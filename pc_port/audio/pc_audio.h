@@ -12,6 +12,8 @@ extern "C" {
 
 // Initialization & Teardown
 bool pc_audio_init(void);
+// Transient BBFT pause; never changes persisted mixer volumes.
+void pc_audio_set_bbft_held(bool held);
 void pc_audio_shutdown(void);
 bool pc_audio_play_stx(const char* path);
 void pc_audio_stop_stream(void);

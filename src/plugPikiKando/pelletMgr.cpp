@@ -1,4 +1,5 @@
 #include "AIPerf.h"
+#include "pc_bbft.h"
 #include "Age.h"
 #include "DebugLog.h"
 #include "EffectMgr.h"
@@ -1153,6 +1154,13 @@ static u32 bounceSounds[] = {
  */
 void Pellet::update()
 {
+    if (mConfig && isUfoParts() && playerState->isBbftRestoredPart(mConfig->mModelId.mId)) {
+        // Native kill releases carriers, collision, generator and sound state.
+        // This also removes late enemy drops and already-spawned remote checks.
+        pc_bbft_milestone("PIKMIN_PART_REPLAY_PELLET_REMOVED");
+        kill(false);
+        return;
+    }
 #if defined(VERSION_PIKIDEMO)
 #define ASSERT_POSITION_NOTNAN       \
 	/* Yeah, just the X position. */ \

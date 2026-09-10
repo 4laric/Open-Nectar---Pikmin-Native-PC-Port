@@ -1,3 +1,4 @@
+#include "pc_bbft.h"
 #include "AIConstant.h"
 #include "BombItem.h"
 #include "Boss.h"
@@ -323,6 +324,7 @@ void ActPutBomb::initThrow()
  */
 void ActPutBomb::initPut()
 {
+    if (!pc_bbft_bomb_rocks()) return;
 	mPiki->startMotion(PaniMotionInfo(PIKIANIM_Tanemaki, this), PaniMotionInfo(PIKIANIM_Tanemaki));
 	InteractRelease release(mPiki, 1.0f);
 	Creature* held = mPiki->getHoldCreature();
@@ -403,6 +405,7 @@ int ActPutBomb::exePut()
  */
 int ActPutBomb::exec()
 {
+    if (!pc_bbft_bomb_rocks()) return ACTOUT_Fail;
 	if (mTouchedPlayer) {
 #if defined(VERSION_PIKIDEMO) || defined(VERSION_GPIJ01_01)
 		mPiki->mFSM->transit(mPiki, PIKISTATE_LookAt);

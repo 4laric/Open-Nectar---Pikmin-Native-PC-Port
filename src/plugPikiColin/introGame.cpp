@@ -1,4 +1,5 @@
 #include "IntroGameSection.h"
+#include "pc_bbft.h"
 
 #include "Camera.h"
 #include "DayMgr.h"
@@ -131,7 +132,7 @@ struct IntroModeState : public ModeState {
 
 		// Finish through MoviePlayer's normal teardown path. The opening is two
 		// queued scenes, so clear the entire sequence rather than only part one.
-		if (gameflow.mMoviePlayer->mIsActive && mController->keyClick(KBBTN_START)) {
+		if (gameflow.mMoviePlayer->mIsActive && (pc_bbft_enabled() || mController->keyClick(KBBTN_START))) {
 			gameflow.mMoviePlayer->skipScene(SCENESKIP_SkipAll);
 		}
 

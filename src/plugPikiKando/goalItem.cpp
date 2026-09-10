@@ -1,3 +1,4 @@
+#include "pc_bbft.h"
 #include "GoalItem.h"
 #include "BaseInf.h"
 #include "CreatureCollPart.h"
@@ -388,6 +389,7 @@ void GoalItem::enterGoal(Piki* piki)
  */
 void GoalItem::exitPikis(int pikis)
 {
+    if (!pc_bbft_color_access(mOnionColour)) return;
 	mIsDispensingPikis = true;
 	mPikisToExit += pikis;
 	mPikiSpawnTimer = 0.0f;
@@ -398,6 +400,7 @@ void GoalItem::exitPikis(int pikis)
  */
 Piki* GoalItem::exitPiki()
 {
+    if (!pc_bbft_color_access(mOnionColour)) return nullptr;
 	int leg = gsys->getRand(1.0f) * 3.0f;
 	if (leg >= 3) {
 		leg = 2;
@@ -678,6 +681,7 @@ void GoalItem::startAI(int)
  */
 void GoalItem::startBoot()
 {
+    if (!pc_bbft_color_access(mOnionColour)) return;
 	_3CC = 3;
 	setMotionSpeed(30.0f);
 	C_SAI(this)->start(this, GoalAI::GOAL_BootInit);
@@ -689,6 +693,7 @@ void GoalItem::startBoot()
  */
 void GoalItem::emitPiki()
 {
+    if (!pc_bbft_color_access(mOnionColour)) return;
 	C_SAI(this)->start(this, GoalAI::GOAL_Unk2);
 }
 

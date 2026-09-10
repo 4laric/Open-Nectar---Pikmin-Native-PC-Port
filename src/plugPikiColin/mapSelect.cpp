@@ -1,3 +1,4 @@
+#include "pc_randomizer.h"
 #include "MapSelect.h"
 
 #include "Camera.h"
@@ -229,7 +230,8 @@ public:
 #if defined(DEVELOP) || defined(WIN32)
 		// press R to increase the day by 1 (can't go above 30)
 		if (mController->keyClick(KBBTN_R)) {
-			if (++gameflow.mWorldClock.mCurrentDay > MAX_DAYS) {
+			gameflow.mWorldClock.mCurrentDay = pc_randomizer_next_day(gameflow.mWorldClock.mCurrentDay);
+			if (gameflow.mWorldClock.mCurrentDay > MAX_DAYS) {
 				gameflow.mWorldClock.mCurrentDay = MAX_DAYS;
 			}
 		}

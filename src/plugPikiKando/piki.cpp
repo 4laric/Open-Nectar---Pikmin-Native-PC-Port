@@ -1,3 +1,4 @@
+#include "pc_bbft.h"
 #include "Piki.h"
 #include "AIConstant.h"
 #include "AIPerf.h"
@@ -1137,7 +1138,7 @@ int Piki::graspSituation(Creature** outTarget)
 					grassTarget = item;
 				}
 
-			} else if (item->mObjType == OBJTYPE_Bomb && mColor == Yellow && item->isVisible()) {
+			} else if (item->mObjType == OBJTYPE_Bomb && mColor == Yellow && pc_bbft_bomb_rocks() && item->isVisible()) {
 				f32 bombDist = centreDist(this, item);
 				if (bombDist <= item->getCentreSize() + minTestDist) {
 					minTestDist = bombDist;
@@ -1226,7 +1227,7 @@ int Piki::graspSituation(Creature** outTarget)
 	}
 
 	////////// CHECK FOR BOMB GENERATORS (YELLOW ONLY) //////////
-	if (mColor == Yellow) {
+	if (mColor == Yellow && pc_bbft_bomb_rocks()) {
 		Creature* bombGenTarget = nullptr;
 		minTestDist             = pikiMgr->mPikiParms->mPikiParms.mIdleAttackSearchRange();
 		Iterator iterBomb(itemMgr);
@@ -1261,6 +1262,7 @@ int Piki::graspSituation(Creature** outTarget)
  */
 void Piki::initColor(int color)
 {
+    if (!pc_bbft_color_access(color)) color = Red;
 	mColor = color;
 	if (flowCont.mIsVersusMode == TRUE) {
 		switch (color) {
@@ -1314,6 +1316,7 @@ void Piki::endKinoko()
  */
 void Piki::setColor(int color)
 {
+    if (!pc_bbft_color_access(color)) color = Red;
 	mColor = color;
 	if (isKinoko()) {
 		mDefaultColour = kinokoColors[mColor];
@@ -2128,13 +2131,13 @@ void Piki::collisionCallback(immut CollEvent& event)
 		}
 	}
 
-	if (distCheck && collider->mObjType == OBJTYPE_Bomb && mColor == Yellow && !collider->isGrabbed() && collider->isVisible()
+	if (distCheck && collider->mObjType == OBJTYPE_Bomb && mColor == Yellow && pc_bbft_bomb_rocks() && !collider->isGrabbed() && collider->isVisible()
 	    && collider->isAlive() && mMode == PikiMode::FormationMode && !isHolding()) {
 		changeMode(PikiMode::PickMode, nullptr);
 		return;
 	}
 
-	if (distCheck && collider->mObjType == OBJTYPE_BombGen && mColor == Yellow && !collider->isGrabbed() && collider->isVisible()
+	if (distCheck && collider->mObjType == OBJTYPE_BombGen && mColor == Yellow && pc_bbft_bomb_rocks() && !collider->isGrabbed() && collider->isVisible()
 	    && collider->isAlive() && mMode == PikiMode::FormationMode && !isHolding()) {
 		mActiveAction->abandon(nullptr);
 		mActiveAction->mCurrActionIdx = PikiAction::Mine;

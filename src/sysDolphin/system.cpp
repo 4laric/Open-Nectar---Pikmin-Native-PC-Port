@@ -1,6 +1,7 @@
 #include "system.h"
 #if PIKI_PC_PORT
 #include "pc_window.h"
+#include "pc_bbft.h"
 #include <chrono>
 #include <thread>
 #include "timing/pc_frame_scheduler.h"
@@ -290,6 +291,17 @@ void System::run(BaseApp* app)
     // switch modes at runtime.
 
 	while (true) {
+        pc_bbft_update();
+        if (pc_bbft_hold()) {
+            // Freeze all app ticks, including creatures, movies and day time.
+            // Keep SDL and networking responsive while parked in another game.
+            pc_window_poll_events(nullptr);
+            if (pc_window_should_close()) break;
+            frameScheduler.reset(std::chrono::steady_clock::now().time_since_epoch().count() / 1e9, mFrameRate);
+            mPrevTick = OSGetTick();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
 		Jac_Gsync();
 		CARDProbe(0);
 		CARDProbe(1);
@@ -317,6 +329,7 @@ void System::run(BaseApp* app)
 			// timer granularity is coarse enough to overshoot it -- which lost
 			// walking and throw inputs at high refresh rates.
 			mControllerMgr.update();
+            if (pc_bbft_hold()) continue; // Input polling may have handled F9.
 			pc_gfx_enable_capture(pc_replay_test_enabled());
 #endif
 			updateSysClock();

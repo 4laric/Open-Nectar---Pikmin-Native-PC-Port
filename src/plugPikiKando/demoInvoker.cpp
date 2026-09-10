@@ -1,3 +1,4 @@
+#include "pc_bbft.h"
 #include "DebugLog.h"
 #include "FlowController.h"
 #include "GoalItem.h"
@@ -45,8 +46,13 @@ bool Navi::demoCheck()
 	// blue onion check
 	if (stage == STAGE_Cave && !playerState->mDemoFlags.isFlag(DEMOFLAG_DiscoverBlueOnyon)) {
 		GoalItem* blueOnyon = itemMgr->getContainer(Blue);
-		if (blueOnyon && qdist2(blueOnyon, this) <= demoParms->mParms.mOnionBootTriggerRadius()) {
-			playerState->mDemoFlags.setFlag(DEMOFLAG_DiscoverBlueOnyon, blueOnyon);
+		if (pc_bbft_progression() ? pc_bbft_near_onion_site(Blue, mSRT.t.x, mSRT.t.z, demoParms->mParms.mOnionBootTriggerRadius()) : (blueOnyon && qdist2(blueOnyon, this) <= demoParms->mParms.mOnionBootTriggerRadius())) {
+			if (pc_bbft_progression()) {
+                pc_bbft_check("Pikmin: Blue Onion Discovery");
+                playerState->mDemoFlags.setFlagOnly(DEMOFLAG_DiscoverBlueOnyon);
+                return false;
+            }
+            playerState->mDemoFlags.setFlag(DEMOFLAG_DiscoverBlueOnyon, blueOnyon);
 			blueOnyon->setMotionSpeed(30.0f);
 			return true;
 		}
@@ -55,8 +61,13 @@ bool Navi::demoCheck()
 	// yellow onion check
 	if (stage == STAGE_Forest && !playerState->mDemoFlags.isFlag(DEMOFLAG_DiscoverYellowOnyon)) {
 		GoalItem* yellowOnyon = itemMgr->getContainer(Yellow);
-		if (yellowOnyon && qdist2(yellowOnyon, this) <= demoParms->mParms.mOnionBootTriggerRadius()) {
-			playerState->mDemoFlags.setFlag(DEMOFLAG_DiscoverYellowOnyon, yellowOnyon);
+		if (pc_bbft_progression() ? pc_bbft_near_onion_site(Yellow, mSRT.t.x, mSRT.t.z, demoParms->mParms.mOnionBootTriggerRadius()) : (yellowOnyon && qdist2(yellowOnyon, this) <= demoParms->mParms.mOnionBootTriggerRadius())) {
+			if (pc_bbft_progression()) {
+                pc_bbft_check("Pikmin: Yellow Onion Discovery");
+                playerState->mDemoFlags.setFlagOnly(DEMOFLAG_DiscoverYellowOnyon);
+                return false;
+            }
+            playerState->mDemoFlags.setFlag(DEMOFLAG_DiscoverYellowOnyon, yellowOnyon);
 			yellowOnyon->setMotionSpeed(30.0f);
 			return true;
 		}

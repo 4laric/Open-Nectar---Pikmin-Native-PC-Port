@@ -1,3 +1,4 @@
+#include "pc_randomizer.h"
 #include "NewPikiGame.h"
 
 #include "Controller.h"
@@ -1668,7 +1669,7 @@ ModeState* DayOverModeState::initialisePhaseTwo()
 		}
 
 		// advance the day and handle the end-of-day results entries
-		gameflow.mWorldClock.mCurrentDay++;
+		gameflow.mWorldClock.mCurrentDay = pc_randomizer_next_day(gameflow.mWorldClock.mCurrentDay);
 		if (!gameflow.mIsChallengeMode) {
 			// story mode - get a diary entry to show at the end of the day, along with how many pages/screens it has
 			int pageCount              = 0;

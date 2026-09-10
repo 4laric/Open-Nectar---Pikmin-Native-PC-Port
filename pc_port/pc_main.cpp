@@ -46,6 +46,7 @@ __declspec(dllexport) int           AmdPowerXpressRequestHighPerformance = 1;
 #endif
 
 #include "pc_window.h"
+#include "pc_bbft.h"
 #include "pc_gpu_preference.h"
 #include "settings/pc_settings.h"
 #include "settings/pc_settings_p2d.h"
@@ -71,8 +72,7 @@ int main(int argc, char* argv[])
     if (argc == 2 && std::strcmp(argv[1], "--audio-self-test") == 0)
         return pc_jaudio_integration_test();
 #endif
-    (void)argc;
-    (void)argv;
+    pc_bbft_init(argc, argv);
 
     printf("╔══════════════════════════════════════════╗\n");
     printf("║   Pikmin - Native Linux PC Port          ║\n");

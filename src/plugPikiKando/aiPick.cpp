@@ -1,3 +1,4 @@
+#include "pc_bbft.h"
 #include "DebugLog.h"
 #include "Interactions.h"
 #include "ItemMgr.h"
@@ -37,6 +38,7 @@ ActPickItem::ActPickItem(Piki* piki)
  */
 Creature* ActPickItem::findItem()
 {
+    if (!pc_bbft_bomb_rocks()) return nullptr;
 	Iterator iter(itemMgr);
 	f32 minDist           = 200.0f;
 	Creature* closestItem = nullptr;
@@ -83,6 +85,7 @@ void ActPickItem::init(Creature* target)
  */
 int ActPickItem::exec()
 {
+    if (!pc_bbft_bomb_rocks()) return ACTOUT_Fail;
 	if (mPiki->isHolding()) {
 		mPiki->mActionState = 0;
 		mPiki->mEmotion     = PikiEmotion::Victorious;

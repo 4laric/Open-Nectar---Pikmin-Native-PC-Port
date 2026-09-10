@@ -30,8 +30,9 @@
 #  endif
 #endif
 
-#include <GL/gl.h>
-#include <GL/glext.h>
+// SDL's headers avoid the legacy gl/gl.h stubs shadowing system GL on
+// case-insensitive Windows filesystems.
+#include <SDL_opengl.h>
 
 // Red de seguridad: si alguna cabecera del sistema acabara arrastrando
 // windows.h de todos modos, estas macros suyas chocan con identificadores del

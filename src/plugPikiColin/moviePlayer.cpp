@@ -1,4 +1,5 @@
 #include "MoviePlayer.h"
+#include "pc_bbft.h"
 #include <cstdio>
 #include "DebugLog.h"
 #include "EffectMgr.h"
@@ -641,6 +642,23 @@ void MoviePlayer::sndStopMovie(MovieInfo* info)
  */
 void MoviePlayer::update()
 {
+    if (pc_bbft_take_skip() && mIsActive) {
+        // Skipping jumps over keyframes. Never drop a tutorial/progression
+        // command: only author-marked, event-free cinematics are eligible.
+        bool safe = mPlayInfoList.mChild != nullptr;
+        for (MovieInfo* info = static_cast<MovieInfo*>(mPlayInfoList.mChild); info;
+             info = static_cast<MovieInfo*>(info->mNext)) {
+            CinematicPlayer* movie = info->mPlayer;
+            if (!movie || !(movie->mType & 1) || !movie->mCurrentScene) { safe = false; break; }
+            FOREACH_NODE(SceneCut, movie->mSceneList.mChild, scene) {
+                if (!(scene->mFlags & 1)) safe = false;
+                for (AnimKey* key = scene->mKey.mNext; key != &scene->mKey; key = key->mNext) {
+                    if (key->mEventType != ANIMEVENT_None) safe = false;
+                }
+            }
+        }
+        if (safe) skipScene(SCENESKIP_Skip);
+    }
 	gameflow.mDemoFlags = CinePlayerFlags::Empty;
 	if (gsys->mDvdErrorCode >= DvdError::ReadingDisc) {
 		return;

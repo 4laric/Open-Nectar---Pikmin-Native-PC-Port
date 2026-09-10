@@ -1,7 +1,10 @@
+#include "pc_randomizer.h"
 #if PIKI_USE_JAUDIO
 #include "port/jaudio_host.h"
+#include "port/audio_sink.h"
 #endif
 #include "pc_window.h"
+#include "pc_bbft.h"
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
@@ -269,7 +272,8 @@ bool pc_window_init(const char* title, int width, int height) {
         SDL_WINDOWPOS_CENTERED,
         sWindowWidth,
         sWindowHeight,
-        SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
+        SDL_WINDOW_OPENGL | ((pc_randomizer_enabled() && std::getenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND")
+            && !std::strcmp(std::getenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND"), "1")) ? SDL_WINDOW_HIDDEN : SDL_WINDOW_SHOWN) | SDL_WINDOW_RESIZABLE
     );
 
     if (!sWindow) {
@@ -348,10 +352,13 @@ bool pc_window_init(const char* title, int width, int height) {
 #endif
 
 void pc_window_poll_events(PADStatus* pad) {
+    const bool bbftHeld = pc_bbft_hold();
+    pc_audio_set_bbft_held(bbftHeld);
 #if PIKI_USE_JAUDIO
-    PikiJAudioTick();
+    PikiAudioSinkBBFTHold(bbftHeld);
+    if (!bbftHeld) PikiJAudioTick();
 #else
-    pc_audio_tick();
+    if (!bbftHeld) pc_audio_tick();
 #endif
 
     SDL_Event event;
@@ -400,6 +407,9 @@ void pc_window_poll_events(PADStatus* pad) {
                 }
                 break;
             case SDL_KEYDOWN:
+                if (event.key.keysym.scancode == SDL_SCANCODE_F9 && !event.key.repeat) {
+                    pc_bbft_warp();
+                }
                 // Toggle relative mouse mode with Tab key
                 if (event.key.keysym.scancode == SDL_SCANCODE_TAB
                     && sControlMode == PC_CONTROL_MOUSE_CURSOR && !sSettingsMenuOpen) {
@@ -644,12 +654,19 @@ void pc_window_poll_events(PADStatus* pad) {
     }
 
     pad[0].button      = button;
+    pc_bbft_start_button((button & PAD_BUTTON_START) != 0);
     pad[0].stickX     = stickX;
     pad[0].stickY     = stickY;
     pad[0].substickX  = substickX;
     pad[0].substickY  = substickY;
     pad[0].triggerLeft  = triggerL;
     pad[0].triggerRight = triggerR;
+    if (!pc_bbft_accept_input()) {
+        pad[0].button = 0;
+        pad[0].stickX = pad[0].stickY = 0;
+        pad[0].substickX = pad[0].substickY = 0;
+        pad[0].triggerLeft = pad[0].triggerRight = 0;
+    }
 #if defined(PIKI_PC_PORT) && defined(PIKI_PC_SETTINGS_MENU)
     // While the settings menu is open, consume the pad so the game underneath
     // does not react to the same input.
@@ -666,6 +683,18 @@ void pc_window_poll_events(PADStatus* pad) {
 }
 
 void pc_window_swap_buffers(void) {
+    if (pc_randomizer_enabled() && sWindow) {
+        static int previousRepairs = -1;
+        const int repairs = pc_randomizer_repairs();
+        if (repairs != previousRepairs) {
+            char title[120];
+            std::snprintf(title, sizeof(title), "Pikmin Randomizer - %s (%d/25 repairs)",
+                          pc_randomizer_goal() ? "Ship repaired!" : "In progress", repairs);
+            SDL_SetWindowTitle(sWindow, title);
+            previousRepairs = repairs;
+        }
+    }
+
     if (sWindow) {
         SDL_GL_SwapWindow(sWindow);
         // VSync Off must not retain the software presentation limiter. Game

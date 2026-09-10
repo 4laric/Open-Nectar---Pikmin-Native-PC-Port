@@ -1,4 +1,6 @@
+#include "pc_randomizer.h"
 #include "gameflow.h"
+#include "pc_bbft.h"
 
 #include "BaseApp.h"
 #include "Controller.h"
@@ -207,7 +209,7 @@ void WorldClock::update(f32 playRate)
 		mCurrentGameHour++;
 		if (mCurrentGameHour >= HOURS_IN_DAY) {
 			mCurrentGameHour -= HOURS_IN_DAY;
-			mCurrentDay++;
+			mCurrentDay = pc_randomizer_next_day(mCurrentDay);
 		}
 	}
 
@@ -511,7 +513,7 @@ void GameFlow::hardReset(BaseApp* baseApp)
 	mVFilters[FILTER_DFOff][6] = 0;
 
 	mCurrGameSectionID      = -1;
-	mNextGameSectionID      = SECTION_NinLogo;
+	mNextGameSectionID      = pc_bbft_enabled() ? SECTION_OnePlayer : SECTION_NinLogo;
 	mNextOnePlayerSectionID = ONEPLAYER_GameSetup;
 	_200                    = 0;            // never used again
 	mNextIntroMovieID       = MOV_GrowDemo; // title screen idling movie demo to queue up first

@@ -289,8 +289,12 @@ static bool convert_pcm(const s16* samples, size_t frameCount, int sourceRate,
     return true;
 }
 
+static std::atomic<bool> sBbftHeld {false};
+void pc_audio_set_bbft_held(bool held) { sBbftHeld.store(held, std::memory_order_relaxed); }
+
 static void audio_callback(void*, Uint8* output, int byteCount) {
     std::memset(output, 0, static_cast<size_t>(byteCount));
+    if (sBbftHeld.load(std::memory_order_relaxed)) return;
     if (sAudioSpec.format != AUDIO_S16SYS || sAudioSpec.channels != 2) return;
 
     s16* dst = reinterpret_cast<s16*>(output);

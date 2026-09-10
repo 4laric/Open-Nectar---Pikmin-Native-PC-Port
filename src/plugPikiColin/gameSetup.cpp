@@ -1,4 +1,10 @@
 #include "GameSetupSection.h"
+#include "pc_bbft.h"
+#include "pc_permadeath.h"
+#include "jaudio/piki_scene.h"
+#include "jaudio/verysimple.h"
+#include <cstdio>
+#include <cstdlib>
 
 #include "BaseInf.h"
 #include "DebugLog.h"
@@ -227,6 +233,80 @@ GameSetupSection::GameSetupSection()
 void GameSetupSection::update()
 {
 	PRINT("reset!\n");
+
+    if (pc_bbft_enabled()) {
+        // The title scene loads shared JAudio banks and its completion callback
+        // sets first_load. Intro/Course wait forever without this native setup.
+        // Keep the audio initialization while bypassing the title UI.
+        pc_bbft_milestone("BOOT_AUDIO_TITLE_BEGIN");
+        Jac_BackDVDBuffer();
+        Jac_SceneSetup(SCENE_Title, 0);
+        Jac_SceneExit(SCENE_Exit, 0);
+        pc_bbft_milestone("BOOT_AUDIO_TITLE_READY");
+        // Same fresh-story setup as CardSelectSection, without its menus.
+        // Legacy mode keeps that story state; the optional day-two starter
+        // state is applied below after the normal resets.
+        gameflow.mIsChallengeMode = FALSE;
+        flowCont.mCurrentStage = nullptr;
+        playerState->initGame();
+        generatorCache->initGame();
+        pikiInfMgr.initGame();
+        FOREACH_NODE(StageInfo, flowCont.mStageList.mChild, stage) {
+            stage->mHasInitialised = FALSE;
+            stage->mStageInf.initGame();
+        }
+        gameflow.mGamePrefs.mMemCardSaveIndex = 0;
+        gameflow.mGamePrefs.mMostRecentFileSlot = 0;
+        gameflow.mGamePrefs.mHasSaveGame = false;
+        gameflow.mPlayState.Initialise();
+        pc_permadeath_set_pending(false);
+        pc_permadeath_begin_new_run();
+        StageInfo* stage = static_cast<StageInfo*>(flowCont.mStageList.mChild);
+        if (pc_bbft_skip_tutorial()) {
+            while (stage && stage->mStageID != STAGE_Forest) stage = static_cast<StageInfo*>(stage->mNext);
+        }
+        if (!stage) { std::fprintf(stderr, "BBFT: requested starting stage missing\n"); std::abort(); }
+        flowCont.mCurrentStage = stage;
+        std::sprintf(flowCont.mCurrStageFilePath, "%s", stage->mFileName);
+        std::sprintf(flowCont.mDoorStageFilePath, "%s", stage->mFileName);
+        gameflow.mWorldClock.mCurrentDay = 1;
+        gameflow.mWorldClock.setTime(TUTORIAL_TIME_OF_DAY);
+        if (pc_bbft_skip_tutorial()) {
+            playerState->mIsTutorialMode = false;
+            playerState->setContainer(Red);
+            playerState->setBootContainer(Red);
+            playerState->setDisplayPikiCount(Red);
+            const int completedTutorials[] = {
+                DEMOFLAG_DiscoverRedOnyon, DEMOFLAG_ApproachSeed, DEMOFLAG_PluckRedPikmin,
+                DEMOFLAG_NoPikminTimeout, DEMOFLAG_CameraInfo, DEMOFLAG_CollectFirstPellet,
+                DEMOFLAG_ApproachEngine, DEMOFLAG_CollectEngine, DEMOFLAG_StartBoxPush,
+                DEMOFLAG_FinishBoxPush, DEMOFLAG_OnyonMenuInfo, DEMOFLAG_Pluck15thPikmin
+            };
+            for (int flag : completedTutorials) playerState->mDemoFlags.setFlagOnly(flag);
+            // Equivalent persisted campaign state to finishing day one. The
+            // actual part's visibility is restored when its model registers.
+            playerState->mCurrParts = 1;
+            playerState->mRequiredUfoPartCount = 1;
+            playerState->mShipUpgradeLevel = 1;
+            playerState->mStagePartsCollected[STAGE_Practice] = 1;
+            playerState->setDayCollectCount(0, 1);
+            gameflow.mPlayState.openStage(STAGE_Forest);
+            pikiInfMgr.mPikiCounts[Red][Leaf] = 20;
+            playerState->mTotalBornPikiNum = 20;
+            playerState->mLivingPikiNum = 20;
+            playerState->mTotalPluckedPikiCount = 20;
+            gameflow.mWorldClock.mCurrentDay = 2;
+            gameflow.mWorldClock.setTime(gameflow.mParameters->mStartHour());
+        }
+        gameflow.mCurrentStageID = -1;
+        gameflow.mPendingStageUnlockID = -1;
+        // The intro's existing BBFT skip executes normal teardown before
+        // entering gameplay, preserving the engine's setup sequence.
+        gameflow.mNextOnePlayerSectionID = pc_bbft_skip_tutorial() ? ONEPLAYER_NewPikiGame : ONEPLAYER_IntroGame;
+        std::printf("[BBFT] Direct boot: %s; save root %s\n", pc_bbft_skip_tutorial() ? "Forest of Hope day 2, 20 reds" : "Impact Site, fresh story", pc_bbft_save_root());
+        gsys->softReset();
+        return;
+    }
 
 #if defined(VERSION_PIKIDEMO)
 	// the only thing the demo will load into is the Forest of Hope challenge mode

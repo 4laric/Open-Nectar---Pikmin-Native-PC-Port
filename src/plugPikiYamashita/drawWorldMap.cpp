@@ -1,4 +1,5 @@
 #include "zen/DrawWorldMap.h"
+#include "pc_bbft.h"
 #include "DebugLog.h"
 #include "P2D/Pane.h"
 #include "P2D/TextBox.h"
@@ -1615,6 +1616,13 @@ public:
 		}
 	}
 
+	void bbftRefreshAccess(bool open)
+	{
+		if (open == mIsVisible) return;
+		if (open) openCourse();
+		else closeCourse();
+	}
+
 	void openCourse()
 	{
 		mIsVisible = true;
@@ -1874,6 +1882,11 @@ public:
 
 	bool update(Controller* controller, bool p2)
 	{
+		// Access can arrive while the player is parked on this screen.
+		if (pc_bbft_enabled() && playerState && mMode == CoursePointMode::Operation) {
+			for (int stage = STAGE_Practice; stage < STAGE_COUNT; ++stage)
+                mCoursePoints[mapNoGame2Scr[stage]].bbftRefreshAccess(playerState->courseOpen(stage));
+		}
 		bool res   = false;
 		mEventFlag = 0;
 		switch (mMode) {

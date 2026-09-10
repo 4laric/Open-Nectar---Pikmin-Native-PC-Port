@@ -1,3 +1,4 @@
+#include "pc_bbft.h"
 #include "Creature.h"
 #include "DebugLog.h"
 #include "Interactions.h"
@@ -19,6 +20,7 @@ DEFINE_PRINT("interactGrab")
  */
 bool InteractGrab::actCommon(Creature* creature) immut
 {
+    if (creature->mObjType == OBJTYPE_Bomb && !pc_bbft_bomb_rocks()) return false;
 	bool result = creature->setStateGrabbed(mOwner);
 	if (creature->mObjType != OBJTYPE_Bomb) {
 		ERROR("try to grab objType %d\n", creature->mObjType);

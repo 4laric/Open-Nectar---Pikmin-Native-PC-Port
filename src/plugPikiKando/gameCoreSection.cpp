@@ -1,4 +1,5 @@
 #include "GameCoreSection.h"
+#include "pc_bbft.h"
 #if defined(PIKI_PC_PORT)
 #include <SDL.h>
 #include <cstdlib>
@@ -1138,6 +1139,7 @@ void GameCoreSection::initStage()
 	memStat->end("mapMgr");
 
 	memStat->start("bobby");
+	playerState->reconcileBbftParts(); // Before generators/cache can recreate checked parts.
 	if (useDefault) {
 		PRINT("*** GEN1\n");
 		generatorMgr->init();
@@ -1723,6 +1725,72 @@ void GameCoreSection::startSundownWarn()
  */
 void GameCoreSection::updateAI()
 {
+    playerState->reconcileBbftParts(); // Also handles a checked snapshot received after boot.
+    static int bbftBombAccess = -1;
+    if (pc_bbft_shared_capabilities() && bbftBombAccess != int(pc_bbft_bomb_rocks())) {
+        bbftBombAccess = int(pc_bbft_bomb_rocks());
+        pc_bbft_milestone(bbftBombAccess ? "PIKMIN_BOMB_ROCKS enabled=1" : "PIKMIN_BOMB_ROCKS enabled=0");
+    }
+    static int bbftAreaMask = -1;
+    if (pc_bbft_progression()) {
+        int mask = 0;
+        for (int stage = STAGE_Practice; stage < STAGE_COUNT; ++stage)
+            if (playerState->courseOpen(stage)) mask |= 1 << stage;
+        if (mask != bbftAreaMask) {
+            char message[128];
+            std::sprintf(message, "PIKMIN_AREA_ACCESS impact=%d forest=%d navel=%d spring=%d trial=%d",
+                !!(mask & 1), !!(mask & 2), !!(mask & 4), !!(mask & 8), !!(mask & 16));
+            pc_bbft_milestone(message);
+            bbftAreaMask = mask;
+        }
+    }
+    // Grants are once per fresh BBFT session, never once per stage or refill.
+    static bool bbftColorGranted[3] = {false, true, false};
+    if (pc_bbft_progression() && itemMgr && !gameflow.mMoviePlayer->mIsActive) {
+        for (int color = 0; color < 3; ++color) {
+            if (bbftColorGranted[color] || !pc_bbft_color_access(color)) continue;
+            GoalItem* onion = itemMgr->getContainer(color);
+            const bool booted = playerState->hasBootContainer(color);
+            playerState->setContainer(color);
+            if (onion && !booted) onion->startBoot();
+            playerState->setBootContainer(color);
+            playerState->setDisplayPikiCount(color);
+            pikiInfMgr.mPikiCounts[color][Leaf] += 5;
+            if (onion) onion->mHeldPikis[Leaf] += 5;
+            for (int i = 0; i < 5; ++i) GameStat::containerPikis.inc(color);
+            playerState->mTotalBornPikiNum += 5;
+            playerState->mLivingPikiNum += 5;
+            GameStat::update();
+            char stockMessage[128];
+            std::sprintf(stockMessage, "PIKMIN_COLOR_STOCK color=%s stored=%d actor=%d",
+                color == Blue ? "Blue" : "Yellow", pikiInfMgr.mPikiCounts[color][Leaf], onion != nullptr);
+            pc_bbft_milestone(stockMessage);
+            bbftColorGranted[color] = true;
+            pc_bbft_milestone(color == Blue ? "PIKMIN_BLUE_ONION_GRANTED starter=5" : "PIKMIN_YELLOW_ONION_GRANTED starter=5");
+        }
+    }
+    static bool bbftRedsQueued = false, bbftRedsReady = false;
+    if (pc_bbft_skip_tutorial() && !gameflow.mMoviePlayer->mIsActive
+        && !gameflow.mPauseAll && !gameflow.mIsUIOverlayActive && itemMgr) {
+        GoalItem* redOnion = itemMgr->getContainer(Red);
+        if (!bbftRedsQueued && redOnion && redOnion->getTotalStorePikis() >= 20) {
+            // Use normal Onion withdrawal: initialized actors descend the legs
+            // and join Olimar through their native exit state, no fake count.
+            redOnion->exitPikis(20);
+            bbftRedsQueued = true;
+        }
+        if (bbftRedsQueued && !bbftRedsReady && redOnion && redOnion->getTotalStorePikis() == 0
+            && GameStat::allPikis[Red] - GameStat::containerPikis[Red] == 20) {
+            pc_bbft_milestone("PIKMIN_FOH_READY day=2 field_red=20 main_engine_ap_check=0");
+            bbftRedsReady = true;
+        }
+    }
+    static bool bbftReady = false;
+    if (!bbftReady && pc_bbft_enabled() && !gameflow.mMoviePlayer->mIsActive
+        && !gameflow.mPauseAll && !gameflow.mIsUIOverlayActive && mNavi && mMapMgr) {
+        pc_bbft_milestone("PIKMIN_GAMEPLAY_READY");
+        bbftReady = true;
+    }
 	STACK_PAD_VAR(2);
 #if defined(PIKI_PC_PORT)
 	// Photo mode. This lives in updateAI rather than in update() because
@@ -2075,6 +2143,11 @@ void GameCoreSection::draw(Graphics& gfx)
 	gfx.setDepth(true);
 	MATCHING_STOP_TIMER("shadow draw");
 	mMapMgr->postrefresh(gfx);
+    static bool bbftWorldDrawn = false;
+    if (!bbftWorldDrawn && pc_bbft_enabled()) {
+        pc_bbft_milestone("PIKMIN_WORLD_RENDERED");
+        bbftWorldDrawn = true;
+    }
 	if (AIPerf::soundDebug) {
 		seSystem->draw3d(gfx);
 	}

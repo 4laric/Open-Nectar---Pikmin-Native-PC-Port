@@ -13,6 +13,12 @@
 cmake_minimum_required(VERSION 3.16)
 project(PikminPC VERSION 0.1.0 LANGUAGES C CXX)
 
+# Native MinGW defines WIN32 too; the original game uses that spelling for
+# its incompatible legacy renderer. Keep _WIN32 for the actual host APIs.
+if(MINGW AND NOT CMAKE_CXX_FLAGS MATCHES "-UWIN32")
+    add_compile_options(-UWIN32)
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_C_STANDARD 11)
 
@@ -147,6 +153,8 @@ if (NOT WIN32)
 endif()
 
 set(PC_PORT_SOURCES
+    pc_port/pc_bbft.cpp
+    pc_port/pc_randomizer.cpp
     pc_port/pc_main.cpp
     pc_port/pc_window.cpp
     pc_port/pc_pad_axis.cpp
@@ -344,6 +352,17 @@ add_executable(pikmin_pc
 )
 target_compile_options(pikmin_pc PRIVATE ${NATIVE_COMPILE_OPTIONS})
 target_link_libraries(pikmin_pc PRIVATE pikmin_legacy)
+if(WIN32)
+    add_library(bbft_transport STATIC pc_port/bbft/bbft_transport.c)
+    target_link_libraries(pikmin_pc PRIVATE bbft_transport ws2_32)
+    add_executable(pc_bbft_test pc_port/pc_bbft_test.cpp pc_port/pc_bbft.cpp pc_port/pc_randomizer.cpp)
+    add_test(NAME pc_bbft_test COMMAND pc_bbft_test)
+    add_test(NAME pc_bbft_background_test COMMAND pc_bbft_test --background)
+    add_executable(jaudio_bbft_test pc_port/audio/jaudio_bbft_test.cpp pc_port/audio/jaudio_sink.cpp)
+    target_include_directories(jaudio_bbft_test PRIVATE pc_port ${SDL2_INCLUDE_DIRS})
+    target_link_libraries(jaudio_bbft_test PRIVATE ${SDL2_LIBRARIES})
+    add_test(NAME jaudio_bbft_test COMMAND jaudio_bbft_test)
+endif()
 
 # GX display lists, game logic and the software audio mixer execute on the host
 # CPU. Keep optimization level, machine-specific ISA and link-time optimization
@@ -419,9 +438,11 @@ set_target_properties(pikmin_pc PROPERTIES
     OUTPUT_NAME "nectar"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
+if(NOT WIN32)
 add_custom_command(TARGET pikmin_pc POST_BUILD
     COMMAND /bin/chmod 775 "$<TARGET_FILE:pikmin_pc>"
     COMMENT "Ensuring the native Pikmin executable is runnable")
+endif()
 
 # Standalone first-run launcher. It accepts an original, uncompressed
 # GameCube ISO/GCM supplied by the user, extracts its FST into the per-user
@@ -649,3 +670,6 @@ if(PIKMIN_NATIVE_JAUDIO)
     set_tests_properties(pc_jaudio_integration_test PROPERTIES
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" TIMEOUT 30)
 endif()
+
+# Standalone adapter harness; exercises real file I/O without game assets.
+add_executable(pc_randomizer_probe pc_port/pc_randomizer_probe.cpp pc_port/pc_randomizer.cpp)

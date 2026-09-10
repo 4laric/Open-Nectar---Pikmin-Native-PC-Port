@@ -1,3 +1,4 @@
+#include "pc_bbft.h"
 #include "PikiHeadItem.h"
 #include "DebugLog.h"
 #include "GameStat.h"
@@ -193,6 +194,7 @@ f32 PikiHeadItem::getiMass()
  */
 void PikiHeadItem::setColor(int color)
 {
+    if (!pc_bbft_color_access(color)) color = Red;
 	mSeedColor = color;
 }
 

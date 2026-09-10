@@ -1,3 +1,4 @@
+#include "pc_bbft.h"
 #include "BombItem.h"
 #include "DebugLog.h"
 #include "Interactions.h"
@@ -100,6 +101,7 @@ void ActMine::initGo()
  */
 int ActMine::exeMine()
 {
+    if (!pc_bbft_bomb_rocks()) return ACTOUT_Fail;
 	mPiki->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
 	if (!mIsMineActionReady) {
 		return ACTOUT_Continue;
@@ -133,6 +135,7 @@ int ActMine::exeMine()
  */
 int ActMine::exec()
 {
+    if (!pc_bbft_bomb_rocks()) return ACTOUT_Fail;
 	if (!mBombGen) {
 		return ACTOUT_Fail;
 	}

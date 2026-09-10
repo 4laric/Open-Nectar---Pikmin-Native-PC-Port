@@ -1,5 +1,6 @@
 /** Native filesystem implementation of the GameCube memory-card API. */
 #include "Dolphin/card.h"
+#include "pc_bbft.h"
 #include "Dolphin/dvd.h"
 
 #include <algorithm>
@@ -27,7 +28,7 @@ std::atomic<s32> sLastResult[2] = { CARD_RESULT_READY, CARD_RESULT_READY };
 std::atomic<s32> sTransferred[2] = {};
 
 bool validChannel(s32 channel) { return channel >= 0 && channel < 2; }
-fs::path root(s32 channel) { return fs::path("save") / (channel == 0 ? "card0" : "card1"); }
+fs::path root(s32 channel) { return fs::path(pc_bbft_save_root()) / (channel == 0 ? "card0" : "card1"); }
 fs::path dataPath(s32 channel, const std::string& name) { return root(channel) / name; }
 fs::path metaPath(s32 channel, const std::string& name) { return root(channel) / (".meta_" + name); }
 
@@ -128,7 +129,7 @@ extern "C" {
 void CARDInit(void)
 {
 	ensureCard(0);
-	printf("[PC Port] CARDInit() - persistent filesystem card: save/card0\n");
+	printf("[PC Port] CARDInit() - persistent filesystem card: %s/card0\n", pc_bbft_save_root());
 }
 
 BOOL CARDProbe(s32 channel) { return validChannel(channel) && ensureCard(channel); }
