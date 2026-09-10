@@ -1,3 +1,4 @@
+#include "pc_randomizer.h"
 #include "pc_bbft.h"
 #include "GoalItem.h"
 #include "BaseInf.h"
@@ -389,6 +390,12 @@ void GoalItem::enterGoal(Piki* piki)
  */
 void GoalItem::exitPikis(int pikis)
 {
+    if (pc_randomizer_expanded()) {
+        int available = pc_randomizer_field_capacity() - int(GameStat::mapPikis) - itemMgr->getContainerExitCount();
+        if (available <= 0 || pikis <= 0) return;
+        if (pikis > available) pikis = available;
+    }
+
     if (!pc_bbft_color_access(mOnionColour)) return;
 	mIsDispensingPikis = true;
 	mPikisToExit += pikis;

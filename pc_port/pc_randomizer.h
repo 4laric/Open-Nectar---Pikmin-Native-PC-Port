@@ -12,3 +12,12 @@ int pc_randomizer_repairs();
 const char* pc_randomizer_save_root();
 // Repeat the last safe diary day; never index past vanilla's 30-entry arrays.
 int pc_randomizer_next_day(int day);
+
+// Expanded schema-2 gameplay observations. Receipts never trigger these checks.
+bool pc_randomizer_expanded();
+int pc_randomizer_field_capacity();
+void pc_randomizer_observe_population(int activePikmin, bool gameplay);
+void pc_randomizer_enemy_defeated(int type, int stage, bool healthDepleted, bool gameplay);
+void pc_randomizer_observe_exploration(int stage, float dx, float dz, bool grounded, bool gameplay);
+
+void pc_randomizer_validate_part_weight(int part, int minimum);

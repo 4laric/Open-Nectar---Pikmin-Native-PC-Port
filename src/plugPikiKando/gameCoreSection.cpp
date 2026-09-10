@@ -1,5 +1,6 @@
 #include "GameCoreSection.h"
 #include "pc_bbft.h"
+#include "pc_randomizer.h"
 #if defined(PIKI_PC_PORT)
 #include <SDL.h>
 #include <cstdlib>
@@ -1433,7 +1434,7 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 	// Every consumer reads the value through AICONST.mMaxPikisOnField(), so
 	// writing it once here covers the spawn gates in pikiMgr and itemMgr as
 	// well as the HUD counter.
-	AICONST.mMaxPikisOnField(pc_settings_get_piki_limit());
+	AICONST.mMaxPikisOnField(pc_randomizer_expanded() ? pc_randomizer_field_capacity() : pc_settings_get_piki_limit());
 
 	// Day length. The menu shows minutes of play, and a day runs 7am to 7pm --
 	// half the 24-hour cycle this parameter describes -- so double it. The
@@ -1725,6 +1726,31 @@ void GameCoreSection::startSundownWarn()
  */
 void GameCoreSection::updateAI()
 {
+    if (pc_randomizer_expanded()) {
+        AICONST.mMaxPikisOnField(pc_randomizer_field_capacity());
+        const bool active = !gameflow.mMoviePlayer->mIsActive && !gameflow.mPauseAll
+            && !gameflow.mIsUIOverlayActive && mNavi && mNavi->mHealth > 0.0f;
+        if (active) {
+            const int field = int(GameStat::formationPikis) + int(GameStat::freePikis) + int(GameStat::workPikis);
+            pc_randomizer_observe_population(field, true);
+            UfoItem* ship = itemMgr ? itemMgr->getUfo() : nullptr;
+            if (ship && flowCont.mCurrentStage) {
+                const Vector3f base = ship->getGoalPos();
+                pc_randomizer_observe_exploration(flowCont.mCurrentStage->mStageID,
+                    mNavi->getPosition().x - base.x, mNavi->getPosition().z - base.z, mNavi->mGroundTriangle != nullptr, true);
+            }
+        }
+    }
+    static bool randomizerWeightsLogged = false;
+    if (pc_randomizer_enabled() && pelletMgr && !randomizerWeightsLogged) {
+        for (int part = 0; part < 30; ++part) {
+            PelletConfig* config = pelletMgr->getConfig(PelletMgr::getUfoIDFromIndex(part));
+            pc_randomizer_validate_part_weight(part, config ? config->mCarryMinPikis() : -1);
+            if (config) std::printf("[Pikmin Randomizer] PART_WEIGHT id=%d min=%d max=%d\n",
+                part, config->mCarryMinPikis(), config->mCarryMaxPikis());
+        }
+        randomizerWeightsLogged = true;
+    }
     playerState->reconcileBbftParts(); // Also handles a checked snapshot received after boot.
     static int bbftBombAccess = -1;
     if (pc_bbft_shared_capabilities() && bbftBombAccess != int(pc_bbft_bomb_rocks())) {
@@ -1785,6 +1811,49 @@ void GameCoreSection::updateAI()
             bbftRedsReady = true;
         }
     }
+#if defined(PIKMIN_RANDOMIZER_TEST_HOOKS)
+    const char* scripted = std::getenv("PIKMIN_RANDOMIZER_TEST_SCRIPT");
+    const char* background = std::getenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND");
+    if (pc_randomizer_expanded() && scripted && !std::strcmp(scripted, "capacity")
+        && background && !std::strcmp(background, "1") && bbftRedsReady
+        && !gameflow.mMoviePlayer->mIsActive && !gameflow.mPauseAll && !gameflow.mIsUIOverlayActive) {
+        static bool supplied = false, killed = false;
+        static int lastCapacity = -1, lastField = -1;
+        GoalItem* onion = itemMgr->getContainer(Red);
+        if (onion && !supplied) {
+            pikiInfMgr.mPikiCounts[Red][Leaf] += 80;
+            onion->mHeldPikis[Leaf] += 80;
+            GameStat::containerPikis.add(Red, 80);
+            playerState->mTotalBornPikiNum += 80;
+            playerState->mLivingPikiNum += 80;
+            GameStat::update(); supplied = true;
+            std::puts("[Pikmin Randomizer] TEST_ONLY stock=80");
+        }
+        const int capacity = pc_randomizer_field_capacity();
+        if (onion && lastCapacity != capacity) {
+            onion->exitPikis(100); // Deliberately too many: exercise the real queue clamp.
+            std::printf("[Pikmin Randomizer] TEST_WITHDRAW cap=%d queued=%d\n", capacity, itemMgr->getContainerExitCount());
+            lastCapacity = capacity;
+        }
+        const int field = int(GameStat::formationPikis) + int(GameStat::freePikis) + int(GameStat::workPikis);
+        if (field != lastField) {
+            std::printf("[Pikmin Randomizer] TEST_FIELD actual=%d cap=%d\n", field, capacity);
+            lastField = field;
+        }
+        if (!killed && tekiMgr) {
+            Iterator it(tekiMgr);
+            CI_LOOP(it) {
+                Teki* enemy = (Teki*)*it;
+                if (enemy->mTekiType == TEKI_Chappy && enemy->mHealth > 0) {
+                    enemy->mHealth = 0; // Let native AI perform its death lifecycle.
+                    killed = true;
+                    std::puts("[Pikmin Randomizer] TEST_ONLY dwarf_health=0");
+                    break;
+                }
+            }
+        }
+    }
+#endif
     static bool bbftReady = false;
     if (!bbftReady && pc_bbft_enabled() && !gameflow.mMoviePlayer->mIsActive
         && !gameflow.mPauseAll && !gameflow.mIsUIOverlayActive && mNavi && mMapMgr) {

@@ -1,3 +1,4 @@
+#include "pc_randomizer.h"
 /**
  * @file pc_settings.cpp
  * @brief Settings menu for the Pikmin PC port (opened with F1).
@@ -2359,6 +2360,8 @@ int pc_settings_get_mouse_wheel_action(void) {
 }
 
 int pc_settings_get_piki_limit(void) {
+    // Allocation callers must reserve the eventual maximum, not today's cap.
+    if (pc_randomizer_expanded()) return 100;
     return sConfig.pikiLimit;
 }
 

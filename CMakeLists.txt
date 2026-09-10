@@ -673,3 +673,10 @@ endif()
 
 # Standalone adapter harness; exercises real file I/O without game assets.
 add_executable(pc_randomizer_probe pc_port/pc_randomizer_probe.cpp pc_port/pc_randomizer.cpp)
+
+# Only the isolated diagnostic build includes scripted stock/death fixtures.
+option(PIKMIN_RANDOMIZER_TEST_HOOKS "Enable standalone scripted gameplay test fixtures" OFF)
+if(PIKMIN_RANDOMIZER_TEST_HOOKS)
+    set_property(SOURCE src/plugPikiKando/gameCoreSection.cpp APPEND PROPERTY
+        COMPILE_DEFINITIONS PIKMIN_RANDOMIZER_TEST_HOOKS=1)
+endif()

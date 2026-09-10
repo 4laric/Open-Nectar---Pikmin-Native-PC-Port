@@ -1,3 +1,6 @@
+#include "pc_randomizer.h"
+#include "FlowController.h"
+#include "MoviePlayer.h"
 #include "teki.h"
 #include "AIConstant.h"
 #include "AIPerf.h"
@@ -579,6 +582,12 @@ void BTeki::doAI()
  */
 void BTeki::die()
 {
+    if (!mDeadState && flowCont.mCurrentStage) {
+        pc_randomizer_enemy_defeated(mTekiType, flowCont.mCurrentStage->mStageID, mHealth <= 0.0f,
+            !gameflow.mIsChallengeMode && !gameflow.mPauseAll && !gameflow.mIsUIOverlayActive
+            && gameflow.mMoviePlayer && !gameflow.mMoviePlayer->mIsActive);
+    }
+
 	mDeadState = 1;
 }
 

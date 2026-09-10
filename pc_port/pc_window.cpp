@@ -684,14 +684,16 @@ void pc_window_poll_events(PADStatus* pad) {
 
 void pc_window_swap_buffers(void) {
     if (pc_randomizer_enabled() && sWindow) {
-        static int previousRepairs = -1;
+        static int previousRepairs = -1, previousCapacity = -1;
         const int repairs = pc_randomizer_repairs();
-        if (repairs != previousRepairs) {
+        const int capacity = pc_randomizer_field_capacity();
+        if (repairs != previousRepairs || capacity != previousCapacity) {
             char title[120];
-            std::snprintf(title, sizeof(title), "Pikmin Randomizer - %s (%d/25 repairs)",
-                          pc_randomizer_goal() ? "Ship repaired!" : "In progress", repairs);
+            std::snprintf(title, sizeof(title), "Pikmin Randomizer - %s (%d/25 repairs, %d field capacity)",
+                          pc_randomizer_goal() ? "Ship repaired!" : "In progress", repairs, capacity);
             SDL_SetWindowTitle(sWindow, title);
             previousRepairs = repairs;
+            previousCapacity = capacity;
         }
     }
 

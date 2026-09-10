@@ -1,4 +1,7 @@
 #include "pc_randomizer.h"
+#include "pc_randomizer_catalog.h"
+#include <cstdint>
+#include <cmath>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -15,41 +18,12 @@
 
 namespace {
 bool enabled = false, ready = false, goalReported = false;
-unsigned repairs = 0, unlocks = 0, checks = 0;
+unsigned repairs = 0, unlocks = 0, flarlic = 0, schema = 1, checkCount = 30;
+std::uint64_t checks = 0;
 std::string token, fingerprint, saveRoot;
 std::filesystem::path directory;
 std::filesystem::file_time_type lastStamp{};
 auto lastFresh = std::chrono::steady_clock::now();
-const char* names[] = { "Pikmin: Bowsprit",
-"Pikmin: Gluon Drive",
-"Pikmin: Anti-Dioxin Filter",
-"Pikmin: Eternal Fuel Dynamo",
-"Pikmin: Whimsical Radar",
-"Pikmin: Interstellar Radio",
-"Pikmin: Guard Satellite",
-"Pikmin: Chronos Reactor",
-"Pikmin: Radiation Canopy",
-"Pikmin: Geiger Counter",
-"Pikmin: Sagittarius",
-"Pikmin: Libra",
-"Pikmin: Omega Stabilizer",
-"Pikmin: Ionium Jet 1",
-"Pikmin: Ionium Jet 2",
-"Pikmin: Shock Absorber",
-"Pikmin: Gravity Jumper",
-"Pikmin: Pilot's Seat",
-"Pikmin: Nova Blaster",
-"Pikmin: Automatic Gear",
-"Pikmin: Zirconium Rotor",
-"Pikmin: Extraordinary Bolt",
-"Pikmin: Repair-type Bolt",
-"Pikmin: Space Float",
-"Pikmin: Massage Machine",
-"Pikmin: Secret Safe",
-"Pikmin: Analog Computer",
-"Pikmin: UV Lamp",
-"Pikmin: Yellow Onion Discovery",
-"Pikmin: Blue Onion Discovery" };
 const char* items[] = { "Yellow Onion", "Blue Onion", "Pikmin: Forest Navel Access", "Pikmin: Distant Spring Access", "Pikmin: Final Trial Access" };
 [[noreturn]] void fail(const char* message) {
     std::fprintf(stderr, "[Pikmin Randomizer] %s\n", message);
@@ -63,7 +37,7 @@ void expect(std::istream& in, const char* expected) {
     if (!(in >> word) || word != expected) fail("unsupported or malformed bootstrap");
 }
 int index(const char* name) {
-    if (name) for (unsigned i = 0; i < 30; ++i) if (!std::strcmp(name, names[i])) return (int)i;
+    if (name) for (unsigned i = 0; i < checkCount; ++i) if (!std::strcmp(name, randomizerCheckNames[i])) return (int)i;
     return -1;
 }
 }
@@ -82,12 +56,16 @@ bool pc_randomizer_init(int argc, char** argv) {
     if (bbft) fail("standalone and BBFT modes cannot be combined");
     std::ifstream input(bootstrap);
     if (!input) fail("cannot open standalone bootstrap");
-    expect(input, "PIKMIN_RANDOMIZER"); expect(input, "1");
+    expect(input, "PIKMIN_RANDOMIZER");
+    std::string version; input >> version;
+    if (version != "1" && version != "2") fail("unsupported bootstrap version");
+    schema = version == "2" ? 2 : 1;
+    checkCount = schema == 2 ? 55 : 30;
     expect(input, "SESSION"); input >> token;
     expect(input, "FINGERPRINT"); input >> fingerprint;
     if (!hex64(token) || !hex64(fingerprint)) fail("invalid session or manifest fingerprint");
     expect(input, "PROFILE"); expect(input, "foh-day2");
-    expect(input, "CATALOG"); expect(input, "vanilla-sites-v1");
+    expect(input, "CATALOG"); expect(input, schema == 2 ? "gameplay-checks-v2" : "vanilla-sites-v1");
     expect(input, "PLACEMENT"); expect(input, "identity-v1");
     expect(input, "GOAL"); expect(input, "25");
     expect(input, "DAYS"); expect(input, "repeat-day29-v1");
@@ -102,8 +80,10 @@ bool pc_randomizer_init(int argc, char** argv) {
     enabled = true;
     pc_randomizer_update(); // Validate initial state before creating a handshake.
     std::ofstream hello(directory / "hello.tmp");
-    hello << "PIKMIN_HELLO 1 " << token << ' ' << fingerprint
-          << " identity-placement-v1 foh-day2-v1 repair-goal-v1 repeat-day29-v1 END\n";
+    hello << "PIKMIN_HELLO " << schema << ' ' << token << ' ' << fingerprint
+          << " identity-placement-v1 foh-day2-v1 repair-goal-v1 repeat-day29-v1";
+    if (schema == 2) hello << " flarlic-v1 population-v1 bestiary-v1 exploration-v1";
+    hello << " END\n";
     hello.close();
     if (!hello) fail("cannot write native handshake");
     std::filesystem::rename(directory / "hello.tmp", directory / "hello.txt");
@@ -121,18 +101,27 @@ void pc_randomizer_update() {
         return;
     }
     std::ifstream input(directory / "state.txt");
+    // Windows may briefly deny opening a file being atomically replaced.
+    // Pause and retry; an opened but malformed record still fails closed.
+    if (!input.is_open()) { ready = false; return; }
     std::string magic, session, end, extra;
-    unsigned version, newReady, newRepairs, newUnlocks, newChecks;
-    if (!(input >> magic >> version >> session >> newReady >> newRepairs >> newUnlocks >> newChecks >> end)
-        || magic != "PIKMIN_STATE" || version != 1 || session != token || newReady > 1
-        || newRepairs > 25 || newUnlocks > 31 || newChecks >= (1u << 30) || end != "END" || (input >> extra))
+    unsigned version, newReady, newRepairs, newUnlocks, newFlarlic = 0;
+    std::uint64_t newChecks;
+    bool parsed = bool(input >> magic >> version >> session >> newReady >> newRepairs >> newUnlocks);
+    if (parsed && schema == 2) parsed = bool(input >> newFlarlic);
+    parsed = parsed && bool(input >> newChecks >> end);
+    if (!parsed || magic != "PIKMIN_STATE" || version != schema || session != token || newReady > 1
+        || newRepairs > 25 || newUnlocks > 31 || newFlarlic > 8 || newChecks >= (1ull << checkCount)
+        || end != "END" || (input >> extra))
         fail("invalid state: identity, version or range mismatch");
     // Inventory is monotonic within this authenticated run.
-    if (newRepairs < repairs || (newUnlocks & unlocks) != unlocks)
+    if (newRepairs < repairs || (newUnlocks & unlocks) != unlocks || newFlarlic < flarlic)
         fail("state attempted to retract received progression");
     ready = newReady != 0;
     repairs = newRepairs;
     unlocks = newUnlocks;
+    if (flarlic != newFlarlic) std::printf("[Pikmin Randomizer] CAPACITY %u\n", 20 + 10 * newFlarlic);
+    flarlic = newFlarlic;
     checks |= newChecks;
     lastStamp = stamp;
     lastFresh = std::chrono::steady_clock::now();
@@ -157,7 +146,7 @@ bool pc_randomizer_has(const char* name) {
 }
 bool pc_randomizer_checked(const char* name) {
     const int slot = index(name);
-    return slot >= 0 && (checks & (1u << slot)) != 0;
+    return slot >= 0 && (checks & (1ull << slot)) != 0;
 }
 void pc_randomizer_check(const char* name) {
     if (!enabled || !ready) return;
@@ -167,7 +156,7 @@ void pc_randomizer_check(const char* name) {
         if (name && !std::strcmp(name, "Pikmin: Main Engine")) return;
         fail("unknown native collection identity");
     }
-    if (checks & (1u << slot)) return;
+    if (checks & (1ull << slot)) return;
     FILE* file = std::fopen((directory / "checks.txt").string().c_str(), "a");
     if (!file) fail("cannot persist native collection");
     bool ok = std::fprintf(file, "%d\n", slot) > 0 && std::fflush(file) == 0;
@@ -178,6 +167,39 @@ void pc_randomizer_check(const char* name) {
 #endif
     ok = std::fclose(file) == 0 && ok;
     if (!ok) fail("native collection persistence failed");
-    checks |= 1u << slot;
+    checks |= 1ull << slot;
     std::printf("[Pikmin Randomizer] CHECK %d %s\n", slot, name);
+}
+
+bool pc_randomizer_expanded() { return enabled && schema == 2; }
+int pc_randomizer_field_capacity() { return pc_randomizer_expanded() ? 20 + 10 * (int)flarlic : 100; }
+namespace {
+bool accessibleStage(int stage) {
+    return stage == 1 || (stage == 2 && pc_randomizer_has("Pikmin: Forest Navel Access"))
+        || (stage == 3 && pc_randomizer_has("Pikmin: Distant Spring Access"))
+        || (stage == 4 && pc_randomizer_has("Pikmin: Final Trial Access"));
+}
+}
+void pc_randomizer_observe_population(int activePikmin, bool gameplay) {
+    if (!pc_randomizer_expanded() || !gameplay || !ready || activePikmin < 0
+        || activePikmin > pc_randomizer_field_capacity()) return;
+    for (int i = 0; i < 9; ++i)
+        if (activePikmin >= 20 + 10 * i) pc_randomizer_check(randomizerCheckNames[30 + i]);
+}
+void pc_randomizer_enemy_defeated(int type, int stage, bool healthDepleted, bool gameplay) {
+    if (!pc_randomizer_expanded() || !healthDepleted || !gameplay || !ready || !accessibleStage(stage)) return;
+    for (int i = 0; i < 8; ++i)
+        if (type == randomizerEnemyTypes[i]) pc_randomizer_check(randomizerCheckNames[39 + i]);
+}
+void pc_randomizer_observe_exploration(int stage, float dx, float dz, bool grounded, bool gameplay) {
+    if (!pc_randomizer_expanded() || !grounded || !gameplay || !ready || !accessibleStage(stage)
+        || !std::isfinite(dx) || !std::isfinite(dz)) return;
+    pc_randomizer_check(randomizerCheckNames[47 + (stage - 1) * 2]);
+    if (dx * dx + dz * dz >= 600.0f * 600.0f)
+        pc_randomizer_check(randomizerCheckNames[48 + (stage - 1) * 2]);
+}
+
+void pc_randomizer_validate_part_weight(int part, int minimum) {
+    if (pc_randomizer_expanded() && (part < 0 || part >= 30 || randomizerPartWeights[part] != minimum))
+        fail("loaded part weight differs from seed logic catalog");
 }
