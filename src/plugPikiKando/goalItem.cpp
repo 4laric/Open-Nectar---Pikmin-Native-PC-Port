@@ -1,6 +1,8 @@
 #include "pc_randomizer.h"
 #include "pc_bbft.h"
 #include "GoalItem.h"
+#include "FlowController.h"
+#include "teki.h"
 #include "BaseInf.h"
 #include "CreatureCollPart.h"
 #include "DebugLog.h"
@@ -346,6 +348,19 @@ Vector3f GoalItem::getSuckPos()
 void GoalItem::suckMe(Pellet* item)
 {
 	PelletConfig* config = item->mConfig;
+    // Non-ship pellets reach this callback after their absorption finishes.
+    // Corpse IDs identify the actual spawned species, including replacements.
+    if (pc_randomizer_collection_checks() && config->mPelletType() == PELTYPE_Corpse
+        && config->mPelletColor() == -1 && flowCont.mCurrentStage) {
+        for (int type = 0; type < TEKI_TypeCount; ++type) {
+            if (config->mModelId.mId == static_cast<u32>(TekiMgr::getTypeId(type))) {
+                pc_randomizer_corpse_delivered(type, flowCont.mCurrentStage->mStageID,
+                    !gameflow.mIsChallengeMode && !gameflow.mPauseAll && !gameflow.mIsUIOverlayActive
+                    && !gameflow.mMoviePlayer->mIsActive);
+                break;
+            }
+        }
+    }
 	int pikiNum;
 	if (mOnionColour == config->mPelletType()) {
 		pikiNum = config->mMatchingOnyonSeeds();

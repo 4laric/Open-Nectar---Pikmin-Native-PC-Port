@@ -1733,6 +1733,7 @@ void GameCoreSection::updateAI()
         if (active) {
             const int field = int(GameStat::formationPikis) + int(GameStat::freePikis) + int(GameStat::workPikis);
             pc_randomizer_observe_population(field, true);
+            pc_randomizer_observe_total_population(int(GameStat::allPikis), true);
             UfoItem* ship = itemMgr ? itemMgr->getUfo() : nullptr;
             if (ship && flowCont.mCurrentStage) {
                 const Vector3f base = ship->getGoalPos();
@@ -1821,6 +1822,46 @@ void GameCoreSection::updateAI()
 #if defined(PIKMIN_RANDOMIZER_TEST_HOOKS)
     const char* scripted = std::getenv("PIKMIN_RANDOMIZER_TEST_SCRIPT");
     const char* background = std::getenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND");
+    if (scripted && !std::strcmp(scripted, "collection") && background && !std::strcmp(background, "1")
+        && pc_randomizer_collection_checks() && bbftRedsReady && !gameflow.mMoviePlayer->mIsActive) {
+        static bool prepared = false, delivered = false;
+        static Teki* victim = nullptr;
+        GoalItem* onion = itemMgr->getContainer(pc_randomizer_start_color());
+        if (!prepared && onion && tekiMgr) {
+            const int species[] = {3, 4, 18, 19, 20, 15, 30, 33};
+            for (int type : species) {
+                PelletConfig* config = pelletMgr->getConfig(TekiMgr::getTypeId(type));
+                if (!config || config->mPelletType() != PELTYPE_Corpse || config->mPelletColor() != -1
+                    || config->mCarryMinPikis() < 1 || config->mCarryMinPikis() > 20) std::abort();
+                std::printf("[Pikmin Randomizer] CORPSE_CONFIG type=%d minimum=%d\n", type, config->mCarryMinPikis());
+            }
+            Iterator it(tekiMgr);
+            CI_LOOP(it) {
+                Teki* enemy = (Teki*)*it;
+                if (enemy->mTekiType == 3 && enemy->mHealth > 0) { victim = enemy; break; }
+            }
+            if (!victim) std::abort();
+            const int color = pc_randomizer_start_color();
+            pikiInfMgr.mPikiCounts[color][Leaf] += 480;
+            onion->mHeldPikis[Leaf] += 480;
+            GameStat::containerPikis.add(color, 480);
+            GameStat::update();
+            Vector3f nearNavi = mNavi->mSRT.t;
+            nearNavi.x += 100.0f;
+            victim->resetPosition(nearNavi);
+            victim->mHealth = 0;
+            prepared = true;
+            std::puts("[Pikmin Randomizer] TEST_ONLY collection_stock=480 field=20");
+        }
+        if (prepared && !delivered && victim->mPellet && victim->mDeadState == 2) {
+            if (pc_randomizer_checked("Bestiary: Deliver Dwarf Bulborb")) std::abort();
+            onion->suckMe(victim->mPellet); // Exercise real Onion callback, not carrying physics.
+            if (!pc_randomizer_checked("Bestiary: Deliver Dwarf Bulborb")) std::abort();
+            if (!pc_randomizer_checked("Population: 500 total Pikmin") || pc_randomizer_field_capacity() != 20) std::abort();
+            delivered = true;
+            std::puts("[Pikmin Randomizer] TEST_ONLY corpse_delivered_after_death_no_kill_check");
+        }
+    }
     if (scripted && !std::strcmp(scripted, "save") && background && !std::strcmp(background, "1") && bbftRedsReady) {
         static bool tested = false;
         if (!tested) {

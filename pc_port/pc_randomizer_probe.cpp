@@ -14,6 +14,36 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 100; ++i) {
         pc_randomizer_update();
         if (pc_randomizer_ready()) {
+            bool collectionProbe = false;
+            for (int arg = 1; arg < argc; ++arg) if (!std::strcmp(argv[arg], "--collection-probe")) collectionProbe = true;
+            if (collectionProbe) {
+                assert(pc_randomizer_collection_checks());
+                assert(pc_randomizer_field_capacity() == 20);
+                pc_randomizer_observe_population(100, true);
+                pc_randomizer_observe_total_population(500, false);
+                pc_randomizer_observe_total_population(-1, true);
+                assert(!pc_randomizer_checked("Population: 20 total Pikmin"));
+                pc_randomizer_observe_total_population(149, true);
+                assert(pc_randomizer_checked("Population: 100 total Pikmin"));
+                assert(!pc_randomizer_checked("Population: 150 total Pikmin"));
+                pc_randomizer_observe_total_population(500, true);
+                assert(pc_randomizer_checked("Population: 500 total Pikmin"));
+                assert(pc_randomizer_field_capacity() == 20);
+                const int types[] = {3, 4, 18, 19, 20, 15, 30, 33};
+                const char* names[] = {"Dwarf Bulborb", "Spotty Bulborb", "Female Sheargrub", "Male Sheargrub", "Shearwig", "Fiery Blowhog", "Water Dumple", "Wollywog"};
+                for (int n = 0; n < 8; ++n) {
+                    char name[100]; std::snprintf(name, sizeof(name), "Bestiary: Deliver %s", names[n]);
+                    pc_randomizer_enemy_defeated(types[n], 1, true, true);
+                    pc_randomizer_corpse_delivered(types[n], 1, false);
+                    pc_randomizer_corpse_delivered(types[n], 4, true);
+                    assert(!pc_randomizer_checked(name));
+                    pc_randomizer_corpse_delivered(types[n], 1, true);
+                    pc_randomizer_corpse_delivered(types[n], 1, true);
+                    assert(pc_randomizer_checked(name));
+                }
+                pc_randomizer_corpse_delivered(6, 1, true);
+                std::puts("COLLECTION_PASS"); return 0;
+            }
             bool enemyProbe = false;
             for (int arg = 1; arg < argc; ++arg) if (!std::strcmp(argv[arg], "--enemy-probe")) enemyProbe = true;
             if (enemyProbe) {
