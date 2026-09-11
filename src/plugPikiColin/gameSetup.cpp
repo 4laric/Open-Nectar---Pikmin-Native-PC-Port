@@ -1,5 +1,6 @@
 #include "GameSetupSection.h"
 #include "pc_bbft.h"
+#include "pc_randomizer.h"
 #include "pc_permadeath.h"
 #include "jaudio/piki_scene.h"
 #include "jaudio/verysimple.h"
@@ -263,7 +264,8 @@ void GameSetupSection::update()
         pc_permadeath_begin_new_run();
         StageInfo* stage = static_cast<StageInfo*>(flowCont.mStageList.mChild);
         if (pc_bbft_skip_tutorial()) {
-            while (stage && stage->mStageID != STAGE_Forest) stage = static_cast<StageInfo*>(stage->mNext);
+            const int selected = pc_randomizer_enabled() ? pc_randomizer_start_stage() : STAGE_Forest;
+            while (stage && stage->mStageID != selected) stage = static_cast<StageInfo*>(stage->mNext);
         }
         if (!stage) { std::fprintf(stderr, "BBFT: requested starting stage missing\n"); std::abort(); }
         flowCont.mCurrentStage = stage;
@@ -290,7 +292,7 @@ void GameSetupSection::update()
             playerState->mShipUpgradeLevel = 1;
             playerState->mStagePartsCollected[STAGE_Practice] = 1;
             playerState->setDayCollectCount(0, 1);
-            gameflow.mPlayState.openStage(STAGE_Forest);
+            gameflow.mPlayState.openStage(stage->mStageID);
             pikiInfMgr.mPikiCounts[Red][Leaf] = 20;
             playerState->mTotalBornPikiNum = 20;
             playerState->mLivingPikiNum = 20;
@@ -299,6 +301,7 @@ void GameSetupSection::update()
             gameflow.mWorldClock.setTime(gameflow.mParameters->mStartHour());
         }
         gameflow.mCurrentStageID = -1;
+        if (pc_randomizer_enabled()) std::printf("[Pikmin Randomizer] START_STAGE %d day=2 stored_red=20\n", stage->mStageID);
         gameflow.mPendingStageUnlockID = -1;
         // The intro's existing BBFT skip executes normal teardown before
         // entering gameplay, preserving the engine's setup sequence.

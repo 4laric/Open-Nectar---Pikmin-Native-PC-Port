@@ -15,6 +15,7 @@ int pc_randomizer_next_day(int day);
 
 // Expanded schema-2 gameplay observations. Receipts never trigger these checks.
 bool pc_randomizer_expanded();
+int pc_randomizer_start_stage();
 int pc_randomizer_field_capacity();
 void pc_randomizer_observe_population(int activePikmin, bool gameplay);
 void pc_randomizer_enemy_defeated(int type, int stage, bool healthDepleted, bool gameplay);

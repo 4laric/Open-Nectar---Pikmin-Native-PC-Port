@@ -362,7 +362,7 @@ bool PlayerState::courseOpen(int courseID)
     if (pc_bbft_skip_tutorial() && courseID == STAGE_Practice) return false;
     if (pc_bbft_progression()) {
         switch (courseID) {
-        case STAGE_Forest: return pc_bbft_has("Pikmin Access");
+        case STAGE_Forest: return pc_randomizer_enabled() ? pc_randomizer_has("Pikmin: Forest of Hope Access") : pc_bbft_has("Pikmin Access");
         case STAGE_Cave: return pc_bbft_has("Pikmin: Forest Navel Access");
         case STAGE_Yakushima: return pc_bbft_has("Pikmin: Distant Spring Access");
         case STAGE_Last: return pc_bbft_has("Pikmin: Final Trial Access");

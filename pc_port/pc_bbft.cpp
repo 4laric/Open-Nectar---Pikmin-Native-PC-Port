@@ -102,7 +102,7 @@ void pc_bbft_warp() {
 #endif
 }
 bool pc_bbft_forest_access() {
-    if (pc_randomizer_enabled()) return true;
+    if (pc_randomizer_enabled()) return pc_randomizer_has("Pikmin: Forest of Hope Access");
 #ifdef _WIN32
     return !enabled || pc_bbft_skip_tutorial() || bbft_has("Pikmin: Forest of Hope Access");
 #else

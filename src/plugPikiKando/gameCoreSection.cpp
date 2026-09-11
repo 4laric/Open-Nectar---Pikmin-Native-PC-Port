@@ -1808,6 +1808,7 @@ void GameCoreSection::updateAI()
         if (bbftRedsQueued && !bbftRedsReady && redOnion && redOnion->getTotalStorePikis() == 0
             && GameStat::allPikis[Red] - GameStat::containerPikis[Red] == 20) {
             pc_bbft_milestone("PIKMIN_FOH_READY day=2 field_red=20 main_engine_ap_check=0");
+            if (pc_randomizer_enabled()) std::printf("[Pikmin Randomizer] START_READY stage=%d field_red=20\n", flowCont.mCurrentStage->mStageID);
             bbftRedsReady = true;
         }
     }
