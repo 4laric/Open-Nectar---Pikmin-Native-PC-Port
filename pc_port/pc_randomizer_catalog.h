@@ -56,6 +56,9 @@ static const char* const randomizerCheckNames[] = {
     "Explore: The Distant Spring - Scout",
     "Explore: The Final Trial - Land",
     "Explore: The Final Trial - Scout",
+    "Explore: The Impact Site - Land",
+    "Explore: The Impact Site - Scout",
+    "Pikmin: Positron Generator",
 };
 static const int randomizerEnemyTypes[] = {3, 4, 18, 19, 20, 15, 30, 33};
 static const int randomizerPartWeights[] = {30, 50, 40, 40, 20, 20, 20, 20, 20, 30, 15, 20, 15, 30, 15, 15, 30, 25, 25, 30, 15, 30, 30, 20, 25, 30, 40, 20, 20, 10};

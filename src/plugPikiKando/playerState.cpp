@@ -359,7 +359,8 @@ bool PlayerState::isBbftRestoredPart(u32 id)
 
 bool PlayerState::courseOpen(int courseID)
 {
-    if (pc_bbft_skip_tutorial() && courseID == STAGE_Practice) return false;
+    if (pc_bbft_skip_tutorial() && courseID == STAGE_Practice)
+        return pc_randomizer_enabled() && pc_randomizer_has("Pikmin: Impact Site Access");
     if (pc_bbft_progression()) {
         switch (courseID) {
         case STAGE_Forest: return pc_randomizer_enabled() ? pc_randomizer_has("Pikmin: Forest of Hope Access") : pc_bbft_has("Pikmin Access");
@@ -1204,6 +1205,8 @@ void PlayerState::startUfoPartsMotion(u32 id, int anim, bool wantPassiveMotion)
  */
 void PlayerState::getUfoParts(u32 partID, bool isInvisiblePart)
 {
+    if (partID == UFOID_PositronGenerator && pc_randomizer_enabled() && pc_randomizer_has("Pikmin: Impact Site Access"))
+        pc_randomizer_check("Pikmin: Positron Generator");
     if (pc_bbft_progression() && flowCont.mCurrentStage && courseOpen(flowCont.mCurrentStage->mStageID)) {
         const char* location = bbftPartName(partID);
         if (location) pc_bbft_check(location);

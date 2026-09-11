@@ -60,21 +60,24 @@ bool pc_randomizer_init(int argc, char** argv) {
     if (!input) fail("cannot open standalone bootstrap");
     expect(input, "PIKMIN_RANDOMIZER");
     std::string version; input >> version;
-    if (version != "1" && version != "2" && version != "3" && version != "4") fail("unsupported bootstrap version");
+    if (version != "1" && version != "2" && version != "3" && version != "4" && version != "5") fail("unsupported bootstrap version");
     schema = (unsigned)(version[0] - '0');
-    checkCount = schema >= 2 ? 55 : 30;
+    checkCount = schema >= 5 ? 58 : schema >= 2 ? 55 : 30;
     expect(input, "SESSION"); input >> token;
     expect(input, "FINGERPRINT"); input >> fingerprint;
     if (!hex64(token) || !hex64(fingerprint)) fail("invalid session or manifest fingerprint");
     expect(input, "PROFILE");
     std::string profile; input >> profile;
     if (profile == "navel-day2" && schema >= 3) startStage = 2;
+    else if (profile == "impact-day2" && schema >= 5) startStage = 0;
+    else if (profile == "spring-day2" && schema >= 5) startStage = 3;
+    else if (profile == "trial-day2" && schema >= 5) startStage = 4;
     else if (profile != "foh-day2") fail("unsupported start profile");
-    expect(input, "CATALOG"); expect(input, schema == 4 ? "gameplay-checks-v4" : schema == 3 ? "gameplay-checks-v3" : schema == 2 ? "gameplay-checks-v2" : "vanilla-sites-v1");
+    expect(input, "CATALOG"); expect(input, schema == 5 ? "gameplay-checks-v5" : schema == 4 ? "gameplay-checks-v4" : schema == 3 ? "gameplay-checks-v3" : schema == 2 ? "gameplay-checks-v2" : "vanilla-sites-v1");
     expect(input, "PLACEMENT"); expect(input, "identity-v1");
     expect(input, "GOAL"); expect(input, "25");
     expect(input, "DAYS"); expect(input, "repeat-day29-v1");
-    if (schema == 4) {
+    if (schema >= 4) {
         expect(input, "COLOR"); std::string color; input >> color;
         if (color == "red") startColor = 1;
         else if (color == "yellow") startColor = 2;
@@ -95,7 +98,8 @@ bool pc_randomizer_init(int argc, char** argv) {
     hello << "PIKMIN_HELLO " << schema << ' ' << token << ' ' << fingerprint
           << " identity-placement-v1 " << (schema >= 3 ? "random-start-v1" : "foh-day2-v1") << " repair-goal-v1 repeat-day29-v1";
     if (schema >= 2) hello << " flarlic-v1 population-v1 bestiary-v1 exploration-v1";
-    if (schema == 4) hello << " starting-color-v1";
+    if (schema >= 4) hello << " starting-color-v1";
+    if (schema >= 5) hello << " all-areas-v1";
     hello << " END\n";
     hello.close();
     if (!hello) fail("cannot write native handshake");
@@ -124,7 +128,7 @@ void pc_randomizer_update() {
     if (parsed && schema >= 2) parsed = bool(input >> newFlarlic);
     parsed = parsed && bool(input >> newChecks >> end);
     if (!parsed || magic != "PIKMIN_STATE" || version != schema || session != token || newReady > 1
-        || newRepairs > 25 || newUnlocks > (schema == 4 ? 127u : schema == 3 ? 63u : 31u) || newFlarlic > 8 || newChecks >= (1ull << checkCount)
+        || newRepairs > 25 || newUnlocks > (schema == 5 ? 255u : schema == 4 ? 127u : schema == 3 ? 63u : 31u) || newFlarlic > 8 || newChecks >= (1ull << checkCount)
         || end != "END" || (input >> extra))
         fail("invalid state: identity, version or range mismatch");
     // Inventory is monotonic within this authenticated run.
@@ -160,6 +164,9 @@ bool pc_randomizer_has(const char* name) {
     if (!std::strcmp(name, "Pikmin Access")) return true;
     if (!std::strcmp(name, "Pikmin: Forest of Hope Access")) return startStage == 1 || (unlocks & 32u);
     if (startStage == 2 && !std::strcmp(name, "Pikmin: Forest Navel Access")) return true;
+    if (startStage == 3 && !std::strcmp(name, "Pikmin: Distant Spring Access")) return true;
+    if (startStage == 4 && !std::strcmp(name, "Pikmin: Final Trial Access")) return true;
+    if (!std::strcmp(name, "Pikmin: Impact Site Access")) return schema >= 5 && (startStage == 0 || (unlocks & 128u));
     for (unsigned i = 0; i < 5; ++i)
         if (!std::strcmp(name, items[i])) return (unlocks & (1u << i)) != 0;
     return false;
@@ -195,7 +202,7 @@ bool pc_randomizer_expanded() { return enabled && schema >= 2; }
 int pc_randomizer_field_capacity() { return pc_randomizer_expanded() ? 20 + 10 * (int)flarlic : 100; }
 namespace {
 bool accessibleStage(int stage) {
-    return (stage == 1 && pc_randomizer_has("Pikmin: Forest of Hope Access")) || (stage == 2 && pc_randomizer_has("Pikmin: Forest Navel Access"))
+    return (stage == 0 && pc_randomizer_has("Pikmin: Impact Site Access")) || (stage == 1 && pc_randomizer_has("Pikmin: Forest of Hope Access")) || (stage == 2 && pc_randomizer_has("Pikmin: Forest Navel Access"))
         || (stage == 3 && pc_randomizer_has("Pikmin: Distant Spring Access"))
         || (stage == 4 && pc_randomizer_has("Pikmin: Final Trial Access"));
 }
@@ -214,9 +221,10 @@ void pc_randomizer_enemy_defeated(int type, int stage, bool healthDepleted, bool
 void pc_randomizer_observe_exploration(int stage, float dx, float dz, bool grounded, bool gameplay) {
     if (!pc_randomizer_expanded() || !grounded || !gameplay || !ready || !accessibleStage(stage)
         || !std::isfinite(dx) || !std::isfinite(dz)) return;
-    pc_randomizer_check(randomizerCheckNames[47 + (stage - 1) * 2]);
+    const int landIndex = stage == 0 ? 55 : 47 + (stage - 1) * 2;
+    pc_randomizer_check(randomizerCheckNames[landIndex]);
     if (dx * dx + dz * dz >= 600.0f * 600.0f)
-        pc_randomizer_check(randomizerCheckNames[48 + (stage - 1) * 2]);
+        pc_randomizer_check(randomizerCheckNames[landIndex + 1]);
 }
 
 void pc_randomizer_validate_part_weight(int part, int minimum) {

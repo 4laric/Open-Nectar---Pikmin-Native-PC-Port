@@ -14,6 +14,24 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 100; ++i) {
         pc_randomizer_update();
         if (pc_randomizer_ready()) {
+            bool areaProbe = false;
+            for (int arg = 1; arg < argc; ++arg) if (!std::strcmp(argv[arg], "--area-probe")) areaProbe = true;
+            if (areaProbe) {
+                const char* areas[] = {"Pikmin: Impact Site Access", "Pikmin: Forest of Hope Access", "Pikmin: Forest Navel Access", "Pikmin: Distant Spring Access", "Pikmin: Final Trial Access"};
+                const char* colors[] = {"Blue Onion", "Red Onion", "Yellow Onion"};
+                const char* lands[] = {"Explore: The Impact Site - Land", "Explore: The Forest of Hope - Land", "Explore: The Forest Navel - Land", "Explore: The Distant Spring - Land", "Explore: The Final Trial - Land"};
+                for (int area = 0; area < 5; ++area) {
+                    assert(pc_randomizer_has(areas[area]) == (area == pc_randomizer_start_stage()));
+                    pc_randomizer_observe_exploration(area, 0, 0, true, true);
+                    assert(pc_randomizer_checked(lands[area]) == (area == pc_randomizer_start_stage()));
+                }
+                for (int color = 0; color < 3; ++color) assert(pc_randomizer_has(colors[color]) == (color == pc_randomizer_start_color()));
+                if (pc_randomizer_start_stage() == 0) {
+                    pc_randomizer_observe_exploration(0, 600, 0, true, true);
+                    pc_randomizer_check("Pikmin: Positron Generator");
+                }
+                std::puts("ALL_AREA_INITIAL_PASS"); return 0;
+            }
             if (pc_randomizer_expanded()) {
                 assert(pc_randomizer_field_capacity() == 20);
                 pc_randomizer_observe_population(19, true);
