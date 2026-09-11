@@ -20,6 +20,7 @@ namespace {
 bool enabled = false, ready = false, goalReported = false;
 unsigned repairs = 0, unlocks = 0, flarlic = 0, schema = 1, checkCount = 30;
 int startStage = 1;
+int startColor = 1; // Native IDs: blue 0, red 1, yellow 2.
 std::uint64_t checks = 0;
 std::string token, fingerprint, saveRoot;
 std::filesystem::path directory;
@@ -59,7 +60,7 @@ bool pc_randomizer_init(int argc, char** argv) {
     if (!input) fail("cannot open standalone bootstrap");
     expect(input, "PIKMIN_RANDOMIZER");
     std::string version; input >> version;
-    if (version != "1" && version != "2" && version != "3") fail("unsupported bootstrap version");
+    if (version != "1" && version != "2" && version != "3" && version != "4") fail("unsupported bootstrap version");
     schema = (unsigned)(version[0] - '0');
     checkCount = schema >= 2 ? 55 : 30;
     expect(input, "SESSION"); input >> token;
@@ -67,12 +68,19 @@ bool pc_randomizer_init(int argc, char** argv) {
     if (!hex64(token) || !hex64(fingerprint)) fail("invalid session or manifest fingerprint");
     expect(input, "PROFILE");
     std::string profile; input >> profile;
-    if (profile == "navel-day2" && schema == 3) startStage = 2;
+    if (profile == "navel-day2" && schema >= 3) startStage = 2;
     else if (profile != "foh-day2") fail("unsupported start profile");
-    expect(input, "CATALOG"); expect(input, schema == 3 ? "gameplay-checks-v3" : schema == 2 ? "gameplay-checks-v2" : "vanilla-sites-v1");
+    expect(input, "CATALOG"); expect(input, schema == 4 ? "gameplay-checks-v4" : schema == 3 ? "gameplay-checks-v3" : schema == 2 ? "gameplay-checks-v2" : "vanilla-sites-v1");
     expect(input, "PLACEMENT"); expect(input, "identity-v1");
     expect(input, "GOAL"); expect(input, "25");
     expect(input, "DAYS"); expect(input, "repeat-day29-v1");
+    if (schema == 4) {
+        expect(input, "COLOR"); std::string color; input >> color;
+        if (color == "red") startColor = 1;
+        else if (color == "yellow") startColor = 2;
+        else if (color == "blue") startColor = 0;
+        else fail("unsupported starting color");
+    }
     expect(input, "END");
     std::string extra;
     if (input >> extra) fail("trailing bootstrap data");
@@ -85,8 +93,9 @@ bool pc_randomizer_init(int argc, char** argv) {
     pc_randomizer_update(); // Validate initial state before creating a handshake.
     std::ofstream hello(directory / "hello.tmp");
     hello << "PIKMIN_HELLO " << schema << ' ' << token << ' ' << fingerprint
-          << " identity-placement-v1 " << (schema == 3 ? "random-start-v1" : "foh-day2-v1") << " repair-goal-v1 repeat-day29-v1";
+          << " identity-placement-v1 " << (schema >= 3 ? "random-start-v1" : "foh-day2-v1") << " repair-goal-v1 repeat-day29-v1";
     if (schema >= 2) hello << " flarlic-v1 population-v1 bestiary-v1 exploration-v1";
+    if (schema == 4) hello << " starting-color-v1";
     hello << " END\n";
     hello.close();
     if (!hello) fail("cannot write native handshake");
@@ -115,7 +124,7 @@ void pc_randomizer_update() {
     if (parsed && schema >= 2) parsed = bool(input >> newFlarlic);
     parsed = parsed && bool(input >> newChecks >> end);
     if (!parsed || magic != "PIKMIN_STATE" || version != schema || session != token || newReady > 1
-        || newRepairs > 25 || newUnlocks > (schema == 3 ? 63u : 31u) || newFlarlic > 8 || newChecks >= (1ull << checkCount)
+        || newRepairs > 25 || newUnlocks > (schema == 4 ? 127u : schema == 3 ? 63u : 31u) || newFlarlic > 8 || newChecks >= (1ull << checkCount)
         || end != "END" || (input >> extra))
         fail("invalid state: identity, version or range mismatch");
     // Inventory is monotonic within this authenticated run.
@@ -137,6 +146,7 @@ void pc_randomizer_update() {
 
 bool pc_randomizer_enabled() { return enabled; }
 int pc_randomizer_start_stage() { return startStage; }
+int pc_randomizer_start_color() { return startColor; }
 bool pc_randomizer_ready() { return ready; }
 bool pc_randomizer_goal() { return enabled && repairs == 25; }
 int pc_randomizer_repairs() { return (int)repairs; }
@@ -144,6 +154,9 @@ const char* pc_randomizer_save_root() { return saveRoot.c_str(); }
 int pc_randomizer_next_day(int day) { return enabled && day >= 28 ? 29 : day + 1; }
 bool pc_randomizer_has(const char* name) {
     if (!enabled || !name) return false;
+    if (!std::strcmp(name, "Red Onion")) return startColor == 1 || (unlocks & 64u);
+    if (startColor == 0 && !std::strcmp(name, "Blue Onion")) return true;
+    if (startColor == 2 && !std::strcmp(name, "Yellow Onion")) return true;
     if (!std::strcmp(name, "Pikmin Access")) return true;
     if (!std::strcmp(name, "Pikmin: Forest of Hope Access")) return startStage == 1 || (unlocks & 32u);
     if (startStage == 2 && !std::strcmp(name, "Pikmin: Forest Navel Access")) return true;

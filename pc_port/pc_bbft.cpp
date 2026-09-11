@@ -142,6 +142,8 @@ bool pc_bbft_has(const char* name) {
 }
 bool pc_bbft_color_access(int color) {
     // Engine colors: blue=0, red=1, yellow=2.
+    if (pc_randomizer_enabled()) return (color == 0 && pc_randomizer_has("Blue Onion"))
+        || (color == 1 && pc_randomizer_has("Red Onion")) || (color == 2 && pc_randomizer_has("Yellow Onion"));
     return !pc_bbft_progression() || color == 1 ||
         (color == 0 && pc_bbft_has(pc_bbft_shared_capabilities() ? "Zora Tunic" : "Blue Onion")) ||
         (color == 2 && pc_bbft_has("Yellow Onion"));

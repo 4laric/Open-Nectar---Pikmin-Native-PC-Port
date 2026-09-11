@@ -275,9 +275,10 @@ void GameSetupSection::update()
         gameflow.mWorldClock.setTime(TUTORIAL_TIME_OF_DAY);
         if (pc_bbft_skip_tutorial()) {
             playerState->mIsTutorialMode = false;
-            playerState->setContainer(Red);
-            playerState->setBootContainer(Red);
-            playerState->setDisplayPikiCount(Red);
+            const int initialColor = pc_randomizer_enabled() ? pc_randomizer_start_color() : Red;
+            playerState->setContainer(initialColor);
+            playerState->setBootContainer(initialColor);
+            playerState->setDisplayPikiCount(initialColor);
             const int completedTutorials[] = {
                 DEMOFLAG_DiscoverRedOnyon, DEMOFLAG_ApproachSeed, DEMOFLAG_PluckRedPikmin,
                 DEMOFLAG_NoPikminTimeout, DEMOFLAG_CameraInfo, DEMOFLAG_CollectFirstPellet,
@@ -293,7 +294,7 @@ void GameSetupSection::update()
             playerState->mStagePartsCollected[STAGE_Practice] = 1;
             playerState->setDayCollectCount(0, 1);
             gameflow.mPlayState.openStage(stage->mStageID);
-            pikiInfMgr.mPikiCounts[Red][Leaf] = 20;
+            pikiInfMgr.mPikiCounts[initialColor][Leaf] = 20;
             playerState->mTotalBornPikiNum = 20;
             playerState->mLivingPikiNum = 20;
             playerState->mTotalPluckedPikiCount = 20;
@@ -301,7 +302,7 @@ void GameSetupSection::update()
             gameflow.mWorldClock.setTime(gameflow.mParameters->mStartHour());
         }
         gameflow.mCurrentStageID = -1;
-        if (pc_randomizer_enabled()) std::printf("[Pikmin Randomizer] START_STAGE %d day=2 stored_red=20\n", stage->mStageID);
+        if (pc_randomizer_enabled()) std::printf("[Pikmin Randomizer] START_STAGE %d day=2 color=%d stored=20\n", stage->mStageID, pc_randomizer_start_color());
         gameflow.mPendingStageUnlockID = -1;
         // The intro's existing BBFT skip executes normal teardown before
         // entering gameplay, preserving the engine's setup sequence.

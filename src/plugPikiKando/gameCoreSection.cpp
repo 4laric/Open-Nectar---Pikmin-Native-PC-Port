@@ -1771,7 +1771,10 @@ void GameCoreSection::updateAI()
         }
     }
     // Grants are once per fresh BBFT session, never once per stage or refill.
-    static bool bbftColorGranted[3] = {false, true, false};
+    static bool bbftColorGranted[3] = {};
+    static bool initialColorRegistered = false;
+    const int initialColor = pc_randomizer_enabled() ? pc_randomizer_start_color() : Red;
+    if (!initialColorRegistered) { bbftColorGranted[initialColor] = true; initialColorRegistered = true; }
     if (pc_bbft_progression() && itemMgr && !gameflow.mMoviePlayer->mIsActive) {
         for (int color = 0; color < 3; ++color) {
             if (bbftColorGranted[color] || !pc_bbft_color_access(color)) continue;
@@ -1789,16 +1792,16 @@ void GameCoreSection::updateAI()
             GameStat::update();
             char stockMessage[128];
             std::sprintf(stockMessage, "PIKMIN_COLOR_STOCK color=%s stored=%d actor=%d",
-                color == Blue ? "Blue" : "Yellow", pikiInfMgr.mPikiCounts[color][Leaf], onion != nullptr);
+                color == Blue ? "Blue" : color == Red ? "Red" : "Yellow", pikiInfMgr.mPikiCounts[color][Leaf], onion != nullptr);
             pc_bbft_milestone(stockMessage);
             bbftColorGranted[color] = true;
-            pc_bbft_milestone(color == Blue ? "PIKMIN_BLUE_ONION_GRANTED starter=5" : "PIKMIN_YELLOW_ONION_GRANTED starter=5");
+            pc_bbft_milestone(color == Blue ? "PIKMIN_BLUE_ONION_GRANTED starter=5" : color == Red ? "PIKMIN_RED_ONION_GRANTED starter=5" : "PIKMIN_YELLOW_ONION_GRANTED starter=5");
         }
     }
     static bool bbftRedsQueued = false, bbftRedsReady = false;
     if (pc_bbft_skip_tutorial() && !gameflow.mMoviePlayer->mIsActive
         && !gameflow.mPauseAll && !gameflow.mIsUIOverlayActive && itemMgr) {
-        GoalItem* redOnion = itemMgr->getContainer(Red);
+        GoalItem* redOnion = itemMgr->getContainer(initialColor);
         if (!bbftRedsQueued && redOnion && redOnion->getTotalStorePikis() >= 20) {
             // Use normal Onion withdrawal: initialized actors descend the legs
             // and join Olimar through their native exit state, no fake count.
@@ -1806,9 +1809,12 @@ void GameCoreSection::updateAI()
             bbftRedsQueued = true;
         }
         if (bbftRedsQueued && !bbftRedsReady && redOnion && redOnion->getTotalStorePikis() == 0
-            && GameStat::allPikis[Red] - GameStat::containerPikis[Red] == 20) {
-            pc_bbft_milestone("PIKMIN_FOH_READY day=2 field_red=20 main_engine_ap_check=0");
-            if (pc_randomizer_enabled()) std::printf("[Pikmin Randomizer] START_READY stage=%d field_red=20\n", flowCont.mCurrentStage->mStageID);
+            && GameStat::allPikis[initialColor] - GameStat::containerPikis[initialColor] == 20) {
+            if (initialColor == Red) pc_bbft_milestone("PIKMIN_FOH_READY day=2 field_red=20 main_engine_ap_check=0");
+            if (pc_randomizer_enabled()) {
+                std::printf("[Pikmin Randomizer] START_COLOR_READY stage=%d color=%d field=20\n", flowCont.mCurrentStage->mStageID, initialColor);
+                if (initialColor == Red) std::printf("[Pikmin Randomizer] START_READY stage=%d field_red=20\n", flowCont.mCurrentStage->mStageID);
+            }
             bbftRedsReady = true;
         }
     }
