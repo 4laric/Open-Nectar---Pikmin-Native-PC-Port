@@ -1821,6 +1821,41 @@ void GameCoreSection::updateAI()
 #if defined(PIKMIN_RANDOMIZER_TEST_HOOKS)
     const char* scripted = std::getenv("PIKMIN_RANDOMIZER_TEST_SCRIPT");
     const char* background = std::getenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND");
+    if (scripted && !std::strcmp(scripted, "save") && background && !std::strcmp(background, "1") && bbftRedsReady) {
+        static bool tested = false;
+        if (!tested) {
+            tested = true;
+            PlayerState* originalPlayer = playerState;
+            auto* originalCache = generatorCache;
+            static u8 originalData[CARD_DATA_SIZE];
+            std::memcpy(originalData, cardData, CARD_DATA_SIZE);
+            const int invalidSlots[] = {0, 5, 255};
+            for (int slot : invalidSlots) {
+                gameflow.mGamePrefs.mSpareMemCardSaveIndex = slot;
+                gameflow.mMemoryCard.saveCurrentGame();
+                if (!gameflow.mMemoryCard.didSaveFail() || playerState != originalPlayer || generatorCache != originalCache
+                    || std::memcmp(originalData, cardData, CARD_DATA_SIZE)) std::abort();
+            }
+            std::puts("[Pikmin Randomizer] TEST_ONLY invalid_save_slots_rejected");
+            gameflow.mMemoryCard.getMemoryCardState(true);
+            gameflow.mMemoryCard.makeDefaultFile();
+            while (!gameflow.mMemoryCard.hasCardFinished()) OSYieldThread();
+            gameflow.mMemoryCard.getMemoryCardState(true);
+            gameflow.mPlayState.mSaveSlot = 0;
+            gameflow.mGamePrefs.mMemCardSaveIndex = 0;
+            gameflow.mGamePrefs.mSpareMemCardSaveIndex = 4;
+            gameflow.mMemoryCard.saveCurrentGame();
+            if (gameflow.mMemoryCard.didSaveFail() || playerState != originalPlayer || generatorCache != originalCache) std::abort();
+            if (gameflow.mGamePrefs.mSpareMemCardSaveIndex < 1 || gameflow.mGamePrefs.mSpareMemCardSaveIndex > 4
+                || gameflow.mGamePrefs.mSpareMemCardSaveIndex == gameflow.mGamePrefs.mMemCardSaveIndex) std::abort();
+            gameflow.mMemoryCard.saveCurrentGame();
+            if (gameflow.mMemoryCard.didSaveFail() || playerState != originalPlayer || generatorCache != originalCache) std::abort();
+            CardQuickInfo infos[4];
+            gameflow.mMemoryCard.getQuickInfos(infos);
+            if (infos[0].mCurrentDay != gameflow.mWorldClock.mCurrentDay || infos[0].mSaveStatus != PlayState::ReadyToSave) std::abort();
+            std::puts("[Pikmin Randomizer] TEST_ONLY native_save_written_and_read_back consecutive=2");
+        }
+    }
     if (pc_randomizer_expanded() && scripted && !std::strcmp(scripted, "capacity")
         && background && !std::strcmp(background, "1") && bbftRedsReady
         && !gameflow.mMoviePlayer->mIsActive && !gameflow.mPauseAll && !gameflow.mIsUIOverlayActive) {
