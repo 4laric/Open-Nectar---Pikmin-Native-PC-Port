@@ -21,6 +21,7 @@ bool enabled = false, ready = false, goalReported = false;
 unsigned repairs = 0, unlocks = 0, flarlic = 0, schema = 1, checkCount = 30;
 int startStage = 1;
 int startColor = 1; // Native IDs: blue 0, red 1, yellow 2.
+unsigned enemyMask = 0;
 std::uint64_t checks = 0;
 std::string token, fingerprint, saveRoot;
 std::filesystem::path directory;
@@ -60,7 +61,7 @@ bool pc_randomizer_init(int argc, char** argv) {
     if (!input) fail("cannot open standalone bootstrap");
     expect(input, "PIKMIN_RANDOMIZER");
     std::string version; input >> version;
-    if (version != "1" && version != "2" && version != "3" && version != "4" && version != "5") fail("unsupported bootstrap version");
+    if (version != "1" && version != "2" && version != "3" && version != "4" && version != "5" && version != "6") fail("unsupported bootstrap version");
     schema = (unsigned)(version[0] - '0');
     checkCount = schema >= 5 ? 58 : schema >= 2 ? 55 : 30;
     expect(input, "SESSION"); input >> token;
@@ -73,7 +74,7 @@ bool pc_randomizer_init(int argc, char** argv) {
     else if (profile == "spring-day2" && schema >= 5) startStage = 3;
     else if (profile == "trial-day2" && schema >= 5) startStage = 4;
     else if (profile != "foh-day2") fail("unsupported start profile");
-    expect(input, "CATALOG"); expect(input, schema == 5 ? "gameplay-checks-v5" : schema == 4 ? "gameplay-checks-v4" : schema == 3 ? "gameplay-checks-v3" : schema == 2 ? "gameplay-checks-v2" : "vanilla-sites-v1");
+    expect(input, "CATALOG"); expect(input, schema == 6 ? "gameplay-checks-v6" : schema == 5 ? "gameplay-checks-v5" : schema == 4 ? "gameplay-checks-v4" : schema == 3 ? "gameplay-checks-v3" : schema == 2 ? "gameplay-checks-v2" : "vanilla-sites-v1");
     expect(input, "PLACEMENT"); expect(input, "identity-v1");
     expect(input, "GOAL"); expect(input, "25");
     expect(input, "DAYS"); expect(input, "repeat-day29-v1");
@@ -83,6 +84,10 @@ bool pc_randomizer_init(int argc, char** argv) {
         else if (color == "yellow") startColor = 2;
         else if (color == "blue") startColor = 0;
         else fail("unsupported starting color");
+    }
+    if (schema >= 6) {
+        expect(input, "ENEMIES");
+        if (!(input >> enemyMask) || enemyMask < 1 || enemyMask > 7) fail("invalid enemy permutation");
     }
     expect(input, "END");
     std::string extra;
@@ -100,6 +105,7 @@ bool pc_randomizer_init(int argc, char** argv) {
     if (schema >= 2) hello << " flarlic-v1 population-v1 bestiary-v1 exploration-v1";
     if (schema >= 4) hello << " starting-color-v1";
     if (schema >= 5) hello << " all-areas-v1";
+    if (schema >= 6) hello << " enemy-families-v1";
     hello << " END\n";
     hello.close();
     if (!hello) fail("cannot write native handshake");
@@ -128,7 +134,7 @@ void pc_randomizer_update() {
     if (parsed && schema >= 2) parsed = bool(input >> newFlarlic);
     parsed = parsed && bool(input >> newChecks >> end);
     if (!parsed || magic != "PIKMIN_STATE" || version != schema || session != token || newReady > 1
-        || newRepairs > 25 || newUnlocks > (schema == 5 ? 255u : schema == 4 ? 127u : schema == 3 ? 63u : 31u) || newFlarlic > 8 || newChecks >= (1ull << checkCount)
+        || newRepairs > 25 || newUnlocks > (schema >= 5 ? 255u : schema == 4 ? 127u : schema == 3 ? 63u : 31u) || newFlarlic > 8 || newChecks >= (1ull << checkCount)
         || end != "END" || (input >> extra))
         fail("invalid state: identity, version or range mismatch");
     // Inventory is monotonic within this authenticated run.
@@ -151,6 +157,16 @@ void pc_randomizer_update() {
 bool pc_randomizer_enabled() { return enabled; }
 int pc_randomizer_start_stage() { return startStage; }
 int pc_randomizer_start_color() { return startColor; }
+bool pc_randomizer_enemy_shuffle() { return enabled && schema >= 6; }
+int pc_randomizer_enemy_type(int original, bool protectedSpawn) {
+    if (!pc_randomizer_enemy_shuffle() || protectedSpawn) return original;
+    const int pairs[3][2] = {{3, 31}, {4, 32}, {18, 19}};
+    for (unsigned i = 0; i < 3; ++i) if (enemyMask & (1u << i)) {
+        if (original == pairs[i][0]) return pairs[i][1];
+        if (original == pairs[i][1]) return pairs[i][0];
+    }
+    return original;
+}
 bool pc_randomizer_ready() { return ready; }
 bool pc_randomizer_goal() { return enabled && repairs == 25; }
 int pc_randomizer_repairs() { return (int)repairs; }

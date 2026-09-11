@@ -17,6 +17,8 @@ int pc_randomizer_next_day(int day);
 bool pc_randomizer_expanded();
 int pc_randomizer_start_stage();
 int pc_randomizer_start_color();
+bool pc_randomizer_enemy_shuffle();
+int pc_randomizer_enemy_type(int original, bool protectedSpawn);
 int pc_randomizer_field_capacity();
 void pc_randomizer_observe_population(int activePikmin, bool gameplay);
 void pc_randomizer_enemy_defeated(int type, int stage, bool healthDepleted, bool gameplay);

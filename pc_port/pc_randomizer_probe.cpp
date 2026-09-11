@@ -14,6 +14,17 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 100; ++i) {
         pc_randomizer_update();
         if (pc_randomizer_ready()) {
+            bool enemyProbe = false;
+            for (int arg = 1; arg < argc; ++arg) if (!std::strcmp(argv[arg], "--enemy-probe")) enemyProbe = true;
+            if (enemyProbe) {
+                for (int type = 0; type < 35; ++type) {
+                    const int target = pc_randomizer_enemy_type(type, false);
+                    assert(pc_randomizer_enemy_type(type, true) == type);
+                    assert(pc_randomizer_enemy_type(target, false) == type);
+                    std::printf("ENEMY_MAP %d %d\n", type, target);
+                }
+                return 0;
+            }
             bool areaProbe = false;
             for (int arg = 1; arg < argc; ++arg) if (!std::strcmp(argv[arg], "--area-probe")) areaProbe = true;
             if (areaProbe) {

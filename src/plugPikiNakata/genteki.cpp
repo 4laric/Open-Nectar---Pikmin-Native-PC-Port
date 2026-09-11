@@ -6,6 +6,12 @@
 #include "TekiPersonality.h"
 #include "sysNew.h"
 #include "teki.h"
+#include "pc_randomizer.h"
+#include <cstdio>
+
+static bool randomizerProtected(TekiPersonality* personality) {
+    return personality->mID.mId != 'none' || personality->getI(TekiPersonality::INT_Parameter0) != 0;
+}
 
 /**
  * @todo: Documentation
@@ -79,6 +85,9 @@ void GenObjectTeki::updateUseList(Generator*, int)
 	}
 
 	tekiMgr->mUsingType[mTekiType] = true;
+    // Keep original generator identity; reserve replacement assets before birth.
+    const int replacement = pc_randomizer_enemy_type(mTekiType, randomizerProtected(mPersonality));
+    tekiMgr->mUsingType[replacement] = true;
 
 	if (!tekiMgr->hasType(mTekiType)) {
 		ERROR("!tekiMgr->hasType(kind)\n");
@@ -96,7 +105,9 @@ void GenObjectTeki::updateUseList(Generator*, int)
  */
 Creature* GenObjectTeki::birth(BirthInfo& info)
 {
-	Teki* teki = tekiMgr->newTeki(mTekiType);
+    const bool protectedSpawn = randomizerProtected(mPersonality);
+    const int replacement = pc_randomizer_enemy_type(mTekiType, protectedSpawn);
+	Teki* teki = tekiMgr->newTeki(replacement);
 	if (!teki) {
 		return nullptr;
 	}
@@ -113,6 +124,8 @@ Creature* GenObjectTeki::birth(BirthInfo& info)
 	}
 
 	teki->mRebirthDay = info.mGenerator->getRebirthDay();
+    if (pc_randomizer_enemy_shuffle())
+        std::printf("[Pikmin Randomizer] ENEMY_SPAWN original=%d actual=%d protected=%d x=%.1f z=%.1f\n", mTekiType, replacement, int(protectedSpawn), info.mPosition.x, info.mPosition.z);
 	return teki;
 }
 
