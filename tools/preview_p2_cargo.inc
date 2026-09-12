@@ -2,8 +2,23 @@
 // verifyCargoReceipts() at a safe floor boundary; no transport is simulated here.
 #include "pc_p2_cargo.h"
 #include "Generator.h"
+#include "Suckable.h"
 #include <fstream>
 #include <set>
+struct CargoTransportProbe : ActTransport {
+    static bool print(ActTransport* action) {
+        auto state=&CargoTransportProbe::mState;auto path=&CargoTransportProbe::mPathIndex;
+        auto goal=&CargoTransportProbe::mGoal;
+        Suckable* receiver=action->*goal;if(!receiver)return false;Vector3f position=receiver->getGoalPos();
+        std::printf("P2_CARGO_ROUTE state=%d path=%d goal=%.2f,%.2f,%.2f\n",action->*state,action->*path,position.x,position.y,position.z);
+        auto refs=&CargoTransportProbe::mSplineControlPts;auto next=&CargoTransportProbe::mNextPathIndex;
+        auto direction=&CargoTransportProbe::mMoveDir;
+        std::printf("P2_CARGO_SPLINE next=%d direction=%.3f,%.3f,%.3f",action->*next,(action->*direction).x,(action->*direction).y,(action->*direction).z);
+        for(auto& point:action->*refs)std::printf(" ref=%.2f,%.2f,%.2f",point.x,point.y,point.z);
+        std::puts("");
+        return true;
+    }
+};
 static void verifyCargoReceipts() {
     std::ifstream in("p2-cargo.txt");auto specs=p2ReadCargo(in);
     require(pc_p2_preview_cargo_count()==int(specs.size()),"cargo registry count");
@@ -60,7 +75,12 @@ static bool cargoCarryFixture(Navi* n) {
     }
     if(frames%300==0){
         std::printf("P2_CARGO_CARRY_PROGRESS x=%.2f y=%.2f z=%.2f strength=%d\n",target->mSRT.t.x,target->mSRT.t.y,target->mSRT.t.z,target->mCarrierCounter);
+        std::printf("P2_CARGO_VELOCITY carry=%.3f,%.3f,%.3f actual=%.3f,%.3f,%.3f volatile=%.3f,%.3f,%.3f ground=%d\n",target->mCarryDirection.x,target->mCarryDirection.y,target->mCarryDirection.z,target->mVelocity.x,target->mVelocity.y,target->mVelocity.z,target->mVolatileVelocity.x,target->mVolatileVelocity.y,target->mVolatileVelocity.z,target->onGround());
+        std::printf("P2_CARGO_PHYSICS fixing=%d fixed=%d centre=%.2f bottom=%.2f dt=%.4f",target->isCreatureFlag(CF_AllowFixPosition),target->isCreatureFlag(CF_IsPositionFixed),target->getCentreSize(),target->getBottomRadius(),gsys->getFrameTime());
+        if(target->mGroundTriangle)std::printf(" normal=%.3f,%.3f,%.3f",target->mGroundTriangle->mTriangle.mNormal.x,target->mGroundTriangle->mTriangle.mNormal.y,target->mGroundTriangle->mTriangle.mNormal.z);
+        std::puts("");
         capture("p2-cargo-progress.ppm");
+        Iterator carriers(pikiMgr);CI_LOOP(carriers){Piki* p=static_cast<Piki*>(*carriers);if(p->isAlive() && p->isStickTo() && p->mActiveAction->mCurrActionIdx==PikiAction::Transport && CargoTransportProbe::print(static_cast<ActTransport*>(p->mActiveAction->getCurrAction())))break;}
     }
     if(!target->isAlive()) {
         require(pc_p2_preview_pokos()==before+value && playerState->getCurrParts()==repairs,"second cargo actual delivery accounting");
