@@ -1,6 +1,7 @@
 // Lifecycle fixture only: synthetic casualty/maturity/conversion and real
 // native restoration, collection hook and transfer writer. Not transport AI.
 #include "pc_p2_cave.h"
+#include "pc_p2_cave_anchor.h"
 #include "GoalItem.h"
 #include <fstream>
 static void caveFixture(Navi* n) {
@@ -26,9 +27,21 @@ static void caveFixture(Navi* n) {
     }
     gameflow.mPauseAll=true;require(!pc_p2_cave_checkpoint(false),"paused cave transitioned");gameflow.mPauseAll=false;
     Suckable* pod=pc_p2_preview_goal();require(pod!=nullptr,"cave Pod missing");
+    P2CaveAnchor anchor;std::ifstream anchorFile("p2-cave-transition.txt");
+    if(anchorFile)require(p2_cave_read_anchor(anchorFile,floor,anchor),"fixture transition anchor");
+    Vector3f destination=anchor.enabled?Vector3f(anchor.x,anchor.y,anchor.z):pod->mSRT.t;
     Vector3f position=n->mSRT.t;
-    n->resetPosition(Vector3f(pod->mSRT.t.x+300,pod->mSRT.t.y,pod->mSRT.t.z));
+    n->resetPosition(Vector3f(destination.x+300,destination.y,destination.z));
     require(!pc_p2_cave_checkpoint(false),"distant cave transitioned");n->resetPosition(position);
+    if(anchor.enabled){
+        n->resetPosition(Vector3f(destination.x,destination.y+60,destination.z));
+        require(!pc_p2_cave_interact(destination.x,destination.y,destination.z),"anchor interacted across vertical layer");
+        require(!pc_p2_cave_checkpoint(false),"anchor checkpoint across vertical layer");
+        n->resetPosition(destination);n->mStateMachine->transit(n,NAVISTATE_Walk);
+        require(!pc_p2_cave_interact(destination.x+300,destination.y,destination.z),"foreign actor requested anchor");
+        require(pc_p2_cave_interact(destination.x,destination.y,destination.z),"anchor interaction rejected");
+        capture("p2-cave-anchor.ppm");
+    }
     if(floor==1){
         require(pikis.size()==20,"first fixture squad");pikis.back()->kill(false);
         pikis[0]->mHappa=Flower;pikis[1]->mHappa=Bud;n->mHealth=C_NAVI_PARM(n,mHealth)*.625f;
@@ -38,7 +51,7 @@ static void caveFixture(Navi* n) {
         for(size_t i=0;i<10;++i)pc_p2_make_purple(pikis[i]);
     }
     require(pc_p2_preview_deliver(pc_p2_preview_treasure()),"cave collection hook failed");
-    n->resetPosition(Vector3f(pod->mSRT.t.x+50,pod->mSRT.t.y,pod->mSRT.t.z));
+    n->resetPosition(destination);
     n->mStateMachine->transit(n,NAVISTATE_Walk);
     require(pc_p2_cave_checkpoint(false),"cave boundary checkpoint failed");
     require(!pc_p2_cave_checkpoint(false),"duplicate cave transition accepted");
