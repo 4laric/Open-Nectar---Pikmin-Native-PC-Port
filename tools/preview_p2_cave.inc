@@ -14,7 +14,7 @@ static void caveFixture(Navi* n) {
         n->mStateMachine->transit(n,NAVISTATE_Walk);
     }
     // Allow the inherited landing effects to clear before inspecting markers.
-    if(++ticks<330)return;
+    if(++ticks<(pc_p2_preview_cargo_count() && !renderOnly?90:330))return;
     if(renderOnly){capture("p2-cave-marker.ppm");std::puts("PASS marker render fixture (synthetic captain position)");std::fflush(stdout);std::_Exit(0);}
     for(int f=0;f<DEMOFLAG_COUNT;++f)playerState->mDemoFlags.setFlagOnly(f);
     std::ifstream entry("p2-cave-entry.txt");std::string version,token;int floor,count;float health;
@@ -59,7 +59,8 @@ static void caveFixture(Navi* n) {
         // Conversion gameplay is tested separately by preview_p2_purple.inc.
         for(size_t i=0;i<10;++i)pc_p2_make_purple(pikis[i]);
     }
-    require(pc_p2_preview_deliver(pc_p2_preview_treasure()),"cave collection hook failed");
+    if(pc_p2_preview_cargo_count())verifyCargoReceipts();
+    else require(pc_p2_preview_deliver(pc_p2_preview_treasure()),"cave collection hook failed");
     n->resetPosition(destination);
     n->mStateMachine->transit(n,NAVISTATE_Walk);
     require(pc_p2_cave_checkpoint(false),"cave boundary checkpoint failed");
