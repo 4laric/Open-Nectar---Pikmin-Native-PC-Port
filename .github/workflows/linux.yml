@@ -50,4 +50,7 @@ jobs:
           ./nectar-launcher --help
           # Resolve with the packaged loader, as the launch wrappers do. Do not
           # inject the bundled libc into the clean distro's own ldd process.
-          ./lib/ld-linux-x86-64.so.2 --library-path ./lib --list ./nectar.real
+          if ./lib/ld-linux-x86-64.so.2 --library-path ./lib --list ./nectar.real | grep 'not found'; then
+            echo 'Unresolved dependencies in the standalone package'
+            exit 1
+          fi
