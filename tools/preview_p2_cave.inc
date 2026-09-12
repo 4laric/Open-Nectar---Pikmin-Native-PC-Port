@@ -6,7 +6,16 @@
 #include <fstream>
 static void caveFixture(Navi* n) {
     static int ticks=0;
-    if(++ticks<90)return;
+    static bool renderOnly=[](){FILE* f=std::fopen("p2-cave-marker-render.txt","r");if(!f)return false;std::fclose(f);return true;}();
+    if(renderOnly && ticks==0){
+        P2CaveAnchor marker;std::ifstream input("p2-cave-transition.txt");
+        require(p2_cave_read_anchor(input,pc_p2_cave_floor(),marker),"marker render config");
+        n->resetPosition(Vector3f(marker.x-60,marker.y,marker.z+60));
+        n->mStateMachine->transit(n,NAVISTATE_Walk);
+    }
+    // Allow the inherited landing effects to clear before inspecting markers.
+    if(++ticks<330)return;
+    if(renderOnly){capture("p2-cave-marker.ppm");std::puts("PASS marker render fixture (synthetic captain position)");std::fflush(stdout);std::_Exit(0);}
     for(int f=0;f<DEMOFLAG_COUNT;++f)playerState->mDemoFlags.setFlagOnly(f);
     std::ifstream entry("p2-cave-entry.txt");std::string version,token;int floor,count;float health;
     require(bool(entry>>version>>token>>floor>>health>>count),"cave fixture input");

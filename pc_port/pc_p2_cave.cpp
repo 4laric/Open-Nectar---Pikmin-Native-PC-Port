@@ -146,9 +146,18 @@ void pc_p2_cave_tick(){
 
 void pc_p2_cave_draw_transition(Graphics& gfx){
     if(!active() || !anchor.enabled || !gfx.mCamera)return;
+    static bool logged=false;
+    if(!logged){std::puts("P2_CAVE_MARKER_DRAW");logged=true;}
+    // Map post-effects may leave an orthographic projection/material active.
+    gfx.setPerspective(gfx.mCamera->mPerspectiveMatrix.mMtx,gfx.mCamera->mFov,
+        gfx.mCamera->mAspectRatio,gfx.mCamera->mNear,gfx.mCamera->mFar,1.f);
+    gfx.useMaterial(nullptr);
+    gfx.setDepth(true);
     // Honest engineering marker, not an imported P2 actor. Ring + down/up arrow.
     // The caller is a world-overlay boundary and resets the matrix for subsequent UI.
     const Colour oldColour=gfx.mPrimaryColour;
+    const Colour oldAux=gfx.mAuxiliaryColour;
+    const int oldBlend=gfx.setCBlending(BLEND_Alpha);
     Texture* oldTexture=gfx.mActiveTexture[0];
     const bool oldLight=gfx.setLighting(false,nullptr);
     const float oldWidth=gfx.setLineWidth(3.f);
@@ -166,5 +175,6 @@ void pc_p2_cave_draw_transition(Graphics& gfx){
     gfx.drawLine(Vector3f(anchor.x,tail,anchor.z),Vector3f(anchor.x,tip,anchor.z));
     gfx.drawLine(Vector3f(anchor.x-18.f,wing,anchor.z),Vector3f(anchor.x,tip,anchor.z));
     gfx.drawLine(Vector3f(anchor.x+18.f,wing,anchor.z),Vector3f(anchor.x,tip,anchor.z));
-    gfx.setLineWidth(oldWidth);gfx.setColour(oldColour,true);gfx.useTexture(oldTexture,0);gfx.setLighting(oldLight,nullptr);
+    gfx.setLineWidth(oldWidth);gfx.setColour(oldColour,true);gfx.mAuxiliaryColour=oldAux;
+    gfx.setCBlending(oldBlend);gfx.useTexture(oldTexture,0);gfx.setLighting(oldLight,nullptr);
 }
