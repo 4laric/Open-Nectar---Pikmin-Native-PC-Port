@@ -15,7 +15,7 @@ static void verifyCargoReceipts() {
         require(actor->mConfig->mCarryMinPikis()==specs[i].weight && actor->mConfig->mCarryMaxPikis()==specs[i].slots,"cargo per-actor weights");
         require(configs.insert(actor->mConfig).second,"cargo config shared between actors");
         require(shapes.insert(pc_p2_preview_cargo_shape(actor)).second && pc_p2_preview_cargo_shape(actor),"cargo model shared/missing");
-        PelletConfig* global=pelletMgr->getConfig(actor->mConfig->mPelletId.mId);
+        PelletConfig* global=pelletMgr->getConfig(actor->mConfig->mModelId.mId);
         require(global && global!=actor->mConfig,"cargo mutates shared global config");
         // Constructor-owned intrusive parameter links must all remain in this clone.
         int nodes=0;for(BaseParm* node=actor->mConfig->mFirstParm;node;node=node->mNext) {
@@ -31,23 +31,32 @@ static void verifyCargoReceipts() {
     require(pc_p2_preview_pokos()==before+value && playerState->getCurrParts()==repairs,"duplicate cargo credit or P1 repairs");
     std::printf("P2_CARGO_FIXTURE_PASS count=%zu added=%d duplicate_credit=0 repairs_unchanged=1 private_configs=1\n",specs.size(),value);
 }
-// Optional independent real transport check for the second floor-1 treasure.
-// Assigns real Pikmin transport AI; no actor positions or receipt hooks changed.
+// Optional independent real transport check for the second floor-1 treasure
+// or sole floor-2 Atlas. Synthetic Purple identity supplies Atlas lifting power.
+// Assigns real transport AI; cargo positions and receipt hooks are unchanged.
 static bool cargoCarryFixture(Navi* n) {
     static bool requested=[](){FILE* f=std::fopen("p2-cargo-carry.txt","r");if(!f)return false;std::fclose(f);return true;}();
     if(!requested)return false;
     static int frames=0,before=0,value=0,repairs=0;static Pellet* target=nullptr;
     ++frames;if(frames<90)return true;
     if(frames==90) {
-        require(pc_p2_preview_cargo_count()>=2,"second cargo missing");target=pc_p2_preview_cargo_at(1);
-        std::ifstream in("p2-cargo.txt");auto specs=p2ReadCargo(in);value=specs[1].value;
+        require(pc_p2_preview_cargo_count()>0,"cargo missing");
+        const int index=pc_p2_preview_cargo_count()>1?1:0;target=pc_p2_preview_cargo_at(index);
+        std::ifstream in("p2-cargo.txt");auto specs=p2ReadCargo(in);value=specs[index].value;
         before=pc_p2_preview_pokos();repairs=playerState->getCurrParts();int count=0;
         Iterator p(pikiMgr);CI_LOOP(p){Piki* v=static_cast<Piki*>(*p);if(!v->isAlive())continue;
+            if(specs[index].weight>20 && count<10)pc_p2_make_purple(v);
             v->mActiveAction->abandon(nullptr);v->mActiveAction->mCurrActionIdx=PikiAction::Transport;
             v->mActiveAction->mChildActions[PikiAction::Transport].initialise(target);v->mMode=PikiMode::TransportMode;++count;
         }
         require(count>=5,"too few carriers for second cargo");
+        // Keep the idle test captain out of the cargo's approach to the Pod.
+        n->resetPosition(Vector3f(240,mapMgr->getMinY(240,210,true),210));
         std::printf("P2_CARGO_CARRY_START generator=%u weight=%d carriers=%d\n",target->mGenerator->_70,target->mConfig->mCarryMinPikis(),count);
+    }
+    if(frames%300==0){
+        std::printf("P2_CARGO_CARRY_PROGRESS x=%.2f y=%.2f z=%.2f strength=%d\n",target->mSRT.t.x,target->mSRT.t.y,target->mSRT.t.z,target->mCarrierCounter);
+        capture("p2-cargo-progress.ppm");
     }
     if(!target->isAlive()) {
         require(pc_p2_preview_pokos()==before+value && playerState->getCurrParts()==repairs,"second cargo actual delivery accounting");
