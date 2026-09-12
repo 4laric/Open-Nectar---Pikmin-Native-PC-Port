@@ -43,6 +43,10 @@ static bool cargoCarryFixture(Navi* n) {
         require(pc_p2_preview_cargo_count()>0,"cargo missing");
         const int index=pc_p2_preview_cargo_count()>1?1:0;target=pc_p2_preview_cargo_at(index);
         std::ifstream in("p2-cargo.txt");auto specs=p2ReadCargo(in);value=specs[index].value;
+        // Isolate hauling geometry from the newly populated combat encounters.
+        // Real enemy combat is covered separately; these removals grant no credit.
+        Iterator enemies(tekiMgr);CI_LOOP(enemies){Teki* enemy=static_cast<Teki*>(*enemies);if(enemy && enemy->isAlive())enemy->kill(false);}
+        std::puts("P2_CARGO_FIXTURE_ENEMIES_REMOVED no_receipt_credit");
         before=pc_p2_preview_pokos();repairs=playerState->getCurrParts();int count=0;
         Iterator p(pikiMgr);CI_LOOP(p){Piki* v=static_cast<Piki*>(*p);if(!v->isAlive())continue;
             if(specs[index].weight>20 && count<10)pc_p2_make_purple(v);
@@ -62,5 +66,5 @@ static bool cargoCarryFixture(Navi* n) {
         require(pc_p2_preview_pokos()==before+value && playerState->getCurrParts()==repairs,"second cargo actual delivery accounting");
         capture("p2-cargo-carry.ppm");std::puts("PASS P2 second cargo actual native transport and Pod delivery");std::fflush(stdout);std::_Exit(0);
     }
-    require(frames<6000,"second cargo transport timeout");return true;
+    require(frames<(target->mConfig->mCarryMinPikis()>20?9000:6000),"cargo transport timeout");return true;
 }

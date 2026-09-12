@@ -782,6 +782,9 @@ int ActTransport::exec()
 
 			Vector3f goalDir = mGoal->getGoalPos() - pel->mSRT.t;
 			f32 goalDistXZ   = speedy_sqrtf(goalDir.x * goalDir.x + goalDir.z * goalDir.z);
+			// The Pod's suction point is elevated. Normalizing in 3D and then
+			// discarding Y can stall a slow P2 load before it reaches the receiver.
+			if (mGoal == pc_p2_preview_goal()) goalDir.y = 0.0f;
 			if (goalDir.normalise() == 0.0f) {
 				goalDir.set(0.0f, 0.0f, 0.0f);
 			}

@@ -6,6 +6,11 @@
 #include <fstream>
 static void caveFixture(Navi* n) {
     static int ticks=0;
+    if(ticks==0 && pc_p2_preview_cargo_count()){
+        // This fixture verifies checkpoint restoration, not random live combat.
+        Iterator enemies(tekiMgr);CI_LOOP(enemies){Teki* e=static_cast<Teki*>(*enemies);if(e && e->isAlive())e->kill(false);}
+        std::puts("P2_CAVE_FIXTURE_ENEMIES_REMOVED no_receipt_credit");
+    }
     static bool renderOnly=[](){FILE* f=std::fopen("p2-cave-marker-render.txt","r");if(!f)return false;std::fclose(f);return true;}();
     if(renderOnly && ticks==0){
         P2CaveAnchor marker;std::ifstream input("p2-cave-transition.txt");
