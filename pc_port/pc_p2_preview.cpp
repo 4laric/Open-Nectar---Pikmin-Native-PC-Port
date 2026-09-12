@@ -9,6 +9,7 @@
 #include "NaviMgr.h"
 #include "Navi.h"
 #include "Texture.h"
+#include "system.h"
 #include <cstdio>
 #include <cstdlib>
 
@@ -33,12 +34,18 @@ void pc_p2_preview_setup() {
         }
     }
     if (!previewTreasure) { std::fprintf(stderr,"P2 preview: treasure generator missing\n"); std::abort(); }
+    const int previousHeap = gsys->setHeap(SYSHEAP_App);
+    std::printf("[Pikipelago] P2_PREVIEW_HEAP previous=%d map_vertices=%p movie_range=%p..%p\n", previousHeap,
+        static_cast<void*>(mapMgr->mMapModel->mVertexList),
+        reinterpret_cast<void*>(gsys->mHeaps[SYSHEAP_Movie].mInitialStackTop),
+        reinterpret_cast<void*>(gsys->mHeaps[SYSHEAP_Movie].mInitialStackLimit));
     previewShape = gameflow.loadShape("courses/pikmin2room/treasure.mod", true);
     if (!previewShape) { std::fprintf(stderr,"P2 preview: converted treasure missing\n"); std::abort(); }
     // Stage finalSetup can run during rendering, where attachObjs is forbidden.
     // Upload only this late-loaded static model's textures through the PC texture API.
     for (int i=0;i<previewShape->mTexAttrCount;++i)
         if (previewShape->mTexAttrList[i].mTexture) previewShape->mTexAttrList[i].mTexture->attach();
+    gsys->setHeap(previousHeap);
     const float points[][2]={{-85,0},{-175,-100},{185,-180},{-220,-180}};
     for (const auto& point : points)
         std::printf("[Pikipelago] P2_ROOM_GROUND x=%.1f z=%.1f y=%.3f\n",point[0],point[1],mapMgr->getMinY(point[0],point[1],true));
