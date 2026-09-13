@@ -10,6 +10,10 @@ class Shape;
 class Navi;
 class CollPart;
 class BTeki;
+class P2DemonHost;
+void pc_p2_demon_manager_reset();
+void pc_p2_demon_manager_forget(BTeki* actor);
+bool pc_p2_demon_manager_bind(P2DemonHost* host, BTeki* actor, unsigned generatorId, int tekiType);
 
 // Private host for the staged P2 Demon model. It is deliberately not registered
 // as a P1 teki or a replacement for Sarai's full FSM.

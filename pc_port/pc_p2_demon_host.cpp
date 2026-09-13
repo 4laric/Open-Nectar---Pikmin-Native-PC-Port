@@ -11,8 +11,29 @@
 #include "sysNew.h"
 #include <cmath>
 #include <utility>
+#include <map>
 
-namespace { std::uint64_t nextHostToken = 0; }
+namespace { std::uint64_t nextHostToken = 0; std::map<BTeki*, P2DemonHost*> managerBindings; }
+
+void pc_p2_demon_manager_reset()
+{
+    for (auto& entry : managerBindings) entry.second->unbindNativeActor(entry.first);
+    managerBindings.clear();
+}
+void pc_p2_demon_manager_forget(BTeki* actor)
+{
+    if (!actor) return;
+    auto it = managerBindings.find(actor);
+    if (it != managerBindings.end()) { it->second->unbindNativeActor(actor); managerBindings.erase(it); }
+}
+bool pc_p2_demon_manager_bind(P2DemonHost* host, BTeki* actor, unsigned generatorId, int tekiType)
+{
+    if (!host || !actor || !host->bindNativeActor(actor, generatorId, tekiType)) return false;
+    auto it = managerBindings.find(actor);
+    if (it != managerBindings.end() && it->second != host) { host->unbindNativeActor(actor); return false; }
+    managerBindings[actor] = host;
+    return true;
+}
 
 P2DemonHost::P2DemonHost()
     : Creature(nullptr)
@@ -151,7 +172,7 @@ void P2DemonHost::update()
     mSRT.t.z += mTargetVelocity.z * dt;
     updateMouths();
 }
-void P2DemonHost::sceneExit() { mClockMode = 0; mCatchElapsedFrames = 0; mAttackPlayer.cancel(); pc_demon_owner_lost(mOwnerToken); mOccupied = 0; mAttackActive = false; mBoundActor = nullptr; }
+void P2DemonHost::sceneExit() { mClockMode = 0; mCatchElapsedFrames = 0; mAttackPlayer.cancel(); pc_demon_owner_lost(mOwnerToken); mOccupied = 0; mAttackActive = false; if (mBoundActor) pc_p2_demon_manager_forget(mBoundActor); mBoundActor = nullptr; }
 void P2DemonHost::doKill() { sceneExit(); }
 
 void P2DemonHost::refresh(Graphics& gfx)
