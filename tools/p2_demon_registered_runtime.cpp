@@ -42,6 +42,7 @@ public:
                 require(n->getCurrState()->getID()==NAVISTATE_Flick,"ordinary Flick registered");
             } else {
                 n->resetPosition(Vector3f(0,mapMgr->getMinY(0,100,true)+120,100));
+                std::printf("DEMON_ADMISSION state=%d alive=%d flags=%x rope=%d stick=%d limit=%d index36=%d count=%d\n",n->getCurrState()->getID(),int(n->isAlive()),n->mCreatureFlags,int(n->mRope!=nullptr),int(n->isStickTo()),n->mStateMachine->mStateLimit,n->mStateMachine->mStateIndexes[36],n->mStateMachine->mStateCount);
                 require(pc_demon_drop_begin(n,1,is("fatal")?200:10,200),"admission");
                 require(n->getCurrState()->getID()==36,"dedicated state");
                 require(n->mVelocity.y==-400&&n->mTargetVelocity.y==-200,"entry velocities");
