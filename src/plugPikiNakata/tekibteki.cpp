@@ -1,3 +1,4 @@
+#include "pc_p2_hanachirashi.h"
 #include "pc_p2_catfish.h"
 #include "pc_p2_mar.h"
 #include "pc_p2_tadpole.h"
@@ -474,8 +475,10 @@ void BTeki::update()
 	pc_p2_qurione_update(this);
 	pc_p2_elecbug_update(this);
 	pc_p2_tamago_update(this);
+	pc_p2_hanachirashi_update(this);
 	pc_p2_catfish_update(this);
 	pc_p2_mar_update(this);
+	pc_p2_hanachirashi_update(this);
 	pc_p2_tadpole_update(this);
 	pc_p2_hana_update(this);
 	pc_p2_imomushi_update(this);

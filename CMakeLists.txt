@@ -215,6 +215,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_tadpole.cpp
     pc_port/pc_p2_mar.cpp
     pc_port/pc_p2_catfish.cpp
+    pc_port/pc_p2_hanachirashi.cpp
     pc_port/pc_p2_batch2.cpp
     pc_port/pc_p2_batch3.cpp
     pc_port/pc_p2_snagret_fsm.cpp

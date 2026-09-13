@@ -1,3 +1,4 @@
+#include "pc_p2_hanachirashi.h"
 #include "pc_p2_catfish.h"
 #include "pc_p2_mar.h"
 #include "pc_p2_tadpole.h"
@@ -430,7 +431,8 @@ public:
 		const f32 before_tadpole=pc_p2_hana_param_f(this,idx,before_hana);
 		const f32 before_mar=pc_p2_tadpole_param_f(this,idx,before_tadpole);
 		const f32 before_catfish=pc_p2_mar_param_f(this,idx,before_mar);
-		const f32 qurione=pc_p2_catfish_param_f(this,idx,before_catfish);
+		const f32 before_hanachirashi=pc_p2_catfish_param_f(this,idx,before_catfish);
+		const f32 qurione=pc_p2_hanachirashi_param_f(this,idx,before_hanachirashi);
 		if(idx==TPF_Life)return pc_p2_dwarf_orange_max_health(this,pc_p2_kochappy_max_health(this,pc_p2_snow_max_health(this,qurione)));
 		return qurione;
 #endif
