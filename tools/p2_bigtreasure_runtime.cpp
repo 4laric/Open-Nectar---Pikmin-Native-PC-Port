@@ -14,6 +14,7 @@
 #include "Node.h"
 #include "Graphics.h"
 #include "MapMgr.h"
+#include "Matrix4f.h"
 #include "Navi.h"
 #include "NaviMgr.h"
 #include "MoviePlayer.h"
@@ -28,9 +29,12 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <vector>
 
 #include "pc_p2_bigtreasure_host.h"
 #include "pc_p2_bigtreasure_map_trace.h"
+#include "pc_p2_bigtreasure_visual.h"
 
 // Private one-TU fixture build snapshots these lane implementations as
 // dependencies (same pattern as the Groink volley fixture).
@@ -38,6 +42,8 @@
 #include "../pc_port/pc_p2_bigtreasure_attacks.cpp"
 #include "../pc_port/pc_p2_bigtreasure_host.cpp"
 #include "../pc_port/pc_p2_bigtreasure_map_trace.cpp"
+#include "../pc_port/pc_p2_bigtreasure_motion.cpp"
+#include "../pc_port/pc_p2_bigtreasure_visual.cpp"
 
 namespace {
 constexpr float kDt = 1.0f / 30.0f;
@@ -51,6 +57,34 @@ void require(bool value, const char* message)
     }
 }
 
+void capture(const char* path)
+{
+    auto bind = reinterpret_cast<PFNGLBINDFRAMEBUFFERPROC>(SDL_GL_GetProcAddress("glBindFramebuffer"));
+    GLint previous = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous);
+    bind(GL_FRAMEBUFFER, 0);
+    int w = 0, h = 0;
+    SDL_GL_GetDrawableSize(SDL_GL_GetCurrentWindow(), &w, &h);
+    std::vector<unsigned char> pixels(size_t(w) * size_t(h) * 3);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadBuffer(GL_BACK);
+    glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+    bind(GL_FRAMEBUFFER, previous);
+    require(glGetError() == GL_NO_ERROR, "capture GL error");
+    bool nonblack = false;
+    for (unsigned char v : pixels) {
+        nonblack |= v > 8;
+    }
+    require(nonblack, "empty capture");
+    FILE* file = std::fopen(path, "wb");
+    require(file != nullptr, "capture file");
+    std::fprintf(file, "P6\n%d %d\n255\n", w, h);
+    for (int y = h - 1; y >= 0; --y) {
+        std::fwrite(pixels.data() + size_t(y) * w * 3, 1, size_t(w) * 3, file);
+    }
+    std::fclose(file);
+}
+
 struct WallProbe {
     bool valid = false;
     P2BigTreasureVec3 center{}, velocity{};
@@ -58,7 +92,11 @@ struct WallProbe {
 
 class BigTreasureApp final : public PlugPikiApp {
     int frames = 0;
-    bool setup = false;
+    int phase = 0; // 0 probes pending, 1 wait1 playback, 2 dead playback, 3 done
+    int visualFrames = 0;
+    int wait1Events = 0;
+    bool setup = false, wait1Captured = false, deadCaptured = false;
+    float ground = 0.0f;
     P2BigTreasureMapTrace trace;
     P2BigTreasureHostSeam seam;
     WallProbe wall;
@@ -67,7 +105,7 @@ public:
     int idle() override
     {
         int result = PlugPikiApp::idle();
-        require(++frames < 1800, "timeout");
+        require(++frames < 3600, "timeout");
         if (gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive) {
             gameflow.mMoviePlayer->requestSkip();
             return result;
@@ -87,20 +125,55 @@ public:
                       "captures=5 no_ai=1 no_damage=1");
             setup = true;
         }
-        runProbes();
-        runElecProbe();
-        runWaterProbe();
-        runHostSeam();
-        std::puts("PASS BIGTREASURE_RUNTIME");
-        std::fflush(stdout);
-        std::_Exit(0);
+        switch (phase) {
+        case 0:
+            runProbes();
+            runElecProbe();
+            runWaterProbe();
+            runHostSeam();
+            startVisual();
+            phase = 1;
+            break;
+        case 1:
+            stepWait1();
+            break;
+        case 2:
+            stepDead();
+            break;
+        default:
+            break;
+        }
+        return result;
+    }
+
+    void draw(Graphics& gfx) override
+    {
+        PlugPikiApp::draw(gfx);
+        if (phase == 0) {
+            return;
+        }
+        Matrix4f owner;
+        owner.makeSRT(Vector3f(1.0f, 1.0f, 1.0f), Vector3f(0.0f, 0.0f, 0.0f),
+                      Vector3f(0.0f, ground, 0.0f));
+        pc_p2_bigtreasure_visual_draw(gfx, owner);
+        if (phase == 1 && visualFrames == 100 && !wait1Captured) {
+            capture("bigtreasure-wait1.ppm");
+            wait1Captured = true;
+        }
+        if (phase == 3 && !deadCaptured) {
+            capture("bigtreasure-dead.ppm");
+            deadCaptured = true;
+            std::puts("PASS BIGTREASURE_RUNTIME");
+            std::fflush(stdout);
+            std::_Exit(0);
+        }
     }
 
 private:
     void runProbes()
     {
         require(mapMgr && mapMgr->mMapModel, "map unavailable");
-        const float ground = mapMgr->getMinY(0, 0, false);
+        ground = mapMgr->getMinY(0, 0, false);
         require(std::isfinite(ground), "center ground unavailable");
         P2BigTreasureTraceResult result{};
         // Flat-floor probe: radius-20 sphere center must rest at ground+20.
@@ -259,6 +332,74 @@ private:
         std::printf("P2_BIGTREASURE_HOST_SEAM_PASS ticks=%llu attacks=%llu events=%llu\n",
                     (unsigned long long)seam.ticks, (unsigned long long)seam.attacksStarted,
                     (unsigned long long)seam.defeatEvents);
+    }
+
+    void startVisual()
+    {
+        require(pc_p2_bigtreasure_visual_setup("p2-bigtreasure-visual.txt"), "visual setup");
+        require(pc_p2_bigtreasure_visual_pellet_count() == 4, "converted pellet count");
+        require(pc_p2_bigtreasure_visual_debug_count() == 1, "loozy debug marker count");
+        require(pc_p2_bigtreasure_visual_clip("wait1"), "wait1 clip");
+        visualFrames = 0;
+    }
+
+    void stepWait1()
+    {
+        // wait1: 90-frame loop with authored (0,0)/(89,1) markers; advance
+        // one source frame per idle frame for 200 frames (two full loops).
+        require(pc_p2_bigtreasure_visual_update(1.0f) >= 0, "wait1 update");
+        ++visualFrames;
+        if (visualFrames < 200) {
+            return;
+        }
+        int count = 0;
+        const P2BigTreasureVisualEvent* events = pc_p2_bigtreasure_visual_events(&count);
+        int loops = 0;
+        for (int i = 0; i < count; ++i) {
+            require(std::strcmp(events[i].clip, "wait1") == 0, "wait1 event clip");
+            require((events[i].frame == 0 && events[i].type == 0)
+                        || (events[i].frame == 89 && events[i].type == 1),
+                    "wait1 authored event");
+            loops += events[i].type == 1;
+        }
+        require(loops >= 2, "wait1 loop count");
+        wait1Events = count;
+        std::printf("P2_BIGTREASURE_VISUAL_WAIT1_PASS frames=%d events=%d loops=%d pose=%d\n",
+                    visualFrames, count, loops, pc_p2_bigtreasure_visual_pose_index());
+        require(pc_p2_bigtreasure_visual_clip("dead"), "dead clip");
+        phase        = 2;
+        visualFrames = 0;
+    }
+
+    void stepDead()
+    {
+        // dead: 332-frame one-shot; all 11 authored key events fire in
+        // order, including the KEYEVENT_100 throwupItem anchor at frame 320,
+        // then the implicit type-1000 completion.
+        require(pc_p2_bigtreasure_visual_update(1.0f) >= 0, "dead update");
+        ++visualFrames;
+        if (!pc_p2_bigtreasure_visual_completed()) {
+            require(visualFrames < 400, "dead never completed");
+            return;
+        }
+        static const int kExpected[][2] = {
+            { 60, 2 }, { 100, 3 }, { 125, 4 }, { 150, 5 }, { 175, 6 }, { 200, 7 },
+            { 290, 8 }, { 295, 9 }, { 300, 10 }, { 305, 11 }, { 320, 100 },
+        };
+        int count = 0;
+        const P2BigTreasureVisualEvent* events = pc_p2_bigtreasure_visual_events(&count);
+        const int base = wait1Events;
+        require(count - base == 12, "dead event count");
+        for (int i = 0; i < 11; ++i) {
+            const P2BigTreasureVisualEvent& event = events[base + i];
+            require(std::strcmp(event.clip, "dead") == 0, "dead event clip");
+            require(event.frame == kExpected[i][0] && event.type == kExpected[i][1],
+                    "dead authored event order");
+        }
+        require(events[count - 1].type == 1000, "dead implicit completion");
+        std::printf("P2_BIGTREASURE_VISUAL_DEAD_PASS frames=%d events=%d keyevent100=%d\n",
+                    visualFrames, count - base, events[base + 10].frame);
+        phase = 3;
     }
 };
 } // namespace

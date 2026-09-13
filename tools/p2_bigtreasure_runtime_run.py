@@ -94,6 +94,28 @@ def verify_log(text):
                      r"events=(\d+)\s*$", text, flags=re.MULTILINE)
     if seam and int(seam.group(3)) != 5:
         errors.append(f"seam defeat did not release 5 captures: {seam.groups()}")
+    visual = re.search(r"^P2_BIGTREASURE_VISUAL_READY\s+clips=(\d+)\s+pellets=(\d+)\s+"
+                       r"pellet_debug=(\d+)\s*$", text, flags=re.MULTILINE)
+    if not visual:
+        errors.append("missing visual READY marker")
+    elif tuple(map(int, visual.groups()[1:])) != (4, 1):
+        errors.append(f"unexpected visual bank accounting: {visual.groups()}")
+    draw = re.search(r"^P2_BIGTREASURE_VISUAL_DRAW\s+clip=(\w+)\s+pose=(\d+)\s+pellets=(\d+)\s+"
+                     r"pellet_debug=(\d+)\s*$", text, flags=re.MULTILINE)
+    if not draw:
+        errors.append("missing visual DRAW marker")
+    wait1 = re.search(r"^P2_BIGTREASURE_VISUAL_WAIT1_PASS\s+frames=(\d+)\s+events=(\d+)\s+"
+                      r"loops=(\d+)\s+pose=(\d+)\s*$", text, flags=re.MULTILINE)
+    if not wait1:
+        errors.append("missing wait1 playback marker")
+    elif int(wait1.group(3)) < 2:
+        errors.append(f"wait1 did not loop: {wait1.groups()}")
+    dead = re.search(r"^P2_BIGTREASURE_VISUAL_DEAD_PASS\s+frames=(\d+)\s+events=(\d+)\s+"
+                     r"keyevent100=(\d+)\s*$", text, flags=re.MULTILINE)
+    if not dead:
+        errors.append("missing dead playback marker")
+    elif int(dead.group(2)) != 12 or int(dead.group(3)) != 320:
+        errors.append(f"dead playback did not fire all authored events: {dead.groups()}")
     if "PASS BIGTREASURE_RUNTIME" not in text:
         errors.append("missing runtime PASS marker")
     return errors
@@ -108,6 +130,8 @@ def main():
                         help="Converted room directory accepted by preview.prepare")
     parser.add_argument("--stage", type=Path, required=True,
                         help="BigTreasure stage containing p2-bigtreasure-host.txt")
+    parser.add_argument("--visual-stage", type=Path, required=True,
+                        help="Visual stage from pikmin2_bigtreasure_stage (profile, events, mods)")
     parser.add_argument("--fixture", type=Path, required=True,
                         help="Built fixture directory containing fixture.exe and provenance.json")
     parser.add_argument("--output", type=Path, required=True,
@@ -122,6 +146,7 @@ def main():
         assets, room, stage, fixture, output = (args.assets.resolve(), args.room.resolve(),
                                                  args.stage.resolve(), args.fixture.resolve(),
                                                  args.output.resolve())
+        visual_stage = args.visual_stage.resolve()
         provenance_path, provenance, executable, executable_hash = fixture_provenance(fixture)
         prepare = load_preview_prepare(root)
         run = prepare(assets, room, output)
@@ -129,6 +154,28 @@ def main():
         profile_source = stage / "p2-bigtreasure-host.txt"
         profile_target = run / "p2-bigtreasure-host.txt"
         copy_new(profile_source, profile_target)
+        # Visual stage: profile + event table at the run root, converted mods
+        # under the overlay's courses/pikmin2room/ (bounded, hash-recorded).
+        staged = {}
+        manifest = json.loads((visual_stage / "stage.json").read_text(encoding="utf-8"))
+        expected_mods = int(manifest["poses"]) + int(manifest["pellets_converted"])
+        stage_files = [visual_stage / "p2-bigtreasure-visual.txt",
+                       visual_stage / "p2_bigtreasure_events.txt"]
+        stage_files += sorted((visual_stage / "assets" / "dataDir" / "courses" / "pikmin2room").glob("*.mod"))
+        if len(stage_files) != 2 + expected_mods:
+            raise ValueError(f"unexpected visual stage file count: {len(stage_files)}")
+        total = 0
+        for source in stage_files:
+            total += source.stat().st_size
+            if total > 96 * 1024 * 1024:
+                raise ValueError("visual stage byte budget exceeded")
+            if source.suffix == ".mod":
+                target = run / "assets" / "dataDir" / "courses" / "pikmin2room" / source.name
+            else:
+                target = run / source.name
+            copy_new(source, target)
+            staged[source.name] = sha256(target)
+        record["visual_stage_files"] = len(staged)
         record["fixture"] = {"provenance": file_record(provenance_path),
                              "provenance_status": provenance.get("status"),
                              "executable": {"path": str(executable), "sha256": executable_hash}}
@@ -149,6 +196,16 @@ def main():
                                 "stderr": file_record(run / "stderr.log")}
         errors = verify_log(result.stdout + "\n" + result.stderr)
         record["verification"] = {"errors": errors}
+        captures = {}
+        for name in ("bigtreasure-wait1.ppm", "bigtreasure-dead.ppm"):
+            path = run / name
+            if not path.is_file():
+                errors.append(f"missing capture: {name}")
+            elif path.stat().st_size < 100000:
+                errors.append(f"trivial capture: {name}")
+            else:
+                captures[name] = file_record(path)
+        record["captures"] = captures
         if result.returncode != 0:
             errors.append(f"fixture exit code {result.returncode}")
         record["errors"].extend(errors)
