@@ -23,6 +23,7 @@
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_armor.h"
 #include "pc_p2_elecbug.h"
+#include "pc_p2_tamago.h"
 #include "pc_p2_batch3.h"
 #include "pc_p2_long_legs.h"
 #include "pc_p2_projectiles.h"
@@ -238,6 +239,7 @@ void pc_p2_preview_setup() {
     pc_p2_sokkuri_setup();
     pc_p2_armor_setup();
     pc_p2_elecbug_setup();
+    pc_p2_tamago_setup();
     pc_p2_batch3_setup();
     pc_p2_long_legs_setup();
     pc_p2_projectiles_setup();
