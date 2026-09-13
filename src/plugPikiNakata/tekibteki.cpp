@@ -1,3 +1,4 @@
+#include "pc_p2_hana.h"
 #include "pc_p2_kurage_teki.h"
 #include "pc_p2_teki_lifetime.h"
 #include "pc_p2_onikurage_teki.h"
@@ -470,6 +471,7 @@ void BTeki::update()
 	pc_p2_qurione_update(this);
 	pc_p2_elecbug_update(this);
 	pc_p2_tamago_update(this);
+	pc_p2_hana_update(this);
 	pc_p2_imomushi_update(this);
 #endif
 	if (mDeadState == 0) {

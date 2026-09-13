@@ -211,6 +211,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_elecbug.cpp
     pc_port/pc_p2_tamago.cpp
     pc_port/pc_p2_imomushi.cpp
+    pc_port/pc_p2_hana.cpp
     pc_port/pc_p2_batch2.cpp
     pc_port/pc_p2_batch3.cpp
     pc_port/pc_p2_snagret_fsm.cpp
