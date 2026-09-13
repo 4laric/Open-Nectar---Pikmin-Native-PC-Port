@@ -9,6 +9,7 @@ class Graphics;
 class Shape;
 class Navi;
 class CollPart;
+class BTeki;
 
 // Private host for the staged P2 Demon model. It is deliberately not registered
 // as a P1 teki or a replacement for Sarai's full FSM.
@@ -34,6 +35,9 @@ public:
     bool beginCatchFly(const p2retail::Motion& motion);
     bool selectCatchFlyTarget(const Vector3f& home, float radius, float angle);
     bool selectCatchFlyTargetSeeded(const Vector3f& home, float radius, std::uint32_t seed);
+    bool bindNativeActor(BTeki* actor, unsigned generatorId, int tekiType);
+    void unbindNativeActor(BTeki* actor);
+    BTeki* boundNativeActor() const { return mBoundActor; }
     P2DemonAttackDecision tickCatchFly(Navi* target, float sourceFrames, p2demon::CatchFlyInput input);
     bool beginFallMeck(const p2retail::Motion& motion);
     P2DemonAttackDecision tickFallMeck(Navi* target, float sourceFrames, float damage, float speed);
@@ -72,6 +76,7 @@ private:
     bool mClockReleased = false;
     float mFacingRadians = 0.0f;
     p2demon::TargetPoint mCatchTarget;
+    BTeki* mBoundActor = nullptr;
     unsigned mOccupied;
     std::uint64_t mOwnerToken;
     void updateMouths();

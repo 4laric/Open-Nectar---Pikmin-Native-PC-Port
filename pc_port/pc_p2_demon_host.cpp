@@ -5,6 +5,8 @@
 #include "Shape.h"
 #include "Graphics.h"
 #include "Texture.h"
+#include "teki.h"
+#include "Generator.h"
 #include "gameflow.h"
 #include "sysNew.h"
 #include <cmath>
@@ -149,7 +151,7 @@ void P2DemonHost::update()
     mSRT.t.z += mTargetVelocity.z * dt;
     updateMouths();
 }
-void P2DemonHost::sceneExit() { mClockMode = 0; mCatchElapsedFrames = 0; mAttackPlayer.cancel(); pc_demon_owner_lost(mOwnerToken); mOccupied = 0; mAttackActive = false; }
+void P2DemonHost::sceneExit() { mClockMode = 0; mCatchElapsedFrames = 0; mAttackPlayer.cancel(); pc_demon_owner_lost(mOwnerToken); mOccupied = 0; mAttackActive = false; mBoundActor = nullptr; }
 void P2DemonHost::doKill() { sceneExit(); }
 
 void P2DemonHost::refresh(Graphics& gfx)
@@ -268,6 +270,20 @@ bool P2DemonHost::selectCatchFlyTargetSeeded(const Vector3f& home, float radius,
 {
     mCatchTarget = p2demon::selectTargetSeeded(home.x, home.y, home.z, radius, seed);
     return mCatchTarget.valid;
+}
+
+bool P2DemonHost::bindNativeActor(BTeki* actor, unsigned generatorId, int tekiType)
+{
+    if (!actor || !actor->mGenerator || actor->mGenerator->_70 != generatorId || actor->mTekiType != tekiType)
+        return false;
+    if (mBoundActor && mBoundActor != actor) return false;
+    mBoundActor = actor;
+    return true;
+}
+
+void P2DemonHost::unbindNativeActor(BTeki* actor)
+{
+    if (!actor || mBoundActor == actor) mBoundActor = nullptr;
 }
 
 P2DemonAttackDecision P2DemonHost::tickCatchFly(Navi* target, float delta, p2demon::CatchFlyInput input)
