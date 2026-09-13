@@ -305,3 +305,13 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
 bool pc_p2_batch2_any_drawn() {
     return logged[0] || logged[1];
 }
+
+// Fixture observability (#397): behavior-neutral read-only accessors so the
+// lifecycle fixture can prove pc_p2_batch2_forget() clears a stale registration.
+unsigned long pc_p2_batch2_count() {
+    return (unsigned long)actors.size();
+}
+
+bool pc_p2_batch2_registered(BTeki* actor) {
+    return actors.count(actor) != 0;
+}
