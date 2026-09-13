@@ -16,6 +16,9 @@ static p2retail::Motion motion(const char* name, int duration,
 
 int main()
 {
+    const auto selected = p2demon::selectTarget(2, 3, 4, 10, 1.5707963f);
+    assert(selected.valid && selected.x > 11.9f && selected.y == 3.0f && selected.z > 3.9f && selected.z < 4.1f);
+    assert(!p2demon::selectTarget(0, 0, 0, -1, 0).valid);
     p2demon::CatchFlyInput input{0, 10, 0, 40, 10, 0, 0, 0, 20, 25,
         1, 0, 10, 0, 0.4f, 10.0f, 0, p2demon::HeightNext::Fall, true};
     auto pursuit = p2demon::catchFly(input);

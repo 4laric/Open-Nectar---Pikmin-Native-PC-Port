@@ -7,6 +7,18 @@
 // remain owned by the native actor; this only exposes the source decision order.
 namespace p2demon {
 using HeightNext = P2DemonHeightNext;
+struct TargetPoint { float x=0, y=0, z=0; bool valid=false; };
+inline TargetPoint selectTarget(float homeX, float homeY, float homeZ, float radius, float angle)
+{
+    TargetPoint out;
+    if (!std::isfinite(homeX) || !std::isfinite(homeY) || !std::isfinite(homeZ) ||
+        !std::isfinite(radius) || radius < 0 || !std::isfinite(angle)) return out;
+    out.x = homeX + radius * std::sin(angle);
+    out.y = homeY;
+    out.z = homeZ + radius * std::cos(angle);
+    out.valid = std::isfinite(out.x) && std::isfinite(out.y) && std::isfinite(out.z);
+    return out;
+}
 struct CatchFlyInput {
     float x, y, z;
     float targetX, targetY, targetZ;

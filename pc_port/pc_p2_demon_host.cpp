@@ -258,6 +258,12 @@ bool P2DemonHost::beginCatchFly(const p2retail::Motion& motion)
     return true;
 }
 
+bool P2DemonHost::selectCatchFlyTarget(const Vector3f& home, float radius, float angle)
+{
+    mCatchTarget = p2demon::selectTarget(home.x, home.y, home.z, radius, angle);
+    return mCatchTarget.valid;
+}
+
 P2DemonAttackDecision P2DemonHost::tickCatchFly(Navi* target, float delta, p2demon::CatchFlyInput input)
 {
     P2DemonAttackDecision result;
@@ -268,6 +274,11 @@ P2DemonAttackDecision P2DemonHost::tickCatchFly(Navi* target, float delta, p2dem
     input.y = mSRT.t.y;
     input.z = mSRT.t.z;
     input.elapsedSeconds = mCatchElapsedFrames / 30.0f;
+    if (mCatchTarget.valid) {
+        input.targetX = mCatchTarget.x;
+        input.targetY = mCatchTarget.y;
+        input.targetZ = mCatchTarget.z;
+    }
     input.targetAttached = mOccupied != 0 && target && pc_demon_owned_by(target, this);
     input.faceDirection = mFacingRadians;
     const auto movement = p2demon::catchFly(input);

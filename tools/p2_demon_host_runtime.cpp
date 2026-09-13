@@ -143,6 +143,10 @@ public:
                     "timed attack reaches occupied CatchFly");
                 require(host.switchPoseMeshes(catchProfilePath.c_str()), "switch CatchFly pose bank");
                 require(host.beginCatchFly(catchFlyMotion), "begin CatchFly clock");
+                const bool pursuitTarget = !std::strcmp(mode, "timed_pursuit");
+                const bool timeoutTarget = !std::strcmp(mode, "timed_timeout");
+                const float targetRadius = timeoutTarget ? 10000.0f : (pursuitTarget ? 40.0f : 0.0f);
+                require(host.selectCatchFlyTarget(Vector3f(0, 10, 0), targetRadius, 1.5707963f), "select CatchFly target");
                 phase=5;
             }
         } else if (phase == 5) {
