@@ -15,6 +15,8 @@
 #include "settings/pc_settings.h"
 #include "settings/pc_settings_p2d.h"
 #include "Interactions.h"
+#include "GameCoreSection.h"
+#include "Section.h"
 #include "pc_p2_demon_drop_state.h"
 #include <cstdio>
 #include <cstdlib>
@@ -22,6 +24,12 @@
 #include <cmath>
 static const char* mode="positive";
 static void require(bool b,const char* s) { if(!b){std::printf("FAIL DEMON_REGISTERED %s\n",s);std::fflush(stdout);std::_Exit(1);} }
+static GameCoreSection* findCore(CoreNode* node,int depth=0) {
+    if(!node||depth>20) return nullptr;
+    if(auto* core=dynamic_cast<GameCoreSection*>(node)) return core;
+    for(auto* c=node->Child();c;c=c->Next()) if(auto* core=findCore(c,depth+1)) return core;
+    return nullptr;
+}
 static bool is(const char* s){return std::strcmp(mode,s)==0;}
 class RegisteredApp final : public PlugPikiApp {
     int frames=0,ticks=0,stage=0,wait=0;
@@ -76,7 +84,38 @@ public:
             }
             stage=1; return r;
         }
-        auto p=pc_demon_drop_phase(n);
+                auto p=pc_demon_drop_phase(n);
+        if(is("stage_exit")) {
+            auto* listener=n->mNaviAnimMgr.getUpperAnimator().mListener;
+            auto* core=findCore(gameflow.mGameSection);require(core!=nullptr,"production core node");
+            core->exitStage(); require(naviMgr==nullptr,"production manager invalidation");
+            PaniAnimKeyEvent stale(KEY_Finished);listener->animationKeyUpdated(stale);
+            require(n->mHealth==hp&&!pc_demon_drop_begin(n,2,10,200),"retired state re-admission");
+            std::puts("PASS DEMON_REGISTERED mode=stage_exit actual_exitStage=1 synthetic_obsolete_listener=1 heap_disposal_untested=1");
+            std::fflush(stdout);std::_Exit(0);
+        }
+        if(std::strncmp(mode,"handoff_",8)==0) {
+            if(!interrupted) {
+                if(is("handoff_flick")) {
+                    InteractFlick flick(n,42,0,0);require(n->stimulate(flick),"incoming Flick receiver");
+                    require(n->mFlickIntensity==42,"Flick intensity erased");
+                } else if(is("handoff_geyzer")) {
+                    InteractGeyzer geyzer(n,Vector3f(90,0,120));require(n->stimulate(geyzer),"incoming Geyzer receiver");
+                    auto* state=static_cast<NaviGeyzerState*>(n->getCurrState());
+                    require(state->mLaunchTargetPos.x==90&&state->mLaunchTargetPos.z==120,"Geyzer payload erased");
+                } else {
+                    int next=is("handoff_bury")?NAVISTATE_Bury:is("handoff_pressed")?NAVISTATE_Pressed:NAVISTATE_Walk;
+                    n->mStateMachine->transit(n,next);
+                }
+                require(n->mVelocity.length()==0&&n->mTargetVelocity.length()==0&&n->mVolatileVelocity.length()==0,"handoff residual drop");
+                require(pc_demon_drop_phase(n)==P2DemonDropPhase::Idle,"handoff pending policy");
+                interrupted=true;wait=0;return r;
+            }
+            require(n->mHealth==hp&&n->getCurrState()->getID()!=36,"handoff late damage");
+            if(++wait==1&&is("handoff_geyzer"))require(n->mTargetVelocity.y>0,"Geyzer new impulse lost");
+            if(wait>=30){std::printf("PASS DEMON_REGISTERED mode=%s health=%.3f\n",mode,n->mHealth);std::fflush(stdout);std::_Exit(0);}
+            return r;
+        }
         if(p==P2DemonDropPhase::Knockdown||p==P2DemonDropPhase::Lay||p==P2DemonDropPhase::GetUp) {
             sawKnockdown=true;
             require(n->mVelocity.length()<.001f&&n->mTargetVelocity.length()<.001f&&n->mVolatileVelocity.length()<.001f,"postphysics residual velocity");

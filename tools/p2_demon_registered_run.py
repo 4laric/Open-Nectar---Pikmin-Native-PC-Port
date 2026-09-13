@@ -14,7 +14,7 @@ def main():
     helper=a.root/'scripts/preview_pikmin2_room.py'
     spec=importlib.util.spec_from_file_location('preview',helper); m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
     results=[]
-    for mode in ('positive','interrupt','reset','rejected','external','flick','fatal','capacity','direct'):
+    for mode in ('positive','interrupt','reset','rejected','external','flick','fatal','capacity','direct','handoff_walk','handoff_flick','handoff_geyzer','handoff_bury','handoff_pressed','stage_exit'):
         run=m.prepare(a.assets.resolve(),a.room.resolve(),a.output.resolve())
         env=dict(os.environ,DEMON_FIXTURE_MODE=mode)
         result={'mode':mode,'fixture':actual,'provenance':record(provenance),'runner':record(Path(__file__)),'helper':record(helper),
