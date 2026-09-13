@@ -25,7 +25,7 @@ def main():
         dest=run/'assets/dataDir/courses/pikmin2room'/f"demon{pose['frame']}.mod"
         copy_new(a.demon/pose['file'],dest)
         record['inputs'][dest.name]=file_record(dest)
-    text='\n'.join(' '.join(str(row[3]) for row in mouth['matrix']) for pose in selected for mouth in pose['mouths'])+'\n'
+    text='\n'.join(' '.join(str(x) for row in mouth['matrix'] for x in row) for pose in selected for mouth in pose['mouths'])+'\n'
     (run/'demon-mouths.txt').write_text(text,encoding='utf-8')
     record['inputs']['mouths']=file_record(run/'demon-mouths.txt')
     for name in ('room.mod','room.ini','treasure.mod'):
@@ -40,6 +40,7 @@ def main():
         record['returncode']=r.returncode
         record['captures']=[file_record(run/name) for name in ('demon0.ppm','demon17.ppm')]
         markers=[f'DEMON_VISUAL_CAPTURE frame={frame} markers=2 no_attachment=1' for frame in (0,17)]
+        markers.append('DEMON_CAPTAIN_SHAPES count=2 display_only=1 ordinary_animation=1')
         if r.returncode==0 and 'PASS DEMON_VISUAL' in r.stdout and all(marker in r.stdout for marker in markers):
             record['status']='captured_requires_visual_review'
     except Exception as error:
