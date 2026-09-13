@@ -1354,6 +1354,12 @@ static const char* vShaderSrc =
     "    if (index == 3) return aTexCoord3;\n"
     "    return aTexCoord3;\n"
     "}\n"
+    // nrm is the OBJECT-space normal, not the lit one. GX feeds texgen from the
+    // raw vertex attribute, and the texgen matrix the game loads for the
+    // environment map already carries the modelview rotation (dgxGraphics
+    // useMatrixQuick). Passing the transformed normal rotates it twice and
+    // pushes the sphere-map coordinates off the useful range, which is what
+    // made the gloss on Olimar, the pellets and the ship disappear.
     "vec2 genTc(int slot, vec4 viewPos, vec3 nrm, vec2 uvIn, vec2 tc0, vec2 tc1, vec2 tc2, vec2 tc3) {\n"
     "    int mode = uTcMode[slot];\n"
     "    if (mode == 0) return uvIn;\n"
@@ -1388,10 +1394,10 @@ static const char* vShaderSrc =
     // GX permits later texgens to use the output of an earlier texgen as
     // their source (GX_TG_TEXCOORD0..6). Evaluate in hardware order instead
     // of falling back to the usually absent raw attribute for that slot.
-    "    vec2 tc0 = genTc(0, worldPos, N, aTexCoord0, vec2(0.0), vec2(0.0), vec2(0.0), vec2(0.0));\n"
-    "    vec2 tc1 = genTc(1, worldPos, N, aTexCoord1, tc0, vec2(0.0), vec2(0.0), vec2(0.0));\n"
-    "    vec2 tc2 = genTc(2, worldPos, N, aTexCoord2, tc0, tc1, vec2(0.0), vec2(0.0));\n"
-    "    vec2 tc3 = genTc(3, worldPos, N, aTexCoord3, tc0, tc1, tc2, vec2(0.0));\n"
+    "    vec2 tc0 = genTc(0, worldPos, aNormal, aTexCoord0, vec2(0.0), vec2(0.0), vec2(0.0), vec2(0.0));\n"
+    "    vec2 tc1 = genTc(1, worldPos, aNormal, aTexCoord1, tc0, vec2(0.0), vec2(0.0), vec2(0.0));\n"
+    "    vec2 tc2 = genTc(2, worldPos, aNormal, aTexCoord2, tc0, tc1, vec2(0.0), vec2(0.0));\n"
+    "    vec2 tc3 = genTc(3, worldPos, aNormal, aTexCoord3, tc0, tc1, tc2, vec2(0.0));\n"
     "    vTexCoord0 = tc0;\n"
     "    vTexCoord1 = tc1;\n"
     "    vTexCoord2 = tc2;\n"
