@@ -13,6 +13,12 @@
 #include <string>
 #include <vector>
 
+#if defined(_WIN32)
+#include <windows.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#endif
+
 namespace fs = std::filesystem;
 
 namespace {
@@ -38,44 +44,76 @@ bool validChannel(s32 channel) { return channel >= 0 && channel < 2; }
 //
 // Resolved once, and never from the working directory unless there is already
 // a card there.
+// The folder the game was installed into. The launcher copies the game binary
+// into its data root, so the executable's own directory is that install
+// folder on both systems -- and unlike the working directory it does not
+// change with how the game was started.
+fs::path installDir()
+{
+	if (const char* env = std::getenv("NECTAR_EXECUTABLE_PATH"); env != nullptr && *env != '\0')
+		return fs::path(env).parent_path();
+	if (const char* env = std::getenv("PIKMIN_EXECUTABLE_PATH"); env != nullptr && *env != '\0')
+		return fs::path(env).parent_path();
+#if defined(_WIN32)
+	std::vector<wchar_t> path(32768); // Windows long-path limit
+	const DWORD count = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+	if (count > 0 && count < path.size()) return fs::path(std::wstring(path.data(), count)).parent_path();
+#elif defined(__linux__)
+	std::vector<char> path(4096);
+	const ssize_t count = readlink("/proc/self/exe", path.data(), path.size() - 1);
+	if (count > 0) { path[static_cast<std::size_t>(count)] = '\0'; return fs::path(path.data()).parent_path(); }
+#endif
+	return {};
+}
+
 fs::path saveRoot()
 {
-    static const fs::path resolved = [] {
-        std::error_code error;
-        // An explicit override always wins; portable setups can pin it.
-        if (const char* env = std::getenv("NECTAR_SAVE_DIR"); env != nullptr && *env != '\0')
-            return fs::path(env);
+	static const fs::path resolved = [] {
+		std::error_code error;
+		// An explicit override always wins; portable setups can pin it.
+		if (const char* env = std::getenv("NECTAR_SAVE_DIR"); env != nullptr && *env != '\0')
+			return fs::path(env);
 
-        std::vector<fs::path> candidates;
-        // [0] A card beside the working directory: what every build before 0.5
-        // wrote, and what a portable install still expects.
-        candidates.emplace_back("save");
-        // [1] The preferred per-user location. It has to be the same folder the
-        // launcher uses as its data root, or the launcher and a direct launch
-        // disagree about where the card lives -- which is the whole bug.
+		// Where the card belongs: beside the installed game.
+		const fs::path install = installDir();
+		const fs::path preferred = install.empty() ? fs::path("save") : install / "save";
+		if (fs::exists(preferred / "card0", error)) return preferred;
+
+		// Places earlier builds wrote to. A card in one of these is somebody's
+		// progress, so find it and bring it along rather than start empty.
+		std::vector<fs::path> legacy;
+		legacy.emplace_back("save"); // relative to the working directory
 #if defined(_WIN32)
-        if (const char* local = std::getenv("LOCALAPPDATA"); local != nullptr && *local != '\0')
-            candidates.push_back(fs::path(local) / "Nectar" / "save");
-        // 0.5 briefly wrote to roaming AppData. Keep reading those cards.
-        if (const char* roaming = std::getenv("APPDATA"); roaming != nullptr && *roaming != '\0')
-            candidates.push_back(fs::path(roaming) / "OpenNectar" / "save");
+		if (const char* local = std::getenv("LOCALAPPDATA"); local != nullptr && *local != '\0')
+			legacy.push_back(fs::path(local) / "Nectar" / "save");
+		if (const char* roaming = std::getenv("APPDATA"); roaming != nullptr && *roaming != '\0')
+			legacy.push_back(fs::path(roaming) / "OpenNectar" / "save");
 #else
-        if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg != nullptr && *xdg != '\0')
-            candidates.push_back(fs::path(xdg) / "pikmin-native" / "save");
-        if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0')
-            candidates.push_back(fs::path(home) / ".local" / "share" / "pikmin-native" / "save");
+		if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg != nullptr && *xdg != '\0')
+			legacy.push_back(fs::path(xdg) / "pikmin-native" / "save");
+		if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0')
+			legacy.push_back(fs::path(home) / ".local" / "share" / "pikmin-native" / "save");
 #endif
-
-        // A card that already exists wins, wherever it is. Stranding somebody's
-        // progress is worse than keeping it in an unfashionable folder.
-        for (const auto& candidate : candidates)
-            if (fs::exists(candidate / "card0", error)) return candidate;
-
-        // Nothing saved yet: the per-user location, or the old relative path if
-        // there is no home directory to put it in.
-        return candidates.size() > 1 ? candidates[1] : candidates[0];
-    }();
-    return resolved;
+		for (const fs::path& candidate : legacy) {
+			if (fs::equivalent(candidate, preferred, error) && !error) continue;
+			if (!fs::exists(candidate / "card0", error)) continue;
+			// Copy rather than move: if anything goes wrong the original is
+			// still there, and an orphaned folder is cheaper than a lost save.
+			fs::create_directories(preferred, error);
+			std::error_code copyError;
+			fs::copy(candidate, preferred,
+			         fs::copy_options::recursive | fs::copy_options::overwrite_existing, copyError);
+			if (!copyError && fs::exists(preferred / "card0", error)) {
+				std::printf("[PC Port] Moved your memory card into the game folder:\n  from %s\n  to   %s\n",
+				            candidate.string().c_str(), preferred.string().c_str());
+				return preferred;
+			}
+			// Could not write beside the game -- read-only install, most likely.
+			return candidate;
+		}
+		return preferred;
+	}();
+	return resolved;
 }
 
 fs::path root(s32 channel) { return saveRoot() / (channel == 0 ? "card0" : "card1"); }
@@ -140,7 +178,19 @@ CARDStat loadStat(s32 channel, const std::string& name)
 {
 	CARDStat stat = defaultStat(channel, name), stored{};
 	std::ifstream input(metaPath(channel, name), std::ios::binary);
-	if (input.read(reinterpret_cast<char*>(&stored), sizeof(stored))) stat = stored;
+	if (input.read(reinterpret_cast<char*>(&stored), sizeof(stored))) {
+		// Earlier builds let CARDSetStatus overwrite the game identity with
+		// whatever the caller left in it, which was zeros. The European game
+		// compares those bytes against the disc and refuses a file that does
+		// not match, so it kept deleting and recreating its own save. Heal
+		// such a record on read rather than make anyone start over.
+		static const u8 kNoGame[4] = { 0, 0, 0, 0 };
+		if (std::memcmp(stored.gameName, kNoGame, sizeof(kNoGame)) == 0) {
+			std::memcpy(stored.gameName, stat.gameName, sizeof(stored.gameName));
+			std::memcpy(stored.company, stat.company, sizeof(stored.company));
+		}
+		stat = stored;
+	}
 	std::strncpy(stat.fileName, name.c_str(), CARD_FILENAME_MAX - 1);
 	stat.fileName[CARD_FILENAME_MAX - 1] = '\0';
 	std::error_code error;
@@ -157,8 +207,45 @@ bool saveStat(s32 channel, const std::string& name, const CARDStat& source)
 	return !!output.write(reinterpret_cast<const char*>(&stat), sizeof(stat));
 }
 
+// Card tracing (NECTAR_CARD_DEBUG=1). The save flow is create-temp, write,
+// delete-old, rename; a single failing step makes the game retry the whole
+// thing, which is what a loop of "creating save data" looks like from outside.
+bool cardlog_on()
+{
+	static const int on = [] {
+		const char* value = std::getenv("NECTAR_CARD_DEBUG");
+		return (value != nullptr && value[0] != '0') ? 1 : 0;
+	}();
+	return on != 0;
+}
+
+// The operation in flight, so finish() can name it without every call site
+// having to log its own return paths.
+thread_local const char* sTraceOp = "-";
+thread_local std::string sTraceName;
+
+void cardtrace(const char* op, const char* name)
+{
+	if (!cardlog_on()) return;
+	sTraceOp = op;
+	sTraceName = name ? name : "-";
+}
+
+void cardtrace(const char* op, s32 fileNo)
+{
+	if (!cardlog_on()) return;
+	sTraceOp = op;
+	sTraceName = "#" + std::to_string(fileNo);
+}
+
 s32 finish(s32 channel, s32 result, CARDCallback callback = nullptr)
 {
+	if (cardlog_on()) {
+		std::printf("[CARD] %-14s %-34s -> %d   (root %s)\n", sTraceOp, sTraceName.c_str(),
+		            (int)result, saveRoot().string().c_str());
+		std::fflush(stdout);
+		sTraceOp = "-";
+	}
 	if (validChannel(channel)) sLastResult[channel] = result;
 	if (callback) callback(channel, result);
 	return result;
@@ -190,22 +277,26 @@ void CARDInit(void)
 BOOL CARDProbe(s32 channel) { return validChannel(channel) && ensureCard(channel); }
 s32 CARDProbeEx(s32 channel, s32* memSize, s32* sectorSize)
 {
+	cardtrace("CARDProbeEx", "-");
 	if (memSize) *memSize = 128;
 	if (sectorSize) *sectorSize = kSectorSize;
 	return finish(channel, CARDProbe(channel) ? CARD_RESULT_READY : CARD_RESULT_NOCARD);
 }
 s32 CARDMountAsync(s32 channel, CARDMemoryCard*, CARDCallback, CARDCallback callback)
 {
+	cardtrace("CARDMountAsync", "-");
 	return finish(channel, ensureCard(channel) ? CARD_RESULT_READY : CARD_RESULT_NOCARD, callback);
 }
 s32 CARDMount(s32 channel, CARDMemoryCard*, CARDCallback)
 {
+	cardtrace("CARDMount", "-");
 	return finish(channel, ensureCard(channel) ? CARD_RESULT_READY : CARD_RESULT_NOCARD);
 }
 s32 CARDUnmount(s32 channel) { return finish(channel, CARD_RESULT_READY); }
 
 s32 CARDOpen(s32 channel, const char* fileName, CARDFileInfo* info)
 {
+	cardtrace("CARDOpen", fileName);
 	const std::string wanted = safeName(fileName);
 	const auto files = entries(channel);
 	const auto item = std::find(files.begin(), files.end(), wanted);
@@ -219,6 +310,7 @@ s32 CARDOpen(s32 channel, const char* fileName, CARDFileInfo* info)
 }
 s32 CARDFastOpen(s32 channel, s32 fileNo, CARDFileInfo* info)
 {
+	cardtrace("CARDFastOpen", fileNo);
 	const auto files = entries(channel);
 	if (!info || fileNo < 0 || static_cast<size_t>(fileNo) >= files.size()) return finish(channel, CARD_RESULT_NOFILE);
 	info->chan = channel; info->fileNo = fileNo; info->offset = 0;
@@ -229,6 +321,7 @@ s32 CARDClose(CARDFileInfo* info) { return finish(info ? info->chan : 0, CARD_RE
 
 s32 CARDCreate(s32 channel, const char* fileName, u32 size, CARDFileInfo* info)
 {
+	cardtrace("CARDCreate", fileName);
 	const std::string name = safeName(fileName);
 	if (name.empty() || name.size() >= CARD_FILENAME_MAX) return finish(channel, CARD_RESULT_NAMETOOLONG);
 	if (!ensureCard(channel)) return finish(channel, CARD_RESULT_NOCARD);
@@ -251,6 +344,7 @@ s32 CARDCreateAsync(s32 channel, const char* name, u32 size, CARDFileInfo* info,
 
 s32 CARDRead(CARDFileInfo* info, void* address, s32 length, s32 offset)
 {
+	cardtrace("CARDRead", info ? info->fileNo : -1);
 	std::string name;
 	if (!address || length < 0 || offset < 0 || !resolve(info, name)) return finish(info ? info->chan : 0, CARD_RESULT_NOFILE);
 	std::ifstream input(dataPath(info->chan, name), std::ios::binary);
@@ -265,6 +359,7 @@ s32 CARDReadAsync(CARDFileInfo* info, void* address, s32 length, s32 offset, CAR
 }
 s32 CARDWrite(CARDFileInfo* info, void* address, s32 length, s32 offset)
 {
+	cardtrace("CARDWrite", info ? info->fileNo : -1);
 	std::string name;
 	if (!address || length < 0 || offset < 0 || !resolve(info, name)) return finish(info ? info->chan : 0, CARD_RESULT_NOFILE);
 	std::fstream output(dataPath(info->chan, name), std::ios::binary | std::ios::in | std::ios::out);
@@ -283,6 +378,7 @@ s32 CARDGetXferredBytes(s32 channel) { return validChannel(channel) ? sTransferr
 
 s32 CARDFastDelete(s32 channel, s32 fileNo)
 {
+	cardtrace("CARDFastDelete", fileNo);
 	const auto files = entries(channel);
 	if (fileNo < 0 || static_cast<size_t>(fileNo) >= files.size()) return finish(channel, CARD_RESULT_NOFILE);
 	std::error_code error;
@@ -297,6 +393,7 @@ s32 CARDFastDeleteAsync(s32 channel, s32 fileNo, CARDCallback callback)
 
 s32 CARDRename(s32 channel, const char* oldName, const char* newName)
 {
+	cardtrace("CARDRename", (std::string(oldName ? oldName : "-") + " -> " + (newName ? newName : "-")).c_str());
 	const std::string oldSafe = safeName(oldName), newSafe = safeName(newName);
 	if (!fs::exists(dataPath(channel, oldSafe))) return finish(channel, CARD_RESULT_NOFILE);
 	if (fs::exists(dataPath(channel, newSafe))) return finish(channel, CARD_RESULT_EXIST);
@@ -314,6 +411,7 @@ s32 CARDRenameAsync(s32 channel, const char* oldName, const char* newName, CARDC
 
 s32 CARDGetStatus(s32 channel, s32 fileNo, CARDStat* stat)
 {
+	cardtrace("CARDGetStatus", fileNo);
 	const auto files = entries(channel);
 	if (!stat || fileNo < 0 || static_cast<size_t>(fileNo) >= files.size()) return finish(channel, CARD_RESULT_NOFILE);
 	*stat = loadStat(channel, files[fileNo]);
@@ -321,9 +419,21 @@ s32 CARDGetStatus(s32 channel, s32 fileNo, CARDStat* stat)
 }
 s32 CARDSetStatus(s32 channel, s32 fileNo, CARDStat* stat)
 {
+	cardtrace("CARDSetStatus", fileNo);
 	const auto files = entries(channel);
 	if (!stat || fileNo < 0 || static_cast<size_t>(fileNo) >= files.size()) return finish(channel, CARD_RESULT_NOFILE);
-	CARDStat copy = *stat; copy.length = loadStat(channel, files[fileNo]).length; copy.time = cardTimeNow();
+	// The real CARDSetStatus only takes the banner, icon and comment layout
+	// from the caller. Name, size and above all the game identity belong to
+	// the card and never change. Copying the whole struct let a caller that
+	// had not filled gameName/company wipe them, and the PAL game then no
+	// longer recognised the file as its own.
+	CARDStat copy       = loadStat(channel, files[fileNo]);
+	copy.bannerFormat   = stat->bannerFormat;
+	copy.iconAddr       = stat->iconAddr;
+	copy.iconFormat     = stat->iconFormat;
+	copy.iconSpeed      = stat->iconSpeed;
+	copy.commentAddr    = stat->commentAddr;
+	copy.time           = cardTimeNow();
 	return finish(channel, saveStat(channel, files[fileNo], copy) ? CARD_RESULT_READY : CARD_RESULT_IOERROR);
 }
 s32 CARDSetStatusAsync(s32 channel, s32 fileNo, CARDStat* stat, CARDCallback callback)
