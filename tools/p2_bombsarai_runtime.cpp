@@ -108,7 +108,9 @@ private:
         P2BombSaraiTraceResult result{};
         // Flat-floor probe: downward trace lands, center rests at ground+radius.
         const float radius = 5.0f;
-        require(P2BombSaraiTerrainAdapter::trace(&adapter, { 0, ground + 15, 0 }, { 0, -300, 0 },
+        // Travel must exceed the start gap (10 = 15 - radius at 30Hz with 300
+        // units/s lands exactly tangent, registering no collision): use 600.
+        require(P2BombSaraiTerrainAdapter::trace(&adapter, { 0, ground + 15, 0 }, { 0, -600, 0 },
                                                  P2BombSaraiBomb::kSourceDelta, radius, result),
                 "center trace");
         std::printf("P2_BOMBSARAI_FLOOR_PROBE ground=%.6f center=%.6f floor=%d\n",
@@ -136,7 +138,8 @@ private:
             if (std::fabs(normal.y) < 0.05f && center.y > mapGround + 15) {
                 wall = { true, { center.x + normal.x * 15, center.y + normal.y * 15,
                                  center.z + normal.z * 15 },
-                         { -normal.x * 300, -normal.y * 300, -normal.z * 300 } };
+                         // 600 units/s: same tangent-landing avoidance as above.
+                         { -normal.x * 600, -normal.y * 600, -normal.z * 600 } };
             }
         }
         require(wall.valid, "no wall probe candidate");
