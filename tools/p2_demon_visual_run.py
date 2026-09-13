@@ -39,7 +39,8 @@ def main():
         record['stdout']=file_record(run/'stdout.log'); record['stderr']=file_record(run/'stderr.log')
         record['returncode']=r.returncode
         record['captures']=[file_record(run/name) for name in ('demon0.ppm','demon17.ppm')]
-        if r.returncode==0 and 'PASS DEMON_VISUAL' in r.stdout:
+        markers=[f'DEMON_VISUAL_CAPTURE frame={frame} markers=2 no_attachment=1' for frame in (0,17)]
+        if r.returncode==0 and 'PASS DEMON_VISUAL' in r.stdout and all(marker in r.stdout for marker in markers):
             record['status']='captured_requires_visual_review'
     except Exception as error:
         record['error']=str(error)
