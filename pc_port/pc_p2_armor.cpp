@@ -225,6 +225,10 @@ void pc_p2_armor_reset() {
     clips.clear();
     ready = false;
 }
+void pc_p2_armor_forget_piki(Piki* piki) {
+    for (auto& entry : actors) if (entry.second.captured == piki) entry.second.captured = nullptr;
+}
+
 void pc_p2_armor_forget(BTeki* actor) { actors.erase(static_cast<PelletView*>(actor)); }
 
 float pc_p2_armor_param_f(const BTeki* actor, int idx, float fallback) {

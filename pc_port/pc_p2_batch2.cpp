@@ -234,8 +234,8 @@ static void bindFamilies(bool strict) {
         for (const std::string& species : speciesUsed) {
             auto clipRows = rows.find(species);
             if (clipRows == rows.end() || clipRows->second.empty()) fail("species has no bank clips");
-            banks[std::string(family.name) + "|" + species] =
-                loadBank(family, species, clipRows->second);
+            const std::string key = std::string(family.name) + "|" + species;
+            if (!banks.count(key)) banks[key] = loadBank(family, species, clipRows->second);
         }
     }
 }
@@ -257,7 +257,8 @@ void pc_p2_batch2_setup() {
 }
 
 void pc_p2_batch2_rebind() {
-    pc_p2_batch2_reset();
+    // Rebind within this scene without reallocating the immutable model banks.
+    actors.clear();
     if (!pc_pikipelago_room_preview() || !tekiMgr) return;
     bindFamilies(false);
     logBindings();
@@ -322,3 +323,6 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
 bool pc_p2_batch2_any_drawn() {
     return logged[0] || logged[1];
 }
+
+unsigned long pc_p2_batch2_count() { return (unsigned long)actors.size(); }
+bool pc_p2_batch2_registered(BTeki* actor) { return actors.count(actor) != 0; }
