@@ -2133,14 +2133,13 @@ void PikiFlyingState::procCollideMsg(Piki* piki, MsgCollide* msg)
 	if (colliderType != OBJTYPE_Plant) {
 		SeSystem::playPlayerSe(SE_THROWHIT);
 	}
-	if (specialFlightContact) {
-		pc_p2_purple_flight_contact(piki, colliderType == OBJTYPE_Teki || collider->isBoss());
-	}
-
 	if (colliderType == OBJTYPE_Teki || collider->isBoss()) {
 		PcP2PurpleDirectHit direct;
 		if ((!pc_p2_purple_flight_active(piki) || specialFlightContact) && piki->mVelocity.y < 0.0f) {
 			direct = pc_p2_purple_direct_begin(piki, collider, msg->mEvent.mColliderPart);
+			if (specialFlightContact && direct.handled) {
+				pc_p2_purple_flight_contact(piki, true);
+			}
 			pc_p2_purple_impact_emit(piki, "enemy_collision");
 			pc_p2_purple_direct_finish(piki, collider, msg->mEvent.mColliderPart, direct);
 		}
