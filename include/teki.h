@@ -20,11 +20,9 @@
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
 #include "pc_p2_enemy.h"
 #include "pc_p2_kochappy.h"
-<<<<<<< HEAD
 #include "pc_p2_kogane.h"
-=======
 #include "pc_p2_sokkuri.h"
->>>>>>> c102a4d5 (pc_p2_sokkuri: source Skitter Leaf FSM + flick/press receivers on batch-2 host (#407, #165))
+#include "pc_p2_armor.h"
 #endif
 
 class CollEvent;
@@ -411,15 +409,9 @@ public:
 	f32 getParameterF(int idx) {
 		const f32 value=mTekiParams->getF(idx);
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
-<<<<<<< HEAD
-		const f32 kogane=pc_p2_kogane_param_f(this,idx,value);
+		const f32 kogane=pc_p2_armor_param_f(this,idx,pc_p2_sokkuri_param_f(this,idx,pc_p2_kogane_param_f(this,idx,value)));
 		if(idx==TPF_Life)return pc_p2_kochappy_max_health(this,pc_p2_snow_max_health(this,kogane));
 		return kogane;
-=======
-		const f32 sokkuri=pc_p2_sokkuri_param_f(this,idx,value);
-		if(idx==TPF_Life)return pc_p2_kochappy_max_health(this,pc_p2_snow_max_health(this,sokkuri));
-		return sokkuri;
->>>>>>> c102a4d5 (pc_p2_sokkuri: source Skitter Leaf FSM + flick/press receivers on batch-2 host (#407, #165))
 #endif
 		return value;
 	} // see TekiFloatParams enum
