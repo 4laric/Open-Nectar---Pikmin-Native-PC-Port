@@ -13,6 +13,7 @@
 #include "pc_p2_queen.h"
 #include "pc_p2_king.h"
 #include "pc_p2_batch2.h"
+#include "pc_p2_sokkuri.h"
 #include "pc_p2_batch3.h"
 #include "pc_p2_long_legs.h"
 #endif
@@ -126,7 +127,11 @@ int TekiMgr::typeIds[TEKI_TypeCount] = {
 void TekiMgr::initTekiMgr()
 {
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+<<<<<<< HEAD
 	{ pc_p2_snow_reset(); pc_p2_sheargrub_reset(); pc_p2_kochappy_reset(); pc_p2_giant_breadbug_actor_reset(); pc_p2_breadbug_actor_reset(); pc_p2_queen_reset(); pc_p2_king_reset(); pc_p2_frog_reset(); pc_p2_kogane_reset(); pc_p2_mamuta_reset(); pc_p2_tank_reset(); pc_p2_qurione_reset(); pc_p2_batch2_reset(); pc_p2_batch3_reset(); pc_p2_long_legs_reset(); }
+=======
+	{ pc_p2_snow_reset(); pc_p2_sheargrub_reset(); pc_p2_kochappy_reset(); pc_p2_breadbug_actor_reset(); pc_p2_frog_reset(); pc_p2_kogane_reset(); pc_p2_mamuta_reset(); pc_p2_tank_reset(); pc_p2_qurione_reset(); pc_p2_batch2_reset(); pc_p2_sokkuri_reset(); pc_p2_batch3_reset(); pc_p2_long_legs_reset(); }
+>>>>>>> c102a4d5 (pc_p2_sokkuri: source Skitter Leaf FSM + flick/press receivers on batch-2 host (#407, #165))
 #endif
 	tekiMgr = nullptr;
 }
@@ -153,7 +158,11 @@ TekiMgr::TekiMgr()
 {
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
 	// Stage teardown nulls the global manager. Do not clear an unrelated live manager.
+<<<<<<< HEAD
 	if (!tekiMgr) { pc_p2_snow_reset(); pc_p2_sheargrub_reset(); pc_p2_kochappy_reset(); pc_p2_giant_breadbug_actor_reset(); pc_p2_breadbug_actor_reset(); pc_p2_queen_reset(); pc_p2_king_reset(); pc_p2_frog_reset(); pc_p2_kogane_reset(); pc_p2_mamuta_reset(); pc_p2_tank_reset(); pc_p2_qurione_reset(); pc_p2_batch2_reset(); pc_p2_batch3_reset(); pc_p2_long_legs_reset(); }
+=======
+	if (!tekiMgr) { pc_p2_snow_reset(); pc_p2_sheargrub_reset(); pc_p2_kochappy_reset(); pc_p2_breadbug_actor_reset(); pc_p2_frog_reset(); pc_p2_kogane_reset(); pc_p2_mamuta_reset(); pc_p2_tank_reset(); pc_p2_qurione_reset(); pc_p2_batch2_reset(); pc_p2_sokkuri_reset(); pc_p2_batch3_reset(); pc_p2_long_legs_reset(); }
+>>>>>>> c102a4d5 (pc_p2_sokkuri: source Skitter Leaf FSM + flick/press receivers on batch-2 host (#407, #165))
 #endif
 	PRINT_NAKATA("TekiMgr>\n");
 	memStat->start("tekiMgr");
@@ -284,7 +293,11 @@ Teki* TekiMgr::newTeki(int type)
 	}
 
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+<<<<<<< HEAD
 	pc_p2_snow_forget(teki); pc_p2_sheargrub_forget(teki); pc_p2_kochappy_forget(teki); pc_p2_giant_breadbug_actor_forget(teki); pc_p2_breadbug_actor_forget(teki); pc_p2_frog_forget(teki); pc_p2_kogane_forget(teki); pc_p2_mamuta_forget(teki); pc_p2_tank_forget(teki); pc_p2_qurione_forget(teki); pc_p2_batch2_forget(teki); pc_p2_batch3_forget(teki); pc_p2_long_legs_forget(teki);
+=======
+	pc_p2_snow_forget(teki); pc_p2_sheargrub_forget(teki); pc_p2_kochappy_forget(teki); pc_p2_breadbug_actor_forget(teki); pc_p2_frog_forget(teki); pc_p2_kogane_forget(teki); pc_p2_mamuta_forget(teki); pc_p2_tank_forget(teki); pc_p2_qurione_forget(teki); pc_p2_batch2_forget(teki); pc_p2_sokkuri_forget(teki); pc_p2_batch3_forget(teki); pc_p2_long_legs_forget(teki);
+>>>>>>> c102a4d5 (pc_p2_sokkuri: source Skitter Leaf FSM + flick/press receivers on batch-2 host (#407, #165))
 #endif
 	teki->init(type);
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
@@ -299,7 +312,11 @@ Teki* TekiMgr::newTeki(int type)
 void TekiMgr::reset()
 {
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+<<<<<<< HEAD
 	if (this == tekiMgr) { pc_p2_snow_reset(); pc_p2_sheargrub_reset(); pc_p2_kochappy_reset(); pc_p2_breadbug_visual_reset(); pc_p2_giant_breadbug_visual_reset(); pc_p2_bulblax_visual_reset(); pc_p2_giant_breadbug_actor_reset(); pc_p2_breadbug_actor_reset(); pc_p2_queen_reset(); pc_p2_king_reset(); pc_p2_frog_reset(); pc_p2_kogane_reset(); pc_p2_mamuta_reset(); pc_p2_tank_reset(); pc_p2_qurione_reset(); pc_p2_batch2_reset(); pc_p2_batch3_reset(); pc_p2_long_legs_reset(); }
+=======
+	if (this == tekiMgr) { pc_p2_snow_reset(); pc_p2_sheargrub_reset(); pc_p2_kochappy_reset(); pc_p2_breadbug_visual_reset(); pc_p2_giant_breadbug_visual_reset(); pc_p2_bulblax_visual_reset(); pc_p2_breadbug_actor_reset(); pc_p2_frog_reset(); pc_p2_kogane_reset(); pc_p2_mamuta_reset(); pc_p2_tank_reset(); pc_p2_qurione_reset(); pc_p2_batch2_reset(); pc_p2_sokkuri_reset(); pc_p2_batch3_reset(); pc_p2_long_legs_reset(); }
+>>>>>>> c102a4d5 (pc_p2_sokkuri: source Skitter Leaf FSM + flick/press receivers on batch-2 host (#407, #165))
 #endif
 	PRINT_NAKATA("reset>\n");
 	Iterator iter(this);

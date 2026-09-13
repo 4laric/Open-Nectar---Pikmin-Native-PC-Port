@@ -13,6 +13,11 @@
 #include "pc_p2_queen.h"
 #include "pc_p2_king.h"
 #include "pc_p2_batch2.h"
+<<<<<<< HEAD
+=======
+#include "pc_p2_sokkuri.h"
+#include "pc_p2_hardlanes.h"
+>>>>>>> c102a4d5 (pc_p2_sokkuri: source Skitter Leaf FSM + flick/press receivers on batch-2 host (#407, #165))
 #include "pc_p2_batch3.h"
 #include "pc_p2_long_legs.h"
 #include "pc_p2_preview.h"
@@ -202,6 +207,11 @@ void pc_p2_preview_setup() {
     pc_p2_tank_setup();
     pc_p2_qurione_setup();
     pc_p2_batch2_setup();
+<<<<<<< HEAD
+=======
+    pc_p2_sokkuri_setup();
+    pc_p2_hardlanes_setup();
+>>>>>>> c102a4d5 (pc_p2_sokkuri: source Skitter Leaf FSM + flick/press receivers on batch-2 host (#407, #165))
     pc_p2_batch3_setup();
     pc_p2_long_legs_setup();
     pc_p2_purple_setup();

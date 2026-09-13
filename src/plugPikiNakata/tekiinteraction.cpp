@@ -2,6 +2,7 @@
 #include "Interactions.h"
 #include "sysNew.h"
 #include "teki.h"
+#include "pc_p2_sokkuri.h"
 
 /**
  * @todo: Documentation
@@ -69,11 +70,17 @@ bool InteractSwallow::actTeki(Teki*) immut
  */
 bool InteractPress::actTeki(Teki* teki) immut
 {
+<<<<<<< HEAD
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
 	if (pc_p2_kogane_pressed(teki, mOwner)) {
 		return true; // registered beetles flip instead of the host pressed state
 	}
 #endif
+=======
+	if (pc_p2_sokkuri_pressed(teki, mOwner)) {
+		return true; // registered Skitter Leaves are crushed into their source Press state
+	}
+>>>>>>> c102a4d5 (pc_p2_sokkuri: source Skitter Leaf FSM + flick/press receivers on batch-2 host (#407, #165))
 	teki->eventPerformed(TekiEvent(TekiEventType::Pressed, teki, mOwner));
 	return true;
 }

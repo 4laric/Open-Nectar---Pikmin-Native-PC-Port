@@ -9,6 +9,7 @@
 #include "pc_p2_breadbug_actor.h"
 #include "pc_p2_giant_breadbug_actor.h"
 #include "pc_p2_batch2.h"
+#include "pc_p2_sokkuri.h"
 #include "pc_p2_batch3.h"
 #include "pc_p2_long_legs.h"
 #endif
@@ -449,10 +450,14 @@ void BTeki::startAI(int)
 void BTeki::update()
 {
 	Creature::update();
+<<<<<<< HEAD
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
 	pc_p2_kogane_update(this);
     pc_p2_snow_update(this,NSystem::getFrameTime());
 #endif
+=======
+	pc_p2_sokkuri_update(this);
+>>>>>>> c102a4d5 (pc_p2_sokkuri: source Skitter Leaf FSM + flick/press receivers on batch-2 host (#407, #165))
 	if (mDeadState == 0) {
 		updateTimers();
 		if (mHealth > 0.0f) {

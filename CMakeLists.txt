@@ -192,6 +192,11 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_qurione.cpp
     pc_port/pc_p2_kurage_receiver.cpp
     pc_port/pc_p2_batch2.cpp
+<<<<<<< HEAD
+=======
+    pc_port/pc_p2_sokkuri.cpp
+    pc_port/pc_p2_hardlanes.cpp
+>>>>>>> c102a4d5 (pc_p2_sokkuri: source Skitter Leaf FSM + flick/press receivers on batch-2 host (#407, #165))
     pc_port/pc_p2_batch3.cpp
     pc_port/pc_p2_long_legs.cpp
     pc_port/pc_randomizer.cpp
