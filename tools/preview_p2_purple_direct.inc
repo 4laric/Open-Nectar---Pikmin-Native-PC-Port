@@ -28,7 +28,8 @@ static void purpleDirectFixture(Navi* n)
         n->throwPiki(source, Vector3f(position.x + 42.0f, position.y, position.z));
         // Keep the actual throw/arming path, then stage its descending flight over
         // the fixed receiver so autonomous target motion cannot make the proof flaky.
-        source->resetPosition(Vector3f(position.x, position.y + 80.0f, position.z));
+        const float stagedHeight = adult ? 80.0f : 24.0f;
+        source->resetPosition(Vector3f(position.x, position.y + stagedHeight, position.z));
         source->mVelocity = Vector3f(0.0f, -100.0f, 0.0f);
         source->mTargetVelocity = source->mVelocity;
         timer = 0;
