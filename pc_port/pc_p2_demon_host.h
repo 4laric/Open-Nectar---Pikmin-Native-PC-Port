@@ -16,6 +16,7 @@ void pc_p2_demon_manager_forget(BTeki* actor);
 bool pc_p2_demon_manager_bind(P2DemonHost* host, BTeki* actor, unsigned generatorId, int tekiType);
 void pc_p2_demon_manager_setup();
 std::size_t pc_p2_demon_manager_binding_count();
+std::size_t pc_p2_demon_manager_render_count();
 bool pc_p2_demon_manager_is_bound(BTeki* actor);
 void pc_p2_demon_manager_update();
 void pc_p2_demon_manager_draw(Graphics& gfx);
@@ -50,6 +51,8 @@ public:
     void unbindNativeActor(BTeki* actor);
     bool revalidateNativeActor(BTeki* actor, unsigned generatorId, int tekiType);
     BTeki* boundNativeActor() const { return mBoundActor; }
+    bool hasRenderableShape() const { return mLoaded && mShape != nullptr; }
+    unsigned renderCount() const { return mRenderCount; }
     P2DemonAttackDecision tickCatchFly(Navi* target, float sourceFrames, p2demon::CatchFlyInput input);
     bool beginFallMeck(const p2retail::Motion& motion);
     P2DemonAttackDecision tickFallMeck(Navi* target, float sourceFrames, float damage, float speed);
@@ -89,6 +92,7 @@ private:
     float mFacingRadians = 0.0f;
     p2demon::TargetPoint mCatchTarget;
     BTeki* mBoundActor = nullptr;
+    unsigned mRenderCount = 0;
     unsigned mOccupied;
     std::uint64_t mOwnerToken;
     void updateMouths();

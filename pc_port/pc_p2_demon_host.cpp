@@ -47,6 +47,7 @@ void pc_p2_demon_manager_setup()
         }
         if (!match || !pc_p2_demon_manager_bind(host.get(), match, generator, type)) continue;
         host->setPosition(match->getPosition());
+        host->mSRT.s.set(1.0f, 1.0f, 1.0f);
         managerHosts.push_back(std::move(host));
     }
 }
@@ -72,6 +73,11 @@ bool pc_p2_demon_manager_bind(P2DemonHost* host, BTeki* actor, unsigned generato
     return true;
 }
 std::size_t pc_p2_demon_manager_binding_count() { return managerBindings.size(); }
+std::size_t pc_p2_demon_manager_render_count() {
+    std::size_t total = 0;
+    for (const auto& entry : managerBindings) total += entry.second.host->renderCount();
+    return total;
+}
 bool pc_p2_demon_manager_is_bound(BTeki* actor)
 {
     auto it = managerBindings.find(actor);
@@ -273,6 +279,7 @@ void P2DemonHost::refresh(Graphics& gfx)
     gfx.mCamera->mLookAtMtx.multiplyTo(world, view);
     mShape->updateAnim(gfx, view, nullptr, nullptr);
     mShape->drawshape(gfx, *gfx.mCamera, nullptr);
+    ++mRenderCount;
 }
 bool P2DemonHost::loadMouthPoses(const char* path) { return mPoseMeshes.empty() && mPoseBank.load(path); }
 bool P2DemonHost::applyMouthFrame(int frame)

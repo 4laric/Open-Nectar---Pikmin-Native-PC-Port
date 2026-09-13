@@ -32,6 +32,7 @@ class DemonHostApp final : public PlugPikiApp {
     int ticks = 0;
     int phase = 0;
     int recoveryTicks = 0;
+    int bindingFrames = 0;
     int attackTicks = 0;
     int pursuitTicks = 0;
     bool sawDash = false, sawInterrupt = false;
@@ -75,7 +76,11 @@ public:
                 }
                 require(actor && pc_p2_demon_manager_binding_count() == 1, "automatic manager binding");
                 require(pc_p2_demon_manager_is_bound(actor), "automatic identity validation");
-                std::puts("PASS DEMON_HOST automatic_binding_final_setup"); std::fflush(stdout); std::_Exit(0);
+                if (++bindingFrames > 30) {
+                    require(pc_p2_demon_manager_render_count() > 0, "automatic host rendered geometry");
+                    std::puts("PASS DEMON_HOST automatic_binding_final_setup"); std::fflush(stdout); std::_Exit(0);
+                }
+                return result;
             }
             float x0, y0, z0, x1, y1, z1;
             std::ifstream input("demon-mouths.txt");
