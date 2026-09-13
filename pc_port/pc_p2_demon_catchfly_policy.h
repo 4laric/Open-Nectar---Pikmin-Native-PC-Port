@@ -5,18 +5,20 @@
 // Bounded translation of SaraiState::StateCatchFly::exec. Physics and turning
 // remain owned by the native actor; this only exposes the source decision order.
 namespace p2demon {
+enum class HeightNext { None, Flick, Fall };
 struct CatchFlyInput {
     float x, y, z;
     float targetX, targetY, targetZ;
     float mapY, elapsedSeconds, grabFlightHeight, transitionHeight;
     float riseFactor, climbingFactor, grabSpeed;
     int stuckCount;
-    int heightNext;
+    HeightNext heightNext;
     bool targetAttached;
 };
 struct CatchFlyResult {
     float velocityX = 0, velocityY = 0, velocityZ = 0;
     bool finishMotion = false;
+    HeightNext heightNext = HeightNext::None;
     P2DemonAttackNext next = P2DemonAttackNext::None;
 };
 
@@ -45,8 +47,8 @@ inline CatchFlyResult catchFly(const CatchFlyInput& in)
     const float factor = (1.0f - t) * in.riseFactor + t * in.climbingFactor;
     out.velocityY = factor * ((in.mapY + in.grabFlightHeight) - in.y);
     const float height = in.y - in.mapY;
-    if ((height > in.transitionHeight || in.elapsedSeconds > 3.0f) && in.heightNext >= 0)
-        out.next = static_cast<P2DemonAttackNext>(in.heightNext);
+    if (height > in.transitionHeight || in.elapsedSeconds > 3.0f)
+        out.heightNext = in.heightNext;
     return out;
 }
 } // namespace p2demon

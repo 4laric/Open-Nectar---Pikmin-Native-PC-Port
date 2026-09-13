@@ -16,11 +16,11 @@ static p2retail::Motion motion(const char* name, int duration,
 
 int main()
 {
-    p2demon::CatchFlyInput input{0, 10, 0, 40, 10, 0, 0, 0, 20, 25, 1, 0, 10, 0, 2, true};
+    p2demon::CatchFlyInput input{0, 10, 0, 40, 10, 0, 0, 0, 20, 25, 1, 0, 10, 0, p2demon::HeightNext::Fall, true};
     auto pursuit = p2demon::catchFly(input);
     assert(pursuit.velocityX > 0 && pursuit.velocityY > 0 && !pursuit.finishMotion);
     input.elapsedSeconds = 4.0f;
-    assert(p2demon::catchFly(input).next == static_cast<P2DemonAttackNext>(2));
+    assert(p2demon::catchFly(input).heightNext == p2demon::HeightNext::Fall);
     input.targetAttached = false;
     assert(p2demon::catchFly(input).next == P2DemonAttackNext::Move);
     input.targetAttached = true; input.elapsedSeconds = 11.0f;

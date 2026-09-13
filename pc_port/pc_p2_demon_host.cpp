@@ -248,12 +248,12 @@ bool P2DemonHost::beginCatchFly(const p2retail::Motion& motion)
     return true;
 }
 
-P2DemonAttackDecision P2DemonHost::tickCatchFly(float delta, p2demon::CatchFlyInput input)
+P2DemonAttackDecision P2DemonHost::tickCatchFly(Navi* target, float delta, p2demon::CatchFlyInput input)
 {
     P2DemonAttackDecision result;
     if (mClockMode != 1 || !std::isfinite(delta) || delta <= 0 || delta > 1) return result;
     input.elapsedSeconds = mCatchElapsedFrames / 30.0f;
-    input.targetAttached = mOccupied != 0;
+    input.targetAttached = mOccupied != 0 && target && pc_demon_owned_by(target, this);
     const auto movement = p2demon::catchFly(input);
     if (!input.targetAttached) {
         mOccupied = 0; mClockMode = 0; mAttackPlayer.cancel();
