@@ -56,5 +56,9 @@ not the earlier source snapshots.
 Limits: frame/END inputs remain fixture-driven; rendered mesh selection is not
 yet synchronized with sampled mouth poses. The fixture verifies joint basis and
 captain position, not a visual comparison of the captain's rendered orientation.
-Natural approach/capture/flight FSM, moving platforms/water, full scene reload,
-and focused shared-state integration acceptance remain separate unfinished gates.
+CatchFly now uses a deterministic, caller-supplied home/radius/angle target and
+updates the private host's position on ordinary frame updates. The target
+construction follows Sarai's radial `setRandTarget` shape while keeping the
+fixture reproducible. The host does not claim map collision, platform/water
+handling, random target selection, or manager registration; those remain
+separate production integration gates.
