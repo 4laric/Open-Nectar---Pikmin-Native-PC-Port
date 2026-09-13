@@ -2,6 +2,7 @@
 #include <cassert>
 #include <fstream>
 #include <iostream>
+#include <iomanip>
 #include <limits>
 using namespace p2attach;
 static bool near(float a,float b){return std::fabs(a-b)<.0001f;}
@@ -50,8 +51,8 @@ int main(int argc,char** argv){
     for(auto bad:{std::string(source)+"junk",std::string("P2_ATTACHMENTS_1 129 1"),std::string("P2_ATTACHMENTS_1 1 1\nroot 0\n")}){std::istringstream in(bad);assert(!read(in));}
     std::string invalid=source;invalid.replace(invalid.find("mouth 0"),7,"mouth 1");std::istringstream broken(invalid);assert(!read(broken));
     auto mutableBank=std::make_shared<Bank>();assert(!actor.bind(mutableBank));
-    if(argc==2){std::ifstream file(argv[1]);auto real=read(file);assert(real&&checked(*real));auto id=actor.bind(real);size_t count=0;
-        for(size_t c=0;c<real->clips.size();++c)for(int frame:real->clips[c].frames){assert(actor.sample(id,int(c),float(frame),Affine{},++count));assert(actor.socket(id,real->joint("kamu"),mouth));}
+    if(argc>=2){std::ofstream dump;if(argc==3){dump.open(argv[2]);dump<<std::setprecision(9);}std::ifstream file(argv[1]);auto real=read(file);assert(real&&checked(*real));auto id=actor.bind(real);size_t count=0;
+        for(size_t c=0;c<real->clips.size();++c)for(int frame:real->clips[c].frames){assert(actor.sample(id,int(c),float(frame),Affine{},++count));assert(actor.socket(id,real->joint("kamu"),mouth));if(dump.is_open())for(size_t j=0;j<real->joints.size();++j){assert(actor.socket(id,int(j),mouth));dump<<c<<" "<<frame<<" "<<j;for(auto& row:mouth.m)for(float v:row)dump<<" "<<v;dump<<"\n";}}
         std::cout<<"REAL_BANK joints="<<real->joints.size()<<" samples="<<count<<"\n";}
     std::cout<<"PASS attachments: hierarchy, quaternion, isolation, pause/death, windows, dedupe, bounds, generations\n";
 }
