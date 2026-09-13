@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace {
 struct FlightState {
@@ -60,8 +61,10 @@ void beginDescent(Piki* piki, float gravity)
 
 void pc_p2_purple_flight_reset()
 {
-    for (auto& entry : states) pc_p2_purple_feedback_cancel(entry.first);
-    states.clear();
+    std::vector<Piki*> active;
+    active.reserve(states.size());
+    for (const auto& entry : states) active.push_back(entry.first);
+    for (Piki* piki : active) pc_p2_purple_flight_cancel(piki);
     pc_p2_purple_feedback_reset();
     enabled = false;
 }
