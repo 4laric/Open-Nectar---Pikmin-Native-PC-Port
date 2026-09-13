@@ -93,6 +93,7 @@ public:
                 require(!host.bindNativeActor(bindingActor, bindingGenerator + 1, bindingType), "generator mismatch rejected");
                 require(!host.bindNativeActor(bindingActor, bindingGenerator, bindingType + 1), "type mismatch rejected");
                 require(bindingActor && host.bindNativeActor(bindingActor, bindingGenerator, bindingType), "bind matching actor");
+                require(pc_p2_demon_manager_bind(&host, bindingActor, bindingGenerator, bindingType), "manager bind matching actor");
                 if (otherActor) require(!host.bindNativeActor(otherActor, bindingGenerator, bindingType), "second actor rejected");
                 host.unbindNativeActor(nullptr);
                 require(host.boundNativeActor() == bindingActor, "null unbind preserves actor");
@@ -100,6 +101,7 @@ public:
                 require(host.boundNativeActor() == bindingActor, "other actor unbind preserves actor");
                 const unsigned original = bindingActor->mGenerator->_70;
                 bindingActor->mGenerator->_70 = original + 1;
+                pc_p2_demon_manager_update();
                 require(!host.revalidateNativeActor(bindingActor, original, bindingType), "identity reuse revocation");
                 bindingActor->mGenerator->_70 = original;
                 host.sceneExit();

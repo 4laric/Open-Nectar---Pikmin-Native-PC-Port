@@ -13,26 +13,54 @@
 #include <utility>
 #include <map>
 
-namespace { std::uint64_t nextHostToken = 0; std::map<BTeki*, P2DemonHost*> managerBindings; }
+namespace {
+std::uint64_t nextHostToken = 0;
+struct ManagerBinding { P2DemonHost* host; unsigned generator; int type; };
+std::map<BTeki*, ManagerBinding> managerBindings;
+}
 
 void pc_p2_demon_manager_reset()
 {
-    for (auto& entry : managerBindings) entry.second->unbindNativeActor(entry.first);
+    for (auto& entry : managerBindings) entry.second.host->unbindNativeActor(entry.first);
     managerBindings.clear();
 }
 void pc_p2_demon_manager_forget(BTeki* actor)
 {
     if (!actor) return;
     auto it = managerBindings.find(actor);
-    if (it != managerBindings.end()) { it->second->unbindNativeActor(actor); managerBindings.erase(it); }
+    if (it != managerBindings.end()) { it->second.host->unbindNativeActor(actor); managerBindings.erase(it); }
 }
 bool pc_p2_demon_manager_bind(P2DemonHost* host, BTeki* actor, unsigned generatorId, int tekiType)
 {
     if (!host || !actor || !host->bindNativeActor(actor, generatorId, tekiType)) return false;
     auto it = managerBindings.find(actor);
-    if (it != managerBindings.end() && it->second != host) { host->unbindNativeActor(actor); return false; }
-    managerBindings[actor] = host;
+    if (it != managerBindings.end() && it->second.host != host) { host->unbindNativeActor(actor); return false; }
+    managerBindings[actor] = {host, generatorId, tekiType};
     return true;
+}
+void pc_p2_demon_manager_update()
+{
+    for (auto it = managerBindings.begin(); it != managerBindings.end();) {
+        auto current = it++;
+        auto& binding = current->second;
+        if (!binding.host->revalidateNativeActor(current->first, binding.generator, binding.type)) {
+            managerBindings.erase(current);
+            continue;
+        }
+        binding.host->update();
+    }
+}
+void pc_p2_demon_manager_draw(Graphics& gfx)
+{
+    for (auto it = managerBindings.begin(); it != managerBindings.end();) {
+        auto current = it++;
+        auto& binding = current->second;
+        if (!binding.host->revalidateNativeActor(current->first, binding.generator, binding.type)) {
+            managerBindings.erase(current);
+            continue;
+        }
+        binding.host->refresh(gfx);
+    }
 }
 
 P2DemonHost::P2DemonHost()
