@@ -14,6 +14,7 @@ bool pc_demon_capture(Navi* captain, Creature* owner, CollPart* mouth,
 // an old registered-drop callback by reusing their own local token.
 bool pc_demon_forced_release(Navi* captain, float damage, float retailFallMeckSpeed);
 bool pc_demon_bound(Navi* captain);
+bool pc_demon_owned_by(Navi* captain, Creature* owner);
 void pc_demon_release(Navi* captain);
 void pc_demon_reset(Navi* captain); // Before Navi::reset mutates native stick fields.
 void pc_demon_owner_lost(std::uint64_t owner);

@@ -64,6 +64,7 @@ bool pc_demon_bound(Navi* n) {
        n->getStickObject()!=binding.owner||n->getStickPart()!=binding.mouth) { detach(n); return false; }
     return true;
 }
+bool pc_demon_owned_by(Navi* n, Creature* owner) { return pc_demon_bound(n) && binding.owner==owner; }
 void pc_demon_release(Navi* n) { detach(n); }
 void pc_demon_reset(Navi* n) { detach(n); pc_demon_escape_reset(n); }
 void pc_demon_owner_lost(std::uint64_t token) { if(token&&token==binding.ownerToken) detach(binding.captain); }
