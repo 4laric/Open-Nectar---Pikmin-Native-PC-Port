@@ -16,6 +16,8 @@ public:
 
     bool load(const char* modelPath, const Vector3f& mouthA, const Vector3f& mouthB);
     void setPosition(const Vector3f& position);
+    // Atomic pose update: source-local joint bases, before the native mouth twist.
+    bool setMouthPose(const Matrix4f& mouthA, const Matrix4f& mouthB);
     bool beginAttack();
     bool updateAttack(Navi* target, float sourceFrame, bool floorContact);
     bool endAttack(Navi* target);
@@ -31,7 +33,7 @@ public:
 private:
     Shape* mShape;
     CollPart* mMouths[2];
-    Vector3f mMouthLocal[2];
+    Matrix4f mMouthLocal[2];
     P2DemonAttackWindow mWindow;
     bool mLoaded;
     bool mAttackActive;

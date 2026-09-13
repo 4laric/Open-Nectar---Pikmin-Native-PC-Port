@@ -35,8 +35,8 @@ bool P2DemonHost::load(const char* modelPath, const Vector3f& mouthA, const Vect
         return false;
     for (int i = 0; i < mShape->mTexAttrCount; ++i)
         if (mShape->mTexAttrList[i].mTexture) mShape->mTexAttrList[i].mTexture->attach();
-    mMouthLocal[0] = mouthA;
-    mMouthLocal[1] = mouthB;
+    mMouthLocal[0].makeSRT(Vector3f(1, 1, 1), Vector3f(0, 0, 0), mouthA);
+    mMouthLocal[1].makeSRT(Vector3f(1, 1, 1), Vector3f(0, 0, 0), mouthB);
     for (auto* mouth : mMouths) {
         mouth->mPartType = PART_BoundSphere;
         mouth->mRadius = 15.0f;
@@ -53,12 +53,30 @@ void P2DemonHost::setPosition(const Vector3f& position)
     updateMouths();
 }
 
+bool P2DemonHost::setMouthPose(const Matrix4f& mouthA, const Matrix4f& mouthB)
+{
+    if (!mLoaded) return false;
+    const Matrix4f* poses[2] = { &mouthA, &mouthB };
+    for (const Matrix4f* pose : poses) {
+        for (int r = 0; r < 4; ++r)
+            for (int c = 0; c < 4; ++c)
+                if (!std::isfinite(pose->mMtx[r][c]) || std::fabs(pose->mMtx[r][c]) > 1.0e6f) return false;
+        if (pose->mMtx[3][0] != 0 || pose->mMtx[3][1] != 0 || pose->mMtx[3][2] != 0 || pose->mMtx[3][3] != 1) return false;
+    }
+    mMouthLocal[0] = mouthA;
+    mMouthLocal[1] = mouthB;
+    updateMouths();
+    return true;
+}
+
 void P2DemonHost::updateMouths()
 {
+    Matrix4f world;
+    world.makeSRT(mSRT.s, mSRT.r, mSRT.t);
     for (int i = 0; i < 2; ++i) {
-        const Vector3f centre = mSRT.t + mMouthLocal[i];
-        mMouths[i]->mCentre = centre;
-        mMouths[i]->mJointMatrix.makeSRT(Vector3f(1, 1, 1), Vector3f(0, 0, 0), centre);
+        world.multiplyTo(mMouthLocal[i], mMouths[i]->mJointMatrix);
+        const Matrix4f& joint = mMouths[i]->mJointMatrix;
+        mMouths[i]->mCentre.set(joint.mMtx[0][3], joint.mMtx[1][3], joint.mMtx[2][3]);
     }
 }
 
