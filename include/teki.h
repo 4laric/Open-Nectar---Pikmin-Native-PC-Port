@@ -18,6 +18,10 @@
 #include "types.h"
 #include "zen/CallBack.h"
 
+#if defined(PIKI_PC_PORT)
+f32 pc_hardmode_teki_life(f32 base);
+#endif
+
 class CollEvent;
 class Colour;
 struct CreaturePlatMgr;
@@ -394,6 +398,15 @@ public:
 	void setPersonalityI(int idx, int val) { mPersonality->setI(idx, val); }
 
 	f32 getParameterF(int idx) { return mTekiParams->getF(idx); } // see TekiFloatParams enum
+	// Hard scales only this, not every AI parameter read.
+	f32 getMaxLife()
+	{
+#if defined(PIKI_PC_PORT)
+		return pc_hardmode_teki_life(mTekiParams->getF(TPF_Life));
+#else
+		return mTekiParams->getF(TPF_Life);
+#endif
+	}
 	int getParameterI(int idx) { return mTekiParams->getI(idx); } // see TekiIntParams enum
 
 	void outputDirectionVector(Vector3f& outDir) { BTeki::outputDirectionVector(getDirection(), outDir); }
