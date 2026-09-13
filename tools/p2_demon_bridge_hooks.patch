@@ -1,0 +1,50 @@
+--- a/src/plugPikiKando/navi.cpp
++++ b/src/plugPikiKando/navi.cpp
+@@ -1,3 +1,6 @@
++#if defined(PIKI_PC_PORT)
++#include "pc_p2_demon_bridge.h"
++#endif
+ #include "pc_p2_purple.h"
+ #include "Navi.h"
+ #include "pc_randomizer.h"
+@@ -1023,6 +1026,9 @@
+ 	}
+ 
+ 	mPlateMgr->update();
++	#if defined(PIKI_PC_PORT)
++	if (!pc_demon_bound(this))
++	#endif
+ 	updateWalkAnimation();
+ 	mWalkAnimPrevPos = mSRT.t;
+ 	f32 actionSpeed = mStateMachine->getCurrID(this) == NAVISTATE_Nuku ? pc_randomizer_benefit_multiplier(PC_BENEFIT_PLUCK) : 1.0f;
+@@ -1053,6 +1059,9 @@
+ 
+ 	mKontroller->update();
+ 	mWalkAnimPrevDir = mFaceDirection;
++	#if defined(PIKI_PC_PORT)
++	if (!pc_demon_apply(this))
++	#endif
+ 	Creature::update();
+ 
+ 	mapMgr->updatePos(mSRT.t.x, mSRT.t.z);
+@@ -1453,6 +1462,9 @@
+  */
+ void Navi::doAI()
+ {
++#if defined(PIKI_PC_PORT)
++	if (pc_demon_bound(this)) return;
++#endif
+ 	if (gameflow.mDemoFlags & CinePlayerFlags::NaviNoAI) {
+ 		return;
+ 	}
+@@ -2378,6 +2390,10 @@
+ 		mSRT.s.set(scale, scale, scale);
+ 	}
+ 
++	#if defined(PIKI_PC_PORT)
++	if (pc_demon_draw_matrix(this, mWorldMtx)) {
++	} else
++	#endif
+ 	if (mRope) {
+ 		mWorldMtx = mConstrainedMoveMtx;
+ 		mWorldMtx.setTranslation(mSRT.t.x, mSRT.t.y, mSRT.t.z);
