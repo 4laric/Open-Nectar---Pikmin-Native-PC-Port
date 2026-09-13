@@ -31,8 +31,10 @@ void pc_p2_purple_motion_setup() {
     if(!pc_pikipelago_room_preview()||!pc_p2_purples_enabled())return;
     std::ifstream in("p2-purple-motion.txt");if(!in)return;
     std::string word;if(!(in>>word)||word!="P2_PURPLE_MOTION_1")std::abort();
+    int expectedFrames[]={14,20};int clipNumber=0;
     for(const char* expected:{"rolljmp","fall"}) {
         int count;float seconds;if(!(in>>word>>count>>seconds)||word!=expected||count<1||count>32||!std::isfinite(seconds)||seconds<=0)std::abort();
+        if(count!=expectedFrames[clipNumber]||std::fabs(seconds-float(expectedFrames[clipNumber])/30.0f)>0.00001f)std::abort();++clipNumber;
         Clip& clip=clips[clipIndex(word)];clip.seconds=seconds;clip.happa.resize(count);clip.seen.assign(count,false);
         for(int i=0;i<count;++i){char suffix[8];std::snprintf(suffix,sizeof(suffix),"_%02d",i);clip.shapes.push_back(load("purple_"+word+suffix));}
     }
@@ -45,7 +47,7 @@ void pc_p2_purple_motion_setup() {
     }
     for(const Clip& clip:clips)for(bool seen:clip.seen)if(!seen)std::abort();
     for(int i=0;i<3;++i)growth[i]=load("purple_happa_"+std::to_string(i));enabled=true;
-    std::printf("P2_PURPLE_MOTION_READY rolljmp=14frames fall=20frames boundary=flight_phase_time\n");
+    std::printf("P2_PURPLE_MOTION_READY rolljmp=14frames fall=20frames source_loop=repeat events=none boundary=flight_motion_time\n");
 }
 bool pc_p2_purple_motion_enabled(){return enabled;}
 bool pc_p2_draw_purple_motion(Piki* p,Graphics& gfx,PcP2PurpleMotionClip requested,float elapsed) {
