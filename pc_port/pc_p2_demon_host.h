@@ -3,6 +3,7 @@
 #include "pc_p2_demon_attack_window.h"
 #include "pc_p2_demon_pose_bank.h"
 #include "pc_p2_retail_player.h"
+#include "pc_p2_demon_catchfly_policy.h"
 
 class Graphics;
 class Shape;
@@ -31,7 +32,7 @@ public:
     bool beginTimedAttack(const p2retail::Motion& motion);
     P2DemonAttackDecision tickTimedAttack(Navi*, float sourceFrames, bool floorContact);
     bool beginCatchFly(const p2retail::Motion& motion);
-    P2DemonAttackDecision tickCatchFly(Navi* target, float sourceFrames, bool targetWithin25);
+    P2DemonAttackDecision tickCatchFly(float sourceFrames, p2demon::CatchFlyInput input);
     bool beginFallMeck(const p2retail::Motion& motion);
     P2DemonAttackDecision tickFallMeck(Navi* target, float sourceFrames, float damage, float speed);
     bool updateAttack(Navi* target, float sourceFrame, bool floorContact);

@@ -144,10 +144,12 @@ public:
             }
         } else if (phase == 5) {
             require(host.occupied(), "CatchFly keeps capture ownership");
-            // The fixture supplies a bounded target-distance input; movement AI
-            // is outside this host's acceptance surface.
-            const bool targetWithin25 = std::strcmp(mode, "timed_timeout") != 0;
-            const auto decision = host.tickCatchFly(n, 1.0f, targetWithin25);
+            // Bounded world inputs make pursuit and source height ordering
+            // observable without replacing the native movement implementation.
+            const bool timeout = std::strcmp(mode, "timed_timeout") == 0;
+            p2demon::CatchFlyInput input{0, timeout ? 20.0f : 10.0f, 0, timeout ? 40.0f : 10.0f, timeout ? 20.0f : 10.0f, 0,
+                0, 0, 20, 25, 1, 0, 10, 0, timeout ? -1 : int(P2DemonAttackNext::None), true};
+            const auto decision = host.tickCatchFly(1.0f, input);
             require(decision.valid, "advance CatchFly clock");
             if (decision.next != P2DemonAttackNext::None) {
                 require(decision.next == P2DemonAttackNext::FallMeck, "CatchFly END transition");

@@ -248,15 +248,19 @@ bool P2DemonHost::beginCatchFly(const p2retail::Motion& motion)
     return true;
 }
 
-P2DemonAttackDecision P2DemonHost::tickCatchFly(Navi* target, float delta, bool targetWithin25)
+P2DemonAttackDecision P2DemonHost::tickCatchFly(float delta, p2demon::CatchFlyInput input)
 {
     P2DemonAttackDecision result;
     if (mClockMode != 1 || !std::isfinite(delta) || delta <= 0 || delta > 1) return result;
-    if (!target || !pc_demon_owned_by(target, this)) {
+    input.elapsedSeconds = mCatchElapsedFrames / 30.0f;
+    input.targetAttached = mOccupied != 0;
+    const auto movement = p2demon::catchFly(input);
+    if (!input.targetAttached) {
         mOccupied = 0; mClockMode = 0; mAttackPlayer.cancel();
         result.valid = true; result.next = P2DemonAttackNext::Move; return result;
     }
-    if (!mClockFinished && (mCatchElapsedFrames > 300.0f || targetWithin25)) {
+    mTargetVelocity.set(movement.velocityX, movement.velocityY, movement.velocityZ);
+    if (!mClockFinished && movement.finishMotion) {
         mAttackPlayer.finishMotion();
         mClockFinished = true;
     }
@@ -270,6 +274,7 @@ P2DemonAttackDecision P2DemonHost::tickCatchFly(Navi* target, float delta, bool 
     if (!selected || !applyPoseFrame(selected->frame)) return result;
     result.valid = true;
     if (ended) { mClockMode = 2; result.next = P2DemonAttackNext::FallMeck; }
+    else if (movement.next != P2DemonAttackNext::None) result.next = movement.next;
     return result;
 }
 
