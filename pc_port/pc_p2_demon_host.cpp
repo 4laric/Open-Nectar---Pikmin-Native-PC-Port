@@ -151,3 +151,17 @@ void P2DemonHost::refresh(Graphics& gfx)
     mShape->updateAnim(gfx, view, nullptr, nullptr);
     mShape->drawshape(gfx, *gfx.mCamera, nullptr);
 }
+bool P2DemonHost::loadMouthPoses(const char* path) { return mPoseBank.load(path); }
+bool P2DemonHost::applyMouthFrame(int frame)
+{
+    const auto* pose = mPoseBank.exact(frame);
+    if (!pose) return false;
+    Matrix4f mouths[2];
+    for (int slot = 0; slot < 2; ++slot) {
+        mouths[slot].makeIdentity();
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 4; ++c)
+                mouths[slot].mMtx[r][c] = pose->values[slot * 12 + r * 4 + c];
+    }
+    return setMouthPose(mouths[0], mouths[1]);
+}

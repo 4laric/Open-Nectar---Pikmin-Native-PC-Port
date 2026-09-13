@@ -1,6 +1,7 @@
 #pragma once
 #include "Creature.h"
 #include "pc_p2_demon_attack_window.h"
+#include "pc_p2_demon_pose_bank.h"
 
 class Graphics;
 class Shape;
@@ -18,6 +19,8 @@ public:
     void setPosition(const Vector3f& position);
     // Atomic pose update: source-local joint bases, before the native mouth twist.
     bool setMouthPose(const Matrix4f& mouthA, const Matrix4f& mouthB);
+    bool loadMouthPoses(const char* path);
+    bool applyMouthFrame(int frame);
     bool beginAttack();
     bool updateAttack(Navi* target, float sourceFrame, bool floorContact);
     bool endAttack(Navi* target);
@@ -35,6 +38,7 @@ private:
     CollPart* mMouths[2];
     Matrix4f mMouthLocal[2];
     P2DemonAttackWindow mWindow;
+    P2DemonPoseBank mPoseBank;
     bool mLoaded;
     bool mAttackActive;
     unsigned mOccupied;
