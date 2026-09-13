@@ -29,7 +29,7 @@ void beginDescent(Piki* piki, float gravity)
     Iterator enemies(tekiMgr);
     CI_LOOP(enemies) {
         BTeki* enemy = static_cast<BTeki*>(*enemies);
-        if (!enemy || !enemy->isAlive() || !enemy->isLivingThing()) continue;
+        if (!enemy || !enemy->isAlive()) continue;
         const Vector3f separation = enemy->mSRT.t - piki->mSRT.t;
         const float distance = separation.length();
         if (!std::isfinite(enemy->mCollisionRadius) || enemy->mCollisionRadius < 0.0f) continue;
