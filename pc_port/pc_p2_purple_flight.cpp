@@ -37,7 +37,9 @@ void beginDescent(Piki* piki, float gravity)
     Iterator enemies(tekiMgr);
     CI_LOOP(enemies) {
         BTeki* enemy = static_cast<BTeki*>(*enemies);
-        if (!enemy || !enemy->isAlive()) continue;
+        // Native has no P2 isLivingThing predicate. Organic is the bounded adapter
+        // that excludes bombs, vents, rocks, and other nonliving Teki props.
+        if (!enemy || !enemy->isAlive() || !enemy->isOrganic()) continue;
         const Vector3f separation = enemy->mSRT.t - piki->mSRT.t;
         const float distance = separation.length();
         if (!std::isfinite(enemy->mCollisionRadius) || enemy->mCollisionRadius < 0.0f) continue;

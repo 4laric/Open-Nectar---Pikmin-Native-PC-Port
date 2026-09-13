@@ -9,7 +9,8 @@ static void purpleFlightFixture(Navi* n)
     static Piki* source = nullptr;
     static BTeki* adult = nullptr;
     static Vector3f adultPosition;
-    static float pauseY = 0.0f, adultHealth = 0.0f, pauseObserved = 0.0f, recoveryObserved = 0.0f;
+    static float pauseY = 0.0f, pauseMinY = 0.0f, pauseMaxY = 0.0f;
+    static float adultHealth = 0.0f, pauseObserved = 0.0f, recoveryObserved = 0.0f;
     static bool sawAscent = false, sawPause = false, sawDescent = false, sawRecovery = false;
     static bool capturedAscent = false, capturedPause = false, capturedDescent = false;
     ++timer;
@@ -74,9 +75,20 @@ static void purpleFlightFixture(Navi* n)
             }
         }
         if (sample.phase == PcP2PurpleFlightPhase::EntryPause) {
-            if (!sawPause) { pauseY = source->mSRT.t.y; sawPause = true; }
+            if (!sawPause) {
+                pauseY = pauseMinY = pauseMaxY = source->mSRT.t.y;
+                sawPause = true;
+            }
             pauseObserved += gsys->getFrameTime();
-            require(std::fabs(source->mSRT.t.y - pauseY) < 1.0f, "entry pause drifted vertically");
+            pauseMinY = std::min(pauseMinY, source->mSRT.t.y);
+            pauseMaxY = std::max(pauseMaxY, source->mSRT.t.y);
+            std::printf("P2_PURPLE_FLIGHT_PAUSE elapsed=%.3f pos=(%.3f,%.3f,%.3f) velocity=(%.3f,%.3f,%.3f) target=(%.3f,%.3f,%.3f) b0=(%.3f,%.3f,%.3f) volatile=(%.3f,%.3f,%.3f) flags=%08x\n",
+                sample.phaseElapsed, source->mSRT.t.x, source->mSRT.t.y, source->mSRT.t.z,
+                source->mVelocity.x, source->mVelocity.y, source->mVelocity.z,
+                source->mTargetVelocity.x, source->mTargetVelocity.y, source->mTargetVelocity.z,
+                source->_B0.x, source->_B0.y, source->_B0.z,
+                source->mVolatileVelocity.x, source->mVolatileVelocity.y, source->mVolatileVelocity.z,
+                source->mCreatureFlags);
             if (!capturedPause) {
                 capturedPause = true;
                 capture("p2-purple-flight-pause.ppm");
@@ -84,6 +96,7 @@ static void purpleFlightFixture(Navi* n)
         }
         if (sample.phase == PcP2PurpleFlightPhase::Descent) {
             sawDescent = true;
+            require(pauseMaxY - pauseMinY < 1.0f, "entry pause drifted vertically");
             require(sample.motionElapsed < 3.0f, "descent motion clock invalid");
             if (!capturedDescent) {
                 capturedDescent = true;
