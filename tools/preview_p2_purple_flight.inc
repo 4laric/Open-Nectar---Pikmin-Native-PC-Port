@@ -23,7 +23,9 @@ static void purpleFlightFixture(Navi* n)
         timer = 0;
     };
 
-    if (state == 0 && timer >= 300) {
+    const bool captainReady = n->getCurrState() && n->getCurrState()->getID() == NAVISTATE_Walk
+                           && !gameflow.mMoviePlayer->mIsActive;
+    if (state == 0 && timer >= 300 && captainReady) {
         int reds = 0;
         Iterator pikis(pikiMgr);
         CI_LOOP(pikis) {
@@ -51,6 +53,8 @@ static void purpleFlightFixture(Navi* n)
         throwTo(Vector3f(-85.0f, mapMgr->getMinY(-85.0f, 0.0f, true), 0.0f));
         state = 1;
         std::puts("P2_PURPLE_FLIGHT_FIXTURE_READY fresh_reds=20 window=960x540 centered throw=physical");
+    } else if (state == 0) {
+        require(timer < 900, "captain never reached active Walk gameplay after intro");
     } else if (state == 1) {
         PcP2PurpleFlightSample sample = pc_p2_purple_flight_sample(source);
         if (sample.phase == PcP2PurpleFlightPhase::Ascent && timer >= 3) {
