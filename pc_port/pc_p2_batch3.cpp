@@ -1,3 +1,4 @@
+#include "pc_p2_dangomushi.h"
 #include "pc_p2_hanachirashi.h"
 #include "pc_p2_catfish.h"
 // Family-owned batch-3 P2 visual registration: aquatic (#374), flying (#375)
@@ -254,7 +255,7 @@ void pc_p2_batch3_setup() {
         }
     }
     for (const auto& entry : actors) {
-        if (entry.second == "aquatic|Tadpole" || entry.second == "flying|Mar" || entry.second == "flying|Hanachirashi" || entry.second == "aquatic|Catfish")
+        if (entry.second == "aquatic|Tadpole" || entry.second == "flying|Mar" || entry.second == "snagret|DangoMushi" || entry.second == "flying|Hanachirashi" || entry.second == "aquatic|Catfish")
             std::printf("P2_BATCH3_BIND generator=%u key=%s visual_only=0 native_fsm=implemented\n",
                         entry.first->mGenerator ? entry.first->mGenerator->_70 : 0, entry.second.c_str());
         else
@@ -285,7 +286,7 @@ bool pc_p2_batch3_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     if (!corpse) {
         const char* forced = nullptr;
         float phase = 0.0f;
-        if ((pc_p2_tadpole_clip(actor, forced, phase) || pc_p2_mar_clip(actor, forced, phase) || pc_p2_hanachirashi_clip(actor, forced, phase) || pc_p2_catfish_clip(actor, forced, phase)) && bank.clips.count(forced)) {
+        if ((pc_p2_tadpole_clip(actor, forced, phase) || pc_p2_mar_clip(actor, forced, phase) || pc_p2_dangomushi_clip(actor, forced, phase) || pc_p2_hanachirashi_clip(actor, forced, phase) || pc_p2_catfish_clip(actor, forced, phase)) && bank.clips.count(forced)) {
             name = forced;
             forcedPhase = phase;
         }
