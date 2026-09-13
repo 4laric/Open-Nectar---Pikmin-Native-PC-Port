@@ -2,6 +2,7 @@
 #include "pc_p2_demon_attack_window.h"
 #include <cmath>
 #include <algorithm>
+#include <cstdint>
 
 // Bounded translation of SaraiState::StateCatchFly::exec. Physics and turning
 // remain owned by the native actor; this only exposes the source decision order.
@@ -18,6 +19,13 @@ inline TargetPoint selectTarget(float homeX, float homeY, float homeZ, float rad
     out.z = homeZ + radius * std::cos(angle);
     out.valid = std::isfinite(out.x) && std::isfinite(out.y) && std::isfinite(out.z);
     return out;
+}
+inline TargetPoint selectTargetSeeded(float homeX, float homeY, float homeZ, float radius, std::uint32_t seed)
+{
+    constexpr float twoPi = 6.28318530717958647692f;
+    // Explicit fixture stream: one documented 32-bit sample, no global RNG use.
+    const float angle = (float(seed) / 4294967296.0f) * twoPi;
+    return selectTarget(homeX, homeY, homeZ, radius, angle);
 }
 struct CatchFlyInput {
     float x, y, z;

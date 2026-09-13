@@ -33,6 +33,7 @@ public:
     P2DemonAttackDecision tickTimedAttack(Navi*, float sourceFrames, bool floorContact);
     bool beginCatchFly(const p2retail::Motion& motion);
     bool selectCatchFlyTarget(const Vector3f& home, float radius, float angle);
+    bool selectCatchFlyTargetSeeded(const Vector3f& home, float radius, std::uint32_t seed);
     P2DemonAttackDecision tickCatchFly(Navi* target, float sourceFrames, p2demon::CatchFlyInput input);
     bool beginFallMeck(const p2retail::Motion& motion);
     P2DemonAttackDecision tickFallMeck(Navi* target, float sourceFrames, float damage, float speed);

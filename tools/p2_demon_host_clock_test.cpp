@@ -19,6 +19,10 @@ int main()
     const auto selected = p2demon::selectTarget(2, 3, 4, 10, 1.5707963f);
     assert(selected.valid && selected.x > 11.9f && selected.y == 3.0f && selected.z > 3.9f && selected.z < 4.1f);
     assert(!p2demon::selectTarget(0, 0, 0, -1, 0).valid);
+    const auto seedA = p2demon::selectTargetSeeded(1, 2, 3, 8, 0x40000000u);
+    const auto seedB = p2demon::selectTargetSeeded(1, 2, 3, 8, 0x40000000u);
+    assert(seedA.valid && seedB.valid && seedA.x == seedB.x && seedA.z == seedB.z);
+    assert(seedA.x > 8.9f && seedA.x < 9.1f && seedA.z > 2.9f && seedA.z < 3.1f);
     p2demon::CatchFlyInput input{0, 10, 0, 40, 10, 0, 0, 0, 20, 25,
         1, 0, 10, 0, 0.4f, 10.0f, 0, p2demon::HeightNext::Fall, true};
     auto pursuit = p2demon::catchFly(input);

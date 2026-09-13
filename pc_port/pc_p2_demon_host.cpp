@@ -264,6 +264,12 @@ bool P2DemonHost::selectCatchFlyTarget(const Vector3f& home, float radius, float
     return mCatchTarget.valid;
 }
 
+bool P2DemonHost::selectCatchFlyTargetSeeded(const Vector3f& home, float radius, std::uint32_t seed)
+{
+    mCatchTarget = p2demon::selectTargetSeeded(home.x, home.y, home.z, radius, seed);
+    return mCatchTarget.valid;
+}
+
 P2DemonAttackDecision P2DemonHost::tickCatchFly(Navi* target, float delta, p2demon::CatchFlyInput input)
 {
     P2DemonAttackDecision result;
