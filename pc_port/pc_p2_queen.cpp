@@ -14,6 +14,7 @@
 #include "Graphics.h"
 #include "Camera.h"
 #include "gameflow.h"
+#include "MoviePlayer.h"
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "PikiState.h"
@@ -482,6 +483,12 @@ void pc_p2_queen_setup() {
 			std::snprintf(name, sizeof(name), "bulblax_%s_%s_%02u.mod", speciesName(clip.enemy), clip.name.c_str(),
 			              unsigned(i));
 			shapes[ci].push_back(load(name, resources[clip.enemy], bytes));
+			if(materialEnabled&&clip.enemy==30){
+				Shape* shape=shapes[ci].back();
+				if(shape->mMaterialCount!=2||shape->mTexAttrCount<3||
+				   shape->mMaterialList[1].mTextureInfo.mTextureDataCount!=1||
+				   shape->mMaterialList[1].mTextureInfo.mTextureData[0].mTexture!=shape->mTexAttrList[2].mTexture)fail();
+			}
 		}
 	}
 	for (const auto& p : config.placements) {
@@ -514,7 +521,8 @@ void pc_p2_queen_update() {
 		clockAcc -= Tick;
 		++steps;
 		for (auto& q : queens) {
-			if(materialEnabled&&q.health>0&&q.state!=p2queen::Dead)q.materialFrame=std::fmod(q.materialFrame+1.f,30.f);
+			if(materialEnabled&&q.health>0&&q.state!=p2queen::Dead&&!gameflow.mPauseAll&&!gameflow.mIsUIOverlayActive&&
+			   !(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive))q.materialFrame=std::fmod(q.materialFrame+1.f,30.f);
 			tickQueen(q);
 		}
 	}
