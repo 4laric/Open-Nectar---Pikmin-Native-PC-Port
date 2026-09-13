@@ -42,12 +42,7 @@ void trail(Piki* piki)
     generator->setScaleSize(0.65f);
     // Allow one emission update before ending this detached burst. stopGen()
     // here would suppress its first particles altogether.
-    generator->mEmissionRateKeyCount = 0;
-    generator->mEmissionRate = 2.0f;
-    generator->mEmissionRateJitter = 0.0f;
-    generator->mMaxFrame = 1;
-    generator->mMaxPasses = 1;
-    generator->mBaseLifetime = 6;
+    generator->configureOneShotBurst(2.0f, 6);
     ++stats.trailBursts;
 }
 }
@@ -91,7 +86,8 @@ void pc_p2_purple_feedback_land(Piki* piki, bool enemy)
     // P2 DOSUN/DOSUN_HIT IDs belong to a different sound bank. Use spatial
     // native thud/hit sounds; never send P2 IDs into P1 JAudio and claim parity.
     const int sound = enemy ? SE_CHAPPY_FOOTDAMAGE : SE_FLOG_LAND;
-    if (seSystem && !seSystem->mIsClosed) {
+    // playSoundDirect itself rejects requests when the sound system is closed.
+    if (seSystem) {
         seSystem->playSoundDirect(JACEVENT_Battle, sound, position);
         ++stats.soundRequests;
     }
