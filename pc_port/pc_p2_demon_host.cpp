@@ -296,7 +296,12 @@ P2DemonAttackDecision P2DemonHost::tickFallMeck(Navi* target, float delta, float
     for (const auto& pose : samples) if (pose.frame <= mAttackPlayer.frame()) selected = &pose;
     if (!selected || !applyPoseFrame(selected->frame)) return result;
     result.valid = true;
-    if (ended) { mClockMode = 0; result.next = P2DemonAttackNext::Move; }
+    if (ended) {
+        // KEY3 owns the one-shot release. Never claim the retail Move
+        // transition if ownership was already lost or the release was refused.
+        mClockMode = 0;
+        result.next = mClockReleased ? P2DemonAttackNext::Move : P2DemonAttackNext::Fail;
+    }
     return result;
 }
 

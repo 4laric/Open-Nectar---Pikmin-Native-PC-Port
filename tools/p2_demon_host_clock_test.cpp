@@ -1,4 +1,5 @@
 #include "pc_p2_retail_player.h"
+#include "pc_p2_demon_catchfly_policy.h"
 #include <cassert>
 #include <cstdio>
 #include <initializer_list>
@@ -15,6 +16,16 @@ static p2retail::Motion motion(const char* name, int duration,
 
 int main()
 {
+    p2demon::CatchFlyInput input{0, 10, 0, 40, 10, 0, 0, 0, 20, 25, 1, 0, 10, 0, 2, true};
+    auto pursuit = p2demon::catchFly(input);
+    assert(pursuit.velocityX > 0 && pursuit.velocityY > 0 && !pursuit.finishMotion);
+    input.elapsedSeconds = 4.0f;
+    assert(p2demon::catchFly(input).next == static_cast<P2DemonAttackNext>(2));
+    input.targetAttached = false;
+    assert(p2demon::catchFly(input).next == P2DemonAttackNext::Move);
+    input.targetAttached = true; input.elapsedSeconds = 11.0f;
+    assert(p2demon::catchFly(input).finishMotion);
+
     const auto catchFly = motion("waitact2.bca", 50, {{0, 0}, {39, 1}});
     p2retail::Player player;
     assert(player.start(catchFly));
