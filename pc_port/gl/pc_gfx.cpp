@@ -4539,10 +4539,14 @@ static Vertex sFifoVertex = {};
 
 static bool vtx_desc_uses_fifo()
 {
-    for (int a = GX_VA_PNMTXIDX; a <= GX_VA_TEX7; ++a) {
+    // Matrix-index DIRECT is the normal GX default. Treating it as a FIFO
+    // stream made every UI and world draw parse vertices a byte at a time.
+    // Only indexed arrays, or packed non-float immediates (GXTexCoord2u8),
+    // need the byte parser.
+    for (int a = GX_VA_POS; a <= GX_VA_TEX7; ++a) {
         const GXAttrType d = sVtxDesc[a];
         if (d == GX_INDEX8 || d == GX_INDEX16) return true;
-        if (a <= GX_VA_TEX7MTXIDX && d == GX_DIRECT) return true;
+        if (d == GX_DIRECT && sVtxFormats[sImmVtxFmt][a].type != GX_F32) return true;
     }
     return false;
 }
