@@ -918,7 +918,10 @@ void pc_p2_king_update() {
 		if (injectWarCryTick && !injectWarCryDone && behaviorTick >= injectWarCryTick) {
 			for (auto& k : kings) {
 				if (injectWarCryId && k.cfg.id != injectWarCryId) continue;
-				if (k.state == p2king::HideWait || k.state == p2king::Hide) continue;
+				// Opt-in fixture injection: force WarCry even from a buried
+				// state so the scenario does not depend on the squad surviving
+				// to provide an appear target. Dead is never resurrected.
+				if (k.state == p2king::Dead) continue;
 				enter(k, p2king::WarCry);
 				injectWarCryDone = true;
 				std::printf("P2_KING_INJECT id=%u tick=%lu force=WarCry fixture=1\n", k.cfg.id, behaviorTick);
@@ -937,7 +940,10 @@ void pc_p2_king_update() {
 		if (injectBombTick && !injectBombDone && behaviorTick >= injectBombTick) {
 			for (auto& k : kings) {
 				if (injectWarCryId && k.cfg.id != injectWarCryId) continue;
-				if (k.state == p2king::Dead || k.state == p2king::HideWait || k.state == p2king::Hide) continue;
+				// Opt-in fixture injection: force the bomb line-up even from a
+				// buried state so the deterministic ingestion lane does not
+				// depend on the squad providing an appear target. Dead skipped.
+				if (k.state == p2king::Dead) continue;
 				Bomb* best = nullptr;
 				float bestDist = 0.0f;
 				for (auto& b : bombs) {
