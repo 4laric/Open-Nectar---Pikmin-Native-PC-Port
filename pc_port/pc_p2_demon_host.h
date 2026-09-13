@@ -23,6 +23,8 @@ public:
     bool loadMouthPoses(const char* path);
     bool applyMouthFrame(int frame);
     bool loadPoseMeshes(const char* profile);
+    bool preloadPoseMeshes(const char* profile);
+    bool switchPoseMeshes(const char* profile);
     bool applyPoseFrame(int frame);
     int renderedPoseFrame() const { return mRenderedFrame; }
     bool beginAttack();
@@ -40,6 +42,11 @@ public:
     void doKill() override;
 
 private:
+    struct PoseSet {
+        std::string profile;
+        P2DemonPoseBank bank;
+        std::vector<Shape*> meshes;
+    };
     Shape* mShape;
     CollPart* mMouths[2];
     Matrix4f mMouthLocal[2];
@@ -47,6 +54,7 @@ private:
     p2retail::Player mAttackPlayer;
     P2DemonPoseBank mPoseBank;
     std::vector<Shape*> mPoseMeshes;
+    std::vector<PoseSet> mPoseSets;
     int mRenderedFrame = -1;
     bool mLoaded;
     bool mAttackActive;

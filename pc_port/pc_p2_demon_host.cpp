@@ -8,6 +8,7 @@
 #include "gameflow.h"
 #include "sysNew.h"
 #include <cmath>
+#include <utility>
 
 namespace { std::uint64_t nextHostToken = 0; }
 
@@ -166,27 +167,51 @@ bool P2DemonHost::applyMouthFrame(int frame)
     return setMouthPose(mouths[0], mouths[1]);
 }
 
-// Preload once in the App heap. No per-frame model allocation or global cache mutation.
-bool P2DemonHost::loadPoseMeshes(const char* profile)
+// Load sampled meshes once in the App heap. Switching only changes pointers and
+// the active bank, so a motion transition cannot allocate or mutate global state.
+bool P2DemonHost::preloadPoseMeshes(const char* profile)
 {
-    if (!mLoaded || !mPoseMeshes.empty()) return false;
-    P2DemonPoseBank parsed;
-    if (!parsed.load(profile)) return false;
-    for (const auto& pose : parsed.samples()) if (pose.model.empty()) return false;
-    std::vector<Shape*> meshes;
+    if (!mLoaded || !profile || !*profile) return false;
+    for (const auto& set : mPoseSets)
+        if (set.profile == profile) return true;
+
+    PoseSet set;
+    set.profile = profile;
+    if (!set.bank.load(profile)) return false;
+    for (const auto& pose : set.bank.samples()) if (pose.model.empty()) return false;
     const int previousHeap = gsys->setHeap(SYSHEAP_App);
-    for (const auto& pose : parsed.samples()) {
+    for (const auto& pose : set.bank.samples()) {
         const std::string path = "courses/pikmin2room/" + pose.model;
         Shape* shape = gameflow.loadShape(path.c_str(), true);
         if (!shape) { gsys->setHeap(previousHeap); return false; }
-        for (int i=0; i<shape->mTexAttrCount; ++i)
+        for (int i = 0; i < shape->mTexAttrCount; ++i)
             if (shape->mTexAttrList[i].mTexture) shape->mTexAttrList[i].mTexture->attach();
-        meshes.push_back(shape);
+        set.meshes.push_back(shape);
     }
     gsys->setHeap(previousHeap);
-    mPoseBank = parsed;
-    mPoseMeshes.swap(meshes);
+    mPoseSets.push_back(std::move(set));
+    if (mPoseMeshes.empty()) return switchPoseMeshes(profile);
     return true;
+}
+
+bool P2DemonHost::switchPoseMeshes(const char* profile)
+{
+    if (!mLoaded || !profile || !*profile) return false;
+    for (const auto& set : mPoseSets) {
+        if (set.profile != profile) continue;
+        if (set.bank.samples().size() != set.meshes.size() || set.meshes.empty()) return false;
+        mPoseBank = set.bank;
+        mPoseMeshes = set.meshes;
+        return true;
+    }
+    if (!preloadPoseMeshes(profile)) return false;
+    return switchPoseMeshes(profile);
+}
+
+bool P2DemonHost::loadPoseMeshes(const char* profile)
+{
+    if (!mLoaded || !mPoseMeshes.empty()) return false;
+    return preloadPoseMeshes(profile);
 }
 bool P2DemonHost::applyPoseFrame(int frame)
 {
