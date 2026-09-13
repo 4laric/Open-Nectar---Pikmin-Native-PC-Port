@@ -403,6 +403,7 @@ public:
 	// Explicit detached burst; existing generators retain their loaded settings.
 	void configureOneShotBurst(f32 particles, s16 lifetime)
 	{
+		mParticleFlags &= ~(PTCLFLAG_EmissionRateManual | PTCLFLAG_EmissionRateLinear | PTCLFLAG_DisableEmission);
 		mEmissionRateKeyCount = 0;
 		mEmissionRate = particles;
 		mEmissionRateJitter = 0.0f;
