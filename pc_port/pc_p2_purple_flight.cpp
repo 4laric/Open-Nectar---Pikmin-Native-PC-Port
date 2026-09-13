@@ -16,6 +16,8 @@ struct FlightState {
     PcP2PurpleFlightPhase phase = PcP2PurpleFlightPhase::None;
     float elapsed = 0.0f;
     float motionElapsed = 0.0f;
+    bool hadIgnoreGravity = false;
+    bool hadPriorityFaceDirection = false;
 };
 
 bool enabled = false;
@@ -23,6 +25,11 @@ std::unordered_map<Piki*, FlightState> states;
 
 void beginDescent(Piki* piki, float gravity)
 {
+    auto found = states.find(piki);
+    if (found != states.end() && !found->second.hadIgnoreGravity) {
+        piki->resetCreatureFlag(CF_IgnoreGravity);
+    }
+    piki->setCreatureFlag(CF_UsePriorityFaceDir);
     piki->mVelocity.set(0.0f, -gravity * 0.5f, 0.0f);
     BTeki* closest = nullptr;
     float closestDistance = 12800.0f;
@@ -87,7 +94,8 @@ void pc_p2_purple_flight_arm(Piki* piki)
 {
     if (!enabled || !piki || !piki->isAlive() || !pc_p2_is_purple(piki)) return;
     pc_p2_purple_feedback_cancel(piki);
-    states[piki] = { PcP2PurpleFlightPhase::Ascent, 0.0f, 0.0f };
+    states[piki] = { PcP2PurpleFlightPhase::Ascent, 0.0f, 0.0f,
+        piki->isCreatureFlag(CF_IgnoreGravity), piki->isCreatureFlag(CF_UsePriorityFaceDir) };
 }
 
 bool pc_p2_purple_flight_update(Piki* piki, float deltaTime, float gravity)
@@ -104,12 +112,16 @@ bool pc_p2_purple_flight_update(Piki* piki, float deltaTime, float gravity)
         state.elapsed = 0.0f;
         piki->mVelocity.set(0.0f, 0.0f, 0.0f);
         piki->mTargetVelocity = piki->mVelocity;
+        piki->setCreatureFlag(CF_IgnoreGravity);
         pc_p2_purple_feedback_entry(piki);
     } else if (state.phase == PcP2PurpleFlightPhase::EntryPause) {
         piki->mVelocity.set(0.0f, 0.0f, 0.0f);
         piki->mTargetVelocity = piki->mVelocity;
         if (state.elapsed >= 0.25f) {
-            state = { PcP2PurpleFlightPhase::Descent, 0.0f, 0.0f };
+            const bool hadIgnoreGravity = state.hadIgnoreGravity;
+            const bool hadPriorityFaceDirection = state.hadPriorityFaceDirection;
+            state = { PcP2PurpleFlightPhase::Descent, 0.0f, 0.0f,
+                hadIgnoreGravity, hadPriorityFaceDirection };
             beginDescent(piki, gravity);
         }
     } else if (state.phase == PcP2PurpleFlightPhase::Descent) {
@@ -141,7 +153,12 @@ void pc_p2_purple_flight_contact(Piki* piki, bool enemyContact)
 
 void pc_p2_purple_flight_cancel(Piki* piki)
 {
-    if (!piki || states.erase(piki) == 0) return;
+    if (!piki) return;
+    auto found = states.find(piki);
+    if (found == states.end()) return;
+    if (!found->second.hadIgnoreGravity) piki->resetCreatureFlag(CF_IgnoreGravity);
+    if (!found->second.hadPriorityFaceDirection) piki->resetCreatureFlag(CF_UsePriorityFaceDir);
+    states.erase(found);
     pc_p2_purple_feedback_cancel(piki);
 }
 

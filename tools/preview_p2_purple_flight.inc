@@ -9,8 +9,9 @@ static void purpleFlightFixture(Navi* n)
     static Piki* source = nullptr;
     static BTeki* adult = nullptr;
     static Vector3f adultPosition;
-    static float pauseY = 0.0f, adultHealth = 0.0f;
+    static float pauseY = 0.0f, adultHealth = 0.0f, pauseObserved = 0.0f, recoveryObserved = 0.0f;
     static bool sawAscent = false, sawPause = false, sawDescent = false, sawRecovery = false;
+    static bool capturedAscent = false, capturedPause = false, capturedDescent = false;
     ++timer;
 
     auto throwTo = [&](const Vector3f& target) {
@@ -39,7 +40,10 @@ static void purpleFlightFixture(Navi* n)
             }
         }
         require(reds == 20 && source && adult, "fresh 20-red flight arena actors missing");
+        pc_p2_purple_flight_arm(source);
+        require(!pc_p2_purple_flight_active(source), "Red Pikmin armed Purple flight");
         pc_p2_make_purple(source);
+        source->setFlower(Flower);
         adultPosition = adult->mSRT.t;
         n->resetPosition(Vector3f(-175.0f, mapMgr->getMinY(-175.0f, -100.0f, true), -100.0f));
         throwTo(Vector3f(-85.0f, mapMgr->getMinY(-85.0f, 0.0f, true), 0.0f));
@@ -47,25 +51,62 @@ static void purpleFlightFixture(Navi* n)
         std::puts("P2_PURPLE_FLIGHT_FIXTURE_READY fresh_reds=20 window=960x540 centered throw=physical");
     } else if (state == 1) {
         PcP2PurpleFlightSample sample = pc_p2_purple_flight_sample(source);
-        if (sample.phase == PcP2PurpleFlightPhase::Ascent) sawAscent = true;
+        if (sample.phase == PcP2PurpleFlightPhase::Ascent && timer >= 3) {
+            source->mFSM->transit(source, PIKISTATE_Normal);
+            require(!pc_p2_purple_flight_active(source), "interrupted ascent retained flight state");
+            PcP2PurpleFeedbackStats feedback = pc_p2_purple_feedback_stats();
+            require(feedback.entries == 0 && feedback.impacts == 0, "interrupted ascent emitted landing feedback");
+            std::puts("P2_PURPLE_FLIGHT_CANCEL_PASS phase=Ascent reuse=armed-next");
+            n->resetPosition(Vector3f(-175.0f, mapMgr->getMinY(-175.0f, -100.0f, true), -100.0f));
+            throwTo(Vector3f(-85.0f, mapMgr->getMinY(-85.0f, 0.0f, true), 0.0f));
+            state = 2;
+        }
+        require(timer < 120, "physical interruption throw did not enter ascent");
+    } else if (state == 2) {
+        PcP2PurpleFlightSample sample = pc_p2_purple_flight_sample(source);
+        if (sample.phase == PcP2PurpleFlightPhase::Ascent) {
+            sawAscent = true;
+            if (!capturedAscent) {
+                capturedAscent = true;
+                capture("p2-purple-flight-ascent.ppm");
+                std::printf("P2_PURPLE_FLIGHT_PHASE phase=Ascent elapsed=%.3f motion=%.3f y=%.2f\n",
+                    sample.phaseElapsed, sample.motionElapsed, source->mSRT.t.y);
+            }
+        }
         if (sample.phase == PcP2PurpleFlightPhase::EntryPause) {
             if (!sawPause) { pauseY = source->mSRT.t.y; sawPause = true; }
+            pauseObserved += gsys->getFrameTime();
             require(std::fabs(source->mSRT.t.y - pauseY) < 1.0f, "entry pause drifted vertically");
+            if (!capturedPause) {
+                capturedPause = true;
+                capture("p2-purple-flight-pause.ppm");
+            }
         }
         if (sample.phase == PcP2PurpleFlightPhase::Descent) {
             sawDescent = true;
             require(sample.motionElapsed < 3.0f, "descent motion clock invalid");
+            if (!capturedDescent) {
+                capturedDescent = true;
+                capture("p2-purple-flight-descent.ppm");
+                std::printf("P2_PURPLE_FLIGHT_PHASE phase=Descent pause=%.3f motion=%.3f y=%.2f\n",
+                    pauseObserved, sample.motionElapsed, source->mSRT.t.y);
+            }
         }
         if (sample.phase == PcP2PurpleFlightPhase::Recovery && !sawRecovery) {
             sawRecovery = true;
             capture("p2-purple-flight-impact.ppm");
         }
+        if (sample.phase == PcP2PurpleFlightPhase::Recovery) recoveryObserved += gsys->getFrameTime();
         if (sawRecovery && sample.phase == PcP2PurpleFlightPhase::None) {
             require(sawAscent && sawPause && sawDescent, "ground throw skipped a HipDrop phase");
+            require(pauseObserved >= 0.20f && recoveryObserved >= 0.25f,
+                "HipDrop pause/recovery duration below one-frame tolerance");
+            require(source->mHappa == Flower, "flower Purple maturity changed during HipDrop");
             PcP2PurpleFeedbackStats feedback = pc_p2_purple_feedback_stats();
             require(feedback.entries == 1 && feedback.impacts == 1 && feedback.trailBursts >= 1,
                 "ground feedback counts invalid");
-            std::printf("P2_PURPLE_FLIGHT_GROUND_PASS entries=%u trail=%u impacts=%u sound=%u camera=%u rumble=%u\n",
+            std::printf("P2_PURPLE_FLIGHT_GROUND_PASS pause=%.3f recovery=%.3f flower=1 entries=%u trail=%u impacts=%u sound=%u camera=%u rumble=%u\n",
+                pauseObserved, recoveryObserved,
                 feedback.entries, feedback.trailBursts, feedback.impacts, feedback.soundRequests,
                 feedback.cameraRequests, feedback.rumbleRequests);
             adultHealth = adult->mHealth;
@@ -75,10 +116,10 @@ static void purpleFlightFixture(Navi* n)
             n->resetPosition(Vector3f(adultPosition.x - 70.0f,
                 mapMgr->getMinY(adultPosition.x - 70.0f, adultPosition.z, true), adultPosition.z));
             throwTo(adultPosition);
-            state = 2;
+            state = 3;
         }
         require(timer < 360, "physical ground HipDrop did not recover");
-    } else if (state == 2) {
+    } else if (state == 3) {
         adult->resetPosition(adultPosition);
         adult->mVelocity.set(0.0f, 0.0f, 0.0f);
         adult->mTargetVelocity = adult->mVelocity;
