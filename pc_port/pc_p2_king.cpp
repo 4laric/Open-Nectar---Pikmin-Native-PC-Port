@@ -104,6 +104,9 @@ unsigned long injectKillTick = 0;
 bool injectKillDone = false;
 unsigned long injectBombTick = 0;
 bool injectBombDone = false;
+// Fixture-observation flag: set when the Dead clip reaches its frame-185 kill
+// key. Read-only fixture gate; no effect on actor behavior.
+bool deadKeySeen = false;
 
 void fail() {
 	std::fputs("P2_KING_ACTOR invalid profile/model\n", stderr);
@@ -536,6 +539,7 @@ void tickKing(King& k) {
 		}
 		if (k.state == p2king::Dead && key == 185 && !k.loggedDead) {
 			k.loggedDead = true;
+			deadKeySeen = true;
 			std::printf("P2_KING_DEAD_KEY id=%u frame=185 kill=1\n", k.cfg.id);
 		}
 	}
@@ -821,7 +825,15 @@ void pc_p2_king_reset() {
 	injectKillDone = false;
 	injectBombTick = 0;
 	injectBombDone = false;
+	deadKeySeen = false;
 }
+
+// Fixture-only read-only observation getters. They expose the actor's own
+// 30 Hz behavior clock and Dead-key completion so a host fixture can gate
+// scenario sequencing deterministically instead of guessing with idle frames.
+// No behavior change; absent an opt-in injection nothing here is exercised.
+unsigned long pc_p2_king_behavior_tick() { return behaviorTick; }
+bool pc_p2_king_dead_key_seen() { return deadKeySeen; }
 
 void pc_p2_king_setup() {
 	pc_p2_king_reset();
