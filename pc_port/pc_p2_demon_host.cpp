@@ -139,6 +139,16 @@ void P2DemonHost::release(Navi* target)
 
 bool P2DemonHost::occupied() const { return mOccupied != 0; }
 Vector3f P2DemonHost::mouthCentre(unsigned slot) const { return slot < 2 ? mMouths[slot]->mCentre : Vector3f(0, 0, 0); }
+void P2DemonHost::update()
+{
+    if (!mLoaded || mClockMode != 1) return;
+    const float dt = gsys ? gsys->getFrameTime() : 0.0f;
+    if (!std::isfinite(dt) || dt <= 0.0f || dt > 1.0f) return;
+    mSRT.t.x += mTargetVelocity.x * dt;
+    mSRT.t.y += mTargetVelocity.y * dt;
+    mSRT.t.z += mTargetVelocity.z * dt;
+    updateMouths();
+}
 void P2DemonHost::sceneExit() { mClockMode = 0; mCatchElapsedFrames = 0; mAttackPlayer.cancel(); pc_demon_owner_lost(mOwnerToken); mOccupied = 0; mAttackActive = false; }
 void P2DemonHost::doKill() { sceneExit(); }
 

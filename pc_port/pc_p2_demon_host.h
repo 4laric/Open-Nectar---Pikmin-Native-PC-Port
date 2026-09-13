@@ -44,6 +44,7 @@ public:
     void sceneExit();
 
     void refresh(Graphics&) override;
+    void update() override;
     void doKill() override;
 
 private:

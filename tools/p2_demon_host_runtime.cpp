@@ -43,6 +43,7 @@ public:
         if (gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive) { gameflow.mMoviePlayer->requestSkip(); return result; }
         if (!pc_p2_preview_ready() || !naviMgr || !naviMgr->getNavi()) return result;
         Navi* n = naviMgr->getNavi();
+        if (ready) host.update();
         if (!ready) {
             float x0, y0, z0, x1, y1, z1;
             std::ifstream input("demon-mouths.txt");
