@@ -356,6 +356,8 @@ void pc_p2_hana_setup() {
         enter(s, HANA_SLEEP, "type1");
         std::printf("P2_HANA_BIND generator=%u source_id=84 visual_only=0\n",
                     actor->mGenerator->_70);
+        std::printf("P2_HANA_STATE generator=%u state=sleep\n", actor->mGenerator->_70);
+        std::fflush(stdout);
         const Vector3f pos = actor->getPosition();
         std::printf("P2_ENEMY_READY species=Hana native_family=Chappy generator=%u "
                     "x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=native "
