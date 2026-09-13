@@ -7,5 +7,6 @@ struct PVWTextureData {
 };
 struct PVWTexGenData { unsigned mTexCoordID=0,mTexGenType=1,mTexGenSrc=4,mMatrixType=10; };
 struct PVWTextureInfo { int mTextureDataCount=1,mTexGenDataCount=1;PVWTextureData* mTextureData=nullptr;PVWTexGenData* mTexGenData=nullptr; };
-struct Material { PVWTextureInfo mTextureInfo; };
+enum { MATFLAG_PVW=1 };
+struct Material { unsigned mFlags=MATFLAG_PVW;PVWTextureInfo mTextureInfo; };
 class Graphics;

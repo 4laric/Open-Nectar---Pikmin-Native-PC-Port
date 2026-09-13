@@ -38,11 +38,13 @@ int main(int argc,char** argv){
  assert(data.mAnimatedTexMtx.mMtx[0][0]==7&&data.mAnimatedTexMtx.mMtx[0][3]==9&&data.mAnimationFactor==255&&gen.mMatrixType==10);
  for(int i=0;i<2;++i){Sample actor=s;actor.sx=3+i;ScopedSrt scope(material,actor);assert(scope.applied()&&data.mAnimatedTexMtx.mMtx[0][0]==3+i);}
  assert(data.mAnimatedTexMtx.mMtx[0][0]==7);
+ material.mFlags=0;{ScopedSrt rejected(material,s);assert(!rejected.applied());}material.mFlags=MATFLAG_PVW;
+ gen.mTexCoordID=1;{ScopedSrt rejected(material,s);assert(!rejected.applied());}gen.mTexCoordID=0;
  material.mTextureInfo.mTexGenDataCount=2;{ScopedSrt rejected(material,s);assert(!rejected.applied());}material.mTextureInfo.mTexGenDataCount=1;
  gen.mTexGenSrc=1;{ScopedSrt rejected(material,s);assert(!rejected.applied());}
  data._UNUSED10=0xE6;data.mAnimationFactor=0;
- {ScopedSrt env(material,s);assert(env.applied()&&data.mScaleX==2&&data.mTranslationX==.25f);}
- assert(data.mScaleX==1&&data.mTranslationX==0);
+ {ScopedSrt env(material,s);assert(env.applied()&&data.mScaleX==2&&data.mTranslationX==.25f&&gen.mMatrixType==0);}
+ assert(data.mScaleX==1&&data.mTranslationX==0&&gen.mMatrixType==10);
  data.mRotationZ=1;{ScopedSrt rejected(material,s);assert(!rejected.applied());}data.mRotationZ=0;
  s.rotation=32;{ScopedSrt rejected(material,s);assert(!rejected.applied());}s.rotation=0;
  data._UNUSED10=0;gen.mTexGenSrc=4;
