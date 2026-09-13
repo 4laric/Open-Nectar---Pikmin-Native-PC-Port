@@ -184,6 +184,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_qurione.cpp
     pc_port/pc_p2_batch2.cpp
     pc_port/pc_p2_hardlanes.cpp
+    pc_port/pc_p2_batch3.cpp
     pc_port/pc_p2_bombsarai_arena.cpp
     pc_port/pc_p2_bombsarai_blast.cpp
     pc_port/pc_p2_bombsarai_bomb.cpp
