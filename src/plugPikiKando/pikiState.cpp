@@ -1,5 +1,6 @@
 #include "pc_p2_purple.h"
 #include "pc_p2_purple_impact.h"
+#include "pc_p2_purple_direct.h"
 #include "pc_p2_white.h"
 #include "PikiState.h"
 #include "AIConstant.h"
@@ -2100,8 +2101,11 @@ void PikiFlyingState::procCollideMsg(Piki* piki, MsgCollide* msg)
 	}
 
 	if (colliderType == OBJTYPE_Teki || collider->isBoss()) {
+		PcP2PurpleDirectHit direct;
 		if (piki->mVelocity.y < 0.0f) {
+			direct = pc_p2_purple_direct_begin(piki, collider, msg->mEvent.mColliderPart);
 			pc_p2_purple_impact_emit(piki, "enemy_collision");
+			pc_p2_purple_direct_finish(piki, collider, msg->mEvent.mColliderPart, direct);
 		}
 		Vector3f effPos = collider->mSRT.t - piki->mSRT.t;
 		effPos.normalise();
@@ -2110,6 +2114,18 @@ void PikiFlyingState::procCollideMsg(Piki* piki, MsgCollide* msg)
 		effPos.add(piki->mSRT.t);
 		InteractHitEffect hit(piki, effPos, effDir, msg->mEvent.mColliderPart);
 		collider->stimulate(hit);
+		if (direct.handled) {
+			CollPart* part = msg->mEvent.mColliderPart;
+			if (!direct.accepted && part && part->isStickable() && collider->isAlive()) {
+				piki->startStickObject(collider, part, -1, 0.0f);
+				SeSystem::playPlayerSe(SE_PIKI_ATTACHENEMY);
+			}
+			if (piki->getState() == PIKISTATE_Flying) {
+				transit(piki, PIKISTATE_Normal);
+				piki->restartAI();
+			}
+			return;
+		}
 	}
 
 	CollPart* part = msg->mEvent.mColliderPart;
