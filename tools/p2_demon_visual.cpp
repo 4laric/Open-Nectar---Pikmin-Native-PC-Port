@@ -42,7 +42,7 @@ public:
         gfx.setPerspective(gfx.mCamera->mPerspectiveMatrix.mMtx,gfx.mCamera->mFov,gfx.mCamera->mAspectRatio,gfx.mCamera->mNear,gfx.mCamera->mFar,1);
         gfx.useMaterial(nullptr); gfx.setDepth(true);
         Matrix4f world,view;
-        world.makeSRT(Vector3f(1,1,1),Vector3f(0,0,0),Vector3f(0,30,0));
+        world.makeSRT(Vector3f(1,1,1),Vector3f(0,0,0),Vector3f(0,100,0));
         gfx.mCamera->mLookAtMtx.multiplyTo(world,view);
         models[pose]->updateAnim(gfx,view,nullptr,nullptr);
         models[pose]->drawshape(gfx,*gfx.mCamera,nullptr);
@@ -50,7 +50,7 @@ public:
         for(int slot=0;slot<2;++slot) {
             const auto p=mouths[pose][slot];
             gfx.setColour(slot?Colour(0,80,255,255):Colour(255,0,0,255),true);
-            gfx.drawSphere(Vector3f(p.x,p.y+30,p.z),3,gfx.mCamera->mLookAtMtx);
+            gfx.drawSphere(Vector3f(p.x,p.y+100,p.z),3,gfx.mCamera->mLookAtMtx);
         }
         if(ticks==30||ticks==90) {
             capture(pose?"demon17.ppm":"demon0.ppm");
@@ -67,3 +67,4 @@ int main(int argc,char** argv) {
     pc_settings_init(); gsys->Initialise(); pc_settings_p2d_init(); nodeMgr=new NodeMgr();
     gsys->run(new DemonVisualApp()); return 0;
 }
+
