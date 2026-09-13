@@ -163,9 +163,12 @@ public:
                 if (drive2 > 0.0f) {
                 require(std::fabs(drive2 - 100.0f) < 0.01f,
                     "CatchFly applies bounded grab-speed pursuit drive");
+                require(host.mTargetVelocity.x > 0.0f && host.mTargetVelocity.z < 0.0f,
+                    "CatchFly pursuit drive follows non-axis target heading");
                 ++pursuitTicks;
                 if (pursuitTicks > 1)
-                    require(host.mSRT.t.x > 0.0f, "CatchFly host moves over ordinary game frames");
+                    require(host.mSRT.t.x > 0.0f && host.mSRT.t.z < 100.0f,
+                        "CatchFly host moves along pursuit heading over ordinary game frames");
                 }
             }
             if (height) {
