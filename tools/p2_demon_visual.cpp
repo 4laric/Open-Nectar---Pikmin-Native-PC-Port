@@ -39,7 +39,7 @@ public:
     void draw(Graphics& gfx) override {
         PlugPikiApp::draw(gfx); if(!ready) return;
         const int pose=ticks<60?0:1;
-        gfx.setPerspective(gfx.mCamera->mFov,gfx.mCamera->mAspectRatio,gfx.mCamera->mNear,gfx.mCamera->mFar,1);
+        gfx.setPerspective(gfx.mCamera->mPerspectiveMatrix.mMtx,gfx.mCamera->mFov,gfx.mCamera->mAspectRatio,gfx.mCamera->mNear,gfx.mCamera->mFar,1);
         gfx.useMaterial(nullptr); gfx.setDepth(true);
         Matrix4f world,view;
         world.makeSRT(Vector3f(1,1,1),Vector3f(0,0,0),Vector3f(0,30,0));
