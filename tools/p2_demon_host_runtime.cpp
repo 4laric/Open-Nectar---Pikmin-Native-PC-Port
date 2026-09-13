@@ -70,19 +70,28 @@ public:
             if (!std::strcmp(mode, "binding")) {
                 const char* gen = std::getenv("DEMON_BIND_GENERATOR");
                 const char* type = std::getenv("DEMON_BIND_TYPE");
-                require(gen && type, "binding identity inputs");
-                bindingGenerator = unsigned(std::strtoul(gen, nullptr, 10));
-                bindingType = std::atoi(type);
+                const bool explicitIdentity = gen && type;
+                if (explicitIdentity) {
+                    bindingGenerator = unsigned(std::strtoul(gen, nullptr, 10));
+                    bindingType = std::atoi(type);
+                }
                 Iterator actors(tekiMgr);
                 BTeki* otherActor = nullptr;
                 CI_LOOP(actors) {
                     BTeki* candidate = static_cast<BTeki*>(*actors);
-                    if (candidate && candidate->mGenerator && candidate->mGenerator->_70 == bindingGenerator && candidate->mTekiType == bindingType) {
+                    if (candidate && candidate->mGenerator && (!explicitIdentity
+                        || (candidate->mGenerator->_70 == bindingGenerator && candidate->mTekiType == bindingType))) {
                         if (!bindingActor) bindingActor = candidate;
                         else if (!otherActor) otherActor = candidate;
                     }
                     if (candidate && candidate != bindingActor) otherActor = candidate;
                 }
+                require(bindingActor && bindingActor->mGenerator, "binding actor available");
+                bindingGenerator = bindingActor->mGenerator->_70;
+                bindingType = bindingActor->mTekiType;
+                require(!host.bindNativeActor(nullptr, bindingGenerator, bindingType), "null actor rejected");
+                require(!host.bindNativeActor(bindingActor, bindingGenerator + 1, bindingType), "generator mismatch rejected");
+                require(!host.bindNativeActor(bindingActor, bindingGenerator, bindingType + 1), "type mismatch rejected");
                 require(bindingActor && host.bindNativeActor(bindingActor, bindingGenerator, bindingType), "bind matching actor");
                 if (otherActor) require(!host.bindNativeActor(otherActor, bindingGenerator, bindingType), "second actor rejected");
                 host.unbindNativeActor(nullptr);
