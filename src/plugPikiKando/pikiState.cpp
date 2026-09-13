@@ -2087,8 +2087,10 @@ void PikiFlyingState::procCollideMsg(Piki* piki, MsgCollide* msg)
 	if (collisionFlight.phase == PcP2PurpleFlightPhase::Recovery) return;
 	const bool specialFlightContact = collisionFlight.phase == PcP2PurpleFlightPhase::EntryPause
 	                               || collisionFlight.phase == PcP2PurpleFlightPhase::Descent;
+	if (specialFlightContact && colliderType == OBJTYPE_Piki) return;
 	CollPart* flightPart = msg->mEvent.mColliderPart;
-	if (specialFlightContact && flightPart && flightPart->isPlatformType()
+	if (specialFlightContact && colliderType != OBJTYPE_Teki && !collider->isBoss()
+	    && flightPart && flightPart->isPlatformType()
 	    && pc_p2_purple_flight_land(piki, false)) {
 		pc_p2_purple_impact_emit(piki, "platform_collision");
 		return;
