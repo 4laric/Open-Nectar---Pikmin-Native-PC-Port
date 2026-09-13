@@ -169,6 +169,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_kochappy_stun.cpp
     pc_port/pc_p2_species.cpp
     pc_port/pc_p2_white.cpp
+    pc_port/pc_p2_white_poison.cpp
     pc_port/pc_p2_cave.cpp
     pc_port/pc_p2_enemy.cpp
     pc_port/pc_p2_sheargrub.cpp
