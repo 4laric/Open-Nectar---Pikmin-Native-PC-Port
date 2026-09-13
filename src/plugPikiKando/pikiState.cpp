@@ -2116,9 +2116,16 @@ void PikiFlyingState::procCollideMsg(Piki* piki, MsgCollide* msg)
 		collider->stimulate(hit);
 		if (direct.handled) {
 			CollPart* part = msg->mEvent.mColliderPart;
-			if (!direct.accepted && part && part->isStickable() && collider->isAlive()) {
-				piki->startStickObject(collider, part, -1, 0.0f);
-				SeSystem::playPlayerSe(SE_PIKI_ATTACHENEMY);
+			if (!direct.accepted && part && collider->isAlive()) {
+				bool attached = false;
+				if (part->isPlatformType() && (part->isStickable() || part->isClimbable())) {
+					piki->startStick(collider, part);
+					attached = true;
+				} else if ((part->isCollisionType() || part->isTubeType()) && part->isStickable()) {
+					piki->startStickObject(collider, part, -1, 0.0f);
+					attached = true;
+				}
+				if (attached) SeSystem::playPlayerSe(SE_PIKI_ATTACHENEMY);
 			}
 			if (piki->getState() == PIKISTATE_Flying) {
 				transit(piki, PIKISTATE_Normal);
