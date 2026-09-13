@@ -1,5 +1,6 @@
 #include "pc_p2_purple_flight.h"
 #include "pc_p2_purple_feedback.h"
+#include "pc_p2_purple_impact.h"
 #include "pc_p2_purple.h"
 #include "Piki.h"
 #include "teki.h"
@@ -31,6 +32,7 @@ void beginDescent(Piki* piki, float gravity)
         if (!enemy || !enemy->isAlive() || !enemy->isLivingThing()) continue;
         const Vector3f separation = enemy->mSRT.t - piki->mSRT.t;
         const float distance = separation.length();
+        if (!std::isfinite(enemy->mCollisionRadius) || enemy->mCollisionRadius < 0.0f) continue;
         const float searchRadius = 50.0f + enemy->mCollisionRadius;
         if (distance <= searchRadius && distance < closestDistance) {
             closest = enemy;
@@ -53,6 +55,7 @@ void pc_p2_purple_flight_reset()
 {
     for (auto& entry : states) pc_p2_purple_feedback_cancel(entry.first);
     states.clear();
+    pc_p2_purple_feedback_reset();
     enabled = false;
 }
 
@@ -70,6 +73,10 @@ void pc_p2_purple_flight_setup()
         std::fprintf(stderr, "Invalid P2 Purple flight config\n");
         std::abort();
     }
+    if (!pc_p2_purple_impact_enabled()) {
+        std::fprintf(stderr, "P2 Purple flight requires enabled impact profile\n");
+        std::abort();
+    }
     enabled = pc_p2_purples_enabled();
     std::printf("P2_PURPLE_FLIGHT_SETUP enabled=%d pause=0.25 recovery=0.30 homing=120 radius=50\n", enabled ? 1 : 0);
 }
@@ -77,6 +84,7 @@ void pc_p2_purple_flight_setup()
 void pc_p2_purple_flight_arm(Piki* piki)
 {
     if (!enabled || !piki || !piki->isAlive() || !pc_p2_is_purple(piki)) return;
+    pc_p2_purple_feedback_cancel(piki);
     states[piki] = { PcP2PurpleFlightPhase::Ascent, 0.0f, 0.0f };
 }
 
@@ -84,6 +92,7 @@ bool pc_p2_purple_flight_update(Piki* piki, float deltaTime, float gravity)
 {
     auto found = states.find(piki);
     if (found == states.end()) return false;
+    if (!std::isfinite(deltaTime) || deltaTime <= 0.0f || !std::isfinite(gravity) || gravity <= 0.0f) return false;
     FlightState& state = found->second;
     state.elapsed += deltaTime;
     state.motionElapsed += deltaTime;
@@ -113,7 +122,9 @@ bool pc_p2_purple_flight_update(Piki* piki, float deltaTime, float gravity)
 bool pc_p2_purple_flight_land(Piki* piki, bool enemyContact)
 {
     auto found = states.find(piki);
-    if (found == states.end() || found->second.phase == PcP2PurpleFlightPhase::Recovery) return false;
+    if (found == states.end()
+        || (found->second.phase != PcP2PurpleFlightPhase::EntryPause
+            && found->second.phase != PcP2PurpleFlightPhase::Descent)) return false;
     found->second.phase = PcP2PurpleFlightPhase::Recovery;
     found->second.elapsed = 0.0f;
     piki->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
