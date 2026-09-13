@@ -1386,6 +1386,7 @@ void GameCoreSection::finalSetup()
 
 	pc_p2_kurage_teki_setup();
 	pc_p2_onikurage_teki_setup();
+	pc_p2_demon_manager_setup();
 	pc_p2_preview_setup();
 	pc_p2_snow_campaign_setup();
 	PRINT("====================== FINAL SETUP DONE ======================\n");
