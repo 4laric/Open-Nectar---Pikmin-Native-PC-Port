@@ -199,9 +199,11 @@ void pc_p2_batch2_forget(BTeki* actor) {
     actors.erase(actor);
 }
 
-void pc_p2_batch2_setup() {
-    pc_p2_batch2_reset();
-    if (!pc_pikipelago_room_preview() || !tekiMgr) return;
+// Scan the scene and bind present arena actors. ``strict`` is the startup
+// contract (every configured actor must exist); ``false`` is the re-entry path
+// after a legitimate family death, where absent actors are tolerated so the
+// respawned actor can be re-bound without a stale pointer.
+static void bindFamilies(bool strict) {
     for (const FamilyDef& family : FAMILIES) {
         std::map<unsigned, std::string> wanted;
         if (!parseActors(family.actors, wanted)) continue;
@@ -222,7 +224,11 @@ void pc_p2_batch2_setup() {
             actors[teki] = std::string(family.name) + "|" + match->second;
             speciesUsed.insert(match->second);
         }
-        if (found.size() != wanted.size()) fail("arena actor not present in scene");
+        if (found.size() != wanted.size()) {
+            if (strict) fail("arena actor not present in scene");
+            std::printf("P2_BATCH2_MISSING family=%s found=%zu wanted=%zu\n",
+                        family.name, found.size(), wanted.size());
+        }
         for (const std::string& species : speciesUsed) {
             auto clipRows = rows.find(species);
             if (clipRows == rows.end() || clipRows->second.empty()) fail("species has no bank clips");
@@ -230,10 +236,27 @@ void pc_p2_batch2_setup() {
                 loadBank(family, species, clipRows->second);
         }
     }
+}
+
+static void logBindings() {
     for (const auto& entry : actors)
         std::printf("P2_BATCH2_BIND generator=%u key=%s visual_only=1 native_fsm=unimplemented\n",
                     entry.first->mGenerator ? entry.first->mGenerator->_70 : 0, entry.second.c_str());
     std::printf("P2_BATCH2_BANK total_mod_bytes=%zu species=%zu\n", bytesTotal, banks.size());
+}
+
+void pc_p2_batch2_setup() {
+    pc_p2_batch2_reset();
+    if (!pc_pikipelago_room_preview() || !tekiMgr) return;
+    bindFamilies(true);
+    logBindings();
+}
+
+void pc_p2_batch2_rebind() {
+    pc_p2_batch2_reset();
+    if (!pc_pikipelago_room_preview() || !tekiMgr) return;
+    bindFamilies(false);
+    logBindings();
 }
 
 bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool corpse) {
