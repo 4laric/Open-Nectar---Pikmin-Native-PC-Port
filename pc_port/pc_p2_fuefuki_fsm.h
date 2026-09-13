@@ -95,6 +95,7 @@ struct P2FuefukiFsmOut {
     std::vector<std::uint32_t> claimed;
     std::vector<std::uint32_t> releasedPanic;   // ownerDied followers
     std::vector<std::uint32_t> releasedSuspend; // flying/suspend followers
+    P2FuefukiSuspendFallback suspendFallback = P2FUEFUKI_SUSPEND_FALLBACK_FREE;
     std::vector<std::uint32_t> pinged;
 };
 
@@ -173,8 +174,14 @@ class P2FuefukiFsm {
             out.eventClear |= P2FUEFUKI_EB_NoInterrupt | P2FUEFUKI_EB_Lifegauge | P2FUEFUKI_EB_Cullable;
             out.zeroVelocity = true;
             // Beetle is airborne: followers exit with the Success/emote
-            // branch (source ActTeki isFlying). Not a Panic release.
-            out.releasedSuspend = interference.suspend(boundEpoch);
+            // branch (source ActTeki isFlying). Not a Panic release. The
+            // brain destination is the resolved source constant Free
+            // (ActTeki::getNextAIType()==ACT_Free, aiAction.cpp:108-110).
+            {
+                P2FuefukiSuspendOut susp = interference.suspend(boundEpoch);
+                out.releasedSuspend      = susp.released;
+                out.suspendFallback      = susp.fallback;
+            }
             break;
         case P2FuefukiFsmState::Land:
             canStruggle = false;

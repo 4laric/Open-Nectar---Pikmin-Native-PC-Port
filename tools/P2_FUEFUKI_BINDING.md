@@ -78,6 +78,8 @@ g++ -std=c++17 -Wall -Wextra -Werror -Ipc_port tools/p2_fuefuki_interference_pol
 ../fuefuki-interference-policy-test.exe      # PASS (re-run)
 g++ -std=c++17 -Wall -Wextra -Werror -Ipc_port tools/p2_fuefuki_fsm_test.cpp -o ../fuefuki-fsm-test.exe
 ../fuefuki-fsm-test.exe                      # PASS (re-run)
+g++ -std=c++17 -Wall -Wextra -Werror -Ipc_port tools/p2_fuefuki_suspend_fallback_test.cpp -o ../fuefuki-suspend-fallback-test.exe
+../fuefuki-suspend-fallback-test.exe         # PASS (this slice)
 ```
 
 Private native compile against the frozen host (isolated candidate, no
@@ -119,8 +121,11 @@ gaps below remain open.
 - Arena staging under #186 with the install profile, physical placement
   and rendered whistle ring requires the #128 motion bank and converted
   parms; fixture parms are shortened.
-- Suspend brain-fallback destination (Formation rejoin vs Free) and claim
-  persistence across day/cave transitions remain open from earlier
-  slices; the seam exposes the release reasons but does not define the
-  destination state. P1 has no verified panic state — released followers
-  stay in PIKISTATE_Normal (see evidence doc).
+- Suspend brain-fallback was resolved to **Free, not Formation** (#245
+  suspend-fallback slice; ActTeki::getNextAIType()==ACT_Free,
+  PikiAI.h:1254; aiAction.cpp:108-110; mNavi cleared by ActFree::init,
+  aiFree.cpp:33). P2FuefukiBindOut::suspendFallback now carries the source
+  decision through the seam; the world-side situation-scan re-task gate
+  (aiAction.cpp:92-95) stays host knowledge. Claim persistence across
+  day/cave transitions remains open; P1 has no verified panic state —
+  released followers stay in PIKISTATE_Normal (see evidence doc).
