@@ -81,6 +81,8 @@ void pc_p2_purple_flight_setup()
     std::printf("P2_PURPLE_FLIGHT_SETUP enabled=%d pause=0.25 recovery=0.30 homing=120 radius=50\n", enabled ? 1 : 0);
 }
 
+bool pc_p2_purple_flight_enabled() { return enabled; }
+
 void pc_p2_purple_flight_arm(Piki* piki)
 {
     if (!enabled || !piki || !piki->isAlive() || !pc_p2_is_purple(piki)) return;

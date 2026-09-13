@@ -12,6 +12,7 @@ struct PcP2PurpleFlightSample {
 
 void pc_p2_purple_flight_reset();
 void pc_p2_purple_flight_setup();
+bool pc_p2_purple_flight_enabled();
 void pc_p2_purple_flight_arm(Piki*);
 bool pc_p2_purple_flight_update(Piki*, float deltaTime, float gravity);
 bool pc_p2_purple_flight_land(Piki*, bool enemyContact);
