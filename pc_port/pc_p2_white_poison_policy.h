@@ -14,6 +14,11 @@ public:
     bool commit(const void* predator, const void* victim) {
         return mPending.erase(std::make_pair(predator, victim)) == 1;
     }
+    void forgetPredator(const void* predator) {
+        for (auto it = mPending.begin(); it != mPending.end();) {
+            if (it->first == predator) it = mPending.erase(it); else ++it;
+        }
+    }
     void reset() { mPending.clear(); }
 private:
     std::set<std::pair<const void*, const void*>> mPending;

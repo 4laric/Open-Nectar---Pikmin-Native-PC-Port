@@ -1,6 +1,7 @@
 #include "pc_p2_demon_host.h"
 #include "pc_p2_teki_lifetime.h"
 #include "pc_p2_purple_direct.h"
+#include "pc_p2_white_poison.h"
 
 #include "pc_p2_armor.h"
 #include "pc_p2_elecbug.h"
@@ -54,6 +55,7 @@ void pc_p2_forget_teki(BTeki* actor)
 		return;
 	}
 
+	pc_p2_white_poison_forget(actor);
 	pc_p2_purple_direct_forget(actor);
 	pc_p2_demon_manager_forget(actor);
 	pc_p2_snow_forget(actor);

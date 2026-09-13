@@ -17,6 +17,9 @@ int main() {
     // A later actor lifecycle may reuse the same pool address.
     assert(events.prepare(&predator, &first));
     assert(events.commit(&predator, &first));
+    assert(events.prepare(&predator, &first));
+    events.forgetPredator(&predator);
+    assert(!events.commit(&predator, &first));
     events.reset();
     assert(!events.commit(&predator, &first));
 }
