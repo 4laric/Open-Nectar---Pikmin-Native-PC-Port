@@ -283,7 +283,17 @@ bool P2DemonHost::bindNativeActor(BTeki* actor, unsigned generatorId, int tekiTy
 
 void P2DemonHost::unbindNativeActor(BTeki* actor)
 {
-    if (!actor || mBoundActor == actor) mBoundActor = nullptr;
+    if (actor && mBoundActor == actor) mBoundActor = nullptr;
+}
+
+bool P2DemonHost::revalidateNativeActor(BTeki* actor, unsigned generatorId, int tekiType)
+{
+    if (!actor || mBoundActor != actor) return false;
+    if (!actor->mGenerator || actor->mGenerator->_70 != generatorId || actor->mTekiType != tekiType) {
+        mBoundActor = nullptr;
+        return false;
+    }
+    return true;
 }
 
 P2DemonAttackDecision P2DemonHost::tickCatchFly(Navi* target, float delta, p2demon::CatchFlyInput input)

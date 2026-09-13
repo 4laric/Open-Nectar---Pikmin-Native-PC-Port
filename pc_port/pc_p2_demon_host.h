@@ -37,6 +37,7 @@ public:
     bool selectCatchFlyTargetSeeded(const Vector3f& home, float radius, std::uint32_t seed);
     bool bindNativeActor(BTeki* actor, unsigned generatorId, int tekiType);
     void unbindNativeActor(BTeki* actor);
+    bool revalidateNativeActor(BTeki* actor, unsigned generatorId, int tekiType);
     BTeki* boundNativeActor() const { return mBoundActor; }
     P2DemonAttackDecision tickCatchFly(Navi* target, float sourceFrames, p2demon::CatchFlyInput input);
     bool beginFallMeck(const p2retail::Motion& motion);
