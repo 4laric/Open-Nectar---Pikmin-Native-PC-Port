@@ -96,7 +96,7 @@ bool pc_p2_purple_flight_enabled() { return enabled; }
 void pc_p2_purple_flight_arm(Piki* piki)
 {
     if (!enabled || !piki || !piki->isAlive() || !pc_p2_is_purple(piki)) return;
-    pc_p2_purple_feedback_cancel(piki);
+    pc_p2_purple_flight_cancel(piki);
     states[piki] = { PcP2PurpleFlightPhase::Ascent, 0.0f, 0.0f,
         piki->isCreatureFlag(CF_IgnoreGravity), piki->isCreatureFlag(CF_UsePriorityFaceDir) };
 }
