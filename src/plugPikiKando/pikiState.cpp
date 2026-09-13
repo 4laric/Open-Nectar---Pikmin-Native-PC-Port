@@ -2172,6 +2172,12 @@ void PikiFlyingState::procCollideMsg(Piki* piki, MsgCollide* msg)
 			return;
 		}
 	}
+	if (specialFlightContact) {
+		pc_p2_purple_flight_contact(piki, colliderType == OBJTYPE_Teki || collider->isBoss());
+		transit(piki, PIKISTATE_Normal);
+		piki->restartAI();
+		return;
+	}
 
 	CollPart* part = msg->mEvent.mColliderPart;
 	if (part && part->isBouncy()) {
@@ -2276,12 +2282,15 @@ void PikiFlyingState::procStickMsg(Piki*, MsgStick*)
  */
 void PikiFlyingState::procBounceMsg(Piki* piki, MsgBounce*)
 {
-	if (pc_p2_purple_flight_sample(piki).phase == PcP2PurpleFlightPhase::Recovery) return;
+	PcP2PurpleFlightSample flight = pc_p2_purple_flight_sample(piki);
+	if (flight.phase == PcP2PurpleFlightPhase::Recovery) return;
 	if (pc_p2_purple_flight_land(piki, false)) {
 		pc_p2_purple_impact_emit(piki, "ground_bounce");
 		return;
 	}
-	pc_p2_purple_impact_emit(piki, "ground_bounce");
+	if (flight.phase != PcP2PurpleFlightPhase::Ascent) {
+		pc_p2_purple_impact_emit(piki, "ground_bounce");
+	}
 	if (mHasBounced) {
 		piki->restartAI();
 		transit(piki, PIKISTATE_Normal);
