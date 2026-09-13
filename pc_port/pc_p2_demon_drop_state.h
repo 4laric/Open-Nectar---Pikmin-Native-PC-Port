@@ -8,6 +8,3 @@ bool pc_demon_drop_begin(Navi*,std::uint64_t generation,float damage,float speed
 void pc_demon_drop_post_physics(Navi*);
 void pc_demon_drop_reset(Navi*);
 P2DemonDropPhase pc_demon_drop_phase(Navi*);
-
-void pc_demon_drop_before_transition(Navi*, int nextState);
-void pc_demon_drop_scene_exit(); // Before exitStage nulls manager; no physics/state transitions.

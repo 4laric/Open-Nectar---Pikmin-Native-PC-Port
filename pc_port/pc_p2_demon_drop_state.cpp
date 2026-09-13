@@ -1,6 +1,5 @@
 #include "pc_p2_demon_drop_state.h"
 #include "NaviState.h"
-#include "NaviMgr.h"
 #include "Interactions.h"
 #include "PaniPikiAnimator.h"
 #include "system.h"
@@ -19,7 +18,7 @@ public:
     P2DemonDropPolicy policy;
     Navi* captain=nullptr;
     std::uint64_t generation=0,serial=0,dispatch=0;
-    bool delivering=false, retired=false;
+    bool delivering=false;
     int expected=-1;
     std::deque<Listener> listeners; // Stable issuance tokens; retained until state destruction.
     DropState():NaviState(NAVISTATE_DemonDrop) {}
@@ -33,13 +32,7 @@ public:
         listeners.emplace_back(this,n,generation,serial);
         n->startMotion(PaniMotionInfo(id,&listeners.back()),PaniMotionInfo(id));
     }
-    void init(Navi* n) override {
-        // Registration exposes an ID, but only admitted payloads may own it.
-        if(captain!=n||policy.phase()!=P2DemonDropPhase::Falling) {
-            policy.cancel(); captain=nullptr; expected=-1; dispatch=0;
-            n->mStateMachine->transit(n,NAVISTATE_Walk);
-        }
-    }
+    void init(Navi*) override {} // Admission prepares payload before transit.
     void cleanup(Navi*) override { policy.cancel(); captain=nullptr; expected=-1; dispatch=0; }
     void resume(Navi* n) override {
         std::printf("DEMON_STATE_RESUME owned_delivery=%d phase=%d\n",int(delivering),int(policy.phase()));
@@ -98,13 +91,13 @@ DropState* registered(Navi* n) {
 NaviState* pc_demon_drop_state_create() { return new DropState(); }
 bool pc_demon_drop_begin(Navi* n,std::uint64_t g,float damage,float speed) {
     auto* s=registered(n);
-    if(!s||s->retired||!n->isAlive()||n->mHealth<=1||n->getCurrState()->getID()!=NAVISTATE_Walk||n->mRope||n->isStickTo()||
+    if(!s||!n->isAlive()||n->mHealth<=1||n->getCurrState()->getID()!=NAVISTATE_Walk||n->mRope||n->isStickTo()||
        damage<0||!std::isfinite(n->mSRT.t.x)||!std::isfinite(n->mSRT.t.y)||!std::isfinite(n->mSRT.t.z)||
        n->isCreatureFlag(CF_DisableMovement|CF_IgnoreGravity|CF_IsFlying)||s->listeners.size()>4093) return false;
     auto c=s->policy.begin(g,damage,speed); if(!c.accepted) return false;
     s->captain=n; s->generation=g;
     n->mStateMachine->transit(n,NAVISTATE_DemonDrop);
-    if(!s->owns(n)) { s->policy.cancel(); s->captain=nullptr; return false; }
+    if(!s->owns(n)) { s->policy.cancel(); return false; }
     n->mGroundTriangle=nullptr; n->mPreviousTriangle=nullptr; n->mCollPlatform=nullptr;
     n->resetCreatureFlag(CF_IsOnGround|CF_IsPositionFixed); n->mFixedPosition=n->mSRT.t;
     n->mVelocity.y=c.actualY; n->mTargetVelocity.set(0,c.targetY,0); n->mVolatileVelocity.set(0,0,0);
@@ -124,36 +117,4 @@ void pc_demon_drop_reset(Navi* n) {
 }
 P2DemonDropPhase pc_demon_drop_phase(Navi* n) {
     auto* s=registered(n); return s&&s->owns(n)?s->policy.phase():P2DemonDropPhase::Idle;
-}
-
-void pc_demon_drop_before_transition(Navi* n,int next) {
-    auto* s=registered(n); if(!s||!s->owns(n)) return;
-    // Audited P1 receiver contracts: these targets do not accept a caller-supplied
-    // vector impulse. Flick intensity and Geyzer destination remain untouched;
-    // their own init/exec constructs the new motion after this old drop is quenched.
-    switch(next) {
-    case NAVISTATE_Walk: case NAVISTATE_Dead: case NAVISTATE_Flick:
-    case NAVISTATE_Geyzer: case NAVISTATE_Bury: case NAVISTATE_Pressed:
-    case NAVISTATE_DemonDrop:
-        s->zero(n);
-        std::printf("DEMON_STATE_HANDOFF next=%d quenched=1\n",next);
-        break;
-    default:
-        // Unknown payload/impulse semantics: leave incoming values intact.
-        std::printf("DEMON_STATE_HANDOFF next=%d quenched=0 unaudited=1\n",next);
-        break;
-    }
-}
-
-void pc_demon_drop_scene_exit() {
-    if(!naviMgr) return;
-    unsigned count=0;
-    Iterator it(naviMgr);
-    for(it.first();!it.isDone();it.next()) {
-        auto* n=static_cast<Navi*>(*it);
-        auto* s=registered(n); if(!s) continue;
-        s->policy.cancel(); s->captain=nullptr; s->expected=-1; s->dispatch=0;
-        s->retired=true; ++count;
-    }
-    std::printf("DEMON_SCENE_REVOKE states=%u before_heap_disposal=1\n",count);
 }
