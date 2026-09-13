@@ -17,7 +17,8 @@ bool validConfig(const P2BombSaraiBombConfig& config)
         && finite(config.blastRadius) && config.blastRadius > 0.0f
         && finite(config.blastHalfHeight) && config.blastHalfHeight >= 0.0f
         && finite(config.tekiDamage) && config.tekiDamage >= 0.0f
-        && finite(config.naviPikiDamage) && config.naviPikiDamage >= 0.0f;
+        && finite(config.naviPikiDamage) && config.naviPikiDamage >= 0.0f
+        && config.ip02TriggerLimit >= 0;
 }
 bool livePhase(P2BombSaraiBombPhase phase)
 {
@@ -39,6 +40,7 @@ void P2BombSaraiBomb::reset(const P2BombSaraiBombConfig& config)
     mArmTicksRemaining = 0;
     mFuseHealthRemaining = 0.0f;
     mDetonateDelayTicks = 0;
+    mInductionCounter = 0;
     clearBlast();
 }
 
@@ -65,6 +67,7 @@ bool P2BombSaraiBomb::capture(std::uint64_t carrierToken, const P2BombSaraiVec3&
     mPosition = jointPosition;
     mVelocity = P2BombSaraiVec3{};
     mEscapeTicks = 0;
+    mInductionCounter = mConfig.ip02TriggerLimit; // ip02 armed at capture
     mPhase = P2BombSaraiBombPhase::Captured;
     return true;
 }
@@ -101,6 +104,27 @@ void P2BombSaraiBomb::detonate(P2BombSaraiCarrierFn carrier, void* carrierContex
     mBlast.carrierValid = carrier && carrier(carrierContext, mCarrierToken);
     mHasBlast = true;
     mPhase = P2BombSaraiBombPhase::Despawned;
+}
+
+bool P2BombSaraiBomb::induce(P2BombSaraiCarrierFn carrier, void* carrierContext)
+{
+    // Bomb-on-bomb induction: an armed/burning bomb whose blast window
+    // reaches another bomb drains that bomb's ip02 trigger-limit counter
+    // (bomb.cpp:348-368, 426-440). Only foreign-hosted induce() calls from a
+    // detonating bomb reach here: the bomb itself is never a candidate (the
+    // host excludes it, source creature != enemy).
+    if (mPhase != P2BombSaraiBombPhase::ArmedLoop
+        && mPhase != P2BombSaraiBombPhase::Burning) {
+        return false;
+    }
+    if (mInductionCounter <= 0) {
+        return false; // spent (0) or disabled; never re-detonates
+    }
+    if (--mInductionCounter == 0) {
+        detonate(carrier, carrierContext);
+        return true;
+    }
+    return false;
 }
 
 bool P2BombSaraiBomb::update(float delta, P2BombSaraiTraceFn trace, void* traceContext,

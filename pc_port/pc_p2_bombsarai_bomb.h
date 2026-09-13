@@ -84,6 +84,14 @@ struct P2BombSaraiBombConfig {
     float blastHalfHeight = 50.0f;  // fp02 default (Bomb.h:139)
     float tekiDamage = 250.0f;      // fp01 default (Bomb.h:138)
     float naviPikiDamage = 0.0f;    // general mAttackDamage
+    int ip02TriggerLimit = 50;          // bomb-on-bomb induction trigger
+                                        // limit (bomb.cpp:348-368, 426-440),
+                                        // Bomb.h:142 header default; retail
+                                        // 15 comes from the host/config.
+                                        // Counts down from ip02 on each
+                                        // induce() call; at 0 the bomb
+                                        // detonates immediately.
+                                        // 0 disables induction.
 };
 
 // Called once per 30 Hz source update while a bomb is in flight. Return true
@@ -119,6 +127,18 @@ public:
     bool update(float delta, P2BombSaraiTraceFn trace, void* traceContext,
                 P2BombSaraiCarrierFn carrier, void* carrierContext);
 
+    // Bomb-on-bomb induction (ip02 trigger-limit countdown, bomb.cpp:348-368,
+    // 426-440). The host invokes this on every armed/burning bomb inside a
+    // detonating bomb's blast volume. Each call decrements the counter by 1;
+    // when it reaches 0 the bomb detonates immediately (skipping its own edge
+    // fuse), recording one blast event and transitioning to Despawned. A
+    // counter already at 0 never re-detonates. No-op (returns false) unless
+    // the phase is ArmedLoop or Burning; a counter configured to 0 disables
+    // induction entirely. Returns true only when this bomb detonated.
+    bool induce(P2BombSaraiCarrierFn carrier, void* carrierContext);
+
+    int inductionCounter() const { return mInductionCounter; }
+
     P2BombSaraiBombPhase phase() const { return mPhase; }
     const P2BombSaraiVec3& position() const { return mPosition; }
     const P2BombSaraiVec3& velocity() const { return mVelocity; }
@@ -144,6 +164,7 @@ private:
     int mArmTicksRemaining = 0;
     float mFuseHealthRemaining = 0.0f;
     int mDetonateDelayTicks = 0;
+    int mInductionCounter = 0;
     bool mHasBlast = false;
     P2BombSaraiBlastEvent mBlast;
 };
