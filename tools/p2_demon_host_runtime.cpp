@@ -50,6 +50,23 @@ public:
         Navi* n = naviMgr->getNavi();
         if (ready) host.update();
         if (!ready) {
+            if (!std::strcmp(mode, "binding_auto")) {
+                const char* gen = std::getenv("DEMON_BIND_GENERATOR");
+                const char* type = std::getenv("DEMON_BIND_TYPE");
+                require(gen && type, "automatic binding identity inputs");
+                const unsigned wantedGenerator = unsigned(std::strtoul(gen, nullptr, 10));
+                const int wantedType = std::atoi(type);
+                BTeki* actor = nullptr;
+                Iterator actors(tekiMgr); CI_LOOP(actors) {
+                    BTeki* candidate = static_cast<BTeki*>(*actors);
+                    if (candidate && candidate->mGenerator && candidate->mGenerator->_70 == wantedGenerator && candidate->mTekiType == wantedType) {
+                        actor = candidate; break;
+                    }
+                }
+                require(actor && pc_p2_demon_manager_binding_count() == 1, "automatic manager binding");
+                require(pc_p2_demon_manager_is_bound(actor), "automatic identity validation");
+                std::puts("PASS DEMON_HOST automatic_binding_final_setup"); std::fflush(stdout); std::_Exit(0);
+            }
             float x0, y0, z0, x1, y1, z1;
             std::ifstream input("demon-mouths.txt");
             input >> x0 >> y0 >> z0 >> x1 >> y1 >> z1;

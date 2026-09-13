@@ -71,6 +71,12 @@ bool pc_p2_demon_manager_bind(P2DemonHost* host, BTeki* actor, unsigned generato
     managerBindings[actor] = {host, generatorId, tekiType};
     return true;
 }
+std::size_t pc_p2_demon_manager_binding_count() { return managerBindings.size(); }
+bool pc_p2_demon_manager_is_bound(BTeki* actor)
+{
+    auto it = managerBindings.find(actor);
+    return it != managerBindings.end() && it->second.host->revalidateNativeActor(actor, it->second.generator, it->second.type);
+}
 void pc_p2_demon_manager_update()
 {
     for (auto it = managerBindings.begin(); it != managerBindings.end();) {
