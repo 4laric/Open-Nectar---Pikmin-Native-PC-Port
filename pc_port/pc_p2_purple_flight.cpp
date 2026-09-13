@@ -1,0 +1,142 @@
+#include "pc_p2_purple_flight.h"
+#include "pc_p2_purple_feedback.h"
+#include "pc_p2_purple.h"
+#include "Piki.h"
+#include "teki.h"
+#include <cmath>
+#include <cstdlib>
+#include <cstdio>
+#include <filesystem>
+#include <string>
+#include <unordered_map>
+
+namespace {
+struct FlightState {
+    PcP2PurpleFlightPhase phase = PcP2PurpleFlightPhase::None;
+    float elapsed = 0.0f;
+    float motionElapsed = 0.0f;
+};
+
+bool enabled = false;
+std::unordered_map<Piki*, FlightState> states;
+
+void beginDescent(Piki* piki, float gravity)
+{
+    piki->mVelocity.set(0.0f, -gravity * 0.5f, 0.0f);
+    BTeki* closest = nullptr;
+    float closestDistance = 12800.0f;
+    Iterator enemies(tekiMgr);
+    CI_LOOP(enemies) {
+        BTeki* enemy = static_cast<BTeki*>(*enemies);
+        if (!enemy || !enemy->isAlive() || !enemy->isLivingThing()) continue;
+        const Vector3f separation = enemy->mSRT.t - piki->mSRT.t;
+        const float distance = separation.length();
+        const float searchRadius = 50.0f + enemy->mCollisionRadius;
+        if (distance <= searchRadius && distance < closestDistance) {
+            closest = enemy;
+            closestDistance = distance;
+        }
+    }
+    if (closest) {
+        Vector3f direction = closest->mSRT.t - piki->mSRT.t;
+        const float horizontalDistance = std::sqrt(direction.x * direction.x + direction.z * direction.z);
+        if (horizontalDistance > 0.0f) {
+            piki->mVelocity.x = direction.x * 120.0f / horizontalDistance;
+            piki->mVelocity.z = direction.z * 120.0f / horizontalDistance;
+        }
+    }
+    piki->mTargetVelocity = piki->mVelocity;
+}
+}
+
+void pc_p2_purple_flight_reset()
+{
+    for (auto& entry : states) pc_p2_purple_feedback_cancel(entry.first);
+    states.clear();
+    enabled = false;
+}
+
+void pc_p2_purple_flight_setup()
+{
+    pc_p2_purple_flight_reset();
+    if (!std::filesystem::exists("p2-purple-flight.txt")) return;
+    FILE* file = std::fopen("p2-purple-flight.txt", "r");
+    char version[32] = {};
+    char trailing = 0;
+    const bool valid = file && std::fscanf(file, "%31s", version) == 1
+        && std::fscanf(file, " %c", &trailing) != 1;
+    if (file) std::fclose(file);
+    if (!valid || std::string(version) != "P2_PURPLE_FLIGHT_1") {
+        std::fprintf(stderr, "Invalid P2 Purple flight config\n");
+        std::abort();
+    }
+    enabled = pc_p2_purples_enabled();
+    std::printf("P2_PURPLE_FLIGHT_SETUP enabled=%d pause=0.25 recovery=0.30 homing=120 radius=50\n", enabled ? 1 : 0);
+}
+
+void pc_p2_purple_flight_arm(Piki* piki)
+{
+    if (!enabled || !piki || !piki->isAlive() || !pc_p2_is_purple(piki)) return;
+    states[piki] = { PcP2PurpleFlightPhase::Ascent, 0.0f, 0.0f };
+}
+
+bool pc_p2_purple_flight_update(Piki* piki, float deltaTime, float gravity)
+{
+    auto found = states.find(piki);
+    if (found == states.end()) return false;
+    FlightState& state = found->second;
+    state.elapsed += deltaTime;
+    state.motionElapsed += deltaTime;
+    pc_p2_purple_feedback_update(piki, deltaTime);
+    if (state.phase == PcP2PurpleFlightPhase::Ascent && piki->mVelocity.y <= 0.0f) {
+        state.phase = PcP2PurpleFlightPhase::EntryPause;
+        state.elapsed = 0.0f;
+        piki->mVelocity.set(0.0f, 0.0f, 0.0f);
+        piki->mTargetVelocity = piki->mVelocity;
+        pc_p2_purple_feedback_entry(piki);
+    } else if (state.phase == PcP2PurpleFlightPhase::EntryPause) {
+        piki->mVelocity.set(0.0f, 0.0f, 0.0f);
+        piki->mTargetVelocity = piki->mVelocity;
+        if (state.elapsed >= 0.25f) {
+            state = { PcP2PurpleFlightPhase::Descent, 0.0f, 0.0f };
+            beginDescent(piki, gravity);
+        }
+    } else if (state.phase == PcP2PurpleFlightPhase::Descent) {
+        piki->mFaceDirection = roundAng(piki->mFaceDirection + deltaTime * PI / 0.2f);
+    } else if (state.phase == PcP2PurpleFlightPhase::Recovery) {
+        piki->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
+        if (state.elapsed >= 0.3f) return true;
+    }
+    return false;
+}
+
+bool pc_p2_purple_flight_land(Piki* piki, bool enemyContact)
+{
+    auto found = states.find(piki);
+    if (found == states.end() || found->second.phase == PcP2PurpleFlightPhase::Recovery) return false;
+    found->second.phase = PcP2PurpleFlightPhase::Recovery;
+    found->second.elapsed = 0.0f;
+    piki->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
+    pc_p2_purple_feedback_land(piki, enemyContact);
+    return true;
+}
+
+void pc_p2_purple_flight_contact(Piki* piki, bool enemyContact)
+{
+    if (pc_p2_purple_flight_active(piki)) pc_p2_purple_feedback_land(piki, enemyContact);
+}
+
+void pc_p2_purple_flight_cancel(Piki* piki)
+{
+    if (!piki || states.erase(piki) == 0) return;
+    pc_p2_purple_feedback_cancel(piki);
+}
+
+bool pc_p2_purple_flight_active(const Piki* piki) { return states.count(const_cast<Piki*>(piki)) != 0; }
+
+PcP2PurpleFlightSample pc_p2_purple_flight_sample(const Piki* piki)
+{
+    auto found = states.find(const_cast<Piki*>(piki));
+    return found == states.end() ? PcP2PurpleFlightSample{}
+                                 : PcP2PurpleFlightSample{ found->second.phase, found->second.elapsed, found->second.motionElapsed };
+}

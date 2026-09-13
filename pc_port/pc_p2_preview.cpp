@@ -57,6 +57,7 @@
 #include "system.h"
 #include "pc_p2_economy.h"
 #include "pc_p2_purple.h"
+#include "pc_p2_purple_flight.h"
 #include "pc_p2_white.h"
 #include "pc_p2_bulbmin.h"
 #include "pc_p2_white_poison.h"
@@ -272,6 +273,7 @@ void pc_p2_preview_setup() {
     pc_p2_projectiles_setup();
     pc_p2_hardlanes_setup();
     pc_p2_purple_setup();
+    pc_p2_purple_flight_setup();
     pc_p2_white_setup();
     pc_p2_bulbmin_setup();
     // Lane-11 opt-in driver: use the existing Chappy-family registration as the
