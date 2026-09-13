@@ -1005,20 +1005,24 @@ void DGXGraphics::setMatMatrices(Material* mat, int p2)
 		if (mat->mTextureInfo.mTextureData[j]._UNUSED10 == 0xE6) {
 			if (mP2Envmap || texGenSrc != GX_TG_NRM || animFactor == 255) std::abort();
 			mP2Envmap = true;
-            GXSetTexCoordGen2(texCoordID, texGenType, GXTexGenSrc(0xE6), postMtxId, GX_FALSE, GX_PTIDENTITY);
-            // Static imported shapes do not run ShapeDynMaterials::animate.
-            // Read the bounded source SRT directly, never its uninitialized cache.
-            const auto& data = mat->mTextureInfo.mTextureData[j];
-            if (data.mTotalFrameCount != 0 || data.mRotationZ != 0.0f) std::abort();
-            mP2EnvSRT[0][0] = data.mScaleX; mP2EnvSRT[0][1] = 0.0f;
-            mP2EnvSRT[1][0] = 0.0f; mP2EnvSRT[1][1] = data.mScaleY;
-            mP2EnvSRT[0][2] = (1.0f-data.mScaleX)*data.mPivotX+data.mTranslationX;
-            mP2EnvSRT[1][2] = (1.0f-data.mScaleY)*data.mPivotY+data.mTranslationY;
+			GXSetTexCoordGen2(texCoordID, texGenType, GXTexGenSrc(0xE6), postMtxId, GX_FALSE, GX_PTIDENTITY);
+			// Static imported shapes do not run ShapeDynMaterials::animate.
+			// Read the bounded source SRT directly, never its uninitialized cache.
+			const auto& data = mat->mTextureInfo.mTextureData[j];
+			if (data.mTotalFrameCount != 0 || data.mRotationZ != 0.0f) std::abort();
+			mP2EnvSRT[0][0] = data.mScaleX; mP2EnvSRT[0][1] = 0.0f;
+			mP2EnvSRT[1][0] = 0.0f; mP2EnvSRT[1][1] = data.mScaleY;
+			mP2EnvSRT[0][2] = (1.0f-data.mScaleX)*data.mPivotX+data.mTranslationX;
+			mP2EnvSRT[1][2] = (1.0f-data.mScaleY)*data.mPivotY+data.mTranslationY;
 		}
 #endif
 		if (animFactor != 0xFF) {
 			int id = (animFactor != 10) ? matrixType : 60;
-			GXLoadTexMtxImm(mat->mTextureInfo.mTextureData[j].mAnimatedTexMtx.mMtx, id, GX_MTX2x4);
+#if defined(PIKI_PC_PORT)
+            // The marked static path is loaded from source parameters in useMatrixQuick.
+            if (!mP2Envmap)
+#endif
+                GXLoadTexMtxImm(mat->mTextureInfo.mTextureData[j].mAnimatedTexMtx.mMtx, id, GX_MTX2x4);
 
 			if (mHasTexGen && mat->mTextureInfo.mTexGenData[i].mTexGenSrc == 1) {
 				mTexMtxBaseID = matrixType;
