@@ -23,10 +23,12 @@ inline Profile read(std::istream& in){
  std::set<std::pair<int,std::string>> seen;
  for(int i=0;i<count;++i){Clip c;int n;if(!(in>>c.enemy>>c.name>>c.duration>>n)||!species(c.enemy)||!clipName(c.enemy,c.name)||!seen.insert({c.enemy,c.name}).second||c.duration<1||c.duration>10000||n<1||n>12)fail();
  for(int j=0;j<n;++j){int f;if(!(in>>f)||f<0||f>=c.duration||(j&&f<=c.frames.back()))fail();c.frames.push_back(f);}p.clips.push_back(c);}
- if(!(in>>count)||count<1||count>8)fail();std::set<uint32_t> ids;
+ if(!(in>>count)||count<1||count>8)fail();
+ std::set<uint32_t> ids;
  for(int i=0;i<count;++i){unsigned long long id;int enemy;std::string name;Display d{};
  if(!(in>>id>>enemy>>name>>d.x>>d.y>>d.z>>d.yaw)||id>0xffffffffULL||!ids.insert(uint32_t(id)).second||!std::isfinite(d.x)||!std::isfinite(d.y)||!std::isfinite(d.z)||!std::isfinite(d.yaw)||std::fabs(d.x)>100000||std::fabs(d.y)>100000||std::fabs(d.z)>100000||std::fabs(d.yaw)>360)fail();
  d.id=uint32_t(id);d.clip=p.clips.size();for(size_t k=0;k<p.clips.size();++k)if(p.clips[k].enemy==enemy&&p.clips[k].name==name)d.clip=k;if(d.clip==p.clips.size())fail();p.displays.push_back(d);}
- if(in>>magic)fail();return p;
+ if(in>>magic)fail();
+ return p;
 }
 }
