@@ -3,6 +3,7 @@
 #include "pc_p2_onikurage_teki.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_demon_drop_state.h"
+#include "pc_p2_demon_bridge.h"
 #endif
 #if defined(PIKMIN_RANDOMIZER_TEST_HOOKS)
 #include "pc_randomizer_campaign_catalog.h"
@@ -859,6 +860,7 @@ void GameCoreSection::exitStage()
 {
 #if defined(PIKI_PC_PORT)
 	pc_demon_drop_scene_exit();
+	pc_demon_scene_exit();
 #endif
 #if defined(PIKI_PC_PORT)
 	// Stale focus would keep depth of field running on the file-select and
