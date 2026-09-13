@@ -56,13 +56,18 @@ void pc_p2_white_poison_setup() {
                 poisonDamage, count);
 }
 
+void pc_p2_white_poison_forget(BTeki* predator) {
+    predators.erase(predator);
+    events.forgetPredator(predator);
+}
+
 bool pc_p2_white_poison_predator(BTeki* predator) {
     return enabled && predator && predator->isAlive() && predators.count(predator);
 }
 
 bool pc_p2_white_poison_prepare(BTeki* predator, Creature* victim) {
     if (!pc_p2_white_poison_predator(predator) || !victim || !victim->isAlive()
-        || !victim->isPiki() || !victim->isStickToMouth()) return false;
+        || !victim->isPiki() || !victim->isStickToMouth() || victim->getStickObject() != predator) return false;
     Piki* piki = static_cast<Piki*>(victim);
     return pc_p2_is_white(piki) && events.prepare(predator, victim);
 }
