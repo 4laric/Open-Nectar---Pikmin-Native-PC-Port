@@ -151,7 +151,8 @@ public:
             // observable without replacing the native movement implementation.
             const bool timeout = std::strcmp(mode, "timed_timeout") == 0;
             const bool height = std::strcmp(mode, "timed_height") == 0;
-            p2demon::CatchFlyInput input{0, timeout ? 20.0f : 10.0f, 0, timeout ? 40.0f : 10.0f, timeout ? 20.0f : 10.0f, 0,
+            p2demon::CatchFlyInput input{0, timeout ? 20.0f : 10.0f, 0,
+                timeout ? 10000.0f : 10.0f, timeout ? 100.0f : 10.0f, 0,
                 0, 0, 20, height ? 5.0f : 25.0f, 1, 0, 10, 0,
                 height ? p2demon::HeightNext::Fall : p2demon::HeightNext::None, true};
             const auto decision = host.tickCatchFly(n, 1.0f, input);
@@ -163,6 +164,8 @@ public:
                 require(std::fabs(drive2 - 100.0f) < 0.01f,
                     "CatchFly applies bounded grab-speed pursuit drive");
                 ++pursuitTicks;
+                if (pursuitTicks > 1)
+                    require(host.mSRT.t.x > 0.0f, "CatchFly host moves over ordinary game frames");
                 }
             }
             if (height) {

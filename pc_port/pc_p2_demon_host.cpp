@@ -262,6 +262,11 @@ P2DemonAttackDecision P2DemonHost::tickCatchFly(Navi* target, float delta, p2dem
 {
     P2DemonAttackDecision result;
     if (mClockMode != 1 || !std::isfinite(delta) || delta <= 0 || delta > 1) return result;
+    // The host owns its evolving world position. Callers supply the destination
+    // and bounded environment/parameter inputs, never a stale duplicate origin.
+    input.x = mSRT.t.x;
+    input.y = mSRT.t.y;
+    input.z = mSRT.t.z;
     input.elapsedSeconds = mCatchElapsedFrames / 30.0f;
     input.targetAttached = mOccupied != 0 && target && pc_demon_owned_by(target, this);
     const auto movement = p2demon::catchFly(input);
