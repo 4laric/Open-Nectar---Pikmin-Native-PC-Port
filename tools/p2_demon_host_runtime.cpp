@@ -31,6 +31,7 @@ class DemonHostApp final : public PlugPikiApp {
     int phase = 0;
     int recoveryTicks = 0;
     int attackTicks = 0;
+    int pursuitTicks = 0;
     bool sawDash = false, sawInterrupt = false;
     bool released = false, moveRequested = false;
     float startingHealth = 0;
@@ -154,6 +155,15 @@ public:
                 height ? p2demon::HeightNext::Fall : p2demon::HeightNext::None, true};
             const auto decision = host.tickCatchFly(n, 1.0f, input);
             require(decision.valid, "advance CatchFly clock");
+            if (timeout) {
+                const float drive2 = host.mTargetVelocity.x * host.mTargetVelocity.x
+                    + host.mTargetVelocity.z * host.mTargetVelocity.z;
+                if (drive2 > 0.0f) {
+                require(std::fabs(drive2 - 100.0f) < 0.01f,
+                    "CatchFly applies bounded grab-speed pursuit drive");
+                ++pursuitTicks;
+                }
+            }
             if (height) {
                 require(decision.heightNext == P2DemonHeightNext::Fall
                     && decision.next == P2DemonAttackNext::None, "semantic CatchFly height transition");
@@ -162,6 +172,7 @@ public:
             }
             if (decision.next != P2DemonAttackNext::None) {
                 require(decision.next == P2DemonAttackNext::FallMeck, "CatchFly END transition");
+                if (timeout) require(pursuitTicks >= 301, "CatchFly pursues through strict ten-second boundary");
                 require(host.switchPoseMeshes(fallProfilePath.c_str()), "switch FallMeck pose bank");
                 require(host.beginFallMeck(fallMeckMotion), "start FallMeck motion");
                 released = false;
