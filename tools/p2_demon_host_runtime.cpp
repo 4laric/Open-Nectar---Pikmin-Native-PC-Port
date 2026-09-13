@@ -12,6 +12,8 @@
 #include "settings/pc_settings.h"
 #include "settings/pc_settings_p2d.h"
 #include "pc_p2_demon_host.h"
+#include "teki.h"
+#include "Generator.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -36,6 +38,9 @@ class DemonHostApp final : public PlugPikiApp {
     bool released = false, moveRequested = false;
     float startingHealth = 0;
     bool ready = false;
+    BTeki* bindingActor = nullptr;
+    unsigned bindingGenerator = 0;
+    int bindingType = 0;
 public:
     int idle() override {
         int result = PlugPikiApp::idle();
@@ -62,6 +67,36 @@ public:
             n->mStateMachine->transit(n, NAVISTATE_Walk);
             n->resetPosition(host.mouthCentre(0));
             ready = true;
+            if (!std::strcmp(mode, "binding")) {
+                const char* gen = std::getenv("DEMON_BIND_GENERATOR");
+                const char* type = std::getenv("DEMON_BIND_TYPE");
+                require(gen && type, "binding identity inputs");
+                bindingGenerator = unsigned(std::strtoul(gen, nullptr, 10));
+                bindingType = std::atoi(type);
+                Iterator actors(tekiMgr);
+                BTeki* otherActor = nullptr;
+                CI_LOOP(actors) {
+                    BTeki* candidate = static_cast<BTeki*>(*actors);
+                    if (candidate && candidate->mGenerator && candidate->mGenerator->_70 == bindingGenerator && candidate->mTekiType == bindingType) {
+                        if (!bindingActor) bindingActor = candidate;
+                        else if (!otherActor) otherActor = candidate;
+                    }
+                    if (candidate && candidate != bindingActor) otherActor = candidate;
+                }
+                require(bindingActor && host.bindNativeActor(bindingActor, bindingGenerator, bindingType), "bind matching actor");
+                if (otherActor) require(!host.bindNativeActor(otherActor, bindingGenerator, bindingType), "second actor rejected");
+                host.unbindNativeActor(nullptr);
+                require(host.boundNativeActor() == bindingActor, "null unbind preserves actor");
+                host.unbindNativeActor(otherActor);
+                require(host.boundNativeActor() == bindingActor, "other actor unbind preserves actor");
+                const unsigned original = bindingActor->mGenerator->_70;
+                bindingActor->mGenerator->_70 = original + 1;
+                require(!host.revalidateNativeActor(bindingActor, original, bindingType), "identity reuse revocation");
+                bindingActor->mGenerator->_70 = original;
+                host.sceneExit();
+                require(host.boundNativeActor() == nullptr, "scene exit unbind");
+                std::puts("PASS DEMON_HOST binding_lifecycle"); std::fflush(stdout); std::_Exit(0);
+            }
             return result;
         }
         if (phase == 0) {
