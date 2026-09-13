@@ -17,6 +17,7 @@
 #include "pc_p2_armor.h"
 #include "pc_p2_elecbug.h"
 #include "pc_p2_tamago.h"
+#include "pc_p2_imomushi.h"
 #include "pc_p2_batch3.h"
 #include "pc_p2_long_legs.h"
 #endif
@@ -469,6 +470,7 @@ void BTeki::update()
 	pc_p2_qurione_update(this);
 	pc_p2_elecbug_update(this);
 	pc_p2_tamago_update(this);
+	pc_p2_imomushi_update(this);
 #endif
 	if (mDeadState == 0) {
 		updateTimers();

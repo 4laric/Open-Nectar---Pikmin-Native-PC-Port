@@ -16,6 +16,7 @@
 #include "pc_p2_batch2_clock.h"
 #include "pc_p2_elecbug.h"
 #include "pc_p2_tamago.h"
+#include "pc_p2_imomushi.h"
 #include "pc_bbft.h"
 #include "teki.h"
 #include "Generator.h"
@@ -260,8 +261,8 @@ static void logBindings() {
     for (const auto& entry : actors)
         std::printf("P2_BATCH2_BIND generator=%u key=%s visual_only=%d native_fsm=%s\n",
                     entry.first->mGenerator ? entry.first->mGenerator->_70 : 0, entry.second.c_str(),
-                    (entry.second == "ground|Sokkuri" || entry.second == "ground|Armor" || entry.second == "ground|ElecBug" || entry.second == "ground|TamagoMushi") ? 0 : 1,
-                    (entry.second == "ground|Sokkuri" || entry.second == "ground|Armor" || entry.second == "ground|ElecBug" || entry.second == "ground|TamagoMushi") ? "implemented" : "unimplemented");
+                    (entry.second == "ground|Sokkuri" || entry.second == "ground|Armor" || entry.second == "ground|ElecBug" || entry.second == "ground|TamagoMushi" || entry.second == "ground|Imomushi") ? 0 : 1,
+                    (entry.second == "ground|Sokkuri" || entry.second == "ground|Armor" || entry.second == "ground|ElecBug" || entry.second == "ground|TamagoMushi" || entry.second == "ground|Imomushi") ? "implemented" : "unimplemented");
     std::printf("P2_BATCH2_BANK total_mod_bytes=%zu species=%zu\n", bytesTotal, banks.size());
 }
 
@@ -301,7 +302,8 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
         const char* forced = nullptr;
         float phase = 0.0f;
         if ((pc_p2_sokkuri_clip(actor, forced, phase) || pc_p2_armor_clip(actor, forced, phase)
-                || pc_p2_elecbug_clip(actor, forced, phase) || pc_p2_tamago_clip(actor, forced, phase))
+                || pc_p2_elecbug_clip(actor, forced, phase) || pc_p2_tamago_clip(actor, forced, phase)
+                || pc_p2_imomushi_clip(actor, forced, phase))
                 && bank.clips.count(forced)) {
             name = forced;
             forcedPhase = phase;

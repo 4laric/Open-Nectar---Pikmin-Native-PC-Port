@@ -28,6 +28,7 @@
 #include "pc_p2_shijimi.h"
 #include "pc_p2_elecbug.h"
 #include "pc_p2_tamago.h"
+#include "pc_p2_imomushi.h"
 #endif
 
 #if defined(PIKI_PC_PORT)
@@ -420,7 +421,8 @@ public:
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
 		const f32 kogane=pc_p2_armor_param_f(this,idx,pc_p2_sokkuri_param_f(this,idx,pc_p2_kogane_param_f(this,idx,pc_p2_shijimi_param_f(this,idx,value))));
 		const f32 beforeTamago=pc_p2_elecbug_param_f(this,idx,pc_p2_qurione_param_f(this,idx,kogane));
-		const f32 qurione=pc_p2_tamago_param_f(this,idx,beforeTamago);
+		const f32 before_imomushi=pc_p2_tamago_param_f(this,idx,beforeTamago);
+		const f32 qurione=pc_p2_imomushi_param_f(this,idx,before_imomushi);
 		if(idx==TPF_Life)return pc_p2_dwarf_orange_max_health(this,pc_p2_kochappy_max_health(this,pc_p2_snow_max_health(this,qurione)));
 		return qurione;
 #endif
