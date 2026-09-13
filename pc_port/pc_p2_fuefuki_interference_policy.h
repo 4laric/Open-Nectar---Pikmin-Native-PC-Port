@@ -143,6 +143,19 @@ public:
         return out;
     }
 
+    // End the whistle cast after the source's fixed cast duration
+    // (source finishWhisle / StateWhisle cleanup) while claims persist:
+    // followers remain ACT_Teki-owned and keep pinging. The ring resets.
+    P2FuefukiCommand endCast(std::uint64_t id)
+    {
+        P2FuefukiCommand out;
+        if (!current(id) || phase != P2FuefukiPhase::Casting) return out;
+        phase          = P2FuefukiPhase::Idle;
+        radiusModifier = 0.0f;
+        out.accepted   = true;
+        return out;
+    }
+
     // Each active follower pings its owner once per exec tick (source
     // InteractFuefukiTimerReset sets 5.0). Host cadence decision: the
     // timer is an integer count of fixed simulation ticks, decremented
