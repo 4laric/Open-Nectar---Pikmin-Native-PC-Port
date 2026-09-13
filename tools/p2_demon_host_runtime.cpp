@@ -63,7 +63,7 @@ public:
             return result;
         }
         if (phase == 0) {
-            if (!std::strcmp(mode, "timed")) {
+            if (!std::strcmp(mode, "timed") || !std::strcmp(mode, "timed_timeout")) {
                 std::ifstream input("demon-retail-events.txt");
                 auto table = p2retail::read(input);
                 bool started = false;
@@ -74,6 +74,7 @@ public:
                 }
                 require(!catchFlyMotion.name.empty() && !fallMeckMotion.name.empty(), "retail transition motions");
                 require(started, "retail attack motion");
+                startingHealth = n->mHealth;
                 phase = 4;
                 return result;
             }
@@ -138,13 +139,14 @@ public:
                 require(decision.next==P2DemonAttackNext::CatchFly && sawDash && sawInterrupt,
                     "timed attack reaches occupied CatchFly");
                 require(host.switchPoseMeshes(catchProfilePath.c_str()), "switch CatchFly pose bank");
+                require(host.beginCatchFly(catchFlyMotion), "begin CatchFly clock");
                 phase=5;
             }
         } else if (phase == 5) {
             require(host.occupied(), "CatchFly keeps capture ownership");
             // The fixture supplies a bounded target-distance input; movement AI
             // is outside this host's acceptance surface.
-            const bool targetWithin25 = true;
+            const bool targetWithin25 = std::strcmp(mode, "timed_timeout") != 0;
             const auto decision = host.tickCatchFly(1.0f, targetWithin25);
             require(decision.valid, "advance CatchFly clock");
             if (decision.next != P2DemonAttackNext::None) {
@@ -168,7 +170,7 @@ public:
         } else if (phase == 3) {
             require(++recoveryTicks < 240, "drop recovery timeout");
             if (n->getCurrState()->getID() == NAVISTATE_Walk) {
-                if (!std::strcmp(mode, "timed")) require(moveRequested, "Move after FallMeck");
+                if (!std::strcmp(mode, "timed") || !std::strcmp(mode, "timed_timeout")) require(moveRequested, "Move after FallMeck");
                 require(n->mHealth == startingHealth - 10.0f, "one damaging drop completion");
                 std::puts("PASS DEMON_HOST injected_capture_catchfly_drop_recovery");
                 std::fflush(stdout); std::_Exit(0);

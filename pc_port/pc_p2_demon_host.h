@@ -63,6 +63,7 @@ private:
     bool mLoaded;
     bool mAttackActive;
     int mClockMode = 0;
+    float mCatchElapsedFrames = 0.0f;
     bool mClockFinished = false;
     bool mClockReleased = false;
     unsigned mOccupied;

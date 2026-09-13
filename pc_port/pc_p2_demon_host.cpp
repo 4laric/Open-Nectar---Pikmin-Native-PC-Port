@@ -139,7 +139,7 @@ void P2DemonHost::release(Navi* target)
 
 bool P2DemonHost::occupied() const { return mOccupied != 0; }
 Vector3f P2DemonHost::mouthCentre(unsigned slot) const { return slot < 2 ? mMouths[slot]->mCentre : Vector3f(0, 0, 0); }
-void P2DemonHost::sceneExit() { mAttackPlayer.cancel(); pc_demon_owner_lost(mOwnerToken); mOccupied = 0; mAttackActive = false; }
+void P2DemonHost::sceneExit() { mClockMode = 0; mCatchElapsedFrames = 0; mAttackPlayer.cancel(); pc_demon_owner_lost(mOwnerToken); mOccupied = 0; mAttackActive = false; }
 void P2DemonHost::doKill() { sceneExit(); }
 
 void P2DemonHost::refresh(Graphics& gfx)
@@ -240,8 +240,9 @@ bool P2DemonHost::beginTimedAttack(const p2retail::Motion& motion)
 
 bool P2DemonHost::beginCatchFly(const p2retail::Motion& motion)
 {
-    if (!mOccupied || mClockMode != 0 || !mAttackPlayer.start(motion)) return false;
+    if (motion.name != "waitact2.bca" || !mOccupied || mClockMode != 0 || !mAttackPlayer.start(motion)) return false;
     mClockMode = 1;
+    mCatchElapsedFrames = 0;
     mClockFinished = false;
     return true;
 }
@@ -250,10 +251,11 @@ P2DemonAttackDecision P2DemonHost::tickCatchFly(float delta, bool targetWithin25
 {
     P2DemonAttackDecision result;
     if (mClockMode != 1 || !std::isfinite(delta) || delta <= 0 || delta > 1) return result;
-    if (!mClockFinished && (mAttackPlayer.frame() > 300.0f || targetWithin25)) {
+    if (!mClockFinished && (mCatchElapsedFrames > 300.0f || targetWithin25)) {
         mAttackPlayer.finishMotion();
         mClockFinished = true;
     }
+    mCatchElapsedFrames += delta; // 30 source animation frames per second; independent of loop rewinds.
     bool ended = false;
     if (mAttackPlayer.advance(delta, [&](p2retail::Event event) { ended |= event.type == 1000; }) != p2retail::Update::Ok)
         return result;
@@ -268,7 +270,7 @@ P2DemonAttackDecision P2DemonHost::tickCatchFly(float delta, bool targetWithin25
 
 bool P2DemonHost::beginFallMeck(const p2retail::Motion& motion)
 {
-    if (mClockMode != 2 || !mAttackPlayer.start(motion)) return false;
+    if (motion.name != "waitact1.bca" || mClockMode != 2 || !mAttackPlayer.start(motion)) return false;
     mClockMode = 3;
     mClockReleased = false;
     return true;
@@ -280,7 +282,7 @@ P2DemonAttackDecision P2DemonHost::tickFallMeck(Navi* target, float delta, float
     if (mClockMode != 3 || !std::isfinite(delta) || delta <= 0 || delta > 1) return result;
     bool ended = false;
     if (mAttackPlayer.advance(delta, [&](p2retail::Event event) {
-            if (event.type == 3 && !mClockReleased && mAttackPlayer.frame() == 20.0f)
+            if (event.type == 3 && !mClockReleased)
                 mClockReleased = forceDrop(target, damage, speed);
             if (event.type == 1000) ended = true;
         }) != p2retail::Update::Ok) return result;
@@ -289,7 +291,7 @@ P2DemonAttackDecision P2DemonHost::tickFallMeck(Navi* target, float delta, float
     for (const auto& pose : samples) if (pose.frame <= mAttackPlayer.frame()) selected = &pose;
     if (!selected || !applyPoseFrame(selected->frame)) return result;
     result.valid = true;
-    if (ended) { mClockMode = 4; result.next = P2DemonAttackNext::Move; }
+    if (ended) { mClockMode = 0; result.next = P2DemonAttackNext::Move; }
     return result;
 }
 

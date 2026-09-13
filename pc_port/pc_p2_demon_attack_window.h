@@ -2,7 +2,7 @@
 #include <cmath>
 
 // SaraiState.cpp StateAttack, inherited by Demon. This policy does not move actors.
-enum class P2DemonAttackNext { None, Move, Fail, CatchFly };
+enum class P2DemonAttackNext { None, Move, Fail, CatchFly, FallMeck };
 enum class P2DemonAttackEvent { None, Dash, Interruptible, CaptureCheck, End };
 struct P2DemonAttackDecision {
     bool valid=false;

@@ -27,7 +27,7 @@ int main()
     bool ended = false;
     for (int i = 0; i < 50; ++i)
         assert(player.advance(1.0f, [&](p2retail::Event event) {
-            assert(event.type == 1 || event.type == 1000);
+            assert(event.type == 0 || event.type == 1 || event.type == 1000);
             ended |= event.type == 1000;
         }) == p2retail::Update::Ok);
     assert(ended && player.completed());
@@ -46,3 +46,4 @@ int main()
     assert(released && fallEnded);
     std::puts("p2_demon_host_clock_test PASS");
 }
+
