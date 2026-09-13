@@ -47,7 +47,7 @@ void pc_p2_purple_motion_setup() {
     }
     for(const Clip& clip:clips)for(bool seen:clip.seen)if(!seen)std::abort();
     for(int i=0;i<3;++i)growth[i]=load("purple_happa_"+std::to_string(i));enabled=true;
-    std::printf("P2_PURPLE_MOTION_READY rolljmp=14frames fall=20frames source_loop=repeat events=none boundary=flight_motion_time\n");
+    std::printf("P2_PURPLE_MOTION_READY rolljmp=14frames fall=20frames source_loop=repeat bca_event_metadata=absent boundary=flight_motion_time\n");
 }
 bool pc_p2_purple_motion_enabled(){return enabled;}
 bool pc_p2_draw_purple_motion(Piki* p,Graphics& gfx,PcP2PurpleMotionClip requested,float elapsed) {
