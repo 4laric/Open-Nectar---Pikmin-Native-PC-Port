@@ -1,6 +1,7 @@
 #include "pc_p2_purple.h"
 #include "pc_p2_purple_impact.h"
 #include "pc_p2_purple_direct.h"
+#include "pc_p2_purple_flight.h"
 #include "pc_p2_white.h"
 #include "PikiState.h"
 #include "AIConstant.h"
@@ -1936,6 +1937,20 @@ void PikiFlyingState::init(Piki* piki)
  */
 void PikiFlyingState::exec(Piki* piki)
 {
+	if (pc_p2_purple_flight_update(piki, gsys->getFrameTime(), AICONST.mGravity())) {
+		pc_p2_purple_flight_cancel(piki);
+		piki->restartAI();
+		transit(piki, PIKISTATE_Normal);
+		seSystem->playPikiSound(SEF_PIKI_LAND, piki->mSRT.t);
+		piki->actOnSituaton();
+		return;
+	}
+	PcP2PurpleFlightSample purpleFlight = pc_p2_purple_flight_sample(piki);
+	if (purpleFlight.phase == PcP2PurpleFlightPhase::EntryPause) return;
+	if (purpleFlight.phase == PcP2PurpleFlightPhase::Descent && purpleFlight.phaseElapsed == 0.0f) {
+		piki->startMotion(PaniMotionInfo(PIKIANIM_Fall), PaniMotionInfo(PIKIANIM_Fall));
+	}
+	if (purpleFlight.phase == PcP2PurpleFlightPhase::Recovery) return;
 	if (piki->isCreatureFlag(CF_IsOnGround)) {
 		mGroundTouchFrames++;
 		if (mGroundTouchFrames >= 10) {
@@ -2030,6 +2045,7 @@ void PikiFlyingState::cleanup(Piki* piki)
 	piki->restartAI();
 	piki->mWantToStick = false;
 	pc_p2_purple_impact_forget(piki);
+	pc_p2_purple_flight_cancel(piki);
 }
 
 /**
@@ -2099,6 +2115,7 @@ void PikiFlyingState::procCollideMsg(Piki* piki, MsgCollide* msg)
 	if (colliderType != OBJTYPE_Plant) {
 		SeSystem::playPlayerSe(SE_THROWHIT);
 	}
+	pc_p2_purple_flight_contact(piki, colliderType == OBJTYPE_Teki || collider->isBoss());
 
 	if (colliderType == OBJTYPE_Teki || collider->isBoss()) {
 		PcP2PurpleDirectHit direct;
@@ -2238,6 +2255,10 @@ void PikiFlyingState::procStickMsg(Piki*, MsgStick*)
  */
 void PikiFlyingState::procBounceMsg(Piki* piki, MsgBounce*)
 {
+	if (pc_p2_purple_flight_land(piki, false)) {
+		pc_p2_purple_impact_emit(piki, "ground_bounce");
+		return;
+	}
 	pc_p2_purple_impact_emit(piki, "ground_bounce");
 	if (mHasBounced) {
 		piki->restartAI();
