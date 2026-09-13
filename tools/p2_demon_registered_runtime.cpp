@@ -37,6 +37,28 @@ public:
             if(ticks<30)return r;
             static_assert(NAVISTATE_Flick==8&&NAVISTATE_IroIro==35&&NAVISTATE_DemonDrop==36&&NAVISTATE_Count==37,"registry IDs");
             hp=n->mHealth; n->releasePikis();
+            std::printf("DEMON_FIXTURE_WALK_SETUP previous=%d\n",n->getCurrState()->getID());
+            n->mStateMachine->transit(n,NAVISTATE_Walk); // Explicit setup from preview Starting state.
+            if(is("capacity")) {
+                PaniAnimKeyListener* old=nullptr;
+                unsigned count=0;
+                for(unsigned g=1;g<=4100;++g) {
+                    if(!pc_demon_drop_begin(n,g,10,200)) break;
+                    ++count;
+                    if(!old) old=n->mNaviAnimMgr.getUpperAnimator().mListener;
+                    else {
+                        auto phase=pc_demon_drop_phase(n); PaniAnimKeyEvent stale(KEY_Finished);
+                        old->animationKeyUpdated(stale); // Synthetic obsolete issuance probe.
+                        require(pc_demon_drop_phase(n)==phase&&n->mHealth==hp,"old listener after new admission");
+                    }
+                    pc_demon_drop_reset(n);n->mStateMachine->transit(n,NAVISTATE_Walk);
+                    PaniAnimKeyEvent stale(KEY_Finished);old->animationKeyUpdated(stale);
+                    require(n->getCurrState()->getID()==NAVISTATE_Walk&&n->mHealth==hp,"old listener after reset");
+                }
+                require(count==4094&&!pc_demon_drop_begin(n,5000,10,200),"listener capacity refusal");
+                std::printf("PASS DEMON_REGISTERED mode=capacity admitted=%u synthetic_listener_probes=1\n",count);
+                std::fflush(stdout);std::_Exit(0);
+            }
             if(is("flick")) {
                 n->mFlickIntensity=20; n->mStateMachine->transit(n,NAVISTATE_Flick);
                 require(n->getCurrState()->getID()==NAVISTATE_Flick,"ordinary Flick registered");
