@@ -58,4 +58,3 @@ bool pc_p2_breadbug_actor_draw(BTeki* actor,Graphics& gfx,const Matrix4f& view){
  Shape* shape=motion.shapes[best];shape->updateAnim(gfx,view,nullptr,actor);shape->drawshape(gfx,*gfx.mCamera,nullptr);
  if(!state.logged){std::printf("P2_BREADBUG_ACTOR_DRAW generator=%u visual_proxy no_P2_FSM\n",state.id);state.logged=true;}return true;
 }
-
