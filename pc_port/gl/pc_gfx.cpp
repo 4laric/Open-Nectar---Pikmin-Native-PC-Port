@@ -1868,6 +1868,16 @@ void pc_gfx_init(void) {
     printf("[PC Port] GPU: %s -- %s\n",
            glVendor ? reinterpret_cast<const char*>(glVendor) : "unknown",
            glRenderer ? reinterpret_cast<const char*>(glRenderer) : "unknown");
+    if (glRenderer) {
+        const char* renderer = reinterpret_cast<const char*>(glRenderer);
+        const bool integrated = std::strstr(renderer, "Intel") || std::strstr(renderer, "llvmpipe")
+                             || std::strstr(renderer, "Softpipe") || std::strstr(renderer, "SVGA3D");
+        if (integrated && std::getenv("__NV_PRIME_RENDER_OFFLOAD")) {
+            printf("[PC Port] WARNING: requested NVIDIA PRIME but the context is %s. "
+                   "Menus will sit around 30 fps. On Wayland use: prime-run ./build/bin/nectar\n",
+                   renderer);
+        }
+    }
     if (const char* value = std::getenv("PIKMIN_TEV_SPECIALIZE")) {
         sSpecialiseShaders = value[0] != '0';
     }

@@ -405,7 +405,7 @@ if (WIN32)
     # SDL_main sin definir en todos los ejecutables.
     target_link_libraries(pikmin_pc PRIVATE ${SDL2_LIBRARIES} opengl32)
 else()
-    target_link_libraries(pikmin_pc PRIVATE m ${SDL2_LIBRARIES} OpenGL::GL)
+    target_link_libraries(pikmin_pc PRIVATE m ${SDL2_LIBRARIES} OpenGL::GL X11)
 endif()
 # Export symbol names so the diagnostic backtrace in pc_gfx.cpp prints function
 # names rather than bare addresses. Costs nothing at runtime.
