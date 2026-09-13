@@ -79,6 +79,13 @@ struct Queen {
 std::vector<Queen> queens;
 unsigned clockLast = 0;
 float clockAcc = 0;
+unsigned long behaviorTick = 0;
+// Opt-in fixture-only injection (inactive without p2-queen-inject.txt): place an
+// active larva at the captain's mouth and force Baby Attack 4 at a behavior
+// tick, so the captain-bite receiver is exercised deterministically without the
+// larva having to cross the proximity-crush zone. No effect on normal profiles.
+unsigned long injectLarvaTick = 0;
+bool injectLarvaDone = false;
 
 void fail() {
 	std::fputs("P2_QUEEN_ACTOR invalid profile/model\n", stderr);
@@ -506,6 +513,9 @@ void pc_p2_queen_reset() {
 	totalBytes = 0;
 	clockLast = 0;
 	clockAcc = 0;
+	behaviorTick = 0;
+	injectLarvaTick = 0;
+	injectLarvaDone = false;
 }
 
 void pc_p2_queen_setup() {
@@ -526,6 +536,15 @@ void pc_p2_queen_setup() {
 		   materialBank.tracks[0].material!="mat_queen_body"||materialBank.tracks[0].slot!=0)fail();
 		materialEnabled=true;
 		std::puts("P2_QUEEN_SPECULAR_READY diffuse=UV1 specular=normal_btk source_lighting=host third_stage=omitted");
+	}
+	// Opt-in, fail-closed fixture injection sidecar; absent in normal runs.
+	std::ifstream inject("p2-queen-inject.txt");
+	if (inject) {
+		std::string magic;
+		unsigned long long tick = 0;
+		if (!(inject >> magic >> tick) || magic != "P2_QUEEN_INJECT_1" || tick < 1 || tick > 1000000ULL)
+			fail();
+		injectLarvaTick = (unsigned long)tick;
 	}
 	std::map<int, std::vector<unsigned char>> resources;
 	// Validate/copy the whole referenced bank before allocating Shapes; clips
@@ -575,6 +594,27 @@ void pc_p2_queen_update() {
 	while (clockAcc >= Tick && steps < 4) { // bounded: never catch up more than 4 ticks
 		clockAcc -= Tick;
 		++steps;
+		++behaviorTick;
+		if (injectLarvaTick && !injectLarvaDone && behaviorTick >= injectLarvaTick && naviMgr) {
+			Navi* n = naviMgr->getNavi();
+			if (n && n->mHealth > 0) {
+				for (auto& q : queens) {
+					for (auto& l : q.larvae) {
+						if (!l.active) continue;
+						l.x = n->getPosition().x;
+						l.z = n->getPosition().z + 10.0f;
+						l.yaw = 180.0f;
+						l.state = 4;
+						l.frame = 0;
+						l.attackHit = false;
+						injectLarvaDone = true;
+						std::printf("P2_QUEEN_INJECT_LARVA id=%u tick=%lu state=4 fixture=1\n", q.cfg.id, behaviorTick);
+						break;
+					}
+					if (injectLarvaDone) break;
+				}
+			}
+		}
 		for (auto& q : queens) {
 			if(materialEnabled&&q.health>0&&q.state!=p2queen::Dead&&!gameflow.mPauseAll&&!gameflow.mIsUIOverlayActive&&
 			   !(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive))q.materialFrame=std::fmod(q.materialFrame+1.f,30.f);
