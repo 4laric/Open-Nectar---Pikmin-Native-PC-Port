@@ -137,7 +137,7 @@ bool parseBank(const std::string& path,
             std::string species, name, events, status, marker;
             int frames = 0, poses = 0;
             if (!(in >> species >> name >> frames >> events >> marker >> poses >> status)
-                    || marker != "poses" || poses < 1 || poses > 64
+                    || marker != "poses" || poses < 0 || poses > 64
                     || !out.count(species)) fail("invalid bank clip row");
             out[species].emplace_back(name, poses);
         } else {
