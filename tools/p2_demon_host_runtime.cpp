@@ -50,6 +50,16 @@ public:
         Navi* n = naviMgr->getNavi();
         if (ready) host.update();
         if (!ready) {
+            if (!std::strcmp(mode, "binding_discover")) {
+                Iterator actors(tekiMgr); CI_LOOP(actors) {
+                    BTeki* actor = static_cast<BTeki*>(*actors);
+                    if (actor && actor->mGenerator) {
+                        std::printf("DEMON_BINDING_CANDIDATE generator=%u type=%d\n", actor->mGenerator->_70, actor->mTekiType);
+                        std::fflush(stdout); std::_Exit(0);
+                    }
+                }
+                require(false, "generated binding candidate");
+            }
             if (!std::strcmp(mode, "binding_auto")) {
                 const char* gen = std::getenv("DEMON_BIND_GENERATOR");
                 const char* type = std::getenv("DEMON_BIND_TYPE");
