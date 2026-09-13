@@ -3,6 +3,7 @@
 
 // SaraiState.cpp StateAttack, inherited by Demon. This policy does not move actors.
 enum class P2DemonAttackNext { None, Move, Fail, CatchFly, FallMeck };
+enum class P2DemonHeightNext { None, Flick, Fall };
 enum class P2DemonAttackEvent { None, Dash, Interruptible, CaptureCheck, End };
 struct P2DemonAttackDecision {
     bool valid=false;
@@ -10,6 +11,7 @@ struct P2DemonAttackDecision {
     bool dash=false;
     bool clearNoInterrupt=false;
     P2DemonAttackNext next=P2DemonAttackNext::None;
+    P2DemonHeightNext heightNext=P2DemonHeightNext::None;
 };
 class P2DemonAttackWindow {
     bool floorLatched=false;

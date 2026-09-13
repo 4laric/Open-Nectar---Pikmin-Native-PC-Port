@@ -5,7 +5,7 @@
 // Bounded translation of SaraiState::StateCatchFly::exec. Physics and turning
 // remain owned by the native actor; this only exposes the source decision order.
 namespace p2demon {
-enum class HeightNext { None, Flick, Fall };
+using HeightNext = P2DemonHeightNext;
 struct CatchFlyInput {
     float x, y, z;
     float targetX, targetY, targetZ;

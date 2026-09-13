@@ -63,7 +63,8 @@ public:
             return result;
         }
         if (phase == 0) {
-            if (!std::strcmp(mode, "timed") || !std::strcmp(mode, "timed_timeout")) {
+            if (!std::strcmp(mode, "timed") || !std::strcmp(mode, "timed_timeout")
+                || !std::strcmp(mode, "timed_height")) {
                 std::ifstream input("demon-retail-events.txt");
                 auto table = p2retail::read(input);
                 bool started = false;
@@ -147,10 +148,18 @@ public:
             // Bounded world inputs make pursuit and source height ordering
             // observable without replacing the native movement implementation.
             const bool timeout = std::strcmp(mode, "timed_timeout") == 0;
+            const bool height = std::strcmp(mode, "timed_height") == 0;
             p2demon::CatchFlyInput input{0, timeout ? 20.0f : 10.0f, 0, timeout ? 40.0f : 10.0f, timeout ? 20.0f : 10.0f, 0,
-                0, 0, 20, 25, 1, 0, 10, 0, p2demon::HeightNext::None, true};
+                0, 0, 20, height ? 5.0f : 25.0f, 1, 0, 10, 0,
+                height ? p2demon::HeightNext::Fall : p2demon::HeightNext::None, true};
             const auto decision = host.tickCatchFly(n, 1.0f, input);
             require(decision.valid, "advance CatchFly clock");
+            if (height) {
+                require(decision.heightNext == P2DemonHeightNext::Fall
+                    && decision.next == P2DemonAttackNext::None, "semantic CatchFly height transition");
+                std::puts("PASS DEMON_HOST CatchFly height -> Fall");
+                std::fflush(stdout); std::_Exit(0);
+            }
             if (decision.next != P2DemonAttackNext::None) {
                 require(decision.next == P2DemonAttackNext::FallMeck, "CatchFly END transition");
                 require(host.switchPoseMeshes(fallProfilePath.c_str()), "switch FallMeck pose bank");

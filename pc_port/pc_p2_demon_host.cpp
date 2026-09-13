@@ -275,6 +275,11 @@ P2DemonAttackDecision P2DemonHost::tickCatchFly(Navi* target, float delta, p2dem
     result.valid = true;
     if (ended) { mClockMode = 2; result.next = P2DemonAttackNext::FallMeck; }
     else if (movement.next != P2DemonAttackNext::None) result.next = movement.next;
+    else if (movement.heightNext != p2demon::HeightNext::None) {
+        mClockMode = 0;
+        mAttackPlayer.cancel();
+        result.heightNext = movement.heightNext;
+    }
     return result;
 }
 
