@@ -16,7 +16,8 @@ static p2retail::Motion motion(const char* name, int duration,
 
 int main()
 {
-    p2demon::CatchFlyInput input{0, 10, 0, 40, 10, 0, 0, 0, 20, 25, 1, 0, 10, 0, 0, 0.4f, 10.0f, p2demon::HeightNext::Fall, true};
+    p2demon::CatchFlyInput input{0, 10, 0, 40, 10, 0, 0, 0, 20, 25,
+        1, 0, 10, 0, 0.4f, 10.0f, 0, p2demon::HeightNext::Fall, true};
     auto pursuit = p2demon::catchFly(input);
     assert(pursuit.velocityX > 0 && pursuit.velocityY > 0 && !pursuit.finishMotion);
     assert(pursuit.faceDirection > 0 && pursuit.faceDirection < 0.18f);
