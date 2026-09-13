@@ -39,6 +39,11 @@ public:
             hp=n->mHealth; n->releasePikis();
             std::printf("DEMON_FIXTURE_WALK_SETUP previous=%d\n",n->getCurrState()->getID());
             n->mStateMachine->transit(n,NAVISTATE_Walk); // Explicit setup from preview Starting state.
+            if(is("direct")) {
+                n->mStateMachine->transit(n,NAVISTATE_DemonDrop);
+                require(n->getCurrState()->getID()==NAVISTATE_Walk&&pc_demon_drop_phase(n)==P2DemonDropPhase::Idle,"unadmitted state stranded");
+                std::puts("PASS DEMON_REGISTERED mode=direct unadmitted_fallback=1");std::fflush(stdout);std::_Exit(0);
+            }
             if(is("capacity")) {
                 PaniAnimKeyListener* old=nullptr;
                 unsigned count=0;

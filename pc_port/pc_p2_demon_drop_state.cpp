@@ -32,7 +32,13 @@ public:
         listeners.emplace_back(this,n,generation,serial);
         n->startMotion(PaniMotionInfo(id,&listeners.back()),PaniMotionInfo(id));
     }
-    void init(Navi*) override {} // Admission prepares payload before transit.
+    void init(Navi* n) override {
+        // Registration exposes an ID, but only admitted payloads may own it.
+        if(captain!=n||policy.phase()!=P2DemonDropPhase::Falling) {
+            policy.cancel(); captain=nullptr; expected=-1; dispatch=0;
+            n->mStateMachine->transit(n,NAVISTATE_Walk);
+        }
+    }
     void cleanup(Navi*) override { policy.cancel(); captain=nullptr; expected=-1; dispatch=0; }
     void resume(Navi* n) override {
         std::printf("DEMON_STATE_RESUME owned_delivery=%d phase=%d\n",int(delivering),int(policy.phase()));
@@ -97,7 +103,7 @@ bool pc_demon_drop_begin(Navi* n,std::uint64_t g,float damage,float speed) {
     auto c=s->policy.begin(g,damage,speed); if(!c.accepted) return false;
     s->captain=n; s->generation=g;
     n->mStateMachine->transit(n,NAVISTATE_DemonDrop);
-    if(!s->owns(n)) { s->policy.cancel(); return false; }
+    if(!s->owns(n)) { s->policy.cancel(); s->captain=nullptr; return false; }
     n->mGroundTriangle=nullptr; n->mPreviousTriangle=nullptr; n->mCollPlatform=nullptr;
     n->resetCreatureFlag(CF_IsOnGround|CF_IsPositionFixed); n->mFixedPosition=n->mSRT.t;
     n->mVelocity.y=c.actualY; n->mTargetVelocity.set(0,c.targetY,0); n->mVolatileVelocity.set(0,0,0);
