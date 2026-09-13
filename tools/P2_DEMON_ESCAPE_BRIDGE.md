@@ -38,3 +38,5 @@ Required live gates: input consumed once, six-edge threshold/RNG behavior,
 stable captured matrix, airborne control suppression with active gravity,
 no stale-ground immediate landing, restored object collision/control after
 actual floor bounce, interruption preservation and teardown/re-entry.
+
+Source audit: Creature::moveNew (creatureMove.cpp:139-141) applies gravity independently of Navi AI; ordinary Creature::update must continue during exit. Flying, IgnoreGravity, and DisableMovement flags can still inhibit movement; integration must verify ordinary captain flags in the live fixture. The bridge does not overwrite external physics flags. Atari queries reconcile landing/interruption before suppressing collision, avoiding stale suppression after a state change.
