@@ -83,3 +83,16 @@ py -3.12 tools/p2_demon_registered_run.py --root ../p2-groink-prototype --assets
 Root review must resolve generic external-transition physics and scene teardown
 before enabling the receiver beyond this isolated prototype. No shared native
 checkout was changed; production hooks are a proposal demonstrated privately.
+
+Final corrected source cb357a78072a004039df103764b691b417679699 adds fail-closed
+unadmitted state36 init (returns Walk instead of stranding captain) and clears
+captain on failed admission. Production rebuild succeeded. Frozen fixture04,
+SHA2565165ff8de957379fbd658072b6cda04da3472b0fd0d9aef6cd77c1be86a8739b,
+passes all prior eight modes plus direct-unadmitted-entry fallback. Complete
+nine-session index: output/demon-registered-evidence04.json. Direct guard session
+d3561edbcdda4590b9a786d2df2540ca; positive0b4e3547d7a648fcb117bea43a9df4a0;
+capacity a1e65686fb2649bba4e8e0a9406ff209. All earlier evidence remains preserved.
+
+Independent review confirmed the scoped eight-mode evidence and identified the
+direct-entry guard now fixed/tested. Outstanding generic interruption physics and
+scene-listener lifetime are explicit production blockers, not hidden by test PASS.
