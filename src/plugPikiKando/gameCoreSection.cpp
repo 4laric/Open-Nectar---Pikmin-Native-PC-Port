@@ -17,6 +17,7 @@
 #include "pc_bbft.h"
 #include "pc_p2_preview.h"
 #include "pc_p2_enemy.h"
+#include "pc_p2_demon_host.h"
 #include "pc_p2_cave.h"
 #include "pc_p2_kurage_receiver.h"
 #include "pc_p2_breadbug_visual.h"
@@ -1729,6 +1730,9 @@ static void pcDebugKeys()
 void GameCoreSection::update()
 {
 	STACK_PAD_VAR(2);
+#if defined(PIKI_PC_PORT)
+	pc_p2_demon_manager_update();
+#endif
 #if defined(PIKI_PC_PORT) && PIKI_DEBUG_KEYS
 	pcDebugKeys();
 #endif
@@ -2953,6 +2957,9 @@ void GameCoreSection::updateAI()
  */
 void GameCoreSection::draw(Graphics& gfx)
 {
+#if defined(PIKI_PC_PORT)
+	pc_p2_demon_manager_draw(gfx);
+#endif
 	gfx.mCamera->mProjectionMatrix = gfx.mCamera->mPerspectiveMatrix;
 	gfx.mCamera->mProjectionMatrix.multiply(gfx.mCamera->mLookAtMtx);
 	bool advanceState = true;
