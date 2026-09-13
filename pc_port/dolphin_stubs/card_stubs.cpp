@@ -6,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -27,7 +28,43 @@ std::atomic<s32> sLastResult[2] = { CARD_RESULT_READY, CARD_RESULT_READY };
 std::atomic<s32> sTransferred[2] = {};
 
 bool validChannel(s32 channel) { return channel >= 0 && channel < 2; }
-fs::path root(s32 channel) { return fs::path("save") / (channel == 0 ? "card0" : "card1"); }
+
+// Where the cards live. This used to be the relative path "save", which meant
+// the memory card followed the working directory: the launcher chdir()s into
+// the data root before starting the game, but running the binary straight from
+// Steam or a file manager leaves the working directory somewhere else, and the
+// two ended up with different cards. Players saved at sunset, relaunched the
+// other way, and found nothing.
+//
+// Resolved once, and never from the working directory unless there is already
+// a card there.
+fs::path saveRoot()
+{
+    static const fs::path resolved = [] {
+        std::error_code error;
+        // An explicit override always wins; portable setups can pin it.
+        if (const char* env = std::getenv("NECTAR_SAVE_DIR"); env != nullptr && *env != '\0')
+            return fs::path(env);
+        // Anyone who already has a card beside the working directory keeps it.
+        // Moving somebody's save out from under them is worse than the bug.
+        if (fs::exists(fs::path("save") / "card0", error))
+            return fs::path("save");
+#if defined(_WIN32)
+        if (const char* appdata = std::getenv("APPDATA"); appdata != nullptr && *appdata != '\0')
+            return fs::path(appdata) / "OpenNectar" / "save";
+#else
+        if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg != nullptr && *xdg != '\0')
+            return fs::path(xdg) / "pikmin-native" / "save";
+        if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0')
+            return fs::path(home) / ".local" / "share" / "pikmin-native" / "save";
+#endif
+        // No home to put it in. The old behaviour is still better than nothing.
+        return fs::path("save");
+    }();
+    return resolved;
+}
+
+fs::path root(s32 channel) { return saveRoot() / (channel == 0 ? "card0" : "card1"); }
 fs::path dataPath(s32 channel, const std::string& name) { return root(channel) / name; }
 fs::path metaPath(s32 channel, const std::string& name) { return root(channel) / (".meta_" + name); }
 
@@ -128,7 +165,12 @@ extern "C" {
 void CARDInit(void)
 {
 	ensureCard(0);
-	printf("[PC Port] CARDInit() - persistent filesystem card: save/card0\n");
+	// Print where it actually landed. The old message named a fixed relative
+	// path, which is exactly the detail a save-file bug report needs to be true.
+	std::error_code error;
+	const fs::path shown = fs::absolute(root(0), error);
+	printf("[PC Port] CARDInit() - persistent filesystem card: %s\n",
+	       (error ? root(0) : shown).string().c_str());
 }
 
 BOOL CARDProbe(s32 channel) { return validChannel(channel) && ensureCard(channel); }
