@@ -43,8 +43,8 @@ public:
             require(bool(input), "mouth profile");
             host.setPosition(Vector3f(0, 100, 100));
             require(host.load("courses/pikmin2room/demon0.mod", Vector3f(x0,y0,z0), Vector3f(x1,y1,z1)), "demon model");
-            require(host.loadMouthPoses("demon-attack-mouths.txt"), "pose bank");
-            require(host.applyMouthFrame(0), "initial pose");
+            require(host.loadPoseMeshes("demon-attack-poses.txt"), "mesh and mouth pose bank");
+            require(host.applyPoseFrame(0) && host.renderedPoseFrame()==0, "initial synchronized pose");
             n->mStateMachine->transit(n, NAVISTATE_Walk);
             n->resetPosition(host.mouthCentre(0));
             ready = true;
@@ -64,7 +64,8 @@ public:
                 host.mSRT.r.set(0, 0.7f, 0);
                 host.mSRT.s.set(1.2f, 0.8f, 1.1f);
                 host.setPosition(Vector3f(25, 100, 100));
-                require(host.applyMouthFrame(17), "frame17 pose");
+                require(host.applyPoseFrame(17) && host.renderedPoseFrame()==17, "frame17 synchronized pose");
+                require(!host.applyPoseFrame(18) && host.renderedPoseFrame()==17, "missing frame retains mesh");
                 Matrix4f local, world, expected;
                 local.makeIdentity();
                 for (int r=0; r<3; ++r) for (int c=0; c<4; ++c)

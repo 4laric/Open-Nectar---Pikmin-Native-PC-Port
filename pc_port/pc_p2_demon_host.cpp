@@ -151,7 +151,7 @@ void P2DemonHost::refresh(Graphics& gfx)
     mShape->updateAnim(gfx, view, nullptr, nullptr);
     mShape->drawshape(gfx, *gfx.mCamera, nullptr);
 }
-bool P2DemonHost::loadMouthPoses(const char* path) { return mPoseBank.load(path); }
+bool P2DemonHost::loadMouthPoses(const char* path) { return mPoseMeshes.empty() && mPoseBank.load(path); }
 bool P2DemonHost::applyMouthFrame(int frame)
 {
     const auto* pose = mPoseBank.exact(frame);
@@ -164,4 +164,40 @@ bool P2DemonHost::applyMouthFrame(int frame)
                 mouths[slot].mMtx[r][c] = pose->values[slot * 12 + r * 4 + c];
     }
     return setMouthPose(mouths[0], mouths[1]);
+}
+
+// Preload once in the App heap. No per-frame model allocation or global cache mutation.
+bool P2DemonHost::loadPoseMeshes(const char* profile)
+{
+    if (!mLoaded || !mPoseMeshes.empty()) return false;
+    P2DemonPoseBank parsed;
+    if (!parsed.load(profile)) return false;
+    for (const auto& pose : parsed.samples()) if (pose.model.empty()) return false;
+    std::vector<Shape*> meshes;
+    const int previousHeap = gsys->setHeap(SYSHEAP_App);
+    for (const auto& pose : parsed.samples()) {
+        const std::string path = "courses/pikmin2room/" + pose.model;
+        Shape* shape = gameflow.loadShape(path.c_str(), true);
+        if (!shape) { gsys->setHeap(previousHeap); return false; }
+        for (int i=0; i<shape->mTexAttrCount; ++i)
+            if (shape->mTexAttrList[i].mTexture) shape->mTexAttrList[i].mTexture->attach();
+        meshes.push_back(shape);
+    }
+    gsys->setHeap(previousHeap);
+    mPoseBank = parsed;
+    mPoseMeshes.swap(meshes);
+    return true;
+}
+bool P2DemonHost::applyPoseFrame(int frame)
+{
+    const auto& samples = mPoseBank.samples();
+    if (samples.size() != mPoseMeshes.size()) return false;
+    for (unsigned i=0; i<samples.size(); ++i) {
+        if (samples[i].frame != frame) continue;
+        if (!applyMouthFrame(frame)) return false;
+        mShape = mPoseMeshes[i];
+        mRenderedFrame = frame;
+        return true;
+    }
+    return false;
 }

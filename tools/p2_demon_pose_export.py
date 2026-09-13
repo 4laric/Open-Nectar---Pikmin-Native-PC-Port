@@ -1,8 +1,8 @@
 """Export verified Demon mouth poses for the private native host (no asset embedding)."""
-import argparse, hashlib, json, math
+import argparse, hashlib, json, math, re
 from pathlib import Path
 
-def export(source, clip_name, output):
+def export(source, clip_name, output, models=False):
     raw = source.read_bytes()
     data = json.loads(raw)
     if data.get("species") != "Demon" or data.get("enemy_id") != 32:
@@ -13,7 +13,7 @@ def export(source, clip_name, output):
     poses = clips[0]["poses"]
     if not 1 <= len(poses) <= 128:
         raise ValueError("pose count")
-    rows = ["P2_DEMON_MOUTHS_1", hashlib.sha256(raw).hexdigest(), str(len(poses))]
+    rows = ["P2_DEMON_POSES_2" if models else "P2_DEMON_MOUTHS_1", hashlib.sha256(raw).hexdigest(), str(len(poses))]
     previous = -1
     for pose in poses:
         frame = pose["frame"]
@@ -31,7 +31,15 @@ def export(source, clip_name, output):
             values += [float(x) for row in matrix for x in row]
         if any(not math.isfinite(x) or abs(x) > 1e6 for x in values):
             raise ValueError("invalid matrix")
-        rows.append(str(frame) + " " + " ".join(format(x, ".17g") for x in values))
+        prefix = str(frame)
+        if models:
+            filename = pose["file"]
+            if not re.fullmatch(r"[A-Za-z0-9_]+[.]mod", filename):
+                raise ValueError("unsafe model basename")
+            if hashlib.sha256((source.parent / filename).read_bytes()).hexdigest() != pose["sha256"]:
+                raise ValueError("model hash mismatch")
+            prefix += " " + filename
+        rows.append(prefix + " " + " ".join(format(x, ".17g") for x in values))
     output.write_text("\n".join(rows) + "\n")
 
 if __name__ == "__main__":
@@ -39,5 +47,6 @@ if __name__ == "__main__":
     parser.add_argument("source", type=Path)
     parser.add_argument("clip")
     parser.add_argument("output", type=Path)
+    parser.add_argument("--models", action="store_true")
     args = parser.parse_args()
-    export(args.source, args.clip, args.output)
+    export(args.source, args.clip, args.output, args.models)

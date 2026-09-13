@@ -21,6 +21,9 @@ public:
     bool setMouthPose(const Matrix4f& mouthA, const Matrix4f& mouthB);
     bool loadMouthPoses(const char* path);
     bool applyMouthFrame(int frame);
+    bool loadPoseMeshes(const char* profile);
+    bool applyPoseFrame(int frame);
+    int renderedPoseFrame() const { return mRenderedFrame; }
     bool beginAttack();
     bool updateAttack(Navi* target, float sourceFrame, bool floorContact);
     bool endAttack(Navi* target);
@@ -39,6 +42,8 @@ private:
     Matrix4f mMouthLocal[2];
     P2DemonAttackWindow mWindow;
     P2DemonPoseBank mPoseBank;
+    std::vector<Shape*> mPoseMeshes;
+    int mRenderedFrame = -1;
     bool mLoaded;
     bool mAttackActive;
     unsigned mOccupied;
