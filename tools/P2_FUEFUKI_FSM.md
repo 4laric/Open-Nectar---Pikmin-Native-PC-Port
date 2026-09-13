@@ -57,8 +57,11 @@ Source revision: projectPiki/pikmin2 632af93787b9c95b63f0c13be32b161375ce3a96
 
 ## Root-owned hook request specs (integration, not implemented here)
 
-The lane owns no shared hook. Integration needs these precise requests,
-serialized by root:
+Update 2026-09-13: per the #128 ownership reassignment these specs are now
+lane-owned and IMPLEMENTED by the Fuefuki binding seam — see
+P2_FUEFUKI_BINDING.md (pc_p2_fuefuki_binding.h). Item 6 (motion bank)
+remains with the engine lane's converter/material work (#128). The
+original spec text is kept for reference:
 
 1. Squad-whistle stimulation routing (P1 whistle -> Fuefuki candidate
    scan): a root-owned adapter that, each cast tick, enumerates P1 squad
