@@ -1005,6 +1005,7 @@ void DGXGraphics::setMatMatrices(Material* mat, int p2)
 		if (mat->mTextureInfo.mTextureData[j]._UNUSED10 == 0xE6) {
 			if (mP2Envmap || texGenSrc != GX_TG_NRM || animFactor == 255) std::abort();
 			mP2Envmap = true;
+            GXSetTexCoordGen2(texCoordID, texGenType, GXTexGenSrc(0xE6), postMtxId, GX_FALSE, GX_PTIDENTITY);
             // Static imported shapes do not run ShapeDynMaterials::animate.
             // Read the bounded source SRT directly, never its uninitialized cache.
             const auto& data = mat->mTextureInfo.mTextureData[j];
