@@ -27,6 +27,8 @@ class DemonHostApp final : public PlugPikiApp {
     int ticks = 0;
     int phase = 0;
     int recoveryTicks = 0;
+    int attackTicks = 0;
+    bool sawDash = false, sawInterrupt = false;
     float startingHealth = 0;
     bool ready = false;
 public:
@@ -51,6 +53,16 @@ public:
             return result;
         }
         if (phase == 0) {
+            if (!std::strcmp(mode, "timed")) {
+                std::ifstream input("demon-retail-events.txt");
+                auto table = p2retail::read(input);
+                bool started = false;
+                for (const auto& motion : table.motions)
+                    if (motion.name == "attack1.bca") started = host.beginTimedAttack(motion);
+                require(started, "retail attack motion");
+                phase = 4;
+                return result;
+            }
             require(host.beginAttack(), "attack begin");
             phase = 1;
         } else if (phase == 1) {
@@ -99,6 +111,20 @@ public:
                 return result;
             }
             std::fflush(stdout); std::_Exit(0);
+        } else if (phase == 4) {
+            require(++attackTicks <= 60, "timed attack timeout");
+            // Deterministic target tracking isolates animation/event behavior.
+            // Natural approach and target movement remain separate acceptance.
+            if (!host.occupied()) n->resetPosition(host.mouthCentre(0));
+            const auto decision = host.tickTimedAttack(n, 1.0f, false);
+            require(decision.valid, "timed attack update");
+            if (decision.dash) { require(attackTicks==11, "retail dash boundary"); sawDash=true; }
+            if (decision.clearNoInterrupt) { require(attackTicks==14, "retail interrupt boundary"); sawInterrupt=true; }
+            if (decision.next != P2DemonAttackNext::None) {
+                require(decision.next==P2DemonAttackNext::CatchFly && sawDash && sawInterrupt,
+                    "timed attack reaches occupied CatchFly");
+                phase=2;
+            }
         } else if (phase == 3) {
             require(++recoveryTicks < 240, "drop recovery timeout");
             if (n->getCurrState()->getID() == NAVISTATE_Walk) {
