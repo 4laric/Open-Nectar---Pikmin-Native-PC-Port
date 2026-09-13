@@ -153,7 +153,7 @@ public:
             const bool height = std::strcmp(mode, "timed_height") == 0;
             p2demon::CatchFlyInput input{0, timeout ? 20.0f : 10.0f, 0,
                 timeout ? 10000.0f : 10.0f, timeout ? 100.0f : 10.0f, 0,
-                0, 0, 20, height ? 5.0f : 25.0f, 1, 0, 10, 0,
+                0, 0, 20, height ? 5.0f : 25.0f, 1, 0, 10, 0, 0, 0.4f, 10.0f,
                 height ? p2demon::HeightNext::Fall : p2demon::HeightNext::None, true};
             const auto decision = host.tickCatchFly(n, 1.0f, input);
             require(decision.valid, "advance CatchFly clock");

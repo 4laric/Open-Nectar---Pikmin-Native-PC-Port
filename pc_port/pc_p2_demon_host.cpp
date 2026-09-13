@@ -269,12 +269,17 @@ P2DemonAttackDecision P2DemonHost::tickCatchFly(Navi* target, float delta, p2dem
     input.z = mSRT.t.z;
     input.elapsedSeconds = mCatchElapsedFrames / 30.0f;
     input.targetAttached = mOccupied != 0 && target && pc_demon_owned_by(target, this);
+    input.faceDirection = mFacingRadians;
     const auto movement = p2demon::catchFly(input);
     if (!input.targetAttached) {
         mOccupied = 0; mClockMode = 0; mAttackPlayer.cancel();
         result.valid = true; result.next = P2DemonAttackNext::Move; return result;
     }
     mTargetVelocity.set(movement.velocityX, movement.velocityY, movement.velocityZ);
+    if (!movement.finishMotion) {
+        mFacingRadians = movement.faceDirection;
+        mSRT.r.y = mFacingRadians;
+    }
     if (!mClockFinished && movement.finishMotion) {
         mAttackPlayer.finishMotion();
         mClockFinished = true;

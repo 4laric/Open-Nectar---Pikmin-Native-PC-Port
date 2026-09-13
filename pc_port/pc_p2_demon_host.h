@@ -68,6 +68,7 @@ private:
     float mCatchElapsedFrames = 0.0f;
     bool mClockFinished = false;
     bool mClockReleased = false;
+    float mFacingRadians = 0.0f;
     unsigned mOccupied;
     std::uint64_t mOwnerToken;
     void updateMouths();

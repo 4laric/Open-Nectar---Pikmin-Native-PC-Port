@@ -1,6 +1,7 @@
 #pragma once
 #include "pc_p2_demon_attack_window.h"
 #include <cmath>
+#include <algorithm>
 
 // Bounded translation of SaraiState::StateCatchFly::exec. Physics and turning
 // remain owned by the native actor; this only exposes the source decision order.
@@ -11,12 +12,14 @@ struct CatchFlyInput {
     float targetX, targetY, targetZ;
     float mapY, elapsedSeconds, grabFlightHeight, transitionHeight;
     float riseFactor, climbingFactor, grabSpeed;
+    float faceDirection, turnSpeed, maxTurnAngleDegrees;
     int stuckCount;
     HeightNext heightNext;
     bool targetAttached;
 };
 struct CatchFlyResult {
     float velocityX = 0, velocityY = 0, velocityZ = 0;
+    float faceDirection = 0;
     bool finishMotion = false;
     HeightNext heightNext = HeightNext::None;
     P2DemonAttackNext next = P2DemonAttackNext::None;
@@ -25,20 +28,28 @@ struct CatchFlyResult {
 inline CatchFlyResult catchFly(const CatchFlyInput& in)
 {
     CatchFlyResult out;
+    constexpr float pi = 3.14159265358979323846f;
     if (!std::isfinite(in.x) || !std::isfinite(in.y) || !std::isfinite(in.z) ||
         !std::isfinite(in.targetX) || !std::isfinite(in.targetY) || !std::isfinite(in.targetZ) ||
         !std::isfinite(in.mapY) || !std::isfinite(in.elapsedSeconds) || in.elapsedSeconds < 0 ||
         !std::isfinite(in.grabFlightHeight) || !std::isfinite(in.transitionHeight) ||
-        !std::isfinite(in.riseFactor) || !std::isfinite(in.climbingFactor) || !std::isfinite(in.grabSpeed))
+        !std::isfinite(in.riseFactor) || !std::isfinite(in.climbingFactor) || !std::isfinite(in.grabSpeed) ||
+        !std::isfinite(in.faceDirection) || !std::isfinite(in.turnSpeed) || !std::isfinite(in.maxTurnAngleDegrees))
         return out;
     const float dx = in.targetX - in.x, dz = in.targetZ - in.z;
     const float distance2 = dx * dx + dz * dz;
     if (in.elapsedSeconds > 10.0f || distance2 < 625.0f) {
         out.finishMotion = true;
-    } else if (in.grabSpeed > 0 && distance2 > 0) {
-        const float scale = in.grabSpeed / std::sqrt(distance2);
-        out.velocityX = dx * scale;
-        out.velocityZ = dz * scale;
+    } else if (in.grabSpeed > 0 && distance2 > 0 && in.turnSpeed >= 0 && in.maxTurnAngleDegrees >= 0) {
+        const float targetAngle = std::atan2(dx, dz);
+        float angle = targetAngle - in.faceDirection;
+        while (angle > pi) angle -= 2 * pi;
+        while (angle < -pi) angle += 2 * pi;
+        const float step = std::min(std::fabs(angle) * in.turnSpeed,
+                                    in.maxTurnAngleDegrees * pi / 180.0f);
+        out.faceDirection = in.faceDirection + (angle < 0 ? -step : step);
+        out.velocityX = std::sin(out.faceDirection) * in.grabSpeed;
+        out.velocityZ = std::cos(out.faceDirection) * in.grabSpeed;
     }
     // Source checks attachment before height transition and timer increment.
     if (!in.targetAttached) { out.next = P2DemonAttackNext::Move; return out; }
