@@ -124,6 +124,7 @@ struct P2FuefukiBindOut {
     int claimed = 0, endedSuspend = 0, endedPanic = 0;
     int followErrors = 0; // host followStart rejections (contract errors)
     bool kill = false, carcassCarryAnim = false;
+    P2FuefukiSuspendFallback suspendFallback = P2FUEFUKI_SUSPEND_FALLBACK_FREE;
     P2FuefukiFsmOut fsm;
 };
 
@@ -246,6 +247,7 @@ public:
         out.state         = fout.state;
         out.transited     = fout.transited;
         out.whistleRadius = fout.whistleRadius;
+        out.suspendFallback = fout.suspendFallback;
         out.fsm           = fout;
         return out;
     }
