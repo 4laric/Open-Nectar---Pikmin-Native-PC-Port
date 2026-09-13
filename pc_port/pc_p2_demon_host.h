@@ -14,6 +14,7 @@ class P2DemonHost;
 void pc_p2_demon_manager_reset();
 void pc_p2_demon_manager_forget(BTeki* actor);
 bool pc_p2_demon_manager_bind(P2DemonHost* host, BTeki* actor, unsigned generatorId, int tekiType);
+void pc_p2_demon_manager_setup();
 void pc_p2_demon_manager_update();
 void pc_p2_demon_manager_draw(Graphics& gfx);
 void pc_p2_demon_manager_update_actor(BTeki* actor);

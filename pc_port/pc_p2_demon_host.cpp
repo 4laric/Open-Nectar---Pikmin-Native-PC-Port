@@ -12,17 +12,50 @@
 #include <cmath>
 #include <utility>
 #include <map>
+#include <memory>
+#include <fstream>
+#include <cstdlib>
+#include <cstring>
 
 namespace {
 std::uint64_t nextHostToken = 0;
 struct ManagerBinding { P2DemonHost* host; unsigned generator; int type; };
 std::map<BTeki*, ManagerBinding> managerBindings;
+std::vector<std::unique_ptr<P2DemonHost>> managerHosts;
+}
+
+void pc_p2_demon_manager_setup()
+{
+    const char* enabled = std::getenv("PIKMIN_DEMON_AUTO_BIND");
+    if (!enabled || std::strcmp(enabled, "1") != 0 || !tekiMgr) return;
+    const char* path = std::getenv("PIKMIN_DEMON_BINDINGS");
+    std::ifstream input(path && *path ? path : "demon-host-bindings.txt");
+    if (!input) return;
+    unsigned generator = 0; int type = 0;
+    std::string model, pose;
+    float ax, ay, az, bx, by, bz;
+    while (input >> generator >> type >> model >> ax >> ay >> az >> bx >> by >> bz >> pose) {
+        auto host = std::make_unique<P2DemonHost>();
+        if (!host->load(model.c_str(), Vector3f(ax, ay, az), Vector3f(bx, by, bz)) || !host->preloadPoseMeshes(pose.c_str())) continue;
+        BTeki* match = nullptr;
+        Iterator actors(tekiMgr); CI_LOOP(actors) {
+            BTeki* actor = static_cast<BTeki*>(*actors);
+            if (actor && actor->mGenerator && actor->mGenerator->_70 == generator && actor->mTekiType == type) {
+                if (match) { match = nullptr; break; }
+                match = actor;
+            }
+        }
+        if (!match || !pc_p2_demon_manager_bind(host.get(), match, generator, type)) continue;
+        host->setPosition(match->getPosition());
+        managerHosts.push_back(std::move(host));
+    }
 }
 
 void pc_p2_demon_manager_reset()
 {
     for (auto& entry : managerBindings) entry.second.host->unbindNativeActor(entry.first);
     managerBindings.clear();
+    managerHosts.clear();
 }
 void pc_p2_demon_manager_forget(BTeki* actor)
 {
