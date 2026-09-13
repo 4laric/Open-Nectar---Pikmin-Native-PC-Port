@@ -106,15 +106,21 @@ holding single-controller exclusivity for the same Pikmin.
 
 ## Remaining runtime-acceptance gaps
 
-- Real P1 host adapter implementation (CellIterator-equivalent squad
-  scan, actual follow action, whistle receiver interception, traceMove/
-  map probes) is runtime integration on this seam, not covered by mocks.
+Update (#245, `P2_FUEFUKI_RUNTIME_EVIDENCE.md`): the first and fourth
+bullets are now covered by a real-GL runtime run — real `pikiMgr` squad
+scan, real positions/alive/mode reads, real non-routing on live objects,
+and the captain-whistle reclaim through the REAL `Navi::callPikis`
+(LookAt transit, then real `FormationMode` join 20 frames later). The
+gaps below remain open.
+
+- Actual follow **action** (locomotion) has no P1 follow-teki equivalent;
+  follow movement stays policy-fixture-only. traceMove/map probes beyond
+  the flat-room distance checks are also still mock-side.
 - Arena staging under #186 with the install profile, physical placement
   and rendered whistle ring requires the #128 motion bank and converted
   parms; fixture parms are shortened.
 - Suspend brain-fallback destination (Formation rejoin vs Free) and claim
   persistence across day/cave transitions remain open from earlier
   slices; the seam exposes the release reasons but does not define the
-  destination state.
-- Live captain switch/party-combine non-routing must be re-verified
-  against the real receivers once the P1 whistle path is wired.
+  destination state. P1 has no verified panic state — released followers
+  stay in PIKISTATE_Normal (see evidence doc).
