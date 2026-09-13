@@ -3786,8 +3786,33 @@ void pc_gfx_init_light_attn_k(void* ltObj, f32 k0, f32 k1, f32 k2) {
 void pc_gfx_init_specular_dir(void* ltObj, f32 x, f32 y, f32 z) {
     if (!ltObj) return;
     u8* raw = static_cast<u8*>(ltObj);
+    // This was a copy of pc_gfx_init_light_dir: it stored the raw direction
+    // and left the position alone. A specular light is not shaped like that.
+    // GXInitSpecularDir puts the half-angle vector between the reversed light
+    // direction and the eye (0,0,1) into ldir, and encodes the direction
+    // itself into lpos scaled by 1024*1024. Storing the plain direction gave a
+    // half-vector with negative Z -- pointing away from the camera -- so the
+    // highlight always landed on the far side of the model and never showed.
+    // The Onions were the obvious casualty.
+    f32 vx = -x;
+    f32 vy = -y;
+    f32 vz = -z + 1.0f;
+    const f32 mag = std::sqrt(vx * vx + vy * vy + vz * vz);
+    if (mag > 1e-6f) {
+        const f32 inv = 1.0f / mag;
+        vx *= inv; vy *= inv; vz *= inv;
+    } else {
+        // The light points straight at the eye and the half-vector degenerates.
+        vx = 0.0f; vy = 0.0f; vz = 1.0f;
+    }
     f32* ldir = reinterpret_cast<f32*>(raw + 0x34);
-    ldir[0] = x; ldir[1] = y; ldir[2] = z;
+    ldir[0] = vx; ldir[1] = vy; ldir[2] = vz;
+
+    const f32 kSpecularPosScale = 1024.0f * 1024.0f;
+    f32* lpos = reinterpret_cast<f32*>(raw + 0x28);
+    lpos[0] = -x * kSpecularPosScale;
+    lpos[1] = -y * kSpecularPosScale;
+    lpos[2] = -z * kSpecularPosScale;
 }
 void pc_gfx_load_light(void* ltObj, u32 lightMask) {
     if (!ltObj) return;
