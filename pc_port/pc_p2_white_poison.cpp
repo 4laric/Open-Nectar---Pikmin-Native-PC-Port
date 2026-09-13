@@ -33,7 +33,7 @@ void pc_p2_white_poison_setup() {
     int count = 0;
     if (!(in >> word) || word != "P2_WHITE_POISON_1"
         || !(in >> word >> poisonDamage) || word != "damage"
-        || !std::isfinite(poisonDamage) || poisonDamage <= 0.0f || poisonDamage > 10000.0f
+        || !std::isfinite(poisonDamage) || poisonDamage != 750.0f
         || !(in >> word >> count) || word != "predator_generators" || count < 1 || count > 32) std::abort();
     for (int i = 0; i < count; ++i) {
         std::string token;
