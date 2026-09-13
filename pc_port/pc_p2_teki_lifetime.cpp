@@ -3,6 +3,7 @@
 #include "pc_p2_armor.h"
 #include "pc_p2_elecbug.h"
 #include "pc_p2_tamago.h"
+#include "pc_p2_tadpole.h"
 #include "pc_p2_hana.h"
 #include "pc_p2_imomushi.h"
 #include "pc_p2_batch2.h"
@@ -65,6 +66,7 @@ void pc_p2_forget_teki(BTeki* actor)
 	pc_p2_armor_forget(actor);
 	pc_p2_elecbug_forget(actor);
     pc_p2_tamago_forget(actor);
+    pc_p2_tadpole_forget(actor);
     pc_p2_hana_forget(actor);
     pc_p2_imomushi_forget(actor);
 	pc_p2_batch3_forget(actor);
@@ -107,6 +109,7 @@ void pc_p2_reset_all_teki()
 	pc_p2_armor_reset();
     pc_p2_elecbug_reset();
     pc_p2_tamago_reset();
+    pc_p2_tadpole_reset();
     pc_p2_hana_reset();
     pc_p2_imomushi_reset();
 	pc_p2_batch3_reset();

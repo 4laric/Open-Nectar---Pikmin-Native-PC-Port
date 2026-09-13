@@ -11,6 +11,7 @@
 // stay tracked on the family issues and #186.
 #include "pc_p2_batch3.h"
 #include "pc_p2_animation.h"
+#include "pc_p2_tadpole.h"
 #include "pc_bbft.h"
 #include "teki.h"
 #include "Generator.h"
@@ -235,9 +236,14 @@ void pc_p2_batch3_setup() {
                 loadBank(family, species, clipRows->second);
         }
     }
-    for (const auto& entry : actors)
-        std::printf("P2_BATCH3_BIND generator=%u key=%s visual_only=1 native_fsm=unimplemented\n",
-                    entry.first->mGenerator ? entry.first->mGenerator->_70 : 0, entry.second.c_str());
+    for (const auto& entry : actors) {
+        if (entry.second == "aquatic|Tadpole")
+            std::printf("P2_BATCH3_BIND generator=%u key=%s visual_only=0 native_fsm=implemented\n",
+                        entry.first->mGenerator ? entry.first->mGenerator->_70 : 0, entry.second.c_str());
+        else
+            std::printf("P2_BATCH3_BIND generator=%u key=%s visual_only=1 native_fsm=unimplemented\n",
+                        entry.first->mGenerator ? entry.first->mGenerator->_70 : 0, entry.second.c_str());
+    }
     std::printf("P2_BATCH3_BANK total_mod_bytes=%zu species=%zu\n", bytesTotal, banks.size());
 }
 
@@ -256,9 +262,20 @@ bool pc_p2_batch3_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     static const char* const waitClips[] = {"wait1", "wait", "wait2", "kagebozu_wait", "kagebozu_wait2"};
     const int motion = actor->mTekiAnimator->getCurrentMotionIndex();
     const char* name = nullptr;
+    float forcedPhase = -1.0f;
+    // Family-owned source behavior: a registered Tadpole forces the exact source
+    // clip/phase for its FSM state instead of the generic P1-velocity pick.
+    if (!corpse) {
+        const char* forced = nullptr;
+        float phase = 0.0f;
+        if (pc_p2_tadpole_clip(actor, forced, phase) && bank.clips.count(forced)) {
+            name = forced;
+            forcedPhase = phase;
+        }
+    }
     if (corpse) {
         name = firstClip(bank, deadClips, int(sizeof(deadClips) / sizeof(deadClips[0])));
-    } else if (motion == TekiMotion::Damage || motion >= TekiMotion::Type1) {
+    } else if (!name && (motion == TekiMotion::Damage || motion >= TekiMotion::Type1)) {
         name = firstClip(bank, attackClips, int(sizeof(attackClips) / sizeof(attackClips[0])));
     }
     if (!name) {
@@ -272,7 +289,8 @@ bool pc_p2_batch3_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     const auto& poses = bank.clips.at(name);
     if (poses.empty()) return false;
     const int frames = actor->mTekiAnimator->getFrameCount();
-    const float phase = frames > 1 ? actor->mTekiAnimator->getCounter() / (frames - 1) : 0.f;
+    const float phase = forcedPhase >= 0.0f ? forcedPhase
+        : (frames > 1 ? actor->mTekiAnimator->getCounter() / (frames - 1) : 0.f);
     const p2animation::Clip& timing = bank.timing.at(name);
     const size_t index = timing.index(phase, corpse);
     Shape* shape = poses.at(index < poses.size() ? index : poses.size() - 1);
