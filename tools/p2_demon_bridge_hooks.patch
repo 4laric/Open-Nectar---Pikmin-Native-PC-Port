@@ -12,7 +12,7 @@
  
  	mPlateMgr->update();
 +	#if defined(PIKI_PC_PORT)
-+	if (!pc_demon_bound(this))
++	if (!pc_demon_controls_blocked(this))
 +	#endif
  	updateWalkAnimation();
  	mWalkAnimPrevPos = mSRT.t;
@@ -32,12 +32,32 @@
  void Navi::doAI()
  {
 +#if defined(PIKI_PC_PORT)
-+	if (pc_demon_bound(this)) return;
++	if (pc_demon_controls_blocked(this)) return;
 +#endif
  	if (gameflow.mDemoFlags & CinePlayerFlags::NaviNoAI) {
  		return;
  	}
-@@ -2378,6 +2390,10 @@
+@@ -1684,6 +1696,9 @@
+  */
+ bool Navi::isAtari()
+ {
++#if defined(PIKI_PC_PORT)
++	if (pc_demon_suppress_atari(this)) return false;
++#endif
+ 	int state = mStateMachine->getCurrID(this);
+ 	return state != NAVISTATE_Pressed && state != NAVISTATE_Bury && state != NAVISTATE_Container;
+ }
+@@ -1708,6 +1723,9 @@
+  */
+ void Navi::bounceCallback()
+ {
++#if defined(PIKI_PC_PORT)
++	pc_demon_landed(this);
++#endif
+ 	MsgBounce msg(Vector3f(0.0f, 1.0f, 0.0f));
+ 	sendMsg(&msg);
+ }
+@@ -2378,6 +2396,10 @@
  		mSRT.s.set(scale, scale, scale);
  	}
  
