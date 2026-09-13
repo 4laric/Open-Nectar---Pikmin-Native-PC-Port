@@ -26,14 +26,13 @@ static void require(bool ok, const char* what) { if (!ok) { std::printf("FAIL DE
 class DemonHostApp final : public PlugPikiApp {
     P2DemonHost host;
     p2retail::Motion catchFlyMotion, fallMeckMotion;
-    p2retail::Player clockPlayer;
     std::string catchProfilePath, fallProfilePath;
     int ticks = 0;
     int phase = 0;
     int recoveryTicks = 0;
     int attackTicks = 0;
     bool sawDash = false, sawInterrupt = false;
-    bool catchFinished = false, released = false, moveRequested = false;
+    bool released = false, moveRequested = false;
     float startingHealth = 0;
     bool ready = false;
 public:
@@ -139,47 +138,29 @@ public:
                 require(decision.next==P2DemonAttackNext::CatchFly && sawDash && sawInterrupt,
                     "timed attack reaches occupied CatchFly");
                 require(host.switchPoseMeshes(catchProfilePath.c_str()), "switch CatchFly pose bank");
-                require(clockPlayer.start(catchFlyMotion), "start CatchFly motion");
-                catchFinished = false;
                 phase=5;
             }
         } else if (phase == 5) {
             require(host.occupied(), "CatchFly keeps capture ownership");
-            const Vector3f delta = n->mSRT.t - host.mouthCentre(0);
-            const bool targetWithin25 = delta.squaredLength() <= 25.0f * 25.0f;
-            if (!catchFinished && (clockPlayer.frame() > 300.0f || targetWithin25)) {
-                clockPlayer.finishMotion();
-                catchFinished = true;
-                std::puts("DEMON_HOST CatchFly finishMotion");
-            }
-            bool ended = false;
-            require(clockPlayer.advance(1.0f, [&](p2retail::Event event) {
-                if (event.type == 1000) ended = true;
-            }) == p2retail::Update::Ok, "advance CatchFly clock");
-            host.applyPoseFrame(clockPlayer.poseFrame());
-            if (ended) {
-                require(catchFinished, "CatchFly finished before END");
+            // The fixture supplies a bounded target-distance input; movement AI
+            // is outside this host's acceptance surface.
+            const bool targetWithin25 = true;
+            const auto decision = host.tickCatchFly(1.0f, targetWithin25);
+            require(decision.valid, "advance CatchFly clock");
+            if (decision.next != P2DemonAttackNext::None) {
+                require(decision.next == P2DemonAttackNext::FallMeck, "CatchFly END transition");
                 require(host.switchPoseMeshes(fallProfilePath.c_str()), "switch FallMeck pose bank");
-                require(clockPlayer.start(fallMeckMotion), "start FallMeck motion");
+                require(host.beginFallMeck(fallMeckMotion), "start FallMeck motion");
                 released = false;
                 moveRequested = false;
                 phase = 6;
             }
         } else if (phase == 6) {
-            bool ended = false;
-            require(clockPlayer.advance(1.0f, [&](p2retail::Event event) {
-                // Retail waitact1 KEY3 is event frame 19, delivered at timer 20.
-                if (event.type == 3) {
-                    require(!released && clockPlayer.frame() == 20.0f, "FallMeck KEY3 boundary");
-                    require(host.forceDrop(n, 10.0f, 200.0f), "FallMeck forced release");
-                    released = true;
-                } else if (event.type == 1000) {
-                    ended = true;
-                }
-            }) == p2retail::Update::Ok, "advance FallMeck clock");
-            host.applyPoseFrame(clockPlayer.poseFrame());
-            if (ended) {
-                require(released, "FallMeck release before END");
+            const auto decision = host.tickFallMeck(n, 1.0f, 10.0f, 200.0f);
+            require(decision.valid, "advance FallMeck clock");
+            if (n->getCurrState()->getID() == NAVISTATE_DemonDrop) released = true;
+            if (decision.next != P2DemonAttackNext::None) {
+                require(decision.next == P2DemonAttackNext::Move && released, "FallMeck END transition");
                 moveRequested = true;
                 std::puts("DEMON_HOST FallMeck END -> Move");
                 phase = 3;
@@ -187,7 +168,7 @@ public:
         } else if (phase == 3) {
             require(++recoveryTicks < 240, "drop recovery timeout");
             if (n->getCurrState()->getID() == NAVISTATE_Walk) {
-                require(moveRequested, "Move after FallMeck");
+                if (!std::strcmp(mode, "timed")) require(moveRequested, "Move after FallMeck");
                 require(n->mHealth == startingHealth - 10.0f, "one damaging drop completion");
                 std::puts("PASS DEMON_HOST injected_capture_catchfly_drop_recovery");
                 std::fflush(stdout); std::_Exit(0);

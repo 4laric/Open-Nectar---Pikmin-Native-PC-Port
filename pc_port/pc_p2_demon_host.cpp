@@ -204,8 +204,9 @@ bool P2DemonHost::switchPoseMeshes(const char* profile)
         mPoseMeshes = set.meshes;
         return true;
     }
-    if (!preloadPoseMeshes(profile)) return false;
-    return switchPoseMeshes(profile);
+    // Transitions must use a bank explicitly preloaded during setup; this keeps
+    // the host clock free of allocations and makes missing assets observable.
+    return false;
 }
 
 bool P2DemonHost::loadPoseMeshes(const char* profile)
@@ -236,6 +237,62 @@ bool P2DemonHost::beginTimedAttack(const p2retail::Motion& motion)
     if (!beginAttack()) { mAttackPlayer.cancel(); return false; }
     return true;
 }
+
+bool P2DemonHost::beginCatchFly(const p2retail::Motion& motion)
+{
+    if (!mOccupied || mClockMode != 0 || !mAttackPlayer.start(motion)) return false;
+    mClockMode = 1;
+    mClockFinished = false;
+    return true;
+}
+
+P2DemonAttackDecision P2DemonHost::tickCatchFly(float delta, bool targetWithin25)
+{
+    P2DemonAttackDecision result;
+    if (mClockMode != 1 || !std::isfinite(delta) || delta <= 0 || delta > 1) return result;
+    if (!mClockFinished && (mAttackPlayer.frame() > 300.0f || targetWithin25)) {
+        mAttackPlayer.finishMotion();
+        mClockFinished = true;
+    }
+    bool ended = false;
+    if (mAttackPlayer.advance(delta, [&](p2retail::Event event) { ended |= event.type == 1000; }) != p2retail::Update::Ok)
+        return result;
+    const auto& samples = mPoseBank.samples();
+    const P2DemonMouthFrame* selected = nullptr;
+    for (const auto& pose : samples) if (pose.frame <= mAttackPlayer.frame()) selected = &pose;
+    if (!selected || !applyPoseFrame(selected->frame)) return result;
+    result.valid = true;
+    if (ended) { mClockMode = 2; result.next = P2DemonAttackNext::FallMeck; }
+    return result;
+}
+
+bool P2DemonHost::beginFallMeck(const p2retail::Motion& motion)
+{
+    if (mClockMode != 2 || !mAttackPlayer.start(motion)) return false;
+    mClockMode = 3;
+    mClockReleased = false;
+    return true;
+}
+
+P2DemonAttackDecision P2DemonHost::tickFallMeck(Navi* target, float delta, float damage, float speed)
+{
+    P2DemonAttackDecision result;
+    if (mClockMode != 3 || !std::isfinite(delta) || delta <= 0 || delta > 1) return result;
+    bool ended = false;
+    if (mAttackPlayer.advance(delta, [&](p2retail::Event event) {
+            if (event.type == 3 && !mClockReleased && mAttackPlayer.frame() == 20.0f)
+                mClockReleased = forceDrop(target, damage, speed);
+            if (event.type == 1000) ended = true;
+        }) != p2retail::Update::Ok) return result;
+    const auto& samples = mPoseBank.samples();
+    const P2DemonMouthFrame* selected = nullptr;
+    for (const auto& pose : samples) if (pose.frame <= mAttackPlayer.frame()) selected = &pose;
+    if (!selected || !applyPoseFrame(selected->frame)) return result;
+    result.valid = true;
+    if (ended) { mClockMode = 4; result.next = P2DemonAttackNext::Move; }
+    return result;
+}
+
 P2DemonAttackDecision P2DemonHost::tickTimedAttack(Navi* target, float delta, bool floorContact)
 {
     P2DemonAttackDecision result;

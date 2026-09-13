@@ -30,6 +30,10 @@ public:
     bool beginAttack();
     bool beginTimedAttack(const p2retail::Motion& motion);
     P2DemonAttackDecision tickTimedAttack(Navi*, float sourceFrames, bool floorContact);
+    bool beginCatchFly(const p2retail::Motion& motion);
+    P2DemonAttackDecision tickCatchFly(float sourceFrames, bool targetWithin25);
+    bool beginFallMeck(const p2retail::Motion& motion);
+    P2DemonAttackDecision tickFallMeck(Navi* target, float sourceFrames, float damage, float speed);
     bool updateAttack(Navi* target, float sourceFrame, bool floorContact);
     bool endAttack(Navi* target);
     bool forceDrop(Navi* target, float damage, float speed);
@@ -58,6 +62,9 @@ private:
     int mRenderedFrame = -1;
     bool mLoaded;
     bool mAttackActive;
+    int mClockMode = 0;
+    bool mClockFinished = false;
+    bool mClockReleased = false;
     unsigned mOccupied;
     std::uint64_t mOwnerToken;
     void updateMouths();
