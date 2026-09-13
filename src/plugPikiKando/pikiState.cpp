@@ -1957,6 +1957,7 @@ void PikiFlyingState::exec(Piki* piki)
 	if (purpleFlight.phase == PcP2PurpleFlightPhase::Descent && purpleFlight.phaseElapsed == 0.0f) {
 		piki->startMotion(PaniMotionInfo(PIKIANIM_Fall), PaniMotionInfo(PIKIANIM_Fall));
 	}
+	if (purpleFlight.phase == PcP2PurpleFlightPhase::Descent) return;
 	if (purpleFlight.phase == PcP2PurpleFlightPhase::Recovery) return;
 	if (piki->isCreatureFlag(CF_IsOnGround)) {
 		mGroundTouchFrames++;
@@ -2082,6 +2083,16 @@ void PikiFlyingState::procCollideMsg(Piki* piki, MsgCollide* msg)
 	if (piki->isHolding()) {
 		return;
 	}
+	PcP2PurpleFlightSample collisionFlight = pc_p2_purple_flight_sample(piki);
+	if (collisionFlight.phase == PcP2PurpleFlightPhase::Recovery) return;
+	const bool specialFlightContact = collisionFlight.phase == PcP2PurpleFlightPhase::EntryPause
+	                               || collisionFlight.phase == PcP2PurpleFlightPhase::Descent;
+	CollPart* flightPart = msg->mEvent.mColliderPart;
+	if (specialFlightContact && flightPart && flightPart->isPlatformType()
+	    && pc_p2_purple_flight_land(piki, false)) {
+		pc_p2_purple_impact_emit(piki, "platform_collision");
+		return;
+	}
 
 	if (colliderType == OBJTYPE_WorkObject) {
 		WorkObject* obj = (WorkObject*)collider;
@@ -2122,10 +2133,6 @@ void PikiFlyingState::procCollideMsg(Piki* piki, MsgCollide* msg)
 	if (colliderType != OBJTYPE_Plant) {
 		SeSystem::playPlayerSe(SE_THROWHIT);
 	}
-	PcP2PurpleFlightSample collisionFlight = pc_p2_purple_flight_sample(piki);
-	if (collisionFlight.phase == PcP2PurpleFlightPhase::Recovery) return;
-	const bool specialFlightContact = collisionFlight.phase == PcP2PurpleFlightPhase::EntryPause
-	                               || collisionFlight.phase == PcP2PurpleFlightPhase::Descent;
 	if (specialFlightContact) {
 		pc_p2_purple_flight_contact(piki, colliderType == OBJTYPE_Teki || collider->isBoss());
 	}
@@ -2268,6 +2275,7 @@ void PikiFlyingState::procStickMsg(Piki*, MsgStick*)
  */
 void PikiFlyingState::procBounceMsg(Piki* piki, MsgBounce*)
 {
+	if (pc_p2_purple_flight_sample(piki).phase == PcP2PurpleFlightPhase::Recovery) return;
 	if (pc_p2_purple_flight_land(piki, false)) {
 		pc_p2_purple_impact_emit(piki, "ground_bounce");
 		return;
