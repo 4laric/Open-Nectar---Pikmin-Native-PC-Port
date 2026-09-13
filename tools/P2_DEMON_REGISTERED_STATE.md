@@ -41,3 +41,45 @@ Compatibility: normal P1 InteractAttack is not P2 KokeDamage fidelity; actual ca
 binding/owner actor is absent. Scene lifetime, allocator reuse, water, moving
 platforms, slope/ledge behavior and arbitrary asynchronous event delivery remain
 unverified. No declaration of full enemy completion follows from this prototype.
+
+## Registered-state runtime evidence
+
+Production Release build succeeds with PIKMIN_NATIVE_JAUDIO=ON. Initial default
+legacy-audio link failed on existing Jac_NoteDemoSkipped references; no unrelated
+audio source was changed. Build/fixture base snapshot12bd4d607a7d80ec4c1ac4841cb1936cbeeec6e2.
+Private fixture03 SHA2566f19f0db71cbb5c5a1d6ec85d38c3f275084c2dd9effec7acde28bbf39c20606,
+manifest output/demon-registered-fixture-03/provenance.json. Earlier fixture01/02
+correctly rejected preview Starting23 admission; fixture03 explicitly arranges
+Walk before injecting drop. Production admission was not weakened.
+
+All sessions under output/demon-registered-sessions, each with executable,
+provenance, runner, room/helper hashes and logs:
+
+| Mode | Session | Observed result |
+|---|---|---|
+| positive | 793b9768986842f181c79c7b8329785e | Real bounce/JKoke END; owned resume and restart preserve Lay3;100->90; GetUp toWalk |
+| interrupt | 0196e7c0edaa4001bdd3a84255368a9e | Knockdown->Walk;90updates no pending damage |
+| reset | 47aa9200f9a842a1badfe20a1bf5b67b | Falling reset; owned actual/target/volatile zero and all3 contact pointers null immediately; no late damage |
+| rejected | 0324fa604b3e42d18f233fd4f0c06975 | Explicit damaged-flag setup causes one accepted=0 attempt;100HP and recovery, no retry |
+| external | f79ccb956c224a03bebc9767af6e8ac1 | Real external InteractAttack calls unowned-delivery resume; cancel thenWalk;99HP, no pending10HP hit |
+| flick | 7ca1bb6bd27849098d0ad244b2275d7c | Real registered ordinary Flick8 init/animation/recovery toWalk;100HP |
+| fatal | 30bf945d6f6a4fc0afeaaca723ab8378 | Real200damage;100->-100; native outer finishDamage enters Dead29, stays there for30updates |
+| capacity | 0557fdec6083420989e6808667428b6f |4094 fall admissions/reset cycles then refusal; retained first listener rejected after reset and newer generation |
+
+The capacity test's calls to an obsolete listener are synthetic rejection probes,
+not fabricated successful animation completions. No direct HP writes. The rejected
+mode deliberately sets the existing damaged flag, not natural enemy damage.
+Fixture asserts current/target/volatile magnitudes<0.001 after real Navi updates
+through Knockdown/Lay/GetUp, retaining a valid ground triangle. This measures the
+end of both physics passes, NOT instrumentation proving which pass first bounced.
+No water/platform/contact-quiescence-at-altitude or full scene lifetime claim.
+
+Reproduce (MinGW bin on PATH):
+cmake -S . -B build-demon -DPIKMIN_NATIVE_JAUDIO=ON
+cmake --build build-demon -j6
+py -3.12 ../p2-groink-prototype/scripts/build_pikmin2_fixture.py --build build-demon --source . --fixture tools/p2_demon_registered_runtime.cpp --output ../NEW-FIXTURE --expected-native-head CURRENT_COMMIT
+py -3.12 tools/p2_demon_registered_run.py --root ../p2-groink-prototype --assets C:/Users/alari/pikmin-local/game/assets --room ../pikmin2-room105 --fixture ../NEW-FIXTURE --output ../demon-registered-sessions
+
+Root review must resolve generic external-transition physics and scene teardown
+before enabling the receiver beyond this isolated prototype. No shared native
+checkout was changed; production hooks are a proposal demonstrated privately.
