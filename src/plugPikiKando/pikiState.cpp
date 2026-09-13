@@ -1937,6 +1937,7 @@ void PikiFlyingState::init(Piki* piki)
  */
 void PikiFlyingState::exec(Piki* piki)
 {
+	PcP2PurpleFlightSample previousPurpleFlight = pc_p2_purple_flight_sample(piki);
 	if (pc_p2_purple_flight_update(piki, gsys->getFrameTime(), AICONST.mGravity())) {
 		pc_p2_purple_flight_cancel(piki);
 		piki->restartAI();
@@ -1946,6 +1947,10 @@ void PikiFlyingState::exec(Piki* piki)
 		return;
 	}
 	PcP2PurpleFlightSample purpleFlight = pc_p2_purple_flight_sample(piki);
+	if (previousPurpleFlight.phase == PcP2PurpleFlightPhase::Ascent
+	    && purpleFlight.phase == PcP2PurpleFlightPhase::EntryPause) {
+		mSparkleEffect.kill();
+	}
 	if (purpleFlight.phase == PcP2PurpleFlightPhase::EntryPause) return;
 	if (purpleFlight.phase == PcP2PurpleFlightPhase::Descent && purpleFlight.phaseElapsed == 0.0f) {
 		piki->startMotion(PaniMotionInfo(PIKIANIM_Fall), PaniMotionInfo(PIKIANIM_Fall));
@@ -2115,11 +2120,17 @@ void PikiFlyingState::procCollideMsg(Piki* piki, MsgCollide* msg)
 	if (colliderType != OBJTYPE_Plant) {
 		SeSystem::playPlayerSe(SE_THROWHIT);
 	}
-	pc_p2_purple_flight_contact(piki, colliderType == OBJTYPE_Teki || collider->isBoss());
+	PcP2PurpleFlightSample collisionFlight = pc_p2_purple_flight_sample(piki);
+	if (collisionFlight.phase == PcP2PurpleFlightPhase::Recovery) return;
+	const bool specialFlightContact = collisionFlight.phase == PcP2PurpleFlightPhase::EntryPause
+	                               || collisionFlight.phase == PcP2PurpleFlightPhase::Descent;
+	if (specialFlightContact) {
+		pc_p2_purple_flight_contact(piki, colliderType == OBJTYPE_Teki || collider->isBoss());
+	}
 
 	if (colliderType == OBJTYPE_Teki || collider->isBoss()) {
 		PcP2PurpleDirectHit direct;
-		if (piki->mVelocity.y < 0.0f) {
+		if ((!pc_p2_purple_flight_active(piki) || specialFlightContact) && piki->mVelocity.y < 0.0f) {
 			direct = pc_p2_purple_direct_begin(piki, collider, msg->mEvent.mColliderPart);
 			pc_p2_purple_impact_emit(piki, "enemy_collision");
 			pc_p2_purple_direct_finish(piki, collider, msg->mEvent.mColliderPart, direct);
