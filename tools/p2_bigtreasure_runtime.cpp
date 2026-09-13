@@ -36,14 +36,9 @@
 #include "pc_p2_bigtreasure_map_trace.h"
 #include "pc_p2_bigtreasure_visual.h"
 
-// Private one-TU fixture build snapshots these lane implementations as
-// dependencies (same pattern as the Groink volley fixture).
-#include "../pc_port/pc_p2_bigtreasure.cpp"
-#include "../pc_port/pc_p2_bigtreasure_attacks.cpp"
-#include "../pc_port/pc_p2_bigtreasure_host.cpp"
-#include "../pc_port/pc_p2_bigtreasure_map_trace.cpp"
-#include "../pc_port/pc_p2_bigtreasure_motion.cpp"
-#include "../pc_port/pc_p2_bigtreasure_visual.cpp"
+// Batch 2: the lane implementations are part of the shared pikmin_pc target,
+// so the fixture links against the build objects instead of compiling them into
+// this translation unit (avoids duplicate symbols).
 
 namespace {
 constexpr float kDt = 1.0f / 30.0f;

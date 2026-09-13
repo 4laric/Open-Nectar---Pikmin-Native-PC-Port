@@ -25,7 +25,13 @@ Source revision: projectPiki/pikmin2 632af93787b9c95b63f0c13be32b161375ce3a96
   lifegauge at KEYEVENT_2, struggle arming at KEYEVENT_3); Whisle cleanup
   runs on ANY exit and ends the cast while claims persist (the new
   endCast path on the interference policy — source finishWhisle); Stay
-  entry suspends followers (source ActTeki isFlying Success/emote exit);
+  entry suspends followers (source ActTeki isFlying Success/emote exit;
+  the releasedSuspend output carries the resolved brain
+  destination -- **Free, not Formation**, via
+  P2FuefukiFsmOut::suspendFallback: ActTeki::getNextAIType() returns
+  ACT_Free, PikiAI.h:1254; Brain::exec routes to start(ACT_Free),
+  aiAction.cpp:108-110; the stored piki->mNavi is not consulted and is
+  cleared by ActFree::init, aiFree.cpp:33);
   Dead entry commits the owner-death Panic release before any host death
   callback; Dead kills at dead-anim END and the carcass uses
   FUEFUKIANIM_Carry.
@@ -121,6 +127,16 @@ acceptance follows from these fixtures. Root retains shared integration.
   fp12 - fp11 and lets the first patrol tick supply the delta.
 - Stay/Jump airborne duration, escape trajectory and landing position
   validity are host/map responsibilities with no fixture coverage.
-- Brain fallback after suspend (Formation rejoin vs Free) and claim
-  persistence across day/cave transitions remain open from the earlier
-  slices.
+- Brain fallback after suspend is resolved to **Free** (this lane slice;
+  see tools/p2_fuefuki_suspend_fallback_test.cpp). Claim persistence
+  across day/cave transitions remains open from the earlier slices.
+
+## Test evidence (this slice)
+
+    g++ -std=gnu++17 -Wall -Wextra -Werror -Ipc_port tools/p2_fuefuki_suspend_fallback_test.cpp -o <out>
+    <out>   # p2_fuefuki_suspend_fallback_test PASS (exit 0)
+
+Tools/p2_fuefuki_interference_policy_test re-verified PASS; tools/
+p2_fuefuki_fsm_test re-verified PASS; tools/p2_fuefuki_binding_test
+re-verified PASS after the P2FuefukiSuspendOut / suspendFallback
+propagation.
