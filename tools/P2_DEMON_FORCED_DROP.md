@@ -14,7 +14,7 @@ uses a separate InteractFlick path and must not be relabeled as forced drop.
 
 Sarai.cpp:228 fallMeckGround iterates the owner's Stickers, filters mouth-stuck
 creatures, and stimulates InteractFallMeck(owner, retail attackDamage). Only an
-accepted receiver gets its full actual velocity replaced with
+accepted receiver receives a virtual setVelocity call with
 (0, -retail FallMeckSpeed, 0). Use the Demon parameter block, not header defaults.
 Do not infer ownership merely from being stuck to some other owner's mouth.
 Releasing during traversal requires source-equivalent safe sticker iteration.
@@ -25,8 +25,9 @@ interactNavi.cpp:102 unconditionally transits NSID_FallMeck with the damage arg
 and returns true. NaviFallMeckState::init (naviState.cpp:3627) stores damage,
 starts FALL, ends stick ownership, and initializes actual AND target vertical
 velocity to -400 for positive damage or -100 otherwise. Horizontal components
-are not changed by that init. The caller then overwrites the entire actual
-velocity as above, leaving target velocity from receiver initialization.
+are not changed by that init. The caller then invokes virtual setVelocity. Navi.h:127 overrides this to assign
+mTargetVelocity only: final target velocity is (0,-retail FallMeckSpeed,0),
+while actual vertical velocity remains the receiver-initialized -400 or -100.
 Do not reverse these operations or accidentally overwrite the final fall speed
 with the escape bridge's zero-velocity release helper.
 
