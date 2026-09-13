@@ -31,7 +31,7 @@ public:
     bool beginTimedAttack(const p2retail::Motion& motion);
     P2DemonAttackDecision tickTimedAttack(Navi*, float sourceFrames, bool floorContact);
     bool beginCatchFly(const p2retail::Motion& motion);
-    P2DemonAttackDecision tickCatchFly(float sourceFrames, bool targetWithin25);
+    P2DemonAttackDecision tickCatchFly(Navi* target, float sourceFrames, bool targetWithin25);
     bool beginFallMeck(const p2retail::Motion& motion);
     P2DemonAttackDecision tickFallMeck(Navi* target, float sourceFrames, float damage, float speed);
     bool updateAttack(Navi* target, float sourceFrame, bool floorContact);

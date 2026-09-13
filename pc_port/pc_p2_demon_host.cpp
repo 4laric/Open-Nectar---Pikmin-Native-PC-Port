@@ -168,7 +168,8 @@ bool P2DemonHost::applyMouthFrame(int frame)
 }
 
 // Load sampled meshes once in the App heap. Switching only changes pointers and
-// the active bank, so a motion transition cannot allocate or mutate global state.
+// the active bank. Bank/vector copies can allocate at transitions; there are
+// no per-frame model loads or global cache mutations.
 bool P2DemonHost::preloadPoseMeshes(const char* profile)
 {
     if (!mLoaded || !profile || !*profile) return false;
@@ -247,10 +248,14 @@ bool P2DemonHost::beginCatchFly(const p2retail::Motion& motion)
     return true;
 }
 
-P2DemonAttackDecision P2DemonHost::tickCatchFly(float delta, bool targetWithin25)
+P2DemonAttackDecision P2DemonHost::tickCatchFly(Navi* target, float delta, bool targetWithin25)
 {
     P2DemonAttackDecision result;
     if (mClockMode != 1 || !std::isfinite(delta) || delta <= 0 || delta > 1) return result;
+    if (!target || !pc_demon_owned_by(target, this)) {
+        mOccupied = 0; mClockMode = 0; mAttackPlayer.cancel();
+        result.valid = true; result.next = P2DemonAttackNext::Move; return result;
+    }
     if (!mClockFinished && (mCatchElapsedFrames > 300.0f || targetWithin25)) {
         mAttackPlayer.finishMotion();
         mClockFinished = true;

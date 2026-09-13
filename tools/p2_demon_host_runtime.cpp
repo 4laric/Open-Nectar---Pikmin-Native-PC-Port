@@ -147,7 +147,7 @@ public:
             // The fixture supplies a bounded target-distance input; movement AI
             // is outside this host's acceptance surface.
             const bool targetWithin25 = std::strcmp(mode, "timed_timeout") != 0;
-            const auto decision = host.tickCatchFly(1.0f, targetWithin25);
+            const auto decision = host.tickCatchFly(n, 1.0f, targetWithin25);
             require(decision.valid, "advance CatchFly clock");
             if (decision.next != P2DemonAttackNext::None) {
                 require(decision.next == P2DemonAttackNext::FallMeck, "CatchFly END transition");
