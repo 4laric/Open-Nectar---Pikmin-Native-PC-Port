@@ -45,21 +45,35 @@ fs::path saveRoot()
         // An explicit override always wins; portable setups can pin it.
         if (const char* env = std::getenv("NECTAR_SAVE_DIR"); env != nullptr && *env != '\0')
             return fs::path(env);
-        // Anyone who already has a card beside the working directory keeps it.
-        // Moving somebody's save out from under them is worse than the bug.
-        if (fs::exists(fs::path("save") / "card0", error))
-            return fs::path("save");
+
+        std::vector<fs::path> candidates;
+        // [0] A card beside the working directory: what every build before 0.5
+        // wrote, and what a portable install still expects.
+        candidates.emplace_back("save");
+        // [1] The preferred per-user location. It has to be the same folder the
+        // launcher uses as its data root, or the launcher and a direct launch
+        // disagree about where the card lives -- which is the whole bug.
 #if defined(_WIN32)
-        if (const char* appdata = std::getenv("APPDATA"); appdata != nullptr && *appdata != '\0')
-            return fs::path(appdata) / "OpenNectar" / "save";
+        if (const char* local = std::getenv("LOCALAPPDATA"); local != nullptr && *local != '\0')
+            candidates.push_back(fs::path(local) / "Nectar" / "save");
+        // 0.5 briefly wrote to roaming AppData. Keep reading those cards.
+        if (const char* roaming = std::getenv("APPDATA"); roaming != nullptr && *roaming != '\0')
+            candidates.push_back(fs::path(roaming) / "OpenNectar" / "save");
 #else
         if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg != nullptr && *xdg != '\0')
-            return fs::path(xdg) / "pikmin-native" / "save";
+            candidates.push_back(fs::path(xdg) / "pikmin-native" / "save");
         if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0')
-            return fs::path(home) / ".local" / "share" / "pikmin-native" / "save";
+            candidates.push_back(fs::path(home) / ".local" / "share" / "pikmin-native" / "save");
 #endif
-        // No home to put it in. The old behaviour is still better than nothing.
-        return fs::path("save");
+
+        // A card that already exists wins, wherever it is. Stranding somebody's
+        // progress is worse than keeping it in an unfashionable folder.
+        for (const auto& candidate : candidates)
+            if (fs::exists(candidate / "card0", error)) return candidate;
+
+        // Nothing saved yet: the per-user location, or the old relative path if
+        // there is no home directory to put it in.
+        return candidates.size() > 1 ? candidates[1] : candidates[0];
     }();
     return resolved;
 }
