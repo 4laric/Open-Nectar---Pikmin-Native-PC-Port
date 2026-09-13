@@ -2,6 +2,7 @@
 #include "Creature.h"
 #include "pc_p2_demon_attack_window.h"
 #include "pc_p2_demon_pose_bank.h"
+#include "pc_p2_retail_player.h"
 
 class Graphics;
 class Shape;
@@ -25,6 +26,8 @@ public:
     bool applyPoseFrame(int frame);
     int renderedPoseFrame() const { return mRenderedFrame; }
     bool beginAttack();
+    bool beginTimedAttack(const p2retail::Motion& motion);
+    P2DemonAttackDecision tickTimedAttack(Navi*, float sourceFrames, bool floorContact);
     bool updateAttack(Navi* target, float sourceFrame, bool floorContact);
     bool endAttack(Navi* target);
     bool forceDrop(Navi* target, float damage, float speed);
@@ -41,6 +44,7 @@ private:
     CollPart* mMouths[2];
     Matrix4f mMouthLocal[2];
     P2DemonAttackWindow mWindow;
+    p2retail::Player mAttackPlayer;
     P2DemonPoseBank mPoseBank;
     std::vector<Shape*> mPoseMeshes;
     int mRenderedFrame = -1;

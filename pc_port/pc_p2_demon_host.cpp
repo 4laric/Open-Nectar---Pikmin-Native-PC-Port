@@ -138,7 +138,7 @@ void P2DemonHost::release(Navi* target)
 
 bool P2DemonHost::occupied() const { return mOccupied != 0; }
 Vector3f P2DemonHost::mouthCentre(unsigned slot) const { return slot < 2 ? mMouths[slot]->mCentre : Vector3f(0, 0, 0); }
-void P2DemonHost::sceneExit() { pc_demon_owner_lost(mOwnerToken); mOccupied = 0; mAttackActive = false; }
+void P2DemonHost::sceneExit() { mAttackPlayer.cancel(); pc_demon_owner_lost(mOwnerToken); mOccupied = 0; mAttackActive = false; }
 void P2DemonHost::doKill() { sceneExit(); }
 
 void P2DemonHost::refresh(Graphics& gfx)
@@ -200,4 +200,42 @@ bool P2DemonHost::applyPoseFrame(int frame)
         return true;
     }
     return false;
+}
+
+// The caller supplies animation-frame deltas from its simulation clock.
+// Keep updates <=1 frame so the continuous capture window cannot be skipped.
+bool P2DemonHost::beginTimedAttack(const p2retail::Motion& motion)
+{
+    if (motion.name != "attack1.bca" || mPoseMeshes.empty() || mAttackActive) return false;
+    if (!mAttackPlayer.start(motion)) return false;
+    if (!beginAttack()) { mAttackPlayer.cancel(); return false; }
+    return true;
+}
+P2DemonAttackDecision P2DemonHost::tickTimedAttack(Navi* target, float delta, bool floorContact)
+{
+    P2DemonAttackDecision result;
+    if (!mAttackActive || !std::isfinite(delta) || delta <= 0 || delta > 1) return result;
+    std::vector<p2retail::Event> events;
+    if (mAttackPlayer.advance(delta, [&](p2retail::Event event){ events.push_back(event); }) != p2retail::Update::Ok) return result;
+    const float frame = mAttackPlayer.frame();
+    const P2DemonMouthFrame* selected = nullptr;
+    for (const auto& pose : mPoseBank.samples()) if (pose.frame <= frame) selected = &pose;
+    if (!selected || !applyPoseFrame(selected->frame)) return result;
+    if (mOccupied && (!target || !pc_demon_owned_by(target, this))) mOccupied = 0;
+    updateAttack(target, frame, floorContact);
+    result.valid = true;
+    if (!target) result.next = P2DemonAttackNext::Move;
+    for (const auto& event : events) {
+        P2DemonAttackEvent mapped = P2DemonAttackEvent::None;
+        if (event.type == 2) mapped = P2DemonAttackEvent::Dash;
+        else if (event.type == 3) mapped = P2DemonAttackEvent::Interruptible;
+        else if (event.type == 4) mapped = P2DemonAttackEvent::CaptureCheck;
+        else if (event.type == 1000) mapped = P2DemonAttackEvent::End;
+        const auto decision = P2DemonAttackWindow::eventDecision(target != nullptr, true, mapped, mOccupied);
+        result.dash |= decision.dash;
+        result.clearNoInterrupt |= decision.clearNoInterrupt;
+        if (decision.next != P2DemonAttackNext::None) result.next = decision.next;
+    }
+    if (result.next != P2DemonAttackNext::None) { mAttackActive = false; mAttackPlayer.cancel(); }
+    return result;
 }
