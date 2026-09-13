@@ -48,6 +48,7 @@ struct Larva {
 	float frame = 0;
 	bool landed = false;
 	bool loggedDead = false;
+	bool attackHit = false;
 };
 struct Queen {
 	p2queen::Placement cfg;
@@ -248,9 +249,10 @@ void tickLarva(Queen& q, Larva& l) {
 			l.state = next;
 			l.frame = 0;
 		}
-	} else if (l.state == 3) { // move toward nearest target, BabyState.cpp:153-186
-		Piki* best = nullptr;
+	} else if (l.state == 3) { // move toward nearest Pikmin/captain, BabyState.cpp:153-186
 		float bestDist = p2queen::BabySight;
+		float targetX = 0.0f, targetZ = 0.0f;
+		bool found = false;
 		if (pikiMgr) {
 			Iterator it(pikiMgr);
 			CI_LOOP(it) {
@@ -261,13 +263,28 @@ void tickLarva(Queen& q, Larva& l) {
 				const float dist = std::sqrt(dx * dx + dz * dz);
 				if (dist < bestDist) {
 					bestDist = dist;
-					best = p;
+					targetX = pos.x;
+					targetZ = pos.z;
+					found = true;
 				}
 			}
 		}
-		if (best) {
-			const Vector3f& pos = best->getPosition();
-			const float want = std::atan2(pos.x - l.x, pos.z - l.z) * 57.29577951308232f;
+		if (naviMgr) { // Baby also targets the captain (BabyState.cpp:153-186)
+			Navi* n = naviMgr->getNavi();
+			if (n && n->mHealth > 0) {
+				const Vector3f& pos = n->getPosition();
+				const float dx = pos.x - l.x, dz = pos.z - l.z;
+				const float dist = std::sqrt(dx * dx + dz * dz);
+				if (dist < bestDist) {
+					bestDist = dist;
+					targetX = pos.x;
+					targetZ = pos.z;
+					found = true;
+				}
+			}
+		}
+		if (found) {
+			const float want = std::atan2(targetX - l.x, targetZ - l.z) * 57.29577951308232f;
 			float off = want - l.yaw;
 			while (off > 180.0f) off -= 360.0f;
 			while (off < -180.0f) off += 360.0f;
@@ -277,7 +294,13 @@ void tickLarva(Queen& q, Larva& l) {
 			const float rad = l.yaw * 0.0174532925199433f;
 			l.x += std::sin(rad) * move.first * Tick;
 			l.z += std::cos(rad) * move.first * Tick;
-			// Baby attack (damage 2 to captains) is deferred: UNTESTED slice.
+			// Baby.cpp StateMove enters Attack inside mMaxAttackRange (30) /
+			// mMaxAttackAngle (45); the bite is applied in state 4.
+			if (move.second) {
+				l.state = 4;
+				l.frame = 0;
+				l.attackHit = false;
+			}
 		}
 		// Instant crush when pressed (a roll pass or a press): hp 5 disc.
 		if (pikiMgr) {
@@ -298,6 +321,38 @@ void tickLarva(Queen& q, Larva& l) {
 		if (l.health <= 0.0f) {
 			l.state = 0;
 			l.frame = 0;
+		}
+	} else if (l.state == 4) { // attack: key 2 bites a captain for mAttackDamage
+		// Baby.cpp StateAttack: key 2 hits captains with mAttackDamage (2) and
+		// tries to eat a Pikmin. Captain damage goes through the engine
+		// InteractAttack path (actNavi), so the ordinary P1 damage cooldown,
+		// rumble and damage animation still apply. Pikmin ingestion/swallow
+		// and White-Pikmin poison remain deferred (labeled).
+		if (naviMgr && !l.attackHit && l.frame >= 10.0f) {
+			Navi* n = naviMgr->getNavi();
+			if (n && n->mHealth > 0) {
+				const Vector3f& pos = n->getPosition();
+				const float dx = pos.x - l.x, dz = pos.z - l.z;
+				const float dist = std::sqrt(dx * dx + dz * dz);
+				float off = std::atan2(dx, dz) * 57.29577951308232f - l.yaw;
+				while (off > 180.0f) off -= 360.0f;
+				while (off < -180.0f) off += 360.0f;
+				if (dist <= 30.0f && std::fabs(off) <= 45.0f) {
+					InteractAttack attack(nullptr, nullptr, p2queen::BabyAttackDamage, false);
+					const float before = n->mHealth;
+					n->stimulate(attack);
+					l.attackHit = true;
+					std::printf("P2_QUEEN_LARVA_ATTACK id=%u damage=%.0f captain_before=%.1f captain_health=%.1f\n",
+					            q.cfg.id, p2queen::BabyAttackDamage, before, n->mHealth);
+				}
+			}
+		}
+		const p2queen::ActorClip* attackClip = config.clip(31, "attack");
+		const float attackDuration = attackClip ? float(attackClip->duration) : 30.0f;
+		if (l.frame >= attackDuration) {
+			l.state = 3;
+			l.frame = 0;
+			l.attackHit = false;
 		}
 	} else if (l.state == 0 && !l.loggedDead) {
 		l.loggedDead = true;
@@ -555,7 +610,7 @@ void pc_p2_queen_draw(Graphics& gfx) {
 		drawOne(30, stateClip(q.state, q.rollingLeft), q.frame, q.x, q.y, q.z, q.yaw,q.materialFrame);
 		for (const auto& l : q.larvae) {
 			if (!l.active) continue;
-			drawOne(31, l.state == 2 ? "born" : l.state == 3 ? "move" : "dead", l.frame, l.x, l.y, l.z, l.yaw,0);
+			drawOne(31, l.state == 2 ? "born" : l.state == 3 ? "move" : l.state == 4 ? "attack" : "dead", l.frame, l.x, l.y, l.z, l.yaw,0);
 		}
 	}
 }
