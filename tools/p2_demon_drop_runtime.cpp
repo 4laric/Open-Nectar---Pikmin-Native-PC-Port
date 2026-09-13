@@ -96,6 +96,7 @@ public:
         return result;
     }
 };
+#ifndef DEMON_DROP_NO_MAIN
 int main(int argc,char** argv) {
     SDL_setenv("SDL_AUDIODRIVER","dummy",1); SDL_SetMainReady(); pc_gpu_preference_apply();
     _putenv_s("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1"); pc_bbft_init(argc,argv);
@@ -104,3 +105,5 @@ int main(int argc,char** argv) {
     pc_settings_init(); gsys->Initialise(); pc_settings_p2d_init(); nodeMgr=new NodeMgr();
     gsys->run(new DemonDropApp()); return 0;
 }
+
+#endif
