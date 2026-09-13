@@ -302,7 +302,8 @@ int main(int argc, char** argv) {
     mode = std::getenv("DEMON_HOST_MODE"); if (!mode) mode = "drop";
     SDL_setenv("SDL_AUDIODRIVER", "dummy", 1); SDL_SetMainReady(); pc_gpu_preference_apply();
     _putenv_s("PIKMIN_RANDOMIZER_TEST_BACKGROUND", "1"); pc_bbft_init(argc, argv);
-    require(pc_pikipelago_room_preview(), "room"); require(pc_window_init("Demon host fixture", 960, 720), "window");
+    require(pc_pikipelago_room_preview(), "room"); require(pc_window_init("Demon host fixture", 960, 540), "window");
+    pc_window_center();
     pc_settings_init(); gsys->Initialise(); pc_settings_p2d_init(); nodeMgr = new NodeMgr();
     gsys->run(new DemonHostApp());
     return 0;
