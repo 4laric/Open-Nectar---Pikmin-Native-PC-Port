@@ -1315,7 +1315,7 @@ static const char* vShaderSrc =
     "uniform vec4 uAmbColor;\n"
     "uniform int uChan0En;\n"
     "uniform int uChan1En;\n"
-    "uniform int uChan0AttnFn;\n"  // 0=NONE,1=SPOT,2=SPEC
+    "uniform int uChan0AttnFn;\n"  // GXAttnFn: 0=SPEC, 1=SPOT, 2=NONE
     "uniform int uChan1AttnFn;\n"
     "uniform int uNumLights1;\n"
     "uniform vec4 uLightPos1[4];\n"
@@ -1375,16 +1375,25 @@ static const char* vShaderSrc =
     "    vec3 N = normalize(uNrmMtx * aNormal);\n"
     "    vec3 lit0 = uAmbColor.rgb + doLights(N, worldPos, uNumLights, uLightPos, uLightColor, uLightK);\n"
     "    vec3 spec1 = vec3(0.0);\n"
-    "    if (uChan1AttnFn == 2 && uNumLights1 > 0) {\n"
-    "        // GX hardware specular: att = clamp(a0 + a1*cosT + a2*cosT^2)\n"
+    // GX_AF_SPEC is 0; 2 is GX_AF_NONE. Testing for 2 meant the specular
+    // branch never ran on a specular channel, and the diffuse branch ran
+    // instead on a light whose dir field holds a half-vector, not a position.
+    // The misleading comment on uChan0AttnFn above is where that came from.
+    "    if (uChan1AttnFn == 0 && uNumLights1 > 0) {\n"
+    "        // GX evaluates specular as a ratio of two quadratics in N.H: the\n"
+    "        // angle coefficients over the distance ones. The numerator alone\n"
+    "        // gives a far broader, flatter highlight than the hardware.\n"
     "        float cosT = max(dot(N, normalize(uSpecHalf1.xyz)), 0.0);\n"
-    "        float att = clamp(uSpecAttn1.x + uSpecAttn1.y * cosT + uSpecAttn1.z * cosT * cosT, 0.0, 1.0);\n"
+    "        vec3 quad = vec3(1.0, cosT, cosT * cosT);\n"
+    "        float num = max(0.0, dot(uSpecAttn1.xyz, quad));\n"
+    "        float den = dot(uLightK1[0].xyz, quad);\n"
+    "        float att = (den > 1e-5) ? clamp(num / den, 0.0, 1.0) : 0.0;\n"
     "        spec1 = att * uLightColor1[0].rgb;\n"
     "    }\n"
     "    // GX_AF_SPEC uses the channel's attenuation function to produce the\n"
     "    // specular term.  Feeding the same light through the diffuse path as\n"
     "    // well double-counts COLOR1 and saturates specular materials white.\n"
-    "    vec3 diffuse1 = (uChan1AttnFn == 2)\n"
+    "    vec3 diffuse1 = (uChan1AttnFn == 0)\n"
     "        ? vec3(0.0)\n"
     "        : doLights(N, worldPos, uNumLights1, uLightPos1, uLightColor1, uLightK1);\n"
     "    vec3 lit1 = uAmbColor1.rgb + diffuse1 + spec1;\n"
