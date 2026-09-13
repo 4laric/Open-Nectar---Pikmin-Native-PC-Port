@@ -14,6 +14,7 @@
 #include "pc_p2_giant_breadbug_visual.h"
 #include "pc_p2_bulblax_visual.h"
 #include "pc_p2_tank.h"
+#include "pc_p2_hardlanes.h"
 #include "pc_randomizer.h"
 #include "MapCode.h"
 #include <fstream>
@@ -1680,6 +1681,7 @@ void GameCoreSection::update()
 		bugPrintBuffer->update();
 #endif
 	}
+	pc_p2_hardlanes_update();
 
 	if (GameStat::allPikis == 0 && GameStat::maxPikis > 0) {
 		Navi* navi = mNavi;
@@ -2890,6 +2892,7 @@ void GameCoreSection::draw(Graphics& gfx)
 
 	gfx.useMatrix(Matrix4f::ident, 0);
 	gfx.calcLighting(1.0f);
+	pc_p2_hardlanes_draw(gfx);
 	if (mDrawHideType != 8) {
 		mMapMgr->refresh(gfx);
 	}
