@@ -24,3 +24,7 @@ void pc_demon_before_transition(Navi*, int nextState);
 using P2DemonRandom = float (*)(void*);
 bool pc_demon_escape_tick(Navi* captain, bool directionalDownEdge, P2DemonRandom random, void* context);
 bool pc_demon_suppress_atari(Navi* captain);
+
+class Matrix4f;
+void pc_demon_follow_mouth(Navi*);
+bool pc_demon_capture_matrix(Navi*, Matrix4f&);

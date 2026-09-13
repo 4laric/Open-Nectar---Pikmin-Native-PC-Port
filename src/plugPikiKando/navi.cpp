@@ -1072,6 +1072,7 @@ void Navi::update()
 	Creature::update();
 #if defined(PIKI_PC_PORT)
 	pc_demon_drop_post_physics(this);
+	pc_demon_follow_mouth(this);
 #endif
 
 	mapMgr->updatePos(mSRT.t.x, mSRT.t.z);
@@ -2411,6 +2412,11 @@ void Navi::draw(Graphics& gfx)
 		mSRT.s.set(scale, scale, scale);
 	}
 
+#if defined(PIKI_PC_PORT)
+    if (pc_demon_capture_matrix(this, mWorldMtx)) {
+        // Preserve full source joint basis instead of rebuilding upright SRT.
+    } else
+#endif
 	if (mRope) {
 		mWorldMtx = mConstrainedMoveMtx;
 		mWorldMtx.setTranslation(mSRT.t.x, mSRT.t.y, mSRT.t.z);
