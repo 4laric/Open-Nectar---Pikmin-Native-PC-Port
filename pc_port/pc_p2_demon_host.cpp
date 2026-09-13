@@ -62,6 +62,28 @@ void pc_p2_demon_manager_draw(Graphics& gfx)
         binding.host->refresh(gfx);
     }
 }
+void pc_p2_demon_manager_update_actor(BTeki* actor)
+{
+    auto it = managerBindings.find(actor);
+    if (it == managerBindings.end()) return;
+    auto& binding = it->second;
+    if (!binding.host->revalidateNativeActor(actor, binding.generator, binding.type)) {
+        managerBindings.erase(it); return;
+    }
+    binding.host->setPosition(actor->getPosition());
+    binding.host->update();
+}
+bool pc_p2_demon_manager_draw_actor(BTeki* actor, Graphics& gfx, const Matrix4f&, bool)
+{
+    auto it = managerBindings.find(actor);
+    if (it == managerBindings.end()) return false;
+    auto& binding = it->second;
+    if (!binding.host->revalidateNativeActor(actor, binding.generator, binding.type)) {
+        managerBindings.erase(it); return false;
+    }
+    binding.host->refresh(gfx);
+    return true;
+}
 
 P2DemonHost::P2DemonHost()
     : Creature(nullptr)

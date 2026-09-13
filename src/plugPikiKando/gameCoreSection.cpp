@@ -1730,9 +1730,6 @@ static void pcDebugKeys()
 void GameCoreSection::update()
 {
 	STACK_PAD_VAR(2);
-#if defined(PIKI_PC_PORT)
-	pc_p2_demon_manager_update();
-#endif
 #if defined(PIKI_PC_PORT) && PIKI_DEBUG_KEYS
 	pcDebugKeys();
 #endif
@@ -2957,9 +2954,6 @@ void GameCoreSection::updateAI()
  */
 void GameCoreSection::draw(Graphics& gfx)
 {
-#if defined(PIKI_PC_PORT)
-	pc_p2_demon_manager_draw(gfx);
-#endif
 	gfx.mCamera->mProjectionMatrix = gfx.mCamera->mPerspectiveMatrix;
 	gfx.mCamera->mProjectionMatrix.multiply(gfx.mCamera->mLookAtMtx);
 	bool advanceState = true;

@@ -16,6 +16,8 @@ void pc_p2_demon_manager_forget(BTeki* actor);
 bool pc_p2_demon_manager_bind(P2DemonHost* host, BTeki* actor, unsigned generatorId, int tekiType);
 void pc_p2_demon_manager_update();
 void pc_p2_demon_manager_draw(Graphics& gfx);
+void pc_p2_demon_manager_update_actor(BTeki* actor);
+bool pc_p2_demon_manager_draw_actor(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool corpse);
 
 // Private host for the staged P2 Demon model. It is deliberately not registered
 // as a P1 teki or a replacement for Sarai's full FSM.
