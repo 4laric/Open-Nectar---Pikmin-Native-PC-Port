@@ -24,6 +24,7 @@
 #include "pc_p2_armor.h"
 #include "pc_p2_elecbug.h"
 #include "pc_p2_tamago.h"
+#include "pc_p2_mar.h"
 #include "pc_p2_tadpole.h"
 #include "pc_p2_hana.h"
 #include "pc_p2_imomushi.h"
@@ -243,6 +244,7 @@ void pc_p2_preview_setup() {
     pc_p2_armor_setup();
     pc_p2_elecbug_setup();
     pc_p2_tamago_setup();
+    pc_p2_mar_setup();
     pc_p2_tadpole_setup();
     pc_p2_hana_setup();
     pc_p2_imomushi_setup();

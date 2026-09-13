@@ -12,6 +12,7 @@
 #include "pc_p2_batch3.h"
 #include "pc_p2_animation.h"
 #include "pc_p2_tadpole.h"
+#include "pc_p2_mar.h"
 #include "pc_bbft.h"
 #include "teki.h"
 #include "Generator.h"
@@ -131,16 +132,30 @@ bool parseBank(const std::string& path,
             || word.compare(word.size() - 7, 7, "_BANK_1") != 0) fail("invalid bank header");
     while (in >> word) {
         if (word == "species") {
-            std::string species;
-            unsigned long long id = 0;
-            if (!(in >> species >> id)) fail("invalid bank species row");
+            std::string species, identity;
+            if (!(in >> species >> identity)) fail("invalid bank species row");
+            // Batch-3 families currently differ: aquatic/snagret write the
+            // numeric enemy id, the flying install writes `clips <count>`.
+            if (identity == "clips") {
+                int clips = 0;
+                if (!(in >> clips) || clips < 0) fail("invalid bank species row");
+            } else {
+                char* end = nullptr;
+                std::strtoull(identity.c_str(), &end, 10);
+                if (end == identity.c_str() || *end != '\0') fail("invalid bank species row");
+            }
             out.emplace(species, std::vector<std::pair<std::string, int>>());
         } else if (word == "clip") {
-            std::string species, name, events, status, marker;
+            std::string species, name, events, status, marker, value;
             int frames = 0, poses = 0;
-            if (!(in >> species >> name >> frames >> events >> marker >> poses >> status)
+            if (!(in >> species >> name >> frames >> events >> marker >> poses)
                     || marker != "poses" || poses < 0 || poses > 64
                     || !out.count(species)) fail("invalid bank clip row");
+            // The flying install writes a literal `status` token before the
+            // value; aquatic/snagret write the value directly.
+            if (!(in >> value)) fail("invalid bank clip row");
+            if (value != "status") status = value;
+            else if (!(in >> status)) fail("invalid bank clip row");
             out[species].emplace_back(name, poses);
         } else {
             fail("invalid bank token");
@@ -237,7 +252,7 @@ void pc_p2_batch3_setup() {
         }
     }
     for (const auto& entry : actors) {
-        if (entry.second == "aquatic|Tadpole")
+        if (entry.second == "aquatic|Tadpole" || entry.second == "flying|Mar")
             std::printf("P2_BATCH3_BIND generator=%u key=%s visual_only=0 native_fsm=implemented\n",
                         entry.first->mGenerator ? entry.first->mGenerator->_70 : 0, entry.second.c_str());
         else
@@ -268,7 +283,7 @@ bool pc_p2_batch3_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     if (!corpse) {
         const char* forced = nullptr;
         float phase = 0.0f;
-        if (pc_p2_tadpole_clip(actor, forced, phase) && bank.clips.count(forced)) {
+        if ((pc_p2_tadpole_clip(actor, forced, phase) || pc_p2_mar_clip(actor, forced, phase)) && bank.clips.count(forced)) {
             name = forced;
             forcedPhase = phase;
         }
