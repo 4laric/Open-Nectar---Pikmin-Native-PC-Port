@@ -16,6 +16,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <cmath>
+#include "Collision.h"
 
 static const char* mode = "drop";
 static void require(bool ok, const char* what) { if (!ok) { std::printf("FAIL DEMON_HOST %s\n", what); std::fflush(stdout); std::_Exit(1); } }
@@ -41,6 +43,8 @@ public:
             require(bool(input), "mouth profile");
             host.setPosition(Vector3f(0, 100, 100));
             require(host.load("courses/pikmin2room/demon0.mod", Vector3f(x0,y0,z0), Vector3f(x1,y1,z1)), "demon model");
+            require(host.loadMouthPoses("demon-attack-mouths.txt"), "pose bank");
+            require(host.applyMouthFrame(0), "initial pose");
             n->mStateMachine->transit(n, NAVISTATE_Walk);
             n->resetPosition(host.mouthCentre(0));
             ready = true;
@@ -52,6 +56,33 @@ public:
         } else if (phase == 1) {
             host.updateAttack(n, 17.0f, false);
             require(host.occupied(), "automatic source-window capture");
+            if (!std::strcmp(mode, "pose")) {
+                P2DemonPoseBank expectedBank;
+                require(expectedBank.load("demon-attack-mouths.txt"), "expected pose bank");
+                const auto* sample = expectedBank.exact(17);
+                require(sample != nullptr, "expected frame17");
+                host.mSRT.r.set(0, 0.7f, 0);
+                host.mSRT.s.set(1.2f, 0.8f, 1.1f);
+                host.setPosition(Vector3f(25, 100, 100));
+                require(host.applyMouthFrame(17), "frame17 pose");
+                Matrix4f local, world, expected;
+                local.makeIdentity();
+                for (int r=0; r<3; ++r) for (int c=0; c<4; ++c)
+                    local.mMtx[r][c] = sample->values[r*4+c];
+                world.makeSRT(host.mSRT.s, host.mSRT.r, host.mSRT.t);
+                world.multiplyTo(local, expected);
+                CollPart* mouth = n->getStickPart();
+                require(mouth != nullptr, "live mouth link");
+                for (int r=0; r<3; ++r) for (int c=0; c<4; ++c)
+                    require(std::fabs(mouth->mJointMatrix.mMtx[r][c]-expected.mMtx[r][c])<0.001f, "full joint basis");
+                n->update();
+                const Vector3f centre = host.mouthCentre(0);
+                require((n->mSRT.t-centre).squaredLength()<0.01f, "captain follows full posed mouth");
+                host.sceneExit();
+                require(!n->isStickTo(), "pose teardown");
+                std::puts("PASS DEMON_HOST full_mouth_pose_follow");
+                std::fflush(stdout); std::_Exit(0);
+            }
             require(host.endAttack(n), "CatchFly end");
             phase = 2;
         } else if (phase == 2) {
