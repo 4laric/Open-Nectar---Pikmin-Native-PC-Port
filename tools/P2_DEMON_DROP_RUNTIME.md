@@ -52,3 +52,5 @@ final actual/target velocity afterward. Map P2 damage semantics before fidelity
 acceptance; this P1 attack-receiver experiment is insufficient for that claim.
 
 Final runner adds its own and preview-helper hashes. Fresh provenance-complete session output/demon-drop-sessions/a1efddf098464c1db2e389af050f4de3 also passes the same scoped native gates; first session is preserved.
+
+Independent review confirmed the native dispatch and observed log, with no fixture blocker. Production must use a dedicated state ID: Flick ID can misclassify the actor in other callers. InteractAttack reenters state resume through startDamage; after MsgAnim returns, Navi's KEY_Finished path calls finishDamage and state restart. This fixture inherits no-op resume/restart. A production receiver must explicitly preserve the committed Lay phase through both callbacks and the Damage motion change. Source references: navi.cpp1129-1135 and2609-2632, StateMachine.h61-96, creatureMove.cpp151 and278-284.
