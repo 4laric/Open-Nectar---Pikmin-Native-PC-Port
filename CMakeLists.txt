@@ -178,6 +178,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_input_script.cpp
     pc_port/pc_p2_purple.cpp
     pc_port/pc_p2_purple_impact.cpp
+    pc_port/pc_p2_purple_direct.cpp
     pc_port/pc_p2_kochappy_stun.cpp
     pc_port/pc_p2_species.cpp
     pc_port/pc_p2_bulbmin.cpp
