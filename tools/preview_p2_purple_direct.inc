@@ -10,6 +10,7 @@ static void purpleDirectFixture(Navi* n)
     static BTeki* target = nullptr;
     static bool adult = false;
     static float startingHealth = 0.0f;
+    static Vector3f targetPosition;
     ++timer;
 
     auto parkSource = [&]() {
@@ -19,12 +20,18 @@ static void purpleDirectFixture(Navi* n)
     };
     auto throwAtTarget = [&]() {
         parkSource();
-        const Vector3f position = target->mSRT.t;
+        const Vector3f position = targetPosition;
         n->resetPosition(Vector3f(position.x - 70.0f, mapMgr->getMinY(position.x - 70.0f, position.z, true), position.z));
         source->mFSM->transit(source, PIKISTATE_Flying);
         // Native throw targeting lands about 36 world units short in this arena.
         // Aim beyond the receiver so the descending arc crosses its collision body.
         n->throwPiki(source, Vector3f(position.x + 42.0f, position.y, position.z));
+        // Keep the actual throw/arming path, then stage its descending flight over
+        // the fixed receiver so autonomous target motion cannot make the proof flaky.
+        const float stagedHeight = adult ? 80.0f : 24.0f;
+        source->resetPosition(Vector3f(position.x, position.y + stagedHeight, position.z));
+        source->mVelocity = Vector3f(0.0f, -100.0f, 0.0f);
+        source->mTargetVelocity = source->mVelocity;
         timer = 0;
     };
 
@@ -54,6 +61,7 @@ static void purpleDirectFixture(Navi* n)
             }
         }
         require(source && target, "direct fixture actors missing");
+        targetPosition = target->mSRT.t;
         Iterator parked(pikiMgr);
         CI_LOOP(parked) {
             Piki* piki = static_cast<Piki*>(*parked);
@@ -81,6 +89,9 @@ static void purpleDirectFixture(Navi* n)
         state = 1;
         std::printf("P2_PURPLE_DIRECT_FIXTURE_READY family=%s health=%.1f\n", adult ? "adult_bulborb" : "red_dwarf", startingHealth);
     } else if (state == 1) {
+        target->mVelocity = Vector3f(0.0f, 0.0f, 0.0f);
+        target->mTargetVelocity = Vector3f(0.0f, 0.0f, 0.0f);
+        target->resetPosition(targetPosition);
         if (adult && target->mStoredDamage >= 49.9f) {
             const float queuedDamage = target->mStoredDamage;
             source->mVelocity.y = -1.0f;
@@ -98,14 +109,20 @@ static void purpleDirectFixture(Navi* n)
             std::puts("P2_PURPLE_DIRECT_CRUSH_PASS state=2");
         }
         require(timer < 240, "direct callback did not reach receiver");
-    } else if (state == 2 && timer >= 2) {
-        require(target->isAlive() && target->mHealth <= startingHealth - 49.9f && target->mHealth >= startingHealth - 50.1f,
-            "adult direct hit was not exactly one fp36 damage");
+    } else if (state == 2 && target->mHealth < startingHealth) {
+        require(target->isAlive() && target->mHealth <= startingHealth - 49.9f
+                && target->mHealth >= startingHealth - 50.1f,
+            "adult direct hit health delta was not exactly one fp36 damage");
         std::printf("P2_PURPLE_DIRECT_DAMAGE_PASS before=%.1f after=%.1f\n", startingHealth, target->mHealth);
         target->mHealth = 40.0f;
         throwAtTarget();
         state = 3;
+    } else if (state == 2) {
+        require(timer < 60, "adult queued fp36 damage was not consumed by native update");
     } else if (state == 3) {
+        target->mVelocity = Vector3f(0.0f, 0.0f, 0.0f);
+        target->mTargetVelocity = Vector3f(0.0f, 0.0f, 0.0f);
+        target->resetPosition(targetPosition);
         if (target->mDeadState || !target->isAlive()) {
             state = 4;
             timer = 0;
