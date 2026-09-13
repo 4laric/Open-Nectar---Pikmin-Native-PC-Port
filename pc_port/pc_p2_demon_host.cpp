@@ -47,7 +47,6 @@ void pc_p2_demon_manager_setup()
         }
         if (!match || !pc_p2_demon_manager_bind(host.get(), match, generator, type)) continue;
         host->setPosition(match->getPosition());
-        host->mSRT.s.set(1.0f, 1.0f, 1.0f);
         managerHosts.push_back(std::move(host));
     }
 }
@@ -140,6 +139,7 @@ P2DemonHost::P2DemonHost()
     , mOwnerToken(++nextHostToken)
 {
     mStickListHead = nullptr;
+    mSRT.s.set(1.0f, 1.0f, 1.0f);
 }
 
 bool P2DemonHost::load(const char* modelPath, const Vector3f& mouthA, const Vector3f& mouthB)
@@ -272,8 +272,12 @@ void P2DemonHost::doKill() { sceneExit(); }
 
 void P2DemonHost::refresh(Graphics& gfx)
 {
-    if (!mShape)
+    if (!mShape || !gfx.mCamera)
         return;
+    gfx.setPerspective(gfx.mCamera->mPerspectiveMatrix.mMtx, gfx.mCamera->mFov,
+        gfx.mCamera->mAspectRatio, gfx.mCamera->mNear, gfx.mCamera->mFar, 1.0f);
+    gfx.useMaterial(nullptr);
+    gfx.setDepth(true);
     Matrix4f world, view;
     world.makeSRT(mSRT.s, mSRT.r, mSRT.t);
     gfx.mCamera->mLookAtMtx.multiplyTo(world, view);
