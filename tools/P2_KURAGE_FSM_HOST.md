@@ -118,6 +118,25 @@ lane 08's sampled-animation contract (`pc_p2_sampled_clock.h`, #431):
   let the source fall timer pass the shake time, enter FlyFlick, and the real
   `flick1.bca` KEY2 ejects it.
 
+## Per-state converted pose selection
+
+`pc_port/pc_p2_kurage_visual.{h,cpp}` now loads the converted per-motion pose
+mods (the 10 `Kurage/*.mod` the converter already produced), not just
+wait/attack:
+
+- `pc_p2_kurage_visual_shape(motionBase)` returns the pose for a source motion
+  base name; `pc_p2_kurage_visual_motion_for_state(state)` maps the FSM state.
+- Both hosts draw the pose for the current FSM state (arena host and the
+  ordinary sidecar-bound actor), so the actor no longer shows only wait/attack.
+  Missing pose files keep the wait/attack fallback.
+- `P2_KURAGE_VISUAL_POSES optional_loaded=N/8` reports how many optional poses
+  shipped; `P2_KURAGE_POSE motion=<name> available=1` logs each drawn state.
+- `tools/run_kurage_flight_fsm.py`: `--models <dir>` copies `<motion>.mod` as
+  `kurage_<motion>.mod` into the run's room assets.
+
+This still does not animate within a pose (each converted MOD is a single static
+pose); it selects the correct static source pose per state.
+
 ## Fixture stabilization
 
 The private fixture birthed a Piki with only `init()` + a direct `mMode`
@@ -132,12 +151,21 @@ admission/death/greater/greater-drop/ingestion/kill/transfer/stageexit).
 Private build `output/native-lane29-build` (Ninja Release/MinGW gcc 16.2.0,
 JAudio ON, test hooks OFF), `ninja -n pikmin_pc`: no work to do.
 `bin/nectar.exe` SHA-256
-`21AFB8EA9FACAB2DA3AA8EEB9B7FA223C4A4223D1FA2231C85D536FF9DA81DA2`.
+`C29FD5A599E98CEFD530B627D45D20746B8314A4307A085D07E3A926D9B1E558`.
 
-Fixture `output/p2-lane29-clock-fixture-01` (provenance `status=built`);
+Fixture `output/p2-lane29-final-fixture-02` (provenance `status=built`);
 `fixture.exe` SHA-256
-`A3D764750DC000566C3014781EBD0BDFBC0B4D141778F8CCEA54EE8FB9F6D1B7`.  All runs
+`5815C1E06027D6774078BFC16F9CA72B18E022AB98547BCCF62605C4A66E419D`.  All runs
 use `PIKMIN_P2_ROOM_WINDOW=960x540` (centred `373,263`) and a 20-red squad.
+
+Per-state converted poses (10 mods shipped):
+
+```
+P2_KURAGE_VISUAL_POSES optional_loaded=8/8
+P2_KURAGE_POSE motion=wait available=1
+P2_KURAGE_POSE motion=attack available=1
+P2_KURAGE_POSE motion=flick1 available=1
+```
 
 Stuck -> flick -> eject (real `flick1.bca` KEY2):
 
@@ -196,7 +224,7 @@ checks=35`.
 | Gate | Status | Note |
 |---|---|---|
 | A Identity/content | PARTIAL | Kurage (57) and OniKurage (72) variants run; the generated `TEKI_Frog` ordinary actor runs the Kurage FSM when the sidecar opts in. Visuals remain the private adapter. |
-| B Source behavior | PARTIAL | FSM flight for both variants on the arena host and ordinary actor; real per-state source animation event/duration clocks; static converted pose (no skeletal playback), and states without an imported clip still use the bounded motion-END. |
+| B Source behavior | PARTIAL | FSM flight for both variants on the arena host and ordinary actor; real per-state source animation event/duration clocks; the converted per-state source pose is drawn for each FSM state. No within-pose skeletal playback, and states without an imported clip still use the bounded motion-END. |
 | C Combat/receivers | PASS (bounded host + ordinary actor) | Ordinary Attack suction autonomously admits and attaches a live Pikmin in both hosts; Greater captures and releases a live captain through lane 12's policy. |
 | D Death/drop/transport | BLOCKED | No corpse/pellet/Onion transport; OniKurage `Drop` is not the Pikmin cargo path. |
 | E Lifetime | PARTIAL | Owner-death release restores scale; late birth/recycled address not exercised. |
@@ -205,11 +233,11 @@ checks=35`.
 
 ## Remaining
 
-Moving suction joint (converted MOD omits JNT1), skeletal pose playback (the
-converted MOD is static; only the source event/duration clocks are adopted),
-replacing the underlying P1 Frog proxy behavior/motion with the full Jellyfloat
-host (the FSM currently drives vertical motion while the P1 proxy still
-animates), materials/opacity, corpse/reward, restart and generated-seed
-admission all remain open.  The Greater captain capture uses a lane-29 bounded
+Moving suction joint (converted MOD omits JNT1), within-pose skeletal playback
+(the converted MODs are per-state static poses; only the source event/duration
+clocks and per-state pose selection are adopted), replacing the underlying P1
+Frog proxy behavior/motion with the full Jellyfloat host (the FSM currently
+drives vertical motion while the P1 proxy still animates), materials/opacity,
+corpse/reward, restart and generated-seed admission all remain open.  The Greater captain capture uses a lane-29 bounded
 Navi adapter; lane 12's live `Navi`/`NaviMgr` host adapter is still the provider
 gate for captain health/switch/knockout fidelity.

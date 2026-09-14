@@ -44,6 +44,9 @@ parser.add_argument("--fixture", type=Path, required=True)
 parser.add_argument("--base-session", type=Path, required=True)
 parser.add_argument("--scenario", choices=sorted(SCENARIOS), required=True)
 parser.add_argument("--run", type=Path, required=True)
+parser.add_argument("--models", type=Path,
+    help="optional converted Kurage pose directory; each <motion>.mod is copied "
+         "as kurage_<motion>.mod so the host can draw the per-state source pose")
 args = parser.parse_args()
 
 flag = SCENARIOS[args.scenario]
@@ -58,6 +61,14 @@ for name in ("assets", "p2-kurage-arena.txt"):
 args.run.mkdir(parents=True)
 shutil.copytree(args.base_session / "assets", args.run / "assets")
 shutil.copy2(args.base_session / "p2-kurage-arena.txt", args.run / "p2-kurage-arena.txt")
+if args.models is not None:
+    target = args.run / "assets/dataDir/courses/pikmin2room"
+    target.mkdir(parents=True, exist_ok=True)
+    copied = []
+    for model in sorted(args.models.glob("*.mod")):
+        shutil.copy2(model, target / ("kurage_" + model.name))
+        copied.append(model.name)
+    print("kurage models copied:", ", ".join(copied))
 
 environment = os.environ.copy()
 environment["PATH"] = "C:/msys64/mingw64/bin;" + environment["PATH"]

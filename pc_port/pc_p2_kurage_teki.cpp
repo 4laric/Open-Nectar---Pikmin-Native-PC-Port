@@ -4,8 +4,11 @@
 #include "pc_p2_kurage_teki_policy.h"
 #include "pc_p2_kurage_visual.h"
 #include "pc_p2_retail_player.h"
+#include "Camera.h"
 #include "Collision.h"
 #include "Generator.h"
+#include "Graphics.h"
+#include "Shape.h"
 #include "MapMgr.h"
 #include "Piki.h"
 #include "PikiMgr.h"
@@ -189,7 +192,17 @@ void pc_p2_kurage_teki_tick(BTeki* t)
 
 bool pc_p2_kurage_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& matrix, bool corpse)
 {
-    if (!s.count(t)) return false;
+    auto i = s.find(t);
+    if (i == s.end()) return false;
+    if (i->second.fsmEnabled) {
+        Shape* shape = pc_p2_kurage_visual_shape(
+            pc_p2_kurage_visual_motion_for_state((int)i->second.fsm.state()));
+        if (shape) {
+            shape->updateAnim(gfx, matrix, nullptr, t);
+            shape->drawshape(gfx, *gfx.mCamera, nullptr);
+            return true;
+        }
+    }
     return pc_p2_kurage_visual_draw(t, gfx, matrix, corpse);
 }
 

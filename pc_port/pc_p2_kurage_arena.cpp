@@ -143,6 +143,7 @@ const p2sampled::Clip* stateClip(int state)
     if (state < 0 || state > 10) return nullptr;
     return clips[state].poses.name.empty() ? nullptr : &clips[state];
 }
+
 // Retail Kurage/attack.bca SHA-256 302660c6ba9c86fee11cc6aca98bd514e201a80d8530be3a5cce867a9dc74a4e.
 // ANF1 is big-endian: loop attribute 2, duration 0x0078 (120), 12 joints.
 // enemyanimmgr.txt supplies the source event table below.
@@ -583,7 +584,18 @@ void pc_p2_kurage_arena_draw(Graphics& gfx)
     world.mMtx[2][3] = sHost.position.z;
     Matrix4f matrix;
     gfx.mCamera->mLookAtMtx.multiplyTo(world, matrix);
-    Shape* shape = attackPoseActive() ? sHost.attackShape : sHost.shape;
+    Shape* shape = nullptr;
+    if (sHost.fsmEnabled) {
+        const char* base = pc_p2_kurage_visual_motion_for_state(sHost.lastFsmState);
+        shape = pc_p2_kurage_visual_shape(base);
+        static const char* lastBase = nullptr;
+        if (base && base != lastBase) {
+            lastBase = base;
+            std::printf("P2_KURAGE_POSE motion=%s available=%d\n", base, int(shape != nullptr));
+            std::fflush(stdout);
+        }
+    }
+    if (!shape) shape = attackPoseActive() ? sHost.attackShape : sHost.shape;
     shape->updateAnim(gfx, matrix, nullptr, nullptr);
     shape->drawshape(gfx, *gfx.mCamera, nullptr);
     static bool logged = false;
