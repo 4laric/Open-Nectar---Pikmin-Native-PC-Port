@@ -168,6 +168,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_demon_drop_state.cpp
     pc_port/pc_bbft.cpp
     pc_port/pc_p2_preview.cpp
+    pc_port/pc_p2_captain.cpp
     pc_port/pc_p2_economy.cpp
     pc_port/pc_p2_teki_lifetime.cpp
     pc_port/pc_p2_purple.cpp

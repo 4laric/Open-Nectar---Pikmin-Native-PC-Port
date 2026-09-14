@@ -216,6 +216,18 @@ public:
     }
     bool controllable(int captain) const { return aliveIdle(captain); }
 
+    // Raw health override for the engine-facing host adapter
+    // (pc_p2_captain.h), which is authoritative for the live Navi value. This
+    // does not change phase: use damage() for knockout and revive() for
+    // coming back. Refuses absent slots and non-finite/negative values.
+    bool setHealth(int captain, float health) {
+        if (!bound() || !P2CaptainOwnershipTable::isCaptain(captain)
+            || !slots[captain].present || !std::isfinite(health) || health < 0.0f)
+            return false;
+        slots[captain].health = health;
+        return true;
+    }
+
     // Source NaviMgr::getActiveNavi switch. Refuses a captain that is absent,
     // captured or down. Owned actors stay with their owners; no transfer and
     // no loss.
