@@ -154,10 +154,12 @@ bool pc_p2_fuefuki_visual_setup(const char* profilePath)
                 pc_p2_fuefuki_visual_reset();
                 return false;
             }
+            // Every sampled pose is its own Shape with its own texture
+            // instances; attach all of them or later poses draw transparent.
+            attachTextures(clip.poses[i]);
             clip.frames[i] = item.frames[i];
         }
         clip.poseCount = item.poses;
-        attachTextures(clip.poses[0]);
         ++sVisual.clipCount;
     }
     sVisual.ready = true;
