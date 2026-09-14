@@ -43,6 +43,7 @@
 #include "pc_p2_economy.h"
 #include "pc_p2_purple.h"
 #include "pc_p2_white.h"
+#include "pc_p2_bulbmin.h"
 #include "pc_p2_cave.h"
 #include "pc_p2_enemy.h"
 #include "pc_p2_cargo.h"
@@ -241,6 +242,7 @@ void pc_p2_preview_setup() {
     pc_p2_hardlanes_setup();
     pc_p2_purple_setup();
     pc_p2_white_setup();
+    pc_p2_bulbmin_setup();
     pc_p2_cave_setup();
     gsys->setHeap(previousHeap);
     const float points[][2]={{-85,0},{-175,-100},{185,-180},{-220,-180}};
