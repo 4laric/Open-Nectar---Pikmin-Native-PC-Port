@@ -7,6 +7,7 @@
 #include "pc_p2_elecbug.h"
 #include "pc_p2_armor.h"
 #include "pc_p2_hana.h"
+#include "pc_p2_hardlanes.h"
 #endif
 
 /**
@@ -92,6 +93,7 @@ bool InteractPress::actTeki(Teki* teki) immut
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
 	if (pc_p2_elecbug_pressed(teki, mOwner)) return true;
 	if (pc_p2_sokkuri_pressed(teki, mOwner)) return true;
+	if (pc_p2_hardlanes_fuefuki_pressed(teki, mOwner)) return true;
 	if (pc_p2_kogane_pressed(teki, mOwner)) {
 		return true; // registered beetles flip instead of the host pressed state
 	}
