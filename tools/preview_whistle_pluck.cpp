@@ -62,7 +62,7 @@ static void capture(const char* path="whistle-pluck.ppm") {
 static void setting(bool on) {
     FILE* f=std::fopen("pikmin_settings.conf","w");require(f,"private settings");
     std::fprintf(f,"whistlePluck = %d\nwindowWidth = 960\nwindowHeight = 540\ndisplayMode = 0\n",on?1:0);
-    std::fclose(f);pc_settings_init();pc_window_center();
+    std::fclose(f);pc_settings_init();pc_window_set_display_mode(0);pc_window_set_window_size(960,540);pc_window_center();
     require(pc_settings_get_whistle_pluck()==int(on),"setting reload");
 }
 static int sprouts() {
@@ -112,6 +112,8 @@ public:
             n->mCursorWorldPos=target->mSRT.t;
             gameflow.mPauseAll=true;require(!pc_whistle_pluck(n,100),"paused pluck");gameflow.mPauseAll=false;
             gameflow.mIsUIOverlayActive=true;require(!pc_whistle_pluck(n,100),"UI pluck");gameflow.mIsUIOverlayActive=false;
+            bool movie=gameflow.mMoviePlayer->mIsActive;gameflow.mMoviePlayer->mIsActive=true;
+            require(!pc_whistle_pluck(n,100),"movie pluck");gameflow.mMoviePlayer->mIsActive=movie;
             float health=n->mHealth;n->mHealth=0;require(!pc_whistle_pluck(n,100),"dead captain pluck");n->mHealth=health;
             n->mCursorWorldPos.x-=100;require(!pc_whistle_pluck(n,100),"radius boundary");n->mCursorWorldPos=target->mSRT.t;
             n->mCursorWorldPos.y-=25;require(!pc_whistle_pluck(n,100),"vertical boundary");n->mCursorWorldPos=target->mSRT.t;
@@ -120,7 +122,7 @@ public:
             AICONST.mMaxPikisOnField.mValue=total;
             require(pc_whistle_pluck(n,100),"conversion at field limit");AICONST.mMaxPikisOnField.mValue=limit;
             require(sprouts()==before-1,"single conversion");target=nullptr;
-            std::puts("GUARDS_PASS disabled-real-whistle pause UI dead range height allocation-failure full-cap-conversion");
+            std::puts("GUARDS_PASS disabled-real-whistle pause UI movie dead range height allocation-failure full-cap-conversion");
             phase=2;ticks=0;
         } else if(phase==2 && ++ticks>=10) {
             before=sprouts();held=true;phase=3;ticks=0;
@@ -169,4 +171,3 @@ int main(int argc,char** argv) {
     std::puts("Experimental preview window set to 960x540 windowed and centered");
     gsys->Initialise();pc_settings_p2d_init();nodeMgr=new NodeMgr();gsys->run(new PluckApp());return 0;
 }
-
