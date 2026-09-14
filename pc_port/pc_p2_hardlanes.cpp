@@ -28,6 +28,7 @@
 #include "pc_p2_bombsarai_map_trace.h"
 #include "pc_p2_bombsarai_terrain.h"
 #include "pc_p2_fuefuki_binding.h"
+#include "pc_p2_fuefuki_visual.h"
 #include "pc_p2_bigtreasure_host.h"
 #include "pc_p2_bigtreasure_visual.h"
 #include "Matrix4f.h"
@@ -68,6 +69,25 @@ std::map<std::uint32_t, Piki*> sFuefukiPiki;
 std::map<std::uint32_t, bool> sFuefukiHeld;
 std::uint32_t sFuefukiNextId = 1;
 double sFuefukiDebt = 0.0;
+bool sFuefukiVisualReady = false;
+double sFuefukiVisualDebt = 0.0;
+
+// Lane FSM state -> converted clip name (landing/landfail are not converted).
+const char* fuefukiVisualClip(P2FuefukiFsmState state)
+{
+    switch (state) {
+    case P2FuefukiFsmState::Dead: return "dead";
+    case P2FuefukiFsmState::Stay: return "jump";
+    case P2FuefukiFsmState::Land: return "wait";
+    case P2FuefukiFsmState::Jump: return "jump";
+    case P2FuefukiFsmState::Wait: return "wait";
+    case P2FuefukiFsmState::Turn: return "pivot";
+    case P2FuefukiFsmState::Walk: return "move";
+    case P2FuefukiFsmState::Whisle: return "whisle";
+    case P2FuefukiFsmState::Struggle: return "struggle";
+    }
+    return "wait";
+}
 
 std::uint32_t fuefukiId(Piki* piki)
 {
@@ -241,6 +261,9 @@ void pc_p2_hardlanes_reset()
     sFuefukiHeld.clear();
     sFuefukiNextId = 1;
     if (sFuefuki) sFuefuki->follow().reset();
+    pc_p2_fuefuki_visual_reset();
+    sFuefukiVisualReady = false;
+    sFuefukiVisualDebt = 0.0;
     p2_bigtreasure_host_reset(sBigTreasure);
     pc_p2_bigtreasure_visual_reset();
     sBigTreasureReady = false;
@@ -294,6 +317,14 @@ void pc_p2_hardlanes_setup()
         }
     }
 
+    // Fuefuki (#245): opt-in converted visual bank (#128 pose import).
+    if (pc_p2_fuefuki_visual_setup("p2-fuefuki-visual.txt")) {
+        sFuefukiVisualReady = true;
+        pc_p2_fuefuki_visual_clip("wait");
+        std::printf("P2_HARDLANES_READY family=Fuefuki visual=1 clips=%d\n",
+                    pc_p2_fuefuki_visual_clip_count());
+    }
+
     // BigTreasure (#246): fixed-placement host seam + sampled visual bank.
     if (p2_bigtreasure_host_setup("p2-bigtreasure-host.txt", sBigTreasure)) {
         sBigTreasureReady = true;
@@ -341,6 +372,18 @@ void pc_p2_hardlanes_update()
         }
     }
 
+    if (sFuefukiVisualReady) {
+        sFuefukiVisualDebt += gsys->getFrameTime();
+        int ticks = static_cast<int>(sFuefukiVisualDebt / kFuefukiSourceDelta);
+        if (ticks > 4) ticks = 4;
+        sFuefukiVisualDebt -= ticks * static_cast<double>(kFuefukiSourceDelta);
+        for (int i = 0; i < ticks; ++i) {
+            if (sFuefuki)
+                pc_p2_fuefuki_visual_clip(fuefukiVisualClip(sFuefuki->getFsm().getState()));
+            pc_p2_fuefuki_visual_update(1.0f);
+        }
+    }
+
     if (sBigTreasureReady || sBigTreasureVisualReady) {
         sBigTreasureDebt += gsys->getFrameTime();
         int ticks = static_cast<int>(sBigTreasureDebt / kBigTreasureSourceDelta);
@@ -360,6 +403,17 @@ void pc_p2_hardlanes_update()
 void pc_p2_hardlanes_draw(Graphics& gfx)
 {
     if (sBombSaraiReady) pc_p2_bombsarai_arena_draw(gfx);
+    if (sFuefukiVisualReady) {
+        Vector3f pos(0.0f, 0.0f, 0.0f);
+        if (sFuefukiVehicle) {
+            pos = sFuefukiVehicle->getPosition();
+        } else if (mapMgr) {
+            pos.y = mapMgr->getMinY(0.0f, 0.0f, false);
+        }
+        Matrix4f owner;
+        owner.makeSRT(Vector3f(1.0f, 1.0f, 1.0f), Vector3f(0.0f, 0.0f, 0.0f), pos);
+        pc_p2_fuefuki_visual_draw(gfx, owner);
+    }
     if (sBigTreasureVisualReady) {
         Matrix4f owner;
         owner.makeSRT(Vector3f(1.0f, 1.0f, 1.0f), Vector3f(0.0f, 0.0f, 0.0f),
