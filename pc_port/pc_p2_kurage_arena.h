@@ -38,3 +38,12 @@ int pc_p2_kurage_arena_fsm_variant();
 // lane 12 provider work; this is an explicitly labelled host seam until a
 // Navi attachment exists.
 void pc_p2_kurage_arena_set_captain_held(bool held);
+// Lane-12 consumer path: compose the live captain with P2CaptainPolicy (lane 12
+// #130) and the OniKurage mouth-slot policy.  The policy owns identity and
+// ownership; this host owns the family-local capture/release and the bounded
+// Navi attachment while held.
+class P2CaptainPolicy;
+class Navi;
+void pc_p2_kurage_arena_set_captain_target(P2CaptainPolicy* policy, int captain, Navi* navi);
+int pc_p2_kurage_arena_captain_occupied();
+bool pc_p2_kurage_arena_captain_captured();

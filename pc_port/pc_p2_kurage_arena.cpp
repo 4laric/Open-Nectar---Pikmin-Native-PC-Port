@@ -5,17 +5,21 @@
 #include "Creature.h"
 #include "Graphics.h"
 #include "MapMgr.h"
+#include "Navi.h"
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "Shape.h"
 #include "gameflow.h"
 #include "system.h"
+#include "pc_p2_captain_policy.h"
 #include "pc_p2_kurage_fsm.h"
+#include "pc_p2_onikurage_mouth.h"
 #include "pc_p2_kurage_receiver.h"
 #include "pc_p2_retail_player.h"
 #include "pc_p2_kurage_visual.h"
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -71,6 +75,13 @@ struct Host {
     bool captainHeld = false;
     bool captainSettled = true;
     float fallVelocity = 0.0f;
+    // Lane-12 consumer path (Greater captain capture).
+    P2CaptainPolicy* captainPolicy = nullptr;
+    int captainTarget = -1;
+    Navi* captainNavi = nullptr;
+    p2onikurage::MouthSlots captainSlots;
+    std::uint64_t captorEpoch = 0;
+    bool captainCaptured = false;
 };
 Host sHost;
 // Retail Lesser Kurage suckPikmin() queries collision part ID 'suck'; hire1 is
@@ -172,6 +183,8 @@ void pc_p2_kurage_arena_reset()
     sHost.fsmHealth = kFsmLiveHealth; sHost.ownerHasHealth = true; sHost.ownerBittered = false;
     sHost.autoAdmissions = 0; sHost.pendingKey = p2kurage::KeyEvent::None; sHost.fsmMotionFinished = false; sHost.fsmMotionTimer = 0;
     sHost.variant = p2kurage::Variant::Lesser; sHost.captainHeld = false; sHost.captainSettled = true; sHost.fallVelocity = 0.0f;
+    sHost.captainPolicy = nullptr; sHost.captainTarget = -1; sHost.captainNavi = nullptr;
+    sHost.captainSlots.reset(); sHost.captorEpoch = 0; sHost.captainCaptured = false;
 }
 
 bool pc_p2_kurage_arena_setup(const char* profilePath)
@@ -208,6 +221,8 @@ bool pc_p2_kurage_arena_setup(const char* profilePath)
     sHost.fsmHealth = kFsmLiveHealth; sHost.ownerHasHealth = true; sHost.ownerBittered = false;
     sHost.autoAdmissions = 0; sHost.pendingKey = p2kurage::KeyEvent::None; sHost.fsmMotionFinished = false; sHost.fsmMotionTimer = 0;
     sHost.variant = p2kurage::Variant::Lesser; sHost.captainHeld = false; sHost.captainSettled = true; sHost.fallVelocity = 0.0f;
+    sHost.captainPolicy = nullptr; sHost.captainTarget = -1; sHost.captainNavi = nullptr;
+    sHost.captainSlots.reset(); sHost.captorEpoch = 0; sHost.captainCaptured = false;
     sHost.fsm = p2kurage::Fsm(); sHost.fsm.spawn();
     sHost.owner.mStickListHead = nullptr;
     updateHostCollision();
@@ -222,6 +237,11 @@ bool pc_p2_kurage_arena_update(float delta, bool ownerAlive)
         // This private host is the lifecycle authority for its bounded receiver.
         // Release while the concrete owner and mouth still exist; callers must
         // not substitute this for P2's full Kurage health/bitter/FSM path.
+        if (sHost.captainCaptured && sHost.captainPolicy) {
+            sHost.captainPolicy->releaseCaptured(sHost.captainTarget, sHost.captorEpoch);
+            sHost.captainSlots.onDeath();
+            sHost.captainCaptured = false;
+        }
         pc_p2_kurage_receiver_update(0.0f, false, true, false);
         return false;
     }
@@ -240,11 +260,19 @@ bool pc_p2_kurage_arena_update(float delta, bool ownerAlive)
         in.isFlying = true;
         in.mapY = mapY;
         in.positionY = sHost.position.y;
-        in.targetFound = findSuctionTarget() != nullptr || pc_p2_kurage_receiver_count() > 0;
+        const bool captainRoute = sHost.variant == p2kurage::Variant::Greater
+            && sHost.captainPolicy && sHost.captainTarget >= 0 && sHost.captainNavi;
+        const bool captainInRange = captainRoute && !sHost.captainCaptured
+            && sHost.captainNavi->isAlive()
+            && p2kurage::naviSearchAdmit(true, false, sHost.captainNavi->mSRT.t.y, sHost.position.y, 0.0f,
+                (sHost.captainNavi->mSRT.t.x - sHost.position.x) * (sHost.captainNavi->mSRT.t.x - sHost.position.x)
+                + (sHost.captainNavi->mSRT.t.z - sHost.position.z) * (sHost.captainNavi->mSRT.t.z - sHost.position.z),
+                kSourceAttackRadius);
+        in.targetFound = findSuctionTarget() != nullptr || pc_p2_kurage_receiver_count() > 0 || captainInRange;
         in.suckTarget = in.targetFound;
         in.suckAny = in.targetFound;
-        in.naviSucked = sHost.captainHeld;
-        in.naviSuckFinished = sHost.captainSettled;
+        in.naviSucked = captainRoute ? sHost.captainCaptured : sHost.captainHeld;
+        in.naviSuckFinished = captainRoute ? sHost.captainSlots.isFinishNaviSuck() : sHost.captainSettled;
         in.velocityY = -sHost.fallVelocity;
         in.motionFrame = sHost.attackPlaying ? sHost.attackPlayer.frame() : 0.0f;
         // Bounded animation-END: the attack clock owns the Attack interval; the
@@ -272,6 +300,7 @@ bool pc_p2_kurage_arena_update(float delta, bool ownerAlive)
             sHost.position.y += out.heightVelocity * delta;
         }
         sHost.fsmAltitude = out.altitude;
+        const int prevState = sHost.lastFsmState;
         if ((int)out.state != sHost.lastFsmState) {
             sHost.lastFsmState = (int)out.state;
             std::printf("P2_KURAGE_FSM state=%d motion=%d altitude=%.3f vy=%.3f ticks=%d\n",
@@ -291,6 +320,46 @@ bool pc_p2_kurage_arena_update(float delta, bool ownerAlive)
         if ((out.isSucking || sHost.sucking)
             && pc_p2_kurage_receiver_scan_admit(0.0f, kSourceAttackRadius, kMaxAutoAdmissions, true) > 0)
             ++sHost.autoAdmissions;
+        if (captainRoute) {
+            // OniKurage::suckNavi during the source Attack suction window.
+            if (!sHost.captainCaptured && out.state == p2kurage::State::Attack
+                && (out.isSucking || sHost.sucking) && sHost.captainNavi->isAlive()) {
+                const Vector3f naviPos = sHost.captainNavi->mSRT.t;
+                const float dx = naviPos.x - sHost.position.x;
+                const float dz = naviPos.z - sHost.position.z;
+                const bool eligible = p2kurage::naviSearchAdmit(true, false, naviPos.y,
+                    sHost.position.y, 0.0f, dx * dx + dz * dz, kSourceAttackRadius);
+                if (eligible && sHost.captainSlots.capture(sHost.captainTarget, true)) {
+                    if (++sHost.captorEpoch == 0) sHost.captorEpoch = 1;
+                    if (sHost.captainPolicy->capture(sHost.captainTarget, sHost.captorEpoch)) {
+                        sHost.captainCaptured = true;
+                        std::printf("P2_KURAGE_CAPTAIN_CAPTURED captain=%d epoch=%llu\n",
+                            sHost.captainTarget, (unsigned long long)sHost.captorEpoch);
+                    } else {
+                        sHost.captainSlots.onDeath(); // policy refused (last control)
+                    }
+                }
+            }
+            if (sHost.captainCaptured) {
+                for (int slot = 0; slot < p2onikurage::kMouthSlotCount; ++slot)
+                    sHost.captainSlots.advanceDefaultOffset(slot);
+                // Bounded attach: pin the held captain to the mouth-slot offset
+                // until the source Drop lands and the captain is released.
+                const p2onikurage::Slot& held = sHost.captainSlots.slots()[0];
+                Vector3f target = sHost.mouth.mCentre;
+                target.x += held.offset.x;
+                target.y += held.offset.y;
+                target.z += held.offset.z;
+                if (valid(target)) sHost.captainNavi->resetPosition(target);
+                if (prevState == (int)p2kurage::State::Drop && (int)out.state != (int)p2kurage::State::Drop) {
+                    sHost.captainPolicy->releaseCaptured(sHost.captainTarget, sHost.captorEpoch);
+                    std::printf("P2_KURAGE_CAPTAIN_RELEASED captain=%d state=%d\n",
+                        sHost.captainTarget, (int)out.state);
+                    sHost.captainSlots.onDeath();
+                    sHost.captainCaptured = false;
+                }
+            }
+        }
         sHost.fsmTicks++;
         pc_p2_kurage_receiver_update(delta, true, sHost.ownerHasHealth, sHost.ownerBittered);
         return true;
@@ -411,6 +480,22 @@ void pc_p2_kurage_arena_set_captain_held(bool held)
 {
     sHost.captainHeld = held;
     sHost.captainSettled = true;
+}
+void pc_p2_kurage_arena_set_captain_target(P2CaptainPolicy* policy, int captain, Navi* navi)
+{
+    sHost.captainPolicy = policy;
+    sHost.captainTarget = captain;
+    sHost.captainNavi = navi;
+    sHost.captainSlots.reset();
+    sHost.captainCaptured = false;
+}
+int pc_p2_kurage_arena_captain_occupied()
+{
+    return sHost.captainSlots.occupiedCount();
+}
+bool pc_p2_kurage_arena_captain_captured()
+{
+    return sHost.captainCaptured;
 }
 
 void pc_p2_kurage_arena_draw(Graphics& gfx)

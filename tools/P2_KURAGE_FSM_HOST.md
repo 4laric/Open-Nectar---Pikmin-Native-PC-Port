@@ -76,6 +76,28 @@ generated `TEKI_Frog`; that replacement is tracked separately.
 - `tools/p2_kurage_runtime.cpp` gains `--receiver-auto-fsm`;
   `tools/run_kurage_automatic_binding.py` gains `--scenario binding|auto-fsm`.
 
+## Greater captain capture (lane 12 consumer)
+
+`pc_port/pc_p2_kurage_arena.{h,cpp}` now composes the live captain with lane 12's
+`P2CaptainPolicy` (`pc_p2_captain_policy.h`, #130) and the OniKurage
+`MouthSlots` policy (`pc_p2_onikurage_mouth.h`):
+
+- `pc_p2_kurage_arena_set_captain_target(P2CaptainPolicy*, captain, Navi*)`.
+  The policy owns identity/ownership; the host owns the family-local capture
+  during the Attack suction window and the bounded attach while held.
+- Capture uses the source `getSearchedTarget`/`naviSearchAdmit` window; the
+  slot policy (`capture`, `advanceDefaultOffset`, `isNaviSuck`) drives the FSM
+  `naviSucked`/`naviSuckFinished`, so a real capture (not the earlier seam)
+  routes Attack END -> `Drop`.
+- Release on leaving `Drop` or on owner death calls
+  `releaseCaptured` + `onDeath`, so the captain is never lost or duplicated.
+- Probes: `pc_p2_kurage_arena_captain_occupied/captured`.
+- The isolated room has one real `Navi` mapped to captain A; captain B is a
+  nominal present slot so the source zero-control guard is satisfied.  This is
+  a labelled lane-29 bounded adapter, not lane-12 live-adapter acceptance (the
+  lane-12 doc records the live `Navi`/`NaviMgr` adapter as its next slice).
+- `tools/p2_kurage_runtime.cpp`: `--flight-fsm-greater-captain`.
+
 ## Fixture stabilization
 
 The private fixture birthed a Piki with only `init()` + a direct `mMode`
@@ -90,12 +112,22 @@ admission/death/greater/greater-drop/ingestion/kill/transfer/stageexit).
 Private build `output/native-lane29-build` (Ninja Release/MinGW gcc 16.2.0,
 JAudio ON, test hooks OFF), `ninja -n pikmin_pc`: no work to do.
 `bin/nectar.exe` SHA-256
-`A6B76E39622D1405AD51765A3F7DFC56367E852104F91D43DE17221878D3842A`.
+`0639B13E76245D83787FEE4A8EB8086A42A21B55E6B91F48B483BE3E4F8F672F`.
 
-Fixture `output/p2-lane29-final-fixture` (provenance `status=built`);
+Fixture `output/p2-lane29-captain-fixture-01` (provenance `status=built`);
 `fixture.exe` SHA-256
-`49D3D2D52A296820BAF82DCF68FE33DAC963C9AA2CAB06071C592C0FEA5738D7`.  All runs
+`679B033D4E1D2AB786BBB0716EE4DAEE450AD6300CF19DBB8A0D11600196191E`.  All runs
 use `PIKMIN_P2_ROOM_WINDOW=960x540` (centred `373,263`) and a 20-red squad.
+
+Greater captain capture (lane 12 consumer):
+
+```
+P2_KURAGE_CAPTAIN_CAPTURED captain=0 epoch=1
+P2_KURAGE_CAPTAIN_CAPTURED_PHASE captain=A state=Captured
+P2_KURAGE_CAPTAIN_RELEASED captain=0 state=6
+P2_KURAGE_GREATER_CAPTAIN_PASS captured=1 drop=1 released=1 occupied=0
+PASS KURAGE_RUNTIME flight_fsm_greater_captain
+```
 
 Ordinary generated actor (frog profile, sidecar `P2_KURAGE_TEKI_1 1 201001 0`):
 
@@ -134,7 +166,7 @@ checks=35`.
 |---|---|---|
 | A Identity/content | PARTIAL | Kurage (57) and OniKurage (72) variants run; the generated `TEKI_Frog` ordinary actor runs the Kurage FSM when the sidecar opts in. Visuals remain the private adapter. |
 | B Source behavior | PARTIAL | FSM flight for both variants, on the arena host and the ordinary actor; static converted pose, motion-END is a bounded stand-in. |
-| C Combat/receivers | PASS (bounded host + ordinary actor) | Ordinary Attack suction autonomously admits and attaches a live Pikmin in both hosts. |
+| C Combat/receivers | PASS (bounded host + ordinary actor) | Ordinary Attack suction autonomously admits and attaches a live Pikmin in both hosts; Greater captures and releases a live captain through lane 12's policy. |
 | D Death/drop/transport | BLOCKED | No corpse/pellet/Onion transport; OniKurage `Drop` is not the Pikmin cargo path. |
 | E Lifetime | PARTIAL | Owner-death release restores scale; late birth/recycled address not exercised. |
 | F Persistence | UNTESTED | No restart/save path in this slice. |
@@ -145,6 +177,7 @@ checks=35`.
 Moving suction joint (converted MOD omits JNT1), real animation/event playback
 (#431), replacing the underlying P1 Frog proxy behavior/motion with the full
 Jellyfloat host (the FSM currently drives vertical motion while the P1 proxy
-still animates), Greater captain capture/Drop with a real Navi (lane 12),
-materials/opacity, corpse/reward, restart and generated-seed admission all
-remain open.
+still animates), materials/opacity, corpse/reward, restart and generated-seed
+admission all remain open.  The Greater captain capture uses a lane-29 bounded
+Navi adapter; lane 12's live `Navi`/`NaviMgr` host adapter is still the provider
+gate for captain health/switch/knockout fidelity.

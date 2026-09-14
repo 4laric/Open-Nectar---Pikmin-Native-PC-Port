@@ -29,6 +29,7 @@ SCENARIOS = {
     "flight-fsm-death": "--flight-fsm-death",
     "flight-fsm-greater": "--flight-fsm-greater",
     "flight-fsm-greater-drop": "--flight-fsm-greater-drop",
+    "flight-fsm-greater-captain": "--flight-fsm-greater-captain",
 }
 
 
