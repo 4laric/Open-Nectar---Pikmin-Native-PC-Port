@@ -23,6 +23,7 @@
 #include "pc_p2_kabuto_muzzle.h"
 #include "pc_p2_projectile_host.h"
 #include "pc_p2_projectile_receiver.h"
+#include "pc_p2_projectile_engine_receiver.h"
 #include "pc_p2_rock_hazard.h"
 #include "pc_bbft.h"
 #include "Creature.h"
@@ -333,6 +334,13 @@ struct Host {
     // an engine Creature. Populated from `receiver <token> <maxHealth>` rows.
     P2ProjectileReceiverRegistry receivers;
 
+    // Opt-in real engine receiver mutation ("actual receiver mutation", #169
+    // lane 20 remaining work). When set via `engine_receiver 1`, each emitted
+    // Stone/Rock strike is additionally routed into the live creature through
+    // its own stimulate(InteractAttack/InteractPress) path; the proxy is left
+    // intact so both signals are recorded. Default 0 = proxy only.
+    bool engineReceiver = false;
+
     ScriptRng rng;
     double debt = 0.0;
 };
@@ -530,6 +538,16 @@ void parseConfig(const char* path)
                         : !gHost.receivers.add(token, maxHealth))) {
                 fail("invalid receiver row");
             }
+        } else if (word == "engine_receiver") {
+            // Opt-in real engine receiver mutation: `engine_receiver <0|1>`.
+            if (gHost.engineReceiver) {
+                fail("duplicate engine_receiver row");
+            }
+            float enabled = 0.0f;
+            if (!(in >> enabled) || (enabled != 0.0f && enabled != 1.0f)) {
+                fail("invalid engine_receiver row");
+            }
+            gHost.engineReceiver = (enabled == 1.0f);
         } else {
             fail("invalid config token");
         }
@@ -705,6 +723,38 @@ void logReceiverStrike(const P2ProjectileReceiverHit& hit)
     }
 }
 
+// Real engine receiver mutation (#169 "actual receiver mutation"). Applies the
+// already-classified strike to a live engine creature through its own
+// stimulate(InteractAttack/InteractPress) path and records the observed outcome.
+// `source` is the host-resolved source enemy: null for Teki (source attributes
+// Teki damage to the Stone, which has no live Creature here), the bound Kabuto
+// actor for a grounded Navi/Pikmin.
+void applyAndLogEngineStrike(Creature* target, Creature* source, bool attack,
+                             bool targetIsTeki, float damage)
+{
+    if (!gHost.engineReceiver || !target) {
+        return;
+    }
+    const P2ProjectileEngineHit hit = p2_projectile_apply_engine_strike(
+        target, source, attack, targetIsTeki, damage);
+    std::printf("P2_PROJECTILE_ENGINE_STRIKE target=%llu kind=%s damage=%.1f applied=%d "
+                "rejected=%d health=%.1f->%.1f stored=%.1f->%.1f source=%llu\n",
+                static_cast<unsigned long long>(tokenOf(target)),
+                attack ? "Attack" : "Press", damage, int(hit.applied), int(hit.rejected),
+                hit.healthBefore, hit.healthAfter,
+                hit.storedDamageBefore, hit.storedDamageAfter,
+                static_cast<unsigned long long>(tokenOf(source)));
+    if (hit.applied && hit.healthAfter <= 0.0f && targetIsTeki) {
+        std::printf("P2_PROJECTILE_ENGINE_DAMAGED_TEKI target=%llu stored_delta=%.1f\n",
+                    static_cast<unsigned long long>(tokenOf(target)),
+                    hit.storedDamageAfter - hit.storedDamageBefore);
+    }
+    if (hit.attempted && !hit.applied) {
+        std::printf("P2_PROJECTILE_ENGINE_NOP target=%llu rejected=%d\n",
+                    static_cast<unsigned long long>(tokenOf(target)), int(hit.rejected));
+    }
+}
+
 void detectStoneContacts()
 {
     if (!gHost.stoneActive || !gHost.stone.isAlive()) {
@@ -736,6 +786,14 @@ void detectStoneContacts()
         if (result.strikeEmitted) {
             logStoneStrike(result);
             logReceiverStrike(gHost.receivers.applyStrike(result));
+            const bool attack = result.strike.kind == P2CannonStoneStrikeKind::Attack;
+            const bool targetIsTeki = kind == P2CannonStoneContactKind::Teki;
+            // Source attribution: InteractPress uses mSourceEnemy (the firing
+            // Kabuto) when present; InteractAttack is attributed to the Stone
+            // itself (no live Creature in this host -> null source).
+            Creature* source = (kind == P2CannonStoneContactKind::NaviPiki) ? gHost.kabutoActor
+                                                                            : nullptr;
+            applyAndLogEngineStrike(creature, source, attack, targetIsTeki, result.strike.damage);
         }
         if (result.healthZeroed) {
             std::printf("P2_PROJECTILE_STONE_CONTACT target=%llu kind=%d health_zeroed=1\n",
@@ -1163,6 +1221,9 @@ void detectRockContacts()
                         static_cast<unsigned long long>(result.strike.attributedToken),
                         int(result.strike.attributedToSource), int(result.healthZeroed));
             logReceiverStrike(gHost.receivers.applyStrike(result));
+            const bool attack = result.strike.kind == P2RockHazardStrikeKind::Attack;
+            const bool targetIsTeki = kind == P2RockHazardContactKind::Teki;
+            applyAndLogEngineStrike(creature, nullptr, attack, targetIsTeki, result.strike.damage);
         }
         if (result.healthZeroed) {
             std::printf("P2_PROJECTILE_ROCK_HEALTH_ZERO kind=%s target=%llu\n",
@@ -1281,6 +1342,7 @@ void pc_p2_projectiles_reset()
     gHost.rockDeadTimer = 0.0;
     gHost.rockContacts.clear();
     gHost.receivers.reset();
+    gHost.engineReceiver = false;
     gHost.rng.state = 1u;
     gHost.debt = 0.0;
     if (gHost.binding) {
