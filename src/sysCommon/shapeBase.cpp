@@ -17,7 +17,6 @@
 #include "PVW.h"
 #include "Texture.h"
 #include "Vector.h"
-#include "pc_p2_billboard.h"
 #include "sysNew.h"
 #include "system.h"
 #include "timers.h"
@@ -251,44 +250,6 @@ void Joint::write(RandomAccessStream& stream)
  * @todo: Documentation
  * @note UNUSED Size: 00043C (Matching by size)
  */
-#if defined(PIKI_PC_PORT)
-/**
- * @brief Camera-facing rotation for a billboard mesh (#429).
- *
- * Returns the inverse of the combined model*view rotation so that a mesh whose
- * geometry is pivot-centred around its joint translation faces the camera once
- * the joint matrix is concatenated with it. False keeps the plain joint matrix
- * when the camera or model basis is unavailable/degenerate.
- */
-static bool billboardRotation(Matrix4f& rot, Graphics& gfx)
-{
-	if (!gfx.mCamera || !gfx.mLastModelMatrix) {
-		return false;
-	}
-	const Matrix4f& model = *gfx.mLastModelMatrix;
-	const Matrix4f& view  = gfx.mCamera->mLookAtMtx;
-	float m3[3][3];
-	float v3[3][3];
-	float r3[3][3];
-	for (int i = 0; i < 3; ++i) {
-		for (int j = 0; j < 3; ++j) {
-			m3[i][j] = model.mMtx[i][j];
-			v3[i][j] = view.mMtx[i][j];
-		}
-	}
-	if (!p2billboard::facingRotation(r3, m3, v3)) {
-		return false;
-	}
-	rot.makeIdentity();
-	for (int i = 0; i < 3; ++i) {
-		for (int j = 0; j < 3; ++j) {
-			rot.mMtx[i][j] = r3[i][j];
-		}
-	}
-	return true;
-}
-#endif
-
 /**
  * @todo: Documentation
  */
@@ -326,9 +287,6 @@ void Joint::render(Graphics& gfx)
 	}
 
 	immut Matrix4f* animMatrices[10];
-#if defined(PIKI_PC_PORT)
-	Matrix4f billboardMtx[10]; // Per-dep camera-facing replacements for flagged meshes.
-#endif
 	int matPolyCount = 0; // Counted but never used.
 
 	FOREACH_NODE(MatPoly, mMatPoly.mChild, matPoly)
@@ -367,21 +325,6 @@ void Joint::render(Graphics& gfx)
 					}
 				}
 			}
-
-#if defined(PIKI_PC_PORT)
-			if (mesh->mFeatureFlags & Mesh::FeatureFlags::Billboard) {
-				Matrix4f rot;
-				if (billboardRotation(rot, gfx)) {
-					const int depCount = mtxGroup->mDepLength ? mtxGroup->mDepLength : 1;
-					for (int k = 0; k < depCount && k < 10; ++k) {
-						if (animMatrices[k]) {
-							animMatrices[k]->multiplyTo(rot, billboardMtx[k]);
-							animMatrices[k] = &billboardMtx[k];
-						}
-					}
-				}
-			}
-#endif
 
 			Vector3f* shapeVertices  = mParentShape->mVertexList;
 			Vector2f* shapeTexCoords = mParentShape->mTexCoordList[0];
