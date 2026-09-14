@@ -26,16 +26,19 @@ Not real / not covered:
 
 - no dedicated P1 follow-teki action; the `mVolatileVelocity` impulse is an
   explicit approximation (see `P2_FUEFUKI_FOLLOW.md`);
-- the beetle anchor is policy-side and static (no Fuefuki actor, no visual or
-  audio assets); the beetle velocity blend is pinned to zero;
+- the beetle anchor is policy-side (static in the approach phase, scripted
+  along -Z in the trail phase); there is no Fuefuki actor or visual/audio
+  asset and the beetle velocity blend is pinned to zero, so this proves the
+  follower policy against a moving trail, not native beetle locomotion;
 - no PIKISTATE_Panic equivalent; this run does not cover release/reclaim
   (covered by `P2_FUEFUKI_RUNTIME_EVIDENCE.md`).
 
 ## Provenance
 
 - Native branch `opencode/p2-lane28-fuefuki-follow`, HEAD
-  `f0900f2a4cadbaa52b6f265524735e33d9f333b1` (fixture commit; the locomotion
-  policy/seam/host slice is `f6982a58`).
+  `c3fd1a94ef62c07dc98a5b887d19bd9cdb118b6a` (adds the moving-trail phase; the
+  locomotion policy/seam/host slice is `f6982a58`, the runtime fixture
+  `f0900f2a`).
 - Base `f14c6851473ac1161be56c8b98f4f905232f3635` (`codex/p2-main-review-native`).
 - Isolated fixture build (verifies HEAD, Ninja freshness, records git state):
 
@@ -44,18 +47,18 @@ Not real / not covered:
       --build output/lane28-fuefuki-build \
       --source output/native-lane28-fuefuki \
       --fixture output/native-lane28-fuefuki/tools/p2_fuefuki_follow_runtime.cpp \
-      --output output/p2-lane28-follow-runtime-02 \
-      --expected-native-head f0900f2a4cadbaa52b6f265524735e33d9f333b1
+      --output output/p2-lane28-follow-runtime-04 \
+      --expected-native-head c3fd1a94ef62c07dc98a5b887d19bd9cdb118b6a
   # -> {"status": "built", ...}
   ```
 
 - Private build `output/lane28-fuefuki-build`, Ninja Release, MinGW-w64 g++
   16.2.0, JAudio ON; `ninja pikmin_pc -n` reported no work.
 - Fixture executable SHA-256
-  `8AE837112707AE4532A4E00D7AC2C89E08B9AE2EE51F2B2D615A26CEA14E7C8F`.
-  An earlier run of output `p2-lane28-follow-runtime-01`
-  (`6283EB5F8C3C533611971D91F9155A829B02611492C8AC59B359124673129C70`, built at
-  `f6982a58`) produced the same PASS and is superseded by this clean-HEAD build.
+  `1AC01C5359B10F014DCC5B9B455B068A50C16235DE14A050A41FACA4139765B4`.
+  Earlier clean-HEAD runs `p2-lane28-follow-runtime-02` (`8AE83711…`, HEAD
+  `f0900f2a`) and dirty-worktree `…-03` (`471450F2…`) are superseded; all
+  produced the same PASS.
 
 ## Staging and run
 
@@ -77,9 +80,14 @@ committed).
 P2_FUEFUKI_FOLLOW_RT_WINDOW size=960x540 pos=373,263 display=1707x1067 centered=1
 P2_FUEFUKI_FOLLOW_RT_READY squad=6 anchor=0,0 ring=130 follow_distance=100 locomotion=actteki_volatile_approx
 P2_FUEFUKI_FOLLOW_RT_CLAIM claimed=3 hold=3 start_dist=70.0
-P2_FUEFUKI_FOLLOW_RT_MOVE start=70.0 end=50.0 frames=8 moves=57 stops=4 writes=0 real_piki=1
+P2_FUEFUKI_FOLLOW_RT_MOVE start=70.0 end=48.4 frames=9 moves=60 stops=4 writes=0 real_piki=1
+P2_FUEFUKI_FOLLOW_RT_TRAIL anchors_moved=112.5 follower_moved=25.9 dist_to_anchor=99.0 frames=45 moves=51 stops=84 writes=0
 PASS FUEFUKI_FOLLOW_RUNTIME
 ```
+
+(Run-to-run variation in the approach phase is expected: the near-speed
+`0.5 * randFloat() + 0.5` and the frame rate both vary. The `end` value always
+lands at the source arrival threshold `FOLLOW_DISTANCE/2 = 50`.)
 
 Phase detail:
 
@@ -91,10 +99,17 @@ Phase detail:
   outside the 50-unit arrival threshold).
 - **MOVE** — one binding tick per rendered frame: the ActTeki policy emits a
   footprint target (the anchor trail mark), and the host drives the real Piki.
-  Follower 1 closed from 70.0 to 50.0 units in 8 frames and the policy then
-  emitted its arrival stop at the source threshold. 57 move commands and 4 stop
+  Follower 1 closed from 70.0 to ~48 units in 9 frames and the policy then
+  emitted its arrival stop at the source threshold. 60 move commands and 4 stop
   commands; **zero ownership writes**; held Pikmin stayed in `FreeMode`; the
   three outside-ring Pikmin did not move into the ring.
+- **TRAIL** — the anchor then walked 112.5 units along -Z (2.5 units/frame) and
+  the follower kept chasing the real footmark trail: it moved a further 25.9
+  units and settled at 99.0 units from the beetle — the source
+  `FOLLOW_DISTANCE = 100` follow band — with 51 move / 84 stop commands
+  (stop/re-target each frame as the trail receded) and still **zero ownership
+  writes**. This exercises the footmark ring, `makeTarget` re-targeting and the
+  far-speed branch against a moving trail, not just a static approach.
 
 ## Remaining gaps
 
