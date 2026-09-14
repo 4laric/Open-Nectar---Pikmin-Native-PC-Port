@@ -93,7 +93,7 @@ public:
             for(int i=0;i<4;++i) {
                 PikiHeadItem* s=static_cast<PikiHeadItem*>(itemMgr->birth(OBJTYPE_Pikihead));require(s,"spawn sprout");
                 Vector3f pos=patch;pos.x+=i*5.0f;
-                s->init(pos);s->setColor(i%3);s->mFlowerStage=i%3;s->startAI(0);
+                s->init(pos);s->setColor((pc_p2_purples_enabled() || pc_p2_whites_enabled()) ? Red : i%3);s->mFlowerStage=i%3;s->startAI(0);
                 s->mFlowerStage=i%3;
                 if(pc_p2_purples_enabled())s->mP2Purple=true;
                 if(pc_p2_whites_enabled())s->mP2White=true;
@@ -138,12 +138,15 @@ public:
             }
         } else if(phase==6 && ++ticks>=150) {
             require(sprouts()==0,"sprout replay");require(emerged.size()==4,"four emergence animations");
+            int maturity[3]={};
             for(Piki* p:emerged) {
                 require(p->isAlive() && p->getState()==PIKISTATE_Normal && p->mMode==PikiMode::FormationMode && p->mNavi==n,"animation did not join squad");
-                require(p->mColor==p->mHappa,"color/maturity changed");
+                require(p->mHappa>=Leaf && p->mHappa<=Flower,"maturity invalid");++maturity[p->mHappa];
+                require(p->mColor==((pc_p2_purples_enabled() || pc_p2_whites_enabled()) ? Red : p->mHappa),"color changed");
                 require(!pc_p2_purples_enabled() || pc_p2_is_purple(p),"Purple identity lost");
                 require(!pc_p2_whites_enabled() || pc_p2_is_white(p),"White identity lost");
             }
+            require(maturity[Leaf]==2 && maturity[Bud]==1 && maturity[Flower]==1,"maturity changed");
             require(int(GameStat::mapPikis)==total,"population changed");capture("whistle-pluck-after.ppm");
             std::printf("PASS whistle pluck: native animation, stagger, release, formation, identity, maturity, population=%d\n",total);
             std::fflush(stdout);std::_Exit(0);
