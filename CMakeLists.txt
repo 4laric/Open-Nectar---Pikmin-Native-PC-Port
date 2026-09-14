@@ -205,6 +205,7 @@ set(PC_PORT_SOURCES
 pc_port/pc_p2_kabuto_cannon.cpp
 pc_port/pc_p2_kabuto_events.cpp
 pc_port/pc_p2_kabuto_muzzle.cpp
+pc_port/pc_p2_kabuto_binding.cpp
 pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_rock_hazard.cpp
     pc_port/pc_p2_projectile_receiver.cpp
