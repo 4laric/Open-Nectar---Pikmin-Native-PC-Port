@@ -11,8 +11,10 @@
 // The conversion hook implements the source own-colour refund: a same-colour
 // input births a replacement sprout and spends no budget slot, a different
 // colour spends one, and population is conserved (inputs in == sprouts born +
-// Pikmin left alive). BlackPom/WhitePom stay with the existing violet/ivory
-// providers; the RandPom Queen colour cycle is not in this slice.
+// Pikmin left alive). RandPom is the Queen: it never refunds, cycles
+// Blue/Red/Yellow every fp02 = 2.6 s, and shoots ip13 = 9 leaf sprouts per
+// swallowed Pikmin. BlackPom/WhitePom stay with the existing violet/ivory
+// providers.
 class Pom;
 
 void pc_p2_candypop_setup();
