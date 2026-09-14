@@ -31,7 +31,16 @@ static void require(bool ok, const char* what) { if (!ok) { std::printf("FAIL DE
 
 static bool isNaturalMode(const char* m) {
     return !std::strcmp(m, "natural") || !std::strcmp(m, "natural_escape")
-        || !std::strcmp(m, "natural_interrupt") || !std::strcmp(m, "natural_teardown");
+        || !std::strcmp(m, "natural_interrupt") || !std::strcmp(m, "natural_teardown")
+        || !std::strcmp(m, "natural_idle");
+}
+
+// A/B control for #186: the same binary can restore the historical Walk-only
+// captain admission. natural_idle asserts that this gate refuses an Idle
+// captain instead of timing out.
+static bool walkOnlyAdmission() {
+    const char* value = std::getenv("PIKMIN_DEMON_WALK_ONLY_ADMISSION");
+    return value && !std::strcmp(value, "1");
 }
 
 // The ordinary mode binds through the production manager instead of the
@@ -92,6 +101,7 @@ class DemonHostApp final : public PlugPikiApp {
     bool naturalCaptured = false;
     bool naturalActionDone = false;
     bool naturalSawEscapeState = false;
+    bool naturalSawIdleCarry = false;
     bool ready = false;
     BTeki* bindingActor = nullptr;
     unsigned bindingGenerator = 0;
@@ -160,8 +170,9 @@ public:
         // The P1 Demon bridge admits capture only from Walk (NaviState 0). With no
         // player input the captain idles, so hold the real captain in Walk until
         // the natural capture succeeds; this is a bridge-contract accommodation,
-        // not an injected capture, frame or target.
-        if (ready && naturalMode && !host.occupied() && !naturalSawCapture && !naturalSawDrop
+        // not an injected capture, frame or target. `natural_idle` deliberately
+        // does NOT do this: it targets the source-backed Idle admission instead.
+        if (ready && naturalMode && std::strcmp(mode, "natural_idle") != 0 && !host.occupied() && !naturalSawCapture && !naturalSawDrop
             && n->getCurrState()->getID() != NAVISTATE_Walk) {
             n->mStateMachine->transit(n, NAVISTATE_Walk);
         }
@@ -279,14 +290,25 @@ public:
                     escapeController = new EscapeController();
                     n->mKontroller = escapeController;
                 }
-                n->mStateMachine->transit(n, NAVISTATE_Walk);
+                if (!std::strcmp(mode, "natural_idle")) {
+                    // Source-backed Idle admission: keep the real engine Idle
+                    // state. The neutral timer is past the Walk->Idle threshold
+                    // (10s) but below the Idle->Pellet threshold (140s), so with
+                    // no input the captain genuinely idles. The fixture never
+                    // transits it to Walk.
+                    n->mNeutralTime = 11.0f;
+                    n->mStateMachine->transit(n, NAVISTATE_Idle);
+                } else {
+                    n->mStateMachine->transit(n, NAVISTATE_Walk);
+                }
                 n->resetPosition(Vector3f(0, 100, 160));
                 startingHealth = n->mHealth;
                 naturalStartZ = host.mSRT.t.z;
                 host.enableNatural(30.0f, 3.0f, 20.0f, 12.0f, 200.0f, 60.0f, 300.0f, Vector3f(0, 100, 100));
                 require(host.naturalEnabled(), "natural captor enabled");
-                std::printf("DEMON_NATURAL_BEGIN host=(%.2f,%.2f,%.2f) captain=(%.2f,%.2f,%.2f)\n",
-                    host.mSRT.t.x, host.mSRT.t.y, host.mSRT.t.z, n->mSRT.t.x, n->mSRT.t.y, n->mSRT.t.z);
+                std::printf("DEMON_NATURAL_BEGIN mode=%s host=(%.2f,%.2f,%.2f) captain=(%.2f,%.2f,%.2f) state=%d neutral=%.1f\n",
+                    mode, host.mSRT.t.x, host.mSRT.t.y, host.mSRT.t.z, n->mSRT.t.x, n->mSRT.t.y, n->mSRT.t.z,
+                    n->getCurrState()->getID(), n->mNeutralTime);
                 std::fflush(stdout);
             }
             return result;
@@ -315,6 +337,48 @@ public:
                     require(host.mSRT.t.z > naturalStartZ + 1.0f, "host approached the live captain");
                     require(n->mHealth == startingHealth - 10.0f, "one natural damaging drop completed");
                     std::printf("PASS DEMON_HOST natural_captor_acquire_attack_capture_drop (ticks=%d)\n", naturalTicks);
+                    std::fflush(stdout); std::_Exit(0);
+                }
+                return result;
+            }
+
+            if (!std::strcmp(mode, "natural_idle")) {
+                // Source-backed admission gate: the captain is never held in
+                // Walk. It must stay Idle from the arena start, be captured
+                // while Idle, remain Idle through the whole mouth carry, then
+                // be dropped and recover to Walk. Once the drop is admitted the
+                // host is frozen so it cannot re-acquire the recovering captain.
+                if (naturalSawDrop) freezeHost = true;
+                if (!host.occupied() && !naturalSawDrop) {
+                    // Fixture environment hold of the neutral timer only (below
+                    // the engine's Idle->Pellet threshold); it never transits
+                    // the captain to Walk.
+                    if (n->mNeutralTime > 120.0f) n->mNeutralTime = 11.0f;
+                    require(n->getCurrState()->getID() == NAVISTATE_Idle, "idling captain stays Idle before capture");
+                    if (walkOnlyAdmission() && naturalTicks > 900) {
+                        // A/B: the historical Walk-only gate must not admit this
+                        // real, live, un-held Idle captain.
+                        require(!naturalSawCapture && !host.occupied(), "walk-only admission refuses idle capture");
+                        std::printf("PASS DEMON_HOST natural_idle_walk_only_admission_refuses_capture (ticks=%d)\n", naturalTicks);
+                        std::fflush(stdout); std::_Exit(0);
+                    }
+                }
+                if (host.occupied() && pc_demon_bound(n)) {
+                    require(n->getCurrState()->getID() == NAVISTATE_Idle, "idling captain stays Idle through the carry");
+                    if (!naturalSawIdleCarry) {
+                        naturalSawIdleCarry = true;
+                        std::printf("DEMON_NATURAL_IDLE carry tick=%d state=%d stuck=%d bound=%d hp=%.1f\n",
+                            naturalTicks, n->getCurrState()->getID(), int(n->isStickTo()),
+                            int(pc_demon_bound(n)), n->mHealth);
+                        std::fflush(stdout);
+                    }
+                }
+                if (naturalSawDrop && n->getCurrState()->getID() == NAVISTATE_Walk) {
+                    require(naturalSawAttack, "natural attack reached");
+                    require(naturalSawCapture, "natural mouth capture admitted from Idle");
+                    require(naturalSawIdleCarry, "idle mouth carry sustained while Idle");
+                    require(n->mHealth == startingHealth - 10.0f, "one natural damaging drop completed");
+                    std::printf("PASS DEMON_HOST natural_idle_captor_acquire_attack_capture_drop (ticks=%d)\n", naturalTicks);
                     std::fflush(stdout); std::_Exit(0);
                 }
                 return result;
