@@ -31,6 +31,13 @@ The draw position `(-150, 30, 1850)` is exactly the arena's Napkid placement, so
 the visual is anchored on the real vehicle. The run stayed stable for 40 s
 (manually stopped; the game has no self-exit).
 
+The binding is **generator-scoped** through an optional `p2-fuefuki-teki.txt`
+(`P2_FUEFUKI_TEKI_1 <generator> <type>`, the Kurage/Onikurage private-adapter
+pattern): with the arena's `245001 11` the receipt reads
+`family=Fuefuki vehicle=Napkid gen=245001 type=11`, so the lane actor binds the
+exact placement row rather than "the first Napkid". The arena script writes this
+config. This is still a *placement vehicle* (Napkid 11), not enemy 41.
+
 ## What was tried before (kept for the record)
 
 1. **Arena without cargo-free** — stalled at `P2 preview: treasure generator
@@ -52,5 +59,9 @@ the visual is anchored on the real vehicle. The run stayed stable for 40 s
   source jump-away (intruder) behaviour. The source Beetle animation bank
   (#128) remains the eventual feed, but the table is enough for the state
   machine.
-- Whistle effect ring, audio, material fidelity; the arena does not itself stage
-  the converted pose bank (overlay `p2-fuefuki-visual.txt` + mods to see it).
+- Whistle effect ring, audio; the arena does not itself stage the converted pose
+  bank (overlay `p2-fuefuki-visual.txt` + mods to see it).
+- **Material fidelity:** the run logs repeated
+  `[PC GX Warning] ... la textura ... nunca se subió; se dibujará transparente`
+  for the Fuefuki maps — the converted mod's textures are not uploaded and draw
+  transparent. Provider 09 work.
