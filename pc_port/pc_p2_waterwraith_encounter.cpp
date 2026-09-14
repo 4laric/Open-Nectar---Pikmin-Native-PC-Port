@@ -159,6 +159,11 @@ void pc_p2_waterwraith_encounter_step(P2WaterwraithActor& actor, P2WaterwraithAc
 
     // Wraith body resolution: end the escape, then the source Dead key sequence
     // (KEYEVENT_5 releases the treasure, KEYEVENT_END kills).
+    if (actor.bodyZeroed() && !sStats.bodyZeroed) {
+        sStats.bodyZeroed = true;
+        std::printf("P2_WATERWRAITH_BODY_ZERO tick=%llu bodyHealth=0.0\n",
+                    static_cast<unsigned long long>(sStats.ticks));
+    }
     if (actor.phase() == P2BM_Escape) {
         in.animEnd = true;
     } else if (actor.phase() == P2BM_Dead) {
