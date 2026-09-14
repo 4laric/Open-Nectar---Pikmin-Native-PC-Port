@@ -16,8 +16,10 @@
 // for the terrain center/base convention.
 #include "pc_p2_projectiles.h"
 #include "pc_p2_cannon_stone.h"
+#include "pc_p2_attachments.h"
 #include "pc_p2_egg_hazard.h"
 #include "pc_p2_kabuto_cannon.h"
+#include "pc_p2_kabuto_muzzle.h"
 #include "pc_p2_projectile_host.h"
 #include "pc_p2_projectile_receiver.h"
 #include "pc_p2_rock_hazard.h"
@@ -37,6 +39,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <memory>
 #include <set>
 #include <string>
 
@@ -267,6 +270,20 @@ struct Host {
     std::uint64_t kabutoSelf = 0x504B4254ULL; // "PKBT"
     int kabutoFires = 0;
 
+    // Optional attachment-bank moving muzzle (#169 muzzle slice). When a
+    // `kabuto_rig <bankPath> <x> <y> <z> <faceDeg>` row is present the Stone is
+    // born from the sampled `kuti` joint in the actor's world transform instead
+    // of the static `kabutoMouthJoint`; absent -> legacy static mouth point.
+    bool haveKabutoRig = false;
+    std::string kabutoRigPath;
+    p2attach::Vec kabutoRigOrigin{};
+    float kabutoRigFaceDeg = 0.0f;
+    std::shared_ptr<const p2attach::Bank> kabutoBank;
+    p2attach::Instance kabutoAttachment;
+    p2attach::Token kabutoAttachmentToken = 0;
+    P2KabutoMuzzle kabutoMuzzle;
+    std::uint64_t kabutoRigTick = 0;
+
     // Falling-Rock hazard (#411), instantiated once as a host-driven actor.
     bool haveRockCfg = false;
     P2RockHazardConfig rockCfg;
@@ -357,6 +374,26 @@ void parseConfig(const char* path)
             gHost.kabutoAttackTicks = attackTicks;
             gHost.kabutoKey2Tick = key2Tick;
             gHost.haveKabutoCfg = true;
+        } else if (word == "kabuto_rig") {
+            // Opt-in moving muzzle: `kabuto_rig <bankPath> <x> <y> <z> <faceDeg>`.
+            // Requires a kabuto row (checked below); the bank is loaded and the
+            // species clip/joint resolved in setup.
+            if (gHost.haveKabutoRig) {
+                fail("duplicate kabuto_rig row");
+            }
+            if (!(in >> gHost.kabutoRigPath >> gHost.kabutoRigOrigin.x >> gHost.kabutoRigOrigin.y
+                    >> gHost.kabutoRigOrigin.z >> gHost.kabutoRigFaceDeg)) {
+                fail("invalid kabuto_rig row");
+            }
+            if (gHost.kabutoRigPath.empty()
+                || !finite(gHost.kabutoRigOrigin.x) || !finite(gHost.kabutoRigOrigin.y)
+                || !finite(gHost.kabutoRigOrigin.z) || !finite(gHost.kabutoRigFaceDeg)
+                || std::fabs(gHost.kabutoRigOrigin.x) > 100000.0f
+                || std::fabs(gHost.kabutoRigOrigin.y) > 100000.0f
+                || std::fabs(gHost.kabutoRigOrigin.z) > 100000.0f) {
+                fail("invalid kabuto_rig row");
+            }
+            gHost.haveKabutoRig = true;
         } else if (word == "rock") {
             if (gHost.haveRockCfg) {
                 fail("duplicate rock row");
@@ -442,6 +479,9 @@ void parseConfig(const char* path)
     }
     if (gHost.haveKabutoCfg && !gHost.haveStoneCfg) {
         fail("kabuto requires a stone row");
+    }
+    if (gHost.haveKabutoRig && !gHost.haveKabutoCfg) {
+        fail("kabuto_rig requires a kabuto row");
     }
     if (!gHost.haveStoneCfg && !gHost.haveEggCfg && !gHost.haveRockCfg) {
         fail("config has no rows");
@@ -690,6 +730,22 @@ void logKabutoAction(P2KabutoAction action)
                 gHost.kabutoTicks);
 }
 
+// Actor world transform for the attachment-bank muzzle: translate to the rig
+// origin and rotate about Y by the configured facing.
+p2attach::Affine kabutoActorWorld(float faceRad)
+{
+    p2attach::Affine owner;
+    const float c = std::cos(faceRad), s = std::sin(faceRad);
+    owner.m[0][0] = c;
+    owner.m[0][2] = s;
+    owner.m[2][0] = -s;
+    owner.m[2][2] = c;
+    owner.m[0][3] = gHost.kabutoRigOrigin.x;
+    owner.m[1][3] = gHost.kabutoRigOrigin.y;
+    owner.m[2][3] = gHost.kabutoRigOrigin.z;
+    return owner;
+}
+
 // Host-driven automatic attack cycle: Wait -> Turn -> Attack -> KEYEVENT_2 ->
 // END, one source tick at a time. The cycle freezes while a Stone is in flight
 // so the FSM sequence is clean and exactly one Stone is active at a time.
@@ -730,7 +786,23 @@ void tickKabuto()
             if (action == P2KabutoAction::FireStone) {
                 P2KabutoStoneBirth birth;
                 const float faceRad = gHost.kabutoFaceDeg * kPi / 180.0f;
-                if (!cannon.takeBirth(gHost.kabutoMouthJoint, faceRad, birth)) {
+                P2CannonStoneVec3 mouthJoint = gHost.kabutoMouthJoint;
+                bool took = false;
+                if (gHost.haveKabutoRig) {
+                    // Attachment-bank moving muzzle: sample the `kuti` joint at the
+                    // source fire frame in the actor's world transform.
+                    took = gHost.kabutoMuzzle.takeBirth(
+                        cannon, gHost.kabutoAttachment, gHost.kabutoAttachmentToken,
+                        kabutoActorWorld(faceRad), ++gHost.kabutoRigTick, faceRad, birth);
+                    if (took) {
+                        // takeBirth applied the source +25 y offset; recover the joint.
+                        mouthJoint = { birth.mouthPosition.x, birth.mouthPosition.y - 25.0f,
+                                       birth.mouthPosition.z };
+                    }
+                } else {
+                    took = cannon.takeBirth(gHost.kabutoMouthJoint, faceRad, birth);
+                }
+                if (!took) {
                     fail("kabuto takeBirth failed");
                 }
                 gHost.stone.reset(gHost.stoneCfg);
@@ -741,11 +813,11 @@ void tickKabuto()
                 gHost.stoneActive = true;
                 gHost.stoneDeadTimer = 0.0;
                 ++gHost.kabutoFires;
-                std::printf("P2_PROJECTILE_KABUTO_FIRE species=%s homing=%d mouth=(%.1f,%.1f,%.1f) "
+                std::printf("P2_PROJECTILE_KABUTO_FIRE species=%s homing=%d rig=%d mouth=(%.1f,%.1f,%.1f) "
                             "birth=(%.1f,%.1f,%.1f) face_deg=%.1f source=%llu fire=%d\n",
                             kabutoSpeciesName(cannon.species()), int(birth.homing),
-                            gHost.kabutoMouthJoint.x, gHost.kabutoMouthJoint.y,
-                            gHost.kabutoMouthJoint.z, birth.mouthPosition.x,
+                            int(gHost.haveKabutoRig), mouthJoint.x, mouthJoint.y,
+                            mouthJoint.z, birth.mouthPosition.x,
                             birth.mouthPosition.y, birth.mouthPosition.z, gHost.kabutoFaceDeg,
                             static_cast<unsigned long long>(gHost.kabutoSelf), gHost.kabutoFires);
             }
@@ -997,6 +1069,15 @@ void pc_p2_projectiles_reset()
     gHost.kabuto.reset(P2KabutoCannonConfig{}, P2KabutoSpecies::Kabuto);
     gHost.kabutoTicks = 0;
     gHost.kabutoFires = 0;
+    gHost.haveKabutoRig = false;
+    gHost.kabutoRigPath.clear();
+    gHost.kabutoRigOrigin = p2attach::Vec{};
+    gHost.kabutoRigFaceDeg = 0.0f;
+    gHost.kabutoBank.reset();
+    gHost.kabutoAttachment.reset();
+    gHost.kabutoAttachmentToken = 0;
+    gHost.kabutoMuzzle = P2KabutoMuzzle{};
+    gHost.kabutoRigTick = 0;
     gHost.haveRockCfg = false;
     gHost.rockCfg = P2RockHazardConfig{};
     gHost.rockInit = P2RockHazardInit{};
@@ -1056,6 +1137,28 @@ void pc_p2_projectiles_setup()
         }
         gHost.kabutoTicks = 0;
         gHost.kabutoFires = 0;
+        if (gHost.haveKabutoRig) {
+            // Load the species attachment bank and bind the moving muzzle. The
+            // bank is an authored sidecar; a failed parse or unresolved species
+            // clip/joint fails closed.
+            std::ifstream bankIn(gHost.kabutoRigPath);
+            gHost.kabutoBank = p2attach::read(bankIn);
+            if (!gHost.kabutoBank) {
+                fail("kabuto_rig bank parse failed");
+            }
+            gHost.kabutoAttachmentToken = gHost.kabutoAttachment.bind(gHost.kabutoBank);
+            if (gHost.kabutoAttachmentToken == 0
+                || !gHost.kabutoMuzzle.bind(*gHost.kabutoBank, gHost.kabutoSpecies)) {
+                fail("kabuto_rig resolve failed");
+            }
+            gHost.kabutoRigTick = 0;
+            std::printf("P2_PROJECTILE_KABUTO_RIG clip=%s joint=%d fire_frame=%d "
+                        "origin=(%.1f,%.1f,%.1f)\n",
+                        gHost.kabutoBank->clips[gHost.kabutoMuzzle.binding().clip].name.c_str(),
+                        gHost.kabutoMuzzle.binding().joint,
+                        gHost.kabutoMuzzle.binding().fireFrame, gHost.kabutoRigOrigin.x,
+                        gHost.kabutoRigOrigin.y, gHost.kabutoRigOrigin.z);
+        }
         std::printf("P2_PROJECTILE_KABUTO_READY species=%s mouth=(%.1f,%.1f,%.1f) face_deg=%.1f "
                     "max_attack_angle=%.1f health=%.1f wait=%d turn=%d attack=%d key2=%d\n",
                     kabutoSpeciesName(gHost.kabutoSpecies), gHost.kabutoMouthJoint.x,
