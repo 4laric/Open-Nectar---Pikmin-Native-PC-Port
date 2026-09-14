@@ -55,6 +55,44 @@ Regression modes from the same fixture/session: `drop`, `livecapture` and
 `teardown` all `PASS`. Standalone `p2_demon_captor_test`, `p2_demon_escape_test`,
 `p2_demon_drop_policy_test` and `p2_demon_host_clock_test` all PASS.
 
+## Post-capture gates: escape, interruption, teardown
+
+`natural_escape`, `natural_interrupt` and `natural_teardown` begin from the same
+real capture (no injected frame, target, END or capture):
+
+- `natural_escape`: a fixture `Kontroller` subclass feeds the production
+  `Controller::updateCont()` contract alternating `KBBTN_DPAD_LEFT`/`RIGHT`
+  edges, so `Navi::doAI`'s real `keyClick` sampling drives
+  `pc_demon_escape_tick` with the engine RNG. This is **input-simulated
+  controller state**, not physical keyboard input. The fixture raises the frozen
+  host (whose live mouth still carries the real captain) 60 units so the source
+  `Fall` state is observable before it grounds. It asserts mouth detach, entry
+  into `NAVISTATE_DemonEscape`, return to `Walk` on `mGroundTriangle`, and no
+  stale `getStickObject()`/`getStickPart()`.
+- `natural_interrupt`: an external bounded forced release (`host.forceDrop`,
+  10 damage / 200 speed) interrupts the carry; asserts detach, null stick
+  pointers, revoked bridge authority, live captain, registered `DemonDrop`
+  admission, then inert stale owner token, owner teardown and scene teardown.
+- `natural_teardown`: production grounded `pc_demon_release` detaches without
+  damage, keeps `Walk`, then owner and scene teardown stay inert.
+
+Session `output/demon-captor-escape-run-01/66c8f4d3c53d47acbed4b654cafd21ff`,
+fixture `output/demon-captor-escape-fixture-01` (`status=built`, expected native
+head `920e2a80`), exe SHA-256
+`88A298DECE9EC6A8250603BFB40A3CB18A5EE64182892E561C109F4545639F48`, `960x540`
+centred window. Regressions `natural`, `drop`, `livecapture` and `teardown` pass
+from the same fixture/session.
+
+```text
+DEMON_NATURAL_ESCAPE arm token=1 input=controller_dpad_simulated lift=89.80
+DEMON_NATURAL_ESCAPE state=DemonEscape tick=188 cap=(1.03,58.96,186.88) detached=1 edges=23
+PASS DEMON_HOST natural_captor_voluntary_escape (ticks=201 edges=36)
+DEMON_STATE_BEGIN generation=1 actual_y=-400.000 target_y=-200.000
+PASS DEMON_HOST natural_captor_interruption_release_teardown (ticks=173)
+DEMON_NATURAL_TEARDOWN release state=0 ground=1
+PASS DEMON_HOST natural_captor_grounded_release_teardown (ticks=164)
+```
+
 ## Limits
 
 - The captain is held in Walk for the duration of the approach because the P1
@@ -67,6 +105,10 @@ Regression modes from the same fixture/session: `drop`, `livecapture` and
   effector while the stick follows the sampled joint.
 - Water/platform/slope terrain, scene teardown during drop, and `Sarai` ID 23
   source actor remain separate gates.
+- The escape gate enters through `Navi::doAI` but its D-pad source is synthesised
+  controller state, not a physical keyboard/device edge, and the frozen host is
+  repositioned 60 units so the Fall state spans more than one frame; neither is
+  an injected capture, frame, target or END.
 
 Reproduction: stage the demon conversion from a known-good session (pose banks,
 `demon-mouths.txt`, `demon-retail-events.txt`, `demon*.mod`) into a fresh
