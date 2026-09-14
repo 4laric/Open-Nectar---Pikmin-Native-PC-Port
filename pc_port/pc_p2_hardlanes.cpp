@@ -28,7 +28,9 @@
 #include "pc_p2_bombsarai_map_trace.h"
 #include "pc_p2_bombsarai_terrain.h"
 #include "pc_p2_fuefuki_binding.h"
+#include "pc_p2_fuefuki_motion.h"
 #include "pc_p2_fuefuki_visual.h"
+#include "pc_p2_retail_player.h"
 #include "pc_p2_bigtreasure_host.h"
 #include "pc_p2_bigtreasure_visual.h"
 #include "Matrix4f.h"
@@ -72,6 +74,10 @@ double sFuefukiDebt = 0.0;
 bool sFuefukiVisualReady = false;
 double sFuefukiVisualDebt = 0.0;
 int sFuefukiLastState = -1;
+P2FuefukiMotionBank sFuefukiMotions;
+p2retail::Player sFuefukiMotionPlayer;
+bool sFuefukiMotionReady = false;
+int sFuefukiMotionState = -1;
 
 std::uint32_t fuefukiId(Piki* piki)
 {
@@ -249,6 +255,9 @@ void pc_p2_hardlanes_reset()
     sFuefukiVisualReady = false;
     sFuefukiVisualDebt = 0.0;
     sFuefukiLastState = -1;
+    sFuefukiMotions = P2FuefukiMotionBank();
+    sFuefukiMotionReady = false;
+    sFuefukiMotionState = -1;
     p2_bigtreasure_host_reset(sBigTreasure);
     pc_p2_bigtreasure_visual_reset();
     sBigTreasureReady = false;
@@ -317,6 +326,13 @@ void pc_p2_hardlanes_setup()
                     pc_p2_fuefuki_visual_clip_count());
     }
 
+    // Fuefuki (#245): opt-in converted motion event table for the lane FSM.
+    if (p2_fuefuki_motion_load("p2-fuefuki-motion.txt", sFuefukiMotions)) {
+        sFuefukiMotionReady = true;
+        std::printf("P2_HARDLANES_READY family=Fuefuki motion=1 clips=%d\n",
+                    static_cast<int>(sFuefukiMotions.table.motions.size()));
+    }
+
     // BigTreasure (#246): fixed-placement host seam + sampled visual bank.
     if (p2_bigtreasure_host_setup("p2-bigtreasure-host.txt", sBigTreasure)) {
         sBigTreasureReady = true;
@@ -358,11 +374,37 @@ void pc_p2_hardlanes_update()
             P2FuefukiBindTick tick;
             tick.delta = kFuefukiSourceDelta;
             tick.health = sFuefukiVehicle->mHealth;
-            tick.animPlaying = true;   // no source Beetle animation bank yet (#128)
-            tick.keyEvent = 0;
-            tick.motionFinished = false;
             tick.turnComplete = true;
-            sFuefuki->tick(tick);
+            if (sFuefukiMotionReady) {
+                // Drive the FSM from the converted clip bank: start the clip
+                // for the current state and feed its KEYEVENT_2/3 and END.
+                const int state = static_cast<int>(sFuefuki->getFsm().getState());
+                if (state != sFuefukiMotionState) {
+                    sFuefukiMotionState = state;
+                    const p2retail::Motion* motion = p2_fuefuki_motion_find(
+                        sFuefukiMotions, pc_p2_fuefuki_visual_clip_for_state(state));
+                    if (motion) sFuefukiMotionPlayer.start(*motion);
+                }
+                int key = 0;
+                sFuefukiMotionPlayer.advance(1.0f, [&key](const p2retail::Event& event) {
+                    if (event.type == 2) key = 2;
+                    else if (event.type == 3) key = 3;
+                    else if (event.type >= 1000) key = 4;
+                });
+                tick.animPlaying = true;
+                tick.keyEvent = key;
+                tick.motionFinished = sFuefukiMotionPlayer.completed();
+            } else {
+                tick.animPlaying = true; // no source Beetle animation bank yet (#128)
+                tick.keyEvent = 0;
+                tick.motionFinished = false;
+            }
+            P2FuefukiBindOut out = sFuefuki->tick(tick);
+            if (sFuefukiMotionReady && out.fsm.requestFinishMotion) {
+                // The transition waits for the finish motion's END; let the
+                // active (possibly looping) clip run to completion.
+                sFuefukiMotionPlayer.finishMotion(true);
+            }
         }
     }
 
