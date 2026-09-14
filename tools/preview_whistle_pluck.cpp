@@ -1,5 +1,7 @@
 // Isolated real-engine test: injected sprouts/input; production whistle and animations.
 #include <SDL2/SDL.h>
+#include <GL/gl.h>
+#include "gl/pc_opengl.h"
 #include "system.h"
 #include "App.h"
 #include "Node.h"
@@ -46,6 +48,17 @@ public:
 static void require(bool ok, const char* why) {
     if (!ok) { std::printf("FAIL whistle pluck: %s\n",why);std::fflush(stdout);std::_Exit(1); }
 }
+static void capture(const char* path="whistle-pluck.ppm") {
+    auto bind=reinterpret_cast<PFNGLBINDFRAMEBUFFERPROC>(SDL_GL_GetProcAddress("glBindFramebuffer"));
+    GLint previous=0;glGetIntegerv(GL_FRAMEBUFFER_BINDING,&previous);bind(GL_FRAMEBUFFER,0);
+    int w=0,h=0;SDL_GL_GetDrawableSize(SDL_GL_GetCurrentWindow(),&w,&h);
+    std::vector<unsigned char> pixels(size_t(w)*h*3);glPixelStorei(GL_PACK_ALIGNMENT,1);glReadBuffer(GL_BACK);
+    glReadPixels(0,0,w,h,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());bind(GL_FRAMEBUFFER,previous);
+    require(glGetError()==GL_NO_ERROR,"capture GL error");
+    FILE* f=std::fopen(path,"wb");require(f!=nullptr,"capture file");std::fprintf(f,"P6\n%d %d\n255\n",w,h);
+    for(int y=h-1;y>=0;--y)std::fwrite(pixels.data()+size_t(y)*w*3,1,size_t(w)*3,f);std::fclose(f);
+}
+
 static void setting(bool on) {
     FILE* f=std::fopen("pikmin_settings.conf","w");require(f,"private settings");
     std::fprintf(f,"whistlePluck = %d\nwindowWidth = 960\nwindowHeight = 540\ndisplayMode = 0\n",on?1:0);
@@ -86,6 +99,10 @@ public:
                 if(pc_p2_whites_enabled())s->mP2White=true;
                 require(s->canPullout(),"fixture grounded sprout state");if(i==0)target=s;
             }
+            int wx,wy,ww,wh;SDL_Window* window=SDL_GL_GetCurrentWindow();SDL_GetWindowPosition(window,&wx,&wy);SDL_GetWindowSize(window,&ww,&wh);
+            SDL_Rect bounds;SDL_GetDisplayBounds(SDL_GetWindowDisplayIndex(window),&bounds);
+            std::printf("WINDOW x=%d y=%d w=%d h=%d display=(%d,%d,%d,%d)\n",wx,wy,ww,wh,bounds.x,bounds.y,bounds.w,bounds.h);
+            require(ww==960 && wh==540,"window size");capture("whistle-pluck-before.ppm");
             total=GameStat::mapPikis;before=sprouts();require(before==4,"four fixture sprouts");
             held=true;phase=1;ticks=0;
             std::printf("FIXTURE_READY live=20 active=Walk window=%dx%d centered sprouts=4 total=%d\n",pc_window_get_width(),pc_window_get_height(),total);
@@ -117,7 +134,7 @@ public:
                 const float time=n->mWhistleTimer;
                 require(previous<0 || time-previous>=PC_WHISTLE_PLUCK_INTERVAL-0.001f,"cadence too fast");
                 std::printf("PLUCK_EVENT held_seconds=%.3f remaining=%d\n",time,sprouts());previous=time;before=sprouts();
-                if(!before){held=false;phase=6;ticks=0;}
+                if(!before){held=false;phase=6;ticks=0;capture("whistle-pluck-emerging.ppm");}
             }
         } else if(phase==6 && ++ticks>=150) {
             require(sprouts()==0,"sprout replay");require(emerged.size()==4,"four emergence animations");
@@ -127,7 +144,7 @@ public:
                 require(!pc_p2_purples_enabled() || pc_p2_is_purple(p),"Purple identity lost");
                 require(!pc_p2_whites_enabled() || pc_p2_is_white(p),"White identity lost");
             }
-            require(int(GameStat::mapPikis)==total,"population changed");
+            require(int(GameStat::mapPikis)==total,"population changed");capture("whistle-pluck-after.ppm");
             std::printf("PASS whistle pluck: native animation, stagger, release, formation, identity, maturity, population=%d\n",total);
             std::fflush(stdout);std::_Exit(0);
         }
