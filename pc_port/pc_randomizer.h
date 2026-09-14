@@ -30,6 +30,7 @@ bool pc_randomizer_group_slots();
 bool pc_randomizer_p2_bridge();
 unsigned pc_randomizer_p2_source(const char* target);
 unsigned pc_randomizer_p2_binding_count();
+bool pc_randomizer_p2_bound(unsigned source_id);
 unsigned pc_randomizer_generator_id(const void* generator);
 void pc_randomizer_set_generator_id(const void* generator, unsigned uid);
 void pc_randomizer_bind_generator(const void* generator, int stage, const char* file, int offset);

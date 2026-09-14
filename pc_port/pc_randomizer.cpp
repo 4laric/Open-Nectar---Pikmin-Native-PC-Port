@@ -499,6 +499,11 @@ unsigned pc_randomizer_p2_source(const char* target) {
 unsigned pc_randomizer_p2_binding_count() {
     return enabled && p2EnemyBridge ? static_cast<unsigned>(p2Bindings.size()) : 0;
 }
+bool pc_randomizer_p2_bound(unsigned source_id) {
+    if (!enabled || !p2EnemyBridge || !source_id) return false;
+    for (const auto& binding : p2Bindings) if (binding.second == source_id) return true;
+    return false;
+}
 unsigned pc_randomizer_generator_id(const void* generator) {
     auto it = generatorIds.find(generator);
     return it == generatorIds.end() ? 0 : it->second;

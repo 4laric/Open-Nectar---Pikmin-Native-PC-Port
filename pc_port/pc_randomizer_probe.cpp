@@ -37,10 +37,10 @@ int main(int argc, char** argv) {
     for (int arg = 1; arg < argc; ++arg) if (!std::strcmp(argv[arg], "--enemy-p2-probe")) {
         assert(pc_randomizer_p2_bridge());
         assert(pc_randomizer_p2_binding_count() == 2);
-        const unsigned a = pc_randomizer_p2_source("gen-001"), b = pc_randomizer_p2_source("gen-002");
-        // Order is a seeded permutation; only the identity set is contractual.
-        assert(a && b && a != b && a + b == 109);
-        assert(pc_randomizer_p2_source("gen-999") == 0);
+        // Target tokens and order are placement-owned; only the identity set is contractual.
+        assert(pc_randomizer_p2_bound(79) && pc_randomizer_p2_bound(30));
+        assert(!pc_randomizer_p2_bound(999) && !pc_randomizer_p2_bound(0));
+        assert(pc_randomizer_p2_source("no-such-target") == 0);
         assert(pc_randomizer_p2_source(nullptr) == 0);
         std::puts("ENEMY_P2_PASS"); return 0;
     }
