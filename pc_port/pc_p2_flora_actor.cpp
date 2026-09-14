@@ -210,7 +210,11 @@ void pc_p2_flora_forget(BTeki* actor)
 {
 	for (auto it = posies.begin(); it != posies.end(); ++it) {
 		if (it->actor == actor) {
-			posies.erase(it);
+			// Palm spawns its pellet immediately before doKill. Keep only the
+			// value-owned drop/receipt record; the actor address must not survive
+			// the central death funnel or alias a recycled Teki slot.
+			if (it->fell) it->actor = nullptr;
+			else posies.erase(it);
 			return;
 		}
 	}
@@ -297,7 +301,7 @@ void pc_p2_flora_tick()
 	// Claim the pellet a fell posy dropped (P1 spawnItems performs the actual
 	// release; we only bind the new number pellet for observation).
 	for (Bound& bound : posies) {
-		if (!bound.fell || bound.releaseLogged || !bound.actor) {
+		if (!bound.fell || bound.releaseLogged) {
 			continue;
 		}
 		for (Pellet* pellet : current) {
