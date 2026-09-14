@@ -225,11 +225,14 @@ private:
     int mWaypointIndex = 0;
 };
 
-// Routes a hit through the rig's `damageable()` gate. Only Purple damage is
-// accepted (structural vulnerability). While the child is attached the damage
-// goes to the Tyre health; after dismount it goes to the wraith body health.
-// `outDead` (optional) reports the underlying target's death gate (roller death
-// still requires the dismounted EB_Invulnerable flag; body death is HP <= 0).
+// Routes a hit through the per-target vulnerability gates. Only Purple damage
+// is accepted (structural vulnerability). While the child is attached the
+// damage goes to the Tyre health, gated on the roller's `damageable()`; after
+// dismount it goes to the wraith body health, gated on the dismount flag
+// (EB_Invulnerable) which persists past child removal so the exposed body stays
+// vulnerable until the wraith itself dies. `outDead` (optional) reports the
+// underlying target's death gate (roller death still requires the dismounted
+// EB_Invulnerable flag; body death is HP <= 0).
 P2WaterwraithDamageResult p2_waterwraith_actor_apply_damage(P2WaterwraithActor& actor,
                                                              float damage, bool isPurple,
                                                              bool* outDead = nullptr);
