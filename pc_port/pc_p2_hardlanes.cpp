@@ -26,6 +26,7 @@
 #include "pc_p2_bombsarai_terrain.h"
 #include "pc_p2_fuefuki_binding.h"
 #include "pc_p2_bigtreasure_host.h"
+#include "pc_p2_bigtreasure_ordinary.h"
 #include "pc_p2_bigtreasure_visual.h"
 #include "Matrix4f.h"
 #include "pc_bbft.h"
@@ -43,6 +44,7 @@
 #include "teki.h"
 #include <cstdint>
 #include <cstdio>
+#include <cmath>
 #include <map>
 
 namespace {
@@ -178,10 +180,34 @@ P2FuefukiFsmParms fuefukiParms()
 // BigTreasure (#246)
 constexpr float kBigTreasureSourceDelta = 1.0f / 30.0f;
 P2BigTreasureHostSeam sBigTreasure;
+P2BigTreasureOrdinary sBigTreasureOrdinary;
 bool sBigTreasureReady = false;
 bool sBigTreasureVisualReady = false;
 float sBigTreasureGround = 0.0f;
 double sBigTreasureDebt = 0.0;
+P2BigTreasurePhase sBigTreasurePhase = P2BT_Dead;
+
+// Source isAttackLimitTime box test: a live Navi/Pikmin inside the 225-unit XZ
+// box around the fixed placement. The ordinary FSM drive consumes the result
+// as `targetInBox`; the policy's pacer owns the timer accrual and threshold.
+bool bigTreasureTargetInBox()
+{
+    if (!sBigTreasure.active) return false;
+    const float bx = sBigTreasure.placement.owner.x;
+    const float bz = sBigTreasure.placement.owner.z;
+    const float box = P2BigTreasureAttackPacer::kBoxHalfExtent;
+    auto inside = [&](float x, float z) {
+        return std::fabs(x - bx) <= box && std::fabs(z - bz) <= box;
+    };
+    Navi* navi = naviMgr ? naviMgr->getNavi() : nullptr;
+    if (navi && inside(navi->mSRT.t.x, navi->mSRT.t.z)) return true;
+    Iterator it(pikiMgr);
+    CI_LOOP(it) {
+        Piki* piki = static_cast<Piki*>(*it);
+        if (piki && piki->isAlive() && inside(piki->mSRT.t.x, piki->mSRT.t.z)) return true;
+    }
+    return false;
+}
 }
 
 void pc_p2_hardlanes_reset()
@@ -196,11 +222,22 @@ void pc_p2_hardlanes_reset()
     sFuefukiHeld.clear();
     sFuefukiNextId = 1;
     p2_bigtreasure_host_reset(sBigTreasure);
+    sBigTreasureOrdinary.reset(P2BigTreasureFsmParms());
     pc_p2_bigtreasure_visual_reset();
     sBigTreasureReady = false;
     sBigTreasureVisualReady = false;
     sBigTreasureGround = 0.0f;
     sBigTreasureDebt = 0.0;
+    sBigTreasurePhase = P2BT_Dead;
+}
+
+bool pc_p2_hardlanes_bigtreasure_hit(int weapon, float damage, bool bittered)
+{
+    P2BigTreasureOrdinaryHit hit;
+    hit.weapon = weapon;
+    hit.damage = damage;
+    hit.bittered = bittered;
+    return sBigTreasureOrdinary.postHit(hit);
 }
 
 void pc_p2_hardlanes_setup()
@@ -248,6 +285,7 @@ void pc_p2_hardlanes_setup()
     // BigTreasure (#246): fixed-placement host seam + sampled visual bank.
     if (p2_bigtreasure_host_setup("p2-bigtreasure-host.txt", sBigTreasure)) {
         sBigTreasureReady = true;
+        sBigTreasureOrdinary.reset(P2BigTreasureFsmParms());
         sBigTreasureGround = mapMgr->getMinY(0.0f, 0.0f, false);
         std::printf("P2_HARDLANES_READY family=BigTreasure host=1 captures=5\n");
     }
@@ -298,8 +336,26 @@ void pc_p2_hardlanes_update()
         if (ticks > 4) ticks = 4;
         sBigTreasureDebt -= ticks * static_cast<double>(kBigTreasureSourceDelta);
         for (int i = 0; i < ticks; ++i) {
-            if (sBigTreasureReady)
-                p2_bigtreasure_host_tick_entry(sBigTreasure, kBigTreasureSourceDelta, false, 0.0f);
+            if (sBigTreasureReady) {
+                // Ordinary update: step the 12-state policy (not the injected
+                // attack shortcut) and let the lane-10 hit ingress drive weapon
+                // knock-off. Animation keyframe pulses are host facts; the
+                // motion-staging provider supplies them (#128), so until then
+                // the policy parks in Land and the pacer gate stays closed.
+                P2BigTreasureOrdinaryFacts facts;
+                facts.delta = kBigTreasureSourceDelta;
+                facts.targetInBox = bigTreasureTargetInBox();
+                facts.hasTarget = facts.targetInBox;
+                P2BigTreasureFsmHostOutput fsmOut;
+                sBigTreasureOrdinary.tick(sBigTreasure, facts, fsmOut);
+                const P2BigTreasurePhase phase = sBigTreasureOrdinary.phase();
+                if (phase != sBigTreasurePhase) {
+                    sBigTreasurePhase = phase;
+                    std::printf("P2_BIGTREASURE_FSM phase=%s weapons=%d\n",
+                                P2BigTreasureFsm::stateName(phase),
+                                sBigTreasure.ownership.weaponCount());
+                }
+            }
             if (sBigTreasureVisualReady) {
                 if (pc_p2_bigtreasure_visual_completed()) pc_p2_bigtreasure_visual_clip("wait1");
                 pc_p2_bigtreasure_visual_update(1.0f);
