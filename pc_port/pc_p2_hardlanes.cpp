@@ -481,3 +481,46 @@ void pc_p2_hardlanes_draw(Graphics& gfx)
         pc_p2_bigtreasure_visual_draw(gfx, owner);
     }
 }
+
+bool pc_p2_hardlanes_fuefuki_ready()
+{
+    return sFuefuki != nullptr && sFuefukiVehicle != nullptr;
+}
+
+int pc_p2_hardlanes_fuefuki_state()
+{
+    return sFuefuki ? static_cast<int>(sFuefuki->getFsm().getState()) : -1;
+}
+
+int pc_p2_hardlanes_fuefuki_held_count()
+{
+    int count = 0;
+    for (const auto& entry : sFuefukiHeld) {
+        if (entry.second) ++count;
+    }
+    return count;
+}
+
+Piki* pc_p2_hardlanes_fuefuki_held(int index)
+{
+    if (index < 0) return nullptr;
+    int seen = 0;
+    for (const auto& entry : sFuefukiHeld) {
+        if (!entry.second) continue;
+        if (seen++ == index) {
+            auto it = sFuefukiPiki.find(entry.first);
+            return it == sFuefukiPiki.end() ? nullptr : it->second;
+        }
+    }
+    return nullptr;
+}
+
+bool pc_p2_hardlanes_fuefuki_vehicle_position(float& x, float& y, float& z)
+{
+    if (!sFuefukiVehicle) return false;
+    const Vector3f position = sFuefukiVehicle->getPosition();
+    x = position.x;
+    y = position.y;
+    z = position.z;
+    return true;
+}
