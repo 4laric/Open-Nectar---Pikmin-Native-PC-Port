@@ -736,6 +736,14 @@ target_include_directories(p2_sarai_captor_test PRIVATE pc_port)
 target_compile_options(p2_sarai_captor_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_sarai_captor_test COMMAND p2_sarai_captor_test)
 
+# Lane 30 (#242) dedicated captor spawn-identity test. Engine-free: it asserts
+# the identity/selection seam; the constant is static_asserted against
+# TEKI_P2Demon in the engine build (pc_port/pc_p2_demon_host.cpp).
+add_executable(p2_demon_identity_test tools/p2_demon_identity_test.cpp)
+target_include_directories(p2_demon_identity_test PRIVATE pc_port)
+target_compile_options(p2_demon_identity_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_demon_identity_test COMMAND p2_demon_identity_test)
+
 # Engine-including admission test: it includes Navi/NaviState through
 # pc_port/pc_p2_demon_admission.h and uses _putenv_s/_spawnl to prove both
 # allowlist branches, so it is Windows-only like the launcher platform tests.
