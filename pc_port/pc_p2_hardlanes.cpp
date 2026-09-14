@@ -409,7 +409,7 @@ void pc_p2_hardlanes_update()
                 if (state != sFuefukiMotionState) {
                     sFuefukiMotionState = state;
                     const p2retail::Motion* motion = p2_fuefuki_motion_find(
-                        sFuefukiMotions, pc_p2_fuefuki_visual_clip_for_state(state));
+                        sFuefukiMotions, p2_fuefuki_motion_clip_for_state(state));
                     if (motion) sFuefukiMotionPlayer.start(*motion);
                 }
                 int key = 0;

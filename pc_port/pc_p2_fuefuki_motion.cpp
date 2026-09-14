@@ -46,6 +46,22 @@ bool p2_fuefuki_motion_load(const char* path, P2FuefukiMotionBank& bank)
     return true;
 }
 
+const char* p2_fuefuki_motion_clip_for_state(int state)
+{
+    switch (state) {
+    case 0: return "dead";      // Dead
+    case 1: return "jump";      // Stay (airborne)
+    case 2: return "landing";   // Land (event feed uses the real clip)
+    case 3: return "jump";      // Jump
+    case 4: return "wait";      // Wait
+    case 5: return "pivot";     // Turn
+    case 6: return "move";      // Walk
+    case 7: return "whisle";    // Whisle
+    case 8: return "struggle";  // Struggle
+    }
+    return "wait";
+}
+
 const p2retail::Motion* p2_fuefuki_motion_find(const P2FuefukiMotionBank& bank,
                                                const char* name)
 {

@@ -19,3 +19,8 @@ bool p2_fuefuki_motion_load(const char* path, P2FuefukiMotionBank& bank);
 // Finds a motion by clip stem (e.g. "whisle" -> whisle.bca), or null.
 const p2retail::Motion* p2_fuefuki_motion_find(const P2FuefukiMotionBank& bank,
                                                const char* name);
+
+// Lane FSM state -> motion clip stem for the *event feed*. Unlike the visual
+// mapping (which has no landing geometry) this uses landing/landfail, so the
+// Land state receives its authored KEYEVENT_2/3 and END.
+const char* p2_fuefuki_motion_clip_for_state(int state);

@@ -95,8 +95,8 @@ public:
             gameflow.mMoviePlayer->requestSkip();
             return result;
         }
-        if (!pc_p2_preview_ready() || !naviMgr || !naviMgr->getNavi() || gameflow.mPauseAll
-            || gameflow.mIsUIOverlayActive) {
+        if ((!pc_p2_preview_ready() && !pc_p2_preview_cargo_free_ready()) || !naviMgr
+            || !naviMgr->getNavi() || gameflow.mPauseAll || gameflow.mIsUIOverlayActive) {
             return result;
         }
         switch (gPhase) {
