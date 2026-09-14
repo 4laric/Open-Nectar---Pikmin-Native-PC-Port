@@ -763,6 +763,79 @@ target_include_directories(p2_bombsarai_induction_test PRIVATE pc_port)
 target_compile_options(p2_bombsarai_induction_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_bombsarai_induction_test COMMAND p2_bombsarai_induction_test)
 
+# Lane 27 Fuefuki hard-lane header-only policy gates (unwired on the approved line).
+add_executable(p2_fuefuki_binding_test tools/p2_fuefuki_binding_test.cpp)
+target_include_directories(p2_fuefuki_binding_test PRIVATE pc_port)
+target_compile_options(p2_fuefuki_binding_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_fuefuki_binding_test COMMAND p2_fuefuki_binding_test)
+
+add_executable(p2_fuefuki_fsm_test tools/p2_fuefuki_fsm_test.cpp)
+target_include_directories(p2_fuefuki_fsm_test PRIVATE pc_port)
+target_compile_options(p2_fuefuki_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_fuefuki_fsm_test COMMAND p2_fuefuki_fsm_test)
+
+add_executable(p2_fuefuki_interference_policy_test tools/p2_fuefuki_interference_policy_test.cpp)
+target_include_directories(p2_fuefuki_interference_policy_test PRIVATE pc_port)
+target_compile_options(p2_fuefuki_interference_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_fuefuki_interference_policy_test COMMAND p2_fuefuki_interference_policy_test)
+
+add_executable(p2_fuefuki_suspend_fallback_test tools/p2_fuefuki_suspend_fallback_test.cpp)
+target_include_directories(p2_fuefuki_suspend_fallback_test PRIVATE pc_port)
+target_compile_options(p2_fuefuki_suspend_fallback_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_fuefuki_suspend_fallback_test COMMAND p2_fuefuki_suspend_fallback_test)
+
+# Lane 27 BigTreasure policy gates (unwired on the approved line).
+add_executable(p2_bigtreasure_test
+    tools/p2_bigtreasure_test.cpp
+    pc_port/pc_p2_bigtreasure.cpp)
+target_include_directories(p2_bigtreasure_test PRIVATE pc_port)
+target_compile_options(p2_bigtreasure_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_bigtreasure_test COMMAND p2_bigtreasure_test)
+
+add_executable(p2_bigtreasure_fsm_test
+    tools/p2_bigtreasure_fsm_test.cpp
+    pc_port/pc_p2_bigtreasure_fsm.cpp)
+target_include_directories(p2_bigtreasure_fsm_test PRIVATE pc_port)
+target_compile_options(p2_bigtreasure_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_bigtreasure_fsm_test COMMAND p2_bigtreasure_fsm_test)
+
+add_executable(p2_bigtreasure_attacks_test
+    tools/p2_bigtreasure_attacks_test.cpp
+    pc_port/pc_p2_bigtreasure_attacks.cpp
+    pc_port/pc_p2_bigtreasure.cpp)
+target_include_directories(p2_bigtreasure_attacks_test PRIVATE pc_port)
+target_compile_options(p2_bigtreasure_attacks_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_bigtreasure_attacks_test COMMAND p2_bigtreasure_attacks_test)
+
+set(P2_BIGTREASURE_TEST_DEPS
+    pc_port/pc_p2_bigtreasure.cpp
+    pc_port/pc_p2_bigtreasure_fsm.cpp
+    pc_port/pc_p2_bigtreasure_attacks.cpp
+    pc_port/pc_p2_bigtreasure_host.cpp
+    pc_port/pc_p2_bigtreasure_fsmhost.cpp
+    pc_port/pc_p2_bigtreasure_motion.cpp)
+
+add_executable(p2_bigtreasure_fsmhost_test
+    tools/p2_bigtreasure_fsmhost_test.cpp
+    ${P2_BIGTREASURE_TEST_DEPS})
+target_include_directories(p2_bigtreasure_fsmhost_test PRIVATE pc_port)
+target_compile_options(p2_bigtreasure_fsmhost_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_bigtreasure_fsmhost_test COMMAND p2_bigtreasure_fsmhost_test)
+
+add_executable(p2_bigtreasure_host_test
+    tools/p2_bigtreasure_host_test.cpp
+    ${P2_BIGTREASURE_TEST_DEPS})
+target_include_directories(p2_bigtreasure_host_test PRIVATE pc_port)
+target_compile_options(p2_bigtreasure_host_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_bigtreasure_host_test COMMAND p2_bigtreasure_host_test)
+
+add_executable(p2_bigtreasure_motion_test
+    tools/p2_bigtreasure_motion_test.cpp
+    ${P2_BIGTREASURE_TEST_DEPS})
+target_include_directories(p2_bigtreasure_motion_test PRIVATE pc_port)
+target_compile_options(p2_bigtreasure_motion_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_bigtreasure_motion_test COMMAND p2_bigtreasure_motion_test)
+
 add_executable(pc_render_phase_test
     pc_port/timing/pc_render_phase_test.cpp
     pc_port/timing/pc_render_phase.cpp)
