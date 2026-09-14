@@ -104,6 +104,13 @@ def verify_log(text):
     elif (int(fsmhost.group(1)) != 4 or int(fsmhost.group(2)) != 0
           or fsmhost.group(3) != "DropItem" or int(fsmhost.group(4)) != 4):
         errors.append(f"fsmhost four-weapon phase progression not observed: {fsmhost.groups()}")
+    encounter = re.search(r"^P2_BIGTREASURE_ENCOUNTER_PASS\s+knockoffs=(\d+)\s+hits=(\d+)\s+"
+                          r"phase=(\w+)\s+events=(\d+)\s*$", text, flags=re.MULTILINE)
+    if not encounter:
+        errors.append("missing encounter PASS marker")
+    elif (int(encounter.group(1)) != 4 or int(encounter.group(2)) < 4
+          or encounter.group(3) != "Dead" or int(encounter.group(4)) < 4):
+        errors.append(f"encounter did not complete the full boss fight: {encounter.groups()}")
     visual = re.search(r"^P2_BIGTREASURE_VISUAL_READY\s+clips=(\d+)\s+pellets=(\d+)\s+"
                        r"pellet_debug=(\d+)\s*$", text, flags=re.MULTILINE)
     if not visual:
