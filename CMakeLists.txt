@@ -1035,3 +1035,12 @@ foreach(policy IN ITEMS kabuto_muzzle kabuto_chain kabuto_binding)
     target_compile_options(p2_${policy}_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
     add_test(NAME p2_${policy}_test COMMAND p2_${policy}_test)
 endforeach()
+
+foreach(policy IN ITEMS bigtreasure_ordinary bigtreasure_animclock bigtreasure_natural bigtreasure_elements)
+    add_executable(p2_${policy}_test tools/p2_${policy}_test.cpp ${P2_BIGTREASURE_TEST_DEPS}
+        pc_port/pc_p2_bigtreasure_ordinary.cpp pc_port/pc_p2_bigtreasure_animclock.cpp
+        pc_port/pc_p2_bigtreasure_motion.cpp pc_port/pc_p2_bigtreasure_elements.cpp)
+    target_include_directories(p2_${policy}_test PRIVATE pc_port)
+    target_compile_options(p2_${policy}_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+    add_test(NAME p2_${policy}_test COMMAND p2_${policy}_test)
+endforeach()
