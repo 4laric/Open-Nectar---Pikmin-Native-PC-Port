@@ -203,6 +203,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_cannon_stone.cpp
     pc_port/pc_p2_egg_hazard.cpp
 pc_port/pc_p2_kabuto_cannon.cpp
+pc_port/pc_p2_kabuto_events.cpp
 pc_port/pc_p2_kabuto_muzzle.cpp
 pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_rock_hazard.cpp
