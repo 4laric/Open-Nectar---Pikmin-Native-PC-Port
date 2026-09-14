@@ -24,6 +24,17 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
+#include <sstream>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifdef _WIN32
+#include <windows.h>
+#endif
 namespace {
 std::map<std::string,std::vector<Shape*>> clips;
 std::map<std::string,p2animation::Clip> timing;
@@ -50,6 +61,54 @@ std::map<PelletView*,Beetle> beetles;
 // snapshots each actor's flip count keyed by generator id and setup restores it.
 // Empty on a fresh process, so the first setup is a no-op.
 std::map<unsigned,int> restoredFlips;
+
+// On-disk flip receipts (#168/#219): the in-process snapshot above dies with the
+// process, so a second process on the same run directory would re-spawn spent
+// beetles. This family-local sidecar (never the P2 save) keeps per-generator flip
+// counts durable. It is written atomically (temp + rename) on every flip/escape
+// and loaded in setup() after the in-process snapshot; a missing or malformed
+// file is ignored (fail safe, never crash) so a corrupt ledger cannot wedge the
+// room.
+const char* kReceiptsPath="p2-kogane-receipts.txt";
+const char* kReceiptsHeader="P2_KOGANE_RECEIPTS_1";
+
+int loadReceipts(){
+    std::ifstream in(kReceiptsPath);
+    if(!in)return 0;
+    std::string line;
+    if(!std::getline(in,line)||line!=kReceiptsHeader)return 0;
+    std::map<unsigned,int> rows;
+    while(std::getline(in,line)){
+        if(line.empty())continue;
+        std::istringstream row(line);unsigned generator=0;int flips=0;std::string extra;
+        if(!(row>>generator>>flips)||row>>extra||flips<1||flips>3)return 0;
+        if(!rows.emplace(generator,flips).second)return 0;
+    }
+    if(!in.eof())return 0;
+    for(const auto& row:rows){
+        auto found=restoredFlips.find(row.first);
+        if(found==restoredFlips.end()||row.second>found->second)restoredFlips[row.first]=row.second;
+    }
+    return int(rows.size());
+}
+void saveReceipts(){
+    std::map<unsigned,int> rows=restoredFlips;
+    for(const auto& entry:beetles)if(entry.second.generator&&entry.second.flips>0)rows[entry.second.generator]=entry.second.flips;
+    if(rows.empty())return;
+    std::string data=std::string(kReceiptsHeader)+"\n";
+    for(const auto& row:rows)data+=std::to_string(row.first)+" "+std::to_string(row.second)+"\n";
+    const std::string temporary=std::string(kReceiptsPath)+".tmp";
+    FILE* file=std::fopen(temporary.c_str(),"wb");
+    if(!file)return;
+    bool ok=std::fwrite(data.data(),1,data.size(),file)==data.size()&&std::fflush(file)==0;
+    if(std::fclose(file)!=0)ok=false;
+    if(!ok)return;
+#ifdef _WIN32
+    if(!::MoveFileExA(temporary.c_str(),kReceiptsPath,MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))return;
+#else
+    if(std::rename(temporary.c_str(),kReceiptsPath)!=0)return;
+#endif
+}
 
 bool logged[2]={false,false};
 
@@ -104,6 +163,9 @@ int pc_p2_kogane_source_id(PelletView* a){auto i=actors.find(a);return i==actors
 const char* pc_p2_kogane_name(PelletView* a){int id=pc_p2_kogane_source_id(a);return id==9?"Iridescent Flint Beetle":id==10?"Iridescent Glint Beetle":id==11?"Doodlebug":nullptr;}
 void pc_p2_kogane_setup(){
     pc_p2_kogane_reset();
+    const int receipts=loadReceipts();
+    std::printf("P2_KOGANE_RECEIPTS loaded=%d\n",receipts);
+    std::fflush(stdout);
     std::ifstream sidecar("p2-kogane-native.txt");if(!sidecar)return;
     p2kogane::Config config;if(!tekiMgr||!p2kogane::read(sidecar,config))std::abort();
     auto manifest=config.clips;std::set<std::uint32_t> wanted;for(auto row:config.ids)wanted.insert(row.first);karada=config.karada;
@@ -217,6 +279,7 @@ bool pc_p2_kogane_pressed(Teki* teki,Creature*){
     teki->stopMove();
     std::printf("P2_KOGANE_FLIP generator=%u source_id=%d flip=%d\n",teki->mGenerator?teki->mGenerator->_70:0u,id,b.flips);
     std::fflush(stdout);
+    saveReceipts();
     return true;
 }
 // Per-frame driver: wander, pending drops, Fart gas, forced escape.
@@ -235,6 +298,7 @@ void pc_p2_kogane_update(BTeki* actor){
             if(b.flips>=3){
                 std::printf("P2_KOGANE_ESCAPE generator=%u source_id=%d flips=%d\n",actor->mGenerator?actor->mGenerator->_70:0u,id,b.flips);
                 std::fflush(stdout);
+                saveReceipts();
                 actor->pcEscapeNow(); // corpse suppressed via the CorpseType hook; health stays >0 so no defeat event
                 return;
             }
