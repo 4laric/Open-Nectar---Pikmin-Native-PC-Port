@@ -151,6 +151,17 @@ implements it:
 - `tools/p2_kurage_runtime.cpp`: `--flight-fsm-patrol` (target parked out of
   range so the Wait -> Move path runs).
 
+## Ordinary actor movement
+
+The sidecar-bound generated actor now flies under the same FSM walkToTarget as
+the arena host (Move patrol / Chase pursuit), not just the P1 proxy's ground
+behavior:
+
+- `pc_p2_kurage_teki_tick` drives the actor's `mSRT.t` vertically (FSM
+  `heightVelocity`) and horizontally (patrol/Chase at `kPatrolSpeed`), and feeds
+  `distToTargetXZ` back to the FSM.  Binding-only consumers are unchanged.
+- `tools/run_kurage_automatic_binding.py --scenario auto-fsm-move`.
+
 ## Natural death cycle
 
 The arena host consumes the FSM death outputs: `out.deathProcedure`/`bodyBomb`
@@ -177,12 +188,20 @@ admission/death/greater/greater-drop/ingestion/kill/transfer/stageexit).
 Private build `output/native-lane29-build` (Ninja Release/MinGW gcc 16.2.0,
 JAudio ON, test hooks OFF), `ninja -n pikmin_pc`: no work to do.
 `bin/nectar.exe` SHA-256
-`1581E3DE90FAEA2EC7BA51A2D8F3A2963DB935CCBAC9138CC4B49C80A6B29047`.
+`E9A9ACF2975A0BBF6B07C4F8C0E8529D18C1D1B95FC522F42CED946C635736E1`.
 
-Fixture `output/p2-lane29-patrol-fixture-01` (provenance `status=built`);
+Fixture `output/p2-lane29-move-fixture-01` (provenance `status=built`);
 `fixture.exe` SHA-256
-`756715675310262572C1B961BB4CACC601A98717F756B350694F1922106144CF`.  All runs
+`1D5A1A493F6FAA7B82054E30788B32290EC98A3F9797A250C3249B6ECF91196A`.  All runs
 use `PIKMIN_P2_ROOM_WINDOW=960x540` (centred `373,263`) and a 20-red squad.
+
+Ordinary actor flies under FSM control:
+
+```
+P2_KURAGE_AUTO_FSM_ARMED ordinary_actor=1 enabled=1
+P2_KURAGE_AUTO_FSM_MOVE_PASS moved=195.4 state=1
+PASS KURAGE_RUNTIME ordinary_actor_fsm_patrol
+```
 
 Host walkToTarget (Move patrol -> Wait arrival):
 

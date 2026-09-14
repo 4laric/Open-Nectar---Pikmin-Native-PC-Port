@@ -35,7 +35,7 @@
 #include <string>
 
 namespace {
-bool sKillScenario = false, sTransferScenario = false, sStageExitScenario = false, sAdmissionScenario = false, sAutomaticBindingScenario = false, sOniKurageScenario = false, sIngestionScenario = false, sFlightFsmScenario = false, sFlightFsmDeathScenario = false, sFlightFsmGreaterScenario = false, sFlightFsmGreaterDropScenario = false, sAutoFsmScenario = false, sFlightFsmGreaterCaptainScenario = false, sFlightFsmStuckFlickScenario = false, sFlightFsmDeathCycleScenario = false, sFlightFsmPatrolScenario = false;
+bool sKillScenario = false, sTransferScenario = false, sStageExitScenario = false, sAdmissionScenario = false, sAutomaticBindingScenario = false, sOniKurageScenario = false, sIngestionScenario = false, sFlightFsmScenario = false, sFlightFsmDeathScenario = false, sFlightFsmGreaterScenario = false, sFlightFsmGreaterDropScenario = false, sAutoFsmScenario = false, sFlightFsmGreaterCaptainScenario = false, sFlightFsmStuckFlickScenario = false, sFlightFsmDeathCycleScenario = false, sFlightFsmPatrolScenario = false, sAutoFsmMoveScenario = false;
 void require(bool value, const char* message)
 {
     if (!value) { std::printf("FAIL KURAGE_RUNTIME %s\n", message); std::fflush(stdout); std::_Exit(1); }
@@ -90,6 +90,7 @@ class KurageApp final : public PlugPikiApp {
     bool captainSawDrop = false;
     Vector3f patrolStart;
     int patrolStartTick = 0;
+    int autoFsmStage = 0;
     class FixtureOwner final : public Creature {
     public:
         FixtureOwner() : Creature(nullptr) { }
@@ -142,7 +143,10 @@ public:
                     p->init(nav);
                     p->initColor(Red);
                     p->setFlower(Leaf);
-                    p->resetPosition(Vector3f(generatedFrog->mSRT.t.x, generatedFrog->mSRT.t.y - 30.0f, generatedFrog->mSRT.t.z));
+                    if (sAutoFsmMoveScenario)
+                        p->resetPosition(Vector3f(1000.0f, 0.0f, 1000.0f));
+                    else
+                        p->resetPosition(Vector3f(generatedFrog->mSRT.t.x, generatedFrog->mSRT.t.y - 30.0f, generatedFrog->mSRT.t.z));
                     p->mMode = PikiMode::AttackMode;
                     autoFsmPiki = p;
                     autoFsmActor = generatedFrog;
@@ -157,6 +161,28 @@ public:
                 // The isolated preview pauses the Teki manager's per-frame
                 // update, so drive the bound ordinary actor's lane hook here.
                 pc_p2_kurage_teki_tick(autoFsmActor);
+                if (sAutoFsmMoveScenario) {
+                    if (autoFsmPiki && autoFsmPiki->isAlive() && !pc_p2_kurage_receiver_controls(autoFsmPiki))
+                        autoFsmPiki->resetPosition(Vector3f(1000.0f, 0.0f, 1000.0f));
+                    if (autoFsmStage == 0) {
+                        if (pc_p2_kurage_teki_fsm_state(autoFsmActor) == 2) {
+                            patrolStart = autoFsmActor->mSRT.t;
+                            patrolStartTick = autoFsmTicks;
+                            autoFsmStage = 1;
+                        } else require(autoFsmTicks < 900, "ordinary actor patrol wait->move timeout");
+                        return result;
+                    }
+                    if (autoFsmTicks - patrolStartTick > 120) {
+                        const Vector3f p = autoFsmActor->mSRT.t;
+                        const float moved = std::fabs(p.x - patrolStart.x) + std::fabs(p.z - patrolStart.z);
+                        require(moved > 5.0f, "ordinary actor patrol moved");
+                        std::printf("P2_KURAGE_AUTO_FSM_MOVE_PASS moved=%.1f state=%d\n",
+                            moved, pc_p2_kurage_teki_fsm_state(autoFsmActor));
+                        std::puts("PASS KURAGE_RUNTIME ordinary_actor_fsm_patrol");
+                        std::fflush(stdout); std::_Exit(0);
+                    }
+                    return result;
+                }
                 if (autoFsmPiki && autoFsmPiki->isAlive() && !pc_p2_kurage_receiver_controls(autoFsmPiki))
                     autoFsmPiki->resetPosition(Vector3f(autoFsmActor->mSRT.t.x, autoFsmActor->mSRT.t.y - 30.0f, autoFsmActor->mSRT.t.z));
                 if (pc_p2_kurage_receiver_stomach_count() == 1) {
@@ -629,6 +655,7 @@ int main(int argc, char** argv)
         if (std::string(argv[i]) == "--flight-fsm-greater") sFlightFsmGreaterScenario = true;
         if (std::string(argv[i]) == "--flight-fsm-greater-drop") sFlightFsmGreaterDropScenario = true;
         if (std::string(argv[i]) == "--receiver-auto-fsm") { sAutomaticBindingScenario = true; sAutoFsmScenario = true; }
+        if (std::string(argv[i]) == "--receiver-auto-fsm-move") { sAutomaticBindingScenario = true; sAutoFsmScenario = true; sAutoFsmMoveScenario = true; }
         if (std::string(argv[i]) == "--flight-fsm-greater-captain") sFlightFsmGreaterCaptainScenario = true;
         if (std::string(argv[i]) == "--flight-fsm-stuck-flick") sFlightFsmStuckFlickScenario = true;
         if (std::string(argv[i]) == "--flight-fsm-death-cycle") sFlightFsmDeathCycleScenario = true;
