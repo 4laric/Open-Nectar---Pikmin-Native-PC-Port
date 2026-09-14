@@ -15,9 +15,18 @@ void pc_p2_elecbug_forget(BTeki*);
 void pc_p2_elecbug_update(BTeki*);
 float pc_p2_elecbug_param_f(const BTeki*, int idx, float fallback);
 bool pc_p2_elecbug_clip(const BTeki*, const char*& name, float& phase);
-// Attack receiver: true = swallow the attack (registered ElecBugs are invulnerable
-// until pressed into the source Reverse state).
+// Read-only FSM state name ("wait"/"charge"/"discharge"/"reverse"/...) for the
+// private runtime fixture; nullptr when the actor is not a registered ElecBug.
+const char* pc_p2_elecbug_state_name(const BTeki*);
+// Attack receiver: true = swallow the attack. Registered ElecBugs are invulnerable
+// until pressed into the source Reverse state (source ElecBug::init enables it,
+// StateReverse::init disables it); a reversed beetle prints ATTACK_ACCEPTED and
+// returns false so the host applies damage. Emits P2_ELECBUG_ATTACK_BLOCKED /
+// P2_ELECBUG_ATTACK_ACCEPTED, and P2_ELECBUG_HIT from update on a health drop.
 bool pc_p2_elecbug_attacked(Teki*);
 // Press receiver: breaks any active partner link, then flips a live,
-// non-bithered, non-reversed beetle into Reverse.
+// non-bithered, non-reversed beetle into Reverse (P2_ELECBUG_FLIP, then
+// P2_ELECBUG_STATE state=reverse). Pressing an actively discharging beetle also sends Denki
+// to the pressing Pikmin: P2_ELECBUG_PRESS_SHOCK for a non-Yellow, and
+// P2_ELECBUG_PRESS_IMMUNE for an excluded Yellow.
 bool pc_p2_elecbug_pressed(BTeki*, Creature*);

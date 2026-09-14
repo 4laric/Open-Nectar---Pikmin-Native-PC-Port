@@ -109,8 +109,10 @@ struct ElecBug {
     BTeki* partner = nullptr;
     bool hasSearched = false;
     bool shockedThisDischarge = false;
+    bool immuneLogged = false;
     bool flipped = false;
     bool deadLogged = false;
+    float lastHealth = LIFE;
     std::string clip = "wait";
     float phase = 0.0f;
     float logTimer = 0.0f;
@@ -178,6 +180,28 @@ Piki* nearestNonYellowPair(const Vector3f& pos, const BTeki* partner, float radi
     if (!best && partner) best = nearestNonYellow(partner->getPosition(), radius);
     return best;
 }
+const char* colorName(unsigned color) {
+    switch (color) {
+    case Blue: return "blue";
+    case Red: return "red";
+    case Yellow: return "yellow";
+    default: return "other";
+    }
+}
+// Source InteractDenki::actPiki excludes Yellow/Bulbmin from the discharge. The
+// P1 host has no InteractDenki, so the exclusion is enforced by nearestNonYellow;
+// this probe exists only to emit the immunity marker when a Yellow is actually
+// inside the sweep radius but is deliberately not shocked.
+bool anyYellowInRange(const Vector3f& pos, float radius) {
+    if (!pikiMgr) return false;
+    Iterator it(pikiMgr);
+    CI_LOOP(it) {
+        Piki* p = static_cast<Piki*>(*it);
+        if (!p || !p->isAlive() || p->mColor != Yellow) continue;
+        if (distXZ(p->getPosition(), pos) < radius) return true;
+    }
+    return false;
+}
 void enter(ElecBug& s, State state, const char* clip) {
     s.state = state;
     s.stateTime = 0.0f;
@@ -244,6 +268,7 @@ void linkPair(BTeki* actor, ElecBug& s, BTeki* partner, ElecBug& child) {
     s.hasSearched = true;
     child.hasSearched = true;
     child.shockedThisDischarge = false;
+    child.immuneLogged = false;
     child.flipped = false;
     enter(child, ELEC_CHILDCHARGE, "charge");
     std::printf("P2_ELECBUG_LINK generator=%u partner=%u\n", genOf(actor), genOf(partner));
@@ -299,18 +324,46 @@ bool pc_p2_elecbug_attacked(Teki* teki) {
     auto it = actors.find(static_cast<PelletView*>(teki));
     if (it == actors.end()) return false;
     if (it->second.state == ELEC_DEAD) return false;
-    return !it->second.flipped; // invulnerable until flipped into Reverse
+    if (!it->second.flipped) {
+        // Source ElecBug::init enables invulnerability; any attack is swallowed.
+        std::printf("P2_ELECBUG_ATTACK_BLOCKED generator=%u source_id=28 invulnerable=1\n",
+                    genOf(teki));
+        std::fflush(stdout);
+        return true;
+    }
+    // Source StateReverse::init disables invulnerability: the attack lands.
+    std::printf("P2_ELECBUG_ATTACK_ACCEPTED generator=%u source_id=28 state=reverse health=%.1f\n",
+                genOf(teki), teki->mHealth);
+    std::fflush(stdout);
+    return false;
 }
 
-bool pc_p2_elecbug_pressed(BTeki* teki, Creature*) {
+bool pc_p2_elecbug_pressed(BTeki* teki, Creature* presser) {
     if (!ready) return false;
     ElecBug* s = lookup(teki);
     if (!s) return false;
     if (s->state == ELEC_DEAD || s->state == ELEC_REVERSE) return true;
+    // Source ElecBug::pressCallBack: an actively discharging beetle sends Denki
+    // to the pressing Pikmin (InteractDenki still excludes Yellow/Bulbmin).
+    if (s->state == ELEC_DISCHARGE || s->state == ELEC_CHILDISCHARGE) {
+        Piki* piki = (presser && presser->isPiki()) ? static_cast<Piki*>(presser) : nullptr;
+        if (piki && piki->isAlive()) {
+            if (piki->mColor == Yellow) {
+                std::printf("P2_ELECBUG_PRESS_IMMUNE generator=%u source_id=28 pikmin=yellow\n",
+                            genOf(teki));
+            } else {
+                piki->stimulate(InteractKill(teki, 0));
+                std::printf("P2_ELECBUG_PRESS_SHOCK generator=%u source_id=28 pikmin=1 color=%s\n",
+                            genOf(teki), colorName(piki->mColor));
+            }
+            std::fflush(stdout);
+        }
+    }
     if (s->partner) breakLink(teki, *s); // source StateReverse::init finishPartnerAndEffect
     s->flipped = true;
     enter(*s, ELEC_REVERSE, "recover");
     std::printf("P2_ELECBUG_FLIP generator=%u source_id=28\n", genOf(teki));
+    std::printf("P2_ELECBUG_STATE generator=%u state=reverse\n", genOf(teki));
     std::fflush(stdout);
     return true;
 }
@@ -322,6 +375,16 @@ bool pc_p2_elecbug_clip(const BTeki* actor, const char*& name, float& phase) {
     name = it->second.clip.c_str();
     phase = it->second.phase;
     return true;
+}
+
+// Read-only state probe for the private runtime fixture. It lets an injected
+// main schedule the press/discharge gates at the exact source state; it never
+// mutates behavior and returns nullptr for unregistered actors.
+const char* pc_p2_elecbug_state_name(const BTeki* actor) {
+    if (!ready) return nullptr;
+    auto it = actors.find(static_cast<PelletView*>(const_cast<BTeki*>(actor)));
+    if (it == actors.end()) return nullptr;
+    return stateName(it->second.state);
 }
 
 void pc_p2_elecbug_setup() {
@@ -412,6 +475,15 @@ void pc_p2_elecbug_update(BTeki* actor) {
     const Vector3f pos = actor->getPosition();
     const unsigned generator = genOf(actor);
 
+    // Reversed beetles accept InteractAttack damage; every non-lethal drop is the
+    // runtime proof that invulnerability is disabled while flipped.
+    if (actor->mHealth < s.lastHealth && actor->mHealth > 0.0f) {
+        std::printf("P2_ELECBUG_HIT generator=%u source_id=28 health=%.1f\n",
+                    generator, actor->mHealth);
+        std::fflush(stdout);
+    }
+    s.lastHealth = actor->mHealth;
+
     if (actor->mHealth <= 0.0f && s.state != ELEC_DEAD) {
         if (s.partner) breakLink(actor, s);
         if (!s.deadLogged) {
@@ -476,6 +548,7 @@ void pc_p2_elecbug_update(BTeki* actor) {
         if (s.stateTime >= CHARGE_TIME) {
             if (s.partner) {
                 s.shockedThisDischarge = false;
+                s.immuneLogged = false;
                 std::printf("P2_ELECBUG_STATE generator=%u state=discharge\n", generator);
                 std::printf("P2_ELECBUG_DISCHARGE generator=%u source_id=28 duration=%.3f state=charge\n",
                             generator, DISCHARGE_TIME);
@@ -494,6 +567,7 @@ void pc_p2_elecbug_update(BTeki* actor) {
         if (s.stateTime >= CHILD_CHARGE_TIME) {
             if (s.partner) {
                 s.shockedThisDischarge = false;
+                s.immuneLogged = false;
                 std::printf("P2_ELECBUG_STATE generator=%u state=childdischarge\n", generator);
                 std::printf("P2_ELECBUG_DISCHARGE generator=%u source_id=28 duration=%.3f state=child\n",
                             generator, DISCHARGE_TIME);
@@ -518,9 +592,19 @@ void pc_p2_elecbug_update(BTeki* actor) {
             if (piki) {
                 s.shockedThisDischarge = true;
                 piki->stimulate(InteractKill(actor, 0));
-                std::printf("P2_ELECBUG_SHOCK generator=%u pikmin=1\n", generator);
+                std::printf("P2_ELECBUG_SHOCK generator=%u pikmin=1 color=%s\n", generator,
+                            colorName(piki->mColor));
                 std::fflush(stdout);
             }
+        }
+        // Emit the immunity marker when a Yellow Pikmin is inside the sweep but
+        // is deliberately skipped by the source Yellow/Bulbmin exclusion.
+        if (!s.immuneLogged
+                && (anyYellowInRange(pos, ELEC_RADIUS)
+                    || (s.partner && anyYellowInRange(s.partner->getPosition(), ELEC_RADIUS)))) {
+            s.immuneLogged = true;
+            std::printf("P2_ELECBUG_IMMUNE generator=%u source_id=28 pikmin=yellow\n", generator);
+            std::fflush(stdout);
         }
         if (s.stateTime >= DISCHARGE_TIME) {
             breakLink(actor, s);
