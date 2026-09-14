@@ -14,15 +14,31 @@
 //     Timing is delivered by the authoritative sampled clock (#431), so the
 //     effects fire exactly once across skipped frames, pause, interruption and
 //     actor-address reuse. Exactly-once per bite.
-//   * The source `damageCallBack` part-id rule (`dmg1`/bittered) is not
-//     representable on the P1 host; damage is accepted while surfaced.
+//   * The source `damageCallBack` part-id rule (`dmg1`/bittered) is implemented
+//     as a registered receiver (pc_p2_armor_receiver_rejects) hooked from
+//     InteractAttack/InteractBomb::actTeki. The P1 host exposes the stuck-to
+//     target's CollPart, but this visual-only Armor rides the P1 Chappy
+//     collision and does not load the source model's `dmg1`. When `dmg1` is
+//     absent the receiver designates one host collision part (the bounding
+//     sphere) as a documented single-weakpoint-sphere approximation by part id
+//     and logs `P2_ARMOR_RECEIVER_PART`; if none resolves, all non-bittered
+//     damage is rejected. It never silently accepts all damage.
+//   * `EB_Bittered` has no P1 host equivalent; pc_p2_armor_set_bittered is the
+//     explicit host/fixture input for the bittered leg of the same rule.
+//   * `doStartStoneState` flick is implemented, but the P1 host has no
+//     petrification lifecycle. pc_p2_armor_update fires it on the rising edge
+//     of TEKIOPT_Pressed (the host's flattened/incapacitated analogue) and the
+//     port records `P2_ARMOR_STONE_NOTE host_lifecycle=absent port_analogue=pressed`.
 //   * View angle is a full hemisphere (fp13 absent from the Armor general block);
 //     turn rate and flick radius are documented port adaptations.
 // No other lane's module is modified; every hook is a no-op for unregistered actors.
 #include "pc_p2_armor.h"
 #include "pc_p2_armor_events.h"
+#include "pc_p2_armor_receiver_policy.h"
 #include "teki.h"
 #include "Interactions.h"
+#include "Collision.h"
+#include "ID32.h"
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "Navi.h"
@@ -102,6 +118,12 @@ struct Armor {
     bool biteLogged = false;
     bool deadLogged = false;
     float logTimer = 0.0f;
+    // Damage-receiver / stone-flick port state (see pc_p2_armor.h).
+    bool bittered = false;
+    bool stone = false;
+    bool dmg1Present = false;
+    bool weakpointActive = false;
+    unsigned weakpointId = 0;
 };
 
 std::map<PelletView*, Armor> actors;
@@ -124,6 +146,50 @@ float clipDuration(const std::string& name) {
 bool clipLoops(const std::string& name) {
     auto it = clips.find(name);
     return it != clips.end() && it->second.loop;
+}
+std::string fourCCString(unsigned id) {
+    char buf[5];
+    buf[0] = char((id >> 24) & 0xffu);
+    buf[1] = char((id >> 16) & 0xffu);
+    buf[2] = char((id >> 8) & 0xffu);
+    buf[3] = char(id & 0xffu);
+    buf[4] = '\0';
+    for (int i = 0; i < 4; ++i) {
+        if (buf[i] < 32 || buf[i] > 126) buf[i] = '?';
+    }
+    return std::string(buf);
+}
+// Resolve the damage-receiver weakpoint from the host collision and log it.
+// The source `dmg1` part wins when the host actually loaded it; otherwise the
+// first collision part (bounding sphere) is the documented port approximation.
+void resolveReceiverPart(Creature* actor, Armor& s) {
+    s.dmg1Present = false;
+    s.weakpointActive = false;
+    s.weakpointId = 0;
+    CollPart* dmg1 = nullptr;
+    CollPart* bound = nullptr;
+    if (actor->mCollInfo) {
+        dmg1 = actor->mCollInfo->getSphere(p2armorreceiver::DamagePartID);
+        bound = actor->mCollInfo->getBoundingSphere();
+    }
+    if (dmg1) {
+        s.dmg1Present = true;
+        s.weakpointActive = true;
+        s.weakpointId = dmg1->getID().mId;
+    } else if (bound) {
+        s.weakpointActive = true;
+        s.weakpointId = bound->getID().mId;
+    }
+    const char* mode = s.dmg1Present ? "source_dmg1"
+        : (s.weakpointActive ? "port_bounding_sphere" : "reject_all");
+    std::printf("P2_ARMOR_RECEIVER_PART generator=%u dmg1=%s weakpoint=%s mode=%s\n",
+                actor->mGenerator ? actor->mGenerator->_70 : 0u,
+                s.dmg1Present ? "present" : "absent",
+                s.weakpointActive ? fourCCString(s.weakpointId).c_str() : "none", mode);
+    // The P1 host has no petrification lifecycle; record the wired analogue.
+    std::printf("P2_ARMOR_STONE_NOTE generator=%u host_lifecycle=absent port_analogue=pressed\n",
+                actor->mGenerator ? actor->mGenerator->_70 : 0u);
+    std::fflush(stdout);
 }
 
 Creature* nearestTarget(const Vector3f& pos) {
@@ -242,6 +308,89 @@ void pc_p2_armor_forget(BTeki* actor) { actors.erase(static_cast<PelletView*>(ac
 
 unsigned long pc_p2_armor_count() { return (unsigned long)actors.size(); }
 bool pc_p2_armor_registered(BTeki* actor) { return actors.count(static_cast<PelletView*>(actor)) != 0; }
+bool pc_p2_armor_receiver_rejects(Teki* teki, const InteractAttack* attack) {
+    if (!ready || !teki) return false;
+    auto it = actors.find(static_cast<PelletView*>(teki));
+    if (it == actors.end()) return false;
+    const Armor& s = it->second;
+
+    p2armorreceiver::Inputs in;
+    in.bittered = s.bittered;
+    in.has_part = attack && attack->mCollPart;
+    in.part_id = in.has_part ? attack->mCollPart->getID().mId : 0u;
+    // The port weakpoint substitutes for the missing source `dmg1` part; the
+    // exact source rule already covers `dmg1` when present.
+    in.weakpoint_active = s.weakpointActive && !s.dmg1Present;
+    in.weakpoint_id = s.weakpointId;
+
+    const p2armorreceiver::Decision decision = p2armorreceiver::decide(in);
+    const bool reject = decision == p2armorreceiver::Decision::Reject;
+    std::printf("P2_ARMOR_RECEIVER generator=%u decision=%s reason=%s part=%s bittered=%d "
+                "weakpoint=%s\n",
+                teki->mGenerator ? teki->mGenerator->_70 : 0u, reject ? "reject" : "accept",
+                p2armorreceiver::decisionName(decision),
+                in.has_part ? fourCCString(in.part_id).c_str() : "none", int(in.bittered),
+                s.weakpointActive ? fourCCString(s.weakpointId).c_str() : "none");
+    std::fflush(stdout);
+    return reject;
+}
+
+void pc_p2_armor_set_bittered(BTeki* actor, bool value) {
+    if (!ready || !actor) return;
+    auto it = actors.find(static_cast<PelletView*>(actor));
+    if (it == actors.end()) return;
+    it->second.bittered = value;
+    std::printf("P2_ARMOR_BITTERED generator=%u value=%d\n",
+                actor->mGenerator ? actor->mGenerator->_70 : 0u, int(value));
+    std::fflush(stdout);
+}
+
+void pc_p2_armor_start_stone(BTeki* actor) {
+    if (!ready || !actor) return;
+    auto it = actors.find(static_cast<PelletView*>(actor));
+    if (it == actors.end()) return;
+    Armor& s = it->second;
+    if (s.stone) return;
+    s.stone = true;
+
+    // Source Obj::doStartStoneState iterates Stickers(this); InteractFlick's
+    // actCommon detaches the sticker, so snapshot the list before flicking.
+    std::vector<Creature*> mouths;
+    for (Creature* c = actor->mStickListHead; c; c = c->mNextSticker) {
+        if (c->isStickToMouth()) mouths.push_back(c);
+    }
+    int flicked = 0;
+    for (Creature* c : mouths) {
+        if (c->isAlive()
+                && c->stimulate(InteractFlick(actor, 0.0f, 0.0f, FLICK_BACKWARDS_ANGLE))) {
+            ++flicked;
+        }
+    }
+    // The port mouth-slot capture is the P1 stand-in for the source mouth slot.
+    if (s.captured && s.captured->isAlive()) {
+        if (s.captured->stimulate(InteractFlick(actor, 0.0f, 0.0f, FLICK_BACKWARDS_ANGLE))) {
+            ++flicked;
+        }
+        s.captured = nullptr;
+    }
+    std::printf("P2_ARMOR_STONE generator=%u event=enter stuck=%zu flicked=%d\n",
+                actor->mGenerator ? actor->mGenerator->_70 : 0u, mouths.size(), flicked);
+    std::fflush(stdout);
+}
+
+void pc_p2_armor_finish_stone(BTeki* actor) {
+    if (!ready || !actor) return;
+    auto it = actors.find(static_cast<PelletView*>(actor));
+    if (it == actors.end()) return;
+    Armor& s = it->second;
+    if (!s.stone) return;
+    s.stone = false;
+    // Preserve consumed sampled events across the pressed-state exit; replaying
+    // them would duplicate bite/eat effects. Clip transitions reset the clock.
+    std::printf("P2_ARMOR_STONE generator=%u event=exit\n",
+                actor->mGenerator ? actor->mGenerator->_70 : 0u);
+    std::fflush(stdout);
+}
 
 float pc_p2_armor_param_f(const BTeki* actor, int idx, float fallback) {
     if (!ready || !actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor)))) return fallback;
@@ -355,6 +504,7 @@ void pc_p2_armor_setup() {
         s.home = actor->getPosition();
         s.heading = actor->getDirection();
         actor->mHealth = LIFE;
+        resolveReceiverPart(actor, s);
         enter(s, ARMOR_STAY, "appear");
         std::printf("P2_ARMOR_BIND generator=%u source_id=15 visual_only=0\n", actor->mGenerator->_70);
         const Vector3f pos = actor->getPosition();
@@ -378,6 +528,15 @@ void pc_p2_armor_update(BTeki* actor) {
     Armor& s = it->second;
     const float dt = gsys->getFrameTime();
     if (dt <= 0.0f || dt > 0.5f) return;
+    // Port stone analogue: the P1 host has no petrified lifecycle, so the
+    // source doStartStoneState flick fires on the rising edge of the host
+    // TEKIOPT_Pressed state (see pc_p2_armor.h / P2_ARMOR_RECEIVER.md).
+    const bool pressed = actor->getTekiOption(TEKIOPT_Pressed);
+    if (pressed && !s.stone) {
+        pc_p2_armor_start_stone(actor);
+    } else if (!pressed && s.stone) {
+        pc_p2_armor_finish_stone(actor);
+    }
     const Vector3f pos = actor->getPosition();
     const unsigned generator = actor->mGenerator ? actor->mGenerator->_70 : 0u;
 
