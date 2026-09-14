@@ -93,14 +93,81 @@ DEMON_NATURAL_TEARDOWN release state=0 ground=1
 PASS DEMON_HOST natural_captor_grounded_release_teardown (ticks=164)
 ```
 
+## Ordinary spawned captor (manager-bound, no fixture-placed captain)
+
+`ordinary` is the product-path mode. The production manager setup binds the
+Demon host to an actor the arena actually spawned and enables the natural front
+end, so the production per-actor hook
+(`pc_p2_demon_manager_update_actor` -> `P2DemonHost::update`) drives acquisition,
+approach, the source Attack window, `pc_demon_capture`, CatchFly/FallMeck and the
+registered drop. The fixture only enables the mode and observes; it never loads
+its own host, never positions the captain and never issues a frame, target, END,
+capture or drop.
+
+How the bindable actor is spawned and bound:
+
+- `scripts/preview_pikmin2_room.generator()` builds the private stage's
+  `chal0/default.gen` with exactly one enemy generator: the Dwarf Bulborb
+  template (`TEKI_Chappy`) placed at `(185, 0, -180)`, the only enemy in the
+  converted room. Its generator id is `385875968`, teki type `3`.
+- `pc_p2_demon_manager_setup()` with `PIKMIN_DEMON_ORDINARY=1` finds that single
+  spawned actor (explicit identity `PIKMIN_DEMON_ORDINARY_GENERATOR`/
+  `PIKMIN_DEMON_ORDINARY_TYPE`, or the unique `TEKI_Chappy` fallback), loads the
+  staged converted `demon0.mod` with `demon-mouths.txt`, preloads the attack/
+  CatchFly/FallMeck pose banks, binds via `pc_p2_demon_manager_bind`, seats the
+  host at the actor's spawned position and calls `enableNatural`.
+  `pc_p2_demon_manager_update_actor` no longer snaps a natural host to the anchor
+  each frame (the anchor is the lifetime/identity token); non-natural hosts keep
+  the original following behaviour. Default-off: with the env unset all existing
+  manager and fixture behaviour is unchanged.
+- The converted Demon assets are staged from the known-good session
+  (`demon0.mod`/`demon17.mod`, `attack1_*.mod`, `waitact*.mod`, the `demon*.txt`
+  mouth/pose/event banks); no new conversion is introduced.
+
+Fixture/session: `output/demon-ordinary-fixture-01` (`status=built`, expected
+native head `75780452139de5004e9d30c74c5f33ecb54cd57c`, exe SHA-256
+`59233286016377DEA32A990FF32C5BD7C371A8BC26CCC0A4BA898C7FD5ED2674`), session
+`output/demon-ordinary-run-01/a3872390075e4e2780897638ac286318`, `960x540`
+centred window, 20-red baseline arena. Helper `output/run_demon_ordinary.py`.
+
+```text
+P2_DEMON_HOST_WINDOW size=960x540 pos=373,263 display=1707x1067 centered=1
+DEMON_ORDINARY_BIND generator=385875968 type=3 anchor=(148.79,0.00,-149.01) captain=(121.49,0.00,157.90)
+DEMON_ORDINARY tick=420 phase=2 cap=(122.70,0.00,157.51) hp=100.0 state=0 stuck=0 bound=0
+DEMON_ORDINARY tick=480 phase=3 cap=(158.91,8.46,152.18) hp=100.0 state=0 stuck=1 bound=1
+DEMON_STATE_BEGIN generation=1 actual_y=-400.000 target_y=-200.000
+DEMON_STATE_DAMAGE generation=1 accepted=1 before=100.000 after=90.000
+DEMON_ORDINARY tick=840 phase=1 cap=(156.54,0.00,108.80) hp=90.0 state=36 stuck=0 bound=0
+PASS DEMON_HOST ordinary_spawned_captor_acquire_attack_capture_drop (ticks=865)
+```
+
+The anchor actor is the spawned `TEKI_Chappy`; the captain's `(121.49,0,157.90)`
+is its untouched arena start (the `DEMON_ORDINARY_BIND` line prints it before any
+capture). Regressions from the same fixture/session all PASS: `natural`,
+`natural_escape`, `natural_interrupt`, `natural_teardown`, `drop`,
+`livecapture`, `teardown`.
+
+Fixture-driven / approximation notes (not natural):
+
+- No patrol or turn-to-scan state is transcribed, so the ordinary enable widens
+  the view cone to 360 degrees and the territory/sight radii to cover the room;
+  retail view-angle and territory constants are narrower. Approach speed (30),
+  turn cap (20 deg) and grab range (12) keep the natural-fixture values.
+- The captain is held in `NAVISTATE_Walk` (state only, never repositioned)
+  because the P1 bridge admits capture only from Walk.
+- Admission still uses the rest-pose mouth effector while the stick follows the
+  sampled animated joint.
+
 ## Limits
 
 - The captain is held in Walk for the duration of the approach because the P1
   bridge only admits capture from Walk; this is a bridge-contract accommodation,
   not an injected capture. Retail P2 targets idling captains; relaxing the bridge
   state gate is a shared (#186) decision and is not done here.
-- The starting offset and the `naviMgr` captain are fixture-provided; this is not
-  a generated-seed or manager-spawned ordinary encounter.
+- The `natural*` modes use a fixture-placed starting offset and captain; they are
+  not a generated-seed or manager-spawned encounter. The separate `ordinary` mode
+  above is the manager-bound spawned-captor path and leaves the captain at its
+  arena start.
 - Rendered animated-mouth parity is not established; admission uses the rest
   effector while the stick follows the sampled joint.
 - Water/platform/slope terrain, scene teardown during drop, and `Sarai` ID 23
@@ -114,4 +181,7 @@ Reproduction: stage the demon conversion from a known-good session (pose banks,
 `demon-mouths.txt`, `demon-retail-events.txt`, `demon*.mod`) into a fresh
 `preview_pikmin2_room.prepare()` arena, copy `fixture.exe`, then run
 `DEMON_HOST_MODE=natural PIKMIN_P2_ROOM_WINDOW=960x540 fixture.exe
---experimental-pikmin2-room` (helper `output/run_demon_natural.py`).
+--experimental-pikmin2-room` (helper `output/run_demon_natural.py`). For the
+ordinary spawned-captor path stage with `output/run_demon_ordinary.py` and run
+`DEMON_HOST_MODE=ordinary`; the fixture sets `PIKMIN_DEMON_ORDINARY=1` plus the
+`385875968`/`3` anchor identity itself.
