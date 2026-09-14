@@ -188,6 +188,7 @@ P2BigTreasureAnimClock sBigTreasureClock;
 P2BigTreasureElementRuntime sBigTreasureElements;
 P2BigTreasureMapTrace sBigTreasureTrace;
 bool sBigTreasureAttackLogged = false;
+bool sBigTreasureHitLogged = false;
 bool sBigTreasureReady = false;
 bool sBigTreasureVisualReady = false;
 float sBigTreasureGround = 0.0f;
@@ -244,6 +245,7 @@ void pc_p2_hardlanes_reset()
     sBigTreasureClock.reset();
     sBigTreasureElements.defeat();
     sBigTreasureAttackLogged = false;
+    sBigTreasureHitLogged = false;
     pc_p2_bigtreasure_visual_reset();
     sBigTreasureReady = false;
     sBigTreasureVisualReady = false;
@@ -409,6 +411,7 @@ void pc_p2_hardlanes_update()
                             weapon, origin, sBigTreasureGround,
                             sBigTreasure.ownership.weaponHealth(weapon), 0.25f, 0.25f)) {
                         sBigTreasureAttackLogged = false;
+                        sBigTreasureHitLogged = false;
                         std::printf("P2_BIGTREASURE_ATTACK_START weapon=%s\n",
                                     bigTreasureWeaponName(weapon));
                     }
@@ -428,6 +431,37 @@ void pc_p2_hardlanes_update()
                         std::printf("P2_BIGTREASURE_ATTACK_EMIT weapon=%s nodes=%d\n",
                                     bigTreasureWeaponName(sBigTreasureElements.activeWeapon()),
                                     elementStats.nodes);
+                    }
+                    // Detection only: report once when the running element's
+                    // source hit geometry intersects a live Navi/Pikmin. Damage
+                    // application is the lane-10 receiver.
+                    if (!sBigTreasureHitLogged && elementStats.nodes > 0) {
+                        bool hit = false;
+                        Navi* liveNavi = naviMgr ? naviMgr->getNavi() : nullptr;
+                        if (liveNavi
+                            && sBigTreasureElements.queryHit(P2BigTreasureVec3{
+                                   liveNavi->mSRT.t.x, liveNavi->mSRT.t.y,
+                                   liveNavi->mSRT.t.z })) {
+                            hit = true;
+                        }
+                        if (!hit) {
+                            Iterator pikiIt(pikiMgr);
+                            CI_LOOP(pikiIt) {
+                                Piki* piki = static_cast<Piki*>(*pikiIt);
+                                if (!piki || !piki->isAlive()) continue;
+                                if (sBigTreasureElements.queryHit(P2BigTreasureVec3{
+                                        piki->mSRT.t.x, piki->mSRT.t.y, piki->mSRT.t.z })) {
+                                    hit = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (hit) {
+                            sBigTreasureHitLogged = true;
+                            std::printf("P2_BIGTREASURE_ATTACK_HIT weapon=%s target=live\n",
+                                        bigTreasureWeaponName(
+                                            sBigTreasureElements.activeWeapon()));
+                        }
                     }
                 }
             }

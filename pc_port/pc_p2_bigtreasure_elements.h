@@ -48,10 +48,17 @@ public:
     void tick(float delta, const P2BigTreasureElementHost& host,
               P2BigTreasureElementStats& out);
 
+    // Detection only: true when the running element's source hit geometry
+    // registers on `target`. Applying damage is the lane-10 receiver's job;
+    // this lets an ordinary-update consumer observe that an emitted node
+    // intersects a live target. `outIndex` receives the node/arm index.
+    bool queryHit(const P2BigTreasureVec3& target, int* outIndex = nullptr) const;
+
 private:
     int mWeapon = -1;
     float mGround = 0.0f;
     P2BigTreasureVec3 mOrigin{};
+    int mGasArms = 3;
     P2BigTreasureFirePolicy mFire;
     P2BigTreasureGasPolicy mGas;
     P2BigTreasureWaterPolicy mWater;

@@ -118,6 +118,37 @@ void testInvalidAndEmpty()
     assert(stats.nodes == 0 && stats.emits == 0);
     std::puts("PASS elements_invalid");
 }
+void testQueryHit()
+{
+    P2BigTreasureElementRuntime runtime;
+    P2BigTreasureElementHost h = host();
+    P2BigTreasureElementStats stats;
+
+    // Inactive runtime never reports a hit.
+    assert(!runtime.queryHit(P2BigTreasureVec3{ 0, 0, 0 }));
+
+    // Water: after the first emitted bubble, the emit anchor is inside the
+    // in-flight radius.
+    assert(runtime.start(P2BTWEAPON_Water, P2BigTreasureVec3{ 0, 0, 0 }, 0.0f,
+                         P2BigTreasureOwnership::kWeaponMaxHealth, 0.25f, 0.25f));
+    int emitted = 0;
+    for (int i = 0; i < 40 && emitted == 0; ++i) {
+        runtime.tick(kDt, h, stats);
+        emitted = stats.nodes;
+    }
+    assert(emitted > 0);
+    int index = -1;
+    assert(runtime.queryHit(P2BigTreasureVec3{ 0, 100, 0 }, &index));
+    assert(index >= 0);
+    runtime.defeat();
+
+    // Elec chain geometry (source chainHit): a point on the segment registers.
+    const P2BigTreasureVec3 a{ 0, 0, 0 };
+    const P2BigTreasureVec3 b{ 0, 0, 40 };
+    assert(P2BigTreasureElecPolicy::chainHit(a, b, P2BigTreasureVec3{ 0, 0, 20 }));
+    assert(!P2BigTreasureElecPolicy::chainHit(a, b, P2BigTreasureVec3{ 50, 0, 20 }));
+    std::puts("PASS elements_query_hit");
+}
 } // namespace
 
 int main()
@@ -126,6 +157,7 @@ int main()
     testWaterGroundHit();
     testElecBounce();
     testInvalidAndEmpty();
+    testQueryHit();
     std::puts("PASS BIGTREASURE_ELEMENTS");
     return 0;
 }
