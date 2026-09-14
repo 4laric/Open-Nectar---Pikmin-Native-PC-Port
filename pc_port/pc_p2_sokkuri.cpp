@@ -272,6 +272,16 @@ void pc_p2_sokkuri_forget(BTeki* actor) {
     actors.erase(static_cast<PelletView*>(actor));
 }
 
+// Fixture observability (#165/#407 lifecycle gates): read-only registration
+// count / membership. Never mutates state and is safe for any actor pointer.
+unsigned long pc_p2_sokkuri_count() {
+    return (unsigned long)actors.size();
+}
+
+bool pc_p2_sokkuri_registered(BTeki* actor) {
+    return actors.count(static_cast<PelletView*>(actor)) != 0;
+}
+
 float pc_p2_sokkuri_param_f(const BTeki* actor, int idx, float fallback) {
     if (!ready || !actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor)))) return fallback;
     if (idx == TPF_Life) return LIFE;

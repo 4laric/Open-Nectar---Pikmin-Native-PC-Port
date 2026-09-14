@@ -240,6 +240,9 @@ void pc_p2_armor_forget_piki(Piki* piki) {
 
 void pc_p2_armor_forget(BTeki* actor) { actors.erase(static_cast<PelletView*>(actor)); }
 
+unsigned long pc_p2_armor_count() { return (unsigned long)actors.size(); }
+bool pc_p2_armor_registered(BTeki* actor) { return actors.count(static_cast<PelletView*>(actor)) != 0; }
+
 float pc_p2_armor_param_f(const BTeki* actor, int idx, float fallback) {
     if (!ready || !actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor)))) return fallback;
     if (idx == TPF_Life) return LIFE;
