@@ -26,6 +26,7 @@
 #include "pc_p2_breadbug_visual.h"
 #include "pc_p2_giant_breadbug_visual.h"
 #include "pc_p2_giant_breadbug_actor.h"
+#include "pc_p2_breadbug_actor.h"
 #include "pc_p2_bulblax_visual.h"
 #include "pc_p2_queen.h"
 #include "pc_p2_king.h"
@@ -2193,6 +2194,7 @@ void GameCoreSection::updateAI()
 {
     pc_p2_cave_tick();
     pc_p2_giant_breadbug_actor_tick();
+    pc_p2_breadbug_actor_tick();
     if (pc_randomizer_expanded()) {
         AICONST.mMaxPikisOnField(pc_randomizer_field_capacity());
         const bool active = !gameflow.mMoviePlayer->mIsActive && !gameflow.mPauseAll
