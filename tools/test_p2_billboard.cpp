@@ -119,6 +119,79 @@ void testDegenerateRejected() {
     check(!p2billboard::facingRotation(out, model, view), "degenerate basis rejected");
 }
 
+// --- Full 4x4 composition: joint translation/pivot handling -----------------
+// Mirrors the renderer: B = joint * R, and the final draw matrix is
+// view * model * B. A flagged mesh must end up screen-aligned (rotation = s*I)
+// and placed at the joint's pivot transformed by view*model.
+
+using M4 = float[4][4];
+
+void ident4(M4 m) {
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) {
+            m[i][j] = (i == j) ? 1.f : 0.f;
+        }
+    }
+}
+
+void mul4(M4 out, const M4 a, const M4 b) {
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) {
+            float sum = 0.f;
+            for (int k = 0; k < 4; ++k) {
+                sum += a[i][k] * b[k][j];
+            }
+            out[i][j] = sum;
+        }
+    }
+}
+
+void fromRot3(M4 out, const float r[3][3]) {
+    ident4(out);
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            out[i][j] = r[i][j];
+        }
+    }
+}
+
+void testPivotComposition() {
+    float model3[3][3], view3[3][3], facing[3][3];
+    rotY(model3, 0.8f);
+    rotY(view3, -0.5f);
+
+    M4 model, view, joint, rot, billboard, vm, product;
+    fromRot3(model, model3);
+    fromRot3(view, view3);
+    ident4(joint);
+    const float s = 0.8f;
+    const float px = -4.f, py = 46.f, pz = 0.f;
+    // joint = T(p) * S(s)
+    joint[0][0] = joint[1][1] = joint[2][2] = s;
+    joint[0][3] = px;
+    joint[1][3] = py;
+    joint[2][3] = pz;
+
+    check(p2billboard::facingRotation(facing, model3, view3), "composition facing");
+    fromRot3(rot, facing);
+    mul4(billboard, joint, rot);
+    mul4(vm, view, model);
+    mul4(product, vm, billboard);
+
+    // Screen-aligned: rotation part is s*I.
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            check(near(product[i][j], (i == j) ? s : 0.f),
+                  "composed draw matrix is screen-aligned with joint scale");
+        }
+    }
+    // Translation is (view*model) applied to the pivot.
+    for (int i = 0; i < 3; ++i) {
+        const float want = vm[i][0] * px + vm[i][1] * py + vm[i][2] * pz + vm[i][3];
+        check(near(product[i][3], want), "billboard pivot placed by view*model");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -126,6 +199,7 @@ int main() {
     testRotationCancelled();
     testScalePreserved();
     testDegenerateRejected();
+    testPivotComposition();
     if (failures == 0) {
         std::printf("PASS p2_billboard\n");
         return 0;
