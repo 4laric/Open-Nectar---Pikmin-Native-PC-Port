@@ -544,7 +544,13 @@ void pc_p2_sokkuri_update(BTeki* actor) {
         actor->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
         actor->mVelocity.x = 0.0f;
         actor->mVelocity.z = 0.0f;
-        if (s.stateTime >= clipDuration("dead1")) actor->die();
+        // Host death handoff: the P1 strategy reacts to mHealth<=0 inside
+        // BTeki::doAI(), calls die() there and then dieSoon()->becomePellet() in
+        // the same doAI() pass. Calling BTeki::die() from this update-phase hook
+        // would set mDeadState before the next doAI() and permanently block
+        // dieSoon(), leaving a dead-but-present actor with no corpse. The module
+        // therefore only drives the source dead clip and lets the host complete
+        // teardown/corpse. (The SOKKURI_PRESS crush path is unchanged.)
         break;
     case SOKKURI_PRESS:
         if (s.stateTime >= clipDuration("pdead1")) actor->die();

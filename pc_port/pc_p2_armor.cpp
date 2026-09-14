@@ -512,7 +512,13 @@ void pc_p2_armor_update(BTeki* actor) {
         break;
     case ARMOR_DEAD:
         stop(actor);
-        if (s.stateTime >= clipDuration("dead")) actor->die();
+        // Host death handoff: the P1 strategy reacts to mHealth<=0 inside
+        // BTeki::doAI(), calls die() there and then dieSoon()->becomePellet() in
+        // the same doAI() pass. Calling BTeki::die() from this update-phase hook
+        // would set mDeadState before the next doAI() and permanently block
+        // dieSoon(), leaving a dead-but-present actor with no corpse. The module
+        // only drives the source dead clip and lets the host complete
+        // teardown/corpse.
         break;
     default:
         break;
