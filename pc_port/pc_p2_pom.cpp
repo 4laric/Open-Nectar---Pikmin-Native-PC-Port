@@ -37,6 +37,7 @@
 #include "pc_p2_pom.h"
 #include "pc_p2_pom_policy.h"
 #include "pc_bbft.h"
+#include "GameStat.h"
 #include "ItemMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
@@ -64,6 +65,7 @@ constexpr double TicksPerSecond = 30.0;
 
 struct Bound {
 	p2pom::PomSpec spec;
+	p2pom::State state = p2pom::State::Wait;
 	int colour        = -1;
 	int used          = 0;
 	int refunds       = 0;
@@ -94,6 +96,39 @@ std::vector<InjectFail> injects;
 unsigned clockLast = 0;
 float clockAcc     = 0.0f;
 unsigned behaviorTick = 0;
+
+// Population-conservation baseline: deadPikis captured after the buds are
+// bound and before any conversion. Consumed Pikmin are erase-killed, so this
+// counter must not advance while the buds convert; a Drift proves a loss was
+// wrongly counted.
+int deadPikisBaseline = 0;
+
+// Source state transition with observable logging; no-op on a repeated state.
+void setState(Bound& bound, p2pom::State next)
+{
+	if (bound.state == next) {
+		return;
+	}
+	std::printf("P2_POM_STATE generator=%u species=%s from=%s to=%s\n", bound.spec.generator,
+	            p2pom::speciesName(bound.spec.species), p2pom::stateName(bound.state), p2pom::stateName(next));
+	bound.state = next;
+}
+
+// Terminal death: only an exhausted budget reaches here (source: no combat
+// path, no corpse). Conservation is proven by deadPikis unchanged across the
+// conversions (no consumed Pikmin counted as a loss).
+void finishDead(Bound& bound)
+{
+	setState(bound, p2pom::State::Dead);
+	const int now = static_cast<int>(GameStat::deadPikis);
+	std::printf("P2_POM_DEAD generator=%u species=%s used=%d refunds=%d corpse=0 budget=%d\n", bound.spec.generator,
+	            p2pom::speciesName(bound.spec.species), bound.used, bound.refunds, p2pom::budget(bound.spec.species));
+	std::printf("P2_POM_CONSERVATION generator=%u species=%s used=%d refunds=%d requested=%d born=%d dead_pikis=%d "
+	            "loss_counted=%d\n",
+	            bound.spec.generator, p2pom::speciesName(bound.spec.species), bound.used, bound.refunds, bound.requested,
+	            bound.born, now, int(now > deadPikisBaseline ? 1 : 0));
+	bound.done = true;
+}
 
 [[noreturn]] void fail()
 {
@@ -172,9 +207,7 @@ void settleOwed(Bound& bound)
 	std::printf("P2_POM_SPROUT_SETTLED generator=%u species=%s requested=%d born=%d conservation=1\n", bound.spec.generator,
 	            p2pom::speciesName(bound.spec.species), bound.requested, bound.born);
 	if (bound.finishWhenSettled) {
-		bound.done = true;
-		std::printf("P2_POM_DONE generator=%u species=%s used=%d refunds=%d\n", bound.spec.generator,
-		            p2pom::speciesName(bound.spec.species), bound.used, bound.refunds);
+		finishDead(bound);
 	}
 }
 
@@ -232,12 +265,17 @@ void stepBuds(double nowSec)
 				std::printf("P2_POM_ACCEPT generator=%u species=%s thrown_colour=%d used=%d budget=%d\n",
 				            bound.spec.generator, p2pom::speciesName(bound.spec.species), thrownColour, bound.used, limit);
 			}
+			const bool wasClosed = !bound.open;
 			++bound.swallowed;
 			bound.open         = true;
 			bound.lastAcceptSec = nowSec;
 			if (bound.openedSec == 0.0) {
 				bound.openedSec = nowSec;
 			}
+			if (wasClosed) {
+				setState(bound, p2pom::State::Open); // arm on the cycle's first touch
+			}
+			setState(bound, p2pom::State::Swing); // each touch is a swing
 			piki->setEraseKill();
 			piki->kill(false);
 		}
@@ -252,9 +290,11 @@ void stepBuds(double nowSec)
 		if (outcome == p2pom::CloseOutcome::StillOpen) {
 			continue;
 		}
+		setState(bound, p2pom::State::Close);
 		std::printf("P2_POM_CLOSE generator=%u species=%s outcome=%s used=%d budget=%d swallowed=%d\n", bound.spec.generator,
 		            p2pom::speciesName(bound.spec.species), p2pom::closeOutcomeName(outcome), bound.used, limit, bound.swallowed);
 		if (outcome == p2pom::CloseOutcome::Shot) {
+			setState(bound, p2pom::State::Shot);
 			const int count = p2pom::shotCount(bound.spec.species, bound.swallowed);
 			bound.requested += count;
 			bound.owed += count;
@@ -265,12 +305,14 @@ void stepBuds(double nowSec)
 		}
 		bound.open      = false;
 		bound.swallowed = 0;
-		if (budgetSpent && bound.owed == 0) {
-			bound.done = true;
-			std::printf("P2_POM_DONE generator=%u species=%s used=%d refunds=%d\n", bound.spec.generator,
-			            p2pom::speciesName(bound.spec.species), bound.used, bound.refunds);
+		if (p2pom::dead(budgetSpent, bound.owed)) {
+			if (!bound.done) {
+				finishDead(bound);
+			}
 		} else if (budgetSpent) {
 			bound.finishWhenSettled = true;
+		} else {
+			setState(bound, p2pom::State::Wait); // reopen after the close cycle
 		}
 	}
 }
@@ -283,6 +325,7 @@ void pc_p2_pom_reset()
 	clockLast    = SDL_GetTicks();
 	clockAcc     = 0.0f;
 	behaviorTick = 0;
+	deadPikisBaseline = 0;
 }
 
 void pc_p2_pom_setup()
@@ -350,6 +393,7 @@ void pc_p2_pom_setup()
 	for (const Bound& bound : buds) {
 		std::printf("P2_POM_INVULNERABLE generator=%u invulnerable_after_landing=1\n", bound.spec.generator);
 	}
+	deadPikisBaseline = static_cast<int>(GameStat::deadPikis);
 	std::printf("P2_POM_SIDECAR buds=%u\n", unsigned(buds.size()));
 	std::fflush(stdout);
 }
