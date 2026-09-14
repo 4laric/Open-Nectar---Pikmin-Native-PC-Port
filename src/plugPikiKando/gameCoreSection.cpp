@@ -27,6 +27,7 @@
 #include "pc_p2_queen.h"
 #include "pc_p2_king.h"
 #include "pc_p2_dweevil.h"
+#include "pc_p2_bombotakara.h"
 #include "pc_p2_tank.h"
 #include "pc_p2_hiba.h"
 #include "pc_p2_flora_actor.h"
@@ -1829,6 +1830,7 @@ void GameCoreSection::update()
 	pc_p2_king_update();
 	pc_p2_hiba_update();
 	pc_p2_dweevil_update();
+	pc_p2_bombotakara_update();
 	Node::update();
 }
 

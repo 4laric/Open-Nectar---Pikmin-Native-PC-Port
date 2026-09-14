@@ -204,6 +204,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_waterwraith_register.cpp
     pc_port/pc_p2_waterwraith_encounter.cpp
     pc_port/pc_p2_dweevil.cpp
+    pc_port/pc_p2_bombotakara.cpp
     pc_port/pc_p2_qurione.cpp
     pc_port/pc_p2_shijimi.cpp
     pc_port/pc_p2_kurage_receiver.cpp
