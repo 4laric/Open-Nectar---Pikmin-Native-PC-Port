@@ -35,21 +35,30 @@ P2GroinkStrikeResult p2_groink_apply_strike(P2ProjectileReceiverRegistry& regist
     return result;
 }
 
-bool P2GroinkStrikeTracker::firstHit(std::size_t shellSlot, std::uint64_t targetToken)
+P2GroinkStrikeDecision P2GroinkStrikeTracker::decide(std::size_t shellSlot,
+                                                     std::uint64_t targetToken)
 {
     for (std::size_t i = 0; i < mCount; ++i) {
         if (mEntries[i].slot == shellSlot && mEntries[i].token == targetToken) {
-            return false;
+            return P2GroinkStrikeDecision::AlreadyHit;
         }
     }
-    if (mCount < kMaxTracked) {
-        mEntries[mCount].slot = shellSlot;
-        mEntries[mCount].token = targetToken;
-        ++mCount;
+    if (mCount >= kMaxTracked) {
+        // The table is full and this pair is untracked. Reject it: applying an
+        // unrecorded pair would re-fire on every subsequent moving step, which
+        // breaks the once-per-shell/target guarantee. The host may retry after
+        // `clearSlot` frees a recycled shell.
+        return P2GroinkStrikeDecision::RejectedAtCapacity;
     }
-    // Overflow is a best-effort host bound: report the strike rather than drop
-    // an otherwise-valid one, at the cost of not remembering the pair.
-    return true;
+    mEntries[mCount].slot = shellSlot;
+    mEntries[mCount].token = targetToken;
+    ++mCount;
+    return P2GroinkStrikeDecision::Apply;
+}
+
+bool P2GroinkStrikeTracker::firstHit(std::size_t shellSlot, std::uint64_t targetToken)
+{
+    return decide(shellSlot, targetToken) == P2GroinkStrikeDecision::Apply;
 }
 
 void P2GroinkStrikeTracker::clearSlot(std::size_t shellSlot)

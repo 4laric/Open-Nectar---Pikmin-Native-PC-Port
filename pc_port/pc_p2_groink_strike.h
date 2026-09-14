@@ -12,14 +12,11 @@
 // proxy InteractAttack. Damage is never re-derived here; it is exactly the
 // classifier command's value.
 //
-// Vendored dependency (copied byte-identical, not modified):
-//   pc_port/pc_p2_projectile_receiver.{h,cpp}  from native lane
-//   `opencode/p2-projectiles-integration` @ be8037af5e1d50dcd0d96333d48761cf52e27f84
-//     pc_p2_projectile_receiver.h   sha256 d127e060b85fa53e5f8e72fbc6de91505ac3e25d06a90791d51149c8743b0cbc
-//     pc_p2_projectile_receiver.cpp sha256 4dd711b3ef71c09a86372b273cff378d8efb38b8e9b0a925178f7cadef5de56b
-//   Its required type headers are vendored the same way:
-//     pc_p2_cannon_stone.h          sha256 abf3ea470f80a394ba6673a1e98223251416ed69ffce5b0c39251d0eb56e1508
-//     pc_p2_rock_hazard.h           sha256 a99cc889068a6f5b662e9c8b6568622010803eb991b8336c1dae837760eef4c7
+// Receiver dependency: lane 20's `pc_p2_projectile_receiver.{h,cpp}` (plus the
+// `pc_p2_cannon_stone.h` / `pc_p2_rock_hazard.h` type headers) is integrated in
+// the approved native baseline `f14c6851` and used directly. The earlier strike
+// handoff vendored lane `opencode/p2-projectiles-integration` @ `be8037af`
+// byte-identically; the approved tree is identical, so no copy is carried here.
 //
 // The receiver owns no impulse field, so the classifier's knockback vector is
 // carried through the result unchanged for the host to apply separately.
@@ -54,19 +51,41 @@ P2GroinkStrikeResult p2_groink_apply_strike(P2ProjectileReceiverRegistry& regist
 // candidate. p2_groink_apply_strike stays pure; this tracker is the only state.
 //
 // Hosts consult it only after the classifier reports a non-None kind, then call
-// p2_groink_apply_strike when `firstHit` returns true. `clearSlot` forgets one
+// p2_groink_apply_strike when the decision is `Apply`. `clearSlot` forgets one
 // shell once its pool slot recycles so a reused slot starts a fresh flight.
+//
+// Supported bound: `kMaxTracked` distinct (slot, token) pairs may be in flight
+// at once. The host owns this bound by recycling shell slots; live pairs are
+// typically (in-flight shells) x (candidates each shell has struck). When the
+// table is full a genuinely new pair cannot be recorded, so the tracker rejects
+// it (`RejectedAtCapacity`) instead of reporting a hit it cannot dedup. That
+// preserves the documented once-per-shell/target damage guarantee at the cost of
+// dropping the untracked strike; the host can log the rejection and defer/retry
+// after a `clearSlot`. Silently re-reporting an unstored pair would apply damage
+// on every moving step and is exactly the bug this bound must prevent.
+enum class P2GroinkStrikeDecision {
+    Apply,                // newly recorded; the host may apply the strike
+    AlreadyHit,           // this (slot, token) pair was already recorded
+    RejectedAtCapacity,   // table full and the pair is untracked; do not apply
+};
+
 class P2GroinkStrikeTracker {
 public:
     static constexpr std::size_t kMaxTracked = 64;
 
-    // Records the pair and returns true the first time it is seen; a repeated
-    // identical call returns false. Bounded: if full, the pair is reported as a
-    // hit but not stored (see implementation note).
+    // Explicit tri-state decision. Callers that only need the apply/don't-apply
+    // answer may use `firstHit`.
+    P2GroinkStrikeDecision decide(std::size_t shellSlot, std::uint64_t targetToken);
+    // Convenience: true only for `Apply` (newly recorded). `AlreadyHit` and
+    // `RejectedAtCapacity` both return false, so an untrackable pair is never
+    // applied twice.
     bool firstHit(std::size_t shellSlot, std::uint64_t targetToken);
     // Forgets every pair for one shell slot. Call when that shell recycles.
     void clearSlot(std::size_t shellSlot);
     void reset();
+
+    std::size_t tracked() const { return mCount; }
+    bool full() const { return mCount >= kMaxTracked; }
 
 private:
     struct Entry {
@@ -78,6 +97,7 @@ private:
 };
 
 // Convenience wrapper for hosts that prefer a free function over the method.
+// Returns true only for `P2GroinkStrikeDecision::Apply`.
 bool p2_groink_strike_first_hit(P2GroinkStrikeTracker& tracker,
                                 std::size_t shellSlot,
                                 std::uint64_t targetToken);

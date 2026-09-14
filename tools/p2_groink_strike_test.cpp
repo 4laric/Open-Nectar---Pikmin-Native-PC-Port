@@ -285,6 +285,75 @@ void testExactTokenTakesPrecedenceOverWildcard()
         p2_groink_apply_strike(registry, input, captain(1.0f, 5.0f));
     assert(wildcard.applied && !wildcard.died && near(wildcard.health, 90.0f));
 }
+// Capacity regression (wave-three #437). Filling the tracker must not let an
+// untrackable extra pair be reported as a hit on every moving step, which would
+// re-apply damage. Overflow is an explicit rejection, and recycling a shell slot
+// still admits a genuinely new flight.
+void testTrackerRejectsOverflowAndRecycleAdmitsNewFlight()
+{
+    P2ProjectileReceiverRegistry registry;
+    assert(registry.add(kNaviToken, 30.0f));
+    assert(registry.add(kRuntimeToken, 30.0f));
+
+    P2GroinkStrikeTracker tracker;
+    P2GroinkStrikeInput input;
+    input.hit = bombSweep(10.0f);
+    input.targetToken = kNaviToken;
+
+    // Fill the supported bound with kMaxTracked distinct (slot, token) pairs.
+    for (std::size_t slot = 0; slot < P2GroinkStrikeTracker::kMaxTracked; ++slot) {
+        assert(tracker.firstHit(slot, kNaviToken));
+    }
+    assert(tracker.tracked() == P2GroinkStrikeTracker::kMaxTracked);
+    assert(tracker.full());
+
+    // Already-tracked pairs stay deduped, not misreported as new.
+    assert(tracker.decide(0, kNaviToken) == P2GroinkStrikeDecision::AlreadyHit);
+    assert(!tracker.firstHit(0, kNaviToken));
+
+    // The 65th unique candidate cannot be recorded. It must be rejected on every
+    // call rather than reported as a hit (the pre-fix overflow behavior).
+    assert(tracker.decide(0, kRuntimeToken)
+           == P2GroinkStrikeDecision::RejectedAtCapacity);
+    assert(!tracker.firstHit(0, kRuntimeToken));
+    assert(!tracker.firstHit(0, kRuntimeToken));
+    assert(!p2_groink_strike_first_hit(tracker, 0, kRuntimeToken));
+    assert(near(registry.find(kNaviToken)->health(), 30.0f));
+
+    // Host pattern: apply only when the tracker returns true. The rejected pair
+    // never mutates the receiver, so its health is unchanged.
+    input.targetToken = kRuntimeToken;
+    if (tracker.firstHit(0, kRuntimeToken)) {
+        (void)p2_groink_apply_strike(registry, input, captain(1.0f, 5.0f));
+    }
+    assert(near(registry.find(kRuntimeToken)->health(), 30.0f));
+
+    // Recycling slot 0 frees exactly that shell's pair and admits a new flight.
+    tracker.clearSlot(0);
+    assert(tracker.tracked() == P2GroinkStrikeTracker::kMaxTracked - 1);
+    assert(!tracker.full());
+    assert(tracker.firstHit(0, kRuntimeToken));
+
+    // The new flight applies once and is then deduped for that shell.
+    const P2GroinkStrikeResult hit =
+        p2_groink_apply_strike(registry, input, captain(1.0f, 5.0f));
+    assert(hit.applied && near(hit.health, 20.0f));
+    assert(!tracker.firstHit(0, kRuntimeToken));
+    if (tracker.firstHit(0, kRuntimeToken)) {
+        (void)p2_groink_apply_strike(registry, input, captain(1.0f, 5.0f));
+    }
+    assert(near(registry.find(kRuntimeToken)->health(), 20.0f));
+
+    // Another shell may still strike the same token once of its own once its
+    // own slot recycles (the table was full again after slot 0 was re-recorded).
+    assert(tracker.full());
+    tracker.clearSlot(1);
+    assert(tracker.firstHit(1, kRuntimeToken));
+    const P2GroinkStrikeResult second =
+        p2_groink_apply_strike(registry, input, captain(1.0f, 5.0f));
+    assert(second.applied && near(second.health, 10.0f));
+}
+
 } // namespace
 
 int main()
@@ -298,6 +367,7 @@ int main()
     testTrackerDedupsPerShellSlotButAllowsAnotherSlot();
     testMovingNonTerminalSegmentApplies();
     testWindStepCarriesImpulseWithoutHealthAndDedups();
+    testTrackerRejectsOverflowAndRecycleAdmitsNewFlight();
     std::puts("p2_groink_strike_test PASS");
     return 0;
 }
