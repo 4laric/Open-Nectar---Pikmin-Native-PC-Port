@@ -156,6 +156,7 @@ void pc_p2_kurage_teki_setup()
         refresh(t, b);
         if (!pc_p2_kurage_receiver_setup(t, &b.mouth)) std::abort();
         std::printf("P2_KURAGE_TEKI_READY generator=%u type=%d binding=private_adapter\n", gen, type);
+        std::printf("P2_KURAGE_CORPSE_READY generator=%u drop=BDT_Normal ledger=onion receipt=corpse:kurage:%u\n", gen, gen);
     }
 }
 
@@ -288,4 +289,18 @@ int pc_p2_kurage_teki_fsm_ticks(const BTeki* t)
 int pc_p2_kurage_teki_tick_calls()
 {
     return gTickCalls;
+}
+
+bool pc_p2_kurage_receipt(PelletView* view, unsigned& generator)
+{
+    if (!view) return false;
+    auto i = s.find(static_cast<BTeki*>(view));
+    if (i == s.end()) return false;
+    generator = i->second.generator;
+    return true;
+}
+
+int pc_p2_kurage_bound_count()
+{
+    return int(s.size());
 }
