@@ -13,7 +13,7 @@
 #include <string>
 
 namespace p2kochappyfsm {
-struct Params {
+	struct Params {
 	float health         = 250.0f; // general fp00
 	float moveSpeed      = 60.0f;  // general fp06
 	float sight          = 95.0f;  // general fp12
@@ -24,6 +24,8 @@ struct Params {
 	float homeRadius     = 80.0f;  // general fp10
 	float territory      = 500.0f; // general fp09
 	float privateRadius  = 70.0f;  // general fp11
+	float eatRange       = 15.0f;  // source KochappyBase mouth-slot radius ("kamu")
+	float poisonDamage   = 300.0f; // proper fp02 (white-pikmin poison, eatWhitePikminCallBack)
 };
 
 // Source KochappyBase::StateID order: Wait(0), Dead(1), Turn(2), Walk(3),
@@ -71,7 +73,7 @@ inline bool parseConfig(std::istream& in, Params& out)
 		return false;
 	}
 	Params params;
-	const unsigned keys = 0x3FF; // all ten keys below
+	const unsigned keys = 0xFFF; // all twelve keys below
 	unsigned seen       = 0;
 	std::string key;
 	while (in >> key) {
@@ -86,6 +88,8 @@ inline bool parseConfig(std::istream& in, Params& out)
 		else if (key == "home_radius") bit = 1u << 7;
 		else if (key == "territory") bit = 1u << 8;
 		else if (key == "private_radius") bit = 1u << 9;
+		else if (key == "eat_range") bit = 1u << 10;
+		else if (key == "poison_damage") bit = 1u << 11;
 		else return false;
 		if ((seen & bit) || !(keys & bit)) {
 			return false;
@@ -122,9 +126,15 @@ inline bool parseConfig(std::istream& in, Params& out)
 		} else if (bit == (1u << 8)) {
 			if (!positive(value, 100000.0f)) return false;
 			params.territory = value;
-		} else {
+		} else if (bit == (1u << 9)) {
 			if (!positive(value, 100000.0f)) return false;
 			params.privateRadius = value;
+		} else if (bit == (1u << 10)) {
+			if (!positive(value, 100000.0f)) return false;
+			params.eatRange = value;
+		} else {
+			if (value < 0.0f || value > 100000.0f) return false;
+			params.poisonDamage = value;
 		}
 	}
 	out = params;

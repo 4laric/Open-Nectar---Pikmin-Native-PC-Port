@@ -18,8 +18,14 @@
 //   * EnemyFunc::isStartFlick (a Pikmin actually stuck to the body) is
 //     approximated by a contact-radius test; attack posture takes precedence.
 //   * Attack applies one InteractAttack at source frame 8 (attack hit radius
-//     fp22 = 35, damage fp24 = 10). eatPikmin/flickStickPikmin and the frame-88
-//     swallow / white-Pikmin poison are not modelled.
+//     fp22 = 35, damage fp24 = 10) as the bite, then the source
+//     EnemyFunc::eatPikmin (frame 8, KEYEVENT_2) sticks one free Pikmin within
+//     the mouth-slot radius (fp default eat_range 15, joint "kamu") to a free
+//     mouth slot via InteractSwallow, and EnemyFunc::swallowPikmin (frame 88,
+//     KEYEVENT_3) kills the mouth-stuck Pikmin via InteractKill; a White Pikmin
+//     applies proper-fp02 poison (eatWhitePikminCallBack -> mStoredDamage).
+//     flickStickPikmin (frame 8) remains approximated by the standalone Flick
+//     contact-radius test / not modelled in the attack posture.
 //   * `isTargetOutOfRange` is approximated by distance > sight fp12 = 95.
 //   * Press is implemented as a state and a `pc_p2_kochappy_fsm_press` trigger
 //     (source Press: health 0, type1 anim, then Dead). The P1 Chappy vehicle
@@ -34,6 +40,7 @@
 #include "pc_p2_kochappy_fsm.h"
 #include "pc_p2_kochappy_fsm_policy.h"
 #include "pc_p2_dwarf_orange.h"
+#include "pc_p2_white.h"
 #include "teki.h"
 #include "Interactions.h"
 #include "Piki.h"
@@ -41,6 +48,7 @@
 #include "Navi.h"
 #include "NaviMgr.h"
 #include "Generator.h"
+#include "Stickers.h"
 #include "system.h"
 #include <cmath>
 #include <cstdio>
@@ -60,6 +68,7 @@ constexpr float FLICK_DURATION   = 80.0f / 30.0f;
 constexpr float DEAD_DURATION    = 90.0f / 30.0f;
 constexpr float PRESS_DURATION   = 105.0f / 30.0f; // type1
 constexpr float ATTACK_EVENT_FRAME = 8.0f;
+constexpr float SWALLOW_EVENT_FRAME = 88.0f; // KEYEVENT_3 (swallow/white poison)
 constexpr float FLICK_EVENT_FRAME  = 31.0f;
 constexpr float NOTICE_DELAY       = 0.5f;  // port adaptation: source animation end
 constexpr float TURN_RATE          = 2.0f;  // port adaptation (host drive rate)
@@ -74,6 +83,7 @@ struct FsmActor {
 	float heading         = 0.0f;
 	Vector3f home;
 	bool attackFired      = false;
+	bool swallowFired     = false;
 	bool flickFired       = false;
 	bool deadLogged       = false;
 	bool died             = false;
@@ -142,6 +152,28 @@ Piki* nearestPiki(const Vector3f& pos, float radius)
 	return best;
 }
 
+// Source EnemyFunc::eatPikmin (enemyAction.cpp:1107-1142): stick one free,
+// not-already-stuck Pikmin within `radius` of `center` to a free mouth slot.
+// 3D distance matches the source slotPos.distance(pikiPos) check.
+Piki* nearestEdiblePiki(const Vector3f& center, float radius)
+{
+	Piki* best   = nullptr;
+	float bestSq = radius * radius;
+	if (pikiMgr) {
+		Iterator it(pikiMgr);
+		CI_LOOP(it) {
+			Piki* piki = static_cast<Piki*>(*it);
+			if (!piki || !piki->isAlive()) continue;
+			if (piki->isStickToMouth() || piki->isStickTo()) continue;
+			const Vector3f q = piki->getPosition();
+			const float dx = q.x - center.x, dy = q.y - center.y, dz = q.z - center.z;
+			const float d  = dx * dx + dy * dy + dz * dz;
+			if (d < bestSq) { bestSq = d; best = piki; }
+		}
+	}
+	return best;
+}
+
 void stop(BTeki* actor)
 {
 	actor->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
@@ -196,6 +228,46 @@ void doFlick(BTeki* actor)
 	}
 }
 
+// Source EnemyFunc::eatPikmin (KEYEVENT_2, frame 8): stick one free Pikmin
+// within the mouth-slot radius to a free mouth slot. The host Chappy vehicle
+// exposes its mouth slots via getFreeSlot(); p3=0 selects the eat (Esa) motion.
+// Returns true when a Pikmin was stuck.
+bool doEat(BTeki* actor)
+{
+	if (!pikiMgr || !actor->mCollInfo) return false;
+	CollPart* slot = actor->getFreeSlot();
+	if (!slot) return false;
+	Piki* prey = nearestEdiblePiki(slot->mCentre, params.eatRange);
+	if (!prey) return false;
+	return prey->stimulate(InteractSwallow(actor, slot, 0));
+}
+
+// Source EnemyFunc::swallowPikmin (KEYEVENT_3, frame 88): kill every Pikmin
+// stuck to the eater's mouth; a White Pikmin applies the proper-fp02 poison via
+// eatWhitePikminCallBack (host: accumulate into mStoredDamage, applied by the
+// next makeDamaged() call). Returns the swallowed count and sets whitePoisoned.
+int doSwallow(BTeki* actor, int& whitePoisoned)
+{
+	whitePoisoned = 0;
+	int count = 0;
+	Stickers stickers(actor);
+	Iterator it(&stickers);
+	CI_LOOP(it) {
+		Creature* stuck = *it;
+		if (!stuck || !stuck->isPiki() || !stuck->isStickToMouth()) continue;
+		Piki* piki = static_cast<Piki*>(stuck);
+		const bool white = pc_p2_is_white(piki);
+		if (piki->stimulate(InteractKill(actor, 0))) {
+			++count;
+			if (white) {
+				actor->mStoredDamage += params.poisonDamage;
+				whitePoisoned = 1;
+			}
+		}
+	}
+	return count;
+}
+
 float attackAngleRadians()
 {
 	return params.attackAngle * PI / 180.0f;
@@ -229,10 +301,11 @@ int motionFor(State state)
 
 void enter(BTeki* actor, FsmActor& state, State next)
 {
-	state.state       = next;
-	state.stateTime   = 0.0f;
-	state.attackFired = false;
-	state.flickFired  = false;
+	state.state        = next;
+	state.stateTime    = 0.0f;
+	state.attackFired  = false;
+	state.swallowFired = false;
+	state.flickFired   = false;
 	actor->startMotion(motionFor(next));
 	const unsigned generator = actor->mGenerator ? actor->mGenerator->_70 : 0u;
 	std::printf("P2_KOCHAPPY_STATE generator=%u state=%s\n", generator,
@@ -464,6 +537,19 @@ void pc_p2_kochappy_fsm_update(BTeki* actor)
 				            ATTACK_EVENT_FRAME, params.attackDamage);
 				std::fflush(stdout);
 			}
+			// Source eatPikmin (KEYEVENT_2): stick one free Pikmin to the mouth.
+			const bool eaten = doEat(actor);
+			std::printf("P2_KOCHAPPY_EAT generator=%u frame=%.0f eaten=%d\n", generator,
+			            ATTACK_EVENT_FRAME, eaten ? 1 : 0);
+			std::fflush(stdout);
+		}
+		if (!state.swallowFired && state.stateTime * 30.0f >= SWALLOW_EVENT_FRAME) {
+			state.swallowFired = true;
+			int whitePoisoned = 0;
+			const int swallowed = doSwallow(actor, whitePoisoned);
+			std::printf("P2_KOCHAPPY_SWALLOW generator=%u frame=%.0f swallowed=%d white=%d\n",
+			            generator, SWALLOW_EVENT_FRAME, swallowed, whitePoisoned);
+			std::fflush(stdout);
 		}
 		if (state.stateTime >= ATTACK_DURATION) {
 			if (!target) {
