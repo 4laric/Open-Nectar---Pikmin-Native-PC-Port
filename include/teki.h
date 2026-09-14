@@ -21,6 +21,7 @@
 #include "pc_p2_enemy.h"
 #include "pc_p2_kochappy.h"
 #include "pc_p2_qurione.h"
+#include "pc_p2_dwarf_orange.h"
 #include "pc_p2_kogane.h"
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_armor.h"
