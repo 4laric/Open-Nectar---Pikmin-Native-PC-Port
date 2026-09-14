@@ -133,6 +133,12 @@ def verify_log(text):
         errors.append("missing dead playback marker")
     elif int(dead.group(2)) != 12 or int(dead.group(3)) != 320:
         errors.append(f"dead playback did not fire all authored events: {dead.groups()}")
+    motion = re.search(r"^P2_BIGTREASURE_MOTION_PASS\s+clips=(\d+)\s+events=(\d+)\s*$", text,
+                       flags=re.MULTILINE)
+    if not motion:
+        errors.append("missing extra-clip motion playback marker")
+    elif int(motion.group(1)) < 3:
+        errors.append(f"motion playback advanced fewer than 3 staged clips: {motion.groups()}")
     if "PASS BIGTREASURE_RUNTIME" not in text:
         errors.append("missing runtime PASS marker")
     return errors

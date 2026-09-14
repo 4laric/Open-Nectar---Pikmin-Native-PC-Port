@@ -44,6 +44,12 @@ int pc_p2_bigtreasure_visual_update(float sourceFrames);
 
 const P2BigTreasureVisualEvent* pc_p2_bigtreasure_visual_events(int* count);
 const char* pc_p2_bigtreasure_visual_active_clip();
+
+// Additive (#246 motion staging): enumerate the loaded clip bank so a host
+// can drive every staged clip, not just the two hard-coded ones.
+int pc_p2_bigtreasure_visual_clip_count();
+const char* pc_p2_bigtreasure_visual_clip_name(int index);
+
 int pc_p2_bigtreasure_visual_pose_index();
 bool pc_p2_bigtreasure_visual_completed();
 int pc_p2_bigtreasure_visual_pellet_count();  // converted pellets drawn

@@ -103,9 +103,15 @@ struct EncounterReceiverSink {
 
 class BigTreasureApp final : public PlugPikiApp {
     int frames = 0;
-    int phase = 0; // 0 probes pending, 1 wait1 playback, 2 dead playback, 3 done
+    int phase = 0; // 0 probes pending, 1 wait1 playback, 2 dead playback, 3 dead
+                   // capture, 4 extra-clip motion playback, 5 exit
     int visualFrames = 0;
     int wait1Events = 0;
+    int motionIndex = 0;
+    int motionClips = 0;
+    int motionEvents = 0;
+    int motionBase = 0;
+    int motionFrames = 0;
     bool setup = false, wait1Captured = false, deadCaptured = false;
     float ground = 0.0f;
     P2BigTreasureMapTrace trace;
@@ -161,6 +167,9 @@ public:
         case 2:
             stepDead();
             break;
+        case 4:
+            stepMotion();
+            break;
         default:
             break;
         }
@@ -184,6 +193,10 @@ public:
         if (phase == 3 && !deadCaptured) {
             capture("bigtreasure-dead.ppm");
             deadCaptured = true;
+            startMotion();
+            phase = 4;
+        }
+        if (phase == 5) {
             std::puts("PASS BIGTREASURE_RUNTIME");
             std::fflush(stdout);
             std::_Exit(0);
@@ -743,6 +756,71 @@ private:
         std::printf("P2_BIGTREASURE_VISUAL_DEAD_PASS frames=%d events=%d keyevent100=%d\n",
                     visualFrames, count - base, events[base + 10].frame);
         phase = 3;
+    }
+
+    // Additive (#246 motion staging): after wait1/dead, replay every other
+    // clip staged in the generated profile through the vendored retail event
+    // player. The clip list comes from the stage subset, so widening the stage
+    // widens playback without touching this fixture; the dispatch log is the
+    // same bounded event bank wait1/dead already use.
+    void startMotion()
+    {
+        motionIndex = 0;
+        motionClips = 0;
+        motionEvents = 0;
+        motionFrames = 0;
+        int count = 0;
+        pc_p2_bigtreasure_visual_events(&count);
+        motionBase = count;
+        if (!beginMotionClip()) {
+            finishMotion();
+        }
+    }
+
+    bool beginMotionClip()
+    {
+        while (motionIndex < pc_p2_bigtreasure_visual_clip_count()) {
+            const char* name = pc_p2_bigtreasure_visual_clip_name(motionIndex++);
+            if (!name || std::strcmp(name, "wait1") == 0 || std::strcmp(name, "dead") == 0) {
+                continue;
+            }
+            if (pc_p2_bigtreasure_visual_clip(name)) {
+                motionFrames = 0;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void stepMotion()
+    {
+        require(pc_p2_bigtreasure_visual_update(1.0f) >= 0, "motion update");
+        ++motionFrames;
+        // Looping clips (0/1 loop markers) never report completion, so bound
+        // each clip at one source length before advancing to the next.
+        if (!pc_p2_bigtreasure_visual_completed() && motionFrames < 240) {
+            return;
+        }
+        int count = 0;
+        pc_p2_bigtreasure_visual_events(&count);
+        const int pose = pc_p2_bigtreasure_visual_pose_index();
+        if (pose > 0 || count > motionBase) {
+            ++motionClips;
+        }
+        if (!beginMotionClip()) {
+            finishMotion();
+        }
+    }
+
+    void finishMotion()
+    {
+        int count = 0;
+        pc_p2_bigtreasure_visual_events(&count);
+        motionEvents = count - motionBase;
+        require(motionClips >= 3, "motion clip advances");
+        std::printf("P2_BIGTREASURE_MOTION_PASS clips=%d events=%d\n", motionClips,
+                    motionEvents);
+        phase = 5;
     }
 };
 } // namespace
