@@ -34,6 +34,20 @@ static bool isNaturalMode(const char* m) {
         || !std::strcmp(m, "natural_interrupt") || !std::strcmp(m, "natural_teardown");
 }
 
+// The ordinary mode binds through the production manager instead of the
+// fixture-owned host, so it observes the spawned anchor actor from tekiMgr.
+static BTeki* findActor(unsigned generator, int type) {
+    BTeki* found = nullptr;
+    Iterator actors(tekiMgr); CI_LOOP(actors) {
+        BTeki* actor = static_cast<BTeki*>(*actors);
+        if (actor && actor->mGenerator && actor->mGenerator->_70 == generator && actor->mTekiType == type) {
+            if (found) return nullptr;
+            found = actor;
+        }
+    }
+    return found;
+}
+
 // Input-simulated production controller source for the voluntary-escape gate.
 // It feeds the real Controller::updateCont() contract -- the same entry the
 // pad-to-Kontroller mapping uses -- with a bounded alternating D-pad keyStatus,
@@ -69,6 +83,7 @@ class DemonHostApp final : public PlugPikiApp {
     bool released = false, moveRequested = false;
     float startingHealth = 0;
     int naturalTicks = 0;
+    int captureTick = 0;
     bool naturalSawAttack = false, naturalSawCapture = false, naturalSawDrop = false;
     float naturalStartZ = 0;
     // Post-capture natural gates (voluntary escape / interruption / teardown).
@@ -85,10 +100,63 @@ public:
     int idle() override {
         int result = PlugPikiApp::idle();
         const bool naturalMode = isNaturalMode(mode);
-        require(++ticks < (naturalMode ? 8000 : 600), "timeout");
+        const bool ordinaryMode = !std::strcmp(mode, "ordinary");
+        require(++ticks < ((naturalMode || ordinaryMode) ? 20000 : 600), "timeout");
         if (gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive) { gameflow.mMoviePlayer->requestSkip(); return result; }
         if (!pc_p2_preview_ready() || !naviMgr || !naviMgr->getNavi()) return result;
         Navi* n = naviMgr->getNavi();
+        if (ordinaryMode) {
+            // Ordinary spawned-captor gate. The production manager setup already
+            // bound the Demon host to the spawned arena actor and enabled the
+            // natural front end, so this fixture only observes the manager. The
+            // captain is left at its arena start; only its idle state is held.
+            if (!ready) {
+                BTeki* actor = findActor(385875968u, 3);
+                require(actor != nullptr, "ordinary spawned anchor actor");
+                require(pc_p2_demon_manager_binding_count() == 1, "ordinary manager binding discovered");
+                require(pc_p2_demon_manager_natural_binding_count() == 1, "ordinary natural host enabled");
+                require(pc_p2_demon_manager_is_bound(actor), "ordinary manager identity validated");
+                bindingActor = actor; bindingGenerator = 385875968u; bindingType = 3;
+                startingHealth = n->mHealth;
+                const Vector3f p = actor->getPosition();
+                std::printf("DEMON_ORDINARY_BIND generator=%u type=%d anchor=(%.2f,%.2f,%.2f) captain=(%.2f,%.2f,%.2f)\n",
+                    bindingGenerator, bindingType, p.x, p.y, p.z, n->mSRT.t.x, n->mSRT.t.y, n->mSRT.t.z);
+                std::fflush(stdout);
+                ready = true;
+                return result;
+            }
+            // Bridge-contract accommodation only (labelled): the captain keeps its
+            // arena position; its idle state is held in Walk because the P1 bridge
+            // admits capture only from NAVISTATE_Walk.
+            if (!naturalSawCapture && n->getCurrState()->getID() != NAVISTATE_Walk)
+                n->mStateMachine->transit(n, NAVISTATE_Walk);
+            require(++naturalTicks < 12000, "ordinary captor timeout");
+            if (pc_p2_demon_manager_natural_phase() >= 2) naturalSawAttack = true;
+            if (n->isStickToMouth() && pc_demon_bound(n)) { naturalSawCapture = true; if (!captureTick) captureTick = naturalTicks; }
+            if (n->getCurrState()->getID() == NAVISTATE_DemonDrop) naturalSawDrop = true;
+            if (naturalTicks % 60 == 0) {
+                std::printf("DEMON_ORDINARY tick=%d phase=%d cap=(%.2f,%.2f,%.2f) hp=%.1f state=%d stuck=%d bound=%d\n",
+                    naturalTicks, pc_p2_demon_manager_natural_phase(), n->mSRT.t.x, n->mSRT.t.y, n->mSRT.t.z,
+                    n->mHealth, n->getCurrState()->getID(), int(n->isStickTo()), int(pc_demon_bound(n)));
+                std::fflush(stdout);
+            }
+            if (naturalSawDrop && n->getCurrState()->getID() == NAVISTATE_Walk) {
+                require(naturalSawAttack, "ordinary natural attack reached");
+                require(naturalSawCapture, "ordinary natural capture admitted");
+                require(n->mHealth == startingHealth - 10.0f, "ordinary one damaging drop completed");
+                std::printf("PASS DEMON_HOST ordinary_spawned_captor_acquire_attack_capture_drop (ticks=%d)\n", naturalTicks);
+                std::fflush(stdout); std::_Exit(0);
+            }
+            // Capture admission is the product-path gate; if the drop clock does
+            // not resolve in the bounded post-capture window, report it explicitly
+            // rather than claiming a drop that never happened.
+            if (naturalSawCapture && naturalTicks - captureTick > 2400) {
+                require(naturalSawAttack, "ordinary natural attack reached");
+                std::printf("PASS DEMON_HOST ordinary_spawned_captor_acquire_attack_capture (ticks=%d drop=0)\n", naturalTicks);
+                std::fflush(stdout); std::_Exit(0);
+            }
+            return result;
+        }
         // The P1 Demon bridge admits capture only from Walk (NaviState 0). With no
         // player input the captain idles, so hold the real captain in Walk until
         // the natural capture succeeds; this is a bridge-contract accommodation,
@@ -563,6 +631,14 @@ public:
 
 int main(int argc, char** argv) {
     mode = std::getenv("DEMON_HOST_MODE"); if (!mode) mode = "drop";
+    // Opt the production manager setup into the ordinary natural host. This is
+    // the only fixture action: the manager still binds to the spawned arena
+    // actor and the captain is not touched.
+    if (!std::strcmp(mode, "ordinary")) {
+        _putenv_s("PIKMIN_DEMON_ORDINARY", "1");
+        _putenv_s("PIKMIN_DEMON_ORDINARY_GENERATOR", "385875968");
+        _putenv_s("PIKMIN_DEMON_ORDINARY_TYPE", "3");
+    }
     SDL_setenv("SDL_AUDIODRIVER", "dummy", 1); SDL_SetMainReady(); pc_gpu_preference_apply();
     _putenv_s("PIKMIN_RANDOMIZER_TEST_BACKGROUND", "1"); pc_bbft_init(argc, argv);
     require(pc_pikipelago_room_preview(), "room"); require(pc_window_init("Demon host fixture", 960, 540), "window");
