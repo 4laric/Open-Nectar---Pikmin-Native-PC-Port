@@ -26,7 +26,9 @@ const char* pc_p2_elecbug_state_name(const BTeki*);
 bool pc_p2_elecbug_attacked(Teki*);
 // Press receiver: breaks any active partner link, then flips a live,
 // non-bithered, non-reversed beetle into Reverse (P2_ELECBUG_FLIP, then
-// P2_ELECBUG_STATE state=reverse). Pressing an actively discharging beetle also sends Denki
-// to the pressing Pikmin: P2_ELECBUG_PRESS_SHOCK for a non-Yellow, and
-// P2_ELECBUG_PRESS_IMMUNE for an excluded Yellow.
+// P2_ELECBUG_STATE state=reverse). Pressing an actively discharging beetle also
+// delivers the real lane-10 InteractDenki receiver to the pressing Pikmin
+// (P2_ELECBUG_PRESS_DENKI): P2_ELECBUG_PRESS_SHOCK for a shockable species and
+// P2_ELECBUG_PRESS_IMMUNE for an electric-immune Yellow/Bulbmin, decided by the
+// lane-11 capability matrix.
 bool pc_p2_elecbug_pressed(BTeki*, Creature*);
