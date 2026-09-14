@@ -96,10 +96,16 @@ void testTranslate()
     p2_bigtreasure_anim_translate(all, 3, pulses);
     assert(pulses.animEnd && pulses.keyEvent2 && pulses.keyEvent100);
 
-    const int none[] = {0, 1, 3, 7};
+    const int none[] = {0, 3, 7};
     pulses = P2BigTreasureAnimPulses{};
-    p2_bigtreasure_anim_translate(none, 4, pulses);
+    p2_bigtreasure_anim_translate(none, 3, pulses);
     assert(!pulses.animEnd && !pulses.keyEvent2 && !pulses.keyEvent100);
+
+    // The authored loop marker ends the host cycle.
+    const int loop[] = {1};
+    pulses = P2BigTreasureAnimPulses{};
+    p2_bigtreasure_anim_translate(loop, 1, pulses);
+    assert(pulses.animEnd);
 
     pulses = P2BigTreasureAnimPulses{};
     p2_bigtreasure_anim_translate(nullptr, 0, pulses);

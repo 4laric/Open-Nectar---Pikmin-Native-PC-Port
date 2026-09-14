@@ -64,6 +64,12 @@ void p2_bigtreasure_anim_translate(const int* types, int count,
         case 1000: out.animEnd = true; break;
         case 2: out.keyEvent2 = true; break;
         case 100: out.keyEvent100 = true; break;
+        // The authored loop marker is where the host ends the current cycle.
+        // The policy's idle states ignore animEnd, so this only finishes the
+        // one-shot states (Land / PreAttack / Attack / PutItem / Flick /
+        // DropItem / Dead); it mirrors the fixed loop-window the retail
+        // event-player fixture stops on.
+        case 1: out.animEnd = true; break;
         default: break;
         }
     }

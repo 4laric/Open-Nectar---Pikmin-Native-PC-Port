@@ -34,8 +34,9 @@ bool p2_bigtreasure_anim_clip(P2BigTreasurePhase phase, int chosenWeapon,
                               char* out, std::size_t capacity);
 
 // Maps retail-dispatched event types to FSM keyframe pulses: 1000 (implicit
-// completion) -> animEnd; authored KEYEVENT_2 -> keyEvent2; KEYEVENT_100 ->
-// keyEvent100. Other authored types are host-side effects the policy ignores.
+// completion) and 1 (authored loop marker, treated as the host cycle end) ->
+// animEnd; authored KEYEVENT_2 -> keyEvent2; KEYEVENT_100 -> keyEvent100.
+// Other authored types are host-side effects the policy ignores.
 void p2_bigtreasure_anim_translate(const int* types, int count,
                                    P2BigTreasureAnimPulses& out);
 
