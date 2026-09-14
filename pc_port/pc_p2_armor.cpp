@@ -8,15 +8,19 @@
 //
 // Port adaptations (recorded, not retail-faithful):
 //   * The P2 mouth-slot swallow is resolved on the P1 host as an explicit
-//     capture within the source attack sweep radius at the attack2 motion-frame
-//     window (17<frame<27), then a single InteractKill at the source eat event.
-//     Exactly-once per bite.
+//     capture within the source attack sweep radius at the attack2 source
+//     damage event (frame 18), then a single InteractKill at the source eat
+//     event (frame 60); flick fires on the flick source event (frame 39).
+//     Timing is delivered by the authoritative sampled clock (#431), so the
+//     effects fire exactly once across skipped frames, pause, interruption and
+//     actor-address reuse. Exactly-once per bite.
 //   * The source `damageCallBack` part-id rule (`dmg1`/bittered) is not
 //     representable on the P1 host; damage is accepted while surfaced.
 //   * View angle is a full hemisphere (fp13 absent from the Armor general block);
 //     turn rate and flick radius are documented port adaptations.
 // No other lane's module is modified; every hook is a no-op for unregistered actors.
 #include "pc_p2_armor.h"
+#include "pc_p2_armor_events.h"
 #include "teki.h"
 #include "Interactions.h"
 #include "Piki.h"
@@ -83,6 +87,7 @@ struct Clip {
     float duration = 1.0f;
     bool loop = false;
     std::vector<std::pair<int, int>> events;
+    p2sampled::Clip sampled;
 };
 
 struct Armor {
@@ -91,7 +96,7 @@ struct Armor {
     float heading = 0.0f;
     Vector3f home;
     Piki* captured = nullptr;
-    std::set<int> firedEvents;
+    p2armorevents::Receiver events;
     std::string clip = "appear";
     float phase = 0.0f;
     bool biteLogged = false;
@@ -181,9 +186,14 @@ void doFlick(BTeki* a, Armor& s) {
 void enter(Armor& s, State state, const char* clip) {
     s.state = state;
     s.stateTime = 0.0f;
-    s.firedEvents.clear();
     s.biteLogged = false;
     if (clip) s.clip = clip;
+    auto it = clips.find(s.clip);
+    if (it != clips.end()) {
+        s.events.start(it->second.sampled, it->second.name);
+    } else {
+        s.events.cancel();
+    }
 }
 void walkTo(BTeki* a, Armor& s, const Vector3f& target, float dt) {
     const Vector3f pos = a->getPosition();
@@ -204,7 +214,6 @@ void stop(BTeki* a) {
     a->mVelocity.x = 0.0f;
     a->mVelocity.z = 0.0f;
 }
-float motionFrame(const Armor& s) { return s.stateTime * 30.0f; }
 
 void setPhase(Armor& s) {
     if (s.state == ARMOR_STAY) { s.phase = 0.0f; return; }
@@ -282,6 +291,11 @@ void pc_p2_armor_setup() {
                         clip.name = name;
                         clip.duration = frames > 0 ? float(frames) / 30.0f : 1.0f;
                         clip.loop = (name == "move");
+                        p2armorevents::Row row;
+                        row.name = name;
+                        row.sourceFrames = frames > 0 ? int(frames) : 0;
+                        row.poseCount = poses;
+                        row.loop = clip.loop;
                         if (events != "-") {
                             size_t start = 0;
                             while (start < events.size()) {
@@ -289,13 +303,16 @@ void pc_p2_armor_setup() {
                                 const std::string pair = events.substr(start, comma - start);
                                 const size_t colon = pair.find(':');
                                 if (colon != std::string::npos) {
-                                    clip.events.emplace_back(std::atoi(pair.substr(0, colon).c_str()),
-                                                             std::atoi(pair.substr(colon + 1).c_str()));
+                                    const int eventFrame = std::atoi(pair.substr(0, colon).c_str());
+                                    const std::string key = pair.substr(colon + 1);
+                                    clip.events.emplace_back(eventFrame, std::atoi(key.c_str()));
+                                    row.events.push_back(p2sampled::Event{eventFrame, key});
                                 }
                                 if (comma == std::string::npos) break;
                                 start = comma + 1;
                             }
                         }
+                        clip.sampled = p2armorevents::makeClip(row);
                         clips[name] = clip;
                     }
                 } else {
@@ -331,6 +348,7 @@ void pc_p2_armor_setup() {
             std::abort();
         }
         Armor& s = actors[static_cast<PelletView*>(actor)];
+        s = Armor();  // reject stale clock/capture state on actor-address reuse
         s.home = actor->getPosition();
         s.heading = actor->getDirection();
         actor->mHealth = LIFE;
@@ -419,13 +437,15 @@ void pc_p2_armor_update(BTeki* actor) {
     }
     case ARMOR_ATTACK2: {
         stop(actor);
-        const float frame = motionFrame(s);
-        if (frame > 17.0f && frame < 27.0f && !s.captured) {
-            Piki* piki = nearestPiki(pos, ATTACK_RANGE);
-            if (piki) {
-                s.captured = piki;
-                std::printf("P2_ARMOR_BITE generator=%u frame=%.1f pikmin=1\n", generator, frame);
-                std::fflush(stdout);
+        for (const p2armorevents::Dispatched& event : s.events.advance(dt)) {
+            if (event.action == p2armorevents::Action::Bite && !s.captured) {
+                Piki* piki = nearestPiki(pos, ATTACK_RANGE);
+                if (piki) {
+                    s.captured = piki;
+                    std::printf("P2_ARMOR_BITE generator=%u frame=%d pikmin=1\n",
+                                generator, event.frame);
+                    std::fflush(stdout);
+                }
             }
         }
         if (s.stateTime >= clipDuration("attack2")) {
@@ -441,19 +461,14 @@ void pc_p2_armor_update(BTeki* actor) {
     }
     case ARMOR_EAT: {
         stop(actor);
-        auto clip = clips.find("eat");
-        if (clip != clips.end()) {
-            for (const auto& event : clip->second.events) {
-                if (event.second == 2 && !s.firedEvents.count(event.first)
-                        && s.stateTime >= event.first / 30.0f) {
-                    s.firedEvents.insert(event.first);
-                    if (s.captured && s.captured->isAlive()) {
-                        s.captured->stimulate(InteractKill(actor, 0));
-                        std::printf("P2_ARMOR_EAT generator=%u pikmin=1\n", generator);
-                        std::fflush(stdout);
-                    }
-                    s.captured = nullptr;
+        for (const p2armorevents::Dispatched& event : s.events.advance(dt)) {
+            if (event.action == p2armorevents::Action::Eat) {
+                if (s.captured && s.captured->isAlive()) {
+                    s.captured->stimulate(InteractKill(actor, 0));
+                    std::printf("P2_ARMOR_EAT generator=%u pikmin=1\n", generator);
+                    std::fflush(stdout);
                 }
+                s.captured = nullptr;
             }
         }
         if (s.stateTime >= clipDuration("eat")) {
@@ -465,14 +480,12 @@ void pc_p2_armor_update(BTeki* actor) {
     }
     case ARMOR_FLICK: {
         stop(actor);
-        auto clip = clips.find("flick");
-        const int flickFrame = (clip != clips.end() && !clip->second.events.empty())
-                                   ? clip->second.events.front().first : 14;
-        if (!s.firedEvents.count(flickFrame) && s.stateTime >= flickFrame / 30.0f) {
-            s.firedEvents.insert(flickFrame);
-            doFlick(actor, s);
-            std::printf("P2_ARMOR_FLICK generator=%u frame=%d\n", generator, flickFrame);
-            std::fflush(stdout);
+        for (const p2armorevents::Dispatched& event : s.events.advance(dt)) {
+            if (event.action == p2armorevents::Action::Flick) {
+                doFlick(actor, s);
+                std::printf("P2_ARMOR_FLICK generator=%u frame=%d\n", generator, event.frame);
+                std::fflush(stdout);
+            }
         }
         if (s.stateTime >= clipDuration("flick")) {
             std::printf("P2_ARMOR_STATE generator=%u state=move\n", generator);
