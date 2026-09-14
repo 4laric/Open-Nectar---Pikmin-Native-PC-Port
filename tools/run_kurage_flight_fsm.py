@@ -30,6 +30,7 @@ SCENARIOS = {
     "flight-fsm-greater": "--flight-fsm-greater",
     "flight-fsm-greater-drop": "--flight-fsm-greater-drop",
     "flight-fsm-greater-captain": "--flight-fsm-greater-captain",
+    "flight-fsm-stuck-flick": "--flight-fsm-stuck-flick",
 }
 
 

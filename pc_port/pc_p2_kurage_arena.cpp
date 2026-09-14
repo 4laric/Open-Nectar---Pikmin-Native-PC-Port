@@ -14,6 +14,7 @@
 #include "pc_p2_captain_policy.h"
 #include "pc_p2_kurage_fsm.h"
 #include "pc_p2_onikurage_mouth.h"
+#include "pc_p2_sampled_clock.h"
 #include "pc_p2_kurage_receiver.h"
 #include "pc_p2_retail_player.h"
 #include "pc_p2_kurage_visual.h"
@@ -67,9 +68,12 @@ struct Host {
     int autoAdmissions = 0;
     p2kurage::KeyEvent pendingKey = p2kurage::KeyEvent::None;
     bool fsmMotionFinished = false;
-    // Bounded animation-END stand-in while the converted MOD is a static pose.
-    // The real source motion-end event belongs to the #431 animation clock.
+    // Bounded animation-END fallback for states with no imported clip.
     int fsmMotionTimer = 0;
+    // Real source animation clock (lane 08 #431 contract) for non-Attack states.
+    p2sampled::Clock stateClock;
+    bool stateClockActive = false;
+    std::uint64_t clockCycle = 0;
     // Greater (OniKurage, id 72) selection and the labelled captain-held seam.
     p2kurage::Variant variant = p2kurage::Variant::Lesser;
     bool captainHeld = false;
@@ -104,6 +108,41 @@ constexpr float kAttackFramesPerSecond = 30.0f;
 // Bounded OniKurage StateDrop gravity (the source falls under creature physics;
 // the host owns the integration until that seam exists).
 constexpr float kDropGravity = 300.0f;
+
+// Source Kurage animation clips: durations from the ANF1 header (low 16 bits of
+// the third uint32) and events from enemyanimmgr.txt.  KeyEvents are carried as
+// the source event type ("2"/"3"/"1"); the attack clip stays on the retail
+// Player that also owns the suction window.
+p2sampled::Clip makeStateClip(const char* name, int duration, double loopBegin, double loopEnd,
+                              std::initializer_list<std::pair<int, const char*>> events)
+{
+    p2sampled::Clip clip;
+    clip.poses.name = name;
+    clip.poses.count = 1;
+    clip.poses.duration = duration;
+    clip.loopBegin = loopBegin;
+    clip.loopEnd = loopEnd;
+    for (const auto& e : events) clip.events.push_back(p2sampled::Event{e.first, e.second});
+    return clip;
+}
+const p2sampled::Clip* stateClip(int state)
+{
+    static const p2sampled::Clip clips[] = {
+        makeStateClip("dead1.bca", 96, 0.0, -1.0, { { 33, "2" }, { 93, "3" } }), // 0 Dead
+        makeStateClip("wait.bca", 35, 0.0, 34.0, {}),                            // 1 Wait
+        makeStateClip("move1.bca", 60, 0.0, 59.0, {}),                           // 2 Move
+        makeStateClip("move1.bca", 60, 0.0, 59.0, {}),                           // 3 Chase
+        makeStateClip("", 0, 0.0, -1.0, {}),                                     // 4 Attack (Player)
+        makeStateClip("type1.bca", 75, 0.0, -1.0, { { 32, "2" } }),              // 5 Fall
+        makeStateClip("type2.bca", 20, 0.0, 19.0, {}),                           // 6 Land
+        makeStateClip("wait.bca", 35, 0.0, 34.0, {}),                            // 7 Ground
+        makeStateClip("type2.bca", 20, 0.0, 19.0, {}),                           // 8 TakeOff
+        makeStateClip("flick1.bca", 60, 0.0, -1.0, { { 16, "2" } }),             // 9 FlyFlick
+        makeStateClip("flick2.bca", 60, 0.0, -1.0, { { 20, "2" }, { 30, "3" } }),// 10 GroundFlick
+    };
+    if (state < 0 || state > 10) return nullptr;
+    return clips[state].poses.name.empty() ? nullptr : &clips[state];
+}
 // Retail Kurage/attack.bca SHA-256 302660c6ba9c86fee11cc6aca98bd514e201a80d8530be3a5cce867a9dc74a4e.
 // ANF1 is big-endian: loop attribute 2, duration 0x0078 (120), 12 joints.
 // enemyanimmgr.txt supplies the source event table below.
@@ -182,6 +221,7 @@ void pc_p2_kurage_arena_reset()
     sHost.fsmEnabled = false; sHost.fsmTicks = 0; sHost.lastFsmState = -1; sHost.fsmAltitude = 0.0f;
     sHost.fsmHealth = kFsmLiveHealth; sHost.ownerHasHealth = true; sHost.ownerBittered = false;
     sHost.autoAdmissions = 0; sHost.pendingKey = p2kurage::KeyEvent::None; sHost.fsmMotionFinished = false; sHost.fsmMotionTimer = 0;
+    sHost.stateClock.cancel(); sHost.stateClockActive = false; sHost.clockCycle = 0;
     sHost.variant = p2kurage::Variant::Lesser; sHost.captainHeld = false; sHost.captainSettled = true; sHost.fallVelocity = 0.0f;
     sHost.captainPolicy = nullptr; sHost.captainTarget = -1; sHost.captainNavi = nullptr;
     sHost.captainSlots.reset(); sHost.captorEpoch = 0; sHost.captainCaptured = false;
@@ -220,6 +260,7 @@ bool pc_p2_kurage_arena_setup(const char* profilePath)
     sHost.fsmEnabled = false; sHost.fsmTicks = 0; sHost.lastFsmState = -1; sHost.fsmAltitude = 0.0f;
     sHost.fsmHealth = kFsmLiveHealth; sHost.ownerHasHealth = true; sHost.ownerBittered = false;
     sHost.autoAdmissions = 0; sHost.pendingKey = p2kurage::KeyEvent::None; sHost.fsmMotionFinished = false; sHost.fsmMotionTimer = 0;
+    sHost.stateClock.cancel(); sHost.stateClockActive = false; sHost.clockCycle = 0;
     sHost.variant = p2kurage::Variant::Lesser; sHost.captainHeld = false; sHost.captainSettled = true; sHost.fallVelocity = 0.0f;
     sHost.captainPolicy = nullptr; sHost.captainTarget = -1; sHost.captainNavi = nullptr;
     sHost.captainSlots.reset(); sHost.captorEpoch = 0; sHost.captainCaptured = false;
@@ -275,16 +316,30 @@ bool pc_p2_kurage_arena_update(float delta, bool ownerAlive)
         in.naviSuckFinished = captainRoute ? sHost.captainSlots.isFinishNaviSuck() : sHost.captainSettled;
         in.velocityY = -sHost.fallVelocity;
         in.motionFrame = sHost.attackPlaying ? sHost.attackPlayer.frame() : 0.0f;
-        // Bounded animation-END: the attack clock owns the Attack interval; the
-        // other states use a fixed period until the #431 motion-event bridge
-        // supplies real clip completion.
+        // Real source animation clock (lane 08 #431 contract) for the current
+        // non-Attack state: durations/events transcribed from the source BCA
+        // headers and enemyanimmgr.txt.
+        bool clockMotionEnd = false;
+        p2kurage::KeyEvent clockKey = p2kurage::KeyEvent::None;
+        if (sHost.stateClockActive) {
+            const p2sampled::Batch batch = sHost.stateClock.advance(delta * kAttackFramesPerSecond);
+            for (const p2sampled::Occurrence& occ : batch.events) {
+                if (occ.key == "2") clockKey = p2kurage::KeyEvent::Key2;
+                else if (occ.key == "3") clockKey = p2kurage::KeyEvent::Key3;
+                else if (occ.key == "1") clockKey = p2kurage::KeyEvent::Key1;
+            }
+            if (sHost.stateClock.finished() || sHost.stateClock.cycle() != sHost.clockCycle) clockMotionEnd = true;
+            sHost.clockCycle = sHost.stateClock.cycle();
+        }
+        // Bounded animation-END fallback for states with no imported clip.
         bool motionEnd = false;
-        if (!sHost.attackPlaying && ++sHost.fsmMotionTimer >= kFsmMotionFrames) {
+        if (!sHost.attackPlaying && !sHost.stateClockActive
+            && ++sHost.fsmMotionTimer >= kFsmMotionFrames) {
             sHost.fsmMotionTimer = 0;
             motionEnd = true;
         }
-        in.motionFinished = sHost.fsmMotionFinished || motionEnd;
-        in.keyEvent = sHost.pendingKey;
+        in.motionFinished = sHost.fsmMotionFinished || motionEnd || clockMotionEnd;
+        in.keyEvent = clockKey != p2kurage::KeyEvent::None ? clockKey : sHost.pendingKey;
         sHost.pendingKey = p2kurage::KeyEvent::None;
         sHost.fsmMotionFinished = false;
 
@@ -303,6 +358,15 @@ bool pc_p2_kurage_arena_update(float delta, bool ownerAlive)
         const int prevState = sHost.lastFsmState;
         if ((int)out.state != sHost.lastFsmState) {
             sHost.lastFsmState = (int)out.state;
+            const p2sampled::Clip* clip = stateClip((int)out.state);
+            if (clip && out.state != p2kurage::State::Attack) {
+                sHost.stateClock.start(*clip);
+                sHost.stateClockActive = true;
+                sHost.clockCycle = 0;
+            } else {
+                sHost.stateClock.cancel();
+                sHost.stateClockActive = false;
+            }
             std::printf("P2_KURAGE_FSM state=%d motion=%d altitude=%.3f vy=%.3f ticks=%d\n",
                 (int)out.state, (int)out.motion, out.altitude, out.heightVelocity, sHost.fsmTicks);
         }
@@ -360,6 +424,13 @@ bool pc_p2_kurage_arena_update(float delta, bool ownerAlive)
                 }
             }
         }
+        if (out.flickStick) {
+            // KurageState flickStickPikmin: eject Pikmin the Kurage holds.
+            const int released = pc_p2_kurage_receiver_count();
+            pc_p2_kurage_receiver_release_all();
+            std::printf("P2_KURAGE_FLICK_STICK released=%d\n", released);
+        }
+        if (out.flickNearby) std::printf("P2_KURAGE_FLICK_NEARBY\n");
         sHost.fsmTicks++;
         pc_p2_kurage_receiver_update(delta, true, sHost.ownerHasHealth, sHost.ownerBittered);
         return true;

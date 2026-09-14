@@ -35,7 +35,7 @@
 #include <string>
 
 namespace {
-bool sKillScenario = false, sTransferScenario = false, sStageExitScenario = false, sAdmissionScenario = false, sAutomaticBindingScenario = false, sOniKurageScenario = false, sIngestionScenario = false, sFlightFsmScenario = false, sFlightFsmDeathScenario = false, sFlightFsmGreaterScenario = false, sFlightFsmGreaterDropScenario = false, sAutoFsmScenario = false, sFlightFsmGreaterCaptainScenario = false;
+bool sKillScenario = false, sTransferScenario = false, sStageExitScenario = false, sAdmissionScenario = false, sAutomaticBindingScenario = false, sOniKurageScenario = false, sIngestionScenario = false, sFlightFsmScenario = false, sFlightFsmDeathScenario = false, sFlightFsmGreaterScenario = false, sFlightFsmGreaterDropScenario = false, sAutoFsmScenario = false, sFlightFsmGreaterCaptainScenario = false, sFlightFsmStuckFlickScenario = false;
 void require(bool value, const char* message)
 {
     if (!value) { std::printf("FAIL KURAGE_RUNTIME %s\n", message); std::fflush(stdout); std::_Exit(1); }
@@ -104,7 +104,8 @@ class KurageApp final : public PlugPikiApp {
 public:
     int idle() override {
         int result = PlugPikiApp::idle();
-        require(++frames < (sFlightFsmGreaterCaptainScenario ? 3600 : (sAutoFsmScenario ? 2400 : 900)), "timeout");
+        require(++frames < (sFlightFsmGreaterCaptainScenario ? 3600
+            : (sAutoFsmScenario || sFlightFsmStuckFlickScenario) ? 2400 : 900), "timeout");
         if (gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive) { gameflow.mMoviePlayer->requestSkip(); return result; }
         if (sAutomaticBindingScenario) {
             if (!tekiMgr) return result;
@@ -235,7 +236,7 @@ public:
             }
             if (sFlightFsmScenario || sFlightFsmDeathScenario
                 || sFlightFsmGreaterScenario || sFlightFsmGreaterDropScenario
-                || sFlightFsmGreaterCaptainScenario) {
+                || sFlightFsmGreaterCaptainScenario || sFlightFsmStuckFlickScenario) {
                 // Source flight lifecycle drives the host; the candidate sits
                 // inside the source suction window until the Attack state's
                 // autonomous admission scan claims it.
@@ -342,6 +343,30 @@ public:
             require(!piki->isAlive() && !piki->isStickTo() && piki->getStickObject() == nullptr, "receiver digest state");
             std::puts("P2_KURAGE_DIGEST_PASS alive16=1 half16_25=0.5 external_detach_scale=1 bitter_pause=1 health_pause=1 dead16_5=1 release_scale=1");
             receiverTested = true;
+        }
+        if (sFlightFsmStuckFlickScenario) {
+            ++fsmTicks;
+            Creature* host = pc_p2_kurage_arena_owner();
+            // A stuck Pikmin raises the source fall timer; after the shake time
+            // the FSM enters FlyFlick and the real flick1.bca KEY2 ejects it.
+            if (fsmPiki && fsmPiki->isAlive() && !pc_p2_kurage_receiver_controls(fsmPiki) && host)
+                fsmPiki->resetPosition(Vector3f(host->mSRT.t.x, host->mSRT.t.y - 30.0f, host->mSRT.t.z));
+            require(pc_p2_kurage_arena_update(1.0f / 60.0f, true), "stuck flick host update");
+            if (fsmStage == 0) {
+                if (pc_p2_kurage_receiver_stomach_count() == 1) fsmStage = 1;
+                else require(fsmTicks < 900, "stuck flick admission timeout");
+                return result;
+            }
+            if (pc_p2_kurage_receiver_count() == 0) {
+                require(fsmPiki->isAlive() && !fsmPiki->isStickTo() && fsmPiki->mSRT.s.x == 1.0f,
+                    "flick releases attached piki");
+                std::printf("P2_KURAGE_STUCK_FLICK_PASS flick_released=1 alive=1 scale_restored=1 state=%d\n",
+                    pc_p2_kurage_arena_fsm_state());
+                std::puts("PASS KURAGE_RUNTIME flight_fsm_stuck_flick");
+                std::fflush(stdout); std::_Exit(0);
+            }
+            require(fsmTicks < 1500, "stuck flick timeout");
+            return result;
         }
         if (sFlightFsmGreaterCaptainScenario) {
             ++fsmTicks;
@@ -545,6 +570,7 @@ int main(int argc, char** argv)
         if (std::string(argv[i]) == "--flight-fsm-greater-drop") sFlightFsmGreaterDropScenario = true;
         if (std::string(argv[i]) == "--receiver-auto-fsm") { sAutomaticBindingScenario = true; sAutoFsmScenario = true; }
         if (std::string(argv[i]) == "--flight-fsm-greater-captain") sFlightFsmGreaterCaptainScenario = true;
+        if (std::string(argv[i]) == "--flight-fsm-stuck-flick") sFlightFsmStuckFlickScenario = true;
     }
     SDL_setenv("SDL_AUDIODRIVER", "dummy", 1); SDL_SetMainReady();
     pc_gpu_preference_apply(); _putenv_s("PIKMIN_RANDOMIZER_TEST_BACKGROUND", "1"); pc_bbft_init(argc, argv);
