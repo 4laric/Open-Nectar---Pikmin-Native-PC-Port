@@ -2589,6 +2589,34 @@ bool InteractWind::actNavi(Navi* navi) immut
 
 /**
  * @todo: Documentation
+ *
+ * P2 electric Navi receiver (#408). Source `InteractDenki::actNavi`
+ * (native/pikmin2-research/src/plugProjectKandoU/interactNavi.cpp:85) flicks
+ * the captain with the source force/direction unless Olimar has the Dream
+ * Material. The port has no Dream Material gate, so this mirrors the existing
+ * `InteractFire::actNavi`/`InteractBubble::actNavi` flick behavior.
+ */
+bool InteractDenki::actNavi(Navi* navi) immut
+{
+	if (navi->mStateMachine->getNaviState(navi)->invincible(navi)) {
+		return false;
+	}
+
+	navi->mHealth -= mDamage;
+	navi->mLifeGauge.updValue(navi->mHealth, C_NAVI_PARM(navi, mHealth));
+	navi->startDamageEffect();
+	rumbleMgr->start(RUMBLE_Unk1, 0, nullptr);
+	SeSystem::playPlayerSe(SE_FIRED);
+	if (navi->mHealth <= 1.0f) {
+		GameCoreSection::startPause(COREPAUSE_Unk1 | COREPAUSE_Unk3 | COREPAUSE_Unk16);
+	}
+	navi->mFlickIntensity = 2.0f;
+	navi->mStateMachine->transit(navi, NAVISTATE_Flick);
+	return true;
+}
+
+/**
+ * @todo: Documentation
  */
 bool InteractSuck::actNavi(Navi* navi) immut
 {

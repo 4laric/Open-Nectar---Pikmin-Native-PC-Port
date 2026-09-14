@@ -214,6 +214,73 @@ bool InteractFire::actPiki(Piki* piki) immut
 
 /**
  * @todo: Documentation
+ *
+ * P2 electric receiver (#170/#408). Source `InteractDenki::actPiki`
+ * (native/pikmin2-research/src/plugProjectKandoU/interactPiki.cpp:334) rejects
+ * Yellow and Bulbmin and otherwise transits to `PIKISTATE_DenkiDying`. This
+ * port has no `PIKISTATE_Denki*` state: non-immune Piki take the closest
+ * existing lethal path (`PIKISTATE_Dying`) and the missing P2 state is logged
+ * and recorded as the blocker. The routing is matrix-driven, so P2 Bulbmin is
+ * covered without a separate colour test.
+ */
+bool InteractDenki::actPiki(Piki* piki) immut
+{
+	if (!piki->isAlive()) {
+		return false;
+	}
+
+	int state = piki->getState();
+	if (state == PIKISTATE_Dying || state == PIKISTATE_Dead) {
+		return false;
+	}
+
+	if (p2_species_immune(pc_p2_species(piki), P2HazardElectric)) {
+		return false;
+	}
+
+	PRINT("P2_RECV_DENKI species=%d accepted=1 p2_state=PIKISTATE_DenkiDying missing using=PIKISTATE_Dying\n",
+	      pc_p2_species(piki));
+	piki->mFSM->transit(piki, PIKISTATE_Dying);
+	return true;
+}
+
+/**
+ * @todo: Documentation
+ *
+ * P2 gas receiver (#170/#408). Source `InteractGas::actPiki`
+ * (native/pikmin2-research/src/plugProjectKandoU/interactPiki.cpp:531) checks
+ * `Piki::gasInvicible()` and rejects White and Bulbmin, otherwise requesting
+ * `PIKISTATE_Panic` with `PIKIPANIC_Gas`. This port has neither a panic/gas
+ * state nor a gas-invincibility timer: non-immune Piki take the closest
+ * existing panic-style path (`PIKISTATE_Fired`) and both missing inputs are
+ * logged and recorded as the blocker. Routing stays matrix-driven so P2
+ * Bulbmin is covered.
+ */
+bool InteractGas::actPiki(Piki* piki) immut
+{
+	if (!piki->isAlive()) {
+		return false;
+	}
+
+	int state = piki->getState();
+	if (state == PIKISTATE_Dying || state == PIKISTATE_Dead || state == PIKISTATE_Fired) {
+		return false;
+	}
+
+	if (p2_species_immune(pc_p2_species(piki), P2HazardGas)) {
+		return false;
+	}
+
+	PRINT("P2_RECV_GAS species=%d accepted=1 p2_state=PIKISTATE_Panic(gas) missing using=PIKISTATE_Fired "
+	      "gasInvicible=missing\n",
+	      pc_p2_species(piki));
+	piki->changeMode(0, piki->mNavi);
+	piki->mFSM->transit(piki, PIKISTATE_Fired);
+	return true;
+}
+
+/**
+ * @todo: Documentation
  */
 bool InteractWind::actCommon(Creature*) immut
 {
