@@ -38,6 +38,10 @@ p2_sarai_policy_test.exe   # p2_sarai_policy_test PASS checks=38
 - `attackExit`: symbolic Attack transitions (`Fail` / `CatchFly` / `Move`).
 - `catchFlyReadyForHeightDecision`: altitude > `fp03`, general timer > 3.0 s,
   or motion `END`.
+- `targetable` (`getAttackableTarget`): only inside `mTerritoryRadius`; candidate
+  must be alive, a Pikmin, not mouth-stuck, not stuck to this Sarai, on a floor
+  triangle, within the view half-angle and within `mSightRadius`. `viewHalfAngle`
+  transcribes the source expression `PI * (DEG2RAD * mViewAngle)` verbatim.
 
 ## Deliberate exclusions
 
@@ -48,9 +52,10 @@ shared-semantics concerns and stay on their owning lanes/contracts.
 
 ## Evidence
 
-- `tools/p2_sarai_policy_test.cpp` — 38 assertions across the climb factor,
+- `tools/p2_sarai_policy_test.cpp` — 49 assertions across the climb factor,
   height velocity, latch accounting, escape/drop probability (including
   monotonicity), random-target radius branches, FallMeck velocity, Attack catch
-  frame window and transitions, and the CatchFly decision trigger.
+  frame window and transitions, the CatchFly decision trigger, and
+  `getAttackableTarget` geometry.
 - Compiler: MinGW-w64 g++ 16.2.0, warning-clean under
   `-std=gnu++17 -Wall -Wextra -Werror`.

@@ -82,6 +82,43 @@ int main()
     require(catchFlyReadyForHeightDecision(10.0f, 0.0f, parms, true), "motion END decides");
     require(!catchFlyReadyForHeightDecision(10.0f, 1.0f, parms, false), "below thresholds keeps flying");
 
+    // --- getAttackableTarget geometry ---
+    {
+        TargetQuery query;
+        query.sqrDistToHome = 100.0f * 100.0f;
+        query.territoryRadius = 400.0f;
+        query.sightRadius = 300.0f;
+        query.viewAngleDeg = 180.0f;
+
+        TargetCandidate good;
+        good.sqrDistXZ = 150.0f * 150.0f;
+        require(targetable(query, good), "in-territory valid Pikmin is targetable");
+
+        TargetCandidate far = good; far.sqrDistXZ = 301.0f * 301.0f;
+        require(!targetable(query, far), "beyond sight radius is rejected");
+
+        TargetCandidate dead = good; dead.alive = false;
+        require(!targetable(query, dead), "dead candidate rejected");
+        TargetCandidate flower = good; flower.isPikmin = false;
+        require(!targetable(query, flower), "non-Pikmin rejected");
+        TargetCandidate mouth = good; mouth.stickToMouth = true;
+        require(!targetable(query, mouth), "mouth-stuck rejected");
+        TargetCandidate self = good; self.stickerIsSelf = true;
+        require(!targetable(query, self), "already stuck to this Sarai rejected");
+        TargetCandidate air = good; air.floorTriangle = false;
+        require(!targetable(query, air), "airborne (no floor triangle) rejected");
+
+        TargetQuery outside = query; outside.sqrDistToHome = 400.0f * 400.0f;
+        require(!targetable(outside, good), "outside territory is not scanned");
+
+        TargetQuery narrow = query; narrow.viewAngleDeg = 1.0f;
+        TargetCandidate onAxis = good; onAxis.angleRad = 0.01f;
+        TargetCandidate offAxis = good; offAxis.angleRad = 0.10f;
+        require(targetable(narrow, onAxis), "candidate inside the view half-angle accepted");
+        require(!targetable(narrow, offAxis), "candidate outside the view half-angle rejected");
+        require(near(viewHalfAngle(180.0f), kPi * kPi), "view half-angle transcribes PI*(DEG2RAD*angle)");
+    }
+
     std::printf("p2_sarai_policy_test PASS checks=%d\n", gChecks);
     std::fflush(stdout);
     return 0;

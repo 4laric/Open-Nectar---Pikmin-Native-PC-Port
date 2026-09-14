@@ -23,6 +23,9 @@ namespace p2sarai {
 constexpr int kMouthSlots = 2;
 constexpr float kMouthRadius = 15.0f;
 
+constexpr float kPi = 3.14159265358979323846f;
+constexpr float kDeg2Rad = kPi / 180.0f;
+
 // Sarai.cpp setHeightVelocity(): MAX_PIKMIN_STUCK_FACTOR 5, and the payoff
 // interpolation indexes 0..4 (getNextStateOnHeight()).
 constexpr int kMaxWeightFactor = 5;
@@ -134,6 +137,47 @@ inline bool catchFlyReadyForHeightDecision(float heightAboveMap, float generalTi
 {
     if (heightAboveMap > parms.stateTransitionHeight || generalTimer > 3.0f || atEnd) return true;
     return false;
+}
+
+// --- getAttackableTarget() geometry (Sarai.cpp) ------------------------------
+//
+// The source only scans while Sarai is inside its territory, then admits a
+// candidate that is alive, a Pikmin, not already mouth-stuck, not stuck to this
+// Sarai, and standing on a floor triangle, within the view half-angle and the
+// sight radius. `viewHalfAngle` transcribes the source expression verbatim
+// (`PI * (DEG2RAD * mViewAngle)`).
+struct TargetCandidate {
+    bool alive = true;
+    bool isPikmin = true;
+    bool stickToMouth = false;
+    bool stickerIsSelf = false;
+    bool floorTriangle = true;
+    float angleRad = 0.0f;      // getAngDist(candidate)
+    float sqrDistXZ = 0.0f;     // squared XZ distance to Sarai
+};
+
+struct TargetQuery {
+    float sqrDistToHome = 0.0f;
+    float territoryRadius = 0.0f;
+    float viewAngleDeg = 0.0f;  // mViewAngle
+    float sightRadius = 0.0f;   // mSightRadius
+};
+
+inline float viewHalfAngle(float viewAngleDeg) { return kPi * (kDeg2Rad * viewAngleDeg); }
+
+inline bool targetable(const TargetQuery& query, const TargetCandidate& candidate)
+{
+    if (query.sqrDistToHome >= query.territoryRadius * query.territoryRadius) return false;
+    if (!candidate.alive || !candidate.isPikmin || candidate.stickToMouth
+        || candidate.stickerIsSelf || !candidate.floorTriangle) {
+        return false;
+    }
+    if (candidate.angleRad > viewHalfAngle(query.viewAngleDeg)
+        || -candidate.angleRad > viewHalfAngle(query.viewAngleDeg)) {
+        return false;
+    }
+    if (candidate.sqrDistXZ >= query.sightRadius * query.sightRadius) return false;
+    return true;
 }
 
 } // namespace p2sarai
