@@ -244,6 +244,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_groink_strike.cpp
     pc_port/pc_p2_projectiles.cpp
     pc_port/pc_p2_hardlanes.cpp
+    pc_port/pc_p2_fuefuki_visual.cpp
+    pc_port/pc_p2_fuefuki_motion.cpp
     pc_port/pc_p2_bombsarai_arena.cpp
     pc_port/pc_p2_bombsarai_blast.cpp
     pc_port/pc_p2_bombsarai_bomb.cpp
