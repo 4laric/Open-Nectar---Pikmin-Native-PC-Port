@@ -475,10 +475,10 @@ int main(int argc, char** argv)
     pc_bbft_init(argc, argv);
     require(pc_pikipelago_room_preview(), "requires --experimental-pikmin2-room");
     require(pc_window_init("BigTreasure host-seam runtime fixture", 960, 540), "window init");
-    if (SDL_Window* window = SDL_GL_GetCurrentWindow()) {
-        SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-    }
     pc_settings_init();
+    pc_window_set_display_mode(PC_WINDOW_FULLSCREEN_WINDOWED);
+    pc_window_set_window_size(960, 540);
+    pc_window_center();
     gsys->Initialise();
     pc_settings_p2d_init();
     nodeMgr = new NodeMgr();
