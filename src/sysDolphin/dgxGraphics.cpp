@@ -1432,9 +1432,9 @@ void DGXGraphics::drawSingleMatpoly(Shape* model, Joint::MatPoly* matPoly)
 			}
 		}
 
-		// Opt-in camera-facing billboard (#429): re-upload the draw matrix as
-		// joint * inverse(model*view rotation) for flagged meshes.
-		if ((mesh.mFeatureFlags & Mesh::FeatureFlags::Billboard) && mLastModelMatrix && mCamera) {
+		// Opt-in camera-facing billboard (#429): re-upload the draw matrix as the
+		// pivot-preserving, screen-aligned matrix for flagged meshes.
+		if ((mesh.mFeatureFlags & Mesh::FeatureFlags::Billboard) && viewMtx) {
 			for (int depListIdx = 0; depListIdx < group.mDepLength && depListIdx < 10; ++depListIdx) {
 				int depMtxIdx = group.mDepList[depListIdx];
 				if (depMtxIdx == -1) {
@@ -1449,16 +1449,13 @@ void DGXGraphics::drawSingleMatpoly(Shape* model, Joint::MatPoly* matPoly)
 				} else {
 					joint = &model->mJointList[vtxMtx.mIndex].mAnimMatrix;
 				}
-				if (p2billboard::facingMatrix(billboardMatrices[depListIdx], *joint, *mLastModelMatrix,
-				                              mCamera->mLookAtMtx)) {
+				if (p2billboard::billboardFromJoint(billboardMatrices[depListIdx], *joint, *viewMtx)) {
 					useMatrixQuick(billboardMatrices[depListIdx], depListIdx);
-					if (viewMtx) {
-						const float off = p2billboard::offDiagonal(*viewMtx, billboardMatrices[depListIdx]);
-						p2billboard::Stats& stats = p2billboard::stats();
-						++stats.draws;
-						if (off > stats.max_offdiagonal) {
-							stats.max_offdiagonal = off;
-						}
+					const float off = p2billboard::offDiagonal(*viewMtx, billboardMatrices[depListIdx]);
+					p2billboard::Stats& stats = p2billboard::stats();
+					++stats.draws;
+					if (off > stats.max_offdiagonal) {
+						stats.max_offdiagonal = off;
 					}
 				}
 			}

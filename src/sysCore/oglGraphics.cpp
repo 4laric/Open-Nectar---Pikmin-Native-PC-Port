@@ -695,22 +695,20 @@ void OGLGraphics::drawSingleMatpoly(Shape* model, Joint::MatPoly* matPoly)
 		}
 
 		// Opt-in camera-facing billboard (#429): replace the mesh's draw matrix
-		// with joint * inverse(model*view rotation). Geometry is pivot-centred so
-		// concatenation keeps the authored placement.
-		if ((mesh.mFeatureFlags & Mesh::FeatureFlags::Billboard) && mLastModelMatrix && mCamera) {
+		// with one that is screen-aligned under the active GPU matrix. Geometry
+		// is pivot-centred so the joint translation keeps the authored placement.
+		if ((mesh.mFeatureFlags & Mesh::FeatureFlags::Billboard) && mActiveMatrix) {
 			for (int depListIdx = 0; depListIdx < mtxGroup.mDepLength && depListIdx < 10; ++depListIdx) {
 				if (!animMatrices[depListIdx]) {
 					continue;
 				}
-				if (p2billboard::facingMatrix(billboardMatrices[depListIdx], *animMatrices[depListIdx],
-				                              *mLastModelMatrix, mCamera->mLookAtMtx)) {
-					if (mActiveMatrix) {
-						const float off = p2billboard::offDiagonal(*mActiveMatrix, billboardMatrices[depListIdx]);
-						p2billboard::Stats& stats = p2billboard::stats();
-						++stats.draws;
-						if (off > stats.max_offdiagonal) {
-							stats.max_offdiagonal = off;
-						}
+				if (p2billboard::billboardFromJoint(billboardMatrices[depListIdx], *animMatrices[depListIdx],
+				                                    *mActiveMatrix)) {
+					const float off = p2billboard::offDiagonal(*mActiveMatrix, billboardMatrices[depListIdx]);
+					p2billboard::Stats& stats = p2billboard::stats();
+					++stats.draws;
+					if (off > stats.max_offdiagonal) {
+						stats.max_offdiagonal = off;
 					}
 					animMatrices[depListIdx] = &billboardMatrices[depListIdx];
 				}

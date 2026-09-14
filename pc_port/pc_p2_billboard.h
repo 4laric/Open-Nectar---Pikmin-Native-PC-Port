@@ -1,52 +1,43 @@
 #pragma once
-// Camera-facing billboard rotation for flagged MOD meshes (#429, parent #128).
+// Camera-facing billboard math for flagged MOD meshes (#429, parent #128).
 //
-// The converted MOD format bakes all geometry through its joints, so a
-// billboard shape is emitted pivot-centred and re-placed by the joint's
-// translation. At draw time the draw matrix for a flagged mesh keeps the
-// joint's translation/scale but replaces its rotation with the inverse of the
-// combined model*view rotation, so the mesh faces the camera in view space.
+// The PC port renders a shape's vertices on the CPU through its per-joint
+// matrices and then applies the "active" matrix (the matrix last passed to
+// Graphics::useMatrix) on the GPU. Callers differ: some bake lookAt*model into
+// the joint matrices and use an identity active matrix, others keep model-space
+// joints and apply lookAt*model on the GPU. Both reduce to one rule:
+//
+//     final = active * joint;   we want final's rotation to be screen-aligned.
+//
+// So the flagged mesh's draw matrix keeps the joint's pivot translation and
+// uniform scale but takes the rotation `scale * active.rotation^T`.
 //
 // This header is engine-independent (plain 3x3 floats) so the standalone probe
-// shares the exact same math as the renderer.
+// shares the exact same rotation math as the renderer.
 #include <cmath>
 
 namespace p2billboard {
 
-// out = normalized((model * view).rotation)^T.
-//
-// `model` and `view` are row-major 3x3 rotation extracts of the active model
-// matrix and the camera view matrix. Returns false (leaving `out` untouched)
-// when a basis column degenerates, in which case the caller keeps the plain
-// joint matrix.
-inline bool facingRotation(float out[3][3], const float model[3][3], const float view[3][3]) {
-    // combined = view * model
-    float combined[3][3];
-    for (int i = 0; i < 3; ++i) {
-        for (int j = 0; j < 3; ++j) {
-            combined[i][j] = view[i][0] * model[0][j]
-                           + view[i][1] * model[1][j]
-                           + view[i][2] * model[2][j];
-        }
-    }
-    // Normalize each basis column so any model/joint scale survives while the
-    // orientation is orthonormalised.
+// out = scale * normalised(active).rotation^T. Returns false (leaving `out`
+// untouched) when an active basis column degenerates; the caller then keeps the
+// plain joint matrix.
+inline bool screenRotation(float out[3][3], const float active[3][3], float scale) {
+    float basis[3][3];
     for (int j = 0; j < 3; ++j) {
-        const float norm = combined[0][j] * combined[0][j]
-                         + combined[1][j] * combined[1][j]
-                         + combined[2][j] * combined[2][j];
+        const float norm = active[0][j] * active[0][j]
+                         + active[1][j] * active[1][j]
+                         + active[2][j] * active[2][j];
         if (norm < 1e-12f) {
             return false;
         }
         const float inv = 1.0f / std::sqrt(norm);
         for (int i = 0; i < 3; ++i) {
-            combined[i][j] *= inv;
+            basis[i][j] = active[i][j] * inv;
         }
     }
-    // Inverse of an orthonormal rotation is its transpose.
     for (int i = 0; i < 3; ++i) {
         for (int j = 0; j < 3; ++j) {
-            out[i][j] = combined[j][i];
+            out[i][j] = scale * basis[j][i];
         }
     }
     return true;

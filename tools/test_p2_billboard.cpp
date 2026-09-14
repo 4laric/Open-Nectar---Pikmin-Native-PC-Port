@@ -2,10 +2,10 @@
 //
 // Build: g++ -std=c++17 -Wall -Wextra -Werror tools/test_p2_billboard.cpp -o p2_billboard.exe
 //
-// The renderer builds a flagged mesh's draw matrix as joint * rot where
-// rot = normalized(view*model)^T. This proves that concatenation makes the
-// flagged mesh screen-aligned in view space while preserving scale, and that
-// degenerate bases are rejected instead of producing NaNs.
+// The renderer replaces a flagged mesh's draw matrix with one whose rotation is
+// `scale * active.rotation^T`, keeping the joint pivot translation. This proves
+// that `active * billboard` is screen-aligned with the joint scale, the pivot
+// lands where the active matrix puts it, and degenerate bases are rejected.
 #include "../pc_port/pc_p2_billboard.h"
 
 #include <cmath>
@@ -49,10 +49,10 @@ void rotY(float m[3][3], float a) {
     m[2][2] = std::cos(a);
 }
 
-bool isIdentity(const float m[3][3]) {
+bool isScaledIdentity(const float m[3][3], float scale) {
     for (int i = 0; i < 3; ++i) {
         for (int j = 0; j < 3; ++j) {
-            if (!near(m[i][j], (i == j) ? 1.f : 0.f)) {
+            if (!near(m[i][j], (i == j) ? scale : 0.f)) {
                 return false;
             }
         }
@@ -60,144 +60,96 @@ bool isIdentity(const float m[3][3]) {
     return true;
 }
 
-void testIdentityModelView() {
-    float model[3][3], view[3][3], out[3][3];
-    ident(model);
-    ident(view);
-    check(p2billboard::facingRotation(out, model, view), "identity accepted");
-    check(isIdentity(out), "identity model/view -> identity facing");
+void testIdentityActive() {
+    float active[3][3], out[3][3];
+    ident(active);
+    check(p2billboard::screenRotation(out, active, 1.0f), "identity active accepted");
+    check(isScaledIdentity(out, 1.0f), "identity active -> identity rotation");
 }
 
 void testRotationCancelled() {
-    float model[3][3], view[3][3], out[3][3], combined[3][3], product[3][3];
-    float yaw[3][3], pitch[3][3];
-    // model = yaw(0.7)
-    rotY(model, 0.7f);
-    // view = pitch(0.4) * yaw(-0.3)
-    rotY(yaw, -0.3f);
-    ident(pitch);
-    pitch[1][1] = std::cos(0.4f);
-    pitch[1][2] = -std::sin(0.4f);
-    pitch[2][1] = std::sin(0.4f);
-    pitch[2][2] = std::cos(0.4f);
-    matmul(view, pitch, yaw);
-
-    check(p2billboard::facingRotation(out, model, view), "rotated basis accepted");
-
-    matmul(combined, view, model);
-    matmul(product, combined, out);
-    check(isIdentity(product), "view*model*facing is rotation-free");
-}
-
-void testScalePreserved() {
-    float model[3][3], view[3][3], out[3][3];
-    ident(model);
-    rotY(model, 0.9f);
-    // Uniform scale commutes with the rotation and must survive.
-    for (int i = 0; i < 3; ++i) {
-        for (int j = 0; j < 3; ++j) {
-            model[i][j] *= 2.5f;
-        }
-    }
-    ident(view);
-    check(p2billboard::facingRotation(out, model, view), "scaled basis accepted");
-    // out is orthonormal (unit columns) so the draw keeps the model's scale.
-    for (int j = 0; j < 3; ++j) {
-        const float n = std::sqrt(out[0][j] * out[0][j] + out[1][j] * out[1][j]
-                                  + out[2][j] * out[2][j]);
-        check(near(n, 1.f), "facing columns are unit length");
-    }
+    float active[3][3], out[3][3], product[3][3];
+    rotY(active, 0.7f);
+    check(p2billboard::screenRotation(out, active, 2.0f), "rotated active accepted");
+    matmul(product, active, out);
+    check(isScaledIdentity(product, 2.0f), "active * rotation is scaled identity");
 }
 
 void testDegenerateRejected() {
-    float model[3][3], view[3][3], out[3][3];
-    ident(model);
-    ident(view);
-    model[0][1] = model[1][1] = model[2][1] = 0.f;  // collapse a model column
-    // Zero the combined column by zeroing the corresponding view column too.
-    view[0][1] = view[1][1] = view[2][1] = 0.f;
-    check(!p2billboard::facingRotation(out, model, view), "degenerate basis rejected");
+    float active[3][3], out[3][3];
+    ident(active);
+    active[0][1] = active[1][1] = active[2][1] = 0.f;  // collapse a column
+    check(!p2billboard::screenRotation(out, active, 1.0f), "degenerate active rejected");
 }
 
-// --- Full 4x4 composition: joint translation/pivot handling -----------------
-// Mirrors the renderer: B = joint * R, and the final draw matrix is
-// view * model * B. A flagged mesh must end up screen-aligned (rotation = s*I)
-// and placed at the joint's pivot transformed by view*model.
+// Full 4x4 composition: final = active * billboard(joint, active) must be
+// screen-aligned and place the joint pivot at active * pivot.
+void testPivotComposition() {
+    float active3[3][3], rot[3][3];
+    rotY(active3, 0.6f);
+    const float s = 0.8f;
+    const float px = -4.f, py = 46.f, pz = 0.f;
 
-using M4 = float[4][4];
+    check(p2billboard::screenRotation(rot, active3, s), "composition rotation");
 
-void ident4(M4 m) {
+    // billboard = T(p) * rot
+    float billboard[4][4];
     for (int i = 0; i < 4; ++i) {
         for (int j = 0; j < 4; ++j) {
-            m[i][j] = (i == j) ? 1.f : 0.f;
+            billboard[i][j] = (i == j) ? 1.f : 0.f;
         }
     }
-}
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            billboard[i][j] = rot[i][j];
+        }
+    }
+    billboard[0][3] = px;
+    billboard[1][3] = py;
+    billboard[2][3] = pz;
 
-void mul4(M4 out, const M4 a, const M4 b) {
+    // active = rotation with zero translation
+    float active[4][4];
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) {
+            active[i][j] = (i == j) ? 1.f : 0.f;
+        }
+    }
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            active[i][j] = active3[i][j];
+        }
+    }
+
+    float final[4][4];
     for (int i = 0; i < 4; ++i) {
         for (int j = 0; j < 4; ++j) {
             float sum = 0.f;
             for (int k = 0; k < 4; ++k) {
-                sum += a[i][k] * b[k][j];
+                sum += active[i][k] * billboard[k][j];
             }
-            out[i][j] = sum;
+            final[i][j] = sum;
         }
     }
-}
 
-void fromRot3(M4 out, const float r[3][3]) {
-    ident4(out);
+    float final3[3][3];
     for (int i = 0; i < 3; ++i) {
         for (int j = 0; j < 3; ++j) {
-            out[i][j] = r[i][j];
+            final3[i][j] = final[i][j];
         }
     }
-}
-
-void testPivotComposition() {
-    float model3[3][3], view3[3][3], facing[3][3];
-    rotY(model3, 0.8f);
-    rotY(view3, -0.5f);
-
-    M4 model, view, joint, rot, billboard, vm, product;
-    fromRot3(model, model3);
-    fromRot3(view, view3);
-    ident4(joint);
-    const float s = 0.8f;
-    const float px = -4.f, py = 46.f, pz = 0.f;
-    // joint = T(p) * S(s)
-    joint[0][0] = joint[1][1] = joint[2][2] = s;
-    joint[0][3] = px;
-    joint[1][3] = py;
-    joint[2][3] = pz;
-
-    check(p2billboard::facingRotation(facing, model3, view3), "composition facing");
-    fromRot3(rot, facing);
-    mul4(billboard, joint, rot);
-    mul4(vm, view, model);
-    mul4(product, vm, billboard);
-
-    // Screen-aligned: rotation part is s*I.
+    check(isScaledIdentity(final3, s), "active*billboard is screen-aligned with joint scale");
     for (int i = 0; i < 3; ++i) {
-        for (int j = 0; j < 3; ++j) {
-            check(near(product[i][j], (i == j) ? s : 0.f),
-                  "composed draw matrix is screen-aligned with joint scale");
-        }
-    }
-    // Translation is (view*model) applied to the pivot.
-    for (int i = 0; i < 3; ++i) {
-        const float want = vm[i][0] * px + vm[i][1] * py + vm[i][2] * pz + vm[i][3];
-        check(near(product[i][3], want), "billboard pivot placed by view*model");
+        const float want = active3[i][0] * px + active3[i][1] * py + active3[i][2] * pz;
+        check(near(final[i][3], want), "billboard pivot placed by the active matrix");
     }
 }
 
 }  // namespace
 
 int main() {
-    testIdentityModelView();
+    testIdentityActive();
     testRotationCancelled();
-    testScalePreserved();
     testDegenerateRejected();
     testPivotComposition();
     if (failures == 0) {
