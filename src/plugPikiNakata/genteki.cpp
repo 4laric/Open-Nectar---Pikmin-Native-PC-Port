@@ -132,6 +132,12 @@ Creature* GenObjectTeki::birth(BirthInfo& info)
         std::printf("ENEMY_SLOT_BIRTH uid=%u original=%d actual=%d\n", pc_randomizer_generator_id(info.mGenerator), mTekiType, replacement);
     if (pc_randomizer_enemy_shuffle())
         std::printf("[Pikmin Randomizer] ENEMY_SPAWN original=%d actual=%d protected=%d x=%.1f z=%.1f\n", mTekiType, replacement, int(protectedSpawn), info.mPosition.x, info.mPosition.z);
+    if (pc_randomizer_p2_bridge() && info.mGenerator) {
+        const unsigned source = pc_randomizer_p2_source_for_id(static_cast<unsigned long>(info.mGenerator->_70));
+        if (source)
+            std::printf("P2_SEED_BIND source_id=%u target=%lu original_type=%d x=%.1f z=%.1f\n",
+                        source, static_cast<unsigned long>(info.mGenerator->_70), int(mTekiType), info.mPosition.x, info.mPosition.z);
+    }
 	return teki;
 }
 

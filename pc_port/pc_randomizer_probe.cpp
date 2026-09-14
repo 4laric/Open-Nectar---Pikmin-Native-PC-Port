@@ -50,6 +50,23 @@ int main(int argc, char** argv) {
         assert(pc_randomizer_p2_source(nullptr) == 0);
         std::puts("ENEMY_P2_PASS"); return 0;
     }
+    for (int arg = 1; arg < argc; ++arg) if (!std::strcmp(argv[arg], "--enemy-p2-spawn-probe")) {
+        assert(pc_randomizer_p2_bridge());
+        unsigned bound = 0;
+        for (int i = 1; i + 1 < argc; ++i) if (!std::strcmp(argv[i], "--enemy-p2-target")) {
+            const unsigned long id = std::strtoul(argv[i + 1], nullptr, 10);
+            const unsigned source = pc_randomizer_p2_source_for_id(id);
+            assert(source != 0);
+            std::printf("P2_SPAWN_BIND target=%lu source_id=%u\n", id, source);
+            ++bound;
+        }
+        assert(bound > 0);
+        // Unbound generator identities must resolve to 0 (ordinary P1 spawn).
+        assert(pc_randomizer_p2_source_for_id(0) == 0);
+        assert(pc_randomizer_p2_source_for_id(123456789UL) == 0);
+        assert(pc_randomizer_p2_source_for_id(4294967295UL) == 0);
+        std::puts("ENEMY_P2_SPAWN_PASS"); return 0;
+    }
     for (int arg = 1; arg < argc; ++arg) if (!std::strcmp(argv[arg], "--group-probe")) {
         assert(pc_randomizer_group_slots());
         int objects[12] = {};
