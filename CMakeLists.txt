@@ -844,6 +844,28 @@ add_executable(p2_bigtreasure_motion_test
 target_include_directories(p2_bigtreasure_motion_test PRIVATE pc_port)
 target_compile_options(p2_bigtreasure_motion_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_bigtreasure_motion_test COMMAND p2_bigtreasure_motion_test)
+# Lane 31 (#443 / #175) engine-free Waterwraith/Tyre tests. -UNDEBUG keeps the
+# assert-based fixtures active in the Release native gate.
+add_executable(p2_waterwraith_policy_test
+    tools/p2_waterwraith_test.cpp
+    pc_port/pc_p2_waterwraith.cpp)
+target_include_directories(p2_waterwraith_policy_test PRIVATE pc_port)
+target_compile_options(p2_waterwraith_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_waterwraith_policy_test COMMAND p2_waterwraith_policy_test)
+
+add_executable(p2_waterwraith_actor_test
+    tools/p2_waterwraith_actor_test.cpp
+    pc_port/pc_p2_waterwraith_actor.cpp
+    pc_port/pc_p2_waterwraith.cpp)
+target_include_directories(p2_waterwraith_actor_test PRIVATE pc_port)
+target_compile_options(p2_waterwraith_actor_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_waterwraith_actor_test COMMAND p2_waterwraith_actor_test)
+
+add_executable(p2_waterwraith_attack_policy_test
+    tools/p2_waterwraith_attack_policy_test.cpp)
+target_include_directories(p2_waterwraith_attack_policy_test PRIVATE pc_port)
+target_compile_options(p2_waterwraith_attack_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_waterwraith_attack_policy_test COMMAND p2_waterwraith_attack_policy_test)
 
 add_executable(pc_render_phase_test
     pc_port/timing/pc_render_phase_test.cpp
