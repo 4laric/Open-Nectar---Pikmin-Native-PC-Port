@@ -19,6 +19,7 @@
 #include "pc_p2_enemy.h"
 #include "pc_p2_cave.h"
 #include "pc_p2_kurage_receiver.h"
+#include "pc_p2_second_captain.h"
 #include "pc_p2_breadbug_visual.h"
 #include "pc_p2_giant_breadbug_visual.h"
 #include "pc_p2_giant_breadbug_actor.h"
@@ -1523,8 +1524,17 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 	PRINT("================== NAVI ===================\n");
 	memStat->start("navi");
 	naviMgr = new NaviMgr();
-	naviMgr->create(1);
+	// Lane 12 (#130): strictly opt-in second captain. navi_capacity() is 1
+	// unless PIKMIN_P2_SECOND_CAPTAIN is set AND the live gate allows it; the
+	// gate is deliberately closed until follow-AI/camera/controls/game-over are
+	// ported, so this is inert in normal single-captain play.
+	int naviCapacity = pc_p2_captain::navi_capacity();
+	if (naviCapacity > 1 && !pc_p2_captain::prepare_second_captain_assets(naviMgr)) {
+		naviCapacity = 1;
+	}
+	naviMgr->create(naviCapacity);
 	mNavi = static_cast<Navi*>(naviMgr->birth());
+	if (naviCapacity > 1) pc_p2_captain::birth_second_captain(naviMgr);
 	PRINT("********* navi ==== %x\n", mNavi);
 	gameflow.addGenNode("naviMgr", naviMgr);
 	memStat->end("navi");

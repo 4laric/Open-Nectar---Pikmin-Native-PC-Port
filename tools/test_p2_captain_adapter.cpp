@@ -31,6 +31,10 @@ struct FakeScene {
     FakePiki pikiB;
     int setHealthCalls = 0;
     int setOwnerCalls = 0;
+    int notifyActiveCalls = 0;
+    int lastActiveSlot = P2CaptainInvalid;
+    int notifyKnockoutCalls = 0;
+    int lastKnockoutSlot = P2CaptainInvalid;
 };
 
 P2CaptainHandle fake_captain_at(void* ctx, int slot)
@@ -71,6 +75,20 @@ int fake_enumerate(void* ctx, P2PikiHandle* out, int capacity)
     return count;
 }
 
+void fake_notify_active(void* ctx, int slot)
+{
+    FakeScene* s = static_cast<FakeScene*>(ctx);
+    s->notifyActiveCalls++;
+    s->lastActiveSlot = slot;
+}
+
+void fake_notify_knockout(void* ctx, int slot)
+{
+    FakeScene* s = static_cast<FakeScene*>(ctx);
+    s->notifyKnockoutCalls++;
+    s->lastKnockoutSlot = slot;
+}
+
 P2CaptainHostOps fake_ops(FakeScene& scene)
 {
     P2CaptainHostOps ops;
@@ -82,6 +100,8 @@ P2CaptainHostOps fake_ops(FakeScene& scene)
     ops.ownerSlot    = &fake_owner_slot;
     ops.setOwnerSlot = &fake_set_owner_slot;
     ops.enumerate    = &fake_enumerate;
+    ops.notifyActive   = &fake_notify_active;
+    ops.notifyKnockout = &fake_notify_knockout;
     return ops;
 }
 
@@ -180,6 +200,8 @@ void test_two_captain_transfer_double(FakeScene& scene)
     assert(adapter.switchActive(P2CaptainB));
     assert(adapter.activeCaptain() == P2CaptainB);
     assert(adapter.policy().phase(P2CaptainA) == P2CaptainPhase::Idle);
+    // The switch is routed into the engine's active-captain helper.
+    assert(scene.notifyActiveCalls == 1 && scene.lastActiveSlot == P2CaptainB);
 
     // B owns 102: capture B hands 102 to A and mirrors it into the engine.
     adapter.policy().abandon(P2CaptainA, 102);
@@ -192,11 +214,22 @@ void test_two_captain_transfer_double(FakeScene& scene)
     assert(adapter.ownerOfActor(102) == P2CaptainA);
     assert(scene.pikiB.ownerSlot == P2CaptainA);
     assert(adapter.ownsActor(101) && adapter.ownsActor(102));
+    // Capture routed control to the survivor.
+    assert(scene.notifyActiveCalls == 2 && scene.lastActiveSlot == P2CaptainA);
 
     // Once B is down, the last controllable captain cannot be captured.
     assert(!adapter.captureCaptain(P2CaptainA, 78));
     assert(adapter.releaseCaptain(P2CaptainB, 77));
     assert(adapter.policy().phase(P2CaptainB) == P2CaptainPhase::Idle);
+
+    // Knockout routes to the engine dead flag and the surviving captain.
+    assert(adapter.damageCaptain(P2CaptainB, 100.0f));
+    assert(adapter.policy().phase(P2CaptainB) == P2CaptainPhase::Down);
+    assert(scene.notifyKnockoutCalls == 1 && scene.lastKnockoutSlot == P2CaptainB);
+    assert(scene.notifyActiveCalls == 3 && scene.lastActiveSlot == P2CaptainA);
+    // A non-lethal hit does not report a knockout.
+    assert(!adapter.damageCaptain(P2CaptainA, 1.0f));
+    assert(adapter.policy().phase(P2CaptainA) == P2CaptainPhase::Active);
 }
 
 } // namespace

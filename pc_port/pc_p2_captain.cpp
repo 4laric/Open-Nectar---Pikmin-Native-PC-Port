@@ -10,11 +10,12 @@
 // Navi/NaviMgr/PikiMgr. This is the only translation unit that needs engine
 // headers; the adapter logic is header-only and engine-free.
 //
-// Single-captain binding: captain slot 0 is the live `naviMgr->getNavi(0)`
-// (Navi::mNaviID == 0); slot 1 is always absent. There is no
-// NaviMgr::getActiveNavi / getAliveOrima / getDeadOrima on this port, so the
-// adapter's own P2CaptainPolicy is the source of truth for active/captured
-// bookkeeping and it mirrors Piki::mNavi writes back into the engine.
+// Captain slot N is the live `naviMgr->getNavi(N)` (Navi::mNaviID == N). Slot 1
+// binds when a second Navi exists (see pc_p2_second_captain.h); on the default
+// single-captain port getNavi(1) is null and slot 1 stays absent. The adapter's
+// P2CaptainPolicy is the source of truth for active/captured bookkeeping; it
+// mirrors Piki::mNavi writes and now routes active/knockout selection into the
+// additive NaviMgr helpers (setActiveNavi / informOrimaDead).
 
 namespace {
 
@@ -38,8 +39,8 @@ std::uint32_t actor_id_for(void* actor)
 
 void* live_captain_at(void*, int slot)
 {
-    if (!naviMgr || slot != P2CaptainA) return nullptr;
-    return static_cast<void*>(naviMgr->getNavi(0));
+    if (!naviMgr || !P2CaptainOwnershipTable::isCaptain(slot)) return nullptr;
+    return static_cast<void*>(naviMgr->getNavi(slot));
 }
 
 float live_get_health(void*, void* captain)
@@ -62,7 +63,8 @@ int live_owner_slot(void* context, void* actor)
     if (!actor) return P2CaptainInvalid;
     Navi* owner = static_cast<Piki*>(actor)->mNavi;
     if (!owner) return P2CaptainInvalid;
-    return owner->mNaviID == P2CaptainA ? P2CaptainA : P2CaptainInvalid;
+    return P2CaptainOwnershipTable::isCaptain(owner->getNaviIndex()) ? owner->getNaviIndex()
+                                                                    : P2CaptainInvalid;
 }
 
 void live_set_owner_slot(void* context, void* actor, int slot)
@@ -70,7 +72,23 @@ void live_set_owner_slot(void* context, void* actor, int slot)
     (void)context;
     if (!actor || !naviMgr) return;
     Piki* piki = static_cast<Piki*>(actor);
-    piki->mNavi = (slot == P2CaptainA) ? naviMgr->getNavi(0) : nullptr;
+    piki->mNavi = P2CaptainOwnershipTable::isCaptain(slot) ? naviMgr->getNavi(slot) : nullptr;
+}
+
+// Route the adapter's active/knockout selection into NaviMgr's additive
+// second-captain bookkeeping. With one Navi these simply touch slot 0/false.
+void live_notify_active(void*, int slot)
+{
+    if (!naviMgr) return;
+    Navi* navi = naviMgr->getNavi(slot);
+    if (navi) naviMgr->setActiveNavi(navi);
+}
+
+void live_notify_knockout(void*, int slot)
+{
+    if (!naviMgr) return;
+    Navi* navi = naviMgr->getNavi(slot);
+    if (navi) naviMgr->informOrimaDead(navi);
 }
 
 int live_enumerate(void*, P2PikiHandle* out, int capacity)
@@ -96,6 +114,8 @@ P2CaptainHostOps live_ops()
     ops.ownerSlot    = &live_owner_slot;
     ops.setOwnerSlot = &live_set_owner_slot;
     ops.enumerate    = &live_enumerate;
+    ops.notifyActive   = &live_notify_active;
+    ops.notifyKnockout = &live_notify_knockout;
     return ops;
 }
 
@@ -113,7 +133,7 @@ bool setup_from_navi_mgr()
 {
     P2CaptainAdapter& adapter = live_adapter();
     if (adapter.bound()) return true;
-    if (!naviMgr || !naviMgr->getNavi(0)) return false;
+    if (!naviMgr || !naviMgr->getActiveNavi()) return false;
     if (!adapter.bind(live_ops())) return false;
     if (!adapter.setup()) {
         adapter.teardown();
@@ -165,6 +185,16 @@ bool release_actor(std::uint64_t captorEpoch, P2PikiHandle piki, int toCaptain)
 std::vector<std::uint32_t> drop_captured(std::uint64_t captorEpoch)
 {
     return live_adapter().dropAllCaptured(captorEpoch);
+}
+
+bool has_second_captain()
+{
+    return naviMgr && naviMgr->hasSecondNavi();
+}
+
+int other_captain(int captain)
+{
+    return p2_other_captain(captain);
 }
 
 } // namespace pc_p2_captain

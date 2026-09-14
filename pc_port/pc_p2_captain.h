@@ -55,6 +55,13 @@ struct P2CaptainHostOps {
     // Enumerate live squad actors for adoption. Returns the count written to
     // `out` (truncated to capacity), or -1 on failure.
     int (*enumerate)(void* context, P2PikiHandle* out, int capacity) = nullptr;
+
+    // Optional engine notifications. These are how the policy's switch/capture
+    // selection is routed back into the engine's own active/dead bookkeeping
+    // (NaviMgr::setActiveNavi / informOrimaDead). They are nullable so existing
+    // engine-double tests keep binding without them.
+    void (*notifyActive)(void* context, int slot)   = nullptr;
+    void (*notifyKnockout)(void* context, int slot) = nullptr;
 };
 
 // One per loaded scene. Bind, setup(), then let captor families drive it.
@@ -70,6 +77,15 @@ class P2CaptainAdapter {
         if (!mHost.captainAt || slot < 0 || slot >= P2CaptainCount) return false;
         out = mHost.captainAt(mHost.context, slot);
         return out != nullptr;
+    }
+
+    void notifyActive(int slot)
+    {
+        if (mHost.notifyActive) mHost.notifyActive(mHost.context, slot);
+    }
+    void notifyKnockout(int slot)
+    {
+        if (mHost.notifyKnockout) mHost.notifyKnockout(mHost.context, slot);
     }
 
 public:
@@ -195,16 +211,19 @@ public:
 
     bool switchActive(int target)
     {
-        if (!mBound) return false;
-        return mPolicy.switchActive(target);
+        if (!mBound || !mPolicy.switchActive(target)) return false;
+        notifyActive(target);
+        return true;
     }
 
     // Captor ingest of a captain. On success the captive's squad is
-    // transferred in-policy and mirrored into the engine.
+    // transferred in-policy and mirrored into the engine, and control has moved
+    // to the survivor.
     bool captureCaptain(int captain, std::uint64_t captorEpoch)
     {
         if (!mBound || !mPolicy.capture(captain, captorEpoch)) return false;
         syncOwnership();
+        notifyActive(mPolicy.activeCaptain());
         return true;
     }
 
@@ -212,6 +231,21 @@ public:
     {
         if (!mBound) return false;
         return mPolicy.releaseCaptured(captain, captorEpoch);
+    }
+
+    // Source Navi damage/knockout. Returns true only when the hit knocked the
+    // captain out. The downed captain's actors are freed in-policy, mirrored to
+    // the engine, and the engine is told the captain is down and which captain
+    // now has control. Callers that already applied the damage in the engine
+    // should keep the engine authoritative and use refresh()/setHealth();
+    // this drives the shared policy and the engine active/dead bookkeeping.
+    bool damageCaptain(int captain, float amount)
+    {
+        if (!mBound || !mPolicy.damage(captain, amount)) return false;
+        syncOwnership();
+        notifyKnockout(captain);
+        notifyActive(mPolicy.activeCaptain());
+        return true;
     }
 
     // --- Captor-held actors (Pikmin / carried items) ---
@@ -301,6 +335,11 @@ bool release_captain(int captain, std::uint64_t captorEpoch);
 bool switch_active(int captain);
 bool reload();
 int adopt_squad();
+
+// Lane 12 second-captain queries (#130). `has_second_captain` is false on the
+// single-captain port; `other_captain` is the GET_OTHER_NAVI mapping.
+bool has_second_captain();
+int other_captain(int captain);
 
 // Captor-held squad actor (Piki*) operations. `piki` is a live Piki*.
 bool capture_actor(std::uint64_t captorEpoch, P2PikiHandle piki);
