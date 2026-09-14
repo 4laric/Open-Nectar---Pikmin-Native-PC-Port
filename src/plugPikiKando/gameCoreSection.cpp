@@ -1,4 +1,5 @@
 #include "pc_p2_kurage_visual.h"
+#include "pc_p2_teki_lifetime.h"
 #include "pc_p2_kurage_teki.h"
 #include "pc_p2_onikurage_teki.h"
 #if defined(PIKI_PC_PORT)
@@ -870,6 +871,11 @@ void GameCoreSection::exitStage()
 	pc_p2_kurage_teki_reset();
 	pc_p2_onikurage_teki_reset();
 	pc_p2_kurage_visual_reset();
+	// Actor-lifetime seam (#397/#186): clear every remaining P2 family
+	// registration map so a finished stage cannot retain a stale BTeki* key
+	// pointing into the TekiMgr that is about to be destroyed. Previously only
+	// the kurage families were released here.
+	pc_p2_reset_all_teki();
 #endif
 	demoEventMgr = nullptr;
 	naviMgr      = nullptr;
