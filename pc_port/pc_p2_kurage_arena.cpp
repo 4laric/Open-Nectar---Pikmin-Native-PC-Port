@@ -234,7 +234,9 @@ bool pc_p2_kurage_arena_update(float delta, bool ownerAlive)
         p2kurage::In in;
         in.deltaTime = delta;
         in.health = sHost.fsmHealth;
-        in.stuckPikminCount = pc_p2_kurage_receiver_count();
+        // Mouth-travel Pikmin are not body-stuck; only stomach-attached ones
+        // count toward the source fall/flick threshold.
+        in.stuckPikminCount = pc_p2_kurage_receiver_stomach_count();
         in.isFlying = true;
         in.mapY = mapY;
         in.positionY = sHost.position.y;

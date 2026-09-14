@@ -54,6 +54,28 @@ generated `TEKI_Frog`; that replacement is tracked separately.
 - `tools/p2_kurage_runtime.cpp`: `--flight-fsm-greater` and
   `--flight-fsm-greater-drop`.
 
+## Ordinary generated-actor slice
+
+`pc_port/pc_p2_kurage_teki.{h,cpp}` — the real consumer (a generated
+`TEKI_Frog` bound by the `p2-kurage-teki.txt` sidecar through
+`GameCoreSection::finalSetup`):
+
+- `pc_p2_kurage_teki_fsm_enable(true)` is opt-in; the default binding-only path
+  (draw + receiver) is unchanged.
+- When enabled, `pc_p2_kurage_teki_tick` runs the same source flight lifecycle
+  and Attack-suction scan as the arena host: it drives the actor's `mSRT.t.y`
+  from `p2kurage::Fsm`, starts the retail `attack.bca` clock on Attack entry
+  and consumes KeyEvent 2/1, and admits nearby Pikmin while the suction window
+  is open.
+- Probes: `pc_p2_kurage_teki_fsm_enabled/state/auto_admissions/fsm_ticks`.
+- Three source-faithfulness fixes found by this path: `attackPlaying` is set on
+  a successful player start; only stomach-attached Pikmin count toward the
+  source fall/flick threshold (mouth-travel Pikmin do not); the isolated
+  preview leaves the day/UI overlay active, so the fixture clears it before
+  arming (the arena scenarios already ran with it clear).
+- `tools/p2_kurage_runtime.cpp` gains `--receiver-auto-fsm`;
+  `tools/run_kurage_automatic_binding.py` gains `--scenario binding|auto-fsm`.
+
 ## Fixture stabilization
 
 The private fixture birthed a Piki with only `init()` + a direct `mMode`
@@ -68,12 +90,23 @@ admission/death/greater/greater-drop/ingestion/kill/transfer/stageexit).
 Private build `output/native-lane29-build` (Ninja Release/MinGW gcc 16.2.0,
 JAudio ON, test hooks OFF), `ninja -n pikmin_pc`: no work to do.
 `bin/nectar.exe` SHA-256
-`A0CBEFA91334C7BC4166BB065E39151A58F8FF7DD01AB84EAF2F4C2B2D3F9AAB`.
+`A6B76E39622D1405AD51765A3F7DFC56367E852104F91D43DE17221878D3842A`.
 
-Fixture `output/p2-lane29-greater-fixture-04` (provenance `status=built`);
+Fixture `output/p2-lane29-final-fixture` (provenance `status=built`);
 `fixture.exe` SHA-256
-`56C0553F3EED7834F58ACBA7BDDC2DBCC83DB827350FA33573437D4EB8EA1230`.  All runs
+`49D3D2D52A296820BAF82DCF68FE33DAC963C9AA2CAB06071C592C0FEA5738D7`.  All runs
 use `PIKMIN_P2_ROOM_WINDOW=960x540` (centred `373,263`) and a 20-red squad.
+
+Ordinary generated actor (frog profile, sidecar `P2_KURAGE_TEKI_1 1 201001 0`):
+
+```
+P2_KURAGE_AUTO_BIND_PASS generator=201001 type=0 source=GameCoreSection::finalSetup ...
+P2_KURAGE_AUTO_FSM_ARMED ordinary_actor=1 enabled=1
+P2_KURAGE_AUTO_FSM_ADMISSION_PASS state=4 auto=1 attach=1 stomach=1
+PASS KURAGE_RUNTIME ordinary_actor_fsm_admission
+```
+
+Arena variants:
 
 ```
 P2_KURAGE_FSM_ADMISSION_PASS variant=57 state=4 auto=1 attach=1 stomach=1 altitude=74.6
@@ -99,9 +132,9 @@ checks=35`.
 
 | Gate | Status | Note |
 |---|---|---|
-| A Identity/content | PARTIAL | Kurage (57) and OniKurage (72) variants run; ordinary generated-actor binding unchanged. |
-| B Source behavior | PARTIAL | FSM flight for both variants; static converted pose, motion-END is a bounded stand-in. |
-| C Combat/receivers | PASS (bounded host) | Ordinary Attack suction autonomously admits and attaches a live Pikmin. |
+| A Identity/content | PARTIAL | Kurage (57) and OniKurage (72) variants run; the generated `TEKI_Frog` ordinary actor runs the Kurage FSM when the sidecar opts in. Visuals remain the private adapter. |
+| B Source behavior | PARTIAL | FSM flight for both variants, on the arena host and the ordinary actor; static converted pose, motion-END is a bounded stand-in. |
+| C Combat/receivers | PASS (bounded host + ordinary actor) | Ordinary Attack suction autonomously admits and attaches a live Pikmin in both hosts. |
 | D Death/drop/transport | BLOCKED | No corpse/pellet/Onion transport; OniKurage `Drop` is not the Pikmin cargo path. |
 | E Lifetime | PARTIAL | Owner-death release restores scale; late birth/recycled address not exercised. |
 | F Persistence | UNTESTED | No restart/save path in this slice. |
@@ -110,6 +143,8 @@ checks=35`.
 ## Remaining
 
 Moving suction joint (converted MOD omits JNT1), real animation/event playback
-(#431), ordinary `TEKI_Frog` -> Jellyfloat spawn replacement, Greater captain
-capture/Drop with a real Navi (lane 12), materials/opacity, corpse/reward,
-restart and generated-seed admission all remain open.
+(#431), replacing the underlying P1 Frog proxy behavior/motion with the full
+Jellyfloat host (the FSM currently drives vertical motion while the P1 proxy
+still animates), Greater captain capture/Drop with a real Navi (lane 12),
+materials/opacity, corpse/reward, restart and generated-seed admission all
+remain open.

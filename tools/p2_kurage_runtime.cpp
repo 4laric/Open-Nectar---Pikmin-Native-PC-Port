@@ -34,7 +34,7 @@
 #include <string>
 
 namespace {
-bool sKillScenario = false, sTransferScenario = false, sStageExitScenario = false, sAdmissionScenario = false, sAutomaticBindingScenario = false, sOniKurageScenario = false, sIngestionScenario = false, sFlightFsmScenario = false, sFlightFsmDeathScenario = false, sFlightFsmGreaterScenario = false, sFlightFsmGreaterDropScenario = false;
+bool sKillScenario = false, sTransferScenario = false, sStageExitScenario = false, sAdmissionScenario = false, sAutomaticBindingScenario = false, sOniKurageScenario = false, sIngestionScenario = false, sFlightFsmScenario = false, sFlightFsmDeathScenario = false, sFlightFsmGreaterScenario = false, sFlightFsmGreaterDropScenario = false, sAutoFsmScenario = false;
 void require(bool value, const char* message)
 {
     if (!value) { std::printf("FAIL KURAGE_RUNTIME %s\n", message); std::fflush(stdout); std::_Exit(1); }
@@ -74,6 +74,10 @@ class KurageApp final : public PlugPikiApp {
     int fsmTicks = 0, fsmStage = 0;
     bool dropSeen = false;
     Piki* fsmPiki = nullptr;
+    bool autoFsmArmed = false;
+    int autoFsmTicks = 0;
+    BTeki* autoFsmActor = nullptr;
+    Piki* autoFsmPiki = nullptr;
     class FixtureOwner final : public Creature {
     public:
         FixtureOwner() : Creature(nullptr) { }
@@ -89,7 +93,8 @@ class KurageApp final : public PlugPikiApp {
     }
 public:
     int idle() override {
-        int result = PlugPikiApp::idle(); require(++frames < 900, "timeout");
+        int result = PlugPikiApp::idle();
+        require(++frames < (sAutoFsmScenario ? 2400 : 900), "timeout");
         if (gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive) { gameflow.mMoviePlayer->requestSkip(); return result; }
         if (sAutomaticBindingScenario) {
             if (!tekiMgr) return result;
@@ -109,6 +114,61 @@ public:
                 std::fflush(stdout); std::_Exit(0);
             }
             require(pc_p2_kurage_teki_is_bound(generatedFrog), "finalSetup sidecar bound generated Frog");
+            if (sAutoFsmScenario) {
+                // Ordinary generated actor runs the source flight lifecycle and
+                // its Attack state admits a nearby Pikmin.
+                if (!autoFsmArmed) {
+                    // The frog-profile room leaves the day/UI overlay active,
+                    // which freezes the managers this ordinary-actor harness
+                    // needs.  The arena scenarios run with it clear.
+                    gameflow.mPauseAll = FALSE;
+                    gameflow.mIsUIOverlayActive = FALSE;
+                    Navi* nav = naviMgr->getNavi();
+                    Piki* p = static_cast<Piki*>(pikiMgr->birth());
+                    require(nav && p, "auto fsm piki birth");
+                    p->init(nav);
+                    p->initColor(Red);
+                    p->setFlower(Leaf);
+                    p->resetPosition(Vector3f(generatedFrog->mSRT.t.x, generatedFrog->mSRT.t.y - 30.0f, generatedFrog->mSRT.t.z));
+                    p->mMode = PikiMode::AttackMode;
+                    autoFsmPiki = p;
+                    autoFsmActor = generatedFrog;
+                    pc_p2_kurage_teki_fsm_enable(true);
+                    autoFsmArmed = true;
+                    std::printf("P2_KURAGE_AUTO_FSM_ARMED ordinary_actor=1 enabled=%d\n",
+                        int(pc_p2_kurage_teki_fsm_enabled(generatedFrog)));
+                    std::fflush(stdout);
+                    return result;
+                }
+                ++autoFsmTicks;
+                // The isolated preview pauses the Teki manager's per-frame
+                // update, so drive the bound ordinary actor's lane hook here.
+                pc_p2_kurage_teki_tick(autoFsmActor);
+                if (autoFsmPiki && autoFsmPiki->isAlive() && !pc_p2_kurage_receiver_controls(autoFsmPiki))
+                    autoFsmPiki->resetPosition(Vector3f(autoFsmActor->mSRT.t.x, autoFsmActor->mSRT.t.y - 30.0f, autoFsmActor->mSRT.t.z));
+                if (pc_p2_kurage_receiver_stomach_count() == 1) {
+                    require(pc_p2_kurage_teki_auto_admissions(autoFsmActor) >= 1,
+                        "ordinary actor autonomous admission counted");
+                    require(autoFsmPiki->isAlive() && autoFsmPiki->isStickTo()
+                        && autoFsmPiki->getStickObject() == autoFsmActor,
+                        "ordinary actor suction attached");
+                    std::printf("P2_KURAGE_AUTO_FSM_ADMISSION_PASS state=%d auto=%d attach=1 stomach=1\n",
+                        pc_p2_kurage_teki_fsm_state(autoFsmActor), pc_p2_kurage_teki_auto_admissions(autoFsmActor));
+                    std::puts("PASS KURAGE_RUNTIME ordinary_actor_fsm_admission");
+                    std::fflush(stdout); std::_Exit(0);
+                }
+                if (autoFsmTicks >= 900) {
+                    std::printf("P2_KURAGE_AUTO_FSM_TIMEOUT hook_calls=%d ticks=%d state=%d auto=%d recv=%d alive=%d stick=%d enabled=%d\n",
+                        pc_p2_kurage_teki_tick_calls(),
+                        pc_p2_kurage_teki_fsm_ticks(autoFsmActor), pc_p2_kurage_teki_fsm_state(autoFsmActor),
+                        pc_p2_kurage_teki_auto_admissions(autoFsmActor), pc_p2_kurage_receiver_count(),
+                        int(autoFsmPiki && autoFsmPiki->isAlive()), int(autoFsmPiki && autoFsmPiki->isStickTo()),
+                        int(pc_p2_kurage_teki_fsm_enabled(autoFsmActor)));
+                    std::fflush(stdout);
+                    std::_Exit(1);
+                }
+                return result;
+            }
             std::puts("P2_KURAGE_AUTO_BIND_PASS generator=201001 type=0 source=GameCoreSection::finalSetup sidecar=p2-kurage-teki.txt direct_bind_calls=0");
             std::fflush(stdout); std::_Exit(0);
         }
@@ -431,6 +491,7 @@ int main(int argc, char** argv)
         if (std::string(argv[i]) == "--flight-fsm-death") { sFlightFsmScenario = true; sFlightFsmDeathScenario = true; }
         if (std::string(argv[i]) == "--flight-fsm-greater") sFlightFsmGreaterScenario = true;
         if (std::string(argv[i]) == "--flight-fsm-greater-drop") sFlightFsmGreaterDropScenario = true;
+        if (std::string(argv[i]) == "--receiver-auto-fsm") { sAutomaticBindingScenario = true; sAutoFsmScenario = true; }
     }
     SDL_setenv("SDL_AUDIODRIVER", "dummy", 1); SDL_SetMainReady();
     pc_gpu_preference_apply(); _putenv_s("PIKMIN_RANDOMIZER_TEST_BACKGROUND", "1"); pc_bbft_init(argc, argv);
