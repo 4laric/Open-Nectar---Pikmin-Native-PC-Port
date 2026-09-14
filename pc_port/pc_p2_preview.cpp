@@ -243,6 +243,10 @@ void pc_p2_preview_setup() {
     pc_p2_purple_setup();
     pc_p2_white_setup();
     pc_p2_bulbmin_setup();
+    // Lane-11 opt-in driver: use the existing Chappy-family registration as the
+    // Mother Bulbmin stand-in (no-op unless PIKMIN_P2_BULBMIN/p2-bulbmin.txt is
+    // set and a Kochappy actor is registered).
+    pc_p2_bulbmin_attach_mother(static_cast<Creature*>(pc_p2_kochappy_first_registered()));
     pc_p2_cave_setup();
     gsys->setHeap(previousHeap);
     const float points[][2]={{-85,0},{-175,-100},{185,-180},{-220,-180}};

@@ -1,4 +1,5 @@
 #include "pc_p2_bulbmin.h"
+#include "pc_p2_captain.h"
 #include "pc_p2_species.h"
 #include "pc_p2_preview.h"
 #include "pc_bbft.h"
@@ -24,6 +25,10 @@ std::unordered_map<Piki*, std::uint32_t> idOfPiki;
 std::unordered_map<std::uint32_t, Piki*> pikiOfId;
 std::uint32_t nextId = 1;
 
+// The Chappy-family actor currently standing in for the missing LeafChappy
+// mother. Only ever compared, never dereferenced.
+void* proxyMother = nullptr;
+
 std::uint32_t idFor(Piki* piki) {
     auto found = idOfPiki.find(piki);
     if (found != idOfPiki.end()) return found->second;
@@ -41,6 +46,7 @@ void pc_p2_bulbmin_reset() {
     idOfPiki.clear();
     pikiOfId.clear();
     nextId = 1;
+    proxyMother = nullptr;
     active = false;
 }
 
@@ -75,8 +81,16 @@ void pc_p2_bulbmin_setup() {
         std::abort();
     }
     active = true;
-    std::printf("P2_BULBMIN_READY mother_epoch=%llu dependents=%d behavior=policy_ledger live_spawn=unregistered\n",
-                static_cast<unsigned long long>(config.motherEpoch), config.maxDependents);
+    // Wire the recruited body to the lane-12 captain ownership table when the
+    // live adapter is available (single-captain slot 0). With no NaviMgr the
+    // whistle still converts the body in place.
+    if (pc_p2_captain::setup_from_navi_mgr()) {
+        if (P2CaptainAdapter* captainAdapter = pc_p2_captain::adapter())
+            bridge.bindCaptains(captainAdapter->ownershipTable());
+    }
+    std::printf("P2_BULBMIN_READY mother_epoch=%llu dependents=%d behavior=policy_ledger live_spawn=kochappy_proxy captain_table=%d\n",
+                static_cast<unsigned long long>(config.motherEpoch), config.maxDependents,
+                bridge.hasCaptains() ? 1 : 0);
     std::fflush(stdout);
 }
 
@@ -117,7 +131,8 @@ bool pc_p2_bulbmin_whistle(Piki* bulbmin) {
     if (!active || !bulbmin) return false;
     const auto found = idOfPiki.find(bulbmin);
     if (found == idOfPiki.end()) return false;
-    const P2BulbminCommand command = bridge.whistle(found->second, P2CaptainInvalid);
+    const int captain = bridge.hasCaptains() ? P2CaptainA : P2CaptainInvalid;
+    const P2BulbminCommand command = bridge.whistle(found->second, captain);
     if (!command.accepted) return false;
     bulbmin->mLeaderCreature = nullptr;
     if (naviMgr) {
@@ -149,4 +164,80 @@ std::vector<std::uint32_t> pc_p2_bulbmin_transition(P2BulbminCaveTransition move
 
 void pc_p2_bulbmin_bind_captain_table(P2CaptainOwnershipTable* ownership) {
     bridge.bindCaptains(ownership);
+}
+
+int pc_p2_bulbmin_dependent_count() {
+    return active ? bridge.dependentCount() : 0;
+}
+
+namespace {
+// Context handed to the driver's spawn callback for one birthChildren() pass.
+struct DriveContext {
+    Creature* leader = nullptr;
+    Vector3f position;
+    float faceDir = 0.0f;
+};
+DriveContext driveContext;
+
+std::uint32_t driveSpawn(void*, int index) {
+    Piki* p = pc_p2_bulbmin_birth_dependent(driveContext.leader, driveContext.position,
+                                            driveContext.faceDir, index);
+    return p ? idFor(p) : 0;
+}
+} // namespace
+
+int pc_p2_bulbmin_drive_birth(Creature* leader, const Vector3f& leaderPos,
+                              float faceDir, int requested) {
+    if (!active) return 0;
+    P2BulbminDriver driver;
+    if (!driver.bind(&bridge, &driveSpawn, nullptr)) return 0;
+    driveContext.leader = leader;
+    driveContext.position = leaderPos;
+    driveContext.faceDir = faceDir;
+    return driver.birthFlock(requested);
+}
+
+int pc_p2_bulbmin_attach_mother(Creature* mother) {
+    if (!active || !mother || proxyMother) return 0;
+    proxyMother = mother;
+    return pc_p2_bulbmin_drive_birth(mother, mother->getPosition(),
+                                     mother->mFaceDirection,
+                                     bridge.settings().maxDependents);
+}
+
+int pc_p2_bulbmin_call_pikis(Navi* navi, float radius) {
+    if (!active || !navi || !pikiMgr || radius <= 0.0f) return 0;
+    const float radius2 = radius * radius;
+    int recruited = 0;
+    Iterator it(pikiMgr);
+    CI_LOOP(it) {
+        Piki* p = static_cast<Piki*>(*it);
+        if (!p || !p->isAlive()) continue;
+        const auto found = idOfPiki.find(p);
+        if (found == idOfPiki.end()) continue;
+        if (bridge.phaseOf(found->second) != P2BulbminWild) continue;
+        const Vector3f delta = p->mSRT.t - navi->mCursorWorldPos;
+        if (delta.x * delta.x + delta.z * delta.z >= radius2) continue;
+        if (pc_p2_bulbmin_whistle(p)) ++recruited;
+    }
+    return recruited;
+}
+
+int pc_p2_bulbmin_leader_died() {
+    if (!active) return 0;
+    const std::vector<std::uint32_t> released = bridge.leaderDied();
+    for (const std::uint32_t id : released) {
+        auto found = pikiOfId.find(id);
+        if (found == pikiOfId.end()) continue;
+        if (found->second) found->second->mLeaderCreature = nullptr;
+        idOfPiki.erase(found->second);
+        pikiOfId.erase(found);
+    }
+    return static_cast<int>(released.size());
+}
+
+void pc_p2_bulbmin_proxy_forget(BTeki* mother) {
+    if (!active || !mother || proxyMother != static_cast<void*>(mother)) return;
+    pc_p2_bulbmin_leader_died();
+    proxyMother = nullptr;
 }

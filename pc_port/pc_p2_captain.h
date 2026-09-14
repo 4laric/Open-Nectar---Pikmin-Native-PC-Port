@@ -95,6 +95,12 @@ public:
     bool ownsActor(std::uint32_t actor) const { return mTable.isOwned(actor); }
     int ownerOfActor(std::uint32_t actor) const { return mTable.ownerOf(actor); }
 
+    // The live shared ownership table, so a sibling lane can claim/release
+    // through the same domain (used by the lane-11 Bulbmin whistle handoff).
+    // Null until bind(); callers must not retain it past teardown().
+    P2CaptainOwnershipTable* ownershipTable() { return mBound ? &mTable : nullptr; }
+    const P2CaptainOwnershipTable* ownershipTable() const { return mBound ? &mTable : nullptr; }
+
     // Register every present captain (slot 0 only on this port) and adopt the
     // squad's existing Piki::mNavi ownership. Returns false when no captain is
     // present. Safe to call once per scene after bind().

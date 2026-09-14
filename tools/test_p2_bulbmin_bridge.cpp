@@ -111,6 +111,89 @@ static void test_birth_and_recruitment() {
     assert(orphan.recruitedCount() == 1);
 }
 
+// Engine double: the driver's spawn callback creates one body and registers it
+// in the bridge, exactly like the live pikiMgr->birth() hook. Returns 0 when
+// the bridge refuses (configured cap reached), which stops the flock.
+struct SpawnDouble {
+    P2BulbminBridge* bridge;
+    std::uint32_t nextId;
+};
+
+static std::uint32_t spawn_double(void* context, int) {
+    SpawnDouble* engine = static_cast<SpawnDouble*>(context);
+    const std::uint32_t id = engine->nextId++;
+    return engine->bridge->birth(id).accepted ? id : 0;
+}
+
+static void test_driver() {
+    P2BulbminBridge bridge;
+    P2CaptainOwnershipTable table;
+    P2BulbminConfig config;
+    config.motherEpoch = 300;
+    config.maxDependents = P2BULBMIN_MAX_DEPENDENTS;
+    assert(bridge.setup(config, &table));
+
+    SpawnDouble engine = {&bridge, 7000};
+    P2BulbminDriver driver;
+    assert(driver.bind(&bridge, &spawn_double, &engine));
+    assert(driver.bound());
+
+    // Source LeafChappy::birthChildren spawns exactly ten dependents, no eleventh.
+    assert(driver.birthFlock(10) == 10);
+    assert(driver.birthFlock(1) == 0);
+    assert(driver.bornCount() == 10);
+    assert(bridge.dependentCount() == 10 && bridge.wildCount() == 10);
+
+    // Whistle through the driver recruits in place and claims the captain.
+    P2BulbminCommand recruited = driver.whistle(7003, P2CaptainA);
+    assert(recruited.accepted && recruited.phase == P2BulbminRecruited);
+    assert(table.isOwned(7003) && table.ownerOf(7003) == P2CaptainA);
+
+    // Leader death releases only the nine wild dependents; the whistled body
+    // keeps its captain ownership and survives.
+    std::vector<std::uint32_t> released = driver.leaderDied();
+    assert(released.size() == 9);
+    assert(bridge.size() == 1 && bridge.recruitedCount() == 1);
+    assert(bridge.phaseOf(7003) == P2BulbminRecruited && table.isOwned(7003));
+    assert(driver.bornCount() == 0);
+
+    // A configured cap below ten bounds the flock even when ten are requested.
+    P2BulbminBridge capped;
+    P2BulbminConfig small;
+    small.motherEpoch = 301;
+    small.maxDependents = 3;
+    assert(capped.setup(small));
+    SpawnDouble cappedEngine = {&capped, 8000};
+    P2BulbminDriver cappedDriver;
+    assert(cappedDriver.bind(&capped, &spawn_double, &cappedEngine));
+    assert(cappedDriver.birthFlock(10) == 3);
+    assert(capped.dependentCount() == 3 && capped.wildCount() == 3);
+
+    // Cave save filter through the driver: a floor descent keeps only the one
+    // whistled Bulbmin; a full cave exit removes every Bulbmin.
+    P2BulbminBridge cave;
+    P2BulbminConfig caveConfig;
+    caveConfig.motherEpoch = 400;
+    caveConfig.maxDependents = 10;
+    assert(cave.setup(caveConfig));
+    SpawnDouble caveEngine = {&cave, 9000};
+    P2BulbminDriver caveDriver;
+    assert(caveDriver.bind(&cave, &spawn_double, &caveEngine));
+    assert(caveDriver.birthFlock(10) == 10);
+    assert(caveDriver.whistle(9000, P2CaptainA).accepted);
+    P2BulbminTransitionOut down = caveDriver.transition(P2BulbminDescendFloor);
+    assert(down.kept.size() == 1 && down.removed.size() == 9 && down.recruitedKept == 1);
+    P2BulbminTransitionOut exitOut = caveDriver.transition(P2BulbminExitCave);
+    assert(exitOut.kept.empty() && exitOut.removed.size() == 1 && cave.size() == 0);
+
+    // An inert bridge cannot bind a driver.
+    P2BulbminBridge inert;
+    P2BulbminDriver inertDriver;
+    SpawnDouble inertEngine = {&inert, 1};
+    assert(!inertDriver.bind(&inert, &spawn_double, &inertEngine));
+    assert(!inertDriver.bound() && inertDriver.birthFlock(10) == 0);
+}
+
 static void test_cave_transition() {
     P2BulbminBridge bridge;
     P2BulbminConfig config;
@@ -140,6 +223,7 @@ static void test_cave_transition() {
 int main() {
     test_parse();
     test_birth_and_recruitment();
+    test_driver();
     test_cave_transition();
     std::puts("PASS P2_BULBMIN_BRIDGE");
     return 0;

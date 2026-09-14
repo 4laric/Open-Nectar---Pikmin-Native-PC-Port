@@ -6,6 +6,7 @@
 #include "pc_p2_purple_impact.h"
 #include "pc_p2_white.h"
 #include "pc_p2_species.h"
+#include "pc_p2_bulbmin.h"
 #include "Navi.h"
 #include "pc_randomizer.h"
 #include <cstdlib>
@@ -1236,6 +1237,14 @@ void Navi::callPikis(f32 radius, bool recallWorkers)
 			TERNARY_BUILD_MATCHING(ERROR, PRINT)("cursor nuki!\n");
 		}
 	}
+
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	// Lane-11 Bulbmin: a captain whistle converts wild dependents in place and
+	// hands them to the bound captain table. Inert unless opted in.
+	if (pc_p2_bulbmin_active()) {
+		pc_p2_bulbmin_call_pikis(this, radius);
+	}
+#endif
 
 	Iterator iterSprout(itemMgr->getPikiHeadMgr());
 	CI_LOOP(iterSprout)
