@@ -211,6 +211,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_bigtreasure_attacks.cpp
     pc_port/pc_p2_bigtreasure_fsm.cpp
     pc_port/pc_p2_bigtreasure_host.cpp
+    pc_port/pc_p2_bigtreasure_fsmhost.cpp
     pc_port/pc_p2_bigtreasure_map_trace.cpp
     pc_port/pc_p2_bigtreasure_motion.cpp
     pc_port/pc_p2_bigtreasure_visual.cpp
