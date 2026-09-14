@@ -44,10 +44,7 @@
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_tank.h"
 
-// Single authoritative list of families that hold a BTeki* registration map.
-// Mirrors the pre-existing inline forget list in TekiMgr::newTeki exactly (no
-// family added or dropped) so this change is behaviour-neutral at the call
-// sites. Queen/King track Piki*, not BTeki*, and keep their own Piki forgets.
+// Family registrations released before death teardown or manager-slot reuse.
 void pc_p2_forget_teki(BTeki* actor)
 {
 	if (!actor) {

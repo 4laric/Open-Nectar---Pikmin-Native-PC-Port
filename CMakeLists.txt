@@ -234,6 +234,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_rock_hazard.cpp
     pc_port/pc_p2_projectile_receiver.cpp
+    pc_port/pc_p2_groink_hit.cpp
+    pc_port/pc_p2_groink_strike.cpp
     pc_port/pc_p2_projectiles.cpp
     pc_port/pc_p2_hardlanes.cpp
     pc_port/pc_p2_bombsarai_arena.cpp
@@ -979,3 +981,20 @@ if(PIKMIN_RANDOMIZER_TEST_HOOKS)
     set_property(SOURCE src/plugPikiKando/gameCoreSection.cpp APPEND PROPERTY
         COMPILE_DEFINITIONS PIKMIN_RANDOMIZER_TEST_HOOKS=1)
 endif()
+
+# Integration gates: keep assertions active for these engine-free contracts.
+foreach(policy IN ITEMS species_schema hazard_reaction hazard_emitter cave_transfer captain_roster squad_policy)
+    add_executable(p2_${policy}_test tools/test_p2_${policy}.cpp)
+    target_include_directories(p2_${policy}_test PRIVATE pc_port)
+    target_compile_options(p2_${policy}_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+    add_test(NAME p2_${policy}_test COMMAND p2_${policy}_test)
+endforeach()
+add_executable(p2_groink_strike_test tools/p2_groink_strike_test.cpp
+    pc_port/pc_p2_groink_strike.cpp pc_port/pc_p2_groink_hit.cpp pc_port/pc_p2_projectile_receiver.cpp)
+target_include_directories(p2_groink_strike_test PRIVATE pc_port)
+target_compile_options(p2_groink_strike_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_groink_strike_test COMMAND p2_groink_strike_test)
+add_executable(p2_bigtreasure_save_test tools/p2_bigtreasure_save_test.cpp pc_port/pc_p2_bigtreasure_save.cpp)
+target_include_directories(p2_bigtreasure_save_test PRIVATE pc_port)
+target_compile_options(p2_bigtreasure_save_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_bigtreasure_save_test COMMAND p2_bigtreasure_save_test)
