@@ -11,20 +11,31 @@
 //
 // Port adaptations (recorded, not retail-faithful):
 //   * The P2 two-slot mouth (kamu1/kamu2, Catfish.cpp:83) is not representable
-//     on the P1 host. The P2 swallow is resolved as an explicit capture inside
-//     the source attack sweep radius at the banked attack bite animation event
-//     (attack frame 17, event 2), then exactly one InteractKill at the banked
-//     swallow event (attack frame 75, event 3). Exactly-once per bite; mirrors
-//     the Armor port.
+//     on the P1 host. The P2 ingest is resolved as an explicit nearest-first
+//     capture of up to two Pikmin inside the source attack sweep at the banked
+//     attack bite animation event (attack frame 17, event 2), then exactly one
+//     InteractKill per captured Pikmin at the banked swallow event (attack frame
+//     75, event 3). The same Pikmin is never captured twice and each captured
+//     Pikmin is consumed once (pc_p2_catfish_residual_policy.h). Mirrors the
+//     Armor port.
+//   * StateAttack KEYEVENT_2 also runs the source attackNavi (general fp22=50
+//     hit radius, fp23=15 deg hit angle, fp24=10 damage) against the active
+//     Navi, and the banked swallow applies the source proper fp02=300 poison to
+//     the eater for each consumed White Pikmin while preserving the normal
+//     InteractKill death/corpse.
 //   * Catfish ships no waitact1 clip (the KochappyBase Turn motion), so the Turn
 //     state reuses wait1. The Eat motion (waitact2) is not entered because the
 //     bite and swallow both live in the single attack clip.
 //   * Target detection accepts the nearest Navi or Pikmin; the source view angle
 //     is treated as a full hemisphere because the Catfish general block does not
-//     override it. Turn rate, flick radius and shake values are P1-host values.
+//     override it. The attack sweep angle is a P1-host ~45 deg; turn rate and the
+//     flick latch radius are P1-host values. The flick knockback/damage/range use
+//     the source general fp17/fp18/fp19 defaults (300/0/120).
 // Every hook is a no-op for unregistered actors; no other lane's module is
 // modified.
 #include "pc_p2_catfish.h"
+#include "pc_p2_catfish_residual_policy.h"
+#include "pc_p2_white.h"
 #include "teki.h"
 #include "Interactions.h"
 #include "Piki.h"
@@ -75,13 +86,11 @@ constexpr float MOVE_SPEED = 60.0f;     // general fp06
 constexpr float TERRITORY = 280.0f;     // general fp09
 constexpr float HOME_RADIUS = 80.0f;    // general fp10
 constexpr float SIGHT = 200.0f;         // general fp12
-constexpr float ATTACK_RANGE = 50.0f;   // general fp20/fp22 attack hit
+constexpr float ATTACK_RANGE = p2catfish::kAttackHitRadius; // general fp20/fp22
 constexpr float ATTACK_ANGLE = 0.785398f; // port adaptation ~45 deg
 constexpr float ABSENT_MINDED = 2.0f;   // proper fp01
 constexpr float TURN_RATE = 2.5f;       // port adaptation
-constexpr float FLICK_RADIUS = 25.0f;   // port adaptation
-constexpr float SHAKE_RANGE = 100.0f;   // port adaptation
-constexpr float SHAKE_KNOCKBACK = 120.0f; // port adaptation
+constexpr float FLICK_RADIUS = 25.0f;   // port latch radius (source isStartFlick)
 constexpr float PI_F = 3.14159265f;
 
 struct Clip {
@@ -98,7 +107,11 @@ struct Catfish {
     Vector3f home;
     Vector3f wanderTarget;
     bool wanderValid = false;
-    Piki* captured = nullptr;
+    // Source two-slot mouth (kamu1/kamu2). The P1 host has no mouth geometry,
+    // so each slot holds the Pikmin captured inside the attack sweep until the
+    // banked swallow event. `consumed` makes the kill/poison exactly-once.
+    Piki* slots[p2catfish::kMouthSlots] = {nullptr, nullptr};
+    std::set<Piki*> consumed;
     std::set<int> firedEvents;
     std::string clip = "wait1";
     float phase = 0.0f;
@@ -175,19 +188,76 @@ Piki* nearestPiki(const Vector3f& pos, float radius) {
     }
     return best;
 }
+Navi* activeNavi() {
+    if (!naviMgr) return nullptr;
+    Navi* n = naviMgr->getNavi();
+    return (n && n->isAlive()) ? n : nullptr;
+}
+int slotIndexOf(const Catfish& s, const Piki* p) {
+    for (int i = 0; i < p2catfish::kMouthSlots; ++i)
+        if (s.slots[i] == p) return i;
+    return -1;
+}
+int freeSlot(const Catfish& s) {
+    for (int i = 0; i < p2catfish::kMouthSlots; ++i)
+        if (!s.slots[i]) return i;
+    return -1;
+}
 bool shouldFlick(BTeki* a) {
     return nearestPiki(a->getPosition(), FLICK_RADIUS) != nullptr;
 }
-void doFlick(BTeki* a) {
-    if (!pikiMgr) return;
+// StateFlick KEYEVENT_2: flickStickPikmin + flickNearbyPikmin + flickNearbyNavi
+// with the source general fp17/fp18/fp19 values and FLICK_BACKWARDS_ANGLE. The
+// P1 host has no mouth joints, so the two captured slots stand in for the source
+// stick-to-mouth list and are flicked exactly once.
+int doFlick(BTeki* a, Catfish& s) {
     const Vector3f pos = a->getPosition();
-    Iterator it(pikiMgr);
-    CI_LOOP(it) {
-        Piki* p = static_cast<Piki*>(*it);
-        if (p && p->isAlive() && distXZ(p->getPosition(), pos) < SHAKE_RANGE) {
-            p->stimulate(InteractFlick(a, SHAKE_KNOCKBACK, 0.0f, a->getDirection()));
+    int hit = 0;
+    std::vector<Creature*> mouths;
+    for (Creature* c = a->mStickListHead; c; c = c->mNextSticker) {
+        if (c->isStickToMouth()) mouths.push_back(c);
+    }
+    for (int i = 0; i < p2catfish::kMouthSlots; ++i) {
+        Piki* p = s.slots[i];
+        if (!p) continue;
+        bool found = false;
+        for (Creature* c : mouths)
+            if (c == p) { found = true; break; }
+        if (!found) mouths.push_back(p);
+    }
+    for (Creature* c : mouths) {
+        if (c->isAlive()
+                && c->stimulate(InteractFlick(a, p2catfish::kFlickKnockback,
+                                              p2catfish::kFlickDamage,
+                                              FLICK_BACKWARDS_ANGLE))) {
+            ++hit;
         }
     }
+    if (pikiMgr) {
+        Iterator it(pikiMgr);
+        CI_LOOP(it) {
+            Piki* p = static_cast<Piki*>(*it);
+            if (!p || !p->isAlive()) continue;
+            bool already = false;
+            for (Creature* c : mouths)
+                if (c == p) { already = true; break; }
+            if (already || !p2catfish::inFlickRange(distXZ(p->getPosition(), pos))) continue;
+            if (p->stimulate(InteractFlick(a, p2catfish::kFlickKnockback,
+                                           p2catfish::kFlickDamage,
+                                           FLICK_BACKWARDS_ANGLE))) {
+                ++hit;
+            }
+        }
+    }
+    Navi* navi = activeNavi();
+    if (navi && p2catfish::inFlickRange(distXZ(navi->getPosition(), pos))) {
+        if (navi->stimulate(InteractFlick(a, p2catfish::kFlickKnockback,
+                                          p2catfish::kFlickDamage,
+                                          FLICK_BACKWARDS_ANGLE))) {
+            ++hit;
+        }
+    }
+    return hit;
 }
 void stop(BTeki* a) {
     a->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
@@ -240,40 +310,104 @@ void transition(Catfish& s, State state, const char* clip, unsigned generator) {
     s.state = state;
     s.stateTime = 0.0f;
     s.firedEvents.clear();
-    s.captured = nullptr;
+    for (int i = 0; i < p2catfish::kMouthSlots; ++i) s.slots[i] = nullptr;
+    s.consumed.clear();
     if (clip) s.clip = clip;
     std::printf("P2_CATFISH_STATE generator=%u state=%s\n", generator, stateName(state));
     std::fflush(stdout);
 }
 
+// Source StateAttack KEYEVENT_2: attackNavi + eatPikmin. The P1 host resolves
+// eatPikmin as a two-slot nearest-first capture inside the source attack sweep;
+// the captured Pikmin are consumed exactly once at the banked swallow event.
+void biteEvent(BTeki* actor, Catfish& s, unsigned generator, int frame) {
+    const Vector3f pos = actor->getPosition();
+    Navi* navi = activeNavi();
+    if (navi) {
+        const Vector3f np = navi->getPosition();
+        if (p2catfish::attackNaviHits(distXZ(np, pos), targetAngle(s, pos, np))) {
+            navi->stimulate(InteractAttack(actor, nullptr, p2catfish::kAttackDamage, false));
+            std::printf("P2_CATFISH_ATTACK_NAVI generator=%u frame=%d damage=%.1f\n",
+                        generator, frame, p2catfish::kAttackDamage);
+            std::fflush(stdout);
+        }
+    }
+    std::vector<Piki*> picks;
+    std::vector<p2catfish::Candidate> candidates;
+    if (pikiMgr) {
+        Iterator it(pikiMgr);
+        CI_LOOP(it) {
+            Piki* p = static_cast<Piki*>(*it);
+            if (!p || !p->isAlive()) continue;
+            const Vector3f q = p->getPosition();
+            const float distance = distXZ(q, pos);
+            const bool eligible = distance < ATTACK_RANGE
+                    && targetAngle(s, pos, q) < ATTACK_ANGLE;
+            candidates.push_back({distance, eligible, slotIndexOf(s, p) >= 0});
+            picks.push_back(p);
+        }
+    }
+    int chosen[p2catfish::kMouthSlots] = {-1, -1};
+    const int count = p2catfish::selectMouthCaptures(candidates.data(), int(candidates.size()),
+                                                     chosen);
+    for (int i = 0; i < count; ++i) {
+        const int slot = freeSlot(s);
+        if (slot < 0) break;
+        s.slots[slot] = picks[chosen[i]];
+        std::printf("P2_CATFISH_BITE generator=%u frame=%d pikmin=1 slot=%d\n",
+                    generator, frame, slot);
+    }
+    std::fflush(stdout);
+}
+
+// Source StateAttack KEYEVENT_3: swallowPikmin. Each captured Pikmin is killed
+// exactly once; a swallowed White additionally poisons the eater with proper
+// fp02 (KochappyBase.h:106) while keeping the normal death/corpse.
+void swallowEvent(BTeki* actor, Catfish& s, unsigned generator) {
+    for (int slot = 0; slot < p2catfish::kMouthSlots; ++slot) {
+        Piki* p = s.slots[slot];
+        s.slots[slot] = nullptr;
+        if (!p) continue;
+        const bool white = pc_p2_is_white(p);
+        const bool already = !s.consumed.insert(p).second;
+        const p2catfish::SwallowResult result = p2catfish::swallowResult(white, already);
+        if (!result.kill || !p->isAlive()) continue;
+        p->stimulate(InteractKill(actor, 0));
+        std::printf("P2_CATFISH_EAT generator=%u pikmin=1 slot=%d\n", generator, slot);
+        if (result.poison && result.poisonDamage > 0.0f) {
+            actor->mHealth -= result.poisonDamage;
+            std::printf("P2_CATFISH_POISON generator=%u source_id=26 pikmin=white "
+                        "damage=%.1f health=%.1f\n",
+                        generator, result.poisonDamage, actor->mHealth);
+        }
+    }
+    std::fflush(stdout);
+}
+
 // Source StateAttack events: event 2 = bite (attackNavi + eatPikmin), event 3 =
-// swallowPikmin. Resolved as capture then one kill for the P1 host.
+// swallowPikmin.
 void fireAttackEvents(BTeki* actor, Catfish& s, unsigned generator) {
     auto it = clips.find("attack");
     if (it == clips.end()) return;
-    const Vector3f pos = actor->getPosition();
     for (const auto& event : it->second.events) {
         if (s.firedEvents.count(event.first)) continue;
         if (s.stateTime < event.first / 30.0f) continue;
         s.firedEvents.insert(event.first);
-        if (event.second == 2) {
-            Piki* piki = nearestPiki(pos, ATTACK_RANGE);
-            if (piki) {
-                s.captured = piki;
-                std::printf("P2_CATFISH_BITE generator=%u frame=%d pikmin=1\n",
-                            generator, event.first);
-                std::fflush(stdout);
-            }
-        } else if (event.second == 3) {
-            if (s.captured && s.captured->isAlive()) {
-                s.captured->stimulate(InteractKill(actor, 0));
-                std::printf("P2_CATFISH_EAT generator=%u pikmin=1\n", generator);
-                std::fflush(stdout);
-            }
-            s.captured = nullptr;
+        switch (p2catfish::attackEvent(event.second)) {
+        case p2catfish::AttackEvent::Bite:
+            biteEvent(actor, s, generator, event.first);
+            break;
+        case p2catfish::AttackEvent::Swallow:
+            swallowEvent(actor, s, generator);
+            break;
+        default:
+            break;
         }
     }
 }
+// Source StateFlick events: event 2 = knockback (stick/nearby Pikmin + nearby
+// Navi), event 3 = resetEnemyNonStone. Both are read from the banked clip
+// instead of a synthetic frame.
 void fireFlickEvents(BTeki* actor, Catfish& s, unsigned generator) {
     auto it = clips.find("flick");
     if (it == clips.end()) return;
@@ -281,12 +415,21 @@ void fireFlickEvents(BTeki* actor, Catfish& s, unsigned generator) {
         if (s.firedEvents.count(event.first)) continue;
         if (s.stateTime < event.first / 30.0f) continue;
         s.firedEvents.insert(event.first);
-        if (event.second == 2) {
-            doFlick(actor);
-            std::printf("P2_CATFISH_FLICK generator=%u frame=%d\n",
-                        generator, event.first);
-            std::fflush(stdout);
+        switch (p2catfish::flickEvent(event.second)) {
+        case p2catfish::FlickEvent::Knockback: {
+            const int hit = doFlick(actor, s);
+            std::printf("P2_CATFISH_FLICK generator=%u frame=%d event=knockback hit=%d\n",
+                        generator, event.first, hit);
+            break;
         }
+        case p2catfish::FlickEvent::RestoreNonStone:
+            std::printf("P2_CATFISH_FLICK generator=%u frame=%d event=restore\n",
+                        generator, event.first);
+            break;
+        default:
+            break;
+        }
+        std::fflush(stdout);
     }
 }
 bool attackable(const Catfish& s, const Vector3f& pos, Creature* target) {
@@ -421,6 +564,10 @@ void pc_p2_catfish_setup() {
                     "x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=native "
                     "source_FSM=implemented attack=animation_event water=absent\n",
                     actor->mGenerator->_70, pos.x, pos.y, pos.z, actor->mHealth, LIFE);
+        std::printf("P2_CATFISH_RESIDUAL generator=%u slots=%d attack_damage=%.1f "
+                    "poison_damage=%.1f flick_events=25,47\n",
+                    actor->mGenerator->_70, p2catfish::kMouthSlots,
+                    p2catfish::kAttackDamage, p2catfish::kPoisonDamage);
         std::fflush(stdout);
         found.insert(actor->mGenerator->_70);
     }
@@ -503,7 +650,7 @@ void pc_p2_catfish_update(BTeki* actor) {
         stop(actor);
         fireAttackEvents(actor, s, generator);
         if (s.stateTime >= clipDuration("attack")) {
-            s.captured = nullptr;
+            for (int i = 0; i < p2catfish::kMouthSlots; ++i) s.slots[i] = nullptr;
             Creature* target = nearestTarget(pos);
             if (target && attackable(s, pos, target)) {
                 transition(s, CATFISH_ATTACK, "attack", generator);

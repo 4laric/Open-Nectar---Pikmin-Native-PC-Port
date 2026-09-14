@@ -14,14 +14,20 @@ class Creature;
 //
 // ATTACK / MOUTH ADAPTATION (recorded, not retail-faithful): the P2 Catfish
 // owns a two-slot mouth (kamu1/kamu2, Catfish.cpp:83) that is not representable
-// on the P1 host. The mouth swallow is resolved as an explicit capture inside
-// the source attack sweep radius at the banked attack bite animation event
-// (attack frame 17, event 2), then exactly one InteractKill at the banked
-// swallow event (attack frame 75, event 3), mirroring the Armor port. Catfish
-// ships no waitact1 clip (the KochappyBase Turn motion), so Turn reuses wait1.
-// Target detection accepts the nearest Navi or Pikmin; the source view angle is
-// treated as a full hemisphere because the Catfish general block does not
-// override it. Turn rate, flick radius and shake values are P1-host values.
+// on the P1 host. The mouth ingest is resolved as an explicit nearest-first
+// capture of up to two Pikmin inside the source attack sweep at the banked
+// attack bite animation event (attack frame 17, event 2), then exactly one
+// InteractKill per captured Pikmin at the banked swallow event (attack frame 75,
+// event 3); the same Pikmin is never captured twice and each is consumed once.
+// KEYEVENT_2 also runs the source attackNavi (general fp22/fp23/fp24) and the
+// banked swallow applies proper fp02=300 poison per consumed White Pikmin while
+// preserving the normal kill/corpse. The banked flick events (25,2)/(47,3) run
+// the source flick (stick/nearby Pikmin + nearby Navi) and the non-stone reset
+// rather than a synthetic frame. Catfish ships no waitact1 clip (the KochappyBase
+// Turn motion), so Turn reuses wait1. Target detection accepts the nearest Navi
+// or Pikmin; the source view angle is treated as a full hemisphere because the
+// Catfish general block does not override it. Turn rate and the flick latch
+// radius are P1-host values; flick knockback/damage/range use source defaults.
 //
 // Every hook is a no-op for unregistered actors; no other lane's module is
 // modified.
