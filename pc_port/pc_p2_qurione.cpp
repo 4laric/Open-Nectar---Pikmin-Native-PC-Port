@@ -23,6 +23,7 @@
 #include "pc_p2_sheargrub.h"
 #include "teki.h"
 #include "system.h"
+#include "MapMgr.h"
 #include "Generator.h"
 #include "Shape.h"
 #include "Texture.h"
@@ -68,6 +69,8 @@ constexpr float DEATH_RATE = 100.0f;     // fp04
 constexpr float DEATH_TIME = 1.0f;       // fp05
 constexpr float SIGHT = 200.0f;          // port adaptation
 constexpr float MOVE_SPEED = 80.0f;      // port adaptation (source moveSpeed class)
+constexpr float PITCH_RATE = 2.5f;       // fp02
+constexpr float PITCH_AMP = 20.0f;       // fp03
 constexpr float TURN_RATE = 3.14159265f; // unused fallback heading rate
 constexpr float HIT_RADIUS = 30.0f;      // Piki contact -> Drop
 constexpr float DROP_FRACTION = 0.5f;    // recorded adaptation (no bank events)
@@ -79,6 +82,7 @@ struct Wisp {
     Vector3f spawn[2];
     int spawnIndex = 0;
     float heading = 0.0f;
+    float pitch = 0.0f;
     bool eggAttached = true;
     bool dropFired = false;
     bool deadLogged = false;
@@ -287,6 +291,10 @@ void pc_p2_qurione_setup() {
     ready = true;
 }
 
+bool pc_p2_qurione_suppress_ai(const BTeki* actor) {
+    return ready && actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor))) != 0;
+}
+
 void pc_p2_qurione_update(BTeki* actor) {
     if (!ready) return;
     auto it = actors.find(static_cast<PelletView*>(actor));
@@ -315,7 +323,14 @@ void pc_p2_qurione_update(BTeki* actor) {
         }
         break;
     case QS_MOVE: {
-        const Vector3f drive(std::sin(w.heading) * MOVE_SPEED, 0.0f, std::cos(w.heading) * MOVE_SPEED);
+        // Source moveFaceDir: forward speed plus a pitch bob about
+        // mapMinY + fP03 * sin(mPitchRatio) + fP01 (flight height).
+        w.pitch += PITCH_RATE * dt;
+        if (w.pitch > TAU) w.pitch -= TAU;
+        const float minY = mapMgr ? mapMgr->getMinY(pos.x, pos.z, true) : pos.y - FLIGHT_HEIGHT;
+        const float targetY = minY + (PITCH_AMP * std::sin(w.pitch) + FLIGHT_HEIGHT);
+        const float vy = 2.5f * (targetY - pos.y);
+        const Vector3f drive(std::sin(w.heading) * MOVE_SPEED, vy, std::cos(w.heading) * MOVE_SPEED);
         actor->inputDrive(drive);
         actor->mVelocity.set(drive);
         if (pikiContact(pos)) {
@@ -374,8 +389,8 @@ void pc_p2_qurione_update(BTeki* actor) {
     w.logTimer += dt;
     if (w.logTimer >= 1.0f) {
         w.logTimer = 0.0f;
-        std::printf("P2_QURIONE_POS generator=%u state=%s clip=%s phase=%.2f x=%.2f z=%.2f\n",
-                    gen, qStateName(w.state), w.clip.c_str(), w.phase, pos.x, pos.z);
+        std::printf("P2_QURIONE_POS generator=%u state=%s clip=%s phase=%.2f x=%.2f y=%.2f z=%.2f\n",
+                    gen, qStateName(w.state), w.clip.c_str(), w.phase, pos.x, pos.y, pos.z);
         std::fflush(stdout);
     }
 }

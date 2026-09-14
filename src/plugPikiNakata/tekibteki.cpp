@@ -578,6 +578,9 @@ void BTeki::doAI()
 		return;
 	}
 #endif
+	if (pc_p2_qurione_suppress_ai(this)) {
+		return;
+	}
 	if (!mDeadState && (AIPerf::optLevel < 3 || mOptUpdateContext.updatable())) {
 		TekiStrategy* strat = getStrategy();
 		strat->act(*static_cast<Teki*>(this));
