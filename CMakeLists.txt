@@ -756,9 +756,12 @@ target_include_directories(p2_bombsarai_terrain_test PRIVATE pc_port)
 target_compile_options(p2_bombsarai_terrain_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_bombsarai_terrain_test COMMAND p2_bombsarai_terrain_test)
 
-# Note: tools/p2_bombsarai_induction_test.cpp exists on the approved line but
-# does not terminate when run as a ctest (observed timeout at 15 s), so it is
-# intentionally not registered here. Tracked for lane 27 as a test-hang finding.
+add_executable(p2_bombsarai_induction_test
+    tools/p2_bombsarai_induction_test.cpp
+    pc_port/pc_p2_bombsarai_bomb.cpp)
+target_include_directories(p2_bombsarai_induction_test PRIVATE pc_port)
+target_compile_options(p2_bombsarai_induction_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_bombsarai_induction_test COMMAND p2_bombsarai_induction_test)
 
 add_executable(pc_render_phase_test
     pc_port/timing/pc_render_phase_test.cpp
