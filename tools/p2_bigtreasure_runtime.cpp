@@ -36,6 +36,7 @@
 #include "pc_p2_bigtreasure_fsmhost.h"
 #include "pc_p2_bigtreasure_map_trace.h"
 #include "pc_p2_bigtreasure_visual.h"
+#include "pc_p2_hardlanes.h"
 
 // Batch 2: the lane implementations are part of the shared pikmin_pc target,
 // so the fixture links against the build objects instead of compiling them into
@@ -696,6 +697,9 @@ private:
 
     void startVisual()
     {
+        // Own the clip player for the deterministic per-clip phases below; the
+        // production hardlanes clock would otherwise advance the same player.
+        pc_p2_hardlanes_set_bigtreasure_visual_driven(false);
         require(pc_p2_bigtreasure_visual_setup("p2-bigtreasure-visual.txt"), "visual setup");
         require(pc_p2_bigtreasure_visual_pellet_count() == 4, "converted pellet count");
         require(pc_p2_bigtreasure_visual_debug_count() == 1, "loozy debug marker count");
