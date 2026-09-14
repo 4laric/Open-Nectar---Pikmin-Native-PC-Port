@@ -1,14 +1,22 @@
 // Pikmin 2 lane-22 BombOtakara payload sidecar runtime (#170, child #447).
 //
-// Policy-driven, actor-local BombOtakara simulation. This P1 port has no Bomb
-// enemy and no shared blast/projectile contract at this base, so the payload is
-// a sidecar-staged stub (labeled) and the driver consumes
-// pc_p2_bombotakara_policy.h. The blast application itself is BLOCKED and
-// reported, never re-implemented. Missing sidecar = inert; malformed = fail
-// closed.
+// Policy-driven, actor-local BombOtakara simulation. The payload is a
+// sidecar-staged stub (labeled) driven by pc_p2_bombotakara_policy.h. On
+// detonation the module now consumes the shared blast primitive owned by the
+// projectiles/BombSarai lane (pc_p2_bombsarai_blast.h, #169) and applies the
+// source Bomb's InteractBomb to enumerated receivers; the numeric Bomb parms
+// are the pinned retail values from the lane-20 tests (radius 90 fp22, teki 500
+// fp01, navi/piki 10 fp24, half-height 50 fp02). Missing sidecar = inert;
+// malformed = fail closed.
 #include "pc_p2_bombotakara.h"
 #include "pc_p2_bombotakara_policy.h"
+#include "pc_p2_bombsarai_blast.h"
 #include "pc_bbft.h"
+#include "Interactions.h"
+#include "Piki.h"
+#include "PikiMgr.h"
+#include "Navi.h"
+#include "NaviMgr.h"
 #include <SDL.h>
 #include <cmath>
 #include <cstdio>
@@ -17,9 +25,18 @@
 #include <string>
 #include <vector>
 
+class Graphics;
+
 namespace {
 
 const float kTickSeconds = 1.0f / 30.0f;
+// Shared Bomb payload parms (lane-20 pinned retail values; Bomb.h defaults for
+// fp02): radius mAttackRadius fp22 90, teki damage fp01 500, navi/piki damage
+// fp24 10, blast half-height fp02 50.
+const float kBlastRadius     = 90.0f;
+const float kBlastHalfHeight = 50.0f;
+const float kTekDamage       = 500.0f;
+const float kNavPikiDamage   = 10.0f;
 
 struct Unit {
     std::uint32_t generator = 0;
@@ -50,12 +67,92 @@ unsigned long behaviorTick = 0;
 float clockAccumulator = 0.0f;
 unsigned clockLast = 0;
 int suppressedCount = 0;
-int blastBlockedCount = 0;
+int blastCount = 0;
+
+// The InteractBomb receiver uses the owner for the knockback direction and
+// sound source (interactBattle.cpp:63). A carrierless BombOtakara blast is
+// attributed to the bomb itself (bombState.cpp:167-172), so a stateless
+// module-local Creature positioned at the blast center is the faithful owner.
+class BlastOwner : public Creature {
+public:
+    BlastOwner() : Creature(nullptr) { mHealth = 1.0f; }
+    void refresh(Graphics&) override {}
+    void doKill() override {}
+};
+BlastOwner blastOwner;
 
 Unit* findUnit(std::uint32_t generator) {
     for (auto& unit : units)
         if (unit.generator == generator) return &unit;
     return nullptr;
+}
+
+// Consume the shared BombSarai blast primitive: enumerate Pikmin/Navi/Teki
+// receivers, classify/attribute with the shared policy, then apply the source
+// Bomb's InteractBomb to each routed hit. Returns the number of receivers hit.
+int applyBlast(Unit& unit) {
+    P2BombSaraiBlastEvent event;
+    event.center = P2BombSaraiVec3{unit.bx, unit.by, unit.bz};
+    event.radius = kBlastRadius;
+    event.halfHeight = kBlastHalfHeight;
+    event.tekiDamage = kTekDamage;
+    event.naviPikiDamage = kNavPikiDamage;
+    event.hasCarrier = false;
+    event.carrierValid = false;
+
+    std::vector<P2BombSaraiReceiver> receivers;
+    std::vector<Creature*> actors;
+    std::vector<P2BombSaraiReceiverKind> kinds;
+    auto addReceiver = [&](Creature* creature, P2BombSaraiReceiverKind kind) {
+        if (!creature || !creature->isAlive()) return;
+        const Vector3f& position = creature->getPosition();
+        P2BombSaraiReceiver receiver;
+        receiver.id = receivers.size();
+        receiver.position = P2BombSaraiVec3{position.x, position.y, position.z};
+        receiver.kind = kind;
+        receiver.alive = true;
+        receiver.grounded = true;
+        receivers.push_back(receiver);
+        actors.push_back(creature);
+        kinds.push_back(kind);
+    };
+    if (pikiMgr) {
+        Iterator it(pikiMgr);
+        CI_LOOP(it) { addReceiver(static_cast<Creature*>(static_cast<Piki*>(*it)), P2BombSaraiReceiverKind::Piki); }
+    }
+    if (naviMgr && naviMgr->getNavi()) {
+        addReceiver(static_cast<Creature*>(naviMgr->getNavi()), P2BombSaraiReceiverKind::Navi);
+    }
+    if (receivers.empty()) {
+        std::printf("P2_BOMBOTAKARA_BLAST generator=%u payload=%u center=%.3f,%.3f,%.3f radius=%.1f "
+                    "receivers=0 hits=0 pikmin_hits=0\n",
+                    unit.generator, unit.payloadId, unit.bx, unit.by, unit.bz, kBlastRadius);
+        ++blastCount;
+        return 0;
+    }
+    std::vector<P2BombSaraiRoutedHit> hits(receivers.size());
+    const int routed = p2_bombsarai_route_blast(event, receivers.data(), int(receivers.size()), hits.data(),
+                                                int(hits.size()));
+    if (routed < 0) {
+        std::printf("P2_BOMBOTAKARA_BLAST_BLOCKED generator=%u payload=%u reason=invalid_blast\n", unit.generator,
+                    unit.payloadId);
+        return 0;
+    }
+    int pikminHits = 0;
+    blastOwner.mSRT.t.set(unit.bx, unit.by, unit.bz);
+    for (int i = 0; i < routed; ++i) {
+        const P2BombSaraiRoutedHit& hit = hits[i];
+        if (hit.receiverId >= actors.size() || !actors[hit.receiverId]) continue;
+        InteractBomb bomb(&blastOwner, hit.damage, nullptr);
+        actors[hit.receiverId]->stimulate(bomb);
+        if (kinds[hit.receiverId] == P2BombSaraiReceiverKind::Piki) ++pikminHits;
+    }
+    std::printf("P2_BOMBOTAKARA_BLAST generator=%u payload=%u center=%.3f,%.3f,%.3f radius=%.1f receivers=%d "
+                "hits=%d pikmin_hits=%d teki_damage=%.1f navi_piki_damage=%.1f shared_primitive=1\n",
+                unit.generator, unit.payloadId, unit.bx, unit.by, unit.bz, kBlastRadius, int(receivers.size()), routed,
+                pikminHits, kTekDamage, kNavPikiDamage);
+    ++blastCount;
+    return routed;
 }
 
 void detonate(Unit& unit, p2bombotakara::Trigger trigger) {
@@ -66,9 +163,7 @@ void detonate(Unit& unit, p2bombotakara::Trigger trigger) {
         std::printf("P2_BOMBOTAKARA_DETONATE generator=%u payload=%u trigger=%s detonated=1 "
                     "exactly_once=1 total_detonations=1\n",
                     unit.generator, unit.payloadId, p2bombotakara::triggerName(trigger));
-        std::printf("P2_BOMBOTAKARA_BLAST_BLOCKED generator=%u payload=%u reason=no_shared_blast\n",
-                    unit.generator, unit.payloadId);
-        ++blastBlockedCount;
+        applyBlast(unit);
     } else {
         ++suppressedCount;
         std::printf("P2_BOMBOTAKARA_DETONATE_SUPPRESSED generator=%u payload=%u trigger=%s detonated=0 "
@@ -126,7 +221,7 @@ void pc_p2_bombotakara_reset() {
     clockAccumulator = 0.0f;
     clockLast = 0;
     suppressedCount = 0;
-    blastBlockedCount = 0;
+    blastCount = 0;
 }
 
 void pc_p2_bombotakara_setup() {
@@ -214,7 +309,11 @@ bool pc_p2_bombotakara_gates_ready() {
     for (const auto& unit : units) {
         if (!unit.carryLogged || !unit.armed || !unit.detonated) return false;
     }
-    return suppressedCount >= 1 && blastBlockedCount >= 1;
+    // Every carrier is triggered twice by the fixture; require the second
+    // (suppressed) trigger for each so the fixture cannot exit before the
+    // death-path suppression is emitted.
+    const int required = static_cast<int>(units.size());
+    return suppressedCount >= required && blastCount >= required;
 }
 
 void pc_p2_bombotakara_kill_all() {
@@ -244,4 +343,4 @@ int pc_p2_bombotakara_detonated_count() {
 }
 
 int pc_p2_bombotakara_suppressed_count() { return suppressedCount; }
-int pc_p2_bombotakara_blast_blocked_count() { return blastBlockedCount; }
+int pc_p2_bombotakara_blast_count() { return blastCount; }

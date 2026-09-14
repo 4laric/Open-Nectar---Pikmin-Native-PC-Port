@@ -4,10 +4,10 @@
 // Opt-in, actor-local BombOtakara (93) payload behavior: born carrying a Bomb
 // stub, chase/arm via the stimulateBomb 1.5 s force delay, detonate exactly
 // once on contact/press/death. Gated on p2-bombotakara-native.txt: absent file
-// means inert, malformed file fails closed. The shared blast/explosion
-// primitive (projectiles lane #169) does not exist at this base, so detonation
-// is reported with P2_BOMBOTAKARA_BLAST_BLOCKED reason=no_shared_blast instead
-// of a duplicate blast. Generic damage/physics is untouched.
+// means inert, malformed file fails closed. On detonation the module consumes
+// the shared blast primitive (pc_p2_bombsarai_blast.h, projectiles lane #169)
+// and applies the source Bomb's InteractBomb, rather than emitting a duplicate
+// blast. Generic damage/physics is otherwise untouched.
 void pc_p2_bombotakara_setup();
 void pc_p2_bombotakara_reset();
 void pc_p2_bombotakara_update();
@@ -18,4 +18,4 @@ int pc_p2_bombotakara_carry_count();
 int pc_p2_bombotakara_armed_count();
 int pc_p2_bombotakara_detonated_count();
 int pc_p2_bombotakara_suppressed_count();
-int pc_p2_bombotakara_blast_blocked_count();
+int pc_p2_bombotakara_blast_count();
