@@ -1,46 +1,52 @@
-# Fuefuki native vehicle (Napkid 11) — staging blocker (#245)
+# Fuefuki native vehicle (Napkid 11) — arena staging (#245)
 
-Status: **BLOCKED**. Recorded 2026-09-14. The lane visual and follow policy run
-against a scripted anchor (see `P2_FUEFUKI_VISUAL_EVIDENCE.md`); anchoring them on
-a *native moveable vehicle* needs the shared arena/generator path, which does
-not currently complete.
+Status: **RESOLVED for binding/draw** (2026-09-14). The lane binds and draws on a
+real Napkid 11 placement vehicle in the P1 practice arena, via the **cargo-free**
+preview mode. What remains open is *native Fuefuki identity* (enemy 41) — the
+Napkid is still only a placement vehicle.
 
-## What was tried
+## Resolution
 
-1. **Arena path (`experimental.pikmin2_fuefuki_arena.py`).** Built a run dir on
-   the original P1 practice stage with a Napkid 11 generator + Chappy control,
-   overlaid the converted pose bank and `p2-fuefuki-visual.txt`, and ran
-   `nectar.exe --experimental-pikmin2-room`. The run loaded 26 generators /
-   24 creatures, then stopped at
-   `P2 preview: treasure generator missing` and never reached
-   `P2_HARDLANES_READY`; the process ended before the room-preview hardlane
-   setup. The P2 room-preview path expects the converted P2 room's treasure
-   generator, which the P1 practice arena does not provide.
+`pc_p2_preview_setup` validates `p2ValidatePreviewCargo(cargoFree, hasCargoConfig,
+hasTreasure)`: without a treasure generator it aborts ("treasure generator
+missing"). The practice arena has no treasure generator, but the supported
+**cargo-free** config (`p2-cargo-free.txt` containing `P2_CARGO_FREE_1`) makes
+the validation pass. `experimental/pikmin2_fuefuki_arena.py` now writes that
+config into the run directory.
 
-2. **Direct `tekiMgr` birth in the working converted room.** In
-   `p2_fuefuki_follow_runtime.cpp`, `tekiMgr->hasType(TEKI_Napkid)` returned
-   **1** and `tekiMgr->newTeki(TEKI_Napkid)` returned a **type-11** `Teki`
-   object. The fixture then applied the visible part of
-   `GenObjectTeki::birth` (`mPersonality->mPosition/mNestPosition`, `reset()`,
-   `startAI(0)`) and reached `P2_FUEFUKI_FOLLOW_RT_READY`. On the next engine
-   frame the process access-violated (`0xC0000005`): the hand-initialised
-   Teki is missing the generator's remaining setup.
+Running `nectar.exe --experimental-pikmin2-room` in that arena with the converted
+pose bank overlaid produced:
 
-The probe was reverted; the runtime fixture is green again (`7411332e`).
+```
+[Pikipelago] P2_ROOM_PREVIEW room=room_4x4a_4_conc red=20 isolated=1
+P2_HARDLANES_READY family=Fuefuki vehicle=Napkid follow_locomotion=actteki_volatile_approx
+P2_FUEFUKI_VISUAL_READY clips=8
+P2_HARDLANES_READY family=Fuefuki visual=1 clips=8
+[Pikipelago] P2_ROOM_CARGO_FREE_READY cargo=0 repairs=1
+P2_FUEFUKI_VISUAL_DRAW clip=wait pose=0 x=-150.0 y=30.0 z=1850.0
+P2_FUEFUKI_FSM state=2 clip=wait
+```
 
-## What is proven / not proven
+The draw position `(-150, 30, 1850)` is exactly the arena's Napkid placement, so
+the visual is anchored on the real vehicle. The run stayed stable for 40 s
+(manually stopped; the game has no self-exit).
 
-- Proven: the Napkid type is loaded and constructible in the converted room
-  (`has_type=1`, `newTeki` non-null, `mTekiType==TEKI_Napkid`).
-- Not proven: a stable, moveable native vehicle. Neither the arena generator
-  path nor a hand-rolled `Teki` init produces a frame-stable actor.
+## What was tried before (kept for the record)
 
-## Next steps (owner: integration/arena #186 + lane 28)
+1. **Arena without cargo-free** — stalled at `P2 preview: treasure generator
+   missing`; never reached the hardlane setup.
+2. **Direct `tekiMgr->newTeki(TEKI_Napkid)`** — `hasType==1` and a type-11 `Teki`
+   is returned, but a hand-initialised instance (`mPersonality` pos/nest,
+   `reset()`, `startAI(0)`) access-violated on the next frame. Not needed once
+   the generator path runs.
 
-- Fix the P2 room-preview setup so the P1 practice arena loads (treasure
-  generator requirement), then let `GenObjectTeki::birth` create the Napkid and
-  let `pc_p2_hardlanes_setup` bind it.
-- Or complete the `GenObjectTeki` init sequence for a direct birth (strategy
-  table / brain / motion / nest), verified against a crash-free frame loop.
-- Once stable, drive the lane visual/follow from the live vehicle transform and
-  assert state-driven clip switching there.
+## Still open
+
+- **Native Fuefuki identity (41):** the vehicle is Napkid 11; `native_identity`
+  stays BLOCKED.
+- **FSM progression:** on the real vehicle the FSM reached only `Land` (`state=2`)
+  because the source Beetle animation bank is not wired (#128), so no
+  `KEYEVENT_2/3/END` events are fed. The fixture drives synthetic key events;
+  the arena cannot until the motion bank lands.
+- Whistle effect ring, audio, material fidelity; the arena does not itself stage
+  the converted pose bank (overlay `p2-fuefuki-visual.txt` + mods to see it).

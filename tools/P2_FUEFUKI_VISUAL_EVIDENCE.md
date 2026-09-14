@@ -20,12 +20,9 @@ Real in this run:
 
 Not covered / limitations:
 
-- **Vehicle identity:** the fixture moves a scripted anchor, not a native
-  Napkid vehicle. The FSM→clip mapping, pose advance and visual-at-moving-anchor
-  transform are exercised; a real vehicle is blocked (see
-  `P2_FUEFUKI_VEHICLE_BLOCKER.md`): the arena path stalls before the hardlane
-  setup, and a hand-initialised `tekiMgr->newTeki(TEKI_Napkid)` access-violates
-  on the next frame.
+- **Vehicle:** the fixture moves a scripted anchor; a separate real-vehicle run
+  is recorded below. Native Fuefuki **identity** (enemy 41) is still not
+  registered — the vehicle is Napkid 11 (`native_identity` BLOCKED).
 - `landing`/`landfail` are absent (singular source joint scale); the profile
   lists only the 8 converted clips.
 - Baked rigid poses with approximate materials; no skeletal playback or
@@ -64,6 +61,23 @@ The final run adds: FSM state 7 (Whisle) maps to the `whisle` clip
 beetle to z=-115.0; and the pose advances within the clip (`pose=2`) because
 the clip is only re-selected on a change. The follow-locomotion phases pass in
 the same run.
+
+## Real-vehicle arena run
+
+`experimental/pikmin2_fuefuki_arena.py` (cargo-free preview) + the overlaid pose
+bank, run with `nectar.exe --experimental-pikmin2-room` at the same native HEAD:
+
+```
+P2_HARDLANES_READY family=Fuefuki vehicle=Napkid follow_locomotion=actteki_volatile_approx
+P2_FUEFUKI_VISUAL_READY clips=8
+P2_FUEFUKI_VISUAL_DRAW clip=wait pose=0 x=-150.0 y=30.0 z=1850.0
+P2_FUEFUKI_FSM state=2 clip=wait
+```
+
+`(-150, 30, 1850)` is the arena's Napkid placement, so the converted Fuefuki
+pose is drawn at the real placement vehicle. The FSM reached only `Land` because
+the source Beetle animation bank (#128) is not wired to feed key events; the
+fixture's synthetic key events are what advance the clip there.
 
 ## Next steps
 
