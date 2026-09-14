@@ -25,7 +25,10 @@
 #include "pc_p2_rock_hazard.h"
 #include "pc_bbft.h"
 #include "Creature.h"
+#include "ItemMgr.h"
 #include "MapMgr.h"
+#include "ObjType.h"
+#include "Pellet.h"
 #include "Navi.h"
 #include "NaviMgr.h"
 #include "Piki.h"
@@ -855,6 +858,62 @@ void logEggDrop(const P2EggDrop& drop)
     }
 }
 
+// Real child births for a broken Egg (#410, "real requested child births").
+// Maps the P2EggDrop policy result onto the P1 managers that exist in this host:
+//   PelletOne/Five -> pelletMgr->newNumberPellet(color, NUMPEL_*) with the
+//                     source spawn velocity;
+//   Nectar         -> itemMgr->birth(OBJTYPE_Water);
+//   MititeGroup    -> the source createGroup-failure fallback to nectar
+//                     (egg.cpp:351-360), since P1 has no Mitite manager;
+//   Spicy/Bitter   -> P1 has no spray item and the policy only emits these when
+//                     the family opts in with the first-spray demo flag, so the
+//                     host reports them unsupported rather than inventing a drop.
+void birthEggDrop(const P2EggDrop& drop)
+{
+    const Vector3f base(gHost.eggPos.x, gHost.eggPos.y + drop.positionOffsetY, gHost.eggPos.z);
+    for (int i = 0; i < drop.itemCount && i < 2; ++i) {
+        const P2EggItem& item = drop.items[i];
+        P2EggSpawnKind kind = item.kind;
+        bool fallback = false;
+        if (kind == P2EggSpawnKind::MititeGroup && drop.mititeFallbackToNectar) {
+            kind = P2EggSpawnKind::Nectar;
+            fallback = true;
+        }
+        bool birthed = false;
+        const char* born = "none";
+        if (kind == P2EggSpawnKind::PelletOne || kind == P2EggSpawnKind::PelletFive) {
+            if (pelletMgr) {
+                Pellet* pellet = pelletMgr->newNumberPellet(
+                    item.pelletColor,
+                    kind == P2EggSpawnKind::PelletFive ? NUMPEL_FivePellet : NUMPEL_OnePellet);
+                if (pellet) {
+                    pellet->init(base);
+                    pellet->mVelocity.set(item.velocity.x, item.velocity.y, item.velocity.z);
+                    pellet->startAI(0);
+                    birthed = true;
+                    born = "pellet";
+                }
+            }
+        } else if (kind == P2EggSpawnKind::Nectar) {
+            if (itemMgr) {
+                Creature* nectar = itemMgr->birth(OBJTYPE_Water);
+                if (nectar) {
+                    nectar->init(base);
+                    nectar->startAI(0);
+                    birthed = true;
+                    born = "nectar";
+                }
+            }
+        } else {
+            born = "unsupported";
+        }
+        std::printf("P2_PROJECTILE_EGG_BIRTH index=%d kind=%d real=%d fallback=%d item=%s "
+                    "x=%.1f y=%.1f z=%.1f\n",
+                    i, int(item.kind), int(birthed), int(fallback), born, base.x, base.y,
+                    base.z);
+    }
+}
+
 void tickEgg()
 {
     P2Egg& egg = gHost.egg;
@@ -892,6 +951,7 @@ void tickEgg()
 
     if (egg.health() <= 0.0f && egg.update(rngFloat, &gHost.rng, rngInt, &gHost.rng)) {
         logEggDrop(egg.drop());
+        birthEggDrop(egg.drop());
         gHost.eggActive = false;
     }
 }
