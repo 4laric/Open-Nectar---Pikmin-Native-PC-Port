@@ -31,11 +31,12 @@ or END events.
 
 ## Observed evidence (natural, not injected)
 
-Session `output/demon-captor-run-05/8865cd69aff2401e87d0f7904d4b5665`,
-fixture `output/demon-captor-fixture-05` (`status=built`, expected native head
-`e67005e8`), exe SHA-256
-`0470BA4482ED04E6EE744102853E4AEF0BAB65A1AEFA42DD9C0C8206957AE444`,
-`960x540` centred window, 20-red baseline arena.
+Session `output/demon-captor-run-06/693d627dab254b31bfc996c3c6e711e8`,
+fixture `output/demon-captor-fixture-06` (`status=built`, expected native head
+`57e6a52c`), exe SHA-256
+`2F13FA440C6F14E0BF4C8D3D22F23E03CD1F1FBE537911D7806FCD364C02EF1D`,
+`960x540` centred window, 20-red baseline arena. An earlier identical run at the
+pre-commit head `e67005e8` is `output/demon-captor-run-05/8865cd69aff2401e87d0f7904d4b5665`.
 
 ```text
 P2_DEMON_HOST_WINDOW size=960x540 pos=373,263 display=1707x1067 centered=1
