@@ -3,6 +3,7 @@
 #include "pc_p2_mamuta.h"
 #include "pc_p2_tank.h"
 #include "pc_p2_hiba.h"
+#include "pc_p2_dweevil.h"
 #include "pc_p2_qurione.h"
 #include "pc_p2_shijimi.h"
 #include "pc_p2_kurage_teki.h"
@@ -243,6 +244,7 @@ void pc_p2_preview_setup() {
     pc_p2_flora_setup();
     pc_p2_pom_setup();
     pc_p2_plant_setup();
+    pc_p2_dweevil_setup();
     pc_p2_qurione_setup();
     pc_p2_shijimi_setup();
     pc_p2_batch2_setup();
