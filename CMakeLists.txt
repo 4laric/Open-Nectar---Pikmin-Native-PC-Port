@@ -243,6 +243,12 @@ pc_port/pc_p2_kabuto_binding.cpp
 pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_rock_hazard.cpp
     pc_port/pc_p2_projectile_receiver.cpp
+    pc_port/pc_p2_groink.cpp
+    pc_port/pc_p2_groink_arena.cpp
+    pc_port/pc_p2_groink_attack.cpp
+    pc_port/pc_p2_groink_map_trace.cpp
+    pc_port/pc_p2_groink_target.cpp
+    pc_port/pc_p2_groink_volley.cpp
     pc_port/pc_p2_groink_hit.cpp
     pc_port/pc_p2_groink_strike.cpp
     pc_port/pc_p2_projectiles.cpp
@@ -1044,3 +1050,33 @@ foreach(policy IN ITEMS bigtreasure_ordinary bigtreasure_animclock bigtreasure_n
     target_compile_options(p2_${policy}_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
     add_test(NAME p2_${policy}_test COMMAND p2_${policy}_test)
 endforeach()
+
+# Groink submitted policy dependencies; arena remains opt-in.
+add_executable(p2_groink_test tools/p2_groink_test.cpp pc_port/pc_p2_groink.cpp)
+target_include_directories(p2_groink_test PRIVATE pc_port)
+target_compile_options(p2_groink_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_groink_test COMMAND p2_groink_test)
+add_executable(p2_groink_attack_test tools/p2_groink_attack_test.cpp pc_port/pc_p2_groink_attack.cpp pc_port/pc_p2_groink.cpp)
+target_include_directories(p2_groink_attack_test PRIVATE pc_port)
+target_compile_options(p2_groink_attack_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_groink_attack_test COMMAND p2_groink_attack_test)
+add_executable(p2_groink_clock_test tools/p2_groink_clock_test.cpp )
+target_include_directories(p2_groink_clock_test PRIVATE pc_port)
+target_compile_options(p2_groink_clock_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_groink_clock_test COMMAND p2_groink_clock_test)
+add_executable(p2_groink_events_test tools/p2_groink_events_test.cpp pc_port/pc_p2_groink_attack.cpp pc_port/pc_p2_groink.cpp)
+target_include_directories(p2_groink_events_test PRIVATE pc_port)
+target_compile_options(p2_groink_events_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_groink_events_test COMMAND p2_groink_events_test)
+add_executable(p2_groink_target_test tools/p2_groink_target_test.cpp pc_port/pc_p2_groink_target.cpp)
+target_include_directories(p2_groink_target_test PRIVATE pc_port)
+target_compile_options(p2_groink_target_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_groink_target_test COMMAND p2_groink_target_test)
+add_executable(p2_groink_volley_test tools/p2_groink_volley_test.cpp pc_port/pc_p2_groink_volley.cpp pc_port/pc_p2_groink.cpp)
+target_include_directories(p2_groink_volley_test PRIVATE pc_port)
+target_compile_options(p2_groink_volley_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_groink_volley_test COMMAND p2_groink_volley_test)
+add_executable(p2_groink_hit_test tools/p2_groink_hit_test.cpp pc_port/pc_p2_groink_hit.cpp)
+target_include_directories(p2_groink_hit_test PRIVATE pc_port)
+target_compile_options(p2_groink_hit_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_groink_hit_test COMMAND p2_groink_hit_test)
