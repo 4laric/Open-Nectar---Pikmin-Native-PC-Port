@@ -159,6 +159,15 @@ void pc_p2_kogane_setup(){
             b.flips=restored->second;
             std::printf("P2_KOGANE_FLIPS_RESTORED generator=%u flips=%d\n",b.generator,b.flips);
             std::fflush(stdout);
+            if(b.flips>=3){
+                // Already at the source flip cap: this beetle spent every drop and
+                // burrowed away before the reset, so reconstruct the escaped state
+                // instead of re-spawning one that can never drop again.
+                std::printf("P2_KOGANE_RESTORED_ESCAPE generator=%u flips=%d\n",b.generator,b.flips);
+                std::fflush(stdout);
+                actor->pcEscapeNow(); // corpse suppressed via the CorpseType hook
+                continue;
+            }
         }
         actor->mHealth=actor->getParameterF(TPF_Life);
         std::printf("P2_KOGANE_BIND generator=%u source_id=%d karada_k0=%d visual_only=0\n",actor->mGenerator->_70,id,p2kogane::karada(id));
