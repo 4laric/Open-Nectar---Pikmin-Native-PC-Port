@@ -23,10 +23,91 @@ std::uint64_t nextHostToken = 0;
 struct ManagerBinding { P2DemonHost* host; unsigned generator; int type; };
 std::map<BTeki*, ManagerBinding> managerBindings;
 std::vector<std::unique_ptr<P2DemonHost>> managerHosts;
+std::size_t managerOrdinaryBindings = 0;
+
+// Find the one spawned arena actor the ordinary Demon host binds to. The
+// converted private room spawns a single Dwarf Bulborb (native TEKI_Chappy)
+// placeholder as its only enemy generator; an explicit identity may be supplied
+// instead. Exactly one match is required, so a stale/ambiguous scene fails closed.
+bool findOrdinaryActor(unsigned wantedGenerator, int wantedType, bool fixedIdentity, BTeki*& match)
+{
+    match = nullptr;
+    Iterator actors(tekiMgr); CI_LOOP(actors) {
+        BTeki* actor = static_cast<BTeki*>(*actors);
+        if (!actor || !actor->mGenerator) continue;
+        if (fixedIdentity) {
+            if (actor->mGenerator->_70 != wantedGenerator || actor->mTekiType != wantedType) continue;
+        } else if (actor->mTekiType != TEKI_Chappy) {
+            continue;
+        }
+        if (match) return false;
+        match = actor;
+    }
+    return match != nullptr;
+}
+
+// Ordinary natural captor: bind a private Demon host to the spawned arena actor
+// and enable the source front end (target/approach/attack/capture) so the
+// production update hook drives it. Default-off; only PIKMIN_DEMON_ORDINARY=1
+// reaches here. The captain is never touched by this setup.
+void setupOrdinaryHost()
+{
+    if (!tekiMgr) return;
+    const char* gen = std::getenv("PIKMIN_DEMON_ORDINARY_GENERATOR");
+    const char* type = std::getenv("PIKMIN_DEMON_ORDINARY_TYPE");
+    const bool fixedIdentity = gen && *gen && type && *type;
+    const unsigned wantedGenerator = fixedIdentity ? unsigned(std::strtoul(gen, nullptr, 10)) : 0u;
+    const int wantedType = fixedIdentity ? std::atoi(type) : TEKI_Chappy;
+    BTeki* match = nullptr;
+    if (!findOrdinaryActor(wantedGenerator, wantedType, fixedIdentity, match)) return;
+
+    const char* model = std::getenv("PIKMIN_DEMON_ORDINARY_MODEL");
+    if (!model || !*model) model = "courses/pikmin2room/demon0.mod";
+    float ax, ay, az, bx, by, bz;
+    std::ifstream mouths("demon-mouths.txt");
+    if (!(mouths >> ax >> ay >> az >> bx >> by >> bz)) return;
+
+    const char* catchProfile = std::getenv("DEMON_CATCHFLY_POSES");
+    const char* fallProfile = std::getenv("DEMON_FALLMECK_POSES");
+    if (!catchProfile || !*catchProfile) catchProfile = "demon-waitact2-poses.txt";
+    if (!fallProfile || !*fallProfile) fallProfile = "demon-waitact1-poses.txt";
+    std::ifstream events("demon-retail-events.txt");
+    if (!events) return;
+    p2retail::Table table;
+    try { table = p2retail::read(events); } catch (...) { return; }
+    p2retail::Motion attack, catchFly, fallMeck;
+    for (const auto& motion : table.motions) {
+        if (motion.name == "attack1.bca") attack = motion;
+        else if (motion.name == "waitact2.bca") catchFly = motion;
+        else if (motion.name == "waitact1.bca") fallMeck = motion;
+    }
+    if (attack.name.empty() || catchFly.name.empty() || fallMeck.name.empty()) return;
+
+    auto host = std::make_unique<P2DemonHost>();
+    if (!host->load(model, Vector3f(ax, ay, az), Vector3f(bx, by, bz))) return;
+    if (!host->preloadPoseMeshes("demon-attack-poses.txt")
+        || !host->preloadPoseMeshes(catchProfile)
+        || !host->preloadPoseMeshes(fallProfile)) return;
+    host->setNaturalMotions(attack, catchFly, fallMeck);
+    host->setNaturalPoseProfiles(catchProfile, fallProfile);
+    if (!pc_p2_demon_manager_bind(host.get(), match, match->mGenerator->_70, match->mTekiType)) return;
+    const Vector3f home = match->getPosition();
+    host->setPosition(home);
+    // The converted private room's only spawned enemy starts away from the
+    // captain, and no patrol/scan state is implemented here, so the view cone is
+    // widened and the territory/sight radii cover the room. Approach speed, turn
+    // cap and grab range stay at the fixture's natural values.
+    host->enableNatural(30.0f, 3.0f, 20.0f, 12.0f, 1000.0f, 360.0f, 1200.0f, home);
+    if (!host->naturalEnabled()) return;
+    ++managerOrdinaryBindings;
+    managerHosts.push_back(std::move(host));
+}
 }
 
 void pc_p2_demon_manager_setup()
 {
+    const char* ordinary = std::getenv("PIKMIN_DEMON_ORDINARY");
+    if (ordinary && std::strcmp(ordinary, "1") == 0) { setupOrdinaryHost(); return; }
     const char* enabled = std::getenv("PIKMIN_DEMON_AUTO_BIND");
     if (!enabled || std::strcmp(enabled, "1") != 0 || !tekiMgr) return;
     const char* path = std::getenv("PIKMIN_DEMON_BINDINGS");
@@ -57,6 +138,7 @@ void pc_p2_demon_manager_reset()
     for (auto& entry : managerBindings) entry.second.host->unbindNativeActor(entry.first);
     managerBindings.clear();
     managerHosts.clear();
+    managerOrdinaryBindings = 0;
 }
 void pc_p2_demon_manager_forget(BTeki* actor)
 {
@@ -115,9 +197,19 @@ void pc_p2_demon_manager_update_actor(BTeki* actor)
     if (!binding.host->revalidateNativeActor(actor, binding.generator, binding.type)) {
         managerBindings.erase(it); return;
     }
-    binding.host->setPosition(actor->getPosition());
+    // A natural host owns its own approaching position; the spawned actor is its
+    // lifetime/identity anchor, not a per-frame transform source. Fixture/injected
+    // hosts (natural disabled) keep following the anchor exactly as before.
+    if (!binding.host->naturalEnabled()) binding.host->setPosition(actor->getPosition());
     binding.host->update();
 }
+int pc_p2_demon_manager_natural_phase()
+{
+    for (const auto& entry : managerBindings)
+        if (entry.second.host->naturalEnabled()) return entry.second.host->naturalPhase();
+    return 0;
+}
+std::size_t pc_p2_demon_manager_natural_binding_count() { return managerOrdinaryBindings; }
 bool pc_p2_demon_manager_draw_actor(BTeki* actor, Graphics& gfx, const Matrix4f&, bool)
 {
     auto it = managerBindings.find(actor);

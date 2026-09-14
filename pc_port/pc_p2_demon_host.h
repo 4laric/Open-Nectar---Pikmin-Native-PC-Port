@@ -19,6 +19,8 @@ void pc_p2_demon_manager_setup();
 std::size_t pc_p2_demon_manager_binding_count();
 std::size_t pc_p2_demon_manager_render_count();
 bool pc_p2_demon_manager_is_bound(BTeki* actor);
+int pc_p2_demon_manager_natural_phase();
+std::size_t pc_p2_demon_manager_natural_binding_count();
 void pc_p2_demon_manager_update();
 void pc_p2_demon_manager_draw(Graphics& gfx);
 void pc_p2_demon_manager_update_actor(BTeki* actor);
