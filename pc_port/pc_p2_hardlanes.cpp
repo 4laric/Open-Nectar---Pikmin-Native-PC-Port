@@ -28,6 +28,8 @@
 #include "pc_p2_bigtreasure_host.h"
 #include "pc_p2_bigtreasure_ordinary.h"
 #include "pc_p2_bigtreasure_animclock.h"
+#include "pc_p2_bigtreasure_elements.h"
+#include "pc_p2_bigtreasure_map_trace.h"
 #include "pc_p2_bigtreasure_visual.h"
 #include "Matrix4f.h"
 #include "pc_bbft.h"
@@ -183,11 +185,25 @@ constexpr float kBigTreasureSourceDelta = 1.0f / 30.0f;
 P2BigTreasureHostSeam sBigTreasure;
 P2BigTreasureOrdinary sBigTreasureOrdinary;
 P2BigTreasureAnimClock sBigTreasureClock;
+P2BigTreasureElementRuntime sBigTreasureElements;
+P2BigTreasureMapTrace sBigTreasureTrace;
+bool sBigTreasureAttackLogged = false;
 bool sBigTreasureReady = false;
 bool sBigTreasureVisualReady = false;
 float sBigTreasureGround = 0.0f;
 double sBigTreasureDebt = 0.0;
 P2BigTreasurePhase sBigTreasurePhase = P2BT_Dead;
+
+const char* bigTreasureWeaponName(int weapon)
+{
+    switch (weapon) {
+    case P2BTWEAPON_Elec: return "elec";
+    case P2BTWEAPON_Fire: return "fire";
+    case P2BTWEAPON_Gas: return "gas";
+    case P2BTWEAPON_Water: return "water";
+    default: return "?";
+    }
+}
 
 // Source isAttackLimitTime box test: a live Navi/Pikmin inside the 225-unit XZ
 // box around the fixed placement. The ordinary FSM drive consumes the result
@@ -226,6 +242,8 @@ void pc_p2_hardlanes_reset()
     p2_bigtreasure_host_reset(sBigTreasure);
     sBigTreasureOrdinary.reset(P2BigTreasureFsmParms());
     sBigTreasureClock.reset();
+    sBigTreasureElements.defeat();
+    sBigTreasureAttackLogged = false;
     pc_p2_bigtreasure_visual_reset();
     sBigTreasureReady = false;
     sBigTreasureVisualReady = false;
@@ -295,6 +313,7 @@ void pc_p2_hardlanes_setup()
         if (sBigTreasureClock.load("p2_bigtreasure_events.txt")) {
             std::printf("P2_HARDLANES_READY family=BigTreasure keyframes=1\n");
         }
+        sBigTreasureTrace.reset(mapMgr);
         sBigTreasureGround = mapMgr->getMinY(0.0f, 0.0f, false);
         std::printf("P2_HARDLANES_READY family=BigTreasure host=1 captures=5\n");
     }
@@ -376,6 +395,40 @@ void pc_p2_hardlanes_update()
                     std::printf("P2_BIGTREASURE_FSM phase=%s weapons=%d clip=%s\n",
                                 P2BigTreasureFsm::stateName(phase),
                                 sBigTreasure.ownership.weaponCount(), clip);
+                }
+                // Element runtime: start the source controller the FSM just
+                // started through the pools, and step it against the lane map
+                // trace so a live attack actually emits/moves. The Pikmin
+                // damage receiver stays lane 10's boundary.
+                if (fsmOut.fsm.startAttack) {
+                    const int weapon = sBigTreasureOrdinary.chosenWeapon();
+                    const P2BigTreasureVec3 origin{ sBigTreasure.placement.owner.x,
+                                                    sBigTreasureGround,
+                                                    sBigTreasure.placement.owner.z };
+                    if (sBigTreasureElements.start(
+                            weapon, origin, sBigTreasureGround,
+                            sBigTreasure.ownership.weaponHealth(weapon), 0.25f, 0.25f)) {
+                        sBigTreasureAttackLogged = false;
+                        std::printf("P2_BIGTREASURE_ATTACK_START weapon=%s\n",
+                                    bigTreasureWeaponName(weapon));
+                    }
+                }
+                if (fsmOut.fsm.finishAttack) {
+                    sBigTreasureElements.finish();
+                }
+                if (sBigTreasureElements.active()) {
+                    P2BigTreasureElementHost elementHost;
+                    elementHost.context = &sBigTreasureTrace;
+                    elementHost.trace = P2BigTreasureMapTrace::trace;
+                    elementHost.ground = P2BigTreasureMapTrace::ground;
+                    P2BigTreasureElementStats elementStats;
+                    sBigTreasureElements.tick(kBigTreasureSourceDelta, elementHost, elementStats);
+                    if (!sBigTreasureAttackLogged && elementStats.nodes > 0) {
+                        sBigTreasureAttackLogged = true;
+                        std::printf("P2_BIGTREASURE_ATTACK_EMIT weapon=%s nodes=%d\n",
+                                    bigTreasureWeaponName(sBigTreasureElements.activeWeapon()),
+                                    elementStats.nodes);
+                    }
                 }
             }
             if (sBigTreasureVisualReady) {

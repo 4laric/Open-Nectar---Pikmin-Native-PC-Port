@@ -225,6 +225,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_bigtreasure_visual.cpp
     pc_port/pc_p2_bigtreasure_ordinary.cpp
     pc_port/pc_p2_bigtreasure_animclock.cpp
+    pc_port/pc_p2_bigtreasure_elements.cpp
     pc_port/pc_randomizer.cpp
     pc_port/pc_p2_kurage.cpp
     pc_port/pc_p2_kurage_arena.cpp
