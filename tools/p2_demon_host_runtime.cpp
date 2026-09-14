@@ -12,11 +12,13 @@
 #include "settings/pc_settings.h"
 #include "settings/pc_settings_p2d.h"
 #include "pc_p2_demon_host.h"
+#include "pc_p2_demon_bridge.h"
 #include "teki.h"
 #include "Generator.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
 #include <fstream>
 #include <cmath>
 #include <string>
@@ -141,6 +143,73 @@ public:
                 std::puts("PASS DEMON_HOST binding_lifecycle"); std::fflush(stdout); std::_Exit(0);
             }
             return result;
+        }
+        if (!std::strcmp(mode, "livecapture")) {
+            // FIXTURE-DRIVEN owner/collision capture. The real converted Demon
+            // host supplies its own live mouth CollPart; the fixture stages the
+            // real P1 captain at that part and calls pc_demon_capture directly,
+            // then releases while captain, owner and part are all still alive.
+            // No natural approach, enemy AI, FSM, pose parity or manager
+            // registration is claimed.
+            CollPart* const mouth = host.mouthPart(0);
+            CollPart* const other = host.mouthPart(1);
+            require(mouth && other && mouth != other, "host owns two distinct live mouth parts");
+            require(mouth->isBouncySphereType() && std::isfinite(mouth->mRadius) && mouth->mRadius > 0.0f,
+                "host mouth is a live bound sphere");
+            const std::uint64_t token = host.ownerToken();
+            require(token != 0, "host generation token");
+            std::printf("DEMON_HOST_LIVE mouth=%p other=%p radius=%.3f token=%llu owner=%p\n",
+                (void*)mouth, (void*)other, double(mouth->mRadius),
+                (unsigned long long)token, (void*)&host);
+            std::fflush(stdout);
+
+            n->mStateMachine->transit(n, NAVISTATE_Walk);
+            n->resetPosition(host.mouthCentre(0));
+            require(pc_demon_capture(n, &host, mouth, token, 0), "live owner-mouth capture admission");
+            require(n->isStickToMouth(), "captain marked stuck to mouth");
+            require(n->getStickObject() == static_cast<Creature*>(&host), "stick owner is exact host");
+            require(n->getStickPart() == mouth, "stick part is exact host mouth");
+            require(pc_demon_bound(n), "bridge binding live");
+            require(pc_demon_owned_by(n, &host), "bridge owner is exact host");
+            std::puts("DEMON_HOST_LIVE link owner=exact part=exact");
+            std::fflush(stdout);
+
+            // Move the real host mouth through a loaded pose frame; the native
+            // Creature stick update must carry the real captain to that centre.
+            host.mSRT.r.set(0.0f, 0.7f, 0.0f);
+            host.mSRT.s.set(1.2f, 0.8f, 1.1f);
+            host.setPosition(Vector3f(25, 100, 100));
+            require(host.applyPoseFrame(17) && host.renderedPoseFrame() == 17, "loaded frame17 mouth pose");
+            const Vector3f moved = host.mouthCentre(0);
+            require(n->getStickPart() == mouth && (mouth->mCentre - moved).squaredLength() < 0.0001f,
+                "exact live part moved with host pose");
+            n->update();
+            require((n->mSRT.t - moved).squaredLength() < 0.01f, "native stick update follows real mouth");
+            std::puts("DEMON_HOST_LIVE follow native_stick_update=1");
+            std::fflush(stdout);
+
+            // Release while the captain and the owner/part are all still live.
+            require(n->isAlive() && host.mouthPart(0) == mouth, "captain and owner live before release");
+            pc_demon_release(n);
+            require(!n->isStickToMouth() && !n->isStickTo(), "captain detached from mouth");
+            require(n->getStickObject() == nullptr && n->getStickPart() == nullptr, "no captain stick pointers");
+            require(!pc_demon_bound(n) && !pc_demon_owned_by(n, &host), "bridge authority revoked");
+            Matrix4f releasedPose;
+            require(!pc_demon_capture_matrix(n, releasedPose), "released binding reads no part");
+            std::puts("DEMON_HOST_LIVE release detached=1 pointers=null");
+            std::fflush(stdout);
+
+            // Owner-side revocation after release must be inert, and teardown
+            // must stay safe while the host is still alive.
+            pc_demon_owner_lost(token);
+            require(!n->isStickTo() && host.mouthPart(0) == mouth, "stale owner token is inert");
+            host.sceneExit();
+            require(!n->isStickTo() && !pc_demon_bound(n), "owner teardown stays detached");
+            require(host.mouthPart(0) == mouth && n->isAlive(), "owner and captain alive after teardown");
+            pc_demon_scene_exit();
+            require(!n->isStickTo(), "scene exit stays detached");
+            std::puts("PASS DEMON_HOST live_owner_mouth_capture_release");
+            std::fflush(stdout); std::_Exit(0);
         }
         if (phase == 0) {
             if (!std::strcmp(mode, "timed") || !std::strcmp(mode, "timed_timeout")

@@ -62,6 +62,11 @@ public:
     void release(Navi* target);
     bool occupied() const;
     Vector3f mouthCentre(unsigned slot) const;
+    // Fixture/owner access to the exact live mouth CollParts and generation
+    // token. The caller must revoke capture (release or sceneExit) before the
+    // host parts are disposed; this does not transfer ownership.
+    CollPart* mouthPart(unsigned slot) const { return slot < 2 ? mMouths[slot] : nullptr; }
+    std::uint64_t ownerToken() const { return mOwnerToken; }
     void sceneExit();
 
     void refresh(Graphics&) override;

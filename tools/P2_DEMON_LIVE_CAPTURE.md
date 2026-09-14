@@ -35,5 +35,17 @@ claim is made after heap disposal.
 
 Validation so far: changed MinGW translation units compile in
 `output/demon-live-build-01`; `tools/p2_demon_escape_test.cpp` passes from
-`output/demon-live-tests-01`. A live owner/collision runtime fixture remains
-required before integration.
+`output/demon-live-tests-01`.
+
+## Live owner/collision capture fixture
+
+`tools/p2_demon_host_runtime.cpp` mode `livecapture` stages the real P1 captain
+at the loaded converted `demon0.mod` host's own mouth `CollPart` (slot 0, via
+the new read-only `P2DemonHost::mouthPart`/`ownerToken` accessors) and calls
+`pc_demon_capture` directly. It asserts the exact stick owner/part link, moves
+the host through loaded pose frame 17 and confirms the native `Creature` stick
+update carries the captain, then releases and tears down while the captain,
+host and part are all still alive, including inert stale-token and
+post-release no-read checks. Inputs are fixture-driven: no natural approach,
+movement, full FSM, rendered mouth-pose parity, natural enemy capture, or
+manager registration is claimed.
