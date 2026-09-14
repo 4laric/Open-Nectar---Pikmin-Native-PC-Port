@@ -97,13 +97,13 @@ def verify_log(text):
     if not re.search(r"^P2_BIGTREASURE_WINDOW\s+size=960x540\s+pos=-?\d+,-?\d+\s*$", text,
                      flags=re.MULTILINE):
         errors.append("missing 960x540 window marker")
-    fsmhost = re.search(r"^P2_BIGTREASURE_FSMHOST_PASS\s+ticks=(\d+)\s+knockoffs=(\d+)\s+"
-                        r"weapons=(\d+)\s+phase=(\w+)\s*$", text, flags=re.MULTILINE)
+    fsmhost = re.search(r"^P2_BIGTREASURE_FSMHOST_FULL_PASS\s+knockoffs=(\d+)\s+weapons=(\d+)\s+"
+                        r"phase=(\w+)\s+transitions=(\d+)\s*$", text, flags=re.MULTILINE)
     if not fsmhost:
-        errors.append("missing fsmhost PASS marker")
-    elif (int(fsmhost.group(2)) != 1 or int(fsmhost.group(3)) != 3
-          or fsmhost.group(4) != "PreAttack"):
-        errors.append(f"fsmhost knock-off phase transition not observed: {fsmhost.groups()}")
+        errors.append("missing fsmhost FULL PASS marker")
+    elif (int(fsmhost.group(1)) != 4 or int(fsmhost.group(2)) != 0
+          or fsmhost.group(3) != "DropItem" or int(fsmhost.group(4)) != 4):
+        errors.append(f"fsmhost four-weapon phase progression not observed: {fsmhost.groups()}")
     visual = re.search(r"^P2_BIGTREASURE_VISUAL_READY\s+clips=(\d+)\s+pellets=(\d+)\s+"
                        r"pellet_debug=(\d+)\s*$", text, flags=re.MULTILINE)
     if not visual:

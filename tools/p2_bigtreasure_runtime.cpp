@@ -378,22 +378,56 @@ private:
         in = P2BigTreasureFsmHostInput{};
         in.keyEvent2 = true;
         fsmHost.tick(seam, in, out);
-        const int chosen = fsmHost.chosenWeapon();
-        require(chosen == P2BTWEAPON_Elec && seam.director.pools.isStarted(chosen),
+        require(fsmHost.chosenWeapon() == P2BTWEAPON_Elec
+                    && seam.director.pools.isStarted(fsmHost.chosenWeapon()),
                 "fsmhost attack start");
 
-        in = P2BigTreasureFsmHostInput{};
-        in.damage = P2BigTreasureOwnership::kWeaponMaxHealth;
-        in.damageWeapon = chosen;
-        fsmHost.tick(seam, in, out);
-        require(out.damageResult == P2BTDMG_Weapon, "fsmhost damage routing");
-        require(out.knockedOff == 1 && seam.ownership.weaponCount() == P2BTWEAPON_Count - 1,
-                "fsmhost knock-off");
-        require(fsmHost.phase() == P2BT_PreAttack && fsmHost.chosenWeapon() != chosen,
-                "fsmhost phase transition");
-        std::printf("P2_BIGTREASURE_FSMHOST_PASS ticks=1 knockoffs=%llu weapons=%d phase=%s\n",
+        // Full four-weapon knock-off sequence: each weapon is damaged to zero
+        // on the real map, the roller drops, and the policy re-picks (or drops
+        // to DropItem when the last one goes). This is the weapon-count phase
+        // progression the audit calls the real per-weapon escalation.
+        int transitions = 0;
+        for (int remaining = P2BTWEAPON_Count; remaining >= 1; --remaining) {
+            const int weapon = fsmHost.chosenWeapon();
+            require(weapon >= 0 && seam.ownership.isWeaponAttached(weapon),
+                    "fsmhost chosen weapon attached");
+            P2BigTreasureFsmHostInput damage;
+            damage.damage = P2BigTreasureOwnership::kWeaponMaxHealth;
+            damage.damageWeapon = weapon;
+            fsmHost.tick(seam, damage, out);
+            require(out.damageResult == P2BTDMG_Weapon, "fsmhost damage routing");
+            require(out.knockedOff == 1 && seam.ownership.weaponCount() == remaining - 1,
+                    "fsmhost knock-off sequence");
+            require(!seam.ownership.isWeaponAttached(weapon), "fsmhost weapon released");
+            if (remaining > 1) {
+                require(fsmHost.phase() == P2BT_PreAttack, "fsmhost re-pick phase");
+                P2BigTreasureFsmHostInput advance;
+                advance.animEnd = true;
+                fsmHost.tick(seam, advance, out);
+                require(fsmHost.phase() == P2BT_Attack, "fsmhost attack after re-pick");
+                P2BigTreasureFsmHostInput restart;
+                restart.keyEvent2 = true;
+                fsmHost.tick(seam, restart, out);
+                require(fsmHost.chosenWeapon() != weapon
+                            && seam.director.pools.isStarted(fsmHost.chosenWeapon()),
+                        "fsmhost next attack started");
+            }
+            ++transitions;
+        }
+        require(transitions == P2BTWEAPON_Count, "fsmhost transition count");
+        require(seam.ownership.isBodyExposed(), "fsmhost body exposed");
+        require(fsmHost.phase() == P2BT_DropItem, "fsmhost DropItem with no weapons");
+
+        // With every weapon gone the body is damageable and routes to boss HP.
+        P2BigTreasureFsmHostInput body;
+        body.damage = 250.0f;
+        body.damageWeapon = -1;
+        fsmHost.tick(seam, body, out);
+        require(out.damageResult == P2BTDMG_Body && out.liveWeapons == 0, "fsmhost body damage");
+        std::printf("P2_BIGTREASURE_FSMHOST_FULL_PASS knockoffs=%llu weapons=%d phase=%s "
+                    "transitions=%d\n",
                     (unsigned long long)fsmHost.knockOffs(), seam.ownership.weaponCount(),
-                    P2BigTreasureFsm::stateName(fsmHost.phase()));
+                    P2BigTreasureFsm::stateName(fsmHost.phase()), transitions);
     }
 
     void startVisual()
