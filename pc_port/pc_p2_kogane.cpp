@@ -26,15 +26,6 @@
 #include <cstdlib>
 #include <string>
 #include <sstream>
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifdef _WIN32
-#include <windows.h>
-#endif
 namespace {
 std::map<std::string,std::vector<Shape*>> clips;
 std::map<std::string,p2animation::Clip> timing;
@@ -103,11 +94,8 @@ void saveReceipts(){
     bool ok=std::fwrite(data.data(),1,data.size(),file)==data.size()&&std::fflush(file)==0;
     if(std::fclose(file)!=0)ok=false;
     if(!ok)return;
-#ifdef _WIN32
-    if(!::MoveFileExA(temporary.c_str(),kReceiptsPath,MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))return;
-#else
+    std::remove(kReceiptsPath);
     if(std::rename(temporary.c_str(),kReceiptsPath)!=0)return;
-#endif
 }
 
 bool logged[2]={false,false};
