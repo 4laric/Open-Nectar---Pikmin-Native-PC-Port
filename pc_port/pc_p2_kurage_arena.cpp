@@ -66,6 +66,11 @@ struct Host {
     // Bounded animation-END stand-in while the converted MOD is a static pose.
     // The real source motion-end event belongs to the #431 animation clock.
     int fsmMotionTimer = 0;
+    // Greater (OniKurage, id 72) selection and the labelled captain-held seam.
+    p2kurage::Variant variant = p2kurage::Variant::Lesser;
+    bool captainHeld = false;
+    bool captainSettled = true;
+    float fallVelocity = 0.0f;
 };
 Host sHost;
 // Retail Lesser Kurage suckPikmin() queries collision part ID 'suck'; hire1 is
@@ -85,6 +90,9 @@ constexpr int kFsmMotionFrames = 30;
 // p2retail::Player timers are animation frames. Kurage attack.bca is a 30 fps
 // clip, so a real-time host advances the clock by delta * 30.
 constexpr float kAttackFramesPerSecond = 30.0f;
+// Bounded OniKurage StateDrop gravity (the source falls under creature physics;
+// the host owns the integration until that seam exists).
+constexpr float kDropGravity = 300.0f;
 // Retail Kurage/attack.bca SHA-256 302660c6ba9c86fee11cc6aca98bd514e201a80d8530be3a5cce867a9dc74a4e.
 // ANF1 is big-endian: loop attribute 2, duration 0x0078 (120), 12 joints.
 // enemyanimmgr.txt supplies the source event table below.
@@ -163,6 +171,7 @@ void pc_p2_kurage_arena_reset()
     sHost.fsmEnabled = false; sHost.fsmTicks = 0; sHost.lastFsmState = -1; sHost.fsmAltitude = 0.0f;
     sHost.fsmHealth = kFsmLiveHealth; sHost.ownerHasHealth = true; sHost.ownerBittered = false;
     sHost.autoAdmissions = 0; sHost.pendingKey = p2kurage::KeyEvent::None; sHost.fsmMotionFinished = false; sHost.fsmMotionTimer = 0;
+    sHost.variant = p2kurage::Variant::Lesser; sHost.captainHeld = false; sHost.captainSettled = true; sHost.fallVelocity = 0.0f;
 }
 
 bool pc_p2_kurage_arena_setup(const char* profilePath)
@@ -198,6 +207,7 @@ bool pc_p2_kurage_arena_setup(const char* profilePath)
     sHost.fsmEnabled = false; sHost.fsmTicks = 0; sHost.lastFsmState = -1; sHost.fsmAltitude = 0.0f;
     sHost.fsmHealth = kFsmLiveHealth; sHost.ownerHasHealth = true; sHost.ownerBittered = false;
     sHost.autoAdmissions = 0; sHost.pendingKey = p2kurage::KeyEvent::None; sHost.fsmMotionFinished = false; sHost.fsmMotionTimer = 0;
+    sHost.variant = p2kurage::Variant::Lesser; sHost.captainHeld = false; sHost.captainSettled = true; sHost.fallVelocity = 0.0f;
     sHost.fsm = p2kurage::Fsm(); sHost.fsm.spawn();
     sHost.owner.mStickListHead = nullptr;
     updateHostCollision();
@@ -231,6 +241,9 @@ bool pc_p2_kurage_arena_update(float delta, bool ownerAlive)
         in.targetFound = findSuctionTarget() != nullptr || pc_p2_kurage_receiver_count() > 0;
         in.suckTarget = in.targetFound;
         in.suckAny = in.targetFound;
+        in.naviSucked = sHost.captainHeld;
+        in.naviSuckFinished = sHost.captainSettled;
+        in.velocityY = -sHost.fallVelocity;
         in.motionFrame = sHost.attackPlaying ? sHost.attackPlayer.frame() : 0.0f;
         // Bounded animation-END: the attack clock owns the Attack interval; the
         // other states use a fixed period until the #431 motion-event bridge
@@ -246,7 +259,16 @@ bool pc_p2_kurage_arena_update(float delta, bool ownerAlive)
         sHost.fsmMotionFinished = false;
 
         const p2kurage::Out out = sHost.fsm.tick(in);
-        sHost.position.y += out.heightVelocity * delta;
+        if (out.state == p2kurage::State::Drop && sHost.variant == p2kurage::Variant::Greater) {
+            // Source StateDrop::exec is a pure fall (no setHeightVelocity); the
+            // host integrates gravity until dropShouldFinish or the bounded
+            // motion-END lands the body.
+            sHost.fallVelocity += kDropGravity * delta;
+            sHost.position.y -= sHost.fallVelocity * delta;
+        } else {
+            sHost.fallVelocity = 0.0f;
+            sHost.position.y += out.heightVelocity * delta;
+        }
         sHost.fsmAltitude = out.altitude;
         if ((int)out.state != sHost.lastFsmState) {
             sHost.lastFsmState = (int)out.state;
@@ -255,7 +277,7 @@ bool pc_p2_kurage_arena_update(float delta, bool ownerAlive)
         }
         // Entering the source Attack state starts the retail attack.bca clock.
         if (out.state == p2kurage::State::Attack && out.motionChanged && !sHost.attackPlaying) {
-            if (pc_p2_kurage_arena_begin_attack()) { sHost.autoAdmissions = 0; sHost.fsmMotionTimer = 0; }
+            if (pc_p2_kurage_arena_begin_attack()) { sHost.autoAdmissions = 0; sHost.fsmMotionTimer = 0; sHost.fallVelocity = 0.0f; }
         }
         // The clock supplies KeyEvent 2/1 and the open suction interval.  The
         // retail Player advances in animation frames, not seconds.
@@ -367,6 +389,26 @@ void pc_p2_kurage_arena_set_owner_facts(bool hasHealth, bool bittered)
 int pc_p2_kurage_arena_auto_admissions()
 {
     return sHost.autoAdmissions;
+}
+
+void pc_p2_kurage_arena_set_greater(bool greater)
+{
+    if (!sHost.ready || !sHost.alive) return;
+    sHost.variant = greater ? p2kurage::Variant::Greater : p2kurage::Variant::Lesser;
+    sHost.fsm = p2kurage::Fsm(p2kurage::Parms(), sHost.variant);
+    sHost.fsm.spawn();
+    sHost.lastFsmState = -1;
+    sHost.fallVelocity = 0.0f;
+    std::printf("P2_KURAGE_ARENA_VARIANT variant=%s id=%d\n", greater ? "Greater" : "Lesser", greater ? 72 : 57);
+}
+int pc_p2_kurage_arena_fsm_variant()
+{
+    return sHost.variant == p2kurage::Variant::Greater ? 72 : 57;
+}
+void pc_p2_kurage_arena_set_captain_held(bool held)
+{
+    sHost.captainHeld = held;
+    sHost.captainSettled = true;
 }
 
 void pc_p2_kurage_arena_draw(Graphics& gfx)

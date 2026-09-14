@@ -27,6 +27,8 @@ import subprocess
 SCENARIOS = {
     "flight-fsm-admission": "--flight-fsm-admission",
     "flight-fsm-death": "--flight-fsm-death",
+    "flight-fsm-greater": "--flight-fsm-greater",
+    "flight-fsm-greater-drop": "--flight-fsm-greater-drop",
 }
 
 

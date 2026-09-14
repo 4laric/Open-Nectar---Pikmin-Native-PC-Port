@@ -29,3 +29,12 @@ float pc_p2_kurage_arena_fsm_altitude();
 // fixture owns the health model until a full Kurage health/bitter host lands.
 void pc_p2_kurage_arena_set_owner_facts(bool hasHealth, bool bittered);
 int pc_p2_kurage_arena_auto_admissions();
+// Greater Spotted Jellyfloat (OniKurage, id 72).  Default is Lesser (Kurage,
+// id 57).  The shared Fsm is reconstructed with the selected variant, which
+// switches the pitch numerics and enables the OniKurage Drop state.
+void pc_p2_kurage_arena_set_greater(bool greater);
+int pc_p2_kurage_arena_fsm_variant();
+// Captain-held facts for the OniKurage Drop route.  Real captain capture is
+// lane 12 provider work; this is an explicitly labelled host seam until a
+// Navi attachment exists.
+void pc_p2_kurage_arena_set_captain_held(bool held);
