@@ -1,6 +1,7 @@
 #include "pc_p2_purple.h"
 #include "pc_p2_mamuta_rules.h"
 #include "pc_p2_species.h"
+#include "pc_p2_species_policy.h"
 #include "BombItem.h"
 #include "Collision.h"
 #include "Condition.h"
@@ -183,8 +184,8 @@ bool InteractBubble::actPiki(Piki* piki) immut
 		return false;
 	}
 
-	// blue pikmin are immune to bubble
-	if (piki->mColor != Blue) {
+	// blue pikmin (and P2 Bulbmin) are immune to bubble
+	if (!p2_species_immune(pc_p2_species(piki), P2HazardWater)) {
 		piki->changeMode(0, piki->mNavi);
 		piki->mFSM->transit(piki, PIKISTATE_Bubble);
 		return true;
@@ -201,8 +202,8 @@ bool InteractFire::actPiki(Piki* piki) immut
 		return false;
 	}
 
-	// red pikmin are immune to fire
-	if (!pc_p2_has_red_immunity(piki)) {
+	// red pikmin (and P2 Bulbmin) are immune to fire
+	if (!p2_species_immune(pc_p2_species(piki), P2HazardFire)) {
 		piki->startFire();
 		return true;
 	}
