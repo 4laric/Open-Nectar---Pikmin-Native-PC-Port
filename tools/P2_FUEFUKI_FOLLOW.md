@@ -30,6 +30,8 @@ action's decision logic and gives the host a movement command to apply.
   (beetle trail recording + per-follower `makeTarget`/`test_0`/`setTimer`).
 - `tools/p2_fuefuki_follow_test.cpp` — policy fixture (this slice).
 - `tools/p2_fuefuki_follow_binding_test.cpp` — seam fixture.
+- `tools/p2_fuefuki_follow_runtime.cpp` — real-GL runtime fixture
+  (`P2_FUEFUKI_FOLLOW_RUNTIME_EVIDENCE.md`).
 - `pc_port/pc_p2_fuefuki_binding.h` — optional `followerSample`/`followDrive`/
   `randFloat` host callbacks, `P2FuefukiFollowMove` output, per-tick drive.
 - `pc_port/pc_p2_hardlanes.cpp` — live host adapter over the real `pikiMgr`
@@ -109,12 +111,17 @@ The existing Fuefuki fixtures were re-run after the header change with no
 regression: `p2_fuefuki_interference_policy_test`, `p2_fuefuki_fsm_test`,
 `p2_fuefuki_binding_test`, `p2_fuefuki_suspend_fallback_test` all PASS.
 
+## Real-GL runtime (PASS)
+
+`tools/p2_fuefuki_follow_runtime.cpp` was executed on a real SDL2/OpenGL
+window against the retail room: the real squad claim produced 3 followers and
+follower 1 walked 70.0 → 50.0 units toward the beetle in 8 frames (stopping at
+the source arrival threshold), with zero ownership writes and held Pikmin left
+in `FreeMode`. Markers, provenance and the exact commands are in
+`P2_FUEFUKI_FOLLOW_RUNTIME_EVIDENCE.md`.
+
 ## Remaining gaps
 
-- **No real-GL runtime run.** The host object compiles against the frozen
-  engine (`pc_p2_hardlanes.cpp.obj`, private Release/Ninja/MinGW build) but the
-  volatile approximation has not been observed in a windowed run; that is the
-  next acceptance step with a staged Napkid vehicle.
 - **No dedicated P1 follow action.** The volatile impulse is an approximation;
   sustained steering, collision response and the final approach stop need the
   provider-12 follow action or an equivalent `ActTeki` port in the Piki AI.
