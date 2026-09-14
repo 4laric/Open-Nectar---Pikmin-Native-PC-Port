@@ -22,9 +22,11 @@
 //   * No P2 water box (mWaterBox, Hamon sea height, dive/splash) is present on
 //     the host; the source outMove/dry fallback and water presentation are
 //     bounded gaps.
-//   * The shared UmiMushi::Mgr base (100) exclusion and Blind (101)
-//     half-scale / fp12=800 health / reduced turn-rate parameter split are
-//     bounded gaps; this port runs the ordinary (71) parameters only.
+//   * The shared UmiMushi::Mgr base (100) exclusion remains a bounded gap.
+//     Blind (101) is now ported on the same shared FSM: half scale, proper
+//     fp12=800 health, Parms::mBlindTurnRateReduction 0.3 on turnFunc, no Navi
+//     retargeting (isChangeNavi false) and the Walk move/wait frame cycle
+//     (fp14/fp13, disc 200/200). The actors config marks it `UmiMushiBlind`.
 //   * The mid-boss BGM phase staging, eye/weak joint callbacks and the
 //     umimusi_model1.btk material animation are P2-only and not reproduced.
 //   * Target selection uses the single active Navi; the two-player nearest-Navi
@@ -109,6 +111,17 @@ constexpr float GENERAL_MAX_TURN = 0.17453293f; // general fp28 default 10 deg
 constexpr float WALK_ANGLE_SPEED = 10.0f;  // Parms mWalkAngleSpeed
 constexpr float ROTATE_ANGLE_DELTA = 0.05f; // Parms mRotateAngleDelta
 constexpr float WAIT_TIME = 0.25f;         // port value (source ip01 = 0)
+// Blind (EnemyID_UmiMushiBlind, 101) shared-FSM parameter split from
+// umiMushi.cpp: Obj::setParameters applies scale 0.5 and a 50.0 floor offset;
+// onInit overwrites health with proper fp12 (disc 800); Parms::
+// mBlindTurnRateReduction 0.3 scales turnFunc's rotate speed and max; the Walk
+// state alternates fp14 move frames and fp13 wait frames (disc 200/200).
+constexpr float BLIND_LIFE = 800.0f;       // proper fp12 mBlindHealth
+constexpr float BLIND_SCALE = 0.5f;        // setParameters scale
+constexpr float BLIND_TURN_RATE = 0.3f;    // Parms mBlindTurnRateReduction
+constexpr float BLIND_WAIT_FRAMES = 200.0f; // proper fp13 mBlindWaitTime
+constexpr float BLIND_MOVE_FRAMES = 200.0f; // proper fp14 mBlindMoveTime
+constexpr float FRAME_RATE = 30.0f;        // source counter tick rate
 constexpr float PI_F = 3.14159265f;
 constexpr float TAU_F = 6.28318531f;
 
@@ -136,6 +149,13 @@ struct Umi {
     float phase = 0.0f;
     bool deadLogged = false;
     float logTimer = 0.0f;
+    // Blind (101) shared-FSM split. sourceId is 71 or 101; blind actors use
+    // half scale, fp12 health, a reduced turn rate and the Walk wait/move cycle.
+    bool blind = false;
+    int sourceId = 71;
+    bool blindWaiting = false;
+    float blindWaitTimer = 0.0f;
+    float blindMoveTimer = 0.0f;
 };
 
 std::map<PelletView*, Umi> actors;
@@ -303,6 +323,8 @@ void outMove(BTeki* a, Umi& s) {
     a->mVelocity.set(drive);
 }
 bool isChangeNavi(BTeki* a, Umi& s) {
+    // Source umiMushi.cpp:843: Blind never retargets a Navi (returns false).
+    if (s.blind) return false;
     Navi* navi = activeNavi();
     if (!navi) return false;
     const Vector3f pos = a->getPosition();
@@ -385,7 +407,10 @@ bool isNeedTurn(BTeki* a, Umi& s) {
 }
 float turnFunc(BTeki* a, Umi& s) {
     if (s.targetNavi) s.goal = s.targetNavi->getPosition();
-    return turnToTarget(a, s, s.goal, ROTATE_RATE, ROTATE_MAX);
+    // Source umiMushi.cpp:820-825 scales both the search rotation rate and its
+    // max by Parms::mBlindTurnRateReduction (0.3) for Blind.
+    const float factor = s.blind ? BLIND_TURN_RATE : 1.0f;
+    return turnToTarget(a, s, s.goal, ROTATE_RATE * factor, ROTATE_MAX * factor);
 }
 
 void enter(Umi& s, State state, const char* clip) {
@@ -394,6 +419,12 @@ void enter(Umi& s, State state, const char* clip) {
     s.stateTime = 0.0f;
     s.firedEvents.clear();
     if (clip) s.clip = clip;
+    // Source StateWalk::init resets both Blind pace counters and starts moving.
+    if (state == UMI_WALK) {
+        s.blindWaiting = false;
+        s.blindWaitTimer = 0.0f;
+        s.blindMoveTimer = 0.0f;
+    }
 }
 const char* clipForState(State st) {
     switch (st) {
@@ -489,8 +520,10 @@ void pc_p2_umimushi_forget(BTeki* actor) {
 }
 
 float pc_p2_umimushi_param_f(const BTeki* actor, int idx, float fallback) {
-    if (!ready || !actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor)))) return fallback;
-    if (idx == TPF_Life) return LIFE;
+    if (!ready) return fallback;
+    auto found = actors.find(static_cast<PelletView*>(const_cast<BTeki*>(actor)));
+    if (found == actors.end()) return fallback;
+    if (idx == TPF_Life) return found->second.blind ? BLIND_LIFE : LIFE;
     if (idx == TPF_LifeRecoverRate) return 0.0f;
     switch (idx) {
     case TPF_VisibleRange:
@@ -567,12 +600,16 @@ void pc_p2_umimushi_setup() {
     std::string header;
     int count = 0;
     if (!(in >> header >> count) || header != "P2_AQUATIC_ACTORS_1" || count < 1) return;
-    std::map<unsigned, std::string> wanted;
+    // Same shared UmiMushi::Mgr FSM, two source IDs: ordinary (71) and Blind
+    // (101). The actors config marks Blind with the `UmiMushiBlind` species;
+    // the Blind bank reuses the converted UmiMushi clips (visual stand-in).
+    std::map<unsigned, bool> wanted; // generator -> blind
     for (int i = 0; i < count; ++i) {
         unsigned long long generator = 0;
         std::string species;
         if (!(in >> generator >> species)) return;
-        if (species == "UmiMushi") wanted[unsigned(generator)] = species;
+        if (species == "UmiMushi") wanted[unsigned(generator)] = false;
+        else if (species == "UmiMushiBlind") wanted[unsigned(generator)] = true;
     }
     if (wanted.empty()) return;
 
@@ -589,18 +626,32 @@ void pc_p2_umimushi_setup() {
             std::abort();
         }
         Umi& s = actors[static_cast<PelletView*>(actor)];
+        s.blind = match->second;
+        s.sourceId = s.blind ? 101 : 71;
         s.home = actor->getPosition();
         s.goal = s.home;
         s.heading = actor->getDirection();
-        actor->mHealth = LIFE;
+        actor->mHealth = s.blind ? BLIND_LIFE : LIFE;
+        actor->mMaxHealth = actor->mHealth;
+        // Source setParameters applies scale 0.5 to Blind; the P1 host draws the
+        // actor from mSRT.s (batch-3 onCamMtx), so the visual is genuinely half.
+        if (s.blind) actor->mSRT.s.set(BLIND_SCALE, BLIND_SCALE, BLIND_SCALE);
         enter(s, UMI_WALK, "run1");
-        std::printf("P2_UMIMUSHI_BIND generator=%u source_id=71 visual_only=0\n",
-                    actor->mGenerator->_70);
+        std::printf("P2_UMIMUSHI_BIND generator=%u source_id=%d visual_only=0 blind=%d\n",
+                    actor->mGenerator->_70, s.sourceId, s.blind ? 1 : 0);
+        if (s.blind) {
+            std::printf("P2_UMIMUSHI_BLIND generator=%u scale=%.3f health=%.1f "
+                        "turn_rate=%.2f wait_frames=%.0f move_frames=%.0f\n",
+                        actor->mGenerator->_70, BLIND_SCALE, BLIND_LIFE, BLIND_TURN_RATE,
+                        BLIND_WAIT_FRAMES, BLIND_MOVE_FRAMES);
+        }
         const Vector3f pos = actor->getPosition();
-        std::printf("P2_ENEMY_READY species=UmiMushi native_family=Chappy generator=%u "
+        std::printf("P2_ENEMY_READY species=%s native_family=Chappy generator=%u "
                     "x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=native "
                     "source_FSM=implemented attack=animation_event water=absent\n",
-                    actor->mGenerator->_70, pos.x, pos.y, pos.z, actor->mHealth, LIFE);
+                    s.blind ? "UmiMushiBlind" : "UmiMushi",
+                    actor->mGenerator->_70, pos.x, pos.y, pos.z, actor->mHealth,
+                    actor->mMaxHealth);
         std::printf("P2_UMIMUSHI_STATE generator=%u state=walk\n", actor->mGenerator->_70);
         std::fflush(stdout);
         found.insert(actor->mGenerator->_70);
@@ -626,7 +677,8 @@ void pc_p2_umimushi_update(BTeki* actor) {
 
     if (actor->mHealth <= 0.0f && s.state != UMI_DEAD) {
         if (!s.deadLogged) {
-            std::printf("P2_UMIMUSHI_DEAD generator=%u source_id=71 health=0\n", generator);
+            std::printf("P2_UMIMUSHI_DEAD generator=%u source_id=%d health=0\n",
+                        generator, s.sourceId);
             std::fflush(stdout);
             s.deadLogged = true;
         }
@@ -639,7 +691,34 @@ void pc_p2_umimushi_update(BTeki* actor) {
         if (distXZ(pos, s.goal) < 50.0f) {
             if (isOutOfTerritory(s, pos, 1.0f) || !isFindTarget(actor, s)) setNextGoal(s);
         }
-        walkFunc(actor, s);
+        // Source StateWalk::exec (umiMushiState.cpp:146-173) bifurcates: Blind
+        // alternates configured move (fp14) and wait (fp13) frame windows while
+        // the ordinary Bloyster walks continuously.
+        if (s.blind) {
+            if (s.blindWaiting) {
+                stop(actor);
+                s.blindWaitTimer += dt;
+                if (s.blindWaitTimer >= BLIND_WAIT_FRAMES / FRAME_RATE) {
+                    s.blindWaitTimer = 0.0f;
+                    s.blindMoveTimer = 0.0f;
+                    s.blindWaiting = false;
+                    std::printf("P2_UMIMUSHI_BLIND_MOVE generator=%u\n", generator);
+                    std::fflush(stdout);
+                }
+            } else {
+                s.blindMoveTimer += dt;
+                walkFunc(actor, s);
+                if (s.blindMoveTimer >= BLIND_MOVE_FRAMES / FRAME_RATE) {
+                    s.blindMoveTimer = 0.0f;
+                    s.blindWaitTimer = 0.0f;
+                    s.blindWaiting = true;
+                    std::printf("P2_UMIMUSHI_BLIND_WAIT generator=%u\n", generator);
+                    std::fflush(stdout);
+                }
+            }
+        } else {
+            walkFunc(actor, s);
+        }
         if (isStartFlick(pos)) {
             setState(actor, s, UMI_FLICK, "flick1");
             s.nextState = UMI_WALK;

@@ -3,8 +3,9 @@ class BTeki;
 class Creature;
 
 // Family-owned aquatic source behavior for the batch-3 Chappy placement
-// vehicle: Toady Bloyster (UmiMushi, EnemyID 71) on the P1 TEKI_Chappy (3)
-// host (#167/#374/#407). UmiMushi ships a dedicated shared FSM
+// vehicle: the shared UmiMushi::Mgr FSM for the Ranging Bloyster (EnemyID 71)
+// and the Toady/Blind Bloyster (EnemyID 101) on the P1 TEKI_Chappy (3) host
+// (#167/#374/#407). Both source IDs run the same FSM
 // (UmiMushiState.cpp, registered at umiMushiState.cpp:18): Wait 0 -> Walk 1 ->
 // Find 2 -> Search 3 -> Turn 4 -> Flick 5 -> Attack 6 -> Eat 7, Dead 8,
 // Lost 9. Obj::onInit starts the FSM in Walk (umiMushi.cpp:141). Attack marks
@@ -20,13 +21,21 @@ class Creature;
 // (frame 39, event 3), then exactly one InteractKill at the banked Eat swallow
 // (eat1 animation end), mirroring the Catfish/Armor port.
 //
+// BLIND (101) SHARED-BASE SPLIT (implemented): the actors config binds a
+// source-101 actor with the `UmiMushiBlind` species. It reuses the shared FSM
+// with the source Blind parameters: half scale (mSRT.s 0.5), proper fp12=800
+// health, Parms::mBlindTurnRateReduction 0.3 scaling turnFunc's rotate speed
+// and max, isChangeNavi false (no Navi retargeting) and the Walk move/wait
+// frame cycle (fp14 move 200 / fp13 wait 200). Its sampled visual bank is the
+// converted UmiMushi bank used as an explicit stand-in: the source import
+// manifest has no converted Blind actor/model (no fabricated provenance).
+//
 // BOUNDED GAPS (recorded, not retail-faithful): no P2 water box (mWaterBox /
-// Hamon sea height / dive/splash presentation), no shared UmiMushi::Mgr
-// base (100) exclusion or Blind (101) half-scale/health/parameter split, no
-// mid-boss BGM phase staging, and no eye/weak joint callbacks or material
-// texture animation (umimusi_model1.btk). Target selection is a single active
-// Navi; the two-player nearest-Navi branch, the source view-angle gate and the
-// mouth-slot geometry test are port adaptations.
+// Hamon sea height / dive/splash presentation), no UmiMushi::Mgr base (100)
+// direct-spawn exclusion, no mid-boss BGM phase staging, and no eye/weak joint
+// callbacks or material texture animation (umimusi_model1.btk). Target
+// selection is a single active Navi; the two-player nearest-Navi branch, the
+// source view-angle gate and the mouth-slot geometry test are port adaptations.
 //
 // Every hook is a no-op for unregistered actors; no other lane's module is
 // modified.

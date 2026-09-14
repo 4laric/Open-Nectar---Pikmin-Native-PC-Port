@@ -252,14 +252,22 @@ void pc_p2_batch3_setup() {
         }
         if (found.size() != wanted.size()) fail("arena actor not present in scene");
         for (const std::string& species : speciesUsed) {
-            auto clipRows = rows.find(species);
+            // Blind UmiMushi (101) has no converted visual bank of its own; the
+            // source import manifest only ships the ordinary UmiMushi (71)
+            // poses. Reuse that bank explicitly as a stand-in so the actor is
+            // observable (draw override keyed aquatic|UmiMushiBlind), never as
+            // fabricated Blind provenance.
+            const std::string bankSpecies =
+                (std::string(family.name) == "aquatic" && species == "UmiMushiBlind")
+                    ? "UmiMushi" : species;
+            auto clipRows = rows.find(bankSpecies);
             if (clipRows == rows.end() || clipRows->second.empty()) fail("species has no bank clips");
             banks[std::string(family.name) + "|" + species] =
-                loadBank(family, species, clipRows->second);
+                loadBank(family, bankSpecies, clipRows->second);
         }
     }
     for (const auto& entry : actors) {
-        if (entry.second == "aquatic|Tadpole" || entry.second == "flying|Mar" || entry.second == "aquatic|UmiMushi" || entry.second == "aquatic|Jigumo" || entry.second == "snagret|SnakeCrow" || entry.second == "snagret|SnakeWhole" || entry.second == "snagret|DangoMushi" || entry.second == "flying|Hanachirashi" || entry.second == "aquatic|Catfish")
+        if (entry.second == "aquatic|Tadpole" || entry.second == "flying|Mar" || entry.second == "aquatic|UmiMushi" || entry.second == "aquatic|UmiMushiBlind" || entry.second == "aquatic|Jigumo" || entry.second == "snagret|SnakeCrow" || entry.second == "snagret|SnakeWhole" || entry.second == "snagret|DangoMushi" || entry.second == "flying|Hanachirashi" || entry.second == "aquatic|Catfish")
             std::printf("P2_BATCH3_BIND generator=%u key=%s visual_only=0 native_fsm=implemented\n",
                         entry.first->mGenerator ? entry.first->mGenerator->_70 : 0, entry.second.c_str());
         else
