@@ -41,8 +41,15 @@ struct Beetle {
     Vector3f gasPosition;    // cloud anchor (source mFartPosition)
     std::map<Piki*,float> gasExposure; // sustained-exposure seconds per piki (P1-host InteractGas approximation)
     unsigned rng=1;          // deterministic per-actor LCG
+    unsigned generator=0;    // spawn generator id, keys the in-process flip dedupe
 };
 std::map<PelletView*,Beetle> beetles;
+
+// In-process scene re-entry dedupe (#219): a reset+setup cycle within one
+// process must not let a finite-flip beetle farm its drops again, so reset
+// snapshots each actor's flip count keyed by generator id and setup restores it.
+// Empty on a fresh process, so the first setup is a no-op.
+std::map<unsigned,int> restoredFlips;
 
 bool logged[2]={false,false};
 
@@ -88,7 +95,10 @@ void doDrop(BTeki* actor,int id,Beetle& b){
     std::fflush(stdout);
 }
 }
-void pc_p2_kogane_reset(){clips.clear();timing.clear();actors.clear();beetles.clear();karada=-1;logged[0]=logged[1]=false;}
+void pc_p2_kogane_reset(){
+    for(const auto& entry:beetles)if(entry.second.generator&&entry.second.flips>0)restoredFlips[entry.second.generator]=entry.second.flips;
+    clips.clear();timing.clear();actors.clear();beetles.clear();karada=-1;logged[0]=logged[1]=false;
+}
 void pc_p2_kogane_forget(BTeki* actor){actors.erase(static_cast<PelletView*>(actor));beetles.erase(static_cast<PelletView*>(actor));}
 int pc_p2_kogane_source_id(PelletView* a){auto i=actors.find(a);return i==actors.end()?-1:i->second;}
 const char* pc_p2_kogane_name(PelletView* a){int id=pc_p2_kogane_source_id(a);return id==9?"Iridescent Flint Beetle":id==10?"Iridescent Glint Beetle":id==11?"Doodlebug":nullptr;}
@@ -141,8 +151,15 @@ void pc_p2_kogane_setup(){
         actors[actor]=id;
         Beetle& b=beetles[actor];
         b.rng=(actor->mGenerator->_70*2654435761u)|1u;
+        b.generator=actor->mGenerator->_70;
         b.heading=actor->getDirection();
         b.phaseTimer=randRange(b,1.0f,2.0f); // source starts waiting, then wanders
+        auto restored=restoredFlips.find(b.generator);
+        if(restored!=restoredFlips.end()&&restored->second>0){
+            b.flips=restored->second;
+            std::printf("P2_KOGANE_FLIPS_RESTORED generator=%u flips=%d\n",b.generator,b.flips);
+            std::fflush(stdout);
+        }
         actor->mHealth=actor->getParameterF(TPF_Life);
         std::printf("P2_KOGANE_BIND generator=%u source_id=%d karada_k0=%d visual_only=0\n",actor->mGenerator->_70,id,p2kogane::karada(id));
         const auto& pos=actor->getPosition();
