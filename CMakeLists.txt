@@ -196,6 +196,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_flora_actor.cpp
     pc_port/pc_p2_pom.cpp
     pc_port/pc_p2_plant.cpp
+    pc_port/pc_p2_waterwraith_visual.cpp
     pc_port/pc_p2_qurione.cpp
     pc_port/pc_p2_shijimi.cpp
     pc_port/pc_p2_kurage_receiver.cpp
