@@ -1,5 +1,6 @@
 #pragma once
 #include "pc_p2_captain_policy.h"
+#include "pc_p2_squad_policy.h"
 #include <cmath>
 #include <cstdint>
 
@@ -248,6 +249,29 @@ public:
         return true;
     }
 
+    // --- Per-captain squad split (lane 12 two-captain follow-up) ---
+
+    // Move up to `count` of `from`'s adopted actors to `to` and mirror the new
+    // owner into the engine (Piki::mNavi). Returns the moved actor ids.
+    std::vector<std::uint32_t> splitSquad(int from, int to, std::size_t count)
+    {
+        std::vector<std::uint32_t> moved;
+        if (!mBound) return moved;
+        moved = mPolicy.splitSquad(from, to, count);
+        if (!moved.empty()) syncOwnership();
+        return moved;
+    }
+
+    // Move exactly the named adopted actors; mirrors ownership into the engine.
+    std::size_t transferSquad(int from, int to, const std::uint32_t* actors,
+                              std::size_t count)
+    {
+        if (!mBound) return 0;
+        std::size_t moved = mPolicy.transferSquad(from, to, actors, count);
+        if (moved) syncOwnership();
+        return moved;
+    }
+
     // --- Captor-held actors (Pikmin / carried items) ---
 
     bool captureActor(std::uint64_t captorEpoch, P2PikiHandle actor)
@@ -345,5 +369,21 @@ int other_captain(int captain);
 bool capture_actor(std::uint64_t captorEpoch, P2PikiHandle piki);
 bool release_actor(std::uint64_t captorEpoch, P2PikiHandle piki, int toCaptain);
 std::vector<std::uint32_t> drop_captured(std::uint64_t captorEpoch);
+
+// Lane 12 two-captain follow-up (#130): move up to `count` adopted Pikmin from
+// `from` to `to`, mirroring Piki::mNavi. Returns the moved actor ids. With one
+// captain the policy refuses the split, so this is a no-op in default play.
+std::vector<std::uint32_t> split_squad(int from, int to, std::size_t count);
+
+// Drive the inactive captain's follow state from the live Navi positions. This
+// is the narrow engine hook called each frame by NaviMgr::update(); it returns
+// immediately unless a real second Navi already exists, so single-captain play
+// is byte-identical. The decision itself is engine-free (P2SquadFollowPolicy);
+// this only marshals positions/velocity into the inactive Navi.
+void update_inactive_captain_follow();
+
+// Last phase produced by update_inactive_captain_follow(), for diagnostics and
+// the standalone gate. Idle while no second captain exists.
+P2FollowPhase inactive_captain_follow_phase();
 
 } // namespace pc_p2_captain

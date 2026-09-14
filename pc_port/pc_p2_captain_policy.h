@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <unordered_map>
@@ -126,6 +127,15 @@ public:
         for (const auto& entry : owner)
             if (entry.second == captain) ++n;
         return n;
+    }
+    // Actors owned by `captain`, ascending by id so a split is deterministic
+    // across runs regardless of hash-table iteration order.
+    std::vector<std::uint32_t> actorsOwnedBy(int captain) const {
+        std::vector<std::uint32_t> out;
+        for (const auto& entry : owner)
+            if (entry.second == captain) out.push_back(entry.first);
+        std::sort(out.begin(), out.end());
+        return out;
     }
 
     static bool isCaptain(int captain) {
@@ -331,6 +341,49 @@ public:
     }
     void abandon(int captain, std::uint32_t actor) {
         if (bound()) table->release(actor, captain);
+    }
+
+    // --- Per-captain squad split (lane 12 two-captain follow-up) ---
+
+    // Move up to `count` of `from`'s actors to `to`, in ascending actor-id order
+    // so a split is deterministic. Both captains must be controllable (present,
+    // not captured/down) and distinct. Returns the moved actor ids; a `to`
+    // captain with no room for a given actor leaves it with `from`.
+    std::vector<std::uint32_t> splitSquad(int from, int to, std::size_t count) {
+        std::vector<std::uint32_t> moved;
+        if (!bound() || from == to || !aliveIdle(from) || !aliveIdle(to))
+            return moved;
+        std::vector<std::uint32_t> owned = table->actorsOwnedBy(from);
+        if (count > owned.size()) count = owned.size();
+        moved.reserve(count);
+        for (std::size_t i = 0; i < count; ++i) {
+            table->release(owned[i], from);
+            if (table->tryClaim(owned[i], to)) {
+                moved.push_back(owned[i]);
+            } else {
+                table->tryClaim(owned[i], from); // restore on refusal
+            }
+        }
+        return moved;
+    }
+
+    // Move exactly the named actors from `from` to `to` when `from` owns them.
+    // Refused for the same reasons as splitSquad(). Returns the moved count.
+    std::size_t transferSquad(int from, int to, const std::uint32_t* actors,
+                              std::size_t count) {
+        if (!bound() || from == to || !aliveIdle(from) || !aliveIdle(to) || !actors)
+            return 0;
+        std::size_t moved = 0;
+        for (std::size_t i = 0; i < count; ++i) {
+            if (table->ownerOf(actors[i]) != from) continue;
+            table->release(actors[i], from);
+            if (table->tryClaim(actors[i], to)) {
+                ++moved;
+            } else {
+                table->tryClaim(actors[i], from); // restore on refusal
+            }
+        }
+        return moved;
     }
 
     // --- Captor-held actors (families 29/30; captor FSM stays family-owned) ---

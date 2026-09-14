@@ -125,6 +125,11 @@ P2CaptainAdapter& live_adapter()
     return instance;
 }
 
+// Inactive-captain follow state. Engine-free policy; this file only feeds it
+// the live distance and applies the decision. Persistent across frames.
+P2SquadFollowPolicy g_secondCaptainFollow;
+P2FollowPhase g_secondCaptainFollowPhase = P2FollowPhase::Idle;
+
 } // namespace
 
 namespace pc_p2_captain {
@@ -185,6 +190,52 @@ bool release_actor(std::uint64_t captorEpoch, P2PikiHandle piki, int toCaptain)
 std::vector<std::uint32_t> drop_captured(std::uint64_t captorEpoch)
 {
     return live_adapter().dropAllCaptured(captorEpoch);
+}
+
+std::vector<std::uint32_t> split_squad(int from, int to, std::size_t count)
+{
+    return live_adapter().splitSquad(from, to, count);
+}
+
+void update_inactive_captain_follow()
+{
+    // Narrow hook: inert unless a real second Navi exists. On the default
+    // single-captain port hasSecondNavi() is false, so this never runs and
+    // default play is byte-identical.
+    if (!naviMgr || !naviMgr->hasSecondNavi()) {
+        return;
+    }
+
+    Navi* active = naviMgr->getActiveNavi();
+    Navi* inactive = active ? naviMgr->getOtherNavi(active) : nullptr;
+    if (!active || !inactive || !inactive->isAlive()) {
+        return;
+    }
+
+    Vector3f delta = active->getPosition() - inactive->getPosition();
+    delta.y = 0.0f;
+    f32 distance = delta.length();
+    const bool leaderMoving = active->mVelocity.length() > 20.0f;
+
+    P2FollowPhase phase = g_secondCaptainFollow.update(distance, leaderMoving);
+    g_secondCaptainFollowPhase = phase;
+
+    // Approximate NaviFollowState::exec (source naviState.cpp:1501-1551): walk
+    // toward the controlled captain, halt inside the stop radius. Full
+    // state-machine parity (idle goofs, autopluck, push-away) remains open.
+    if (phase == P2FollowPhase::Follow && distance > 0.0001f) {
+        delta.normalise();
+        f32 speed = P2SquadFollowPolicy::followSpeed(distance, C_NAVI_PARM(inactive, mMoveSpeed));
+        inactive->mTargetVelocity = delta * speed;
+        inactive->mFaceDirection = atan2f(delta.x, delta.z);
+    } else if (phase == P2FollowPhase::Idle) {
+        inactive->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
+    }
+}
+
+P2FollowPhase inactive_captain_follow_phase()
+{
+    return g_secondCaptainFollowPhase;
 }
 
 bool has_second_captain()

@@ -20,14 +20,21 @@ bool second_captain_requested()
 
 bool second_captain_live_allowed()
 {
-    // Closed on purpose. A live second Navi requires, at minimum:
-    //   * per-captain follow/whistle AI and split-squad control routing,
+    // Closed on purpose. The engine-free follow state, split-squad ownership
+    // policy and the NaviMgr::update() follow hook are now in place (see
+    // pc_p2_squad_policy.h and P2CaptainAdapter::splitSquad). A live second Navi
+    // still requires, at minimum:
     //   * a per-captain camera and Kontroller binding (Navi ctor already makes
     //     Kontroller(naviID + 1); P2 input mapping is not ported),
-    //   * survivor-gated GAMEEND_NaviDown (naviState.cpp:3190 sets a global),
-    //   * HUD/AI consumers to use getActiveNavi() instead of getNavi().
-    // Shipping the additive helpers and closed spawn path keeps default play
-    // byte-identical while a later slice ports those systems.
+    //   * active-captain control routing for a second pad,
+    //   * HUD/cursor/whistle consumers to use getActiveNavi() instead of
+    //     getNavi() (drawGameInfo.cpp, playerState.cpp),
+    //   * survivor-gated game over. naviState.cpp:3190 sets a global
+    //     GameStat::orimaDead and newPikiGame.cpp:2779 raises GAMEEND_NaviDown;
+    //     both must become "only when every present captain is down" via
+    //     NaviMgr::getAliveOrima()/isNaviDead().
+    // The follow hook is guarded so it never runs with one Navi, keeping
+    // default play byte-identical while a later slice ports those systems.
     return false;
 }
 

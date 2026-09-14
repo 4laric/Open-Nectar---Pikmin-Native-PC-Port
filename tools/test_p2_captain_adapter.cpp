@@ -187,6 +187,33 @@ void test_single_captain_slot0(FakeScene& scene)
     assert(adapter.setup());
 }
 
+// Splitting an adopted squad between two captains mirrors Piki::mNavi through
+// the engine callbacks. Engine double, not live two-captain runtime.
+void test_two_captain_split_double(FakeScene& scene)
+{
+    P2CaptainAdapter adapter;
+    assert(adapter.bind(fake_ops(scene)));
+    assert(adapter.setup());
+    assert(adapter.activeCaptain() == P2CaptainA);
+    assert(adapter.ownerOfActor(101) == P2CaptainA);
+    assert(adapter.ownerOfActor(102) == P2CaptainA);
+
+    std::vector<std::uint32_t> moved = adapter.splitSquad(P2CaptainA, P2CaptainB, 1);
+    assert(moved.size() == 1 && moved[0] == 101);
+    assert(adapter.ownerOfActor(101) == P2CaptainB);
+    assert(scene.pikiA.ownerSlot == P2CaptainB); // mirrored into the engine
+    assert(adapter.ownerOfActor(102) == P2CaptainA);
+    assert(scene.pikiB.ownerSlot == P2CaptainA);
+
+    const std::uint32_t named[1] = { 102 };
+    assert(adapter.transferSquad(P2CaptainA, P2CaptainB, named, 1) == 1);
+    assert(adapter.ownerOfActor(102) == P2CaptainB);
+    assert(scene.pikiB.ownerSlot == P2CaptainB);
+
+    // Splitting an absent slot is refused.
+    assert(adapter.splitSquad(P2CaptainA, P2CaptainA, 1).empty());
+}
+
 // The adapter is engine-generic: a host that exposes a second captain exercises
 // the capture/transfer path that the single-captain port cannot reach. This is
 // still an engine double, not live two-captain runtime.
@@ -251,6 +278,15 @@ int main()
         scene.pikiA = FakePiki{101, P2CaptainA};
         scene.pikiB = FakePiki{102, P2CaptainA};
         test_two_captain_transfer_double(scene);
+    }
+    {
+        FakeScene scene;
+        scene.navi0.health = 100.0f;
+        scene.navi1.health = 100.0f;
+        scene.twoCaptains = true;
+        scene.pikiA = FakePiki{101, P2CaptainA};
+        scene.pikiB = FakePiki{102, P2CaptainA};
+        test_two_captain_split_double(scene);
     }
 
     std::puts("PASS P2_CAPTAIN_ADAPTER");
