@@ -27,6 +27,7 @@
 #include "pc_p2_fuefuki_binding.h"
 #include "pc_p2_bigtreasure_host.h"
 #include "pc_p2_bigtreasure_ordinary.h"
+#include "pc_p2_bigtreasure_animclock.h"
 #include "pc_p2_bigtreasure_visual.h"
 #include "Matrix4f.h"
 #include "pc_bbft.h"
@@ -181,6 +182,7 @@ P2FuefukiFsmParms fuefukiParms()
 constexpr float kBigTreasureSourceDelta = 1.0f / 30.0f;
 P2BigTreasureHostSeam sBigTreasure;
 P2BigTreasureOrdinary sBigTreasureOrdinary;
+P2BigTreasureAnimClock sBigTreasureClock;
 bool sBigTreasureReady = false;
 bool sBigTreasureVisualReady = false;
 float sBigTreasureGround = 0.0f;
@@ -223,6 +225,7 @@ void pc_p2_hardlanes_reset()
     sFuefukiNextId = 1;
     p2_bigtreasure_host_reset(sBigTreasure);
     sBigTreasureOrdinary.reset(P2BigTreasureFsmParms());
+    sBigTreasureClock.reset();
     pc_p2_bigtreasure_visual_reset();
     sBigTreasureReady = false;
     sBigTreasureVisualReady = false;
@@ -286,6 +289,12 @@ void pc_p2_hardlanes_setup()
     if (p2_bigtreasure_host_setup("p2-bigtreasure-host.txt", sBigTreasure)) {
         sBigTreasureReady = true;
         sBigTreasureOrdinary.reset(P2BigTreasureFsmParms());
+        // Animation keyframe source: the lane's own motion-table player, so the
+        // policy can leave Land even when the shared visual bank only stages a
+        // subset. Absent table leaves the clock inactive (policy parks in Land).
+        if (sBigTreasureClock.load("p2_bigtreasure_events.txt")) {
+            std::printf("P2_HARDLANES_READY family=BigTreasure keyframes=1\n");
+        }
         sBigTreasureGround = mapMgr->getMinY(0.0f, 0.0f, false);
         std::printf("P2_HARDLANES_READY family=BigTreasure host=1 captures=5\n");
     }
@@ -338,22 +347,35 @@ void pc_p2_hardlanes_update()
         for (int i = 0; i < ticks; ++i) {
             if (sBigTreasureReady) {
                 // Ordinary update: step the 12-state policy (not the injected
-                // attack shortcut) and let the lane-10 hit ingress drive weapon
-                // knock-off. Animation keyframe pulses are host facts; the
-                // motion-staging provider supplies them (#128), so until then
-                // the policy parks in Land and the pacer gate stays closed.
+                // attack shortcut). The animation keyframe source runs the
+                // mapped source clip through the lane's own motion player, so
+                // the policy advances Land -> ItemWalk -> ... -> Attack as the
+                // clips dispatch their authored events. Natural hits enter via
+                // pc_p2_hardlanes_bigtreasure_hit.
+                P2BigTreasureAnimPulses pulses;
+                sBigTreasureClock.tick(sBigTreasureOrdinary.phase(),
+                                       sBigTreasureOrdinary.chosenWeapon(), pulses);
                 P2BigTreasureOrdinaryFacts facts;
                 facts.delta = kBigTreasureSourceDelta;
                 facts.targetInBox = bigTreasureTargetInBox();
                 facts.hasTarget = facts.targetInBox;
+                facts.animEnd = pulses.animEnd;
+                facts.keyEvent2 = pulses.keyEvent2;
+                facts.keyEvent100 = pulses.keyEvent100;
+                // No IK-system bridge yet: treat the IK motion as finished so
+                // the walk gates resolve, mirroring the fixture inputs.
+                facts.finishIKMotion = true;
                 P2BigTreasureFsmHostOutput fsmOut;
                 sBigTreasureOrdinary.tick(sBigTreasure, facts, fsmOut);
                 const P2BigTreasurePhase phase = sBigTreasureOrdinary.phase();
                 if (phase != sBigTreasurePhase) {
                     sBigTreasurePhase = phase;
-                    std::printf("P2_BIGTREASURE_FSM phase=%s weapons=%d\n",
+                    char clip[40] = "-";
+                    p2_bigtreasure_anim_clip(phase, sBigTreasureOrdinary.chosenWeapon(),
+                                             clip, sizeof(clip));
+                    std::printf("P2_BIGTREASURE_FSM phase=%s weapons=%d clip=%s\n",
                                 P2BigTreasureFsm::stateName(phase),
-                                sBigTreasure.ownership.weaponCount());
+                                sBigTreasure.ownership.weaponCount(), clip);
                 }
             }
             if (sBigTreasureVisualReady) {
