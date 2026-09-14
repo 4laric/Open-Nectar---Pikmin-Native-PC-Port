@@ -305,7 +305,7 @@ void stepBuds(double nowSec)
 		}
 		bound.open      = false;
 		bound.swallowed = 0;
-		if (budgetSpent && bound.owed == 0) {
+		if (p2pom::dead(budgetSpent, bound.owed)) {
 			if (!bound.done) {
 				finishDead(bound);
 			}
