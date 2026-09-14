@@ -53,7 +53,9 @@ inline bool pc_demon_admission_walk_only()
 inline bool pc_demon_captain_admission_eligible(Navi* n)
 {
     if (!n || !n->mStateMachine) return false;
-    const int id = n->getCurrState()->getID();
+    auto* current = n->getCurrState();
+    if (!current) return false;
+    const int id = current->getID();
     if (pc_demon_admission_walk_only()) return id == NAVISTATE_Walk;
     switch (id) {
     case NAVISTATE_Walk:
