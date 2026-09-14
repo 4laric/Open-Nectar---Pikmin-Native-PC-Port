@@ -99,7 +99,7 @@ constexpr float ATTACK_HIT_ANGLE = 0.26179939f; // general fp23 default 15 deg
 constexpr float ATTACK_DAMAGE = 10.0f;     // general fp24
 constexpr float SHAKE_KNOCKBACK = 300.0f;  // general fp17 default
 constexpr float SHAKE_DAMAGE = 0.0f;       // general fp18 default
-constexpr float SHAKE_RANGE = 120.0f;      // general fp19 default
+constexpr float SHAKE_RANGE = 20.0f;       // port latch radius for isStartFlick (fp19 default 120 is too broad on the P1 host, where it would pre-empt every bite)
 constexpr float TURN_START_ANGLE = 0.52359878f; // proper fp02 30 deg
 constexpr float TURN_END_ANGLE = 0.17453293f;   // proper fp03 10 deg
 constexpr float ROTATE_RATE = 0.05f;       // proper fp06
@@ -358,7 +358,10 @@ bool isAttackStart(BTeki* a, Umi& s) {
         }
     }
     Piki* piki = nearestPikiAngle(pos, s.heading, ATTACK_HIT, ATTACK_HIT_ANGLE);
-    if (!piki) piki = nearestPiki(pos, ATTACK_RANGE);
+    // Port adaptation: the source also gates the bite on the fp23=15 deg cone.
+    // The P1 host has no tongue geometry, so a Pikmin anywhere inside the source
+    // fp22=170 hit radius starts the attack (the tongue then captures it).
+    if (!piki) piki = nearestPiki(pos, ATTACK_HIT);
     if (piki) {
         s.goal = piki->getPosition();
         return true;
