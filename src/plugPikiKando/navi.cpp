@@ -2595,8 +2595,10 @@ bool InteractWind::actNavi(Navi* navi) immut
  * the captain with the source force/direction unless Olimar has the Dream
  * Material. The port has no Dream Material gate, so this mirrors the existing
  * `InteractFire::actNavi`/`InteractBubble::actNavi` flick behavior.
+ *
+ * `__attribute__((used))` keeps it in the link until a denki emitter exists.
  */
-bool InteractDenki::actNavi(Navi* navi) immut
+__attribute__((used)) bool InteractDenki::actNavi(Navi* navi) immut
 {
 	if (navi->mStateMachine->getNaviState(navi)->invincible(navi)) {
 		return false;

@@ -222,8 +222,11 @@ bool InteractFire::actPiki(Piki* piki) immut
  * existing lethal path (`PIKISTATE_Dying`) and the missing P2 state is logged
  * and recorded as the blocker. The routing is matrix-driven, so P2 Bulbmin is
  * covered without a separate colour test.
+ *
+ * `__attribute__((used))`: no gas/denki emitter references this receiver yet,
+ * so LTO would otherwise dead-strip it (and its P2_RECV_ log) from the link.
  */
-bool InteractDenki::actPiki(Piki* piki) immut
+__attribute__((used)) bool InteractDenki::actPiki(Piki* piki) immut
 {
 	if (!piki->isAlive()) {
 		return false;
@@ -255,8 +258,11 @@ bool InteractDenki::actPiki(Piki* piki) immut
  * existing panic-style path (`PIKISTATE_Fired`) and both missing inputs are
  * logged and recorded as the blocker. Routing stays matrix-driven so P2
  * Bulbmin is covered.
+ *
+ * `__attribute__((used))` keeps the receiver and its P2_RECV_ log in the link
+ * until a gas emitter references it (see InteractDenki::actPiki above).
  */
-bool InteractGas::actPiki(Piki* piki) immut
+__attribute__((used)) bool InteractGas::actPiki(Piki* piki) immut
 {
 	if (!piki->isAlive()) {
 		return false;
