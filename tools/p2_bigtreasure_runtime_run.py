@@ -94,6 +94,16 @@ def verify_log(text):
                      r"events=(\d+)\s*$", text, flags=re.MULTILINE)
     if seam and int(seam.group(3)) != 5:
         errors.append(f"seam defeat did not release 5 captures: {seam.groups()}")
+    if not re.search(r"^P2_BIGTREASURE_WINDOW\s+size=960x540\s+pos=-?\d+,-?\d+\s*$", text,
+                     flags=re.MULTILINE):
+        errors.append("missing 960x540 window marker")
+    fsmhost = re.search(r"^P2_BIGTREASURE_FSMHOST_PASS\s+ticks=(\d+)\s+knockoffs=(\d+)\s+"
+                        r"weapons=(\d+)\s+phase=(\w+)\s*$", text, flags=re.MULTILINE)
+    if not fsmhost:
+        errors.append("missing fsmhost PASS marker")
+    elif (int(fsmhost.group(2)) != 1 or int(fsmhost.group(3)) != 3
+          or fsmhost.group(4) != "PreAttack"):
+        errors.append(f"fsmhost knock-off phase transition not observed: {fsmhost.groups()}")
     visual = re.search(r"^P2_BIGTREASURE_VISUAL_READY\s+clips=(\d+)\s+pellets=(\d+)\s+"
                        r"pellet_debug=(\d+)\s*$", text, flags=re.MULTILINE)
     if not visual:
