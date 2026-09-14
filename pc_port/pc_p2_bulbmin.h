@@ -368,3 +368,15 @@ int pc_p2_bulbmin_leader_died();
 // forgotten actor was the mother stand-in.
 void pc_p2_bulbmin_proxy_forget(BTeki* mother);
 int pc_p2_bulbmin_dependent_count();
+
+// Cave-transition save filter (source PikiMgr::saveAllPikmins /
+// caveSaveAllPikmins, pikiMgr.cpp:723,762). `phase` returns -1 when the Piki is
+// not a tracked dependent (an injected/restored Bulbmin counts as recruited,
+// i.e. isPikmin()), P2BulbminWild for an unwhistled dependent, and
+// P2BulbminRecruited for a whistled one. `pc_p2_bulbmin_should_save` returns
+// whether the body should be written to a cave checkpoint: wild dependents are
+// never saved, recruited bodies are carried. `isExitingCave` is retained for a
+// future surface-rebirth target; the current preview keeps recruited bodies on
+// exit (documented deviation).
+int pc_p2_bulbmin_phase(const Piki* piki);
+bool pc_p2_bulbmin_should_save(const Piki* piki, bool isExitingCave);
