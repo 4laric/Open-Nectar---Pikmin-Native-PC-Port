@@ -1,0 +1,74 @@
+# Natural Demon captor: target, approach, attack, capture and drop (#242)
+
+Lane 30 (Bumbling Snitchbug `Demon` ID 32 / Swooping Snitchbug `Sarai` ID 23).
+This slice adds the missing enemy-side front end so the private Demon host can
+acquire a live captain, approach it and run the source Attack/CatchFly/FallMeck
+clocks and the registered drop receiver without fixture-injected frames, targets
+or END events.
+
+## What changed
+
+- `pc_port/pc_p2_demon_captor.h` (new): dependency-free source front end. It
+  composes the existing `P2DemonTargetGate` (source `getAttackableTarget`
+  territory/view/sight/three-second timer) and adds capped-turn approach and the
+  grab-range transition to Attack. It never touches captain stick state.
+- `tools/p2_demon_captor_test.cpp` (new): standalone policy tests (acquisition
+  timer, territory/view/sight rejection, dead/stuck skip, capped turn, approach
+  drive, grab-range attack request, invalid-input rejection, reset). Warning
+  clean under `-std=gnu++17 -Wall -Wextra -Werror`.
+- `pc_port/pc_p2_demon_host.{h,cpp}`: opt-in `enableNatural()`,
+  `setNaturalMotions()`, `setNaturalPoseProfiles()` and `naturalPhase()`; a
+  `P2DemonCaptor` plus an `updateNatural()` path in `P2DemonHost::update()`.
+  Default-off, so fixture modes and the production line are unchanged. A
+  `staticMouthCentre()` rest-pose effector is the shared reference for approach
+  and grab admission; the animated mouth `CollPart` still carries the sampled
+  joint for following. Source clocks advance in 30 fps frames capped to one frame
+  per update.
+- `tools/p2_demon_host_runtime.cpp`: new `natural` mode. It loads the real
+  captain from `naviMgr`, holds it in `NAVISTATE_Walk` (the P1 bridge admits
+  capture only from Walk; no input otherwise idles it), and asserts the full
+  chain. The Demon target, movement, attack window and capture are not injected.
+
+## Observed evidence (natural, not injected)
+
+Session `output/demon-captor-run-05/8865cd69aff2401e87d0f7904d4b5665`,
+fixture `output/demon-captor-fixture-05` (`status=built`, expected native head
+`e67005e8`), exe SHA-256
+`0470BA4482ED04E6EE744102853E4AEF0BAB65A1AEFA42DD9C0C8206957AE444`,
+`960x540` centred window, 20-red baseline arena.
+
+```text
+P2_DEMON_HOST_WINDOW size=960x540 pos=373,263 display=1707x1067 centered=1
+DEMON_NATURAL_BEGIN host=(0.00,100.00,100.00) captain=(0.00,100.00,160.00)
+DEMON_NATURAL tick=90  phase=1 host=(0.00,29.80,100.00)  cap=(...)  (timer)
+DEMON_NATURAL tick=120 phase=1 host=(3.89,29.80,123.27)  (approach)
+DEMON_NATURAL tick=150 phase=2 host=(6.80,29.80,143.17)  (source Attack window)
+DEMON_NATURAL tick=180 phase=3 occupied=1 stuck=1        (real mouth capture)
+DEMON_NATURAL tick=240 cap state=36 hp=...               (registered drop)
+DEMON_STATE_DAMAGE generation=1 accepted=1 before=100.000 after=90.000
+DEMON_STATE_HANDOFF next=0 quenched=1
+PASS DEMON_HOST natural_captor_acquire_attack_capture_drop (ticks=296)
+```
+
+Regression modes from the same fixture/session: `drop`, `livecapture` and
+`teardown` all `PASS`. Standalone `p2_demon_captor_test`, `p2_demon_escape_test`,
+`p2_demon_drop_policy_test` and `p2_demon_host_clock_test` all PASS.
+
+## Limits
+
+- The captain is held in Walk for the duration of the approach because the P1
+  bridge only admits capture from Walk; this is a bridge-contract accommodation,
+  not an injected capture. Retail P2 targets idling captains; relaxing the bridge
+  state gate is a shared (#186) decision and is not done here.
+- The starting offset and the `naviMgr` captain are fixture-provided; this is not
+  a generated-seed or manager-spawned ordinary encounter.
+- Rendered animated-mouth parity is not established; admission uses the rest
+  effector while the stick follows the sampled joint.
+- Water/platform/slope terrain, scene teardown during drop, and `Sarai` ID 23
+  source actor remain separate gates.
+
+Reproduction: stage the demon conversion from a known-good session (pose banks,
+`demon-mouths.txt`, `demon-retail-events.txt`, `demon*.mod`) into a fresh
+`preview_pikmin2_room.prepare()` arena, copy `fixture.exe`, then run
+`DEMON_HOST_MODE=natural PIKMIN_P2_ROOM_WINDOW=960x540 fixture.exe
+--experimental-pikmin2-room` (helper `output/run_demon_natural.py`).

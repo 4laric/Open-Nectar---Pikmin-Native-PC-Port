@@ -40,6 +40,9 @@ class DemonHostApp final : public PlugPikiApp {
     bool sawDash = false, sawInterrupt = false;
     bool released = false, moveRequested = false;
     float startingHealth = 0;
+    int naturalTicks = 0;
+    bool naturalSawAttack = false, naturalSawCapture = false, naturalSawDrop = false;
+    float naturalStartZ = 0;
     bool ready = false;
     BTeki* bindingActor = nullptr;
     unsigned bindingGenerator = 0;
@@ -47,10 +50,19 @@ class DemonHostApp final : public PlugPikiApp {
 public:
     int idle() override {
         int result = PlugPikiApp::idle();
-        require(++ticks < 600, "timeout");
+        const bool naturalMode = !std::strcmp(mode, "natural");
+        require(++ticks < (naturalMode ? 8000 : 600), "timeout");
         if (gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive) { gameflow.mMoviePlayer->requestSkip(); return result; }
         if (!pc_p2_preview_ready() || !naviMgr || !naviMgr->getNavi()) return result;
         Navi* n = naviMgr->getNavi();
+        // The P1 Demon bridge admits capture only from Walk (NaviState 0). With no
+        // player input the captain idles, so hold the real captain in Walk until
+        // the natural capture succeeds; this is a bridge-contract accommodation,
+        // not an injected capture, frame or target.
+        if (ready && naturalMode && !host.occupied() && !naturalSawCapture && !naturalSawDrop
+            && n->getCurrState()->getID() != NAVISTATE_Walk) {
+            n->mStateMachine->transit(n, NAVISTATE_Walk);
+        }
         if (ready) host.update();
         if (!ready) {
             if (!std::strcmp(mode, "binding_discover")) {
@@ -141,6 +153,58 @@ public:
                 host.sceneExit();
                 require(host.boundNativeActor() == nullptr, "scene exit unbind");
                 std::puts("PASS DEMON_HOST binding_lifecycle"); std::fflush(stdout); std::_Exit(0);
+            }
+            if (!std::strcmp(mode, "natural")) {
+                std::ifstream events("demon-retail-events.txt");
+                require(bool(events), "natural retail event table");
+                const auto table = p2retail::read(events);
+                p2retail::Motion attack, catchFly, fallMeck;
+                for (const auto& motion : table.motions) {
+                    if (motion.name == "attack1.bca") attack = motion;
+                    else if (motion.name == "waitact2.bca") catchFly = motion;
+                    else if (motion.name == "waitact1.bca") fallMeck = motion;
+                }
+                require(!attack.name.empty() && !catchFly.name.empty() && !fallMeck.name.empty(), "natural retail motions");
+                host.setNaturalMotions(attack, catchFly, fallMeck);
+                host.setNaturalPoseProfiles(catchProfilePath.c_str(), fallProfilePath.c_str());
+                host.mSRT.r.set(0, 0, 0);
+                host.setPosition(Vector3f(0, 100, 100));
+                n->mStateMachine->transit(n, NAVISTATE_Walk);
+                n->resetPosition(Vector3f(0, 100, 160));
+                startingHealth = n->mHealth;
+                naturalStartZ = host.mSRT.t.z;
+                host.enableNatural(30.0f, 3.0f, 20.0f, 12.0f, 200.0f, 60.0f, 300.0f, Vector3f(0, 100, 100));
+                require(host.naturalEnabled(), "natural captor enabled");
+                std::printf("DEMON_NATURAL_BEGIN host=(%.2f,%.2f,%.2f) captain=(%.2f,%.2f,%.2f)\n",
+                    host.mSRT.t.x, host.mSRT.t.y, host.mSRT.t.z, n->mSRT.t.x, n->mSRT.t.y, n->mSRT.t.z);
+                std::fflush(stdout);
+            }
+            return result;
+        }
+        if (ready && !std::strcmp(mode, "natural")) {
+            // Ordinary captor front end: no fixture-injected frame, target, END,
+            // capture or drop. host.update() performs source target acquisition,
+            // approach, Attack/CatchFly/FallMeck and pc_demon_capture delivery.
+            require(++naturalTicks < 1500, "natural captor timeout");
+            if (host.naturalPhase() >= 2) naturalSawAttack = true;
+            if (host.occupied()) naturalSawCapture = true;
+            if (n->getCurrState()->getID() == NAVISTATE_DemonDrop) naturalSawDrop = true;
+            if (naturalTicks % 30 == 0) {
+                const Vector3f mouth = host.mouthCentre(0);
+                const float md = (n->mSRT.t - mouth).length();
+                std::printf("DEMON_NATURAL tick=%d phase=%d host=(%.2f,%.2f,%.2f) cap=(%.2f,%.2f,%.2f) hp=%.1f state=%d stuck=%d mouthdist=%.3f occupied=%d\n",
+                    naturalTicks, host.naturalPhase(), host.mSRT.t.x, host.mSRT.t.y, host.mSRT.t.z,
+                    n->mSRT.t.x, n->mSRT.t.y, n->mSRT.t.z, n->mHealth, n->getCurrState()->getID(),
+                    int(n->isStickTo()), md, int(host.occupied()));
+                std::fflush(stdout);
+            }
+            if (naturalSawDrop && n->getCurrState()->getID() == NAVISTATE_Walk) {
+                require(naturalSawAttack, "natural attack reached");
+                require(naturalSawCapture, "natural mouth capture admitted");
+                require(host.mSRT.t.z > naturalStartZ + 1.0f, "host approached the live captain");
+                require(n->mHealth == startingHealth - 10.0f, "one natural damaging drop completed");
+                std::printf("PASS DEMON_HOST natural_captor_acquire_attack_capture_drop (ticks=%d)\n", naturalTicks);
+                std::fflush(stdout); std::_Exit(0);
             }
             return result;
         }
