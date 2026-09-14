@@ -12,6 +12,9 @@
 // is folded into Dead.
 //
 // Recorded port adaptations / partials (docs/PIKMIN2_KOCHAPPY_FSM.md):
+//   * The P1 host applies accumulated Pikmin damage in a TAI damage reaction
+//     inside doAI; because the FSM suppresses doAI it calls actor->makeDamaged()
+//     itself so real Pikmin hits still reach mHealth (no damage is injected).
 //   * EnemyFunc::isStartFlick (a Pikmin actually stuck to the body) is
 //     approximated by a contact-radius test; attack posture takes precedence.
 //   * Attack applies one InteractAttack at source frame 8 (attack hit radius
@@ -323,6 +326,13 @@ void pc_p2_kochappy_fsm_update(BTeki* actor)
 	if (dt <= 0.0f || dt > 0.5f) return;
 	const unsigned generator = actor->mGenerator ? actor->mGenerator->_70 : 0u;
 	const Vector3f pos = actor->getPosition();
+
+	// The P1 host applies accumulated Pikmin damage through a TAI damage
+	// reaction that lives in the suppressed strategy (doAI). Apply the queued
+	// damage here so real Pikmin hits reach mHealth; no damage is injected.
+	if (actor->mStoredDamage > 0.0f) {
+		actor->makeDamaged();
+	}
 
 	if (actor->mHealth <= 0.0f && state.state != p2kochappyfsm::STATE_DEAD
 	    && state.state != p2kochappyfsm::STATE_PRESS) {
