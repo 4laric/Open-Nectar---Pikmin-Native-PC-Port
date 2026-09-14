@@ -994,7 +994,7 @@ add_executable(p2_groink_strike_test tools/p2_groink_strike_test.cpp
 target_include_directories(p2_groink_strike_test PRIVATE pc_port)
 target_compile_options(p2_groink_strike_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_groink_strike_test COMMAND p2_groink_strike_test)
-add_executable(p2_bigtreasure_save_test tools/p2_bigtreasure_save_test.cpp pc_port/pc_p2_bigtreasure_save.cpp)
+add_executable(p2_bigtreasure_save_test tools/p2_bigtreasure_save_test.cpp pc_port/pc_p2_bigtreasure_save.cpp ${P2_BIGTREASURE_TEST_DEPS})
 target_include_directories(p2_bigtreasure_save_test PRIVATE pc_port)
 target_compile_options(p2_bigtreasure_save_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_bigtreasure_save_test COMMAND p2_bigtreasure_save_test)
