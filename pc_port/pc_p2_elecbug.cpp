@@ -1,18 +1,30 @@
 // Family-owned ground-invertebrate source behavior for the batch-2 Chappy
 // placement vehicle: Anode Beetle (ElecBug, EnemyID 28). Implements the source
 // ElecBugState.cpp cycle (Wait/Turn/Move wander -> Charge -> Discharge -> Return)
-// plus the Reverse flip from ElecBug.cpp::pressCallBack and the invulnerability
-// that Reverse removes. Source revision
+// plus the source two-beetle Charge/ChildCharge partner link and the Reverse flip
+// from ElecBug.cpp::pressCallBack / StateReverse. Source revision
 // 632af93787b9c95b63f0c13be32b161375ce3a96; retail parms from
 // experimental/pikmin2_ground_inverts_assets.py (GPVE01 rev 0).
 //
+// Source contract implemented:
+//   * StateCharge::exec searches once, 2.0s into Charge, for a live unlinked
+//     beetle in Wait/Turn/Move within 300 units and links reciprocally via
+//     startChargeState/startChildChargeState (generator Charge, child ChildCharge).
+//   * Charge lasts 3.0s then Discharge; ChildCharge lasts 1.0s then ChildDischarge.
+//     On discharge the generator sweeps the electrical receiver across the pair.
+//   * Partner links break on partner death, press/Reverse (finishPartnerAndEffect),
+//     discharge completion and partner loss.
+//
 // Port adaptations (recorded, not retail-faithful):
-//   * The source two-beetle Charge/ChildCharge partner link is not implemented
-//     on the P1 host; the beetle runs a singleton Charge -> Discharge cycle.
+//   * Partner selection is nearest-first (the source picks uniformly at random
+//     among candidates within 300 units).
 //   * Between-beetle Denki geometry is resolved as a single nearest non-Yellow
-//     Pikmin within the discharge radius, shocked once per discharge. The P1
-//     engine has no InteractDenki, so the electrical receiver uses InteractKill.
-//   * View angle is a full hemisphere; charge/return durations are port values.
+//     Pikmin within the discharge radius of either linked beetle, shocked once
+//     per discharge. The P1 engine has no InteractDenki, so the electrical
+//     receiver uses InteractKill.
+//   * Charge and ChildCharge durations are port values (source hard-codes
+//     mStateTimer > 3.0 / > 1.0; Return ends on animation end).
+//   * View angle is a full hemisphere.
 // No other lane's module is modified; every hook is a no-op for unregistered actors.
 #include "pc_p2_elecbug.h"
 #include "teki.h"
@@ -42,6 +54,8 @@ enum State {
     ELEC_MOVE = 3,
     ELEC_CHARGE = 4,
     ELEC_DISCHARGE = 5,
+    ELEC_CHILDCHARGE = 6,
+    ELEC_CHILDISCHARGE = 7,
     ELEC_REVERSE = 8,
     ELEC_RETURN = 9,
 };
@@ -54,6 +68,8 @@ const char* stateName(State s) {
     case ELEC_MOVE: return "move";
     case ELEC_CHARGE: return "charge";
     case ELEC_DISCHARGE: return "discharge";
+    case ELEC_CHILDCHARGE: return "childcharge";
+    case ELEC_CHILDISCHARGE: return "childdischarge";
     case ELEC_REVERSE: return "reverse";
     case ELEC_RETURN: return "return";
     default: return "null";
@@ -66,13 +82,16 @@ constexpr float MOVE_SPEED = 30.0f;
 constexpr float SIGHT = 200.0f;
 constexpr float TERRITORY = 200.0f;
 constexpr float HOME_RADIUS = 100.0f;
-constexpr float FLIP_TIME = 5.0f;      // fp01
-constexpr float WAIT_TIME = 1.5f;      // fp02
-constexpr float DISCHARGE_TIME = 3.0f; // fp11
-constexpr float CHARGE_TIME = 1.0f;    // port value
-constexpr float RETURN_TIME = 0.5f;    // port value
-constexpr float WANDER_TIME = 1.5f;    // port value
-constexpr float ELEC_RADIUS = 70.0f;   // source sweep radius fp20/22 = 70
+constexpr float FLIP_TIME = 5.0f;         // fp01
+constexpr float WAIT_TIME = 1.5f;         // fp02
+constexpr float DISCHARGE_TIME = 3.0f;    // fp11
+constexpr float CHARGE_TIME = 3.0f;       // source StateCharge mStateTimer > 3.0
+constexpr float CHILD_CHARGE_TIME = 1.0f; // source StateChildCharge mStateTimer > 1.0
+constexpr float CHARGE_SEARCH_DELAY = 2.0f; // source mStateTimer > 2.0
+constexpr float PAIR_RADIUS = 300.0f;     // source bugPos.distance(otherPos) < 300
+constexpr float RETURN_TIME = 0.5f;       // port value
+constexpr float WANDER_TIME = 1.5f;       // port value
+constexpr float ELEC_RADIUS = 70.0f;      // source sweep radius fp20/22 = 70
 constexpr float TURN_RATE = 2.0f;
 
 struct Clip {
@@ -86,6 +105,9 @@ struct ElecBug {
     float stateTime = 0.0f;
     float heading = 0.0f;
     Vector3f home;
+    BTeki* self = nullptr;
+    BTeki* partner = nullptr;
+    bool hasSearched = false;
     bool shockedThisDischarge = false;
     bool flipped = false;
     bool deadLogged = false;
@@ -115,6 +137,11 @@ bool clipLoops(const std::string& name) {
     auto it = clips.find(name);
     return it != clips.end() && it->second.loop;
 }
+unsigned genOf(const BTeki* actor) { return actor && actor->mGenerator ? actor->mGenerator->_70 : 0u; }
+ElecBug* lookup(BTeki* actor) {
+    auto it = actors.find(static_cast<PelletView*>(actor));
+    return it == actors.end() ? nullptr : &it->second;
+}
 bool targetInSight(const Vector3f& pos) {
     if (naviMgr) {
         Navi* n = naviMgr->getNavi();
@@ -141,6 +168,14 @@ Piki* nearestNonYellow(const Vector3f& pos, float radius) {
             if (d < radius && d * d < bestSq) { bestSq = d * d; best = p; }
         }
     }
+    return best;
+}
+// The source StateDischarge::checkInteract sweeps the Denki line between the two
+// linked beetles. The P1 host has no InteractDenki, so the receiver is the
+// nearest non-Yellow Pikmin to either end of the pair.
+Piki* nearestNonYellowPair(const Vector3f& pos, const BTeki* partner, float radius) {
+    Piki* best = nearestNonYellow(pos, radius);
+    if (!best && partner) best = nearestNonYellow(partner->getPosition(), radius);
     return best;
 }
 void enter(ElecBug& s, State state, const char* clip) {
@@ -170,6 +205,62 @@ void setPhase(ElecBug& s) {
         if (s.phase > 1.0f) s.phase = 1.0f;
     }
 }
+// Source Obj::resetPartnerPtr / finishPartnerAndEffect null both sides. Log the
+// unlink for each beetle that actually carried the pointer.
+void breakLink(BTeki* actor, ElecBug& s) {
+    BTeki* partner = s.partner;
+    if (!partner) return;
+    ElecBug* other = lookup(partner);
+    s.partner = nullptr;
+    if (other) other->partner = nullptr;
+    std::printf("P2_ELECBUG_UNLINK generator=%u\n", genOf(actor));
+    if (other) std::printf("P2_ELECBUG_UNLINK generator=%u\n", genOf(partner));
+    std::fflush(stdout);
+}
+// Source StateCharge::exec picks among other beetles within 300 units that are in
+// a pre-charge state. A beetle already in Charge but still unlinked is also a
+// valid candidate here so two beetles that acquire sight on the same frame still
+// form a pair (the source staggers via its random inactive timer).
+BTeki* nearestPartner(BTeki* actor, float radius) {
+    const Vector3f pos = actor->getPosition();
+    BTeki* best = nullptr;
+    float bestSq = radius * radius;
+    for (auto& entry : actors) {
+        ElecBug& other = entry.second;
+        if (!other.self || other.self == actor) continue;
+        if (other.partner || other.state == ELEC_DEAD) continue;
+        if (other.self->mHealth <= 0.0f) continue;
+        if (other.state != ELEC_WAIT && other.state != ELEC_TURN
+                && other.state != ELEC_MOVE && other.state != ELEC_CHARGE) continue;
+        const float d = distXZ(pos, other.self->getPosition());
+        if (d < radius && d * d < bestSq) { bestSq = d * d; best = other.self; }
+    }
+    return best;
+}
+// Source startChargeState/startChildChargeState reciprocal assignment.
+void linkPair(BTeki* actor, ElecBug& s, BTeki* partner, ElecBug& child) {
+    s.partner = partner;
+    child.partner = actor;
+    s.hasSearched = true;
+    child.hasSearched = true;
+    child.shockedThisDischarge = false;
+    child.flipped = false;
+    enter(child, ELEC_CHILDCHARGE, "charge");
+    std::printf("P2_ELECBUG_LINK generator=%u partner=%u\n", genOf(actor), genOf(partner));
+    std::printf("P2_ELECBUG_STATE generator=%u state=childcharge\n", genOf(partner));
+    std::fflush(stdout);
+}
+// Source StateCharge::exec faces the pair outward: target = bugPos + (bugPos - partnerPos).
+void turnTowardsPair(BTeki* a, ElecBug& s) {
+    if (!s.partner) return;
+    const Vector3f bugPos = a->getPosition();
+    const Vector3f partnerPos = s.partner->getPosition();
+    const float dx = bugPos.x - partnerPos.x;
+    const float dz = bugPos.z - partnerPos.z;
+    if (dx * dx + dz * dz < 1e-6f) return;
+    s.heading = std::atan2(dx, dz);
+    a->setDirection(s.heading);
+}
 }
 
 void pc_p2_elecbug_reset() {
@@ -177,7 +268,11 @@ void pc_p2_elecbug_reset() {
     clips.clear();
     ready = false;
 }
-void pc_p2_elecbug_forget(BTeki* actor) { actors.erase(static_cast<PelletView*>(actor)); }
+void pc_p2_elecbug_forget(BTeki* actor) {
+    ElecBug* s = lookup(actor);
+    if (s && s->partner) breakLink(actor, *s);
+    actors.erase(static_cast<PelletView*>(actor));
+}
 
 float pc_p2_elecbug_param_f(const BTeki* actor, int idx, float fallback) {
     if (!ready || !actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor)))) return fallback;
@@ -209,14 +304,13 @@ bool pc_p2_elecbug_attacked(Teki* teki) {
 
 bool pc_p2_elecbug_pressed(BTeki* teki, Creature*) {
     if (!ready) return false;
-    auto it = actors.find(static_cast<PelletView*>(teki));
-    if (it == actors.end()) return false;
-    ElecBug& s = it->second;
-    if (s.state == ELEC_DEAD || s.state == ELEC_REVERSE) return true;
-    s.flipped = true;
-    enter(s, ELEC_REVERSE, "recover");
-    std::printf("P2_ELECBUG_FLIP generator=%u source_id=28\n",
-                teki->mGenerator ? teki->mGenerator->_70 : 0u);
+    ElecBug* s = lookup(teki);
+    if (!s) return false;
+    if (s->state == ELEC_DEAD || s->state == ELEC_REVERSE) return true;
+    if (s->partner) breakLink(teki, *s); // source StateReverse::init finishPartnerAndEffect
+    s->flipped = true;
+    enter(*s, ELEC_REVERSE, "recover");
+    std::printf("P2_ELECBUG_FLIP generator=%u source_id=28\n", genOf(teki));
     std::fflush(stdout);
     return true;
 }
@@ -287,6 +381,7 @@ void pc_p2_elecbug_setup() {
             std::abort();
         }
         ElecBug& s = actors[static_cast<PelletView*>(actor)];
+        s.self = actor;
         s.home = actor->getPosition();
         s.heading = actor->getDirection();
         actor->mHealth = LIFE;
@@ -315,9 +410,10 @@ void pc_p2_elecbug_update(BTeki* actor) {
     const float dt = gsys->getFrameTime();
     if (dt <= 0.0f || dt > 0.5f) return;
     const Vector3f pos = actor->getPosition();
-    const unsigned generator = actor->mGenerator ? actor->mGenerator->_70 : 0u;
+    const unsigned generator = genOf(actor);
 
     if (actor->mHealth <= 0.0f && s.state != ELEC_DEAD) {
+        if (s.partner) breakLink(actor, s);
         if (!s.deadLogged) {
             std::printf("P2_ELECBUG_DEAD generator=%u source_id=28 health=0\n", generator);
             std::fflush(stdout);
@@ -326,12 +422,21 @@ void pc_p2_elecbug_update(BTeki* actor) {
         enter(s, ELEC_DEAD, "dead");
     }
 
+    // Partner loss (removed from the arena, dead, or health-0) breaks the link.
+    if (s.state != ELEC_DEAD && s.partner) {
+        ElecBug* other = lookup(s.partner);
+        if (!other || !other->self || other->state == ELEC_DEAD || other->self->mHealth <= 0.0f) {
+            breakLink(actor, s);
+        }
+    }
+
     s.stateTime += dt;
     switch (s.state) {
     case ELEC_WAIT:
         stop(actor);
         if (targetInSight(pos)) {
             std::printf("P2_ELECBUG_STATE generator=%u state=charge\n", generator);
+            s.hasSearched = false;
             enter(s, ELEC_CHARGE, "charge");
         } else if (s.stateTime > WAIT_TIME) {
             std::printf("P2_ELECBUG_STATE generator=%u state=move\n", generator);
@@ -348,6 +453,7 @@ void pc_p2_elecbug_update(BTeki* actor) {
     case ELEC_MOVE:
         if (targetInSight(pos)) {
             std::printf("P2_ELECBUG_STATE generator=%u state=charge\n", generator);
+            s.hasSearched = false;
             enter(s, ELEC_CHARGE, "charge");
             break;
         }
@@ -358,21 +464,57 @@ void pc_p2_elecbug_update(BTeki* actor) {
             enter(s, ELEC_WAIT, "wait");
         }
         break;
-    case ELEC_CHARGE:
+    case ELEC_CHARGE: {
         stop(actor);
+        if (!s.hasSearched && s.stateTime >= CHARGE_SEARCH_DELAY) {
+            s.hasSearched = true;
+            BTeki* partner = nearestPartner(actor, PAIR_RADIUS);
+            ElecBug* child = partner ? lookup(partner) : nullptr;
+            if (child) linkPair(actor, s, partner, *child);
+        }
+        if (s.partner) turnTowardsPair(actor, s);
         if (s.stateTime >= CHARGE_TIME) {
-            s.shockedThisDischarge = false;
-            std::printf("P2_ELECBUG_STATE generator=%u state=discharge\n", generator);
-            std::printf("P2_ELECBUG_DISCHARGE generator=%u source_id=28 duration=%.3f\n",
-                        generator, DISCHARGE_TIME);
-            std::fflush(stdout);
-            enter(s, ELEC_DISCHARGE, "discharge");
+            if (s.partner) {
+                s.shockedThisDischarge = false;
+                std::printf("P2_ELECBUG_STATE generator=%u state=discharge\n", generator);
+                std::printf("P2_ELECBUG_DISCHARGE generator=%u source_id=28 duration=%.3f state=charge\n",
+                            generator, DISCHARGE_TIME);
+                std::fflush(stdout);
+                enter(s, ELEC_DISCHARGE, "discharge");
+            } else {
+                std::printf("P2_ELECBUG_STATE generator=%u state=return\n", generator);
+                enter(s, ELEC_RETURN, "recover");
+            }
         }
         break;
+    }
+    case ELEC_CHILDCHARGE: {
+        stop(actor);
+        if (s.partner) turnTowardsPair(actor, s);
+        if (s.stateTime >= CHILD_CHARGE_TIME) {
+            if (s.partner) {
+                s.shockedThisDischarge = false;
+                std::printf("P2_ELECBUG_STATE generator=%u state=childdischarge\n", generator);
+                std::printf("P2_ELECBUG_DISCHARGE generator=%u source_id=28 duration=%.3f state=child\n",
+                            generator, DISCHARGE_TIME);
+                std::fflush(stdout);
+                enter(s, ELEC_CHILDISCHARGE, "discharge");
+            } else {
+                std::printf("P2_ELECBUG_STATE generator=%u state=return\n", generator);
+                enter(s, ELEC_RETURN, "recover");
+            }
+        }
+        break;
+    }
     case ELEC_DISCHARGE: {
         stop(actor);
+        if (!s.partner) {
+            std::printf("P2_ELECBUG_STATE generator=%u state=return\n", generator);
+            enter(s, ELEC_RETURN, "recover");
+            break;
+        }
         if (!s.shockedThisDischarge) {
-            Piki* piki = nearestNonYellow(pos, ELEC_RADIUS);
+            Piki* piki = nearestNonYellowPair(pos, s.partner, ELEC_RADIUS);
             if (piki) {
                 s.shockedThisDischarge = true;
                 piki->stimulate(InteractKill(actor, 0));
@@ -381,8 +523,23 @@ void pc_p2_elecbug_update(BTeki* actor) {
             }
         }
         if (s.stateTime >= DISCHARGE_TIME) {
+            breakLink(actor, s);
             std::printf("P2_ELECBUG_STATE generator=%u state=return\n", generator);
             enter(s, ELEC_RETURN, "recover");
+        }
+        break;
+    }
+    case ELEC_CHILDISCHARGE: {
+        stop(actor);
+        if (!s.partner) {
+            std::printf("P2_ELECBUG_STATE generator=%u state=wait\n", generator);
+            enter(s, ELEC_WAIT, "wait");
+            break;
+        }
+        if (s.stateTime >= DISCHARGE_TIME) {
+            breakLink(actor, s);
+            std::printf("P2_ELECBUG_STATE generator=%u state=wait\n", generator);
+            enter(s, ELEC_WAIT, "wait");
         }
         break;
     }
