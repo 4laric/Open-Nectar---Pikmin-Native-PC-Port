@@ -101,6 +101,7 @@ void pc_p2_forget_teki(BTeki* actor)
 // the existing exitStage steps is not significant.
 void pc_p2_reset_all_teki()
 {
+	pc_p2_white_poison_reset();
 	pc_p2_purple_direct_reset();
 	pc_p2_demon_manager_reset();
 	pc_p2_snow_reset();

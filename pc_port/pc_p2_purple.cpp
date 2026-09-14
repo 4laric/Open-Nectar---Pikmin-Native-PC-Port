@@ -1,6 +1,8 @@
 #include "pc_p2_purple.h"
 #include "pc_p2_purple_impact.h"
 #include "pc_p2_purple_direct.h"
+#include "pc_p2_purple_flight.h"
+#include "pc_p2_purple_motion.h"
 #include "pc_p2_white.h"
 #include "pc_p2_preview.h"
 #include "pc_bbft.h"
@@ -99,6 +101,12 @@ void pc_p2_purple_setup() {
 }
 bool pc_p2_draw_purple(Piki* p,Graphics& gfx) {
     if(!pc_p2_is_purple(p))return false;
+    PcP2PurpleFlightSample flight=pc_p2_purple_flight_sample(p);
+    if(flight.phase!=PcP2PurpleFlightPhase::None && pc_p2_purple_motion_enabled()) {
+        PcP2PurpleMotionClip clip=(flight.phase==PcP2PurpleFlightPhase::Ascent||flight.phase==PcP2PurpleFlightPhase::EntryPause)
+            ? PcP2PurpleMotionClip::RollJump : PcP2PurpleMotionClip::Fall;
+        return pc_p2_draw_purple_motion(p,gfx,clip,flight.motionElapsed);
+    }
     std::string motion=p->mMode==PikiMode::AttackMode?"attack1":(p->mVelocity.x*p->mVelocity.x+p->mVelocity.z*p->mVelocity.z>16?"walk":"wait");
     Clip& clip=clips[motion];int index=int(std::fmod(p->mP2AnimationTime,clip.seconds)/clip.seconds*clip.shapes.size());
     if(index<0 || index>=int(clip.shapes.size()))index=0;

@@ -1085,3 +1085,17 @@ add_executable(p2_groink_hit_test tools/p2_groink_hit_test.cpp pc_port/pc_p2_gro
 target_include_directories(p2_groink_hit_test PRIVATE pc_port)
 target_compile_options(p2_groink_hit_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_groink_hit_test COMMAND p2_groink_hit_test)
+
+# Opt-in Purple and White policy regressions.
+add_executable(p2_purple_direct_policy_test tools/p2_purple_direct_policy_test.cpp)
+target_include_directories(p2_purple_direct_policy_test PRIVATE pc_port)
+target_compile_options(p2_purple_direct_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_purple_direct_policy_test COMMAND p2_purple_direct_policy_test)
+add_executable(p2_purple_impact_policy_test tools/p2_purple_impact_policy_test.cpp)
+target_include_directories(p2_purple_impact_policy_test PRIVATE pc_port)
+target_compile_options(p2_purple_impact_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_purple_impact_policy_test COMMAND p2_purple_impact_policy_test)
+add_executable(p2_white_poison_policy_test tools/test_p2_white_poison_policy.cpp)
+target_include_directories(p2_white_poison_policy_test PRIVATE pc_port)
+target_compile_options(p2_white_poison_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_white_poison_policy_test COMMAND p2_white_poison_policy_test)

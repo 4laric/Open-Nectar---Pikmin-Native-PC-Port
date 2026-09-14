@@ -1,3 +1,4 @@
+#include "pc_p2_purple_flight.h"
 #include "pc_p2_kurage_visual.h"
 #include "pc_p2_teki_lifetime.h"
 #include "pc_p2_kurage_teki.h"
@@ -884,6 +885,7 @@ void GameCoreSection::exitStage()
 	// registration map so a finished stage cannot retain a stale BTeki* key
 	// pointing into the TekiMgr that is about to be destroyed. Previously only
 	// the kurage families were released here.
+	pc_p2_purple_flight_reset(); // Restore live Pikmin flags before the stage heap is released.
 	pc_p2_reset_all_teki();
 #endif
 	demoEventMgr = nullptr;

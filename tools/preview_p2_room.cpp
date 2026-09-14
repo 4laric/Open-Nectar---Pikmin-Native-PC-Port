@@ -229,6 +229,7 @@ public:
         if(cargoCarryFixture(n))return result;
         if(snowRenderFixture(n))return result;
         if(pc_p2_cave_floor()){caveFixture(n);std::fflush(stdout);return result;}
+        if(FILE* poison=std::fopen("p2-white-poison.txt","r")){std::fclose(poison);whitePoisonFixture(n);std::fflush(stdout);return result;}
         if(pc_p2_whites_enabled()){whiteFixture(n);std::fflush(stdout);return result;}
         if(pc_p2_purple_flight_enabled()){purpleFlightFixture(n);std::fflush(stdout);return result;}
         if(pc_p2_purple_direct_enabled()){purpleDirectFixture(n);std::fflush(stdout);return result;}
