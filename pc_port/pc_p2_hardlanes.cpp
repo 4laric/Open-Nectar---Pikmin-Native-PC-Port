@@ -11,9 +11,12 @@
 // * Fuefuki (#245): the lane-owned P2FuefukiBinding is bound to a live host
 //   adapter over the real squad, with the beetle vehicle anchored on a staged
 //   TEKI_Napkid proxy actor. Whistle-theft/reclaim policy runs against real
-//   Pikmin; follow locomotion remains policy/fixture-only because P1 has no
-//   follow-teki action. Runs only inside the private room preview when a Napkid
-//   vehicle exists, so ordinary P1 play is unaffected.
+//   Pikmin. The ActTeki follow-locomotion policy (pc_p2_fuefuki_follow.h)
+//   drives each held Pikmin: the faithful Piki::setSpeed drive plus a labeled
+//   volatile-velocity approximation, because P1 has no follow-teki action and
+//   ActFree overwrites mTargetVelocity before moveVelocity each frame. Runs
+//   only inside the private room preview when a Napkid vehicle exists, so
+//   ordinary P1 play is unaffected.
 //
 // No shared semantics are changed: this module owns no saves, rewards, generic
 // damage or actor lifetime. It is a debug/arena registration for runtime
@@ -93,6 +96,9 @@ void fuefukiProbe(void*, P2FuefukiProbeResult& out)
     const Vector3f anchor = sFuefukiVehicle->getPosition();
     out.x = anchor.x;
     out.z = anchor.z;
+    const Vector3f velocity = sFuefukiVehicle->getVelocity();
+    out.vx = velocity.x;
+    out.vz = velocity.z;
     Navi* navi = naviMgr ? naviMgr->getNavi() : nullptr;
     if (navi && fuefukiXzSq(navi->mSRT.t, anchor) < 3600.0f) out.intruder = true;
     Iterator it(pikiMgr);
@@ -163,6 +169,45 @@ void fuefukiOwnershipWrite(void*, std::uint32_t id, std::uint32_t)
 // No P1 Beetle actor exists yet, so kill delivery is recorded only.
 void fuefukiKill(void*, bool) {}
 
+// (g) ActTeki follow locomotion host side. The sample returns the real P1
+// Pikmin position; the drive applies the policy command to the real actor.
+bool fuefukiFollowerSample(void*, std::uint32_t id, float& x, float& z)
+{
+    auto it = sFuefukiPiki.find(id);
+    if (it == sFuefukiPiki.end() || !it->second->isAlive()) return false;
+    x = it->second->mSRT.t.x;
+    z = it->second->mSRT.t.z;
+    return true;
+}
+
+void fuefukiFollowDrive(void*, std::uint32_t id, const P2FuefukiFollowMove& move)
+{
+    auto it = sFuefukiPiki.find(id);
+    if (it == sFuefukiPiki.end() || !it->second->isAlive()) return;
+    Piki* piki = it->second;
+    if (move.stop) {
+        piki->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
+        piki->mVolatileVelocity.set(0.0f, 0.0f, 0.0f);
+        return;
+    }
+    // Faithful source drive (ActTeki::test_0 -> Piki::setSpeed).
+    Vector3f dir(move.dirX, 0.0f, move.dirZ);
+    piki->setSpeed(move.speed, dir);
+    // Labeled approximation: P1 has no follow-teki action, so the Pikmin's
+    // ActFree overwrites mTargetVelocity before Creature::moveVelocity each
+    // frame. Seed the volatile impulse channel (already used by flicks) so
+    // the follow motion is actually realized until a real follow action lands
+    // (provider lane 12). Remove once that action exists.
+    piki->mVolatileVelocity.set(move.dirX * piki->mMoveSpeed, 0.0f, move.dirZ * piki->mMoveSpeed);
+}
+
+P2FuefukiFollowParms fuefukiFollowParms()
+{
+    P2FuefukiFollowParms p;
+    p.followDistance = 100.0f; // source FOLLOW_DISTANCE
+    return p;
+}
+
 P2FuefukiFsmParms fuefukiParms()
 {
     P2FuefukiFsmParms p;
@@ -195,6 +240,7 @@ void pc_p2_hardlanes_reset()
     sFuefukiPiki.clear();
     sFuefukiHeld.clear();
     sFuefukiNextId = 1;
+    if (sFuefuki) sFuefuki->follow().reset();
     p2_bigtreasure_host_reset(sBigTreasure);
     pc_p2_bigtreasure_visual_reset();
     sBigTreasureReady = false;
@@ -239,9 +285,12 @@ void pc_p2_hardlanes_setup()
         host.pingCollect = fuefukiPingCollect;
         host.ownershipWrite = fuefukiOwnershipWrite;
         host.kill = fuefukiKill;
-        if (sFuefuki->bind(host, fuefukiParms(), nullptr)) {
+        host.followerSample = fuefukiFollowerSample;
+        host.followDrive = fuefukiFollowDrive;
+        host.randFloat = nullptr; // deterministic lane LCG fallback
+        if (sFuefuki->bind(host, fuefukiParms(), nullptr, fuefukiFollowParms())) {
             sFuefuki->spawn(1);
-            std::printf("P2_HARDLANES_READY family=Fuefuki vehicle=Napkid follow_locomotion=policy_only\n");
+            std::printf("P2_HARDLANES_READY family=Fuefuki vehicle=Napkid follow_locomotion=actteki_volatile_approx\n");
         }
     }
 
