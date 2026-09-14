@@ -1,5 +1,6 @@
 #include "pc_p2_bulbmin.h"
 #include "pc_p2_captain.h"
+#include "pc_p2_kochappy.h"
 #include "pc_p2_species.h"
 #include "pc_p2_preview.h"
 #include "pc_bbft.h"
@@ -8,6 +9,7 @@
 #include "Navi.h"
 #include "NaviMgr.h"
 #include "MapMgr.h"
+#include "teki.h"
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -25,9 +27,10 @@ std::unordered_map<Piki*, std::uint32_t> idOfPiki;
 std::unordered_map<std::uint32_t, Piki*> pikiOfId;
 std::uint32_t nextId = 1;
 
-// The Chappy-family actor currently standing in for the missing LeafChappy
-// mother. Only ever compared, never dereferenced.
-void* proxyMother = nullptr;
+// Default label for the Chappy-family actor standing in for the missing
+// LeafChappy mother. The bridge registry holds the host pointer (compared,
+// never dereferenced); this constant is only the proxy label reported to logs.
+constexpr const char* kKochappyProxyModel = "kochappy_proxy";
 
 std::uint32_t idFor(Piki* piki) {
     auto found = idOfPiki.find(piki);
@@ -46,7 +49,6 @@ void pc_p2_bulbmin_reset() {
     idOfPiki.clear();
     pikiOfId.clear();
     nextId = 1;
-    proxyMother = nullptr;
     active = false;
 }
 
@@ -88,9 +90,9 @@ void pc_p2_bulbmin_setup() {
         if (P2CaptainAdapter* captainAdapter = pc_p2_captain::adapter())
             bridge.bindCaptains(captainAdapter->ownershipTable());
     }
-    std::printf("P2_BULBMIN_READY mother_epoch=%llu dependents=%d behavior=policy_ledger live_spawn=kochappy_proxy captain_table=%d\n",
+    std::printf("P2_BULBMIN_READY mother_epoch=%llu dependents=%d behavior=policy_ledger proxy_model=%s proxy=1 live_leafchappy=0 captain_table=%d\n",
                 static_cast<unsigned long long>(config.motherEpoch), config.maxDependents,
-                bridge.hasCaptains() ? 1 : 0);
+                config.motherModel.c_str(), bridge.hasCaptains() ? 1 : 0);
     std::fflush(stdout);
 }
 
@@ -197,12 +199,36 @@ int pc_p2_bulbmin_drive_birth(Creature* leader, const Vector3f& leaderPos,
     return driver.birthFlock(requested);
 }
 
-int pc_p2_bulbmin_attach_mother(Creature* mother) {
-    if (!active || !mother || proxyMother) return 0;
-    proxyMother = mother;
+int pc_p2_bulbmin_attach_mother_ex(Creature* mother, const char* model, bool proxy) {
+    if (!active || !mother) return 0;
+    const std::string label = (model && model[0] != '\0') ? model : kKochappyProxyModel;
+    if (!bridge.registerMother(mother, label, proxy)) return 0;
     return pc_p2_bulbmin_drive_birth(mother, mother->getPosition(),
                                      mother->mFaceDirection,
                                      bridge.settings().maxDependents);
+}
+
+int pc_p2_bulbmin_attach_mother(Creature* mother) {
+    return pc_p2_bulbmin_attach_mother_ex(mother, kKochappyProxyModel, true);
+}
+
+int pc_p2_bulbmin_attach_dedicated_mother() {
+    if (!active) return 0;
+    const char* env = std::getenv("PIKMIN_P2_BULBMIN_MOTHER");
+    if (!env || env[0] == '\0') return 0;
+    Creature* host = static_cast<Creature*>(pc_p2_kochappy_first_registered());
+    if (!host) return 0;
+    // Same-host re-registration only refreshes the label; it never re-births.
+    return pc_p2_bulbmin_attach_mother_ex(host, env, true);
+}
+
+const char* pc_p2_bulbmin_mother_model() {
+    if (!active || !bridge.hasMother()) return "none";
+    return bridge.motherActorInfo().model.c_str();
+}
+
+bool pc_p2_bulbmin_has_mother() {
+    return active && bridge.hasMother();
 }
 
 int pc_p2_bulbmin_call_pikis(Navi* navi, float radius) {
@@ -226,6 +252,7 @@ int pc_p2_bulbmin_call_pikis(Navi* navi, float radius) {
 int pc_p2_bulbmin_leader_died() {
     if (!active) return 0;
     const std::vector<std::uint32_t> released = bridge.leaderDied();
+    bridge.clearMother();
     for (const std::uint32_t id : released) {
         auto found = pikiOfId.find(id);
         if (found == pikiOfId.end()) continue;
@@ -237,7 +264,7 @@ int pc_p2_bulbmin_leader_died() {
 }
 
 void pc_p2_bulbmin_proxy_forget(BTeki* mother) {
-    if (!active || !mother || proxyMother != static_cast<void*>(mother)) return;
+    if (!active || !mother) return;
+    if (!bridge.motherIs(static_cast<void*>(mother))) return;
     pc_p2_bulbmin_leader_died();
-    proxyMother = nullptr;
 }

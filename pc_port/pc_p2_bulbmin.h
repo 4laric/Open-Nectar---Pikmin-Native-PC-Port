@@ -32,23 +32,42 @@
 //       changeShape(Bulbmin) + setFPFlag(FPFLAGS_IsWildBulbmin)
 
 // Configuration body:
-//   P2_BULBMIN_1 <mother_epoch> <dependents>
-// `mother_epoch` is a nonzero decimal id identifying the LeafChappy instance;
+//   P2_BULBMIN_1 <mother_epoch> <dependents> [mother_model]
+//   P2_BULBMIN_2 <mother_epoch> <dependents> <mother_model>
+// `mother_epoch` is a nonzero decimal id identifying the mother instance;
 // `dependents` is the source ten-dependent bound (1..P2BULBMIN_MAX_DEPENDENTS).
-// Unknown headers, missing fields, non-numeric tokens, a zero epoch, an
-// out-of-range dependent count or trailing data are all rejected.
+// `mother_model` names the visual proxy standing in for the missing
+// LeafChappy/KumaChappy model. It is metadata for logs and the mother registry;
+// the port never fabricates a rendered LeafChappy. P2_BULBMIN_1 makes the label
+// optional (defaults to "kochappy_proxy"); P2_BULBMIN_2 requires it. Unknown
+// headers, missing fields, non-numeric tokens, a zero epoch, an out-of-range
+// dependent count, a malformed label or trailing data are all rejected.
 struct P2BulbminConfig {
     std::uint64_t motherEpoch = 0;
     int maxDependents = P2BULBMIN_MAX_DEPENDENTS;
+    std::string motherModel = "kochappy_proxy";
 };
 
 bool p2_bulbmin_read(std::istream& in, P2BulbminConfig& out);
+
+// Dedicated Mother Bulbmin registration. There is no LeafChappy/KumaChappy
+// actor or `piki_kochappy` model in the port, so a registered mother is a
+// labeled proxy host: the existing Chappy-family Kochappy visual bank stands in
+// for the missing model. The registry is identity/release bookkeeping only; it
+// never pretends a real LeafChappy was spawned or rendered.
+struct P2BulbminMotherActor {
+    void* host = nullptr;   // engine Creature*/BTeki*; compared, never dereferenced
+    std::string model;      // visual proxy label, e.g. "kochappy_proxy"
+    bool proxy = true;      // true unless a real LeafChappy actor is ever wired
+    bool registered = false;
+};
 
 // Engine-free bridge core. The unit test drives this directly; the engine
 // translation unit owns one instance and maps live Piki pointers onto ids.
 class P2BulbminBridge {
     P2BulbminFlock flock;
     P2BulbminLeader mother;
+    P2BulbminMotherActor motherActor;
     P2CaptainOwnershipTable* captains = nullptr;
     P2BulbminConfig config;
     bool active = false;
@@ -62,6 +81,23 @@ public:
     bool enabled() const { return active; }
     const P2BulbminConfig& settings() const { return config; }
     int dependentCount() const { return dependents; }
+
+    // Dedicated mother registration. One mother per bridge: a second, different
+    // host is refused. Re-registering the same host updates only the label and
+    // returns false so the caller does not re-drive birth. Returns true only
+    // when a new mother identity was accepted.
+    bool registerMother(void* host, const std::string& model = std::string(),
+                        bool proxy = true);
+    bool hasMother() const { return motherActor.registered; }
+    bool motherIs(void* host) const {
+        return motherActor.registered && host && motherActor.host == host;
+    }
+    const P2BulbminMotherActor& motherActorInfo() const { return motherActor; }
+    // Death/removal of the registered mother host: releases only wild
+    // dependents and clears the registration. Returns the released count, or -1
+    // when `host` is not the registered mother (or no mother is registered).
+    int motherDied(void* host);
+    void clearMother() { motherActor = P2BulbminMotherActor{}; }
 
     // Birth entry for the configured mother epoch (source birthChildren one
     // iteration). Refused when inert, already at the configured cap, or the
@@ -142,12 +178,26 @@ public:
     }
 };
 
+inline bool p2_bulbmin_label_valid(const std::string& label) {
+    if (label.empty() || label.size() > 32) return false;
+    return label.find_first_not_of(
+               "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
+           == std::string::npos;
+}
+
 inline bool p2_bulbmin_read(std::istream& in, P2BulbminConfig& out) {
     out = P2BulbminConfig{};
-    std::string header, epoch, dependents, extra;
+    std::string header, epoch, dependents, label, extra;
     if (!(in >> header >> epoch >> dependents)) return false;
-    if (header != "P2_BULBMIN_1") return false;
-    if (in >> extra) return false; // reject trailing data
+    const bool requiresLabel = header == "P2_BULBMIN_2";
+    if (header != "P2_BULBMIN_1" && !requiresLabel) return false;
+    if (in >> label) {
+        if (in >> extra) return false; // reject trailing data
+        if (!p2_bulbmin_label_valid(label)) return false;
+        out.motherModel = label;
+    } else if (requiresLabel) {
+        return false; // P2_BULBMIN_2 requires the proxy model label
+    }
     if (epoch.empty() || epoch.size() > 20
         || epoch.find_first_not_of("0123456789") != std::string::npos)
         return false;
@@ -172,10 +222,37 @@ inline void P2BulbminBridge::reset() {
     if (active) mother.cancel();
     flock = P2BulbminFlock{};
     mother = P2BulbminLeader{};
+    motherActor = P2BulbminMotherActor{};
     captains = nullptr;
     config = P2BulbminConfig{};
     active = false;
     dependents = 0;
+}
+
+inline bool P2BulbminBridge::registerMother(void* host, const std::string& model,
+                                            bool proxy) {
+    if (!active || !host) return false;
+    if (motherActor.registered) {
+        // Same host: refresh the label but report "not newly registered" so the
+        // caller does not run birthChildren a second time. A different host is
+        // refused: this bridge owns exactly one mother.
+        if (motherActor.host == host) {
+            if (!model.empty()) motherActor.model = model;
+            motherActor.proxy = proxy;
+        }
+        return false;
+    }
+    motherActor.host = host;
+    motherActor.model = model.empty() ? config.motherModel : model;
+    motherActor.proxy = proxy;
+    motherActor.registered = true;
+    return true;
+}
+
+inline int P2BulbminBridge::motherDied(void* host) {
+    if (!active || !motherActor.registered || motherActor.host != host) return -1;
+    motherActor = P2BulbminMotherActor{};
+    return static_cast<int>(leaderDied().size());
 }
 
 inline bool P2BulbminBridge::setup(const P2BulbminConfig& cfg,
@@ -265,6 +342,22 @@ int pc_p2_bulbmin_drive_birth(Creature* leader, const struct Vector3f& leaderPos
 // born (0 when inert, already attached, or no actor). This is the engine double
 // for a missing LeafChappy actor; see docs/PIKMIN2_BULBMIN_CONTRACT.md.
 int pc_p2_bulbmin_attach_mother(Creature* mother);
+// Dedicated Mother Bulbmin registration path: register `host` as the labeled
+// mother proxy and, when it is newly registered, drive the source ten-body
+// flock behind it. Separate from the Kochappy auto-attach so a caller can
+// supply its own identity/model label. `proxy` must stay true while the port
+// has no LeafChappy model; a false value only labels a future real actor and
+// never fabricates one. Returns the dependents born (0 when inert, already
+// registered, or no host).
+int pc_p2_bulbmin_attach_mother_ex(Creature* host, const char* model, bool proxy);
+// Opt-in env registration (PIKMIN_P2_BULBMIN_MOTHER). Registers the first
+// Chappy-family actor as the dedicated labeled mother. No-op returning 0 when
+// the env value is unset or the bridge is inert, so default behavior is
+// unchanged.
+int pc_p2_bulbmin_attach_dedicated_mother();
+// Label of the registered mother proxy, or "none" when unregistered.
+const char* pc_p2_bulbmin_mother_model();
+bool pc_p2_bulbmin_has_mother();
 // Real Navi::callPikis whistle hook: recruits every wild dependent of `navi`
 // within `radius`, claiming through the bound captain table when present.
 int pc_p2_bulbmin_call_pikis(Navi* navi, float radius);

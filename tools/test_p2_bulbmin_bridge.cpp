@@ -35,7 +35,11 @@ static void test_parse() {
     assert(!read("P2_BULBMIN_1 abc 10", config));
     assert(!read("P2_BULBMIN_1 -5 10", config));
     assert(!read("P2_BULBMIN_1 100 x", config));
-    assert(!read("P2_BULBMIN_1 100 10 extra", config));
+    // Lane-11 sub-slice 3: the optional fourth token is the proxy label, so
+    // `extra` now parses as a label; only true trailing data is rejected.
+    assert(read("P2_BULBMIN_1 100 10 extra", config));
+    assert(config.motherModel == "extra");
+    assert(!read("P2_BULBMIN_1 100 10 kochappy_proxy trailing", config));
 }
 
 static void test_birth_and_recruitment() {

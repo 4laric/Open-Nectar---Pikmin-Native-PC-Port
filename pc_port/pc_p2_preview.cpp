@@ -247,6 +247,10 @@ void pc_p2_preview_setup() {
     // Mother Bulbmin stand-in (no-op unless PIKMIN_P2_BULBMIN/p2-bulbmin.txt is
     // set and a Kochappy actor is registered).
     pc_p2_bulbmin_attach_mother(static_cast<Creature*>(pc_p2_kochappy_first_registered()));
+    // Lane-11 dedicated mother path: register the same proxy under an explicit
+    // label from PIKMIN_P2_BULBMIN_MOTHER (no-op unless the env value is set).
+    // Still a labeled Chappy-family proxy: no LeafChappy model exists.
+    pc_p2_bulbmin_attach_dedicated_mother();
     pc_p2_cave_setup();
     gsys->setHeap(previousHeap);
     const float points[][2]={{-85,0},{-175,-100},{185,-180},{-220,-180}};
