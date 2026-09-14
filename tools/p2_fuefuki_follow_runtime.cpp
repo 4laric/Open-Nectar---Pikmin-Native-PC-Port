@@ -223,7 +223,10 @@ class FollowApp final : public PlugPikiApp {
     int frames = 0;
     int phase = 0;
     int locoFrames = 0;
+    int moveFrames = 0;
     float locoStart = 0.0f;
+    Vector3f approachEnd;
+    float moveStartDist = 0.0f;
     P2FuefukiBinding binding;
 
     P2FuefukiBindOut drive(const P2FuefukiBindTick& t)
@@ -265,7 +268,8 @@ public:
         case 0: setup(); break;
         case 1: claimPhase(); break;
         case 2: locomotionPhase(); break;
-        case 3: finishPhase(); break;
+        case 3: trailChasePhase(); break;
+        case 4: finishPhase(); break;
         }
         return result;
     }
@@ -349,7 +353,38 @@ private:
             std::printf("P2_FUEFUKI_FOLLOW_RT_MOVE start=%.1f end=%.1f frames=%d moves=%d stops=%d writes=0 real_piki=1\n",
                         locoStart, dist, locoFrames, g.moveCommands, g.stopCommands);
             std::fflush(stdout);
+            approachEnd = g.pikis[0]->mSRT.t;
+            moveStartDist = dist;
+            g.moveCommands = 0;
+            g.stopCommands = 0;
             phase = 3;
+        }
+    }
+
+    // Moving-beetle trail chase: the anchor walks away along -Z and the
+    // follower must keep following the real footmark trail instead of parking
+    // at the static target. The anchor is policy-side here (no native beetle
+    // actor), but the Pikmin motion and the trail it follows are real.
+    void trailChasePhase()
+    {
+        const float step = 2.5f; // units/frame -> ~75 units/s at the 30 Hz tick
+        g.anchor.z -= step;
+        P2FuefukiBindTick t;
+        t.delta = kDt; t.health = 700.0f; t.animPlaying = true;
+        drive(t);
+        ++moveFrames;
+        const Vector3f& fpos = g.pikis[0]->mSRT.t;
+        const float moved = xzDist(fpos, approachEnd);
+        const float toAnchor = xzDist(fpos, g.anchor);
+        if (moved >= 25.0f || moveFrames >= 60) {
+            require(g.moveCommands > 0, "no trail-chase move command issued");
+            require(moved >= 15.0f, "follower did not chase the moving trail");
+            require(toAnchor <= 180.0f, "follower lost the moving beetle");
+            require(g.writes == 0, "ownership write during trail chase");
+            std::printf("P2_FUEFUKI_FOLLOW_RT_TRAIL anchors_moved=%.1f follower_moved=%.1f dist_to_anchor=%.1f frames=%d moves=%d stops=%d writes=0\n",
+                        -(g.anchor.z), moved, toAnchor, moveFrames, g.moveCommands, g.stopCommands);
+            std::fflush(stdout);
+            phase = 4;
         }
     }
 
