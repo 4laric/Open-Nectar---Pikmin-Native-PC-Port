@@ -306,8 +306,13 @@ void pc_p2_hardlanes_setup()
     if (pc_p2_fuefuki_visual_setup("p2-fuefuki-visual.txt")) {
         sFuefukiVisualReady = true;
         pc_p2_fuefuki_visual_clip("wait");
-        const float ground = mapMgr->getMinY(0.0f, 0.0f, false);
-        pc_p2_fuefuki_visual_set_position(0.0f, ground, 0.0f);
+        if (sFuefukiVehicle) {
+            const Vector3f anchor = sFuefukiVehicle->getPosition();
+            pc_p2_fuefuki_visual_set_position(anchor.x, anchor.y, anchor.z);
+        } else {
+            const float ground = mapMgr->getMinY(0.0f, 0.0f, false);
+            pc_p2_fuefuki_visual_set_position(0.0f, ground, 0.0f);
+        }
         std::printf("P2_HARDLANES_READY family=Fuefuki visual=1 clips=%d\n",
                     pc_p2_fuefuki_visual_clip_count());
     }
