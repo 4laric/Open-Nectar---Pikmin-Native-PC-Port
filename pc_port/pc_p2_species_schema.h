@@ -5,17 +5,16 @@
 // storage, lane 11 (#131/#395). Coordinate the exact wire schema with #131 and
 // the seed/manifest bridge (#132) before either endpoint changes.
 //
-// Requirement (docs/PIKMIN2_WHITE_SPEC.md / #395): define a versioned
-// capability schema, retain old schema behavior, and reject unsupported or new
-// species explicitly in old readers. Current campaign code accepts four
-// species and `pc_p2_cave.cpp` accepts colors 0-3 under schema 1 / 0-4 under
-// schema 2; Bulbmin needs schema 3 rather than widening schema 2, so an old
-// reader never silently reinterprets an ID.
+// The numbering matches the existing cave wire format (`pc_p2_cave.cpp`
+// `P2_CAVE_ENTRY_1/2`, `P2_CAVE_TRANSFER_n`); schema 1 already carried Purple.
 //
-// Versions:
-//   v1 (Legacy) : Blue, Red, Yellow
-//   v2 (P2)     : + Purple, White
-//   v3 (Bulbmin): + Bulbmin
+//   v1: Blue, Red, Yellow, Purple
+//   v2: + White
+//   v3: + Bulbmin
+//
+// Requirement (#395): retain old schema behavior and reject unsupported or new
+// species explicitly in old readers, so Bulbmin needs schema 3 rather than
+// widening schema 2 (which would let an old reader silently reinterpret an ID).
 //
 // Invariants enforced by the policy test:
 //   1. An unknown version is rejected, never treated as the latest.
@@ -24,9 +23,9 @@
 //   4. Total population is the exact sum of its compartments.
 
 enum P2SpeciesSchema {
-    P2SpeciesSchemaLegacy = 1,
-    P2SpeciesSchemaP2 = 2,
-    P2SpeciesSchemaBulbmin = 3,
+    P2SpeciesSchemaPurple = 1,   // Blue, Red, Yellow, Purple
+    P2SpeciesSchemaWhite = 2,    // + White
+    P2SpeciesSchemaBulbmin = 3,  // + Bulbmin
     P2SpeciesSchemaLatest = P2SpeciesSchemaBulbmin,
 };
 
@@ -34,9 +33,23 @@ enum P2SpeciesSchema {
 // version itself is unknown.
 inline int p2_schema_max_species(int version) {
     switch (version) {
-    case P2SpeciesSchemaLegacy: return P2SpeciesYellow;
-    case P2SpeciesSchemaP2: return P2SpeciesWhite;
+    case P2SpeciesSchemaPurple: return P2SpeciesPurple;
+    case P2SpeciesSchemaWhite: return P2SpeciesWhite;
     case P2SpeciesSchemaBulbmin: return P2SpeciesBulbmin;
+    default: return -1;
+    }
+}
+
+// Minimum schema version that can carry `species`; -1 if the species is
+// unknown.
+inline int p2_schema_required_for_species(int species) {
+    switch (species) {
+    case P2SpeciesBlue:
+    case P2SpeciesRed:
+    case P2SpeciesYellow:
+    case P2SpeciesPurple: return P2SpeciesSchemaPurple;
+    case P2SpeciesWhite: return P2SpeciesSchemaWhite;
+    case P2SpeciesBulbmin: return P2SpeciesSchemaBulbmin;
     default: return -1;
     }
 }
