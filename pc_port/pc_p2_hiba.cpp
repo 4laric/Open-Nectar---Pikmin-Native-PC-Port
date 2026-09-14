@@ -124,10 +124,11 @@ void setSign(Hazard& hazard) {
 }
 
 void emitScan(Hazard& hazard) {
+    const bool firstEmission = !hazard.emitLogged;
     hazard.emitLogged = true;
     hazard.everEmitted = true;
     const p2dweevil::Stimulus stimulus = p2hiba::hazardStimulus(hazard.hazardId);
-    std::printf("P2_HIBA_EMIT generator=%u hazard=%s stimulus=%s\n",
+    if (firstEmission) std::printf("P2_HIBA_EMIT generator=%u hazard=%s stimulus=%s\n",
                 hazard.generator, hazardName(hazard.hazardId), p2dweevil::stimulusName(stimulus));
     Creature* owner = nullptr;
     if (naviMgr && naviMgr->getNavi()) owner = static_cast<Creature*>(naviMgr->getNavi());
@@ -135,10 +136,10 @@ void emitScan(Hazard& hazard) {
     CI_LOOP(it) {
         Piki* piki = static_cast<Piki*>(*it);
         if (!piki || !piki->isAlive()) continue;
-        if (!hazard.handled.insert(static_cast<const void*>(piki)).second) continue;
         const Vector3f& pos = piki->getPosition();
         const float dx = pos.x - hazard.x, dy = pos.y - hazard.y, dz = pos.z - hazard.z;
         if (dx * dx + dy * dy + dz * dz > kEmitRadius * kEmitRadius) continue;
+        if (!hazard.handled.insert(static_cast<const void*>(piki)).second) continue;
         const p2dweevil::Colour colour = policyColour(piki);
         if (p2dweevil::pikminImmune(stimulus, colour, false)) {
             immuneSeen = true;
@@ -149,7 +150,8 @@ void emitScan(Hazard& hazard) {
         }
         if (stimulus == p2dweevil::StimFire) {
             InteractFire fire(owner, kFireDamage);
-            piki->stimulate(fire);
+            const bool applied = piki->stimulate(fire);
+            if (!applied) { hazard.handled.erase(piki); continue; }
             hitSeen = true;
             std::printf("P2_HIBA_HIT generator=%u hazard=%s stimulus=InteractFire colour=%s immune=0 "
                         "applied=1 damage=%.1f\n",
@@ -189,7 +191,7 @@ void tickHazard(Hazard& hazard) {
         }
         if (step.emits) {
             if (hazard.state != p2hiba::ElecHibaAttack) setAttack(hazard, "sign");
-            if (!hazard.emitLogged) emitScan(hazard);
+            emitScan(hazard);
         } else if (step.next == p2hiba::ElecHibaWait && hazard.state == p2hiba::ElecHibaAttack) {
             setWait(hazard, "attack");
         } else if (step.next == p2hiba::ElecHibaSign && hazard.state == p2hiba::ElecHibaWait) {
@@ -210,7 +212,7 @@ void tickHazard(Hazard& hazard) {
     // Attack.
     if (hazard.hazardId == p2dweevil::HibaId) {
         if (p2hiba::hibaEmit(p2hiba::HibaAttack, hazard.health, hazard.timer, hazard.activeTime)) {
-            if (!hazard.emitLogged) emitScan(hazard);
+            emitScan(hazard);
         } else {
             setWait(hazard, "attack");
         }
@@ -222,7 +224,7 @@ void tickHazard(Hazard& hazard) {
     if (hazard.timer < hazard.attackStart) return;
     if (p2hiba::gashibaEmit(p2hiba::GasHibaAttack, hazard.timer, hazard.timer, hazard.attackStart,
                             hazard.activeTime, hazard.waitTime)) {
-        if (!hazard.emitLogged) emitScan(hazard);
+        emitScan(hazard);
     } else {
         setWait(hazard, "attack");
     }
