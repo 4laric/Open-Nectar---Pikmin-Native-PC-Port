@@ -464,6 +464,7 @@ void BTeki::update()
     pc_p2_snow_update(this,NSystem::getFrameTime());
     pc_p2_long_legs_update(this);
 	pc_p2_shijimi_update(this);
+	pc_p2_qurione_update(this);
 #endif
 	if (mDeadState == 0) {
 		updateTimers();
