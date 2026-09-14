@@ -24,6 +24,7 @@
 #include "pc_p2_projectiles.h"
 #include "pc_p2_queen.h"
 #include "pc_p2_qurione.h"
+#include "pc_p2_shijimi.h"
 #include "pc_p2_sheargrub.h"
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_tank.h"
@@ -49,6 +50,7 @@ void pc_p2_forget_teki(BTeki* actor)
 	pc_p2_mamuta_forget(actor);
 	pc_p2_tank_forget(actor);
 	pc_p2_qurione_forget(actor);
+	pc_p2_shijimi_forget(actor);
 	pc_p2_kurage_teki_forget(actor);
 	pc_p2_onikurage_teki_forget(actor);
 	pc_p2_batch2_forget(actor);
@@ -85,6 +87,7 @@ void pc_p2_reset_all_teki()
 	pc_p2_mamuta_reset();
 	pc_p2_tank_reset();
 	pc_p2_qurione_reset();
+	pc_p2_shijimi_reset();
 	pc_p2_kurage_teki_reset();
 	pc_p2_onikurage_teki_reset();
 	pc_p2_batch2_reset();
