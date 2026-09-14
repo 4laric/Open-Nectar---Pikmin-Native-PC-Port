@@ -257,19 +257,43 @@ void pc_p2_long_legs_setup() {
 
 // Per-frame source-FSM tick. Called from BTeki::update() (tekibteki.cpp) so the
 // schedule runs for every registered actor regardless of camera visibility; the
-// previous draw-tick only advanced on-camera actors. A corpse is not alive, so
-// a dead registration never advances the policy or emits a foot-crush.
+// previous draw-tick only advanced on-camera actors.
 void pc_p2_long_legs_update(BTeki* actor) {
     auto entry = actors.find(actor);
     if (entry == actors.end()) return;
     ActorState& state = entry->second;
-    if (!actor->isAlive()) return;
+    if (state.fsm.state() == P2LongLegsState::Dead) return;
 
     const float dt = gsys ? gsys->getFrameTime() : 0.0f;
     if (!(dt > 0.0f && dt < 0.5f)) return;
 
     const Vector3f pos = actor->getPosition();
     const P2LongLegsSpecies species = speciesEnum(state.species);
+
+    // Engine death of the placement vehicle is the host kill signal. One
+    // terminal tick lets the policy emit its source death output: the held
+    // treasure drop, or the no-treasure child burst. The dropped treasure and
+    // children are lane 06/14/15/20 objects, so the intents are logged, not
+    // spawned here. No further ticks run once the policy is Dead.
+    if (!actor->isAlive()) {
+        P2LongLegsFsmInput kill;
+        kill.health = actor->mHealth;
+        kill.killed = true;
+        P2LongLegsFsmOutput dead;
+        state.fsm.update(kill, dead);
+        if (dead.dropTreasure)
+            std::printf("P2_LONG_LEGS_DROP species=%s generator=%u\n",
+                        state.species.c_str(), state.generator);
+        if (dead.birthChildren > 0)
+            std::printf("P2_LONG_LEGS_BIRTH species=%s generator=%u count=%d\n",
+                        state.species.c_str(), state.generator, dead.birthChildren);
+        std::printf("P2_LONG_LEGS_STATE species=%s generator=%u state=%s\n",
+                    state.species.c_str(), state.generator,
+                    P2LongLegsFsm::stateName(state.fsm.state()));
+        std::fflush(stdout);
+        return;
+    }
+
     const float land = landingSeconds(species);
     const float flick = flickSeconds(species);
     const P2LongLegsState before = state.fsm.state();
