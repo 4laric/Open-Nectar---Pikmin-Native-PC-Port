@@ -866,6 +866,17 @@ add_executable(p2_waterwraith_attack_policy_test
 target_include_directories(p2_waterwraith_attack_policy_test PRIVATE pc_port)
 target_compile_options(p2_waterwraith_attack_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_waterwraith_attack_policy_test COMMAND p2_waterwraith_attack_policy_test)
+add_executable(p2_armor_events_test
+    tools/test_p2_armor_events.cpp)
+target_include_directories(p2_armor_events_test PRIVATE pc_port)
+target_compile_options(p2_armor_events_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_armor_events_test COMMAND p2_armor_events_test)
+
+add_executable(p2_billboard_test
+    tools/test_p2_billboard.cpp)
+target_include_directories(p2_billboard_test PRIVATE pc_port)
+target_compile_options(p2_billboard_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_billboard_test COMMAND p2_billboard_test)
 
 add_executable(pc_render_phase_test
     pc_port/timing/pc_render_phase_test.cpp
