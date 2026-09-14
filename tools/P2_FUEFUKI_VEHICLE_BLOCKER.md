@@ -61,7 +61,8 @@ config. This is still a *placement vehicle* (Napkid 11), not enemy 41.
   machine.
 - Whistle effect ring, audio; the arena does not itself stage the converted pose
   bank (overlay `p2-fuefuki-visual.txt` + mods to see it).
-- **Material fidelity:** the run logs repeated
-  `[PC GX Warning] ... la textura ... nunca se subió; se dibujará transparente`
-  for the Fuefuki maps — the converted mod's textures are not uploaded and draw
-  transparent. Provider 09 work.
+- **Material upload:** fixed. Every sampled pose is its own Shape with its own
+  texture instances; the visual previously attached only pose 0, so later poses
+  drew transparent (`[PC GX Warning] ... nunca se subió`). Attaching all poses
+  dropped the warning count from the 8-report cap to **0**. Retail material
+  *fidelity* (approximate converter materials) is still provider 09 work.

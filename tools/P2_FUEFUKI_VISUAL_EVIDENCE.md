@@ -98,6 +98,11 @@ It cycles `Land -> Jump -> Stay` rather than `Walk/Turn/Whisle` because a nearby
 captain triggers the source jump-away (intruder) behaviour. The source Beetle
 animation bank (#128) is still the eventual feed; this table is the host stand-in.
 
+Material upload is fixed: every sampled pose attaches its own textures, dropping
+the engine `[PC GX Warning] ... nunca se subió` (texture never uploaded) reports
+from the 8-report cap to **0** in this run. Converter materials remain
+approximate (provider 09).
+
 ## Next steps
 
 - Provider 09 material fidelity and the whistle effect ring; audio (#128).
