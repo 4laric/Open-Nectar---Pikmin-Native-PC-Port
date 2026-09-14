@@ -33,7 +33,7 @@
 #include <string>
 
 namespace {
-bool sKillScenario = false, sTransferScenario = false, sStageExitScenario = false, sAdmissionScenario = false, sAutomaticBindingScenario = false, sOniKurageScenario = false, sIngestionScenario = false;
+bool sKillScenario = false, sTransferScenario = false, sStageExitScenario = false, sAdmissionScenario = false, sAutomaticBindingScenario = false, sOniKurageScenario = false, sIngestionScenario = false, sFlightFsmScenario = false, sFlightFsmDeathScenario = false;
 void require(bool value, const char* message)
 {
     if (!value) { std::printf("FAIL KURAGE_RUNTIME %s\n", message); std::fflush(stdout); std::_Exit(1); }
@@ -70,6 +70,8 @@ class KurageApp final : public PlugPikiApp {
     Piki* admissionPiki = nullptr;
     int ingestionTicks = 0, ingestionStage = 0;
     Piki* ingestionPiki = nullptr;
+    int fsmTicks = 0, fsmStage = 0;
+    Piki* fsmPiki = nullptr;
     class FixtureOwner final : public Creature {
     public:
         FixtureOwner() : Creature(nullptr) { }
@@ -150,6 +152,19 @@ public:
                 require(pc_p2_kurage_receiver_admit(piki), "ingestion mouth admission");
                 require(pc_p2_kurage_receiver_count() == 1 && pc_p2_kurage_receiver_stomach_count() == 0
                     && pc_p2_kurage_receiver_controls(piki), "ingestion mouth travel reserved");
+                return result;
+            }
+            if (sFlightFsmScenario || sFlightFsmDeathScenario) {
+                // Source flight lifecycle drives the host; the candidate sits
+                // inside the source suction window until the Attack state's
+                // autonomous admission scan claims it.
+                piki->resetPosition(Vector3f(owner->mSRT.t.x, owner->mSRT.t.y - 30.0f, owner->mSRT.t.z));
+                piki->mMode = PikiMode::AttackMode;
+                fsmPiki = piki;
+                pc_p2_kurage_arena_set_owner_facts(true, false);
+                pc_p2_kurage_arena_fsm_enable(true);
+                std::puts("P2_KURAGE_FSM_ADMISSION_ARMED state_source=pc_p2_kurage_fsm.h scan=source_attack_window");
+                std::fflush(stdout);
                 return result;
             }
             require(pc_p2_kurage_receiver_capture(piki) && pc_p2_kurage_receiver_count() == 1, "receiver capture");
@@ -234,6 +249,45 @@ public:
             require(!piki->isAlive() && !piki->isStickTo() && piki->getStickObject() == nullptr, "receiver digest state");
             std::puts("P2_KURAGE_DIGEST_PASS alive16=1 half16_25=0.5 external_detach_scale=1 bitter_pause=1 health_pause=1 dead16_5=1 release_scale=1");
             receiverTested = true;
+        }
+        if (sFlightFsmScenario || sFlightFsmDeathScenario) {
+            ++fsmTicks;
+            if (fsmStage == 0) {
+                // Keep the candidate inside the source suction window until the
+                // receiver owns it, mirroring a Pikmin walking under the body.
+                if (fsmPiki && fsmPiki->isAlive() && !pc_p2_kurage_receiver_controls(fsmPiki)) {
+                    Creature* host = pc_p2_kurage_arena_owner();
+                    if (host) fsmPiki->resetPosition(Vector3f(host->mSRT.t.x, host->mSRT.t.y - 30.0f, host->mSRT.t.z));
+                }
+                require(pc_p2_kurage_arena_update(1.0f / 60.0f, true), "fsm host update");
+                if (pc_p2_kurage_receiver_stomach_count() == 1) {
+                    require(pc_p2_kurage_arena_auto_admissions() >= 1, "fsm autonomous admission counted");
+                    require(fsmPiki->isAlive() && fsmPiki->isStickTo()
+                        && fsmPiki->getStickObject() == pc_p2_kurage_arena_owner(),
+                        "fsm attack suction attached");
+                    if (!sFlightFsmDeathScenario) {
+                        std::printf("P2_KURAGE_FSM_ADMISSION_PASS state=%d auto=%d attach=1 stomach=1 altitude=%.1f\n",
+                            pc_p2_kurage_arena_fsm_state(), pc_p2_kurage_arena_auto_admissions(), pc_p2_kurage_arena_fsm_altitude());
+                        std::puts("PASS KURAGE_RUNTIME flight_fsm_admission");
+                        std::fflush(stdout); std::_Exit(0);
+                    }
+                    fsmStage = 1;
+                } else {
+                    require(fsmTicks < 900, "fsm attack admission timeout");
+                }
+                return result;
+            }
+            // Interrupted release through owner death: the live stuck Pikmin
+            // must be ejected with its captured scale restored.
+            pc_p2_kurage_arena_update(1.0f / 60.0f, false);
+            require(pc_p2_kurage_receiver_count() == 0, "fsm owner-death receiver release");
+            require(fsmPiki->isAlive() && !fsmPiki->isStickTo() && fsmPiki->getStickObject() == nullptr,
+                "fsm owner-death piki detach");
+            require(fsmPiki->mSRT.s.x == 1.0f, "fsm owner-death scale restored");
+            std::printf("P2_KURAGE_FSM_DEATH_PASS released=1 alive=1 scale_restored=1 state=%d\n",
+                pc_p2_kurage_arena_fsm_state());
+            std::puts("PASS KURAGE_RUNTIME flight_fsm_interrupt");
+            std::fflush(stdout); std::_Exit(0);
         }
         if (sAdmissionScenario) {
             ++admissionTicks;
@@ -337,6 +391,8 @@ int main(int argc, char** argv)
         if (std::string(argv[i]) == "--receiver-ingestion") sIngestionScenario = true;
         if (std::string(argv[i]) == "--receiver-automatic-binding") sAutomaticBindingScenario = true;
         if (std::string(argv[i]) == "--receiver-onikurage-binding") { sAutomaticBindingScenario = true; sOniKurageScenario = true; }
+        if (std::string(argv[i]) == "--flight-fsm-admission") sFlightFsmScenario = true;
+        if (std::string(argv[i]) == "--flight-fsm-death") { sFlightFsmScenario = true; sFlightFsmDeathScenario = true; }
     }
     SDL_setenv("SDL_AUDIODRIVER", "dummy", 1); SDL_SetMainReady();
     pc_gpu_preference_apply(); _putenv_s("PIKMIN_RANDOMIZER_TEST_BACKGROUND", "1"); pc_bbft_init(argc, argv);

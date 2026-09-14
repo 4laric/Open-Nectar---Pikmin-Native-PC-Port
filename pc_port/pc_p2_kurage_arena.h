@@ -17,3 +17,15 @@ int pc_p2_kurage_arena_scan_admit(float verticalOffset, float attackRadius, int 
 // Explicit test seam only; live hosts use begin_attack/tick_attack.
 void pc_p2_kurage_arena_set_attack_frame(float frame);
 bool pc_p2_kurage_arena_attack_pose_active();
+// Opt-in source flight-lifecycle authority (pc_p2_kurage_fsm.h). When enabled
+// the host's vertical motion and state come from the FSM instead of the sine
+// preview path, and the source Attack state autonomously drives the suction
+// admission scan.
+void pc_p2_kurage_arena_fsm_enable(bool enable);
+bool pc_p2_kurage_arena_fsm_enabled();
+int pc_p2_kurage_arena_fsm_state();
+float pc_p2_kurage_arena_fsm_altitude();
+// Host-side owner facts for the source bitter/zero-health pause gates.  The
+// fixture owns the health model until a full Kurage health/bitter host lands.
+void pc_p2_kurage_arena_set_owner_facts(bool hasHealth, bool bittered);
+int pc_p2_kurage_arena_auto_admissions();

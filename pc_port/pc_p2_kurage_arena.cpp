@@ -4,9 +4,13 @@
 #include "Collision.h"
 #include "Creature.h"
 #include "Graphics.h"
+#include "MapMgr.h"
+#include "Piki.h"
+#include "PikiMgr.h"
 #include "Shape.h"
 #include "gameflow.h"
 #include "system.h"
+#include "pc_p2_kurage_fsm.h"
 #include "pc_p2_kurage_receiver.h"
 #include "pc_p2_retail_player.h"
 #include "pc_p2_kurage_visual.h"
@@ -47,6 +51,21 @@ struct Host {
     // never drives the live host update path.
     bool attackFrameSeam = false;
     float attackFrame = 0.0f;
+    // Opt-in source flight-lifecycle authority (pc_p2_kurage_fsm.h).
+    p2kurage::Fsm fsm;
+    bool fsmEnabled = false;
+    int fsmTicks = 0;
+    int lastFsmState = -1;
+    float fsmAltitude = 0.0f;
+    float fsmHealth = 100.0f;
+    bool ownerHasHealth = true;
+    bool ownerBittered = false;
+    int autoAdmissions = 0;
+    p2kurage::KeyEvent pendingKey = p2kurage::KeyEvent::None;
+    bool fsmMotionFinished = false;
+    // Bounded animation-END stand-in while the converted MOD is a static pose.
+    // The real source motion-end event belongs to the #431 animation clock.
+    int fsmMotionTimer = 0;
 };
 Host sHost;
 // Retail Lesser Kurage suckPikmin() queries collision part ID 'suck'; hire1 is
@@ -55,6 +74,17 @@ constexpr char kSourceSuctionPart[] = "suck";
 constexpr char kVisualHireJoint[] = "hire1";
 constexpr int kSourceSuctionJoint = 4;
 constexpr float kSourceSuctionRadius = 15.0f;
+// Bounded host approximation of Kurage::mAttackRadius for getSearchedTarget/
+// isSuck; the source ProperParms value is asset-supplied and not yet imported.
+constexpr float kSourceAttackRadius = 35.0f;
+constexpr int kMaxAutoAdmissions = 10; // Kurage.h ip11 maxSuckPiki
+constexpr float kFsmLiveHealth = 100.0f;
+// Bounded host animation-END period (0.5 s at 60 Hz) used only while the
+// converted MOD cannot supply a real motion-end event (#431 owns that bridge).
+constexpr int kFsmMotionFrames = 30;
+// p2retail::Player timers are animation frames. Kurage attack.bca is a 30 fps
+// clip, so a real-time host advances the clock by delta * 30.
+constexpr float kAttackFramesPerSecond = 30.0f;
 // Retail Kurage/attack.bca SHA-256 302660c6ba9c86fee11cc6aca98bd514e201a80d8530be3a5cce867a9dc74a4e.
 // ANF1 is big-endian: loop attribute 2, duration 0x0078 (120), 12 joints.
 // enemyanimmgr.txt supplies the source event table below.
@@ -100,6 +130,27 @@ void updateHostCollision()
         sHost.position.z + sHost.mouthJointTranslation.z);
     sHost.mouth.mJointMatrix.makeIdentity();
 }
+
+// Bounded host approximation of Kurage::getSearchedTarget(altitude): return the
+// first live Pikmin inside the source vertical suction window and attack
+// radius whose sticker is not this owner.  View-angle rejection and per-family
+// sight radius belong to the one-consumer receiver, not this scan.
+Piki* findSuctionTarget()
+{
+    if (!pikiMgr || !sHost.ready) return nullptr;
+    ObjectMgr* manager = static_cast<ObjectMgr*>(pikiMgr);
+    const float radiusSqr = kSourceAttackRadius * kSourceAttackRadius;
+    for (int it = manager->getFirst(); !manager->isDone(it); it = manager->getNext(it)) {
+        Piki* piki = static_cast<Piki*>(manager->getCreature(it));
+        if (!piki || !piki->isAlive() || piki->getStickObject() == &sHost.owner || !piki->mayIstick()) continue;
+        if (!p2kurage::inSuctionWindow(sHost.position.y, 0.0f, piki->mSRT.t.y)) continue;
+        const float dx = piki->mSRT.t.x - sHost.position.x;
+        const float dz = piki->mSRT.t.z - sHost.position.z;
+        if (dx * dx + dz * dz >= radiusSqr) continue;
+        return piki;
+    }
+    return nullptr;
+}
 }
 
 void pc_p2_kurage_arena_reset()
@@ -109,6 +160,9 @@ void pc_p2_kurage_arena_reset()
     sHost.shape = nullptr; sHost.ready = sHost.alive = false; sHost.phase = 0.0f;
     sHost.attackPlayer.cancel(); sHost.attackPlaying = sHost.sucking = false;
     sHost.attackFrameSeam = false; sHost.attackFrame = 0.0f;
+    sHost.fsmEnabled = false; sHost.fsmTicks = 0; sHost.lastFsmState = -1; sHost.fsmAltitude = 0.0f;
+    sHost.fsmHealth = kFsmLiveHealth; sHost.ownerHasHealth = true; sHost.ownerBittered = false;
+    sHost.autoAdmissions = 0; sHost.pendingKey = p2kurage::KeyEvent::None; sHost.fsmMotionFinished = false; sHost.fsmMotionTimer = 0;
 }
 
 bool pc_p2_kurage_arena_setup(const char* profilePath)
@@ -141,6 +195,10 @@ bool pc_p2_kurage_arena_setup(const char* profilePath)
     sHost.radius = parsed.radius; sHost.mouthJointTranslation = parsed.mouthJointTranslation;
     sHost.sourceJointAvailable = parsed.sourceJointAvailable;
     sHost.phase = 0.0f; sHost.ready = sHost.alive = true;
+    sHost.fsmEnabled = false; sHost.fsmTicks = 0; sHost.lastFsmState = -1; sHost.fsmAltitude = 0.0f;
+    sHost.fsmHealth = kFsmLiveHealth; sHost.ownerHasHealth = true; sHost.ownerBittered = false;
+    sHost.autoAdmissions = 0; sHost.pendingKey = p2kurage::KeyEvent::None; sHost.fsmMotionFinished = false; sHost.fsmMotionTimer = 0;
+    sHost.fsm = p2kurage::Fsm(); sHost.fsm.spawn();
     sHost.owner.mStickListHead = nullptr;
     updateHostCollision();
     std::printf("P2_KURAGE_ARENA_READY species=Kurage id=57 visual=converted_wait source_part=%s joint=%d radius=%.1f offset=0,0,0 joint_translation=%s visual_joint=%s host_receiver=bounded\n", kSourceSuctionPart, kSourceSuctionJoint, kSourceSuctionRadius, sHost.sourceJointAvailable ? "wait_pose" : "unavailable_origin", kVisualHireJoint);
@@ -156,6 +214,62 @@ bool pc_p2_kurage_arena_update(float delta, bool ownerAlive)
         // not substitute this for P2's full Kurage health/bitter/FSM path.
         pc_p2_kurage_receiver_update(0.0f, false, true, false);
         return false;
+    }
+    if (sHost.fsmEnabled) {
+        // Source Kurage StateWait/Move/Chase/Attack vertical authority.  The
+        // bounded host supplies real map height/position and the real attack.bca
+        // event clock; target facts come from a live Pikmin scan, not a
+        // fabricated target.
+        const float mapY = mapMgr ? mapMgr->getMinY(sHost.position.x, sHost.position.z, false) : 0.0f;
+        p2kurage::In in;
+        in.deltaTime = delta;
+        in.health = sHost.fsmHealth;
+        in.stuckPikminCount = pc_p2_kurage_receiver_count();
+        in.isFlying = true;
+        in.mapY = mapY;
+        in.positionY = sHost.position.y;
+        in.targetFound = findSuctionTarget() != nullptr || pc_p2_kurage_receiver_count() > 0;
+        in.suckTarget = in.targetFound;
+        in.suckAny = in.targetFound;
+        in.motionFrame = sHost.attackPlaying ? sHost.attackPlayer.frame() : 0.0f;
+        // Bounded animation-END: the attack clock owns the Attack interval; the
+        // other states use a fixed period until the #431 motion-event bridge
+        // supplies real clip completion.
+        bool motionEnd = false;
+        if (!sHost.attackPlaying && ++sHost.fsmMotionTimer >= kFsmMotionFrames) {
+            sHost.fsmMotionTimer = 0;
+            motionEnd = true;
+        }
+        in.motionFinished = sHost.fsmMotionFinished || motionEnd;
+        in.keyEvent = sHost.pendingKey;
+        sHost.pendingKey = p2kurage::KeyEvent::None;
+        sHost.fsmMotionFinished = false;
+
+        const p2kurage::Out out = sHost.fsm.tick(in);
+        sHost.position.y += out.heightVelocity * delta;
+        sHost.fsmAltitude = out.altitude;
+        if ((int)out.state != sHost.lastFsmState) {
+            sHost.lastFsmState = (int)out.state;
+            std::printf("P2_KURAGE_FSM state=%d motion=%d altitude=%.3f vy=%.3f ticks=%d\n",
+                (int)out.state, (int)out.motion, out.altitude, out.heightVelocity, sHost.fsmTicks);
+        }
+        // Entering the source Attack state starts the retail attack.bca clock.
+        if (out.state == p2kurage::State::Attack && out.motionChanged && !sHost.attackPlaying) {
+            if (pc_p2_kurage_arena_begin_attack()) { sHost.autoAdmissions = 0; sHost.fsmMotionTimer = 0; }
+        }
+        // The clock supplies KeyEvent 2/1 and the open suction interval.  The
+        // retail Player advances in animation frames, not seconds.
+        if (sHost.attackPlaying) pc_p2_kurage_arena_tick_attack(delta * kAttackFramesPerSecond);
+        if (!valid(sHost.position)) { sHost.alive = false; return false; }
+        updateHostCollision();
+        // Source Attack suction: the ordinary Attack state autonomously admits
+        // eligible Pikmin while its window is open.
+        if ((out.isSucking || sHost.sucking)
+            && pc_p2_kurage_receiver_scan_admit(0.0f, kSourceAttackRadius, kMaxAutoAdmissions, true) > 0)
+            ++sHost.autoAdmissions;
+        sHost.fsmTicks++;
+        pc_p2_kurage_receiver_update(delta, true, sHost.ownerHasHealth, sHost.ownerBittered);
+        return true;
     }
     sHost.phase += delta * 0.8f;
     if (!finite(sHost.phase)) { sHost.alive = false; return false; }
@@ -187,14 +301,18 @@ bool pc_p2_kurage_arena_tick_attack(float delta)
     const auto result = sHost.attackPlayer.advance(delta, [](const p2retail::Event& event) {
         if (event.type == 2) {
             sHost.sucking = true;
+            sHost.pendingKey = p2kurage::KeyEvent::Key2; // Kurage KEYEVENT_2 suck start
         } else if (event.type == 1 || event.type == 1000) {
             // Kurage StateAttack leaves its sucking interval on type 1.  This
             // bounded static-pose host closes there instead of re-looping 60..67.
             sHost.sucking = false;
             sHost.attackPlaying = false;
             sHost.attackPlayer.cancel();
+            sHost.pendingKey = p2kurage::KeyEvent::Key1; // Kurage KEYEVENT_1 suck end
+            sHost.fsmMotionFinished = true;
         }
     });
+    if (result == p2retail::Update::Ok && sHost.attackPlayer.completed()) sHost.fsmMotionFinished = true;
     return result == p2retail::Update::Ok || result == p2retail::Update::Replaced;
 }
 
@@ -222,6 +340,33 @@ void pc_p2_kurage_arena_set_attack_frame(float frame)
 bool pc_p2_kurage_arena_attack_pose_active()
 {
     return sHost.ready && attackPoseActive();
+}
+
+void pc_p2_kurage_arena_fsm_enable(bool enable)
+{
+    if (sHost.ready && sHost.alive) sHost.fsmEnabled = enable;
+}
+bool pc_p2_kurage_arena_fsm_enabled()
+{
+    return sHost.ready && sHost.alive && sHost.fsmEnabled;
+}
+int pc_p2_kurage_arena_fsm_state()
+{
+    return sHost.ready ? (int)sHost.fsm.state() : -1;
+}
+float pc_p2_kurage_arena_fsm_altitude()
+{
+    return sHost.fsmAltitude;
+}
+void pc_p2_kurage_arena_set_owner_facts(bool hasHealth, bool bittered)
+{
+    sHost.ownerHasHealth = hasHealth;
+    sHost.ownerBittered = bittered;
+    sHost.fsmHealth = hasHealth ? kFsmLiveHealth : 0.0f;
+}
+int pc_p2_kurage_arena_auto_admissions()
+{
+    return sHost.autoAdmissions;
 }
 
 void pc_p2_kurage_arena_draw(Graphics& gfx)
