@@ -228,9 +228,9 @@ struct InteractChangeHappa : public Interaction {
  * Source: `InteractDenki : public InteractWind` (`include/Game/Interaction.h`),
  * `actPiki` rejects Yellow/Bulbmin and requests `PIKISTATE_DenkiDying`
  * (`native/pikmin2-research/src/plugProjectKandoU/interactPiki.cpp:334,347`).
- * This P1-derived port has no `PIKISTATE_Denki*` state, so the receiver routes
- * non-immune Piki to the closest existing death path and records the missing
- * P2 state (#170/#408, see docs/PIKMIN2_RECEIVER_PATHS.md).
+ * The port now carries `PIKISTATE_DenkiDying` (`PikiState.h`) and routes
+ * non-immune Piki through `p2_hazard_reaction` (#170/#408, see
+ * docs/PIKMIN2_RECEIVER_PATHS.md).
  */
 struct InteractDenki : public Interaction {
 	InteractDenki(Creature* owner, f32 force, Vector3f* direction)
@@ -317,9 +317,9 @@ struct InteractFlute : public Interaction {
  * `Piki::gasInvicible()` and rejects White/Bulbmin, otherwise requesting
  * `PIKISTATE_Panic` with `PIKIPANIC_Gas`
  * (`native/pikmin2-research/src/plugProjectKandoU/interactPiki.cpp:531,543`).
- * This P1-derived port has no panic/gas state or `gasInvicible` timer, so the
- * receiver routes non-immune Piki to the closest existing panic-style path and
- * records the missing inputs (#170/#408, see docs/PIKMIN2_RECEIVER_PATHS.md).
+ * The port now carries `PIKISTATE_Panic` and the narrow gas gate, routing
+ * non-immune Piki through `p2_hazard_reaction` (#170/#408, see
+ * docs/PIKMIN2_RECEIVER_PATHS.md).
  */
 struct InteractGas : public Interaction {
 	inline InteractGas(Creature* owner, f32 damage)

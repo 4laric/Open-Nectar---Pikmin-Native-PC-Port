@@ -227,6 +227,12 @@ public:
 
 	bool isFired() { return mFiredState == 1; }
 
+	// Narrow P2 gas-reaction gate (#170/#408). Source `Piki::gasInvicible`
+	// (`native/pikmin2-research/src/plugProjectKandoU/piki.cpp:832`). The gas
+	// panic state raises it so `InteractGas::actPiki` cannot restart the panic.
+	bool gasInvicible() { return mGasInvincible != 0; }
+	void setGasInvincible(u8 frames) { mGasInvincible = frames; }
+
 protected:
 	virtual void doKill(); // _10C
 
@@ -337,6 +343,7 @@ public:
     bool mP2White = false;
     bool mP2Bulbmin = false; // source Piki.h Bulbmin = 5; cave-only, wild by default
     float mP2AnimationTime = 0;
+    u8 mGasInvincible = 0; // P2 gas-reaction gate (#170/#408); see gasInvicible()
 };
 
 /**
