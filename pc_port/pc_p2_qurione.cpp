@@ -376,6 +376,7 @@ void pc_p2_qurione_update(BTeki* actor) {
         w.logTimer = 0.0f;
         std::printf("P2_QURIONE_POS generator=%u state=%s clip=%s phase=%.2f x=%.2f z=%.2f\n",
                     gen, qStateName(w.state), w.clip.c_str(), w.phase, pos.x, pos.z);
+        std::fflush(stdout);
     }
 }
 
@@ -396,3 +397,4 @@ bool pc_p2_qurione_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, boo
     shape->drawshape(gfx, *gfx.mCamera, nullptr);
     return true;
 }
+
