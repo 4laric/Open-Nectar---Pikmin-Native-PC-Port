@@ -28,15 +28,16 @@ bool pc_p2_receipt_host_valid(const char* value)
 	return value && P2Receipt::validToken(value, 128);
 }
 
-bool pc_p2_receipt_host_grant(const char* seed, const char* reward, const char* slotOrActor, const char* encounter)
+P2ReceiptHostResult pc_p2_receipt_host_grant(const char* seed, const char* reward, const char* slotOrActor, const char* encounter)
 {
-	if (!ledger) {
-		return false;
+	if (!ledger || !seed || !reward || !slotOrActor || !encounter) {
+		return P2ReceiptHostResult::Error;
 	}
 	try {
-		return ledger->grant(seed, reward, slotOrActor, encounter);
+		return ledger->grant(seed, reward, slotOrActor, encounter)
+		    ? P2ReceiptHostResult::Granted : P2ReceiptHostResult::Duplicate;
 	} catch (...) {
-		return false;
+		return P2ReceiptHostResult::Error;
 	}
 }
 

@@ -343,12 +343,17 @@ bool pc_p2_flora_receipt(Pellet* pellet)
 			continue;
 		}
 		if (!bound.receiptLogged) {
-			bound.receiptLogged = true;
 			const int seeds = pellet->mConfig ? int(pellet->mConfig->mPelletType()) : int(bound.spec.pellet);
 			const std::string identity = "flora-pelplant:" + std::to_string(bound.generator());
-			const bool granted
+			const auto result
 			    = pc_p2_receipt_host_grant(receiptSeed.c_str(), identity.c_str(), std::to_string(bound.generator()).c_str(),
 			                               "onion");
+			if (result == P2ReceiptHostResult::Error) {
+				std::fputs("P2_FLORA_PELPLANT receipt persistence failed\n", stderr);
+				std::abort();
+			}
+			bound.receiptLogged = true;
+			const bool granted = result == P2ReceiptHostResult::Granted;
 			if (granted) {
 				++onionReceipts;
 			} else {

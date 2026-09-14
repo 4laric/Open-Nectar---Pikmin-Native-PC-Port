@@ -8,6 +8,8 @@
 bool pc_p2_receipt_host_open(const char* path);
 bool pc_p2_receipt_host_ready();
 bool pc_p2_receipt_host_valid(const char* value);
-bool pc_p2_receipt_host_grant(const char* seed, const char* reward, const char* slotOrActor,
+// Error is distinct from a durable duplicate; callers must not consume rewards on Error.
+enum class P2ReceiptHostResult { Error = -1, Duplicate = 0, Granted = 1 };
+P2ReceiptHostResult pc_p2_receipt_host_grant(const char* seed, const char* reward, const char* slotOrActor,
                               const char* encounter);
 void pc_p2_receipt_host_close();
