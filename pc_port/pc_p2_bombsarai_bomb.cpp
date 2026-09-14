@@ -72,6 +72,15 @@ bool P2BombSaraiBomb::capture(std::uint64_t carrierToken, const P2BombSaraiVec3&
     return true;
 }
 
+bool P2BombSaraiBomb::followJoint(const P2BombSaraiVec3& jointPosition)
+{
+    if (mPhase != P2BombSaraiBombPhase::Captured || !finite(jointPosition)) {
+        return false;
+    }
+    mPosition = jointPosition;
+    return true;
+}
+
 bool P2BombSaraiBomb::throwBomb(P2BombSaraiThrowKind kind, float faceDir)
 {
     // Source: throwBomb clears mHeldBomb unconditionally and is a no-op on

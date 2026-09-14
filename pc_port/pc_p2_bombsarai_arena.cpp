@@ -1,5 +1,7 @@
 #include "pc_p2_bombsarai_arena.h"
 
+#include "pc_p2_bombsarai_joint.h"
+
 #include "Camera.h"
 #include "Graphics.h"
 
@@ -44,7 +46,13 @@ struct ArenaState {
     P2BombSaraiBombPool pool{ 2 }; // mChildNum preallocation (enemyInfo.cpp:46)
     P2BombSaraiBomb* held = nullptr;
     P2BombSaraiVec3 carrier;
-    P2BombSaraiVec3 joint; // pinned capture joint (kamu_jnt1 stand-in, #128 pending)
+    // Body-local capture-joint offset (kamu_jnt1 stand-in, #128 pending). The
+    // seam rotates it by the carrier yaw and adds it to the hover-integrated
+    // body origin each tick, so the payload rides the moving carrier instead of
+    // a static world point.
+    P2BombSaraiVec3 joint;
+    P2BombSaraiVec3 capturedJoint; // last resolved joint world position
+    bool haveCapturedJoint = false;
     float carrierYaw = 0.0f;
     float carrierY = 0.0f;   // current hover height, integrated by the seam
     float carrierVy = 0.0f;  // Fall crash velocity
@@ -144,6 +152,9 @@ bool parseProfileFull(const char* profilePath, ArenaState& parsed)
               >> parsed.carrierYaw >> parsed.carrierToken) || !exhausted(values)) return false;
     }
     {
+        // joint <body-local offset x y z> relative to the carrier body center
+        // (kamu_jnt1 stand-in). The seam rotates it by the carrier yaw and adds
+        // it to the hover-integrated body position each tick.
         if (!nextLine(input, line)) return false;
         std::istringstream values(line);
         std::string key;
@@ -336,7 +347,7 @@ bool pc_p2_bombsarai_arena_setup(const char* profilePath)
     parsed.ready = true;
     sArena = parsed;
     std::printf("P2_BOMBSARAI_ARENA_READY pinned=1 fsm=1 no_ai=1 no_visual_assets=1 "
-                "receivers=%d pool=%d events=%d\n", sArena.receiverCount,
+                "joint_follow=1 receivers=%d pool=%d events=%d\n", sArena.receiverCount,
                 sArena.pool.capacity(), sArena.eventCount);
     return true;
 }
@@ -402,6 +413,15 @@ bool pc_p2_bombsarai_arena_update(float sourceDelta,
     }
     if (!finite(sArena.carrierY)) return false;
     sArena.heightAboveGround = sArena.carrierY - groundY;
+
+    // 2b. Animated capture joint (bomb.cpp:23-44): resolve the body-local joint
+    // offset into world space from the hover-integrated body origin and the
+    // carrier yaw. This is what lets the captured payload ride the moving
+    // carrier (hover bob + facing) instead of a static point.
+    const P2BombSaraiVec3 jointWorld = P2BombSaraiJoint::compute(
+        { sArena.carrier.x, sArena.carrierY, sArena.carrier.z },
+        sArena.carrierYaw, sArena.joint);
+    if (!finite(jointWorld)) return false;
 
     // 3. Target sensing from the pinned receiver list (nearest alive
     // Navi/Pikmin). Retail radii: territory 200 (fp09), attackable 100/45deg
@@ -475,7 +495,7 @@ bool pc_p2_bombsarai_arena_update(float sourceDelta,
 
     // 6. Requested effects.
     if (out.supplyRequested && !sArena.held) {
-        sArena.held = sArena.pool.supply(sArena.carrierToken, sArena.joint, sArena.bombConfig);
+        sArena.held = sArena.pool.supply(sArena.carrierToken, jointWorld, sArena.bombConfig);
         // Exhaustion is tolerated silently (source behavior); the FSM
         // proceeds through the Bomb* states with no payload.
     }
@@ -491,6 +511,11 @@ bool pc_p2_bombsarai_arena_update(float sourceDelta,
     // 7. Bomb update + blast routing.
     TraceBridge bridge{ trace, traceContext };
     if (sArena.held) {
+        // Keep a captured payload glued to the carrier's joint each tick; a
+        // thrown (InFlight or later) bomb ignores this and flies ballistically.
+        sArena.held->followJoint(jointWorld);
+        sArena.capturedJoint = jointWorld;
+        sArena.haveCapturedJoint = true;
         CarrierBridge carrierBridge{ carrier, carrierContext };
         P2BombSaraiBomb* held = sArena.held;
         held->update(sourceDelta, requiredTrace, &bridge, carrierGate, &carrierBridge);
@@ -534,6 +559,15 @@ bool pc_p2_bombsarai_arena_carrying()
 {
     return sArena.held != nullptr
         && sArena.held->phase() == P2BombSaraiBombPhase::Captured;
+}
+
+bool pc_p2_bombsarai_arena_captured_position(P2BombSaraiVec3& out)
+{
+    if (!sArena.held || sArena.held->phase() != P2BombSaraiBombPhase::Captured) {
+        return false;
+    }
+    out = sArena.held->position();
+    return true;
 }
 
 int pc_p2_bombsarai_arena_last_throw_kind()

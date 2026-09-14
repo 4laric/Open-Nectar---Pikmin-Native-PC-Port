@@ -117,6 +117,13 @@ public:
     // Captures a fresh bomb for a carrier (supplyBomb, BombSarai.cpp:263-279).
     bool capture(std::uint64_t carrierToken, const P2BombSaraiVec3& jointPosition);
 
+    // Moves a captured bomb to the carrier's current capture-joint world
+    // position (bomb.cpp:23-44: the host moves the constrained bomb with the
+    // joint). Only valid while Captured; any other phase is a no-op, and a
+    // non-finite position is rejected with no state change. This is what makes
+    // the payload ride the carrier's animated joint instead of a static point.
+    bool followJoint(const P2BombSaraiVec3& jointPosition);
+
     // Ends capture and applies the source throw velocity for the kind
     // (throwBomb, BombSarai.cpp:285-294). No-op unless Captured, matching the
     // source null-mHeldBomb no-op. faceDir is the carrier facing in radians.

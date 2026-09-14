@@ -66,6 +66,8 @@ class BombSaraiApp final : public PlugPikiApp {
     int scenarioTicks = 0;
     int lastState = -1;
     bool wasCarrying = false;
+    bool jointTracked = false;
+    float jointMinY = 0.0f, jointMaxY = 0.0f;
     P2BombSaraiMapBinding binding;
     P2BombSaraiTerrainAdapter adapter;
     P2BombSaraiSourceClock clock;
@@ -127,8 +129,28 @@ private:
         const bool carrying = pc_p2_bombsarai_arena_carrying();
         if (carrying && !wasCarrying) {
             std::printf("P2_BOMBSARAI_FSM_SUPPLY scenario=%s tick=%d\n", s.name, scenarioTicks);
+            jointTracked = false;
+        }
+        // Animated capture joint: the captured payload must ride the moving
+        // carrier (hover bob), not sit at the static profile joint point.
+        if (carrying) {
+            P2BombSaraiVec3 joint;
+            if (pc_p2_bombsarai_arena_captured_position(joint)) {
+                if (!jointTracked) {
+                    jointTracked = true;
+                    jointMinY = jointMaxY = joint.y;
+                } else {
+                    if (joint.y < jointMinY) jointMinY = joint.y;
+                    if (joint.y > jointMaxY) jointMaxY = joint.y;
+                }
+            }
         }
         if (!carrying && wasCarrying && !pc_p2_bombsarai_arena_blast_fired()) {
+            if (jointTracked) {
+                std::printf("P2_BOMBSARAI_JOINT_FOLLOW scenario=%s travel_y=%.3f min=%.3f max=%.3f\n",
+                            s.name, jointMaxY - jointMinY, jointMinY, jointMaxY);
+                require(jointMaxY - jointMinY > 0.01f, "captured joint did not follow the carrier");
+            }
             const int kind = pc_p2_bombsarai_arena_last_throw_kind();
             const char* kindName = kind == (int)P2BombSaraiThrowKind::Release ? "Release"
                 : kind == (int)P2BombSaraiThrowKind::Fall ? "Fall" : "Death";
