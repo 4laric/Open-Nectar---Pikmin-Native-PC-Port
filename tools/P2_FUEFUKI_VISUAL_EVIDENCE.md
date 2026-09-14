@@ -20,9 +20,10 @@ Real in this run:
 
 Not covered / limitations:
 
-- **Clip selection** is wired from the lane FSM (`fuefukiVisualClip`) but this
-  fixture has no Napkid vehicle, so the binding does not run and the clip stayed
-  `wait`; state-driven clip switching still needs a staged vehicle.
+- **Vehicle identity:** the fixture moves a scripted anchor, not a native
+  Napkid vehicle (the converted room has none). The FSM→clip mapping, pose
+  advance and visual-at-moving-anchor transform are exercised; a real vehicle
+  identity/placement remains open.
 - `landing`/`landfail` are absent (singular source joint scale); the profile
   lists only the 8 converted clips.
 - Baked rigid poses with approximate materials; no skeletal playback or
@@ -33,11 +34,13 @@ Not covered / limitations:
 ## Provenance
 
 - Native branch `opencode/p2-lane28-fuefuki-follow`, HEAD
-  `c564660b7258b2baad136d2caa64541e5a0ec582` (visual module + hardlane draw).
+  `ca7f9da74eb5e2e38aa4dcd8fd5eb087884c8a3c` (visual module + hardlane draw +
+  anchor API + state→clip mapping driven by the fixture).
 - Private build `output/lane28-fuefuki-build`, Ninja Release, MinGW-w64 g++
   16.2.0, JAudio ON; `ninja pikmin_pc -n` => no work.
-- Fixture `output/p2-lane28-follow-runtime-05/fixture.exe`, SHA-256
-  `4CB86081ED9766398B17F63EDE103A811B293C14ED2C5661B1EF85214B411825`.
+- Fixture `output/p2-lane28-follow-runtime-07/fixture.exe`, SHA-256
+  `B2224121314D323C4BD111CF70D680B011A162F180E6BC8C259586F9990FECB2`
+  (supersedes `…-05` `4CB86081…`).
 - Stage `output/p2-fuefuki-stage-01` (`stage.json`: 8 clips, 31 poses,
   unsupported landing/landfail), overlaid onto the run room
   (`assets/dataDir/courses/pikmin2room/`).
@@ -48,9 +51,17 @@ Not covered / limitations:
 P2_FUEFUKI_VISUAL_READY clips=8
 P2_HARDLANES_READY family=Fuefuki visual=1 clips=8
 P2_FUEFUKI_VISUAL_DRAW clip=wait pose=0
+P2_FUEFUKI_VISUAL_STATE state=7 clip=whisle pose=0
+P2_FUEFUKI_VISUAL_TRACK x=0.0 z=-115.0 clip=whisle pose=2
 ...
 PASS FUEFUKI_FOLLOW_RUNTIME
 ```
+
+The final run adds: FSM state 7 (Whisle) maps to the `whisle` clip
+(`P2_FUEFUKI_VISUAL_STATE`); the visual anchor follows the scripted moving
+beetle to z=-115.0; and the pose advances within the clip (`pose=2`) because
+the clip is only re-selected on a change. The follow-locomotion phases pass in
+the same run.
 
 ## Next steps
 
