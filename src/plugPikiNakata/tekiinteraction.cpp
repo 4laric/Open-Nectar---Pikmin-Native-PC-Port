@@ -5,6 +5,7 @@
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_elecbug.h"
+#include "pc_p2_hana.h"
 #endif
 
 /**
@@ -35,6 +36,7 @@ TekiInteractionKey::TekiInteractionKey(int type, immut Interaction* interaction)
 bool InteractAttack::actTeki(Teki* teki) immut
 {
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	if (pc_p2_hana_rejects_attack(teki)) return true;
 	if (pc_p2_elecbug_attacked(teki)) return true;
 	if (pc_p2_kogane_attacked(teki)) {
 		return true; // registered beetles take no attack damage (P2: only flips)
@@ -48,6 +50,9 @@ bool InteractAttack::actTeki(Teki* teki) immut
  */
 bool InteractBomb::actTeki(Teki* teki) immut
 {
+	if (pc_p2_hana_rejects_attack(teki)) {
+		return true; // registered Hana is buried: bomb swallowed, no damage
+	}
 	f32 bombFactor = teki->getParameterF(TPF_BombDamageRate);
 	return teki->interact(
 	    TekiInteractionKey(TekiInteractType::Attack, stack_new(InteractAttack)(mOwner, nullptr, mDamage * bombFactor, false)));

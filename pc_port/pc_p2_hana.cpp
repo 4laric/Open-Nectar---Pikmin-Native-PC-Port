@@ -9,10 +9,18 @@
 //   * The P2 three-slot mouth swallow (kamu1..3) is resolved on the P1 host as an
 //     explicit capture of the nearest Pikmin inside the source attack sweep
 //     radius during the attack1 bite window, then a single InteractKill at the
-//     source swallow event frame. Exactly-once per bite.
-//   * Hana::setUnderGround() hardware invulnerability/no-atari is not exposed on
-//     the P1 Chappy host; "buried" only suppresses the FSM/pose (type1 frame 0).
-//     Damage is accepted from the surfaced states.
+//     source swallow event frame. Exactly-once per bite. A successfully consumed
+//     White Pikmin applies the fp02 poison (2500) to Hana at that swallow frame.
+//   * The buried gate is implemented as a read-only policy gate
+//     (pc_p2_hana_buried / pc_p2_hana_rejects_attack) because the P1 Chappy host
+//     has no EB_Invulnerable/EB_ModelHidden event flags and its TEKIOPT_Atari /
+//     TEKIOPT_Invincible writes are gated on pc_render_is_authoritative(). While
+//     buried (source Sleep) the gate reports non-targetable/no-atari and the
+//     host attack path swallows incoming damage; the gate also toggles the host
+//     options when authoritative. See pc_p2_hana_residual_policy.h.
+//   * attackNavi captain damage fires at the source attack1 KEYEVENT_2 (retail
+//     bite frame) with radius fp22=80, hit half-angle fp23=15 deg (header
+//     default) and damage fp24=10.
 //   * View angle is a full hemisphere; the attack sweep angle is the fp13=90
 //     view-angle half-angle and turn rate/flick radius are port adaptations.
 //   * The source isWakeup() uses the private radius (fp11=70); the wake test is
@@ -20,6 +28,8 @@
 //     the ambusher, per lane audit.
 // No other lane's module is modified; every hook is a no-op for unregistered actors.
 #include "pc_p2_hana.h"
+#include "pc_p2_hana_residual_policy.h"
+#include "pc_p2_white.h"
 #include "teki.h"
 #include "Interactions.h"
 #include "Piki.h"
@@ -77,6 +87,11 @@ constexpr float FLICK_RADIUS = 25.0f;       // port adaptation
 constexpr float SHAKE_RANGE = 100.0f;       // port adaptation
 constexpr float SHAKE_KNOCKBACK = 120.0f;   // port adaptation
 
+// Source attackNavi / poison values (Hana disc, GPVE01 rev 0).
+constexpr float POISON_DAMAGE = p2hanapolicy::WhitePoisonDamage; // proper fp02
+constexpr float CAPTAIN_DAMAGE = 10.0f;     // general fp24 attack power
+constexpr float ATTACK_HIT_ANGLE = 0.261799f; // general fp23 default 15 deg half-angle
+
 // Audit fallbacks for the attack1 bite/swallow events (Hana bank 18:2, 71:3).
 constexpr int FALLBACK_BITE_FRAME = 18;
 constexpr int FALLBACK_SWALLOW_FRAME = 71;
@@ -104,6 +119,7 @@ struct Hana {
     std::string clip = "type1";
     float phase = 0.0f;
     bool deadLogged = false;
+    bool buriedLogged = false;
     float logTimer = 0.0f;
 };
 
@@ -186,6 +202,51 @@ void doFlick(BTeki* a, Hana& s) {
     }
     (void)s;
 }
+// Source EnemyFunc::attackNavi (enemyAction.cpp:1179): damage every Navi inside
+// the attack hit radius (fp22) and hit half-angle (fp23) at the attack event
+// frame. Fired once per attack1 bite (KEYEVENT_2).
+void doAttackNavi(BTeki* a, const Hana& s, unsigned generator) {
+    if (!naviMgr) return;
+    const Vector3f pos = a->getPosition();
+    int attacked = 0;
+    for (int i = 0; i < naviMgr->getSize(); ++i) {
+        Navi* n = naviMgr->getNavi(i);
+        if (!n || !n->isAlive()) continue;
+        const Vector3f np = n->getPosition();
+        if (distXZ(np, pos) >= ATTACK_RANGE) continue;
+        const float angle = std::fabs(wrapPi(std::atan2(np.x - pos.x, np.z - pos.z) - s.heading));
+        if (angle >= ATTACK_HIT_ANGLE) continue;
+        n->stimulate(InteractAttack(a, nullptr, CAPTAIN_DAMAGE, false));
+        ++attacked;
+    }
+    std::printf("P2_HANA_ATTACK_NAVI generator=%u frame=%.1f navi=%d damage=%.1f\n",
+                generator, s.stateTime * 30.0f, attacked, CAPTAIN_DAMAGE);
+    std::fflush(stdout);
+}
+// Read-only policy gate for the buried window. Registered Hana actors in the
+// buried Sleep state are non-targetable/no-atari and damage is swallowed. The
+// host TEKIOPT_Atari/TEKIOPT_Invincible writes are authoritative-only (see
+// pc_p2_hana_residual_policy.h); the query hooks used by the attack path are not.
+void applyUndergroundGate(BTeki* a, Hana& s, unsigned generator) {
+    p2hanapolicy::UndergroundInputs in;
+    in.registered = true;
+    in.buried = (s.state == HANA_SLEEP);
+    const bool buried = p2hanapolicy::noAtari(p2hanapolicy::undergroundGate(in));
+    if (buried == s.buriedLogged) return;
+    s.buriedLogged = buried;
+    if (buried) {
+        a->clearTekiOption(TEKIOPT_Atari);
+        a->setTekiOption(TEKIOPT_Invincible);
+        std::printf("P2_HANA_UNDERGROUND generator=%u event=enter no_atari=1 invulnerable=1\n",
+                    generator);
+    } else {
+        a->setTekiOption(TEKIOPT_Atari);
+        a->clearTekiOption(TEKIOPT_Invincible);
+        std::printf("P2_HANA_UNDERGROUND generator=%u event=exit no_atari=0 invulnerable=0\n",
+                    generator);
+    }
+    std::fflush(stdout);
+}
 void enter(Hana& s, State state, const char* clip) {
     s.state = state;
     s.stateTime = 0.0f;
@@ -237,6 +298,32 @@ void pc_p2_hana_reset() {
     ready = false;
 }
 void pc_p2_hana_forget(BTeki* actor) { actors.erase(static_cast<PelletView*>(actor)); }
+
+bool pc_p2_hana_buried(const BTeki* actor) {
+    if (!ready || !actor) return false;
+    auto it = actors.find(static_cast<PelletView*>(const_cast<BTeki*>(actor)));
+    if (it == actors.end()) return false;
+    p2hanapolicy::UndergroundInputs in;
+    in.registered = true;
+    in.buried = (it->second.state == HANA_SLEEP);
+    return p2hanapolicy::noAtari(p2hanapolicy::undergroundGate(in));
+}
+
+bool pc_p2_hana_rejects_attack(Teki* teki) {
+    if (!ready || !teki) return false;
+    auto it = actors.find(static_cast<PelletView*>(static_cast<BTeki*>(teki)));
+    if (it == actors.end()) return false;
+    p2hanapolicy::UndergroundInputs in;
+    in.registered = true;
+    in.buried = (it->second.state == HANA_SLEEP);
+    const bool blocked = p2hanapolicy::blocksDamage(p2hanapolicy::undergroundGate(in));
+    if (blocked) {
+        std::printf("P2_HANA_UNDERGROUND_BLOCK generator=%u source_id=84 buried=1\n",
+                    teki->mGenerator ? teki->mGenerator->_70 : 0u);
+        std::fflush(stdout);
+    }
+    return blocked;
+}
 
 float pc_p2_hana_param_f(const BTeki* actor, int idx, float fallback) {
     if (!ready || !actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor)))) return fallback;
@@ -445,7 +532,10 @@ void pc_p2_hana_update(BTeki* actor) {
     case HANA_ATTACK: {
         stop(actor);
         const float frame = motionFrame(s);
-        if (!s.captured && !s.killed && frame >= float(s.biteFrame)) {
+        // Source StateAttack::exec KEYEVENT_2: attackNavi + eatAttackPikmin.
+        if (!s.firedEvents.count(s.biteFrame) && frame >= float(s.biteFrame)) {
+            s.firedEvents.insert(s.biteFrame);
+            doAttackNavi(actor, s, generator);
             Piki* piki = nearestPiki(pos, ATTACK_RANGE);
             if (piki) {
                 s.captured = piki;
@@ -453,12 +543,22 @@ void pc_p2_hana_update(BTeki* actor) {
                 std::fflush(stdout);
             }
         }
+        // Source StateAttack::exec KEYEVENT_3: swallowPikmin(poisonDamage).
         if (s.captured && !s.killed && frame >= float(s.swallowFrame)) {
             s.killed = true;
-            if (s.captured->isAlive()) {
-                s.captured->stimulate(InteractKill(actor, 0));
-            }
+            Piki* piki = s.captured;
             s.captured = nullptr;
+            const bool isWhite = pc_p2_is_white(piki);
+            const bool killedNow = piki->isAlive() && piki->stimulate(InteractKill(actor, 0));
+            p2hanapolicy::PoisonInputs poison;
+            poison.killSucceeded = killedNow;
+            poison.isWhite = isWhite;
+            if (p2hanapolicy::appliesWhitePoison(poison)) {
+                actor->mHealth -= p2hanapolicy::poisonDamage(poison);
+                std::printf("P2_HANA_POISON generator=%u pikmin=1 damage=%.1f health=%.1f\n",
+                            generator, p2hanapolicy::poisonDamage(poison), actor->mHealth);
+                std::fflush(stdout);
+            }
             std::printf("P2_HANA_EAT generator=%u pikmin=1\n", generator);
             std::fflush(stdout);
         }
@@ -501,6 +601,7 @@ void pc_p2_hana_update(BTeki* actor) {
     default:
         break;
     }
+    applyUndergroundGate(actor, s, generator);
     setPhase(s);
     s.logTimer += dt;
     if (s.logTimer >= 1.0f) {
