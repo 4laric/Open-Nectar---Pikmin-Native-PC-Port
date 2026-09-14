@@ -1,4 +1,5 @@
 #include "pc_p2_kurage_teki.h"
+#include "pc_p2_teki_lifetime.h"
 #include "pc_p2_onikurage_teki.h"
 #include "pc_p2_frog.h"
 #include "pc_p2_kogane.h"
@@ -290,7 +291,9 @@ Teki* TekiMgr::newTeki(int type)
 	}
 
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
-	pc_p2_snow_forget(teki); pc_p2_sheargrub_forget(teki); pc_p2_kochappy_forget(teki); pc_p2_giant_breadbug_actor_forget(teki); pc_p2_breadbug_actor_forget(teki); pc_p2_frog_forget(teki); pc_p2_kogane_forget(teki); pc_p2_mamuta_forget(teki); pc_p2_tank_forget(teki); pc_p2_qurione_forget(teki); pc_p2_kurage_teki_forget(teki); pc_p2_onikurage_teki_forget(teki); pc_p2_batch2_forget(teki); pc_p2_projectiles_forget(teki); pc_p2_sokkuri_forget(teki); pc_p2_armor_forget(teki); pc_p2_batch3_forget(teki); pc_p2_long_legs_forget(teki);
+	// Slot reuse calls the same centralized seam as the death funnel so a pooled
+	// address can never retain a stale family registration.
+	pc_p2_forget_teki(teki);
 #endif
 	teki->init(type);
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT

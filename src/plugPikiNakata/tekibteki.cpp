@@ -1,4 +1,5 @@
 #include "pc_p2_kurage_teki.h"
+#include "pc_p2_teki_lifetime.h"
 #include "pc_p2_onikurage_teki.h"
 #include "pc_p2_frog.h"
 #include "pc_p2_kogane.h"
@@ -696,6 +697,11 @@ void BTeki::becomeCorpse()
 void BTeki::doKill()
 {
 	PRINT_NAKATA("BTeki::doKill:%08x\n", this);
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	// Actor-lifetime seam (#397/#186): clear this actor's P2 family
+	// registrations on the real death funnel, not only on pool-address reuse.
+	pc_p2_forget_teki(this);
+#endif
 	if (tekiOptUpdateMgr) {
 		mOptUpdateContext.exit();
 	}
