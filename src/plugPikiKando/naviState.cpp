@@ -3205,7 +3205,14 @@ void NaviDeadState::restart(Navi* navi)
  */
 void NaviDeadState::init(Navi* navi)
 {
-	GameStat::orimaDead = true;
+	// Lane 12 (#130) survivor-gated game over + knockout roster sync. Mark this
+	// captain down in the shared roster (source NaviMgr::informOrimaDead) so the
+	// alive-captain check below reflects the real set. Game over is only signalled
+	// when every present captain is down (source singleGS_MainGame.cpp:914-928
+	// `mDeadNavis != 2`); with the single-captain port this is unchanged, because
+	// getAliveOrima() is null once the only captain goes down.
+	naviMgr->informOrimaDead(navi);
+	GameStat::orimaDead = (naviMgr->getAliveOrima() == nullptr);
 	playerState->mResultFlags.setOn(zen::RESFLAG_OlimarDown);
 	gameflow.mGameInterface->message(MOVIECMD_SetPauseAllowed, FALSE);
 	gameflow.mGameInterface->message(MOVIECMD_StageFinish, TRUE);
