@@ -312,7 +312,7 @@ bool pc_p2_preview_deliver(Pellet* pellet) {
         // P2 Pellet Posy capture receptor: the released pellet was observed and
         // claimed by the flora module; the Onion-side seed receipt stays open.
         if(pc_p2_flora_receipt(pellet)) {
-            std::printf("[Pikipelago] P2_FLORA_DELIVER seeds=0 onion_slice_unimplemented=1\n");std::fflush(stdout);return true;
+            std::printf("[Pikipelago] P2_FLORA_DELIVER onion_receipt=1\n");std::fflush(stdout);return true;
         }
         if(cargoFree){std::fprintf(stderr,"Cargo-free P2 Pod refuses cargo rewards and seed side effects\n");std::abort();}
         std::string receipt;int value=0;Cargo* c=cargoFor(pellet);
