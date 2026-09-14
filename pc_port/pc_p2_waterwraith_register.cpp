@@ -1,6 +1,7 @@
 #include "pc_p2_waterwraith_register.h"
 
 #include "pc_p2_waterwraith_actor.h"
+#include "pc_p2_waterwraith_encounter.h"
 #include "pc_p2_waterwraith_visual.h"
 
 #include "Graphics.h"
@@ -166,6 +167,7 @@ void pc_p2_waterwraith_register_reset()
 {
     sState = RegisterState();
     pc_p2_waterwraith_visual_reset();
+    pc_p2_waterwraith_encounter_reset();
 }
 
 bool pc_p2_waterwraith_register_ready()
@@ -196,6 +198,9 @@ void pc_p2_waterwraith_register_tick(float delta)
         } else if (sState.actorTicks == 2) {
             in.animEnd = true;
         }
+        // Live-squad combat: Purple stun/damage and roller crush, plus the
+        // roller death script (dismount -> tyre_getoff -> child removal).
+        pc_p2_waterwraith_encounter_step(sState.actor, in);
         sState.actor.tick(in, sState.out, kSourceDelta);
         ++sState.actorTicks;
         if (sState.visualReady) {
@@ -247,4 +252,29 @@ float pc_p2_waterwraith_register_roll()
 const char* pc_p2_waterwraith_register_phase()
 {
     return sState.actor.phaseName();
+}
+
+P2WaterwraithVec3 pc_p2_waterwraith_register_wraith_position()
+{
+    return sState.actor.position();
+}
+
+P2WaterwraithVec3 pc_p2_waterwraith_register_roller_position()
+{
+    return sState.actor.rig().position();
+}
+
+bool pc_p2_waterwraith_register_attached()
+{
+    return sState.actor.rig().alive() && sState.actor.rig().attachedToOwner();
+}
+
+float pc_p2_waterwraith_register_tyre_health()
+{
+    return sState.actor.rig().tyreHealth();
+}
+
+float pc_p2_waterwraith_register_body_health()
+{
+    return sState.actor.bodyHealth();
 }

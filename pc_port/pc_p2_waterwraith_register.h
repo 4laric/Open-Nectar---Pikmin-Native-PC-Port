@@ -65,3 +65,8 @@ std::uint64_t pc_p2_waterwraith_register_ticks();
 float pc_p2_waterwraith_register_distance();
 float pc_p2_waterwraith_register_roll();
 const char* pc_p2_waterwraith_register_phase();
+P2WaterwraithVec3 pc_p2_waterwraith_register_wraith_position();
+P2WaterwraithVec3 pc_p2_waterwraith_register_roller_position();
+bool pc_p2_waterwraith_register_attached();
+float pc_p2_waterwraith_register_tyre_health();
+float pc_p2_waterwraith_register_body_health();
