@@ -10,6 +10,7 @@
 void pc_p2_hiba_setup();
 void pc_p2_hiba_reset();
 void pc_p2_hiba_update();
+void pc_p2_hiba_lethal_check();
 unsigned long pc_p2_hiba_behavior_tick();
 bool pc_p2_hiba_gates_ready();
 void pc_p2_hiba_kill_all();
@@ -17,3 +18,9 @@ int pc_p2_hiba_activated();
 int pc_p2_hiba_emitted();
 bool pc_p2_hiba_hit_seen();
 bool pc_p2_hiba_immune_seen();
+bool pc_p2_hiba_gas_hit_seen();
+bool pc_p2_hiba_gas_immune_seen();
+bool pc_p2_hiba_denki_hit_seen();
+bool pc_p2_hiba_denki_immune_seen();
+bool pc_p2_hiba_gas_lethal();
+bool pc_p2_hiba_denki_lethal();

@@ -8,6 +8,8 @@
 // Missing sidecar = inert; malformed sidecar = fail closed.
 #include "pc_p2_hiba.h"
 #include "pc_p2_hiba_policy.h"
+#include "pc_p2_hazard_emitter.h"
+#include "pc_p2_species.h"
 #include "pc_bbft.h"
 #include "pc_p2_purple.h"
 #include "GlobalGameOptions.h"
@@ -30,6 +32,8 @@ namespace {
 const float kTickSeconds = 1.0f / 30.0f;
 const float kEmitRadius  = 60.0f;
 const float kFireDamage  = 1.0f;
+const float kGasDamage   = 1.0f;
+const float kDenkiForce  = 1.0f;
 
 struct Hazard {
     std::uint32_t generator = 0;
@@ -51,7 +55,11 @@ std::vector<Hazard> hazards;
 unsigned long behaviorTick = 0;
 float clockAccumulator = 0.0f;
 unsigned clockLast = 0;
-bool hitSeen = false, immuneSeen = false;
+bool hitSeen = false, immuneSeen = false, gasHitSeen = false, gasImmuneSeen = false,
+     denkiHitSeen = false, denkiImmuneSeen = false;
+bool gasLethal = false, denkiLethal = false;
+std::vector<Piki*> gasHitTargets;
+std::vector<Piki*> denkiHitTargets;
 
 const char* hazardName(int hazardId) {
     switch (hazardId) {
@@ -140,6 +148,45 @@ void emitScan(Hazard& hazard) {
         const float dx = pos.x - hazard.x, dy = pos.y - hazard.y, dz = pos.z - hazard.z;
         if (dx * dx + dy * dy + dz * dz > kEmitRadius * kEmitRadius) continue;
         if (!hazard.handled.insert(static_cast<const void*>(piki)).second) continue;
+        const int species = pc_p2_species(piki);
+        // Gas and electricity route through the lane-10 receiver contract
+        // (p2_hazard_emitter.h) so an emitter and the InteractGas/InteractDenki
+        // receiver cannot disagree about immunity; the receiver's gas-invincible
+        // gate is honoured here too.
+        if (stimulus == p2dweevil::StimGas) {
+            if (!p2_emitter_accepts(species, P2HazardGas, piki->gasInvicible())) {
+                gasImmuneSeen = true;
+                std::printf("P2_HIBA_GAS_PASS generator=%u hazard=GasHiba species=%d immune=1 applied=0\n",
+                            hazard.generator, species);
+                continue;
+            }
+            InteractGas gas(owner, kGasDamage);
+            const bool applied = piki->stimulate(gas);
+            if (!applied) { hazard.handled.erase(piki); continue; }
+            gasHitSeen = true;
+            gasHitTargets.push_back(piki);
+            std::printf("P2_HIBA_GAS_HIT generator=%u hazard=GasHiba species=%d state=%d applied=1\n",
+                        hazard.generator, species, piki->getState());
+            continue;
+        }
+        if (stimulus == p2dweevil::StimDenki) {
+            if (!p2_emitter_accepts(species, P2HazardElectric, piki->gasInvicible())) {
+                denkiImmuneSeen = true;
+                std::printf("P2_HIBA_DENKI_PASS generator=%u hazard=ElecHiba species=%d immune=1 applied=0\n",
+                            hazard.generator, species);
+                continue;
+            }
+            Vector3f dir(dx, dy, dz);
+            InteractDenki denki(owner, kDenkiForce, &dir);
+            const bool applied = piki->stimulate(denki);
+            if (!applied) { hazard.handled.erase(piki); continue; }
+            denkiHitSeen = true;
+            denkiHitTargets.push_back(piki);
+            std::printf("P2_HIBA_DENKI_HIT generator=%u hazard=ElecHiba species=%d state=%d applied=1\n",
+                        hazard.generator, species, piki->getState());
+            continue;
+        }
+        // Fire (Hiba) keeps the original colour-based receiver path.
         const p2dweevil::Colour colour = policyColour(piki);
         if (p2dweevil::pikminImmune(stimulus, colour, false)) {
             immuneSeen = true;
@@ -148,20 +195,13 @@ void emitScan(Hazard& hazard) {
                         colourName(colour));
             continue;
         }
-        if (stimulus == p2dweevil::StimFire) {
-            InteractFire fire(owner, kFireDamage);
-            const bool applied = piki->stimulate(fire);
-            if (!applied) { hazard.handled.erase(piki); continue; }
-            hitSeen = true;
-            std::printf("P2_HIBA_HIT generator=%u hazard=%s stimulus=InteractFire colour=%s immune=0 "
-                        "applied=1 damage=%.1f\n",
-                        hazard.generator, hazardName(hazard.hazardId), colourName(colour), kFireDamage);
-        } else {
-            std::printf("P2_HIBA_APPLY_BLOCKED generator=%u hazard=%s stimulus=%s colour=%s immune=0 "
-                        "applied=0 reason=no_engine_interaction\n",
-                        hazard.generator, hazardName(hazard.hazardId), p2dweevil::stimulusName(stimulus),
-                        colourName(colour));
-        }
+        InteractFire fire(owner, kFireDamage);
+        const bool applied = piki->stimulate(fire);
+        if (!applied) { hazard.handled.erase(piki); continue; }
+        hitSeen = true;
+        std::printf("P2_HIBA_HIT generator=%u hazard=%s stimulus=InteractFire colour=%s immune=0 "
+                    "applied=1 damage=%.1f\n",
+                    hazard.generator, hazardName(hazard.hazardId), colourName(colour), kFireDamage);
     }
 }
 
@@ -230,15 +270,43 @@ void tickHazard(Hazard& hazard) {
     }
 }
 
+// A recorded hit target is lethal once it is no longer observed alive in the
+// live Pikmin manager. Only freshly-iterated pointers are dereferenced for
+// isAlive(); the recorded identity is compared by address, so a recycled actor
+// can never be dereferenced after destruction.
+bool anyTargetDead(const std::vector<Piki*>& targets) {
+    if (targets.empty()) return false;
+    std::set<const void*> alive;
+    if (pikiMgr) {
+        Iterator it(pikiMgr);
+        CI_LOOP(it) {
+            Piki* p = static_cast<Piki*>(*it);
+            if (p && p->isAlive()) alive.insert(static_cast<const void*>(p));
+        }
+    }
+    for (const Piki* p : targets) {
+        if (!alive.count(static_cast<const void*>(p))) return true;
+    }
+    return false;
+}
+
 } // namespace
 
 void pc_p2_hiba_reset() {
     hazards.clear();
+    gasHitTargets.clear();
+    denkiHitTargets.clear();
     behaviorTick = 0;
     clockAccumulator = 0.0f;
     clockLast = 0;
     hitSeen = false;
     immuneSeen = false;
+    gasHitSeen = false;
+    gasImmuneSeen = false;
+    denkiHitSeen = false;
+    denkiImmuneSeen = false;
+    gasLethal = false;
+    denkiLethal = false;
 }
 
 void pc_p2_hiba_setup() {
@@ -297,12 +365,31 @@ void pc_p2_hiba_update() {
         for (auto& hazard : hazards) tickHazard(hazard);
     }
     if (steps == 4) clockAccumulator = 0.0f;
+    pc_p2_hiba_lethal_check();
+}
+
+// Observes whether any delivered gas/denki target has died and logs the
+// markers once. Called every update so the lethal transit (Panic poison timer,
+// DenkiDying 0.3s wait) is captured after emission.
+void pc_p2_hiba_lethal_check() {
+    if (!gasLethal && anyTargetDead(gasHitTargets)) {
+        gasLethal = true;
+        std::printf("P2_HIBA_GAS_LETHAL dead=1\n");
+        std::fflush(stdout);
+    }
+    if (!denkiLethal && anyTargetDead(denkiHitTargets)) {
+        denkiLethal = true;
+        std::printf("P2_HIBA_DENKI_LETHAL dead=1\n");
+        std::fflush(stdout);
+    }
 }
 
 unsigned long pc_p2_hiba_behavior_tick() { return behaviorTick; }
 
 bool pc_p2_hiba_gates_ready() {
     if (hazards.empty() || !hitSeen || !immuneSeen) return false;
+    if (!gasHitSeen || !gasImmuneSeen || !denkiHitSeen || !denkiImmuneSeen) return false;
+    if (!gasLethal || !denkiLethal) return false;
     for (const auto& hazard : hazards) {
         if (!hazard.everActivated || !hazard.everEmitted) return false;
     }
@@ -331,3 +418,9 @@ int pc_p2_hiba_emitted() {
 
 bool pc_p2_hiba_hit_seen() { return hitSeen; }
 bool pc_p2_hiba_immune_seen() { return immuneSeen; }
+bool pc_p2_hiba_gas_hit_seen() { return gasHitSeen; }
+bool pc_p2_hiba_gas_immune_seen() { return gasImmuneSeen; }
+bool pc_p2_hiba_denki_hit_seen() { return denkiHitSeen; }
+bool pc_p2_hiba_denki_immune_seen() { return denkiImmuneSeen; }
+bool pc_p2_hiba_gas_lethal() { return gasLethal; }
+bool pc_p2_hiba_denki_lethal() { return denkiLethal; }
