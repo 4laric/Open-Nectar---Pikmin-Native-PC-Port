@@ -731,6 +731,11 @@ target_include_directories(p2_sarai_fsm_test PRIVATE pc_port)
 target_compile_options(p2_sarai_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_sarai_fsm_test COMMAND p2_sarai_fsm_test)
 
+add_executable(p2_sarai_captor_test tools/p2_sarai_captor_test.cpp)
+target_include_directories(p2_sarai_captor_test PRIVATE pc_port)
+target_compile_options(p2_sarai_captor_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_sarai_captor_test COMMAND p2_sarai_captor_test)
+
 # Engine-including admission test: it includes Navi/NaviState through
 # pc_port/pc_p2_demon_admission.h and uses _putenv_s/_spawnl to prove both
 # allowlist branches, so it is Windows-only like the launcher platform tests.
