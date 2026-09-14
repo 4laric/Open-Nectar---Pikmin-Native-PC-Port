@@ -35,7 +35,7 @@
 #include <string>
 
 namespace {
-bool sKillScenario = false, sTransferScenario = false, sStageExitScenario = false, sAdmissionScenario = false, sAutomaticBindingScenario = false, sOniKurageScenario = false, sIngestionScenario = false, sFlightFsmScenario = false, sFlightFsmDeathScenario = false, sFlightFsmGreaterScenario = false, sFlightFsmGreaterDropScenario = false, sAutoFsmScenario = false, sFlightFsmGreaterCaptainScenario = false, sFlightFsmStuckFlickScenario = false;
+bool sKillScenario = false, sTransferScenario = false, sStageExitScenario = false, sAdmissionScenario = false, sAutomaticBindingScenario = false, sOniKurageScenario = false, sIngestionScenario = false, sFlightFsmScenario = false, sFlightFsmDeathScenario = false, sFlightFsmGreaterScenario = false, sFlightFsmGreaterDropScenario = false, sAutoFsmScenario = false, sFlightFsmGreaterCaptainScenario = false, sFlightFsmStuckFlickScenario = false, sFlightFsmDeathCycleScenario = false;
 void require(bool value, const char* message)
 {
     if (!value) { std::printf("FAIL KURAGE_RUNTIME %s\n", message); std::fflush(stdout); std::_Exit(1); }
@@ -236,7 +236,8 @@ public:
             }
             if (sFlightFsmScenario || sFlightFsmDeathScenario
                 || sFlightFsmGreaterScenario || sFlightFsmGreaterDropScenario
-                || sFlightFsmGreaterCaptainScenario || sFlightFsmStuckFlickScenario) {
+                || sFlightFsmGreaterCaptainScenario || sFlightFsmStuckFlickScenario
+                || sFlightFsmDeathCycleScenario) {
                 // Source flight lifecycle drives the host; the candidate sits
                 // inside the source suction window until the Attack state's
                 // autonomous admission scan claims it.
@@ -343,6 +344,37 @@ public:
             require(!piki->isAlive() && !piki->isStickTo() && piki->getStickObject() == nullptr, "receiver digest state");
             std::puts("P2_KURAGE_DIGEST_PASS alive16=1 half16_25=0.5 external_detach_scale=1 bitter_pause=1 health_pause=1 dead16_5=1 release_scale=1");
             receiverTested = true;
+        }
+        if (sFlightFsmDeathCycleScenario) {
+            ++fsmTicks;
+            Creature* host = pc_p2_kurage_arena_owner();
+            if (fsmPiki && fsmPiki->isAlive() && !pc_p2_kurage_receiver_controls(fsmPiki) && host)
+                fsmPiki->resetPosition(Vector3f(host->mSRT.t.x, host->mSRT.t.y - 30.0f, host->mSRT.t.z));
+            require(pc_p2_kurage_arena_update(1.0f / 60.0f, true), "death cycle host update");
+            if (fsmStage == 0) {
+                if (pc_p2_kurage_receiver_stomach_count() == 1) fsmStage = 1;
+                else require(fsmTicks < 900, "death cycle admission timeout");
+                return result;
+            }
+            if (fsmStage == 1) {
+                // Drop the owner health to 0; the FSM routes to Dead and runs the
+                // source dead1 clock to its KEY3 procedure and END kill.
+                pc_p2_kurage_arena_set_owner_facts(false, false);
+                fsmStage = 2;
+                return result;
+            }
+            if (pc_p2_kurage_arena_killed()) {
+                require(pc_p2_kurage_receiver_count() == 0, "death releases the receiver piki");
+                require(fsmPiki->isAlive() && !fsmPiki->isStickTo() && fsmPiki->mSRT.s.x == 1.0f,
+                    "death releases the piki with restored scale");
+                require(pc_p2_kurage_arena_owner() == nullptr, "dead host left the field");
+                std::printf("P2_KURAGE_DEATH_CYCLE_PASS killed=1 recv=%d piki_alive=1 scale_restored=1\n",
+                    pc_p2_kurage_receiver_count());
+                std::puts("PASS KURAGE_RUNTIME flight_fsm_death_cycle");
+                std::fflush(stdout); std::_Exit(0);
+            }
+            require(fsmTicks < 1800, "death cycle timeout");
+            return result;
         }
         if (sFlightFsmStuckFlickScenario) {
             ++fsmTicks;
@@ -571,6 +603,7 @@ int main(int argc, char** argv)
         if (std::string(argv[i]) == "--receiver-auto-fsm") { sAutomaticBindingScenario = true; sAutoFsmScenario = true; }
         if (std::string(argv[i]) == "--flight-fsm-greater-captain") sFlightFsmGreaterCaptainScenario = true;
         if (std::string(argv[i]) == "--flight-fsm-stuck-flick") sFlightFsmStuckFlickScenario = true;
+        if (std::string(argv[i]) == "--flight-fsm-death-cycle") sFlightFsmDeathCycleScenario = true;
     }
     SDL_setenv("SDL_AUDIODRIVER", "dummy", 1); SDL_SetMainReady();
     pc_gpu_preference_apply(); _putenv_s("PIKMIN_RANDOMIZER_TEST_BACKGROUND", "1"); pc_bbft_init(argc, argv);

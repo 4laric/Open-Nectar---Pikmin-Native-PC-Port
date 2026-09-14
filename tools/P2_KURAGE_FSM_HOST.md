@@ -137,6 +137,18 @@ wait/attack:
 This still does not animate within a pose (each converted MOD is a single static
 pose); it selects the correct static source pose per state.
 
+## Natural death cycle
+
+The arena host consumes the FSM death outputs: `out.deathProcedure`/`bodyBomb`
+(the Dead KEY3), `out.kill` (Dead END), plus `downEffect`/`flickEffect` logs.
+On `out.kill` the host releases any held captain, releases the receiver's
+Pikmin, marks itself dead and leaves the field.
+
+- `pc_p2_kurage_arena_killed()` reports the Dead END.
+- `tools/p2_kurage_runtime.cpp`: `--flight-fsm-death-cycle` — admit a Pikmin,
+  set owner health 0, let the source `dead1.bca` clock run to its KEY3
+  procedure, and verify the END releases the Pikmin with restored scale.
+
 ## Fixture stabilization
 
 The private fixture birthed a Piki with only `init()` + a direct `mMode`
@@ -151,12 +163,23 @@ admission/death/greater/greater-drop/ingestion/kill/transfer/stageexit).
 Private build `output/native-lane29-build` (Ninja Release/MinGW gcc 16.2.0,
 JAudio ON, test hooks OFF), `ninja -n pikmin_pc`: no work to do.
 `bin/nectar.exe` SHA-256
-`C29FD5A599E98CEFD530B627D45D20746B8314A4307A085D07E3A926D9B1E558`.
+`C461603787B0659813A087E292B19F24D02B9607DBE3048D37AC1CED370CAE2A`.
 
-Fixture `output/p2-lane29-final-fixture-02` (provenance `status=built`);
+Fixture `output/p2-lane29-death-fixture-01` (provenance `status=built`);
 `fixture.exe` SHA-256
-`5815C1E06027D6774078BFC16F9CA72B18E022AB98547BCCF62605C4A66E419D`.  All runs
+`E5827C2C6AF41F0A93B9BF0539D2F6CF60EF21F024F8BF3DF5B74B7273948D07`.  All runs
 use `PIKMIN_P2_ROOM_WINDOW=960x540` (centred `373,263`) and a 20-red squad.
+
+Natural death (real `dead1.bca` KEY3 + END kill):
+
+```
+P2_KURAGE_FSM state=0 motion=1 ... ticks=204
+P2_KURAGE_DEATH_PROCEDURE
+P2_KURAGE_BODY_BOMB
+P2_KURAGE_KILL
+P2_KURAGE_DEATH_CYCLE_PASS killed=1 recv=0 piki_alive=1 scale_restored=1
+PASS KURAGE_RUNTIME flight_fsm_death_cycle
+```
 
 Per-state converted poses (10 mods shipped):
 
@@ -226,8 +249,8 @@ checks=35`.
 | A Identity/content | PARTIAL | Kurage (57) and OniKurage (72) variants run; the generated `TEKI_Frog` ordinary actor runs the Kurage FSM when the sidecar opts in. Visuals remain the private adapter. |
 | B Source behavior | PARTIAL | FSM flight for both variants on the arena host and ordinary actor; real per-state source animation event/duration clocks; the converted per-state source pose is drawn for each FSM state. No within-pose skeletal playback, and states without an imported clip still use the bounded motion-END. |
 | C Combat/receivers | PASS (bounded host + ordinary actor) | Ordinary Attack suction autonomously admits and attaches a live Pikmin in both hosts; Greater captures and releases a live captain through lane 12's policy. |
-| D Death/drop/transport | BLOCKED | No corpse/pellet/Onion transport; OniKurage `Drop` is not the Pikmin cargo path. |
-| E Lifetime | PARTIAL | Owner-death release restores scale; late birth/recycled address not exercised. |
+| D Death/drop/transport | PARTIAL | Natural FSM death releases owned Pikmin/captain and the host leaves the field; no corpse/pellet/Onion transport yet, and OniKurage `Drop` is not the Pikmin cargo path. |
+| E Lifetime | PARTIAL | FSM-death and owner-death release restore scale; late birth/recycled address not exercised. |
 | F Persistence | UNTESTED | No restart/save path in this slice. |
 | G Product/mixed scene | UNTESTED | Private opt-in host, not a generated-session launch. |
 

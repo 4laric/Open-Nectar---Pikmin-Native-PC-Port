@@ -74,6 +74,7 @@ struct Host {
     p2sampled::Clock stateClock;
     bool stateClockActive = false;
     std::uint64_t clockCycle = 0;
+    bool killed = false;
     // Greater (OniKurage, id 72) selection and the labelled captain-held seam.
     p2kurage::Variant variant = p2kurage::Variant::Lesser;
     bool captainHeld = false;
@@ -222,7 +223,7 @@ void pc_p2_kurage_arena_reset()
     sHost.fsmEnabled = false; sHost.fsmTicks = 0; sHost.lastFsmState = -1; sHost.fsmAltitude = 0.0f;
     sHost.fsmHealth = kFsmLiveHealth; sHost.ownerHasHealth = true; sHost.ownerBittered = false;
     sHost.autoAdmissions = 0; sHost.pendingKey = p2kurage::KeyEvent::None; sHost.fsmMotionFinished = false; sHost.fsmMotionTimer = 0;
-    sHost.stateClock.cancel(); sHost.stateClockActive = false; sHost.clockCycle = 0;
+    sHost.stateClock.cancel(); sHost.stateClockActive = false; sHost.clockCycle = 0; sHost.killed = false;
     sHost.variant = p2kurage::Variant::Lesser; sHost.captainHeld = false; sHost.captainSettled = true; sHost.fallVelocity = 0.0f;
     sHost.captainPolicy = nullptr; sHost.captainTarget = -1; sHost.captainNavi = nullptr;
     sHost.captainSlots.reset(); sHost.captorEpoch = 0; sHost.captainCaptured = false;
@@ -261,7 +262,7 @@ bool pc_p2_kurage_arena_setup(const char* profilePath)
     sHost.fsmEnabled = false; sHost.fsmTicks = 0; sHost.lastFsmState = -1; sHost.fsmAltitude = 0.0f;
     sHost.fsmHealth = kFsmLiveHealth; sHost.ownerHasHealth = true; sHost.ownerBittered = false;
     sHost.autoAdmissions = 0; sHost.pendingKey = p2kurage::KeyEvent::None; sHost.fsmMotionFinished = false; sHost.fsmMotionTimer = 0;
-    sHost.stateClock.cancel(); sHost.stateClockActive = false; sHost.clockCycle = 0;
+    sHost.stateClock.cancel(); sHost.stateClockActive = false; sHost.clockCycle = 0; sHost.killed = false;
     sHost.variant = p2kurage::Variant::Lesser; sHost.captainHeld = false; sHost.captainSettled = true; sHost.fallVelocity = 0.0f;
     sHost.captainPolicy = nullptr; sHost.captainTarget = -1; sHost.captainNavi = nullptr;
     sHost.captainSlots.reset(); sHost.captorEpoch = 0; sHost.captainCaptured = false;
@@ -432,6 +433,24 @@ bool pc_p2_kurage_arena_update(float delta, bool ownerAlive)
             std::printf("P2_KURAGE_FLICK_STICK released=%d\n", released);
         }
         if (out.flickNearby) std::printf("P2_KURAGE_FLICK_NEARBY\n");
+        if (out.downEffect) std::printf("P2_KURAGE_DOWN_EFFECT\n");
+        if (out.flickEffect) std::printf("P2_KURAGE_FLICK_EFFECT\n");
+        if (out.deathProcedure) std::printf("P2_KURAGE_DEATH_PROCEDURE\n");
+        if (out.bodyBomb) std::printf("P2_KURAGE_BODY_BOMB\n");
+        if (out.kill && !sHost.killed) {
+            // KurageState Dead END: natural death releases owned Pikmin and any
+            // held captain, then the host leaves the field.
+            sHost.killed = true;
+            if (sHost.captainCaptured && sHost.captainPolicy) {
+                sHost.captainPolicy->releaseCaptured(sHost.captainTarget, sHost.captorEpoch);
+                sHost.captainSlots.onDeath();
+                sHost.captainCaptured = false;
+            }
+            pc_p2_kurage_receiver_release_all();
+            sHost.alive = false;
+            std::printf("P2_KURAGE_KILL\n");
+            std::fflush(stdout);
+        }
         sHost.fsmTicks++;
         pc_p2_kurage_receiver_update(delta, true, sHost.ownerHasHealth, sHost.ownerBittered);
         return true;
@@ -568,6 +587,10 @@ int pc_p2_kurage_arena_captain_occupied()
 bool pc_p2_kurage_arena_captain_captured()
 {
     return sHost.captainCaptured;
+}
+bool pc_p2_kurage_arena_killed()
+{
+    return sHost.killed;
 }
 
 void pc_p2_kurage_arena_draw(Graphics& gfx)
