@@ -3,6 +3,7 @@
 #include "Dolphin/os.h"
 #include "MemStat.h"
 #include "gameflow.h"
+#include "pc_p2_captain.h" // lane 12 (#130) inactive-captain follow hook
 #include "sysNew.h"
 
 /**
@@ -76,6 +77,14 @@ Creature* NaviMgr::createObject()
 void NaviMgr::update()
 {
 	MonoObjectMgr::update();
+
+	// Lane 12 two-captain follow-up (#130): drive the inactive captain's follow
+	// state. update_inactive_captain_follow() returns immediately unless a real
+	// second Navi exists, and the guard here keeps the call out of the
+	// single-captain path entirely, so default play is unchanged.
+	if (mNumObjects > 1) {
+		pc_p2_captain::update_inactive_captain_follow();
+	}
 }
 
 /**
