@@ -1,4 +1,5 @@
 #include "pc_p2_demon_escape_state.h"
+#include "pc_p2_demon_admission.h"
 #include "Navi.h"
 #include "NaviState.h"
 #include "NaviMgr.h"
@@ -31,7 +32,7 @@ EscapeState* state(Navi* n) {
 NaviState* pc_demon_escape_state_create() { return new EscapeState(); }
 bool pc_demon_escape_begin(Navi* n) {
     auto* s=state(n);
-    if(!s||s->captain||!n->isAlive()||n->isStickTo()||n->mRope||n->getCurrState()->getID()!=NAVISTATE_Walk) return false;
+    if(!s||s->captain||!n->isAlive()||n->isStickTo()||n->mRope||!pc_demon_captain_admission_eligible(n)) return false;
     s->captain=n;
     n->mGroundTriangle=nullptr;
     n->mPreviousTriangle=nullptr;

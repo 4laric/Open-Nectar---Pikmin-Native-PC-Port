@@ -1,6 +1,7 @@
 #include "pc_p2_demon_bridge.h"
 #include "pc_p2_demon_drop_state.h"
 #include "pc_p2_demon_escape_state.h"
+#include "pc_p2_demon_admission.h"
 #include "Navi.h"
 #include "NaviState.h"
 #include "Creature.h"
@@ -35,7 +36,7 @@ void detach(Navi* n) {
 
 bool pc_demon_capture(Navi* n, Creature* owner, CollPart* mouth, std::uint64_t token, unsigned slot) {
     if(binding.captain||!n||!owner||!mouth||!token||slot>=2||!mouth->isBouncySphereType()||!n->isAlive()||n->isStickTo()||n->mRope||
-       !n->mStateMachine||n->getCurrState()->getID()!=NAVISTATE_Walk) return false;
+       !pc_demon_captain_admission_eligible(n)) return false;
     n->startStickMouth(owner,mouth);
     if(!n->isStickToMouth()||n->getStickObject()!=owner||n->getStickPart()!=mouth) {
         if(n->isStickToMouth()&&n->getStickObject()==owner&&n->getStickPart()==mouth) n->endStickMouth();
@@ -60,7 +61,7 @@ bool pc_demon_forced_release(Navi* n, float damage, float speed) {
 
 bool pc_demon_bound(Navi* n) {
     if(!current(n)) return false;
-    if(!n->isAlive()||!n->mStateMachine||n->getCurrState()->getID()!=NAVISTATE_Walk||n->mRope||!n->isStickToMouth()||
+    if(!n->isAlive()||!pc_demon_captain_admission_eligible(n)||n->mRope||!n->isStickToMouth()||
        n->getStickObject()!=binding.owner||n->getStickPart()!=binding.mouth) { detach(n); return false; }
     return true;
 }
