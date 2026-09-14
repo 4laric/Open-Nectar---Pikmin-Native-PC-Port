@@ -50,6 +50,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <map>
+#include <string>
 
 namespace {
 // ---------------------------------------------------------------------------
@@ -283,13 +284,37 @@ void pc_p2_hardlanes_setup()
         std::printf("P2_HARDLANES_READY family=BombSarai arena=1\n");
     }
 
-    // Fuefuki (#245): bind to a staged TEKI_Napkid placement vehicle.
+    // Fuefuki (#245): bind to a staged placement vehicle. An optional
+    // `p2-fuefuki-teki.txt` scopes the binding to one generator (private
+    // adapter pattern, Kurage/Onikurage); absent, the first Napkid is used.
+    unsigned wantedGenerator = 0;
+    int wantedType = TEKI_Napkid;
+    if (FILE* config = std::fopen("p2-fuefuki-teki.txt", "r")) {
+        char version[32];
+        unsigned generator = 0;
+        int type = 0;
+        const bool valid = std::fscanf(config, "%31s %u %d", version, &generator, &type) == 3;
+        std::fclose(config);
+        if (!valid || std::string(version) != "P2_FUEFUKI_TEKI_1") {
+            std::printf("P2_HARDLANES_ERROR family=Fuefuki invalid p2-fuefuki-teki.txt\n");
+            return;
+        }
+        wantedGenerator = generator;
+        wantedType = type;
+    }
     if (tekiMgr) {
         Iterator it(tekiMgr);
         CI_LOOP(it) {
             Teki* teki = static_cast<Teki*>(*it);
-            if (teki && teki->mTekiType == TEKI_Napkid) { sFuefukiVehicle = teki; break; }
+            if (!teki || teki->mTekiType != wantedType) continue;
+            if (wantedGenerator && (!teki->mGenerator || teki->mGenerator->_70 != wantedGenerator)) continue;
+            sFuefukiVehicle = teki;
+            break;
         }
+    }
+    if (wantedGenerator && !sFuefukiVehicle) {
+        std::printf("P2_HARDLANES_ERROR family=Fuefuki generator=%u type=%d not found\n",
+                    wantedGenerator, wantedType);
     }
     if (sFuefukiVehicle) {
         if (!sFuefuki) sFuefuki = new P2FuefukiBinding();
@@ -307,7 +332,9 @@ void pc_p2_hardlanes_setup()
         host.randFloat = nullptr; // deterministic lane LCG fallback
         if (sFuefuki->bind(host, fuefukiParms(), nullptr, fuefukiFollowParms())) {
             sFuefuki->spawn(1);
-            std::printf("P2_HARDLANES_READY family=Fuefuki vehicle=Napkid follow_locomotion=actteki_volatile_approx\n");
+            const unsigned generator = sFuefukiVehicle->mGenerator ? sFuefukiVehicle->mGenerator->_70 : 0u;
+            std::printf("P2_HARDLANES_READY family=Fuefuki vehicle=Napkid gen=%u type=%d follow_locomotion=actteki_volatile_approx\n",
+                        generator, static_cast<int>(sFuefukiVehicle->mTekiType));
         }
     }
 
