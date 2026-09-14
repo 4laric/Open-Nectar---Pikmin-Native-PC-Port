@@ -332,10 +332,15 @@ private:
         locoStart = xzDist(g.pikis[0]->mSRT.t, g.anchor);
         require(locoStart > 50.0f && locoStart < 100.0f, "unexpected start distance");
         // State-driven visual clip: the FSM is casting, so the mapped clip must
-        // be "whisle" (landing/landfail are not converted).
+        // be "whisle" (landing/landfail are not converted). Only re-select on a
+        // change so the pose advances within the clip.
         pc_p2_fuefuki_visual_set_position(g.anchor.x, g.anchor.y, g.anchor.z);
         const int state = static_cast<int>(binding.getFsm().getState());
-        pc_p2_fuefuki_visual_clip(pc_p2_fuefuki_visual_clip_for_state(state));
+        const char* desired = pc_p2_fuefuki_visual_clip_for_state(state);
+        const char* current = pc_p2_fuefuki_visual_active_clip();
+        if (!current || std::strcmp(current, desired) != 0) {
+            pc_p2_fuefuki_visual_clip(desired);
+        }
         require(std::strcmp(pc_p2_fuefuki_visual_active_clip(), "whisle") == 0,
                 "FSM state did not map to the whisle clip");
         std::printf("P2_FUEFUKI_FOLLOW_RT_CLAIM claimed=3 hold=3 start_dist=%.1f\n", locoStart);
@@ -385,10 +390,14 @@ private:
         P2FuefukiBindTick t;
         t.delta = kDt; t.health = 700.0f; t.animPlaying = true;
         drive(t);
-        // The visual anchor tracks the beetle; the FSM clip follows the state.
+        // The visual anchor tracks the beetle; the FSM clip follows the state
+        // (only re-selected on a change so the pose advances within the clip).
         pc_p2_fuefuki_visual_set_position(g.anchor.x, g.anchor.y, g.anchor.z);
-        pc_p2_fuefuki_visual_clip(pc_p2_fuefuki_visual_clip_for_state(
-            static_cast<int>(binding.getFsm().getState())));
+        const char* desired = pc_p2_fuefuki_visual_clip_for_state(
+            static_cast<int>(binding.getFsm().getState()));
+        if (std::strcmp(pc_p2_fuefuki_visual_active_clip(), desired) != 0) {
+            pc_p2_fuefuki_visual_clip(desired);
+        }
         pc_p2_fuefuki_visual_update(1.0f);
         ++moveFrames;
         const Vector3f& fpos = g.pikis[0]->mSRT.t;
