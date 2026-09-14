@@ -26,6 +26,7 @@
 #include "pc_p2_rock_hazard.h"
 #include "pc_bbft.h"
 #include "Creature.h"
+#include "Generator.h"
 #include "ItemMgr.h"
 #include "MapMgr.h"
 #include "ObjType.h"
@@ -303,6 +304,13 @@ struct Host {
     P2KabutoMuzzle kabutoMuzzle;
     std::uint64_t kabutoRigTick = 0;
 
+    // Optional live Kabuto proxy actor (#424): `kabuto_actor <generator>`. When
+    // present the muzzle owner follows that Teki's world transform and facing
+    // instead of the configured rig origin, i.e. the mouth moves with the actor.
+    bool haveKabutoActor = false;
+    unsigned kabutoActorGenerator = 0;
+    BTeki* kabutoActor = nullptr;
+
     // Optional P2_ANIM_CLOCK_1 sidecar (#431) driving the attack motion's
     // KEYEVENT_2/END from the shared sampled clock instead of the synthetic tick.
     bool haveKabutoClock = false;
@@ -431,6 +439,18 @@ void parseConfig(const char* path)
                 fail("invalid kabuto_clock row");
             }
             gHost.haveKabutoClock = true;
+        } else if (word == "kabuto_actor") {
+            // Opt-in live actor: `kabuto_actor <generator>`. The host binds the
+            // Teki with that generator in setup and follows its transform.
+            if (gHost.haveKabutoActor) {
+                fail("duplicate kabuto_actor row");
+            }
+            unsigned long long generator = 0;
+            if (!(in >> generator) || generator == 0 || generator > 0xffffffffULL) {
+                fail("invalid kabuto_actor row");
+            }
+            gHost.kabutoActorGenerator = static_cast<unsigned>(generator);
+            gHost.haveKabutoActor = true;
         } else if (word == "rock") {
             if (gHost.haveRockCfg) {
                 fail("duplicate rock row");
@@ -522,6 +542,9 @@ void parseConfig(const char* path)
     }
     if (gHost.haveKabutoClock && !gHost.haveKabutoCfg) {
         fail("kabuto_clock requires a kabuto row");
+    }
+    if (gHost.haveKabutoActor && (!gHost.haveKabutoCfg || !gHost.haveKabutoRig)) {
+        fail("kabuto_actor requires a kabuto row and a kabuto_rig row");
     }
     if (!gHost.haveStoneCfg && !gHost.haveEggCfg && !gHost.haveRockCfg) {
         fail("config has no rows");
@@ -770,8 +793,9 @@ void logKabutoAction(P2KabutoAction action)
                 gHost.kabutoTicks);
 }
 
-// Actor world transform for the attachment-bank muzzle: translate to the rig
-// origin and rotate about Y by the configured facing.
+// Actor world transform for the attachment-bank muzzle: translate to the live
+// bound actor when one is configured, else the rig origin, and rotate about Y by
+// the facing.
 p2attach::Affine kabutoActorWorld(float faceRad)
 {
     p2attach::Affine owner;
@@ -780,9 +804,16 @@ p2attach::Affine kabutoActorWorld(float faceRad)
     owner.m[0][2] = s;
     owner.m[2][0] = -s;
     owner.m[2][2] = c;
-    owner.m[0][3] = gHost.kabutoRigOrigin.x;
-    owner.m[1][3] = gHost.kabutoRigOrigin.y;
-    owner.m[2][3] = gHost.kabutoRigOrigin.z;
+    if (gHost.haveKabutoActor && gHost.kabutoActor) {
+        const Vector3f& p = gHost.kabutoActor->mSRT.t;
+        owner.m[0][3] = p.x;
+        owner.m[1][3] = p.y;
+        owner.m[2][3] = p.z;
+    } else {
+        owner.m[0][3] = gHost.kabutoRigOrigin.x;
+        owner.m[1][3] = gHost.kabutoRigOrigin.y;
+        owner.m[2][3] = gHost.kabutoRigOrigin.z;
+    }
     return owner;
 }
 
@@ -792,7 +823,10 @@ p2attach::Affine kabutoActorWorld(float faceRad)
 void fireKabutoStone(P2KabutoCannon& cannon)
 {
     P2KabutoStoneBirth birth;
-    const float faceRad = gHost.kabutoFaceDeg * kPi / 180.0f;
+    // A live bound actor supplies its own facing (radians); otherwise the row.
+    const float faceRad = (gHost.haveKabutoActor && gHost.kabutoActor)
+        ? gHost.kabutoActor->getDirection()
+        : gHost.kabutoFaceDeg * kPi / 180.0f;
     P2CannonStoneVec3 mouthJoint = gHost.kabutoMouthJoint;
     bool took = false;
     if (gHost.haveKabutoRig) {
@@ -839,8 +873,23 @@ void tickKabuto()
         return;
     }
 
-    const P2CannonStoneVec3 origin = gHost.kabutoMouthJoint;
+    // Search for a target around the live bound actor when present, else the
+    // configured mouth point.
+    P2CannonStoneVec3 origin = gHost.kabutoMouthJoint;
+    if (gHost.haveKabutoActor && gHost.kabutoActor) {
+        const Vector3f& p = gHost.kabutoActor->mSRT.t;
+        origin = { p.x, p.y, p.z };
+    }
     const P2CannonStoneTarget target = selectHostTarget(origin, gHost.stoneCfg.sightRadius);
+    {
+        static bool logged = false;
+        if (!logged) {
+            logged = true;
+            std::printf("P2_PROJECTILE_KABUTO_TARGET present=%d origin=(%.1f,%.1f,%.1f) sight=%.1f\n",
+                        int(target.hasTarget), origin.x, origin.y, origin.z,
+                        gHost.stoneCfg.sightRadius);
+        }
+    }
 
     P2KabutoHostState host;
     host.targetPresent = target.hasTarget;
@@ -1215,6 +1264,9 @@ void pc_p2_projectiles_reset()
     gHost.kabutoAttachmentToken = 0;
     gHost.kabutoMuzzle = P2KabutoMuzzle{};
     gHost.kabutoRigTick = 0;
+    gHost.haveKabutoActor = false;
+    gHost.kabutoActorGenerator = 0;
+    gHost.kabutoActor = nullptr;
     gHost.haveKabutoClock = false;
     gHost.kabutoClockPath.clear();
     gHost.kabutoAttackClip = p2sampled::Clip{};
@@ -1327,6 +1379,26 @@ void pc_p2_projectiles_setup()
                         gHost.kabutoAttackClip.events.empty()
                             ? -1
                             : gHost.kabutoAttackClip.events[0].frame);
+        }
+        if (gHost.haveKabutoActor) {
+            // Bind the live Teki with the configured generator; the muzzle owner
+            // then follows its world transform and facing.
+            Iterator actors(tekiMgr);
+            CI_LOOP(actors) {
+                Teki* candidate = static_cast<Teki*>(*actors);
+                if (candidate && candidate->mGenerator
+                    && candidate->mGenerator->_70 == gHost.kabutoActorGenerator) {
+                    gHost.kabutoActor = candidate;
+                    break;
+                }
+            }
+            if (!gHost.kabutoActor) {
+                fail("kabuto_actor generator not found");
+            }
+            const Vector3f& p = gHost.kabutoActor->mSRT.t;
+            std::printf("P2_PROJECTILE_KABUTO_ACTOR generator=%u bound=1 type=%d pos=(%.1f,%.1f,%.1f)\n",
+                        gHost.kabutoActorGenerator, int(gHost.kabutoActor->mTekiType),
+                        p.x, p.y, p.z);
         }
         std::printf("P2_PROJECTILE_KABUTO_READY species=%s mouth=(%.1f,%.1f,%.1f) face_deg=%.1f "
                     "max_attack_angle=%.1f health=%.1f wait=%d turn=%d attack=%d key2=%d\n",
