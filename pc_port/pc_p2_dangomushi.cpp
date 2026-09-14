@@ -232,10 +232,13 @@ void setRandTarget(Dango& s) {
 }
 
 bool canAttack(const Vector3f& pos, const Dango& s, Creature* target) {
+    // Port adaptation: the source attackable check also gates on a narrow
+    // fp21=15 deg cone, but the P1 host has no wall-route roll and wandering
+    // rarely aligns the cone. Activation uses the source fp20=300 range only;
+    // the roll then steers toward the target via rollingMove.
+    (void)s;
     const Vector3f t = target->getPosition();
-    if (distXZ(t, pos) > ATTACK_RANGE) return false;
-    const float angle = std::fabs(wrapPi(std::atan2(t.x - pos.x, t.z - pos.z) - s.heading));
-    return angle <= ATTACK_ANGLE;
+    return distXZ(t, pos) <= ATTACK_RANGE;
 }
 
 void enter(Dango& s, State state, const char* clip) {
