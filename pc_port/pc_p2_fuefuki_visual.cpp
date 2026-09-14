@@ -282,8 +282,9 @@ void pc_p2_fuefuki_visual_draw(Graphics& gfx)
     shape->updateAnim(gfx, view, nullptr, nullptr);
     shape->drawshape(gfx, *gfx.mCamera, nullptr);
     if (!sVisual.drew) {
-        std::printf("P2_FUEFUKI_VISUAL_DRAW clip=%s pose=%d\n",
-                    pc_p2_fuefuki_visual_active_clip(), pose);
+        std::printf("P2_FUEFUKI_VISUAL_DRAW clip=%s pose=%d x=%.1f y=%.1f z=%.1f\n",
+                    pc_p2_fuefuki_visual_active_clip(), pose,
+                    sVisual.position[0], sVisual.position[1], sVisual.position[2]);
         sVisual.drew = true;
     }
 }

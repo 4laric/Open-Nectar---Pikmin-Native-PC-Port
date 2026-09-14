@@ -71,6 +71,7 @@ std::uint32_t sFuefukiNextId = 1;
 double sFuefukiDebt = 0.0;
 bool sFuefukiVisualReady = false;
 double sFuefukiVisualDebt = 0.0;
+int sFuefukiLastState = -1;
 
 std::uint32_t fuefukiId(Piki* piki)
 {
@@ -247,6 +248,7 @@ void pc_p2_hardlanes_reset()
     pc_p2_fuefuki_visual_reset();
     sFuefukiVisualReady = false;
     sFuefukiVisualDebt = 0.0;
+    sFuefukiLastState = -1;
     p2_bigtreasure_host_reset(sBigTreasure);
     pc_p2_bigtreasure_visual_reset();
     sBigTreasureReady = false;
@@ -365,9 +367,15 @@ void pc_p2_hardlanes_update()
         if (ticks > 4) ticks = 4;
         sFuefukiVisualDebt -= ticks * static_cast<double>(kFuefukiSourceDelta);
         for (int i = 0; i < ticks; ++i) {
-            if (sFuefuki)
-                pc_p2_fuefuki_visual_clip(pc_p2_fuefuki_visual_clip_for_state(
-                    static_cast<int>(sFuefuki->getFsm().getState())));
+            if (sFuefuki) {
+                const int state = static_cast<int>(sFuefuki->getFsm().getState());
+                if (state != sFuefukiLastState) {
+                    sFuefukiLastState = state;
+                    const char* clip = pc_p2_fuefuki_visual_clip_for_state(state);
+                    pc_p2_fuefuki_visual_clip(clip);
+                    std::printf("P2_FUEFUKI_FSM state=%d clip=%s\n", state, clip);
+                }
+            }
             pc_p2_fuefuki_visual_update(1.0f);
         }
     }
