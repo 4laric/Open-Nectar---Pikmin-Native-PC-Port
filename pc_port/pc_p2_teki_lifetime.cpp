@@ -3,6 +3,7 @@
 #include "pc_p2_armor.h"
 #include "pc_p2_elecbug.h"
 #include "pc_p2_tamago.h"
+#include "pc_p2_jigumo.h"
 #include "pc_p2_snakejoint.h"
 #include "pc_p2_dangomushi.h"
 #include "pc_p2_hanachirashi.h"
@@ -71,6 +72,7 @@ void pc_p2_forget_teki(BTeki* actor)
 	pc_p2_armor_forget(actor);
 	pc_p2_elecbug_forget(actor);
     pc_p2_tamago_forget(actor);
+    pc_p2_jigumo_forget(actor);
     pc_p2_snakejoint_forget(actor);
     pc_p2_dangomushi_forget(actor);
     pc_p2_hanachirashi_forget(actor);
@@ -119,6 +121,7 @@ void pc_p2_reset_all_teki()
 	pc_p2_armor_reset();
     pc_p2_elecbug_reset();
     pc_p2_tamago_reset();
+    pc_p2_jigumo_reset();
     pc_p2_snakejoint_reset();
     pc_p2_dangomushi_reset();
     pc_p2_hanachirashi_reset();

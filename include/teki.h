@@ -1,3 +1,4 @@
+#include "pc_p2_jigumo.h"
 #include "pc_p2_snakejoint.h"
 #include "pc_p2_dangomushi.h"
 #include "pc_p2_hanachirashi.h"
@@ -436,7 +437,8 @@ public:
 		const f32 before_hanachirashi=pc_p2_catfish_param_f(this,idx,before_catfish);
 		const f32 before_dangomushi=pc_p2_hanachirashi_param_f(this,idx,before_hanachirashi);
 		const f32 before_snakejoint=pc_p2_dangomushi_param_f(this,idx,before_dangomushi);
-		const f32 qurione=pc_p2_snakejoint_param_f(this,idx,before_snakejoint);
+		const f32 before_jigumo=pc_p2_snakejoint_param_f(this,idx,before_snakejoint);
+		const f32 qurione=pc_p2_jigumo_param_f(this,idx,before_jigumo);
 		if(idx==TPF_Life)return pc_p2_dwarf_orange_max_health(this,pc_p2_kochappy_max_health(this,pc_p2_snow_max_health(this,qurione)));
 		return qurione;
 #endif
