@@ -265,14 +265,17 @@ void stepBuds(double nowSec)
 				std::printf("P2_POM_ACCEPT generator=%u species=%s thrown_colour=%d used=%d budget=%d\n",
 				            bound.spec.generator, p2pom::speciesName(bound.spec.species), thrownColour, bound.used, limit);
 			}
+			const bool wasClosed = !bound.open;
 			++bound.swallowed;
 			bound.open         = true;
 			bound.lastAcceptSec = nowSec;
 			if (bound.openedSec == 0.0) {
 				bound.openedSec = nowSec;
 			}
-			setState(bound, p2pom::State::Open);
-			setState(bound, p2pom::State::Swing);
+			if (wasClosed) {
+				setState(bound, p2pom::State::Open); // arm on the cycle's first touch
+			}
+			setState(bound, p2pom::State::Swing); // each touch is a swing
 			piki->setEraseKill();
 			piki->kill(false);
 		}
