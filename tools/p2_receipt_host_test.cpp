@@ -26,5 +26,11 @@ int main() {
     { std::ofstream out(path); out << "P2_RECEIPTS_1\ns truncated\n"; }
     assert(!pc_p2_receipt_host_open(path.c_str()));
     assert(!pc_p2_receipt_host_ready());
-    fs::remove(path); fs::remove(dir);
+    fs::remove(path);
+    assert(pc_p2_receipt_host_atomic_write(path.c_str(), "first"));
+    assert(pc_p2_receipt_host_atomic_write(path.c_str(), "second"));
+    fs::create_directory(path + ".tmp");
+    assert(!pc_p2_receipt_host_atomic_write(path.c_str(), "lost"));
+    { std::ifstream in(path); std::string value; in >> value; assert(value == "second"); }
+    fs::remove(path + ".tmp"); fs::remove(path); fs::remove(dir);
 }

@@ -253,6 +253,7 @@ bool pc_randomizer_init(int argc, char** argv) {
         }
         p2EnemyBridge = true;
         input >> end;
+        if (end != "END") fail("P2 enemy bridge cannot mix other enemy layouts");
     }
     if (end == "ENEMY_CAMPAIGN") {
         unsigned version, count, miniboss; std::string catalog;

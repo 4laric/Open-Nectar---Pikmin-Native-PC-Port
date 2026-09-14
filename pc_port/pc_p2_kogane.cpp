@@ -1,3 +1,4 @@
+#include "pc_p2_receipt_host.h"
 #include "pc_p2_kogane.h"
 #include "pc_p2_kogane_policy.h"
 #include "pc_p2_enemy.h"
@@ -57,9 +58,8 @@ std::map<unsigned,int> restoredFlips;
 // process, so a second process on the same run directory would re-spawn spent
 // beetles. This family-local sidecar (never the P2 save) keeps per-generator flip
 // counts durable. It is written atomically (temp + rename) on every flip/escape
-// and loaded in setup() after the in-process snapshot; a missing or malformed
-// file is ignored (fail safe, never crash) so a corrupt ledger cannot wedge the
-// room.
+// and loaded in setup() after the in-process snapshot; a missing file starts empty; malformed state is rejected so it cannot replay
+// previously granted drops.
 const char* kReceiptsPath="p2-kogane-receipts.txt";
 const char* kReceiptsHeader="P2_KOGANE_RECEIPTS_1";
 
@@ -67,15 +67,15 @@ int loadReceipts(){
     std::ifstream in(kReceiptsPath);
     if(!in)return 0;
     std::string line;
-    if(!std::getline(in,line)||line!=kReceiptsHeader)return 0;
+    if(!std::getline(in,line)||line!=kReceiptsHeader)throw std::runtime_error("Invalid P2 Kogane receipt state");
     std::map<unsigned,int> rows;
     while(std::getline(in,line)){
         if(line.empty())continue;
         std::istringstream row(line);unsigned generator=0;int flips=0;std::string extra;
-        if(!(row>>generator>>flips)||row>>extra||flips<1||flips>3)return 0;
-        if(!rows.emplace(generator,flips).second)return 0;
+        if(!(row>>generator>>flips)||row>>extra||flips<1||flips>3)throw std::runtime_error("Invalid P2 Kogane receipt state");
+        if(!rows.emplace(generator,flips).second)throw std::runtime_error("Invalid P2 Kogane receipt state");
     }
-    if(!in.eof())return 0;
+    if(!in.eof())throw std::runtime_error("Invalid P2 Kogane receipt state");
     for(const auto& row:rows){
         auto found=restoredFlips.find(row.first);
         if(found==restoredFlips.end()||row.second>found->second)restoredFlips[row.first]=row.second;
@@ -88,14 +88,9 @@ void saveReceipts(){
     if(rows.empty())return;
     std::string data=std::string(kReceiptsHeader)+"\n";
     for(const auto& row:rows)data+=std::to_string(row.first)+" "+std::to_string(row.second)+"\n";
-    const std::string temporary=std::string(kReceiptsPath)+".tmp";
-    FILE* file=std::fopen(temporary.c_str(),"wb");
-    if(!file)return;
-    bool ok=std::fwrite(data.data(),1,data.size(),file)==data.size()&&std::fflush(file)==0;
-    if(std::fclose(file)!=0)ok=false;
-    if(!ok)return;
-    std::remove(kReceiptsPath);
-    if(std::rename(temporary.c_str(),kReceiptsPath)!=0)return;
+    if (!pc_p2_receipt_host_atomic_write(kReceiptsPath,data.c_str())) {
+        std::fputs("P2_KOGANE receipt persistence failed\n",stderr); std::abort();
+    }
 }
 
 bool logged[2]={false,false};

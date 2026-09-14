@@ -13,3 +13,6 @@ enum class P2ReceiptHostResult { Error = -1, Duplicate = 0, Granted = 1 };
 P2ReceiptHostResult pc_p2_receipt_host_grant(const char* seed, const char* reward, const char* slotOrActor,
                               const char* encounter);
 void pc_p2_receipt_host_close();
+
+// Atomically replace a sidecar without deleting its last good version first.
+bool pc_p2_receipt_host_atomic_write(const char* path, const char* data);
