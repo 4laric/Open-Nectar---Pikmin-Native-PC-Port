@@ -50,6 +50,11 @@ const char* pc_p2_bigtreasure_visual_active_clip();
 int pc_p2_bigtreasure_visual_clip_count();
 const char* pc_p2_bigtreasure_visual_clip_name(int index);
 
+// Additive (#246 motion staging): the authored retail motion (duration and key
+// events) behind a staged clip, so a host can assert each clip dispatches its
+// authored events. Returns nullptr for an unknown clip or a non-ready bank.
+const p2retail::Motion* pc_p2_bigtreasure_visual_clip_motion(const char* name);
+
 int pc_p2_bigtreasure_visual_pose_index();
 bool pc_p2_bigtreasure_visual_completed();
 int pc_p2_bigtreasure_visual_pellet_count();  // converted pellets drawn

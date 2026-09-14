@@ -112,6 +112,10 @@ class BigTreasureApp final : public PlugPikiApp {
     int motionEvents = 0;
     int motionBase = 0;
     int motionFrames = 0;
+    const char* motionName = nullptr;
+    std::vector<p2retail::Event> motionExpected;
+    bool motionClipLoop = false;
+    int motionLoopFrames = 0;
     bool setup = false, wait1Captured = false, deadCaptured = false;
     float ground = 0.0f;
     P2BigTreasureMapTrace trace;
@@ -760,9 +764,12 @@ private:
 
     // Additive (#246 motion staging): after wait1/dead, replay every other
     // clip staged in the generated profile through the vendored retail event
-    // player. The clip list comes from the stage subset, so widening the stage
-    // widens playback without touching this fixture; the dispatch log is the
-    // same bounded event bank wait1/dead already use.
+    // player and assert each one dispatches its authored key events. The clip
+    // list comes from the stage subset, so widening the stage widens playback
+    // without touching this fixture; the dispatch log is the same bounded event
+    // bank wait1/dead already use. One-shot clips run to the implicit type-1000
+    // completion; loops run exactly to their first authored (type-1) loop
+    // marker, which is the fixed window retail wraps on.
     void startMotion()
     {
         motionIndex = 0;
@@ -784,10 +791,28 @@ private:
             if (!name || std::strcmp(name, "wait1") == 0 || std::strcmp(name, "dead") == 0) {
                 continue;
             }
-            if (pc_p2_bigtreasure_visual_clip(name)) {
-                motionFrames = 0;
-                return true;
+            if (!pc_p2_bigtreasure_visual_clip(name)) {
+                continue;
             }
+            const p2retail::Motion* motion = pc_p2_bigtreasure_visual_clip_motion(name);
+            require(motion != nullptr, "motion clip table entry");
+            motionName = name;
+            motionExpected.clear();
+            motionClipLoop = false;
+            motionLoopFrames = 0;
+            for (const p2retail::Event& event : motion->events) {
+                motionExpected.push_back(event);
+                if (event.type == 1) {
+                    motionClipLoop = true;
+                    motionLoopFrames = event.frame + 1;
+                    break;
+                }
+            }
+            if (!motionClipLoop) {
+                motionExpected.push_back(p2retail::Event{ motion->duration, 1000 });
+            }
+            motionFrames = 0;
+            return true;
         }
         return false;
     }
@@ -796,17 +821,33 @@ private:
     {
         require(pc_p2_bigtreasure_visual_update(1.0f) >= 0, "motion update");
         ++motionFrames;
-        // Looping clips (0/1 loop markers) never report completion, so bound
-        // each clip at one source length before advancing to the next.
-        if (!pc_p2_bigtreasure_visual_completed() && motionFrames < 240) {
+        const bool done = motionClipLoop ? (motionFrames >= motionLoopFrames)
+                                         : pc_p2_bigtreasure_visual_completed();
+        // Bounded safety net: one-shot clips complete inside their own length
+        // and loops stop at the first loop marker, both far under 240 frames.
+        if (!done && motionFrames < 240) {
             return;
         }
         int count = 0;
-        pc_p2_bigtreasure_visual_events(&count);
-        const int pose = pc_p2_bigtreasure_visual_pose_index();
-        if (pose > 0 || count > motionBase) {
-            ++motionClips;
+        const P2BigTreasureVisualEvent* log = pc_p2_bigtreasure_visual_events(&count);
+        require(std::strcmp(pc_p2_bigtreasure_visual_active_clip(), motionName) == 0,
+                "motion active clip");
+        if (!motionClipLoop) {
+            require(pc_p2_bigtreasure_visual_completed(), "one-shot clip completes");
         }
+        const int dispatched = count - motionBase;
+        require(dispatched == static_cast<int>(motionExpected.size()),
+                "motion authored event count");
+        for (int i = 0; i < dispatched; ++i) {
+            require(std::strcmp(log[motionBase + i].clip, motionName) == 0,
+                    "motion authored event clip");
+            require(log[motionBase + i].frame == motionExpected[i].frame
+                        && log[motionBase + i].type == motionExpected[i].type,
+                    "motion authored event order");
+        }
+        motionEvents += dispatched;
+        ++motionClips;
+        motionBase = count;
         if (!beginMotionClip()) {
             finishMotion();
         }
@@ -814,12 +855,13 @@ private:
 
     void finishMotion()
     {
-        int count = 0;
-        pc_p2_bigtreasure_visual_events(&count);
-        motionEvents = count - motionBase;
-        require(motionClips >= 3, "motion clip advances");
+        require(motionClips >= 16, "full motion clip advances");
+        require(motionClips == pc_p2_bigtreasure_visual_clip_count() - 2,
+                "every staged clip advanced");
         std::printf("P2_BIGTREASURE_MOTION_PASS clips=%d events=%d\n", motionClips,
                     motionEvents);
+        std::printf("P2_BIGTREASURE_MOTION_FULL_PASS clips=%d events=%d advanced=%d\n",
+                    motionClips, motionEvents, motionClips);
         phase = 5;
     }
 };

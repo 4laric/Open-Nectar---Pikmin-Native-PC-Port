@@ -329,6 +329,15 @@ const char* pc_p2_bigtreasure_visual_clip_name(int index)
     return sVisual.clips[index].name.c_str();
 }
 
+const p2retail::Motion* pc_p2_bigtreasure_visual_clip_motion(const char* name)
+{
+    if (!sVisual.ready || !name) {
+        return nullptr;
+    }
+    const ClipBank* clip = findClip(name);
+    return clip ? clip->motion : nullptr;
+}
+
 int pc_p2_bigtreasure_visual_pose_index()
 {
     if (!sVisual.active) {

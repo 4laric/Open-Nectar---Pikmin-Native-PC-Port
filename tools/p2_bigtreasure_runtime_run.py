@@ -139,6 +139,20 @@ def verify_log(text):
         errors.append("missing extra-clip motion playback marker")
     elif int(motion.group(1)) < 3:
         errors.append(f"motion playback advanced fewer than 3 staged clips: {motion.groups()}")
+    motion_full = re.search(r"^P2_BIGTREASURE_MOTION_FULL_PASS\s+clips=(\d+)\s+events=(\d+)\s+"
+                            r"advanced=(\d+)\s*$", text, flags=re.MULTILINE)
+    if not motion_full:
+        errors.append("missing full motion staging marker")
+    else:
+        clips, events, advanced = map(int, motion_full.groups())
+        if clips < 16:
+            errors.append(f"full motion staging covered fewer than 16 clips: {motion_full.groups()}")
+        if advanced != clips:
+            errors.append(f"full motion staging did not advance every staged clip: "
+                          f"{motion_full.groups()}")
+        if events < clips:
+            errors.append(f"full motion staging dispatched fewer events than clips: "
+                          f"{motion_full.groups()}")
     if "PASS BIGTREASURE_RUNTIME" not in text:
         errors.append("missing runtime PASS marker")
     return errors
