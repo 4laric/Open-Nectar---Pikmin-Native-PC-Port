@@ -335,6 +335,7 @@ public:
     // Experimental sequel identity, never an index into legacy three-color arrays.
     bool mP2Purple = false;
     bool mP2White = false;
+    bool mP2Bulbmin = false; // source Piki.h Bulbmin = 5; cave-only, wild by default
     float mP2AnimationTime = 0;
 };
 
