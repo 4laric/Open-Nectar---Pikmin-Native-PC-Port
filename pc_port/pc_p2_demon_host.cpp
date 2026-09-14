@@ -2,6 +2,7 @@
 #include "pc_p2_demon_bridge.h"
 #include "Collision.h"
 #include "Navi.h"
+#include "NaviMgr.h"
 #include "Shape.h"
 #include "Graphics.h"
 #include "Texture.h"
@@ -156,6 +157,8 @@ bool P2DemonHost::load(const char* modelPath, const Vector3f& mouthA, const Vect
         if (mShape->mTexAttrList[i].mTexture) mShape->mTexAttrList[i].mTexture->attach();
     mMouthLocal[0].makeSRT(Vector3f(1, 1, 1), Vector3f(0, 0, 0), mouthA);
     mMouthLocal[1].makeSRT(Vector3f(1, 1, 1), Vector3f(0, 0, 0), mouthB);
+    mStaticMouth[0] = mMouthLocal[0];
+    mStaticMouth[1] = mMouthLocal[1];
     for (auto* mouth : mMouths) {
         mouth->mPartType = PART_BoundSphere;
         mouth->mRadius = 15.0f;
@@ -199,6 +202,15 @@ void P2DemonHost::updateMouths()
     }
 }
 
+// Restore the static rest mouth offsets after a sampled pose bank rotated the
+// local matrices. The approach/acquisition path uses these stable parts.
+void P2DemonHost::resetMouthPose()
+{
+    mMouthLocal[0] = mStaticMouth[0];
+    mMouthLocal[1] = mStaticMouth[1];
+    updateMouths();
+}
+
 bool P2DemonHost::beginAttack()
 {
     if (!mLoaded || mAttackActive)
@@ -218,7 +230,7 @@ bool P2DemonHost::updateAttack(Navi* target, float sourceFrame, bool floorContac
     if (!decision.valid)
         return false;
     if (decision.attemptCapture && !mOccupied) {
-        const Vector3f delta = target->mSRT.t - mMouths[0]->mCentre;
+        const Vector3f delta = target->mSRT.t - staticMouthCentre(0);
         if (delta.squaredLength() < 15.0f * 15.0f && pc_demon_capture(target, this, mMouths[0], mOwnerToken, 0))
             mOccupied = 1;
     }
@@ -257,9 +269,19 @@ void P2DemonHost::release(Navi* target)
 
 bool P2DemonHost::occupied() const { return mOccupied != 0; }
 Vector3f P2DemonHost::mouthCentre(unsigned slot) const { return slot < 2 ? mMouths[slot]->mCentre : Vector3f(0, 0, 0); }
+Vector3f P2DemonHost::staticMouthCentre(unsigned slot) const
+{
+    if (slot >= 2) return Vector3f(0, 0, 0);
+    Matrix4f world, joint;
+    world.makeSRT(mSRT.s, mSRT.r, mSRT.t);
+    world.multiplyTo(mStaticMouth[slot], joint);
+    return Vector3f(joint.mMtx[0][3], joint.mMtx[1][3], joint.mMtx[2][3]);
+}
 void P2DemonHost::update()
 {
-    if (!mLoaded || mClockMode != 1) return;
+    if (!mLoaded) return;
+    if (mNaturalEnabled) { updateNatural(); return; }
+    if (mClockMode != 1) return;
     const float dt = gsys ? gsys->getFrameTime() : 0.0f;
     if (!std::isfinite(dt) || dt <= 0.0f || dt > 1.0f) return;
     mSRT.t.x += mTargetVelocity.x * dt;
@@ -267,6 +289,114 @@ void P2DemonHost::update()
     mSRT.t.z += mTargetVelocity.z * dt;
     updateMouths();
 }
+
+// Ordinary captor front end: source target acquisition (getAttackableTarget),
+// capped-turn approach, then the existing Attack/CatchFly/FallMeck clocks with
+// the selected live captain. Capture delivery still goes through pc_demon_capture;
+// this method never touches captain stick state directly.
+void P2DemonHost::updateNatural()
+{
+    const float dt = gsys ? gsys->getFrameTime() : 0.0f;
+    if (!std::isfinite(dt) || dt <= 0.0f || dt > 1.0f) return;
+    // Host clocks advance in source animation frames (30 fps). Cap to one frame
+    // per update so the continuous capture window cannot be skipped.
+    float frames = dt * 30.0f;
+    if (frames > 1.0f) frames = 1.0f;
+    Navi* target = naviMgr ? naviMgr->getNavi() : nullptr;
+    if (mOccupied && (!target || !pc_demon_owned_by(target, this))) mOccupied = 0;
+
+    if (mOccupied) {
+        if (mClockMode == 0) {
+            if (!mNaturalMotionsSet || !switchPoseMeshes(mNaturalCatchProfile.c_str()) || !beginCatchFly(mNaturalCatchFly)) {
+                release(target);
+                return;
+            }
+            selectCatchFlyTarget(mNaturalHome, 40.0f, mFacingRadians);
+            return;
+        }
+        if (mClockMode == 1) {
+            p2demon::CatchFlyInput input{};
+            input.mapY = mSRT.t.y;
+            input.grabFlightHeight = 25.0f;
+            input.riseFactor = 0.4f;
+            input.climbingFactor = 1.0f;
+            input.grabSpeed = 10.0f;
+            input.turnSpeed = mNaturalTurnSpeed;
+            input.maxTurnAngleDegrees = mNaturalMaxTurnDegrees;
+            input.stuckCount = 1;
+            input.heightNext = p2demon::HeightNext::None;
+            const auto decision = tickCatchFly(target, frames, input);
+            if (decision.next == P2DemonAttackNext::FallMeck || decision.heightNext == p2demon::HeightNext::Fall) {
+                if (!mNaturalMotionsSet || !switchPoseMeshes(mNaturalFallProfile.c_str()) || !beginFallMeck(mNaturalFallMeck))
+                    release(target);
+            }
+            return;
+        }
+        if (mClockMode == 3) {
+            const auto decision = tickFallMeck(target, frames, 10.0f, 200.0f);
+            if (decision.next == P2DemonAttackNext::Move) mClockMode = 0;
+            else if (decision.next == P2DemonAttackNext::Fail) { mClockMode = 0; mOccupied = 0; }
+        }
+        return;
+    }
+
+    if (mAttackActive) {
+        const auto decision = tickTimedAttack(target, frames, false);
+        if (decision.next == P2DemonAttackNext::CatchFly && mOccupied) {
+            if (!mNaturalMotionsSet || !switchPoseMeshes(mNaturalCatchProfile.c_str()) || !beginCatchFly(mNaturalCatchFly))
+                mAttackActive = false;
+        } else if (decision.next == P2DemonAttackNext::Move) {
+            mAttackActive = false;
+        }
+        return;
+    }
+
+    if (!mNaturalMotionsSet || !target || !target->isAlive() || target->isStickToMouth()) return;
+    resetMouthPose();
+    P2DemonCaptain captain;
+    captain.alive = target->isAlive();
+    captain.stuckToMouth = target->isStickToMouth();
+    // Acquire and approach against the live mouth centre so the source grab
+    // window and the capture proximity check share one reference point.
+    const Vector3f delta = target->mSRT.t - mMouths[0]->mCentre;
+    captain.distanceSquaredXZ = delta.x * delta.x + delta.z * delta.z;
+    float bearing = std::atan2(delta.x, delta.z) - mFacingRadians;
+    while (bearing > 3.14159265358979323846f) bearing -= 6.28318530717958647692f;
+    while (bearing < -3.14159265358979323846f) bearing += 6.28318530717958647692f;
+    captain.angleRadians = bearing;
+
+    P2DemonCaptor::Input input;
+    input.faceDirection = mFacingRadians;
+    const float homeX = mSRT.t.x - mNaturalHome.x, homeZ = mSRT.t.z - mNaturalHome.z;
+    input.homeDistanceSquaredXZ = homeX * homeX + homeZ * homeZ;
+    input.territoryRadius = mNaturalTerritoryRadius;
+    input.viewAngleDegrees = mNaturalViewAngle;
+    input.sightRadius = mNaturalSightRadius;
+    input.moveSpeed = mNaturalMoveSpeed;
+    input.turnSpeed = mNaturalTurnSpeed;
+    input.maxTurnAngleDegrees = mNaturalMaxTurnDegrees;
+    input.attackRange = mNaturalAttackRange;
+    input.delta = dt;
+    input.captains = &captain;
+    input.count = 1;
+    input.active = true;
+    const auto out = mCaptor.step(input);
+    if (!out.valid) return;
+    mFacingRadians = out.faceDirection;
+    mSRT.r.y = mFacingRadians;
+    if (out.beginAttack) {
+        beginTimedAttack(mNaturalAttack);
+        return;
+    }
+    mSRT.t.x += out.velocityX * dt;
+    mSRT.t.z += out.velocityZ * dt;
+    // The Demon grabs with mouths ~30 units below its origin. Track the
+    // captain's height so the effector (mouth centre) can actually reach the
+    // 3D capture proximity rather than hovering at a fixed altitude.
+    mSRT.t.y += target->mSRT.t.y - mMouths[0]->mCentre.y;
+    updateMouths();
+}
+
 void P2DemonHost::sceneExit() { mClockMode = 0; mCatchElapsedFrames = 0; mAttackPlayer.cancel(); pc_demon_owner_lost(mOwnerToken); mOccupied = 0; mAttackActive = false; if (mBoundActor) pc_p2_demon_manager_forget(mBoundActor); mBoundActor = nullptr; }
 void P2DemonHost::doKill() { sceneExit(); }
 
@@ -392,6 +522,50 @@ bool P2DemonHost::selectCatchFlyTargetSeeded(const Vector3f& home, float radius,
     mCatchTarget = p2demon::selectTargetSeeded(home.x, home.y, home.z, radius, seed);
     return mCatchTarget.valid;
 }
+
+void P2DemonHost::enableNatural(float moveSpeed, float turnSpeed, float maxTurnAngleDegrees, float attackRange,
+                                float territoryRadius, float viewAngleDegrees, float sightRadius, const Vector3f& home)
+{
+    mNaturalEnabled = std::isfinite(moveSpeed) && moveSpeed >= 0
+        && std::isfinite(turnSpeed) && turnSpeed >= 0
+        && std::isfinite(maxTurnAngleDegrees) && maxTurnAngleDegrees >= 0
+        && std::isfinite(attackRange) && attackRange >= 0
+        && std::isfinite(territoryRadius) && territoryRadius >= 0
+        && std::isfinite(viewAngleDegrees) && viewAngleDegrees >= 0
+        && std::isfinite(sightRadius) && sightRadius >= 0;
+    if (!mNaturalEnabled) return;
+    mNaturalMoveSpeed = moveSpeed;
+    mNaturalTurnSpeed = turnSpeed;
+    mNaturalMaxTurnDegrees = maxTurnAngleDegrees;
+    mNaturalAttackRange = attackRange;
+    mNaturalTerritoryRadius = territoryRadius;
+    mNaturalViewAngle = viewAngleDegrees;
+    mNaturalSightRadius = sightRadius;
+    mNaturalHome = home;
+    mCaptor.reset();
+}
+
+void P2DemonHost::setNaturalMotions(const p2retail::Motion& attack, const p2retail::Motion& catchFly, const p2retail::Motion& fallMeck)
+{
+    mNaturalAttack = attack;
+    mNaturalCatchFly = catchFly;
+    mNaturalFallMeck = fallMeck;
+    mNaturalMotionsSet = attack.name == "attack1.bca" && catchFly.name == "waitact2.bca" && fallMeck.name == "waitact1.bca";
+}
+
+void P2DemonHost::setNaturalPoseProfiles(const char* catchProfile, const char* fallProfile)
+{
+    mNaturalCatchProfile = catchProfile ? catchProfile : "";
+    mNaturalFallProfile = fallProfile ? fallProfile : "";
+}
+
+int P2DemonHost::naturalPhase() const
+{
+    if (mOccupied) return mClockMode == 3 ? 4 : 3;
+    if (mAttackActive) return 2;
+    return 1;
+}
+
 
 bool P2DemonHost::bindNativeActor(BTeki* actor, unsigned generatorId, int tekiType)
 {

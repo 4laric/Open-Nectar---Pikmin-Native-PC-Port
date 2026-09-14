@@ -4,6 +4,7 @@
 #include "pc_p2_demon_pose_bank.h"
 #include "pc_p2_retail_player.h"
 #include "pc_p2_demon_catchfly_policy.h"
+#include "pc_p2_demon_captor.h"
 
 class Graphics;
 class Shape;
@@ -47,6 +48,16 @@ public:
     bool beginCatchFly(const p2retail::Motion& motion);
     bool selectCatchFlyTarget(const Vector3f& home, float radius, float angle);
     bool selectCatchFlyTargetSeeded(const Vector3f& home, float radius, std::uint32_t seed);
+    // Opt-in natural captor front end. When enabled, P2DemonHost::update()
+    // acquires a live captain through the source target gate, approaches it and
+    // runs the source Attack/CatchFly/FallMeck clocks against it. Default-off so
+    // fixture-driven modes and the production line are unchanged.
+    void enableNatural(float moveSpeed, float turnSpeed, float maxTurnAngleDegrees, float attackRange,
+                       float territoryRadius, float viewAngleDegrees, float sightRadius, const Vector3f& home);
+    void setNaturalMotions(const p2retail::Motion& attack, const p2retail::Motion& catchFly, const p2retail::Motion& fallMeck);
+    void setNaturalPoseProfiles(const char* catchProfile, const char* fallProfile);
+    bool naturalEnabled() const { return mNaturalEnabled; }
+    int naturalPhase() const; // 0 idle, 1 approach, 2 attack, 3 CatchFly, 4 FallMeck
     bool bindNativeActor(BTeki* actor, unsigned generatorId, int tekiType);
     void unbindNativeActor(BTeki* actor);
     bool revalidateNativeActor(BTeki* actor, unsigned generatorId, int tekiType);
@@ -62,6 +73,10 @@ public:
     void release(Navi* target);
     bool occupied() const;
     Vector3f mouthCentre(unsigned slot) const;
+    // Rest-pose effector used for grab admission/proximity. The animated mouth
+    // CollPart carries the sampled joint for following; admission stays on the
+    // stable effector so approach and capture use one reference point.
+    Vector3f staticMouthCentre(unsigned slot) const;
     // Fixture/owner access to the exact live mouth CollParts and generation
     // token. The caller must revoke capture (release or sceneExit) before the
     // host parts are disposed; this does not transfer ownership.
@@ -82,6 +97,7 @@ private:
     Shape* mShape;
     CollPart* mMouths[2];
     Matrix4f mMouthLocal[2];
+    Matrix4f mStaticMouth[2];
     P2DemonAttackWindow mWindow;
     p2retail::Player mAttackPlayer;
     P2DemonPoseBank mPoseBank;
@@ -101,4 +117,23 @@ private:
     unsigned mOccupied;
     std::uint64_t mOwnerToken;
     void updateMouths();
+    void resetMouthPose();
+
+    P2DemonCaptor mCaptor;
+    bool mNaturalEnabled = false;
+    bool mNaturalMotionsSet = false;
+    float mNaturalMoveSpeed = 0;
+    float mNaturalTurnSpeed = 0;
+    float mNaturalMaxTurnDegrees = 0;
+    float mNaturalAttackRange = 0;
+    float mNaturalTerritoryRadius = 0;
+    float mNaturalViewAngle = 0;
+    float mNaturalSightRadius = 0;
+    Vector3f mNaturalHome;
+    p2retail::Motion mNaturalAttack;
+    p2retail::Motion mNaturalCatchFly;
+    p2retail::Motion mNaturalFallMeck;
+    std::string mNaturalCatchProfile;
+    std::string mNaturalFallProfile;
+    void updateNatural();
 };
