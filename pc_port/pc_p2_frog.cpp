@@ -54,6 +54,19 @@ void loadAnimation(std::vector<p2animation::Clip> (&banks)[2]){
 void pc_p2_frog_reset(){actors.clear();for(auto& b:animated)b.clear();for(auto& b:timing)b.clear();}
 void pc_p2_frog_forget(BTeki* actor){actors.erase(static_cast<PelletView*>(actor));}
 const char* pc_p2_frog_name(PelletView* view){auto i=actors.find(view);return i==actors.end()?nullptr:ids[i->second];}
+// Source parameters replace the shared P1 host values for registered frogs only;
+// unregistered controls keep native values. Reads stay non-mutating.
+float pc_p2_frog_param_f(const BTeki* actor,int idx,float fallback){
+    auto i=actors.find(static_cast<PelletView*>(const_cast<BTeki*>(actor)));if(i==actors.end())return fallback;
+    const p2frog::Params& p=p2frog::params(i->second);
+    switch(idx){
+    case TPF_Life:return p.health;
+    case TPF_VisibleRange:return p.sight;
+    case TPF_AttackableRange:return p.attackRange;
+    case TPF_AttackPower:return p.attackDamage;
+    default:return fallback;
+    }
+}
 void pc_p2_frog_setup(){
     pc_p2_frog_reset();if(!pc_pikipelago_room_preview())return;
     std::ifstream input("p2-frog.txt");if(!input)return;
@@ -64,7 +77,8 @@ void pc_p2_frog_setup(){
         auto found=wanted.find(teki->mGenerator->_70);if(found==wanted.end())continue;
         int kind=found->second;if(!seen.insert(found->first).second)std::abort();if(teki->mTekiType!=(kind?TEKI_Frow:TEKI_Frog))std::abort();
         actors[static_cast<PelletView*>(teki)]=kind;
-        std::printf("P2_FROG_READY species=%s generator=%u behavior=P1_proxy rewards=P1_unchanged\n",ids[kind],found->first);
+        teki->mHealth=p2frog::params(kind).health;
+        std::printf("P2_FROG_READY species=%s generator=%u health=%.1f max_health=%.1f behavior=P1_proxy rewards=P1_unchanged\n",ids[kind],found->first,teki->mHealth,teki->getParameterF(TPF_Life));
     }
     if(seen.size()!=wanted.size())std::abort();loadAnimation(banks);
 }

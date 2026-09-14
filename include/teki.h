@@ -23,6 +23,7 @@
 #include "pc_p2_kogane.h"
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_armor.h"
+#include "pc_p2_frog.h"
 #endif
 
 #if defined(PIKI_PC_PORT)
@@ -413,7 +414,7 @@ public:
 	f32 getParameterF(int idx) {
 		const f32 value=mTekiParams->getF(idx);
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
-		const f32 kogane=pc_p2_armor_param_f(this,idx,pc_p2_sokkuri_param_f(this,idx,pc_p2_kogane_param_f(this,idx,value)));
+		const f32 kogane=pc_p2_frog_param_f(this,idx,pc_p2_armor_param_f(this,idx,pc_p2_sokkuri_param_f(this,idx,pc_p2_kogane_param_f(this,idx,value))));
 		if(idx==TPF_Life)return pc_p2_kochappy_max_health(this,pc_p2_snow_max_health(this,kogane));
 		return kogane;
 #endif
