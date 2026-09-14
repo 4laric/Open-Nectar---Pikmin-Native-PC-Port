@@ -24,6 +24,7 @@
 #include "pc_p2_armor.h"
 #include "pc_p2_elecbug.h"
 #include "pc_p2_tamago.h"
+#include "pc_p2_snakejoint.h"
 #include "pc_p2_dangomushi.h"
 #include "pc_p2_catfish.h"
 #include "pc_p2_mar.h"
@@ -247,6 +248,7 @@ void pc_p2_preview_setup() {
     pc_p2_armor_setup();
     pc_p2_elecbug_setup();
     pc_p2_tamago_setup();
+    pc_p2_snakejoint_setup();
     pc_p2_dangomushi_setup();
     pc_p2_catfish_setup();
     pc_p2_mar_setup();

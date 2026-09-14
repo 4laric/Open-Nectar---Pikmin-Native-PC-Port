@@ -1,3 +1,4 @@
+#include "pc_p2_snakejoint.h"
 #include "pc_p2_dangomushi.h"
 #include "pc_p2_hanachirashi.h"
 #include "pc_p2_catfish.h"
@@ -476,6 +477,7 @@ void BTeki::update()
 	pc_p2_qurione_update(this);
 	pc_p2_elecbug_update(this);
 	pc_p2_tamago_update(this);
+	pc_p2_snakejoint_update(this);
 	pc_p2_dangomushi_update(this);
 	pc_p2_hanachirashi_update(this);
 	pc_p2_catfish_update(this);
