@@ -75,6 +75,12 @@ struct Host {
     bool stateClockActive = false;
     std::uint64_t clockCycle = 0;
     bool killed = false;
+    // Host walkToTarget: Move patrols, Chase pursues the searched target.
+    Vector3f spawnPos;
+    Vector3f patrolTarget;
+    bool hasPatrol = false;
+    unsigned patrolState = 0x12345678u;
+    float lastDistToGoal = 1e9f;
     // Greater (OniKurage, id 72) selection and the labelled captain-held seam.
     p2kurage::Variant variant = p2kurage::Variant::Lesser;
     bool captainHeld = false;
@@ -109,6 +115,10 @@ constexpr float kAttackFramesPerSecond = 30.0f;
 // Bounded OniKurage StateDrop gravity (the source falls under creature physics;
 // the host owns the integration until that seam exists).
 constexpr float kDropGravity = 300.0f;
+// Bounded host walkToTarget speed and patrol radius (source target is a random
+// patrol point; the host owns the walk).
+constexpr float kPatrolSpeed = 60.0f;
+constexpr float kPatrolRadius = 150.0f;
 
 // Source Kurage animation clips: durations from the ANF1 header (low 16 bits of
 // the third uint32) and events from enemyanimmgr.txt.  KeyEvents are carried as
@@ -211,6 +221,19 @@ Piki* findSuctionTarget()
     }
     return nullptr;
 }
+
+// Deterministic patrol point within kPatrolRadius of the spawn, for StateMove.
+void pickPatrol()
+{
+    sHost.patrolState = sHost.patrolState * 1664525u + 1013904223u;
+    const float u = float((sHost.patrolState >> 8) & 0xFFFFu) / 65535.0f;
+    sHost.patrolState = sHost.patrolState * 1664525u + 1013904223u;
+    const float v = float((sHost.patrolState >> 8) & 0xFFFFu) / 65535.0f;
+    const float angle = u * 6.2831853f;
+    const float dist = 40.0f + v * kPatrolRadius;
+    sHost.patrolTarget.set(sHost.spawnPos.x + std::cos(angle) * dist, 0.0f,
+        sHost.spawnPos.z + std::sin(angle) * dist);
+}
 }
 
 void pc_p2_kurage_arena_reset()
@@ -224,6 +247,7 @@ void pc_p2_kurage_arena_reset()
     sHost.fsmHealth = kFsmLiveHealth; sHost.ownerHasHealth = true; sHost.ownerBittered = false;
     sHost.autoAdmissions = 0; sHost.pendingKey = p2kurage::KeyEvent::None; sHost.fsmMotionFinished = false; sHost.fsmMotionTimer = 0;
     sHost.stateClock.cancel(); sHost.stateClockActive = false; sHost.clockCycle = 0; sHost.killed = false;
+    sHost.hasPatrol = false; sHost.patrolState = 0x12345678u; sHost.lastDistToGoal = 1e9f;
     sHost.variant = p2kurage::Variant::Lesser; sHost.captainHeld = false; sHost.captainSettled = true; sHost.fallVelocity = 0.0f;
     sHost.captainPolicy = nullptr; sHost.captainTarget = -1; sHost.captainNavi = nullptr;
     sHost.captainSlots.reset(); sHost.captorEpoch = 0; sHost.captainCaptured = false;
@@ -258,11 +282,13 @@ bool pc_p2_kurage_arena_setup(const char* profilePath)
     sHost.shape = parsed.shape; sHost.attackShape = parsed.attackShape; sHost.position = parsed.position; sHost.height = parsed.height;
     sHost.radius = parsed.radius; sHost.mouthJointTranslation = parsed.mouthJointTranslation;
     sHost.sourceJointAvailable = parsed.sourceJointAvailable;
+    sHost.spawnPos = sHost.position;
     sHost.phase = 0.0f; sHost.ready = sHost.alive = true;
     sHost.fsmEnabled = false; sHost.fsmTicks = 0; sHost.lastFsmState = -1; sHost.fsmAltitude = 0.0f;
     sHost.fsmHealth = kFsmLiveHealth; sHost.ownerHasHealth = true; sHost.ownerBittered = false;
     sHost.autoAdmissions = 0; sHost.pendingKey = p2kurage::KeyEvent::None; sHost.fsmMotionFinished = false; sHost.fsmMotionTimer = 0;
     sHost.stateClock.cancel(); sHost.stateClockActive = false; sHost.clockCycle = 0; sHost.killed = false;
+    sHost.hasPatrol = false; sHost.patrolState = 0x12345678u; sHost.lastDistToGoal = 1e9f;
     sHost.variant = p2kurage::Variant::Lesser; sHost.captainHeld = false; sHost.captainSettled = true; sHost.fallVelocity = 0.0f;
     sHost.captainPolicy = nullptr; sHost.captainTarget = -1; sHost.captainNavi = nullptr;
     sHost.captainSlots.reset(); sHost.captorEpoch = 0; sHost.captainCaptured = false;
@@ -303,6 +329,7 @@ bool pc_p2_kurage_arena_update(float delta, bool ownerAlive)
         in.isFlying = true;
         in.mapY = mapY;
         in.positionY = sHost.position.y;
+        in.distToTargetXZ = sHost.lastDistToGoal;
         const bool captainRoute = sHost.variant == p2kurage::Variant::Greater
             && sHost.captainPolicy && sHost.captainTarget >= 0 && sHost.captainNavi;
         const bool captainInRange = captainRoute && !sHost.captainCaptured
@@ -355,6 +382,37 @@ bool pc_p2_kurage_arena_update(float delta, bool ownerAlive)
         } else {
             sHost.fallVelocity = 0.0f;
             sHost.position.y += out.heightVelocity * delta;
+        }
+        // Host walkToTarget: Move patrols, Chase pursues the searched target.
+        // distToTargetXZ (next tick) drives the source Move arrival.
+        {
+            Vector3f goal;
+            bool haveGoal = false;
+            if (out.state == p2kurage::State::Move) {
+                if (!sHost.hasPatrol) { pickPatrol(); sHost.hasPatrol = true; }
+                goal = sHost.patrolTarget;
+                haveGoal = true;
+            } else if (out.state == p2kurage::State::Chase) {
+                Piki* chase = findSuctionTarget();
+                if (chase) { goal = chase->mSRT.t; haveGoal = true; }
+                else if (sHost.captainNavi && sHost.captainNavi->isAlive()) { goal = sHost.captainNavi->mSRT.t; haveGoal = true; }
+            } else {
+                sHost.hasPatrol = false;
+            }
+            if (haveGoal) {
+                const float dx = goal.x - sHost.position.x;
+                const float dz = goal.z - sHost.position.z;
+                const float dist = std::sqrt(dx * dx + dz * dz);
+                sHost.lastDistToGoal = dist;
+                if (dist > 1.0f && finite(delta)) {
+                    float step = kPatrolSpeed * delta;
+                    if (step > dist) step = dist;
+                    sHost.position.x += dx / dist * step;
+                    sHost.position.z += dz / dist * step;
+                }
+            } else {
+                sHost.lastDistToGoal = 1e9f;
+            }
         }
         sHost.fsmAltitude = out.altitude;
         const int prevState = sHost.lastFsmState;

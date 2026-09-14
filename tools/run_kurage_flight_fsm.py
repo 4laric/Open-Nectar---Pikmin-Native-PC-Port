@@ -32,6 +32,7 @@ SCENARIOS = {
     "flight-fsm-greater-captain": "--flight-fsm-greater-captain",
     "flight-fsm-stuck-flick": "--flight-fsm-stuck-flick",
     "flight-fsm-death-cycle": "--flight-fsm-death-cycle",
+    "flight-fsm-patrol": "--flight-fsm-patrol",
 }
 
 

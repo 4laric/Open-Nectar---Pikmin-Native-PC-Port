@@ -35,7 +35,7 @@
 #include <string>
 
 namespace {
-bool sKillScenario = false, sTransferScenario = false, sStageExitScenario = false, sAdmissionScenario = false, sAutomaticBindingScenario = false, sOniKurageScenario = false, sIngestionScenario = false, sFlightFsmScenario = false, sFlightFsmDeathScenario = false, sFlightFsmGreaterScenario = false, sFlightFsmGreaterDropScenario = false, sAutoFsmScenario = false, sFlightFsmGreaterCaptainScenario = false, sFlightFsmStuckFlickScenario = false, sFlightFsmDeathCycleScenario = false;
+bool sKillScenario = false, sTransferScenario = false, sStageExitScenario = false, sAdmissionScenario = false, sAutomaticBindingScenario = false, sOniKurageScenario = false, sIngestionScenario = false, sFlightFsmScenario = false, sFlightFsmDeathScenario = false, sFlightFsmGreaterScenario = false, sFlightFsmGreaterDropScenario = false, sAutoFsmScenario = false, sFlightFsmGreaterCaptainScenario = false, sFlightFsmStuckFlickScenario = false, sFlightFsmDeathCycleScenario = false, sFlightFsmPatrolScenario = false;
 void require(bool value, const char* message)
 {
     if (!value) { std::printf("FAIL KURAGE_RUNTIME %s\n", message); std::fflush(stdout); std::_Exit(1); }
@@ -88,6 +88,8 @@ class KurageApp final : public PlugPikiApp {
     bool captainBound = false;
     int captainStage = 0;
     bool captainSawDrop = false;
+    Vector3f patrolStart;
+    int patrolStartTick = 0;
     class FixtureOwner final : public Creature {
     public:
         FixtureOwner() : Creature(nullptr) { }
@@ -237,7 +239,7 @@ public:
             if (sFlightFsmScenario || sFlightFsmDeathScenario
                 || sFlightFsmGreaterScenario || sFlightFsmGreaterDropScenario
                 || sFlightFsmGreaterCaptainScenario || sFlightFsmStuckFlickScenario
-                || sFlightFsmDeathCycleScenario) {
+                || sFlightFsmDeathCycleScenario || sFlightFsmPatrolScenario) {
                 // Source flight lifecycle drives the host; the candidate sits
                 // inside the source suction window until the Attack state's
                 // autonomous admission scan claims it.
@@ -344,6 +346,32 @@ public:
             require(!piki->isAlive() && !piki->isStickTo() && piki->getStickObject() == nullptr, "receiver digest state");
             std::puts("P2_KURAGE_DIGEST_PASS alive16=1 half16_25=0.5 external_detach_scale=1 bitter_pause=1 health_pause=1 dead16_5=1 release_scale=1");
             receiverTested = true;
+        }
+        if (sFlightFsmPatrolScenario) {
+            ++fsmTicks;
+            // Park the candidate out of the source window so the FSM has no
+            // target and follows the Wait -> Move patrol path.
+            if (fsmPiki && fsmPiki->isAlive() && !pc_p2_kurage_receiver_controls(fsmPiki))
+                fsmPiki->resetPosition(Vector3f(1000.0f, 0.0f, 1000.0f));
+            require(pc_p2_kurage_arena_update(1.0f / 60.0f, true), "patrol host update");
+            if (fsmStage == 0) {
+                if (pc_p2_kurage_arena_fsm_state() == 2) {
+                    patrolStart = pc_p2_kurage_arena_owner()->mSRT.t;
+                    patrolStartTick = fsmTicks;
+                    fsmStage = 1;
+                } else require(fsmTicks < 600, "patrol wait->move timeout");
+                return result;
+            }
+            if (fsmTicks - patrolStartTick > 120) {
+                const Vector3f p = pc_p2_kurage_arena_owner()->mSRT.t;
+                const float moved = std::fabs(p.x - patrolStart.x) + std::fabs(p.z - patrolStart.z);
+                require(moved > 5.0f, "patrol moved horizontally");
+                std::printf("P2_KURAGE_PATROL_PASS moved=%.1f from=%.1f,%.1f to=%.1f,%.1f\n",
+                    moved, patrolStart.x, patrolStart.z, p.x, p.z);
+                std::puts("PASS KURAGE_RUNTIME flight_fsm_patrol");
+                std::fflush(stdout); std::_Exit(0);
+            }
+            return result;
         }
         if (sFlightFsmDeathCycleScenario) {
             ++fsmTicks;
@@ -604,6 +632,7 @@ int main(int argc, char** argv)
         if (std::string(argv[i]) == "--flight-fsm-greater-captain") sFlightFsmGreaterCaptainScenario = true;
         if (std::string(argv[i]) == "--flight-fsm-stuck-flick") sFlightFsmStuckFlickScenario = true;
         if (std::string(argv[i]) == "--flight-fsm-death-cycle") sFlightFsmDeathCycleScenario = true;
+        if (std::string(argv[i]) == "--flight-fsm-patrol") sFlightFsmPatrolScenario = true;
     }
     SDL_setenv("SDL_AUDIODRIVER", "dummy", 1); SDL_SetMainReady();
     pc_gpu_preference_apply(); _putenv_s("PIKMIN_RANDOMIZER_TEST_BACKGROUND", "1"); pc_bbft_init(argc, argv);

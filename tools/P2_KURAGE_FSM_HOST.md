@@ -137,6 +137,20 @@ wait/attack:
 This still does not animate within a pose (each converted MOD is a single static
 pose); it selects the correct static source pose per state.
 
+## Host walkToTarget (Move patrol / Chase pursuit)
+
+The FSM leaves movement to the host ("walkToTarget movement"). The arena host now
+implements it:
+
+- `State::Move`: a deterministic patrol point within `kPatrolRadius` of the
+  spawn (LCG); the host flies toward it at `kPatrolSpeed`, and the reported
+  `distToTargetXZ` drives the source Move arrival (`< 25` units -> Wait).
+- `State::Chase`: fly toward the searched Pikmin/captain target.
+- Other states hover (no horizontal motion). A new patrol point is chosen on
+  each Move entry.
+- `tools/p2_kurage_runtime.cpp`: `--flight-fsm-patrol` (target parked out of
+  range so the Wait -> Move path runs).
+
 ## Natural death cycle
 
 The arena host consumes the FSM death outputs: `out.deathProcedure`/`bodyBomb`
@@ -163,12 +177,20 @@ admission/death/greater/greater-drop/ingestion/kill/transfer/stageexit).
 Private build `output/native-lane29-build` (Ninja Release/MinGW gcc 16.2.0,
 JAudio ON, test hooks OFF), `ninja -n pikmin_pc`: no work to do.
 `bin/nectar.exe` SHA-256
-`C461603787B0659813A087E292B19F24D02B9607DBE3048D37AC1CED370CAE2A`.
+`1581E3DE90FAEA2EC7BA51A2D8F3A2963DB935CCBAC9138CC4B49C80A6B29047`.
 
-Fixture `output/p2-lane29-death-fixture-01` (provenance `status=built`);
+Fixture `output/p2-lane29-patrol-fixture-01` (provenance `status=built`);
 `fixture.exe` SHA-256
-`E5827C2C6AF41F0A93B9BF0539D2F6CF60EF21F024F8BF3DF5B74B7273948D07`.  All runs
+`756715675310262572C1B961BB4CACC601A98717F756B350694F1922106144CF`.  All runs
 use `PIKMIN_P2_ROOM_WINDOW=960x540` (centred `373,263`) and a 20-red squad.
+
+Host walkToTarget (Move patrol -> Wait arrival):
+
+```
+P2_KURAGE_FSM state=1 (Wait) t0 -> state=2 (Move) t204 -> state=1 t322
+P2_KURAGE_PATROL_PASS moved=72.0 from=-0.1,1.0 to=-5.3,67.8
+PASS KURAGE_RUNTIME flight_fsm_patrol
+```
 
 Natural death (real `dead1.bca` KEY3 + END kill):
 
