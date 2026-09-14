@@ -27,6 +27,7 @@
 #include "pc_p2_preview.h"
 #include "settings/pc_settings.h"
 #include "settings/pc_settings_p2d.h"
+#include "Generator.h"
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "PikiState.h"
@@ -43,8 +44,10 @@ int gFrames = 0;
 int gPhase = 0;
 int gStageFrames = 0;
 int gMeasureFrames = 0;
+int gDeathFrames = 0;
 Vector3f gVehicleStart;
 std::vector<Vector3f> gHeldStart;
+bool gVehicleKilled = false;
 
 void require(bool value, const char* message)
 {
@@ -103,6 +106,7 @@ public:
         case 0: setup(); break;
         case 1: stagePhase(); break;
         case 2: measurePhase(); break;
+        case 3: deathPhase(); break;
         }
         return result;
     }
@@ -159,6 +163,37 @@ private:
             std::printf("P2_FUEFUKI_VEHICLE_RT_MOVE held=%d moved=%.1f frames=%d state=%d\n",
                         (int)gHeldStart.size(), moved, gMeasureFrames,
                         pc_p2_hardlanes_fuefuki_state());
+            std::fflush(stdout);
+            gPhase = 3;
+        }
+    }
+
+    void deathPhase()
+    {
+        if (!gVehicleKilled) {
+            // Defeat the real placement vehicle; the FSM must route to Dead and
+            // release every follower (owner-death Panic release).
+            Iterator it(tekiMgr);
+            CI_LOOP(it)
+            {
+                Teki* teki = static_cast<Teki*>(*it);
+                if (teki && teki->mTekiType == TEKI_Napkid && teki->mGenerator
+                    && teki->mGenerator->_70 == 245001) {
+                    teki->mHealth = 0.0f;
+                    gVehicleKilled = true;
+                    std::printf("P2_FUEFUKI_VEHICLE_RT_KILL health=0\n");
+                    std::fflush(stdout);
+                    break;
+                }
+            }
+            require(gVehicleKilled, "placement vehicle not found to defeat");
+        }
+        ++gDeathFrames;
+        const int state = pc_p2_hardlanes_fuefuki_state();
+        const int held = pc_p2_hardlanes_fuefuki_held_count();
+        require(gDeathFrames < 240, "death release did not complete");
+        if (state == 0 && held == 0 && gDeathFrames > 1) {
+            std::printf("P2_FUEFUKI_VEHICLE_RT_DEATH state=0 held=0 frames=%d\n", gDeathFrames);
             std::printf("PASS FUEFUKI_VEHICLE_RUNTIME\n");
             std::fflush(stdout);
             std::_Exit(0);

@@ -10,11 +10,12 @@ fixture's own binding.
 ## Provenance
 
 - Native branch `opencode/p2-lane28-fuefuki-follow`, HEAD
-  `c10e663e982ad1abfd41408cebfd7962db9dd404`.
+  `c531ca7b1dc2baa24f5e3bb0fb5af9c8b450046a`.
 - Private build `output/lane28-fuefuki-build`, Ninja Release, MinGW-w64 g++
   16.2.0, JAudio ON; `ninja pikmin_pc -n` => no work.
-- Fixture `output/p2-lane28-vehicle-runtime-03/fixture.exe`, SHA-256
-  `170FAA3DB011C364E88F0951A2E9873D587B0B881F4F7C719EC7B929DB4340F4`.
+- Fixture `output/p2-lane28-vehicle-runtime-04/fixture.exe`, SHA-256
+  `3054B35020FE4224F2D94706B52EDEC4C8C4721EC4D97084878C77AE6506DF08`
+  (supersedes `…-03` `170FAA3D…`).
 - Run dir `output/p2-fuefuki-arena-real3/556113df…` (arena `p2-cargo-free.txt`,
   `p2-fuefuki-teki.txt`, overlaid pose bank + motion table).
 
@@ -30,8 +31,10 @@ P2_FUEFUKI_VEHICLE_RT_STAGE frames=30 state=2 held=0
 ...
 P2_FUEFUKI_VEHICLE_RT_STAGE frames=300 state=4 held=0
 P2_FUEFUKI_VEHICLE_RT_STAGE frames=330 state=7 held=0
-P2_FUEFUKI_VEHICLE_RT_CLAIM state=7 held=2 frames=335
-P2_FUEFUKI_VEHICLE_RT_MOVE held=2 moved=190.4 frames=3 state=7
+P2_FUEFUKI_VEHICLE_RT_CLAIM state=7 held=2 frames=339
+P2_FUEFUKI_VEHICLE_RT_MOVE held=2 moved=14.9 frames=2 state=7
+P2_FUEFUKI_VEHICLE_RT_KILL health=0
+P2_FUEFUKI_VEHICLE_RT_DEATH state=0 held=0 frames=22
 PASS FUEFUKI_VEHICLE_RUNTIME
 ```
 
@@ -45,8 +48,12 @@ Phase detail:
   (below); before it the Land state was fed the looping `wait.bca` and stalled.
 - At frame 335 (state 7, casting) the real whistle claimed **2** Pikmin
   (`held=2`).
-- The follow locomotion then moved the claimed Pikmin 190.4 units (flick +
-  volatile-velocity drive) — real motion on the real vehicle.
+- The follow locomotion then moved the claimed Pikmin (flick + volatile-velocity
+  drive) — real motion on the real vehicle.
+- Defeat: the fixture zeroes the vehicle's health; the FSM routes to `Dead(0)`
+  and the owner-death release detaches every follower. `P2_FUEFUKI_VEHICLE_RT_KILL`
+  then `..._RT_DEATH state=0 held=0` confirm `held` drops 2 → 0 on the real
+  vehicle within the same run.
 
 ## Fix that unblocked it
 
@@ -61,7 +68,8 @@ never delivered its END, so the FSM never advanced past `Land`.
 - The vehicle is **Napkid 11**, not enemy 41 (`native_identity` BLOCKED).
 - The FSM is fed by the converted motion event table, not source skeletal
   Beetle animation (#128).
-- `moved=190.4` combines the beetle's Jump flick with the labeled
-  `mVolatileVelocity` follow drive; follower count was small (2). No combat,
-  death, reward or persistence in this run.
+- The move distance combines the beetle's Jump flick with the labeled
+  `mVolatileVelocity` follow drive; follower count was small (2). Owner-death
+  follower release is covered, but the carcass/reward path, real combat
+  receivers and persistence are not.
 - Whistle effect ring/audio and retail material fidelity remain open.
