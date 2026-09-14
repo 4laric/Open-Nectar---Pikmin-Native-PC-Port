@@ -265,6 +265,9 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_bigtreasure_motion.cpp
     pc_port/pc_p2_bigtreasure_visual.cpp
     pc_port/pc_p2_bigtreasure_save.cpp
+    pc_port/pc_p2_bigtreasure_ordinary.cpp
+    pc_port/pc_p2_bigtreasure_animclock.cpp
+    pc_port/pc_p2_bigtreasure_elements.cpp
     pc_port/pc_randomizer.cpp
     pc_port/pc_p2_waterwraith.cpp
     pc_port/pc_p2_waterwraith_actor.cpp
