@@ -75,12 +75,31 @@ P2_FUEFUKI_FSM state=2 clip=wait
 ```
 
 `(-150, 30, 1850)` is the arena's Napkid placement, so the converted Fuefuki
-pose is drawn at the real placement vehicle. The FSM reached only `Land` because
-the source Beetle animation bank (#128) is not wired to feed key events; the
-fixture's synthetic key events are what advance the clip there.
+pose is drawn at the real placement vehicle.
+
+## Motion bank drives the FSM (real vehicle)
+
+`pc_p2_fuefuki_motion` loads the converted `P2_RETAIL_EVENTS_1` table
+(`experimental/pikmin2_fuefuki_motion.py`) and `pc_p2_hardlanes` plays the clip
+for the current FSM state through the vendored `p2retail::Player`, feeding
+`KEYEVENT_2/3` and clip completion. On the real Napkid vehicle the FSM now
+cycles and the visual clips follow:
+
+```
+P2_HARDLANES_READY family=Fuefuki motion=1 clips=10
+P2_FUEFUKI_FSM state=2 clip=wait
+P2_FUEFUKI_FSM state=3 clip=jump
+P2_FUEFUKI_FSM state=1 clip=jump
+P2_FUEFUKI_FSM state=2 clip=wait
+...
+```
+
+It cycles `Land -> Jump -> Stay` rather than `Walk/Turn/Whisle` because a nearby
+captain triggers the source jump-away (intruder) behaviour. The source Beetle
+animation bank (#128) is still the eventual feed; this table is the host stand-in.
 
 ## Next steps
 
-- Stage a moveable vehicle (Napkid proxy) so the FSM→clip mapping and the
-  visual-at-vehicle transform are exercised end-to-end.
 - Provider 09 material fidelity and the whistle effect ring; audio (#128).
+- Source Beetle animation bank (#128) to replace the event-table feed.
+- Native Fuefuki identity (enemy 41) registration (`native_identity` BLOCKED).

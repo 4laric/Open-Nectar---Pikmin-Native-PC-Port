@@ -44,9 +44,13 @@ the visual is anchored on the real vehicle. The run stayed stable for 40 s
 
 - **Native Fuefuki identity (41):** the vehicle is Napkid 11; `native_identity`
   stays BLOCKED.
-- **FSM progression:** on the real vehicle the FSM reached only `Land` (`state=2`)
-  because the source Beetle animation bank is not wired (#128), so no
-  `KEYEVENT_2/3/END` events are fed. The fixture drives synthetic key events;
-  the arena cannot until the motion bank lands.
+- **FSM progression:** now driven from the converted motion event table
+  (`pc_p2_fuefuki_motion` + `p2retail::Player`): on the real vehicle the FSM
+  cycles `Land -> Jump -> Stay -> Land` with matching visual clips
+  (`state=2 clip=wait`, `state=3 clip=jump`, `state=1 clip=jump`). It does not
+  reach `Walk/Turn/Whisle` in the arena because a nearby captain triggers the
+  source jump-away (intruder) behaviour. The source Beetle animation bank
+  (#128) remains the eventual feed, but the table is enough for the state
+  machine.
 - Whistle effect ring, audio, material fidelity; the arena does not itself stage
   the converted pose bank (overlay `p2-fuefuki-visual.txt` + mods to see it).
