@@ -36,6 +36,7 @@ struct VisualState {
     int active = -1;
     int pose = 0;
     bool drew = false;
+    float position[3] = {};
 };
 
 VisualState sVisual;
@@ -179,6 +180,38 @@ int pc_p2_fuefuki_visual_clip_count()
     return sVisual.clipCount;
 }
 
+const char* pc_p2_fuefuki_visual_clip_for_state(int state)
+{
+    switch (state) {
+    case 0: return "dead";      // Dead
+    case 1: return "jump";      // Stay (airborne)
+    case 2: return "wait";      // Land (landing clip not converted)
+    case 3: return "jump";      // Jump
+    case 4: return "wait";      // Wait
+    case 5: return "pivot";     // Turn
+    case 6: return "move";      // Walk
+    case 7: return "whisle";    // Whisle
+    case 8: return "struggle";  // Struggle
+    }
+    return "wait";
+}
+
+void pc_p2_fuefuki_visual_set_position(float x, float y, float z)
+{
+    if (std::isfinite(x) && std::isfinite(y) && std::isfinite(z)) {
+        sVisual.position[0] = x;
+        sVisual.position[1] = y;
+        sVisual.position[2] = z;
+    }
+}
+
+void pc_p2_fuefuki_visual_position(float& x, float& y, float& z)
+{
+    x = sVisual.position[0];
+    y = sVisual.position[1];
+    z = sVisual.position[2];
+}
+
 bool pc_p2_fuefuki_visual_clip(const char* name)
 {
     if (!sVisual.ready || !name) {
@@ -232,7 +265,7 @@ bool pc_p2_fuefuki_visual_drew()
     return sVisual.drew;
 }
 
-void pc_p2_fuefuki_visual_draw(Graphics& gfx, const Matrix4f& ownerWorld)
+void pc_p2_fuefuki_visual_draw(Graphics& gfx)
 {
     if (!sVisual.ready || sVisual.active < 0 || !gfx.mCamera) {
         return;
@@ -240,8 +273,11 @@ void pc_p2_fuefuki_visual_draw(Graphics& gfx, const Matrix4f& ownerWorld)
     gfx.setPerspective(gfx.mCamera->mPerspectiveMatrix.mMtx, gfx.mCamera->mFov,
                        gfx.mCamera->mAspectRatio, gfx.mCamera->mNear, gfx.mCamera->mFar, 1.0f);
     const int pose = pc_p2_fuefuki_visual_pose_index();
+    Matrix4f owner;
+    owner.makeSRT(Vector3f(1.0f, 1.0f, 1.0f), Vector3f(0.0f, 0.0f, 0.0f),
+                  Vector3f(sVisual.position[0], sVisual.position[1], sVisual.position[2]));
     Matrix4f view;
-    gfx.mCamera->mLookAtMtx.multiplyTo(ownerWorld, view);
+    gfx.mCamera->mLookAtMtx.multiplyTo(owner, view);
     Shape* shape = sVisual.clips[sVisual.active].poses[pose];
     shape->updateAnim(gfx, view, nullptr, nullptr);
     shape->drawshape(gfx, *gfx.mCamera, nullptr);

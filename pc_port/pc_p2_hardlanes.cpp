@@ -72,23 +72,6 @@ double sFuefukiDebt = 0.0;
 bool sFuefukiVisualReady = false;
 double sFuefukiVisualDebt = 0.0;
 
-// Lane FSM state -> converted clip name (landing/landfail are not converted).
-const char* fuefukiVisualClip(P2FuefukiFsmState state)
-{
-    switch (state) {
-    case P2FuefukiFsmState::Dead: return "dead";
-    case P2FuefukiFsmState::Stay: return "jump";
-    case P2FuefukiFsmState::Land: return "wait";
-    case P2FuefukiFsmState::Jump: return "jump";
-    case P2FuefukiFsmState::Wait: return "wait";
-    case P2FuefukiFsmState::Turn: return "pivot";
-    case P2FuefukiFsmState::Walk: return "move";
-    case P2FuefukiFsmState::Whisle: return "whisle";
-    case P2FuefukiFsmState::Struggle: return "struggle";
-    }
-    return "wait";
-}
-
 std::uint32_t fuefukiId(Piki* piki)
 {
     auto it = sFuefukiId.find(piki);
@@ -321,6 +304,8 @@ void pc_p2_hardlanes_setup()
     if (pc_p2_fuefuki_visual_setup("p2-fuefuki-visual.txt")) {
         sFuefukiVisualReady = true;
         pc_p2_fuefuki_visual_clip("wait");
+        const float ground = mapMgr->getMinY(0.0f, 0.0f, false);
+        pc_p2_fuefuki_visual_set_position(0.0f, ground, 0.0f);
         std::printf("P2_HARDLANES_READY family=Fuefuki visual=1 clips=%d\n",
                     pc_p2_fuefuki_visual_clip_count());
     }
@@ -356,6 +341,8 @@ void pc_p2_hardlanes_update()
     }
 
     if (sFuefuki && sFuefukiVehicle) {
+        const Vector3f anchor = sFuefukiVehicle->getPosition();
+        pc_p2_fuefuki_visual_set_position(anchor.x, anchor.y, anchor.z);
         sFuefukiDebt += gsys->getFrameTime();
         int ticks = static_cast<int>(sFuefukiDebt / kFuefukiSourceDelta);
         if (ticks > 4) ticks = 4;
@@ -379,7 +366,8 @@ void pc_p2_hardlanes_update()
         sFuefukiVisualDebt -= ticks * static_cast<double>(kFuefukiSourceDelta);
         for (int i = 0; i < ticks; ++i) {
             if (sFuefuki)
-                pc_p2_fuefuki_visual_clip(fuefukiVisualClip(sFuefuki->getFsm().getState()));
+                pc_p2_fuefuki_visual_clip(pc_p2_fuefuki_visual_clip_for_state(
+                    static_cast<int>(sFuefuki->getFsm().getState())));
             pc_p2_fuefuki_visual_update(1.0f);
         }
     }
@@ -403,17 +391,7 @@ void pc_p2_hardlanes_update()
 void pc_p2_hardlanes_draw(Graphics& gfx)
 {
     if (sBombSaraiReady) pc_p2_bombsarai_arena_draw(gfx);
-    if (sFuefukiVisualReady) {
-        Vector3f pos(0.0f, 0.0f, 0.0f);
-        if (sFuefukiVehicle) {
-            pos = sFuefukiVehicle->getPosition();
-        } else if (mapMgr) {
-            pos.y = mapMgr->getMinY(0.0f, 0.0f, false);
-        }
-        Matrix4f owner;
-        owner.makeSRT(Vector3f(1.0f, 1.0f, 1.0f), Vector3f(0.0f, 0.0f, 0.0f), pos);
-        pc_p2_fuefuki_visual_draw(gfx, owner);
-    }
+    if (sFuefukiVisualReady) pc_p2_fuefuki_visual_draw(gfx);
     if (sBigTreasureVisualReady) {
         Matrix4f owner;
         owner.makeSRT(Vector3f(1.0f, 1.0f, 1.0f), Vector3f(0.0f, 0.0f, 0.0f),

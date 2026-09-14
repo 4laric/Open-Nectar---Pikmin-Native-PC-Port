@@ -39,9 +39,11 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <vector>
 
 #include "pc_p2_fuefuki_binding.h"
+#include "pc_p2_fuefuki_visual.h"
 
 namespace {
 constexpr float kDt = 1.0f / 30.0f;
@@ -300,6 +302,8 @@ private:
             g.held.push_back(false);
         }
         require(g.pikis.size() == 6, "squad size");
+        require(pc_p2_fuefuki_visual_ready(), "visual bank not staged");
+        require(pc_p2_fuefuki_visual_clip_count() == 8, "visual clip count");
         require(binding.bind(rtHost(), retailParms(), nullptr, retailFollowParms()), "binding bind");
         require(binding.spawn(1).accepted, "spawn");
         g.binding = &binding;
@@ -327,7 +331,16 @@ private:
             g.baselineMode.push_back(p->mMode);
         locoStart = xzDist(g.pikis[0]->mSRT.t, g.anchor);
         require(locoStart > 50.0f && locoStart < 100.0f, "unexpected start distance");
+        // State-driven visual clip: the FSM is casting, so the mapped clip must
+        // be "whisle" (landing/landfail are not converted).
+        pc_p2_fuefuki_visual_set_position(g.anchor.x, g.anchor.y, g.anchor.z);
+        const int state = static_cast<int>(binding.getFsm().getState());
+        pc_p2_fuefuki_visual_clip(pc_p2_fuefuki_visual_clip_for_state(state));
+        require(std::strcmp(pc_p2_fuefuki_visual_active_clip(), "whisle") == 0,
+                "FSM state did not map to the whisle clip");
         std::printf("P2_FUEFUKI_FOLLOW_RT_CLAIM claimed=3 hold=3 start_dist=%.1f\n", locoStart);
+        std::printf("P2_FUEFUKI_VISUAL_STATE state=%d clip=%s pose=%d\n", state,
+                    pc_p2_fuefuki_visual_active_clip(), pc_p2_fuefuki_visual_pose_index());
         std::fflush(stdout);
         phase = 2;
     }
@@ -372,6 +385,11 @@ private:
         P2FuefukiBindTick t;
         t.delta = kDt; t.health = 700.0f; t.animPlaying = true;
         drive(t);
+        // The visual anchor tracks the beetle; the FSM clip follows the state.
+        pc_p2_fuefuki_visual_set_position(g.anchor.x, g.anchor.y, g.anchor.z);
+        pc_p2_fuefuki_visual_clip(pc_p2_fuefuki_visual_clip_for_state(
+            static_cast<int>(binding.getFsm().getState())));
+        pc_p2_fuefuki_visual_update(1.0f);
         ++moveFrames;
         const Vector3f& fpos = g.pikis[0]->mSRT.t;
         const float moved = xzDist(fpos, approachEnd);
@@ -381,8 +399,14 @@ private:
             require(moved >= 15.0f, "follower did not chase the moving trail");
             require(toAnchor <= 180.0f, "follower lost the moving beetle");
             require(g.writes == 0, "ownership write during trail chase");
+            float vx = 0.0f, vy = 0.0f, vz = 0.0f;
+            pc_p2_fuefuki_visual_position(vx, vy, vz);
+            require(std::fabs(vx - g.anchor.x) < 0.01f && std::fabs(vz - g.anchor.z) < 0.01f,
+                    "visual anchor did not track the moving beetle");
             std::printf("P2_FUEFUKI_FOLLOW_RT_TRAIL anchors_moved=%.1f follower_moved=%.1f dist_to_anchor=%.1f frames=%d moves=%d stops=%d writes=0\n",
                         -(g.anchor.z), moved, toAnchor, moveFrames, g.moveCommands, g.stopCommands);
+            std::printf("P2_FUEFUKI_VISUAL_TRACK x=%.1f z=%.1f clip=%s pose=%d\n", vx, vz,
+                        pc_p2_fuefuki_visual_active_clip(), pc_p2_fuefuki_visual_pose_index());
             std::fflush(stdout);
             phase = 4;
         }
@@ -390,6 +414,7 @@ private:
 
     void finishPhase()
     {
+        require(pc_p2_fuefuki_visual_drew(), "visual never reached the draw path");
         std::puts("PASS FUEFUKI_FOLLOW_RUNTIME");
         std::fflush(stdout);
         std::_Exit(0);

@@ -1,7 +1,6 @@
 #pragma once
 
 class Graphics;
-struct Matrix4f;
 
 // Lane-owned Fuefuki visual bank (#245): baked sampled rigid poses from the
 // restricted converter (docs/PIKMIN2_FUEFUKI_ASSETS.md) with clip selection
@@ -23,6 +22,16 @@ void pc_p2_fuefuki_visual_reset();
 bool pc_p2_fuefuki_visual_ready();
 int pc_p2_fuefuki_visual_clip_count();
 
+// Lane FSM state -> clip name. `state` is a P2FuefukiFsmState value
+// (Dead 0 .. Struggle 8); landing clips are not converted, so Land maps to
+// "wait". Returns "wait" for out-of-range values.
+const char* pc_p2_fuefuki_visual_clip_for_state(int state);
+
+// World anchor for the drawn pose (host sets it from the vehicle each frame;
+// initialised to the room ground origin).
+void pc_p2_fuefuki_visual_set_position(float x, float y, float z);
+void pc_p2_fuefuki_visual_position(float& x, float& y, float& z);
+
 // Starts a clip by name; false for unknown clips or when not ready.
 bool pc_p2_fuefuki_visual_clip(const char* name);
 const char* pc_p2_fuefuki_visual_active_clip();
@@ -35,5 +44,5 @@ int pc_p2_fuefuki_visual_pose_index();
 // Prints a one-time readiness/draw marker for runtime evidence.
 bool pc_p2_fuefuki_visual_drew();
 
-// Draws the active pose under ownerWorld.
-void pc_p2_fuefuki_visual_draw(Graphics& gfx, const Matrix4f& ownerWorld);
+// Draws the active pose at the stored anchor.
+void pc_p2_fuefuki_visual_draw(Graphics& gfx);
