@@ -140,3 +140,17 @@ void pc_p2_reset_all_teki()
 	pc_p2_batch3_reset();
 	pc_p2_long_legs_reset();
 }
+
+namespace {
+unsigned long sSceneGeneration = 0;
+}
+
+void pc_p2_scene_begin()
+{
+	++sSceneGeneration;
+}
+
+unsigned long pc_p2_scene_generation()
+{
+	return sSceneGeneration;
+}

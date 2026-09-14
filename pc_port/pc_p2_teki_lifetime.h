@@ -23,3 +23,10 @@ void pc_p2_forget_teki(BTeki* actor);
 // (stage exit only reset the kurage families before this). Safe to call while
 // the stage creatures and managers are still valid.
 void pc_p2_reset_all_teki();
+
+// Safe new-scene signal for lifecycle fixtures: called once from
+// GameCoreSection::finalSetup for every loaded stage. Fixtures must not touch
+// TekiMgr/P2 family state across a stage transition until this has advanced, as
+// the transition frees the previous TekiMgr.
+void pc_p2_scene_begin();
+unsigned long pc_p2_scene_generation();

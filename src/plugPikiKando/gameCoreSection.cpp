@@ -1398,6 +1398,8 @@ void GameCoreSection::finalSetup()
 	pc_p2_onikurage_teki_setup();
 	pc_p2_preview_setup();
 	pc_p2_snow_campaign_setup();
+	// Actor-lifetime (#397): mark the new scene ready for lifecycle fixtures.
+	pc_p2_scene_begin();
 	PRINT("====================== FINAL SETUP DONE ======================\n");
 }
 
