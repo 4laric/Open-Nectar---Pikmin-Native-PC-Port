@@ -353,17 +353,9 @@ int pc_p2_waterwraith_visual_draw(Graphics& gfx, const Matrix4f& ownerWorld)
     if (!sVisual.ready || !gfx.mCamera) {
         return 0;
     }
-    gfx.setPerspective(gfx.mCamera->mPerspectiveMatrix.mMtx, gfx.mCamera->mFov,
-                       gfx.mCamera->mAspectRatio, gfx.mCamera->mNear, gfx.mCamera->mFar, 1.0f);
     int drawn = 0;
     for (int i = 0; i < sVisual.speciesCount; ++i) {
-        const ActiveClip& active = sVisual.active[i];
-        if (active.clip < 0) {
-            continue;
-        }
-        const ClipBank& clip = sVisual.clips[active.clip];
-        const int pose = pc_p2_waterwraith_visual_pose_index(sVisual.species[i].name.c_str());
-        if (pose < 0 || !clip.poses[pose]) {
+        if (sVisual.active[i].clip < 0) {
             continue;
         }
         Matrix4f offset;
@@ -373,16 +365,41 @@ int pc_p2_waterwraith_visual_draw(Graphics& gfx, const Matrix4f& ownerWorld)
             }
         }
         offset.mMtx[0][3] = static_cast<float>(i) * 80.0f;
-        Matrix4f world, view;
+        Matrix4f world;
         ownerWorld.multiplyTo(offset, world);
-        gfx.mCamera->mLookAtMtx.multiplyTo(world, view);
-        clip.poses[pose]->updateAnim(gfx, view, nullptr, nullptr);
-        clip.poses[pose]->drawshape(gfx, *gfx.mCamera, nullptr);
-        ++drawn;
-    }
-    if (!sVisual.drew && drawn > 0) {
-        std::printf("P2_WATERWRAITH_VISUAL_DRAW species=%d\n", drawn);
-        sVisual.drew = true;
+        drawn += pc_p2_waterwraith_visual_draw_species(gfx, sVisual.species[i].name.c_str(), world);
     }
     return drawn;
+}
+
+int pc_p2_waterwraith_visual_draw_species(Graphics& gfx, const char* species,
+                                          const Matrix4f& world)
+{
+    if (!sVisual.ready || !gfx.mCamera || !species) {
+        return 0;
+    }
+    const int speciesIndex = findSpecies(species);
+    if (speciesIndex < 0) {
+        return 0;
+    }
+    const ActiveClip& active = sVisual.active[speciesIndex];
+    if (active.clip < 0) {
+        return 0;
+    }
+    const int pose = pc_p2_waterwraith_visual_pose_index(species);
+    if (pose < 0 || !sVisual.clips[active.clip].poses[pose]) {
+        return 0;
+    }
+    gfx.setPerspective(gfx.mCamera->mPerspectiveMatrix.mMtx, gfx.mCamera->mFov,
+                       gfx.mCamera->mAspectRatio, gfx.mCamera->mNear, gfx.mCamera->mFar, 1.0f);
+    Matrix4f view;
+    gfx.mCamera->mLookAtMtx.multiplyTo(world, view);
+    Shape* shape = sVisual.clips[active.clip].poses[pose];
+    shape->updateAnim(gfx, view, nullptr, nullptr);
+    shape->drawshape(gfx, *gfx.mCamera, nullptr);
+    if (!sVisual.drew) {
+        std::printf("P2_WATERWRAITH_VISUAL_DRAW species=1\n");
+        sVisual.drew = true;
+    }
+    return 1;
 }

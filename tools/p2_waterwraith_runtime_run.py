@@ -18,7 +18,7 @@ import traceback
 
 MARKERS = ("P2_WATERWRAITH_VISUAL_READY", "P2_WATERWRAITH_VISUAL_DRAW",
            "P2_WATERWRAITH_VISUAL_PLAY", "P2_WATERWRAITH_WINDOW",
-           "PASS WATERWRAITH_RUNTIME")
+           "P2_WATERWRAITH_HOST_PASS", "PASS WATERWRAITH_RUNTIME")
 
 
 def sha256(path):
@@ -89,8 +89,14 @@ def verify_log(text):
     draw = re.search(r"^P2_WATERWRAITH_VISUAL_DRAW\s+species=(\d+)\s*$", text, flags=re.MULTILINE)
     if not draw:
         errors.append("missing visual DRAW marker")
-    elif int(draw.group(1)) != 2:
-        errors.append(f"expected 2 species drawn: {draw.groups()}")
+    elif int(draw.group(1)) != 1:
+        errors.append(f"expected per-species draw marker: {draw.groups()}")
+    host = re.search(r"^P2_WATERWRAITH_HOST_PASS\s+ticks=(\d+)\s+distance=([\d.]+)\s+"
+                     r"roll=([\d.]+)\s+phase=(\w+)\s*$", text, flags=re.MULTILINE)
+    if not host:
+        errors.append("missing host PASS marker")
+    elif float(host.group(2)) <= 0.0 or float(host.group(3)) <= 0.0:
+        errors.append(f"roller did not travel/roll: {host.groups()}")
     return errors
 
 

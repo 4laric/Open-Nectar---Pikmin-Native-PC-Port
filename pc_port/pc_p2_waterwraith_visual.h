@@ -45,3 +45,8 @@ bool pc_p2_waterwraith_visual_completed();
 // Draws every active species' current pose under `ownerWorld`, offset along X
 // by 80 units per species index. Returns the number of species drawn.
 int pc_p2_waterwraith_visual_draw(Graphics& gfx, const Matrix4f& ownerWorld);
+
+// Draws one species' current pose at an explicit world transform. Returns 1
+// when drawn, 0 when the species/clip is inactive or unknown.
+int pc_p2_waterwraith_visual_draw_species(Graphics& gfx, const char* species,
+                                          const Matrix4f& world);

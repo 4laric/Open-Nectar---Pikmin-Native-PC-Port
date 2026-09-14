@@ -30,8 +30,11 @@
 #include <vector>
 
 #include "pc_p2_waterwraith_visual.h"
+#include "pc_p2_waterwraith_host.h"
 
 namespace {
+constexpr float kDt = 1.0f / 30.0f;
+
 void require(bool value, const char* message)
 {
     if (!value) {
@@ -75,6 +78,7 @@ class WaterwraithApp final : public PlugPikiApp {
     bool setup = false;
     bool captured = false;
     float ground = 0.0f;
+    P2WaterwraithHostSeam seam;
 
 public:
     int idle() override
@@ -103,6 +107,8 @@ public:
             require(pc_p2_waterwraith_visual_play("BlackMan", "kagebozu_walk", true),
                     "BlackMan walk play");
             require(pc_p2_waterwraith_visual_play("Tyre", "tyre_move", true), "Tyre move play");
+            require(p2_waterwraith_host_setup(seam), "host setup");
+            require(seam.rig.alive() && seam.rig.attachedToOwner(), "roller birth");
             SDL_Window* window = SDL_GL_GetCurrentWindow();
             require(window != nullptr, "window");
             int windowWidth = 0, windowHeight = 0, windowX = 0, windowY = 0;
@@ -115,6 +121,7 @@ public:
             setup = true;
         }
         require(pc_p2_waterwraith_visual_update() == 2, "visual update");
+        p2_waterwraith_host_tick(seam, kDt);
         ++visualFrames;
         return result;
     }
@@ -125,12 +132,27 @@ public:
         if (!setup) {
             return;
         }
-        Matrix4f owner;
-        owner.makeSRT(Vector3f(1.0f, 1.0f, 1.0f), Vector3f(0.0f, 0.0f, 0.0f),
-                      Vector3f(0.0f, ground, -250.0f));
-        const int drawn = pc_p2_waterwraith_visual_draw(gfx, owner);
-        require(drawn == 2, "visual draw");
+        // BlackMan walks the host route; the rig-owned Tyre child follows at
+        // the pushed position with the derived roll angle applied.
+        const P2WaterwraithVec3 roller = seam.rig.position();
+        Matrix4f wraithWorld;
+        wraithWorld.makeSRT(Vector3f(1.0f, 1.0f, 1.0f), Vector3f(0.0f, seam.facing, 0.0f),
+                            Vector3f(seam.x, seam.y, seam.z));
+        Matrix4f tyreWorld;
+        tyreWorld.makeSRT(Vector3f(1.0f, 1.0f, 1.0f),
+                          Vector3f(0.0f, 0.0f, seam.rig.rollAngle()),
+                          Vector3f(roller.x, roller.y, roller.z));
+        const int wraithDrawn =
+            pc_p2_waterwraith_visual_draw_species(gfx, "BlackMan", wraithWorld);
+        const int tyreDrawn = pc_p2_waterwraith_visual_draw_species(gfx, "Tyre", tyreWorld);
+        require(wraithDrawn == 1 && tyreDrawn == 1, "visual draw");
         if (visualFrames >= 90 && !captured) {
+            require(seam.rig.travelledDistance() > 0.0f, "roller travelled");
+            require(seam.rig.rollAngle() > 0.0f, "roller rolled");
+            std::printf("P2_WATERWRAITH_HOST_PASS ticks=%llu distance=%.3f roll=%.4f phase=%s\n",
+                        (unsigned long long)seam.ticks, seam.rig.travelledDistance(),
+                        seam.rig.rollAngle(),
+                        seam.rig.tyrePhase() == P2TYRE_Move ? "Move" : "Freeze");
             capture("waterwraith-visual.ppm");
             captured = true;
             std::puts("PASS WATERWRAITH_RUNTIME");
