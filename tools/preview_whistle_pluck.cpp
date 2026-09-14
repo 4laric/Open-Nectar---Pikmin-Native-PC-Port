@@ -108,7 +108,7 @@ public:
             std::printf("FIXTURE_READY live=20 active=Walk window=%dx%d centered sprouts=4 total=%d\n",pc_window_get_width(),pc_window_get_height(),total);
         } else if(phase==1 && ++ticks>=12) {
             require(sprouts()==before,"disabled real whistle plucked");held=false;
-            n->mFSM->transit(n,NAVISTATE_Walk);setting(true);
+            n->mStateMachine->transit(n,NAVISTATE_Walk);setting(true);
             n->mCursorWorldPos=target->mSRT.t;
             gameflow.mPauseAll=true;require(!pc_whistle_pluck(n,100),"paused pluck");gameflow.mPauseAll=false;
             gameflow.mIsUIOverlayActive=true;require(!pc_whistle_pluck(n,100),"UI pluck");gameflow.mIsUIOverlayActive=false;
@@ -169,3 +169,4 @@ int main(int argc,char** argv) {
     std::puts("Experimental preview window set to 960x540 windowed and centered");
     gsys->Initialise();pc_settings_p2d_init();nodeMgr=new NodeMgr();gsys->run(new PluckApp());return 0;
 }
+
