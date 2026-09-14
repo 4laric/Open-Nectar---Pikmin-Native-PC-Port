@@ -21,6 +21,7 @@
 #include "pc_p2_king.h"
 #include "pc_p2_flora_actor.h"
 #include "pc_p2_pom.h"
+#include "pc_p2_candypop.h"
 #include "pc_p2_plant.h"
 #include "pc_p2_batch2.h"
 #include "pc_p2_sokkuri.h"
@@ -249,6 +250,7 @@ void pc_p2_preview_setup() {
     pc_p2_hiba_setup();
     pc_p2_flora_setup();
     pc_p2_pom_setup();
+    pc_p2_candypop_setup();
     pc_p2_plant_setup();
     pc_p2_dweevil_setup();
     pc_p2_bombotakara_setup();
