@@ -138,7 +138,15 @@ class P2CaptainPolicy {
     P2CaptainOwnershipTable* table = nullptr;
     P2CaptainSlot slots[P2CaptainCount];
     int active = P2CaptainInvalid;
-    std::uint64_t nextEpoch = 1;
+
+    // Captor-held actors (Snitchbug, Demon, Jellyfloat). An actor is either
+    // captain-owned or captor-held, never both; `previousOwner` lets a reload
+    // restore it without loss.
+    struct CaptiveRecord {
+        std::uint64_t captorEpoch = 0;
+        int previousOwner = P2CaptainInvalid;
+    };
+    std::unordered_map<std::uint32_t, CaptiveRecord> captives;
 
     bool aliveIdle(int captain) const {
         if (!p2_is_captain(captain)) return false;
@@ -292,6 +300,14 @@ public:
                 slots[c].captureEpoch = 0;
             }
         }
+        // Captor-held actors are transient; restore each to its previous
+        // captain (or the active one) so a reload cannot lose a squad.
+        for (const auto& entry : captives) {
+            int restore = entry.second.previousOwner;
+            if (!aliveIdle(restore)) restore = active;
+            if (aliveIdle(restore)) table->tryClaim(entry.first, restore);
+        }
+        captives.clear();
         selectFallback();
     }
 
@@ -305,6 +321,56 @@ public:
         if (bound()) table->release(actor, captain);
     }
 
+    // --- Captor-held actors (families 29/30; captor FSM stays family-owned) ---
+
+    // A captor grabs an actor (Pikmin or carried item) under a nonzero captor
+    // epoch. If captain-owned it is removed from that captain; the previous
+    // owner is recorded for reload restoration. An already-captive actor is
+    // never double-claimed.
+    bool captureActor(std::uint64_t captorEpoch, std::uint32_t actor) {
+        if (!bound() || !captorEpoch || !actor || captives.count(actor)) return false;
+        CaptiveRecord record;
+        record.captorEpoch = captorEpoch;
+        record.previousOwner = table->ownerOf(actor);
+        if (P2CaptainOwnershipTable::isCaptain(record.previousOwner))
+            table->release(actor, record.previousOwner);
+        captives[actor] = record;
+        return true;
+    }
+
+    // Captor drop/release. `toCaptain` reattaches to the squad; an invalid or
+    // unavailable target restores the previous owner when still controllable,
+    // otherwise the actor is left free (whistle-reclaimable), never deleted.
+    bool releaseActor(std::uint64_t captorEpoch, std::uint32_t actor, int toCaptain) {
+        auto it = captives.find(actor);
+        if (it == captives.end() || it->second.captorEpoch != captorEpoch) return false;
+        const int previousOwner = it->second.previousOwner;
+        captives.erase(it);
+        int restore = toCaptain;
+        if (!aliveIdle(restore)) restore = previousOwner;
+        if (aliveIdle(restore)) return table->tryClaim(actor, restore);
+        return true;
+    }
+
+    // Captor death/interruption: every actor it held is freed to the ground
+    // (whistle-reclaimable). Returns the released actor ids.
+    std::vector<std::uint32_t> dropAllCaptured(std::uint64_t captorEpoch) {
+        std::vector<std::uint32_t> out;
+        if (!bound() || !captorEpoch) return out;
+        for (auto it = captives.begin(); it != captives.end();) {
+            if (it->second.captorEpoch == captorEpoch) {
+                out.push_back(it->first);
+                it = captives.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        return out;
+    }
+
+    bool isCaptive(std::uint32_t actor) const { return captives.count(actor) != 0; }
+    std::size_t captiveCount() const { return captives.size(); }
+
     // Synchronous cancellation before scene teardown or manager-slot reuse.
     // Frees this policy's actors and clears transient capture state.
     void cancel() {
@@ -313,5 +379,6 @@ public:
             table->releaseAll(c);
             slots[c].captureEpoch = 0;
         }
+        captives.clear();
     }
 };

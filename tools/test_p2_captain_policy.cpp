@@ -89,6 +89,49 @@ int main() {
     assert(!cap2.controllable(P2CaptainB));
     assert(!cap2.switchActive(P2CaptainB));
 
+    // Captor-held actors (families 29/30): an actor is either captain-owned or
+    // captor-held, never both; drop frees it, reload restores it, stale
+    // captors cannot release it.
+    P2CaptainOwnershipTable table3;
+    P2CaptainPolicy cap3;
+    assert(cap3.bind(&table3));
+    assert(cap3.configure(P2CaptainA, 100.0f, true));
+    assert(cap3.configure(P2CaptainB, 100.0f, true));
+    assert(cap3.claim(P2CaptainA, 21));
+    assert(cap3.claim(P2CaptainA, 22));
+    assert(cap3.claim(P2CaptainB, 23));
+
+    assert(cap3.captureActor(900, 21));
+    assert(cap3.isCaptive(21));
+    assert(table3.ownerOf(21) == P2CaptainInvalid);
+    assert(table3.ownedBy(P2CaptainA) == 1); // 22 remains with A
+    assert(!cap3.captureActor(901, 21));      // never double-claimed
+    assert(cap3.releaseActor(900, 21, P2CaptainB));
+    assert(!cap3.isCaptive(21));
+    assert(table3.ownerOf(21) == P2CaptainB);
+    assert(table3.ownedCount() == 3); // 21, 22 and 23 all owned again
+
+    assert(cap3.captureActor(902, 22));
+    assert(!cap3.releaseActor(903, 22, P2CaptainA)); // stale captor epoch
+    assert(cap3.isCaptive(22));
+    std::vector<std::uint32_t> dropped = cap3.dropAllCaptured(902);
+    assert(dropped.size() == 1 && dropped[0] == 22);
+    assert(table3.ownerOf(22) == P2CaptainInvalid); // freed, not deleted
+
+    // A free actor can be grabbed, and releasing to an invalid target restores
+    // the (invalid) previous owner, i.e. leaves it free.
+    assert(cap3.captureActor(905, 22));
+    assert(cap3.releaseActor(905, 22, P2CaptainInvalid));
+    assert(table3.ownerOf(22) == P2CaptainInvalid);
+
+    // Reload restores a captive to its previous captain without duplication.
+    assert(cap3.captureActor(904, 23));
+    assert(table3.ownerOf(23) == P2CaptainInvalid);
+    cap3.reload();
+    assert(table3.ownerOf(23) == P2CaptainB);
+    assert(cap3.captiveCount() == 0);
+    assert(table3.ownedCount() == 2);
+
     // Cancellation before teardown frees every owned actor.
     cap.cancel();
     assert(table.ownedCount() == 0);
