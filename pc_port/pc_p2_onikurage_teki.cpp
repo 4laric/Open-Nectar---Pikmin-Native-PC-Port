@@ -69,10 +69,10 @@ void pc_p2_onikurage_teki_setup()
         if (!t || !t->mGenerator || t->mGenerator->_70 != gen) continue;
         if (t->mTekiType != type || s.size()) std::abort();
         if (!pc_p2_kurage_visual_setup()) std::abort();
-        Binding b{gen, type, {}, {}};
+        auto inserted = s.emplace(static_cast<BTeki*>(t), Binding{gen, type, {}, {}});
+        Binding& b = inserted.first->second;
         refresh(t, b);
         if (!pc_p2_kurage_receiver_setup(t, &b.suck)) std::abort();
-        s.emplace(static_cast<BTeki*>(t), std::move(b));
         std::printf("P2_ONIKURAGE_TEKI_READY generator=%u type=%d variant=Greater mouth_slots=%d binding=private_adapter\n",
             gen, type, p2onikurage::kMouthSlotCount);
     }

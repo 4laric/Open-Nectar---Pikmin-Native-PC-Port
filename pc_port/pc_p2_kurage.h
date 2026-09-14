@@ -25,7 +25,7 @@ public:
     P2KurageEvent update(float delta, bool ownerAlive, bool bittered);
     P2KurageEvent interrupt(int target);
     P2KurageEvent onDeath();
-    const std::array<P2KurageSlot, 2>& slots() const { return mSlots; }
+    const std::array<P2KurageSlot, 10>& slots() const { return mSlots; }
 
 private:
     int freeSlot(P2KurageCaptureKind kind) const;
