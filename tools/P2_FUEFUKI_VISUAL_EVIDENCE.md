@@ -21,9 +21,11 @@ Real in this run:
 Not covered / limitations:
 
 - **Vehicle identity:** the fixture moves a scripted anchor, not a native
-  Napkid vehicle (the converted room has none). The FSM→clip mapping, pose
-  advance and visual-at-moving-anchor transform are exercised; a real vehicle
-  identity/placement remains open.
+  Napkid vehicle. The FSM→clip mapping, pose advance and visual-at-moving-anchor
+  transform are exercised; a real vehicle is blocked (see
+  `P2_FUEFUKI_VEHICLE_BLOCKER.md`): the arena path stalls before the hardlane
+  setup, and a hand-initialised `tekiMgr->newTeki(TEKI_Napkid)` access-violates
+  on the next frame.
 - `landing`/`landfail` are absent (singular source joint scale); the profile
   lists only the 8 converted clips.
 - Baked rigid poses with approximate materials; no skeletal playback or
