@@ -712,6 +712,54 @@ target_include_directories(p2_snagret_fsm_test PRIVATE pc_port)
 target_compile_options(p2_snagret_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_snagret_fsm_test COMMAND p2_snagret_fsm_test)
 
+# Lane 27 BombSarai (Careening Dirigibug) engine-free source-policy gates. The
+# sources shipped on the approved line without ctest registration.
+add_executable(p2_bombsarai_fsm_test
+    tools/p2_bombsarai_fsm_test.cpp
+    pc_port/pc_p2_bombsarai_fsm.cpp)
+target_include_directories(p2_bombsarai_fsm_test PRIVATE pc_port)
+target_compile_options(p2_bombsarai_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_bombsarai_fsm_test COMMAND p2_bombsarai_fsm_test)
+
+add_executable(p2_bombsarai_bomb_test
+    tools/p2_bombsarai_bomb_test.cpp
+    pc_port/pc_p2_bombsarai_bomb.cpp)
+target_include_directories(p2_bombsarai_bomb_test PRIVATE pc_port)
+target_compile_options(p2_bombsarai_bomb_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_bombsarai_bomb_test COMMAND p2_bombsarai_bomb_test)
+
+add_executable(p2_bombsarai_blast_test
+    tools/p2_bombsarai_blast_test.cpp
+    pc_port/pc_p2_bombsarai_blast.cpp)
+target_include_directories(p2_bombsarai_blast_test PRIVATE pc_port)
+target_compile_options(p2_bombsarai_blast_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_bombsarai_blast_test COMMAND p2_bombsarai_blast_test)
+
+add_executable(p2_bombsarai_clock_test
+    tools/p2_bombsarai_clock_test.cpp)
+target_include_directories(p2_bombsarai_clock_test PRIVATE pc_port)
+target_compile_options(p2_bombsarai_clock_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_bombsarai_clock_test COMMAND p2_bombsarai_clock_test)
+
+add_executable(p2_bombsarai_hover_test
+    tools/p2_bombsarai_hover_test.cpp
+    pc_port/pc_p2_bombsarai_hover.cpp)
+target_include_directories(p2_bombsarai_hover_test PRIVATE pc_port)
+target_compile_options(p2_bombsarai_hover_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_bombsarai_hover_test COMMAND p2_bombsarai_hover_test)
+
+add_executable(p2_bombsarai_terrain_test
+    tools/p2_bombsarai_terrain_test.cpp
+    pc_port/pc_p2_bombsarai_terrain.cpp
+    pc_port/pc_p2_bombsarai_bomb.cpp)
+target_include_directories(p2_bombsarai_terrain_test PRIVATE pc_port)
+target_compile_options(p2_bombsarai_terrain_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_bombsarai_terrain_test COMMAND p2_bombsarai_terrain_test)
+
+# Note: tools/p2_bombsarai_induction_test.cpp exists on the approved line but
+# does not terminate when run as a ctest (observed timeout at 15 s), so it is
+# intentionally not registered here. Tracked for lane 27 as a test-hang finding.
+
 add_executable(pc_render_phase_test
     pc_port/timing/pc_render_phase_test.cpp
     pc_port/timing/pc_render_phase.cpp)
