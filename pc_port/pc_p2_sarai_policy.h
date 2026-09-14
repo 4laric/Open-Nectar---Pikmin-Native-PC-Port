@@ -83,8 +83,10 @@ inline HeightDecision nextStateOnHeight(const Parms& parms, float health, int mo
 {
     if (health <= 0.0f) return HeightDecision::Fall;
 
+    // Source: if (stuckPiki) { ... } return NULL. bodyStuckCount >= mouthCarried
+    // holds in the source, so a non-positive value means "no body attackers".
     const int stuckPiki = stickPikminNum(bodyStuckCount, mouthCarried);
-    if (stuckPiki == 0) return HeightDecision::None;
+    if (stuckPiki <= 0) return HeightDecision::None;
     if (purpleLatched) return HeightDecision::Fall;
 
     int index = stuckPiki - 1;
