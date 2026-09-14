@@ -249,6 +249,7 @@ pc_port/pc_p2_kabuto_binding.cpp
 pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_rock_hazard.cpp
     pc_port/pc_p2_projectile_receiver.cpp
+    pc_port/pc_p2_projectile_engine_receiver.cpp
     pc_port/pc_p2_groink.cpp
     pc_port/pc_p2_groink_arena.cpp
     pc_port/pc_p2_groink_attack.cpp
