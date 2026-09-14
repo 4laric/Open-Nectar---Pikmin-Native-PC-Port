@@ -8,8 +8,8 @@
 //
 // Source states covered: Wait(0), Dead(1), Turn(2), Walk(3), Attack(4),
 // Flick(5), TurnToHome(6), GoHome(7), Press(8). Demo(9) is the source
-// kill(nullptr) terminal; on the host the Dead end calls actor->die(), so Demo
-// is folded into Dead.
+// kill(nullptr) terminal; on the host the Dead end finalizes with
+// actor->pcEscapeNow() (die + dieSoon), so Demo is folded into Dead.
 //
 // Recorded port adaptations / partials (docs/PIKMIN2_KOCHAPPY_FSM.md):
 //   * The P1 host applies accumulated Pikmin damage in a TAI damage reaction
@@ -505,9 +505,12 @@ void pc_p2_kochappy_fsm_update(BTeki* actor)
 		}
 		if (!state.died && state.stateTime >= DEAD_DURATION) {
 			state.died = true;
-			std::printf("P2_KOCHAPPY_CORPSE generator=%u source_id=44 native=host_die\n", generator);
+			std::printf("P2_KOCHAPPY_CORPSE generator=%u source_id=44 native=host_escape_now\n", generator);
 			std::fflush(stdout);
-			actor->die();
+			// die() alone only arms mDeadState; dieSoon() normally runs inside
+			// doAI, which this module suppresses. pcEscapeNow() finalizes the
+			// death (carcass birth) outside doAI (teki.h family-lane helper #219).
+			actor->pcEscapeNow();
 		}
 		break;
 	}
