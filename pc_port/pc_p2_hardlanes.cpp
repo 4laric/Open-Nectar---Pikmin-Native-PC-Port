@@ -51,6 +51,7 @@
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "PikiState.h"
+#include "Creature.h"
 #include "teki.h"
 #include <cstdint>
 #include <cstdio>
@@ -78,6 +79,8 @@ std::map<std::uint32_t, Piki*> sFuefukiPiki;
 std::map<std::uint32_t, bool> sFuefukiHeld;
 std::uint32_t sFuefukiNextId = 1;
 double sFuefukiDebt = 0.0;
+bool sFuefukiPressed = false;      // #245 natural combat: press/hipdrop latch
+unsigned long sFuefukiPressCount = 0;
 bool sFuefukiVisualReady = false;
 double sFuefukiVisualDebt = 0.0;
 int sFuefukiLastState = -1;
@@ -236,6 +239,20 @@ P2FuefukiFsmParms fuefukiParms()
     return p;
 }
 
+// (#245) Count live Pikmin currently stuck to the vehicle (source stuck-attacker
+// count: Struggle exits to Jump when no stuck Pikmin remain after 3.0 s, and the
+// whistle cadence uses "stuck attackers present" to pick the fp12 interval).
+// Walks the engine sticker list and counts only living Piki.
+int fuefukiStuckPikmin(Teki* vehicle)
+{
+    int count = 0;
+    if (!vehicle) return 0;
+    for (Creature* stuck = vehicle->mStickListHead; stuck; stuck = stuck->mNextSticker) {
+        if (stuck->isPiki() && stuck->isAlive()) ++count;
+    }
+    return count;
+}
+
 // ---------------------------------------------------------------------------
 // BigTreasure (#246)
 constexpr float kBigTreasureSourceDelta = 1.0f / 30.0f;
@@ -300,6 +317,8 @@ void pc_p2_hardlanes_reset()
     sBombSaraiReady = false;
     sFuefukiVehicle = nullptr;
     sFuefukiDebt = 0.0;
+    sFuefukiPressed = false;
+    sFuefukiPressCount = 0;
     sFuefukiId.clear();
     sFuefukiPiki.clear();
     sFuefukiHeld.clear();
@@ -490,6 +509,10 @@ void pc_p2_hardlanes_update()
             tick.delta = kFuefukiSourceDelta;
             tick.health = sFuefukiVehicle->mHealth;
             tick.turnComplete = true;
+            tick.pressed = sFuefukiPressed; // #245 natural combat: consume the latch
+            sFuefukiPressed = false;
+            tick.stuckPikmin = fuefukiStuckPikmin(sFuefukiVehicle);
+            tick.bittered = false; // no P1 bittering bridge; host admits via parm
             if (sFuefukiMotionReady) {
                 // Drive the FSM from the converted clip bank: start the clip
                 // for the current state and feed its KEYEVENT_2/3 and END.
@@ -721,4 +744,26 @@ bool pc_p2_hardlanes_fuefuki_vehicle_position(float& x, float& y, float& z)
     y = position.y;
     z = position.z;
     return true;
+}
+
+// (#245) Source pressCallBack/hipdropCallBack (Fuefuki.cpp:163-185): latch the
+// press stimulus on the bound vehicle. Admission (mCanStruggle && !bittered) and
+// the Struggle transit are decided by the FSM on the next source tick, matching
+// the source's immediate-presence check rather than a spatial radius. A no-op
+// (returns false) for any unregistered Tei or when the seam is not bound.
+bool pc_p2_hardlanes_fuefuki_pressed(Teki* teki, Creature*)
+{
+    if (!teki || !sFuefukiVehicle || teki != sFuefukiVehicle) return false;
+    sFuefukiPressed     = true;
+    sFuefukiPressCount += 1;
+    std::printf("P2_FUEFUKI_PRESS press=%u state=%d\n",
+                pc_p2_hardlanes_fuefuki_press_count(),
+                pc_p2_hardlanes_fuefuki_state());
+    std::fflush(stdout);
+    return true;
+}
+
+unsigned pc_p2_hardlanes_fuefuki_press_count()
+{
+    return static_cast<unsigned>(sFuefukiPressCount);
 }

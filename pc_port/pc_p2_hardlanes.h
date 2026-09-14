@@ -1,6 +1,8 @@
 #pragma once
 class Graphics;
 class Piki;
+class Creature;
+class Teki;
 
 // Hard-lane shared registration seam (#244 BombSarai, #245 Fuefuki, #246
 // BigTreasure). Opt-in: only active inside the Pikipelago private room preview
@@ -23,6 +25,16 @@ int pc_p2_hardlanes_fuefuki_state();   // P2FuefukiFsmState, or -1
 int pc_p2_hardlanes_fuefuki_held_count();
 Piki* pc_p2_hardlanes_fuefuki_held(int index); // k-th held Pikmin, or null
 bool pc_p2_hardlanes_fuefuki_vehicle_position(float& x, float& y, float& z);
+// Natural combat receiver (#245): source pressCallBack/hipdropCallBack enter
+// Struggle when mCanStruggle and not bittered. The host maps a P1 InteractPress
+// stimulus onto the bound Fuefuki vehicle; admission stays in the FSM. Returns
+// true and latches the press fact when the pressed Teki is the bound vehicle;
+// false otherwise, so ordinary P1 play is untouched. Only active inside the
+// private room preview with the Fuefuki vehicle bound.
+bool pc_p2_hardlanes_fuefuki_pressed(Teki*, Creature* stimulus);
+// Introspection for the runtime fixture: count of press/hipdrop stimuli
+// latched since the current vehicle was bound.
+unsigned pc_p2_hardlanes_fuefuki_press_count();
 // Natural-hit ingress (#246): post one Pikmin-source hit against a BigTreasure
 // weapon coll part (`weapon` in [0,3], or -1 for the body) into the ordinary
 // FSM host drive. The lane-10 receiver / collision proxy is the intended
