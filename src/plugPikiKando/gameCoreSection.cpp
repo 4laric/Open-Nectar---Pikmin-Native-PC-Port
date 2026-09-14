@@ -27,6 +27,9 @@
 #include "pc_p2_king.h"
 #include "pc_p2_tank.h"
 #include "pc_p2_hiba.h"
+#include "pc_p2_flora_actor.h"
+#include "pc_p2_pom.h"
+#include "pc_p2_plant.h"
 #include "pc_p2_hardlanes.h"
 #include "pc_p2_projectiles.h"
 #include "pc_randomizer.h"
@@ -2920,6 +2923,9 @@ void GameCoreSection::updateAI()
 				}
 				gsys->mTimer->stop("teki");
 				pelletMgr->update();
+				pc_p2_flora_tick();
+				pc_p2_pom_tick();
+				pc_p2_plant_tick();
 			}
 		}
 	}

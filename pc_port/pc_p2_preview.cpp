@@ -14,6 +14,9 @@
 #include "pc_p2_giant_breadbug_actor.h"
 #include "pc_p2_queen.h"
 #include "pc_p2_king.h"
+#include "pc_p2_flora_actor.h"
+#include "pc_p2_pom.h"
+#include "pc_p2_plant.h"
 #include "pc_p2_batch2.h"
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_armor.h"
@@ -221,6 +224,9 @@ void pc_p2_preview_setup() {
     pc_p2_mamuta_setup();
     pc_p2_tank_setup();
     pc_p2_hiba_setup();
+    pc_p2_flora_setup();
+    pc_p2_pom_setup();
+    pc_p2_plant_setup();
     pc_p2_qurione_setup();
     pc_p2_batch2_setup();
     pc_p2_sokkuri_setup();
@@ -258,6 +264,11 @@ bool pc_p2_preview_deliver(Pellet* pellet) {
         // the Pod must finish the normal wake-up path, never create money/seeds.
         if(naviMgr && pellet->mConfig->mModelId.mId=='navi' && pellet->mPelletView==static_cast<PelletView*>(naviMgr->getNavi())) {
             std::puts("[Pikipelago] P2_POD_CAPTAIN_RETURN pokos_unchanged=1 seeds=0");return true;
+        }
+        // P2 Pellet Posy capture receptor: the released pellet was observed and
+        // claimed by the flora module; the Onion-side seed receipt stays open.
+        if(pc_p2_flora_receipt(pellet)) {
+            std::printf("[Pikipelago] P2_FLORA_DELIVER seeds=0 onion_slice_unimplemented=1\n");std::fflush(stdout);return true;
         }
         if(cargoFree){std::fprintf(stderr,"Cargo-free P2 Pod refuses cargo rewards and seed side effects\n");std::abort();}
         std::string receipt;int value=0;Cargo* c=cargoFor(pellet);

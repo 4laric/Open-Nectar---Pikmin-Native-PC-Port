@@ -8,6 +8,10 @@
 #include "pc_p2_bulblax_visual.h"
 #include "pc_p2_enemy.h"
 #include "pc_p2_frog.h"
+#include "pc_p2_flora_actor.h"
+#include "pc_p2_plant.h"
+#include "pc_p2_pom.h"
+#include "pc_p2_hiba.h"
 #include "pc_p2_giant_breadbug_actor.h"
 #include "pc_p2_giant_breadbug_visual.h"
 #include "pc_p2_king.h"
@@ -40,6 +44,7 @@ void pc_p2_forget_teki(BTeki* actor)
 	pc_p2_giant_breadbug_actor_forget(actor);
 	pc_p2_breadbug_actor_forget(actor);
 	pc_p2_frog_forget(actor);
+	pc_p2_flora_forget(actor);
 	pc_p2_kogane_forget(actor);
 	pc_p2_mamuta_forget(actor);
 	pc_p2_tank_forget(actor);
@@ -72,6 +77,10 @@ void pc_p2_reset_all_teki()
 	pc_p2_queen_reset();
 	pc_p2_king_reset();
 	pc_p2_frog_reset();
+	pc_p2_flora_reset();
+	pc_p2_plant_reset();
+	pc_p2_pom_reset();
+	pc_p2_hiba_reset();
 	pc_p2_kogane_reset();
 	pc_p2_mamuta_reset();
 	pc_p2_tank_reset();
