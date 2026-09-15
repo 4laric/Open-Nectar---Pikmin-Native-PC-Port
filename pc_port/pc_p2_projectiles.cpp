@@ -25,6 +25,7 @@
 #include "pc_p2_projectile_receiver.h"
 #include "pc_p2_projectile_engine_receiver.h"
 #include "pc_p2_rock_hazard.h"
+#include "pc_p2_rock_host.h"
 #include "pc_p2_groink.h"
 #include "pc_p2_groink_hit.h"
 #include "pc_p2_groink_strike.h"
@@ -94,34 +95,11 @@ bool iequals(const char* a, const char* b)
     return *a == '\0' && *b == '\0';
 }
 
-// P1 trace proxy. It is never registered with an actor manager; its collision
-// fields are used only for the static-map probe (same pattern as
-// P2BombSaraiTraceProxy, #244).
-class ProjectileTraceProxy : public Creature {
-public:
-    ProjectileTraceProxy() : Creature(nullptr) { clear(); }
-    void clear()
-    {
-        wall = false;
-        mGroundTriangle = nullptr;
-        mCollisionOccurred = 0;
-        mHasCollChangedVelocity = 0;
-        mCurrCollisionModel = nullptr;
-        mCollPlatform = nullptr;
-        mCollNormal = nullptr;
-        mPikiPlatformTriangle = nullptr;
-    }
-    void refresh(Graphics&) override {}
-    void wallCallback(immut Plane&, DynCollObject*) override { wall = true; }
-    bool wall = false;
-protected:
-    void doKill() override {}
-};
-
 // Binds the Stone trace primitive to the P1 static map. center/base conversion
 // is owned here: P1 traceMove adds the radius before collision and subtracts it
 // afterward, so the policy's center is lowered by the radius for the trace and
-// the raw result is raised back.
+// the raw result is raised back. The trace proxy is the shared lane-20
+// p2rockhost::TraceProxy (pc_p2_rock_host.h), not a local fork.
 class ProjectileMapBinding {
 public:
     void reset(MapMgr* map) { mMap = map; mProxy.clear(); mCalls = mFloors = mWalls = 0; }
@@ -162,81 +140,13 @@ public:
 
 private:
     MapMgr* mMap = nullptr;
-    ProjectileTraceProxy mProxy;
+    p2rockhost::TraceProxy mProxy;
     std::uint64_t mCalls = 0, mFloors = 0, mWalls = 0;
 };
 
-// Binds the falling-Rock trace primitive to the P1 static map. The Rock policy
-// stores its position as the sphere center, so the same center/base conversion
-// as ProjectileMapBinding is applied. `colliding` is host-owned (P1 has no
-// EB_Colliding); floor contact is reported through mGroundTriangle.
-class RockMapBinding {
-public:
-    void reset(MapMgr* map) { mMap = map; mProxy.clear(); mCalls = mFloors = 0; }
-
-    static bool trace(void* context, const P2RockHazardVec3& center,
-                      const P2RockHazardVec3& velocity, float delta, float radius,
-                      P2RockHazardTraceResult& result)
-    {
-        if (!context || !finite(center.x) || !finite(center.y) || !finite(center.z)
-            || !finite(velocity.x) || !finite(velocity.y) || !finite(velocity.z)
-            || !finite(delta) || std::fabs(delta - kSourceDelta) > 0.000001f
-            || !finite(radius) || radius <= 0.0f) {
-            return false;
-        }
-        RockMapBinding& self = *static_cast<RockMapBinding*>(context);
-        if (!self.mMap || !self.mMap->mMapModel) {
-            return false;
-        }
-        self.mProxy.clear();
-        const Vector3f base(center.x, center.y - radius, center.z);
-        MoveTrace movement(base, Vector3f(velocity.x, velocity.y, velocity.z), radius, true);
-        self.mMap->traceMove(&self.mProxy, movement, delta);
-        ++self.mCalls;
-        result.position = { movement.mPosition.x, movement.mPosition.y + radius, movement.mPosition.z };
-        result.velocity = { movement.mVelocity.x, movement.mVelocity.y, movement.mVelocity.z };
-        result.floorTriangle = self.mProxy.mGroundTriangle != nullptr;
-        result.colliding = false;
-        if (!finite(result.position.x) || !finite(result.position.y) || !finite(result.position.z)
-            || !finite(result.velocity.x) || !finite(result.velocity.y) || !finite(result.velocity.z)) {
-            return false;
-        }
-        self.mFloors += result.floorTriangle;
-        return true;
-    }
-
-    std::uint64_t calls() const { return mCalls; }
-    std::uint64_t floors() const { return mFloors; }
-
-private:
-    MapMgr* mMap = nullptr;
-    ProjectileTraceProxy mProxy;
-    std::uint64_t mCalls = 0, mFloors = 0;
-};
-
 // Deterministic scripted RNG for the Egg policy (the host owns the source).
-struct ScriptRng {
-    std::uint32_t state = 1u;
-    float next()
-    {
-        state = state * 1664525u + 1013904223u;
-        return static_cast<float>((state >> 8) & 0xffffffu) / 16777216.0f;
-    }
-    int nextInt(int count)
-    {
-        if (count <= 0) {
-            return 0;
-        }
-        int value = static_cast<int>(next() * static_cast<float>(count));
-        if (value >= count) {
-            value = count - 1;
-        }
-        return value;
-    }
-};
-
-float rngFloat(void* context) { return static_cast<ScriptRng*>(context)->next(); }
-int rngInt(void* context, int count) { return static_cast<ScriptRng*>(context)->nextInt(count); }
+// The shared lane-20 p2rockhost::ScriptRng / rngFloat / rngInt are used instead
+// of a local fork.
 
 std::uint64_t tokenOf(const Creature* creature)
 {
@@ -251,7 +161,7 @@ std::uint64_t tokenOf(const Creature* creature)
 
 struct Host {
     ProjectileMapBinding* binding = nullptr;
-    RockMapBinding* rockBinding = nullptr;
+    p2rockhost::RockMapBinding* rockBinding = nullptr;
 
     bool haveStoneCfg = false;
     P2CannonStoneConfig stoneCfg;
@@ -366,7 +276,7 @@ struct Host {
     bool pinVictim = false;
     bool sawTekiPinRow = false;
 
-    ScriptRng rng;
+    p2rockhost::ScriptRng rng;
     double debt = 0.0;
 };
 Host gHost;
@@ -1203,7 +1113,7 @@ void tickEgg()
                     gHost.eggDamage, egg.health());
     }
 
-    if (egg.health() <= 0.0f && egg.update(rngFloat, &gHost.rng, rngInt, &gHost.rng)) {
+    if (egg.health() <= 0.0f && egg.update(p2rockhost::rngFloat, &gHost.rng, p2rockhost::rngInt, &gHost.rng)) {
         logEggDrop(egg.drop());
         birthEggDrop(egg.drop());
         gHost.eggActive = false;
@@ -1228,30 +1138,10 @@ void logRockTransition()
 
 // Host Wait detection approximation: 3D distance to the active Navi / any live
 // Pikmin within mSightRadius (source runs EnemyFunc::isThereOlimar/isTherePikmin).
+// The shared lane-20 p2rockhost::detectRock is used instead of a local fork.
 P2RockHazardDetection rockDetection(const P2RockHazardVec3& from)
 {
-    P2RockHazardDetection detection;
-    const float sightSq = gHost.rockCfg.sightRadius * gHost.rockCfg.sightRadius;
-    auto inRange = [&](const Creature* creature) {
-        const Vector3f& p = creature->mSRT.t;
-        const float dx = p.x - from.x, dy = p.y - from.y, dz = p.z - from.z;
-        return dx * dx + dy * dy + dz * dz <= sightSq;
-    };
-    Navi* navi = naviMgr ? naviMgr->getNavi() : nullptr;
-    if (navi && navi->isAlive() && inRange(navi)) {
-        detection.olimarInSight = true;
-    }
-    if (pikiMgr) {
-        Iterator it(pikiMgr);
-        CI_LOOP(it) {
-            Piki* piki = static_cast<Piki*>(*it);
-            if (piki && piki->isAlive() && inRange(piki)) {
-                detection.pikminInSight = true;
-                break;
-            }
-        }
-    }
-    return detection;
+    return p2rockhost::detectRock(from, gHost.rockCfg.sightRadius);
 }
 
 void detectRockContacts()
@@ -1338,7 +1228,7 @@ void tickRock()
     }
 
     const P2RockHazardDetection detection = rockDetection(rock.position());
-    rock.update(kSourceDelta, detection, RockMapBinding::trace, gHost.rockBinding);
+    rock.update(kSourceDelta, detection, p2rockhost::RockMapBinding::trace, gHost.rockBinding);
     logRockTransition();
     detectRockContacts();
     logRockTransition();
@@ -1525,7 +1415,7 @@ void pc_p2_projectiles_setup()
         gHost.binding = new ProjectileMapBinding();
     }
     if (!gHost.rockBinding) {
-        gHost.rockBinding = new RockMapBinding();
+        gHost.rockBinding = new p2rockhost::RockMapBinding();
     }
     gHost.binding->reset(mapMgr);
     gHost.rockBinding->reset(mapMgr);
