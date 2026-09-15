@@ -12,6 +12,18 @@ struct DeliveryHost {
 	std::unique_ptr<P2Delivery::DeliveryReceiver> receiver;
 };
 std::map<std::string, std::unique_ptr<DeliveryHost>> deliveryHosts;
+
+// Resolve a handle to a live host via the registry (never dereference a dangling
+// handle). A closed handle is not present, so it resolves to nullptr -> Error.
+DeliveryHost* deliveryHostByHandle(P2DeliveryHostHandle handle)
+{
+	for (auto& entry : deliveryHosts) {
+		if (entry.second.get() == handle) {
+			return entry.second.get();
+		}
+	}
+	return nullptr;
+}
 } // namespace
 
 P2DeliveryHostHandle pc_p2_delivery_host_open(const char* path)
@@ -40,22 +52,18 @@ P2DeliveryHostHandle pc_p2_delivery_host_open(const char* path)
 
 const char* pc_p2_delivery_host_path(P2DeliveryHostHandle handle)
 {
-	for (const auto& entry : deliveryHosts) {
-		if (entry.second.get() == handle) {
-			return entry.second->path.c_str();
-		}
-	}
-	return nullptr;
+	DeliveryHost* host = deliveryHostByHandle(handle);
+	return host ? host->path.c_str() : nullptr;
 }
 
 P2DeliveryHostResult pc_p2_delivery_host_deliver(P2DeliveryHostHandle handle, const char* seed,
 	unsigned sourceId, int tekiType, int stage, unsigned generatorToken, const char* encounter)
 {
-	if (!handle || !seed || !encounter || sourceId == 0) {
+	DeliveryHost* host = deliveryHostByHandle(handle);
+	if (!host || !seed || !encounter || sourceId == 0) {
 		return P2DeliveryHostResult::Error;
 	}
 	try {
-		auto* host = static_cast<DeliveryHost*>(const_cast<void*>(handle));
 		return host->receiver->deliver(seed, sourceId, tekiType, stage, generatorToken,
 			encounter, /*p1Proxy=*/false)
 		    ? P2DeliveryHostResult::Granted : P2DeliveryHostResult::Duplicate;

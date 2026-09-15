@@ -99,9 +99,13 @@ void pc_p2_forget_teki(BTeki* actor)
 	pc_p2_batch3_forget(actor);
 	pc_p2_long_legs_forget(actor);
 	pc_p2_hardlanes_forget(actor);
-	// Lane 06: drop any P2 corpse-delivery source binding so a recycled Teki
+    // Lane 06: drop any P2 corpse-delivery source binding so a recycled Teki
 	// address can never inherit it and credit the P1 proxy as an onion:p2 grant.
 	pc_randomizer_p2_forget_source(static_cast<PelletView*>(actor));
+	// Lane 06: close and clear the process-wide ordinary delivery ledger so the
+	// next stage reopens it fresh (the handle is otherwise opened once and never
+	// reset).
+	pc_randomizer_p2_delivery_reset();
 }
 
 // Stage-boundary teardown. The family set mirrors TekiMgr::reset() exactly; the

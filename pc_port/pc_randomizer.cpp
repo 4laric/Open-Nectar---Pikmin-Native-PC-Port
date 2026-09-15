@@ -535,6 +535,12 @@ void pc_randomizer_p2_forget_source(const void* tekiview) {
     p2TekiSources.erase(tekiview);
     p2TekiGeneratorUids.erase(tekiview);
 }
+void pc_randomizer_p2_delivery_reset() {
+    if (p2DeliveryHost) {
+        pc_p2_delivery_host_close(p2DeliveryHost);
+        p2DeliveryHost = nullptr;
+    }
+}
 bool pc_randomizer_p2_corpse_delivered(const void* tekiview, int type, int stage, bool gameplay) {
     if (!enabled || !ready || !gameplay || !tekiview) return false;
     const unsigned sourceId = pc_randomizer_p2_source_for(tekiview);

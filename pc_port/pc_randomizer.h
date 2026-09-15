@@ -59,6 +59,10 @@ void pc_randomizer_p2_bind_source(const void* tekiview, unsigned sourceId, unsig
 unsigned pc_randomizer_p2_source_for(const void* tekiview);
 unsigned pc_randomizer_p2_generator_for(const void* tekiview);
 void pc_randomizer_p2_forget_source(const void* tekiview);
+// Close and clear the process-wide ordinary delivery ledger (once-per-process
+// handle), so the next stage/session reopens it fresh. Called from the central
+// stage-boundary reset seam (pc_p2_reset_all_teki).
+void pc_randomizer_p2_delivery_reset();
 // Ordinary Onion/AP delivery of a P2 corpse: resolves the bound source and grants
 // it exactly once through the durable ordinary receipt host (p1Proxy=false).
 // Returns true when a bound P2 delivery was handled; callers use the return value
