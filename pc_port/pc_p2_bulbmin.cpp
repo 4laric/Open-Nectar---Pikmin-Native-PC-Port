@@ -225,9 +225,13 @@ int pc_p2_bulbmin_attach_mother_ex(Creature* mother, const char* model, bool pro
     if (!active || !mother) return 0;
     const std::string label = (model && model[0] != '\0') ? model : kKochappyProxyModel;
     if (!bridge.registerMother(mother, label, proxy)) return 0;
-    return pc_p2_bulbmin_drive_birth(mother, mother->getPosition(),
-                                     mother->mFaceDirection,
-                                     bridge.settings().maxDependents);
+    const int born = pc_p2_bulbmin_drive_birth(mother, mother->getPosition(),
+                                               mother->mFaceDirection,
+                                               bridge.settings().maxDependents);
+    std::printf("P2_BULBMIN_MOTHER_BIRTH model=%s dependents=%d wild=%zu recruited=%zu\n",
+                label.c_str(), born, bridge.wildCount(), bridge.recruitedCount());
+    std::fflush(stdout);
+    return born;
 }
 
 int pc_p2_bulbmin_attach_mother(Creature* mother) {
@@ -268,6 +272,9 @@ int pc_p2_bulbmin_call_pikis(Navi* navi, float radius) {
         if (delta.x * delta.x + delta.z * delta.z >= radius2) continue;
         if (pc_p2_bulbmin_whistle(p)) ++recruited;
     }
+    if (recruited)
+        std::printf("P2_BULBMIN_WHISTLE recruited=%d wild=%zu recruited_total=%zu\n",
+                    recruited, bridge.wildCount(), bridge.recruitedCount());
     return recruited;
 }
 
