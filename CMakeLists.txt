@@ -926,6 +926,12 @@ target_include_directories(p2_armor_events_test PRIVATE pc_port)
 target_compile_options(p2_armor_events_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_armor_events_test COMMAND p2_armor_events_test)
 
+add_executable(p2_hana_events_test
+    tools/test_p2_hana_events.cpp)
+target_include_directories(p2_hana_events_test PRIVATE pc_port)
+target_compile_options(p2_hana_events_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_hana_events_test COMMAND p2_hana_events_test)
+
 add_executable(p2_billboard_test
     tools/test_p2_billboard.cpp)
 target_include_directories(p2_billboard_test PRIVATE pc_port)
