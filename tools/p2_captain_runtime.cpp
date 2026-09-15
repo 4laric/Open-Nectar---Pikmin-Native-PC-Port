@@ -36,6 +36,7 @@
 #include "settings/pc_settings.h"
 #include "settings/pc_settings_p2d.h"
 #include "system.h"
+#include "teki.h"
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -45,6 +46,7 @@ namespace {
 bool sKnockoutScenario = false;
 bool sSurvivorScenario = false;
 bool sPpmScenario = false;
+bool sMamutaScenario = false;
 
 void require(bool value, const char* message)
 {
@@ -89,6 +91,12 @@ class CaptainApp final : public PlugPikiApp {
     bool ppmArmed = false;
     int ppmFrames = 0;
     bool ppmCaptured = false;
+    // Natural Mamuta knockdown scenario state (task 2 / slice 3b).
+    bool mamutaArmed = false;
+    int mamutaFrames = 0;
+    BTeki* mamutaActor = nullptr;
+    Navi* mamutaNavi = nullptr;
+    float mamutaStartHealth = 0.0f;
 public:
     void draw(Graphics& gfx) override {
         PlugPikiApp::draw(gfx);
@@ -109,14 +117,16 @@ public:
             gameflow.mMoviePlayer->requestSkip();
             return result;
         }
-        // The two-captain PPM run spans frames; clear the preview's day/UI overlay
-        // that would otherwise freeze the managers a few frames in.
-        if (sPpmScenario && (gameflow.mPauseAll || gameflow.mIsUIOverlayActive)) {
+        // The two-captain PPM and Mamuta runs span frames; clear the preview's
+        // day/UI overlay that would otherwise freeze the managers a few frames in.
+        if ((sPpmScenario || sMamutaScenario) && (gameflow.mPauseAll || gameflow.mIsUIOverlayActive)) {
             gameflow.mPauseAll = FALSE;
             gameflow.mIsUIOverlayActive = FALSE;
         }
-        if (!pc_p2_preview_ready() || !naviMgr || !naviMgr->getNavi() || gameflow.mPauseAll
-            || gameflow.mIsUIOverlayActive)
+        // The Mamuta arena replaces the generic preview stage, so it does not
+        // satisfy pc_p2_preview_ready(); only require a live naviMgr there.
+        if ((!sMamutaScenario && !pc_p2_preview_ready()) || !naviMgr || !naviMgr->getNavi()
+            || gameflow.mPauseAll || gameflow.mIsUIOverlayActive)
             return result;
         if (!setup) {
             setup = true;
@@ -139,6 +149,36 @@ public:
                 std::printf("P2_CAPTAIN_PPM_ARMED captain_count=%d\n", naviMgr->getNaviCount());
                 std::fflush(stdout);
                 ppmArmed = true;
+                return result;
+            }
+
+            if (sMamutaScenario) {
+                // --- Natural Mamuta knockdown (task 2): the staged arena spawns a
+                // P1 Miurin (generator 221001). Stage the arena WITHOUT
+                // p2-mamuta-rules.txt, so pc_p2_mamuta_bury_navi returns -1 and the
+                // source InteractBury path (TAImiurin.cpp:559) transits the captain
+                // through NAVISTATE_Bury with pcNaviHurt(20.0) until it goes Dead.
+                Iterator it(tekiMgr);
+                mamutaActor = nullptr;
+                CI_LOOP(it) {
+                    Teki* t = static_cast<Teki*>(*it);
+                    if (t && t->mTekiType == TEKI_Miurin) { mamutaActor = static_cast<BTeki*>(t); break; }
+                }
+                require(mamutaActor != nullptr, "a spawned Miurin (Mamuta) actor is present");
+                mamutaNavi = naviMgr->getActiveNavi();
+                if (!mamutaNavi) mamutaNavi = naviMgr->getNavi();
+                require(mamutaNavi != nullptr, "an active captain is present");
+                // Park the captain inside the ~70-unit attackable range (pod and
+                // natural lane-19 fixtures use actor.z + 20..50).
+                Vector3f park(mamutaActor->mSRT.t.x, 0.0f, mamutaActor->mSRT.t.z + 50.0f);
+                park.y = mapMgr->getMinY(park.x, park.z, true);
+                mamutaNavi->resetPosition(park);
+                mamutaStartHealth = mamutaNavi->mHealth;
+                std::printf("P2_CAPTAIN_MAMUTA_ARMED actor=%.1f,%.1f,%.1f captain=%.1f,%.1f,%.1f health=%.1f rules_off=1\n",
+                    mamutaActor->mSRT.t.x, mamutaActor->mSRT.t.y, mamutaActor->mSRT.t.z,
+                    park.x, park.y, park.z, mamutaStartHealth);
+                std::fflush(stdout);
+                mamutaArmed = true;
                 return result;
             }
 
@@ -298,6 +338,31 @@ public:
             std::puts("PASS P2_CAPTAIN_RUNTIME"); std::fflush(stdout); std::_Exit(0);
             return result;
         }
+        if (sMamutaScenario && mamutaArmed) {
+            ++mamutaFrames;
+            // Hold the captain inside the attackable range until the Miurin's
+            // natural bury lands (its TAI throws InteractBury on the Navi).
+            if (mamutaNavi->isAlive()) {
+                Vector3f park(mamutaActor->mSRT.t.x, 0.0f, mamutaActor->mSRT.t.z + 50.0f);
+                park.y = mapMgr->getMinY(park.x, park.z, true);
+                mamutaNavi->resetPosition(park);
+            }
+            const float hp = mamutaNavi->mHealth;
+            const int state = mamutaNavi->getCurrState() ? mamutaNavi->getCurrState()->getID() : -1;
+            const bool hit = hp < mamutaStartHealth;
+            if (hit || state == NAVISTATE_Bury || state == NAVISTATE_Dead) {
+                const bool down = (state == NAVISTATE_Dead) || hp <= 1.0f;
+                std::printf("P2_CAPTAIN_MAMUTA_BURY frame=%d health=%.1f state=%d hit=%d down=%d\n",
+                    mamutaFrames, hp, state, int(hit), int(down));
+                std::fflush(stdout);
+                if (down) {
+                    std::puts("PASS P2_CAPTAIN_RUNTIME"); std::fflush(stdout); std::_Exit(0);
+                }
+                mamutaStartHealth = hp;
+            }
+            require(mamutaFrames < 900, "natural mamuta bury timeout");
+            return result;
+        }
         return result;
     }
 };
@@ -309,6 +374,7 @@ int main(int argc, char** argv)
         if (std::string(argv[i]) == "--knockout-roster") sKnockoutScenario = true;
         if (std::string(argv[i]) == "--survivor-path") sSurvivorScenario = true;
         if (std::string(argv[i]) == "--two-captain-ppm") sPpmScenario = true;
+        if (std::string(argv[i]) == "--mamuta-natural") sMamutaScenario = true;
     }
     SDL_setenv("SDL_AUDIODRIVER", "dummy", 1);
     SDL_SetMainReady();
