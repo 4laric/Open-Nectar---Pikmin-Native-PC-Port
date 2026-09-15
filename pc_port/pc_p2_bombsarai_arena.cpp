@@ -77,7 +77,8 @@ struct CarrierState {
 struct ArenaState {
     P2BombSaraiBombConfig bombConfig;
     P2BombSaraiHoverParms hoverParms;
-    P2BombSaraiBombPool pool{ 2 }; // mChildNum preallocation (enemyInfo.cpp:46)
+    int poolCapacity = 2; // mChildNum preallocation (enemyInfo.cpp:46)
+    P2BombSaraiBombPool pool;
     P2BombSaraiReceiver receivers[kMaxReceivers];
     int receiverCount = 0;
     int timing[kTimingSlots] = { 30, 30, 10, 30, 30, 10, 10, 24, 45, 21, 20 };
@@ -286,7 +287,7 @@ bool parseProfileFull(const char* profilePath, ArenaState& parsed)
     // timing, events (carrier 0), carrier2/joint2 (carrier 1),
     // path (carrier 0), path2 (carrier 1), events2 (carrier 1).
     bool seenTiming = false, seenEvents = false, seenCarrier2 = false, seenJoint2 = false,
-         seenPath = false, seenPath2 = false, seenEvents2 = false;
+         seenPath = false, seenPath2 = false, seenEvents2 = false, seenPool = false;
     while (nextLine(input, line)) {
         std::istringstream values(line);
         std::string key;
@@ -319,6 +320,11 @@ bool parseProfileFull(const char* profilePath, ArenaState& parsed)
         } else if (key == "events2" && !seenEvents2) {
             seenEvents2 = true;
             if (!parseEvents(input, line, 1, parsed, "events2")) return false;
+        } else if (key == "pool" && !seenPool) {
+            // pool <capacity> — the shared bomb-pool size (mChildNum). Default 2.
+            seenPool = true;
+            if (!(values >> parsed.poolCapacity) || !exhausted(values)
+                || parsed.poolCapacity < 1 || parsed.poolCapacity > 16) return false;
         } else {
             return false; // unknown or duplicate section
         }
@@ -452,6 +458,7 @@ bool pc_p2_bombsarai_arena_setup(const char* profilePath)
         c.fsm.reset(c.fsmParms);
         totalEvents += c.eventCount;
     }
+    parsed.pool = P2BombSaraiBombPool(parsed.poolCapacity);
     parsed.ready = true;
     sArena = parsed;
     std::printf("P2_BOMBSARAI_ARENA_READY pinned=1 fsm=1 no_ai=1 no_visual_assets=1 "

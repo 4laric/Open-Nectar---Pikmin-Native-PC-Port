@@ -187,6 +187,9 @@ private:
 class P2BombSaraiBombPool {
 public:
     explicit P2BombSaraiBombPool(int capacity) : mCapacity(capacity > 0 ? capacity : 0) {}
+    // Default pool is empty; the host seam re-arms it with the profile capacity
+    // before use (see pc_p2_bombsarai_arena_setup).
+    P2BombSaraiBombPool() : mCapacity(0) {}
 
     // Returns a captured bomb, or nullptr on pool exhaustion, a duplicate
     // HELD (captured) carrier token, or invalid input. No state changes on

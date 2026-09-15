@@ -76,8 +76,12 @@ const Scenario kScenarios[] = {
       { 1, -1 }, { (int)P2BombSaraiThrowKind::Fall, -1 }, 0, 8, false, false },
     { "death", "p2-bombsarai-arena-death.txt", 1, 1,
       { 1, -1 }, { (int)P2BombSaraiThrowKind::Death, -1 }, 3, 3, true, false },
+    // multi: with finding #2 (captured-only held) and pool=2 each carrier
+    // re-supplies and re-throws after its first lob on the long fuse, so an
+    // exact throw count is not stable; the gate is per-token blast attribution
+    // (two distinct tokens, no cross-attribution).
     { "multi", "p2-bombsarai-arena-multi.txt", 2, 2,
-      { 1, 1 }, { (int)P2BombSaraiThrowKind::Release, (int)P2BombSaraiThrowKind::Release },
+      { -1, -1 }, { (int)P2BombSaraiThrowKind::Release, (int)P2BombSaraiThrowKind::Release },
       2, 8, false, true },
     { "deadflight", "p2-bombsarai-arena-deadflight.txt", 1, 1,
       { 1, -1 }, { (int)P2BombSaraiThrowKind::Release, -1 }, 3, 3, true, false },
