@@ -124,7 +124,7 @@ constexpr float AttackDamage = 5.0f;     // fp24 (captain mouth-slot damage)
 
 // Continuous stuck-Pikmin latch damage (approximation). The decomp applies the
 // Pikmin blow damage per attached Pikmin per attack interval while they remain
-// latched to a collision part, not once on entry. The per-color blow strength
+// inside the root collision sphere (proximity latch; no Piki attack-state check on this host), not once on entry. The per-color blow strength
 // is out of scope (the family uses a unit blow, tier x1 when stuck to a part);
 // the interval is a documented 20-tick (2/3 s at the 30 Hz behavior clock)
 // approximation of the ordinary Pikmin attack cadence. These constants back the

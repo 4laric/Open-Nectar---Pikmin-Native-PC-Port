@@ -275,6 +275,7 @@ void flickStuck(King& k) {
 	std::printf("P2_KING_FLICK id=%u shaken=%d shake_range=60\n", k.cfg.id, k.stuckCount);
 	k.stuckCount = 0;
 	k.blows = 0;
+	k.damageClock = 0; // review: a Flick must not be followed by an interval blow one tick later
 	if (k.flickTier < 3) ++k.flickTier;
 }
 
