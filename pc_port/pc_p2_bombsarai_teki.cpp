@@ -80,13 +80,16 @@ struct Binding {
 };
 
 std::map<BTeki*, Binding> sBound;
+// Naturally dead carrier bodies: kept until the central forget/reset seam so
+// the Pod delivery receipt can still resolve the corpse after the live binding
+// is revoked (mirrors pc_p2_kurage_teki.cpp). Populated only on the death tick
+// path; the recycle/slot-reuse forget erases without recording.
+std::map<BTeki*, unsigned> sCorpses;
 P2BombSaraiMapBinding sMap;
 P2BombSaraiTerrainAdapter sAdapter;
 int sThrowCount = 0;
 int sBlastCount = 0;
 bool sCarrierDead = false;
-PelletView* sCorpseView = nullptr;
-std::uint64_t sCorpseGenerator = 0;
 
 // Blast owner for the small self-creature the source passes as the bomb when
 // the carrier is not live (carrierless attribution). Module-local, like
@@ -147,7 +150,9 @@ P2BombSaraiVec3 carrierPosition(const BTeki* t)
 
 void readConfig(Binding& b)
 {
-    b.hoverParms.flightHeight = 70.0f;   // retail fp01 overlay
+    // Lowered from the retail fp01 70 to keep the carrier within ordinary-Pikmin
+    // throw reach for the natural kill demonstration; labelled experimental.
+    b.hoverParms.flightHeight = 20.0f;
     b.hoverParms.pitchRate = 2.5f;
     b.hoverParms.pitchAmp = 20.0f;
     b.hoverParms.freeRiseFactor = 1.5f;
@@ -248,7 +253,7 @@ void stepCarrier(BTeki* t, Binding& b, float delta)
     in.animEnd = animEnd;
     in.keyEvent2 = keyEvent2;
     in.bitterQueued = false;
-    in.killed = !t->isAlive();
+    in.killed = false; // death is handled in pc_p2_bombsarai_teki_tick (revoke + corpse)
     in.flickRoll = nextRoll(b.rng);
     P2BombSaraiFsmOutput out;
     b.fsm.update(in, out);
@@ -346,15 +351,6 @@ void applyBlast(BTeki* t, Binding& b, const P2BombSaraiBlastEvent& event)
                 event.carrierValid ? 1 : 0, hits, pikminHits);
 }
 
-void registerCorpse(BTeki* t)
-{
-    sCorpseView = static_cast<PelletView*>(t);
-    sCarrierDead = true;
-    auto i = sBound.find(t);
-    if (i != sBound.end()) sCorpseGenerator = i->second.generator;
-    std::printf("P2_BOMBSARAI_TEKI_DEAD generator=%llu\n",
-                (unsigned long long)sCorpseGenerator);
-}
 } // namespace
 
 void pc_p2_bombsarai_teki_setup()
@@ -406,45 +402,49 @@ void pc_p2_bombsarai_teki_tick(BTeki* t)
 {
     auto i = sBound.find(t);
     if (i == sBound.end()) return;
-    Binding& b = i->second;
-    if (b.dead) return;
     if (!t->isAlive() || t->mHealth <= 0.0f) {
-        b.dead = true;
-        registerCorpse(t);
+        sCorpses[t] = (unsigned)i->second.generator;
+        sCarrierDead = true;
+        std::printf("P2_BOMBSARAI_TEKI_DEAD generator=%llu\n",
+                    (unsigned long long)i->second.generator);
         sBound.erase(i);
         return;
     }
-    const int ticks = b.clock.step(gsys->getFrameTime(), true);
+    const int ticks = i->second.clock.step(gsys->getFrameTime(), true);
     for (int k = 0; k < ticks; ++k) {
-        ++b.tick;
-        stepCarrier(t, b, P2BombSaraiBomb::kSourceDelta);
+        ++i->second.tick;
+        stepCarrier(t, i->second, P2BombSaraiBomb::kSourceDelta);
     }
 }
 
 void pc_p2_bombsarai_teki_forget(BTeki* t)
 {
     if (!t) return;
-    auto i = sBound.find(t);
-    if (i == sBound.end()) return;
-    i->second.dead = true;
-    registerCorpse(t);
-    sBound.erase(i);
+    sBound.erase(t);
+    sCorpses.erase(t);
 }
 
 void pc_p2_bombsarai_teki_reset()
 {
     sBound.clear();
+    sCorpses.clear();
     sThrowCount = 0;
     sBlastCount = 0;
     sCarrierDead = false;
-    sCorpseView = nullptr;
-    sCorpseGenerator = 0;
 }
 
 bool pc_p2_bombsarai_receipt(PelletView* view, unsigned& generator)
 {
-    if (!sCarrierDead || !view || view != sCorpseView) return false;
-    generator = static_cast<unsigned>(sCorpseGenerator);
+    if (!view) return false;
+    BTeki* t = static_cast<BTeki*>(view);
+    auto i = sBound.find(t);
+    if (i != sBound.end()) {
+        generator = (unsigned)i->second.generator;
+        return true;
+    }
+    auto c = sCorpses.find(t);
+    if (c == sCorpses.end()) return false;
+    generator = c->second;
     return true;
 }
 
