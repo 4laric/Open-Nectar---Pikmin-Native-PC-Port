@@ -5,6 +5,7 @@
 #include "pc_p2_waterwraith_visual.h"
 
 #include "Graphics.h"
+#include "MapMgr.h"
 #include "Matrix4f.h"
 #include "Pellet.h"
 
@@ -60,7 +61,11 @@ void spawnWraithCorpse()
         std::printf("P2_WATERWRAITH_CORPSE skipped=no_pellet\n");
         return;
     }
-    const Vector3f pos(base.x + local.x, base.y + local.y + 10.0f, base.z + local.z);
+    Vector3f pos(base.x + local.x, 0.0f, base.z + local.z);
+    // Snap to the ground so ordinary Pikmin can actually reach and pick it up.
+    if (mapMgr) {
+        pos.y = mapMgr->getMinY(pos.x, pos.z, true);
+    }
     pellet->init(pos);
     pellet->mVelocity.set(0.0f, 100.0f, 0.0f);
     pellet->startAI(0);
@@ -248,6 +253,11 @@ void pc_p2_waterwraith_reset()
 unsigned pc_p2_waterwraith_delivery_count()
 {
     return sDeliveryCount;
+}
+
+unsigned pc_p2_waterwraith_corpse_count()
+{
+    return static_cast<unsigned>(sCorpses.size());
 }
 
 bool pc_p2_waterwraith_register_ready()

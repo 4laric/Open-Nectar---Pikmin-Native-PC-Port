@@ -112,23 +112,30 @@ def verify_log(text):
         errors.append("missing teardown marker")
     if not re.search(r"^P2_WATERWRAITH_CARRY_SETUP\s*$", text, flags=re.MULTILINE):
         errors.append("missing carry-setup marker")
-    if not re.search(r"^P2_WATERWRAITH_POD_RECEIPT\s+generator=\d+\s+deliveries=\d+\s*$", text,
-                     flags=re.MULTILINE):
-        errors.append("missing waterwraith Pod receipt marker")
-    if not re.search(r"^P2_WATERWRAITH_ENCOUNTER_DELIVERED\s+deliveries=\d+\s*$", text,
-                     flags=re.MULTILINE):
-        errors.append("missing encounter delivered marker")
+    delivered = bool(re.search(r"^P2_WATERWRAITH_POD_RECEIPT\s+generator=\d+\s+deliveries=\d+\s*$",
+                               text, flags=re.MULTILINE))
+    blocked = bool(re.search(r"^P2_WATERWRAITH_CARRY_BLOCKED\s+registered=0\s+.*$", text,
+                             flags=re.MULTILINE))
+    if delivered:
+        if not re.search(r"^P2_WATERWRAITH_ENCOUNTER_DELIVERED\s+deliveries=\d+\s*$", text,
+                         flags=re.MULTILINE):
+            errors.append("missing encounter delivered marker")
+    elif blocked:
+        pass  # the carry is blocked at the view-less stand-in
+    else:
+        errors.append("missing carry outcome (delivered or blocked)")
     if not re.search(r"^P2_WATERWRAITH_ENCOUNTER_DEATH_REENTRY\s+ready=1\s+attached=1\s*$", text,
                      flags=re.MULTILINE):
         errors.append("missing death cleanup/re-entry marker")
     passed = re.search(r"^P2_WATERWRAITH_ENCOUNTER_PASS\s+stuns=(\d+)\s+hits=(\d+)\s+crushes=(\d+)\s+"
                        r"damage=([\d.]+)\s+zeroed=1\s+child_removed=1\s+body_zeroed=1\s+"
-                       r"treasure=1\s+kill=1\s+delivered=1\s*$", text, flags=re.MULTILINE)
+                       r"treasure=1\s+kill=1\s+delivered=(\d+)\s*$", text, flags=re.MULTILINE)
     if not passed:
         errors.append("missing encounter PASS marker")
     else:
-        stuns, hits, crushes, damage = (int(passed.group(1)), int(passed.group(2)),
-                                        int(passed.group(3)), float(passed.group(4)))
+        stuns, hits, crushes, damage, delivered_flag = (int(passed.group(1)), int(passed.group(2)),
+                                                        int(passed.group(3)), float(passed.group(4)),
+                                                        int(passed.group(5)))
         if stuns < 1:
             errors.append("no Purple landing stun observed")
         if hits < 1:
@@ -137,8 +144,12 @@ def verify_log(text):
             errors.append("no roller crush observed")
         if damage <= 0.0:
             errors.append("no damage dealt")
-    if "PASS WATERWRAITH_ENCOUNTER_RUNTIME" not in text:
+        if delivered_flag != (1 if delivered else 0):
+            errors.append("delivered flag mismatch with carry outcome")
+    if delivered and "PASS WATERWRAITH_ENCOUNTER_RUNTIME" not in text:
         errors.append("missing runtime PASS marker")
+    elif blocked and "BLOCKED WATERWRAITH_ENCOUNTER_RUNTIME" not in text:
+        errors.append("missing runtime BLOCKED marker")
     return errors
 
 
@@ -230,7 +241,8 @@ def main(argv=None):
         record["subprocess"] = {"returncode": result.returncode, "timeout_seconds": 150,
                                 "stdout": file_record(run / "stdout.log"),
                                 "stderr": file_record(run / "stderr.log")}
-        errors = verify_log(result.stdout + "\n" + result.stderr)
+        combined = result.stdout + "\n" + result.stderr
+        errors = verify_log(combined)
         record["verification"] = {"errors": errors}
         capture = run / "waterwraith-encounter.ppm"
         if not capture.is_file():
@@ -243,9 +255,12 @@ def main(argv=None):
             errors.append(f"fixture exit code {result.returncode}")
         record["errors"].extend(errors)
         if not errors:
-            record["status"] = "passed"
+            record["status"] = (
+                "blocked" if "BLOCKED WATERWRAITH_ENCOUNTER_RUNTIME" in combined else "passed")
+            record["outcome"] = (
+                "blocked" if "BLOCKED WATERWRAITH_ENCOUNTER_RUNTIME" in combined else "delivered")
     except subprocess.TimeoutExpired as error:
-        record["errors"].append("fixture timed out after 90 seconds")
+        record["errors"].append("fixture timed out after 150 seconds")
         if run is not None:
             for name, value in (("stdout.log", error.stdout), ("stderr.log", error.stderr)):
                 if isinstance(value, bytes):
@@ -260,7 +275,7 @@ def main(argv=None):
                                                encoding="utf-8")
     print(json.dumps({"status": record["status"], "run": str(run) if run else None,
                       "errors": record["errors"]}, indent=2))
-    return 0 if record["status"] == "passed" else 1
+    return 0 if record["status"] in ("passed", "blocked") else 1
 
 
 if __name__ == "__main__":

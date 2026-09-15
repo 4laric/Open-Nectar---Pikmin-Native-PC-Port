@@ -71,6 +71,10 @@ void pc_p2_waterwraith_forget(PelletView* view);
 // Lane-07 boundary: clear the corpse map and delivery counter.
 void pc_p2_waterwraith_reset();
 unsigned pc_p2_waterwraith_delivery_count();
+// Number of currently registered (still on-field) corpse pellets. 0 means the
+// spawned stand-in had no PelletView (view-less number pellet) and so cannot be
+// carried/fed through the Pod receipt path.
+unsigned pc_p2_waterwraith_corpse_count();
 
 // One engine frame: source-clocks the actor at 30 Hz (at most 4 steps per
 // frame), feeds the fixed fall -> recover -> walk host script and advances the

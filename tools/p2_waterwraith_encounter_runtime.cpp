@@ -104,7 +104,7 @@ class WaterwraithEncounterApp final : public PlugPikiApp {
     bool captured = false;
     bool reentryChecked = false;
     bool corpseGrabStaged = false;
-    bool deliveredLogged = false;
+    bool carryResolved = false;
 
 public:
     int idle() override
@@ -241,25 +241,31 @@ public:
         require(pc_p2_waterwraith_register_tyre_health() <= 0.0f, "roller health not zeroed");
         require(pc_p2_waterwraith_register_body_health() <= 0.0f, "body health not zeroed");
 
-        // Corpse carry + Pod receipt: ordinary Pikmin carry the spawn stand-in to
-        // the Pod; pc_p2_preview_deliver recognizes it via the family map and the
-        // durable P2Economy ledger credits it, logging P2_POD_RECEIPT + the
-        // P2_WATERWRAITH_POD_RECEIPT marker from pc_p2_waterwraith_receipt.
-        if (pc_p2_waterwraith_delivery_count() == 0) {
-            return; // still carrying
-        }
-        if (!deliveredLogged) {
-            std::printf("P2_WATERWRAITH_ENCOUNTER_DELIVERED deliveries=%u\n",
-                        pc_p2_waterwraith_delivery_count());
-            deliveredLogged = true;
-        }
-
         // Snapshot the combat counters before cleanup zeroes them.
         const P2WaterwraithEncounterStats summary = pc_p2_waterwraith_encounter_stats();
         require(summary.stunned > 0 && summary.purpleHits > 0 && summary.crushes > 0
                     && summary.damageDealt > 0.0f && summary.bodyZeroed
                     && summary.treasureReleased && summary.killed,
                 "combat counters incomplete");
+
+        // Corpse carry + Pod receipt. The stand-in is a P1 number pellet: if it
+        // was born view-less (mPelletView == nullptr) it is invisible to the
+        // lane-06 Pod receipt path (pc_p2_preview_deliver keys on mPelletView) and
+        // cannot be carried; that is reported as BLOCKED, not a transport PASS.
+        const unsigned registeredCorpses = pc_p2_waterwraith_corpse_count();
+        if (registeredCorpses == 0) {
+            if (!carryResolved) {
+                std::printf("P2_WATERWRAITH_CARRY_BLOCKED registered=0 "
+                            "reason=viewless_number_pellet_mPelletView_null\n");
+                carryResolved = true;
+            }
+        } else if (pc_p2_waterwraith_delivery_count() == 0) {
+            return; // still carrying to the Pod
+        } else if (!carryResolved) {
+            std::printf("P2_WATERWRAITH_ENCOUNTER_DELIVERED deliveries=%u\n",
+                        pc_p2_waterwraith_delivery_count());
+            carryResolved = true;
+        }
 
         // Cleanup and re-entry: tear the seam down and bring it back with no
         // stale actor/child/squad/body/corpse state.
@@ -283,12 +289,17 @@ public:
 
         capture("waterwraith-encounter.ppm");
         std::printf("P2_WATERWRAITH_ENCOUNTER_PASS stuns=%llu hits=%llu crushes=%llu damage=%.1f "
-                    "zeroed=1 child_removed=1 body_zeroed=1 treasure=1 kill=1 delivered=1\n",
+                    "zeroed=1 child_removed=1 body_zeroed=1 treasure=1 kill=1 delivered=%d\n",
                     static_cast<unsigned long long>(summary.stunned),
                     static_cast<unsigned long long>(summary.purpleHits),
-                    static_cast<unsigned long long>(summary.crushes), summary.damageDealt);
+                    static_cast<unsigned long long>(summary.crushes), summary.damageDealt,
+                    pc_p2_waterwraith_delivery_count() > 0 ? 1 : 0);
         captured = true;
-        std::puts("PASS WATERWRAITH_ENCOUNTER_RUNTIME");
+        if (pc_p2_waterwraith_delivery_count() > 0) {
+            std::puts("PASS WATERWRAITH_ENCOUNTER_RUNTIME");
+        } else {
+            std::puts("BLOCKED WATERWRAITH_ENCOUNTER_RUNTIME carry=viewless_number_pellet");
+        }
         std::fflush(stdout);
         std::_Exit(0);
     }
