@@ -11,7 +11,6 @@
 #include "pc_p2_bulbmin.h"
 #include "Navi.h"
 #include "pc_randomizer.h"
-#include <cstdio>
 #include <cstdlib>
 #if defined(PIKI_PC_PORT)
 #include "GameStat.h"
@@ -2350,17 +2349,19 @@ void Navi::refresh(Graphics& gfx)
 	// exists); with the live gate on, both captains render at their own mSRT.
 	draw(gfx);
 	if (!movieMode()) {
-		std::printf("[L12r] after draw id=%d\n", mNaviID); std::fflush(stdout);
-		std::printf("[L12r] plateptr id=%d plateMgr=%p toggColls=%d camera=%p\n", mNaviID, (void*)mPlateMgr, int(gsys->mToggleColls), (void*)gfx.mCamera); std::fflush(stdout);
 		if (gsys->mToggleColls) {
 			mapMgr->showCollisions(mSRT.t);
 		}
 
 		Matrix4f viewMtx;
+		// Lane 12 (#130): a second Navi is birthed in the GameCoreSection
+		// constructor but init()/reset() (which allocates mPlateMgr) runs later in
+		// finalSetup, so the setup draw can reach refresh() with mPlateMgr still
+		// null. Guard it (and see demoDraw's light guards) so the second captain
+		// can render before reset without a null deref.
 		if (mPlateMgr) {
 			mPlateMgr->render(gfx);
 		}
-		std::printf("[L12r] after plate id=%d\n", mNaviID); std::fflush(stdout);
 
 		// these aren't used for anything in the DLL either, lol.
 		f32 unusedVal  = sinf(mFaceDirection);
@@ -2371,7 +2372,6 @@ void Navi::refresh(Graphics& gfx)
 		mCursorWorldPos.y = mapMgr->getMinY(mCursorWorldPos.x, mCursorWorldPos.z, true) + 1.0f;
 
 		CollTriInfo* cursorTri = mapMgr->getCurrTri(mCursorWorldPos.x, mCursorWorldPos.z, true);
-		std::printf("[L12r] after cursor compute id=%d cursorVisible=%d\n", mNaviID, int(mIsCursorVisible)); std::fflush(stdout);
 
 		Matrix4f orientMatrix;
 		orientMatrix.makeIdentity();
@@ -2417,7 +2417,6 @@ void Navi::refresh(Graphics& gfx)
 
 			mAnimatedMaterials.updateContext();
 			GlobalShape::cursorShape->drawshape(gfx, *gfx.mCamera, nullptr);
-			std::printf("[L12r] after cursorShape id=%d\n", mNaviID); std::fflush(stdout);
 
 			Colour markerColour;
 			if (mNextThrowPiki) {
@@ -2439,15 +2438,11 @@ void Navi::refresh(Graphics& gfx)
  */
 void Navi::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 {
-	std::printf("[L12m] enter id=%d\n", mNaviID); std::fflush(stdout);
 	mShadowCaster.mSourcePosition.set(mSRT.t.x + 75.0f, mSRT.t.y + 100.0f, mSRT.t.z + 25.0f);
 	mShadowCaster.mTargetPosition.set(mSRT.t.x, mSRT.t.y + 10.0f, mSRT.t.z);
 	mNaviShapeObject->mShape->drawshape(gfx, *gfx.mCamera, nullptr);
-	std::printf("[L12m] after drawshape id=%d\n", mNaviID); std::fflush(stdout);
 	mCollInfo->updateInfo(gfx, false);
-	std::printf("[L12m] after collInfo id=%d\n", mNaviID); std::fflush(stdout);
 	CollPart* antenna = mCollInfo->getSphere('ante');
-	std::printf("[L12m] after getSphere id=%d antenna=%p\n", mNaviID, (void*)antenna); std::fflush(stdout);
 	if (antenna) {
 		mNaviLightPosition = antenna->mCentre;
 	} else {
@@ -2469,7 +2464,6 @@ void Navi::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
  */
 void Navi::draw(Graphics& gfx)
 {
-	std::printf("[L12d] enter id=%d\n", mNaviID); std::fflush(stdout);
 	if (isPellet()) {
 		return;
 	}
@@ -2517,14 +2511,11 @@ void Navi::draw(Graphics& gfx)
 	if (!hasAnimError) {
 		mNaviShapeObject->mShape->updateAnim(gfx, viewMtx, nullptr, this);
 	}
-	std::printf("[L12d] after updateAnim id=%d\n", mNaviID); std::fflush(stdout);
 
 	updateHeadMatrix();
-	std::printf("[L12d] after headMtx id=%d\n", mNaviID); std::fflush(stdout);
 	if (!(gameflow.mDemoFlags & CinePlayerFlags::HideNavi) && !mIsRidingUfo) {
 		demoDraw(gfx, nullptr);
 	}
-	std::printf("[L12d] after demoDraw id=%d\n", mNaviID); std::fflush(stdout);
 
 	STACK_PAD_VAR(7);
 }

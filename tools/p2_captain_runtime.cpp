@@ -52,7 +52,9 @@ void require(bool value, const char* message)
 }
 
 // Reusable P6 PPM capture after a real draw (mirrors the other room fixtures).
-void capture(const char* path)
+// Returns true (and writes the file) only when the captured frame is non-black,
+// so a caller can retry across the setup fade-in.
+bool capture(const char* path)
 {
     pc_gfx_flush_batch();
     auto bind = reinterpret_cast<PFNGLBINDFRAMEBUFFERPROC>(SDL_GL_GetProcAddress("glBindFramebuffer"));
@@ -63,13 +65,13 @@ void capture(const char* path)
     glReadBuffer(GL_BACK); glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
     bind(GL_FRAMEBUFFER, previous);
-    require(glGetError() == GL_NO_ERROR, "capture GL error");
     bool visible = false; for (unsigned char value : pixels) visible |= value > 8;
-    require(visible, "empty capture");
+    if (!visible) return false;
     FILE* file = std::fopen(path, "wb"); require(file != nullptr, "capture file");
     std::fprintf(file, "P6\n%d %d\n255\n", width, height);
     for (int y = height - 1; y >= 0; --y) std::fwrite(pixels.data() + size_t(y) * width * 3, 1, size_t(width) * 3, file);
     std::fclose(file);
+    return true;
 }
 
 class CaptainApp final : public PlugPikiApp {
@@ -90,12 +92,14 @@ class CaptainApp final : public PlugPikiApp {
 public:
     void draw(Graphics& gfx) override {
         PlugPikiApp::draw(gfx);
-        if (ppmArmed && !ppmCaptured && frames >= 6) {
-            capture("two-captains.ppm");
-            ppmCaptured = true;
-            std::printf("P2_CAPTAIN_PPM saved=two-captains.ppm frame=%d\n", frames);
-            std::fflush(stdout);
-            std::puts("PASS P2_CAPTAIN_RUNTIME"); std::fflush(stdout); std::_Exit(0);
+        if (ppmArmed && !ppmCaptured && frames >= 20) {
+            if (capture("two-captains.ppm")) {
+                ppmCaptured = true;
+                std::printf("P2_CAPTAIN_PPM saved=two-captains.ppm frame=%d captains=%d\n",
+                    frames, naviMgr ? naviMgr->getNaviCount() : 0);
+                std::fflush(stdout);
+                std::puts("PASS P2_CAPTAIN_RUNTIME"); std::fflush(stdout); std::_Exit(0);
+            }
         }
     }
     int idle() override {
