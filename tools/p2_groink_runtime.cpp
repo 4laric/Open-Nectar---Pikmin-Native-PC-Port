@@ -102,15 +102,21 @@ public:
             // every 120 ticks; the transport mode rings once and then leaves the
             // squad free to pick up and carry the dropped corpse to the Pod.
             if (pc_p2_groink_teki_is_bound(carcassHost)) {
-                Vector3f park(carcassHost->mSRT.t.x, 0.0f, carcassHost->mSRT.t.z + 40.0f);
-                park.y = mapMgr->getMinY(park.x, park.z, true);
-                n->resetPosition(park);
-                if (sCarcassTransport) {
-                    // Keep the free squad on the corpse until a Pikmin grasps it,
-                    // then stop re-ringing so the carry is not disrupted.
-                    if (transportCarriers() == 0 && (carcassTicks == 1 || carcassTicks % 60 == 0)) ringReds(n, carcassHost);
-                } else if (carcassTicks == 1 || carcassTicks % 120 == 0) {
-                    ringReds(n, carcassHost);
+                // Kill phase only: park the captain beside the live host and
+                // deploy the free-mode squad. Once the host dies in transport
+                // mode the native carcass tail (pc_p2_groink_teki.cpp) owns the
+                // captain park and the free-mode re-ring onto the corpse pellet,
+                // so the fixture must stop overriding the captain here.
+                const bool hostAlive = carcassHost->isAlive();
+                if (!sCarcassTransport || hostAlive) {
+                    Vector3f park(carcassHost->mSRT.t.x, 0.0f, carcassHost->mSRT.t.z + 40.0f);
+                    park.y = mapMgr->getMinY(park.x, park.z, true);
+                    n->resetPosition(park);
+                    if (sCarcassTransport) {
+                        if (carcassTicks == 1 || carcassTicks % 60 == 0) ringReds(n, carcassHost);
+                    } else if (carcassTicks == 1 || carcassTicks % 120 == 0) {
+                        ringReds(n, carcassHost);
+                    }
                 }
             }
             if (carcassTicks % 60 == 0 || !pc_p2_groink_teki_is_bound(carcassHost)) {
