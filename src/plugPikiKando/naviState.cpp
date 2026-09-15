@@ -3217,6 +3217,15 @@ void NaviDeadState::init(Navi* navi)
 		naviMgr->informOrimaDead(navi);
 	}
 	if (naviMgr && naviMgr->getAliveOrima()) {
+		// Survivor path: the downed captain still plays ODead, stops and drops
+		// its squad (source-faithful); only stage finish / camera / pause are
+		// deferred until the last captain is down.
+		navi->mMotionSpeed = 30.0f;
+		navi->startMotion(PaniMotionInfo(PIKIANIM_ODead, navi), PaniMotionInfo(PIKIANIM_ODead));
+		seSystem->playPlayerSe(SE_PLAYER_DOWN);
+		navi->mVelocity.set(0.0f, 0.0f, 0.0f);
+		navi->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
+		navi->releasePikis();
 		return;
 	}
 
@@ -3261,6 +3270,10 @@ void NaviDeadState::procAnimMsg(Navi* navi, MsgAnim* msg)
 	switch (msg->mKeyEvent->mEventType) {
 	case KEY_Finished:
 	{
+		// Lane 12: a downed captain with a living partner must not end the game.
+		if (naviMgr && naviMgr->getAliveOrima()) {
+			break;
+		}
 		gameflow.mGameInterface->message(MOVIECMD_GameEndCondition, ENDCAUSE_NaviDown);
 		break;
 	}
