@@ -3,6 +3,7 @@ class Graphics;
 class Piki;
 class Creature;
 class Teki;
+class PelletView;
 struct BTeki;
 
 // Hard-lane shared registration seam (#244 BombSarai, #245 Fuefuki, #246
@@ -41,6 +42,16 @@ unsigned pc_p2_hardlanes_fuefuki_press_count();
 // latch so the per-tick sticker walk and pointer-equality press check never run
 // on a despawned/reused actor. No-op for any other actor.
 void pc_p2_hardlanes_forget(BTeki*);
+
+// (#245 transport_reward) Per-actor hook called from BTeki::update after the P1
+// strategy's act()/moveNew(). Grounds the flying Napkid host so a FreeMode squad
+// can attack it and registers the carcass on the natural death tick. Preview-only
+// and a no-op for any actor that is not the bound Fuefuki vehicle.
+void pc_p2_hardlanes_fuefuki_actor(BTeki*);
+// (#245 transport_reward) Research Pod corpse receipt: resolves the live vehicle
+// or its naturally dead carcass to the generator for `corpse:...fuefuki:<gen>`.
+// Returns false for any unregistered pellet so ordinary cargo is untouched.
+bool pc_p2_hardlanes_fuefuki_receipt(PelletView*, unsigned& generator);
 // Natural-hit ingress (#246): post one Pikmin-source hit against a BigTreasure
 // weapon coll part (`weapon` in [0,3], or -1 for the body) into the ordinary
 // FSM host drive. The lane-10 receiver / collision proxy is the intended
