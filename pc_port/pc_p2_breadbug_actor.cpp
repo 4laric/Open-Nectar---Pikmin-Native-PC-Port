@@ -61,11 +61,21 @@ void pc_p2_breadbug_actor_forget(BTeki* actor){
  if(state.contestHandle){if(!state.ownerDiedLogged)pc_p2_breadbug_contest_owner_died(state.contestHandle);pc_p2_breadbug_contest_destroy(state.contestHandle);state.contestHandle=0;} // no handle leak on despawn
  actors.erase(found);
 }
-void pc_p2_breadbug_actor_probe_carriers(int count){probeCarriers=count;}
+void pc_p2_breadbug_actor_probe_carriers(int count){
+ probeCarriers=count;
+ if(count>=0){
+  // The labelled injection is confessed by the module itself, not the fixture, so
+  // the validator can trust the confession without trusting the driver.
+  for(auto& entry:actors){
+   std::printf("P2_BREADBUG_CONTEST_PROBE generator=%u carriers=%d injected=1\n",entry.second.id,count);
+  }
+ }
+}
 void pc_p2_breadbug_actor_probe_revisit(){
  for(auto& entry:actors){
   auto& state=entry.second;
-  if(state.contestHandle){pc_p2_breadbug_contest_revisit(state.contestHandle);std::printf("P2_BREADBUG_REVISIT generator=%u rearmed=1\n",state.id);}
+  if(state.contestHandle){pc_p2_breadbug_contest_revisit(state.contestHandle);pc_p2_breadbug_contest_destroy(state.contestHandle);} // no Stolen-outcome handle leak
+  std::printf("P2_BREADBUG_REVISIT generator=%u rearmed=1\n",state.id);
   state.contestHandle=0;state.lastOutcome=-1;state.ownerDiedLogged=false;
  }
 }
@@ -110,7 +120,8 @@ void pc_p2_breadbug_actor_tick(){
     state.ownerDiedLogged=true;
     if(held){held->endStickTeki(actor);}actor->clearCreaturePointer(2);actor->stopParticleGenerator(2);
     pc_p2_breadbug_contest_owner_died(state.contestHandle);
-    std::printf("P2_BREADBUG_OWNER_DIED generator=%u released=%d reason=OwnerDied\n",state.id,1);
+    std::printf("P2_BREADBUG_OWNER_DIED generator=%u released=%d reason=OwnerDied\n",state.id,int(held!=nullptr));
+    pc_p2_breadbug_contest_destroy(state.contestHandle);state.contestHandle=0;
    }
    continue;
   }
