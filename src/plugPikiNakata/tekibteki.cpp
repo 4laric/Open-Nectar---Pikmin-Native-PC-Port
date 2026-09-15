@@ -29,6 +29,7 @@
 #include "pc_p2_elecbug.h"
 #include "pc_p2_tamago.h"
 #include "pc_p2_imomushi.h"
+#include "pc_p2_otakara.h"
 #include "pc_p2_batch3.h"
 #include "pc_p2_long_legs.h"
 #endif
@@ -473,6 +474,7 @@ void BTeki::update()
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
 	pc_p2_sokkuri_update(this);
 	pc_p2_armor_update(this);
+	pc_p2_otakara_update(this);
 	pc_p2_kurage_teki_tick(this);
 	pc_p2_onikurage_teki_tick(this);
 	pc_p2_kogane_update(this);

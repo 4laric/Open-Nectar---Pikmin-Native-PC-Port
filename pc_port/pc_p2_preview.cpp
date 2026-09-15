@@ -25,6 +25,7 @@
 #include "pc_p2_batch2.h"
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_armor.h"
+#include "pc_p2_otakara.h"
 #include "pc_p2_elecbug.h"
 #include "pc_p2_tamago.h"
 #include "pc_p2_umimushi.h"
@@ -258,6 +259,7 @@ void pc_p2_preview_setup() {
     pc_p2_batch2_setup();
     pc_p2_sokkuri_setup();
     pc_p2_armor_setup();
+    pc_p2_otakara_setup();
     pc_p2_elecbug_setup();
     pc_p2_tamago_setup();
     pc_p2_umimushi_setup();
