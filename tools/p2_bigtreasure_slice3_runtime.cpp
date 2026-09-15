@@ -32,6 +32,7 @@
 #include "settings/pc_settings_p2d.h"
 #include "pc_p2_hardlanes.h"
 #include "pc_p2_bigtreasure.h"
+#include "pc_p2_species.h"
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -54,10 +55,12 @@ class Slice3App final : public PlugPikiApp {
     bool setup = false;
     bool sentKnock = false;
     bool sawRepick = false;
+    bool injectedBlue = false;
     int phase = -1;
     int lastPhase = -1;
     int framesInAttack = 0;
-    int weaponsAtKnock = 0;
+    int repickFrames = 0;
+    Piki* bluePiki = nullptr;
     float ground = 0.0f;
 
 public:
@@ -87,6 +90,23 @@ public:
             require(squad >= 20, "live starting squad (>=20)");
             std::printf("P2_BIGTREASURE_SLICE3_SQUAD alive=%d\n", squad);
             require(pc_p2_hardlanes_bigtreasure_ready(), "ordinary seam active");
+            // Inject one Blue Pikmin (flagged: the squad is all Red) so a
+            // non-immune target is available for the fire receiver.
+            if (pikiMgr) {
+                Iterator it(pikiMgr);
+                CI_LOOP(it) {
+                    Piki* piki = static_cast<Piki*>(*it);
+                    if (piki && piki->isAlive()) {
+                        pc_p2_set_species(piki, P2SpeciesBlue);
+                        bluePiki = piki;
+                        injectedBlue = true;
+                        std::printf("P2_BIGTREASURE_SLICE3_BLUE species=%d injected=1\n",
+                                    pc_p2_species(piki));
+                        break;
+                    }
+                }
+            }
+            require(injectedBlue, "inject blue species");
             setup = true;
         }
 
@@ -104,30 +124,35 @@ public:
                         pc_p2_hardlanes_bigtreasure_weapon_count());
         }
 
-        if (phase == P2BT_Attack) {
+        if (phase == P2BT_Attack && !sentKnock) {
             ++framesInAttack;
-            // Let the element run long enough to emit, form its chains/bubbles,
-            // and hit a pinned Pikmin, then knock the chosen (elec) weapon off to
-            // observe the re-pick.
-            if (!sentKnock && framesInAttack >= 90) {
-                weaponsAtKnock = pc_p2_hardlanes_bigtreasure_weapon_count();
+            // Let the elec element run to emit, then knock elec off to observe
+            // the re-pick. This single knock-off is the flagged injected trigger;
+            // the FSM re-pick and the next (fire) attack are natural.
+            if (framesInAttack >= 90) {
                 const bool posted = pc_p2_hardlanes_bigtreasure_hit(
                     P2BTWEAPON_Elec, P2BigTreasureOwnership::kWeaponMaxHealth, false);
                 std::printf("P2_BIGTREASURE_SLICE3_KNOCKOFF posted=%d weapon=elec injected=1\n",
                             posted ? 1 : 0);
                 sentKnock = true;
             }
-        } else if (sentKnock && !sawRepick && phase == P2BT_PreAttack) {
+        }
+        if (sentKnock && !sawRepick && phase == P2BT_PreAttack) {
             sawRepick = true;
+            repickFrames = 0;
             std::printf("P2_BIGTREASURE_SLICE3_REPICK phase=PreAttack weapons=%d\n",
                         pc_p2_hardlanes_bigtreasure_weapon_count());
         }
-
-        if (sentKnock && sawRepick) {
-            std::printf("P2_BIGTREASURE_SLICE3_ATTACKED framed=%d\n", framesInAttack);
-            std::puts("PASS BIGTREASURE_SLICE3_RUNTIME");
-            std::fflush(stdout);
-            std::_Exit(0);
+        if (sawRepick) {
+            // Let the follow-on (fire) attack run so the pinned fire-column
+            // Pikmin are hit by the loop's real receiver before we exit.
+            ++repickFrames;
+            if (repickFrames >= 700) {
+                std::printf("P2_BIGTREASURE_SLICE3_ATTACKED\n");
+                std::puts("PASS BIGTREASURE_SLICE3_RUNTIME");
+                std::fflush(stdout);
+                std::_Exit(0);
+            }
         }
         return result;
     }
@@ -166,25 +191,41 @@ private:
         return alive;
     }
 
-    // Pins the Navi inside the boss box and up to four red Pikmin on the boss
-    // footprint / element scatter region, once per frame.
+    // Pins the Navi in the boss box and a few Pikmin: the injected Blue plus a
+    // Red in the fire column (so the follow-on fire attack reaches them through
+    // the loop), and two Red near the boss footprint for the elec scatter.
     void pinTargets()
     {
         Navi* navi = naviMgr ? naviMgr->getNavi() : nullptr;
         if (navi) {
             navi->mSRT.t.set(0.0f, ground, 60.0f);
         }
-        static const float spots[4][2] = {
-            { 0.0f, 0.0f }, { 25.0f, 0.0f }, { 0.0f, 25.0f }, { -25.0f, 0.0f },
+        static const float fireColumn[2][3] = {
+            { 0.0f, 50.0f, 120.0f },   // red, fire-immune -> accepted=0
+            { 0.0f, 50.0f, 130.0f },   // blue (injected), non-immune -> accepted=1
         };
-        int pinned = 0;
-        if (pikiMgr) {
-            Iterator it(pikiMgr);
-            CI_LOOP(it) {
-                Piki* piki = static_cast<Piki*>(*it);
-                if (!piki || !piki->isAlive() || pinned >= 4) continue;
-                piki->mSRT.t.set(spots[pinned][0], ground, spots[pinned][1]);
-                ++pinned;
+        static const float nearBoss[2][3] = {
+            { 25.0f, 0.0f, 0.0f }, { -25.0f, 0.0f, 0.0f },
+        };
+        if (!pikiMgr) return;
+        int columnIndex = 0, bossIndex = 0;
+        Iterator it(pikiMgr);
+        CI_LOOP(it) {
+            Piki* piki = static_cast<Piki*>(*it);
+            if (!piki || !piki->isAlive()) continue;
+            if (piki == bluePiki) {
+                piki->mSRT.t.set(fireColumn[1][0], ground + fireColumn[1][1], fireColumn[1][2]);
+                continue;
+            }
+            if (columnIndex < 1) {
+                piki->mSRT.t.set(fireColumn[0][0], ground + fireColumn[0][1], fireColumn[0][2]);
+                ++columnIndex;
+                continue;
+            }
+            if (bossIndex < 2) {
+                piki->mSRT.t.set(nearBoss[bossIndex][0], ground, nearBoss[bossIndex][2]);
+                ++bossIndex;
+                continue;
             }
         }
     }
