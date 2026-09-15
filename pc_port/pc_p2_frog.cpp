@@ -17,6 +17,9 @@
 #include <set>
 #include <cstdlib>
 #include <cstdio>
+// lane09 specular-instrumentation hook (renderer-owned, c linkage): brackets the
+// family draw so pc_gfx can attribute its GX_AF_SPEC COLOR1 uploads (pc_gfx.h).
+extern "C" void pc_gfx_specular_family_scope(int active);
 namespace {
 std::map<PelletView*,int> actors;
 const char* ids[]={"Frog","MaroFrog"};
@@ -124,5 +127,11 @@ bool pc_p2_frog_draw(BTeki* actor,Graphics& gfx,const Matrix4f& matrix,bool corp
     Shape* shape=animated[kind].at("wait1").front();
     if(name){int frames=actor->mTekiAnimator->getFrameCount();float phase=frames>1?actor->mTekiAnimator->getCounter()/(frames-1):0;
         shape=animated[kind].at(name).at(timing[kind].at(name).index(phase,corpse));}
-    shape->updateAnim(gfx,matrix,nullptr,actor);shape->drawshape(gfx,*gfx.mCamera,nullptr);return true;
+    shape->updateAnim(gfx,matrix,nullptr,actor);
+    // lane09 specular-instrumentation hook: bracket the family's own draw so the
+    // renderer can attribute its GX_AF_SPEC COLOR1 uploads to this family draw.
+    pc_gfx_specular_family_scope(1);
+    shape->drawshape(gfx,*gfx.mCamera,nullptr);
+    pc_gfx_specular_family_scope(0);
+    return true;
 }
