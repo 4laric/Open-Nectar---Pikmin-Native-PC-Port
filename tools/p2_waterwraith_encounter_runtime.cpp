@@ -55,6 +55,10 @@ namespace {
 constexpr int kStageA_Frames = 45;
 constexpr int kMaxFrames = 9000;
 constexpr int kCarryDeadlineFrames = 2400;
+// The labelled transport assist fires only near the end of the observation
+// window, so a natural multi-carrier haul has time to complete first (a natural
+// carrier that grabs early reaches the Pod long before this).
+constexpr int kAssistGraceFrames = 1800;
 constexpr float kPurpleOffsetX[3] = { 30.0f, 0.0f, -30.0f };
 constexpr float kPurpleOffsetZ[3] = { 0.0f, 30.0f, 0.0f };
 constexpr float kRedOffsetX[2] = { 50.0f, -50.0f };
@@ -156,11 +160,20 @@ public:
             windowPrinted = true;
         }
         if (!readyPrinted) {
-            // Pin the captain: a null controller keeps it still and whistle-free,
-            // so it cannot re-adopt Pikmin the fixture frees into FreeMode.
+            // Pin the captain (unconditional: Navi::Navi already allocs a Kontroller)
+            // and park it far from the corpse and the corpse->Pod haul path, so the
+            // post-work join-party (range 250, aiAction.cpp:462-468) cannot re-adopt
+            // a freed Pikmin whose transport aborted near the corpse.
             Navi* navi = naviMgr->getNavi();
-            if (navi && !navi->mKontroller) {
+            if (navi) {
                 navi->mKontroller = new NullNaviController();
+                Vector3f park(-400.0f, 0.0f, 0.0f);
+                if (mapMgr) {
+                    park.y = mapMgr->getMinY(park.x, park.z, true);
+                }
+                navi->resetPosition(park);
+                std::printf("P2_WATERWRAITH_NAVI_PARKED pos=%.1f,%.1f,%.1f\n", park.x, park.y,
+                            park.z);
             }
             std::printf("P2_WATERWRAITH_ENCOUNTER_READY\n");
             readyPrinted = true;
@@ -310,8 +323,14 @@ public:
                         }
                         const float dx = piki->mSRT.t.x - ref.x;
                         const float dz = piki->mSRT.t.z - ref.z;
-                        std::printf("P2_WATERWRAITH_PIKIMODE pik=%p mode=%d dist=%.1f\n",
-                                    static_cast<void*>(piki), int(piki->mMode),
+                        // mCurrActionIdx is public on TopAction; the transport
+                        // action's internal mState is protected, so the current
+                        // action index + mode name the step (Transport == 9).
+                        const int actionIdx
+                            = piki->mActiveAction ? int(piki->mActiveAction->mCurrActionIdx) : -1;
+                        std::printf("P2_WATERWRAITH_PIKIMODE pik=%p mode=%d action=%d "
+                                    "dist=%.1f\n",
+                                    static_cast<void*>(piki), int(piki->mMode), actionIdx,
                                     std::sqrt(dx * dx + dz * dz));
                     }
                 }
@@ -320,7 +339,7 @@ public:
             // an idle Pikmin the real Transport action (the same mechanism the
             // Mamuta assisted fixture uses). This is INJECTED (assisted=1), not a
             // natural-carry PASS.
-            if (!assistAssigned && carryFrames > 400
+            if (!assistAssigned && carryFrames > kAssistGraceFrames
                 && pc_p2_waterwraith_delivery_count() == 0 && corpse && corpse->isAlive()) {
                 int count = 0;
                 if (pikiMgr && naviMgr) {

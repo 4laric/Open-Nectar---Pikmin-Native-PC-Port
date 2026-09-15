@@ -86,8 +86,11 @@ void spawnWraithCorpse()
     pellet->mVelocity.set(0.0f, 100.0f, 0.0f);
     pellet->startAI(0);
     sCorpses[pellet] = 0u; // fixed placement => generator 0 (register unconditionally)
-    std::printf("P2_WATERWRAITH_CORPSE pos=%.3f,%.3f,%.3f registered=%d standin=number_pellet\n",
-                pos.x, pos.y, pos.z, 1);
+    std::printf("P2_WATERWRAITH_CORPSE pos=%.3f,%.3f,%.3f registered=%d standin=number_pellet "
+                "carry_min=%d carry_max=%d\n",
+                pos.x, pos.y, pos.z, 1,
+                pellet->mConfig ? int(pellet->mConfig->mCarryMinPikis()) : -1,
+                pellet->mConfig ? int(pellet->mConfig->mCarryMaxPikis()) : -1);
     std::fflush(stdout);
 }
 
