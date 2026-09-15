@@ -513,7 +513,10 @@ void pc_p2_bombsarai_teki_tick(BTeki* t)
             // seconds instead of letting its spawn velocity fling it clear of
             // the squad, so the FreeMode Pikmin that killed it can pick it up
             // (injected; the natural throw otherwise lands it out of reach).
-            if (sCorpseProbeTick < 300) sCorpsePellet->mVelocity.set(0.0f, 0.0f, 0.0f);
+            // Hold the corpse at the kill site until a carrier latches: its
+            // spawn velocity otherwise flings it out of the room (probe moved
+            // grew to 373) well clear of the ringed squad.
+            if (sCorpsePellet->getMinFreeSlotIndex() != -1) sCorpsePellet->mVelocity.set(0.0f, 0.0f, 0.0f);
             // Cargo-Pod corpse carry, same recipe as lanes 13/19/22/24/31: a
             // formation squad never picks up a corpse; only FREE-MODE Pikmin do
             // (Piki::graspSituation, mIdleWorkSearchRange ~100; graspSituation
