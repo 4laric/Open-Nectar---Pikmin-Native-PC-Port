@@ -115,7 +115,7 @@ void pc_p2_breadbug_actor_tick(){
  for(auto& entry:actors){
   BTeki* actor=entry.first;auto& state=entry.second;
   Pellet* held=actor->getCreaturePointer(2)&&actor->getCreaturePointer(2)->isObjType(OBJTYPE_Pellet)?static_cast<Pellet*>(actor->getCreaturePointer(2)):nullptr;
-  if(!actor->isAlive()){
+  if(actor->mDeadState || !actor->isAlive()){
    if(state.contestHandle&&!state.ownerDiedLogged){
     state.ownerDiedLogged=true;
     if(held){held->endStickTeki(actor);}actor->clearCreaturePointer(2);actor->stopParticleGenerator(2);
