@@ -47,6 +47,7 @@
 #include "pc_p2_sheargrub.h"
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_tank.h"
+#include "pc_p2_waterwraith_register.h"
 
 // Family registrations released before death teardown or manager-slot reuse.
 void pc_p2_forget_teki(BTeki* actor)
@@ -148,6 +149,7 @@ void pc_p2_reset_all_teki()
     pc_p2_imomushi_reset();
 	pc_p2_batch3_reset();
 	pc_p2_long_legs_reset();
+	pc_p2_waterwraith_reset();
 }
 
 namespace {

@@ -1,6 +1,7 @@
 #include "pc_p2_frog.h"
 #include "pc_p2_kogane.h"
 #include "pc_p2_mamuta.h"
+#include "pc_p2_waterwraith_register.h"
 #include "pc_p2_tank.h"
 #include "pc_p2_hiba.h"
 #include "pc_p2_dweevil.h"
@@ -329,6 +330,9 @@ bool pc_p2_preview_deliver(Pellet* pellet) {
         }
         else if(unsigned generator=0;pc_p2_mamuta_receipt(pellet->mPelletView,generator)) {
             receipt="corpse:"+pc_p2_cave_receipt_prefix()+"mamuta:"+std::to_string(generator);value=corpseValue;
+        }
+        else if(unsigned generator=0;pc_p2_waterwraith_receipt(pellet->mPelletView,generator)) {
+            receipt="corpse:"+pc_p2_cave_receipt_prefix()+"waterwraith:"+std::to_string(generator);value=corpseValue;
         }
         else {
             auto found=corpses.find(pellet->mPelletView);
