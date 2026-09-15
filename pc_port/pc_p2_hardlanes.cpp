@@ -772,9 +772,17 @@ unsigned pc_p2_hardlanes_fuefuki_press_count()
 // reuses its slot. pc_p2_hardlanes_update gates its sticker walk on sFuefukiVehicle,
 // and pc_p2_hardlanes_fuefuki_pressed compares against the same pointer, so a
 // forgotten actor must never leave either running on a despawned/reused Napkid.
+//
+// Ordering hazard: BTeki::doKill -> pc_p2_forget_teki can reach here before
+// pc_p2_hardlanes_update consumes health<=0 -> Dead (the lane update runs before
+// tekiMgr->update in the frame). Release the whistle-stolen squad now — source
+// ActTeki::exec owner-not-alive -> Panic is per-Pikmin (aiTeki.cpp:62-81), so a
+// dead beetle must free every follower — instead of leaving them held by a dead
+// owner. Idempotent after a normal Dead transit.
 void pc_p2_hardlanes_forget(BTeki* actor)
 {
     if (!actor || !sFuefukiVehicle || static_cast<BTeki*>(sFuefukiVehicle) != actor) return;
+    if (sFuefuki) sFuefuki->killVehicle();
     sFuefukiVehicle = nullptr;
     sFuefukiPressed = false;
 }
