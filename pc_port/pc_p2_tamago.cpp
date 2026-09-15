@@ -220,9 +220,13 @@ void pc_p2_tamago_forget(BTeki* actor) {
     // so forgetting the host despawns every born follower (via the death funnel)
     // and erases the whole group — no orphaned, unregistered Chappy actors remain.
     if (wasGroupHost) {
+        // Collect only the born followers (exclude the host itself, whose own
+        // leaderActor points back to it), despawn them via the death funnel, then
+        // erase the host. No orphaned, unregistered Chappy actors remain.
         std::vector<BTeki*> children;
         for (auto& entry : actors) {
-            if (entry.second.leaderActor == actor) {
+            if (entry.first != static_cast<PelletView*>(actor)
+                    && entry.second.leaderActor == actor) {
                 children.push_back(static_cast<BTeki*>(entry.first));
             }
         }
