@@ -36,6 +36,13 @@ bool pc_randomizer_p2_bound(unsigned source_id);
 // not bound. The ordinary spawn path keys its seed bindings on the spawn-slot
 // uid, not Generator::_70.
 unsigned pc_randomizer_p2_source_for_id(unsigned long generator_id);
+// Generic seed->native bridge path: resolve a generator's on-file id
+// (Generator::_70) to its seed-assigned ENEMY_P2 source id, by joining the lane-04
+// placement-slot sidecar (p2-placement-slots.txt: _70 -> spawn-slot uid) to the
+// seed's ENEMY_P2 binding (slot uid -> source). 0 means the generator is not
+// seed-bound. A family module uses this to bind the randomizer-assigned generator
+// rather than only a fixed p2-<family>-actors.txt set.
+unsigned pc_randomizer_p2_source_for_70(unsigned generator70);
 unsigned pc_randomizer_generator_id(const void* generator);
 void pc_randomizer_set_generator_id(const void* generator, unsigned uid);
 // `sourceId70` is the generator's on-file id (Generator::_70); it is consulted

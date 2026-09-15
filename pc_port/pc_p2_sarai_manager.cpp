@@ -1,6 +1,7 @@
 #include "pc_p2_sarai_manager.h"
 #include "pc_p2_sarai_host.h"
 #include "pc_p2_retail_player.h"
+#include "pc_randomizer.h"
 #include "Generator.h"
 #include "Graphics.h"
 #include "teki.h"
@@ -40,6 +41,25 @@ bool findOwnerActor(unsigned wantedGenerator, int wantedType, BTeki*& match)
         BTeki* actor = static_cast<BTeki*>(*actors);
         if (!actor || !actor->mGenerator) continue;
         if (actor->mGenerator->_70 != wantedGenerator || actor->mTekiType != wantedType) continue;
+        if (match) return false;
+        match = actor;
+    }
+    return match != nullptr;
+}
+
+// Seed-driven selection (lane-03 bridge): the exactly-one spawned actor whose
+// generator the ENEMY_P2 seed bound to Sarai (source 23), so the randomizer's
+// assigned generator drives the module rather than only the fixed env generator.
+bool findSeedActor(unsigned source, int wantedType, BTeki*& match)
+{
+    match = nullptr;
+    if (!tekiMgr || !pc_randomizer_p2_bridge()) return false;
+    Iterator actors(tekiMgr);
+    CI_LOOP(actors) {
+        BTeki* actor = static_cast<BTeki*>(*actors);
+        if (!actor || !actor->mGenerator) continue;
+        if (actor->mTekiType != wantedType) continue;
+        if (pc_randomizer_p2_source_for_70(actor->mGenerator->_70) != source) continue;
         if (match) return false;
         match = actor;
     }
@@ -152,12 +172,15 @@ void pc_p2_sarai_manager_setup()
     const int wantedType = type && *type ? std::atoi(type) : 3;
 
     BTeki* match = nullptr;
-    if (!findOwnerActor(wantedGenerator, wantedType, match)) return;
+    // Seed-driven selection wins over the fixed env generator: a generator the
+    // ENEMY_P2 seed bound to Sarai (23) is authoritative.
+    const bool seedBound = findSeedActor(23, wantedType, match);
+    if (!seedBound && !findOwnerActor(wantedGenerator, wantedType, match)) return;
     auto host = buildHost(match);
     if (!host) return;
     s[match] = { host.get(), match->mGenerator->_70, match->mTekiType };
-    std::printf("P2_SARAI_READY source_id=23 species=Sarai generator=%u type=%d health=%.1f behavior=source\n",
-                match->mGenerator->_70, match->mTekiType, match->mHealth);
+    std::printf("P2_SARAI_READY source_id=23 species=Sarai generator=%u type=%d health=%.1f behavior=source resolution=%s\n",
+                match->mGenerator->_70, match->mTekiType, match->mHealth, seedBound ? "seed" : "env");
     std::printf("P2_SARAI_CORPSE_READY generator=%u drop=BDT_Normal ledger=onion receipt=corpse:sarai:%u\n",
                 match->mGenerator->_70, match->mGenerator->_70);
     std::fflush(stdout);

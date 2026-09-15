@@ -23,6 +23,7 @@
 //   * View angle is a full circle (hit angle fp23=0 on the disc).
 // No other lane's module is modified; every hook is a no-op for unregistered actors.
 #include "pc_p2_otakara.h"
+#include "pc_randomizer.h"
 #include "pc_p2_dweevil_policy.h"
 #include "pc_p2_species.h"
 #include "pc_p2_hazard_emitter.h"
@@ -472,18 +473,34 @@ void pc_p2_otakara_setup() {
         }
     }
 
-    std::ifstream in("p2-dweevil-actors.txt");
-    if (!in) return;
-    std::string header;
-    int count = 0;
-    if (!(in >> header >> count) || header != "P2_DWEEVIL_ACTORS_1" || count < 1) return;
     std::map<unsigned, int> wanted;
-    for (int i = 0; i < count; ++i) {
-        unsigned long long generator = 0;
-        std::string species;
-        if (!(in >> generator >> species)) return;
-        const int sid = speciesFromName(species);
-        if (sid >= 0) wanted[unsigned(generator)] = sid;
+    std::ifstream in("p2-dweevil-actors.txt");
+    if (in) {
+        std::string header;
+        int count = 0;
+        if ((in >> header >> count) && header == "P2_DWEEVIL_ACTORS_1" && count >= 1) {
+            for (int i = 0; i < count; ++i) {
+                unsigned long long generator = 0;
+                std::string species;
+                if (!(in >> generator >> species)) break;
+                const int sid = speciesFromName(species);
+                if (sid >= 0) wanted[unsigned(generator)] = sid;
+            }
+        }
+    }
+    // lane-03 seed->native bridge: a generator the ENEMY_P2 seed bound to an
+    // Otakara source (59-62) is bound even without a p2-dweevil-actors.txt row, so
+    // the randomizer-assigned generator selects this module rather than only a
+    // fixed sidecar set. Additive: no seed binding leaves `wanted` unchanged.
+    if (pc_randomizer_p2_bridge()) {
+        Iterator seedScan(tekiMgr);
+        CI_LOOP(seedScan) {
+            Teki* actor = static_cast<Teki*>(*seedScan);
+            if (!actor || !actor->mGenerator) continue;
+            const unsigned source = pc_randomizer_p2_source_for_70(actor->mGenerator->_70);
+            if (source >= unsigned(p2dweevil::FireId) && source <= unsigned(p2dweevil::ElecId))
+                wanted[actor->mGenerator->_70] = int(source);
+        }
     }
     if (wanted.empty()) return;
 
