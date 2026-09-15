@@ -547,7 +547,10 @@ void pc_p2_qurione_update(BTeki* actor) {
         // !mDeadState block (teki.h:249-252); because this FSM update is outside
         // doAI, a bare die() never finalizes, so doKill and the lane-07
         // pc_p2_forget_teki seam never run. pcEscapeNow() = die()+dieSoon().
-        if (w.stateTime >= DEATH_TIME && !w.killed) { w.killed = true; actor->pcEscapeNow(); }
+        // pcEscapeNow() finalizes the death, runs doKill and the lane-07 forget
+        // seam, which erases this wisp from actors (:290). w is dangling after
+        // this call, so return before the egg tick / POS log below touch it.
+        if (w.stateTime >= DEATH_TIME && !w.killed) { w.killed = true; actor->pcEscapeNow(); return; }
         break;
     }
     default:
