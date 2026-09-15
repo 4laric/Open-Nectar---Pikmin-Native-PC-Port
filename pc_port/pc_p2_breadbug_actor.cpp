@@ -126,6 +126,10 @@ void pc_p2_breadbug_actor_tick(){
    continue;
   }
   if(held){
+   // Legacy read-only observation marker FIRST, so the natural carriers value is
+   // logged before the contest update samples it (the validator cross-checks each
+   // pre-grant CONTEST_UPDATE carriers against this latest legacy carriers value).
+   if(!state.lastHeld||carriers(held)!=state.lastCarriers){state.lastHeld=true;state.lastCarriers=carriers(held);std::printf("P2_BREADBUG_CONTEST generator=%u native_power=%g carriers=%d\n",state.id,PROXY_CARRY_POWER,state.lastCarriers);}
    if(!state.contestHandle){
     std::string sourceToken="nest:"+std::to_string(state.id);
     state.contestHandle=pc_p2_breadbug_contest_create((int)CONTEST_SOURCE_ID,CONTEST_STAGE,sourceToken.c_str(),CONTEST_MIN_THRESHOLD,CONTEST_MAX_THRESHOLD,CONTEST_FREEZE_SECONDS,CONTEST_REQUIRED_CARRIERS,CONTEST_MAX_CARRIERS);
@@ -160,9 +164,6 @@ void pc_p2_breadbug_actor_tick(){
      }
     }
    }
-   // Legacy read-only observation marker (P1 proxy carriers/power), kept for the
-   // existing contest-observation validators.
-   if(!state.lastHeld||carriers(held)!=state.lastCarriers){state.lastHeld=true;state.lastCarriers=carriers(held);std::printf("P2_BREADBUG_CONTEST generator=%u native_power=%g carriers=%d\n",state.id,PROXY_CARRY_POWER,state.lastCarriers);}
   } else {
    state.lastHeld=false;
    // Lost the cargo while the contest was still Held (delivered to its nest, or
