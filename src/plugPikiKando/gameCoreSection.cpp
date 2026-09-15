@@ -3,6 +3,7 @@
 #include "pc_p2_teki_lifetime.h"
 #include "pc_p2_kurage_teki.h"
 #include "pc_p2_onikurage_teki.h"
+#include "pc_p2_king_teki.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_demon_drop_state.h"
 #include "pc_p2_demon_bridge.h"
@@ -882,6 +883,7 @@ void GameCoreSection::exitStage()
 	pc_p2_kurage_receiver_reset();
 	pc_p2_kurage_teki_reset();
 	pc_p2_onikurage_teki_reset();
+	pc_p2_king_teki_reset();
 	pc_p2_kurage_visual_reset();
 	// Actor-lifetime seam (#397/#186): clear every remaining P2 family
 	// registration map so a finished stage cannot retain a stale BTeki* key
@@ -1431,6 +1433,7 @@ void GameCoreSection::finalSetup()
 
 	pc_p2_kurage_teki_setup();
 	pc_p2_onikurage_teki_setup();
+	pc_p2_king_teki_setup();
 	pc_p2_demon_manager_setup();
 	pc_p2_preview_setup();
 	pc_p2_snow_campaign_setup();
