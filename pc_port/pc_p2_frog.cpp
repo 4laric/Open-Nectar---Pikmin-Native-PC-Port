@@ -14,6 +14,7 @@
 #include "Navi.h"
 #include "NaviMgr.h"
 #include "Interactions.h"
+#include "MapMgr.h"
 #include <fstream>
 #include <set>
 #include <cstdlib>
@@ -37,7 +38,7 @@ constexpr float MOVE_SPEED = 80.0f;        // source mMoveSpeed default
 constexpr float TURN_RATE = 2.5f;          // port adaptation
 constexpr float ATTACK_ANGLE = 0.261799f;  // 15 deg source mMaxAttackAngle default
 constexpr float FACE_OK_ANGLE = 0.174533f; // 10 deg settle
-constexpr float LATCH_RADIUS = 40.0f;      // port: isStartFlick stand-in
+constexpr int FLEE_STUCK_MIN = 3;          // source mShakeOffSticking1 first tier (flick-timer graduation omitted)
 constexpr float JUMP_LAUNCH_S = 8.0f / 30.0f; // type1 key event 2 (frame 8)
 constexpr float FLICK_KNOCKBACK = 0.0f;
 constexpr float FLICK_DAMAGE = 0.0f;
@@ -58,7 +59,8 @@ struct FrogFsm {
     float hopDirX = 0.0f, hopDirZ = 0.0f;
     bool launched = false;
     bool escaped = false;
-    int nextState = -1;
+    bool pressDone = false;
+    bool jumpEntryChecked = false;
     unsigned rng = 1;
     bool deadLogged = false;
     std::string clip = "wait1";
@@ -160,13 +162,26 @@ Creature* nearestTarget(const Vector3f& pos,float sight){
         const Vector3f q=p->getPosition();const float dx=q.x-pos.x,dz=q.z-pos.z,d=dx*dx+dz*dz;if(d<bestSq){bestSq=d;best=p;}}}
     return best;
 }
+int stuckPikminCount(Creature* creature){
+    int n=0;
+    for(Creature* s=creature->mStickListHead;s;s=s->mNextSticker){
+        if(!s||!s->isPiki()||!s->isAlive())continue;
+        ++n;
+    }
+    return n;
+}
+float probeFloorY(const Vector3f& pos,float fallback){
+    if(!mapMgr)return fallback;
+    const float y=mapMgr->getMinY(pos.x,pos.z,false);
+    return std::isfinite(y)?y:fallback;
+}
 bool attackable(const FrogFsm& s,const Vector3f& pos,const Creature* target,float range){
     if(!target)return false;const Vector3f tp=target->getPosition();
     if(distXZ(pos,tp)>=range)return false;
     const float ang=std::fabs(wrapPi(std::atan2(tp.x-pos.x,tp.z-pos.z)-s.heading));
     return ang<ATTACK_ANGLE;
 }
-bool shouldFlick(const Vector3f& pos){return nearestTarget(pos,LATCH_RADIUS)!=nullptr;}
+bool shouldFlick(BTeki* actor){return stuckPikminCount(actor)>=FLEE_STUCK_MIN;}
 // MaroFrog attackNaviPosition: an in-range living captain overrides the jump
 // landing point (the source captain retarget).
 void retargetNavi(BTeki* actor,FrogFsm& s){
@@ -180,30 +195,33 @@ void retargetNavi(BTeki* actor,FrogFsm& s){
 // adjacent shake; the P2 water branch is absent on the dry P1 host).
 void doJumpFlick(BTeki* actor,FrogFsm& s){
     const Vector3f pos=actor->getPosition();
+    const float range=p2frog::params(s.kind).shakeRange;
     int hit=0;
     if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){Piki* q=static_cast<Piki*>(*it);if(!q||!q->isAlive())continue;
-        if(distXZ(q->getPosition(),pos)<55.0f){if(q->stimulate(InteractFlick(actor,FLICK_KNOCKBACK,FLICK_DAMAGE,FLICK_BACKWARDS_ANGLE)))++hit;}}}
-    if(naviMgr){Navi* n=naviMgr->getNavi();if(n&&n->isAlive()&&distXZ(n->getPosition(),pos)<55.0f)
+        if(distXZ(q->getPosition(),pos)<range){if(q->stimulate(InteractFlick(actor,FLICK_KNOCKBACK,FLICK_DAMAGE,FLICK_BACKWARDS_ANGLE)))++hit;}}}
+    if(naviMgr){Navi* n=naviMgr->getNavi();if(n&&n->isAlive()&&distXZ(n->getPosition(),pos)<range)
         if(n->stimulate(InteractFlick(actor,FLICK_KNOCKBACK,FLICK_DAMAGE,FLICK_BACKWARDS_ANGLE)))++hit;}
     std::printf("P2_FROG_JUMP_FLICK species=%s hit=%d\n",ids[s.kind],hit);std::fflush(stdout);
 }
 // Source collisionCallback while falling: InteractPress(attackDamage) on grounded
-// non-bittered Navi/Pikmin in the source head radius; pressOnGround flips stuck.
+// (floor-triangle) non-bittered Navi/Pikmin inside the source head radius, applied
+// once at the Fall->Attack landing. The separate pressOnGround stuck-shakeoff is
+// not reproduced on the P1 host (see the jump flick instead).
 int doLandPress(BTeki* actor,FrogFsm& s){
     if(isBittered(static_cast<PelletView*>(actor)))return 0;
     const Vector3f pos=actor->getPosition();
     const float radius=p2frog::headRadius(s.kind);
     const p2frog::Params& p=p2frog::params(s.kind);
-    int pressed=0;
+    int pressedPikmin=0,pressedNavi=0;
     if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){Piki* q=static_cast<Piki*>(*it);if(!q||!q->isAlive()||q->isFlying())continue;
         const Vector3f qp=q->getPosition();const float dx=qp.x-pos.x,dz=qp.z-pos.z;
-        if(dx*dx+dz*dz<=radius*radius){if(q->stimulate(InteractPress(actor,p.attackDamage)))++pressed;}}}
+        if(dx*dx+dz*dz<=radius*radius){if(q->stimulate(InteractPress(actor,p.attackDamage)))++pressedPikmin;}}}
     if(naviMgr){Iterator it(naviMgr);CI_LOOP(it){Navi* n=static_cast<Navi*>(*it);if(!n||!n->isAlive()||n->isFlying())continue;
         const Vector3f np=n->getPosition();const float dx=np.x-pos.x,dz=np.z-pos.z;
-        if(dx*dx+dz*dz<=radius*radius){if(n->stimulate(InteractPress(actor,p.attackDamage)))++pressed;}}}
-    std::printf("P2_FROG_LAND species=%s radius=%.1f bittered=0 pikmin=%d navi=0 behavior=source\n",ids[s.kind],radius,pressed);
+        if(dx*dx+dz*dz<=radius*radius){if(n->stimulate(InteractPress(actor,p.attackDamage)))++pressedNavi;}}}
+    std::printf("P2_FROG_LAND species=%s radius=%.1f bittered=0 pikmin=%d navi=%d behavior=source\n",ids[s.kind],radius,pressedPikmin,pressedNavi);
     std::fflush(stdout);
-    return pressed;
+    return pressedPikmin+pressedNavi;
 }
 void setPhase(int kind,FrogFsm& s){
     const float dur=clipSeconds(kind,s.clip);
@@ -212,14 +230,21 @@ void setPhase(int kind,FrogFsm& s){
     s.phase=ph;
 }
 void transition(BTeki* actor,FrogFsm& s,FState st,const char* clip,unsigned gen){
-    s.state=st;s.stateTime=0.0f;s.launched=false;s.pressDone=false;if(clip)s.clip=clip;
+    s.state=st;s.stateTime=0.0f;s.launched=false;s.pressDone=false;s.jumpEntryChecked=false;if(clip)s.clip=clip;
     std::printf("P2_FROG_STATE species=%s generator=%u state=%s\n",ids[s.kind],gen,p2frog::stateName(st));
     std::fflush(stdout);
+}
+// Source death is deferred to the per-state exec points, never taken mid-air:
+// Wait (isDead), Turn/TurnToHome/GoHome (mNextState=Dead, finishMotion), and
+// Attack/Fail (KEYEVENT_END). Jump/JumpWait/Fall never transit to Dead directly.
+void die(BTeki* actor,FrogFsm& s,unsigned gen){
+    if(!s.deadLogged){s.deadLogged=true;std::printf("P2_FROG_DEAD species=%s generator=%u health=0\n",ids[s.kind],gen);std::fflush(stdout);}
+    transition(actor,s,FRG_DEAD,"dead",gen);
 }
 void launchHop(BTeki* actor,FrogFsm& s){
     const Vector3f pos=actor->getPosition();
     const p2frog::Params& p=p2frog::params(s.kind);
-    s.groundY=pos.y;
+    s.groundY=probeFloorY(pos,s.groundY);
     s.hopApex=(p.jumpSpeed*p.jumpSpeed)/APEX_GRAVITY;
     const float dx=s.targetPos.x-pos.x,dz=s.targetPos.z-pos.z;
     const float len=std::sqrt(dx*dx+dz*dz);
@@ -270,10 +295,10 @@ void pc_p2_frog_setup(){
         teki->mHealth=p2frog::params(kind).health;
         FrogFsm& f=fsms[static_cast<PelletView*>(teki)];
         f.kind=kind;f.home=teki->getPosition();f.heading=teki->getDirection();
-        f.groundY=teki->getPosition().y;f.targetPos=f.home;f.targetValid=true;
+        f.groundY=probeFloorY(teki->getPosition(),teki->getPosition().y);f.targetPos=f.home;f.targetValid=true;
         f.rng=(teki->mGenerator->_70*2654435761u)|1u;
         f.state=FRG_WAIT;f.clip="wait1";f.phase=0.0f;
-        std::printf("P2_FROG_READY species=%s generator=%u health=%.1f max_health=%.1f behavior=P1_proxy rewards=P1_unchanged\n",ids[kind],found->first,teki->mHealth,teki->getParameterF(TPF_Life));
+        std::printf("P2_FROG_READY species=%s generator=%u health=%.1f max_health=%.1f behavior=source_fsm rewards=P1_unchanged\n",ids[kind],found->first,teki->mHealth,teki->getParameterF(TPF_Life));
         std::printf("P2_FROG_STATE species=%s generator=%u state=wait\n",ids[kind],found->first);
         std::fflush(stdout);
     }
@@ -294,16 +319,13 @@ void pc_p2_frog_update(BTeki* actor){
     // the source FSM applies pending damage itself. Mirrors TAIsimultaneousDamage.
     if(actor->mStoredDamage>0.0f)actor->makeDamaged();
 
-    if(actor->mHealth<=0.0f&&s.state!=FRG_DEAD){
-        if(!s.deadLogged){s.deadLogged=true;std::printf("P2_FROG_DEAD species=%s generator=%u health=0\n",ids[s.kind],gen);std::fflush(stdout);}
-        transition(actor,s,FRG_DEAD,"dead",gen);
-    }
-
     s.stateTime+=dt;
     switch(s.state){
     case FRG_WAIT:{
         stop(actor);
-        if(shouldFlick(pos)){
+        actor->getPosition().y=s.groundY;
+        if(actor->mHealth<=0.0f){die(actor,s,gen);break;}
+        if(shouldFlick(actor)){
             s.targetPos=pos;s.targetValid=true;retargetNavi(actor,s);
             transition(actor,s,FRG_JUMP,"type1",gen);
             break;
@@ -322,7 +344,9 @@ void pc_p2_frog_update(BTeki* actor){
     }
     case FRG_TURN:{
         stop(actor);
-        if(shouldFlick(pos)){s.targetPos=pos;s.targetValid=true;transition(actor,s,FRG_JUMP,"type1",gen);break;}
+        actor->getPosition().y=s.groundY;
+        if(actor->mHealth<=0.0f){die(actor,s,gen);break;}
+        if(shouldFlick(actor)){s.targetPos=pos;s.targetValid=true;transition(actor,s,FRG_JUMP,"type1",gen);break;}
         Creature* t=nearestTarget(pos,p.sight);
         bool nextJump=false;
         if(t){
@@ -337,6 +361,11 @@ void pc_p2_frog_update(BTeki* actor){
     }
     case FRG_JUMP:{
         stop(actor);
+        actor->getPosition().y=s.groundY;
+        if(!s.jumpEntryChecked){
+            s.jumpEntryChecked=true;
+            if(stuckPikminCount(actor)>0&&rand01(s)<p.jumpFail){transition(actor,s,FRG_FAIL,"damage",gen);break;}
+        }
         if(!s.launched&&s.stateTime>=JUMP_LAUNCH_S){
             s.launched=true;launchHop(actor,s);doJumpFlick(actor,s);
         }
@@ -345,12 +374,12 @@ void pc_p2_frog_update(BTeki* actor){
     }
     case FRG_JUMPWAIT:{
         advanceHop(actor,s,dt);
-        if(s.airTimer>=p.airTime||s.stateTime>=clipSeconds(s.kind,"wait2"))transition(actor,s,FRG_FALL,"type2",gen);
+        if(s.airTimer>=p.airTime*0.5f||s.stateTime>=clipSeconds(s.kind,"wait2"))transition(actor,s,FRG_FALL,"type2",gen);
         break;
     }
     case FRG_FALL:{
         advanceHop(actor,s,dt);
-        if(s.airTimer>=p.airTime||s.stateTime>=clipSeconds(s.kind,"type2")*1.5f){actor->getPosition().y=s.groundY;transition(actor,s,FRG_ATTACK,"attack",gen);}
+        if(s.airTimer>=p.airTime){actor->getPosition().y=s.groundY;transition(actor,s,FRG_ATTACK,"attack",gen);}
         break;
     }
     case FRG_ATTACK:{
@@ -358,6 +387,7 @@ void pc_p2_frog_update(BTeki* actor){
         actor->getPosition().y=s.groundY;
         if(!s.pressDone){s.pressDone=true;doLandPress(actor,s);}
         if(s.stateTime>=clipSeconds(s.kind,"attack")){
+            if(actor->mHealth<=0.0f){die(actor,s,gen);break;}
             if(distXZ(pos,s.home)>TERRITORY)transition(actor,s,FRG_TURNTOHOME,"waitact1",gen);
             else transition(actor,s,FRG_WAIT,"wait1",gen);
         }
@@ -365,8 +395,10 @@ void pc_p2_frog_update(BTeki* actor){
     }
     case FRG_FAIL:{
         stop(actor);
+        actor->getPosition().y=s.groundY;
         if(s.stateTime>=clipSeconds(s.kind,"damage")){
-            if(shouldFlick(pos))transition(actor,s,FRG_JUMP,"type1",gen);
+            if(actor->mHealth<=0.0f){die(actor,s,gen);break;}
+            if(shouldFlick(actor))transition(actor,s,FRG_JUMP,"type1",gen);
             else if(distXZ(pos,s.home)>TERRITORY)transition(actor,s,FRG_TURNTOHOME,"waitact1",gen);
             else transition(actor,s,FRG_WAIT,"wait1",gen);
         }
@@ -374,20 +406,25 @@ void pc_p2_frog_update(BTeki* actor){
     }
     case FRG_TURNTOHOME:{
         stop(actor);
-        if(shouldFlick(pos)){s.targetPos=pos;s.targetValid=true;transition(actor,s,FRG_JUMP,"type1",gen);break;}
+        actor->getPosition().y=s.groundY;
+        if(actor->mHealth<=0.0f){die(actor,s,gen);break;}
+        if(shouldFlick(actor)){s.targetPos=pos;s.targetValid=true;transition(actor,s,FRG_JUMP,"type1",gen);break;}
         turnTo(actor,s,s.home,dt);
         if(std::fabs(wrapPi(std::atan2(s.home.x-pos.x,s.home.z-pos.z)-s.heading))<=FACE_OK_ANGLE||s.stateTime>=clipSeconds(s.kind,"waitact1"))
             transition(actor,s,FRG_GOHOME,"move1",gen);
         break;
     }
     case FRG_GOHOME:{
+        actor->getPosition().y=s.groundY;
+        if(actor->mHealth<=0.0f){die(actor,s,gen);break;}
         if(distXZ(pos,s.home)<HOME_RADIUS){transition(actor,s,FRG_WAIT,"wait1",gen);break;}
-        if(shouldFlick(pos)){s.targetPos=pos;s.targetValid=true;transition(actor,s,FRG_JUMP,"type1",gen);break;}
+        if(shouldFlick(actor)){s.targetPos=pos;s.targetValid=true;transition(actor,s,FRG_JUMP,"type1",gen);break;}
         walkTo(actor,s,s.home,MOVE_SPEED,dt);
         break;
     }
     case FRG_DEAD:{
         stop(actor);
+        actor->getPosition().y=s.groundY;
         // dieSoon() only runs inside the P1 doAI block, which is suppressed for
         // registered frogs; pcEscapeNow() finalizes the corpse outside doAI,
         // fired exactly once when the dead animation completes.
