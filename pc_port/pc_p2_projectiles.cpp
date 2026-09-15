@@ -29,6 +29,7 @@
 #include "pc_p2_groink.h"
 #include "pc_p2_groink_hit.h"
 #include "pc_p2_bombsarai_bomb.h"
+#include "pc_p2_bombsarai_blast.h"
 #include "pc_bbft.h"
 #include "Creature.h"
 #include "Generator.h"
@@ -359,6 +360,11 @@ struct Host {
     // (the room's two Dwarf Bulborbs otherwise settle ~70 units apart).
     bool pinVictim = false;
     bool sawTekiPinRow = false;
+
+    // Once-per-scene diagnostic loggers (moved out of function-scope statics so
+    // pc_p2_projectiles_reset() clears them like every other Host field).
+    bool aimNoneLogged = false;
+    bool kabutoTargetLogged = false;
 
     p2rockhost::ScriptRng rng;
     double debt = 0.0;
@@ -980,9 +986,8 @@ Teki* findVictimTeki(const Vector3f& from)
         }
     }
     if (!best) {
-        static bool logged = false;
-        if (!logged) {
-            logged = true;
+        if (!gHost.aimNoneLogged) {
+            gHost.aimNoneLogged = true;
             std::printf("P2_PROJECTILE_AIM_NONE total_teki=%d alive_nonfirer=%d\n",
                         total, aliveNonFirer);
         }
@@ -1083,9 +1088,8 @@ void tickKabuto()
     }
     const P2CannonStoneTarget target = selectHostTarget(origin, gHost.stoneCfg.sightRadius);
     {
-        static bool logged = false;
-        if (!logged) {
-            logged = true;
+        if (!gHost.kabutoTargetLogged) {
+            gHost.kabutoTargetLogged = true;
             std::printf("P2_PROJECTILE_KABUTO_TARGET present=%d origin=(%.1f,%.1f,%.1f) sight=%.1f\n",
                         int(target.hasTarget), origin.x, origin.y, origin.z,
                         gHost.stoneCfg.sightRadius);
@@ -1477,18 +1481,37 @@ void tickBombConsumer()
                     blast.center.x, blast.center.y, blast.center.z, blast.radius,
                     blast.naviPikiDamage,
                     static_cast<unsigned long long>(gHost.bombBinding ? gHost.bombBinding->floors() : 0ULL));
+        // Route the blast through lane-27's shared classifier (never a direct
+        // unconditional application): build one Navi receiver from the live
+        // captain, let p2_bombsarai_route_blast decide the volume/damage, and apply
+        // the engine strike ONLY when a hit is routed. Distance is logged.
         Navi* navi = naviMgr ? naviMgr->getNavi() : nullptr;
         if (navi && navi->isAlive()) {
-            const P2ProjectileEngineHit hit = p2_projectile_apply_engine_strike(
-                navi, nullptr, /*attack=*/true, /*targetIsTeki=*/false, blast.naviPikiDamage);
-            std::printf("P2_PROJECTILE_BOMB_ENGINE_HIT token=%llu kind=Bomb damage=%.1f "
-                        "applied=%d rejected=%d health=%.1f->%.1f\n",
-                        static_cast<unsigned long long>(tokenOf(navi)),
-                        blast.naviPikiDamage, int(hit.applied), int(hit.rejected),
-                        hit.healthBefore, hit.healthAfter);
+            const Vector3f& p = navi->mSRT.t;
+            P2BombSaraiReceiver receiver;
+            receiver.id = tokenOf(navi);
+            receiver.position = P2BombSaraiVec3{ p.x, p.y, p.z };
+            receiver.kind = P2BombSaraiReceiverKind::Navi;
+            receiver.alive = true;
+            receiver.airborneBombImmune = false;
+            receiver.grounded = true;
+            P2BombSaraiRoutedHit routed;
+            const int routedCount = p2_bombsarai_route_blast(blast, &receiver, 1, &routed, 1);
+            const float dx = p.x - blast.center.x, dy = p.y - blast.center.y, dz = p.z - blast.center.z;
+            const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+            if (routedCount >= 1) {
+                const P2ProjectileEngineHit hit = p2_projectile_apply_engine_strike(
+                    navi, nullptr, /*attack=*/true, /*targetIsTeki=*/false, routed.damage);
+                std::printf("P2_PROJECTILE_BOMB_ENGINE_HIT token=%llu kind=Bomb damage=%.1f "
+                            "applied=%d rejected=%d health=%.1f->%.1f dist=%.1f\n",
+                            static_cast<unsigned long long>(tokenOf(navi)),
+                            routed.damage, int(hit.applied), int(hit.rejected),
+                            hit.healthBefore, hit.healthAfter, dist);
+            } else {
+                std::printf("P2_PROJECTILE_BOMB_NOHIT dist=%.1f\n", dist);
+            }
         } else {
-            std::printf("P2_PROJECTILE_BOMB_ENGINE_HIT token=0 kind=Bomb damage=%.1f "
-                        "applied=0 rejected=1 health=0.0->0.0\n", blast.naviPikiDamage);
+            std::printf("P2_PROJECTILE_BOMB_NOHIT dist=-1.0\n");
         }
         gHost.bombApplied = true;
     }
@@ -1599,6 +1622,8 @@ void pc_p2_projectiles_reset()
     gHost.bombApplied = false;
     gHost.pinVictim = false;
     gHost.sawTekiPinRow = false;
+    gHost.aimNoneLogged = false;
+    gHost.kabutoTargetLogged = false;
     gHost.rng.state = 1u;
     gHost.debt = 0.0;
     if (gHost.binding) {
