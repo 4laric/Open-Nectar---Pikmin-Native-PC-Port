@@ -209,6 +209,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_hiba.cpp
     pc_port/pc_p2_flora_actor.cpp
     pc_port/pc_p2_receipt_host.cpp
+    pc_port/pc_p2_delivery_host.cpp
     pc_port/pc_p2_pom.cpp
     pc_port/pc_p2_plant.cpp
     pc_port/pc_p2_waterwraith_visual.cpp
@@ -1035,6 +1036,12 @@ add_executable(p2_delivery_receiver_test tools/p2_delivery_receiver_test.cpp)
 target_include_directories(p2_delivery_receiver_test PRIVATE pc_port)
 target_compile_options(p2_delivery_receiver_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_delivery_receiver_test COMMAND p2_delivery_receiver_test)
+
+# Lane 06: engine-free delivery host bridge (persistent ordinary receipt ledger).
+add_executable(p2_delivery_host_test tools/p2_delivery_host_test.cpp pc_port/pc_p2_delivery_host.cpp)
+target_include_directories(p2_delivery_host_test PRIVATE pc_port)
+target_compile_options(p2_delivery_host_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_delivery_host_test COMMAND p2_delivery_host_test)
 
 foreach(policy IN ITEMS demon_captor demon_escape demon_pose sarai_fsm sarai_policy fuefuki_follow fuefuki_follow_binding)
     add_executable(p2_${policy}_test tools/p2_${policy}_test.cpp)
