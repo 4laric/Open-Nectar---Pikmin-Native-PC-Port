@@ -494,6 +494,7 @@ void BTeki::update()
 	pc_p2_catfish_update(this);
 	pc_p2_mar_update(this);
 	pc_p2_tadpole_update(this);
+	pc_p2_frog_update(this);
 	pc_p2_hana_update(this);
 	pc_p2_imomushi_update(this);
 	pc_p2_kochappy_fsm_update(this);
@@ -610,6 +611,9 @@ void BTeki::doAI()
 		return;
 	}
 	if (pc_p2_kochappy_fsm_suppress_ai(this)) {
+		return;
+	}
+	if (pc_p2_frog_suppress_ai(this)) {
 		return;
 	}
 #endif
