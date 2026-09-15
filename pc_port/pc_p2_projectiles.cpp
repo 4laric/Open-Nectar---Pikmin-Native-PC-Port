@@ -26,6 +26,9 @@
 #include "pc_p2_projectile_engine_receiver.h"
 #include "pc_p2_rock_hazard.h"
 #include "pc_p2_rock_host.h"
+#include "pc_p2_groink.h"
+#include "pc_p2_groink_hit.h"
+#include "pc_p2_groink_strike.h"
 #include "pc_bbft.h"
 #include "Creature.h"
 #include "Generator.h"
@@ -256,6 +259,23 @@ struct Host {
     // Emits P2_PROJECTILE_SKIP_SELF at most once per Stone flight.
     bool stoneSkippedSelf = false;
 
+    // Groink consumer proof (#169 lane 20): exercises lane-21's Groink strike
+    // bridge (pc_p2_groink_strike.h -> p2_groink_apply_strike -> this lane's
+    // proxy receiver) against the live captain Navi, without forking lane-21's
+    // modules. The sweep is the muzzle-origin -> live-captain segment (the host
+    // supplies it because the Groink policy owns no actor).
+    bool haveGroinkCfg = false;
+    P2GroinkVec3 groinkOrigin{};
+    float groinkDamage = 0.0f;
+    bool groinkApplied = false;
+
+    // Two-Teki injected placement: when `teki_pin 1` is set, every other live Teki
+    // (the victim) is re-anchored to the bound firer each step so the Stone's
+    // birth-frame contact deterministically reaches it. Clearly labelled injected
+    // (the room's two Dwarf Bulborbs otherwise settle ~70 units apart).
+    bool pinVictim = false;
+    bool sawTekiPinRow = false;
+
     p2rockhost::ScriptRng rng;
     double debt = 0.0;
 };
@@ -464,6 +484,31 @@ void parseConfig(const char* path)
                 fail("invalid engine_receiver row");
             }
             gHost.engineReceiver = (enabled == 1.0f);
+        } else if (word == "groink") {
+            // Opt-in second-consumer proof: drive lane-21's Groink Bomb -> this
+            // lane's receiver bridge. `groink <mx> <my> <mz> <damage>`.
+            if (gHost.haveGroinkCfg) {
+                fail("duplicate groink row");
+            }
+            float d = 0.0f;
+            if (!(in >> gHost.groinkOrigin.x >> gHost.groinkOrigin.y >> gHost.groinkOrigin.z >> d)
+                || !finite(gHost.groinkOrigin.x) || !finite(gHost.groinkOrigin.y)
+                || !finite(gHost.groinkOrigin.z) || !finite(d) || d < 0.0f) {
+                fail("invalid groink row");
+            }
+            gHost.groinkDamage = d;
+            gHost.haveGroinkCfg = true;
+        } else if (word == "teki_pin") {
+            // Opt-in injected victim placement: `teki_pin <0|1>` (default 0).
+            if (gHost.sawTekiPinRow) {
+                fail("duplicate teki_pin row");
+            }
+            gHost.sawTekiPinRow = true;
+            float v = 0.0f;
+            if (!(in >> v) || (v != 0.0f && v != 1.0f)) {
+                fail("invalid teki_pin row");
+            }
+            gHost.pinVictim = (v == 1.0f);
         } else {
             fail("invalid config token");
         }
@@ -480,7 +525,10 @@ void parseConfig(const char* path)
     if (gHost.haveKabutoActor && (!gHost.haveKabutoCfg || !gHost.haveKabutoRig)) {
         fail("kabuto_actor requires a kabuto row and a kabuto_rig row");
     }
-    if (!gHost.haveStoneCfg && !gHost.haveEggCfg && !gHost.haveRockCfg) {
+    if (gHost.pinVictim && !gHost.haveKabutoActor) {
+        fail("teki_pin requires a kabuto_actor row");
+    }
+    if (!gHost.haveStoneCfg && !gHost.haveEggCfg && !gHost.haveRockCfg && !gHost.haveGroinkCfg) {
         fail("config has no rows");
     }
 }
@@ -1186,8 +1234,73 @@ void tickRock()
     logRockTransition();
 }
 
+// Second-consumer proof: exercise lane-21's Groink strike bridge end-to-end in
+// the production room preview, without forking its modules. The configured
+// muzzle origin aims at the live captain Navi and the Bomb strike is applied
+// through lane-20's own proxy receiver (pc_p2_projectile_receiver), so both
+// families' code runs in the same binary. Emits P2_PROJECTILE_GROINK_RECEIVER_HIT
+// exactly once; skipped until the captain exists (preview spawn settles).
+void tickGroinkConsumer()
+{
+    if (!gHost.haveGroinkCfg || gHost.groinkApplied) {
+        return;
+    }
+    Navi* navi = naviMgr ? naviMgr->getNavi() : nullptr;
+    if (!navi || !navi->isAlive()) {
+        return;
+    }
+    const Vector3f& p = navi->mSRT.t;
+    P2GroinkHitCandidate candidate;
+    candidate.position = { p.x, p.y, p.z };
+    candidate.kind = P2GroinkCandidateKind::Captain;
+    candidate.alive = true;
+    candidate.owner = false;
+    candidate.cellRadius = 10.0f;
+
+    P2GroinkStrikeInput strike;
+    strike.hit.start = gHost.groinkOrigin;
+    strike.hit.end = { p.x, p.y, p.z };
+    strike.hit.radius = P2GroinkPolicy::kShellRadius;
+    strike.hit.terminalRadius = 65.0f;
+    strike.hit.damage = gHost.groinkDamage;
+    strike.hit.terminal = true;
+    const std::uint64_t token = tokenOf(navi);
+    strike.targetToken = token;
+    strike.attributedToken = token;
+
+    const P2GroinkStrikeResult result =
+        p2_groink_apply_strike(gHost.receivers, strike, candidate);
+    std::printf("P2_PROJECTILE_GROINK_RECEIVER_HIT token=%llu kind=%s damage=%.1f "
+                "applied=%d died=%d health=%.1f\n",
+                static_cast<unsigned long long>(token),
+                result.kind == P2GroinkHitKind::Bomb ? "Bomb" : "Wind",
+                result.damage, int(result.applied), int(result.died), result.health);
+    gHost.groinkApplied = true;
+}
+
+// Injected victim placement for the two-Teki proof: re-anchor every Teki other
+// than the bound firer to the firer's transform each step, so the Stone's
+// birth-frame contact finds the victim within collision radius regardless of the
+// room's natural ~70-unit Dwarf settle separation. Labelled injected; the marker
+// is emitted once at setup, not per step.
+void pinVictimTeki()
+{
+    if (!gHost.pinVictim || !gHost.haveKabutoActor || !gHost.kabutoActor) {
+        return;
+    }
+    const Vector3f& anchor = gHost.kabutoActor->mSRT.t;
+    Iterator it(tekiMgr);
+    CI_LOOP(it) {
+        Teki* t = static_cast<Teki*>(*it);
+        if (t && t != gHost.kabutoActor) {
+            t->mSRT.t = anchor;
+        }
+    }
+}
+
 void step()
 {
+    pinVictimTeki();
     tickKabuto();
     if (gHost.stoneActive) {
         tickStone();
@@ -1196,6 +1309,7 @@ void step()
         tickEgg();
     }
     tickRock();
+    tickGroinkConsumer();
 }
 } // namespace
 
@@ -1256,6 +1370,12 @@ void pc_p2_projectiles_reset()
     gHost.rockContacts.clear();
     gHost.receivers.reset();
     gHost.engineReceiver = false;
+    gHost.haveGroinkCfg = false;
+    gHost.groinkOrigin = P2GroinkVec3{};
+    gHost.groinkDamage = 0.0f;
+    gHost.groinkApplied = false;
+    gHost.pinVictim = false;
+    gHost.sawTekiPinRow = false;
     gHost.rng.state = 1u;
     gHost.debt = 0.0;
     if (gHost.binding) {
@@ -1391,6 +1511,26 @@ void pc_p2_projectiles_setup()
             std::printf("P2_PROJECTILE_KABUTO_ACTOR generator=%u bound=1 type=%d pos=(%.1f,%.1f,%.1f)\n",
                         gHost.kabutoActorGenerator, int(gHost.kabutoActor->mTekiType),
                         p.x, p.y, p.z);
+            // Two-Teki diagnostic: list every live Teki (including the victim) so
+            // runtime evidence can confirm the victim's distinct token/position
+            // beside the bound firer.
+            {
+                Iterator all(tekiMgr);
+                CI_LOOP(all) {
+                    Teki* t = static_cast<Teki*>(*all);
+                    if (t) {
+                        std::printf("P2_PROJECTILE_TEKI_ROSTER token=%llu type=%d gen=%u pos=(%.1f,%.1f,%.1f)\n",
+                                    static_cast<unsigned long long>(tokenOf(t)),
+                                    int(t->mTekiType),
+                                    t->mGenerator ? t->mGenerator->_70 : 0u,
+                                    t->mSRT.t.x, t->mSRT.t.y, t->mSRT.t.z);
+                    }
+                }
+            }
+            if (gHost.pinVictim) {
+                std::printf("P2_PROJECTILE_TEKI_PIN injected=1 anchor=%llu\n",
+                            static_cast<unsigned long long>(tokenOf(gHost.kabutoActor)));
+            }
         }
         std::printf("P2_PROJECTILE_KABUTO_READY species=%s mouth=(%.1f,%.1f,%.1f) face_deg=%.1f "
                     "max_attack_angle=%.1f health=%.1f wait=%d turn=%d attack=%d key2=%d\n",
@@ -1444,7 +1584,8 @@ void pc_p2_projectiles_setup()
 void pc_p2_projectiles_update()
 {
     const bool anyActive = gHost.stoneActive || gHost.eggActive || gHost.rockPending
-        || (gHost.haveKabutoCfg && gHost.kabuto.isAlive());
+        || (gHost.haveKabutoCfg && gHost.kabuto.isAlive())
+        || (gHost.haveGroinkCfg && !gHost.groinkApplied);
     if (!gsys || !anyActive) {
         return;
     }
