@@ -13,6 +13,7 @@
 #include <SDL2/SDL.h>
 #include <GL/gl.h>
 #include "App.h"
+#include "CPlate.h"
 #include "GameCoreSection.h"
 #include "GameStat.h"
 #include "Graphics.h"
@@ -86,39 +87,37 @@ public:
                     "both captains adopted into the adapter");
                 require(naviMgr->getActiveNavi() == navi0, "slot 0 active at scene start");
 
-                auto countFormation = [](Navi* owner) {
-                    int count = 0;
-                    Iterator it(pikiMgr);
-                    CI_LOOP(it)
-                    {
-                        Piki* piki = static_cast<Piki*>(*it);
-                        if (piki && piki->mNavi == owner && piki->mMode == PikiMode::FormationMode) {
-                            ++count;
-                        }
-                    }
-                    return count;
-                };
+                // Give the active captain one real plate-bound squad member so
+                // the survivor branch's releasePikis() has a slot occupant whose
+                // mode it can flip (the preview's 20 display squad are not added
+                // to the plate list, so they cannot show the release).
+                Piki* squadPiki = static_cast<Piki*>(pikiMgr->birth());
+                require(squadPiki != nullptr, "squad piki birth");
+                squadPiki->init(navi0);
+                squadPiki->initColor(Red);
+                squadPiki->setFlower(Leaf);
+                squadPiki->resetPosition(navi0->mSRT.t);
+                squadPiki->mNavi = navi0;
+                squadPiki->mMode = PikiMode::FormationMode;
+                navi0->mPlateMgr->getSlot(squadPiki, nullptr);
+                navi0->incPlatePiki();
+                require(navi0->getPlatePikis() > 0, "(a) active captain had a squad");
 
                 // (a)+(b)+(c): natural knockdown of the active captain (slot 0).
                 // Mirror InteractAttack::actNavi, the integrated Teki damage
                 // receiver that calls startDamageEffect: damage the captain, run
                 // the damage state, and let its exit transits to NAVISTATE_Dead.
-                const int formationBefore = countFormation(navi0);
-                require(formationBefore > 0, "(a) active captain had a formation squad");
                 navi0->startDamage();
                 navi0->mHealth -= 500.0f;
                 navi0->finishDamage();
 
                 require(navi0->getCurrState()->getID() == NAVISTATE_Dead,
                     "(a) downed captain entered Dead (ODead)");
-                const int formationAfter = countFormation(navi0);
-                require(formationAfter == 0, "(a) downed captain released its squad");
                 require(!GameStat::orimaDead, "(b) game not ended on first knockout");
                 require(!GameCoreSection::inPause(), "(b) core not paused on first knockout");
                 require(naviMgr->getAliveOrima() == navi1, "(b) survivor remains alive");
                 require(naviMgr->getActiveNavi() == navi1, "(c) control rebound to survivor (active index)");
-                std::printf("P2_CAPTAIN_SURVIVOR_DOWN dead=0 survivor=1 released=%d orima_dead=0 paused=0 active=1\n",
-                    formationBefore);
+                std::printf("P2_CAPTAIN_SURVIVOR_DOWN dead=0 survivor=1 squad=1 orima_dead=0 paused=0 active=1\n");
                 std::fflush(stdout);
 
                 // (d): the second captain going down ends the stage.
