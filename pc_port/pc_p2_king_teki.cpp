@@ -14,6 +14,7 @@
 #include "PikiAI.h"
 #include "Interactions.h"
 #include "teki.h"
+#include "Generator.h"
 #include <SDL.h>
 #include <map>
 #include <vector>
