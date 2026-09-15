@@ -37,6 +37,7 @@
 #include "pc_p2_kochappy_fsm.h"
 #include "pc_p2_kogane.h"
 #include "pc_p2_kurage_teki.h"
+#include "pc_p2_bombsarai_teki.h"
 #include "pc_p2_long_legs.h"
 #include "pc_p2_mamuta.h"
 #include "pc_p2_onikurage_teki.h"
@@ -74,6 +75,7 @@ void pc_p2_forget_teki(BTeki* actor)
 	pc_p2_shijimi_forget(actor);
 	pc_p2_kurage_teki_forget(actor);
 	pc_p2_onikurage_teki_forget(actor);
+	pc_p2_bombsarai_teki_forget(actor);
 	pc_p2_batch2_forget(actor);
 	pc_p2_projectiles_forget(actor);
 	pc_p2_sokkuri_forget(actor);
@@ -130,6 +132,7 @@ void pc_p2_reset_all_teki()
 	pc_p2_shijimi_reset();
 	pc_p2_kurage_teki_reset();
 	pc_p2_onikurage_teki_reset();
+	pc_p2_bombsarai_teki_reset();
 	pc_p2_batch2_reset();
 	pc_p2_projectiles_reset();
 	pc_p2_sokkuri_reset();
