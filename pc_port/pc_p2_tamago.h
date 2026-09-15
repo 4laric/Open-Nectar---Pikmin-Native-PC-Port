@@ -29,3 +29,6 @@ void pc_p2_tamago_birth_group(BTeki* host, int count);
 // Registration observability for the group-birth lifecycle fixture.
 unsigned long pc_p2_tamago_count();
 bool pc_p2_tamago_registered(BTeki*);
+// Once-per-frame drain of deferred born-follower kills (queued by the forget
+// group branch; hooked after tekiMgr->update() in gameCoreSection.cpp).
+void pc_p2_tamago_tick();

@@ -37,6 +37,7 @@
 #include "pc_p2_flora_actor.h"
 #include "pc_p2_pom.h"
 #include "pc_p2_plant.h"
+#include "pc_p2_tamago.h"
 #include "pc_p2_hardlanes.h"
 #include "pc_p2_projectiles.h"
 #include "pc_randomizer.h"
@@ -2950,6 +2951,7 @@ void GameCoreSection::updateAI()
 				pc_p2_flora_tick();
 				pc_p2_pom_tick();
 				pc_p2_plant_tick();
+				pc_p2_tamago_tick();
 			}
 		}
 	}
