@@ -106,9 +106,10 @@ public:
 
         if (phase == P2BT_Attack) {
             ++framesInAttack;
-            // Let the element run long enough to emit and hit, then knock the
-            // chosen (elec) weapon off to observe the re-pick.
-            if (!sentKnock && framesInAttack >= 30) {
+            // Let the element run long enough to emit, form its chains/bubbles,
+            // and hit a pinned Pikmin, then knock the chosen (elec) weapon off to
+            // observe the re-pick.
+            if (!sentKnock && framesInAttack >= 90) {
                 weaponsAtKnock = pc_p2_hardlanes_bigtreasure_weapon_count();
                 const bool posted = pc_p2_hardlanes_bigtreasure_hit(
                     P2BTWEAPON_Elec, P2BigTreasureOwnership::kWeaponMaxHealth, false);
@@ -174,7 +175,7 @@ private:
             navi->mSRT.t.set(0.0f, ground, 60.0f);
         }
         static const float spots[4][2] = {
-            { 0.0f, 30.0f }, { 40.0f, 0.0f }, { -40.0f, 0.0f }, { 0.0f, -30.0f },
+            { 0.0f, 0.0f }, { 25.0f, 0.0f }, { 0.0f, 25.0f }, { -25.0f, 0.0f },
         };
         int pinned = 0;
         if (pikiMgr) {
