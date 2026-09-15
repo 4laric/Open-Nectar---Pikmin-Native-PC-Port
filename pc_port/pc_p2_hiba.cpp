@@ -311,7 +311,7 @@ void pc_p2_hiba_setup() {
         hazard.waitTime     = row.waitOverride >= 0.0f ? row.waitOverride : disc.wait;
         hazard.activeTime   = disc.active;
         hazard.attackStart  = disc.attackStart;
-        hazard.warningTime  = disc.warning;
+        hazard.warningTime  = row.warningOverride >= 0.0f ? row.warningOverride : disc.warning;
         hazard.separation   = row.separation;
         hazard.link         = row.link;
         hazard.state        = waitState(row.hazardId);
