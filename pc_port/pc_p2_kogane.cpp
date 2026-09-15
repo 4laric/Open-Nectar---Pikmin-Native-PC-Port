@@ -164,6 +164,14 @@ void doDrop(BTeki* actor,int id,Beetle& b){
     // re-arm for another reward; the flip-count sidecar independently keeps the
     // escaped beetle from flipping again.
     if (receiptSeed.size() > 0) {
+        // The lane-06 receipt host is a single-consumer singleton; another lane's
+        // setup may have closed it after ours (e.g. pc_p2_flora_reset). Reopen
+        // lazily right before granting so the drop reward is never lost.
+        if (!pc_p2_receipt_host_ready()
+            && !pc_p2_receipt_host_open(kOnionReceiptsPath)) {
+            std::fputs("P2_KOGANE_ONION_RECEIPT invalid receipt state\n", stderr);
+            std::abort();
+        }
         const unsigned gen = actor->mGenerator ? actor->mGenerator->_70 : 0u;
         const std::string identity = "enemy:" + std::to_string(id);
         const std::string encounter = "flip" + std::to_string(b.flips);
