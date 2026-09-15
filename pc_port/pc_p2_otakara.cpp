@@ -31,6 +31,7 @@
 #include "Piki.h"
 #include "PikiState.h"
 #include "PikiMgr.h"
+#include "Pellet.h"
 #include "Navi.h"
 #include "NaviMgr.h"
 #include "Generator.h"
