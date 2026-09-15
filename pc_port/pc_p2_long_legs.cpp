@@ -57,6 +57,10 @@ const SpeciesDef SPECIES[] = {
 constexpr size_t MeshBytes = 4 * 1024 * 1024;    // per species
 constexpr size_t TotalBytes = 16 * 1024 * 1024;  // per setup
 constexpr float AccumulateRadius = 60.0f;        // Pikmin "accumulating" census
+// Proxy survival floor: the P1 Chappy placement vehicle offers only ~130 HP
+// (source Houdai 2800), so the source Houdai FSM never survives Land (5 s) +
+// Flick (2.3 s) to reach Shot. See pc_p2_long_legs_update for the pin.
+constexpr float kHoudaiProxyBaseline = 600.0f;
 
 struct ActorState {
     std::string species;
@@ -362,6 +366,20 @@ void pc_p2_long_legs_update(BTeki* actor) {
     if (entry == actors.end()) return;
     ActorState& state = entry->second;
     if (state.fsm.state() == P2LongLegsState::Dead) return;
+
+    // Documented proxy approximation (#312): the P1 Chappy placement vehicle has
+    // only ~130 HP (source Houdai 2800), so a late Chappy reset (grid activation
+    // re-runs BTeki::reset -> mHealth = getMaxLife) would drop it back below the
+    // source FSM's pre-Shot schedule (Land 5 s + Flick 2.3 s). Pin the proxy to a
+    // bounded baseline while it is still bitter-immune (Stay/Land, i.e. not yet
+    // damageable); once damageable the pin releases and ordinary Pikmin combat
+    // drains the baseline to zero. Gated to the preview/opt-in host, not P1 play.
+    if (state.species == "Houdai" && !state.damageable && actor->isAlive()
+            && actor->mHealth < kHoudaiProxyBaseline) {
+        actor->mHealth = kHoudaiProxyBaseline;
+        state.lastHealth = actor->mHealth;
+        state.lastPositiveHealth = actor->mHealth;
+    }
 
     const float dt = gsys ? gsys->getFrameTime() : 0.0f;
     if (!(dt > 0.0f && dt < 0.5f)) return;
