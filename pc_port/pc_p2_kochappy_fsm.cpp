@@ -229,17 +229,22 @@ void doFlick(BTeki* actor)
 }
 
 // Source EnemyFunc::eatPikmin (KEYEVENT_2, frame 8): stick one free Pikmin
-// within the mouth-slot radius to a free mouth slot. The host Chappy vehicle
-// exposes its mouth slots via getFreeSlot(); p3=0 selects the eat (Esa) motion.
-// Returns true when a Pikmin was stuck.
-bool doEat(BTeki* actor)
+// within the mouth-slot radius to a free mouth slot. The P1 Chappy vehicle
+// exposes its mouth slots via getFreeSlot() but no reliable mouth-joint world
+// position, so the bite reach is measured from the actor centre at eatRange
+// (fp22 = 35) and the target is stuck to a free slot (p3=0 selects the eat/Esa
+// motion). With no free slot the host one-shot eat path kills the Pikmin.
+bool doEat(BTeki* actor, bool& slotAvailable)
 {
-	if (!pikiMgr || !actor->mCollInfo) return false;
-	CollPart* slot = actor->getFreeSlot();
-	if (!slot) return false;
-	Piki* prey = nearestEdiblePiki(slot->mCentre, params.eatRange);
+	slotAvailable = false;
+	if (!pikiMgr) return false;
+	const Vector3f center = actor->getPosition();
+	Piki* prey = nearestEdiblePiki(center, params.eatRange);
+	CollPart* slot = actor->mCollInfo ? actor->getFreeSlot() : nullptr;
+	slotAvailable = slot != nullptr;
 	if (!prey) return false;
-	return prey->stimulate(InteractSwallow(actor, slot, 0));
+	if (slot) return prey->stimulate(InteractSwallow(actor, slot, 0));
+	return prey->stimulate(InteractSwallow(actor, nullptr, 0));
 }
 
 // Source EnemyFunc::swallowPikmin (KEYEVENT_3, frame 88): kill every Pikmin
@@ -538,9 +543,10 @@ void pc_p2_kochappy_fsm_update(BTeki* actor)
 				std::fflush(stdout);
 			}
 			// Source eatPikmin (KEYEVENT_2): stick one free Pikmin to the mouth.
-			const bool eaten = doEat(actor);
-			std::printf("P2_KOCHAPPY_EAT generator=%u frame=%.0f eaten=%d\n", generator,
-			            ATTACK_EVENT_FRAME, eaten ? 1 : 0);
+			bool slotAvailable = false;
+			const bool eaten = doEat(actor, slotAvailable);
+			std::printf("P2_KOCHAPPY_EAT generator=%u frame=%.0f eaten=%d slot=%d\n", generator,
+			            ATTACK_EVENT_FRAME, eaten ? 1 : 0, slotAvailable ? 1 : 0);
 			std::fflush(stdout);
 		}
 		if (!state.swallowFired && state.stateTime * 30.0f >= SWALLOW_EVENT_FRAME) {
