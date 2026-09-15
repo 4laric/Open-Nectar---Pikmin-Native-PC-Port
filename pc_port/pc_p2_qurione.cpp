@@ -278,7 +278,17 @@ void pc_p2_qurione_reset() {
     logged[0] = logged[1] = false;
 }
 
-void pc_p2_qurione_forget(BTeki* actor) { actors.erase(static_cast<PelletView*>(actor)); }
+void pc_p2_qurione_forget(BTeki* actor) {
+    // Lane-07 lifetime seam (pc_p2_forget_teki, from BTeki::doKill / TekiMgr::newTeki):
+    // report the unbind so the drop fixture can show cleanup after death.
+    auto it = actors.find(static_cast<PelletView*>(actor));
+    if (it != actors.end()) {
+        const unsigned gen = actor->mGenerator ? actor->mGenerator->_70 : 0u;
+        std::printf("P2_QURIONE_FORGET generator=%u\n", gen);
+        std::fflush(stdout);
+        actors.erase(it);
+    }
+}
 const char* pc_p2_qurione_name(PelletView* actor) { return actors.count(actor) ? "Honeywisp (source FSM)" : nullptr; }
 
 float pc_p2_qurione_param_f(const BTeki* actor, int idx, float fallback) {
