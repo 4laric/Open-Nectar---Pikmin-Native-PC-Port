@@ -164,6 +164,10 @@ void pc_p2_reset_all_teki()
 	pc_p2_batch3_reset();
 	pc_p2_long_legs_reset();
 	pc_p2_waterwraith_reset();
+	// Lane 06: close and clear the process-wide ordinary delivery ledger at the
+	// stage boundary, so the next stage/session reopens it fresh (the handle is
+	// otherwise opened once and never reset).
+	pc_randomizer_p2_delivery_reset();
 }
 
 namespace {
