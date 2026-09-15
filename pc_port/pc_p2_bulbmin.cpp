@@ -237,6 +237,12 @@ int pc_p2_bulbmin_attach_mother_ex(Creature* mother, const char* model, bool pro
         born = pc_p2_bulbmin_drive_birth(mother, mother->getPosition(),
                                          mother->mFaceDirection,
                                          bridge.settings().maxDependents);
+    // Raw Generator::_70. Generator::read parses it through generator.cpp's
+    // file-local readID (__builtin_bswap32 over the already-swapping
+    // Stream::readInt), so it is the source file's four id bytes read as a
+    // little-endian u32 (e.g. the stager's big-endian 23 prints 0x17000000 =
+    // 385875968). No shared byte-swap accessor exists on the wave; every pc_p2
+    // consumer reads _70 raw, so keep the raw value and document it here.
     const std::uint32_t generator = mother->mGenerator ? mother->mGenerator->_70 : 0;
     std::printf("P2_BULBMIN_MOTHER_BIRTH model=%s generator=%u dependents=%d wild=%zu recruited=%zu\n",
                 label.c_str(), generator, born, bridge.wildCount(), bridge.recruitedCount());
