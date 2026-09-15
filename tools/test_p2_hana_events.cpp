@@ -111,13 +111,13 @@ void testOneShotNoRefire() {
 // A looping clip fires its event once per cycle across continuous stepping.
 void testLoopCycle() {
     p2hanaevents::Row row;
-    row.name = "attack2";
+    row.name = "attack1";
     row.sourceFrames = 10;
     row.poseCount = 2;
     row.loop = true;
     row.events = {{4, "2"}};
     Receiver receiver;
-    check(receiver.start(p2hanaevents::makeClip(row), "attack2"), "loop start");
+    check(receiver.start(p2hanaevents::makeClip(row), "attack1"), "loop start");
 
     std::size_t fired = 0;
     for (int cycle = 0; cycle < 5; ++cycle) {
@@ -126,7 +126,7 @@ void testLoopCycle() {
     check(fired == 5, "loop: one event per cycle over five cycles");
 
     Receiver jumping;
-    check(jumping.start(p2hanaevents::makeClip(row), "attack2"), "loop jump start");
+    check(jumping.start(p2hanaevents::makeClip(row), "attack1"), "loop jump start");
     check(count(step(jumping, 30.0), Action::Bite) == 3,
           "loop: one event per wrap across a skipped-cycles advance");
 }
@@ -187,7 +187,7 @@ void testAddressReuse() {
           "reuse: fresh bite+swallow once");
 }
 
-// Clip names other than attack1/attack2/flick never map to gameplay actions,
+// Clip names other than attack1/flick never map to gameplay actions,
 // including type1 whose authored type-2/type-3 events are non-gameplay.
 void testVisualEventsIgnored() {
     const auto bank = hanaBank();

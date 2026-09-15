@@ -52,7 +52,7 @@ inline p2sampled::Clip makeClip(const Row& row) {
 enum class Action { None, Bite, Swallow, Flick };
 
 inline Action actionFor(const std::string& clip, const std::string& key) {
-    if (clip == "attack1" || clip == "attack2") {
+    if (clip == "attack1") {
         if (key == "2") return Action::Bite;
         if (key == "3") return Action::Swallow;
     }
