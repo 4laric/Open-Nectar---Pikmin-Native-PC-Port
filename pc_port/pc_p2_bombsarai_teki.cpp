@@ -128,6 +128,24 @@ P2BombSaraiVec3 sCorpseOrigin;
 int sCorpseProbeTick = 0;
 unsigned sCorpseGenerator = 0;
 bool sCorpseDelivered = false;
+// Snapshot of the shared carcass PelletConfig carry slots before the carry
+// concession mutates them, restored on receipt/reset so the shared config is
+// left at its retail values.
+PelletConfig* sCarryConfig = nullptr;
+int sOrigCarryMin = 0;
+int sOrigCarryMax = 0;
+bool sHaveOrigCarry = false;
+
+// Restore the shared carcass carry slots captured before the concession.
+void restoreCarryConfig()
+{
+    if (sHaveOrigCarry && sCarryConfig) {
+        sCarryConfig->mCarryMinPikis.mValue = sOrigCarryMin;
+        sCarryConfig->mCarryMaxPikis.mValue = sOrigCarryMax;
+    }
+    sHaveOrigCarry = false;
+    sCarryConfig = nullptr;
+}
 P2BombSaraiMapBinding sMap;
 P2BombSaraiTerrainAdapter sAdapter;
 int sThrowCount = 0;
@@ -651,6 +669,7 @@ void pc_p2_bombsarai_teki_tick(BTeki* t)
             }
         }
         std::printf("P2_BOMBSARAI_TEKI_CORPSE_DELIVERED\n");
+        restoreCarryConfig();
         sCorpseTeki = nullptr;
         sCorpsePellet = nullptr;
         sCorpseProbeTick = 0;
@@ -685,6 +704,13 @@ void pc_p2_bombsarai_teki_tick(BTeki* t)
             // re-adopts formation and drops the pellet. Re-ring every 60 ticks
             // while no carrier is latched; stop once one is.
             if (sCorpsePellet->mConfig) {
+                if (!sHaveOrigCarry) {
+                    // Snapshot the shared carcass config before mutating it.
+                    sCarryConfig = sCorpsePellet->mConfig;
+                    sOrigCarryMin = sCarryConfig->mCarryMinPikis.mValue;
+                    sOrigCarryMax = sCarryConfig->mCarryMaxPikis.mValue;
+                    sHaveOrigCarry = true;
+                }
                 if (sCorpsePellet->mConfig->mCarryMaxPikis.mValue < 1) sCorpsePellet->mConfig->mCarryMaxPikis.mValue = 6;
                 // Fixture concession: the carrier's own bombs decimate the
                 // 20-red squad before it dies (retail Napkid corpse min is 3),
@@ -814,6 +840,7 @@ void pc_p2_bombsarai_teki_reset()
 {
     const int boundBefore = (int)sBound.size();
     const int corpseBefore = (int)sCorpses.size();
+    restoreCarryConfig();
     sBound.clear();
     sCorpses.clear();
     sThrowCount = 0;
