@@ -43,6 +43,10 @@ struct Binding {
     float lastDistToGoal = 1e9f;
 };
 std::map<BTeki*, Binding> s;
+// Naturally dead Kurage bodies: kept until the central forget/reset seam so the
+// Pod delivery receipt can still resolve the corpse after the live binding is
+// revoked (mirrors the mamuta pattern; BTeki::update keeps ticking dead bodies).
+std::map<BTeki*, unsigned> corpses;
 int gTickCalls = 0;
 // p2retail::Player timers are animation frames; attack.bca is a 30 fps clip.
 constexpr float kAttackFramesPerSecond = 30.0f;
@@ -130,8 +134,9 @@ void pc_p2_kurage_teki_reset()
 {
     for (auto& x : s) pc_p2_kurage_receiver_owner_invalidated(x.first);
     s.clear();
+    corpses.clear();
 }
-void pc_p2_kurage_teki_forget(BTeki* t) { if (t) revoke(t); }
+void pc_p2_kurage_teki_forget(BTeki* t) { if (t) { revoke(t); corpses.erase(t); } }
 bool pc_p2_kurage_teki_is_bound(const BTeki* t) { return t && s.count(const_cast<BTeki*>(t)); }
 
 void pc_p2_kurage_teki_setup()
@@ -165,7 +170,7 @@ void pc_p2_kurage_teki_tick(BTeki* t)
     ++gTickCalls;
     auto i = s.find(t);
     if (i == s.end()) return;
-    if (!t->isAlive()) { revoke(t); return; }
+    if (!t->isAlive()) { corpses[t] = i->second.generator; revoke(t); return; }
     Binding& b = i->second;
     const float dt = gsys->getFrameTime();
     if (!b.fsmEnabled) {
@@ -294,13 +299,16 @@ int pc_p2_kurage_teki_tick_calls()
 bool pc_p2_kurage_receipt(PelletView* view, unsigned& generator)
 {
     if (!view) return false;
-    auto i = s.find(static_cast<BTeki*>(view));
-    if (i == s.end()) return false;
-    generator = i->second.generator;
+    BTeki* t = static_cast<BTeki*>(view);
+    auto i = s.find(t);
+    if (i != s.end()) { generator = i->second.generator; return true; }
+    auto c = corpses.find(t);
+    if (c == corpses.end()) return false;
+    generator = c->second;
     return true;
 }
 
 int pc_p2_kurage_bound_count()
 {
-    return int(s.size());
+    return int(s.size() + corpses.size());
 }

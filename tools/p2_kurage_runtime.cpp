@@ -135,6 +135,15 @@ public:
                 require(generator == 201001u, "corpse receipt generator matches the bound actor");
                 require(pc_p2_kurage_bound_count() == 1, "exactly one bound Kurage corpse");
                 std::printf("P2_KURAGE_CORPSE_RECEIPT_PASS generator=%u bound=1 drop=BDT_Normal\n", generator);
+                // Natural death path (injected health write): the first tick after
+                // death revokes the live binding; the corpse must still resolve.
+                generatedFrog->mHealth = 0.0f;
+                pc_p2_kurage_teki_tick(generatedFrog);
+                unsigned dead = 0;
+                require(pc_p2_kurage_receipt(static_cast<PelletView*>(generatedFrog), dead),
+                    "dead Kurage corpse still resolves after the post-death tick");
+                require(dead == 201001u, "dead corpse receipt generator matches");
+                std::printf("P2_KURAGE_DEAD_CORPSE_RECEIPT_PASS generator=%u injected=health_zero\n", dead);
                 // Cleanup / re-entry seam: forgetting the actor clears the corpse
                 // registration so a recycled address is never mis-resolved.
                 pc_p2_kurage_teki_forget(generatedFrog);
