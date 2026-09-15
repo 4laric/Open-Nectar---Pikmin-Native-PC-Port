@@ -250,14 +250,6 @@ bool pc_p2_waterwraith_receipt(Pellet* pellet, unsigned& generator)
     return true;
 }
 
-void pc_p2_waterwraith_forget(Pellet* pellet)
-{
-    if (!pellet) {
-        return;
-    }
-    sCorpses.erase(pellet);
-}
-
 void pc_p2_waterwraith_reset()
 {
     sCorpses.clear();
@@ -272,6 +264,12 @@ unsigned pc_p2_waterwraith_delivery_count()
 unsigned pc_p2_waterwraith_corpse_count()
 {
     return static_cast<unsigned>(sCorpses.size());
+}
+
+Pellet* pc_p2_waterwraith_corpse_pellet()
+{
+    sweepCorpses();
+    return sCorpses.empty() ? nullptr : sCorpses.begin()->first;
 }
 
 bool pc_p2_waterwraith_register_ready()

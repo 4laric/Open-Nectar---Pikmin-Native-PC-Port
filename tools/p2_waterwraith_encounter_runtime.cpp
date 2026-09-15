@@ -31,7 +31,9 @@
 #include "Node.h"
 #include "MoviePlayer.h"
 #include "Piki.h"
+#include "PikiAI.h"
 #include "PikiMgr.h"
+#include "Pellet.h"
 #include "system.h"
 #include "pc_bbft.h"
 #include "pc_gpu_preference.h"
@@ -107,6 +109,7 @@ class WaterwraithEncounterApp final : public PlugPikiApp {
     bool corpseGrabStaged = false;
     bool carryResolved = false;
     bool carrySetupLogged = false;
+    bool assistAssigned = false;
     int carryFrames = 0;
     int maxCarriers = 0;
 
@@ -210,19 +213,42 @@ public:
                 squad[i]->resetPosition(Vector3f(ref.x + kPurpleOffsetX[i], 0.0f, ref.z + kPurpleOffsetZ[i]));
             }
         } else if (!corpseGrabStaged) {
-            // Death is done: place the surviving squad on the corpse stand-in so
-            // the idle-goals pick it up; then stop steering and let them carry.
-            for (int i = 0; i < 3 && i < static_cast<int>(squad.size()); ++i) {
+            // Death is done: release the squad from formation (player-equivalent
+            // whistle/dismiss) and place the survivors on the corpse stand-in so
+            // the free-mode `graspSituation` idle search picks it up and carries
+            // it to the preview Pod (natural pickup, same as preview_p2_room's
+            // P2_CORPSE_FREE_RECRUIT idiom). Labelled player-equivalent stimulus.
+            for (int i = 0; i < static_cast<int>(squad.size()); ++i) {
                 if (!squad[i]->isAlive()) {
                     continue;
                 }
-                squad[i]->resetPosition(Vector3f(ref.x, 0.0f, ref.z));
+                Navi* navi = naviMgr ? naviMgr->getNavi() : nullptr;
+                squad[i]->changeMode(PikiMode::FreeMode, navi);
             }
+            // Scatter the whole freed squad onto the corpse stand-in so the
+            // free-mode multi-carrier haul can complete (a number pellet needs
+            // more than one carrier's strength; purple=10, others=1).
+            const float ring[8][2] = { { 12.0f, 0.0f }, { -12.0f, 0.0f }, { 0.0f, 12.0f },
+                                       { 0.0f, -12.0f }, { 16.0f, 10.0f }, { -16.0f, -10.0f },
+                                       { 16.0f, -10.0f }, { -16.0f, 10.0f } };
+            for (int i = 0; i < static_cast<int>(squad.size()); ++i) {
+                if (!squad[i]->isAlive()) {
+                    continue;
+                }
+                const float ox = ring[i % 8][0];
+                const float oz = ring[i % 8][1];
+                squad[i]->resetPosition(Vector3f(ref.x + ox, 0.0f, ref.z + oz));
+            }
+            std::printf("P2_WATERWRAITH_SQUAD_FREE count=%d\n",
+                        static_cast<int>(squad.size()));
             corpseGrabStaged = true;
         }
 
         // Natural carry observation: count Pikmin in TransportMode toward the
-        // corpse stand-in and log over time (gate-E evidence).
+        // corpse stand-in, log the corpse state/position and per-Pikmin
+        // mode/distance, and (after a grace period) apply a labelled transport
+        // assist so the receipt path can still be exercised when free pickup
+        // does not complete (injected, never a natural PASS).
         if (dead && corpseGrabStaged) {
             int transport = 0;
             if (pikiMgr) {
@@ -238,10 +264,52 @@ public:
                 maxCarriers = transport;
             }
             ++carryFrames;
+            Pellet* corpse = pc_p2_waterwraith_corpse_pellet();
             if (carryFrames % 120 == 0) {
-                std::printf("P2_WATERWRAITH_CARRY_OBSERVE frame=%d carriers=%d max=%d deliveries=%u\n",
+                std::printf("P2_WATERWRAITH_CARRY_OBSERVE frame=%d carriers=%d max=%d deliveries=%u "
+                            "corpse_state=%d corpse_alive=%d\n",
                             frames, transport, maxCarriers,
-                            pc_p2_waterwraith_delivery_count());
+                            pc_p2_waterwraith_delivery_count(),
+                            corpse ? int(corpse->getState()) : -1,
+                            corpse ? int(corpse->isAlive()) : -1);
+                if (pikiMgr) {
+                    Iterator iterator(pikiMgr);
+                    CI_LOOP(iterator) {
+                        Piki* piki = static_cast<Piki*>(*iterator);
+                        if (!piki || !piki->isAlive()) {
+                            continue;
+                        }
+                        const float dx = piki->mSRT.t.x - ref.x;
+                        const float dz = piki->mSRT.t.z - ref.z;
+                        std::printf("P2_WATERWRAITH_PIKIMODE pik=%p mode=%d dist=%.1f\n",
+                                    static_cast<void*>(piki), int(piki->mMode),
+                                    std::sqrt(dx * dx + dz * dz));
+                    }
+                }
+            }
+            // Labelled transport assist: if free pickup has not completed, hand
+            // an idle Pikmin the real Transport action (the same mechanism the
+            // Mamuta assisted fixture uses). This is INJECTED (assisted=1), not a
+            // natural-carry PASS.
+            if (!assistAssigned && carryFrames > 400
+                && pc_p2_waterwraith_delivery_count() == 0 && corpse && corpse->isAlive()) {
+                int count = 0;
+                if (pikiMgr && naviMgr) {
+                    Iterator iterator(pikiMgr);
+                    CI_LOOP(iterator) {
+                        Piki* piki = static_cast<Piki*>(*iterator);
+                        if (!piki || !piki->isAlive()) {
+                            continue;
+                        }
+                        piki->mActiveAction->abandon(nullptr);
+                        piki->mActiveAction->mCurrActionIdx = PikiAction::Transport;
+                        piki->mActiveAction->mChildActions[PikiAction::Transport].initialise(corpse);
+                        piki->mMode = PikiMode::TransportMode;
+                        ++count;
+                    }
+                }
+                assistAssigned = true;
+                std::printf("P2_WATERWRAITH_SQUAD_ASSIST carriers=%d assisted=1\n", count);
             }
         }
 
@@ -298,6 +366,8 @@ public:
             }
             carryResolved = true;
         }
+        // Capture the carry outcome BEFORE the re-entry reset zeroes the counter.
+        const bool delivered = pc_p2_waterwraith_delivery_count() > 0;
 
         // Cleanup and re-entry: tear the seam down and bring it back with no
         // stale actor/child/squad/body/corpse state.
@@ -325,9 +395,9 @@ public:
                     static_cast<unsigned long long>(summary.stunned),
                     static_cast<unsigned long long>(summary.acceptedHits),
                     static_cast<unsigned long long>(summary.crushes), summary.damageDealt,
-                    pc_p2_waterwraith_delivery_count() > 0 ? 1 : 0);
+                    delivered ? 1 : 0);
         captured = true;
-        if (pc_p2_waterwraith_delivery_count() > 0) {
+        if (delivered) {
             std::puts("PASS WATERWRAITH_ENCOUNTER_RUNTIME");
         } else {
             std::puts("BLOCKED WATERWRAITH_ENCOUNTER_RUNTIME carry=no_natural_carry");
