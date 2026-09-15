@@ -90,6 +90,13 @@ P2FuefukiMotionBank sFuefukiMotions;
 p2retail::Player sFuefukiMotionPlayer;
 bool sFuefukiMotionReady = false;
 int sFuefukiMotionState = -1;
+// (#245 gate probes) Fixture observation state.
+unsigned long sFuefukiTickCount = 0;   // source ticks driven into the FSM
+unsigned sFuefukiHitCount = 0;         // InteractAttack receiver hits on the vehicle
+float sFuefukiHealthTracked = -1.0f;   // last observed vehicle health (drop detector)
+unsigned sFuefukiForgetCount = 0;      // lifecycle forget-seam calls that cleared state
+unsigned sFuefukiResetCount = 0;       // lifecycle reset-seam calls
+Generator* sFuefukiGeneratorObj = nullptr; // bound vehicle's generator (rebirth probe)
 
 // (#245) Natural carcass -> Research Pod receipt. The bound vehicle's corpse is
 // an ordinary carryable carcass (`TPI_CorpseType == TEKICORPSE_LeaveCorpse` on
@@ -556,6 +563,15 @@ void pc_p2_hardlanes_reset()
     sFuefukiCorpseDelivered = false;
     sFuefukiCaptainParked = false;
     sFuefukiEngaged = false;
+    // (#245 gate probes) reset the per-vehicle observation, keep the lifecycle
+    // counters so a scene re-entry can cite them.
+    sFuefukiGeneratorObj = nullptr;
+    sFuefukiHitCount = 0;
+    sFuefukiHealthTracked = -1.0f;
+    sFuefukiTickCount = 0;
+    ++sFuefukiResetCount;
+    std::printf("P2_FUEFUKI_RESET count=%u\n", sFuefukiResetCount);
+    std::fflush(stdout);
     p2_bigtreasure_host_reset(sBigTreasure);
     sBigTreasureOrdinary.reset(P2BigTreasureFsmParms());
     sBigTreasureClock.reset();
@@ -691,6 +707,7 @@ void pc_p2_hardlanes_setup()
             sFuefuki->spawn(1);
             const unsigned generator = sFuefukiVehicle->mGenerator ? sFuefukiVehicle->mGenerator->_70 : 0u;
             sFuefukiVehicleGenerator = generator;
+            sFuefukiGeneratorObj = sFuefukiVehicle->mGenerator; // (#245 gate 6 rebirth probe)
             std::printf("P2_HARDLANES_READY family=Fuefuki vehicle=Napkid gen=%u type=%d follow_locomotion=actteki_volatile_approx\n",
                         generator, static_cast<int>(sFuefukiVehicle->mTekiType));
         }
@@ -802,11 +819,22 @@ void pc_p2_hardlanes_update()
         }
         const Vector3f anchor = sFuefukiVehicle->getPosition();
         pc_p2_fuefuki_visual_set_position(anchor.x, anchor.y, anchor.z);
+        // (#245 gate 3) Observe the engine attack receiver's health effect on the
+        // live vehicle (InteractAttack::actTeki -> teki->interact -> makeDamaged).
+        if (sFuefukiHealthTracked < 0.0f) {
+            sFuefukiHealthTracked = sFuefukiVehicle->mHealth;
+        } else if (sFuefukiVehicle->mHealth < sFuefukiHealthTracked - 0.01f) {
+            std::printf("P2_FUEFUKI_HIT_APPLY health_before=%.2f health_after=%.2f\n",
+                        sFuefukiHealthTracked, sFuefukiVehicle->mHealth);
+            std::fflush(stdout);
+            sFuefukiHealthTracked = sFuefukiVehicle->mHealth;
+        }
         sFuefukiDebt += gsys->getFrameTime();
         int ticks = static_cast<int>(sFuefukiDebt / kFuefukiSourceDelta);
         if (ticks > 4) ticks = 4;
         sFuefukiDebt -= ticks * static_cast<double>(kFuefukiSourceDelta);
         for (int i = 0; i < ticks; ++i) {
+            ++sFuefukiTickCount; // (#245 gate 2) lane FSM/animation counter
             P2FuefukiBindTick tick;
             tick.delta = kFuefukiSourceDelta;
             tick.health = sFuefukiVehicle->mHealth;
@@ -1096,6 +1124,64 @@ unsigned pc_p2_hardlanes_fuefuki_press_count()
     return static_cast<unsigned>(sFuefukiPressCount);
 }
 
+// (#245 gate probes) Lane animation/FSM observation. `state`/`clip` come from the
+// lane FSM's state->converted-clip mapping; `pose` is the converted motion
+// player's advancing frame (or -1 without a staged motion bank). The P1 Napkid
+// host position is read separately by the fixture, keeping host vs lane labelled.
+int pc_p2_hardlanes_fuefuki_motion_state()
+{
+    return sFuefuki ? static_cast<int>(sFuefuki->getFsm().getState()) : -1;
+}
+
+int pc_p2_hardlanes_fuefuki_motion_pose()
+{
+    return sFuefukiMotionReady ? sFuefukiMotionPlayer.poseFrame() : -1;
+}
+
+const char* pc_p2_hardlanes_fuefuki_motion_clip()
+{
+    const int state = pc_p2_hardlanes_fuefuki_motion_state();
+    return state >= 0 ? p2_fuefuki_motion_clip_for_state(state) : "-";
+}
+
+unsigned long pc_p2_hardlanes_fuefuki_tick_count()
+{
+    return sFuefukiTickCount;
+}
+
+// (#245 gate 3) Engine receiver ingress for the bound vehicle. Mirrors the
+// lane-22 pc_p2_otakara_attack hook: no-op for every other actor, so ordinary
+// attacks are untouched. `accepted` is the engine teki->interact() result.
+void pc_p2_hardlanes_fuefuki_hit(Teki* teki, Creature* owner, float damage, bool accepted)
+{
+    if (!teki || !sFuefukiVehicle || teki != sFuefukiVehicle) return;
+    ++sFuefukiHitCount;
+    std::printf("P2_FUEFUKI_HIT owner=%s damage=%.2f accepted=%d health=%.2f count=%u\n",
+                (owner && owner->isPiki()) ? "piki" : "other", damage,
+                accepted ? 1 : 0, teki->mHealth, sFuefukiHitCount);
+    std::fflush(stdout);
+}
+
+unsigned pc_p2_hardlanes_fuefuki_hit_count()
+{
+    return sFuefukiHitCount;
+}
+
+unsigned pc_p2_hardlanes_fuefuki_forget_count()
+{
+    return sFuefukiForgetCount;
+}
+
+unsigned pc_p2_hardlanes_fuefuki_reset_count()
+{
+    return sFuefukiResetCount;
+}
+
+Generator* pc_p2_hardlanes_fuefuki_generator_object()
+{
+    return sFuefukiGeneratorObj;
+}
+
 // (#245 transport_reward) Ground the flying Napkid host so the FreeMode squad can
 // attack it, and register the carcass the moment the vehicle dies. Called from
 // BTeki::update (after the P1 strategy's act()/moveNew()) so the ground pin is
@@ -1154,15 +1240,24 @@ void pc_p2_hardlanes_forget(BTeki* actor)
     if (!actor) return;
     // A forgotten carcass can never be credited: erase its receipt registration
     // and drop any live carry tail so a recycled address is never resolved.
-    sFuefukiCorpses.erase(actor);
+    bool touched = sFuefukiCorpses.erase(actor) > 0;
     if (sFuefukiCorpseTeki && static_cast<BTeki*>(sFuefukiCorpseTeki) == actor) {
         sFuefukiCorpseTeki = nullptr;
         sFuefukiCorpsePellet = nullptr;
         sFuefukiCorpseProbeTick = 0;
         sFuefukiCaptainParked = false;
+        touched = true;
     }
-    if (!sFuefukiVehicle || static_cast<BTeki*>(sFuefukiVehicle) != actor) return;
-    if (sFuefuki) sFuefuki->killVehicle();
-    sFuefukiVehicle = nullptr;
-    sFuefukiPressed = false;
+    if (sFuefukiVehicle && static_cast<BTeki*>(sFuefukiVehicle) == actor) {
+        if (sFuefuki) sFuefuki->killVehicle();
+        sFuefukiVehicle = nullptr;
+        sFuefukiPressed = false;
+        touched = true;
+    }
+    if (touched) {
+        ++sFuefukiForgetCount;
+        std::printf("P2_FUEFUKI_FORGET actor=%p count=%u stale=0\n",
+                    static_cast<void*>(actor), sFuefukiForgetCount);
+        std::fflush(stdout);
+    }
 }

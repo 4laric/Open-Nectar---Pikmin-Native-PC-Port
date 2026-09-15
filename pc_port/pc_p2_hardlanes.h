@@ -4,6 +4,7 @@ class Piki;
 class Creature;
 class Teki;
 class PelletView;
+class Generator;
 struct BTeki;
 
 // Hard-lane shared registration seam (#244 BombSarai, #245 Fuefuki, #246
@@ -52,6 +53,30 @@ void pc_p2_hardlanes_fuefuki_actor(BTeki*);
 // or its naturally dead carcass to the generator for `corpse:...fuefuki:<gen>`.
 // Returns false for any unregistered pellet so ordinary cargo is untouched.
 bool pc_p2_hardlanes_fuefuki_receipt(PelletView*, unsigned& generator);
+
+// (#245 gate probes) Read-only observation hooks for the real-GL gate fixture.
+// The bound vehicle's lane FSM state + the converted motion clip name and its
+// advancing pose counter (the "animation state/counter"); the P1 Napkid host
+// position is read separately through the fixture so the two are labelled
+// independently. `pose` is -1 when no converted motion bank is staged.
+int pc_p2_hardlanes_fuefuki_motion_state();
+int pc_p2_hardlanes_fuefuki_motion_pose();
+const char* pc_p2_hardlanes_fuefuki_motion_clip();
+// Source ticks driven into the lane FSM since the vehicle was bound (lane-side
+// animation/FSM time, distinct from the P1 host's own frame clock).
+unsigned long pc_p2_hardlanes_fuefuki_tick_count();
+// (#245 gate 3) Real engine receiver ingress: `InteractAttack::actTeki` delivers
+// an attack to the bound vehicle; called from tekiinteraction.cpp after the
+// engine's `teki->interact()` applied the hit. Records the hit and the live
+// target's health so the fixture can observe the health/state change.
+void pc_p2_hardlanes_fuefuki_hit(Teki*, Creature* owner, float damage, bool accepted);
+unsigned pc_p2_hardlanes_fuefuki_hit_count();
+// (#245 gate 6) Lifecycle observation: forget/reset marker counts and the bound
+// generator object captured at bind time (so a fixture can drive the real
+// generator rebirth + scene re-entry and prove no stale pointer survives).
+unsigned pc_p2_hardlanes_fuefuki_forget_count();
+unsigned pc_p2_hardlanes_fuefuki_reset_count();
+Generator* pc_p2_hardlanes_fuefuki_generator_object();
 // Natural-hit ingress (#246): post one Pikmin-source hit against a BigTreasure
 // weapon coll part (`weapon` in [0,3], or -1 for the body) into the ordinary
 // FSM host drive. The lane-10 receiver / collision proxy is the intended
