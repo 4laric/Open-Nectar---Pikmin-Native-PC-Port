@@ -1141,8 +1141,11 @@ void GameCoreSection::initStage()
 	const bool resumeRoomCache = false;
 #endif
 	sprintf(path2, "%sdefault.gen", path);
-	RandomAccessStream* data = gsys->openFile(path2);
-	if (data && !resumeRoomCache) {
+	// On a room cache-resume boot, skip the disk default.gen entirely (the
+	// generator list already came from GeneratorCache::preload); do not even
+	// open the stream, so it is neither leaked nor double-read.
+	RandomAccessStream* data = resumeRoomCache ? nullptr : gsys->openFile(path2);
+	if (data) {
 		PRINT("DEFAULT GEN LOADED **********************************\n");
 		generatorMgr->read(*data, false);
 		data->close();
@@ -1271,7 +1274,7 @@ void GameCoreSection::initStage()
 	generatorList->createRamGenerators();
 
 	memStat->start("genCache");
-	generatorCache->load(flowCont.mCurrentStage->mStageIndex);
+	generatorCache->load(genCacheStage);
 	memStat->end("genCache");
 
 	if (useDay) {
@@ -2424,19 +2427,21 @@ void GameCoreSection::updateAI()
                             unsigned(gen->_70), unsigned(gen->mCarryOverFlags),
                             int(gen->mDayLimit), int(gameflow.mWorldClock.mCurrentDay));
                 if (gen->mCarryOverFlags & GENCARRY_SaveGenerator) {
-                    // Test-hook reset: a generator-only cache stores the post-birth
-                    // alive count, which would suppress re-birth on resume. Reset so
-                    // the second boot re-births fresh from the restored uid.
-                    gen->mAliveCount = 0;
-                    gen->mLatestSpawnDay = 0;
                     generatorCache->saveGenerator(gen);
                     ++gens;
                 }
             }
             generatorCache->endSave();
+            // saveCard writes 4 + 4 + GENCACHE_HEAP_SIZE + STAGE_COUNT*(1+9*4)
+            // bytes; bound the buffer so a growth cannot silently overflow it.
             static char card[0x8000];
             RamStream stream(card, sizeof(card));
             generatorCache->saveCard(stream);
+            if (stream.getPosition() <= 0 || stream.getPosition() >= (int)sizeof(card)) {
+                std::fprintf(stderr, "[PC Generator] gen-cache record %d bytes does not fit the %zu-byte buffer\n",
+                             stream.getPosition(), sizeof(card));
+                std::abort();
+            }
             std::ofstream out("p2-gencache.bin", std::ios::binary | std::ios::trunc);
             out.write(card, stream.getPosition());
             out.close();
