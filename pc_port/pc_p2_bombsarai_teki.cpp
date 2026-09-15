@@ -237,8 +237,11 @@ void stepCarrier(BTeki* t, Binding& b, float delta)
     }
     const P2BombSaraiVec3 carrier = carrierPosition(t);
 
-    // Animated capture joint world position.
-    const P2BombSaraiVec3 jointWorld = P2BombSaraiJoint::compute(carrier, t->getDirection(), b.joint);
+    // Animated capture joint world position. The source body offset is below
+    // the carrier (kamu_jnt1); with the carrier grounded that would put the
+    // payload under the floor, so clamp the joint just above the ground.
+    P2BombSaraiVec3 jointWorld = P2BombSaraiJoint::compute(carrier, t->getDirection(), b.joint);
+    if (jointWorld.y < groundY + 5.0f) jointWorld.y = groundY + 5.0f;
 
     // Per-second engagement probe: the carrier's floor height, the live squad
     // size and the nearest squad distance, so the run proves the ground squad
