@@ -348,15 +348,16 @@ void pc_p2_hiba_update() {
 }
 
 // Element-lethal attribution. A gas-tagged target is gas-lethal only when it is
-// no longer alive AND was never denki-tagged (so its fatal state is the gas-
-// exclusive PIKISTATE_Panic, not DenkiDying); in the fixed-hazard scenario that
-// witness is the denki-immune Yellow. A denki-tagged target is denki-lethal when
-// no longer alive, preferring a fire-immune species (Red) so the denki-exclusive
-// PIKISTATE_DenkiDying cannot be a fire burn. Both log the recorded species.
+// a fire-immune species (Red/Bulbmin, so it can never be a fire burn), was never
+// denki-tagged (so its fatal state is the gas-exclusive PIKISTATE_Panic, not
+// DenkiDying), and is no longer alive. A denki-tagged target is denki-lethal
+// when a fire-immune species (Red) is no longer alive, since PIKISTATE_DenkiDying
+// is denki-exclusive. Both log the recorded species.
 void pc_p2_hiba_lethal_check() {
     const std::set<const void*> alive = alivePikmin();
     if (!gasLethal) {
         for (const auto& entry : gasTargets) {
+            if (!p2_species_immune(entry.second, P2HazardFire)) continue;
             if (alive.count(entry.first)) continue;
             if (denkiTargets.count(entry.first)) continue;
             gasLethal = true;
@@ -369,20 +370,11 @@ void pc_p2_hiba_lethal_check() {
         const void* witness = nullptr;
         int witnessSpecies = -1;
         for (const auto& entry : denkiTargets) {
+            if (!p2_species_immune(entry.second, P2HazardFire)) continue;
             if (alive.count(entry.first)) continue;
-            if (p2_species_immune(entry.second, P2HazardFire)) {
-                witness = entry.first;
-                witnessSpecies = entry.second;
-                break;
-            }
-        }
-        if (!witness) {
-            for (const auto& entry : denkiTargets) {
-                if (alive.count(entry.first)) continue;
-                witness = entry.first;
-                witnessSpecies = entry.second;
-                break;
-            }
+            witness = entry.first;
+            witnessSpecies = entry.second;
+            break;
         }
         if (witness) {
             denkiLethal = true;
