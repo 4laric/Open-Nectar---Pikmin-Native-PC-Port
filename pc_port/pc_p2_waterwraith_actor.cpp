@@ -510,6 +510,9 @@ P2WaterwraithDamageResult p2_waterwraith_actor_apply_damage(P2WaterwraithActor& 
     if (!actor.mRig.ownerInvulnerableSet()) {
         return P2WWDMG_Ignored; // still riding (no dismount yet)
     }
+    if (actor.mBodyHealth <= 0.0f) {
+        return P2WWDMG_Ignored; // already zeroed: no further body hits count
+    }
     actor.mBodyHealth -= damage;
     if (actor.mBodyHealth < 0.0f) {
         actor.mBodyHealth = 0.0f;

@@ -47,7 +47,7 @@ enum ActionFlags : unsigned {
 
 struct Evaluation {
     unsigned actions = ActionNone;
-    int purpleHits = 0;   // Purple targets in hit range (one accepted hit each)
+    int acceptedHits = 0;   // targets that landed a hit (Purple on roller; any color on body)
     int crushTargets = 0; // non-Purple targets in crush range
 };
 
@@ -86,7 +86,7 @@ inline Evaluation evaluate(const Rule& rule, float rollerX, float rollerZ, bool 
             }
             if (inRange(target.x, target.z, rollerX, rollerZ, rule.hitRadius)) {
                 result.actions |= ActionHit;
-                ++result.purpleHits; // accepted hit count (any color here)
+                ++result.acceptedHits; // accepted hit count (any color here)
             }
         }
         return result;
@@ -101,7 +101,7 @@ inline Evaluation evaluate(const Rule& rule, float rollerX, float rollerZ, bool 
             if (damageable) {
                 if (inRange(target.x, target.z, rollerX, rollerZ, rule.hitRadius)) {
                     result.actions |= ActionHit;
-                    ++result.purpleHits;
+                    ++result.acceptedHits;
                 }
             } else if (inRange(target.x, target.z, rollerX, rollerZ, rule.stunRadius)) {
                 result.actions |= ActionStun;

@@ -105,7 +105,7 @@ void pc_p2_waterwraith_encounter_step(P2WaterwraithActor& actor, P2WaterwraithAc
                 == P2WWDMG_Ignored) {
                 continue;
             }
-            ++sStats.purpleHits;
+            ++sStats.acceptedHits;
             sStats.damageDealt += rule.purpleHitDamage;
             std::printf("P2_WATERWRAITH_HIT tick=%llu attached=%d purple=%d rollerHealth=%.1f bodyHealth=%.1f\n",
                         static_cast<unsigned long long>(sStats.ticks), attached ? 1 : 0,
