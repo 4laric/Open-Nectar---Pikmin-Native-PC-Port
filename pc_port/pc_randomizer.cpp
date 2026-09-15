@@ -3,6 +3,7 @@
 #include "pc_randomizer_spawn_catalog.h"
 #include "pc_randomizer_campaign_catalog.h"
 #include "pc_randomizer_p2_roster.h"
+#include "pc_p2_delivery_host.h"
 #include <unordered_map>
 #include <cstdint>
 #include <cmath>
@@ -41,6 +42,9 @@ bool groupEnemies = false;
 unsigned groupAssignments[12] = {};
 unsigned adultAssignments[15] = {};
 std::unordered_map<const void*, unsigned> generatorIds;
+// Lane 06: live P2-bound Teki -> source_id / generator uid, captured at bind time.
+std::unordered_map<const void*, unsigned> p2TekiSources;
+std::unordered_map<const void*, unsigned> p2TekiGeneratorUids;
 unsigned startingFlarlic = 2;
 bool configuredFlarlic = false, configuredStats = false, progressiveStats = false, wideStats = false, balancedStats = false, doubledStats = false;
 int baseColorStats[3][4] = {{100, 100, 100, 1}, {100, 100, 100, 1}, {100, 100, 100, 1}};
@@ -504,6 +508,47 @@ bool pc_randomizer_p2_bound(unsigned source_id) {
     if (!enabled || !p2EnemyBridge || !source_id) return false;
     for (const auto& binding : p2Bindings) if (binding.second == source_id) return true;
     return false;
+}
+void pc_randomizer_p2_bind_source(const void* tekiview, unsigned sourceId, unsigned generatorUid) {
+    if (!tekiview || !sourceId) return;
+    if (!randomizerP2IsBindable(sourceId)) fail("P2 delivery source id is not in the bindable roster");
+    p2TekiSources[tekiview] = sourceId;
+    p2TekiGeneratorUids[tekiview] = generatorUid;
+}
+unsigned pc_randomizer_p2_source_for(const void* tekiview) {
+    const auto it = p2TekiSources.find(tekiview);
+    return it == p2TekiSources.end() ? 0 : it->second;
+}
+unsigned pc_randomizer_p2_generator_for(const void* tekiview) {
+    const auto it = p2TekiGeneratorUids.find(tekiview);
+    return it == p2TekiGeneratorUids.end() ? 0 : it->second;
+}
+void pc_randomizer_p2_corpse_delivered(const void* tekiview, int type, int stage, bool gameplay) {
+    if (!enabled || !ready || !gameplay || !tekiview) return;
+    const unsigned sourceId = pc_randomizer_p2_source_for(tekiview);
+    if (!sourceId) return;
+    const unsigned generatorUid = pc_randomizer_p2_generator_for(tekiview);
+    if (!generatorUid) {
+        std::printf("[Pikmin Randomizer] P2_ORDINARY_DELIVERY SKIP source=%u no_generator_uid\n", sourceId);
+        return;
+    }
+    // Open the durable ordinary receipt host once per process, at a path stable
+    // across a checkpoint save + new process (the session campaign directory).
+    if (!pc_p2_delivery_host_ready()) {
+        const std::filesystem::path path = campaignDirectory.empty()
+            ? directory / "p2-delivery-receipts.txt"
+            : campaignDirectory / "p2-delivery-receipts.txt";
+        if (!pc_p2_delivery_host_open(path.string().c_str())) {
+            std::printf("[Pikmin Randomizer] P2_ORDINARY_DELIVERY host open failed\n");
+            return;
+        }
+    }
+    // `fingerprint` is the seed-manifest-level identity, stable across process
+    // restarts of the same seed; `token` is the run-instance identity fallback.
+    const std::string& seed = fingerprint.empty() ? token : fingerprint;
+    const P2DeliveryHostResult result = pc_p2_delivery_host_deliver(seed.c_str(), sourceId, type, stage, generatorUid, "corpse");
+    std::printf("[Pikmin Randomizer] P2_ORDINARY_P2_RECEIPT seed=%s id=onion:p2:%u:%d generator=%u new=%d\n",
+        seed.c_str(), sourceId, stage, generatorUid, int(result == P2DeliveryHostResult::Granted));
 }
 unsigned pc_randomizer_generator_id(const void* generator) {
     auto it = generatorIds.find(generator);

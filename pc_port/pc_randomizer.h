@@ -34,6 +34,18 @@ bool pc_randomizer_p2_bound(unsigned source_id);
 unsigned pc_randomizer_generator_id(const void* generator);
 void pc_randomizer_set_generator_id(const void* generator, unsigned uid);
 void pc_randomizer_bind_generator(const void* generator, int stage, const char* file, int offset);
+// Lane 06 runtime association: a live P2-bound Teki (passed as its PelletView) ->
+// source_id + generator uid, captured at bind/spawn time because the Teki's
+// mGenerator is already nulled by dieSoon() when the corpse reaches the Onion.
+// Called by the family bind path (or a fixture); the source id installed must be
+// in the bindable roster. generatorUid is the stable `._70` id that names the
+// actor instance across revisits and restarts.
+void pc_randomizer_p2_bind_source(const void* tekiview, unsigned sourceId, unsigned generatorUid);
+unsigned pc_randomizer_p2_source_for(const void* tekiview);
+unsigned pc_randomizer_p2_generator_for(const void* tekiview);
+// Ordinary Onion/AP delivery of a P2 corpse: resolves the bound source and grants
+// it exactly once through the durable ordinary receipt host (p1Proxy=false).
+void pc_randomizer_p2_corpse_delivered(const void* tekiview, int type, int stage, bool gameplay);
 int pc_randomizer_enemy_for_generator(int original, bool protectedSpawn, const void* generator);
 void pc_randomizer_bad_spawn_cache();
 int pc_randomizer_field_capacity();
