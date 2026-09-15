@@ -121,10 +121,12 @@ public:
                 require(naviMgr->getAliveOrima() == navi1, "(b) survivor remains alive");
                 require(naviMgr->getActiveNavi() == navi1, "(c) control rebound to survivor (active index)");
                 // (squad): the survivor branch of NaviDeadState::init releases the
-                // downed captain's squad, so its plate empties and the member
-                // drops out of FormationMode.
+                // downed captain's squad, so the plate member drops back to
+                // FreeMode (changeMode(PikiMode::FreeMode)). Observe and print the
+                // real mode, not a hardcoded constant.
                 const int plateAfter = navi0->getPlatePikis();
-                require(plateAfter == 0, "(squad) downed captain released its plate squad");
+                require(squadPiki->mMode == PikiMode::FreeMode,
+                    "(squad) downed captain released its plate squad");
                 std::printf("P2_CAPTAIN_SURVIVOR_DOWN dead=0 survivor=1 plate=%d mode=%d orima_dead=0 paused=0 active=1\n",
                     plateAfter, (int)squadPiki->mMode);
                 std::fflush(stdout);
