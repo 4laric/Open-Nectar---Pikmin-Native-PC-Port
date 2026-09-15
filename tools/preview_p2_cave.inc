@@ -3,6 +3,7 @@
 #include "pc_p2_cave.h"
 #include "pc_p2_cave_anchor.h"
 #include "pc_p2_cave_rooms_engine.h"
+#include "pc_p2_cave_items_engine.h"
 #include "pc_p2_species.h"
 #include "GoalItem.h"
 #include <fstream>
@@ -24,7 +25,68 @@ static void caveRoomsGrantSpecies(int species) {
         if(p && p->isAlive() && pc_p2_species(p)==P2SpeciesRed) { pc_p2_set_species(p,species); return; }
     }
 }
+// Lane 46 (#484): physical cave-item loop. Places the captain at the tagged
+// elec treasure's leaf, releases the squad so free-mode Pikmin can acquire it,
+// falls back to the real Transport AI if they do not, and waits for the live
+// receipt seam to credit it exactly once. The acquisition method is reported;
+// the carry state machine and receipt are the production path.
+static int caveItemTicks=0;
+static Pellet* caveCarryTarget=nullptr;
+static void caveItemsFixture(Navi* n) {
+    const P2CaveItemPlacement* items=pc_p2_cave_items_placement();
+    require(items!=nullptr,"cave items placement missing");
+    if(caveItemTicks==0){
+        caveCarryTarget=pc_p2_cave_items_pellet_for("treasure_elec");
+        require(caveCarryTarget!=nullptr,"tagged elec treasure not spawned");
+        const float x=caveCarryTarget->mSRT.t.x,z=caveCarryTarget->mSRT.t.z,y=mapMgr->getMinY(x,z,true);
+        n->resetPosition(Vector3f(x,y,z));
+        n->mStateMachine->transit(n,NAVISTATE_Walk);
+        std::printf("P2_CAVE_ITEM_STAGE target=treasure_elec x=%.3f y=%.3f z=%.3f spawned=%d\n",
+            x,y,z,pc_p2_cave_items_spawned());
+        ++caveItemTicks;return;
+    }
+    ++caveItemTicks;
+    if(caveItemTicks<120)return;
+    if(caveItemTicks==120){
+        Iterator it(pikiMgr);int count=0;CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(!p->isAlive())continue;
+            const float px=caveCarryTarget->mSRT.t.x+((count%5)-2)*6.f,pz=caveCarryTarget->mSRT.t.z+((count/5)-1)*6.f;
+            p->mSRT.t=Vector3f(px,mapMgr->getMinY(px,pz,true),pz);
+            p->changeMode(PikiMode::FreeMode,n);++count;}
+        std::printf("P2_CAVE_ITEM_FREE_RELEASE target=treasure_elec count=%d\n",count);
+        return;
+    }
+    if(caveItemTicks<150)return;
+    if(caveItemTicks==150){
+        int transport=0;Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(p->mMode==PikiMode::TransportMode)++transport;}
+        if(transport==0){
+            int assigned=0;Iterator a(pikiMgr);CI_LOOP(a){Piki* p=static_cast<Piki*>(*a);if(!p->isAlive())continue;
+                p->mActiveAction->abandon(nullptr);p->mActiveAction->mCurrActionIdx=PikiAction::Transport;
+                p->mActiveAction->mChildActions[PikiAction::Transport].initialise(caveCarryTarget);
+                p->mMode=PikiMode::TransportMode;++assigned;}
+            std::printf("P2_CAVE_ITEM_TRANSPORT_ASSIGNED target=treasure_elec count=%d injected=1\n",assigned);
+        } else {
+            std::printf("P2_CAVE_ITEM_NATURAL_CARRY transport=%d\n",transport);
+        }
+        return;
+    }
+    if(pc_p2_cave_items_delivered()>0){
+        capture("p2-cave-items.ppm");
+        const bool again=pc_p2_cave_items_deliver(caveCarryTarget);
+        std::printf("P2_CAVE_ITEM_REDELIVER duplicate_call=%d delivered=%d\n",int(again),pc_p2_cave_items_delivered());
+        std::puts("PASS cave items: physical placement, real carry, exactly-once receipt (proxy geometry/model)");
+        std::fflush(stdout);std::_Exit(0);
+    }
+    if(caveItemTicks%150==0){
+        int transport=0,free=0;Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(p->mMode==PikiMode::TransportMode)++transport;if(p->mMode==PikiMode::FreeMode)++free;}
+        std::printf("P2_CAVE_ITEM_PROGRESS tick=%d alive=%d state=%d transport=%d free=%d x=%.2f z=%.2f goal=%p delivered=%d\n",
+            caveItemTicks,int(caveCarryTarget->isAlive()),caveCarryTarget->getState(),transport,free,
+            caveCarryTarget->mSRT.t.x,caveCarryTarget->mSRT.t.z,(void*)caveCarryTarget->mTargetGoal,pc_p2_cave_items_delivered());
+        capture("p2-cave-items-progress.ppm");
+    }
+    require(caveItemTicks<2400,"cave item carry did not deliver");
+}
 static void caveRoomsFixture(Navi* n) {
+    if(pc_p2_cave_items_active()){caveItemsFixture(n);return;}
     static int ticks=0;
     if(++ticks<120)return;
     const P2CaveRoomLayout* layout=pc_p2_cave_rooms_layout();
