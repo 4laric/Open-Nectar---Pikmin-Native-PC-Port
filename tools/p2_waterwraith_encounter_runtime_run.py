@@ -161,6 +161,12 @@ def main(argv=None):
         copy_new(stage / "p2-waterwraith-actor.txt", run / "p2-waterwraith-actor.txt")
         profile = visual_stage / "p2-waterwraith-visual.txt"
         copy_new(profile, run / "p2-waterwraith-visual.txt")
+        # The Purple converter (pc_p2_make_purple) and several opt-in family
+        # setups gate on a live Pod anchor (pc_p2_preview_goal); stage one when
+        # the provider directory carries it (same borrow the cave/purple lanes use).
+        for extra in ("p2-pod.txt", "p2-economy.txt"):
+            if (stage / extra).is_file():
+                copy_new(stage / extra, run / extra)
         staged = {}
         mods = sorted((visual_stage / "assets" / "dataDir" / "courses" / "pikmin2room").glob("*.mod"))
         if not mods:
