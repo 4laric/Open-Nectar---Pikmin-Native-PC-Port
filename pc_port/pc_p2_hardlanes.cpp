@@ -347,6 +347,34 @@ bool pc_p2_hardlanes_bigtreasure_hit(int weapon, float damage, bool bittered)
     return sBigTreasureOrdinary.postHit(hit);
 }
 
+bool pc_p2_hardlanes_bigtreasure_ready()
+{
+    return sBigTreasureReady && sBigTreasure.active;
+}
+
+int pc_p2_hardlanes_bigtreasure_weapon_count()
+{
+    return sBigTreasureReady ? sBigTreasure.ownership.weaponCount() : 0;
+}
+
+int pc_p2_hardlanes_bigtreasure_recv_probe(int weapon, Piki* piki)
+{
+    if (!sBigTreasureReady || !sBigTreasure.active || !piki || !piki->isAlive()) {
+        return 0;
+    }
+    // Reuse the ordinary loop's per-attack handled set: a target is stimulated
+    // at most once per attack, so a second probe of the same Piki returns 0.
+    if (!sBigTreasureHandled.insert(static_cast<const void*>(piki)).second) {
+        return 0;
+    }
+    const P2BigTreasureVec3 origin{ sBigTreasure.placement.owner.x,
+                                    sBigTreasureGround,
+                                    sBigTreasure.placement.owner.z };
+    const bool accepted = pc_p2_bigtreasure_stimulate_piki(weapon, origin,
+                                                           kBigTreasureAttackDamage, piki);
+    return accepted ? 1 : -1;
+}
+
 void pc_p2_hardlanes_setup()
 {
     pc_p2_hardlanes_reset();
