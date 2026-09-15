@@ -848,6 +848,15 @@ target_include_directories(p2_fuefuki_suspend_fallback_test PRIVATE pc_port)
 target_compile_options(p2_fuefuki_suspend_fallback_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_fuefuki_suspend_fallback_test COMMAND p2_fuefuki_suspend_fallback_test)
 
+# Lane 28 Fuefuki natural-combat real-GL fixture (#245): compile-only isolated
+# target. Its replacement-main executable is produced by
+# scripts/build_pikmin2_fixture.py against a completed pikmin_pc build; this
+# object target only proves the full-app fixture source still compiles against
+# the engine headers (SDL2/GL/App/...) when the lane edits it.
+add_library(p2_fuefuki_combat_runtime_compile OBJECT tools/p2_fuefuki_combat_runtime.cpp)
+target_include_directories(p2_fuefuki_combat_runtime_compile PRIVATE pc_port ${SDL2_INCLUDE_DIRS})
+target_compile_options(p2_fuefuki_combat_runtime_compile PRIVATE ${NATIVE_COMPILE_OPTIONS} -Wno-unused-parameter)
+
 # Lane 27 BigTreasure policy gates (unwired on the approved line).
 add_executable(p2_bigtreasure_test
     tools/p2_bigtreasure_test.cpp

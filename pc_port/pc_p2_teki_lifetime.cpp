@@ -47,6 +47,7 @@
 #include "pc_p2_sheargrub.h"
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_tank.h"
+#include "pc_p2_hardlanes.h"
 
 // Family registrations released before death teardown or manager-slot reuse.
 void pc_p2_forget_teki(BTeki* actor)
@@ -92,6 +93,7 @@ void pc_p2_forget_teki(BTeki* actor)
     pc_p2_imomushi_forget(actor);
 	pc_p2_batch3_forget(actor);
 	pc_p2_long_legs_forget(actor);
+	pc_p2_hardlanes_forget(actor);
 }
 
 // Stage-boundary teardown. The family set mirrors TekiMgr::reset() exactly; the
