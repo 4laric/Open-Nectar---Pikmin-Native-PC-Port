@@ -1,5 +1,7 @@
 #include "pc_p2_demon_host.h"
 #include "pc_p2_teki_lifetime.h"
+#include "pc_randomizer.h"
+#include "teki.h"
 #include "pc_p2_purple_direct.h"
 #include "pc_p2_white_poison.h"
 
@@ -97,6 +99,9 @@ void pc_p2_forget_teki(BTeki* actor)
 	pc_p2_batch3_forget(actor);
 	pc_p2_long_legs_forget(actor);
 	pc_p2_hardlanes_forget(actor);
+	// Lane 06: drop any P2 corpse-delivery source binding so a recycled Teki
+	// address can never inherit it and credit the P1 proxy as an onion:p2 grant.
+	pc_randomizer_p2_forget_source(static_cast<PelletView*>(actor));
 }
 
 // Stage-boundary teardown. The family set mirrors TekiMgr::reset() exactly; the
