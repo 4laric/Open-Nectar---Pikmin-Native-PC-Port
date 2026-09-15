@@ -114,6 +114,8 @@ std::vector<InjectFail> injects;
 unsigned clockLast = 0;
 float clockAcc     = 0.0f;
 unsigned behaviorTick = 0;
+bool clockPrimed   = false; // first tick re-bases the clock so the setup pause
+                            // never collapses the one-tick Wait into a catch-up
 // Population-conservation baseline: deadPikis captured at setup (before any
 // bud is lazily bound or converts). Consumed Pikmin are erase-killed, so this
 // counter must not advance while the buds convert; a Drift proves a loss was
@@ -491,6 +493,7 @@ void pc_p2_pom_reset()
 	clockAcc     = 0.0f;
 	behaviorTick = 0;
 	deadPikisBaseline = 0;
+	clockPrimed  = false;
 }
 
 void pc_p2_pom_setup()
@@ -569,6 +572,15 @@ void pc_p2_pom_tick()
 		return;
 	}
 	bindHosts();
+	// Prime the clock on the first active tick: the long setup pause (movie
+	// skip, preview setup) must not accrue as catch-up steps, otherwise the
+	// one-tick Wait arm collapses into the bind frame and the wait pose is never
+	// drawn (and an off-camera bud would arm mid-burst).
+	if (!clockPrimed) {
+		clockLast = SDL_GetTicks();
+		clockAcc  = 0.0f;
+		clockPrimed = true;
+	}
 	const unsigned now = SDL_GetTicks();
 	clockAcc += float(now - clockLast) * 0.001f;
 	clockLast = now;
