@@ -361,7 +361,8 @@ void GoalItem::suckMe(Pellet* item)
                 // Lane 06: a bound P2 corpse grants its own ordinary receipt identity
                 // (never the P1-proxy bestiary check). The Teki (as its PelletView) is
                 // still alive while carried; its bound source id was captured at bind time.
-                if (pc_randomizer_p2_bridge() && item->mPelletView) {
+                // The delivery call self-guards on the runtime binding being present.
+                if (item->mPelletView) {
                     pc_randomizer_p2_corpse_delivered(item->mPelletView, type,
                         flowCont.mCurrentStage->mStageID,
                         !gameflow.mIsChallengeMode && !gameflow.mPauseAll && !gameflow.mIsUIOverlayActive
