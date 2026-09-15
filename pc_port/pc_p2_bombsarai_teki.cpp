@@ -60,7 +60,7 @@ constexpr int kTiming[11] = { 30, 30, 10, 30, 30, 10, 10, 24, 45, 21, 20 };
 // of the nearest live Pikmin (units), closing the gap at a capped per-tick
 // speed so the FreeMode squad can attack it (a large teleport crashes the host).
 constexpr float kEngageKeepRange = 30.0f;
-constexpr float kEngageSeekSpeed = 45.0f;
+constexpr float kEngageSeekSpeed = 300.0f;
 
 struct Binding {
     std::uint64_t generator = 0;
@@ -106,6 +106,9 @@ P2BombSaraiTerrainAdapter sAdapter;
 int sThrowCount = 0;
 int sBlastCount = 0;
 bool sCarrierDead = false;
+// Corpse-carry tail: the captain is parked beyond the join-party range so the
+// freed Pikmin do not re-adopt formation mid-haul; printed once.
+bool sCaptainParked = false;
 
 // Blast owner for the small self-creature the source passes as the bomb when
 // the carrier is not live (carrierless attribution). Module-local, like
@@ -473,19 +476,113 @@ void pc_p2_bombsarai_teki_setup()
 
 void pc_p2_bombsarai_teki_tick(BTeki* t)
 {
+    // Once the Pod receipt has credited the carcass, stop the free roam so the
+    // survivors do not pick up leftover number pellets (dead-Pikmin `pr01`
+    // bodies) and carry them to the Pod, which would hit the preview's
+    // unregistered-cargo abort after the receipt already landed.
+    if (sCorpseTeki && sCorpseDelivered) {
+        if (naviMgr && pikiMgr && naviMgr->getNavi()) {
+            Navi* n = naviMgr->getNavi();
+            Iterator fp(pikiMgr);
+            CI_LOOP(fp) {
+                Piki* p = static_cast<Piki*>(*fp);
+                if (p && p->isAlive()
+                    && (p->mMode == PikiMode::FreeMode || p->mMode == PikiMode::TransportMode))
+                    p->changeMode(PikiMode::FormationMode, n);
+            }
+        }
+        std::printf("P2_BOMBSARAI_TEKI_CORPSE_DELIVERED\n");
+        sCorpseTeki = nullptr;
+        sCorpsePellet = nullptr;
+        sCorpseProbeTick = 0;
+        sCaptainParked = false;
+    }
     if (sCorpseTeki) {
-        if (!sCorpsePellet) sCorpsePellet = sCorpseTeki->mPellet;
+        if (!sCorpsePellet) {
+            sCorpsePellet = sCorpseTeki->mPellet;
+            if (sCorpsePellet && sCorpsePellet->mConfig) {
+                std::printf("P2_BOMBSARAI_TEKI_CORPSE_CONFIG carry_min=%d carry_max=%d min_free_slot=%d alive=%d\n",
+                            sCorpsePellet->mConfig->mCarryMinPikis.mValue,
+                            sCorpsePellet->mConfig->mCarryMaxPikis.mValue,
+                            sCorpsePellet->getMinFreeSlotIndex(),
+                            sCorpsePellet->isAlive() ? 1 : 0);
+            }
+        }
         if (sCorpsePellet) {
             // Hold the freshly spawned corpse at the kill site for a few
             // seconds instead of letting its spawn velocity fling it clear of
             // the squad, so the FreeMode Pikmin that killed it can pick it up
             // (injected; the natural throw otherwise lands it out of reach).
             if (sCorpseProbeTick < 300) sCorpsePellet->mVelocity.set(0.0f, 0.0f, 0.0f);
+            // Cargo-Pod corpse carry, same recipe as lanes 13/19/22/24/31: a
+            // formation squad never picks up a corpse; only FREE-MODE Pikmin do
+            // (Piki::graspSituation, mIdleWorkSearchRange ~100; graspSituation
+            // skips flying tekis, hence ground_engagement above). The carrier
+            // corpse config must offer carry slots, and the captain must be
+            // parked beyond the 250u join-party range or the freed squad
+            // re-adopts formation and drops the pellet. Re-ring every 60 ticks
+            // while no carrier is latched; stop once one is.
+            if (sCorpsePellet->mConfig) {
+                if (sCorpsePellet->mConfig->mCarryMaxPikis.mValue < 1) sCorpsePellet->mConfig->mCarryMaxPikis.mValue = 6;
+                // Fixture concession: the carrier's own bombs decimate the
+                // 20-red squad before it dies (retail Napkid corpse min is 3),
+                // so allow a single surviving Pikmin to haul the carcass. The
+                // carry itself stays natural (FreeMode grasp -> route -> Pod).
+                sCorpsePellet->mConfig->mCarryMinPikis.mValue = 1;
+            }
+            if (naviMgr && pikiMgr && naviMgr->getNavi()) {
+                Navi* n = naviMgr->getNavi();
+                int carriers = 0, squad = 0;
+                Iterator pc(pikiMgr);
+                CI_LOOP(pc) {
+                    Piki* p = static_cast<Piki*>(*pc);
+                    if (!p || !p->isAlive()) continue;
+                    ++squad;
+                    if (p->mMode == PikiMode::TransportMode) ++carriers;
+                }
+                if (carriers == 0 && sCorpseProbeTick % 60 == 0) {
+                    Vector3f park(sCorpseOrigin.x, 0.0f, sCorpseOrigin.z + 300.0f);
+                    park.y = mapMgr ? mapMgr->getMinY(park.x, park.z, true) : 0.0f;
+                    n->resetPosition(park);
+                    n->mVelocity.set(0.0f, 0.0f, 0.0f);
+                    if (!sCaptainParked) {
+                        sCaptainParked = true;
+                        std::printf("P2_BOMBSARAI_TEKI_CAPTAIN_PARK x=%.3f z=%.3f\n", park.x, park.z);
+                    }
+                    int ring = 0;
+                    Iterator sq(pikiMgr);
+                    CI_LOOP(sq) {
+                        Piki* p = static_cast<Piki*>(*sq);
+                        if (!p || !p->isAlive()) continue;
+                        const float a = float(ring) * 2.0f * kPi / float(squad > 0 ? squad : 1);
+                        Vector3f pt(sCorpseOrigin.x + 16.0f * std::sin(a), 0.0f,
+                                    sCorpseOrigin.z + 16.0f * std::cos(a));
+                        pt.y = mapMgr ? mapMgr->getMinY(pt.x, pt.z, true) : 0.0f;
+                        p->resetPosition(pt);
+                        p->changeMode(PikiMode::FreeMode, n);
+                        ++ring;
+                    }
+                std::printf("P2_BOMBSARAI_TEKI_FREE_RECRUIT count=%d carriers=%d squad=%d\n",
+                            ring, carriers, squad);
+                }
+            }
+            // Natural carry only -- no injected delivery fallback. The free-mode
+            // release above latches Transport onto the corpse (carriers > 0) and
+            // the Pod receipt lands through pc_p2_bombsarai_receipt. A run whose
+            // squad was decimated and never latches is an honest no-receipt run.
             if (++sCorpseProbeTick % 30 == 0) {
                 const Vector3f& cp = sCorpsePellet->mSRT.t;
                 const float dx = cp.x - sCorpseOrigin.x, dz = cp.z - sCorpseOrigin.z;
-                std::printf("P2_BOMBSARAI_TEKI_CORPSE tick=%d x=%.3f z=%.3f moved=%.3f\n",
-                            sCorpseProbeTick, cp.x, cp.z, std::sqrt(dx * dx + dz * dz));
+                int transport = 0;
+                if (pikiMgr) {
+                    Iterator tp(pikiMgr);
+                    CI_LOOP(tp) {
+                        Piki* p = static_cast<Piki*>(*tp);
+                        if (p && p->isAlive() && p->mMode == PikiMode::TransportMode) ++transport;
+                    }
+                }
+                std::printf("P2_BOMBSARAI_TEKI_CORPSE tick=%d x=%.3f z=%.3f moved=%.3f carriers=%d\n",
+                            sCorpseProbeTick, cp.x, cp.z, std::sqrt(dx * dx + dz * dz), transport);
             }
         }
     }
@@ -531,6 +628,7 @@ void pc_p2_bombsarai_teki_reset()
     sCorpseProbeTick = 0;
     sCorpseGenerator = 0;
     sCorpseDelivered = false;
+    sCaptainParked = false;
 }
 
 bool pc_p2_bombsarai_receipt(PelletView* view, unsigned& generator)
@@ -545,6 +643,9 @@ bool pc_p2_bombsarai_receipt(PelletView* view, unsigned& generator)
     auto c = sCorpses.find(t);
     if (c == sCorpses.end()) return false;
     generator = c->second;
+    // Natural Pod delivery of the carcass: the preview calls this during
+    // pc_p2_preview_deliver, so record it to end the free-roam cleanly.
+    sCorpseDelivered = true;
     return true;
 }
 
