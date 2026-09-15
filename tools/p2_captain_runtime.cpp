@@ -2,8 +2,9 @@
 // Private real-GL display fixture; no production registration or gameplay claims.
 //
 // Drives the LIVE pc_p2_captain adapter (p2_captain::setup_from_navi_mgr is now
-// auto-bound by GameCoreSection::finalSetup) through the four semantics a captor
-// family needs: target identity, claim/release, interrupted capture and cleanup.
+// auto-bound by the GameCoreSection constructor) through the four semantics a
+// captor family needs: target identity, claim/release, interrupted capture and
+// cleanup.
 // A separate --knockout-roster scenario exercises the survivor-gated game-over /
 // NaviMgr::informOrimaDead hook added to NaviDeadState::init.
 #include <SDL2/SDL.h>
@@ -65,7 +66,7 @@ public:
 
             // The scene setup hook should already have bound the live adapter.
             require(pc_p2_captain::adapter() != nullptr,
-                "live adapter auto-bound by GameCoreSection::finalSetup");
+                "live adapter auto-bound by GameCoreSection constructor");
             require(pc_p2_captain::setup_from_navi_mgr(), "setup_from_navi_mgr idempotent");
             require(pc_p2_captain::adapter() != nullptr, "adapter remains bound");
 
