@@ -222,6 +222,7 @@ void pc_p2_cave_geometry_tick()
 void pc_p2_cave_geometry_draw(Graphics& gfx)
 {
     if (!geometryActive || !gfx.mCamera) return;
+    static bool drawLogged = false;
     gfx.setPerspective(gfx.mCamera->mPerspectiveMatrix.mMtx, gfx.mCamera->mFov,
         gfx.mCamera->mAspectRatio, gfx.mCamera->mNear, gfx.mCamera->mFar, 1.f);
     gfx.useMaterial(nullptr);
@@ -245,6 +246,20 @@ void pc_p2_cave_geometry_draw(Graphics& gfx)
         const float drop = actor.open ? 32.0f : 0.0f;
         Vector3f position(actor.position.x, actor.position.y - drop, actor.position.z);
         drawShapeAt(gfx, actor.shape, position, 0.0f);
+    }
+    if (!drawLogged) {
+        drawLogged = true;
+        int models = 0;
+        for (const NodeShape& entry : nodeShapes) {
+            if (entry.shape) ++models;
+        }
+        int gates = 0;
+        for (const GateActor& actor : gateActors) {
+            if (actor.shape) ++gates;
+        }
+        std::printf("P2_CAVE_GEOMETRY_DRAW nodes=%zu models=%d gates=%d geometry=%s\n",
+                    geometry.nodes.size(), models, gates, geometry.geometry.c_str());
+        std::fflush(stdout);
     }
     gfx.setColour(oldColour, true);
     gfx.mAuxiliaryColour = oldAux;
