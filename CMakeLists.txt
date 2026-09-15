@@ -190,6 +190,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_white_poison.cpp
     pc_port/pc_p2_cave.cpp
     pc_port/pc_p2_cave_generator.cpp
+    pc_port/pc_p2_cave_rooms.cpp
     pc_port/pc_p2_enemy.cpp
     pc_port/pc_p2_sheargrub.cpp
     pc_port/pc_p2_kochappy.cpp
@@ -770,6 +771,14 @@ add_executable(p2_cave_generator_test
 target_include_directories(p2_cave_generator_test PRIVATE pc_port)
 target_compile_options(p2_cave_generator_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_cave_generator_test COMMAND p2_cave_generator_test)
+
+# Lane 44 proxy cave-room instantiation (#482). Header-only engine-free logic;
+# the engine glue (pc_p2_cave_rooms.cpp) is linked into pikmin_pc separately.
+add_executable(p2_cave_rooms_test
+    tools/p2_cave_rooms_test.cpp)
+target_include_directories(p2_cave_rooms_test PRIVATE pc_port)
+target_compile_options(p2_cave_rooms_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_cave_rooms_test COMMAND p2_cave_rooms_test)
 
 add_executable(p2_long_legs_fsm_test
     tools/p2_long_legs_fsm_test.cpp

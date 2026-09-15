@@ -2,10 +2,61 @@
 // native restoration, collection hook and transfer writer. Not transport AI.
 #include "pc_p2_cave.h"
 #include "pc_p2_cave_anchor.h"
+#include "pc_p2_cave_rooms_engine.h"
+#include "pc_p2_species.h"
 #include "GoalItem.h"
 #include <fstream>
+
+// Lane 44 (#482): live proxy-room loop. The proxy geometry is labelled; the
+// reachability answers come from the real live squad keys, not a scripted table.
+static void caveRoomsLogTimeline(const P2CaveRoomLayout* layout, const char* tag) {
+    std::printf("P2_CAVE_ROOMS_TIMELINE tag=%s hole=%d treasure_elec=%d treasure_water=%d untagged=%d\n",
+        tag, int(pc_p2_cave_rooms_reachable_now(layout->hole)),
+        int(pc_p2_cave_rooms_reachable_now("leaf_elec_0")),
+        int(pc_p2_cave_rooms_reachable_now("leaf_water_0")),
+        int(pc_p2_cave_rooms_reachable_now(layout->entrance)));
+}
+static void caveRoomsGrantSpecies(int species) {
+    // Only convert a still-Red squad member so a previously granted key is kept.
+    Iterator it(pikiMgr);
+    CI_LOOP(it) {
+        Piki* p=static_cast<Piki*>(*it);
+        if(p && p->isAlive() && pc_p2_species(p)==P2SpeciesRed) { pc_p2_set_species(p,species); return; }
+    }
+}
+static void caveRoomsFixture(Navi* n) {
+    static int ticks=0;
+    if(++ticks<120)return;
+    const P2CaveRoomLayout* layout=pc_p2_cave_rooms_layout();
+    require(layout!=nullptr,"rooms layout missing");
+    const P2CaveRoomUnit* entrance=p2CaveRoomsFind(*layout,layout->entrance);
+    require(entrance!=nullptr,"rooms entrance missing");
+    const float ex=p2CaveRoomsWorldX(*layout,*entrance),ez=p2CaveRoomsWorldZ(*layout,*entrance);
+    n->resetPosition(Vector3f(ex,mapMgr->getMinY(ex,ez,true),ez));
+    n->mStateMachine->transit(n,NAVISTATE_Walk);
+    P2CaveAbilities keys=pc_p2_cave_rooms_squad_abilities();
+    std::printf("P2_CAVE_ROOMS_ENTER id=%s unit_at=%s geometry=%s proxy=1\n",
+        layout->entrance.c_str(),pc_p2_cave_rooms_unit_at(n->mSRT.t.x,n->mSRT.t.z).c_str(),
+        layout->geometry.c_str());
+    std::printf("P2_CAVE_ROOMS_PROJECTION salt=%d projection=%s\n",layout->salt,
+        p2CaveRoomsLogicalProjection(*layout).c_str());
+    std::printf("P2_CAVE_ROOMS_SQUAD blue=%d yellow=%d red=%d white=%d\n",
+        int(keys.blue),int(keys.yellow),int(keys.red),int(keys.white));
+    caveRoomsLogTimeline(layout,"fresh_floor_no_abilities");
+    caveRoomsGrantSpecies(P2SpeciesYellow);
+    std::printf("P2_CAVE_ROOMS_GRANT species=yellow natural_acquire=0 staged=1\n");
+    caveRoomsLogTimeline(layout,"come_back_with_yellow");
+    caveRoomsGrantSpecies(P2SpeciesBlue);
+    std::printf("P2_CAVE_ROOMS_GRANT species=blue natural_acquire=0 staged=1\n");
+    caveRoomsLogTimeline(layout,"return_with_yellow_and_blue");
+    capture("p2-cave-rooms.ppm");
+    std::puts("PASS cave rooms: proxy floor, live squad keys, hazard timeline (proxy geometry)");
+    std::fflush(stdout);std::_Exit(0);
+}
 static void caveFixture(Navi* n) {
     static int ticks=0;
+    if(pc_p2_cave_rooms_active()){caveRoomsFixture(n);return;}
+
     if(ticks==0 && pc_p2_preview_cargo_count()){
         // This fixture verifies checkpoint restoration, not random live combat.
         Iterator enemies(tekiMgr);CI_LOOP(enemies){Teki* e=static_cast<Teki*>(*enemies);if(e && e->isAlive())e->kill(false);}
