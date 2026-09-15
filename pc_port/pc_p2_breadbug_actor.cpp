@@ -42,6 +42,7 @@ struct Motion {int duration=0;std::vector<int> frames;std::vector<Shape*> shapes
 struct BreadbugProxyActor {unsigned id;unsigned started;int lastMotion=-1;bool logged=false;int loggedCargo=-99;bool lastHeld=false;int lastCarriers=-1;int contestHandle=0;int lastOutcome=-1;bool ownerDiedLogged=false;};
 std::map<BTeki*,BreadbugProxyActor> actors;Motion motions[2];
 Motion cargoMotions[2];bool cargoEnabled=false;int probeCarriers=-1;
+const char* reasonName(int r){switch(r){case 1:return "interrupted";case 2:return "owner_died";case 3:return "carrier_lost";case 4:return "timeout";case 5:return "revisit";default:return "none";}}
 void fail(){std::fputs("P2_BREADBUG_ACTOR invalid P1 proxy profile\n",stderr);std::abort();}
 int carriers(Pellet* pellet){
  Stickers stuckList(pellet);Iterator it(&stuckList);int count=0;CI_LOOP(it){if((*it)->isPiki())++count;}return count;
@@ -132,15 +133,16 @@ void pc_p2_breadbug_actor_tick(){
      state.lastOutcome=outcome;
      const char* os=outcome==0?"held":(outcome==1?"stolen":"released");
      std::printf("P2_BREADBUG_CONTEST_UPDATE generator=%u carriers=%d outcome=%s\n",state.id,n,os);
-     if(outcome==1){
-      held->endStickTeki(actor);actor->clearCreaturePointer(2);actor->stopParticleGenerator(2);
-      actor->mReturnStateID=actor->mStateID;actor->mStateID=3;actor->mIsStateReady=true; // resume wandering after losing the tug
-      std::printf("P2_BREADBUG_CONTEST_STOLEN generator=%u carriers=%d released=1\n",state.id,n);
-      std::string slot="g"+std::to_string(state.id);
-      const int grant=pc_p2_breadbug_contest_grant(state.contestHandle,"p2-preview",slot.c_str(),"contest");
-      if(grant==1)std::printf("P2_BREADBUG_CONTEST_GRANT generator=%u identity=%s granted=1\n",state.id,pc_p2_breadbug_contest_identity(state.contestHandle));
-      else if(grant==2)std::printf("P2_BREADBUG_CONTEST_GRANT generator=%u identity=%s granted=0 duplicate=1\n",state.id,pc_p2_breadbug_contest_identity(state.contestHandle));
-     }
+      if(outcome==1){
+       held->endStickTeki(actor);actor->clearCreaturePointer(2);actor->stopParticleGenerator(2);
+       actor->mReturnStateID=actor->mStateID;actor->mStateID=3;actor->mIsStateReady=true; // resume wandering after losing the tug
+       std::printf("P2_BREADBUG_CONTEST_STOLEN generator=%u carriers=%d released=1\n",state.id,n);
+       std::string slot="g"+std::to_string(state.id);
+       const int grant=pc_p2_breadbug_contest_grant(state.contestHandle,"p2-preview",slot.c_str(),"contest");
+       if(grant==1)std::printf("P2_BREADBUG_CONTEST_GRANT generator=%u identity=%s granted=1\n",state.id,pc_p2_breadbug_contest_identity(state.contestHandle));
+       else if(grant==2)std::printf("P2_BREADBUG_CONTEST_GRANT generator=%u identity=%s granted=0 duplicate=1\n",state.id,pc_p2_breadbug_contest_identity(state.contestHandle));
+       pc_p2_breadbug_contest_destroy(state.contestHandle);state.contestHandle=0;state.lastOutcome=-1; // Stolen is terminal: the next grab starts a fresh tug
+      }
      if(outcome==2){
       // Timeout/release is terminal for this contest; drop the handle so the next grab starts a fresh tug (the ledger keeps exactly-once durable).
       pc_p2_breadbug_contest_destroy(state.contestHandle);state.contestHandle=0;state.lastOutcome=-1;
@@ -152,6 +154,15 @@ void pc_p2_breadbug_actor_tick(){
    if(!state.lastHeld||carriers(held)!=state.lastCarriers){state.lastHeld=true;state.lastCarriers=carriers(held);std::printf("P2_BREADBUG_CONTEST generator=%u native_power=%g carriers=%d\n",state.id,PROXY_CARRY_POWER,state.lastCarriers);}
   } else {
    state.lastHeld=false;
+   // Lost the cargo while the contest was still Held (delivered to its nest, or
+   // the carriers were pulled off) — not a Stolen/timeout, which already destroy
+   // their handle. Interrupt + destroy so the next grab begins a fresh tug.
+   if(state.contestHandle){
+    pc_p2_breadbug_contest_interrupt(state.contestHandle);
+    const int reason=pc_p2_breadbug_contest_reason(state.contestHandle);
+    std::printf("P2_BREADBUG_CONTEST_INTERRUPT generator=%u reason=%s\n",state.id,reasonName(reason));
+    pc_p2_breadbug_contest_destroy(state.contestHandle);state.contestHandle=0;state.lastOutcome=-1;
+   }
   }
  }
 }
