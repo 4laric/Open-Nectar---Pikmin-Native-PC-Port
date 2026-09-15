@@ -101,15 +101,20 @@ void pc_p2_groink_teki_tick(BTeki* t) {
     }
     // The carcass "pellet" is the actor's own corpse pellet (PelletView::mPellet).
     // Once KillPellet has fired the pellet slot may be recycled by pelletMgr, so
-    // it is never re-dereferenced after that.
+    // it is never re-dereferenced after that (defensive; see the kill note below).
     const bool pelletAlive = !b.pelletKilled && t->mPellet != nullptr && t->mPellet->isAlive();
     // gaugeManager is bound to the P1 life-gauge manager. ActivateGauge only
-    // toggles TEKIOPT_LifeGaugeVisible; the on-screen gauge reader is driven by
-    // mHealth (held at 0 on the dead proxy), so the visible gauge is empty and
-    // the regrowth amount is surfaced via pc_p2_groink_teki_health()/markers,
-    // not the on-screen ring (resurgence of mHealth is a lane 06/07 concern).
+    // toggles TEKIOPT_LifeGaugeVisible; BTeki::update runs updateLifeGauge only
+    // while mDeadState == 0, so on a corpse the toggle is inert (not updated),
+    // and the regrowth amount is surfaced via pc_p2_groink_teki_health()/markers,
+    // not the on-screen ring (a real health regrowth is a lane 06/07 concern).
     const P2GroinkCarcassStep step = b.carcass.step(dt, pelletAlive, /*gaugeManager=*/true, /*activeTick=*/true);
     if (!step.valid) return;
+    // Snapshot and log every command BEFORE the pellet is killed. Killing the
+    // pellet runs Pellet::doKill -> viewKill -> BTeki::doKill ->
+    // pc_p2_forget_teki, which erases this binding (and clears the actor), so no
+    // field of `t` or `b` may be read after the kill. The kill is done last.
+    bool killPellet = false;
     for (std::size_t k = 0; k < step.count; ++k) {
         switch (step.commands[k]) {
         case P2GroinkCarcassCommand::ActivateGauge:
@@ -121,8 +126,7 @@ void pc_p2_groink_teki_tick(BTeki* t) {
             std::printf("P2_GROINK_CARCASS_GAUGE_INACTIVE generator=%u\n", b.generator);
             break;
         case P2GroinkCarcassCommand::KillPellet:
-            b.pelletKilled = true;
-            if (t->mPellet) t->mPellet->kill(false);
+            killPellet = true;
             std::printf("P2_GROINK_CARCASS_KILL_PELLET generator=%u health=%.3f\n", b.generator, b.carcass.health());
             break;
         case P2GroinkCarcassCommand::RequestBirth: {
@@ -139,11 +143,19 @@ void pc_p2_groink_teki_tick(BTeki* t) {
                         b.generator, born.position.x, born.position.y, born.position.z,
                         born.faceDir, born.existenceLength, born.inPiklopedia ? 1 : 0,
                         b.carcass.health());
-            // Records the birth descriptor and stops driving; the actual
-            // replacement-object birth is pending lane 06/07 (generalEnemyMgr).
+            // Records the descriptor and stops driving. On a P1 host the pellet
+            // kill below also tears down the actor + pellet, so the binding is
+            // erased and "stop ticking" is moot; the replacement birth itself is
+            // pending lane 06/07.
             b.terminal = true;
             break;
         }
         }
+    }
+    // Kill the pellet last, after every marker is recorded and every field read;
+    // never touch `t` or `b` again (the kill erases the binding on a P1 host).
+    if (killPellet) {
+        b.pelletKilled = true; // still valid here; the kill below erases the binding on a P1 host
+        if (t->mPellet) t->mPellet->kill(false);
     }
 }
