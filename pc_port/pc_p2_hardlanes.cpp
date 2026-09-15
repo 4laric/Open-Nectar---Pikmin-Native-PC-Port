@@ -767,3 +767,14 @@ unsigned pc_p2_hardlanes_fuefuki_press_count()
 {
     return static_cast<unsigned>(sFuefukiPressCount);
 }
+
+// (#397/#245) Lifecycle seam: drop the bound vehicle pointer before the TekiMgr
+// reuses its slot. pc_p2_hardlanes_update gates its sticker walk on sFuefukiVehicle,
+// and pc_p2_hardlanes_fuefuki_pressed compares against the same pointer, so a
+// forgotten actor must never leave either running on a despawned/reused Napkid.
+void pc_p2_hardlanes_forget(BTeki* actor)
+{
+    if (!actor || !sFuefukiVehicle || static_cast<BTeki*>(sFuefukiVehicle) != actor) return;
+    sFuefukiVehicle = nullptr;
+    sFuefukiPressed = false;
+}

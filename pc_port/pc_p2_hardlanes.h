@@ -3,6 +3,7 @@ class Graphics;
 class Piki;
 class Creature;
 class Teki;
+struct BTeki;
 
 // Hard-lane shared registration seam (#244 BombSarai, #245 Fuefuki, #246
 // BigTreasure). Opt-in: only active inside the Pikipelago private room preview
@@ -35,6 +36,11 @@ bool pc_p2_hardlanes_fuefuki_pressed(Teki*, Creature* stimulus);
 // Introspection for the runtime fixture: count of press/hipdrop stimuli
 // latched since the current vehicle was bound.
 unsigned pc_p2_hardlanes_fuefuki_press_count();
+// Lifecycle seam (#397/#245): when the bound Fuefuki vehicle is forgotten at
+// death teardown or manager-slot reuse, drop the raw Teki* and the pending press
+// latch so the per-tick sticker walk and pointer-equality press check never run
+// on a despawned/reused actor. No-op for any other actor.
+void pc_p2_hardlanes_forget(BTeki*);
 // Natural-hit ingress (#246): post one Pikmin-source hit against a BigTreasure
 // weapon coll part (`weapon` in [0,3], or -1 for the body) into the ordinary
 // FSM host drive. The lane-10 receiver / collision proxy is the intended
