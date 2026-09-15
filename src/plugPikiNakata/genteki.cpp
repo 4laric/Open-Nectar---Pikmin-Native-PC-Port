@@ -7,6 +7,7 @@
 #include "sysNew.h"
 #include "teki.h"
 #include "pc_randomizer.h"
+#include "pc_p2_placement_probe.h"
 #include <cstdio>
 
 static bool randomizerProtected(TekiPersonality* personality) {
@@ -138,6 +139,11 @@ Creature* GenObjectTeki::birth(BirthInfo& info)
         if (source)
             std::printf("P2_SEED_RESOLVE source_id=%u target=%u original_type=%d x=%.1f z=%.1f\n",
                         source, uid, int(mTekiType), info.mPosition.x, info.mPosition.z);
+        // Lane-04 placement evidence: sample the generated slot's terrain/route
+        // at the birth position. Additive; the slot uid is already resolved.
+        if (uid)
+            pc_p2_placement_probe_birth(info.mPosition.x, info.mPosition.y, info.mPosition.z,
+                                        info.mGenerator->_70, uid, replacement);
     }
 	return teki;
 }
