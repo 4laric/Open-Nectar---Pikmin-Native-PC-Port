@@ -25,6 +25,7 @@
 #include "pc_p2_dweevil_policy.h"
 #include "pc_p2_species.h"
 #include "pc_p2_hazard_emitter.h"
+#include "pc_p2_receipt_host.h"
 #include "teki.h"
 #include "Interactions.h"
 #include "Piki.h"
@@ -122,11 +123,16 @@ struct Otakara {
     float logTimer = 0.0f;
     std::string lastInteraction = "unknown";
     std::string lastAttacker = "none";
+    unsigned generator = 0;
+    bool receiptLogged = false;
+    bool deathSeamLogged = false;
 };
 
 std::map<PelletView*, Otakara> actors;
 std::map<std::string, Clip> clips;
 bool ready = false;
+std::string receiptSeed = "l22-receipt";
+static bool receiptHostOpen = false;
 
 unsigned nextRand(Otakara& s) {
     s.rng = s.rng * 1664525u + 1013904223u;
@@ -320,7 +326,51 @@ void pc_p2_otakara_reset() {
 }
 
 void pc_p2_otakara_forget(BTeki* actor) {
-    actors.erase(static_cast<PelletView*>(actor));
+    auto it = actors.find(static_cast<PelletView*>(actor));
+    if (it == actors.end()) return;
+    const unsigned generator = it->second.generator;
+    actors.erase(it);
+    // lane-07 seam (pc_p2_forget_teki in BTeki::doKill / slot reuse): report the
+    // registration actually dropping. `stale` is a computed post-erase probe, not
+    // a literal, so a re-registered alias would surface as stale=1.
+    const unsigned long after = (unsigned long)actors.size();
+    const int stale = int(actors.count(static_cast<PelletView*>(actor)) != 0);
+    std::printf("P2_OTAKARA_FORGET generator=%u registered=1 count=%lu stale=%d\n",
+                generator, after, stale);
+    std::fflush(stdout);
+}
+
+void pc_p2_otakara_died(BTeki* actor) {
+    if (!ready) return;
+    auto it = actors.find(static_cast<PelletView*>(actor));
+    if (it == actors.end() || it->second.deathSeamLogged) return;
+    it->second.deathSeamLogged = true;
+    // Host death seam (BTeki::die, mDeadState transition), distinct from the
+    // module's P2_OTAKARA_MODULE_DEAD observation on mHealth<=0.
+    std::printf("P2_OTAKARA_DEAD generator=%u source_id=%d mDeadState=1\n",
+                it->second.generator, it->second.species);
+    std::fflush(stdout);
+}
+
+bool pc_p2_otakara_receipt(Pellet* pellet) {
+    if (!pellet || !ready) return false;
+    auto it = actors.find(pellet->mPelletView);
+    if (it == actors.end()) return false;
+    Otakara& s = it->second;
+    if (!s.receiptLogged) {
+        s.receiptLogged = true;
+        const std::string identity = "otakara:" + std::to_string(s.generator);
+        const P2ReceiptHostResult result = pc_p2_receipt_host_grant(
+            receiptSeed.c_str(), identity.c_str(), std::to_string(s.generator).c_str(), "onion");
+        const bool granted = result == P2ReceiptHostResult::Granted;
+        if (result == P2ReceiptHostResult::Error) {
+            std::fputs("P2_OTAKARA_ONION_RECEIPT persistence failed\n", stderr);
+        }
+        std::printf("P2_OTAKARA_ONION_RECEIPT generator=%u granted=%d ledger=onion\n",
+                    s.generator, int(granted));
+        std::fflush(stdout);
+    }
+    return true;
 }
 
 void pc_p2_otakara_attack(BTeki* actor, Creature* owner, const char* interaction) {
@@ -461,6 +511,7 @@ void pc_p2_otakara_setup() {
         s.stimulus = p2dweevil::stimulusFor(s.species);
         s.life = speciesLife(s.species);
         s.attack = speciesAttack(s.species);
+        s.generator = actor->mGenerator->_70;
         s.rng = (actor->mGenerator->_70 * 2654435761u) | 1u;
         s.home = actor->getPosition();
         s.target = s.home;
@@ -481,6 +532,14 @@ void pc_p2_otakara_setup() {
     if (found.size() != wanted.size()) {
         std::printf("P2_OTAKARA_ERROR missing_actor wanted=%zu found=%zu\n", wanted.size(), found.size());
         std::abort();
+    }
+    // Lane-06 ordinary-Onion receipt ledger (exactly-once, independent of the Pod
+    // economy). The seed coordinate is the product seed when the host supplies one.
+    if (const char* seed = std::getenv("PIKMIN_P2_SEED")) {
+        if (pc_p2_receipt_host_valid(seed)) receiptSeed = seed;
+    }
+    if (!receiptHostOpen) {
+        if (pc_p2_receipt_host_open("p2-otakara-receipts.txt")) receiptHostOpen = true;
     }
     ready = true;
 }
@@ -513,7 +572,7 @@ void pc_p2_otakara_update(BTeki* actor) {
 
     if (actor->mHealth <= 0.0f && s.state != OTA_DEAD) {
         if (!s.deadLogged) {
-            std::printf("P2_OTAKARA_DEAD generator=%u source_id=%d health=0\n", generator, s.species);
+            std::printf("P2_OTAKARA_MODULE_DEAD generator=%u source_id=%d health=0\n", generator, s.species);
             std::fflush(stdout);
             s.deadLogged = true;
         }
