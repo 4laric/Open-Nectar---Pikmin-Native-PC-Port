@@ -2351,12 +2351,15 @@ void Navi::refresh(Graphics& gfx)
 	draw(gfx);
 	if (!movieMode()) {
 		std::printf("[L12r] after draw id=%d\n", mNaviID); std::fflush(stdout);
+		std::printf("[L12r] plateptr id=%d plateMgr=%p toggColls=%d camera=%p\n", mNaviID, (void*)mPlateMgr, int(gsys->mToggleColls), (void*)gfx.mCamera); std::fflush(stdout);
 		if (gsys->mToggleColls) {
 			mapMgr->showCollisions(mSRT.t);
 		}
 
 		Matrix4f viewMtx;
-		mPlateMgr->render(gfx);
+		if (mPlateMgr) {
+			mPlateMgr->render(gfx);
+		}
 		std::printf("[L12r] after plate id=%d\n", mNaviID); std::fflush(stdout);
 
 		// these aren't used for anything in the DLL either, lol.
