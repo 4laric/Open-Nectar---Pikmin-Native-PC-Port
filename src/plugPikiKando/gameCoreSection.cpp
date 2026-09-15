@@ -2356,6 +2356,42 @@ void GameCoreSection::updateAI()
             bbftRedsReady = true;
         }
     }
+    // lane-03 (#439): room-preview cache round-trip. Drives the real
+    // Generator::write/Generator::read ramMode record (the SLT1 + spawn-slot uid
+    // trailer the day-end save serializes) on each live room generator, then
+    // re-reads a fresh Generator from those bytes and re-resolves the ENEMY_P2
+    // source from the restored uid. Env-gated so the ordinary room preview is
+    // unaffected; only runs under --experimental-pikmin2-room.
+    if (pc_pikipelago_room_preview() && std::getenv("PIKMIN_P2_CACHE_ROUNDTRIP") && generatorList && generatorList->mGenListHead) {
+        static bool tested = false;
+        if (!tested) {
+            tested = true;
+            int bound = 0;
+            Generator* gen;
+            FOREACH_NODE_REUSE(Generator, generatorList->mGenListHead->mChild, gen)
+            {
+                const unsigned uid = pc_randomizer_generator_id(gen);
+                if (!uid) continue;
+                char data[2048] = {};
+                RamStream saved(data, sizeof(data));
+                Generator::ramMode = true; gen->write(saved); Generator::ramMode = false;
+                saved.setPosition(0);
+                Generator* restored = new Generator();
+                Generator::ramMode = true; restored->read(saved); Generator::ramMode = false;
+                const unsigned restoredUid = pc_randomizer_generator_id(restored);
+                const unsigned source = pc_randomizer_p2_source_for_id(restoredUid);
+                std::printf("P2_ROOM_CACHE_ROUNDTRIP uid=%u restored=%u source_id=%u carry_flags=%u\n",
+                            uid, restoredUid, source, unsigned(gen->mCarryOverFlags));
+                if (restoredUid != uid || !source) std::abort();
+                delete restored;
+                ++bound;
+            }
+            if (!bound) std::abort();
+            std::printf("TEST_ONLY p2_room_cache_roundtrip_pass bound=%d\n", bound);
+            std::fflush(stdout);
+            std::exit(0);
+        }
+    }
 #if defined(PIKMIN_RANDOMIZER_TEST_HOOKS)
     const char* scripted = std::getenv("PIKMIN_RANDOMIZER_TEST_SCRIPT");
     const char* background = std::getenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND");
@@ -2381,7 +2417,7 @@ void GameCoreSection::updateAI()
             for (int i = 0; i < count; ++i) {
                 const int offset = input->getPosition();
                 Generator* gen = new Generator(); gen->read(*input);
-                pc_randomizer_bind_generator(gen, stage, file.c_str(), offset);
+                pc_randomizer_bind_generator(gen, stage, file.c_str(), offset, gen->_70);
                 if (!gen->mGenObject) continue;
                 const bool teki = gen->mGenObject->mID == 'teki', boss = gen->mGenObject->mID == 'boss';
                 if (!teki && !boss) continue;
