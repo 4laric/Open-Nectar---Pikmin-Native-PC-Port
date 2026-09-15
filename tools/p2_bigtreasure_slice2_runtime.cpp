@@ -21,6 +21,7 @@
 #include "MapMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "MoviePlayer.h"
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "PikiState.h"
