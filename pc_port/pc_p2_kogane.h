@@ -20,4 +20,4 @@ int pc_p2_kogane_gas_state(BTeki*,float* x,float* z,float* remaining);
 // proving the reward cap holds even if the flip-count sidecar were lost.
 int pc_p2_kogane_onion_ledger_rows();
 int pc_p2_kogane_reprobe_duplicates(unsigned generator,int id);
-int pc_p2_kogane_nectar_dropped();
+int pc_p2_kogane_nectar_dropped(unsigned generator);
