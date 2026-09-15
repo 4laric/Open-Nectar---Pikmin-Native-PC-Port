@@ -87,6 +87,7 @@ class Slice2App final : public PlugPikiApp {
     bool setup = false;
     int checkPhase = 0;   // 0 receiver acceptance, 1 phase transition, 2 exit
     int phaseWait = 0;    // frames yielded while the loop applies a queued hit
+    int weaponsBefore = 0;
     float ground = 0.0f;
 
 public:
@@ -255,11 +256,14 @@ private:
 
     void runPhaseTransition()
     {
+        // The live seam is installed by pc_p2_hardlanes_setup when the opt-in
+        // host profile is present, so the natural-hit ingress drives the SAME
+        // ordinary FSM the game loop runs.
         require(pc_p2_hardlanes_bigtreasure_ready(), "ordinary seam active");
-        const int before = pc_p2_hardlanes_bigtreasure_weapon_count();
-        std::printf("P2_BIGTREASURE_SLICE2_DIAG phase_weapons_before=%d\n", before);
-        require(before == 4, "four weapons attached");
         if (phaseWait == 0) {
+            weaponsBefore = pc_p2_hardlanes_bigtreasure_weapon_count();
+            require(weaponsBefore == 4, "four weapons attached");
+            std::printf("P2_BIGTREASURE_SLICE2_DIAG phase_weapons_before=%d\n", weaponsBefore);
             // Route a full-health hit against the elec weapon through the
             // natural-hit ingress. No direct FSM-host health is written.
             require(pc_p2_hardlanes_bigtreasure_hit(P2BTWEAPON_Elec,
@@ -272,8 +276,8 @@ private:
         // Let the ordinary update apply the queued hit (one per source tick).
         ++phaseWait;
         const int after = pc_p2_hardlanes_bigtreasure_weapon_count();
-        if (after < before) {
-            std::printf("P2_BIGTREASURE_SLICE2_PHASE weapons=%d->%d\n", before, after);
+        if (after < weaponsBefore) {
+            std::printf("P2_BIGTREASURE_SLICE2_PHASE weapons=%d->%d\n", weaponsBefore, after);
             std::puts("PASS BIGTREASURE_SLICE2_RUNTIME");
             std::fflush(stdout);
             std::_Exit(0);
