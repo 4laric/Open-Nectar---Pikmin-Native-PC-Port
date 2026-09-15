@@ -326,8 +326,14 @@ Piki* pc_p2_bulbmin_birth_dependent(Creature* leader, const struct Vector3f& mot
 bool pc_p2_bulbmin_whistle(Piki* bulbmin);
 // Drop a destroyed dependent.
 void pc_p2_bulbmin_forget(Piki* piki);
-// Apply the cave save filter, returning the bodies that must not be saved.
-std::vector<std::uint32_t> pc_p2_bulbmin_transition(P2BulbminCaveTransition move);
+// Apply the cave save filter (source PikiMgr::caveSaveAllPikmins, pikiMgr.cpp
+// :723) to the live Bulbmin flock and return the live Piki bodies that must be
+// excluded from a checkpoint. On P2BulbminDescendFloor a wild (unwhistled)
+// dependent is removed and a recruited one kept; on P2BulbminExitCave every
+// tracked Bulbmin is removed. Untracked Bulbmin (injected/restored before this
+// save) are never returned. The ledger is mutated so a removed body cannot be
+// re-saved by a retry. This is the live caller used by pc_p2_cave_checkpoint.
+std::vector<Piki*> pc_p2_bulbmin_transition(P2BulbminCaveTransition move);
 // Optional handoff target for whistle; another lane can bind its captain
 // ownership table so recruited Bulbmin join the squad.
 void pc_p2_bulbmin_bind_captain_table(P2CaptainOwnershipTable* ownership);

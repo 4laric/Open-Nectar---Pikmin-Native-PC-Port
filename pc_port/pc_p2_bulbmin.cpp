@@ -152,16 +152,19 @@ void pc_p2_bulbmin_forget(Piki* piki) {
     idOfPiki.erase(found);
 }
 
-std::vector<std::uint32_t> pc_p2_bulbmin_transition(P2BulbminCaveTransition move) {
+std::vector<Piki*> pc_p2_bulbmin_transition(P2BulbminCaveTransition move) {
+    std::vector<Piki*> removed;
+    if (!active) return removed;
     const P2BulbminTransitionOut result = bridge.transition(move);
+    removed.reserve(result.removed.size());
     for (const std::uint32_t id : result.removed) {
         auto found = pikiOfId.find(id);
-        if (found != pikiOfId.end()) {
-            idOfPiki.erase(found->second);
-            pikiOfId.erase(found);
-        }
+        if (found == pikiOfId.end()) continue;
+        removed.push_back(found->second);
+        idOfPiki.erase(found->second);
+        pikiOfId.erase(found);
     }
-    return result.removed;
+    return removed;
 }
 
 void pc_p2_bulbmin_bind_captain_table(P2CaptainOwnershipTable* ownership) {
