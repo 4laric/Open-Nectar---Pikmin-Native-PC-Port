@@ -34,6 +34,7 @@ struct Spawned {
 };
 std::vector<Spawned> spawned;
 int deliveredCount = 0;
+int deliveryEventCount = 0;
 
 bool readPlacement(const std::string& path, P2CaveItemPlacement& out, std::string& error)
 {
@@ -104,6 +105,8 @@ int pc_p2_cave_items_spawned() { return static_cast<int>(spawned.size()); }
 
 int pc_p2_cave_items_delivered() { return deliveredCount; }
 
+int pc_p2_cave_items_delivery_events() { return deliveryEventCount; }
+
 Pellet* pc_p2_cave_items_pellet_for(const char* item)
 {
     if (!item) return nullptr;
@@ -120,6 +123,7 @@ void pc_p2_cave_items_shutdown()
     itemShape = nullptr;
     spawned.clear();
     deliveredCount = 0;
+    deliveryEventCount = 0;
 }
 
 void pc_p2_cave_items_setup()
@@ -128,6 +132,7 @@ void pc_p2_cave_items_setup()
     itemsActive = false;
     spawned.clear();
     deliveredCount = 0;
+    deliveryEventCount = 0;
     itemShape = nullptr;
 
     const char* env = std::getenv("PIKMIN_CAVE_ITEMS");
@@ -241,6 +246,7 @@ bool pc_p2_cave_items_deliver(Pellet* pellet)
         seed.c_str(), reward.c_str(), entry.host.c_str(), "cave_treasure");
     const bool granted = result == P2ReceiptHostResult::Granted;
     if (granted) ++deliveredCount;
+    if (result != P2ReceiptHostResult::Error) ++deliveryEventCount;
     std::printf("P2_CAVE_ITEM_RECEIPT id=%s item=%s host=%s tagged=%d new=%d tag=cave_treasure seed=%llu result=%d\n",
                 reward.c_str(), entry.item.c_str(), entry.host.c_str(), entry.tagged ? 1 : 0,
                 granted ? 1 : 0, static_cast<unsigned long long>(placement.seed),

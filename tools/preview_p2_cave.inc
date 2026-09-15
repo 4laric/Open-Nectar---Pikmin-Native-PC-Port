@@ -69,18 +69,21 @@ static void caveItemsFixture(Navi* n) {
         }
         return;
     }
-    if(pc_p2_cave_items_delivered()>0){
+    if(pc_p2_cave_items_delivery_events()>0){
         capture("p2-cave-items.ppm");
         const bool again=pc_p2_cave_items_deliver(caveCarryTarget);
-        std::printf("P2_CAVE_ITEM_REDELIVER duplicate_call=%d delivered=%d\n",int(again),pc_p2_cave_items_delivered());
+        std::printf("P2_CAVE_ITEM_REDELIVER duplicate_call=%d events=%d new=%d\n",
+            int(again),pc_p2_cave_items_delivery_events(),pc_p2_cave_items_delivered());
         std::puts("PASS cave items: physical placement, real carry, exactly-once receipt (proxy geometry/model)");
         std::fflush(stdout);std::_Exit(0);
     }
     if(caveItemTicks%150==0){
         int transport=0,free=0;Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(p->mMode==PikiMode::TransportMode)++transport;if(p->mMode==PikiMode::FreeMode)++free;}
-        std::printf("P2_CAVE_ITEM_PROGRESS tick=%d alive=%d state=%d transport=%d free=%d x=%.2f z=%.2f goal=%p delivered=%d\n",
+        std::printf("P2_CAVE_ITEM_PROGRESS tick=%d alive=%d state=%d transport=%d free=%d x=%.2f z=%.2f goal=%p events=%d new=%d\n",
             caveItemTicks,int(caveCarryTarget->isAlive()),caveCarryTarget->getState(),transport,free,
-            caveCarryTarget->mSRT.t.x,caveCarryTarget->mSRT.t.z,(void*)caveCarryTarget->mTargetGoal,pc_p2_cave_items_delivered());
+            caveCarryTarget->mSRT.t.x,caveCarryTarget->mSRT.t.z,(void*)caveCarryTarget->mTargetGoal,
+            pc_p2_cave_items_delivery_events(),pc_p2_cave_items_delivered());
+        std::fflush(stdout);
         capture("p2-cave-items-progress.ppm");
     }
     require(caveItemTicks<2400,"cave item carry did not deliver");

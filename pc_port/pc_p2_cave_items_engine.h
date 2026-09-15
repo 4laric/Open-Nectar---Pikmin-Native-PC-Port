@@ -32,7 +32,10 @@ bool pc_p2_cave_items_deliver(Pellet* pellet);
 
 const P2CaveItemPlacement* pc_p2_cave_items_placement();
 int pc_p2_cave_items_spawned();
+// New first-time grants (exactly-once credit happened this run).
 int pc_p2_cave_items_delivered();
+// Completed delivery events, including durable duplicates from a prior process.
+int pc_p2_cave_items_delivery_events();
 
 // Test/fixture helper: the spawned pellet for an item token, or null.
 Pellet* pc_p2_cave_items_pellet_for(const char* item);
