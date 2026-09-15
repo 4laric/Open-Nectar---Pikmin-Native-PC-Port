@@ -76,7 +76,6 @@ struct Bound {
 	int used          = 0;
 	int refunds       = 0;
 	int swallowed     = 0;
-	bool open         = false;
 	bool done         = false;
 	double openedSec      = 0.0;
 	double lastAcceptSec  = 0.0;
@@ -290,6 +289,34 @@ void settleOwed(Bound& bound)
 	}
 }
 
+// Collect the flying Pikmin currently inside a bud's mouth slot. The caller
+// consumes them so the pikiMgr iterator is never invalidated mid-walk.
+std::vector<Piki*> slotsTaken(const Bound& bound)
+{
+	const Vector3f slot = slotPosition(bound);
+	std::vector<Piki*> candidates;
+	Iterator it(pikiMgr);
+	CI_LOOP(it)
+	{
+		Piki* piki = static_cast<Piki*>(*it);
+		if (!piki || !piki->isAlive() || piki->getState() != PIKISTATE_Flying) {
+			continue;
+		}
+		const float dx = piki->mSRT.t.x - slot.x;
+		const float dz = piki->mSRT.t.z - slot.z;
+		if (dx * dx + dz * dz <= p2pom::SlotRadius * p2pom::SlotRadius) {
+			candidates.push_back(piki);
+		}
+	}
+	return candidates;
+}
+
+// Source-timed six-state walk (Pom.h:120): Wait is one frame then arms to Open;
+// every touch is the transient Swing which returns to Open; Open closes after the
+// remain-open window or a spent budget; Close routes to Shot (Pikmin inside) or
+// reopens; Shot settles its owed sprouts then reopens, or dies once the lifetime
+// budget is spent. Each state occupies at least one behavior step so the drawn
+// clip walk can actually sample open/swing/close (which one-tick collapse hid).
 void stepBuds(double nowSec)
 {
 	for (Bound& bound : buds) {
@@ -305,94 +332,111 @@ void stepBuds(double nowSec)
 			}
 		}
 
-		// A closed bud with outstanding sprout demand keeps retrying before it
-		// may accept or reopen; budget-spent buds settle then finish.
+		// A bud mid-shot keeps spilling its owed sprouts before it may do
+		// anything else; a budget-spent bud finishes (dead) once settled.
 		if (bound.owed > 0) {
 			settleOwed(bound);
 			continue;
 		}
 
-		// Collect thrown/pressed Pikmin inside the slot radius, then consume them
-		// so the pikiMgr iterator is never invalidated mid-walk.
-		const Vector3f slot = slotPosition(bound);
-		std::vector<Piki*> candidates;
-		Iterator it(pikiMgr);
-		CI_LOOP(it)
-		{
-			Piki* piki = static_cast<Piki*>(*it);
-			if (!piki || !piki->isAlive() || piki->getState() != PIKISTATE_Flying) {
-				continue;
+		switch (bound.state) {
+		case p2pom::State::Wait:
+			// Arm once the bud has been drawn in its Wait pose (no clip playback
+			// here; the source arms on the open clip's key 2, Pom.h:120). Gating
+			// on the confirmed draw keeps the Wait clip observable in the walk
+			// before the petals open, which a fixed step count could catch-up past.
+			if (bound.draws >= 1u) {
+				setState(bound, p2pom::State::Open);
 			}
-			const float dx = piki->mSRT.t.x - slot.x;
-			const float dz = piki->mSRT.t.z - slot.z;
-			if (dx * dx + dz * dz <= p2pom::SlotRadius * p2pom::SlotRadius) {
-				candidates.push_back(piki);
-			}
-		}
+			break;
 
-		const int limit = p2pom::budget(bound.spec.species);
-		for (Piki* piki : candidates) {
-			if (bound.used >= limit) {
+		case p2pom::State::Open: {
+			const int limit = p2pom::budget(bound.spec.species);
+			bool touched = false;
+			for (Piki* piki : slotsTaken(bound)) {
+				if (bound.used >= limit) {
+					break;
+				}
+				const int thrownColour = int(piki->mColor);
+				if (p2pom::refund(bound.spec.species, thrownColour)) {
+					++bound.refunds;
+					std::printf("P2_POM_REFUND generator=%u species=%s thrown_colour=%d used=%d budget=%d slot_refunded=1\n",
+					            bound.spec.generator, p2pom::speciesName(bound.spec.species), thrownColour, bound.used, limit);
+				} else {
+					++bound.used;
+					std::printf("P2_POM_ACCEPT generator=%u species=%s thrown_colour=%d used=%d budget=%d\n",
+					            bound.spec.generator, p2pom::speciesName(bound.spec.species), thrownColour, bound.used, limit);
+				}
+				++bound.swallowed;
+				touched            = true;
+				bound.lastAcceptSec = nowSec;
+				if (bound.openedSec == 0.0) {
+					bound.openedSec = nowSec;
+				}
+				piki->setEraseKill();
+				piki->kill(false);
+			}
+			if (touched) {
+				// Each touch is the transient Swing; the next step returns to Open.
+				setState(bound, p2pom::State::Swing);
 				break;
 			}
-			const int thrownColour = int(piki->mColor);
-			if (p2pom::refund(bound.spec.species, thrownColour)) {
-				++bound.refunds;
-				std::printf("P2_POM_REFUND generator=%u species=%s thrown_colour=%d used=%d budget=%d slot_refunded=1\n",
-				            bound.spec.generator, p2pom::speciesName(bound.spec.species), thrownColour, bound.used, limit);
-			} else {
-				++bound.used;
-				std::printf("P2_POM_ACCEPT generator=%u species=%s thrown_colour=%d used=%d budget=%d\n",
-				            bound.spec.generator, p2pom::speciesName(bound.spec.species), thrownColour, bound.used, limit);
+			// Armed and idle: close only after a swallow opened the cycle and the
+			// remain-open window or the lifetime budget has elapsed.
+			if (bound.swallowed > 0) {
+				const bool budgetSpent = bound.used >= limit;
+				const float sinceAccept = float(nowSec - bound.lastAcceptSec);
+				const p2pom::CloseOutcome outcome
+				    = p2pom::closeOutcome(sinceAccept, p2pom::RemainOpenSec, budgetSpent, bound.swallowed > 0);
+				if (outcome != p2pom::CloseOutcome::StillOpen) {
+					setState(bound, p2pom::State::Close);
+				}
 			}
-			const bool wasClosed = !bound.open;
-			++bound.swallowed;
-			bound.open         = true;
-			bound.lastAcceptSec = nowSec;
-			if (bound.openedSec == 0.0) {
-				bound.openedSec = nowSec;
-			}
-			if (wasClosed) {
-				setState(bound, p2pom::State::Open); // arm on the cycle's first touch
-			}
-			setState(bound, p2pom::State::Swing); // each touch is a swing
-			piki->setEraseKill();
-			piki->kill(false);
+			break;
 		}
 
-		if (!bound.open) {
-			continue;
-		}
-		const bool budgetSpent = bound.used >= limit;
-		const float sinceAccept = float(nowSec - bound.lastAcceptSec);
-		const p2pom::CloseOutcome outcome
-		    = p2pom::closeOutcome(sinceAccept, p2pom::RemainOpenSec, budgetSpent, bound.swallowed > 0);
-		if (outcome == p2pom::CloseOutcome::StillOpen) {
-			continue;
-		}
-		setState(bound, p2pom::State::Close);
-		std::printf("P2_POM_CLOSE generator=%u species=%s outcome=%s used=%d budget=%d swallowed=%d\n", bound.spec.generator,
-		            p2pom::speciesName(bound.spec.species), p2pom::closeOutcomeName(outcome), bound.used, limit, bound.swallowed);
-		if (outcome == p2pom::CloseOutcome::Shot) {
-			setState(bound, p2pom::State::Shot);
-			const int count = p2pom::shotCount(bound.spec.species, bound.swallowed);
-			bound.requested += count;
-			bound.owed += count;
-			std::printf("P2_POM_SPROUT generator=%u species=%s count=%d colour=%d body=%d leaf=1\n", bound.spec.generator,
-			            p2pom::speciesName(bound.spec.species), count, sourceColour(bound), outputColour(bound));
-			bound.finishWhenSettled = budgetSpent;
-			settleOwed(bound);
-		}
-		bound.open      = false;
-		bound.swallowed = 0;
-		if (p2pom::dead(budgetSpent, bound.owed)) {
-			if (!bound.done) {
-				finishDead(bound);
+		case p2pom::State::Swing:
+			// Transient per-touch state; the source returns to Open after each swing.
+			setState(bound, p2pom::State::Open);
+			break;
+
+		case p2pom::State::Close: {
+			const int limit = p2pom::budget(bound.spec.species);
+			const bool budgetSpent = bound.used >= limit;
+			const float sinceAccept = float(nowSec - bound.lastAcceptSec);
+			const p2pom::CloseOutcome outcome
+			    = p2pom::closeOutcome(sinceAccept, p2pom::RemainOpenSec, budgetSpent, bound.swallowed > 0);
+			std::printf("P2_POM_CLOSE generator=%u species=%s outcome=%s used=%d budget=%d swallowed=%d\n", bound.spec.generator,
+			            p2pom::speciesName(bound.spec.species), p2pom::closeOutcomeName(outcome), bound.used, limit,
+			            bound.swallowed);
+			if (outcome == p2pom::CloseOutcome::Shot) {
+				setState(bound, p2pom::State::Shot);
+				const int count = p2pom::shotCount(bound.spec.species, bound.swallowed);
+				bound.requested += count;
+				bound.owed += count;
+				std::printf("P2_POM_SPROUT generator=%u species=%s count=%d colour=%d body=%d leaf=1\n", bound.spec.generator,
+				            p2pom::speciesName(bound.spec.species), count, sourceColour(bound), outputColour(bound));
+				bound.finishWhenSettled = budgetSpent;
+			} else {
+				// Close with nothing inside reopens.
+				setState(bound, p2pom::State::Open);
 			}
-		} else if (budgetSpent) {
-			bound.finishWhenSettled = true;
-		} else {
-			setState(bound, p2pom::State::Wait); // reopen after the close cycle
+			bound.swallowed = 0;
+			break;
+		}
+
+		case p2pom::State::Shot:
+			// The owed sprouts settled (arrived here with owed == 0): the source
+			// shot reopens, or dies once the lifetime budget is spent.
+			if (bound.finishWhenSettled) {
+				finishDead(bound);
+			} else {
+				setState(bound, p2pom::State::Open);
+			}
+			break;
+
+		case p2pom::State::Dead:
+			break;
 		}
 	}
 }
@@ -509,17 +553,6 @@ void pc_p2_pom_forget(BTeki* actor)
 	}
 }
 
-unsigned long pc_p2_pom_bound()
-{
-	unsigned long count = 0;
-	for (const Bound& bound : buds) {
-		if (bound.actor) {
-			++count;
-		}
-	}
-	return count;
-}
-
 bool pc_p2_pom_clip(const BTeki* actor, const char*& name, float& phase)
 {
 	if (!actor) {
@@ -532,13 +565,29 @@ bool pc_p2_pom_clip(const BTeki* actor, const char*& name, float& phase)
 		syncClip(bound);
 		name  = bound.clip.c_str();
 		phase = bound.phase;
+		return true;
+	}
+	return false;
+}
+
+// Confirmed draw: called by the batch-2 display path only after the forced clip
+// was found in the bank and selected, so a P2_POM_DRAW line claims a pose the
+// draw chain actually rendered (not merely a candidate clip name).
+void pc_p2_pom_report_draw(const BTeki* actor)
+{
+	if (!actor) {
+		return;
+	}
+	for (Bound& bound : buds) {
+		if (bound.actor != actor) {
+			continue;
+		}
 		if (bound.draws < 64u) {
 			std::printf("P2_POM_DRAW generator=%u species=%s pose=%s draws=%llu\n", bound.spec.generator,
 			            p2pom::speciesName(bound.spec.species), p2pom::stateName(bound.state),
 			            static_cast<unsigned long long>(bound.draws + 1));
 		}
 		++bound.draws;
-		return true;
+		return;
 	}
-	return false;
 }
