@@ -1066,6 +1066,12 @@ target_include_directories(p2_receipt_host_test PRIVATE pc_port)
 target_compile_options(p2_receipt_host_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_receipt_host_test COMMAND p2_receipt_host_test)
 
+# Lane 06: per-consumer ledger — two handles on distinct paths never interfere.
+add_executable(p2_receipt_host_multi_test tools/p2_receipt_host_multi_test.cpp pc_port/pc_p2_receipt_host.cpp)
+target_include_directories(p2_receipt_host_multi_test PRIVATE pc_port)
+target_compile_options(p2_receipt_host_multi_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_receipt_host_multi_test COMMAND p2_receipt_host_multi_test)
+
 # Lane 06: P2 ordinary delivery receiver (header-only over pc_p2_receipt.h).
 add_executable(p2_delivery_receiver_test tools/p2_delivery_receiver_test.cpp)
 target_include_directories(p2_delivery_receiver_test PRIVATE pc_port)
