@@ -30,6 +30,7 @@ void pc_p2_dwarf_orange_forget(BTeki* actor){actors.erase(static_cast<PelletView
 float pc_p2_dwarf_orange_max_health(const BTeki* actor,float fallback){return health.life(actor,fallback);}
 const char* pc_p2_dwarf_orange_name(PelletView* actor){return actors.count(actor)?"Dwarf Orange Bulborb":nullptr;}
 bool pc_p2_dwarf_orange_registered(const BTeki* actor){return actors.count(const_cast<BTeki*>(actor))!=0;}
+unsigned long pc_p2_dwarf_orange_count(){return (unsigned long)actors.size();}
 void pc_p2_dwarf_orange_setup(){
     pc_p2_dwarf_orange_reset();
     std::ifstream profile("p2-dwarf-orange-profile.txt"),bank("p2-dwarf-orange-bank.txt"),bindings("p2-dwarf-orange-actors.txt");
