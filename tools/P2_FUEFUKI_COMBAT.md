@@ -64,8 +64,8 @@ New evidence:
   (`src/plugPikiNakata/tekiinteraction.cpp`, `pc_port/pc_p2_hardlanes.cpp`,
   `tools/p2_fuefuki_combat_runtime.cpp`) against the frozen host include tree,
   `PIKI_PC_PORT=1`.
-- `tools/p2_fuefuki_combat_runtime.cpp` is WRITTEN but NOT yet compiled into
-  CMake and NOT run: the natural-combat real-GL acceptance is **UNTESTED**. There
+- `tools/p2_fuefuki_combat_runtime.cpp` is compiled as the compile-only CMake
+  object target `p2_fuefuki_combat_runtime_compile` (not linked, not run): the natural-combat real-GL acceptance is **UNTESTED**. There
   is no `P2_FUEFUKI_COMBAT_RUNTIME_EVIDENCE.md`; no real `InteractPress` has been
   observed on the bound vehicle, nothing proved the Struggle transit live, and no
   engine attack drove `mHealth <= 0` to Dead. `fuefukiStuckPikmin` and the press
