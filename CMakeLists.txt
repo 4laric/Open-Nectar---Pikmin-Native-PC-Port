@@ -1126,6 +1126,15 @@ add_executable(p2_groink_hit_test tools/p2_groink_hit_test.cpp pc_port/pc_p2_gro
 target_include_directories(p2_groink_hit_test PRIVATE pc_port)
 target_compile_options(p2_groink_hit_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_groink_hit_test COMMAND p2_groink_hit_test)
+# Parked Groink carcass-recovery and host-registration-guard policy tests.
+add_executable(p2_groink_carcass_test tools/p2_groink_carcass_test.cpp pc_port/pc_p2_groink_carcass.cpp)
+target_include_directories(p2_groink_carcass_test PRIVATE pc_port)
+target_compile_options(p2_groink_carcass_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_groink_carcass_test COMMAND p2_groink_carcass_test)
+add_executable(p2_groink_lifetime_test tools/p2_groink_lifetime_test.cpp)
+target_include_directories(p2_groink_lifetime_test PRIVATE pc_port)
+target_compile_options(p2_groink_lifetime_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_groink_lifetime_test COMMAND p2_groink_lifetime_test)
 
 # Opt-in Purple and White policy regressions.
 add_executable(p2_purple_direct_policy_test tools/p2_purple_direct_policy_test.cpp)
