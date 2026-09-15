@@ -310,6 +310,7 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
                 && bank.clips.count(forced)) {
             name = forced;
             forcedPhase = phase;
+            pc_p2_pom_report_draw(actor);
         }
     }
     if (corpse) {
