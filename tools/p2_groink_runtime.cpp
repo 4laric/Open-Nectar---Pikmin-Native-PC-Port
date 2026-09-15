@@ -96,17 +96,18 @@ public:
             }
             pc_p2_groink_teki_tick(frog);
             ++carcassTicks;
-            if (pc_p2_groink_teki_births(frog) >= 1) {
-                std::printf("P2_GROINK_CARCASS_BIRTH_PASS ticks=%d timer=%.3f health=%.3f bound=%d births=%d\n",
-                    carcassTicks, pc_p2_groink_teki_timer(frog), pc_p2_groink_teki_health(frog),
-                    int(pc_p2_groink_teki_is_bound(frog)), pc_p2_groink_teki_births(frog));
+            if (pc_p2_groink_teki_total_births() >= 1) {
+                // The BIRTH tick kills the pellet, which erases the per-actor
+                // binding; read the process-wide tally that survives the forget.
+                std::printf("P2_GROINK_CARCASS_BIRTH_PASS ticks=%d total_births=%d\n",
+                    carcassTicks, pc_p2_groink_teki_total_births());
                 std::puts("PASS GROINK_RUNTIME carcass_automatic_binding");
                 std::fflush(stdout); std::_Exit(0);
             }
             if (carcassTicks >= 1200) {
-                std::printf("P2_GROINK_CARCASS_TIMEOUT ticks=%d timer=%.3f health=%.3f bound=%d births=%d\n",
+                std::printf("P2_GROINK_CARCASS_TIMEOUT ticks=%d timer=%.3f health=%.3f bound=%d total_births=%d\n",
                     carcassTicks, pc_p2_groink_teki_timer(frog), pc_p2_groink_teki_health(frog),
-                    int(pc_p2_groink_teki_is_bound(frog)), pc_p2_groink_teki_births(frog));
+                    int(pc_p2_groink_teki_is_bound(frog)), pc_p2_groink_teki_total_births());
                 std::fflush(stdout);
                 std::_Exit(1);
             }

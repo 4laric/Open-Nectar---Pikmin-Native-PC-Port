@@ -17,3 +17,8 @@ bool pc_p2_groink_teki_is_bound(const BTeki*);
 float pc_p2_groink_teki_timer(const BTeki*);
 float pc_p2_groink_teki_health(const BTeki*);
 int pc_p2_groink_teki_births(const BTeki*);
+// Process-wide RequestBirth count. Survives pc_p2_groink_teki_forget (and the
+// deferred pellet kill that erases the per-actor binding on the BIRTH tick), so a
+// runtime fixture can observe that the birth marker fired without re-reading the
+// now-torn-down actor. Monotonic; reset only on a full process reset.
+int pc_p2_groink_teki_total_births();
