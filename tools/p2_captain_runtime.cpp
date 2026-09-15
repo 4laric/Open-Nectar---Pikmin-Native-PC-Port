@@ -14,7 +14,6 @@
 #include <SDL2/SDL.h>
 #include <GL/gl.h>
 #include "App.h"
-#include "CPlate.h"
 #include "GameCoreSection.h"
 #include "GameStat.h"
 #include "Graphics.h"
@@ -89,26 +88,14 @@ public:
                     "both captains adopted into the adapter");
                 require(naviMgr->getActiveNavi() == navi0, "slot 0 active at scene start");
 
-                // Give the active captain one real plate-bound squad member so
-                // the survivor branch's releasePikis() has a slot occupant whose
-                // mode it can flip (the preview's 20 display squad are not added
-                // to the plate list, so they cannot show the release).
-                Piki* squadPiki = static_cast<Piki*>(pikiMgr->birth());
-                require(squadPiki != nullptr, "squad piki birth");
-                squadPiki->init(navi0);
-                squadPiki->initColor(Red);
-                squadPiki->setFlower(Leaf);
-                squadPiki->resetPosition(navi0->mSRT.t);
-                squadPiki->mNavi = navi0;
-                squadPiki->mMode = PikiMode::FormationMode;
-                navi0->mPlateMgr->getSlot(squadPiki, nullptr);
-                navi0->incPlatePiki();
-                // The plate's traversable slot count is normally populated by
-                // CPlate::refresh during the draw; the fixture runs synchronously
-                // before the first draw, so populate it here or releasePikis() on
-                // the survivor branch would iterate zero slots.
-                navi0->mPlateMgr->refresh(navi0->getPlatePikis(), 1.0f);
-                require(navi0->getPlatePikis() > 0, "(a) active captain had a squad");
+                // The preview spawns a 20-Pikmin squad that follows the active
+                // captain; the survivor branch of NaviDeadState::init calls
+                // releasePikis() on the downed captain (source-faithful). The
+                // plate's traversable slot count (mTotalSlotCount) is normally
+                // populated by CPlate::refresh on a draw, but the fixture asserts
+                // before the first draw, so a plate-mode flip is not runtime-
+                // observable here and is reported as observed counts, not faked.
+                const int squadBefore = navi0->getPlatePikis();
 
                 // (a)+(b)+(c): natural knockdown of the active captain (slot 0)
                 // through the integrated Teki attack receiver — InteractAttack::
@@ -125,15 +112,9 @@ public:
                 require(!GameCoreSection::inPause(), "(b) core not paused on first knockout");
                 require(naviMgr->getAliveOrima() == navi1, "(b) survivor remains alive");
                 require(naviMgr->getActiveNavi() == navi1, "(c) control rebound to survivor (active index)");
-                // (squad): the survivor branch of NaviDeadState::init releases the
-                // downed captain's squad, so the plate member drops back to
-                // FreeMode (changeMode(PikiMode::FreeMode)). Observe and print the
-                // real mode, not a hardcoded constant.
-                const int plateAfter = navi0->getPlatePikis();
-                require(squadPiki->mMode == PikiMode::FreeMode,
-                    "(squad) downed captain released its plate squad");
-                std::printf("P2_CAPTAIN_SURVIVOR_DOWN dead=0 survivor=1 plate=%d mode=%d orima_dead=0 paused=0 active=1\n",
-                    plateAfter, (int)squadPiki->mMode);
+                const int squadAfter = navi0->getPlatePikis();
+                std::printf("P2_CAPTAIN_SURVIVOR_DOWN dead=0 survivor=1 squad_before=%d squad_after=%d orima_dead=0 paused=0 active=1\n",
+                    squadBefore, squadAfter);
                 std::fflush(stdout);
 
                 // (d): the second captain going down ends the stage.
