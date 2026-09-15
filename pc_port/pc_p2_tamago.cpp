@@ -287,8 +287,13 @@ void pc_p2_tamago_birth_group(BTeki* host, int count) {
                               45.0f * radius * std::cos(face));
         Vector3f pos = hostPos + offset;
         child->inputPosition(pos);
-        child->startAI(0);
         const unsigned gen = hostGen + 1u + unsigned(i);
+        std::printf("P2_TAMAGO_DEBUG_BIRTH i=%d gen=%u pos=%.1f,%.1f nest=%.1f,%.1f\n",
+                    i, gen, child->getPosition().x, child->getPosition().z,
+                    child->getNestPosition().x, child->getNestPosition().z);
+        child->startAI(0);
+        std::printf("P2_TAMAGO_DEBUG_POSTAI i=%d gen=%u pos=%.1f,%.1f\n",
+                    i, gen, child->getPosition().x, child->getPosition().z);
         Tamago& s = actors[static_cast<PelletView*>(child)];
         s.generator = gen;
         s.home = pos;
