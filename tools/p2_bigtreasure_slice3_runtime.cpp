@@ -31,6 +31,7 @@
 #include "settings/pc_settings.h"
 #include "settings/pc_settings_p2d.h"
 #include "pc_p2_hardlanes.h"
+#include "pc_p2_bigtreasure.h"
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
