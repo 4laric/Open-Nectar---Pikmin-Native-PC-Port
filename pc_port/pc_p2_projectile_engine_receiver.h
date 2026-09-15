@@ -17,6 +17,14 @@ class Creature;
 // firing enemy). Damage is never re-derived here; the caller passes the amount
 // the Stone/Rock contact policy already produced.
 //
+// Side effect to be aware of (not "no side effect"): a Teki strike passes
+// source=nullptr, so InteractAttack::actTeki -> tekibteki.cpp interactDefault
+// stores `setCreaturePointer(1, nullptr)` on the target Teki, clearing its
+// "last assailant" pointer to null (SmartPtr::set is null-safe; the source
+// attributes Teki damage to the Stone self, which has no Creature here). A
+// grounded Navi/Pikmin strike passes the real source (the bound Kabuto) when one
+// is bound, so `playEventSound(mOwner)` and its attribution stay valid.
+//
 // This file is engine-aware (it calls Creature::stimulate with the interaction
 // types defined in Interactions.h) and therefore has no standalone unit test;
 // its acceptance path is the real-GL projectile arena, which observes the

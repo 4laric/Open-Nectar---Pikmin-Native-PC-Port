@@ -340,6 +340,9 @@ struct Host {
     // its own stimulate(InteractAttack/InteractPress) path; the proxy is left
     // intact so both signals are recorded. Default 0 = proxy only.
     bool engineReceiver = false;
+    // Tracks whether an `engine_receiver` row was seen, so `engine_receiver 0`
+    // followed by `engine_receiver 1` is still rejected as a duplicate.
+    bool sawEngineReceiverRow = false;
 
     ScriptRng rng;
     double debt = 0.0;
@@ -540,9 +543,10 @@ void parseConfig(const char* path)
             }
         } else if (word == "engine_receiver") {
             // Opt-in real engine receiver mutation: `engine_receiver <0|1>`.
-            if (gHost.engineReceiver) {
+            if (gHost.sawEngineReceiverRow) {
                 fail("duplicate engine_receiver row");
             }
+            gHost.sawEngineReceiverRow = true;
             float enabled = 0.0f;
             if (!(in >> enabled) || (enabled != 0.0f && enabled != 1.0f)) {
                 fail("invalid engine_receiver row");
@@ -744,11 +748,6 @@ void applyAndLogEngineStrike(Creature* target, Creature* source, bool attack,
                 hit.healthBefore, hit.healthAfter,
                 hit.storedDamageBefore, hit.storedDamageAfter,
                 static_cast<unsigned long long>(tokenOf(source)));
-    if (hit.applied && hit.healthAfter <= 0.0f && targetIsTeki) {
-        std::printf("P2_PROJECTILE_ENGINE_DAMAGED_TEKI target=%llu stored_delta=%.1f\n",
-                    static_cast<unsigned long long>(tokenOf(target)),
-                    hit.storedDamageAfter - hit.storedDamageBefore);
-    }
     if (hit.attempted && !hit.applied) {
         std::printf("P2_PROJECTILE_ENGINE_NOP target=%llu rejected=%d\n",
                     static_cast<unsigned long long>(tokenOf(target)), int(hit.rejected));
@@ -770,6 +769,15 @@ void detectStoneContacts()
         const Vector3f& p = creature->mSRT.t;
         const float dx = p.x - position.x, dy = p.y - position.y, dz = p.z - position.z;
         if (dx * dx + dy * dy + dz * dz > radiusSq) {
+            return;
+        }
+        // Never let a Stone damage its own firing Kabuto: the bound actor is
+        // skipped even beyond the 1 s source-grace (a forward-fired Stone should
+        // not wrap back onto its firer). Emitted only when the firer is actually
+        // inside the contact radius.
+        if (creature == gHost.kabutoActor) {
+            std::printf("P2_PROJECTILE_SKIP_SELF target=%llu\n",
+                        static_cast<unsigned long long>(tokenOf(creature)));
             return;
         }
         const std::uint64_t token = tokenOf(creature);
@@ -905,8 +913,16 @@ void fireKabutoStone(P2KabutoCannon& cannon)
         fail("kabuto takeBirth failed");
     }
     gHost.stone.reset(gHost.stoneCfg);
+    // Source token for the source-grace (shouldIgnoreAtari, CannonStone:289):
+    // when a real Kabuto actor is bound, use its live token so the Stone ignores
+    // the firing Teki for the first second instead of never matching the synthetic
+    // kabutoSelf token (which otherwise lets the Stone hit its own firer from the
+    // birth-frame contact).
+    const std::uint64_t sourceToken = (gHost.haveKabutoActor && gHost.kabutoActor)
+        ? tokenOf(gHost.kabutoActor)
+        : gHost.kabutoSelf;
     if (!gHost.stone.birth(birth.mouthPosition, birth.faceDir, birth.homing,
-                           gHost.kabutoSelf, gHost.stoneSelf)) {
+                           sourceToken, gHost.stoneSelf)) {
         fail("kabuto stone birth failed");
     }
     gHost.stoneActive = true;
@@ -1355,9 +1371,13 @@ void pc_p2_projectiles_reset()
 
 void pc_p2_projectiles_forget(BTeki* actor)
 {
-    // This host holds no engine-actor references. Clear the contact dedupe so a
-    // recycled Teki pointer can never suppress a fresh contact.
-    (void)actor;
+    // Clear the contact dedupe so a recycled Teki pointer can never suppress a
+    // fresh contact, and drop the bound Kabuto actor reference if it is the one
+    // being forgotten (otherwise a later grounded Navi/Pikmin strike would hand
+    // a dangling pointer to InteractPress(owner) -> playEventSound(mOwner)).
+    if (actor && actor == gHost.kabutoActor) {
+        gHost.kabutoActor = nullptr;
+    }
     gHost.stoneContacts.clear();
     gHost.rockContacts.clear();
 }
@@ -1455,6 +1475,19 @@ void pc_p2_projectiles_setup()
                 }
             }
             if (!gHost.kabutoActor) {
+                // Diagnostic: report every live Teki generator so a misconfigured
+                // `kabuto_actor` row can be corrected from the log instead of a
+                // silent/opaque abort.
+                Iterator all(tekiMgr);
+                CI_LOOP(all) {
+                    Teki* candidate = static_cast<Teki*>(*all);
+                    if (candidate) {
+                        std::printf("P2_PROJECTILE_KABUTO_ACTOR_CAND type=%d gen=%u pos=(%.1f,%.1f,%.1f)\n",
+                                    int(candidate->mTekiType),
+                                    candidate->mGenerator ? candidate->mGenerator->_70 : 0u,
+                                    candidate->mSRT.t.x, candidate->mSRT.t.y, candidate->mSRT.t.z);
+                    }
+                }
                 fail("kabuto_actor generator not found");
             }
             const Vector3f& p = gHost.kabutoActor->mSRT.t;
