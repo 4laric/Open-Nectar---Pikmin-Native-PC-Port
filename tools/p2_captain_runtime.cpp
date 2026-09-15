@@ -105,6 +105,13 @@ public:
             gameflow.mMoviePlayer->requestSkip();
             return result;
         }
+        // The two-captain run spans multiple frames; the isolated preview
+        // leaves the day/UI overlay active, which would freeze the managers a
+        // few frames in. Clear it like the other ordinary-actor fixtures.
+        if (sSurvivorScenario && (gameflow.mPauseAll || gameflow.mIsUIOverlayActive)) {
+            gameflow.mPauseAll = FALSE;
+            gameflow.mIsUIOverlayActive = FALSE;
+        }
         if (!pc_p2_preview_ready() || !naviMgr || !naviMgr->getNavi() || gameflow.mPauseAll
             || gameflow.mIsUIOverlayActive)
             return result;
