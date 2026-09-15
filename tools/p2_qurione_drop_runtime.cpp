@@ -68,7 +68,7 @@ public:
             gameflow.mMoviePlayer->requestSkip();
             return result;
         }
-        if (!pc_p2_preview_ready() || !naviMgr || !naviMgr->getNavi() || gameflow.mPauseAll || gameflow.mIsUIOverlayActive) return result;
+        if (!pc_pikipelago_room_preview() || !naviMgr || !naviMgr->getNavi() || gameflow.mPauseAll || gameflow.mIsUIOverlayActive) return result;
         Navi* n = naviMgr->getNavi();
 
         if (phase == SETTLE) {
