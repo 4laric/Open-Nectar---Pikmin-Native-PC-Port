@@ -17,9 +17,7 @@
 #include <set>
 #include <cstdlib>
 #include <cstdio>
-// lane09 specular-instrumentation hook (renderer-owned, c linkage): brackets the
-// family draw so pc_gfx can attribute its GX_AF_SPEC COLOR1 uploads (pc_gfx.h).
-extern "C" void pc_gfx_specular_family_scope(int active);
+#include "gl/pc_gfx.h"
 namespace {
 std::map<PelletView*,int> actors;
 const char* ids[]={"Frog","MaroFrog"};
