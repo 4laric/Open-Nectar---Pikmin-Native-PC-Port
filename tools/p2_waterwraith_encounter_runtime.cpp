@@ -325,7 +325,8 @@ public:
                         const float dz = piki->mSRT.t.z - ref.z;
                         // mCurrActionIdx is public on TopAction; the transport
                         // action's internal mState is protected, so the current
-                        // action index + mode name the step (Transport == 9).
+                        // action index + mode name the step (PikiMode::TransportMode == 9;
+                        // PikiAction::Transport == 21).
                         const int actionIdx
                             = piki->mActiveAction ? int(piki->mActiveAction->mCurrActionIdx) : -1;
                         std::printf("P2_WATERWRAITH_PIKIMODE pik=%p mode=%d action=%d "
