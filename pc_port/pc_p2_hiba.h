@@ -3,10 +3,18 @@
 //
 // Opt-in, actor-local Hiba (20, fire geyser), GasHiba (21, gas pipe) and
 // ElecHiba (22, electrical wire) behavior. Gated on p2-hiba-native.txt: absent
-// file means inert, malformed file fails closed. Elemental stimulus is applied
-// through the existing Pikmin receiver (InteractFire here) with colour immunity
-// decided by pc_p2_hiba_policy.h; generic damage/physics and lane-20 blast
-// primitives are untouched.
+// file means inert, malformed file fails closed. Each hazard's elemental
+// stimulus is applied through the real Pikmin receivers this engine owns --
+// InteractFire (Hiba), InteractGas (GasHiba -> PIKISTATE_Panic),
+// InteractDenki (ElecHiba -> PIKISTATE_DenkiDying) -- with immunity decided by
+// the lane-10 emitter contract (p2_emitter_accepts -> lane-11
+// p2_species_immune), never by a P1 colour table. Generic damage/physics and
+// lane-20 blast primitives are untouched.
+//
+// Cross-lane note: this is lane 22's fixed-hazard module; lane 10 (receivers)
+// added the p2_emitter_accepts routing so the emitter and the
+// InteractFire/InteractGas/InteractDenki receivers cannot disagree about
+// immunity.
 void pc_p2_hiba_setup();
 void pc_p2_hiba_reset();
 void pc_p2_hiba_update();
