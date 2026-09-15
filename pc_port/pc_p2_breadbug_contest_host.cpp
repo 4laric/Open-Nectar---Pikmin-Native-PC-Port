@@ -71,11 +71,11 @@ void pc_p2_breadbug_contest_destroy(int handle)
 	sContests.erase(handle);
 }
 
-void pc_p2_breadbug_contest_begin(int handle)
+void pc_p2_breadbug_contest_begin(int handle, float nowSeconds)
 {
 	auto it = sContests.find(handle);
 	if (it != sContests.end()) {
-		it->second->begin();
+		it->second->begin(nowSeconds);
 	}
 }
 

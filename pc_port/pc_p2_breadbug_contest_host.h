@@ -29,7 +29,7 @@ int pc_p2_breadbug_contest_create(int sourceId, int stage, const char* sourceTok
                                   int minThreshold, int maxThreshold, float freezeSeconds,
                                   int requiredCarriers, int maxCarriers);
 void pc_p2_breadbug_contest_destroy(int handle);
-void pc_p2_breadbug_contest_begin(int handle);
+void pc_p2_breadbug_contest_begin(int handle, float nowSeconds);
 // Advance one step with value-token carriers; returns the Outcome int.
 int pc_p2_breadbug_contest_update(int handle, float nowSeconds,
                                   const char* const* carrierTokens,

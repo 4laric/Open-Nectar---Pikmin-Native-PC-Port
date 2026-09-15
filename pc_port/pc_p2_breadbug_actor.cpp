@@ -113,7 +113,7 @@ void pc_p2_breadbug_actor_tick(){
     std::string sourceToken="nest:"+std::to_string(state.id);
     state.contestHandle=pc_p2_breadbug_contest_create((int)CONTEST_SOURCE_ID,CONTEST_STAGE,sourceToken.c_str(),CONTEST_MIN_THRESHOLD,CONTEST_MAX_THRESHOLD,CONTEST_FREEZE_SECONDS,CONTEST_REQUIRED_CARRIERS,CONTEST_MAX_CARRIERS);
     if(state.contestHandle){
-     pc_p2_breadbug_contest_begin(state.contestHandle);state.lastOutcome=-1;state.ownerDiedLogged=false;
+     pc_p2_breadbug_contest_begin(state.contestHandle,now);state.lastOutcome=-1;state.ownerDiedLogged=false;
      std::printf("P2_BREADBUG_CONTEST_BEGIN generator=%u identity=%s max=%d\n",state.id,pc_p2_breadbug_contest_identity(state.contestHandle),CONTEST_MAX_THRESHOLD);
     }
    }
