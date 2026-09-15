@@ -429,7 +429,7 @@ const char* pc_p2_elecbug_state_name(const BTeki* actor) {
 // thrown/hipdropped Pikmin landing (velocity.y<0 in PikiFlyingState collision).
 // The P1 host has no Pikmin->enemy InteractPress routing for a Chappy-vehicle
 // enemy, so this probe detects a descending Purple Pikmin overlapping the adult
-// ElecBug once per descent and delegates to the source-equivalent press receiver.
+// ElecBug once per flip (REVERSE/DEAD short-circuit) and delegates to the source-equivalent press receiver.
 // Constant press radius 30 is a documented P1-derived adaptation (source uses the
 // collision searchDistance/height), not a retail-faithful proximity.
 void pc_p2_elecbug_check_landing_press(BTeki* actor) {
