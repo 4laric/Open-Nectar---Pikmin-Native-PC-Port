@@ -10,3 +10,4 @@ path -130 0 -70 0
 carrier2 100 120 0 0 9002
 joint2 0 -40 0
 path2 70 0 130 0
+pool 2
