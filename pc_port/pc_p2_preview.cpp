@@ -15,6 +15,7 @@
 #include "pc_p2_king_teki.h"
 #include "pc_p2_kochappy.h"
 #include "pc_p2_dwarf_orange.h"
+#include "pc_p2_bluechappy.h"
 #include "pc_p2_kochappy_fsm.h"
 #include "pc_p2_breadbug_visual.h"
 #include "pc_p2_giant_breadbug_visual.h"
@@ -240,6 +241,7 @@ void pc_p2_preview_setup() {
     pc_p2_sheargrub_setup();
     pc_p2_kochappy_setup();
     pc_p2_dwarf_orange_setup();
+    pc_p2_bluechappy_setup();
     pc_p2_kochappy_fsm_setup();
     pc_p2_breadbug_visual_setup();
     pc_p2_giant_breadbug_visual_setup();
