@@ -102,8 +102,8 @@ std::vector<InjectFail> injects;
 unsigned clockLast = 0;
 float clockAcc     = 0.0f;
 unsigned behaviorTick = 0;
-// Population-conservation baseline: deadPikis captured after the buds are
-// bound and before any conversion. Consumed Pikmin are erase-killed, so this
+// Population-conservation baseline: deadPikis captured at setup (before any
+// bud is lazily bound or converts). Consumed Pikmin are erase-killed, so this
 // counter must not advance while the buds convert; a Drift proves a loss was
 // wrongly counted.
 int deadPikisBaseline = 0;
@@ -202,7 +202,7 @@ void bindHosts()
 			bound.actor = teki;
 			bound.clip  = clipFor(bound.state);
 			bound.phase = 0.0f;
-			std::printf("P2_POM_BIND generator=%u species=%s source_id=%d host=teki type=%d drawn=1\n", bound.spec.generator,
+			std::printf("P2_POM_BIND generator=%u species=%s source_id=%d host=teki type=%d\n", bound.spec.generator,
 			            p2pom::speciesName(bound.spec.species), p2pom::speciesId(bound.spec.species), int(teki->mTekiType));
 			break;
 		}
