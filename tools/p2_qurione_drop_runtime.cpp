@@ -68,10 +68,8 @@ public:
             gameflow.mMoviePlayer->requestSkip();
             return result;
         }
-        if (!pc_p2_preview_ready() || !naviMgr || !naviMgr->getNavi() || gameflow.mPauseAll) return result;
+        if (!pc_p2_preview_ready() || !naviMgr || !naviMgr->getNavi() || gameflow.mPauseAll || gameflow.mIsUIOverlayActive) return result;
         Navi* n = naviMgr->getNavi();
-        const bool captainReady = n->getCurrState() && n->getCurrState()->getID() == NAVISTATE_Walk;
-        if (!captainReady || phase == DONE) return result;
 
         if (phase == SETTLE) {
             // Park every red far away so cycle 1 cannot drop; keep the captain
@@ -88,6 +86,7 @@ public:
             phase = CYCLE1;
             return result;
         }
+        if (phase == DONE) return result;
 
         Teki* wisp = findWisp();
         if (!wisp) { phase = DONE; return result; }
