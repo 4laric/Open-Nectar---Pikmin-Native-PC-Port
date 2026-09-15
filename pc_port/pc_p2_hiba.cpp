@@ -372,6 +372,7 @@ void pc_p2_hiba_lethal_check() {
         for (const auto& entry : denkiTargets) {
             if (!p2_species_immune(entry.second, P2HazardFire)) continue;
             if (alive.count(entry.first)) continue;
+            if (gasTargets.count(entry.first)) continue;
             witness = entry.first;
             witnessSpecies = entry.second;
             break;
