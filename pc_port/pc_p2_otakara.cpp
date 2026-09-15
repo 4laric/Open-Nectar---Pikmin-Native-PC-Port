@@ -505,6 +505,9 @@ void pc_p2_otakara_update(BTeki* actor) {
                     generator, s.species, s.prevHealth, actor->mHealth,
                     s.prevHealth - actor->mHealth, s.lastInteraction.c_str(), s.lastAttacker.c_str());
         std::fflush(stdout);
+        // Attribution is per drop: clear it so a later non-Attack drop is not mislabelled.
+        s.lastInteraction = "unknown";
+        s.lastAttacker = "none";
     }
     s.prevHealth = actor->mHealth;
 
