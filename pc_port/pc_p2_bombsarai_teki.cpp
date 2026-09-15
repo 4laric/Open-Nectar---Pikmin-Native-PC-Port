@@ -46,6 +46,8 @@
 #include <fstream>
 #include <map>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace {
 constexpr float kPi = 3.14159265358979323846f;
@@ -398,6 +400,20 @@ void applyBlast(BTeki* t, Binding& b, const P2BombSaraiBlastEvent& event)
     int hits = 0;
     int pikminHits = 0;
     Creature* owner = t->isAlive() ? static_cast<Creature*>(t) : static_cast<Creature*>(&sBombOwner);
+    // Snapshot candidates BEFORE stimulating: a lethal InteractBomb removes the
+    // Pikmin from pikiMgr, which would invalidate a live CI_LOOP iterator and
+    // crash the game right after a big blast (hits>=20).
+    std::vector<std::pair<Creature*, bool>> targets;
+    if (naviMgr && naviMgr->getNavi()) {
+        targets.emplace_back(static_cast<Creature*>(naviMgr->getNavi()), false);
+    }
+    if (pikiMgr) {
+        Iterator it(pikiMgr);
+        CI_LOOP(it) {
+            Piki* piki = static_cast<Piki*>(*it);
+            if (piki) targets.emplace_back(static_cast<Creature*>(piki), true);
+        }
+    }
     auto strike = [&](Creature* receiver, bool isPiki) -> bool {
         if (!receiver || !receiver->isAlive()) return false;
         const Vector3f& p = receiver->getPosition();
@@ -412,15 +428,8 @@ void applyBlast(BTeki* t, Binding& b, const P2BombSaraiBlastEvent& event)
         if (isPiki) ++pikminHits;
         return true;
     };
-    if (naviMgr && naviMgr->getNavi()) {
-        strike(static_cast<Creature*>(naviMgr->getNavi()), false);
-    }
-    if (pikiMgr) {
-        Iterator it(pikiMgr);
-        CI_LOOP(it) {
-            Piki* piki = static_cast<Piki*>(*it);
-            strike(static_cast<Creature*>(piki), true);
-        }
+    for (const auto& target : targets) {
+        strike(target.first, target.second);
     }
     std::printf("P2_BOMBSARAI_TEKI_BLAST generator=%llu token=%llu carrier_valid=%d hits=%d pikmin_hits=%d\n",
                 (unsigned long long)b.generator, (unsigned long long)event.carrierToken,
