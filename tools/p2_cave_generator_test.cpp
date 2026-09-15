@@ -102,17 +102,23 @@ static bool connected_without(const P2CaveObservedLayout& layout, const std::str
     return false;
 }
 
+// The re-roll-stable logical projection: slot kinds, hazards and seeded segment
+// indices, plus where each *tagged* treasure sits. The untagged item uses the
+// normal pool and is allowed to move with the salt (it is geometry, not logic).
 static std::string projection(const P2CaveObservedLayout& layout)
 {
     std::ostringstream out;
     for (const P2CaveObservedNode& node : layout.nodes) {
-        out << node.kind << '|' << node.hazard << '|' << node.segment_index << '|';
-        for (const std::string& item : node.items) {
-            out << item << ',';
-        }
-        out << ';';
+        out << node.kind << '|' << node.hazard << '|' << node.segment_index << ';';
     }
     out << layout.entrance << '>' << layout.hole;
+    for (const P2CaveObservedNode& node : layout.nodes) {
+        for (const std::string& item : node.items) {
+            if (item == "treasure_elec" || item == "treasure_water") {
+                out << item << '@' << node.kind << node.segment_index << ';';
+            }
+        }
+    }
     return out.str();
 }
 
