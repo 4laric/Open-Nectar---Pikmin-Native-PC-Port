@@ -206,7 +206,8 @@ bool pc_p2_cave_checkpoint(bool confirm){
     // is pc_p2_bulbmin_transition; untracked (restored/injected) Bulbmin are kept.
     const bool exiting=!beasts && floorId!=1;
     const P2BulbminCaveTransition move=exiting?P2BulbminExitCave:P2BulbminDescendFloor;
-    const std::vector<Piki*> dropped=pc_p2_bulbmin_transition(move);
+    // Leader-down (alive cleared) saves an empty squad; do not touch the Bulbmin ledger then.
+    const std::vector<Piki*> dropped=alive.empty()?std::vector<Piki*>{}:pc_p2_bulbmin_transition(move);
     std::vector<Survivor> squad;
     squad.reserve(alive.size());
     for(Piki* p:alive){
@@ -214,7 +215,7 @@ bool pc_p2_cave_checkpoint(bool confirm){
         for(Piki* d:dropped){if(d==p){isDropped=true;break;}}
         if(!isDropped) squad.push_back({pc_p2_species(p),p->mHappa});
     }
-    std::printf("P2_CAVE_BULBMIN_TRANSITION move=%s removed=%zu kept=%zu exiting=%d\n",
+    if(!alive.empty()) std::printf("P2_CAVE_BULBMIN_TRANSITION move=%s removed=%zu kept=%zu exiting=%d\n",
                 exiting?"exit":"descend",dropped.size(),squad.size(),int(exiting));
     int writeSchema=checkpointSchema;
     for(const auto& s:squad){const int required=p2_schema_required_for_species(s.species);if(required>writeSchema)writeSchema=required;}

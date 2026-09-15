@@ -331,8 +331,7 @@ void pc_p2_bulbmin_forget(Piki* piki);
 // excluded from a checkpoint. On P2BulbminDescendFloor a wild (unwhistled)
 // dependent is removed and a recruited one kept; on P2BulbminExitCave every
 // tracked Bulbmin is removed. Untracked Bulbmin (injected/restored before this
-// save) are never returned. The ledger is mutated so a removed body cannot be
-// re-saved by a retry. This is the live caller used by pc_p2_cave_checkpoint.
+// save) are never returned. The ledger is mutated before the transfer file is written, so if the write fails the removed bodies are untracked and kept on retry (known hole; lane 11 to compute the drop set non-mutatingly and mutate only after a successful write). This is the live caller used by pc_p2_cave_checkpoint.
 std::vector<Piki*> pc_p2_bulbmin_transition(P2BulbminCaveTransition move);
 // Optional handoff target for whistle; another lane can bind its captain
 // ownership table so recruited Bulbmin join the squad.
