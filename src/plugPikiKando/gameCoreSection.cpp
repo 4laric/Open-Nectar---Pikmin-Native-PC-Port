@@ -22,6 +22,7 @@
 #include "pc_p2_preview.h"
 #include "pc_p2_enemy.h"
 #include "pc_p2_demon_host.h"
+#include "pc_p2_sarai_manager.h"
 #include "pc_p2_cave.h"
 #include "pc_p2_kurage_receiver.h"
 #include "pc_p2_captain.h"
@@ -1490,6 +1491,7 @@ void GameCoreSection::finalSetup()
 	pc_p2_groink_teki_setup();
 	pc_p2_king_teki_setup();
 	pc_p2_demon_manager_setup();
+	pc_p2_sarai_manager_setup();
 	pc_p2_preview_setup();
 	pc_p2_snow_campaign_setup();
 	// Actor-lifetime (#397): mark the new scene ready for lifecycle fixtures.
@@ -1622,10 +1624,9 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 	PRINT("================== NAVI ===================\n");
 	memStat->start("navi");
 	naviMgr = new NaviMgr();
-	// Lane 12 (#130): strictly opt-in second captain. navi_capacity() is 1
-	// unless PIKMIN_P2_SECOND_CAPTAIN is set AND the live gate allows it; the
-	// gate is deliberately closed until follow-AI/camera/controls/game-over are
-	// ported, so this is inert in normal single-captain play.
+	// Lane 12 (#130): opt-in second captain. navi_capacity() is 1 unless
+	// PIKMIN_P2_SECOND_CAPTAIN is set (the live gate now defaults open); normal
+	// single-captain play is unchanged because the request defaults off.
 	int naviCapacity = pc_p2_captain::navi_capacity();
 	if (naviCapacity > 1 && !pc_p2_captain::prepare_second_captain_assets(naviMgr)) {
 		naviCapacity = 1;
