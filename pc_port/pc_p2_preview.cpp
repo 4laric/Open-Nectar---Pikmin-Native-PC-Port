@@ -9,6 +9,7 @@
 #include "pc_p2_qurione.h"
 #include "pc_p2_shijimi.h"
 #include "pc_p2_kurage_teki.h"
+#include "pc_p2_bombsarai_teki.h"
 #include "pc_p2_sarai_manager.h"
 #include "pc_p2_groink_teki.h"
 #include "pc_p2_sheargrub.h"
@@ -341,6 +342,9 @@ bool pc_p2_preview_deliver(Pellet* pellet) {
         }
         else if(unsigned generator=0;pc_p2_mamuta_receipt(pellet->mPelletView,generator)) {
             receipt="corpse:"+pc_p2_cave_receipt_prefix()+"mamuta:"+std::to_string(generator);value=corpseValue;
+        }
+        else if(unsigned generator=0;pc_p2_bombsarai_receipt(pellet->mPelletView,generator)) {
+            receipt="corpse:"+pc_p2_cave_receipt_prefix()+"bombsarai:"+std::to_string(generator);value=corpseValue;
         }
         else if(unsigned generator=0;pc_p2_kurage_receipt(pellet->mPelletView,generator)) {
             receipt="corpse:"+pc_p2_cave_receipt_prefix()+"kurage:"+std::to_string(generator);value=corpseValue;

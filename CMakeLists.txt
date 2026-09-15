@@ -279,6 +279,7 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_bombsarai_hover.cpp
     pc_port/pc_p2_bombsarai_map_trace.cpp
     pc_port/pc_p2_bombsarai_terrain.cpp
+    pc_port/pc_p2_bombsarai_teki.cpp
     pc_port/pc_p2_bigtreasure.cpp
     pc_port/pc_p2_bigtreasure_attacks.cpp
     pc_port/pc_p2_bigtreasure_fsm.cpp
