@@ -72,6 +72,8 @@ struct Bound {
 	std::string clip = "wait";
 	float phase      = 0.0f;
 	std::uint64_t draws = 0;
+	std::string drawnPose = ""; // pose currently being logged for draw
+	int poseDraws      = 0;     // draws logged for the current pose
 	int colour        = -1;
 	int used          = 0;
 	int refunds       = 0;
@@ -582,11 +584,20 @@ void pc_p2_pom_report_draw(const BTeki* actor)
 		if (bound.actor != actor) {
 			continue;
 		}
-		if (bound.draws < 64u) {
+		// Confirm every pose is drawn without drowning the log in per-frame
+		// repeats: the first few draws of each pose are logged, then the pose is
+		// suppressed until the FSM advances it. `draws` stays a monotonic count.
+		const char* pose = p2pom::stateName(bound.state);
+		if (bound.drawnPose != pose) {
+			bound.drawnPose = pose;
+			bound.poseDraws = 0;
+		}
+		if (bound.poseDraws < 8) {
 			std::printf("P2_POM_DRAW generator=%u species=%s pose=%s draws=%llu\n", bound.spec.generator,
-			            p2pom::speciesName(bound.spec.species), p2pom::stateName(bound.state),
+			            p2pom::speciesName(bound.spec.species), pose,
 			            static_cast<unsigned long long>(bound.draws + 1));
 		}
+		++bound.poseDraws;
 		++bound.draws;
 		return;
 	}
