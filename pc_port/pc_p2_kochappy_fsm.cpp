@@ -391,6 +391,7 @@ void pc_p2_kochappy_fsm_press(BTeki* actor)
 	if (!ready || !actor) return;
 	auto found = actors.find(static_cast<PelletView*>(actor));
 	if (found == actors.end()) return;
+	found->second.healthAsserted = true; // keep the prologue from restoring health while pressed
 	actor->mHealth = 0.0f;
 	enter(actor, found->second, p2kochappyfsm::STATE_PRESS);
 }

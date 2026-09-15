@@ -13,7 +13,7 @@
 #include <string>
 
 namespace p2kochappyfsm {
-	struct Params {
+struct Params {
 	float health         = 250.0f; // general fp00
 	float moveSpeed      = 60.0f;  // general fp06
 	float sight          = 95.0f;  // general fp12
