@@ -98,10 +98,12 @@ void pc_p2_placement_probe_run()
         // catalog slot uid. `slot` is the catalog uid from the sidecar, or 0.
         const unsigned generator = teki->mGenerator ? teki->mGenerator->_70 : 0;
         const unsigned slot = slotByGenerator.count(generator) ? slotByGenerator.at(generator) : 0;
-        std::printf("P2_PLACEMENT_SLOT generator=%u slot=%u actor=%d xyz=%d terrain=%s route=%d route_distance=%.1f water_depth=%.2f\n",
+        std::printf("P2_PLACEMENT_SLOT generator=%u slot=%u actor=%d xyz=%d terrain=%s route=%d route_distance=%.1f x=%.3f y=%.3f z=%.3f water_depth=%.2f\n",
                     generator, slot, static_cast<int>(teki->mTekiType),
                     hasTerrain ? 1 : 0, terrain, route ? 1 : 0,
-                    static_cast<double>(routeDistance), static_cast<double>(depth));
+                    static_cast<double>(routeDistance),
+                    static_cast<double>(pos.x), static_cast<double>(pos.y), static_cast<double>(pos.z),
+                    static_cast<double>(depth));
         ++actors;
         if (hasTerrain && route) ++evidenceSlots;
     }
