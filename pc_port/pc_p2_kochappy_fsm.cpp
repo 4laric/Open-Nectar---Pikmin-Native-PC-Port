@@ -87,6 +87,7 @@ struct FsmActor {
 	bool flickFired       = false;
 	bool deadLogged       = false;
 	bool died             = false;
+	bool healthAsserted   = false;
 	float logTimer        = 0.0f;
 };
 
@@ -404,6 +405,15 @@ void pc_p2_kochappy_fsm_update(BTeki* actor)
 	if (dt <= 0.0f || dt > 0.5f) return;
 	const unsigned generator = actor->mGenerator ? actor->mGenerator->_70 : 0u;
 	const Vector3f pos = actor->getPosition();
+
+	// The P1 Chappy vehicle re-initialises mHealth from its TPF_Life policy at
+	// actor birth, after this module's setup() adopted the actor; re-assert the
+	// opted-in params.health once on the first live update so a health override
+	// survives birth (default 250 is unaffected).
+	if (!state.healthAsserted) {
+		state.healthAsserted = true;
+		actor->mHealth       = params.health;
+	}
 
 	// The P1 host applies accumulated Pikmin damage through a TAI damage
 	// reaction that lives in the suppressed strategy (doAI). Apply the queued
