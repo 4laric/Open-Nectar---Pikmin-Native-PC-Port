@@ -59,6 +59,19 @@ bool pc_p2_waterwraith_register_finished();
 // (source Dead KEYEVENT_5 -> a P1 number-pellet stand-in, see register.cpp).
 bool pc_p2_waterwraith_register_corpse_spawned();
 
+// --- Corpse receipt / lane-07 lifecycle seam ---
+// The spawned corpse pellet is registered so `pc_p2_preview_deliver` (lane 06's
+// experimental Pod receipt path) can recognize it as a Waterwraith corpse and
+// credit the durable P2Economy ledger. `pc_p2_waterwraith_receipt` is a one-shot
+// lookup + consume: a reused PelletView address can never be double-credited.
+class PelletView;
+bool pc_p2_waterwraith_receipt(PelletView* view, unsigned& generator);
+// Forget a corpse pellet that dies or is cleared without being delivered.
+void pc_p2_waterwraith_forget(PelletView* view);
+// Lane-07 boundary: clear the corpse map and delivery counter.
+void pc_p2_waterwraith_reset();
+unsigned pc_p2_waterwraith_delivery_count();
+
 // One engine frame: source-clocks the actor at 30 Hz (at most 4 steps per
 // frame), feeds the fixed fall -> recover -> walk host script and advances the
 // visual bank. Safe before setup (no-op).

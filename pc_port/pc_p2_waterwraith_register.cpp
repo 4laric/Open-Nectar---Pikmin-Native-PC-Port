@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <string>
 
@@ -34,10 +35,16 @@ struct RegisterState {
 
 RegisterState sState;
 
+// Corpse pellet {view -> generator}. Fixed placement, so generator is 0. This is
+// the lane-07 registration the shared `pc_p2_preview_deliver` consumes.
+std::map<PelletView*, unsigned> sCorpses;
+unsigned sDeliveryCount = 0;
+
 // Source Dead KEYEVENT_5 releases the held treasure; the P1 host has no P2
-// treasure item, so a labelled number-pellet stand-in is spawned at the wraith
-// position (the same adaptation the Kogane lane records for its cave treasure).
-// Lane 06 owns the durable exactly-once receipt path; this is the on-field drop.
+// treasure item, so a labelled number-pellet carryable corpse stand-in is
+// spawned at the wraith position (the same adaptation the Kogane lane records).
+// The pellet is registered for lane-06 Pod receipt via its PelletView and for
+// lane-07 lifecycle via `pc_p2_waterwraith_forget/reset`.
 void spawnWraithCorpse()
 {
     sState.corpseSpawned = true;
@@ -57,8 +64,11 @@ void spawnWraithCorpse()
     pellet->init(pos);
     pellet->mVelocity.set(0.0f, 100.0f, 0.0f);
     pellet->startAI(0);
-    std::printf("P2_WATERWRAITH_CORPSE pos=%.3f,%.3f,%.3f standin=number_pellet\n", pos.x, pos.y,
-                pos.z);
+    if (pellet->mPelletView) {
+        sCorpses[pellet->mPelletView] = 0u; // fixed placement => generator 0
+    }
+    std::printf("P2_WATERWRAITH_CORPSE pos=%.3f,%.3f,%.3f registered=%d standin=number_pellet\n",
+                pos.x, pos.y, pos.z, pellet->mPelletView ? 1 : 0);
     std::fflush(stdout);
 }
 
@@ -199,6 +209,45 @@ void pc_p2_waterwraith_register_reset()
     sState = RegisterState();
     pc_p2_waterwraith_visual_reset();
     pc_p2_waterwraith_encounter_reset();
+    pc_p2_waterwraith_reset();
+}
+
+bool pc_p2_waterwraith_receipt(PelletView* view, unsigned& generator)
+{
+    if (!view) {
+        return false;
+    }
+    auto it = sCorpses.find(view);
+    if (it == sCorpses.end()) {
+        return false;
+    }
+    generator = it->second;
+    // One-shot consume: the delivered corpse's address must never be re-credited.
+    sCorpses.erase(it);
+    ++sDeliveryCount;
+    std::printf("P2_WATERWRAITH_POD_RECEIPT generator=%u deliveries=%u\n", generator,
+                sDeliveryCount);
+    std::fflush(stdout);
+    return true;
+}
+
+void pc_p2_waterwraith_forget(PelletView* view)
+{
+    if (!view) {
+        return;
+    }
+    sCorpses.erase(view);
+}
+
+void pc_p2_waterwraith_reset()
+{
+    sCorpses.clear();
+    sDeliveryCount = 0;
+}
+
+unsigned pc_p2_waterwraith_delivery_count()
+{
+    return sDeliveryCount;
 }
 
 bool pc_p2_waterwraith_register_ready()
