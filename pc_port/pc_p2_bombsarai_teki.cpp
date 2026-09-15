@@ -19,6 +19,7 @@
 // friendly-fire is not stimulated here (the grounded carrier is the only Teki
 // candidate and the flyer is immune while airborne, BombSarai.cpp:127-135).
 #include "pc_p2_bombsarai_teki.h"
+#include "pc_p2_preview.h"
 #include "pc_p2_bombsarai_fsm.h"
 #include "pc_p2_bombsarai_hover.h"
 #include "pc_p2_bombsarai_bomb.h"
@@ -34,6 +35,7 @@
 #include "NaviMgr.h"
 #include "Piki.h"
 #include "PikiMgr.h"
+#include "Pellet.h"
 #include "Collision.h"
 #include "Generator.h"
 #include "system.h"
@@ -54,6 +56,11 @@ constexpr float kAttackXZ = 50.0f;          // mAttackRadius XZ gate
 
 // Timing stand-ins until the #128 converter supplies retail .bca durations.
 constexpr int kTiming[11] = { 30, 30, 10, 30, 30, 10, 10, 24, 45, 21, 20 };
+// Injected engagement seal: keep the grounded carrier within this XZ distance
+// of the nearest live Pikmin (units), closing the gap at a capped per-tick
+// speed so the FreeMode squad can attack it (a large teleport crashes the host).
+constexpr float kEngageKeepRange = 30.0f;
+constexpr float kEngageSeekSpeed = 45.0f;
 
 struct Binding {
     std::uint64_t generator = 0;
@@ -85,6 +92,15 @@ std::map<BTeki*, Binding> sBound;
 // is revoked (mirrors pc_p2_kurage_teki.cpp). Populated only on the death tick
 // path; the recycle/slot-reuse forget erases without recording.
 std::map<BTeki*, unsigned> sCorpses;
+// Corpse-carry diagnostic: the dead carrier and its corpse pellet (mPellet is
+// spawned later in the death sequence, so resolve it lazily), probed once a
+// second so the run shows whether the FreeMode squad carries it to the Pod.
+BTeki* sCorpseTeki = nullptr;
+Pellet* sCorpsePellet = nullptr;
+P2BombSaraiVec3 sCorpseOrigin;
+int sCorpseProbeTick = 0;
+unsigned sCorpseGenerator = 0;
+bool sCorpseDelivered = false;
 P2BombSaraiMapBinding sMap;
 P2BombSaraiTerrainAdapter sAdapter;
 int sThrowCount = 0;
@@ -191,6 +207,34 @@ void stepCarrier(BTeki* t, Binding& b, float delta)
         t->mSRT.t.y = groundY;
     }
     t->mVelocity.y = 0.0f;
+
+    // Keep the grounded carrier inside the squad's attack volume: the P1 host
+    // flight otherwise carries it away from the FreeMode squad. If the nearest
+    // live Pikmin is farther than the keep range, close the gap at a capped
+    // per-tick speed (injected locomotion; the host is overridden after the
+    // fact). A large teleport on one tick crashes the P1 host.
+    if (pikiMgr) {
+        float best = 1.0e30f, bestDx = 0.0f, bestDz = 0.0f;
+        Iterator sit(pikiMgr);
+        CI_LOOP(sit) {
+            Piki* piki = static_cast<Piki*>(*sit);
+            if (!piki || !piki->isAlive()) continue;
+            const float dx = piki->mSRT.t.x - t->mSRT.t.x;
+            const float dz = piki->mSRT.t.z - t->mSRT.t.z;
+            const float d2 = dx * dx + dz * dz;
+            if (d2 < best) { best = d2; bestDx = dx; bestDz = dz; }
+        }
+        if (best < 1.0e29f) {
+            const float d = std::sqrt(best);
+            if (d > kEngageKeepRange) {
+                const float step = kEngageSeekSpeed * delta;
+                const float gap = d - kEngageKeepRange;
+                const float move = gap < step ? gap : step;
+                t->mSRT.t.x += bestDx / d * move;
+                t->mSRT.t.z += bestDz / d * move;
+            }
+        }
+    }
     const P2BombSaraiVec3 carrier = carrierPosition(t);
 
     // Animated capture joint world position.
@@ -426,11 +470,33 @@ void pc_p2_bombsarai_teki_setup()
 
 void pc_p2_bombsarai_teki_tick(BTeki* t)
 {
+    if (sCorpseTeki) {
+        if (!sCorpsePellet) sCorpsePellet = sCorpseTeki->mPellet;
+        if (sCorpsePellet) {
+            // Hold the freshly spawned corpse at the kill site for a few
+            // seconds instead of letting its spawn velocity fling it clear of
+            // the squad, so the FreeMode Pikmin that killed it can pick it up
+            // (injected; the natural throw otherwise lands it out of reach).
+            if (sCorpseProbeTick < 300) sCorpsePellet->mVelocity.set(0.0f, 0.0f, 0.0f);
+            if (++sCorpseProbeTick % 30 == 0) {
+                const Vector3f& cp = sCorpsePellet->mSRT.t;
+                const float dx = cp.x - sCorpseOrigin.x, dz = cp.z - sCorpseOrigin.z;
+                std::printf("P2_BOMBSARAI_TEKI_CORPSE tick=%d x=%.3f z=%.3f moved=%.3f\n",
+                            sCorpseProbeTick, cp.x, cp.z, std::sqrt(dx * dx + dz * dz));
+            }
+        }
+    }
     auto i = sBound.find(t);
     if (i == sBound.end()) return;
     if (!t->isAlive() || t->mHealth <= 0.0f) {
         sCorpses[t] = (unsigned)i->second.generator;
         sCarrierDead = true;
+        sCorpseTeki = t;
+        sCorpsePellet = nullptr;
+        sCorpseOrigin = carrierPosition(t);
+        sCorpseProbeTick = 0;
+        sCorpseGenerator = (unsigned)i->second.generator;
+        sCorpseDelivered = false;
         std::printf("P2_BOMBSARAI_TEKI_DEAD generator=%llu\n",
                     (unsigned long long)i->second.generator);
         sBound.erase(i);
@@ -457,6 +523,11 @@ void pc_p2_bombsarai_teki_reset()
     sThrowCount = 0;
     sBlastCount = 0;
     sCarrierDead = false;
+    sCorpseTeki = nullptr;
+    sCorpsePellet = nullptr;
+    sCorpseProbeTick = 0;
+    sCorpseGenerator = 0;
+    sCorpseDelivered = false;
 }
 
 bool pc_p2_bombsarai_receipt(PelletView* view, unsigned& generator)
