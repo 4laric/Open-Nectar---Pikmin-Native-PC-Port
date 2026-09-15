@@ -211,10 +211,16 @@ private:
         host.trace = nullptr;
         host.ground = nullptr;
         P2BigTreasureElementStats stats;
-        runtime.tick(kDt, host, stats);
+        int guard = 0;
+        while (stats.nodes == 0 && guard++ < 60) {
+            runtime.tick(kDt, host, stats);
+        }
         require(stats.nodes > 0, "water element emitted a node");
         Piki* geoPiki = freshPiki();
         require(geoPiki != nullptr, "fresh red for geometry hit");
+        // The first bubble is emitted at the raised joint (mGround + 100) and
+        // only moves a few units in its first tick, so the emit anchor is still
+        // inside its in-flight radius.
         geoPiki->mSRT.t.set(origin.x, ground + 100.0f, origin.z);
         require(runtime.queryHit(P2BigTreasureVec3{ geoPiki->mSRT.t.x, geoPiki->mSRT.t.y,
                                                     geoPiki->mSRT.t.z }),
