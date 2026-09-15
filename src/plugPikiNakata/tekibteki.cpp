@@ -1863,6 +1863,7 @@ bool BTeki::interactDefault(immut TekiInteractionKey& key)
 
 		_344 = attack->getDamagePortion();
 		mStoredDamage += attack->mDamage;
+		pc_p2_otakara_attack(this, attack->mOwner, "InteractAttack");
 		if (getTekiOption(TEKIOPT_DamageCountable)) {
 			mDamageCount++;
 		}
