@@ -98,7 +98,9 @@ void pc_p2_waterwraith_encounter_step(P2WaterwraithActor& actor, P2WaterwraithAc
                 || !hitRange(target.x, target.z, reference.x, reference.z, rule.hitRadius)) {
                 continue;
             }
-            p2_waterwraith_actor_apply_damage(actor, rule.purpleHitDamage, true, nullptr);
+            if (p2_waterwraith_actor_apply_damage(actor, rule.purpleHitDamage, true, nullptr) == P2WWDMG_Ignored) {
+                continue;
+            }
             ++sStats.purpleHits;
             sStats.damageDealt += rule.purpleHitDamage;
             std::printf("P2_WATERWRAITH_HIT tick=%llu attached=%d rollerHealth=%.1f bodyHealth=%.1f\n",

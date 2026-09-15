@@ -35,8 +35,8 @@
 // effectively instantaneous). No claim of natural-Map navigation is made.
 //
 // Damage model (structural, not a receiver): only Purple hits are accepted, and
-// only when `P2WaterwraithRig::damageable()` is true (roller frozen, or after
-// the wraith dismounted). While riding/moving the hit is ignored. Damage while
+// while the roller is attached only when `P2WaterwraithRig::damageable()` is
+// true (frozen); after dismount the body accepts hits until `ownerInvulnerableSet()`. While riding/moving the hit is ignored. Damage while
 // the child is still attached routes to the Tyre health (source freeze/bend
 // routes to `mTyre`, blackMan.cpp:672-681); after dismount it routes to the
 // wraith body health (general fp00 = 1500). This expresses the Purple-only
