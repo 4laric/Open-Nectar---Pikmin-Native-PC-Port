@@ -114,16 +114,16 @@ def verify_log(text):
         errors.append("missing carry-setup marker")
     delivered = bool(re.search(r"^P2_WATERWRAITH_POD_RECEIPT\s+generator=\d+\s+deliveries=\d+\s*$",
                                text, flags=re.MULTILINE))
-    blocked = bool(re.search(r"^P2_WATERWRAITH_CARRY_BLOCKED\s+registered=0\s+.*$", text,
-                             flags=re.MULTILINE))
+    blocked = bool(re.search(r"^P2_WATERWRAITH_CARRY_UNRESOLVED\s+frame=\d+\s+max_carriers=\d+\s+"
+                             r"deliveries=0\s*$", text, flags=re.MULTILINE))
     if delivered:
         if not re.search(r"^P2_WATERWRAITH_ENCOUNTER_DELIVERED\s+deliveries=\d+\s*$", text,
                          flags=re.MULTILINE):
             errors.append("missing encounter delivered marker")
     elif blocked:
-        pass  # the carry is blocked at the view-less stand-in
+        pass  # natural carry did not complete; carrier evidence is logged
     else:
-        errors.append("missing carry outcome (delivered or blocked)")
+        errors.append("missing carry outcome (delivered or unresolved)")
     if not re.search(r"^P2_WATERWRAITH_ENCOUNTER_DEATH_REENTRY\s+ready=1\s+attached=1\s*$", text,
                      flags=re.MULTILINE):
         errors.append("missing death cleanup/re-entry marker")
@@ -275,7 +275,7 @@ def main(argv=None):
                                                encoding="utf-8")
     print(json.dumps({"status": record["status"], "run": str(run) if run else None,
                       "errors": record["errors"]}, indent=2))
-    return 0 if record["status"] in ("passed", "blocked") else 1
+    return 0 if record["status"] == "passed" else 1
 
 
 if __name__ == "__main__":

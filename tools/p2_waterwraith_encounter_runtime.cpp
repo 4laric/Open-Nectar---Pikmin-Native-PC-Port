@@ -51,6 +51,7 @@
 namespace {
 constexpr int kStageA_Frames = 45;
 constexpr int kMaxFrames = 9000;
+constexpr int kCarryDeadlineFrames = 2400;
 constexpr float kPurpleOffsetX[3] = { 30.0f, 0.0f, -30.0f };
 constexpr float kPurpleOffsetZ[3] = { 0.0f, 30.0f, 0.0f };
 constexpr float kRedOffsetX[2] = { 50.0f, -50.0f };
@@ -106,6 +107,8 @@ class WaterwraithEncounterApp final : public PlugPikiApp {
     bool corpseGrabStaged = false;
     bool carryResolved = false;
     bool carrySetupLogged = false;
+    int carryFrames = 0;
+    int maxCarriers = 0;
 
 public:
     int idle() override
@@ -177,7 +180,7 @@ public:
 
         if (!stageAOk) {
             ++stageAFrames;
-            if (stats.damageDealt != 0.0f || stats.purpleHits != 0) {
+            if (stats.damageDealt != 0.0f || stats.acceptedHits != 0) {
                 require(false, "non-Purple squad damaged the actor");
             }
             if (stageAFrames >= kStageA_Frames) {
@@ -218,6 +221,30 @@ public:
             corpseGrabStaged = true;
         }
 
+        // Natural carry observation: count Pikmin in TransportMode toward the
+        // corpse stand-in and log over time (gate-E evidence).
+        if (dead && corpseGrabStaged) {
+            int transport = 0;
+            if (pikiMgr) {
+                Iterator iterator(pikiMgr);
+                CI_LOOP(iterator) {
+                    Piki* piki = static_cast<Piki*>(*iterator);
+                    if (piki && piki->isAlive() && piki->mMode == PikiMode::TransportMode) {
+                        ++transport;
+                    }
+                }
+            }
+            if (transport > maxCarriers) {
+                maxCarriers = transport;
+            }
+            ++carryFrames;
+            if (carryFrames % 120 == 0) {
+                std::printf("P2_WATERWRAITH_CARRY_OBSERVE frame=%d carriers=%d max=%d deliveries=%u\n",
+                            frames, transport, maxCarriers,
+                            pc_p2_waterwraith_delivery_count());
+            }
+        }
+
         return result;
     }
 
@@ -230,7 +257,7 @@ public:
         const P2WaterwraithEncounterStats& stats = pc_p2_waterwraith_encounter_stats();
         // Full natural chain: stun -> roller death -> child removal -> exposed
         // body death -> corpse drop -> teardown.
-        if (!(stats.stunned > 0 && stats.purpleHits > 0 && stats.damageDealt > 0.0f
+        if (!(stats.stunned > 0 && stats.acceptedHits > 0 && stats.damageDealt > 0.0f
               && stats.rollerZeroed && stats.childRemoved && stats.bodyZeroed
               && stats.treasureReleased && stats.killed
               && pc_p2_waterwraith_register_corpse_spawned()
@@ -243,31 +270,32 @@ public:
 
         // Snapshot the combat counters before cleanup zeroes them.
         const P2WaterwraithEncounterStats summary = pc_p2_waterwraith_encounter_stats();
-        require(summary.stunned > 0 && summary.purpleHits > 0 && summary.crushes > 0
+        require(summary.stunned > 0 && summary.acceptedHits > 0 && summary.crushes > 0
                     && summary.damageDealt > 0.0f && summary.bodyZeroed
                     && summary.treasureReleased && summary.killed,
                 "combat counters incomplete");
 
-        // Corpse carry + Pod receipt. The stand-in is a P1 number pellet: if it
-        // was born view-less (mPelletView == nullptr) it is invisible to the
-        // lane-06 Pod receipt path (pc_p2_preview_deliver keys on mPelletView) and
-        // cannot be carried; that is reported as BLOCKED, not a transport PASS.
+        // Corpse carry + Pod receipt. The stand-in is a registered P1 number
+        // pellet (ActTransport::decideGoal routes every pellet to the preview Pod
+        // regardless of view). Wait for the receipt to fire through
+        // pc_p2_preview_deliver -> pc_p2_waterwraith_receipt; if natural carry
+        // does not complete, log the carrier evidence and report the host reason.
         if (!carrySetupLogged) {
             std::printf("P2_WATERWRAITH_CARRY_SETUP\n");
             carrySetupLogged = true;
         }
-        const unsigned registeredCorpses = pc_p2_waterwraith_corpse_count();
-        if (registeredCorpses == 0) {
-            if (!carryResolved) {
-                std::printf("P2_WATERWRAITH_CARRY_BLOCKED registered=0 "
-                            "reason=viewless_number_pellet_mPelletView_null\n");
-                carryResolved = true;
-            }
-        } else if (pc_p2_waterwraith_delivery_count() == 0) {
+        if (pc_p2_waterwraith_delivery_count() == 0
+            && carryFrames < kCarryDeadlineFrames) {
             return; // still carrying to the Pod
-        } else if (!carryResolved) {
-            std::printf("P2_WATERWRAITH_ENCOUNTER_DELIVERED deliveries=%u\n",
-                        pc_p2_waterwraith_delivery_count());
+        }
+        if (!carryResolved) {
+            if (pc_p2_waterwraith_delivery_count() > 0) {
+                std::printf("P2_WATERWRAITH_ENCOUNTER_DELIVERED deliveries=%u\n",
+                            pc_p2_waterwraith_delivery_count());
+            } else {
+                std::printf("P2_WATERWRAITH_CARRY_UNRESOLVED frame=%d max_carriers=%d deliveries=%u\n",
+                            carryFrames, maxCarriers, pc_p2_waterwraith_delivery_count());
+            }
             carryResolved = true;
         }
 
@@ -295,14 +323,14 @@ public:
         std::printf("P2_WATERWRAITH_ENCOUNTER_PASS stuns=%llu hits=%llu crushes=%llu damage=%.1f "
                     "zeroed=1 child_removed=1 body_zeroed=1 treasure=1 kill=1 delivered=%d\n",
                     static_cast<unsigned long long>(summary.stunned),
-                    static_cast<unsigned long long>(summary.purpleHits),
+                    static_cast<unsigned long long>(summary.acceptedHits),
                     static_cast<unsigned long long>(summary.crushes), summary.damageDealt,
                     pc_p2_waterwraith_delivery_count() > 0 ? 1 : 0);
         captured = true;
         if (pc_p2_waterwraith_delivery_count() > 0) {
             std::puts("PASS WATERWRAITH_ENCOUNTER_RUNTIME");
         } else {
-            std::puts("BLOCKED WATERWRAITH_ENCOUNTER_RUNTIME carry=viewless_number_pellet");
+            std::puts("BLOCKED WATERWRAITH_ENCOUNTER_RUNTIME carry=no_natural_carry");
         }
         std::fflush(stdout);
         std::_Exit(0);
