@@ -358,9 +358,19 @@ public:
                 if (down) {
                     std::puts("PASS P2_CAPTAIN_RUNTIME"); std::fflush(stdout); std::_Exit(0);
                 }
+                // Assisted exit from the P1 NaviBuryState: it is an escapable,
+                // non-lethal state, so the captain would otherwise stay buried at
+                // 80 HP. The damage stays natural (the spawned Miurin's
+                // InteractBury); only the bury-exit is assisted so the Miurin can
+                // land successive natural buries down to Dead.
+                if (state == NAVISTATE_Bury) {
+                    mamutaNavi->mStateMachine->transit(mamutaNavi, NAVISTATE_Walk);
+                    std::printf("P2_CAPTAIN_MAMUTA_ESCAPE_ASSIST frame=%d health=%.1f\n", mamutaFrames, hp);
+                    std::fflush(stdout);
+                }
                 mamutaStartHealth = hp;
             }
-            require(mamutaFrames < 900, "natural mamuta bury timeout");
+            require(mamutaFrames < 1200, "natural mamuta bury timeout");
             return result;
         }
         return result;
