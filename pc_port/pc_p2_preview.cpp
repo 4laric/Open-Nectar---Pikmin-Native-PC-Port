@@ -343,6 +343,9 @@ bool pc_p2_preview_deliver(Pellet* pellet) {
         else if(unsigned generator=0;pc_p2_otakara_receipt(pellet->mPelletView,generator)) {
             receipt="corpse:"+pc_p2_cave_receipt_prefix()+"otakara:"+std::to_string(generator);value=corpseValue;
         }
+        else if(unsigned generator=0;pc_p2_long_legs_receipt(pellet->mPelletView,generator)) {
+            receipt="corpse:"+pc_p2_cave_receipt_prefix()+"longlegs:"+std::to_string(generator);value=corpseValue;
+        }
         else {
             auto found=corpses.find(pellet->mPelletView);
             if(found==corpses.end()) {std::fprintf(stderr,"Unregistered P2 pod cargo id=%08x view=%p pellet=%p treasure=%p; refusing seed side effects\n",pellet->mConfig->mModelId.mId,(void*)pellet->mPelletView,(void*)pellet,(void*)previewTreasure);std::abort();}
