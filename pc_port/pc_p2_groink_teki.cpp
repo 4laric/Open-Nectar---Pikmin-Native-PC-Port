@@ -1,6 +1,7 @@
 #include "pc_p2_groink_teki.h"
 #include "pc_p2_groink_teki_policy.h"
 #include "pc_p2_groink_carcass.h"
+#include "pc_p2_preview.h"
 #include "Generator.h"
 #include "Pellet.h"
 #include "system.h"
@@ -29,6 +30,8 @@ const Binding* find(const BTeki* t) {
     auto i = s.find(const_cast<BTeki*>(t));
     return i == s.end() ? nullptr : &i->second;
 }
+// Preview-only bound-host max-life cap (see the header note).
+constexpr float kHostLifeClamp = 120.0f;
 } // namespace
 
 void pc_p2_groink_teki_reset() { s.clear(); }
@@ -57,6 +60,11 @@ bool pc_p2_groink_receipt(PelletView* view, unsigned& generator) {
     if (!b) return false;
     generator = b->generator;
     return true;
+}
+float pc_p2_groink_teki_param_f(const BTeki* teki, int idx, float fallback) {
+    if (idx != TPF_Life || !pc_pikipelago_room_preview()) return fallback;
+    if (!find(teki)) return fallback;
+    return fallback < kHostLifeClamp ? fallback : kHostLifeClamp;
 }
 
 void pc_p2_groink_teki_setup() {

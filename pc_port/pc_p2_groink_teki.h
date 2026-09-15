@@ -27,3 +27,9 @@ int pc_p2_groink_teki_total_births();
 // Groink host generator, so pc_p2_preview_deliver can credit
 // `corpse:groink:<gen>`. Returns false for any pellet this sidecar does not own.
 bool pc_p2_groink_receipt(PelletView* view, unsigned& generator);
+// Host life-clamp seam (chained in teki.h getParameterF, like lane 24's King
+// host). In the isolated room preview a natural free-mode squad cannot reliably
+// out-damage the P1 Frog host, so the bound host's TPF_Life is capped. This is a
+// parameter override, never a health write; returns `fallback` for any other
+// parameter or unbound actor.
+float pc_p2_groink_teki_param_f(const BTeki* teki, int idx, float fallback);

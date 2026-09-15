@@ -92,7 +92,7 @@ public:
                 }
                 if (!carcassHost) return result;
                 require(pc_p2_groink_teki_is_bound(carcassHost), "finalSetup sidecar bound generated Frog");
-                std::puts("P2_GROINK_CARCASS_HOST_BOUND host=generated_Frog generator=201001 kill=free_mode_squad health_write=0");
+                std::puts("P2_GROINK_CARCASS_HOST_BOUND host=generated_Frog generator=201001 kill=free_mode_squad health_write=0 host_life_clamp=120 parameter_override=1");
                 std::fflush(stdout);
             }
             ++carcassTicks;
