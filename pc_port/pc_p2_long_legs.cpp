@@ -25,6 +25,7 @@
 #include "pc_p2_animation.h"
 #include "pc_bbft.h"
 #include "teki.h"
+#include "Pellet.h"
 #include "Interactions.h"
 #include "Generator.h"
 #include "Shape.h"
@@ -76,6 +77,10 @@ struct ActorState {
 };
 
 std::map<BTeki*, ActorState> actors;      // actor -> species + policy state
+// Naturally dead Long Legs proxy corpses, keyed on the corpse Pellet* the engine
+// created (PelletView::mPellet). A number-pellet stand-in corpse has no
+// PelletView, so the receipt must key on the Pellet* (mirrors lane 31 Waterwraith).
+std::map<Pellet*, unsigned> corpses;      // corpse pellet -> generator
 std::map<std::string, Shape*> shapes;     // species -> bind shape
 size_t bytesTotal = 0;
 bool logged[2] = {false, false};
@@ -344,6 +349,7 @@ void pc_p2_long_legs_reset() {
         if (shell.stone) { shell.stone->notifyWallContact(); shell.stone->finishDeath(); }
     }
     actors.clear();
+    corpses.clear();
     shapes.clear();
     shells.clear();
     bytesTotal = 0;
@@ -404,6 +410,15 @@ void pc_p2_long_legs_update(BTeki* actor) {
     auto entry = actors.find(actor);
     if (entry == actors.end()) return;
     ActorState& state = entry->second;
+    // Once the proxy dies, capture the corpse Pellet* the engine created
+    // (PelletView::mPellet) so the ordinary Pod receipt can resolve a view-less
+    // stand-in corpse (mirrors lane 31). Runs each tick until forget/reset.
+    if (!actor->isAlive() && actor->mPellet && !corpses.count(actor->mPellet)) {
+        corpses[actor->mPellet] = state.generator;
+        std::printf("P2_LONG_LEGS_CORPSE_REGISTER generator=%u species=%s\n",
+                    state.generator, state.species.c_str());
+        std::fflush(stdout);
+    }
     if (state.fsm.state() == P2LongLegsState::Dead) return;
 
     const float dt = gsys ? gsys->getFrameTime() : 0.0f;
@@ -562,11 +577,18 @@ bool pc_p2_long_legs_receiver_rejects(Teki* teki, const InteractAttack* /*attack
     return !actors[teki].damageable;
 }
 
-bool pc_p2_long_legs_receipt(PelletView* view, unsigned& generator) {
-    // Ordinary corpse receipt (mirrors pc_p2_kurage_receipt / pc_p2_otakara_receipt).
-    // The delivered corpse's mPelletView is the dead Chappy placement vehicle; it
-    // stays in `actors` through engine death (only forget/reset remove it), so the
-    // generator captured at registration resolves the receipt.
+bool pc_p2_long_legs_receipt(Pellet* pellet, unsigned& generator) {
+    // Ordinary corpse receipt (mirrors lane 31's pc_p2_waterwraith_receipt and
+    // kurage/otakara). Primary key is the corpse Pellet* captured at death, which
+    // resolves even a view-less stand-in corpse; the PelletView backlink is a
+    // fallback for a live-binding corpse. Returns false for any unowned pellet.
+    if (!pellet) return false;
+    auto corpse = corpses.find(pellet);
+    if (corpse != corpses.end()) {
+        generator = corpse->second;
+        return true;
+    }
+    PelletView* view = pellet->mPelletView;
     if (!view) return false;
     auto it = actors.find(static_cast<BTeki*>(view));
     if (it == actors.end()) return false;

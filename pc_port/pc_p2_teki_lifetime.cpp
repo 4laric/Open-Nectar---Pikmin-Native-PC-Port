@@ -36,12 +36,15 @@
 #include "pc_p2_king.h"
 #include "pc_p2_kochappy.h"
 #include "pc_p2_dwarf_orange.h"
+#include "pc_p2_bulbmin.h"
 #include "pc_p2_kochappy_fsm.h"
 #include "pc_p2_kogane.h"
 #include "pc_p2_kurage_teki.h"
+#include "pc_p2_groink_teki.h"
 #include "pc_p2_long_legs.h"
 #include "pc_p2_mamuta.h"
 #include "pc_p2_onikurage_teki.h"
+#include "pc_p2_king_teki.h"
 #include "pc_p2_projectiles.h"
 #include "pc_p2_queen.h"
 #include "pc_p2_qurione.h"
@@ -50,6 +53,7 @@
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_otakara.h"
 #include "pc_p2_tank.h"
+#include "pc_p2_waterwraith_register.h"
 #include "pc_p2_hardlanes.h"
 
 // Family registrations released before death teardown or manager-slot reuse.
@@ -66,6 +70,9 @@ void pc_p2_forget_teki(BTeki* actor)
 	pc_p2_sheargrub_forget(actor);
 	pc_p2_kochappy_forget(actor);
 	pc_p2_dwarf_orange_forget(actor);
+	// Lane-11 Bulbmin: release the flock when its mother stand-in (Kochappy or a
+	// bare Chappy-family host) is forgotten, independent of the Kochappy module.
+	pc_p2_bulbmin_proxy_forget(actor);
     pc_p2_kochappy_fsm_forget(actor);
 	pc_p2_giant_breadbug_actor_forget(actor);
 	pc_p2_breadbug_actor_forget(actor);
@@ -78,7 +85,9 @@ void pc_p2_forget_teki(BTeki* actor)
 	pc_p2_qurione_forget(actor);
 	pc_p2_shijimi_forget(actor);
 	pc_p2_kurage_teki_forget(actor);
+	pc_p2_groink_teki_forget(actor);
 	pc_p2_onikurage_teki_forget(actor);
+	pc_p2_king_teki_forget(actor);
 	pc_p2_batch2_forget(actor);
 	pc_p2_projectiles_forget(actor);
 	pc_p2_sokkuri_forget(actor);
@@ -139,7 +148,9 @@ void pc_p2_reset_all_teki()
 	pc_p2_qurione_reset();
 	pc_p2_shijimi_reset();
 	pc_p2_kurage_teki_reset();
+	pc_p2_groink_teki_reset();
 	pc_p2_onikurage_teki_reset();
+	pc_p2_king_teki_reset();
 	pc_p2_batch2_reset();
 	pc_p2_projectiles_reset();
 	pc_p2_sokkuri_reset();
@@ -159,6 +170,11 @@ void pc_p2_reset_all_teki()
     pc_p2_imomushi_reset();
 	pc_p2_batch3_reset();
 	pc_p2_long_legs_reset();
+	pc_p2_waterwraith_reset();
+	// Lane 06: close and clear the process-wide ordinary delivery ledger at the
+	// stage boundary, so the next stage/session reopens it fresh (the handle is
+	// otherwise opened once and never reset).
+	pc_randomizer_p2_delivery_reset();
 }
 
 namespace {

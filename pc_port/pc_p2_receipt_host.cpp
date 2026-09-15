@@ -12,6 +12,18 @@ struct ReceiptHost {
 };
 // Keyed by path; the handle is the stable ReceiptHost address.
 std::map<std::string, std::unique_ptr<ReceiptHost>> receiptHosts;
+
+// Resolve a handle to a live host via the registry (never dereference a dangling
+// handle). A closed handle is not present, so it resolves to nullptr -> Error.
+ReceiptHost* receiptHostByHandle(P2ReceiptHostHandle handle)
+{
+	for (auto& entry : receiptHosts) {
+		if (entry.second.get() == handle) {
+			return entry.second.get();
+		}
+	}
+	return nullptr;
+}
 } // namespace
 
 P2ReceiptHostHandle pc_p2_receipt_host_open(const char* path)
@@ -39,12 +51,8 @@ P2ReceiptHostHandle pc_p2_receipt_host_open(const char* path)
 
 const char* pc_p2_receipt_host_path(P2ReceiptHostHandle handle)
 {
-	for (const auto& entry : receiptHosts) {
-		if (entry.second.get() == handle) {
-			return entry.second->path.c_str();
-		}
-	}
-	return nullptr;
+	ReceiptHost* host = receiptHostByHandle(handle);
+	return host ? host->path.c_str() : nullptr;
 }
 
 bool pc_p2_receipt_host_valid(const char* value)
@@ -55,16 +63,22 @@ bool pc_p2_receipt_host_valid(const char* value)
 P2ReceiptHostResult pc_p2_receipt_host_grant(P2ReceiptHostHandle handle, const char* seed,
 	const char* reward, const char* slotOrActor, const char* encounter)
 {
-	if (!handle || !seed || !reward || !slotOrActor || !encounter) {
+	ReceiptHost* host = receiptHostByHandle(handle);
+	if (!host || !seed || !reward || !slotOrActor || !encounter) {
 		return P2ReceiptHostResult::Error;
 	}
 	try {
-		auto* host = static_cast<ReceiptHost*>(const_cast<void*>(handle));
 		return host->ledger->grant(seed, reward, slotOrActor, encounter)
 		    ? P2ReceiptHostResult::Granted : P2ReceiptHostResult::Duplicate;
 	} catch (...) {
 		return P2ReceiptHostResult::Error;
 	}
+}
+
+unsigned pc_p2_receipt_host_count(P2ReceiptHostHandle handle)
+{
+	ReceiptHost* host = receiptHostByHandle(handle);
+	return host ? static_cast<unsigned>(host->ledger->size()) : 0;
 }
 
 void pc_p2_receipt_host_close(P2ReceiptHostHandle handle)

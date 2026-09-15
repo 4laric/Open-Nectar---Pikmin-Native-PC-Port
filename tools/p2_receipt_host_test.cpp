@@ -29,13 +29,22 @@ int main()
     assert(pc_p2_receipt_host_grant(a, nullptr, "r", "a", "onion") == R::Error);
     assert(pc_p2_receipt_host_grant(a, "s", "r", "a", "onion") == R::Granted);
     assert(pc_p2_receipt_host_grant(a, "s", "r", "a", "onion") == R::Duplicate);
+    assert(pc_p2_receipt_host_count(a) == 1);
+
+    // A closed handle is no longer live: grant/count resolve to Error/0 instead of
+    // dereferencing a dangling host (closed-handle UB regression).
+    P2ReceiptHostHandle closed = a;
+    pc_p2_receipt_host_close(a);
+    assert(pc_p2_receipt_host_path(closed) == nullptr);
+    assert(pc_p2_receipt_host_grant(closed, "s", "r", "a", "onion") == R::Error);
+    assert(pc_p2_receipt_host_count(closed) == 0);
 
     // Process restart over the same path reuses the durable state (never re-grants).
-    pc_p2_receipt_host_close(a);
     a = pc_p2_receipt_host_open(path.c_str());
     assert(a != nullptr);
     assert(pc_p2_receipt_host_grant(a, "s", "r", "a", "onion") == R::Duplicate);
     assert(pc_p2_receipt_host_grant(a, "s", "r2", "a", "onion") == R::Granted);
+    assert(pc_p2_receipt_host_count(a) == 2);
 
     // A directory at the temporary-file path forces a real persistence failure.
     fs::create_directory(path + ".tmp");
@@ -52,6 +61,11 @@ int main()
     fs::remove(path);
     assert(pc_p2_receipt_host_atomic_write(path.c_str(), "first"));
     assert(pc_p2_receipt_host_atomic_write(path.c_str(), "second"));
+    // A directory at the temporary-file path forces a real write failure and must
+    // leave the last good file untouched.
+    fs::create_directory(path + ".tmp");
+    assert(!pc_p2_receipt_host_atomic_write(path.c_str(), "lost"));
+    fs::remove(path + ".tmp");
     { std::ifstream in(path); std::string value; in >> value; assert(value == "second"); }
 
     fs::remove(path);
