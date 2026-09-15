@@ -89,6 +89,7 @@ constexpr float EGG_FLOOR_PAD = 2.0f;    // floor-contact tolerance
 
 struct Wisp {
     QState state = QS_STAY;
+    unsigned generator = 0;  // stable id for the forget marker (mGenerator nulls on teardown)
     float stateTime = 0.0f;
     float timer = 0.0f;
     Vector3f spawn[2];
@@ -284,8 +285,7 @@ void pc_p2_qurione_forget(BTeki* actor) {
     // report the unbind so the drop fixture can show cleanup after death.
     auto it = actors.find(static_cast<PelletView*>(actor));
     if (it != actors.end()) {
-        const unsigned gen = actor->mGenerator ? actor->mGenerator->_70 : 0u;
-        std::printf("P2_QURIONE_FORGET generator=%u\n", gen);
+        std::printf("P2_QURIONE_FORGET generator=%u\n", it->second.generator);
         std::fflush(stdout);
         actors.erase(it);
     }
@@ -417,6 +417,7 @@ void pc_p2_qurione_setup() {
         // executing, freezing the position mid-Move.
         actor->setInsideView();
         const unsigned gen = actor->mGenerator->_70;
+        w.generator = gen;
         std::printf("P2_QURIONE_BIND generator=%u source_id=16 visual_only=0\n", gen);
         std::printf("P2_ENEMY_READY species=Qurione native_family=Qurione generator=%u x=%.7f y=%.7f z=%.7f "
                     "health=%.1f max_health=%.1f behavior=native source_FSM=implemented reward=P2_Egg\n",
