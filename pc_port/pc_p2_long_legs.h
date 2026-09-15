@@ -1,5 +1,5 @@
 #pragma once
-class BTeki; class Graphics; struct Matrix4f; class Teki; struct InteractAttack;
+class BTeki; class Graphics; struct Matrix4f; class Teki; struct InteractAttack; class PelletView;
 // Family-owned Long Legs (#312, parent #173) native registration for the
 // installed bind-pose meshes. Optional, additive, opt-in via the Pikipelago
 // room preview. Ordinary P1 actors and unconfigured families are untouched.
@@ -22,3 +22,8 @@ bool pc_p2_long_legs_damageable(const BTeki*);
 // bitter-immune (Stay or Land). False for unregistered actors so the shared
 // tekiinteraction hook is a no-op for ordinary P1 play.
 bool pc_p2_long_legs_receiver_rejects(Teki*, const InteractAttack*);
+// Pod receipt lookup (ordinary corpse delivery, mirrors pc_p2_kurage/otakara):
+// true and writes the source generator id when the delivered PelletView is a
+// registered Long Legs actor (its live binding persists through engine death).
+// Pure lookup, no ledger grant; the caller credits the shared Pod economy.
+bool pc_p2_long_legs_receipt(PelletView*, unsigned& generator);

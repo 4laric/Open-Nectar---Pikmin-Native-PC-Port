@@ -111,23 +111,13 @@ P2LongLegsSpecies speciesEnum(const std::string& name) {
 // Source animation key frames (docs/PIKMIN2_LONG_LEGS_AUDIT.md) converted to
 // seconds at 30 fps. Landing runs to the last landing key; Flick to the last
 // flick key. Used only to synthesize the missing key edges in this fixture.
-//
-// The P1 Chappy placement vehicle (~130 HP) is drained by the squad before the
-// source pre-Shot schedule completes, so Houdai's Land/Flick are compressed for
-// the preview (documented approximation): the source state order and receiver
-// rules are preserved, only the animation key-edge timings shorten so the source
-// Shot state is reachable before the proxy dies. Natural death remains 130 -> 0.
 float landingSeconds(P2LongLegsSpecies species) {
     // Source Land (frames): Damagumo/Houdai 150, BigFoot 18.
-    if (species == P2LongLegsSpecies::BigFoot) return 18.0f / 30.0f;
-    if (species == P2LongLegsSpecies::Houdai) return 30.0f / 30.0f;  // compressed from 150
-    return 150.0f / 30.0f;  // Damagumo source
+    return species == P2LongLegsSpecies::BigFoot ? 18.0f / 30.0f : 150.0f / 30.0f;
 }
 float flickSeconds(P2LongLegsSpecies species) {
     // Source Flick (frames): Damagumo/Houdai 68, BigFoot 35.
-    if (species == P2LongLegsSpecies::BigFoot) return 35.0f / 30.0f;
-    if (species == P2LongLegsSpecies::Houdai) return 15.0f / 30.0f;  // compressed from 68
-    return 68.0f / 30.0f;  // Damagumo source
+    return species == P2LongLegsSpecies::BigFoot ? 35.0f / 30.0f : 68.0f / 30.0f;
 }
 float shotSeconds(P2LongLegsSpecies species) {
     // Houdai attack clip is 39 frames (Houdai.h); the gunless species never shoot.
@@ -350,6 +340,9 @@ Shape* loadBind(const SpeciesDef& species) {
 }
 
 void pc_p2_long_legs_reset() {
+    for (HoudaiShell& shell : shells) {
+        if (shell.stone) { shell.stone->notifyWallContact(); shell.stone->finishDeath(); }
+    }
     actors.clear();
     shapes.clear();
     shells.clear();
@@ -567,4 +560,16 @@ bool pc_p2_long_legs_receiver_rejects(Teki* teki, const InteractAttack* /*attack
     // Unregistered actors are never rejected, keeping the shared hook a no-op.
     if (!actors.count(teki)) return false;
     return !actors[teki].damageable;
+}
+
+bool pc_p2_long_legs_receipt(PelletView* view, unsigned& generator) {
+    // Ordinary corpse receipt (mirrors pc_p2_kurage_receipt / pc_p2_otakara_receipt).
+    // The delivered corpse's mPelletView is the dead Chappy placement vehicle; it
+    // stays in `actors` through engine death (only forget/reset remove it), so the
+    // generator captured at registration resolves the receipt.
+    if (!view) return false;
+    auto it = actors.find(static_cast<BTeki*>(view));
+    if (it == actors.end()) return false;
+    generator = it->second.generator;
+    return true;
 }
