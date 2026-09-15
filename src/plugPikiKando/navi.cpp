@@ -442,7 +442,14 @@ void Navi::finishDamage()
 
 	if (mHealth <= 1.0f) {
 		mStateMachine->transit(this, NAVISTATE_Dead);
-		GameCoreSection::startPause(COREPAUSE_Unk1 | COREPAUSE_Unk3 | COREPAUSE_Unk16);
+		// Lane 12 (#130): a downed captain with a living partner must not pause
+		// or finish the stage (source mDeadNavis != 2). NaviDeadState::init takes
+		// the survivor branch in that case; gate finishDamage's own pause the same
+		// way so a survivor keeps playing. Single-captain play is unchanged (the
+		// sole captain going down still pauses into game over).
+		if (!naviMgr || !naviMgr->getAliveOrima()) {
+			GameCoreSection::startPause(COREPAUSE_Unk1 | COREPAUSE_Unk3 | COREPAUSE_Unk16);
+		}
 	} else {
 		if (!gameflow.mMoviePlayer->mIsActive && mHealth <= 0.25f * NAVI_PARM(mHealth)
 		    && !playerState->mDemoFlags.isFlag(DEMOFLAG_OlimarLowHealth)) {
@@ -520,7 +527,11 @@ Navi::Navi(CreatureProp* props, int naviID)
 	mVelocity.set(0.0f, 0.0f, 0.0f);
 	mTargetVelocity.set(0.0f, 0.0f, 0.0f);
 	_268        = 0.0f;
-	mKontroller = new Kontroller(naviID + 1);
+	// Lane 12 (#130): the PC port has a single live pad (controller port 0), so
+	// both captains read the same Kontroller port. The survivor keeps receiving
+	// whistle/throw input after a switch; the downed captain's Dead state ignores
+	// it. Source P2 maps naviID+1 (two pads); that input split is not ported.
+	mKontroller = new Kontroller(1);
 	mSize       = 20.0f;
 
 	memStat->start("naviStateM");
@@ -2307,6 +2318,14 @@ void Navi::makeCStick(bool isSunset)
  */
 void Navi::refresh(Graphics& gfx)
 {
+	// Lane 12 (#130): the second captain is live in the roster (health, active
+	// index, knockout) but its model, self-shadow, plate and cursor rendering
+	// are deferred — the per-captain shape/head/collision bind is still open.
+	// Its game state still drives the survivor path; only the visual pass is
+	// skipped so the shared single-captain render path stays byte-identical.
+	if (mNaviID != 0) {
+		return;
+	}
 	draw(gfx);
 	if (!movieMode()) {
 		if (gsys->mToggleColls) {

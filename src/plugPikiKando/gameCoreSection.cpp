@@ -1253,7 +1253,7 @@ void GameCoreSection::initStage()
 	}
 
 	attentionCamera = new AttentionCamera;
-	cameraMgr->startCamera(naviMgr->getNavi());
+	cameraMgr->startCamera(naviMgr->getActiveNavi());
 	cameraMgr->update();
 	mNavi->mIsCursorVisible = TRUE;
 
@@ -1316,7 +1316,7 @@ void GameCoreSection::initStage()
 		DCFlushRange(controllerBuffer->mBufferAddr, data2->getLength());
 	}
 
-	naviMgr->getNavi(0)->startKontroller();
+	naviMgr->getActiveNavi()->startKontroller();
 	PRINT("init stage done\n");
 }
 
@@ -1380,6 +1380,29 @@ void GameCoreSection::finalSetup()
 			}
 		} else {
 			cameraMgr->mCamera->startCamera(mNavi, 1, 0);
+		}
+	}
+
+	// Lane 12 (#130): finish the second captain's live setup now that the first
+	// captain's spawn position, the shared camera and every stage manager exist.
+	// The second Navi was birthed (create(2)) during initStage; here it is
+	// init'd and reset beside the active captain (the same sequence the first
+	// captain goes through), so the survivor path can rebind active/camera/
+	// whistle/throw to it when slot 0 goes down.
+	if (naviMgr->hasSecondNavi()) {
+		Navi* firstNavi = naviMgr->getActiveNavi();
+		Navi* secondNavi = naviMgr->getOtherNavi(firstNavi);
+		if (firstNavi && secondNavi) {
+			Vector3f place = firstNavi->mSRT.t;
+			place.x += 40.0f;
+			place.z += 40.0f;
+			secondNavi->init(place);
+			secondNavi->mSRT.r = firstNavi->mSRT.r;
+			secondNavi->mFaceDirection = firstNavi->mFaceDirection;
+			secondNavi->reset();
+			secondNavi->mNaviCamera = mNavi->mNaviCamera;
+			secondNavi->mStateMachine->transit(secondNavi, NAVISTATE_Starting);
+			secondNavi->startKontroller();
 		}
 	}
 
@@ -1812,7 +1835,9 @@ void GameCoreSection::update()
 	}
 
 
-	Piki* nextThrowPiki = naviMgr->getNavi()->mNextThrowPiki;
+	Navi* activeThrowNavi = naviMgr->getActiveNavi();
+	if (!activeThrowNavi) activeThrowNavi = naviMgr->getNavi();
+	Piki* nextThrowPiki = activeThrowNavi->mNextThrowPiki;
 	int encodedNextThrowType;
 	if (nextThrowPiki) {
 		int color = nextThrowPiki->mColor;

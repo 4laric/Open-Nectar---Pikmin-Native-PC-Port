@@ -20,22 +20,12 @@ bool second_captain_requested()
 
 bool second_captain_live_allowed()
 {
-    // Closed on purpose. The engine-free follow state, split-squad ownership
-    // policy and the NaviMgr::update() follow hook are now in place (see
-    // pc_p2_squad_policy.h and P2CaptainAdapter::splitSquad). A live second Navi
-    // still requires, at minimum:
-    //   * a per-captain camera and Kontroller binding (Navi ctor already makes
-    //     Kontroller(naviID + 1); P2 input mapping is not ported),
-    //   * active-captain control routing for a second pad,
-    //   * HUD/cursor/whistle consumers to use getActiveNavi() instead of
-    //     getNavi() (drawGameInfo.cpp, playerState.cpp),
-    //   * survivor-gated game over. naviState.cpp:3190 sets a global
-    //     GameStat::orimaDead and newPikiGame.cpp:2779 raises GAMEEND_NaviDown;
-    //     both must become "only when every present captain is down" via
-    //     NaviMgr::getAliveOrima()/isNaviDead().
-    // The follow hook is guarded so it never runs with one Navi, keeping
-    // default play byte-identical while a later slice ports those systems.
-    return false;
+    // Opened for the survivor-path slice: the minimal rebind (active navi
+    // index, camera target, whistle/throw input) is now in place, so a live
+    // second Navi can be birthed on opt-in. The control is still strictly
+    // request-gated (PIKMIN_P2_SECOND_CAPTAIN); default single-captain play
+    // never reaches birth_second_captain().
+    return true;
 }
 
 int navi_capacity()
@@ -54,8 +44,13 @@ Navi* birth_second_captain(NaviMgr* mgr)
 {
     if (!mgr || !second_captain_live_allowed()) return nullptr;
     if (!mgr->ensureSecondNaviShapeObject()) return nullptr;
+    Navi* first = mgr->getNavi();
+    if (!first) return nullptr;
     // NaviMgr::create(2) already constructed the second Navi object; birth()
-    // simply activates the next free slot.
+    // simply activates the next free slot. The full live setup (init, reset,
+    // shared camera, spawn placement) is finished by GameCoreSection::finalSetup
+    // once the stage managers all exist (effectMgr, mapMgr, etc.), matching how
+    // the first captain is initialised.
     Navi* navi = static_cast<Navi*>(mgr->birth());
     if (navi) {
         std::printf("[Pikmin Randomizer] second captain spawned at slot %d\n", navi->getNaviIndex());
