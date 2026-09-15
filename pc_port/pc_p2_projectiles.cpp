@@ -28,7 +28,6 @@
 #include "pc_p2_rock_host.h"
 #include "pc_p2_groink.h"
 #include "pc_p2_groink_hit.h"
-#include "pc_p2_groink_strike.h"
 #include "pc_bbft.h"
 #include "Creature.h"
 #include "Generator.h"
@@ -259,11 +258,12 @@ struct Host {
     // Emits P2_PROJECTILE_SKIP_SELF at most once per Stone flight.
     bool stoneSkippedSelf = false;
 
-    // Groink consumer proof (#169 lane 20): exercises lane-21's Groink strike
-    // bridge (pc_p2_groink_strike.h -> p2_groink_apply_strike -> this lane's
-    // proxy receiver) against the live captain Navi, without forking lane-21's
-    // modules. The sweep is the muzzle-origin -> live-captain segment (the host
-    // supplies it because the Groink policy owns no actor).
+    // Groink consumer proof (#169 lane 20): exercises lane-21's Groink classifier
+    // (pc_p2_groink_hit.h -> p2_groink_classify_hit) without forking lane-21's
+    // modules, then applies the classified Bomb through THIS lane's real engine
+    // receiver (stimulate on the captain Navi). The sweep is the muzzle-origin ->
+    // live-captain segment (the host supplies it because the Groink policy owns no
+    // actor).
     bool haveGroinkCfg = false;
     P2GroinkVec3 groinkOrigin{};
     float groinkDamage = 0.0f;
@@ -1234,12 +1234,12 @@ void tickRock()
     logRockTransition();
 }
 
-// Second-consumer proof: exercise lane-21's Groink strike bridge end-to-end in
-// the production room preview, without forking its modules. The configured
-// muzzle origin aims at the live captain Navi and the Bomb strike is applied
-// through lane-20's own proxy receiver (pc_p2_projectile_receiver), so both
-// families' code runs in the same binary. Emits P2_PROJECTILE_GROINK_RECEIVER_HIT
-// exactly once; skipped until the captain exists (preview spawn settles).
+// Second-consumer proof: exercise lane-21's Groink classifier end-to-end in the
+// production room preview, without forking its modules. The configured muzzle
+// origin aims at the live captain Navi; the classified Bomb strike is applied
+// through THIS lane's real engine receiver (stimulate(InteractAttack) on the
+// Navi), not the proxy registry, and the Navi health change is logged. Emits
+// P2_PROJECTILE_GROINK_ENGINE_HIT exactly once; skipped until the captain exists.
 void tickGroinkConsumer()
 {
     if (!gHost.haveGroinkCfg || gHost.groinkApplied) {
@@ -1257,24 +1257,27 @@ void tickGroinkConsumer()
     candidate.owner = false;
     candidate.cellRadius = 10.0f;
 
-    P2GroinkStrikeInput strike;
-    strike.hit.start = gHost.groinkOrigin;
-    strike.hit.end = { p.x, p.y, p.z };
-    strike.hit.radius = P2GroinkPolicy::kShellRadius;
-    strike.hit.terminalRadius = 65.0f;
-    strike.hit.damage = gHost.groinkDamage;
-    strike.hit.terminal = true;
-    const std::uint64_t token = tokenOf(navi);
-    strike.targetToken = token;
-    strike.attributedToken = token;
+    P2GroinkHitInput hit;
+    hit.start = gHost.groinkOrigin;
+    hit.end = { p.x, p.y, p.z };
+    hit.radius = P2GroinkPolicy::kShellRadius;
+    hit.terminalRadius = 65.0f;
+    hit.damage = gHost.groinkDamage;
+    hit.terminal = true;
 
-    const P2GroinkStrikeResult result =
-        p2_groink_apply_strike(gHost.receivers, strike, candidate);
-    std::printf("P2_PROJECTILE_GROINK_RECEIVER_HIT token=%llu kind=%s damage=%.1f "
-                "applied=%d died=%d health=%.1f\n",
-                static_cast<unsigned long long>(token),
-                result.kind == P2GroinkHitKind::Bomb ? "Bomb" : "Wind",
-                result.damage, int(result.applied), int(result.died), result.health);
+    // lane-21's classifier decides the shell kind; this lane's engine receiver
+    // applies the Bomb via the captain's own stimulate(InteractAttack) path.
+    const P2GroinkHitCommand command = p2_groink_classify_hit(hit, candidate);
+    const bool bomb = command.kind == P2GroinkHitKind::Bomb;
+    const float damage = bomb ? command.damage : 0.0f;
+    const P2ProjectileEngineHit result =
+        p2_projectile_apply_engine_strike(navi, nullptr, bomb, false, damage);
+
+    std::printf("P2_PROJECTILE_GROINK_ENGINE_HIT token=%llu kind=%s damage=%.1f "
+                "applied=%d rejected=%d health=%.1f->%.1f\n",
+                static_cast<unsigned long long>(tokenOf(navi)),
+                bomb ? "Bomb" : "Wind", damage, int(result.applied),
+                int(result.rejected), result.healthBefore, result.healthAfter);
     gHost.groinkApplied = true;
 }
 
