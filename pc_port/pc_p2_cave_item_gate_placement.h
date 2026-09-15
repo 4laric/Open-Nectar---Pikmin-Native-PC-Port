@@ -19,7 +19,10 @@
 //   * an elec leaf door is electrified (the "come back with yellow" loop);
 //   * no gate is present on a door the frozen table marks unrequired.
 
+#ifndef P2_CAVE_HAZARD_ENUM_DEFINED
+#define P2_CAVE_HAZARD_ENUM_DEFINED
 enum class P2CaveHazard { None, Water, Elec, Fire, Poison };
+#endif
 enum class P2CaveDoorClass { Segment, Choke, Leaf };
 
 struct P2CaveLeaf {
