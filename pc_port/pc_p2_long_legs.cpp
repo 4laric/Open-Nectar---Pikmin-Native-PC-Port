@@ -12,8 +12,16 @@
 // policy only emits intents: foot crush, shake, shell request and death bursts
 // are logged/observed, not applied. IK stability, real foot-press collision,
 // Man-at-Legs shell objects and damage receivers remain lane work (#173/#186).
+//
+// Slice 2: the Houdai host now exposes a source damageable window and consumes
+// lane 20's shared fired-projectile primitive (`pc_p2_cannon_stone.h`, the Stone
+// policy/pool, #169) to fly a Man-at-Legs shell and route the source
+// HoudaiShotGun damage (`InteractBomb` shellDamage 10) into a real Pikmin. The
+// Stone's rolling/homing flight is a documented approximation of the source
+// THdamaShell; the in-flight pool mirrors the source pool of 10.
 #include "pc_p2_long_legs.h"
 #include "pc_p2_long_legs_fsm.h"
+#include "pc_p2_cannon_stone.h"
 #include "pc_p2_animation.h"
 #include "pc_bbft.h"
 #include "teki.h"
@@ -61,12 +69,21 @@ struct ActorState {
     float lastPositiveHealth = 0.0f; // last still-positive health, for death provenance
     P2LongLegsState lastState = P2LongLegsState::Stay;
     bool stateLogged = false;
+    bool damageable = false;        // source damage window (Wait/Flick/Walk/Shot)
+    bool bitterImmune = true;       // Stay/Land immunity
+    float shotLoopAccum = 0.0f;     // Man-at-Legs attack-loop shell cadence
 };
 
 std::map<BTeki*, ActorState> actors;      // actor -> species + policy state
 std::map<std::string, Shape*> shapes;     // species -> bind shape
 size_t bytesTotal = 0;
 bool logged[2] = {false, false};
+
+// Man-at-Legs shell pool (source pool of 10, HoudaiShotGun.cpp:1050) hosted on
+// lane 20's shared fired-projectile policy. Consume-only: no forked projectile.
+P2CannonStonePool shellPool(10);
+std::vector<P2CannonStone*> shells;       // active shells owned by shellPool
+std::uint64_t shellSelfToken = 1;
 
 [[noreturn]] void fail(const char* what) {
     std::fprintf(stderr, "P2_LONG_LEGS %s\n", what);
@@ -93,6 +110,12 @@ float landingSeconds(P2LongLegsSpecies species) {
 float flickSeconds(P2LongLegsSpecies species) {
     return species == P2LongLegsSpecies::BigFoot ? 35.0f / 30.0f : 68.0f / 30.0f;
 }
+float shotSeconds(P2LongLegsSpecies species) {
+    // Houdai attack clip is 39 frames (Houdai.h); the gunless species never shoot.
+    return species == P2LongLegsSpecies::Houdai ? 39.0f / 30.0f : 0.0f;
+}
+constexpr float kShellLoopPeriod = 5.0f / 30.0f; // one shell per attack loop (<-> frame 35)
+constexpr float kShellHitRadius = 20.0f;         // shell radius 10 + target margin
 
 Creature* nearestTarget(const Vector3f& pos, float radius) {
     Creature* best = nullptr;
@@ -133,6 +156,77 @@ int countPikiWithin(const Vector3f& pos, float radius) {
         if (dx * dx + dz * dz <= rSq) ++count;
     }
     return count;
+}
+
+// Man-at-Legs shell (consume lane 20 `P2CannonStone`; no forked projectile).
+// Fired on the Shot loop boundary and stepped each tick; on contact with a live
+// Pikmin the source HoudaiShotGun receiver (InteractBomb shellDamage) is applied.
+void fireHoudaiShell(BTeki* actor, const Vector3f& pos) {
+    Creature* target = nearestTarget(pos, 200.0f); // source shot search range
+    if (!target) return;
+    const Vector3f tp = target->getPosition();
+    const float faceDir = std::atan2(tp.x - pos.x, tp.z - pos.z);
+    P2CannonStoneConfig cfg;
+    cfg.variant = P2CannonStoneVariant::Stone;
+    cfg.moveSpeed = 600.0f;          // source shell speed (HoudaiShotGun.cpp:1193)
+    cfg.searchRumbleSpeed = 600.0f;
+    cfg.turnSpeed = 0.1f;            // homing steering fraction (approximation)
+    cfg.maxTurnAngle = 180.0f;       // unrestricted homing sweep
+    cfg.attackDamage = 10.0f;        // source Navi/Piki shell damage (HoudaiShotGun.cpp:227)
+    cfg.sightRadius = 0.0f;
+    cfg.collisionRadius = 10.0f;     // source shell trace radius
+    cfg.health = 1.0f;
+    P2CannonStoneVec3 mouth{ pos.x, pos.y + 25.0f, pos.z }; // source mouth offset
+    P2CannonStone* s = shellPool.spawn(mouth, faceDir, true,
+                                       (std::uint64_t)(std::uintptr_t)actor,
+                                       shellSelfToken++, cfg);
+    if (s) shells.push_back(s);
+}
+
+void stepHoudaiShells(BTeki* actor, const std::string& species, unsigned generator) {
+    if (shells.empty() || !pikiMgr) return;
+    int hitTotal = 0;
+    for (size_t i = 0; i < shells.size();) {
+        P2CannonStone* s = shells[i];
+        if (!s || !s->isAlive()) { shells.erase(shells.begin() + i); continue; }
+        const P2CannonStoneVec3 sp = s->position();
+        P2CannonStoneTarget tgt;
+        Creature* c = nearestTarget(Vector3f(sp.x, sp.y, sp.z), 400.0f);
+        if (c) {
+            const Vector3f tp = c->getPosition();
+            tgt.hasTarget = true;
+            tgt.position = P2CannonStoneVec3{ tp.x, tp.y, tp.z };
+        }
+        s->update(P2CannonStone::kSourceDelta, tgt, nullptr, nullptr);
+        if (s->isAlive()) {
+            const P2CannonStoneVec3 now = s->position();
+            Iterator it(pikiMgr);
+            CI_LOOP(it) {
+                Piki* p = static_cast<Piki*>(*it);
+                if (!p || !p->isAlive()) continue;
+                const Vector3f q = p->getPosition();
+                const float dx = q.x - now.x, dy = q.y - now.y, dz = q.z - now.z;
+                if (dx * dx + dy * dy + dz * dz > kShellHitRadius * kShellHitRadius) continue;
+                const P2CannonStoneContactResult res = s->contact(
+                    P2CannonStoneContactKind::NaviPiki, true, false,
+                    (std::uint64_t)(std::uintptr_t)p);
+                if (res.strikeEmitted && res.strike.damage > 0.0f) {
+                    p->stimulate(InteractBomb(actor, res.strike.damage, nullptr));
+                    ++hitTotal;
+                }
+                s->notifyWallContact(); // terminate the shell on impact
+                s->finishDeath();       // free the pool slot
+                break;
+            }
+        }
+        if (!s->isAlive()) shells.erase(shells.begin() + i);
+        else ++i;
+    }
+    if (hitTotal > 0) {
+        std::printf("P2_LONG_LEGS_SHELL_HIT species=%s generator=%u pikmin=%d\n",
+                    species.c_str(), generator, hitTotal);
+        std::fflush(stdout);
+    }
 }
 
 // Port substitution: the P1 engine has no InteractPress callback, so the
@@ -209,6 +303,7 @@ Shape* loadBind(const SpeciesDef& species) {
 void pc_p2_long_legs_reset() {
     actors.clear();
     shapes.clear();
+    shells.clear();
     bytesTotal = 0;
     logged[0] = logged[1] = false;
 }
@@ -306,6 +401,7 @@ void pc_p2_long_legs_update(BTeki* actor) {
 
     const float land = landingSeconds(species);
     const float flick = flickSeconds(species);
+    const float shot = shotSeconds(species);
     const P2LongLegsState before = state.fsm.state();
 
     P2LongLegsFsmInput in;
@@ -331,7 +427,18 @@ void pc_p2_long_legs_update(BTeki* actor) {
     in.flickKey2 = before == P2LongLegsState::Flick && !state.key2Fired
         && state.animSeconds >= flick * 0.5f;
     in.animEnd = (before == P2LongLegsState::Land && state.animSeconds >= land)
-        || (before == P2LongLegsState::Flick && state.animSeconds >= flick);
+        || (before == P2LongLegsState::Flick && state.animSeconds >= flick)
+        || (before == P2LongLegsState::Shot && shot > 0.0f && state.animSeconds >= shot);
+    // Man-at-Legs attack loop: one shell every ~5 source frames while the burst
+    // is on, bounded by the lane-20 in-flight pool occupancy.
+    if (before == P2LongLegsState::Shot) {
+        state.shotLoopAccum += dt;
+        in.shotLoop = state.shotLoopAccum >= kShellLoopPeriod;
+        if (in.shotLoop) state.shotLoopAccum = 0.0f;
+    } else {
+        state.shotLoopAccum = 0.0f;
+    }
+    in.shellsInFlight = (int)shells.size();
     if (in.landingKey2 || in.flickKey2) state.key2Fired = true;
 
     P2LongLegsFsmOutput out;
@@ -343,6 +450,8 @@ void pc_p2_long_legs_update(BTeki* actor) {
     } else {
         state.animSeconds += dt;
     }
+    state.damageable = out.damageable;
+    state.bitterImmune = out.bitterImmune;
     if (out.footCrush) {
         std::printf("P2_LONG_LEGS_FOOT species=%s generator=%u\n", state.species.c_str(),
                     state.generator);
@@ -350,9 +459,13 @@ void pc_p2_long_legs_update(BTeki* actor) {
         applyFootCrush(actor, pos, state.species, state.generator,
                        state.parms.pressDamage, 60.0f);
     }
-    if (out.fireShell)
+    if (out.fireShell) {
         std::printf("P2_LONG_LEGS_SHELL species=%s generator=%u\n", state.species.c_str(),
                     state.generator);
+        std::fflush(stdout);
+        if (state.species == "Houdai") fireHoudaiShell(actor, pos);
+    }
+    if (state.species == "Houdai") stepHoudaiShells(actor, state.species, state.generator);
     if (!state.stateLogged || out.entered) {
         state.stateLogged = true;
         std::printf("P2_LONG_LEGS_STATE species=%s generator=%u state=%s\n",
@@ -388,4 +501,19 @@ unsigned long pc_p2_long_legs_count() {
 
 bool pc_p2_long_legs_registered(BTeki* actor) {
     return actors.count(actor) != 0;
+}
+
+bool pc_p2_long_legs_damageable(const BTeki* actor) {
+    auto entry = actors.find(const_cast<BTeki*>(actor));
+    if (entry == actors.end()) return false;
+    return entry->second.damageable;
+}
+
+bool pc_p2_long_legs_receiver_rejects(Teki* teki, const InteractAttack* /*attack*/) {
+    // Source damageCallBack + EB_BitterImmune: a registered Long Legs rejects
+    // every attack while it is still bitter-immune (Stay or Land). Once damageable
+    // (Wait/Flick/Walk/Shot) the P1 proxy accepts ordinary Pikmin attack damage.
+    // Unregistered actors are never rejected, keeping the shared hook a no-op.
+    if (!actors.count(teki)) return false;
+    return !actors[teki].damageable;
 }
