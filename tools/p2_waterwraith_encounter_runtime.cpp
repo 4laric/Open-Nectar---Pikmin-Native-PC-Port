@@ -105,6 +105,7 @@ class WaterwraithEncounterApp final : public PlugPikiApp {
     bool reentryChecked = false;
     bool corpseGrabStaged = false;
     bool carryResolved = false;
+    bool carrySetupLogged = false;
 
 public:
     int idle() override
@@ -215,7 +216,6 @@ public:
                 squad[i]->resetPosition(Vector3f(ref.x, 0.0f, ref.z));
             }
             corpseGrabStaged = true;
-            std::printf("P2_WATERWRAITH_CARRY_SETUP\n");
         }
 
         return result;
@@ -252,6 +252,10 @@ public:
         // was born view-less (mPelletView == nullptr) it is invisible to the
         // lane-06 Pod receipt path (pc_p2_preview_deliver keys on mPelletView) and
         // cannot be carried; that is reported as BLOCKED, not a transport PASS.
+        if (!carrySetupLogged) {
+            std::printf("P2_WATERWRAITH_CARRY_SETUP\n");
+            carrySetupLogged = true;
+        }
         const unsigned registeredCorpses = pc_p2_waterwraith_corpse_count();
         if (registeredCorpses == 0) {
             if (!carryResolved) {
