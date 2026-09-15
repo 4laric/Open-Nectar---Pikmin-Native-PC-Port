@@ -25,7 +25,6 @@
 #include "pc_p2_dweevil_policy.h"
 #include "pc_p2_species.h"
 #include "pc_p2_hazard_emitter.h"
-#include "pc_p2_receipt_host.h"
 #include "teki.h"
 #include "Interactions.h"
 #include "Piki.h"
@@ -125,15 +124,12 @@ struct Otakara {
     std::string lastInteraction = "unknown";
     std::string lastAttacker = "none";
     unsigned generator = 0;
-    bool receiptLogged = false;
     bool deathSeamLogged = false;
 };
 
 std::map<PelletView*, Otakara> actors;
 std::map<std::string, Clip> clips;
 bool ready = false;
-std::string receiptSeed = "l22-receipt";
-static bool receiptHostOpen = false;
 
 unsigned nextRand(Otakara& s) {
     s.rng = s.rng * 1664525u + 1013904223u;
@@ -332,12 +328,11 @@ void pc_p2_otakara_forget(BTeki* actor) {
     const unsigned generator = it->second.generator;
     actors.erase(it);
     // lane-07 seam (pc_p2_forget_teki in BTeki::doKill / slot reuse): report the
-    // registration actually dropping. `stale` is a computed post-erase probe, not
-    // a literal, so a re-registered alias would surface as stale=1.
+    // registration actually dropping (count after the erase). This marker is
+    // computed from the live map; the fixture's P2_OTAKARA_SEAM_OBSERVED is the
+    // authoritative zero-registration probe.
     const unsigned long after = (unsigned long)actors.size();
-    const int stale = int(actors.count(static_cast<PelletView*>(actor)) != 0);
-    std::printf("P2_OTAKARA_FORGET generator=%u registered=1 count=%lu stale=%d\n",
-                generator, after, stale);
+    std::printf("P2_OTAKARA_FORGET generator=%u registered=1 count=%lu\n", generator, after);
     std::fflush(stdout);
 }
 
@@ -353,24 +348,11 @@ void pc_p2_otakara_died(BTeki* actor) {
     std::fflush(stdout);
 }
 
-bool pc_p2_otakara_receipt(Pellet* pellet) {
-    if (!pellet || !ready) return false;
-    auto it = actors.find(pellet->mPelletView);
+bool pc_p2_otakara_receipt(PelletView* view, unsigned& generator) {
+    if (!view || !ready) return false;
+    auto it = actors.find(view);
     if (it == actors.end()) return false;
-    Otakara& s = it->second;
-    if (!s.receiptLogged) {
-        s.receiptLogged = true;
-        const std::string identity = "otakara:" + std::to_string(s.generator);
-        const P2ReceiptHostResult result = pc_p2_receipt_host_grant(
-            receiptSeed.c_str(), identity.c_str(), std::to_string(s.generator).c_str(), "onion");
-        const bool granted = result == P2ReceiptHostResult::Granted;
-        if (result == P2ReceiptHostResult::Error) {
-            std::fputs("P2_OTAKARA_ONION_RECEIPT persistence failed\n", stderr);
-        }
-        std::printf("P2_OTAKARA_ONION_RECEIPT generator=%u granted=%d ledger=onion\n",
-                    s.generator, int(granted));
-        std::fflush(stdout);
-    }
+    generator = it->second.generator;
     return true;
 }
 
@@ -533,14 +515,6 @@ void pc_p2_otakara_setup() {
     if (found.size() != wanted.size()) {
         std::printf("P2_OTAKARA_ERROR missing_actor wanted=%zu found=%zu\n", wanted.size(), found.size());
         std::abort();
-    }
-    // Lane-06 ordinary-Onion receipt ledger (exactly-once, independent of the Pod
-    // economy). The seed coordinate is the product seed when the host supplies one.
-    if (const char* seed = std::getenv("PIKMIN_P2_SEED")) {
-        if (pc_p2_receipt_host_valid(seed)) receiptSeed = seed;
-    }
-    if (!receiptHostOpen) {
-        if (pc_p2_receipt_host_open("p2-otakara-receipts.txt")) receiptHostOpen = true;
     }
     ready = true;
 }

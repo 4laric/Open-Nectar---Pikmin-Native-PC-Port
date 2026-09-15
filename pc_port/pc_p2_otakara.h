@@ -1,7 +1,7 @@
 #pragma once
 class BTeki;
 class Creature;
-class Pellet;
+class PelletView;
 
 // Family-owned lane-22 elemental-dweevil source behavior on the batch-2 Chappy
 // placement vehicle (#170, child #447). Implements the shared OtakaraBase normal
@@ -32,10 +32,11 @@ void pc_p2_otakara_update(BTeki*);
 // observation (P2_OTAKARA_MODULE_DEAD). No-op for unregistered actors.
 void pc_p2_otakara_died(BTeki*);
 
-// Lane-06 ordinary-Onion receipt hook (pc_p2_preview_deliver): grants an
-// exactly-once receipt for a consumed Otakara corpse pellet and returns true
-// only for a pellet whose mPelletView is a registered Otakara actor.
-bool pc_p2_otakara_receipt(Pellet*);
+// Lane-06 ordinary-Onion receipt hook (pc_p2_preview_deliver): pure lookup —
+// returns true and writes the generator ID only for a pellet whose mPelletView
+// is a registered Otakara actor. It performs no ledger grant; the caller credits
+// the shared Pod economy and emits P2_POD_RECEIPT.
+bool pc_p2_otakara_receipt(PelletView*, unsigned& generator);
 
 // Damage attribution: records the queued attack interaction (label + owner
 // colour) for the next P2_OTAKARA_HIT log, so a natural Pikmin melee drop is
