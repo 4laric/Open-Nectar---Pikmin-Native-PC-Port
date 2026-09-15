@@ -57,6 +57,7 @@ void capture(const char* path) {
 struct WallProbe { bool valid = false; P2GroinkVec3 center{}, velocity{}; };
 
 bool sCarcassAutomaticBinding = false;
+bool sCarcassTransport = false;
 
 class GroinkApp final : public PlugPikiApp {
     int frames = 0, sourceTicks = 0;
@@ -74,7 +75,7 @@ public:
         if (gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive) {
             clock.reset(); gameflow.mMoviePlayer->requestSkip(); return result;
         }
-        if (sCarcassAutomaticBinding) {
+        if (sCarcassAutomaticBinding || sCarcassTransport) {
             if (!tekiMgr || !naviMgr || !pikiMgr) return result;
             Navi* n = naviMgr->getNavi();
             if (!n) return result;
@@ -97,19 +98,37 @@ public:
             }
             ++carcassTicks;
             // Natural kill (lane 19 recipe): park the captain beside the host and
-            // ring-deploy the red squad in FreeMode, re-ringing every 120 ticks.
-            // No AI action is assigned to any Pikmin and no host health is written.
+            // ring-deploy the red squad in FreeMode. The carcass mode re-rings
+            // every 120 ticks; the transport mode rings once and then leaves the
+            // squad free to pick up and carry the dropped corpse to the Pod.
             if (pc_p2_groink_teki_is_bound(carcassHost)) {
                 Vector3f park(carcassHost->mSRT.t.x, 0.0f, carcassHost->mSRT.t.z + 40.0f);
                 park.y = mapMgr->getMinY(park.x, park.z, true);
                 n->resetPosition(park);
-                if (carcassTicks == 1 || carcassTicks % 120 == 0) ringReds(n, carcassHost);
+                if (carcassTicks == 1 || (!sCarcassTransport && carcassTicks % 120 == 0)) ringReds(n, carcassHost);
             }
             if (carcassTicks % 60 == 0 || !pc_p2_groink_teki_is_bound(carcassHost)) {
-                std::printf("P2_GROINK_CARCASS_HOST tick=%d health=%.1f bound=%d reds=%d\n",
+                std::printf("P2_GROINK_CARCASS_HOST tick=%d health=%.1f bound=%d reds=%d pokos=%d\n",
                     carcassTicks, pc_p2_groink_teki_health(carcassHost),
-                    int(pc_p2_groink_teki_is_bound(carcassHost)), aliveReds());
+                    int(pc_p2_groink_teki_is_bound(carcassHost)), aliveReds(), pc_p2_preview_pokos());
                 std::fflush(stdout);
+            }
+            if (sCarcassTransport) {
+                // Transport: the natural kill drops a corpse; free Pikmin carry it
+                // to the Pod, whose receipt credits corpse:groink:<gen> (pokos > 0).
+                if (pc_p2_preview_pokos() > 0) {
+                    std::printf("P2_GROINK_CARCASS_TRANSPORT_PASS ticks=%d pokos=%d\n",
+                        carcassTicks, pc_p2_preview_pokos());
+                    std::puts("PASS GROINK_RUNTIME carcass_transport");
+                    std::fflush(stdout); std::_Exit(0);
+                }
+                if (carcassTicks >= 2400) {
+                    std::printf("P2_GROINK_CARCASS_TRANSPORT_TIMEOUT ticks=%d pokos=%d reds=%d\n",
+                        carcassTicks, pc_p2_preview_pokos(), aliveReds());
+                    std::fflush(stdout);
+                    std::_Exit(1);
+                }
+                return result;
             }
             if (pc_p2_groink_teki_total_births() >= 1) {
                 std::printf("P2_GROINK_CARCASS_BIRTH_PASS ticks=%d total_births=%d\n",
@@ -229,6 +248,7 @@ int main(int argc, char** argv) {
     SDL_setenv("SDL_AUDIODRIVER", "dummy", 1); SDL_SetMainReady(); pc_gpu_preference_apply();
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--carcass-automatic-binding") sCarcassAutomaticBinding = true;
+        if (std::string(argv[i]) == "--carcass-transport") sCarcassTransport = true;
     }
     _putenv_s("PIKMIN_RANDOMIZER_TEST_BACKGROUND", "1"); pc_bbft_init(argc, argv);
     require(pc_pikipelago_room_preview(), "requires --experimental-pikmin2-room");
