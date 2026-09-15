@@ -35,6 +35,7 @@
 #include "pc_p2_bigtreasure_ordinary.h"
 #include "pc_p2_bigtreasure_animclock.h"
 #include "pc_p2_bigtreasure_elements.h"
+#include "pc_p2_bigtreasure_receiver_host.h"
 #include "pc_p2_bigtreasure_map_trace.h"
 #include "pc_p2_bigtreasure_visual.h"
 #include "pc_p2_waterwraith_register.h"
@@ -57,6 +58,7 @@
 #include <cstdio>
 #include <cmath>
 #include <map>
+#include <set>
 #include <string>
 
 namespace {
@@ -256,13 +258,22 @@ int fuefukiStuckPikmin(Teki* vehicle)
 // ---------------------------------------------------------------------------
 // BigTreasure (#246)
 constexpr float kBigTreasureSourceDelta = 1.0f / 30.0f;
+constexpr float kBigTreasureAttackDamage = kBigTreasureDefaultAttackDamage;
 P2BigTreasureHostSeam sBigTreasure;
 P2BigTreasureOrdinary sBigTreasureOrdinary;
 P2BigTreasureAnimClock sBigTreasureClock;
 P2BigTreasureElementRuntime sBigTreasureElements;
 P2BigTreasureMapTrace sBigTreasureTrace;
+// Per-attack handled set of live targets (Navi/Piki pointers). Mirrors lane 22's
+// per-Piki handled set (pc_p2_hiba.cpp:47,142): a target is stimulated at most
+// once per attack so a creature standing inside the running element is not
+// re-stimulated (and SEF_PIKI_FIRED re-emitted) every frame. Cleared on attack
+// start and on full reset.
+std::set<const void*> sBigTreasureHandled;
+// Rate-limit for the held log: print P2_BIGTREASURE_RECV_HELD once per attack
+// (not once per held target per frame). Cleared alongside the handled set.
+bool sBigTreasureHeldLogged = false;
 bool sBigTreasureAttackLogged = false;
-bool sBigTreasureHitLogged = false;
 bool sBigTreasureReady = false;
 bool sBigTreasureVisualReady = false;
 bool sBigTreasureVisualDriven = true;
@@ -335,8 +346,9 @@ void pc_p2_hardlanes_reset()
     sBigTreasureOrdinary.reset(P2BigTreasureFsmParms());
     sBigTreasureClock.reset();
     sBigTreasureElements.defeat();
+    sBigTreasureHandled.clear();
+    sBigTreasureHeldLogged = false;
     sBigTreasureAttackLogged = false;
-    sBigTreasureHitLogged = false;
     pc_p2_bigtreasure_visual_reset();
     sBigTreasureReady = false;
     sBigTreasureVisualReady = false;
@@ -356,6 +368,46 @@ bool pc_p2_hardlanes_bigtreasure_hit(int weapon, float damage, bool bittered)
     hit.damage = damage;
     hit.bittered = bittered;
     return sBigTreasureOrdinary.postHit(hit);
+}
+
+bool pc_p2_hardlanes_bigtreasure_ready()
+{
+    return sBigTreasureReady && sBigTreasure.active;
+}
+
+int pc_p2_hardlanes_bigtreasure_weapon_count()
+{
+    return sBigTreasureReady ? sBigTreasure.ownership.weaponCount() : 0;
+}
+
+int pc_p2_hardlanes_bigtreasure_phase()
+{
+    return sBigTreasureReady ? static_cast<int>(sBigTreasureOrdinary.phase()) : P2BT_Dead;
+}
+
+int pc_p2_hardlanes_bigtreasure_recv_probe(int weapon, Piki* piki)
+{
+    if (!sBigTreasureReady || !sBigTreasure.active || !piki || !piki->isAlive()) {
+        return 0;
+    }
+    // Reuse the ordinary loop's per-attack handled set transiently: the probe
+    // returns 0 when the live loop is already handling this target in an attack
+    // (it must NOT erase here — erasing would un-handle a target the loop just
+    // inserted). When it does apply, it removes its own transient entry so the
+    // probe never leaves a target handled. This is a test probe only; the real
+    // handled-set hold is the ordinary loop's P2_BIGTREASURE_RECV_HELD, cleared
+    // at attack start.
+    const void* key = static_cast<const void*>(piki);
+    if (!sBigTreasureHandled.insert(key).second) {
+        return 0;
+    }
+    const P2BigTreasureVec3 origin{ sBigTreasure.placement.owner.x,
+                                    sBigTreasureGround,
+                                    sBigTreasure.placement.owner.z };
+    const bool accepted = pc_p2_bigtreasure_stimulate_piki(weapon, origin,
+                                                           kBigTreasureAttackDamage, piki);
+    sBigTreasureHandled.erase(key);
+    return accepted ? 1 : -1;
 }
 
 void pc_p2_hardlanes_setup()
@@ -605,8 +657,8 @@ void pc_p2_hardlanes_update()
                 }
                 // Element runtime: start the source controller the FSM just
                 // started through the pools, and step it against the lane map
-                // trace so a live attack actually emits/moves. The Pikmin
-                // damage receiver stays lane 10's boundary.
+                // trace so a live attack actually emits/moves and its emitted
+                // nodes apply real elemental damage to live targets below.
                 if (fsmOut.fsm.startAttack) {
                     const int weapon = sBigTreasureOrdinary.chosenWeapon();
                     const P2BigTreasureVec3 origin{ sBigTreasure.placement.owner.x,
@@ -615,8 +667,9 @@ void pc_p2_hardlanes_update()
                     if (sBigTreasureElements.start(
                             weapon, origin, sBigTreasureGround,
                             sBigTreasure.ownership.weaponHealth(weapon), 0.25f, 0.25f)) {
+                        sBigTreasureHandled.clear();
+                        sBigTreasureHeldLogged = false;
                         sBigTreasureAttackLogged = false;
-                        sBigTreasureHitLogged = false;
                         std::printf("P2_BIGTREASURE_ATTACK_START weapon=%s\n",
                                     bigTreasureWeaponName(weapon));
                     }
@@ -637,35 +690,60 @@ void pc_p2_hardlanes_update()
                                     bigTreasureWeaponName(sBigTreasureElements.activeWeapon()),
                                     elementStats.nodes);
                     }
-                    // Detection only: report once when the running element's
-                    // source hit geometry intersects a live Navi/Pikmin. Damage
-                    // application is the lane-10 receiver.
-                    if (!sBigTreasureHitLogged && elementStats.nodes > 0) {
-                        bool hit = false;
+                    // Real elemental receiver (#246): apply each emitted node's
+                    // source stimulus to every live Navi/Pikmin intersecting it,
+                    // through the shared P2 receivers (InteractFire/InteractGas/
+                    // InteractBubble/InteractDenki). This closes the
+                    // "detection-only" gap: a hit now mutates the target. The
+                    // per-attack handled set targets once per attack, so a
+                    // creature standing in the running element is not
+                    // re-stimulated (and SEF_PIKI_FIRED re-emitted) every frame.
+                    if (elementStats.nodes > 0) {
+                        const int recvWeapon = sBigTreasureElements.activeWeapon();
+                        const P2BigTreasureVec3 origin{ sBigTreasure.placement.owner.x,
+                                                        sBigTreasureGround,
+                                                        sBigTreasure.placement.owner.z };
                         Navi* liveNavi = naviMgr ? naviMgr->getNavi() : nullptr;
-                        if (liveNavi
-                            && sBigTreasureElements.queryHit(P2BigTreasureVec3{
-                                   liveNavi->mSRT.t.x, liveNavi->mSRT.t.y,
-                                   liveNavi->mSRT.t.z })) {
-                            hit = true;
-                        }
-                        if (!hit) {
-                            Iterator pikiIt(pikiMgr);
-                            CI_LOOP(pikiIt) {
-                                Piki* piki = static_cast<Piki*>(*pikiIt);
-                                if (!piki || !piki->isAlive()) continue;
-                                if (sBigTreasureElements.queryHit(P2BigTreasureVec3{
-                                        piki->mSRT.t.x, piki->mSRT.t.y, piki->mSRT.t.z })) {
-                                    hit = true;
-                                    break;
+                        if (liveNavi) {
+                            const P2BigTreasureVec3 target{ liveNavi->mSRT.t.x,
+                                                            liveNavi->mSRT.t.y,
+                                                            liveNavi->mSRT.t.z };
+                            if (sBigTreasureElements.queryHit(target)) {
+                                if (sBigTreasureHandled.insert(
+                                        static_cast<const void*>(liveNavi)).second) {
+                                    pc_p2_bigtreasure_stimulate_navi(recvWeapon, origin,
+                                                                     kBigTreasureAttackDamage,
+                                                                     liveNavi);
+                                } else if (!sBigTreasureHeldLogged) {
+                                    // Handled-set hold: a target was already
+                                    // stimulated this attack. Log once per attack
+                                    // (not once per held target per frame).
+                                    sBigTreasureHeldLogged = true;
+                                    std::printf("P2_BIGTREASURE_RECV_HELD weapon=%s target=navi\n",
+                                                bigTreasureWeaponName(recvWeapon));
                                 }
                             }
                         }
-                        if (hit) {
-                            sBigTreasureHitLogged = true;
-                            std::printf("P2_BIGTREASURE_ATTACK_HIT weapon=%s target=live\n",
-                                        bigTreasureWeaponName(
-                                            sBigTreasureElements.activeWeapon()));
+                        Iterator pikiIt(pikiMgr);
+                        CI_LOOP(pikiIt) {
+                            Piki* piki = static_cast<Piki*>(*pikiIt);
+                            if (!piki || !piki->isAlive()) continue;
+                            const P2BigTreasureVec3 target{ piki->mSRT.t.x,
+                                                            piki->mSRT.t.y,
+                                                            piki->mSRT.t.z };
+                            if (sBigTreasureElements.queryHit(target)) {
+                                if (sBigTreasureHandled.insert(
+                                        static_cast<const void*>(piki)).second) {
+                                    pc_p2_bigtreasure_stimulate_piki(recvWeapon, origin,
+                                                                     kBigTreasureAttackDamage,
+                                                                     piki);
+                                } else if (!sBigTreasureHeldLogged) {
+                                    sBigTreasureHeldLogged = true;
+                                    std::printf("P2_BIGTREASURE_RECV_HELD weapon=%s target=piki species=%d\n",
+                                                bigTreasureWeaponName(recvWeapon),
+                                                pc_p2_species(piki));
+                                }
+                            }
                         }
                     }
                 }

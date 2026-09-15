@@ -47,3 +47,19 @@ void pc_p2_hardlanes_forget(BTeki*);
 // caller. Returns false when the seam is inactive or the bounded queue rejects
 // the hit (full, non-finite/non-positive damage or an out-of-range weapon).
 bool pc_p2_hardlanes_bigtreasure_hit(int weapon, float damage, bool bittered);
+
+// Slice-2 read/probe hooks (lane 32, #246; additive, opt-in room-preview only):
+//   * ready() reports whether the ordinary BigTreasure seam is installed live.
+//   * weapon_count() reports the live attached-weapon count (4 at full loadout),
+//     so a natural-hit ingress can be observed knocking a weapon off (4->3).
+//   * recv_probe() drives the ordinary loop's per-attack handled set +
+//     elemental receiver against one live Piki exactly as the loop would, and
+//     is only here so a real-GL fixture can prove "no re-stimulation"
+//     deterministically. Returns 1 applied-accepted, -1 applied-but-immunity,
+//     0 already-handled this attack (or inactive seam).
+bool pc_p2_hardlanes_bigtreasure_ready();
+int pc_p2_hardlanes_bigtreasure_weapon_count();
+// Current FSM phase (P2BigTreasurePhase, or P2BT_Dead when inactive); read-only
+// so a real-GL fixture can observe the weapon-loss re-pick after a knock-off.
+int pc_p2_hardlanes_bigtreasure_phase();
+int pc_p2_hardlanes_bigtreasure_recv_probe(int weapon, Piki* piki);
