@@ -166,13 +166,12 @@ void syncClip(Bound& bound)
 	bound.phase = 0.0f;
 }
 
-// The bud's slot centre: the live host position when bound, else the authored
-// sidecar XYZ (module-local fallback).
+// The bud's slot centre: the authored plant point (sidecar XYZ == the arena
+// spawn position). The live Chappy host is the drawn vehicle; conversion stays
+// anchored at the planted mouth slot so a wandering vehicle cannot move the
+// receptor (source buds are stationary, dropped exactly on their point).
 Vector3f slotPosition(const Bound& bound)
 {
-	if (bound.actor) {
-		return bound.actor->getPosition();
-	}
 	return Vector3f(bound.spec.x, bound.spec.y, bound.spec.z);
 }
 
