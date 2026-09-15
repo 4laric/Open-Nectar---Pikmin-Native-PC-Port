@@ -2341,14 +2341,11 @@ void Navi::makeCStick(bool isSunset)
  */
 void Navi::refresh(Graphics& gfx)
 {
-	// Lane 12 (#130): the second captain is live in the roster (health, active
-	// index, knockout) but its model, self-shadow, plate and cursor rendering
-	// are deferred — the per-captain shape/head/collision bind is still open.
-	// Its game state still drives the survivor path; only the visual pass is
-	// skipped so the shared single-captain render path stays byte-identical.
-	if (mNaviID != 0) {
-		return;
-	}
+	// Lane 12 (#130): the second captain is now drawn like the first. Its fresh
+	// uncached mNaviShapeObject[1] (built by NaviMgr::ensureSecondNaviShapeObject
+	// before create(2)) avoids clobbering slot 0's animators, and the antenna
+	// light already has a null-safe fallback, so draw/plate/cursor/shadow all run
+	// for mNaviID != 0 too. Single-captain play is unchanged (only slot 0 exists).
 	draw(gfx);
 	if (!movieMode()) {
 		if (gsys->mToggleColls) {

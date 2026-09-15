@@ -29,14 +29,10 @@ namespace pc_p2_captain {
 // True when PIKMIN_P2_SECOND_CAPTAIN is set to a non-empty value (not "0").
 bool second_captain_requested();
 
-// True only when a fixture/test explicitly requests the live spawn via
-// PIKMIN_P2_SECOND_CAPTAIN_LIVE. Deliberately closes the gate for normal play
-// until the second captain's rendering (Navi::refresh) and per-captain
-// controller routing are finished.
-bool second_captain_live_requested();
-
-// Whether this build may actually birth a live second Navi. Defaults false;
-// a fixture flips it on via second_captain_live_requested().
+// Whether this build may actually birth a live second Navi. Open now that the
+// second captain renders and its input is skipped when inactive; default
+// single-captain play still never spawns one (request-gated by
+// second_captain_requested()).
 bool second_captain_live_allowed();
 
 // Object-manager capacity for NaviMgr::create(): 1, or 2 when the live gate is

@@ -37,6 +37,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 namespace {
 bool sKnockoutScenario = false;
@@ -47,13 +48,51 @@ void require(bool value, const char* message)
     if (!value) { std::printf("FAIL P2_CAPTAIN_RUNTIME %s\n", message); std::fflush(stdout); std::_Exit(1); }
 }
 
+// Reusable P6 PPM capture (mirrors the other room fixtures). Reads the GL back
+// buffer after a real draw so a two-captain frame can be saved as evidence.
+void capture(const char* path)
+{
+    pc_gfx_flush_batch();
+    auto bind = reinterpret_cast<PFNGLBINDFRAMEBUFFERPROC>(SDL_GL_GetProcAddress("glBindFramebuffer"));
+    require(bind != nullptr, "framebuffer entry point unavailable");
+    GLint previous = 0; glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous); bind(GL_FRAMEBUFFER, 0);
+    int width = 0, height = 0; SDL_GL_GetDrawableSize(SDL_GL_GetCurrentWindow(), &width, &height);
+    std::vector<unsigned char> pixels(size_t(width) * size_t(height) * 3);
+    glReadBuffer(GL_BACK); glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+    bind(GL_FRAMEBUFFER, previous);
+    require(glGetError() == GL_NO_ERROR, "capture GL error");
+    bool visible = false; for (unsigned char value : pixels) visible |= value > 8;
+    require(visible, "empty capture");
+    FILE* file = std::fopen(path, "wb"); require(file != nullptr, "capture file");
+    std::fprintf(file, "P6\n%d %d\n255\n", width, height);
+    for (int y = height - 1; y >= 0; --y) std::fwrite(pixels.data() + size_t(y) * width * 3, 1, size_t(width) * 3, file);
+    std::fclose(file);
+}
+
 class CaptainApp final : public PlugPikiApp {
     int frames = 0;
     bool setup = false;
     int stage = 0;
     Piki* squadPiki = nullptr;
     std::uint64_t epoch = 1;
+    // Survivor scenario multi-frame state: arm on the first ready frame, then
+    // act once the plate has been refreshed (so releasePikis() can iterate).
+    bool survivorArmed = false;
+    int survivorFrames = 0;
+    Piki* survivorPiki = nullptr;
+    int survivorPreMode = 0;
+    Navi* survivorNavi0 = nullptr;
+    Navi* survivorNavi1 = nullptr;
+    bool captured = false;
 public:
+    void draw(Graphics& gfx) override {
+        PlugPikiApp::draw(gfx);
+        if (survivorArmed && !captured && frames >= 3 && frames < 5) {
+            capture("two-captains.ppm");
+            captured = true;
+        }
+    }
     int idle() override {
         int result = PlugPikiApp::idle();
         require(++frames < 900, "timeout");
@@ -80,52 +119,29 @@ public:
 
             if (sSurvivorScenario) {
                 // --- Survivor path end-to-end (#130): natural knockdown + rebind ---
+                // Stage 0: arm. Record a real starting squad Piki and the two
+                // captains, then return so the game update/draw runs and the
+                // plate's trailing slot count (CPlate::refresh) is populated before
+                // the knockdown (releasePikis() iterates mTotalSlotCount).
                 require(naviMgr->hasSecondNavi(), "second captain present in roster");
-                Navi* navi0 = naviMgr->getNavi(0);
-                Navi* navi1 = naviMgr->getNavi(1);
-                require(navi0 != nullptr && navi1 != nullptr, "both captain slots live");
+                survivorNavi0 = naviMgr->getNavi(0);
+                survivorNavi1 = naviMgr->getNavi(1);
+                require(survivorNavi0 != nullptr && survivorNavi1 != nullptr, "both captain slots live");
                 require(pc_p2_captain::health(0) > 0.0f && pc_p2_captain::health(1) > 0.0f,
                     "both captains adopted into the adapter");
-                require(naviMgr->getActiveNavi() == navi0, "slot 0 active at scene start");
-
-                // The preview spawns a 20-Pikmin squad that follows the active
-                // captain; the survivor branch of NaviDeadState::init calls
-                // releasePikis() on the downed captain (source-faithful). The
-                // plate's traversable slot count (mTotalSlotCount) is normally
-                // populated by CPlate::refresh on a draw, but the fixture asserts
-                // before the first draw, so a plate-mode flip is not runtime-
-                // observable here and is reported as observed counts, not faked.
-                const int squadBefore = navi0->getPlatePikis();
-
-                // (a)+(b)+(c): natural knockdown of the active captain (slot 0)
-                // through the integrated Teki attack receiver — InteractAttack::
-                // actNavi applies pcNaviHurt damage and the engine's own pause and
-                // damage-state handling; finishDamage then exits to NAVISTATE_Dead.
-                InteractAttack attack(nullptr, nullptr, 500.0f, false);
-                require(attack.actNavi(navi0), "InteractAttack::actNavi landed on active captain");
-                require(navi0->mHealth <= 1.0f, "attack receiver reduced captain to down");
-                navi0->finishDamage();
-
-                require(navi0->getCurrState()->getID() == NAVISTATE_Dead,
-                    "(a) downed captain entered Dead (ODead)");
-                require(!GameStat::orimaDead, "(b) game not ended on first knockout");
-                require(!GameCoreSection::inPause(), "(b) core not paused on first knockout");
-                require(naviMgr->getAliveOrima() == navi1, "(b) survivor remains alive");
-                require(naviMgr->getActiveNavi() == navi1, "(c) control rebound to survivor (active index)");
-                const int squadAfter = navi0->getPlatePikis();
-                std::printf("P2_CAPTAIN_SURVIVOR_DOWN dead=0 survivor=1 squad_before=%d squad_after=%d orima_dead=0 paused=0 active=1\n",
-                    squadBefore, squadAfter);
+                require(naviMgr->getActiveNavi() == survivorNavi0, "slot 0 active at scene start");
+                Iterator sit(pikiMgr);
+                survivorPiki = nullptr;
+                CI_LOOP(sit) {
+                    Piki* p = static_cast<Piki*>(*sit);
+                    if (p && p->isAlive() && p->mNavi == survivorNavi0) { survivorPiki = p; break; }
+                }
+                require(survivorPiki != nullptr, "a live starting squad Piki bound to captain 0 exists");
+                survivorPreMode = survivorPiki->mMode;
+                std::printf("P2_CAPTAIN_SURVIVOR_ARMED plate=%d piki_mode_before=%d\n",
+                    survivorNavi0->getPlatePikis(), survivorPreMode);
                 std::fflush(stdout);
-
-                // (d): the second captain going down ends the stage.
-                navi1->mHealth = 0.0f;
-                navi1->finishDamage();
-                require(naviMgr->isNaviDead(navi1), "(d) second captain recorded dead");
-                require(naviMgr->getAliveOrima() == nullptr, "(d) no survivor remains");
-                require(GameStat::orimaDead, "(d) game over signalled with zero survivors");
-                std::printf("P2_CAPTAIN_SURVIVOR_STAGE_END dead=2 alive_orima=none orima_dead=1\n");
-                std::fflush(stdout);
-                std::puts("PASS P2_CAPTAIN_RUNTIME"); std::fflush(stdout); std::_Exit(0);
+                return result;
             }
 
             // --- Gate 1: target identity ---
@@ -223,6 +239,41 @@ public:
             std::puts("P2_CAPTAIN_LIVE_SEAM_PASS target_identity=1 claim_release=1 interrupt=1 cleanup=1");
             std::puts("PASS P2_CAPTAIN_RUNTIME"); std::fflush(stdout); std::_Exit(0);
             return result;
+        }
+        if (sSurvivorScenario && survivorArmed) {
+            // Stage 1+: let the frame loop (update + draw) run so CPlate::refresh
+            // has populated the plate's traversable slot count, then knock slot 0
+            // down through the integrated receiver and observe the squad release.
+            if (++survivorFrames < 4) return result;
+
+            InteractAttack attack(nullptr, nullptr, 500.0f, false);
+            require(attack.actNavi(survivorNavi0), "InteractAttack::actNavi landed on active captain");
+            require(survivorNavi0->mHealth <= 1.0f, "attack receiver reduced captain to down");
+            survivorNavi0->finishDamage();
+
+            require(survivorNavi0->getCurrState()->getID() == NAVISTATE_Dead,
+                "(a) downed captain entered Dead (ODead)");
+            require(!GameStat::orimaDead, "(b) game not ended on first knockout");
+            require(!GameCoreSection::inPause(), "(b) core not paused on first knockout");
+            require(naviMgr->getAliveOrima() == survivorNavi1, "(b) survivor remains alive");
+            require(naviMgr->getActiveNavi() == survivorNavi1, "(c) control rebound to survivor (active index)");
+            // Observed squad release: the real starting Piki the downed captain
+            // held is now FreeMode (releasePikis on the survivor branch).
+            require(survivorPiki->mMode == PikiMode::FreeMode,
+                "(squad) survivor-down released the starting squad to FreeMode");
+            std::printf("P2_CAPTAIN_SURVIVOR_DOWN dead=0 survivor=1 plate=%d piki_mode_before=%d piki_mode_after=%d orima_dead=0 paused=0 active=1\n",
+                survivorNavi0->getPlatePikis(), survivorPreMode, (int)survivorPiki->mMode);
+            std::fflush(stdout);
+
+            // Final stage end (injected second-captain knockout).
+            survivorNavi1->mHealth = 0.0f;
+            survivorNavi1->finishDamage();
+            require(naviMgr->isNaviDead(survivorNavi1), "(d) second captain recorded dead");
+            require(naviMgr->getAliveOrima() == nullptr, "(d) no survivor remains");
+            require(GameStat::orimaDead, "(d) game over signalled with zero survivors");
+            std::printf("P2_CAPTAIN_SURVIVOR_STAGE_END dead=2 alive_orima=none orima_dead=1\n");
+            std::fflush(stdout);
+            std::puts("PASS P2_CAPTAIN_RUNTIME"); std::fflush(stdout); std::_Exit(0);
         }
         return result;
     }
