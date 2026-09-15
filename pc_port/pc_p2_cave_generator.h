@@ -156,6 +156,25 @@ inline P2CaveHazard p2CaveHazardFromToken(const std::string& token)
     return P2CaveHazard::None;
 }
 
+// Candypop species -> the hazard that species is the alternate key for. Purple
+// has no hazard (it is a capability bud, lane 11), so it maps to None.
+inline P2CaveHazard p2CaveHazardFromSpecies(const std::string& species)
+{
+    if (species == "blue") {
+        return P2CaveHazard::Water;
+    }
+    if (species == "yellow") {
+        return P2CaveHazard::Elec;
+    }
+    if (species == "red") {
+        return P2CaveHazard::Fire;
+    }
+    if (species == "white") {
+        return P2CaveHazard::Poison;
+    }
+    return P2CaveHazard::None;
+}
+
 // The decomp marks room units kind 1 and corridors kind 2; the wave policies use
 // the same convention (pc_p2_cave_growth.h). Only used for reporting.
 inline int p2CaveCanonicalChokeCount(const P2CaveCanonicalTable& table, int before_segment)
@@ -594,7 +613,7 @@ inline bool p2CaveGenerateAttempt(const P2CaveCanonicalTable& table, int salt, P
                 return false;
             }
             door_use[segment] += 1;
-            const int node = push_node(bud.slot_id, "bud", p2CaveHazardToken(p2CaveHazardFromToken(bud.species)),
+            const int node = push_node(bud.slot_id, "bud", p2CaveHazardToken(p2CaveHazardFromSpecies(bud.species)),
                                        segment, pick_unit(bud.slot_id));
             connect(segment_node[segment], node);
         }

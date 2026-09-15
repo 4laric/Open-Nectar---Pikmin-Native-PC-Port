@@ -208,6 +208,34 @@ int main(int argc, char** argv)
     CHECK(rejected_attempts == 8);
     CHECK(!rejected_error.empty());
 
+    // Bud slot class: a seeded elec bud in the entry segment becomes a bud node
+    // with the species->hazard mapping the layout vocabulary needs.
+    P2CaveCanonicalTable budded = table;
+    P2CaveCanonicalBud bud;
+    bud.slot_id = "forest_1:f1:bud:0";
+    bud.index = 0;
+    bud.segment = 0;
+    bud.species = "yellow";
+    bud.count = 5;
+    budded.buds.push_back(bud);
+    P2CaveObservedLayout with_bud;
+    std::string bud_error;
+    CHECK(p2CaveGenerateAttempt(budded, 0, with_bud, bud_error));
+    CHECK(find_node(with_bud, "bud", "elec", 0) != nullptr);
+
+    // A bud in the segment gated by its own colour is rejected (lane 38 rule).
+    P2CaveCanonicalTable behind = table;
+    P2CaveCanonicalBud gated;
+    gated.slot_id = "forest_1:f1:bud:0";
+    gated.index = 0;
+    gated.segment = 1;
+    gated.species = "blue";
+    gated.count = 5;
+    behind.buds.push_back(gated);
+    P2CaveObservedLayout rejected_bud;
+    std::string behind_error;
+    CHECK(!p2CaveGenerateAttempt(behind, 0, rejected_bud, behind_error));
+
     // Canonical text round trip through the engine-facing grammar.
     std::ostringstream text;
     p2CaveWriteCanonical(text, table);
@@ -234,6 +262,7 @@ int main(int argc, char** argv)
     }
 
     std::puts("PASS p2 cave generator: forced choke/leaves/gate, choke dominance, "
-              "tagged vs untagged placement, seed determinism, reroll invariance, retry rejection");
+              "tagged vs untagged placement, bud slot mapping and own-gate rejection, "
+              "seed determinism, reroll invariance, retry rejection");
     return 0;
 }
