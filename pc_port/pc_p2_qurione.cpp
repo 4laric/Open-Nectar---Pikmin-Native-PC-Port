@@ -200,6 +200,8 @@ int eggRandInt(void* ctx, int count) {
 // (ItemHoney HONEY_Y), mitite groups downgrade to nectar (no Mitite manager),
 // spicy/bitter sprays unsupported until the first-spray demo flag.
 void qurioneEggBirthItems(const P2EggDrop& drop, const Vector3f& base, unsigned gen) {
+    // egg.cpp:249: every non-spray item spawns at positionOffsetY above the egg.
+    const Vector3f spawnBase(base.x, base.y + drop.positionOffsetY, base.z);
     for (int i = 0; i < drop.itemCount && i < 2; ++i) {
         const P2EggItem& item = drop.items[i];
         P2EggSpawnKind kind = item.kind;
@@ -216,7 +218,7 @@ void qurioneEggBirthItems(const P2EggDrop& drop, const Vector3f& base, unsigned 
                     item.pelletColor,
                     kind == P2EggSpawnKind::PelletFive ? NUMPEL_FivePellet : NUMPEL_OnePellet);
                 if (pellet) {
-                    pellet->init(base);
+                    pellet->init(spawnBase);
                     pellet->mVelocity.set(item.velocity.x, item.velocity.y, item.velocity.z);
                     pellet->startAI(0);
                     birthed = true;
@@ -227,7 +229,7 @@ void qurioneEggBirthItems(const P2EggDrop& drop, const Vector3f& base, unsigned 
             if (itemMgr) {
                 Creature* nectar = itemMgr->birth(OBJTYPE_Water);
                 if (nectar) {
-                    nectar->init(base);
+                    nectar->init(spawnBase);
                     nectar->startAI(0);
                     birthed = true;
                     born = "nectar";
@@ -239,7 +241,7 @@ void qurioneEggBirthItems(const P2EggDrop& drop, const Vector3f& base, unsigned 
         std::printf("P2_QURIONE_EGG_ITEM generator=%u index=%d kind=%d real=%d fallback=%d item=%s "
                     "x=%.1f y=%.1f z=%.1f\n",
                     gen, i, int(item.kind), int(birthed), int(fallback), born,
-                    base.x, base.y, base.z);
+                    spawnBase.x, spawnBase.y, spawnBase.z);
     }
 }
 
