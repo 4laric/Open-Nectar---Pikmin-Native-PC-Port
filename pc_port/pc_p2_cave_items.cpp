@@ -179,7 +179,9 @@ void pc_p2_cave_items_setup()
         const float x = p2CaveRoomsWorldX(*rooms, *unit);
         const float z = p2CaveRoomsWorldZ(*rooms, *unit);
         const float y = mapMgr ? mapMgr->getMinY(x, z, true) : 0.f;
-        Pellet* pellet = pelletMgr->newPellet(templateConfig->mPelletId.mId, nullptr);
+        // PelletMgr::newPellet/getConfig key on the config's model id (not its
+        // mPelletId), so spawn from the room treasure's model id ('pr05').
+        Pellet* pellet = pelletMgr->newPellet(templateConfig->mModelId.mId, nullptr);
         if (!pellet) {
             std::printf("P2_CAVE_ITEMS FAILED reason=spawn refused slot=%s\n", entry.slot_id.c_str());
             std::fflush(stdout);
