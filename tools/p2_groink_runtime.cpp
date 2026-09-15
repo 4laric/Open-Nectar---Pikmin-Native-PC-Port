@@ -73,6 +73,26 @@ public:
         }
         if (sCarcassAutomaticBinding) {
             if (!tekiMgr) return result;
+            // Once armed, the BTeki::update hook drives the carcass through the
+            // Frog's own corpse pellet (LeaveCorpse). The Frog's generator clears
+            // on death, so re-locating it by generator here is unreliable; poll the
+            // process-wide birth tally, which survives the pellet-kill forget.
+            if (carcassArmed) {
+                ++carcassTicks;
+                if (pc_p2_groink_teki_total_births() >= 1) {
+                    std::printf("P2_GROINK_CARCASS_BIRTH_PASS ticks=%d total_births=%d\n",
+                        carcassTicks, pc_p2_groink_teki_total_births());
+                    std::puts("PASS GROINK_RUNTIME carcass_automatic_binding");
+                    std::fflush(stdout); std::_Exit(0);
+                }
+                if (carcassTicks >= 1200) {
+                    std::printf("P2_GROINK_CARCASS_TIMEOUT ticks=%d total_births=%d\n",
+                        carcassTicks, pc_p2_groink_teki_total_births());
+                    std::fflush(stdout);
+                    std::_Exit(1);
+                }
+                return result;
+            }
             BTeki* frog = nullptr;
             Iterator it(tekiMgr); CI_LOOP(it) {
                 Teki* teki = static_cast<Teki*>(*it);
@@ -83,34 +103,13 @@ public:
             }
             if (!frog) return result;
             require(pc_p2_groink_teki_is_bound(frog), "finalSetup sidecar bound generated Frog");
-            if (!carcassArmed) {
-                // Isolated preview pauses the Teki manager's per-frame update, so
-                // no ordinary Pikmin combat can run to kill the Frog naturally.
-                // Force the death funnel once and label it injected.
-                frog->mHealth = 0.0f;
-                frog->pcEscapeNow();
-                carcassArmed = true;
-                std::puts("P2_GROINK_CARCASS_KILL_INJECTED host=generated_Frog generator=201001 method=pcEscapeNow health_write=1");
-                std::fflush(stdout);
-                return result;
-            }
-            pc_p2_groink_teki_tick(frog);
-            ++carcassTicks;
-            if (pc_p2_groink_teki_total_births() >= 1) {
-                // The BIRTH tick kills the pellet, which erases the per-actor
-                // binding; read the process-wide tally that survives the forget.
-                std::printf("P2_GROINK_CARCASS_BIRTH_PASS ticks=%d total_births=%d\n",
-                    carcassTicks, pc_p2_groink_teki_total_births());
-                std::puts("PASS GROINK_RUNTIME carcass_automatic_binding");
-                std::fflush(stdout); std::_Exit(0);
-            }
-            if (carcassTicks >= 1200) {
-                std::printf("P2_GROINK_CARCASS_TIMEOUT ticks=%d timer=%.3f health=%.3f bound=%d total_births=%d\n",
-                    carcassTicks, pc_p2_groink_teki_timer(frog), pc_p2_groink_teki_health(frog),
-                    int(pc_p2_groink_teki_is_bound(frog)), pc_p2_groink_teki_total_births());
-                std::fflush(stdout);
-                std::_Exit(1);
-            }
+            // Isolated preview pauses ordinary Pikmin combat, so no natural squad
+            // kill can run. Force the death funnel once and label it injected.
+            frog->mHealth = 0.0f;
+            frog->pcEscapeNow();
+            carcassArmed = true;
+            std::puts("P2_GROINK_CARCASS_KILL_INJECTED host=generated_Frog generator=201001 method=pcEscapeNow health_write=1");
+            std::fflush(stdout);
             return result;
         }
         if (!pc_p2_preview_ready() || !naviMgr || !naviMgr->getNavi() || gameflow.mPauseAll || gameflow.mIsUIOverlayActive) { clock.reset(); return result; }
