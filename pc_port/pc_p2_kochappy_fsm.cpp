@@ -407,18 +407,19 @@ void pc_p2_kochappy_fsm_update(BTeki* actor)
 	const Vector3f pos = actor->getPosition();
 
 	// The P1 Chappy vehicle re-initialises mHealth from its TPF_Life policy at
-	// actor birth, after this module's setup() adopted the actor; re-assert the
-	// opted-in params.health once on the first live update so a health override
-	// survives birth (default 250 is unaffected).
+	// actor birth, which can land a frame after this module adopted the actor.
+	// Re-assert the opted-in params.health on every update until the first real
+	// Pikmin damage arrives (default 250 is a no-op), so a health override
+	// survives the birth reset without masking any natural damage.
 	if (!state.healthAsserted) {
-		state.healthAsserted = true;
-		actor->mHealth       = params.health;
+		actor->mHealth = params.health;
 	}
 
 	// The P1 host applies accumulated Pikmin damage through a TAI damage
 	// reaction that lives in the suppressed strategy (doAI). Apply the queued
 	// damage here so real Pikmin hits reach mHealth; no damage is injected.
 	if (actor->mStoredDamage > 0.0f) {
+		state.healthAsserted = true; // first natural damage: stop re-asserting
 		actor->makeDamaged();
 	}
 
