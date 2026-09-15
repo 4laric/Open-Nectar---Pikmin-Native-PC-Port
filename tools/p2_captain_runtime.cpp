@@ -14,6 +14,7 @@
 #include <SDL2/SDL.h>
 #include <GL/gl.h>
 #include "App.h"
+#include "CPlate.h"
 #include "GameCoreSection.h"
 #include "GameStat.h"
 #include "Graphics.h"
@@ -105,6 +106,12 @@ public:
                 }
                 require(survivorPiki != nullptr, "a live starting squad Piki bound to captain 0 exists");
                 survivorPreMode = survivorPiki->mMode;
+
+                // Populate the plate's traversable slot count before the knockdown:
+                // releasePikis() iterates mTotalSlotCount, which the per-frame
+                // makeCStick -> CPlate::refresh normally fills on a later frame.
+                // Refresh it now so the survivor branch really releases the squad.
+                survivorNavi0->mPlateMgr->refresh(survivorNavi0->getPlatePikis(), 1.0f);
 
                 // Natural knockdown of the active captain through the integrated
                 // Teki attack receiver (InteractAttack::actNavi applies pcNaviHurt
