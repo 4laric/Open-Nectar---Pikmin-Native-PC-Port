@@ -176,23 +176,49 @@ void stepCarrier(BTeki* t, Binding& b, float delta)
     float groundY = 0.0f;
     if (!P2BombSaraiTerrainAdapter::getMinY(&sAdapter, pos.x, pos.z, groundY)) return;
 
-    // Vertical: hover in flying states, crash/damage/dead ground the carrier.
-    const bool fastTakeOff = state == P2BombSaraiFsmState::TakeOff2;
+    // Experimental ground-engagement mode. A FreeMode Pikmin squad rejects a
+    // flying Teki outright: graspSituation skips `isFlying()` (piki.cpp:951) and
+    // ActAttack abandons an airborne target (aiAttack.cpp:189/297), so raising
+    // only the height is not enough. This hook runs after the Napkid strategy's
+    // act()+moveNew (tekibteki.cpp:473-484), so it is the last write of the
+    // frame: clear CF_IsFlying and pin the carrier to the floor every tick. The
+    // Fall crash keeps gravity; every other state walks on the ground.
+    t->finishFlying();
     if (state == P2BombSaraiFsmState::Fall) {
         t->mSRT.t.y -= b.bombConfig.gravityPerTick * 30.0f * delta;
         if (t->mSRT.t.y < groundY) t->mSRT.t.y = groundY;
-    } else if (state == P2BombSaraiFsmState::Damage || state == P2BombSaraiFsmState::Dead) {
-        t->mSRT.t.y = groundY;
     } else {
-        float vy = 0.0f, height = 0.0f;
-        if (!b.hover.update(fastTakeOff, 0, pos, delta, sAdapter.mGetMinY, sAdapter.mGetMinYContext,
-                            vy, height)) return;
-        t->mSRT.t.y += vy * delta;
+        t->mSRT.t.y = groundY;
     }
+    t->mVelocity.y = 0.0f;
     const P2BombSaraiVec3 carrier = carrierPosition(t);
 
     // Animated capture joint world position.
     const P2BombSaraiVec3 jointWorld = P2BombSaraiJoint::compute(carrier, t->getDirection(), b.joint);
+
+    // Per-second engagement probe: the carrier's floor height, the live squad
+    // size and the nearest squad distance, so the run proves the ground squad
+    // can actually reach the carrier.
+    if (b.tick % 30 == 0) {
+        int squad = 0;
+        float nearest = 1.0e30f;
+        if (pikiMgr) {
+            Iterator pit(pikiMgr);
+            CI_LOOP(pit) {
+                Piki* piki = static_cast<Piki*>(*pit);
+                if (!piki || !piki->isAlive()) continue;
+                ++squad;
+                const float dx = piki->mSRT.t.x - carrier.x;
+                const float dy = piki->mSRT.t.y - carrier.y;
+                const float dz = piki->mSRT.t.z - carrier.z;
+                const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
+                if (d < nearest) nearest = d;
+            }
+        }
+        if (nearest > 1.0e29f) nearest = -1.0f;
+        std::printf("P2_BOMBSARAI_TEKI_PROBE generator=%llu tick=%d y=%.3f nearest=%.3f squad=%d\n",
+                    (unsigned long long)b.generator, b.tick, t->mSRT.t.y, nearest, squad);
+    }
 
     // Target sensing: nearest alive Navi/Pikmin against retail radii.
     bool territory = false, attackable = false, attackXZ = false;
