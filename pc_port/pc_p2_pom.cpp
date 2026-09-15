@@ -203,6 +203,11 @@ void bindHosts()
 			bound.actor = teki;
 			bound.clip  = clipFor(bound.state);
 			bound.phase = 0.0f;
+			// The Chappy is only the drawn vehicle; anchor it at the bud's authored
+			// plant point (source: dropped buds land exactly on their point). The
+			// conversion slot is slotPosition(), so host and receptor coincide.
+			teki->mSRT.t.set(bound.spec.x, bound.spec.y, bound.spec.z);
+			teki->mVelocity.set(0.0f, 0.0f, 0.0f);
 			std::printf("P2_POM_BIND generator=%u species=%s source_id=%d host=teki type=%d\n", bound.spec.generator,
 			            p2pom::speciesName(bound.spec.species), p2pom::speciesId(bound.spec.species), int(teki->mTekiType));
 			break;
