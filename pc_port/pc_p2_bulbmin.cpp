@@ -282,7 +282,7 @@ bool pc_p2_bulbmin_has_mother() {
     return active && bridge.hasMother();
 }
 
-int pc_p2_bulbmin_call_pikis(Navi* navi, float radius) {
+int pc_p2_bulbmin_call_pikis(Navi* navi, float radius, const char* via) {
     if (!active || !navi || !pikiMgr || radius <= 0.0f) return 0;
     const float radius2 = radius * radius;
     int recruited = 0;
@@ -297,10 +297,12 @@ int pc_p2_bulbmin_call_pikis(Navi* navi, float radius) {
         if (delta.x * delta.x + delta.z * delta.z >= radius2) continue;
         if (pc_p2_bulbmin_whistle(p)) ++recruited;
     }
-    if (recruited)
-        std::printf("P2_BULBMIN_WHISTLE recruited=%d wild=%zu recruited_total=%zu\n",
-                    recruited, bridge.wildCount(), bridge.recruitedCount());
+    if (recruited) {
+        std::printf("P2_BULBMIN_WHISTLE recruited=%d wild=%zu recruited_total=%zu via=%s\n",
+                    recruited, bridge.wildCount(), bridge.recruitedCount(),
+                    via ? via : "direct");
         std::fflush(stdout);
+    }
     return recruited;
 }
 
