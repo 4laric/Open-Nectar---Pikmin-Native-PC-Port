@@ -2341,11 +2341,16 @@ void Navi::makeCStick(bool isSunset)
  */
 void Navi::refresh(Graphics& gfx)
 {
-	// Lane 12 (#130): the second captain is now drawn like the first. Its fresh
-	// uncached mNaviShapeObject[1] (built by NaviMgr::ensureSecondNaviShapeObject
-	// before create(2)) avoids clobbering slot 0's animators, and the antenna
-	// light already has a null-safe fallback, so draw/plate/cursor/shadow all run
-	// for mNaviID != 0 too. Single-captain play is unchanged (only slot 0 exists).
+	// Lane 12 (#130): the second captain's full draw (model + head-look +
+	// antenna light + plate + cursor) is still blocked: the fresh uncached
+	// mNaviShapeObject[1] built by ensureSecondNaviShapeObject() crashes in
+	// Shape::drawshape/demoDraw on its first render (the raw uncached nv3Model
+	// load lacks the game's animation/material setup that slot 0's cached shape
+	// has). Until that per-captain shape binding is finished, the second
+	// captain's visual pass is deferred while its game state stays live.
+	if (mNaviID != 0) {
+		return;
+	}
 	draw(gfx);
 	if (!movieMode()) {
 		if (gsys->mToggleColls) {

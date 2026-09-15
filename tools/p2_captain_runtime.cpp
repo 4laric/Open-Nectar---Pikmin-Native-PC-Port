@@ -88,8 +88,13 @@ class CaptainApp final : public PlugPikiApp {
 public:
     void draw(Graphics& gfx) override {
         PlugPikiApp::draw(gfx);
+        // Capture the survivor scene once, early, while both captains are
+        // present in the roster. NOTE: the second captain's model render is
+        // still deferred (Navi::refresh early-return), so the PPM shows the
+        // first captain + squad; it is scene evidence, not two-captain render
+        // evidence (that remains blocked).
         if (survivorArmed && !captured && frames >= 3 && frames < 5) {
-            capture("two-captains.ppm");
+            capture("survivor-scene.ppm");
             captured = true;
         }
     }

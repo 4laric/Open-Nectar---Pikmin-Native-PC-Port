@@ -18,15 +18,22 @@ bool second_captain_requested()
     return true;
 }
 
-// Lane 12 (#130): the live spawn gate is now open (request-gated only). The
-// second captain's model/shadow/plate/cursor render (Navi::refresh for
-// mNaviID != 0) and the inactive-captain Kontroller skip are in place, so a
-// requested second captain no longer ships as an invisible/input-mirroring
-// actor. Default single-captain play never reaches navi_capacity() > 1 because
-// second_captain_requested() is false unless PIKMIN_P2_SECOND_CAPTAIN is set.
+// Lane 12 (#130): the live spawn gate stays CLOSED for normal play until the
+// second captain renders without crashing. Navi::refresh's full draw for the
+// fresh uncached mNaviShapeObject[1] still crashes on its first render, so a
+// requested second captain would ship invisible-but-colliding. Only a fixture
+// flips it on via PIKMIN_P2_SECOND_CAPTAIN_LIVE to exercise the survivor path.
+bool second_captain_live_requested()
+{
+    const char* env = std::getenv("PIKMIN_P2_SECOND_CAPTAIN_LIVE");
+    if (!env || env[0] == '\0') return false;
+    if (env[0] == '0' && env[1] == '\0') return false;
+    return true;
+}
+
 bool second_captain_live_allowed()
 {
-    return true;
+    return second_captain_live_requested();
 }
 
 int navi_capacity()
