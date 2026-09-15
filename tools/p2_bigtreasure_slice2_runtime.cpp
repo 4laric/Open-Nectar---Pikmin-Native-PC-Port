@@ -53,8 +53,9 @@ void require(bool value, const char* message)
     }
 }
 
-// Returns an alive field Pikmin, preferring one in a normal state, so each
-// receiver check uses a distinct fresh target.
+// Returns an alive Red field Pikmin, preferring one in a normal state, so each
+// receiver check uses a distinct fresh target and the injected Blue identity
+// cannot leak into a later check.
 Piki* freshPiki()
 {
     if (!pikiMgr) {
@@ -65,6 +66,9 @@ Piki* freshPiki()
     CI_LOOP(it) {
         Piki* piki = static_cast<Piki*>(*it);
         if (!piki || !piki->isAlive()) {
+            continue;
+        }
+        if (pc_p2_species(piki) != P2SpeciesRed) {
             continue;
         }
         if (!fallback) {
