@@ -675,13 +675,6 @@ void NaviWalkState::exec(Navi* navi)
 	STACK_PAD_VAR(1);
 	navi->makeVelocity(false);
 
-	// Swarm is a one-shot cursor-directed call, matching the Wii D-pad-down
-	// action while leaving the GameCube D-pad-down pellet action intact.
-	if (navi->mKontroller->keyClick(KBBTN_SWARM) && navi->mGroundTriangle) {
-		navi->callPikis(C_NAVI_PARM(navi, mWhistleMaxRadius));
-		return;
-	}
-
 	if (!playerState->isTutorial() && navi->mGroundTriangle && navi->mKontroller->keyClick(KBBTN_DPAD_DOWN)) {
 		navi->mStateMachine->transit(navi, NAVISTATE_Pellet);
 		return;
