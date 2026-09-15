@@ -1060,7 +1060,7 @@ void GeneratorMgr::read(RandomAccessStream& input, bool p2)
 			mGenListHead = new Generator();
 			mGenListHead->read(input);
 #if defined(PIKI_PC_PORT)
-            if (!Generator::ramMode && flowCont.mCurrentStage) pc_randomizer_bind_generator(mGenListHead, flowCont.mCurrentStage->mStageID, sourceFile, sourceOffset);
+            if (!Generator::ramMode && flowCont.mCurrentStage) pc_randomizer_bind_generator(mGenListHead, flowCont.mCurrentStage->mStageID, sourceFile, sourceOffset, mGenListHead->_70);
 #endif
 			mGenListHead->mMgr = this;
 			generatorList->mGenListHead->add(mGenListHead);
@@ -1069,7 +1069,7 @@ void GeneratorMgr::read(RandomAccessStream& input, bool p2)
 			newGen->mMgr      = this;
 			newGen->read(input);
 #if defined(PIKI_PC_PORT)
-            if (!Generator::ramMode && flowCont.mCurrentStage) pc_randomizer_bind_generator(newGen, flowCont.mCurrentStage->mStageID, sourceFile, sourceOffset);
+            if (!Generator::ramMode && flowCont.mCurrentStage) pc_randomizer_bind_generator(newGen, flowCont.mCurrentStage->mStageID, sourceFile, sourceOffset, newGen->_70);
 #endif
 
 			Generator* endList = mGenListHead;
