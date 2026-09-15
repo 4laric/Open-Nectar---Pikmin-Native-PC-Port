@@ -22,6 +22,7 @@
 #include "pc_p2_demon_host.h"
 #include "pc_p2_cave.h"
 #include "pc_p2_kurage_receiver.h"
+#include "pc_p2_captain.h"
 #include "pc_p2_second_captain.h"
 #include "pc_p2_breadbug_visual.h"
 #include "pc_p2_giant_breadbug_visual.h"
@@ -890,6 +891,9 @@ void GameCoreSection::exitStage()
 	pc_p2_reset_all_teki();
 #endif
 	demoEventMgr = nullptr;
+	// Lane 12 (#130): drop the live captain/squad binding before the NaviMgr and
+	// stage-heap objects are destroyed, matching the shared lifetime seam.
+	pc_p2_captain::teardown();
 	naviMgr      = nullptr;
 	playerState->exitCourse();
 	seSystem->exitCourse();
@@ -1546,6 +1550,12 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 	naviMgr->create(naviCapacity);
 	mNavi = static_cast<Navi*>(naviMgr->birth());
 	if (naviCapacity > 1) pc_p2_captain::birth_second_captain(naviMgr);
+	// Lane 12 (#130): bind the live slot-0 captain/squad adapter now that the
+	// Navi object exists, so a captor family can resolve target identity and
+	// claim/release through pc_p2_captain against the real NaviMgr/PikiMgr.
+	// Idempotent; with one Navi the zero-control guard keeps only-captain
+	// capture refused, exactly as the source refuses to strand the player.
+	pc_p2_captain::setup_from_navi_mgr();
 	PRINT("********* navi ==== %x\n", mNavi);
 	gameflow.addGenNode("naviMgr", naviMgr);
 	memStat->end("navi");
