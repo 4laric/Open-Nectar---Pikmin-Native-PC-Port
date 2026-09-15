@@ -39,6 +39,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <algorithm>
 #include <fstream>
 #include <map>
 #include <set>
@@ -57,10 +58,6 @@ const SpeciesDef SPECIES[] = {
 constexpr size_t MeshBytes = 4 * 1024 * 1024;    // per species
 constexpr size_t TotalBytes = 16 * 1024 * 1024;  // per setup
 constexpr float AccumulateRadius = 60.0f;        // Pikmin "accumulating" census
-// Proxy survival floor: the P1 Chappy placement vehicle offers only ~130 HP
-// (source Houdai 2800), so the source Houdai FSM never survives Land (5 s) +
-// Flick (2.3 s) to reach Shot. See pc_p2_long_legs_update for the pin.
-constexpr float kHoudaiProxyBaseline = 600.0f;
 
 struct ActorState {
     std::string species;
@@ -75,7 +72,6 @@ struct ActorState {
     bool stateLogged = false;
     bool damageable = false;        // source damage window (Wait/Flick/Walk/Shot)
     bool bitterImmune = true;       // Stay/Land immunity
-    bool reachedShot = false;       // Houdai: first Shot reached (pin releases)
     float shotLoopAccum = 0.0f;     // Man-at-Legs attack-loop shell cadence
 };
 
@@ -86,8 +82,14 @@ bool logged[2] = {false, false};
 
 // Man-at-Legs shell pool (source pool of 10, HoudaiShotGun.cpp:1050) hosted on
 // lane 20's shared fired-projectile policy. Consume-only: no forked projectile.
+// Each shell remembers its firing actor (sourceToken) so a forget/death can kill
+// only that actor's shells and two live Houdai never step each other's shells.
+struct HoudaiShell {
+    P2CannonStone* stone = nullptr;
+    std::uint64_t sourceToken = 0;
+};
 P2CannonStonePool shellPool(10);
-std::vector<P2CannonStone*> shells;       // active shells owned by shellPool
+std::vector<HoudaiShell> shells;           // active shells, keyed by sourceToken
 std::uint64_t shellSelfToken = 1;
 
 [[noreturn]] void fail(const char* what) {
@@ -109,11 +111,23 @@ P2LongLegsSpecies speciesEnum(const std::string& name) {
 // Source animation key frames (docs/PIKMIN2_LONG_LEGS_AUDIT.md) converted to
 // seconds at 30 fps. Landing runs to the last landing key; Flick to the last
 // flick key. Used only to synthesize the missing key edges in this fixture.
+//
+// The P1 Chappy placement vehicle (~130 HP) is drained by the squad before the
+// source pre-Shot schedule completes, so Houdai's Land/Flick are compressed for
+// the preview (documented approximation): the source state order and receiver
+// rules are preserved, only the animation key-edge timings shorten so the source
+// Shot state is reachable before the proxy dies. Natural death remains 130 -> 0.
 float landingSeconds(P2LongLegsSpecies species) {
-    return species == P2LongLegsSpecies::BigFoot ? 18.0f / 30.0f : 150.0f / 30.0f;
+    // Source Land (frames): Damagumo/Houdai 150, BigFoot 18.
+    if (species == P2LongLegsSpecies::BigFoot) return 18.0f / 30.0f;
+    if (species == P2LongLegsSpecies::Houdai) return 30.0f / 30.0f;  // compressed from 150
+    return 150.0f / 30.0f;  // Damagumo source
 }
 float flickSeconds(P2LongLegsSpecies species) {
-    return species == P2LongLegsSpecies::BigFoot ? 35.0f / 30.0f : 68.0f / 30.0f;
+    // Source Flick (frames): Damagumo/Houdai 68, BigFoot 35.
+    if (species == P2LongLegsSpecies::BigFoot) return 35.0f / 30.0f;
+    if (species == P2LongLegsSpecies::Houdai) return 15.0f / 30.0f;  // compressed from 68
+    return 68.0f / 30.0f;  // Damagumo source
 }
 float shotSeconds(P2LongLegsSpecies species) {
     // Houdai attack clip is 39 frames (Houdai.h); the gunless species never shoot.
@@ -166,6 +180,10 @@ int countPikiWithin(const Vector3f& pos, float radius) {
 // Man-at-Legs shell (consume lane 20 `P2CannonStone`; no forked projectile).
 // Fired on the Shot loop boundary and stepped each tick; on contact with a live
 // Pikmin the source HoudaiShotGun receiver (InteractBomb shellDamage) is applied.
+// Documented approximations: the flight is the Stone's flat homing plan (no
+// source gravity arc), contact is a flat 20-unit sphere (`kShellHitRadius`) keyed
+// on the shell's elevated mouth y, and `nearestTarget` may select the Navi, which
+// a shell can home on but never damages (InteractBomb is only routed to Pikmin).
 void fireHoudaiShell(BTeki* actor, const Vector3f& pos) {
     Creature* target = nearestTarget(pos, 200.0f); // source shot search range
     if (!target) return;
@@ -185,14 +203,40 @@ void fireHoudaiShell(BTeki* actor, const Vector3f& pos) {
     P2CannonStone* s = shellPool.spawn(mouth, faceDir, true,
                                        (std::uint64_t)(std::uintptr_t)actor,
                                        shellSelfToken++, cfg);
-    if (s) shells.push_back(s);
+    if (s) shells.push_back(HoudaiShell{s, (std::uint64_t)(std::uintptr_t)actor});
+}
+
+// Kill and drop every in-flight shell owned by `actor`, freeing its pool slots.
+// Called on the host death path and on forget so a dead/forgotten Houdai never
+// leaks shells (and a re-entered one regains the full 10-slot pool).
+void killShellsOf(BTeki* actor) {
+    const std::uint64_t token = (std::uint64_t)(std::uintptr_t)actor;
+    for (HoudaiShell& shell : shells) {
+        if (shell.sourceToken != token || !shell.stone) continue;
+        shell.stone->notifyWallContact();
+        shell.stone->finishDeath();
+    }
+    shells.erase(std::remove_if(shells.begin(), shells.end(),
+                                [token](const HoudaiShell& s) { return s.sourceToken == token; }),
+                 shells.end());
+}
+
+int countShellsOf(BTeki* actor) {
+    const std::uint64_t token = (std::uint64_t)(std::uintptr_t)actor;
+    int count = 0;
+    for (const HoudaiShell& shell : shells)
+        if (shell.sourceToken == token && shell.stone && shell.stone->isAlive()) ++count;
+    return count;
 }
 
 void stepHoudaiShells(BTeki* actor, const std::string& species, unsigned generator) {
     if (shells.empty() || !pikiMgr) return;
+    const std::uint64_t token = (std::uint64_t)(std::uintptr_t)actor;
     int hitTotal = 0;
     for (size_t i = 0; i < shells.size();) {
-        P2CannonStone* s = shells[i];
+        HoudaiShell& shell = shells[i];
+        if (shell.sourceToken != token) { ++i; continue; }  // only step this actor's shells
+        P2CannonStone* s = shell.stone;
         if (!s || !s->isAlive()) { shells.erase(shells.begin() + i); continue; }
         const P2CannonStoneVec3 sp = s->position();
         P2CannonStoneTarget tgt;
@@ -314,6 +358,7 @@ void pc_p2_long_legs_reset() {
 }
 
 void pc_p2_long_legs_forget(BTeki* actor) {
+    killShellsOf(actor);
     actors.erase(actor);
 }
 
@@ -368,20 +413,6 @@ void pc_p2_long_legs_update(BTeki* actor) {
     ActorState& state = entry->second;
     if (state.fsm.state() == P2LongLegsState::Dead) return;
 
-    // Documented proxy approximation (#312): the P1 Chappy placement vehicle has
-    // only ~130 HP (source Houdai 2800), and its grid-activation re-runs
-    // BTeki::reset -> mHealth = getMaxLife when the squad approaches, dropping it
-    // back below the source FSM's pre-Shot schedule (Land 5 s + Flick 2.3 s). Pin
-    // the proxy to a bounded baseline until it FIRST reaches its Shot state; the
-    // pin then releases for good and ordinary Pikmin combat drains the baseline to
-    // zero. Gated to the preview/opt-in host, not P1 play.
-    if (state.species == "Houdai" && !state.reachedShot && actor->isAlive()
-            && actor->mHealth < kHoudaiProxyBaseline) {
-        actor->mHealth = kHoudaiProxyBaseline;
-        state.lastHealth = actor->mHealth;
-        state.lastPositiveHealth = actor->mHealth;
-    }
-
     const float dt = gsys ? gsys->getFrameTime() : 0.0f;
     if (!(dt > 0.0f && dt < 0.5f)) return;
 
@@ -394,6 +425,7 @@ void pc_p2_long_legs_update(BTeki* actor) {
     // children are lane 06/14/15/20 objects, so the intents are logged, not
     // spawned here. No further ticks run once the policy is Dead.
     if (!actor->isAlive()) {
+        killShellsOf(actor);  // free the actor's in-flight shells on death
         P2LongLegsFsmInput kill;
         kill.health = actor->mHealth;
         kill.killed = true;
@@ -457,7 +489,7 @@ void pc_p2_long_legs_update(BTeki* actor) {
     } else {
         state.shotLoopAccum = 0.0f;
     }
-    in.shellsInFlight = (int)shells.size();
+    in.shellsInFlight = countShellsOf(actor);
     if (in.landingKey2 || in.flickKey2) state.key2Fired = true;
 
     P2LongLegsFsmOutput out;
@@ -471,7 +503,6 @@ void pc_p2_long_legs_update(BTeki* actor) {
     }
     state.damageable = out.damageable;
     state.bitterImmune = out.bitterImmune;
-    if (state.fsm.state() == P2LongLegsState::Shot) state.reachedShot = true;
     if (out.footCrush) {
         std::printf("P2_LONG_LEGS_FOOT species=%s generator=%u\n", state.species.c_str(),
                     state.generator);
