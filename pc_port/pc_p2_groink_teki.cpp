@@ -17,9 +17,10 @@ struct Binding {
     int type;
     P2GroinkCarcassConfig config;
     P2GroinkCarcass carcass;
-    bool began = false;      // death observed -> carcass begin (doBecomeCarcass)
-    bool terminal = false;   // RequestBirth emitted -> the old object transits to Rebirth
-    bool gaugeShown = false; // TEKIOPT_LifeGaugeVisible currently set
+    bool began = false;         // death observed -> carcass begin (doBecomeCarcass)
+    bool terminal = false;      // RequestBirth emitted -> stop driving; birth pending lane 06/07
+    bool gaugeShown = false;    // TEKIOPT_LifeGaugeVisible currently set
+    bool pelletKilled = false;  // KillPellet emitted -> never re-dereference the recycled pellet
     int births = 0;
 };
 std::map<BTeki*, Binding> s;
@@ -65,7 +66,15 @@ void pc_p2_groink_teki_setup() {
         auto* t = static_cast<Teki*>(*it);
         if (!t || !t->mGenerator || t->mGenerator->_70 != gen) continue;
         if (t->mTekiType != type || s.size()) std::abort();
-        s.emplace(static_cast<BTeki*>(t), Binding{gen, type, cfg.carcass, {}, false, false, false, 0});
+        // A host that leaves no corpse dies through dieSoon -> kill -> doKill,
+        // which runs pc_p2_forget_teki on the death frame and erases this binding
+        // before RequestBirth can ever fire (tekibteki.cpp:681-721, 742-749).
+        // Only a LeaveCorpse host survives death as a revivable carcass pellet.
+        if (t->getParameterI(TPI_CorpseType) != TEKICORPSE_LeaveCorpse) {
+            std::printf("P2_GROINK_CARCASS_UNBOUND generator=%u type=%d reason=no_corpse\n", gen, type);
+            continue;
+        }
+        s.emplace(static_cast<BTeki*>(t), Binding{gen, type, cfg.carcass, {}, false, false, false, false, 0});
         std::printf("P2_GROINK_CARCASS_READY generator=%u type=%d gauge_delay=%.3f recovery=%.3f max_health=%.3f\n",
                     gen, type, cfg.carcass.gaugeDelay, cfg.carcass.recoverySeconds, cfg.carcass.maxHealth);
     }
@@ -91,7 +100,14 @@ void pc_p2_groink_teki_tick(BTeki* t) {
                     b.generator, t->mSRT.t.x, t->mSRT.t.y, t->mSRT.t.z, t->getDirection());
     }
     // The carcass "pellet" is the actor's own corpse pellet (PelletView::mPellet).
-    const bool pelletAlive = t->mPellet != nullptr && t->mPellet->isAlive();
+    // Once KillPellet has fired the pellet slot may be recycled by pelletMgr, so
+    // it is never re-dereferenced after that.
+    const bool pelletAlive = !b.pelletKilled && t->mPellet != nullptr && t->mPellet->isAlive();
+    // gaugeManager is bound to the P1 life-gauge manager. ActivateGauge only
+    // toggles TEKIOPT_LifeGaugeVisible; the on-screen gauge reader is driven by
+    // mHealth (held at 0 on the dead proxy), so the visible gauge is empty and
+    // the regrowth amount is surfaced via pc_p2_groink_teki_health()/markers,
+    // not the on-screen ring (resurgence of mHealth is a lane 06/07 concern).
     const P2GroinkCarcassStep step = b.carcass.step(dt, pelletAlive, /*gaugeManager=*/true, /*activeTick=*/true);
     if (!step.valid) return;
     for (std::size_t k = 0; k < step.count; ++k) {
@@ -105,6 +121,7 @@ void pc_p2_groink_teki_tick(BTeki* t) {
             std::printf("P2_GROINK_CARCASS_GAUGE_INACTIVE generator=%u\n", b.generator);
             break;
         case P2GroinkCarcassCommand::KillPellet:
+            b.pelletKilled = true;
             if (t->mPellet) t->mPellet->kill(false);
             std::printf("P2_GROINK_CARCASS_KILL_PELLET generator=%u health=%.3f\n", b.generator, b.carcass.health());
             break;
@@ -122,7 +139,9 @@ void pc_p2_groink_teki_tick(BTeki* t) {
                         b.generator, born.position.x, born.position.y, born.position.z,
                         born.faceDir, born.existenceLength, born.inPiklopedia ? 1 : 0,
                         b.carcass.health());
-            b.terminal = true; // old object transits to MINIHOUDAI_Rebirth
+            // Records the birth descriptor and stops driving; the actual
+            // replacement-object birth is pending lane 06/07 (generalEnemyMgr).
+            b.terminal = true;
             break;
         }
         }
