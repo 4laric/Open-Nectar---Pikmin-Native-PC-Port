@@ -536,6 +536,12 @@ void pc_p2_queen_forget_piki(Piki* piki) {
     }
 }
 
+bool pc_p2_queen_death_released() {
+    for (const auto& q : queens)
+        if (q.deathReleased) return true;
+    return false;
+}
+
 void pc_p2_queen_reset() {
 	materialEnabled=false;materialBank=p2material::Bank{};
 	config = p2queen::ActorConfig{};
