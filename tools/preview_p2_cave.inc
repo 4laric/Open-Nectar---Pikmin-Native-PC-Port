@@ -17,10 +17,11 @@ static void caveRoomsLogTimeline(const P2CaveRoomLayout* layout, const char* tag
         int(pc_p2_cave_rooms_reachable_now(layout->entrance)));
 }
 static void caveRoomsGrantSpecies(int species) {
+    // Only convert a still-Red squad member so a previously granted key is kept.
     Iterator it(pikiMgr);
     CI_LOOP(it) {
         Piki* p=static_cast<Piki*>(*it);
-        if(p && p->isAlive() && pc_p2_species(p)!=species) { pc_p2_set_species(p,species); return; }
+        if(p && p->isAlive() && pc_p2_species(p)==P2SpeciesRed) { pc_p2_set_species(p,species); return; }
     }
 }
 static void caveRoomsFixture(Navi* n) {
@@ -37,6 +38,8 @@ static void caveRoomsFixture(Navi* n) {
     std::printf("P2_CAVE_ROOMS_ENTER id=%s unit_at=%s geometry=%s proxy=1\n",
         layout->entrance.c_str(),pc_p2_cave_rooms_unit_at(n->mSRT.t.x,n->mSRT.t.z).c_str(),
         layout->geometry.c_str());
+    std::printf("P2_CAVE_ROOMS_PROJECTION salt=%d projection=%s\n",layout->salt,
+        p2CaveRoomsLogicalProjection(*layout).c_str());
     std::printf("P2_CAVE_ROOMS_SQUAD blue=%d yellow=%d red=%d white=%d\n",
         int(keys.blue),int(keys.yellow),int(keys.red),int(keys.white));
     caveRoomsLogTimeline(layout,"fresh_floor_no_abilities");
