@@ -4,6 +4,7 @@
 #include "pc_p2_cave_anchor.h"
 #include "pc_p2_cave_rooms_engine.h"
 #include "pc_p2_cave_items_engine.h"
+#include "pc_p2_cave_bud_actor.h"  // lane 48 (#486) real seeded Candypop bud actor
 #include "pc_p2_species.h"
 #include "GoalItem.h"
 #include <fstream>
@@ -88,8 +89,83 @@ static void caveItemsFixture(Navi* n) {
     }
     require(caveItemTicks<2400,"cave item carry did not deliver");
 }
+// Lane 48 (#486): natural ability acquisition. A real Candypop bud actor at the
+// seeded bud node swallows an ordinarily-thrown Pikmin and births a live Pikmin
+// of the bud's colour; no existing Piki is recoloured.
+static void caveBudFixture(Navi* n) {
+    static int ticks=0;static bool thrown=false;
+    ++ticks;
+    if(ticks<120)return;
+    const P2CaveRoomLayout* layout=pc_p2_cave_rooms_layout();
+    require(layout!=nullptr,"rooms layout missing");
+    if(ticks==120){
+        const P2CaveRoomUnit* entrance=p2CaveRoomsFind(*layout,layout->entrance);
+        require(entrance!=nullptr,"rooms entrance missing");
+        const float ex=p2CaveRoomsWorldX(*layout,*entrance),ez=p2CaveRoomsWorldZ(*layout,*entrance);
+        n->resetPosition(Vector3f(ex,mapMgr->getMinY(ex,ez,true),ez));
+        n->mStateMachine->transit(n,NAVISTATE_Walk);
+        P2CaveAbilities keys=pc_p2_cave_rooms_squad_abilities();
+        std::printf("P2_CAVE_ROOMS_ENTER id=%s unit_at=%s geometry=%s proxy=1\n",
+            layout->entrance.c_str(),pc_p2_cave_rooms_unit_at(n->mSRT.t.x,n->mSRT.t.z).c_str(),
+            layout->geometry.c_str());
+        std::printf("P2_CAVE_ROOMS_PROJECTION salt=%d projection=%s\n",layout->salt,
+            p2CaveRoomsLogicalProjection(*layout).c_str());
+        std::printf("P2_CAVE_ROOMS_SQUAD blue=%d yellow=%d red=%d white=%d\n",
+            int(keys.blue),int(keys.yellow),int(keys.red),int(keys.white));
+        caveRoomsLogTimeline(layout,"fresh_floor_no_abilities");
+        std::printf("P2_CAVE_BUD_FIXTURE actors=%d\n",pc_p2_cave_bud_count());
+        return;
+    }
+    if(!thrown && ticks>=140){
+        Vector3f bud;require(pc_p2_cave_bud_position("yellow",bud),"seeded yellow bud missing");
+        Piki* thrower=nullptr;Iterator it(pikiMgr);CI_LOOP(it){
+            Piki* p=static_cast<Piki*>(*it);
+            if(p&&p->isAlive()&&pc_p2_species(p)==P2SpeciesRed){thrower=p;break;}
+        }
+        require(thrower!=nullptr,"no red Pikmin to throw");
+        const float bx=bud.x-18.f,bz=bud.z;
+        n->resetPosition(Vector3f(bx,mapMgr->getMinY(bx,bz,true),bz));
+        n->mStateMachine->transit(n,NAVISTATE_Walk);
+        thrower->changeMode(PikiMode::FreeMode,n);
+        thrower->mFSM->transit(thrower,PIKISTATE_Flying);
+        n->throwPiki(thrower,bud);
+        std::printf("P2_CAVE_BUD_THROW colour=yellow distance=18 natural=1\n");
+        thrown=true;return;
+    }
+    if(thrown){
+        P2CaveAbilities keys=pc_p2_cave_rooms_squad_abilities();
+        if(keys.yellow&&pc_p2_cave_bud_conversions()>0){
+            std::printf("P2_CAVE_ROOMS_GRANT species=yellow natural_acquire=1 staged=0 conversions=%d\n",
+                pc_p2_cave_bud_conversions());
+            caveRoomsLogTimeline(layout,"come_back_with_yellow");
+            caveRoomsGrantSpecies(P2SpeciesBlue);
+            std::printf("P2_CAVE_ROOMS_GRANT species=blue natural_acquire=0 staged=1\n");
+            caveRoomsLogTimeline(layout,"return_with_yellow_and_blue");
+            capture("p2-cave-rooms.ppm");
+            std::puts("PASS cave buds: seeded bud actor, ordinary throw conversion, natural yellow (proxy geometry)");
+            std::fflush(stdout);std::_Exit(0);
+        }
+        if(ticks%120==0){
+            Vector3f bud;if(pc_p2_cave_bud_position("yellow",bud)){
+                Iterator it(pikiMgr);CI_LOOP(it){
+                    Piki* p=static_cast<Piki*>(*it);
+                    if(!p||!p->isAlive()||pc_p2_species(p)!=P2SpeciesRed)continue;
+                    const float bx=bud.x-18.f,bz=bud.z;
+                    p->resetPosition(Vector3f(bx,mapMgr->getMinY(bx,bz,true),bz));
+                    p->changeMode(PikiMode::FreeMode,n);
+                    p->mFSM->transit(p,PIKISTATE_Flying);
+                    n->throwPiki(p,bud);
+                    std::printf("P2_CAVE_BUD_THROW_RETRY tick=%d natural=1\n",ticks);
+                    break;
+                }
+            }
+        }
+        require(ticks<1800,"seeded bud conversion did not complete");
+    }
+}
 static void caveRoomsFixture(Navi* n) {
     if(pc_p2_cave_items_active()){caveItemsFixture(n);return;}
+    if(pc_p2_cave_bud_active()){caveBudFixture(n);return;}
     static int ticks=0;
     if(++ticks<120)return;
     const P2CaveRoomLayout* layout=pc_p2_cave_rooms_layout();

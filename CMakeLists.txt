@@ -193,6 +193,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_cave_rooms.cpp
     pc_port/pc_p2_cave_geometry.cpp
     pc_port/pc_p2_cave_items.cpp
+    pc_port/pc_p2_cave_bud_actor.cpp
     pc_port/pc_p2_enemy.cpp
     pc_port/pc_p2_sheargrub.cpp
     pc_port/pc_p2_kochappy.cpp
@@ -798,6 +799,14 @@ add_executable(p2_cave_items_test
 target_include_directories(p2_cave_items_test PRIVATE pc_port)
 target_compile_options(p2_cave_items_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_cave_items_test COMMAND p2_cave_items_test)
+
+# Lane 48 (#486): seeded Candypop bud actor instantiation gate (header-only;
+# the engine glue pc_p2_cave_bud_actor.cpp is linked into pikmin_pc separately).
+add_executable(p2_cave_bud_test
+    tools/p2_cave_bud_test.cpp)
+target_include_directories(p2_cave_bud_test PRIVATE pc_port)
+target_compile_options(p2_cave_bud_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_cave_bud_test COMMAND p2_cave_bud_test)
 
 add_executable(p2_long_legs_fsm_test
     tools/p2_long_legs_fsm_test.cpp
