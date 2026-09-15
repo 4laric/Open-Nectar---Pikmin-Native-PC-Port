@@ -105,12 +105,18 @@ public:
                 Vector3f park(carcassHost->mSRT.t.x, 0.0f, carcassHost->mSRT.t.z + 40.0f);
                 park.y = mapMgr->getMinY(park.x, park.z, true);
                 n->resetPosition(park);
-                if (carcassTicks == 1 || (!sCarcassTransport && carcassTicks % 120 == 0)) ringReds(n, carcassHost);
+                if (sCarcassTransport) {
+                    // Keep the free squad on the corpse until a Pikmin grasps it,
+                    // then stop re-ringing so the carry is not disrupted.
+                    if (transportCarriers() == 0 && (carcassTicks == 1 || carcassTicks % 60 == 0)) ringReds(n, carcassHost);
+                } else if (carcassTicks == 1 || carcassTicks % 120 == 0) {
+                    ringReds(n, carcassHost);
+                }
             }
             if (carcassTicks % 60 == 0 || !pc_p2_groink_teki_is_bound(carcassHost)) {
-                std::printf("P2_GROINK_CARCASS_HOST tick=%d health=%.1f bound=%d reds=%d pokos=%d\n",
+                std::printf("P2_GROINK_CARCASS_HOST tick=%d health=%.1f bound=%d reds=%d pokos=%d transport=%d\n",
                     carcassTicks, pc_p2_groink_teki_health(carcassHost),
-                    int(pc_p2_groink_teki_is_bound(carcassHost)), aliveReds(), pc_p2_preview_pokos());
+                    int(pc_p2_groink_teki_is_bound(carcassHost)), aliveReds(), pc_p2_preview_pokos(), transportCarriers());
                 std::fflush(stdout);
             }
             if (sCarcassTransport) {
@@ -181,6 +187,14 @@ public:
         }
     }
 private:
+    int transportCarriers() {
+        int count = 0;
+        Iterator it(pikiMgr); CI_LOOP(it) {
+            Piki* p = static_cast<Piki*>(*it);
+            if (p && p->isAlive() && p->mMode == PikiMode::TransportMode) ++count;
+        }
+        return count;
+    }
     int aliveReds() {
         int count = 0;
         Iterator it(pikiMgr); CI_LOOP(it) {
