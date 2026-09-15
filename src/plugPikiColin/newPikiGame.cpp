@@ -1705,6 +1705,9 @@ ModeState* DayOverModeState::initialisePhaseTwo()
 			// start the results window with our chosen diary entry
 			resultWindow = new zen::ogScrResultMgr((zen::EnumResult*)resultTable);
 			resultWindow->start();
+			if (pc_settings_get_disable_tutorials()) {
+				resultWindow->skip();
+			}
 
 		} else {
 			// challenge mode - start the challenge mode results window
