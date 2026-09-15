@@ -475,7 +475,7 @@ struct GfxChannel {
     float ambColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 };
 static GfxChannel sChannels[2] = {}; // COLOR0/ALPHA0, COLOR1/ALPHA1
-// Lane-09 instrumentation counters (renderer-owned): prove the corrected
+// Specular instrumentation counters (renderer-owned): prove the corrected
 // half-vector path is reached by the ordinary draw, not only by a fixture.
 static unsigned sSpecularDirCalls = 0;
 static unsigned sSpecularChannelDraws = 0;
@@ -3802,8 +3802,7 @@ void pc_gfx_init_specular_dir(void* ltObj, f32 x, f32 y, f32 z) {
     // The Onions were the obvious casualty.
     float dir[3], pos[3];
     p2specular::halfVector(x, y, z, dir, pos);
-    if (++sSpecularDirCalls == 1)
-        std::printf("[lane09] pc_gfx_init_specular_dir first_call half=(%.4f,%.4f,%.4f)\n", dir[0], dir[1], dir[2]);
+    ++sSpecularDirCalls;
     f32* ldir = reinterpret_cast<f32*>(raw + 0x34);
     ldir[0] = dir[0]; ldir[1] = dir[1]; ldir[2] = dir[2];
 
