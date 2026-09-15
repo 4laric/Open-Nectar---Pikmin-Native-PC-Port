@@ -31,11 +31,6 @@ const Binding* find(const BTeki* t) {
 }
 } // namespace
 
-// Process-wide RequestBirth tally. It deliberately lives outside the per-actor
-// map so a deferred pellet kill (which erases the binding via forget on the BIRTH
-// frame) cannot zero it before the runtime fixture reads the result.
-static int sTotalBirths = 0;
-
 void pc_p2_groink_teki_reset() { s.clear(); }
 
 void pc_p2_groink_teki_forget(BTeki* t) {
@@ -55,7 +50,7 @@ int pc_p2_groink_teki_births(const BTeki* t) {
     const Binding* b = find(t);
     return b ? b->births : 0;
 }
-int pc_p2_groink_teki_total_births() { return sTotalBirths; }
+int pc_p2_groink_teki_total_births() { return p2_groink_carcass_total_births(); }
 
 void pc_p2_groink_teki_setup() {
     pc_p2_groink_teki_reset();
@@ -145,7 +140,7 @@ void pc_p2_groink_teki_tick(BTeki* t) {
             born.existenceLength = -1.0f;
             born.inPiklopedia = false;
             ++b.births;
-            ++sTotalBirths;
+            p2_groink_carcass_note_birth();
             std::printf("P2_GROINK_CARCASS_BIRTH generator=%u pos=%.3f,%.3f,%.3f face_dir=%.3f existence_length=%.3f in_piklopedia=%d health=%.3f\n",
                         b.generator, born.position.x, born.position.y, born.position.z,
                         born.faceDir, born.existenceLength, born.inPiklopedia ? 1 : 0,

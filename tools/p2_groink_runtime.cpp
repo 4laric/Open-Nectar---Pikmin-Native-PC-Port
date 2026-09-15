@@ -9,6 +9,8 @@
 #include "MapMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "Piki.h"
+#include "PikiMgr.h"
 #include "MoviePlayer.h"
 #include "Shape.h"
 #include "system.h"
@@ -60,6 +62,7 @@ class GroinkApp final : public PlugPikiApp {
     int frames = 0, sourceTicks = 0;
     bool carcassArmed = false;
     int carcassTicks = 0;
+    BTeki* carcassHost = nullptr;
     bool setup = false, probes = false, fired = false, flightCapture = false, flightCaptured = false, terminalCapture = false;
     P2GroinkMapTrace trace;
     P2GroinkSourceClock clock;
@@ -72,44 +75,57 @@ public:
             clock.reset(); gameflow.mMoviePlayer->requestSkip(); return result;
         }
         if (sCarcassAutomaticBinding) {
-            if (!tekiMgr) return result;
-            // Once armed, the BTeki::update hook drives the carcass through the
-            // Frog's own corpse pellet (LeaveCorpse). The Frog's generator clears
-            // on death, so re-locating it by generator here is unreliable; poll the
-            // process-wide birth tally, which survives the pellet-kill forget.
-            if (carcassArmed) {
-                ++carcassTicks;
-                if (pc_p2_groink_teki_total_births() >= 1) {
-                    std::printf("P2_GROINK_CARCASS_BIRTH_PASS ticks=%d total_births=%d\n",
-                        carcassTicks, pc_p2_groink_teki_total_births());
-                    std::puts("PASS GROINK_RUNTIME carcass_automatic_binding");
-                    std::fflush(stdout); std::_Exit(0);
+            if (!tekiMgr || !naviMgr || !pikiMgr) return result;
+            Navi* n = naviMgr->getNavi();
+            if (!n) return result;
+            // Locate the generated Frog host once. The BTeki survives as a
+            // LeaveCorpse corpse; the sidecar's binding key stays valid until the
+            // carcass policy kills the pellet (then is_bound flips false and the
+            // host pointer must not be dereferenced).
+            if (!carcassHost) {
+                Iterator it(tekiMgr); CI_LOOP(it) {
+                    Teki* teki = static_cast<Teki*>(*it);
+                    if (teki && teki->mTekiType == TEKI_Frog && teki->mGenerator && teki->mGenerator->_70 == 201001u) {
+                        carcassHost = static_cast<BTeki*>(teki);
+                        break;
+                    }
                 }
-                if (carcassTicks >= 1200) {
-                    std::printf("P2_GROINK_CARCASS_TIMEOUT ticks=%d total_births=%d\n",
-                        carcassTicks, pc_p2_groink_teki_total_births());
-                    std::fflush(stdout);
-                    std::_Exit(1);
-                }
-                return result;
+                if (!carcassHost) return result;
+                require(pc_p2_groink_teki_is_bound(carcassHost), "finalSetup sidecar bound generated Frog");
+                std::puts("P2_GROINK_CARCASS_HOST_BOUND host=generated_Frog generator=201001 kill=free_mode_squad health_write=0");
+                std::fflush(stdout);
             }
-            BTeki* frog = nullptr;
-            Iterator it(tekiMgr); CI_LOOP(it) {
-                Teki* teki = static_cast<Teki*>(*it);
-                if (teki && teki->mTekiType == TEKI_Frog && teki->mGenerator && teki->mGenerator->_70 == 201001u) {
-                    frog = static_cast<BTeki*>(teki);
-                    break;
-                }
+            ++carcassTicks;
+            // Natural kill (lane 19 recipe): park the captain beside the host and
+            // ring-deploy the red squad in FreeMode, re-ringing every 120 ticks.
+            // No AI action is assigned to any Pikmin and no host health is written.
+            if (pc_p2_groink_teki_is_bound(carcassHost)) {
+                Vector3f park(carcassHost->mSRT.t.x, 0.0f, carcassHost->mSRT.t.z + 40.0f);
+                park.y = mapMgr->getMinY(park.x, park.z, true);
+                n->resetPosition(park);
+                if (carcassTicks == 1 || carcassTicks % 120 == 0) ringReds(n, carcassHost);
             }
-            if (!frog) return result;
-            require(pc_p2_groink_teki_is_bound(frog), "finalSetup sidecar bound generated Frog");
-            // Isolated preview pauses ordinary Pikmin combat, so no natural squad
-            // kill can run. Force the death funnel once and label it injected.
-            frog->mHealth = 0.0f;
-            frog->pcEscapeNow();
-            carcassArmed = true;
-            std::puts("P2_GROINK_CARCASS_KILL_INJECTED host=generated_Frog generator=201001 method=pcEscapeNow health_write=1");
-            std::fflush(stdout);
+            if (carcassTicks % 60 == 0 || !pc_p2_groink_teki_is_bound(carcassHost)) {
+                std::printf("P2_GROINK_CARCASS_HOST tick=%d health=%.1f bound=%d reds=%d\n",
+                    carcassTicks, pc_p2_groink_teki_health(carcassHost),
+                    int(pc_p2_groink_teki_is_bound(carcassHost)), aliveReds());
+                std::fflush(stdout);
+            }
+            if (pc_p2_groink_teki_total_births() >= 1) {
+                std::printf("P2_GROINK_CARCASS_BIRTH_PASS ticks=%d total_births=%d\n",
+                    carcassTicks, pc_p2_groink_teki_total_births());
+                std::puts("PASS GROINK_RUNTIME carcass_natural_kill");
+                std::fflush(stdout); std::_Exit(0);
+            }
+            if (carcassTicks >= 1200) {
+                // Budget note: the sidecar's source 30 s gauge + 10 s recovery
+                // defaults would need ~2400 frames at 60 fps, so every run writes
+                // the short config (sidecar_config_short: 2 s + 3 s) to fit 1200.
+                std::printf("P2_GROINK_CARCASS_TIMEOUT ticks=%d total_births=%d reds=%d\n",
+                    carcassTicks, pc_p2_groink_teki_total_births(), aliveReds());
+                std::fflush(stdout);
+                std::_Exit(1);
+            }
             return result;
         }
         if (!pc_p2_preview_ready() || !naviMgr || !naviMgr->getNavi() || gameflow.mPauseAll || gameflow.mIsUIOverlayActive) { clock.reset(); return result; }
@@ -145,6 +161,37 @@ public:
         }
     }
 private:
+    int aliveReds() {
+        int count = 0;
+        Iterator it(pikiMgr); CI_LOOP(it) {
+            Piki* p = static_cast<Piki*>(*it);
+            if (p && p->isAlive() && p->mColor == Red) ++count;
+        }
+        return count;
+    }
+    // Lane 19 free-mode ring: deploy every live red on a 22-unit circle around the
+    // host and set FreeMode so the P1 auto-attack engages it. No Piki action is
+    // assigned and the host's health is never written (parameter/actor state is
+    // left to the source FSM).
+    void ringReds(Navi* n, BTeki* host) {
+        int total = aliveReds();
+        if (total <= 0) return;
+        int index = 0;
+        Iterator it(pikiMgr); CI_LOOP(it) {
+            Piki* p = static_cast<Piki*>(*it);
+            if (!p || !p->isAlive() || p->mColor != Red) continue;
+            const float angle = float(index) * 6.2831853f / float(total);
+            Vector3f spot(host->mSRT.t.x + 22.0f * std::sin(angle), 0.0f,
+                          host->mSRT.t.z + 22.0f * std::cos(angle));
+            spot.y = mapMgr->getMinY(spot.x, spot.z, true);
+            p->resetPosition(spot);
+            p->changeMode(PikiMode::FreeMode, n);
+            ++index;
+        }
+        std::printf("P2_GROINK_CARCASS_RING tick=%d reds=%d health=%.1f\n",
+                    carcassTicks, index, pc_p2_groink_teki_health(host));
+        std::fflush(stdout);
+    }
     void runProbes() {
         require(mapMgr && mapMgr->mMapModel, "map unavailable");
         float ground = mapMgr->getMinY(0, 0, false); require(std::isfinite(ground), "center ground unavailable");
