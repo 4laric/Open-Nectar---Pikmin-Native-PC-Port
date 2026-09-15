@@ -202,12 +202,13 @@ bool pc_p2_cave_checkpoint(bool confirm){
     }
     // Apply the source cave save filter (pikiMgr::caveSaveAllPikmins, pikiMgr.cpp
     // :723) and build the persisted squad. Wild Bulbmin dependents are dropped on
-    // a descent; every tracked Bulbmin is dropped on a cave exit. The live caller
-    // is pc_p2_bulbmin_transition; untracked (restored/injected) Bulbmin are kept.
+    // a descent; every tracked Bulbmin is dropped on a cave exit. The drop set is
+    // computed non-mutatingly so a failed write can retry without leaking bodies;
+    // the ledger is committed only after the transfer file is written.
     const bool exiting=!beasts && floorId!=1;
     const P2BulbminCaveTransition move=exiting?P2BulbminExitCave:P2BulbminDescendFloor;
     // Leader-down (alive cleared) saves an empty squad; do not touch the Bulbmin ledger then.
-    const std::vector<Piki*> dropped=alive.empty()?std::vector<Piki*>{}:pc_p2_bulbmin_transition(move);
+    const std::vector<Piki*> dropped=alive.empty()?std::vector<Piki*>{}:pc_p2_bulbmin_transition_removes(move);
     std::vector<Survivor> squad;
     squad.reserve(alive.size());
     for(Piki* p:alive){
@@ -215,8 +216,6 @@ bool pc_p2_cave_checkpoint(bool confirm){
         for(Piki* d:dropped){if(d==p){isDropped=true;break;}}
         if(!isDropped) squad.push_back({pc_p2_species(p),p->mHappa});
     }
-    if(!alive.empty()) std::printf("P2_CAVE_BULBMIN_TRANSITION move=%s removed=%zu kept=%zu exiting=%d\n",
-                exiting?"exit":"descend",dropped.size(),squad.size(),int(exiting));
     int writeSchema=checkpointSchema;
     for(const auto& s:squad){const int required=p2_schema_required_for_species(s.species);if(required>writeSchema)writeSchema=required;}
     std::ostringstream out;out.precision(9);
@@ -224,6 +223,11 @@ bool pc_p2_cave_checkpoint(bool confirm){
     else out<<"P2_CAVE_TRANSFER_"<<writeSchema<<'\n'<<token<<'\n'<<floorId<<' '<<health<<' '<<squad.size()<<'\n';
     for(const auto& s:squad)out<<s.species<<' '<<s.maturity<<'\n';
     if(!writeTransfer(out.str())){if(confirm)notice("Could not prepare the checkpoint. Stay on this floor and retry.");return false;}
+    // Commit the ledger mutation only now that the transfer file is durable, so a
+    // retry after a failed write still tracks every removed dependent.
+    if(!dropped.empty()) pc_p2_bulbmin_transition(move);
+    if(!alive.empty()) std::printf("P2_CAVE_BULBMIN_TRANSITION move=%s removed=%zu kept=%zu exiting=%d\n",
+                exiting?"exit":"descend",dropped.size(),squad.size(),int(exiting));
     completed=true;
     std::printf("P2_CAVE_TRANSFER floor=%d survivors=%zu health=%.9g failed=%d\n",floorId,squad.size(),health,int(squad.empty()));std::fflush(stdout);
     return true;

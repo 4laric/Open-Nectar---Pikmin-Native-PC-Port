@@ -152,6 +152,18 @@ void pc_p2_bulbmin_forget(Piki* piki) {
     idOfPiki.erase(found);
 }
 
+std::vector<Piki*> pc_p2_bulbmin_transition_removes(P2BulbminCaveTransition move) {
+    std::vector<Piki*> removed;
+    if (!active) return removed;
+    const std::vector<std::uint32_t> ids = bridge.transitionRemoves(move);
+    removed.reserve(ids.size());
+    for (const std::uint32_t id : ids) {
+        auto found = pikiOfId.find(id);
+        if (found != pikiOfId.end()) removed.push_back(found->second);
+    }
+    return removed;
+}
+
 std::vector<Piki*> pc_p2_bulbmin_transition(P2BulbminCaveTransition move) {
     std::vector<Piki*> removed;
     if (!active) return removed;
@@ -180,12 +192,6 @@ int pc_p2_bulbmin_phase(const Piki* piki) {
     const auto found = idOfPiki.find(const_cast<Piki*>(piki));
     if (found == idOfPiki.end()) return -1;
     return bridge.phaseOf(found->second);
-}
-
-bool pc_p2_bulbmin_should_save(const Piki* piki, bool isExitingCave) {
-    (void)isExitingCave; // surface-rebirth target not present; see policy doc
-    if (!piki) return true;
-    return p2_bulbmin_should_save(pc_p2_species(piki), pc_p2_bulbmin_phase(piki));
 }
 
 namespace {
