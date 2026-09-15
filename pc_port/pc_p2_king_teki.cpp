@@ -181,6 +181,9 @@ void pc_p2_king_teki_tick(BTeki* t) {
 	auto i = s.find(t);
 	if (i == s.end()) return;
 	Binding& b = i->second;
+	// The Emperor is an ambush predator: hold the host at its spawn so it does not
+	// wander off and drag the fight/carcass away from the squad.
+	t->mSRT.t = b.home;
 	if (t->mHealth <= 0.0f) {
 		if (!b.deadLogged) {
 			b.deadLogged = true;
