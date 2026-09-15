@@ -1044,7 +1044,9 @@ void GameCoreSection::initStage()
 				RamStream stream(card, static_cast<int>(size));
 				generatorCache->loadCard(stream);
 			}
-			std::printf("P2_GENCACHE_RESUME stage_id=%u bytes=%lld\n", flowCont.mCurrentStage->mStageID, (long long)size);
+			std::printf("P2_GENCACHE_RESUME stage_id=%u bytes=%lld bridge=%d bindings=%u\n",
+			            flowCont.mCurrentStage->mStageID, (long long)size,
+			            int(pc_randomizer_p2_bridge()), pc_randomizer_p2_binding_count());
 		}
 	}
 #endif
@@ -1056,6 +1058,16 @@ void GameCoreSection::initStage()
 		flowCont.mCurrentStage->mStageIndex;
 #endif
 	const bool hasAuthoritativeStageCache = generatorCache->preload(genCacheStage);
+#if defined(PIKMIN_RANDOMIZER_TEST_HOOKS)
+	if (pc_pikipelago_room_preview() && std::getenv("PIKMIN_P2_CACHE_RESUME")) {
+		Generator* g;
+		FOREACH_NODE_REUSE(Generator, generatorList->mGenListHead->mChild, g) {
+			std::printf("P2_GENCACHE_DUMP _70=%u uid=%u alive=%d day=%d ram=%d\n",
+			            unsigned(g->_70), pc_randomizer_generator_id(g),
+			            int(g->mAliveCount), int(g->mLatestSpawnDay), int(g->readFromRam()));
+		}
+	}
+#endif
 	memStat->end("genCache");
 	PRINT("--------------- GeneratorCache : preload done\n");
 
@@ -1120,15 +1132,23 @@ void GameCoreSection::initStage()
 	bool useDay     = false;
 	bool useInit    = false;
 	bool usePlant   = false;
+#if defined(PIKMIN_RANDOMIZER_TEST_HOOKS)
+	// lane-03 (#439): on a room cache-resume boot, the generator list already
+	// came from preload; skipping the default.gen disk read avoids duplicate
+	// room actors binding the same _70.
+	const bool resumeRoomCache = pc_pikipelago_room_preview() && std::getenv("PIKMIN_P2_CACHE_RESUME");
+#else
+	const bool resumeRoomCache = false;
+#endif
 	sprintf(path2, "%sdefault.gen", path);
 	RandomAccessStream* data = gsys->openFile(path2);
-	if (data) {
+	if (data && !resumeRoomCache) {
 		PRINT("DEFAULT GEN LOADED **********************************\n");
 		generatorMgr->read(*data, false);
 		data->close();
 		generatorMgr->updateUseList();
 		useDefault = true;
-	} else {
+	} else if (!resumeRoomCache) {
 		PRINT("*** NO GENERATOR FILE\n");
 		mNavi->mSRT.t.set(0.0f, 0.0f, 0.0f);
 		mNavi->mDayEndPosition = mNavi->mSRT.t;
@@ -2404,6 +2424,11 @@ void GameCoreSection::updateAI()
                             unsigned(gen->_70), unsigned(gen->mCarryOverFlags),
                             int(gen->mDayLimit), int(gameflow.mWorldClock.mCurrentDay));
                 if (gen->mCarryOverFlags & GENCARRY_SaveGenerator) {
+                    // Test-hook reset: a generator-only cache stores the post-birth
+                    // alive count, which would suppress re-birth on resume. Reset so
+                    // the second boot re-births fresh from the restored uid.
+                    gen->mAliveCount = 0;
+                    gen->mLatestSpawnDay = 0;
                     generatorCache->saveGenerator(gen);
                     ++gens;
                 }
