@@ -58,6 +58,7 @@ constexpr int kTiming[11] = { 30, 30, 10, 30, 30, 10, 10, 24, 45, 21, 20 };
 struct Binding {
     std::uint64_t generator = 0;
     int type = 0;
+    std::uint64_t rng = 0; // LCG seed for host-fed flick rolls (never the token)
     P2BombSaraiFsm fsm;
     P2BombSaraiFsmParms fsmParms;
     P2BombSaraiHover hover;
@@ -248,7 +249,7 @@ void stepCarrier(BTeki* t, Binding& b, float delta)
     in.keyEvent2 = keyEvent2;
     in.bitterQueued = false;
     in.killed = !t->isAlive();
-    in.flickRoll = nextRoll(b.generator);
+    in.flickRoll = nextRoll(b.rng);
     P2BombSaraiFsmOutput out;
     b.fsm.update(in, out);
     if (out.entered) {
@@ -386,6 +387,7 @@ void pc_p2_bombsarai_teki_setup()
         Binding b;
         b.generator = generator;
         b.type = type;
+        b.rng = generator;
         readConfig(b);
         b.fsm.reset(b.fsmParms);
         b.hover.reset(b.hoverParms);
