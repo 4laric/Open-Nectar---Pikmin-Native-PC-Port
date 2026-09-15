@@ -50,7 +50,7 @@
 
 namespace {
 constexpr int kStageA_Frames = 45;
-constexpr int kMaxFrames = 3600;
+constexpr int kMaxFrames = 9000;
 constexpr float kPurpleOffsetX[3] = { 30.0f, 0.0f, -30.0f };
 constexpr float kPurpleOffsetZ[3] = { 0.0f, 30.0f, 0.0f };
 constexpr float kRedOffsetX[2] = { 50.0f, -50.0f };
@@ -103,6 +103,8 @@ class WaterwraithEncounterApp final : public PlugPikiApp {
     bool stageAOk = false;
     bool captured = false;
     bool reentryChecked = false;
+    bool corpseGrabStaged = false;
+    bool deliveredLogged = false;
 
 public:
     int idle() override
@@ -159,12 +161,17 @@ public:
         }
 
         // Keep two reds under the rollers (crush). This never damages the actor.
-        const int redCount = 2;
-        for (int i = 0; i < redCount && i < static_cast<int>(squad.size()); ++i) {
-            if (!squad[i]->isAlive()) {
-                continue;
+        // Once the wraith is finished, stop steering the squad so idle Pikmin
+        // can pick up the corpse stand-in and carry it to the Pod.
+        const bool dead = pc_p2_waterwraith_register_finished();
+        if (!dead) {
+            const int redCount = 2;
+            for (int i = 0; i < redCount && i < static_cast<int>(squad.size()); ++i) {
+                if (!squad[i]->isAlive()) {
+                    continue;
+                }
+                squad[i]->resetPosition(Vector3f(ref.x + kRedOffsetX[i], 0.0f, ref.z + kRedOffsetZ[i]));
             }
-            squad[i]->resetPosition(Vector3f(ref.x + kRedOffsetX[i], 0.0f, ref.z + kRedOffsetZ[i]));
         }
 
         if (!stageAOk) {
@@ -191,11 +198,24 @@ public:
             convertedPurple = true;
             std::printf("P2_WATERWRAITH_ENCOUNTER_PURPLE_SETUP\n");
         }
-        for (int i = 0; i < 3 && i < static_cast<int>(squad.size()); ++i) {
-            if (!squad[i]->isAlive()) {
-                continue;
+        if (!dead) {
+            for (int i = 0; i < 3 && i < static_cast<int>(squad.size()); ++i) {
+                if (!squad[i]->isAlive()) {
+                    continue;
+                }
+                squad[i]->resetPosition(Vector3f(ref.x + kPurpleOffsetX[i], 0.0f, ref.z + kPurpleOffsetZ[i]));
             }
-            squad[i]->resetPosition(Vector3f(ref.x + kPurpleOffsetX[i], 0.0f, ref.z + kPurpleOffsetZ[i]));
+        } else if (!corpseGrabStaged) {
+            // Death is done: place the surviving squad on the corpse stand-in so
+            // the idle-goals pick it up; then stop steering and let them carry.
+            for (int i = 0; i < 3 && i < static_cast<int>(squad.size()); ++i) {
+                if (!squad[i]->isAlive()) {
+                    continue;
+                }
+                squad[i]->resetPosition(Vector3f(ref.x, 0.0f, ref.z));
+            }
+            corpseGrabStaged = true;
+            std::printf("P2_WATERWRAITH_CARRY_SETUP\n");
         }
 
         return result;
@@ -220,6 +240,19 @@ public:
 
         require(pc_p2_waterwraith_register_tyre_health() <= 0.0f, "roller health not zeroed");
         require(pc_p2_waterwraith_register_body_health() <= 0.0f, "body health not zeroed");
+
+        // Corpse carry + Pod receipt: ordinary Pikmin carry the spawn stand-in to
+        // the Pod; pc_p2_preview_deliver recognizes it via the family map and the
+        // durable P2Economy ledger credits it, logging P2_POD_RECEIPT + the
+        // P2_WATERWRAITH_POD_RECEIPT marker from pc_p2_waterwraith_receipt.
+        if (pc_p2_waterwraith_delivery_count() == 0) {
+            return; // still carrying
+        }
+        if (!deliveredLogged) {
+            std::printf("P2_WATERWRAITH_ENCOUNTER_DELIVERED deliveries=%u\n",
+                        pc_p2_waterwraith_delivery_count());
+            deliveredLogged = true;
+        }
 
         // Snapshot the combat counters before cleanup zeroes them.
         const P2WaterwraithEncounterStats summary = pc_p2_waterwraith_encounter_stats();
@@ -250,7 +283,7 @@ public:
 
         capture("waterwraith-encounter.ppm");
         std::printf("P2_WATERWRAITH_ENCOUNTER_PASS stuns=%llu hits=%llu crushes=%llu damage=%.1f "
-                    "zeroed=1 child_removed=1 body_zeroed=1 treasure=1 kill=1\n",
+                    "zeroed=1 child_removed=1 body_zeroed=1 treasure=1 kill=1 delivered=1\n",
                     static_cast<unsigned long long>(summary.stunned),
                     static_cast<unsigned long long>(summary.purpleHits),
                     static_cast<unsigned long long>(summary.crushes), summary.damageDealt);

@@ -27,6 +27,9 @@ MARKERS = (
     "P2_WATERWRAITH_BODY_ZERO",
     "P2_WATERWRAITH_CORPSE",
     "P2_WATERWRAITH_FINISHED",
+    "P2_WATERWRAITH_CARRY_SETUP",
+    "P2_WATERWRAITH_POD_RECEIPT",
+    "P2_WATERWRAITH_ENCOUNTER_DELIVERED",
     "P2_WATERWRAITH_ENCOUNTER_PASS",
     "PASS WATERWRAITH_ENCOUNTER_RUNTIME",
 )
@@ -107,12 +110,20 @@ def verify_log(text):
     if not re.search(r"^P2_WATERWRAITH_FINISHED\s+tick=\d+\s+bodyHealth=0\.0\s*$", text,
                      flags=re.MULTILINE):
         errors.append("missing teardown marker")
+    if not re.search(r"^P2_WATERWRAITH_CARRY_SETUP\s*$", text, flags=re.MULTILINE):
+        errors.append("missing carry-setup marker")
+    if not re.search(r"^P2_WATERWRAITH_POD_RECEIPT\s+generator=\d+\s+deliveries=\d+\s*$", text,
+                     flags=re.MULTILINE):
+        errors.append("missing waterwraith Pod receipt marker")
+    if not re.search(r"^P2_WATERWRAITH_ENCOUNTER_DELIVERED\s+deliveries=\d+\s*$", text,
+                     flags=re.MULTILINE):
+        errors.append("missing encounter delivered marker")
     if not re.search(r"^P2_WATERWRAITH_ENCOUNTER_DEATH_REENTRY\s+ready=1\s+attached=1\s*$", text,
                      flags=re.MULTILINE):
         errors.append("missing death cleanup/re-entry marker")
     passed = re.search(r"^P2_WATERWRAITH_ENCOUNTER_PASS\s+stuns=(\d+)\s+hits=(\d+)\s+crushes=(\d+)\s+"
                        r"damage=([\d.]+)\s+zeroed=1\s+child_removed=1\s+body_zeroed=1\s+"
-                       r"treasure=1\s+kill=1\s*$", text, flags=re.MULTILINE)
+                       r"treasure=1\s+kill=1\s+delivered=1\s*$", text, flags=re.MULTILINE)
     if not passed:
         errors.append("missing encounter PASS marker")
     else:
@@ -212,11 +223,11 @@ def main(argv=None):
         record["inputs"]["preview_helper"] = file_record(root / "scripts" / "preview_pikmin2_room.py")
         command = [str(executable), "--experimental-pikmin2-room"]
         record["command"] = command
-        result = subprocess.run(command, cwd=run, env=dict(os.environ), timeout=90,
+        result = subprocess.run(command, cwd=run, env=dict(os.environ), timeout=150,
                                 text=True, encoding="utf-8", errors="replace", capture_output=True)
         (run / "stdout.log").write_text(result.stdout, encoding="utf-8")
         (run / "stderr.log").write_text(result.stderr, encoding="utf-8")
-        record["subprocess"] = {"returncode": result.returncode, "timeout_seconds": 90,
+        record["subprocess"] = {"returncode": result.returncode, "timeout_seconds": 150,
                                 "stdout": file_record(run / "stdout.log"),
                                 "stderr": file_record(run / "stderr.log")}
         errors = verify_log(result.stdout + "\n" + result.stderr)
