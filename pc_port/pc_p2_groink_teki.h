@@ -1,5 +1,6 @@
 #pragma once
 class BTeki;
+class PelletView;
 // Family sidecar binding the parked P2GroinkCarcass policy to a live generated
 // Groink host actor (MiniHoudai 78 / FminiHoudai 97).  Binding is read from
 // p2-groink-teki.txt at finalSetup; the carcass lifecycle is then driven once
@@ -22,3 +23,7 @@ int pc_p2_groink_teki_births(const BTeki*);
 // runtime fixture can observe that the birth marker fired without re-reading the
 // now-torn-down actor. Monotonic; reset only on a full process reset.
 int pc_p2_groink_teki_total_births();
+// Pod receipt: maps a carried corpse pellet's PelletView back to the bound
+// Groink host generator, so pc_p2_preview_deliver can credit
+// `corpse:groink:<gen>`. Returns false for any pellet this sidecar does not own.
+bool pc_p2_groink_receipt(PelletView* view, unsigned& generator);

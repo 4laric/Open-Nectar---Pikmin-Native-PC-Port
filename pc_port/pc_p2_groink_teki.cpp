@@ -51,6 +51,13 @@ int pc_p2_groink_teki_births(const BTeki* t) {
     return b ? b->births : 0;
 }
 int pc_p2_groink_teki_total_births() { return p2_groink_carcass_total_births(); }
+bool pc_p2_groink_receipt(PelletView* view, unsigned& generator) {
+    if (!view) return false;
+    const Binding* b = find(static_cast<BTeki*>(view));
+    if (!b) return false;
+    generator = b->generator;
+    return true;
+}
 
 void pc_p2_groink_teki_setup() {
     pc_p2_groink_teki_reset();
