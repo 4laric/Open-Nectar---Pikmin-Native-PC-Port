@@ -276,17 +276,18 @@ void pc_p2_tamago_birth_group(BTeki* host, int count) {
     // Source createGroup follower placement: birthRadius*(45*sin/cos) around the
     // leader (tamagoMushiMgr.cpp:152-178), leaders self-own.
     for (int i = 0; i < follow; ++i) {
-        Teki* child = host->spawnTeki(TEKI_Chappy);
+        // generateTeki births a fresh Chappy-vehicle Teki with its personality
+        // inherited from the host but NO spawn position/launch velocity (spawnTeki
+        // would apply SpawnVelocity*Strength and fling the child out of the arena).
+        Teki* child = host->generateTeki(TEKI_Chappy);
         if (!child) continue;  // null birth tolerated (source skips, count short)
-        // spawnTeki applies a launch velocity (SpawnVelocity*Strength) + startAI
-        // before we reposition; cancel it so the child stays in the host's group.
-        child->stopMove();
         const float radius = 0.5f + 0.5f * (float(unsigned(i * 2654435761u) >> 8) / 32768.0f);
         const float face = 6.28318531f * float(i) / float(count);
         const Vector3f offset(45.0f * radius * std::sin(face), 0.0f,
                               45.0f * radius * std::cos(face));
         Vector3f pos = hostPos + offset;
         child->inputPosition(pos);
+        child->startAI(0);
         const unsigned gen = hostGen + 1u + unsigned(i);
         Tamago& s = actors[static_cast<PelletView*>(child)];
         s.generator = gen;
