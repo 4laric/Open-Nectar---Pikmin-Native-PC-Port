@@ -185,8 +185,7 @@ void astonishContacts(BTeki* a, Tamago& s) {
             inside.insert(p);
             if (s.inContact.count(p)) continue;
             p->stimulate(InteractFlick(a, FLICK_KNOCKBACK, 0.0f, a->getDirection()));
-            std::printf("P2_TAMAGO_ASTONISH generator=%u pikmin=1\n",
-                        a->mGenerator ? a->mGenerator->_70 : 0u);
+            std::printf("P2_TAMAGO_ASTONISH generator=%u pikmin=1\n", s.generator);
             std::fflush(stdout);
         }
     }
@@ -201,8 +200,7 @@ void dropHoney(BTeki* a, Tamago& s) {
     if (!drop) return;
     drop->init(pos);
     drop->startAI(0);
-    std::printf("P2_TAMAGO_HONEY generator=%u source_id=68\n",
-                a->mGenerator ? a->mGenerator->_70 : 0u);
+    std::printf("P2_TAMAGO_HONEY generator=%u source_id=68\n", s.generator);
     std::fflush(stdout);
 }
 }
