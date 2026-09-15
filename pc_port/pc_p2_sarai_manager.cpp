@@ -97,6 +97,13 @@ std::unique_ptr<P2SaraiHost> buildHost(BTeki* match)
 
     const Vector3f home = match->getPosition();
     host->setPosition(home);
+    // Static bind: draw the Sarai and keep the anchor at its spawn for combat/
+    // transport acceptance fixtures that must not have the captor move it.
+    const char* staticMode = std::getenv("PIKMIN_SARAI_STATIC");
+    if (staticMode && std::strcmp(staticMode, "1") == 0) {
+        if (!host->bindNativeActor(match, match->mGenerator->_70, match->mTekiType)) return nullptr;
+        return host;
+    }
     // The converted private room's only spawned enemy starts away from the
     // captain and no patrol/scan state is implemented here, so the view cone is
     // widened and the territory/sight radii cover the room (same accommodation
@@ -153,6 +160,7 @@ void pc_p2_sarai_manager_update_actor(BTeki* actor)
 {
     static int tickCount = 0;
     static bool sawCapture = false;
+    static bool sawDeath = false;
     auto it = s.find(actor);
     if (it == s.end()) return;
     auto& binding = it->second;
@@ -165,7 +173,15 @@ void pc_p2_sarai_manager_update_actor(BTeki* actor)
     // the Sarai host so Pikmin can reach and damage it; the host owns the
     // behaviour and visual. On death the engine corpse path takes over.
     if (actor->isAlive()) actor->mSRT.t = binding.host->position();
-    else corpses[actor] = binding.generator;
+    else {
+        corpses[actor] = binding.generator;
+        if (!sawDeath) {
+            sawDeath = true;
+            std::printf("P2_SARAI_DEAD source_id=23 generator=%u health=%.1f\n",
+                        binding.generator, actor->mHealth);
+            std::fflush(stdout);
+        }
+    }
     binding.host->update();
     ++tickCount;
     if (binding.host->occupied() && !sawCapture) {
