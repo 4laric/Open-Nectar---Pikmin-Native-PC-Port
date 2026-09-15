@@ -21,7 +21,7 @@
 #include "../timing/pc_render_phase.h"
 #include "../timing/pc_tick_profiler.h"
 
-#include "pc_p2_specular_dir.h"
+#include "../pc_p2_specular_dir.h"
 #include "pc_opengl.h"
 
 // ── GL Function Pointers (Loaded via SDL_GL_GetProcAddress) ──
