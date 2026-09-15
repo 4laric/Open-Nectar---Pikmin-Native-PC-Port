@@ -6,10 +6,13 @@
 // 632af93787b9c95b63f0c13be32b161375ce3a96.
 //
 // Port adaptations (recorded, not retail-faithful):
-//   * The carried Egg (EnemyID_Egg 37, joint "water") is reported through
-//     P2_QURIONE_EGG action=attach|drop markers. The shared Egg projectile is
-//     owned by lane 20, so no duplicate primitive is spawned here; the host
-//     reward remains P1 nectar.
+//   * The carried Egg (EnemyID_Egg 37, joint "water") is a real source reward
+//     now: this host reuses lane 20's integrated `P2Egg` policy
+//     (pc_p2_egg_hazard.*) rather than reimplementing the primitive. On Drop the
+//     carried egg is released (endCapture), falls under a bounded host gravity,
+//     breaks on floor contact (bounceCallback), and births the source drop table
+//     (single/double nectar, pellets, mitites->nectar fallback) as real P1
+//     items. Spicy/Bitter sprays stay unsupported (first-spray demo flag).
 //   * The qurione bank does not carry KEYEVENT frames, so the Drop release
 //     fires at half the damage clip (recorded adaptation).
 //   * Sight is a distance test (SIGHT); the source uses viewAngle *
@@ -21,7 +24,11 @@
 #include "pc_p2_qurione_policy.h"
 #include "pc_p2_enemy.h"
 #include "pc_p2_sheargrub.h"
+#include "pc_p2_egg_hazard.h"
 #include "teki.h"
+#include "Pellet.h"
+#include "ItemMgr.h"
+#include "ObjType.h"
 #include "system.h"
 #include "MapMgr.h"
 #include "Generator.h"
@@ -75,6 +82,11 @@ constexpr float TURN_RATE = 3.14159265f; // unused fallback heading rate
 constexpr float HIT_RADIUS = 30.0f;      // Piki contact -> Drop
 constexpr float DROP_FRACTION = 0.5f;    // recorded adaptation (no bank events)
 
+// Carried-Egg reward host (consumes lane-20 P2Egg policy).
+constexpr float EGG_GRAVITY = 500.0f;    // host fall acceleration (units/s^2)
+constexpr float EGG_MAX_FALL = 200.0f;   // host terminal fall speed
+constexpr float EGG_FLOOR_PAD = 2.0f;    // floor-contact tolerance
+
 struct Wisp {
     QState state = QS_STAY;
     float stateTime = 0.0f;
@@ -86,9 +98,17 @@ struct Wisp {
     bool eggAttached = true;
     bool dropFired = false;
     bool deadLogged = false;
+    bool probeLogged = false;
     float logTimer = 0.0f;
     std::string clip = "appear1";
     float phase = 0.0f;
+    // Real carried-Egg reward host (lane-20 P2Egg policy).
+    P2Egg egg;
+    bool eggBorn = false;
+    bool eggReleased = false;
+    bool eggBroken = false;
+    Vector3f eggPos;
+    float eggFallVel = 0.0f;
 };
 
 std::map<std::string, std::vector<Shape*>> clips;
@@ -147,6 +167,106 @@ void enter(Wisp& w, QState state, const char* clip) {
     w.state = state;
     w.stateTime = 0.0f;
     if (clip) w.clip = clip;
+}
+
+// Real carried-Egg reward host. The disc Egg proper parms are fp01..fp05
+// (singleNectar 0.5, doubleNectar 0.35, mitites 0.05, spicy 0.05, bitter 0.05)
+// and general fp00 health 50 (egg.cpp; docs/PIKMIN2_CANNON_PROJECTILE_ASSETS.md
+// §5). Never invented here.
+P2EggConfig qurioneEggConfig() {
+    P2EggConfig c;
+    c.singleNectarChance = 0.5f;
+    c.doubleNectarChance = 0.35f;
+    c.mititesChance = 0.05f;
+    c.spicyChance = 0.05f;
+    c.bitterChance = 0.05f;
+    c.checkHasSpray = true;
+    c.health = 50.0f;
+    return c;
+}
+
+float eggRandFloat(void* ctx) {
+    (void)ctx;
+    return gsys ? gsys->getRand(1.0f) : 0.0f;
+}
+
+int eggRandInt(void* ctx, int count) {
+    (void)ctx;
+    if (count <= 0) return 0;
+    return gsys ? int(gsys->getRand(float(count))) % count : 0;
+}
+
+// Map the P2Egg policy drop onto the P1 host managers (same birth mapping as
+// pc_p2_projectiles.cpp): pellets via pelletMgr, nectar via OBJTYPE_Water
+// (ItemHoney HONEY_Y), mitite groups downgrade to nectar (no Mitite manager),
+// spicy/bitter sprays unsupported until the first-spray demo flag.
+void qurioneEggBirthItems(const P2EggDrop& drop, const Vector3f& base, unsigned gen) {
+    // egg.cpp:249: every non-spray item spawns at positionOffsetY above the egg.
+    const Vector3f spawnBase(base.x, base.y + drop.positionOffsetY, base.z);
+    for (int i = 0; i < drop.itemCount && i < 2; ++i) {
+        const P2EggItem& item = drop.items[i];
+        P2EggSpawnKind kind = item.kind;
+        bool fallback = false;
+        if (kind == P2EggSpawnKind::MititeGroup && drop.mititeFallbackToNectar) {
+            kind = P2EggSpawnKind::Nectar;
+            fallback = true;
+        }
+        bool birthed = false;
+        const char* born = "none";
+        if (kind == P2EggSpawnKind::PelletOne || kind == P2EggSpawnKind::PelletFive) {
+            if (pelletMgr) {
+                Pellet* pellet = pelletMgr->newNumberPellet(
+                    item.pelletColor,
+                    kind == P2EggSpawnKind::PelletFive ? NUMPEL_FivePellet : NUMPEL_OnePellet);
+                if (pellet) {
+                    pellet->init(spawnBase);
+                    pellet->mVelocity.set(item.velocity.x, item.velocity.y, item.velocity.z);
+                    pellet->startAI(0);
+                    birthed = true;
+                    born = "pellet";
+                }
+            }
+        } else if (kind == P2EggSpawnKind::Nectar) {
+            if (itemMgr) {
+                Creature* nectar = itemMgr->birth(OBJTYPE_Water);
+                if (nectar) {
+                    nectar->init(spawnBase);
+                    nectar->startAI(0);
+                    birthed = true;
+                    born = "nectar";
+                }
+            }
+        } else {
+            born = "unsupported";
+        }
+        std::printf("P2_QURIONE_EGG_ITEM generator=%u index=%d kind=%d real=%d fallback=%d item=%s "
+                    "x=%.1f y=%.1f z=%.1f\n",
+                    gen, i, int(item.kind), int(birthed), int(fallback), born,
+                    spawnBase.x, spawnBase.y, spawnBase.z);
+    }
+}
+
+// Tick the released Egg: bounded host gravity fall, floor contact -> bounce
+// (health 0), then the policy computes and births the drop exactly once.
+void qurioneEggTick(Wisp& w, const unsigned gen, float dt) {
+    if (!w.eggBorn || !w.eggReleased || w.eggBroken) return;
+    w.eggFallVel -= EGG_GRAVITY * dt;
+    if (w.eggFallVel < -EGG_MAX_FALL) w.eggFallVel = -EGG_MAX_FALL;
+    w.eggPos.y += w.eggFallVel * dt;
+    const float floorY = mapMgr ? mapMgr->getMinY(w.eggPos.x, w.eggPos.z, true) : w.eggPos.y;
+    if (w.eggPos.y <= floorY + EGG_FLOOR_PAD) {
+        w.eggPos.y = floorY + EGG_FLOOR_PAD;
+        if (w.egg.bounce()) {
+            std::printf("P2_QURIONE_EGG_BOUNCE generator=%u health_zeroed=1\n", gen);
+        }
+    }
+    if (w.egg.health() <= 0.0f && w.egg.update(eggRandFloat, nullptr, eggRandInt, nullptr)) {
+        w.eggBroken = true;
+        const P2EggDrop& drop = w.egg.drop();
+        std::printf("P2_QURIONE_EGG_BREAK generator=%u type=%d items=%d real=1\n",
+                    gen, int(drop.type), drop.itemCount);
+        qurioneEggBirthItems(drop, w.eggPos, gen);
+    }
 }
 }
 
@@ -279,12 +399,26 @@ void pc_p2_qurione_setup() {
         w.timer = 0.0f;
         w.clip = "appear1";
         actor->mHealth = LIFE;
+        // Source onInit calls doAnimationCullingOff(): the wisp is never
+        // AI/LOD culled. On the P1 host the equivalent is CF_AIAlwaysActive,
+        // otherwise Creature::update early-returns (creature.cpp:677) once the
+        // wisp leaves the AI grid and its movement pass (moveNew) stops
+        // executing, freezing the position mid-Move.
+        actor->setInsideView();
         const unsigned gen = actor->mGenerator->_70;
         std::printf("P2_QURIONE_BIND generator=%u source_id=16 visual_only=0\n", gen);
         std::printf("P2_ENEMY_READY species=Qurione native_family=Qurione generator=%u x=%.7f y=%.7f z=%.7f "
                     "health=%.1f max_health=%.1f behavior=native source_FSM=implemented reward=P2_Egg\n",
                     gen, pos.x, pos.y, pos.z, actor->mHealth, LIFE);
         std::printf("P2_QURIONE_EGG generator=%u action=attach\n", gen);
+        w.egg.reset(qurioneEggConfig());
+        if (w.egg.birth(false)) {
+            w.egg.onStartCapture();
+            w.eggBorn = true;
+            w.eggPos = Vector3f(pos.x, pos.y, pos.z);
+            w.eggFallVel = 0.0f;
+        }
+        std::printf("P2_QURIONE_EGG_REAL generator=%u born=%d drop_group=0\n", gen, int(w.eggBorn));
     }
     std::printf("P2_QURIONE_BANK poses=%zu mod_bytes=%zu texture_attach_calls=%d load_seconds=%.3f\n",
                 poses, total, attachments, std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count());
@@ -300,10 +434,25 @@ void pc_p2_qurione_update(BTeki* actor) {
     auto it = actors.find(static_cast<PelletView*>(actor));
     if (it == actors.end()) return;
     Wisp& w = it->second;
+    // Idempotent re-apply each frame: Creature::init (creature.cpp:429) resets
+    // CF_AIAlwaysActive, and setup-only setInsideView would not survive a
+    // re-entry/new-scene bind, re-freezing Move via the culling early-return.
+    actor->setInsideView();
     const float dt = gsys->getFrameTime();
     if (dt <= 0.0f || dt > 0.5f) return;
     const unsigned gen = actor->mGenerator ? actor->mGenerator->_70 : 0u;
     const Vector3f pos = actor->getPosition();
+    // Env-gated first-NaN probe (evidence; off by default). The prior probe
+    // build was a dirty tree, so this gate makes it reproducible:
+    //   PIKMIN_P2_NAN_PROBE=1 nectar.exe --experimental-pikmin2-room
+    if (std::getenv("PIKMIN_P2_NAN_PROBE") && !w.probeLogged
+        && (pos.x != pos.x || pos.y != pos.y || pos.z != pos.z)) {
+        w.probeLogged = true;
+        std::printf("[PC_L15_PROBE] first_nan state=%d vel=(%.3f,%.3f,%.3f) pos=(%.3f,%.3f,%.3f)\n",
+                    int(w.state), (double)actor->mVelocity.x, (double)actor->mVelocity.y,
+                    (double)actor->mVelocity.z, (double)pos.x, (double)pos.y, (double)pos.z);
+        std::fflush(stdout);
+    }
     w.stateTime += dt;
     switch (w.state) {
     case QS_STAY:
@@ -361,6 +510,13 @@ void pc_p2_qurione_update(BTeki* actor) {
             w.dropFired = true;
             w.eggAttached = false;
             std::printf("P2_QURIONE_EGG generator=%u action=drop\n", gen);
+            if (w.eggBorn && !w.eggReleased) {
+                w.eggReleased = true;
+                w.egg.onEndCapture();
+                w.eggPos = pos;
+                w.eggFallVel = 0.0f;
+                std::printf("P2_QURIONE_EGG_REAL generator=%u released=1\n", gen);
+            }
         }
         if (w.stateTime >= clipDuration("damage")) {
             std::printf("P2_QURIONE_STATE generator=%u state=dead\n", gen);
@@ -381,6 +537,7 @@ void pc_p2_qurione_update(BTeki* actor) {
     default:
         break;
     }
+    qurioneEggTick(w, gen, dt);
     {
         const float duration = clipDuration(w.clip);
         w.phase = duration > 0.0f ? w.stateTime / duration : 0.0f;
