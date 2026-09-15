@@ -176,6 +176,7 @@ pc_p2_sarai_manager_reset();
     pc_p2_imomushi_reset();
 	pc_p2_batch3_reset();
 	pc_p2_long_legs_reset();
+	pc_p2_hardlanes_reset();
 	pc_p2_waterwraith_reset();
 	// Lane 06: close and clear the process-wide ordinary delivery ledger at the
 	// stage boundary, so the next stage/session reopens it fresh (the handle is
