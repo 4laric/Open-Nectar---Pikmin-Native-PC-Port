@@ -14,6 +14,15 @@ inline const Params& params(int kind){
 // joint radius 23, MaroFrog 21. The landing press uses this radius around the
 // actor; the head joint offset itself is under 1.5 units in XZ.
 inline float headRadius(int kind){return kind?21.0f:23.0f;}
+// Source FROGANIM motion id for each FSM state (Frog.h AnimID). FROG_* state
+// ordinals mirror Frog.h StateID so the transition markers stay source-faithful:
+// Dead 0, Wait 1, Turn 2, Jump 3, JumpWait 4, Fall 5, Attack 6, Fail 7,
+// TurnToHome 8, GoHome 9.
+inline const char* stateName(int state){
+ switch(state){case 0:return "dead";case 1:return "wait";case 2:return "turn";
+ case 3:return "jump";case 4:return "jumpwait";case 5:return "fall";
+ case 6:return "attack";case 7:return "fail";case 8:return "turntohome";
+ case 9:return "gohome";default:return "null";}}
 inline const char* motionClip(int m){
 // PaniAnimator enum and TaiOtimoti actions; Flick is jump wind-up; unmatched motions use static fallback.
 switch(m){case 0:return "dead";case 1:return "damage";case 2:return "wait1";
