@@ -34,7 +34,7 @@ bool pc_p2_hardlanes_bigtreasure_hit(int weapon, float damage, bool bittered);
 //   * ready() reports whether the ordinary BigTreasure seam is installed live.
 //   * weapon_count() reports the live attached-weapon count (4 at full loadout),
 //     so a natural-hit ingress can be observed knocking a weapon off (4->3).
-//   * recv_probe() drives the the ordinary loop's per-attack handled set +
+//   * recv_probe() drives the ordinary loop's per-attack handled set +
 //     elemental receiver against one live Piki exactly as the loop would, and
 //     is only here so a real-GL fixture can prove "no re-stimulation"
 //     deterministically. Returns 1 applied-accepted, -1 applied-but-immunity,

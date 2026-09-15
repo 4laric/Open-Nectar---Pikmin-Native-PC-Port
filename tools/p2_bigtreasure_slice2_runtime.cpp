@@ -3,12 +3,17 @@
 // only (not part of the game target). Boots the frozen room preview with the
 // live 20-red squad and observes, on real live Pikmin:
 //   * the wired receiver host applies the source stimulus (non-immune target
-//     enters the hazard state) and rejects immune targets (Red/fire, Blue/water);
-//   * the element geometry resolves a hit against a live target positioned
-//     inside a running water attack;
-//   * the ordinary loop's per-attack handled set prevents re-stimulation;
-//   * one weapon is destroyed through the natural-hit ingress
-//     (pc_p2_hardlanes_bigtreasure_hit) and the attached-weapon count drops.
+//     enters the hazard state) and rejects immune targets (Red/fire, Blue/water).
+//     These are DIRECT host-helper calls on live Pikmin; the ordinary loop's
+//     attack -> element-geometry -> receiver path is NOT driven here (a
+//     standalone element runtime + a teleported Pikmin is used for the geometry
+//     check, with host.trace=nullptr).
+//   * the handled set dedups (probe first=1, second=0); this proves set-dedupe
+//     only, not per-attack re-arm.
+//   * one weapon is knocked off through the lane's natural-hit ingress
+//     (pc_p2_hardlanes_bigtreasure_hit) — an INJECTED max-health hit, since no
+//     engine-side caller or Pikmin coll-part attacker exists. The attached-
+//     weapon count drops; the FSM is still in its boot landing (no re-pick).
 //
 // The 960x540 centred window and the live starting squad are asserted at boot.
 
@@ -53,9 +58,8 @@ void require(bool value, const char* message)
     }
 }
 
-// Returns an alive Red field Pikmin, preferring one in a normal state, so each
-// receiver check uses a distinct fresh target and the injected Blue identity
-// cannot leak into a later check.
+// Returns an alive field Pikmin in a normal state (falling back to any alive
+// Pikmin), so each receiver check uses a distinct fresh target.
 Piki* freshPiki()
 {
     if (!pikiMgr) {
@@ -66,9 +70,6 @@ Piki* freshPiki()
     CI_LOOP(it) {
         Piki* piki = static_cast<Piki*>(*it);
         if (!piki || !piki->isAlive()) {
-            continue;
-        }
-        if (pc_p2_species(piki) != P2SpeciesRed) {
             continue;
         }
         if (!fallback) {
@@ -198,13 +199,15 @@ private:
         // Water on a Blue (injected identity): source InteractBubble rejects
         // Blue, so the wired receiver returns false. Identity injection is
         // labelled; the live squad is all Red, so Blue cannot be observed
-        // naturally in this arena.
+        // naturally in this arena. The species is restored to Red afterwards so
+        // the injected identity does not leak into later checks.
         Piki* blue = freshPiki();
         require(blue != nullptr && pc_p2_set_species(blue, P2SpeciesBlue),
                 "inject blue species");
         require(!pc_p2_bigtreasure_stimulate_piki(P2BTWEAPON_Water, origin,
                                                   kBigTreasureDefaultAttackDamage, blue),
                 "water-blue immune (accepted=0)");
+        require(pc_p2_set_species(blue, P2SpeciesRed), "restore red species");
         std::printf("P2_BIGTREASURE_SLICE2_IMMUNE weapon=water species=blue(injected)\n");
 
         // Element geometry -> live target: a running water attack emits a
@@ -240,9 +243,11 @@ private:
         runtime.defeat();
         std::printf("P2_BIGTREASURE_SLICE2_GEOMETRY weapon=water species=red state=Bubble\n");
 
-        // Per-attack handled set: the ordinary loop's probe stimulates a target
-        // at most once per attack, so a second probe returns 0 (no
-        // re-stimulation). Reuses the same set the ordinary update drives.
+        // Handled-set dedup: the probe reuses the ordinary loop's handled set,
+        // so a second probe of the same target returns 0 (no re-stimulation) and
+        // the probe removes its transient entry. This proves set-dedupe only;
+        // per-attack re-arm (attack-start clear) is not exercised without a real
+        // attack.
         Piki* handled = freshPiki();
         require(handled != nullptr, "fresh red for handled-set proof");
         const int first = pc_p2_hardlanes_bigtreasure_recv_probe(P2BTWEAPON_Water, handled);
@@ -256,20 +261,23 @@ private:
 
     void runPhaseTransition()
     {
-        // The live seam is installed by pc_p2_hardlanes_setup when the opt-in
-        // host profile is present, so the natural-hit ingress drives the SAME
-        // ordinary FSM the game loop runs.
+        // NOTE (injected): the knock-off below is driven by this fixture posting
+        // a max-health hit through pc_p2_hardlanes_bigtreasure_hit, the lane's
+        // natural-hit ingress. There is NO engine-side caller of that ingress and
+        // no Pikmin coll-part attacker, so this is an INJECTED weapon destroy,
+        // equivalent to writing the weapon's health to zero. It proves the FSM
+        // host knock-off + count drop, not a natural Pikmin attack, and the FSM
+        // is still in its boot landing (Stay->Land); no PreAttack/pickWeapon
+        // re-pick is exercised.
         require(pc_p2_hardlanes_bigtreasure_ready(), "ordinary seam active");
         if (phaseWait == 0) {
             weaponsBefore = pc_p2_hardlanes_bigtreasure_weapon_count();
             require(weaponsBefore == 4, "four weapons attached");
             std::printf("P2_BIGTREASURE_SLICE2_DIAG phase_weapons_before=%d\n", weaponsBefore);
-            // Route a full-health hit against the elec weapon through the
-            // natural-hit ingress. No direct FSM-host health is written.
             require(pc_p2_hardlanes_bigtreasure_hit(P2BTWEAPON_Elec,
                                                     P2BigTreasureOwnership::kWeaponMaxHealth,
                                                     false),
-                    "natural-hit ingress accepts the hit");
+                    "ingress accepts the max-health hit (injected)");
             ++phaseWait;
             return;
         }
@@ -277,7 +285,8 @@ private:
         ++phaseWait;
         const int after = pc_p2_hardlanes_bigtreasure_weapon_count();
         if (after < weaponsBefore) {
-            std::printf("P2_BIGTREASURE_SLICE2_PHASE weapons=%d->%d\n", weaponsBefore, after);
+            std::printf("P2_BIGTREASURE_SLICE2_DROP_INGRESS weapons=%d->%d injected=1 repick=0\n",
+                        weaponsBefore, after);
             std::puts("PASS BIGTREASURE_SLICE2_RUNTIME");
             std::fflush(stdout);
             std::_Exit(0);

@@ -364,7 +364,14 @@ int pc_p2_hardlanes_bigtreasure_recv_probe(int weapon, Piki* piki)
     }
     // Reuse the ordinary loop's per-attack handled set: a target is stimulated
     // at most once per attack, so a second probe of the same Piki returns 0.
-    if (!sBigTreasureHandled.insert(static_cast<const void*>(piki)).second) {
+    // The probe removes its transient entry when it observes that dedup so it
+    // never leaves a target permanently handled. This demonstrates set-dedupe
+    // only; per-attack re-arm is the ordinary loop's attack-start clear
+    // (pc_p2_hardlanes_update, startAttack), which a probe cannot exercise
+    // without a real attack.
+    const void* key = static_cast<const void*>(piki);
+    if (!sBigTreasureHandled.insert(key).second) {
+        sBigTreasureHandled.erase(key);
         return 0;
     }
     const P2BigTreasureVec3 origin{ sBigTreasure.placement.owner.x,
