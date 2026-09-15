@@ -65,9 +65,20 @@ constexpr float SimTick        = 1.0f / 30.0f;
 constexpr int MaxCatchUpSteps  = 4;
 constexpr double TicksPerSecond = 30.0;
 
+// Clip durations in 30 Hz behavior steps, from the extracted Pom anim.szs
+// source_frames (flora.json, shared Pom bank): wait = 1, type1/open = 30,
+// type2/close = 30, type3/shot = 40, type4/swing = 20, dead = 40. Each state
+// holds at least its clip length so the drawn pose is sampled across frames and
+// not a one-tick flash that the display thread may or may not have rendered.
+constexpr int WaitTicks  = 1;   // wait clip length
+constexpr int SwingTicks = 20;  // type4 (swing) clip length
+constexpr int CloseTicks = 30;  // type2 (close) clip length
+constexpr int ShotTicks  = 40;  // type3 (shot) clip length; see Shot hold below
+
 struct Bound {
 	p2pom::PomSpec spec;
 	p2pom::State state = p2pom::State::Wait;
+	int stateTicks     = 0; // behavior steps spent in the current state
 	BTeki* actor     = nullptr; // live batch-2 Chappy placement vehicle, if bound
 	std::string clip = "wait";
 	float phase      = 0.0f;
@@ -118,6 +129,7 @@ void setState(Bound& bound, p2pom::State next)
 	std::printf("P2_POM_STATE generator=%u species=%s from=%s to=%s\n", bound.spec.generator,
 	            p2pom::speciesName(bound.spec.species), p2pom::stateName(bound.state), p2pom::stateName(next));
 	bound.state = next;
+	bound.stateTicks = 0;
 }
 
 // Terminal death: only an exhausted budget reaches here (source: no combat
@@ -179,7 +191,9 @@ Vector3f slotPosition(const Bound& bound)
 // Lazily bind each unbound bud to its live batch-2 Chappy placement vehicle by
 // generator id, exactly like the batch-2 `flora` family does. A TEKI_Chappy
 // asserting the same generator id is the host; any other native type is a
-// fail-closed error.
+// fail-closed error. Already-bound hosts are re-anchored to the plant point each
+// tick so the Chappy's own AI cannot wander them out of the authored position
+// (engineering choice for the placement vehicle).
 void bindHosts()
 {
 	if (!tekiMgr) {
@@ -187,6 +201,10 @@ void bindHosts()
 	}
 	for (Bound& bound : buds) {
 		if (bound.actor) {
+			// Re-anchor bound host: the drawn vehicle stays on the plant point so
+			// both buds remain in-frame and the receptor coincides with the host.
+			bound.actor->mSRT.t.set(bound.spec.x, bound.spec.y, bound.spec.z);
+			bound.actor->mVelocity.set(0.0f, 0.0f, 0.0f);
 			continue;
 		}
 		Iterator it(tekiMgr);
@@ -203,11 +221,12 @@ void bindHosts()
 			bound.actor = teki;
 			bound.clip  = clipFor(bound.state);
 			bound.phase = 0.0f;
-			// The Chappy is only the drawn vehicle; anchor it at the bud's authored
-			// plant point (source: dropped buds land exactly on their point). The
-			// conversion slot is slotPosition(), so host and receptor coincide.
-			teki->mSRT.t.set(bound.spec.x, bound.spec.y, bound.spec.z);
-			teki->mVelocity.set(0.0f, 0.0f, 0.0f);
+			// The Chappy is only the drawn vehicle; anchor it at the bud's
+			// authored plant point (source: dropped buds land exactly on their
+			// point). The conversion slot is slotPosition(), so host and receptor
+			// coincide.
+			bound.actor->mSRT.t.set(bound.spec.x, bound.spec.y, bound.spec.z);
+			bound.actor->mVelocity.set(0.0f, 0.0f, 0.0f);
 			std::printf("P2_POM_BIND generator=%u species=%s source_id=%d host=teki type=%d\n", bound.spec.generator,
 			            p2pom::speciesName(bound.spec.species), p2pom::speciesId(bound.spec.species), int(teki->mTekiType));
 			break;
@@ -343,16 +362,18 @@ void stepBuds(double nowSec)
 		// anything else; a budget-spent bud finishes (dead) once settled.
 		if (bound.owed > 0) {
 			settleOwed(bound);
+			++bound.stateTicks;
 			continue;
 		}
+		++bound.stateTicks;
 
 		switch (bound.state) {
 		case p2pom::State::Wait:
-			// Arm once the bud has been drawn in its Wait pose (no clip playback
-			// here; the source arms on the open clip's key 2, Pom.h:120). Gating
-			// on the confirmed draw keeps the Wait clip observable in the walk
-			// before the petals open, which a fixed step count could catch-up past.
-			if (bound.draws >= 1u) {
+			// Arm on a source-timed step (the wait clip length, one behavior
+			// step), never on a confirmed render: an off-camera or culled bud
+			// must still arm and accept Pikmin (source arms on the open clip's
+			// key, Pom.h:120). `draws` stays draw evidence only.
+			if (bound.stateTicks >= WaitTicks) {
 				setState(bound, p2pom::State::Open);
 			}
 			break;
@@ -384,7 +405,8 @@ void stepBuds(double nowSec)
 				piki->kill(false);
 			}
 			if (touched) {
-				// Each touch is the transient Swing; the next step returns to Open.
+				// Each touch is the transient Swing; it holds its own clip length
+				// before the next step returns to Open.
 				setState(bound, p2pom::State::Swing);
 				break;
 			}
@@ -403,11 +425,20 @@ void stepBuds(double nowSec)
 		}
 
 		case p2pom::State::Swing:
-			// Transient per-touch state; the source returns to Open after each swing.
-			setState(bound, p2pom::State::Open);
+			// Hold the swing clip (type4) for its source length before returning
+			// to Open, so the transient touch pose is drawn across frames rather
+			// than flashing once within a single 1/30 s step.
+			if (bound.stateTicks >= SwingTicks) {
+				setState(bound, p2pom::State::Open);
+			}
 			break;
 
 		case p2pom::State::Close: {
+			// Hold the close clip (type2) for its source length before routing,
+			// so the close pose is drawn across frames, not a single step.
+			if (bound.stateTicks < CloseTicks) {
+				break;
+			}
 			const int limit = p2pom::budget(bound.spec.species);
 			const bool budgetSpent = bound.used >= limit;
 			const float sinceAccept = float(nowSec - bound.lastAcceptSec);
@@ -433,11 +464,10 @@ void stepBuds(double nowSec)
 		}
 
 		case p2pom::State::Shot:
-			// The owed sprouts settled (arrived here with owed == 0): the source
-			// shot reopens, or dies once the lifetime budget is spent.
-			if (bound.finishWhenSettled) {
-				finishDead(bound);
-			} else {
+			// Arrived here with owed == 0 (settleOwed fires finishDead directly
+			// for a budget-spent bud). Hold the shot clip (type3) for its source
+			// length, then reopen.
+			if (bound.stateTicks >= ShotTicks) {
 				setState(bound, p2pom::State::Open);
 			}
 			break;
