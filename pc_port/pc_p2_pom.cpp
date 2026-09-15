@@ -38,6 +38,7 @@
 #include "pc_p2_pom_policy.h"
 #include "pc_bbft.h"
 #include "GameStat.h"
+#include "Generator.h"
 #include "ItemMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
@@ -45,6 +46,7 @@
 #include "PikiMgr.h"
 #include "PikiState.h"
 #include "PikiHeadItem.h"
+#include "teki.h"
 #include "Vector.h"
 #include <SDL2/SDL.h>
 #include <cmath>
@@ -66,6 +68,10 @@ constexpr double TicksPerSecond = 30.0;
 struct Bound {
 	p2pom::PomSpec spec;
 	p2pom::State state = p2pom::State::Wait;
+	BTeki* actor     = nullptr; // live batch-2 Chappy placement vehicle, if bound
+	std::string clip = "wait";
+	float phase      = 0.0f;
+	std::uint64_t draws = 0;
 	int colour        = -1;
 	int used          = 0;
 	int refunds       = 0;
@@ -96,9 +102,8 @@ std::vector<InjectFail> injects;
 unsigned clockLast = 0;
 float clockAcc     = 0.0f;
 unsigned behaviorTick = 0;
-
-// Population-conservation baseline: deadPikis captured after the buds are
-// bound and before any conversion. Consumed Pikmin are erase-killed, so this
+// Population-conservation baseline: deadPikis captured at setup (before any
+// bud is lazily bound or converts). Consumed Pikmin are erase-killed, so this
 // counter must not advance while the buds convert; a Drift proves a loss was
 // wrongly counted.
 int deadPikisBaseline = 0;
@@ -128,6 +133,80 @@ void finishDead(Bound& bound)
 	            bound.spec.generator, p2pom::speciesName(bound.spec.species), bound.used, bound.refunds, bound.requested,
 	            bound.born, now, int(now > deadPikisBaseline ? 1 : 0));
 	bound.done = true;
+}
+
+// Clip name driven by the source FSM state (Pom.h AnimID order wait/dead/
+// type1..type4): Wait->wait, Dead->dead, Open->type1, Close->type2,
+// Shot->type3, Swing->type4. Mirrors PomAi::initWait/initPetalOpen/… motion
+// choices in src/plugPikiNishimura/PomAi.cpp.
+const char* clipFor(p2pom::State state)
+{
+	switch (state) {
+	case p2pom::State::Wait:
+		return "wait";
+	case p2pom::State::Dead:
+		return "dead";
+	case p2pom::State::Open:
+		return "type1";
+	case p2pom::State::Close:
+		return "type2";
+	case p2pom::State::Shot:
+		return "type3";
+	case p2pom::State::Swing:
+		return "type4";
+	}
+	return "wait";
+}
+
+// Keep a bound bud's drawn clip/phase in step with its FSM state. Static/bind
+// pose (phase 0); the clip alone distinguishes the source state.
+void syncClip(Bound& bound)
+{
+	bound.clip = clipFor(bound.state);
+	bound.phase = 0.0f;
+}
+
+// The bud's slot centre: the authored plant point (sidecar XYZ == the arena
+// spawn position). The live Chappy host is the drawn vehicle; conversion stays
+// anchored at the planted mouth slot so a wandering vehicle cannot move the
+// receptor (source buds are stationary, dropped exactly on their point).
+Vector3f slotPosition(const Bound& bound)
+{
+	return Vector3f(bound.spec.x, bound.spec.y, bound.spec.z);
+}
+
+// Lazily bind each unbound bud to its live batch-2 Chappy placement vehicle by
+// generator id, exactly like the batch-2 `flora` family does. A TEKI_Chappy
+// asserting the same generator id is the host; any other native type is a
+// fail-closed error.
+void bindHosts()
+{
+	if (!tekiMgr) {
+		return;
+	}
+	for (Bound& bound : buds) {
+		if (bound.actor) {
+			continue;
+		}
+		Iterator it(tekiMgr);
+		CI_LOOP(it)
+		{
+			Teki* teki = static_cast<Teki*>(*it);
+			if (!teki || !teki->mGenerator || teki->mGenerator->_70 != bound.spec.generator) {
+				continue;
+			}
+			if (teki->mTekiType != TEKI_Chappy) {
+				std::printf("P2_POM_ERROR native_type generator=%u type=%d\n", bound.spec.generator, int(teki->mTekiType));
+				abort();
+			}
+			bound.actor = teki;
+			bound.clip  = clipFor(bound.state);
+			bound.phase = 0.0f;
+			std::printf("P2_POM_BIND generator=%u species=%s source_id=%d host=teki type=%d\n", bound.spec.generator,
+			            p2pom::speciesName(bound.spec.species), p2pom::speciesId(bound.spec.species), int(teki->mTekiType));
+			break;
+		}
+	}
 }
 
 [[noreturn]] void fail()
@@ -235,6 +314,7 @@ void stepBuds(double nowSec)
 
 		// Collect thrown/pressed Pikmin inside the slot radius, then consume them
 		// so the pikiMgr iterator is never invalidated mid-walk.
+		const Vector3f slot = slotPosition(bound);
 		std::vector<Piki*> candidates;
 		Iterator it(pikiMgr);
 		CI_LOOP(it)
@@ -243,8 +323,8 @@ void stepBuds(double nowSec)
 			if (!piki || !piki->isAlive() || piki->getState() != PIKISTATE_Flying) {
 				continue;
 			}
-			const float dx = piki->mSRT.t.x - bound.spec.x;
-			const float dz = piki->mSRT.t.z - bound.spec.z;
+			const float dx = piki->mSRT.t.x - slot.x;
+			const float dz = piki->mSRT.t.z - slot.z;
 			if (dx * dx + dz * dz <= p2pom::SlotRadius * p2pom::SlotRadius) {
 				candidates.push_back(piki);
 			}
@@ -403,6 +483,7 @@ void pc_p2_pom_tick()
 	if (buds.empty()) {
 		return;
 	}
+	bindHosts();
 	const unsigned now = SDL_GetTicks();
 	clockAcc += float(now - clockLast) * 0.001f;
 	clockLast = now;
@@ -414,4 +495,50 @@ void pc_p2_pom_tick()
 		stepBuds(double(behaviorTick) / TicksPerSecond);
 	}
 	std::fflush(stdout);
+}
+
+void pc_p2_pom_forget(BTeki* actor)
+{
+	for (Bound& bound : buds) {
+		if (bound.actor == actor) {
+			// Keep the value-owned FSM/receipt state; only the host binding is
+			// released so a recycled Teki address can never alias this bud.
+			bound.actor = nullptr;
+			return;
+		}
+	}
+}
+
+unsigned long pc_p2_pom_bound()
+{
+	unsigned long count = 0;
+	for (const Bound& bound : buds) {
+		if (bound.actor) {
+			++count;
+		}
+	}
+	return count;
+}
+
+bool pc_p2_pom_clip(const BTeki* actor, const char*& name, float& phase)
+{
+	if (!actor) {
+		return false;
+	}
+	for (Bound& bound : buds) {
+		if (bound.actor != actor) {
+			continue;
+		}
+		syncClip(bound);
+		name  = bound.clip.c_str();
+		phase = bound.phase;
+		if (bound.draws < 64u) {
+			std::printf("P2_POM_DRAW generator=%u species=%s pose=%s draws=%llu\n", bound.spec.generator,
+			            p2pom::speciesName(bound.spec.species), p2pom::stateName(bound.state),
+			            static_cast<unsigned long long>(bound.draws + 1));
+		}
+		++bound.draws;
+		return true;
+	}
+	return false;
 }

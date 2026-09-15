@@ -69,6 +69,7 @@ void pc_p2_forget_teki(BTeki* actor)
 	pc_p2_breadbug_actor_forget(actor);
 	pc_p2_frog_forget(actor);
 	pc_p2_flora_forget(actor);
+	pc_p2_pom_forget(actor);
 	pc_p2_kogane_forget(actor);
 	pc_p2_mamuta_forget(actor);
 	pc_p2_tank_forget(actor);
