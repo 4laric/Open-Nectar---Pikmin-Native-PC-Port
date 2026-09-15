@@ -54,7 +54,12 @@ Shape* load(const std::string& name){
 }
 }
 void pc_p2_breadbug_actor_reset(){actors.clear();for(auto& motion:motions)motion=Motion{};for(auto& motion:cargoMotions)motion=Motion{};cargoEnabled=false;probeCarriers=-1;pc_p2_breadbug_contest_reset_all();}
-void pc_p2_breadbug_actor_forget(BTeki* actor){actors.erase(actor);}
+void pc_p2_breadbug_actor_forget(BTeki* actor){
+ auto found=actors.find(actor);if(found==actors.end())return;
+ auto& state=found->second;
+ if(state.contestHandle){if(!state.ownerDiedLogged)pc_p2_breadbug_contest_owner_died(state.contestHandle);pc_p2_breadbug_contest_destroy(state.contestHandle);state.contestHandle=0;} // no handle leak on despawn
+ actors.erase(found);
+}
 void pc_p2_breadbug_actor_probe_carriers(int count){probeCarriers=count;}
 void pc_p2_breadbug_actor_probe_revisit(){
  for(auto& entry:actors){
@@ -135,6 +140,10 @@ void pc_p2_breadbug_actor_tick(){
       const int grant=pc_p2_breadbug_contest_grant(state.contestHandle,"p2-preview",slot.c_str(),"contest");
       if(grant==1)std::printf("P2_BREADBUG_CONTEST_GRANT generator=%u identity=%s granted=1\n",state.id,pc_p2_breadbug_contest_identity(state.contestHandle));
       else if(grant==2)std::printf("P2_BREADBUG_CONTEST_GRANT generator=%u identity=%s granted=0 duplicate=1\n",state.id,pc_p2_breadbug_contest_identity(state.contestHandle));
+     }
+     if(outcome==2){
+      // Timeout/release is terminal for this contest; drop the handle so the next grab starts a fresh tug (the ledger keeps exactly-once durable).
+      pc_p2_breadbug_contest_destroy(state.contestHandle);state.contestHandle=0;state.lastOutcome=-1;
      }
     }
    }
