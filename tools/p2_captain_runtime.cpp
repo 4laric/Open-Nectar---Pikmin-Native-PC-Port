@@ -126,11 +126,16 @@ public:
                 (int)dropped.size());
             std::fflush(stdout);
 
-            // Reclaim for cleanup, then reload: conservation, no loss/duplication.
+            // Reclaim for cleanup, then reload: a captive is restored to its
+            // previous owner on reload — never lost or duplicated.
             piki->mNavi = navi;
+            require(pc_p2_captain::adopt_squad() >= 1, "freed piki re-adopted into squad");
+            require(pc_p2_captain::capture_actor(++epoch, piki), "capture for reload conservation");
+            require(piki->mNavi == nullptr, "captive removed from squad");
             require(pc_p2_captain::reload(), "reload succeeds");
-            require(pc_p2_captain::captive_count() == 0, "no stale captives after reload");
-            require(piki->isAlive() && piki->mNavi == navi, "squad conserved across reload");
+            require(piki->isAlive(), "captive survived reload (not lost)");
+            require(piki->mNavi == navi, "reload restored captive to previous owner");
+            require(pc_p2_captain::captive_count() == 0, "no duplicated captive after reload");
             std::printf("P2_CAPTAIN_CLEANUP_RELOAD conserved=1 captive_count=%d\n",
                 pc_p2_captain::captive_count());
             std::fflush(stdout);
