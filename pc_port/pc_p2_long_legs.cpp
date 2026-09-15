@@ -573,3 +573,8 @@ bool pc_p2_long_legs_receipt(PelletView* view, unsigned& generator) {
     generator = it->second.generator;
     return true;
 }
+
+bool pc_p2_long_legs_shot(const BTeki* actor) {
+    auto it = actors.find(const_cast<BTeki*>(actor));
+    return it != actors.end() && it->second.fsm.state() == P2LongLegsState::Shot;
+}

@@ -22,6 +22,10 @@ bool pc_p2_long_legs_damageable(const BTeki*);
 // bitter-immune (Stay or Land). False for unregistered actors so the shared
 // tekiinteraction hook is a no-op for ordinary P1 play.
 bool pc_p2_long_legs_receiver_rejects(Teki*, const InteractAttack*);
+// Read-only fixture accessor: true while a registered Houdai's FSM is in Shot
+// (the gun-exposed state), so the fixture can stage the squad until Shot is
+// reached before assigning attacks (source timings, no clip compression).
+bool pc_p2_long_legs_shot(const BTeki*);
 // Pod receipt lookup (ordinary corpse delivery, mirrors pc_p2_kurage/otakara):
 // true and writes the source generator id when the delivered PelletView is a
 // registered Long Legs actor (its live binding persists through engine death).
