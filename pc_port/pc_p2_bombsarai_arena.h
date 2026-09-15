@@ -44,6 +44,9 @@ int pc_p2_bombsarai_arena_state();
 const char* pc_p2_bombsarai_arena_state_name();
 bool pc_p2_bombsarai_arena_carrier_dead();
 bool pc_p2_bombsarai_arena_carrying();
+// Last resolved captured-bomb world position (joint-follow evidence). Returns
+// true only while a bomb is riding the carrier's capture joint.
+bool pc_p2_bombsarai_arena_captured_position(P2BombSaraiVec3& out);
 // Last FSM-requested throw: P2BombSaraiThrowKind as int, or -1 when no throw
 // has happened since setup; tick is the arena source tick of the throw.
 int pc_p2_bombsarai_arena_last_throw_kind();

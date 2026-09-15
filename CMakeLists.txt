@@ -818,6 +818,14 @@ target_include_directories(p2_bombsarai_induction_test PRIVATE pc_port)
 target_compile_options(p2_bombsarai_induction_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_bombsarai_induction_test COMMAND p2_bombsarai_induction_test)
 
+# Animated capture-joint transform + payload follow gate (kamu_jnt1 stand-in).
+add_executable(p2_bombsarai_joint_test
+    tools/p2_bombsarai_joint_test.cpp
+    pc_port/pc_p2_bombsarai_bomb.cpp)
+target_include_directories(p2_bombsarai_joint_test PRIVATE pc_port)
+target_compile_options(p2_bombsarai_joint_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_bombsarai_joint_test COMMAND p2_bombsarai_joint_test)
+
 # Lane 27 Fuefuki hard-lane header-only policy gates (unwired on the approved line).
 add_executable(p2_fuefuki_binding_test tools/p2_fuefuki_binding_test.cpp)
 target_include_directories(p2_fuefuki_binding_test PRIVATE pc_port)
