@@ -66,6 +66,7 @@
 #include "pc_p2_enemy.h"
 #include "pc_p2_cargo.h"
 #include "pc_p2_preview_policy.h"
+#include "pc_p2_placement_probe.h"
 #include <fstream>
 #include <filesystem>
 #include <vector>
@@ -292,6 +293,10 @@ void pc_p2_preview_setup() {
     const float points[][2]={{-85,0},{-175,-100},{185,-180},{-220,-180}};
     for (const auto& point : points)
         std::printf("[Pikipelago] P2_ROOM_GROUND x=%.1f z=%.1f y=%.3f\n",point[0],point[1],mapMgr->getMinY(point[0],point[1],true));
+    // Lane-04 (placement) native evidence probe: sample live terrain/water/route
+    // facts at each spawned actor's position. Read-only; additively after the
+    // legacy room ground probe.
+    pc_p2_placement_probe_run();
     setupComplete=true;
     if(cargoFree) std::printf("[Pikipelago] P2_ROOM_CARGO_FREE_READY cargo=0 repairs=%d\n",initialRepairs);
     else std::printf("[Pikipelago] P2_ROOM_READY treasure=%s carry=%d repairs=%d\n",podAnchor?treasureId.c_str():"bolt",previewTreasure->mConfig->mCarryMinPikis(),initialRepairs);
