@@ -153,6 +153,9 @@ private:
     void runReceiverAcceptance()
     {
         const P2BigTreasureVec3 origin{ 0.0f, ground, 0.0f };
+        std::printf("P2_BIGTREASURE_SLICE2_DIAG weapons_at_start=%d ready=%d\n",
+                    pc_p2_hardlanes_bigtreasure_weapon_count(),
+                    pc_p2_hardlanes_bigtreasure_ready() ? 1 : 0);
 
         // Fire on a live Red: source InteractFire rejects fire-immune Red, so
         // the wired receiver returns false (immune) and does not startFire.
@@ -252,11 +255,9 @@ private:
 
     void runPhaseTransition()
     {
-        // The live seam is installed by pc_p2_hardlanes_setup when the opt-in
-        // host profile is present, so the natural-hit ingress drives the SAME
-        // ordinary FSM the game loop runs.
         require(pc_p2_hardlanes_bigtreasure_ready(), "ordinary seam active");
         const int before = pc_p2_hardlanes_bigtreasure_weapon_count();
+        std::printf("P2_BIGTREASURE_SLICE2_DIAG phase_weapons_before=%d\n", before);
         require(before == 4, "four weapons attached");
         if (phaseWait == 0) {
             // Route a full-health hit against the elec weapon through the
