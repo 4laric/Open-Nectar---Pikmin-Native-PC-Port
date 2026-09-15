@@ -668,8 +668,8 @@ void BTeki::die()
             && gameflow.mMoviePlayer && !gameflow.mMoviePlayer->mIsActive);
     }
 
+    mDeadState = 1;
 	pc_p2_otakara_died(this); // lane-22 host death-seam hook; no-op for unregistered actors
-	mDeadState = 1;
 }
 
 /**

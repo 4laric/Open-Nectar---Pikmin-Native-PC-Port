@@ -322,11 +322,6 @@ bool pc_p2_preview_deliver(Pellet* pellet) {
         if(pc_p2_flora_receipt(pellet)) {
             std::printf("[Pikipelago] P2_FLORA_DELIVER onion_receipt=1\n");std::fflush(stdout);return true;
         }
-        // Lane-22 elemental dweevil: ordinary-Onion receipt for a consumed Otakara
-        // corpse pellet (exactly-once via the lane-06 receipt host).
-        if(pc_p2_otakara_receipt(pellet)) {
-            std::printf("[Pikipelago] P2_OTAKARA_DELIVER onion_receipt=1\n");std::fflush(stdout);return true;
-        }
         if(cargoFree){std::fprintf(stderr,"Cargo-free P2 Pod refuses cargo rewards and seed side effects\n");std::abort();}
         std::string receipt;int value=0;Cargo* c=cargoFor(pellet);
         if(c){receipt="treasure:"+c->spec.instance;value=c->spec.value;}
@@ -336,6 +331,9 @@ bool pc_p2_preview_deliver(Pellet* pellet) {
         }
         else if(unsigned generator=0;pc_p2_mamuta_receipt(pellet->mPelletView,generator)) {
             receipt="corpse:"+pc_p2_cave_receipt_prefix()+"mamuta:"+std::to_string(generator);value=corpseValue;
+        }
+        else if(unsigned generator=0;pc_p2_otakara_receipt(pellet->mPelletView,generator)) {
+            receipt="corpse:"+pc_p2_cave_receipt_prefix()+"otakara:"+std::to_string(generator);value=corpseValue;
         }
         else {
             auto found=corpses.find(pellet->mPelletView);
