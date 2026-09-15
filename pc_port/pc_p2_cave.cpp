@@ -13,6 +13,7 @@
 #include "pc_p2_species.h"
 #include "pc_p2_species_schema.h"
 #include "pc_p2_cave_transfer.h"
+#include "pc_p2_bulbmin.h"
 #include "pc_bbft.h"
 #include "Piki.h"
 #include "PikiMgr.h"
@@ -168,6 +169,8 @@ bool pc_p2_cave_checkpoint(bool confirm){
     }
     Navi* n=naviMgr->getNavi();std::vector<Survivor> squad;
     bool busy=false;
+    const bool exiting=!beasts && floorId!=1;
+    int bulbminWild=0,bulbminRecruited=0,bulbminDropped=0,bulbminKept=0;
     Iterator it(pikiMgr);CI_LOOP(it){
         Piki* p=static_cast<Piki*>(*it);if(!p->isAlive())continue;
         const int state=p->getState();
@@ -176,8 +179,18 @@ bool pc_p2_cave_checkpoint(bool confirm){
         if(state==PIKISTATE_Swallowed || state==PIKISTATE_Bury || state==PIKISTATE_Grow
             || (p->getStickObject() && p->getStickObject()->mObjType!=OBJTYPE_Pellet))busy=true;
         const int species=pc_p2_species(p);if(species<0 || !p2_schema_supports(checkpointSchema,species))invalid("runtime Pikmin species");
+        // Source PikiMgr::caveSaveAllPikmins (pikiMgr.cpp:723): a wild (unwhistled)
+        // Bulbmin dependent is never saved. Inert unless pc_p2_bulbmin is opted in.
+        if(species==P2SpeciesBulbmin){
+            if(pc_p2_bulbmin_phase(p)==P2BulbminWild)++bulbminWild;else ++bulbminRecruited;
+            if(!pc_p2_bulbmin_should_save(p,exiting)){++bulbminDropped;continue;}
+            ++bulbminKept;
+        }
         squad.push_back({species,p->mHappa});
     }
+    if(bulbminWild||bulbminRecruited||bulbminDropped||bulbminKept)
+        std::printf("P2_CAVE_BULBMIN_FILTER wild=%d recruited=%d dropped=%d kept=%d exiting=%d\n",
+                    bulbminWild,bulbminRecruited,bulbminDropped,bulbminKept,int(exiting));
     Iterator heads(itemMgr->getPikiHeadMgr());CI_LOOP(heads){if(static_cast<PikiHeadItem*>(*heads)->isAlive())busy=true;}
     if(busy && n->mHealth>1){if(confirm)notice("Pluck all sprouts and whistle Pikmin out of flowers or combat before leaving.");return false;}
     float health=C_NAVI_PARM(n,mHealth)>0?n->mHealth/C_NAVI_PARM(n,mHealth):0;

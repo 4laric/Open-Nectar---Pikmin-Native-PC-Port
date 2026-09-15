@@ -172,6 +172,19 @@ int pc_p2_bulbmin_dependent_count() {
     return active ? bridge.dependentCount() : 0;
 }
 
+int pc_p2_bulbmin_phase(const Piki* piki) {
+    if (!piki) return -1;
+    const auto found = idOfPiki.find(const_cast<Piki*>(piki));
+    if (found == idOfPiki.end()) return -1;
+    return bridge.phaseOf(found->second);
+}
+
+bool pc_p2_bulbmin_should_save(const Piki* piki, bool isExitingCave) {
+    (void)isExitingCave; // surface-rebirth target not present; see policy doc
+    if (!piki) return true;
+    return p2_bulbmin_should_save(pc_p2_species(piki), pc_p2_bulbmin_phase(piki));
+}
+
 namespace {
 // Context handed to the driver's spawn callback for one birthChildren() pass.
 struct DriveContext {
