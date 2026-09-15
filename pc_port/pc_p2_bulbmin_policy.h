@@ -165,6 +165,21 @@ public:
         return out;
     }
 
+    // Non-mutating cave-transition drop set. Mirrors applyTransition's removal
+    // rule (wild on either move; recruited additionally on a cave exit) without
+    // erasing, so a checkpoint can compute the excluded squad before writing the
+    // transfer file and commit only after a successful write. The returned id
+    // order is that of the member map and must not be relied upon.
+    std::vector<std::uint32_t> removedOn(P2BulbminCaveTransition move) const {
+        std::vector<std::uint32_t> out;
+        for (const auto& entry : members) {
+            const bool wild = entry.second.phase == P2BulbminWild;
+            if (move == P2BulbminExitCave || (move == P2BulbminDescendFloor && wild))
+                out.push_back(entry.first);
+        }
+        return out;
+    }
+
     // Scene-wide cave transition. Wild Bulbmin are removed on either move;
     // recruited Bulbmin survive a floor descent but not a full cave exit.
     P2BulbminTransitionOut applyTransition(P2BulbminCaveTransition move) {
