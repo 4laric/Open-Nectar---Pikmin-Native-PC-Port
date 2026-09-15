@@ -124,7 +124,7 @@ float shotSeconds(P2LongLegsSpecies species) {
     return species == P2LongLegsSpecies::Houdai ? 39.0f / 30.0f : 0.0f;
 }
 constexpr float kShellLoopPeriod = 5.0f / 30.0f; // one shell per attack loop (<-> frame 35)
-constexpr float kShellHitRadius = 20.0f;         // shell radius 10 + target margin
+constexpr float kShellHitRadius = 30.0f;         // shell radius 10 + contact margin over the +25 mouth y
 
 Creature* nearestTarget(const Vector3f& pos, float radius) {
     Creature* best = nullptr;
