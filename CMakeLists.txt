@@ -924,6 +924,12 @@ target_include_directories(p2_billboard_test PRIVATE pc_port)
 target_compile_options(p2_billboard_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_billboard_test COMMAND p2_billboard_test)
 
+add_executable(p2_specular_dir_test
+    tools/test_p2_specular_dir.cpp)
+target_include_directories(p2_specular_dir_test PRIVATE pc_port)
+target_compile_options(p2_specular_dir_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_specular_dir_test COMMAND p2_specular_dir_test)
+
 add_executable(pc_render_phase_test
     pc_port/timing/pc_render_phase_test.cpp
     pc_port/timing/pc_render_phase.cpp)
