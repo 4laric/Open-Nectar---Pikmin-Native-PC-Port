@@ -98,6 +98,7 @@ struct Wisp {
     bool eggAttached = true;
     bool dropFired = false;
     bool deadLogged = false;
+    bool killed = false;
     bool probeLogged = false;
     float logTimer = 0.0f;
     std::string clip = "appear1";
@@ -541,7 +542,11 @@ void pc_p2_qurione_update(BTeki* actor) {
             w.deadLogged = true;
             std::printf("P2_QURIONE_DEAD generator=%u source_id=16\n", gen);
         }
-        if (w.stateTime >= DEATH_TIME) actor->die();
+        // die() alone only arms mDeadState, and dieSoon() runs inside doAI's
+        // !mDeadState block (teki.h:249-252); because this FSM update is outside
+        // doAI, a bare die() never finalizes, so doKill and the lane-07
+        // pc_p2_forget_teki seam never run. pcEscapeNow() = die()+dieSoon().
+        if (w.stateTime >= DEATH_TIME && !w.killed) { w.killed = true; actor->pcEscapeNow(); }
         break;
     }
     default:
