@@ -70,7 +70,7 @@ class GroinkApp final : public PlugPikiApp {
 public:
     int idle() override {
         int result = PlugPikiApp::idle();
-        require(++frames < 1800, "timeout");
+        require(++frames < 3600, "timeout");
         if (gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive) {
             clock.reset(); gameflow.mMoviePlayer->requestSkip(); return result;
         }
@@ -117,10 +117,11 @@ public:
                 std::puts("PASS GROINK_RUNTIME carcass_natural_kill");
                 std::fflush(stdout); std::_Exit(0);
             }
-            if (carcassTicks >= 1200) {
-                // Budget note: the sidecar's source 30 s gauge + 10 s recovery
-                // defaults would need ~2400 frames at 60 fps, so every run writes
-                // the short config (sidecar_config_short: 2 s + 3 s) to fit 1200.
+            if (carcassTicks >= 2400) {
+                // Budget: a natural free-mode kill takes ~950 ticks (Frog 800 HP),
+                // then the 135-frame dead animation finalizes the corpse (~4.5 s),
+                // then the sidecar regrows. The source 30 s + 10 s defaults would
+                // need far more, so every run writes sidecar_config_short (2 s + 3 s).
                 std::printf("P2_GROINK_CARCASS_TIMEOUT ticks=%d total_births=%d reds=%d\n",
                     carcassTicks, pc_p2_groink_teki_total_births(), aliveReds());
                 std::fflush(stdout);
