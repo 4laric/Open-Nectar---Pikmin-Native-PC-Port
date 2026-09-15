@@ -283,7 +283,9 @@ float pc_p2_frog_param_f(const BTeki* actor,int idx,float fallback){
 }
 bool pc_p2_frog_suppress_ai(const BTeki* actor){return ready&&actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor)))!=0;}
 void pc_p2_frog_setup(){
-    pc_p2_frog_reset();if(!pc_pikipelago_room_preview())return;
+    pc_p2_frog_reset();
+    std::printf("P2_FROG_SETUP\n");std::fflush(stdout);
+    if(!pc_pikipelago_room_preview())return;
     std::ifstream input("p2-frog.txt");if(!input)return;
     std::map<unsigned,int> wanted;std::vector<p2animation::Clip> banks[2];
     if(!p2frog::parse(input,wanted,banks))std::abort();
