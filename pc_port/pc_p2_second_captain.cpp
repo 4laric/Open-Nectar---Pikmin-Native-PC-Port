@@ -5,8 +5,8 @@
 #include <cstdio>
 #include <cstdlib>
 
-// Lane 12 opt-in second-captain creation (#130). See the header for why the
-// live spawn is gated shut on this port.
+// Lane 12 opt-in second-captain creation (#130). See the header for the
+// request-gated live-spawn path.
 
 namespace pc_p2_captain {
 
