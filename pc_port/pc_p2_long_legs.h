@@ -36,3 +36,7 @@ bool pc_p2_long_legs_shot(const BTeki*);
 // captured at death (view-less-safe), with the PelletView backlink as fallback.
 // Pure lookup, no ledger grant; the caller credits the shared Pod economy.
 bool pc_p2_long_legs_receipt(Pellet*, unsigned& generator);
+// Read-only fixture accessor: sweeps dead/undelivered corpse registrations and
+// returns the surviving count. Proves the receipt is one-shot (a delivered corpse
+// leaves no registration) and the liveness sweep runs.
+unsigned long pc_p2_long_legs_corpse_count();

@@ -85,6 +85,31 @@ std::map<std::string, Shape*> shapes;     // species -> bind shape
 size_t bytesTotal = 0;
 bool logged[2] = {false, false};
 
+// Drop a registered corpse that died/vanished before it was delivered. The
+// registry is keyed on the corpse Pellet*, and MonoObjectMgr recycles slots, so
+// without this a future unrelated pellet at the same address could be credited as
+// a Long Legs corpse. Mirrors lane 31's Waterwraith sweepCorpses()
+// (pc_p2_waterwraith_register.cpp:48-58).
+//
+// Called from pc_p2_long_legs_corpse_count() (the fixture's observation point),
+// NOT from the per-frame tick: an unconditional tick sweep dereferences the
+// engine-owned corpse Pellet* every frame and stalled the stage-2 FSM in the
+// merged wave (naviMgr went null). reset() clears the whole registry and
+// forget() erases the forgotten actor's corpse, so the live tick does not need
+// to sweep. A corpse that dies undelivered is still dropped the next time the
+// registry is observed (or cleared), which is the slot-reuse protection.
+void sweepCorpses() {
+    for (auto it = corpses.begin(); it != corpses.end();) {
+        if (!it->first->isAlive()) {
+            std::printf("P2_LONG_LEGS_CORPSE_DROPPED generator=%u\n", it->second);
+            std::fflush(stdout);
+            it = corpses.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 // Man-at-Legs shell pool (source pool of 10, HoudaiShotGun.cpp:1050) hosted on
 // lane 20's shared fired-projectile policy. Consume-only: no forked projectile.
 // Each shell remembers its firing actor (sourceToken) so a forget/death can kill
@@ -359,6 +384,9 @@ void pc_p2_long_legs_reset() {
 void pc_p2_long_legs_forget(BTeki* actor) {
     killShellsOf(actor);
     actors.erase(actor);
+    // The actor's corpse registration is keyed on its Pellet*, so a plain
+    // actors.erase leaves it behind; clear it with the actor (review fix 3b).
+    if (actor && actor->mPellet) corpses.erase(actor->mPellet);
 }
 
 void pc_p2_long_legs_setup() {
@@ -412,7 +440,9 @@ void pc_p2_long_legs_update(BTeki* actor) {
     ActorState& state = entry->second;
     // Once the proxy dies, capture the corpse Pellet* the engine created
     // (PelletView::mPellet) so the ordinary Pod receipt can resolve a view-less
-    // stand-in corpse (mirrors lane 31). Runs each tick until forget/reset.
+    // stand-in corpse (mirrors lane 31). Runs each tick until the corpse is
+    // delivered (the receipt consumes it one-shot) or swept as dead, and is also
+    // cleared by forget (per-actor) and reset (whole registry).
     if (!actor->isAlive() && actor->mPellet && !corpses.count(actor->mPellet)) {
         corpses[actor->mPellet] = state.generator;
         std::printf("P2_LONG_LEGS_CORPSE_REGISTER generator=%u species=%s\n",
@@ -582,10 +612,13 @@ bool pc_p2_long_legs_receipt(Pellet* pellet, unsigned& generator) {
     // kurage/otakara). Primary key is the corpse Pellet* captured at death, which
     // resolves even a view-less stand-in corpse; the PelletView backlink is a
     // fallback for a live-binding corpse. Returns false for any unowned pellet.
+    // One-shot: the resolved registration is consumed so MonoObjectMgr slot reuse
+    // cannot re-credit a future unrelated pellet at the same address (lane 31).
     if (!pellet) return false;
     auto corpse = corpses.find(pellet);
     if (corpse != corpses.end()) {
         generator = corpse->second;
+        corpses.erase(corpse);
         return true;
     }
     PelletView* view = pellet->mPelletView;
@@ -602,6 +635,15 @@ bool pc_p2_long_legs_shot(const BTeki* actor) {
 }
 
 void pc_p2_long_legs_update_all() {
+    // Sweeping is done from the guarded per-actor tick (pc_p2_long_legs_update),
+    // not here: an unconditional per-frame sweep stalled the stage-2 FSM.
     if (actors.empty()) return;
     for (const auto& entry : actors) pc_p2_long_legs_update(entry.first);
+}
+
+unsigned long pc_p2_long_legs_corpse_count() {
+    // Fixture observability (review fix 3b): sweeps dead/undelivered corpses and
+    // reports the surviving registrations, so a non-one-shot receipt is visible.
+    sweepCorpses();
+    return static_cast<unsigned long>(corpses.size());
 }
