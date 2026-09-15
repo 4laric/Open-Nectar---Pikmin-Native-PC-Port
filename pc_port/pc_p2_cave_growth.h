@@ -141,14 +141,20 @@ inline bool p2_cave_choke_on_every_path(const P2CaveLayout& layout, const P2Cave
         return seen[layout.hole_host];
     };
     if (!hole_reachable(-1)) return false;
-    int choke_nodes = 0;
+    int required = 0;
+    for (int index = 0; index < choke_count; index++) {
+        bool present = false;
+        for (int node = 0; node < layout.node_count; node++)
+            if (layout.nodes[node].slot == P2CaveSlot::Choke &&
+                pool.hazard[layout.nodes[node].unit] == chokes[index]) present = true;
+        if (!present) return false;
+        required++;
+    }
     for (int node = 0; node < layout.node_count; node++) {
         if (layout.nodes[node].slot != P2CaveSlot::Choke) continue;
-        choke_nodes++;
         if (hole_reachable(node)) return false;
     }
-    (void)pool;
-    return choke_count > 0 && choke_nodes == choke_count;
+    return choke_count > 0 && required == choke_count;
 }
 
 inline bool p2_cave_layout_same(const P2CaveLayout& a, const P2CaveLayout& b) {
