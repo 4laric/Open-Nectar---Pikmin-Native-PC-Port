@@ -1462,6 +1462,19 @@ void tickBombConsumer()
     }
     P2BombSaraiBomb& bomb = gHost.bomb;
     if (bomb.phase() == P2BombSaraiBombPhase::Inactive) {
+        // Capture the bomb at the live captain (config origin fallback) so the
+        // blast volume genuinely contains the captain; then drop it (Death).
+        Navi* navi = naviMgr ? naviMgr->getNavi() : nullptr;
+        P2BombSaraiVec3 origin = gHost.bombOrigin;
+        if (navi && navi->isAlive()) {
+            const Vector3f& p = navi->mSRT.t;
+            origin = P2BombSaraiVec3{ p.x, p.y + 30.0f, p.z };
+        }
+        if (!bomb.capture(gHost.bombCarrierToken, origin)) {
+            fail("bomb capture failed");
+        }
+        std::printf("P2_PROJECTILE_BOMB_CAPTURE center=(%.1f,%.1f,%.1f) navi=%d\n",
+                    origin.x, origin.y, origin.z, int(navi && navi->isAlive()));
         return;
     }
     if (bomb.phase() == P2BombSaraiBombPhase::Captured) {
@@ -1470,7 +1483,7 @@ void tickBombConsumer()
         }
         gHost.bombThrown = true;
         std::printf("P2_PROJECTILE_BOMB_THROW center=(%.1f,%.1f,%.1f)\n",
-                    gHost.bombOrigin.x, gHost.bombOrigin.y, gHost.bombOrigin.z);
+                    bomb.position().x, bomb.position().y, bomb.position().z);
         return;
     }
     bomb.update(kSourceDelta, BombMapBinding::trace, gHost.bombBinding, nullptr, nullptr);
@@ -1832,7 +1845,10 @@ void pc_p2_projectiles_setup()
     }
     if (gHost.haveBombCfg) {
         // Bomb primitive consumer: host-supplied lifecycle parms (documented
-        // approximations), the Navi/Pikmin blast damage from the config row.
+        // approximations), the Navi/Pikmin blast damage from the config row. The
+        // bomb is captured lazily at the live captain on the first consumer tick
+        // (with the config row origin as fallback) so the detonation volume
+        // genuinely contains the captain; route_blast does the real volume test.
         P2BombSaraiBombConfig config;
         config.gravityPerTick = kBombGravityPerTick;
         config.fuseHealth = kBombFuseHealth;
@@ -1844,9 +1860,6 @@ void pc_p2_projectiles_setup()
         config.naviPikiDamage = gHost.bombNaviDamage;
         config.ip02TriggerLimit = 0; // no bomb-on-bomb induction in this proof
         gHost.bomb.reset(config);
-        if (!gHost.bomb.capture(gHost.bombCarrierToken, gHost.bombOrigin)) {
-            fail("bomb capture failed");
-        }
         gHost.bombThrown = false;
         gHost.bombApplied = false;
         std::printf("P2_PROJECTILE_BOMB_READY center=(%.1f,%.1f,%.1f) navi_damage=%.1f\n",
