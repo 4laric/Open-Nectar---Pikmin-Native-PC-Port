@@ -170,6 +170,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_demon_bridge.cpp
     pc_port/pc_p2_demon_host.cpp
     pc_port/pc_p2_sarai_host.cpp
+    pc_port/pc_p2_sarai_manager.cpp
     pc_port/pc_bbft.cpp
     pc_port/pc_p2_preview.cpp
     pc_port/pc_p2_captain.cpp
@@ -963,19 +964,10 @@ target_include_directories(p2_specular_dir_test PRIVATE pc_port)
 target_compile_options(p2_specular_dir_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_specular_dir_test COMMAND p2_specular_dir_test)
 
-# Lane 30 (#242) standalone policy tests. The captor/escape/drop/host-clock and
-# Sarai policy/FSM harnesses are dependency-free headers: a test source and the
-# pc_port include dir are all they need.
-add_executable(p2_demon_captor_test tools/p2_demon_captor_test.cpp)
-target_include_directories(p2_demon_captor_test PRIVATE pc_port)
-target_compile_options(p2_demon_captor_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
-add_test(NAME p2_demon_captor_test COMMAND p2_demon_captor_test)
-
-add_executable(p2_demon_escape_test tools/p2_demon_escape_test.cpp)
-target_include_directories(p2_demon_escape_test PRIVATE pc_port)
-target_compile_options(p2_demon_escape_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
-add_test(NAME p2_demon_escape_test COMMAND p2_demon_escape_test)
-
+# Lane 30 (#242) standalone policy tests. The drop/host-clock and Sarai
+# captor/lifecycle/identity harnesses are dependency-free headers: a test source
+# and the pc_port include dir are all they need. (demon_captor/demon_escape and
+# sarai_fsm/sarai_policy are already registered by the policy foreach below.)
 add_executable(p2_demon_drop_policy_test tools/p2_demon_drop_policy_test.cpp)
 target_include_directories(p2_demon_drop_policy_test PRIVATE pc_port)
 target_compile_options(p2_demon_drop_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
@@ -985,16 +977,6 @@ add_executable(p2_demon_host_clock_test tools/p2_demon_host_clock_test.cpp)
 target_include_directories(p2_demon_host_clock_test PRIVATE pc_port)
 target_compile_options(p2_demon_host_clock_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_demon_host_clock_test COMMAND p2_demon_host_clock_test)
-
-add_executable(p2_sarai_policy_test tools/p2_sarai_policy_test.cpp)
-target_include_directories(p2_sarai_policy_test PRIVATE pc_port)
-target_compile_options(p2_sarai_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
-add_test(NAME p2_sarai_policy_test COMMAND p2_sarai_policy_test)
-
-add_executable(p2_sarai_fsm_test tools/p2_sarai_fsm_test.cpp)
-target_include_directories(p2_sarai_fsm_test PRIVATE pc_port)
-target_compile_options(p2_sarai_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
-add_test(NAME p2_sarai_fsm_test COMMAND p2_sarai_fsm_test)
 
 add_executable(p2_sarai_captor_test tools/p2_sarai_captor_test.cpp)
 target_include_directories(p2_sarai_captor_test PRIVATE pc_port)
