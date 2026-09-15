@@ -1,5 +1,6 @@
 #pragma once
 class BTeki;
+class Creature;
 
 // Family-owned lane-22 elemental-dweevil source behavior on the batch-2 Chappy
 // placement vehicle (#170, child #447). Implements the shared OtakaraBase normal
@@ -24,6 +25,12 @@ void pc_p2_otakara_setup();
 void pc_p2_otakara_reset();
 void pc_p2_otakara_forget(BTeki*);
 void pc_p2_otakara_update(BTeki*);
+
+// Damage attribution: records the queued attack interaction (label + owner
+// colour) for the next P2_OTAKARA_HIT log, so a natural Pikmin melee drop is
+// named rather than left as an unlabelled delta. Read-only no-op for
+// unregistered actors; hooked from BTeki::interactDefault's Attack branch.
+void pc_p2_otakara_attack(BTeki*, Creature* owner, const char* interaction);
 
 // Source per-species general life (fp00) plus harmless-host parameter zeroing for
 // registered actors only.

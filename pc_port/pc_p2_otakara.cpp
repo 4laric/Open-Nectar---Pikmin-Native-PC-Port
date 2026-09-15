@@ -120,6 +120,8 @@ struct Otakara {
     float prevHealth = 0.0f;
     bool deadLogged = false;
     float logTimer = 0.0f;
+    std::string lastInteraction = "unknown";
+    std::string lastAttacker = "none";
 };
 
 std::map<PelletView*, Otakara> actors;
@@ -321,6 +323,21 @@ void pc_p2_otakara_forget(BTeki* actor) {
     actors.erase(static_cast<PelletView*>(actor));
 }
 
+void pc_p2_otakara_attack(BTeki* actor, Creature* owner, const char* interaction) {
+    if (!ready) return;
+    auto it = actors.find(static_cast<PelletView*>(actor));
+    if (it == actors.end()) return;
+    Otakara& s = it->second;
+    s.lastInteraction = interaction && *interaction ? interaction : "InteractAttack";
+    if (owner && owner->isPiki()) {
+        s.lastAttacker = colorName(static_cast<Piki*>(owner)->mColor);
+    } else if (owner) {
+        s.lastAttacker = "creature";
+    } else {
+        s.lastAttacker = "none";
+    }
+}
+
 unsigned long pc_p2_otakara_count() { return (unsigned long)actors.size(); }
 bool pc_p2_otakara_registered(BTeki* actor) {
     return actors.count(static_cast<PelletView*>(actor)) != 0;
@@ -483,9 +500,10 @@ void pc_p2_otakara_update(BTeki* actor) {
     // independent of the injected fixture trigger, so natural pre-injection combat
     // is observable as a positive delta.
     if (s.prevHealth - actor->mHealth > 0.5f) {
-        std::printf("P2_OTAKARA_HIT generator=%u source_id=%d health=%.1f->%.1f delta=%.1f\n",
+        std::printf("P2_OTAKARA_HIT generator=%u source_id=%d health=%.1f->%.1f delta=%.1f "
+                    "interaction=%s attacker=%s\n",
                     generator, s.species, s.prevHealth, actor->mHealth,
-                    s.prevHealth - actor->mHealth);
+                    s.prevHealth - actor->mHealth, s.lastInteraction.c_str(), s.lastAttacker.c_str());
         std::fflush(stdout);
     }
     s.prevHealth = actor->mHealth;
