@@ -9,6 +9,10 @@ void pc_p2_long_legs_forget(BTeki*);
 // Per-frame source-FSM tick, called from BTeki::update so it no longer depends
 // on the actor being on camera. No-op for unregistered/dead actors.
 void pc_p2_long_legs_update(BTeki*);
+// Manager-level tick (gameCoreSection, unculled): advances every registered
+// actor's FSM each frame even when the placement proxy is off-camera / grid
+// culled, so the source 50 s cooldown path to Shot still runs.
+void pc_p2_long_legs_update_all();
 bool pc_p2_long_legs_draw(BTeki*, Graphics&, const Matrix4f&, bool corpse = false);
 // Fixture observability (#397): read-only registration count / membership.
 unsigned long pc_p2_long_legs_count();

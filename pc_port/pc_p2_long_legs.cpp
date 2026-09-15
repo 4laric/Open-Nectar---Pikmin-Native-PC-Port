@@ -578,3 +578,8 @@ bool pc_p2_long_legs_shot(const BTeki* actor) {
     auto it = actors.find(const_cast<BTeki*>(actor));
     return it != actors.end() && it->second.fsm.state() == P2LongLegsState::Shot;
 }
+
+void pc_p2_long_legs_update_all() {
+    if (actors.empty()) return;
+    for (const auto& entry : actors) pc_p2_long_legs_update(entry.first);
+}
