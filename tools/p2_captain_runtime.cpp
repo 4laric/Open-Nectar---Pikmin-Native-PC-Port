@@ -103,6 +103,11 @@ public:
                 squadPiki->mMode = PikiMode::FormationMode;
                 navi0->mPlateMgr->getSlot(squadPiki, nullptr);
                 navi0->incPlatePiki();
+                // The plate's traversable slot count is normally populated by
+                // CPlate::refresh during the draw; the fixture runs synchronously
+                // before the first draw, so populate it here or releasePikis() on
+                // the survivor branch would iterate zero slots.
+                navi0->mPlateMgr->refresh(navi0->getPlatePikis(), 1.0f);
                 require(navi0->getPlatePikis() > 0, "(a) active captain had a squad");
 
                 // (a)+(b)+(c): natural knockdown of the active captain (slot 0)
