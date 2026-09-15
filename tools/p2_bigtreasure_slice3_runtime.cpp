@@ -129,10 +129,11 @@ public:
 
         if (phase == P2BT_Attack && !sentKnock) {
             ++framesInAttack;
-            // Knock elec off 90 frames into the FIRST Attack phase, after its
-            // element has emitted. This single knock-off is the flagged injected
-            // trigger; the FSM re-pick and the next (fire) attack are natural.
-            if (framesInAttack >= 90) {
+            // Knock elec off 15 frames into the FIRST Attack phase (each attack
+            // clip is ~30 frames), after its element has emitted. This single
+            // knock-off is the flagged injected trigger; the FSM re-pick and the
+            // next (fire) attack are natural.
+            if (framesInAttack >= 15) {
                 const bool posted = pc_p2_hardlanes_bigtreasure_hit(
                     P2BTWEAPON_Elec, P2BigTreasureOwnership::kWeaponMaxHealth, false);
                 std::printf("P2_BIGTREASURE_SLICE3_KNOCKOFF posted=%d weapon=elec injected=1\n",
