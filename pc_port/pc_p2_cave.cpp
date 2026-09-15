@@ -15,6 +15,7 @@
 #include "pc_p2_cave_transfer.h"
 #include "pc_p2_cave_generator.h"  // lane 41 (#480) runtime generator hook
 #include "pc_p2_cave_rooms_engine.h"  // lane 44 (#482) proxy room/unit instantiation
+#include "pc_p2_cave_geometry_engine.h"  // lane 45 (#483) real unit geometry + elec gate
 #include "pc_bbft.h"
 #include "Piki.h"
 #include "PikiMgr.h"
@@ -89,6 +90,7 @@ void pc_p2_cave_setup(){
     const char* opt=std::getenv("PIKMIN_CAVE_NAV_DIAGNOSTICS");
     navRate.reset(opt && opt[0]==49 && opt[1]==0);navDrawCalls=0;navMarkerLogged=false;
     pc_p2_cave_rooms_shutdown();
+    pc_p2_cave_geometry_shutdown();  // lane 45 (#483)
     floorId=0;checkpointSchema=1;beasts=false;cargoTerminal=false;token.clear();requested=false;completed=false;titleTimer=0;anchor=P2CaveAnchor{};transitionShape=nullptr;
     // Lane 41 (#480) runtime generator hook: opt-in only, so a normal cave entry
     // is unchanged. Reads a host-written canonical floor table and writes the
@@ -110,6 +112,10 @@ void pc_p2_cave_setup(){
     // is unchanged. Reads the host bridge's P2_CAVE_ROOMS_1 config and draws the
     // proxy floor; the geometry is explicitly labelled proxy.
     pc_p2_cave_rooms_setup();
+    // Lane 45 (#483) real unit geometry + electric gate: opt-in only, reads the
+    // host bridge's P2_CAVE_GEOMETRY_1 plan and instantiates real converted unit
+    // models in place of the proxy squares for choke/leaf/gate nodes.
+    pc_p2_cave_geometry_setup();
     if(!pc_pikipelago_room_preview())return;
     std::ifstream in("p2-cave-entry.txt");if(!in)return;
     std::string version,extra;int floor,count;float health;
@@ -238,6 +244,7 @@ bool pc_p2_cave_exit_after_checkpoint(){
     std::fflush(nullptr);std::_Exit(42);
 }
 void pc_p2_cave_tick(){
+    pc_p2_cave_geometry_tick();  // lane 45 (#483) live electric-gate actor
     navigationDiagnostic();
     if(!safeTime()){requested=false;return;}
     gameflow.mWorldClock.setTime(gameflow.mParameters->mStartHour());
@@ -262,6 +269,7 @@ void pc_p2_cave_tick(){
 
 void pc_p2_cave_draw_transition(Graphics& gfx){
     if(gfx.mCamera && pc_p2_cave_rooms_active())pc_p2_cave_rooms_draw(gfx);
+    if(gfx.mCamera && pc_p2_cave_geometry_active())pc_p2_cave_geometry_draw(gfx);  // lane 45 (#483)
     if(!active() || !anchor.enabled || !gfx.mCamera)return;
     if(navRate.enabled)++navDrawCalls;
     if(!navMarkerLogged){std::puts("P2_CAVE_MARKER_DRAW");navMarkerLogged=true;}

@@ -5,6 +5,7 @@
 // the proxy floor. This is labelled proxy geometry: it is not a P2 MapUnit room
 // and never a generation PASS.
 #include "pc_p2_cave_rooms_engine.h"
+#include "pc_p2_cave_geometry_engine.h"  // lane 45 (#483): real geometry takes over loaded nodes
 
 #include "Graphics.h"
 #include "Camera.h"
@@ -166,6 +167,9 @@ void pc_p2_cave_rooms_draw(Graphics& gfx)
     gfx.useMatrix(gfx.mCamera->mLookAtMtx, 0);
     const float half = rooms.cell * 0.4f;
     for (const P2CaveRoomUnit& unit : rooms.units) {
+        // Lane 45 (#483): a node with a loaded real model is drawn once, by the
+        // geometry module, so the proxy square is not drawn underneath it.
+        if (pc_p2_cave_geometry_handles(unit.id)) continue;
         const Vector3f ground = unitGround(unit);
         gfx.setColour(unitColour(unit.kind, unit.hazard), true);
         drawSquare(gfx, ground, half, ground.y + 2.f);
