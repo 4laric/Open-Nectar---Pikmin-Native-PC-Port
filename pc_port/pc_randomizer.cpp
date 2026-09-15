@@ -616,15 +616,6 @@ unsigned pc_randomizer_placement_slot_uid(unsigned sourceId70) {
     return it == slotBy70.end() ? 0 : it->second;
 }
 
-unsigned pc_randomizer_p2_source_for_70(unsigned generator70) {
-    // Seed->native generic bridge: a generator's file id (_70) -> the lane-04
-    // placement-slot uid -> the seed's ENEMY_P2 source id. Fails closed (0) when
-    // the bridge is off, the generator is unmapped, or the slot is unbound.
-    if (!p2EnemyBridge || !generator70) return 0;
-    const unsigned uid = pc_randomizer_placement_slot_uid(generator70);
-    return uid ? pc_randomizer_p2_source_for_id(uid) : 0;
-}
-
 void pc_randomizer_bind_generator(const void* generator, int stage, const char* file, int offset, unsigned sourceId70) {
     pc_randomizer_set_generator_id(generator, 0);
     if ((!pc_randomizer_spawn_slots() && !pc_randomizer_p2_bridge()) || !file) return;
