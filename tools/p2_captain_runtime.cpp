@@ -100,7 +100,7 @@ class CaptainApp final : public PlugPikiApp {
 public:
     void draw(Graphics& gfx) override {
         PlugPikiApp::draw(gfx);
-        if (ppmArmed && !ppmCaptured && frames >= 20) {
+        if (ppmArmed && !ppmCaptured && frames >= 150) {
             if (capture("two-captains.ppm")) {
                 ppmCaptured = true;
                 std::printf("P2_CAPTAIN_PPM saved=two-captains.ppm frame=%d captains=%d\n",
