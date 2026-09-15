@@ -365,7 +365,6 @@ void stepBuds(double nowSec)
 			++bound.stateTicks;
 			continue;
 		}
-		++bound.stateTicks;
 
 		switch (bound.state) {
 		case p2pom::State::Wait:
@@ -475,6 +474,11 @@ void stepBuds(double nowSec)
 		case p2pom::State::Dead:
 			break;
 		}
+		// One behavior step completed in the current (possibly newly entered)
+		// state. Incrementing after the switch means the entering step keeps the
+		// prior state's clip observable for the draw that happens this frame, so a
+		// Wait (1 tick) is drawn once before it arms.
+		++bound.stateTicks;
 	}
 }
 } // namespace
