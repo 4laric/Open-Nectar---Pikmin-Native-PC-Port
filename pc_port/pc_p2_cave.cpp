@@ -13,6 +13,7 @@
 #include "pc_p2_species.h"
 #include "pc_p2_species_schema.h"
 #include "pc_p2_cave_transfer.h"
+#include "pc_p2_cave_generator.h"  // lane 41 (#480) runtime generator hook
 #include "pc_bbft.h"
 #include "Piki.h"
 #include "PikiMgr.h"
@@ -87,6 +88,22 @@ void pc_p2_cave_setup(){
     const char* opt=std::getenv("PIKMIN_CAVE_NAV_DIAGNOSTICS");
     navRate.reset(opt && opt[0]==49 && opt[1]==0);navDrawCalls=0;navMarkerLogged=false;
     floorId=0;checkpointSchema=1;beasts=false;cargoTerminal=false;token.clear();requested=false;completed=false;titleTimer=0;anchor=P2CaveAnchor{};transitionShape=nullptr;
+    // Lane 41 (#480) runtime generator hook: opt-in only, so a normal cave entry
+    // is unchanged. Reads a host-written canonical floor table and writes the
+    // engine-generated observed layout for lane 40's checker.
+    if(const char* table=std::getenv("PIKMIN_CAVE_GENERATOR_TABLE");table && table[0]){
+        std::string layoutJson,marker,error;
+        if(pc_p2_cave_generate_file(table,8,layoutJson,marker,error)){
+            const char* requested=std::getenv("PIKMIN_CAVE_GENERATOR_OUT");
+            const std::string path=requested && requested[0]?requested:"p2-cave-generated.json";
+            std::ofstream file(path,std::ios::binary|std::ios::trunc);
+            if(file){file.write(layoutJson.data(),static_cast<std::streamsize>(layoutJson.size()));file.close();}
+            std::printf("%s\n",marker.c_str());
+        }else{
+            std::printf("P2_CAVE_GEN source=engine FAILED reason=%s\n",error.c_str());
+        }
+        std::fflush(stdout);
+    }
     if(!pc_pikipelago_room_preview())return;
     std::ifstream in("p2-cave-entry.txt");if(!in)return;
     std::string version,extra;int floor,count;float health;

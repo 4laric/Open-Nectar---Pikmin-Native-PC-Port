@@ -5,7 +5,10 @@
 #include <cstdint>
 
 enum class P2CaveSlot { Segment, Choke, Leaf, Excluded };
+#ifndef P2_CAVE_HAZARD_ENUM_DEFINED
+#define P2_CAVE_HAZARD_ENUM_DEFINED
 enum class P2CaveHazard { None, Water, Elec, Fire, Poison };
+#endif
 
 struct P2CaveUnit {
     const char* name;
