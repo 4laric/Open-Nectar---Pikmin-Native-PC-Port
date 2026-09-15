@@ -280,6 +280,7 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_bigtreasure_ordinary.cpp
     pc_port/pc_p2_bigtreasure_animclock.cpp
     pc_port/pc_p2_bigtreasure_elements.cpp
+    pc_port/pc_p2_bigtreasure_receiver.cpp
     pc_port/pc_randomizer.cpp
     pc_port/pc_p2_waterwraith.cpp
     pc_port/pc_p2_waterwraith_actor.cpp
@@ -1056,6 +1057,13 @@ foreach(policy IN ITEMS bigtreasure_ordinary bigtreasure_animclock bigtreasure_n
     target_compile_options(p2_${policy}_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
     add_test(NAME p2_${policy}_test COMMAND p2_${policy}_test)
 endforeach()
+
+# Lane 32 (#246) elemental receiver decision (engine-free stimulus resolve).
+add_executable(p2_bigtreasure_receiver_test tools/p2_bigtreasure_receiver_test.cpp
+    pc_port/pc_p2_bigtreasure_receiver.cpp)
+target_include_directories(p2_bigtreasure_receiver_test PRIVATE pc_port)
+target_compile_options(p2_bigtreasure_receiver_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_bigtreasure_receiver_test COMMAND p2_bigtreasure_receiver_test)
 
 # Groink submitted policy dependencies; arena remains opt-in.
 add_executable(p2_groink_test tools/p2_groink_test.cpp pc_port/pc_p2_groink.cpp)
