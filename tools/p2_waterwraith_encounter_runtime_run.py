@@ -255,10 +255,15 @@ def main(argv=None):
             errors.append(f"fixture exit code {result.returncode}")
         record["errors"].extend(errors)
         if not errors:
-            record["status"] = (
-                "blocked" if "BLOCKED WATERWRAITH_ENCOUNTER_RUNTIME" in combined else "passed")
-            record["outcome"] = (
-                "blocked" if "BLOCKED WATERWRAITH_ENCOUNTER_RUNTIME" in combined else "delivered")
+            if "BLOCKED WATERWRAITH_ENCOUNTER_RUNTIME" in combined:
+                record["status"] = "blocked"
+                record["outcome"] = "blocked"
+            elif re.search(r"P2_WATERWRAITH_SQUAD_ASSIST\b.*assisted=1", combined):
+                record["status"] = "assisted"
+                record["outcome"] = "assisted"
+            else:
+                record["status"] = "passed"
+                record["outcome"] = "delivered"
     except subprocess.TimeoutExpired as error:
         record["errors"].append("fixture timed out after 150 seconds")
         if run is not None:
@@ -275,7 +280,7 @@ def main(argv=None):
                                                encoding="utf-8")
     print(json.dumps({"status": record["status"], "run": str(run) if run else None,
                       "errors": record["errors"]}, indent=2))
-    return 0 if record["status"] == "passed" else 1
+    return 0 if record["status"] in ("passed", "assisted") else 1
 
 
 if __name__ == "__main__":

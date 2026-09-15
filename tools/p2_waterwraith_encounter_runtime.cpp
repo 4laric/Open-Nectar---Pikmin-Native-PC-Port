@@ -34,6 +34,7 @@
 #include "PikiAI.h"
 #include "PikiMgr.h"
 #include "Pellet.h"
+#include "Kontroller.h"
 #include "system.h"
 #include "pc_bbft.h"
 #include "pc_gpu_preference.h"
@@ -58,6 +59,22 @@ constexpr float kPurpleOffsetX[3] = { 30.0f, 0.0f, -30.0f };
 constexpr float kPurpleOffsetZ[3] = { 0.0f, 30.0f, 0.0f };
 constexpr float kRedOffsetX[2] = { 50.0f, -50.0f };
 constexpr float kRedOffsetZ[2] = { 0.0f, 0.0f };
+
+// A navi controller that never whistles or moves, so the Captain cannot recall
+// a squad the fixture freed into FreeMode (the same trick preview_p2_room's
+// FixtureController uses: the navi polls this controller each update).
+class NullNaviController : public Kontroller {
+public:
+    NullNaviController() : Kontroller(1) {}
+    void update() override
+    {
+        updateCont(0);
+        mMainStickX = 0;
+        mMainStickY = 0;
+        mSubStickX = 0;
+        mSubStickY = 0;
+    }
+};
 
 void require(bool value, const char* message)
 {
@@ -139,6 +156,12 @@ public:
             windowPrinted = true;
         }
         if (!readyPrinted) {
+            // Pin the captain: a null controller keeps it still and whistle-free,
+            // so it cannot re-adopt Pikmin the fixture frees into FreeMode.
+            Navi* navi = naviMgr->getNavi();
+            if (navi && !navi->mKontroller) {
+                navi->mKontroller = new NullNaviController();
+            }
             std::printf("P2_WATERWRAITH_ENCOUNTER_READY\n");
             readyPrinted = true;
         }
@@ -225,9 +248,8 @@ public:
                 Navi* navi = naviMgr ? naviMgr->getNavi() : nullptr;
                 squad[i]->changeMode(PikiMode::FreeMode, navi);
             }
-            // Scatter the whole freed squad onto the corpse stand-in so the
-            // free-mode multi-carrier haul can complete (a number pellet needs
-            // more than one carrier's strength; purple=10, others=1).
+            // Scatter the freed squad onto the corpse stand-in (one Free Pikmin
+            // suffices for a NewNumberPellet; strength is not the issue).
             const float ring[8][2] = { { 12.0f, 0.0f }, { -12.0f, 0.0f }, { 0.0f, 12.0f },
                                        { 0.0f, -12.0f }, { 16.0f, 10.0f }, { -16.0f, -10.0f },
                                        { 16.0f, -10.0f }, { -16.0f, 10.0f } };
@@ -241,6 +263,13 @@ public:
             }
             std::printf("P2_WATERWRAITH_SQUAD_FREE count=%d\n",
                         static_cast<int>(squad.size()));
+            for (int i = 0; i < static_cast<int>(squad.size()); ++i) {
+                if (!squad[i]->isAlive()) {
+                    continue;
+                }
+                std::printf("P2_WATERWRAITH_SQUAD_FREED_MODE pik=%p mode=%d\n",
+                            static_cast<void*>(squad[i]), int(squad[i]->mMode));
+            }
             corpseGrabStaged = true;
         }
 
@@ -398,7 +427,8 @@ public:
                     delivered ? 1 : 0);
         captured = true;
         if (delivered) {
-            std::puts("PASS WATERWRAITH_ENCOUNTER_RUNTIME");
+            std::puts(assistAssigned ? "PASS WATERWRAITH_ENCOUNTER_RUNTIME ASSISTED"
+                                     : "PASS WATERWRAITH_ENCOUNTER_RUNTIME");
         } else {
             std::puts("BLOCKED WATERWRAITH_ENCOUNTER_RUNTIME carry=no_natural_carry");
         }

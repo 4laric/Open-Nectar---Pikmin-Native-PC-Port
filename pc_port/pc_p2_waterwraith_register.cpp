@@ -61,7 +61,7 @@ void sweepCorpses()
 // treasure item, so a labelled number-pellet carryable corpse stand-in is
 // spawned at the wraith position (the same adaptation the Kogane lane records).
 // The pellet is registered for lane-06 Pod receipt via its Pellet* and for
-// lane-07 lifecycle via `pc_p2_waterwraith_forget/reset`.
+// lane-07 lifecycle via the register_tick liveness sweep and reset.
 void spawnWraithCorpse()
 {
     sState.corpseSpawned = true;
