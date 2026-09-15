@@ -1393,15 +1393,17 @@ void GameCoreSection::finalSetup()
 		Navi* firstNavi = naviMgr->getActiveNavi();
 		Navi* secondNavi = naviMgr->getOtherNavi(firstNavi);
 		if (firstNavi && secondNavi) {
-			Vector3f place = firstNavi->mSRT.t;
-			place.x += 40.0f;
-			place.z += 40.0f;
-			secondNavi->init(place);
+			secondNavi->init(firstNavi->mSRT.t);
 			secondNavi->mSRT.r = firstNavi->mSRT.r;
 			secondNavi->mFaceDirection = firstNavi->mFaceDirection;
 			secondNavi->reset();
 			secondNavi->mNaviCamera = mNavi->mNaviCamera;
 			secondNavi->mStateMachine->transit(secondNavi, NAVISTATE_Starting);
+			// Lane 12 (#130): NaviStartingState::init re-centres the Navi on the
+			// ship, so apply the slot offset AFTER the Starting transition or the
+			// two captains stack at the same point.
+			secondNavi->mSRT.t.x += 40.0f;
+			secondNavi->mSRT.t.z += 40.0f;
 			secondNavi->startKontroller();
 		}
 	}

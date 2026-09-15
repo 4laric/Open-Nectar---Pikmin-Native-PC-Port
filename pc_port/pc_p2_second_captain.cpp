@@ -18,14 +18,22 @@ bool second_captain_requested()
     return true;
 }
 
+// Lane 12 (#130): the live spawn gate is OPEN only for a fixture/test that
+// explicitly requests it. Normal play stays single-captain until the second
+// captain's model/plate/cursor rendering (Navi::refresh) and per-captain
+// controller routing are finished, so a live second Navi (whose collision is
+// active but whose model is skipped) is never born in a normal run.
+bool second_captain_live_requested()
+{
+    const char* env = std::getenv("PIKMIN_P2_SECOND_CAPTAIN_LIVE");
+    if (!env || env[0] == '\0') return false;
+    if (env[0] == '0' && env[1] == '\0') return false;
+    return true;
+}
+
 bool second_captain_live_allowed()
 {
-    // Opened for the survivor-path slice: the minimal rebind (active navi
-    // index, camera target, whistle/throw input) is now in place, so a live
-    // second Navi can be birthed on opt-in. The control is still strictly
-    // request-gated (PIKMIN_P2_SECOND_CAPTAIN); default single-captain play
-    // never reaches birth_second_captain().
-    return true;
+    return second_captain_live_requested();
 }
 
 int navi_capacity()

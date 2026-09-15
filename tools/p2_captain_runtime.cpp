@@ -7,9 +7,10 @@
 // cleanup.
 // A separate --knockout-roster scenario exercises the survivor-gated game-over /
 // NaviMgr::informOrimaDead hook added to NaviDeadState::init.
-// The --survivor-path scenario (with PIKMIN_P2_SECOND_CAPTAIN=1) drives a live
-// second captain, knocks the active captain down through the natural damage
-// receiver, and verifies the survivor rebind and the final stage end.
+// The --survivor-path scenario (with PIKMIN_P2_SECOND_CAPTAIN=1 and the
+// fixture-only PIKMIN_P2_SECOND_CAPTAIN_LIVE=1) flips the live gate, drives a
+// real second captain, knocks the active captain down through the integrated
+// InteractAttack receiver, and verifies the survivor rebind and final stage end.
 #include <SDL2/SDL.h>
 #include <GL/gl.h>
 #include "App.h"
@@ -17,6 +18,7 @@
 #include "GameCoreSection.h"
 #include "GameStat.h"
 #include "Graphics.h"
+#include "Interactions.h"
 #include "Navi.h"
 #include "NaviMgr.h"
 #include "NaviState.h"
@@ -103,12 +105,13 @@ public:
                 navi0->incPlatePiki();
                 require(navi0->getPlatePikis() > 0, "(a) active captain had a squad");
 
-                // (a)+(b)+(c): natural knockdown of the active captain (slot 0).
-                // Mirror InteractAttack::actNavi, the integrated Teki damage
-                // receiver that calls startDamageEffect: damage the captain, run
-                // the damage state, and let its exit transits to NAVISTATE_Dead.
-                navi0->startDamage();
-                navi0->mHealth -= 500.0f;
+                // (a)+(b)+(c): natural knockdown of the active captain (slot 0)
+                // through the integrated Teki attack receiver — InteractAttack::
+                // actNavi applies pcNaviHurt damage and the engine's own pause and
+                // damage-state handling; finishDamage then exits to NAVISTATE_Dead.
+                InteractAttack attack(nullptr, nullptr, 500.0f, false);
+                require(attack.actNavi(navi0), "InteractAttack::actNavi landed on active captain");
+                require(navi0->mHealth <= 1.0f, "attack receiver reduced captain to down");
                 navi0->finishDamage();
 
                 require(navi0->getCurrState()->getID() == NAVISTATE_Dead,
@@ -117,7 +120,13 @@ public:
                 require(!GameCoreSection::inPause(), "(b) core not paused on first knockout");
                 require(naviMgr->getAliveOrima() == navi1, "(b) survivor remains alive");
                 require(naviMgr->getActiveNavi() == navi1, "(c) control rebound to survivor (active index)");
-                std::printf("P2_CAPTAIN_SURVIVOR_DOWN dead=0 survivor=1 squad=1 orima_dead=0 paused=0 active=1\n");
+                // (squad): the survivor branch of NaviDeadState::init releases the
+                // downed captain's squad, so its plate empties and the member
+                // drops out of FormationMode.
+                const int plateAfter = navi0->getPlatePikis();
+                require(plateAfter == 0, "(squad) downed captain released its plate squad");
+                std::printf("P2_CAPTAIN_SURVIVOR_DOWN dead=0 survivor=1 plate=%d mode=%d orima_dead=0 paused=0 active=1\n",
+                    plateAfter, (int)squadPiki->mMode);
                 std::fflush(stdout);
 
                 // (d): the second captain going down ends the stage.
