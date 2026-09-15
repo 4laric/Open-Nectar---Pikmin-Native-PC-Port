@@ -386,6 +386,15 @@ bool carrierGate(void* context, std::uint64_t token)
     return bridge.fn ? bridge.fn(bridge.context, token) : false;
 }
 
+// Carrier index for a token, or -1 when no carrier owns it.
+int carrierIndexOfToken(std::uint64_t token)
+{
+    for (int i = 0; i < sArena.carrierCount; ++i) {
+        if (sArena.carriers[i].carrierToken == token) return i;
+    }
+    return -1;
+}
+
 // Deterministic host-fed flick roll in [0, 1) (LCG; profile-seeded).
 float nextRoll()
 {
@@ -488,12 +497,18 @@ bool pc_p2_bombsarai_arena_update(float sourceDelta,
         }
 
         // 2. Horizontal motion (scripted path) before the vertical step.
-        advancePath(k, sourceDelta);
+        const P2BombSaraiFsmState state = k.fsm.state();
+        // Skip the walk in Fall/Damage/Dead: the carrier is crashing or
+        // grounded there and must not advance its waypoint (source advancePath
+        // runs only in the walking states).
+        if (state != P2BombSaraiFsmState::Fall && state != P2BombSaraiFsmState::Damage
+            && state != P2BombSaraiFsmState::Dead) {
+            advancePath(k, sourceDelta);
+        }
 
         // 3. Vertical motion: hover in the flying states, crash integration in
         // Fall, grounded in Damage/Dead (bomb-immunity semantics depend on the
         // floor contact, bombCallBack BombSarai.cpp:127-135).
-        const P2BombSaraiFsmState state = k.fsm.state();
         float groundY = 0.0f;
         if (!P2BombSaraiTerrainAdapter::getMinY(adapter, k.carrier.x, k.carrier.z, groundY)) {
             return false;
@@ -565,7 +580,7 @@ bool pc_p2_bombsarai_arena_update(float sourceDelta,
         // 6. FSM decision.
         P2BombSaraiFsmInput in;
         in.health = k.health;
-        in.carrying = k.held != nullptr && k.held->phase() == P2BombSaraiBombPhase::Captured;
+        in.carrying = k.held != nullptr; // mHeldBomb: Captured only (cleared on throw)
         in.stuckPikmin = k.stuckNormal + k.stuckPurple;
         in.stuckPurple = k.stuckPurple;
         in.targetWithinTerritory = targetTerritory;
@@ -602,43 +617,50 @@ bool pc_p2_bombsarai_arena_update(float sourceDelta,
             k.held->throwBomb(out.throwKind, k.carrierYaw);
             k.lastThrowKind = (int)out.throwKind;
             k.lastThrowTick = sArena.tick;
+            k.held = nullptr; // mHeldBomb cleared in flight (BombSarai.cpp:285-294)
         }
         if (killed) {
             k.dead = true;
         }
     }
 
-    // Phase B: advance every live bomb and record detonations.
-    TraceBridge bridge{ trace, traceContext };
+    // Phase B: glue each carrier's captured payload to its joint, then advance
+    // every live bomb in the shared pool. Captured bombs are constrained (their
+    // update is a no-op); in-flight/armed/burning bombs fly through the trace
+    // and may detonate. Iterating the pool means an in-flight bomb keeps
+    // advancing after its carrier has cleared its held pointer (and possibly
+    // supplied a second bomb — see Finding #2).
     for (int c = 0; c < sArena.carrierCount; ++c) {
-        CarrierState& k = sArena.carriers[c];
-        if (!k.held) continue;
-        // Keep a captured payload glued to the carrier's joint each tick; a
-        // thrown (InFlight or later) bomb ignores this and flies ballistically.
-        k.held->followJoint(carrierJoint(k));
-        CarrierBridge carrierBridge{ carrier, carrierContext };
-        P2BombSaraiBomb* held = k.held;
-        held->update(sourceDelta, requiredTrace, &bridge, carrierGate, &carrierBridge);
-        if (bridge.failed) return false;
-        if (held->hasBlast()) {
-            const P2BombSaraiBlastEvent& event = held->lastBlast();
-            if (sArena.blastCount < kMaxBlastRecords) {
-                P2BombSaraiBlastRecord& record = sArena.blasts[sArena.blastCount++];
-                record.carrier = c;
-                record.carrierToken = event.carrierToken;
-                record.carrierValid = event.carrierValid;
-                record.center = event.center;
-                record.tick = sArena.tick;
-                record.hitCount = p2_bombsarai_route_blast(event, sArena.receivers,
-                                                            sArena.receiverCount,
-                                                            record.hits, kMaxReceivers);
-                if (record.hitCount < 0) return false;
-            }
-            sArena.blastFired = true;
-            held->clearBlast();
+        if (sArena.carriers[c].held) {
+            sArena.carriers[c].held->followJoint(carrierJoint(sArena.carriers[c]));
         }
-        if (held->phase() == P2BombSaraiBombPhase::Despawned) {
-            k.held = nullptr;
+    }
+    TraceBridge bridge{ trace, traceContext };
+    const int poolSlots = sArena.pool.slotCount();
+    for (int slot = 0; slot < poolSlots; ++slot) {
+        if (!sArena.pool.slotLive(slot)) continue;
+        P2BombSaraiBomb* bomb = sArena.pool.bombAt(slot);
+        CarrierBridge carrierBridge{ carrier, carrierContext };
+        bomb->update(sourceDelta, requiredTrace, &bridge, carrierGate, &carrierBridge);
+        if (bridge.failed) return false;
+        if (bomb->hasBlast()) {
+            const P2BombSaraiBlastEvent& event = bomb->lastBlast();
+            if (sArena.blastCount >= kMaxBlastRecords) {
+                std::fputs("P2_BOMBSARAI_BLAST_OVERFLOW record capacity exceeded\n", stderr);
+                return false; // never silently drop a detonation
+            }
+            P2BombSaraiBlastRecord& record = sArena.blasts[sArena.blastCount++];
+            record.carrier = carrierIndexOfToken(event.carrierToken);
+            record.carrierToken = event.carrierToken;
+            record.carrierValid = event.carrierValid;
+            record.center = event.center;
+            record.tick = sArena.tick;
+            record.hitCount = p2_bombsarai_route_blast(event, sArena.receivers,
+                                                        sArena.receiverCount,
+                                                        record.hits, kMaxReceivers);
+            if (record.hitCount < 0) return false;
+            sArena.blastFired = true;
+            bomb->clearBlast();
         }
     }
     return true;

@@ -178,8 +178,10 @@ private:
 
 // Fixed-capacity supply pool. Capacity models the BombSarai roster
 // preallocation (mChildNum = 2, enemyInfo.cpp:46); the host configures the
-// real shared Bomb manager limit. One active bomb per carrier token mirrors
-// the source !mHeldBomb guard (BombSarai.cpp:265). Exhaustion returns
+// real shared Bomb manager limit. One HELD (captured) bomb per carrier token
+// mirrors the source !mHeldBomb guard (BombSarai.cpp:265): once a carrier
+// throws, mHeldBomb is null in flight, so a second bomb may be supplied while
+// the first is still airborne, up to the pool capacity. Exhaustion returns
 // nullptr with no partial state, matching the source's silent tolerance of a
 // failed manager/birth (:266-278).
 class P2BombSaraiBombPool {
@@ -187,12 +189,22 @@ public:
     explicit P2BombSaraiBombPool(int capacity) : mCapacity(capacity > 0 ? capacity : 0) {}
 
     // Returns a captured bomb, or nullptr on pool exhaustion, a duplicate
-    // live carrier token, or invalid input. No state changes on failure.
+    // HELD (captured) carrier token, or invalid input. No state changes on
+    // failure.
     P2BombSaraiBomb* supply(std::uint64_t carrierToken, const P2BombSaraiVec3& jointPosition,
                             const P2BombSaraiBombConfig& config);
 
     int capacity() const { return mCapacity; }
     int activeCount() const;
+
+    // Stable slot addressing for the host seam: the host iterates every live
+    // bomb (captured payloads get glued to a joint by their owner; in-flight,
+    // armed and burning bombs advance through the trace). A Despawned bomb's
+    // slot reads as not-live and is re-issued by the next supply.
+    int slotCount() const { return mCapacity < kMaxBombs ? mCapacity : kMaxBombs; }
+    bool slotLive(int slot) const;
+    P2BombSaraiBomb* bombAt(int slot);
+    const P2BombSaraiBomb* bombAt(int slot) const;
 
 private:
     static constexpr int kMaxBombs = 16;

@@ -32,6 +32,7 @@
 #include "pc_p2_bombsarai_clock.h"
 #include "pc_p2_bombsarai_map_trace.h"
 #include "pc_p2_bombsarai_terrain.h"
+#include "pc_p2_hardlanes.h"
 #include "settings/pc_settings.h"
 #include "settings/pc_settings_p2d.h"
 #include <cmath>
@@ -111,6 +112,13 @@ public:
             || gameflow.mIsUIOverlayActive) { clock.reset(); return result; }
         Navi* n = naviMgr->getNavi();
         if (!setup) {
+            // The private room preview runs pc_p2_hardlanes_setup() and, on the
+            // authored p2-bombsarai-arena.txt, steps the SAME global arena every
+            // frame via gameCoreSection -> pc_p2_hardlanes_update. Release the
+            // hardlane's arena ownership so this fixture advances the arena
+            // exactly once per source tick (otherwise observe() samples every
+            // other tick).
+            pc_p2_hardlanes_reset();
             n->resetPosition(Vector3f(0, 0, -250)); n->mFaceDirection = 0; n->mSRT.r.set(0, 0, 0);
             binding.reset(mapMgr);
             adapter.reset(P2BombSaraiMapBinding::traceMove, &binding,
