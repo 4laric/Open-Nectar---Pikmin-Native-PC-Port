@@ -343,6 +343,8 @@ struct Host {
     // Tracks whether an `engine_receiver` row was seen, so `engine_receiver 0`
     // followed by `engine_receiver 1` is still rejected as a duplicate.
     bool sawEngineReceiverRow = false;
+    // Emits P2_PROJECTILE_SKIP_SELF at most once per Stone flight.
+    bool stoneSkippedSelf = false;
 
     ScriptRng rng;
     double debt = 0.0;
@@ -773,11 +775,14 @@ void detectStoneContacts()
         }
         // Never let a Stone damage its own firing Kabuto: the bound actor is
         // skipped even beyond the 1 s source-grace (a forward-fired Stone should
-        // not wrap back onto its firer). Emitted only when the firer is actually
-        // inside the contact radius.
+        // not wrap back onto its firer). Emitted at most once per flight, only
+        // when the firer is actually inside the contact radius.
         if (creature == gHost.kabutoActor) {
-            std::printf("P2_PROJECTILE_SKIP_SELF target=%llu\n",
-                        static_cast<unsigned long long>(tokenOf(creature)));
+            if (!gHost.stoneSkippedSelf) {
+                std::printf("P2_PROJECTILE_SKIP_SELF target=%llu\n",
+                            static_cast<unsigned long long>(tokenOf(creature)));
+                gHost.stoneSkippedSelf = true;
+            }
             return;
         }
         const std::uint64_t token = tokenOf(creature);
@@ -927,6 +932,7 @@ void fireKabutoStone(P2KabutoCannon& cannon)
     }
     gHost.stoneActive = true;
     gHost.stoneDeadTimer = 0.0;
+    gHost.stoneSkippedSelf = false;
     ++gHost.kabutoFires;
     std::printf("P2_PROJECTILE_KABUTO_FIRE species=%s homing=%d rig=%d mouth=(%.1f,%.1f,%.1f) "
                 "birth=(%.1f,%.1f,%.1f) face_deg=%.1f source=%llu fire=%d\n",
@@ -1313,6 +1319,7 @@ void pc_p2_projectiles_reset()
     gHost.stoneSource = 0;
     gHost.stoneDeadTimer = 0.0;
     gHost.stoneContacts.clear();
+    gHost.stoneSkippedSelf = false;
     gHost.haveEggCfg = false;
     gHost.eggActive = false;
     gHost.egg.reset(P2EggConfig{});
@@ -1511,6 +1518,7 @@ void pc_p2_projectiles_setup()
             fail("stone birth failed");
         }
         gHost.stoneActive = true;
+        gHost.stoneSkippedSelf = false;
         std::printf("P2_PROJECTILE_STONE_BORN x=%.1f y=%.1f z=%.1f face_deg=%.1f "
                     "homing=%d source=%llu radius=%.1f\n",
                     gHost.stonePos.x, gHost.stonePos.y, gHost.stonePos.z,
