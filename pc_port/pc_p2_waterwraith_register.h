@@ -25,9 +25,11 @@
 #include "pc_p2_waterwraith.h"
 
 #include <cstdint>
+#include <string>
 
 class Graphics;
 struct Matrix4f;
+class Pellet;
 
 struct P2WaterwraithRegisterPlacement {
     P2WaterwraithVec3 placement{}; // fixed world placement (actor origin)
@@ -58,6 +60,11 @@ bool pc_p2_waterwraith_register_finished();
 // True once the dead-wraith treasure stand-in was dropped into the world
 // (source Dead KEYEVENT_5 -> a P1 number-pellet stand-in, see register.cpp).
 bool pc_p2_waterwraith_register_corpse_spawned();
+
+// Lane 06 corpse-credit hook: true when `pellet` is the Waterwraith's own
+// view-less corpse stand-in, and in that case writes a synthetic identity token
+// into `identity` (the fixed-placement seam carries no generator id).
+bool pc_p2_waterwraith_receipt(Pellet* pellet, std::string& identity);
 
 // One engine frame: source-clocks the actor at 30 Hz (at most 4 steps per
 // frame), feeds the fixed fall -> recover -> walk host script and advances the

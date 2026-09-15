@@ -25,6 +25,7 @@ struct RegisterState {
     bool visualReady = false;
     bool finished = false;       // source Dead KEYEVENT_END reached
     bool corpseSpawned = false;  // Dead KEYEVENT_5 stand-in drop spawned once
+    Pellet* spawnedPellet = nullptr; // the view-less corpse pellet, for the lane-06 receipt hook
     P2WaterwraithRegisterPlacement placement;
     P2WaterwraithActor actor;
     P2WaterwraithActorOutput out;
@@ -57,6 +58,7 @@ void spawnWraithCorpse()
     pellet->init(pos);
     pellet->mVelocity.set(0.0f, 100.0f, 0.0f);
     pellet->startAI(0);
+    sState.spawnedPellet = pellet;
     std::printf("P2_WATERWRAITH_CORPSE pos=%.3f,%.3f,%.3f standin=number_pellet\n", pos.x, pos.y,
                 pos.z);
     std::fflush(stdout);
@@ -214,6 +216,18 @@ bool pc_p2_waterwraith_register_finished()
 bool pc_p2_waterwraith_register_corpse_spawned()
 {
     return sState.corpseSpawned;
+}
+
+// Lane 06 corpse-credit hook: identifies the Waterwraith's own view-less corpse
+// pellet and returns a synthetic identity token (the fixed-placement seam has no
+// generator id). The Pod economy credits it through pc_p2_preview_deliver.
+bool pc_p2_waterwraith_receipt(Pellet* pellet, std::string& identity)
+{
+    if (!pellet || pellet != sState.spawnedPellet) {
+        return false;
+    }
+    identity = "waterwraith";
+    return true;
 }
 
 void pc_p2_waterwraith_register_tick(float delta)

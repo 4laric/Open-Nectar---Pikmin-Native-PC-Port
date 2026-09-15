@@ -26,6 +26,7 @@
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_armor.h"
 #include "pc_p2_otakara.h"
+#include "pc_p2_waterwraith_register.h"
 #include "pc_p2_elecbug.h"
 #include "pc_p2_tamago.h"
 #include "pc_p2_umimushi.h"
@@ -339,6 +340,11 @@ bool pc_p2_preview_deliver(Pellet* pellet) {
         }
         else if(unsigned generator=0;pc_p2_kurage_receipt(pellet->mPelletView,generator)) {
             receipt="corpse:"+pc_p2_cave_receipt_prefix()+"kurage:"+std::to_string(generator);value=corpseValue;
+        }
+        else if(std::string id;pc_p2_waterwraith_receipt(pellet,id)) {
+            // Lane 06: a view-less number-pellet corpse (no mPelletView, no
+            // generator) credits through a Pellet*-keyed family receipt hook.
+            receipt="corpse:"+pc_p2_cave_receipt_prefix()+id;value=corpseValue;
         }
         else {
             auto found=corpses.find(pellet->mPelletView);
