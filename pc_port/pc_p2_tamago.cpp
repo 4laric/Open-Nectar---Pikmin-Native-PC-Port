@@ -281,19 +281,16 @@ void pc_p2_tamago_birth_group(BTeki* host, int count) {
         // would apply SpawnVelocity*Strength and fling the child out of the arena).
         Teki* child = host->generateTeki(TEKI_Chappy);
         if (!child) continue;  // null birth tolerated (source skips, count short)
-        const float radius = 0.5f + 0.5f * (float(unsigned(i * 2654435761u) >> 8) / 32768.0f);
+        // Bounded deterministic birth radius in [0.2, 1.0] (source
+        // createGroup birthRadius 0.8*randFloat()+0.2), 45-unit distribution.
+        const float radius = 0.2f + 0.8f * (float(unsigned(i * 2654435761u) & 0xffffu) / 65535.0f);
         const float face = 6.28318531f * float(i) / float(count);
         const Vector3f offset(45.0f * radius * std::sin(face), 0.0f,
                               45.0f * radius * std::cos(face));
         Vector3f pos = hostPos + offset;
         child->inputPosition(pos);
-        const unsigned gen = hostGen + 1u + unsigned(i);
-        std::printf("P2_TAMAGO_DEBUG_BIRTH i=%d gen=%u pos=%.1f,%.1f nest=%.1f,%.1f\n",
-                    i, gen, child->getPosition().x, child->getPosition().z,
-                    child->getNestPosition().x, child->getNestPosition().z);
         child->startAI(0);
-        std::printf("P2_TAMAGO_DEBUG_POSTAI i=%d gen=%u pos=%.1f,%.1f\n",
-                    i, gen, child->getPosition().x, child->getPosition().z);
+        const unsigned gen = hostGen + 1u + unsigned(i);
         Tamago& s = actors[static_cast<PelletView*>(child)];
         s.generator = gen;
         s.home = pos;
