@@ -9,6 +9,7 @@
 #include "pc_p2_tadpole.h"
 #include "pc_p2_hana.h"
 #include "pc_p2_kurage_teki.h"
+#include "pc_p2_groink_teki.h"
 #include "pc_p2_teki_lifetime.h"
 #include "pc_p2_onikurage_teki.h"
 #include "pc_p2_king_teki.h"
@@ -30,6 +31,7 @@
 #include "pc_p2_elecbug.h"
 #include "pc_p2_tamago.h"
 #include "pc_p2_imomushi.h"
+#include "pc_p2_otakara.h"
 #include "pc_p2_batch3.h"
 #include "pc_p2_long_legs.h"
 #endif
@@ -474,7 +476,9 @@ void BTeki::update()
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
 	pc_p2_sokkuri_update(this);
 	pc_p2_armor_update(this);
+	pc_p2_otakara_update(this);
 	pc_p2_kurage_teki_tick(this);
+	pc_p2_groink_teki_tick(this);
 	pc_p2_onikurage_teki_tick(this);
 	pc_p2_kogane_update(this);
 	pc_p2_king_teki_tick(this);
@@ -492,6 +496,7 @@ void BTeki::update()
 	pc_p2_catfish_update(this);
 	pc_p2_mar_update(this);
 	pc_p2_tadpole_update(this);
+	pc_p2_frog_update(this);
 	pc_p2_hana_update(this);
 	pc_p2_imomushi_update(this);
 	pc_p2_kochappy_fsm_update(this);
@@ -610,6 +615,9 @@ void BTeki::doAI()
 	if (pc_p2_kochappy_fsm_suppress_ai(this)) {
 		return;
 	}
+	if (pc_p2_frog_suppress_ai(this)) {
+		return;
+	}
 #endif
 	if (pc_p2_qurione_suppress_ai(this)) {
 		return;
@@ -668,7 +676,8 @@ void BTeki::die()
             && gameflow.mMoviePlayer && !gameflow.mMoviePlayer->mIsActive);
     }
 
-	mDeadState = 1;
+    mDeadState = 1;
+    pc_p2_otakara_died(this); // lane-22 host death-seam hook; no-op for unregistered actors
 }
 
 /**
@@ -1863,6 +1872,7 @@ bool BTeki::interactDefault(immut TekiInteractionKey& key)
 
 		_344 = attack->getDamagePortion();
 		mStoredDamage += attack->mDamage;
+		pc_p2_otakara_attack(this, attack->mOwner, "InteractAttack");
 		if (getTekiOption(TEKIOPT_DamageCountable)) {
 			mDamageCount++;
 		}
