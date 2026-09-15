@@ -275,6 +275,7 @@ int pc_p2_bulbmin_call_pikis(Navi* navi, float radius) {
     if (recruited)
         std::printf("P2_BULBMIN_WHISTLE recruited=%d wild=%zu recruited_total=%zu\n",
                     recruited, bridge.wildCount(), bridge.recruitedCount());
+        std::fflush(stdout);
     return recruited;
 }
 
