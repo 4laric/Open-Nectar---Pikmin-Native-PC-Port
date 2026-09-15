@@ -217,19 +217,26 @@ void pc_p2_tamago_forget(BTeki* actor) {
     const unsigned gone = it->second.generator;
     const bool wasGroupHost = it->second.isGroupHost;
     // Whole-group cleanup on host forget: the manager-birth host owns its group,
-    // so forgetting the host erases every born follower too (no orphaned group).
+    // so forgetting the host despawns every born follower (via the death funnel)
+    // and erases the whole group — no orphaned, unregistered Chappy actors remain.
     if (wasGroupHost) {
-        int members = 0;
-        for (auto entry = actors.begin(); entry != actors.end();) {
-            if (entry->second.leaderActor == actor || entry->first == static_cast<PelletView*>(actor)) {
-                entry = actors.erase(entry);
-                ++members;
-            } else {
-                ++entry;
+        std::vector<BTeki*> children;
+        for (auto& entry : actors) {
+            if (entry.second.leaderActor == actor) {
+                children.push_back(static_cast<BTeki*>(entry.first));
             }
         }
-        std::printf("P2_TAMAGO_GROUP_FORGET host=%u group=%d remaining=%zu source_id=68\n",
-                    gone, members, actors.size());
+        int killed = 0;
+        for (BTeki* child : children) {
+            actors.erase(static_cast<PelletView*>(child));
+            if (child->isAlive()) {
+                child->kill(false);  // death funnel -> pc_p2_forget_teki + manager recycle
+                ++killed;
+            }
+        }
+        actors.erase(static_cast<PelletView*>(actor));
+        std::printf("P2_TAMAGO_GROUP_FORGET host=%u group=%d remaining=%zu killed=%d source_id=68\n",
+                    gone, int(children.size()) + 1, actors.size(), killed);
         std::fflush(stdout);
         return;
     }
@@ -271,6 +278,9 @@ void pc_p2_tamago_birth_group(BTeki* host, int count) {
     for (int i = 0; i < follow; ++i) {
         Teki* child = host->spawnTeki(TEKI_Chappy);
         if (!child) continue;  // null birth tolerated (source skips, count short)
+        // spawnTeki applies a launch velocity (SpawnVelocity*Strength) + startAI
+        // before we reposition; cancel it so the child stays in the host's group.
+        child->stopMove();
         const float radius = 0.5f + 0.5f * (float(unsigned(i * 2654435761u) >> 8) / 32768.0f);
         const float face = 6.28318531f * float(i) / float(count);
         const Vector3f offset(45.0f * radius * std::sin(face), 0.0f,
@@ -288,12 +298,13 @@ void pc_p2_tamago_birth_group(BTeki* host, int count) {
         s.leaderActor = host;
         enter(s, TAMAGO_APPEAR, "set");
         std::printf("P2_TAMAGO_GROUP leader=%u follower=%u source_id=68\n", hostGen, gen);
-        std::printf("P2_TAMAGO_BIND generator=%u source_id=68 visual_only=0\n", gen);
+        // born=1 flags the synthetic (manager-birth) id, distinct from a staged id.
+        std::printf("P2_TAMAGO_BIND generator=%u source_id=68 visual_only=0 born=1\n", gen);
         ++born;
     }
     std::printf("P2_TAMAGO_BIRTH host=%u leader=%u follow=%d count=%d source=manager\n",
                 hostGen, hostGen, born, count);
-    std::printf("P2_TAMAGO_BIRTH_ONCE host=%u births=%d duplicate=0\n", hostGen, count);
+    std::printf("P2_TAMAGO_BIRTH_ONCE host=%u born=%d\n", hostGen, born);
     std::fflush(stdout);
 }
 
