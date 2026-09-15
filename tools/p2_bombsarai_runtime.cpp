@@ -33,6 +33,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <vector>
 
 namespace {
@@ -251,7 +252,23 @@ int main(int argc, char** argv) {
     SDL_setenv("SDL_AUDIODRIVER", "dummy", 1); SDL_SetMainReady(); pc_gpu_preference_apply();
     _putenv_s("PIKMIN_RANDOMIZER_TEST_BACKGROUND", "1"); pc_bbft_init(argc, argv);
     require(pc_pikipelago_room_preview(), "requires --experimental-pikmin2-room");
-    require(pc_window_init("BombSarai arena runtime fixture", 960, 720), "window init");
-    pc_settings_init(); gsys->Initialise(); pc_settings_p2d_init(); nodeMgr = new NodeMgr();
+    // Equivalent replacement-main startup: a small centred 960x540 windowed
+    // preview (PIKMIN_P2_ROOM_WINDOW=WxH overrides; off/0 keeps defaults),
+    // matching pc_main.cpp's experimental-room startup without its main object.
+    int windowWidth = 960, windowHeight = 540;
+    const char* windowEnv = std::getenv("PIKMIN_P2_ROOM_WINDOW");
+    if (windowEnv && std::strcmp(windowEnv, "off") && std::strcmp(windowEnv, "0")) {
+        int w = 0, h = 0;
+        if (std::sscanf(windowEnv, "%dx%d", &w, &h) == 2 && w >= 320 && h >= 240) {
+            windowWidth = w; windowHeight = h;
+        }
+    }
+    require(pc_window_init("BombSarai arena runtime fixture", windowWidth, windowHeight),
+            "window init");
+    pc_settings_init();
+    pc_window_set_display_mode(PC_WINDOW_FULLSCREEN_WINDOWED);
+    pc_window_set_window_size(windowWidth, windowHeight);
+    pc_window_center();
+    gsys->Initialise(); pc_settings_p2d_init(); nodeMgr = new NodeMgr();
     gsys->run(new BombSaraiApp()); return 0;
 }
