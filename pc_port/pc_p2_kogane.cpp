@@ -437,6 +437,43 @@ int pc_p2_kogane_gas_state(BTeki* actor,float* x,float* z,float* remaining){
     if(x)*x=b.gasPosition.x;if(z)*z=b.gasPosition.z;if(remaining)*remaining=b.gasTimer;
     return 1;
 }
+// Slice 3: the persisted lane-06 onion ledger is the independent backstop to the
+// family-local flip sidecar. These read/re-drive it so a restart pass can prove
+// the reward cap holds: the ledger still has exactly three rows and every
+// re-attempt is a genuine pc_p2_receipt_host_grant Duplicate, never a re-grant.
+int pc_p2_kogane_onion_ledger_rows(){
+    std::ifstream in(kOnionReceiptsPath);
+    if(!in)return 0; // missing file starts empty
+    std::string header;
+    if(!(in>>header)||header!="P2_RECEIPTS_1")return -1;
+    int rows=0;std::string seed,reward,slot,encounter;
+    while(in>>seed){ if(!(in>>reward>>slot>>encounter))return -1; ++rows; }
+    if(!in.eof())return -1;
+    return rows;
+}
+int pc_p2_kogane_reprobe_duplicates(unsigned generator,int id){
+    // Reopen the kogane ledger unconditionally: another lane's setup (or the
+    // mixed-scene Flora consumer) may have left the shared single-consumer host
+    // pointing at its own file, and a probe must always test THIS lane's ledger.
+    if(!pc_p2_receipt_host_open(kOnionReceiptsPath)){std::fputs("P2_KOGANE_ONION_RECEIPT invalid receipt state\n",stderr);std::abort();}
+    const std::string identity="enemy:"+std::to_string(id);
+    const std::string slot=std::to_string(generator);
+    int dups=0;
+    for(int flip=1;flip<=3;++flip){
+        const std::string encounter="flip"+std::to_string(flip);
+        const P2ReceiptHostResult result=pc_p2_receipt_host_grant(
+            receiptSeed.c_str(),identity.c_str(),slot.c_str(),encounter.c_str());
+        if(result==P2ReceiptHostResult::Error){std::fputs("P2_KOGANE_ONION_RECEIPT persistence failed\n",stderr);std::abort();}
+        const bool granted=result==P2ReceiptHostResult::Granted;
+        const bool duplicate=result==P2ReceiptHostResult::Duplicate;
+        std::printf("P2_KOGANE_ONION_RECEIPT generator=%u flip=%d granted=%d duplicate=%d ledger=onion seed=%s\n",
+            generator,flip,int(granted),int(duplicate),receiptSeed.c_str());
+        if(granted)return -1; // a re-farm grant is a cap bug; fail closed
+        if(duplicate)++dups;
+    }
+    std::fflush(stdout);
+    return dups;
+}
 bool pc_p2_kogane_draw(BTeki* actor,Graphics& gfx,const Matrix4f& matrix,bool corpse){
     if(!actors.count(static_cast<PelletView*>(actor)))return false;
     if(!logged[corpse?1:0]){std::printf("P2_KOGANE_DRAW corpse=%d\n",int(corpse));logged[corpse?1:0]=true;}
