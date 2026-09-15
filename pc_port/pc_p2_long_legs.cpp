@@ -312,7 +312,7 @@ void pc_p2_long_legs_update(BTeki* actor) {
     in.health = actor->mHealth;
     // A health decrease this tick is the source damage edge; it postpones the
     // Houdai gun by resetting the shot cooldown (Houdai.cpp).
-    if (actor->mHealth < state.lastHealth) {
+    if (actor->mHealth > 0.0f && actor->mHealth < state.lastHealth) {
         // Natural combat observability: an incremental, still-positive health
         // decrease is live Pikmin attack damage, distinguishable from a single
         // fixture-injected jump to zero (which shows up only in P2_LONG_LEGS_DEAD).
