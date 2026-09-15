@@ -484,6 +484,8 @@ static unsigned sSpecularChannelDraws = 0;
 // channel draws can be told apart from the renderer-global count.
 static bool sSpecularFamilyScope = false;
 static unsigned sSpecularFamilyDraws = 0;
+static unsigned sSpecularFamilyBegin = 0;      // upload count at scope entry
+static unsigned sSpecularFamilyDeltaLast = 0;  // per-draw delta of the last scope
 
 static constexpr GXAttnFn decode_xf_attn_fn(u32 control) {
     const bool bit9  = (control & (1u << 9)) != 0;
@@ -3816,8 +3818,17 @@ void pc_gfx_init_specular_dir(void* ltObj, f32 x, f32 y, f32 z) {
 }
 unsigned pc_gfx_specular_dir_calls(void) { return sSpecularDirCalls; }
 unsigned pc_gfx_specular_channel_draws(void) { return sSpecularChannelDraws; }
-void pc_gfx_specular_family_scope(int active) { sSpecularFamilyScope = active != 0; }
+void pc_gfx_specular_family_scope(int active) {
+    if (active) {
+        sSpecularFamilyScope = true;
+        sSpecularFamilyBegin = sSpecularFamilyDraws;
+    } else {
+        sSpecularFamilyScope = false;
+        sSpecularFamilyDeltaLast = sSpecularFamilyDraws - sSpecularFamilyBegin;
+    }
+}
 unsigned pc_gfx_specular_family_draws(void) { return sSpecularFamilyDraws; }
+unsigned pc_gfx_specular_family_delta_last(void) { return sSpecularFamilyDeltaLast; }
 void pc_gfx_load_light(void* ltObj, u32 lightMask) {
     if (!ltObj) return;
     for (int i = 0; i < 8; i++) {
@@ -6166,10 +6177,10 @@ void pc_gfx_end(void) {
     if (sLoc.ambColor1 >= 0) glUniform4f_ptr(sLoc.ambColor1, a1r, a1g, a1b, a1a);
     if (sLoc.chan1En >= 0) glUniform1i_ptr(sLoc.chan1En, sChannels[1].enabled ? 1 : 0);
     if (sLoc.chan1AttnFn >= 0) glUniform1i_ptr(sLoc.chan1AttnFn, (int)sChannels[1].attnFn);
-    // Specular half-vector: light 7's dir field (offset 0x34) holds it.
+    // Specular half-vector: light 7's dir field (offset 0x34) holds it. Count the
+    // channel draw only when the half-vector uniform is actually uploaded (light 7
+    // active), so a count proves the upload, not merely an in-flight spec state.
     if (sChannels[1].enabled && sChannels[1].attnFn == GX_AF_SPEC) {
-        ++sSpecularChannelDraws;
-        if (sSpecularFamilyScope) ++sSpecularFamilyDraws;
         u32 mask1 = sChannels[1].lightMask;
         for (int i = 7; i < 8; i++) {
             if (mask1 & (1u << i) && sLights[i].active) {
@@ -6179,7 +6190,8 @@ void pc_gfx_end(void) {
                 if (sLoc.specAttn1 >= 0) {
                     glUniform4f_ptr(sLoc.specAttn1, sLights[i].a[0], sLights[i].a[1], sLights[i].a[2], 0.0f);
                 }
-                
+                ++sSpecularChannelDraws;
+                if (sSpecularFamilyScope) ++sSpecularFamilyDraws;
                 break;
             }
         }

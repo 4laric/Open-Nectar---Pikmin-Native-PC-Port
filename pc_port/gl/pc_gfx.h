@@ -94,6 +94,7 @@ unsigned pc_gfx_specular_dir_calls(void);
 unsigned pc_gfx_specular_channel_draws(void);
 void pc_gfx_specular_family_scope(int active);
 unsigned pc_gfx_specular_family_draws(void);
+unsigned pc_gfx_specular_family_delta_last(void);
 void pc_gfx_load_light(void* ltObj, u32 lightMask);
 void pc_gfx_set_tev_order(GXTevStageID stage, GXTexCoordID coord, GXTexMapID map, GXChannelID chan);
 void pc_gfx_set_tev_op(GXTevStageID stage, GXTevMode mode);
