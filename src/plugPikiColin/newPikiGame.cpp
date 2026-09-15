@@ -1395,6 +1395,14 @@ ModeState* DayOverModeState::update(u32& result)
 			// Clear the global pointer first so the draw pass cannot dereference
 			// the released screen while a memory-card dialog is still active.
 			resultWindow = nullptr;
+			// The abandoned results background may still have a StartMovie
+			// command queued. Drop pending cutscene commands before the
+			// gameplay section is torn down; otherwise parseMessages() would
+			// dispatch them against a released NaviMgr on a later frame.
+			if (gameflow.mGameInterface) {
+				static_cast<GameMovieInterface*>(gameflow.mGameInterface)->mSimpleMessageCount = 0;
+				static_cast<GameMovieInterface*>(gameflow.mGameInterface)->mComplexMesgCount   = 0;
+			}
 			// 2-second loading screen
 			gsys->startLoading(nullptr, true, 120);
 			PRINT("EXITDAYEND!!!!\n");
