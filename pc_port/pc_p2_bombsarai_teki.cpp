@@ -542,6 +542,24 @@ void pc_p2_bombsarai_teki_tick(BTeki* t)
                 // carry itself stays natural (FreeMode grasp -> route -> Pod).
                 sCorpsePellet->mConfig->mCarryMinPikis.mValue = 1;
             }
+            // Suppress stray Red number pellets (pr01) while the carcass is being
+            // hauled: the carrier (and any Pikmin it killed) drops `pr01` number
+            // pellets, and a FreeMode Pikmin carrying one to the Pod hits the
+            // preview's deny-by-default cargo abort before the carcass receipt
+            // lands. Only free (uncarried) pellets are touched so an in-flight
+            // carrier is never disrupted. Labelled fixture concession (the
+            // l29 recipe closes the same pre-receipt race).
+            if (pelletMgr) {
+                Iterator pit(pelletMgr);
+                CI_LOOP(pit) {
+                    Pellet* pel = static_cast<Pellet*>(*pit);
+                    if (!pel || pel == sCorpsePellet || !pel->isAlive() || !pel->mConfig) continue;
+                    if (pel->mConfig->mModelId.mId != 'pr01') continue;
+                    if (pel->getMinFreeSlotIndex() == -1) continue;
+                    pel->mConfig->mCarryMinPikis.mValue = 0;
+                    pel->mConfig->mCarryMaxPikis.mValue = 0;
+                }
+            }
             if (naviMgr && pikiMgr && naviMgr->getNavi()) {
                 Navi* n = naviMgr->getNavi();
                 int carriers = 0, squad = 0;
