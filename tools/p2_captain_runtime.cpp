@@ -7,10 +7,11 @@
 // cleanup.
 // A separate --knockout-roster scenario exercises the survivor-gated game-over /
 // NaviMgr::informOrimaDead hook added to NaviDeadState::init.
-// The --survivor-path scenario (with PIKMIN_P2_SECOND_CAPTAIN=1 and the
-// fixture-only PIKMIN_P2_SECOND_CAPTAIN_LIVE=1) flips the live gate, drives a
-// real second captain, knocks the active captain down through the integrated
-// InteractAttack receiver, and verifies the survivor rebind and final stage end.
+// The --survivor-path scenario (with PIKMIN_P2_SECOND_CAPTAIN=1) drives a real
+// second captain, knocks the active captain down through the integrated
+// InteractAttack receiver, and verifies the survivor rebind, observed squad
+// release and final stage end.
+// The --two-captain-ppm scenario draws both captains and saves a PPM.
 #include <SDL2/SDL.h>
 #include <GL/gl.h>
 #include "App.h"
@@ -43,10 +44,32 @@
 namespace {
 bool sKnockoutScenario = false;
 bool sSurvivorScenario = false;
+bool sPpmScenario = false;
 
 void require(bool value, const char* message)
 {
     if (!value) { std::printf("FAIL P2_CAPTAIN_RUNTIME %s\n", message); std::fflush(stdout); std::_Exit(1); }
+}
+
+// Reusable P6 PPM capture after a real draw (mirrors the other room fixtures).
+void capture(const char* path)
+{
+    pc_gfx_flush_batch();
+    auto bind = reinterpret_cast<PFNGLBINDFRAMEBUFFERPROC>(SDL_GL_GetProcAddress("glBindFramebuffer"));
+    require(bind != nullptr, "framebuffer entry point unavailable");
+    GLint previous = 0; glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous); bind(GL_FRAMEBUFFER, 0);
+    int width = 0, height = 0; SDL_GL_GetDrawableSize(SDL_GL_GetCurrentWindow(), &width, &height);
+    std::vector<unsigned char> pixels(size_t(width) * size_t(height) * 3);
+    glReadBuffer(GL_BACK); glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+    bind(GL_FRAMEBUFFER, previous);
+    require(glGetError() == GL_NO_ERROR, "capture GL error");
+    bool visible = false; for (unsigned char value : pixels) visible |= value > 8;
+    require(visible, "empty capture");
+    FILE* file = std::fopen(path, "wb"); require(file != nullptr, "capture file");
+    std::fprintf(file, "P6\n%d %d\n255\n", width, height);
+    for (int y = height - 1; y >= 0; --y) std::fwrite(pixels.data() + size_t(y) * width * 3, 1, size_t(width) * 3, file);
+    std::fclose(file);
 }
 
 class CaptainApp final : public PlugPikiApp {
@@ -60,13 +83,33 @@ class CaptainApp final : public PlugPikiApp {
     int survivorPreMode = 0;
     Navi* survivorNavi0 = nullptr;
     Navi* survivorNavi1 = nullptr;
+    // Two-captain PPM scenario state.
+    bool ppmArmed = false;
+    int ppmFrames = 0;
+    bool ppmCaptured = false;
 public:
+    void draw(Graphics& gfx) override {
+        PlugPikiApp::draw(gfx);
+        if (ppmArmed && !ppmCaptured && frames >= 6) {
+            capture("two-captains.ppm");
+            ppmCaptured = true;
+            std::printf("P2_CAPTAIN_PPM saved=two-captains.ppm frame=%d\n", frames);
+            std::fflush(stdout);
+            std::puts("PASS P2_CAPTAIN_RUNTIME"); std::fflush(stdout); std::_Exit(0);
+        }
+    }
     int idle() override {
         int result = PlugPikiApp::idle();
         require(++frames < 900, "timeout");
         if (gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive) {
             gameflow.mMoviePlayer->requestSkip();
             return result;
+        }
+        // The two-captain PPM run spans frames; clear the preview's day/UI overlay
+        // that would otherwise freeze the managers a few frames in.
+        if (sPpmScenario && (gameflow.mPauseAll || gameflow.mIsUIOverlayActive)) {
+            gameflow.mPauseAll = FALSE;
+            gameflow.mIsUIOverlayActive = FALSE;
         }
         if (!pc_p2_preview_ready() || !naviMgr || !naviMgr->getNavi() || gameflow.mPauseAll
             || gameflow.mIsUIOverlayActive)
@@ -84,6 +127,16 @@ public:
                 "live adapter auto-bound by GameCoreSection constructor");
             require(pc_p2_captain::setup_from_navi_mgr(), "setup_from_navi_mgr idempotent");
             require(pc_p2_captain::adapter() != nullptr, "adapter remains bound");
+
+            if (sPpmScenario) {
+                // Arm: the second captain must already exist (PIKMIN_P2_SECOND_CAPTAIN=1).
+                require(naviMgr->hasSecondNavi(), "second captain present in roster");
+                require(naviMgr->getNavi(0) && naviMgr->getNavi(1), "both captain slots live");
+                std::printf("P2_CAPTAIN_PPM_ARMED captain_count=%d\n", naviMgr->getNaviCount());
+                std::fflush(stdout);
+                ppmArmed = true;
+                return result;
+            }
 
             if (sSurvivorScenario) {
                 // --- Survivor path end-to-end (#130): natural knockdown + rebind ---
@@ -251,6 +304,7 @@ int main(int argc, char** argv)
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--knockout-roster") sKnockoutScenario = true;
         if (std::string(argv[i]) == "--survivor-path") sSurvivorScenario = true;
+        if (std::string(argv[i]) == "--two-captain-ppm") sPpmScenario = true;
     }
     SDL_setenv("SDL_AUDIODRIVER", "dummy", 1);
     SDL_SetMainReady();

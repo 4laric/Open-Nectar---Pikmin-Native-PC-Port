@@ -231,20 +231,16 @@ void NaviMgr::resetCaptainRoster()
  */
 bool NaviMgr::ensureSecondNaviShapeObject()
 {
-	if (mNaviShapeObject[1]) {
-		return true;
-	}
-	Shape* shape = gameflow.loadShape("pikis/nv3Model.mod", false);
-	if (!shape) {
-		return false;
-	}
-	PikiShapeObject* shapeObject = new PikiShapeObject(shape);
-	if (!shapeObject) {
-		return false;
-	}
-	shapeObject->mAnimMgr = PikiShapeObject::getAnimMgr();
-	mNaviShapeObject[1]   = shapeObject;
-	return true;
+	// Lane 12 (#130): share slot 0's fully-initialised PikiShapeObject. A fresh
+	// uncached `loadShape("pikis/nv3Model.mod", false)` crashed
+	// non-deterministically in the Navi::draw/demoDraw tail (fault location moved
+	// between runs), so the second captain reuses mNaviShapeObject[0] (same mesh,
+	// collision tree, animators and animation manager slot 0 already draws with).
+	// Consequence: the two captains drive the shared mAnimatorA/B, so their poses
+	// couple (a documented cosmetic limitation) while both are drawn at their own
+	// mSRT. mNaviShapeObject[1] is never deleted, so sharing is safe.
+	mNaviShapeObject[1] = mNaviShapeObject[0];
+	return mNaviShapeObject[1] != nullptr;
 }
 
 /**
