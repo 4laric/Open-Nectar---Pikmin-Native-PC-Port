@@ -517,7 +517,10 @@ unsigned pc_randomizer_generator_id(const void* generator) {
 }
 void pc_randomizer_set_generator_id(const void* generator, unsigned uid) {
     if (!uid) { generatorIds.erase(generator); return; }
-    if (!pc_randomizer_spawn_slots()) return;
+    // Populate under the P2 enemy bridge too: ENEMY_P2 forbids the P1 slot
+    // layouts, so pc_randomizer_spawn_slots() is false and generatorIds would
+    // otherwise stay empty (the seed bindings key on the spawn-slot uid).
+    if (!pc_randomizer_spawn_slots() && !pc_randomizer_p2_bridge()) return;
     for (const auto& row : randomizerSpawnSlots) if (row.uid == uid) {
         generatorIds[generator] = uid; return;
     }
@@ -525,7 +528,7 @@ void pc_randomizer_set_generator_id(const void* generator, unsigned uid) {
 }
 void pc_randomizer_bind_generator(const void* generator, int stage, const char* file, int offset) {
     pc_randomizer_set_generator_id(generator, 0);
-    if (!pc_randomizer_spawn_slots() || !file) return;
+    if ((!pc_randomizer_spawn_slots() && !pc_randomizer_p2_bridge()) || !file) return;
     for (const auto& row : randomizerSpawnSlots)
         if (row.stage == stage && row.offset == offset && !std::strcmp(row.file, file)) {
             pc_randomizer_set_generator_id(generator, row.uid); return;

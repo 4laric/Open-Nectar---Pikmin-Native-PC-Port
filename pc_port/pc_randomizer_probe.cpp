@@ -52,19 +52,27 @@ int main(int argc, char** argv) {
     }
     for (int arg = 1; arg < argc; ++arg) if (!std::strcmp(argv[arg], "--enemy-p2-spawn-probe")) {
         assert(pc_randomizer_p2_bridge());
-        unsigned bound = 0;
-        for (int i = 1; i + 1 < argc; ++i) if (!std::strcmp(argv[i], "--enemy-p2-target")) {
-            const unsigned long id = std::strtoul(argv[i + 1], nullptr, 10);
-            const unsigned source = pc_randomizer_p2_source_for_id(id);
-            assert(source != 0);
-            std::printf("P2_SPAWN_BIND target=%lu source_id=%u\n", id, source);
+        int bound = 0;
+        for (const auto& row : randomizerSpawnSlots) {
+            int object;
+            pc_randomizer_bind_generator(&object, row.stage, row.file, row.offset);
+            const unsigned uid = pc_randomizer_generator_id(&object);
+            assert(uid == row.uid);
+            const unsigned source = pc_randomizer_p2_source_for_id(uid);
+            if (!source) continue;
+            // The slot uid is re-derived from (stage,file,offset) on every load;
+            // an unset + rebind (cache reload) must re-resolve the same source.
+            pc_randomizer_set_generator_id(&object, 0);
+            assert(pc_randomizer_generator_id(&object) == 0);
+            assert(pc_randomizer_p2_source_for_id(pc_randomizer_generator_id(&object)) == 0);
+            pc_randomizer_bind_generator(&object, row.stage, row.file, row.offset);
+            assert(pc_randomizer_p2_source_for_id(pc_randomizer_generator_id(&object)) == source);
+            std::printf("P2_SPAWN_BIND target=%u source_id=%u\n", uid, source);
             ++bound;
         }
         assert(bound > 0);
-        // Unbound generator identities must resolve to 0 (ordinary P1 spawn).
         assert(pc_randomizer_p2_source_for_id(0) == 0);
-        assert(pc_randomizer_p2_source_for_id(123456789UL) == 0);
-        assert(pc_randomizer_p2_source_for_id(4294967295UL) == 0);
+        assert(pc_randomizer_p2_source_for_id(424242u) == 0); // unknown uid
         std::puts("ENEMY_P2_SPAWN_PASS"); return 0;
     }
     for (int arg = 1; arg < argc; ++arg) if (!std::strcmp(argv[arg], "--group-probe")) {
