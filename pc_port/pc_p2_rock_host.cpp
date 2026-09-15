@@ -52,7 +52,8 @@ bool RockMapBinding::trace(void* context, const P2RockHazardVec3& center,
     result.floorTriangle = self.mProxy.mGroundTriangle != nullptr;
     result.colliding = false;
     if (!std::isfinite(result.position.x) || !std::isfinite(result.position.y)
-        || !std::isfinite(result.position.z)) {
+        || !std::isfinite(result.position.z) || !std::isfinite(result.velocity.x)
+        || !std::isfinite(result.velocity.y) || !std::isfinite(result.velocity.z)) {
         return false;
     }
     self.mFloors += static_cast<std::uint64_t>(result.floorTriangle);

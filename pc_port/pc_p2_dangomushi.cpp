@@ -973,7 +973,7 @@ void pc_p2_dangomushi_update(BTeki* actor) {
             // One real Egg at the Crawbster's home; its break births real items.
             // Source probability is the captain's formation share of all Pikmin
             // (DangoMushi.cpp:732-748), so with a squad attacking out of formation
-            // (share ~0) this is structurally unreachable in the attack fixture.
+            // (share ~0) it is rare in the attack fixture; run 9093da5e observed one birth.
             spawnRainEgg(s, s.home, generator);
         }
         if (hzo.stickable != s.hazardWindowLogged) {
