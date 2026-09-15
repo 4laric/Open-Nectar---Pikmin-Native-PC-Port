@@ -75,6 +75,7 @@ struct ActorState {
     bool stateLogged = false;
     bool damageable = false;        // source damage window (Wait/Flick/Walk/Shot)
     bool bitterImmune = true;       // Stay/Land immunity
+    bool reachedShot = false;       // Houdai: first Shot reached (pin releases)
     float shotLoopAccum = 0.0f;     // Man-at-Legs attack-loop shell cadence
 };
 
@@ -368,13 +369,13 @@ void pc_p2_long_legs_update(BTeki* actor) {
     if (state.fsm.state() == P2LongLegsState::Dead) return;
 
     // Documented proxy approximation (#312): the P1 Chappy placement vehicle has
-    // only ~130 HP (source Houdai 2800), so a late Chappy reset (grid activation
-    // re-runs BTeki::reset -> mHealth = getMaxLife) would drop it back below the
-    // source FSM's pre-Shot schedule (Land 5 s + Flick 2.3 s). Pin the proxy to a
-    // bounded baseline while it is still bitter-immune (Stay/Land, i.e. not yet
-    // damageable); once damageable the pin releases and ordinary Pikmin combat
-    // drains the baseline to zero. Gated to the preview/opt-in host, not P1 play.
-    if (state.species == "Houdai" && !state.damageable && actor->isAlive()
+    // only ~130 HP (source Houdai 2800), and its grid-activation re-runs
+    // BTeki::reset -> mHealth = getMaxLife when the squad approaches, dropping it
+    // back below the source FSM's pre-Shot schedule (Land 5 s + Flick 2.3 s). Pin
+    // the proxy to a bounded baseline until it FIRST reaches its Shot state; the
+    // pin then releases for good and ordinary Pikmin combat drains the baseline to
+    // zero. Gated to the preview/opt-in host, not P1 play.
+    if (state.species == "Houdai" && !state.reachedShot && actor->isAlive()
             && actor->mHealth < kHoudaiProxyBaseline) {
         actor->mHealth = kHoudaiProxyBaseline;
         state.lastHealth = actor->mHealth;
@@ -470,6 +471,7 @@ void pc_p2_long_legs_update(BTeki* actor) {
     }
     state.damageable = out.damageable;
     state.bitterImmune = out.bitterImmune;
+    if (state.fsm.state() == P2LongLegsState::Shot) state.reachedShot = true;
     if (out.footCrush) {
         std::printf("P2_LONG_LEGS_FOOT species=%s generator=%u\n", state.species.c_str(),
                     state.generator);
