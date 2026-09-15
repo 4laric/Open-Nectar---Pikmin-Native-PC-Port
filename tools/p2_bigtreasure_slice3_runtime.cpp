@@ -119,6 +119,9 @@ public:
         phase = pc_p2_hardlanes_bigtreasure_phase();
         if (phase != lastPhase) {
             lastPhase = phase;
+            if (phase == P2BT_Attack) {
+                framesInAttack = 0; // reset per Attack phase (they are separate)
+            }
             std::printf("P2_BIGTREASURE_SLICE3_PHASE phase=%s weapons=%d\n",
                         phaseName(phase),
                         pc_p2_hardlanes_bigtreasure_weapon_count());
@@ -126,9 +129,9 @@ public:
 
         if (phase == P2BT_Attack && !sentKnock) {
             ++framesInAttack;
-            // Let the elec element run to emit, then knock elec off to observe
-            // the re-pick. This single knock-off is the flagged injected trigger;
-            // the FSM re-pick and the next (fire) attack are natural.
+            // Knock elec off 90 frames into the FIRST Attack phase, after its
+            // element has emitted. This single knock-off is the flagged injected
+            // trigger; the FSM re-pick and the next (fire) attack are natural.
             if (framesInAttack >= 90) {
                 const bool posted = pc_p2_hardlanes_bigtreasure_hit(
                     P2BTWEAPON_Elec, P2BigTreasureOwnership::kWeaponMaxHealth, false);
