@@ -340,7 +340,7 @@ bool pc_p2_preview_deliver(Pellet* pellet) {
             receipt="corpse:"+pc_p2_cave_receipt_prefix()+found->second.substr(7);value=corpseValue;
         }
         bool added=economy.credit(receipt,value);
-        podTitle((c?c->spec.instance:pellet==previewTreasure?treasureId:(pc_p2_sheargrub_name(pellet->mPelletView)?pc_p2_sheargrub_name(pellet->mPelletView):pc_p2_enemy_name(pellet->mPelletView)?pc_p2_enemy_name(pellet->mPelletView):"Dwarf Bulborb"))+" +"+std::to_string(added?value:0));
+        podTitle((c?c->spec.instance:pellet==previewTreasure?treasureId:(pc_p2_king_teki_name(pellet->mPelletView)?pc_p2_king_teki_name(pellet->mPelletView):pc_p2_sheargrub_name(pellet->mPelletView)?pc_p2_sheargrub_name(pellet->mPelletView):pc_p2_enemy_name(pellet->mPelletView)?pc_p2_enemy_name(pellet->mPelletView):"Dwarf Bulborb"))+" +"+std::to_string(added?value:0));
         pc_p2_purple_status();
         std::printf("[Pikipelago] P2_POD_RECEIPT id=%s value=%d new=%d pokos=%d seeds=0\n",receipt.c_str(),value,int(added),economy.total());
         if(pellet==previewTreasure) {

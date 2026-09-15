@@ -110,7 +110,7 @@ void scanFlick(Binding& b, BTeki* t) {
 	            b.generator, attached, b.blows, b.stuck, b.flickTier, int(startFlick));
 	if (startFlick) {
 		std::printf("P2_KING_TEKI_FLICK generator=%u shaken=%d blown_threshold=%d stuck_threshold=%d\n",
-		            b.generator, b.blows, blowTh[blowTier], stickTh[stickTier]);
+		            b.generator, attached, blowTh[blowTier], stickTh[stickTier]);
 		Iterator f(pikiMgr);
 		CI_LOOP(f) {
 			Piki* p = static_cast<Piki*>(*f);
@@ -181,17 +181,18 @@ void pc_p2_king_teki_tick(BTeki* t) {
 	auto i = s.find(t);
 	if (i == s.end()) return;
 	Binding& b = i->second;
-	// The Emperor is an ambush predator: hold the host at its spawn so it does not
-	// wander off and drag the fight/carcass away from the squad.
-	t->mSRT.t = b.home;
 	if (t->mHealth <= 0.0f) {
 		if (!b.deadLogged) {
 			b.deadLogged = true;
 			gDeadKeySeen = true;
-			std::printf("P2_KING_TEKI_CORPSE generator=%u health=0.0 corpse_pellet=1 cleanup_engine=1\n", b.generator);
+			std::printf("P2_KING_TEKI_CORPSE generator=%u health=0.0 carcass_pellet=%d\n", b.generator,
+			            int(t->mPellet != nullptr));
 		}
-		return;
+		return; // stop re-pinning once dead so the engine's carcass pellet moves freely
 	}
+	// The Emperor is an ambush predator: hold the host at its spawn so it does not
+	// wander off and drag the fight/carcass away from the squad.
+	t->mSRT.t = b.home;
 	const unsigned now = SDL_GetTicks();
 	clockAcc += float(now - lastTicks) * 0.001f;
 	lastTicks = now;
@@ -253,4 +254,10 @@ bool pc_p2_king_teki_receipt(PelletView* view, unsigned& generator) {
     if (i == s.end()) return false;
     generator = i->second.generator;
     return true;
+}
+
+const char* pc_p2_king_teki_name(PelletView* view) {
+    if (!view) return nullptr;
+    auto i = s.find(static_cast<BTeki*>(view));
+    return i == s.end() ? nullptr : "Emperor Bulblax";
 }
