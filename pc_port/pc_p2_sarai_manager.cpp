@@ -119,16 +119,24 @@ std::unique_ptr<P2SaraiHost> buildHost(BTeki* match)
 void pc_p2_sarai_manager_reset()
 {
     for (auto& entry : s) entry.second.host->unbindNativeActor(entry.first);
+    const std::size_t count = s.size();
     s.clear();
     hosts.clear();
     corpses.clear();
+    std::printf("P2_SARAI_RESET cleared=%zu\n", count);
+    std::fflush(stdout);
 }
 
 void pc_p2_sarai_manager_forget(BTeki* actor)
 {
     if (!actor) return;
     auto it = s.find(actor);
-    if (it != s.end()) { it->second.host->unbindNativeActor(actor); s.erase(it); }
+    if (it != s.end()) {
+        std::printf("P2_SARAI_FORGET generator=%u phase=cleanup\n", it->second.generator);
+        std::fflush(stdout);
+        it->second.host->unbindNativeActor(actor);
+        s.erase(it);
+    }
     corpses.erase(actor);
 }
 
