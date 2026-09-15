@@ -72,15 +72,16 @@ public:
         Navi* n = naviMgr->getNavi();
 
         if (phase == SETTLE) {
-            // Park every red far away so cycle 1 cannot drop; keep the captain
-            // near the wisp so cycle 1 still appears (nearestTarget SIGHT 200).
+            // Park every red at the far ufo-goal so cycle 1 cannot drop. The
+            // goal is valid terrain (the earlier off-map z=-180 spot fell out of
+            // the map, extinguished the squad and ended the day).
             Iterator pit(pikiMgr); CI_LOOP(pit) {
                 Piki* p = static_cast<Piki*>(*pit);
                 if (p && p->isAlive()) {
-                    p->resetPosition(Vector3f(-220.0f, mapMgr->getMinY(-220.0f, -180.0f, true), -180.0f));
+                    p->resetPosition(Vector3f(206.0f, mapMgr->getMinY(206.0f, 1858.0f, true), 1858.0f));
                 }
             }
-            n->resetPosition(Vector3f(-104.0f, mapMgr->getMinY(-104.0f, 1780.0f, true), 1780.0f));
+            n->resetPosition(Vector3f(-104.0f, mapMgr->getMinY(-104.0f, 1816.0f, true), 1816.0f));
             std::printf("P2_QURIONE_SETTLE reds_parked=1 captain_near=1\n");
             std::fflush(stdout);
             phase = CYCLE1;
