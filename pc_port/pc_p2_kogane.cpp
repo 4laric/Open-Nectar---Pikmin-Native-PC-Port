@@ -72,6 +72,7 @@ const char* kReceiptsHeader="P2_KOGANE_RECEIPTS_1";
 // source press count for re-arm prevention; this grants the actual drop reward.
 const char* kOnionReceiptsPath="p2-kogane-onion-receipts.txt";
 std::string receiptSeed="kogane-arena";
+int totalNectarDropped=0; // slice 3: total nectar spawned this process (collection census)
 
 int loadReceipts(){
     std::ifstream in(kReceiptsPath);
@@ -158,6 +159,7 @@ void doDrop(BTeki* actor,int id,Beetle& b){
     std::printf("P2_KOGANE_DROP generator=%u source_id=%d flip=%d pellet%d=%d nectar=%d\n",
         actor->mGenerator?actor->mGenerator->_70:0u,id,b.flips,pelletValue,pellets,nectar);
     std::fflush(stdout);
+    totalNectarDropped+=nectar;
     // Grant the drop reward exactly-once through the lane-06 ordinary Onion
     // ledger (never the Pod). On a process restart the host ledger reloads and a
     // re-attempted drop grants nothing (Duplicate), so a farmed beetle can never
@@ -474,6 +476,7 @@ int pc_p2_kogane_reprobe_duplicates(unsigned generator,int id){
     std::fflush(stdout);
     return dups;
 }
+int pc_p2_kogane_nectar_dropped(){return totalNectarDropped;}
 bool pc_p2_kogane_draw(BTeki* actor,Graphics& gfx,const Matrix4f& matrix,bool corpse){
     if(!actors.count(static_cast<PelletView*>(actor)))return false;
     if(!logged[corpse?1:0]){std::printf("P2_KOGANE_DRAW corpse=%d\n",int(corpse));logged[corpse?1:0]=true;}
