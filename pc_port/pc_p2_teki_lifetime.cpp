@@ -150,6 +150,7 @@ void pc_p2_reset_all_teki()
     pc_p2_imomushi_reset();
 	pc_p2_batch3_reset();
 	pc_p2_long_legs_reset();
+	pc_p2_hardlanes_reset();
 }
 
 namespace {
