@@ -129,6 +129,7 @@ void pc_p2_breadbug_actor_tick(){
      std::printf("P2_BREADBUG_CONTEST_UPDATE generator=%u carriers=%d outcome=%s\n",state.id,n,os);
      if(outcome==1){
       held->endStickTeki(actor);actor->clearCreaturePointer(2);actor->stopParticleGenerator(2);
+      actor->mReturnStateID=actor->mStateID;actor->mStateID=3;actor->mIsStateReady=true; // resume wandering after losing the tug
       std::printf("P2_BREADBUG_CONTEST_STOLEN generator=%u carriers=%d released=1\n",state.id,n);
       std::string slot="g"+std::to_string(state.id);
       const int grant=pc_p2_breadbug_contest_grant(state.contestHandle,"p2-preview",slot.c_str(),"contest");
