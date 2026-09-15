@@ -839,6 +839,11 @@ target_include_directories(p2_fuefuki_suspend_fallback_test PRIVATE pc_port)
 target_compile_options(p2_fuefuki_suspend_fallback_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_fuefuki_suspend_fallback_test COMMAND p2_fuefuki_suspend_fallback_test)
 
+add_executable(p2_fuefuki_owner_death_test tools/p2_fuefuki_owner_death_test.cpp)
+target_include_directories(p2_fuefuki_owner_death_test PRIVATE pc_port)
+target_compile_options(p2_fuefuki_owner_death_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_fuefuki_owner_death_test COMMAND p2_fuefuki_owner_death_test)
+
 # Lane 28 Fuefuki natural-combat real-GL fixture (#245): compile-only isolated
 # target. Its replacement-main executable is produced by
 # scripts/build_pikmin2_fixture.py against a completed pikmin_pc build; this
