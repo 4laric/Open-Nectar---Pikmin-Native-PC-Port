@@ -31,6 +31,11 @@ bool pc_randomizer_p2_bridge();
 unsigned pc_randomizer_p2_source(const char* target);
 unsigned pc_randomizer_p2_binding_count();
 bool pc_randomizer_p2_bound(unsigned source_id);
+// Resolve a bound generator's spawn-slot uid (as returned by
+// pc_randomizer_generator_id) to its ENEMY_P2 source id. 0 means the target is
+// not bound. The ordinary spawn path keys its seed bindings on the spawn-slot
+// uid, not Generator::_70.
+unsigned pc_randomizer_p2_source_for_id(unsigned long generator_id);
 unsigned pc_randomizer_generator_id(const void* generator);
 void pc_randomizer_set_generator_id(const void* generator, unsigned uid);
 void pc_randomizer_bind_generator(const void* generator, int stage, const char* file, int offset);
