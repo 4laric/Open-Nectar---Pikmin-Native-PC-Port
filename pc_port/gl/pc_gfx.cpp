@@ -21,6 +21,7 @@
 #include "../timing/pc_render_phase.h"
 #include "../timing/pc_tick_profiler.h"
 
+#include "../pc_p2_specular_dir.h"
 #include "pc_opengl.h"
 
 // ── GL Function Pointers (Loaded via SDL_GL_GetProcAddress) ──
@@ -474,6 +475,10 @@ struct GfxChannel {
     float ambColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 };
 static GfxChannel sChannels[2] = {}; // COLOR0/ALPHA0, COLOR1/ALPHA1
+// Specular instrumentation counters (renderer-owned): prove the corrected
+// half-vector path is reached by the ordinary draw, not only by a fixture.
+static unsigned sSpecularDirCalls = 0;
+static unsigned sSpecularChannelDraws = 0;
 
 static constexpr GXAttnFn decode_xf_attn_fn(u32 control) {
     const bool bit9  = (control & (1u << 9)) != 0;
@@ -3795,26 +3800,17 @@ void pc_gfx_init_specular_dir(void* ltObj, f32 x, f32 y, f32 z) {
     // half-vector with negative Z -- pointing away from the camera -- so the
     // highlight always landed on the far side of the model and never showed.
     // The Onions were the obvious casualty.
-    f32 vx = -x;
-    f32 vy = -y;
-    f32 vz = -z + 1.0f;
-    const f32 mag = std::sqrt(vx * vx + vy * vy + vz * vz);
-    if (mag > 1e-6f) {
-        const f32 inv = 1.0f / mag;
-        vx *= inv; vy *= inv; vz *= inv;
-    } else {
-        // The light points straight at the eye and the half-vector degenerates.
-        vx = 0.0f; vy = 0.0f; vz = 1.0f;
-    }
+    float dir[3], pos[3];
+    p2specular::halfVector(x, y, z, dir, pos);
+    ++sSpecularDirCalls;
     f32* ldir = reinterpret_cast<f32*>(raw + 0x34);
-    ldir[0] = vx; ldir[1] = vy; ldir[2] = vz;
+    ldir[0] = dir[0]; ldir[1] = dir[1]; ldir[2] = dir[2];
 
-    const f32 kSpecularPosScale = 1024.0f * 1024.0f;
     f32* lpos = reinterpret_cast<f32*>(raw + 0x28);
-    lpos[0] = -x * kSpecularPosScale;
-    lpos[1] = -y * kSpecularPosScale;
-    lpos[2] = -z * kSpecularPosScale;
+    lpos[0] = pos[0]; lpos[1] = pos[1]; lpos[2] = pos[2];
 }
+unsigned pc_gfx_specular_dir_calls(void) { return sSpecularDirCalls; }
+unsigned pc_gfx_specular_channel_draws(void) { return sSpecularChannelDraws; }
 void pc_gfx_load_light(void* ltObj, u32 lightMask) {
     if (!ltObj) return;
     for (int i = 0; i < 8; i++) {
@@ -6165,6 +6161,7 @@ void pc_gfx_end(void) {
     if (sLoc.chan1AttnFn >= 0) glUniform1i_ptr(sLoc.chan1AttnFn, (int)sChannels[1].attnFn);
     // Specular half-vector: light 7's dir field (offset 0x34) holds it.
     if (sChannels[1].enabled && sChannels[1].attnFn == GX_AF_SPEC) {
+        ++sSpecularChannelDraws;
         u32 mask1 = sChannels[1].lightMask;
         for (int i = 7; i < 8; i++) {
             if (mask1 & (1u << i) && sLights[i].active) {
