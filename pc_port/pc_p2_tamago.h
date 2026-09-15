@@ -12,7 +12,8 @@ class Creature;
 // are followers (P2_TAMAGO_GROUP) that emerge near the leader, follow it within
 // the bounded swarm leash and share the Astonish receiver. This is a bounded
 // approximation of the manager-owned tamagoMushiMgr.cpp::createGroup birth
-// (10 surface / 30 cave); no new P1 Teki actors are born here.
+// (10 surface / 30 cave); group mode additionally births `count` follower Teki
+// via pc_p2_tamago_birth_group (P1-derived, see below).
 // Every hook is a no-op for unregistered actors.
 void pc_p2_tamago_setup();
 void pc_p2_tamago_reset();
