@@ -350,14 +350,18 @@ void pc_p2_frog_update(BTeki* actor){
         if(actor->mHealth<=0.0f){die(actor,s,gen);break;}
         if(shouldFlick(actor)){s.targetPos=pos;s.targetValid=true;transition(actor,s,FRG_JUMP,"type1",gen);break;}
         Creature* t=nearestTarget(pos,p.sight);
-        bool nextJump=false;
         if(t){
             turnTo(actor,s,t->getPosition(),dt);
-            if(attackable(s,pos,t,p.attackRange)){s.targetPos=t->getPosition();s.targetValid=true;nextJump=true;}
-        }
-        if(s.stateTime>=clipSeconds(s.kind,"waitact1")){
-            if(nextJump){retargetNavi(actor,s);transition(actor,s,FRG_JUMP,"type1",gen);}
-            else transition(actor,s,FRG_WAIT,"wait1",gen);
+            if(attackable(s,pos,t,p.attackRange)){
+                s.targetPos=t->getPosition();s.targetValid=true;retargetNavi(actor,s);
+                transition(actor,s,FRG_JUMP,"type1",gen);
+            } else if(std::fabs(wrapPi(std::atan2(t->getPosition().x-pos.x,t->getPosition().z-pos.z)-s.heading))<=FACE_OK_ANGLE){
+                transition(actor,s,FRG_WAIT,"wait1",gen);
+            } else if(s.stateTime>=clipSeconds(s.kind,"waitact1")){
+                transition(actor,s,FRG_WAIT,"wait1",gen);
+            }
+        } else {
+            transition(actor,s,FRG_WAIT,"wait1",gen);
         }
         break;
     }
