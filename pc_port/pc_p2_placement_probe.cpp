@@ -10,6 +10,9 @@
 
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <map>
+#include <string>
 
 namespace {
 // Mirror the family adapters' bound: reject NaN/Inf and absurd coordinates
@@ -38,6 +41,23 @@ void pc_p2_placement_probe_run()
     int actors = 0;
     int evidenceSlots = 0;
     const u32 kRouteHandle = 'test'; // every gameplay caller uses the shared handle
+
+    // Catalog-join sidecar: maps a generator's 4-byte file id (_70) to a
+    // placement-catalog slot uid (crc32). Best-effort: absent/partial sidecars
+    // simply leave `slot` at 0 (unmapped) and the root audit reports
+    // catalog_join=false. Format: `P2_PLACEMENT_SLOTS_1` then one
+    // `<generator_id> <slot_uid>` pair per line.
+    std::map<unsigned, unsigned> slotByGenerator;
+    {
+        std::ifstream sidecar("p2-placement-slots.txt");
+        if (sidecar) {
+            std::string magic;
+            if ((sidecar >> magic) && magic == "P2_PLACEMENT_SLOTS_1") {
+                unsigned generator = 0, slot = 0;
+                while (sidecar >> generator >> slot) slotByGenerator[generator] = slot;
+            }
+        }
+    }
 
     Iterator it(tekiMgr);
     CI_LOOP(it) {
@@ -75,12 +95,15 @@ void pc_p2_placement_probe_run()
         }
 
         // The id here is the generator's 4-byte file id (_70), NOT a placement
-        // catalog slot uid.
+        // catalog slot uid. `slot` is the catalog uid from the sidecar, or 0.
         const unsigned generator = teki->mGenerator ? teki->mGenerator->_70 : 0;
-        std::printf("P2_PLACEMENT_SLOT generator=%u actor=%d xyz=%d terrain=%s route=%d route_distance=%.1f water_depth=%.2f\n",
-                    generator, static_cast<int>(teki->mTekiType),
+        const unsigned slot = slotByGenerator.count(generator) ? slotByGenerator.at(generator) : 0;
+        std::printf("P2_PLACEMENT_SLOT generator=%u slot=%u actor=%d xyz=%d terrain=%s route=%d route_distance=%.1f x=%.3f y=%.3f z=%.3f water_depth=%.2f\n",
+                    generator, slot, static_cast<int>(teki->mTekiType),
                     hasTerrain ? 1 : 0, terrain, route ? 1 : 0,
-                    static_cast<double>(routeDistance), static_cast<double>(depth));
+                    static_cast<double>(routeDistance),
+                    static_cast<double>(pos.x), static_cast<double>(pos.y), static_cast<double>(pos.z),
+                    static_cast<double>(depth));
         ++actors;
         if (hasTerrain && route) ++evidenceSlots;
     }
