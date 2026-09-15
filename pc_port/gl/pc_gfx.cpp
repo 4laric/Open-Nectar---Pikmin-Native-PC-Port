@@ -475,6 +475,10 @@ struct GfxChannel {
     float ambColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 };
 static GfxChannel sChannels[2] = {}; // COLOR0/ALPHA0, COLOR1/ALPHA1
+// Specular instrumentation counters (renderer-owned): prove the corrected
+// half-vector path is reached by the ordinary draw, not only by a fixture.
+static unsigned sSpecularDirCalls = 0;
+static unsigned sSpecularChannelDraws = 0;
 
 static constexpr GXAttnFn decode_xf_attn_fn(u32 control) {
     const bool bit9  = (control & (1u << 9)) != 0;
@@ -3798,12 +3802,15 @@ void pc_gfx_init_specular_dir(void* ltObj, f32 x, f32 y, f32 z) {
     // The Onions were the obvious casualty.
     float dir[3], pos[3];
     p2specular::halfVector(x, y, z, dir, pos);
+    ++sSpecularDirCalls;
     f32* ldir = reinterpret_cast<f32*>(raw + 0x34);
     ldir[0] = dir[0]; ldir[1] = dir[1]; ldir[2] = dir[2];
 
     f32* lpos = reinterpret_cast<f32*>(raw + 0x28);
     lpos[0] = pos[0]; lpos[1] = pos[1]; lpos[2] = pos[2];
 }
+unsigned pc_gfx_specular_dir_calls(void) { return sSpecularDirCalls; }
+unsigned pc_gfx_specular_channel_draws(void) { return sSpecularChannelDraws; }
 void pc_gfx_load_light(void* ltObj, u32 lightMask) {
     if (!ltObj) return;
     for (int i = 0; i < 8; i++) {
@@ -6154,6 +6161,7 @@ void pc_gfx_end(void) {
     if (sLoc.chan1AttnFn >= 0) glUniform1i_ptr(sLoc.chan1AttnFn, (int)sChannels[1].attnFn);
     // Specular half-vector: light 7's dir field (offset 0x34) holds it.
     if (sChannels[1].enabled && sChannels[1].attnFn == GX_AF_SPEC) {
+        ++sSpecularChannelDraws;
         u32 mask1 = sChannels[1].lightMask;
         for (int i = 7; i < 8; i++) {
             if (mask1 & (1u << i) && sLights[i].active) {
