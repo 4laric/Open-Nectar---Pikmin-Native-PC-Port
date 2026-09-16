@@ -1,7 +1,7 @@
 // Muse ground delivery observer fixture (Sokkuri79 first, #495).
 //
-// Intended replacement-main for build_pikmin2_fixture.py (not yet built this
-// slice; see docs/PIKMIN2_MUSE_GROUND_HANDOFF.md remaining work). It stages the
+// Replacement-main for build_pikmin2_fixture.py (built slice 2; provenance +
+// runtime log recorded in docs/PIKMIN2_MUSE_GROUND_HANDOFF.md). It stages the
 // Sokkuri-only ground arena, deploys the live 20-red squad in FreeMode around
 // the Skitter Leaf with NO health/state writes, observes natural
 // InteractAttack drain (P2_SOKKURI_DAMAGE -> P2_SOKKURI_DEAD small prior ->
@@ -16,8 +16,8 @@
 // - Exit 0 with PASS only on the full natural chain; otherwise exit 0 with
 //   UNTESTED markers (carry absent) or exit 1 with FAIL + blocking_reason.
 //
-// This file is source for review; the built provenance + runtime log arrive in
-// the next slice after the private build + fresh arena run.
+// This file is source for review; built provenance + runtime evidence are
+// recorded per slice in docs/PIKMIN2_MUSE_GROUND_HANDOFF.md.
 
 #include <SDL2/SDL.h>
 #include "system.h"
@@ -35,6 +35,7 @@
 #include "PelletState.h"
 #include "MapMgr.h"
 #include "Interactions.h"
+#include "pc_p2_preview.h"
 #include "pc_p2_sokkuri.h"
 #include "pc_randomizer.h"
 #include "pc_window.h"
