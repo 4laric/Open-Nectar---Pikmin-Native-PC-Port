@@ -260,7 +260,7 @@ void requireFinite(float v, const char* message)
 }
 
 class BombMgrBirthApp final : public PlugPikiApp {
-    enum Phase { SETTLE, BIRTH, FOLLOW, RESET, REBIRTH, DONE };
+    enum Phase { SETTLE, DISCOVER, BIRTH, FOLLOW, RESET, REBIRTH, DONE };
     int frames = 0;
     int observed = 0;
     Phase phase = SETTLE;
@@ -270,25 +270,12 @@ class BombMgrBirthApp final : public PlugPikiApp {
     int rebirthPosMarks = 0;
     bool rejectLogged = false;
 
-    Teki* findCarrierActor()
+    Teki* firstLiveTeki()
     {
-        // Prefer the sidecar-registered carrier; else the first live host
-        // teki (STAGED fallback: carrier selection staged, birth path real).
-        P2BombMgr& mgr = pc_p2_bomb_mgr_birth_manager();
         Iterator it(tekiMgr);
         CI_LOOP(it) {
             Teki* t = static_cast<Teki*>(*it);
-            if (t && t->isAlive() && t->mGenerator && mgr.isRegistered(t->mGenerator->_70)) {
-                stagedFallback = false;
-                return t;
-            }
-        }
-        CI_LOOP(it) {
-            Teki* t = static_cast<Teki*>(*it);
-            if (t && t->isAlive() && t->mGenerator) {
-                stagedFallback = true;
-                return t;
-            }
+            if (t && t->isAlive() && t->mGenerator) return t;
         }
         return nullptr;
     }
@@ -297,8 +284,6 @@ class BombMgrBirthApp final : public PlugPikiApp {
     {
         int result = PlugPikiApp::idle();
         require(++frames < 5400, "timeout");
-        // Captain guard FIRST: before pause/movie/UI early returns, readiness
-        // gates, observation counters or PASS markers (fanout #632).
         Navi* guardNavi = (naviMgr) ? naviMgr->getNavi() : nullptr;
         if (guardNavi) {
             const bool deadState = guardNavi->getCurrState()
@@ -321,8 +306,6 @@ class BombMgrBirthApp final : public PlugPikiApp {
         P2BombMgr& mgr = pc_p2_bomb_mgr_birth_manager();
 
         if (phase == SETTLE) {
-            // STAGED: park the squad far from any carrier and the captain out
-            // of blast reach (radius 90); captain damage is not the subject.
             Iterator pit(pikiMgr);
             CI_LOOP(pit) {
                 Piki* p = static_cast<Piki*>(*pit);
@@ -331,50 +314,71 @@ class BombMgrBirthApp final : public PlugPikiApp {
                 }
             }
             n->resetPosition(Vector3f(-420.0f, mapMgr->getMinY(-420.0f, 1500.0f, true), 1500.0f));
-            pc_p2_bomb_mgr_birth_setup();
-            std::printf("P2_BOMB_MGR_SETTLE reds_parked=1 captain_staged=1 ready=%d\n",
-                        int(pc_p2_bomb_mgr_birth_ready()));
+            std::printf("P2_BOMB_MGR_SETTLE reds_parked=1 captain_staged=1\n");
             std::fflush(stdout);
-            phase = BIRTH;
+            phase = DISCOVER;
             return result;
         }
         if (phase == DONE) return result;
 
-        Teki* actor = findCarrierActor();
+        if (phase == DISCOVER) {
+            Teki* actor = firstLiveTeki();
+            require(actor != nullptr, "no-live-carrier");
+            carrier = actor->mGenerator->_70;
+            stagedFallback = true;
+            FILE* sidecar = std::fopen("p2-bomb-mgr-birth.txt", "w");
+            require(sidecar != nullptr, "sidecar-write");
+            std::fprintf(sidecar, "P2_BOMB_MGR_BIRTH_1 1 %u\n", carrier);
+            std::fclose(sidecar);
+            pc_p2_bomb_mgr_birth_setup();
+            require(pc_p2_bomb_mgr_birth_ready(), "setup-not-ready");
+            std::printf("P2_BOMB_MGR_STAGED carrier=%u fallback=1\n", carrier);
+            std::fflush(stdout);
+            phase = BIRTH;
+            return result;
+        }
+
+        Teki* actor = nullptr;
+        {
+            Iterator it(tekiMgr);
+            CI_LOOP(it) {
+                Teki* t = static_cast<Teki*>(*it);
+                if (t && t->isAlive() && t->mGenerator && t->mGenerator->_70 == carrier) {
+                    actor = t;
+                    break;
+                }
+            }
+        }
         if (!actor) return result;
-        const unsigned gen = actor->mGenerator->_70;
         const Vector3f p = actor->mSRT.t;
         requireFinite(p.x, "carrier-nan-x");
         requireFinite(p.y, "carrier-nan-y");
         requireFinite(p.z, "carrier-nan-z");
 
         if (phase == BIRTH) {
-            if (!mgr.isRegistered(gen)) {
-                // Negative test (labelled): unregistered-ID rejection first.
-                const P2BombMgrHandle rejected = mgr.birth(gen, {p.x, p.y, p.z}, P2BombPayloadConfig{});
-                require(!p2_bomb_mgr_handle_valid(rejected), "unregistered-not-rejected-live");
-                if (!rejectLogged) {
-                    rejectLogged = true;
-                    std::printf("P2_BOMB_MGR_NEGATIVE backed_by=manager reason=unregistered\n");
-                    std::fflush(stdout);
-                }
-                mgr.registerCarrier(gen);
+            P2BombSaraiVec3 joint;
+            joint.x = p.x;
+            joint.y = p.y;
+            joint.z = p.z;
+            const P2BombMgrHandle rejected =
+                mgr.birth(carrier + 1000000u, joint, P2BombPayloadConfig{});
+            require(!p2_bomb_mgr_handle_valid(rejected), "unregistered-not-rejected-live");
+            if (!rejectLogged) {
+                rejectLogged = true;
+                std::printf("P2_BOMB_MGR_NEGATIVE backed_by=manager reason=unregistered\n");
+                std::fflush(stdout);
             }
-            carrier = gen;
-            const P2BombMgrHandle h = pc_p2_bomb_mgr_birth_carrier(gen);
+            const P2BombMgrHandle h = pc_p2_bomb_mgr_birth_carrier(carrier);
             require(p2_bomb_mgr_handle_valid(h), "live-birth-failed");
             require(mgr.isLive(h), "live-birth-not-live");
-            std::printf("P2_BOMB_MGR_STAGED carrier=%u fallback=%d\n", gen, int(stagedFallback));
-            std::fflush(stdout);
             phase = FOLLOW;
             return result;
         }
         if (phase == FOLLOW) {
             pc_p2_bomb_mgr_birth_update(actor);
-            const P2BombMgrHandle h = mgr.findLive(gen);
+            const P2BombMgrHandle h = mgr.findLive(carrier);
             require(p2_bomb_mgr_handle_valid(h) && mgr.isLive(h), "follow-lost-live");
             ++observed;
-            // POS markers come from the production update path (1 Hz).
             if (observed % 60 == 0) ++posMarks;
             if (posMarks >= 3) {
                 pc_p2_bomb_mgr_birth_reset();
@@ -385,23 +389,24 @@ class BombMgrBirthApp final : public PlugPikiApp {
             return result;
         }
         if (phase == RESET) {
-            require(!p2_bomb_mgr_handle_valid(mgr.findLive(gen)), "reset-did-not-retire");
-            mgr.registerCarrier(gen);
-            const P2BombMgrHandle h = pc_p2_bomb_mgr_birth_carrier(gen);
+            require(!p2_bomb_mgr_handle_valid(mgr.findLive(carrier)), "reset-did-not-retire");
+            pc_p2_bomb_mgr_birth_setup();
+            require(pc_p2_bomb_mgr_birth_ready(), "reset-setup-not-ready");
+            const P2BombMgrHandle h = pc_p2_bomb_mgr_birth_carrier(carrier);
             require(p2_bomb_mgr_handle_valid(h) && mgr.isLive(h), "rebirth-failed");
-            std::printf("P2_BOMB_MGR_REBIRTH carrier=%u\n", gen);
+            std::printf("P2_BOMB_MGR_REBIRTH carrier=%u\n", carrier);
             std::fflush(stdout);
             phase = REBIRTH;
             return result;
         }
         if (phase == REBIRTH) {
             pc_p2_bomb_mgr_birth_update(actor);
-            const P2BombMgrHandle h = mgr.findLive(gen);
+            const P2BombMgrHandle h = mgr.findLive(carrier);
             require(p2_bomb_mgr_handle_valid(h) && mgr.isLive(h), "rebirth-lost-live");
             ++observed;
             if (observed % 60 == 0) ++rebirthPosMarks;
             if (rebirthPosMarks >= 3) {
-                std::printf("P2_BOMB_MGR_DONE carrier=%u staged_fallback=%d\n", gen,
+                std::printf("P2_BOMB_MGR_DONE carrier=%u staged_fallback=%d\n", carrier,
                             int(stagedFallback));
                 std::fflush(stdout);
                 phase = DONE;
