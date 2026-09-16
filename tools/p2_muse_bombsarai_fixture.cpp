@@ -28,6 +28,10 @@ namespace {
 const unsigned kBombSaraiSourceId = 58;
 // P1 vehicle type the generated carrier binds (TEKI_Napkid).
 const int kNapkidVehicleType = 11;
+// Reviewed muse-placement #492 candidate profile: accepted generated slot
+// uid for source 58 (must equal MUSE_ACCEPTED_SLOT[58] in
+// experimental/pikmin2_muse_placement.py).
+const unsigned kAcceptedSlotUid58 = 1787125272;
 
 struct CorrelatedBirth {
     bool actor_bound = false;
@@ -77,7 +81,39 @@ const char *check_correlated_birth(int ready_gen, int supply_gen,
 }
 
 const char *p2_muse_bombsarai_gate1_contract() {
-    return "muse-bombsarai-gate1-v1";
+    return "muse-bombsarai-gate1-v2";
+}
+
+// Generation-2 core: mirrors
+// experimental/pikmin2_muse_bombsarai.py::validate_generated_birth over the
+// real marker contract. resolved_uid/bound_uid come from P2_SEED_RESOLVE and
+// the P2_GENERATED_PLACEMENT bound marker; bound_flag is the marker's
+// bound bit; bind_gen is its generator field; ready_gen/supplied mirror the
+// teki READY generator and same-generator SUPPLY presence. Uids use -1 for
+// "marker absent".
+const char *check_generated_birth(int resolved_uid, int bound_uid,
+                                  bool bound_flag, int bind_gen,
+                                  int ready_gen, bool supplied) {
+    if (ready_gen < 0) {
+        return "no-ready";
+    }
+    if (resolved_uid < 0) {
+        return "seed-unresolved";
+    }
+    if (!bound_flag) {
+        return "placement-refused";
+    }
+    if (resolved_uid != bound_uid ||
+        bound_uid != (int)kAcceptedSlotUid58) {
+        return "slot-mismatch";
+    }
+    if (bind_gen != ready_gen) {
+        return "generator-mismatch";
+    }
+    if (!supplied) {
+        return "supply-missing";
+    }
+    return "correlated";
 }
 
 }  // namespace
@@ -128,6 +164,37 @@ int main() {
                                            nullptr),
                     "supply-missing") != 0) {
         std::puts("FAIL supply-missing");
+        ++failures;
+    }
+    // Generation-2 real-marker cases (accepted slot 1787125272).
+    if (std::strcmp(check_generated_birth(1787125272, 1787125272, true,
+                                          270001, 270001, true),
+                    "correlated") != 0) {
+        std::puts("FAIL gen2-correlated");
+        ++failures;
+    }
+    if (std::strcmp(check_generated_birth(1787125272, 1787125272, false,
+                                          270001, 270001, true),
+                    "placement-refused") != 0) {
+        std::puts("FAIL gen2-refused");
+        ++failures;
+    }
+    if (std::strcmp(check_generated_birth(12345, 12345, true,
+                                          270001, 270001, true),
+                    "slot-mismatch") != 0) {
+        std::puts("FAIL gen2-slot");
+        ++failures;
+    }
+    if (std::strcmp(check_generated_birth(1787125272, 1787125272, true,
+                                          270002, 270001, true),
+                    "generator-mismatch") != 0) {
+        std::puts("FAIL gen2-generator");
+        ++failures;
+    }
+    if (std::strcmp(check_generated_birth(-1, -1, false,
+                                          -1, 270001, true),
+                    "seed-unresolved") != 0) {
+        std::puts("FAIL gen2-seed");
         ++failures;
     }
     std::printf("contract=%s vehicle=%d failures=%d\n",
