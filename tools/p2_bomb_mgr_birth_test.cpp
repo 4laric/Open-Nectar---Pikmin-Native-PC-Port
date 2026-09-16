@@ -296,8 +296,7 @@ class BombMgrBirthApp final : public PlugPikiApp {
         if (guardNavi) {
             const bool deadState = guardNavi->getCurrState()
                 && guardNavi->getCurrState()->getID() == NAVISTATE_Dead;
-            if (p2_bomb_mgr_guard_down(GameStat::orimaDead, deadState,
-                                       guardNavi->mHealth, observed)) {
+            if (p2_bomb_mgr_guard_down(GameStat::orimaDead, deadState, guardNavi->mHealth)) {
                 std::printf("P2_FIXTURE_CAPTAIN_DOWN tick=%d outcome=BLOCKED\n", observed);
                 std::fflush(stdout);
                 std::_Exit(86);
