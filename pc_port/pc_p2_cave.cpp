@@ -1,4 +1,5 @@
 #include "pc_p2_cave.h"
+#include "pc_p2_cave_generate.h"
 #include "pc_p2_cave_nav_diagnostics.h"
 #include "pc_p2_cave_anchor.h"
 #include "Graphics.h"
@@ -111,6 +112,7 @@ void pc_p2_cave_setup(){
         std::printf("P2_CAVE_VISUAL_READY kind=%s vertices=%d\n",kind.c_str(),transitionShape->mVertexCount);
     }
     std::printf("P2_CAVE_READY floor=%d survivors=%d health=%.9g\n",floor,count,health);std::fflush(stdout);
+    pc_p2_cave_generate_run(); // lane cave-generator-consumer-landing (#129): opt-in manifest sidecar only
 }
 void pc_p2_cave_request(){if(active())requested=true;}
 bool pc_p2_cave_interact(float x,float y,float z){
