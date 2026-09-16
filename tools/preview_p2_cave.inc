@@ -148,7 +148,6 @@ static void caveCarryFixture(Navi* n) {
             std::printf("P2_CAVE_CARRY_PHASE phase=blocked hazard=elec blocked=%d carriers_dropped=%d new=%d\n",
                 pc_p2_cave_carry_blocked(),pc_p2_cave_carry_carriers_dropped(),pc_p2_cave_items_delivered());
             require(pc_p2_cave_items_delivered()==0,"elec treasure credited while the gate was closed");
-            capture("p2-cave-carry-blocked.ppm");
             Piki* yellow=aliveRed();
             require(yellow!=nullptr,"no red left to open the gate");
             pc_p2_set_species(yellow,P2SpeciesYellow);
@@ -202,7 +201,6 @@ static void caveCarryFixture(Navi* n) {
             std::printf("P2_CAVE_CARRY_PHASE phase=credited new=%d events=%d redeliver=%d redeliver_new=%d\n",
                 fresh,pc_p2_cave_items_delivery_events(),int(again),pc_p2_cave_items_delivered());
             require(fresh==1,"elec treasure was not credited exactly once");
-            capture("p2-cave-carry-credited.ppm");
             caveCarryPhase=4;return;
         }
         require(caveCarryTicks<3000,"opened gate did not credit the elec treasure");
@@ -210,7 +208,6 @@ static void caveCarryFixture(Navi* n) {
     }
     if(pc_p2_cave_carry_water_blocked()>0){
         std::printf("P2_CAVE_CARRY_PHASE phase=water_blocked water_filtered=%d\n",pc_p2_cave_carry_water_blocked());
-        capture("p2-cave-carry-water.ppm");
         std::puts("PASS cave carry: closed gate blocks the carry, yellow opens, exactly-once credit, water filters red (proxy geometry)");
         std::fflush(stdout);std::_Exit(0);
     }
