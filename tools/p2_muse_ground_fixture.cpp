@@ -217,9 +217,31 @@ int main(int argc, char** argv) {
     pc_gpu_preference_apply();
     _putenv_s("PIKMIN_RANDOMIZER_TEST_BACKGROUND", "1");
     pc_bbft_init(argc, argv);
-    if (!pc_window_init("muse-ground sokkuri79", 960, 540)) return 3;
-    pc_window_center();
+    // Preview-room entrypoint (mirrors tools/preview_p2_room.cpp): the run
+    // must pass --experimental-pikmin2-room, otherwise the base app boots the
+    // normal title flow instead of the staged ground arena.
+    require(pc_pikipelago_room_preview(), "requires --experimental-pikmin2-room");
+    int windowWidth = 960, windowHeight = 540;
+    bool smallWindow = true;
+    if (const char* value = std::getenv("PIKMIN_P2_ROOM_WINDOW")) {
+        if (!std::strcmp(value, "off") || !std::strcmp(value, "0")) smallWindow = false;
+        int customWidth = 0, customHeight = 0;
+        if (std::sscanf(value, "%dx%d", &customWidth, &customHeight) == 2 &&
+            customWidth >= 320 && customHeight >= 240) {
+            windowWidth = customWidth;
+            windowHeight = customHeight;
+        }
+    }
+    if (!pc_window_init("muse-ground sokkuri79", windowWidth, windowHeight)) return 3;
     pc_settings_init();
+    if (smallWindow) {
+        pc_window_set_display_mode(PC_WINDOW_FULLSCREEN_WINDOWED);
+        pc_window_set_window_size(windowWidth, windowHeight);
+        pc_window_center();
+        std::printf("[PC Port] Experimental preview window set to %dx%d windowed and centered (override with PIKMIN_P2_ROOM_WINDOW=WxH or =off).\n",
+                    windowWidth, windowHeight);
+        std::fflush(stdout);
+    }
     gsys->Initialise();
     pc_settings_p2d_init();
     nodeMgr = new NodeMgr();
