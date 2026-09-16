@@ -120,21 +120,33 @@ public:
   }
   if (phase == 3) {
    ++phaseTick;
-   // Wait for the death-funnel forget to erase the family entry, then capture
-   // the dieSoon() corpse product (mPellet at mDeadState==2, ordinary-fixture
-   // method) plus an independent pelletMgr mPelletView scan (actor-fixture
-   // method). The pooled actor pointer stays readable here, as in the shared
-   // ordinary receipt fixture.
-   if (pc_p2_breadbug_actor_tracked_count() == 0 || phaseTick > 120) {
-    const int viaPellet = (actor->mPellet && actor->mDeadState == 2) ? 1 : 0;
-    int bodies = 0; Iterator p(pelletMgr); CI_LOOP(p) { Pellet* body = static_cast<Pellet*>(*p); if (body && body->isAlive() && body->mPelletView == static_cast<PelletView*>(actor)) ++bodies; }
-    std::printf("P2_MUSE_BREADBUG_CORPSE bodies=%d via_mpellet=%d\n", bodies, viaPellet); std::fflush(stdout);
-    require(bodies >= 1 && viaPellet == 1, "Muse breadbug natural death left no corpse");
-    corpseOk = true;
-    std::printf("P2_MUSE_BREADBUG_REBIRTH_BEGIN generator=186081\n"); std::fflush(stdout);
-    phase = 4; phaseTick = 0;
+   // The pooled actor pointer stays readable here, as in the shared ordinary
+   // receipt fixture. die() only sets mDeadState=1; the dieSoon() corpse
+   // product (becomePellet sets mPellet for LeaveCorpse types such as Collec)
+   // materializes on a later update, so wait for mDeadState==2 explicitly.
+   if (!corpseOk) {
+    if (phaseTick % 60 == 0) { std::printf("P2_MUSE_BREADBUG_WAIT phase=corpse tick=%d dead=%d tracked=%d\n", phaseTick, actor->mDeadState, pc_p2_breadbug_actor_tracked_count()); std::fflush(stdout); }
+    if (actor->mDeadState == 2) {
+     const int viaPellet = (actor->mPellet != nullptr) ? 1 : 0;
+     int bodies = 0; Iterator p(pelletMgr); CI_LOOP(p) { Pellet* body = static_cast<Pellet*>(*p); if (body && body->isAlive() && body->mPelletView == static_cast<PelletView*>(actor)) ++bodies; }
+     std::printf("P2_MUSE_BREADBUG_CORPSE bodies=%d via_mpellet=%d\n", bodies, viaPellet); std::fflush(stdout);
+     require(bodies >= 1 && viaPellet == 1, "Muse breadbug natural death left no corpse");
+     corpseOk = true;
+     std::printf("P2_MUSE_BREADBUG_REBIRTH_BEGIN generator=186081\n"); std::fflush(stdout);
+    }
+    require(phaseTick < 900, "Muse breadbug corpse product never materialized");
+   } else {
+    // Corpse proven. Now observe whether the real death funnel
+    // (BTeki::doKill -> pc_p2_forget_teki, dead_state>=1) ever runs for a
+    // LeaveCorpse death, or the dead entry simply persists until rebirth.
+    if (phaseTick % 60 == 0) { std::printf("P2_MUSE_BREADBUG_WAIT phase=funnel tick=%d tracked=%d\n", phaseTick, pc_p2_breadbug_actor_tracked_count()); std::fflush(stdout); }
+    if (pc_p2_breadbug_actor_tracked_count() == 0) { phase = 4; phaseTick = 0; }
+    else if (phaseTick > 900) {
+     std::printf("P2_MUSE_BREADBUG_NO_FORGET tick=%d tracked=%d\n", phaseTick, pc_p2_breadbug_actor_tracked_count()); std::fflush(stdout);
+     phase = 4; phaseTick = 0;
+    }
+    require(phaseTick < 1500, "Muse breadbug funnel wait did not resolve");
    }
-   require(phaseTick < 900, "Muse breadbug death-funnel forget did not complete");
   }
   if (phase == 4) {
    ++phaseTick;
