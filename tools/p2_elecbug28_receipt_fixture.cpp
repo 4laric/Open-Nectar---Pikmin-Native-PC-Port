@@ -105,7 +105,14 @@ public:int idle() override {
     }
     if(stage==5){
         if(!corpse)corpse=corpseOf(a);
-        if(corpse){std::printf("P2_ELECBUG28_CORPSE pellet=1 tick=%d\n",observed);std::fflush(stdout);stage=6;return result;}
+        if(corpse){
+            // Natural-haul stimulus only: re-place the surviving free squad in a
+            // ring around the corpse and leave them in FreeMode, exactly as the
+            // Sokkuri79 #495/#578 recipe. No Transport assignment, no health or
+            // state write; graspSituation latches the carry on its own.
+            int k=0;Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(!p||!p->isAlive())continue;float ang=float(k)*6.2831853f/16.f;Vector3f pt=corpse->mSRT.t+Vector3f(16.f*std::sin(ang),0.f,16.f*std::cos(ang));pt.y=mapMgr->getMinY(pt.x,pt.z,true);p->resetPosition(pt);p->changeMode(PikiMode::FreeMode,n);++k;}
+            std::printf("P2_ELECBUG28_CORPSE pellet=1 tick=%d deployed=%d\n",observed,k);std::fflush(stdout);stage=6;return result;
+        }
         require(observed<7560,"corpse handoff timeout");
         return result;
     }
