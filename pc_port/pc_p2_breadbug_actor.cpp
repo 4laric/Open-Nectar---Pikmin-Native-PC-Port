@@ -197,13 +197,16 @@ void pc_p2_breadbug_actor_tick(){
    }
   }
  }
- // Natural re-entry scan: a generator rebirth after death-funnel forget() is a
- // live TEKI_Collec carrying a wanted generator id that this registry no longer
- // tracks. Re-register it here so cleanup/re-entry evidences without a manager
- // recreation (no reset/setup call) and without touching another family. Runs
- // only while a wanted actor is missing, so the steady state costs one size
- // comparison per tick.
- if(actors.size()<wantedIds.size()&&tekiMgr){
+ // Natural re-entry scan: a generator rebirth after death is a live TEKI_Collec
+ // carrying a wanted generator id that this registry no longer tracks LIVE.
+ // (A dead entry persists in the map for LeaveCorpse deaths because no doKill
+ // runs; only live bindings count.) Re-register it here so cleanup/re-entry
+ // evidences without a manager recreation (no reset/setup call) and without
+ // touching another family. Stale dead same-id entries are erased inside
+ // (replaced_stale=1) so exactly one live binding results.
+ size_t liveTracked=0;
+ for(auto& entry:actors){BTeki* known=entry.first;if(known&&!known->mDeadState&&known->isAlive())++liveTracked;}
+ if(liveTracked<wantedIds.size()&&tekiMgr){
   Iterator scan(tekiMgr);CI_LOOP(scan){
    Teki* cand=static_cast<Teki*>(*scan);
    if(!cand||!cand->mGenerator)continue;
