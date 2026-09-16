@@ -17,6 +17,8 @@
 #include "pc_p2_cave_rooms_engine.h"  // lane 44 (#482) proxy room/unit instantiation
 #include "pc_p2_cave_geometry_engine.h"  // lane 45 (#483) real unit geometry + elec gate
 #include "pc_p2_cave_items_engine.h"  // lane 46 (#484) physical cave-item placement
+#include "pc_p2_cave_bud_actor.h"  // lane 48 (#486) real seeded Candypop bud actor
+#include "pc_p2_cave_carry_engine.h"  // lane 50 (#488) carry blocking at hazards
 #include "pc_bbft.h"
 #include "Piki.h"
 #include "PikiMgr.h"
@@ -93,6 +95,8 @@ void pc_p2_cave_setup(){
     pc_p2_cave_rooms_shutdown();
     pc_p2_cave_geometry_shutdown();  // lane 45 (#483)
     pc_p2_cave_items_shutdown();  // lane 46 (#484)
+    pc_p2_cave_bud_shutdown();  // lane 48 (#486)
+    pc_p2_cave_carry_shutdown();  // lane 50 (#488)
     floorId=0;checkpointSchema=1;beasts=false;cargoTerminal=false;token.clear();requested=false;completed=false;titleTimer=0;anchor=P2CaveAnchor{};transitionShape=nullptr;
     // Lane 41 (#480) runtime generator hook: opt-in only, so a normal cave entry
     // is unchanged. Reads a host-written canonical floor table and writes the
@@ -122,6 +126,14 @@ void pc_p2_cave_setup(){
     // host bridge's P2_CAVE_ITEMS_1 config against the live rooms layout and
     // spawns one real Pellet per item. Proxy geometry/model, never a generation PASS.
     pc_p2_cave_items_setup();
+    // Lane 48 (#486) real seeded Candypop bud actor: opt-in only, reads the live
+    // lane-44 rooms layout so the bud sits at the seeded bud node's segment and
+    // the ordinary throw/convert path grants the colour naturally.
+    pc_p2_cave_bud_setup();
+    // Lane 50 (#488) carry blocking: opt-in only. Reads the host bridge's
+    // P2_CAVE_GATES_1 plan and places one hazard volume per blocking door so a
+    // non-immune carrier cannot cross a closed electric gate / water pool.
+    pc_p2_cave_carry_setup();
     if(!pc_pikipelago_room_preview())return;
     std::ifstream in("p2-cave-entry.txt");if(!in)return;
     std::string version,extra;int floor,count;float health;
@@ -250,7 +262,9 @@ bool pc_p2_cave_exit_after_checkpoint(){
     std::fflush(nullptr);std::_Exit(42);
 }
 void pc_p2_cave_tick(){
+    pc_p2_cave_carry_tick();  // lane 50 (#488) carry blocking at hazards
     pc_p2_cave_geometry_tick();  // lane 45 (#483) live electric-gate actor
+    pc_p2_cave_bud_tick();  // lane 48 (#486) ordinary bud conversion path
     navigationDiagnostic();
     if(!safeTime()){requested=false;return;}
     gameflow.mWorldClock.setTime(gameflow.mParameters->mStartHour());
