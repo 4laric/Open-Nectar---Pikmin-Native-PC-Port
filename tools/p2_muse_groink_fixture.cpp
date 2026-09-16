@@ -18,6 +18,9 @@
 //   reason=<...> (exit 1).
 //
 // This proves the sidecar parser, slot/resolve wiring, and carcass birth leg.
+// Generation 2 also asserts the reviewed muse-placement slot contract at
+// runtime: the header-inline accepted slot for 78 must equal the staged uid,
+// 78 must be a muse candidate, and pedestal 97 must be excluded (returns 0).
 // It is labeled contract evidence, never a natural gameplay birth.
 #include <cstdio>
 #include <cstdlib>
@@ -25,6 +28,7 @@
 #include <map>
 #include <string>
 
+#include "../pc_port/pc_p2_generated_placement.h"
 #include "../pc_port/pc_p2_groink_teki_policy.h"
 
 namespace {
@@ -86,6 +90,15 @@ int main() {
     if (resolve.generator != binding.generator) fail("resolve_generator");
     if (resolve.target != slotIt->second) fail("slot_disagree");
     std::printf("P2_MUSE_GROINK_RESOLVE source_id=%u target=%u\n", resolve.sourceId, resolve.target);
+    std::fflush(stdout);
+
+    // Reviewed slot contract (muse-placement l52/#492): the staged uid must
+    // equal the native accepted slot for 78; 97 stays excluded.
+    if (!pc_p2_generated_placement_is_muse_candidate(78)) fail("slot_candidate");
+    if (pc_p2_generated_placement_muse_slot(78) != slotIt->second) fail("slot_contract");
+    if (pc_p2_generated_placement_muse_slot(97) != 0) fail("pedestal_excluded");
+    std::printf("P2_MUSE_GROINK_SLOT_CONSTANTS source=78 slot=%u pedestal=0\n",
+                pc_p2_generated_placement_muse_slot(78));
     std::fflush(stdout);
 
     // Real carcass birth leg: the sidecar config must drive the policy itself
