@@ -131,6 +131,7 @@ int main(int argc, char** argv)
     // family, so conflicts can be scoped to the correlated slot/generator.
     std::vector<ResolveLeg> resolveLegs;
     std::vector<ResolveLeg> placementLegs; // bound=1 only
+    std::vector<ResolveLeg> placementRefusals; // bound=0 vetoes the target
     std::vector<BindingLeg> bindingLegs;
     bool taintedBirth = false;
     std::vector<std::string> taintedLines;
@@ -163,9 +164,16 @@ int main(int argc, char** argv)
         if (hasToken(raw, "P2_GENERATED_PLACEMENT")) {
             unsigned source = 0, target = 0;
             if (fieldValue(raw, "source_id", source) &&
-                fieldValue(raw, "target", target) &&
-                fieldText(raw, "bound", "1")) {
-                placementLegs.push_back({static_cast<int>(source), target});
+                fieldValue(raw, "target", target)) {
+                if (fieldText(raw, "bound", "1")) {
+                    placementLegs.push_back(
+                        {static_cast<int>(source), target});
+                } else if (fieldText(raw, "bound", "0")) {
+                    // A native refusal for this exact target vetoes any
+                    // otherwise-consistent triple on it.
+                    placementRefusals.push_back(
+                        {static_cast<int>(source), target});
+                }
             }
         }
         if (familyIdx >= 0) {
@@ -188,6 +196,7 @@ int main(int argc, char** argv)
         std::snprintf(want, sizeof(want), "%d", cand.sourceId);
         std::vector<unsigned> resolveTargets;
         std::vector<unsigned> placementTargets;
+        std::vector<unsigned> refusedTargets;
         std::vector<Placement> slots;
         std::vector<unsigned> bindings;
 
@@ -200,6 +209,11 @@ int main(int argc, char** argv)
             char have[16];
             std::snprintf(have, sizeof(have), "%d", leg.sourceId);
             if (std::string(have) == want) placementTargets.push_back(leg.target);
+        }
+        for (const ResolveLeg& leg : placementRefusals) {
+            char have[16];
+            std::snprintf(have, sizeof(have), "%d", leg.sourceId);
+            if (std::string(have) == want) refusedTargets.push_back(leg.target);
         }
         for (const BindingLeg& leg : bindingLegs) {
             if (leg.candidateIdx == c) bindings.push_back(leg.generator);
@@ -228,6 +242,14 @@ int main(int argc, char** argv)
         for (const Placement& placement : slots) {
             if (placement.slot == 0) continue; // unmapped: fail closed
             if (!placement.terrainOk || !placement.routeOk) continue;
+            bool refused = false;
+            for (unsigned target : refusedTargets) {
+                if (target == placement.slot) {
+                    refused = true;
+                    break;
+                }
+            }
+            if (refused) continue; // native bound=0 vetoes this target
             bool seedHit = false;
             for (unsigned target : resolveTargets) {
                 if (target == placement.slot) {
