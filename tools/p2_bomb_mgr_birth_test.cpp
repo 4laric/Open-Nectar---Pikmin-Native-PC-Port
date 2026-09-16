@@ -16,6 +16,10 @@
 #ifdef P2_BOMB_MGR_BIRTH_UNITTEST
 #define P2_BOMB_MGR_BIRTH_NO_HOST
 #include "pc_p2_bomb_mgr_birth.cpp"
+// Unity-include the #577 payload TU: it is not in the main build object
+// list, so no duplicate symbols arise (blast TU stays linked from the
+// main build). The standalone unit-test build links all three TUs.
+#include "pc_p2_bomb_payload_actor.cpp"
 #include "pc_p2_bomb_payload_actor.cpp"
 
 #include <cmath>
@@ -225,6 +229,10 @@ int main()
 #include "system.h"
 #include "gameflow.h"
 #include "pc_p2_bomb_mgr_birth.cpp"
+// Unity-include the #577 payload TU: it is not in the main build object
+// list, so no duplicate symbols arise (blast TU stays linked from the
+// main build). The standalone unit-test build links all three TUs.
+#include "pc_p2_bomb_payload_actor.cpp"
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
