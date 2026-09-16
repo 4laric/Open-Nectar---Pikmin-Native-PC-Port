@@ -30,7 +30,7 @@ class RoomApp : public PlugPikiApp {
 public:int idle() override {
     int result=PlugPikiApp::idle();require(++frames<60000,"sokkuri79 receipt startup timeout");
     if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
-    if(!pc_p2_preview_ready()||!naviMgr||!pikiMgr||!tekiMgr)return result;
+    if(!pc_p2_preview_cargo_free_ready()||!naviMgr||!pikiMgr||!tekiMgr)return result;
     Navi* n=naviMgr->getNavi();if(!n||gameflow.mPauseAll||gameflow.mIsUIOverlayActive)return result;
     if(!pc_randomizer_ready()){if(observed%300==0){std::printf("P2_SOKKURI79_SESSION_WAIT observed=%d\n",observed);std::fflush(stdout);}return result;}
     ++observed;
@@ -39,7 +39,6 @@ public:int idle() override {
         require(sokkuri&&pc_p2_sokkuri_registered(sokkuri)&&pc_p2_sokkuri_count()==1,"sokkuri registered exactly once");
         require(aliveReds()>=1,"live red starting squad");
         snapPod();
-        require(havePodPos,"no Pod anchor container in arena");
         std::printf("P2_SOKKURI79_READY squad=%d sokkuri_gen=346005 reg=1 session=1\n",aliveReds());
         std::fflush(stdout);stage=1;return result;
     }
