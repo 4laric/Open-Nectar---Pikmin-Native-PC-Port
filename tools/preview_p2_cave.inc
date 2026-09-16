@@ -173,6 +173,12 @@ static void caveCarryFixture(Navi* n) {
                     p->changeMode(PikiMode::FreeMode,n);++freed;}}
             std::printf("P2_CAVE_CARRY_PHASE phase=credit_release freed=%d\n",freed);
             std::fflush(stdout);
+            Piki* wred=water?aliveRed():nullptr;
+            if(wred){
+                place(wred,water->mSRT.t.x,water->mSRT.t.z);assign(wred,water);
+                std::printf("P2_CAVE_CARRY_PHASE phase=water_assign water_filtered=%d\n",pc_p2_cave_carry_water_blocked());
+                std::fflush(stdout);
+            }
             caveCarryPhase=3;return;
         }
         require(caveCarryTicks<2000,"natural yellow did not open the gate");
@@ -197,11 +203,6 @@ static void caveCarryFixture(Navi* n) {
                 fresh,pc_p2_cave_items_delivery_events(),int(again),pc_p2_cave_items_delivered());
             require(fresh==1,"elec treasure was not credited exactly once");
             capture("p2-cave-carry-credited.ppm");
-            Piki* red=water?aliveRed():nullptr;
-            if(red){
-                place(red,water->mSRT.t.x,water->mSRT.t.z);assign(red,water);
-                std::printf("P2_CAVE_CARRY_PHASE phase=water_assign water_filtered=%d\n",pc_p2_cave_carry_water_blocked());
-            }
             caveCarryPhase=4;return;
         }
         require(caveCarryTicks<3000,"opened gate did not credit the elec treasure");
