@@ -171,6 +171,7 @@ static void caveBudFixture(Navi* n) {
 static int caveCarryTicks=0;
 static int caveCarryPhase=0;
 static Piki* caveCarryRed=nullptr;
+static bool caveCarryThrown=false;  // lane 51 (#489) natural-open experiment
 static void caveCarryFixture(Navi* n) {
     if(n->getCurrState() && n->getCurrState()->getID()!=NAVISTATE_Walk)
         n->mStateMachine->transit(n,NAVISTATE_Walk);
@@ -183,6 +184,12 @@ static void caveCarryFixture(Navi* n) {
         Iterator it(pikiMgr);
         CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);
             if(p && p->isAlive() && pc_p2_species(p)==P2SpeciesRed)return p;}
+        return nullptr;
+    };
+    auto aliveYellow=[]()->Piki*{
+        Iterator it(pikiMgr);
+        CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);
+            if(p && p->isAlive() && pc_p2_species(p)==P2SpeciesYellow)return p;}
         return nullptr;
     };
     auto place=[](Piki* p,float x,float z){
@@ -203,6 +210,13 @@ static void caveCarryFixture(Navi* n) {
         place(caveCarryRed,x,z);
         assign(caveCarryRed,elec);
         std::printf("P2_CAVE_CARRY_PHASE phase=block_assign blocked=%d\n",pc_p2_cave_carry_blocked());
+        const P2CaveRoomLayout* freshLayout=pc_p2_cave_rooms_layout();
+        if(freshLayout!=nullptr){
+            P2CaveAbilities freshKeys=pc_p2_cave_rooms_squad_abilities();
+            std::printf("P2_CAVE_ROOMS_SQUAD blue=%d yellow=%d red=%d white=%d\n",
+                int(freshKeys.blue),int(freshKeys.yellow),int(freshKeys.red),int(freshKeys.white));
+            caveRoomsLogTimeline(freshLayout,"fresh_floor_no_abilities");
+        }
         caveCarryPhase=1;return;
     }
     if(caveCarryPhase==1){
@@ -223,17 +237,70 @@ static void caveCarryFixture(Navi* n) {
             std::printf("P2_CAVE_CARRY_PHASE phase=blocked hazard=elec blocked=%d carriers_dropped=%d new=%d\n",
                 pc_p2_cave_carry_blocked(),pc_p2_cave_carry_carriers_dropped(),pc_p2_cave_items_delivered());
             require(pc_p2_cave_items_delivered()==0,"elec treasure credited while the gate was closed");
+            // Lane 51 (#489) natural-open experiment (needs #186 review): earn
+            // the yellow key from the seeded bud instead of recolouring below.
+            caveCarryPhase=10;return;
+        }
+        require(caveCarryTicks<1500,"closed gate did not block the red carry");
+        return;
+    }
+    if(caveCarryPhase==10){
+        // Lane 51 (#489) natural-open experiment (needs #186 review). A red is
+        // thrown into the seeded yellow bud through the ordinary path (same
+        // recipe as caveBudFixture); the resulting live yellow opens the gate.
+        // Floors without a seeded yellow bud keep lane-50's staged recolour.
+        Vector3f budPos;const bool haveBud=pc_p2_cave_bud_position("yellow",budPos);
+        if(!haveBud){
             Piki* yellow=aliveRed();
             require(yellow!=nullptr,"no red left to open the gate");
             pc_p2_set_species(yellow,P2SpeciesYellow);
             float gx=elec->mSRT.t.x,gz=elec->mSRT.t.z;
             pc_p2_cave_carry_door_pos("leaf_elec_0",&gx,&gz);
             place(yellow,gx,gz);
-            std::printf("P2_CAVE_CARRY_PHASE phase=open_stage opened=%d gx=%.2f gz=%.2f\n",
+            std::printf("P2_CAVE_CARRY_PHASE phase=open_stage opened=%d staged=1 gx=%.2f gz=%.2f\n",
                 pc_p2_cave_carry_opened(),gx,gz);
             caveCarryPhase=2;return;
         }
-        require(caveCarryTicks<1500,"closed gate did not block the red carry");
+        P2CaveAbilities keys=pc_p2_cave_rooms_squad_abilities();
+        if(keys.yellow&&pc_p2_cave_bud_conversions()>0){
+            std::printf("P2_CAVE_ROOMS_GRANT species=yellow natural_acquire=1 staged=0 conversions=%d\n",
+                pc_p2_cave_bud_conversions());
+            const P2CaveRoomLayout* yellowLayout=pc_p2_cave_rooms_layout();
+            if(yellowLayout!=nullptr)caveRoomsLogTimeline(yellowLayout,"come_back_with_yellow");
+            Piki* yellow=aliveYellow();
+            require(yellow!=nullptr,"bud conversion logged but no live yellow");
+            float gx=elec->mSRT.t.x,gz=elec->mSRT.t.z;
+            pc_p2_cave_carry_door_pos("leaf_elec_0",&gx,&gz);
+            place(yellow,gx,gz);
+            std::printf("P2_CAVE_CARRY_PHASE phase=open_stage opened=%d natural=1 gx=%.2f gz=%.2f\n",
+                pc_p2_cave_carry_opened(),gx,gz);
+            caveCarryPhase=2;return;
+        }
+        if(!caveCarryThrown){
+            Piki* thrower=aliveRed();
+            require(thrower!=nullptr,"no red Pikmin to throw into the bud");
+            const float bx=budPos.x-18.f,bz=budPos.z;
+            n->resetPosition(Vector3f(bx,mapMgr->getMinY(bx,bz,true),bz));
+            n->mStateMachine->transit(n,NAVISTATE_Walk);
+            thrower->changeMode(PikiMode::FreeMode,n);
+            thrower->mFSM->transit(thrower,PIKISTATE_Flying);
+            n->throwPiki(thrower,budPos);
+            std::printf("P2_CAVE_BUD_THROW colour=yellow distance=18 natural=1\n");
+            caveCarryThrown=true;return;
+        }
+        if(caveCarryTicks%120==0){
+            Piki* red=aliveRed();
+            if(red){
+                const float bx=budPos.x-18.f,bz=budPos.z;
+                red->resetPosition(Vector3f(bx,mapMgr->getMinY(bx,bz,true),bz));
+                red->changeMode(PikiMode::FreeMode,n);
+                red->mFSM->transit(red,PIKISTATE_Flying);
+                n->throwPiki(red,budPos);
+                std::printf("P2_CAVE_BUD_THROW_RETRY tick=%d natural=1\n",caveCarryTicks);
+            }
+            std::fflush(stdout);
+        }
+        require(caveCarryTicks<2500,"seeded bud conversion did not complete");
         return;
     }
     if(caveCarryPhase==2){
@@ -276,6 +343,12 @@ static void caveCarryFixture(Navi* n) {
             std::printf("P2_CAVE_CARRY_PHASE phase=credited new=%d events=%d redeliver=%d redeliver_new=%d\n",
                 fresh,pc_p2_cave_items_delivery_events(),int(again),pc_p2_cave_items_delivered());
             require(fresh==1,"elec treasure was not credited exactly once");
+            // Lane 51 (#489): staged blue stands in for the unearned colour
+            // (same compromise as lane 48); the yellow half above is natural.
+            caveRoomsGrantSpecies(P2SpeciesBlue);
+            std::printf("P2_CAVE_ROOMS_GRANT species=blue natural_acquire=0 staged=1\n");
+            const P2CaveRoomLayout* fullLayout=pc_p2_cave_rooms_layout();
+            if(fullLayout!=nullptr)caveRoomsLogTimeline(fullLayout,"return_with_yellow_and_blue");
             caveCarryPhase=4;return;
         }
         require(caveCarryTicks<3000,"opened gate did not credit the elec treasure");
