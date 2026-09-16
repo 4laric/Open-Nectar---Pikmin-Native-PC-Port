@@ -20,7 +20,6 @@
 // list, so no duplicate symbols arise (blast TU stays linked from the
 // main build). The standalone unit-test build links all three TUs.
 #include "pc_p2_bomb_payload_actor.cpp"
-#include "pc_p2_bomb_payload_actor.cpp"
 
 #include <cmath>
 #include <cstdio>
