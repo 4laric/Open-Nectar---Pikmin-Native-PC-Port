@@ -5,10 +5,15 @@
 // birth markers a natural generated Kurage spawn must emit:
 //
 //   1. P2_SEED_RESOLVE source_id=57 target=<uid>      (genteki.cpp birth)
-//   2. P2_GENERATED_PLACEMENT source_id=57 target=<uid> bound=1
-//      (pc_p2_generated_placement.cpp; muse-placement l52 owns case 57)
+//   2. P2_GENERATED_PLACEMENT source_id=57 target=<uid> generator=<gen> bound=1
+//      (reviewed muse-placement l52/#492, consumed as candidate 558d12af;
+//      only the accepted slot 689702860 passes)
 //   3. P2_KURAGE_TEKI_READY generator=<gen> +
 //      P2_KURAGE_CORPSE_READY generator=<gen> ... receipt=corpse:kurage:<gen>
+//
+// The verdict is PASS only for the accepted slot (resolve target ==
+// placement target == 689702860) with the triple-chain tie (placement
+// generator == teki generator == corpse receipt generator).
 //
 // Exit 0 with KURAGE_GENERATED_BIRTH_PASS on full agreement, exit 1 with
 // KURAGE_GENERATED_BIRTH_FAIL plus the exact reason otherwise. The legacy
@@ -19,8 +24,8 @@
 //
 // This tool observes logs only. It links against nothing, touches no family
 // module, and is intentionally NOT registered as an engine replacement-main
-// target: CMake registration waits for the l52 case-57 bind (shared hook
-// request filed with #491 before any CMakeLists edit).
+// target (shared-hook request to #491 deferred until the marker contract
+// stabilizes across the four consumer lanes).
 //
 // Usage: p2_muse_kurage_fixture [native.log]   (stdin when omitted)
 #include <cctype>
@@ -34,6 +39,8 @@
 namespace {
 
 const char* kSourceToken = "source_id=57";
+// Reviewed Kurage57 generated slot (muse-placement l52 MUSE_GENERATED_SLOTS).
+const char* kAcceptedSlot = "689702860";
 
 bool hasToken(const std::string& line, const char* token) {
     return line.find(token) != std::string::npos;
@@ -106,6 +113,7 @@ int main(int argc, char** argv) {
     if (lines.empty()) { fail("empty log: no generated-birth markers"); return 1; }
 
     std::set<std::string> resolveTargets, placementTargets, tekiGens, corpseGens;
+    std::set<std::string> placedGens;
     std::vector<std::string> taintedBirth;
     bool placementRefused = false;
     std::string refusedTarget;
@@ -119,11 +127,16 @@ int main(int argc, char** argv) {
         }
         if (hasToken(line, "P2_GENERATED_PLACEMENT") && hasToken(line, kSourceToken)) {
             if (tainted(line)) { taintedBirth.push_back(line); continue; }
-            std::string target, bound;
+            std::string target, bound, placedGen;
             fieldValue(line, "target", target);
             fieldValue(line, "bound", bound);
-            if (bound == "1") placementTargets.insert(target);
-            else { placementRefused = true; refusedTarget = target; }
+            // Reviewed contract carries generator= between target and bound;
+            // pre-contract markers omit it (fallback below).
+            fieldValue(line, "generator", placedGen);
+            if (bound == "1") {
+                placementTargets.insert(target);
+                if (!placedGen.empty()) placedGens.insert(placedGen);
+            } else { placementRefused = true; refusedTarget = target; }
         }
         if (hasToken(line, "P2_KURAGE_TEKI_READY")) {
             if (tainted(line)) { taintedBirth.push_back(line); continue; }
@@ -175,7 +188,7 @@ int main(int argc, char** argv) {
             return 1;
         }
         fail("missing P2_GENERATED_PLACEMENT source_id=57 bound=1 "
-             "(muse-placement l52/#492 has not landed the case-57 bind yet)");
+             "(expected from reviewed muse-placement l52 bind)");
         return 1;
     }
     if (tekiGens.empty()) { fail("missing P2_KURAGE_TEKI_READY generator marker"); return 1; }
@@ -187,15 +200,30 @@ int main(int argc, char** argv) {
         fail("resolve/placement slot disagreement");
         return 1;
     }
+    const std::string& slot = *slots.begin();
+    if (slot != kAcceptedSlot) {
+        fail(std::string("slot-not-accepted: slot=") + slot +
+             " is not the reviewed Kurage57 generated slot " + kAcceptedSlot);
+        return 1;
+    }
     std::set<std::string> gens(tekiGens.begin(), tekiGens.end());
     gens.insert(corpseGens.begin(), corpseGens.end());
     if (gens.size() > 1) {
         fail("Kurage binding generator disagreement");
         return 1;
     }
-    const std::string& slot = *slots.begin();
     const std::string& gen = *gens.begin();
-    if (slot != gen) {
+    if (!placedGens.empty()) {
+        if (placedGens.size() > 1) {
+            fail("placement generator disagreement");
+            return 1;
+        }
+        if (*placedGens.begin() != gen) {
+            fail("actor disagreement: placement generator=" + *placedGens.begin() +
+                 " Kurage generator=" + gen + "; same spawned actor required");
+            return 1;
+        }
+    } else if (slot != gen) {
         fail("slot/generator disagreement: seed slot=" + slot +
              " Kurage generator=" + gen + "; same spawned actor required");
         return 1;
@@ -210,8 +238,8 @@ int main(int argc, char** argv) {
         }
     }
 
-    std::printf("KURAGE_GENERATED_BIRTH_PASS slot/generator=%s "
-                "resolve+placement+teki+corpse agree\n", slot.c_str());
+    std::printf("KURAGE_GENERATED_BIRTH_PASS slot=%s generator=%s "
+                "resolve+placement+teki+corpse agree\n", slot.c_str(), gen.c_str());
     std::fflush(stdout);
     return 0;
 }
