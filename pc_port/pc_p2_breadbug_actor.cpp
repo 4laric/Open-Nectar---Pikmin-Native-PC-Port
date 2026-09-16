@@ -102,7 +102,7 @@ void pc_p2_breadbug_actor_setup(){
   if(actor->mTekiType!=TEKI_Collec||!found.insert(id).second)fail();actors.emplace(actor,BreadbugProxyActor{id,SDL_GetTicks()});
   std::printf("P2_BREADBUG_ACTOR_READY generator=%u native_type=8 xyz=%.6f,%.6f,%.6f behavior=P1_Collec_proxy\n",id,actor->mSRT.t.x,actor->mSRT.t.y,actor->mSRT.t.z);
  }
- if(found!=wanted)fail();
+ if(found!=wantedIds)fail();
  if(!pc_p2_breadbug_contest_open("p2-breadbug-contest-receipts.txt"))fail();
  for(int k=0;k<2;++k)for(size_t i=0;i<motions[k].frames.size();++i){char name[80];std::snprintf(name,sizeof(name),"breadbug_actor_%s_%02u.mod",k?"move":"wait",unsigned(i));motions[k].shapes.push_back(load(name));}
  std::ifstream bank("p2-breadbug-cargo.txt");if(bank){
