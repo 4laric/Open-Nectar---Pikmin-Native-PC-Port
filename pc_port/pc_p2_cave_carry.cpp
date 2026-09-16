@@ -281,24 +281,31 @@ void pc_p2_cave_carry_tick()
 {
     if (!carryActive) return;
     const float dt = gsys ? gsys->getFrameTime() : 0.0f;
+    // An electric-immune Pikmin at any electric gate clears every electric
+    // gate: the squad holds the yellow key, so the hazard system is passable.
+    bool yellowKey = false;
     for (CarryBlocker& blocker : blockers) {
-        if (blocker.cooldown > 0.0f) blocker.cooldown -= dt;
+        if (blocker.hazard != "elec" || blocker.open) continue;
         const int hazard = hazardCode(blocker.hazard);
         if (hazard < 0) continue;
-        // Electric-immune Pikmin clear an electric gate; this is the live half of
-        // the "come back with yellow" loop.
-        if (blocker.hazard == "elec" && !blocker.open) {
-            bool immune = false;
-            Piki* opener = nearestPikmin(blocker.position, 22.0f, hazard, true, immune);
-            if (opener) {
+        bool immune = false;
+        if (nearestPikmin(blocker.position, 22.0f, hazard, true, immune)) yellowKey = true;
+    }
+    if (yellowKey) {
+        for (CarryBlocker& blocker : blockers) {
+            if (blocker.hazard == "elec" && !blocker.open) {
                 blocker.open = true;
                 ++openedCount;
                 std::printf("P2_CAVE_CARRY_OPEN id=%s hazard=elec reason=electric_immune\n",
                             blocker.id.c_str());
                 std::fflush(stdout);
-                continue;
             }
         }
+    }
+    for (CarryBlocker& blocker : blockers) {
+        if (blocker.cooldown > 0.0f) blocker.cooldown -= dt;
+        const int hazard = hazardCode(blocker.hazard);
+        if (hazard < 0) continue;
         if (blocker.open) continue;
         if (blocker.cooldown > 0.0f) continue;
         bool immune = false;
@@ -318,9 +325,9 @@ void pc_p2_cave_carry_tick()
         if (carrying) ++carriersDropped;
         if (blocker.hazard == "water") ++waterBlockedCount;
         std::printf(
-            "P2_CAVE_CARRY_BLOCKED id=%s hazard=%s species=%d carrying=%d accepted=%d\n",
+            "P2_CAVE_CARRY_BLOCKED id=%s hazard=%s species=%d carrying=%d accepted=%d tx=%.2f tz=%.2f\n",
             blocker.id.c_str(), blocker.hazard.c_str(), pc_p2_species(target), int(carrying),
-            int(accepted));
+            int(accepted), target->getPosition().x, target->getPosition().z);
         std::fflush(stdout);
     }
 }
