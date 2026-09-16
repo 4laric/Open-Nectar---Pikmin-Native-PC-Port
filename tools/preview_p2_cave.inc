@@ -4,6 +4,7 @@
 #include "pc_p2_cave_anchor.h"
 #include "pc_p2_cave_rooms_engine.h"
 #include "pc_p2_cave_items_engine.h"
+#include "pc_p2_cave_carry_engine.h"
 #include "pc_p2_species.h"
 #include "GoalItem.h"
 #include <fstream>
@@ -88,7 +89,134 @@ static void caveItemsFixture(Navi* n) {
     }
     require(caveItemTicks<2400,"cave item carry did not deliver");
 }
+// Lane 50 (#488): carry-blocking loop. A red-carried tagged elec treasure must
+// not cross the closed electric gate (no credit); a natural yellow opens it and
+// the same treasure is credited exactly once. Then a red-carried water treasure
+// is stopped by the water pool. All positions/receipts are the real engine paths.
+static int caveCarryTicks=0;
+static int caveCarryPhase=0;
+static Piki* caveCarryRed=nullptr;
+static void caveCarryFixture(Navi* n) {
+    if(n->getCurrState() && n->getCurrState()->getID()!=NAVISTATE_Walk)
+        n->mStateMachine->transit(n,NAVISTATE_Walk);
+    const P2CaveItemPlacement* items=pc_p2_cave_items_placement();
+    require(items!=nullptr,"cave carry items placement missing");
+    Pellet* elec=pc_p2_cave_items_pellet_for("treasure_elec");
+    require(elec!=nullptr,"tagged elec treasure not spawned");
+    Pellet* water=pc_p2_cave_items_pellet_for("treasure_water");
+    auto aliveRed=[]()->Piki*{
+        Iterator it(pikiMgr);
+        CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);
+            if(p && p->isAlive() && pc_p2_species(p)==P2SpeciesRed)return p;}
+        return nullptr;
+    };
+    auto place=[](Piki* p,float x,float z){
+        p->mSRT.t=Vector3f(x,mapMgr->getMinY(x,z,true),z);
+    };
+    auto assign=[](Piki* p,Pellet* target){
+        p->mActiveAction->abandon(nullptr);
+        p->mActiveAction->mCurrActionIdx=PikiAction::Transport;
+        p->mActiveAction->mChildActions[PikiAction::Transport].initialise(target);
+        p->mMode=PikiMode::TransportMode;
+    };
+    ++caveCarryTicks;
+    if(caveCarryPhase==0){
+        const float x=elec->mSRT.t.x,z=elec->mSRT.t.z;
+        n->resetPosition(Vector3f(x,mapMgr->getMinY(x,z,true),z));
+        caveCarryRed=aliveRed();
+        require(caveCarryRed!=nullptr,"no red to carry the tagged elec treasure");
+        place(caveCarryRed,x,z);
+        assign(caveCarryRed,elec);
+        std::printf("P2_CAVE_CARRY_PHASE phase=block_assign blocked=%d\n",pc_p2_cave_carry_blocked());
+        caveCarryPhase=1;return;
+    }
+    if(caveCarryPhase==1){
+        if(caveCarryTicks%120==0){
+            Creature* stick=caveCarryRed?caveCarryRed->getStickObject():nullptr;
+            std::printf("P2_CAVE_CARRY_PHASE phase=waiting ticks=%d alive=%d mode=%d stick=%p dropped=%d blocked=%d new=%d\n",
+                caveCarryTicks,int(caveCarryRed && caveCarryRed->isAlive()),
+                int(caveCarryRed?caveCarryRed->mMode:0),(void*)stick,
+                pc_p2_cave_carry_carriers_dropped(),pc_p2_cave_carry_blocked(),pc_p2_cave_items_delivered());
+            std::fflush(stdout);
+        }
+        if((!caveCarryRed || !caveCarryRed->isAlive()) && pc_p2_cave_carry_carriers_dropped()==0){
+            Piki* red=aliveRed();
+            if(red){caveCarryRed=red;place(red,elec->mSRT.t.x,elec->mSRT.t.z);assign(red,elec);caveCarryTicks=0;}
+            return;
+        }
+        if(pc_p2_cave_carry_carriers_dropped()>0){
+            std::printf("P2_CAVE_CARRY_PHASE phase=blocked hazard=elec blocked=%d carriers_dropped=%d new=%d\n",
+                pc_p2_cave_carry_blocked(),pc_p2_cave_carry_carriers_dropped(),pc_p2_cave_items_delivered());
+            require(pc_p2_cave_items_delivered()==0,"elec treasure credited while the gate was closed");
+            capture("p2-cave-carry-blocked.ppm");
+            Piki* yellow=aliveRed();
+            require(yellow!=nullptr,"no red left to open the gate");
+            pc_p2_set_species(yellow,P2SpeciesYellow);
+            float gx=elec->mSRT.t.x,gz=elec->mSRT.t.z;
+            pc_p2_cave_carry_door_pos("leaf_elec_0",&gx,&gz);
+            place(yellow,gx,gz);
+            std::printf("P2_CAVE_CARRY_PHASE phase=open_stage opened=%d gx=%.2f gz=%.2f\n",
+                pc_p2_cave_carry_opened(),gx,gz);
+            caveCarryPhase=2;return;
+        }
+        require(caveCarryTicks<1500,"closed gate did not block the red carry");
+        return;
+    }
+    if(caveCarryPhase==2){
+        if(pc_p2_cave_carry_opened()>0){
+            std::printf("P2_CAVE_CARRY_PHASE phase=opened opened=%d\n",pc_p2_cave_carry_opened());
+            int freed=0;
+            Iterator it(pikiMgr);
+            CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);
+                if(p && p->isAlive() && pc_p2_species(p)==P2SpeciesRed && freed<3){
+                    place(p,elec->mSRT.t.x,elec->mSRT.t.z);
+                    p->changeMode(PikiMode::FreeMode,n);++freed;}}
+            std::printf("P2_CAVE_CARRY_PHASE phase=credit_release freed=%d\n",freed);
+            std::fflush(stdout);
+            caveCarryPhase=3;return;
+        }
+        require(caveCarryTicks<2000,"natural yellow did not open the gate");
+        return;
+    }
+    if(caveCarryPhase==3){
+        if(caveCarryTicks%150==0){
+            int transport=0,free=0;
+            Iterator it(pikiMgr);
+            CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);
+                if(p->mMode==PikiMode::TransportMode)++transport;
+                if(p->mMode==PikiMode::FreeMode)++free;}
+            std::printf("P2_CAVE_CARRY_PHASE phase=credit_wait ticks=%d transport=%d free=%d x=%.2f z=%.2f events=%d new=%d\n",
+                caveCarryTicks,transport,free,elec->mSRT.t.x,elec->mSRT.t.z,
+                pc_p2_cave_items_delivery_events(),pc_p2_cave_items_delivered());
+            std::fflush(stdout);
+        }
+        if(pc_p2_cave_items_delivery_events()>0){
+            const int fresh=pc_p2_cave_items_delivered();
+            const bool again=pc_p2_cave_items_deliver(elec);
+            std::printf("P2_CAVE_CARRY_PHASE phase=credited new=%d events=%d redeliver=%d redeliver_new=%d\n",
+                fresh,pc_p2_cave_items_delivery_events(),int(again),pc_p2_cave_items_delivered());
+            require(fresh==1,"elec treasure was not credited exactly once");
+            capture("p2-cave-carry-credited.ppm");
+            Piki* red=water?aliveRed():nullptr;
+            if(red){
+                place(red,water->mSRT.t.x,water->mSRT.t.z);assign(red,water);
+                std::printf("P2_CAVE_CARRY_PHASE phase=water_assign water_filtered=%d\n",pc_p2_cave_carry_water_blocked());
+            }
+            caveCarryPhase=4;return;
+        }
+        require(caveCarryTicks<3000,"opened gate did not credit the elec treasure");
+        return;
+    }
+    if(pc_p2_cave_carry_water_blocked()>0){
+        std::printf("P2_CAVE_CARRY_PHASE phase=water_blocked water_filtered=%d\n",pc_p2_cave_carry_water_blocked());
+        capture("p2-cave-carry-water.ppm");
+        std::puts("PASS cave carry: closed gate blocks the carry, yellow opens, exactly-once credit, water filters red (proxy geometry)");
+        std::fflush(stdout);std::_Exit(0);
+    }
+    require(caveCarryTicks<4000,"water pool did not block the red carry");
+}
 static void caveRoomsFixture(Navi* n) {
+    if(pc_p2_cave_carry_active()){caveCarryFixture(n);return;}
     if(pc_p2_cave_items_active()){caveItemsFixture(n);return;}
     static int ticks=0;
     if(++ticks<120)return;

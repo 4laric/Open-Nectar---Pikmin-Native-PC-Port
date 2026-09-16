@@ -21,6 +21,7 @@
 #include "system.h"
 #include "pc_p2_species.h"
 #include "pc_p2_hazard_emitter.h"
+#include "pc_p2_cave_carry_engine.h"  // lane 50 (#488): carry blocking owns plan gates
 
 #include <cmath>
 #include <cstdio>
@@ -193,6 +194,9 @@ void pc_p2_cave_geometry_tick()
     if (!geometryActive) return;
     const float dt = gsys ? gsys->getFrameTime() : 0.0f;
     for (GateActor& actor : gateActors) {
+        // Lane 50 (#488): when a P2_CAVE_GATES_1 carry blocker owns this node it
+        // drives the carry hazard; the gate mesh is still drawn here.
+        if (pc_p2_cave_carry_handles(actor.node_id)) continue;
         if (actor.cooldown > 0.0f) actor.cooldown -= dt;
         bool immune = false;
         // Electric-immune Pikmin (Yellow / Bulbmin) open the gate; this is the
