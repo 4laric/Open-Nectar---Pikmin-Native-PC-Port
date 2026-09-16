@@ -64,6 +64,13 @@ public:int idle() override {
         require(armorGen&&armorGen->mGenType&&armorGen->mGenObject,"Armor generator present");
         armorLastHealth=armor->mHealth;armorStartHealth=armor->mHealth;
         require(armorStartHealth>0.0f,"Armor starts healthy");
+        // Damage-window staging only. This host has no EB_Bittered lifecycle and
+        // the arena Armor loads no collision weakpoint (mode=reject_all), so the
+        // source receiver rejects every hit; pc_p2_armor_set_bittered is the
+        // module's documented host input for the bittered leg. No health is
+        // written: the drain below is real InteractAttack damage.
+        pc_p2_armor_set_bittered(armor,true);
+        std::printf("P2_MUSE_ARMOR_WINDOW bittered=1 source=armor_module_input\n");
         std::printf("P2_MUSE_ARMOR_READY squad=%d armor_gen=346001 health=%.2f\n",squad,armor->mHealth);
         std::fflush(stdout);stage=1;return result;
     }
