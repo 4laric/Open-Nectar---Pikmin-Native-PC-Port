@@ -5,6 +5,7 @@
 #include "Generator.h"
 #include "Piki.h"
 #include "PikiMgr.h"
+#include "PikiState.h"
 #include "Navi.h"
 #include "NaviMgr.h"
 #include "Pellet.h"
@@ -12,19 +13,24 @@
 
 // Muse l64 Breadbug38 natural lifecycle fixture (#504). PanModoki source 38
 // only (P1 TEKI_Collec proxy 186081); the 186082 control is a never-touched
-// sentinel. No bait pellet is ever deployed, so the contest bridge stays idle
-// and the free-mode squad can only engage the actor itself.
+// sentinel. No bait pellet is ever deployed, so the contest bridge stays idle.
 //
-// Phases: bind -> autonomous movement sample -> natural ringReds squad kill
-// (zero fixture health writes, no die() call) -> death-funnel forget + corpse
-// capture (mPellet at mDeadState==2 plus the pelletMgr mPelletView scan) ->
-// generator rebirth (natural respawn first, engine mGenType->init fallback,
-// both fixture-timed and honestly labelled) -> tracked re-registration check
-// via the family rebirth scan (no reset/setup call) -> PASS.
+// Phases: bind -> autonomous movement sample -> captain-thrown red assault
+// (real player-controller throw events through Navi::throwPiki; damage flows
+// through the real engine receiver; zero fixture health writes, no die() call,
+// no InteractAttack injection) -> death-funnel forget + corpse capture
+// (mPellet at mDeadState==2 plus the pelletMgr mPelletView scan) -> generator
+// rebirth (natural respawn first, engine mGenType->init fallback, both
+// fixture-timed and honestly labelled) -> tracked re-registration check via
+// the family rebirth scan (no reset/setup call) -> PASS.
 //
-// Any P2_MUSE_BREADBUG_INJECTED line would mark a fixture health/die write;
-// this fixture never emits one. A missing corpse or a timed-out kill fails
-// here with the exact cause instead of passing silently.
+// A prior revision ringed free-mode reds around the actor (lane-19 recipe):
+// 20 reds for 2400 ticks dealt zero damage (Collec HP stayed 5000.0), so the
+// harmless proxy never engages idle pursuers. Thrown Pikmin actively latch,
+// which is the ordinary player combat path. Any P2_MUSE_BREADBUG_INJECTED line
+// would mark a fixture health/die write; this fixture never emits one. A
+// missing corpse or a timed-out kill fails here with the exact cause instead
+// of passing silently.
 class MuseBreadbugApp : public PlugPikiApp {
  int frames = 0, active = 0, moving = 0, phase = 0, phaseTick = 0;
  Teki* actor = nullptr; Teki* control = nullptr; Generator* generator = nullptr;
@@ -48,7 +54,7 @@ class MuseBreadbugApp : public PlugPikiApp {
 public:
  int idle() override {
   int result = PlugPikiApp::idle();
-  require(++frames < 9000, "Muse breadbug timeout");
+  require(++frames < 20000, "Muse breadbug timeout");
   if (gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive) { gameflow.mMoviePlayer->requestSkip(); return result; }
   if (!pc_p2_preview_cargo_free_ready() || !naviMgr || !tekiMgr || !pikiMgr || !mapMgr) return result;
   Navi* n = naviMgr->getNavi(); if (!n || gameflow.mPauseAll || gameflow.mIsUIOverlayActive) return result;
@@ -80,10 +86,32 @@ public:
    require(control->isAlive(), "control died during the natural kill");
    ++phaseTick;
    if (actor->isAlive()) {
-    if (phaseTick == 1 || phaseTick % 120 == 0) ringReds(n);
+    // Captain-thrown assault through the real player-controller event path:
+    // the captain is staged in throw range (reported position) and idle reds
+    // are thrown at the actor with Navi::throwPiki. Thrown Pikmin latch onto
+    // the Collec through ordinary engine behavior and wound it through the
+    // real receiver. No health is written, die() is never called, and no
+    // InteractAttack is injected.
+    if (phaseTick == 1 || phaseTick % 10 == 0) {
+     Vector3f near = actor->mSRT.t + Vector3f(60, 0, 60);
+     near.y = mapMgr->getMinY(near.x, near.z, true);
+     n->resetPosition(near);
+     int thrown = 0;
+     Iterator it(pikiMgr); CI_LOOP(it) {
+      Piki* p = static_cast<Piki*>(*it);
+      if (!p || !p->isAlive() || p->mColor != Red) continue;
+      if (p->getStickObject() || p->getState() != PIKISTATE_Normal) continue;
+      p->changeMode(PikiMode::FreeMode, n);
+      p->mFSM->transit(p, PIKISTATE_Flying);
+      n->throwPiki(p, actor->mSRT.t);
+      std::printf("P2_MUSE_BREADBUG_THROW tick=%d reds=%d health=%.1f\n", phaseTick, aliveReds(), actor->mHealth);
+      if (++thrown >= 2) break;
+     }
+     std::fflush(stdout);
+    }
     if (actor->mHealth < killHealth0) healthFell = true;
     if (phaseTick % 60 == 0) { std::printf("P2_MUSE_BREADBUG_RING tick=%d reds=%d health=%.1f\n", phaseTick, aliveReds(), actor->mHealth); std::fflush(stdout); }
-    require(phaseTick < 2400, "Muse breadbug natural kill did not complete");
+    require(phaseTick < 5400, "Muse breadbug thrown-Pikmin kill did not complete");
    } else {
     std::printf("P2_MUSE_BREADBUG_KILL_NATURAL tick=%d\n", phaseTick); std::fflush(stdout);
     require(healthFell, "kill without receiver health fall");
