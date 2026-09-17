@@ -40,6 +40,12 @@
 
 #include <cstdio>
 
+// Free-function seam declarations (defined at namespace scope in
+// pc_port/pc_p2_bomb_mgr_birth.cpp; declared here rather than edited into
+// the #726 header, which stays read-only for this lane).
+class Teki;
+bool pc_p2_bomb_engine_birth_poll(Teki* actor);
+
 // Retail Bomb-family IDs routed through this call site.
 static const int kGeneralEnemyID_Bomb = 36;
 static const int kGeneralEnemyID_BombOtakara = 93;
