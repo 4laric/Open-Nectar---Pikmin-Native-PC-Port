@@ -1,5 +1,6 @@
 #include "pc_bbft.h"
 #include "pc_randomizer.h"
+#include "pc_p2_challenge_persistence.h"
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
@@ -147,11 +148,58 @@ bool pc_bbft_skip_tutorial() {
     return false;
 #endif
 }
+
+// Challenge persistence call site (#718). The #713 module
+// (pc_p2_challenge_persistence.{h,cpp}) is engine-free and not yet in any
+// CMake target, so its recorders are referenced WEAKLY here: pc_bbft_test
+// stays link-inert without the module, while every build that does compile
+// the module (the #718 callsite fixture, and pikmin_pc once the module joins
+// its sources under #186) resolves them and emits the 7 probe markers for a
+// selected stage.
+#if defined(__GNUC__)
+namespace p2challengepersist {
+bool selectStage(const char*, StageAnchors*) __attribute__((weak));
+bool recordSave(StageAnchors*) __attribute__((weak));
+bool recordLoad(StageAnchors*) __attribute__((weak));
+bool recordClear(StageAnchors*) __attribute__((weak));
+bool recordHighscore(StageAnchors*, int, double, int) __attribute__((weak));
+bool recordUnlock(StageAnchors*) __attribute__((weak));
+bool recordReceipt(StageAnchors*, int) __attribute__((weak));
+bool recordReentry(StageAnchors*) __attribute__((weak));
+}
+#endif
+
+static bool sPersistenceEmitted = false;
+static void p2ChallengePersistenceCallSite() {
+#if defined(__GNUC__)
+    if (sPersistenceEmitted) return;
+    if (p2challengepersist::selectStage == nullptr) return; // module not linked
+    const char* caveId = pc_p2_challenge_stage();
+    if (caveId == nullptr) return;
+    p2challengepersist::StageAnchors anchors;
+    if (!p2challengepersist::selectStage(caveId, &anchors)) {
+        sPersistenceEmitted = true; // refusal already emitted its marker
+        return;
+    }
+    p2challengepersist::recordSave(&anchors);
+    p2challengepersist::recordLoad(&anchors);
+    p2challengepersist::recordClear(&anchors);
+    // Deterministic result-screen sample (mirrors #713: 42 pokos, 120.5 s, 15 squad).
+    p2challengepersist::recordHighscore(&anchors, 42, 120.5, 15);
+    p2challengepersist::recordUnlock(&anchors);
+    p2challengepersist::recordReceipt(&anchors, 1);
+    p2challengepersist::recordReentry(&anchors);
+    sPersistenceEmitted = true;
+#endif
+}
 void pc_bbft_update() {
     if (pc_randomizer_enabled()) { pc_randomizer_update(); return; }
 #ifdef _WIN32
     if (enabled) bbft_transport_update();
 #endif
+    // Challenge persistence call site (#718): emits the 7 probe markers for a
+    // selected challenge stage via the #713 module; inert without it.
+    p2ChallengePersistenceCallSite();
 }
 bool pc_bbft_hold() {
     if (pc_randomizer_enabled()) {
