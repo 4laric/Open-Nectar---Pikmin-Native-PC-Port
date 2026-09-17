@@ -42,9 +42,9 @@ inline void p2_fixture_require_captain(bool orimaDead, bool deadState, float hp,
 #include "pc_window.h"
 #include "pc_gpu_preference.h"
 #include "pc_bbft.h"
-#include "pc_p2_challenge_runtime.h"
 // pc_p2_challenge_stage() is defined in pc_bbft.cpp (process-lifetime
-// std::string) but has no public header; declare it here for the check.
+// std::string) but has no public header on this line; declare it here.
+// (The #710-only pc_p2_challenge_runtime.h is absent here, so no include.)
 const char* pc_p2_challenge_stage();
 #include "pc_p2_challenge_persistence.h"
 // The module TU is not a CMake target (no shared build edits allowed), so it
