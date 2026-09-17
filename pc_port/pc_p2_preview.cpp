@@ -13,6 +13,8 @@
 #include "pc_p2_hardlanes.h"
 #include "pc_p2_batch3.h"
 #include "pc_p2_long_legs.h"
+#include "pc_p2_queen.h"
+#include "pc_p2_queen_teki.h"
 #include "pc_p2_preview.h"
 #include "pc_bbft.h"
 #include "Pellet.h"
@@ -203,6 +205,8 @@ void pc_p2_preview_setup() {
     pc_p2_hardlanes_setup();
     pc_p2_batch3_setup();
     pc_p2_long_legs_setup();
+    pc_p2_queen_setup();
+    pc_p2_queen_teki_setup();
     pc_p2_purple_setup();
     pc_p2_purple_flight_setup();
     pc_p2_purple_motion_setup();

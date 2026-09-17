@@ -206,6 +206,9 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_bigtreasure_motion.cpp
     pc_port/pc_p2_bigtreasure_visual.cpp
     pc_port/pc_p2_long_legs.cpp
+    pc_port/pc_p2_queen.cpp
+    pc_port/pc_p2_queen_teki.cpp
+    pc_port/pc_p2_specular_layer.cpp
     pc_port/pc_randomizer.cpp
     pc_port/pc_main.cpp
     pc_port/pc_window.cpp
