@@ -1,5 +1,5 @@
-﻿###############################################################################
-#  Pikmin PC Port â€” CMake Build System
+###############################################################################
+#  Pikmin PC Port — CMake Build System
 #  Stage 1: Compilation Skeleton
 #
 #  This CMakeLists.txt compiles the decompiled Pikmin source code natively
@@ -22,7 +22,7 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_C_STANDARD 11)
 
-# â”€â”€â”€ Build type â”€â”€â”€
+# ─── Build type ───
 # An unset build type means no -O flag at all, which is -O0: the game then runs
 # several times slower with nothing on screen to say why. This is a game, so a
 # build that is merely usable is the wrong default; RelWithDebInfo keeps the
@@ -39,7 +39,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         "-DCMAKE_BUILD_TYPE=RelWithDebInfo.")
 endif()
 
-# â”€â”€â”€ Compiler Flags â”€â”€â”€
+# ─── Compiler Flags ───
 # Force-include our PC types header BEFORE anything else.
 # This overrides MetroWerks and MSVC macros, fixes type sizes, etc.
 set(PC_PORT_DIR "${CMAKE_SOURCE_DIR}/pc_port")
@@ -96,7 +96,7 @@ option(PIKMIN_NATIVE_JAUDIO "Drive audio with the original src/jaudio engine" OF
 # on with -DPIKMIN_DEBUG_KEYS=ON while working on the Mods settings.
 option(PIKMIN_DEBUG_KEYS "Build the F5/F6 testing shortcuts" OFF)
 
-# â”€â”€â”€ Which release of the game this binary is built for â”€â”€â”€
+# ─── Which release of the game this binary is built for ───
 #
 # The port compiles the game's own code, and that code is conditional on the
 # release in 404 places across 83 files, so this is a build-time choice and not
@@ -126,7 +126,7 @@ add_compile_definitions(
     PIKI_PC_SETTINGS_MENU=1
 )
 
-# â”€â”€â”€ Include paths â”€â”€â”€
+# ─── Include paths ───
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/include/Dolphin
@@ -142,7 +142,7 @@ include_directories(
 #  implementations (those are replaced by our stubs).
 ###############################################################################
 
-# â”€â”€â”€ External Dependencies (SDL2 & OpenGL) â”€â”€â”€
+# ─── External Dependencies (SDL2 & OpenGL) ───
 find_package(SDL2 QUIET)
 if (NOT SDL2_FOUND)
     find_package(PkgConfig REQUIRED)
@@ -363,10 +363,10 @@ include_directories(
     ${OPENGL_INCLUDE_DIR}
 )
 
-# â”€â”€â”€ System Common (platform-independent game engine) â”€â”€â”€
+# ─── System Common (platform-independent game engine) ───
 file(GLOB SYSCOMMON_SOURCES "src/sysCommon/*.cpp")
 
-# â”€â”€â”€ System Dolphin (GameCube-specific system layer â€” we compile it but stubs handle the calls) â”€â”€â”€
+# ─── System Dolphin (GameCube-specific system layer — we compile it but stubs handle the calls) ───
 set(SYSDOLPHIN_SOURCES
     src/sysDolphin/controllerMgr.cpp
     src/sysDolphin/dgxGraphics.cpp
@@ -446,7 +446,7 @@ else()
     message(STATUS "Audio: legacy native PC mixer (pc_port/audio)")
 endif()
 
-# â”€â”€â”€ Game plugin modules (the actual game code) â”€â”€â”€
+# ─── Game plugin modules (the actual game code) ───
 file(GLOB PLUGPIKI_KANDO_SOURCES   "src/plugPikiKando/*.cpp")
 file(GLOB PLUGPIKI_NAKATA_SOURCES  "src/plugPikiNakata/*.cpp")
 file(GLOB PLUGPIKI_NISHIMURA_SOURCES "src/plugPikiNishimura/*.cpp")
@@ -459,35 +459,35 @@ file(GLOB PLUGPIKI_YAMASHITA_SOURCES "src/plugPikiYamashita/*.cpp")
 #  These are GameCube hardware drivers that our stubs replace entirely.
 ###############################################################################
 # We do NOT compile:
-#   src/os/          â€” Dolphin OS implementation (replaced by os_stubs)
-#   src/gx/          â€” GX hardware driver (replaced by gx_stubs)
-#   src/dvd/         â€” DVD hardware driver (replaced by dvd_stubs)
-#   src/pad/         â€” PAD hardware driver (replaced by pad_stubs)
-#   src/vi/          â€” VI hardware driver (replaced by vi_stubs)
-#   src/card/        â€” Memory card driver (replaced by card_stubs)
-#   src/dsp/         â€” DSP driver (replaced by audio_stubs)
-#   src/ai/          â€” Audio interface (replaced by audio_stubs)
-#   src/ar/          â€” ARAM driver (replaced by os_stubs)
-#   src/si/          â€” Serial interface (replaced by misc_stubs)
-#   src/exi/         â€” Expansion interface (replaced by misc_stubs)
-#   src/jaudio/      â€” JAudio library (replaced by audio_stubs)
-#   src/mtx/         â€” Matrix math (replaced by misc_stubs)
-#   src/mtxD/        â€” Matrix math (replaced by misc_stubs)
-#   src/base/        â€” PPCArch (replaced by misc_stubs)
-#   src/db/          â€” Debug (replaced by misc_stubs)
-#   src/hio/         â€” Host I/O (replaced by misc_stubs)
-#   src/hvqm4dec/    â€” Video decoder (built with PIKMIN_NATIVE_JAUDIO)
-#   src/MSL_C/       â€” MetroWerks Standard Library (use system libc)
-#   src/Runtime/     â€” CodeWarrior Runtime (use system runtime)
-#   src/TRK_MINNOW_DOLPHIN/ â€” Debugger (not needed)
-#   src/OdemuExi2/   â€” Dev kit hardware (not needed)
-#   src/amcExi2/     â€” Dev kit hardware (not needed)
-#   src/amcnotstub/  â€” Dev kit hardware (not needed)
-#   src/amcstubs/    â€” Dev kit hardware (not needed)
-#   src/odemustubs/  â€” Dev kit hardware (not needed)
-#   src/odenotstub/  â€” Dev kit hardware (not needed)
-#   src/sysCore/     â€” Windows DLL code (uses Win32 APIs, will adapt later)
-#   src/sysBootup.cpp â€” Original entry point (replaced by pc_main.cpp)
+#   src/os/          — Dolphin OS implementation (replaced by os_stubs)
+#   src/gx/          — GX hardware driver (replaced by gx_stubs)
+#   src/dvd/         — DVD hardware driver (replaced by dvd_stubs)
+#   src/pad/         — PAD hardware driver (replaced by pad_stubs)
+#   src/vi/          — VI hardware driver (replaced by vi_stubs)
+#   src/card/        — Memory card driver (replaced by card_stubs)
+#   src/dsp/         — DSP driver (replaced by audio_stubs)
+#   src/ai/          — Audio interface (replaced by audio_stubs)
+#   src/ar/          — ARAM driver (replaced by os_stubs)
+#   src/si/          — Serial interface (replaced by misc_stubs)
+#   src/exi/         — Expansion interface (replaced by misc_stubs)
+#   src/jaudio/      — JAudio library (replaced by audio_stubs)
+#   src/mtx/         — Matrix math (replaced by misc_stubs)
+#   src/mtxD/        — Matrix math (replaced by misc_stubs)
+#   src/base/        — PPCArch (replaced by misc_stubs)
+#   src/db/          — Debug (replaced by misc_stubs)
+#   src/hio/         — Host I/O (replaced by misc_stubs)
+#   src/hvqm4dec/    — Video decoder (built with PIKMIN_NATIVE_JAUDIO)
+#   src/MSL_C/       — MetroWerks Standard Library (use system libc)
+#   src/Runtime/     — CodeWarrior Runtime (use system runtime)
+#   src/TRK_MINNOW_DOLPHIN/ — Debugger (not needed)
+#   src/OdemuExi2/   — Dev kit hardware (not needed)
+#   src/amcExi2/     — Dev kit hardware (not needed)
+#   src/amcnotstub/  — Dev kit hardware (not needed)
+#   src/amcstubs/    — Dev kit hardware (not needed)
+#   src/odemustubs/  — Dev kit hardware (not needed)
+#   src/odenotstub/  — Dev kit hardware (not needed)
+#   src/sysCore/     — Windows DLL code (uses Win32 APIs, will adapt later)
+#   src/sysBootup.cpp — Original entry point (replaced by pc_main.cpp)
 
 ###############################################################################
 #  Build the executable
@@ -584,7 +584,7 @@ endif()
 
 # Link against math, SDL2, and OpenGL libraries
 if (WIN32)
-    # MinGW ya trae las funciones matemÃ¡ticas en su runtime: no existe libm
+    # MinGW ya trae las funciones matemáticas en su runtime: no existe libm
     # suelta, y OpenGL lo expone opengl32.
     #
     # SDL2main NO se enlaza: aporta un WinMain que llama a SDL_main, y este
@@ -635,8 +635,8 @@ target_include_directories(pikmin_disc_image PUBLIC
     ${CMAKE_SOURCE_DIR}/pc_port/launcher)
 target_compile_options(pikmin_disc_image PRIVATE ${NATIVE_COMPILE_OPTIONS})
 
-# La capa de plataforma aÃ­sla lo Ãºnico del launcher que depende del sistema:
-# rutas del ejecutable, diÃ¡logos y arranque del juego.
+# La capa de plataforma aísla lo único del launcher que depende del sistema:
+# rutas del ejecutable, diálogos y arranque del juego.
 if (WIN32)
     set(LAUNCHER_PLATFORM_SOURCE pc_port/launcher/launcher_platform_win32.cpp)
 else()
@@ -651,7 +651,7 @@ add_executable(pikmin_launcher
 target_include_directories(pikmin_launcher PRIVATE ${SDL2_INCLUDE_DIRS})
 target_link_libraries(pikmin_launcher PRIVATE pikmin_disc_image ${SDL2_LIBRARIES} Threads::Threads)
 if (WIN32)
-    # DiÃ¡logo de archivo clÃ¡sico, selector de carpeta del shell y COM.
+    # Diálogo de archivo clásico, selector de carpeta del shell y COM.
     target_link_libraries(pikmin_launcher PRIVATE comdlg32 ole32 shell32 uuid)
 endif()
 target_compile_options(pikmin_launcher PRIVATE ${NATIVE_COMPILE_OPTIONS})
@@ -1131,14 +1131,14 @@ target_compile_options(pc_tick_profiler_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME pc_tick_profiler_test COMMAND pc_tick_profiler_test)
 
 message(STATUS "")
-message(STATUS "â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—")
-message(STATUS "â•‘   Pikmin PC Port - Build Configuration   â•‘")
-message(STATUS "â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£")
-message(STATUS "â•‘   Version:  USA Rev 1 (GPIE01_01)       â•‘")
-message(STATUS "â•‘   Graphics: Native GX â†’ OpenGL          â•‘")
-message(STATUS "â•‘   Audio:    SDL mixer/STX; JAudio WIP   â•‘")
-message(STATUS "â•‘   Input:    Native SDL keyboard/gamepad â•‘")
-message(STATUS "â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•")
+message(STATUS "╔══════════════════════════════════════════╗")
+message(STATUS "║   Pikmin PC Port - Build Configuration   ║")
+message(STATUS "╠══════════════════════════════════════════╣")
+message(STATUS "║   Version:  USA Rev 1 (GPIE01_01)       ║")
+message(STATUS "║   Graphics: Native GX → OpenGL          ║")
+message(STATUS "║   Audio:    SDL mixer/STX; JAudio WIP   ║")
+message(STATUS "║   Input:    Native SDL keyboard/gamepad ║")
+message(STATUS "╚══════════════════════════════════════════╝")
 message(STATUS "")
 
 if(PIKMIN_NATIVE_JAUDIO)
@@ -1182,7 +1182,7 @@ target_include_directories(p2_receipt_host_test PRIVATE pc_port)
 target_compile_options(p2_receipt_host_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_receipt_host_test COMMAND p2_receipt_host_test)
 
-# Lane 06: per-consumer ledger â€” two handles on distinct paths never interfere.
+# Lane 06: per-consumer ledger — two handles on distinct paths never interfere.
 add_executable(p2_receipt_host_multi_test tools/p2_receipt_host_multi_test.cpp pc_port/pc_p2_receipt_host.cpp)
 target_include_directories(p2_receipt_host_multi_test PRIVATE pc_port)
 target_compile_options(p2_receipt_host_multi_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
