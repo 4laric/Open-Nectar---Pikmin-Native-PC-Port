@@ -99,11 +99,15 @@ GeneratedVerdict checkGenerated(const std::vector<std::string>& lines)
     std::string placeGenerator;
     bool placeGeneratorSeen = false;
     bool birthSeen = false;
-    std::string birthGenerator;
-    bool birthGeneratorSeen = false;
+    std::vector<std::string> bindGens;
+    std::vector<std::string> bindSlots;
+    std::vector<std::size_t> bindLines;
+    std::vector<std::string> forgetGens;
+    std::vector<std::size_t> forgetLines;
     for (std::vector<std::string>::size_type li = 0; li < lines.size(); ++li) {
         const std::string& line = lines[li];
         std::string source, target, bound, id, helper, phase, attached;
+        std::string bindGen, bindSlot, bindSource, forgetGen;
         if (hasToken(line, "P2_SEED_RESOLVE") && fieldText(line, "source_id", source)) {
             if (tainted(line)) { verdict.taint = true; continue; }
             if (source == "99" && fieldText(line, "target", target)) {
@@ -128,12 +132,21 @@ GeneratedVerdict checkGenerated(const std::vector<std::string>& lines)
                 && fieldText(line, "phase", phase) && phase == "fall"
                 && fieldText(line, "attached", attached) && attached == "1") {
                 birthSeen = true;
-                std::string gen;
-                if (fieldText(line, "generator", gen)) {
-                    birthGeneratorSeen = true;
-                    birthGenerator = gen;
-                }
             }
+        }
+        if (hasToken(line, "P2_WATERWRAITH_GENERATED_BIND") && fieldText(line, "generator", bindGen)) {
+            if (tainted(line)) { verdict.taint = true; continue; }
+            if (fieldText(line, "slot", bindSlot) && fieldText(line, "source", bindSource)
+                && bindSource == "99") {
+                bindLines.push_back(li);
+                bindGens.push_back(bindGen);
+                bindSlots.push_back(bindSlot);
+            }
+        }
+        if (hasToken(line, "P2_WATERWRAITH_GENERATED_FORGET") && fieldText(line, "generator", forgetGen)) {
+            if (tainted(line)) { verdict.taint = true; continue; }
+            forgetLines.push_back(li);
+            forgetGens.push_back(forgetGen);
         }
     }
     if (verdict.taint) { verdict.reason = "injected-birth taint"; return verdict; }
@@ -160,30 +173,31 @@ GeneratedVerdict checkGenerated(const std::vector<std::string>& lines)
         verdict.reason = "slot-not-accepted";
         return verdict;
     }
-    if (placeGeneratorSeen) {
-        if (birthGeneratorSeen && birthGenerator != placeGenerator) {
-            verdict.birth = false;
-            verdict.reason = "placement/register generator disagreement";
-            return verdict;
-        }
-        verdict.generator = placeGenerator;
-    } else {
+    if (!placeGeneratorSeen) {
         verdict.birth = false;
         verdict.reason = "placement marker lacks a generator field";
         return verdict;
     }
-    if (!birthGeneratorSeen) {
+    std::size_t lastBind = bindLines.size();
+    for (std::size_t i = 0; i < bindLines.size(); ++i) {
+        if (bindGens[i] == placeGenerator && bindSlots[i] == resolveTarget) {
+            lastBind = i;
+        }
+    }
+    if (lastBind == bindLines.size()) {
         verdict.birth = false;
-        verdict.reason = "register tie not numeric (family marker follow-on open)";
+        verdict.reason = "family generated-claim missing: no P2_WATERWRAITH_GENERATED_BIND for this generator and slot";
         return verdict;
     }
-    if (birthGenerator != placeGenerator) {
-        verdict.birth = false;
-        verdict.reason = "placement/register generator disagreement";
-        return verdict;
+    for (std::size_t i = 0; i < forgetLines.size(); ++i) {
+        if (forgetLines[i] > bindLines[lastBind] && forgetGens[i] == placeGenerator) {
+            verdict.birth = false;
+            verdict.reason = "family claim lost after bind";
+            return verdict;
+        }
     }
     verdict.generator = placeGenerator;
-    verdict.reason = "resolve+placement+register agree (numeric register tie)";
+    verdict.reason = "resolve+placement+register-claim agree (live family bind)";
     return verdict;
 }
 
