@@ -95,3 +95,41 @@ inline void emit(const char* what, const HostState& s)
 }
 
 } // namespace p2challenge
+
+namespace p2challenge {
+// ---- Runtime wiring layer (lane host-mode-runtime-wiring-native, #702)
+//
+// Additive coexistence with the landed #672 module above: this namespace
+// drives the LANDED HostState/StageEntry API from LIVE engine facts inside a
+// real guarded boot and reports observed delivery. Nothing above is modified;
+// the wiring never redefines StageEntry, HostState, start, tick, descend,
+// end, emit, retry, selectByUiIndex, applySquadAndSprays, or score. The two
+// marker families coexist: the landed emit() lines (P2_CHALLENGE_MODE_*)
+// plus the wiring observation lines (P2CHALLENGE_WIRING_*) below.
+
+namespace wiring {
+
+// Live snapshot feeding one wiring step. All fields are engine-observed;
+// squad/position/captain come from the fixture idle scan, seconds from the
+// engine frame clock.
+struct LiveFacts {
+    int squad_alive = 0;
+    int squad_reds = 0;
+    bool captain_down = false;
+    float seconds = 0.0f;
+};
+
+// Advance a landed HostState by one engine tick and report the observed
+// delivery. Mirrors the mode end triggers (timeout/extinction/captain)
+// against live facts; with no natural trigger the attempt continues.
+// Returns true while the attempt is still running.
+bool syncTick(HostState& s, const LiveFacts& facts);
+
+// Bind a live squad count into the running state population each tick.
+// Query-only helper: keeps the landed population field honest against the
+// engine instead of a staged number. Returns the bound population.
+int bindPopulation(HostState& s, int squad_alive);
+
+}  // namespace wiring
+
+}  // namespace p2challenge
