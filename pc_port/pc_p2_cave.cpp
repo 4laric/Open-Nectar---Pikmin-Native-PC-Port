@@ -89,8 +89,14 @@ void pc_p2_cave_setup(){
     const char* opt=std::getenv("PIKMIN_CAVE_NAV_DIAGNOSTICS");
     navRate.reset(opt && opt[0]==49 && opt[1]==0);navDrawCalls=0;navMarkerLogged=false;
     floorId=0;checkpointSchema=1;beasts=false;cargoTerminal=false;token.clear();requested=false;completed=false;titleTimer=0;anchor=P2CaveAnchor{};transitionShape=nullptr;
-    if(!pc_pikipelago_room_preview())return;
-    std::ifstream in("p2-cave-entry.txt");if(!in)return;
+    // yakushima4 boot-stall fix (#673): the pre-stage stall was a SILENT return.
+    // Emit an explicit fail-closed marker naming the exact blocked precondition so
+    // the guarded boot cannot stall without evidence before any stage load.
+    const bool roomPreview=pc_pikipelago_room_preview();
+    std::printf("P2_CAVE_SETUP_PROBE room_preview=%d\n",int(roomPreview));std::fflush(stdout);
+    if(!roomPreview){std::printf("P2_CAVE_SETUP_BLOCK reason=room_preview_unavailable\n");std::fflush(stdout);return;}
+    std::ifstream in("p2-cave-entry.txt");
+    if(!in){std::printf("P2_CAVE_SETUP_BLOCK reason=entry_file_missing path=p2-cave-entry.txt\n");std::fflush(stdout);return;}
     std::string version,extra;int floor,count;float health;
     if(!(in>>version>>token>>floor>>health>>count))invalid("header");
     const P2CaveEntryProfile profile=p2_cave_entry_profile(version,floor,token);
