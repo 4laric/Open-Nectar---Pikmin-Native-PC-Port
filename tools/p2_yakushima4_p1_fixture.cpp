@@ -9,10 +9,13 @@
 //     plus a P2_CAVE_NAV sample with the captain walking inside the anchor).
 // It never infers unit staging from nav lines.
 #include <cstdio>
+#include <filesystem>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
+
+#include "pc_p2_cave_generate.h"
 
 namespace {
 const char* const kEntryVersion = "P2_CAVE_ENTRY_1";
@@ -133,6 +136,34 @@ static int check(int argc, char** argv)
     return 0;
 }
 
+static int generate(int argc, char** argv)
+{
+    if (argc != 3) {
+        std::fprintf(stderr, "usage: %s generate <p2-cave-generate.txt>\n", argv[0]);
+        return 2;
+    }
+    const std::filesystem::path sidecar(argv[2]);
+    if (!std::filesystem::is_regular_file(sidecar)) {
+        std::fprintf(stderr, "cannot find %s\n", argv[2]);
+        return 2;
+    }
+    std::error_code error;
+    const std::filesystem::path previous = std::filesystem::current_path();
+    std::filesystem::current_path(sidecar.parent_path(), error);
+    if (error) {
+        std::fprintf(stderr, "cannot enter %s\n", sidecar.parent_path().string().c_str());
+        return 2;
+    }
+    const bool ok = pc_p2_cave_generate_run();
+    std::filesystem::current_path(previous, error);
+    if (!ok) {
+        std::printf("FAIL P2_YAKUSHIMA4_P1 generator refused the sidecar\n");
+        return 1;
+    }
+    std::printf("PASS P2_YAKUSHIMA4_P1 generator staged real unit pool\n");
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if (argc >= 2 && std::strcmp(argv[1], "stage") == 0) {
@@ -141,6 +172,9 @@ int main(int argc, char** argv)
     if (argc >= 2 && std::strcmp(argv[1], "check") == 0) {
         return check(argc, argv);
     }
-    std::fprintf(stderr, "usage: %s stage|check ...\n", argv[0]);
+    if (argc >= 2 && std::strcmp(argv[1], "generate") == 0) {
+        return generate(argc, argv);
+    }
+    std::fprintf(stderr, "usage: %s stage|check|generate ...\n", argv[0]);
     return 2;
 }
