@@ -178,22 +178,24 @@ void pc_p2_preview_setup() {
         Pellet* pellet = static_cast<Pellet*>(*it);
         if (pellet && pellet->mConfig->mModelId.mId == 'pr05') {
             // Reconcile preview pr05 pellets with arena overlays (#679): the
-            // room itself always spawns its own generator-less (id 0) bolts.
-            // Those room bolts are never staged treasure and never cargo, so
-            // skip them in both branches; only staged (nonzero generator id)
-            // pellets participate in the duplicate/cargo checks below.
+            // room itself spawns generator-less (id 0) bolts. Those room bolts
+            // are never staged cargo, so the cargo duplicate/actor-count
+            // checks exclude them. The no-cargo treasure selection is
+            // unchanged (first pr05 wins), so the default room preview keeps
+            // its room-bolt treasure and p2ValidatePreviewCargo is satisfied.
             const uint32_t genId = pellet->mGenerator ? pellet->mGenerator->_70 : 0;
-            if (genId == 0) { ++roomBolts; continue; }
-            ++stagedBolts;
             if(!specs.empty()) {
+                if (genId == 0) { ++roomBolts; continue; }
+                ++stagedBolts;
                 if(!spawned.emplace(genId,pellet).second){std::fprintf(stderr,"P2 cargo duplicate/missing generator\n");std::abort();}
                 continue;
             }
+            if (genId == 0) ++roomBolts; else ++stagedBolts;
             if (previewTreasure) { std::fprintf(stderr,"P2 preview: duplicate treasure\n"); std::abort(); }
             previewTreasure = pellet;
         }
     }
-    std::printf("[Pikipelago] P2_PREVIEW_PR05 room_bolts=%d staged=%d\n", roomBolts, stagedBolts);
+    std::printf("[Pikipelago] P2_PREVIEW_PR05 room_bolts=%d staged=%d cargo=%d\n", roomBolts, stagedBolts, int(!specs.empty()));
     std::fflush(stdout);
     if(!specs.empty()) {
         if(spawned.size()!=specs.size()){std::fprintf(stderr,"P2 cargo actor count mismatch\n");std::abort();}
