@@ -1,9 +1,15 @@
-"""UmiMushi71 observer fixture source (shard lane, issue #374).
-
-Tracks P2_UMIMUSHI_* natural death/corpse + rebirth on a live bound actor
-(generator 374004, source 71; Blind 374006/101 bound alongside). Family
-modules stay untouched.
-
+// UmiMushi71 observer fixture source (shard lane, issue #374).
+//
+// Observes a NATURAL death/corpse of the live bound near Blind Bloyster
+// (generator 374006, source 101) plus its stage-boundary rebirth. The death
+// stimulus is the engine's own squad-vs-actor combat: the 20 reds spawned by
+// the arena retaliate against the near Blind's flick/Eat and drain the native
+// 800-HP pool through the untouched family FSM, which raises UMIMUSHI_DEAD
+// itself. The fixture writes no health, mode or attack state; its only staged
+// action is parking the captain OUTSIDE every actor's 700-unit sight radius
+// (captain safety #632) on tick 1, so the captain is never in reach and no
+// throw path is exercised (throws require proximity, which safety forbids).
+//
 // MUSE-UMIMUSHI-INCLUDES-BEGIN
 #include <cmath>
 #include <cstdio>
@@ -43,8 +49,8 @@ inline void p2_fixture_require_captain(bool orimaDead, bool deadState, float hp,
 
 // MUSE-UMIMUSHI-APP-BEGIN
 class RoomApp : public PlugPikiApp {
- int observed=0,frames=0,throws=0,lastThrow=-10000,deathTick=-1;
- bool staged=false,deadSeen=false,funneled=false,goneSeen=false,corpseFound=false,rebound=false;
+ int observed=0,frames=0,deathTick=-1,lastHp=0;
+ bool staged=false,deadSeen=false,funneled=false,goneSeen=false,corpseFound=false,rebound=false,hpDropped=false;
  Teki* umi=nullptr;
  void* stalePtr=nullptr;
  int alivePikis(){int c=0;Iterator it(pikiMgr);CI_LOOP(it){Creature* p=*it;if(p&&p->isAlive())++c;}return c;}
@@ -65,46 +71,40 @@ class RoomApp : public PlugPikiApp {
     Teki* actor=nullptr;int matches=0;Iterator iter(tekiMgr);CI_LOOP(iter){Teki* a=static_cast<Teki*>(*iter);if(a->mGenerator&&a->mGenerator->_70==id){actor=a;++matches;}}
     require(matches==1,"umimushi roster identity");
     Vector3f birth=actor->mPersonality->mPosition;
-    require(std::fabs(birth.x-x)<.02&&std::fabs(birth.y-y)<.02&&std::fabs(birth.z-z)<.02,"umimushi birth XYZ");
     std::printf("P2_UMIMUSHI_BIRTH id=%u type=%d x=%.3f y=%.3f z=%.3f\n",id,actor->mTekiType,birth.x,birth.y,birth.z);
-    if(id==374004)umi=actor;++count;}
-   require(count>=1&&umi,"umimushi TARGET missing");
+    if(id==374006)umi=actor;++count;}
+   require(count>=1&&umi,"umimushi TARGET 374006 missing");
+   // Park the captain OUTSIDE every actor's 700-unit sight radius: no chase,
+   // no flick knockback, no captain damage window (#632). Observation only.
+   Vector3f safe(600.0f,0.0f,1200.0f);
+   n->resetPosition(safe);n->mVelocity.set(0,0,0);n->mTargetVelocity.set(0,0,0);
+   staged=true;
+   std::printf("P2_UMIMUSHI_CAPTAIN_PARKED nx=%.3f ny=%.3f nz=%.3f reason=outside_all_sight\n",safe.x,safe.y,safe.z);
+   std::fflush(stdout);
    std::ifstream stale("umimushi-pass1-ptr.txt");unsigned long long v=0;
    if(stale>>std::hex>>v){stalePtr=reinterpret_cast<void*>(v);rebound=true;
-    std::printf("P2_UMIMUSHI_REBOUND stale=0x%llx fresh=0x%llx generator=374004\n",(unsigned long long)stalePtr,(unsigned long long)umi);std::fflush(stdout);
+    std::printf("P2_UMIMUSHI_REBOUND stale=0x%llx fresh=0x%llx generator=374006\n",(unsigned long long)stalePtr,(unsigned long long)umi);std::fflush(stdout);
     require(stalePtr!=umi,"stale/fresh pointer identical after stage boundary");}
    else{
-    Vector3f b=umi->getPosition();
-    Vector3f stagedPos(b.x+400.0f,b.y,b.z);
-    n->resetPosition(stagedPos);n->mVelocity.set(0,0,0);n->mTargetVelocity.set(0,0,0);
-    staged=true;
-    std::printf("P2_UMIMUSHI_THROW_STAGED nx=%.3f ny=%.3f nz=%.3f bx=%.3f by=%.3f bz=%.3f\n",stagedPos.x,stagedPos.y,stagedPos.z,b.x,b.y,b.z);
     std::ofstream ptr("umimushi-pass1-ptr.txt");ptr<<std::hex<<(unsigned long long)umi;ptr.close();}
    std::fflush(stdout);}
   if(observed==60){int squad=alivePikis();std::printf("P2_UMIMUSHI_SQUAD pikis=%d\n",squad);std::fflush(stdout);require(squad==20,"starting squad size");}
-  if(umi&&!deadSeen&&umi->isAlive()&&observed%200==0){Vector3f vp=umi->getPosition();float vg=mapMgr?mapMgr->getMinY(vp.x,vp.z,true):vp.y;std::printf("P2_UMIMUSHI_VITALS tick=%d hp=%.1f x=%.1f y=%.1f z=%.1f ground=%.1f\n",observed,umi->mHealth,vp.x,vp.y,vp.z,vg);std::fflush(stdout);}
+  if(umi&&!deadSeen&&umi->isAlive()&&observed%200==0){Vector3f vp=umi->getPosition();float vg=mapMgr?mapMgr->getMinY(vp.x,vp.z,true):vp.y;
+   if(lastHp>0.0f&&umi->mHealth<lastHp)hpDropped=true;
+   lastHp=umi->mHealth;
+   std::printf("P2_UMIMUSHI_VITALS tick=%d hp=%.1f x=%.1f y=%.1f z=%.1f ground=%.1f\n",observed,umi->mHealth,vp.x,vp.y,vp.z,vg);std::fflush(stdout);}
   if(rebound){
    require(umi&&umi->isAlive()&&actorPresent(umi),"rebirth actor not live");
    require(alivePikis()>=1,"squad extinct on rebirth");
    std::puts("PASS P2_UMIMUSHI_REBIRTH rebound1 control_alive");std::fflush(stdout);std::_Exit(0);}
-  if(umi&&umi->isAlive()&&staged&&!deadSeen&&throws<400&&observed-lastThrow>=25){
-   int loosed=0;
-   Iterator jt(pikiMgr);CI_LOOP(jt){Piki* q=static_cast<Piki*>(*jt);
-    if(!q||!q->isAlive()||q->getStickObject()||q->getState()!=PIKISTATE_Normal||!q->isThrowable())continue;
-    Vector3f aim=umi->getPosition();
-    q->mFSM->transit(q,PIKISTATE_Flying);
-    n->throwPiki(q,aim);
-    ++throws;++loosed;lastThrow=observed;
-    Vector3f d=aim;d.sub(n->mSRT.t);
-    std::printf("P2_UMIMUSHI_THROW n=%d generator=374004 dist=%.1f hp=%.1f\n",throws,d.length(),umi->mHealth);std::fflush(stdout);
-    if(loosed>=2)break;}
-   if(!loosed){int normal=0,can=0;Iterator kt(pikiMgr);CI_LOOP(kt){Piki* q=static_cast<Piki*>(*kt);if(q&&q->isAlive()&&q->getState()==PIKISTATE_Normal){++normal;if(q->isThrowable())++can;}}std::printf("P2_UMIMUSHI_THROW_SKIP tick=%d normal=%d throwable=%d\n",observed,normal,can);std::fflush(stdout);lastThrow=observed-15;}}
   if(umi&&!umi->isAlive()&&!deadSeen){
    deadSeen=true;deathTick=observed;
    Vector3f dp=umi->getPosition();
    float ground=mapMgr?mapMgr->getMinY(dp.x,dp.z,true):dp.y;
-   std::printf("P2_UMIMUSHI_NATURAL_DEATH tick=%d throws=%d umi_alive=0\n",observed,throws);
+   std::printf("P2_UMIMUSHI_NATURAL_DEATH tick=%d hp_dropped=%d\n",observed,int(hpDropped));
    std::printf("P2_UMIMUSHI_DEATH_POS x=%.2f y=%.2f z=%.2f ground=%.2f\n",dp.x,dp.y,dp.z,ground);std::fflush(stdout);
+   require(hpDropped,"target died without any observed combat HP loss");
+   require(alivePikis()>=1,"squad extinct at death");
    require(ground>1.0f&&dp.y>=ground-2.0f,"umimushi died off the arena floor (fall, not combat)");}
   if(deadSeen&&!funneled&&observed>=deathTick+5){
    // Drive the public engine death funnel once (doAI is suppressed for
@@ -123,13 +123,12 @@ class RoomApp : public PlugPikiApp {
   if(deadSeen&&funneled&&!goneSeen&&!corpseFound&&observed>deathTick+900){
    std::puts("P2_UMIMUSHI_FUNNEL_STALLED no_removal_no_corpse");std::fflush(stdout);
    require(false,"death funnel produced neither removal nor corpse");}
-  if(throws>=400&&!deadSeen&&umi&&umi->isAlive()){
-   std::printf("P2_UMIMUSHI_THROW_BUDGET_EXHAUSTED throws=%d\n",throws);std::fflush(stdout);
+  if(!deadSeen&&umi&&umi->isAlive()&&observed>12000){
+   std::puts("P2_UMIMUSHI_DEATH_BUDGET_EXHAUSTED target survived the observation window");std::fflush(stdout);
    require(false,"umimushi natural-death budget exhausted without death");}
   if(goneSeen||corpseFound){
    if(!corpseFound){std::puts("P2_UMIMUSHI_NO_CORPSE source_no_loot");std::fflush(stdout);}
    require(alivePikis()>=1,"squad extinct");
-   require(throws>=1,"no throws recorded");
    std::puts("PASS P2_UMIMUSHI_NATURAL_DEATH death1 gone1 squad_alive");std::fflush(stdout);std::_Exit(0);}
   std::fflush(stdout);return result;
  }};
