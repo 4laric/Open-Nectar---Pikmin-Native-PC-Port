@@ -122,6 +122,12 @@ struct Catfish {
 
 std::map<PelletView*, Catfish> actors;
 std::map<std::string, Clip> clips;
+// Natural-death corpse registrations (actor -> generator) for the Pod receipt
+// path (#641). The Pod delivery resolves `corpse:catfish:<gen>` from this
+// registration. Keyed on the actor so a forgotten/recreated actor cannot
+// double-report; cleared on forget (per-actor) and reset (whole registry).
+// Pure routing state: no ledger grant, no reward computation here.
+std::map<BTeki*, unsigned> corpses;
 bool ready = false;
 
 float wrapPi(float a) {
@@ -442,11 +448,13 @@ bool attackable(const Catfish& s, const Vector3f& pos, Creature* target) {
 void pc_p2_catfish_reset() {
     actors.clear();
     clips.clear();
+    corpses.clear();
     ready = false;
 }
 
 void pc_p2_catfish_forget(BTeki* actor) {
     actors.erase(static_cast<PelletView*>(actor));
+    corpses.erase(actor);
 }
 
 float pc_p2_catfish_param_f(const BTeki* actor, int idx, float fallback) {
@@ -594,6 +602,17 @@ void pc_p2_catfish_update(BTeki* actor) {
             std::printf("P2_CATFISH_DEAD generator=%u source_id=26 health=0\n", generator);
             std::fflush(stdout);
             s.deadLogged = true;
+            // Corpse->receipt registration (#641): exactly one registration
+            // per natural death, emitted beside the CATFISH_DEAD transition.
+            // Guarded by generator != 0 (staged actors always carry one) and
+            // by the corpses set (a forgotten/recreated actor at a reused
+            // address cannot double-report). No marker fires off this path.
+            if (generator != 0u && corpses.find(actor) == corpses.end()) {
+                corpses[actor] = generator;
+                std::printf("P2_CATFISH_CORPSE_READY generator=%u source_id=26 receipt=corpse:catfish:%u\n",
+                            generator, generator);
+                std::fflush(stdout);
+            }
         }
         transition(s, CATFISH_DEAD, "dead", generator);
     }
