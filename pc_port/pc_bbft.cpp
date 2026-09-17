@@ -15,6 +15,44 @@ bool pc_pikipelago_room_preview() { return p2RoomPreview; }
 int pc_pikipelago_challenge_level() { return challengeLevel; }
 static std::string p2ChallengeStage;
 const char* pc_p2_challenge_stage() { return p2ChallengeStage.empty() ? nullptr : p2ChallengeStage.c_str(); }
+// Decoded P2 challenge stage table (lane challenge-stage-boot-native-hook,
+// #675). Keyed by cave_id and transcribed from the canonical plan/inventory
+// pins via the #669 selector record. The engine hook records the requested
+// key; this table resolves it; the guarded fixture cross-checks flag, table
+// and the #669 P2_CHALLENGE_STAGE_SELECT_1 record. P1
+// --experimental-challenge-level is a different namespace and stays untouched.
+struct P2ChallengeStageRow {
+    const char* caveId;
+    const char* cavePath;
+    const char* sourceSha256;
+    int uiIndex;
+    int tableOrder;
+    int floors;
+    float floorSeconds[8];
+    int roster[7][3];
+    int bitterSprays;
+    int spicySprays;
+    float legacyTime;
+    int treasureCountField;
+};
+static const P2ChallengeStageRow kP2ChallengeStages[] = {
+    { "ch_NARI_01kusachi",
+      "user/Mukki/mapunits/caveinfo/ch_NARI_01kusachi.txt",
+      "b8d232f417ce3fd4b2903571a1c53234e63dec49e127d5ef5b8ef3cc34bb8d85",
+      3, 3, 1,
+      { 180.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f },
+      { {0,0,50}, {0,0,0}, {0,0,0}, {0,0,0}, {0,0,0}, {0,0,0}, {0,0,0} },
+      1, 2, 350.0f, 0 },
+};
+const P2ChallengeStageRow* pc_p2_challenge_stage_lookup(const char* caveId) {
+    if (caveId == nullptr) return nullptr;
+    for (size_t i = 0; i < sizeof(kP2ChallengeStages) / sizeof(kP2ChallengeStages[0]); ++i)
+        if (!std::strcmp(kP2ChallengeStages[i].caveId, caveId)) return &kP2ChallengeStages[i];
+    return nullptr;
+}
+const P2ChallengeStageRow* pc_p2_challenge_stage_selected() {
+    return p2ChallengeStage.empty() ? nullptr : pc_p2_challenge_stage_lookup(p2ChallengeStage.c_str());
+}
 static bool testBackground = false;
 void pc_bbft_milestone(const char* text) {
     if (!enabled) return;
