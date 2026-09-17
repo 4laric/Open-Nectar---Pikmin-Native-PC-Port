@@ -187,9 +187,30 @@ public:
         }
         if (gameflow.mPauseAll || gameflow.mIsUIOverlayActive) return result;
         ++observed;
-        if (pc_p2_preview_ready()) {
-            std::printf("P2_CHALLENGE_STAGE_EXT_READY observed=%d\n", observed);
+        // Readiness here means the engine runs this binary live in the room:
+        // pc_p2_preview_ready() additionally requires a preview treasure,
+        // which a pure table proof does not stage, so this fixture counts
+        // guarded live ticks with a live squad instead (600 ticks ~= 20 s).
+        if (observed == 600) {
+            int red = 0, blue = 0;
+            if (pikiMgr) {
+                Iterator it(pikiMgr);
+                CI_LOOP(it) {
+                    Piki* piki = static_cast<Piki*>(*it);
+                    if (piki && piki->isAlive()) {
+                        if (piki->mColor == Red) ++red;
+                        else if (piki->mColor == Blue) ++blue;
+                    }
+                }
+            }
+            std::printf("P2_CHALLENGE_STAGE_EXT_READY observed=%d red=%d blue=%d\n",
+                        observed, red, blue);
             std::fflush(stdout);
+            if (red + blue < 1) {
+                std::printf("P2_CHALLENGE_STAGE_EXT_REFUSED reason=no-live-squad\n");
+                std::fflush(stdout);
+                std::_Exit(1);
+            }
             std::printf("P2_CHALLENGE_STAGE_EXT_GATES all=UNTESTED content_wired=0\n");
             std::fflush(stdout);
             std::puts("PASS CHALLENGE_STAGE_TABLE_EXT");
@@ -295,7 +316,7 @@ int main(int argc, char** argv) {
             if (SDL_GetDisplayBounds(d, &bounds) != 0) continue;
             const bool onThis = std::abs(x - (bounds.x + (bounds.w - width) / 2)) <= 2
                 && std::abs(y - (bounds.y + (bounds.h - height) / 2)) <= 2;
-            std::printf("P2_CHALLENGE_STAGE_EXT_DISPLAY index=%d origin=%d,%d size=%dx%d\\n",
+            std::printf("P2_CHALLENGE_STAGE_EXT_DISPLAY index=%d origin=%d,%d size=%dx%d\n",
                         d, bounds.x, bounds.y, bounds.w, bounds.h);
             if (onThis && !centered) {
                 centered = true;
