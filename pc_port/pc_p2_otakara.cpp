@@ -430,6 +430,7 @@ static int speciesFromSource(unsigned source) {
     case 60: return p2dweevil::WaterId;
     case 61: return p2dweevil::GasId;
     case 62: return p2dweevil::ElecId;
+    case 93: return p2dweevil::BombId; // BombOtakara; payload-delegated (StimNone)
     default: return -1;
     }
 }

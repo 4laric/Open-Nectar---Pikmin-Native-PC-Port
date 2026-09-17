@@ -120,6 +120,7 @@ bool pc_p2_generated_placement_bind(BTeki* actor, unsigned sourceId, unsigned se
     case 60:
     case 61:
     case 62:
+    case 93: // BombOtakara; shares the Otakara dynamic bind (payload-delegated).
         if (pc_p2_otakara_bind_dynamic(actor, generatorId, sourceId)) {
             std::printf("P2_GENERATED_PLACEMENT source_id=%u target=%u bound=1\n", sourceId, seedTargetUid);
             std::fflush(stdout);
