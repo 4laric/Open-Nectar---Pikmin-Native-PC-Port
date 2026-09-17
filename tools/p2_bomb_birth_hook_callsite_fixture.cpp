@@ -63,6 +63,8 @@ extern bool pc_p2_general_enemy_mgr_birth(int enemyID, Teki* actor);
 // pc_port/pc_p2_bomb_mgr_birth.cpp; the #726 header nests these inside the
 // class body, so redeclare here instead of editing that header).
 extern P2BombMgr& pc_p2_bomb_mgr_birth_manager();
+extern void pc_p2_bomb_mgr_birth_setup();
+extern bool pc_p2_bomb_mgr_birth_ready();
 
 // Captain-safety guard (#632), vendored verbatim from
 // scripts/p2_fixture_captain_guard.h (sha256
