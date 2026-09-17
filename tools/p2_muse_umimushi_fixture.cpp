@@ -105,7 +105,7 @@ class RoomApp : public PlugPikiApp {
    std::printf("P2_UMIMUSHI_DEATH_POS x=%.2f y=%.2f z=%.2f ground=%.2f\n",dp.x,dp.y,dp.z,ground);std::fflush(stdout);
    require(hpDropped,"target died without any observed combat HP loss");
    require(alivePikis()>=1,"squad extinct at death");
-   require(ground>1.0f&&dp.y>=ground-2.0f,"umimushi died off the arena floor (fall, not combat)");}
+   require(std::isfinite(ground)&&dp.y>=ground-2.0f&&dp.y<=ground+160.0f,"umimushi died off the arena floor (fall, not combat)");}
   if(deadSeen&&!funneled&&observed>=deathTick+5){
    // Drive the public engine death funnel once (doAI is suppressed for
    // family actors, so dieSoon would never run). No state is written by the
