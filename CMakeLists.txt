@@ -191,6 +191,12 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_bomb_payload_actor.cpp
     pikmin2-research/src/plugProjectYamashitaU/generalEnemyMgr.cpp
     pc_port/pc_p2_challenge_mode.cpp
+    # Overworld session save serializer (#736; #186 review before shared-line
+    # landing): the save/load/verify module, linked into pikmin_pc so the
+    # engine serializes the session on the pc_bbft session path. The pc_bbft
+    # call site is weak-linked (null-by-default), so pc_bbft_test keeps
+    # linking without this TU.
+    pc_port/pc_p2_overworld_save.cpp
     # Challenge persistence recorder module (#725, membership for #713; #186
     # review before shared-line landing). Added here so the production
     # pikmin_pc target resolves the pc_bbft.cpp weak references and the engine
