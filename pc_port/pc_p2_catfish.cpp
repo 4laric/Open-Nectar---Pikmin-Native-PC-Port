@@ -122,11 +122,13 @@ struct Catfish {
 
 std::map<PelletView*, Catfish> actors;
 std::map<std::string, Clip> clips;
-// Natural-death corpse registrations (actor -> generator) for the Pod receipt
-// path (#641). The Pod delivery resolves `corpse:catfish:<gen>` from this
-// registration. Keyed on the actor so a forgotten/recreated actor cannot
-// double-report; cleared on forget (per-actor) and reset (whole registry).
-// Pure routing state: no ledger grant, no reward computation here.
+// Diagnostic natural-death registrations (actor -> generator) for the
+// Catfish corpse marker named by #641/#652. This map is local to this
+// translation unit and has no reader other than the emission guard below:
+// NO shared Pod dispatch or receipt bridge consumes it yet, and it grants no
+// reward, writes no ledger and changes no save. Keyed on the actor so a
+// forgotten/recreated actor cannot double-report; cleared on forget
+// (per-actor) and reset (whole registry).
 std::map<BTeki*, unsigned> corpses;
 bool ready = false;
 
@@ -602,11 +604,13 @@ void pc_p2_catfish_update(BTeki* actor) {
             std::printf("P2_CATFISH_DEAD generator=%u source_id=26 health=0\n", generator);
             std::fflush(stdout);
             s.deadLogged = true;
-            // Corpse->receipt registration (#641): exactly one registration
-            // per natural death, emitted beside the CATFISH_DEAD transition.
-            // Guarded by generator != 0 (staged actors always carry one) and
-            // by the corpses set (a forgotten/recreated actor at a reused
-            // address cannot double-report). No marker fires off this path.
+            // Diagnostic death-registration marker (#641/#652): exactly one
+            // emission per natural death, beside the CATFISH_DEAD transition.
+            // It records the marker namespace only; the shared Pod receipt
+            // bridge and the natural receiver observation remain separate
+            // open work. Guarded by generator != 0 (staged actors always carry
+            // one) and by the corpses set (address reuse cannot double-report);
+            // no marker fires off this path.
             if (generator != 0u && corpses.find(actor) == corpses.end()) {
                 corpses[actor] = generator;
                 std::printf("P2_CATFISH_CORPSE_READY generator=%u source_id=26 receipt=corpse:catfish:%u\n",
