@@ -13,6 +13,8 @@ static int challengeLevel = -1;
 static bool p2RoomPreview = false;
 bool pc_pikipelago_room_preview() { return p2RoomPreview; }
 int pc_pikipelago_challenge_level() { return challengeLevel; }
+static std::string p2ChallengeStage;
+const char* pc_p2_challenge_stage() { return p2ChallengeStage.empty() ? nullptr : p2ChallengeStage.c_str(); }
 static bool testBackground = false;
 void pc_bbft_milestone(const char* text) {
     if (!enabled) return;
@@ -23,7 +25,7 @@ void pc_bbft_milestone(const char* text) {
 }
 const char* pc_bbft_save_root() {
     if (pc_randomizer_enabled()) return pc_randomizer_save_root();
-    if (!enabled && challengeLevel < 0) return "save";
+    if (!enabled && challengeLevel < 0 && p2ChallengeStage.empty()) return "save";
     // A quick-boot run must never reuse a user's named memory-card slot.
     static const std::string session = "save/bbft_sessions/" + std::to_string(
         std::chrono::system_clock::now().time_since_epoch().count());
@@ -44,6 +46,18 @@ void pc_bbft_init(int argc, char** argv) {
         if (!std::strcmp(argv[i], "--experimental-pikmin2-room")) {
             if (challengeLevel >= 0) { std::fprintf(stderr,"Only one experimental preview may be selected\n"); std::exit(2); }
             p2RoomPreview = true; challengeLevel = 0;
+        } else if (!std::strcmp(argv[i], "--experimental-challenge-stage")) {
+            if (++i>=argc) { std::fprintf(stderr,"--experimental-challenge-stage needs a stage key\n"); std::exit(2); }
+            const char* key = argv[i];
+            size_t len = std::strlen(key);
+            bool ok = len >= 1 && len <= 64 && ((key[0]>='A'&&key[0]<='Z')||(key[0]>='a'&&key[0]<='z'));
+            for (size_t k = 1; ok && k < len; ++k) {
+                char c = key[k];
+                ok = (c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='_';
+            }
+            if (!ok) { std::fprintf(stderr,"--experimental-challenge-stage needs a stage key ([A-Za-z][A-Za-z0-9_]{0,63})\n"); std::exit(2); }
+            p2ChallengeStage = key;
+            std::printf("P2_CHALLENGE_STAGE_FLAG cave=%s\n", key); std::fflush(stdout);
         } else if (!std::strcmp(argv[i], "--experimental-challenge-level")) {
             if (++i>=argc || challengeLevel>=0 || std::strlen(argv[i])!=1 || argv[i][0]<'0' || argv[i][0]>'4') {
                 std::fprintf(stderr,"--experimental-challenge-level requires one ID 0-4\n"); std::exit(2);
