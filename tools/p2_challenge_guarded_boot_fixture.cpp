@@ -54,14 +54,22 @@ inline void p2_fixture_require_captain(bool orimaDead, bool deadState, float hp,
 class RoomApp : public PlugPikiApp {
  int observed=0,frames=0;
  bool staged=false,booted=false;
+ int stuckMarks=0;
  int alivePikis(){int c=0;Iterator it(pikiMgr);CI_LOOP(it){Creature* p=*it;if(p&&p->isAlive())++c;}return c;}
+ // #698: name the holding gate plus the live count on stuck ticks, so a
+ // post-PARK freeze attributes itself instead of going silent. Called only on
+ // early-return paths where observed does not advance.
+ void gateDiag(const char* gate){
+  if((frames%300)!=0||stuckMarks>=48)return;++stuckMarks;
+  int alive=pikiMgr?alivePikis():-1;
+  std::printf("P2_CHALLENGE_GATE_DIAG gate=%s observed=%d alive=%d frames=%d\n",gate,observed,alive,frames);std::fflush(stdout);}
  public:int idle() override {
   int result=PlugPikiApp::idle();require(++frames<20000,"challenge boot observer timeout");
-  if(!naviMgr||!tekiMgr||!pikiMgr)return result;
-  Navi* n=naviMgr->getNavi();if(!n)return result;
+  if(!naviMgr||!tekiMgr||!pikiMgr){gateDiag("managers");return result;}
+  Navi* n=naviMgr->getNavi();if(!n){gateDiag("navi");return result;}
   p2_fixture_require_captain(GameStat::orimaDead,!n->isAlive(),n->mHealth,observed);
-  if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
-  if(gameflow.mPauseAll||gameflow.mIsUIOverlayActive)return result;
+  if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gateDiag("movie");gameflow.mMoviePlayer->requestSkip();return result;}
+  if(gameflow.mPauseAll||gameflow.mIsUIOverlayActive){gateDiag(gameflow.mPauseAll?"pause":"ui");return result;}
   ++observed;
   int level=pc_pikipelago_challenge_level();
   require(level>=0&&level<=4,"challenge boot fixture requires a selected level");
@@ -70,8 +78,11 @@ class RoomApp : public PlugPikiApp {
    // Park the captain far outside attack reach (reported staging, not gameplay).
    Vector3f park(n->mSRT.t.x+600.0f,n->mSRT.t.y,n->mSRT.t.z);
    n->resetPosition(park);n->mVelocity.set(0,0,0);n->mTargetVelocity.set(0,0,0);
-   staged=true;
-   std::printf("P2_CHALLENGE_PARK nx=%.3f ny=%.3f nz=%.3f\n",park.x,park.y,park.z);std::fflush(stdout);}
+    staged=true;
+    std::printf("P2_CHALLENGE_PARK nx=%.3f ny=%.3f nz=%.3f\n",park.x,park.y,park.z);std::fflush(stdout);
+    // #698: alive count at PARK time, so a later freeze can be compared
+    // against a known live baseline (separates never-spawned from frozen).
+    std::printf("P2_CHALLENGE_PARK_ALIVE pikis=%d\n",alivePikis());std::fflush(stdout);}
   if(observed==60){int squad=alivePikis();std::printf("P2_CHALLENGE_SQUAD pikis=%d\n",squad);std::fflush(stdout);}
   if(staged&&!booted&&observed>=120){
    booted=true;
