@@ -735,6 +735,26 @@ target_include_directories(pc_menu_repeat_test PRIVATE pc_port)
 target_compile_options(pc_menu_repeat_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME pc_menu_repeat_test COMMAND pc_menu_repeat_test)
 
+# P2 Challenge host-state unit test (#651), landed per #676. Guard include dir
+# is an explicit, validated cache PATH (per the pinned #651/#186 review): it
+# defaults to the root-relative scripts/ when present, and private builds pass
+# -DP2_CHALLENGE_GUARD_INCLUDE_DIR=<canonical scripts dir>. No vendored copy.
+set(P2_CHALLENGE_GUARD_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/../scripts" CACHE PATH
+    "Directory containing the canonical p2_fixture_captain_guard.h")
+if(NOT EXISTS "${P2_CHALLENGE_GUARD_INCLUDE_DIR}/p2_fixture_captain_guard.h")
+    message(FATAL_ERROR
+        "p2_fixture_captain_guard.h not found in ${P2_CHALLENGE_GUARD_INCLUDE_DIR}; "
+        "pass -DP2_CHALLENGE_GUARD_INCLUDE_DIR=<canonical scripts dir>")
+endif()
+add_executable(p2_challenge_mode_fixture
+    tools/p2_challenge_mode_fixture.cpp
+    pc_port/pc_p2_challenge_mode.cpp)
+target_include_directories(p2_challenge_mode_fixture PRIVATE
+    pc_port
+    ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
+target_compile_options(p2_challenge_mode_fixture PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_challenge_mode_fixture COMMAND p2_challenge_mode_fixture)
+
 # Host software DSP test (not linked into main game)
 add_executable(pc_dsp_host_test
     pc_port/audio/pc_dsp_host_test.cpp
