@@ -53,6 +53,23 @@ unsigned navDrawCalls=0;
 bool navMarkerLogged=false;
 using Survivor = P2CaveSurvivor;
 void invalid(const char* reason){std::fprintf(stderr,"Invalid P2 cave entry: %s\n",reason);std::abort();}
+// Tutorial later-floors entry extension (lane tutorial2-descend-policy-native,
+// #757; consumer #747). The shared header pc_p2_cave_entry_policy.h stays
+// read-only for this lane, so the new version maps here: P2_CAVE_ENTRY_4
+// admits tutorial staged floors 3-8 under the same 32-hex token contract as
+// Tutorial floors 1-2, and routes them to the Tutorial (non-beasts) path.
+// All previously valid (version, floor) pairs behave exactly as before;
+// floor 9+ stays Invalid (floor-9 cargo + persistence are follow-ons).
+P2CaveEntryProfile p2_tutorial2_entry_profile(const std::string& version, int floor, const std::string& token){
+    if(version=="P2_CAVE_ENTRY_4" && floor>=3 && floor<=8 && token.size()==32
+        && token.find_first_not_of("0123456789abcdef")==std::string::npos)
+        return P2CaveEntryProfile::Tutorial;
+    return P2CaveEntryProfile::Invalid;
+}
+// Tutorial descend range: floors 1-7 transition downward (BulbminDescendFloor);
+// floor 8 is terminal until the floor-9 follow-on, so its transition exits.
+// Beasts behavior is untouched (separate arms below).
+bool p2_tutorial_descends(int floor){return floor>=1 && floor<=7;}
 bool active(){return floorId && !completed && p2CavePreviewReady(beasts,floorId,pc_p2_preview_cargo_free_ready(),pc_p2_preview_ready(),pc_p2_preview_goal()!=nullptr,pc_p2_preview_cargo_count(),pc_p2_preview_pokos(),cargoTerminal) && naviMgr && naviMgr->getNavi() && naviMgr->getNavi()->getCurrState();}
 bool safeTime(){return active() && !gameflow.mPauseAll && !gameflow.mIsUIOverlayActive
     && (!gameflow.mMoviePlayer || !gameflow.mMoviePlayer->mIsActive) && !playerState->mInDayEnd;}
@@ -85,6 +102,28 @@ int pc_p2_cave_floor(){return floorId;}
 bool pc_p2_cave_is_beasts(){return beasts;}
 std::string pc_p2_cave_boundary_token(){return token;}
 std::string pc_p2_cave_receipt_prefix(){return floorId?"floor"+std::to_string(floorId)+":":"";}
+// Non-aborting entry-header validator for the descend fixture's
+// --check-entry mode. Same mapping + header rules as pc_p2_cave_setup
+// (shared profile, tutorial2 extension, health/count/schema/trailing
+// checks) without touching engine state and never aborting. The header
+// pc_p2_cave.h stays read-only for this lane; the fixture extern-declares
+// this symbol (established pattern).
+bool pc_p2_tutorial2_entry_check(const char* path, int* floorOut){
+    std::ifstream in(path?path:"");
+    if(!in)return false;
+    std::string version,token,extra;int floor=0,count=0;float health=0;
+    if(!(in>>version>>token>>floor>>health>>count))return false;
+    P2CaveEntryProfile profile=p2_cave_entry_profile(version,floor,token);
+    if(profile==P2CaveEntryProfile::Invalid)profile=p2_tutorial2_entry_profile(version,floor,token);
+    if(profile==P2CaveEntryProfile::Invalid || !std::isfinite(health) || health<=0 || health>1 || count<1 || count>100)
+        return false;
+    const int schema=version=="P2_CAVE_ENTRY_3"?3:(version=="P2_CAVE_ENTRY_2"?2:1);
+    for(int i=0;i<count;++i){int species=0,maturity=0;
+        if(!(in>>species>>maturity) || !p2_schema_supports(schema,species))return false;}
+    if(in>>extra || !in.eof())return false;
+    if(floorOut)*floorOut=floor;
+    return true;
+}
 void pc_p2_cave_setup(){
     const char* opt=std::getenv("PIKMIN_CAVE_NAV_DIAGNOSTICS");
     navRate.reset(opt && opt[0]==49 && opt[1]==0);navDrawCalls=0;navMarkerLogged=false;
@@ -100,8 +139,10 @@ void pc_p2_cave_setup(){
     std::string version,extra;int floor,count;float health;
     if(!(in>>version>>token>>floor>>health>>count))invalid("header");
     const P2CaveEntryProfile profile=p2_cave_entry_profile(version,floor,token);
-    beasts=profile==P2CaveEntryProfile::BeastsFloor2 || profile==P2CaveEntryProfile::BeastsFloor3 || profile==P2CaveEntryProfile::BeastsFloor4;
-    if(profile==P2CaveEntryProfile::Invalid || !std::isfinite(health) || health<=0 || health>1 || count<1 || count>100)
+    const P2CaveEntryProfile admitted=profile==P2CaveEntryProfile::Invalid
+        ?p2_tutorial2_entry_profile(version,floor,token):profile;
+    beasts=admitted==P2CaveEntryProfile::BeastsFloor2 || admitted==P2CaveEntryProfile::BeastsFloor3 || admitted==P2CaveEntryProfile::BeastsFloor4;
+    if(admitted==P2CaveEntryProfile::Invalid || !std::isfinite(health) || health<=0 || health>1 || count<1 || count>100)
         invalid("header");
     std::vector<Survivor> squad;
     checkpointSchema=version=="P2_CAVE_ENTRY_3"?3:(version=="P2_CAVE_ENTRY_2"?2:1);
@@ -122,6 +163,14 @@ void pc_p2_cave_setup(){
     Navi* n=naviMgr->getNavi();if(!n || C_NAVI_PARM(n,mHealth)<=0)invalid("captain unavailable");
     n->mHealth=C_NAVI_PARM(n,mHealth)*health;
     floorId=floor;
+    if(!beasts){
+        // In-band descend-policy proof (#757): emitted from the engine on
+        // every tutorial entry; floors 1-7 descend, floor 8 exits terminal
+        // until the floor-9 follow-on.
+        std::printf("P2_TUTORIAL2_DESCEND_POLICY floor=%d descend=%d\n",
+                    floor,p2_tutorial_descends(floor)?1:0);
+        std::fflush(stdout);
+    }
     std::ifstream terminal("p2-beasts-cargo-terminal.txt");
     if(terminal){
         if(!p2CargoTerminalOptIn(terminal,beasts,floor,token) || !pc_p2_preview_ready() || !pc_p2_preview_goal() || pc_p2_preview_cargo_count()!=1 || pc_p2_preview_pokos()!=0)
@@ -201,7 +250,7 @@ bool pc_p2_cave_checkpoint(bool confirm){
         if(confirm)notice(anchor.enabled?"Stand at the hole/geyser to descend or leave the cave.":"Return to the Research Pod to descend or leave the cave.");return false;
     }
     if(confirm && !failed){
-        const char* action=(beasts || floorId==1)?"Descend":"Leave cave";
+        const char* action=(beasts || p2_tutorial_descends(floorId))?"Descend":"Leave cave";
         std::string message=std::string(action)+" with all "+std::to_string(alive.size())+" surviving Pikmin?\n"
             "Uncollected treasure stays behind. Your squad and delivered treasure will be saved together.";
         const SDL_MessageBoxButtonData buttons[]={{SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT,0,"Stay"},{SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT,1,action}};
@@ -213,7 +262,7 @@ bool pc_p2_cave_checkpoint(bool confirm){
     // a descent; every tracked Bulbmin is dropped on a cave exit. The drop set is
     // computed non-mutatingly so a failed write can retry without leaking bodies;
     // the ledger is committed only after the transfer file is written.
-    const bool exiting=!beasts && floorId!=1;
+    const bool exiting=!beasts && !p2_tutorial_descends(floorId);
     const P2BulbminCaveTransition move=exiting?P2BulbminExitCave:P2BulbminDescendFloor;
     // Leader-down (alive cleared) saves an empty squad; do not touch the Bulbmin ledger then.
     const std::vector<Piki*> dropped=alive.empty()?std::vector<Piki*>{}:pc_p2_bulbmin_transition_removes(move);
@@ -261,7 +310,7 @@ void pc_p2_cave_tick(){
         titleTimer=0;
         int count=0,purples=0,whites=0;Iterator squad(pikiMgr);CI_LOOP(squad){Piki* p=static_cast<Piki*>(*squad);if(p->isAlive()){++count;if(pc_p2_is_purple(p))++purples;if(pc_p2_is_white(p))++whites;}}
         const std::string transition=beasts && floorId>=3?" | Floor "+std::to_string(floorId+1)+" descent unavailable":
-            " | F6 at "+(anchor.enabled?anchor.kind:std::string("Pod"))+": "+((beasts || floorId==1)?"descend":"leave cave")+" | Saves at floor boundaries";
+            " | F6 at "+(anchor.enabled?anchor.kind:std::string("Pod"))+": "+((beasts || p2_tutorial_descends(floorId))?"descend":"leave cave")+" | Saves at floor boundaries";
         std::string title=std::string("Pikipelago - ")+caveName()+" | Floor "+std::to_string(floorId)+" | "+std::to_string(count)+" Pikmin ("+std::to_string(purples)+" Purple, "+std::to_string(whites)+" White) | "+std::to_string(pc_p2_preview_pokos())+" Pokos"+transition;
         if(SDL_Window* w=SDL_GL_GetCurrentWindow())SDL_SetWindowTitle(w,title.c_str());
     }
