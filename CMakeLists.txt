@@ -173,6 +173,15 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_sarai_manager.cpp
     pc_port/pc_p2_generated_placement.cpp
     pc_port/pc_bbft.cpp
+    # Port Bomb birth provider + hook notifier (#715, #186 review before
+    # shared-line landing): the #616 manager core and the strong hook-notifier
+    # TU, linked into pikmin_pc so the engine weak hook resolves and live Bomb
+    # births notify. The owned #577 payload pool TU travels with the manager
+    # (the manager constructs a P2BombPayloadPool member; content untouched).
+    # Neither TU is added to the small pc_bbft_test target.
+    pc_port/pc_p2_bomb_mgr_birth.cpp
+    pc_port/pc_p2_bomb_notifier.cpp
+    pc_port/pc_p2_bomb_payload_actor.cpp
     pc_port/pc_p2_preview.cpp
     pc_port/pc_p2_captain.cpp
     pc_port/pc_p2_second_captain.cpp
@@ -862,6 +871,21 @@ add_executable(p2_fuefuki_binding_test tools/p2_fuefuki_binding_test.cpp)
 target_include_directories(p2_fuefuki_binding_test PRIVATE pc_port)
 target_compile_options(p2_fuefuki_binding_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_fuefuki_binding_test COMMAND p2_fuefuki_binding_test)
+
+# Port Bomb birth hook-notifier provider test (#715, #186 review). Standalone
+# engine-free build of the notifier TU + #616 manager core + #577 payload TU
+# plus the guarded fixture; P2_BOMB_MGR_BIRTH_NO_HOST excludes the host
+# binding so the provider boundary stays provable without the engine.
+add_executable(p2_bomb_birth_notifier_test
+    tools/p2_bomb_birth_notifier_fixture.cpp
+    pc_port/pc_p2_bomb_notifier.cpp
+    pc_port/pc_p2_bomb_mgr_birth.cpp
+    pc_port/pc_p2_bomb_payload_actor.cpp
+    pc_port/pc_p2_bombsarai_blast.cpp)
+target_include_directories(p2_bomb_birth_notifier_test PRIVATE pc_port)
+target_compile_options(p2_bomb_birth_notifier_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+target_compile_definitions(p2_bomb_birth_notifier_test PRIVATE P2_BOMB_MGR_BIRTH_NO_HOST)
+add_test(NAME p2_bomb_birth_notifier_test COMMAND p2_bomb_birth_notifier_test)
 
 add_executable(p2_fuefuki_fsm_test tools/p2_fuefuki_fsm_test.cpp)
 target_include_directories(p2_fuefuki_fsm_test PRIVATE pc_port)
