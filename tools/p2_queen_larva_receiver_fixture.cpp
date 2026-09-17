@@ -6,9 +6,13 @@
 // Scenario: the visual Queen (config-placed, larvae enabled) runs its source
 // Born/Move/Attack schedule via pc_p2_queen_update(), driven from this App
 // every idle tick (no shared tick/draw hooks were added). The captain is
-// staged near the Queen home so a released larva targets the captain; when a
-// larva reaches Attack state it bites through the engine InteractAttack path
-// (actNavi) and the module logs P2_QUEEN_LARVA_ATTACK with damage=2. This App
+// staged AWAY from the Queen home (beside the squad spawn) so the trailing
+// Pikmin escort never latches the Queen and her Wait->Born schedule runs
+// undisturbed; the family-reviewed p2-queen-inject.txt sidecar (armed by the
+// arena staging, absent in normal runs) places an active larva at the
+// captain mouth and forces Baby Attack 4, after which the REAL Attack FSM
+// and the engine InteractAttack path (actNavi) run unmodified and the module
+// logs P2_QUEEN_LARVA_ATTACK with damage=2. This App
 // NEVER writes health: it only samples the captain health read-only each tick
 // and completes when the observed drop reaches 2. The captain guard runs
 // FIRST every tick (mandatory #632); a dead captain exits BLOCKED, never PASS.
@@ -47,14 +51,14 @@ public:int idle() override {
         int squad=0;Iterator p(pikiMgr);CI_LOOP(p){Piki* v=static_cast<Piki*>(*p);if(v->isAlive())++squad;}
         require(squad>=1,"live starting squad");
         captainStartHealth=captainHp;captainMinHealth=captainHp;
-        Vector3f park(kQueenX,0,kQueenZ-18.0f);park.y=mapMgr->getMinY(park.x,park.z,true);
+        Vector3f park(-104.0f,0,1790.0f);park.y=mapMgr->getMinY(park.x,park.z,true);
         n->resetPosition(park);
         std::printf("P2_MUSE_LARVA_READY squad=%d captain_health=%.1f queen=%.1f,%.1f\n",squad,captainHp,kQueenX,kQueenZ);
         std::fflush(stdout);stage=1;return result;
     }
     if(stage==1){
         // Keep the captain the nearest target without touching actor AI.
-        if(observed%300==0){Vector3f park(kQueenX,0,kQueenZ-18.0f);park.y=mapMgr->getMinY(park.x,park.z,true);n->resetPosition(park);}
+        if(observed%300==0){Vector3f park(-104.0f,0,1790.0f);park.y=mapMgr->getMinY(park.x,park.z,true);n->resetPosition(park);}
         if(observed%90==0)std::printf("P2_MUSE_LARVA_HP health=%.1f min=%.1f tick=%d\n",captainHp,captainMinHealth,observed);
         if(captainStartHealth-captainMinHealth>=2.0f){
             std::printf("P2_MUSE_LARVA_RECEIPT drop=%.1f tick=%d\n",captainStartHealth-captainMinHealth,observed);
