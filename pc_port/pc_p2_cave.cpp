@@ -45,6 +45,35 @@ unsigned navDrawCalls=0;
 bool navMarkerLogged=false;
 struct Survivor {int color,maturity;};
 void invalid(const char* reason){std::fprintf(stderr,"Invalid P2 cave entry: %s\n",reason);std::abort();}
+// Tutorial later-floors entry extension, adapted from accepted #757
+// (f2c136b9) for this pin: P2_CAVE_ENTRY_4 admits tutorial staged floors 3-8
+// under the same 32-hex token contract as floors 1-2. Floors 1-7 descend,
+// floor 8 exits terminal until the floor-9 follow-on.
+bool p2_tutorial2_entry_version_ok(const std::string& version, int floor, const std::string& token){
+    if(version!="P2_CAVE_ENTRY_4" || floor<3 || floor>8 || token.size()!=32
+        || token.find_first_not_of("0123456789abcdef")!=std::string::npos)
+        return false;
+    return true;
+}
+bool p2_tutorial_descends(int floor){return floor>=1 && floor<=7;}
+bool pc_p2_tutorial2_entry_check(const char* path, int* floorOut){
+    std::ifstream in(path?path:"");
+    if(!in)return false;
+    std::string version,token,extra;int floor=0,count=0;float health=0;
+    if(!(in>>version>>token>>floor>>health>>count))return false;
+    const bool classic=(version=="P2_CAVE_ENTRY_1" || version=="P2_CAVE_ENTRY_2")
+        && (floor==1 || floor==2) && token.size()==32
+        && token.find_first_not_of("0123456789abcdef")==std::string::npos;
+    if(!classic && !p2_tutorial2_entry_version_ok(version,floor,token))return false;
+    if(!std::isfinite(health) || health<=0 || health>1 || count<1 || count>100)
+        return false;
+    const int schema=version=="P2_CAVE_ENTRY_2"?2:1;
+    for(int i=0;i<count;++i){int color=0,maturity=0;
+        if(!(in>>color>>maturity) || color<0 || color>(schema==2?4:3) || maturity<0 || maturity>2)return false;}
+    if(in>>extra || !in.eof())return false;
+    if(floorOut)*floorOut=floor;
+    return true;
+}
 bool active(){return floorId && !completed && pc_p2_preview_ready() && naviMgr && naviMgr->getNavi() && naviMgr->getNavi()->getCurrState();}
 bool safeTime(){return active() && !gameflow.mPauseAll && !gameflow.mIsUIOverlayActive
     && (!gameflow.mMoviePlayer || !gameflow.mMoviePlayer->mIsActive) && !playerState->mInDayEnd;}
@@ -74,9 +103,12 @@ void pc_p2_cave_setup(){
     if(!pc_pikipelago_room_preview())return;
     std::ifstream in("p2-cave-entry.txt");if(!in)return;
     std::string version,extra;int floor,count;float health;
-    if(!(in>>version>>token>>floor>>health>>count) || (version!="P2_CAVE_ENTRY_1" && version!="P2_CAVE_ENTRY_2")
-        || token.size()!=32 || token.find_first_not_of("0123456789abcdef")!=std::string::npos
-        || (floor!=1 && floor!=2) || !std::isfinite(health) || health<=0 || health>1 || count<1 || count>100)
+    if(!(in>>version>>token>>floor>>health>>count))invalid("header");
+    const bool classicEntry=(version=="P2_CAVE_ENTRY_1" || version=="P2_CAVE_ENTRY_2")
+        && (floor==1 || floor==2);
+    if(!classicEntry && !p2_tutorial2_entry_version_ok(version,floor,token))invalid("header");
+    if(token.size()!=32 || token.find_first_not_of("0123456789abcdef")!=std::string::npos
+        || !std::isfinite(health) || health<=0 || health>1 || count<1 || count>100)
         invalid("header");
     std::vector<Survivor> squad;
     checkpointSchema=version=="P2_CAVE_ENTRY_2"?2:1;
@@ -96,6 +128,9 @@ void pc_p2_cave_setup(){
     Navi* n=naviMgr->getNavi();if(!n || C_NAVI_PARM(n,mHealth)<=0)invalid("captain unavailable");
     n->mHealth=C_NAVI_PARM(n,mHealth)*health;
     floorId=floor;
+    std::printf("P2_TUTORIAL2_DESCEND_POLICY floor=%d descend=%d\n",
+                floor,p2_tutorial_descends(floor)?1:0);
+    std::fflush(stdout);
     std::ifstream location("p2-cave-transition.txt");
     if(location && !p2_cave_read_anchor(location,floor,anchor))invalid("transition anchor");
     if(anchor.enabled)std::printf("P2_CAVE_ANCHOR kind=%s x=%.3f y=%.3f z=%.3f radius=%.3f\n",anchor.kind.c_str(),anchor.x,anchor.y,anchor.z,anchor.radius);
@@ -150,7 +185,7 @@ bool pc_p2_cave_checkpoint(bool confirm){
         if(confirm)notice(anchor.enabled?"Stand at the hole/geyser to descend or leave the cave.":"Return to the Research Pod to descend or leave the cave.");return false;
     }
     if(confirm && !failed){
-        const char* action=floorId==1?"Descend":"Leave cave";
+        const char* action=p2_tutorial_descends(floorId)?"Descend":"Leave cave";
         std::string message=std::string(action)+" with all "+std::to_string(squad.size())+" surviving Pikmin?\n"
             "Uncollected treasure stays behind. Your squad and delivered treasure will be saved together.";
         const SDL_MessageBoxButtonData buttons[]={{SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT,0,"Stay"},{SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT,1,action}};
@@ -186,7 +221,7 @@ void pc_p2_cave_tick(){
         titleTimer=0;
         int count=0,purples=0,whites=0;Iterator squad(pikiMgr);CI_LOOP(squad){Piki* p=static_cast<Piki*>(*squad);if(p->isAlive()){++count;if(pc_p2_is_purple(p))++purples;if(pc_p2_is_white(p))++whites;}}
         std::string title="Pikipelago - Emergence Cave | Floor "+std::to_string(floorId)+" | "+std::to_string(count)+" Pikmin ("+std::to_string(purples)+" Purple, "+std::to_string(whites)+" White) | "+std::to_string(pc_p2_preview_pokos())
-            +" Pokos | F6 at "+(anchor.enabled?anchor.kind:std::string("Pod"))+": "+(floorId==1?"descend":"leave cave")+" | Saves at floor boundaries";
+            +" Pokos | F6 at "+(anchor.enabled?anchor.kind:std::string("Pod"))+": "+(p2_tutorial_descends(floorId)?"descend":"leave cave")+" | Saves at floor boundaries";
         if(SDL_Window* w=SDL_GL_GetCurrentWindow())SDL_SetWindowTitle(w,title.c_str());
     }
 }
