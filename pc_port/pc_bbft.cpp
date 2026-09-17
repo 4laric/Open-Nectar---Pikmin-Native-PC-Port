@@ -13,6 +13,46 @@ static int challengeLevel = -1;
 static bool p2RoomPreview = false;
 bool pc_pikipelago_room_preview() { return p2RoomPreview; }
 int pc_pikipelago_challenge_level() { return challengeLevel; }
+static std::string p2ChallengeStage;
+const char* pc_p2_challenge_stage() { return p2ChallengeStage.empty() ? nullptr : p2ChallengeStage.c_str(); }
+// Decoded P2 challenge stage table (lane challenge-stage-boot-native-hook,
+// #675). Keyed by cave_id and transcribed from the canonical plan/inventory
+// pins via the #669 selector record. The engine hook records the requested
+// key; this table resolves it; the guarded fixture cross-checks flag, table
+// and the #669 P2_CHALLENGE_STAGE_SELECT_1 record. P1
+// --experimental-challenge-level is a different namespace and stays untouched.
+struct P2ChallengeStageRow {
+    const char* caveId;
+    const char* cavePath;
+    const char* sourceSha256;
+    int uiIndex;
+    int tableOrder;
+    int floors;
+    float floorSeconds[8];
+    int roster[7][3];
+    int bitterSprays;
+    int spicySprays;
+    float legacyTime;
+    int treasureCountField;
+};
+static const P2ChallengeStageRow kP2ChallengeStages[] = {
+    { "ch_NARI_01kusachi",
+      "user/Mukki/mapunits/caveinfo/ch_NARI_01kusachi.txt",
+      "b8d232f417ce3fd4b2903571a1c53234e63dec49e127d5ef5b8ef3cc34bb8d85",
+      3, 3, 1,
+      { 180.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f },
+      { {0,0,50}, {0,0,0}, {0,0,0}, {0,0,0}, {0,0,0}, {0,0,0}, {0,0,0} },
+      1, 2, 350.0f, 0 },
+};
+const P2ChallengeStageRow* pc_p2_challenge_stage_lookup(const char* caveId) {
+    if (caveId == nullptr) return nullptr;
+    for (size_t i = 0; i < sizeof(kP2ChallengeStages) / sizeof(kP2ChallengeStages[0]); ++i)
+        if (!std::strcmp(kP2ChallengeStages[i].caveId, caveId)) return &kP2ChallengeStages[i];
+    return nullptr;
+}
+const P2ChallengeStageRow* pc_p2_challenge_stage_selected() {
+    return p2ChallengeStage.empty() ? nullptr : pc_p2_challenge_stage_lookup(p2ChallengeStage.c_str());
+}
 static bool testBackground = false;
 void pc_bbft_milestone(const char* text) {
     if (!enabled) return;
@@ -23,7 +63,7 @@ void pc_bbft_milestone(const char* text) {
 }
 const char* pc_bbft_save_root() {
     if (pc_randomizer_enabled()) return pc_randomizer_save_root();
-    if (!enabled && challengeLevel < 0) return "save";
+    if (!enabled && challengeLevel < 0 && p2ChallengeStage.empty()) return "save";
     // A quick-boot run must never reuse a user's named memory-card slot.
     static const std::string session = "save/bbft_sessions/" + std::to_string(
         std::chrono::system_clock::now().time_since_epoch().count());
@@ -44,6 +84,18 @@ void pc_bbft_init(int argc, char** argv) {
         if (!std::strcmp(argv[i], "--experimental-pikmin2-room")) {
             if (challengeLevel >= 0) { std::fprintf(stderr,"Only one experimental preview may be selected\n"); std::exit(2); }
             p2RoomPreview = true; challengeLevel = 0;
+        } else if (!std::strcmp(argv[i], "--experimental-challenge-stage")) {
+            if (++i>=argc) { std::fprintf(stderr,"--experimental-challenge-stage needs a stage key\n"); std::exit(2); }
+            const char* key = argv[i];
+            size_t len = std::strlen(key);
+            bool ok = len >= 1 && len <= 64 && ((key[0]>='A'&&key[0]<='Z')||(key[0]>='a'&&key[0]<='z'));
+            for (size_t k = 1; ok && k < len; ++k) {
+                char c = key[k];
+                ok = (c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='_';
+            }
+            if (!ok) { std::fprintf(stderr,"--experimental-challenge-stage needs a stage key ([A-Za-z][A-Za-z0-9_]{0,63})\n"); std::exit(2); }
+            p2ChallengeStage = key;
+            std::printf("P2_CHALLENGE_STAGE_FLAG cave=%s\n", key); std::fflush(stdout);
         } else if (!std::strcmp(argv[i], "--experimental-challenge-level")) {
             if (++i>=argc || challengeLevel>=0 || std::strlen(argv[i])!=1 || argv[i][0]<'0' || argv[i][0]>'4') {
                 std::fprintf(stderr,"--experimental-challenge-level requires one ID 0-4\n"); std::exit(2);
