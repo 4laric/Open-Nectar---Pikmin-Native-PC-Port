@@ -12,7 +12,10 @@
 
 #include "../pc_port/pc_p2_challenge_muki_stages.h"
 #include "../pc_port/pc_p2_challenge_muki_stages.cpp"
-#include "../pc_port/pc_p2_challenge_mode.cpp"
+// NOTE: pc_p2_challenge_mode.cpp is NOT included here because it is
+// compiled into pikmin_pc on this native line; the fixture links those
+// engine objects via the maintained builder. Including it would cause
+// multiple-definition link errors.
 #include "p2_fixture_captain_guard.h"
 
 static int runOne(int ui) {
