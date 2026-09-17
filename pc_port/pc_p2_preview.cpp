@@ -173,16 +173,19 @@ void pc_p2_preview_setup() {
     }
     std::map<uint32_t,Pellet*> spawned;
     int roomBolts = 0, stagedBolts = 0;
+    Pellet* roomBoltTreasure = nullptr;
     Iterator it(pelletMgr);
     CI_LOOP(it) {
         Pellet* pellet = static_cast<Pellet*>(*it);
         if (pellet && pellet->mConfig->mModelId.mId == 'pr05') {
-            // Reconcile preview pr05 pellets with arena overlays (#679): the
-            // room itself spawns generator-less (id 0) bolts. Those room bolts
-            // are never staged cargo, so the cargo duplicate/actor-count
-            // checks exclude them. The no-cargo treasure selection is
-            // unchanged (first pr05 wins), so the default room preview keeps
-            // its room-bolt treasure and p2ValidatePreviewCargo is satisfied.
+            // Reconcile preview pr05 pellets with arena overlays (#679/#695):
+            // the isolated room spawns its own generator-less (id 0) pr05 bolts
+            // and a room may legitimately carry more than one, so room bolts are
+            // never staged cargo and never count as a duplicate treasure. In
+            // no-cargo mode the first room bolt is kept as a fallback treasure;
+            // a staged (nonzero generator id) pr05 still wins and must be
+            // unique, so a genuinely ambiguous arena with two staged bolts
+            // still aborts below.
             const uint32_t genId = pellet->mGenerator ? pellet->mGenerator->_70 : 0;
             if(!specs.empty()) {
                 if (genId == 0) { ++roomBolts; continue; }
@@ -190,7 +193,8 @@ void pc_p2_preview_setup() {
                 if(!spawned.emplace(genId,pellet).second){std::fprintf(stderr,"P2 cargo duplicate/missing generator\n");std::abort();}
                 continue;
             }
-            if (genId == 0) ++roomBolts; else ++stagedBolts;
+            if (genId == 0) { ++roomBolts; if(!roomBoltTreasure) roomBoltTreasure = pellet; continue; }
+            ++stagedBolts;
             if (previewTreasure) { std::fprintf(stderr,"P2 preview: duplicate treasure\n"); std::abort(); }
             previewTreasure = pellet;
         }
@@ -202,6 +206,10 @@ void pc_p2_preview_setup() {
         for(const auto& spec:specs){auto found=spawned.find(spec.generator);if(found==spawned.end()){std::fprintf(stderr,"P2 cargo unknown actor %u\n",spec.generator);std::abort();}cargo.push_back({spec,found->second,nullptr,nullptr});}
         previewTreasure=cargo.front().actor;
     }
+    // No-cargo fallback (#695): with no staged treasure, the room's own bolt is
+    // still a valid preview treasure, so the default room preview reaches
+    // P2_ROOM_READY instead of aborting on the room's second bolt.
+    else if(!previewTreasure) previewTreasure = roomBoltTreasure;
     try { p2ValidatePreviewCargo(cargoFree,hasCargoConfig,previewTreasure!=nullptr); }
     catch(const std::exception& e){std::fprintf(stderr,"P2 preview: %s\n",e.what());std::abort();}
     const int previousHeap = gsys->setHeap(SYSHEAP_App);
