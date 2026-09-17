@@ -172,18 +172,29 @@ void pc_p2_preview_setup() {
         try{specs=p2ReadCargo(config);}catch(const std::exception& e){std::fprintf(stderr,"P2 cargo: %s\n",e.what());std::abort();}
     }
     std::map<uint32_t,Pellet*> spawned;
+    int roomBolts = 0, stagedBolts = 0;
     Iterator it(pelletMgr);
     CI_LOOP(it) {
         Pellet* pellet = static_cast<Pellet*>(*it);
         if (pellet && pellet->mConfig->mModelId.mId == 'pr05') {
+            // Reconcile preview pr05 pellets with arena overlays (#679): the
+            // room itself always spawns its own generator-less (id 0) bolts.
+            // Those room bolts are never staged treasure and never cargo, so
+            // skip them in both branches; only staged (nonzero generator id)
+            // pellets participate in the duplicate/cargo checks below.
+            const uint32_t genId = pellet->mGenerator ? pellet->mGenerator->_70 : 0;
+            if (genId == 0) { ++roomBolts; continue; }
+            ++stagedBolts;
             if(!specs.empty()) {
-                if(!pellet->mGenerator || !spawned.emplace(pellet->mGenerator->_70,pellet).second){std::fprintf(stderr,"P2 cargo duplicate/missing generator\n");std::abort();}
+                if(!spawned.emplace(genId,pellet).second){std::fprintf(stderr,"P2 cargo duplicate/missing generator\n");std::abort();}
                 continue;
             }
             if (previewTreasure) { std::fprintf(stderr,"P2 preview: duplicate treasure\n"); std::abort(); }
             previewTreasure = pellet;
         }
     }
+    std::printf("[Pikipelago] P2_PREVIEW_PR05 room_bolts=%d staged=%d\n", roomBolts, stagedBolts);
+    std::fflush(stdout);
     if(!specs.empty()) {
         if(spawned.size()!=specs.size()){std::fprintf(stderr,"P2 cargo actor count mismatch\n");std::abort();}
         for(const auto& spec:specs){auto found=spawned.find(spec.generator);if(found==spawned.end()){std::fprintf(stderr,"P2 cargo unknown actor %u\n",spec.generator);std::abort();}cargo.push_back({spec,found->second,nullptr,nullptr});}
