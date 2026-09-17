@@ -69,6 +69,8 @@ bool fieldDouble(const std::string& line, const char* key, double& out)
     }
 }
 
+const char* kAcceptedSlot = "568677317";
+
 bool tainted(const std::string& line)
 {
     std::string lower(line);
@@ -153,6 +155,11 @@ GeneratedVerdict checkGenerated(const std::vector<std::string>& lines)
     }
     verdict.birth = true;
     verdict.target = resolveTarget;
+    if (verdict.target != kAcceptedSlot) {
+        verdict.birth = false;
+        verdict.reason = "slot-not-accepted";
+        return verdict;
+    }
     if (placeGeneratorSeen) {
         if (birthGeneratorSeen && birthGenerator != placeGenerator) {
             verdict.birth = false;
@@ -160,14 +167,23 @@ GeneratedVerdict checkGenerated(const std::vector<std::string>& lines)
             return verdict;
         }
         verdict.generator = placeGenerator;
-    } else if (birthGeneratorSeen) {
-        verdict.generator = birthGenerator;
     } else {
         verdict.birth = false;
-        verdict.reason = "no generator linkage between placement and register";
+        verdict.reason = "placement marker lacks a generator field";
         return verdict;
     }
-    verdict.reason = "resolve+placement+register agree";
+    if (!birthGeneratorSeen) {
+        verdict.birth = false;
+        verdict.reason = "register tie not numeric (family marker follow-on open)";
+        return verdict;
+    }
+    if (birthGenerator != placeGenerator) {
+        verdict.birth = false;
+        verdict.reason = "placement/register generator disagreement";
+        return verdict;
+    }
+    verdict.generator = placeGenerator;
+    verdict.reason = "resolve+placement+register agree (numeric register tie)";
     return verdict;
 }
 
