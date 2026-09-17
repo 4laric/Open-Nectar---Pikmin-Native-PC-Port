@@ -268,30 +268,6 @@ int P2BombMgr::suppressedCount() const { return mSuppressed; }
 int P2BombMgr::blastCount() const { return mBlasts; }
 int P2BombMgr::registeredCount() const { return mRegisteredCount; }
 
-// ---- Section 1b: port-side Bomb birth arm registration (#684) ----
-
-bool pc_p2_bomb_mgr_birth_arm_enemy(int enemyID)
-{
-    return enemyID == P2BOMB_MGR_ARM_ENEMY_ID_BOMB
-        || enemyID == P2BOMB_MGR_ARM_ENEMY_ID_BOMBOTAKARA;
-}
-
-P2BombMgrHandle pc_p2_bomb_mgr_birth_arm(P2BombMgr& mgr, int enemyID,
-                                         std::uint64_t carrierToken,
-                                         const P2BombSaraiVec3& jointPosition,
-                                         const P2BombPayloadConfig& config)
-{
-    if (!pc_p2_bomb_mgr_birth_arm_enemy(enemyID)) {
-        std::printf("P2_BOMB_MGR_ARM_REJECT enemyID=%d reason=not_arm\n", enemyID);
-        std::fflush(stdout);
-        return P2BombMgrHandle{};
-    }
-    std::printf("P2_BOMB_MGR_ARM_ENEMY enemyID=%d carrier=%llu\n", enemyID,
-                static_cast<unsigned long long>(carrierToken));
-    std::fflush(stdout);
-    return mgr.birth(carrierToken, jointPosition, config);
-}
-
 #ifndef P2_BOMB_MGR_BIRTH_NO_HOST
 // ---- Section 2: host binding (port TekiMgr path; excluded from the
 // engine-free standalone build by P2_BOMB_MGR_BIRTH_NO_HOST) ----
@@ -436,4 +412,56 @@ void pc_p2_bomb_mgr_birth_forget(BTeki* actor)
 }
 
 bool pc_p2_bomb_mgr_birth_ready() { return sReady; }
+// ---- Section 3: engine-driven birth arm (lane bomb-engine-birth-real-native,
+// #691). Construction + spawn through the engine surface: the ONLY entry takes
+// a live engine actor, never a raw ID (unlike test-driver or allowlist arms,
+// this cannot birth without the engine having spawned a live Teki whose
+// generator the sidecar registered). Called from engine idle context; every
+// refusal leaves zero state change. Retail engine surface consumed read-only:
+// generalEnemyMgr creates Bomb::Mgr / BombOtakara::Mgr per enemy ID
+// (pikmin2-research src/plugProjectYamashitaU/generalEnemyMgr.cpp:322-323,
+// :421-422 @632af9378); TekiMgr::newTeki + birth() allocate and init live
+// actors; TekiInfo::read resolves caveinfo names under EFlag_CanBeSpawned.
+bool pc_p2_bomb_engine_birth_poll(Teki* actor)
+{
+    if (!sReady || !actor || !actor->mGenerator) {
+        return false;
+    }
+    if (!actor->isAlive()) {
+        std::printf("P2_BOMB_ENGINE_BIRTH_REFUSE reason=actor_dead\n");
+        std::fflush(stdout);
+        return false;
+    }
+    const unsigned gen = actor->mGenerator->_70;
+    if (!gen || !sManager.isRegistered(gen)) {
+        return false;
+    }
+    if (p2_bomb_mgr_handle_valid(sManager.findLive(gen))) {
+        std::printf("P2_BOMB_ENGINE_BIRTH_REFUSE generator=%u reason=duplicate\n", gen);
+        std::fflush(stdout);
+        return false;
+    }
+    const Vector3f pos = actor->getPosition();
+    if (!std::isfinite(pos.x) || !std::isfinite(pos.y) || !std::isfinite(pos.z)) {
+        std::printf("P2_BOMB_ENGINE_BIRTH_REFUSE generator=%u reason=position\n", gen);
+        std::fflush(stdout);
+        return false;
+    }
+    P2BombSaraiVec3 joint;
+    joint.x = pos.x;
+    joint.y = pos.y;
+    joint.z = pos.z;
+    P2BombPayloadConfig config;
+    const P2BombMgrHandle handle = sManager.birth(
+        static_cast<std::uint64_t>(gen), joint, config);
+    if (!p2_bomb_mgr_handle_valid(handle)) {
+        return false;
+    }
+    std::printf("P2_BOMB_ENGINE_BIRTH generator=%u source_id=%d slot=%u generation=%u "
+                "x=%.3f y=%.3f z=%.3f health=%.1f engine_driven=1\n",
+                gen, P2_BOMB_MGR_SOURCE_ID, handle.slot, handle.generation,
+                pos.x, pos.y, pos.z, actor->mHealth);
+    std::fflush(stdout);
+    return true;
+}
 #endif // P2_BOMB_MGR_BIRTH_NO_HOST

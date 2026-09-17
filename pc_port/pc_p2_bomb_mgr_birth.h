@@ -37,10 +37,6 @@
 // Retail source identity birthed through this manager.
 constexpr int P2_BOMB_MGR_SOURCE_ID = 36;
 
-// Port-side arm registration IDs (#684): Bomb 36, BombOtakara 93.
-constexpr int P2BOMB_MGR_ARM_ENEMY_ID_BOMB = 36;
-constexpr int P2BOMB_MGR_ARM_ENEMY_ID_BOMBOTAKARA = 93;
-
 // Generational born-actor handle. generation==0 is never issued, so reset()
 // slot-reuse can never resurrect a stale handle (same discipline as #577).
 struct P2BombMgrHandle {
@@ -139,6 +135,15 @@ P2BombMgrHandle pc_p2_bomb_mgr_birth_carrier(unsigned generator);
 void pc_p2_bomb_mgr_birth_update(BTeki* actor);
 void pc_p2_bomb_mgr_birth_forget(BTeki* actor);
 bool pc_p2_bomb_mgr_birth_ready();
+// ---- Section 3: engine-driven birth arm declarations (lane
+// bomb-engine-birth-real-native, #691; defined in the .cpp unless
+// P2_BOMB_MGR_BIRTH_NO_HOST is set). Unlike the raw-ID arm, this entry takes
+// ONLY a live engine actor: birth is impossible without the engine having
+// spawned a live Teki whose generator the sidecar registered. Called from
+// engine idle context (never from test drivers); refuses with no state
+// change otherwise. Returns true iff a birth record was produced this call.
+class Teki;
+bool pc_p2_bomb_engine_birth_poll(Teki* actor);
 
 private:
     struct Record {
@@ -163,16 +168,3 @@ private:
     int mBlasts = 0;
     P2BombPayloadPool mPool;
 };
-// ---- Section 1b: port-side Bomb birth arm registration (#684) ----
-// Mirrors the landed #675 pc_bbft.cpp flag pattern: the port's
-// manager-creation seam calls these for each enemy ID it creates. Only
-// Bomb-family arms are accepted; any other ID is refused with no state
-// change (P2_BOMB_MGR_ARM_REJECT). Engine-free: no decomp/engine
-// dependency. The decomp call site lives in pikmin2-research (parallel
-// work, not landed); this is the port-side seam the port build compiles.
-bool pc_p2_bomb_mgr_birth_arm_enemy(int enemyID);
-P2BombMgrHandle pc_p2_bomb_mgr_birth_arm(P2BombMgr& mgr, int enemyID,
-                                         std::uint64_t carrierToken,
-                                         const P2BombSaraiVec3& jointPosition,
-                                         const P2BombPayloadConfig& config);
-
