@@ -268,6 +268,30 @@ int P2BombMgr::suppressedCount() const { return mSuppressed; }
 int P2BombMgr::blastCount() const { return mBlasts; }
 int P2BombMgr::registeredCount() const { return mRegisteredCount; }
 
+// ---- Section 1b: port-side Bomb birth arm registration (#684) ----
+
+bool pc_p2_bomb_mgr_birth_arm_enemy(int enemyID)
+{
+    return enemyID == P2BOMB_MGR_ARM_ENEMY_ID_BOMB
+        || enemyID == P2BOMB_MGR_ARM_ENEMY_ID_BOMBOTAKARA;
+}
+
+P2BombMgrHandle pc_p2_bomb_mgr_birth_arm(P2BombMgr& mgr, int enemyID,
+                                         std::uint64_t carrierToken,
+                                         const P2BombSaraiVec3& jointPosition,
+                                         const P2BombPayloadConfig& config)
+{
+    if (!pc_p2_bomb_mgr_birth_arm_enemy(enemyID)) {
+        std::printf("P2_BOMB_MGR_ARM_REJECT enemyID=%d reason=not_arm\n", enemyID);
+        std::fflush(stdout);
+        return P2BombMgrHandle{};
+    }
+    std::printf("P2_BOMB_MGR_ARM_ENEMY enemyID=%d carrier=%llu\n", enemyID,
+                static_cast<unsigned long long>(carrierToken));
+    std::fflush(stdout);
+    return mgr.birth(carrierToken, jointPosition, config);
+}
+
 #ifndef P2_BOMB_MGR_BIRTH_NO_HOST
 // ---- Section 2: host binding (port TekiMgr path; excluded from the
 // engine-free standalone build by P2_BOMB_MGR_BIRTH_NO_HOST) ----

@@ -37,6 +37,10 @@
 // Retail source identity birthed through this manager.
 constexpr int P2_BOMB_MGR_SOURCE_ID = 36;
 
+// Port-side arm registration IDs (#684): Bomb 36, BombOtakara 93.
+constexpr int P2BOMB_MGR_ARM_ENEMY_ID_BOMB = 36;
+constexpr int P2BOMB_MGR_ARM_ENEMY_ID_BOMBOTAKARA = 93;
+
 // Generational born-actor handle. generation==0 is never issued, so reset()
 // slot-reuse can never resurrect a stale handle (same discipline as #577).
 struct P2BombMgrHandle {
@@ -159,3 +163,16 @@ private:
     int mBlasts = 0;
     P2BombPayloadPool mPool;
 };
+// ---- Section 1b: port-side Bomb birth arm registration (#684) ----
+// Mirrors the landed #675 pc_bbft.cpp flag pattern: the port's
+// manager-creation seam calls these for each enemy ID it creates. Only
+// Bomb-family arms are accepted; any other ID is refused with no state
+// change (P2_BOMB_MGR_ARM_REJECT). Engine-free: no decomp/engine
+// dependency. The decomp call site lives in pikmin2-research (parallel
+// work, not landed); this is the port-side seam the port build compiles.
+bool pc_p2_bomb_mgr_birth_arm_enemy(int enemyID);
+P2BombMgrHandle pc_p2_bomb_mgr_birth_arm(P2BombMgr& mgr, int enemyID,
+                                         std::uint64_t carrierToken,
+                                         const P2BombSaraiVec3& jointPosition,
+                                         const P2BombPayloadConfig& config);
+
