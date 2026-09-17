@@ -173,6 +173,14 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_sarai_manager.cpp
     pc_port/pc_p2_generated_placement.cpp
     pc_port/pc_bbft.cpp
+    # P2 challenge host-mode engine runtime (#710, #186 review before
+    # shared-line landing): the per-tick bridge plus the landed host-state
+    # module, linked into pikmin_pc so the engine drives syncTick from live
+    # facts during a challenge boot. pc_bbft_test keeps linking: pc_bbft.cpp
+    # itself stays engine-free (null-by-default hook) and neither new TU is
+    # added to that small target.
+    pc_port/pc_p2_challenge_runtime.cpp
+    pc_port/pc_p2_challenge_mode.cpp
     pc_port/pc_p2_preview.cpp
     pc_port/pc_p2_captain.cpp
     pc_port/pc_p2_second_captain.cpp

@@ -1,5 +1,6 @@
 #include "pc_bbft.h"
 #include "pc_randomizer.h"
+#include "pc_p2_challenge_runtime.h"
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
@@ -52,6 +53,27 @@ const P2ChallengeStageRow* pc_p2_challenge_stage_lookup(const char* caveId) {
 }
 const P2ChallengeStageRow* pc_p2_challenge_stage_selected() {
     return p2ChallengeStage.empty() ? nullptr : pc_p2_challenge_stage_lookup(p2ChallengeStage.c_str());
+}
+// Challenge runtime bridge glue (lane challenge-hostmode-engine-hook-native,
+// #710). Engine-free: plain field copy plus a null-by-default hook pointer,
+// so the small pc_bbft_test target (no engine objects) keeps linking and runs
+// inert. The engine-dependent bridge registers itself at startup in pikmin_pc.
+bool p2_challenge_stage_params(P2ChallengeStageParams& out) {
+    const P2ChallengeStageRow* row = pc_p2_challenge_stage_selected();
+    if (row == nullptr) return false;
+    out.caveId = row->caveId;
+    out.uiIndex = row->uiIndex;
+    out.floors = row->floors;
+    for (int i = 0; i < 8; ++i) out.floorSeconds[i] = row->floorSeconds[i];
+    for (int c = 0; c < 7; ++c)
+        for (int h = 0; h < 3; ++h) out.roster[c][h] = row->roster[c][h];
+    out.bitterSprays = row->bitterSprays;
+    out.spicySprays = row->spicySprays;
+    return true;
+}
+static P2ChallengeRuntimeHook sChallengeRuntimeHook = nullptr;
+void p2_challenge_runtime_set_hook(P2ChallengeRuntimeHook hook) {
+    sChallengeRuntimeHook = hook;
 }
 static bool testBackground = false;
 void pc_bbft_milestone(const char* text) {
@@ -152,6 +174,9 @@ void pc_bbft_update() {
 #ifdef _WIN32
     if (enabled) bbft_transport_update();
 #endif
+    // Challenge host-mode runtime bridge (#710). Null (inert) unless the
+    // pikmin_pc bridge registered at startup; pc_bbft_test never registers.
+    if (sChallengeRuntimeHook) sChallengeRuntimeHook();
 }
 bool pc_bbft_hold() {
     if (pc_randomizer_enabled()) {
