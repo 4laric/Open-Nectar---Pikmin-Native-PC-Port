@@ -181,6 +181,12 @@ set(PC_PORT_SOURCES
     # hook) and neither TU is added to that small target.
     pc_port/pc_p2_challenge_runtime.cpp
     pc_port/pc_p2_challenge_mode.cpp
+    # Challenge persistence recorder module (#725, membership for #713; #186
+    # review before shared-line landing). Added here so the production
+    # pikmin_pc target resolves the pc_bbft.cpp weak references and the engine
+    # emits its 7 challenge-persistence probe markers; the #718 callsite fixture
+    # links this same object rather than a fixture-local copy.
+    pc_port/pc_p2_challenge_persistence.cpp
     pc_port/pc_p2_preview.cpp
     pc_port/pc_p2_captain.cpp
     pc_port/pc_p2_second_captain.cpp
