@@ -6,7 +6,7 @@
 // standalone translation unit; it never links on its own.
 //
 // Scenario: bind the staged Damagumo56 actor (required staged generator
-// 312003, the next arena id after l62 312001/312002), park the live squad
+// 312004, the next arena id after l62 312001/312002), park the live squad
 // outside the 60-unit accumulate radius so source Wait reaches Walk
 // naturally at Damagumo disc speed 100, observe the Stay->Land->Wait->Walk
 // cycle, then assign the real Pikmin Attack action and prove natural drain
@@ -17,14 +17,13 @@
 // experimental/pikmin2_muse_damagumo.py; gate 5 stays source-backed N/A
 // (Damagumo.cpp:80 disables EB_LeaveCarcass).
 //
-// STAGING CONTRACT (read before running): this harness requires an arena
-// that stages a Damagumo actor at generator 312003 AND a family that binds
-// species "Damagumo" (mesh bank entry, SPECIES row, speciesEnum arm,
-// actors.txt slot). As of this writing the family bank installs only
-// Houdai/BigFoot meshes (pc_p2_long_legs.cpp:56-59), speciesEnum maps every
-// non-BigFoot name to Houdai (:145-148), and no arena stages Damagumo, so
-// stage 0 fails closed here until the family owner stages it. That failure
-// is the honest staging-gap signal, not a harness defect.
+// STAGING CONTRACT (read before running): this harness requires the provider arena slot 312004 (damagumo-family-staging #638); the demon-lane 56 profile/mesh, family visual conversion and arena staging (wake criteria 1-3) are still pending, so stage 0 fails closed until they land.
+// Host binding for "Damagumo" has landed (SPECIES row + speciesEnum arm,
+// cherry-picked #638); what is still pending is the demon-lane 56 profile
+// + mesh, the family visual conversion to longlegs_Damagumo_bind_00.mod,
+// and the arena actors slot at 312004 (wake criteria 1-3). Until those land,
+// stage 0 fails closed here. That failure is the honest staging-gap signal,
+// not a harness defect.
 class RoomApp : public PlugPikiApp {
     int frames=0,observed=0,stage=0;
     int damagumoDropEvents=0;         // receiver-hit probe: actual health decreases
@@ -53,7 +52,17 @@ public:int idle() override {
         std::printf("P2_MUSE_DAMAGUMO_HB frames=%d stage=%d observed=%d live=%d\n",frames,stage,observed,live);std::fflush(stdout);}
     if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->skipScene(SCENESKIP_SkipAll);return result;}
     if(!pc_p2_preview_ready()||!naviMgr||!pikiMgr||!tekiMgr)return result;
-    Navi* n=naviMgr->getNavi();if(!n||gameflow.mPauseAll||gameflow.mIsUIOverlayActive)return result;
+    Navi* n=naviMgr->getNavi();if(!n)return result;
+    // Captain-safety #632 (inline equivalent of scripts/p2_fixture_captain_guard.h:
+    // orimaDead/NaviDead/HP<=1 exits BLOCKED instead of observing; the captain
+    // stays parked at origin and is never made invincible).
+    {bool orimaDead=naviMgr->getDeadOrima()!=nullptr;
+     bool deadState=n->mStateMachine->getCurrID(n)==NAVISTATE_Dead;
+     float hp=n->mHealth;
+     if(orimaDead||deadState||hp!=hp||hp<=1.0f){
+         std::printf("P2_FIXTURE_CAPTAIN_DOWN tick=%d hp=%.3f orima_dead=%d dead_state=%d outcome=BLOCKED\n",
+             observed,hp,int(orimaDead),int(deadState));std::fflush(stdout);std::_Exit(86);}}
+    if(gameflow.mPauseAll||gameflow.mIsUIOverlayActive)return result;
     {static bool naviSustainLogged=false;int ns=n->mStateMachine->getCurrID(n);
         if(ns==NAVISTATE_Pressed||ns==NAVISTATE_Flick||ns==NAVISTATE_Dead||ns==NAVISTATE_PikiZero||ns==NAVISTATE_DemoSunset||ns==NAVISTATE_DemoWait||ns==NAVISTATE_DemoInf){n->mStateMachine->transit(n,NAVISTATE_Walk);if(!naviSustainLogged){naviSustainLogged=true;std::puts("P2_MUSE_DAMAGUMO_GUARD navi_sustain=1");}}}
     {static bool pikminGuardLogged=false;if((int)GameStat::allPikis==0){GameStat::allPikis.set(1,Red);if(!pikminGuardLogged){pikminGuardLogged=true;std::puts("P2_MUSE_DAMAGUMO_GUARD pikmin_guard=1");}}}
@@ -62,8 +71,8 @@ public:int idle() override {
         captainOrigin=n->mSRT.t;
         for(int f=0;f<DEMOFLAG_COUNT;++f)playerState->mDemoFlags.setFlagOnly(f);
         n->mKontroller=new FixtureController();
-        damagumo=byGenerator(312003);
-        require(damagumo,"staged Damagumo56 actor present at generator 312003");
+        damagumo=byGenerator(312004);
+        require(damagumo,"staged Damagumo56 actor present at generator 312004");
         require(pc_p2_long_legs_registered(damagumo),"damagumo bound by family (species Damagumo staged)");
         int squad=0;Iterator p(pikiMgr);CI_LOOP(p){Piki* v=static_cast<Piki*>(*p);if(v->isAlive())++squad;}
         require(squad>=1,"live starting squad");
@@ -72,8 +81,8 @@ public:int idle() override {
         // Wait reaches Walk naturally at disc speed 100) but inside the 400u
         // territory sight (so the source target rule walks Damagumo toward the squad).
         int c=freeAndPark(damagumo,120.0f);std::printf("P2_MUSE_DAMAGUMO_PARK count=%d\n",c);
-        std::printf("P2_MUSE_DAMAGUMO_READY squad=%d damagumo_gen=312003\n",squad);
-        std::printf("P2_MUSE_DAMAGUMO_BIND generator=312003 species=Damagumo native_fsm=implemented\n");
+        std::printf("P2_MUSE_DAMAGUMO_READY squad=%d damagumo_gen=312004\n",squad);
+        std::printf("P2_MUSE_DAMAGUMO_BIND generator=312004 species=Damagumo native_fsm=implemented\n");
         std::fflush(stdout);stage=1;return result;
     }
     if(stage==1){
