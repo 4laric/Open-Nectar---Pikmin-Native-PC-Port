@@ -2,6 +2,7 @@
 #include "pc_randomizer.h"
 #include "pc_p2_challenge_persistence.h"
 #include "pc_p2_challenge_runtime.h"
+#include "pc_p2_challenge_content.h"
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
@@ -75,6 +76,13 @@ bool p2_challenge_stage_params(P2ChallengeStageParams& out) {
 static P2ChallengeRuntimeHook sChallengeRuntimeHook = nullptr;
 void p2_challenge_runtime_set_hook(P2ChallengeRuntimeHook hook) {
     sChallengeRuntimeHook = hook;
+}
+// Challenge stage content wiring (#728). Same link-safety contract: plain
+// hook pointer, null by default, engine-free here; the engine-dependent
+// content module registers itself at startup in pikmin_pc only.
+static P2ChallengeContentHook sChallengeContentHook = nullptr;
+void p2_challenge_content_set_hook(P2ChallengeContentHook hook) {
+    sChallengeContentHook = hook;
 }
 static bool testBackground = false;
 void pc_bbft_milestone(const char* text) {
@@ -226,6 +234,9 @@ void pc_bbft_update() {
     // unless the pikmin_pc bridge registered at startup; pc_bbft_test never
     // registers.
     if (sChallengeRuntimeHook) sChallengeRuntimeHook();
+    // Challenge stage content wiring (#728). Null (inert) unless the pikmin_pc
+    // content module registered at startup; pc_bbft_test never registers.
+    if (sChallengeContentHook) sChallengeContentHook();
 }
 bool pc_bbft_hold() {
     if (pc_randomizer_enabled()) {
