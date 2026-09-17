@@ -282,12 +282,29 @@ int main(int argc, char** argv) {
         int width = 0, height = 0, x = 0, y = 0;
         SDL_GetWindowSize(window, &width, &height);
         SDL_GetWindowPosition(window, &x, &y);
-        SDL_Rect bounds{0, 0, 0, 0};
-        SDL_GetDisplayBounds(SDL_GetWindowDisplayIndex(window), &bounds);
-        const bool centered = std::abs(x - (bounds.x + (bounds.w - width) / 2)) <= 2
-            && std::abs(y - (bounds.y - (bounds.h - height) / 2)) <= 2;
+        // Attribute the window against EVERY display, not just the one
+        // SDL_GetWindowDisplayIndex reports: on multi-display or scaled
+        // setups the reported index can disagree with where pc_window_center
+        // placed the window, while the window itself is exactly centered.
+        // Passing requires 960x540 and centered on at least one display.
+        const int displays = SDL_GetNumVideoDisplays();
+        bool centered = false;
+        SDL_Rect usedBounds{0, 0, 0, 0};
+        for (int d = 0; d < displays; ++d) {
+            SDL_Rect bounds{0, 0, 0, 0};
+            if (SDL_GetDisplayBounds(d, &bounds) != 0) continue;
+            const bool onThis = std::abs(x - (bounds.x + (bounds.w - width) / 2)) <= 2
+                && std::abs(y - (bounds.y + (bounds.h - height) / 2)) <= 2;
+            std::printf("P2_CHALLENGE_STAGE_EXT_DISPLAY index=%d origin=%d,%d size=%dx%d\\n",
+                        d, bounds.x, bounds.y, bounds.w, bounds.h);
+            if (onThis && !centered) {
+                centered = true;
+                usedBounds = bounds;
+            }
+        }
+        std::fflush(stdout);
         std::printf("P2_CHALLENGE_STAGE_EXT_WINDOW size=%dx%d pos=%d,%d display=%dx%d centered=%d\n",
-                    width, height, x, y, bounds.w, bounds.h, int(centered));
+                    width, height, x, y, usedBounds.w, usedBounds.h, int(centered));
         std::fflush(stdout);
         if (width != 960 || height != 540 || !centered) fail("window-geometry");
     }
