@@ -309,3 +309,127 @@ void pc_p2_cave_draw_transition(Graphics& gfx){
     gfx.setLineWidth(oldWidth);gfx.setColour(oldColour,true);gfx.mAuxiliaryColour=oldAux;
     gfx.setCBlending(oldBlend);gfx.useTexture(oldTexture,0);gfx.setLighting(oldLight,nullptr);
 }
+
+
+// ---- Authored yakushima_4 floor-1 room graph (#682) ----
+//
+// Decoded from user/Mukki/mapunits/caveinfo/yakushima_4.txt floor 1
+// (f008 2_units_gw_l_conc.txt) and
+// user/Mukki/mapunits/units/2_units_gw_l_conc.txt, both read from the local
+// US GPVE01 disc via experimental.pikmin2_assets.disc_files.
+//   caveinfo sha256 3e3fc04e1131673e22063eb2e395e22e7ac3d4252d2db9223400632696272de0
+//   units    sha256 742624fd2cae25ad6a3bab04a5d4440e721875f25a2185809324a59c25fc867e
+// 8 rooms / 19 doors / 36 door links, baked verbatim from the decode.
+// Higher floors, triangle-mesh collision and regrowth schedules are
+// explicitly OPEN (not decoded here); coverage is room/door/link topology
+// plus route reachability (see the lane harness, which re-decodes the real
+// files and diffs the emitted table).
+struct P2Yakushima4Room { const char *name; int cells[2]; int kind; int doors; };
+struct P2Yakushima4Link {
+    int room;
+    int door;
+    int waypoint;
+    int peer;
+    int distMilli;
+    int enemyFlag;
+};
+static const P2Yakushima4Room kYakushima4Rooms[] = {
+    {"item_cap_conc", 1, 1, 0, 1},
+    {"way3_conc", 1, 1, 2, 3},
+    {"way4_conc", 1, 1, 2, 4},
+    {"wayl_conc", 1, 1, 2, 2},
+    {"way2_conc", 1, 1, 2, 2},
+    {"way2x2_conc", 1, 2, 2, 2},
+    {"room_4x4g_water_4_conc", 4, 4, 1, 4},
+    {"room_north4x4l_1_conc", 4, 4, 1, 1},
+};
+static const P2Yakushima4Link kYakushima4Links[] = {
+    {1, 0, 0, 1, 170005, 1},
+    {1, 0, 0, 2, 170005, 1},
+    {1, 1, 1, 0, 170005, 1},
+    {1, 1, 1, 2, 170005, 1},
+    {1, 2, 2, 0, 170005, 1},
+    {1, 2, 2, 1, 170005, 1},
+    {2, 0, 0, 1, 170005, 1},
+    {2, 0, 0, 2, 170005, 1},
+    {2, 0, 0, 3, 170005, 1},
+    {2, 1, 1, 0, 170005, 1},
+    {2, 1, 1, 2, 170005, 1},
+    {2, 1, 1, 3, 170005, 1},
+    {2, 2, 2, 0, 170005, 1},
+    {2, 2, 2, 1, 170005, 1},
+    {2, 2, 2, 3, 170005, 1},
+    {2, 3, 3, 0, 170005, 1},
+    {2, 3, 3, 1, 170005, 1},
+    {2, 3, 3, 2, 170005, 1},
+    {3, 0, 0, 1, 136007, 1},
+    {3, 1, 1, 0, 136007, 1},
+    {4, 0, 0, 1, 170005, 1},
+    {4, 1, 1, 0, 170005, 1},
+    {5, 0, 0, 1, 340009, 1},
+    {5, 1, 1, 0, 340009, 1},
+    {6, 0, 0, 1, 850046, 1},
+    {6, 0, 0, 2, 997832, 1},
+    {6, 0, 0, 3, 680015, 1},
+    {6, 1, 1, 0, 850046, 1},
+    {6, 1, 1, 2, 707838, 1},
+    {6, 1, 1, 3, 1020044, 1},
+    {6, 2, 2, 0, 997832, 1},
+    {6, 2, 2, 1, 707838, 1},
+    {6, 2, 2, 3, 827848, 1},
+    {6, 3, 3, 0, 680015, 1},
+    {6, 3, 3, 1, 1020044, 1},
+    {6, 3, 3, 2, 827848, 1},
+};
+static const int kYakushima4RoomCount = 8;
+static const int kYakushima4DoorCount = 19;
+static const int kYakushima4LinkCount = 36;
+
+int pc_p2_yakushima4_room_count() { return kYakushima4RoomCount; }
+
+bool pc_p2_yakushima4_validate()
+{
+    int doors = 0;
+    for (int r = 0; r < kYakushima4RoomCount; ++r) {
+        if (!kYakushima4Rooms[r].name || kYakushima4Rooms[r].doors < 0) return false;
+        doors += kYakushima4Rooms[r].doors;
+    }
+    if (doors != kYakushima4DoorCount) return false;
+    int links = 0;
+    for (int i = 0; i < kYakushima4LinkCount; ++i) {
+        const P2Yakushima4Link &link = kYakushima4Links[i];
+        if (link.room < 0 || link.room >= kYakushima4RoomCount) return false;
+        if (link.door < 0 || link.door >= kYakushima4Rooms[link.room].doors) return false;
+        if (link.peer < 0 || link.peer >= kYakushima4Rooms[link.room].doors) return false;
+        if (link.door == link.peer || link.distMilli <= 0) return false;
+        bool symmetric = false;
+        for (int j = 0; j < kYakushima4LinkCount; ++j) {
+            const P2Yakushima4Link &back = kYakushima4Links[j];
+            if (back.room == link.room && back.door == link.peer && back.peer == link.door) {
+                symmetric = true;
+                break;
+            }
+        }
+        if (!symmetric) return false;
+        ++links;
+    }
+    return links == kYakushima4LinkCount;
+}
+
+int pc_p2_yakushima4_emit_nav()
+{
+    if (!pc_p2_yakushima4_validate()) {
+        std::printf("P2_YAKUSHIMA4_AUTHORED valid=0\n");
+        std::fflush(stdout);
+        return -1;
+    }
+    for (int i = 0; i < kYakushima4LinkCount; ++i) {
+        const P2Yakushima4Link &link = kYakushima4Links[i];
+        std::printf("P2_CAVE_NAV authored=1 room=%d door=%d waypoint=%d peer=%d dist_mm=%d enemy_flag=%d\n",
+                    link.room, link.door, link.waypoint, link.peer, link.distMilli, link.enemyFlag);
+    }
+    std::printf("P2_YAKUSHIMA4_AUTHORED valid=1 rooms=%d doors=%d links=%d\n",
+                kYakushima4RoomCount, kYakushima4DoorCount, kYakushima4LinkCount);
+    std::fflush(stdout);
+    return kYakushima4LinkCount;
+}
