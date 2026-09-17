@@ -153,7 +153,8 @@ public:
         ++observed;
         const int floor = pc_p2_cave_floor();
         if (floor <= 0 && observed % 600 == 0) {
-            std::printf("P2_TUTORIAL2_DESCEND_WAIT observed=%d floor=0\n", observed);
+            std::printf("P2_TUTORIAL2_DESCEND_WAIT observed=%d floor=0 alive=%d\n",
+                        observed, alivePikis());
             std::fflush(stdout);
         }
         if (floor == sWantFloor && !entrySeen) {
