@@ -32,6 +32,7 @@
 //     view-angle/FOV search is a documented port adaptation.
 // No other lane's module is modified; every hook is a no-op for unregistered actors.
 #include "pc_p2_mar.h"
+#include "pc_p2_mar_receipt.h"
 #include "teki.h"
 #include "Interactions.h"
 #include "Piki.h"
@@ -294,8 +295,9 @@ void pc_p2_mar_reset() {
     actors.clear();
     clips.clear();
     ready = false;
+    pc_p2_mar_receipt_reset();
 }
-void pc_p2_mar_forget(BTeki* actor) { actors.erase(static_cast<PelletView*>(actor)); }
+void pc_p2_mar_forget(BTeki* actor) { actors.erase(static_cast<PelletView*>(actor)); pc_p2_mar_receipt_forget(actor); }
 
 float pc_p2_mar_param_f(const BTeki* actor, int idx, float fallback) {
     if (!ready || !actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor)))) return fallback;
@@ -328,6 +330,7 @@ bool pc_p2_mar_clip(const BTeki* actor, const char*& name, float& phase) {
 
 void pc_p2_mar_setup() {
     pc_p2_mar_reset();
+    pc_p2_mar_receipt_setup();
     if (!tekiMgr) return;
 
     std::ifstream bank("p2-flying-bank.txt");
@@ -421,6 +424,7 @@ void pc_p2_mar_setup() {
         enter(s, MAR_WAIT, "move1");
         std::printf("P2_MAR_BIND generator=%u source_id=29 visual_only=0\n",
                     actor->mGenerator->_70);
+        pc_p2_mar_receipt_bind(actor);
         std::printf("P2_MAR_STATE generator=%u state=wait\n", actor->mGenerator->_70);
         std::fflush(stdout);
         const Vector3f pos = actor->getPosition();

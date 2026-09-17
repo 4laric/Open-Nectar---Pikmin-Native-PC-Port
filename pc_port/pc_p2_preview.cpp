@@ -40,6 +40,7 @@
 #include "pc_p2_dangomushi.h"
 #include "pc_p2_catfish.h"
 #include "pc_p2_mar.h"
+#include "pc_p2_mar_receipt.h"
 #include "pc_p2_hanachirashi.h"
 #include "pc_p2_tadpole.h"
 #include "pc_p2_hana.h"
@@ -344,6 +345,9 @@ bool pc_p2_preview_deliver(Pellet* pellet) {
         else if(unsigned generator=0;pc_p2_mamuta_receipt(pellet->mPelletView,generator)) {
             receipt="corpse:"+pc_p2_cave_receipt_prefix()+"mamuta:"+std::to_string(generator);value=corpseValue;
         }
+        else if(unsigned generator=0;pc_p2_mar_receipt(pellet->mPelletView,generator)) {
+            receipt="corpse:"+pc_p2_cave_receipt_prefix()+"mar:"+std::to_string(generator);value=corpseValue;
+        }
         else if(unsigned generator=0;pc_p2_bombsarai_receipt(pellet->mPelletView,generator)) {
             receipt="corpse:"+pc_p2_cave_receipt_prefix()+"bombsarai:"+std::to_string(generator);value=corpseValue;
         }
@@ -378,6 +382,7 @@ bool pc_p2_preview_deliver(Pellet* pellet) {
         // the delivered Pellet* (a viewless stand-in corpse would still resolve).
         else if(unsigned generator=0;pc_p2_long_legs_receipt(pellet,generator)) {
             receipt="corpse:"+pc_p2_cave_receipt_prefix()+"longlegs:"+std::to_string(generator);value=corpseValue;
+        }
         }
         else {
             auto found=corpses.find(pellet->mPelletView);

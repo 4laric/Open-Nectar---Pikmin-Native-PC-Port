@@ -237,6 +237,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_hana.cpp
     pc_port/pc_p2_tadpole.cpp
     pc_port/pc_p2_mar.cpp
+    pc_port/pc_p2_mar_receipt.cpp
     pc_port/pc_p2_catfish.cpp
     pc_port/pc_p2_hanachirashi.cpp
     pc_port/pc_p2_dangomushi.cpp
@@ -783,6 +784,12 @@ add_executable(p2_dangomushi_hazard_test
 target_include_directories(p2_dangomushi_hazard_test PRIVATE pc_port)
 target_compile_options(p2_dangomushi_hazard_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_dangomushi_hazard_test COMMAND p2_dangomushi_hazard_test)
+add_executable(p2_mar_receipt_registration_test
+    tools/p2_mar_receipt_registration_test.cpp
+    pc_port/pc_p2_mar_receipt.cpp)
+target_include_directories(p2_mar_receipt_registration_test PRIVATE pc_port)
+target_compile_options(p2_mar_receipt_registration_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_mar_receipt_registration_test COMMAND p2_mar_receipt_registration_test)
 
 add_executable(p2_long_legs_fsm_test
     tools/p2_long_legs_fsm_test.cpp
