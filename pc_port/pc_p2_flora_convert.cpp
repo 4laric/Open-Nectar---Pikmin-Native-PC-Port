@@ -59,9 +59,9 @@ int p2_flora_convert_suite()
         failures += checkConvert(buds[i], 2, true, true, 2, 2, true);
         failures += checkConvert(buds[i], 6, false, false, 0, 0, false);
     }
-    failures += checkConvert(p2flora::RandPom, 2, false, true, 18, 0, false);
-    failures += checkConvert(p2flora::RandPom, 2, true, true, 18, 0, false);
-    failures += checkConvert(p2flora::RandPom, 6, false, false, 0, 0, false);
+    failures += checkConvert(p2flora::RandPom, 1, false, true, 9, 0, false);
+    failures += checkConvert(p2flora::RandPom, 1, true, true, 9, 0, false);
+    failures += checkConvert(p2flora::RandPom, 2, false, false, 0, 0, false);
     failures += checkConvert(p2flora::SpeciesCount, 1, false, false, 0, 0, false);
     failures += checkConvert(p2flora::BluePom, -1, false, false, 0, 0, false);
     p2flora::Converter limited(p2flora::RedPom);

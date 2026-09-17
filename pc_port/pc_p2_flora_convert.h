@@ -41,10 +41,13 @@ inline bool isCandypop(Species species)
 
 inline bool isQueen(Species species) { return species == RandPom; }
 
-// Lifetime conversion slots per bud (proper ip01=5 for every bud).
+// Lifetime conversion slots per bud (proper ip01=5 for ordinary buds,
+// ip11=1 for the queen). Mirrors the reference predicate exactly, including
+// the queen budget.
 inline int lifetimeSlots(Species species)
 {
-    return isCandypop(species) ? 5 : 0;
+    if (!isCandypop(species)) return 0;
+    return isQueen(species) ? 1 : 5;
 }
 
 // Sprout multiplier (proper ip13=9 for the queen, 1 otherwise).
@@ -87,6 +90,8 @@ inline ConvertResult convertSwallow(ConvertRequest request)
         out.refund = request.ownColour && request.swallowed > 0;
     }
     return out;
+    // Note: the queen is also budget-checked above (ip11=1), matching the
+    // reference predicate; only slotsUsed/refund stay queen-exempt.
 }
 
 // Bounded per-bud lifetime converter: enforces the slot budget across shots.
