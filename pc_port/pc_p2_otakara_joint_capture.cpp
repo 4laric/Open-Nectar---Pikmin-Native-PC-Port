@@ -58,10 +58,16 @@ void pc_p2_otakara_joint_capture_poll() {
         if (!actor || !actor->isAlive() || actor->mTekiType != TEKI_Chappy) continue;
         ++liveCarriers;
         Shape* shape = (actor->mTekiShape != nullptr) ? actor->mTekiShape->mShape : nullptr;
+        // The shape's animated matrices are allocated on first render/update;
+        // reading them earlier would dereference null, so an unready carrier
+        // is skipped (fail-closed) until its matrices exist.
         if (shape == nullptr || shape->mJointCount <= 0 || shape->mJointList == nullptr) continue;
+        if (shape->mAnimMatrices == nullptr || shape->mAnimMtxCount == 0) continue;
         const unsigned generator = (actor->mGenerator != nullptr) ? actor->mGenerator->_70 : 0;
+        const int joints = (shape->mJointCount < (int)shape->mAnimMtxCount)
+            ? shape->mJointCount : (int)shape->mAnimMtxCount;
         int valid = 0;
-        for (int j = 0; j < shape->mJointCount; ++j) {
+        for (int j = 0; j < joints; ++j) {
             float x = 0.0f, y = 0.0f, z = 0.0f;
             if (!finiteJoint(shape->getAnimMatrix(j), x, y, z)) continue;
             ++valid;
@@ -79,7 +85,7 @@ void pc_p2_otakara_joint_capture_poll() {
             sLastEmitTick = sPollTick;
             std::printf("[Pikipelago] P2_OTAKARA_JOINT_CAPTURE generator=%u teki=3 joints=%d\n",
                         generator, valid);
-            for (int j = 0; j < shape->mJointCount; ++j) {
+            for (int j = 0; j < joints; ++j) {
                 float x = 0.0f, y = 0.0f, z = 0.0f;
                 if (!finiteJoint(shape->getAnimMatrix(j), x, y, z)) continue;
                 std::printf("[Pikipelago] P2_OTAKARA_JOINT generator=%u joint=%d xyz=%.3f,%.3f,%.3f\n",
