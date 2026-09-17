@@ -86,6 +86,7 @@ struct P2ChallengeStageRow {
     float legacyTime;
     int treasureCountField;
 };
+extern const char* pc_p2_challenge_stage();
 extern const P2ChallengeStageRow* pc_p2_challenge_stage_lookup(const char* caveId);
 extern const P2ChallengeStageRow* pc_p2_challenge_stage_selected();
 
