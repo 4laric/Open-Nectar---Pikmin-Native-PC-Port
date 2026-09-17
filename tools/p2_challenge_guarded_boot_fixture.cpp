@@ -54,15 +54,21 @@ inline void p2_fixture_require_captain(bool orimaDead, bool deadState, float hp,
 class RoomApp : public PlugPikiApp {
  int observed=0,frames=0;
  bool staged=false,booted=false;
- int stuckMarks=0;
+ int lastDiagObserved=-1,stuckPrints=0;
  int alivePikis(){int c=0;Iterator it(pikiMgr);CI_LOOP(it){Creature* p=*it;if(p&&p->isAlive())++c;}return c;}
- // #698: name the holding gate plus the live count on stuck ticks, so a
- // post-PARK freeze attributes itself instead of going silent. Called only on
- // early-return paths where observed does not advance.
+ // #745: attribute stalls independent of frame rate: print on the first stuck
+ // idle of each observed level plus every 120th, with full gate state, so a
+ // slow or frozen run still names its holding gate. Behavior unchanged.
  void gateDiag(const char* gate){
-  if((frames%300)!=0||stuckMarks>=48)return;++stuckMarks;
+  if(observed!=lastDiagObserved){lastDiagObserved=observed;stuckPrints=0;}
+  ++stuckPrints;
+  if((stuckPrints>1&&(stuckPrints-1)%120!=0)||stuckPrints>600)return;
   int alive=pikiMgr?alivePikis():-1;
-  std::printf("P2_CHALLENGE_GATE_DIAG gate=%s observed=%d alive=%d frames=%d\n",gate,observed,alive,frames);std::fflush(stdout);}
+  int movie=gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive?1:0;
+  int paused=gameflow.mPauseAll?1:0;
+  int ui=gameflow.mIsUIOverlayActive?1:0;
+  int navi=naviMgr&&naviMgr->getNavi()?1:0;
+  std::printf("P2_CHALLENGE_GATE_DIAG gate=%s observed=%d alive=%d frames=%d movie=%d pause=%d ui=%d navi=%d\n",gate,observed,alive,frames,movie,paused,ui,navi);std::fflush(stdout);}
  public:int idle() override {
   int result=PlugPikiApp::idle();require(++frames<20000,"challenge boot observer timeout");
   if(!naviMgr||!tekiMgr||!pikiMgr){gateDiag("managers");return result;}
