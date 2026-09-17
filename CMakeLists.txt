@@ -180,6 +180,16 @@ set(PC_PORT_SOURCES
     # pc_bbft_test keeps linking: pc_bbft.cpp stays engine-free (null-by-default
     # hook) and neither TU is added to that small target.
     pc_port/pc_p2_challenge_runtime.cpp
+    # Bomb birth hook call site (#732; #186 review before shared-line
+    # landing): the #726/#616 manager + payload TUs plus the new
+    # research-mirror call-site TU that strong-defines
+    # pc_p2_bomb_birth_hook_notify in the production graph and routes the
+    # retail Bomb-family IDs (36/93) to pc_p2_bomb_engine_birth_poll.
+    # No GLOB covers pikmin2-research, so the call-site TU is listed
+    # explicitly; neither TU is added to engine-free test targets.
+    pc_port/pc_p2_bomb_mgr_birth.cpp
+    pc_port/pc_p2_bomb_payload_actor.cpp
+    pikmin2-research/src/plugProjectYamashitaU/generalEnemyMgr.cpp
     pc_port/pc_p2_challenge_mode.cpp
     pc_port/pc_p2_preview.cpp
     pc_port/pc_p2_captain.cpp
