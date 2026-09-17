@@ -16,7 +16,7 @@
 // predicate below mirrors scripts/p2_fixture_captain_guard.h and is asserted
 // as a pure check. Any future runtime consumer must adopt that header before
 // launch; its hash is recorded in the lane packet, not claimed as a run.
-#define P2_BOMB_MGR_BIRTH_NO_HOST
+// P2_BOMB_MGR_BIRTH_NO_HOST comes from the build command line.
 #include "pc_p2_bomb_mgr_birth.cpp"
 #include "pc_p2_bomb_payload_actor.cpp"
 
