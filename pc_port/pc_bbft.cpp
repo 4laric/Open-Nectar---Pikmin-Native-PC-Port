@@ -199,6 +199,23 @@ bool recordReentry(StageAnchors*) __attribute__((weak));
 }
 #endif
 
+// Overworld save-serializer session call (#736). The module
+// (pc_p2_overworld_save.{h,cpp}) joins pikmin_pc sources, so the reference
+// below is weak: pc_bbft_test stays link-inert without the module, while
+// pikmin_pc resolves it. The poll itself is context-gated (no-op unless a
+// fixture set explicit session context), so production runs that never set
+// context perform no file I/O.
+#if defined(__GNUC__)
+void pc_p2_overworld_save_poll(void) __attribute__((weak));
+#endif
+
+static void p2OverworldSaveCallSite() {
+#if defined(__GNUC__)
+    if (pc_p2_overworld_save_poll == nullptr) return;
+    pc_p2_overworld_save_poll();
+#endif
+}
+
 static bool sPersistenceEmitted = false;
 static void p2ChallengePersistenceCallSite() {
 #if defined(__GNUC__)
@@ -230,6 +247,9 @@ void pc_bbft_update() {
     // Challenge persistence call site (#718): emits the 7 probe markers for a
     // selected challenge stage via the #713 module; inert without it.
     p2ChallengePersistenceCallSite();
+    // Overworld save-serializer session call (#736): context-gated save+verify
+    // via the overworld save module; inert without the module or context.
+    p2OverworldSaveCallSite();
     // Challenge host-mode runtime bridge (#722, ported from #710). Null (inert)
     // unless the pikmin_pc bridge registered at startup; pc_bbft_test never
     // registers.
