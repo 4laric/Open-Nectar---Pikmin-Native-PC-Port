@@ -10,8 +10,11 @@
 // --experimental-challenge-stage <cave_id> flag (engine/pc_port/pc_bbft.cpp),
 // the run directory carries the #669 P2_CHALLENGE_STAGE_SELECT_1 record, and
 // the engine's decoded P2 stage table resolves that key to the canonical
-// ch_NARI_01kusachi pins. Flag, record and table must agree field by field or
-// the fixture refuses. It boots the real engine privately under the
+// pins. Flag, record and table must agree field by field or the fixture
+// refuses. Stage records are accepted only from a pinned allowlist
+// (ch_NARI_01kusachi, and ch_NARI_02tile per #537/#711); a record whose engine
+// table row is not yet serialized (#710 follow-on) resolves at the record
+// level and exits BLOCKED before boot instead of PASS. It boots the real engine privately under the
 // room-preview path with a guarded captain.
 //
 // It does NOT prove P2 challenge content wiring: the engine still selects the
@@ -138,6 +141,31 @@ int guardSelfTest() {
     return 0;
 }
 
+// Pinned #669 stage records this fixture accepts (cave_id, source path,
+// source sha256). The engine table row is authoritative when it exists; where
+// it is not yet serialized (ch_NARI_02tile, follow-on after #710 releases
+// pc_bbft.cpp) the record is still resolved from these pinned #537 pins and
+// the run stops BLOCKED before boot. Every other record stays refused.
+struct P2PinnedSource {
+    const char* caveId;
+    const char* path;
+    const char* sha256;
+};
+static const P2PinnedSource kP2PinnedSources[] = {
+    { "ch_NARI_01kusachi",
+      "user/Mukki/mapunits/caveinfo/ch_NARI_01kusachi.txt",
+      "b8d232f417ce3fd4b2903571a1c53234e63dec49e127d5ef5b8ef3cc34bb8d85" },
+    { "ch_NARI_02tile",
+      "user/Mukki/mapunits/caveinfo/ch_NARI_02tile.txt",
+      "d047060c7965e501d23b23e2850b5f58e327d40b452d70710149ea4b41479ea6" },
+};
+bool pinnedSource(const std::string& cave, const std::string& path, const std::string& sha) {
+    for (size_t i = 0; i < sizeof(kP2PinnedSources) / sizeof(kP2PinnedSources[0]); ++i)
+        if (cave == kP2PinnedSources[i].caveId && path == kP2PinnedSources[i].path
+            && sha == kP2PinnedSources[i].sha256) return true;
+    return false;
+}
+
 // Parses the canonical #669 P2_CHALLENGE_STAGE_SELECT_1 record emitted by
 // render_boot_request(). Strict shape: any deviation is a refusal, never a
 // default.
@@ -162,7 +190,7 @@ bool readRecord(const char* path, Record& out) {
         std::getline(in, line);
         std::istringstream s(line);
         if (!(s >> word) || word != "source" || !(s >> out.sourcePath) || !(s >> out.sourceSha)) return false;
-        if (out.sourcePath != "user/Mukki/mapunits/caveinfo/ch_NARI_01kusachi.txt") return false;
+        if (!pinnedSource(out.cave, out.sourcePath, out.sourceSha)) return false;
     }
     {
         std::getline(in, line);
@@ -281,7 +309,24 @@ int main(int argc, char** argv) {
     std::fflush(stdout);
     if (record.cave != flagStage) fail("flag-record-mismatch");
     const P2ChallengeStageRow* row = pc_p2_challenge_stage_lookup(record.cave.c_str());
-    if (!row) fail("unknown-stage");
+    if (!row) {
+        // The record is accepted from the pinned #537 pins, but the engine
+        // table row is a specified follow-on (blocked on #710 releasing
+        // pc_bbft.cpp). Resolve the record honestly and stop BLOCKED before
+        // boot: never READY and never PASS. Exit 3 is distinct from the
+        // guard's 86 and the refusals' 1.
+        std::printf("P2_CHALLENGE_STAGE_RESOLVED cave=%s ui_index=%d floors=%d roster_total=%d engine_row=pending\n",
+                    record.cave.c_str(), record.uiIndex, record.floors, rosterTotal(record.roster));
+        std::fflush(stdout);
+        std::printf("P2_CHALLENGE_STAGE_ENGINE_ROW_PENDING cave=%s follow_on=710 source_sha=%s\n",
+                    record.cave.c_str(), record.sourceSha.c_str());
+        std::fflush(stdout);
+        std::printf("P2_CHALLENGE_STAGE_GATES all=UNTESTED content_wired=0\n");
+        std::fflush(stdout);
+        std::printf("P2_CHALLENGE_STAGE_BLOCKED reason=engine-table-row-pending follow_on=710\n");
+        std::fflush(stdout);
+        std::_Exit(3); // accepted record; boot awaits the engine table row
+    }
     const P2ChallengeStageRow* selected = pc_p2_challenge_stage_selected();
     if (selected != row) fail("selected-table-mismatch");
     std::printf("P2_CHALLENGE_STAGE_TABLE cave=%s ui_index=%d floors=%d\n",
