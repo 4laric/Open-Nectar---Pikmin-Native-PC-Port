@@ -41,6 +41,11 @@ inline void p2_fixture_require_captain(bool orimaDead, bool deadState, float hp,
 #include "pc_window.h"
 #include "pc_gpu_preference.h"
 #include "pc_p2_challenge_persistence.h"
+// The module TU is not a CMake target (no shared build edits allowed), so it
+// is compiled as part of this replacement-main TU. pc_p2_challenge_persistence
+// has no other object in the link, so this single inclusion is the one and
+// only definition site.
+#include "../pc_port/pc_p2_challenge_persistence.cpp"
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
