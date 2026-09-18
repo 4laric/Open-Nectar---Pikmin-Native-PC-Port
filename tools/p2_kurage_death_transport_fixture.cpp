@@ -39,11 +39,10 @@ inline void p2_fixture_require_captain(bool orimaDead, bool deadState, float hp,
 #include "pc_window.h"
 #include "pc_gpu_preference.h"
 #include "pc_p2_kurage.h"
-// The capture policy is engine-free with no CMake target of its own (no
-// shared build edits allowed), so its TU is compiled as part of this
-// replacement-main TU. It has no other object in the link, so this single
-// inclusion is the one and only definition site.
-#include "../pc_port/pc_p2_kurage.cpp"
+// The capture policy TU (pc_port/pc_p2_kurage.cpp) is already a member of the
+// pikmin_pc graph in this base, so the fixture links the engine object
+// (read-only consumption, no shared build edits) instead of unity-including
+// it. Only the header is included here.
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
