@@ -1,3 +1,4 @@
+#include "pc_randomizer.h"
 #include "pc_p2_frog.h"
 #include "pc_p2_kogane.h"
 #include "pc_p2_mamuta.h"
@@ -155,7 +156,17 @@ bool pc_p2_preview_cargo_free_ready() { return pc_pikipelago_room_preview() && c
 Pellet* pc_p2_preview_treasure() { return previewTreasure; }
 
 void pc_p2_preview_setup() {
-    if (!pc_pikipelago_room_preview()) return;
+    if (!pc_pikipelago_room_preview()) {
+        if (pc_randomizer_p2_bridge()) {
+            pc_p2_dwarf_orange_setup();
+            pc_p2_kochappy_fsm_setup();
+            pc_p2_kogane_setup();
+            pc_p2_mamuta_setup();
+            pc_p2_sokkuri_setup();
+            pc_p2_otakara_setup();
+        }
+        return;
+    }
     previewTreasure = nullptr; previewShape = nullptr; delivered = false;
     cargoFree=false;setupComplete=false;treasureId.clear();treasureValue=0;corpseValue=0;
     podAnchor=nullptr;podShape=nullptr;corpses.clear();

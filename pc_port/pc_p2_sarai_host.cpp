@@ -1,3 +1,4 @@
+#include "pc_p2_campaign_actor.h"
 #include "pc_p2_sarai_host.h"
 #include "pc_p2_demon_bridge.h"
 #include "Collision.h"
@@ -380,7 +381,7 @@ void P2SaraiHost::updateNatural()
     if (mBoundActor && !mBoundActor->isAlive()) {
         if (!mDead) {
             mDead = true;
-            const unsigned generator = mBoundActor->mGenerator ? mBoundActor->mGenerator->_70 : 0u;
+            const unsigned generator = mBoundActor->mGenerator ? pc_p2_campaign_token(mBoundActor) : 0u;
             std::printf("P2_SARAI_DEAD source_id=23 generator=%u\n", generator);
             std::fflush(stdout);
         }
@@ -504,7 +505,7 @@ void P2SaraiHost::updateNatural()
 
 bool P2SaraiHost::bindNativeActor(BTeki* actor, unsigned generatorId, int tekiType)
 {
-    if (!actor || !actor->mGenerator || actor->mGenerator->_70 != generatorId || actor->mTekiType != tekiType)
+    if (!actor || !actor->mGenerator || pc_p2_campaign_token(actor) != generatorId || actor->mTekiType != tekiType)
         return false;
     if (mBoundActor && mBoundActor != actor) return false;
     mBoundActor = actor;
@@ -520,7 +521,7 @@ void P2SaraiHost::unbindNativeActor(BTeki* actor)
 bool P2SaraiHost::revalidateNativeActor(BTeki* actor, unsigned generatorId, int tekiType)
 {
     if (!actor || mBoundActor != actor) return false;
-    if (!actor->mGenerator || actor->mGenerator->_70 != generatorId || actor->mTekiType != tekiType) {
+    if (!actor->mGenerator || pc_p2_campaign_token(actor) != generatorId || actor->mTekiType != tekiType) {
         mBoundActor = nullptr;
         return false;
     }

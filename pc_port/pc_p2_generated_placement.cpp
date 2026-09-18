@@ -1,3 +1,5 @@
+#include "pc_randomizer.h"
+#include "pc_p2_campaign_placements.h"
 #include "pc_p2_generated_placement.h"
 #include "pc_p2_sarai_manager.h"
 #include "pc_p2_otakara.h"
@@ -11,7 +13,7 @@ struct MuseBinding {
     unsigned target;
     unsigned generator;
 };
-MuseBinding g_museBindings[8];
+MuseBinding g_museBindings[64];
 int g_museBound = 0;
 
 bool museRecord(const BTeki* actor, unsigned source, unsigned target, unsigned generator)
@@ -24,7 +26,7 @@ bool museRecord(const BTeki* actor, unsigned source, unsigned target, unsigned g
             return true;
         }
     }
-    if (g_museBound >= 8) return false;
+    if (g_museBound >= 64) return false;
     g_museBindings[g_museBound].actor = actor;
     g_museBindings[g_museBound].source = source;
     g_museBindings[g_museBound].target = target;
@@ -97,7 +99,11 @@ static bool recordBind(BTeki* actor, unsigned accepted, unsigned sourceId,
 
 static bool museBind(BTeki* actor, unsigned sourceId, unsigned seedTargetUid, unsigned generatorId)
 {
-    return recordBind(actor, pc_p2_generated_placement_muse_slot(sourceId), sourceId, seedTargetUid, generatorId);
+    const bool campaign = pc_randomizer_p2_bridge()
+        && pc_randomizer_p2_source_for_id(seedTargetUid) == sourceId
+        && p2campaign::accepted(sourceId, seedTargetUid);
+    return recordBind(actor, campaign ? seedTargetUid : pc_p2_generated_placement_muse_slot(sourceId),
+                      sourceId, seedTargetUid, generatorId);
 }
 
 static bool waterwraithBind(BTeki* actor, unsigned sourceId, unsigned seedTargetUid, unsigned generatorId)
