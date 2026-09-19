@@ -24,6 +24,7 @@
 //   * View angle is a full circle (hit angle fp23=0 on the disc).
 // No other lane's module is modified; every hook is a no-op for unregistered actors.
 #include "pc_p2_otakara.h"
+#include "pc_p2_otakara_fx.h"
 #include "pc_p2_dweevil_policy.h"
 #include "pc_p2_species.h"
 #include "pc_p2_hazard_emitter.h"
@@ -273,6 +274,7 @@ void doDischarge(BTeki* a, Otakara& s) {
     }
     std::printf("P2_OTAKARA_DISCHARGE generator=%u source_id=%d stimulus=%s applied=%d immune=%d\n",
                 generator, s.species, p2dweevil::stimulusName(s.stimulus), applied, immune);
+    pc_p2_otakara_fx_on_discharge(s.species, pos.x, pos.y, pos.z);
     std::fflush(stdout);
 }
 
