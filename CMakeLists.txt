@@ -1418,6 +1418,13 @@ target_include_directories(p2_elecbug_transport_test PRIVATE pc_port)
 target_compile_options(p2_elecbug_transport_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_elecbug_transport_test COMMAND p2_elecbug_transport_test)
 
+# rd-p2-kurage-transport (#768): Kurage57 corpse -> carried -> exactly one
+# Onion receipt over the real delivery-host bridge (registration only).
+add_executable(p2_kurage_transport_test tools/p2_kurage_transport_test.cpp pc_port/pc_p2_delivery_host.cpp)
+target_include_directories(p2_kurage_transport_test PRIVATE pc_port)
+target_compile_options(p2_kurage_transport_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_kurage_transport_test COMMAND p2_kurage_transport_test)
+
 # Lane 06: engine-free provider unit tests (header-only; previously present but unregistered).
 add_executable(p2_receipt_test tools/p2_receipt_test.cpp)
 target_include_directories(p2_receipt_test PRIVATE pc_port)
