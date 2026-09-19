@@ -1,4 +1,5 @@
 #include "pc_randomizer.h"
+#include "pc_p2_campaign_actor.h"
 #include "pc_p2_campaign_placements.h"
 #include "pc_p2_generated_placement.h"
 #include "pc_p2_sarai_manager.h"
@@ -6,6 +7,7 @@
 #include "pc_p2_bluechappy.h"
 #include "teki.h"
 #include <cstdio>
+#include <set>
 
 namespace {
 struct MuseBinding {
@@ -66,6 +68,25 @@ void pc_p2_generated_placement_forget(const BTeki* actor)
 void pc_p2_generated_placement_reset()
 {
     g_museBound = 0;
+}
+
+bool pc_p2_generated_placement_sweep_sarai()
+{
+    if (!pc_randomizer_p2_bridge() || !tekiMgr) return false;
+    const std::set<unsigned> wanted = pc_p2_campaign_ids(23);
+    if (wanted.empty()) return false;
+    bool bound = false;
+    Iterator actors(tekiMgr);
+    CI_LOOP(actors) {
+        BTeki* actor = static_cast<BTeki*>(*actors);
+        if (!actor || !actor->mGenerator) continue;
+        const unsigned token = pc_p2_campaign_token(actor);
+        if (!wanted.count(token)) continue;
+        // The dynamic binder skips already-bound actors and actors whose
+        // sidecar is absent, quietly returning false for both.
+        if (pc_p2_sarai_manager_bind_dynamic(actor, token, token)) bound = true;
+    }
+    return bound;
 }
 
 static bool recordBind(BTeki* actor, unsigned accepted, unsigned sourceId,

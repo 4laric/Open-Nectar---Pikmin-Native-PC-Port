@@ -1153,6 +1153,17 @@ target_include_directories(p2_sarai_captor_lifecycle_test PRIVATE pc_port)
 target_compile_options(p2_sarai_captor_lifecycle_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_sarai_captor_lifecycle_test COMMAND p2_sarai_captor_lifecycle_test)
 
+# rd-p2ap-sarai (#439) Sarai seed-bridge campaign test. Engine-free: stub
+# engine headers shadow the real ones (BEFORE pc_port), so the real
+# pc_p2_generated_placement.cpp compiles against doubles (same mechanics as
+# p2_purple_flight_actual_test). The Sarai dynamic binder is doubled with its
+# real claim contract; the real binder ships in pc_p2_sarai_manager.cpp.
+add_executable(p2_sarai_campaign_test tools/test_p2_sarai_campaign.cpp
+    pc_port/pc_p2_generated_placement.cpp)
+target_include_directories(p2_sarai_campaign_test BEFORE PRIVATE tools/p2_sarai_campaign_stubs pc_port)
+target_compile_options(p2_sarai_campaign_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_sarai_campaign_test COMMAND p2_sarai_campaign_test)
+
 # Lane 30 (#242) dedicated captor spawn-identity test. Engine-free: it asserts
 # the identity/selection seam; the constant is static_asserted against
 # TEKI_P2Demon in the engine build (pc_port/pc_p2_demon_host.cpp).

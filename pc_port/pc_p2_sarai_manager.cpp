@@ -1,5 +1,6 @@
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_sarai_manager.h"
+#include "pc_p2_generated_placement.h"
 #include "pc_p2_sarai_host.h"
 #include "pc_p2_retail_player.h"
 #include "Generator.h"
@@ -146,6 +147,15 @@ void pc_p2_sarai_manager_forget(BTeki* actor)
 
 void pc_p2_sarai_manager_setup()
 {
+    // Seed-bridge campaign path (#439, Otakara pattern): in bridge mode the
+    // generated-placement seam claims every actor the randomizer resolved to
+    // Sarai source 23. No env var is consulted and several copies may bind;
+    // actors whose sidecar is absent are skipped quietly by the dynamic
+    // binder. The env/fixture path below is unchanged.
+    if (pc_randomizer_p2_bridge()) {
+        pc_p2_generated_placement_sweep_sarai();
+        return;
+    }
     const char* ordinary = std::getenv("PIKMIN_SARAI_ORDINARY");
     if (!ordinary || std::strcmp(ordinary, "1") != 0) return;
     if (!tekiMgr) return;
