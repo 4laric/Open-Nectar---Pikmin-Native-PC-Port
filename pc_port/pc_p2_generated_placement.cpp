@@ -1,6 +1,7 @@
 #include "pc_p2_generated_placement.h"
 #include "pc_p2_sarai_manager.h"
 #include "pc_p2_otakara.h"
+#include "pc_p2_bluechappy.h"
 #include "teki.h"
 #include <cstdio>
 
@@ -112,6 +113,13 @@ bool pc_p2_generated_placement_bind(BTeki* actor, unsigned sourceId, unsigned se
     case 23: // Swooping Snitchbug (Sarai); lane 30.
         if (pc_p2_sarai_manager_bind_dynamic(actor, generatorId, seedTargetUid)) {
             std::printf("P2_GENERATED_PLACEMENT source_id=23 target=%u bound=1\n", seedTargetUid);
+            std::fflush(stdout);
+            return true;
+        }
+        return false;
+    case 42: // Orange Bulborb (BlueChappy, adult); lane 42.
+        if (pc_p2_bluechappy_bind_dynamic(actor, generatorId, sourceId)) {
+            std::printf("P2_GENERATED_PLACEMENT source_id=42 target=%u bound=1\n", seedTargetUid);
             std::fflush(stdout);
             return true;
         }

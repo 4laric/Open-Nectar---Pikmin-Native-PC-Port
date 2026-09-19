@@ -227,6 +227,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_sheargrub.cpp
     pc_port/pc_p2_kochappy.cpp
     pc_port/pc_p2_dwarf_orange.cpp
+    pc_port/pc_p2_bluechappy.cpp
     pc_port/pc_p2_kochappy_fsm.cpp
     pc_port/pc_p2_breadbug_visual.cpp
     pc_port/pc_p2_giant_breadbug_visual.cpp
