@@ -1258,7 +1258,7 @@ if(PIKMIN_RANDOMIZER_TEST_HOOKS)
 endif()
 
 # Integration gates: keep assertions active for these engine-free contracts.
-foreach(policy IN ITEMS species_schema hazard_reaction hazard_emitter cave_transfer bulbmin_cave_filter cave_item_gate_placement cave_bud_policy captain_roster squad_policy)
+foreach(policy IN ITEMS species_schema hazard_reaction hazard_emitter cave_transfer bulbmin_cave_filter cave_item_gate_placement cave_bud_policy captain_roster squad_policy mamuta_policy)
     add_executable(p2_${policy}_test tools/test_p2_${policy}.cpp)
     target_include_directories(p2_${policy}_test PRIVATE pc_port)
     target_compile_options(p2_${policy}_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
