@@ -1203,9 +1203,22 @@ add_test(NAME p2_sarai_captor_lifecycle_test COMMAND p2_sarai_captor_lifecycle_t
 # pc_p2_generated_placement.cpp compiles against doubles (same mechanics as
 # p2_purple_flight_actual_test). The Sarai dynamic binder is doubled with its
 # real claim contract; the real binder ships in pc_p2_sarai_manager.cpp.
-add_executable(p2_sarai_campaign_test tools/test_p2_sarai_campaign.cpp
+add_executable(p2_sarai_seed_bridge_test tools/test_p2_sarai_campaign.cpp
     pc_port/pc_p2_generated_placement.cpp)
-target_include_directories(p2_sarai_campaign_test BEFORE PRIVATE tools/p2_sarai_campaign_stubs pc_port)
+target_include_directories(p2_sarai_seed_bridge_test BEFORE PRIVATE tools/p2_sarai_campaign_stubs pc_port)
+target_compile_options(p2_sarai_seed_bridge_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_sarai_seed_bridge_test COMMAND p2_sarai_seed_bridge_test)
+
+# rd-p2-sarai-campaign (#457) Sarai campaign capture/teardown proof. Engine-free:
+# the two stub dirs shadow the real Piki/Creature/CollPart/Interaction and
+# Generator/teki headers (BEFORE pc_port), so the SHIPPED
+# pc_p2_sarai_capture_bridge.cpp is compiled and driven directly against
+# campaign-shaped hosts (pc_p2_campaign_policy.h vehicle + pc_p2_campaign_actor.h
+# token). Asserts a capture and a teardown strand no Pikmin.
+add_executable(p2_sarai_campaign_test tools/p2_sarai_campaign_test.cpp
+    pc_port/pc_p2_sarai_capture_bridge.cpp)
+target_include_directories(p2_sarai_campaign_test BEFORE PRIVATE
+    tools/p2_sarai_capture_stubs tools/p2_sarai_campaign_stubs pc_port)
 target_compile_options(p2_sarai_campaign_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_sarai_campaign_test COMMAND p2_sarai_campaign_test)
 
