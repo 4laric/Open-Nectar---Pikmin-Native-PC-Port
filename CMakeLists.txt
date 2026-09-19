@@ -1185,6 +1185,36 @@ target_include_directories(p2_demon_identity_test PRIVATE pc_port)
 target_compile_options(p2_demon_identity_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_demon_identity_test COMMAND p2_demon_identity_test)
 
+# rd-captain-kurage (#130): port of the codex/p2-lane12-review captain/Kurage
+# review fixes onto the line captain API. The adapter and policy harnesses are
+# engine-free (header + doubles only). The Kurage receiver harness is a single
+# TU: it drives the production receiver + captain glue against the stub engine
+# doubles (tools/kurage_receiver_stubs/engine.h) with the real engine headers
+# neutralized by include-guard defines inside the test source.
+add_executable(p2_captain_adapter_test tools/test_p2_captain_adapter.cpp)
+target_include_directories(p2_captain_adapter_test PRIVATE pc_port)
+target_compile_options(p2_captain_adapter_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_captain_adapter_test COMMAND p2_captain_adapter_test)
+
+add_executable(p2_captain_policy_test tools/test_p2_captain_policy.cpp)
+target_include_directories(p2_captain_policy_test PRIVATE pc_port)
+target_compile_options(p2_captain_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_captain_policy_test COMMAND p2_captain_policy_test)
+
+add_executable(p2_kurage_receiver_test tools/test_p2_kurage_receiver.cpp)
+target_include_directories(p2_kurage_receiver_test PRIVATE pc_port tools/kurage_receiver_stubs)
+target_compile_options(p2_kurage_receiver_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_kurage_receiver_test COMMAND p2_kurage_receiver_test)
+
+# Lane 12 captain/Kurage real-GL diagnostic (codex/p2-lane12-review
+# tools/p2_captain_kurage_runtime.cpp, adapted to the line epoch API).
+# Compile-only isolated target, mirroring p2_fuefuki_combat_runtime_compile:
+# the replacement-main executable is produced by scripts/build_pikmin2_fixture.py
+# against a completed pikmin_pc build.
+add_library(p2_captain_kurage_runtime_compile OBJECT tools/p2_captain_kurage_runtime.cpp)
+target_include_directories(p2_captain_kurage_runtime_compile PRIVATE pc_port ${SDL2_INCLUDE_DIRS})
+target_compile_options(p2_captain_kurage_runtime_compile PRIVATE ${NATIVE_COMPILE_OPTIONS} -Wno-unused-parameter)
+
 # Engine-including admission test: it includes Navi/NaviState through
 # pc_port/pc_p2_demon_admission.h and uses _putenv_s/_spawnl to prove both
 # allowlist branches, so it is Windows-only like the launcher platform tests.
