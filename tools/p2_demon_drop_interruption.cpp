@@ -1,6 +1,15 @@
 #define DEMON_DROP_NO_MAIN
 #include "p2_demon_drop_runtime.cpp"
 #undef DEMON_DROP_NO_MAIN
+#include "GameStat.h"
+#include <cmath>
+
+// #632 captain-guard predicate mirror (canonical
+// scripts/p2_fixture_captain_guard.h sha256
+// d2f678c9eda75e151eb534077dff9e30ad36ae4796881d971bbd09945f3c3474).
+// Fixture-only observation guard: never changes captain health or game state.
+// Prints P2_FIXTURE_CAPTAIN_DOWN and exits 86 (BLOCKED) on orimaDead,
+// Navi Dead state, or nonfinite/HP<=1.
 
 class DemonInterruptionApp final : public PlugPikiApp {
     DemonDropState drop;
@@ -18,6 +27,21 @@ class DemonInterruptionApp final : public PlugPikiApp {
 public:
     int idle() override {
         int result=PlugPikiApp::idle(); require(++frames<2400,"interruption timeout");
+        // #632: captain guard immediately after the engine idle step, BEFORE
+        // movie/pause early returns, readiness gates, or observed ticks.
+        {
+            Navi* guardNavi=naviMgr?naviMgr->getNavi():nullptr;
+            if(guardNavi) {
+                const bool deadState=guardNavi->getCurrState()&&
+                    guardNavi->getCurrState()->getID()==NAVISTATE_Dead;
+                const float hp=guardNavi->mHealth;
+                if(GameStat::orimaDead||deadState||!std::isfinite(hp)||hp<=1.0f) {
+                    std::printf("P2_FIXTURE_CAPTAIN_DOWN tick=%d hp=%.3f orima_dead=%d dead_state=%d outcome=BLOCKED\n",
+                        frames,hp,int(GameStat::orimaDead),int(deadState));
+                    std::fflush(stdout); std::_Exit(86);
+                }
+            }
+        }
         if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive) { gameflow.mMoviePlayer->requestSkip(); return result; }
         if(!pc_p2_preview_ready()||!naviMgr||!naviMgr->getNavi()) return result;
         Navi* n=naviMgr->getNavi();
