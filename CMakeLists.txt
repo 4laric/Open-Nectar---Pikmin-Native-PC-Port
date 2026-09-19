@@ -1151,6 +1151,15 @@ target_include_directories(p2_specular_dir_test PRIVATE pc_port)
 target_compile_options(p2_specular_dir_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_specular_dir_test COMMAND p2_specular_dir_test)
 
+# rd-p2-material-tint (#207) per-species batch-2 tint probe. Engine-free: the
+# tint table is inline in pc_port/pc_p2_batch2.h, so the test needs only its own
+# source plus the pc_port include dir.
+add_executable(p2_batch2_tint_test
+    tools/test_p2_batch2_tint.cpp)
+target_include_directories(p2_batch2_tint_test PRIVATE pc_port)
+target_compile_options(p2_batch2_tint_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_batch2_tint_test COMMAND p2_batch2_tint_test)
+
 # Lane 30 (#242) standalone policy tests. The drop/host-clock and Sarai
 # captor/lifecycle/identity harnesses are dependency-free headers: a test source
 # and the pc_port include dir are all they need. (demon_captor/demon_escape and
