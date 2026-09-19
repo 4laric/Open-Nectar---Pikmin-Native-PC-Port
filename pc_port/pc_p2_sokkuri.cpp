@@ -102,6 +102,11 @@ struct Sokkuri {
     float phase = 0.0f;
     bool hidden = true;
     bool deadLogged = false;
+    // #578 receipt boundary: the ordinary-delivery bind is established only
+    // on reveal (STAY -> APPEAR), never at setup. A still-disguised Sokkuri
+    // therefore carries no bound source, so GoalItem::suckMe can never mint
+    // onion:p2:79 for it. Single-use: consumed on delivery, cleared on forget.
+    bool deliveryBound = false;
     float lastHealth = LIFE;
     float logTimer = 0.0f;
 };
@@ -198,6 +203,24 @@ void enter(Sokkuri& s, State state, const char* clip, float timer = 0.0f) {
     if (clip) s.clip = clip;
 }
 
+// #578 receipt boundary: bind the ordinary-delivery source at reveal time.
+// Idempotent: the first reveal establishes the single-use bind; later
+// reveals (after a disappear cycle) never re-bind. Rejected (unbindable id)
+// is logged by the callee, never fatal.
+void bindDelivery(BTeki* a, Sokkuri& s) {
+    if (s.deliveryBound) return;
+    s.deliveryBound = true;
+    // Ordinary-delivery bridge (lane 06 contract, #495): bind source 79 to
+    // this live actor so GoalItem::suckMe can grant onion:p2:79 exactly once
+    // through pc_randomizer_p2_corpse_delivered. Single-use: consumed on
+    // delivery and cleared on forget/recycle.
+    pc_randomizer_p2_bind_source(static_cast<PelletView*>(a), 79,
+                                 pc_p2_campaign_token(a));
+    std::printf("P2_SOKKURI_DELIVERY_BIND generator=%u source_id=79\n",
+                pc_p2_campaign_token(a));
+    std::fflush(stdout);
+}
+
 void setNextMoveInfo(Sokkuri& s, const Vector3f& pos) {
     s.timer = randRange(s, 0.0f, MAX_TRAVEL); // source randWeightFloat(max-min)+0
     const float deg = randRange(s, 45.0f, 90.0f); // fp04..fp03
@@ -288,6 +311,15 @@ unsigned long pc_p2_sokkuri_count() {
 
 bool pc_p2_sokkuri_registered(BTeki* actor) {
     return actors.count(static_cast<PelletView*>(actor)) != 0;
+}
+
+// #578 receipt boundary observability: read-only reveal query. True once the
+// actor's disguise has dropped at least once (delivery bind established);
+// false while still disguised. Never mutates state; false for any
+// unregistered actor.
+bool pc_p2_sokkuri_revealed(BTeki* actor) {
+    auto it = actors.find(static_cast<PelletView*>(actor));
+    return it != actors.end() && it->second.deliveryBound;
 }
 
 float pc_p2_sokkuri_param_f(const BTeki* actor, int idx, float fallback) {
@@ -415,15 +447,9 @@ void pc_p2_sokkuri_setup() {
         s.targetPosition = s.home;
         actor->mHealth = LIFE;
         enter(s, SOKKURI_STAY, "appear1");
-        // Ordinary-delivery bridge (lane 06 contract, #495): bind source 79 to
-        // this live actor so GoalItem::suckMe can grant onion:p2:79 exactly once
-        // through pc_randomizer_p2_corpse_delivered. Rejected (unbindable id)
-        // is logged by the callee, never fatal. Single-use: consumed on
-        // delivery and cleared on forget/recycle.
-        pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor), 79,
-                                     pc_p2_campaign_token(actor));
-        std::printf("P2_SOKKURI_DELIVERY_BIND generator=%u source_id=79\n",
-                    pc_p2_campaign_token(actor));
+        // #578: the delivery bind is NOT established here. bindDelivery()
+        // runs on the first STAY -> APPEAR reveal, so a still-disguised
+        // Sokkuri carries no bound source and cannot mint onion:p2:79.
         std::printf("P2_SOKKURI_BIND generator=%u source_id=79 visual_only=0\n",
                     pc_p2_campaign_token(actor));
         const Vector3f pos = actor->getPosition();
@@ -487,6 +513,9 @@ void pc_p2_sokkuri_update(BTeki* actor) {
                         actor->mGenerator ? pc_p2_campaign_token(actor) : 0u);
             std::printf("P2_SOKKURI_STATE generator=%u state=appear\n",
                         actor->mGenerator ? pc_p2_campaign_token(actor) : 0u);
+            // #578 receipt boundary: first reveal establishes the
+            // single-use delivery bind. Idempotent across disappear cycles.
+            bindDelivery(actor, s);
             enter(s, SOKKURI_APPEAR, "appear1");
         }
         break;
