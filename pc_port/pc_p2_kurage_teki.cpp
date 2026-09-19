@@ -1,3 +1,4 @@
+#include "pc_p2_campaign_actor.h"
 #include "pc_p2_kurage_teki.h"
 #include "pc_p2_kurage_fsm.h"
 #include "pc_p2_kurage_receiver.h"
@@ -367,8 +368,12 @@ void pc_p2_kurage_teki_setup()
     CI_LOOP(it)
     {
         auto* t = static_cast<Teki*>(*it);
-        if (!t || !t->mGenerator || t->mGenerator->_70 != gen) continue;
-        if (t->mTekiType != type || s.size()) std::abort();
+        if (!t || !t->mGenerator) continue;
+        if (pc_randomizer_p2_bridge()) {
+            if (pc_p2_campaign_source(t) != 57) continue;
+            gen = pc_p2_campaign_token(t);
+        } else if (pc_p2_campaign_token(t) != gen) continue;
+        if (t->mTekiType != type || (!pc_randomizer_p2_bridge() && s.size())) std::abort();
         // Optional visual poses: the corpse/receipt path must not require the
         // converted kurage_*.mod files. When they are absent the P1 host body
         // draws instead (pc_p2_kurage_visual_draw returns false).

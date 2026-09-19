@@ -1,3 +1,4 @@
+#include "pc_p2_campaign_actor.h"
 #include "pc_p2_sarai_manager.h"
 #include "pc_p2_sarai_host.h"
 #include "pc_p2_retail_player.h"
@@ -39,7 +40,7 @@ bool findOwnerActor(unsigned wantedGenerator, int wantedType, BTeki*& match)
     CI_LOOP(actors) {
         BTeki* actor = static_cast<BTeki*>(*actors);
         if (!actor || !actor->mGenerator) continue;
-        if (actor->mGenerator->_70 != wantedGenerator || actor->mTekiType != wantedType) continue;
+        if (pc_p2_campaign_token(actor) != wantedGenerator || actor->mTekiType != wantedType) continue;
         if (match) return false;
         match = actor;
     }
@@ -114,7 +115,7 @@ std::unique_ptr<P2SaraiHost> buildHost(BTeki* match, unsigned generatorId)
     // at the fixture's natural values.
     host->enableNatural(30.0f, 3.0f, 20.0f, 12.0f, 1000.0f, 360.0f, 1200.0f, home);
     if (!host->naturalEnabled()) return nullptr;
-    if (!host->bindNativeActor(match, match->mGenerator->_70, match->mTekiType)) return nullptr;
+    if (!host->bindNativeActor(match, pc_p2_campaign_token(match), match->mTekiType)) return nullptr;
     return host;
 }
 } // namespace
@@ -156,13 +157,13 @@ void pc_p2_sarai_manager_setup()
 
     BTeki* match = nullptr;
     if (!findOwnerActor(wantedGenerator, wantedType, match)) return;
-    auto host = buildHost(match, match->mGenerator->_70);
+    auto host = buildHost(match, pc_p2_campaign_token(match));
     if (!host) return;
-    s[match] = { host.get(), match->mGenerator->_70, match->mTekiType };
+    s[match] = { host.get(), pc_p2_campaign_token(match), match->mTekiType };
     std::printf("P2_SARAI_READY source_id=23 species=Sarai generator=%u type=%d health=%.1f behavior=source\n",
-                match->mGenerator->_70, match->mTekiType, match->mHealth);
+                pc_p2_campaign_token(match), match->mTekiType, match->mHealth);
     std::printf("P2_SARAI_CORPSE_READY generator=%u drop=BDT_Normal ledger=onion receipt=corpse:sarai:%u\n",
-                match->mGenerator->_70, match->mGenerator->_70);
+                pc_p2_campaign_token(match), pc_p2_campaign_token(match));
     std::fflush(stdout);
     hosts.push_back(std::move(host));
 }

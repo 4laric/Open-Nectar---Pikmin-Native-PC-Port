@@ -1,3 +1,4 @@
+#include "pc_p2_campaign_actor.h"
 // Optional P2 Mamuta static anchors on exact P1 Miurin actors. Gameplay stays P1.
 #include "pc_p2_mamuta.h"
 #include "pc_p2_mamuta_policy.h"
@@ -58,7 +59,7 @@ void pc_p2_mamuta_forget(BTeki* actor) {
 }
 void pc_p2_mamuta_setup() {
     pc_p2_mamuta_reset();
-    if (!pc_pikipelago_room_preview()) return;
+    if (!pc_pikipelago_room_preview() && !pc_randomizer_p2_bridge()) return;
     std::ifstream in("p2-mamuta-actors.txt"); if (!in) return;
     std::string word; int count;
     if (!(in>>word>>count) || word!="P2_MAMUTA_ACTORS_1" || count<1 || count>100 || !tekiMgr) fail();
@@ -68,10 +69,14 @@ void pc_p2_mamuta_setup() {
         if (!(in>>id>>word) || id>0xffffffffULL || word!="Miulin" || !wanted.insert(unsigned(id)).second) fail();
     }
     if (in>>word) fail();
+    if (pc_randomizer_p2_bridge()) {
+        wanted = pc_p2_campaign_ids(54);
+        if (wanted.empty()) return;
+    }
     Iterator it(tekiMgr); CI_LOOP(it) {
         Teki* actor=static_cast<Teki*>(*it);
-        if (!actor || !actor->mGenerator || !wanted.count(actor->mGenerator->_70)) continue;
-        unsigned id=actor->mGenerator->_70;
+        if (!actor || !actor->mGenerator || !wanted.count(pc_p2_campaign_token(actor))) continue;
+        unsigned id=pc_p2_campaign_token(actor);
         if (actor->mTekiType!=TEKI_Miurin || !found.insert(id).second) fail();
         actors.emplace(actor,id);
     }

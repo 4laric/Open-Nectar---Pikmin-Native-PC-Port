@@ -1,3 +1,4 @@
+#include "pc_p2_campaign_actor.h"
 #include "Age.h"
 #include "DebugLog.h"
 #include "Dolphin/os.h"
@@ -142,7 +143,7 @@ Creature* GenObjectTeki::birth(BirthInfo& info)
                         source, uid, int(mTekiType), info.mPosition.x, info.mPosition.z);
             // Generated placement (lane 03/04): claim the spawned actor for its
             // seeded P2 identity module instead of leaving it as a P1 stand-in.
-            pc_p2_generated_placement_bind(static_cast<BTeki*>(teki), source, uid, info.mGenerator->_70);
+            pc_p2_generated_placement_bind(static_cast<BTeki*>(teki), source, uid, pc_p2_campaign_token(static_cast<BTeki*>(teki)));
             // Lane-04 placement evidence: sample the generated slot's terrain/route
             // at the birth position. Additive; the slot uid is already resolved.
             if (uid)
