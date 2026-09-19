@@ -920,6 +920,15 @@ target_include_directories(p2_snagret_fsm_test PRIVATE pc_port)
 target_compile_options(p2_snagret_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_snagret_fsm_test COMMAND p2_snagret_fsm_test)
 
+# rd-snakecrow-gate (#174): SnakeCrow/SnakeWhole emerged-vulnerability gate.
+# Header-only engine-free predicate shared with pc_p2_snakejoint_invulnerable;
+# the engine glue (pc_p2_snakejoint.cpp) is linked into pikmin_pc separately.
+add_executable(p2_snakejoint_gate_test
+    tools/test_p2_snakejoint_gate.cpp)
+target_include_directories(p2_snakejoint_gate_test PRIVATE pc_port)
+target_compile_options(p2_snakejoint_gate_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_snakejoint_gate_test COMMAND p2_snakejoint_gate_test)
+
 # Lane 27 BombSarai (Careening Dirigibug) engine-free source-policy gates. The
 # sources shipped on the approved line without ctest registration.
 add_executable(p2_bombsarai_fsm_test
