@@ -270,6 +270,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_sokkuri.cpp
     pc_port/pc_p2_armor.cpp
     pc_port/pc_p2_otakara.cpp
+    pc_port/pc_p2_otakara_fx.cpp
     pc_port/pc_p2_elecbug.cpp
     pc_port/pc_p2_tamago.cpp
     pc_port/pc_p2_imomushi.cpp
@@ -850,6 +851,17 @@ add_executable(p2_mar_receipt_registration_test
 target_include_directories(p2_mar_receipt_registration_test PRIVATE pc_port)
 target_compile_options(p2_mar_receipt_registration_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_mar_receipt_registration_test COMMAND p2_mar_receipt_registration_test)
+
+# Visible Otakara discharge attacks (#170, rd-p2-otakara-fx). Engine-free
+# mapping + slot-lifecycle test; the game TU compiles with the real
+# effectMgr seam, the test with P2_OTAKARA_FX_NO_ENGINE stubs.
+add_executable(p2_otakara_fx_test
+    tools/test_p2_otakara_fx.cpp
+    pc_port/pc_p2_otakara_fx.cpp)
+target_include_directories(p2_otakara_fx_test PRIVATE pc_port)
+target_compile_definitions(p2_otakara_fx_test PRIVATE P2_OTAKARA_FX_NO_ENGINE)
+target_compile_options(p2_otakara_fx_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_otakara_fx_test COMMAND p2_otakara_fx_test)
 
 # Lane 35 cave unit-pool partition + phased trunk growth (#474). Header-only
 # engine-free policy; no shared generator source is claimed or ported here.
