@@ -51,6 +51,7 @@ struct Beetle {
     unsigned rng=1;          // deterministic per-actor LCG
     unsigned generator=0;    // spawn generator id, keys the in-process flip dedupe
     int treasure=0;          // configured first-flip stand-in pellet value (0 = none)
+    bool escaped=false;      // terminal burrow/flee: corpse suppressed, delivery bind dropped
 };
 std::map<PelletView*,Beetle> beetles;
 
@@ -302,11 +303,21 @@ void pc_p2_kogane_setup(){
                 // instead of re-spawning one that can never drop again.
                 std::printf("P2_KOGANE_RESTORED_ESCAPE generator=%u flips=%d\n",b.generator,b.flips);
                 std::fflush(stdout);
+                b.escaped=true;      // #571: burrow/flee leaves no corpse and no receipt
                 actor->pcEscapeNow(); // corpse suppressed via the CorpseType hook
                 continue;
             }
         }
         actor->mHealth=actor->getParameterF(TPF_Life);
+        // #571 ordinary-delivery bridge: bind source 9 to this live actor so a
+        // Kogane killed by the host leaves a corpse that grants onion:p2:9
+        // exactly once through pc_randomizer_p2_corpse_delivered
+        // (GoalItem::suckMe). Single-use: consumed on delivery, and dropped by
+        // the burrow/flee path / central lifetime seam so an escaped beetle can
+        // never strand a corpse or double-fire a receipt. Rejected (unbindable
+        // id) is logged by the callee, never fatal.
+        pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor),9,b.generator);
+        std::printf("P2_KOGANE_DELIVERY_BIND generator=%u source_id=9\n",b.generator);
         std::printf("P2_KOGANE_BIND generator=%u source_id=%d karada_k0=%d visual_only=0\n",pc_p2_campaign_token(actor),id,p2kogane::karada(id));
         const auto& pos=actor->getPosition();
         std::printf("P2_ENEMY_READY species=Kogane_family native_family=Chappy generator=%u x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=native source_FSM=implemented drops=native gas=native_P1_approx escape=native treasure=%s cave=disabled\n",pc_p2_campaign_token(actor),pos.x,pos.y,pos.z,actor->mHealth,actor->getParameterF(TPF_Life),b.treasure>0?"standin":"disabled");
@@ -314,10 +325,30 @@ void pc_p2_kogane_setup(){
     std::printf("P2_KOGANE_BANK poses=%zu mod_bytes=%zu texture_attach_calls=%d load_seconds=%.3f\n",poses,total,attachments,std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count());
 }
 // Batch-4 hooks: every hook is a no-op for unregistered actors.
-// Beetles never leave a corpse: on death/escape they burrow away (KoganeState
-// Disappear); suppress the host corpse pellet for registered actors only.
+// On burrow/flee (KoganeAi dieState scale-down) a registered beetle leaves no
+// corpse; a beetle killed by the host leaves a normal carryable corpse (#571).
 int pc_p2_kogane_corpse_type(const BTeki* actor,int fallback){
-    return pc_p2_kogane_source_id(const_cast<BTeki*>(actor))<0?fallback:TEKICORPSE_NoCorpse;
+    if(pc_p2_kogane_source_id(const_cast<BTeki*>(actor))<0)return fallback;
+    // #571: a beetle that burrows/flees leaves nothing (source vanish, KoganeAi
+    // dieState scale-down -> doKill), but a beetle killed by the host leaves a
+    // carryable corpse so the bound ordinary delivery can grant onion:p2:9
+    // exactly once. While the beetle is alive this hook is never consulted for
+    // corpse creation, so returning the fallback for a live registered actor is
+    // safe for any pre-death parameter read.
+    auto it=beetles.find(static_cast<PelletView*>(const_cast<BTeki*>(actor)));
+    return (it!=beetles.end()&&it->second.escaped)?TEKICORPSE_NoCorpse:fallback;
+}
+// #571 receipt-boundary introspection for the receipt fixture/test. Read-only:
+// true once this beetle burrowed/fled (corpse suppressed, delivery bind dropped)
+// and true while it still holds the ordinary-delivery bind. Both false for any
+// unregistered actor.
+bool pc_p2_kogane_escaped(BTeki* actor){
+    auto it=beetles.find(static_cast<PelletView*>(actor));
+    return it!=beetles.end()&&it->second.escaped;
+}
+bool pc_p2_kogane_delivery_bound(BTeki* actor){
+    return pc_p2_kogane_source_id(static_cast<PelletView*>(actor))>=0
+        && pc_randomizer_p2_source_for(static_cast<PelletView*>(actor))!=0;
 }
 // Audited source health plus harmlessness: beetles never pursue or bite, so
 // the host's target-recognition and attack params are zeroed for registered
@@ -368,6 +399,7 @@ void pc_p2_kogane_update(BTeki* actor){
                 std::printf("P2_KOGANE_ESCAPE generator=%u source_id=%d flips=%d\n",actor->mGenerator?pc_p2_campaign_token(actor):0u,id,b.flips);
                 std::fflush(stdout);
                 saveReceipts();
+                b.escaped=true; // #571: burrow/flee leaves no corpse; central seam drops the bind
                 actor->pcEscapeNow(); // corpse suppressed via the CorpseType hook; health stays >0 so no defeat event
                 return;
             }
