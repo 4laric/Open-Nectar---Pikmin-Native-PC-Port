@@ -1,4 +1,5 @@
 #include "pc_p2_campaign_actor.h"
+#include "pc_p2_setup_failsafe.h"
 // Family-owned ground-invertebrate source behavior for the batch-2 Chappy
 // placement vehicle: Skitter Leaf (Sokkuri, EnemyID 79). Implements the source
 // SokkuriState.cpp FSM (Stay/Appear/Disappear/Wait/MoveGround/MoveWater/Flick/
@@ -405,7 +406,7 @@ void pc_p2_sokkuri_setup() {
         if (match == wanted.end()) continue;
         if (actor->mTekiType != TEKI_Chappy) {
             std::printf("P2_SOKKURI_ERROR native_type generator=%u\n", pc_p2_campaign_token(actor));
-            std::abort();
+            if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Sokkuri", "actor_type_mismatch")) return;
         }
         Sokkuri& s = actors[static_cast<PelletView*>(actor)];
         s.rng = (pc_p2_campaign_token(actor) * 2654435761u) | 1u;
@@ -434,7 +435,7 @@ void pc_p2_sokkuri_setup() {
     }
     if (found.size() != wanted.size()) {
         std::printf("P2_SOKKURI_ERROR missing_actor wanted=%zu found=%zu\n", wanted.size(), found.size());
-        std::abort();
+        if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Sokkuri", "actor_roster_incomplete")) return;
     }
     ready = true;
 }

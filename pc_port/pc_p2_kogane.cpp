@@ -1,5 +1,6 @@
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_receipt_host.h"
+#include "pc_p2_setup_failsafe.h"
 #include "pc_p2_kogane.h"
 #include "pc_p2_kogane_policy.h"
 #include "pc_p2_enemy.h"
@@ -231,10 +232,9 @@ void pc_p2_kogane_setup(){
     }
     koganeReceiptHandle = pc_p2_receipt_host_open(kOnionReceiptsPath);
     if (!koganeReceiptHandle) {
-        std::fputs("P2_KOGANE = invalid receipt state\n", stderr);
-        std::abort();
+        if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Kogane", "receipt_ledger_unreadable")) return;
     }
-    p2kogane::Config config;if(!tekiMgr||!p2kogane::read(sidecar,config))std::abort();
+    p2kogane::Config config;if(!tekiMgr||!p2kogane::read(sidecar,config)){if(pc_p2_setup_skip(pc_randomizer_p2_bridge(),"Kogane","staged_sidecar_invalid"))return;}
     if (pc_randomizer_p2_bridge()) {
         config.ids.clear();
         config.treasures.clear();
@@ -247,21 +247,21 @@ void pc_p2_kogane_setup(){
     Iterator it(tekiMgr);CI_LOOP(it){
         Teki* actor=static_cast<Teki*>(*it);
         if(!actor || !actor->mGenerator || !wanted.count(pc_p2_campaign_token(actor)))continue;
-        if(!seen.insert(pc_p2_campaign_token(actor)).second || actor->mTekiType!=TEKI_Chappy || pc_p2_enemy_name(actor) || pc_p2_sheargrub_name(actor) || pc_p2_kochappy_name(actor))std::abort();
+        if(!seen.insert(pc_p2_campaign_token(actor)).second || actor->mTekiType!=TEKI_Chappy || pc_p2_enemy_name(actor) || pc_p2_sheargrub_name(actor) || pc_p2_kochappy_name(actor)){if(pc_p2_setup_skip(pc_randomizer_p2_bridge(),"Kogane","actor_identity_mismatch"))return;}
         selected.push_back(actor);
     }
-    if(seen!=wanted)std::abort();
+    if(seen!=wanted){if(pc_p2_setup_skip(pc_randomizer_p2_bridge(),"Kogane","actor_roster_incomplete"))return;}
     size_t total=0,poses=0;std::vector<unsigned char> reference;
     for(const auto& clip:manifest){
         size_t clipBytes=0;
         for(int i=0;i<clip.count;++i){
             char path[160];std::snprintf(path,sizeof(path),"assets/dataDir/courses/pikmin2room/kogane_%s_%02d.mod",clip.name.c_str(),i);
-            std::ifstream file(path,std::ios::binary|std::ios::ate);if(!file)std::abort();auto bytes=file.tellg();
-            if(bytes<=0 || size_t(bytes)>p2animation::ClipBytes-clipBytes || size_t(bytes)>p2animation::TotalBytes-total)std::abort();
+            std::ifstream file(path,std::ios::binary|std::ios::ate);if(!file){if(pc_p2_setup_skip(pc_randomizer_p2_bridge(),"Kogane","clip_file_missing"))return;}auto bytes=file.tellg();
+            if(bytes<=0 || size_t(bytes)>p2animation::ClipBytes-clipBytes || size_t(bytes)>p2animation::TotalBytes-total){if(pc_p2_setup_skip(pc_randomizer_p2_bridge(),"Kogane","clip_file_invalid"))return;}
             clipBytes+=size_t(bytes);total+=size_t(bytes);file.seekg(0);
             std::vector<unsigned char> data(size_t(bytes),0),resources;
-            if(!file.read(reinterpret_cast<char*>(data.data()),bytes) || !p2animation::resources(data,resources))std::abort();
-            if(!reference.empty() && reference!=resources)std::abort();reference=resources;
+            if(!file.read(reinterpret_cast<char*>(data.data()),bytes) || !p2animation::resources(data,resources)){if(pc_p2_setup_skip(pc_randomizer_p2_bridge(),"Kogane","clip_file_unparsable"))return;}
+            if(!reference.empty() && reference!=resources){if(pc_p2_setup_skip(pc_randomizer_p2_bridge(),"Kogane","clip_resource_mismatch"))return;}reference=resources;
         }
     }
     const auto started=std::chrono::steady_clock::now();Shape* shared=nullptr;int attachments=0;
@@ -269,13 +269,13 @@ void pc_p2_kogane_setup(){
         timing[clip.name]=clip;
         for(int i=0;i<clip.count;++i){
             char path[128];std::snprintf(path,sizeof(path),"courses/pikmin2room/kogane_%s_%02d.mod",clip.name.c_str(),i);
-            Shape* shape=gameflow.loadShape(path,true);if(!shape)std::abort();
+            Shape* shape=gameflow.loadShape(path,true);if(!shape){if(pc_p2_setup_skip(pc_randomizer_p2_bridge(),"Kogane","shape_load_failed"))return;}
             if(!shared){shared=shape;for(int t=0;t<shape->mTexAttrCount;++t)if(shape->mTexAttrList[t].mTexture){shape->mTexAttrList[t].mTexture->attach();++attachments;}}
             else{
-                if(shape->mMaterialCount!=shared->mMaterialCount || shape->mTexAttrCount!=shared->mTexAttrCount || shape->mTevInfoCount!=shared->mTevInfoCount)std::abort();
+                if(shape->mMaterialCount!=shared->mMaterialCount || shape->mTexAttrCount!=shared->mTexAttrCount || shape->mTevInfoCount!=shared->mTevInfoCount){if(pc_p2_setup_skip(pc_randomizer_p2_bridge(),"Kogane","shape_layout_mismatch"))return;}
                 for(int j=0;j<shape->mTotalMatpolyCount;++j){auto* poly=shape->mMatpolyList[j];if(!poly || !poly->mMaterial)continue;int material=-1;
                     for(int m=0;m<shape->mMaterialCount;++m)if(poly->mMaterial==&shape->mMaterialList[m])material=m;
-                    if(material<0)std::abort();poly->mMaterial=&shared->mMaterialList[material];}
+                    if(material<0){if(pc_p2_setup_skip(pc_randomizer_p2_bridge(),"Kogane","shape_material_mismatch"))return;}poly->mMaterial=&shared->mMaterialList[material];}
                 shape->mMaterialList=shared->mMaterialList;shape->mTexAttrList=shared->mTexAttrList;shape->mTevInfoList=shared->mTevInfoList;
             }
             clips[clip.name].push_back(shape);++poses;

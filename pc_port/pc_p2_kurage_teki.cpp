@@ -1,4 +1,5 @@
 #include "pc_p2_campaign_actor.h"
+#include "pc_p2_setup_failsafe.h"
 #include "pc_p2_kurage_teki.h"
 #include "pc_p2_kurage_fsm.h"
 #include "pc_p2_kurage_receiver.h"
@@ -361,7 +362,7 @@ void pc_p2_kurage_teki_setup()
     std::ifstream in("p2-kurage-teki.txt");
     if (!in) return;
     p2kurage::Binding cfg{};
-    if (!p2kurage::read(in, cfg) || !tekiMgr) std::abort();
+    if (!p2kurage::read(in, cfg) || !tekiMgr) { if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Kurage", "staged_config_invalid")) return; }
     unsigned gen = cfg.generator;
     int type = cfg.type;
     Iterator it(tekiMgr);
@@ -373,7 +374,7 @@ void pc_p2_kurage_teki_setup()
             if (pc_p2_campaign_source(t) != 57) continue;
             gen = pc_p2_campaign_token(t);
         } else if (pc_p2_campaign_token(t) != gen) continue;
-        if (t->mTekiType != type || (!pc_randomizer_p2_bridge() && s.size())) std::abort();
+        if (t->mTekiType != type || (!pc_randomizer_p2_bridge() && s.size())) { if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Kurage", "actor_type_mismatch")) return; }
         // Optional visual poses: the corpse/receipt path must not require the
         // converted kurage_*.mod files. When they are absent the P1 host body
         // draws instead (pc_p2_kurage_visual_draw returns false).
@@ -383,7 +384,7 @@ void pc_p2_kurage_teki_setup()
         Binding& b = inserted.first->second;
         b.spawnPos = t->mSRT.t;
         refresh(t, b);
-        if (!pc_p2_kurage_receiver_setup(t, &b.mouth)) std::abort();
+        if (!pc_p2_kurage_receiver_setup(t, &b.mouth)) { if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Kurage", "receiver_setup_failed")) return; }
         std::printf("P2_KURAGE_TEKI_READY generator=%u type=%d binding=private_adapter\n", gen, type);
         std::printf("P2_KURAGE_CORPSE_READY generator=%u drop=BDT_Normal ledger=onion receipt=corpse:kurage:%u\n", gen, gen);
         if (std::getenv("PIKMIN_P2_KURAGE_SHOWCASE")) {

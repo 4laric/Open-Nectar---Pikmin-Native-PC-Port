@@ -1515,3 +1515,11 @@ add_executable(p2_purple_flight_actual_test tools/test_p2_purple_flight_actual.c
 target_include_directories(p2_purple_flight_actual_test BEFORE PRIVATE tools/p2_purple_flight_stubs pc_port)
 target_compile_options(p2_purple_flight_actual_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_purple_flight_actual_test COMMAND p2_purple_flight_actual_test)
+
+# #440 campaign setup failsafe: in bridge mode a species setup that cannot stage
+# its files logs P2_SETUP_SKIP and leaves the P1 stand-ins instead of aborting;
+# fixture mode stays fail-closed. Engine-free guard test.
+add_executable(p2_setup_failsafe_test tools/test_p2_setup_failsafe.cpp)
+target_include_directories(p2_setup_failsafe_test PRIVATE pc_port)
+target_compile_options(p2_setup_failsafe_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_setup_failsafe_test COMMAND p2_setup_failsafe_test)
