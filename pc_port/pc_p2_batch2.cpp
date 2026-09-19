@@ -19,6 +19,8 @@
 #include "pc_p2_imomushi.h"
 #include "pc_p2_otakara.h"
 #include "pc_p2_pom.h"
+#include "pc_p2_campaign_actor.h"
+#include "pc_randomizer.h"
 #include "pc_bbft.h"
 #include "teki.h"
 #include "Generator.h"
@@ -224,10 +226,29 @@ void pc_p2_batch2_forget(BTeki* actor) {
 // contract (every configured actor must exist); ``false`` is the re-entry path
 // after a legitimate family death, where absent actors are tolerated so the
 // respawned actor can be re-bound without a stale pointer.
+// Generated campaign sessions (the seed bridge) bind by the seed's source id per
+// actor, like the behaviour modules, not by the arena sidecar's generator ids.
+static void campaignWanted(const FamilyDef& family, std::map<unsigned, std::string>& wanted) {
+    static const struct { const char* family; unsigned source; const char* species; } SOURCES[] = {
+        {"dweevil", 59, "FireOtakara"}, {"dweevil", 60, "WaterOtakara"},
+        {"dweevil", 61, "GasOtakara"}, {"dweevil", 62, "ElecOtakara"},
+        {"ground", 79, "Sokkuri"},
+    };
+    wanted.clear();
+    for (const auto& row : SOURCES)
+        if (std::string(row.family) == family.name)
+            for (unsigned id : pc_p2_campaign_ids(row.source)) wanted[id] = row.species;
+}
+
 static void bindFamilies(bool strict) {
+    const bool bridge = pc_randomizer_p2_bridge() && !pc_pikipelago_room_preview();
     for (const FamilyDef& family : FAMILIES) {
         std::map<unsigned, std::string> wanted;
         if (!parseActors(family.actors, wanted)) continue;
+        if (bridge) {
+            campaignWanted(family, wanted);
+            if (wanted.empty()) continue;
+        }
         std::map<std::string, std::vector<p2batch2clock::Row>> rows;
         if (!parseBank(family.bank, rows)) fail("missing bank for present actor config");
 
@@ -237,10 +258,14 @@ static void bindFamilies(bool strict) {
         CI_LOOP(it) {
             Teki* teki = static_cast<Teki*>(*it);
             if (!teki || !teki->mGenerator) continue;
-            const unsigned generator = teki->mGenerator->_70;
+            const unsigned generator = bridge ? pc_p2_campaign_token(teki) : teki->mGenerator->_70;
             auto match = wanted.find(generator);
             if (match == wanted.end()) continue;
-            if (teki->mTekiType != expectedType(family.name, match->second)) fail("native type mismatch");
+            if (teki->mTekiType != expectedType(family.name, match->second)) {
+                if (!bridge) fail("native type mismatch");
+                std::printf("P2_SETUP_SKIP batch2 %s native_type_mismatch generator=%u\n", family.name, generator);
+                continue;
+            }
             if (!found.insert(generator).second) fail("duplicate generator in scene");
             actors[teki] = std::string(family.name) + "|" + match->second;
             speciesUsed.insert(match->second);
@@ -270,15 +295,21 @@ static void logBindings() {
 
 void pc_p2_batch2_setup() {
     pc_p2_batch2_reset();
-    if (!pc_pikipelago_room_preview() || !tekiMgr) return;
-    bindFamilies(true);
+    if (!tekiMgr) return;
+    if (pc_pikipelago_room_preview()) {
+        bindFamilies(true);
+    } else if (pc_randomizer_p2_bridge()) {
+        bindFamilies(false);  // campaign: missing actors (other areas/days) are expected
+    } else {
+        return;
+    }
     logBindings();
 }
 
 void pc_p2_batch2_rebind() {
     // Rebind within this scene without reallocating the immutable model banks.
     actors.clear();
-    if (!pc_pikipelago_room_preview() || !tekiMgr) return;
+    if (!(pc_pikipelago_room_preview() || pc_randomizer_p2_bridge()) || !tekiMgr) return;
     bindFamilies(false);
     logBindings();
 }

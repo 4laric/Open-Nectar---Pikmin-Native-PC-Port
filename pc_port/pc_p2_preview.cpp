@@ -167,6 +167,7 @@ void pc_p2_preview_setup() {
             pc_p2_mamuta_setup();
             pc_p2_sokkuri_setup();
             pc_p2_otakara_setup();
+            pc_p2_batch2_setup();  // P2 models for the Otakara/Sokkuri behaviour hosts
         }
         return;
     }
