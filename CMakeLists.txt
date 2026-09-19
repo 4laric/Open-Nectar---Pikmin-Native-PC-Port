@@ -295,6 +295,7 @@ pc_port/pc_p2_kabuto_cannon.cpp
 pc_port/pc_p2_kabuto_events.cpp
 pc_port/pc_p2_kabuto_muzzle.cpp
 pc_port/pc_p2_kabuto_binding.cpp
+pc_port/pc_p2_kabuto_host.cpp
 pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_rock_hazard.cpp
     pc_port/pc_p2_rock_host.cpp
@@ -1335,6 +1336,11 @@ foreach(policy IN ITEMS kabuto_muzzle kabuto_chain kabuto_binding)
     target_compile_options(p2_${policy}_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
     add_test(NAME p2_${policy}_test COMMAND p2_${policy}_test)
 endforeach()
+# Lane 20 (#424) generated-session live-animator family host.
+add_executable(p2_kabuto_host_test tools/p2_kabuto_host_test.cpp ${P2_KABUTO_TEST_DEPS} pc_port/pc_p2_kabuto_host.cpp)
+target_include_directories(p2_kabuto_host_test PRIVATE pc_port)
+target_compile_options(p2_kabuto_host_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_kabuto_host_test COMMAND p2_kabuto_host_test)
 
 foreach(policy IN ITEMS bigtreasure_ordinary bigtreasure_animclock bigtreasure_natural bigtreasure_elements)
     add_executable(p2_${policy}_test tools/p2_${policy}_test.cpp ${P2_BIGTREASURE_TEST_DEPS}

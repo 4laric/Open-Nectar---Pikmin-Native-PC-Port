@@ -1,4 +1,5 @@
 #include "pc_p2_enemy.h"
+#include "pc_p2_kabuto_host.h"
 #include "pc_p2_kochappy.h"
 #include "pc_p2_animation.h"
 #include "pc_p2_snow_policy.h"
@@ -13,6 +14,7 @@
 #include "pc_p2_preview.h"
 #include "teki.h"
 #include "Generator.h"
+#include "pc_randomizer.h"
 #include "Shape.h"
 #include "System.h"
 #include "Joint.h"
@@ -24,6 +26,7 @@
 #include "Graphics.h"
 #include "Camera.h"
 #include <map>
+#include <memory>
 #include <set>
 #include <vector>
 #include <string>
@@ -48,15 +51,91 @@ P2SnowHealthPolicy healthPolicy;
 P2SnowAttackPolicy attackPolicy;
 P2SnowTurnPolicy turnPolicy;
 P2SnowChasePolicy chasePolicy;
+// Generated-session Cannon Beetle family host (#424). Keyed by the stable
+// generator uid; bound at actor birth (pc_p2_kabuto_bind_dynamic, called from
+// genteki.cpp) and advanced from the live TekiAnimator.
+P2KabutoHost kabutoHost;
+std::shared_ptr<const p2attach::Bank> kabutoGeneratedBank;
+bool kabutoGeneratedBankLoaded=false;
+p2attach::Affine kabutoOwner(const BTeki* actor,float faceRad) {
+    p2attach::Affine owner;
+    const float c=std::cos(faceRad),s=std::sin(faceRad);
+    owner.m[0][0]=c;owner.m[0][2]=s;
+    owner.m[2][0]=-s;owner.m[2][2]=c;
+    if(actor) {
+        const Vector3f& p=actor->mSRT.t;
+        owner.m[0][3]=p.x;owner.m[1][3]=p.y;owner.m[2][3]=p.z;
+    }
+    return owner;
+}
+// Live-animator feed for one bound actor. The P1 actor's own AI owns behavior;
+// this observes its attack motion and drives the family source clock/muzzle.
+void kabutoGeneratedTick(BTeki* actor,float) {
+    if(!actor || !actor->mGenerator || !kabutoHost.size())return;
+    const unsigned generatorId=pc_randomizer_generator_id(actor->mGenerator);
+    if(!generatorId || !kabutoHost.bound(generatorId))return;
+    auto* animator=actor->mTekiAnimator;
+    if(!animator)return;
+    const int motion=animator->getCurrentMotionIndex();
+    const int frames=animator->getFrameCount();
+    P2KabutoHostAnimator sample;
+    sample.motion=motion;
+    sample.counter=double(animator->getCounter());
+    sample.frameCount=frames;
+    sample.attackMotion=(motion==TekiMotion::Attack && frames>1);
+    const float faceRad=actor->getDirection();
+    P2KabutoHostState host;
+    host.targetPresent=false;
+    host.targetAttackable=false;
+    host.flickRequested=false;
+    host.targetAngle=0.0f;
+    host.health=actor->mHealth;
+    P2KabutoAdvanceOut out;
+    if(!kabutoHost.advance(generatorId,sample,kabutoOwner(actor,faceRad),faceRad,host,out))return;
+    if(!out.fired)return;
+    std::printf("P2_KABUTO_GENERATED_FIRE generator=%u species=%s homing=%d mouth=(%.1f,%.1f,%.1f) face_deg=%.1f\n",
+                generatorId,P2KabutoHost::species_name(kabutoHost.species(generatorId)),
+                int(out.birth.homing),out.birth.mouthPosition.x,out.birth.mouthPosition.y,
+                out.birth.mouthPosition.z,faceRad*180.0f/3.14159265358979323846f);
+    std::fflush(stdout);
+}
 }
 float pc_p2_snow_max_health(const BTeki* actor,float fallback) { return healthPolicy.life(actor,fallback); }
-void pc_p2_snow_reset() { interpolation=false;crossfade=false;campaignMode=false;skin.reset();skeleton.reset();baked.clear();instances.clear(); clips.clear();actors.clear();timing.clear();healthPolicy.reset();attackPolicy.reset();turnPolicy.reset();chasePolicy.reset(); }
+void pc_p2_snow_reset() { interpolation=false;crossfade=false;campaignMode=false;skin.reset();skeleton.reset();baked.clear();instances.clear(); clips.clear();actors.clear();timing.clear();healthPolicy.reset();attackPolicy.reset();turnPolicy.reset();chasePolicy.reset();kabutoHost.reset();kabutoGeneratedBank.reset();kabutoGeneratedBankLoaded=false; }
 void pc_p2_snow_update(BTeki* actor,float seconds){
+    kabutoGeneratedTick(actor,seconds);
     if(!crossfade)return;
     auto it=instances.find(static_cast<PelletView*>(actor));
     if(it!=instances.end())it->second.transition.advance(seconds,gameflow.mPauseAll||gameflow.mIsUIOverlayActive);
 }
-void pc_p2_snow_forget(BTeki* actor) { instances.erase(static_cast<PelletView*>(actor)); healthPolicy.forget(actor);attackPolicy.forget(actor);turnPolicy.forget(actor);chasePolicy.forget(actor);actors.erase(static_cast<PelletView*>(actor)); }
+void pc_p2_snow_forget(BTeki* actor) { instances.erase(static_cast<PelletView*>(actor)); healthPolicy.forget(actor);attackPolicy.forget(actor);turnPolicy.forget(actor);chasePolicy.forget(actor);actors.erase(static_cast<PelletView*>(actor)); if(actor && actor->mGenerator)kabutoHost.release(pc_randomizer_generator_id(actor->mGenerator)); }
+// Cannon Beetle family generated-session bind (lane 20, #424). Called from
+// genteki.cpp at birth for a P2-bound actor; declared in pc_p2_kabuto_host.h.
+// The source aborted on a non-Beatle vehicle because its dispatch forced
+// TEKI_Beatle; this line's spawn routing (p2campaign::hostType, owned
+// elsewhere) has no Kabuto case, so a mismatch fails closed instead.
+bool pc_p2_kabuto_bind_dynamic(Teki* actor, unsigned generatorId, unsigned sourceId)
+{
+    P2KabutoSpecies species;
+    if(!P2KabutoHost::species_for_source(sourceId,species))return false;
+    if(!actor || !generatorId)return false;
+    if(actor->mTekiType!=TEKI_Beatle)return false;
+    if(!kabutoGeneratedBankLoaded) {
+        kabutoGeneratedBankLoaded=true;
+        std::ifstream bank("assets/p2-kabuto-attach.txt");
+        if(bank)kabutoGeneratedBank=p2attach::read(bank);
+    }
+    if(!kabutoGeneratedBank || !kabutoHost.bind(generatorId,species,kabutoGeneratedBank)) {
+        std::printf("P2_KABUTO_GENERATED_BIND generator=%u source=%u type=%d bank=%d host=0\n",
+                    generatorId,sourceId,int(actor->mTekiType),int(bool(kabutoGeneratedBank)));
+        std::fflush(stdout);
+        return false;
+    }
+    std::printf("P2_KABUTO_GENERATED_BIND generator=%u source=%u type=%d species=%s bank=1 host=1\n",
+                generatorId,sourceId,int(actor->mTekiType),P2KabutoHost::species_name(species));
+    std::fflush(stdout);
+    return true;
+}
 bool pc_p2_snow_chase(BTeki* actor,const Vector3f& target) {
     if(!actor->isAlive() || !chasePolicy.contains(actor))return false;
     const Vector3f& position=actor->getPosition();

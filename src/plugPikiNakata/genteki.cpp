@@ -9,6 +9,7 @@
 #include "teki.h"
 #include "pc_randomizer.h"
 #include "pc_p2_generated_placement.h"
+#include "pc_p2_kabuto_host.h"
 #include "pc_p2_placement_probe.h"
 #include <cstdio>
 
@@ -144,6 +145,9 @@ Creature* GenObjectTeki::birth(BirthInfo& info)
             // Generated placement (lane 03/04): claim the spawned actor for its
             // seeded P2 identity module instead of leaving it as a P1 stand-in.
             pc_p2_generated_placement_bind(static_cast<BTeki*>(teki), source, uid, pc_p2_campaign_token(static_cast<BTeki*>(teki)));
+            // Cannon Beetle family generated-session host (lane 20, #424): no-op
+            // for every source outside 75/95/96.
+            pc_p2_kabuto_bind_dynamic(teki, uid, source);
             // Lane-04 placement evidence: sample the generated slot's terrain/route
             // at the birth position. Additive; the slot uid is already resolved.
             if (uid)
