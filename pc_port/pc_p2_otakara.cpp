@@ -1,4 +1,5 @@
 #include "pc_p2_campaign_actor.h"
+#include "pc_p2_setup_failsafe.h"
 // Family-owned lane-22 elemental-dweevil source behavior for the batch-2 Chappy
 // placement vehicle: Fiery Dweevil (FireOtakara, EnemyID 59) and its shared-base
 // elemental siblings WaterOtakara (60), GasOtakara (61), ElecOtakara (62).
@@ -542,14 +543,14 @@ void pc_p2_otakara_setup() {
         if (match == wanted.end()) continue;
         if (actor->mTekiType != TEKI_Chappy) {
             std::printf("P2_OTAKARA_ERROR native_type generator=%u\n", pc_p2_campaign_token(actor));
-            std::abort();
+            if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Otakara", "actor_type_mismatch")) return;
         }
         registerActor(actor, match->second, pc_p2_campaign_token(actor));
         found.insert(pc_p2_campaign_token(actor));
     }
     if (found.size() != wanted.size()) {
         std::printf("P2_OTAKARA_ERROR missing_actor wanted=%zu found=%zu\n", wanted.size(), found.size());
-        std::abort();
+        if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Otakara", "actor_roster_incomplete")) return;
     }
     ready = true;
 }
