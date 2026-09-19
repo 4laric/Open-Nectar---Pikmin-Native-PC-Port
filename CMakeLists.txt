@@ -1171,6 +1171,29 @@ if(WIN32)
     add_test(NAME p2_demon_admission_test COMMAND p2_demon_admission_test)
 endif()
 
+# rd-demon-chain-b: standalone policy tests from codex/p2-demon-drop-interruption
+# commits 22..43. Dependency-free headers; test source + pc_port include dir
+# are all they need. Verified -fsyntax-only clean against the line's headers.
+add_executable(p2_demon_capture_test tools/p2_demon_capture_test.cpp)
+target_include_directories(p2_demon_capture_test PRIVATE pc_port)
+target_compile_options(p2_demon_capture_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_demon_capture_test COMMAND p2_demon_capture_test)
+
+add_executable(p2_demon_attack_window_test tools/p2_demon_attack_window_test.cpp)
+target_include_directories(p2_demon_attack_window_test PRIVATE pc_port)
+target_compile_options(p2_demon_attack_window_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_demon_attack_window_test COMMAND p2_demon_attack_window_test)
+
+add_executable(p2_demon_policy_scenario_test tools/p2_demon_policy_scenario_test.cpp)
+target_include_directories(p2_demon_policy_scenario_test PRIVATE pc_port)
+target_compile_options(p2_demon_policy_scenario_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_demon_policy_scenario_test COMMAND p2_demon_policy_scenario_test)
+
+add_executable(p2_demon_attachment_test tools/p2_demon_attachment_test.cpp)
+target_include_directories(p2_demon_attachment_test PRIVATE pc_port)
+target_compile_options(p2_demon_attachment_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_demon_attachment_test COMMAND p2_demon_attachment_test)
+
 add_executable(pc_render_phase_test
     pc_port/timing/pc_render_phase_test.cpp
     pc_port/timing/pc_render_phase.cpp)
