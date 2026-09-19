@@ -249,6 +249,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_receipt_host.cpp
     pc_port/pc_p2_delivery_host.cpp
     pc_port/pc_p2_pom.cpp
+    pc_port/pc_p2_candypop.cpp
     pc_port/pc_p2_plant.cpp
     pc_port/pc_p2_waterwraith_visual.cpp
     pc_port/pc_p2_waterwraith_host.cpp

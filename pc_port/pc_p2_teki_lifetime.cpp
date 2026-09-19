@@ -28,6 +28,7 @@
 #include "pc_p2_flora_actor.h"
 #include "pc_p2_plant.h"
 #include "pc_p2_pom.h"
+#include "pc_p2_candypop.h"
 #include "pc_p2_hiba.h"
 #include "pc_p2_bombotakara.h"
 #include "pc_p2_dweevil.h"
@@ -149,6 +150,7 @@ pc_p2_sarai_manager_reset();
 	pc_p2_flora_reset();
 	pc_p2_plant_reset();
 	pc_p2_pom_reset();
+	pc_p2_candypop_reset();
 	pc_p2_hiba_reset();
     pc_p2_bombotakara_reset();
     pc_p2_dweevil_reset();
