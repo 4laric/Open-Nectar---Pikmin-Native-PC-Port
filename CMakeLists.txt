@@ -930,6 +930,29 @@ target_include_directories(p2_snakejoint_gate_test PRIVATE pc_port)
 target_compile_options(p2_snakejoint_gate_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_snakejoint_gate_test COMMAND p2_snakejoint_gate_test)
 
+# rd-onikurage-policy (#243): the shared OniKurage (Greater Spotted Jellyfloat)
+# captain-capture/Drop sources shipped on the approved line without ctest
+# registration. Register the existing engine-free suite so `ctest -R onikurage`
+# exercises it; no policy code is (re)added here.
+add_executable(p2_onikurage_fsm_test
+    tools/p2_onikurage_fsm_test.cpp)
+target_include_directories(p2_onikurage_fsm_test PRIVATE pc_port)
+target_compile_options(p2_onikurage_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_onikurage_fsm_test COMMAND p2_onikurage_fsm_test)
+
+add_executable(p2_onikurage_mouth_test
+    tools/test_p2_onikurage_mouth.cpp
+    pc_port/pc_p2_onikurage_mouth.cpp)
+target_include_directories(p2_onikurage_mouth_test PRIVATE pc_port)
+target_compile_options(p2_onikurage_mouth_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_onikurage_mouth_test COMMAND p2_onikurage_mouth_test)
+
+add_executable(p2_onikurage_teki_policy_test
+    tools/test_p2_onikurage_teki_policy.cpp)
+target_include_directories(p2_onikurage_teki_policy_test PRIVATE pc_port)
+target_compile_options(p2_onikurage_teki_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_onikurage_teki_policy_test COMMAND p2_onikurage_teki_policy_test)
+
 # Lane 27 BombSarai (Careening Dirigibug) engine-free source-policy gates. The
 # sources shipped on the approved line without ctest registration.
 add_executable(p2_bombsarai_fsm_test
