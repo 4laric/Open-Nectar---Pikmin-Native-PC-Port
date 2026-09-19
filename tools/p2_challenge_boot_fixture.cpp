@@ -3,7 +3,8 @@
 // Boots a pinned stage entry by ui_index (default 7 = ch_MUKI_bigfoot), applies
 // squad/sprays, ticks with the #632 captain guard before every observed tick,
 // then exercises descend + retry. Markers use the P2_CHALLENGE_BOOT_ prefix.
-// The module TU rides along via include so no CMake target edit is needed.
+// The module TU rides along via include; registered in CMakeLists.txt as the
+// p2_challenge_boot_fixture executable + ctest test (#674).
 
 
 #include <cstdio>
