@@ -14,6 +14,7 @@ class Shape;
 class CollPart;
 class Navi;
 class BTeki;
+class Piki;
 
 // Private visual host for the staged P2 Sarai (Swooping Snitchbug, enemy ID 23)
 // model. It is deliberately not registered as a P1 teki. It loads the converted
@@ -48,6 +49,15 @@ public:
     // token; this does not transfer ownership.
     CollPart* mouthPart(unsigned slot) const { return slot < 2 ? mMouths[slot] : nullptr; }
     std::uint64_t ownerToken() const { return mOwnerToken; }
+    // Mouth capture/attachment receiver (source eatPikmin + FallMeck/Flick).
+    // These drive pc_p2_sarai_capture_bridge against the host's live mouth
+    // CollParts; the captured Pikmin are carried (never swallowed) and released
+    // on drop/flick/teardown. The host does not transfer mouth ownership.
+    bool capturePiki(Piki* piki, unsigned slot);
+    bool releasePiki(Piki* piki);
+    unsigned carriedCount() const;
+    unsigned dropOwned(float damage, float downSpeed);
+    unsigned flickOwned();
     void sceneExit();
 
     // Ordinary spawned anchor binding (#242 admission). The host binds to the

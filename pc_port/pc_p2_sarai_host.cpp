@@ -1,6 +1,7 @@
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_sarai_host.h"
 #include "pc_p2_demon_bridge.h"
+#include "pc_p2_sarai_capture_bridge.h"
 #include "Collision.h"
 #include "Navi.h"
 #include "NaviMgr.h"
@@ -132,6 +133,7 @@ void P2SaraiHost::update()
 
 void P2SaraiHost::sceneExit()
 {
+    pc_p2_sarai_owner_lost(mOwnerToken);
     mSceneExited = true;
     mRenderedFrame = -1;
     mNaturalMotionStarted = false;
@@ -140,6 +142,19 @@ void P2SaraiHost::sceneExit()
     mLifecycle.sceneExit();
     resetMouthPose();
 }
+
+// Mouth capture/attachment receiver (source eatPikmin admission against the
+// live mouth CollPart; carried, never swallowed). Delegates the stick binding
+// to the bridge, which owns exactly-once/address-reuse safety.
+bool P2SaraiHost::capturePiki(Piki* piki, unsigned slot)
+{
+    if (!mLoaded || slot >= 2 || !mMouths[slot]) return false;
+    return pc_p2_sarai_piki_capture(piki, this, mMouths[slot], mOwnerToken, slot);
+}
+bool P2SaraiHost::releasePiki(Piki* piki) { return pc_p2_sarai_piki_release(piki); }
+unsigned P2SaraiHost::carriedCount() const { return pc_p2_sarai_carried_count(const_cast<P2SaraiHost*>(this)); }
+unsigned P2SaraiHost::dropOwned(float damage, float downSpeed) { return pc_p2_sarai_drop_owned(this, damage, downSpeed); }
+unsigned P2SaraiHost::flickOwned() { return pc_p2_sarai_flick_owned(this); }
 
 void P2SaraiHost::doKill() { sceneExit(); }
 
