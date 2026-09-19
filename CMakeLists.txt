@@ -223,6 +223,12 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_white_poison.cpp
     pc_port/pc_p2_cave.cpp
     pc_port/pc_p2_cave_generate.cpp
+    pc_port/pc_p2_cave_generator.cpp
+    pc_port/pc_p2_cave_rooms.cpp
+    pc_port/pc_p2_cave_geometry.cpp
+    pc_port/pc_p2_cave_items.cpp
+    pc_port/pc_p2_cave_bud_actor.cpp
+    pc_port/pc_p2_cave_carry.cpp
     pc_port/pc_p2_enemy.cpp
     pc_port/pc_p2_sheargrub.cpp
     pc_port/pc_p2_kochappy.cpp
@@ -843,6 +849,63 @@ target_include_directories(p2_mar_receipt_registration_test PRIVATE pc_port)
 target_compile_options(p2_mar_receipt_registration_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_mar_receipt_registration_test COMMAND p2_mar_receipt_registration_test)
 
+# Lane 35 cave unit-pool partition + phased trunk growth (#474). Header-only
+# engine-free policy; no shared generator source is claimed or ported here.
+add_executable(p2_cave_growth_test
+    tools/p2_cave_growth_test.cpp)
+target_include_directories(p2_cave_growth_test PRIVATE pc_port)
+target_compile_options(p2_cave_growth_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_cave_growth_test COMMAND p2_cave_growth_test)
+
+# Lane 41 cave-generator port (#480). One-consumer gate over the header-only
+# generator plus the engine-linked facade source (pc_p2_cave_generator.cpp).
+add_executable(p2_cave_generator_test
+    tools/p2_cave_generator_test.cpp
+    pc_port/pc_p2_cave_generator.cpp)
+target_include_directories(p2_cave_generator_test PRIVATE pc_port)
+target_compile_options(p2_cave_generator_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_cave_generator_test COMMAND p2_cave_generator_test)
+
+# Lane 44 proxy cave-room instantiation (#482). Header-only engine-free logic;
+# the engine glue (pc_p2_cave_rooms.cpp) is linked into pikmin_pc separately.
+add_executable(p2_cave_rooms_test
+tools/p2_cave_rooms_test.cpp)
+target_include_directories(p2_cave_rooms_test PRIVATE pc_port)
+target_compile_options(p2_cave_rooms_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_cave_rooms_test COMMAND p2_cave_rooms_test)
+
+# Lane 45 real cave-unit geometry + electric-gate actor (#483). Header-only
+# engine-free plan logic; the engine glue (pc_p2_cave_geometry.cpp) is linked
+# into pikmin_pc separately.
+add_executable(p2_cave_geometry_test
+    tools/p2_cave_geometry_test.cpp)
+target_include_directories(p2_cave_geometry_test PRIVATE pc_port)
+target_compile_options(p2_cave_geometry_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_cave_geometry_test COMMAND p2_cave_geometry_test)
+
+# Lane 46 (#484): physical cave-item placement gate (header-only; the engine
+# glue pc_p2_cave_items.cpp is linked into pikmin_pc separately).
+add_executable(p2_cave_items_test
+    tools/p2_cave_items_test.cpp)
+target_include_directories(p2_cave_items_test PRIVATE pc_port)
+target_compile_options(p2_cave_items_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_cave_items_test COMMAND p2_cave_items_test)
+
+# Lane 48 (#486): seeded Candypop bud actor instantiation gate (header-only;
+# the engine glue pc_p2_cave_bud_actor.cpp is linked into pikmin_pc separately).
+add_executable(p2_cave_bud_test
+    tools/p2_cave_bud_test.cpp)
+target_include_directories(p2_cave_bud_test PRIVATE pc_port)
+target_compile_options(p2_cave_bud_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_cave_bud_test COMMAND p2_cave_bud_test)
+# Lane 50 (#488): carry-blocking gate (header-only engine-free plan/verdict; the
+# engine glue pc_p2_cave_carry.cpp is linked into pikmin_pc separately).
+add_executable(p2_cave_carry_test
+    tools/p2_cave_carry_test.cpp)
+target_include_directories(p2_cave_carry_test PRIVATE pc_port)
+target_compile_options(p2_cave_carry_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_cave_carry_test COMMAND p2_cave_carry_test)
+
 add_executable(p2_long_legs_fsm_test
     tools/p2_long_legs_fsm_test.cpp
     pc_port/pc_p2_long_legs_fsm.cpp)
@@ -1185,7 +1248,7 @@ if(PIKMIN_RANDOMIZER_TEST_HOOKS)
 endif()
 
 # Integration gates: keep assertions active for these engine-free contracts.
-foreach(policy IN ITEMS species_schema hazard_reaction hazard_emitter cave_transfer bulbmin_cave_filter captain_roster squad_policy)
+foreach(policy IN ITEMS species_schema hazard_reaction hazard_emitter cave_transfer bulbmin_cave_filter cave_item_gate_placement cave_bud_policy captain_roster squad_policy)
     add_executable(p2_${policy}_test tools/test_p2_${policy}.cpp)
     target_include_directories(p2_${policy}_test PRIVATE pc_port)
     target_compile_options(p2_${policy}_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)

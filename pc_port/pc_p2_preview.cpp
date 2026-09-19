@@ -53,6 +53,7 @@
 #include "pc_p2_projectiles.h"
 #include "pc_p2_hardlanes.h"
 #include "pc_p2_preview.h"
+#include "pc_p2_cave_items_engine.h"  // lane 46 (#484) physical cave-item placement
 #include "pc_bbft.h"
 #include "Pellet.h"
 #include "PlayerState.h"
@@ -351,6 +352,7 @@ void pc_p2_preview_setup() {
 
 bool pc_p2_preview_draw(Pellet* pellet, Graphics& gfx, Matrix4f& matrix) {
     if(!pc_pikipelago_room_preview() || !pellet)return false;
+    if(pc_p2_cave_items_draw_pellet(pellet,gfx,matrix))return true;  // lane 46 (#484)
     Cargo* c=cargoFor(pellet);Shape* shape=c?c->shape:(pellet==previewTreasure?previewShape:nullptr);
     if(!shape || pellet->mConfig->mModelId.mId!='pr05')return false;
     shape->updateAnim(gfx,matrix,nullptr,pellet);
@@ -360,6 +362,7 @@ bool pc_p2_preview_draw(Pellet* pellet, Graphics& gfx, Matrix4f& matrix) {
 
 bool pc_p2_preview_deliver(Pellet* pellet) {
     if(!pellet)return false;
+    if(pc_p2_cave_items_deliver(pellet))return true;  // lane 46 (#484) physical cave treasure
     if(pc_pikipelago_room_preview() && podAnchor) {
         // P1's long-idle captain can be carried like a pellet. Returning him to
         // the Pod must finish the normal wake-up path, never create money/seeds.
