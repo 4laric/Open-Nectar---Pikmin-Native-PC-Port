@@ -36,6 +36,7 @@
 // Exit 0 only if every check passes; any failure prints FAIL and exits 1.
 #include "pc_p2_delivery_host.h"
 #include "pc_p2_sarai_policy.h"
+#include "pc_randomizer_p2_roster.h"
 
 #include <cmath>
 #include <cstdio>
@@ -110,17 +111,19 @@ int checkCombatLog(const char* logPath)
         }
     }
     const size_t readyAt = text.find("P2_SARAI_READY source_id=23");
+    // The manager binds the delivery source immediately before printing
+    // READY, so DELIVERY_BIND precedes it; both must precede the throws.
     const size_t bindAt = text.find("P2_SARAI_DELIVERY_BIND generator=");
     if (readyAt == std::string::npos) {
         std::printf("FAIL log-missing-ready\n");
         return 1;
     }
-    if (bindAt == std::string::npos || bindAt < readyAt) {
-        std::printf("FAIL log-missing-delivery-bind-after-ready\n");
+    if (bindAt == std::string::npos) {
+        std::printf("FAIL log-missing-delivery-bind\n");
         return 1;
     }
     const size_t throwAt = text.find("P2_SARAI_COMBAT_THROW");
-    if (throwAt == std::string::npos || throwAt < bindAt) {
+    if (throwAt == std::string::npos || throwAt < bindAt || throwAt < readyAt) {
         std::printf("FAIL log-missing-controller-throw-after-bind\n");
         return 1;
     }
@@ -206,6 +209,11 @@ int main(int argc, char** argv)
     CHECK(ledgerMentions(path, "onion:p2:23:1") == 2, "restart-count-two");
     pc_p2_delivery_host_close(h);
 
+    // Roster admission: source 23 is bindable, so the family delivery bind
+    // the manager performs cannot be a REJECTED no-op; source 0 is not.
+    CHECK(randomizerP2IsBindable(kSourceId), "roster-23-bindable");
+    CHECK(!randomizerP2IsBindable(0), "roster-0-unbindable");
+
     // Weigh-down policy: the repaired host feeds these decisions with the
     // anchor's live sticker census instead of a hardcoded zero.
     using namespace p2sarai;
@@ -232,7 +240,7 @@ int main(int argc, char** argv)
     fs::remove(path);
     fs::remove(dir);
 
-    if (failures == 0) std::printf("PASS P2_SARAI_COMBAT_REPAIR source=23 granted=1 duplicates_refused=1 policy=9\n");
+    if (failures == 0) std::printf("PASS P2_SARAI_COMBAT_REPAIR source=23 granted=1 duplicates_refused=1 roster=2 policy=9\n");
     else std::printf("P2_SARAI_COMBAT_REPAIR pass=0 failures=%d\n", failures);
     return failures == 0 ? 0 : 1;
 }
