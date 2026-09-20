@@ -40,6 +40,10 @@ P2SaraiHost::P2SaraiHost()
 
 P2SaraiHost::~P2SaraiHost()
 {
+    // Teardown revokes before disposal: manager reset destroys bound hosts,
+    // and without this the Pikmin mouth bridge would keep a mouth link (and
+    // claim) against a freed owner. sceneExit() is idempotent.
+    sceneExit();
     // The private host owns its two mouth parts and never registers them with
     // the engine, so teardown deletes them explicitly.
     delete mMouths[0];
@@ -136,6 +140,7 @@ void P2SaraiHost::update()
 
 void P2SaraiHost::sceneExit()
 {
+    if (mSceneExited) return;
     pc_p2_sarai_owner_lost(mOwnerToken);
     mSceneExited = true;
     mRenderedFrame = -1;
