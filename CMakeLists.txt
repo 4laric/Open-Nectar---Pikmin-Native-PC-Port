@@ -1234,6 +1234,20 @@ target_include_directories(p2_sarai_campaign_test BEFORE PRIVATE
 target_compile_options(p2_sarai_campaign_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_sarai_campaign_test COMMAND p2_sarai_campaign_test)
 
+# rd-p2-sarai-campaign-behavior (#834) Sarai campaign targeting/reacquisition
+# proof. Engine-free: header-only policy/capture/fsm suites plus the SHIPPED
+# capture bridge against the same stub dirs as p2_sarai_campaign_test, and
+# the roster header. Pins retail eligibility, nearest-first selection,
+# bounded FSM reacquisition, receivers, teardown and the unchanged source-23
+# binding; optional log mode classifies a campaign-behavior run
+# (shared-review registration only).
+add_executable(p2_sarai_campaign_behavior_test tools/p2_sarai_campaign_behavior_test.cpp
+    pc_port/pc_p2_sarai_capture_bridge.cpp)
+target_include_directories(p2_sarai_campaign_behavior_test BEFORE PRIVATE
+    tools/p2_sarai_capture_stubs tools/p2_sarai_campaign_stubs pc_port)
+target_compile_options(p2_sarai_campaign_behavior_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_sarai_campaign_behavior_test COMMAND p2_sarai_campaign_behavior_test)
+
 # Lane 30 (#242) dedicated captor spawn-identity test. Engine-free: it asserts
 # the identity/selection seam; the constant is static_asserted against
 # TEKI_P2Demon in the engine build (pc_port/pc_p2_demon_host.cpp).
@@ -1487,6 +1501,14 @@ add_test(NAME p2_sarai_combat_repair_test COMMAND p2_sarai_combat_repair_test)
 add_library(p2_sarai_combat_repair_runtime_compile OBJECT tools/p2_sarai_combat_repair_runtime.cpp)
 target_include_directories(p2_sarai_combat_repair_runtime_compile PRIVATE pc_port ${SDL2_INCLUDE_DIRS})
 target_compile_options(p2_sarai_combat_repair_runtime_compile PRIVATE ${NATIVE_COMPILE_OPTIONS} -Wno-unused-parameter)
+# rd-p2-sarai-campaign-behavior (#834): guarded replacement-main
+# campaign-behavior observation fixture (campaign-seam bind, protected
+# captain observation, reset/teardown). Compile-only here; the
+# replacement-main executable is produced by scripts/build_pikmin2_fixture.py
+# against a completed pikmin_pc build (shared-review registration only).
+add_library(p2_sarai_campaign_behavior_runtime_compile OBJECT tools/p2_sarai_campaign_behavior_runtime.cpp)
+target_include_directories(p2_sarai_campaign_behavior_runtime_compile PRIVATE pc_port ${SDL2_INCLUDE_DIRS})
+target_compile_options(p2_sarai_campaign_behavior_runtime_compile PRIVATE ${NATIVE_COMPILE_OPTIONS} -Wno-unused-parameter)
 # rd-p2-sarai-combat-repair (#828, supervisor finding 2): manager/central-seam
 # lifecycle over the real pc_p2_sarai_manager.cpp TU (engine headers shadowed
 # by tools/p2_sarai_lifecycle_stubs; real host class, token logic, roster and
