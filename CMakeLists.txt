@@ -1467,6 +1467,18 @@ add_executable(p2_kogane_receipt_test tools/p2_kogane_receipt_test.cpp pc_port/p
 target_include_directories(p2_kogane_receipt_test PRIVATE pc_port)
 target_compile_options(p2_kogane_receipt_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_kogane_receipt_test COMMAND p2_kogane_receipt_test)
+# rd-p2-kogane-engagement (#835): finite flip/drop/escape engagement contract.
+# Engine-free truth tables over the owned policy header (registration only).
+add_executable(p2_kogane_engagement_test tools/p2_kogane_engagement_test.cpp)
+target_include_directories(p2_kogane_engagement_test PRIVATE pc_port)
+target_compile_options(p2_kogane_engagement_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_kogane_engagement_test COMMAND p2_kogane_engagement_test)
+# Guarded natural-throw replacement-main fixture. Compile-only here; the
+# replacement-main executable is produced by scripts/build_pikmin2_fixture.py
+# against a completed pikmin_pc build.
+add_library(p2_kogane_engagement_runtime_compile OBJECT tools/p2_kogane_engagement_runtime.cpp)
+target_include_directories(p2_kogane_engagement_runtime_compile PRIVATE pc_port ${SDL2_INCLUDE_DIRS})
+target_compile_options(p2_kogane_engagement_runtime_compile PRIVATE ${NATIVE_COMPILE_OPTIONS} -Wno-unused-parameter)
 # rd-p2-sokkuri-receipt (#578): Sokkuri79 corpse -> carried -> exactly one
 # Onion receipt over the real delivery-host bridge (registration only).
 add_executable(p2_sokkuri_receipt_test tools/p2_sokkuri_receipt_test.cpp pc_port/pc_p2_delivery_host.cpp)
