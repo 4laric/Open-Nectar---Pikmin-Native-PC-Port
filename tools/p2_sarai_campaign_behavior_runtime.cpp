@@ -133,6 +133,35 @@ constexpr int kDefaultTicks = 3600;
 constexpr float kParkDistance = 450.0f;   // gather park: outside campaign sight
 constexpr float kHoldDistance = 120.0f;   // observation hold: inside sight, outside grab
 
+// Engine-independent self test of the guard truth table. Runs before any
+// engine boot so it works without assets or a display.
+int guardSelfTest()
+{
+    struct Row { bool orima; bool dead; float hp; bool expectDown; };
+    const Row rows[] = {
+        {false, false, 100.0f, false},
+        {false, false, 1.5f, false},
+        {false, false, 1.0f, true},
+        {false, false, 0.0f, true},
+        {false, true, 100.0f, true},
+        {true, false, 100.0f, true},
+        {true, true, 0.0f, true},
+    };
+    for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); ++i) {
+        const bool down = p2_fixture_captain_down(rows[i].orima, rows[i].dead, rows[i].hp);
+        if (down != rows[i].expectDown) {
+            std::printf("FAIL P2_SARAI_BEHAVIOR selftest row=%d orima=%d dead=%d hp=%.3f got=%d want=%d\n",
+                        int(i), int(rows[i].orima), int(rows[i].dead), rows[i].hp,
+                        int(down), int(rows[i].expectDown));
+            std::fflush(stdout);
+            return 1;
+        }
+    }
+    std::printf("P2_SARAI_BEHAVIOR_SELFTEST_PASS rows=%d\n", int(sizeof(rows) / sizeof(rows[0])));
+    std::fflush(stdout);
+    return 0;
+}
+
 int envTicks()
 {
     const char* ticks = std::getenv("SARAI_BEHAVIOR_TICKS");
@@ -350,6 +379,18 @@ public:
 
 int main(int argc, char** argv)
 {
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--guard-self-test") return guardSelfTest();
+        if (std::string(argv[i]) == "--guard-negative-test") {
+            // Exercise the exact interruption call idle() uses: must print
+            // P2_FIXTURE_CAPTAIN_DOWN and exit BLOCKED (86) with no PASS.
+            // Engine-independent; the exit code is the assertion.
+            p2_fixture_require_captain(true, true, 0.0f, 0);
+            std::printf("FAIL P2_SARAI_BEHAVIOR negative test did not trip\n");
+            std::fflush(stdout);
+            return 1;
+        }
+    }
     SDL_setenv("SDL_AUDIODRIVER", "dummy", 1);
     SDL_SetMainReady();
     pc_gpu_preference_apply();
