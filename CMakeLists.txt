@@ -173,6 +173,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_sarai_capture_bridge.cpp
     pc_port/pc_p2_sarai_manager.cpp
     pc_port/pc_p2_generated_placement.cpp
+    pc_port/pc_p2_campaign_goal_probe.cpp
     pc_port/pc_bbft.cpp
     # Challenge host-mode engine runtime bridge (#722, ported from #710
     # db245877; #186 review before shared-line landing): the per-tick runtime
@@ -1633,3 +1634,16 @@ add_executable(p2_setup_failsafe_test tools/test_p2_setup_failsafe.cpp)
 target_include_directories(p2_setup_failsafe_test PRIVATE pc_port)
 target_compile_options(p2_setup_failsafe_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_setup_failsafe_test COMMAND p2_setup_failsafe_test)
+
+# rd-p2-campaign-goal-lifecycle (#836; CMake registration shared review):
+# read-only Onion GoalItem lifecycle probe linked into pikmin_pc so campaign
+# fixtures resolve the census; engine-free format/parse/classify regression;
+# guarded replacement-main campaign observer (compile-only here, executable
+# via scripts/build_pikmin2_fixture.py against a completed pikmin_pc build).
+add_executable(p2_campaign_goal_lifecycle_test tools/p2_campaign_goal_lifecycle_test.cpp)
+target_include_directories(p2_campaign_goal_lifecycle_test PRIVATE pc_port)
+target_compile_options(p2_campaign_goal_lifecycle_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_campaign_goal_lifecycle_test COMMAND p2_campaign_goal_lifecycle_test)
+add_library(p2_campaign_goal_lifecycle_runtime_compile OBJECT tools/p2_campaign_goal_lifecycle_runtime.cpp)
+target_include_directories(p2_campaign_goal_lifecycle_runtime_compile PRIVATE pc_port ${SDL2_INCLUDE_DIRS})
+target_compile_options(p2_campaign_goal_lifecycle_runtime_compile PRIVATE ${NATIVE_COMPILE_OPTIONS} -Wno-unused-parameter)
