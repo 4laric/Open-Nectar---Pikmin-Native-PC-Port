@@ -1449,6 +1449,18 @@ add_executable(p2_kurage_transport_test tools/p2_kurage_transport_test.cpp pc_po
 target_include_directories(p2_kurage_transport_test PRIVATE pc_port)
 target_compile_options(p2_kurage_transport_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_kurage_transport_test COMMAND p2_kurage_transport_test)
+# rd-p2-kurage-natural (#832): engine-free reachability audit for the
+# private-adapter Kurage (source 57) natural-kill gate (registration only).
+add_executable(p2_kurage_natural_test tools/p2_kurage_natural_test.cpp pc_port/pc_p2_kurage_natural.cpp)
+target_include_directories(p2_kurage_natural_test PRIVATE pc_port)
+target_compile_options(p2_kurage_natural_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_kurage_natural_test COMMAND p2_kurage_natural_test)
+# rd-p2-kurage-natural (#832): guarded replacement-main natural-engagement
+# observation fixture. Compile-only here; the replacement-main executable is
+# produced by scripts/build_pikmin2_fixture.py against a completed pikmin_pc build.
+add_library(p2_kurage_natural_runtime_compile OBJECT tools/p2_kurage_natural_runtime.cpp)
+target_include_directories(p2_kurage_natural_runtime_compile PRIVATE pc_port ${SDL2_INCLUDE_DIRS})
+target_compile_options(p2_kurage_natural_runtime_compile PRIVATE ${NATIVE_COMPILE_OPTIONS} -Wno-unused-parameter)
 # rd-p2-kogane-receipt (#571): Kogane9 corpse -> carried -> exactly one Onion
 # receipt over the real delivery-host bridge (registration only).
 add_executable(p2_kogane_receipt_test tools/p2_kogane_receipt_test.cpp pc_port/pc_p2_delivery_host.cpp)
