@@ -294,10 +294,15 @@ int main(int argc, char** argv)
         CHECK(win.tick(winIn).attemptCatch, "fsm-catch-open-past-16");
         winIn.targetFrame = 31.0f;
         CHECK(!win.tick(winIn).attemptCatch, "fsm-catch-closed-past-30");
-        // Dead/Fall/Damage entry flicks (mouth release on the way down).
+        // Dead/Fall/Damage entry flicks (mouth release on the way down: the
+        // flag fires on the transition tick into Fall, not steady-state).
         Fsm dying = freshFsm();
-        dying.forceState(State::Fall, 0.1f);
-        CHECK(dying.tick(tickIn()).flickAttackers, "fsm-fall-entry-flicks");
+        dying.forceState(State::TakeOff, 0.1f);
+        In dyingIn = tickIn();
+        dyingIn.health = 0.0f;
+        dyingIn.motionFinished = true;
+        Out dyingOut = dying.tick(dyingIn);
+        CHECK(dyingOut.state == State::Fall && dyingOut.flickAttackers, "fsm-fall-entry-flicks");
     }
 
     // --- 4. Drop/flick receivers (capture.h constants the host calls) ------
