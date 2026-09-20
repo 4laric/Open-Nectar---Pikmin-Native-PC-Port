@@ -22,17 +22,17 @@ bool attack_holds(bool pikiStickTo, bool targetFlying, bool targetVisible)
 
 bool damage_receiver_accepts(unsigned sourceId)
 {
-    // Source ids with a family-local InteractAttack rejection in
-    // src/plugPikiNakata/tekiinteraction.cpp:44-60.  Source 57 (Kurage) is not
-    // in that list, so the receiver accepts a generated attack.
+    // The family-local InteractAttack rejections live in
+    // src/plugPikiNakata/tekiinteraction.cpp:44-60 as the predicates
+    // pc_p2_hana_rejects_attack, pc_p2_elecbug_attacked, pc_p2_kogane_attacked,
+    // pc_p2_armor_receiver_rejects, pc_p2_dangomushi_invulnerable,
+    // pc_p2_snakejoint_invulnerable and pc_p2_long_legs_receiver_rejects.
+    // This pin only encodes the two source ids verified in this lane's family
+    // install (Kogane 9, ElecBug 28) plus the open default; every other id --
+    // including source 57 -- has no Kurage rejection and is accepted.
     switch (sourceId) {
-    case 28: // ElecBug  -- pc_p2_elecbug_attacked
-    case 9:  // Kogane   -- pc_p2_kogane_attacked
-    case 23: // Sarai    -- pc_p2_hana_rejects_attack
-    case 71: // Armor    -- pc_p2_armor_receiver_rejects
-    case 88: // Dangomushi -- pc_p2_dangomushi_invulnerable
-    case 52: // Snakejoint -- pc_p2_snakejoint_invulnerable
-    case 55: // LongLegs -- pc_p2_long_legs_receiver_rejects
+    case 9:  // Kogane -- pc_p2_kogane_attacked
+    case 28: // ElecBug -- pc_p2_elecbug_attacked
         return false;
     default:
         return true;
