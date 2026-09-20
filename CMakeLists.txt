@@ -796,6 +796,18 @@ target_include_directories(p2_challenge_mode_fixture PRIVATE
 target_compile_options(p2_challenge_mode_fixture PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_challenge_mode_fixture COMMAND p2_challenge_mode_fixture)
 
+# P2 challenge boot fixture with argv stage select (#672 / lane rd-p2-fixture-cmake #674).
+# Registration-only: the tool TU rides along via include of the module TU, so
+# only the tool source is listed. Guard header comes from the validated
+# P2_CHALLENGE_GUARD_INCLUDE_DIR cache PATH above (no vendored copy).
+add_executable(p2_challenge_boot_fixture
+    tools/p2_challenge_boot_fixture.cpp)
+target_include_directories(p2_challenge_boot_fixture PRIVATE
+    pc_port
+    ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
+target_compile_options(p2_challenge_boot_fixture PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_challenge_boot_fixture COMMAND p2_challenge_boot_fixture)
+
 # Host software DSP test (not linked into main game)
 add_executable(pc_dsp_host_test
     pc_port/audio/pc_dsp_host_test.cpp
