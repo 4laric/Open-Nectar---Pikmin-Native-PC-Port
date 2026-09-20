@@ -1473,6 +1473,20 @@ add_executable(p2_sokkuri_receipt_test tools/p2_sokkuri_receipt_test.cpp pc_port
 target_include_directories(p2_sokkuri_receipt_test PRIVATE pc_port)
 target_compile_options(p2_sokkuri_receipt_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_sokkuri_receipt_test COMMAND p2_sokkuri_receipt_test)
+# rd-p2-sarai-combat-repair (#828): Sarai23 corpse -> carried -> exactly one
+# Onion receipt over the real delivery-host bridge plus the weigh-down policy
+# the repaired host now feeds with live anchor facts (registration only).
+add_executable(p2_sarai_combat_repair_test tools/p2_sarai_combat_repair_test.cpp pc_port/pc_p2_delivery_host.cpp)
+target_include_directories(p2_sarai_combat_repair_test PRIVATE pc_port)
+target_compile_options(p2_sarai_combat_repair_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_sarai_combat_repair_test COMMAND p2_sarai_combat_repair_test)
+# rd-p2-sarai-combat-repair (#828): guarded replacement-main combat-repair
+# observation fixture with controller-driven throws. Compile-only here; the
+# replacement-main executable is produced by scripts/build_pikmin2_fixture.py
+# against a completed pikmin_pc build.
+add_library(p2_sarai_combat_repair_runtime_compile OBJECT tools/p2_sarai_combat_repair_runtime.cpp)
+target_include_directories(p2_sarai_combat_repair_runtime_compile PRIVATE pc_port ${SDL2_INCLUDE_DIRS})
+target_compile_options(p2_sarai_combat_repair_runtime_compile PRIVATE ${NATIVE_COMPILE_OPTIONS} -Wno-unused-parameter)
 
 # Lane 06: engine-free provider unit tests (header-only; previously present but unregistered).
 add_executable(p2_receipt_test tools/p2_receipt_test.cpp)

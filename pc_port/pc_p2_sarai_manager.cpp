@@ -3,6 +3,7 @@
 #include "pc_p2_generated_placement.h"
 #include "pc_p2_sarai_host.h"
 #include "pc_p2_retail_player.h"
+#include "pc_randomizer.h"
 #include "Generator.h"
 #include "Graphics.h"
 #include "teki.h"
@@ -64,6 +65,20 @@ bool readRestOffsets(const char* path, Vector3f& mouthA, Vector3f& mouthB)
     mouthA.set(values[3], values[7], values[11]);
     mouthB.set(values[15], values[19], values[23]);
     return true;
+}
+
+// Ordinary-delivery bridge (lane 06 contract, #828): bind source 23 to this
+// live actor so GoalItem::suckMe can grant onion:p2:23 exactly once through
+// pc_randomizer_p2_corpse_delivered. Mirrors ElecBug (28), Kogane (9) and
+// Sokkuri (79). Single-use: consumed on delivery and cleared on
+// forget/recycle. Rejected (unbindable id) is logged by the callee, never
+// fatal.
+void bindDeliverySource(BTeki* actor, unsigned generator)
+{
+    if (!actor || !generator) return;
+    pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor), 23, generator);
+    std::printf("P2_SARAI_DELIVERY_BIND generator=%u source_id=23\n", generator);
+    std::fflush(stdout);
 }
 
 std::unique_ptr<P2SaraiHost> buildHost(BTeki* match, unsigned generatorId)
@@ -135,6 +150,10 @@ void pc_p2_sarai_manager_reset()
 void pc_p2_sarai_manager_forget(BTeki* actor)
 {
     if (!actor) return;
+    // Lane 06 single-use binding: drop the ordinary-delivery source so a
+    // recycled actor address can never inherit source 23. The central
+    // pc_p2_forget_teki seam also clears it; this is idempotent.
+    pc_randomizer_p2_forget_source(static_cast<PelletView*>(actor));
     auto it = s.find(actor);
     if (it != s.end()) {
         std::printf("P2_SARAI_FORGET generator=%u phase=cleanup\n", it->second.generator);
@@ -167,9 +186,14 @@ void pc_p2_sarai_manager_setup()
 
     BTeki* match = nullptr;
     if (!findOwnerActor(wantedGenerator, wantedType, match)) return;
+    // Repeated setup is idempotent: the first bind wins, mirroring the
+    // dynamic binder's already-bound refusal. Re-binding would orphan the
+    // live host and double-print the delivery marker.
+    if (s.count(match)) return;
     auto host = buildHost(match, pc_p2_campaign_token(match));
     if (!host) return;
     s[match] = { host.get(), pc_p2_campaign_token(match), match->mTekiType };
+    bindDeliverySource(match, pc_p2_campaign_token(match));
     std::printf("P2_SARAI_READY source_id=23 species=Sarai generator=%u type=%d health=%.1f behavior=source\n",
                 pc_p2_campaign_token(match), match->mTekiType, match->mHealth);
     std::printf("P2_SARAI_CORPSE_READY generator=%u drop=BDT_Normal ledger=onion receipt=corpse:sarai:%u\n",
@@ -188,6 +212,7 @@ bool pc_p2_sarai_manager_bind_dynamic(BTeki* actor, unsigned generatorId, unsign
         return false;
     }
     s[actor] = { host.get(), generatorId, actor->mTekiType };
+    bindDeliverySource(actor, generatorId);
     std::printf("P2_SARAI_READY source_id=23 species=Sarai generator=%u type=%d health=%.1f behavior=source generated=1 seed_target=%u\n",
                 generatorId, actor->mTekiType, actor->mHealth, seedTargetUid);
     std::printf("P2_SARAI_CORPSE_READY generator=%u drop=BDT_Normal ledger=onion receipt=corpse:sarai:%u\n",

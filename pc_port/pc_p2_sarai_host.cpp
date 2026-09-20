@@ -6,6 +6,7 @@
 #include "Navi.h"
 #include "NaviMgr.h"
 #include "Shape.h"
+#include "Stickers.h"
 #include "Graphics.h"
 #include "Texture.h"
 #include "gameflow.h"
@@ -465,12 +466,29 @@ void P2SaraiHost::updateNatural()
     const bool targetPresent = captorOut.valid && captorOut.targetFound;
 
     // Isolated source FSM tick with live facts. This private host owns no health
-    // model; the captain is the only damageable actor in the chain.
+    // model; the bound anchor actor is the damage/lifetime anchor (real engine
+    // health, Pikmin receivers, engine corpse on death).
     p2sarai::In in;
     in.deltaTime = dt;
     in.health = mBoundActor ? mBoundActor->mHealth : 100.0f;
-    in.bodyStuckCount = 0;
-    in.mouthCarried = mLifecycle.occupied() ? 1 : 0;
+    // Source Sarai.cpp: the climb/escape decisions read the live body-latched
+    // Pikmin count (mStuckPikminCount) and the mouth-carried captives
+    // (getCatchTargetNum). A hardcoded zero body count pins the FSM out of
+    // Fall/Damage/Flick forever, so no amount of normally-thrown Pikmin could
+    // ever weigh the host down. Feed the anchor's real sticker count; the
+    // anchor only ever carries body-latched Pikmin (mouth captives bind to
+    // this host, never to the anchor).
+    int bodyStuck = 0;
+    if (mBoundActor && mBoundActor->isAlive()) {
+        Stickers stuck(mBoundActor);
+        bodyStuck = stuck.getNumStickers();
+        if (bodyStuck < 0) bodyStuck = 0;
+    }
+    in.bodyStuckCount = bodyStuck;
+    // Mouth captives are the bridge-bound Pikmin; the captain occupancy keeps
+    // driving the existing FallMeck drop path until a Pikmin-catch front end
+    // lands (retail getAttackableTarget scans Pikmin, not captains).
+    in.mouthCarried = int(carriedCount()) + (mLifecycle.occupied() ? 1 : 0);
     in.purpleLatched = false;
     in.mapY = 0.0f;
     in.positionY = mSRT.t.y;
