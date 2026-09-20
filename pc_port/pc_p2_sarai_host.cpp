@@ -477,7 +477,10 @@ void P2SaraiHost::updateNatural()
     // Fall/Damage/Flick forever, so no amount of normally-thrown Pikmin could
     // ever weigh the host down. Feed the anchor's real sticker count; the
     // anchor only ever carries body-latched Pikmin (mouth captives bind to
-    // this host, never to the anchor).
+    // this host, never to the anchor). No combat causality is claimed for
+    // this input: guarded runs show zero anchor sticks, so the observed kills
+    // come from the formation swarm bites, not from this path (which only
+    // unblocks future Fall/Damage/Flick transitions once latches occur).
     int bodyStuck = 0;
     if (mBoundActor && mBoundActor->isAlive()) {
         Stickers stuck(mBoundActor);

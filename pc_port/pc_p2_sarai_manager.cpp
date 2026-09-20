@@ -138,7 +138,19 @@ std::unique_ptr<P2SaraiHost> buildHost(BTeki* match, unsigned generatorId)
 
 void pc_p2_sarai_manager_reset()
 {
-    for (auto& entry : s) entry.second.host->unbindNativeActor(entry.first);
+    // Lane 06 single-use bindings: drop every ordinary-delivery source before
+    // clearing the maps. The central pc_randomizer_p2_delivery_reset only
+    // closes the ledger; it never clears p2TekiSources, so without this a
+    // stage teardown would strand live source-23 entries keyed by destroyed
+    // actor addresses for a recycled Teki to inherit (the exact hazard the
+    // forget path guards). Covers live bindings and death-observed corpses
+    // whose delivery may not have been consumed yet. Idempotent.
+    for (auto& entry : s) {
+        pc_randomizer_p2_forget_source(static_cast<PelletView*>(entry.first));
+        entry.second.host->unbindNativeActor(entry.first);
+    }
+    for (auto& entry : corpses)
+        pc_randomizer_p2_forget_source(static_cast<PelletView*>(entry.first));
     const std::size_t count = s.size();
     s.clear();
     hosts.clear();

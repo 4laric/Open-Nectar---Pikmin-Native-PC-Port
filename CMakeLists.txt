@@ -1487,6 +1487,18 @@ add_test(NAME p2_sarai_combat_repair_test COMMAND p2_sarai_combat_repair_test)
 add_library(p2_sarai_combat_repair_runtime_compile OBJECT tools/p2_sarai_combat_repair_runtime.cpp)
 target_include_directories(p2_sarai_combat_repair_runtime_compile PRIVATE pc_port ${SDL2_INCLUDE_DIRS})
 target_compile_options(p2_sarai_combat_repair_runtime_compile PRIVATE ${NATIVE_COMPILE_OPTIONS} -Wno-unused-parameter)
+# rd-p2-sarai-combat-repair (#828, supervisor finding 2): manager/central-seam
+# lifecycle over the real pc_p2_sarai_manager.cpp TU (engine headers shadowed
+# by tools/p2_sarai_lifecycle_stubs; real host class, token logic, roster and
+# delivery ledger) covering setup/rebind idempotency, dynamic refusal,
+# forget, death retention, reset central-drop, rebind exactly-once and bridge
+# routing (registration only).
+add_executable(p2_sarai_lifecycle_test tools/p2_sarai_lifecycle_test.cpp
+    pc_port/pc_p2_sarai_manager.cpp pc_port/pc_p2_delivery_host.cpp)
+target_include_directories(p2_sarai_lifecycle_test BEFORE PRIVATE
+    tools/p2_sarai_lifecycle_stubs pc_port)
+target_compile_options(p2_sarai_lifecycle_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_sarai_lifecycle_test COMMAND p2_sarai_lifecycle_test)
 
 # Lane 06: engine-free provider unit tests (header-only; previously present but unregistered).
 add_executable(p2_receipt_test tools/p2_receipt_test.cpp)
