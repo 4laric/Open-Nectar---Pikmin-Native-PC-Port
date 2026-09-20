@@ -197,11 +197,14 @@ class CombatApp : public PlugPikiApp {
     float minDistance = 1.0e9f;
     bool gathered = false;
     int gatherTick = 0;
+    int gatherAttempts = 0;
+    int lastGatherTransit = -100000;
     int formationCount = 0;
     int throwTransits = 0;
     int lastTransitTick = -100000;
     int throwsObserved = 0;
     int sticksObserved = 0;
+    int lastStuckNow = 0;
     int damageEvents = 0;
     float startHealth = 0.0f;
     float lastHealth = 0.0f;
@@ -331,24 +334,38 @@ public:
 
             if (!gathered) {
                 // Still marching to the squad: refresh the goal from the live
-                // centroid, then whistle once the captain closes in.
+                // centroid, then whistle. The whistle transit fires at most a
+                // few spaced attempts (re-transiting every tick re-inits
+                // Gather and scatters the squad); gathered flips on observed
+                // formation or a bounded timeout.
                 float sx = walkGoal.x, sz = walkGoal.z;
                 squadCentroid(sx, sz);
                 walkGoal.set(sx, 0.0f, sz);
+                formationCount = formationSquad();
                 const float gx = sx - n->mSRT.t.x, gz = sz - n->mSRT.t.z;
-                if (std::sqrt(gx * gx + gz * gz) < 60.0f && naviId == NAVISTATE_Walk) {
+                if (gatherTick == 0 && std::sqrt(gx * gx + gz * gz) < 60.0f && naviId == NAVISTATE_Walk) {
                     // CONTROLLER_INPUT: whistle-button equivalent. The engine
                     // gather collects idle Pikmin into formation by itself.
                     n->mStateMachine->transit(n, NAVISTATE_Gather);
                     gatherTick = observed;
-                    std::printf("P2_SARAI_COMBAT_GATHER tick=%d controller=whistle_equivalent\n", observed);
+                    lastGatherTransit = observed;
+                    ++gatherAttempts;
+                    std::printf("P2_SARAI_COMBAT_GATHER tick=%d attempt=%d controller=whistle_equivalent\n",
+                                observed, gatherAttempts);
+                    std::fflush(stdout);
+                } else if (gatherTick > 0 && formationCount == 0 && gatherAttempts < 6
+                           && observed - lastGatherTransit > 120 && naviId == NAVISTATE_Walk) {
+                    n->mStateMachine->transit(n, NAVISTATE_Gather);
+                    lastGatherTransit = observed;
+                    ++gatherAttempts;
+                    std::printf("P2_SARAI_COMBAT_GATHER tick=%d attempt=%d controller=whistle_equivalent\n",
+                                observed, gatherAttempts);
                     std::fflush(stdout);
                 }
-                if (gatherTick > 0 && observed - gatherTick > 300) {
+                if (gatherTick > 0 && (formationCount > 0 || observed - gatherTick > 600)) {
                     gathered = true;
-                    formationCount = formationSquad();
-                    std::printf("P2_SARAI_COMBAT_FORMATION tick=%d formation=%d squad=%d\n",
-                                observed, formationCount, aliveSquad());
+                    std::printf("P2_SARAI_COMBAT_FORMATION tick=%d formation=%d squad=%d attempts=%d\n",
+                                observed, formationCount, aliveSquad(), gatherAttempts);
                     std::fflush(stdout);
                 }
             } else {
@@ -365,11 +382,16 @@ public:
                     n->mStateMachine->transit(n, NAVISTATE_ThrowWait);
                     lastTransitTick = observed;
                     ++throwTransits;
+                    std::printf("P2_SARAI_COMBAT_THROW_ATTEMPT tick=%d n=%d controller=throw_button_equivalent\n",
+                                observed, throwTransits);
+                    std::fflush(stdout);
                 }
             }
 
             // Engagement census, all read-only: newly flying Pikmin (thrown),
-            // Pikmin stuck to the anchor, and anchor health drops.
+            // Pikmin stuck to the anchor (with their engine state/mode, so a
+            // RopeMode hanger is never mistaken for an AttackMode biter), and
+            // anchor health drops.
             int stuckNow = 0;
             Iterator pit(pikiMgr);
             CI_LOOP(pit) {
@@ -382,13 +404,24 @@ public:
                                 observed, throwsObserved);
                     std::fflush(stdout);
                 }
-                if (p->getStickObject() == static_cast<Creature*>(actor)) ++stuckNow;
+                if (p->getStickObject() == static_cast<Creature*>(actor)) {
+                    ++stuckNow;
+                    if (stuckNow > sticksObserved || observed % 300 == 0) {
+                        std::printf("P2_SARAI_COMBAT_LATCH tick=%d state=%d mode=%d\n",
+                                    observed, p->getState(), int(p->mMode));
+                        std::fflush(stdout);
+                    }
+                }
             }
             if (stuckNow > sticksObserved) {
                 sticksObserved = stuckNow;
                 std::printf("P2_SARAI_COMBAT_STICK tick=%d count=%d\n", observed, sticksObserved);
                 std::fflush(stdout);
+            } else if (stuckNow < lastStuckNow) {
+                std::printf("P2_SARAI_COMBAT_UNSTICK tick=%d count=%d\n", observed, stuckNow);
+                std::fflush(stdout);
             }
+            lastStuckNow = stuckNow;
             // Natural Pikmin damage: the anchor's real engine health falling
             // with no fixture write is the engagement proof.
             if (actor->mHealth < lastHealth) {
