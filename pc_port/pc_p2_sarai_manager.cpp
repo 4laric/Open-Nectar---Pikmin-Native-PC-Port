@@ -81,7 +81,7 @@ void bindDeliverySource(BTeki* actor, unsigned generator)
     std::fflush(stdout);
 }
 
-std::unique_ptr<P2SaraiHost> buildHost(BTeki* match, unsigned generatorId)
+std::unique_ptr<P2SaraiHost> buildHost(BTeki* match, unsigned generatorId, bool campaign)
 {
     Vector3f restA, restB;
     if (!readRestOffsets("sarai-attack-mouths.txt", restA, restB)) return nullptr;
@@ -128,8 +128,26 @@ std::unique_ptr<P2SaraiHost> buildHost(BTeki* match, unsigned generatorId)
     // captain and no patrol/scan state is implemented here, so the view cone is
     // widened and the territory/sight radii cover the room (same accommodation
     // as the Demon ordinary host). Approach speed, turn cap and grab range stay
-    // at the fixture's natural values.
-    host->enableNatural(30.0f, 3.0f, 20.0f, 12.0f, 1000.0f, 360.0f, 1200.0f, home);
+    // at the fixture's natural values. Campaign seed-bridge bindings
+    // (bind_dynamic) use the retail-scale geometry instead (#834).
+    // Campaign seed-bridge bindings (#834) use the retail-scale general
+    // geometry (EnemyParmsBase defaults fp09/fp12/fp13: territory 200, sight
+    // 200, view 90) so eight Sarai no longer share one room-wide capture
+    // territory over the captain. Speeds stay fixture-tuned in both paths.
+    if (campaign) {
+        host->enableNatural(30.0f, 3.0f, 20.0f, 12.0f,
+            P2SaraiHost::kCampaignTerritoryRadius,
+            P2SaraiHost::kCampaignViewAngleDegrees,
+            P2SaraiHost::kCampaignSightRadius, home);
+        std::printf("P2_SARAI_GEOMETRY mode=campaign territory=%.0f view=%.0f sight=%.0f cooldown=%.0f\n",
+                    P2SaraiHost::kCampaignTerritoryRadius,
+                    P2SaraiHost::kCampaignViewAngleDegrees,
+                    P2SaraiHost::kCampaignSightRadius,
+                    P2SaraiHost::kReacquireCooldownSeconds);
+        std::fflush(stdout);
+    } else {
+        host->enableNatural(30.0f, 3.0f, 20.0f, 12.0f, 1000.0f, 360.0f, 1200.0f, home);
+    }
     if (!host->naturalEnabled()) return nullptr;
     if (!host->bindNativeActor(match, pc_p2_campaign_token(match), match->mTekiType)) return nullptr;
     return host;
@@ -202,7 +220,7 @@ void pc_p2_sarai_manager_setup()
     // dynamic binder's already-bound refusal. Re-binding would orphan the
     // live host and double-print the delivery marker.
     if (s.count(match)) return;
-    auto host = buildHost(match, pc_p2_campaign_token(match));
+    auto host = buildHost(match, pc_p2_campaign_token(match), false);
     if (!host) return;
     s[match] = { host.get(), pc_p2_campaign_token(match), match->mTekiType };
     bindDeliverySource(match, pc_p2_campaign_token(match));
@@ -217,7 +235,7 @@ void pc_p2_sarai_manager_setup()
 bool pc_p2_sarai_manager_bind_dynamic(BTeki* actor, unsigned generatorId, unsigned seedTargetUid)
 {
     if (!actor || !generatorId || s.count(actor)) return false;
-    auto host = buildHost(actor, generatorId);
+    auto host = buildHost(actor, generatorId, true);
     if (!host) {
         std::printf("P2_GENERATED_PLACEMENT source_id=23 target=%u bound=0 reason=host\n", seedTargetUid);
         std::fflush(stdout);
