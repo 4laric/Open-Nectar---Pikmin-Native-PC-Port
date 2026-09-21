@@ -19,4 +19,7 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     default: return original;
     }
 }
+inline bool hasStaticHost(unsigned source) {
+    return hostType(source, -1, false) == hostType(source, -2, false);
+}
 }

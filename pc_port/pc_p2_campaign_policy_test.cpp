@@ -12,4 +12,7 @@ int main() {
     }
     for (unsigned source: {0u,1u,41u,45u,58u,99u,999u})
         assert(p2campaign::hostType(source,17,false)==17);
+    for (unsigned source : {9u,23u,44u,54u,57u,59u,60u,61u,62u,78u,79u})
+        assert(p2campaign::hasStaticHost(source));
+    for (unsigned source : {2u,17u,0u}) assert(!p2campaign::hasStaticHost(source));
 }

@@ -1,4 +1,5 @@
 #include "pc_p2_campaign_policy.h"
+#include "pc_p2_proxy.h"
 #include "pc_randomizer.h"
 #include "pc_randomizer_catalog.h"
 #include "pc_randomizer_spawn_catalog.h"
@@ -656,7 +657,11 @@ bool pc_randomizer_p2_room_bootstrap(const char* path) {
 int pc_randomizer_enemy_for_generator(int original, bool protectedSpawn, const void* generator) {
     if (pc_randomizer_p2_bridge()) {
         const unsigned source = pc_randomizer_p2_source_for_id(pc_randomizer_generator_id(generator));
-        return p2campaign::hostType(source, original, protectedSpawn);
+        if (protectedSpawn || p2campaign::hasStaticHost(source))
+            return p2campaign::hostType(source, original, protectedSpawn);
+        const int proxy = pc_p2_proxy_host(source);
+        if (proxy >= 0) return proxy;
+        return original;
     }
     if (!pc_randomizer_spawn_slots()) return pc_randomizer_enemy_type(original, protectedSpawn);
     if (campaignEnemies) {
