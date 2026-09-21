@@ -103,4 +103,17 @@ inline const Row* bySpecies(const Table& table, const std::string& species) {
         if (table.rows[i].species == species) return &table.rows[i];
     return nullptr;
 }
+
+// Drop rows whose source has a static host (#871 D2). Engine-free: the caller
+// supplies the static predicate (the loader passes p2campaign::hasStaticHost)
+// so this header never includes engine policy. Preserves valid/error; an
+// empty result stays valid so the rest of the table is unaffected.
+inline Table withoutStaticSources(const Table& table, bool (*isStatic)(unsigned)) {
+    if (!table.valid || isStatic == nullptr) return table;
+    Table out;
+    out.valid = true;
+    for (std::vector<Row>::size_type i = 0; i < table.rows.size(); ++i)
+        if (!isStatic(table.rows[i].source)) out.rows.push_back(table.rows[i]);
+    return out;
+}
 }  // namespace p2proxy
