@@ -20,6 +20,7 @@
 #include "pc_p2_otakara.h"
 #include "pc_p2_pom.h"
 #include "pc_p2_campaign_actor.h"
+#include "pc_p2_proxy.h"
 #include "pc_randomizer.h"
 #include "pc_bbft.h"
 #include "teki.h"
@@ -54,6 +55,7 @@ const FamilyDef FAMILIES[] = {
     {"ground", "ginv", "p2-ground-actors.txt", "p2-ground-bank.txt"},
     {"cannon", "cannon", "p2-cannon-actors.txt", "p2-cannon-bank.txt"},
     {"waterwraith", "ww", "p2-waterwraith-actors.txt", "p2-waterwraith-bank.txt"},
+    {"proxy", "px", "p2-proxy-actors.txt", "p2-proxy-bank.txt"},
 };
 constexpr size_t ClipBytes = 512 * 1024;         // per clip
 constexpr size_t TotalBytes = 48 * 1024 * 1024;  // per setup
@@ -79,6 +81,12 @@ unsigned long long eventCount = 0;
 }
 
 int expectedType(const std::string& family, const std::string& species) {
+    if (family == "proxy") {
+        const p2proxy::Table& table = pc_p2_proxy_table();
+        if (!table.valid) return -1;
+        const p2proxy::Row* row = p2proxy::bySpecies(table, species);
+        return row ? row->host : -1;
+    }
     if (family == "cannon") {
         if (species == "Kabuto" || species == "Rkabuto" || species == "Fkabuto") return TEKI_Beatle;
         if (species == "Rock" || species == "Stone") return TEKI_Iwagon;
@@ -229,6 +237,20 @@ void pc_p2_batch2_forget(BTeki* actor) {
 // respawned actor can be re-bound without a stale pointer.
 // Generated campaign sessions (the seed bridge) bind by the seed's source id per
 // actor, like the behaviour modules, not by the arena sidecar's generator ids.
+static bool proxyPoseAvailable(const FamilyDef& family, const std::string& species,
+                               const std::vector<p2batch2clock::Row>& clipRows) {
+    for (const auto& row : clipRows) {
+        for (int i = 0; i < row.poseCount; ++i) {
+            char rel[192];
+            std::snprintf(rel, sizeof(rel), "assets/dataDir/courses/pikmin2room/%s_%s_%s_%02d.mod",
+                          family.prefix, species.c_str(), row.name.c_str(), i);
+            std::ifstream probe(rel, std::ios::binary);
+            if (!probe) return false;
+        }
+    }
+    return true;
+}
+
 static void campaignWanted(const FamilyDef& family, std::map<unsigned, std::string>& wanted) {
     static const struct { const char* family; unsigned source; const char* species; } SOURCES[] = {
         {"dweevil", 59, "FireOtakara"}, {"dweevil", 60, "WaterOtakara"},
@@ -239,19 +261,48 @@ static void campaignWanted(const FamilyDef& family, std::map<unsigned, std::stri
     for (const auto& row : SOURCES)
         if (std::string(row.family) == family.name)
             for (unsigned id : pc_p2_campaign_ids(row.source)) wanted[id] = row.species;
+    if (std::string(family.name) == "proxy") {
+        const p2proxy::Table& table = pc_p2_proxy_table();
+        if (!table.valid) return;
+        for (const auto& prow : table.rows) {
+            bool inStatic = false;
+            for (const auto& srow : SOURCES)
+                if (srow.source == prow.source) {
+                    inStatic = true;
+                    break;
+                }
+            if (inStatic) continue;
+            for (unsigned id : pc_p2_campaign_ids(prow.source)) wanted[id] = prow.species;
+        }
+    }
 }
 
 static void bindFamilies(bool strict) {
     const bool bridge = pc_randomizer_p2_bridge() && !pc_pikipelago_room_preview();
     for (const FamilyDef& family : FAMILIES) {
+        const bool isProxy = std::string(family.name) == "proxy";
+        const bool soft = bridge && isProxy;
         std::map<unsigned, std::string> wanted;
-        if (!parseActors(family.actors, wanted)) continue;
-        if (bridge) {
+        const bool haveActors = parseActors(family.actors, wanted);
+        if (soft) {
             campaignWanted(family, wanted);
             if (wanted.empty()) continue;
+        } else {
+            if (!haveActors) continue;
+            if (bridge) {
+                campaignWanted(family, wanted);
+                if (wanted.empty()) continue;
+            }
         }
         std::map<std::string, std::vector<p2batch2clock::Row>> rows;
-        if (!parseBank(family.bank, rows)) fail("missing bank for present actor config");
+        bool haveBank = false;
+        if (soft) {
+            std::ifstream bankProbe(family.bank);
+            if (bankProbe) haveBank = parseBank(family.bank, rows);
+        } else {
+            if (!parseBank(family.bank, rows)) fail("missing bank for present actor config");
+            haveBank = true;
+        }
 
         std::set<unsigned> found;
         std::set<std::string> speciesUsed;
@@ -276,9 +327,46 @@ static void bindFamilies(bool strict) {
             std::printf("P2_BATCH2_MISSING family=%s found=%zu wanted=%zu\n",
                         family.name, found.size(), wanted.size());
         }
+        if (soft && !haveBank) {
+            for (const std::string& species : speciesUsed) {
+                std::printf("P2_SETUP_SKIP batch2 proxy missing_bank species=%s\n", species.c_str());
+                const std::string key = std::string(family.name) + "|" + species;
+                for (auto ait = actors.begin(); ait != actors.end();) {
+                    if (ait->second == key)
+                        ait = actors.erase(ait);
+                    else
+                        ++ait;
+                }
+            }
+            continue;
+        }
         for (const std::string& species : speciesUsed) {
             auto clipRows = rows.find(species);
-            if (clipRows == rows.end() || clipRows->second.empty()) fail("species has no bank clips");
+            if (clipRows == rows.end() || clipRows->second.empty()) {
+                if (soft) {
+                    std::printf("P2_SETUP_SKIP batch2 proxy no_bank_clips species=%s\n", species.c_str());
+                    const std::string key = std::string(family.name) + "|" + species;
+                    for (auto ait = actors.begin(); ait != actors.end();) {
+                        if (ait->second == key)
+                            ait = actors.erase(ait);
+                        else
+                            ++ait;
+                    }
+                    continue;
+                }
+                fail("species has no bank clips");
+            }
+            if (soft && !proxyPoseAvailable(family, species, clipRows->second)) {
+                std::printf("P2_SETUP_SKIP batch2 proxy missing_pose species=%s\n", species.c_str());
+                const std::string key = std::string(family.name) + "|" + species;
+                for (auto ait = actors.begin(); ait != actors.end();) {
+                    if (ait->second == key)
+                        ait = actors.erase(ait);
+                    else
+                        ++ait;
+                }
+                continue;
+            }
             const std::string key = std::string(family.name) + "|" + species;
             if (!banks.count(key)) banks[key] = loadBank(family, species, clipRows->second);
         }
