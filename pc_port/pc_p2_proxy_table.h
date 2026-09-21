@@ -34,6 +34,20 @@ inline bool validSpecies(const std::string& species) {
     return true;
 }
 
+// Pikmin 1 teki types a proxy row may name as its host. Everything else is
+// refused: the placeholder types (26-29, 34) crash on birth, TEKI_P2Demon (35)
+// is a lane-30 spawn identity, and the rest (spawners, plants, clam parts, egg,
+// Progg, geyser) are not free-standing enemies. Mirrors the root allowlist in
+// randomizer/p2_proxy/__init__.py.
+inline bool safeHost(int host) {
+    switch (host) {
+    case 0: case 2: case 3: case 4: case 6: case 8: case 9: case 11: case 15: case 16:
+    case 17: case 18: case 19: case 20: case 24: case 25: case 30: case 31: case 32: case 33:
+        return true;
+    default: return false;
+    }
+}
+
 inline Table parse(std::istream& in, bool (*bindable)(unsigned), int tekiTypeCount) {
     Table table;
     const auto fail = [&table](const std::string& message) {
@@ -59,6 +73,7 @@ inline Table parse(std::istream& in, bool (*bindable)(unsigned), int tekiTypeCou
         if (bindable == nullptr || !bindable(source)) return fail("source not bindable");
         if (!validSpecies(species)) return fail("bad species");
         if (hostValue < 0 || hostValue >= (long long)tekiTypeCount) return fail("bad host type");
+        if (!safeHost(int(hostValue))) return fail("unsafe host type");
         for (const Row& existing : rows) {
             if (existing.source == source) return fail("duplicate source");
             if (existing.species == species) return fail("duplicate species");

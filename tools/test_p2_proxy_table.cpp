@@ -25,7 +25,7 @@ void testValid() {
         "P2_PROXY_CAMPAIGN_1 3\n"
         "2 Kochappy 3\n"
         "17 Bulborb 4\n"
-        "10 Hana 5\n");
+        "10 Hana 0\n");
     const p2proxy::Table table = p2proxy::parse(in, allowAll, 36);
     check(table.valid, "valid table accepted");
     check(table.rows.size() == 3, "valid table has 3 rows");
@@ -34,7 +34,7 @@ void testValid() {
     check(bySource != nullptr && bySource->species == "Kochappy" && bySource->host == 3,
           "bySource 2");
     const p2proxy::Row* bySpecies = p2proxy::bySpecies(table, std::string("Hana"));
-    check(bySpecies != nullptr && bySpecies->source == 10 && bySpecies->host == 5,
+    check(bySpecies != nullptr && bySpecies->source == 10 && bySpecies->host == 0,
           "bySpecies Hana");
     check(p2proxy::bySource(table, 99) == nullptr, "bySource unknown null");
     check(p2proxy::bySpecies(table, std::string("Missing")) == nullptr, "bySpecies unknown null");
@@ -77,6 +77,12 @@ void testViolations() {
     expectInvalid("host too big",
                   "P2_PROXY_CAMPAIGN_1 1\n"
                   "2 Foo 36\n");
+    for (int host : {1, 5, 7, 10, 12, 13, 14, 21, 22, 23, 26, 27, 28, 29, 34, 35}) {
+        const std::string text = "P2_PROXY_CAMPAIGN_1 1\n2 Foo " + std::to_string(host) + "\n";
+        expectInvalid("unsafe host", text);
+    }
+    for (int host : {0, 2, 3, 4, 6, 8, 9, 11, 15, 16, 17, 18, 19, 20, 24, 25, 30, 31, 32, 33})
+        check(p2proxy::safeHost(host), "safe host accepted");
     expectInvalid("species leading digit",
                   "P2_PROXY_CAMPAIGN_1 1\n"
                   "2 1Bad 3\n");
