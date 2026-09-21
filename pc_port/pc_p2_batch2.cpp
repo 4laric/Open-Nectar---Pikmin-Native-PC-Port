@@ -405,11 +405,20 @@ void pc_p2_batch2_rebind() {
     logBindings();
 }
 
+// A proxy actor that binds but cannot draw leaves the plain host visible, which
+// is safe but silent. Name the early return once per (key, reason) so a probe
+// log says why a species never rendered (#871).
+static bool proxySkip(const std::string& key, const char* reason, int motion, bool corpse) {
+    if (key.compare(0, 6, "proxy|") == 0 && proxyDrawn.insert(std::string("skip|") + reason + "|" + key).second)
+        std::printf("P2_PROXY_DRAW_SKIP key=%s reason=%s motion=%d corpse=%d\n", key.c_str(), reason, motion, int(corpse));
+    return false;
+}
+
 bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool corpse) {
     auto entry = actors.find(actor);
     if (entry == actors.end() || !gfx.mCamera || !actor->mTekiAnimator) return false;
     auto bankIt = banks.find(entry->second);
-    if (bankIt == banks.end()) return false;
+    if (bankIt == banks.end()) return proxySkip(entry->second, "no_bank", -1, corpse);
     const Bank& bank = bankIt->second;
     static const char* const deadClips[] = {"dead", "dead1", "pdead1", "kagebozu_dead"};
     static const char* const attackClips[] = {"attack1", "attack", "attack2", "charge",
@@ -448,21 +457,21 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
             : firstClip(bank, waitClips, int(sizeof(waitClips) / sizeof(waitClips[0])));
     }
     if (!name) name = firstClip(bank, waitClips, int(sizeof(waitClips) / sizeof(waitClips[0])));
-    if (!name) return false;
+    if (!name) return proxySkip(entry->second, "no_clip", motion, corpse);
     const auto& poses = bank.clips.at(name);
-    if (poses.empty()) return false;
+    if (poses.empty()) return proxySkip(entry->second, "empty_poses", motion, corpse);
     const int frames = actor->mTekiAnimator->getFrameCount();
     const float phase = forcedPhase >= 0.0f ? forcedPhase
         : (frames > 1 ? actor->mTekiAnimator->getCounter() / (frames - 1) : 0.f);
     const p2sampled::Clip& clock = bank.clock.at(name);
     ActorClock& state = clocks[actor];
     if (state.clip != name) {
-        if (!state.cursor.start(clock)) return false;
+        if (!state.cursor.start(clock)) return proxySkip(entry->second, "clock_start", motion, corpse);
         state.clip = name;
     }
     const double sourceFrame = double(phase) * double(clock.poses.duration - 1);
     p2batch2clock::Step step = state.cursor.stepTo(sourceFrame);
-    if (!step.ok) return false;
+    if (!step.ok) return proxySkip(entry->second, "clock_step", motion, corpse);
     for (const p2sampled::Occurrence& event : step.events) {
         ++eventCount;
         if (eventCount <= 16u) {
@@ -480,9 +489,10 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     }
     // Proxy species are probed per species, so each proxy key reports its first
     // live and first corpse draw (#871); the families above keep the single line.
-    if (entry->second.compare(0, 6, "proxy|") == 0
-        && proxyDrawn.insert(std::string(corpse ? "1|" : "0|") + entry->second).second) {
-        std::printf("P2_PROXY_DRAW corpse=%d key=%s clip=%s\n", int(corpse), entry->second.c_str(), name);
+    if (entry->second.compare(0, 6, "proxy|") == 0) {
+        const unsigned token = pc_p2_campaign_token(actor);
+        if (proxyDrawn.insert(std::string(corpse ? "1|" : "0|") + entry->second + "|" + std::to_string(token)).second)
+            std::printf("P2_PROXY_DRAW corpse=%d key=%s clip=%s token=%u\n", int(corpse), entry->second.c_str(), name, token);
     }
     // Per-species tint (#207): the converter bakes every dweevil species from
     // the shared-base model, so multiply the species tint over each material
