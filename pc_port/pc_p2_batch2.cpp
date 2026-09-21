@@ -73,6 +73,7 @@ std::map<BTeki*, std::string> actors;          // actor -> key
 std::map<BTeki*, ActorClock> clocks;           // actor -> sampled clock state
 size_t bytesTotal = 0;
 bool logged[2] = {false, false};
+std::set<std::string> proxyDrawn;            // "<corpse>|<key>" already reported
 unsigned long long eventCount = 0;
 
 [[noreturn]] void fail(const char* what) {
@@ -224,6 +225,7 @@ void pc_p2_batch2_reset() {
     bytesTotal = 0;
     eventCount = 0;
     logged[0] = logged[1] = false;
+    proxyDrawn.clear();
 }
 
 void pc_p2_batch2_forget(BTeki* actor) {
@@ -475,6 +477,12 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     if (!logged[corpse ? 1 : 0]) {
         std::printf("P2_BATCH2_DRAW corpse=%d key=%s clip=%s\n", int(corpse), entry->second.c_str(), name);
         logged[corpse ? 1 : 0] = true;
+    }
+    // Proxy species are probed per species, so each proxy key reports its first
+    // live and first corpse draw (#871); the families above keep the single line.
+    if (entry->second.compare(0, 6, "proxy|") == 0
+        && proxyDrawn.insert(std::string(corpse ? "1|" : "0|") + entry->second).second) {
+        std::printf("P2_PROXY_DRAW corpse=%d key=%s clip=%s\n", int(corpse), entry->second.c_str(), name);
     }
     // Per-species tint (#207): the converter bakes every dweevil species from
     // the shared-base model, so multiply the species tint over each material
