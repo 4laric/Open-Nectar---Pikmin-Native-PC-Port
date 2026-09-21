@@ -20,8 +20,10 @@
 #include "pc_p2_otakara.h"
 #include "pc_p2_pom.h"
 #include "pc_p2_campaign_actor.h"
+#include "pc_p2_campaign_policy.h"
 #include "pc_p2_proxy.h"
 #include "pc_randomizer.h"
+#include "gl/pc_gfx.h"
 #include "pc_bbft.h"
 #include "teki.h"
 #include "Generator.h"
@@ -75,6 +77,7 @@ size_t bytesTotal = 0;
 bool logged[2] = {false, false};
 std::set<std::string> proxyDrawn;            // "<corpse>|<key>" already reported
 unsigned long long eventCount = 0;
+std::set<std::string> proxyShotKeys;          // proxy keys whose shot was scheduled
 
 [[noreturn]] void fail(const char* what) {
     std::fprintf(stderr, "P2_BATCH2 %s\n", what);
@@ -103,28 +106,36 @@ const char* firstClip(const Bank& bank, const char* const* names, int count) {
 
 Shape* loadPose(const std::string& prefix, const std::string& species,
                 const std::string& clip, int index,
-                std::vector<unsigned char>& reference, size_t& clipBytes) {
+                std::vector<unsigned char>& reference, size_t& clipBytes,
+                std::string* softError = nullptr) {
+    const auto softFail = [&softError](const char* what) -> Shape* {
+        if (softError) {
+            *softError = what;
+            return nullptr;
+        }
+        fail(what);
+    };
     char rel[192];
     std::snprintf(rel, sizeof(rel), "assets/dataDir/courses/pikmin2room/%s_%s_%s_%02d.mod",
                   prefix.c_str(), species.c_str(), clip.c_str(), index);
     std::ifstream file(rel, std::ios::binary | std::ios::ate);
-    if (!file) fail("missing pose bank");
+    if (!file) return softFail("missing pose bank");
     const auto size = file.tellg();
     if (size <= 0 || size_t(size) > ClipBytes || clipBytes + size_t(size) > ClipBytes
-            || bytesTotal + size_t(size) > TotalBytes) fail("pose bank exceeds budget");
+            || bytesTotal + size_t(size) > TotalBytes) return softFail("pose bank exceeds budget");
     clipBytes += size_t(size);
     bytesTotal += size_t(size);
     file.seekg(0);
     std::vector<unsigned char> data(size_t(size), 0), resources;
     if (!file.read(reinterpret_cast<char*>(data.data()), size)
-            || !p2animation::resources(data, resources)) fail("invalid pose resources");
-    if (!reference.empty() && reference != resources) fail("pose resources differ");
+            || !p2animation::resources(data, resources)) return softFail("invalid pose resources");
+    if (!reference.empty() && reference != resources) return softFail("pose resources differ");
     reference = resources;
     char load[160];
     std::snprintf(load, sizeof(load), "courses/pikmin2room/%s_%s_%s_%02d.mod",
                   prefix.c_str(), species.c_str(), clip.c_str(), index);
     Shape* shape = gameflow.loadShape(load, true);
-    if (!shape) fail("pose load failed");
+    if (!shape) return softFail("pose load failed");
     return shape;
 }
 
@@ -147,49 +158,74 @@ bool parseActors(const std::string& path, std::map<unsigned, std::string>& out) 
 }
 
 bool parseBank(const std::string& path,
-               std::map<std::string, std::vector<p2batch2clock::Row>>& out) {
+               std::map<std::string, std::vector<p2batch2clock::Row>>& out,
+               std::string* softError = nullptr) {
     std::ifstream in(path);
     if (!in) return false;
+    const auto softFail = [&softError](const char* what) -> bool {
+        if (softError) {
+            *softError = what;
+            return false;
+        }
+        fail(what);
+    };
     std::string word;
     if (!(in >> word) || word.size() < 9 || word.compare(0, 3, "P2_") != 0
-            || word.compare(word.size() - 7, 7, "_BANK_1") != 0) fail("invalid bank header");
+            || word.compare(word.size() - 7, 7, "_BANK_1") != 0) return softFail("invalid bank header");
     while (in >> word) {
         if (word == "species") {
             std::string species;
             unsigned long long id = 0;
-            if (!(in >> species >> id)) fail("invalid bank species row");
+            if (!(in >> species >> id)) return softFail("invalid bank species row");
             out.emplace(species, std::vector<p2batch2clock::Row>());
         } else if (word == "clip") {
             std::string species, name, events, status, marker;
             int frames = 0, poses = 0;
             if (!(in >> species >> name >> frames >> events >> marker >> poses >> status)
                     || marker != "poses" || frames < 0 || poses < 0 || poses > 64
-                    || !out.count(species)) fail("invalid bank clip row");
+                    || !out.count(species)) return softFail("invalid bank clip row");
             p2batch2clock::Row row;
             row.name = name;
             row.sourceFrames = frames;
             row.poseCount = poses;
-            if (!p2batch2clock::parseEvents(events, row.events)) fail("invalid bank event token");
+            if (!p2batch2clock::parseEvents(events, row.events)) return softFail("invalid bank event token");
             out[species].push_back(std::move(row));
         } else {
-            fail("invalid bank token");
+            return softFail("invalid bank token");
         }
     }
     return true;
 }
 
 Bank loadBank(const FamilyDef& family, const std::string& species,
-              const std::vector<p2batch2clock::Row>& rows) {
+              const std::vector<p2batch2clock::Row>& rows,
+              std::string* softError = nullptr) {
+    const auto softFail = [&softError](const char* what) -> Bank {
+        if (softError) {
+            *softError = what;
+            return Bank();
+        }
+        fail(what);
+    };
     Bank bank;
     std::vector<unsigned char> reference;
     Shape* shared = nullptr;
     for (const auto& row : rows) {
         size_t clipBytes = 0;
         p2sampled::Clip clock = p2batch2clock::makeClip(row);
-        if (!clock.valid()) fail("invalid sampled clock clip");
+        if (!clock.valid()) return softFail("invalid sampled clock clip");
         bank.clock[row.name] = clock;
         for (int i = 0; i < row.poseCount; ++i) {
-            Shape* shape = loadPose(family.prefix, species, row.name, i, reference, clipBytes);
+            std::string poseError;
+            Shape* shape = loadPose(family.prefix, species, row.name, i, reference, clipBytes,
+                                    softError ? &poseError : nullptr);
+            if (!shape) {
+                if (softError) {
+                    *softError = poseError.empty() ? "pose load failed" : poseError;
+                    return Bank();
+                }
+                fail("pose load failed");
+            }
             if (!shared) {
                 shared = shape;
                 for (int t = 0; t < shape->mTexAttrCount; ++t)
@@ -197,14 +233,15 @@ Bank loadBank(const FamilyDef& family, const std::string& species,
             } else {
                 if (shape->mMaterialCount != shared->mMaterialCount
                         || shape->mTexAttrCount != shared->mTexAttrCount
-                        || shape->mTevInfoCount != shared->mTevInfoCount) fail("material framing mismatch");
+                        || shape->mTevInfoCount != shared->mTevInfoCount)
+                    return softFail("material framing mismatch");
                 for (int j = 0; j < shape->mTotalMatpolyCount; ++j) {
                     auto* poly = shape->mMatpolyList[j];
                     if (!poly || !poly->mMaterial) continue;
                     int material = -1;
                     for (int m = 0; m < shape->mMaterialCount; ++m)
                         if (poly->mMaterial == &shape->mMaterialList[m]) material = m;
-                    if (material < 0) fail("pose material not found");
+                    if (material < 0) return softFail("pose material not found");
                     poly->mMaterial = &shared->mMaterialList[material];
                 }
                 shape->mMaterialList = shared->mMaterialList;
@@ -216,6 +253,46 @@ Bank loadBank(const FamilyDef& family, const std::string& species,
     }
     return bank;
 }
+
+// Erase every binding for one proxy key from both maps (#871 D4). Clocks are
+// keyed by actor, so dropping actors alone leaves a stale entry that a
+// recycled BTeki* address would inherit.
+static void eraseProxySpecies(const std::string& key) {
+    for (auto ait = actors.begin(); ait != actors.end();) {
+        if (ait->second == key) {
+            clocks.erase(ait->first);
+            ait = actors.erase(ait);
+        } else {
+            ++ait;
+        }
+    }
+}
+
+// Pre-sum a proxy species' pose bytes without loading (#871 D1). Returns true
+// when the species would exceed ClipBytes (per clip) or TotalBytes (running
+// total). Missing/unreadable files return false here and surface as
+// load_failed from the soft loadBank below instead.
+static bool proxyBudgetExceeds(const FamilyDef& family, const std::string& species,
+                               const std::vector<p2batch2clock::Row>& clipRows,
+                               size_t& speciesBytes) {
+    speciesBytes = 0;
+    for (const auto& row : clipRows) {
+        size_t clipBytes = 0;
+        for (int i = 0; i < row.poseCount; ++i) {
+            char rel[192];
+            std::snprintf(rel, sizeof(rel), "assets/dataDir/courses/pikmin2room/%s_%s_%s_%02d.mod",
+                          family.prefix, species.c_str(), row.name.c_str(), i);
+            std::ifstream file(rel, std::ios::binary | std::ios::ate);
+            if (!file) return false;
+            const auto size = file.tellg();
+            if (size <= 0) return false;
+            clipBytes += size_t(size);
+            speciesBytes += size_t(size);
+        }
+        if (clipBytes > ClipBytes) return true;
+    }
+    return bytesTotal + speciesBytes > TotalBytes;
+}
 }
 
 void pc_p2_batch2_reset() {
@@ -226,6 +303,12 @@ void pc_p2_batch2_reset() {
     eventCount = 0;
     logged[0] = logged[1] = false;
     proxyDrawn.clear();
+    proxyShotKeys.clear();
+    // D4: the proxy table is latched per reset, not per process. Stage
+    // teardown (pc_p2_reset_all_teki) and TekiMgr::reset() both funnel through
+    // here, and the process is reused across stages/sessions, so without this
+    // the first session's table (or its absence) would persist.
+    pc_p2_proxy_reset();
 }
 
 void pc_p2_batch2_forget(BTeki* actor) {
@@ -267,13 +350,10 @@ static void campaignWanted(const FamilyDef& family, std::map<unsigned, std::stri
         const p2proxy::Table& table = pc_p2_proxy_table();
         if (!table.valid) return;
         for (const auto& prow : table.rows) {
-            bool inStatic = false;
-            for (const auto& srow : SOURCES)
-                if (srow.source == prow.source) {
-                    inStatic = true;
-                    break;
-                }
-            if (inStatic) continue;
+            // D2: static-host sources are untouchable by the visual path too.
+            // hasStaticHost covers every hostType switch case (9,23,44,54,57,
+            // 59-62,78,79), which includes batch2's own static SOURCES above.
+            if (p2campaign::hasStaticHost(prow.source)) continue;
             for (unsigned id : pc_p2_campaign_ids(prow.source)) wanted[id] = prow.species;
         }
     }
@@ -285,11 +365,14 @@ static void bindFamilies(bool strict) {
         const bool isProxy = std::string(family.name) == "proxy";
         const bool soft = bridge && isProxy;
         std::map<unsigned, std::string> wanted;
-        const bool haveActors = parseActors(family.actors, wanted);
         if (soft) {
+            // D3: the proxy family never reads p2-proxy-actors.txt in bridge
+            // mode; campaign identity comes from the table via campaignWanted.
+            // A stale or half-written actors sidecar must not abort the campaign.
             campaignWanted(family, wanted);
             if (wanted.empty()) continue;
         } else {
+            const bool haveActors = parseActors(family.actors, wanted);
             if (!haveActors) continue;
             if (bridge) {
                 campaignWanted(family, wanted);
@@ -300,7 +383,20 @@ static void bindFamilies(bool strict) {
         bool haveBank = false;
         if (soft) {
             std::ifstream bankProbe(family.bank);
-            if (bankProbe) haveBank = parseBank(family.bank, rows);
+            if (!bankProbe) {
+                haveBank = false;
+            } else {
+                // D3: a present-but-malformed bank degrades to a single
+                // bad_bank skip (every proxy actor stays a plain host) instead
+                // of fail(). parseBank reports the reason via softError and
+                // never calls fail() on this path.
+                std::string bankError;
+                if (!parseBank(family.bank, rows, &bankError)) {
+                    std::printf("P2_SETUP_SKIP batch2 proxy bad_bank\n");
+                    continue;
+                }
+                haveBank = true;
+            }
         } else {
             if (!parseBank(family.bank, rows)) fail("missing bank for present actor config");
             haveBank = true;
@@ -320,7 +416,15 @@ static void bindFamilies(bool strict) {
                 std::printf("P2_SETUP_SKIP batch2 %s native_type_mismatch generator=%u\n", family.name, generator);
                 continue;
             }
-            if (!found.insert(generator).second) fail("duplicate generator in scene");
+            if (!found.insert(generator).second) {
+                // D3: a duplicated campaign token skips that actor instead of
+                // aborting the bridge campaign. Keep the first binding.
+                if (soft) {
+                    std::printf("P2_SETUP_SKIP batch2 proxy duplicate_token token=%u\n", generator);
+                    continue;
+                }
+                fail("duplicate generator in scene");
+            }
             actors[teki] = std::string(family.name) + "|" + match->second;
             speciesUsed.insert(match->second);
         }
@@ -332,45 +436,61 @@ static void bindFamilies(bool strict) {
         if (soft && !haveBank) {
             for (const std::string& species : speciesUsed) {
                 std::printf("P2_SETUP_SKIP batch2 proxy missing_bank species=%s\n", species.c_str());
-                const std::string key = std::string(family.name) + "|" + species;
-                for (auto ait = actors.begin(); ait != actors.end();) {
-                    if (ait->second == key)
-                        ait = actors.erase(ait);
-                    else
-                        ++ait;
-                }
+                eraseProxySpecies(std::string(family.name) + "|" + species);
             }
             continue;
         }
+        // speciesUsed is a std::set, so iteration is sorted by species name:
+        // budget outcomes are reproducible regardless of scene order.
         for (const std::string& species : speciesUsed) {
             auto clipRows = rows.find(species);
             if (clipRows == rows.end() || clipRows->second.empty()) {
                 if (soft) {
                     std::printf("P2_SETUP_SKIP batch2 proxy no_bank_clips species=%s\n", species.c_str());
-                    const std::string key = std::string(family.name) + "|" + species;
-                    for (auto ait = actors.begin(); ait != actors.end();) {
-                        if (ait->second == key)
-                            ait = actors.erase(ait);
-                        else
-                            ++ait;
-                    }
+                    eraseProxySpecies(std::string(family.name) + "|" + species);
                     continue;
                 }
                 fail("species has no bank clips");
             }
             if (soft && !proxyPoseAvailable(family, species, clipRows->second)) {
                 std::printf("P2_SETUP_SKIP batch2 proxy missing_pose species=%s\n", species.c_str());
-                const std::string key = std::string(family.name) + "|" + species;
-                for (auto ait = actors.begin(); ait != actors.end();) {
-                    if (ait->second == key)
-                        ait = actors.erase(ait);
-                    else
-                        ++ait;
-                }
+                eraseProxySpecies(std::string(family.name) + "|" + species);
                 continue;
             }
             const std::string key = std::string(family.name) + "|" + species;
-            if (!banks.count(key)) banks[key] = loadBank(family, species, clipRows->second);
+            if (soft && !banks.count(key)) {
+                // D1: pre-sum pose bytes before loadBank so a full-proxy area
+                // degrades to a budget skip instead of fail() aborting the
+                // campaign mid-setup.
+                size_t speciesBytes = 0;
+                if (proxyBudgetExceeds(family, species, clipRows->second, speciesBytes)) {
+                    std::printf("P2_SETUP_SKIP batch2 proxy budget species=%s bytes=%zu total=%zu\n",
+                                species.c_str(), speciesBytes, bytesTotal);
+                    eraseProxySpecies(key);
+                    continue;
+                }
+                // D1/D3: any other loadBank/loadPose failure (resource
+                // mismatch, unreadable pose, bad clock, material mismatch)
+                // degrades to load_failed + erase, not fail(). The softError
+                // out-param leaves loadBank/loadPose behaviour for the five
+                // existing families EXACTLY as today (they pass nullptr and
+                // still fail()); see the handoff for why soft-param was chosen
+                // over exceptions even though the target builds with
+                // exceptions enabled (gnu++17, no -fno-exceptions).
+                const size_t bytesBefore = bytesTotal;
+                std::string loadError;
+                Bank bank = loadBank(family, species, clipRows->second, &loadError);
+                if (!loadError.empty()) {
+                    bytesTotal = bytesBefore;
+                    std::printf("P2_SETUP_SKIP batch2 proxy load_failed species=%s reason=%s\n",
+                                species.c_str(), loadError.c_str());
+                    eraseProxySpecies(key);
+                    continue;
+                }
+                banks[key] = std::move(bank);
+            } else if (!banks.count(key)) {
+                banks[key] = loadBank(family, species, clipRows->second);
+            }
         }
     }
 }
@@ -400,8 +520,21 @@ void pc_p2_batch2_setup() {
 void pc_p2_batch2_rebind() {
     // Rebind within this scene without reallocating the immutable model banks.
     actors.clear();
-    if (!(pc_pikipelago_room_preview() || pc_randomizer_p2_bridge()) || !tekiMgr) return;
+    if (!(pc_pikipelago_room_preview() || pc_randomizer_p2_bridge()) || !tekiMgr) {
+        // D4: no rebind means every clock is stale; the next draw re-creates
+        // entries on demand.
+        clocks.clear();
+        return;
+    }
     bindFamilies(false);
+    // D4: drop clocks for actors that did not rebind (freed actors whose
+    // address may be recycled); survivors keep their cursors.
+    for (auto cit = clocks.begin(); cit != clocks.end();) {
+        if (actors.count(cit->first) == 0)
+            cit = clocks.erase(cit);
+        else
+            ++cit;
+    }
     logBindings();
 }
 
@@ -493,6 +626,12 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
         const unsigned token = pc_p2_campaign_token(actor);
         if (proxyDrawn.insert(std::string(corpse ? "1|" : "0|") + entry->second + "|" + std::to_string(token)).second)
             std::printf("P2_PROXY_DRAW corpse=%d key=%s clip=%s token=%u\n", int(corpse), entry->second.c_str(), name, token);
+        // Probe screenshot hook (#871): the FIRST live draw per key (not per
+        // token) schedules a capture 30 frames later. The gfx side is
+        // env-gated, so without PIKMIN_P2_PROXY_SHOT this is one set insert
+        // per key per session plus one disabled branch.
+        if (!corpse && proxyShotKeys.insert(entry->second).second)
+            pc_gfx_proxy_shot_notify(entry->second.c_str());
     }
     // Per-species tint (#207): the converter bakes every dweevil species from
     // the shared-base model, so multiply the species tint over each material

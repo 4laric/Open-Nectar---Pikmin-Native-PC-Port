@@ -14,6 +14,9 @@
 #include <vector>
 #include <unordered_map>
 #include <memory>
+#include <string>
+#include <set>
+#include <filesystem>
 
 #include "../timing/pc_render_packet.h"
 #include "pc_tev_shader.h"
@@ -3358,6 +3361,132 @@ static void post_apply_before_interface()
     invalidate_uniform_cache();
 }
 
+// ── P2 proxy probe screenshots (#871, probe-only, env-gated) ──
+// When PIKMIN_P2_PROXY_SHOT names an existing directory, each proxy key's
+// first live draw (via pc_gfx_proxy_shot_notify) schedules a capture 30
+// frames later; present() then writes the final presented frame -- the
+// default framebuffer after the post blit and letterbox dim, just before the
+// swap -- as an uncompressed 24-bit BMP <dir>/<Species>.bmp. Without the env
+// var, present() pays a single disabled branch and nothing else changes.
+static std::string sProxyShotDir;
+static bool sProxyShotChecked = false;
+static bool sProxyShotEnabled = false;
+static uint64_t sProxyShotFrame = 0;
+struct ProxyShotPending {
+    std::string key;
+    uint64_t frame = 0;
+};
+static std::vector<ProxyShotPending> sProxyShotPending;
+static std::set<std::string> sProxyShotDone;
+
+static bool proxyShotActive() {
+    if (!sProxyShotChecked) {
+        sProxyShotChecked = true;
+        const char* env = std::getenv("PIKMIN_P2_PROXY_SHOT");
+        if (env && *env != '\0') {
+            std::error_code ec;
+            if (std::filesystem::is_directory(env, ec)) {
+                sProxyShotDir = env;
+                sProxyShotEnabled = true;
+            }
+        }
+    }
+    return sProxyShotEnabled;
+}
+
+void pc_gfx_proxy_shot_notify(const char* key) {
+    if (!proxyShotActive()) return;
+    if (!key || *key == '\0') return;
+    const std::string k(key);
+    if (sProxyShotDone.count(k) != 0) return;
+    for (const ProxyShotPending& p : sProxyShotPending)
+        if (p.key == k) return;
+    sProxyShotDone.insert(k);
+    ProxyShotPending pending;
+    pending.key = k;
+    pending.frame = sProxyShotFrame + 30;
+    sProxyShotPending.push_back(pending);
+}
+
+static void proxyShotWrite(const std::string& key) {
+    if (!glBindFramebuffer_ptr || sDrawableWidth <= 0 || sDrawableHeight <= 0) return;
+    const int w = sDrawableWidth;
+    const int h = sDrawableHeight;
+    std::string species = key;
+    const std::string::size_type bar = key.find('|');
+    if (bar != std::string::npos) species = key.substr(bar + 1);
+    if (species.empty()) return;
+    const std::string path = sProxyShotDir + "/" + species + ".bmp";
+    // The presented frame lives in the default framebuffer (READ is still the
+    // post source after the blit); copy the state handling from the existing
+    // glReadPixels probes: bind explicitly, use tight packing, restore after.
+    glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, 0);
+    GLint packAlign = 4;
+    glGetIntegerv(GL_PACK_ALIGNMENT, &packAlign);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    std::vector<unsigned char> rgb(size_t(w) * size_t(h) * 3, 0);
+    glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, rgb.data());
+    glPixelStorei(GL_PACK_ALIGNMENT, packAlign);
+    FILE* out = std::fopen(path.c_str(), "wb");
+    if (!out) return;
+    const int rowStride = (w * 3 + 3) & ~3;
+    const uint32_t imageSize = uint32_t(rowStride) * uint32_t(h);
+    const uint32_t fileSize = 54 + imageSize;
+    unsigned char hdr[54] = {0};
+    hdr[0] = 'B';
+    hdr[1] = 'M';
+    hdr[2] = static_cast<unsigned char>(fileSize & 0xff);
+    hdr[3] = static_cast<unsigned char>((fileSize >> 8) & 0xff);
+    hdr[4] = static_cast<unsigned char>((fileSize >> 16) & 0xff);
+    hdr[5] = static_cast<unsigned char>((fileSize >> 24) & 0xff);
+    hdr[10] = 54;
+    hdr[14] = 40;
+    hdr[18] = static_cast<unsigned char>(w & 0xff);
+    hdr[19] = static_cast<unsigned char>((w >> 8) & 0xff);
+    hdr[20] = static_cast<unsigned char>((w >> 16) & 0xff);
+    hdr[21] = static_cast<unsigned char>((w >> 24) & 0xff);
+    hdr[22] = static_cast<unsigned char>(h & 0xff);
+    hdr[23] = static_cast<unsigned char>((h >> 8) & 0xff);
+    hdr[24] = static_cast<unsigned char>((h >> 16) & 0xff);
+    hdr[25] = static_cast<unsigned char>((h >> 24) & 0xff);
+    hdr[26] = 1;
+    hdr[28] = 24;
+    hdr[34] = static_cast<unsigned char>(imageSize & 0xff);
+    hdr[35] = static_cast<unsigned char>((imageSize >> 8) & 0xff);
+    hdr[36] = static_cast<unsigned char>((imageSize >> 16) & 0xff);
+    hdr[37] = static_cast<unsigned char>((imageSize >> 24) & 0xff);
+    bool ok = std::fwrite(hdr, 1, sizeof(hdr), out) == sizeof(hdr);
+    std::vector<unsigned char> row(size_t(rowStride), 0);
+    // glReadPixels returns bottom-up rows and a positive-height BMP expects
+    // bottom-up rows, so y runs in stored order; only RGB->BGR swaps.
+    for (int y = 0; ok && y < h; ++y) {
+        const unsigned char* src = &rgb[size_t(y) * size_t(w) * 3];
+        for (int x = 0; x < w; ++x) {
+            row[size_t(x) * 3 + 0] = src[size_t(x) * 3 + 2];
+            row[size_t(x) * 3 + 1] = src[size_t(x) * 3 + 1];
+            row[size_t(x) * 3 + 2] = src[size_t(x) * 3 + 0];
+        }
+        ok = std::fwrite(row.data(), 1, size_t(rowStride), out) == size_t(rowStride);
+    }
+    std::fclose(out);
+    if (!ok) return;
+    std::printf("P2_PROXY_SHOT key=%s file=%s w=%d h=%d\n", key.c_str(), path.c_str(), w, h);
+    std::fflush(stdout);
+}
+
+static void proxyShotOnPresent() {
+    ++sProxyShotFrame;
+    if (sProxyShotPending.empty()) return;
+    for (size_t i = 0; i < sProxyShotPending.size();) {
+        if (sProxyShotFrame >= sProxyShotPending[i].frame) {
+            proxyShotWrite(sProxyShotPending[i].key);
+            sProxyShotPending.erase(sProxyShotPending.begin() + long(i));
+        } else {
+            ++i;
+        }
+    }
+}
+
 void pc_gfx_present(void) {
     pc_gfx_flush_batch();
 #ifdef GL_TIME_ELAPSED
@@ -3412,6 +3541,10 @@ void pc_gfx_present(void) {
     glBlitFramebuffer_ptr(0, 0, sRenderWidth, sRenderHeight, outX, outY, outX + outWidth, outY + outHeight,
                           GL_COLOR_BUFFER_BIT, GL_LINEAR);
     dim_window_letterbox(outX, outY, outWidth, outHeight);
+    // Probe-only captures read the default framebuffer just before the swap
+    // (the swap itself happens in pc_window_swap_buffers after this returns).
+    // Disabled (no env var) this is a single cached branch per frame.
+    if (proxyShotActive()) proxyShotOnPresent();
 #ifdef GL_TIME_ELAPSED
     if (gpuQuery) {
         glEndQuery_ptr(GL_TIME_ELAPSED);

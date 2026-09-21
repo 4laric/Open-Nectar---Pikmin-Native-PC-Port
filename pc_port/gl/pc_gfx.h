@@ -13,6 +13,10 @@ extern "C" {
 void pc_gfx_init(void);
 void pc_gfx_begin_frame(void);
 void pc_gfx_present(void);
+// Probe screenshot hook (#871, probe-only): called once per proxy key on its
+// first live draw. Env-gated inside pc_gfx.cpp (PIKMIN_P2_PROXY_SHOT); without
+// the env var this is a single disabled branch and zero behaviour change.
+void pc_gfx_proxy_shot_notify(const char* key);
 void pc_gfx_perf_scope_begin(const char* name);
 void pc_gfx_perf_scope_end(void);
 
