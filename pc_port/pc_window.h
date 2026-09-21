@@ -28,6 +28,7 @@ enum {
 enum {
     PC_CONTROL_CLASSIC      = 0,  // Original GameCube behavior
     PC_CONTROL_MOUSE_CURSOR = 1,  // Mouse controls cursor, WASD moves Olimar
+    PC_CONTROL_ARPG         = 2,  // Right-click move, Q/W/E/R actions
 };
 
 // Keyboard remapping actions (PC only).
@@ -128,6 +129,8 @@ extern "C" s8 pc_window_get_virtual_cursor_y(void);
 extern "C" float pc_window_get_mouse_cursor_delta_x(void);
 extern "C" float pc_window_get_mouse_cursor_delta_y(void);
 extern "C" void pc_window_clear_mouse_cursor_delta(void);
+extern "C" bool pc_window_take_arpg_move_click(void);
+extern "C" bool pc_window_arpg_swarm_held(void);
 
 #ifdef __cplusplus
 }

@@ -58,7 +58,7 @@ struct PcConfig {
     // FPS mode (0=30fps, 1=60fps, 2=120fps experimental)
     int fpsMode = 0;
 
-    // Control mode (0=Classic, 1=Mouse Cursor)
+    // Control mode (0=Classic, 1=Mouse Cursor, 2=ARPG)
     int controlMode = PC_CONTROL_CLASSIC;
 
     // Keyboard bindings (scancodes for each action)
@@ -827,7 +827,7 @@ void loadConfig() {
         }
         else if (key == "controlMode") {
             sConfig.controlMode = atoi(val.c_str());
-            if (sConfig.controlMode < PC_CONTROL_CLASSIC || sConfig.controlMode > PC_CONTROL_MOUSE_CURSOR) {
+            if (sConfig.controlMode < PC_CONTROL_CLASSIC || sConfig.controlMode > PC_CONTROL_ARPG) {
                 sConfig.controlMode = PC_CONTROL_CLASSIC;
             }
         }
@@ -1501,10 +1501,10 @@ void pollMenuInput() {
             return;
         }
 
-        // Control scheme: Classic (GameCube) or Mouse Cursor.
+        // Control scheme: Classic, Mouse Cursor, or ARPG.
         if (sModsSelection == 0) {
-            if (left) sPending.controlMode = (sPending.controlMode - 1 + 2) % 2;
-            else if (right) sPending.controlMode = (sPending.controlMode + 1) % 2;
+            if (left) sPending.controlMode = (sPending.controlMode - 1 + 3) % 3;
+            else if (right) sPending.controlMode = (sPending.controlMode + 1) % 3;
         }
         // Chain Pikmin actions.
         else if (sModsSelection == 1) {
@@ -2649,9 +2649,11 @@ void pc_settings_draw(void) {
 
             char value[64];
             if (i == 0) {
-                snprintf(value, sizeof(value), "%s",
-                         sPending.controlMode == PC_CONTROL_CLASSIC ? "Classic (original)"
-                                                                    : "Mouse Cursor");
+                const char* controlNames[] = { "Classic (original)", "Mouse Cursor", "ARPG (QWER)" };
+                const int mode = sPending.controlMode >= PC_CONTROL_CLASSIC
+                              && sPending.controlMode <= PC_CONTROL_ARPG
+                               ? sPending.controlMode : PC_CONTROL_CLASSIC;
+                snprintf(value, sizeof(value), "%s", controlNames[mode]);
             } else if (i == 1) {
                 snprintf(value, sizeof(value), "%s",
                          sPending.chainActions ? "On" : "Off (original)");

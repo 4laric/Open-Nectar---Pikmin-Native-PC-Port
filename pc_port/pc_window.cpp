@@ -86,6 +86,8 @@ static s8 sVirtualCursorY = 0;
 // Mouse cursor delta for direct mouse input (PC_CONTROL_MOUSE_CURSOR relative mode)
 static float sMouseCursorDeltaX = 0.0f;
 static float sMouseCursorDeltaY = 0.0f;
+static bool sArpgMoveClick = false;
+static bool sArpgSwarmHeld = false;
 
 // Default keyboard bindings (comfortable layout: mouse handles cursor/C-stick).
 const SDL_Scancode kDefaultKeyBindings[PC_KEY_ACT_COUNT] = {
@@ -276,6 +278,10 @@ void pc_window_message_control_label(char tag, char* buf, unsigned bufSize)
 	}
 
 	if (tag == 'c') {
+		if (sControlMode == PC_CONTROL_ARPG) {
+			snprintf(buf, bufSize, "R");
+			return;
+		}
 		const SDL_Scancode keys[4] = {
 		    pc_window_get_key_binding(PC_KEY_ACT_CSTICK_UP),
 		    pc_window_get_key_binding(PC_KEY_ACT_CSTICK_LEFT),
@@ -299,11 +305,23 @@ void pc_window_message_control_label(char tag, char* buf, unsigned bufSize)
 		return;
 	}
 
+	if (sControlMode == PC_CONTROL_ARPG) {
+		const char* arpgName = nullptr;
+		if (tag == 'a') arpgName = "Left Mouse";
+		else if (tag == 'b') arpgName = "Q";
+		else if (tag == 'l') arpgName = "W";
+		else if (tag == 'x') arpgName = "E";
+		if (arpgName) {
+			snprintf(buf, bufSize, "%s", arpgName);
+			return;
+		}
+	}
+
 	const char* name = SDL_GetScancodeName(pc_window_get_key_binding(action));
 	snprintf(buf, bufSize, "%s", (name && name[0]) ? name : "?");
 
 	// Mouse buttons are fixed conveniences (not F1 remaps): L=A, R=B, M=Z.
-	if (sControlMode != PC_CONTROL_CLASSIC) {
+	if (sControlMode == PC_CONTROL_MOUSE_CURSOR) {
 		const char* mouse = mouseButtonAliasForTag(tag);
 		if (mouse) {
 			const size_t used = strlen(buf);
@@ -592,6 +610,12 @@ void pc_window_poll_events(PADStatus* pad) {
                 sMouseWheelSteps += steps;
                 break;
             }
+            case SDL_MOUSEBUTTONDOWN:
+                if (event.button.button == SDL_BUTTON_RIGHT
+                    && sControlMode == PC_CONTROL_ARPG && !sSettingsMenuOpen) {
+                    sArpgMoveClick = true;
+                }
+                break;
             case SDL_WINDOWEVENT:
                 if (event.window.event == SDL_WINDOWEVENT_RESIZED || 
                     event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
@@ -631,7 +655,7 @@ void pc_window_poll_events(PADStatus* pad) {
                 }
                 // Toggle relative mouse mode with Tab key
                 if (event.key.keysym.scancode == SDL_SCANCODE_TAB
-                    && sControlMode == PC_CONTROL_MOUSE_CURSOR && !sSettingsMenuOpen) {
+                    && sControlMode != PC_CONTROL_CLASSIC && !sSettingsMenuOpen) {
                     sMouseRelativeMode = !sMouseRelativeMode;
                     SDL_SetRelativeMouseMode(sMouseRelativeMode ? SDL_TRUE : SDL_FALSE);
                     // Clear mouse deltas on relative mode toggle
@@ -661,8 +685,8 @@ void pc_window_poll_events(PADStatus* pad) {
                 }
                 // Cycle control modes with F2 key
                 if (event.key.keysym.scancode == SDL_SCANCODE_F2 && !sSettingsMenuOpen) {
-                    pc_window_set_control_mode((sControlMode + 1) % 2);
-                    const char* modeNames[] = {"Classic", "Mouse Cursor"};
+                    pc_window_set_control_mode((sControlMode + 1) % 3);
+                    const char* modeNames[] = {"Classic", "Mouse Cursor", "ARPG"};
                     printf("[PC Port] Control mode: %s\n", modeNames[sControlMode]);
                 }
                 break;
@@ -693,12 +717,25 @@ void pc_window_poll_events(PADStatus* pad) {
     initKeyBindings();
 
     // ── Keyboard Mapping (configurable) ──
-    if (state[sKeyBindings[PC_KEY_ACT_A]])        button |= PAD_BUTTON_A;
-    if (state[sKeyBindings[PC_KEY_ACT_B]])        button |= PAD_BUTTON_B;
-    if (state[sKeyBindings[PC_KEY_ACT_X]])        button |= PAD_BUTTON_X;
-    if (state[sKeyBindings[PC_KEY_ACT_Y]])        button |= PAD_BUTTON_Y;
-    if (state[sKeyBindings[PC_KEY_ACT_Z]])        button |= PAD_TRIGGER_Z;
-    if (state[sKeyBindings[PC_KEY_ACT_START]])    button |= PAD_BUTTON_START;
+    // ARPG owns Q/W/E/R and removes keyboard locomotion. Classic and Mouse
+    // Cursor retain the configured GameCube mapping exactly.
+    if (sControlMode == PC_CONTROL_ARPG) {
+        if (state[SDL_SCANCODE_Q]) button |= PAD_BUTTON_B;
+        if (state[SDL_SCANCODE_W]) { button |= PAD_TRIGGER_L; triggerL = 255; }
+        if (state[SDL_SCANCODE_E]) button |= PAD_BUTTON_X;
+        sArpgSwarmHeld = state[SDL_SCANCODE_R] && !sSettingsMenuOpen;
+        if (state[sKeyBindings[PC_KEY_ACT_Y]]) button |= PAD_BUTTON_Y;
+        if (state[sKeyBindings[PC_KEY_ACT_Z]]) button |= PAD_TRIGGER_Z;
+        if (state[sKeyBindings[PC_KEY_ACT_START]]) button |= PAD_BUTTON_START;
+    } else {
+        sArpgSwarmHeld = false;
+        if (state[sKeyBindings[PC_KEY_ACT_A]])        button |= PAD_BUTTON_A;
+        if (state[sKeyBindings[PC_KEY_ACT_B]])        button |= PAD_BUTTON_B;
+        if (state[sKeyBindings[PC_KEY_ACT_X]])        button |= PAD_BUTTON_X;
+        if (state[sKeyBindings[PC_KEY_ACT_Y]])        button |= PAD_BUTTON_Y;
+        if (state[sKeyBindings[PC_KEY_ACT_Z]])        button |= PAD_TRIGGER_Z;
+        if (state[sKeyBindings[PC_KEY_ACT_START]])    button |= PAD_BUTTON_START;
+    }
 
     // D-Pad
     if (state[sKeyBindings[PC_KEY_ACT_DPAD_UP]])    button |= PAD_BUTTON_UP;
@@ -707,11 +744,11 @@ void pc_window_poll_events(PADStatus* pad) {
     if (state[sKeyBindings[PC_KEY_ACT_DPAD_RIGHT]]) button |= PAD_BUTTON_RIGHT;
 
     // Analog Triggers (Keyboard)
-    if (state[sKeyBindings[PC_KEY_ACT_L]]) {
+    if (sControlMode != PC_CONTROL_ARPG && state[sKeyBindings[PC_KEY_ACT_L]]) {
         button |= PAD_TRIGGER_L;
         triggerL = 255;
     }
-    if (state[sKeyBindings[PC_KEY_ACT_R]]) {
+    if (sControlMode != PC_CONTROL_ARPG && state[sKeyBindings[PC_KEY_ACT_R]]) {
         button |= PAD_TRIGGER_R;
         triggerR = 255;
     }
@@ -719,10 +756,12 @@ void pc_window_poll_events(PADStatus* pad) {
     // Main Stick (WASD) - ALWAYS controls Olimar movement
     // In all modes: WASD = movement, mouse = cursor (in mouse modes)
     int dirX = 0, dirY = 0;
-    if (state[sKeyBindings[PC_KEY_ACT_STICK_LEFT]])  dirX -= 1;
-    if (state[sKeyBindings[PC_KEY_ACT_STICK_RIGHT]]) dirX += 1;
-    if (state[sKeyBindings[PC_KEY_ACT_STICK_UP]])    dirY += 1;
-    if (state[sKeyBindings[PC_KEY_ACT_STICK_DOWN]])  dirY -= 1;
+    if (sControlMode != PC_CONTROL_ARPG) {
+        if (state[sKeyBindings[PC_KEY_ACT_STICK_LEFT]])  dirX -= 1;
+        if (state[sKeyBindings[PC_KEY_ACT_STICK_RIGHT]]) dirX += 1;
+        if (state[sKeyBindings[PC_KEY_ACT_STICK_UP]])    dirY += 1;
+        if (state[sKeyBindings[PC_KEY_ACT_STICK_DOWN]])  dirY -= 1;
+    }
 
     // WASD always controls movement stick (Olimar movement)
     stickX = (s8)(dirX * 127);
@@ -880,7 +919,7 @@ void pc_window_poll_events(PADStatus* pad) {
         if (mouseState & SDL_BUTTON(SDL_BUTTON_LEFT)) {
             button |= PAD_BUTTON_A;
         }
-        if (mouseState & SDL_BUTTON(SDL_BUTTON_RIGHT)) {
+        if (sControlMode != PC_CONTROL_ARPG && mouseState & SDL_BUTTON(SDL_BUTTON_RIGHT)) {
             button |= PAD_BUTTON_B;
         }
         if (mouseState & SDL_BUTTON(SDL_BUTTON_MIDDLE)) {
@@ -1102,13 +1141,15 @@ SDL_GameController* pc_window_get_controller(void) {
 
 // Control mode functions
 void pc_window_set_control_mode(int mode) {
-    if (mode >= PC_CONTROL_CLASSIC && mode <= PC_CONTROL_MOUSE_CURSOR) {
+    if (mode >= PC_CONTROL_CLASSIC && mode <= PC_CONTROL_ARPG) {
         sControlMode = mode;
         printf("[PC Port] Control mode set to %d\n", mode);
 
         // Clear mouse deltas on mode transition to avoid consuming accumulated movement
         sMouseCursorDeltaX = 0.0f;
         sMouseCursorDeltaY = 0.0f;
+        sArpgMoveClick = false;
+        sArpgSwarmHeld = false;
 
         if (mode == PC_CONTROL_CLASSIC || sSettingsMenuOpen) {
             sMouseRelativeMode = false;
@@ -1141,6 +1182,8 @@ void pc_window_set_settings_menu_open(bool open) {
     // Clear mouse deltas on menu state transition
     sMouseCursorDeltaX = 0.0f;
     sMouseCursorDeltaY = 0.0f;
+    sArpgMoveClick = false;
+    sArpgSwarmHeld = false;
     
     if (open) {
         sMouseRelativeMode = false;
@@ -1150,7 +1193,7 @@ void pc_window_set_settings_menu_open(bool open) {
     }
 
     SDL_ShowCursor(SDL_DISABLE);
-    sMouseRelativeMode = sControlMode == PC_CONTROL_MOUSE_CURSOR;
+    sMouseRelativeMode = sControlMode != PC_CONTROL_CLASSIC;
     SDL_SetRelativeMouseMode(sMouseRelativeMode ? SDL_TRUE : SDL_FALSE);
     
     // Consume any pending relative mouse motion after menu closes
@@ -1181,4 +1224,14 @@ extern "C" float pc_window_get_mouse_cursor_delta_y(void) {
 extern "C" void pc_window_clear_mouse_cursor_delta(void) {
     sMouseCursorDeltaX = 0.0f;
     sMouseCursorDeltaY = 0.0f;
+}
+
+extern "C" bool pc_window_take_arpg_move_click(void) {
+    const bool clicked = sControlMode == PC_CONTROL_ARPG && sArpgMoveClick;
+    sArpgMoveClick = false;
+    return clicked;
+}
+
+extern "C" bool pc_window_arpg_swarm_held(void) {
+    return sControlMode == PC_CONTROL_ARPG && sArpgSwarmHeld && !sSettingsMenuOpen;
 }

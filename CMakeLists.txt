@@ -210,6 +210,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_main.cpp
     pc_port/pc_window.cpp
     pc_port/pc_pad_axis.cpp
+    pc_port/pc_arpg_controls.cpp
     pc_port/pc_menu_repeat.cpp
     pc_port/pc_photo_mode.cpp
     pc_port/pc_permadeath.cpp
@@ -581,6 +582,12 @@ add_executable(pc_pad_axis_test pc_port/pc_pad_axis_test.cpp pc_port/pc_pad_axis
 target_include_directories(pc_pad_axis_test PRIVATE ${SDL2_INCLUDE_DIRS} pc_port)
 target_compile_options(pc_pad_axis_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME pc_pad_axis_test COMMAND pc_pad_axis_test)
+
+# ARPG click movement policy (no window or game needed)
+add_executable(pc_arpg_controls_test pc_port/pc_arpg_controls_test.cpp pc_port/pc_arpg_controls.cpp)
+target_include_directories(pc_arpg_controls_test PRIVATE pc_port)
+target_compile_options(pc_arpg_controls_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME pc_arpg_controls_test COMMAND pc_arpg_controls_test)
 
 # Permadeath save block (no game needed)
 add_executable(pc_permadeath_test pc_port/pc_permadeath_test.cpp pc_port/pc_permadeath.cpp src/sysCommon/stream.cpp src/sysCommon/string.cpp)

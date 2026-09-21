@@ -8,6 +8,7 @@
 #include <cstdlib>
 #if defined(PIKI_PC_PORT)
 #include "GameStat.h"
+#include "pc_arpg_controls.h"
 #include "pc_window.h"
 #include "settings/pc_settings.h"
 #endif
@@ -1894,6 +1895,12 @@ void Navi::reviseController(Vector3f& stickPos)
  */
 void Navi::makeVelocity(bool isSunset)
 {
+#if defined(PIKI_PC_PORT)
+	static PcArpgMoveState sArpgMoveState {};
+	if (pc_window_get_control_mode() != PC_CONTROL_ARPG) {
+		pc_arpg_move_reset(&sArpgMoveState);
+	}
+#endif
 	mNeutralTime += gsys->getFrameTime();
 
 	if (mKontroller->keyDown(KBBTN_B) || mKontroller->keyDown(KBBTN_A) || mKontroller->keyDown(KBBTN_X) || mKontroller->keyDown(KBBTN_Z)) {
@@ -1972,7 +1979,7 @@ void Navi::makeVelocity(bool isSunset)
 
 	// Use virtual cursor (mouse) in PC mouse modes, otherwise use movement stick
 	#ifdef PIKI_PC_PORT
-	if (pc_window_get_control_mode() == PC_CONTROL_MOUSE_CURSOR) {
+	if (pc_window_get_control_mode() != PC_CONTROL_CLASSIC) {
 		// Direct mouse delta mode: use raw deltas, no normalization or frame time scaling
 		// SDL already provides distance since last poll
 		static const float kMouseCursorWorldScale = 0.5f; // Convert SDL counts to world units
@@ -2011,6 +2018,32 @@ void Navi::makeVelocity(bool isSunset)
 		mCursorNaviDist       = dist;
 		mCursorTargetPosition = targetPos;
 
+		bool arpgMoving = false;
+		if (pc_window_get_control_mode() == PC_CONTROL_ARPG) {
+			const PcArpgVec2 captain { mSRT.t.x, mSRT.t.z };
+			if (pc_window_take_arpg_move_click()) {
+				pc_arpg_move_set_destination(
+				    &sArpgMoveState, captain,
+				    { mSRT.t.x + mCursorPosition.x, mSRT.t.z + mCursorPosition.z });
+			}
+			const bool actionHeld = mKontroller->keyDown(KBBTN_A) || mKontroller->keyDown(KBBTN_B)
+			                     || mKontroller->keyDown(KBBTN_X) || mKontroller->keyDown(KBBTN_Z);
+			const bool allowMove = !isSunset && !movieMode() && !actionHeld
+			                    && getCurrState()->getID() != NAVISTATE_Dead
+			                    && getCurrState()->getID() != NAVISTATE_DemoSunset;
+			PcArpgVec2 direction {};
+			const PcArpgMoveResult result = pc_arpg_move_update(
+			    &sArpgMoveState, captain, gsys->getFrameTime(), allowMove, &direction);
+			arpgMoving = result == PC_ARPG_MOVE_ACTIVE;
+			if (arpgMoving) {
+				Vector3f worldDirection(direction.x, 0.0f, direction.z);
+				mMainStick = worldDirection;
+				f32 speed = mPlateMgr->canNaviRunFast() ? NAVI_PARM(mRunSpeed) : NAVI_PARM(mMoveSpeed);
+				mTargetVelocity = worldDirection * speed;
+				mTargetVelocity = mTargetVelocity * pc_randomizer_captain_movement_multiplier();
+			}
+		}
+
 		// For cursor-facing logic: use delta magnitude (activity-based)
 		f32 moveStickMag = stickMag;
 		f32 cursorStickMag = mouseDelta.length();
@@ -2029,7 +2062,7 @@ void Navi::makeVelocity(bool isSunset)
 		// WASD is the stick, the mouse is the cursor. Treating a small mouse
 		// delta as that "look" band zeroed velocity while the player was
 		// still holding WASD (issue #17).
-		const bool moving = moveStickMag > NAVI_PARM(mNeutralStickThreshold);
+		const bool moving = arpgMoving || moveStickMag > NAVI_PARM(mNeutralStickThreshold);
 		if (!moving && (check || cursorStickMag > NAVI_PARM(mNeutralStickThreshold))
 		    && cursorStickMag <= NAVI_PARM(mCursorMoveStickThreshold)) {
 			mTargetVelocity.set(0.0f, 0.0f, 0.0f);
@@ -2138,6 +2171,16 @@ void Navi::makeCStick(bool isSunset)
 	transform.inputAxisAngle(axisAngle);
 
 	NVector3f cStickInput(mKontroller->getSubStickX(), 0.0f, -mKontroller->getSubStickY());
+	bool arpgWorldInput = false;
+#if defined(PIKI_PC_PORT)
+	if (pc_window_get_control_mode() == PC_CONTROL_ARPG && pc_window_arpg_swarm_held()) {
+		const PcArpgVec2 swarm = pc_arpg_swarm_direction(
+		    { mSRT.t.x, mSRT.t.z },
+		    { mSRT.t.x + mCursorPosition.x, mSRT.t.z + mCursorPosition.z });
+		cStickInput.set(swarm.x, 0.0f, swarm.z);
+		arpgWorldInput = true;
+	}
+#endif
 
 	if (isSunset) {
 		cStickInput.set(0.0f, 0.0f, 0.0f);
@@ -2156,7 +2199,9 @@ void Navi::makeCStick(bool isSunset)
 	}
 
 	cStickInput.scale(1.0f);
-	transform.transform(cStickInput);
+	if (!arpgWorldInput) {
+		transform.transform(cStickInput);
+	}
 
 	mCStick.set(0.0f, 0.0f, 0.0f);
 
