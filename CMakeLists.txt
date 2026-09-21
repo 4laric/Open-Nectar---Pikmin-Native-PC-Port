@@ -292,6 +292,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_jigumo.cpp
     pc_port/pc_p2_umimushi.cpp
     pc_port/pc_p2_batch2.cpp
+    pc_port/pc_p2_proxy.cpp
     pc_port/pc_p2_batch3.cpp
     pc_port/pc_p2_snagret_fsm.cpp
     pc_port/pc_p2_dangomushi_hazard.cpp
@@ -1190,6 +1191,12 @@ add_executable(p2_batch2_tint_test
 target_include_directories(p2_batch2_tint_test PRIVATE pc_port)
 target_compile_options(p2_batch2_tint_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_batch2_tint_test COMMAND p2_batch2_tint_test)
+
+add_executable(p2_proxy_table_test
+    tools/test_p2_proxy_table.cpp)
+target_include_directories(p2_proxy_table_test PRIVATE pc_port)
+target_compile_options(p2_proxy_table_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_proxy_table_test COMMAND p2_proxy_table_test)
 
 # Lane 30 (#242) standalone policy tests. The drop/host-clock and Sarai
 # captor/lifecycle/identity harnesses are dependency-free headers: a test source
