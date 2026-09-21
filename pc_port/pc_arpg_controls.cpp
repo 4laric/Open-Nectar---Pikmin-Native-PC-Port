@@ -1,6 +1,14 @@
 #include "pc_arpg_controls.h"
 
 #include <cmath>
+#include <cstring>
+
+int pc_arpg_control_mode_override(const char* value, int persistedMode)
+{
+    if (!value || !value[0]) return persistedMode;
+    if (!std::strcmp(value, "arpg") || !std::strcmp(value, "2")) return 2;
+    return persistedMode;
+}
 
 namespace {
 constexpr float kArrivalRadius = 18.0f;

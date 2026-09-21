@@ -14,6 +14,11 @@ static void require(bool condition, const char* message)
 
 int main()
 {
+    require(pc_arpg_control_mode_override(nullptr, 0) == 0, "missing launcher override preserves settings");
+    require(pc_arpg_control_mode_override("bogus", 1) == 1, "invalid launcher override preserves settings");
+    require(pc_arpg_control_mode_override("arpg", 0) == 2, "named launcher override selects ARPG");
+    require(pc_arpg_control_mode_override("2", 0) == 2, "numeric launcher override selects ARPG");
+
     PcArpgMoveState state {};
     PcArpgVec2 direction {};
     pc_arpg_move_reset(&state);

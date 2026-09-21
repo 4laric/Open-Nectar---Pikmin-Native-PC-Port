@@ -13,6 +13,10 @@ struct PcArpgMoveState {
     float blockedSeconds;
 };
 
+// Launcher-only override parser. Unknown values fail closed to the persisted
+// mode so a typo cannot silently select a different control scheme.
+int pc_arpg_control_mode_override(const char* value, int persistedMode);
+
 enum PcArpgMoveResult {
     PC_ARPG_MOVE_IDLE = 0,
     PC_ARPG_MOVE_ACTIVE,

@@ -15,6 +15,7 @@
 #include "settings/pc_settings.h"
 #include "settings/pc_settings_p2d.h"
 #include "pc_menu_repeat.h"
+#include "pc_arpg_controls.h"
 
 #include <SDL2/SDL.h>
 #include <cstdio>
@@ -1960,6 +1961,16 @@ void drawSubmenuRow(DGXGraphics* gfx, int x, int y, int w,
 
 void pc_settings_init(void) {
     loadConfig();
+    const int persistedControlMode = sConfig.controlMode;
+    sConfig.controlMode = pc_arpg_control_mode_override(
+        std::getenv("PIKMIN_CONTROL_MODE"), sConfig.controlMode);
+    if (sConfig.controlMode != persistedControlMode) {
+        printf("[PC Settings] Launch override selected ARPG control mode.\n");
+    } else if (const char* requested = std::getenv("PIKMIN_CONTROL_MODE")) {
+        if (requested[0] && std::strcmp(requested, "arpg") && std::strcmp(requested, "2")) {
+            printf("[PC Settings] Ignoring invalid PIKMIN_CONTROL_MODE=%s.\n", requested);
+        }
+    }
     sPending = sConfig;
     rebuildResolutionList();
     // Sin fichero previo, arrancar a la resolucion del monitor en vez de a un
