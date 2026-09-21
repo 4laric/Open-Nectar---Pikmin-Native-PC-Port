@@ -1198,6 +1198,13 @@ target_include_directories(p2_proxy_table_test PRIVATE pc_port)
 target_compile_options(p2_proxy_table_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_proxy_table_test COMMAND p2_proxy_table_test)
 
+# Campaign host policy (#871): engine-free hostType/hasStaticHost contract.
+add_executable(p2_campaign_policy_test
+    pc_port/pc_p2_campaign_policy_test.cpp)
+target_include_directories(p2_campaign_policy_test PRIVATE pc_port)
+target_compile_options(p2_campaign_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_campaign_policy_test COMMAND p2_campaign_policy_test)
+
 # Lane 30 (#242) standalone policy tests. The drop/host-clock and Sarai
 # captor/lifecycle/identity harnesses are dependency-free headers: a test source
 # and the pc_port include dir are all they need. (demon_captor/demon_escape and
