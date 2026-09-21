@@ -38,6 +38,7 @@ bool slotEnemies = false, campaignEnemies = false;
 // P2 enemy bridge: a versioned roster revision with target->source_id bindings.
 // Lane 02 enforces admission; the native side only validates identity and revision.
 bool p2EnemyBridge = false;
+bool p2ProxyTier = false;
 std::unordered_map<std::string, unsigned> p2Bindings;
 unsigned campaignAssignments[72] = {};
 bool groupEnemies = false;
@@ -149,6 +150,7 @@ bool pc_randomizer_init(int argc, char** argv) {
     }
     if (!bootstrap) return false;
     if (bbft) fail("standalone and BBFT modes cannot be combined");
+    p2ProxyTier = false;
     std::ifstream input(bootstrap);
     if (!input) fail("cannot open standalone bootstrap");
     expect(input, "PIKMIN_RANDOMIZER");
@@ -262,7 +264,14 @@ bool pc_randomizer_init(int argc, char** argv) {
                 fail("invalid P2 enemy binding");
         }
         p2EnemyBridge = true;
+        p2ProxyTier = false;
         input >> end;
+        if (end == "P2_PROXY_TIER") {
+            unsigned tier = 0;
+            if (!(input >> tier) || tier != 1) fail("invalid P2 proxy tier");
+            p2ProxyTier = true;
+            input >> end;
+        }
         if (end != "END") fail("P2 enemy bridge cannot mix other enemy layouts");
     }
     if (end == "ENEMY_CAMPAIGN") {
@@ -364,6 +373,7 @@ bool pc_randomizer_init(int argc, char** argv) {
     if (emperorGoal) hello << " emperor-goal-v1";
     if (deathLinkUnit) hello << " death-link-v1";
     if (p2EnemyBridge) hello << " p2-enemy-bridge-v1";
+    if (p2ProxyTier) hello << " p2-proxy-tier-v1";
     hello << " END\n";
     hello.close();
     if (!hello) fail("cannot write native handshake");
@@ -502,6 +512,7 @@ int pc_randomizer_start_color() { return startColor; }
 bool pc_randomizer_spawn_slots() { return enabled && (slotEnemies || campaignEnemies); }
 bool pc_randomizer_group_slots() { return enabled && groupEnemies; }
 bool pc_randomizer_p2_bridge() { return p2EnemyBridge; }
+bool pc_randomizer_p2_proxy_tier() { return p2EnemyBridge && p2ProxyTier; }
 unsigned pc_randomizer_p2_source(const char* target) {
     if (!p2EnemyBridge || !target) return 0;
     const auto it = p2Bindings.find(target);
@@ -648,6 +659,16 @@ bool pc_randomizer_p2_room_bootstrap(const char* path) {
             if (!(input >> target >> sourceId) || target.empty() || target.size() > 64
                 || !randomizerP2IsBindable(sourceId) || !p2Bindings.emplace(target, sourceId).second)
                 fail("invalid P2 enemy binding");
+        }
+        // Finding 4: skip the optional P2_PROXY_TIER pair the same way as the
+        // full-session reader so a tier seed's bootstrap parses here too. The
+        // room preview never takes the campaign tier; the flag is left alone.
+        std::string tierWord;
+        if (input >> tierWord) {
+            if (tierWord == "P2_PROXY_TIER") {
+                unsigned tier = 0;
+                if (!(input >> tier) || tier != 1) fail("invalid P2 proxy tier");
+            }
         }
         p2EnemyBridge = true;
         return true;

@@ -1,6 +1,8 @@
 #include "pc_p2_campaign_policy.h"
+#include "pc_p2_proxy_pack.h"
 #include <cassert>
 #include <initializer_list>
+#include <set>
 int main() {
     const unsigned sources[] = {9,23,44,54,57,59,60,61,62,78,79};
     const int hosts[] = {3,3,3,24,0,3,3,3,3,0,3};
@@ -27,5 +29,33 @@ int main() {
     for (unsigned s = 0; s <= 200; ++s) {
         assert(p2campaign::hostType(s, -1, false) >= -1);
         assert(p2campaign::hostType(s, -2, false) >= -2);
+    }
+    // Pack-generator token policy (finding 5): first sight binds in both
+    // modes; a repeat binds for soft proxy and fails otherwise.
+    assert(p2proxy::tokenAction(false, false) == p2proxy::TokenAction::Bind);
+    assert(p2proxy::tokenAction(true, false) == p2proxy::TokenAction::Bind);
+    assert(p2proxy::tokenAction(true, true) == p2proxy::TokenAction::Bind);
+    assert(p2proxy::tokenAction(false, true) == p2proxy::TokenAction::Fail);
+    // Bind-every-member simulation: members sharing token T each bind, the
+    // token counts once (mirrors the bindFamilies loop: insert once, bind
+    // on every member when the helper says Bind).
+    {
+        const unsigned members[] = {7, 7, 7, 9, 9};
+        std::set<unsigned> found;
+        unsigned binds = 0;
+        for (unsigned token : members) {
+            const bool isRepeat = !found.insert(token).second;
+            assert(p2proxy::tokenAction(true, isRepeat) == p2proxy::TokenAction::Bind);
+            ++binds;
+        }
+        assert(binds == 5);
+        assert(found.size() == 2);
+    }
+    // Strict mode still rejects the repeat (would fail() in bindFamilies).
+    {
+        std::set<unsigned> found;
+        found.insert(7u);
+        assert(p2proxy::tokenAction(false, !found.insert(7u).second)
+               == p2proxy::TokenAction::Fail);
     }
 }

@@ -28,6 +28,7 @@ bool pc_randomizer_group_slots();
 // P2 enemy bridge: versioned roster bindings parsed from ENEMY_P2. The target
 // token comes from lane 04 placement; 0 means the target is not bound.
 bool pc_randomizer_p2_bridge();
+bool pc_randomizer_p2_proxy_tier();
 unsigned pc_randomizer_p2_source(const char* target);
 unsigned pc_randomizer_p2_binding_count();
 bool pc_randomizer_p2_bound(unsigned source_id);

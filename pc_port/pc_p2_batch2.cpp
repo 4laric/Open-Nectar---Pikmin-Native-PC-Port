@@ -22,6 +22,7 @@
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_campaign_policy.h"
 #include "pc_p2_proxy.h"
+#include "pc_p2_proxy_pack.h"
 #include "pc_randomizer.h"
 #include "gl/pc_gfx.h"
 #include "pc_bbft.h"
@@ -347,6 +348,10 @@ static void campaignWanted(const FamilyDef& family, std::map<unsigned, std::stri
         if (std::string(row.family) == family.name)
             for (unsigned id : pc_p2_campaign_ids(row.source)) wanted[id] = row.species;
     if (std::string(family.name) == "proxy") {
+        // Finding 4: without the tier handshake the proxy family binds
+        // nothing, so a stray p2-proxy-campaign.txt cannot affect a non-tier
+        // seed (the spawn path already returns -1 via pc_p2_proxy_host).
+        if (!pc_randomizer_p2_proxy_tier()) return;
         const p2proxy::Table& table = pc_p2_proxy_table();
         if (!table.valid) return;
         for (const auto& prow : table.rows) {
@@ -416,15 +421,14 @@ static void bindFamilies(bool strict) {
                 std::printf("P2_SETUP_SKIP batch2 %s native_type_mismatch generator=%u\n", family.name, generator);
                 continue;
             }
-            if (!found.insert(generator).second) {
-                // D3: a duplicated campaign token skips that actor instead of
-                // aborting the bridge campaign. Keep the first binding.
-                if (soft) {
-                    std::printf("P2_SETUP_SKIP batch2 proxy duplicate_token token=%u\n", generator);
-                    continue;
-                }
+            // Finding 5: pack generators share one campaign token across
+            // members. The proxy family in bridge mode binds EVERY live
+            // member and counts the token once (found already holds it, so
+            // repeats fall through to the bind below with no second insert).
+            // All other families keep the duplicate-generator abort.
+            if (p2proxy::tokenAction(soft, !found.insert(generator).second)
+                    == p2proxy::TokenAction::Fail)
                 fail("duplicate generator in scene");
-            }
             actors[teki] = std::string(family.name) + "|" + match->second;
             speciesUsed.insert(match->second);
         }

@@ -1,5 +1,6 @@
 #include "pc_p2_proxy.h"
 #include "pc_p2_campaign_policy.h"
+#include "pc_randomizer.h"
 #include "pc_randomizer_p2_roster.h"
 #include "teki.h"
 #include <cstdio>
@@ -49,6 +50,9 @@ const p2proxy::Table& pc_p2_proxy_table() {
 }
 
 int pc_p2_proxy_host(unsigned source) {
+    // Finding 4: without the tier handshake a stray p2-proxy-campaign.txt
+    // must not affect a non-tier seed; the proxy family binds nothing.
+    if (!pc_randomizer_p2_proxy_tier()) return -1;
     const p2proxy::Table& table = pc_p2_proxy_table();
     if (!table.valid) return -1;
     const p2proxy::Row* row = p2proxy::bySource(table, source);
