@@ -706,24 +706,37 @@ void pc_p2_autoplay_tick(void)
     {
         const p2autoplay::State st = sBrain.current();
         const bool steering = (st == p2autoplay::State::Approach || st == p2autoplay::State::Done
-                               || st == p2autoplay::State::WithdrawSeek);
+                               || st == p2autoplay::State::WithdrawSeek
+                               || st == p2autoplay::State::Attack
+                               || st == p2autoplay::State::Aftermath);
         if (steering && (sTicks % 300 == 0)) {
             const int stateId = (navi->getCurrState() != nullptr) ? navi->getCurrState()->getID() : -999;
             float legX = senses.waypointLeg ? senses.wpX : senses.tgtX;
             float legZ = senses.waypointLeg ? senses.wpZ : senses.tgtZ;
-            if (st != p2autoplay::State::Approach) {
+            if (st != p2autoplay::State::Approach && st != p2autoplay::State::Attack
+                && st != p2autoplay::State::Aftermath) {
                 legX = senses.waypointLeg ? senses.wpX : onionX;
                 legZ = senses.waypointLeg ? senses.wpZ : onionZ;
             }
             const float velLen = navi->mTargetVelocity.length();
             const float stickLen = navi->mMainStick.length();
-            std::printf("AUTOPLAY_NAVI state=%s navi=(%.0f,%.0f) tgt=(%.0f,%.0f) tdist=%.0f leg=(%.0f,%.0f) move=(%.2f,%.2f) stick=(%d,%d) btn=%u nstate=%d open=%d yaw=%.2f vel=%.1f mstick=%.2f bot-driven\n",
+            const float showDist = (st == p2autoplay::State::Approach || st == p2autoplay::State::Attack
+                                    || st == p2autoplay::State::Aftermath)
+                ? senses.targetDist
+                : onionDist;
+            std::printf("AUTOPLAY_NAVI state=%s navi=(%.0f,%.0f) tgt=(%.0f,%.0f) tdist=%.0f leg=(%.0f,%.0f) move=(%.2f,%.2f) stick=(%d,%d) btn=%u nstate=%d open=%d yaw=%.2f vel=%.1f mstick=%.2f hp=%.2f scat=%d field=%d bot-driven\n",
                         p2autoplay::stateName(st), naviX, naviZ,
-                        (st == p2autoplay::State::Approach && pick) ? pick->x : onionX,
-                        (st == p2autoplay::State::Approach && pick) ? pick->z : onionZ,
-                        (st == p2autoplay::State::Approach) ? senses.targetDist : onionDist,
-                        legX, legZ, cmd.moveX, cmd.moveZ, stickX, stickY, buttons,
-                        stateId, senses.containerOpen ? 1 : 0, yawDbg, velLen, stickLen);
+                        (st == p2autoplay::State::Approach || st == p2autoplay::State::Attack
+                         || st == p2autoplay::State::Aftermath)
+                            ? senses.tgtX
+                            : onionX,
+                        (st == p2autoplay::State::Approach || st == p2autoplay::State::Attack
+                         || st == p2autoplay::State::Aftermath)
+                            ? senses.tgtZ
+                            : onionZ,
+                        showDist, legX, legZ, cmd.moveX, cmd.moveZ, stickX, stickY, buttons,
+                        stateId, senses.containerOpen ? 1 : 0, yawDbg, velLen, stickLen,
+                        senses.targetHealthFrac, senses.scattered ? 1 : 0, alive);
             std::fflush(stdout);
         }
     }
