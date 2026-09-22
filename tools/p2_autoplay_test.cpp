@@ -1,4 +1,4 @@
-// TEST-ONLY autoplay bot policy test (bot-impl wf9, bot-v2 wf10, bot-v3 wf10). Engine-free.
+// TEST-ONLY autoplay bot policy test (bot-impl wf9, bot-v2/v3/v4 wf10, bot-v5 wf10). Engine-free.
 //
 // Pins the engine-free Brain in pc_port/pc_p2_autoplay_policy.h:
 //   * inert-when-unset: with the PIKMIN_RANDOMIZER_AUTOPLAY gate closed the
@@ -15,6 +15,11 @@
 //     target_unreachable GIVEUP after maxApproachReplans consecutive STUCK
 //     windows (count resets on real progress); Done idles near the Onion.
 //
+//   * bot-v5: aftermath never whistles (release B), walks onto the corpse
+//     (contact ring) + throws to seed grabs, backs off, re-throws bounded
+//     times; receipt window extends only while carriers>0 AND the corpse
+//     moves; giveups name the broken link; received=1 only from the token's
+//     own ledger receipt.
 // Exit 0 only if every check passes; any failure prints FAIL and exits 1.
 #include "pc_p2_autoplay_policy.h"
 
@@ -426,14 +431,16 @@ void testReceiptWait()
     for (int i = 0; i < 6; ++i) brain.update(0.05f, s);
     CHECK(brain.current() == p2autoplay::State::Aftermath, "receipt/keeps_waiting_without_receipt");
     CHECK(!hasMarker(brain.takeMarkers(), "AUTOPLAY_RESULT"), "receipt/no_early_result");
-    // Timeout with no receipt: kill claimed, carry/receipt refused.
+    // Timeout with no receipt: kill claimed, carry/receipt refused. The lift
+    // was seen (transport) but the corpse never moved: bot-v5 names the stall
+    // (carry_stalled) instead of the generic receipt_timeout.
     std::vector<std::string> markers;
     for (int i = 0; i < 60 && brain.current() == p2autoplay::State::Aftermath; ++i) {
         brain.update(0.05f, s);
         const std::vector<std::string> got = brain.takeMarkers();
         markers.insert(markers.end(), got.begin(), got.end());
     }
-    CHECK(hasMarker(markers, "AUTOPLAY_GIVEUP reason=receipt_timeout"), "receipt/timeout_logged");
+    CHECK(hasMarker(markers, "AUTOPLAY_GIVEUP reason=carry_stalled"), "receipt/stall_logged");
     CHECK(hasMarker(markers, "AUTOPLAY_RESULT target=777001 damaged=1 killed=1 carried=0"),
           "receipt/timeout_no_carry_claim");
     CHECK(hasMarker(markers, "received=0"), "receipt/timeout_received_zero");
@@ -1165,6 +1172,8 @@ void testAftermathEscortExtension()
 {
     // bot-v4: a carry en route doubles the receipt window instead of timing
     // out while the corpse is still being carried (bc3 receipt_timeout).
+    // bot-v5: the extension needs carriers > 0 AND the corpse moving (live);
+    // a latched-but-stalled lift times out bounded with carry_stalled.
     p2autoplay::Config cfg;
     cfg.receiptTimeout = 1.0f;
     cfg.aftermathTimeout = 60.0f;
@@ -1184,12 +1193,342 @@ void testAftermathEscortExtension()
     brain.update(0.05f, s);
     s.targetAlive = false;
     s.transportSeen = true; // corpse en route, no receipt yet
+    s.corpseMoving = true; // ... and the corpse is actually moving
     s.receiptSeen = false;
     brain.update(0.05f, s);
     CHECK(brain.current() == p2autoplay::State::Aftermath, "escort/waits_after_kill");
     for (int i = 0; i < 30; ++i) brain.update(0.05f, s); // 1.5s > base 1.0s window
     CHECK(brain.current() == p2autoplay::State::Aftermath, "escort/outlasts_base_window_while_carrying");
     CHECK(!hasMarker(brain.takeMarkers(), "AUTOPLAY_RESULT"), "escort/no_early_result_while_carrying");
+
+    // Control: carriers but no motion -> no extension, bounded stall giveup.
+    p2autoplay::Brain stalled(cfg);
+    stalled.update(0.05f, s);
+    p2autoplay::Senses s2 = liveSenses();
+    s2.fieldPikmin = 20;
+    stalled.update(0.05f, s2); // -> select
+    s2.targetToken = 640002;
+    s2.targetSource = 79;
+    s2.targetAlive = true;
+    s2.targetDist = 100.0f;
+    stalled.update(0.05f, s2); // -> approach
+    stalled.update(0.05f, s2); // -> attack
+    s2.targetHealthFrac = 0.5f;
+    stalled.update(0.05f, s2);
+    s2.targetAlive = false;
+    s2.transportSeen = true; // lift seen...
+    s2.corpseMoving = false; // ... but the corpse never moves
+    s2.receiptSeen = false;
+    stalled.update(0.05f, s2);
+    std::vector<std::string> stalledMarkers;
+    for (int i = 0; i < 60 && stalled.current() == p2autoplay::State::Aftermath; ++i) {
+        stalled.update(0.05f, s2);
+        const std::vector<std::string> got = stalled.takeMarkers();
+        stalledMarkers.insert(stalledMarkers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(stalledMarkers, "AUTOPLAY_GIVEUP reason=carry_stalled"),
+          "escort/stall_no_extension");
+    CHECK(hasMarker(stalledMarkers, "AUTOPLAY_RESULT target=640002 damaged=1 killed=1 carried=0"),
+          "escort/stall_no_carry_claim");
+}
+
+void testAftermathNoWhistle()
+{
+    // bot-v5 (v4b diagnosis): aftermath HOLDS whistle (B) while standing
+    // 36-65 u from the corpse, so Pikmin gather at the navi and no carry
+    // ever initiates. Aftermath must never whistle, even scattered / in
+    // distress / grabbing: it releases B and delivers with stick + throws.
+    p2autoplay::Config cfg;
+    cfg.throwHold = 0.1f;
+    cfg.throwGap = 0.2f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 650001;
+    s.targetSource = 2;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.naviX = 0.0f;
+    s.naviZ = 0.0f;
+    s.tgtX = 100.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    s.targetHealthFrac = 0.5f;
+    brain.update(0.05f, s);
+    s.targetAlive = false;
+    s.targetDist = 50.0f; // corpse 50 u out
+    s.tgtX = 50.0f;
+    s.scattered = true; // worst case: scattered + distress + grab
+    s.squadDistress = true;
+    s.targetGrabbing = true;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "nowhistle/aftermath");
+    bool whistled = false, steered = false;
+    for (int i = 0; i < 60; ++i) {
+        brain.update(0.05f, s);
+        const p2autoplay::Command cmd = brain.command();
+        if (cmd.buttons & unsigned(p2autoplay::PadB)) whistled = true;
+        if (cmd.moveX > 0.5f) steered = true; // walks ONTO the corpse, not idle
+        if (brain.current() != p2autoplay::State::Aftermath) break;
+    }
+    CHECK(!whistled, "nowhistle/releases_B_despite_scatter");
+    CHECK(steered, "nowhistle/closes_onto_corpse");
+}
+
+void testAftermathSeedBackoffRethrow()
+{
+    // bot-v5 delivery loop: seed (onto the corpse + throws), bounded wait,
+    // back off out of contact, re-approach + re-throw bounded times, then a
+    // named giveup (carry_no_grab) - all pad-only.
+    p2autoplay::Config cfg;
+    cfg.throwHold = 0.1f;
+    cfg.throwGap = 0.2f;
+    cfg.receiptTimeout = 60.0f;
+    cfg.aftermathTimeout = 60.0f;
+    cfg.carryGrabWait = 0.5f;
+    cfg.aftermathSettleWait = 0.5f;
+    cfg.aftermathRethrowMax = 2;
+    cfg.aftermathApproachRadius = 60.0f;
+    cfg.aftermathBackoffDist = 200.0f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 650002;
+    s.targetSource = 27;
+    s.targetAlive = true;
+    s.targetDist = 300.0f;
+    s.naviX = 0.0f;
+    s.naviZ = 0.0f;
+    s.tgtX = 300.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    s.targetHealthFrac = 0.5f;
+    brain.update(0.05f, s);
+    s.targetAlive = false; // kill: corpse 300 u out, nobody grabs it
+    s.transportSeen = false;
+    s.carryCount = 0;
+    s.pelletCarriers = 0;
+    s.corpseMoving = false;
+    s.receiptSeen = false;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "seed/aftermath");
+    // Far: steers onto the corpse and throws once in range.
+    brain.update(0.05f, s);
+    CHECK(brain.command().moveX > 0.5f, "seed/steers_onto_corpse");
+    s.targetDist = 50.0f; // closed into the contact ring
+    s.tgtX = 50.0f;
+    int aOn = 0;
+    for (int i = 0; i < 12; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) ++aOn;
+    }
+    CHECK(aOn > 0, "seed/throws_at_corpse");
+    // Bounded wait on the corpse with no grab: backs off (steers AWAY).
+    bool backed = false;
+    for (int i = 0; i < 20 && !backed; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().moveX < -0.5f) backed = true;
+    }
+    CHECK(backed, "seed/backs_off_when_no_grab");
+    // Settle out of contact (or settle wait): re-approach + re-throw logged.
+    std::vector<std::string> markers;
+    s.targetDist = 200.0f; // reached backoff distance
+    for (int i = 0; i < 5; ++i) {
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_RETHROW token=650002 attempt=1"), "seed/rethrow_logged");
+    // Window expiry far from the corpse with no grab: named giveup, kill
+    // kept, no carry claim. (Seed never reaches the contact ring at
+    // tdist=200, so the bounded window, not a phase cap, ends it.)
+    for (int i = 0; i < 1400 && brain.current() == p2autoplay::State::Aftermath; ++i) {
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_GIVEUP reason=carry_no_grab"), "seed/giveup_names_no_grab");
+    CHECK(hasMarker(markers, "AUTOPLAY_RESULT target=650002 damaged=1 killed=1 carried=0"),
+          "seed/result_no_carry_claim");
+    int rethrows = 0;
+    for (const std::string& m : markers) {
+        if (m.find("AUTOPLAY_RETHROW") != std::string::npos) ++rethrows;
+    }
+    CHECK(rethrows <= 2, "seed/rethrows_bounded");
+}
+
+void testAftermathEscortNoThrows()
+{
+    // bot-v5 escort: while the carry is active the bot follows the corpse
+    // (steers when far) and stops throwing so the crew keeps hauling.
+    p2autoplay::Config cfg;
+    cfg.receiptTimeout = 60.0f;
+    cfg.throwHold = 0.1f;
+    cfg.throwGap = 0.2f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 650003;
+    s.targetSource = 79;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.naviX = 0.0f;
+    s.naviZ = 0.0f;
+    s.tgtX = 500.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    s.targetHealthFrac = 0.5f;
+    brain.update(0.05f, s);
+    s.targetAlive = false;
+    s.transportSeen = true;
+    s.carryCount = 6;
+    s.corpseMoving = true;
+    s.receiptSeen = false;
+    s.targetDist = 500.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "escort2/aftermath");
+    int aOn = 0;
+    bool followed = false;
+    for (int i = 0; i < 20; ++i) {
+        brain.update(0.05f, s);
+        const p2autoplay::Command cmd = brain.command();
+        if (cmd.buttons & unsigned(p2autoplay::PadA)) ++aOn;
+        if (cmd.buttons & unsigned(p2autoplay::PadB)) aOn += 1000; // whistle forbidden too
+        if (cmd.moveX > 0.5f) followed = true;
+    }
+    CHECK(aOn == 0, "escort2/no_throws_no_whistle_while_hauling");
+    CHECK(followed, "escort2/follows_corpse");
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "escort2/keeps_escorting");
+}
+
+void testAftermathGiveupReasons()
+{
+    // bot-v5: the giveup names the broken link (despawned / no grab /
+    // stalled / out of reach / slow receipt).
+    p2autoplay::Config cfg;
+    cfg.receiptTimeout = 0.5f;
+    cfg.aftermathTimeout = 60.0f;
+    cfg.carryGrabWait = 100.0f; // stay seeding: reach the window, not a phase cap
+    cfg.aftermathRethrowMax = 100;
+    cfg.corpseOutOfReach = 800.0f;
+    const auto runKill = [&](unsigned token, p2autoplay::Senses s, float corpseDist) {
+        p2autoplay::Brain* brain = new p2autoplay::Brain(cfg);
+        brain->update(0.05f, s);
+        brain->update(0.05f, s); // -> select
+        s.targetToken = token;
+        s.targetSource = 2;
+        s.targetAlive = true;
+        s.targetDist = 100.0f;
+        brain->update(0.05f, s); // -> approach
+        brain->update(0.05f, s); // -> attack
+        s.targetHealthFrac = 0.5f;
+        brain->update(0.05f, s);
+        s.targetAlive = false;
+        s.targetDist = corpseDist; // aftermath sees the corpse at this distance
+        s.receiptSeen = false;
+        brain->update(0.05f, s); // -> aftermath
+        std::vector<std::string> markers;
+        for (int i = 0; i < 120 && brain->current() == p2autoplay::State::Aftermath; ++i) {
+            brain->update(0.05f, s);
+            const std::vector<std::string> got = brain->takeMarkers();
+            markers.insert(markers.end(), got.begin(), got.end());
+        }
+        delete brain;
+        return markers;
+    };
+    // Corpse gone entirely (no body, no pellet, no carry): despawned.
+    p2autoplay::Senses d = liveSenses();
+    d.fieldPikmin = 20;
+    d.pelletExists = false;
+    d.transportSeen = false;
+    d.carryCount = 0;
+    d.targetDist = 100.0f;
+    CHECK(hasMarker(runKill(651001, d, 100.0f), "reason=corpse_despawned"), "reasons/despawned");
+    // Present corpse, nobody grabs, far away: out of reach.
+    p2autoplay::Senses f = liveSenses();
+    f.fieldPikmin = 20;
+    f.pelletExists = true;
+    f.transportSeen = false;
+    f.carryCount = 0;
+    f.targetDist = 900.0f;
+    CHECK(hasMarker(runKill(651002, f, 900.0f), "reason=corpse_out_of_reach"), "reasons/out_of_reach");
+    // Present corpse, moving haul, receipt just slow: receipt_timeout kept.
+    p2autoplay::Senses r = liveSenses();
+    r.fieldPikmin = 20;
+    r.pelletExists = true;
+    r.transportSeen = true;
+    r.carryCount = 4;
+    r.corpseMoving = true;
+    r.targetDist = 100.0f;
+    p2autoplay::Config cfg2 = cfg;
+    cfg2.receiptTimeout = 0.5f; // base 0.5, extended 1.0: loop 120 ticks (6 s) covers it
+    p2autoplay::Brain brainR(cfg2);
+    brainR.update(0.05f, r);
+    brainR.update(0.05f, r);
+    p2autoplay::Senses r2 = r;
+    r2.targetToken = 651003;
+    r2.targetSource = 2;
+    r2.targetAlive = true;
+    brainR.update(0.05f, r2);
+    brainR.update(0.05f, r2);
+    r2.targetHealthFrac = 0.5f;
+    brainR.update(0.05f, r2);
+    r2.targetAlive = false;
+    brainR.update(0.05f, r2);
+    std::vector<std::string> mr;
+    for (int i = 0; i < 120 && brainR.current() == p2autoplay::State::Aftermath; ++i) {
+        brainR.update(0.05f, r2);
+        const std::vector<std::string> got = brainR.takeMarkers();
+        mr.insert(mr.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(mr, "reason=receipt_timeout"), "reasons/slow_receipt");
+}
+
+void testReceiptPerTokenOnly()
+{
+    // bot-v5: RESULT received=1 comes ONLY from this token's own ledger
+    // receipt (receiptSeen). A kill + visible carry with NO receipt scores
+    // carried=0 received=0: bystander CHECK Bestiary:Deliver lines (which the
+    // harness used to count) must never flip the bot's verdict.
+    p2autoplay::Config cfg;
+    cfg.receiptTimeout = 0.5f;
+    cfg.whistleHold = 0.2f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 652001;
+    s.targetSource = 30; // Queen: v4b saw a bystander Spotty-Bulborb deliver CHECK here
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    s.targetHealthFrac = 0.4f;
+    brain.update(0.05f, s);
+    s.targetAlive = false;
+    s.transportSeen = true; // crew on it...
+    s.receiptSeen = false; // ... but no ledger line for THIS token
+    brain.update(0.05f, s);
+    std::vector<std::string> markers;
+    for (int i = 0; i < 120 && brain.current() == p2autoplay::State::Aftermath; ++i) {
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_RESULT target=652001 damaged=1 killed=1 carried=0"),
+          "pertoken/carry_refused_without_ledger");
+    CHECK(hasMarker(markers, "received=0"), "pertoken/received_refused_without_ledger");
+    CHECK(!hasMarker(markers, "received=1"), "pertoken/no_bystander_receipt");
 }
 
 } // namespace
@@ -1220,6 +1559,11 @@ int main()
     testRegroupDistress();
     testResupply();
     testAftermathEscortExtension();
+    testAftermathNoWhistle();
+    testAftermathSeedBackoffRethrow();
+    testAftermathEscortNoThrows();
+    testAftermathGiveupReasons();
+    testReceiptPerTokenOnly();
     if (failures == 0) {
         std::printf("PASS p2_autoplay\n");
         return 0;
