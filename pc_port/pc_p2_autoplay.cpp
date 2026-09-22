@@ -418,7 +418,11 @@ void pc_p2_autoplay_tick(void)
                 ++distress;
         }
     }
-    if (powerMode && !sPowerLogged) {
+    if (powerMode && !sPowerLogged && alive > 0
+        && (sBrain.current() == p2autoplay::State::Attack
+            || sBrain.current() == p2autoplay::State::Aftermath)) {
+        // First fight tick with a field squad: the power squad is complete
+        // (withdraw finished before Select), so this logs its real size.
         sPowerLogged = true;
         std::printf("AUTOPLAY_POWER squad=%d maturity=flower damage_mult=%g bot-driven\n",
                     alive, double(p2autoplay::powerDamageMult()));
