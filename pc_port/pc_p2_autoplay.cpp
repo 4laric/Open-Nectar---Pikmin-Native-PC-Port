@@ -318,8 +318,12 @@ void pc_p2_autoplay_tick(void)
     }
 
     // --- Stuck replan via the map's route/waypoint graph ---
-    if (sBrain.replanWanted() && pick) {
-        planDetour(naviX, naviZ, pick->x, pick->z);
+    if (sBrain.replanWanted()) {
+        if (sBrain.current() == p2autoplay::State::WithdrawSeek && hasOnion) {
+            planDetour(naviX, naviZ, onionX, onionZ);
+        } else if (pick) {
+            planDetour(naviX, naviZ, pick->x, pick->z);
+        }
         sBrain.clearReplan();
     }
     if (sHaveDetour) {
@@ -373,6 +377,15 @@ void pc_p2_autoplay_tick(void)
         else if (stickY < -32) buttons |= unsigned(p2autoplay::PadMainDown);
     }
     pc_p2_input_script_set(1, buttons, stickX, stickY);
+
+    // --- Withdraw diagnostics (bot-driven): proves the captain closes to
+    // the real container trigger instead of stalling at arriveRadius. ---
+    if (sBrain.current() == p2autoplay::State::WithdrawSeek && (sTicks % 300 == 0)) {
+        std::printf("AUTOPLAY_WITHDRAW navi=(%.0f,%.0f) onion=(%.0f,%.0f) dist=%.0f stored=%d field=%d open=%d bot-driven\n",
+                    naviX, naviZ, onionX, onionZ, onionDist, onionStored, alive,
+                    senses.containerOpen ? 1 : 0);
+        std::fflush(stdout);
+    }
 
     // --- FPS evidence ---
     if (++sTicks % 3600 == 0) {

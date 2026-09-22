@@ -345,7 +345,6 @@ private:
 
     void tickWithdrawSeek(float dt, const Senses& in)
     {
-        (void)dt;
         if (in.fieldPikmin >= cfg.wantSquad) {
             enter(State::Select, in);
             return;
@@ -355,15 +354,44 @@ private:
             enter(State::Select, in);
             return;
         }
-        if (in.onionDist <= cfg.arriveRadius) {
-            // At the Onion: tap A to open the container UI.
-            pulseA(in, 0.12f, 0.6f);
-            if (in.containerOpen) {
-                enter(State::WithdrawMenu, in);
-                return;
+        if (in.containerOpen) {
+            // UI already open (A landed while closing distance): work it.
+            enter(State::WithdrawMenu, in);
+            return;
+        }
+        if (in.hasOnion) {
+            // Keep closing until the real container trigger (navi size +
+            // coll radius, ~50) fires: arriveRadius (90) only starts the A
+            // taps, it must not stop the steering or the captain stalls at
+            // 90 and never opens the UI (wf9-2 withdraw_timeout).
+            if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+            else steer(in.naviX, in.naviZ, in.onionX, in.onionZ);
+            if (in.onionDist <= cfg.arriveRadius) {
+                // At the Onion: tap A to open the container UI.
+                pulseA(in, 0.12f, 0.6f);
             }
-        } else if (in.hasOnion) {
-            steer(in.naviX, in.naviZ, in.onionX, in.onionZ);
+            // Progress / stuck tracking so a wall between spawn and the
+            // Onion logs AUTOPLAY_STUCK and asks the driver to replan via
+            // the map waypoint graph (same contract as approach).
+            if (stuckWindowDist >= 1.0e29f) {
+                stuckWindowDist = in.onionDist;
+                stuckWindowStart = 0.0f;
+                progressBest = in.onionDist;
+            }
+            if (in.onionDist < progressBest) progressBest = in.onionDist;
+            stuckWindowStart += dt;
+            if (stuckWindowStart >= cfg.stuckWindow) {
+                if (stuckWindowDist - progressBest < cfg.stuckMinProgress) {
+                    char buf[256];
+                    std::snprintf(buf, sizeof(buf),
+                                  "AUTOPLAY_STUCK state=withdraw_seek onion_dist=%.0f bot-driven",
+                                  in.onionDist);
+                    markers.emplace_back(buf);
+                    wantReplan = true;
+                }
+                stuckWindowDist = progressBest;
+                stuckWindowStart = 0.0f;
+            }
         }
         if (stateTime >= cfg.withdrawTimeout) {
             giveUp(in, "withdraw_timeout");

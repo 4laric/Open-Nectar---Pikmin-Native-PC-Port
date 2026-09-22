@@ -147,6 +147,58 @@ void testWithdrawFlow()
     CHECK(brain.current() == p2autoplay::State::Select, "withdraw/leaves_when_filled");
 }
 
+void testWithdrawKeepsClosing()
+{
+    // Regression for wf9-2 withdraw_timeout: arriving within arriveRadius
+    // (90) must not stop the steering -- the real container trigger is
+    // ~50, so stopping at 90 stalls forever. Close distance still steers
+    // while tapping A, honours waypoint detours, and logs STUCK + replan.
+    p2autoplay::Config cfg;
+    cfg.wantSquad = 15;
+    cfg.stuckWindow = 0.2f;
+    cfg.stuckMinProgress = 30.0f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    brain.update(0.05f, s); // idle -> withdraw_seek
+    s.hasOnion = true;
+    s.naviX = 0.0f;
+    s.naviZ = 0.0f;
+    s.onionX = 50.0f;
+    s.onionZ = 0.0f;
+    s.onionDist = 50.0f;
+    s.onionStored = 20;
+    s.containerOpen = false;
+    brain.update(0.05f, s);
+    const p2autoplay::Command close = brain.command();
+    CHECK(close.moveX > 0.9f, "withdraw-close/keeps_steering_inside_arrive");
+    int aOn = 0;
+    for (int i = 0; i < 40; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) ++aOn;
+    }
+    CHECK(aOn > 0, "withdraw-close/pulses_A_while_closing");
+    CHECK(brain.current() == p2autoplay::State::WithdrawSeek, "withdraw-close/stays_until_open");
+
+    // Waypoint detour overrides the straight line to the Onion.
+    s.waypointLeg = true;
+    s.wpX = 0.0f;
+    s.wpZ = 400.0f;
+    brain.update(0.05f, s);
+    const p2autoplay::Command det = brain.command();
+    CHECK(det.moveZ > 0.9f && std::fabs(det.moveX) < 0.2f, "withdraw-close/waypoint_detour");
+    s.waypointLeg = false;
+
+    // No progress: STUCK + replan wanted (driver routes via waypoints).
+    std::vector<std::string> markers;
+    for (int i = 0; i < 30; ++i) {
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_STUCK state=withdraw_seek"), "withdraw-close/stuck_marker");
+    CHECK(brain.replanWanted(), "withdraw-close/replan_wanted");
+}
+
 void testCombatFlow()
 {
     p2autoplay::Config cfg;
@@ -298,6 +350,7 @@ int main()
     testGate();
     testInertWhenUnset();
     testWithdrawFlow();
+    testWithdrawKeepsClosing();
     testCombatFlow();
     testKoganeMovesOn();
     testTimeoutsAndStuck();
