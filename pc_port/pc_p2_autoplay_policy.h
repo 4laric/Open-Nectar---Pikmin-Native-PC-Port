@@ -1,6 +1,6 @@
 #pragma once
 
-// TEST-ONLY headless autoplay bot policy (brief key: bot-impl, wf9).
+// TEST-ONLY headless autoplay bot policy (brief keys: bot-impl wf9, bot-v2 wf10).
 //
 // Engine-free state machine for the scripted player that drives the game
 // through the NORMAL controller input path (synthesised pad state fed where
@@ -15,6 +15,20 @@
 // The Brain also takes an explicit `enabled` sense: with enabled=false every
 // update returns a neutral pad and stays IDLE, which is the
 // inert-when-unset guarantee the native test pins (tools/p2_autoplay_test.cpp).
+//
+// bot-v2 (wf10) deltas, in brief priority order:
+//   1. Onion receipt: Aftermath waits for the species' Onion receipt marker
+//      (sensed as receiptSeen from the delivery ledger) or receiptTimeout;
+//      RESULT carried=1 means a receipt line was seen, plus received=<0/1>.
+//   2. Far targets: the driver plans over the routeMgr waypoint graph and
+//      follows waypoint by waypoint (Brain honours waypointLeg + replan on
+//      every STUCK window, not just the first).
+//   3. Flyers: Sarai is only thrown at when low or holding a Pikmin (whistle
+//      frees grabs); Kurage gets a longer attack window and rotating throws.
+//   4. Full squad: the withdraw menu repeats until field>=wantSquad or the
+//      Onion is empty (bounded by maxWithdrawCycles).
+//   5. Kill claims: generic death latch (targetDead / health<=0 / !alive /
+//      corpse) scores kills for every species, not just per-module markers.
 
 #include <cmath>
 #include <cstdlib>
@@ -165,7 +179,10 @@ struct Config {
     float approachTimeout = 150.0f; // steer to one target
     float attackTimeout = 240.0f; // throw at one target
     float aftermathTimeout = 60.0f; // whistle back + let the corpse be carried
+    float receiptTimeout = 180.0f; // after a kill, wait for the Onion receipt marker or this timeout
     float koganeConfirm = 20.0f; // after Kogane damage, watch escapes then move on
+    float kurageAttackMultiplier = 2.0f; // Kurage has high HP: longer attack window
+    float saraiLowHeight = 120.0f; // Sarai thrown at only when within this height above ground (or grabbing)
     float throwRange = 260.0f; // XZ distance at which throws start
     float arriveRadius = 90.0f; // XZ distance considered "at" the Onion
     float throwHold = 0.12f; // A held per throw pulse
@@ -174,6 +191,7 @@ struct Config {
     float stuckWindow = 4.0f; // no-progress window before STUCK + replan
     float stuckMinProgress = 30.0f; // XZ units that count as progress
     int wantSquad = 15; // withdrawn Pikmin before leaving the Onion
+    int maxWithdrawCycles = 5; // repeat the withdraw menu until field>=wantSquad or Onion empty
 };
 
 // Plain-data senses gathered by the engine-linked driver each tick.
@@ -205,6 +223,11 @@ struct Senses {
     float targetHealthFrac = 1.0f; // 1 == untouched
     bool targetDamagedLatch = false; // family-observed combat (e.g. Kogane flip)
     bool targetRevealed = true; // Sokkuri disguise dropped
+    bool targetDead = false; // generic death: health<=0 / !alive / dead-state / corpse formed
+    bool receiptSeen = false; // Onion receipt marker for this token observed (delivery ledger)
+    float targetHeight = 0.0f; // Y above ground (flyers: Sarai/Kurage)
+    bool targetGrabbing = false; // flyer holds a Pikmin (Sarai grab): whistle to free
+    bool targetLow = false; // flyer low enough to hit (driver compares height to saraiLowHeight)
     bool transportSeen = false; // any live Pikmin in TransportMode
     bool scattered = false; // squad scattered: whistle regroup
     bool waypointLeg = false; // steer the detour waypoint, not the target
@@ -226,6 +249,7 @@ struct Result {
     bool damaged = false;
     bool killed = false;
     bool carried = false;
+    bool received = false; // Onion receipt marker observed (carried=1 implies received=1)
     float seconds = 0.0f;
     bool koganeLike = false;
 };
@@ -254,6 +278,9 @@ public:
         sawDamage = false;
         sawKill = false;
         sawCarry = false;
+        sawReceipt = false;
+        withdrawCycles = 0;
+        throwSpin = 0.0f;
         result = Result{};
         markers.clear();
         lastCommand = Command{};
@@ -404,9 +431,22 @@ private:
     void tickWithdrawMenu(float dt, const Senses& in)
     {
         if (!in.containerOpen) {
-            // UI closed after our A confirm: the withdrawal landed, leave.
+            // UI closed after our A confirm: one withdraw cycle landed.
             if (menuConfirmed) {
-                enter(State::Select, in);
+                if (in.fieldPikmin >= cfg.wantSquad || in.onionStored <= 0
+                    || withdrawCycles + 1 >= cfg.maxWithdrawCycles) {
+                    enter(State::Select, in);
+                    return;
+                }
+                // Squad still short and the Onion still stocks: loop back for
+                // another cycle (bot-v2 gap 4: repeat until 15 or empty).
+                ++withdrawCycles;
+                char buf[256];
+                std::snprintf(buf, sizeof(buf),
+                              "AUTOPLAY_WITHDRAW cycle=%d field=%d stored=%d bot-driven",
+                              withdrawCycles, in.fieldPikmin, in.onionStored);
+                markers.emplace_back(buf);
+                enter(State::WithdrawSeek, in);
                 return;
             }
             // UI did not open (or closed early): tap A to (re)open, then wait.
@@ -460,8 +500,10 @@ private:
         engageTime = 0.0f;
         initialHealthFrac = in.targetHealthFrac;
         sawDamage = in.targetDamagedLatch;
-        sawKill = false;
+        sawKill = in.targetDead;
+        if (in.targetDead) sawDamage = true; // death implies damage
         sawCarry = false;
+        sawReceipt = in.receiptSeen;
         result = Result{};
         result.token = in.targetToken;
         result.koganeLike = isKoganeLike(in.targetSource);
@@ -471,9 +513,12 @@ private:
     void tickApproach(float dt, const Senses& in)
     {
         engageTime += dt;
-        if (!in.targetAlive) {
+        if (!in.targetAlive || in.targetDead) {
             // Died before we arrived (or despawned): score what we saw.
-            if (sawDamage) {
+            // Generic death latch first so Otakara-style kills (no per-module
+            // marker) still claim (bot-v2 gap 5).
+            observeDeath(in);
+            if (sawDamage || sawKill) {
                 enter(State::Aftermath, in); // a corpse may still be carried
             } else {
                 finishTarget(in, /*claimedKill*/ false);
@@ -481,6 +526,8 @@ private:
             return;
         }
         observeDamage(in);
+        observeDeath(in);
+        observeReceipt(in);
         const float closeEnough = isFlyer(in.targetSource) ? cfg.throwRange : cfg.throwRange * 0.75f;
         const float need = in.targetRevealed ? closeEnough : 120.0f; // walk onto disguised Sokkuri
         if (in.targetDist <= need) {
@@ -519,31 +566,65 @@ private:
     void tickAttack(float dt, const Senses& in)
     {
         engageTime += dt;
-        if (!in.targetAlive) {
+        if (!in.targetAlive || in.targetDead) {
+            observeDeath(in);
             enter(State::Aftermath, in); // whistle back, watch the corpse
             return;
         }
         observeDamage(in);
+        observeDeath(in);
+        observeReceipt(in);
         // Kogane never dies: damage observed -> confirm, then move on.
         if (isKoganeLike(in.targetSource) && sawDamage && stateTime >= cfg.koganeConfirm) {
             finishTarget(in, /*killed*/ false);
             return;
         }
-        if (in.scattered && !whistling) {
+        const bool sarai = in.targetSource == 23;
+        const bool kurage = in.targetSource == 57;
+        // Sarai grab: whistle to free the grabbed Pikmin (priority over throws).
+        const bool grabWhistle = sarai && in.targetGrabbing;
+        if ((in.scattered || grabWhistle) && !whistling) {
             whistling = true;
             whistleTime = 0.0f;
         }
         if (whistling) {
             whistleTime += dt;
-            lastCommand.buttons = PadB; // hold whistle to regroup
-            if (whistleTime >= cfg.whistleHold || !in.scattered) whistling = false;
+            lastCommand.buttons = PadB; // hold whistle to regroup / free grabs
+            if (whistleTime >= cfg.whistleHold || (!in.scattered && !grabWhistle)) whistling = false;
             return;
+        }
+        if (sarai && !in.targetLow && !in.targetGrabbing) {
+            // Flyer high and holding nothing: stay near it with the squad
+            // following (steer under it), save Pikmin until it swoops low.
+            steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            if (stateTime >= cfg.attackTimeout) {
+                giveUp(in, "attack_timeout");
+                finishTarget(in, /*killed*/ false);
+            }
+            return;
+        }
+        // Kurage: body is on the ground (visual float only) so throw at the
+        // body position; high HP means a longer window, and throws rotate to
+        // spread Pikmin around the bell.
+        float aimX = in.tgtX, aimZ = in.tgtZ;
+        float gap = cfg.throwGap;
+        if (kurage) {
+            throwSpin += dt * 1.5f;
+            const float dx = in.tgtX - in.naviX, dz = in.tgtZ - in.naviZ;
+            const float len = std::sqrt(dx * dx + dz * dz);
+            if (len > 1.0f) {
+                const float wob = std::sin(throwSpin) * 40.0f;
+                aimX += (-dz / len) * wob;
+                aimZ += (dx / len) * wob;
+            }
+            gap = cfg.throwGap * (1.0f + 0.4f * std::sin(throwSpin * 0.7f));
         }
         // Keep the stick toward the target so the cursor aims at it, and
         // pulse A to throw. Flyers are thrown at from range as the game allows.
-        steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
-        pulseA(in, cfg.throwHold, cfg.throwGap);
-        if (stateTime >= cfg.attackTimeout) {
+        steer(in.naviX, in.naviZ, aimX, aimZ);
+        pulseA(in, cfg.throwHold, gap);
+        const float limit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout;
+        if (stateTime >= limit) {
             giveUp(in, "attack_timeout");
             finishTarget(in, /*killed*/ false);
         }
@@ -553,13 +634,17 @@ private:
     {
         engageTime += dt;
         if (in.transportSeen) sawCarry = true;
-        if (!in.targetAlive && !sawDamage && !sawCarry) {
+        observeDeath(in);
+        observeReceipt(in);
+        if ((!in.targetAlive || in.targetDead) && !sawDamage && !sawKill && !sawCarry && !sawReceipt) {
             // Target gone with no combat observed: nothing to wait for.
             finishTarget(in, /*claimedKill*/ false);
             return;
         }
-        if (!whistling && stateTime < cfg.whistleHold) {
-            // Whistle the squad back first.
+        // Idle near the corpse/Onion and whistle stragglers while the carry
+        // resolves (bot-v2 gap 1): steer to the last-known corpse when far,
+        // whistle scattered Pikmin back.
+        if ((!whistling && stateTime < cfg.whistleHold) || (in.scattered && !whistling)) {
             whistling = true;
             whistleTime = 0.0f;
         }
@@ -567,13 +652,26 @@ private:
             whistleTime += dt;
             lastCommand.buttons = PadB;
             if (whistleTime >= cfg.whistleHold) whistling = false;
+        } else if (in.waypointLeg) {
+            steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+        } else if (in.targetToken != 0) {
+            const float dx = in.tgtX - in.naviX, dz = in.tgtZ - in.naviZ;
+            if (dx * dx + dz * dz > 150.0f * 150.0f) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
         }
-        if (sawCarry && stateTime > cfg.whistleHold + 4.0f) {
-            // Carry latched and settled: score it.
+        if (sawReceipt && stateTime > cfg.whistleHold) {
+            // Onion receipt landed: score it promptly.
             finishTarget(in, /*killed*/ true);
             return;
         }
-        if (stateTime >= cfg.aftermathTimeout) {
+        const float wait = (sawKill || sawDamage) ? cfg.receiptTimeout : cfg.aftermathTimeout;
+        if (stateTime >= wait) {
+            if (!sawReceipt) {
+                char buf[256];
+                std::snprintf(buf, sizeof(buf),
+                              "AUTOPLAY_GIVEUP reason=receipt_timeout token=%u state=aftermath bot-driven",
+                              in.targetToken);
+                markers.emplace_back(buf);
+            }
             finishTarget(in, /*killed*/ true);
         }
     }
@@ -582,6 +680,25 @@ private:
     {
         if (in.targetHealthFrac < initialHealthFrac - 0.001f) sawDamage = true;
         if (in.targetDamagedLatch) sawDamage = true;
+    }
+
+    void observeDeath(const Senses& in)
+    {
+        // Generic death for every species (bot-v2 gap 5): engine death
+        // signals, not per-module markers. Death implies damage.
+        if (in.targetDead) {
+            sawKill = true;
+            sawDamage = true;
+        }
+        if (!in.targetAlive && (sawDamage || in.targetHealthFrac <= 0.001f)) {
+            sawKill = true;
+            if (in.targetHealthFrac <= 0.001f) sawDamage = true;
+        }
+    }
+
+    void observeReceipt(const Senses& in)
+    {
+        if (in.receiptSeen) sawReceipt = true;
     }
 
     void giveUp(const Senses& in, const char* reason)
@@ -594,21 +711,24 @@ private:
 
     void finishTarget(const Senses& in, bool claimedKill)
     {
-        result.damaged = sawDamage;
-        result.killed = claimedKill && sawDamage && !result.koganeLike;
+        result.damaged = sawDamage || sawKill;
+        result.killed = (claimedKill || sawKill) && result.damaged && !result.koganeLike;
         if (result.koganeLike) {
             // Kogane never dies; damage is the outcome.
             result.killed = false;
             result.carried = false;
+            result.received = false;
         } else {
-            result.carried = sawCarry;
+            // carried=1 means an Onion receipt line was seen (bot-v2 gap 1).
+            result.received = sawReceipt;
+            result.carried = sawReceipt;
         }
         result.seconds = engageTime;
         char buf[256];
         std::snprintf(buf, sizeof(buf),
-                      "AUTOPLAY_RESULT target=%u damaged=%d killed=%d carried=%d seconds=%.0f bot-driven",
+                      "AUTOPLAY_RESULT target=%u damaged=%d killed=%d carried=%d received=%d seconds=%.0f bot-driven",
                       result.token, int(result.damaged), int(result.killed),
-                      int(result.carried), result.seconds);
+                      int(result.carried), int(result.received), result.seconds);
         markers.emplace_back(buf);
         // The driver advances to the next target (or Done when none remain).
         enter(State::Select, in);
@@ -651,8 +771,11 @@ private:
     float progressBest = 1.0e30f;
     float initialHealthFrac = 1.0f;
     bool sawDamage = false;
-    bool sawKill = false;
+    bool sawKill = false; // generic death latched (any species)
     bool sawCarry = false;
+    bool sawReceipt = false; // Onion receipt latched (authoritative for carried)
+    int withdrawCycles = 0; // withdraw-menu repeat count this run
+    float throwSpin = 0.0f; // Kurage throw rotation phase
     bool announced = false;
     Result result;
     Command lastCommand;

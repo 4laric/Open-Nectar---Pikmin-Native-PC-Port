@@ -52,6 +52,10 @@ std::unordered_map<const void*, unsigned> p2TekiSources;
 std::unordered_map<const void*, unsigned> p2TekiGeneratorUids;
 // The randomizer's one ordinary delivery ledger (campaign directory), opened once.
 P2DeliveryHostHandle p2DeliveryHost = nullptr;
+// bot-v2 gap 1: in-memory copy of granted Onion corpse receipts this process,
+// so the TEST-ONLY autoplay bot can sense its own receipt without touching
+// the ledger (read-only query via pc_randomizer_p2_receipt_seen).
+std::set<unsigned> p2ReceiptGenerators;
 unsigned startingFlarlic = 2;
 bool configuredFlarlic = false, configuredStats = false, progressiveStats = false, wideStats = false, balancedStats = false, doubledStats = false;
 int baseColorStats[3][4] = {{100, 100, 100, 1}, {100, 100, 100, 1}, {100, 100, 100, 1}};
@@ -553,6 +557,11 @@ void pc_randomizer_p2_delivery_reset() {
         pc_p2_delivery_host_close(p2DeliveryHost);
         p2DeliveryHost = nullptr;
     }
+    p2ReceiptGenerators.clear();
+}
+bool pc_randomizer_p2_receipt_seen(unsigned generatorUid)
+{
+    return generatorUid != 0 && p2ReceiptGenerators.count(generatorUid) != 0;
 }
 bool pc_randomizer_p2_corpse_delivered(const void* tekiview, int type, int stage, bool gameplay) {
     if (!enabled || !ready || !gameplay || !tekiview) return false;
@@ -583,6 +592,9 @@ bool pc_randomizer_p2_corpse_delivered(const void* tekiview, int type, int stage
     const P2DeliveryHostResult result = pc_p2_delivery_host_deliver(p2DeliveryHost, seed.c_str(), sourceId, type, stage, generatorUid, "corpse");
     std::printf("[Pikmin Randomizer] P2_ORDINARY_P2_RECEIPT seed=%s id=onion:p2:%u:%d generator=%u new=%d\n",
         seed.c_str(), sourceId, stage, generatorUid, int(result == P2DeliveryHostResult::Granted));
+    if (result == P2DeliveryHostResult::Granted || result == P2DeliveryHostResult::Duplicate) {
+        p2ReceiptGenerators.insert(generatorUid);
+    }
     // Single-use: consume the binding so the address can be safely recycled.
     pc_randomizer_p2_forget_source(tekiview);
     return true;

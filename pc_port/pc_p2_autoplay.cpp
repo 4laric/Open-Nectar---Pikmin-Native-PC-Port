@@ -1,4 +1,4 @@
-// TEST-ONLY headless autoplay bot driver (brief key: bot-impl, wf9).
+// TEST-ONLY headless autoplay bot driver (brief keys: bot-impl wf9, bot-v2 wf10).
 //
 // Drives the game through the NORMAL controller input path: each logical
 // tick ControllerMgr::update() calls pc_p2_autoplay_tick(), which senses
@@ -12,6 +12,12 @@
 // Enabled only when PIKMIN_RANDOMIZER_AUTOPLAY is set (non-empty, != "0").
 // Otherwise tick() returns before touching anything: production input is
 // untouched (native test: tools/p2_autoplay_test.cpp).
+//
+// bot-v2 (wf10): waypoint-by-waypoint route-graph following with BFS
+// fallback + replan on every STUCK; generic death latch (health/isAlive/
+// dead-state/corpse pellet) for every species; Onion receipt sensing from
+// the delivery ledger; flyer height/grab senses (Sarai low-or-grabbing
+// throws + whistle, Kurage body-position throws).
 
 #include "pc_p2_autoplay_policy.h"
 
@@ -31,6 +37,7 @@
 #include "Generator.h"
 #include "GoalItem.h"
 #include "ItemMgr.h"
+#include "MapMgr.h"
 #include "Route.h"
 #include "Camera.h"
 #include "gameflow.h"
@@ -39,8 +46,10 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <queue>
 #include <set>
 #include <string>
+#include <vector>
 
 // Pad bits emitted here must equal the engine's KeyboardButtons.
 static_assert(unsigned(p2autoplay::PadA) == unsigned(KBBTN_A), "autoplay pad bits drifted");
@@ -85,67 +94,113 @@ struct Engagement {
     float lastZ = 0.0f;
     bool lastAlive = false;
     bool carryLatch = false;
+    bool deadLatch = false; // generic death observed (any species, gap 5)
 };
 
 p2autoplay::Brain sBrain;
 Engagement sEngage;
 std::set<unsigned> sCompleted;
-bool sHaveDetour = false;
-float sDetourX = 0.0f, sDetourZ = 0.0f;
-float sDetourTime = 0.0f;
+// Waypoint-by-waypoint route-graph path (bot-v2 gap 2): legs from the
+// nearest waypoint to us through the graph to the waypoint nearest the
+// target, advanced as each leg is reached, replanned on every STUCK.
+std::vector<std::pair<float, float>> sPath;
+size_t sPathIdx = 0;
+float sLegTime = 0.0f;
 long long sTicks = 0;
 std::chrono::steady_clock::time_point sFpsStart = std::chrono::steady_clock::now();
 bool sFpsLogged = false;
 
+// BFS over the raw waypoint link graph (bot-v2 gap 2 fallback): the engine
+// findSync above is the primary real graph search (A* over the same graph);
+// when it yields no legs, this BFS over mLinkIndices still produces a real
+// waypoint-by-waypoint route instead of a blind sidestep.
+bool bfsPath(int selfIdx, int tgtIdx, std::vector<std::pair<float, float>>& out)
+{
+    out.clear();
+    if (!routeMgr || selfIdx < 0 || tgtIdx < 0 || selfIdx == tgtIdx) return false;
+    const u32 handle = 'test';
+    const int n = routeMgr->getNumWayPoints(handle);
+    if (n <= 0 || selfIdx >= n || tgtIdx >= n || n > 4096) return false;
+    std::vector<int> parent(n, -1);
+    std::queue<int> q;
+    q.push(selfIdx);
+    parent[selfIdx] = selfIdx;
+    bool found = false;
+    while (!q.empty()) {
+        const int cur = q.front();
+        q.pop();
+        if (cur == tgtIdx) {
+            found = true;
+            break;
+        }
+        WayPoint* wp = routeMgr->getWayPoint(handle, cur);
+        if (!wp) continue;
+        const int links = wp->mLinkCount > 8 ? 8 : wp->mLinkCount;
+        for (int k = 0; k < links; ++k) {
+            const int nx = wp->mLinkIndices[k];
+            if (nx < 0 || nx >= n || parent[nx] != -1) continue;
+            parent[nx] = cur;
+            q.push(nx);
+        }
+    }
+    if (!found) return false;
+    std::vector<int> rev;
+    for (int cur = tgtIdx; cur != selfIdx; cur = parent[cur]) {
+        rev.push_back(cur);
+        if (int(rev.size()) > 64) break;
+        if (parent[cur] < 0) return false;
+    }
+    for (int i = int(rev.size()) - 1; i >= 0 && out.size() < 64; --i) {
+        WayPoint* wp = routeMgr->getWayPoint(handle, rev[i]);
+        if (!wp) continue;
+        out.emplace_back(wp->mPosition.x, wp->mPosition.z);
+    }
+    return !out.empty();
+}
+
 void planDetour(float naviX, float naviZ, float tgtX, float tgtZ)
 {
-    sHaveDetour = false;
-    sDetourTime = 0.0f;
-    // Prefer the map's real waypoint graph: nearest waypoint to the target
-    // via a synced path from the nearest waypoint to us.
+    sPath.clear();
+    sPathIdx = 0;
+    sLegTime = 0.0f;
+    const char* method = "none";
+    // Real path planning over the routeMgr waypoint graph (bot-v2 gap 2):
+    // nearest waypoint to us -> graph search -> waypoint nearest the target,
+    // followed waypoint by waypoint (advanced in the tick below).
     if (routeMgr) {
         Vector3f from(naviX, 0.0f, naviZ), to(tgtX, 0.0f, tgtZ);
         WayPoint* selfWp = routeMgr->findNearestWayPoint('test', from, true);
         WayPoint* tgtWp = routeMgr->findNearestWayPoint('test', to, true);
         PathFinder* finder = routeMgr->getPathFinder('test');
         if (selfWp && tgtWp && finder && selfWp != tgtWp) {
-            WayPoint* path[16] = {};
-            const int n = finder->findSync(path, 16, selfWp->mIndex, tgtWp->mIndex, false);
-            for (int i = 0; i < n; ++i) {
-                if (!path[i]) continue;
-                if (distXZ(naviX, naviZ, path[i]->mPosition.x, path[i]->mPosition.z) > 100.0f) {
-                    sDetourX = path[i]->mPosition.x;
-                    sDetourZ = path[i]->mPosition.z;
-                    sHaveDetour = true;
-                    break;
-                }
+            WayPoint* legs[64] = {};
+            const int n = finder->findSync(legs, 64, selfWp->mIndex, tgtWp->mIndex, false);
+            for (int i = 0; i < n && int(sPath.size()) < 64; ++i) {
+                if (!legs[i]) continue;
+                sPath.emplace_back(legs[i]->mPosition.x, legs[i]->mPosition.z);
             }
-            if (!sHaveDetour && n > 0 && path[0]) {
-                // Degenerate path: still step onto the graph toward the target.
-                sDetourX = path[0]->mPosition.x;
-                sDetourZ = path[0]->mPosition.z;
-                sHaveDetour = true;
-            }
+            if (!sPath.empty()) method = "graph";
+            if (sPath.empty() && bfsPath(selfWp->mIndex, tgtWp->mIndex, sPath)) method = "bfs";
         } else if (tgtWp) {
-            sDetourX = tgtWp->mPosition.x;
-            sDetourZ = tgtWp->mPosition.z;
-            sHaveDetour = true;
+            sPath.emplace_back(tgtWp->mPosition.x, tgtWp->mPosition.z);
+            method = "graph-nearest";
         }
     }
-    if (!sHaveDetour) {
+    if (sPath.empty()) {
         // Graph unavailable: perpendicular sidestep around the straight line.
         const float dx = tgtX - naviX, dz = tgtZ - naviZ;
         const float len = std::sqrt(dx * dx + dz * dz);
         if (len > 1.0f) {
             const float side = (sTicks % 2 == 0) ? 1.0f : -1.0f;
-            sDetourX = naviX + dx * 0.35f - dz / len * 220.0f * side;
-            sDetourZ = naviZ + dz * 0.35f + dx / len * 220.0f * side;
-            sHaveDetour = true;
+            sPath.emplace_back(naviX + dx * 0.35f - dz / len * 220.0f * side,
+                               naviZ + dz * 0.35f + dx / len * 220.0f * side);
+            method = "sidestep";
         }
     }
-    if (sHaveDetour) {
-        std::printf("AUTOPLAY_REPLAN token=%u detour=(%.0f,%.0f) bot-driven\n",
-                    sEngage.token, sDetourX, sDetourZ);
+    if (!sPath.empty()) {
+        std::printf("AUTOPLAY_REPLAN token=%u detour=(%.0f,%.0f) legs=%d method=%s bot-driven\n",
+                    sEngage.token, sPath[0].first, sPath[0].second,
+                    int(sPath.size()), method);
         std::fflush(stdout);
     }
 }
@@ -264,8 +319,32 @@ void pc_p2_autoplay_tick(void)
         sEngage.source = pick->source;
         sEngage.initialHealth = pick->health > 0.0f ? pick->health : 1.0f;
         if (p2autoplay::isKoganeLike(pick->source)) sEngage.initialNectar = pc_p2_kogane_nectar_dropped(pick->token);
-        sHaveDetour = false;
-        sDetourTime = 0.0f;
+        sPath.clear();
+        sPathIdx = 0;
+        sLegTime = 0.0f;
+    }
+
+    // --- Generic death scan (bot-v2 gap 5): the engaged actor by token among
+    // ALL teki (including dead bodies the live-list filter skips). Any of
+    // health<=0 / !isAlive / dead-state / corpse pellet formed latches death
+    // for every species, not just per-module markers (Otakara wf9-4 fix). ---
+    bool deadSignal = sEngage.deadLatch;
+    if (sEngage.token && !sEngage.deadLatch && tekiMgr) {
+        Iterator dit(tekiMgr);
+        CI_LOOP(dit)
+        {
+            Teki* t = static_cast<Teki*>(*dit);
+            if (!t || !t->mGenerator) continue;
+            BTeki* b = static_cast<BTeki*>(t);
+            if (pc_p2_campaign_token(b) != sEngage.token) continue;
+            if (b->mHealth <= 0.0f || !b->isAlive() || b->mDeadState != 0 || b->mPellet != nullptr) {
+                deadSignal = true;
+                sEngage.deadLatch = true;
+            }
+            sEngage.lastX = b->getPosition().x;
+            sEngage.lastZ = b->getPosition().z;
+            break;
+        }
     }
 
     // --- Senses ---
@@ -285,6 +364,10 @@ void pc_p2_autoplay_tick(void)
     senses.scattered = (farCount >= 3) || (alive >= 10 && nearCount < 5);
     if (transport > 0) sEngage.carryLatch = true;
     senses.transportSeen = sEngage.carryLatch;
+    senses.targetDead = deadSignal;
+    // Onion receipt for this token (bot-v2 gap 1): durable delivery-ledger
+    // query, read-only. carried=1 in RESULT means this was seen.
+    senses.receiptSeen = sEngage.token ? pc_randomizer_p2_receipt_seen(sEngage.token) : false;
     if (pick) {
         senses.targetToken = pick->token;
         senses.targetSource = pick->source;
@@ -305,6 +388,34 @@ void pc_p2_autoplay_tick(void)
         }
         if (pick->source == 79 && pc_p2_sokkuri_revealed(pick->actor)) senses.targetRevealed = true;
         else if (pick->source == 79) senses.targetRevealed = false;
+        // Flyer senses (bot-v2 gap 3): height above ground, grab latch.
+        // Kurage's body is on the ground (visual float only), so its XZ body
+        // position above is already the throw aim; Sarai throws only when low
+        // or holding a Pikmin.
+        {
+            float groundY = pick->actor->getPosition().y;
+            if (mapMgr) groundY = mapMgr->getMinY(pick->actor->getPosition().x,
+                                                 pick->actor->getPosition().z, true);
+            float height = pick->actor->getPosition().y - groundY;
+            if (!(height > 0.0f)) height = 0.0f;
+            senses.targetHeight = height;
+            senses.targetLow = height <= 120.0f;
+            bool grabbing = false;
+            if (pikiMgr) {
+                Iterator git(pikiMgr);
+                CI_LOOP(git)
+                {
+                    Piki* p = static_cast<Piki*>(*git);
+                    if (!p || !p->isAlive()) continue;
+                    if (p->getStickObject() == pick->actor) {
+                        grabbing = true;
+                        break;
+                    }
+                }
+            }
+            senses.targetGrabbing = grabbing;
+            if (pick->source == 23 && (grabbing || height <= 120.0f)) senses.targetLow = true;
+        }
     } else if (sEngage.token) {
         // Engagement target no longer live-listed: report last-known facts;
         // the Brain scores the outcome (kill vs giveup) from damage history.
@@ -318,22 +429,40 @@ void pc_p2_autoplay_tick(void)
     }
 
     // --- Stuck replan via the map's route/waypoint graph ---
+    // Every STUCK replans (bot-v2 gap 2: far targets follow the graph leg by
+    // leg instead of a single detour).
     if (sBrain.replanWanted()) {
         if (sBrain.current() == p2autoplay::State::WithdrawSeek && hasOnion) {
             planDetour(naviX, naviZ, onionX, onionZ);
         } else if (pick) {
             planDetour(naviX, naviZ, pick->x, pick->z);
+        } else if (sEngage.token) {
+            planDetour(naviX, naviZ, sEngage.lastX, sEngage.lastZ);
         }
         sBrain.clearReplan();
     }
-    if (sHaveDetour) {
-        sDetourTime += dt > 0.0f && dt <= 0.5f ? dt : 0.016f;
-        senses.waypointLeg = true;
-        senses.wpX = sDetourX;
-        senses.wpZ = sDetourZ;
-        if (distXZ(naviX, naviZ, sDetourX, sDetourZ) < 80.0f || sDetourTime > 25.0f) {
-            sHaveDetour = false;
-            senses.waypointLeg = false;
+    // Waypoint-by-waypoint following: steer each leg until reached (80u) or
+    // its 25s budget expires, then advance; the Brain steers the active leg.
+    if (!sPath.empty() && sPathIdx < sPath.size()) {
+        sLegTime += dt > 0.0f && dt <= 0.5f ? dt : 0.016f;
+        float legX = sPath[sPathIdx].first, legZ = sPath[sPathIdx].second;
+        while (sPathIdx < sPath.size()
+               && (distXZ(naviX, naviZ, legX, legZ) < 80.0f || sLegTime > 25.0f)) {
+            ++sPathIdx;
+            sLegTime = 0.0f;
+            if (sPathIdx < sPath.size()) {
+                legX = sPath[sPathIdx].first;
+                legZ = sPath[sPathIdx].second;
+            }
+        }
+        if (sPathIdx < sPath.size()) {
+            senses.waypointLeg = true;
+            senses.wpX = legX;
+            senses.wpZ = legZ;
+        } else {
+            sPath.clear();
+            sPathIdx = 0;
+            sLegTime = 0.0f;
         }
     }
 
@@ -347,7 +476,9 @@ void pc_p2_autoplay_tick(void)
             sCompleted.insert(done);
             if (done == sEngage.token) {
                 sEngage = Engagement{};
-                sHaveDetour = false;
+                sPath.clear();
+                sPathIdx = 0;
+                sLegTime = 0.0f;
             }
         }
     }
