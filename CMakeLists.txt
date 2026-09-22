@@ -1490,6 +1490,12 @@ add_executable(p2_kurage_natural_test tools/p2_kurage_natural_test.cpp pc_port/p
 target_include_directories(p2_kurage_natural_test PRIVATE pc_port)
 target_compile_options(p2_kurage_natural_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_kurage_natural_test COMMAND p2_kurage_natural_test)
+# Kurage57 campaign fixes (#871): engine-free gate/hover/probe contract for the
+# bridge-mode concessions skip, visual hover height and once-per-frame tail.
+add_executable(p2_kurage_campaign_test tools/test_p2_kurage_campaign.cpp)
+target_include_directories(p2_kurage_campaign_test PRIVATE pc_port)
+target_compile_options(p2_kurage_campaign_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_kurage_campaign_test COMMAND p2_kurage_campaign_test)
 # rd-p2-kurage-natural (#832): guarded replacement-main natural-engagement
 # observation fixture. Compile-only here; the replacement-main executable is
 # produced by scripts/build_pikmin2_fixture.py against a completed pikmin_pc build.
