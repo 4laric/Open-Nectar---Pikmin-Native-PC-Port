@@ -825,6 +825,61 @@ void testUnreachableGiveup()
     CHECK(!hasMarker(m2, "target_unreachable"), "unreachable/progress_resets_count");
 }
 
+void testContainerGuards()
+{
+    // bot-v3 root-cause fix: leaving the withdraw menu (or engaging) while
+    // the Onion container UI is open strands the navi in NAVISTATE_Container
+    // (stick drives the UI, velocity stays 0: bc2 38x identical detour).
+    // Select/Approach/Attack/Aftermath/Done with containerOpen bounce back
+    // to WithdrawMenu; the menu never leaves while open.
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s); // idle -> withdraw_seek
+    brain.update(0.05f, s); // -> select
+    CHECK(brain.current() == p2autoplay::State::Select, "containerguard/reaches_select");
+    // Select with the UI open: back to the menu, never to approach.
+    s.containerOpen = true;
+    s.targetToken = 616001u;
+    s.targetSource = 44;
+    s.targetAlive = true;
+    s.targetDist = 500.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::WithdrawMenu, "containerguard/select_bounces_to_menu");
+    // Full squad but the UI still open: the menu must NOT leave dirty (old
+    // code entered Select after 4s); it keeps confirming until close.
+    for (int i = 0; i < 100; ++i) brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::WithdrawMenu, "containerguard/menu_waits_for_close");
+    // Close the UI with a full squad: menu confirms, then leaves for select.
+    s.containerOpen = false;
+    s.onionStored = 0;
+    for (int i = 0; i < 20 && brain.current() == p2autoplay::State::WithdrawMenu; ++i) {
+        brain.update(0.05f, s);
+    }
+    CHECK(brain.current() == p2autoplay::State::Select, "containerguard/menu_leaves_when_closed");
+    // Approach with the UI open: back to the menu (no steering freeze).
+    brain.update(0.05f, s); // -> approach (closed, target live)
+    CHECK(brain.current() == p2autoplay::State::Approach, "containerguard/enters_approach");
+    s.containerOpen = true;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::WithdrawMenu, "containerguard/approach_bounces_to_menu");
+    // Done with the UI open: back to the menu as well.
+    p2autoplay::Brain brain2(cfg);
+    brain2.update(0.05f, s);
+    p2autoplay::Senses s2 = liveSenses();
+    s2.fieldPikmin = 20;
+    s2.containerOpen = false;
+    brain2.update(0.05f, s2);
+    s2.targetToken = 0;
+    s2.targetAlive = false;
+    brain2.update(0.05f, s2);
+    CHECK(brain2.current() == p2autoplay::State::Done, "containerguard/enters_done");
+    s2.containerOpen = true;
+    brain2.update(0.05f, s2);
+    CHECK(brain2.current() == p2autoplay::State::WithdrawMenu, "containerguard/done_bounces_to_menu");
+}
+
 void testDoneIdlesNearOnion()
 {
     // bot-v3: Done (no targets left) steers back toward the Onion instead of
@@ -878,6 +933,7 @@ int main()
     testReplanRepeats();
     testStuckCarriesNaviPos();
     testUnreachableGiveup();
+    testContainerGuards();
     testDoneIdlesNearOnion();
     if (failures == 0) {
         std::printf("PASS p2_autoplay\n");

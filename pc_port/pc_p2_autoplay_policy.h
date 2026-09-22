@@ -471,11 +471,14 @@ private:
             return;
         }
         if (in.fieldPikmin >= cfg.wantSquad || in.onionStored <= 0) {
-            // Already have a squad (e.g. re-entered): confirm and leave.
+            // Already have a squad (e.g. re-entered): confirm and leave, but
+            // NEVER while the container UI is still open (bot-v3: leaving
+            // dirty strands the navi in NAVISTATE_Container, where the stick
+            // drives the UI and mTargetVelocity stays 0, freezing approach).
             pulseA(in, 0.12f, 0.4f);
             menuHoldTime += dt;
             if (menuHoldTime > 1.2f) menuConfirmed = true;
-            if (menuConfirmed && stateTime > 4.0f) enter(State::Select, in);
+            if (menuConfirmed && stateTime > 4.0f && !in.containerOpen) enter(State::Select, in);
             return;
         }
         // Need withdraw: the field count only rises AFTER the A confirm
@@ -506,6 +509,12 @@ private:
 
     void tickSelect(const Senses& in)
     {
+        if (in.containerOpen) {
+            // bot-v3: the container UI must be closed before engaging; work
+            // it instead of stranding the navi in NAVISTATE_Container.
+            enter(State::WithdrawMenu, in);
+            return;
+        }
         if (in.targetToken == 0 || !in.targetAlive) {
             enter(State::Done, in);
             return;
@@ -525,6 +534,12 @@ private:
 
     void tickApproach(float dt, const Senses& in)
     {
+        if (in.containerOpen) {
+            // bot-v3: stick drives the container UI, not the captain; close
+            // it before steering or the navi never moves (bc2 freeze).
+            enter(State::WithdrawMenu, in);
+            return;
+        }
         engageTime += dt;
         if (!in.targetAlive || in.targetDead) {
             // Died before we arrived (or despawned): score what we saw.
@@ -592,6 +607,10 @@ private:
 
     void tickAttack(float dt, const Senses& in)
     {
+        if (in.containerOpen) {
+            enter(State::WithdrawMenu, in);
+            return;
+        }
         engageTime += dt;
         if (!in.targetAlive || in.targetDead) {
             observeDeath(in);
@@ -663,6 +682,10 @@ private:
 
     void tickAftermath(float dt, const Senses& in)
     {
+        if (in.containerOpen) {
+            enter(State::WithdrawMenu, in);
+            return;
+        }
         engageTime += dt;
         if (in.transportSeen) sawCarry = true;
         observeDeath(in);
@@ -709,6 +732,10 @@ private:
 
     void tickDone(float dt, const Senses& in)
     {
+        if (in.containerOpen) {
+            enter(State::WithdrawMenu, in);
+            return;
+        }
         // No more targets: idle near the Onion (bot-v3: enemies may walk to
         // the squad, which is how bc1/bc2 scored its only kills). Pad-only,
         // still gated by update(); neutral when there is no Onion to hold.
