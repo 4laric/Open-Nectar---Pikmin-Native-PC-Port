@@ -948,6 +948,36 @@ void testPowerGate()
     setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", nullptr);
     CHECK(p2autoplay::effectiveWantSquad(cfg) == cfg.wantSquad, "power/want_normal_when_off");
 
+    // bot-v4b Onion stock delta: pure function, inert when power is off.
+    CHECK(p2autoplay::powerStockTarget() == 100, "power/stock_target_100");
+    // Inert when either gate is unset: delta is 0 no matter the counts.
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "10");
+    CHECK(p2autoplay::powerStockDelta(p2autoplay::isPowerEnabled(), 20, 0, 20, 100) == 0,
+          "power/stock_inert_when_gate_closed");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", "1");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", nullptr);
+    CHECK(p2autoplay::powerStockDelta(p2autoplay::isPowerEnabled(), 20, 0, 20, 100) == 0,
+          "power/stock_inert_when_power_unset");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "0");
+    CHECK(p2autoplay::powerStockDelta(p2autoplay::isPowerEnabled(), 20, 0, 20, 100) == 0,
+          "power/stock_inert_when_power_zero");
+    // Enabled: fresh boot (stored 20, field 0) tops up 80 to reach 100.
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "10");
+    CHECK(p2autoplay::powerStockDelta(p2autoplay::isPowerEnabled(), 20, 0, 20, 100) == 80,
+          "power/stock_80_from_boot");
+    // Mid-run (stored 0, field 20 already withdrawn) still tops to 100 total.
+    CHECK(p2autoplay::powerStockDelta(p2autoplay::isPowerEnabled(), 0, 20, 20, 100) == 80,
+          "power/stock_80_mid_run");
+    // Already full: no top-up. At the pool limit: no top-up.
+    CHECK(p2autoplay::powerStockDelta(p2autoplay::isPowerEnabled(), 100, 0, 100, 100) == 0,
+          "power/stock_none_when_full");
+    CHECK(p2autoplay::powerStockDelta(p2autoplay::isPowerEnabled(), 20, 0, 100, 100) == 0,
+          "power/stock_none_at_limit");
+    // Capped by pool room, never overfills past the limit.
+    CHECK(p2autoplay::powerStockDelta(p2autoplay::isPowerEnabled(), 20, 0, 90, 100) == 10,
+          "power/stock_capped_by_limit");
+
     // RESULT tagging: power=1 on every result of a power run, absent otherwise.
     setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "10");
     {

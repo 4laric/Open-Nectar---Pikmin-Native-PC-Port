@@ -42,6 +42,10 @@
 #include "NaviState.h"
 #include "PikiState.h"
 #include "GlobalGameOptions.h"
+#include "BaseInf.h"
+#include "GameStat.h"
+#include "PlayerState.h"
+#include "settings/pc_settings.h"
 #include "Generator.h"
 #include "GoalItem.h"
 #include "ItemMgr.h"
@@ -125,6 +129,7 @@ long long sTicks = 0;
 std::chrono::steady_clock::time_point sFpsStart = std::chrono::steady_clock::now();
 bool sFpsLogged = false;
 bool sPowerLogged = false; // bot-v4: AUTOPLAY_POWER is logged exactly once per process
+bool sPowerStocked = false; // bot-v4b: power-mode Onion stock runs once per process
 
 // BFS over the raw waypoint link graph (bot-v2 gap 2 fallback): the engine
 // findSync below is the primary real graph search (A* over the same graph);
@@ -427,6 +432,51 @@ void pc_p2_autoplay_tick(void)
         std::printf("AUTOPLAY_POWER squad=%d maturity=flower damage_mult=%g bot-driven\n",
                     alive, double(p2autoplay::powerDamageMult()));
         std::fflush(stdout);
+    }
+
+    // bot-v4b power-mode Onion stock (TEST-ONLY, gated by BOTH the autoplay
+    // gate and PIKMIN_RANDOMIZER_AUTOPLAY_POWER via isPowerEnabled(): inert
+    // when either is unset). The day-start Onion only holds the 20 starting
+    // Pikmin (gameSetup sets 20; the field cap is not the binding
+    // constraint), so top the start-colour Onion up to ~100 once per process
+    // through the normal born/stored bookkeeping: pikiInfMgr (stock carried
+    // between days) + the Onion's mHeldPikis (what the withdrawal screen
+    // counts) + GameStat::containerPikis/allPikis (HUD + birth caps) +
+    // playerState born/living/plucked counters. Stocked as Leaf (the normal
+    // birth stage); the power-mode census above flowers the field squad
+    // through the normal setFlower path after withdrawal.
+    if (powerMode && !sPowerStocked && playerState) {
+        int stockColor = pc_randomizer_enabled() ? pc_randomizer_start_color() : Red;
+        if (stockColor < PikiMinColor || stockColor > PikiMaxColor) stockColor = Red;
+        GoalItem* stockOnion = itemMgr ? itemMgr->getContainer(stockColor) : nullptr;
+        if (!stockOnion && itemMgr) {
+            for (int color = PikiMinColor; color <= PikiMaxColor; ++color) {
+                stockOnion = itemMgr->getContainer(color);
+                if (stockOnion) {
+                    stockColor = color;
+                    break;
+                }
+            }
+        }
+        if (stockOnion) {
+            const int stored = stockOnion->getTotalStorePikis();
+            const int already = int(GameStat::allPikis);
+            const int limit = pc_settings_get_piki_limit();
+            const int delta = p2autoplay::powerStockDelta(true, stored, alive, already, limit);
+            if (delta > 0) {
+                pikiInfMgr.mPikiCounts[stockColor][Leaf] += delta;
+                stockOnion->mHeldPikis[Leaf] += (u32)delta;
+                GameStat::containerPikis.add(stockColor, delta);
+                playerState->mTotalBornPikiNum += delta;
+                playerState->mLivingPikiNum += delta;
+                playerState->mTotalPluckedPikiCount += delta;
+                GameStat::update();
+                std::printf("AUTOPLAY_POWER_STOCK color=%d added=%d stored=%d field=%d bot-driven\n",
+                            stockColor, delta, stored + delta, alive);
+                std::fflush(stdout);
+            }
+            sPowerStocked = true;
+        }
     }
 
     // --- Nearest stocked Onion (read-only) ---

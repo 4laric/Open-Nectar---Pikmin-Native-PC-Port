@@ -237,6 +237,25 @@ struct Config {
 inline int effectiveWantSquad(const Config& cfg) { return isPowerEnabled() ? 100 : cfg.wantSquad; }
 inline int effectiveMaxWithdrawCycles(const Config& cfg) { return isPowerEnabled() ? 12 : cfg.maxWithdrawCycles; }
 
+// bot-v4b power-mode Onion stock: the day-start Onion only holds the 20
+// starting Pikmin (gameSetup sets 20; the field cap is not the binding
+// constraint), so power mode tops the start-colour Onion up to ~100 through
+// the normal born/stored bookkeeping. Pure function so the inert-when-unset
+// rule is unit-testable: with power disabled the delta is always 0, no
+// matter what the counts are. stored = Onion's stored count, field = live
+// field Pikmin, already = GameStat::allPikis total, limit = piki pool limit.
+inline int powerStockTarget() { return 100; }
+inline int powerStockDelta(bool powerEnabled, int stored, int field, int already, int limit)
+{
+    if (!powerEnabled) return 0;
+    int want = powerStockTarget() - (stored + field);
+    if (want <= 0) return 0;
+    const int room = limit - already;
+    if (room <= 0) return 0;
+    if (want > room) want = room;
+    return want;
+}
+
 // Plain-data senses gathered by the engine-linked driver each tick.
 struct Senses {
     bool enabled = false; // PIKMIN_RANDOMIZER_AUTOPLAY gate
