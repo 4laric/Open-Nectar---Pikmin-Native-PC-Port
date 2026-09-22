@@ -299,7 +299,14 @@ void pc_p2_autoplay_tick(void)
             candidates.push_back(c);
         }
     }
-    // Keep the sticky engagement when it is still live; else nearest.
+    // Keep the sticky engagement when it is still live; else nearest -- but
+    // NEVER silently re-target mid-fight (bot-v2 fix for the wf10-v2-1
+    // Otakara mis-score: the engaged Otakara died, the scan fell through to
+    // a live Kogane, and the Kogane-confirm path then scored the stale
+    // Otakara token as damaged=1 killed=0). While the Brain is in
+    // Approach/Attack/Aftermath for a live engagement token, hold the
+    // last-known dead report until the Brain emits RESULT (which clears the
+    // engagement); only Select/Done/Withdraw may acquire a new target.
     const Candidate* pick = nullptr;
     if (sEngage.token) {
         for (const Candidate& c : candidates) {
@@ -310,8 +317,13 @@ void pc_p2_autoplay_tick(void)
         }
     }
     if (!pick && !candidates.empty()) {
-        pick = &*std::min_element(candidates.begin(), candidates.end(),
-                                  [](const Candidate& a, const Candidate& b) { return a.dist < b.dist; });
+        const p2autoplay::State st = sBrain.current();
+        const bool midFight = (st == p2autoplay::State::Approach || st == p2autoplay::State::Attack
+                               || st == p2autoplay::State::Aftermath);
+        if (!sEngage.token || !midFight) {
+            pick = &*std::min_element(candidates.begin(), candidates.end(),
+                                      [](const Candidate& a, const Candidate& b) { return a.dist < b.dist; });
+        }
     }
     if (pick && pick->token != sEngage.token) {
         sEngage = Engagement{};

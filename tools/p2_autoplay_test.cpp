@@ -664,9 +664,36 @@ void testKurageLongAttack()
           "kurage/control_no_claims");
 }
 
-void testReplanRepeats()
+void testKoganePathNeedsEngagement()
 {
-    // bot-v2 gap 2: every STUCK window replans (far targets get repeated
+    // wf10-v2-1 Otakara lesson: a mid-fight source switch onto Kogane must
+    // not score the stale (non-Kogane) engagement down the damage-and-move-on
+    // path. The Kogane path needs BOTH the engagement-time flag and live senses.
+    p2autoplay::Config cfg;
+    cfg.koganeConfirm = 0.5f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 3921089765u;
+    s.targetSource = 59; // engaged as FireOtakara (not Kogane-like)
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.targetHealthFrac = 0.8f; // damage observed
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    CHECK(brain.current() == p2autoplay::State::Attack, "kogane-guard/attacks");
+    // Mid-fight source switch to Kogane with damage: must NOT move on.
+    s.targetSource = 9;
+    s.targetDamagedLatch = true;
+    for (int i = 0; i < 30; ++i) brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Attack, "kogane-guard/no_move_on_for_stale_token");
+    CHECK(!hasMarker(brain.takeMarkers(), "AUTOPLAY_RESULT"), "kogane-guard/no_stale_result");
+}
+
+void testReplanRepeats()
+{    // bot-v2 gap 2: every STUCK window replans (far targets get repeated
     // graph replans, not just one detour).
     p2autoplay::Config cfg;
     cfg.approachTimeout = 30.0f;
@@ -712,6 +739,7 @@ int main()
     testKoganeMovesOn();
     testTimeoutsAndStuck();
     testTargetMatching();
+    testKoganePathNeedsEngagement();
     testReceiptWait();
     testGenericDeath();
     testWithdrawRepeat();

@@ -174,7 +174,7 @@ inline bool matchTarget(unsigned token, unsigned source, const char* species, co
 struct Config {
     float withdrawTimeout = 150.0f; // walk to Onion + work the container UI
     float menuOpenTimeout = 12.0f; // wait for the container UI after pressing A
-    float menuHoldDuration = 6.0f; // hold stick-down to accumulate withdraw delta
+    float menuHoldDuration = 8.0f; // hold stick-down to accumulate withdraw delta
     float menuConfirmDuration = 2.0f; // pulse A to confirm after the hold
     float approachTimeout = 150.0f; // steer to one target
     float attackTimeout = 240.0f; // throw at one target
@@ -191,7 +191,7 @@ struct Config {
     float stuckWindow = 4.0f; // no-progress window before STUCK + replan
     float stuckMinProgress = 30.0f; // XZ units that count as progress
     int wantSquad = 15; // withdrawn Pikmin before leaving the Onion
-    int maxWithdrawCycles = 5; // repeat the withdraw menu until field>=wantSquad or Onion empty
+    int maxWithdrawCycles = 6; // repeat the withdraw menu until field>=wantSquad or Onion empty
 };
 
 // Plain-data senses gathered by the engine-linked driver each tick.
@@ -574,8 +574,12 @@ private:
         observeDamage(in);
         observeDeath(in);
         observeReceipt(in);
-        // Kogane never dies: damage observed -> confirm, then move on.
-        if (isKoganeLike(in.targetSource) && sawDamage && stateTime >= cfg.koganeConfirm) {
+        // Kogane never dies: damage observed -> confirm, then move on. Both
+        // the engagement-time flag and the live senses must agree it is
+        // Kogane-like, so a mid-fight source switch can never score a stale
+        // token down the damage-and-move-on path (wf10-v2-1 Otakara lesson;
+        // the driver additionally holds engagements mid-fight).
+        if (result.koganeLike && isKoganeLike(in.targetSource) && sawDamage && stateTime >= cfg.koganeConfirm) {
             finishTarget(in, /*killed*/ false);
             return;
         }
