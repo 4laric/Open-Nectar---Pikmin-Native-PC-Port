@@ -911,6 +911,232 @@ void testDoneIdlesNearOnion()
     CHECK(near.moveX == 0.0f && near.moveZ == 0.0f, "done-idle/neutral_when_close");
 }
 
+void testPowerGate()
+{
+    // bot-v4: PIKMIN_RANDOMIZER_AUTOPLAY_POWER is off by default and ONLY
+    // meaningful when the autoplay gate is already on (inert in normal play).
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", nullptr);
+    CHECK(!p2autoplay::isPowerEnabled(), "power/off_by_default");
+    CHECK(p2autoplay::powerDamageMult() == 1.0f, "power/mult_one_when_off");
+    // Inert in normal play: POWER set but the autoplay gate closed.
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "10");
+    CHECK(!p2autoplay::isPowerEnabled(), "power/inert_when_gate_closed");
+    CHECK(p2autoplay::powerDamageMult() == 1.0f, "power/mult_one_when_gate_closed");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", "0");
+    CHECK(!p2autoplay::isPowerEnabled(), "power/inert_when_gate_zero");
+    // Gate open, POWER unset: still off.
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", "1");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", nullptr);
+    CHECK(!p2autoplay::isPowerEnabled(), "power/off_when_unset");
+    // Gate open + POWER on: numeric value configures the multiplier, any
+    // other non-empty non-"0" value means on with the default x10.
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "1");
+    CHECK(p2autoplay::isPowerEnabled(), "power/on_with_gate");
+    CHECK(p2autoplay::powerDamageMult() == 1.0f, "power/numeric_one_is_x1");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "on");
+    CHECK(p2autoplay::powerDamageMult() == 10.0f, "power/default_x10");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "7.5");
+    CHECK(p2autoplay::isPowerEnabled(), "power/on_with_number");
+    CHECK(std::fabs(p2autoplay::powerDamageMult() - 7.5f) < 0.001f, "power/numeric_configures_mult");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "0");
+    CHECK(!p2autoplay::isPowerEnabled(), "power/zero_is_off");
+    // Effective squad: ~100 in power mode, cfg.wantSquad otherwise.
+    p2autoplay::Config cfg;
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "10");
+    CHECK(p2autoplay::effectiveWantSquad(cfg) == 100, "power/want_100");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", nullptr);
+    CHECK(p2autoplay::effectiveWantSquad(cfg) == cfg.wantSquad, "power/want_normal_when_off");
+
+    // RESULT tagging: power=1 on every result of a power run, absent otherwise.
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "10");
+    {
+        p2autoplay::Brain brain(cfg);
+        p2autoplay::Senses s = liveSenses();
+        s.fieldPikmin = 20;
+        brain.update(0.05f, s);
+        brain.update(0.05f, s); // -> select
+        s.targetToken = 610001;
+        s.targetSource = 79;
+        s.targetAlive = true;
+        s.targetDist = 100.0f;
+        brain.update(0.05f, s); // -> approach
+        brain.update(0.05f, s); // -> attack
+        s.targetHealthFrac = 0.5f;
+        brain.update(0.05f, s);
+        s.targetAlive = false;
+        s.transportSeen = true;
+        brain.update(0.05f, s); // -> aftermath
+        s.receiptSeen = true;
+        std::vector<std::string> markers;
+        for (int i = 0; i < 60 && brain.current() == p2autoplay::State::Aftermath; ++i) {
+            brain.update(0.05f, s);
+            const std::vector<std::string> got = brain.takeMarkers();
+            markers.insert(markers.end(), got.begin(), got.end());
+        }
+        CHECK(hasMarker(markers, "power=1"), "power/result_tagged");
+    }
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", nullptr);
+    {
+        p2autoplay::Brain brain(cfg);
+        p2autoplay::Senses s = liveSenses();
+        s.fieldPikmin = 20;
+        brain.update(0.05f, s);
+        brain.update(0.05f, s); // -> select
+        s.targetToken = 610002;
+        s.targetSource = 79;
+        s.targetAlive = true;
+        s.targetDist = 100.0f;
+        brain.update(0.05f, s); // -> approach
+        brain.update(0.05f, s); // -> attack
+        s.targetHealthFrac = 0.5f;
+        brain.update(0.05f, s);
+        s.targetAlive = false;
+        s.transportSeen = true;
+        brain.update(0.05f, s); // -> aftermath
+        s.receiptSeen = true;
+        std::vector<std::string> markers;
+        for (int i = 0; i < 60 && brain.current() == p2autoplay::State::Aftermath; ++i) {
+            brain.update(0.05f, s);
+            const std::vector<std::string> got = brain.takeMarkers();
+            markers.insert(markers.end(), got.begin(), got.end());
+        }
+        CHECK(hasMarker(markers, "AUTOPLAY_RESULT target=610002"), "power/control_result_logged");
+        CHECK(!hasMarker(markers, "power=1"), "power/control_result_untagged");
+    }
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", nullptr);
+}
+
+void testRegroupDistress()
+{
+    // bot-v4 regroup rule: grabbed/thrown-off/burning (squadDistress) or any
+    // grabbed Pikmin (targetGrabbing, any species) whistles first, then
+    // re-throws once the squad is back.
+    p2autoplay::Config cfg;
+    cfg.throwHold = 0.1f;
+    cfg.throwGap = 0.2f;
+    cfg.whistleHold = 0.2f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 620001;
+    s.targetSource = 44; // non-flyer: the old code only whistled Sarai grabs
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.targetHealthFrac = 1.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    CHECK(brain.current() == p2autoplay::State::Attack, "regroup/attacks");
+    // Distress (thrown-off/burning): whistle takes over throwing.
+    s.squadDistress = true;
+    brain.update(0.05f, s);
+    CHECK(brain.command().buttons & unsigned(p2autoplay::PadB), "regroup/distress_whistles");
+    // Grabbed Pikmin on a non-flyer: whistle too.
+    s.squadDistress = false;
+    s.targetGrabbing = true;
+    brain.update(0.05f, s);
+    CHECK(brain.command().buttons & unsigned(p2autoplay::PadB), "regroup/grab_whistles_any_species");
+    // Squad back: whistle releases and throws resume.
+    s.targetGrabbing = false;
+    for (int i = 0; i < 10; ++i) brain.update(0.05f, s);
+    int aOn = 0;
+    for (int i = 0; i < 40; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) ++aOn;
+    }
+    CHECK(aOn > 0, "regroup/rethrows_after_regroup");
+}
+
+void testResupply()
+{
+    // bot-v4 resupply rule: field below threshold + Onion stock => disengage
+    // to WithdrawSeek with AUTOPLAY_RESUPPLY; no detour when the Onion is
+    // empty or the squad is healthy.
+    p2autoplay::Config cfg;
+    cfg.resupplyThreshold = 5;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 630001;
+    s.targetSource = 44;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.targetHealthFrac = 1.0f;
+    s.hasOnion = true;
+    s.onionStored = 10;
+    s.onionDist = 500.0f;
+    s.onionX = -500.0f;
+    s.onionZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    CHECK(brain.current() == p2autoplay::State::Attack, "resupply/attacks");
+    s.fieldPikmin = 2; // squad eaten, Onion still stocks
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::WithdrawSeek, "resupply/disengages_to_withdraw");
+    CHECK(hasMarker(brain.takeMarkers(), "AUTOPLAY_RESUPPLY"), "resupply/marker_logged");
+    // Back at the Onion with a fresh squad: the machine can re-engage.
+    s.fieldPikmin = 15;
+    s.onionDist = 10.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Select
+              || brain.current() == p2autoplay::State::WithdrawSeek,
+          "resupply/withdraws_then_selects");
+    // Control: empty Onion never disengages (nothing to withdraw).
+    p2autoplay::Brain brain2(cfg);
+    brain2.update(0.05f, s);
+    p2autoplay::Senses s2 = liveSenses();
+    s2.fieldPikmin = 20;
+    brain2.update(0.05f, s2);
+    s2.targetToken = 630002;
+    s2.targetSource = 44;
+    s2.targetAlive = true;
+    s2.targetDist = 100.0f;
+    s2.hasOnion = true;
+    s2.onionStored = 0;
+    brain2.update(0.05f, s2);
+    brain2.update(0.05f, s2);
+    s2.fieldPikmin = 2;
+    brain2.update(0.05f, s2);
+    CHECK(brain2.current() == p2autoplay::State::Attack, "resupply/no_detour_when_empty");
+    CHECK(!hasMarker(brain2.takeMarkers(), "AUTOPLAY_RESUPPLY"), "resupply/no_marker_when_empty");
+}
+
+void testAftermathEscortExtension()
+{
+    // bot-v4: a carry en route doubles the receipt window instead of timing
+    // out while the corpse is still being carried (bc3 receipt_timeout).
+    p2autoplay::Config cfg;
+    cfg.receiptTimeout = 1.0f;
+    cfg.aftermathTimeout = 60.0f;
+    cfg.whistleHold = 0.2f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 640001;
+    s.targetSource = 79;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    s.targetHealthFrac = 0.5f;
+    brain.update(0.05f, s);
+    s.targetAlive = false;
+    s.transportSeen = true; // corpse en route, no receipt yet
+    s.receiptSeen = false;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "escort/waits_after_kill");
+    for (int i = 0; i < 30; ++i) brain.update(0.05f, s); // 1.5s > base 1.0s window
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "escort/outlasts_base_window_while_carrying");
+    CHECK(!hasMarker(brain.takeMarkers(), "AUTOPLAY_RESULT"), "escort/no_early_result_while_carrying");
+}
+
 } // namespace
 
 int main()
@@ -935,6 +1161,10 @@ int main()
     testUnreachableGiveup();
     testContainerGuards();
     testDoneIdlesNearOnion();
+    testPowerGate();
+    testRegroupDistress();
+    testResupply();
+    testAftermathEscortExtension();
     if (failures == 0) {
         std::printf("PASS p2_autoplay\n");
         return 0;
