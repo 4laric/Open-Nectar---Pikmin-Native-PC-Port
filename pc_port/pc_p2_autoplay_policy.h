@@ -90,6 +90,31 @@ inline std::string targetFilter()
     return v ? std::string(v) : std::string();
 }
 
+// bot-v4 power mode (owner's idea; evidence, not a fair fight):
+// PIKMIN_RANDOMIZER_AUTOPLAY_POWER, off by default, ONLY meaningful when the
+// autoplay gate above is already on. Inert in normal play: with the autoplay
+// gate closed this is always false, no matter what POWER is set to.
+// A numeric POWER value (e.g. "10") configures the test-only damage
+// multiplier; any other non-empty non-"0" value means "on" with x10.
+inline bool isPowerEnabled()
+{
+    if (!isEnabled()) return false;
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER");
+    return v && v[0] && std::strcmp(v, "0") != 0;
+}
+
+inline float powerDamageMult()
+{
+    if (!isPowerEnabled()) return 1.0f;
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER");
+    if (v && v[0]) {
+        char* end = nullptr;
+        const double d = std::strtod(v, &end);
+        if (end && end != v && *end == 0 && d > 0.0 && d < 1000000.0) return float(d);
+    }
+    return 10.0f;
+}
+
 enum class State {
     Idle = 0, // no input; waiting for enable + live captain
     WithdrawSeek, // walk to the stocked Onion
@@ -203,7 +228,14 @@ struct Config {
     int maxApproachReplans = 6; // consecutive STUCK windows before target_unreachable GIVEUP
     int wantSquad = 15; // withdrawn Pikmin before leaving the Onion
     int maxWithdrawCycles = 6; // repeat the withdraw menu until field>=wantSquad or Onion empty
+    int resupplyThreshold = 5; // Attack/Approach below this field count + Onion stock => disengage + withdraw
 };
+
+// Power-mode effective withdraw targets (bot-v4): up to ~100 Pikmin (the
+// field cap pc_randomizer_field_capacity() already returns), more menu
+// cycles to get there. Capped in practice by what the Onion actually holds.
+inline int effectiveWantSquad(const Config& cfg) { return isPowerEnabled() ? 100 : cfg.wantSquad; }
+inline int effectiveMaxWithdrawCycles(const Config& cfg) { return isPowerEnabled() ? 12 : cfg.maxWithdrawCycles; }
 
 // Plain-data senses gathered by the engine-linked driver each tick.
 struct Senses {
@@ -241,6 +273,7 @@ struct Senses {
     bool targetLow = false; // flyer low enough to hit (driver compares height to saraiLowHeight)
     bool transportSeen = false; // any live Pikmin in TransportMode
     bool scattered = false; // squad scattered: whistle regroup
+    bool squadDistress = false; // grabbed/thrown-off/burning Pikmin: whistle regroup (bot-v4)
     bool waypointLeg = false; // steer the detour waypoint, not the target
 };
 
@@ -387,7 +420,7 @@ private:
 
     void tickWithdrawSeek(float dt, const Senses& in)
     {
-        if (in.fieldPikmin >= cfg.wantSquad) {
+        if (in.fieldPikmin >= effectiveWantSquad(cfg)) {
             enter(State::Select, in);
             return;
         }
@@ -446,8 +479,8 @@ private:
         if (!in.containerOpen) {
             // UI closed after our A confirm: one withdraw cycle landed.
             if (menuConfirmed) {
-                if (in.fieldPikmin >= cfg.wantSquad || in.onionStored <= 0
-                    || withdrawCycles + 1 >= cfg.maxWithdrawCycles) {
+                if (in.fieldPikmin >= effectiveWantSquad(cfg) || in.onionStored <= 0
+                    || withdrawCycles + 1 >= effectiveMaxWithdrawCycles(cfg)) {
                     enter(State::Select, in);
                     return;
                 }
@@ -470,7 +503,7 @@ private:
             }
             return;
         }
-        if (in.fieldPikmin >= cfg.wantSquad || in.onionStored <= 0) {
+        if (in.fieldPikmin >= effectiveWantSquad(cfg) || in.onionStored <= 0) {
             // Already have a squad (e.g. re-entered): confirm and leave, but
             // NEVER while the container UI is still open (bot-v3: leaving
             // dirty strands the navi in NAVISTATE_Container, where the stick
@@ -553,6 +586,17 @@ private:
             }
             return;
         }
+        if (in.fieldPikmin < cfg.resupplyThreshold && in.hasOnion && in.onionStored > 0) {
+            // bot-v4: squad eaten en route and the Onion still stocks:
+            // disengage, walk back, withdraw more, then return.
+            char buf[256];
+            std::snprintf(buf, sizeof(buf),
+                          "AUTOPLAY_RESUPPLY field=%d stored=%d token=%u state=approach bot-driven",
+                          in.fieldPikmin, in.onionStored, in.targetToken);
+            markers.emplace_back(buf);
+            enter(State::WithdrawSeek, in);
+            return;
+        }
         observeDamage(in);
         observeDeath(in);
         observeReceipt(in);
@@ -617,6 +661,17 @@ private:
             enter(State::Aftermath, in); // whistle back, watch the corpse
             return;
         }
+        if (in.fieldPikmin < cfg.resupplyThreshold && in.hasOnion && in.onionStored > 0) {
+            // bot-v4: squad eaten mid-fight and the Onion still stocks:
+            // disengage, walk back, withdraw more, then return.
+            char buf[256];
+            std::snprintf(buf, sizeof(buf),
+                          "AUTOPLAY_RESUPPLY field=%d stored=%d token=%u state=attack bot-driven",
+                          in.fieldPikmin, in.onionStored, in.targetToken);
+            markers.emplace_back(buf);
+            enter(State::WithdrawSeek, in);
+            return;
+        }
         observeDamage(in);
         observeDeath(in);
         observeReceipt(in);
@@ -631,16 +686,19 @@ private:
         }
         const bool sarai = in.targetSource == 23;
         const bool kurage = in.targetSource == 57;
-        // Sarai grab: whistle to free the grabbed Pikmin (priority over throws).
-        const bool grabWhistle = sarai && in.targetGrabbing;
-        if ((in.scattered || grabWhistle) && !whistling) {
+        // Any grabbed Pikmin (stuck to an enemy mouth, Sarai capture or
+        // otherwise), thrown-off / burning / panicked Pikmin (squadDistress),
+        // or a scattered squad: whistle them back first, then re-throw (bot-v4:
+        // real players do this; previously only scattered + Sarai grabs).
+        const bool grabWhistle = in.targetGrabbing;
+        if ((in.scattered || in.squadDistress || grabWhistle) && !whistling) {
             whistling = true;
             whistleTime = 0.0f;
         }
         if (whistling) {
             whistleTime += dt;
             lastCommand.buttons = PadB; // hold whistle to regroup / free grabs
-            if (whistleTime >= cfg.whistleHold || (!in.scattered && !grabWhistle)) whistling = false;
+            if (whistleTime >= cfg.whistleHold || (!in.scattered && !in.squadDistress && !grabWhistle)) whistling = false;
             return;
         }
         if (sarai && !in.targetLow && !in.targetGrabbing) {
@@ -717,7 +775,11 @@ private:
             finishTarget(in, /*killed*/ true);
             return;
         }
-        const float wait = (sawKill || sawDamage) ? cfg.receiptTimeout : cfg.aftermathTimeout;
+        const float waitBase = (sawKill || sawDamage) ? cfg.receiptTimeout : cfg.aftermathTimeout;
+        // bot-v4: bc3 kills timed out with reason=receipt_timeout while the
+        // corpse was still en route. While a carry is active (latched or live)
+        // keep escorting until the Onion receipt: double the receipt window.
+        const float wait = (sawCarry || in.transportSeen) ? cfg.receiptTimeout * 2.0f : waitBase;
         if (stateTime >= wait) {
             if (!sawReceipt) {
                 char buf[256];
@@ -815,10 +877,17 @@ private:
         }
         result.seconds = engageTime;
         char buf[256];
-        std::snprintf(buf, sizeof(buf),
-                      "AUTOPLAY_RESULT target=%u damaged=%d killed=%d carried=%d received=%d seconds=%.0f bot-driven",
-                      result.token, int(result.damaged), int(result.killed),
-                      int(result.carried), int(result.received), result.seconds);
+        if (isPowerEnabled()) {
+            std::snprintf(buf, sizeof(buf),
+                          "AUTOPLAY_RESULT target=%u damaged=%d killed=%d carried=%d received=%d seconds=%.0f power=1 bot-driven",
+                          result.token, int(result.damaged), int(result.killed),
+                          int(result.carried), int(result.received), result.seconds);
+        } else {
+            std::snprintf(buf, sizeof(buf),
+                          "AUTOPLAY_RESULT target=%u damaged=%d killed=%d carried=%d received=%d seconds=%.0f bot-driven",
+                          result.token, int(result.damaged), int(result.killed),
+                          int(result.carried), int(result.received), result.seconds);
+        }
         markers.emplace_back(buf);
         // The driver advances to the next target (or Done when none remain).
         enter(State::Select, in);

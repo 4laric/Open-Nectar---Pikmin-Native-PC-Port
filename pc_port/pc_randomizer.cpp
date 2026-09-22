@@ -824,7 +824,28 @@ void pc_randomizer_check(const char* name) {
 
 bool pc_randomizer_expanded() { return enabled && schema >= 2; }
 bool pc_randomizer_color_stats() { return enabled && (configuredStats || progressiveStats); }
+namespace {
+// bot-v4 power mode (TEST-ONLY): PIKMIN_RANDOMIZER_AUTOPLAY_POWER scales Pikmin
+// attack power through the EXISTING color-multiplier lever. Off by default and
+// ONLY meaningful when the autoplay gate is already on; inert in normal play
+// (autoplay gate closed => normal 1.0x path, no matter what POWER is set to).
+// A numeric POWER value configures the multiplier, otherwise x10.
+float autoplayPowerDamageMult() {
+    const char* gate = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY");
+    if (!gate || !gate[0] || !std::strcmp(gate, "0")) return 1.0f;
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER");
+    if (!v || !v[0] || !std::strcmp(v, "0")) return 1.0f;
+    char* end = nullptr;
+    const double d = std::strtod(v, &end);
+    if (end && end != v && *end == 0 && d > 0.0 && d < 1000000.0) return float(d);
+    return 10.0f;
+}
+}
 float pc_randomizer_color_multiplier(int color, PcPikminStat stat) {
+    if (stat == PC_PIKI_DAMAGE) {
+        const float power = autoplayPowerDamageMult();
+        if (power != 1.0f) return power;
+    }
     return pc_randomizer_color_stats() && color >= 0 && color < 3 && stat >= 0 && stat < 3 ? colorStats[color][stat] / 100.0f : 1.0f;
 }
 int pc_randomizer_carry_strength(int color) {

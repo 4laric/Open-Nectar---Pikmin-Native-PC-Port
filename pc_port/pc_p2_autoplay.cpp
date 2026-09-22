@@ -40,6 +40,8 @@
 #include "Navi.h"
 #include "NaviMgr.h"
 #include "NaviState.h"
+#include "PikiState.h"
+#include "GlobalGameOptions.h"
 #include "Generator.h"
 #include "GoalItem.h"
 #include "ItemMgr.h"
@@ -122,6 +124,7 @@ std::vector<std::pair<float, float>> sDetourHist;
 long long sTicks = 0;
 std::chrono::steady_clock::time_point sFpsStart = std::chrono::steady_clock::now();
 bool sFpsLogged = false;
+bool sPowerLogged = false; // bot-v4: AUTOPLAY_POWER is logged exactly once per process
 
 // BFS over the raw waypoint link graph (bot-v2 gap 2 fallback): the engine
 // findSync below is the primary real graph search (A* over the same graph);
@@ -387,8 +390,9 @@ void pc_p2_autoplay_tick(void)
     const float naviX = navi->getPosition().x;
     const float naviZ = navi->getPosition().z;
 
-    // --- Pikmin census (read-only) ---
-    int alive = 0, nearCount = 0, farCount = 0, transport = 0;
+    // --- Pikmin census (read-only, except bot-v4 power-mode flowering) ---
+    int alive = 0, nearCount = 0, farCount = 0, transport = 0, distress = 0;
+    const bool powerMode = p2autoplay::isPowerEnabled();
     {
         Iterator it(pikiMgr);
         CI_LOOP(it)
@@ -400,7 +404,25 @@ void pc_p2_autoplay_tick(void)
             if (d < 350.0f) ++nearCount;
             if (d > 550.0f) ++farCount;
             if (p->mMode == PikiMode::TransportMode) ++transport;
+            // bot-v4 power mode: flowers through the normal maturity path
+            // (virtual ViewPiki::setFlower, the same call the nectar GrowUp,
+            // Onion exit, and pluck paths use). No direct mHappa pokes.
+            if (powerMode && p->mHappa != Flower) p->setFlower(Flower);
+            // bot-v4 regroup sense: grabbed (mouth-stuck / swallowed),
+            // thrown off (flick/flown/fall/wave/pressed), burning/panicking.
+            const int pst = p->getState();
+            if (pst == PIKISTATE_Fired || pst == PIKISTATE_Flick || pst == PIKISTATE_Flown
+                || pst == PIKISTATE_FallMeck || pst == PIKISTATE_Wave || pst == PIKISTATE_Pressed
+                || pst == PIKISTATE_Swallowed || pst == PIKISTATE_Panic || pst == PIKISTATE_Drown
+                || pst == PIKISTATE_Bubble || p->isFired() || p->isStickToMouth())
+                ++distress;
         }
+    }
+    if (powerMode && !sPowerLogged) {
+        sPowerLogged = true;
+        std::printf("AUTOPLAY_POWER squad=%d maturity=flower damage_mult=%g bot-driven\n",
+                    alive, double(p2autoplay::powerDamageMult()));
+        std::fflush(stdout);
     }
 
     // --- Nearest stocked Onion (read-only) ---
@@ -539,6 +561,7 @@ void pc_p2_autoplay_tick(void)
     senses.onionDist = onionDist;
     senses.containerOpen = navi->getCurrState() && navi->getCurrState()->getID() == NAVISTATE_Container;
     senses.scattered = (farCount >= 3) || (alive >= 10 && nearCount < 5);
+    senses.squadDistress = distress > 0;
     if (transport > 0) sEngage.carryLatch = true;
     senses.transportSeen = sEngage.carryLatch;
     senses.targetDead = deadSignal;
