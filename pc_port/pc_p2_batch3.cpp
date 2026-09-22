@@ -19,14 +19,20 @@
 #include "pc_p2_animation.h"
 #include "pc_p2_tadpole.h"
 #include "pc_p2_mar.h"
+#include "pc_p2_pose_bank.h"
+#include "pc_p2_pose_blend.h"
+#include "pc_p2_pose_shape.h"
 #include "pc_bbft.h"
 #include "teki.h"
 #include "Generator.h"
 #include "Shape.h"
+#include "System.h"
+#include "Joint.h"
 #include "Texture.h"
 #include "Graphics.h"
 #include "Camera.h"
 #include "gameflow.h"
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -53,14 +59,98 @@ const FamilyDef FAMILIES[] = {
 constexpr size_t ClipBytes = 512 * 1024;         // per clip
 constexpr size_t TotalBytes = 48 * 1024 * 1024;  // per setup
 
+struct ClipRow {
+    std::string name;
+    int sourceFrames = 0;
+    int poseCount = 0;
+    std::vector<int> poseFrames;
+    bool framesMalformed = false;
+};
 struct Bank {
     std::map<std::string, std::vector<Shape*>> clips;
     std::map<std::string, p2animation::Clip> timing;
+    std::map<std::string, std::vector<p2pose::Baked>> baked;
+    std::map<std::string, bool> interp;
+    std::string prefix;
+    std::string fileSpecies;
+};
+struct BlendState {
+    Shape* shape = nullptr;
+    p2pose::Pose scratch;
+    std::string clip;
+    float frame = 0.0f;
+    bool corpse = false;
 };
 std::map<std::string, Bank> banks;             // key "family|species"
 std::map<BTeki*, std::string> actors;          // actor -> key
+std::map<BTeki*, BlendState> blends;           // actor -> private deform target
+bool interpolation = false;
 size_t bytesTotal = 0;
 bool logged[2] = {false, false};
+
+[[noreturn]] void fail(const char* what);
+
+static bool readBatch3InterpolationFlag() {
+    std::ifstream direct("p2-batch3-interpolation.txt");
+    if (direct) {
+        std::string got, extra;
+        if (!(direct >> got) || got != "P2_BATCH3_INTERPOLATION_1" || (direct >> extra))
+            fail("invalid interpolation flag");
+        return true;
+    }
+    std::ifstream assets("assets/p2-batch3-interpolation.txt");
+    if (assets) {
+        std::string got, extra;
+        if (!(assets >> got) || got != "P2_BATCH3_INTERPOLATION_1" || (assets >> extra))
+            fail("invalid interpolation flag");
+        return true;
+    }
+    return false;
+}
+
+inline bool parseFramesListToken(const std::string& token, std::vector<int>& out) {
+    out.clear();
+    if (token.empty() || token.size() > 512) return false;
+    size_t at = 0;
+    while (true) {
+        const size_t comma = token.find(',', at);
+        const std::string part =
+            comma == std::string::npos ? token.substr(at) : token.substr(at, comma - at);
+        if (part.empty() || part.size() > 6) return false;
+        for (char c : part) {
+            if (c < '0' || c > '9') return false;
+        }
+        long value = 0;
+        try {
+            value = std::stol(part);
+        } catch (...) {
+            return false;
+        }
+        if (value < 0 || value > 10000) return false;
+        out.push_back(int(value));
+        if (out.size() > 64) return false;
+        if (comma == std::string::npos) break;
+        at = comma + 1;
+    }
+    return !out.empty();
+}
+
+inline std::vector<int> uniformFramesFor(int count, int duration) {
+    std::vector<int> out;
+    if (count <= 0 || duration <= 0) return out;
+    if (count == 1) {
+        out.push_back(0);
+        return out;
+    }
+    for (int i = 0; i < count; ++i) {
+        const double v = double(i) * double(duration - 1) / double(count - 1);
+        int frame = int(std::floor(v + 0.5));
+        if (frame < 0) frame = 0;
+        if (frame >= duration) frame = duration - 1;
+        out.push_back(frame);
+    }
+    return out;
+}
 
 [[noreturn]] void fail(const char* what) {
     std::fprintf(stderr, "P2_BATCH3 %s\n", what);
@@ -87,7 +177,8 @@ const char* firstClip(const Bank& bank, const char* const* names, int count) {
 
 Shape* loadPose(const std::string& prefix, const std::string& species,
                 const std::string& clip, int index,
-                std::vector<unsigned char>& reference, size_t& clipBytes) {
+                std::vector<unsigned char>& reference, size_t& clipBytes,
+                std::vector<unsigned char>* rawOut = nullptr) {
     char rel[192];
     std::snprintf(rel, sizeof(rel), "assets/dataDir/courses/pikmin2room/%s_%s_%s_%02d.mod",
                   prefix.c_str(), species.c_str(), clip.c_str(), index);
@@ -104,6 +195,7 @@ Shape* loadPose(const std::string& prefix, const std::string& species,
             || !p2animation::resources(data, resources)) fail("invalid pose resources");
     if (!reference.empty() && reference != resources) fail("pose resources differ");
     reference = resources;
+    if (rawOut) *rawOut = data;
     char load[160];
     std::snprintf(load, sizeof(load), "courses/pikmin2room/%s_%s_%s_%02d.mod",
                   prefix.c_str(), species.c_str(), clip.c_str(), index);
@@ -130,14 +222,27 @@ bool parseActors(const std::string& path, std::map<unsigned, std::string>& out) 
     return true;
 }
 
-bool parseBank(const std::string& path,
-               std::map<std::string, std::vector<std::pair<std::string, int>>>& out) {
+bool parseBank(const std::string& path, std::map<std::string, std::vector<ClipRow>>& out) {
     std::ifstream in(path);
     if (!in) return false;
     std::string word;
     if (!(in >> word) || word.size() < 9 || word.compare(0, 3, "P2_") != 0
             || word.compare(word.size() - 7, 7, "_BANK_1") != 0) fail("invalid bank header");
-    while (in >> word) {
+    std::string pending;
+    bool havePending = false;
+    auto nextToken = [&](std::string& tok) -> bool {
+        if (havePending) {
+            tok = pending;
+            havePending = false;
+            return true;
+        }
+        return bool(in >> tok);
+    };
+    auto pushBack = [&](const std::string& tok) {
+        pending = tok;
+        havePending = true;
+    };
+    while (nextToken(word)) {
         if (word == "species") {
             std::string species, identity;
             if (!(in >> species >> identity)) fail("invalid bank species row");
@@ -151,7 +256,7 @@ bool parseBank(const std::string& path,
                 std::strtoull(identity.c_str(), &end, 10);
                 if (end == identity.c_str() || *end != '\0') fail("invalid bank species row");
             }
-            out.emplace(species, std::vector<std::pair<std::string, int>>());
+            out.emplace(species, std::vector<ClipRow>());
         } else if (word == "clip") {
             std::string species, name, events, status, marker, value;
             int frames = 0, poses = 0;
@@ -163,7 +268,56 @@ bool parseBank(const std::string& path,
             if (!(in >> value)) fail("invalid bank clip row");
             if (value != "status") status = value;
             else if (!(in >> status)) fail("invalid bank clip row");
-            out[species].emplace_back(name, poses);
+            ClipRow row;
+            row.name = name;
+            row.sourceFrames = frames;
+            row.poseCount = poses;
+            std::string nxt;
+            if (nextToken(nxt)) {
+                if (nxt == "frames") {
+                    std::string listTok;
+                    if (!nextToken(listTok)) {
+                        row.framesMalformed = true;
+                    } else if (listTok == "species" || listTok == "clip" || listTok == "frames") {
+                        pushBack(listTok);
+                        row.framesMalformed = true;
+                    } else {
+                        std::vector<int> parsed;
+                        if (!parseFramesListToken(listTok, parsed)) {
+                            row.framesMalformed = true;
+                        } else {
+                            int duration = frames;
+                            if (duration < 2) duration = poses >= 2 ? poses : 2;
+                            bool ok = int(parsed.size()) == poses;
+                            if (ok) {
+                                for (size_t i = 0; i < parsed.size(); ++i) {
+                                    if (parsed[i] < 0 || parsed[i] >= duration) {
+                                        ok = false;
+                                        break;
+                                    }
+                                    if (i == 0 && parsed[i] != 0) {
+                                        ok = false;
+                                        break;
+                                    }
+                                    if (i > 0 && parsed[i] <= parsed[i - 1]) {
+                                        ok = false;
+                                        break;
+                                    }
+                                }
+                                if (ok && parsed.back() != duration - 1) ok = false;
+                            }
+                            if (!ok) {
+                                row.framesMalformed = true;
+                            } else {
+                                row.poseFrames = std::move(parsed);
+                            }
+                        }
+                    }
+                } else {
+                    pushBack(nxt);
+                }
+            }
+            out[species].push_back(std::move(row));
         } else {
             fail("invalid bank token");
         }
@@ -172,18 +326,51 @@ bool parseBank(const std::string& path,
 }
 
 Bank loadBank(const FamilyDef& family, const std::string& species,
-              const std::vector<std::pair<std::string, int>>& rows) {
+              const std::vector<ClipRow>& rows) {
     Bank bank;
+    bank.prefix = family.prefix;
+    bank.fileSpecies = species;
     std::vector<unsigned char> reference;
+    std::vector<unsigned char> topologyRef;
+    bool haveTopologyRef = false;
     Shape* shared = nullptr;
     for (const auto& clip : rows) {
         size_t clipBytes = 0;
         p2animation::Clip timing;
-        timing.name = clip.first;
-        timing.count = clip.second;
-        bank.timing[clip.first] = timing;
-        for (int i = 0; i < clip.second; ++i) {
-            Shape* shape = loadPose(family.prefix, species, clip.first, i, reference, clipBytes);
+        timing.name = clip.name;
+        timing.count = clip.poseCount;
+        int duration = clip.sourceFrames;
+        if (duration < 2) duration = clip.poseCount >= 2 ? clip.poseCount : 2;
+        timing.duration = duration;
+        if (!clip.framesMalformed && !clip.poseFrames.empty()
+                && int(clip.poseFrames.size()) == clip.poseCount) {
+            bool ok = true;
+            for (size_t i = 0; i < clip.poseFrames.size(); ++i) {
+                if (clip.poseFrames[i] < 0 || clip.poseFrames[i] >= duration) {
+                    ok = false;
+                    break;
+                }
+                if (i == 0 && clip.poseFrames[i] != 0) {
+                    ok = false;
+                    break;
+                }
+                if (i > 0 && clip.poseFrames[i] <= clip.poseFrames[i - 1]) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (ok && clip.poseFrames.back() != duration - 1) ok = false;
+            if (ok) timing.frames = clip.poseFrames;
+        }
+        bank.timing[clip.name] = timing;
+        bool allowInterp = interpolation && !clip.framesMalformed && clip.poseCount >= 2;
+        bank.interp[clip.name] = allowInterp;
+        std::vector<p2pose::Baked> decoded;
+        if (allowInterp) decoded.reserve(size_t(clip.poseCount));
+        for (int i = 0; i < clip.poseCount; ++i) {
+            std::vector<unsigned char> raw;
+            Shape* shape = loadPose(family.prefix, species, clip.name, i, reference, clipBytes,
+                                    allowInterp ? &raw : nullptr);
             if (!shared) {
                 shared = shape;
                 for (int t = 0; t < shape->mTexAttrCount; ++t)
@@ -205,22 +392,109 @@ Bank loadBank(const FamilyDef& family, const std::string& species,
                 shape->mTexAttrList = shared->mTexAttrList;
                 shape->mTevInfoList = shared->mTevInfoList;
             }
-            bank.clips[clip.first].push_back(shape);
+            bank.clips[clip.name].push_back(shape);
+            if (allowInterp) {
+                p2pose::Baked bakedPose;
+                if (!p2pose::decodeBaked(raw, bakedPose)) {
+                    allowInterp = false;
+                    decoded.clear();
+                } else {
+                    decoded.push_back(std::move(bakedPose));
+                }
+            }
         }
+        if (allowInterp) {
+            bool ok = decoded.size() == size_t(clip.poseCount) && !decoded.empty();
+            if (ok) {
+                const size_t positions = decoded.front().pose.positions.size();
+                const size_t normals = decoded.front().pose.normals.size();
+                if (positions == 0 || normals == 0) ok = false;
+                for (const auto& entry : decoded) {
+                    if (entry.pose.positions.size() != positions
+                            || entry.pose.normals.size() != normals
+                            || entry.topology != decoded.front().topology) {
+                        ok = false;
+                        break;
+                    }
+                }
+                if (ok && haveTopologyRef && decoded.front().topology != topologyRef) ok = false;
+            }
+            if (!ok) {
+                allowInterp = false;
+                decoded.clear();
+            } else {
+                if (!haveTopologyRef) {
+                    topologyRef = decoded.front().topology;
+                    haveTopologyRef = true;
+                }
+                bank.baked[clip.name] = std::move(decoded);
+            }
+        }
+        bank.interp[clip.name] = allowInterp;
+        if (!allowInterp) bank.baked.erase(clip.name);
     }
     return bank;
+}
+
+static bool ensureBlendState(BTeki* actor, const std::string& key) {
+    if (!interpolation || blends.count(actor)) return blends.count(actor) != 0;
+    auto bankIt = banks.find(key);
+    if (bankIt == banks.end()) return false;
+    const Bank& bank = bankIt->second;
+    const std::vector<p2pose::Baked>* baseBaked = nullptr;
+    std::string baseClip;
+    for (const auto& entry : bank.baked) {
+        auto interpIt = bank.interp.find(entry.first);
+        if (interpIt != bank.interp.end() && interpIt->second && !entry.second.empty()) {
+            baseBaked = &entry.second;
+            baseClip = entry.first;
+            break;
+        }
+    }
+    if (!baseBaked) return false;
+    auto clipIt = bank.clips.find(baseClip);
+    if (clipIt == bank.clips.end() || clipIt->second.empty()) return false;
+    Shape* sharedShape = clipIt->second.front();
+    if (!sharedShape) return false;
+    const p2pose::Pose& base = baseBaked->front().pose;
+    char path[192];
+    std::snprintf(path, sizeof(path), "courses/pikmin2room/%s_%s_%s_00.mod", bank.prefix.c_str(),
+                  bank.fileSpecies.c_str(), baseClip.c_str());
+    const int previousHeap = gsys->setHeap(SYSHEAP_App);
+    Shape* model = p2pose::privateShape(path, *sharedShape, base);
+    gsys->setHeap(previousHeap);
+    if (!model) return false;
+    for (const auto& entry : blends) {
+        if (entry.second.shape
+                && (entry.second.shape->mVertexList == model->mVertexList
+                    || entry.second.shape->mNormalList == model->mNormalList))
+            return false;
+    }
+    BlendState state;
+    state.shape = model;
+    state.scratch.positions.resize(base.positions.size());
+    state.scratch.normals.resize(base.normals.size());
+    blends.emplace(actor, std::move(state));
+    unsigned generator = 0;
+    if (actor && actor->mGenerator) generator = actor->mGenerator->_70;
+    std::printf("P2_BATCH3_INTERPOLATION_READY key=%s generator=%u positions=%d normals=%d private_geometry=1 gameplay_clock=P1\n",
+                key.c_str(), generator, model->mVertexCount, model->mNormalCount);
+    return true;
 }
 }
 
 void pc_p2_batch3_reset() {
     banks.clear();
     actors.clear();
+    blends.clear();
+    interpolation = false;
     bytesTotal = 0;
     logged[0] = logged[1] = false;
 }
 
 void pc_p2_batch3_forget(BTeki* actor) {
     actors.erase(actor);
+    blends.erase(actor);
 }
 
 bool pc_p2_batch3_corpse_drawn() { return logged[1]; }
@@ -229,11 +503,13 @@ int pc_p2_batch3_bank_count() { return int(banks.size()); }
 
 void pc_p2_batch3_setup() {
     pc_p2_batch3_reset();
+    interpolation = readBatch3InterpolationFlag();
+    if (interpolation) std::printf("P2_BATCH3_INTERPOLATION_READY interpolation=1 gameplay_clock=P1\n");
     if (!pc_pikipelago_room_preview() || !tekiMgr) return;
     for (const FamilyDef& family : FAMILIES) {
         std::map<unsigned, std::string> wanted;
         if (!parseActors(family.actors, wanted)) continue;
-        std::map<std::string, std::vector<std::pair<std::string, int>>> rows;
+        std::map<std::string, std::vector<ClipRow>> rows;
         if (!parseBank(family.bank, rows)) fail("missing bank for present actor config");
 
         std::set<unsigned> found;
@@ -265,6 +541,9 @@ void pc_p2_batch3_setup() {
             banks[std::string(family.name) + "|" + species] =
                 loadBank(family, bankSpecies, clipRows->second);
         }
+    }
+    if (interpolation) {
+        for (const auto& entry : actors) ensureBlendState(entry.first, entry.second);
     }
     for (const auto& entry : actors) {
         if (entry.second == "aquatic|Tadpole" || entry.second == "flying|Mar" || entry.second == "aquatic|UmiMushi" || entry.second == "aquatic|UmiMushiBlind" || entry.second == "aquatic|Jigumo" || entry.second == "snagret|SnakeCrow" || entry.second == "snagret|SnakeWhole" || entry.second == "snagret|DangoMushi" || entry.second == "flying|Hanachirashi" || entry.second == "aquatic|Catfish")
@@ -324,6 +603,47 @@ bool pc_p2_batch3_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     const p2animation::Clip& timing = bank.timing.at(name);
     const size_t index = timing.index(phase, corpse);
     Shape* shape = poses.at(index < poses.size() ? index : poses.size() - 1);
+    if (interpolation && !corpse) {
+        auto interpIt = bank.interp.find(name);
+        auto bakedIt = bank.baked.find(name);
+        if (interpIt != bank.interp.end() && interpIt->second && bakedIt != bank.baked.end()
+                && !bakedIt->second.empty() && bakedIt->second.size() == poses.size()) {
+            const float clampedPhase =
+                phase != phase ? 0.0f : (phase < 0.0f ? 0.0f : (phase > 1.0f ? 1.0f : phase));
+            const double sourceFrame = double(clampedPhase) * double(timing.duration - 1);
+            std::vector<int> frames = timing.frames;
+            if (frames.empty()) frames = uniformFramesFor(int(poses.size()), timing.duration);
+            p2pose::Interval span;
+            if (frames.size() == poses.size() && p2pose::bracket(frames, float(sourceFrame), span)
+                    && span.left < bakedIt->second.size() && span.right < bakedIt->second.size()) {
+                if (!blends.count(actor)) ensureBlendState(actor, entry->second);
+                auto blendIt = blends.find(actor);
+                if (blendIt != blends.end() && blendIt->second.shape) {
+                    const auto& bakedVec = bakedIt->second;
+                    const auto& left = bakedVec[span.left].pose;
+                    const auto& right = bakedVec[span.right].pose;
+                    if (left.positions.size() == size_t(blendIt->second.shape->mVertexCount)
+                            && left.normals.size() == size_t(blendIt->second.shape->mNormalCount)
+                            && left.positions.size() == right.positions.size()
+                            && left.normals.size() == right.normals.size()
+                            && p2pose::apply(*blendIt->second.shape, left, right, span.weight,
+                                             blendIt->second.scratch)) {
+                        shape = blendIt->second.shape;
+                        if (blendIt->second.clip != name || blendIt->second.corpse != corpse) {
+                            std::printf(
+                                "P2_BATCH3_BLEND key=%s clip=%s corpse=%d source_frame=%.5f left=%zu "
+                                "right=%zu weight=%.5f\n",
+                                entry->second.c_str(), name, int(corpse), sourceFrame, span.left,
+                                span.right, span.weight);
+                        }
+                        blendIt->second.clip = name;
+                        blendIt->second.frame = float(sourceFrame);
+                        blendIt->second.corpse = corpse;
+                    }
+                }
+            }
+        }
+    }
     if (!logged[corpse ? 1 : 0]) {
         std::printf("P2_BATCH3_DRAW corpse=%d key=%s clip=%s\n", int(corpse), entry->second.c_str(), name);
         logged[corpse ? 1 : 0] = true;

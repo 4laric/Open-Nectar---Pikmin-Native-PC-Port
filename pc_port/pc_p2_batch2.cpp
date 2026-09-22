@@ -23,12 +23,17 @@
 #include "pc_p2_campaign_policy.h"
 #include "pc_p2_proxy.h"
 #include "pc_p2_proxy_pack.h"
+#include "pc_p2_pose_bank.h"
+#include "pc_p2_pose_blend.h"
+#include "pc_p2_pose_shape.h"
 #include "pc_randomizer.h"
 #include "gl/pc_gfx.h"
 #include "pc_bbft.h"
 #include "teki.h"
 #include "Generator.h"
 #include "Shape.h"
+#include "System.h"
+#include "Joint.h"
 #include "Texture.h"
 #include "Material.h"
 #include "Graphics.h"
@@ -66,14 +71,27 @@ constexpr size_t TotalBytes = 48 * 1024 * 1024;  // per setup
 struct Bank {
     std::map<std::string, std::vector<Shape*>> clips;
     std::map<std::string, p2sampled::Clip> clock;
+    std::map<std::string, std::vector<p2pose::Baked>> baked;
+    std::map<std::string, bool> interp;
+    std::string prefix;
+    std::string fileSpecies;
 };
 struct ActorClock {
     p2batch2clock::Cursor cursor;
     std::string clip;
 };
+struct BlendState {
+    Shape* shape = nullptr;
+    p2pose::Pose scratch;
+    std::string clip;
+    float frame = 0.0f;
+    bool corpse = false;
+};
 std::map<std::string, Bank> banks;             // key "family|species"
 std::map<BTeki*, std::string> actors;          // actor -> key
 std::map<BTeki*, ActorClock> clocks;           // actor -> sampled clock state
+std::map<BTeki*, BlendState> blends;           // actor -> private deform target
+bool interpolation = false;
 size_t bytesTotal = 0;
 bool logged[2] = {false, false};
 std::set<std::string> proxyDrawn;            // "<corpse>|<key>" already reported
@@ -83,6 +101,24 @@ std::set<std::string> proxyShotKeys;          // proxy keys whose shot was sched
 [[noreturn]] void fail(const char* what) {
     std::fprintf(stderr, "P2_BATCH2 %s\n", what);
     std::abort();
+}
+
+static bool readBatch2InterpolationFlag() {
+    std::ifstream direct("p2-batch2-interpolation.txt");
+    if (direct) {
+        std::string got, extra;
+        if (!(direct >> got) || got != "P2_BATCH2_INTERPOLATION_1" || (direct >> extra))
+            fail("invalid interpolation flag");
+        return true;
+    }
+    std::ifstream assets("assets/p2-batch2-interpolation.txt");
+    if (assets) {
+        std::string got, extra;
+        if (!(assets >> got) || got != "P2_BATCH2_INTERPOLATION_1" || (assets >> extra))
+            fail("invalid interpolation flag");
+        return true;
+    }
+    return false;
 }
 
 int expectedType(const std::string& family, const std::string& species) {
@@ -108,7 +144,8 @@ const char* firstClip(const Bank& bank, const char* const* names, int count) {
 Shape* loadPose(const std::string& prefix, const std::string& species,
                 const std::string& clip, int index,
                 std::vector<unsigned char>& reference, size_t& clipBytes,
-                std::string* softError = nullptr) {
+                std::string* softError = nullptr,
+                std::vector<unsigned char>* rawOut = nullptr) {
     const auto softFail = [&softError](const char* what) -> Shape* {
         if (softError) {
             *softError = what;
@@ -132,6 +169,7 @@ Shape* loadPose(const std::string& prefix, const std::string& species,
             || !p2animation::resources(data, resources)) return softFail("invalid pose resources");
     if (!reference.empty() && reference != resources) return softFail("pose resources differ");
     reference = resources;
+    if (rawOut) *rawOut = data;
     char load[160];
     std::snprintf(load, sizeof(load), "courses/pikmin2room/%s_%s_%s_%02d.mod",
                   prefix.c_str(), species.c_str(), clip.c_str(), index);
@@ -173,7 +211,21 @@ bool parseBank(const std::string& path,
     std::string word;
     if (!(in >> word) || word.size() < 9 || word.compare(0, 3, "P2_") != 0
             || word.compare(word.size() - 7, 7, "_BANK_1") != 0) return softFail("invalid bank header");
-    while (in >> word) {
+    std::string pending;
+    bool havePending = false;
+    auto nextToken = [&](std::string& tok) -> bool {
+        if (havePending) {
+            tok = pending;
+            havePending = false;
+            return true;
+        }
+        return bool(in >> tok);
+    };
+    auto pushBack = [&](const std::string& tok) {
+        pending = tok;
+        havePending = true;
+    };
+    while (nextToken(word)) {
         if (word == "species") {
             std::string species;
             unsigned long long id = 0;
@@ -190,6 +242,51 @@ bool parseBank(const std::string& path,
             row.sourceFrames = frames;
             row.poseCount = poses;
             if (!p2batch2clock::parseEvents(events, row.events)) return softFail("invalid bank event token");
+            std::string nxt;
+            if (nextToken(nxt)) {
+                if (nxt == "frames") {
+                    std::string listTok;
+                    if (!nextToken(listTok)) {
+                        row.framesMalformed = true;
+                    } else if (listTok == "species" || listTok == "clip" || listTok == "frames") {
+                        pushBack(listTok);
+                        row.framesMalformed = true;
+                    } else {
+                        std::vector<int> parsed;
+                        if (!p2batch2clock::parseFramesList(listTok, parsed)) {
+                            row.framesMalformed = true;
+                        } else {
+                            int duration = frames;
+                            if (duration < 2) duration = poses >= 2 ? poses : 2;
+                            bool ok = int(parsed.size()) == poses;
+                            if (ok) {
+                                for (size_t i = 0; i < parsed.size(); ++i) {
+                                    if (parsed[i] < 0 || parsed[i] >= duration) {
+                                        ok = false;
+                                        break;
+                                    }
+                                    if (i == 0 && parsed[i] != 0) {
+                                        ok = false;
+                                        break;
+                                    }
+                                    if (i > 0 && parsed[i] <= parsed[i - 1]) {
+                                        ok = false;
+                                        break;
+                                    }
+                                }
+                                if (ok && parsed.back() != duration - 1) ok = false;
+                            }
+                            if (!ok) {
+                                row.framesMalformed = true;
+                            } else {
+                                row.poseFrames = std::move(parsed);
+                            }
+                        }
+                    }
+                } else {
+                    pushBack(nxt);
+                }
+            }
             out[species].push_back(std::move(row));
         } else {
             return softFail("invalid bank token");
@@ -209,17 +306,27 @@ Bank loadBank(const FamilyDef& family, const std::string& species,
         fail(what);
     };
     Bank bank;
+    bank.prefix = family.prefix;
+    bank.fileSpecies = species;
     std::vector<unsigned char> reference;
+    std::vector<unsigned char> topologyRef;
+    bool haveTopologyRef = false;
     Shape* shared = nullptr;
     for (const auto& row : rows) {
         size_t clipBytes = 0;
         p2sampled::Clip clock = p2batch2clock::makeClip(row);
         if (!clock.valid()) return softFail("invalid sampled clock clip");
         bank.clock[row.name] = clock;
+        bool allowInterp = interpolation && !row.framesMalformed && row.poseCount >= 2;
+        bank.interp[row.name] = allowInterp;
+        std::vector<p2pose::Baked> decoded;
+        if (allowInterp) decoded.reserve(size_t(row.poseCount));
         for (int i = 0; i < row.poseCount; ++i) {
             std::string poseError;
+            std::vector<unsigned char> raw;
             Shape* shape = loadPose(family.prefix, species, row.name, i, reference, clipBytes,
-                                    softError ? &poseError : nullptr);
+                                    softError ? &poseError : nullptr,
+                                    allowInterp ? &raw : nullptr);
             if (!shape) {
                 if (softError) {
                     *softError = poseError.empty() ? "pose load failed" : poseError;
@@ -250,18 +357,109 @@ Bank loadBank(const FamilyDef& family, const std::string& species,
                 shape->mTevInfoList = shared->mTevInfoList;
             }
             bank.clips[row.name].push_back(shape);
+            if (allowInterp) {
+                p2pose::Baked bakedPose;
+                if (!p2pose::decodeBaked(raw, bakedPose)) {
+                    allowInterp = false;
+                    decoded.clear();
+                } else {
+                    decoded.push_back(std::move(bakedPose));
+                }
+            }
         }
+        if (allowInterp) {
+            bool ok = decoded.size() == size_t(row.poseCount) && !decoded.empty();
+            if (ok) {
+                const size_t positions = decoded.front().pose.positions.size();
+                const size_t normals = decoded.front().pose.normals.size();
+                if (positions == 0 || normals == 0) ok = false;
+                for (const auto& entry : decoded) {
+                    if (entry.pose.positions.size() != positions
+                            || entry.pose.normals.size() != normals) {
+                        ok = false;
+                        break;
+                    }
+                    if (entry.topology != decoded.front().topology) {
+                        ok = false;
+                        break;
+                    }
+                }
+                if (ok) {
+                    if (haveTopologyRef && decoded.front().topology != topologyRef) ok = false;
+                }
+            }
+            if (!ok) {
+                allowInterp = false;
+                decoded.clear();
+            } else {
+                if (!haveTopologyRef) {
+                    topologyRef = decoded.front().topology;
+                    haveTopologyRef = true;
+                }
+                bank.baked[row.name] = std::move(decoded);
+            }
+        }
+        bank.interp[row.name] = allowInterp;
+        if (!allowInterp) bank.baked.erase(row.name);
     }
     return bank;
 }
 
-// Erase every binding for one proxy key from both maps (#871 D4). Clocks are
-// keyed by actor, so dropping actors alone leaves a stale entry that a
-// recycled BTeki* address would inherit.
+static bool ensureBlendState(BTeki* actor, const std::string& key) {
+    if (!interpolation || blends.count(actor)) return blends.count(actor) != 0;
+    auto bankIt = banks.find(key);
+    if (bankIt == banks.end()) return false;
+    const Bank& bank = bankIt->second;
+    const std::vector<p2pose::Baked>* baseBaked = nullptr;
+    std::string baseClip;
+    for (const auto& entry : bank.baked) {
+        auto interpIt = bank.interp.find(entry.first);
+        if (interpIt != bank.interp.end() && interpIt->second && !entry.second.empty()) {
+            baseBaked = &entry.second;
+            baseClip = entry.first;
+            break;
+        }
+    }
+    if (!baseBaked) return false;
+    auto clipIt = bank.clips.find(baseClip);
+    if (clipIt == bank.clips.end() || clipIt->second.empty()) return false;
+    Shape* sharedShape = clipIt->second.front();
+    if (!sharedShape) return false;
+    const p2pose::Pose& base = baseBaked->front().pose;
+    char path[192];
+    std::snprintf(path, sizeof(path), "courses/pikmin2room/%s_%s_%s_00.mod",
+                  bank.prefix.c_str(), bank.fileSpecies.c_str(), baseClip.c_str());
+    const int previousHeap = gsys->setHeap(SYSHEAP_App);
+    Shape* model = p2pose::privateShape(path, *sharedShape, base);
+    gsys->setHeap(previousHeap);
+    if (!model) return false;
+    for (const auto& entry : blends) {
+        if (entry.second.shape
+                && (entry.second.shape->mVertexList == model->mVertexList
+                    || entry.second.shape->mNormalList == model->mNormalList)) {
+            return false;
+        }
+    }
+    BlendState state;
+    state.shape = model;
+    state.scratch.positions.resize(base.positions.size());
+    state.scratch.normals.resize(base.normals.size());
+    blends.emplace(actor, std::move(state));
+    unsigned generator = 0;
+    if (actor && actor->mGenerator) generator = actor->mGenerator->_70;
+    std::printf("P2_BATCH2_INTERPOLATION_READY key=%s generator=%u positions=%d normals=%d private_geometry=1 gameplay_clock=P1\n",
+                key.c_str(), generator, model->mVertexCount, model->mNormalCount);
+    return true;
+}
+
+// Erase every binding for one proxy key from all maps (#871 D4). Clocks and
+// blend targets are keyed by actor, so dropping actors alone leaves stale
+// entries that a recycled BTeki* address would inherit.
 static void eraseProxySpecies(const std::string& key) {
     for (auto ait = actors.begin(); ait != actors.end();) {
         if (ait->second == key) {
             clocks.erase(ait->first);
+            blends.erase(ait->first);
             ait = actors.erase(ait);
         } else {
             ++ait;
@@ -300,6 +498,8 @@ void pc_p2_batch2_reset() {
     banks.clear();
     actors.clear();
     clocks.clear();
+    blends.clear();
+    interpolation = false;
     bytesTotal = 0;
     eventCount = 0;
     logged[0] = logged[1] = false;
@@ -315,6 +515,7 @@ void pc_p2_batch2_reset() {
 void pc_p2_batch2_forget(BTeki* actor) {
     actors.erase(actor);
     clocks.erase(actor);
+    blends.erase(actor);
 }
 
 // Scan the scene and bind present arena actors. ``strict`` is the startup
@@ -497,6 +698,9 @@ static void bindFamilies(bool strict) {
             }
         }
     }
+    if (interpolation) {
+        for (const auto& entry : actors) ensureBlendState(entry.first, entry.second);
+    }
 }
 
 static void logBindings() {
@@ -510,6 +714,8 @@ static void logBindings() {
 
 void pc_p2_batch2_setup() {
     pc_p2_batch2_reset();
+    interpolation = readBatch2InterpolationFlag();
+    if (interpolation) std::printf("P2_BATCH2_INTERPOLATION_READY interpolation=1 gameplay_clock=P1\n");
     if (!tekiMgr) return;
     if (pc_pikipelago_room_preview()) {
         bindFamilies(true);
@@ -528,6 +734,7 @@ void pc_p2_batch2_rebind() {
         // D4: no rebind means every clock is stale; the next draw re-creates
         // entries on demand.
         clocks.clear();
+        blends.clear();
         return;
     }
     bindFamilies(false);
@@ -538,6 +745,12 @@ void pc_p2_batch2_rebind() {
             cit = clocks.erase(cit);
         else
             ++cit;
+    }
+    for (auto bit = blends.begin(); bit != blends.end();) {
+        if (actors.count(bit->first) == 0)
+            bit = blends.erase(bit);
+        else
+            ++bit;
     }
     logBindings();
 }
@@ -620,6 +833,45 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     const size_t index = corpse ? poses.size() - 1
                                : (step.pose < poses.size() ? step.pose : poses.size() - 1);
     Shape* shape = poses.at(index);
+    if (interpolation && !corpse) {
+        auto interpIt = bank.interp.find(name);
+        auto bakedIt = bank.baked.find(name);
+        if (interpIt != bank.interp.end() && interpIt->second && bakedIt != bank.baked.end()
+                && !bakedIt->second.empty() && bakedIt->second.size() == poses.size()) {
+            std::vector<int> frames = bank.clock.at(name).poses.frames;
+            if (frames.empty())
+                frames = p2batch2clock::uniformFrames(int(poses.size()), bank.clock.at(name).poses.duration);
+            p2pose::Interval span;
+            if (frames.size() == poses.size() && p2pose::bracket(frames, float(sourceFrame), span)
+                    && span.left < bakedIt->second.size() && span.right < bakedIt->second.size()) {
+                if (!blends.count(actor)) ensureBlendState(actor, entry->second);
+                auto blendIt = blends.find(actor);
+                if (blendIt != blends.end() && blendIt->second.shape) {
+                    const auto& bakedVec = bakedIt->second;
+                    const auto& left = bakedVec[span.left].pose;
+                    const auto& right = bakedVec[span.right].pose;
+                    if (left.positions.size() == size_t(blendIt->second.shape->mVertexCount)
+                            && left.normals.size() == size_t(blendIt->second.shape->mNormalCount)
+                            && left.positions.size() == right.positions.size()
+                            && left.normals.size() == right.normals.size()
+                            && p2pose::apply(*blendIt->second.shape, left, right, span.weight,
+                                             blendIt->second.scratch)) {
+                        shape = blendIt->second.shape;
+                        if (blendIt->second.clip != name || blendIt->second.corpse != corpse) {
+                            std::printf(
+                                "P2_BATCH2_BLEND key=%s clip=%s corpse=%d source_frame=%.5f left=%zu "
+                                "right=%zu weight=%.5f\n",
+                                entry->second.c_str(), name, int(corpse), sourceFrame, span.left,
+                                span.right, span.weight);
+                        }
+                        blendIt->second.clip = name;
+                        blendIt->second.frame = float(sourceFrame);
+                        blendIt->second.corpse = corpse;
+                    }
+                }
+            }
+        }
+    }
     if (!logged[corpse ? 1 : 0]) {
         std::printf("P2_BATCH2_DRAW corpse=%d key=%s clip=%s\n", int(corpse), entry->second.c_str(), name);
         logged[corpse ? 1 : 0] = true;
