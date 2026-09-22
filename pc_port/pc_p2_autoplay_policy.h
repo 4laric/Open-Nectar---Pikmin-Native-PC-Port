@@ -231,19 +231,23 @@ struct Config {
     int resupplyThreshold = 5; // Attack/Approach below this field count + Onion stock => disengage + withdraw
 };
 
-// Power-mode effective withdraw targets (bot-v4): up to ~100 Pikmin (the
-// field cap pc_randomizer_field_capacity() already returns), more menu
-// cycles to get there. Capped in practice by what the Onion actually holds.
+// Power-mode effective withdraw targets (bot-v4, bot-v4b): up to ~100 Pikmin.
+// The field cap binds the withdraw menu + exit queue + birth pool, so power
+// mode lifts it to 100 as well (pc_randomizer_field_capacity); the Onion is
+// stocked to ~100 by the driver (AUTOPLAY_POWER_STOCK). 15 menu cycles at the
+// observed ~10/cycle UI accumulation rate reach 100 with headroom; the loop
+// still exits early once field>=100 or the Onion is empty.
 inline int effectiveWantSquad(const Config& cfg) { return isPowerEnabled() ? 100 : cfg.wantSquad; }
-inline int effectiveMaxWithdrawCycles(const Config& cfg) { return isPowerEnabled() ? 12 : cfg.maxWithdrawCycles; }
+inline int effectiveMaxWithdrawCycles(const Config& cfg) { return isPowerEnabled() ? 15 : cfg.maxWithdrawCycles; }
 
 // bot-v4b power-mode Onion stock: the day-start Onion only holds the 20
-// starting Pikmin (gameSetup sets 20; the field cap is not the binding
-// constraint), so power mode tops the start-colour Onion up to ~100 through
-// the normal born/stored bookkeeping. Pure function so the inert-when-unset
-// rule is unit-testable: with power disabled the delta is always 0, no
-// matter what the counts are. stored = Onion's stored count, field = live
-// field Pikmin, already = GameStat::allPikis total, limit = piki pool limit.
+// starting Pikmin (gameSetup sets 20), so power mode tops the start-colour
+// Onion up to ~100 through the normal born/stored bookkeeping (the field cap
+// binds the menu/queue/pool too, so power mode lifts it to 100 as well).
+// Pure function so the inert-when-unset rule is unit-testable: with power
+// disabled the delta is always 0, no matter what the counts are. stored =
+// Onion's stored count, field = live field Pikmin, already =
+// GameStat::allPikis total, limit = piki pool limit.
 inline int powerStockTarget() { return 100; }
 inline int powerStockDelta(bool powerEnabled, int stored, int field, int already, int limit)
 {

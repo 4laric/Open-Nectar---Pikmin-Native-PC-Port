@@ -437,9 +437,8 @@ void pc_p2_autoplay_tick(void)
     // bot-v4b power-mode Onion stock (TEST-ONLY, gated by BOTH the autoplay
     // gate and PIKMIN_RANDOMIZER_AUTOPLAY_POWER via isPowerEnabled(): inert
     // when either is unset). The day-start Onion only holds the 20 starting
-    // Pikmin (gameSetup sets 20; the field cap is not the binding
-    // constraint), so top the start-colour Onion up to ~100 once per process
-    // through the normal born/stored bookkeeping: pikiInfMgr (stock carried
+    // Pikmin (gameSetup sets 20), so top the start-colour Onion up to ~100
+    // once per process through the normal born/stored bookkeeping: pikiInfMgr (stock carried
     // between days) + the Onion's mHeldPikis (what the withdrawal screen
     // counts) + GameStat::containerPikis/allPikis (HUD + birth caps) +
     // playerState born/living/plucked counters. Stocked as Leaf (the normal

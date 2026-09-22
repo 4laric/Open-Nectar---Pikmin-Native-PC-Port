@@ -830,11 +830,16 @@ namespace {
 // ONLY meaningful when the autoplay gate is already on; inert in normal play
 // (autoplay gate closed => normal 1.0x path, no matter what POWER is set to).
 // A numeric POWER value configures the multiplier, otherwise x10.
-float autoplayPowerDamageMult() {
+bool autoplayPowerOn()
+{
     const char* gate = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY");
-    if (!gate || !gate[0] || !std::strcmp(gate, "0")) return 1.0f;
+    if (!gate || !gate[0] || !std::strcmp(gate, "0")) return false;
     const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER");
-    if (!v || !v[0] || !std::strcmp(v, "0")) return 1.0f;
+    return v && v[0] && std::strcmp(v, "0") != 0;
+}
+float autoplayPowerDamageMult() {
+    if (!autoplayPowerOn()) return 1.0f;
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER");
     char* end = nullptr;
     const double d = std::strtod(v, &end);
     if (end && end != v && *end == 0 && d > 0.0 && d < 1000000.0) return float(d);
@@ -851,7 +856,16 @@ float pc_randomizer_color_multiplier(int color, PcPikminStat stat) {
 int pc_randomizer_carry_strength(int color) {
     return pc_randomizer_color_stats() && color >= 0 && color < 3 ? colorStats[color][3] : 1;
 }
-int pc_randomizer_field_capacity() { return pc_randomizer_expanded() ? 10 * (int)(startingFlarlic + flarlic) : 100; }
+int pc_randomizer_field_capacity()
+{
+    // bot-v4b power mode (TEST-ONLY): the campaign field cap is 10xFlarlic
+    // (20-40 at campaign start), which binds the withdraw menu (DrawContainer
+    // squad caps), the Onion exit queue, and the birth pool below the power
+    // squad. Lift to 100 while power mode is on (BOTH gates, same as the
+    // damage lever); inert otherwise, so probe asserts on 20 still hold.
+    if (autoplayPowerOn()) return 100;
+    return pc_randomizer_expanded() ? 10 * (int)(startingFlarlic + flarlic) : 100;
+}
 namespace {
 bool accessibleStage(int stage) {
     return (stage == 0 && pc_randomizer_has("Pikmin: Impact Site Access")) || (stage == 1 && pc_randomizer_has("Pikmin: Forest of Hope Access")) || (stage == 2 && pc_randomizer_has("Pikmin: Forest Navel Access"))
