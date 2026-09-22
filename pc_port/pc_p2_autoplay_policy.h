@@ -686,11 +686,16 @@ private:
         }
         const bool sarai = in.targetSource == 23;
         const bool kurage = in.targetSource == 57;
-        // Any grabbed Pikmin (stuck to an enemy mouth, Sarai capture or
-        // otherwise), thrown-off / burning / panicked Pikmin (squadDistress),
-        // or a scattered squad: whistle them back first, then re-throw (bot-v4:
-        // real players do this; previously only scattered + Sarai grabs).
-        const bool grabWhistle = in.targetGrabbing;
+        // Whistle first, then re-throw (bot-v4: real players do this):
+        // - Sarai holding a Pikmin (targetGrabbing): whistle frees the grab;
+        // - grabbed/thrown-off/burning squad (squadDistress: mouth-stuck,
+        //   swallowed, flick/flown/fall/wave/pressed, fired/panic/drown) or
+        //   scattered squad: whistle them back.
+        // NOTE: a plain stick onto the enemy (attack-latching) is NOT a grab:
+        // whistling those recalls our own attackers and stalls damage (v4dev-1
+        // Chappy: permanent whistle, hp stuck at 0.96), so targetGrabbing only
+        // whistles for the Sarai capture case.
+        const bool grabWhistle = sarai && in.targetGrabbing;
         if ((in.scattered || in.squadDistress || grabWhistle) && !whistling) {
             whistling = true;
             whistleTime = 0.0f;

@@ -1010,9 +1010,11 @@ void testPowerGate()
 
 void testRegroupDistress()
 {
-    // bot-v4 regroup rule: grabbed/thrown-off/burning (squadDistress) or any
-    // grabbed Pikmin (targetGrabbing, any species) whistles first, then
-    // re-throws once the squad is back.
+    // bot-v4 regroup rule: distress (grabbed/thrown-off/burning) or a
+    // scattered squad whistles first, then re-throws once the squad is back.
+    // A plain attack-latch (targetGrabbing on a ground enemy) must NOT
+    // whistle: those Pikmin are dealing damage, and recalling them stalls the
+    // fight (v4dev-1 Chappy regression: permanent whistle, hp stuck at 0.96).
     p2autoplay::Config cfg;
     cfg.throwHold = 0.1f;
     cfg.throwGap = 0.2f;
@@ -1023,7 +1025,7 @@ void testRegroupDistress()
     brain.update(0.05f, s);
     brain.update(0.05f, s); // -> select
     s.targetToken = 620001;
-    s.targetSource = 44; // non-flyer: the old code only whistled Sarai grabs
+    s.targetSource = 44; // ground enemy
     s.targetAlive = true;
     s.targetDist = 100.0f;
     s.targetHealthFrac = 1.0f;
@@ -1034,15 +1036,38 @@ void testRegroupDistress()
     s.squadDistress = true;
     brain.update(0.05f, s);
     CHECK(brain.command().buttons & unsigned(p2autoplay::PadB), "regroup/distress_whistles");
-    // Grabbed Pikmin on a non-flyer: whistle too.
+    // Attack-latch on a ground enemy is not a grab: no whistle, throws continue.
     s.squadDistress = false;
     s.targetGrabbing = true;
-    brain.update(0.05f, s);
-    CHECK(brain.command().buttons & unsigned(p2autoplay::PadB), "regroup/grab_whistles_any_species");
+    for (int i = 0; i < 10; ++i) brain.update(0.05f, s);
+    CHECK(!(brain.command().buttons & unsigned(p2autoplay::PadB)), "regroup/latch_does_not_whistle");
+    int aOn = 0;
+    for (int i = 0; i < 40; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) ++aOn;
+    }
+    CHECK(aOn > 0, "regroup/keeps_throwing_while_latched");
+    // Sarai capture (flyer grab): whistle frees the grabbed Pikmin.
+    p2autoplay::Brain brain2(cfg);
+    brain2.update(0.05f, s);
+    p2autoplay::Senses s2 = liveSenses();
+    s2.fieldPikmin = 20;
+    brain2.update(0.05f, s2);
+    s2.targetToken = 620002;
+    s2.targetSource = 23; // Sarai
+    s2.targetAlive = true;
+    s2.targetDist = 200.0f;
+    s2.targetLow = true;
+    s2.targetGrabbing = true;
+    brain2.update(0.05f, s2); // -> approach
+    brain2.update(0.05f, s2); // -> attack
+    brain2.update(0.05f, s2); // whistle answers the grab
+    CHECK(brain2.command().buttons & unsigned(p2autoplay::PadB), "regroup/sarai_grab_whistles");
     // Squad back: whistle releases and throws resume.
+    s.squadDistress = false;
     s.targetGrabbing = false;
     for (int i = 0; i < 10; ++i) brain.update(0.05f, s);
-    int aOn = 0;
+    aOn = 0;
     for (int i = 0; i < 40; ++i) {
         brain.update(0.05f, s);
         if (brain.command().buttons & unsigned(p2autoplay::PadA)) ++aOn;
