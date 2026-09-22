@@ -119,7 +119,9 @@ static bool readBatch2InterpolationFlag() {
             fail("invalid interpolation flag");
         return true;
     }
-    return false;
+    // Campaign default: interpolate unless PIKMIN_P2_INTERPOLATION=0 (nearest-pose fallback stays per clip).
+    const char* env = std::getenv("PIKMIN_P2_INTERPOLATION");
+    return !(env && env[0] == '0');
 }
 
 int expectedType(const std::string& family, const std::string& species) {
