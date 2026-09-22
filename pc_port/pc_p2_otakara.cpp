@@ -559,7 +559,12 @@ void pc_p2_otakara_setup() {
 
 bool pc_p2_otakara_bind_dynamic(BTeki* actor, unsigned generatorId, unsigned sourceId) {
     const int species = speciesFromSource(sourceId);
-    if (!actor || species < 0 || actors.count(static_cast<PelletView*>(actor))) return false;
+    // wf7 dweevil-impl (#871): reject a zero generator id. At birth time the
+    // newborn BTeki has no mGenerator yet, so the caller's token reads 0; the
+    // caller must pass the seed uid instead. Accepting 0 here created a bogus
+    // generator=0 registration later overwritten by setup (double-claim
+    // window, one actor briefly animated under two identities).
+    if (!actor || !generatorId || species < 0 || actors.count(static_cast<PelletView*>(actor))) return false;
     loadBank();
     if (!registerActor(actor, species, generatorId)) return false;
     ready = true;
@@ -572,6 +577,43 @@ void pc_p2_otakara_update(BTeki* actor) {
     if (!ready) return;
     auto it = actors.find(static_cast<PelletView*>(actor));
     if (it == actors.end()) return;
+    // Headless staged death hook (wf7 dweevil-impl, #871): env-gated,
+    // clearly labelled STAGED. With PIKMIN_P2_DWEEVIL_STAGED_DEATH=1 the first
+    // updated dweevil is killed after ~300 updates, so headless can prove the
+    // corpse holds clip=dead. Off by default; no effect on owner play.
+    // wf7-d-1 showed mHealth=0 alone never reaches BTeki::die() headless (no
+    // combat, so the P1 Chappy TAI never picks its dying branch): the module
+    // went state=dead clip=dead but no P2_OTAKARA_DEAD (mDeadState) line and
+    // no corpse draw ever appeared. So the hook also enters the host's own
+    // natural death funnel via die() (the same call the TAI makes), letting
+    // dieSoon()->becomePellet() form the real carriable corpse.
+    // wf7-d-2 showed die() alone still strands the host at mDeadState=1
+    // headless (the dormant actor's doAI tail never runs dieSoon()), so the
+    // staged step uses the public pcEscapeNow() lane helper (#219: die() plus
+    // the dieSoon() a dormant doAI would run), forming the real pellet corpse
+    // through the unchanged natural funnel.
+    {
+        static bool stagedArmed = false;
+        static bool stagedChecked = false;
+        static bool stagedDone = false;
+        static unsigned long stagedTicks = 0;
+        if (!stagedChecked) {
+            stagedChecked = true;
+            const char* env = std::getenv("PIKMIN_P2_DWEEVIL_STAGED_DEATH");
+            stagedArmed = (env && std::string(env) == "1");
+        }
+        if (stagedArmed && !stagedDone) {
+            ++stagedTicks;
+            if (stagedTicks == 300) {
+                stagedDone = true;
+                actor->mHealth = 0.0f;
+                actor->pcEscapeNow();
+                std::printf("P2_DWEEVIL_STAGED_DEATH staged=1 generator=%u source_id=%d health=0 corpse=%d\n",
+                            it->second.generator, it->second.species, int(actor->mPellet != nullptr));
+                std::fflush(stdout);
+            }
+        }
+    }
     Otakara& s = it->second;
     const float dt = gsys->getFrameTime();
     if (dt <= 0.0f || dt > 0.5f) return;
