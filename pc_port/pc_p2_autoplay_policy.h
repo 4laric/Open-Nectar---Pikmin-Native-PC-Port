@@ -1,6 +1,6 @@
 #pragma once
 
-// TEST-ONLY headless autoplay bot policy (brief keys: bot-impl wf9, bot-v2 wf10).
+// TEST-ONLY headless autoplay bot policy (brief keys: bot-impl wf9, bot-v2 wf10, bot-v3 wf10).
 //
 // Engine-free state machine for the scripted player that drives the game
 // through the NORMAL controller input path (synthesised pad state fed where
@@ -15,6 +15,16 @@
 // The Brain also takes an explicit `enabled` sense: with enabled=false every
 // update returns a neutral pad and stays IDLE, which is the
 // inert-when-unset guarantee the native test pins (tools/p2_autoplay_test.cpp).
+//
+// bot-v3 (wf10) deltas, in brief priority order:
+//   1. Approach follows the routeMgr waypoint graph leg by leg (driver
+//      plans method=graph); STUCK lines carry the navi position + replan
+//      count so logs prove whether the captain moves under stick input.
+//   2. "Target out of reach after N replans" is GIVEUP reason=
+//      target_unreachable, then Done idles near the Onion (enemies may come).
+//   3. Driver never repeats an identical detour and tries alternates
+//      (next-nearest start/goal waypoints, reversed legs); graph failure is
+//      logged as AUTOPLAY_ROUTE_FAIL reason=<why>.
 //
 // bot-v2 (wf10) deltas, in brief priority order:
 //   1. Onion receipt: Aftermath waits for the species' Onion receipt marker
@@ -190,6 +200,7 @@ struct Config {
     float whistleHold = 1.6f; // B held to regroup / call back
     float stuckWindow = 4.0f; // no-progress window before STUCK + replan
     float stuckMinProgress = 30.0f; // XZ units that count as progress
+    int maxApproachReplans = 6; // consecutive STUCK windows before target_unreachable GIVEUP
     int wantSquad = 15; // withdrawn Pikmin before leaving the Onion
     int maxWithdrawCycles = 6; // repeat the withdraw menu until field>=wantSquad or Onion empty
 };
@@ -274,6 +285,7 @@ public:
         stuckWindowDist = 1.0e30f;
         wantReplan = false;
         progressBest = 1.0e30f;
+        approachReplans = 0;
         initialHealthFrac = 1.0f;
         sawDamage = false;
         sawKill = false;
@@ -321,7 +333,7 @@ public:
         case State::Approach: tickApproach(dt, in); break;
         case State::Attack: tickAttack(dt, in); break;
         case State::Aftermath: tickAftermath(dt, in); break;
-        case State::Done: break;
+        case State::Done: tickDone(dt, in); break;
         }
     }
 
@@ -348,6 +360,7 @@ private:
         stuckWindowDist = 1.0e30f;
         wantReplan = false;
         progressBest = 1.0e30f;
+        approachReplans = 0;
         emitState(in);
     }
     void holdIdle() { lastCommand = Command{}; }
@@ -413,8 +426,8 @@ private:
                 if (stuckWindowDist - progressBest < cfg.stuckMinProgress) {
                     char buf[256];
                     std::snprintf(buf, sizeof(buf),
-                                  "AUTOPLAY_STUCK state=withdraw_seek onion_dist=%.0f bot-driven",
-                                  in.onionDist);
+                                  "AUTOPLAY_STUCK state=withdraw_seek onion_dist=%.0f navi=(%.0f,%.0f) bot-driven",
+                                  in.onionDist, in.naviX, in.naviZ);
                     markers.emplace_back(buf);
                     wantReplan = true;
                 }
@@ -546,13 +559,27 @@ private:
             if (stuckWindowDist - progressBest < cfg.stuckMinProgress) {
                 char buf[256];
                 std::snprintf(buf, sizeof(buf),
-                              "AUTOPLAY_STUCK state=approach token=%u dist=%.0f bot-driven",
-                              in.targetToken, in.targetDist);
+                              "AUTOPLAY_STUCK state=approach token=%u dist=%.0f navi=(%.0f,%.0f) replan=%d bot-driven",
+                              in.targetToken, in.targetDist, in.naviX, in.naviZ,
+                              approachReplans + 1);
                 markers.emplace_back(buf);
                 wantReplan = true;
+                ++approachReplans;
+                stuckWindowDist = progressBest;
+                stuckWindowStart = 0.0f;
+                if (approachReplans >= cfg.maxApproachReplans) {
+                    // Target out of reach after N replans: GIVEUP with a
+                    // reason, then idle near the Onion (enemies may come).
+                    giveUp(in, "target_unreachable");
+                    finishTarget(in, /*killed*/ false);
+                    return;
+                }
+            } else {
+                // Real progress: the out-of-reach count restarts.
+                approachReplans = 0;
+                stuckWindowDist = progressBest;
+                stuckWindowStart = 0.0f;
             }
-            stuckWindowDist = progressBest;
-            stuckWindowStart = 0.0f;
         }
         // Driver fills moveX/moveZ toward the target or the detour waypoint.
         if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
@@ -680,6 +707,38 @@ private:
         }
     }
 
+    void tickDone(float dt, const Senses& in)
+    {
+        // No more targets: idle near the Onion (bot-v3: enemies may walk to
+        // the squad, which is how bc1/bc2 scored its only kills). Pad-only,
+        // still gated by update(); neutral when there is no Onion to hold.
+        if (in.waypointLeg) {
+            steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+        } else if (in.hasOnion && in.onionDist > cfg.arriveRadius) {
+            steer(in.naviX, in.naviZ, in.onionX, in.onionZ);
+        }
+        if (stuckWindowDist >= 1.0e29f) {
+            stuckWindowDist = in.onionDist;
+            stuckWindowStart = 0.0f;
+            progressBest = in.onionDist;
+        }
+        if (in.onionDist < progressBest) progressBest = in.onionDist;
+        stuckWindowStart += dt;
+        if (stuckWindowStart >= cfg.stuckWindow) {
+            if (in.hasOnion && stuckWindowDist - progressBest < cfg.stuckMinProgress
+                && in.onionDist > cfg.arriveRadius) {
+                char buf[256];
+                std::snprintf(buf, sizeof(buf),
+                              "AUTOPLAY_STUCK state=done onion_dist=%.0f navi=(%.0f,%.0f) bot-driven",
+                              in.onionDist, in.naviX, in.naviZ);
+                markers.emplace_back(buf);
+                wantReplan = true;
+            }
+            stuckWindowDist = progressBest;
+            stuckWindowStart = 0.0f;
+        }
+    }
+
     void observeDamage(const Senses& in)
     {
         if (in.targetHealthFrac < initialHealthFrac - 0.001f) sawDamage = true;
@@ -773,6 +832,7 @@ private:
     float stuckWindowDist = 1.0e30f;
     bool wantReplan = false;
     float progressBest = 1.0e30f;
+    int approachReplans = 0; // consecutive STUCK windows in this Approach stint (bot-v3)
     float initialHealthFrac = 1.0f;
     bool sawDamage = false;
     bool sawKill = false; // generic death latched (any species)

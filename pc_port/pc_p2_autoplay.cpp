@@ -1,4 +1,4 @@
-// TEST-ONLY headless autoplay bot driver (brief keys: bot-impl wf9, bot-v2 wf10).
+// TEST-ONLY headless autoplay bot driver (brief keys: bot-impl wf9, bot-v2 wf10, bot-v3 wf10).
 //
 // Drives the game through the NORMAL controller input path: each logical
 // tick ControllerMgr::update() calls pc_p2_autoplay_tick(), which senses
@@ -13,6 +13,12 @@
 // Otherwise tick() returns before touching anything: production input is
 // untouched (native test: tools/p2_autoplay_test.cpp).
 //
+// bot-v3 (wf10): approach plans over the routeMgr waypoint graph with
+// next-nearest start/goal alternates + reversed legs, never repeats an
+// identical detour, logs AUTOPLAY_ROUTE_FAIL when the graph cannot route,
+// and diagnoses stick-vs-motion (navi pos in STUCK, NAVI diagnostic with
+// stick/state/yaw/velocity). Unreachable-after-N-replans GIVEUP idles near
+// the Onion.
 // bot-v2 (wf10): waypoint-by-waypoint route-graph following with BFS
 // fallback + replan on every STUCK; generic death latch (health/isAlive/
 // dead-state/corpse pellet) for every species; Onion receipt sensing from
@@ -100,18 +106,25 @@ struct Engagement {
 p2autoplay::Brain sBrain;
 Engagement sEngage;
 std::set<unsigned> sCompleted;
-// Waypoint-by-waypoint route-graph path (bot-v2 gap 2): legs from the
-// nearest waypoint to us through the graph to the waypoint nearest the
+// Waypoint-by-waypoint route-graph path (bot-v2 gap 2, bot-v3 hardening):
+// legs from a nearby waypoint through the graph to a waypoint near the
 // target, advanced as each leg is reached, replanned on every STUCK.
 std::vector<std::pair<float, float>> sPath;
 size_t sPathIdx = 0;
 float sLegTime = 0.0f;
+// bot-v3: per-engagement replan count + detour history so an identical
+// detour is never repeated (bc2: same sidestep 38x at dist=1065).
+int sReplanCount = 0;
+unsigned sReplanToken = 0;
+float sLastDetourX = 0.0f, sLastDetourZ = 0.0f;
+bool sLastDetourValid = false;
+std::vector<std::pair<float, float>> sDetourHist;
 long long sTicks = 0;
 std::chrono::steady_clock::time_point sFpsStart = std::chrono::steady_clock::now();
 bool sFpsLogged = false;
 
 // BFS over the raw waypoint link graph (bot-v2 gap 2 fallback): the engine
-// findSync above is the primary real graph search (A* over the same graph);
+// findSync below is the primary real graph search (A* over the same graph);
 // when it yields no legs, this BFS over mLinkIndices still produces a real
 // waypoint-by-waypoint route instead of a blind sidestep.
 bool bfsPath(int selfIdx, int tgtIdx, std::vector<std::pair<float, float>>& out)
@@ -158,49 +171,197 @@ bool bfsPath(int selfIdx, int tgtIdx, std::vector<std::pair<float, float>>& out)
     return !out.empty();
 }
 
+// bot-v3: k nearest open land waypoints to (x,z), closest first.
+std::vector<int> nearestWpIdx(float x, float z, int k)
+{
+    std::vector<int> out;
+    if (!routeMgr) return out;
+    const u32 handle = 'test';
+    const int n = routeMgr->getNumWayPoints(handle);
+    if (n <= 0 || n > 4096) return out;
+    Vector3f pos(x, 0.0f, z);
+    struct Scored {
+        float d;
+        int idx;
+    };
+    std::vector<Scored> scored;
+    scored.reserve(size_t(n));
+    for (int i = 0; i < n; ++i) {
+        WayPoint* wp = routeMgr->getWayPoint(handle, i);
+        if (!wp || !wp->mIsOpen || wp->inWater()) continue;
+        const float dx = wp->mPosition.x - pos.x, dz = wp->mPosition.z - pos.z;
+        scored.push_back({ dx * dx + dz * dz, i });
+    }
+    std::sort(scored.begin(), scored.end(), [](const Scored& a, const Scored& b) { return a.d < b.d; });
+    for (int i = 0; i < int(scored.size()) && int(out.size()) < k; ++i) out.push_back(scored[i].idx);
+    return out;
+}
+
+bool detourSeen(float x, float z)
+{
+    for (const auto& d : sDetourHist) {
+        const float dx = d.first - x, dz = d.second - z;
+        if (dx * dx + dz * dz < 1.0f) return true;
+    }
+    if (sLastDetourValid) {
+        const float dx = sLastDetourX - x, dz = sLastDetourZ - z;
+        if (dx * dx + dz * dz < 1.0f) return true;
+    }
+    return false;
+}
+
+void recordDetour(float x, float z)
+{
+    sLastDetourX = x;
+    sLastDetourZ = z;
+    sLastDetourValid = true;
+    sDetourHist.emplace_back(x, z);
+    if (sDetourHist.size() > 16) sDetourHist.erase(sDetourHist.begin());
+}
+
+// Engine findSync forward; on empty, the reversed search (goal->start,
+// legs reversed) as the alternate for directed links.
+bool graphLegs(PathFinder* finder, int startIdx, int goalIdx,
+               std::vector<std::pair<float, float>>& out, bool& reversed)
+{
+    out.clear();
+    reversed = false;
+    if (!finder || startIdx < 0 || goalIdx < 0 || startIdx == goalIdx) return false;
+    WayPoint* legs[64] = {};
+    const int n = finder->findSync(legs, 64, startIdx, goalIdx, false);
+    for (int i = 0; i < n && int(out.size()) < 64; ++i) {
+        if (!legs[i]) continue;
+        out.emplace_back(legs[i]->mPosition.x, legs[i]->mPosition.z);
+    }
+    if (!out.empty()) return true;
+    WayPoint* rlegs[64] = {};
+    const int rn = finder->findSync(rlegs, 64, goalIdx, startIdx, false);
+    std::vector<std::pair<float, float>> rev;
+    for (int i = 0; i < rn && int(rev.size()) < 64; ++i) {
+        if (!rlegs[i]) continue;
+        rev.emplace_back(rlegs[i]->mPosition.x, rlegs[i]->mPosition.z);
+    }
+    if (rev.empty()) return false;
+    for (int i = int(rev.size()) - 1; i >= 0; --i) out.push_back(rev[size_t(i)]);
+    reversed = true;
+    return !out.empty();
+}
+
 void planDetour(float naviX, float naviZ, float tgtX, float tgtZ)
 {
+    // Per-engagement replan sequencing (token change resets the history so
+    // alternates vary within one stuck approach, not across targets).
+    if (sReplanToken != sEngage.token) {
+        sReplanToken = sEngage.token;
+        sReplanCount = 0;
+        sDetourHist.clear();
+        sLastDetourValid = false;
+    }
+    ++sReplanCount;
     sPath.clear();
     sPathIdx = 0;
     sLegTime = 0.0f;
     const char* method = "none";
-    // Real path planning over the routeMgr waypoint graph (bot-v2 gap 2):
-    // nearest waypoint to us -> graph search -> waypoint nearest the target,
-    // followed waypoint by waypoint (advanced in the tick below).
-    if (routeMgr) {
-        Vector3f from(naviX, 0.0f, naviZ), to(tgtX, 0.0f, tgtZ);
-        WayPoint* selfWp = routeMgr->findNearestWayPoint('test', from, true);
-        WayPoint* tgtWp = routeMgr->findNearestWayPoint('test', to, true);
+    const char* failReason = nullptr;
+    // Real path planning over the routeMgr waypoint graph (bot-v3: approach
+    // must use method=graph): next-nearest start/goal alternates, reversed
+    // legs for directed links, BFS fallback per pair. First non-duplicate
+    // route wins so an identical detour is never repeated.
+    if (!routeMgr) {
+        failReason = "no_routemgr";
+    } else {
+        const std::vector<int> starts = nearestWpIdx(naviX, naviZ, 3);
+        const std::vector<int> goals = nearestWpIdx(tgtX, tgtZ, 3);
         PathFinder* finder = routeMgr->getPathFinder('test');
-        if (selfWp && tgtWp && finder && selfWp != tgtWp) {
-            WayPoint* legs[64] = {};
-            const int n = finder->findSync(legs, 64, selfWp->mIndex, tgtWp->mIndex, false);
-            for (int i = 0; i < n && int(sPath.size()) < 64; ++i) {
-                if (!legs[i]) continue;
-                sPath.emplace_back(legs[i]->mPosition.x, legs[i]->mPosition.z);
+        if (starts.empty()) failReason = "no_start_wp";
+        else if (goals.empty()) failReason = "no_goal_wp";
+        else if (!finder) failReason = "no_finder";
+        else {
+            bool anyPath = false;
+            const u32 handle = 'test';
+            for (int si : starts) {
+                for (int gi : goals) {
+                    if (si == gi) continue;
+                    std::vector<std::pair<float, float>> legs;
+                    bool reversed = false;
+                    if (!graphLegs(finder, si, gi, legs, reversed)) continue;
+                    anyPath = true;
+                    if (!legs.empty() && detourSeen(legs[0].first, legs[0].second)) continue; // alternate
+                    sPath = legs;
+                    method = reversed ? "graph-rev" : "graph";
+                    break;
+                }
+                if (!sPath.empty()) break;
             }
-            if (!sPath.empty()) method = "graph";
-            if (sPath.empty() && bfsPath(selfWp->mIndex, tgtWp->mIndex, sPath)) method = "bfs";
-        } else if (tgtWp) {
-            sPath.emplace_back(tgtWp->mPosition.x, tgtWp->mPosition.z);
-            method = "graph-nearest";
+            // BFS fallback per pair (same alternates discipline).
+            if (sPath.empty()) {
+                for (int si : starts) {
+                    for (int gi : goals) {
+                        std::vector<std::pair<float, float>> legs;
+                        if (!bfsPath(si, gi, legs)) continue;
+                        anyPath = true;
+                        if (!legs.empty() && detourSeen(legs[0].first, legs[0].second)) continue;
+                        sPath = legs;
+                        method = "bfs";
+                        break;
+                    }
+                    if (!sPath.empty()) break;
+                }
+            }
+            if (sPath.empty()) {
+                failReason = anyPath ? "all_routes_duplicate" : "no_path";
+                // Single-leg graph-nearest fallback only when it is fresh.
+                WayPoint* gwp = routeMgr->getWayPoint(handle, goals[0]);
+                if (gwp && !detourSeen(gwp->mPosition.x, gwp->mPosition.z)
+                    && sReplanCount <= 2) {
+                    sPath.emplace_back(gwp->mPosition.x, gwp->mPosition.z);
+                    method = "graph-nearest";
+                    failReason = nullptr;
+                }
+            }
+            // Reverse the accepted multi-leg route on alternate replans when
+            // the head leg keeps duplicating (directed-link alternates).
+            if (sPath.size() > 1 && sReplanCount % 3 == 0) {
+                std::vector<std::pair<float, float>> rev(sPath.rbegin(), sPath.rend());
+                if (!rev.empty() && !detourSeen(rev[0].first, rev[0].second)) {
+                    sPath = rev;
+                    method = "graph-rev-alt";
+                }
+            }
         }
     }
+    if (failReason) {
+        std::printf("AUTOPLAY_ROUTE_FAIL reason=%s token=%u replan=%d bot-driven\n",
+                    failReason, sEngage.token, sReplanCount);
+        std::fflush(stdout);
+    }
     if (sPath.empty()) {
-        // Graph unavailable: perpendicular sidestep around the straight line.
+        // Graph cannot route: perpendicular sidestep that is guaranteed
+        // fresh (growing lateral + forward mix per replan; flip when the
+        // computed point still duplicates history).
         const float dx = tgtX - naviX, dz = tgtZ - naviZ;
         const float len = std::sqrt(dx * dx + dz * dz);
         if (len > 1.0f) {
-            const float side = (sTicks % 2 == 0) ? 1.0f : -1.0f;
-            sPath.emplace_back(naviX + dx * 0.35f - dz / len * 220.0f * side,
-                               naviZ + dz * 0.35f + dx / len * 220.0f * side);
+            float side = (sReplanCount % 2 == 1) ? 1.0f : -1.0f;
+            const int step = (sReplanCount - 1) % 6;
+            const float fwd = 0.35f + 0.05f * float(step % 5);
+            const float lat = 220.0f + 60.0f * float(step);
+            float px = naviX + dx * fwd - dz / len * lat * side;
+            float pz = naviZ + dz * fwd + dx / len * lat * side;
+            if (detourSeen(px, pz)) {
+                side = -side;
+                px = naviX + dx * fwd - dz / len * (lat + 80.0f) * side;
+                pz = naviZ + dz * fwd + dx / len * (lat + 80.0f) * side;
+            }
+            sPath.emplace_back(px, pz);
             method = "sidestep";
         }
     }
     if (!sPath.empty()) {
-        std::printf("AUTOPLAY_REPLAN token=%u detour=(%.0f,%.0f) legs=%d method=%s bot-driven\n",
+        recordDetour(sPath[0].first, sPath[0].second);
+        std::printf("AUTOPLAY_REPLAN token=%u detour=(%.0f,%.0f) legs=%d method=%s replan=%d bot-driven\n",
                     sEngage.token, sPath[0].first, sPath[0].second,
-                    int(sPath.size()), method);
+                    int(sPath.size()), method, sReplanCount);
         std::fflush(stdout);
     }
 }
@@ -334,6 +495,10 @@ void pc_p2_autoplay_tick(void)
         sPath.clear();
         sPathIdx = 0;
         sLegTime = 0.0f;
+        sReplanCount = 0;
+        sReplanToken = pick->token;
+        sDetourHist.clear();
+        sLastDetourValid = false;
     }
 
     // --- Generic death scan (bot-v2 gap 5): the engaged actor by token among
@@ -441,10 +606,12 @@ void pc_p2_autoplay_tick(void)
     }
 
     // --- Stuck replan via the map's route/waypoint graph ---
-    // Every STUCK replans (bot-v2 gap 2: far targets follow the graph leg by
-    // leg instead of a single detour).
+    // Every STUCK replans (bot-v3: approach must use method=graph, never an
+    // identical detour; Done holds near the Onion so it replans there too).
     if (sBrain.replanWanted()) {
         if (sBrain.current() == p2autoplay::State::WithdrawSeek && hasOnion) {
+            planDetour(naviX, naviZ, onionX, onionZ);
+        } else if (sBrain.current() == p2autoplay::State::Done && hasOnion) {
             planDetour(naviX, naviZ, onionX, onionZ);
         } else if (pick) {
             planDetour(naviX, naviZ, pick->x, pick->z);
@@ -491,6 +658,8 @@ void pc_p2_autoplay_tick(void)
                 sPath.clear();
                 sPathIdx = 0;
                 sLegTime = 0.0f;
+                sDetourHist.clear();
+                sLastDetourValid = false;
             }
         }
     }
@@ -500,12 +669,14 @@ void pc_p2_autoplay_tick(void)
     const p2autoplay::Command cmd = sBrain.command();
     unsigned buttons = cmd.buttons;
     int stickX = 0, stickY = 0;
+    float yawDbg = 0.0f;
     if (cmd.menuHold) {
         stickY = -127; // container withdraw direction
         buttons |= unsigned(p2autoplay::PadMainDown);
     } else if (cmd.moveX != 0.0f || cmd.moveZ != 0.0f) {
         float yaw = 0.0f;
         if (navi->mNaviCamera) yaw = std::atan2(navi->mNaviCamera->mViewXAxis.z, navi->mNaviCamera->mViewXAxis.x);
+        yawDbg = yaw;
         const float c = std::cos(yaw), s = std::sin(yaw);
         // Inverse of makeVelocity's RotY(yaw): local = RotY(-yaw) * world.
         const float lx = c * cmd.moveX + s * cmd.moveZ;
@@ -528,6 +699,33 @@ void pc_p2_autoplay_tick(void)
                     naviX, naviZ, onionX, onionZ, onionDist, onionStored, alive,
                     senses.containerOpen ? 1 : 0);
         std::fflush(stdout);
+    }
+
+    // --- bot-v3 steering diagnostics: proves the navi moves under stick
+    // input (or exposes why: state, menu, stick, camera yaw, velocity). ---
+    {
+        const p2autoplay::State st = sBrain.current();
+        const bool steering = (st == p2autoplay::State::Approach || st == p2autoplay::State::Done
+                               || st == p2autoplay::State::WithdrawSeek);
+        if (steering && (sTicks % 300 == 0)) {
+            const int stateId = (navi->getCurrState() != nullptr) ? navi->getCurrState()->getID() : -999;
+            float legX = senses.waypointLeg ? senses.wpX : senses.tgtX;
+            float legZ = senses.waypointLeg ? senses.wpZ : senses.tgtZ;
+            if (st != p2autoplay::State::Approach) {
+                legX = senses.waypointLeg ? senses.wpX : onionX;
+                legZ = senses.waypointLeg ? senses.wpZ : onionZ;
+            }
+            const float velLen = navi->mTargetVelocity.length();
+            const float stickLen = navi->mMainStick.length();
+            std::printf("AUTOPLAY_NAVI state=%s navi=(%.0f,%.0f) tgt=(%.0f,%.0f) tdist=%.0f leg=(%.0f,%.0f) move=(%.2f,%.2f) stick=(%d,%d) btn=%u nstate=%d open=%d yaw=%.2f vel=%.1f mstick=%.2f bot-driven\n",
+                        p2autoplay::stateName(st), naviX, naviZ,
+                        (st == p2autoplay::State::Approach && pick) ? pick->x : onionX,
+                        (st == p2autoplay::State::Approach && pick) ? pick->z : onionZ,
+                        (st == p2autoplay::State::Approach) ? senses.targetDist : onionDist,
+                        legX, legZ, cmd.moveX, cmd.moveZ, stickX, stickY, buttons,
+                        stateId, senses.containerOpen ? 1 : 0, yawDbg, velLen, stickLen);
+            std::fflush(stdout);
+        }
     }
 
     // --- FPS evidence ---

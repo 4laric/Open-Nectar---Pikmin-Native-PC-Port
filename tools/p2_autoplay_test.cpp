@@ -1,4 +1,4 @@
-// TEST-ONLY autoplay bot policy test (bot-impl wf9, bot-v2 wf10). Engine-free.
+// TEST-ONLY autoplay bot policy test (bot-impl wf9, bot-v2 wf10, bot-v3 wf10). Engine-free.
 //
 // Pins the engine-free Brain in pc_port/pc_p2_autoplay_policy.h:
 //   * inert-when-unset: with the PIKMIN_RANDOMIZER_AUTOPLAY gate closed the
@@ -11,6 +11,9 @@
 //     received=<0/1>), generic death latch for every species, withdraw-menu
 //     repeat until 15-or-empty, Sarai low-or-grabbing throws + whistle,
 //     Kurage extended attack with rotating throws, replan on every STUCK.
+//   * bot-v3: STUCK lines carry navi=(x,z) (+replan=N in approach);
+//     target_unreachable GIVEUP after maxApproachReplans consecutive STUCK
+//     windows (count resets on real progress); Done idles near the Onion.
 //
 // Exit 0 only if every check passes; any failure prints FAIL and exits 1.
 #include "pc_p2_autoplay_policy.h"
@@ -726,6 +729,133 @@ void testReplanRepeats()
     CHECK(replans >= 2, "replan/replan_every_window");
 }
 
+void testStuckCarriesNaviPos()
+{
+    // bot-v3: STUCK lines prove whether the captain moves under stick input.
+    p2autoplay::Config cfg;
+    cfg.approachTimeout = 30.0f;
+    cfg.stuckWindow = 0.2f;
+    cfg.stuckMinProgress = 30.0f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 424242u;
+    s.targetSource = 44;
+    s.targetAlive = true;
+    s.targetDist = 1000.0f;
+    s.naviX = -200.0f;
+    s.naviZ = 70.0f;
+    s.tgtX = 800.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    std::vector<std::string> markers;
+    for (int i = 0; i < 12; ++i) {
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+        if (brain.replanWanted()) brain.clearReplan();
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_STUCK state=approach"), "stuckpos/approach_marker");
+    CHECK(hasMarker(markers, "navi=(-200,70)"), "stuckpos/approach_navi_pos");
+    CHECK(hasMarker(markers, "replan="), "stuckpos/approach_replan_count");
+}
+
+void testUnreachableGiveup()
+{
+    // bot-v3: N consecutive no-progress STUCK windows in one Approach stint
+    // is GIVEUP reason=target_unreachable (then RESULT, no kill claims).
+    // Progress resets the count.
+    p2autoplay::Config cfg;
+    cfg.approachTimeout = 60.0f;
+    cfg.stuckWindow = 0.2f;
+    cfg.stuckMinProgress = 30.0f;
+    cfg.maxApproachReplans = 3;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 515001u;
+    s.targetSource = 44;
+    s.targetAlive = true;
+    s.targetDist = 1000.0f;
+    s.tgtX = 1000.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    std::vector<std::string> markers;
+    for (int i = 0; i < 40; ++i) {
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+        if (brain.replanWanted()) brain.clearReplan();
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_GIVEUP reason=target_unreachable"),
+          "unreachable/giveup_logged");
+    CHECK(hasMarker(markers, "AUTOPLAY_RESULT target=515001 damaged=0 killed=0 carried=0"),
+          "unreachable/result_no_claims");
+
+    // Progress resets the out-of-reach count: two STUCK, then a big close,
+    // then two more STUCK must NOT give up (count restarted).
+    p2autoplay::Brain brain2(cfg);
+    brain2.update(0.05f, s);
+    brain2.update(0.05f, s);
+    p2autoplay::Senses s2 = s;
+    s2.targetDist = 1000.0f;
+    brain2.update(0.05f, s2); // -> approach
+    for (int i = 0; i < 8; ++i) { // ~2 STUCK windows, no progress
+        brain2.update(0.05f, s2);
+        if (brain2.replanWanted()) brain2.clearReplan();
+    }
+    brain2.takeMarkers();
+    s2.targetDist = 500.0f; // real progress: well past stuckMinProgress
+    for (int i = 0; i < 4; ++i) { // one window carrying the progress: resets the count
+        brain2.update(0.05f, s2);
+        if (brain2.replanWanted()) brain2.clearReplan();
+    }
+    brain2.takeMarkers();
+    std::vector<std::string> m2;
+    for (int i = 0; i < 8; ++i) { // two more STUCK after progress: count restarts (2 < 3)
+        brain2.update(0.05f, s2);
+        const std::vector<std::string> got = brain2.takeMarkers();
+        m2.insert(m2.end(), got.begin(), got.end());
+        if (brain2.replanWanted()) brain2.clearReplan();
+    }
+    CHECK(!hasMarker(m2, "target_unreachable"), "unreachable/progress_resets_count");
+}
+
+void testDoneIdlesNearOnion()
+{
+    // bot-v3: Done (no targets left) steers back toward the Onion instead of
+    // standing still; close to the Onion it goes neutral.
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s); // idle -> withdraw_seek
+    brain.update(0.05f, s); // withdraw_seek -> select (squad ready)
+    CHECK(brain.current() == p2autoplay::State::Select, "done-idle/reaches_select");
+    s.targetToken = 0; // no targets left
+    s.targetAlive = false;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Done, "done-idle/enters_done");
+    s.hasOnion = true;
+    s.naviX = 0.0f;
+    s.naviZ = 0.0f;
+    s.onionX = 400.0f;
+    s.onionZ = 0.0f;
+    s.onionDist = 400.0f;
+    brain.update(0.05f, s);
+    const p2autoplay::Command far = brain.command();
+    CHECK(far.moveX > 0.9f && std::fabs(far.moveZ) < 0.01f, "done-idle/steers_to_onion");
+    s.onionDist = 10.0f;
+    s.onionX = 10.0f;
+    brain.update(0.05f, s);
+    const p2autoplay::Command near = brain.command();
+    CHECK(near.moveX == 0.0f && near.moveZ == 0.0f, "done-idle/neutral_when_close");
+}
+
 } // namespace
 
 int main()
@@ -746,6 +876,9 @@ int main()
     testSaraiFlyer();
     testKurageLongAttack();
     testReplanRepeats();
+    testStuckCarriesNaviPos();
+    testUnreachableGiveup();
+    testDoneIdlesNearOnion();
     if (failures == 0) {
         std::printf("PASS p2_autoplay\n");
         return 0;
