@@ -160,6 +160,8 @@ inline bool matchTarget(unsigned token, unsigned source, const char* species, co
 struct Config {
     float withdrawTimeout = 150.0f; // walk to Onion + work the container UI
     float menuOpenTimeout = 12.0f; // wait for the container UI after pressing A
+    float menuHoldDuration = 6.0f; // hold stick-down to accumulate withdraw delta
+    float menuConfirmDuration = 2.0f; // pulse A to confirm after the hold
     float approachTimeout = 150.0f; // steer to one target
     float attackTimeout = 240.0f; // throw at one target
     float aftermathTimeout = 60.0f; // whistle back + let the corpse be carried
@@ -416,19 +418,33 @@ private:
             return;
         }
         if (in.fieldPikmin >= cfg.wantSquad || in.onionStored <= 0) {
-            // Enough withdrawn: confirm with A and leave.
-            if (!menuConfirmed) {
-                pulseA(in, 0.12f, 0.4f);
-                menuHoldTime += dt;
-                if (menuHoldTime > 1.2f) menuConfirmed = true;
-            } else if (!in.containerOpen || stateTime > 4.0f) {
+            // Already have a squad (e.g. re-entered): confirm and leave.
+            pulseA(in, 0.12f, 0.4f);
+            menuHoldTime += dt;
+            if (menuHoldTime > 1.2f) menuConfirmed = true;
+            if (menuConfirmed && stateTime > 4.0f) enter(State::Select, in);
+            return;
+        }
+        // Need withdraw: the field count only rises AFTER the A confirm
+        // (delta is UI-local until End), so a field-gated hold deadlocks
+        // (wf9-3 withdraw_hold_timeout with field=0). Hold stick-down for
+        // menuHoldDuration to accumulate delta, then pulse A to confirm.
+        if (menuHoldTime < cfg.menuHoldDuration) {
+            lastCommand.menuHold = true;
+            menuHoldTime += dt;
+            return;
+        }
+        pulseA(in, 0.12f, 0.4f);
+        menuHoldTime += dt;
+        if (menuHoldTime > cfg.menuHoldDuration + cfg.menuConfirmDuration) menuConfirmed = true;
+        if (menuConfirmed) {
+            // Keep pulsing until the UI closes (exitPikis runs on End).
+            if (stateTime >= cfg.withdrawTimeout) {
+                giveUp(in, "withdraw_hold_timeout");
                 enter(State::Select, in);
             }
             return;
         }
-        // Hold stick-down (withdraw direction) while the UI is open.
-        lastCommand.menuHold = true;
-        menuHoldTime += dt;
         if (stateTime >= cfg.withdrawTimeout) {
             giveUp(in, "withdraw_hold_timeout");
             enter(State::Select, in);

@@ -199,6 +199,45 @@ void testWithdrawKeepsClosing()
     CHECK(brain.replanWanted(), "withdraw-close/replan_wanted");
 }
 
+void testWithdrawMenuHoldThenConfirm()
+{
+    // Regression for wf9-3 withdraw_hold_timeout: field stays 0 while the
+    // container UI is open (delta is UI-local until A confirms), so a
+    // field-gated hold deadlocks. The menu must hold stick-down for
+    // menuHoldDuration, then pulse A to confirm even with field=0.
+    p2autoplay::Config cfg;
+    cfg.wantSquad = 15;
+    cfg.menuHoldDuration = 1.0f;
+    cfg.menuConfirmDuration = 1.0f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    brain.update(0.05f, s); // idle -> withdraw_seek
+    s.hasOnion = true;
+    s.onionDist = 10.0f;
+    s.onionStored = 20;
+    s.fieldPikmin = 0;
+    s.containerOpen = true;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::WithdrawMenu, "withdraw-menu/enters");
+    // Hold phase: menuHold, no A yet.
+    brain.update(0.05f, s);
+    CHECK(brain.command().menuHold, "withdraw-menu/holds_first");
+    // After the hold duration: A pulses to confirm despite field=0.
+    for (int i = 0; i < 30; ++i) brain.update(0.05f, s);
+    int aOn = 0;
+    for (int i = 0; i < 40; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) ++aOn;
+    }
+    CHECK(aOn > 0, "withdraw-menu/confirms_after_hold");
+    // UI closes after the confirm: leaves for target select.
+    s.containerOpen = false;
+    for (int i = 0; i < 10 && brain.current() == p2autoplay::State::WithdrawMenu; ++i) {
+        brain.update(0.05f, s);
+    }
+    CHECK(brain.current() == p2autoplay::State::Select, "withdraw-menu/leaves_after_confirm");
+}
+
 void testCombatFlow()
 {
     p2autoplay::Config cfg;
@@ -351,6 +390,7 @@ int main()
     testInertWhenUnset();
     testWithdrawFlow();
     testWithdrawKeepsClosing();
+    testWithdrawMenuHoldThenConfirm();
     testCombatFlow();
     testKoganeMovesOn();
     testTimeoutsAndStuck();
