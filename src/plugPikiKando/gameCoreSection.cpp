@@ -2431,12 +2431,20 @@ void GameCoreSection::updateAI()
     if (pc_bbft_skip_tutorial() && !pc_randomizer_resumed() && !gameflow.mMoviePlayer->mIsActive
         && !gameflow.mPauseAll && !gameflow.mIsUIOverlayActive && itemMgr) {
         GoalItem* redOnion = itemMgr->getContainer(initialColor);
-        const int initialField = bbftRedsQueued ? bbftInitialField : pc_randomizer_enabled() && pc_randomizer_field_capacity() < 20 ? pc_randomizer_field_capacity() : 20;
+        // Real play keeps the 20 starting Pikmin in the Onion, as vanilla does:
+        // Olimar withdraws them himself. Auto-withdrawing dropped them next to
+        // whatever a randomized seed placed by the start area, on the wrong side
+        // of its wall. The scripted/headless harnesses (TEST_BACKGROUND) still
+        // withdraw so their field=N readiness markers keep their meaning.
+        const bool manualStart = pc_randomizer_enabled()
+            && (!std::getenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND") || std::getenv("PIKMIN_RANDOMIZER_MANUAL_START"));
+        const int initialField = bbftRedsQueued ? bbftInitialField : manualStart ? 0 : pc_randomizer_enabled() && pc_randomizer_field_capacity() < 20 ? pc_randomizer_field_capacity() : 20;
         if (!bbftRedsQueued && redOnion && redOnion->getTotalStorePikis() >= 20) {
             // Use normal Onion withdrawal: initialized actors descend the legs
             // and join Olimar through their native exit state, no fake count.
             bbftInitialField = initialField;
-            redOnion->exitPikis(initialField);
+            if (initialField > 0) redOnion->exitPikis(initialField);
+            else std::printf("[Pikmin Randomizer] START_ONION_HELD stage=%d color=%d stored=%d\n", flowCont.mCurrentStage->mStageID, initialColor, redOnion->getTotalStorePikis());
             bbftRedsQueued = true;
         }
         if (bbftRedsQueued && !bbftRedsReady && redOnion && redOnion->getTotalStorePikis() == 20 - initialField
