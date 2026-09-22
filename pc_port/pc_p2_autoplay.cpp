@@ -1,4 +1,4 @@
-// TEST-ONLY headless autoplay bot driver (brief keys: bot-impl wf9, bot-v2 wf10, bot-v3 wf10).
+// TEST-ONLY headless autoplay bot driver (brief keys: bot-impl wf9, bot-v2/v3/v4 wf10, bot-v5 wf10).
 //
 // Drives the game through the NORMAL controller input path: each logical
 // tick ControllerMgr::update() calls pc_p2_autoplay_tick(), which senses
@@ -13,6 +13,11 @@
 // Otherwise tick() returns before touching anything: production input is
 // untouched (native test: tools/p2_autoplay_test.cpp).
 //
+// bot-v5 (wf10): aftermath delivers (no whistle; onto the corpse, throw to
+// seed grabs, back off, bounded re-throws) with live per-corpse carry sensing
+// (TransportMode bodies near the corpse + pellet carriers), a window that
+// extends only while carriers > 0 AND the corpse moves, named giveup reasons,
+// and AUTOPLAY_CARRY diagnostics; receipt stays the per-token ledger query.
 // bot-v3 (wf10): approach plans over the routeMgr waypoint graph with
 // next-nearest start/goal alternates + reversed legs, never repeats an
 // identical detour, logs AUTOPLAY_ROUTE_FAIL when the graph cannot route,
@@ -37,6 +42,7 @@
 #include "teki.h"
 #include "Piki.h"
 #include "PikiMgr.h"
+#include "Pellet.h"
 #include "Navi.h"
 #include "NaviMgr.h"
 #include "NaviState.h"
@@ -107,6 +113,16 @@ struct Engagement {
     bool lastAlive = false;
     bool carryLatch = false;
     bool deadLatch = false; // generic death observed (any species, gap 5)
+    // bot-v5 corpse tracking: death spot (window anchor), live corpse pos
+    // (dead body, then its pellet - follows the haul), pellet carrier
+    // strength, TransportMode bodies near the corpse.
+    float deathX = 0.0f;
+    float deathZ = 0.0f;
+    bool deathRecorded = false;
+    bool bodyPresent = false;
+    bool pelletFound = false;
+    int pelletCarriers = 0;
+    int carryNear = 0;
 };
 
 p2autoplay::Brain sBrain;
@@ -397,6 +413,7 @@ void pc_p2_autoplay_tick(void)
 
     // --- Pikmin census (read-only, except bot-v4 power-mode flowering) ---
     int alive = 0, nearCount = 0, farCount = 0, transport = 0, distress = 0;
+    std::vector<std::pair<float, float>> transportPos;
     const bool powerMode = p2autoplay::isPowerEnabled();
     {
         Iterator it(pikiMgr);
@@ -408,7 +425,10 @@ void pc_p2_autoplay_tick(void)
             const float d = distXZ(naviX, naviZ, p->getPosition().x, p->getPosition().z);
             if (d < 350.0f) ++nearCount;
             if (d > 550.0f) ++farCount;
-            if (p->mMode == PikiMode::TransportMode) ++transport;
+            if (p->mMode == PikiMode::TransportMode) {
+                ++transport;
+                transportPos.emplace_back(p->getPosition().x, p->getPosition().z);
+            }
             // bot-v4 power mode: flowers through the normal maturity path
             // (virtual ViewPiki::setFlower, the same call the nectar GrowUp,
             // Onion exit, and pluck paths use). No direct mHappa pokes.
@@ -580,8 +600,13 @@ void pc_p2_autoplay_tick(void)
     // ALL teki (including dead bodies the live-list filter skips). Any of
     // health<=0 / !isAlive / dead-state / corpse pellet formed latches death
     // for every species, not just per-module markers (Otakara wf9-4 fix). ---
+    // bot-v5: the scan runs every tick (not just until the latch) so the dead
+    // body position keeps updating while it exists; the death spot anchors
+    // the corpse-motion sense, and the pellet scan below takes over once the
+    // body is gone.
     bool deadSignal = sEngage.deadLatch;
-    if (sEngage.token && !sEngage.deadLatch && tekiMgr) {
+    sEngage.bodyPresent = false;
+    if (sEngage.token && tekiMgr) {
         Iterator dit(tekiMgr);
         CI_LOOP(dit)
         {
@@ -591,12 +616,65 @@ void pc_p2_autoplay_tick(void)
             if (pc_p2_campaign_token(b) != sEngage.token) continue;
             if (b->mHealth <= 0.0f || !b->isAlive() || b->mDeadState != 0 || b->mPellet != nullptr) {
                 deadSignal = true;
-                sEngage.deadLatch = true;
+                if (!sEngage.deadLatch) {
+                    sEngage.deadLatch = true;
+                    sEngage.deathX = b->getPosition().x;
+                    sEngage.deathZ = b->getPosition().z;
+                    sEngage.deathRecorded = true;
+                }
+                sEngage.bodyPresent = true;
+                sEngage.lastX = b->getPosition().x;
+                sEngage.lastZ = b->getPosition().z;
             }
-            sEngage.lastX = b->getPosition().x;
-            sEngage.lastZ = b->getPosition().z;
             break;
         }
+    }
+
+    // bot-v5 corpse-pellet scan: once the body is gone the corpse is a Pellet
+    // (a DualCreature in pelletMgr, not tekiMgr). Follow the nearest live
+    // pellet to the last corpse pos so tgtX/Z tracks the haul and the Brain
+    // escorts it; read its mCarrierCounter (carrying strength, Pellet.h:412)
+    // for the stalled-lift verdict.
+    sEngage.pelletFound = false;
+    sEngage.pelletCarriers = 0;
+    if (sEngage.token && sEngage.deadLatch && pelletMgr && !sEngage.bodyPresent) {
+        float best2 = 600.0f * 600.0f;
+        Pellet* best = nullptr;
+        Iterator pit(pelletMgr);
+        CI_LOOP(pit)
+        {
+            Pellet* pel = static_cast<Pellet*>(*pit);
+            if (!pel || !pel->isAlive()) continue;
+            const float dx = pel->getPosition().x - sEngage.lastX;
+            const float dz = pel->getPosition().z - sEngage.lastZ;
+            const float d2 = dx * dx + dz * dz;
+            if (d2 < best2) {
+                best2 = d2;
+                best = pel;
+            }
+        }
+        if (best) {
+            sEngage.pelletFound = true;
+            sEngage.pelletCarriers = best->mCarrierCounter;
+            sEngage.lastX = best->getPosition().x;
+            sEngage.lastZ = best->getPosition().z;
+        }
+    }
+
+    // bot-v5 carry attribution: TransportMode bodies near THIS corpse (600 u),
+    // not any hauler on the map, so a bystander pellet's crew never latches
+    // this engagement's carry.
+    sEngage.carryNear = 0;
+    if (sEngage.token && sEngage.deadLatch) {
+        for (const auto& tp : transportPos) {
+            if (distXZ(tp.first, tp.second, sEngage.lastX, sEngage.lastZ) <= 600.0f) ++sEngage.carryNear;
+        }
+    }
+    const bool carryActive = sEngage.carryNear > 0 || sEngage.pelletCarriers > 0;
+    bool corpseMoving = false;
+    if (sEngage.deathRecorded) {
+        corpseMoving = p2autoplay::corpseDisplaced(sEngage.lastX - sEngage.deathX,
+                                                   sEngage.lastZ - sEngage.deathZ);
     }
 
     // --- Senses ---
@@ -615,8 +693,13 @@ void pc_p2_autoplay_tick(void)
     senses.containerOpen = navi->getCurrState() && navi->getCurrState()->getID() == NAVISTATE_Container;
     senses.scattered = (farCount >= 3) || (alive >= 10 && nearCount < 5);
     senses.squadDistress = distress > 0;
-    if (transport > 0) sEngage.carryLatch = true;
-    senses.transportSeen = sEngage.carryLatch;
+    // bot-v5: live per-corpse carry (was a forever latch on ANY transport).
+    // receiptSeen stays the per-token ledger query (per-token bystander-proof).
+    senses.transportSeen = carryActive;
+    senses.carryCount = sEngage.carryNear;
+    senses.pelletCarriers = sEngage.pelletCarriers;
+    senses.pelletExists = sEngage.bodyPresent || sEngage.pelletFound || !sEngage.deadLatch;
+    senses.corpseMoving = corpseMoving;
     senses.targetDead = deadSignal;
     // Onion receipt for this token (bot-v2 gap 1): durable delivery-ledger
     // query, read-only. carried=1 in RESULT means this was seen.
@@ -814,6 +897,25 @@ void pc_p2_autoplay_tick(void)
                         stateId, senses.containerOpen ? 1 : 0, yawDbg, velLen, stickLen,
                         senses.targetHealthFrac, senses.scattered ? 1 : 0, alive);
             std::fflush(stdout);
+        }
+    }
+
+    // --- bot-v5 carry diagnostics: carriers + corpse distance, rate-limited
+    // (every 300 ticks like NAVI) plus the rising edge, so the matrix reports
+    // "carriers seen" per species even when no receipt lands. ---
+    {
+        const p2autoplay::State st = sBrain.current();
+        if (st == p2autoplay::State::Aftermath && sEngage.token) {
+            const float tdist = distXZ(naviX, naviZ, sEngage.lastX, sEngage.lastZ);
+            const bool edge = carryActive && !sEngage.carryLatch;
+            if (edge || (sTicks % 300 == 0)) {
+                std::printf("AUTOPLAY_CARRY carriers=%d pellet=%d tdist=%.0f bot-driven\n",
+                            sEngage.carryNear, sEngage.pelletCarriers, tdist);
+                std::fflush(stdout);
+            }
+            if (carryActive) sEngage.carryLatch = true;
+        } else if (!carryActive) {
+            sEngage.carryLatch = false;
         }
     }
 

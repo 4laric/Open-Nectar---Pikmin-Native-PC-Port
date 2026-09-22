@@ -16,6 +16,40 @@
 // update returns a neutral pad and stays IDLE, which is the
 // inert-when-unset guarantee the native test pins (tools/p2_autoplay_test.cpp).
 //
+// bot-v5 (wf10) deltas, in brief priority order:
+//   1. Aftermath never whistles (release B once the target is dead: holding
+//      whistle gathers Pikmin at the navi 36-65 u from the corpse so no carry
+//      ever initiates - v4b diagnosis). Instead it walks the squad ONTO the
+//      corpse (contact ring, see piki.cpp/navi.cpp radii below), throws
+//      Pikmin at it (thrown Pikmin attach on collision), then backs off so
+//      the crew is free to grab it.
+//   2. Carry is sensed live (TransportMode count / pellet carriers) with
+//      corpse motion; the receipt window extends ONLY while carriers > 0 AND
+//      the corpse is moving (a stalled lift times out bounded).
+//   3. No grab after a bounded wait -> back off, then re-approach + re-throw
+//      (bounded rethrows, pad-only); giveup names the reason (carry_no_grab,
+//      carry_stalled, corpse_despawned, corpse_out_of_reach, receipt_timeout).
+//   4. RESULT received=1 comes ONLY from the target's own per-token ledger
+//      receipt (receiptSeen for this token); bystander CHECK Bestiary:Deliver
+//      lines never score (harness keys received the same way).
+//
+// Carry/recruit ring (real radii, cited):
+//   - Pellet attach is CONTACT-driven, not a fixed radius: FormationMode
+//     Pikmin attach to a Pellet on collision with a free slot
+//     (src/plugPikiKando/piki.cpp:2131-2143), gated by distCheck
+//     (piki.cpp:2024-2027: C-stick held or mForcePikiDistCheck); thrown
+//     (flying) Pikmin attach on collision with no distCheck needed
+//     (src/plugPikiKando/pikiState.cpp:2258-2264, OBJTYPE_Pellet ->
+//     TransportMode); the navi standing on a pellet 0.5 s forces one recruit
+//     via mForcePikiDistCheck (Navi::letPikiWork,
+//     src/plugPikiKando/navi.cpp:1853-1864 + 1820-1822).
+//   - aftermathApproachRadius (60 u) is inside that contact scale (same ~50 u
+//     navi-size + coll-radius contact the withdraw comment cites) with margin;
+//     aftermathBackoffDist (200 u) steps back out of contact so the crew
+//     settles onto the pellet. Whistle max radius is 100 u
+//     (include/NaviMgr.h:27) - which is why aftermath must NOT whistle: it
+//     would pin the squad at the navi instead of the corpse.
+//
 // bot-v3 (wf10) deltas, in brief priority order:
 //   1. Approach follows the routeMgr waypoint graph leg by leg (driver
 //      plans method=graph); STUCK lines carry the navi position + replan
@@ -215,6 +249,15 @@ struct Config {
     float attackTimeout = 240.0f; // throw at one target
     float aftermathTimeout = 60.0f; // whistle back + let the corpse be carried
     float receiptTimeout = 180.0f; // after a kill, wait for the Onion receipt marker or this timeout
+    // bot-v5 aftermath delivery knobs (contact ring radii cited in the file
+    // header: piki.cpp:2131-2143, pikiState.cpp:2258-2264, navi.cpp:1853-1864).
+    float aftermathApproachRadius = 60.0f; // walk ONTO the corpse: inside contact scale
+    float aftermathBackoffDist = 200.0f; // step back out of contact so the crew grabs it
+    float carryGrabWait = 20.0f; // bounded wait for the first grab before backing off / re-seeding
+    float aftermathSettleWait = 8.0f; // pause at backoff for grabs to settle before re-approach
+    int aftermathRethrowMax = 3; // bounded re-approach + re-throw cycles when nobody grabs
+    float corpseMoveMin = 15.0f; // corpse displacement that counts as "moving" (harness carried threshold)
+    float corpseOutOfReach = 800.0f; // tdist past this at giveup names corpse_out_of_reach
     float koganeConfirm = 20.0f; // after Kogane damage, watch escapes then move on
     float kurageAttackMultiplier = 2.0f; // Kurage has high HP: longer attack window
     float saraiLowHeight = 120.0f; // Sarai thrown at only when within this height above ground (or grabbing)
@@ -260,6 +303,14 @@ inline int powerStockDelta(bool powerEnabled, int stored, int field, int already
     return want;
 }
 
+// bot-v5: corpse displacement past corpseMoveMin counts as "moving" (shared
+// by the driver, which senses it live, and the Brain tests, which drive it).
+inline bool corpseDisplaced(float dx, float dz)
+{
+    const float min = Config().corpseMoveMin;
+    return dx * dx + dz * dz > min * min;
+}
+
 // Plain-data senses gathered by the engine-linked driver each tick.
 struct Senses {
     bool enabled = false; // PIKMIN_RANDOMIZER_AUTOPLAY gate
@@ -295,6 +346,15 @@ struct Senses {
     bool targetGrabbing = false; // flyer holds a Pikmin (Sarai grab): whistle to free
     bool targetLow = false; // flyer low enough to hit (driver compares height to saraiLowHeight)
     bool transportSeen = false; // any live Pikmin in TransportMode
+    // bot-v5 live carry senses (driver computes per-tick; Brain latches what
+    // it needs). carryCount = TransportMode Pikmin near this corpse;
+    // pelletCarriers = pellet mCarrierCounter near it; pelletExists = dead
+    // body or corpse pellet still present; corpseMoving = displaced past
+    // corpseMoveMin from the death spot.
+    int carryCount = 0;
+    int pelletCarriers = 0;
+    bool pelletExists = true;
+    bool corpseMoving = false;
     bool scattered = false; // squad scattered: whistle regroup
     bool squadDistress = false; // grabbed/thrown-off/burning Pikmin: whistle regroup (bot-v4)
     bool waypointLeg = false; // steer the detour waypoint, not the target
@@ -347,6 +407,10 @@ public:
         sawKill = false;
         sawCarry = false;
         sawReceipt = false;
+        sawMove = false; // bot-v5: corpse displacement latched
+        amPhase = AftermathSeed;
+        amPhaseTime = 0.0f;
+        amRethrows = 0;
         withdrawCycles = 0;
         throwSpin = 0.0f;
         result = Result{};
@@ -434,6 +498,17 @@ private:
     void steer(float fromX, float fromZ, float toX, float toZ)
     {
         const float dx = toX - fromX, dz = toZ - fromZ;
+        const float len = std::sqrt(dx * dx + dz * dz);
+        if (len > 1.0f) {
+            lastCommand.moveX = dx / len;
+            lastCommand.moveZ = dz / len;
+        }
+    }
+
+    // bot-v5: steer directly away from (x,z) (aftermath backoff).
+    void steerAway(float fromX, float fromZ, float awayX, float awayZ)
+    {
+        const float dx = fromX - awayX, dz = fromZ - awayZ;
         const float len = std::sqrt(dx * dx + dz * dz);
         if (len > 1.0f) {
             lastCommand.moveX = dx / len;
@@ -582,6 +657,10 @@ private:
         if (in.targetDead) sawDamage = true; // death implies damage
         sawCarry = false;
         sawReceipt = in.receiptSeen;
+        sawMove = in.corpseMoving; // bot-v5: corpse-motion latch starts live
+        amPhase = AftermathSeed;
+        amPhaseTime = 0.0f;
+        amRethrows = 0;
         result = Result{};
         result.token = in.targetToken;
         result.koganeLike = isKoganeLike(in.targetSource);
@@ -773,7 +852,9 @@ private:
             return;
         }
         engageTime += dt;
-        if (in.transportSeen) sawCarry = true;
+        amPhaseTime += dt;
+        if (in.transportSeen || in.carryCount > 0 || in.pelletCarriers > 0) sawCarry = true;
+        if (in.corpseMoving) sawMove = true;
         observeDeath(in);
         observeReceipt(in);
         if ((!in.targetAlive || in.targetDead) && !sawDamage && !sawKill && !sawCarry && !sawReceipt) {
@@ -781,41 +862,81 @@ private:
             finishTarget(in, /*claimedKill*/ false);
             return;
         }
-        // Idle near the corpse/Onion and whistle stragglers while the carry
-        // resolves (bot-v2 gap 1): steer to the last-known corpse when far,
-        // whistle scattered Pikmin back.
-        if ((!whistling && stateTime < cfg.whistleHold) || (in.scattered && !whistling)) {
-            whistling = true;
-            whistleTime = 0.0f;
-        }
-        if (whistling) {
-            whistleTime += dt;
-            lastCommand.buttons = PadB;
-            if (whistleTime >= cfg.whistleHold) whistling = false;
-        } else if (in.waypointLeg) {
-            steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
-        } else if (in.targetToken != 0) {
-            const float dx = in.tgtX - in.naviX, dz = in.tgtZ - in.naviZ;
-            if (dx * dx + dz * dz > 150.0f * 150.0f) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
-        }
-        if (sawReceipt && stateTime > cfg.whistleHold) {
-            // Onion receipt landed: score it promptly.
+        // bot-v5: NEVER whistle here (no PadB). Holding whistle gathers
+        // Pikmin at the navi 36-65 u from the corpse so no carry ever
+        // initiates (v4b diagnosis). Deliver with stick + throws only.
+        const bool carryActive = in.transportSeen || in.carryCount > 0 || in.pelletCarriers > 0;
+        if (sawReceipt) {
+            // Onion receipt landed: score it promptly. received=1 comes ONLY
+            // from this token's own ledger line; bystander CHECK
+            // Bestiary:Deliver lines never score (driver + harness key by token).
             finishTarget(in, /*killed*/ true);
             return;
         }
-        const float waitBase = (sawKill || sawDamage) ? cfg.receiptTimeout : cfg.aftermathTimeout;
-        // bot-v4: bc3 kills timed out with reason=receipt_timeout while the
-        // corpse was still en route. While a carry is active (latched or live)
-        // keep escorting until the Onion receipt: double the receipt window.
-        const float wait = (sawCarry || in.transportSeen) ? cfg.receiptTimeout * 2.0f : waitBase;
-        if (stateTime >= wait) {
-            if (!sawReceipt) {
-                char buf[256];
-                std::snprintf(buf, sizeof(buf),
-                              "AUTOPLAY_GIVEUP reason=receipt_timeout token=%u state=aftermath bot-driven",
-                              in.targetToken);
-                markers.emplace_back(buf);
+        if (carryActive) {
+            if (amPhase != AftermathEscort) {
+                amPhase = AftermathEscort;
+                amPhaseTime = 0.0f;
             }
+            // Escort the haul toward the Onion: follow the corpse (the driver
+            // tracks the pellet into tgtX/Z) without whistling or throwing so
+            // the crew keeps hauling. Hold close, not on top of it.
+            if (in.waypointLeg) {
+                steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+            } else if (in.targetToken != 0) {
+                const float dx = in.tgtX - in.naviX, dz = in.tgtZ - in.naviZ;
+                const float d2 = dx * dx + dz * dz;
+                if (d2 > 250.0f * 250.0f) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+                else if (d2 < 100.0f * 100.0f) steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            }
+        } else {
+            // No live carry: seed grabs. Walk ONTO the corpse (contact ring)
+            // and throw Pikmin at it (thrown Pikmin attach on collision,
+            // pikiState.cpp:2258-2264), then back off so the crew grabs it.
+            if (amPhase == AftermathEscort) {
+                // Carry lost en route: re-seed while rethrows remain.
+                if (amRethrows >= cfg.aftermathRethrowMax) {
+                    giveUpAftermath(in, "carry_stalled");
+                    finishTarget(in, /*killed*/ true);
+                    return;
+                }
+                ++amRethrows;
+                amPhase = AftermathSeed;
+                amPhaseTime = 0.0f;
+                logRethrow(in);
+            }
+            if (amPhase == AftermathBackoff) {
+                if (in.targetToken != 0) steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+                if (in.targetDist >= cfg.aftermathBackoffDist || amPhaseTime >= cfg.aftermathSettleWait) {
+                    // Settled out of contact: re-approach + re-throw if allowed.
+                    if (amRethrows >= cfg.aftermathRethrowMax) {
+                        giveUpAftermath(in, "carry_no_grab");
+                        finishTarget(in, /*killed*/ true);
+                        return;
+                    }
+                    ++amRethrows;
+                    amPhase = AftermathSeed;
+                    amPhaseTime = 0.0f;
+                    logRethrow(in);
+                }
+            } else {
+                // Seed: close onto the corpse, throwing once in range.
+                if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+                else if (in.targetToken != 0) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+                if (in.targetDist <= cfg.throwRange && in.targetToken != 0) pulseA(in, cfg.throwHold, cfg.throwGap);
+                if (amPhaseTime >= cfg.carryGrabWait && in.targetDist <= cfg.aftermathApproachRadius) {
+                    // On the corpse with no grab after a bounded wait: back off.
+                    amPhase = AftermathBackoff;
+                    amPhaseTime = 0.0f;
+                }
+            }
+        }
+        const float waitBase = (sawKill || sawDamage) ? cfg.receiptTimeout : cfg.aftermathTimeout;
+        // bot-v5: extend ONLY while carriers > 0 AND the corpse is moving
+        // (live, not latched). A latched-but-stalled lift times out bounded.
+        const float wait = (carryActive && in.corpseMoving) ? cfg.receiptTimeout * 2.0f : waitBase;
+        if (stateTime >= wait) {
+            giveUpAftermath(in, aftermathGiveupReason(in));
             finishTarget(in, /*killed*/ true);
         }
     }
@@ -889,6 +1010,38 @@ private:
         markers.emplace_back(buf);
     }
 
+    // bot-v5: aftermath giveup names WHY the delivery failed so the evidence
+    // says which link broke (no grab / stalled lift / despawned / too far /
+    // escorted but slow). Carriers + tdist ride along for the matrix.
+    const char* aftermathGiveupReason(const Senses& in)
+    {
+        if (!in.pelletExists && !sawCarry) return "corpse_despawned";
+        if (!sawCarry) {
+            if (in.targetDist > cfg.corpseOutOfReach) return "corpse_out_of_reach";
+            return "carry_no_grab";
+        }
+        if (!sawMove) return "carry_stalled";
+        if (in.targetDist > cfg.corpseOutOfReach) return "corpse_out_of_reach";
+        return "receipt_timeout";
+    }
+
+    void giveUpAftermath(const Senses& in, const char* reason)
+    {
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+                      "AUTOPLAY_GIVEUP reason=%s token=%u state=aftermath carriers=%d tdist=%.0f bot-driven",
+                      reason, in.targetToken, in.carryCount, in.targetDist);
+        markers.emplace_back(buf);
+    }
+
+    void logRethrow(const Senses& in)
+    {
+        char buf[256];
+        std::snprintf(buf, sizeof(buf), "AUTOPLAY_RETHROW token=%u attempt=%d tdist=%.0f bot-driven",
+                      in.targetToken, amRethrows, in.targetDist);
+        markers.emplace_back(buf);
+    }
+
     void finishTarget(const Senses& in, bool claimedKill)
     {
         result.damaged = sawDamage || sawKill;
@@ -957,10 +1110,20 @@ private:
     bool wantReplan = false;
     float progressBest = 1.0e30f;
     int approachReplans = 0; // consecutive STUCK windows in this Approach stint (bot-v3)
+    // bot-v5 aftermath delivery phases (pad-only; never whistles).
+    enum AftermathPhase {
+        AftermathSeed = 0, // walk onto the corpse + throw to seed grabs
+        AftermathBackoff = 1, // step back out of contact so the crew grabs it
+        AftermathEscort = 2, // carry active: follow the haul, no throws
+    };
+    AftermathPhase amPhase = AftermathSeed;
+    float amPhaseTime = 0.0f;
+    int amRethrows = 0; // bounded re-approach + re-throw cycles used
     float initialHealthFrac = 1.0f;
     bool sawDamage = false;
     bool sawKill = false; // generic death latched (any species)
     bool sawCarry = false;
+    bool sawMove = false; // bot-v5: corpse displacement latched (extension needs live move too)
     bool sawReceipt = false; // Onion receipt latched (authoritative for carried)
     int withdrawCycles = 0; // withdraw-menu repeat count this run
     float throwSpin = 0.0f; // Kurage throw rotation phase
