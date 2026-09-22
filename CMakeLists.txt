@@ -883,6 +883,14 @@ target_compile_definitions(p2_otakara_fx_test PRIVATE P2_OTAKARA_FX_NO_ENGINE)
 target_compile_options(p2_otakara_fx_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_otakara_fx_test COMMAND p2_otakara_fx_test)
 
+# wf7 dweevil-impl (#871): dead-Dweevil clip choice is engine-free and covers
+# all four species 59-62 (dead forces dead, never attack1).
+add_executable(p2_dweevil_death_clip_test
+    tools/p2_dweevil_death_clip_test.cpp)
+target_include_directories(p2_dweevil_death_clip_test PRIVATE pc_port)
+target_compile_options(p2_dweevil_death_clip_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_dweevil_death_clip_test COMMAND p2_dweevil_death_clip_test)
+
 # Lane 35 cave unit-pool partition + phased trunk growth (#474). Header-only
 # engine-free policy; no shared generator source is claimed or ported here.
 add_executable(p2_cave_growth_test

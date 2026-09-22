@@ -11,6 +11,7 @@
 // stay tracked on the family issues and #186.
 #include "pc_p2_batch2.h"
 #include "pc_p2_animation.h"
+#include "pc_p2_dweevil_clip.h"
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_armor.h"
 #include "pc_p2_batch2_clock.h"
@@ -313,6 +314,16 @@ void pc_p2_batch2_reset() {
 }
 
 void pc_p2_batch2_forget(BTeki* actor) {
+    // Dweevil corpse retention (wf7 dweevil-impl, #871): the pellet corpse
+    // (mPellet != nullptr, dead) still needs its visual binding for viewDraw
+    // (corpse=true) after the host death funnel. Forgetting here would drop
+    // the dead pose and fall through to the native P1 Chappy shape, whose
+    // animator is left on an attack/Type1 loop. Retain the binding while a
+    // dead corpse pellet exists; it is released on pellet delivery/stage reset.
+    if (actor && (actor->mHealth <= 0.0f || actor->mDeadState != 0) && actor->mPellet) {
+        auto it = actors.find(actor);
+        if (it != actors.end() && it->second.compare(0, 8, "dweevil|") == 0) return;
+    }
     actors.erase(actor);
     clocks.erase(actor);
 }
@@ -500,11 +511,13 @@ static void bindFamilies(bool strict) {
 }
 
 static void logBindings() {
+    const bool bridge = pc_randomizer_p2_bridge() && !pc_pikipelago_room_preview();
     for (const auto& entry : actors)
-        std::printf("P2_BATCH2_BIND generator=%u key=%s visual_only=%d native_fsm=%s\n",
+        std::printf("P2_BATCH2_BIND generator=%u key=%s visual_only=%d native_fsm=%s token=%u\n",
                     entry.first->mGenerator ? entry.first->mGenerator->_70 : 0, entry.second.c_str(),
                     (entry.second == "ground|Sokkuri" || entry.second == "ground|Armor" || entry.second == "ground|ElecBug" || entry.second == "ground|TamagoMushi" || entry.second == "ground|Imomushi" || entry.second == "ground|Hana") ? 0 : 1,
-                    (entry.second == "ground|Sokkuri" || entry.second == "ground|Armor" || entry.second == "ground|ElecBug" || entry.second == "ground|TamagoMushi" || entry.second == "ground|Imomushi" || entry.second == "ground|Hana") ? "implemented" : "unimplemented");
+                    (entry.second == "ground|Sokkuri" || entry.second == "ground|Armor" || entry.second == "ground|ElecBug" || entry.second == "ground|TamagoMushi" || entry.second == "ground|Imomushi" || entry.second == "ground|Hana") ? "implemented" : "unimplemented",
+                    bridge ? pc_p2_campaign_token(entry.first) : (entry.first->mGenerator ? entry.first->mGenerator->_70 : 0));
     std::printf("P2_BATCH2_BANK total_mod_bytes=%zu species=%zu\n", bytesTotal, banks.size());
 }
 
@@ -582,9 +595,40 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
             forcedClip = forced;
         }
     }
+    // Dweevil death-clip guarantee (wf7 dweevil-impl, #871): a dead dweevil
+    // plays its death clip then holds the dead pose, never attack1. While
+    // alive the visual follows the Otakara FSM only, so the generic P1-motion
+    // attack fallback must never independently animate a dweevil (no actor
+    // animated by two P2 layers). Covers all four species 59-62 via key.
+    const bool isDweevil = p2dweevilclip::isDweevilKey(entry->second);
+    const bool dead = (actor->mHealth <= 0.0f || actor->mDeadState != 0);
+    if (isDweevil) {
+        const bool hasForced = (name != nullptr);
+        const std::string forcedName = hasForced ? std::string(name) : std::string();
+        const bool hasDead = firstClip(bank, deadClips, int(sizeof(deadClips) / sizeof(deadClips[0]))) != nullptr;
+        const std::string chosen = p2dweevilclip::choose(entry->second, corpse, dead,
+                                                         hasForced, forcedName, hasDead, true);
+        if (!chosen.empty()) {
+            if (chosen == "dead") {
+                name = firstClip(bank, deadClips, int(sizeof(deadClips) / sizeof(deadClips[0])));
+                // After the Otakara binding is forgotten the sidecar phase is
+                // gone; hold the final dead pose instead of sampling a stale
+                // attack counter.
+                if (forcedPhase < 0.0f) forcedPhase = 1.0f;
+            } else {
+                // Forced Otakara clip (wait/move/attack/dead while registered).
+                // name already holds it; keep its phase.
+            }
+        } else {
+            // Live dweevil without a forced clip: fall through to wait/move
+            // below, never the motion-based attack pick.
+            name = nullptr;
+        }
+    }
     if (corpse) {
-        name = firstClip(bank, deadClips, int(sizeof(deadClips) / sizeof(deadClips[0])));
-    } else if (!name && (motion == TekiMotion::Damage || motion >= TekiMotion::Type1)) {
+        if (!isDweevil) name = firstClip(bank, deadClips, int(sizeof(deadClips) / sizeof(deadClips[0])));
+        else if (!name) name = firstClip(bank, deadClips, int(sizeof(deadClips) / sizeof(deadClips[0])));
+    } else if (!name && !isDweevil && (motion == TekiMotion::Damage || motion >= TekiMotion::Type1)) {
         name = firstClip(bank, attackClips, int(sizeof(attackClips) / sizeof(attackClips[0])));
     }
     if (!name) {
@@ -612,17 +656,30 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     for (const p2sampled::Occurrence& event : step.events) {
         ++eventCount;
         if (eventCount <= 16u) {
-            std::printf("P2_BATCH2_EVENT key=%s clip=%s frame=%d event=%s cycle=%llu\n",
+            const unsigned token = pc_p2_campaign_token(actor);
+            std::printf("P2_BATCH2_EVENT key=%s clip=%s frame=%d event=%s cycle=%llu token=%u\n",
                         entry->second.c_str(), name, event.frame, event.key.c_str(),
-                        static_cast<unsigned long long>(event.cycle));
+                        static_cast<unsigned long long>(event.cycle), token);
         }
     }
-    const size_t index = corpse ? poses.size() - 1
+    const size_t index = (corpse || (isDweevil && dead)) ? poses.size() - 1
                                : (step.pose < poses.size() ? step.pose : poses.size() - 1);
     Shape* shape = poses.at(index);
     if (!logged[corpse ? 1 : 0]) {
         std::printf("P2_BATCH2_DRAW corpse=%d key=%s clip=%s\n", int(corpse), entry->second.c_str(), name);
         logged[corpse ? 1 : 0] = true;
+    }
+    // Dweevil per-corpse evidence (wf7 dweevil-impl, #871): first dead draw per
+    // campaign token, so headless can prove the corpse holds clip=dead from
+    // the first dead frame with no later attack1 event for that actor.
+    if (isDweevil && (corpse || dead)) {
+        const unsigned token = pc_p2_campaign_token(actor);
+        const unsigned logToken = token ? token : (actor->mGenerator ? actor->mGenerator->_70 : 0);
+        if (proxyDrawn.insert(std::string("dweevil|") + (corpse ? "1|" : "0|") + entry->second + "|" + std::to_string(logToken) + "|" + name).second) {
+            std::printf("P2_DWEEVIL_CORPSE_DRAW token=%u key=%s clip=%s corpse=%d dead=%d\n",
+                        logToken, entry->second.c_str(), name, int(corpse), int(dead));
+            std::fflush(stdout);
+        }
     }
     // Proxy species are probed per species, so each proxy key reports its first
     // live and first corpse draw (#871); the families above keep the single line.
