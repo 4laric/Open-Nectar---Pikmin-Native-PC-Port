@@ -218,6 +218,9 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_teki_lifetime.cpp
     pc_port/pc_p2_placement_probe.cpp
     pc_port/pc_p2_input_script.cpp
+    # TEST-ONLY headless autoplay bot (bot-impl): scripted player driving the
+    # normal pad path. Env-gated (PIKMIN_RANDOMIZER_AUTOPLAY), inert otherwise.
+    pc_port/pc_p2_autoplay.cpp
     pc_port/pc_p2_purple.cpp
     pc_port/pc_p2_purple_motion.cpp
     pc_port/pc_p2_purple_impact.cpp
@@ -1520,6 +1523,13 @@ add_executable(p2_sokkuri_receipt_test tools/p2_sokkuri_receipt_test.cpp pc_port
 target_include_directories(p2_sokkuri_receipt_test PRIVATE pc_port)
 target_compile_options(p2_sokkuri_receipt_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_sokkuri_receipt_test COMMAND p2_sokkuri_receipt_test)
+# bot-impl (#871): TEST-ONLY headless autoplay bot policy. Engine-free:
+# the header-only Brain (states, timeouts, giveup/result markers, Kogane
+# damage-and-move-on) plus the inert-when-unset gate (registration only).
+add_executable(p2_autoplay_test tools/p2_autoplay_test.cpp)
+target_include_directories(p2_autoplay_test PRIVATE pc_port)
+target_compile_options(p2_autoplay_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_autoplay_test COMMAND p2_autoplay_test)
 # rd-p2-sarai-combat-repair (#828): Sarai23 corpse -> carried -> exactly one
 # Onion receipt over the real delivery-host bridge plus the weigh-down policy
 # the repaired host now feeds with live anchor facts (registration only).
