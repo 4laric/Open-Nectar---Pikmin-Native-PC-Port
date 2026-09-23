@@ -1581,13 +1581,16 @@ void testAftermathStallRethrow()
     s.receiptSeen = false;
     brain.update(0.05f, s);
     CHECK(brain.current() == p2autoplay::State::Aftermath, "stall/aftermath");
-    // Escort while the corpse moves (advance the fix each tick so the stall
-    // watch sees motion, like the driver's live pellet tracking).
+    // A short crew grows even while the corpse moves (v7dev-1 Tank: a slide
+    // reads moving=1; motion with a short crew is never a real lift, so the
+    // shortfall alone seeds). Advance the fix each tick so the stall watch
+    // would see motion, like the driver's live pellet tracking.
     for (int i = 0; i < 10; ++i) {
         s.tgtX += 10.0f;
         brain.update(0.05f, s);
+        CHECK(brain.command().moveX > 0.5f, "stall/grows_while_moving_when_short");
     }
-    CHECK(brain.current() == p2autoplay::State::Aftermath, "stall/escorts_while_moving");
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "stall/keeps_growing_while_short");
     // ... then the lift stalls (moved-ever, not moving now): freeze the fix.
     s.corpseMoving = false;
     std::vector<std::string> markers;

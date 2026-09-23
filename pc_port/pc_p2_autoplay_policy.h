@@ -18,14 +18,18 @@
 //
 // bot-v7 (wf10) deltas, in brief priority order:
 //   1. A grabbed lift below the corpse's declared minimum (carryWant,
-//      PelletConfig p01; 0 = unknown) that is not moving is NOT escorted:
-//      escorting parks the squad 100-250 u away with throws suppressed, so
-//      the crew can never grow (v6b-1 Tank: 4 carriers for 231 s). It keeps
-//      seeding instead (SeedGrow: stand the squad ON the corpse, keep
-//      throwing pad-only, never whistle) until the crew reaches the minimum
-//      or the window ends. A stalled viable lift re-seeds the same way
-//      (bounded rethrows, reason=stalled); a crew that shrinks below the
-//      minimum re-seeds with reason=shrank.
+//      PelletConfig p01; 0 = unknown) keeps seeding instead of escorting:
+//      escorting a short lift parks the squad 100-250 u away with throws
+//      suppressed, so the crew can never grow (v6b-1 Tank: 4 carriers for
+//      231 s). SeedGrow (stand the squad ON the corpse, keep throwing
+//      pad-only, never whistle) runs on the shortfall alone, even while the
+//      corpse creeps (v7dev-1 Tank: a downhill slide reads moving=1 forever,
+//      which locked out motion-gated growing): a real haul always carries at
+//      least the minimum (doLift/pellet put-down physics), so motion with a
+//      short crew is a slide or a dropped haul, both want more hands. A
+//      stalled viable lift re-seeds the same way (bounded rethrows,
+//      reason=stalled, latched past the minimum until motion resumes); a
+//      crew that shrinks below the minimum re-seeds with reason=shrank.
 //   2. AUTOPLAY_CARRY (driver) carries want=<min> + moving=<0/1> so the
 //      shortfall is visible (brief format).
 // bot-v6 (wf10) deltas, in brief priority order:
@@ -980,15 +984,23 @@ private:
         }
         if (carryActive) {
             // bot-v7: crew strength vs the corpse's declared minimum
-            // (carryWant, PelletConfig p01; 0 = unknown). A grabbed lift
-            // below the minimum that is not moving is NOT escorted:
-            // escorting parks the squad 100-250 u away with throws
-            // suppressed, so the crew can never grow (v6b-1 Tank: 4 carriers
-            // for 231 s while the squad stood 105 u off). It keeps seeding
-            // (SeedGrow below) instead. A moving haul, a sufficient crew, or
-            // an unknown minimum escorts exactly as v5/v6 did.
+            // (carryWant, PelletConfig p01; 0 = unknown). A short lift keeps
+            // seeding (SeedGrow below) instead of escorting: escorting parks
+            // the squad 100-250 u away with throws suppressed, so the crew
+            // can never grow (v6b-1 Tank: 4 carriers for 231 s while the
+            // squad stood 105 u off; v7dev-1 Tank: a downhill slide reads
+            // moving=1 forever, so the shortfall alone must trigger the
+            // grow - motion with a short crew is a slide or a dropped haul,
+            // never a real lift, because doLift and the pellet put-down
+            // (pelletMgr.cpp:1259-1262) both gate on the minimum). A moving
+            // haul, a sufficient crew, or an unknown minimum escorts exactly
+            // as v5/v6 did.
             const int crew = in.pelletCarriers > 0 ? in.pelletCarriers : in.carryCount;
-            const bool seedGrow = !in.corpseMoving && in.carryWant > 0 && (crew < in.carryWant || amGrow);
+            // A resumed haul ends a latched stall episode: the lift is
+            // viable again, so the escort takes over (or the shortfall rule
+            // below re-seeds on its own terms).
+            if (in.corpseMoving) amGrow = false;
+            const bool seedGrow = in.carryWant > 0 && (crew < in.carryWant || amGrow);
             if (!seedGrow) {
                 if (amPhase != AftermathEscort) {
                     amPhase = AftermathEscort;
