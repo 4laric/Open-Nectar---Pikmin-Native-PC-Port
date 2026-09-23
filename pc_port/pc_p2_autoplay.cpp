@@ -13,6 +13,14 @@
 // Otherwise tick() returns before touching anything: production input is
 // untouched (native test: tools/p2_autoplay_test.cpp).
 //
+// bot-v7 (wf10): Aftermath knows the corpse's declared carry minimum
+// (carryWant, PelletConfig p01, latched from the tracked pellet or the dead
+// host's corpse config) and logs AUTOPLAY_CARRY carriers=<near> want=<min>
+// tdist=<d> moving=<0/1>; proxy ("proxy|" visual) campaign actors bind
+// their lane-06 ordinary-delivery source at visual-bind time so a hauled
+// proxy corpse grants onion:p2 exactly once like Sokkuri (v6b-1: Chappy and
+// Tadpole corpses reached the Onion with crews attached but no receipt
+// could ever land - nothing had ever bound a delivery source for proxies).
 // bot-v6 (wf10): power mode takes the squad in ONE step (whole Onion queued
 // through the normal exitPikis path once at start; WithdrawSeek waits neutral
 // until field>=80, no menu) and logs AUTOPLAY_POWER squad=<n> seconds=<t>;
@@ -131,6 +139,11 @@ struct Engagement {
     bool pelletFound = false;
     int pelletCarriers = 0;
     int carryNear = 0;
+    // bot-v7: declared carry minimum (PelletConfig p01 strength units) for
+    // the tracked corpse, latched once resolved; host teki type while only
+    // the dead body exists (pellet config lookup key).
+    int carryWant = 0;
+    int hostType = -1;
 };
 
 p2autoplay::Brain sBrain;
@@ -639,6 +652,7 @@ void pc_p2_autoplay_tick(void)
             if (!t || !t->mGenerator) continue;
             BTeki* b = static_cast<BTeki*>(t);
             if (pc_p2_campaign_token(b) != sEngage.token) continue;
+            sEngage.hostType = b->mTekiType; // bot-v7: corpse-config key while the body exists
             if (b->mHealth <= 0.0f || !b->isAlive() || b->mDeadState != 0 || b->mPellet != nullptr) {
                 deadSignal = true;
                 if (!sEngage.deadLatch) {
@@ -665,6 +679,7 @@ void pc_p2_autoplay_tick(void)
     // for the stalled-lift verdict.
     sEngage.pelletFound = false;
     sEngage.pelletCarriers = 0;
+    Pellet* trackedPellet = nullptr; // bot-v7: live corpse pellet for carryWant
     if (sEngage.token && sEngage.deadLatch && pelletMgr && !sEngage.bodyPresent) {
         float best2 = 600.0f * 600.0f;
         Pellet* best = nullptr;
@@ -686,7 +701,25 @@ void pc_p2_autoplay_tick(void)
             sEngage.pelletCarriers = best->mCarrierCounter;
             sEngage.lastX = best->getPosition().x;
             sEngage.lastZ = best->getPosition().z;
+            trackedPellet = best;
         }
+    }
+
+    // bot-v7: resolve the tracked corpse's declared carry minimum
+    // (PelletConfig p01, strength units, same scale as mCarrierCounter).
+    // Prefer the live pellet's own config; while only the dead body exists,
+    // resolve through the host teki type (TekiMgr::getTypeId, the same key
+    // dieSoon/becomePellet uses for the corpse pellet). Latched once known
+    // so the Brain keeps the shortfall visible across handoffs and gaps.
+    if (sEngage.token && sEngage.deadLatch) {
+        int want = 0;
+        if (trackedPellet && trackedPellet->mConfig) {
+            want = trackedPellet->mConfig->mCarryMinPikis();
+        } else if (sEngage.bodyPresent && sEngage.hostType >= 0 && pelletMgr) {
+            PelletConfig* hostConfig = pelletMgr->getConfig(TekiMgr::getTypeId(sEngage.hostType));
+            if (hostConfig) want = hostConfig->mCarryMinPikis();
+        }
+        if (want > 0) sEngage.carryWant = want;
     }
 
     // bot-v5 carry attribution: TransportMode bodies near THIS corpse (600 u),
@@ -739,6 +772,7 @@ void pc_p2_autoplay_tick(void)
     senses.transportSeen = carryActive;
     senses.carryCount = sEngage.carryNear;
     senses.pelletCarriers = sEngage.pelletCarriers;
+    senses.carryWant = sEngage.carryWant; // bot-v7: declared minimum (0 = unknown)
     senses.pelletExists = sEngage.bodyPresent || sEngage.pelletFound || !sEngage.deadLatch;
     senses.corpseMoving = corpseMoving;
     senses.corpseMoved = corpseMoved;
@@ -942,17 +976,20 @@ void pc_p2_autoplay_tick(void)
         }
     }
 
-    // --- bot-v5 carry diagnostics: carriers + corpse distance, rate-limited
-    // (every 300 ticks like NAVI) plus the rising edge, so the matrix reports
-    // "carriers seen" per species even when no receipt lands. ---
+    // --- bot-v7 carry diagnostics: carriers vs the corpse's declared
+    // minimum + corpse distance + live motion, rate-limited (every 300 ticks
+    // like NAVI) plus the rising edge, so the matrix reports the shortfall
+    // per species even when no receipt lands. Format is the brief's:
+    // AUTOPLAY_CARRY carriers=<n> want=<min> tdist=<d> moving=<0/1>. ---
     {
         const p2autoplay::State st = sBrain.current();
         if (st == p2autoplay::State::Aftermath && sEngage.token) {
             const float tdist = distXZ(naviX, naviZ, sEngage.lastX, sEngage.lastZ);
             const bool edge = carryActive && !sEngage.carryLatch;
             if (edge || (sTicks % 300 == 0)) {
-                std::printf("AUTOPLAY_CARRY carriers=%d pellet=%d tdist=%.0f bot-driven\n",
-                            sEngage.carryNear, sEngage.pelletCarriers, tdist);
+                std::printf("AUTOPLAY_CARRY carriers=%d want=%d tdist=%.0f moving=%d bot-driven\n",
+                            sEngage.carryNear, sEngage.carryWant, tdist,
+                            corpseMoving ? 1 : 0);
                 std::fflush(stdout);
             }
             if (carryActive) sEngage.carryLatch = true;

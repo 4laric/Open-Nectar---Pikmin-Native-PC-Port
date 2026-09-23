@@ -645,6 +645,30 @@ static void bindFamilies(bool strict) {
                 fail("duplicate generator in scene");
             actors[teki] = std::string(family.name) + "|" + match->second;
             speciesUsed.insert(match->second);
+            // bot-v7 (wf10): lane-06 ordinary-delivery source for proxy
+            // campaign actors. Visual-only proxies never bound one (only
+            // Sokkuri/Kogane/ElecBug/Sarai bind), so a hauled proxy corpse
+            // could never grant onion:p2: GoalItem::suckMe found no source
+            // for the pellet view, fell through to the P1 bestiary CHECK,
+            // and no P2_ORDINARY_P2_RECEIPT ever fired (v6b-1: Chappy and
+            // Tadpole corpses reached the Onion with crews attached, yet the
+            // bot could never score received=1). Bridge mode only: bind
+            // (actor -> (source, token)); Teki IS-A PelletView (teki.h:
+            // NTeki : BTeki : PelletView), so this is the same subobject
+            // address suckMe looks up. Single-use (consumed on delivery),
+            // cleared on the corpse-less death funnel (BTeki::doKill ->
+            // pc_p2_forget_teki) and on pool-slot reuse (TekiMgr::newTeki),
+            // while corpse-leaving deaths skip doKill so the binding survives
+            // to the Onion. Tokens with no seed source keep today's P1 path.
+            if (bridge && std::string(family.name) == "proxy") {
+                const unsigned source = pc_randomizer_p2_source_for_id(generator);
+                if (source != 0) {
+                    pc_randomizer_p2_bind_source(static_cast<PelletView*>(teki), source, generator);
+                    std::printf("P2_PROXY_DELIVERY_BIND generator=%u source_id=%u key=proxy|%s\n",
+                                generator, source, match->second.c_str());
+                    std::fflush(stdout);
+                }
+            }
         }
         if (found.size() != wanted.size()) {
             if (strict) fail("arena actor not present in scene");

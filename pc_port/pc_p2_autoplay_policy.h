@@ -16,6 +16,18 @@
 // update returns a neutral pad and stays IDLE, which is the
 // inert-when-unset guarantee the native test pins (tools/p2_autoplay_test.cpp).
 //
+// bot-v7 (wf10) deltas, in brief priority order:
+//   1. A grabbed lift below the corpse's declared minimum (carryWant,
+//      PelletConfig p01; 0 = unknown) that is not moving is NOT escorted:
+//      escorting parks the squad 100-250 u away with throws suppressed, so
+//      the crew can never grow (v6b-1 Tank: 4 carriers for 231 s). It keeps
+//      seeding instead (SeedGrow: stand the squad ON the corpse, keep
+//      throwing pad-only, never whistle) until the crew reaches the minimum
+//      or the window ends. A stalled viable lift re-seeds the same way
+//      (bounded rethrows, reason=stalled); a crew that shrinks below the
+//      minimum re-seeds with reason=shrank.
+//   2. AUTOPLAY_CARRY (driver) carries want=<min> + moving=<0/1> so the
+//      shortfall is visible (brief format).
 // bot-v6 (wf10) deltas, in brief priority order:
 //   1. Power mode takes the squad in ONE step: the driver queues the whole
 //      Onion through the normal exitPikis path once at start, and WithdrawSeek
@@ -267,9 +279,8 @@ struct Config {
     float aftermathBackoffDist = 200.0f; // step back out of contact so the crew grabs it
     float carryGrabWait = 20.0f; // bounded wait for the first grab before backing off / re-seeding
     float aftermathSettleWait = 8.0f; // pause at backoff for grabs to settle before re-approach
-    int aftermathRethrowMax = 3; // bounded re-approach + re-throw cycles when nobody grabs
-    float carryStallWait = 25.0f; // grabbed but not moving for this long -> re-throw to add carriers
-    float carryStallBurst = 5.0f; // stall re-throw burst: keep throwing this long to grow the crew
+    int aftermathRethrowMax = 5; // bounded re-approach + re-seed cycles when grabs fail or stall
+    float carryStallWait = 25.0f; // grabbed but not moving for this long -> re-seed to add carriers
     float corpseStillWindow = 15.0f; // no corpse displacement for this long counts as stalled
     float corpseMoveMin = 15.0f; // corpse displacement that counts as "moving" (harness carried threshold)
     float corpseOutOfReach = 800.0f; // tdist past this at giveup names corpse_out_of_reach
@@ -373,6 +384,12 @@ struct Senses {
     int carryCount = 0;
     int pelletCarriers = 0;
     bool pelletExists = true;
+    // bot-v7: the tracked corpse's declared carry minimum (PelletConfig p01
+    // strength units, same scale as pelletCarriers). 0 = unknown (no dead
+    // body or pellet resolved yet): the Brain falls back to the v5/v6 rule
+    // (any carry escorts). When known, a grabbed-but-short lift keeps
+    // seeding instead of escorting a stuck lift.
+    int carryWant = 0;
     bool corpseMoving = false;
     bool corpseMoved = false;
     bool scattered = false; // squad scattered: whistle regroup
@@ -435,7 +452,10 @@ public:
         amLastCX = 0.0f;
         amLastCZ = 0.0f;
         amStallTime = 0.0f;
-        amBurstTime = 0.0f;
+        amGrow = false; // bot-v7: seeding a short crew instead of escorting
+        amHadEnough = false; // bot-v7: the lift was viable (escorted)
+        amLastCrew = 0; // bot-v7: high-water crew for SeedGrow progress
+        amGrowStill = 0.0f; // bot-v7: time without crew growth in SeedGrow
         withdrawCycles = 0;
         throwSpin = 0.0f;
         result = Result{};
@@ -539,6 +559,16 @@ private:
             lastCommand.moveX = dx / len;
             lastCommand.moveZ = dz / len;
         }
+    }
+
+    // bot-v7: stand the squad ON the corpse and throw Pikmin directly
+    // onto it in a burst (normal input only: stick + A pulses, never
+    // whistle). Shared by Seed (no grabs yet) and SeedGrow (short crew).
+    void seedSteerThrow(const Senses& in)
+    {
+        if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+        else if (in.targetToken != 0) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+        if (in.targetDist <= cfg.throwRange && in.targetToken != 0) pulseA(in, cfg.throwHold, cfg.throwGap);
     }
 
     void tickWithdrawSeek(float dt, const Senses& in)
@@ -732,7 +762,10 @@ private:
         amLastCX = 0.0f;
         amLastCZ = 0.0f;
         amStallTime = 0.0f;
-        amBurstTime = 0.0f;
+        amGrow = false;
+        amHadEnough = false;
+        amLastCrew = 0;
+        amGrowStill = 0.0f;
         result = Result{};
         result.token = in.targetToken;
         result.koganeLike = isKoganeLike(in.targetSource);
@@ -946,50 +979,62 @@ private:
             return;
         }
         if (carryActive) {
-            if (amPhase != AftermathEscort) {
-                amPhase = AftermathEscort;
-                amPhaseTime = 0.0f;
-            }
-            // bot-v5 stall watch: grabbed but not moving (min carriers not
-            // met - v5dev-1 Chappy held 2 carriers, Kurage 5, neither lifted).
-            // Track the corpse fix each tick; a bounded still time fires a
-            // throw burst to grow the crew instead of escorting a stuck lift.
-            if (!amTracked) {
-                amTracked = true;
-                amLastCX = in.tgtX;
-                amLastCZ = in.tgtZ;
-                amStallTime = 0.0f;
-            } else {
-                const float sx = in.tgtX - amLastCX, sz = in.tgtZ - amLastCZ;
-                if (sx * sx + sz * sz > 25.0f) { // 5 u jitter margin
+            // bot-v7: crew strength vs the corpse's declared minimum
+            // (carryWant, PelletConfig p01; 0 = unknown). A grabbed lift
+            // below the minimum that is not moving is NOT escorted:
+            // escorting parks the squad 100-250 u away with throws
+            // suppressed, so the crew can never grow (v6b-1 Tank: 4 carriers
+            // for 231 s while the squad stood 105 u off). It keeps seeding
+            // (SeedGrow below) instead. A moving haul, a sufficient crew, or
+            // an unknown minimum escorts exactly as v5/v6 did.
+            const int crew = in.pelletCarriers > 0 ? in.pelletCarriers : in.carryCount;
+            const bool seedGrow = !in.corpseMoving && in.carryWant > 0 && (crew < in.carryWant || amGrow);
+            if (!seedGrow) {
+                if (amPhase != AftermathEscort) {
+                    amPhase = AftermathEscort;
+                    amPhaseTime = 0.0f;
+                    // Fresh escort episode (new grabs, or motion resumed
+                    // after a grow): re-arm the stall watch on this fix so a
+                    // later stop is timed from the resume, not from stale
+                    // history.
+                    amTracked = false;
+                    amStallTime = 0.0f;
+                }
+                amGrow = false;
+                amHadEnough = true;
+                // bot-v5 stall watch: grabbed but not moving. Track the
+                // corpse fix each tick; a bounded still time re-seeds
+                // (SeedGrow) to grow the crew instead of escorting a stuck
+                // lift.
+                if (!amTracked) {
+                    amTracked = true;
                     amLastCX = in.tgtX;
                     amLastCZ = in.tgtZ;
                     amStallTime = 0.0f;
                 } else {
-                    amStallTime += dt;
+                    const float sx = in.tgtX - amLastCX, sz = in.tgtZ - amLastCZ;
+                    if (sx * sx + sz * sz > 25.0f) { // 5 u jitter margin
+                        amLastCX = in.tgtX;
+                        amLastCZ = in.tgtZ;
+                        amStallTime = 0.0f;
+                    } else {
+                        amStallTime += dt;
+                    }
                 }
-            }
-            if (amBurstTime <= 0.0f && amStallTime >= cfg.carryStallWait) {
-                if (amRethrows >= cfg.aftermathRethrowMax) {
-                    giveUpAftermath(in, "carry_stalled");
-                    finishTarget(in, /*killed*/ true);
-                    return;
+                if (amStallTime >= cfg.carryStallWait) {
+                    if (amRethrows >= cfg.aftermathRethrowMax) {
+                        giveUpAftermath(in, "carry_stalled");
+                        finishTarget(in, /*killed*/ true);
+                        return;
+                    }
+                    ++amRethrows;
+                    amGrow = true;
+                    amHadEnough = false;
+                    amStallTime = 0.0f;
+                    amLastCrew = crew;
+                    amGrowStill = 0.0f;
+                    logRethrow(in, "stalled");
                 }
-                ++amRethrows;
-                amBurstTime = cfg.carryStallBurst;
-                amStallTime = 0.0f;
-                logRethrow(in, "stalled");
-            }
-            if (amBurstTime > 0.0f) {
-                // Stall burst: close back onto the corpse and throw (pad-only)
-                // to grow the crew while the first crew holds on. Motion
-                // resuming ends the burst early for a clean escort.
-                amBurstTime -= dt;
-                if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
-                else if (in.targetToken != 0) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
-                if (in.targetDist <= cfg.throwRange && in.targetToken != 0) pulseA(in, cfg.throwHold, cfg.throwGap);
-                if (in.corpseMoving) amBurstTime = 0.0f;
-            } else {
                 // Escort the haul toward the Onion: follow the corpse (the
                 // driver tracks the pellet into tgtX/Z) without whistling or
                 // throwing so the crew keeps hauling. Hold close, not on top.
@@ -1001,12 +1046,68 @@ private:
                     if (d2 > 250.0f * 250.0f) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
                     else if (d2 < 100.0f * 100.0f) steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
                 }
+            } else {
+                // bot-v7 SeedGrow: stand the squad ON the corpse and keep
+                // throwing Pikmin directly onto it (pad-only: stick + A,
+                // never whistle) until the crew reaches the minimum (Escort
+                // takes over), the carry is lost, or the window ends. A crew
+                // that shrank below a once-viable lift re-seeds here with
+                // reason=shrank; a stall episode re-seeds with reason=stalled.
+                if (amHadEnough) {
+                    // Regression: this lift escorted before (sufficient crew
+                    // or motion) and fell short again.
+                    if (amRethrows >= cfg.aftermathRethrowMax) {
+                        giveUpAftermath(in, "carry_stalled");
+                        finishTarget(in, /*killed*/ true);
+                        return;
+                    }
+                    ++amRethrows;
+                    amHadEnough = false;
+                    amLastCrew = crew;
+                    amGrowStill = 0.0f;
+                    logRethrow(in, sawMove ? "stalled" : "shrank");
+                }
+                // NOTE: amGrow is NOT latched here. A plain shortfall grows
+                // purely on crew < want, so reaching the minimum returns to
+                // Escort on its own. Only the Escort stall trigger latches
+                // amGrow (a viable-but-stuck lift keeps growing past the
+                // minimum until motion resumes); motion, a full loss, or the
+                // window clears it.
+                amPhase = AftermathSeed;
+                amPhaseTime = 0.0f;
+                // Progress: crew growth restarts the still clock; a grow
+                // that adds nobody for a full stall wait burns one rethrow
+                // episode (bounded), so a capped-out lift (all pellet slots
+                // taken below the minimum) names carry_stalled instead of
+                // sitting out the window silently.
+                if (crew > amLastCrew) {
+                    amLastCrew = crew;
+                    amGrowStill = 0.0f;
+                } else {
+                    amGrowStill += dt;
+                }
+                if (amGrowStill >= cfg.carryStallWait) {
+                    if (amRethrows >= cfg.aftermathRethrowMax) {
+                        giveUpAftermath(in, "carry_stalled");
+                        finishTarget(in, /*killed*/ true);
+                        return;
+                    }
+                    ++amRethrows;
+                    amGrowStill = 0.0f;
+                    logRethrow(in, "stalled");
+                }
+                seedSteerThrow(in);
             }
         } else {
             // No live carry: seed grabs. Walk ONTO the corpse (contact ring)
             // and throw Pikmin at it (thrown Pikmin attach on collision,
             // pikiState.cpp:2258-2264), then back off so the crew grabs it.
-            if (amPhase == AftermathEscort) {
+            // A full loss ends any grow episode: the next grabs start fresh.
+            // Losing an escort OR a grow reseeds (bounded, reason=lost).
+            const bool wasHeld = (amPhase == AftermathEscort) || amGrow;
+            amGrow = false;
+            amHadEnough = false;
+            if (wasHeld) {
                 // Carry lost en route: re-seed while rethrows remain.
                 if (amRethrows >= cfg.aftermathRethrowMax) {
                     giveUpAftermath(in, "carry_stalled");
@@ -1016,6 +1117,8 @@ private:
                 ++amRethrows;
                 amPhase = AftermathSeed;
                 amPhaseTime = 0.0f;
+                amGrow = false;
+                amHadEnough = false;
                 logRethrow(in, "lost");
             }
             if (amPhase == AftermathBackoff) {
@@ -1034,9 +1137,7 @@ private:
                 }
             } else {
                 // Seed: close onto the corpse, throwing once in range.
-                if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
-                else if (in.targetToken != 0) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
-                if (in.targetDist <= cfg.throwRange && in.targetToken != 0) pulseA(in, cfg.throwHold, cfg.throwGap);
+                seedSteerThrow(in);
                 if (amPhaseTime >= cfg.carryGrabWait && in.targetDist <= cfg.aftermathApproachRadius) {
                     // On the corpse with no grab after a bounded wait: back off.
                     amPhase = AftermathBackoff;
@@ -1238,7 +1339,10 @@ private:
     float amLastCX = 0.0f;
     float amLastCZ = 0.0f;
     float amStallTime = 0.0f; // still time while a carry is active
-    float amBurstTime = 0.0f; // stall throw-burst remaining
+    bool amGrow = false; // bot-v7: SeedGrow latches a stall/shortfall episode
+    bool amHadEnough = false; // bot-v7: the lift escorted (viable) before shrinking
+    int amLastCrew = 0; // bot-v7: high-water crew for SeedGrow progress
+    float amGrowStill = 0.0f; // bot-v7: time without crew growth in SeedGrow
     float initialHealthFrac = 1.0f;
     bool sawDamage = false;
     bool sawKill = false; // generic death latched (any species)

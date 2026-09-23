@@ -24,6 +24,11 @@
 //   * bot-v6: power WithdrawSeek waits pad-neutral (no menu) until field>=80;
 //     Select names a dead/absent target (target_gone) and a latched kill for
 //     the same token resumes Aftermath instead of dropping to Done.
+//   * bot-v7: a grabbed lift below the corpse's declared minimum (carryWant)
+//     that is not moving keeps seeding (SeedGrow: onto the corpse + throws,
+//     never whistle) instead of escorting a stuck lift; a shrinking crew
+//     re-seeds (reason=shrank); proxy campaign actors bind their lane-06
+//     delivery source (harness proves the receipt).
 // Exit 0 only if every check passes; any failure prints FAIL and exits 1.
 #include "pc_p2_autoplay_policy.h"
 
@@ -1536,10 +1541,12 @@ void testReceiptPerTokenOnly()
 
 void testAftermathStallRethrow()
 {
-    // bot-v5 (v5dev-1 Chappy/Kurage lesson): a grabbed-but-stalled lift (min
-    // carriers not met - the crew holds a corpse it cannot lift) re-throws to
-    // grow the crew instead of escorting it forever. Recent motion gates the
-    // window: moved-then-stopped names carry_stalled, not receipt_timeout.
+    // bot-v5 (v5dev-1 Chappy/Kurage lesson) as grown by bot-v7: a
+    // grabbed-but-stalled lift below the corpse's declared minimum keeps
+    // seeding (SeedGrow) to grow the crew instead of escorting it forever.
+    // Recent motion gates the window: moved-then-stopped names carry_stalled,
+    // not receipt_timeout. No-progress grow episodes burn the bounded
+    // rethrow budget, then the stall is named.
     p2autoplay::Config cfg;
     cfg.throwHold = 0.1f;
     cfg.throwGap = 0.2f;
@@ -1547,7 +1554,6 @@ void testAftermathStallRethrow()
     cfg.aftermathTimeout = 60.0f;
     cfg.carryStallWait = 0.5f;
     cfg.aftermathRethrowMax = 2;
-    cfg.carryStallBurst = 0.5f;
     p2autoplay::Brain brain(cfg);
     p2autoplay::Senses s = liveSenses();
     s.fieldPikmin = 20;
@@ -1565,9 +1571,11 @@ void testAftermathStallRethrow()
     brain.update(0.05f, s); // -> attack
     s.targetHealthFrac = 0.5f;
     brain.update(0.05f, s);
-    s.targetAlive = false; // kill: 2 carriers grab but cannot lift
+    s.targetAlive = false; // kill: 2 carriers grab but cannot lift a 10-weight corpse
     s.transportSeen = true;
     s.carryCount = 2;
+    s.pelletCarriers = 2;
+    s.carryWant = 10;
     s.corpseMoving = true; // hauling at first...
     s.corpseMoved = true;
     s.receiptSeen = false;
@@ -1583,22 +1591,19 @@ void testAftermathStallRethrow()
     // ... then the lift stalls (moved-ever, not moving now): freeze the fix.
     s.corpseMoving = false;
     std::vector<std::string> markers;
-    for (int i = 0; i < 20; ++i) {
-        brain.update(0.05f, s);
-        const std::vector<std::string> got = brain.takeMarkers();
-        markers.insert(markers.end(), got.begin(), got.end());
-    }
-    CHECK(hasMarker(markers, "AUTOPLAY_RETHROW token=653001 attempt=1"), "stall/rethrow_logged");
-    CHECK(hasMarker(markers, "reason=stalled"), "stall/reason_names_stall");
-    // Re-seeding throws again (pad-only) instead of idling the escort: the
-    // burst refires every stall wait, so a loop spanning cycles sees throws.
+    // Re-seeding throws again (pad-only) instead of idling the escort:
+    // sample throws across the regression + first grow episode (later the
+    // bounded episodes name the stall and finish, after which a static
+    // test sense bounces Select/Aftermath without new throws).
     int aOn = 0;
-    for (int i = 0; i < 40; ++i) {
+    for (int i = 0; i < 20; ++i) {
         brain.update(0.05f, s);
         if (brain.command().buttons & unsigned(p2autoplay::PadA)) ++aOn;
         const std::vector<std::string> got = brain.takeMarkers();
         markers.insert(markers.end(), got.begin(), got.end());
     }
+    CHECK(hasMarker(markers, "AUTOPLAY_RETHROW token=653001 attempt=1"), "stall/rethrow_logged");
+    CHECK(hasMarker(markers, "reason=stalled"), "stall/reason_names_stall");
     CHECK(aOn > 0, "stall/rethrows_to_grow_crew");
     // Still stalled past the bounded budget: carry_stalled, kill kept.
     for (int i = 0; i < 200 && brain.current() == p2autoplay::State::Aftermath; ++i) {
@@ -1609,6 +1614,199 @@ void testAftermathStallRethrow()
     CHECK(hasMarker(markers, "AUTOPLAY_GIVEUP reason=carry_stalled"), "stall/giveup_names_stall");
     CHECK(hasMarker(markers, "AUTOPLAY_RESULT target=653001 damaged=1 killed=1 carried=0"),
           "stall/result_no_carry_claim");
+}
+
+void testAftermathGrowKeepsSeeding()
+{
+    // bot-v7 (v6b-1 Tank lesson): a grabbed lift below the declared minimum
+    // that is not moving is NOT escorted (escort would park 100-250 u off
+    // with throws suppressed, freezing the crew). It keeps seeding: onto
+    // the corpse + throws, never whistle. Once the crew reaches the minimum
+    // the escort takes over and throws stop.
+    p2autoplay::Config cfg;
+    cfg.throwHold = 0.1f;
+    cfg.throwGap = 0.2f;
+    cfg.receiptTimeout = 60.0f;
+    cfg.aftermathTimeout = 60.0f;
+    cfg.carryGrabWait = 100.0f; // stay seeding: phases never cap this test
+    cfg.aftermathSettleWait = 100.0f;
+    cfg.aftermathRethrowMax = 5;
+    cfg.carryStallWait = 100.0f; // no stall episodes: the crew below keeps growing
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 80;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 654001;
+    s.targetSource = 24; // Tank-weight corpse
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.naviX = 0.0f;
+    s.naviZ = 0.0f;
+    s.tgtX = 150.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    s.targetHealthFrac = 0.5f;
+    brain.update(0.05f, s);
+    s.targetAlive = false; // kill: 4 carriers on a 12-weight corpse, stalled
+    s.transportSeen = true;
+    s.carryCount = 4;
+    s.pelletCarriers = 4;
+    s.carryWant = 12;
+    s.corpseMoving = false;
+    s.corpseMoved = false;
+    s.receiptSeen = false;
+    s.targetDist = 150.0f; // escort would hold here (inside 100-250): neutral
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "grow/aftermath");
+    int aOn = 0, steered = 0, whistled = 0;
+    for (int i = 0; i < 40; ++i) {
+        brain.update(0.05f, s);
+        const p2autoplay::Command cmd = brain.command();
+        if (cmd.buttons & unsigned(p2autoplay::PadA)) ++aOn;
+        if (cmd.buttons & unsigned(p2autoplay::PadB)) ++whistled;
+        if (cmd.moveX > 0.5f) ++steered;
+        if (brain.current() != p2autoplay::State::Aftermath) break;
+    }
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "grow/keeps_seeding_while_short");
+    CHECK(steered == 40, "grow/closes_onto_corpse_not_escort_hold");
+    CHECK(aOn > 0, "grow/throws_onto_corpse");
+    CHECK(whistled == 0, "grow/never_whistles");
+    CHECK(!hasMarker(brain.takeMarkers(), "AUTOPLAY_RETHROW"), "grow/no_rethrow_for_first_shortfall");
+    // Crew reaches the minimum: escort takes over (hold: neutral inside the
+    // band, no throws).
+    s.carryCount = 12;
+    s.pelletCarriers = 12;
+    int idle = 0;
+    aOn = 0;
+    for (int i = 0; i < 10; ++i) {
+        brain.update(0.05f, s);
+        const p2autoplay::Command cmd = brain.command();
+        if (cmd.buttons & unsigned(p2autoplay::PadA)) ++aOn;
+        if (cmd.moveX == 0.0f && cmd.moveZ == 0.0f) ++idle;
+    }
+    CHECK(aOn == 0, "grow/escort_stops_throws_when_enough");
+    CHECK(idle == 10, "grow/escort_holds_when_enough");
+}
+
+void testAftermathReseedOnShrink()
+{
+    // bot-v7: a viable lift (escorted) whose crew shrinks below the minimum
+    // re-seeds with reason=shrank instead of escorting the shortfall; the
+    // episodes stay bounded and name carry_stalled past budget.
+    p2autoplay::Config cfg;
+    cfg.throwHold = 0.1f;
+    cfg.throwGap = 0.2f;
+    cfg.receiptTimeout = 60.0f;
+    cfg.aftermathTimeout = 60.0f;
+    cfg.carryStallWait = 0.5f;
+    cfg.aftermathRethrowMax = 2;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 80;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 654002;
+    s.targetSource = 2;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.naviX = 0.0f;
+    s.naviZ = 0.0f;
+    s.tgtX = 100.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    s.targetHealthFrac = 0.5f;
+    brain.update(0.05f, s);
+    s.targetAlive = false;
+    s.transportSeen = true;
+    s.carryCount = 10;
+    s.pelletCarriers = 10;
+    s.carryWant = 10; // full crew: escorts
+    s.corpseMoving = false;
+    s.corpseMoved = false;
+    s.receiptSeen = false;
+    s.targetDist = 150.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "shrink/aftermath");
+    for (int i = 0; i < 5; ++i) brain.update(0.05f, s); // escorting, viable
+    CHECK(brain.command().moveX == 0.0f, "shrink/escort_holds_while_viable");
+    // Crew shrinks below the minimum while stalled: re-seed (shrank), back
+    // onto the corpse with throws.
+    s.carryCount = 6;
+    s.pelletCarriers = 6;
+    std::vector<std::string> markers;
+    for (int i = 0; i < 5; ++i) {
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_RETHROW token=654002 attempt=1"), "shrink/rethrow_logged");
+    CHECK(hasMarker(markers, "reason=shrank"), "shrink/reason_names_shrink");
+    CHECK(brain.command().moveX > 0.5f, "shrink/reseeds_onto_corpse");
+    // Shortfall never recovers: bounded episodes, then carry_stalled with the
+    // kill kept and no carry claim.
+    for (int i = 0; i < 200 && brain.current() == p2autoplay::State::Aftermath; ++i) {
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    int rethrows = 0;
+    for (const std::string& m : markers) {
+        if (m.find("AUTOPLAY_RETHROW") != std::string::npos) ++rethrows;
+    }
+    CHECK(rethrows <= 2, "shrink/rethrows_bounded");
+    CHECK(hasMarker(markers, "AUTOPLAY_GIVEUP reason=carry_stalled"), "shrink/giveup_names_stall");
+    CHECK(hasMarker(markers, "AUTOPLAY_RESULT target=654002 damaged=1 killed=1 carried=0"),
+          "shrink/result_no_carry_claim");
+}
+
+void testAftermathUnknownWantEscorts()
+{
+    // bot-v7 compat: with no declared minimum (carryWant=0, e.g. the corpse
+    // is not resolved yet) any live carry escorts exactly as v5/v6 did -
+    // follow without throws - instead of seeding blindly.
+    p2autoplay::Config cfg;
+    cfg.throwHold = 0.1f;
+    cfg.throwGap = 0.2f;
+    cfg.receiptTimeout = 60.0f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 654003;
+    s.targetSource = 79;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.naviX = 0.0f;
+    s.naviZ = 0.0f;
+    s.tgtX = 500.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    s.targetHealthFrac = 0.5f;
+    brain.update(0.05f, s);
+    s.targetAlive = false;
+    s.transportSeen = true;
+    s.carryCount = 2; // short crew, but no declared minimum...
+    s.carryWant = 0;
+    s.corpseMoving = false;
+    s.receiptSeen = false;
+    s.targetDist = 500.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "unknown/aftermath");
+    int aOn = 0;
+    bool followed = false;
+    for (int i = 0; i < 20; ++i) {
+        brain.update(0.05f, s);
+        const p2autoplay::Command cmd = brain.command();
+        if (cmd.buttons & unsigned(p2autoplay::PadA)) ++aOn;
+        if (cmd.moveX > 0.5f) followed = true;
+    }
+    CHECK(aOn == 0, "unknown/escort_no_throws_without_want");
+    CHECK(followed, "unknown/escort_follows_without_want");
 }
 
 void testPowerFastSquad()
@@ -1799,6 +1997,9 @@ int main()
     testAftermathGiveupReasons();
     testReceiptPerTokenOnly();
     testAftermathStallRethrow();
+    testAftermathGrowKeepsSeeding();
+    testAftermathReseedOnShrink();
+    testAftermathUnknownWantEscorts();
     testPowerFastSquad();
     testSelectTargetGone();
     if (failures == 0) {

@@ -2732,6 +2732,26 @@ void GameCoreSection::updateAI()
             std::puts("[Pikmin Randomizer] TEST_ONLY corpse_delivered_after_death_no_kill_check");
         }
     }
+    // bot-v7 (wf10): dump every corpse pellet config's carry data (min/max
+    // carriers per PelletConfig p01/p02) so the haul wall can be attributed to
+    // content/data (min > max, or max 1-4) vs bot behaviour. TEST_ONLY: gated
+    // by PIKMIN_RANDOMIZER_TEST_SCRIPT=corpse-weights, prints once, exits 0.
+    if (scripted && !std::strcmp(scripted, "corpse-weights") && background && !std::strcmp(background, "1")
+        && pc_randomizer_ready() && pelletMgr) {
+        static bool dumped = false;
+        if (!dumped && pelletMgr->getNumConfigs() > 0) {
+            dumped = true;
+            for (int type = 0; type < TEKI_TypeCount; ++type) {
+                PelletConfig* config = pelletMgr->getConfig(TekiMgr::getTypeId(type));
+                if (!config || config->mPelletType() != PELTYPE_Corpse) continue;
+                std::printf("[Pikmin Randomizer] TEST_ONLY corpse_weight teki_type=%d name=%s min=%d max=%d\n",
+                            type, TekiMgr::getTypeName(type),
+                            config->mCarryMinPikis(), config->mCarryMaxPikis());
+            }
+            std::fflush(stdout);
+            std::exit(0);
+        }
+    }
     if (scripted && !std::strcmp(scripted, "save") && background && !std::strcmp(background, "1") && bbftRedsReady) {
         static bool tested = false;
         if (!tested) {
