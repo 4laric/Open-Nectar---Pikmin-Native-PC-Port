@@ -17,8 +17,9 @@
 //
 //   * bot-v5: aftermath never whistles (release B), walks onto the corpse
 //     (contact ring) + throws to seed grabs, backs off, re-throws bounded
-//     times; receipt window extends only while carriers>0 AND the corpse
-//     moves; giveups name the broken link; received=1 only from the token's
+//     times; a grabbed-but-stalled lift re-throws to grow the crew; receipt
+//     window extends only while carriers>0 AND the corpse moves now;
+//     giveups name the broken link; received=1 only from the token's
 //     own ledger receipt.
 // Exit 0 only if every check passes; any failure prints FAIL and exits 1.
 #include "pc_p2_autoplay_policy.h"
@@ -1411,8 +1412,7 @@ void testAftermathEscortNoThrows()
 }
 
 void testAftermathGiveupReasons()
-{
-    // bot-v5: the giveup names the broken link (despawned / no grab /
+{    // bot-v5: the giveup names the broken link (despawned / no grab /
     // stalled / out of reach / slow receipt).
     p2autoplay::Config cfg;
     cfg.receiptTimeout = 0.5f;
@@ -1531,6 +1531,83 @@ void testReceiptPerTokenOnly()
     CHECK(!hasMarker(markers, "received=1"), "pertoken/no_bystander_receipt");
 }
 
+void testAftermathStallRethrow()
+{
+    // bot-v5 (v5dev-1 Chappy/Kurage lesson): a grabbed-but-stalled lift (min
+    // carriers not met - the crew holds a corpse it cannot lift) re-throws to
+    // grow the crew instead of escorting it forever. Recent motion gates the
+    // window: moved-then-stopped names carry_stalled, not receipt_timeout.
+    p2autoplay::Config cfg;
+    cfg.throwHold = 0.1f;
+    cfg.throwGap = 0.2f;
+    cfg.receiptTimeout = 60.0f;
+    cfg.aftermathTimeout = 60.0f;
+    cfg.carryStallWait = 0.5f;
+    cfg.aftermathRethrowMax = 2;
+    cfg.carryStallBurst = 0.5f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 653001;
+    s.targetSource = 2; // Chappy-weight corpse, light crew
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.naviX = 0.0f;
+    s.naviZ = 0.0f;
+    s.tgtX = 100.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    s.targetHealthFrac = 0.5f;
+    brain.update(0.05f, s);
+    s.targetAlive = false; // kill: 2 carriers grab but cannot lift
+    s.transportSeen = true;
+    s.carryCount = 2;
+    s.corpseMoving = true; // hauling at first...
+    s.corpseMoved = true;
+    s.receiptSeen = false;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "stall/aftermath");
+    // Escort while the corpse moves (advance the fix each tick so the stall
+    // watch sees motion, like the driver's live pellet tracking).
+    for (int i = 0; i < 10; ++i) {
+        s.tgtX += 10.0f;
+        brain.update(0.05f, s);
+    }
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "stall/escorts_while_moving");
+    // ... then the lift stalls (moved-ever, not moving now): freeze the fix.
+    s.corpseMoving = false;
+    std::vector<std::string> markers;
+    for (int i = 0; i < 20; ++i) {
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_RETHROW token=653001 attempt=1"), "stall/rethrow_logged");
+    CHECK(hasMarker(markers, "reason=stalled"), "stall/reason_names_stall");
+    // Re-seeding throws again (pad-only) instead of idling the escort: the
+    // burst refires every stall wait, so a loop spanning cycles sees throws.
+    int aOn = 0;
+    for (int i = 0; i < 40; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) ++aOn;
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(aOn > 0, "stall/rethrows_to_grow_crew");
+    // Still stalled past the bounded budget: carry_stalled, kill kept.
+    for (int i = 0; i < 200 && brain.current() == p2autoplay::State::Aftermath; ++i) {
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_GIVEUP reason=carry_stalled"), "stall/giveup_names_stall");
+    CHECK(hasMarker(markers, "AUTOPLAY_RESULT target=653001 damaged=1 killed=1 carried=0"),
+          "stall/result_no_carry_claim");
+}
+
 } // namespace
 
 int main()
@@ -1564,6 +1641,7 @@ int main()
     testAftermathEscortNoThrows();
     testAftermathGiveupReasons();
     testReceiptPerTokenOnly();
+    testAftermathStallRethrow();
     if (failures == 0) {
         std::printf("PASS p2_autoplay\n");
         return 0;

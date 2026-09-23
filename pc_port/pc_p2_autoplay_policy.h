@@ -24,11 +24,14 @@
 //      Pikmin at it (thrown Pikmin attach on collision), then backs off so
 //      the crew is free to grab it.
 //   2. Carry is sensed live (TransportMode count / pellet carriers) with
-//      corpse motion; the receipt window extends ONLY while carriers > 0 AND
-//      the corpse is moving (a stalled lift times out bounded).
+//      RECENT corpse motion; the receipt window extends ONLY while carriers
+//      > 0 AND the corpse is moving now (a stalled lift times out bounded
+//      with carry_stalled, not an open-ended escort).
 //   3. No grab after a bounded wait -> back off, then re-approach + re-throw
-//      (bounded rethrows, pad-only); giveup names the reason (carry_no_grab,
-//      carry_stalled, corpse_despawned, corpse_out_of_reach, receipt_timeout).
+//      (bounded rethrows, pad-only); a grabbed-but-stalled lift (min carriers
+//      not met) re-throws to grow the crew; giveup names the reason
+//      (carry_no_grab, carry_stalled, corpse_despawned, corpse_out_of_reach,
+//      receipt_timeout).
 //   4. RESULT received=1 comes ONLY from the target's own per-token ledger
 //      receipt (receiptSeen for this token); bystander CHECK Bestiary:Deliver
 //      lines never score (harness keys received the same way).
@@ -256,6 +259,9 @@ struct Config {
     float carryGrabWait = 20.0f; // bounded wait for the first grab before backing off / re-seeding
     float aftermathSettleWait = 8.0f; // pause at backoff for grabs to settle before re-approach
     int aftermathRethrowMax = 3; // bounded re-approach + re-throw cycles when nobody grabs
+    float carryStallWait = 25.0f; // grabbed but not moving for this long -> re-throw to add carriers
+    float carryStallBurst = 5.0f; // stall re-throw burst: keep throwing this long to grow the crew
+    float corpseStillWindow = 15.0f; // no corpse displacement for this long counts as stalled
     float corpseMoveMin = 15.0f; // corpse displacement that counts as "moving" (harness carried threshold)
     float corpseOutOfReach = 800.0f; // tdist past this at giveup names corpse_out_of_reach
     float koganeConfirm = 20.0f; // after Kogane damage, watch escapes then move on
@@ -349,12 +355,16 @@ struct Senses {
     // bot-v5 live carry senses (driver computes per-tick; Brain latches what
     // it needs). carryCount = TransportMode Pikmin near this corpse;
     // pelletCarriers = pellet mCarrierCounter near it; pelletExists = dead
-    // body or corpse pellet still present; corpseMoving = displaced past
-    // corpseMoveMin from the death spot.
+    // body or corpse pellet still present. corpseMoving = the corpse is
+    // moving NOW (displaced past corpseMoveMin AND displaced again within
+    // corpseStillWindow - a lift that moved then stopped reads false, so the
+    // window stops extending and the stall re-throw fires). corpseMoved =
+    // displaced past corpseMoveMin at any point (motion history for reasons).
     int carryCount = 0;
     int pelletCarriers = 0;
     bool pelletExists = true;
     bool corpseMoving = false;
+    bool corpseMoved = false;
     bool scattered = false; // squad scattered: whistle regroup
     bool squadDistress = false; // grabbed/thrown-off/burning Pikmin: whistle regroup (bot-v4)
     bool waypointLeg = false; // steer the detour waypoint, not the target
@@ -411,6 +421,11 @@ public:
         amPhase = AftermathSeed;
         amPhaseTime = 0.0f;
         amRethrows = 0;
+        amTracked = false;
+        amLastCX = 0.0f;
+        amLastCZ = 0.0f;
+        amStallTime = 0.0f;
+        amBurstTime = 0.0f;
         withdrawCycles = 0;
         throwSpin = 0.0f;
         result = Result{};
@@ -658,9 +673,15 @@ private:
         sawCarry = false;
         sawReceipt = in.receiptSeen;
         sawMove = in.corpseMoving; // bot-v5: corpse-motion latch starts live
+        if (in.corpseMoved) sawMove = true;
         amPhase = AftermathSeed;
         amPhaseTime = 0.0f;
         amRethrows = 0;
+        amTracked = false;
+        amLastCX = 0.0f;
+        amLastCZ = 0.0f;
+        amStallTime = 0.0f;
+        amBurstTime = 0.0f;
         result = Result{};
         result.token = in.targetToken;
         result.koganeLike = isKoganeLike(in.targetSource);
@@ -854,7 +875,7 @@ private:
         engageTime += dt;
         amPhaseTime += dt;
         if (in.transportSeen || in.carryCount > 0 || in.pelletCarriers > 0) sawCarry = true;
-        if (in.corpseMoving) sawMove = true;
+        if (in.corpseMoving || in.corpseMoved) sawMove = true;
         observeDeath(in);
         observeReceipt(in);
         if ((!in.targetAlive || in.targetDead) && !sawDamage && !sawKill && !sawCarry && !sawReceipt) {
@@ -878,16 +899,57 @@ private:
                 amPhase = AftermathEscort;
                 amPhaseTime = 0.0f;
             }
-            // Escort the haul toward the Onion: follow the corpse (the driver
-            // tracks the pellet into tgtX/Z) without whistling or throwing so
-            // the crew keeps hauling. Hold close, not on top of it.
-            if (in.waypointLeg) {
-                steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
-            } else if (in.targetToken != 0) {
-                const float dx = in.tgtX - in.naviX, dz = in.tgtZ - in.naviZ;
-                const float d2 = dx * dx + dz * dz;
-                if (d2 > 250.0f * 250.0f) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
-                else if (d2 < 100.0f * 100.0f) steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            // bot-v5 stall watch: grabbed but not moving (min carriers not
+            // met - v5dev-1 Chappy held 2 carriers, Kurage 5, neither lifted).
+            // Track the corpse fix each tick; a bounded still time fires a
+            // throw burst to grow the crew instead of escorting a stuck lift.
+            if (!amTracked) {
+                amTracked = true;
+                amLastCX = in.tgtX;
+                amLastCZ = in.tgtZ;
+                amStallTime = 0.0f;
+            } else {
+                const float sx = in.tgtX - amLastCX, sz = in.tgtZ - amLastCZ;
+                if (sx * sx + sz * sz > 25.0f) { // 5 u jitter margin
+                    amLastCX = in.tgtX;
+                    amLastCZ = in.tgtZ;
+                    amStallTime = 0.0f;
+                } else {
+                    amStallTime += dt;
+                }
+            }
+            if (amBurstTime <= 0.0f && amStallTime >= cfg.carryStallWait) {
+                if (amRethrows >= cfg.aftermathRethrowMax) {
+                    giveUpAftermath(in, "carry_stalled");
+                    finishTarget(in, /*killed*/ true);
+                    return;
+                }
+                ++amRethrows;
+                amBurstTime = cfg.carryStallBurst;
+                amStallTime = 0.0f;
+                logRethrow(in, "stalled");
+            }
+            if (amBurstTime > 0.0f) {
+                // Stall burst: close back onto the corpse and throw (pad-only)
+                // to grow the crew while the first crew holds on. Motion
+                // resuming ends the burst early for a clean escort.
+                amBurstTime -= dt;
+                if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+                else if (in.targetToken != 0) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+                if (in.targetDist <= cfg.throwRange && in.targetToken != 0) pulseA(in, cfg.throwHold, cfg.throwGap);
+                if (in.corpseMoving) amBurstTime = 0.0f;
+            } else {
+                // Escort the haul toward the Onion: follow the corpse (the
+                // driver tracks the pellet into tgtX/Z) without whistling or
+                // throwing so the crew keeps hauling. Hold close, not on top.
+                if (in.waypointLeg) {
+                    steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+                } else if (in.targetToken != 0) {
+                    const float dx = in.tgtX - in.naviX, dz = in.tgtZ - in.naviZ;
+                    const float d2 = dx * dx + dz * dz;
+                    if (d2 > 250.0f * 250.0f) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+                    else if (d2 < 100.0f * 100.0f) steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+                }
             }
         } else {
             // No live carry: seed grabs. Walk ONTO the corpse (contact ring)
@@ -903,7 +965,7 @@ private:
                 ++amRethrows;
                 amPhase = AftermathSeed;
                 amPhaseTime = 0.0f;
-                logRethrow(in);
+                logRethrow(in, "lost");
             }
             if (amPhase == AftermathBackoff) {
                 if (in.targetToken != 0) steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
@@ -917,7 +979,7 @@ private:
                     ++amRethrows;
                     amPhase = AftermathSeed;
                     amPhaseTime = 0.0f;
-                    logRethrow(in);
+                    logRethrow(in, "no_grab");
                 }
             } else {
                 // Seed: close onto the corpse, throwing once in range.
@@ -1020,7 +1082,9 @@ private:
             if (in.targetDist > cfg.corpseOutOfReach) return "corpse_out_of_reach";
             return "carry_no_grab";
         }
-        if (!sawMove) return "carry_stalled";
+        // Grabbed but not moving NOW: never lifted, or moved then stopped
+        // (min carriers not met - the crew holds a corpse it cannot lift).
+        if (!in.corpseMoving) return "carry_stalled";
         if (in.targetDist > cfg.corpseOutOfReach) return "corpse_out_of_reach";
         return "receipt_timeout";
     }
@@ -1034,11 +1098,11 @@ private:
         markers.emplace_back(buf);
     }
 
-    void logRethrow(const Senses& in)
+    void logRethrow(const Senses& in, const char* why)
     {
         char buf[256];
-        std::snprintf(buf, sizeof(buf), "AUTOPLAY_RETHROW token=%u attempt=%d tdist=%.0f bot-driven",
-                      in.targetToken, amRethrows, in.targetDist);
+        std::snprintf(buf, sizeof(buf), "AUTOPLAY_RETHROW token=%u attempt=%d tdist=%.0f reason=%s bot-driven",
+                      in.targetToken, amRethrows, in.targetDist, why);
         markers.emplace_back(buf);
     }
 
@@ -1119,6 +1183,11 @@ private:
     AftermathPhase amPhase = AftermathSeed;
     float amPhaseTime = 0.0f;
     int amRethrows = 0; // bounded re-approach + re-throw cycles used
+    bool amTracked = false; // bot-v5 stall watch has a corpse fix
+    float amLastCX = 0.0f;
+    float amLastCZ = 0.0f;
+    float amStallTime = 0.0f; // still time while a carry is active
+    float amBurstTime = 0.0f; // stall throw-burst remaining
     float initialHealthFrac = 1.0f;
     bool sawDamage = false;
     bool sawKill = false; // generic death latched (any species)

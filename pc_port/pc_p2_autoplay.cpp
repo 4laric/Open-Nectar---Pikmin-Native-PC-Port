@@ -119,6 +119,9 @@ struct Engagement {
     float deathX = 0.0f;
     float deathZ = 0.0f;
     bool deathRecorded = false;
+    float trackX = 0.0f; // bot-v5 recent-motion fix (still-time anchor)
+    float trackZ = 0.0f;
+    float stillTime = 0.0f;
     bool bodyPresent = false;
     bool pelletFound = false;
     int pelletCarriers = 0;
@@ -621,6 +624,9 @@ void pc_p2_autoplay_tick(void)
                     sEngage.deathX = b->getPosition().x;
                     sEngage.deathZ = b->getPosition().z;
                     sEngage.deathRecorded = true;
+                    sEngage.trackX = sEngage.deathX;
+                    sEngage.trackZ = sEngage.deathZ;
+                    sEngage.stillTime = 0.0f;
                 }
                 sEngage.bodyPresent = true;
                 sEngage.lastX = b->getPosition().x;
@@ -671,10 +677,23 @@ void pc_p2_autoplay_tick(void)
         }
     }
     const bool carryActive = sEngage.carryNear > 0 || sEngage.pelletCarriers > 0;
-    bool corpseMoving = false;
+    // bot-v5 recent motion: displaced-ever (motion history for reasons) AND
+    // displaced again within corpseStillWindow (moving NOW for the window).
+    // A lift that moved then stopped reads moving=false, so the window stops
+    // extending and the Brain's stall re-throw fires instead.
+    bool corpseMoved = false, corpseMoving = false;
     if (sEngage.deathRecorded) {
-        corpseMoving = p2autoplay::corpseDisplaced(sEngage.lastX - sEngage.deathX,
-                                                   sEngage.lastZ - sEngage.deathZ);
+        corpseMoved = p2autoplay::corpseDisplaced(sEngage.lastX - sEngage.deathX,
+                                                  sEngage.lastZ - sEngage.deathZ);
+        const float tx = sEngage.lastX - sEngage.trackX, tz = sEngage.lastZ - sEngage.trackZ;
+        if (tx * tx + tz * tz > 4.0f) { // 2 u jitter margin per tick
+            sEngage.trackX = sEngage.lastX;
+            sEngage.trackZ = sEngage.lastZ;
+            sEngage.stillTime = 0.0f;
+        } else {
+            sEngage.stillTime += dt > 0.0f && dt <= 0.5f ? dt : 0.016f;
+        }
+        corpseMoving = corpseMoved && sEngage.stillTime < p2autoplay::Config().corpseStillWindow;
     }
 
     // --- Senses ---
@@ -700,6 +719,7 @@ void pc_p2_autoplay_tick(void)
     senses.pelletCarriers = sEngage.pelletCarriers;
     senses.pelletExists = sEngage.bodyPresent || sEngage.pelletFound || !sEngage.deadLatch;
     senses.corpseMoving = corpseMoving;
+    senses.corpseMoved = corpseMoved;
     senses.targetDead = deadSignal;
     // Onion receipt for this token (bot-v2 gap 1): durable delivery-ledger
     // query, read-only. carried=1 in RESULT means this was seen.
