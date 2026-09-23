@@ -16,6 +16,15 @@
 // update returns a neutral pad and stays IDLE, which is the
 // inert-when-unset guarantee the native test pins (tools/p2_autoplay_test.cpp).
 //
+// bot-v6 (wf10) deltas, in brief priority order:
+//   1. Power mode takes the squad in ONE step: the driver queues the whole
+//      Onion through the normal exitPikis path once at start, and WithdrawSeek
+//      waits (neutral pad, no menu) until field>=powerWantSquad (80). Normal
+//      mode keeps the menu behaviour untouched.
+//   2. Select verifies the target is still alive: a dead/absent target with no
+//      latched damage is GIVEUP reason=target_gone (token/state as evidence);
+//      a latched kill for the same token returns to Aftermath so v5 delivery
+//      still finishes instead of dropping the engagement silently.
 // bot-v5 (wf10) deltas, in brief priority order:
 //   1. Aftermath never whistles (release B once the target is dead: holding
 //      whistle gathers Pikmin at the navi 36-65 u from the corpse so no carry
@@ -276,6 +285,7 @@ struct Config {
     float stuckMinProgress = 30.0f; // XZ units that count as progress
     int maxApproachReplans = 6; // consecutive STUCK windows before target_unreachable GIVEUP
     int wantSquad = 15; // withdrawn Pikmin before leaving the Onion
+    int powerWantSquad = 80; // bot-v6: power-mode one-step squad readiness (field>=80, no menu)
     int maxWithdrawCycles = 6; // repeat the withdraw menu until field>=wantSquad or Onion empty
     int resupplyThreshold = 5; // Attack/Approach below this field count + Onion stock => disengage + withdraw
 };
@@ -533,6 +543,35 @@ private:
 
     void tickWithdrawSeek(float dt, const Senses& in)
     {
+        // bot-v6 (power mode only): the squad arrives in ONE step through the
+        // normal Onion exit queue (driver calls exitPikis for the whole Onion
+        // once at start), never through the withdraw menu. Each menu cycle only
+        // accumulates ~5-6 Pikmin of UI-local delta (bc4: 9-10 cycles to reach
+        // 100), eating the run; the exit queue births ~100 in ~5 s of game
+        // time. Wait here with a neutral pad until field>=powerWantSquad, then
+        // Select. Normal mode keeps the menu behaviour below, untouched.
+        if (isPowerEnabled()) {
+            if (in.containerOpen) {
+                // v3 guard preserved: never steer while the UI is up.
+                enter(State::WithdrawMenu, in);
+                return;
+            }
+            if (in.fieldPikmin >= cfg.powerWantSquad) {
+                enter(State::Select, in);
+                return;
+            }
+            if (in.onionStored <= 0 && in.fieldPikmin > 0) {
+                // Queue drained with a short squad (or a unit-test sense with
+                // no Onion): fight with the squad on the field.
+                enter(State::Select, in);
+                return;
+            }
+            if (stateTime >= cfg.withdrawTimeout) {
+                giveUp(in, "withdraw_timeout");
+                enter(State::Select, in);
+            }
+            return; // neutral pad: no A taps, no menu, the queue lands on its own
+        }
         if (in.fieldPikmin >= effectiveWantSquad(cfg)) {
             enter(State::Select, in);
             return;
@@ -662,6 +701,18 @@ private:
             return;
         }
         if (in.targetToken == 0 || !in.targetAlive) {
+            // bot-v6: verify the target is still alive before Select. A dead /
+            // absent target used to fall through to Done silently, dropping the
+            // engagement (bc4: kills with no RESULT after an aftermath ->
+            // container bounce). Name it instead: a mid-engagement kill latched
+            // for THIS token returns to Aftermath to finish v5 delivery;
+            // anything else is GIVEUP reason=target_gone with the token/state
+            // as evidence. token==0 (no targets at all) still idles silently.
+            if (result.token != 0 && result.token == in.targetToken && (sawDamage || sawKill)) {
+                enter(State::Aftermath, in);
+                return;
+            }
+            if (in.targetToken != 0) giveUp(in, "target_gone");
             enter(State::Done, in);
             return;
         }

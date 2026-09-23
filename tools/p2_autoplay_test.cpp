@@ -21,6 +21,9 @@
 //     window extends only while carriers>0 AND the corpse moves now;
 //     giveups name the broken link; received=1 only from the token's
 //     own ledger receipt.
+//   * bot-v6: power WithdrawSeek waits pad-neutral (no menu) until field>=80;
+//     Select names a dead/absent target (target_gone) and a latched kill for
+//     the same token resumes Aftermath instead of dropping to Done.
 // Exit 0 only if every check passes; any failure prints FAIL and exits 1.
 #include "pc_p2_autoplay_policy.h"
 
@@ -1608,6 +1611,160 @@ void testAftermathStallRethrow()
           "stall/result_no_carry_claim");
 }
 
+void testPowerFastSquad()
+{
+    // bot-v6: power mode takes the squad in ONE step (driver queues the whole
+    // Onion through exitPikis). WithdrawSeek waits with a neutral pad - no A
+    // taps, no menu hold, no WithdrawMenu cycles - until field>=80, then
+    // Select. Normal mode keeps the menu behaviour (control below).
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", "1");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "10");
+    {
+        p2autoplay::Config cfg;
+        p2autoplay::Brain brain(cfg);
+        p2autoplay::Senses s = liveSenses();
+        brain.update(0.05f, s); // idle -> withdraw_seek
+        CHECK(brain.current() == p2autoplay::State::WithdrawSeek, "powersquad/enters_seek");
+        s.hasOnion = true;
+        s.naviX = 0.0f;
+        s.naviZ = 0.0f;
+        s.onionX = 174.0f;
+        s.onionZ = 0.0f;
+        s.onionDist = 174.0f;
+        s.onionStored = 100;
+        s.fieldPikmin = 0;
+        s.containerOpen = false;
+        // The exit queue lands over seconds: short squads wait, pad-neutral.
+        bool touchedMenu = false;
+        for (int i = 0; i < 40; ++i) {
+            brain.update(0.05f, s);
+            if (brain.current() == p2autoplay::State::WithdrawMenu) touchedMenu = true;
+            const p2autoplay::Command cmd = brain.command();
+            if ((cmd.buttons & unsigned(p2autoplay::PadA)) || cmd.menuHold) touchedMenu = true;
+            for (const std::string& m : brain.takeMarkers()) {
+                if (m.find("withdraw_menu") != std::string::npos) touchedMenu = true;
+            }
+        }
+        CHECK(brain.current() == p2autoplay::State::WithdrawSeek, "powersquad/waits_while_short");
+        CHECK(!touchedMenu, "powersquad/no_menu_while_waiting");
+        s.fieldPikmin = 50; // queue still dispensing: still waits
+        brain.update(0.05f, s);
+        CHECK(brain.current() == p2autoplay::State::WithdrawSeek, "powersquad/waits_at_half");
+        s.fieldPikmin = 85; // one-step squad ready: straight to select
+        brain.update(0.05f, s);
+        CHECK(brain.current() == p2autoplay::State::Select, "powersquad/selects_at_80");
+        CHECK(!hasMarker(brain.takeMarkers(), "AUTOPLAY_WITHDRAW cycle="), "powersquad/no_withdraw_cycles");
+    }
+    // Control: normal mode still works the menu (UI open -> WithdrawMenu).
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", nullptr);
+    {
+        p2autoplay::Config cfg;
+        p2autoplay::Brain brain(cfg);
+        p2autoplay::Senses s = liveSenses();
+        brain.update(0.05f, s);
+        s.hasOnion = true;
+        s.onionDist = 10.0f;
+        s.onionStored = 20;
+        s.fieldPikmin = 0;
+        s.containerOpen = true;
+        brain.update(0.05f, s);
+        CHECK(brain.current() == p2autoplay::State::WithdrawMenu, "powersquad/control_menu_when_off");
+    }
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", nullptr);
+}
+
+void testSelectTargetGone()
+{
+    // bot-v6: Select verifies the target is still alive. A dead/absent target
+    // with no latched damage is GIVEUP reason=target_gone (token/state as
+    // evidence), not a silent Done. A latched kill for the SAME token (e.g.
+    // an aftermath -> container bounce) returns to Aftermath so v5 delivery
+    // still finishes instead of dropping the engagement.
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", "1");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", nullptr);
+    p2autoplay::Config cfg;
+    // Fresh select, target already dead, never damaged: named giveup + Done.
+    {
+        p2autoplay::Brain brain(cfg);
+        p2autoplay::Senses s = liveSenses();
+        s.fieldPikmin = 20;
+        brain.update(0.05f, s);
+        brain.update(0.05f, s); // -> select
+        s.targetToken = 660001;
+        s.targetSource = 24; // Tank
+        s.targetAlive = false; // dead/absent before we ever engaged
+        s.targetHealthFrac = 0.0f;
+        std::vector<std::string> markers;
+        brain.update(0.05f, s);
+        for (const std::string& m : brain.takeMarkers()) markers.push_back(m);
+        CHECK(brain.current() == p2autoplay::State::Done, "targetgone/done_when_dead");
+        CHECK(hasMarker(markers, "AUTOPLAY_GIVEUP reason=target_gone"), "targetgone/giveup_logged");
+        CHECK(hasMarker(markers, "token=660001"), "targetgone/token_evidence");
+        CHECK(hasMarker(markers, "state=select"), "targetgone/state_evidence");
+    }
+    // No targets at all (token 0): still idles silently, no spurious giveup.
+    {
+        p2autoplay::Brain brain(cfg);
+        p2autoplay::Senses s = liveSenses();
+        s.fieldPikmin = 20;
+        brain.update(0.05f, s);
+        brain.update(0.05f, s); // -> select
+        s.targetToken = 0;
+        s.targetAlive = false;
+        brain.update(0.05f, s);
+        CHECK(brain.current() == p2autoplay::State::Done, "targetgone/done_when_empty");
+        CHECK(!hasMarker(brain.takeMarkers(), "target_gone"), "targetgone/no_giveup_when_empty");
+    }
+    // Bounce: kill latched for this token, aftermath -> container UI ->
+    // menu -> select with the target dead: back to Aftermath, no giveup.
+    {
+        p2autoplay::Brain brain(cfg);
+        p2autoplay::Senses s = liveSenses();
+        s.fieldPikmin = 20;
+        brain.update(0.05f, s);
+        brain.update(0.05f, s); // -> select
+        s.targetToken = 660002;
+        s.targetSource = 27; // Tadpole
+        s.targetAlive = true;
+        s.targetDist = 100.0f;
+        s.targetHealthFrac = 1.0f;
+        brain.update(0.05f, s); // -> approach
+        brain.update(0.05f, s); // -> attack
+        s.targetHealthFrac = 0.5f;
+        brain.update(0.05f, s);
+        s.targetAlive = false; // kill
+        s.transportSeen = false;
+        s.receiptSeen = false;
+        brain.update(0.05f, s);
+        CHECK(brain.current() == p2autoplay::State::Aftermath, "targetgone/aftermath_after_kill");
+        s.containerOpen = true; // stepped on the Onion mid-delivery: UI bounce
+        brain.update(0.05f, s);
+        CHECK(brain.current() == p2autoplay::State::WithdrawMenu, "targetgone/bounces_to_menu");
+        // Work the UI like the container guard does: the full-squad confirm
+        // needs menuHoldTime>1.2 s and stateTime>4 s while open...
+        for (int i = 0; i < 100 && brain.current() == p2autoplay::State::WithdrawMenu; ++i) {
+            brain.update(0.05f, s);
+        }
+        s.containerOpen = false; // ... then the UI closes and the menu leaves.
+        s.onionStored = 0;
+        for (int i = 0; i < 10 && brain.current() == p2autoplay::State::WithdrawMenu; ++i) {
+            brain.update(0.05f, s);
+        }
+        CHECK(brain.current() == p2autoplay::State::Select, "targetgone/menu_returns_to_select");
+        // ... select sees the same dead token with the kill latched ...
+        std::vector<std::string> markers;
+        for (int i = 0; i < 5; ++i) {
+            brain.update(0.05f, s);
+            for (const std::string& m : brain.takeMarkers()) markers.push_back(m);
+            if (brain.current() != p2autoplay::State::Select) break;
+        }
+        CHECK(brain.current() == p2autoplay::State::Aftermath, "targetgone/latched_kill_resumes_aftermath");
+        CHECK(!hasMarker(markers, "target_gone"), "targetgone/no_giveup_for_latched_kill");
+    }
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
+}
+
 } // namespace
 
 int main()
@@ -1642,6 +1799,8 @@ int main()
     testAftermathGiveupReasons();
     testReceiptPerTokenOnly();
     testAftermathStallRethrow();
+    testPowerFastSquad();
+    testSelectTargetGone();
     if (failures == 0) {
         std::printf("PASS p2_autoplay\n");
         return 0;

@@ -13,6 +13,11 @@
 // Otherwise tick() returns before touching anything: production input is
 // untouched (native test: tools/p2_autoplay_test.cpp).
 //
+// bot-v6 (wf10): power mode takes the squad in ONE step (whole Onion queued
+// through the normal exitPikis path once at start; WithdrawSeek waits neutral
+// until field>=80, no menu) and logs AUTOPLAY_POWER squad=<n> seconds=<t>;
+// Select names a dead/absent target (GIVEUP reason=target_gone) and a latched
+// kill for the same token returns to Aftermath so delivery still finishes.
 // bot-v5 (wf10): aftermath delivers (no whistle; onto the corpse, throw to
 // seed grabs, back off, bounded re-throws) with live per-corpse carry sensing
 // (TransportMode bodies near the corpse + pellet carriers), a window that
@@ -149,6 +154,7 @@ std::chrono::steady_clock::time_point sFpsStart = std::chrono::steady_clock::now
 bool sFpsLogged = false;
 bool sPowerLogged = false; // bot-v4: AUTOPLAY_POWER is logged exactly once per process
 bool sPowerStocked = false; // bot-v4b: power-mode Onion stock runs once per process
+float sPowerSeconds = 0.0f; // bot-v6: game-time seconds since the first live power tick
 
 // BFS over the raw waypoint link graph (bot-v2 gap 2 fallback): the engine
 // findSync below is the primary real graph search (A* over the same graph);
@@ -446,14 +452,15 @@ void pc_p2_autoplay_tick(void)
                 ++distress;
         }
     }
-    if (powerMode && !sPowerLogged && alive > 0
-        && (sBrain.current() == p2autoplay::State::Attack
-            || sBrain.current() == p2autoplay::State::Aftermath)) {
-        // First fight tick with a field squad: the power squad is complete
-        // (withdraw finished before Select), so this logs its real size.
+    if (powerMode) sPowerSeconds += (dt > 0.0f && dt <= 0.5f) ? dt : 0.016f;
+    if (powerMode && !sPowerLogged && alive >= 80) {
+        // bot-v6: the one-step squad is in the field (queued through the
+        // normal Onion exit path at start, no menu cycles). Log its real size
+        // with the game-time seconds it took, whatever state we are in
+        // (normally still WithdrawSeek) - this is the field>=80 evidence.
         sPowerLogged = true;
-        std::printf("AUTOPLAY_POWER squad=%d maturity=flower damage_mult=%g bot-driven\n",
-                    alive, double(p2autoplay::powerDamageMult()));
+        std::printf("AUTOPLAY_POWER squad=%d seconds=%.0f maturity=flower damage_mult=%g bot-driven\n",
+                    alive, double(sPowerSeconds), double(p2autoplay::powerDamageMult()));
         std::fflush(stdout);
     }
 
@@ -467,6 +474,13 @@ void pc_p2_autoplay_tick(void)
     // playerState born/living/plucked counters. Stocked as Leaf (the normal
     // birth stage); the power-mode census above flowers the field squad
     // through the normal setFlower path after withdrawal.
+    // bot-v6: then put the whole Onion in the field in ONE step through the
+    // normal day-start exit path (GoalItem::exitPikis, the same call
+    // gameCoreSection uses for the starting squad). The withdraw menu only
+    // accumulates ~5-6 Pikmin of UI-local delta per cycle (bc4: 9-10 cycles to
+    // reach 100), eating the run; the exit queue births ~100 in ~5 s of game
+    // time with no menu input. The Brain waits it out in WithdrawSeek (power
+    // path: neutral pad, no A) until field>=80.
     if (powerMode && !sPowerStocked && playerState) {
         int stockColor = pc_randomizer_enabled() ? pc_randomizer_start_color() : Red;
         if (stockColor < PikiMinColor || stockColor > PikiMaxColor) stockColor = Red;
@@ -496,6 +510,14 @@ void pc_p2_autoplay_tick(void)
                 std::printf("AUTOPLAY_POWER_STOCK color=%d added=%d stored=%d field=%d bot-driven\n",
                             stockColor, delta, stored + delta, alive);
                 std::fflush(stdout);
+            }
+            // bot-v6 one-step squad: queue the whole stocked Onion to the field
+            // through the normal exit path (clamped by field capacity, 100 in
+            // power mode). Dispenses via exitPiki births over the next seconds;
+            // the Brain's power WithdrawSeek waits for field>=80 meanwhile.
+            {
+                const int total = stockOnion->getTotalStorePikis();
+                if (total > 0) stockOnion->exitPikis(total);
             }
             sPowerStocked = true;
         }
