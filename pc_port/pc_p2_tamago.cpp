@@ -661,8 +661,13 @@ void pc_p2_tamago_update(BTeki* actor) {
             if (s.stateTime > TURN_TIME) enter(s, TAMAGO_WALK, "move");
             break;
         case TAMAGO_DEAD:
+            // inst-bugs lane (#871): never drive P1 death here. The host's
+            // natural damage->die()->dieSoon->becomePellet flow pelletizes
+            // the corpse exactly like the Uji family's (an explicit die()
+            // here stranded the actor: sliding dead Teki, no pellet, the
+            // bot chased it with carriers=0 until carry_no_grab). The dead
+            // clip still plays through the batch-2 forced-clip path.
             stop(actor);
-            if (s.stateTime >= clipDuration("dead")) actor->die();
             break;
         default:
             break;
