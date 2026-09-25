@@ -169,6 +169,7 @@ struct Snake {
     float phase = 0.0f;
     unsigned rng = 1;
     bool deadLogged = false;
+    bool escaped = false;
     float logTimer = 0.0f;
     // Slice-2 vulnerability gate: EB_Invulnerable only while buried (Stay).
     bool rejectLogged = false;  // first rejected attack per buried period
@@ -375,8 +376,11 @@ void pc_p2_snakejoint_forget(BTeki* actor) {
     corpses.erase(static_cast<PelletView*>(actor));
 }
 
-float pc_p2_snakejoint_param_f(const BTeki* actor, int idx, float fallback) {
-    if (!ready) return fallback;
+bool pc_p2_snakejoint_suppress_ai(const BTeki* actor) {
+    return ready && actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor))) != 0;
+}
+
+float pc_p2_snakejoint_param_f(const BTeki* actor, int idx, float fallback) {    if (!ready) return fallback;
     auto it = actors.find(static_cast<PelletView*>(const_cast<BTeki*>(actor)));
     if (it == actors.end()) return fallback;
     if (idx == TPF_Life) return it->second.parms->life;
@@ -572,6 +576,10 @@ void pc_p2_snakejoint_update(BTeki* actor) {
     if (it == actors.end()) return;
     Snake& s = it->second;
     const SpeciesParms& parms = *s.parms;
+    // The P1 TAI reaction path is suppressed for registered snagrets
+    // (pc_p2_snakejoint_suppress_ai), so the source FSM applies pending
+    // damage itself. Mirrors pc_p2_frog_update.
+    if (actor->mStoredDamage > 0.0f) actor->makeDamaged();
     const float dt = gsys->getFrameTime();
     if (dt <= 0.0f || dt > 0.5f) return;
     const Vector3f pos = actor->getPosition();
@@ -749,7 +757,13 @@ void pc_p2_snakejoint_update(BTeki* actor) {
     }
     case SNAKE_DEAD:
         stop(actor);
-        if (s.stateTime >= clipDuration(parms.name, "dead")) actor->die();
+        // dieSoon() only runs inside the P1 doAI block, which is suppressed
+        // for registered snagrets; pcEscapeNow() finalizes the corpse outside
+        // doAI, fired exactly once when the dead clip completes. Mirrors frog.
+        if (!s.escaped && s.stateTime >= clipDuration(parms.name, "dead")) {
+            s.escaped = true;
+            actor->pcEscapeNow();
+        }
         break;
     default:
         break;

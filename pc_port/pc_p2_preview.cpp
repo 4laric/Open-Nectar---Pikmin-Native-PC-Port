@@ -168,6 +168,16 @@ void pc_p2_preview_setup() {
             pc_p2_sokkuri_setup();
             pc_p2_otakara_setup();
             pc_p2_batch2_setup();  // P2 models for the Otakara/Sokkuri behaviour hosts
+            // inst-worms lane (#871) round 2: the P2 FSM must actually run in
+            // bridge mode. Round-1 review found these setups never ran in a
+            // campaign session (bridge branch omitted them), so every tick
+            // was P1 Chappy host AI (PROXY). Bind them here alongside the
+            // visuals (batch2 covers ground Imomushi, batch3 covers
+            // snagret/aquatic).
+            pc_p2_snakejoint_setup();
+            pc_p2_imomushi_setup();
+            pc_p2_umimushi_setup();
+            pc_p2_batch3_setup();
         }
         return;
     }

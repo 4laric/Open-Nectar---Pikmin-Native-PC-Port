@@ -20,6 +20,15 @@ void pc_p2_snakejoint_setup();
 void pc_p2_snakejoint_reset();
 void pc_p2_snakejoint_forget(BTeki*);
 void pc_p2_snakejoint_update(BTeki*);
+bool pc_p2_snakejoint_suppress_ai(const BTeki*);
+// Engine-free suppression predicate shared by pc_p2_snakejoint_suppress_ai
+// and the focused gate test. The P2 FSM drives movement/targeting/attacks
+// every tick for a registered snagret, so the P1 Chappy host strategy
+// (BTeki::doAI) must not run for it; unregistered actors are unaffected.
+// Mirrors pc_p2_frog_suppress_ai.
+inline bool pc_p2_snakejoint_suppressed(bool registered) {
+    return registered;
+}
 float pc_p2_snakejoint_param_f(const BTeki*, int idx, float fallback);
 bool pc_p2_snakejoint_clip(const BTeki*, const char*& name, float& phase);
 bool pc_p2_snakejoint_receipt(class PelletView*, unsigned&);

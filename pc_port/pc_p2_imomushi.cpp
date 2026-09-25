@@ -98,6 +98,7 @@ struct Imomushi {
     Vector3f home;
     bool hiddenLogged = false;
     bool deadLogged = false;
+    bool escaped = false;
     std::string clip = "set";
     float phase = 0.0f;
     float logTimer = 0.0f;
@@ -199,6 +200,10 @@ void pc_p2_imomushi_forget(BTeki* actor) {
     pc_randomizer_p2_forget_source(static_cast<PelletView*>(actor));
     actors.erase(static_cast<PelletView*>(actor));
     corpses.erase(static_cast<PelletView*>(actor));
+}
+
+bool pc_p2_imomushi_suppress_ai(const BTeki* actor) {
+    return ready && actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor))) != 0;
 }
 
 float pc_p2_imomushi_param_f(const BTeki* actor, int idx, float fallback) {
@@ -324,6 +329,10 @@ void pc_p2_imomushi_update(BTeki* actor) {
     auto it = actors.find(static_cast<PelletView*>(actor));
     if (it == actors.end()) return;
     Imomushi& s = it->second;
+    // The P1 TAI reaction path is suppressed for registered whiskerpillars
+    // (pc_p2_imomushi_suppress_ai), so the source FSM applies pending damage
+    // itself. Mirrors pc_p2_frog_update.
+    if (actor->mStoredDamage > 0.0f) actor->makeDamaged();
     const float dt = gsys->getFrameTime();
     if (dt <= 0.0f || dt > 0.5f) return;
     const Vector3f pos = actor->getPosition();
@@ -396,7 +405,13 @@ void pc_p2_imomushi_update(BTeki* actor) {
         break;
     case IMOMUSHI_DEAD:
         stop(actor);
-        if (s.stateTime >= clipDuration("dead")) actor->die();
+        // dieSoon() only runs inside the P1 doAI block, which is suppressed
+        // for registered whiskerpillars; pcEscapeNow() finalizes the corpse
+        // outside doAI, fired exactly once when the dead clip completes.
+        if (!s.escaped && s.stateTime >= clipDuration("dead")) {
+            s.escaped = true;
+            actor->pcEscapeNow();
+        }
         break;
     default:
         break;

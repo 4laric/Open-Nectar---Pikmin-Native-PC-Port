@@ -159,6 +159,8 @@ struct Umi {
     bool blindWaiting = false;
     float blindWaitTimer = 0.0f;
     float blindMoveTimer = 0.0f;
+    bool escaped = false;
+    float lastHealth = 0.0f;
 };
 
 std::map<PelletView*, Umi> actors;
@@ -447,7 +449,7 @@ const char* clipForState(State st) {
 }
 void setState(BTeki* a, Umi& s, State state, const char* clip) {
     enter(s, state, clip);
-    const unsigned generator = a->mGenerator ? a->mGenerator->_70 : 0u;
+    const unsigned generator = a->mGenerator ? pc_p2_campaign_token(a) : 0u;
     std::printf("P2_UMIMUSHI_STATE generator=%u state=%s\n", generator, stateName(state));
     std::fflush(stdout);
 }
@@ -524,6 +526,10 @@ void pc_p2_umimushi_forget(BTeki* actor) {
     pc_randomizer_p2_forget_source(static_cast<PelletView*>(actor));
     actors.erase(static_cast<PelletView*>(actor));
     corpses.erase(static_cast<PelletView*>(actor));
+}
+
+bool pc_p2_umimushi_suppress_ai(const BTeki* actor) {
+    return ready && actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor))) != 0;
 }
 
 float pc_p2_umimushi_param_f(const BTeki* actor, int idx, float fallback) {
@@ -647,6 +653,7 @@ void pc_p2_umimushi_setup() {
         s.heading = actor->getDirection();
         actor->mHealth = s.blind ? BLIND_LIFE : LIFE;
         actor->mMaxHealth = actor->mHealth;
+        s.lastHealth = actor->mHealth;
         // Source setParameters applies scale 0.5 to Blind; the P1 host draws the
         // actor from mSRT.s (batch-3 onCamMtx), so the visual is genuinely half.
         if (s.blind) actor->mSRT.s.set(BLIND_SCALE, BLIND_SCALE, BLIND_SCALE);
@@ -694,6 +701,18 @@ void pc_p2_umimushi_update(BTeki* actor) {
     if (dt <= 0.0f || dt > 0.5f) return;
     const Vector3f pos = actor->getPosition();
     const unsigned generator = actor->mGenerator ? pc_p2_campaign_token(actor) : 0u;
+    // The P1 TAI reaction path is suppressed for registered bloysters
+    // (pc_p2_umimushi_suppress_ai), so the source FSM applies pending damage
+    // itself. Mirrors pc_p2_frog_update.
+    if (actor->mStoredDamage > 0.0f) actor->makeDamaged();
+    // Natural-combat observability: incremental still-positive decrease is
+    // real attack damage. Mirrors P2_FROG_DAMAGE.
+    if (actor->mHealth < s.lastHealth && actor->mHealth > 0.0f) {
+        std::printf("P2_UMIMUSHI_DAMAGE generator=%u source_id=%d health=%.1f\n",
+                    generator, s.sourceId, actor->mHealth);
+        std::fflush(stdout);
+    }
+    s.lastHealth = actor->mHealth;
 
     if (actor->mHealth <= 0.0f && s.state != UMI_DEAD) {
         if (!s.deadLogged) {
@@ -863,7 +882,13 @@ void pc_p2_umimushi_update(BTeki* actor) {
         break;
     case UMI_DEAD:
         stop(actor);
-        if (s.stateTime >= clipDuration("dead1")) actor->die();
+        // dieSoon() only runs inside the P1 doAI block, which is suppressed
+        // for registered bloysters; pcEscapeNow() finalizes the corpse outside
+        // doAI, fired exactly once when the dead clip completes. Mirrors frog.
+        if (!s.escaped && s.stateTime >= clipDuration("dead1")) {
+            s.escaped = true;
+            actor->pcEscapeNow();
+        }
         break;
     default:
         break;

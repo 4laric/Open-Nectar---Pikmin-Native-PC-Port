@@ -556,6 +556,9 @@ static void campaignWanted(const FamilyDef& family, std::map<unsigned, std::stri
         {"dweevil", 59, "FireOtakara"}, {"dweevil", 60, "WaterOtakara"},
         {"dweevil", 61, "GasOtakara"}, {"dweevil", 62, "ElecOtakara"},
         {"ground", 79, "Sokkuri"},
+        // inst-worms lane (#871) round 2: Ravenous Whiskerpillar (65) draws
+        // its P2 model through the ground family in bridge mode.
+        {"ground", 65, "Imomushi"},
     };
     wanted.clear();
     for (const auto& row : SOURCES)
@@ -592,10 +595,14 @@ static void bindFamilies(bool strict) {
             if (wanted.empty()) continue;
         } else {
             const bool haveActors = parseActors(family.actors, wanted);
-            if (!haveActors) continue;
             if (bridge) {
+                // Bridge mode: campaign identity comes from the seed via
+                // campaignWanted; a missing preview actors sidecar must not
+                // block the campaign bind (mirrors the worms FSM setups).
                 campaignWanted(family, wanted);
                 if (wanted.empty()) continue;
+            } else {
+                if (!haveActors) continue;
             }
         }
         std::map<std::string, std::vector<p2batch2clock::Row>> rows;
@@ -617,7 +624,13 @@ static void bindFamilies(bool strict) {
                 haveBank = true;
             }
         } else {
-            if (!parseBank(family.bank, rows)) fail("missing bank for present actor config");
+            if (!parseBank(family.bank, rows)) {
+                if (bridge) {
+                    std::printf("P2_SETUP_SKIP batch2 %s missing_bank\n", family.name);
+                    continue;
+                }
+                fail("missing bank for present actor config");
+            }
             haveBank = true;
         }
 
@@ -692,6 +705,20 @@ static void bindFamilies(bool strict) {
                     eraseProxySpecies(std::string(family.name) + "|" + species);
                     continue;
                 }
+                if (bridge) {
+                    // Bridge mode: a bound campaign actor without staged bank
+                    // clips keeps its P2 behaviour (FSM setups bind sources)
+                    // and skips only the P2 visual. Unbinds this species key.
+                    std::printf("P2_SETUP_SKIP batch2 %s no_bank_clips species=%s\n",
+                                family.name, species.c_str());
+                    for (auto ai = actors.begin(); ai != actors.end();) {
+                        if (ai->second == std::string(family.name) + "|" + species)
+                            ai = actors.erase(ai);
+                        else
+                            ++ai;
+                    }
+                    continue;
+                }
                 fail("species has no bank clips");
             }
             if (soft && !proxyPoseAvailable(family, species, clipRows->second)) {
@@ -731,7 +758,28 @@ static void bindFamilies(bool strict) {
                 }
                 banks[key] = std::move(bank);
             } else if (!banks.count(key)) {
-                banks[key] = loadBank(family, species, clipRows->second);
+                if (bridge) {
+                    // Bridge mode: a pose-load failure degrades to a visual
+                    // skip (behaviour still bound), never a campaign abort.
+                    const size_t bytesBefore = bytesTotal;
+                    std::string loadError;
+                    Bank bank = loadBank(family, species, clipRows->second, &loadError);
+                    if (!loadError.empty()) {
+                        bytesTotal = bytesBefore;
+                        std::printf("P2_SETUP_SKIP batch2 %s load_failed species=%s reason=%s\n",
+                                    family.name, species.c_str(), loadError.c_str());
+                        for (auto ai = actors.begin(); ai != actors.end();) {
+                            if (ai->second == key)
+                                ai = actors.erase(ai);
+                            else
+                                ++ai;
+                        }
+                        continue;
+                    }
+                    banks[key] = std::move(bank);
+                } else {
+                    banks[key] = loadBank(family, species, clipRows->second);
+                }
             }
         }
     }
@@ -959,10 +1007,20 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
             std::fflush(stdout);
         }
     }
+    // inst-worms lane (#871) round 2: per-actor campaign DRAW markers for
+    // ground|Imomushi (the global P2_BATCH2_DRAW above fires once per session
+    // and may belong to another family). Once per actor, corpse separately.
+    if (entry->second == "ground|Imomushi") {
+        const unsigned token = pc_p2_campaign_token(actor);
+        const std::string memo =
+            std::string(corpse ? "1|" : "0|") + entry->second + "|" + std::to_string(token);
+        if (proxyDrawn.insert(memo).second)
+            std::printf("P2_IMOMUSHI_DRAW corpse=%d key=%s clip=%s token=%u generator=%u\n",
+                        int(corpse), entry->second.c_str(), name, token, token);
+    }
     // Proxy species are probed per species, so each proxy key reports its first
     // live and first corpse draw (#871); the families above keep the single line.
-    if (entry->second.compare(0, 6, "proxy|") == 0) {
-        const unsigned token = pc_p2_campaign_token(actor);
+    if (entry->second.compare(0, 6, "proxy|") == 0) {        const unsigned token = pc_p2_campaign_token(actor);
         if (proxyDrawn.insert(std::string(corpse ? "1|" : "0|") + entry->second + "|" + std::to_string(token)).second)
             std::printf("P2_PROXY_DRAW corpse=%d key=%s clip=%s token=%u\n", int(corpse), entry->second.c_str(), name, token);
         // Probe screenshot hook (#871): the FIRST live draw per key (not per
