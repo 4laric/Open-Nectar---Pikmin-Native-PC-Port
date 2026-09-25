@@ -372,7 +372,13 @@ float pc_p2_tamago_param_f(const BTeki* actor, int idx, float fallback) {
 
 int pc_p2_tamago_corpse_type(const BTeki* actor, int fallback) {
     if (!ready || !actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor)))) return fallback;
-    return TEKICORPSE_NoCorpse; // honey reward instead of a corpse
+    // inst-bugs lane (#871): a killed Mitite leaves its natural carriable
+    // corpse (the campaign kill->carry->Onion loop needs a real pellet for
+    // the onion:p2:68 receipt) alongside the exactly-once honey drop
+    // (dropHoney). Previously NoCorpse here made every identity corpse
+    // uncarriable (carry_no_grab, carriers=0): the dead Teki slid without
+    // ever pelletizing because dieSoon saw NoCorpse.
+    return fallback;
 }
 
 bool pc_p2_tamago_clip(const BTeki* actor, const char*& name, float& phase) {
