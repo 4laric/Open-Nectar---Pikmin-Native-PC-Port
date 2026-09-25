@@ -672,8 +672,24 @@ void pc_p2_long_legs_update(BTeki* actor) {
             // otherwise), so the Teki facing control is available.
             static_cast<Teki*>(actor)->setDirection(std::atan2(dx, dz));
             state.walkDistance += step;
+            // Last-word drive (inst3-misc OWN): P2 FSM decides movement each
+            // tick; host Swallow/Chappy TAI is suppressed (doAI) and blinded
+            // (param_f), and this overwrite is the movement verdict.
+            const float heading = std::atan2(dx, dz);
+            const Vector3f drive(std::sin(heading) * state.parms.speed, 0.0f,
+                                 std::cos(heading) * state.parms.speed);
+            actor->inputDrive(drive);
+            actor->mVelocity.set(drive);
+        } else {
+            actor->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
+            actor->mVelocity.x = 0.0f;
+            actor->mVelocity.z = 0.0f;
         }
     } else {
+        // Non-Walk states: P2 holds the actor (last-word zero drive).
+        actor->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
+        actor->mVelocity.x = 0.0f;
+        actor->mVelocity.z = 0.0f;
         state.lastMoveRatio = 1.0f;
         if (before == P2LongLegsState::Walk && state.hasWalkTarget) {
             std::printf("P2_LONG_LEGS_WALK_END species=%s generator=%u distance=%.1f seconds=%.2f start=%.1f,%.1f end=%.1f,%.1f\n",
@@ -742,6 +758,33 @@ unsigned long pc_p2_long_legs_count() {
 
 bool pc_p2_long_legs_registered(BTeki* actor) {
     return actors.count(actor) != 0;
+}
+
+bool pc_p2_long_legs_suppress_ai(const BTeki* actor) {
+    if (!actor) return false;
+    return actors.count(const_cast<BTeki*>(actor)) != 0;
+}
+
+float pc_p2_long_legs_param_f(const BTeki* actor, int idx, float fallback) {
+    if (!actor || !actors.count(const_cast<BTeki*>(actor))) return fallback;
+    // Catfish pattern: blind the P1 host strategy so it cannot acquire or
+    // attack while the P2 FSM drives. Life stays host-owned (damage funnel).
+    switch (idx) {
+    case TPF_VisibleRange:
+    case TPF_VisibleAngle:
+    case TPF_AttackableRange:
+    case TPF_AttackableAngle:
+    case TPF_AttackRange:
+    case TPF_AttackHitRange:
+    case TPF_AttackPower:
+    case TPF_DangerTerritoryRange:
+    case TPF_SafetyTerritoryRange:
+        return 0.0f;
+    case TPF_LifeRecoverRate:
+        return 0.0f;
+    default:
+        return fallback;
+    }
 }
 
 bool pc_p2_long_legs_damageable(const BTeki* actor) {
