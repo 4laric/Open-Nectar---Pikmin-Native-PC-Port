@@ -743,7 +743,8 @@ bool pc_p2_batch3_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     {
         // generator= carries the campaign token (pack members share it), so
         // the bot-campaign scorer attributes the draw to the bound slot.
-        const unsigned drawToken = pc_p2_campaign_token(actor);
+        unsigned drawToken = pc_p2_campaign_token(actor);
+        if (!drawToken && actor->mGenerator) drawToken = actor->mGenerator->_70;
         if (drawnKeys.insert(std::string(corpse ? "1|" : "0|") + entry->second + "|" + std::to_string(drawToken)).second) {
             std::printf("P2_BATCH3_DRAW corpse=%d key=%s clip=%s generator=%u token=%u\n", int(corpse), entry->second.c_str(), name, drawToken, drawToken);
             std::fflush(stdout);

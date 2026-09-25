@@ -89,6 +89,8 @@ struct Uji {
     float lastHealth = 100.0f;
     bool deadLogged = false;
     bool hitLogged = false;
+    bool attackHit = false;
+    bool escaped = false;
     float tickAccum = 0.0f;
     std::string clip = "dive";
     float phase = 0.0f;
@@ -158,7 +160,48 @@ bool targetInRange(const Vector3f& pos, float range) {
 void enter(Uji& s, State state) {
     s.fsm.state = state;
     s.fsm.stateTime = 0.0f;
+    s.attackHit = false;
     s.clip = Fsm::clipFor(state, s.kind);
+}
+const char* stateName(State s);
+// Nearest live Pikmin/Navi for the P2-owned bite and for turn-to-target.
+Creature* nearestFoe(const Vector3f& pos, float range) {
+    Creature* best = nullptr;
+    float bestSq = range * range;
+    if (naviMgr) {
+        Navi* n = naviMgr->getNavi();
+        if (n && n->isAlive()) {
+            const float dx = n->getPosition().x - pos.x, dz = n->getPosition().z - pos.z;
+            const float d = dx * dx + dz * dz;
+            if (d < bestSq) { bestSq = d; best = n; }
+        }
+    }
+    if (pikiMgr) {
+        Iterator it(pikiMgr);
+        CI_LOOP(it) {
+            Piki* p = static_cast<Piki*>(*it);
+            if (!p || !p->isAlive()) continue;
+            const float dx = p->getPosition().x - pos.x, dz = p->getPosition().z - pos.z;
+            const float d = dx * dx + dz * dz;
+            if (d < bestSq) { bestSq = d; best = p; }
+        }
+    }
+    return best;
+}
+// OWN attack (replaces the host Kabekui bite): the P2 FSM deals the retail
+// fp01 bridge-bite damage once per attack entry to the nearest victim in
+// reach. Logged P2_UJI_ATTACK so evidence attributes the kill to the P2 FSM.
+void ujiStrike(BTeki* a, Uji& s, unsigned generator) {
+    if (s.attackHit) return;
+    s.attackHit = true;
+    Creature* victim = nearestFoe(a->getPosition(), s.parms.attackRange);
+    if (!victim) return;
+    const bool navi = naviMgr && victim == naviMgr->getNavi();
+    victim->stimulate(InteractAttack(a, nullptr, s.parms.bridgeDamage, false));
+    std::printf("P2_UJI_ATTACK generator=%u source_id=%d target=%s damage=%.1f state=%s\n",
+                generator, s.sourceId, navi ? "navi" : "pikmin",
+                s.parms.bridgeDamage, stateName(s.fsm.state));
+    std::fflush(stdout);
 }
 void wander(BTeki* a, Uji& s, float speed) {
     a->setDirection(s.heading);
@@ -207,6 +250,9 @@ void pc_p2_uji_reset() {
 }
 unsigned long pc_p2_uji_count() { return (unsigned long)actors.size(); }
 bool pc_p2_uji_registered(BTeki* actor) { return actors.count(static_cast<PelletView*>(actor)) != 0; }
+bool pc_p2_uji_suppress_ai(const BTeki* actor) {
+    return ready && actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor))) != 0;
+}
 void pc_p2_uji_forget(BTeki* actor) {
     // Lane 06 single-use binding: drop the ordinary-delivery source so a
     // recycled actor address can never inherit it and credit the P1 proxy
@@ -222,7 +268,21 @@ float pc_p2_uji_param_f(const BTeki* actor, int idx, float fallback) {
         auto it = actors.find(static_cast<PelletView*>(const_cast<BTeki*>(actor)));
         return it->second.parms.life;
     }
-    return fallback;
+    if (idx == TPF_LifeRecoverRate) return 0.0f;
+    switch (idx) {
+    case TPF_VisibleRange:
+    case TPF_VisibleAngle:
+    case TPF_AttackableRange:
+    case TPF_AttackableAngle:
+    case TPF_AttackRange:
+    case TPF_AttackHitRange:
+    case TPF_AttackPower:
+    case TPF_DangerTerritoryRange:
+    case TPF_SafetyTerritoryRange:
+        return 0.0f;
+    default:
+        return fallback;
+    }
 }
 
 bool pc_p2_uji_clip(const BTeki* actor, const char*& name, float& phase) {
@@ -373,6 +433,10 @@ void pc_p2_uji_update(BTeki* actor) {
     const Vector3f pos = actor->getPosition();
     const unsigned generator = genOf(actor);
 
+    // The P1 TAI damage reaction lives in the suppressed host strategy, so
+    // the P2 FSM drains queued Pikmin damage itself (frog pattern).
+    if (actor->mStoredDamage > 0.0f) actor->makeDamaged();
+
     if (actor->mHealth < s.lastHealth && actor->mHealth > 0.0f && !s.hitLogged) {
         std::printf("P2_UJI_HIT generator=%u source_id=%d health=%.1f\n",
                     generator, s.sourceId, actor->mHealth);
@@ -392,6 +456,13 @@ void pc_p2_uji_update(BTeki* actor) {
         return;
     }
     if (s.fsm.state == UJI_DEAD) {
+        // dieSoon() only runs inside the suppressed host doAI; finalize the
+        // corpse outside doAI once the dead clip completes (frog pattern).
+        s.fsm.stateTime += dt;
+        if (!s.escaped && s.fsm.stateTime >= clipDuration(s, "dead")) {
+            s.escaped = true;
+            actor->pcEscapeNow();
+        }
         setPhase(s, dt);
         return;
     }
@@ -412,6 +483,7 @@ void pc_p2_uji_update(BTeki* actor) {
         if (s.fsm.tick(in, s.parms, s.kind, out) && s.fsm.state != before) {
             s.clip = Fsm::clipFor(s.fsm.state, s.kind);
             s.phase = 0.0f;
+            s.attackHit = false;
             std::printf("P2_UJI_STATE generator=%u state=%s\n", generator, stateName(s.fsm.state));
             std::fflush(stdout);
             moved = true;
@@ -419,19 +491,38 @@ void pc_p2_uji_update(BTeki* actor) {
     }
     (void)moved;
 
-    // Drive the P1 vehicle per state (source Move/MoveSide/MoveCentre/MoveTop
-    // wander collapsed to a bounded heading wander; attack windows stop).
+    // Drive the P1 vehicle per state. Source Move wanders toward the target
+    // (turnToTarget); the fixed heading drift is kept only with no target in
+    // sight. Attack windows stop and deal the OWN P2 bite (ujiStrike).
     switch (s.fsm.state) {
     case UJI_MOVE:
     case UJI_GOHOME:
-    case UJI_FLY:
+    case UJI_FLY: {
         if (s.fsm.state == UJI_GOHOME) {
             const float dx = s.home.x - pos.x, dz = s.home.z - pos.z;
             if (dx * dx + dz * dz > 1e-6f) s.heading = std::atan2(dx, dz);
+        } else if (Creature* foe = nearestFoe(pos, s.parms.sight)) {
+            // Source turnToTarget at ~2 rad/s toward the prey.
+            const Vector3f fp = foe->getPosition();
+            const float desired = std::atan2(fp.x - pos.x, fp.z - pos.z);
+            const float maxTurn = 2.0f * dt;
+            float diff = wrapPi(desired - s.heading);
+            if (diff > maxTurn) diff = maxTurn;
+            if (diff < -maxTurn) diff = -maxTurn;
+            s.heading = wrapPi(s.heading + diff);
         } else {
             s.heading = wrapPi(s.heading + 0.6f * dt);
         }
         wander(actor, s, s.parms.moveSpeed);
+        break;
+    }
+    case UJI_ATTACK1:
+    case UJI_ATTACK2:
+        stop(actor);
+        ujiStrike(actor, s, generator);
+        break;
+    case UJI_EAT:
+        stop(actor);
         break;
     default:
         stop(actor);

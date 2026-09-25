@@ -120,6 +120,7 @@ struct ElecBug {
     bool immuneLogged = false;
     bool flipped = false;
     bool deadLogged = false;
+    bool escaped = false;
     float lastHealth = LIFE;
     std::string clip = "wait";
     float phase = 0.0f;
@@ -147,7 +148,15 @@ bool clipLoops(const std::string& name) {
     auto it = clips.find(name);
     return it != clips.end() && it->second.loop;
 }
-unsigned genOf(const BTeki* actor) { return actor && actor->mGenerator ? actor->mGenerator->_70 : 0u; }
+unsigned genOf(const BTeki* actor) {
+    // Bridge pack members may carry a placeholder _70; the seed token is the
+    // stable own-token for evidence (setup binds by it). Fall back to _70
+    // off-bridge. Fixes the generator=0 HIT/DEAD/PRESS attribution.
+    if (!actor) return 0u;
+    const unsigned token = pc_p2_campaign_token(const_cast<BTeki*>(actor));
+    if (token) return token;
+    return actor->mGenerator ? actor->mGenerator->_70 : 0u;
+}
 ElecBug* lookup(BTeki* actor) {
     auto it = actors.find(static_cast<PelletView*>(actor));
     return it == actors.end() ? nullptr : &it->second;
@@ -327,6 +336,9 @@ void pc_p2_elecbug_reset() {
 // count/membership so the lifecycle fixture can prove forget clears stale state.
 unsigned long pc_p2_elecbug_count() { return (unsigned long)actors.size(); }
 bool pc_p2_elecbug_registered(BTeki* actor) { return actors.count(static_cast<PelletView*>(actor)) != 0; }
+bool pc_p2_elecbug_suppress_ai(const BTeki* actor) {
+    return ready && actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor))) != 0;
+}
 void pc_p2_elecbug_forget(BTeki* actor) {
     // Lane 06 single-use binding: drop the ordinary-delivery source so a
     // recycled actor address can never inherit source 28. The central
@@ -577,6 +589,12 @@ void pc_p2_elecbug_update(BTeki* actor) {
     const Vector3f pos = actor->getPosition();
     const unsigned generator = genOf(actor);
 
+    // The P1 TAI damage reaction lives in the suppressed host strategy, so
+    // the P2 FSM drains queued Pikmin damage itself (frog pattern). The
+    // pre-flip invulnerability gate (pc_p2_elecbug_attacked) still swallows
+    // attack interactions; this only applies admitted damage.
+    if (actor->mStoredDamage > 0.0f) actor->makeDamaged();
+
     // Natural press (Purple landing) -> source StateReverse, before the health
     // bookkeeping so a same-frame flip still reports the pre-flip health.
     pc_p2_elecbug_check_landing_press(actor);
@@ -758,7 +776,12 @@ void pc_p2_elecbug_update(BTeki* actor) {
         break;
     case ELEC_DEAD:
         stop(actor);
-        if (s.stateTime >= clipDuration("dead")) actor->die();
+        // dieSoon() only runs inside the suppressed host doAI; finalize the
+        // corpse outside doAI once the dead clip completes (frog pattern).
+        if (!s.escaped && s.stateTime >= clipDuration("dead")) {
+            s.escaped = true;
+            actor->pcEscapeNow();
+        }
         break;
     default:
         break;

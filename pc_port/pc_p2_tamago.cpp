@@ -10,6 +10,9 @@
 //   * The P1 engine has no InteractAstonish; contact with a Pikmin is resolved
 //     as an InteractFlick knockback (the closest P1 panic/scatter receiver),
 //     applied once per contact.
+//   * Walk ends into Turn (source KEYEVENT_END) before Hide; Hide recycles to
+//     Appear as a bounded port approximation (source Hide despawns the actor,
+//     which would end the campaign encounter before any kill).
 //   * The source manager-owned group birth (tamagoMushiMgr.cpp::createGroup:77/
 //     122, 10 surface / 30 cave from TAMAGOMUSHI_GROUP_COUNT) has TWO port paths:
 //     - the pre-staged approximation (no p2-tamago-host.txt): the arena stages a
@@ -110,6 +113,7 @@ struct Tamago {
     std::set<Piki*> inContact;
     bool honeyDropped = false;
     bool deadLogged = false;
+    bool escaped = false;
     std::string clip = "move";
     float phase = 0.0f;
     float logTimer = 0.0f;
@@ -276,6 +280,9 @@ void pc_p2_tamago_forget(BTeki* actor) {
 unsigned long pc_p2_tamago_count() { return (unsigned long)actors.size(); }
 bool pc_p2_tamago_registered(BTeki* actor) {
     return actors.count(static_cast<PelletView*>(actor)) != 0;
+}
+bool pc_p2_tamago_suppress_ai(const BTeki* actor) {
+    return ready && actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor))) != 0;
 }
 
 void pc_p2_tamago_tick() {
@@ -592,6 +599,10 @@ void pc_p2_tamago_update(BTeki* actor) {
     const Vector3f pos = actor->getPosition();
     const unsigned generator = s.generator;
 
+    // The P1 TAI damage reaction lives in the suppressed host strategy, so
+    // the P2 FSM drains queued Pikmin damage itself (frog pattern).
+    if (actor->mStoredDamage > 0.0f) actor->makeDamaged();
+
     // Manager-driven birth trigger: the host births its group exactly once on its
     // first Appear (source createFellow, guarded by mHasMadeFellow).
     if (birthMode && s.isGroupHost && s.state == TAMAGO_APPEAR && !s.madeFellow) {
@@ -631,8 +642,10 @@ void pc_p2_tamago_update(BTeki* actor) {
             }
             wander(actor, s);
             if (s.stateTime > WALK_TIME) {
-                std::printf("P2_TAMAGO_STATE generator=%u state=hide\n", generator);
-                enter(s, TAMAGO_HIDE, "dive");
+                // Source Walk ends on KEYEVENT_END into Turn; the port Turn
+                // reorients briefly before hiding (was dead code).
+                std::printf("P2_TAMAGO_STATE generator=%u state=turn\n", generator);
+                enter(s, TAMAGO_TURN, "move");
             }
             break;
         case TAMAGO_HIDE:
@@ -658,16 +671,20 @@ void pc_p2_tamago_update(BTeki* actor) {
             break;
         case TAMAGO_TURN:
             stop(actor);
-            if (s.stateTime > TURN_TIME) enter(s, TAMAGO_WALK, "move");
+            if (s.stateTime > TURN_TIME) {
+                std::printf("P2_TAMAGO_STATE generator=%u state=hide\n", generator);
+                enter(s, TAMAGO_HIDE, "dive");
+            }
             break;
         case TAMAGO_DEAD:
-            // inst-bugs lane (#871): never drive P1 death here. The host's
-            // natural damage->die()->dieSoon->becomePellet flow pelletizes
-            // the corpse exactly like the Uji family's (an explicit die()
-            // here stranded the actor: sliding dead Teki, no pellet, the
-            // bot chased it with carriers=0 until carry_no_grab). The dead
-            // clip still plays through the batch-2 forced-clip path.
+            // dieSoon() only runs inside the suppressed host doAI; finalize
+            // the carriable corpse outside doAI once the dead clip completes
+            // (frog pattern). Honey already dropped exactly-once at entry.
             stop(actor);
+            if (!s.escaped && s.stateTime >= clipDuration("dead")) {
+                s.escaped = true;
+                actor->pcEscapeNow();
+            }
             break;
         default:
             break;

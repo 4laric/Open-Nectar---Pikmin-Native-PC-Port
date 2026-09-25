@@ -163,6 +163,7 @@ struct Dango {
     std::string clip = "fly";
     float phase = 0.0f;
     bool deadLogged = false;
+    bool escaped = false;
     float logTimer = 0.0f;
     // Lane-25 hazard policy (#376): Turn vulnerability window + Rock/Egg rain.
     P2DangoMushiHazardPolicy hazard;
@@ -309,7 +310,10 @@ void enter(Dango& s, State state, const char* clip) {
 }
 void setState(BTeki* a, Dango& s, State state, const char* clip) {
     enter(s, state, clip);
-    const unsigned generator = a->mGenerator ? a->mGenerator->_70 : 0u;
+    // Bridge pack actors may carry a placeholder _70; the seed token is the
+    // stable own-token for evidence. Fixes generator=0 STATE attribution.
+    const unsigned generator = pc_p2_campaign_token(a) ? pc_p2_campaign_token(a)
+        : (a->mGenerator ? a->mGenerator->_70 : 0u);
     std::printf("P2_DANGOMUSHI_STATE generator=%u state=%s\n", generator, stateName(state));
     std::fflush(stdout);
 }
@@ -568,7 +572,9 @@ void tickRain(Dango& s, BTeki* actor, const Vector3f& pos, float dt) {
     if (ticks > 6) ticks = 6;
     s.rainDebt -= ticks * static_cast<double>(kRainDelta);
     if (ticks <= 0) return;
-    const unsigned generator = actor->mGenerator ? actor->mGenerator->_70 : 0u;
+    const unsigned campaignToken = pc_p2_campaign_token(actor);
+    const unsigned generator = campaignToken ? campaignToken
+        : (actor->mGenerator ? actor->mGenerator->_70 : 0u);
     const P2RockHazardConfig config = rainRockConfig();
     const float radiusSq = (config.collisionRadius + kRainContactPad)
         * (config.collisionRadius + kRainContactPad);
@@ -716,13 +722,18 @@ bool pc_p2_dangomushi_clip(const BTeki* actor, const char*& name, float& phase) 
     phase = it->second.phase;
     return true;
 }
+bool pc_p2_dangomushi_suppress_ai(const BTeki* actor) {
+    return ready && actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor))) != 0;
+}
 
 bool pc_p2_dangomushi_invulnerable(const BTeki* actor) {
     if (!ready || !actor) return false;
     auto it = actors.find(static_cast<PelletView*>(const_cast<BTeki*>(actor)));
     if (it == actors.end()) return false;
     Dango& s = it->second;
-    const unsigned generator = actor->mGenerator ? actor->mGenerator->_70 : 0u;
+    const unsigned campaignToken = pc_p2_campaign_token(const_cast<BTeki*>(actor));
+    const unsigned generator = campaignToken ? campaignToken
+        : (actor->mGenerator ? actor->mGenerator->_70 : 0u);
     if (!P2DangoMushiHazardPolicy::attackRejected(s.stickable)) {
         // Inside the Turn stickable window: EB_Invulnerable is clear and the
         // attack is admitted (return false so the normal damage path runs).
@@ -882,7 +893,15 @@ void pc_p2_dangomushi_update(BTeki* actor) {
     const float dt = gsys->getFrameTime();
     if (dt <= 0.0f || dt > 0.5f) return;
     const Vector3f pos = actor->getPosition();
-    const unsigned generator = actor->mGenerator ? actor->mGenerator->_70 : 0u;
+    const unsigned campaignToken = pc_p2_campaign_token(actor);
+    const unsigned generator = campaignToken ? campaignToken
+        : (actor->mGenerator ? actor->mGenerator->_70 : 0u);
+
+    // The P1 TAI damage reaction lives in the suppressed host strategy, so
+    // the P2 FSM drains queued Pikmin damage itself (frog pattern). The Turn
+    // stickable-window gate (pc_p2_dangomushi_invulnerable) still swallows
+    // attack/bomb interactions outside the window; this applies admitted damage.
+    if (actor->mStoredDamage > 0.0f) actor->makeDamaged();
 
     if (actor->mHealth <= 0.0f && s.state != DANGO_DEAD) {
         if (!s.deadLogged) {
@@ -1052,7 +1071,12 @@ void pc_p2_dangomushi_update(BTeki* actor) {
     }
     case DANGO_DEAD:
         stop(actor);
-        if (s.stateTime >= clipDuration("dead")) actor->die();
+        // dieSoon() only runs inside the suppressed host doAI; finalize the
+        // corpse outside doAI once the dead clip completes (frog pattern).
+        if (!s.escaped && s.stateTime >= clipDuration("dead")) {
+            s.escaped = true;
+            actor->pcEscapeNow();
+        }
         break;
     default:
         break;

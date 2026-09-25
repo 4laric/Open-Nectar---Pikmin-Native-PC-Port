@@ -975,7 +975,8 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     // racing the run-global single line above. Bounded: one line per species
     // per session, exactly like the proxy per-key lines below.
     if (entry->second.compare(0, 6, "proxy|") != 0 && !isDweevil) {
-        const unsigned drawToken = pc_p2_campaign_token(actor);
+        unsigned drawToken = pc_p2_campaign_token(actor);
+        if (!drawToken && actor->mGenerator) drawToken = actor->mGenerator->_70;
         if (proxyDrawn.insert(std::string(corpse ? "1|" : "0|") + entry->second + "|" + std::to_string(drawToken)).second) {
             std::printf("P2_BATCH2_DRAW corpse=%d key=%s clip=%s generator=%u token=%u\n", int(corpse), entry->second.c_str(), name, drawToken, drawToken);
             std::fflush(stdout);

@@ -2,6 +2,7 @@
 // Build: g++ -std=gnu++17 -Wall -Wextra -Werror -Ipc_port tools/p2_uji_test.cpp -o p2_uji_test.exe
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 #include "pc_p2_uji_policy.h"
 
 using namespace p2uji_policy;
@@ -125,6 +126,18 @@ int main() {
         require(fsm.state == UJI_DEAD, "health 0 kills");
         require(out.downEffect, "death drops effect flag");
     }
+
+    // OWN round-2 guards: per-species toughness/speed, OWN bite damage, clips.
+    require(parmsFor(UJIB).life == 120.0f, "UjiB tougher than female");
+    require(parmsFor(TOBI).life == 150.0f, "Tobi toughest");
+    require(parmsFor(TOBI).moveSpeed == 120.0f, "Tobi fly speed");
+    require(parmsFor(UJIB).bridgeDamage == 25.0f, "UjiB shares fp01 bite");
+    require(parmsFor(TOBI).bridgeDamage == 25.0f, "Tobi shares fp01 bite");
+    require(std::string(Fsm::clipFor(UJI_ATTACK2, UJIB)) == "attack2", "attack2 clip");
+    require(std::string(Fsm::clipFor(UJI_EAT, UJIB)) == "eat", "eat clip");
+    require(std::string(Fsm::clipFor(UJI_FLY, TOBI)) == "fly", "tobi fly clip");
+    require(std::string(Fsm::clipFor(UJI_FLY, UJIA)) == "move", "non-tobi fly falls back");
+    require(std::string(Fsm::clipFor(UJI_DEAD, TOBI)) == "dead", "dead clip all kinds");
 
     std::printf("PASS p2_uji_test checks=%d\n", gChecks);
     return 0;

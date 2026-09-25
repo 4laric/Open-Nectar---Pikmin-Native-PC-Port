@@ -17,6 +17,11 @@ bool pc_p2_uji_clip(const BTeki*, const char*& name, float& phase);
 // Read-only FSM state name for the engine-free unit test fixture;
 // nullptr when the actor is not a registered Uji.
 const char* pc_p2_uji_state_name(const BTeki*);
+// P2 FSM owns movement/targeting/attacks every tick for registered Uji
+// (frog pattern): BTeki::doAI returns early so the KabekuiA/B/C host
+// strategy never runs. Damage still reaches mHealth via the update-phase
+// mStoredDamage -> makeDamaged() drain; death finalizes via pcEscapeNow().
+bool pc_p2_uji_suppress_ai(const BTeki*);
 // Registration observability (mirrors pc_p2_sokkuri/elecbug) so the
 // lifecycle fixture can prove forget clears a stale binding. Additive.
 unsigned long pc_p2_uji_count();

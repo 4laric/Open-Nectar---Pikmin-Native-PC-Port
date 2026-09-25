@@ -33,9 +33,14 @@ bool pc_p2_elecbug_attacked(Teki*);
 // lane-11 capability matrix.
 bool pc_p2_elecbug_pressed(BTeki*, Creature*);
 // Read-only registration observability (mirrors pc_p2_sokkuri/armor) so the
-// lifecycle fixture can prove forget clears a stale binding. Additive.
+// lifecycle fixture can prove forget clears stale state. Additive.
 unsigned long pc_p2_elecbug_count();
 bool pc_p2_elecbug_registered(BTeki*);
+// P2 FSM owns movement/targeting/attacks every tick for registered ElecBug
+// (frog pattern): BTeki::doAI returns early so the Chappy host strategy
+// never runs. Damage still reaches mHealth via the update-phase
+// mStoredDamage -> makeDamaged() drain; death finalizes via pcEscapeNow().
+bool pc_p2_elecbug_suppress_ai(const BTeki*);
 // Natural press adaptation (#165, inst-bugs #871): the source
 // ElecBug::pressCallBack is triggered by a thrown-Pikmin landing of ANY color
 // (PikiFlyingState/PikiHipDropState collision, velocity.y<0). The P1 host
