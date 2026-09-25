@@ -87,6 +87,7 @@ struct BlendState {
 std::map<std::string, Bank> banks;             // key "family|species"
 std::map<BTeki*, std::string> actors;          // actor -> key
 std::map<BTeki*, BlendState> blends;           // actor -> private deform target
+std::set<std::string> drawnKeys;               // "<corpse>|<key>|<token>" already reported
 bool interpolation = false;
 size_t bytesTotal = 0;
 bool logged[2] = {false, false};
@@ -492,6 +493,7 @@ void pc_p2_batch3_reset() {
     banks.clear();
     actors.clear();
     blends.clear();
+    drawnKeys.clear();
     interpolation = false;
     bytesTotal = 0;
     logged[0] = logged[1] = false;
@@ -733,6 +735,17 @@ bool pc_p2_batch3_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     if (!logged[corpse ? 1 : 0]) {
         std::printf("P2_BATCH3_DRAW corpse=%d key=%s clip=%s\n", int(corpse), entry->second.c_str(), name);
         logged[corpse ? 1 : 0] = true;
+    }
+    // Per-key draw evidence for campaign-identity species (mirrors the
+    // batch-2 identity per-key lines): one line per key+corpse+token so the
+    // bot-campaign scorer cites the species' own draw, not the run-global
+    // first-draw race above.
+    {
+        const unsigned drawToken = pc_p2_campaign_token(actor);
+        if (drawnKeys.insert(std::string(corpse ? "1|" : "0|") + entry->second + "|" + std::to_string(drawToken)).second) {
+            std::printf("P2_BATCH3_DRAW corpse=%d key=%s clip=%s token=%u\n", int(corpse), entry->second.c_str(), name, drawToken);
+            std::fflush(stdout);
+        }
     }
     shape->updateAnim(gfx, matrix, nullptr, actor);
     shape->drawshape(gfx, *gfx.mCamera, nullptr);

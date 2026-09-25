@@ -970,6 +970,17 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
         std::printf("P2_BATCH2_DRAW corpse=%d key=%s clip=%s\n", int(corpse), entry->second.c_str(), name);
         logged[corpse ? 1 : 0] = true;
     }
+    // Campaign-identity families report per key (once per key+corpse+token),
+    // so bot-campaign evidence cites each species' own draw line instead of
+    // racing the run-global single line above. Bounded: one line per species
+    // per session, exactly like the proxy per-key lines below.
+    if (entry->second.compare(0, 6, "proxy|") != 0 && !isDweevil) {
+        const unsigned drawToken = pc_p2_campaign_token(actor);
+        if (proxyDrawn.insert(std::string(corpse ? "1|" : "0|") + entry->second + "|" + std::to_string(drawToken)).second) {
+            std::printf("P2_BATCH2_DRAW corpse=%d key=%s clip=%s token=%u\n", int(corpse), entry->second.c_str(), name, drawToken);
+            std::fflush(stdout);
+        }
+    }
     // Dweevil per-corpse evidence (wf7 dweevil-impl, #871): first dead draw per
     // campaign token, so headless can prove the corpse holds clip=dead from
     // the first dead frame with no later attack1 event for that actor.

@@ -36,11 +36,11 @@ bool pc_p2_elecbug_pressed(BTeki*, Creature*);
 // lifecycle fixture can prove forget clears a stale binding. Additive.
 unsigned long pc_p2_elecbug_count();
 bool pc_p2_elecbug_registered(BTeki*);
-// Natural press adaptation (#165): the source ElecBug::pressCallBack is triggered
-// by a thrown-Pikmin / Purple-hipdrop landing (PikiFlyingState/PikiHipDropState
-// collision, velocity.y<0). The P1 host routes no Pikmin->enemy InteractPress, so
-// this family-local probe detects a descending Purple Pikmin overlapping a
-// registered ElecBug once per flip (REVERSE/DEAD short-circuit) and delegates to
-// pc_p2_elecbug_pressed.
+// Natural press adaptation (#165, inst-bugs #871): the source
+// ElecBug::pressCallBack is triggered by a thrown-Pikmin landing of ANY color
+// (PikiFlyingState/PikiHipDropState collision, velocity.y<0). The P1 host
+// routes no Pikmin->enemy InteractPress, so this family-local probe detects a
+// descending Pikmin overlapping a registered ElecBug once per flip
+// (REVERSE/DEAD short-circuit) and delegates to pc_p2_elecbug_pressed.
 // P1-derived adaptation; logged P2_ELECBUG_NATURAL_PRESS. No-op for other actors.
 void pc_p2_elecbug_check_landing_press(BTeki*);

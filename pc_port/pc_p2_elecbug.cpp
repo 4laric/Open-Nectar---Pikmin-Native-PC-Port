@@ -439,6 +439,16 @@ const char* pc_p2_elecbug_state_name(const BTeki* actor) {
 // ElecBug once per flip (REVERSE/DEAD short-circuit) and delegates to the source-equivalent press receiver.
 // Constant press radius 30 is a documented P1-derived adaptation (source uses the
 // collision searchDistance/height), not a retail-faithful proximity.
+// Natural press adaptation (#165, inst-bugs #871): the source
+// ElecBug::pressCallBack fires when a thrown Pikmin lands on the beetle
+// (PikiFlyingState/PikiHipDropState collision, velocity.y<0), for ANY Pikmin
+// color - the P1 host routes no Pikmin->enemy InteractPress, so this
+// family-local probe detects a descending Pikmin overlapping a registered
+// ElecBug once per flip (REVERSE/DEAD short-circuit) and delegates to
+// pc_p2_elecbug_pressed. Purple hipdrops satisfy the same probe; the color is
+// logged for evidence. Without this, a red-only squad (Forest of Hope day 2)
+// can never flip the beetle out of its retail invulnerability and the
+// campaign kill->carry->Onion loop stalls with zero damage.
 void pc_p2_elecbug_check_landing_press(BTeki* actor) {
     if (!ready || !pikiMgr) return;
     ElecBug* s = lookup(actor);
@@ -448,11 +458,10 @@ void pc_p2_elecbug_check_landing_press(BTeki* actor) {
     CI_LOOP(it) {
         Piki* p = static_cast<Piki*>(*it);
         if (!p || !p->isAlive()) continue;
-        if (pc_p2_species(p) != P2SpeciesPurple) continue;
         if (p->mVelocity.y >= -0.01f) continue;  // ascending / grounded
         if (distXZ(p->getPosition(), pos) > 30.0f) continue;
-        std::printf("P2_ELECBUG_NATURAL_PRESS generator=%u purple=1 source_id=28 state=%s\n",
-                    genOf(actor), stateName(s->state));
+        std::printf("P2_ELECBUG_NATURAL_PRESS generator=%u species=%d source_id=28 state=%s\n",
+                    genOf(actor), pc_p2_species(p), stateName(s->state));
         std::fflush(stdout);
         pc_p2_elecbug_pressed(actor, p);
         break;
