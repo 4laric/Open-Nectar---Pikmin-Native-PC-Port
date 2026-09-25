@@ -290,11 +290,11 @@ void pc_p2_frog_setup(){
     std::map<unsigned,int> wanted;std::vector<p2animation::Clip> banks[2];
     if(!p2frog::parse(input,wanted,banks))std::abort();
     if(bridge){
-        // Campaign identity comes from the seed (source 17 Frog only in this
-        // lane step; MaroFrog 18 still rides the proxy tier until its own
-        // step). Filed generators are placeholders there.
+        // Campaign identity comes from the seed (sources 17 Frog + 18 MaroFrog).
+        // Filed generators are placeholders there.
         wanted.clear();
         for(unsigned id : pc_p2_campaign_ids(17)) wanted[id]=0;
+        for(unsigned id : pc_p2_campaign_ids(18)) wanted[id]=1;
     }
     if(wanted.empty())return;
     std::set<unsigned> seen;
