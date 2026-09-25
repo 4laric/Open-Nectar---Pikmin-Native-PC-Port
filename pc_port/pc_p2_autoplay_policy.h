@@ -750,6 +750,17 @@ private:
             enter(State::Done, in);
             return;
         }
+        // bot-deliver (#871): a latched kill must never be dropped by a target
+        // switch (bc5 59/60/57: aftermath -> container -> new token with no
+        // RESULT for the kill). If we carry damage/kill for a different token
+        // than the driver's current target, score the old engagement first;
+        // the next tick will engage the new target. Kogane-likes never die,
+        // so they are excluded (their finishTarget forces killed=0).
+        if (result.token != 0 && in.targetToken != 0 && result.token != in.targetToken
+            && (sawKill || sawDamage) && !result.koganeLike) {
+            finishTarget(in, /*claimedKill*/ false);
+            return;
+        }
         engageTime = 0.0f;
         initialHealthFrac = in.targetHealthFrac;
         sawDamage = in.targetDamagedLatch;
@@ -1036,7 +1047,10 @@ private:
                 if (amStallTime >= cfg.carryStallWait) {
                     if (amRethrows >= cfg.aftermathRethrowMax) {
                         giveUpAftermath(in, "carry_stalled");
-                        finishTarget(in, /*killed*/ true);
+                        // bot-deliver (#871): never claim a kill without a death
+                        // latch (bc5 55 Hanachirashi: aftermath timeout with no
+                        // corpse scored killed=1). killed comes from sawKill.
+                        finishTarget(in, /*killed*/ false);
                         return;
                     }
                     ++amRethrows;
@@ -1070,7 +1084,8 @@ private:
                     // or motion) and fell short again.
                     if (amRethrows >= cfg.aftermathRethrowMax) {
                         giveUpAftermath(in, "carry_stalled");
-                        finishTarget(in, /*killed*/ true);
+                        // bot-deliver (#871): killed from sawKill, not claimed.
+                        finishTarget(in, /*killed*/ false);
                         return;
                     }
                     ++amRethrows;
@@ -1101,7 +1116,8 @@ private:
                 if (amGrowStill >= cfg.carryStallWait) {
                     if (amRethrows >= cfg.aftermathRethrowMax) {
                         giveUpAftermath(in, "carry_stalled");
-                        finishTarget(in, /*killed*/ true);
+                        // bot-deliver (#871): killed from sawKill, not claimed.
+                        finishTarget(in, /*killed*/ false);
                         return;
                     }
                     ++amRethrows;
@@ -1123,7 +1139,8 @@ private:
                 // Carry lost en route: re-seed while rethrows remain.
                 if (amRethrows >= cfg.aftermathRethrowMax) {
                     giveUpAftermath(in, "carry_stalled");
-                    finishTarget(in, /*killed*/ true);
+                    // bot-deliver (#871): killed from sawKill, not claimed.
+                    finishTarget(in, /*killed*/ false);
                     return;
                 }
                 ++amRethrows;
@@ -1139,7 +1156,8 @@ private:
                     // Settled out of contact: re-approach + re-throw if allowed.
                     if (amRethrows >= cfg.aftermathRethrowMax) {
                         giveUpAftermath(in, "carry_no_grab");
-                        finishTarget(in, /*killed*/ true);
+                        // bot-deliver (#871): killed from sawKill, not claimed.
+                        finishTarget(in, /*killed*/ false);
                         return;
                     }
                     ++amRethrows;
@@ -1163,7 +1181,8 @@ private:
         const float wait = (carryActive && in.corpseMoving) ? cfg.receiptTimeout * 2.0f : waitBase;
         if (stateTime >= wait) {
             giveUpAftermath(in, aftermathGiveupReason(in));
-            finishTarget(in, /*killed*/ true);
+            // bot-deliver (#871): killed from sawKill, not claimed (55 fix).
+            finishTarget(in, /*killed*/ false);
         }
     }
 

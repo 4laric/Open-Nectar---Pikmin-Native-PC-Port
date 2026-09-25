@@ -445,6 +445,14 @@ void pc_p2_kurage_teki_setup()
         if (!pc_p2_kurage_receiver_setup(t, &b.mouth)) { if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Kurage", "receiver_setup_failed")) return; }
         std::printf("P2_KURAGE_TEKI_READY generator=%u type=%d binding=private_adapter\n", gen, type);
         std::printf("P2_KURAGE_CORPSE_READY generator=%u drop=BDT_Normal ledger=onion receipt=corpse:kurage:%u\n", gen, gen);
+        // bot-deliver (#871): lane-06 ordinary-delivery source bind so
+        // GoalItem::suckMe grants onion:p2:57 instead of the P1 bestiary
+        // CHECK (Yellow Wollywog). Mirrors Sokkuri/Sarai/ElecBug and proxy
+        // batch2. Single-use: consumed on delivery, cleared on forget.
+        // Additive: hover/draw/corpseTail campaign gates untouched.
+        pc_randomizer_p2_bind_source(static_cast<PelletView*>(t), 57, gen);
+        std::printf("P2_KURAGE_DELIVERY_BIND generator=%u source_id=57\n", gen);
+        std::fflush(stdout);
         if (std::getenv("PIKMIN_P2_KURAGE_SHOWCASE")) {
             b.fsmEnabled = true;
             b.fsm = p2kurage::Fsm();

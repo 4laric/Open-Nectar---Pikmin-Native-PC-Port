@@ -501,6 +501,14 @@ static bool registerActor(BTeki* actor, int species, unsigned generator) {
     enter(s, OTA_WAIT, "wait1");
     std::printf("P2_OTAKARA_BIND generator=%u source_id=%d stimulus=%s visual_only=0\n",
                 generator, s.species, p2dweevil::stimulusName(s.stimulus));
+    // bot-deliver (#871): lane-06 ordinary-delivery source bind so
+    // GoalItem::suckMe grants onion:p2:<59-62> instead of the P1 bestiary
+    // CHECK. Mirrors Sokkuri/ElecBug/Sarai and proxy batch2. Single-use:
+    // consumed on delivery, cleared on forget/recycle. Species id equals
+    // source id for 59-62 (p2dweevil::FireId etc).
+    pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor), (unsigned)s.species, generator);
+    std::printf("P2_OTAKARA_DELIVERY_BIND generator=%u source_id=%d\n", generator, s.species);
+    std::fflush(stdout);
     const Vector3f pos = actor->getPosition();
     std::printf("P2_ENEMY_READY species=%s native_family=Chappy generator=%u "
                 "x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=native "
