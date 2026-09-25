@@ -13,14 +13,17 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     // hosts (include/teki.h). One finished species at a time: Chappy (2),
     // FireChappy (33), YellowChappy (43) and KingChappy (53) ride
     // TEKI_Swallow (4, P1 Spotty Bulborb), KumaChappy (35) rides
-    // TEKI_Swallob (32, P1 Spotty Bulbear). Later species add their own
-    // case when their identity lands (67 -> 3, 76 -> 31); a species must
-    // never become static before its identity stages, or the proxy visual
-    // skips it with nothing to replace it.
+    // TEKI_Swallob (32, P1 Spotty Bulbear), LeafChappy (67) rides
+    // TEKI_Chappy (3, P1 Dwarf Bulborb). KumaKochappy (76) adds its case
+    // when its identity lands; a species must never become static before
+    // its identity stages, or the proxy visual skips it with nothing to
+    // replace it.
     case 2: case 33: case 43: case 53:
         return 4; // TEKI_Swallow: Red/Fiery/Hairy/Emperor Bulborb adults
     case 35:
         return 32; // TEKI_Swallob: Spotty Bulbear
+    case 67:
+        return 3; // TEKI_Chappy: Bulbmin
     // Sarai binds whatever type its anchor carries (pc_p2_sarai_manager.cpp:109,119),
     // so 3 here is the placement vehicle, not a requirement. "Kochappy" is the P2 name
     // for the Dwarf Bulborb; the P1 enum for it is TEKI_Chappy, and there is no

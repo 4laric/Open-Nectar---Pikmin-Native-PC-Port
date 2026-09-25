@@ -18,15 +18,16 @@ int main() {
         assert(p2campaign::hasStaticHost(source));
     // inst-chappy (#871): Chappy (2), FireChappy (33), YellowChappy (43)
     // and KingChappy (53) ride TEKI_Swallow (4), KumaChappy (35) rides
-    // TEKI_Swallob (32). Later family species add their own static case
-    // when their identity lands; until then they stay proxy-routed
-    // (non-static).
+    // TEKI_Swallob (32), LeafChappy (67) rides TEKI_Chappy (3).
+    // KumaKochappy (76) adds its static case when its identity lands;
+    // until then it stays proxy-routed (non-static).
     assert(p2campaign::hasStaticHost(2u));
     assert(p2campaign::hasStaticHost(33u));
     assert(p2campaign::hasStaticHost(35u));
     assert(p2campaign::hasStaticHost(43u));
     assert(p2campaign::hasStaticHost(53u));
-    for (unsigned source : {67u,76u,17u,0u})
+    assert(p2campaign::hasStaticHost(67u));
+    for (unsigned source : {76u,17u,0u})
         assert(!p2campaign::hasStaticHost(source));
     for (int original = 0; original < 34; ++original) {
         assert(p2campaign::hostType(2u, original, false) == 4);
@@ -39,6 +40,8 @@ int main() {
         assert(p2campaign::hostType(43u, original, true) == original);
         assert(p2campaign::hostType(53u, original, false) == 4);
         assert(p2campaign::hostType(53u, original, true) == original);
+        assert(p2campaign::hostType(67u, original, false) == 3);
+        assert(p2campaign::hostType(67u, original, true) == original);
     }
     // Exhaustive agreement (#871 D5): hasStaticHost(s) matches the sentinel
     // probe definition hostType(s,-1,false) != -1 for every s in 0..200.
