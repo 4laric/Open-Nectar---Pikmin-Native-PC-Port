@@ -23,6 +23,9 @@
 #include "pc_p2_long_legs_fsm.h"
 #include "pc_p2_cannon_stone.h"
 #include "pc_p2_animation.h"
+#include "pc_p2_campaign_actor.h"
+#include "pc_p2_setup_failsafe.h"
+#include "pc_randomizer.h"
 #include "pc_bbft.h"
 #include "teki.h"
 #include "Pellet.h"
@@ -422,17 +425,43 @@ void pc_p2_long_legs_reset() {
 
 void pc_p2_long_legs_forget(BTeki* actor) {
     killShellsOf(actor);
+    // Lane 06 single-use binding: drop the ordinary-delivery source so a
+    // recycled actor address can never inherit it (mirrors Sokkuri/ElecBug).
+    pc_randomizer_p2_forget_source(static_cast<PelletView*>(actor));
     actors.erase(actor);
     // The actor's corpse registration is keyed on its Pellet*, so a plain
     // actors.erase leaves it behind; clear it with the actor (review fix 3b).
     if (actor && actor->mPellet) corpses.erase(actor->mPellet);
 }
 
+static unsigned sourceForSpecies(const std::string& species) {
+    if (species == "Damagumo") return 56;
+    if (species == "BigFoot") return 69;
+    return 66; // Houdai
+}
+
 void pc_p2_long_legs_setup() {
     pc_p2_long_legs_reset();
-    if (!pc_pikipelago_room_preview() || !tekiMgr) return;
+    if (!tekiMgr) return;
+    const bool bridge = pc_randomizer_p2_bridge() && !pc_pikipelago_room_preview();
+    const bool preview = pc_pikipelago_room_preview();
+    if (!preview && !bridge) return;
     std::map<unsigned, std::string> wanted;
-    if (!parseActors("p2-long-legs-actors.txt", wanted)) return;
+    if (!parseActors("p2-long-legs-actors.txt", wanted)) {
+        if (bridge) {
+            // No sidecar: fall through to the seed-bridge identity below.
+        } else return;
+    }
+    if (bridge) {
+        // Generated campaign sessions bind by the seed's source id per actor
+        // (like Sokkuri/Kurage), not by the arena sidecar's generator ids.
+        // The sidecar's filed generators are placeholders there.
+        wanted.clear();
+        for (unsigned id : pc_p2_campaign_ids(56)) wanted[id] = "Damagumo";
+        for (unsigned id : pc_p2_campaign_ids(69)) wanted[id] = "BigFoot";
+        for (unsigned id : pc_p2_campaign_ids(66)) wanted[id] = "Houdai";
+        if (wanted.empty()) return;
+    }
 
     std::set<unsigned> found;
     std::set<std::string> speciesUsed;
@@ -440,11 +469,17 @@ void pc_p2_long_legs_setup() {
     CI_LOOP(it) {
         Teki* teki = static_cast<Teki*>(*it);
         if (!teki || !teki->mGenerator) continue;
-        const unsigned generator = teki->mGenerator->_70;
+        const unsigned generator = bridge ? pc_p2_campaign_token(teki) : teki->mGenerator->_70;
         auto match = wanted.find(generator);
         if (match == wanted.end()) continue;
-        if (teki->mTekiType != TEKI_Chappy) fail("native type mismatch");
-        if (!found.insert(generator).second) fail("duplicate generator in scene");
+        if (teki->mTekiType != TEKI_Chappy) {
+            std::printf("P2_LONG_LEGS_ERROR native_type generator=%u\n", generator);
+            if (pc_p2_setup_skip(bridge, "LongLegs", "actor_type_mismatch")) return;
+        }
+        if (!found.insert(generator).second) {
+            if (pc_p2_setup_skip(bridge, "LongLegs", "duplicate_generator")) return;
+            fail("duplicate generator in scene");
+        }
         ActorState& state = actors[teki];
         state.species = match->second;
         state.generator = generator;
@@ -452,15 +487,51 @@ void pc_p2_long_legs_setup() {
         state.fsm.reset(state.parms);
         state.homePos = teki->getPosition(); // source mHomePosition: spawn point
         state.homeRecorded = true;
+        // Source health per identity (audit: Damagumo 1300 disc; BigFoot/Houdai
+        // from the FSM parms retail). The host vehicle spawns with P1 health,
+        // so take the source value here like Jigumo/Sokkuri do.
+        teki->mHealth = state.parms.maxHealth > 0.0f ? state.parms.maxHealth : teki->mHealth;
         state.lastHealth = teki->mHealth;
         state.lastPositiveHealth = teki->mHealth;
         speciesUsed.insert(match->second);
+        // Ordinary-delivery bridge (lane 06 contract): bind the source so
+        // GoalItem::suckMe grants onion:p2:<id> exactly once through
+        // pc_randomizer_p2_corpse_delivered. Single-use: consumed on delivery.
+        if (bridge) {
+            const unsigned source = sourceForSpecies(match->second);
+            pc_randomizer_p2_bind_source(static_cast<PelletView*>(teki), source, generator);
+            std::printf("P2_LONG_LEGS_DELIVERY_BIND generator=%u source_id=%u\n",
+                        generator, source);
+            std::fflush(stdout);
+        }
     }
-    if (found.size() != wanted.size()) fail("arena actor not present in scene");
+    if (found.size() != wanted.size()) {
+        std::printf("P2_LONG_LEGS_ERROR missing_actor wanted=%zu found=%zu\n",
+                    wanted.size(), found.size());
+        if (pc_p2_setup_skip(bridge, "LongLegs", "actor_roster_incomplete")) return;
+        fail("arena actor not present in scene");
+    }
     for (const std::string& species : speciesUsed) {
         if (shapes.count(species)) continue;
         const SpeciesDef* def = findSpecies(species);
-        if (!def) fail("unknown species in actor config");
+        if (!def) {
+            if (pc_p2_setup_skip(bridge, "LongLegs", "unknown_species")) return;
+            fail("unknown species in actor config");
+        }
+        if (bridge) {
+            std::ifstream probe(std::string("assets/dataDir/courses/pikmin2room/") + def->mod,
+                                std::ios::binary);
+            if (!probe) {
+                std::printf("P2_SETUP_SKIP LongLegs clip_file_missing species=%s\n",
+                            species.c_str());
+                std::fflush(stdout);
+                for (auto ait = actors.begin(); ait != actors.end();) {
+                    if (ait->second.species == species) ait = actors.erase(ait);
+                    else ++ait;
+                }
+                continue;
+            }
+        }
         shapes[species] = loadBind(*def);
     }
     for (const auto& entry : actors)
@@ -665,8 +736,12 @@ bool pc_p2_long_legs_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, b
     Shape* shape = shapeIt->second;
 
     if (!logged[corpse ? 1 : 0]) {
-        std::printf("P2_LONG_LEGS_DRAW corpse=%d species=%s pose=bind\n",
-                    int(corpse), state.species.c_str());
+        std::printf("P2_LONG_LEGS_DRAW corpse=%d species=%s pose=bind generator=%u\n",
+                    int(corpse), state.species.c_str(), state.generator);
+        std::printf("P2_%s_DRAW corpse=%d species=%s generator=%u\n",
+                    state.species == "Damagumo" ? "DAMAGUMO"
+                    : state.species == "BigFoot" ? "BIGFOOT" : "HOUDAI",
+                    int(corpse), state.species.c_str(), state.generator);
         logged[corpse ? 1 : 0] = true;
     }
     shape->updateAnim(gfx, matrix, nullptr, actor);

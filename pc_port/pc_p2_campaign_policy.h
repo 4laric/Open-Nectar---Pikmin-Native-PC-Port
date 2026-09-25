@@ -16,6 +16,12 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     case 23: return 3; // TEKI_Chappy: Sarai ordinary-host path
     case 54: return 24; // TEKI_Miurin: Mamuta
     case 57: case 78: return 0; // TEKI_Frog: Jellyfloat/Groink sidecar hosts
+    // inst-legs lane (#871): Damagumo (56, Beady Long Legs) + BigFoot (69,
+    // Raging Long Legs) ride the Chappy placement vehicle the pc_p2_long_legs
+    // host expects (setup fails otherwise); Jigumo (63, Hermit Crawmad) rides
+    // Chappy like the pc_p2_jigumo aquatic host. Proxy rows used Swallow (4)
+    // for 56/69; the identity path standardizes on Chappy (3).
+    case 56: case 63: case 69: return 3; // TEKI_Chappy: legs-lane identity hosts
     default: return original;
     }
 }

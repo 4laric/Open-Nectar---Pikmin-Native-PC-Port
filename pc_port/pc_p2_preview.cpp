@@ -168,6 +168,12 @@ void pc_p2_preview_setup() {
             pc_p2_sokkuri_setup();
             pc_p2_otakara_setup();
             pc_p2_batch2_setup();  // P2 models for the Otakara/Sokkuri behaviour hosts
+            // inst-legs lane (#871): Jigumo FSM + aquatic visuals, Long Legs
+            // FSM + bind visuals. Bridge-mode setups degrade via
+            // pc_p2_setup_skip when their sidecars are absent.
+            pc_p2_jigumo_setup();
+            pc_p2_batch3_setup();
+            pc_p2_long_legs_setup();
         }
         return;
     }
