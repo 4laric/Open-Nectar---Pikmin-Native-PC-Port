@@ -520,7 +520,10 @@ void pc_p2_tamago_setup() {
             if (pc_p2_setup_skip(bridge, "TamagoMushi", "actor_type_mismatch")) return;
             std::abort();
         }
-        if (!found.insert(key).second) continue;
+        // Swarm members share one campaign token: bind every live member
+        // (each corpse needs its own delivery source) while counting the
+        // token once toward the roster check.
+        found.insert(key);
         matched.emplace_back(actor, key);
     }
     if (found.size() != wanted.size()) {

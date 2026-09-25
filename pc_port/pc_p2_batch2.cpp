@@ -650,16 +650,21 @@ static void bindFamilies(bool strict) {
             // members. The proxy family in bridge mode binds EVERY live
             // member and counts the token once (found already holds it, so
             // repeats fall through to the bind below with no second insert).
-            // The Uji family shares this tolerance in bridge mode: P1
-            // KabekuiA/B/C vehicles group-spawn (a Sheargrub burrow pours
-            // several Teki from one generator), so repeats are pack members,
-            // not a scene mismatch. All other families keep the
-            // duplicate-generator abort.
+            // The Uji and ground families share this tolerance in bridge mode:
+            // P1 KabekuiA/B/C vehicles group-spawn (a Sheargrub burrow pours
+            // several Teki from one generator) and Mitite (TamagoMushi) nest
+            // as swarms, so repeats are pack members, not a scene mismatch.
+            // All other families keep the duplicate-generator abort.
+            const std::string famName = family.name;
             const bool packTolerant =
-                soft || (bridge && std::string(family.name) == "uji");
+                soft || (bridge && (famName == "uji" || famName == "ground"));
             if (p2proxy::tokenAction(packTolerant, !found.insert(generator).second)
-                    == p2proxy::TokenAction::Fail)
-                fail("duplicate generator in scene");
+                    == p2proxy::TokenAction::Fail) {
+                char msg[256];
+                std::snprintf(msg, sizeof(msg), "duplicate generator=%u family=%s in scene",
+                              generator, family.name);
+                fail(msg);
+            }
             actors[teki] = std::string(family.name) + "|" + match->second;
             speciesUsed.insert(match->second);
             // bot-v7 (wf10): lane-06 ordinary-delivery source for proxy
