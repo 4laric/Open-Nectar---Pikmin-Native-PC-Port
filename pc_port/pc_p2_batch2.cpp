@@ -555,7 +555,9 @@ static void campaignWanted(const FamilyDef& family, std::map<unsigned, std::stri
     static const struct { const char* family; unsigned source; const char* species; } SOURCES[] = {
         {"dweevil", 59, "FireOtakara"}, {"dweevil", 60, "WaterOtakara"},
         {"dweevil", 61, "GasOtakara"}, {"dweevil", 62, "ElecOtakara"},
+        {"dweevil", 93, "BombOtakara"},
         {"ground", 79, "Sokkuri"},
+        {"ground", 84, "Hana"},
     };
     wanted.clear();
     for (const auto& row : SOURCES)

@@ -23,6 +23,8 @@
 #include "pc_p2_long_legs_fsm.h"
 #include "pc_p2_cannon_stone.h"
 #include "pc_p2_animation.h"
+#include "pc_p2_campaign_actor.h"
+#include "pc_p2_setup_failsafe.h"
 #include "pc_bbft.h"
 #include "teki.h"
 #include "Pellet.h"
@@ -430,9 +432,18 @@ void pc_p2_long_legs_forget(BTeki* actor) {
 
 void pc_p2_long_legs_setup() {
     pc_p2_long_legs_reset();
-    if (!pc_pikipelago_room_preview() || !tekiMgr) return;
+    const bool bridge = pc_randomizer_p2_bridge() && !pc_pikipelago_room_preview();
+    if (!tekiMgr) return;
+    if (!bridge && !pc_pikipelago_room_preview()) return;
     std::map<unsigned, std::string> wanted;
-    if (!parseActors("p2-long-legs-actors.txt", wanted)) return;
+    if (bridge) {
+        // Campaign identity for the Man-at-Legs boss (source 66 Houdai).
+        // Filed generators are placeholders there; the seed source mapping
+        // is authoritative. BigFoot/Damagumo stay preview-only.
+        for (unsigned id : pc_p2_campaign_ids(66)) wanted[id] = "Houdai";
+    } else {
+        if (!parseActors("p2-long-legs-actors.txt", wanted)) return;
+    }
 
     std::set<unsigned> found;
     std::set<std::string> speciesUsed;
@@ -440,11 +451,29 @@ void pc_p2_long_legs_setup() {
     CI_LOOP(it) {
         Teki* teki = static_cast<Teki*>(*it);
         if (!teki || !teki->mGenerator) continue;
-        const unsigned generator = teki->mGenerator->_70;
+        const unsigned generator = bridge ? pc_p2_campaign_token(teki) : teki->mGenerator->_70;
         auto match = wanted.find(generator);
         if (match == wanted.end()) continue;
-        if (teki->mTekiType != TEKI_Chappy) fail("native type mismatch");
-        if (!found.insert(generator).second) fail("duplicate generator in scene");
+        if (bridge) {
+            // Campaign vehicle for 66 is TEKI_Swallow (policy hostType 66->4);
+            // the preview fixture uses TEKI_Chappy. Accept either in bridge
+            // so the vehicle check cannot strand the boss as a host-driven
+            // PROXY; fail closed only on a non-legged vehicle.
+            if (teki->mTekiType != TEKI_Chappy && teki->mTekiType != TEKI_Swallow) {
+                std::printf("P2_LONG_LEGS_ERROR native_type generator=%u\n", generator);
+                std::fflush(stdout);
+                if (pc_p2_setup_skip(true, "LongLegs", "actor_type_mismatch")) return;
+                fail("native type mismatch");
+            }
+        } else if (teki->mTekiType != TEKI_Chappy) {
+            fail("native type mismatch");
+        }
+        if (!found.insert(generator).second) {
+            if (bridge) {
+                if (pc_p2_setup_skip(true, "LongLegs", "duplicate_generator")) return;
+            }
+            fail("duplicate generator in scene");
+        }
         ActorState& state = actors[teki];
         state.species = match->second;
         state.generator = generator;
@@ -455,12 +484,43 @@ void pc_p2_long_legs_setup() {
         state.lastHealth = teki->mHealth;
         state.lastPositiveHealth = teki->mHealth;
         speciesUsed.insert(match->second);
+        if (bridge && match->second == "Houdai") {
+            // Ordinary-delivery bridge (lane 06 contract, mirrors Catfish 26):
+            // bind source 66 so GoalItem::suckMe can grant onion:p2:66.
+            // Boss corpse carriability stays open (host pellet path); the bind
+            // is what lets the Onion credit it.
+            pc_randomizer_p2_bind_source(static_cast<PelletView*>(teki), 66, generator);
+            std::printf("P2_HOUDAI_DELIVERY_BIND generator=%u source_id=66\n", generator);
+            std::fflush(stdout);
+        }
     }
-    if (found.size() != wanted.size()) fail("arena actor not present in scene");
+    if (found.size() != wanted.size()) {
+        if (bridge) {
+            if (pc_p2_setup_skip(true, "LongLegs", "actor_roster_incomplete")) return;
+        }
+        fail("arena actor not present in scene");
+    }
     for (const std::string& species : speciesUsed) {
         if (shapes.count(species)) continue;
         const SpeciesDef* def = findSpecies(species);
-        if (!def) fail("unknown species in actor config");
+        if (!def) {
+            if (bridge) {
+                if (pc_p2_setup_skip(true, "LongLegs", "unknown_species")) return;
+            }
+            fail("unknown species in actor config");
+        }
+        if (bridge) {
+            // Bridge visuals are best-effort: a missing bind mesh must not
+            // strand the boss as unbound (behaviour OWN, visuals degraded to
+            // host). Preview stays fail-closed.
+            std::ifstream probe(std::string("assets/dataDir/courses/pikmin2room/") + def->mod,
+                                std::ios::binary);
+            if (!probe) {
+                std::printf("P2_SETUP_SKIP LongLegs missing_bind_mesh species=%s\n", species.c_str());
+                std::fflush(stdout);
+                continue;
+            }
+        }
         shapes[species] = loadBind(*def);
     }
     for (const auto& entry : actors)

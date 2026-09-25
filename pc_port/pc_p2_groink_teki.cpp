@@ -244,8 +244,15 @@ void pc_p2_groink_teki_setup() {
         auto* t = static_cast<Teki*>(*it);
         if (!t || !t->mGenerator) continue;
         if (pc_randomizer_p2_bridge()) {
-            if (pc_p2_campaign_source(t) != 78) continue;
+            const unsigned src = pc_p2_campaign_source(t);
+            if (src != 78 && src != 97) continue;
             gen = pc_p2_campaign_token(t);
+            // In bridge the staged single-type config no longer describes the
+            // actor: 78 stays a Groink carcass host, 97 is the Gatling Groink
+            // pedestal (FminiHoudai) on the same Frog vehicle. Both share the
+            // carcass-after-death path; live locomotion/gun stays host-driven
+            // (documented PROXY gap for 97 live behaviour).
+            type = t->mTekiType;
         } else if (pc_p2_campaign_token(t) != gen) continue;
         if (t->mTekiType != type || (!pc_randomizer_p2_bridge() && s.size())) { if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Groink", "actor_type_mismatch")) return; }
         // A host that leaves no corpse dies through dieSoon -> kill -> doKill,
@@ -260,6 +267,14 @@ void pc_p2_groink_teki_setup() {
         sGeneratorObj = t->mGenerator; // (#198 gate 6 rebirth probe)
         std::printf("P2_GROINK_CARCASS_READY generator=%u type=%d gauge_delay=%.3f recovery=%.3f max_health=%.3f\n",
                     gen, type, cfg.carcass.gaugeDelay, cfg.carcass.recoverySeconds, cfg.carcass.maxHealth);
+        if (pc_randomizer_p2_bridge() && pc_p2_campaign_source(t) == 97) {
+            // Ordinary-delivery bridge for the 97 pedestal branch (lane 06
+            // contract, mirrors Catfish 26): bind source 97 so GoalItem::suckMe
+            // can grant onion:p2:97 exactly once. Carcass path stays shared.
+            pc_randomizer_p2_bind_source(static_cast<PelletView*>(t), 97, gen);
+            std::printf("P2_GROINK_DELIVERY_BIND generator=%u source_id=97\n", gen);
+            std::fflush(stdout);
+        }
     }
 }
 

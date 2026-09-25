@@ -434,6 +434,7 @@ static int speciesFromSource(unsigned source) {
     case 60: return p2dweevil::WaterId;
     case 61: return p2dweevil::GasId;
     case 62: return p2dweevil::ElecId;
+    case 93: return p2dweevil::BombId;
     default: return -1;
     }
 }
@@ -533,6 +534,7 @@ void pc_p2_otakara_setup() {
         wanted.clear();
         for (unsigned source=59; source<=62; ++source)
             for (unsigned id : pc_p2_campaign_ids(source)) wanted[id] = speciesFromSource(source);
+        for (unsigned id : pc_p2_campaign_ids(93)) wanted[id] = speciesFromSource(93);
     }
     if (wanted.empty()) return;
 
@@ -548,6 +550,17 @@ void pc_p2_otakara_setup() {
             if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Otakara", "actor_type_mismatch")) return;
         }
         registerActor(actor, match->second, pc_p2_campaign_token(actor));
+        if (match->second == p2dweevil::BombId) {
+            // Ordinary-delivery bridge for the Volatile Dweevil carrier
+            // (lane 06 contract, mirrors Catfish 26): bind source 93 so
+            // GoalItem::suckMe can grant onion:p2:93 exactly once. The
+            // element itself stays delegated to the carried Bomb payload.
+            pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor), 93,
+                                         pc_p2_campaign_token(actor));
+            std::printf("P2_BOMBOTAKARA_DELIVERY_BIND generator=%u source_id=93\n",
+                        pc_p2_campaign_token(actor));
+            std::fflush(stdout);
+        }
         found.insert(pc_p2_campaign_token(actor));
     }
     if (found.size() != wanted.size()) {
