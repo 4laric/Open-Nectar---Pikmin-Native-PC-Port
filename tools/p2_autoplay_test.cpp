@@ -2265,7 +2265,6 @@ void testUnkilledWhistleTimeout()
     CHECK(hasMarker(markers, "AUTOPLAY_GIVEUP reason=attack_timeout"), "unkilled-whistle/times_out");
     CHECK(hasMarker(markers, "AUTOPLAY_RESULT target=1945764764"), "unkilled-whistle/results");
 }
-}
 
 } // namespace
 
