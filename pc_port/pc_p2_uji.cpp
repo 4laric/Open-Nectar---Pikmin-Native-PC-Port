@@ -93,6 +93,7 @@ struct Uji {
     bool escaped = false;
     bool atariOn = false;
     bool gateInit = false;
+    int hostMotion = -1;
     float tickAccum = 0.0f;
     std::string clip = "dive";
     float phase = 0.0f;
@@ -189,6 +190,38 @@ void applyBurrowGate(BTeki* a, Uji& s, unsigned generator) {
                     generator, s.sourceId);
     }
     std::fflush(stdout);
+}
+// The suppressed Kabekui host never runs its own appear/move/attack motions,
+// so its collision parts would stay frozen in the spawn (burrowed) pose while
+// the P2 model fights above ground and Pikmin could never stick. Drive the
+// (invisible - batch2 draws the P2 model instead) host animator from the P2
+// FSM so the collparts ride along: emerge uses the host's own appear motion
+// (WaitAct2, cf TAIkabekuiA.cpp:254), locomotion Move1, bites Attack.
+void driveHostMotion(BTeki* a, Uji& s) {
+    int want = -1;
+    switch (s.fsm.state) {
+    case UJI_APPEAR:
+    case UJI_EAT:
+        want = TekiMotion::WaitAct2;
+        break;
+    case UJI_MOVE:
+    case UJI_GOHOME:
+    case UJI_FLY:
+        want = TekiMotion::Move1;
+        break;
+    case UJI_ATTACK1:
+    case UJI_ATTACK2:
+        want = TekiMotion::Attack;
+        break;
+    case UJI_DEAD:
+        want = TekiMotion::Dead;
+        break;
+    default:
+        return; // STAY/DIVE: keep the burrowed pose (no atari anyway)
+    }
+    if (want == s.hostMotion) return;
+    s.hostMotion = want;
+    a->startMotion(want);
 }
 // Nearest live Pikmin/Navi for the P2-owned bite and for turn-to-target.
 Creature* nearestFoe(const Vector3f& pos, float range) {
@@ -519,6 +552,7 @@ void pc_p2_uji_update(BTeki* actor) {
     }
     (void)moved;
     applyBurrowGate(actor, s, generator);
+    driveHostMotion(actor, s);
 
     // Drive the P1 vehicle per state. Source Move wanders toward the target
     // (turnToTarget); the fixed heading drift is kept only with no target in
