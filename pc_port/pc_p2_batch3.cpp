@@ -551,43 +551,6 @@ void pc_p2_batch3_setup_bridge() {
         std::printf("P2_SETUP_SKIP batch3 snagret bad_bank\n");
         return;
     }
-}
-
-// Worms lane (#871) round 2 bridge visuals: the snagret pair (34/70) and the
-// bloyster pair (71/101) draw their P2 pose banks in campaign (bridge) mode.
-// Narrow and additive: builds wanted strictly from live campaign sources for
-// these four species, binds only TEKI_Chappy placement vehicles, loads only
-// their banks (Blind reuses the UmiMushi bank as in preview), and is a no-op
-// for campaigns without worms. All other species and the preview path are
-// untouched.
-static void setupBridgeWorms() {
-    struct WormRow {
-        const char* family;
-        const char* species;
-        unsigned source;
-        const char* bankSpecies;
-    };
-    static const WormRow ROWS[] = {
-        {"snagret", "SnakeCrow", 34, "SnakeCrow"},
-        {"snagret", "SnakeWhole", 70, "SnakeWhole"},
-        {"aquatic", "UmiMushi", 71, "UmiMushi"},
-        {"aquatic", "UmiMushiBlind", 101, "UmiMushi"},
-    };
-    std::map<unsigned, std::pair<std::string, std::string>> wanted; // token -> (key, bankSpecies)
-    std::map<std::string, std::string> bankSpeciesFor;              // key -> bankSpecies
-    for (const auto& row : ROWS) {
-        for (unsigned id : pc_p2_campaign_ids(row.source)) {
-            const std::string key = std::string(row.family) + "|" + row.species;
-            wanted[id] = {key, row.bankSpecies};
-            bankSpeciesFor[key] = row.bankSpecies;
-        }
-    }
-    if (wanted.empty()) return;
-    std::map<std::string, std::map<std::string, std::vector<ClipRow>>> rowsByFamily;
-    for (const FamilyDef& family : FAMILIES) {
-        std::map<std::string, std::vector<ClipRow>> rows;
-        if (parseBank(family.bank, rows)) rowsByFamily[family.name] = std::move(rows);
-    }
     std::set<unsigned> found;
     std::set<std::string> speciesUsed;
     Iterator it(tekiMgr);
@@ -634,6 +597,50 @@ static void setupBridgeWorms() {
     std::printf("P2_BATCH3_BANK total_mod_bytes=%zu species=%zu\n", bytesTotal, banks.size());
 }
 
+// Worms lane (#871) round 2 bridge visuals: the snagret pair (34/70) and the
+// bloyster pair (71/101) draw their P2 pose banks in campaign (bridge) mode.
+// Narrow and additive: builds wanted strictly from live campaign sources for
+// these four species, binds only TEKI_Chappy placement vehicles, loads only
+// their banks (Blind reuses the UmiMushi bank as in preview), and is a no-op
+// for campaigns without worms. All other species and the preview path are
+// untouched.
+static void setupBridgeWorms() {
+    struct WormRow {
+        const char* family;
+        const char* species;
+        unsigned source;
+        const char* bankSpecies;
+    };
+    static const WormRow ROWS[] = {
+        {"snagret", "SnakeCrow", 34, "SnakeCrow"},
+        {"snagret", "SnakeWhole", 70, "SnakeWhole"},
+        {"aquatic", "UmiMushi", 71, "UmiMushi"},
+        {"aquatic", "UmiMushiBlind", 101, "UmiMushi"},
+    };
+    std::map<unsigned, std::pair<std::string, std::string>> wanted; // token -> (key, bankSpecies)
+    std::map<std::string, std::string> bankSpeciesFor;              // key -> bankSpecies
+    for (const auto& row : ROWS) {
+        for (unsigned id : pc_p2_campaign_ids(row.source)) {
+            const std::string key = std::string(row.family) + "|" + row.species;
+            wanted[id] = {key, row.bankSpecies};
+            bankSpeciesFor[key] = row.bankSpecies;
+        }
+    }
+    if (wanted.empty()) return;
+    std::map<std::string, std::map<std::string, std::vector<ClipRow>>> rowsByFamily;
+    for (const FamilyDef& family : FAMILIES) {
+        std::map<std::string, std::vector<ClipRow>> rows;
+        if (parseBank(family.bank, rows)) rowsByFamily[family.name] = std::move(rows);
+    }
+    std::set<unsigned> found;
+    std::set<std::string> speciesUsed;
+    Iterator it(tekiMgr);
+    CI_LOOP(it) {
+        Teki* teki = static_cast<Teki*>(*it);
+        if (!teki || !teki->mGenerator) continue;
+        const unsigned token = pc_p2_campaign_token(teki);
+        auto match = wanted.find(token);
+        if (match == wanted.end()) continue;
         if (teki->mTekiType != TEKI_Chappy) {
             std::printf("P2_SETUP_SKIP batch3 %s native_type_mismatch generator=%u\n",
                         match->second.first.c_str(), token);
