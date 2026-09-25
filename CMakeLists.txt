@@ -245,6 +245,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_kochappy.cpp
     pc_port/pc_p2_dwarf_orange.cpp
     pc_port/pc_p2_bluechappy.cpp
+    pc_port/pc_p2_chappy.cpp
     pc_port/pc_p2_kochappy_fsm.cpp
     pc_port/pc_p2_breadbug_visual.cpp
     pc_port/pc_p2_giant_breadbug_visual.cpp
@@ -1537,6 +1538,17 @@ add_executable(p2_sokkuri_receipt_test tools/p2_sokkuri_receipt_test.cpp pc_port
 target_include_directories(p2_sokkuri_receipt_test PRIVATE pc_port)
 target_compile_options(p2_sokkuri_receipt_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_sokkuri_receipt_test COMMAND p2_sokkuri_receipt_test)
+# inst-chappy (#871): engine-free Chappy-family policy/FSM unit tests
+# (header-only retail parms, sidecar parse, per-actor health registry and
+# the adult/kuma/kumako/king transition tables).
+add_executable(p2_chappy_policy_test tools/p2_chappy_policy_test.cpp)
+target_include_directories(p2_chappy_policy_test PRIVATE pc_port)
+target_compile_options(p2_chappy_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_chappy_policy_test COMMAND p2_chappy_policy_test)
+add_executable(p2_chappy_fsm_test tools/p2_chappy_fsm_test.cpp)
+target_include_directories(p2_chappy_fsm_test PRIVATE pc_port)
+target_compile_options(p2_chappy_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_chappy_fsm_test COMMAND p2_chappy_fsm_test)
 # bot-impl (#871): TEST-ONLY headless autoplay bot policy. Engine-free:
 # the header-only Brain (states, timeouts, giveup/result markers, Kogane
 # damage-and-move-on) plus the inert-when-unset gate (registration only).

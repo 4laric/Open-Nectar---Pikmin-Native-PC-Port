@@ -38,6 +38,7 @@
 #include "pc_p2_kochappy.h"
 #include "pc_p2_dwarf_orange.h"
 #include "pc_p2_bluechappy.h"
+#include "pc_p2_chappy.h"
 #include "pc_p2_bulbmin.h"
 #include "pc_p2_kochappy_fsm.h"
 #include "pc_p2_kogane.h"
@@ -77,6 +78,7 @@ void pc_p2_forget_teki(BTeki* actor)
 	pc_p2_kochappy_forget(actor);
 	pc_p2_dwarf_orange_forget(actor);
 	pc_p2_bluechappy_forget(actor);
+	pc_p2_chappy_forget(actor);
 	// Lane-11 Bulbmin: release the flock when its mother stand-in (Kochappy or a
 	// bare Chappy-family host) is forgotten, independent of the Kochappy module.
 	pc_p2_bulbmin_proxy_forget(actor);
@@ -138,6 +140,7 @@ pc_p2_sarai_manager_reset();
 	pc_p2_kochappy_reset();
 	pc_p2_dwarf_orange_reset();
 	pc_p2_bluechappy_reset();
+	pc_p2_chappy_reset();
     pc_p2_kochappy_fsm_reset();
 	pc_p2_breadbug_visual_reset();
 	pc_p2_giant_breadbug_visual_reset();
