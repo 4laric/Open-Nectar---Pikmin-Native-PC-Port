@@ -88,6 +88,25 @@ int main()
         in.state = 7;
         in.hp = 0.0f;
         require(tick(35, in).next == 0, "kuma death is state 0");
+        // Runtime-driven details: flick preempts walk, attack completion
+        // returns to walk, lost reacquires on sight.
+        in.hp = 1200.0f;
+        in.state = 7; // Walk
+        in.flick = true;
+        in.attackDone = false;
+        require(tick(35, in).next == 4, "walk flicks on shake-off");
+        in.state = 3; // Attack
+        in.flick = false;
+        in.attackDone = true;
+        require(tick(35, in).next == 7, "attack completion walks");
+        in.state = 2; // Lost
+        in.attackDone = false;
+        in.seesTarget = true;
+        in.reviveReady = false;
+        require(tick(35, in).next == 7, "lost reacquires on sight");
+        in.state = 5; // Turn
+        in.seesTarget = false;
+        require(tick(35, in).next == 7, "turn advances to walk");
     }
 
     // --- kumako: wait, follow, attack ---
@@ -106,6 +125,20 @@ int main()
         require(tick(76, in).next == 2, "parent loss returns to wait");
         in.hp = 0.0f;
         require(tick(76, in).next == 0, "kumako death is state 0");
+        // Press (state 1) is entered via the pc_p2_chappy_press trigger, not
+        // the table: the table must hold it so the runtime can graduate it
+        // to Dead after the press clip.
+        in.hp = 500.0f;
+        in.state = 1; // Press
+        require(tick(76, in).next == 1, "press holds for the runtime");
+        in.state = 5; // Walk
+        in.inRange = true;
+        require(tick(76, in).next == 3, "walk range attacks");
+        in.state = 4; // Flick
+        in.inRange = false;
+        in.flick = false;
+        in.attackDone = true;
+        require(tick(76, in).next == 5, "flick completion walks");
     }
 
     // --- king: walk, warcry, burrow, bombs, dead ---
@@ -135,6 +168,26 @@ int main()
         in.bombStun = false;
         in.hp = 0.0f;
         require(tick(53, in).next == 2, "king death is state 2");
+        // Burrow/appear/caution chain and the bomb-eat path the runtime
+        // drives on timers (Eat->Swallow, Hide->HideWait->Appear->Caution).
+        in.hp = 1300.0f;
+        in.state = 8; // Hide
+        require(tick(53, in).next == 9, "hide enters hidewait");
+        in.state = 10; // Appear
+        in.attackDone = true;
+        require(tick(53, in).next == 11, "appear enters caution");
+        in.state = 11; // Caution
+        require(tick(53, in).next == 0, "caution completion walks");
+        in.state = 7; // Eat
+        in.attackDone = false;
+        require(tick(53, in).next == 12, "eat enters swallow");
+        in.state = 12; // Swallow
+        in.attackDone = true;
+        require(tick(53, in).next == 0, "swallow completion walks");
+        in.state = 3; // Flick
+        in.attackDone = true;
+        in.flick = false;
+        require(tick(53, in).next == 3, "flick holds without completion");
     }
 
     std::printf("PASS p2_chappy_fsm_test checks=%d\n", gChecks);

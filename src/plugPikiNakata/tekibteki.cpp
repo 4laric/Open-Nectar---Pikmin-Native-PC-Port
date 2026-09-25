@@ -632,6 +632,9 @@ void BTeki::doAI()
 	if (pc_p2_frog_suppress_ai(this)) {
 		return;
 	}
+	if (pc_p2_chappy_suppress_ai(this)) {
+		return;
+	}
 #endif
 	if (pc_p2_qurione_suppress_ai(this)) {
 		return;

@@ -45,6 +45,35 @@ int main()
         require(row.host == 3 || row.host == 4 || row.host == 31 || row.host == 32, "known vehicle");
     }
 
+    // --- per-species movement/sight/attack envelopes (runtime FSM inputs) ---
+    {
+        const SpeciesParams* fire = speciesForSource(33);
+        require(fire && near(fire->moveSpeed, 110.0f) && near(fire->sight, 500.0f), "fire move/sight");
+        require(near(fire->attackRange, 75.0f) && near(fire->attackDamage, 10.0f), "fire attack envelope");
+        const SpeciesParams* kuma = speciesForSource(35);
+        require(kuma && near(kuma->moveSpeed, 100.0f) && near(kuma->sight, 500.0f), "kuma move/sight");
+        const SpeciesParams* yellow = speciesForSource(43);
+        require(yellow && near(yellow->moveSpeed, 90.0f), "yellow move speed");
+        const SpeciesParams* king = speciesForSource(53);
+        require(king && near(king->moveSpeed, 45.0f) && near(king->attackRange, 130.0f), "king slow wide attack");
+        require(near(king->attackAngle, 30.0f), "king attack angle");
+        const SpeciesParams* leaf = speciesForSource(67);
+        require(leaf && near(leaf->sight, 300.0f) && near(leaf->attackRange, 40.0f), "leaf short sight/range");
+        const SpeciesParams* kumako = speciesForSource(76);
+        require(kumako && near(kumako->sight, 150.0f) && near(kumako->attackRange, 35.0f), "kumako dwarf envelope");
+        require(near(kumako->attackHitRange, 38.0f), "kumako hit range");
+        // Poison (white-pikmin) proper values per family block.
+        require(near(red->poisonDamage, 750.0f) && near(fire->poisonDamage, 300.0f), "adult poison proper");
+        require(near(king->poisonDamage, 200.0f) && near(leaf->poisonDamage, 500.0f), "king/leaf poison proper");
+    }
+
+    // --- source StateID orders (runtime FSM states) ---
+    {
+        require(ADULT_TURN == 0 && ADULT_DEAD == 1 && ADULT_FLICK == 2 && ADULT_WALK == 3, "adult turn/dead/flick/walk");
+        require(ADULT_ATTACK == 4 && ADULT_TURN_TO_HOME == 5 && ADULT_GO_HOME == 6 && ADULT_SLEEP == 7, "adult attack/home/sleep");
+        require(ADULT_COUNT == 8, "adult state count");
+    }
+
     // --- adult attack event frames (chappy/enemyanimmgr.txt) ---
     require(AttackBiteFrame == 10, "bite frame 10");
     require(AttackSwallowFrame == 33, "swallow frame 33");
