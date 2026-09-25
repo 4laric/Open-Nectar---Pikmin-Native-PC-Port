@@ -53,6 +53,12 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     // native modules' TEKI_Chappy expectation (pc_p2_snakejoint.cpp,
     // pc_p2_imomushi.cpp, pc_p2_umimushi.cpp).
     case 34: case 70: case 65: case 71: case 101: return 3; // TEKI_Chappy
+    case 26: return 30; // TEKI_Namazu: Catfish (Water Dumple) aquatic host
+    case 27: return 25; // TEKI_Otama: Tadpole (Wogpole) aquatic host
+    case 84: return 3; // TEKI_Chappy: Hana (Creeping Chrysanthemum)
+    case 93: return 3; // TEKI_Chappy: BombOtakara (Volatile Dweevil)
+    case 66: return 4; // TEKI_Swallow: Houdai (Man-at-Legs) proxy vehicle
+    case 97: return 0; // TEKI_Frog: FminiHoudai (Gatling Groink pedestal) proxy vehicle
     default: return original;
     }
 }

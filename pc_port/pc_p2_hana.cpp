@@ -33,6 +33,8 @@
 #include "pc_p2_hana.h"
 #include "pc_p2_hana_events.h"
 #include "pc_p2_hana_residual_policy.h"
+#include "pc_p2_campaign_actor.h"
+#include "pc_p2_setup_failsafe.h"
 #include "pc_p2_white.h"
 #include "teki.h"
 #include "Interactions.h"
@@ -323,7 +325,7 @@ bool pc_p2_hana_rejects_attack(Teki* teki) {
     const bool blocked = p2hanapolicy::blocksDamage(p2hanapolicy::undergroundGate(in));
     if (blocked) {
         std::printf("P2_HANA_UNDERGROUND_BLOCK generator=%u source_id=84 buried=1\n",
-                    teki->mGenerator ? teki->mGenerator->_70 : 0u);
+                    teki->mGenerator ? pc_p2_campaign_token(teki) : 0u);
         std::fflush(stdout);
     }
     return blocked;
@@ -422,6 +424,10 @@ void pc_p2_hana_setup() {
         if (!(in >> generator >> species)) return;
         if (species == "Hana") wanted[unsigned(generator)] = species;
     }
+    if (pc_randomizer_p2_bridge()) {
+        wanted.clear();
+        for (unsigned id : pc_p2_campaign_ids(84)) wanted[id] = "Hana";
+    }
     if (wanted.empty()) return;
 
     std::set<unsigned> found;
@@ -429,10 +435,12 @@ void pc_p2_hana_setup() {
     CI_LOOP(it) {
         Teki* actor = static_cast<Teki*>(*it);
         if (!actor || !actor->mGenerator) continue;
-        auto match = wanted.find(actor->mGenerator->_70);
+        auto match = wanted.find(pc_p2_campaign_token(actor));
         if (match == wanted.end()) continue;
         if (actor->mTekiType != TEKI_Chappy) {
-            std::printf("P2_HANA_ERROR native_type generator=%u\n", actor->mGenerator->_70);
+            std::printf("P2_HANA_ERROR native_type generator=%u\n", pc_p2_campaign_token(actor));
+            std::fflush(stdout);
+            if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Hana", "actor_type_mismatch")) return;
             std::abort();
         }
         Hana& s = actors[static_cast<PelletView*>(actor)];
@@ -443,19 +451,29 @@ void pc_p2_hana_setup() {
         // Bite/swallow/flick timing comes from the authored attack1/flick events
         // via the sampled clock; no per-state frame fields to extract.
         enter(s, HANA_SLEEP, "type1");
+        // Ordinary-delivery bridge (lane 06 contract, mirrors Catfish 26):
+        // bind source 84 to this live actor so GoalItem::suckMe can grant
+        // onion:p2:84 exactly once. Single-use: consumed on delivery and
+        // cleared on forget/recycle.
+        pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor), 84,
+                                     pc_p2_campaign_token(actor));
+        std::printf("P2_HANA_DELIVERY_BIND generator=%u source_id=84\n",
+                    pc_p2_campaign_token(actor));
         std::printf("P2_HANA_BIND generator=%u source_id=84 visual_only=0\n",
-                    actor->mGenerator->_70);
-        std::printf("P2_HANA_STATE generator=%u state=sleep\n", actor->mGenerator->_70);
+                    pc_p2_campaign_token(actor));
+        std::printf("P2_HANA_STATE generator=%u state=sleep\n", pc_p2_campaign_token(actor));
         std::fflush(stdout);
         const Vector3f pos = actor->getPosition();
         std::printf("P2_ENEMY_READY species=Hana native_family=Chappy generator=%u "
                     "x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=native "
                     "source_FSM=implemented attack=animation_event\n",
-                    actor->mGenerator->_70, pos.x, pos.y, pos.z, actor->mHealth, LIFE);
-        found.insert(actor->mGenerator->_70);
+                    pc_p2_campaign_token(actor), pos.x, pos.y, pos.z, actor->mHealth, LIFE);
+        found.insert(pc_p2_campaign_token(actor));
     }
     if (found.size() != wanted.size()) {
         std::printf("P2_HANA_ERROR missing_actor wanted=%zu found=%zu\n", wanted.size(), found.size());
+        std::fflush(stdout);
+        if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Hana", "actor_roster_incomplete")) return;
         std::abort();
     }
     ready = true;
@@ -474,7 +492,7 @@ void pc_p2_hana_update(BTeki* actor) {
     // it would discard crossed animation events and break exactly-once timing.
     if (dt > 0.5f) dt = 0.5f;
     const Vector3f pos = actor->getPosition();
-    const unsigned generator = actor->mGenerator ? actor->mGenerator->_70 : 0u;
+    const unsigned generator = actor->mGenerator ? pc_p2_campaign_token(actor) : 0u;
 
     if (actor->mHealth <= 0.0f && s.state != HANA_DEAD) {
         if (!s.deadLogged) {

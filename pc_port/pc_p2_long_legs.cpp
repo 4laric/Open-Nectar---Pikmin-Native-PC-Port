@@ -507,12 +507,24 @@ void pc_p2_long_legs_setup() {
         const unsigned generator = bridge ? pc_p2_campaign_token(teki) : teki->mGenerator->_70;
         auto match = wanted.find(generator);
         if (match == wanted.end()) continue;
-        if (teki->mTekiType != TEKI_Chappy) {
-            std::printf("P2_LONG_LEGS_ERROR native_type generator=%u\n", generator);
-            if (pc_p2_setup_skip(bridge, "LongLegs", "actor_type_mismatch")) return;
+        if (bridge) {
+            // Campaign vehicle for 66 is TEKI_Swallow (policy hostType 66->4);
+            // the preview fixture uses TEKI_Chappy. Accept either in bridge
+            // so the vehicle check cannot strand the boss as a host-driven
+            // PROXY; fail closed only on a non-legged vehicle.
+            if (teki->mTekiType != TEKI_Chappy && teki->mTekiType != TEKI_Swallow) {
+                std::printf("P2_LONG_LEGS_ERROR native_type generator=%u\n", generator);
+                std::fflush(stdout);
+                if (pc_p2_setup_skip(true, "LongLegs", "actor_type_mismatch")) return;
+                fail("native type mismatch");
+            }
+        } else if (teki->mTekiType != TEKI_Chappy) {
+            fail("native type mismatch");
         }
         if (!found.insert(generator).second) {
-            if (pc_p2_setup_skip(bridge, "LongLegs", "duplicate_generator")) return;
+            if (bridge) {
+                if (pc_p2_setup_skip(true, "LongLegs", "duplicate_generator")) return;
+            }
             fail("duplicate generator in scene");
         }
         ActorState& state = actors[teki];
@@ -747,8 +759,24 @@ void pc_p2_long_legs_update(BTeki* actor) {
             // otherwise), so the Teki facing control is available.
             static_cast<Teki*>(actor)->setDirection(std::atan2(dx, dz));
             state.walkDistance += step;
+            // Last-word drive (inst3-misc OWN): P2 FSM decides movement each
+            // tick; host Swallow/Chappy TAI is suppressed (doAI) and blinded
+            // (param_f), and this overwrite is the movement verdict.
+            const float heading = std::atan2(dx, dz);
+            const Vector3f drive(std::sin(heading) * state.parms.speed, 0.0f,
+                                 std::cos(heading) * state.parms.speed);
+            actor->inputDrive(drive);
+            actor->mVelocity.set(drive);
+        } else {
+            actor->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
+            actor->mVelocity.x = 0.0f;
+            actor->mVelocity.z = 0.0f;
         }
     } else {
+        // Non-Walk states: P2 holds the actor (last-word zero drive).
+        actor->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
+        actor->mVelocity.x = 0.0f;
+        actor->mVelocity.z = 0.0f;
         state.lastMoveRatio = 1.0f;
         stopActor(actor);
         if (before == P2LongLegsState::Walk && state.hasWalkTarget) {
@@ -831,7 +859,30 @@ bool pc_p2_long_legs_registered(BTeki* actor) {
 }
 
 bool pc_p2_long_legs_suppress_ai(const BTeki* actor) {
+    if (!actor) return false;
     return actors.count(const_cast<BTeki*>(actor)) != 0;
+}
+
+float pc_p2_long_legs_param_f(const BTeki* actor, int idx, float fallback) {
+    if (!actor || !actors.count(const_cast<BTeki*>(actor))) return fallback;
+    // Catfish pattern: blind the P1 host strategy so it cannot acquire or
+    // attack while the P2 FSM drives. Life stays host-owned (damage funnel).
+    switch (idx) {
+    case TPF_VisibleRange:
+    case TPF_VisibleAngle:
+    case TPF_AttackableRange:
+    case TPF_AttackableAngle:
+    case TPF_AttackRange:
+    case TPF_AttackHitRange:
+    case TPF_AttackPower:
+    case TPF_DangerTerritoryRange:
+    case TPF_SafetyTerritoryRange:
+        return 0.0f;
+    case TPF_LifeRecoverRate:
+        return 0.0f;
+    default:
+        return fallback;
+    }
 }
 
 bool pc_p2_long_legs_damageable(const BTeki* actor) {

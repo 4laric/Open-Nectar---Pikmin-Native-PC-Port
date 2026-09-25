@@ -41,5 +41,9 @@ bool pc_p2_groink_receipt(PelletView* view, unsigned& generator);
 // host). In the isolated room preview a natural free-mode squad cannot reliably
 // out-damage the P1 Frog host, so the bound host's TPF_Life is capped. This is a
 // parameter override, never a health write; returns `fallback` for any other
-// parameter or unbound actor.
+// parameter or unbound actor. For 97 live (inst3 OWN) it also blinds sight/
+// attack ranges so the P2 pedestal FSM has last word.
 float pc_p2_groink_teki_param_f(const BTeki* teki, int idx, float fallback);
+// Host suppression (inst3-misc OWN): true for a bound 97 pedestal live actor,
+// disabling the P1 Frog TAI so the P2 gun FSM decides each tick.
+bool pc_p2_groink_teki_suppress_ai(const BTeki* teki);

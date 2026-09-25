@@ -175,6 +175,12 @@ void pc_p2_preview_setup() {
             pc_p2_armor_setup();
             pc_p2_tank_setup();
             pc_p2_kabuto_fsm_setup();
+            pc_p2_catfish_setup();
+            pc_p2_tadpole_setup();
+            pc_p2_hana_setup();
+            pc_p2_bombotakara_setup();
+            pc_p2_long_legs_setup();
+            pc_p2_groink_teki_setup();
             pc_p2_batch2_setup();  // P2 models for the Otakara/Sokkuri behaviour hosts
             // inst-bugs lane (#871): campaign-identity behavior hosts. The
             // room-preview session list below never runs in a campaign, so

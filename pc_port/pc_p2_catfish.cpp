@@ -36,6 +36,8 @@
 #include "pc_p2_catfish.h"
 #include "pc_p2_catfish_events.h"
 #include "pc_p2_catfish_residual_policy.h"
+#include "pc_p2_campaign_actor.h"
+#include "pc_p2_setup_failsafe.h"
 #include "pc_p2_white.h"
 #include "teki.h"
 #include "Interactions.h"
@@ -516,6 +518,10 @@ void pc_p2_catfish_setup() {
         if (!(in >> generator >> species)) return;
         if (species == "Catfish") wanted[unsigned(generator)] = species;
     }
+    if (pc_randomizer_p2_bridge()) {
+        wanted.clear();
+        for (unsigned id : pc_p2_campaign_ids(26)) wanted[id] = "Catfish";
+    }
     if (wanted.empty()) return;
 
     std::set<unsigned> found;
@@ -523,11 +529,12 @@ void pc_p2_catfish_setup() {
     CI_LOOP(it) {
         Teki* actor = static_cast<Teki*>(*it);
         if (!actor || !actor->mGenerator) continue;
-        auto match = wanted.find(actor->mGenerator->_70);
+        auto match = wanted.find(pc_p2_campaign_token(actor));
         if (match == wanted.end()) continue;
         if (actor->mTekiType != TEKI_Namazu) {
-            std::printf("P2_CATFISH_ERROR native_type generator=%u\n", actor->mGenerator->_70);
+            std::printf("P2_CATFISH_ERROR native_type generator=%u\n", pc_p2_campaign_token(actor));
             std::fflush(stdout);
+            if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Catfish", "actor_type_mismatch")) return;
             std::abort();
         }
         Catfish& s = actors[static_cast<PelletView*>(actor)];
@@ -535,30 +542,38 @@ void pc_p2_catfish_setup() {
         s.home = actor->getPosition();
         s.heading = actor->getDirection();
         s.wanderTarget = s.home;
-        s.rng = (actor->mGenerator->_70 * 2654435761u) | 1u;
+        s.rng = (pc_p2_campaign_token(actor) * 2654435761u) | 1u;
         actor->mHealth = LIFE;
         // The initial wait1 clip has no authored gameplay events; start its clock
         // so later state transitions build on a live cursor (Hana/Armor seam).
         auto wait = clips.find("wait1");
         if (wait != clips.end()) s.events.start(wait->second.sampled, wait->second.name);
         else s.events.cancel();
+        // Ordinary-delivery bridge (lane 06 contract): bind source 26 to this
+        // live actor so GoalItem::suckMe can grant onion:p2:26 exactly once.
+        // Single-use: consumed on delivery and cleared on forget/recycle.
+        pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor), 26,
+                                     pc_p2_campaign_token(actor));
+        std::printf("P2_CATFISH_DELIVERY_BIND generator=%u source_id=26\n",
+                    pc_p2_campaign_token(actor));
         std::printf("P2_CATFISH_BIND generator=%u source_id=26 visual_only=0\n",
-                    actor->mGenerator->_70);
+                    pc_p2_campaign_token(actor));
         const Vector3f pos = actor->getPosition();
         std::printf("P2_ENEMY_READY species=Catfish native_family=Namazu generator=%u "
                     "x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=native "
                     "source_FSM=implemented attack=animation_event water=absent\n",
-                    actor->mGenerator->_70, pos.x, pos.y, pos.z, actor->mHealth, LIFE);
+                    pc_p2_campaign_token(actor), pos.x, pos.y, pos.z, actor->mHealth, LIFE);
         std::printf("P2_CATFISH_RESIDUAL generator=%u slots=%d attack_damage=%.1f "
                     "poison_damage=%.1f flick_events=25,47\n",
-                    actor->mGenerator->_70, p2catfish::kMouthSlots,
+                    pc_p2_campaign_token(actor), p2catfish::kMouthSlots,
                     p2catfish::kAttackDamage, p2catfish::kPoisonDamage);
         std::fflush(stdout);
-        found.insert(actor->mGenerator->_70);
+        found.insert(pc_p2_campaign_token(actor));
     }
     if (found.size() != wanted.size()) {
         std::printf("P2_CATFISH_ERROR missing_actor wanted=%zu found=%zu\n", wanted.size(), found.size());
         std::fflush(stdout);
+        if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Catfish", "actor_roster_incomplete")) return;
         std::abort();
     }
     ready = true;
@@ -577,7 +592,7 @@ void pc_p2_catfish_update(BTeki* actor) {
     // it would discard crossed animation events and break exactly-once timing.
     if (dt > 0.5f) dt = 0.5f;
     const Vector3f pos = actor->getPosition();
-    const unsigned generator = actor->mGenerator ? actor->mGenerator->_70 : 0u;
+    const unsigned generator = actor->mGenerator ? pc_p2_campaign_token(actor) : 0u;
 
     if (actor->mHealth <= 0.0f && s.state != CATFISH_DEAD) {
         if (!s.deadLogged) {

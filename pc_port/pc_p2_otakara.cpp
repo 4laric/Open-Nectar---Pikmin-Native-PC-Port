@@ -2,7 +2,8 @@
 #include "pc_p2_setup_failsafe.h"
 // Family-owned lane-22 elemental-dweevil source behavior for the batch-2 Chappy
 // placement vehicle: Fiery Dweevil (FireOtakara, EnemyID 59) and its shared-base
-// elemental siblings WaterOtakara (60), GasOtakara (61), ElecOtakara (62).
+// elemental siblings WaterOtakara (60), GasOtakara (61), ElecOtakara (62),
+// plus Volatile Dweevil (BombOtakara, EnemyID 93, BombId).
 // Implements the shared OtakaraBase normal FSM subset (Wait/Move/Turn/Flick/Dead,
 // OtakaraBase.h:22-39 / OtakaraBaseState.cpp:14-34,71-136) on the P1 host, driven
 // from p2-dweevil-actors.txt / p2-dweevil-bank.txt written by the dweevil arena.
@@ -18,15 +19,20 @@
 //     receivers (see docs/PIKMIN2_RECEIVER_PATHS.md). Immunity is the receiver's
 //     own lane-11 capability matrix (Red/Bulbmin fire, Blue/Bulbmin bubble,
 //     White/Bulbmin gas, Yellow/Bulbmin electric).
-//   * The item-carry (5..10) and Bomb-carry (11..13) states are source-backed N/A:
-//     no treasure or Bomb payload is staged. BombOtakara (93) is bound for identity
-//     only: it delegates its element to the lane-20 Bomb payload (no discharge).
+//   * The item-carry (5..10) states are source-backed N/A: no treasure payload
+//     is staged. BombOtakara (93) blast is OWN via this carrier FSM (inst3-misc):
+//     Flick discharge event type 3 + damage/death edges route the source Bomb
+//     blast (radius 90 fp22, teki 500 fp01, navi/piki 10 fp24, half-height 50
+//     fp02, lane-20 pinned values) through the shared bombsarai blast primitive
+//     on the live actor's own BTeki tick. The preview-only lane-20 sidecar
+//     (pc_p2_bombotakara) remains a fixture driver only, not the bridge path.
 //   * Wander/wake navigation is a P1-host adaptation of OtakaraBase Move/Turn.
 //   * View angle is a full circle (hit angle fp23=0 on the disc).
 // No other lane's module is modified; every hook is a no-op for unregistered actors.
 #include "pc_p2_otakara.h"
 #include "pc_p2_otakara_fx.h"
 #include "pc_p2_dweevil_policy.h"
+#include "pc_p2_bombsarai_blast.h"
 #include "pc_p2_species.h"
 #include "pc_p2_hazard_emitter.h"
 #include "teki.h"
@@ -129,6 +135,7 @@ struct Otakara {
     std::string lastAttacker = "none";
     unsigned generator = 0;
     bool deathSeamLogged = false;
+    bool bombDetonated = false;
 };
 
 std::map<PelletView*, Otakara> actors;
@@ -217,16 +224,108 @@ bool dweevilAccepts(const Piki* p, p2dweevil::Stimulus stim) {
     }
 }
 
+// Volatile Dweevil (93) OWN blast (inst3-misc): source BombOtakara carries a
+// Bomb and detonates it on damage/earthquake/death (BombOtakara.cpp
+// damageCallBack/earthquakeCallBack/bombCallBack -> forceBomb). Lane-20 pinned
+// retail values: radius 90 fp22, teki 500 fp01, navi/piki 10 fp24,
+// half-height 50 fp02. Routed through the shared bombsarai blast primitive on
+// the live carrier's own BTeki tick (not the preview sidecar stepper).
+class OtakaraBlastOwner : public Creature {
+public:
+    OtakaraBlastOwner() : Creature(nullptr) { mHealth = 1.0f; }
+    void refresh(Graphics&) override {}
+    void doKill() override {}
+};
+static OtakaraBlastOwner sBlastOwner;
+
+constexpr float kBombBlastRadius = 90.0f;
+constexpr float kBombBlastHalfHeight = 50.0f;
+constexpr float kBombTekiDamage = 500.0f;
+constexpr float kBombNavPikiDamage = 10.0f;
+
+void applyBombBlast(BTeki* a, Otakara& s, const char* trigger) {
+    const Vector3f pos = a->getPosition();
+    const unsigned generator = genOf(a);
+    P2BombSaraiBlastEvent event;
+    event.center = P2BombSaraiVec3{pos.x, pos.y, pos.z};
+    event.radius = kBombBlastRadius;
+    event.halfHeight = kBombBlastHalfHeight;
+    event.tekiDamage = kBombTekiDamage;
+    event.naviPikiDamage = kBombNavPikiDamage;
+    event.hasCarrier = false;
+    event.carrierValid = false;
+    std::vector<P2BombSaraiReceiver> receivers;
+    std::vector<Creature*> actorsList;
+    auto addReceiver = [&](Creature* creature, P2BombSaraiReceiverKind kind) {
+        if (!creature || !creature->isAlive()) return;
+        const Vector3f& p = creature->getPosition();
+        P2BombSaraiReceiver r;
+        r.id = receivers.size();
+        r.position = P2BombSaraiVec3{p.x, p.y, p.z};
+        r.kind = kind;
+        r.alive = true;
+        r.grounded = true;
+        receivers.push_back(r);
+        actorsList.push_back(creature);
+    };
+    if (pikiMgr) {
+        Iterator it(pikiMgr);
+        CI_LOOP(it) { addReceiver(static_cast<Creature*>(static_cast<Piki*>(*it)), P2BombSaraiReceiverKind::Piki); }
+    }
+    if (naviMgr && naviMgr->getNavi()) {
+        addReceiver(static_cast<Creature*>(naviMgr->getNavi()), P2BombSaraiReceiverKind::Navi);
+    }
+    if (receivers.empty()) {
+        std::printf("P2_BOMBOTAKARA_BLAST generator=%u payload=93 center=%.3f,%.3f,%.3f radius=%.1f "
+                    "receivers=0 hits=0 pikmin_hits=0 trigger=%s shared_primitive=1 carrier_tick=1\n",
+                    generator, pos.x, pos.y, pos.z, kBombBlastRadius, trigger);
+        std::fflush(stdout);
+        return;
+    }
+    std::vector<P2BombSaraiRoutedHit> hits(receivers.size());
+    const int routed = p2_bombsarai_route_blast(event, receivers.data(), int(receivers.size()), hits.data(),
+                                                int(hits.size()));
+    if (routed < 0) {
+        std::printf("P2_BOMBOTAKARA_BLAST_BLOCKED generator=%u trigger=%s reason=invalid_blast\n",
+                    generator, trigger);
+        return;
+    }
+    int pikminHits = 0;
+    sBlastOwner.mSRT.t.set(pos.x, pos.y, pos.z);
+    for (int i = 0; i < routed; ++i) {
+        const P2BombSaraiRoutedHit& hit = hits[i];
+        if (hit.receiverId >= actorsList.size() || !actorsList[hit.receiverId]) continue;
+        InteractBomb bomb(&sBlastOwner, hit.damage, nullptr);
+        actorsList[hit.receiverId]->stimulate(bomb);
+        if (hit.kind == P2BombSaraiReceiverKind::Piki) ++pikminHits;
+    }
+    std::printf("P2_BOMBOTAKARA_BLAST generator=%u payload=93 center=%.3f,%.3f,%.3f radius=%.1f receivers=%d "
+                "hits=%d pikmin_hits=%d teki_damage=%.1f navi_piki_damage=%.1f shared_primitive=1 carrier_tick=1 "
+                "trigger=%s\n",
+                generator, pos.x, pos.y, pos.z, kBombBlastRadius, int(receivers.size()), routed,
+                pikminHits, kBombTekiDamage, kBombNavPikiDamage, trigger);
+    std::fflush(stdout);
+}
+
 void doDischarge(BTeki* a, Otakara& s) {
-    if (!pikiMgr) return;
     if (s.stimulus == p2dweevil::StimNone) {
-        // BombOtakara (93) delegates its element to the carried Bomb payload
-        // (lane-20 shared blast contract); there is no self-contained discharge.
-        std::printf("P2_OTAKARA_DISCHARGE_NONE generator=%u source_id=%d payload_delegated=1\n",
+        // BombOtakara (93) OWN: Flick discharge event detonates the carried
+        // Bomb on this actor's own tick (source BombOtakara damage->forceBomb
+        // path, decided here by the P2 carrier FSM, not delegated).
+        if (!s.bombDetonated) {
+            s.bombDetonated = true;
+            applyBombBlast(a, s, "flick");
+        } else {
+            std::printf("P2_BOMBOTAKARA_DETONATE_SUPPRESSED generator=%u payload=93 trigger=flick detonated=0 "
+                        "already_detonated=1\n", genOf(a));
+            std::fflush(stdout);
+        }
+        std::printf("P2_OTAKARA_DISCHARGE generator=%u source_id=%d stimulus=bomb trigger=flick carrier_tick=1\n",
                     genOf(a), s.species);
         std::fflush(stdout);
         return;
     }
+    if (!pikiMgr) return;
     const Vector3f pos = a->getPosition();
     const unsigned generator = genOf(a);
     int applied = 0, immune = 0;
@@ -434,6 +533,7 @@ static int speciesFromSource(unsigned source) {
     case 60: return p2dweevil::WaterId;
     case 61: return p2dweevil::GasId;
     case 62: return p2dweevil::ElecId;
+    case 93: return p2dweevil::BombId;
     default: return -1;
     }
 }
@@ -541,6 +641,7 @@ void pc_p2_otakara_setup() {
         wanted.clear();
         for (unsigned source=59; source<=62; ++source)
             for (unsigned id : pc_p2_campaign_ids(source)) wanted[id] = speciesFromSource(source);
+        for (unsigned id : pc_p2_campaign_ids(93)) wanted[id] = speciesFromSource(93);
     }
     if (wanted.empty()) return;
 
@@ -556,6 +657,17 @@ void pc_p2_otakara_setup() {
             if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Otakara", "actor_type_mismatch")) return;
         }
         registerActor(actor, match->second, pc_p2_campaign_token(actor));
+        if (match->second == p2dweevil::BombId) {
+            // Ordinary-delivery bridge for the Volatile Dweevil carrier
+            // (lane 06 contract, mirrors Catfish 26): bind source 93 so
+            // GoalItem::suckMe can grant onion:p2:93 exactly once. The
+            // element itself stays delegated to the carried Bomb payload.
+            pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor), 93,
+                                         pc_p2_campaign_token(actor));
+            std::printf("P2_BOMBOTAKARA_DELIVERY_BIND generator=%u source_id=93\n",
+                        pc_p2_campaign_token(actor));
+            std::fflush(stdout);
+        }
         found.insert(pc_p2_campaign_token(actor));
     }
     if (found.size() != wanted.size()) {
@@ -641,6 +753,13 @@ void pc_p2_otakara_update(BTeki* actor) {
         // Attribution is per drop: clear it so a later non-Attack drop is not mislabelled.
         s.lastInteraction = "unknown";
         s.lastAttacker = "none";
+        // Source BombOtakara damage->forceBomb path (BombOtakara.cpp
+        // damageCallBack/hipdropCallBack/bombCallBack): any damage detonates
+        // the carried Bomb on this actor's own tick. P2-decided attack.
+        if (s.species == p2dweevil::BombId && !s.bombDetonated) {
+            s.bombDetonated = true;
+            applyBombBlast(actor, s, "damage");
+        }
     }
     s.prevHealth = actor->mHealth;
 
@@ -649,6 +768,11 @@ void pc_p2_otakara_update(BTeki* actor) {
             std::printf("P2_OTAKARA_MODULE_DEAD generator=%u source_id=%d health=0\n", generator, s.species);
             std::fflush(stdout);
             s.deadLogged = true;
+        }
+        // Source death detonates the carried Bomb (damageCallBack path).
+        if (s.species == p2dweevil::BombId && !s.bombDetonated) {
+            s.bombDetonated = true;
+            applyBombBlast(actor, s, "death");
         }
         enter(s, OTA_DEAD, "dead");
     }

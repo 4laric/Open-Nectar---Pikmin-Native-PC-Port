@@ -19,9 +19,9 @@ class PelletView;
 // host Chappy TAI fulfils the reaction → makeDamaged → dieSoon → corpse, and this
 // module only drives the source dead clip.
 //
-// BombOtakara (93) is deliberately NOT bound here: it consumes the lane-20 shared
-// Bomb blast contract and remains covered by pc_p2_bombotakara plus the batch-2
-// visual path. Every hook is a no-op for unregistered actors.
+// BombOtakara (93) IS bound here (inst3-misc OWN): the carrier FSM drives
+// locomotion/targeting and detonates the carried Bomb via the shared blast
+// primitive on its own BTeki tick. The lane-20 sidecar remains preview-only.
 void pc_p2_otakara_setup();
 // Generated-placement bridge (lane 03/04): register the randomizer-claimed
 // actor for its seeded elemental-dweevil source (59-62) by generator ID.
