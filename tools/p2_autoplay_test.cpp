@@ -1966,6 +1966,151 @@ void testSelectTargetGone()
     setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
 }
 
+void testUndamagedAttack()
+{
+    // bot-undamaged (bc5): permanent whistle (800 s B, zero throws on
+    // 16/30/38/40/42/73/95/96) must be bounded, and fled targets must be
+    // chased via approach (graph) instead of whistling in place.
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", "1");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", nullptr);
+    // 1. Persistent distress still times out (RESULT emitted, not a stall).
+    {
+        p2autoplay::Config cfg;
+        cfg.attackTimeout = 1.0f;
+        cfg.whistleHold = 0.2f;
+        cfg.whistleCooldown = 0.3f;
+        cfg.throwHold = 0.1f;
+        cfg.throwGap = 0.2f;
+        p2autoplay::Brain brain(cfg);
+        p2autoplay::Senses s = liveSenses();
+        s.fieldPikmin = 20;
+        brain.update(0.05f, s);
+        brain.update(0.05f, s); // -> select
+        s.targetToken = 670001;
+        s.targetSource = 42; // BlueChappy (ground)
+        s.targetAlive = true;
+        s.targetDist = 50.0f;
+        s.targetHealthFrac = 1.0f;
+        brain.update(0.05f, s); // -> approach
+        brain.update(0.05f, s); // -> attack
+        CHECK(brain.current() == p2autoplay::State::Attack, "undamaged/attacks");
+        s.squadDistress = true; // flick/flown every tick (bc5 whistle latch)
+        std::vector<std::string> markers;
+        for (int i = 0; i < 40; ++i) { // 2 s > 1 s timeout
+            brain.update(0.05f, s);
+            for (const std::string& m : brain.takeMarkers()) markers.push_back(m);
+        }
+        CHECK(hasMarker(markers, "AUTOPLAY_GIVEUP reason=attack_timeout"),
+              "undamaged/whistle_still_times_out");
+        CHECK(hasMarker(markers, "AUTOPLAY_RESULT target=670001"),
+              "undamaged/whistle_timeout_scores_result");
+    }
+    // 2. Persistent distress gets throw windows (cooldown forces PadA).
+    {
+        p2autoplay::Config cfg;
+        cfg.attackTimeout = 30.0f;
+        cfg.whistleHold = 0.2f;
+        cfg.whistleCooldown = 0.3f;
+        cfg.throwHold = 0.1f;
+        cfg.throwGap = 0.2f;
+        p2autoplay::Brain brain(cfg);
+        p2autoplay::Senses s = liveSenses();
+        s.fieldPikmin = 20;
+        brain.update(0.05f, s);
+        brain.update(0.05f, s);
+        s.targetToken = 670002;
+        s.targetSource = 16; // Qurione
+        s.targetAlive = true;
+        s.targetDist = 47.0f;
+        s.targetHealthFrac = 1.0f;
+        brain.update(0.05f, s);
+        brain.update(0.05f, s);
+        s.scattered = true; // bc5 scat=1 latch
+        int bOn = 0, aOn = 0;
+        for (int i = 0; i < 60; ++i) {
+            brain.update(0.05f, s);
+            if (brain.command().buttons & unsigned(p2autoplay::PadB)) ++bOn;
+            if (brain.command().buttons & unsigned(p2autoplay::PadA)) ++aOn;
+            if (brain.current() != p2autoplay::State::Attack) break;
+        }
+        CHECK(bOn > 0, "undamaged/whistles_first");
+        CHECK(aOn > 0, "undamaged/cooldown_forces_throws");
+    }
+    // 3. Far target in attack re-enters approach (chase fled/teleport).
+    {
+        p2autoplay::Config cfg;
+        cfg.attackChaseDist = 500.0f;
+        p2autoplay::Brain brain(cfg);
+        p2autoplay::Senses s = liveSenses();
+        s.fieldPikmin = 20;
+        brain.update(0.05f, s);
+        brain.update(0.05f, s);
+        s.targetToken = 670003;
+        s.targetSource = 38; // PanModoki (flees to nest)
+        s.targetAlive = true;
+        s.targetDist = 100.0f;
+        s.targetHealthFrac = 1.0f;
+        brain.update(0.05f, s); // -> approach
+        brain.update(0.05f, s); // -> attack
+        CHECK(brain.current() == p2autoplay::State::Attack, "undamaged/chase_starts_attack");
+        s.targetDist = 1302.0f; // bc5 PanModoki end state
+        brain.update(0.05f, s);
+        CHECK(brain.current() == p2autoplay::State::Approach, "undamaged/far_reenters_approach");
+    }
+    // 4. Token switch with a latched kill scores the old kill first (bc5
+    // 44/54: aftermath -> menu -> select picks the next token; the first
+    // kill must emit RESULT damaged=1/killed=1 instead of being dropped).
+    {
+        p2autoplay::Config cfg;
+        p2autoplay::Brain brain(cfg);
+        p2autoplay::Senses s = liveSenses();
+        s.fieldPikmin = 20;
+        brain.update(0.05f, s);
+        brain.update(0.05f, s); // -> select
+        s.targetToken = 670004;
+        s.targetSource = 44;
+        s.targetAlive = true;
+        s.targetDist = 100.0f;
+        s.targetHealthFrac = 1.0f;
+        brain.update(0.05f, s); // -> approach
+        brain.update(0.05f, s); // -> attack
+        s.targetHealthFrac = 0.5f;
+        brain.update(0.05f, s);
+        s.targetAlive = false; // kill
+        brain.update(0.05f, s);
+        CHECK(brain.current() == p2autoplay::State::Aftermath, "undamaged/switch_aftermath");
+        // Driver switches to the next live token across a menu bounce.
+        s.targetToken = 670005;
+        s.targetSource = 44;
+        s.targetAlive = true;
+        s.targetDist = 900.0f;
+        s.targetHealthFrac = 1.0f;
+        s.targetDamagedLatch = false;
+        s.targetDead = false;
+        brain.update(0.05f, s); // select sees the new token? No: still aftermath.
+        // Force the switch path: aftermath -> menu -> select -> new token.
+        s.containerOpen = true;
+        brain.update(0.05f, s);
+        CHECK(brain.current() == p2autoplay::State::WithdrawMenu, "undamaged/switch_bounces_menu");
+        for (int i = 0; i < 120 && brain.current() == p2autoplay::State::WithdrawMenu; ++i)
+            brain.update(0.05f, s);
+        s.containerOpen = false;
+        s.onionStored = 0;
+        for (int i = 0; i < 10 && brain.current() == p2autoplay::State::WithdrawMenu; ++i)
+            brain.update(0.05f, s);
+        // May go to Select (then score old kill on engaging the new token).
+        std::vector<std::string> markers;
+        for (int i = 0; i < 10; ++i) {
+            brain.update(0.05f, s);
+            for (const std::string& m : brain.takeMarkers()) markers.push_back(m);
+            if (hasMarker(markers, "AUTOPLAY_RESULT target=670004")) break;
+        }
+        CHECK(hasMarker(markers, "AUTOPLAY_RESULT target=670004"), "undamaged/switch_scores_old_kill");
+        CHECK(hasMarker(markers, "damaged=1"), "undamaged/switch_scores_damage");
+    }
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
+}
+
 } // namespace
 
 int main()
@@ -2005,6 +2150,7 @@ int main()
     testAftermathUnknownWantEscorts();
     testPowerFastSquad();
     testSelectTargetGone();
+    testUndamagedAttack();
     if (failures == 0) {
         std::printf("PASS p2_autoplay\n");
         return 0;
