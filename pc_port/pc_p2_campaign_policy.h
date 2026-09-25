@@ -16,6 +16,12 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     case 23: return 3; // TEKI_Chappy: Sarai ordinary-host path
     case 54: return 24; // TEKI_Miurin: Mamuta
     case 57: case 78: return 0; // TEKI_Frog: Jellyfloat/Groink sidecar hosts
+    case 26: return 30; // TEKI_Namazu: Catfish (Water Dumple) aquatic host
+    case 27: return 25; // TEKI_Otama: Tadpole (Wogpole) aquatic host
+    case 84: return 3; // TEKI_Chappy: Hana (Creeping Chrysanthemum)
+    case 93: return 3; // TEKI_Chappy: BombOtakara (Volatile Dweevil)
+    case 66: return 4; // TEKI_Swallow: Houdai (Man-at-Legs) proxy vehicle
+    case 97: return 0; // TEKI_Frog: FminiHoudai (Gatling Groink pedestal) proxy vehicle
     default: return original;
     }
 }
