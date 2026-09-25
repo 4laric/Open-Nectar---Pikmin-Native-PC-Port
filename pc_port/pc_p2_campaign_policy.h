@@ -11,14 +11,14 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
         return 3; // TEKI_Chappy (3; 4 is TEKI_Swallow): typed beetle/dwarf/dweevil/Skitter Leaf hosts
     // inst-chappy (#871): Chappy-family vehicles preserve the proven proxy
     // hosts (include/teki.h). One finished species at a time: Chappy (2),
-    // FireChappy (33) and YellowChappy (43) ride TEKI_Swallow (4, P1 Spotty
-    // Bulborb), KumaChappy (35) rides TEKI_Swallob (32, P1 Spotty Bulbear).
-    // Later species add their own case when their identity lands (53 -> 4,
-    // 67 -> 3, 76 -> 31); a species must never become static before its
-    // identity stages, or the proxy visual skips it with nothing to
-    // replace it.
-    case 2: case 33: case 43:
-        return 4; // TEKI_Swallow: Red/Fiery/Hairy Bulborb adults
+    // FireChappy (33), YellowChappy (43) and KingChappy (53) ride
+    // TEKI_Swallow (4, P1 Spotty Bulborb), KumaChappy (35) rides
+    // TEKI_Swallob (32, P1 Spotty Bulbear). Later species add their own
+    // case when their identity lands (67 -> 3, 76 -> 31); a species must
+    // never become static before its identity stages, or the proxy visual
+    // skips it with nothing to replace it.
+    case 2: case 33: case 43: case 53:
+        return 4; // TEKI_Swallow: Red/Fiery/Hairy/Emperor Bulborb adults
     case 35:
         return 32; // TEKI_Swallob: Spotty Bulbear
     // Sarai binds whatever type its anchor carries (pc_p2_sarai_manager.cpp:109,119),
