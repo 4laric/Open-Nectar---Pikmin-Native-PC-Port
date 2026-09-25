@@ -20,6 +20,9 @@
 #include "pc_p2_setup_failsafe.h"
 #include "pc_randomizer.h"
 #include "pc_p2_animation.h"
+#include "pc_p2_campaign_actor.h"
+#include "pc_p2_setup_failsafe.h"
+#include "pc_randomizer.h"
 #include "pc_p2_tadpole.h"
 #include "pc_p2_mar.h"
 #include "pc_p2_pose_bank.h"
@@ -591,14 +594,42 @@ void pc_p2_batch3_setup() {
     pc_p2_batch3_reset();
     interpolation = readBatch3InterpolationFlag();
     if (interpolation) std::printf("P2_BATCH3_INTERPOLATION_READY interpolation=1 gameplay_clock=P1\n");
+    if (!tekiMgr) return;
     const bool bridge = pc_randomizer_p2_bridge() && !pc_pikipelago_room_preview();
-    if (bridge && tekiMgr) pc_p2_batch3_setup_bridge();
-    if (!pc_pikipelago_room_preview() || !tekiMgr) return;
+    const bool preview = pc_pikipelago_room_preview();
+    if (bridge) pc_p2_batch3_setup_bridge();
+    if (!preview && !bridge) return;
     for (const FamilyDef& family : FAMILIES) {
+        const bool isAquatic = std::string(family.name) == "aquatic";
+        // Bridge support is aquatic-only (inst-legs lane #871: Jigumo 63 and
+        // its three family siblings). Flying/snagret stay preview-only.
+        if (bridge && !isAquatic) continue;
         std::map<unsigned, std::string> wanted;
-        if (!parseActors(family.actors, wanted)) continue;
+        const bool haveActors = parseActors(family.actors, wanted);
+        if (bridge) {
+            // Seed-bridge identity overrides the sidecar placeholders (like
+            // batch2 campaignWanted). The sidecar must still stage the bank;
+            // actors without bank poses degrade below instead of aborting.
+            wanted.clear();
+            if (isAquatic) {
+                for (unsigned id : pc_p2_campaign_ids(26)) wanted[id] = "Catfish";
+                for (unsigned id : pc_p2_campaign_ids(27)) wanted[id] = "Tadpole";
+                for (unsigned id : pc_p2_campaign_ids(63)) wanted[id] = "Jigumo";
+                for (unsigned id : pc_p2_campaign_ids(71)) wanted[id] = "UmiMushi";
+            }
+            if (wanted.empty()) continue;
+        } else {
+            if (!haveActors) continue;
+        }
         std::map<std::string, std::vector<ClipRow>> rows;
-        if (!parseBank(family.bank, rows)) fail("missing bank for present actor config");
+        if (bridge) {
+            if (!parseBank(family.bank, rows)) {
+                std::printf("P2_SETUP_SKIP batch3 %s missing_bank\n", family.name);
+                continue;
+            }
+        } else {
+            if (!parseBank(family.bank, rows)) fail("missing bank for present actor config");
+        }
 
         std::set<unsigned> found;
         std::set<std::string> speciesUsed;
@@ -606,15 +637,41 @@ void pc_p2_batch3_setup() {
         CI_LOOP(it) {
             Teki* teki = static_cast<Teki*>(*it);
             if (!teki || !teki->mGenerator) continue;
-            const unsigned generator = teki->mGenerator->_70;
+            const unsigned generator = bridge ? pc_p2_campaign_token(teki) : teki->mGenerator->_70;
             auto match = wanted.find(generator);
             if (match == wanted.end()) continue;
-            if (teki->mTekiType != expectedType(family.name, match->second)) fail("native type mismatch");
-            if (!found.insert(generator).second) fail("duplicate generator in scene");
+            if (teki->mTekiType != expectedType(family.name, match->second)) {
+                if (bridge) {
+                    std::printf("P2_SETUP_SKIP batch3 %s native_type_mismatch generator=%u\n",
+                                family.name, generator);
+                    continue;
+                }
+                fail("native type mismatch");
+            }
+            if (!found.insert(generator).second) {
+                if (bridge) {
+                    std::printf("P2_SETUP_SKIP batch3 %s duplicate_generator generator=%u\n",
+                                family.name, generator);
+                    continue;
+                }
+                fail("duplicate generator in scene");
+            }
             actors[teki] = std::string(family.name) + "|" + match->second;
             speciesUsed.insert(match->second);
         }
-        if (found.size() != wanted.size()) fail("arena actor not present in scene");
+        if (found.size() != wanted.size()) {
+            if (bridge) {
+                std::printf("P2_BATCH3_MISSING family=%s found=%zu wanted=%zu\n",
+                            family.name, found.size(), wanted.size());
+                if (found.empty()) {
+                    for (auto ait = actors.begin(); ait != actors.end();) {
+                        if (ait->second.compare(0, 8, "aquatic|") == 0) ait = actors.erase(ait);
+                        else ++ait;
+                    }
+                    continue;
+                }
+            } else fail("arena actor not present in scene");
+        }
         for (const std::string& species : speciesUsed) {
             // Blind UmiMushi (101) has no converted visual bank of its own; the
             // source import manifest only ships the ordinary UmiMushi (71)
@@ -625,7 +682,46 @@ void pc_p2_batch3_setup() {
                 (std::string(family.name) == "aquatic" && species == "UmiMushiBlind")
                     ? "UmiMushi" : species;
             auto clipRows = rows.find(bankSpecies);
-            if (clipRows == rows.end() || clipRows->second.empty()) fail("species has no bank clips");
+            if (clipRows == rows.end() || clipRows->second.empty()) {
+                if (bridge) {
+                    std::printf("P2_SETUP_SKIP batch3 %s no_bank_clips species=%s\n",
+                                family.name, species.c_str());
+                    for (auto ait = actors.begin(); ait != actors.end();) {
+                        if (ait->second == std::string(family.name) + "|" + species)
+                            ait = actors.erase(ait);
+                        else ++ait;
+                    }
+                    continue;
+                }
+                fail("species has no bank clips");
+            }
+            if (bridge) {
+                // Probe pose availability so a missing bank degrades instead of
+                // fail() aborting the campaign mid-setup (mirrors batch2 soft).
+                bool posesOk = true;
+                for (const auto& row : clipRows->second) {
+                    for (int i = 0; i < row.poseCount; ++i) {
+                        char rel[192];
+                        std::snprintf(rel, sizeof(rel),
+                                      "assets/dataDir/courses/pikmin2room/%s_%s_%s_%02d.mod",
+                                      family.prefix, bankSpecies.c_str(),
+                                      row.name.c_str(), i);
+                        std::ifstream probe(rel, std::ios::binary);
+                        if (!probe) { posesOk = false; break; }
+                    }
+                    if (!posesOk) break;
+                }
+                if (!posesOk) {
+                    std::printf("P2_SETUP_SKIP batch3 %s missing_pose species=%s\n",
+                                family.name, species.c_str());
+                    for (auto ait = actors.begin(); ait != actors.end();) {
+                        if (ait->second == std::string(family.name) + "|" + species)
+                            ait = actors.erase(ait);
+                        else ++ait;
+                    }
+                    continue;
+                }
+            }
             banks[std::string(family.name) + "|" + species] =
                 loadBank(family, bankSpecies, clipRows->second);
         }
@@ -634,12 +730,15 @@ void pc_p2_batch3_setup() {
         for (const auto& entry : actors) ensureBlendState(entry.first, entry.second);
     }
     for (const auto& entry : actors) {
+        const unsigned gen = (bridge && entry.first && entry.first->mGenerator)
+            ? pc_p2_campaign_token(entry.first)
+            : (entry.first->mGenerator ? entry.first->mGenerator->_70 : 0);
         if (entry.second == "aquatic|Tadpole" || entry.second == "flying|Mar" || entry.second == "aquatic|UmiMushi" || entry.second == "aquatic|UmiMushiBlind" || entry.second == "aquatic|Jigumo" || entry.second == "snagret|SnakeCrow" || entry.second == "snagret|SnakeWhole" || entry.second == "snagret|DangoMushi" || entry.second == "flying|Hanachirashi" || entry.second == "aquatic|Catfish")
-            std::printf("P2_BATCH3_BIND generator=%u key=%s visual_only=0 native_fsm=implemented\n",
-                        entry.first->mGenerator ? entry.first->mGenerator->_70 : 0, entry.second.c_str());
+            std::printf("P2_BATCH3_BIND generator=%u key=%s visual_only=0 native_fsm=implemented token=%u\n",
+                        gen, entry.second.c_str(), gen);
         else
-            std::printf("P2_BATCH3_BIND generator=%u key=%s visual_only=1 native_fsm=unimplemented\n",
-                        entry.first->mGenerator ? entry.first->mGenerator->_70 : 0, entry.second.c_str());
+            std::printf("P2_BATCH3_BIND generator=%u key=%s visual_only=1 native_fsm=unimplemented token=%u\n",
+                        gen, entry.second.c_str(), gen);
     }
     std::printf("P2_BATCH3_BANK total_mod_bytes=%zu species=%zu\n", bytesTotal, banks.size());
 }

@@ -30,6 +30,12 @@
 // Every hook is a no-op for unregistered actors; no other lane's module is
 // modified.
 #include "pc_p2_jigumo.h"
+#include "pc_p2_campaign_actor.h"
+#include "pc_p2_setup_failsafe.h"
+#include "pc_randomizer.h"
+#include "pc_bbft.h"
+#include "MapMgr.h"
+#include "Pellet.h"
 #include "teki.h"
 #include "Interactions.h"
 #include "Piki.h"
@@ -124,6 +130,7 @@ struct Jigumo {
     std::string clip = "appear1";
     float phase = 0.0f;
     bool deadLogged = false;
+    bool deadEscapeDone = false; // OWN death: pcEscapeNow fired once after dead1
     float logTimer = 0.0f;
 };
 
@@ -282,7 +289,12 @@ void pc_p2_jigumo_reset() {
 }
 
 void pc_p2_jigumo_forget(BTeki* actor) {
+    pc_randomizer_p2_forget_source(static_cast<PelletView*>(actor));
     actors.erase(static_cast<PelletView*>(actor));
+}
+
+bool pc_p2_jigumo_suppress_ai(const BTeki* actor) {
+    return actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor))) != 0;
 }
 
 float pc_p2_jigumo_param_f(const BTeki* actor, int idx, float fallback) {
@@ -311,6 +323,15 @@ bool pc_p2_jigumo_clip(const BTeki* actor, const char*& name, float& phase) {
     if (it == actors.end()) return false;
     name = it->second.clip.c_str();
     phase = it->second.phase;
+    // Bot-campaign drawn evidence: batch3 draws Jigumo via the aquatic pose
+    // bank without a per-species DRAW line the scorer keys on, so report the
+    // first forced-clip handoff per campaign token here (draw-time call).
+    static std::set<unsigned> drawn;
+    const unsigned token = pc_p2_campaign_token(const_cast<BTeki*>(actor));
+    if (drawn.insert(token ? token : 1u).second) {
+        std::printf("P2_JIGUMO_DRAW corpse=0 clip=%s token=%u\n", name, token);
+        std::fflush(stdout);
+    }
     return true;
 }
 
@@ -358,17 +379,34 @@ void pc_p2_jigumo_setup() {
         }
     }
 
-    std::ifstream in("p2-aquatic-actors.txt");
-    if (!in) return;
-    std::string header;
-    int count = 0;
-    if (!(in >> header >> count) || header != "P2_AQUATIC_ACTORS_1" || count < 1) return;
     std::map<unsigned, std::string> wanted;
-    for (int i = 0; i < count; ++i) {
-        unsigned long long generator = 0;
-        std::string species;
-        if (!(in >> generator >> species)) return;
-        if (species == "Jigumo") wanted[unsigned(generator)] = species;
+    std::ifstream in("p2-aquatic-actors.txt");
+    if (!in) {
+        if (pc_randomizer_p2_bridge()) {
+            // No sidecar: fall through to the seed-bridge identity below.
+        } else return;
+    } else {
+        std::string header;
+        int count = 0;
+        if (!(in >> header >> count) || header != "P2_AQUATIC_ACTORS_1" || count < 1) {
+            if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Jigumo", "staged_config_invalid")) return;
+        } else {
+            for (int i = 0; i < count; ++i) {
+                unsigned long long generator = 0;
+                std::string species;
+                if (!(in >> generator >> species)) {
+                    if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Jigumo", "staged_config_invalid")) return;
+                }
+                if (species == "Jigumo") wanted[unsigned(generator)] = species;
+            }
+        }
+    }
+    const bool bridge = pc_randomizer_p2_bridge() && !pc_pikipelago_room_preview();
+    if (bridge) {
+        // Generated campaign sessions bind by the seed's source id per actor,
+        // like Sokkuri: the sidecar's filed generators are placeholders there.
+        wanted.clear();
+        for (unsigned id : pc_p2_campaign_ids(63)) wanted[id] = "Jigumo";
     }
     if (wanted.empty()) return;
 
@@ -377,12 +415,13 @@ void pc_p2_jigumo_setup() {
     CI_LOOP(it) {
         Teki* actor = static_cast<Teki*>(*it);
         if (!actor || !actor->mGenerator) continue;
-        auto match = wanted.find(actor->mGenerator->_70);
+        const unsigned token = bridge ? pc_p2_campaign_token(actor) : actor->mGenerator->_70;
+        auto match = wanted.find(token);
         if (match == wanted.end()) continue;
         if (actor->mTekiType != TEKI_Chappy) {
-            std::printf("P2_JIGUMO_ERROR native_type generator=%u\n", actor->mGenerator->_70);
+            std::printf("P2_JIGUMO_ERROR native_type generator=%u\n", token);
             std::fflush(stdout);
-            std::abort();
+            if (pc_p2_setup_skip(bridge, "Jigumo", "actor_type_mismatch")) return;
         }
         Jigumo& s = actors[static_cast<PelletView*>(actor)];
         s.home = actor->getPosition();
@@ -393,20 +432,28 @@ void pc_p2_jigumo_setup() {
         s.appearArmed = false;
         actor->mHealth = LIFE;
         std::printf("P2_JIGUMO_BIND generator=%u source_id=63 visual_only=0\n",
-                    actor->mGenerator->_70);
+                    token);
         const Vector3f pos = actor->getPosition();
         std::printf("P2_ENEMY_READY species=Jigumo native_family=Chappy generator=%u "
                     "x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=native "
                     "source_FSM=implemented attack=animation_event nest=2\n",
-                    actor->mGenerator->_70, pos.x, pos.y, pos.z, actor->mHealth, LIFE);
-        std::printf("P2_JIGUMO_STATE generator=%u state=appear\n", actor->mGenerator->_70);
+                    token, pos.x, pos.y, pos.z, actor->mHealth, LIFE);
+        std::printf("P2_JIGUMO_STATE generator=%u state=appear\n", token);
         std::fflush(stdout);
-        found.insert(actor->mGenerator->_70);
+        if (bridge) {
+            // Ordinary-delivery bridge (lane 06): bind source 63 so the hauled
+            // corpse grants onion:p2:63 exactly once via
+            // pc_randomizer_p2_corpse_delivered. Mirrors ElecBug/Sarai/Sokkuri.
+            pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor), 63, token);
+            std::printf("P2_JIGUMO_DELIVERY_BIND generator=%u source_id=63\n", token);
+            std::fflush(stdout);
+        }
+        found.insert(token);
     }
     if (found.size() != wanted.size()) {
         std::printf("P2_JIGUMO_ERROR missing_actor wanted=%zu found=%zu\n", wanted.size(), found.size());
         std::fflush(stdout);
-        std::abort();
+        if (pc_p2_setup_skip(bridge, "Jigumo", "actor_roster_incomplete")) return;
     }
     ready = true;
 }
@@ -418,9 +465,52 @@ void pc_p2_jigumo_update(BTeki* actor) {
     Jigumo& s = it->second;
     const float dt = gsys->getFrameTime();
     if (dt <= 0.0f || dt > 0.5f) return;
+    // OWN damage path (mirrors frog): the P1 TAI damaging reaction is
+    // suppressed with doAI, so the source FSM applies pending attack damage
+    // itself.
+    if (actor->mStoredDamage > 0.0f) actor->makeDamaged();
     const Vector3f pos = actor->getPosition();
-    const unsigned generator = actor->mGenerator ? actor->mGenerator->_70 : 0u;
+    const unsigned generator = pc_p2_campaign_token(actor);
     int frame = 0;
+    // Natural-combat observability: incremental health decrease is live Pikmin
+    // damage (mirrors Sokkuri/Long Legs). Logged for the bot evidence scorer.
+    static std::map<PelletView*, float> lastHealth;
+    PelletView* key = static_cast<PelletView*>(actor);
+    auto lh = lastHealth.find(key);
+    if (lh == lastHealth.end()) lastHealth[key] = LIFE;
+    if (actor->mHealth < lastHealth[key] && actor->mHealth > 0.0f) {
+        std::printf("P2_JIGUMO_DAMAGE generator=%u source_id=63 health=%.1f\n",
+                    generator, actor->mHealth);
+        std::fflush(stdout);
+    }
+    lastHealth[key] = actor->mHealth;
+
+    // Death-drop-to-ground (mirrors Kurage corpseTail): a Jigumo killed on a
+    // ledge spawns its corpse Pellet above the floor, which FreeMode Pikmin
+    // cannot grasp. Settle the fresh Pellet onto the floor so the carry can
+    // latch; idempotent once grounded.
+    if ((actor->mHealth <= 0.0f || !actor->isAlive()) && actor->mPellet && mapMgr) {
+        Pellet* corpse = actor->mPellet;
+        const float groundY = mapMgr->getMinY(corpse->mSRT.t.x, corpse->mSRT.t.z, true);
+        if (std::isfinite(groundY) && corpse->mSRT.t.y > groundY + 1.0f) {
+            std::printf("P2_JIGUMO_CORPSE_DROP from_y=%.3f ground_y=%.3f generator=%u\n",
+                        corpse->mSRT.t.y, groundY, generator);
+            std::fflush(stdout);
+            corpse->mSRT.t.y = groundY;
+            corpse->mVelocity.set(0.0f, 0.0f, 0.0f);
+            corpse->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
+        }
+        static std::set<Pellet*> loggedPellet;
+        if (loggedPellet.insert(corpse).second && corpse->mConfig) {
+            std::printf("P2_JIGUMO_CORPSE_CONFIG carry_min=%d carry_max=%d alive=%d x=%.1f y=%.1f z=%.1f ground=%.1f generator=%u\n",
+                        corpse->mConfig->mCarryMinPikis.mValue,
+                        corpse->mConfig->mCarryMaxPikis.mValue,
+                        corpse->isAlive() ? 1 : 0,
+                        corpse->mSRT.t.x, corpse->mSRT.t.y, corpse->mSRT.t.z,
+                        groundY, generator);
+            std::fflush(stdout);
+        }
+    }
 
     if (actor->mHealth <= 0.0f && s.state != JIGUMO_DEAD) {
         if (!s.deadLogged) {
@@ -428,6 +518,11 @@ void pc_p2_jigumo_update(BTeki* actor) {
             std::fflush(stdout);
             s.deadLogged = true;
         }
+        // Release any captured Pikmin without killing it: a Jigumo that dies
+        // while ferrying a Pikmin to the nest must not take it down (the
+        // corpse would otherwise form while holding a live Pikmin, which the
+        // carry latch rejects). Mirrors the flick-release (captured=nullptr).
+        s.captured = nullptr;
         transition(actor, s, JIGUMO_DEAD, "dead1", generator);
     }
 
@@ -621,7 +716,19 @@ void pc_p2_jigumo_update(BTeki* actor) {
         break;
     case JIGUMO_DEAD:
         stop(actor);
-        if (s.stateTime >= clipDuration("dead1")) actor->die();
+        // OWN death (mirrors frog/kochappy): doAI is suppressed, so dieSoon()
+        // never runs there. The source dead1 clip plays, then pcEscapeNow()
+        // (= die() + dieSoon(), teki.h) finalizes the host teardown and births
+        // the real carriable Chappy-pellet corpse. The pre-round-2 host handoff
+        // (never call die() from update) is superseded: with suppression the
+        // escape is the ONLY path to a corpse, and it runs outside doAI so the
+        // dieSoon block is not skipped.
+        if (!s.deadEscapeDone && s.stateTime >= clipDuration("dead1")) {
+            s.deadEscapeDone = true;
+            std::printf("P2_JIGUMO_ESCAPE generator=%u native=host_escape_now\n", generator);
+            std::fflush(stdout);
+            actor->pcEscapeNow();
+        }
         break;
     default:
         break;

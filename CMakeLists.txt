@@ -961,6 +961,13 @@ target_include_directories(p2_long_legs_fsm_test PRIVATE pc_port)
 target_compile_options(p2_long_legs_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_long_legs_fsm_test COMMAND p2_long_legs_fsm_test)
 
+add_executable(p2_inst_legs_policy_test
+    tools/p2_inst_legs_policy_test.cpp
+    pc_port/pc_p2_long_legs_fsm.cpp)
+target_include_directories(p2_inst_legs_policy_test PRIVATE pc_port)
+target_compile_options(p2_inst_legs_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_inst_legs_policy_test COMMAND p2_inst_legs_policy_test)
+
 add_executable(p2_snagret_fsm_test
     tools/p2_snagret_fsm_test.cpp
     pc_port/pc_p2_snagret_fsm.cpp)
