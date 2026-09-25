@@ -22,6 +22,8 @@ void pc_p2_snakejoint_forget(BTeki*);
 void pc_p2_snakejoint_update(BTeki*);
 float pc_p2_snakejoint_param_f(const BTeki*, int idx, float fallback);
 bool pc_p2_snakejoint_clip(const BTeki*, const char*& name, float& phase);
+bool pc_p2_snakejoint_receipt(class PelletView*, unsigned&);
+int pc_p2_snakejoint_bound_count();
 // Source SnakeCrow/SnakeWhole damage gate: EB_Invulnerable is set only by
 // StateStay::init and cleared only by StateStay::cleanup
 // (SnakeCrowState.cpp:110/213, SnakeWholeState.cpp:113/217), so the head is

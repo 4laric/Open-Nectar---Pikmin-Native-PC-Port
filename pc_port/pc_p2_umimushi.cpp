@@ -37,6 +37,9 @@
 // Every hook is a no-op for unregistered actors; no other lane's module is
 // modified.
 #include "pc_p2_umimushi.h"
+#include "pc_p2_campaign_actor.h"
+#include "pc_p2_setup_failsafe.h"
+#include "pc_randomizer.h"
 #include "teki.h"
 #include "Interactions.h"
 #include "Piki.h"
@@ -159,6 +162,7 @@ struct Umi {
 };
 
 std::map<PelletView*, Umi> actors;
+std::map<PelletView*, unsigned> corpses; // dead-actor delivery registry
 std::map<std::string, Clip> clips;
 bool ready = false;
 
@@ -511,12 +515,15 @@ void setPhase(Umi& s) {
 
 void pc_p2_umimushi_reset() {
     actors.clear();
+    corpses.clear();
     clips.clear();
     ready = false;
 }
 
 void pc_p2_umimushi_forget(BTeki* actor) {
+    pc_randomizer_p2_forget_source(static_cast<PelletView*>(actor));
     actors.erase(static_cast<PelletView*>(actor));
+    corpses.erase(static_cast<PelletView*>(actor));
 }
 
 float pc_p2_umimushi_param_f(const BTeki* actor, int idx, float fallback) {
@@ -596,20 +603,26 @@ void pc_p2_umimushi_setup() {
     }
 
     std::ifstream in("p2-aquatic-actors.txt");
-    if (!in) return;
+    if (!in && !pc_randomizer_p2_bridge()) return;
     std::string header;
     int count = 0;
-    if (!(in >> header >> count) || header != "P2_AQUATIC_ACTORS_1" || count < 1) return;
     // Same shared UmiMushi::Mgr FSM, two source IDs: ordinary (71) and Blind
     // (101). The actors config marks Blind with the `UmiMushiBlind` species;
     // the Blind bank reuses the converted UmiMushi clips (visual stand-in).
     std::map<unsigned, bool> wanted; // generator -> blind
-    for (int i = 0; i < count; ++i) {
-        unsigned long long generator = 0;
-        std::string species;
-        if (!(in >> generator >> species)) return;
-        if (species == "UmiMushi") wanted[unsigned(generator)] = false;
-        else if (species == "UmiMushiBlind") wanted[unsigned(generator)] = true;
+    if (in && (in >> header >> count) && header == "P2_AQUATIC_ACTORS_1" && count >= 1) {
+        for (int i = 0; i < count; ++i) {
+            unsigned long long generator = 0;
+            std::string species;
+            if (!(in >> generator >> species)) return;
+            if (species == "UmiMushi") wanted[unsigned(generator)] = false;
+            else if (species == "UmiMushiBlind") wanted[unsigned(generator)] = true;
+        }
+    }
+    if (pc_randomizer_p2_bridge()) {
+        wanted.clear();
+        for (unsigned id : pc_p2_campaign_ids(71)) wanted[id] = false;
+        for (unsigned id : pc_p2_campaign_ids(101)) wanted[id] = true;
     }
     if (wanted.empty()) return;
 
@@ -618,12 +631,13 @@ void pc_p2_umimushi_setup() {
     CI_LOOP(it) {
         Teki* actor = static_cast<Teki*>(*it);
         if (!actor || !actor->mGenerator) continue;
-        auto match = wanted.find(actor->mGenerator->_70);
+        const unsigned token = pc_p2_campaign_token(actor);
+        auto match = wanted.find(token);
         if (match == wanted.end()) continue;
         if (actor->mTekiType != TEKI_Chappy) {
-            std::printf("P2_UMIMUSHI_ERROR native_type generator=%u\n", actor->mGenerator->_70);
+            std::printf("P2_UMIMUSHI_ERROR native_type generator=%u\n", token);
             std::fflush(stdout);
-            std::abort();
+            if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "UmiMushi", "actor_type_mismatch")) return;
         }
         Umi& s = actors[static_cast<PelletView*>(actor)];
         s.blind = match->second;
@@ -636,13 +650,19 @@ void pc_p2_umimushi_setup() {
         // Source setParameters applies scale 0.5 to Blind; the P1 host draws the
         // actor from mSRT.s (batch-3 onCamMtx), so the visual is genuinely half.
         if (s.blind) actor->mSRT.s.set(BLIND_SCALE, BLIND_SCALE, BLIND_SCALE);
+        // Lane 06 ordinary delivery: bind the campaign source so the corpse
+        // mints onion:p2:<id> via GoalItem::suckMe.
+        pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor),
+                                     unsigned(s.blind ? 101 : 71), token);
+        std::printf("P2_UMIMUSHI_DELIVERY_BIND generator=%u source_id=%d\n",
+                    token, s.sourceId);
         enter(s, UMI_WALK, "run1");
         std::printf("P2_UMIMUSHI_BIND generator=%u source_id=%d visual_only=0 blind=%d\n",
-                    actor->mGenerator->_70, s.sourceId, s.blind ? 1 : 0);
+                    token, s.sourceId, s.blind ? 1 : 0);
         if (s.blind) {
             std::printf("P2_UMIMUSHI_BLIND generator=%u scale=%.3f health=%.1f "
                         "turn_rate=%.2f wait_frames=%.0f move_frames=%.0f\n",
-                        actor->mGenerator->_70, BLIND_SCALE, BLIND_LIFE, BLIND_TURN_RATE,
+                        token, BLIND_SCALE, BLIND_LIFE, BLIND_TURN_RATE,
                         BLIND_WAIT_FRAMES, BLIND_MOVE_FRAMES);
         }
         const Vector3f pos = actor->getPosition();
@@ -650,17 +670,17 @@ void pc_p2_umimushi_setup() {
                     "x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=native "
                     "source_FSM=implemented attack=animation_event water=absent\n",
                     s.blind ? "UmiMushiBlind" : "UmiMushi",
-                    actor->mGenerator->_70, pos.x, pos.y, pos.z, actor->mHealth,
+                    token, pos.x, pos.y, pos.z, actor->mHealth,
                     actor->mMaxHealth);
-        std::printf("P2_UMIMUSHI_STATE generator=%u state=walk\n", actor->mGenerator->_70);
+        std::printf("P2_UMIMUSHI_STATE generator=%u state=walk\n", token);
         std::fflush(stdout);
-        found.insert(actor->mGenerator->_70);
+        found.insert(token);
     }
     if (found.size() != wanted.size()) {
         std::printf("P2_UMIMUSHI_ERROR missing_actor wanted=%zu found=%zu\n",
                     wanted.size(), found.size());
         std::fflush(stdout);
-        std::abort();
+        if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "UmiMushi", "actor_roster_incomplete")) return;
     }
     ready = true;
 }
@@ -673,7 +693,7 @@ void pc_p2_umimushi_update(BTeki* actor) {
     const float dt = gsys->getFrameTime();
     if (dt <= 0.0f || dt > 0.5f) return;
     const Vector3f pos = actor->getPosition();
-    const unsigned generator = actor->mGenerator ? actor->mGenerator->_70 : 0u;
+    const unsigned generator = actor->mGenerator ? pc_p2_campaign_token(actor) : 0u;
 
     if (actor->mHealth <= 0.0f && s.state != UMI_DEAD) {
         if (!s.deadLogged) {
@@ -682,6 +702,9 @@ void pc_p2_umimushi_update(BTeki* actor) {
             std::fflush(stdout);
             s.deadLogged = true;
         }
+        // Keep the generator for Pod receipt after the engine tears down
+        // the host into a carriable pellet.
+        if (generator) corpses[static_cast<PelletView*>(actor)] = generator;
         setState(actor, s, UMI_DEAD, "dead1");
     }
 
@@ -856,4 +879,24 @@ void pc_p2_umimushi_update(BTeki* actor) {
                     now.x, now.y, now.z);
         std::fflush(stdout);
     }
+}
+
+bool pc_p2_umimushi_receipt(PelletView* view, unsigned& generator) {
+    if (!view) return false;
+    auto i = actors.find(view);
+    if (i != actors.end()) {
+        // Live lookup needs the bound token, not the retail _70.
+        BTeki* t = static_cast<BTeki*>(view);
+        generator = (t && t->mGenerator) ? pc_p2_campaign_token(t) : 0u;
+        if (!generator) return false;
+        return true;
+    }
+    auto c = corpses.find(view);
+    if (c == corpses.end()) return false;
+    generator = c->second;
+    return true;
+}
+
+int pc_p2_umimushi_bound_count() {
+    return int(actors.size() + corpses.size());
 }

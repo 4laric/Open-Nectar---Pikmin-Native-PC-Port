@@ -48,6 +48,9 @@
 // No other lane's module is modified; every hook is a no-op for unregistered
 // actors.
 #include "pc_p2_snakejoint.h"
+#include "pc_p2_campaign_actor.h"
+#include "pc_p2_setup_failsafe.h"
+#include "pc_randomizer.h"
 #include "teki.h"
 #include "Interactions.h"
 #include "Piki.h"
@@ -173,6 +176,7 @@ struct Snake {
 };
 
 std::map<PelletView*, Snake> actors;
+std::map<PelletView*, unsigned> corpses; // dead-actor delivery registry
 std::map<std::string, std::map<std::string, Clip>> clipBank; // species -> clip
 bool ready = false;
 
@@ -349,6 +353,7 @@ void attackFollowUp(BTeki* a, Snake& s, const Vector3f& pos) {
 
 void pc_p2_snakejoint_reset() {
     actors.clear();
+    corpses.clear();
     clipBank.clear();
     ready = false;
 }
@@ -356,14 +361,18 @@ void pc_p2_snakejoint_forget(BTeki* actor) {
     // Slice-2 cleanup observability: the centralized forget seam is the P1
     // analogue of scene exit/death teardown; log the release so the fixture can
     // prove the dead snagret is removed without a stale reference.
+    // Lane 06 single-use binding: drop the ordinary-delivery source so a
+    // recycled actor address can never inherit the source. Idempotent.
+    pc_randomizer_p2_forget_source(static_cast<PelletView*>(actor));
     auto it = actors.find(static_cast<PelletView*>(actor));
     if (it != actors.end()) {
         std::printf("P2_SNAKEJOINT_FORGET generator=%u source_id=%d\n",
-                    actor->mGenerator ? actor->mGenerator->_70 : 0u,
+                    actor->mGenerator ? pc_p2_campaign_token(actor) : 0u,
                     it->second.parms->sourceId);
         std::fflush(stdout);
     }
     actors.erase(static_cast<PelletView*>(actor));
+    corpses.erase(static_cast<PelletView*>(actor));
 }
 
 float pc_p2_snakejoint_param_f(const BTeki* actor, int idx, float fallback) {
@@ -481,17 +490,23 @@ void pc_p2_snakejoint_setup() {
     }
 
     std::ifstream in("p2-snagret-actors.txt");
-    if (!in) return;
+    if (!in && !pc_randomizer_p2_bridge()) return;
     std::string header;
     int count = 0;
-    if (!(in >> header >> count) || header != "P2_SNAGRET_ACTORS_1" || count < 1) return;
     std::map<unsigned, const SpeciesParms*> wanted;
-    for (int i = 0; i < count; ++i) {
-        unsigned long long generator = 0;
-        std::string species;
-        if (!(in >> generator >> species)) return;
-        if (species == "SnakeCrow") wanted[unsigned(generator)] = &SNAKE_CROW;
-        else if (species == "SnakeWhole") wanted[unsigned(generator)] = &SNAKE_WHOLE;
+    if (in && (in >> header >> count) && header == "P2_SNAGRET_ACTORS_1" && count >= 1) {
+        for (int i = 0; i < count; ++i) {
+            unsigned long long generator = 0;
+            std::string species;
+            if (!(in >> generator >> species)) return;
+            if (species == "SnakeCrow") wanted[unsigned(generator)] = &SNAKE_CROW;
+            else if (species == "SnakeWhole") wanted[unsigned(generator)] = &SNAKE_WHOLE;
+        }
+    }
+    if (pc_randomizer_p2_bridge()) {
+        wanted.clear();
+        for (unsigned id : pc_p2_campaign_ids(34)) wanted[id] = &SNAKE_CROW;
+        for (unsigned id : pc_p2_campaign_ids(70)) wanted[id] = &SNAKE_WHOLE;
     }
     if (wanted.empty()) return;
 
@@ -500,46 +515,53 @@ void pc_p2_snakejoint_setup() {
     CI_LOOP(it) {
         Teki* actor = static_cast<Teki*>(*it);
         if (!actor || !actor->mGenerator) continue;
-        auto match = wanted.find(actor->mGenerator->_70);
+        const unsigned token = pc_p2_campaign_token(actor);
+        auto match = wanted.find(token);
         if (match == wanted.end()) continue;
         if (actor->mTekiType != TEKI_Chappy) {
-            std::printf("P2_SNAKEJOINT_ERROR native_type generator=%u\n", actor->mGenerator->_70);
+            std::printf("P2_SNAKEJOINT_ERROR native_type generator=%u\n", token);
             std::fflush(stdout);
-            std::abort();
+            if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "SnakeJoint", "actor_type_mismatch")) return;
         }
         Snake& s = actors[static_cast<PelletView*>(actor)];
         s.parms = match->second;
         s.home = actor->getPosition();
         s.heading = actor->getDirection();
         s.moveTarget = s.home;
-        s.rng = (actor->mGenerator->_70 * 2654435761u) | 1u;
+        s.rng = (token * 2654435761u) | 1u;
         actor->mHealth = s.parms->life;
+        // Lane 06 ordinary delivery: bind the campaign source so the corpse
+        // mints onion:p2:<id> via GoalItem::suckMe.
+        pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor),
+                                     unsigned(s.parms->sourceId), token);
+        std::printf("P2_SNAKEJOINT_DELIVERY_BIND generator=%u source_id=%d\n",
+                    token, s.parms->sourceId);
         enter(s, SNAKE_STAY, "appear1");
         std::printf("P2_SNAKEJOINT_BIND generator=%u species=%s source_id=%d visual_only=0\n",
-                    actor->mGenerator->_70, s.parms->name, s.parms->sourceId);
+                    token, s.parms->name, s.parms->sourceId);
         // Slice-2 joint-fidelity measurement: the source rig drives six spinal
         // joints (bodyjnt3-bodyjnt8, SnakeJointMgr.cpp:47) feeding the head; the
         // P1 Chappy host drives a single flat translation-only body, so the drawn
         // pose comes from the per-species clip override, not the spinal matrices.
         std::printf("P2_SNAKEJOINT_JOINTS generator=%u species=%s source_joints=6 "
                     "host_joints=1 pose=clip_override\n",
-                    actor->mGenerator->_70, s.parms->name);
+                    token, s.parms->name);
         std::fflush(stdout);
         const Vector3f pos = actor->getPosition();
         std::printf("P2_ENEMY_READY species=%s native_family=Chappy generator=%u "
                     "x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=native "
                     "source_FSM=implemented attack=animation_event\n",
-                    s.parms->name, actor->mGenerator->_70, pos.x, pos.y, pos.z,
+                    s.parms->name, token, pos.x, pos.y, pos.z,
                     actor->mHealth, s.parms->life);
-        std::printf("P2_SNAKEJOINT_STATE generator=%u state=stay\n", actor->mGenerator->_70);
+        std::printf("P2_SNAKEJOINT_STATE generator=%u state=stay\n", token);
         std::fflush(stdout);
-        found.insert(actor->mGenerator->_70);
+        found.insert(token);
     }
     if (found.size() != wanted.size()) {
         std::printf("P2_SNAKEJOINT_ERROR missing_actor wanted=%zu found=%zu\n",
                     wanted.size(), found.size());
         std::fflush(stdout);
-        std::abort();
+        if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "SnakeJoint", "actor_roster_incomplete")) return;
     }
     ready = true;
 }
@@ -553,7 +575,7 @@ void pc_p2_snakejoint_update(BTeki* actor) {
     const float dt = gsys->getFrameTime();
     if (dt <= 0.0f || dt > 0.5f) return;
     const Vector3f pos = actor->getPosition();
-    const unsigned generator = actor->mGenerator ? actor->mGenerator->_70 : 0u;
+    const unsigned generator = actor->mGenerator ? pc_p2_campaign_token(actor) : 0u;
 
     if (actor->mHealth <= 0.0f && s.state != SNAKE_DEAD) {
         if (!s.deadLogged) {
@@ -562,6 +584,9 @@ void pc_p2_snakejoint_update(BTeki* actor) {
             std::fflush(stdout);
             s.deadLogged = true;
         }
+        // Keep the generator for Pod receipt after the engine tears down
+        // the host into a carriable pellet.
+        if (generator) corpses[static_cast<PelletView*>(actor)] = generator;
         setState(actor, s, SNAKE_DEAD, "dead");
     }
 
@@ -737,4 +762,24 @@ void pc_p2_snakejoint_update(BTeki* actor) {
                     generator, stateName(s.state), s.clip.c_str(), s.phase, pos.x, pos.z);
         std::fflush(stdout);
     }
+}
+
+bool pc_p2_snakejoint_receipt(PelletView* view, unsigned& generator) {
+    if (!view) return false;
+    auto i = actors.find(view);
+    if (i != actors.end()) {
+        // Live lookup needs the bound token, not the retail _70.
+        BTeki* t = static_cast<BTeki*>(view);
+        generator = (t && t->mGenerator) ? pc_p2_campaign_token(t) : 0u;
+        if (!generator) return false;
+        return true;
+    }
+    auto c = corpses.find(view);
+    if (c == corpses.end()) return false;
+    generator = c->second;
+    return true;
+}
+
+int pc_p2_snakejoint_bound_count() {
+    return int(actors.size() + corpses.size());
 }

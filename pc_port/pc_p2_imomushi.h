@@ -11,3 +11,5 @@ void pc_p2_imomushi_forget(BTeki*);
 void pc_p2_imomushi_update(BTeki*);
 float pc_p2_imomushi_param_f(const BTeki*, int idx, float fallback);
 bool pc_p2_imomushi_clip(const BTeki*, const char*& name, float& phase);
+bool pc_p2_imomushi_receipt(class PelletView*, unsigned&);
+int pc_p2_imomushi_bound_count();

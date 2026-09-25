@@ -16,6 +16,11 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     case 23: return 3; // TEKI_Chappy: Sarai ordinary-host path
     case 54: return 24; // TEKI_Miurin: Mamuta
     case 57: case 78: return 0; // TEKI_Frog: Jellyfloat/Groink sidecar hosts
+    // inst-worms lane (#871): snagret pair (34/70), Imomushi (65) and bloyster
+    // pair (71/101) all run on the P1 Chappy placement vehicle, matching the
+    // native modules' TEKI_Chappy expectation (pc_p2_snakejoint.cpp,
+    // pc_p2_imomushi.cpp, pc_p2_umimushi.cpp).
+    case 34: case 70: case 65: case 71: case 101: return 3; // TEKI_Chappy
     default: return original;
     }
 }

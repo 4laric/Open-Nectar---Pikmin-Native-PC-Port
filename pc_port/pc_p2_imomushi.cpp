@@ -32,6 +32,9 @@
 //     mTurnSpeed/mMaxTurnAngle.
 // No other lane's module is modified; every hook is a no-op for unregistered actors.
 #include "pc_p2_imomushi.h"
+#include "pc_p2_campaign_actor.h"
+#include "pc_p2_setup_failsafe.h"
+#include "pc_randomizer.h"
 #include "teki.h"
 #include "Interactions.h"
 #include "Piki.h"
@@ -101,6 +104,7 @@ struct Imomushi {
 };
 
 std::map<PelletView*, Imomushi> actors;
+std::map<PelletView*, unsigned> corpses; // dead-actor delivery registry
 std::map<std::string, Clip> clips;
 bool ready = false;
 
@@ -185,10 +189,17 @@ Creature* nearestTarget(const Vector3f& pos) {
 
 void pc_p2_imomushi_reset() {
     actors.clear();
+    corpses.clear();
     clips.clear();
     ready = false;
 }
-void pc_p2_imomushi_forget(BTeki* actor) { actors.erase(static_cast<PelletView*>(actor)); }
+void pc_p2_imomushi_forget(BTeki* actor) {
+    // Lane 06 single-use binding: drop the ordinary-delivery source so a
+    // recycled actor address can never inherit the source. Idempotent.
+    pc_randomizer_p2_forget_source(static_cast<PelletView*>(actor));
+    actors.erase(static_cast<PelletView*>(actor));
+    corpses.erase(static_cast<PelletView*>(actor));
+}
 
 float pc_p2_imomushi_param_f(const BTeki* actor, int idx, float fallback) {
     if (!ready || !actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor)))) return fallback;
@@ -251,16 +262,21 @@ void pc_p2_imomushi_setup() {
     }
 
     std::ifstream in("p2-ground-actors.txt");
-    if (!in) return;
+    if (!in && !pc_randomizer_p2_bridge()) return;
     std::string header;
     int count = 0;
-    if (!(in >> header >> count) || header != "P2_GROUND_ACTORS_1" || count < 1) return;
     std::map<unsigned, std::string> wanted;
-    for (int i = 0; i < count; ++i) {
-        unsigned long long generator = 0;
-        std::string species;
-        if (!(in >> generator >> species)) return;
-        if (species == "Imomushi") wanted[unsigned(generator)] = species;
+    if (in && (in >> header >> count) && header == "P2_GROUND_ACTORS_1" && count >= 1) {
+        for (int i = 0; i < count; ++i) {
+            unsigned long long generator = 0;
+            std::string species;
+            if (!(in >> generator >> species)) return;
+            if (species == "Imomushi") wanted[unsigned(generator)] = species;
+        }
+    }
+    if (pc_randomizer_p2_bridge()) {
+        wanted.clear();
+        for (unsigned id : pc_p2_campaign_ids(65)) wanted[id] = "Imomushi";
     }
     if (wanted.empty()) return;
 
@@ -269,29 +285,36 @@ void pc_p2_imomushi_setup() {
     CI_LOOP(it) {
         Teki* actor = static_cast<Teki*>(*it);
         if (!actor || !actor->mGenerator) continue;
-        auto match = wanted.find(actor->mGenerator->_70);
+        const unsigned token = pc_p2_campaign_token(actor);
+        auto match = wanted.find(token);
         if (match == wanted.end()) continue;
         if (actor->mTekiType != TEKI_Chappy) {
-            std::printf("P2_IMOMUSHI_ERROR native_type generator=%u\n", actor->mGenerator->_70);
-            std::abort();
+            std::printf("P2_IMOMUSHI_ERROR native_type generator=%u\n", token);
+            std::fflush(stdout);
+            if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Imomushi", "actor_type_mismatch")) return;
         }
         Imomushi& s = actors[static_cast<PelletView*>(actor)];
         s.home = actor->getPosition();
         s.heading = actor->getDirection();
         actor->mHealth = LIFE;
+        // Lane 06 ordinary delivery: bind the campaign source so the corpse
+        // mints onion:p2:<id> via GoalItem::suckMe.
+        pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor), 65, token);
+        std::printf("P2_IMOMUSHI_DELIVERY_BIND generator=%u source_id=65\n", token);
         enter(s, IMOMUSHI_STAY, "set");
         std::printf("P2_IMOMUSHI_BIND generator=%u source_id=65 visual_only=0\n",
-                    actor->mGenerator->_70);
+                    token);
         const Vector3f pos = actor->getPosition();
         std::printf("P2_ENEMY_READY species=Imomushi native_family=Chappy generator=%u "
                     "x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=native "
                     "source_FSM=implemented plant_eat=source_backed_NA\n",
-                    actor->mGenerator->_70, pos.x, pos.y, pos.z, actor->mHealth, LIFE);
-        found.insert(actor->mGenerator->_70);
+                    token, pos.x, pos.y, pos.z, actor->mHealth, LIFE);
+        found.insert(token);
     }
     if (found.size() != wanted.size()) {
         std::printf("P2_IMOMUSHI_ERROR missing_actor wanted=%zu found=%zu\n", wanted.size(), found.size());
-        std::abort();
+        std::fflush(stdout);
+        if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Imomushi", "actor_roster_incomplete")) return;
     }
     ready = true;
 }
@@ -304,7 +327,7 @@ void pc_p2_imomushi_update(BTeki* actor) {
     const float dt = gsys->getFrameTime();
     if (dt <= 0.0f || dt > 0.5f) return;
     const Vector3f pos = actor->getPosition();
-    const unsigned generator = actor->mGenerator ? actor->mGenerator->_70 : 0u;
+    const unsigned generator = actor->mGenerator ? pc_p2_campaign_token(actor) : 0u;
 
     if (actor->mHealth <= 0.0f && s.state != IMOMUSHI_DEAD && s.state != IMOMUSHI_FALL) {
         if (!s.deadLogged) {
@@ -312,6 +335,9 @@ void pc_p2_imomushi_update(BTeki* actor) {
             std::fflush(stdout);
             s.deadLogged = true;
         }
+        // Keep the generator for Pod receipt after the engine tears down
+        // the host into a carriable pellet.
+        if (generator) corpses[static_cast<PelletView*>(actor)] = generator;
         std::printf("P2_IMOMUSHI_STATE generator=%u state=fall\n", generator);
         enter(s, IMOMUSHI_FALL, "fall2");
     }
@@ -383,4 +409,24 @@ void pc_p2_imomushi_update(BTeki* actor) {
                     generator, stateName(s.state), s.clip.c_str(), s.phase, pos.x, pos.z);
         std::fflush(stdout);
     }
+}
+
+bool pc_p2_imomushi_receipt(PelletView* view, unsigned& generator) {
+    if (!view) return false;
+    auto i = actors.find(view);
+    if (i != actors.end()) {
+        // Live lookup needs the bound token, not the retail _70.
+        BTeki* t = static_cast<BTeki*>(view);
+        generator = (t && t->mGenerator) ? pc_p2_campaign_token(t) : 0u;
+        if (!generator) return false;
+        return true;
+    }
+    auto c = corpses.find(view);
+    if (c == corpses.end()) return false;
+    generator = c->second;
+    return true;
+}
+
+int pc_p2_imomushi_bound_count() {
+    return int(actors.size() + corpses.size());
 }
