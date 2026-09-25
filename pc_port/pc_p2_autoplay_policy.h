@@ -232,8 +232,8 @@ inline unsigned sourceForSpeciesName(const char* name)
     return 0;
 }
 
-inline bool isKoganeLike(unsigned source) { return source == 9 || source == 10 || source == 11; }
-inline bool isFlyer(unsigned source) { return source == 23 || source == 57; }
+inline bool isKoganeLike(unsigned source) { return source == 9; }
+inline bool isFlyer(unsigned source) { return source == 23 || source == 57 || source == 32 || source == 72; }
 
 // Numeric filter matches a generator key; otherwise a species name match.
 inline bool matchTarget(unsigned token, unsigned source, const char* species, const std::string& filter)
@@ -896,7 +896,25 @@ private:
             return;
         }
         const bool sarai = in.targetSource == 23;
-        const bool kurage = in.targetSource == 57;
+        const bool kurage = in.targetSource == 57 || in.targetSource == 72;
+        const float limit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout;
+        // bot-unkilled (wf11): chase a fled/flying target instead of whistling
+        // or throwing in place. Attack never re-approaches today: once in
+        // Attack a Snitchbug/Jellyfloat that flies 200-1200 u away holds the
+        // bot at move=(0,0) whistling (Demon bc5: tdist 3->1252, stationary
+        // PadB) or throwing from beyond latch range (OniKurage bc5: tdist 265
+        // vs throwRange 260, hp regen outpaces DPS). Too far to hit means
+        // steer first, no whistle, no wasted throws; whistle/throws resume in
+        // range. Re-engages on resurface the same way (tdist shrinks).
+        if (in.targetDist > cfg.throwRange) {
+            if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+            else steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            if (stateTime >= limit) {
+                giveUp(in, "attack_timeout");
+                finishTarget(in, /*killed*/ false);
+            }
+            return;
+        }
         // Whistle first, then re-throw (bot-v4: real players do this):
         // - Sarai holding a Pikmin (targetGrabbing): whistle frees the grab;
         // - grabbed/thrown-off/burning squad (squadDistress: mouth-stuck,
@@ -915,6 +933,13 @@ private:
             whistleTime += dt;
             lastCommand.buttons = PadB; // hold whistle to regroup / free grabs
             if (whistleTime >= cfg.whistleHold || (!in.scattered && !in.squadDistress && !grabWhistle)) whistling = false;
+            // bot-unkilled: a permanently scattered/distressed squad must not
+            // whistle past the attack window (control Chappy unkilled-1:
+            // field=4 scat=1 tdist=61 whistle-locked 800 s with no RESULT).
+            if (stateTime >= limit) {
+                giveUp(in, "attack_timeout");
+                finishTarget(in, /*killed*/ false);
+            }
             return;
         }
         if (sarai && !in.targetLow && !in.targetGrabbing) {
@@ -947,7 +972,6 @@ private:
         // pulse A to throw. Flyers are thrown at from range as the game allows.
         steer(in.naviX, in.naviZ, aimX, aimZ);
         pulseA(in, cfg.throwHold, gap);
-        const float limit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout;
         if (stateTime >= limit) {
             giveUp(in, "attack_timeout");
             finishTarget(in, /*killed*/ false);

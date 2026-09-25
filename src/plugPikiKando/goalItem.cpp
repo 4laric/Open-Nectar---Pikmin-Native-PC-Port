@@ -364,7 +364,21 @@ void GoalItem::suckMe(Pellet* item)
                     && pc_randomizer_p2_corpse_delivered(item->mPelletView, type,
                         flowCont.mCurrentStage->mStageID, gameplay);
                 if (!deliveredP2) {
-                    pc_randomizer_corpse_delivered(type, flowCont.mCurrentStage->mStageID, gameplay);
+                    // bot-unkilled (wf11): under the P2 bridge a Teki corpse with
+                    // a pellet view is a P2 actor's corpse even when unbound
+                    // (static-host families like dwarf_orange/otakara never bind
+                    // lane-06, and consumed single-use bindings read unbound on
+                    // a recycled address). Its P1 host type (e.g. 3/Chappy for
+                    // Wealthy/Fart/BlueKochappy/Otakara) must not mint the P1
+                    // host CHECK (e.g. Deliver Dwarf Bulborb) with zero P2
+                    // deaths. Bound P2 corpses already returned true above;
+                    // unbound P2-actor corpses grant nothing here.
+                    if (pc_randomizer_p2_bridge() && item->mPelletView) {
+                        std::printf("[Pikmin Randomizer] P2_P1_CHECK_SUPPRESSED host_type=%d stage=%d\n",
+                            type, flowCont.mCurrentStage->mStageID);
+                    } else {
+                        pc_randomizer_corpse_delivered(type, flowCont.mCurrentStage->mStageID, gameplay);
+                    }
                 }
                 break;
             }

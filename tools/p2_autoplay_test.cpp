@@ -1966,6 +1966,161 @@ void testSelectTargetGone()
     setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
 }
 
+void testUnkilledKoganeScope()
+{
+    // bot-unkilled (wf11): only source 9 is never-dies by design (finite
+    // flip/escape, no health damage). Wealthy (10) and Fart (11) are plain
+    // Chappy-host proxies that CAN die, so they must score kills.
+    CHECK(p2autoplay::isKoganeLike(9), "unkilled/kogane9_like");
+    CHECK(!p2autoplay::isKoganeLike(10), "unkilled/wealthy10_not_like");
+    CHECK(!p2autoplay::isKoganeLike(11), "unkilled/fart11_not_like");
+    CHECK(!p2autoplay::isKoganeLike(2), "unkilled/chappy2_not_like");
+    // 10 kills and delivers: killed=1 carried=1 received=1.
+    p2autoplay::Config cfg;
+    cfg.receiptTimeout = 60.0f;
+    cfg.aftermathTimeout = 60.0f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 80;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 1945764764u;
+    s.targetSource = 10;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.targetHealthFrac = 1.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    s.targetHealthFrac = 0.5f;
+    brain.update(0.05f, s);
+    s.targetAlive = false;
+    s.targetDead = true;
+    s.transportSeen = true;
+    s.carryCount = 3;
+    s.receiptSeen = true;
+    brain.update(0.05f, s); // -> aftermath
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "unkilled/wealthy_aftermath");
+    std::vector<std::string> markers;
+    for (int i = 0; i < 10 && brain.current() == p2autoplay::State::Aftermath; ++i) {
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_RESULT target=1945764764 damaged=1 killed=1 carried=1"),
+        "unkilled/wealthy_kill_scores");
+}
+
+void testUnkilledFlyers()
+{
+    // bot-unkilled (wf11): Demon (32) and OniKurage (72) are airborne and
+    // must use the flyer approach range (throwRange, not 0.75x).
+    CHECK(p2autoplay::isFlyer(23), "unkilled/sarai_flyer");
+    CHECK(p2autoplay::isFlyer(57), "unkilled/kurage_flyer");
+    CHECK(p2autoplay::isFlyer(32), "unkilled/demon_flyer");
+    CHECK(p2autoplay::isFlyer(72), "unkilled/onikurage_flyer");
+    CHECK(!p2autoplay::isFlyer(2), "unkilled/chappy_not_flyer");
+}
+
+void testUnkilledChaseWhenFar()
+{
+    // bot-unkilled (wf11): Attack at tdist > throwRange steers toward the
+    // target with no whistle and no wasted throws, even when scattered or in
+    // distress (Demon bc5: stationary PadB at 1200 u; OniKurage: throws from
+    // 265 u while regen outpaces DPS).
+    p2autoplay::Config cfg;
+    cfg.throwRange = 260.0f;
+    cfg.attackTimeout = 60.0f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 100;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 1945764764u;
+    s.targetSource = 32;
+    s.targetAlive = true;
+    s.naviX = 0.0f;
+    s.naviZ = 0.0f;
+    s.tgtX = 1000.0f;
+    s.tgtZ = 0.0f;
+    s.targetDist = 1000.0f;
+    s.scattered = true;
+    s.squadDistress = true;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack (flyer range 260, but already attack?)
+    // Force attack: within old 0.75x range would have entered; drive to attack.
+    s.targetDist = 200.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Attack, "unkilled-chase/attacks");
+    // Now flee far: must chase, not whistle/throw.
+    s.targetDist = 1000.0f;
+    s.tgtX = 1000.0f;
+    brain.update(0.05f, s);
+    const p2autoplay::Command cmd = brain.command();
+    CHECK(!(cmd.buttons & unsigned(p2autoplay::PadB)), "unkilled-chase/no_whistle_when_far");
+    CHECK(!(cmd.buttons & unsigned(p2autoplay::PadA)), "unkilled-chase/no_throw_when_far");
+    CHECK(cmd.moveX > 0.5f, "unkilled-chase/steers_when_far");
+    CHECK(brain.current() == p2autoplay::State::Attack, "unkilled-chase/stays_in_attack");
+}
+
+void testUnkilledOniKurageWindow()
+{
+    // bot-unkilled (wf11): OniKurage (72, 2000 HP + 1%/s regen) gets the
+    // Kurage extended attack window and rotating throws.
+    p2autoplay::Config cfg;
+    cfg.attackTimeout = 1.0f;
+    cfg.kurageAttackMultiplier = 3.0f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 100;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 1945764764u;
+    s.targetSource = 72;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.naviX = 0.0f;
+    s.naviZ = 0.0f;
+    s.tgtX = 100.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    for (int i = 0; i < 30; ++i) brain.update(0.05f, s); // 1.5s > base 1.0s
+    CHECK(brain.current() == p2autoplay::State::Attack, "unkilled-kurage/outlasts_base_timeout");
+}
+
+void testUnkilledWhistleTimeout()
+{
+    // bot-unkilled (wf11): permanent scatter/distress must not whistle past
+    // the attack window with no RESULT (control Chappy unkilled-1 lock).
+    p2autoplay::Config cfg;
+    cfg.attackTimeout = 1.0f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 4;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 1945764764u;
+    s.targetSource = 2;
+    s.targetAlive = true;
+    s.targetDist = 61.0f;
+    s.naviX = 0.0f;
+    s.naviZ = 0.0f;
+    s.tgtX = 61.0f;
+    s.tgtZ = 0.0f;
+    s.scattered = true;
+    s.squadDistress = true;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    std::vector<std::string> markers;
+    for (int i = 0; i < 60; ++i) {
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_GIVEUP reason=attack_timeout"), "unkilled-whistle/times_out");
+    CHECK(hasMarker(markers, "AUTOPLAY_RESULT target=1945764764"), "unkilled-whistle/results");
+}
+
 } // namespace
 
 int main()
@@ -2005,6 +2160,11 @@ int main()
     testAftermathUnknownWantEscorts();
     testPowerFastSquad();
     testSelectTargetGone();
+    testUnkilledKoganeScope();
+    testUnkilledFlyers();
+    testUnkilledChaseWhenFar();
+    testUnkilledOniKurageWindow();
+    testUnkilledWhistleTimeout();
     if (failures == 0) {
         std::printf("PASS p2_autoplay\n");
         return 0;
