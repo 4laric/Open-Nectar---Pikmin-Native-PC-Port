@@ -24,6 +24,7 @@ namespace {
 struct Binding {
     unsigned generator;
     int type;
+    unsigned source = 0; // bridge campaign source (78 Groink, 97 FminiHoudai pedestal); 0 = preview/staged
     P2GroinkCarcassConfig config;
     P2GroinkCarcass carcass;
     bool began = false;         // death observed -> carcass begin (doBecomeCarcass)
@@ -32,6 +33,15 @@ struct Binding {
     bool pelletKilled = false;  // KillPellet emitted -> never re-dereference the recycled pellet
     int births = 0;
     bool transport = false;     // sidecar `transport` token: drive the carcass to the Pod
+    // Live pedestal FSM (97 OWN, inst3-misc): FixMiniHoudai is a fixed gun
+    // turret (no locomotion by source design). P2 decides targeting + Gatling
+    // fire each tick while host Frog TAI is suppressed/blinded.
+    float liveTime = 0.0f;
+    float shotCooldown = 0.0f;
+    float logTimer = 0.0f;
+    Vector3f home{};
+    bool homeRecorded = false;
+    unsigned liveRng = 1;
 };
 std::map<BTeki*, Binding> s;
 
@@ -166,6 +176,59 @@ const Binding* find(const BTeki* t) {
 }
 // Preview-only bound-host max-life cap (see the header note).
 constexpr float kHostLifeClamp = 120.0f;
+// Live pedestal gun (97 OWN): fixed turret sight + Gatling cadence. Source
+// MiniHoudaiShotGun fires 3-round volleys; the port fires a single
+// InteractBomb shell per cooldown as the P2-decided attack (documented
+// approximation, same damage class as the Houdai shell path).
+constexpr float kLiveSight = 400.0f;
+constexpr float kLiveShotPeriod = 1.0f;
+constexpr float kLiveShotDamage = 10.0f;
+
+Creature* liveNearestTarget(const Vector3f& pos) {
+    Creature* best = nullptr;
+    float bestSq = kLiveSight * kLiveSight;
+    if (naviMgr) {
+        Navi* n = naviMgr->getNavi();
+        if (n && n->isAlive()) {
+            const Vector3f p = n->getPosition();
+            const float dx = p.x - pos.x, dz = p.z - pos.z;
+            const float d = dx * dx + dz * dz;
+            if (d < bestSq) { bestSq = d; best = n; }
+        }
+    }
+    if (pikiMgr) {
+        Iterator it(pikiMgr);
+        CI_LOOP(it) {
+            Piki* p = static_cast<Piki*>(*it);
+            if (!p || !p->isAlive()) continue;
+            const Vector3f q = p->getPosition();
+            const float dx = q.x - pos.x, dz = q.z - pos.z;
+            const float d = dx * dx + dz * dz;
+            if (d < bestSq) { bestSq = d; best = p; }
+        }
+    }
+    return best;
+}
+
+void liveFire(BTeki* t, Binding& b, Creature* target) {
+    if (!target || !target->isAlive()) return;
+    const Vector3f pos = t->getPosition();
+    const Vector3f tp = target->getPosition();
+    const float faceDir = std::atan2(tp.x - pos.x, tp.z - pos.z);
+    t->setDirection(faceDir);
+    // Gatling shot: route source shell damage into a real Pikmin/Navi via the
+    // engine receiver. Navi shells home but never damage (documented); Pikmin
+    // take the hit. P2 decides targeting + fire each tick.
+    if (target->isPiki()) {
+        Piki* p = static_cast<Piki*>(target);
+        p->stimulate(InteractBomb(t, kLiveShotDamage, nullptr));
+    } else if (naviMgr && target == naviMgr->getNavi()) {
+        target->stimulate(InteractBomb(t, kLiveShotDamage, nullptr));
+    }
+    std::printf("P2_GROINK_LIVE_FIRE generator=%u source_id=97 x=%.2f z=%.2f tx=%.2f tz=%.2f damage=%.1f\n",
+                b.generator, pos.x, pos.z, tp.x, tp.z, kLiveShotDamage);
+    std::fflush(stdout);
+}
 } // namespace
 
 void pc_p2_groink_teki_reset()
@@ -224,9 +287,37 @@ bool pc_p2_groink_receipt(PelletView* view, unsigned& generator) {
     return true;
 }
 float pc_p2_groink_teki_param_f(const BTeki* teki, int idx, float fallback) {
+    const Binding* b = find(teki);
+    if (!b) return fallback;
+    // 97 live OWN (inst3-misc): blind the Frog host so the P2 pedestal FSM has
+    // last word on targeting. Carcass path (78/97 dead) keeps prior behaviour.
+    if (b->source == 97 && b->began == false) {
+        switch (idx) {
+        case TPF_VisibleRange:
+        case TPF_VisibleAngle:
+        case TPF_AttackableRange:
+        case TPF_AttackableAngle:
+        case TPF_AttackRange:
+        case TPF_AttackHitRange:
+        case TPF_AttackPower:
+        case TPF_DangerTerritoryRange:
+        case TPF_SafetyTerritoryRange:
+            return 0.0f;
+        case TPF_LifeRecoverRate:
+            return 0.0f;
+        default:
+            break;
+        }
+    }
     if (idx != TPF_Life || !pc_pikipelago_room_preview()) return fallback;
-    if (!find(teki)) return fallback;
     return fallback < kHostLifeClamp ? fallback : kHostLifeClamp;
+}
+
+bool pc_p2_groink_teki_suppress_ai(const BTeki* teki) {
+    const Binding* b = find(teki);
+    // Suppress only the 97 pedestal live actor (fixed turret, P2 drives gun).
+    // 78 Groink live stays host-driven (out of lane scope).
+    return b && b->source == 97 && !b->began && !b->terminal;
 }
 
 void pc_p2_groink_teki_setup() {
@@ -239,6 +330,7 @@ void pc_p2_groink_teki_setup() {
     { P2GroinkCarcass probe; if (!probe.become(cfg.carcass)) { if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Groink", "carcass_config_invalid")) return; } }
     unsigned gen = cfg.generator;
     int type = cfg.type;
+    unsigned srcForBind = 0;
     Iterator it(tekiMgr);
     CI_LOOP(it) {
         auto* t = static_cast<Teki*>(*it);
@@ -250,9 +342,10 @@ void pc_p2_groink_teki_setup() {
             // In bridge the staged single-type config no longer describes the
             // actor: 78 stays a Groink carcass host, 97 is the Gatling Groink
             // pedestal (FminiHoudai) on the same Frog vehicle. Both share the
-            // carcass-after-death path; live locomotion/gun stays host-driven
-            // (documented PROXY gap for 97 live behaviour).
+            // carcass-after-death path; 97 live gun is P2-driven (inst3 OWN),
+            // 78 live stays host-driven (out of lane scope).
             type = t->mTekiType;
+            srcForBind = src;
         } else if (pc_p2_campaign_token(t) != gen) continue;
         if (t->mTekiType != type || (!pc_randomizer_p2_bridge() && s.size())) { if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Groink", "actor_type_mismatch")) return; }
         // A host that leaves no corpse dies through dieSoon -> kill -> doKill,
@@ -263,10 +356,18 @@ void pc_p2_groink_teki_setup() {
             std::printf("P2_GROINK_CARCASS_UNBOUND generator=%u type=%d reason=no_corpse\n", gen, type);
             continue;
         }
-        s.emplace(static_cast<BTeki*>(t), Binding{gen, type, cfg.carcass, {}, false, false, false, false, 0, cfg.transport});
+        s.emplace(static_cast<BTeki*>(t), Binding{gen, type, srcForBind, cfg.carcass, {}, false, false, false, false, 0, cfg.transport});
+        {
+            auto jt = s.find(static_cast<BTeki*>(t));
+            if (jt != s.end()) {
+                jt->second.home = t->getPosition();
+                jt->second.homeRecorded = true;
+                jt->second.liveRng = (gen * 2654435761u) | 1u;
+            }
+        }
         sGeneratorObj = t->mGenerator; // (#198 gate 6 rebirth probe)
-        std::printf("P2_GROINK_CARCASS_READY generator=%u type=%d gauge_delay=%.3f recovery=%.3f max_health=%.3f\n",
-                    gen, type, cfg.carcass.gaugeDelay, cfg.carcass.recoverySeconds, cfg.carcass.maxHealth);
+        std::printf("P2_GROINK_CARCASS_READY generator=%u type=%d source=%u gauge_delay=%.3f recovery=%.3f max_health=%.3f\n",
+                    gen, type, srcForBind, cfg.carcass.gaugeDelay, cfg.carcass.recoverySeconds, cfg.carcass.maxHealth);
         if (pc_randomizer_p2_bridge() && pc_p2_campaign_source(t) == 97) {
             // Ordinary-delivery bridge for the 97 pedestal branch (lane 06
             // contract, mirrors Catfish 26): bind source 97 so GoalItem::suckMe
@@ -283,7 +384,39 @@ void pc_p2_groink_teki_tick(BTeki* t) {
     if (i == s.end()) return;
     Binding& b = i->second;
     if (b.terminal) return;
-    const float dt = gsys->getFrameTime();
+    const float dt = gsys ? gsys->getFrameTime() : 0.0f;
+    // 97 live OWN (inst3-misc): fixed pedestal gun runs on the live actor's own
+    // BTeki tick while mHealth>0. P2 decides movement (fixed: zero drive),
+    // targeting (nearest Navi/Piki) and Gatling fire each tick; host Frog TAI
+    // is suppressed (doAI) and blinded (param_f). 78 live keeps prior no-op.
+    if (!b.began && t->mHealth > 0.0f && b.source == 97) {
+        if (!(dt > 0.0f && dt < 0.5f)) return;
+        if (!b.homeRecorded) { b.home = t->getPosition(); b.homeRecorded = true; }
+        // Fixed pedestal: last-word zero drive (movement verdict is "hold").
+        t->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
+        t->mVelocity.x = 0.0f;
+        t->mVelocity.z = 0.0f;
+        b.liveTime += dt;
+        b.shotCooldown -= dt;
+        Creature* target = liveNearestTarget(t->getPosition());
+        if (target) {
+            const Vector3f tp = target->getPosition();
+            t->setDirection(std::atan2(tp.x - t->getPosition().x, tp.z - t->getPosition().z));
+            if (b.shotCooldown <= 0.0f) {
+                b.shotCooldown = kLiveShotPeriod;
+                liveFire(t, b, target);
+            }
+        }
+        b.logTimer += dt;
+        if (b.logTimer >= 1.0f) {
+            b.logTimer = 0.0f;
+            const Vector3f pos = t->getPosition();
+            std::printf("P2_GROINK_LIVE_POS generator=%u source_id=97 x=%.2f z=%.2f target=%s\n",
+                        b.generator, pos.x, pos.z, target ? "1" : "0");
+            std::fflush(stdout);
+        }
+        return; // still alive: no carcass yet
+    }
     // A carcass begins the moment the live actor drops to death (mHealth <= 0),
     // mirroring doBecomeCarcass.  The regrowth timeline is then read from the
     // actor's own update cadence and pellet presence, not injected.

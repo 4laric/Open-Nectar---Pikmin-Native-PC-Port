@@ -633,6 +633,9 @@ void BTeki::doAI()
 	if (pc_p2_long_legs_suppress_ai(this)) {
 		return;
 	}
+	if (pc_p2_groink_teki_suppress_ai(this)) {
+		return;
+	}
 #endif
 	if (pc_p2_qurione_suppress_ai(this)) {
 		return;
