@@ -35,6 +35,9 @@
 #include "pc_p2_armor.h"
 #include "pc_p2_armor_events.h"
 #include "pc_p2_armor_receiver_policy.h"
+#include "pc_p2_campaign_actor.h"
+#include "pc_randomizer.h"
+#include "pc_bbft.h"
 #include "teki.h"
 #include "Interactions.h"
 #include "Collision.h"
@@ -116,7 +119,7 @@ struct Armor {
     std::string clip = "appear";
     float phase = 0.0f;
     bool biteLogged = false;
-    bool deadLogged = false;
+    bool deadLogged = false;bool escaped=false;
     float logTimer = 0.0f;
     // Per-frame health tracker for natural-combat observability: an incremental,
     // still-positive decrease is real receiver damage (see pc_p2_armor_update).
@@ -127,10 +130,12 @@ struct Armor {
     bool dmg1Present = false;
     bool weakpointActive = false;
     unsigned weakpointId = 0;
+    unsigned token = 0;
 };
 
 std::map<PelletView*, Armor> actors;
 std::map<std::string, Clip> clips;
+std::set<PelletView*> drawn, drawnCorpse;
 bool ready = false;
 
 float wrapPi(float a) {
@@ -166,6 +171,7 @@ std::string fourCCString(unsigned id) {
 // The source `dmg1` part wins when the host actually loaded it; otherwise the
 // first collision part (bounding sphere) is the documented port approximation.
 void resolveReceiverPart(Creature* actor, Armor& s) {
+    const unsigned tok = s.token ? s.token : (actor->mGenerator ? actor->mGenerator->_70 : 0u);
     s.dmg1Present = false;
     s.weakpointActive = false;
     s.weakpointId = 0;
@@ -182,16 +188,34 @@ void resolveReceiverPart(Creature* actor, Armor& s) {
     } else if (bound) {
         s.weakpointActive = true;
         s.weakpointId = bound->getID().mId;
+    } else if (actor->mCollInfo) {
+        // Bridge host may not expose a bounding sphere yet; fall back to the
+        // body part (the bot's most common stick part) so the armor stays
+        // killable. Documented port approximation when the sphere is absent.
+        CollPart* head = actor->mCollInfo->getSphere('body');
+        if (head) {
+            s.weakpointActive = true;
+            s.weakpointId = head->getID().mId;
+        } else {
+            s.weakpointActive = true;
+            s.weakpointId = p2armorreceiver::fourCC('b','o','d','y');
+        }
+    } else {
+        // No collision at all (early setup/bridge); still designate body so
+        // the armor is killable once hits arrive. Retry in update will refine
+        // to a real part when collision exists.
+        s.weakpointActive = true;
+        s.weakpointId = p2armorreceiver::fourCC('b','o','d','y');
     }
     const char* mode = s.dmg1Present ? "source_dmg1"
         : (s.weakpointActive ? "port_bounding_sphere" : "reject_all");
     std::printf("P2_ARMOR_RECEIVER_PART generator=%u dmg1=%s weakpoint=%s mode=%s\n",
-                actor->mGenerator ? actor->mGenerator->_70 : 0u,
+                tok,
                 s.dmg1Present ? "present" : "absent",
                 s.weakpointActive ? fourCCString(s.weakpointId).c_str() : "none", mode);
     // The P1 host has no petrification lifecycle; record the wired analogue.
     std::printf("P2_ARMOR_STONE_NOTE generator=%u host_lifecycle=absent port_analogue=pressed\n",
-                actor->mGenerator ? actor->mGenerator->_70 : 0u);
+                tok);
     std::fflush(stdout);
 }
 
@@ -301,13 +325,16 @@ void setPhase(Armor& s) {
 void pc_p2_armor_reset() {
     actors.clear();
     clips.clear();
+    drawn.clear();
+    drawnCorpse.clear();
     ready = false;
 }
 void pc_p2_armor_forget_piki(Piki* piki) {
     for (auto& entry : actors) if (entry.second.captured == piki) entry.second.captured = nullptr;
 }
 
-void pc_p2_armor_forget(BTeki* actor) { actors.erase(static_cast<PelletView*>(actor)); }
+void pc_p2_armor_forget(BTeki* actor) { auto* v=static_cast<PelletView*>(actor);pc_randomizer_p2_forget_source(v);actors.erase(v);drawn.erase(v);drawnCorpse.erase(v); }
+bool pc_p2_armor_suppress_ai(const BTeki* actor){return ready&&actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor)))!=0;}
 
 unsigned long pc_p2_armor_count() { return (unsigned long)actors.size(); }
 bool pc_p2_armor_registered(BTeki* actor) { return actors.count(static_cast<PelletView*>(actor)) != 0; }
@@ -328,9 +355,10 @@ bool pc_p2_armor_receiver_rejects(Teki* teki, const InteractAttack* attack) {
 
     const p2armorreceiver::Decision decision = p2armorreceiver::decide(in);
     const bool reject = decision == p2armorreceiver::Decision::Reject;
+    const unsigned tok = s.token ? s.token : (teki->mGenerator ? teki->mGenerator->_70 : 0u);
     std::printf("P2_ARMOR_RECEIVER generator=%u decision=%s reason=%s part=%s bittered=%d "
                 "weakpoint=%s\n",
-                teki->mGenerator ? teki->mGenerator->_70 : 0u, reject ? "reject" : "accept",
+                tok, reject ? "reject" : "accept",
                 p2armorreceiver::decisionName(decision),
                 in.has_part ? fourCCString(in.part_id).c_str() : "none", int(in.bittered),
                 s.weakpointActive ? fourCCString(s.weakpointId).c_str() : "none");
@@ -417,10 +445,16 @@ float pc_p2_armor_param_f(const BTeki* actor, int idx, float fallback) {
 
 bool pc_p2_armor_clip(const BTeki* actor, const char*& name, float& phase) {
     if (!ready) return false;
-    auto it = actors.find(static_cast<PelletView*>(const_cast<BTeki*>(actor)));
+    auto* view=static_cast<PelletView*>(const_cast<BTeki*>(actor));
+    auto it = actors.find(view);
     if (it == actors.end()) return false;
     name = it->second.clip.c_str();
     phase = it->second.phase;
+    if(drawn.insert(view).second){
+        const unsigned tok=it->second.token ? it->second.token : (actor->mGenerator?actor->mGenerator->_70:0u);
+        std::printf("P2_ARMOR_DRAW generator=%u source_id=15 species=Armor corpse=0\n",tok);
+        std::fflush(stdout);
+    }
     return true;
 }
 
@@ -489,6 +523,11 @@ void pc_p2_armor_setup() {
         if (!(in >> generator >> species)) return;
         if (species == "Armor") wanted[unsigned(generator)] = species;
     }
+    const bool bridge = pc_randomizer_p2_bridge() && !pc_pikipelago_room_preview();
+    if (bridge) {
+        wanted.clear();
+        for (unsigned id : pc_p2_campaign_ids(15)) wanted[id] = "Armor";
+    }
     if (wanted.empty()) return;
 
     std::set<unsigned> found;
@@ -496,26 +535,34 @@ void pc_p2_armor_setup() {
     CI_LOOP(it) {
         Teki* actor = static_cast<Teki*>(*it);
         if (!actor || !actor->mGenerator) continue;
-        auto match = wanted.find(actor->mGenerator->_70);
+        const unsigned token = bridge ? pc_p2_campaign_token(actor) : actor->mGenerator->_70;
+        auto match = wanted.find(token);
         if (match == wanted.end()) continue;
         if (actor->mTekiType != TEKI_Chappy) {
-            std::printf("P2_ARMOR_ERROR native_type generator=%u\n", actor->mGenerator->_70);
+            std::printf("P2_ARMOR_ERROR native_type generator=%u\n", token);
             std::abort();
         }
         Armor& s = actors[static_cast<PelletView*>(actor)];
         s = Armor();  // reject stale clock/capture state on actor-address reuse
         s.home = actor->getPosition();
         s.heading = actor->getDirection();
+        s.token = token;
         actor->mHealth = LIFE;
+        s.lastHealth = LIFE;
         resolveReceiverPart(actor, s);
+        s.weakpointActive=true; s.weakpointId=p2armorreceiver::fourCC('b','o','d','y');
         enter(s, ARMOR_STAY, "appear");
-        std::printf("P2_ARMOR_BIND generator=%u source_id=15 visual_only=0\n", actor->mGenerator->_70);
+        if (bridge) {
+            pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor), 15, token);
+            std::printf("P2_ARMOR_DELIVERY_BIND generator=%u source_id=15\n", token);
+        }
+        std::printf("P2_ARMOR_BIND generator=%u source_id=15 visual_only=0\n", token);
         const Vector3f pos = actor->getPosition();
         std::printf("P2_ENEMY_READY species=Armor native_family=Chappy generator=%u "
                     "x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=native "
                     "source_FSM=implemented attack=animation_event\n",
-                    actor->mGenerator->_70, pos.x, pos.y, pos.z, actor->mHealth, LIFE);
-        found.insert(actor->mGenerator->_70);
+                    token, pos.x, pos.y, pos.z, actor->mHealth, LIFE);
+        found.insert(token);
     }
     if (found.size() != wanted.size()) {
         std::printf("P2_ARMOR_ERROR missing_actor wanted=%zu found=%zu\n", wanted.size(), found.size());
@@ -541,7 +588,13 @@ void pc_p2_armor_update(BTeki* actor) {
         pc_p2_armor_finish_stone(actor);
     }
     const Vector3f pos = actor->getPosition();
-    const unsigned generator = actor->mGenerator ? actor->mGenerator->_70 : 0u;
+    const unsigned live = actor->mGenerator ? pc_p2_campaign_token(actor) : 0u;
+    if (live) s.token = live;
+    const unsigned generator = s.token ? s.token : live;
+    // Collision may not exist at setup time; retry weakpoint resolve until it
+    // sticks so the armor is killable (otherwise all damage rejects).
+    if (!s.weakpointActive){resolveReceiverPart(actor, s); s.weakpointActive=true; s.weakpointId=p2armorreceiver::fourCC('b','o','d','y');}
+    if (actor->mStoredDamage > 0.0f) actor->makeDamaged();
 
     // Natural-combat observability (#165/#407): an incremental, still-positive
     // health decrease is real receiver damage (a Pikmin attack accepted by the
@@ -564,6 +617,10 @@ void pc_p2_armor_update(BTeki* actor) {
             s.deadLogged = true;
         }
         enter(s, ARMOR_DEAD, "dead");
+        if (drawnCorpse.insert(static_cast<PelletView*>(actor)).second) {
+            std::printf("P2_ARMOR_CORPSE_DRAW generator=%u source_id=15 species=Armor\n", generator);
+            std::fflush(stdout);
+        }
     }
 
     s.stateTime += dt;
@@ -688,13 +745,10 @@ void pc_p2_armor_update(BTeki* actor) {
         break;
     case ARMOR_DEAD:
         stop(actor);
-        // Host death handoff: the P1 strategy reacts to mHealth<=0 inside
-        // BTeki::doAI(), calls die() there and then dieSoon()->becomePellet() in
-        // the same doAI() pass. Calling BTeki::die() from this update-phase hook
-        // would set mDeadState before the next doAI() and permanently block
-        // dieSoon(), leaving a dead-but-present actor with no corpse. The module
-        // only drives the source dead clip and lets the host complete
-        // teardown/corpse.
+        // Host doAI is suppressed for registered Armor, so dieSoon() never runs
+        // there; pcEscapeNow() finalizes the corpse outside doAI, fired exactly
+        // once when the dead animation completes (like Frog/Tank/Kabuto).
+        if(!s.escaped&&s.stateTime>=clipDuration("dead")){s.escaped=true;actor->pcEscapeNow();}
         break;
     default:
         break;

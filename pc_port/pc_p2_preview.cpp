@@ -36,6 +36,7 @@
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_uji.h"
 #include "pc_p2_armor.h"
+#include "pc_p2_kabuto_fsm.h"
 #include "pc_p2_otakara.h"
 #include "pc_p2_elecbug.h"
 #include "pc_p2_tamago.h"
@@ -170,6 +171,10 @@ void pc_p2_preview_setup() {
             pc_p2_sokkuri_setup();
             pc_p2_otakara_setup();
             pc_p2_chappy_setup();
+            pc_p2_frog_setup();
+            pc_p2_armor_setup();
+            pc_p2_tank_setup();
+            pc_p2_kabuto_fsm_setup();
             pc_p2_batch2_setup();  // P2 models for the Otakara/Sokkuri behaviour hosts
             // inst-bugs lane (#871): campaign-identity behavior hosts. The
             // room-preview session list below never runs in a campaign, so
@@ -318,6 +323,7 @@ void pc_p2_preview_setup() {
     pc_p2_sokkuri_setup();
     pc_p2_uji_setup();
     pc_p2_armor_setup();
+    pc_p2_kabuto_fsm_setup();
     pc_p2_otakara_setup();
     pc_p2_elecbug_setup();
     pc_p2_tamago_setup();

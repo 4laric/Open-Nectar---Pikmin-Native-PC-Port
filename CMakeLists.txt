@@ -310,6 +310,7 @@ pc_port/pc_p2_kabuto_events.cpp
 pc_port/pc_p2_kabuto_muzzle.cpp
 pc_port/pc_p2_kabuto_binding.cpp
 pc_port/pc_p2_kabuto_host.cpp
+pc_port/pc_p2_kabuto_fsm.cpp
 pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_rock_hazard.cpp
     pc_port/pc_p2_rock_host.cpp
@@ -1217,6 +1218,24 @@ add_executable(p2_campaign_policy_test
 target_include_directories(p2_campaign_policy_test PRIVATE pc_port)
 target_compile_options(p2_campaign_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_campaign_policy_test COMMAND p2_campaign_policy_test)
+
+# Frog identity policy (inst-frogs #871): engine-free params/FSM/clip contract.
+add_executable(p2_frog_policy_test tools/p2_frog_policy_test.cpp)
+target_include_directories(p2_frog_policy_test PRIVATE pc_port)
+target_compile_options(p2_frog_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_frog_policy_test COMMAND p2_frog_policy_test)
+
+# Tank/Wtank identity policy (inst2-frogs #871).
+add_executable(p2_tank_policy_test tools/p2_tank_policy_test.cpp)
+target_include_directories(p2_tank_policy_test PRIVATE pc_port)
+target_compile_options(p2_tank_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_tank_policy_test COMMAND p2_tank_policy_test)
+
+# Kabuto identity policy (inst2-frogs #871).
+add_executable(p2_kabuto_fsm_policy_test tools/p2_kabuto_fsm_policy_test.cpp)
+target_include_directories(p2_kabuto_fsm_policy_test PRIVATE pc_port)
+target_compile_options(p2_kabuto_fsm_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_kabuto_fsm_policy_test COMMAND p2_kabuto_fsm_policy_test)
 
 # Lane 30 (#242) standalone policy tests. The drop/host-clock and Sarai
 # captor/lifecycle/identity harnesses are dependency-free headers: a test source

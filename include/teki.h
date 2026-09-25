@@ -1,4 +1,6 @@
 #include "pc_p2_frog.h"
+#include "pc_p2_tank.h"
+#include "pc_p2_kabuto_fsm.h"
 #include "pc_p2_king_teki.h"
 #include "pc_p2_queen_teki.h"
 #include "pc_p2_umimushi.h"
@@ -440,7 +442,7 @@ public:
 	void setPersonalityI(int idx, int val) { mPersonality->setI(idx, val); }
 
 	f32 getParameterF(int idx) {
-		const f32 value=pc_p2_frog_param_f(this,idx,pc_p2_king_teki_param_f(this,idx,pc_p2_queen_teki_param_f(this,idx,mTekiParams->getF(idx))));
+		const f32 value=pc_p2_kabuto_fsm_param_f(this,idx,pc_p2_tank_param_f(this,idx,pc_p2_frog_param_f(this,idx,pc_p2_king_teki_param_f(this,idx,pc_p2_queen_teki_param_f(this,idx,mTekiParams->getF(idx))))));
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
 		const f32 ujiBlind=pc_p2_uji_param_f(this,idx,value);
 		const f32 kogane=pc_p2_armor_param_f(this,idx,pc_p2_sokkuri_param_f(this,idx,pc_p2_kogane_param_f(this,idx,pc_p2_shijimi_param_f(this,idx,ujiBlind))));
