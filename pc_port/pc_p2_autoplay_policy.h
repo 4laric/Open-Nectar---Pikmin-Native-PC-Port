@@ -296,6 +296,8 @@ struct Config {
     float throwHold = 0.12f; // A held per throw pulse
     float throwGap = 0.55f; // gap between throw pulses
     float whistleHold = 1.6f; // B held to regroup / call back
+    float whistleCooldown = 3.0f; // bot-undamaged: gap after a whistle before re-latching (forces throw windows)
+    float attackChaseDist = 500.0f; // bot-undamaged: target past this in attack re-enters approach (graph chase)
     float stuckWindow = 4.0f; // no-progress window before STUCK + replan
     float stuckMinProgress = 30.0f; // XZ units that count as progress
     int maxApproachReplans = 6; // consecutive STUCK windows before target_unreachable GIVEUP
@@ -435,6 +437,7 @@ public:
         pressOn = false;
         whistleTime = 0.0f;
         whistling = false;
+        whistleCooldown = 0.0f;
         menuTaps = 0;
         menuHoldTime = 0.0f;
         menuConfirmed = false;
@@ -522,6 +525,7 @@ private:
         pressOn = false;
         whistleTime = 0.0f;
         whistling = false;
+        whistleCooldown = 0.0f;
         menuTaps = 0;
         menuHoldTime = 0.0f;
         menuConfirmed = false;
@@ -750,6 +754,15 @@ private:
             enter(State::Done, in);
             return;
         }
+        // bot-undamaged (bc5 44/54): the driver may switch targets across a
+        // WithdrawMenu bounce (aftermath -> menu -> select picks the next live
+        // token). Score the abandoned latched kill first so the species keeps
+        // damaged=1/killed=1 instead of losing it to 4 unreachable RESULTs.
+        // Same-token bounces still resume Aftermath above; only a true token
+        // switch with latched combat scores here (no spurious RESULTs).
+        if (result.token != 0 && result.token != in.targetToken && (sawDamage || sawKill)) {
+            finishTarget(in, /*claimedKill*/ true);
+        }
         engageTime = 0.0f;
         initialHealthFrac = in.targetHealthFrac;
         sawDamage = in.targetDamagedLatch;
@@ -907,14 +920,38 @@ private:
         // Chappy: permanent whistle, hp stuck at 0.96), so targetGrabbing only
         // whistles for the Sarai capture case.
         const bool grabWhistle = sarai && in.targetGrabbing;
-        if ((in.scattered || in.squadDistress || grabWhistle) && !whistling) {
+        // bot-undamaged: fled/teleporting targets (Breadbug nest, Fuefuki kite,
+        // Shijimi retreat, Qurione instance flip) re-enter approach so the
+        // graph routes the chase; straight-line attack steer cannot cross the
+        // map. Hysteresis vs approach closeEnough (195/260 u) prevents flap.
+        if (in.targetDist > cfg.attackChaseDist) {
+            enter(State::Approach, in);
+            return;
+        }
+        if (whistleCooldown > 0.0f) whistleCooldown -= dt;
+        if ((in.scattered || in.squadDistress || grabWhistle) && !whistling && whistleCooldown <= 0.0f) {
             whistling = true;
             whistleTime = 0.0f;
         }
         if (whistling) {
             whistleTime += dt;
             lastCommand.buttons = PadB; // hold whistle to regroup / free grabs
-            if (whistleTime >= cfg.whistleHold || (!in.scattered && !in.squadDistress && !grabWhistle)) whistling = false;
+            // bot-undamaged: bound the whistle (bc5: 800 s permanent B with
+            // zero throws on 16/30/38/40/42/73/95/96). The attack window must
+            // fire even while whistling so latched damage still scores
+            // RESULT damaged=1 instead of stalling to harness cut.
+            {
+                const float wlimit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout;
+                if (stateTime >= wlimit) {
+                    giveUp(in, "attack_timeout");
+                    finishTarget(in, /*killed*/ false);
+                    return;
+                }
+            }
+            if (whistleTime >= cfg.whistleHold || (!in.scattered && !in.squadDistress && !grabWhistle)) {
+                whistling = false;
+                whistleCooldown = cfg.whistleCooldown; // force a throw window before re-latching
+            }
             return;
         }
         if (sarai && !in.targetLow && !in.targetGrabbing) {
@@ -1330,6 +1367,7 @@ private:
     bool pressOn = false;
     float whistleTime = 0.0f;
     bool whistling = false;
+    float whistleCooldown = 0.0f;
     int menuTaps = 0;
     float menuHoldTime = 0.0f;
     bool menuConfirmed = false;
