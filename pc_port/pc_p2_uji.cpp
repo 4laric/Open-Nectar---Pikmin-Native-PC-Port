@@ -91,6 +91,8 @@ struct Uji {
     bool hitLogged = false;
     bool attackHit = false;
     bool escaped = false;
+    bool atariOn = false;
+    bool gateInit = false;
     float tickAccum = 0.0f;
     std::string clip = "dive";
     float phase = 0.0f;
@@ -164,6 +166,30 @@ void enter(Uji& s, State state) {
     s.clip = Fsm::clipFor(state, s.kind);
 }
 const char* stateName(State s);
+// Source underground flags (UjiaState isAppearCheck/setBridgeSearch): while
+// buried (Stay/Dive) the grub is model-hidden, untargetable and invulnerable.
+// The suppressed Kabekui host never emerges on its own, so the P2 FSM drives
+// the host collision/authority flags itself (hana pattern): buried =
+// no-atari + Invincible, emerged = atari + vulnerable.
+void applyBurrowGate(BTeki* a, Uji& s, unsigned generator) {
+    const bool buried = (s.fsm.state == UJI_STAY || s.fsm.state == UJI_DIVE);
+    const bool wantAtari = !buried;
+    if (s.gateInit && wantAtari == s.atariOn) return;
+    s.gateInit = true;
+    s.atariOn = wantAtari;
+    if (buried) {
+        a->clearTekiOption(TEKIOPT_Atari);
+        a->setTekiOption(TEKIOPT_Invincible);
+        std::printf("P2_UJI_UNDERGROUND generator=%u source_id=%d event=enter no_atari=1 invulnerable=1\n",
+                    generator, s.sourceId);
+    } else {
+        a->setTekiOption(TEKIOPT_Atari);
+        a->clearTekiOption(TEKIOPT_Invincible);
+        std::printf("P2_UJI_UNDERGROUND generator=%u source_id=%d event=exit no_atari=0 invulnerable=0\n",
+                    generator, s.sourceId);
+    }
+    std::fflush(stdout);
+}
 // Nearest live Pikmin/Navi for the P2-owned bite and for turn-to-target.
 Creature* nearestFoe(const Vector3f& pos, float range) {
     Creature* best = nullptr;
@@ -402,6 +428,7 @@ void pc_p2_uji_setup() {
         s.fsm.reset();
         s.clip = "dive";
         s.phase = 0.0f;
+        applyBurrowGate(actor, s, token);
         // Ordinary-delivery bridge (lane 06 contract): bind the source so
         // GoalItem::suckMe grants onion:p2:<id> exactly once through
         // pc_randomizer_p2_corpse_delivered. Single-use: consumed on
@@ -452,6 +479,7 @@ void pc_p2_uji_update(BTeki* actor) {
             s.deadLogged = true;
         }
         enter(s, UJI_DEAD);
+        applyBurrowGate(actor, s, generator);
         setPhase(s, dt);
         return;
     }
@@ -490,6 +518,7 @@ void pc_p2_uji_update(BTeki* actor) {
         }
     }
     (void)moved;
+    applyBurrowGate(actor, s, generator);
 
     // Drive the P1 vehicle per state. Source Move wanders toward the target
     // (turnToTarget); the fixed heading drift is kept only with no target in
