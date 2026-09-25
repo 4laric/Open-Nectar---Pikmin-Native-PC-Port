@@ -48,6 +48,9 @@
 // No other lane's module is modified; every hook is a no-op for unregistered
 // actors.
 #include "pc_p2_dangomushi.h"
+#include "pc_p2_campaign_actor.h"
+#include "pc_p2_setup_failsafe.h"
+#include "pc_randomizer.h"
 #include "pc_p2_dangomushi_hazard.h"
 #include "pc_p2_egg_hazard.h"
 #include "pc_p2_rock_hazard.h"
@@ -677,7 +680,13 @@ void pc_p2_dangomushi_reset() {
     flickStartFrame = FALLBACK_FLICK_START;
     ready = false;
 }
-void pc_p2_dangomushi_forget(BTeki* actor) { actors.erase(static_cast<PelletView*>(actor)); }
+void pc_p2_dangomushi_forget(BTeki* actor) {
+    // Lane 06 single-use binding: drop the ordinary-delivery source so a
+    // recycled actor address can never inherit it. Idempotent with the
+    // central pc_p2_forget_teki seam.
+    pc_randomizer_p2_forget_source(static_cast<PelletView*>(actor));
+    actors.erase(static_cast<PelletView*>(actor));
+}
 
 float pc_p2_dangomushi_param_f(const BTeki* actor, int idx, float fallback) {
     if (!ready || !actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor)))) return fallback;
@@ -805,17 +814,34 @@ void pc_p2_dangomushi_setup() {
         if (!(in >> generator >> species)) return;
         if (species == "DangoMushi") wanted[unsigned(generator)] = species;
     }
+    // inst-bugs lane (#871): in bridge campaigns the seed owns the binding,
+    // so the filed ids are placeholders replaced from pc_p2_campaign_ids(94)
+    // (mirrors pc_p2_sokkuri_setup). Actors match by campaign token: scene
+    // members may carry no mGenerator, exactly like the batch-2 bind.
+    const bool bridge = pc_randomizer_p2_bridge();
+    if (bridge) {
+        wanted.clear();
+        for (unsigned id : pc_p2_campaign_ids(94)) wanted[id] = "DangoMushi";
+    }
     if (wanted.empty()) return;
 
     std::set<unsigned> found;
     Iterator it(tekiMgr);
     CI_LOOP(it) {
         Teki* actor = static_cast<Teki*>(*it);
-        if (!actor || !actor->mGenerator) continue;
-        auto match = wanted.find(actor->mGenerator->_70);
+        if (!actor) continue;
+        const unsigned key =
+            bridge ? pc_p2_campaign_token(actor)
+                   : (actor->mGenerator ? actor->mGenerator->_70 : 0u);
+        if (!bridge && key == 0u) continue;
+        auto match = wanted.find(key);
         if (match == wanted.end()) continue;
-        if (actor->mTekiType != TEKI_Chappy) {
-            std::printf("P2_DANGOMUSHI_ERROR native_type generator=%u\n", actor->mGenerator->_70);
+        // Campaign vehicle is TEKI_Swallow (proxy row host_teki 4); the arena
+        // path keeps whatever the sidecar staged on (historically Chappy).
+        const int wantType = bridge ? TEKI_Swallow : TEKI_Chappy;
+        if (actor->mTekiType != wantType) {
+            std::printf("P2_DANGOMUSHI_ERROR native_type generator=%u\n", key);
+            if (pc_p2_setup_skip(bridge, "DangoMushi", "actor_type_mismatch")) return;
             std::abort();
         }
         Dango& s = actors[static_cast<PelletView*>(actor)];
@@ -825,20 +851,24 @@ void pc_p2_dangomushi_setup() {
         s.moveTarget = s.home;
         actor->mHealth = LIFE;
         enter(s, DANGO_STAY, "fly");
-        std::printf("P2_DANGOMUSHI_BIND generator=%u source_id=94 visual_only=0\n",
-                    actor->mGenerator->_70);
+        // Ordinary-delivery bridge (lane 06 contract): bind source 94 so
+        // GoalItem::suckMe grants onion:p2:94 exactly once. Single-use.
+        pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor), 94, key);
+        std::printf("P2_DANGOMUSHI_DELIVERY_BIND generator=%u source_id=94\n", key);
+        std::printf("P2_DANGOMUSHI_BIND generator=%u source_id=94 visual_only=0\n", key);
         const Vector3f pos = actor->getPosition();
-        std::printf("P2_ENEMY_READY species=DangoMushi native_family=Chappy generator=%u "
+        std::printf("P2_ENEMY_READY species=DangoMushi native_family=Swallow generator=%u "
                     "x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=native "
                     "source_FSM=implemented attack=interactflick_roll\n",
-                    actor->mGenerator->_70, pos.x, pos.y, pos.z, actor->mHealth, LIFE);
-        std::printf("P2_DANGOMUSHI_STATE generator=%u state=stay\n", actor->mGenerator->_70);
+                    key, pos.x, pos.y, pos.z, actor->mHealth, LIFE);
+        std::printf("P2_DANGOMUSHI_STATE generator=%u state=stay\n", key);
         std::fflush(stdout);
-        found.insert(actor->mGenerator->_70);
+        found.insert(key);
     }
     if (found.size() != wanted.size()) {
         std::printf("P2_DANGOMUSHI_ERROR missing_actor wanted=%zu found=%zu\n",
                     wanted.size(), found.size());
+        if (pc_p2_setup_skip(bridge, "DangoMushi", "actor_roster_incomplete")) return;
         std::abort();
     }
     ready = true;

@@ -33,6 +33,7 @@
 #include "pc_p2_plant.h"
 #include "pc_p2_batch2.h"
 #include "pc_p2_sokkuri.h"
+#include "pc_p2_uji.h"
 #include "pc_p2_armor.h"
 #include "pc_p2_otakara.h"
 #include "pc_p2_elecbug.h"
@@ -168,6 +169,15 @@ void pc_p2_preview_setup() {
             pc_p2_sokkuri_setup();
             pc_p2_otakara_setup();
             pc_p2_batch2_setup();  // P2 models for the Otakara/Sokkuri behaviour hosts
+            // inst-bugs lane (#871): campaign-identity behavior hosts. The
+            // room-preview session list below never runs in a campaign, so
+            // these four must bind here; each is a no-op when its sidecars
+            // are absent (species not staged in this run).
+            pc_p2_uji_setup();
+            pc_p2_elecbug_setup();
+            pc_p2_tamago_setup();
+            pc_p2_dangomushi_setup();
+            pc_p2_batch3_setup_bridge(); // snagret P2 models for DangoMushi
         }
         return;
     }
@@ -303,6 +313,7 @@ void pc_p2_preview_setup() {
     pc_p2_shijimi_setup();
     pc_p2_batch2_setup();
     pc_p2_sokkuri_setup();
+    pc_p2_uji_setup();
     pc_p2_armor_setup();
     pc_p2_otakara_setup();
     pc_p2_elecbug_setup();

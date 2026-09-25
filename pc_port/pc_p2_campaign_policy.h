@@ -14,6 +14,11 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     // for the Dwarf Bulborb; the P1 enum for it is TEKI_Chappy, and there is no
     // TEKI_Kochappy in include/teki.h.
     case 23: return 3; // TEKI_Chappy: Sarai ordinary-host path
+    case 28: case 68: return 3; // TEKI_Chappy: ElecBug/TamagoMushi ground hosts
+    case 94: return 4; // TEKI_Swallow: DangoMushi snagret host
+    case 12: return 18; // TEKI_KabekuiA: UjiA Female Sheargrub host
+    case 13: return 19; // TEKI_KabekuiB: UjiB Male Sheargrub host
+    case 14: return 20; // TEKI_KabekuiC: Tobi Shearwig host
     case 54: return 24; // TEKI_Miurin: Mamuta
     case 57: case 78: return 0; // TEKI_Frog: Jellyfloat/Groink sidecar hosts
     default: return original;

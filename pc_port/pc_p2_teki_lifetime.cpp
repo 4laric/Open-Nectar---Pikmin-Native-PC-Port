@@ -6,6 +6,7 @@
 #include "pc_p2_white_poison.h"
 
 #include "pc_p2_armor.h"
+#include "pc_p2_uji.h"
 #include "pc_p2_elecbug.h"
 #include "pc_p2_tamago.h"
 #include "pc_p2_umimushi.h"
@@ -101,6 +102,7 @@ void pc_p2_forget_teki(BTeki* actor)
 	pc_p2_projectiles_forget(actor);
 	pc_p2_sokkuri_forget(actor);
 	pc_p2_armor_forget(actor);
+	pc_p2_uji_forget(actor);
 	pc_p2_elecbug_forget(actor);
 	pc_p2_otakara_forget(actor);
     pc_p2_tamago_forget(actor);
@@ -169,6 +171,7 @@ pc_p2_sarai_manager_reset();
 	pc_p2_projectiles_reset();
 	pc_p2_sokkuri_reset();
 	pc_p2_armor_reset();
+    pc_p2_uji_reset();
     pc_p2_elecbug_reset();
     pc_p2_tamago_reset();
     pc_p2_otakara_reset();

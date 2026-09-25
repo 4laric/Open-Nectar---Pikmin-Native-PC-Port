@@ -13,6 +13,7 @@
 #include "pc_p2_animation.h"
 #include "pc_p2_dweevil_clip.h"
 #include "pc_p2_sokkuri.h"
+#include "pc_p2_uji.h"
 #include "pc_p2_armor.h"
 #include "pc_p2_batch2_clock.h"
 #include "pc_p2_elecbug.h"
@@ -62,6 +63,7 @@ const FamilyDef FAMILIES[] = {
     {"dweevil", "ota", "p2-dweevil-actors.txt", "p2-dweevil-bank.txt"},
     {"flora", "flora", "p2-flora-actors.txt", "p2-flora-bank.txt"},
     {"ground", "ginv", "p2-ground-actors.txt", "p2-ground-bank.txt"},
+    {"uji", "uji", "p2-uji-actors.txt", "p2-uji-bank.txt"},
     {"cannon", "cannon", "p2-cannon-actors.txt", "p2-cannon-bank.txt"},
     {"waterwraith", "ww", "p2-waterwraith-actors.txt", "p2-waterwraith-bank.txt"},
     {"proxy", "px", "p2-proxy-actors.txt", "p2-proxy-bank.txt"},
@@ -134,6 +136,11 @@ int expectedType(const std::string& family, const std::string& species) {
     if (family == "cannon") {
         if (species == "Kabuto" || species == "Rkabuto" || species == "Fkabuto") return TEKI_Beatle;
         if (species == "Rock" || species == "Stone") return TEKI_Iwagon;
+    }
+    if (family == "uji") {
+        if (species == "UjiA") return TEKI_KabekuiA;
+        if (species == "UjiB") return TEKI_KabekuiB;
+        if (species == "Tobi") return TEKI_KabekuiC;
     }
     return TEKI_Chappy;
 }
@@ -556,6 +563,9 @@ static void campaignWanted(const FamilyDef& family, std::map<unsigned, std::stri
         {"dweevil", 59, "FireOtakara"}, {"dweevil", 60, "WaterOtakara"},
         {"dweevil", 61, "GasOtakara"}, {"dweevil", 62, "ElecOtakara"},
         {"ground", 79, "Sokkuri"},
+        {"ground", 28, "ElecBug"},
+        {"ground", 68, "TamagoMushi"},
+        {"uji", 12, "UjiA"}, {"uji", 13, "UjiB"}, {"uji", 14, "Tobi"},
     };
     wanted.clear();
     for (const auto& row : SOURCES)
@@ -570,8 +580,9 @@ static void campaignWanted(const FamilyDef& family, std::map<unsigned, std::stri
         if (!table.valid) return;
         for (const auto& prow : table.rows) {
             // D2: static-host sources are untouchable by the visual path too.
-            // hasStaticHost covers every hostType switch case (9,23,44,54,57,
-            // 59-62,78,79), which includes batch2's own static SOURCES above.
+            // hasStaticHost covers every hostType switch case (9,12-14,23,28,
+            // 44,54,57,59-62,68,78,79,94), which includes batch2's own static
+            // SOURCES above.
             if (p2campaign::hasStaticHost(prow.source)) continue;
             for (unsigned id : pc_p2_campaign_ids(prow.source)) wanted[id] = prow.species;
         }
@@ -639,8 +650,14 @@ static void bindFamilies(bool strict) {
             // members. The proxy family in bridge mode binds EVERY live
             // member and counts the token once (found already holds it, so
             // repeats fall through to the bind below with no second insert).
-            // All other families keep the duplicate-generator abort.
-            if (p2proxy::tokenAction(soft, !found.insert(generator).second)
+            // The Uji family shares this tolerance in bridge mode: P1
+            // KabekuiA/B/C vehicles group-spawn (a Sheargrub burrow pours
+            // several Teki from one generator), so repeats are pack members,
+            // not a scene mismatch. All other families keep the
+            // duplicate-generator abort.
+            const bool packTolerant =
+                soft || (bridge && std::string(family.name) == "uji");
+            if (p2proxy::tokenAction(packTolerant, !found.insert(generator).second)
                     == p2proxy::TokenAction::Fail)
                 fail("duplicate generator in scene");
             actors[teki] = std::string(family.name) + "|" + match->second;
@@ -745,8 +762,8 @@ static void logBindings() {
     for (const auto& entry : actors)
         std::printf("P2_BATCH2_BIND generator=%u key=%s visual_only=%d native_fsm=%s token=%u\n",
                     entry.first->mGenerator ? entry.first->mGenerator->_70 : 0, entry.second.c_str(),
-                    (entry.second == "ground|Sokkuri" || entry.second == "ground|Armor" || entry.second == "ground|ElecBug" || entry.second == "ground|TamagoMushi" || entry.second == "ground|Imomushi" || entry.second == "ground|Hana") ? 0 : 1,
-                    (entry.second == "ground|Sokkuri" || entry.second == "ground|Armor" || entry.second == "ground|ElecBug" || entry.second == "ground|TamagoMushi" || entry.second == "ground|Imomushi" || entry.second == "ground|Hana") ? "implemented" : "unimplemented",
+                     (entry.second == "ground|Sokkuri" || entry.second == "ground|Armor" || entry.second == "ground|ElecBug" || entry.second == "ground|TamagoMushi" || entry.second == "ground|Imomushi" || entry.second == "ground|Hana" || entry.second == "uji|UjiA" || entry.second == "uji|UjiB" || entry.second == "uji|Tobi") ? 0 : 1,
+                     (entry.second == "ground|Sokkuri" || entry.second == "ground|Armor" || entry.second == "ground|ElecBug" || entry.second == "ground|TamagoMushi" || entry.second == "ground|Imomushi" || entry.second == "ground|Hana" || entry.second == "uji|UjiA" || entry.second == "uji|UjiB" || entry.second == "uji|Tobi") ? "implemented" : "unimplemented",
                     bridge ? pc_p2_campaign_token(entry.first) : (entry.first->mGenerator ? entry.first->mGenerator->_70 : 0));
     std::printf("P2_BATCH2_BANK total_mod_bytes=%zu species=%zu\n", bytesTotal, banks.size());
 }
@@ -824,7 +841,8 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     if (!corpse) {
         const char* forced = nullptr;
         float phase = 0.0f;
-        if ((pc_p2_sokkuri_clip(actor, forced, phase) || pc_p2_armor_clip(actor, forced, phase)
+        if ((pc_p2_sokkuri_clip(actor, forced, phase) || pc_p2_uji_clip(actor, forced, phase)
+                || pc_p2_armor_clip(actor, forced, phase)
                 || pc_p2_elecbug_clip(actor, forced, phase) || pc_p2_tamago_clip(actor, forced, phase)
                 || pc_p2_imomushi_clip(actor, forced, phase) || pc_p2_hana_clip(actor, forced, phase)
                 || pc_p2_otakara_clip(actor, forced, phase) || pc_p2_pom_clip(actor, forced, phase))

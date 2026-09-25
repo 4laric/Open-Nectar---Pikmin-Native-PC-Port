@@ -29,6 +29,8 @@
 //   * View angle is a full hemisphere.
 // No other lane's module is modified; every hook is a no-op for unregistered actors.
 #include "pc_p2_elecbug.h"
+#include "pc_p2_campaign_actor.h"
+#include "pc_p2_setup_failsafe.h"
 #include "pc_randomizer.h"
 #include "pc_p2_species.h"
 #include "pc_p2_hazard_emitter.h"
@@ -500,17 +502,31 @@ void pc_p2_elecbug_setup() {
         if (!(in >> generator >> species)) return;
         if (species == "ElecBug") wanted[unsigned(generator)] = species;
     }
+    // inst-bugs lane (#871): in bridge campaigns the seed owns the binding,
+    // so the filed ids are placeholders replaced from pc_p2_campaign_ids(28)
+    // (mirrors pc_p2_sokkuri_setup). Actors match by campaign token: scene
+    // members may carry no mGenerator, exactly like the batch-2 bind.
+    const bool bridge = pc_randomizer_p2_bridge();
+    if (bridge) {
+        wanted.clear();
+        for (unsigned id : pc_p2_campaign_ids(28)) wanted[id] = "ElecBug";
+    }
     if (wanted.empty()) return;
 
     std::set<unsigned> found;
     Iterator it(tekiMgr);
     CI_LOOP(it) {
         Teki* actor = static_cast<Teki*>(*it);
-        if (!actor || !actor->mGenerator) continue;
-        auto match = wanted.find(actor->mGenerator->_70);
+        if (!actor) continue;
+        const unsigned token = pc_p2_campaign_token(actor);
+        const unsigned key =
+            bridge ? token : (actor->mGenerator ? actor->mGenerator->_70 : 0u);
+        if (!bridge && key == 0u) continue;
+        auto match = wanted.find(key);
         if (match == wanted.end()) continue;
         if (actor->mTekiType != TEKI_Chappy) {
-            std::printf("P2_ELECBUG_ERROR native_type generator=%u\n", actor->mGenerator->_70);
+            std::printf("P2_ELECBUG_ERROR native_type generator=%u\n", key);
+            if (pc_p2_setup_skip(bridge, "ElecBug", "actor_type_mismatch")) return;
             std::abort();
         }
         ElecBug& s = actors[static_cast<PelletView*>(actor)];
@@ -524,21 +540,19 @@ void pc_p2_elecbug_setup() {
         // through pc_randomizer_p2_corpse_delivered. Rejected (unbindable id)
         // is logged by the callee, never fatal. Single-use: consumed on
         // delivery and cleared on forget/recycle.
-        pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor), 28,
-                                     actor->mGenerator->_70);
-        std::printf("P2_ELECBUG_DELIVERY_BIND generator=%u source_id=28\n",
-                    actor->mGenerator->_70);
-        std::printf("P2_ELECBUG_BIND generator=%u source_id=28 visual_only=0\n",
-                    actor->mGenerator->_70);
+        pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor), 28, key);
+        std::printf("P2_ELECBUG_DELIVERY_BIND generator=%u source_id=28\n", key);
+        std::printf("P2_ELECBUG_BIND generator=%u source_id=28 visual_only=0\n", key);
         const Vector3f pos = actor->getPosition();
         std::printf("P2_ENEMY_READY species=ElecBug native_family=Chappy generator=%u "
                     "x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=native "
                     "source_FSM=implemented attack=discharge_receiver\n",
-                    actor->mGenerator->_70, pos.x, pos.y, pos.z, actor->mHealth, LIFE);
-        found.insert(actor->mGenerator->_70);
+                    key, pos.x, pos.y, pos.z, actor->mHealth, LIFE);
+        found.insert(key);
     }
     if (found.size() != wanted.size()) {
         std::printf("P2_ELECBUG_ERROR missing_actor wanted=%zu found=%zu\n", wanted.size(), found.size());
+        if (pc_p2_setup_skip(bridge, "ElecBug", "actor_roster_incomplete")) return;
         std::abort();
     }
     ready = true;
