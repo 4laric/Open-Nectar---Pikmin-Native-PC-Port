@@ -17,17 +17,21 @@ int main() {
     for (unsigned source : {9u,23u,44u,54u,57u,59u,60u,61u,62u,78u,79u})
         assert(p2campaign::hasStaticHost(source));
     // inst-chappy (#871): Chappy (2) and FireChappy (33) ride TEKI_Swallow
-    // (4). Later family species add their own static case when their
-    // identity lands; until then they stay proxy-routed (non-static).
+    // (4), KumaChappy (35) rides TEKI_Swallob (32). Later family species
+    // add their own static case when their identity lands; until then they
+    // stay proxy-routed (non-static).
     assert(p2campaign::hasStaticHost(2u));
     assert(p2campaign::hasStaticHost(33u));
-    for (unsigned source : {35u,43u,53u,67u,76u,17u,0u})
+    assert(p2campaign::hasStaticHost(35u));
+    for (unsigned source : {43u,53u,67u,76u,17u,0u})
         assert(!p2campaign::hasStaticHost(source));
     for (int original = 0; original < 34; ++original) {
         assert(p2campaign::hostType(2u, original, false) == 4);
         assert(p2campaign::hostType(2u, original, true) == original);
         assert(p2campaign::hostType(33u, original, false) == 4);
         assert(p2campaign::hostType(33u, original, true) == original);
+        assert(p2campaign::hostType(35u, original, false) == 32);
+        assert(p2campaign::hostType(35u, original, true) == original);
     }
     // Exhaustive agreement (#871 D5): hasStaticHost(s) matches the sentinel
     // probe definition hostType(s,-1,false) != -1 for every s in 0..200.

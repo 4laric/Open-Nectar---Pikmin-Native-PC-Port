@@ -571,8 +571,8 @@ static void campaignWanted(const FamilyDef& family, std::map<unsigned, std::stri
         for (const auto& prow : table.rows) {
             // D2: static-host sources are untouchable by the visual path too.
             // hasStaticHost covers every hostType switch case (9,23,44,54,57,
-            // 59-62,78,79 plus inst-chappy 2,33), which includes batch2's own
-            // static SOURCES above.
+            // 59-62,78,79 plus inst-chappy 2,33,35), which includes batch2's
+            // own static SOURCES above.
             if (p2campaign::hasStaticHost(prow.source)) continue;
             for (unsigned id : pc_p2_campaign_ids(prow.source)) wanted[id] = prow.species;
         }
