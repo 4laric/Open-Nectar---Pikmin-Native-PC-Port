@@ -19,6 +19,7 @@
 #include "pc_p2_kochappy.h"
 #include "pc_p2_dwarf_orange.h"
 #include "pc_p2_bluechappy.h"
+#include "pc_p2_chappy.h"
 #include "pc_p2_kochappy_fsm.h"
 #include "pc_p2_breadbug_visual.h"
 #include "pc_p2_giant_breadbug_visual.h"
@@ -167,6 +168,7 @@ void pc_p2_preview_setup() {
             pc_p2_mamuta_setup();
             pc_p2_sokkuri_setup();
             pc_p2_otakara_setup();
+            pc_p2_chappy_setup();
             pc_p2_batch2_setup();  // P2 models for the Otakara/Sokkuri behaviour hosts
         }
         return;
@@ -280,6 +282,7 @@ void pc_p2_preview_setup() {
     pc_p2_kochappy_setup();
     pc_p2_dwarf_orange_setup();
     pc_p2_bluechappy_setup();
+    pc_p2_chappy_setup();
     pc_p2_kochappy_fsm_setup();
     pc_p2_breadbug_visual_setup();
     pc_p2_giant_breadbug_visual_setup();
@@ -400,6 +403,9 @@ bool pc_p2_preview_deliver(Pellet* pellet) {
         else if(unsigned generator=0;pc_p2_otakara_receipt(pellet->mPelletView,generator)) {
             receipt="corpse:"+pc_p2_cave_receipt_prefix()+"otakara:"+std::to_string(generator);value=corpseValue;
         }
+        else if(unsigned generator=0;pc_p2_chappy_receipt(pellet->mPelletView,generator)) {
+            receipt="corpse:"+pc_p2_cave_receipt_prefix()+"chappy:"+std::to_string(generator);value=corpseValue;
+        }
         else if(unsigned generator=0;pc_p2_waterwraith_receipt(pellet,generator)) {
             receipt="corpse:"+pc_p2_cave_receipt_prefix()+"waterwraith:"+std::to_string(generator);value=corpseValue;
             waterwraithCorpse=true;
@@ -429,7 +435,7 @@ bool pc_p2_preview_deliver(Pellet* pellet) {
             receipt="corpse:"+pc_p2_cave_receipt_prefix()+found->second.substr(7);value=corpseValue;
         }
         bool added=economy.credit(receipt,value);
-        podTitle(std::string(waterwraithCorpse ? "Waterwraith" : (c?c->spec.instance.c_str():pellet==previewTreasure?treasureId.c_str():(pc_p2_king_teki_name(pellet->mPelletView)?pc_p2_king_teki_name(pellet->mPelletView):pc_p2_queen_teki_name(pellet->mPelletView)?pc_p2_queen_teki_name(pellet->mPelletView):pc_p2_sheargrub_name(pellet->mPelletView)?pc_p2_sheargrub_name(pellet->mPelletView):pc_p2_enemy_name(pellet->mPelletView)?pc_p2_enemy_name(pellet->mPelletView):"Dwarf Bulborb"))) + " +" + std::to_string(added?value:0));
+        podTitle(std::string(waterwraithCorpse ? "Waterwraith" : (c?c->spec.instance.c_str():pellet==previewTreasure?treasureId.c_str():(pc_p2_king_teki_name(pellet->mPelletView)?pc_p2_king_teki_name(pellet->mPelletView):pc_p2_queen_teki_name(pellet->mPelletView)?pc_p2_queen_teki_name(pellet->mPelletView):pc_p2_chappy_name(pellet->mPelletView)?pc_p2_chappy_name(pellet->mPelletView):pc_p2_sheargrub_name(pellet->mPelletView)?pc_p2_sheargrub_name(pellet->mPelletView):pc_p2_enemy_name(pellet->mPelletView)?pc_p2_enemy_name(pellet->mPelletView):"Dwarf Bulborb"))) + " +" + std::to_string(added?value:0));
         pc_p2_purple_status();
         std::printf("[Pikipelago] P2_POD_RECEIPT id=%s value=%d new=%d pokos=%d seeds=0\n",receipt.c_str(),value,int(added),economy.total());
         if(pellet==previewTreasure) {
