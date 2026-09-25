@@ -1216,6 +1216,12 @@ target_include_directories(p2_campaign_policy_test PRIVATE pc_port)
 target_compile_options(p2_campaign_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_campaign_policy_test COMMAND p2_campaign_policy_test)
 
+# Frog identity policy (inst-frogs #871): engine-free params/FSM/clip contract.
+add_executable(p2_frog_policy_test tools/p2_frog_policy_test.cpp)
+target_include_directories(p2_frog_policy_test PRIVATE pc_port)
+target_compile_options(p2_frog_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_frog_policy_test COMMAND p2_frog_policy_test)
+
 # Lane 30 (#242) standalone policy tests. The drop/host-clock and Sarai
 # captor/lifecycle/identity harnesses are dependency-free headers: a test source
 # and the pc_port include dir are all they need. (demon_captor/demon_escape and
