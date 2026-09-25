@@ -58,6 +58,7 @@
 #include "pc_p2_sarai_manager.h"
 #include "pc_p2_otakara.h"
 #include "pc_p2_tank.h"
+#include "pc_p2_kabuto_fsm.h"
 #include "pc_p2_waterwraith_register.h"
 #include "pc_p2_hardlanes.h"
 
@@ -89,6 +90,7 @@ void pc_p2_forget_teki(BTeki* actor)
 	pc_p2_kogane_forget(actor);
 	pc_p2_mamuta_forget(actor);
 	pc_p2_tank_forget(actor);
+	pc_p2_kabuto_fsm_forget(actor);
 	pc_p2_qurione_forget(actor);
 	pc_p2_shijimi_forget(actor);
 	pc_p2_kurage_teki_forget(actor);
@@ -157,6 +159,7 @@ pc_p2_sarai_manager_reset();
 	pc_p2_kogane_reset();
 	pc_p2_mamuta_reset();
 	pc_p2_tank_reset();
+	pc_p2_kabuto_fsm_reset();
 	pc_p2_qurione_reset();
 	pc_p2_shijimi_reset();
 	pc_p2_kurage_teki_reset();

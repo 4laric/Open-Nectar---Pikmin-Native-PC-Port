@@ -18,6 +18,10 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     case 57: case 78: return 0; // TEKI_Frog: Jellyfloat/Groink sidecar hosts
     case 17: return 0; // TEKI_Frog: Yellow Wollywog (inst-frogs #871)
     case 18: return 33; // TEKI_Frow: Wollywog (inst-frogs #871)
+    case 24: return 15; // TEKI_Tank: Fiery Blowhog (inst2-frogs #871)
+    case 25: return 15; // TEKI_Tank: Watery Blowhog (inst2-frogs #871)
+    case 15: return 3; // TEKI_Chappy: Cloaking Burrow-nit (inst2-frogs #871)
+    case 75: return 17; // TEKI_Beatle: Armored Cannon Beetle Larva (inst2-frogs #871)
     default: return original;
     }
 }

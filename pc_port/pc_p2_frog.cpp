@@ -65,7 +65,8 @@ struct FrogFsm {
     bool pressDone = false;
     bool jumpEntryChecked = false;
     unsigned rng = 1;
-    bool deadLogged = false;
+    unsigned token = 0;
+    bool deadLogged = false;float deathPrior=0.0f;bool deathPriorSet=false;
     std::string clip = "wait1";
     float phase = 0.0f;
     float logTimer = 0.0f;
@@ -235,8 +236,8 @@ void transition(BTeki* actor,FrogFsm& s,FState st,const char* clip,unsigned gen)
 // Source death is deferred to the per-state exec points, never taken mid-air:
 // Wait (isDead), Turn/TurnToHome/GoHome (mNextState=Dead, finishMotion), and
 // Attack/Fail (KEYEVENT_END). Jump/JumpWait/Fall never transit to Dead directly.
-void die(BTeki* actor,FrogFsm& s,unsigned gen){
-    if(!s.deadLogged){s.deadLogged=true;const unsigned sourceId=s.kind?18u:17u;std::printf("P2_FROG_DEAD species=%s generator=%u source_id=%u health=0 prior_health=%.1f\n",ids[s.kind],gen,sourceId,s.lastHealth);std::fflush(stdout);}
+void die(BTeki* actor,FrogFsm& s,unsigned gen,float priorHealth){
+    if(!s.deadLogged){s.deadLogged=true;const unsigned sourceId=s.kind?18u:17u;std::printf("P2_FROG_DEAD species=%s generator=%u source_id=%u health=0 prior_health=%.1f\n",ids[s.kind],gen,sourceId,priorHealth);std::fflush(stdout);}
     transition(actor,s,FRG_DEAD,"dead",gen);
 }
 void launchHop(BTeki* actor,FrogFsm& s){
@@ -308,6 +309,7 @@ void pc_p2_frog_setup(){
         f.kind=kind;f.home=teki->getPosition();f.heading=teki->getDirection();
         f.groundY=probeFloorY(teki->getPosition(),teki->getPosition().y);f.targetPos=f.home;f.targetValid=true;
         f.rng=(token*2654435761u)|1u;
+        f.token=token;
         f.state=FRG_WAIT;f.clip="wait1";f.phase=0.0f;
         f.lastHealth=teki->mHealth;
         const unsigned sourceId = kind ? 18u : 17u;
@@ -317,7 +319,7 @@ void pc_p2_frog_setup(){
         }
         std::printf("P2_FROG_BIND generator=%u source_id=%u visual_only=0\n",token,sourceId);
         std::printf("P2_FROG_READY species=%s generator=%u health=%.1f max_health=%.1f behavior=source_fsm rewards=P1_unchanged\n",ids[kind],token,teki->mHealth,teki->getParameterF(TPF_Life));
-        std::printf("P2_ENEMY_READY species=Frog native_family=Frog generator=%u x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=native source_FSM=implemented\n",token,teki->getPosition().x,teki->getPosition().y,teki->getPosition().z,teki->mHealth,p2frog::params(kind).health);
+        std::printf("P2_ENEMY_READY species=%s native_family=Frog generator=%u x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=native source_FSM=implemented\n",ids[kind],token,teki->getPosition().x,teki->getPosition().y,teki->getPosition().z,teki->mHealth,p2frog::params(kind).health);
         std::printf("P2_FROG_STATE species=%s generator=%u state=wait\n",ids[kind],token);
         std::fflush(stdout);
     }
@@ -334,7 +336,9 @@ void pc_p2_frog_update(BTeki* actor){
     FrogFsm& s=ft->second;
     const float dt=gsys->getFrameTime();if(dt<=0.0f||dt>0.5f)return;
     const Vector3f pos=actor->getPosition();
-    const unsigned gen=actor->mGenerator?pc_p2_campaign_token(actor):0u;
+    const unsigned live=actor->mGenerator?pc_p2_campaign_token(actor):0u;
+    if(live) s.token=live;
+    const unsigned gen=s.token ? s.token : live;
     const unsigned sourceId = s.kind ? 18u : 17u;
     const p2frog::Params& p=p2frog::params(s.kind);
 
@@ -346,6 +350,8 @@ void pc_p2_frog_update(BTeki* actor){
     // Natural-combat observability: incremental still-positive decrease is real
     // attack damage. Death marker records prior_health for fixture distinction.
     const float previousHealth = s.lastHealth;
+    if(actor->mHealth<=0.0f&&!s.deathPriorSet&&previousHealth>0.0f){s.deathPrior=previousHealth;s.deathPriorSet=true;}
+    const float priorForDeath=s.deathPriorSet?s.deathPrior:previousHealth;
     if(actor->mHealth < s.lastHealth && actor->mHealth > 0.0f){
         std::printf("P2_FROG_DAMAGE generator=%u source_id=%u health=%.1f\n",gen,sourceId,actor->mHealth);
         std::fflush(stdout);
@@ -357,7 +363,7 @@ void pc_p2_frog_update(BTeki* actor){
     case FRG_WAIT:{
         stop(actor);
         actor->getPosition().y=s.groundY;
-        if(actor->mHealth<=0.0f){die(actor,s,gen);break;}
+        if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
         if(shouldFlick(actor)){
             s.targetPos=pos;s.targetValid=true;retargetNavi(actor,s);
             transition(actor,s,FRG_JUMP,"type1",gen);
@@ -378,7 +384,7 @@ void pc_p2_frog_update(BTeki* actor){
     case FRG_TURN:{
         stop(actor);
         actor->getPosition().y=s.groundY;
-        if(actor->mHealth<=0.0f){die(actor,s,gen);break;}
+        if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
         if(shouldFlick(actor)){s.targetPos=pos;s.targetValid=true;transition(actor,s,FRG_JUMP,"type1",gen);break;}
         Creature* t=nearestTarget(pos,p.sight);
         if(t){
@@ -430,7 +436,7 @@ void pc_p2_frog_update(BTeki* actor){
         actor->getPosition().y=s.groundY;
         if(!s.pressDone){s.pressDone=true;doLandPress(actor,s);}
         if(s.stateTime>=clipSeconds(s.kind,"attack")){
-            if(actor->mHealth<=0.0f){die(actor,s,gen);break;}
+            if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
             if(distXZ(pos,s.home)>TERRITORY)transition(actor,s,FRG_TURNTOHOME,"waitact1",gen);
             else transition(actor,s,FRG_WAIT,"wait1",gen);
         }
@@ -440,7 +446,7 @@ void pc_p2_frog_update(BTeki* actor){
         stop(actor);
         actor->getPosition().y=s.groundY;
         if(s.stateTime>=clipSeconds(s.kind,"damage")){
-            if(actor->mHealth<=0.0f){die(actor,s,gen);break;}
+            if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
             if(shouldFlick(actor))transition(actor,s,FRG_JUMP,"type1",gen);
             else if(distXZ(pos,s.home)>TERRITORY)transition(actor,s,FRG_TURNTOHOME,"waitact1",gen);
             else transition(actor,s,FRG_WAIT,"wait1",gen);
@@ -450,7 +456,7 @@ void pc_p2_frog_update(BTeki* actor){
     case FRG_TURNTOHOME:{
         stop(actor);
         actor->getPosition().y=s.groundY;
-        if(actor->mHealth<=0.0f){die(actor,s,gen);break;}
+        if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
         if(shouldFlick(actor)){s.targetPos=pos;s.targetValid=true;transition(actor,s,FRG_JUMP,"type1",gen);break;}
         turnTo(actor,s,s.home,dt);
         if(std::fabs(wrapPi(std::atan2(s.home.x-pos.x,s.home.z-pos.z)-s.heading))<=FACE_OK_ANGLE||s.stateTime>=clipSeconds(s.kind,"waitact1"))
@@ -459,7 +465,7 @@ void pc_p2_frog_update(BTeki* actor){
     }
     case FRG_GOHOME:{
         actor->getPosition().y=s.groundY;
-        if(actor->mHealth<=0.0f){die(actor,s,gen);break;}
+        if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
         if(distXZ(pos,s.home)<HOME_RADIUS){transition(actor,s,FRG_WAIT,"wait1",gen);break;}
         if(shouldFlick(actor)){s.targetPos=pos;s.targetValid=true;transition(actor,s,FRG_JUMP,"type1",gen);break;}
         walkTo(actor,s,s.home,MOVE_SPEED,dt);
@@ -496,7 +502,9 @@ bool pc_p2_frog_draw(BTeki* actor,Graphics& gfx,const Matrix4f& matrix,bool corp
     int kind=it->second;if(!corpse)logPress(actor,kind);
     {
         auto* view=static_cast<PelletView*>(actor);
-        const unsigned token=actor->mGenerator?pc_p2_campaign_token(actor):0u;
+        auto ftok=fsms.find(view);
+        const unsigned liveTok=actor->mGenerator?pc_p2_campaign_token(actor):0u;
+        const unsigned token=liveTok ? liveTok : (ftok!=fsms.end()?ftok->second.token:0u);
         const unsigned sourceId=kind?18u:17u;
         if(drawn.insert(view).second){
             std::printf("P2_FROG_DRAW generator=%u source_id=%u species=%s corpse=%d\n",token,sourceId,ids[kind],int(corpse));
