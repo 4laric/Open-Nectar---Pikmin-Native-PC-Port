@@ -232,8 +232,8 @@ inline unsigned sourceForSpeciesName(const char* name)
     return 0;
 }
 
-inline bool isKoganeLike(unsigned source) { return source == 9 || source == 10 || source == 11; }
-inline bool isFlyer(unsigned source) { return source == 23 || source == 57; }
+inline bool isKoganeLike(unsigned source) { return source == 9; }
+inline bool isFlyer(unsigned source) { return source == 23 || source == 57 || source == 32 || source == 72; }
 
 // Numeric filter matches a generator key; otherwise a species name match.
 inline bool matchTarget(unsigned token, unsigned source, const char* species, const std::string& filter)
@@ -914,7 +914,8 @@ private:
             return;
         }
         const bool sarai = in.targetSource == 23;
-        const bool kurage = in.targetSource == 57;
+        const bool kurage = in.targetSource == 57 || in.targetSource == 72;
+        const float limit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout;
         // Whistle first, then re-throw (bot-v4: real players do this):
         // - Sarai holding a Pikmin (targetGrabbing): whistle frees the grab;
         // - grabbed/thrown-off/burning squad (squadDistress: mouth-stuck,
@@ -925,10 +926,29 @@ private:
         // Chappy: permanent whistle, hp stuck at 0.96), so targetGrabbing only
         // whistles for the Sarai capture case.
         const bool grabWhistle = sarai && in.targetGrabbing;
-        // bot-undamaged: fled/teleporting targets (Breadbug nest, Fuefuki kite,
-        // Shijimi retreat, Qurione instance flip) re-enter approach so the
-        // graph routes the chase; straight-line attack steer cannot cross the
-        // map. Hysteresis vs approach closeEnough (195/260 u) prevents flap.
+        // bot-v8 merge (#871): chase keeps ONE coherent flyer-aware version.
+        // Both lanes implemented chase; neither alone passes both lanes'
+        // tests (unkilled flyer-at-1000 expects steer-in-Attack, undamaged
+        // ground-at-1302 expects re-Approach). Kept both mechanisms, split by
+        // flight: flyers (32/72 Demon/OniKurage + 23/57) steer in Attack past
+        // throwRange 260 u (unkilled: no whistle/throws while far, waypoint
+        // aware, re-engages on resurface); ground/teleporters (38/41/16/77)
+        // re-enter Approach past 500 u so the graph routes cross-map chases
+        // (undamaged, hysteresis vs 195/260 u). Both keep the attack timeout.
+        // Flyers first so Demon-at-1252 steers instead of graph-routing.
+        if (isFlyer(in.targetSource) && in.targetDist > cfg.throwRange) {
+            // bot-unkilled (wf11): Demon bc5 tdist 3->1252 stationary PadB;
+            // OniKurage bc5 tdist 265 vs throwRange 260, regen outpaces DPS.
+            if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+            else steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            if (stateTime >= limit) {
+                giveUp(in, "attack_timeout");
+                finishTarget(in, /*killed*/ false);
+            }
+            return;
+        }
+        // bot-undamaged: fled/teleporting ground targets re-enter approach;
+        // straight-line attack steer cannot cross the map.
         if (in.targetDist > cfg.attackChaseDist) {
             enter(State::Approach, in);
             return;
@@ -941,10 +961,12 @@ private:
         if (whistling) {
             whistleTime += dt;
             lastCommand.buttons = PadB; // hold whistle to regroup / free grabs
-            // bot-undamaged: bound the whistle (bc5: 800 s permanent B with
-            // zero throws on 16/30/38/40/42/73/95/96). The attack window must
-            // fire even while whistling so latched damage still scores
-            // RESULT damaged=1 instead of stalling to harness cut.
+            // bot-v8 merge (#871): whistle timeout keeps ONE version
+            // (undamaged's). Both lanes fixed the same whistle-starves-timeout
+            // flaw (undamaged bc5 800 s stalls on 16/30/38/40/42/73/95/96;
+            // unkilled control Chappy field=4 scat=1 800 s lock). Kept
+            // undamaged's bound + cooldown (forces throw windows) with the
+            // kurage-aware limit both lanes used (unkilled limit == wlimit).
             {
                 const float wlimit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout;
                 if (stateTime >= wlimit) {
@@ -989,7 +1011,6 @@ private:
         // pulse A to throw. Flyers are thrown at from range as the game allows.
         steer(in.naviX, in.naviZ, aimX, aimZ);
         pulseA(in, cfg.throwHold, gap);
-        const float limit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout;
         if (stateTime >= limit) {
             giveUp(in, "attack_timeout");
             finishTarget(in, /*killed*/ false);
