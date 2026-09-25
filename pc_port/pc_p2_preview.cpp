@@ -191,6 +191,15 @@ void pc_p2_preview_setup() {
             pc_p2_jigumo_setup();
             pc_p2_batch3_setup();
             pc_p2_long_legs_setup();
+            // inst-worms lane (#871) round 2: the P2 FSM must actually run in
+            // bridge mode. Round-1 review found these setups never ran in a
+            // campaign session (bridge branch omitted them), so every tick
+            // was P1 Chappy host AI (PROXY). Bind them here alongside the
+            // visuals (batch2 covers ground Imomushi, batch3 covers
+            // snagret/aquatic).
+            pc_p2_snakejoint_setup();
+            pc_p2_imomushi_setup();
+            pc_p2_umimushi_setup();
         }
         return;
     }
@@ -451,6 +460,19 @@ bool pc_p2_preview_deliver(Pellet* pellet) {
         // the delivered Pellet* (a viewless stand-in corpse would still resolve).
         else if(unsigned generator=0;pc_p2_long_legs_receipt(pellet,generator)) {
             receipt="corpse:"+pc_p2_cave_receipt_prefix()+"longlegs:"+std::to_string(generator);value=corpseValue;
+        }
+        // inst-worms lane (#871): snagret pair (34/70), Imomushi (65) and
+        // bloyster pair (71/101) carcass receipts. The generator-keyed
+        // corpse:<name>:<gen> flows to onion:p2:<id> via the ordinary
+        // delivery ledger (GoalItem::suckMe -> pc_randomizer_p2_corpse_delivered).
+        else if(unsigned generator=0;pc_p2_snakejoint_receipt(pellet->mPelletView,generator)) {
+            receipt="corpse:"+pc_p2_cave_receipt_prefix()+"snakejoint:"+std::to_string(generator);value=corpseValue;
+        }
+        else if(unsigned generator=0;pc_p2_imomushi_receipt(pellet->mPelletView,generator)) {
+            receipt="corpse:"+pc_p2_cave_receipt_prefix()+"imomushi:"+std::to_string(generator);value=corpseValue;
+        }
+        else if(unsigned generator=0;pc_p2_umimushi_receipt(pellet->mPelletView,generator)) {
+            receipt="corpse:"+pc_p2_cave_receipt_prefix()+"umimushi:"+std::to_string(generator);value=corpseValue;
         }
         else {
             auto found=corpses.find(pellet->mPelletView);

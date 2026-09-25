@@ -21,8 +21,6 @@
 #include "pc_randomizer.h"
 #include "pc_p2_animation.h"
 #include "pc_p2_campaign_actor.h"
-#include "pc_p2_setup_failsafe.h"
-#include "pc_randomizer.h"
 #include "pc_p2_tadpole.h"
 #include "pc_p2_mar.h"
 #include "pc_p2_pose_bank.h"
@@ -91,6 +89,11 @@ std::map<std::string, Bank> banks;             // key "family|species"
 std::map<BTeki*, std::string> actors;          // actor -> key
 std::map<BTeki*, BlendState> blends;           // actor -> private deform target
 std::set<std::string> drawnKeys;               // "<corpse>|<key>|<token>" already reported
+// Worms lane (#871) round 2: once-per-actor campaign DRAW markers for the
+// evidence scorer (bound/drawn/killed/carried/received). Cleared on reset,
+// erased on forget so a recycled actor address re-reports.
+std::set<BTeki*> wormDrawn;
+std::set<BTeki*> wormCorpseDrawn;
 bool interpolation = false;
 size_t bytesTotal = 0;
 bool logged[2] = {false, false};
@@ -497,6 +500,8 @@ void pc_p2_batch3_reset() {
     actors.clear();
     blends.clear();
     drawnKeys.clear();
+    wormDrawn.clear();
+    wormCorpseDrawn.clear();
     interpolation = false;
     bytesTotal = 0;
     logged[0] = logged[1] = false;
@@ -505,6 +510,8 @@ void pc_p2_batch3_reset() {
 void pc_p2_batch3_forget(BTeki* actor) {
     actors.erase(actor);
     blends.erase(actor);
+    wormDrawn.erase(actor);
+    wormCorpseDrawn.erase(actor);
 }
 
 bool pc_p2_batch3_corpse_drawn() { return logged[1]; }
@@ -543,6 +550,43 @@ void pc_p2_batch3_setup_bridge() {
     if (!parseBank("p2-snagret-bank.txt", rows)) {
         std::printf("P2_SETUP_SKIP batch3 snagret bad_bank\n");
         return;
+    }
+}
+
+// Worms lane (#871) round 2 bridge visuals: the snagret pair (34/70) and the
+// bloyster pair (71/101) draw their P2 pose banks in campaign (bridge) mode.
+// Narrow and additive: builds wanted strictly from live campaign sources for
+// these four species, binds only TEKI_Chappy placement vehicles, loads only
+// their banks (Blind reuses the UmiMushi bank as in preview), and is a no-op
+// for campaigns without worms. All other species and the preview path are
+// untouched.
+static void setupBridgeWorms() {
+    struct WormRow {
+        const char* family;
+        const char* species;
+        unsigned source;
+        const char* bankSpecies;
+    };
+    static const WormRow ROWS[] = {
+        {"snagret", "SnakeCrow", 34, "SnakeCrow"},
+        {"snagret", "SnakeWhole", 70, "SnakeWhole"},
+        {"aquatic", "UmiMushi", 71, "UmiMushi"},
+        {"aquatic", "UmiMushiBlind", 101, "UmiMushi"},
+    };
+    std::map<unsigned, std::pair<std::string, std::string>> wanted; // token -> (key, bankSpecies)
+    std::map<std::string, std::string> bankSpeciesFor;              // key -> bankSpecies
+    for (const auto& row : ROWS) {
+        for (unsigned id : pc_p2_campaign_ids(row.source)) {
+            const std::string key = std::string(row.family) + "|" + row.species;
+            wanted[id] = {key, row.bankSpecies};
+            bankSpeciesFor[key] = row.bankSpecies;
+        }
+    }
+    if (wanted.empty()) return;
+    std::map<std::string, std::map<std::string, std::vector<ClipRow>>> rowsByFamily;
+    for (const FamilyDef& family : FAMILIES) {
+        std::map<std::string, std::vector<ClipRow>> rows;
+        if (parseBank(family.bank, rows)) rowsByFamily[family.name] = std::move(rows);
     }
     std::set<unsigned> found;
     std::set<std::string> speciesUsed;
@@ -590,6 +634,89 @@ void pc_p2_batch3_setup_bridge() {
     std::printf("P2_BATCH3_BANK total_mod_bytes=%zu species=%zu\n", bytesTotal, banks.size());
 }
 
+        if (teki->mTekiType != TEKI_Chappy) {
+            std::printf("P2_SETUP_SKIP batch3 %s native_type_mismatch generator=%u\n",
+                        match->second.first.c_str(), token);
+            std::fflush(stdout);
+            continue;
+        }
+        actors[teki] = match->second.first;
+        speciesUsed.insert(match->second.first);
+        found.insert(token);
+    }
+    if (found.size() != wanted.size()) {
+        std::printf("P2_BATCH3_MISSING_BRIDGE found=%zu wanted=%zu\n", found.size(), wanted.size());
+        std::fflush(stdout);
+    }
+    if (found.empty()) return;
+    for (const std::string& key : speciesUsed) {
+        const size_t bar = key.find('|');
+        const std::string family = key.substr(0, bar);
+        const std::string bankSpecies = bankSpeciesFor[key];
+        auto famRows = rowsByFamily.find(family);
+        if (famRows == rowsByFamily.end()) {
+            std::printf("P2_SETUP_SKIP batch3 bridge missing_bank family=%s key=%s\n",
+                        family.c_str(), key.c_str());
+            std::fflush(stdout);
+            for (auto ai = actors.begin(); ai != actors.end();) {
+                if (ai->second == key) ai = actors.erase(ai);
+                else ++ai;
+            }
+            continue;
+        }
+        auto clipRows = famRows->second.find(bankSpecies);
+        if (clipRows == famRows->second.end() || clipRows->second.empty()) {
+            std::printf("P2_SETUP_SKIP batch3 bridge no_bank_clips key=%s\n", key.c_str());
+            std::fflush(stdout);
+            for (auto ai = actors.begin(); ai != actors.end();) {
+                if (ai->second == key) ai = actors.erase(ai);
+                else ++ai;
+            }
+            continue;
+        }
+        const FamilyDef* famDef = nullptr;
+        for (const FamilyDef& f : FAMILIES)
+            if (family == f.name) { famDef = &f; break; }
+        if (!famDef) continue;
+        // Bridge-safe pose pre-check: loadBank fail()s on a missing pose,
+        // which must degrade to a visual skip in campaign, never an abort.
+        // Probe every staged pose file the bank rows reference first.
+        bool posesReady = true;
+        for (const ClipRow& row : clipRows->second) {
+            for (int i = 0; i < row.poseCount; ++i) {
+                char rel[192];
+                std::snprintf(rel, sizeof(rel),
+                              "assets/dataDir/courses/pikmin2room/%s_%s_%s_%02d.mod",
+                              famDef->prefix, bankSpecies.c_str(), row.name.c_str(), i);
+                std::ifstream probe(rel, std::ios::binary);
+                if (!probe) { posesReady = false; break; }
+            }
+            if (!posesReady) break;
+        }
+        if (!posesReady) {
+            std::printf("P2_SETUP_SKIP batch3 bridge missing_pose key=%s\n", key.c_str());
+            std::fflush(stdout);
+            for (auto ai = actors.begin(); ai != actors.end();) {
+                if (ai->second == key) ai = actors.erase(ai);
+                else ++ai;
+            }
+            continue;
+        }
+        banks[key] = loadBank(*famDef, bankSpecies, clipRows->second);
+    }
+    if (actors.empty()) return;
+    for (const auto& entry : actors) {
+        std::printf("P2_BATCH3_BIND generator=%u key=%s visual_only=0 native_fsm=implemented token=%u\n",
+                    entry.first->mGenerator ? entry.first->mGenerator->_70 : 0u,
+                    entry.second.c_str(), pc_p2_campaign_token(entry.first));
+    }
+    std::printf("P2_BATCH3_BANK total_mod_bytes=%zu species=%zu\n", bytesTotal, banks.size());
+    std::fflush(stdout);
+    if (interpolation) {
+        for (const auto& entry : actors) ensureBlendState(entry.first, entry.second);
+    }
+}
+
 void pc_p2_batch3_setup() {
     pc_p2_batch3_reset();
     interpolation = readBatch3InterpolationFlag();
@@ -597,7 +724,12 @@ void pc_p2_batch3_setup() {
     if (!tekiMgr) return;
     const bool bridge = pc_randomizer_p2_bridge() && !pc_pikipelago_room_preview();
     const bool preview = pc_pikipelago_room_preview();
+    // Bridge mode: bind every lane's visuals. setup_bridge covers the
+    // snagret Crawbster (94); setupBridgeWorms covers the worms snagret pair
+    // (34/70) + bloyster pair (71/101); the aquatic family loop below covers
+    // Catfish/Tadpole/Jigumo/UmiMushi (26/27/63/71).
     if (bridge) pc_p2_batch3_setup_bridge();
+    if (bridge) setupBridgeWorms();
     if (!preview && !bridge) return;
     for (const FamilyDef& family : FAMILIES) {
         const bool isAquatic = std::string(family.name) == "aquatic";
@@ -847,6 +979,28 @@ bool pc_p2_batch3_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
         if (drawnKeys.insert(std::string(corpse ? "1|" : "0|") + entry->second + "|" + std::to_string(drawToken)).second) {
             std::printf("P2_BATCH3_DRAW corpse=%d key=%s clip=%s generator=%u token=%u\n", int(corpse), entry->second.c_str(), name, drawToken, drawToken);
             std::fflush(stdout);
+        }
+    }
+    // Worms lane (#871) round 2: per-actor campaign DRAW markers for the
+    // evidence scorer (drawn = P2 model actually rendered for this token).
+    // Once per actor (corpse separately); no-op for all other keys.
+    {
+        const std::string& key = entry->second;
+        const bool isSnagret = (key == "snagret|SnakeCrow" || key == "snagret|SnakeWhole");
+        const bool isBloyster =
+            (key == "aquatic|UmiMushi" || key == "aquatic|UmiMushiBlind");
+        if (isSnagret || isBloyster) {
+            const unsigned tok = pc_p2_campaign_token(actor);
+            const char* mod = isSnagret ? "SNAKEJOINT" : "UMIMUSHI";
+            if (!corpse && wormDrawn.insert(actor).second) {
+                std::printf("P2_%s_DRAW generator=%u key=%s clip=%s\n", mod, tok,
+                            key.c_str(), name);
+                std::fflush(stdout);
+            } else if (corpse && wormCorpseDrawn.insert(actor).second) {
+                std::printf("P2_%s_CORPSE_DRAW generator=%u key=%s clip=%s\n", mod, tok,
+                            key.c_str(), name);
+                std::fflush(stdout);
+            }
         }
     }
     shape->updateAnim(gfx, matrix, nullptr, actor);
