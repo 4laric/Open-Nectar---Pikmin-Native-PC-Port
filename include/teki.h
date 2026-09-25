@@ -40,6 +40,7 @@
 #include "pc_p2_shijimi.h"
 #include "pc_p2_elecbug.h"
 #include "pc_p2_tamago.h"
+#include "pc_p2_uji.h"
 #include "pc_p2_imomushi.h"
 #include "pc_p2_otakara.h"
 #include "pc_p2_groink_teki.h"
@@ -441,7 +442,8 @@ public:
 	f32 getParameterF(int idx) {
 		const f32 value=pc_p2_frog_param_f(this,idx,pc_p2_king_teki_param_f(this,idx,pc_p2_queen_teki_param_f(this,idx,mTekiParams->getF(idx))));
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
-		const f32 kogane=pc_p2_armor_param_f(this,idx,pc_p2_sokkuri_param_f(this,idx,pc_p2_kogane_param_f(this,idx,pc_p2_shijimi_param_f(this,idx,value))));
+		const f32 ujiBlind=pc_p2_uji_param_f(this,idx,value);
+		const f32 kogane=pc_p2_armor_param_f(this,idx,pc_p2_sokkuri_param_f(this,idx,pc_p2_kogane_param_f(this,idx,pc_p2_shijimi_param_f(this,idx,ujiBlind))));
 		const f32 beforeTamago=pc_p2_elecbug_param_f(this,idx,pc_p2_qurione_param_f(this,idx,kogane));
 		const f32 before_imomushi=pc_p2_tamago_param_f(this,idx,beforeTamago);
 		const f32 before_hana=pc_p2_imomushi_param_f(this,idx,before_imomushi);

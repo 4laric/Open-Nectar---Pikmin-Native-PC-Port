@@ -30,6 +30,7 @@
 #include "pc_p2_giant_breadbug_actor.h"
 #include "pc_p2_batch2.h"
 #include "pc_p2_sokkuri.h"
+#include "pc_p2_uji.h"
 #include "pc_p2_armor.h"
 #include "pc_p2_elecbug.h"
 #include "pc_p2_tamago.h"
@@ -500,6 +501,7 @@ void BTeki::update()
 	pc_p2_shijimi_update(this);
 	pc_p2_qurione_update(this);
 	pc_p2_elecbug_update(this);
+	pc_p2_uji_update(this);
 	pc_p2_tamago_update(this);
 	pc_p2_umimushi_update(this);
 	pc_p2_jigumo_update(this);
@@ -633,6 +635,18 @@ void BTeki::doAI()
 		return;
 	}
 	if (pc_p2_chappy_suppress_ai(this)) {
+		return;
+	}
+	if (pc_p2_uji_suppress_ai(this)) {
+		return;
+	}
+	if (pc_p2_elecbug_suppress_ai(this)) {
+		return;
+	}
+	if (pc_p2_tamago_suppress_ai(this)) {
+		return;
+	}
+	if (pc_p2_dangomushi_suppress_ai(this)) {
 		return;
 	}
 #endif

@@ -279,6 +279,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_shijimi.cpp
     pc_port/pc_p2_kurage_receiver.cpp
     pc_port/pc_p2_sokkuri.cpp
+    pc_port/pc_p2_uji.cpp
     pc_port/pc_p2_armor.cpp
     pc_port/pc_p2_otakara.cpp
     pc_port/pc_p2_otakara_fx.cpp
@@ -1607,7 +1608,7 @@ target_include_directories(test_p2_cargo PRIVATE pc_port)
 target_compile_options(test_p2_cargo PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME test_p2_cargo COMMAND test_p2_cargo)
 
-foreach(policy IN ITEMS demon_captor demon_escape demon_pose sarai_fsm sarai_policy sarai_capture fuefuki_follow fuefuki_follow_binding)
+foreach(policy IN ITEMS demon_captor demon_escape demon_pose sarai_fsm sarai_policy sarai_capture fuefuki_follow fuefuki_follow_binding uji)
     add_executable(p2_${policy}_test tools/p2_${policy}_test.cpp)
     target_include_directories(p2_${policy}_test PRIVATE pc_port)
     target_compile_options(p2_${policy}_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)

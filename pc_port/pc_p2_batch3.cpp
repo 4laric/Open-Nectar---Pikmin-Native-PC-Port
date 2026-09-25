@@ -16,6 +16,9 @@
 // damage receiver, reward or collision semantics are implemented here; those
 // stay tracked on the family issues and #186.
 #include "pc_p2_batch3.h"
+#include "pc_p2_campaign_actor.h"
+#include "pc_p2_setup_failsafe.h"
+#include "pc_randomizer.h"
 #include "pc_p2_animation.h"
 #include "pc_p2_tadpole.h"
 #include "pc_p2_mar.h"
@@ -84,6 +87,7 @@ struct BlendState {
 std::map<std::string, Bank> banks;             // key "family|species"
 std::map<BTeki*, std::string> actors;          // actor -> key
 std::map<BTeki*, BlendState> blends;           // actor -> private deform target
+std::set<std::string> drawnKeys;               // "<corpse>|<key>|<token>" already reported
 bool interpolation = false;
 size_t bytesTotal = 0;
 bool logged[2] = {false, false};
@@ -489,6 +493,7 @@ void pc_p2_batch3_reset() {
     banks.clear();
     actors.clear();
     blends.clear();
+    drawnKeys.clear();
     interpolation = false;
     bytesTotal = 0;
     logged[0] = logged[1] = false;
@@ -503,10 +508,91 @@ bool pc_p2_batch3_corpse_drawn() { return logged[1]; }
 int pc_p2_batch3_actor_count() { return int(actors.size()); }
 int pc_p2_batch3_bank_count() { return int(banks.size()); }
 
+static void campaignWantedSnagret(std::map<unsigned, std::string>& wanted) {
+    // Campaign-identity snagret species bound in bridge mode (#871 inst-bugs):
+    // Segmented Crawbster (DangoMushi, 94). Mirrors pc_p2_batch2.cpp
+    // campaignWanted SOURCES; other snagrets stay proxy-only.
+    wanted.clear();
+    for (unsigned id : pc_p2_campaign_ids(94)) wanted[id] = "DangoMushi";
+}
+
+// Bridge-mode campaign binding for the identity snagret species (DangoMushi,
+// 94). Batch-3 is otherwise a room-preview-only visual path; this binds the
+// staged p2-snagret-actors/bank sidecars in a live campaign so the P2 corpse
+// model draws and the delivery bind can mint onion:p2:94. Soft: missing
+// sidecars or no bound ids are a no-op; mismatches skip with a log line,
+// never abort (campaign actors span areas/days).
+void pc_p2_batch3_setup_bridge() {
+    if (!tekiMgr) return;
+    std::map<unsigned, std::string> fileActors;
+    if (!parseActors("p2-snagret-actors.txt", fileActors)) return;
+    std::map<unsigned, std::string> wanted;
+    campaignWantedSnagret(wanted);
+    if (wanted.empty()) return;
+    std::map<std::string, std::vector<ClipRow>> rows;
+    {
+        std::ifstream probe("p2-snagret-bank.txt");
+        if (!probe) {
+            std::printf("P2_SETUP_SKIP batch3 snagret missing_bank\n");
+            return;
+        }
+    }
+    if (!parseBank("p2-snagret-bank.txt", rows)) {
+        std::printf("P2_SETUP_SKIP batch3 snagret bad_bank\n");
+        return;
+    }
+    std::set<unsigned> found;
+    std::set<std::string> speciesUsed;
+    Iterator it(tekiMgr);
+    CI_LOOP(it) {
+        Teki* teki = static_cast<Teki*>(*it);
+        if (!teki || !teki->mGenerator) continue;
+        const unsigned token = pc_p2_campaign_token(teki);
+        auto match = wanted.find(token);
+        if (match == wanted.end()) continue;
+        // Campaign vehicle for the identity Crawbster is TEKI_Swallow (proxy
+        // row host_teki 4); the room-preview arena keeps the Chappy vehicle,
+        // so expectedType (preview) is not reused here.
+        if (teki->mTekiType != TEKI_Swallow) {
+            std::printf("P2_SETUP_SKIP batch3 snagret native_type_mismatch generator=%u\n", token);
+            continue;
+        }
+        if (!found.insert(token).second) {
+            std::printf("P2_SETUP_SKIP batch3 snagret duplicate generator=%u\n", token);
+            continue;
+        }
+        actors[teki] = std::string("snagret|") + match->second;
+        speciesUsed.insert(match->second);
+    }
+    if (found.size() != wanted.size()) {
+        std::printf("P2_BATCH3_MISSING family=snagret found=%zu wanted=%zu\n",
+                    found.size(), wanted.size());
+    }
+    for (const std::string& species : speciesUsed) {
+        auto clipRows = rows.find(species);
+        if (clipRows == rows.end() || clipRows->second.empty()) {
+            std::printf("P2_SETUP_SKIP batch3 snagret no_bank_clips species=%s\n", species.c_str());
+            continue;
+        }
+        const std::string key = std::string("snagret|") + species;
+        if (!banks.count(key)) banks[key] = loadBank({"snagret", "snake",
+                                                      "p2-snagret-actors.txt", "p2-snagret-bank.txt"},
+                                                     species, clipRows->second);
+    }
+    for (const auto& entry : actors)
+        if (entry.second == "snagret|DangoMushi")
+            std::printf("P2_BATCH3_BIND generator=%u key=%s visual_only=0 native_fsm=implemented token=%u\n",
+                        entry.first->mGenerator ? entry.first->mGenerator->_70 : 0, entry.second.c_str(),
+                        pc_p2_campaign_token(entry.first));
+    std::printf("P2_BATCH3_BANK total_mod_bytes=%zu species=%zu\n", bytesTotal, banks.size());
+}
+
 void pc_p2_batch3_setup() {
     pc_p2_batch3_reset();
     interpolation = readBatch3InterpolationFlag();
     if (interpolation) std::printf("P2_BATCH3_INTERPOLATION_READY interpolation=1 gameplay_clock=P1\n");
+    const bool bridge = pc_randomizer_p2_bridge() && !pc_pikipelago_room_preview();
+    if (bridge && tekiMgr) pc_p2_batch3_setup_bridge();
     if (!pc_pikipelago_room_preview() || !tekiMgr) return;
     for (const FamilyDef& family : FAMILIES) {
         std::map<unsigned, std::string> wanted;
@@ -649,6 +735,20 @@ bool pc_p2_batch3_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     if (!logged[corpse ? 1 : 0]) {
         std::printf("P2_BATCH3_DRAW corpse=%d key=%s clip=%s\n", int(corpse), entry->second.c_str(), name);
         logged[corpse ? 1 : 0] = true;
+    }
+    // Per-key draw evidence for campaign-identity species (mirrors the
+    // batch-2 identity per-key lines): one line per key+corpse+token so the
+    // bot-campaign scorer cites the species' own draw, not the run-global
+    // first-draw race above.
+    {
+        // generator= carries the campaign token (pack members share it), so
+        // the bot-campaign scorer attributes the draw to the bound slot.
+        unsigned drawToken = pc_p2_campaign_token(actor);
+        if (!drawToken && actor->mGenerator) drawToken = actor->mGenerator->_70;
+        if (drawnKeys.insert(std::string(corpse ? "1|" : "0|") + entry->second + "|" + std::to_string(drawToken)).second) {
+            std::printf("P2_BATCH3_DRAW corpse=%d key=%s clip=%s generator=%u token=%u\n", int(corpse), entry->second.c_str(), name, drawToken, drawToken);
+            std::fflush(stdout);
+        }
     }
     shape->updateAnim(gfx, matrix, nullptr, actor);
     shape->drawshape(gfx, *gfx.mCamera, nullptr);
