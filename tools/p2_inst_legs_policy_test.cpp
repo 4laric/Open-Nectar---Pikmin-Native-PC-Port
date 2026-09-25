@@ -61,6 +61,30 @@ int main() {
         fsm.update(in, out);
         assert(fsm.state() == P2LongLegsState::Dead);
     }
+    // Round-2 retail parms + intents: Damagumo 1300 HP / 25 ShijimiChou,
+    // BigFoot 10000 HP / fixed 5 s wait / 10 s walk + 5 s post-flick / 30
+    // Mitites; neither gunless species shoots (Houdai Shot branch unused).
+    {
+        const P2LongLegsFsmParms d = p2LongLegsParmsFor(P2LongLegsSpecies::Damagumo);
+        assert(d.maxHealth == 1300.0f && d.deathChildren == 25 && !d.hasShotGun);
+        assert(d.waitMinSeconds == 1.75f && d.waitMaxSeconds == 3.5f);
+        const P2LongLegsFsmParms b = p2LongLegsParmsFor(P2LongLegsSpecies::BigFoot);
+        assert(b.maxHealth == 10000.0f && b.deathChildren == 30 && !b.hasShotGun);
+        assert(b.waitMinSeconds == 5.0f && b.waitMaxSeconds == 5.0f);
+        assert(b.walkMinSeconds == 10.0f && b.walkPostFlickSeconds == 5.0f);
+        P2LongLegsFsm fsm;
+        P2LongLegsFsmInput in;
+        P2LongLegsFsmOutput out;
+        fsm.reset(d);
+        in.killed = true;
+        fsm.update(in, out);
+        assert(out.birthChildren == 25 && !out.dropTreasure);
+        fsm.reset(b);
+        in = P2LongLegsFsmInput();
+        in.killed = true;
+        fsm.update(in, out);
+        assert(out.birthChildren == 30 && !out.dropTreasure);
+    }
     std::printf("PASS INST_LEGS_POLICY species=56,63,69\n");
     return 0;
 }

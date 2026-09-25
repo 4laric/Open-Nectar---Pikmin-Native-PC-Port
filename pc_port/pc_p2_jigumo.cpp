@@ -130,6 +130,7 @@ struct Jigumo {
     std::string clip = "appear1";
     float phase = 0.0f;
     bool deadLogged = false;
+    bool deadEscapeDone = false; // OWN death: pcEscapeNow fired once after dead1
     float logTimer = 0.0f;
 };
 
@@ -290,6 +291,10 @@ void pc_p2_jigumo_reset() {
 void pc_p2_jigumo_forget(BTeki* actor) {
     pc_randomizer_p2_forget_source(static_cast<PelletView*>(actor));
     actors.erase(static_cast<PelletView*>(actor));
+}
+
+bool pc_p2_jigumo_suppress_ai(const BTeki* actor) {
+    return actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor))) != 0;
 }
 
 float pc_p2_jigumo_param_f(const BTeki* actor, int idx, float fallback) {
@@ -460,6 +465,10 @@ void pc_p2_jigumo_update(BTeki* actor) {
     Jigumo& s = it->second;
     const float dt = gsys->getFrameTime();
     if (dt <= 0.0f || dt > 0.5f) return;
+    // OWN damage path (mirrors frog): the P1 TAI damaging reaction is
+    // suppressed with doAI, so the source FSM applies pending attack damage
+    // itself.
+    if (actor->mStoredDamage > 0.0f) actor->makeDamaged();
     const Vector3f pos = actor->getPosition();
     const unsigned generator = pc_p2_campaign_token(actor);
     int frame = 0;
@@ -707,14 +716,19 @@ void pc_p2_jigumo_update(BTeki* actor) {
         break;
     case JIGUMO_DEAD:
         stop(actor);
-        // Host death handoff (mirrors Sokkuri/Long Legs): the P1 strategy
-        // reacts to mHealth<=0 inside BTeki::doAI(), calls die() there and
-        // then dieSoon()->becomePellet() in the same pass. Calling die() from
-        // this update-phase hook would set mDeadState before the next doAI()
-        // and permanently block dieSoon(), leaving a dead-but-present actor
-        // with no corpse pellet (measured: 3 campaign kills with carriers=0).
-        // The module therefore only drives the source dead clip and lets the
-        // host complete teardown/corpse.
+        // OWN death (mirrors frog/kochappy): doAI is suppressed, so dieSoon()
+        // never runs there. The source dead1 clip plays, then pcEscapeNow()
+        // (= die() + dieSoon(), teki.h) finalizes the host teardown and births
+        // the real carriable Chappy-pellet corpse. The pre-round-2 host handoff
+        // (never call die() from update) is superseded: with suppression the
+        // escape is the ONLY path to a corpse, and it runs outside doAI so the
+        // dieSoon block is not skipped.
+        if (!s.deadEscapeDone && s.stateTime >= clipDuration("dead1")) {
+            s.deadEscapeDone = true;
+            std::printf("P2_JIGUMO_ESCAPE generator=%u native=host_escape_now\n", generator);
+            std::fflush(stdout);
+            actor->pcEscapeNow();
+        }
         break;
     default:
         break;
