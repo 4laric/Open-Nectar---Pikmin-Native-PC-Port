@@ -150,7 +150,16 @@ void pc_p2_mamuta_setup() {
     pc_p2_mamuta_rules_setup();
     loadManifest();
     for (int k=0; k<kClips; ++k) loadBank(k);
-    for (const auto& e: actors) std::printf("P2_MAMUTA_READY generator=%u native_type=24 xyz=%.6f,%.6f,%.6f P1_proxy_source_pose_banks_no_P2_planting\n", e.second,e.first->mSRT.t.x,e.first->mSRT.t.y,e.first->mSRT.t.z);
+    for (const auto& e: actors) {
+        // deliv4 (#871): lane-06 ordinary-delivery source bind so
+        // GoalItem::suckMe grants onion:p2:54 instead of suppressing the P1
+        // host CHECK (bc6/bc7 hauled the corpse with carriers>0 but no receipt:
+        // P2_P1_CHECK_SUPPRESSED host_type=24). Mirrors Otakara/Kurage/ElecBug.
+        // Single-use: consumed on delivery, cleared on forget/recycle.
+        pc_randomizer_p2_bind_source(static_cast<PelletView*>(e.first), 54, e.second);
+        std::printf("P2_MAMUTA_DELIVERY_BIND generator=%u source_id=54\n", e.second);
+        std::printf("P2_MAMUTA_READY generator=%u native_type=24 xyz=%.6f,%.6f,%.6f P1_proxy_source_pose_banks_no_P2_planting\n", e.second,e.first->mSRT.t.x,e.first->mSRT.t.y,e.first->mSRT.t.z);
+    }
 }
 bool pc_p2_mamuta_draw(BTeki* actor, Graphics& gfx, const Matrix4f& view, bool corpse) {
     auto entry=actors.find(actor);

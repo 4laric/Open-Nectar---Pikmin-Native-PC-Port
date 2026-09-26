@@ -112,6 +112,13 @@ void pc_p2_dwarf_orange_setup(){
         if(!health.bind(static_cast<BTeki*>(actor))){if(pc_p2_setup_skip(pc_randomizer_p2_bridge(),"BlueKochappy","health_bind_failed"))return;}actors.insert(actor);actor->mHealth=actor->getParameterF(TPF_Life);
         const auto& pos=actor->getPosition();
         pc_p2_kochappy_stun_register(actor,PurpleFitDuration);
+        // deliv4 (#871): lane-06 ordinary-delivery source bind so
+        // GoalItem::suckMe grants onion:p2:44 instead of suppressing the P1
+        // host CHECK (bc6/bc7 hauled the corpse with carriers>0 but no receipt:
+        // P2_P1_CHECK_SUPPRESSED host_type=3). Mirrors Otakara/Kurage/ElecBug.
+        // Single-use: consumed on delivery, cleared on forget/recycle.
+        pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor), 44, pc_p2_campaign_token(actor));
+        std::printf("P2_DWARF_ORANGE_DELIVERY_BIND generator=%u source_id=44\n", pc_p2_campaign_token(actor));
         std::printf("P2_ENEMY_READY species=BlueKochappy source_id=44 native_family=Chappy generator=%u x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=P1 purple_stun=bluekochappy_5s\n",pc_p2_campaign_token(actor),pos.x,pos.y,pos.z,actor->mHealth,actor->getParameterF(TPF_Life));
     }
     std::printf("P2_DWARF_ORANGE_BANK poses=%zu mod_bytes=%zu texture_attach_calls=%d load_seconds=%.3f\n",poses,total,attachments,std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count());
