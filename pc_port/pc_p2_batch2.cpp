@@ -571,6 +571,11 @@ static void campaignWanted(const FamilyDef& family, std::map<unsigned, std::stri
         // its P2 model through the ground family in bridge mode.
         {"ground", 65, "Imomushi"},
         {"ground", 84, "Hana"},
+        // frogs4 (#871): Cloaking Burrow-nit (15) draws its P2 model through
+        // the ground family in bridge mode (union with the integ rows above;
+        // the Armor stager merges its p2-ground-*.txt rows with the other
+        // ground species, so this row is safe to keep unconditionally).
+        {"ground", 15, "Armor"},
     };
     wanted.clear();
     for (const auto& row : SOURCES)
