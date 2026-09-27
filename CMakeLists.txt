@@ -771,6 +771,67 @@ if(PIKMIN_NETPLAY_BUILD AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     endforeach()
 endif()
 
+# Deterministic floating-point libm, M2d (issue #879). When
+# PIKMIN_NETPLAY_BUILD=ON, the game executables additionally link
+# pc_port/netplay/pc_netplay_libm.c, whose strong C definitions of the
+# transcendental entry points (sinf/cosf/sincosf/tanf/atanf/atan2f/
+# asinf/acosf/expf/logf/powf/fmodf/hypotf/log10f/log2f/exp2f and the double
+# versions) satisfy the game's undefined references at static link. The
+# mingw-w64 libm archive members that use x87 transcendentals
+# (fsin/fcos/fsincos/fpatan/f2xm1/fyl2x) are therefore never pulled into
+# the netplay exe, and the msvcrt.dll `tan` import thunk disappears.
+# Pure SSE2 arithmetic only inside that TU; it is compiled -fno-builtin so
+# GCC never lowers one of those names to x87 microcode. The default
+# (non-netplay) build does not link this TU at all: its FP behavior and
+# its libm disassembly are unchanged.
+if(PIKMIN_NETPLAY_BUILD AND NOT ANDROID)
+    target_sources(${NECTAR_GAME} PRIVATE pc_port/netplay/pc_netplay_libm.c)
+    if(NOT ANDROID AND TARGET p2_kurage_runtime)
+        target_sources(p2_kurage_runtime PRIVATE pc_port/netplay/pc_netplay_libm.c)
+    endif()
+    # -fno-builtin: GCC must never lower one of these names to x87
+    # microcode. -fno-lto: keep this TU out of LTO so its strong symbols
+    # link by the ordinary static rules (LTO partitions have discarded
+    # builtin-named definitions like sincosf while other partitions still
+    # reference them).
+    set_source_files_properties(pc_port/netplay/pc_netplay_libm.c PROPERTIES COMPILE_OPTIONS
+        "-fno-builtin;-fno-lto;-ffp-contract=off;-ftrivial-auto-var-init=zero")
+endif()
+
+# Host-run accuracy/determinism test for the netplay libm (issue #879).
+# Engine-free: links only the libm TU plus the test driver. The driver
+# calls the entry points by their standard names (proving the override
+# links) and compares against the platform libm loaded explicitly from
+# msvcrt.dll, so the reference is never shadowed by our definitions.
+# Registered unconditionally (like the other pc_* host tests); the FP
+# gate below is registered only for netplay builds.
+if(PIKMIN_BUILD_TESTS AND NOT ANDROID)
+    add_executable(pc_netplay_libm_test
+        pc_port/netplay/pc_netplay_libm_test.cpp
+        pc_port/netplay/pc_netplay_libm.c)
+    target_include_directories(pc_netplay_libm_test PRIVATE pc_port)
+    target_compile_options(pc_netplay_libm_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    set_source_files_properties(pc_port/netplay/pc_netplay_libm.c PROPERTIES COMPILE_OPTIONS
+        "-fno-builtin;-fno-lto;-ffp-contract=off;-ftrivial-auto-var-init=zero")
+    add_test(NAME pc_netplay_libm_test COMMAND pc_netplay_libm_test)
+endif()
+
+# FP determinism gate (issue #879). Runs objdump over the linked game exe
+# and fails on any x87 transcendental, any FMA instruction, or any
+# tan/sin/cos/atan/exp/log/pow import from msvcrt/ucrt. Only meaningful
+# (and only registered) for netplay builds, where the software libm must
+# have removed all three.
+if(PIKMIN_NETPLAY_BUILD AND PIKMIN_BUILD_TESTS AND NOT ANDROID)
+    if(WIN32)
+        add_test(NAME netplay_fp_gate
+            COMMAND py -3.12 "${CMAKE_CURRENT_SOURCE_DIR}/tools/netplay/fp_gate.py" "$<TARGET_FILE:${NECTAR_GAME}>")
+    else()
+        find_package(Python3 COMPONENTS Interpreter)
+        add_test(NAME netplay_fp_gate
+            COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/netplay/fp_gate.py" "$<TARGET_FILE:${NECTAR_GAME}>")
+    endif()
+endif()
+
 option(PIKMIN_ENABLE_IPO "Enable portable interprocedural/link-time optimization" ON)
 if(PIKMIN_ENABLE_IPO)
     include(CheckIPOSupported)
