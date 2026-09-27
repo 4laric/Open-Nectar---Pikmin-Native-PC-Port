@@ -9,6 +9,7 @@
 #if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_det.h"
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #endif
 
@@ -104,6 +105,12 @@ void PcamCameraManager::update()
 		wobRead         = true;
 		const char* env = std::getenv("PIKMIN_NETPLAY_TEST_CAMERA_WOBBLE");
 		wobDeg          = (env != nullptr && *env != '\0') ? std::atof(env) : 0.0;
+		// M2b fix (review m7): one log line proving the wobble switch took
+		// effect (acceptance compares wobble vs plain hash logs).
+		if (wobDeg != 0.0) {
+			std::printf("[netplay] test camera wobble: %.1f deg, 97-tick period\n", wobDeg);
+			std::fflush(stdout);
+		}
 	}
 	float wobSavedAz  = 0.0f;
 	float wobSavedCur = 0.0f;
