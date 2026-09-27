@@ -30,6 +30,9 @@ std::set<PelletView*> actors;
 // own44-fix (#871): one DRAW line per (actor, corpse) so each marker carries
 // its own generator token (mirrors P2_MAMUTA_DRAW per-actor logging).
 std::set<std::pair<PelletView*,int>> logged;
+// Token captured at bind: dieSoon() detaches mGenerator before the corpse
+// draw, so the live lookup would read 0 for corpse=1.
+std::map<PelletView*,unsigned> tokens;
 bool interpolation=false;
 std::map<std::string,std::vector<p2pose::Baked>> baked;
 struct Mutable {Shape* shape=nullptr;p2pose::Pose scratch;std::string clip;float frame=0;bool corpse=false;};
@@ -37,14 +40,14 @@ std::map<PelletView*,Mutable> instances;
 // Source BlueKochappy purple-pikmin stun: fp38 = 5 s (KochappyBase flick/press).
 constexpr float PurpleFitDuration = 5.0f;
 }
-void pc_p2_dwarf_orange_reset(){instances.clear();baked.clear();interpolation=false;clips.clear();timing.clear();actors.clear();health.reset();logged.clear();}
+void pc_p2_dwarf_orange_reset(){instances.clear();baked.clear();interpolation=false;clips.clear();timing.clear();actors.clear();health.reset();logged.clear();tokens.clear();}
 void pc_p2_dwarf_orange_forget(BTeki* actor){
     instances.erase(static_cast<PelletView*>(actor));
     const bool wasRegistered=actors.erase(static_cast<PelletView*>(actor))!=0;
     // The generator is already detached by dieSoon(), so identity is not
     // available here; the registration transition is the cleanup signal.
     if(wasRegistered){std::printf("P2_DWARF_ORANGE_FORGET registered=1\n");std::fflush(stdout);}
-    logged.erase({static_cast<PelletView*>(actor),0});logged.erase({static_cast<PelletView*>(actor),1});
+    logged.erase({static_cast<PelletView*>(actor),0});logged.erase({static_cast<PelletView*>(actor),1});tokens.erase(static_cast<PelletView*>(actor));
     health.forget(actor);pc_p2_kochappy_stun_forget(actor);
 }
 float pc_p2_dwarf_orange_max_health(const BTeki* actor,float fallback){return health.life(actor,fallback);}
@@ -114,7 +117,7 @@ void pc_p2_dwarf_orange_setup(){
             instances.emplace(static_cast<PelletView*>(actor),std::move(state));gsys->setHeap(heap);
             std::printf("P2_DWARF_ORANGE_INTERPOLATION_READY generator=%u private_geometry=1\n",pc_p2_campaign_token(actor));
         }
-        if(!health.bind(static_cast<BTeki*>(actor))){if(pc_p2_setup_skip(pc_randomizer_p2_bridge(),"BlueKochappy","health_bind_failed"))return;}actors.insert(actor);actor->mHealth=actor->getParameterF(TPF_Life);
+        if(!health.bind(static_cast<BTeki*>(actor))){if(pc_p2_setup_skip(pc_randomizer_p2_bridge(),"BlueKochappy","health_bind_failed"))return;}actors.insert(actor);tokens[actor]=pc_p2_campaign_token(actor);actor->mHealth=actor->getParameterF(TPF_Life);
         const auto& pos=actor->getPosition();
         pc_p2_kochappy_stun_register(actor,PurpleFitDuration);
         // deliv4 (#871): lane-06 ordinary-delivery source bind so
@@ -141,7 +144,8 @@ void pc_p2_dwarf_orange_setup(){
 bool pc_p2_dwarf_orange_draw(BTeki* actor,Graphics& gfx,const Matrix4f& matrix,bool corpse){
     if(!actors.count(static_cast<PelletView*>(actor)))return false;
     if(logged.insert({static_cast<PelletView*>(actor),corpse?1:0}).second){
-        std::printf("P2_DWARF_ORANGE_DRAW generator=%u corpse=%d %s\n",pc_p2_campaign_token(actor),int(corpse),
+        const auto token=tokens.find(static_cast<PelletView*>(actor));
+        std::printf("P2_DWARF_ORANGE_DRAW generator=%u corpse=%d %s\n",token!=tokens.end()?token->second:pc_p2_campaign_token(actor),int(corpse),
                     pc_p2_kochappy_fsm_suppress_ai(actor)?"OWN_FSM_driven":"P1_gameplay_unchanged");
         std::fflush(stdout);
     }
