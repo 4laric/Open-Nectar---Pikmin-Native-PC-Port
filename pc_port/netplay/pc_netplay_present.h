@@ -33,9 +33,26 @@ int pc_netplay_present_skip_presentation(void);
 // Safe to call from engine code (returns 0 when the switch is off).
 int pc_netplay_present_two_pass_active(void);
 
-// Null-GX backend flag (authoritative pass): submission/uploads/present are
-// skipped. Counts attempts (skipped calls) and real GL issued while active
-// (must stay 0). Engine-free counters (host testable).
+// True when this pass may write sim state: single-pass mode, or the
+// authoritative pass of a two-pass tick. The presentation pass must only
+// read sim state and write view state. (Engine-free: host builds only ever
+// run single-pass, so this is 1 there unless det+presentation were entered,
+// which host code cannot do.)
+int pc_netplay_present_sim_side(void);
+
+// True only inside the authoritative pass of a two-pass tick: the SimCamera
+// is installed and the null-GX flag is on. Replaces ad-hoc null-flag reads
+// as the "am I in the sim pass" signal.
+int pc_netplay_present_sim_pass(void);
+
+// Null-GX backend flag (authoritative pass): GL-issuing submission is
+// skipped. Counts attempts (skipped calls) and real GL issued while active.
+// All GL in this architecture goes through pc_gfx.cpp entry points (the GX
+// stubs are CPU-side shims; OGLGraphics is not instantiated — System builds
+// a DGXGraphics), so gating those entries is gating at the GL boundary.
+// The only intentional real GL while null is a one-shot texture-creation
+// upload for textures first created mid-tick (sim-independent bytes;
+// deterministic on every peer). Steady-state replays must show null_gl 0.
 void pc_netplay_present_set_null_gx(int on);
 int pc_netplay_present_null_active(void);
 // GL calls issued while null was active (acceptance: 0 in auth passes).
@@ -46,8 +63,10 @@ void pc_netplay_present_note_attempt(void);
 void pc_netplay_present_note_real(void);
 void pc_netplay_present_reset_counters(void);
 
-// Local player's view: PIKMIN_NETPLAY_LOCAL_PLAYER=0|1, default 0. Cached.
+// Local player's view: PIKMIN_NETPLAY_LOCAL_PLAYER=0|1, default 0. Cached;
+// reset the cache (tests only).
 int pc_netplay_present_local_player(void);
+void pc_netplay_present_reset_local_player(void);
 
 // Presentation matrix save/restore accounting (diagnostic).
 unsigned long long pc_netplay_present_saved_shapes(void);
@@ -58,8 +77,10 @@ unsigned long long pc_netplay_present_saved_shapes(void);
 
 #if defined(PIKI_PC_PORT) && !defined(PC_NETPLAY_PRESENT_HOST) && defined(__cplusplus)
 // Engine side (defined in pc_netplay_present.cpp, uses Camera/Graphics).
-// SimCamera: identity lookAt/inverse (world-space pose), valid fixed
-// projection copied from the real camera at pass start.
+// SimCamera: identity lookAt/inverse (world-space pose) with a fixed
+// session-constant projection (16:9, default gameplay FOV/clip). It never
+// reads the live camera: FOV/near follow zoom and first-person state, so a
+// copy would differ between peers and between LOCAL_PLAYER 0/1.
 Camera* pc_netplay_present_sim_camera(void);
 void pc_netplay_present_begin_authoritative(Graphics& gfx);
 void pc_netplay_present_end_authoritative(Graphics& gfx);

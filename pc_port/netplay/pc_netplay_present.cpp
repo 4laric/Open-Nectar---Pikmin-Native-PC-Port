@@ -10,13 +10,17 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <utility>
+#include <vector>
 
 #if defined(PIKI_PC_PORT) && !defined(PC_NETPLAY_PRESENT_HOST)
 #include "Camera.h"
 #include "Graphics.h"
 #include "Matrix4f.h"
 #include "netplay/pc_netplay_det.h"
-#include <unordered_map>
+#include "timing/pc_render_phase.h"
+#else
+#include "netplay/pc_netplay_det.h"
 #endif
 
 namespace {
@@ -31,7 +35,11 @@ bool sLocalPlayerInit = false;
 Camera* sSimCamera = nullptr;
 Graphics* sSavedGfx = nullptr;
 Camera* sSavedCamera = nullptr;
-std::unordered_map<void*, void*> sSavedPtrs;
+// Per-presentation shape-pointer save list. A vector of (shape, simPtr)
+// pairs: append-only during the pass, indexed restore after it. n is tiny
+// (~33 shapes), so a linear "already saved" scan beats a node-allocating
+// map through the tick allocator every frame.
+std::vector<std::pair<void*, void*>> sSavedPtrs;
 #endif
 } // namespace
 
@@ -54,6 +62,27 @@ int pc_netplay_present_two_pass_active(void)
 		return 0;
 	}
 	return 1;
+#else
+	return 0;
+#endif
+}
+
+int pc_netplay_present_sim_side(void)
+{
+#if defined(PIKI_PC_PORT) && !defined(PC_NETPLAY_PRESENT_HOST)
+	if (pc_netplay_present_two_pass_active()) {
+		return pc_render_is_authoritative() ? 1 : 0;
+	}
+	return 1;
+#else
+	return 1;
+#endif
+}
+
+int pc_netplay_present_sim_pass(void)
+{
+#if defined(PIKI_PC_PORT) && !defined(PC_NETPLAY_PRESENT_HOST)
+	return (pc_netplay_present_two_pass_active() && pc_render_is_authoritative()) ? 1 : 0;
 #else
 	return 0;
 #endif
@@ -106,6 +135,12 @@ int pc_netplay_present_local_player(void)
 	return sLocalPlayerCached;
 }
 
+void pc_netplay_present_reset_local_player(void)
+{
+	sLocalPlayerInit = false;
+	sLocalPlayerCached = 0;
+}
+
 unsigned long long pc_netplay_present_saved_shapes(void)
 {
 	return sSavedShapes;
@@ -125,22 +160,17 @@ Camera* pc_netplay_present_sim_camera(void)
 void pc_netplay_present_begin_authoritative(Graphics& gfx)
 {
 	// Route pose math through identity: lookAt * world * joint becomes
-	// world-space. The SimCamera carries fixed session-constant projection
-	// state (16:9, gameplay FOV/clip); no sim reader depends on the live
-	// window aspect after M2a, and submission is null-op'd anyway. Always
-	// installed, even when gfx.mCamera is still null (first stage frame).
+	// world-space. The SimCamera carries a fixed session-constant projection
+	// (16:9, gameplay default FOV/clip); it never reads the live camera,
+	// whose FOV follows zoom and whose near clip is 3 in first person versus
+	// 100 otherwise. Always installed, even when gfx.mCamera is still null
+	// (first stage frame).
 	Camera* sim = pc_netplay_present_sim_camera();
 	sSavedGfx = &gfx;
 	sSavedCamera = gfx.mCamera;
-	if (gfx.mCamera) {
-		sim->mFov = gfx.mCamera->mFov;
-		sim->mNear = gfx.mCamera->mNear;
-		sim->mFar = gfx.mCamera->mFar;
-	} else {
-		sim->mFov = 60.0f;
-		sim->mNear = 100.0f;
-		sim->mFar = 10000.0f;
-	}
+	sim->mFov = 60.0f;
+	sim->mNear = 100.0f;
+	sim->mFar = 10000.0f;
 	sim->mAspectRatio = 16.0f / 9.0f;
 	// Fixed CPU-side perspective (row-major transpose of gluPerspective
 	// with glScalef(1,1,1)), matching OGLGraphics::setPerspective's output
@@ -179,6 +209,17 @@ void pc_netplay_present_end_authoritative(Graphics& gfx)
 void pc_netplay_present_begin_presentation(Graphics& gfx)
 {
 	(void)gfx;
+	// A previous presentation that never reached the driver's restore (for
+	// example section construction during a soft-reset idle, which runs as
+	// presentation) may have left shapes pointing into the present pool.
+	// Restore those before dropping the list; otherwise they keep pointers
+	// the next presentation overwrites with camera-space data.
+	if (!sSavedPtrs.empty()) {
+		pc_netplay_present_restore_all_shapes();
+	}
+	if (sSavedPtrs.capacity() == 0) {
+		sSavedPtrs.reserve(256);
+	}
 	sSavedPtrs.clear();
 	sSavedShapes = 0;
 	// Presentation matrix pool is reset in Graphics::resetPresentBuffer by
@@ -200,11 +241,15 @@ bool pc_netplay_present_save_shape_ptr(void* shape, void* savedPtr)
 	if (!shape) {
 		return false;
 	}
-	auto it = sSavedPtrs.find(shape);
-	if (it != sSavedPtrs.end()) {
-		return false;
+	for (const auto& kv : sSavedPtrs) {
+		if (kv.first == shape) {
+			return false;
+		}
 	}
-	sSavedPtrs.emplace(shape, savedPtr);
+	if (sSavedPtrs.capacity() == 0) {
+		sSavedPtrs.reserve(256);
+	}
+	sSavedPtrs.emplace_back(shape, savedPtr);
 	++sSavedShapes;
 	return true;
 }
@@ -216,15 +261,11 @@ size_t pc_netplay_present_saved_count(void)
 
 void* pc_netplay_present_saved_shape_at(size_t i, void** outSaved)
 {
-	size_t k = 0;
-	for (auto& kv : sSavedPtrs) {
-		if (k == i) {
-			if (outSaved) {
-				*outSaved = kv.second;
-			}
-			return kv.first;
+	if (i < sSavedPtrs.size()) {
+		if (outSaved) {
+			*outSaved = sSavedPtrs[i].second;
 		}
-		++k;
+		return sSavedPtrs[i].first;
 	}
 	if (outSaved) {
 		*outSaved = nullptr;

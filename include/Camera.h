@@ -8,7 +8,6 @@
 #include "sysMath.h"
 #include "types.h"
 #if defined(PIKI_PC_PORT)
-#include "timing/pc_render_phase.h"
 #include "netplay/pc_netplay_present.h"
 #endif
 
@@ -86,26 +85,10 @@ public:
 	int isBoundVisible(immut BoundBox& bound, int planeFlag)
 	{
 #if defined(PIKI_PC_PORT)
-		// M2b: authoritative pass uses the M2a policy value (always visible).
-		if (pc_render_is_authoritative()) {
-			// Only when two-pass is active does the caller run under the
-			// SimCamera; otherwise keep vanilla behaviour. The det check
-			// lives in the policy helper's TU; authoritative is only true
-			// for a second pass in det mode (presentation sets it false),
-			// and single-pass det runs are also policy-true. Both are
-			// correct: sim visibility must never depend on the local
-			// window. Non-det stays exactly as today via the phase default
-			// (authoritative) -- so gate on two-pass-active through the
-			// policy default: pc_netplay_sim_visible(true) is true only in
-			// det mode and pass-through otherwise. To avoid a header
-			// dependency on the policy TU, mirror that rule here: in
-			// non-det builds the phase is always authoritative but there is
-			// no second pass, so only return early when the SimCamera is
-			// active (presentation module sets null-GX). The null flag is
-			// the cheapest reliable signal available in this header.
-			if (pc_netplay_present_null_active()) {
-				return planeFlag;
-			}
+		// M2b: the sim pass (SimCamera + null GX) uses the M2a policy value
+		// (always visible), never the local-window frustum.
+		if (pc_netplay_present_sim_pass()) {
+			return planeFlag;
 		}
 #endif
 		immut f32* boundArray = (immut f32*)&bound;

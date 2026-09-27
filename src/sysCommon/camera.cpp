@@ -39,9 +39,11 @@ void CullFrustum::vectorToWorldPlane(immut Vector3f& vec, CullingPlane& worldPla
 bool CullFrustum::isPointVisible(immut Vector3f& point, f32 cutoff)
 {
 #if defined(PIKI_PC_PORT)
-	// M2b (issue #879): in the authoritative pass visibility is the M2a
-	// policy value (always visible), never the local-window frustum.
-	if (pc_netplay_present_two_pass_active() && pc_render_is_authoritative()) {
+	// M2b (issue #879): in the sim pass visibility is the M2a policy value
+	// (always visible), never the local-window frustum. The presentation
+	// pass takes the vanilla path below (real frustum culling, no AI-flag
+	// writes — callers guard those with sim_side).
+	if (pc_netplay_present_sim_pass()) {
 		return pc_netplay_sim_visible(true);
 	}
 #endif
