@@ -833,10 +833,13 @@ static bool pcUpdatePreferredThrowColor(Navi* navi)
 #if defined(PIKI_PC_PORT)
 	// M2c lockout: wheel steps and touch taps live outside PADStatus. Det
 	// mode drains and ignores them, and the keyboard-owner routing becomes
-	// a fixed per-pad mapping so both peers agree.
+	// a fixed per-pad mapping so both peers agree. The wheel is drained only
+	// when bound to throw colour (action 0); when bound to zoom the steps
+	// belong to the local presentation camera (pcamcamera.cpp), which may
+	// still be moved locally.
 	const bool detThrow = pc_netplay_deterministic();
 	if (detThrow) {
-		pc_window_take_wheel_steps();
+		if (pc_settings_get_mouse_wheel_action() == 0) pc_window_take_wheel_steps();
 #if PIKI_PC_TOUCH
 		pc_touch_take_color_taps();
 #endif
@@ -932,15 +935,15 @@ Piki* pc_cycle_throw_color(Navi* navi, Piki* current)
 			const f32 candidateDistance = qdist2(piki, navi);
 			if (candidateDistance < distance) { nearest = piki; distance = candidateDistance; }
 		}
-	if (nearest) {
-		// Co-op: the second captain keeps its own preference (upstream #43).
-		// M2c lockout: det mode maps fixedly by pad, not by keyboard owner.
-		const bool toP1 =
+		if (nearest) {
+			// Co-op: the second captain keeps its own preference (upstream #43).
+			// M2c lockout: det mode maps fixedly by pad, not by keyboard owner.
+			const bool toP1 =
 #if defined(PIKI_PC_PORT)
-		    pc_netplay_deterministic() ? (navi->mNaviID == 0) :
+			    pc_netplay_deterministic() ? (navi->mNaviID == 0) :
 #endif
-		                                   (navi->mNaviID == pc_window_get_keyboard_owner());
-		(toP1 ? sPreferredThrowColor : sPreferredThrowColorP2) = color;
+			                                   (navi->mNaviID == pc_window_get_keyboard_owner());
+			(toP1 ? sPreferredThrowColor : sPreferredThrowColorP2) = color;
 			navi->mNextThrowPiki = nearest;
 			return nearest;
 		}
@@ -2357,45 +2360,71 @@ void Navi::reviseController(Vector3f& stickPos)
 //
 // In deterministic mode the stick basis comes from the per-tick input yaw
 // for this Navi's pad channel (mNaviID), never from the camera. The yaw is
-// u16 in 1/65536 turns (see pc_input_log.h). Record and replay share one
-// basis construction: the quantised value feeds sin/cos once, and the
-// resulting (sin, cos) builds the RotY matrix directly through
-// Matrix4f::makeRotate(axis, sin, cos) -- the same sinf/cosf the
+// u16 in 1/65536 turns (see pc_input_log.h). The pre-sim capture hook
+// (pcNaviCaptureControlYaw, called from pc_input_log_tick after PADRead and
+// before the sim) fills every slot without a replayed value from the live
+// control camera, so the input for tick N is complete before the sim for
+// tick N runs -- an input-sync layer can submit that yaw with the pad before
+// advancing, and a rollback re-simulation never re-reads the camera.
+// Record and replay share one basis construction: the quantised value feeds
+// sin/cos once, and the resulting (sin, cos) builds the RotY matrix directly
+// through Matrix4f::makeRotate(axis, sin, cos) -- the same sinf/cosf the
 // angle-based makeRotate(axis, angle) uses internally, so lane m2d's
 // deterministic libm swap covers both. With the switch off this helper is
 // never reached and the old camera path runs verbatim.
-static bool pcNaviControlSincos(int naviID, Camera* cam, float* outSin, float* outCos)
+//
+// A det-mode miss (no Navi/camera at capture time, e.g. menus, or a Navi
+// spawned mid-tick whose first sim use predates its first capture) uses the
+// defined neutral basis (yaw 0), never a camera read.
+static bool pcNaviControlSincos(int naviID, Camera* /*cam*/, float* outSin, float* outCos)
 {
 	const bool detMode = pc_netplay_deterministic();
-	const bool recMode = pc_input_log_is_record_active();
-	if (!detMode && !recMode) return false;
+	if (!detMode) return false;
 	if (naviID < 0 || naviID > 3) return false;
 	float s = 0.0f, c = 1.0f;
-	if (detMode && pc_netplay_control_yaw(naviID, &s, &c)) {
+	if (pc_netplay_control_yaw(naviID, &s, &c)) {
 		if (outSin != nullptr) *outSin = s;
 		if (outCos != nullptr) *outCos = c;
 		return true;
 	}
-	// Live fallback (live record, v1 replay, or past-end-of-file): quantise
-	// the camera yaw BEFORE the basis so record and replay are bit-identical.
-	// A null camera would crash the old path too; store neutral yaw instead
-	// of crashing when only recording.
-	if (cam == nullptr) {
-		if (!detMode) return false;
-		pc_input_log_yaw_set(naviID, 0, pc_input_log::kFlagsNone);
-		if (outSin != nullptr) *outSin = 0.0f;
-		if (outCos != nullptr) *outCos = 1.0f;
-		return true;
-	}
-	const float liveAngle = NMathF::atan2(cam->mViewXAxis.z, cam->mViewXAxis.x);
-	const uint16_t q      = pc_input_log_yaw_quantise(liveAngle);
-	pc_input_log_yaw_set(naviID, q, pc_input_log::kFlagsNone);
-	if (!detMode) return false;
-	pc_input_log_yaw_sincos(q, &s, &c);
-	if (outSin != nullptr) *outSin = s;
-	if (outCos != nullptr) *outCos = c;
+	if (outSin != nullptr) *outSin = 0.0f;
+	if (outCos != nullptr) *outCos = 1.0f;
 	return true;
 }
+
+// Pre-sim yaw capture for pc_input_log_tick (after PADRead, before the sim).
+// Fills every slot without a replayed v2 value from that pad's live control
+// camera (quantised before the basis, so record and replay are
+// bit-identical). Slots already valid (v2 replay hits) are left alone; pads
+// without a Navi stay invalid (record 0, sim neutral). Runs when det mode
+// will consume the yaw or when a record needs it; otherwise no extra work so
+// the switch-off path is untouched. Registered once before the first tick.
+static void pcNaviCaptureControlYaw()
+{
+	const bool detMode = pc_netplay_deterministic();
+	const bool recMode = pc_input_log_is_record_active();
+	if (!detMode && !recMode) return;
+	if (naviMgr == nullptr) return;
+	const int count = naviMgr->getNaviCount();
+	for (int i = 0; i < count; ++i) {
+		Navi* navi = naviMgr->getNavi(i);
+		if (navi == nullptr) continue;
+		const int pad = navi->mNaviID;
+		if (pad < 0 || pad > 3) continue;
+		if (pc_input_log_yaw_valid(pad)) continue;
+		Camera* cam = navi->controlCamera();
+		if (cam == nullptr) {
+			if (detMode) pc_input_log_yaw_set(pad, 0, pc_input_log::kFlagsNone);
+			continue;
+		}
+		const float liveAngle = NMathF::atan2(cam->mViewXAxis.z, cam->mViewXAxis.x);
+		pc_input_log_yaw_set(pad, pc_input_log_yaw_quantise(liveAngle), pc_input_log::kFlagsNone);
+	}
+}
+
+namespace {
+const bool kYawCaptureRegistered = (pc_input_log_set_yaw_capture_fn(&pcNaviCaptureControlYaw), true);
+} // namespace
 #endif
 
 /**
@@ -2409,11 +2438,13 @@ void Navi::makeVelocity(bool isSunset)
 
 #if defined(PIKI_PC_PORT)
 	// M2c test hook (temporary, env-gated, det-only): navi position every
-	// 300 ticks for the wobble-test long-stretch comparison.
-	if (pc_netplay_deterministic() && std::getenv("PIKMIN_NETPLAY_DEBUG_NAVI_POS") != nullptr
-	    && (pc_netplay_tick() % 300) == 0) {
-		std::printf("[netplay-navi] tick=%u navi=%d pos=(%.2f %.2f %.2f)\n", pc_netplay_tick(), mNaviID,
-		            mSRT.t.x, mSRT.t.y, mSRT.t.z);
+	// 300 ticks for the wobble-test long-stretch comparison. Env read once.
+	if (pc_netplay_deterministic() && (pc_netplay_tick() % 300) == 0) {
+		static const bool dbgNaviPos = std::getenv("PIKMIN_NETPLAY_DEBUG_NAVI_POS") != nullptr;
+		if (dbgNaviPos) {
+			std::printf("[netplay-navi] tick=%u navi=%d pos=(%.2f %.2f %.2f)\n", pc_netplay_tick(),
+			            mNaviID, mSRT.t.x, mSRT.t.y, mSRT.t.z);
+		}
 	}
 #endif
 
@@ -2707,8 +2738,8 @@ void Navi::makeVelocity(bool isSunset)
  */
 void Navi::makeCStick(bool isSunset)
 {
-	Camera* ctrlCam = controlCamera();
 #if defined(PIKI_PC_PORT)
+	Camera* ctrlCam = controlCamera();
 	// M2c: det mode builds the basis from the per-player input yaw.
 	// Switch off: exactly the old path.
 	float yawSin = 0.0f, yawCos = 1.0f;
