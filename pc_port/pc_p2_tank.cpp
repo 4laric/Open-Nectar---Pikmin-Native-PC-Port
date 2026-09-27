@@ -7,6 +7,9 @@
 // (p2-tank-visual.txt) is retained when no identity bank is staged.
 #include "pc_p2_tank.h"
 #include "pc_p2_tank_policy.h"
+#include "pc_p2_tank_breath.h"
+#include "pc_p2_species.h"
+#include "pc_p2_species_policy.h"
 #include "pc_p2_tank_phase.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_randomizer.h"
@@ -29,6 +32,7 @@
 #include <vector>
 #include <map>
 #include <set>
+#include <unordered_set>
 #include <fstream>
 #include <cmath>
 #include <cstdlib>
@@ -69,6 +73,10 @@ struct TankFsm {
     unsigned rng=1;unsigned token=0;bool deadLogged=false;float deathPrior=0.0f;bool deathPriorSet=false;
     std::string clip="waitact1";float phase=0.0f;float logTimer=0.0f;float lastHealth=0.0f;
     float blowTimer=0.0f;
+    // Breath exposure (#884): emitter growth, KEYEVENT_2 latch and per-breath
+    // unique-actor evidence sets (pointer identity; cleared on transition).
+    p2tankbreath::Emit emit;bool discharging=false;p2tankbreath::Stats stats;
+    std::unordered_set<const void*> exposedPiki,acceptedPiki,immunePiki,exposedNavi,acceptedNavi;
 };
 std::map<PelletView*,TankFsm> fsms;
 bool ready=false;
@@ -152,36 +160,49 @@ bool attackable(const TankFsm& s,const Vector3f& pos,const Creature* target,floa
     return ang<ATTACK_ANGLE;
 }
 bool shouldFlick(BTeki* actor){return stuckPikminCount(actor)>=FLICK_STUCK_MIN;}
-// Source StateAttack: while mIsBlowing, isAttackable(true) + discharge per tick.
-// Hoppe-emitter cone: face-dir cone of attackRange/attackRadius; Tank uses
-// InteractFire, Wtank uses InteractBubble (Ftank.cpp/Wtank.cpp interactCreature).
-int doBreath(BTeki* actor,TankFsm& s){
+// Source StateAttack: while mIsBlowing, isAttackable(true) discharges every
+// frame (TankState.cpp:870-873). Tank.cpp:292-315 stimulates every alive
+// Pikmin/Navi in the hoppe-emitter box with no receiver cap; Tank uses
+// InteractFire, Wtank InteractBubble (Ftank.cpp:121-125, Wtank.cpp:119-123).
+// Immunity is the receiver's decision; p2_species_immune only classifies
+// evidence here and never gates the stimulus.
+int doBreath(BTeki* actor,TankFsm& s,float dt){
     const Vector3f pos=actor->getPosition();
     const p2tank::Params& p=p2tank::params(s.kind);
-    int hit=0;
-    auto inCone=[&](const Vector3f& q){
-        const float dx=q.x-pos.x,dz=q.z-pos.z;
-        const float d=std::sqrt(dx*dx+dz*dz);
-        if(d>=p.attackRange+p.attackRadius)return false;
-        const float ang=std::fabs(wrapPi(std::atan2(dx,dz)-s.heading));
-        return ang<ATTACK_ANGLE||d<p.attackRadius;
+    const float range=p2tankbreath::advance(s.emit,p.attackRange,dt);
+    const p2tankbreath::Frame f=p2tankbreath::frame(pos.x,pos.y,pos.z,s.heading,range,p.attackRadius);
+    const int hazard=s.kind?P2HazardWater:P2HazardFire;
+    auto where=[](Creature* c,float& x,float& y,float& z){const Vector3f q=c->getPosition();x=q.x;y=q.y;z=q.z;};
+    auto alive=[](Creature* c){return c->isAlive();};
+    auto stim=[&](Creature* c){
+        if(s.kind==0)return c->stimulate(InteractFire(actor,p.attackDamage));
+        return c->stimulate(InteractBubble(actor,p.attackDamage));
     };
-    // Snapshot targets first: InteractBubble can kill (remove from pikiMgr)
-    // during stimulate, invalidating the live iterator (crash in Wtank runs).
-    std::vector<Piki*> pikis;std::vector<Navi*> navis;
-    if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){Piki* q=static_cast<Piki*>(*it);if(!q||!q->isAlive())continue;
-        if(inCone(q->getPosition()))pikis.push_back(q);if(pikis.size()>=6)break;}}
-    if(naviMgr){Iterator it(naviMgr);CI_LOOP(it){Navi* n=static_cast<Navi*>(*it);if(!n||!n->isAlive())continue;
-        if(inCone(n->getPosition()))navis.push_back(n);}}
-    for(Piki* q:pikis){if(!q||!q->isAlive())continue;bool ok=false;
-        if(s.kind==0)ok=q->stimulate(InteractFire(actor,p.attackDamage));
-        else ok=q->stimulate(InteractBubble(actor,p.attackDamage));
-        if(ok)++hit;}
-    for(Navi* n:navis){if(!n||!n->isAlive())continue;bool ok=false;
-        if(s.kind==0)ok=n->stimulate(InteractFire(actor,p.attackDamage));
-        else ok=n->stimulate(InteractBubble(actor,p.attackDamage));
-        if(ok)++hit;}
+    // Snapshot the full manager contents before any stimulus: a receiver can
+    // kill/remove actors, invalidating a live manager iterator.
+    std::vector<Piki*> allPiki,pikis;std::vector<Navi*> allNavi,navis;
+    if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it)allPiki.push_back(static_cast<Piki*>(*it));}
+    if(naviMgr){Iterator it(naviMgr);CI_LOOP(it)allNavi.push_back(static_cast<Navi*>(*it));}
+    p2tankbreath::collect(f,allPiki,where,alive,pikis);
+    p2tankbreath::collect(f,allNavi,where,alive,navis);
+    for(Piki* q:pikis){s.exposedPiki.insert(q);if(p2_species_immune(pc_p2_species(q),hazard))s.immunePiki.insert(q);}
+    for(Navi* n:navis)s.exposedNavi.insert(n);
+    int hit=p2tankbreath::dispatch(pikis,alive,[&](Piki* q){const bool ok=stim(q);if(ok)s.acceptedPiki.insert(q);return ok;});
+    hit+=p2tankbreath::dispatch(navis,alive,[&](Navi* n){const bool ok=stim(n);if(ok)s.acceptedNavi.insert(n);return ok;});
+    ++s.stats.frames;
+    if(int(pikis.size())>s.stats.maxExposedPiki)s.stats.maxExposedPiki=int(pikis.size());
+    if(int(navis.size())>s.stats.maxExposedNavi)s.stats.maxExposedNavi=int(navis.size());
+    if(range>s.stats.maxRange)s.stats.maxRange=range;
     return hit;
+}
+// One summary per attack (clip end or early death exit), printed before
+// transition() clears the breath state.
+void breathSummary(const TankFsm& s,unsigned gen,unsigned sourceId,const char* reason){
+    if(!s.blowing)return;
+    std::printf("P2_TANK_BREATH_SUMMARY species=%s generator=%u source_id=%u reason=%s frames=%d range_max=%.1f element=%s cap=none exposed_piki=%zu accepted_piki=%zu immune_exposed=%zu max_exposed_frame=%d exposed_navi=%zu accepted_navi=%zu\n",
+        ids[s.kind],gen,sourceId,reason,s.stats.frames,s.stats.maxRange,s.kind?"water":"fire",
+        s.exposedPiki.size(),s.acceptedPiki.size(),s.immunePiki.size(),s.stats.maxExposedPiki,s.exposedNavi.size(),s.acceptedNavi.size());
+    std::fflush(stdout);
 }
 // Source StateFlick: flickNearbyNavi + flickNearbyPikmin + flickStickPikmin.
 int doFlick(BTeki* actor,TankFsm& s){
@@ -205,6 +226,8 @@ void setPhase(int kind,TankFsm& s){
 }
 void transition(BTeki* actor,TankFsm& s,TState st,const char* clip,unsigned gen){
     (void)actor;s.state=st;s.stateTime=0.0f;s.blowing=false;s.breathDone=false;s.flickDone=false;s.blowTimer=0.0f;if(clip)s.clip=clip;
+    s.emit=p2tankbreath::Emit{};s.discharging=false;s.stats=p2tankbreath::Stats{};
+    s.exposedPiki.clear();s.acceptedPiki.clear();s.immunePiki.clear();s.exposedNavi.clear();s.acceptedNavi.clear();
     std::printf("P2_TANK_STATE species=%s generator=%u state=%s\n",ids[s.kind],gen,p2tank::stateName(st));
     std::fflush(stdout);
 }
@@ -261,7 +284,17 @@ void pc_p2_tank_setup(){
      std::fflush(stdout);
     }
     if(seen.size()!=wanted.size()){std::printf("P2_TANK_ERROR missing_actor wanted=%zu found=%zu\n",wanted.size(),seen.size());std::abort();}
-    loadAnimation(banks);ready=true;return;
+    loadAnimation(banks);
+    // Breath timing is retail-sourced (attack.bca KEYEVENT_2 at 55 of 95);
+    // the staged bank carries no events, so only cross-check it.
+    for(int kind=0;kind<2;++kind){auto at=timing[kind].find("attack");
+        const int frames=at==timing[kind].end()?0:at->second.duration;bool key=false;
+        if(at!=timing[kind].end())for(int fr:at->second.frames)if(fr==p2tankbreath::KEYEVENT2_FRAME)key=true;
+        const bool verified=frames==p2tankbreath::ATTACK_CLIP_FRAMES&&key;
+        std::printf("P2_TANK_BREATH_TIMING species=%s source_id=%u attack_frames=%d keyevent_frame=%d keyevent_s=%.3f staged_keyframe=%d verified=%d\n",
+            ids[kind],kind?25u:24u,frames,p2tankbreath::KEYEVENT2_FRAME,p2tankbreath::keyEventSeconds(),int(key),int(verified));}
+    std::fflush(stdout);
+    ready=true;return;
    }
   }
  }
@@ -356,13 +389,19 @@ void pc_p2_tank_update(BTeki* actor){
     }
     case TNK_ATTACK:{
         stop(actor);
+        // TankState.cpp:866-869: dead check every exec, before any discharge.
+        if(actor->mHealth<=0.0f){breathSummary(s,gen,sourceId,"dead");die(actor,s,gen,priorForDeath);break;}
         if(!s.blowing){s.blowing=true;s.blowTimer=0.0f;std::printf("P2_TANK_BREATH species=%s generator=%u source_id=%u start=1\n",ids[s.kind],gen,sourceId);std::fflush(stdout);}
         s.blowTimer+=dt;
-        {
-            int hit=doBreath(actor,s);
-            if(hit>0)std::printf("P2_TANK_BREATH_HIT species=%s generator=%u source_id=%u hit=%d\n",ids[s.kind],gen,sourceId,hit),std::fflush(stdout);
+        // TankState.cpp:870-880: discharge while blowing, then latch on
+        // KEYEVENT_2, so the first discharge lands on the following frame.
+        if(s.discharging)doBreath(actor,s,dt);
+        if(!s.discharging&&s.stateTime>=p2tankbreath::keyEventSeconds()){
+            s.discharging=true;s.emit=p2tankbreath::Emit{};
+            std::printf("P2_TANK_BREATH_DISCHARGE species=%s generator=%u source_id=%u t=%.3f frame=%d\n",ids[s.kind],gen,sourceId,s.stateTime,int(std::lround(s.stateTime*p2tankbreath::ANIM_FPS)));std::fflush(stdout);
         }
         if(s.stateTime>=clipSeconds(s.kind,"attack")){
+            breathSummary(s,gen,sourceId,"clip");
             std::printf("P2_TANK_BREATH species=%s generator=%u source_id=%u start=0\n",ids[s.kind],gen,sourceId);std::fflush(stdout);
             if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
             if(shouldFlick(actor))transition(actor,s,TNK_FLICK,"flick",gen);
