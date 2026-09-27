@@ -4,6 +4,7 @@
 #include "settings/pc_settings.h"
 
 #include <cmath>
+#include <cstdio>
 
 namespace {
 

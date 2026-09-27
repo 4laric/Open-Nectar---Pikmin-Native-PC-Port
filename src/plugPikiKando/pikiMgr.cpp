@@ -1,4 +1,10 @@
 #include "PikiMgr.h"
+#if defined(PIKI_PC_PORT)
+#include "settings/pc_settings.h"
+#include "pc_vs.h"
+#include "GoalItem.h"
+#include "PikiHeadItem.h"
+#endif
 #include "AIConstant.h"
 #include "DebugLog.h"
 #include "GameStat.h"
@@ -193,3 +199,29 @@ void PikiMgr::dumpAll()
 		pikiNum++;
 	}
 }
+
+#if defined(PIKI_PC_PORT)
+int pcVsFieldPikis(int player)
+{
+	int count = 0;
+	Iterator it(pikiMgr);
+	CI_LOOP(it)
+	{
+		Piki* piki = static_cast<Piki*>(*it);
+		if (piki->isAlive() && piki->mPlayerId == player) count++;
+	}
+	Iterator heads(itemMgr->getPikiHeadMgr());
+	CI_LOOP(heads)
+	{
+		Creature* c = *heads;
+		if (c->mObjType == OBJTYPE_Pikihead && static_cast<PikiHeadItem*>(c)->mPcOwner == player) count++;
+	}
+	for (int color = PikiMinColor; color < PikiColorCount; color++) {
+		GoalItem* goal = itemMgr->pcGetContainer(color, player);
+		if (goal) count += goal->mPikisToExit;
+	}
+	return count;
+}
+
+int pcVsFieldLimit() { return pc_vs_rules().fieldLimit; }
+#endif

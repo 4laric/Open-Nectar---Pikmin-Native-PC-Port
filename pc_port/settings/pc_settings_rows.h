@@ -10,7 +10,8 @@ enum PcSettingsGroup {
 	PC_SET_GROUP_GRAPHICS,    ///< imagen, efectos, color, packs de texturas y modelos HD
 	PC_SET_GROUP_CONTROLS,    ///< esquema, ratón, sticks, giroscopio y asignación de teclas
 	PC_SET_GROUP_CAMERA,      ///< cámara libre, primera persona, Lock-On, Charge
-	PC_SET_GROUP_GAMEPLAY,    ///< Pikmin, día, vida, comportamiento, cooperativo
+	PC_SET_GROUP_GAMEPLAY,    ///< comportamiento de los Pikmin, cooperativo
+	PC_SET_GROUP_CHEATS,      ///< límite de Pikmin, día, vida, silbato, lanzamiento, debug
 	PC_SET_GROUP_DATA,        ///< exportar/importar partida + restaurar ajustes
 	PC_SET_GROUP_COUNT,
 	/// Selectores (no aparecen como grupo). OK elige/actúa.
@@ -48,6 +49,15 @@ void pc_settings_row_value(int group, int row, char* out, unsigned long n);
 const char* pc_settings_row_help(int group, int row);
 /// false si la fila depende de otra que está apagada: se pinta atenuada y no cambia.
 bool pc_settings_row_enabled(int group, int row);
+/// Título de la sección que empieza en esta fila (cabecera de la lista), o nullptr.
+const char* pc_settings_row_section(int group, int row);
+/// Opciones de una fila de valor, para listarlas: devuelve cuántas hay y en
+/// *current la actual. 0 si la fila no se lista (acción, selector, desactivada).
+int pc_settings_row_options(int group, int row, int* current);
+/// Texto de la opción `index` de la última consulta de pc_settings_row_options.
+const char* pc_settings_row_option(int index);
+/// Pone la fila en la opción `index` (el vídeo se aplica una sola vez).
+void pc_settings_row_pick_option(int group, int row, int index);
 /// Filas de acción (solo A): exportar, importar, calibrar...
 bool pc_settings_row_is_action(int group, int row);
 /// dir: -1 izquierda, +1 derecha; ok: A/Enter. Las filas de valor tratan ok como +1.
@@ -68,6 +78,7 @@ void pc_settings_video_confirm(bool keep);
 /// para que otras interfaces no dupliquen la lectura de entrada.
 struct PcNavEdges {
 	bool up, down, left, right, ok, cancel;
+	bool tabPrev, tabNext; ///< pestaña anterior/siguiente (L/R, Q/E)
 	bool tap;      ///< toque táctil pendiente en este frame
 	float tapX, tapY; ///< normalizado 0..1 (origen arriba-izquierda)
 	float dragY;   ///< arrastre vertical acumulado este frame (espacio 480 px, + hacia abajo)

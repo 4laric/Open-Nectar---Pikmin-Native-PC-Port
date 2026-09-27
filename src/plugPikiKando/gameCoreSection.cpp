@@ -10,6 +10,16 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_photo_mode.h"
 #include "pc_coop.h"
+#include "mods/pc_vs_arena.h"
+#include "pc_vs.h"
+#include "BuildingItem.h"
+#include "PikiAI.h"
+#include "ItemObject.h"
+#include "UfoItem.h"
+#include "TekiPersonality.h"
+#include "teki.h"
+#include <algorithm>
+#include <vector>
 #include "pc_window.h"
 #include "gl/pc_gfx.h"
 #endif
@@ -114,6 +124,13 @@ zen::DrawContainer* containerWindow2 = nullptr;
 zen::DrawHurryUp* hurryupWindow;
 zen::DrawAccount* accountWindow;
 
+
+// VS: sin escena de extinción (se empieza sin Pikmin en el campo).
+#if defined(PIKI_PC_PORT)
+#define PC_NOT_VS && !pc_vs_active()
+#else
+#define PC_NOT_VS
+#endif
 /**
  * @todo: Documentation
  * @note UNUSED Size: 00009C
@@ -911,6 +928,11 @@ void GameCoreSection::exitStage()
 	effectMgr->exit();
 	memStat->reset();
 	flowCont.mIsVersusMode = FALSE;
+#if defined(PIKI_PC_PORT)
+	// Fin de la partida (VS/cooperativo): la siguiente vuelve a leer lo pendiente.
+	gameflow.mPauseAll = FALSE;
+	pc_coop_end_run();
+#endif
 }
 
 /**
@@ -967,6 +989,320 @@ ASM void asmTest(f32, f32)
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+// ── VS: piezas ──────────────────────────────────────────────────────────────
+// Se eligen entre las piezas de la nave del juego por lo que pesan (Pikmin
+// mínimos para cargarlas): las tres más ligeras son las pequeñas, dos de
+// entre 5 y 10 Pikmin las medianas y la más pesada la gorda. Cada pareja
+// simétrica del mapa usa la misma pieza, así los dos cargan lo mismo.
+static u32 sVsPieceIds[PC_VS_PIECE_KINDS];
+
+static void pcVsChoosePieces()
+{
+	for (u32& id : sVsPieceIds) id = 0;
+	std::vector<PelletConfig*> parts;
+	for (CoreNode* n = pelletMgr->pcFirstConfig(); n; n = n->mNext) {
+		PelletConfig* c = static_cast<PelletConfig*>(n);
+		if (c->mPelletType() == PELTYPE_UfoPart) parts.push_back(c);
+	}
+	if (parts.size() < PC_VS_PIECE_KINDS) {
+		fprintf(stderr, "[VS] only %zu ship parts available\n", parts.size());
+		return;
+	}
+	std::stable_sort(parts.begin(), parts.end(), [](PelletConfig* a, PelletConfig* b) {
+		if (a->mCarryMinPikis() != b->mCarryMinPikis()) return a->mCarryMinPikis() < b->mCarryMinPikis();
+		return a->mCarryMaxPikis() < b->mCarryMaxPikis();
+	});
+	std::vector<bool> used(parts.size(), false);
+	auto take = [&](size_t i, int kind, int points) {
+		used[i]             = true;
+		sVsPieceIds[kind]   = parts[i]->mPelletId.mId;
+		pc_vs_set_piece_points(parts[i]->mPelletId.mId, points);
+		fprintf(stderr, "[VS] piece kind %d = %s (carry %d-%d, %d pts)\n", kind, parts[i]->mPelletId.mStringID,
+		        parts[i]->mCarryMinPikis(), parts[i]->mCarryMaxPikis(), points);
+	};
+	take(parts.size() - 1, PC_VS_PIECE_BIG, 5);
+	for (int k = 0; k < 3; k++) take(k, PC_VS_PIECE_SMALL_A + k, 1);
+	int medium = PC_VS_PIECE_GUARDED;
+	for (size_t i = 0; i < parts.size() && medium <= PC_VS_PIECE_POND; i++) {
+		if (!used[i] && parts[i]->mCarryMinPikis() >= 5 && parts[i]->mCarryMinPikis() <= 10) take(i, medium++, 2);
+	}
+	for (size_t i = 0; i < parts.size() && medium <= PC_VS_PIECE_POND; i++) {
+		if (!used[i]) take(i, medium++, 2);
+	}
+}
+
+static Pellet* pcVsSpawnPellet(MapMgr* map, u32 id, f32 x, f32 z)
+{
+	if (!id) return nullptr;
+	Pellet* pellet = pelletMgr->newPellet(id, nullptr);
+	if (!pellet) return nullptr;
+	Vector3f pos(x, 0.0f, z);
+	pos.y = map->getMinY(x, z, true);
+	pellet->init(pos);
+	pellet->startAI(0);
+	return pellet;
+}
+
+// Reloj y eventos, cada fotograma de juego.
+static void pcVsUpdate(MapMgr* map)
+{
+	const bool wasOver = pc_vs_match_over();
+	pc_vs_match_update(gsys->getFrameTime());
+
+	if (pc_vs_take_big_piece_event()) {
+		Vector3f pos;
+		pc_vs_arena_big_piece(pos);
+		pcVsSpawnPellet(map, sVsPieceIds[PC_VS_PIECE_BIG], pos.x, pos.z);
+		pc_vs_announce("BIG PIECE IN THE CRATER!", 4.0f);
+	}
+	if (pc_vs_take_pellet_event()) {
+		// Solo si el sitio está libre, para que no se amontonen.
+		PcVsPelletSpot spots[8];
+		const int n = pc_vs_arena_pellet_spots(spots, 8);
+		for (int i = 0; i < n; i++) {
+			bool busy = false;
+			Iterator it(pelletMgr);
+			CI_LOOP(it)
+			{
+				Creature* c = *it;
+				const f32 dx = c->mSRT.t.x - spots[i].x, dz = c->mSRT.t.z - spots[i].z;
+				if (dx * dx + dz * dz < 80.0f * 80.0f) busy = true;
+			}
+			if (!busy) pcVsSpawnPellet(map, spots[i].pelletId, spots[i].x, spots[i].z);
+		}
+	}
+	// Asedio: cada Pikmin rival libre junto a un cohete le quita vida y lo
+	// golpea. Su IA libre se suspende mientras tanto (si no, vuelve a su
+	// animación de espera cada fotograma) y se reanuda al dejar de asediar.
+	const f32 dt = gsys->getFrameTime();
+	int sieging[2] = { 0, 0 };
+	int alive[2]   = { 0, 0 };
+	const bool siegeOn = pc_vs_rules().rocketWin && !pc_vs_countdown_holding();
+	UfoItem* ufos[2] = { itemMgr->pcGetUfo(0), itemMgr->pcGetUfo(1) };
+	Iterator it(pikiMgr);
+	CI_LOOP(it)
+	{
+		Piki* piki   = static_cast<Piki*>(*it);
+		if (piki->isAlive() && (piki->mPlayerId == 0 || piki->mPlayerId == 1)) alive[piki->mPlayerId]++;
+		const int target = 1 - piki->mPlayerId; // cohete rival
+		bool siege   = siegeOn && !pc_vs_match_over() && piki->isAlive() && piki->mPlayerId >= 0 && ufos[target & 1]
+		           && piki->mMode == PikiMode::FreeMode && piki->getState() == PIKISTATE_Normal;
+		f32 dx = 0.0f, dz = 0.0f;
+		if (siege) {
+			dx    = ufos[target]->mSRT.t.x - piki->mSRT.t.x;
+			dz    = ufos[target]->mSRT.t.z - piki->mSRT.t.z;
+			siege = dx * dx + dz * dz <= PC_VS_SIEGE_RADIUS * PC_VS_SIEGE_RADIUS;
+		}
+		if (!siege) {
+			if (piki->mPcSieging) {
+				piki->mPcSieging                   = false;
+				piki->mActiveAction->pcSetSuspended(false);
+			}
+			continue;
+		}
+		sieging[target]++;
+		piki->mPcSieging                   = true;
+		piki->mActiveAction->pcSetSuspended(true);
+		piki->mFaceDirection               = atan2f(dx, dz);
+		piki->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
+		PaniPikiAnimator& upper = piki->mPikiAnimMgr.getUpperAnimator();
+		// Job2: los golpes contra las compuertas.
+		if (upper.getCurrentMotionIndex() != PIKIANIM_Job2 || upper.isFinished()) {
+			piki->startMotion(PaniMotionInfo(PIKIANIM_Job2), PaniMotionInfo(PIKIANIM_Job2));
+		}
+	}
+	// Refuerzos: un jugador sin ningún Pikmin (campo, brotes, cebollas) no
+	// puede recuperarse; a los 3 s recibe 3 en cada una de sus cebollas.
+	static int sVsSerial        = -1;
+	static f32 sEmptyFor[2]     = { 0.0f, 0.0f };
+	static f32 sReinforceCd[2]  = { 0.0f, 0.0f };
+	if (sVsSerial != pc_vs_match_serial()) {
+		sVsSerial = pc_vs_match_serial();
+		sEmptyFor[0] = sEmptyFor[1] = sReinforceCd[0] = sReinforceCd[1] = 0.0f;
+	}
+	for (int player = 0; player < 2 && !pc_vs_match_over() && !pc_vs_countdown_holding(); player++) {
+		if (sReinforceCd[player] > 0.0f) sReinforceCd[player] -= dt;
+		if (pcVsFieldPikis(player) > 0) {
+			sEmptyFor[player] = 0.0f;
+			continue;
+		}
+		int stored = 0;
+		for (int color = PikiMinColor; color < PikiColorCount; color++) {
+			if (GoalItem* goal = itemMgr->pcGetContainer(color, player)) stored += goal->getTotalStorePikis();
+		}
+		if (stored > 0) {
+			sEmptyFor[player] = 0.0f;
+			continue;
+		}
+		sEmptyFor[player] += dt;
+		if (sEmptyFor[player] < 3.0f || sReinforceCd[player] > 0.0f) continue;
+		for (int color = PikiMinColor; color < PikiColorCount; color++) {
+			GoalItem* goal = itemMgr->pcGetContainer(color, player);
+			if (!goal) continue;
+			for (int k = 0; k < 3; k++) {
+				pikiInfMgr.incPiki(color, Leaf);
+				goal->mHeldPikis[Leaf]++;
+				GameStat::containerPikis.inc(color);
+			}
+		}
+		GameStat::update();
+		sEmptyFor[player]    = 0.0f;
+		sReinforceCd[player] = 20.0f;
+		SeSystem::playSysSe(SYSSE_CONTAINER_OK);
+		pc_vs_announce(player == 0 ? "P1: REINFORCEMENTS IN YOUR ONIONS" : "P2: REINFORCEMENTS IN YOUR ONIONS", 4.0f);
+	}
+
+	for (int player = 0; player < 2; player++) {
+		// Daño fijo por Pikmin: con 20, la vida baja aguanta ~24 s, la normal
+		// ~40 s y la alta ~60 s.
+		if (sieging[player]) pc_vs_damage_rocket(player, sieging[player] * PC_VS_SIEGE_DPS * dt, 1 - player);
+		pc_vs_set_alive(player, alive[player]);
+	}
+
+	if (!wasOver && pc_vs_match_over()) {
+		const int w = pc_vs_winner();
+		const bool destroyed = pc_vs_rocket_hp(0) <= 0.0f || pc_vs_rocket_hp(1) <= 0.0f;
+		const char* msg = w == 2 ? "TIME! DRAW"
+		                : destroyed ? (w == 0 ? "ROCKET DESTROYED! PLAYER 1 WINS" : "ROCKET DESTROYED! PLAYER 2 WINS")
+		                            : (w == 0 ? "TIME! PLAYER 1 WINS" : "TIME! PLAYER 2 WINS");
+		pc_vs_announce(msg, 600.0f);
+	}
+}
+
+/// VS (fase 2): cada jugador recibe sus tres cebollas, 15 Pikmin (5 de cada
+/// color) en su grupo, y aparecen las pastillas de prueba del mapa.
+static void pcVsSetupBases(MapMgr* map)
+{
+	// Cuenta atrás 3, 2, 1, START con el mundo en pausa (la lleva el HUD).
+	pc_vs_countdown_arm();
+
+	// Sin escenas de la historia: todas cuentan como ya vistas (descubrir
+	// cebollas, primer motor, primeros amarillos/azules...). VS no guarda.
+	for (int d = 0; d < DEMOFLAG_COUNT; d++) playerState->mDemoFlags.setFlagOnly(d);
+
+	// Cebollas ya activas: sin la secuencia de despertar, listas desde el
+	// principio y con su punto de camino abierto.
+	for (int color = Blue; color <= Yellow; color++) {
+		playerState->setContainer(color);
+		playerState->setBootContainer(color);
+	}
+	for (int player = 0; player < 2; player++) {
+		Navi* navi = naviMgr->getNavi(player);
+		for (int color = Blue; color <= Yellow; color++) {
+			Vector3f pos;
+			pc_vs_arena_onion(player, color, pos);
+			pos.y          = map->getMinY(pos.x, pos.z, true);
+			GoalItem* goal = static_cast<GoalItem*>(itemMgr->birth(OBJTYPE_Goal));
+			if (!goal) continue;
+			goal->setColorType(color);
+			goal->mPcOwner = player;
+			goal->init(pos);
+			goal->mFaceDirection = player == 0 ? 1.5707963f : -1.5707963f;
+			goal->mSRT.r.set(0.0f, goal->mFaceDirection, 0.0f);
+			goal->startAI(0);
+			// startAI copia el recuento global de Pikmin guardados; en VS cada
+			// cebolla tiene el suyo, y empieza vacía.
+			goal->mHeldPikis[Leaf] = goal->mHeldPikis[Bud] = goal->mHeldPikis[Flower] = 0;
+
+			// 5 Pikmin de este color en el grupo del capitán.
+			for (int i = 0; navi && i < 5; i++) {
+				Piki* piki = static_cast<Piki*>(pikiMgr->birth());
+				if (!piki) break;
+				GameStat::workPikis.inc(color);
+				piki->init(navi);
+				Vector3f at = navi->mSRT.t;
+				at.x += (color - 1) * 25.0f;
+				at.z += (i - 2) * 20.0f;
+				at.y = map->getMinY(at.x, at.z, true);
+				piki->Creature::init(at);
+				piki->initColor(color);
+				piki->mPlayerId = player;
+				piki->changeMode(PikiMode::FormationMode, navi);
+			}
+		}
+	}
+	GameStat::update();
+
+	PcVsPelletSpot spots[8];
+	const int n = pc_vs_arena_pellet_spots(spots, 8);
+	for (int i = 0; i < n; i++) {
+		Pellet* pellet = pelletMgr->newPellet(spots[i].pelletId, nullptr);
+		if (!pellet) continue;
+		Vector3f pos(spots[i].x, 0.0f, spots[i].z);
+		pos.y = map->getMinY(pos.x, pos.z, true);
+		pellet->init(pos);
+		pellet->startAI(0);
+	}
+
+	// Cohete de cada jugador: recibe las piezas.
+	for (int player = 0; player < 2; player++) {
+		Vector3f pos;
+		f32 face;
+		pc_vs_arena_rocket(player, pos, face);
+		pos.y        = map->getMinY(pos.x, pos.z, true);
+		UfoItem* ufo = static_cast<UfoItem*>(itemMgr->birth(OBJTYPE_Ufo));
+		if (!ufo) continue;
+		ufo->mPcOwner = player;
+		ufo->init(pos);
+		ufo->mFaceDirection = face;
+		ufo->mSRT.r.set(0.0f, face, 0.0f);
+		ufo->startAI(0);
+	}
+
+	// Piezas del principio (la gorda sale en el minuto 5).
+	PcVsPieceSpot pieces[16];
+	const int np = pc_vs_arena_piece_spots(pieces, 16);
+	for (int i = 0; i < np; i++) {
+		pcVsSpawnPellet(map, sVsPieceIds[pieces[i].kind], pieces[i].x, pieces[i].z);
+	}
+
+	// Compuerta de roca-bomba en cada base y un montón de bombas para abrirla.
+	for (int player = 0; player < 2; player++) {
+		Vector3f pos;
+		f32 face;
+		pc_vs_arena_gate(player, pos, face);
+		pos.y = map->getMinY(pos.x, pos.z, true);
+		if (BuildingItem* gate = static_cast<BuildingItem*>(itemMgr->birth(OBJTYPE_SluiceBomb))) {
+			gate->mNumStages = 2;
+			gate->init(pos);
+			gate->mFaceDirection = face;
+			gate->mSRT.r.set(0.0f, face, 0.0f);
+			gate->startAI(0);
+			// startAI no cierra el paso (solo lo hace al restaurar una partida):
+			// cerrada, los caminos rodean por las salidas hasta que se rompa.
+			if (gate->mWayPoint) gate->mWayPoint->setFlag(false);
+		}
+		pc_vs_arena_bomb_pile(player, pos);
+		pos.y = map->getMinY(pos.x, pos.z, true);
+		if (BombGenItem* pile = static_cast<BombGenItem*>(itemMgr->birth(OBJTYPE_BombGen))) {
+			pile->init(pos);
+			pile->startAI(0);
+			pile->mCapacity = pile->mRemaining = 4;
+			pile->mGrid.updateGrid(pile->mSRT.t);
+		}
+	}
+
+	// Bulborbs grandes durmiendo junto a las medianas custodiadas.
+	Vector3f guards[4];
+	const int ng = pc_vs_arena_guard_spots(guards, 4);
+	for (int i = 0; i < ng; i++) {
+		Teki* teki = tekiMgr->newTeki(TEKI_Swallow);
+		if (!teki) continue;
+		TekiPersonality pers;
+		pers.mPosition = guards[i];
+		pers.mPosition.y = map->getMinY(guards[i].x, guards[i].z, true);
+		pers.mNestPosition  = pers.mPosition;
+		pers.mFaceDirection = i == 0 ? 1.5707963f : -1.5707963f;
+		pers.setF(TekiPersonality::FLT_TerritoryRange, 250.0f);
+		teki->mPersonality->input(pers);
+		teki->reset();
+		teki->startAI(0);
+		teki->mSRT.r.set(0.0f, pers.mFaceDirection, 0.0f);
+	}
+}
+#endif
+
 void GameCoreSection::initStage()
 {
 #if defined(VERSION_PIKIDEMO)
@@ -1037,6 +1373,10 @@ void GameCoreSection::initStage()
 	memStat->start("initStage");
 	flowCont.mIsVersusMode = FALSE;
 	PRINT("initStage start\n");
+#if defined(PIKI_PC_PORT)
+	// El constructor ya lo activó para el VS; la línea de arriba lo apaga.
+	flowCont.mIsVersusMode = pc_vs_active() ? TRUE : FALSE;
+#endif
 	seMgr->setPikiNum(0);
 	mNavi->_730 = flowCont._250;
 	mNavi->mSeedCollectionCount = flowCont.mNaviSeedCount;
@@ -1188,6 +1528,23 @@ void GameCoreSection::initStage()
 		i++;
 	}
 
+#if defined(PIKI_PC_PORT)
+	// VS: la arena no tiene .gen, así que las pastillas que pone el modo se
+	// registran aquí para que se carguen sus modelos.
+	if (pc_vs_active()) {
+		pc_settings_apply_vs_rules(); // reglas del menú previo
+		pc_vs_match_reset();
+		PcVsPelletSpot spots[8];
+		const int n = pc_vs_arena_pellet_spots(spots, 8);
+		for (int i = 0; i < n; i++) pelletMgr->addUseList(spots[i].pelletId);
+		pcVsChoosePieces();
+		for (u32 id : sVsPieceIds) {
+			if (id) pelletMgr->addUseList(id);
+		}
+		tekiMgr->mUsingType[TEKI_Swallow] = true; // Bulborbs custodios
+		itemMgr->addUseList(OBJTYPE_SluiceBomb);   // compuertas de roca-bomba
+	}
+#endif
 	generatorList->updateUseList();
 	memStat->start("item");
 	itemMgr->initialise();
@@ -1261,6 +1618,25 @@ void GameCoreSection::initStage()
 		piki->initColor(piki->mColor);
 	}
 
+#if defined(PIKI_PC_PORT)
+	// VS: cada capitán empieza en su base de la arena (no hay .gen).
+	if (pc_vs_active()) {
+		for (int i = 0; i < 2; i++) {
+			Navi* navi = naviMgr->getNavi(i);
+			if (!navi) continue;
+			Vector3f pos;
+			f32 face;
+			pc_vs_arena_base(i, pos, face);
+			pos.y                  = mMapMgr->getMinY(pos.x, pos.z, true);
+			navi->mSRT.t           = pos;
+			navi->mLastPosition    = pos;
+			navi->mDayEndPosition  = pos;
+			navi->mFaceDirection   = face;
+			navi->mSRT.r.set(0.0f, face, 0.0f);
+		}
+		pcVsSetupBases(mMapMgr);
+	}
+#endif
 	attentionCamera = new AttentionCamera;
 	cameraMgr->startCamera(naviMgr->getNavi());
 	cameraMgr->update();
@@ -1370,7 +1746,7 @@ void GameCoreSection::finalSetup()
 	PRINT("********* BONUS PIKI CHECK\n");
 	GameStat::dump();
 
-	if (playerState->mHasExtinctionDemoPlayed == false && !playerState->isTutorial()
+	if (playerState->mHasExtinctionDemoPlayed == false && !playerState->isTutorial() PC_NOT_VS
 	    && ((GameStat::allPikis[Blue] == 0 && playerState->hasContainer(Blue))
 	        || (GameStat::allPikis[Red] == 0 && playerState->hasContainer(Red))
 	        || (GameStat::allPikis[Yellow] == 0 && playerState->hasContainer(Yellow)))) {
@@ -1576,6 +1952,9 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 	naviMgr = new NaviMgr();
 #if defined(PIKI_PC_PORT)
 	pc_coop_begin_run();
+	// VS: reaprovecha el modo versus que Nintendo dejó a medias (Pikmin con
+	// dueño, rivales como enemigos). Se puso a FALSE justo arriba.
+	flowCont.mIsVersusMode = pc_vs_active() ? TRUE : FALSE;
 	naviMgr->create(pc_coop_active() ? 2 : 1);
 	mNavi = static_cast<Navi*>(naviMgr->birth());
 	// mNaviID 1 -> Kontroller(2) -> pad 1 (segundo mando, fase 0).
@@ -1710,6 +2089,32 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
  * and 20 Pikmin banked, so testing anything past the first level does not mean
  * playing the first level again.
  */
+// VS (fase 1): F8 apunta dónde está cada capitán en vs_positions.txt, para
+// colocar bases y piezas del mapa VS paseando por él.
+static void pcVsMarkKey()
+{
+	if (!pc_vs_active() || !naviMgr) {
+		return;
+	}
+	const Uint8* keys = SDL_GetKeyboardState(nullptr);
+	static bool wasDown = false;
+	const bool isDown   = keys != nullptr && keys[SDL_SCANCODE_F8] != 0;
+	if (isDown && !wasDown) {
+		static int mark = 0;
+		mark++;
+		FILE* out = fopen("vs_positions.txt", "a");
+		for (int i = 0; i < 2; i++) {
+			Navi* navi = naviMgr->getNavi(i);
+			if (!navi) continue;
+			const Vector3f& p = navi->mSRT.t;
+			fprintf(stderr, "[VS] marca %d  P%d  %.1f %.1f %.1f\n", mark, i + 1, p.x, p.y, p.z);
+			if (out) fprintf(out, "marca %d  P%d  %.1f %.1f %.1f\n", mark, i + 1, p.x, p.y, p.z);
+		}
+		if (out) fclose(out);
+	}
+	wasDown = isDown;
+}
+
 static void pcDebugKeys()
 {
 	// Off unless asked for: a stray F5 would otherwise fill someone's Onion
@@ -1823,8 +2228,14 @@ static void pcDebugKeys()
 void GameCoreSection::update()
 {
 	STACK_PAD_VAR(2);
+#if defined(PIKI_PC_PORT)
+	if (pc_vs_active()) {
+		pcVsUpdate(mMapMgr);
+	}
+#endif
 #if defined(PIKI_PC_PORT) && PIKI_DEBUG_KEYS
 	pcDebugKeys();
+	pcVsMarkKey();
 #endif
 	if (!gameflow.mMoviePlayer->mIsActive && !mDoneSundownWarn && gameflow.mWorldClock.mTimeOfDay >= gameflow.mParameters->mNightWarning()
 	    && (flowCont.mGameEndFlag != GAMEEND_PikminExtinction || flowCont.mGameEndFlag != GAMEEND_NaviDown)) {
@@ -1957,6 +2368,24 @@ void GameCoreSection::fillHudInfo(zen::GameInfo* info, Navi* navi)
 	info->mTotalPikiNum         = GameStat::allPikis;
 	info->mMapPikiNum           = GameStat::mapPikis;
 	info->mFormationPikiNum     = mNavi2 ? countFormationPikis(navi) : (short)GameStat::formationPikis;
+	// VS: cada HUD cuenta solo lo de su jugador (campo y, en total, también
+	// lo guardado en sus cebollas).
+	if (pc_vs_active() && navi) {
+		const int player = navi->mNaviID;
+		int map          = 0;
+		Iterator it(pikiMgr);
+		CI_LOOP(it)
+		{
+			Piki* piki = static_cast<Piki*>(*it);
+			if (piki->isAlive() && piki->mPlayerId == player) map++;
+		}
+		int stored = 0;
+		for (int color = PikiMinColor; color < PikiColorCount; color++) {
+			if (GoalItem* goal = itemMgr->pcGetContainer(color, player)) stored += goal->getTotalStorePikis();
+		}
+		info->mMapPikiNum   = short(map);
+		info->mTotalPikiNum = short(map + stored);
+	}
 }
 #else
 	zen::pGameInfo->mEncodedNextThrowType = encodedNextThrowType;

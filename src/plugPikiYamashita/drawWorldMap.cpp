@@ -1,6 +1,8 @@
 #include "zen/DrawWorldMap.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_gfx.h"
+// Estrellas fugaces por todo el ancho (los efectos del mapa centran en 320).
+#define PC_WM_STAR_X (zen::Rand(640.0f + 2.0f * f32(pc_gfx_menu_shift_center())) - f32(pc_gfx_menu_shift_center()))
 #if PIKI_PC_TOUCH
 #include "touch/pc_touch.h"
 #endif
@@ -94,8 +96,15 @@ public:
 	// might be wait
 	void appear()
 	{
+#if defined(PIKI_PC_PORT)
+		// Pantalla completa (issue #46, como pikminws): entra desde el borde
+		// ancho y reposa pegado a él.
+		mStartPos.set(640.0f + f32(pc_gfx_menu_shift_center()), 30.0f, 0.0f);
+		mTargetPos.set(40.0f - f32(pc_gfx_menu_shift_center()), 30.0f, 0.0f);
+#else
 		mStartPos.set(640.0f, 30.0f, 0.0f);
 		mTargetPos.set(40.0f, 30.0f, 0.0f);
+#endif
 		mAnimTimer = 0.0f;
 		mAnimState = TitleAnimState::Appearing;
 		show();
@@ -1438,6 +1447,12 @@ public:
 
 	void init(P2DScreen* wipeScreen)
 	{
+#if defined(PIKI_PC_PORT)
+		// Las cortinillas cubren todo el ancho (escala uniforme, como pikminws).
+		const f32 wide = f32(pc_gfx_menu_virt_width()) / 640.0f;
+		wipeScreen->setScale(wide, wide, 1.0f);
+		wipeScreen->setOffset(320, 240);
+#endif
 		mWipes[0].init(wipeScreen, 'wp00');
 		mWipes[1].init(wipeScreen, 'wp01');
 		mWipes[2].init(wipeScreen, 'wp02');
@@ -2246,7 +2261,7 @@ public:
 	void update()
 	{
 		if (zen::Rand(100.0f) < mStarFallChance) {
-			WMeffMgr->create(EFF2D_MapShootingStar, Vector3f(zen::Rand(640.0f), 500.0f - zen::Rand(50.0f), -zen::Rand(150.0f)), nullptr,
+			WMeffMgr->create(EFF2D_MapShootingStar, Vector3f(PC_WM_STAR_X, 500.0f - zen::Rand(50.0f), -zen::Rand(150.0f)), nullptr,
 			                 nullptr);
 		}
 		if (mIsRapidFireMode) {
@@ -2311,6 +2326,14 @@ zen::DrawWorldMap::DrawWorldMap()
 	mPointScreen = new DrawScreen("screen/blo/w_point.blo", nullptr, true, true);
 	mLineScreen  = new DrawScreen("screen/blo/w_line.blo", nullptr, true, true);
 	mBackScreen  = new DrawScreen("screen/blo/w_back.blo", nullptr, true, true);
+#if defined(PIKI_PC_PORT)
+	// El fondo se estira solo en horizontal hasta el borde ancho.
+	{
+		P2DScreen* back = mBackScreen->getScreenPtr();
+		back->setScale(f32(pc_gfx_menu_virt_width()) / 640.0f, 1.0f, 1.0f);
+		back->setOffset(320, 240);
+	}
+#endif
 
 	mModeTimer    = 0.0f;
 	mCurrentMode  = DrawWorldMapMode::Null;
@@ -2540,13 +2563,8 @@ void zen::DrawWorldMap::draw(Graphics& gfx)
 #if defined(PIKI_PC_PORT)
 		// Las pantallas del mapa dibujan con el ortho 640x480 por defecto.
 		pc_gfx_note_menu_tap_space(640, 480);
-		// Los .blo del mapa guardan paneles fuera del 640x480 (ventanas que
-		// entran deslizándose, marcos en su posición de reposo). En 4:3 nunca
-		// se veían; en el marco ancho asomaban por los lados como bandas
-		// translúcidas. El fondo también se recorta (issue #46): su degradado
-		// y la placa de cristal de arriba asomaban por los lados. Queda con
-		// bandas negras, como el título y el selector de fichero.
-		pc_gfx_set_menu_clip_43(1);
+		// Pantalla completa (issue #46): sin recorte 4:3. Fondo y cortinillas
+		// se estiran al ancho; los paneles que asomen se esconden aparte.
 #endif
 		mBackScreen->draw();
 		mLineScreen->draw();
@@ -2569,10 +2587,6 @@ void zen::DrawWorldMap::draw(Graphics& gfx)
 #else
 		mEffectMgr2D->draw(gfx);
 		mConfirmMgr->draw(gfx);
-#if defined(PIKI_PC_PORT)
-		pc_gfx_set_menu_clip_43(0);
-		pc_gfx_set_scissor(0, 0, (u32)pc_gfx_menu_virt_width(), 480);
-#endif
 		mWipeScreen->draw();
 #endif
 	} else {

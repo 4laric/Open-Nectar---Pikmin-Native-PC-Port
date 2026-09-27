@@ -18,6 +18,9 @@ static f32 pcNaviHurt(f32 damage)
 	// keeps the life gauge and the "below a quarter" warnings honest, since
 	// both read the health prop as the maximum.
 	const int pct = pc_settings_get_navi_health_pct();
+	if (pct < 0) {
+		return 0.0f; // Infinite
+	}
 	if (pct != 100 && pct > 0) {
 		damage = damage * 100.0f / f32(pct);
 	}
@@ -1409,7 +1412,9 @@ void Navi::callPikis(f32 radius)
 #if defined(PIKI_PC_PORT)
 		// Cooperativo: un pikmin solo pertenece a un Olimar mientras está en su
 		// pelotón. Fuera de él (trabajando, libre) cualquiera puede silbarlo.
-		const bool callable = piki->mNavi == this || piki->mNavi == nullptr || piki->mMode != PikiMode::FormationMode;
+		bool callable = piki->mNavi == this || piki->mNavi == nullptr || piki->mMode != PikiMode::FormationMode;
+		// VS: solo se silban los propios y los que aún no tienen dueño.
+		if (pc_vs_active() && piki->mPlayerId >= 0 && piki->mPlayerId != mNaviID) callable = false;
 #else
 		const bool callable = piki->mNavi == this || piki->mNavi == nullptr;
 #endif
@@ -1483,6 +1488,10 @@ void Navi::callPikis(f32 radius)
 				continue;
 			}
 
+			// VS: los brotes del rival no se pueden arrancar.
+			if (pc_vs_active() && sprout->mPcOwner >= 0 && sprout->mPcOwner != mNaviID) {
+				continue;
+			}
 			if (sprout->canPullout() && sproutDist < radius) {
 				// Why would you put an `ERROR` here?  Just don't enable it??
 				TERNARY_BUILD_MATCHING(ERROR, PRINT)("cursor nuki!\n");
@@ -1493,6 +1502,7 @@ void Navi::callPikis(f32 radius)
 				if (piki) {
 					piki->init(this);
 					piki->initColor(sprout->mSeedColor);
+					if (pc_vs_active() && sprout->mPcOwner >= 0) piki->mPlayerId = sprout->mPcOwner;
 					piki->setFlower(sprout->mFlowerStage);
 					piki->resetPosition(sprout->mSRT.t);
 					piki->mFSM->transit(piki, PIKISTATE_AutoNuki);
@@ -1846,6 +1856,8 @@ bool Navi::procActionButton()
 					if (other && other != this && other->mSproutToPluck == sprout) claimed = true;
 				}
 				if (claimed) continue;
+				// VS: los brotes del rival no se pueden arrancar.
+				if (pc_vs_active() && sprout->mPcOwner >= 0 && sprout->mPcOwner != mNaviID) continue;
 #endif
 				minDist       = sproutDist;
 				closestSprout = sprout;
@@ -1877,6 +1889,7 @@ bool Navi::procActionButton()
 		if (piki) {
 			piki->init(this);
 			piki->initColor(closestSprout->mSeedColor);
+			if (pc_vs_active() && closestSprout->mPcOwner >= 0) piki->mPlayerId = closestSprout->mPcOwner;
 			piki->setFlower(closestSprout->mFlowerStage);
 			piki->resetPosition(closestSprout->mSRT.t);
 			piki->changeMode(PikiMode::FreeMode, this);
@@ -2200,6 +2213,9 @@ void Navi::makeVelocity(bool isSunset)
 			} else {
 				mTargetVelocity = (stickVec * NAVI_PARM(mMoveSpeed)) * drag;
 			}
+#if defined(PIKI_PC_PORT)
+			mTargetVelocity = mTargetVelocity * pc_settings_get_navi_speed_scale(); // cheat "Olimar Speed"
+#endif
 
 			if (mGroundTriangle) {
 				// ?? this does nothing.
@@ -2718,10 +2734,84 @@ void Navi::applyPlayerLightTint()
 	} else if (pcCaptain() == PC_CAPTAIN_LOUIE) {
 		light.set(80, 140, 255, 255);
 		tinted = true;
+	} else if (pc_captain_piki_color(pcCaptain()) >= 0) {
+		light.set(90, 255, 110, 255); // capitán Pikmin: la hoja brilla verde
+		tinted = true;
 	}
 	if (!tinted) return;
 	if (mNaviLightEfx) mNaviLightEfx->setTint(light);
 	if (mNaviLightGlowEfx) mNaviLightGlowEfx->setTint(light);
+}
+
+// Capitán Pikmin. Pikmin y capitanes comparten la tabla de movimientos
+// (PikiNaviAnim), así que el Pikmin reproduce la misma animación y el mismo
+// fotograma que Olimar. Solo cambia el aspecto: el esqueleto de Olimar se
+// sigue animando (colisiones, antena, mano del lanzamiento).
+static void pcSyncPikiAnimator(PaniPikiAnimator& dst, PaniPikiAnimator& src, AnimMgr* mgr)
+{
+	int anim = src.mAnimInfo ? src.mCurrentAnimID : -1;
+	if (anim < 0 || anim >= mgr->countAnims()) {
+		// El Pikmin no tiene esa animación: sigue con la suya, o espera.
+		if (dst.mAnimInfo) return;
+		anim = PaniPikiAnimMgr::getMotionTable()->getMotion(PIKIANIM_Wait)->mAnimID;
+	}
+	if (!dst.mAnimInfo || dst.mCurrentAnimID != anim) {
+		dst.startAnim(src.mAnimInfo ? src.mPlayState : ANIMSTATE_Loop, anim, 0, 8);
+	}
+	if (src.mAnimInfo && src.mCurrentAnimID == anim) {
+		const f32 last = f32(dst.mAnimInfo->mData->mTotalFrameCount) - 1.0f;
+		f32 t          = src.mAnimationCounter;
+		dst.mAnimationCounter = t < 0.0f ? 0.0f : (t > last ? last : t);
+	}
+}
+
+bool Navi::pcDrawAsPikmin(Graphics& gfx)
+{
+	const int color = pc_captain_piki_color(pcCaptain());
+	if (color < 0) return false;
+
+	PikiShapeObject* obj = PikiShapeObject::create(color);
+	if (mPcPikiAnimColor != color) {
+		mPcPikiAnimMgr.init(obj->mAnimMgr, &obj->mAnimatorB, &obj->mAnimatorA, naviMgr->mMotionTable);
+		mPcPikiAnimColor = color;
+	}
+	pcSyncPikiAnimator(mPcPikiAnimMgr.getUpperAnimator(), mNaviAnimMgr.getUpperAnimator(), obj->mAnimMgr);
+	pcSyncPikiAnimator(mPcPikiAnimMgr.getLowerAnimator(), mNaviAnimMgr.getLowerAnimator(), obj->mAnimMgr);
+	// El modelo es compartido por todos los Pikmin de ese color: como hace
+	// ViewPiki, se vuelca el estado propio justo antes de animar y dibujar.
+	mPcPikiAnimMgr.changeContext(&obj->mAnimatorB, &obj->mAnimatorA);
+	mPcPikiAnimMgr.updateContext();
+
+	// Misma pose que Olimar, a tamaño de Pikmin.
+	Matrix4f world = mWorldMtx;
+	const f32 k    = mSRT.s.x > 0.0f ? pikiMgr->mPikiParms->mPikiParms.mPikiDisplayScale() / mSRT.s.x : 1.0f;
+	for (int i = 0; i < 3; i++) {
+		for (int j = 0; j < 3; j++) {
+			world.mMtx[i][j] *= k;
+		}
+	}
+	Matrix4f view;
+	gfx.mCamera->mLookAtMtx.multiplyTo(world, view);
+	obj->mShape->updateAnim(gfx, view, nullptr, this);
+
+	// La textura original es gris y la pinta el color del Pikmin.
+	obj->mShape->mMaterialList->setColour(Piki::pikiColors[color]);
+	static const PcHdModelId kHdPiki[PikiColorCount] = { PC_HD_MODEL_PIKI_BLUE, PC_HD_MODEL_PIKI_RED, PC_HD_MODEL_PIKI_YELLOW };
+	if (!pc_hd_model_draw_skinned(gfx, obj->mShape, kHdPiki[color], pcTint())) {
+		obj->mShape->drawshape(gfx, *gfx.mCamera, nullptr);
+	}
+
+	// Hoja, siempre hoja (no capullo ni flor).
+	gfx.useMatrix(obj->mShape->getAnimMatrix(6), 0);
+	const GXColor white = { 255, 255, 255, 255 };
+	if (!pc_hd_model_draw_rigid(gfx, obj->mShape->getAnimMatrix(6), PC_HD_MODEL_HAPPA_LEAF, white) && pikiMgr->mLeafModel[Leaf]) {
+		pikiMgr->mLeafModel[Leaf]->drawshape(gfx, *gfx.mCamera, nullptr);
+	}
+
+	Vector3f tip(6.0f, 0.0f, 0.0f);
+	obj->mShape->calcJointWorldPos(gfx, 6, tip);
+	mPcPikiLeafTip = tip;
+	return true;
 }
 #endif
 
@@ -2743,6 +2833,8 @@ void Navi::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 	// salen las esferas de colisión (sin ellas no se abre la cebolla).
 	bool drawn = mNaviID == 0 && pc_first_person_active();
 	if (drawn) {
+	} else if (pcDrawAsPikmin(gfx)) {
+		drawn = true;
 	} else if (pcCaptain() == PC_CAPTAIN_LOUIE) {
 		drawn = pc_hd_model_draw_skinned(gfx, mNaviShapeObject->mShape, PC_HD_MODEL_LOUIE_HD, hdTint)
 		     || pc_hd_model_draw_skinned(gfx, mNaviShapeObject->mShape, PC_HD_MODEL_LOUIE, hdTint);
@@ -2765,6 +2857,12 @@ void Navi::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 		// of dereferencing a missing collision part during the transition.
 		mNaviLightPosition.set(mSRT.t.x, mSRT.t.y + 10.0f, mSRT.t.z);
 	}
+#if defined(PIKI_PC_PORT)
+	// Capitán Pikmin: la luz sale de la punta de la hoja, no de la antena.
+	if (pc_captain_piki_color(pcCaptain()) >= 0 && !(mNaviID == 0 && pc_first_person_active())) {
+		mNaviLightPosition = mPcPikiLeafTip;
+	}
+#endif
 	mNaviLightEfx->updatePos(mNaviLightPosition);
 	mNaviLightGlowEfx->updatePos(mNaviLightPosition);
 }

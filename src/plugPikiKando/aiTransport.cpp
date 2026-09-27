@@ -19,6 +19,7 @@
 #include "SoundMgr.h"
 #include "Stickers.h"
 #include "settings/pc_settings.h"
+#include "pc_coop.h"
 #include "UfoItem.h"
 #include "UtilityKando.h"
 #include "bugprint.h"
@@ -831,6 +832,7 @@ int ActTransport::exec()
 
 			f32 speed = ((carriers + 1.0f - f32(minCarry)) / f32(maxCarry)) * (maxSpeed - minSpeed) + minSpeed;
 			goalDir.y = 0.0f;
+			speed *= pc_settings_get_carry_speed_scale(); // cheat "Carry Speed"
 			goalDir.multiply(speed);
 			pel->doCarry(mPiki, goalDir, numStickers);
 			break;
@@ -977,6 +979,7 @@ int ActTransport::moveGuruGuru()
 		f32 factor   = (getCarriers() + 1.0f - f32(minWeight)) / f32(pel->mConfig->mCarryMaxPikis());
 		f32 speed    = factor * (maxSpeed - minSpeed);
 		speed        = (minSpeed + speed);
+		speed *= pc_settings_get_carry_speed_scale(); // cheat "Carry Speed"
 		speed *= 0.5f;
 		vel.multiply(speed);
 		pel->doCarry(mPiki, vel, numStickers);
@@ -1000,7 +1003,12 @@ void ActTransport::decideGoal(Creature* cargo)
 	Pellet* pel = mPellet.getPtr();
 	PRINT("pellet type is %d\n", pel->mConfig->mPelletType());
 	if (pel->mConfig->mPelletType() == PELTYPE_UfoPart) {
+#if defined(PIKI_PC_PORT)
+		// VS: al cohete del dueño de quien carga.
+		mGoal = itemMgr->pcGetUfo(mPiki->mPlayerId);
+#else
 		mGoal = itemMgr->getUfo();
+#endif
 		if (!mGoal) {
 			ERROR("no ufo!");
 		}
@@ -1014,6 +1022,11 @@ void ActTransport::decideGoal(Creature* cargo)
 	int numOptions = 0;
 	int onyonColor = Blue;
 	bool isVsMode  = flowCont.mIsVersusMode == TRUE;
+#if defined(PIKI_PC_PORT)
+	// El reparto de Nintendo (amarillos a la cebolla del capitán) no aplica al
+	// VS del port: cada jugador tiene sus tres cebollas (fase 2).
+	if (pc_vs_active()) isVsMode = false;
+#endif
 
 	PRINT_KANDO("###### decide goal\n");
 	int i;
@@ -1061,7 +1074,12 @@ void ActTransport::decideGoal(Creature* cargo)
 
 	onyonColor = optionColors[randColor];
 	PRINT_KANDO(" ## color %d is selected\n", onyonColor);
-	mGoal                     = itemMgr->getContainer(onyonColor);
+#if defined(PIKI_PC_PORT)
+	// VS: a la cebolla de ese color del dueño de quien carga.
+	mGoal = itemMgr->pcGetContainer(onyonColor, mPiki->mPlayerId);
+#else
+	mGoal = itemMgr->getContainer(onyonColor);
+#endif
 	mPellet.mPtr->mTargetGoal = mGoal; // hmm.
 
 	if (!mGoal) {
@@ -1637,6 +1655,7 @@ int ActTransport::moveToWayPoint()
 		f32 factor   = (getCarriers() + 1.0f - f32(minCarriers)) / f32(pel->mConfig->mCarryMaxPikis());
 		f32 speed    = factor * (maxSpeed - minSpeed);
 		speed        = (minSpeed + speed);
+		speed *= pc_settings_get_carry_speed_scale(); // cheat "Carry Speed"
 		// speed *= 0.5f;
 		mMoveDir.y = 0.0f;
 		mMoveDir.normalise();

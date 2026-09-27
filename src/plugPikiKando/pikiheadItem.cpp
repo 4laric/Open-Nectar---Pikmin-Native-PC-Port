@@ -1,4 +1,7 @@
 #include "PikiHeadItem.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_coop.h"
+#endif
 #include "DebugLog.h"
 #include "GameStat.h"
 #include "GoalItem.h"
@@ -266,6 +269,9 @@ bool PikiHeadItem::interactBikkuri(immut InteractBikkuri& act)
 		Navi* navi = naviMgr->getNavi();
 		piki->init(navi);
 		piki->initColor(mSeedColor);
+#if defined(PIKI_PC_PORT)
+		if (pc_vs_active() && mPcOwner >= 0) piki->mPlayerId = mPcOwner;
+#endif
 		piki->setFlower(mFlowerStage);
 		piki->resetPosition(mSRT.t);
 
@@ -293,6 +299,9 @@ bool PikiHeadItem::interactSwallow(immut InteractSwallow& act)
 		Navi* navi = naviMgr->getNavi();
 		piki->init(navi);
 		piki->initColor(mSeedColor);
+#if defined(PIKI_PC_PORT)
+		if (pc_vs_active() && mPcOwner >= 0) piki->mPlayerId = mPcOwner;
+#endif
 		piki->setFlower(mFlowerStage);
 		piki->resetPosition(mSRT.t);
 		piki->mFSM->transit(piki, PIKISTATE_AutoNuki);

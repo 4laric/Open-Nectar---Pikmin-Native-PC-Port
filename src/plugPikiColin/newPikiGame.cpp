@@ -27,6 +27,7 @@
 #include <chrono>
 
 #include "settings/pc_settings.h"
+#include "pc_vs.h"
 #include "gl/pc_gfx.h"
 #include "jaudio/piki_scene.h"
 #include "jaudio/pikidemo.h"
@@ -929,6 +930,15 @@ ModeState* IntroGameModeState::update(u32& result)
  */
 ModeState* RunningModeState::update(u32& result)
 {
+#if defined(PIKI_PC_PORT)
+	// VS: revancha o título, pedidos desde la pantalla final.
+	if (const int vsExit = pc_vs_take_exit_request()) {
+		gameflow.mPauseAll                         = FALSE;
+		mParentSection->mPendingOnePlayerSectionID = vsExit == PC_VS_EXIT_REMATCH ? ONEPLAYER_NewPikiGame : ONEPLAYER_GameExit;
+		gsys->setFade(0.0f);
+		return new QuittingGameModeState(mParentSection);
+	}
+#endif
 	result = UPDATE_ALL; // enable all update types to start, then disable any we don't want.
 
 	// if we've entered the end of day cutscene, transit to the day over state to handle the day end phases
@@ -1105,6 +1115,15 @@ ModeState* RunningModeState::update(u32& result)
 		// disable AI updates when pause menu is active
 		result &= ~UPDATE_AI;
 
+#if defined(PIKI_PC_PORT)
+	} else if (pc_vs_active() && (state == zen::ogScrPauseMgr::PAUSE_ExitToSunset || state == zen::ogScrPauseMgr::PAUSE_ExitToTitle)) {
+		// VS: no hay atardecer ni selección de nivel. "Atardecer" es revancha
+		// y "salir", volver al título.
+		gameflow.mIsUIOverlayActive                = mIsOverlayCached;
+		mParentSection->mPendingOnePlayerSectionID = state == zen::ogScrPauseMgr::PAUSE_ExitToSunset ? ONEPLAYER_NewPikiGame : ONEPLAYER_GameExit;
+		gsys->setFade(0.0f);
+		return new QuittingGameModeState(mParentSection);
+#endif
 	} else if (state == zen::ogScrPauseMgr::PAUSE_ExitToSunset) {
 		// go to sunset selected - end the day
 		gamecore->forceDayEnd();
@@ -1782,6 +1801,9 @@ ModeState* DayOverModeState::initialisePhaseTwo()
 		}
 
 		// advance the day and handle the end-of-day results entries
+#if defined(PIKI_PC_PORT)
+		if (!pc_settings_get_no_day_advance()) // cheat "No Day Limit"
+#endif
 		gameflow.mWorldClock.mCurrentDay++;
 		if (!gameflow.mIsChallengeMode) {
 			// story mode - get a diary entry to show at the end of the day, along with how many pages/screens it has
@@ -2146,7 +2168,11 @@ public:
 		if (playerState->isTutorial()) {
 			// start our wake-up post-crash-landing cutscene for Day 1
 			gameflow.mMoviePlayer->startMovie(DEMOID_OlimarWakeUp, 0, nullptr, nullptr, nullptr, CAF_AllVisibleMask, true);
-		} else if (flowCont.mCurrentStage->mStageID < STAGE_COUNT) {
+		} else if (flowCont.mCurrentStage->mStageID < STAGE_COUNT
+#if defined(PIKI_PC_PORT)
+		           && !pc_vs_active() // VS: directo al mapa, todo ya colocado
+#endif
+		) {
 			// landing cutscene if we have a valid stage!
 			gameflow.mMoviePlayer->startMovie(DEMOID_Landing, 0, nullptr, nullptr, nullptr, CAF_AllVisibleMask, true);
 		}

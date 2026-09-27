@@ -14,6 +14,7 @@
 #include "pc_gfx.h"
 #include "pc_art.h"
 #include "pc_coop.h"
+#include "PikiMgr.h"
 #endif
 #if PIKI_PC_TOUCH
 #include "touch/pc_touch.h"
@@ -304,10 +305,21 @@ struct NaviTexCallBack : public P2DPaneCallBack {
 		if (naviMgr) {
 			Navi* navi = naviMgr->getNavi(zen::gHudNaviIndex);
 #if defined(PIKI_PC_PORT)
-			// Coop: retrato de Louie (Pikmin 2) cuando este capitán es Louie.
+			// Retrato del capitán: Louie (Pikmin 2) o, para un capitán Pikmin, el
+			// icono de burbuja del propio juego con hoja (el del contador).
 			if (!mOriginalTex) mOriginalTex = pic->getTexture(0);
-			Texture* louie = pc_art_texture("coop_portrait_louie");
-			Texture* want  = (navi->pcCaptain() == PC_CAPTAIN_LOUIE && louie) ? louie : mOriginalTex;
+			static Texture* sPikiPortrait[PikiColorCount] = {};
+			static const char* kPikiPortrait[PikiColorCount] = { "screen/tex/bp_l64.bti", "screen/tex/rp_l64.bti", "screen/tex/yp_l64.bti" };
+			const int captain  = navi->pcCaptain();
+			const int pikColor = pc_captain_piki_color(captain);
+			Texture* custom    = nullptr;
+			if (pikColor >= 0) {
+				if (!sPikiPortrait[pikColor]) sPikiPortrait[pikColor] = zen::loadTexExp(kPikiPortrait[pikColor], true, true);
+				custom = sPikiPortrait[pikColor];
+			} else if (captain == PC_CAPTAIN_LOUIE) {
+				custom = pc_art_texture("coop_portrait_louie");
+			}
+			Texture* want = custom ? custom : mOriginalTex;
 			if (want && pic->getTexture(0) != want) pic->setTexture(want, 0);
 #endif
 			if (navi->mHealth == 0.0f) {
@@ -611,7 +623,12 @@ struct MapPikminWindowCallBack : public P2DPaneCallBack {
 			mPulseTimer -= 2.0f;
 		}
 
+#if defined(PIKI_PC_PORT)
+		// VS: lleno al llegar al tope del jugador (la mitad del límite).
+		if (zen::pGameInfo->mMapPikiNum == (pc_vs_active() ? pcVsFieldLimit() : MAX_PIKI_ON_FIELD)) {
+#else
 		if (zen::pGameInfo->mMapPikiNum == MAX_PIKI_ON_FIELD) {
+#endif
 			mPulseStrength += gsys->getFrameTime();
 			if (mPulseStrength > 1.0f) {
 				mPulseStrength = 1.0f;
@@ -880,9 +897,10 @@ void zen::DrawGameInfo::drawShared(Graphics& gfx)
 	GXSetZMode(GX_FALSE, GX_ALWAYS, GX_FALSE);
 	P2DPerspGraph perspGraph(0, 0, virtW, 480, 30.0f, 1.0f, 5000.0f);
 	perspGraph.setPort();
-	mUpperScreenMgr->draw(&perspGraph, dx / 2);
+	if (!pc_vs_active()) // VS: sin indicador del sol (el día no avanza)
+		mUpperScreenMgr->draw(&perspGraph, dx / 2);
 	mDateScreenMgr->update();
-	mDateScreenMgr->draw(&perspGraph, dx);
+	if (!pc_vs_active()) mDateScreenMgr->draw(&perspGraph, dx);
 	pc_gfx_set_hud_wide(0);
 }
 
@@ -938,14 +956,16 @@ void zen::DrawGameInfo::draw(Graphics& gfx)
 #if defined(PIKI_PC_PORT)
 	P2DPerspGraph perspGraph(0, 0, virtW, 480, 30.0f, 1.0f, 5000.0f);
 	perspGraph.setPort();
-	mUpperScreenMgr->draw(&perspGraph, dx / 2);
+	if (!pc_vs_active()) // VS: sin indicador del sol (el día no avanza)
+		mUpperScreenMgr->draw(&perspGraph, dx / 2);
 	mLowerScreenMgr->draw(&perspGraph, 0);
 	mModeScreenMgr->draw(&perspGraph, dx);
 	pc_gfx_set_hud_wide(0);
 #else
 	P2DPerspGraph perspGraph(0, 0, 640, 480, 30.0f, 1.0f, 5000.0f);
 	perspGraph.setPort();
-	mUpperScreenMgr->draw(&perspGraph);
+	if (!pc_vs_active()) // VS: sin indicador del sol (el día no avanza)
+		mUpperScreenMgr->draw(&perspGraph);
 	mLowerScreenMgr->draw(&perspGraph);
 	mModeScreenMgr->draw(&perspGraph);
 #endif

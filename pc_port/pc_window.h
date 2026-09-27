@@ -190,6 +190,10 @@ extern "C" void pc_window_add_touch_zoom(float delta);
 extern "C" float pc_window_take_touch_zoom(void);
 extern "C" void pc_window_add_camera_drag(float normalizedDx);
 extern "C" float pc_window_take_camera_drag(void);
+/// Arrastre de cámara por jugador: el joystick derecho de cada mando va a
+/// su jugador; ratón y táctil, a J1.
+extern "C" void pc_window_add_camera_drag_player(int player, float normalizedDx);
+extern "C" float pc_window_take_camera_drag_player(int player);
 extern "C" void pc_window_add_camera_pitch(float normalizedDy);
 extern "C" float pc_window_take_camera_pitch(void);
 

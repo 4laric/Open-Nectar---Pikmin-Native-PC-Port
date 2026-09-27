@@ -182,8 +182,14 @@ public:
 	/// Coop: color de la luz de la antena según capitán/tinte. Llamar tras
 	/// cada changeEffect.
 	void applyPlayerLightTint();
-	/// Capitán de este Olimar (PcCaptain): Olimar o Louie.
+	/// Capitán de este Olimar (PcCaptain): Olimar, Louie o un Pikmin.
 	int pcCaptain();
+	/// Capitán Pikmin: dibuja el Pikmin del color elegido (con hoja) usando
+	/// la animación de Olimar. false si el capitán no es un Pikmin.
+	bool pcDrawAsPikmin(Graphics& gfx);
+	PaniPikiAnimMgr mPcPikiAnimMgr;
+	int mPcPikiAnimColor = -1;
+	Vector3f mPcPikiLeafTip; ///< punta de la hoja: ahí brilla la luz del capitán
 	/// Tinte de distinción (solo J2 cuando ambos llevan el mismo capitán).
 	bool pcHasTint();
 	GXColor pcTint();

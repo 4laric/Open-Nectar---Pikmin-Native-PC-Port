@@ -3,6 +3,7 @@
 #include "pc_window.h"
 #include "pc_gyro.h"
 #include "settings/pc_settings.h"
+#include "pc_coop.h"
 #endif
 #include "Creature.h"
 #include "DebugLog.h"
@@ -144,7 +145,8 @@ void PcamCamera::startCamera(Creature* target, int zoom, int angle)
 		mTimers[i] = 0.0f;
 	}
 
-	if (flowCont.mIsVersusMode == TRUE) {
+	// VS del port: pantalla partida, cada cámara sigue solo a su capitán.
+	if (flowCont.mIsVersusMode == TRUE && !pc_vs_active()) {
 		mCreatureArray->add(naviMgr->getNavi(0));
 		mCreatureArray->add(naviMgr->getNavi(1));
 	}
@@ -289,7 +291,8 @@ void PcamCamera::control(Controller& controller)
 	control(info);
 	// Arrastre de cámara: el pellizco táctil, y con el mod "Free Camera" el
 	// ratón y el stick derecho. Mismo acumulador para los tres.
-	const float cameraDrag = pc_window_take_camera_drag();
+	const int dragPlayer   = (mTargetCreature && mTargetCreature->mObjType == OBJTYPE_Navi) ? static_cast<Navi*>(mTargetCreature)->mNaviID : 0;
+	const float cameraDrag = pc_window_take_camera_drag_player(dragPlayer);
 	if (mIsActive && mControlsEnabled && cameraDrag != 0.0f) {
 		// Aproximadamente media vuelta por una pasada de un ancho de pantalla.
 		mPolarDir.rotateAzimuth(cameraDrag * 3.2f);

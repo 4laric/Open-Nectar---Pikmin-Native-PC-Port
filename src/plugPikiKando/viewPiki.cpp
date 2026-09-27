@@ -19,6 +19,11 @@
 #include "gameflow.h"
 #include "sysNew.h"
 #if defined(PIKI_PC_PORT)
+#include "settings/pc_settings.h"
+#include "pc_coop.h"
+#include "pc_gfx.h"
+#endif
+#if defined(PIKI_PC_PORT)
 #include "timing/pc_render_phase.h"
 #endif
 
@@ -215,6 +220,9 @@ void ViewPiki::init(Shape* shp, MapMgr*, Navi* navi)
 void ViewPiki::setFlower(int id)
 {
 	if (!isKinoko()) {
+#if defined(PIKI_PC_PORT)
+		if (pc_settings_get_all_flowers()) id = Flower; // cheat "All Flowers"
+#endif
 		mHappa      = id;
 		mHappaModel = pikiMgr->mLeafModel[id];
 	}
@@ -511,9 +519,17 @@ void ViewPiki::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 	if (aiCullable() && AIPerf::optLevel < 3 && mHappaModel) {
 		gfx.useMatrix(mPikiShape->mShape->getAnimMatrix(6), 0);
 #if defined(PIKI_PC_PORT)
-		if (!pc_hd_model_draw_rigid(gfx, mPikiShape->mShape->getAnimMatrix(6), hdHappaModel(), hdHappaTint))
+		// VS: la hoja/flor de los Pikmin de J2 va teñida de violeta; el cuerpo
+		// conserva su color para que se sepa qué tipo de Pikmin es.
+		const GXColor vsP2Tint = { 190, 70, 255, 255 };
+		const bool vsP2        = pc_vs_active() && mPlayerId == 1;
+		if (vsP2) pc_gfx_set_mat_color_tint(vsP2Tint);
+		if (!pc_hd_model_draw_rigid(gfx, mPikiShape->mShape->getAnimMatrix(6), hdHappaModel(), vsP2 ? vsP2Tint : hdHappaTint))
 #endif
 			mHappaModel->drawshape(gfx, *gfx.mCamera, nullptr);
+#if defined(PIKI_PC_PORT)
+		if (vsP2) pc_gfx_clear_mat_color_tint();
+#endif
 	}
 
 	if (mMode == PikiMode::FormationMode && AIPerf::kandoOnly) {

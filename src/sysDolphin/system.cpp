@@ -11,6 +11,7 @@
 #include "pc_gfx.h"
 #include "settings/pc_settings.h"
 #include "timing/pc_render_packet.h"
+#include "mods/pc_vs_arena.h"
 #endif
 
 #include "bigFont.h"
@@ -173,6 +174,15 @@ void DVDStream::init()
  */
 RandomAccessStream* System::openFile(immut char* path, bool isRelativePath, bool)
 {
+#if defined(PIKI_PC_PORT)
+	// Arena del modo VS: rutas virtuales montadas en memoria desde los datos
+	// del juego (sin archivos nuevos en disco).
+	if (isRelativePath) {
+		if (RandomAccessStream* arena = pc_vs_arena_open(path)) {
+			return arena;
+		}
+	}
+#endif
 	char strPath[PATH_MAX];
 	sprintf(strPath, "%s", isRelativePath ? mActiveDir : "");
 	sprintf(strPath, "%s%s%s", strPath, isRelativePath ? mDataRoot : "", path);

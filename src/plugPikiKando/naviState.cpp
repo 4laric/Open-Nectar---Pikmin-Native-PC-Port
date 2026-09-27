@@ -1,4 +1,7 @@
 #include "NaviState.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_coop.h"
+#endif
 #include <cstdlib>
 #include <cstdio>
 #include "AIConstant.h"
@@ -595,7 +598,12 @@ void NaviWalkState::exec(Navi* navi)
 	}
 
 	for (int i = 0; i < 3; i++) {
+#if defined(PIKI_PC_PORT)
+		// VS: cada capitán solo abre sus cebollas.
+		GoalItem* onyon = itemMgr->pcGetContainer(i, navi->mNaviID);
+#else
 		GoalItem* onyon = itemMgr->getContainer(i);
+#endif
 		if (!onyon) {
 			continue;
 		}
@@ -1053,7 +1061,11 @@ void NaviContainerState::init(Navi* navi)
 
 	int totalExitPendingPikis = 0;
 	for (int i = 0; i < 3; i++) {
+#if defined(PIKI_PC_PORT)
+		GoalItem* goal = itemMgr->pcGetContainer(i, navi->mNaviID);
+#else
 		GoalItem* goal = itemMgr->getContainer(i);
+#endif
 		if (goal) {
 			totalExitPendingPikis += goal->mPikisToExit;
 		}
@@ -1067,9 +1079,11 @@ void NaviContainerState::init(Navi* navi)
 	zen::DrawContainer* win = pcContainerWindowFor(navi);
 	const bool coop         = containerWindow2 != nullptr;
 	if (!coop) gameflow.mGameInterface->message(MOVIECMD_HideHUD, 0);
+	// VS: el campo y el tope son los del jugador (mitad del límite cada uno).
+	const int fieldNow = pc_vs_active() ? pcVsFieldPikis(navi->mNaviID) : totalExitPendingPikis + GameStat::mapPikis;
+	const int fieldMax = pc_vs_active() ? pcVsFieldLimit() : int(AICONST.mMaxPikisOnField());
 	win->start((zen::DrawContainer::containerType)navi->mGoalItem->mOnionColour, storedPikisAvailable, 10000,
-	           numOnionColoredPikis, AICONST.mMaxPikisOnField(), totalExitPendingPikis + GameStat::mapPikis,
-	           AICONST.mMaxPikisOnField());
+	           numOnionColoredPikis, fieldMax, fieldNow, fieldMax);
 	if (!coop) gameflow.mPauseAll = TRUE;
 #else
 	gameflow.mGameInterface->message(MOVIECMD_HideHUD, 0);
@@ -2897,6 +2911,9 @@ void NaviNukuAdjustState::exec(Navi* navi)
 			}
 			piki->init(navi);
 			piki->initColor(navi->mSproutToPluck->mSeedColor);
+#if defined(PIKI_PC_PORT)
+			if (pc_vs_active() && navi->mSproutToPluck->mPcOwner >= 0) piki->mPlayerId = navi->mSproutToPluck->mPcOwner;
+#endif
 			piki->setFlower(navi->mSproutToPluck->mFlowerStage);
 			piki->resetPosition(navi->mSproutToPluck->mSRT.t);
 

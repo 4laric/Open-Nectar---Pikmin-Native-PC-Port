@@ -19,6 +19,7 @@
 #include "pc_gfx.h"
 #include "pc_permadeath.h"
 #include "pc_coop.h"
+#include "mods/pc_vs_arena.h"
 #include "pc_window.h"
 #include "settings/pc_settings.h"
 #endif
@@ -83,7 +84,12 @@ struct CardSelectSetupSection : public Node {
 #if defined(PIKI_PC_PORT)
 		// El selector 1P/2P va antes del slot (PLAN_COOP fase 0b). Challenge
 		// mode se lo salta: siempre 1 jugador.
-		if (!gameflow.mIsChallengeMode && pc_coop_take_chosen_at_title()) {
+		if (gameflow.mIsChallengeMode && pc_vs_pending() && pc_coop_take_chosen_at_title()) {
+			// VS: primero la explicación y las reglas; luego mandos y
+			// capitanes de los dos jugadores; sin fichero.
+			mAwaitingVsRules = true;
+			pc_vsrules_prompt_open();
+		} else if (!gameflow.mIsChallengeMode && pc_coop_take_chosen_at_title()) {
 			// Elegido en el menú del título (Start / Co-op): sin selector 1P/2P.
 			if (pc_coop_pending()) {
 				mAwaitingDevAssign = true;
@@ -147,6 +153,25 @@ struct CardSelectSetupSection : public Node {
 			memcardWindow->start(gameflow.mIsChallengeMode);
 			return;
 		}
+		if (mAwaitingVsRules) {
+			const int choice = pc_vsrules_prompt_result();
+			if (choice == PC_DEVASSIGN_PENDING) {
+				return;
+			}
+			mAwaitingVsRules = false;
+			if (choice == PC_DEVASSIGN_CANCELLED) {
+				// Atrás: vuelta al título.
+				pc_vs_set_pending(false);
+				pc_coop_set_pending(false);
+				mNextSectionsFlag = PACK_NEXT_ONEPLAYER(ONEPLAYER_GameExit);
+				mState            = Exit;
+				gsys->setFade(0.0f);
+				return;
+			}
+			mAwaitingDevAssign = true;
+			pc_devassign_prompt_open();
+			return;
+		}
 		if (mAwaitingPlayerCount) {
 			const int choice = pc_playercount_prompt_result();
 			if (choice == PC_PLAYERCOUNT_PENDING) {
@@ -177,6 +202,19 @@ struct CardSelectSetupSection : public Node {
 				return;
 			}
 			mAwaitingDevAssign = false;
+			if (pc_vs_pending()) {
+				if (choice == PC_DEVASSIGN_CANCELLED) {
+					// Atrás en VS: vuelta al título.
+					pc_window_input_reset_assignment();
+					pc_vs_set_pending(false);
+					pc_coop_set_pending(false);
+					mNextSectionsFlag = PACK_NEXT_ONEPLAYER(ONEPLAYER_GameExit);
+				}
+				// Confirmado: sin selector de fichero; la salida lleva al mapa.
+				mState = Exit;
+				gsys->setFade(0.0f);
+				return;
+			}
 			if (choice == PC_DEVASSIGN_CANCELLED) {
 				pc_window_input_reset_assignment();
 				mAwaitingPlayerCount = true;
@@ -288,6 +326,25 @@ struct CardSelectSetupSection : public Node {
 
 					// next subsection will be (challenge mode) map select
 					gameflow.mNextOnePlayerSectionID = ONEPLAYER_MapSelect;
+#if defined(PIKI_PC_PORT)
+					// VS: la arena propia (mods/pc_vs_arena), sin selector. El
+					// StageInfo es el de Impact Site (música, cielo); el escenario
+					// y el mapa son las rutas virtuales de la arena.
+					if (pc_vs_pending()) {
+						FOREACH_NODE(StageInfo, flowCont.mStageList.mChild, stage)
+						{
+							if (stage->mChalStageID == CHALSTAGE_Practice) {
+								flowCont.mCurrentStage = stage;
+								sprintf(flowCont.mCurrStageFilePath, "%s", PC_VS_ARENA_STAGE);
+								sprintf(flowCont.mDoorStageFilePath, "%s", PC_VS_ARENA_STAGE);
+								// Mediodía (el sol en lo más alto); en VS el día no avanza.
+								gameflow.mWorldClock.setTime((gameflow.mParameters->mStartHour() + gameflow.mParameters->mEndHour()) * 0.5f);
+								gameflow.mNextOnePlayerSectionID = ONEPLAYER_NewPikiGame;
+								break;
+							}
+						}
+					}
+#endif
 				}
 
 				// don't show any preference for ship position or any unlock animations on map screen
@@ -336,6 +393,10 @@ struct CardSelectSetupSection : public Node {
 		// is up, so the prompt is all there is to draw.
 		if (mAwaitingPlayerCount) {
 			pc_playercount_prompt_draw();
+			return;
+		}
+		if (mAwaitingVsRules) {
+			pc_vsrules_prompt_draw();
 			return;
 		}
 		if (mAwaitingDevAssign) {
@@ -446,6 +507,7 @@ struct CardSelectSetupSection : public Node {
 	bool mAwaitingPlayerCount   = false; ///< The 1P/2P prompt is up (before the slot screen).
 	bool mAwaitingCaptain       = false; ///< 1P: selector Olimar/Louie antes del slot.
 	bool mAwaitingDevAssign     = false; ///< The controller assignment prompt is up.
+	bool mAwaitingVsRules       = false; ///< VS: explicación y reglas, antes de los mandos.
 	bool mAwaitingNewGameChoice = false; ///< The new-game prompt is up.
 	zen::ogScrFileChkSelMgr* mPromptBackdrop     = nullptr; ///< Pantalla de slots dibujada bajo el prompt.
 	zen::ogScrFileChkSelMgr* mPromptBackdropNext = nullptr;

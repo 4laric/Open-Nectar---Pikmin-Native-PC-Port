@@ -63,13 +63,13 @@ void zen::ogScrTitleMgr::setGamePrefs()
 zen::ogScrTitleMgr::ogScrTitleMgr()
 {
 #if defined(PIKI_PC_PORT)
-	// Co-op (bajo Start) y Advanced Options (bajo Options) como opciones del
-	// menú principal: dos huecos extra clonados del último. Con 4 ítems se
-	// compacta el paso a 36 px; con 5 (Challenge Mode) a 33 px, subiendo el
+	// Co-op y VS (bajo Start) y Advanced Options (bajo Options) como opciones
+	// del menú principal: tres huecos extra clonados del último. Con 5 ítems
+	// se compacta el paso a 33 px; con 6 (Challenge Mode) a 30 px, subiendo el
 	// panel para no pisar el logo ni el copyright.
 	// El cristal se ensancha 40 px para que "Advanced Options" respire.
-	const PcMenuExtend extNoChallenge   = { 2, 36, -32, 'yoko', 40 };
-	const PcMenuExtend extWithChallenge = { 2, 33, -44, 'yoko', 40 };
+	const PcMenuExtend extNoChallenge   = { 3, 33, -44, 'yoko', 40 };
+	const PcMenuExtend extWithChallenge = { 3, 30, -58, 'yoko', 40 };
 	mMenuNoChallenge   = new DrawMenu("screen/blo/m_select.blo", false, false, &extNoChallenge);
 	mMenuWithChallenge = new DrawMenu("screen/blo/m_selec2.blo", false, false, &extWithChallenge);
 	pcInsertCoopItem(mMenuNoChallenge);
@@ -150,11 +150,12 @@ zen::ogScrTitleMgr::ogScrTitleMgr()
 }
 
 #if defined(PIKI_PC_PORT)
-// Tras clonar dos huecos, los textos quedan: Start / Co-op / Options /
+// Tras clonar tres huecos, los textos quedan: Start / Co-op / VS / Options /
 // Advanced Options [/ Challenge Mode] (en ambos pares he/hm: normal y resaltado).
 void zen::ogScrTitleMgr::pcInsertCoopItem(DrawMenu* menu)
 {
 	static char sCoopLabel[]     = "Co-op";
+	static char sVsLabel[]       = "VS";
 	static char sAdvancedLabel[] = "Advanced Options";
 	static immut char* kFamilies[] = { "he%02d", "hm%02d" };
 	char buf[8];
@@ -164,7 +165,7 @@ void zen::ogScrTitleMgr::pcInsertCoopItem(DrawMenu* menu)
 		while (menu->getScreenPtr()->search(P2DPaneLibrary::makeTag(buf), false)) {
 			sprintf(buf, kFamilies[f], ++n);
 		}
-		if (n < 4) {
+		if (n < 5) {
 			continue;
 		}
 		P2DTextBox* box[6];
@@ -175,19 +176,20 @@ void zen::ogScrTitleMgr::pcInsertCoopItem(DrawMenu* menu)
 		// Originales: 0 Start, 1 Options[, 2 Challenge]. Las cajas quedan
 		// (todas centradas en la misma X); solo viaja el texto.
 		char* optionsText   = box[1]->getString();
-		char* challengeText = n >= 5 ? box[2]->getString() : nullptr;
+		char* challengeText = n >= 6 ? box[2]->getString() : nullptr;
 		box[1]->setString(sCoopLabel);
-		box[2]->setString(optionsText);
-		box[3]->setString(sAdvancedLabel);
+		box[2]->setString(sVsLabel);
+		box[3]->setString(optionsText);
+		box[4]->setString(sAdvancedLabel);
 		// Caja más ancha (misma X central) para que el texto no se parta en
 		// dos líneas; la caja de texto envuelve por ancho.
 		{
-			const int cx = box[3]->getPosH() + box[3]->getWidth() / 2;
+			const int cx = box[4]->getPosH() + box[4]->getWidth() / 2;
 			const int w  = 400;
-			box[3]->resize(w, box[3]->getHeight());
-			box[3]->move(cx - w / 2, box[3]->getPosV());
+			box[4]->resize(w, box[4]->getHeight());
+			box[4]->move(cx - w / 2, box[4]->getPosV());
 		}
-		if (challengeText) box[4]->setString(challengeText);
+		if (challengeText) box[5]->setString(challengeText);
 	}
 }
 #endif
@@ -213,18 +215,18 @@ void zen::ogScrTitleMgr::pcSetupAdvancedMenu()
 	static char sTitle[] = "Advanced";
 	// Mismo orden que PcSettingsGroup. Salir guarda (como F1), así que no hay
 	// fila "Save": Back guarda y vuelve.
-	static char* sLabels[7] = { (char*)"Display", (char*)"Graphics", (char*)"Controls", (char*)"Camera",
-		                         (char*)"Gameplay", (char*)"Data", (char*)"Back" };
-	// option.blo trae 4 huecos (el 1 oculto): se muestran los 4 y se clonan 3
+	static char* sLabels[8] = { (char*)"Display", (char*)"Graphics", (char*)"Controls", (char*)"Camera",
+		                         (char*)"Gameplay", (char*)"Cheats", (char*)"Data", (char*)"Back" };
+	// option.blo trae 4 huecos (el 1 oculto): se muestran los 4 y se clonan 4
 	// más, con el paso compactado y el cristal estirado (PcMenuExtend).
-	const PcMenuExtend ext = { 3, 30, -44, 'yoko', 0 };
+	const PcMenuExtend ext = { 4, 30, -59, 'yoko', 0 };
 	mAdvancedMenu  = new DrawMenu("screen/blo/option.blo", false, false, &ext);
 	P2DScreen* scr = mAdvancedMenu->getScreenPtr();
 	// Fondo negro del .blo fuera, como hace el título con los demás menús.
 	if (P2DPane* back = scr->search('back', false)) static_cast<P2DPicture*>(back)->setAlpha(0);
 	static const char* kFamilies[] = { "he%02d", "hm%02d", "i%02dl", "i%02dr" };
 	char buf[8];
-	for (int i = 0; i < 7; i++) {
+	for (int i = 0; i < 8; i++) {
 		for (int f = 0; f < 4; f++) {
 			sprintf(buf, kFamilies[f], i);
 			P2DPane* p = scr->search(P2DPaneLibrary::makeTag(buf), false);
@@ -317,7 +319,10 @@ zen::ogScrTitleMgr::TitleStatus zen::ogScrTitleMgr::update(Controller* input)
 			break;
 		}
 #if defined(PIKI_PC_PORT)
-		// Orden PC: Start / Co-op / Options / Advanced Options / Challenge Mode.
+		// Orden PC: Start / Co-op / VS / Options / Advanced Options / Challenge Mode.
+		if (mCurrentSelection >= 0 && mCurrentSelection <= 2) {
+			pc_vs_set_pending(false);
+		}
 		if (mCurrentSelection == 0 || mCurrentSelection == 1) {
 			pc_coop_set_pending(mCurrentSelection == 1);
 			pc_coop_set_chosen_at_title(true);
@@ -326,11 +331,22 @@ zen::ogScrTitleMgr::TitleStatus zen::ogScrTitleMgr::update(Controller* input)
 			return mStatus;
 		}
 		if (mCurrentSelection == 2) {
+			// VS: dos capitanes, sin partida guardada. Sale por el camino del
+			// modo desafío (no toca la tarjeta) y CardSelect lo lleva directo
+			// al mapa tras elegir mandos y capitanes.
+			pc_coop_set_pending(true);
+			pc_vs_set_pending(true);
+			pc_coop_set_chosen_at_title(true);
+			mPendingExitStatus = STATUS_ExitToChallengeMode;
+			mStatus            = STATUS_Exiting;
+			return mStatus;
+		}
+		if (mCurrentSelection == 3) {
 			mCurrentMenuID = MENU_Options;
 			mOptionsMenu->start(0);
 			break;
 		}
-		if (mCurrentSelection == 3) {
+		if (mCurrentSelection == 4) {
 			// Advanced Options: panel propio (option.blo) con los grupos de
 			// ajustes del port; las listas las pinta pc_glass_menu.
 			pc_settings_rows_begin();
@@ -338,7 +354,8 @@ zen::ogScrTitleMgr::TitleStatus zen::ogScrTitleMgr::update(Controller* input)
 			mAdvancedMenu->start(0);
 			break;
 		}
-		if (mCurrentSelection == 4) {
+		if (mCurrentSelection == 5) {
+			pc_vs_set_pending(false);
 			mPendingExitStatus = STATUS_ExitToChallengeMode;
 			mStatus            = STATUS_Exiting;
 			return mStatus;
@@ -383,7 +400,7 @@ zen::ogScrTitleMgr::TitleStatus zen::ogScrTitleMgr::update(Controller* input)
 		if (flagA != 0) {
 			break;
 		}
-		// 0 Display, 1 Graphics, 2 Controls, 3 Camera, 4 Gameplay, 5 Data, 6 Back.
+		// 0 Display, 1 Graphics, 2 Controls, 3 Camera, 4 Gameplay, 5 Cheats, 6 Data, 7 Back.
 		const bool cancelled = mAdvancedMenu->checkSelectMenuCancel();
 		if (!cancelled && mCurrentSelection >= 0 && mCurrentSelection < PC_SET_GROUP_COUNT) {
 			pc_glass_menu_open_list(mCurrentSelection);

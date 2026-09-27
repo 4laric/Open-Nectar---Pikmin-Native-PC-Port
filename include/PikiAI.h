@@ -198,6 +198,10 @@ class TopAction : public Action {
 	friend struct PikiSwallowedState;
 
 public:
+#if defined(PIKI_PC_PORT)
+	/// VS: congelar la acción (asedio al cohete rival) y reanudarla.
+	void pcSetSuspended(bool suspended) { mIsSuspended = suspended; }
+#endif
 	/**
 	 * @brief TODO
 	 *

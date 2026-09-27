@@ -286,6 +286,9 @@ public:
 	FreeLightEffect* mFreeLightEffect;    // _434
 	SlimeEffect* mSlimeEffect;            // _438
 	int mPlayerId;                        // _43C
+#if defined(PIKI_PC_PORT)
+	bool mPcSieging = false; ///< VS: golpeando el cohete rival (acción suspendida)
+#endif
 	Vector3f mLastAnimPosition;           // _440
 	Vector3f mShadowPos;                  // _44C
 	Vector3f mCatchPos;                   // _458

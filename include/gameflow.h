@@ -36,6 +36,8 @@ class Texture;
 /// Depuración: con PIKMIN_UNLOCK_ALL=1 todos los mapas (historia y desafío)
 /// cuentan como abiertos, sin tocar la partida guardada.
 bool pc_unlock_all_stages();
+/// Cheat "Unlock All Zones": a diferencia del anterior, sí se graba en la partida.
+bool pc_cheat_unlock_zones();
 #endif
 
 /// PAL-exclusive packing of language preference flag (to save to card).
@@ -234,6 +236,9 @@ public:
 	{
 #if defined(PIKI_PC_PORT)
 		if (pc_unlock_all_stages() && storyStageID >= STAGE_START && storyStageID <= STAGE_TESTMAP) return true;
+		if (pc_cheat_unlock_zones() && storyStageID >= STAGE_START && storyStageID <= STAGE_Last) {
+			SET_STAGE_OPEN(mCourseOpenFlags, storyStageID);
+		}
 #endif
 		if (storyStageID >= STAGE_START && storyStageID <= STAGE_TESTMAP) {
 			return IS_STAGE_OPEN(mCourseOpenFlags, storyStageID) != false;

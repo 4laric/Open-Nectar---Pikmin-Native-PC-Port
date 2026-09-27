@@ -24,6 +24,7 @@
 #include "WeedsItem.h"
 #include "WorkObject.h"
 #include "settings/pc_settings.h"
+#include "pc_coop.h"
 #include "bugprint.h"
 #include "gameflow.h"
 #include "teki.h"
@@ -223,6 +224,15 @@ int Piki::findRoute(int sourceWaypointIndex, int destWaypointIndex, bool isRetry
 	if (ship && ship->mWaypointID == destWaypointIndex) {
 		destinationType = 3;
 	}
+#if defined(PIKI_PC_PORT)
+	// VS: hay dos cohetes y seis cebollas, y las rutas precalculadas por tipo
+	// de meta solo conocen los primeros (y el cohete cambia de punto de camino
+	// tras calcularlas). Camino directo al punto real, como a cualquier otro.
+	if (pc_vs_active()) {
+		destinationType = -1;
+		useAsynchronous = false; // todo por findSync (camino más corto)
+	}
+#endif
 
 	// If destination isn't a special point, try to copy an existing path
 	// from another Piki that's already calculated this route
@@ -638,6 +648,12 @@ void Piki::updateFire()
 {
 	if (mFiredState) {
 		int state = getState();
+#if defined(PIKI_PC_PORT)
+		if (pc_settings_get_piki_invincible()) {
+			mFiredState = 0; // cheat "Invincible Pikmin"
+			return;
+		}
+#endif
 		if (mFiredState != 2 && state != PIKISTATE_Dying && state != PIKISTATE_Dead && state != PIKISTATE_Fired && state != PIKISTATE_Drown
 		    && mColor != Red) {
 			changeMode(PikiMode::FreeMode, mNavi);
@@ -674,7 +690,13 @@ bool Piki::isTeki(Piki* target)
 	}
 
 	if (flowCont.mIsVersusMode == TRUE) {
+#if defined(PIKI_PC_PORT)
+		// VS del port: rival = otro dueño. Los que aún no tienen dueño (-1)
+		// no pelean con nadie.
+		return mPlayerId >= 0 && target->mPlayerId >= 0 && target->mPlayerId != mPlayerId;
+#else
 		return target->mNavi != mNavi;
+#endif
 	}
 
 	return false;
@@ -1263,6 +1285,14 @@ int Piki::graspSituation(Creature** outTarget)
 void Piki::initColor(int color)
 {
 	mColor = color;
+#if defined(PIKI_PC_PORT)
+	// VS del port: cada jugador tiene los tres colores, así que el dueño no
+	// sale del color (Nintendo: azul J1, rojo J2, amarillo neutral). Nacen
+	// sin dueño y son del primer capitán que los mete en su grupo.
+	if (pc_vs_active()) {
+		mPlayerId = -1;
+	} else
+#endif
 	if (flowCont.mIsVersusMode == TRUE) {
 		switch (color) {
 		case Blue:
@@ -1869,7 +1899,7 @@ void Piki::bounceCallback()
 	}
 #endif
 
-	if (isDrownSurface && isAlive() && state != PIKISTATE_Dead && state != PIKISTATE_Dying && state != PIKISTATE_Pressed
+	if (isDrownSurface && isAlive() && !pc_settings_get_piki_invincible() && state != PIKISTATE_Dead && state != PIKISTATE_Dying && state != PIKISTATE_Pressed
 	    && state != PIKISTATE_WaterHanged) {
 		seSystem->playSoundDirect(5, SEW_PIKI_WATERDROP, mSRT.t);
 		startMotion(PaniMotionInfo(PIKIANIM_TYakusui, this), PaniMotionInfo(PIKIANIM_TYakusui));
@@ -2077,6 +2107,16 @@ void Piki::collisionCallback(immut CollEvent& event)
 	if (playerState->inDayEnd()) {
 		return;
 	}
+
+#if defined(PIKI_PC_PORT)
+	// VS: un Pikmin lanzado que choca con el capitán rival lo tumba unos
+	// segundos (sin daño); mientras está en el suelo es invulnerable.
+	if (pc_vs_active() && collider->mObjType == OBJTYPE_Navi && getState() == PIKISTATE_Flying && mPlayerId >= 0
+	    && static_cast<Navi*>(collider)->mNaviID != mPlayerId) {
+		InteractFlick flick(this, 80.0f, 0.0f, atan2f(mVelocity.x, mVelocity.z));
+		collider->stimulate(flick);
+	}
+#endif
 
 	bool distCheck = true;
 	if (!mNavi->mForcePikiDistCheck && mNavi->mCStick.length() < 0.1f) {
@@ -2781,7 +2821,7 @@ void Piki::realAI()
 		}
 
 		if (state != PIKISTATE_Swallowed && state != PIKISTATE_Dead && state != PIKISTATE_Dying && state != PIKISTATE_Pressed
-		    && state != PIKISTATE_Drown && state != PIKISTATE_Flying && mColor != Blue && isAlive()) {
+		    && state != PIKISTATE_Drown && state != PIKISTATE_Flying && mColor != Blue && isAlive() && !pc_settings_get_piki_invincible()) {
 			if (mInWaterTimer >= int(gsys->getRand(1.0f) * pikiMgr->mPikiParms->mPikiParms.mRandStartDrownFrames())
 			                         + pikiMgr->mPikiParms->mPikiParms.mMinStartDrownFrames()) {
 				startMotion(PaniMotionInfo(PIKIANIM_TYakusui, this), PaniMotionInfo(PIKIANIM_TYakusui));
@@ -2873,6 +2913,13 @@ void Piki::pcChargeAt(Creature* target)
 void Piki::changeMode(int newMode, Navi* navi)
 {
 	STACK_PAD_VAR(6); // idk
+#if defined(PIKI_PC_PORT)
+	// VS: un Pikmin sin dueño pasa a ser del capitán a cuyo grupo entra
+	// (arrancarlo, silbarlo o tocarlo acaban aquí).
+	if (pc_vs_active() && newMode == PikiMode::FormationMode && navi && mPlayerId < 0) {
+		mPlayerId = navi->mNaviID;
+	}
+#endif
 	mActiveAction->abandon(nullptr);
 	switch (newMode) {
 	case PikiMode::FreeMode:

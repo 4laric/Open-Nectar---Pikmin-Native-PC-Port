@@ -78,6 +78,14 @@ int pc_settings_get_no_trip(void);
 int pc_settings_get_onion_step10(void);
 /// Los Pikmin silbados se unen al grupo al instante, sin la reacción de LookAt.
 int pc_settings_get_instant_whistle(void);
+/// Cheats. Todos vuelven al original con el modo Hard activo.
+int pc_settings_get_piki_invincible(void);
+int pc_settings_get_all_flowers(void);
+float pc_settings_get_carry_speed_scale(void); ///< 1 = original
+float pc_settings_get_navi_speed_scale(void);  ///< 1 = original
+int pc_settings_get_unlock_zones(void);        ///< abre todas las zonas en la partida
+int pc_settings_get_no_day_advance(void);
+int pc_settings_get_all_onions(void);          ///< da las tres cebollas en la partida
 /// Apuntado con giroscopio (mandos compatibles y el sensor del móvil).
 int pc_settings_get_gyro_enabled(void);
 float pc_settings_get_gyro_sensitivity(void);
@@ -97,6 +105,17 @@ float pc_mods_teki_damage(float damage);
 /// Contador de Pikmin ociosos sobre el juego. Lo llama vi_stubs en el retrace,
 /// antes del overlay F1, para que el menú quede por encima.
 void pc_settings_draw_idle_counter(void);
+/// VS: marcador, reloj, cuenta atrás (lleva la pausa) y pantalla final.
+void pc_settings_draw_vs_hud(void);
+/// VS: pasa las reglas guardadas (menú previo) a la partida.
+void pc_settings_apply_vs_rules(void);
+/// VS: menú previo con la explicación y las reglas. Resultado: PC_DEVASSIGN_*.
+void pc_vsrules_prompt_open(void);
+bool pc_vsrules_prompt_active(void);
+int  pc_vsrules_prompt_result(void);
+void pc_vsrules_prompt_draw(void);
+/// VS: la pantalla final está abierta (tiene la entrada).
+bool pc_vs_end_screen_active(void);
 /// Latido del bucle de juego: lo llama newPikiGame en cada tick de simulación.
 /// Sin él, el contador de ociosos seguiría dibujándose en los menús, porque
 /// GameStat::freePikis conserva su valor al salir de la fase.

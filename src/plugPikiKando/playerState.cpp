@@ -19,6 +19,9 @@
 #include "bugprint.h"
 #include "gameflow.h"
 #include "sysNew.h"
+#if defined(PIKI_PC_PORT)
+#include "settings/pc_settings.h"
+#endif
 
 int PlayerState::totalUfoParts = MAX_UFO_PARTS;
 
@@ -284,10 +287,31 @@ bool pc_unlock_all_stages()
 }
 #endif
 
+#if defined(PIKI_PC_PORT)
+bool pc_cheat_unlock_zones()
+{
+	return pc_settings_get_unlock_zones() != 0;
+}
+
+// Cheat "All Onions": se escribe en la partida, igual que al descubrirlas.
+static void pcCheatGiveOnions(PlayerState* ps)
+{
+	if (!pc_settings_get_all_onions()) return;
+	ps->setContainer(Yellow);
+	ps->setDisplayPikiCount(Yellow);
+	ps->setContainer(Blue);
+	ps->setDisplayPikiCount(Blue);
+}
+#endif
+
 bool PlayerState::courseOpen(int courseID)
 {
 #if defined(PIKI_PC_PORT)
 	if (pc_unlock_all_stages() && courseID >= STAGE_START && courseID <= STAGE_TESTMAP) return true;
+	pcCheatGiveOnions(this);
+	if (pc_cheat_unlock_zones() && courseID >= STAGE_START && courseID <= STAGE_Last) {
+		SET_STAGE_OPEN(gameflow.mPlayState.mCourseOpenFlags, courseID);
+	}
 #endif
 	if (courseID >= STAGE_START && courseID <= STAGE_TESTMAP) {
 		return IS_STAGE_OPEN(gameflow.mPlayState.mCourseOpenFlags, courseID) != 0;
@@ -720,6 +744,9 @@ void PlayerState::initCourse()
 	mPerHourGraph.init();
 	setNavi(false);
 	setDayEnd(false);
+#if defined(PIKI_PC_PORT)
+	pcCheatGiveOnions(this);
+#endif
 	mHasExtinctionDemoPlayed = false;
 	mNaviLightEfx            = new PermanentEffect;
 	mNaviLightGlowEfx        = new PermanentEffect;

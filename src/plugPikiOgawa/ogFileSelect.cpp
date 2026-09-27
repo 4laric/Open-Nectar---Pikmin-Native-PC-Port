@@ -172,10 +172,15 @@ void zen::ogScrFileSelectMgr::MovePaneXY()
 			}
 		}
 	} else {
-		if (x0 < 650) {
+#if defined(PIKI_PC_PORT)
+		const int outX = 650 + pc_gfx_menu_shift_center(); // sale por el borde ancho
+#else
+		const int outX = 650;
+#endif
+		if (x0 < outX) {
 			x0 += 40;
 		}
-		if (x1 < 650) {
+		if (x1 < outX) {
 			x1 += 20;
 		}
 	}
@@ -1514,7 +1519,6 @@ void zen::ogScrFileSelectMgr::drawFxOnly(Graphics& gfx)
 	const int virtW = pc_gfx_menu_virt_width();
 	P2DPerspGraph perspGraph(0, 0, virtW, 480, 30.0f, 1.0f, 5000.0f);
 	perspGraph.setPort();
-	pc_gfx_set_menu_clip_43(1);
 	pc_gfx_apply_menu_clip_43();
 	mFxMgr->draw(gfx);
 	gfx.setFog(false);
@@ -1537,9 +1541,7 @@ void zen::ogScrFileSelectMgr::draw(Graphics& gfx)
 	P2DPerspGraph perspGraph(0, 0, virtW, 480, 30.0f, 1.0f, 5000.0f);
 	perspGraph.setPort();
 
-	// data_b is drawn (and clipped) by ogFileChkSel. Slots, chrome and 2D FX
-	// stay in the original 640×480 so they do not paint the side bars.
-	pc_gfx_set_menu_clip_43(1);
+	// data_b is drawn by ogFileChkSel. Full width (issue #46): no 4:3 clip.
 	pc_gfx_apply_menu_clip_43();
 
 	for (int i = 0; i < 3; i++) {

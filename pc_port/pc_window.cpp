@@ -761,7 +761,7 @@ bool pc_window_init(const char* title, int width, int height) {
 // Vuelca el estado de un mando SDL sobre un pad GC. Devuelve true si el mando
 // se está usando (para decidir entre iconos de teclado y de mando).
 static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& stickX, s8& stickY,
-                                   s8& substickX, s8& substickY, u8& triggerL, u8& triggerR, bool& swarmHeld)
+                                   s8& substickX, s8& substickY, u8& triggerL, u8& triggerR, bool& swarmHeld, int player = 0)
 {
     auto boundButtonPressed = [ctl](int action) {
         return pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(action));
@@ -817,7 +817,8 @@ static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& sti
     // which defaults to D-pad Down here because the mod frees it up.
     if (pc_settings_get_free_camera()) {
         if (abs(rx) > axisDeadZone) {
-            pc_window_add_camera_drag(-(float)rx / 32767.0f * 0.02f);
+            // Cada mando gira la cámara de su jugador (en cooperativo, J2 la suya).
+            pc_window_add_camera_drag_player(player, -(float)rx / 32767.0f * 0.02f);
         }
         if (SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_DOWN)) swarmHeld = true;
     } else {
@@ -1233,7 +1234,7 @@ void pc_window_poll_events(PADStatus* pad) {
     if (sControllers[1] || sKeyboardOwner == 1) {
         u16 b2 = kbButton2; s8 sx2 = kbStickX2, sy2 = kbStickY2, cx2 = kbSubX2, cy2 = kbSubY2; u8 tl2 = kbTrigL2, tr2 = kbTrigR2;
         if (sControllers[1])
-            pc_window_read_gamepad(sControllers[1], b2, sx2, sy2, cx2, cy2, tl2, tr2, sSwarmHeldP2);
+            pc_window_read_gamepad(sControllers[1], b2, sx2, sy2, cx2, cy2, tl2, tr2, sSwarmHeldP2, 1);
         pad[1].err          = PAD_ERR_NONE;
         pad[1].button       = b2;
         pad[1].stickX       = sx2;
@@ -1605,6 +1606,25 @@ extern "C" float pc_window_take_camera_pitch(void) {
     const float delta = sCameraPitchDrag;
     sCameraPitchDrag = 0.0f;
     return delta;
+}
+
+static float sStickCameraDrag[2] = { 0.0f, 0.0f };
+
+extern "C" void pc_window_add_camera_drag_player(int player, float normalizedDx) {
+    if (player < 0 || player > 1) player = 0;
+    sStickCameraDrag[player] = std::clamp(sStickCameraDrag[player] + normalizedDx, -1.0f, 1.0f);
+}
+
+extern "C" float pc_window_take_camera_drag_player(int player) {
+    if (player < 0 || player > 1) player = 0;
+    float delta = sStickCameraDrag[player];
+    sStickCameraDrag[player] = 0.0f;
+    if (player == 0) {
+        // Ratón y pellizco táctil: de J1.
+        delta += sTouchCameraDrag;
+        sTouchCameraDrag = 0.0f;
+    }
+    return std::clamp(delta, -1.0f, 1.0f);
 }
 
 extern "C" float pc_window_take_camera_drag(void) {

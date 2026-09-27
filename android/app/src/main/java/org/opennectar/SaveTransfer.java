@@ -25,11 +25,14 @@ import java.util.zip.ZipOutputStream;
  * Los métodos native viven en libnectar*.so, ya cargada por NectarActivity.
  */
 public final class SaveTransfer {
+    private static final String TAG = "NectarSave";
     private static final int MAX_FILES = 256;
     private static final long MAX_UNCOMPRESSED_BYTES = 64L * 1024L * 1024L;
-    /** Códigos de startActivityForResult. Deben coincidir con la actividad. */
-    public static final int REQ_SAVE_BACKUP = 2049;
-    public static final int REQ_SAVE_RESTORE = 2050;
+    /** Códigos de startActivityForResult. Deben coincidir con la actividad y
+     *  no repetir los de TexturePack (2048/2049): con el mismo código, el
+     *  resultado de exportar lo recogía el instalador de modelos HD. */
+    public static final int REQ_SAVE_BACKUP = 2051;
+    public static final int REQ_SAVE_RESTORE = 2052;
 
     public static native String nativeSaveDir();
     public static native void nativeSaveTransferFinished(boolean ok, String message);
@@ -68,23 +71,43 @@ public final class SaveTransfer {
             nativeSaveTransferFinished(false, "There is no save data to export yet.");
             return;
         }
-        int files = 0;
-        try (OutputStream raw = activity.getContentResolver().openOutputStream(uri, "wt")) {
-            if (raw == null) throw new Exception("Could not open the selected file.");
-            try (ZipOutputStream zip = new ZipOutputStream(new BufferedOutputStream(raw))) {
-                // save/ also contains the regenerable shader cache. A backup
-                // is only the two emulated memory cards; exporting the cache
-                // made our own ZIP fail the restore validator.
-                files += addDirectory(root, new File(root, "card0"), zip);
-                files += addDirectory(root, new File(root, "card1"), zip);
-            }
-        } catch (Exception e) {
-            nativeSaveTransferFinished(false,
-                e.getMessage() == null ? "Could not export the save." : e.getMessage());
+        // save/ also contains the regenerable shader cache. A backup is only
+        // the two emulated memory cards; exporting the cache made our own ZIP
+        // fail the restore validator. Se listan antes de abrir el destino para
+        // no dejar un .zip vacío si no hay nada que copiar.
+        final java.util.List<File> cardFiles = new java.util.ArrayList<>();
+        collectFiles(new File(root, "card0"), cardFiles);
+        collectFiles(new File(root, "card1"), cardFiles);
+        android.util.Log.i(TAG, "backup: " + root + " -> " + cardFiles.size() + " file(s)");
+        if (cardFiles.isEmpty()) {
+            nativeSaveTransferFinished(false, "There is no save data to export yet.");
             return;
         }
-        if (files <= 0) {
-            nativeSaveTransferFinished(false, "There is no save data to export yet.");
+        int files = 0;
+        try (OutputStream raw = openForWrite(activity, uri)) {
+            if (raw == null) throw new Exception("Could not open the selected file.");
+            try (ZipOutputStream zip = new ZipOutputStream(new BufferedOutputStream(raw))) {
+                byte[] buffer = new byte[64 * 1024];
+                for (File file : cardFiles) {
+                    final String rel = relativePath(root, file);
+                    if (rel == null) {
+                        android.util.Log.w(TAG, "backup: skipped " + file);
+                        continue;
+                    }
+                    zip.putNextEntry(new ZipEntry(rel));
+                    try (InputStream in = new java.io.FileInputStream(file)) {
+                        int n;
+                        while ((n = in.read(buffer)) > 0) zip.write(buffer, 0, n);
+                    }
+                    zip.closeEntry();
+                    files++;
+                }
+                if (files <= 0) throw new Exception("Could not read the save files.");
+            }
+        } catch (Exception e) {
+            android.util.Log.e(TAG, "backup failed", e);
+            nativeSaveTransferFinished(false,
+                e.getMessage() == null ? "Could not export the save." : e.getMessage());
             return;
         }
         nativeSaveTransferFinished(true, "Exported " + files + " save file(s). Keep the .zip somewhere safe.");
@@ -174,27 +197,25 @@ public final class SaveTransfer {
 
     // ── Helpers ─────────────────────────────────────────────────────────────
 
-    private static int addDirectory(File root, File dir, ZipOutputStream zip) throws Exception {
-        int count = 0;
+    private static void collectFiles(File dir, java.util.List<File> out) {
         File[] children = dir.listFiles();
-        if (children == null) return 0;
+        if (children == null) return;
         for (File child : children) {
-            if (child.isDirectory()) {
-                count += addDirectory(root, child, zip);
-            } else {
-                final String rel = relativePath(root, child);
-                if (rel == null) continue;
-                zip.putNextEntry(new ZipEntry(rel));
-                try (InputStream in = new java.io.FileInputStream(child)) {
-                    byte[] buffer = new byte[64 * 1024];
-                    int n;
-                    while ((n = in.read(buffer)) > 0) zip.write(buffer, 0, n);
-                }
-                zip.closeEntry();
-                count++;
-            }
+            if (child.isDirectory()) collectFiles(child, out);
+            else if (child.isFile()) out.add(child);
         }
-        return count;
+    }
+
+    /** "wt" trunca si el destino ya existía; no todos los proveedores lo
+     *  aceptan, así que se reintenta con "w" (el documento recién creado está
+     *  vacío de todos modos). */
+    private static OutputStream openForWrite(Activity activity, Uri uri) throws Exception {
+        try {
+            return activity.getContentResolver().openOutputStream(uri, "wt");
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "openOutputStream(wt) failed, retrying with w", e);
+            return activity.getContentResolver().openOutputStream(uri, "w");
+        }
     }
 
     private static String relativePath(File root, File file) {

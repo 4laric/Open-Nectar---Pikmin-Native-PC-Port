@@ -38,6 +38,7 @@ void VIWaitForRetrace(void)    {
     // Draw the settings overlay through the game GX stack before the native
     // framebuffer is blitted to the window, so it appears on top.
     pc_settings_draw_idle_counter();
+    pc_settings_draw_vs_hud();
     pc_settings_draw();
     pc_glass_menu_draw();
 #endif
