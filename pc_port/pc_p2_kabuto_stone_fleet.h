@@ -100,6 +100,11 @@ constexpr float kDeadHoldSeconds = 0.5f;
 // Host capacity; RockMgr sizes its array per stage (RockMgr.cpp:101-115),
 // retail per-stage count unverified. Exhaustion is tolerated (Kabuto.cpp:283).
 constexpr int kFleetCapacity = 16;
+// Retail P2 gravity (user/Kando/aiConstants.txt `gravity 560.0`,
+// docs/PIKMIN2_ENGINE_DISC_PARMS.md:21), read by the Stone's ground
+// simulation as _aiConstants->mGravity (enemyBase.cpp:1878-1893). The host
+// passes this to Fleet::tick instead of the P1 AICONST gravity.
+constexpr float kStoneGravity = 560.0f;
 
 inline P2CannonStoneConfig stoneConfig()
 {
@@ -367,6 +372,14 @@ public:
                 if (gap > 0.0f || s.struck(tg.token)) {
                     continue;
                 }
+                if (strikeCount >= strikeCap) {
+                    // Host strike buffer full this tick: leave the contact
+                    // unresolved (no policy call, no ledger entry, no hit
+                    // count) so it is resolved on a later tick instead of
+                    // being recorded as struck without a dispatched strike.
+                    ++mStrikesDeferred;
+                    continue;
+                }
                 const P2CannonStoneContactResult res =
                     s.stone.contact(tg.kind, tg.onFloor, false, tg.token);
                 if (res.ignored) {
@@ -380,19 +393,17 @@ public:
                 }
                 s.ledger.push_back(tg.token);
                 ++s.hits;
-                if (strikeCount < strikeCap) {
-                    Strike k;
-                    k.slot = i;
-                    k.stone = s.id;
-                    k.owner = s.owner;
-                    k.target = tg.token;
-                    k.targetKind = tg.kind;
-                    k.kind = res.strike.kind;
-                    k.damage = res.strike.damage;
-                    k.flight = s.stone.timer();
-                    k.travel = s.travel;
-                    strikes[strikeCount++] = k;
-                }
+                Strike k;
+                k.slot = i;
+                k.stone = s.id;
+                k.owner = s.owner;
+                k.target = tg.token;
+                k.targetKind = tg.kind;
+                k.kind = res.strike.kind;
+                k.damage = res.strike.damage;
+                k.flight = s.stone.timer();
+                k.travel = s.travel;
+                strikes[strikeCount++] = k;
             }
         }
     }
@@ -414,6 +425,8 @@ public:
     int hits(int slot) const { return valid(slot) ? mSlots[slot].hits : 0; }
     // Contacts suppressed by the source-enemy grace (diagnostic counter).
     std::uint64_t graceIgnored() const { return mGraceIgnored; }
+    // Contacts left for a later tick because the host strike buffer was full.
+    std::uint64_t strikesDeferred() const { return mStrikesDeferred; }
     int ownedBy(std::uint64_t owner) const
     {
         int n = 0;
@@ -516,6 +529,7 @@ private:
     Slot mSlots[kFleetCapacity];
     std::uint32_t mNextId = 0;
     std::uint64_t mGraceIgnored = 0;
+    std::uint64_t mStrikesDeferred = 0;
 };
 
 // ---- Campaign seam (called verbatim by pc_p2_kabuto_fsm.cpp) ----

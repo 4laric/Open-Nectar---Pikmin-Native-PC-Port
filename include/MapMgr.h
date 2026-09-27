@@ -46,6 +46,7 @@ public:
 	{
 		mIgnoreDynamicCollision = ignoreDynColl;
 		mIgnoreEnemyCollParts   = false;
+		mP2WallThreshold        = false;
 		mPosition               = position;
 		mVelocity               = velocity;
 		mRadius                 = radius;
@@ -63,6 +64,10 @@ public:
 	/// (CreatureCollPart via CreaturePlatMgr). Used by P2 projectiles, whose source platform pass only
 	/// ever meets item/map platforms (P2 PlatAttacher is item-only). Default false: P1 behaviour unchanged.
 	bool mIgnoreEnemyCollParts;
+	/// PC port (#884 round 4): classify walls with the P2 MoveInfo rule instead of P1's |n.y| < 0.5 on the
+	/// face normal: wall when the contact normal y is below the 0.6 floor threshold and |y| <= sin(45 deg)
+	/// (P2 MoveInfo.h:38-39, mapMgrTraceMove.cpp:148-157). Default false: P1 behaviour unchanged.
+	bool mP2WallThreshold;
 };
 
 /**

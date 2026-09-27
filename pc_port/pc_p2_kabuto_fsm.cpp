@@ -7,9 +7,13 @@
 // shooter-independent fleet (pc_p2_kabuto_stone_fleet.h) ticked at 30 Hz from
 // gameCoreSection, instead of an instant cone strike. The attack tick itself
 // is p2kabutostone::attackStep, which the regression test drives directly.
+// #884 round 4: Attack is entered only through the source isAttackableTarget
+// lane and the source Wait/Turn/Move selection (pc_p2_kabuto_aim.h), not the
+// old 180 / 0.5 rad cone.
 #include "pc_p2_kabuto_fsm.h"
 #include "pc_p2_kabuto_fsm_policy.h"
 #include "pc_p2_kabuto_stone_fleet.h"
+#include "pc_p2_kabuto_aim.h"
 #include "pc_p2_rock_host.h"
 #include "pc_p2_projectile_engine_receiver.h"
 #include "pc_p2_campaign_actor.h"
@@ -26,6 +30,8 @@
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "Pellet.h"
+#include "Boss.h"
 #include "Interactions.h"
 #include "MapMgr.h"
 #include "MoviePlayer.h"
@@ -48,17 +54,18 @@ std::map<std::string,p2animation::Clip> timing;
 std::set<PelletView*> drawn,drawnCorpse;
 enum KState { KB_DEAD=0,KB_WAIT=1,KB_TURN=2,KB_MOVE=3,KB_FLICK=4,KB_ATTACK=5 };
 const float PI_F=3.14159265f;
-constexpr float HOME_RADIUS=15.0f;
-constexpr float TERRITORY=150.0f;
-constexpr float TURN_RATE=2.5f;
-constexpr float ATTACK_ANGLE=0.5f;
-constexpr float FACE_OK_ANGLE=0.174533f;
 constexpr int FLICK_STUCK_MIN=3;
 struct KabutoFsm {
     KState state=KB_WAIT;float stateTime=0.0f;float heading=0.0f;
     Vector3f home;Vector3f targetPos;bool targetValid=false;
     unsigned rng=1;unsigned token=0;bool deadLogged=false;bool fireDone=false;bool flickDone=false;bool escaped=false;float deathPrior=0.0f;bool deathPriorSet=false;
     std::string clip="wait";float phase=0.0f;float logTimer=0.0f;float lastHealth=0.0f;float poolFullCooldown=0.0f;
+    // #884 round 4 source Wait/Turn/Move selection (pc_p2_kabuto_aim.h):
+    // StateWait mStateTimer + latched mNextState, StateMove mStateTimer,
+    // mAlertTimer (Kabuto.cpp:296-305, starts 0 at onInit :43) and the
+    // setRandTarget wander point (Kabuto.cpp:198-206).
+    float waitTimer=0.0f;bool waitNextTurn=false;float moveTimer=0.0f;float alert=0.0f;
+    p2kabutoaim::Vec3 wander;
 };
 std::map<PelletView*,KabutoFsm> fsms;
 bool ready=false;
@@ -105,41 +112,36 @@ void loadAnimation(const std::vector<p2animation::Clip>& bank){
     std::printf("P2_KABUTO_BANK_READY mod_bytes=%zu gameplay=P1_unchanged\n",total);
 }
 void stop(BTeki* a){a->inputDrive(Vector3f(0.0f,0.0f,0.0f));a->mVelocity.x=0.0f;a->mVelocity.y=0.0f;a->mVelocity.z=0.0f;}
-void walkTo(BTeki* a,KabutoFsm& s,const Vector3f& target,float speed,float dt){
-    const Vector3f pos=a->getPosition();
-    const float desired=std::atan2(target.x-pos.x,target.z-pos.z);
-    const float maxTurn=TURN_RATE*dt;
-    float diff=wrapPi(desired-s.heading);
-    if(diff>maxTurn)diff=maxTurn;if(diff<-maxTurn)diff=-maxTurn;
-    s.heading=wrapPi(s.heading+diff);
+// Facing (EnemyBase::updateFaceDir) and StateMove setTargetSpeed along it.
+void face(BTeki* a,KabutoFsm& s,float heading){s.heading=wrapPi(heading);a->setDirection(s.heading);}
+void driveForward(BTeki* a,KabutoFsm& s,float speed){
     a->setDirection(s.heading);
     const Vector3f drive(std::sin(s.heading)*speed,0.0f,std::cos(s.heading)*speed);
     a->inputDrive(drive);a->mVelocity.set(drive);
 }
-void turnTo(BTeki* a,KabutoFsm& s,const Vector3f& target,float dt){
-    const Vector3f pos=a->getPosition();
-    const float desired=std::atan2(target.x-pos.x,target.z-pos.z);
-    const float maxTurn=TURN_RATE*dt;
-    float diff=wrapPi(desired-s.heading);
-    if(diff>maxTurn)diff=maxTurn;if(diff<-maxTurn)diff=-maxTurn;
-    s.heading=wrapPi(s.heading+diff);
-    a->setDirection(s.heading);
+p2kabutoaim::Vec3 aimVec(const Vector3f& v){p2kabutoaim::Vec3 r;r.x=v.x;r.y=v.y;r.z=v.z;return r;}
+// Host candidate snapshot for getSearchedTarget / isAttackableTarget: every
+// live Navi (co-op: all of naviMgr) and every live Pikmin, at getPosition()
+// (source uses creature positions, Kabuto.cpp:248, enemyAction.cpp:47-49).
+struct AimSnapshot{std::vector<p2kabutoaim::Candidate> cands;std::vector<Creature*> creatures;};
+void buildAim(AimSnapshot& a){
+    a.cands.clear();a.creatures.clear();
+    auto add=[&](Creature* c,bool navi){if(!c||!c->isAlive())return;p2kabutoaim::Candidate k;k.pos=aimVec(c->getPosition());k.navi=navi;k.alive=true;a.cands.push_back(k);a.creatures.push_back(c);};
+    if(naviMgr){Iterator it(naviMgr);CI_LOOP(it){add(static_cast<Navi*>(*it),true);}}
+    if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){add(static_cast<Piki*>(*it),false);}}
 }
-Creature* nearestTarget(const Vector3f& pos,float sight){
-    Creature* best=nullptr;float bestSq=sight*sight;
-    if(naviMgr){Navi* n=naviMgr->getNavi();if(n&&n->isAlive()){const Vector3f p=n->getPosition();
-        const float dx=p.x-pos.x,dz=p.z-pos.z,d=dx*dx+dz*dz;if(d<bestSq){bestSq=d;best=n;}}}
-    if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(!p||!p->isAlive())continue;
-        const Vector3f q=p->getPosition();const float dx=q.x-pos.x,dz=q.z-pos.z,d=dx*dx+dz*dz;if(d<bestSq){bestSq=d;best=p;}}}
-    return best;
-}
+float rngUnit(KabutoFsm& s){s.rng=s.rng*1664525u+1013904223u;return float((s.rng>>8)&0xffffffu)/16777216.0f;}
 int stuckPikminCount(Creature* c){int n=0;for(Creature* s=c->mStickListHead;s;s=s->mNextSticker){if(!s||!s->isPiki()||!s->isAlive())continue;++n;}return n;}
-bool attackable(const KabutoFsm& s,const Vector3f& pos,const Creature* t,float range){
-    if(!t)return false;const Vector3f tp=t->getPosition();
-    if(distXZ(pos,tp)>=range)return false;
-    return std::fabs(wrapPi(std::atan2(tp.x-pos.x,tp.z-pos.z)-s.heading))<ATTACK_ANGLE;
-}
 bool shouldFlick(BTeki* a){return stuckPikminCount(a)>=FLICK_STUCK_MIN;}
+// Lane evidence on every natural Attack entry (Kabuto.cpp:226-262 gate).
+void logLane(unsigned gen,const char* from,const KabutoFsm& s,const Vector3f& pos,const AimSnapshot& a){
+    const p2kabutoaim::Vec3 p=aimVec(pos);
+    const int i=p2kabutoaim::attackableIndex(p,s.heading,a.cands.data(),int(a.cands.size()));
+    if(i<0){std::printf("P2_KABUTO_LANE generator=%u from=%s lane=0 face_deg=%.1f\n",gen,from,s.heading*180.0f/PI_F);std::fflush(stdout);return;}
+    const p2kabutoaim::LaneCoords l=p2kabutoaim::laneCoords(p,s.heading,a.cands[size_t(i)].pos);
+    std::printf("P2_KABUTO_LANE generator=%u from=%s lane=1 face_deg=%.1f target=%s forward=%.1f lateral=%.1f dy=%.1f\n",
+        gen,from,s.heading*180.0f/PI_F,a.cands[size_t(i)].navi?"navi":"piki",l.forward,l.lateral,l.dy);std::fflush(stdout);
+}
 // Logs the outcome of p2kabutostone::attackStep (source StateAttack KEYEVENT_2
 // -> createStoneAttack, Kabuto.cpp:268-290): Stone 74 born at the "mouth"
 // joint XZ (retail pose at attack frame 51) and 25 over the Kabuto's own Y,
@@ -175,7 +177,15 @@ int doFlick(BTeki* actor){
 }
 void setPhase(KabutoFsm& s){const float d=clipSeconds(s.clip);float ph=s.stateTime/d;if(ph>1.0f)ph=1.0f;s.phase=ph;}
 void transition(BTeki* a,KabutoFsm& s,KState st,const char* clip,unsigned gen){
-    (void)a;s.state=st;s.stateTime=0.0f;s.fireDone=false;s.flickDone=false;if(clip)s.clip=clip;
+    s.state=st;s.stateTime=0.0f;s.fireDone=false;s.flickDone=false;if(clip)s.clip=clip;
+    // Per-state init (KabutoState.cpp): StateWait::init resets its timer and
+    // latch and draws a new wander target (:76-82); StateMove::init resets its
+    // timer (:192); StateAttack::init clears the alert timer (:334).
+    if(st==KB_WAIT){s.waitTimer=0.0f;s.waitNextTurn=false;
+        const float u0=rngUnit(s),u1=rngUnit(s);
+        s.wander=p2kabutoaim::wanderTarget(aimVec(a->getPosition()),aimVec(s.home),u0,u1);}
+    if(st==KB_MOVE)s.moveTimer=0.0f;
+    if(st==KB_ATTACK)s.alert=0.0f;
     std::printf("P2_KABUTO_STATE generator=%u state=%s\n",gen,p2kabutofsm::stateName(st));std::fflush(stdout);
 }
 void die(BTeki* a,KabutoFsm& s,unsigned gen,float prior){
@@ -224,6 +234,7 @@ void pc_p2_kabuto_fsm_setup(){
         KabutoFsm& f=fsms[static_cast<PelletView*>(teki)];
         f.home=teki->getPosition();f.heading=teki->getDirection();f.targetPos=f.home;f.targetValid=true;
         f.rng=(token*2654435761u)|1u;f.token=token;f.state=KB_WAIT;f.clip="wait";f.phase=0.0f;f.lastHealth=teki->mHealth;
+        {const float u0=rngUnit(f),u1=rngUnit(f);f.wander=p2kabutoaim::wanderTarget(aimVec(f.home),aimVec(f.home),u0,u1);}
         if(bridge){pc_randomizer_p2_bind_source(static_cast<PelletView*>(teki),75,token);std::printf("P2_KABUTO_DELIVERY_BIND generator=%u source_id=75\n",token);}
         std::printf("P2_KABUTO_BIND generator=%u source_id=75 visual_only=0\n",token);
         std::printf("P2_KABUTO_READY species=Kabuto generator=%u health=%.1f max_health=%.1f behavior=source_fsm rewards=P1_unchanged\n",token,teki->mHealth,teki->getParameterF(TPF_Life));
@@ -243,7 +254,6 @@ void pc_p2_kabuto_fsm_update(BTeki* actor){
     const unsigned live=actor->mGenerator?pc_p2_campaign_token(actor):0u;
     if(live)s.token=live;
     const unsigned gen=s.token?s.token:live;
-    const auto& p=p2kabutofsm::params();
     if(actor->mStoredDamage>0.0f)actor->makeDamaged();
     const float previousHealth=s.lastHealth;
     if(actor->mHealth<=0.0f&&!s.deathPriorSet&&previousHealth>0.0f){s.deathPrior=previousHealth;s.deathPriorSet=true;}
@@ -252,42 +262,65 @@ void pc_p2_kabuto_fsm_update(BTeki* actor){
         std::printf("P2_KABUTO_DAMAGE generator=%u source_id=75 health=%.1f\n",gen,actor->mHealth);std::fflush(stdout);}
     s.lastHealth=actor->mHealth;
     if(s.poolFullCooldown>0.0f)s.poolFullCooldown-=dt;
+    // updateCaution (Kabuto.cpp:296-305): damage or stuck Pikmin re-arm the
+    // alert (EB_Colliding has no P1 host flag); the alert timer runs to fp29.
+    if(actor->mHealth<previousHealth||stuckPikminCount(actor)!=0)s.alert=0.0f;
+    if(s.alert<p2kabutoaim::params().alertDuration)s.alert+=dt;
     const float prevStateTime=p2kabutostone::advanceStateTime(s.stateTime,dt);
+    static AimSnapshot aim;
+    const p2kabutoaim::Vec3 apos=aimVec(pos);
+    // getSearchedTarget (Kabuto.cpp:212-220): nearest Navi / Pikmin within
+    // sight and the alert-dependent view angle; finding one clears the alert.
+    auto searched=[&]()->bool{buildAim(aim);
+        const int t=p2kabutoaim::searchTarget(apos,s.heading,p2kabutoaim::viewAngleDeg(s.alert),aim.cands.data(),int(aim.cands.size()));
+        if(t>=0){s.alert=0.0f;s.targetPos=aim.creatures[size_t(t)]->getPosition();s.targetValid=true;}
+        return t>=0;};
     switch(s.state){
     case KB_WAIT:{
+        // StateWait::exec (KabutoState.cpp:89-110): a searched target or
+        // > 3 s latches Turn; the transit happens when the wait clip ends.
+        // Wait never attacks directly (source enters Attack only from Turn,
+        // Move and Flick).
         stop(actor);
         if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
         if(shouldFlick(actor)){transition(actor,s,KB_FLICK,"flick",gen);break;}
+        if(p2kabutoaim::waitWantsTurn(s.waitTimer,searched()))s.waitNextTurn=true;
+        s.waitTimer+=dt;
         if(s.stateTime>=clipSeconds(s.clip)){
-            s.stateTime=0.0f;Creature* t=nearestTarget(pos,p.sight);
-            if(t){s.targetPos=t->getPosition();s.targetValid=true;
-                if(attackable(s,pos,t,p.attackRange))transition(actor,s,KB_ATTACK,"attack",gen);
-                else if(std::fabs(wrapPi(std::atan2(s.targetPos.x-pos.x,s.targetPos.z-pos.z)-s.heading))>FACE_OK_ANGLE)
-                    transition(actor,s,KB_TURN,"wait",gen);
-            }
+            s.stateTime=0.0f;
+            if(s.waitNextTurn)transition(actor,s,KB_TURN,"wait",gen);
         }
         break;}
     case KB_TURN:{
+        // StateTurn::exec (KabutoState.cpp:139-174) via p2kabutoaim::turnExec:
+        // turn toward the searched target at the retail rate and attack only
+        // once isAttackableTarget holds; there is no facing-close-enough exit,
+        // so an off-axis target keeps it turning until the lane holds. With
+        // no target it turns to the wander point and moves within 30 deg.
         stop(actor);
         if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
         if(shouldFlick(actor)){transition(actor,s,KB_FLICK,"flick",gen);break;}
-        Creature* t=nearestTarget(pos,p.sight);
-        if(t){turnTo(actor,s,t->getPosition(),dt);
-            if(attackable(s,pos,t,p.attackRange)){s.targetPos=t->getPosition();s.targetValid=true;transition(actor,s,KB_ATTACK,"attack",gen);}
-            else if(std::fabs(wrapPi(std::atan2(t->getPosition().x-pos.x,t->getPosition().z-pos.z)-s.heading))<=FACE_OK_ANGLE)transition(actor,s,KB_WAIT,"wait",gen);
-            else if(s.stateTime>=clipSeconds("wait"))transition(actor,s,KB_WAIT,"wait",gen);
-        } else transition(actor,s,KB_WAIT,"wait",gen);
+        buildAim(aim);
+        const p2kabutoaim::TurnResult r=p2kabutoaim::turnExec(apos,s.heading,dt,p2kabutoaim::viewAngleDeg(s.alert),aim.cands.data(),int(aim.cands.size()),s.wander);
+        if(r.target>=0){s.alert=0.0f;s.targetPos=aim.creatures[size_t(r.target)]->getPosition();s.targetValid=true;}
+        face(actor,s,r.faceDir);
+        if(r.next==p2kabutoaim::Next::Attack){logLane(gen,"turn",s,pos,aim);transition(actor,s,KB_ATTACK,"attack",gen);}
+        else if(r.next==p2kabutoaim::Next::Move)transition(actor,s,KB_MOVE,"move",gen);
         break;}
     case KB_MOVE:{
+        // StateMove::exec (KabutoState.cpp:203-260) via p2kabutoaim::moveExec.
         if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
-        if(shouldFlick(actor)){transition(actor,s,KB_FLICK,"flick",gen);break;}
-        Creature* t=nearestTarget(pos,p.sight);
-        if(t){s.targetPos=t->getPosition();s.targetValid=true;
-            if(attackable(s,pos,t,p.attackRange)){transition(actor,s,KB_ATTACK,"attack",gen);break;}
-            walkTo(actor,s,s.targetPos,p.moveSpeed,dt);
-            if(distXZ(pos,s.home)>TERRITORY)transition(actor,s,KB_TURN,"wait",gen);
-        } else {walkTo(actor,s,s.home,p.moveSpeed,dt);
-            if(distXZ(pos,s.home)<HOME_RADIUS)transition(actor,s,KB_WAIT,"wait",gen);}
+        if(shouldFlick(actor)){stop(actor);transition(actor,s,KB_FLICK,"flick",gen);break;}
+        buildAim(aim);
+        const p2kabutoaim::MoveResult r=p2kabutoaim::moveExec(apos,s.heading,dt,p2kabutoaim::viewAngleDeg(s.alert),s.moveTimer,aim.cands.data(),int(aim.cands.size()),s.wander);
+        if(r.target>=0){s.alert=0.0f;s.targetPos=aim.creatures[size_t(r.target)]->getPosition();s.targetValid=true;}
+        face(actor,s,r.faceDir);
+        s.moveTimer+=dt;
+        if(r.next==p2kabutoaim::Next::Attack){stop(actor);logLane(gen,"move",s,pos,aim);transition(actor,s,KB_ATTACK,"attack",gen);}
+        else if(r.next==p2kabutoaim::Next::Turn){stop(actor);transition(actor,s,KB_TURN,"wait",gen);}
+        else if(r.next==p2kabutoaim::Next::Wait){stop(actor);transition(actor,s,KB_WAIT,"wait",gen);}
+        else if(r.walk)driveForward(actor,s,p2kabutoaim::params().moveSpeed);
+        else stop(actor);
         break;}
     case KB_ATTACK:{
         stop(actor);
@@ -300,8 +333,10 @@ void pc_p2_kabuto_fsm_update(BTeki* actor){
         if(step.action==p2kabutostone::AttackAction::Die){die(actor,s,gen,priorForDeath);break;}
         logStoneFire(s,gen,step);
         if(s.stateTime>=clipSeconds("attack")){
+            // KEYEVENT_END (KabutoState.cpp:360-372): Flick, else Turn when a
+            // target is searched, else Wait.
             if(shouldFlick(actor))transition(actor,s,KB_FLICK,"flick",gen);
-            else if(distXZ(pos,s.home)>TERRITORY)transition(actor,s,KB_TURN,"wait",gen);
+            else if(searched())transition(actor,s,KB_TURN,"wait",gen);
             else transition(actor,s,KB_WAIT,"wait",gen);
         }
         break;}
@@ -309,10 +344,10 @@ void pc_p2_kabuto_fsm_update(BTeki* actor){
         stop(actor);
         if(!s.flickDone){s.flickDone=true;int hit=doFlick(actor);std::printf("P2_KABUTO_FLICK generator=%u source_id=75 hit=%d\n",gen,hit);std::fflush(stdout);}
         if(s.stateTime>=clipSeconds("flick")){
+            // KEYEVENT_END (KabutoState.cpp:306-311): Dead, else Attack.
             if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
-            Creature* t=nearestTarget(pos,p.sight);
-            if(t&&attackable(s,pos,t,p.attackRange)){s.targetPos=t->getPosition();s.targetValid=true;transition(actor,s,KB_ATTACK,"attack",gen);}
-            else transition(actor,s,KB_WAIT,"wait",gen);
+            buildAim(aim);logLane(gen,"flick",s,pos,aim);
+            transition(actor,s,KB_ATTACK,"attack",gen);
         }
         break;}
     case KB_DEAD:{
@@ -322,9 +357,6 @@ void pc_p2_kabuto_fsm_update(BTeki* actor){
         break;}
     default:break;
     }
-    // KB_MOVE is entered from KB_TURN only when the target leaves the attack
-    // cone; keep the state reachable for the turn->chase->attack chain.
-    if(s.state==KB_TURN&&s.stateTime>5.0f)transition(actor,s,KB_MOVE,"move",gen);
     setPhase(s);
     s.logTimer+=dt;
     if(s.logTimer>=1.0f){s.logTimer=0.0f;const Vector3f now=actor->getPosition();
@@ -370,6 +402,10 @@ bool stoneTrace(void* ctx,const P2CannonStoneVec3& base,const P2CannonStoneVec3&
     m.proxy.clear();
     MoveTrace mv(Vector3f(base.x,base.y,base.z),Vector3f(vel.x,vel.y,vel.z),radius,false);
     mv.mIgnoreEnemyCollParts=true;
+    // P2 wall classification for Rock::wallCallback (Rock.cpp:244-249):
+    // |contact normal y| <= sin 45 deg below the 0.6 floor threshold
+    // (MoveInfo.h:38-39, mapMgrTraceMove.cpp:148-157), not P1's |n.y| < 0.5.
+    mv.mP2WallThreshold=true;
     mapMgr->traceMove(&m.proxy,mv,dt);
     ++m.calls;
     out.position={mv.mPosition.x,mv.mPosition.y,mv.mPosition.z};
@@ -396,12 +432,42 @@ void buildSnapshot(StoneSnapshot& snap){
     if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){snapshotAdd(snap,static_cast<Piki*>(*it),P2CannonStoneContactKind::NaviPiki,'p');}}
     if(tekiMgr){Iterator it(tekiMgr);CI_LOOP(it){snapshotAdd(snap,static_cast<Teki*>(*it),P2CannonStoneContactKind::Teki,'t');}}
 }
-const char* targetName(char code){return code=='n'?"navi":code=='p'?"piki":"teki";}
+const char* targetName(char code){return code=='n'?"navi":code=='p'?"piki":code=='t'?"teki":code=='l'?"pellet":"boss";}
+// Source Rock collisionCallback zeroes the Stone's health on any creature
+// contact that is not a Navi/Piki (Rock.cpp:207-233), so pellets and other
+// non-Teki creatures stop it. Pellets and P1 bosses are offered as Other:
+// they stop the Stone and take no strike (a P1 boss has no P2 counterpart
+// receiver here; see design-kabuto.md Round 4 for items).
+void snapshotOthers(StoneSnapshot& snap){
+    if(pelletMgr){Iterator it(pelletMgr);CI_LOOP(it){snapshotAdd(snap,static_cast<Pellet*>(*it),P2CannonStoneContactKind::Other,'l');}}
+    if(bossMgr){Iterator it(bossMgr);CI_LOOP(it){snapshotAdd(snap,static_cast<Boss*>(*it),P2CannonStoneContactKind::Other,'b');}}
+}
+// A bound Kabuto actor is hosted on the P1 Beatle, whose strategy accepts
+// InteractAttack only through a damage portion 0 collision part
+// (TAIbeatle.cpp:1100-1113; a null part is portion -1,
+// interactBattle.cpp:399-444), so a Stone's partless InteractAttack would do
+// nothing. Source Kabuto takes the Stone's 250 through EnemyBase (no Kabuto
+// damage override, Kabuto.h). Apply it as the P1 Attack receiver does
+// (tekibteki.cpp:1990-2006: stored damage + last assailant), which the
+// Kabuto FSM drains through makeDamaged on its next update.
+// Returns false when `target` is not a bound Kabuto actor (the caller then
+// uses the ordinary engine receiver); `hit` reports the outcome otherwise.
+bool kabutoHostStoneAttack(Creature* target,float damage,P2ProjectileEngineHit& hit){
+    Teki* t=static_cast<Teki*>(target);
+    if(actors.find(static_cast<PelletView*>(t))==actors.end())return false;
+    hit=P2ProjectileEngineHit();hit.attempted=true;hit.healthBefore=t->mHealth;hit.storedDamageBefore=t->mStoredDamage;
+    // InteractAttack::actCommon visibility gate (interactBattle.cpp:450-456)
+    // and the Beatle strategy's invincible gate (TAIbeatle.cpp:1102-1104).
+    if(t->isVisible()&&!t->getTekiOption(BTeki::TEKI_OPTION_INVINCIBLE)){
+        t->mStoredDamage+=damage;t->setCreaturePointer(1,nullptr);hit.applied=true;}
+    hit.healthAfter=t->mHealth;hit.storedDamageAfter=t->mStoredDamage;hit.rejected=!hit.applied&&t->isAlive();
+    return true;
+}
 void stoneTick(StoneSnapshot& snap){
-    buildSnapshot(snap);
+    buildSnapshot(snap);snapshotOthers(snap);
     p2kabutostone::Strike strikes[64];p2kabutostone::DeadEvent deads[p2kabutostone::kFleetCapacity];p2kabutostone::Released rel[p2kabutostone::kFleetCapacity];
     int sn=0,dn=0,rn=0;
-    fleet.tick(AICONST.mGravity(),&stoneTrace,&stoneMap,snap.targets.data(),int(snap.targets.size()),
+    fleet.tick(p2kabutostone::kStoneGravity,&stoneTrace,&stoneMap,snap.targets.data(),int(snap.targets.size()),
         strikes,64,sn,deads,p2kabutostone::kFleetCapacity,dn,rel,p2kabutostone::kFleetCapacity,rn);
     // Receivers run only after the whole snapshot/tick, since they may change
     // actor state (snapshot-before-stimulate).
@@ -414,11 +480,13 @@ void stoneTick(StoneSnapshot& snap){
         // Attack to the Stone itself, which has no Creature here (Rock.cpp:222).
         Creature* owner=nullptr;
         if(!attack&&k.owner){auto sh=shooters.find(k.owner);if(sh!=shooters.end())owner=sh->second;}
-        P2ProjectileEngineHit hit;
-        if(target&&target->isAlive())hit=p2_projectile_apply_engine_strike(target,owner,attack,code=='t',k.damage);
-        std::printf("P2_KABUTO_STONE_HIT generator=%u stone=%u kind=%s target=%s token=%llx damage=%.1f applied=%d health=%.1f->%.1f stored=%.1f->%.1f owner=%d t_flight=%.3f travel=%.1f\n",
+        P2ProjectileEngineHit hit;bool kabutoHost=false;
+        if(target&&target->isAlive()){
+            kabutoHost=attack&&code=='t'&&kabutoHostStoneAttack(target,k.damage,hit);
+            if(!kabutoHost)hit=p2_projectile_apply_engine_strike(target,owner,attack,code=='t',k.damage);}
+        std::printf("P2_KABUTO_STONE_HIT generator=%u stone=%u kind=%s target=%s token=%llx damage=%.1f applied=%d health=%.1f->%.1f stored=%.1f->%.1f owner=%d kabuto_host=%d t_flight=%.3f travel=%.1f\n",
             slotGen[k.slot],k.stone,attack?"Attack":"Press",targetName(code),static_cast<unsigned long long>(k.target),k.damage,int(hit.applied),
-            hit.healthBefore,hit.healthAfter,hit.storedDamageBefore,hit.storedDamageAfter,int(owner!=nullptr),k.flight,k.travel);
+            hit.healthBefore,hit.healthAfter,hit.storedDamageBefore,hit.storedDamageAfter,int(owner!=nullptr),int(kabutoHost),k.flight,k.travel);
     }
     for(int i=0;i<dn;++i){const auto& d=deads[i];
         std::printf("P2_KABUTO_STONE_DEAD generator=%u stone=%u reason=%s t_flight=%.3f travel=%.1f max_lateral=%.3f hits=%d closest=%.1f x=%.1f y=%.1f z=%.1f\n",
@@ -457,20 +525,27 @@ void pc_p2_kabuto_fsm_update_stones(){
 // (animMgr.cpp:527-530, called from tekibteki.cpp:179,2209). With no Iwagon
 // drawn yet this stage, BaseShape::updateAnim would hit ERROR("no joint anim!!")
 // -> System::halt (shapeBase.cpp:3358-3361, system.cpp:1225-1231). So while the
-// context is empty it is pointed at the shape's own 0-frame "Null Anim"
-// (shapeBase.cpp:2854-2857,3111-3113; 0 frames per shapeBase.cpp:1339-1343),
-// which takes the base-pose branch (shapeBase.cpp:3376-3382), and restored
-// after the stones draw. Without either, the stones are not drawn.
+// context is empty it is pointed at the shape's own current animation data,
+// mCurrentAnimation->mData, and restored after the stones draw. That is the
+// animation most recently loaded into the Iwagon shape (loadDck / importDck /
+// loadDca / importDca each overwrite it, shapeBase.cpp:3100,3128,3148,3174),
+// i.e. normally the last clip of its bundle; only a shape with no animation
+// loaded still holds the 0-frame "Null Anim" created at load
+// (shapeBase.cpp:2854-2857 via importDck(nullptr), 3111-3113), which takes the
+// base-pose branch (shapeBase.cpp:3376-3382). Which one the campaign Iwagon
+// holds at runtime is unverified. Either way the frame is pinned to 0 (the
+// explicit frame pointer skips animate(), shapeBase.cpp:3354-3356), so the
+// stand-in shows that clip's frame-0 pose. Without anim data, no draw.
 void pc_p2_kabuto_fsm_draw_stones(Graphics& gfx){
     if(fleet.active()==0||!gfx.mCamera)return;
     TekiShapeObject* so=tekiMgr?tekiMgr->getTekiShapeObject(TEKI_Iwagon):nullptr;
     Shape* shape=so?so->mShape:nullptr;
     AnimData* const sharedAnim=so?so->mAnimContext.mData:nullptr;
-    AnimData* const nullAnim=(shape&&shape->mCurrentAnimation)?shape->mCurrentAnimation->mData:nullptr;
-    AnimData* const drawAnim=sharedAnim?sharedAnim:nullAnim;
+    AnimData* const shapeAnim=(shape&&shape->mCurrentAnimation)?shape->mCurrentAnimation->mData:nullptr;
+    AnimData* const drawAnim=sharedAnim?sharedAnim:shapeAnim;
     if(!stoneDrawLogged){stoneDrawLogged=true;
-        std::printf("P2_KABUTO_STONE_DRAW model=%s anim=%s\n",shape&&drawAnim?"iwagon_standin":"none",
-            !shape?"none":sharedAnim?"shared":nullAnim?"null_anim":"missing");std::fflush(stdout);}
+        std::printf("P2_KABUTO_STONE_DRAW model=%s anim=%s frames=%d\n",shape&&drawAnim?"iwagon_standin":"none",
+            !shape?"none":sharedAnim?"shared":shapeAnim?"shape_current":"missing",drawAnim?drawAnim->mTotalFrameCount:-1);std::fflush(stdout);}
     if(!shape||!drawAnim)return;
     const float savedFrame=so->mAnimContext.mCurrentFrame;
     so->mAnimContext.mData=drawAnim;
