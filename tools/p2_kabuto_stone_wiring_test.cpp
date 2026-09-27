@@ -118,6 +118,25 @@ int main(int argc, char** argv)
         check(has(trace, "mv.mIgnoreEnemyCollParts=true;") && has(trace, "mapMgr->traceMove(&m.proxy,mv,dt);"), F,
               "stone trace skips enemy body platforms");
         check(has(fsm, "void pc_p2_kabuto_fsm_draw_stones(Graphics& gfx){"), F, "stone draw defined");
+        // The Iwagon stand-in shares TekiShapeObject::mAnimContext, which is
+        // null until a live Iwagon draws; updateAnim would then halt on
+        // ERROR("no joint anim!!") (shapeBase.cpp:3358-3361).
+        // The draw is the last definition in the file: take it to the end.
+        const std::string drawTail = region(fsm, "void pc_p2_kabuto_fsm_draw_stones(Graphics& gfx){", "#if");
+        check(has(drawTail, "AnimData*constsharedAnim=so?so->mAnimContext.mData:nullptr;") &&
+                  has(drawTail, "AnimData*constnullAnim=(shape&&shape->mCurrentAnimation)?shape->mCurrentAnimation->mData:nullptr;") &&
+                  has(drawTail, "AnimData*constdrawAnim=sharedAnim?sharedAnim:nullAnim;"),
+              F, "stone draw falls back to the shape's Null Anim when the shared Iwagon context is empty");
+        check(has(drawTail, "if(!shape||!drawAnim)return;"), F, "stone draw skips when no anim data is bindable");
+        {
+            const size_t bind = drawTail.find(squeeze("so->mAnimContext.mData=drawAnim;"));
+            const size_t anim = drawTail.find(squeeze("shape->updateAnim(gfx,view,&frame,nullptr);"));
+            const size_t restore = drawTail.find(squeeze("so->mAnimContext.mData=sharedAnim;"));
+            check(bind != std::string::npos && anim != std::string::npos && restore != std::string::npos &&
+                      bind < anim && anim < restore,
+                  F, "stone draw binds the anim before updateAnim and restores the shared context after");
+        }
+        check(!drawTail.empty(), F, "stone draw region found");
     }
     if (load(root, G, core)) {
         check(has(core, "#include \"pc_p2_kabuto_fsm.h\""), G, "includes pc_p2_kabuto_fsm.h");

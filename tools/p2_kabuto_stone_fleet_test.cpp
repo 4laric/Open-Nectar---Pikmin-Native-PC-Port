@@ -275,9 +275,10 @@ void case3_travelTime()
     const Log::S* first = log.firstOn(1);
     assert(first);
     assert(first->tick > 3);
-    // Grounded Stone: contact centre y 40 vs Pikmin centre y 10, reach
-    // sqrt(50^2 - 30^2) = 40 horizontally -> travel 200 - 62.9 - 40 = 97.1.
-    const float expected = (200.0f - kMouthLocalZ - 40.0f) / 250.0f;
+    // Grounded Stone: r27 leaf centred at y 25 vs Pikmin centre y 10 (r10),
+    // reach sqrt(37^2 - 15^2) = 33.8 horizontally -> travel 200 - 62.9 - 33.8.
+    const float reach = std::sqrt(37.0f * 37.0f - 15.0f * 15.0f);
+    const float expected = (200.0f - kMouthLocalZ - reach) / 250.0f;
     std::printf("case3 first press tick=%d flight=%.3f expected~%.3f travel=%.1f\n", first->tick,
                 first->s.flight, expected, first->s.travel);
     assert(first->s.flight > 0.3f);
@@ -486,7 +487,7 @@ void case10_sourceGrace()
     // Not recorded in the ledger: once grace ends a renewed overlap counts.
     run(fleet, map, targets, 3, log, [&](int, std::vector<Target>& t) {
         const P2CannonStoneVec3 p = fleet.stone(slot).position();
-        t[0].centre = { p.x, p.y + 40.0f, p.z };
+        t[0].centre = { p.x, p.y + kContactCentreYFull, p.z };
     }, 30);
     assert(log.strikesOn(kShooter) == 1);
     assert(log.firstOn(kShooter)->s.flight >= P2CannonStone::kAtariGraceSeconds);
@@ -748,6 +749,57 @@ void case19_oncePerAttackState()
     assert(full.active() == Fleet::capacity());
 }
 
+// Contact geometry (review round 2): the creature contact is the Rock/Stone
+// enemycoll r27 leaf on rock_body (y 25 x scale), not the r40 broadphase root
+// centred one radius up (the round-1 host: r = 40 x scale at base + r).
+bool legacyRootSphereTouches(const P2CannonStoneVec3& base, float scale, const Target& t)
+{
+    const float r = 40.0f * scale;
+    const float dx = t.centre.x - base.x, dy = t.centre.y - (base.y + r), dz = t.centre.z - base.z;
+    return std::sqrt(dx * dx + dy * dy + dz * dz) - r - t.radius <= 0.0f;
+}
+
+void case20_leafContactGeometry()
+{
+    // Behaviour first (so a geometry revert fails here, not on a constant).
+    // Horizontal reach against a grounded Pikmin (centre y 10, r 10):
+    // source sqrt(37^2 - 15^2) = 33.82, round-1 root sphere sqrt(50^2 - 30^2) = 40.
+    const float reach = std::sqrt(37.0f * 37.0f - 15.0f * 15.0f);
+    assert(std::fabs(reach - 33.823f) < 1e-2f);
+    std::uint32_t id = 0;
+    const float pathX = kMouthLocalX; // heading 0: the Stone runs along x = -0.025
+    struct Lane { float lateral; bool struck; };
+    const Lane lanes[] = { { 30.0f, true }, { 33.0f, true }, { 35.0f, false }, { 37.0f, false },
+                           { 39.0f, false } };
+    for (const Lane& lane : lanes) {
+        Fleet fleet;
+        FlatMap map;
+        fireForward(fleet, id);
+        std::vector<Target> targets{ piki(1, pathX + lane.lateral, 200.0f) };
+        Log log;
+        run(fleet, map, targets, 120, log);
+        std::printf("case20 lateral=%.1f strikes=%d (source %s, round-1 root sphere %s)\n", lane.lateral,
+                    log.strikesOn(1), lane.struck ? "hit" : "miss",
+                    legacyRootSphereTouches({ pathX, 0.0f, 200.0f }, 1.0f, targets[0]) ? "hit" : "miss");
+        assert(log.strikesOn(1) == (lane.struck ? 1 : 0));
+        // Negative control: the round-1 r40 root sphere, grounded and level
+        // with the Pikmin, strikes every lane here, including the three the
+        // source r27 leaf misses.
+        assert(legacyRootSphereTouches({ pathX, 0.0f, 200.0f }, 1.0f, targets[0]));
+    }
+
+    // Retail enemycoll: root r40 (bound only), leaf r27, both on joint 6.
+    assert(kBoundRadiusFull == 40.0f && kContactRadiusFull == 27.0f);
+    assert(kContactCentreYFull == 25.0f);
+    const ContactSphere full = contactSphere({ 3.0f, 7.0f, -2.0f }, 1.0f);
+    assert(full.radius == 27.0f && full.centre.x == 3.0f && full.centre.y == 32.0f &&
+           full.centre.z == -2.0f);
+    // CollPart::setScale scales the radius; the joint height scales with the
+    // model matrix.
+    const ContactSphere half = contactSphere({ 0.0f, 0.0f, 0.0f }, 0.5f);
+    assert(half.radius == 13.5f && half.centre.y == 12.5f);
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -761,7 +813,7 @@ int main(int argc, char** argv)
                                 case13_resetReentry, case14_hostClockEmissionAndFlight,
                                 case15_killBeforeEvent, case16_stoneOutlivesShooter,
                                 case17_teardownReentry, case18_stoneClock,
-                                case19_oncePerAttackState };
+                                case19_oncePerAttackState, case20_leafContactGeometry };
     const int count = int(sizeof(cases) / sizeof(cases[0]));
     for (int i = 0; i < count; ++i) {
         if (only == 0 || only == i + 1) {

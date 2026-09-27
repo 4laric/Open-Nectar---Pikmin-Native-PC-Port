@@ -449,20 +449,38 @@ void pc_p2_kabuto_fsm_update_stones(){
 }
 // Visual stand-in: the retail Rock/Stone model is not staged, so the P1 Rolling
 // Boulder (Iwagon, Beatle's P1 spawn type) mesh is drawn at the Stone's base,
-// scaled from its 24-unit radius to the Stone's 40 x scale.
+// scaled from its 24-unit radius to the Stone's 40 x scale bounding sphere.
+//
+// The shared Iwagon shape's joints are overridden to TekiShapeObject::
+// mAnimContext (tekibteki.cpp:241), whose mData starts null (Animator.h:479-484)
+// and is written only by a live Iwagon BTeki's Animator::updateContext
+// (animMgr.cpp:527-530, called from tekibteki.cpp:179,2209). With no Iwagon
+// drawn yet this stage, BaseShape::updateAnim would hit ERROR("no joint anim!!")
+// -> System::halt (shapeBase.cpp:3358-3361, system.cpp:1225-1231). So while the
+// context is empty it is pointed at the shape's own 0-frame "Null Anim"
+// (shapeBase.cpp:2854-2857,3111-3113; 0 frames per shapeBase.cpp:1339-1343),
+// which takes the base-pose branch (shapeBase.cpp:3376-3382), and restored
+// after the stones draw. Without either, the stones are not drawn.
 void pc_p2_kabuto_fsm_draw_stones(Graphics& gfx){
     if(fleet.active()==0||!gfx.mCamera)return;
     TekiShapeObject* so=tekiMgr?tekiMgr->getTekiShapeObject(TEKI_Iwagon):nullptr;
     Shape* shape=so?so->mShape:nullptr;
-    if(!stoneDrawLogged){stoneDrawLogged=true;std::printf("P2_KABUTO_STONE_DRAW model=%s\n",shape?"iwagon_standin":"none");std::fflush(stdout);}
-    if(!shape)return;
+    AnimData* const sharedAnim=so?so->mAnimContext.mData:nullptr;
+    AnimData* const nullAnim=(shape&&shape->mCurrentAnimation)?shape->mCurrentAnimation->mData:nullptr;
+    AnimData* const drawAnim=sharedAnim?sharedAnim:nullAnim;
+    if(!stoneDrawLogged){stoneDrawLogged=true;
+        std::printf("P2_KABUTO_STONE_DRAW model=%s anim=%s\n",shape&&drawAnim?"iwagon_standin":"none",
+            !shape?"none":sharedAnim?"shared":nullAnim?"null_anim":"missing");std::fflush(stdout);}
+    if(!shape||!drawAnim)return;
+    const float savedFrame=so->mAnimContext.mCurrentFrame;
+    so->mAnimContext.mData=drawAnim;
     gfx.setPerspective(gfx.mCamera->mPerspectiveMatrix.mMtx,gfx.mCamera->mFov,gfx.mCamera->mAspectRatio,gfx.mCamera->mNear,gfx.mCamera->mFar,1.f);
     gfx.useMaterial(nullptr);gfx.setDepth(true);
     for(int i=0;i<p2kabutostone::kFleetCapacity;++i){
         if(!fleet.used(i))continue;
         const P2CannonStone& st=fleet.stone(i);
         if(st.phase()!=P2CannonStonePhase::Move&&st.phase()!=P2CannonStonePhase::Dead)continue;
-        const float k=(p2kabutostone::kContactRadiusFull/24.0f)*st.scale();
+        const float k=(p2kabutostone::kBoundRadiusFull/24.0f)*st.scale();
         Matrix4f world,view;
         world.makeSRT(Vector3f(k,k,k),Vector3f(0.0f,st.faceDir(),0.0f),Vector3f(st.position().x,st.position().y,st.position().z));
         gfx.mCamera->mLookAtMtx.multiplyTo(world,view);
@@ -471,4 +489,7 @@ void pc_p2_kabuto_fsm_draw_stones(Graphics& gfx){
         shape->updateAnim(gfx,view,&frame,nullptr);
         shape->drawshape(gfx,*gfx.mCamera,nullptr);
     }
+    // Hand the shared context back exactly as the Iwagon animator left it.
+    so->mAnimContext.mData=sharedAnim;
+    so->mAnimContext.mCurrentFrame=savedFrame;
 }

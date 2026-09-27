@@ -32,7 +32,9 @@
 //   EXPECTED_EVENTS Kabuto 'attack' [[50, 2]] (KEYEVENT_2 at frame 50),
 //   DISC_PARMS 'Stone' general fp00 99999, fp01 25, fp06 250, fp08 0.03,
 //   fp12 150, fp24 10, fp28 3.0; proper fp01 100.
-//   docs/PIKMIN2_CANNON_PROJECTILE_ASSETS.md:164 Rock/Stone enemycoll root r40.
+//   docs/PIKMIN2_CANNON_PROJECTILE_ASSETS.md:164 Rock/Stone enemycoll: root
+//   r40 @ joint 6 with one child r27 @ joint 6, both offset 0 (see
+//   kContactRadiusFull for why the r27 leaf is the creature contact).
 
 #include "pc_p2_cannon_stone.h"
 
@@ -57,7 +59,28 @@ constexpr float kAnimFps = 30.0f;          // enemyAnimatorBase.cpp:4,11
 constexpr int kAttackKey2TriggerFrame = kAttackKey2Frame + 1;
 constexpr float kBirthYOffset = 25.0f;     // Kabuto.cpp:276 (over the Kabuto's own Y)
 constexpr float kMapRadius = 25.0f;        // Stone fp01, map sphere (enemyBase.cpp:2080-2089)
-constexpr float kContactRadiusFull = 40.0f; // Rock/Stone enemycoll root r40, scaled (Rock.cpp:346)
+// Creature contact sphere (collisionCallback, Rock.cpp:204-238). Rock/Stone
+// enemycoll.txt (retail enemyParms.szs) is a root r40 @ joint 6 with a single
+// child r27 @ joint 6, both offset (0,0,0). P2 reports a creature collision
+// only for a prim pair: isPrim() is `getChild() == nullptr || tube`
+// (include/CollInfo.h:82), and CollTree::checkCollisionRec
+// (plugProjectKandoU/collinfo.cpp:291-320) descends below a non-prim root
+// before reporting. The r40 root is therefore only a bounding sphere; the
+// contact is the concentric r27 leaf. CollPart::setScale scales every part
+// (collinfo.cpp:1549-1558), called with the Stone's scale (Rock.cpp:346).
+constexpr float kBoundRadiusFull = 40.0f;   // enemycoll root (broadphase only)
+constexpr float kContactRadiusFull = 27.0f; // enemycoll r27 leaf
+// Contact centre height: the leaf sits on joint 6 (rock_body), placed by
+// CollPart::makeMatrixTo (collinfo.cpp:832-841) from the model matrix
+// SRT(mScale, rot, mPosition) (enemyBase.cpp:1724,1745), so it is
+// mPosition + (0, rockBodyY * scale, 0). StateMove plays run.bca
+// (RockState.cpp:215); rock_body is (0, 25.0, 0) at run frame 0 and its Y
+// bobs over [23.283, 27.576] (mean 25.666) across the 40 frames with X/Z
+// always 0 (retail Rock enemy.bmd sha256 9ccbbc1a..., run.bca sha256
+// ee786d76..., extracted read-only by
+// output/claude-orch/p2-884/kabuto-r2/rock_body_run.py). The host uses the
+// frame-0 value; the +/-2.3 unit bob is not modelled.
+constexpr float kContactCentreYFull = 25.0f;
 // Source "mouth" joint (index 3 of the babykabuto enemy.bmd) model-space
 // translation at attack.bca frame 51, the pose the joint world matrix holds
 // when createStoneAttack reads it (Kabuto.cpp:274-276). Extracted from the
@@ -137,6 +160,21 @@ inline P2CannonStoneVec3 birthPosition(const P2CannonStoneVec3& kabutoPos, float
 inline P2CannonStoneVec3 mouthBirthPosition(const P2CannonStoneVec3& kabutoPos, float heading)
 {
     return birthPosition(kabutoPos, heading, kMouthLocalX, kMouthLocalZ);
+}
+
+struct ContactSphere {
+    P2CannonStoneVec3 centre;
+    float radius = 0.0f;
+};
+
+// The Stone's creature contact sphere at base point `base` (mPosition) and
+// scale `scale`: the r27 leaf on rock_body (see kContactRadiusFull).
+inline ContactSphere contactSphere(const P2CannonStoneVec3& base, float scale)
+{
+    ContactSphere c;
+    c.centre = { base.x, base.y + kContactCentreYFull * scale, base.z };
+    c.radius = kContactRadiusFull * scale;
+    return c;
 }
 
 // Host target snapshot entry (one per candidate creature per source tick).
@@ -312,10 +350,9 @@ public:
             }
 
             // Contacts (collisionCallback, Rock.cpp:204-238) while still Move.
-            const float scale = s.stone.scale();
-            const float r = kContactRadiusFull * scale;
-            const P2CannonStoneVec3 p = s.stone.position();
-            const P2CannonStoneVec3 c{ p.x, p.y + r, p.z };
+            const ContactSphere sphere = contactSphere(s.stone.position(), s.stone.scale());
+            const float r = sphere.radius;
+            const P2CannonStoneVec3& c = sphere.centre;
             for (int t = 0; t < targetCount; ++t) {
                 const Target& tg = targets[t];
                 if (!tg.alive) {
