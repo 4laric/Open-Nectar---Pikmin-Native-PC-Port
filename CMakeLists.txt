@@ -446,6 +446,9 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_photo_mode.cpp
     pc_port/pc_permadeath.cpp
     pc_port/pc_coop.cpp
+    # Direct-boot co-op switch (netplay M0): CLI/env parse + apply. New
+    # netplay code lives under pc_port/netplay/.
+    pc_port/netplay/pc_coop_switch.cpp
     pc_port/pc_art.cpp
     pc_port/pc_icon.cpp
     pc_port/settings/pc_glass_menu.cpp
@@ -699,7 +702,10 @@ if(WIN32)
     add_library(bbft_transport STATIC pc_port/bbft/bbft_transport.c)
     target_link_libraries(pikmin_pc PRIVATE bbft_transport ws2_32)
     target_link_libraries(p2_kurage_runtime PRIVATE bbft_transport ws2_32)
-    add_executable(pc_bbft_test pc_port/pc_bbft_test.cpp pc_port/pc_bbft.cpp pc_port/pc_randomizer.cpp pc_port/pc_p2_delivery_host.cpp)
+    add_executable(pc_bbft_test pc_port/pc_bbft_test.cpp pc_port/pc_bbft.cpp pc_port/pc_randomizer.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp)
+    # The #871 proxy TU pulls the engine header chain (teki.h), which needs
+    # the same forced pc_types.h preinclude as the rest of the build.
+    target_compile_options(pc_bbft_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_bbft_test COMMAND pc_bbft_test)
     add_test(NAME pc_bbft_background_test COMMAND pc_bbft_test --background)
     add_executable(jaudio_bbft_test pc_port/audio/jaudio_bbft_test.cpp pc_port/audio/jaudio_sink.cpp)
@@ -1520,6 +1526,12 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_menu_repeat_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_menu_repeat_test COMMAND pc_menu_repeat_test)
 
+    # Direct-boot co-op switch parse/apply (netplay M0; no game needed)
+    add_executable(pc_coop_switch_test pc_port/netplay/pc_coop_switch_test.cpp pc_port/netplay/pc_coop_switch.cpp pc_port/pc_coop.cpp)
+    target_include_directories(pc_coop_switch_test PRIVATE pc_port)
+    target_compile_options(pc_coop_switch_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_coop_switch_test COMMAND pc_coop_switch_test)
+
     # Host software DSP test (not linked into main game)
     add_executable(pc_dsp_host_test
         pc_port/audio/pc_dsp_host_test.cpp
@@ -1645,7 +1657,9 @@ endif()
 # Standalone adapter harness; exercises real file I/O without game assets.
 # Include the P2 ordinary delivery ledger because pc_randomizer.cpp always links
 # against its host entry points; this only changes probe linkage, not behavior.
-add_executable(pc_randomizer_probe pc_port/pc_randomizer_probe.cpp pc_port/pc_randomizer.cpp pc_port/pc_p2_delivery_host.cpp)
+add_executable(pc_randomizer_probe pc_port/pc_randomizer_probe.cpp pc_port/pc_randomizer.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp)
+# Same engine-header preinclude as pc_bbft_test above (pc_p2_proxy.cpp needs it).
+target_compile_options(pc_randomizer_probe PRIVATE ${NATIVE_COMPILE_OPTIONS})
 
 # Only the isolated diagnostic build includes scripted stock/death fixtures.
 option(PIKMIN_RANDOMIZER_TEST_HOOKS "Enable standalone scripted gameplay test fixtures" OFF)
