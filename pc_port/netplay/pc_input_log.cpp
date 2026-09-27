@@ -118,6 +118,15 @@ void pc_input_log_flush(void)
 	if (sRecordFile != nullptr) std::fflush(sRecordFile);
 }
 
+void pc_input_log_close(void)
+{
+	if (sRecordFile != nullptr) {
+		std::fclose(sRecordFile);
+		sRecordFile  = nullptr;
+		sRecordActive = false;
+	}
+}
+
 void pc_input_log_tick(void)
 {
 	if (!sInitialised) {
@@ -126,20 +135,9 @@ void pc_input_log_tick(void)
 		const char* replayPath = sArgvReplay;
 		if (recordPath == nullptr) recordPath = std::getenv("PIKMIN_INPUT_RECORD");
 		if (replayPath == nullptr) replayPath = std::getenv("PIKMIN_INPUT_REPLAY");
-		if (recordPath != nullptr && *recordPath != '\0') {
-			sRecordFile = std::fopen(recordPath, "wb");
-			if (sRecordFile != nullptr) {
-				std::vector<uint8_t> header;
-				pc_input_log_write_header(header);
-				std::fwrite(header.data(), 1, header.size(), sRecordFile);
-				sRecordActive = true;
-				std::printf("[netplay] input record: %s\n", recordPath);
-				std::fflush(stdout);
-			} else {
-				std::printf("[netplay] input record: cannot open %s\n", recordPath);
-				std::fflush(stdout);
-			}
-		}
+		// Load the replay first, before the record file is opened: the
+		// replay lives fully in memory, so record and replay may name the
+		// same path for an identity check without truncating the source.
 		if (replayPath != nullptr && *replayPath != '\0') {
 			FILE* in = std::fopen(replayPath, "rb");
 			if (in != nullptr) {
@@ -155,6 +153,10 @@ void pc_input_log_tick(void)
 					                             rec)
 					    == PC_INPUT_HEADER_OK) {
 						size_t body = sReplayBytes.size() - pc_input_log::kHeaderBytes;
+						if (body % pc_input_log::kRecordBytes != 0) {
+							std::printf("[netplay] input replay: trailing %llu bytes ignored in %s\n",
+							            (unsigned long long)(body % pc_input_log::kRecordBytes), replayPath);
+						}
 						sReplayTicks = body / pc_input_log::kRecordBytes;
 						sReplayActive = true;
 						std::printf("[netplay] input replay: %s (%llu ticks)\n", replayPath,
@@ -162,14 +164,34 @@ void pc_input_log_tick(void)
 					} else {
 						std::printf("[netplay] input replay: bad header in %s\n", replayPath);
 						sReplayBytes.clear();
+						std::fflush(stdout);
+						std::exit(3);
 					}
 				} else {
 					std::printf("[netplay] input replay: truncated file %s\n", replayPath);
+					std::fflush(stdout);
+					std::fclose(in);
+					std::exit(3);
 				}
 				std::fclose(in);
 				std::fflush(stdout);
 			} else {
 				std::printf("[netplay] input replay: cannot open %s\n", replayPath);
+				std::fflush(stdout);
+				std::exit(3);
+			}
+		}
+		if (recordPath != nullptr && *recordPath != '\0') {
+			sRecordFile = std::fopen(recordPath, "wb");
+			if (sRecordFile != nullptr) {
+				std::vector<uint8_t> header;
+				pc_input_log_write_header(header);
+				std::fwrite(header.data(), 1, header.size(), sRecordFile);
+				sRecordActive = true;
+				std::printf("[netplay] input record: %s\n", recordPath);
+				std::fflush(stdout);
+			} else {
+				std::printf("[netplay] input record: cannot open %s\n", recordPath);
 				std::fflush(stdout);
 			}
 		}
@@ -238,6 +260,7 @@ void pc_input_log_tick(void)
 		uint8_t out[44];
 		pc_input_log_encode_tick(cur, out);
 		std::fwrite(out, 1, sizeof(out), sRecordFile);
+		if ((sTickIndex + 1) % 300 == 0) std::fflush(sRecordFile);
 	}
 
 	++sTickIndex;

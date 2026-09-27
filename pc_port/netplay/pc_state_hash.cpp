@@ -9,11 +9,14 @@
 #include "GoalItem.h"
 #include "ItemMgr.h"
 #include "NaviMgr.h"
+#include "ObjType.h"
 #include "Pellet.h"
 #include "PikiMgr.h"
 #include "PlayerState.h"
 #include "gameflow.h"
 #include "teki.h"
+
+#include <SDL2/SDL.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -82,6 +85,8 @@ bool sLogActive         = false;
 FILE* sLogFile          = nullptr;
 uint64_t sExitAfter     = 0;
 bool sExitAfterSet      = false;
+bool sExitRequested     = false;
+uint64_t sExitTick      = 0;
 bool sPrerollDone       = false;
 const char* sArgvLog    = nullptr;
 const char* sArgvExit   = nullptr;
@@ -107,6 +112,9 @@ const char* argvValue(int argc, char** argv, const char* flag)
 
 uint64_t hashNavi(void)
 {
+	// No live stage: exitStage reliably nulls naviMgr while the other
+	// manager globals may still point at the released stage. Hash 0
+	// instead of walking stale objects.
 	if (naviMgr == nullptr) return 0;
 	uint64_t h = kFnvOffset;
 	Iterator it(naviMgr);
@@ -118,6 +126,8 @@ uint64_t hashNavi(void)
 		mixVec(h, n->mSRT.t);
 		mixVec(h, n->mSRT.r);
 		mixVec(h, n->mVelocity);
+		mixVec(h, n->mTargetVelocity);
+		mixF32(h, n->mFaceDirection);
 		mixF32(h, n->mHealth);
 		AState<Navi>* st = n->getCurrState();
 		mixS32(h, st != nullptr ? (int32_t)st->getID() : (int32_t)-1);
@@ -127,7 +137,7 @@ uint64_t hashNavi(void)
 
 uint64_t hashPiki(void)
 {
-	if (pikiMgr == nullptr) return 0;
+	if (naviMgr == nullptr || pikiMgr == nullptr) return 0;
 	uint64_t h = kFnvOffset;
 	Iterator it(pikiMgr);
 	CI_LOOP(it)
@@ -141,6 +151,8 @@ uint64_t hashPiki(void)
 		mixVec(h, p->mSRT.t);
 		mixVec(h, p->mSRT.r);
 		mixVec(h, p->mVelocity);
+		mixVec(h, p->mTargetVelocity);
+		mixF32(h, p->mFaceDirection);
 		mixF32(h, p->mHealth);
 		AState<Piki>* st = p->getCurrState();
 		mixS32(h, st != nullptr ? (int32_t)st->getID() : (int32_t)-1);
@@ -150,7 +162,7 @@ uint64_t hashPiki(void)
 
 uint64_t hashTeki(void)
 {
-	if (tekiMgr == nullptr) return 0;
+	if (naviMgr == nullptr || tekiMgr == nullptr) return 0;
 	uint64_t h = kFnvOffset;
 	Iterator it(tekiMgr);
 	CI_LOOP(it)
@@ -161,6 +173,8 @@ uint64_t hashTeki(void)
 		mixVec(h, t->mSRT.t);
 		mixVec(h, t->mSRT.r);
 		mixVec(h, t->mVelocity);
+		mixVec(h, t->mTargetVelocity);
+		mixF32(h, t->mFaceDirection);
 		mixF32(h, t->mHealth);
 		mixS32(h, (int32_t)t->mStateID);
 	}
@@ -169,6 +183,8 @@ uint64_t hashTeki(void)
 
 uint64_t hashItem(void)
 {
+	if (naviMgr == nullptr) return 0;
+	if (itemMgr == nullptr && pelletMgr == nullptr && bossMgr == nullptr) return 0;
 	uint64_t h = kFnvOffset;
 	if (itemMgr != nullptr) {
 		Iterator it(itemMgr);
@@ -178,7 +194,15 @@ uint64_t hashItem(void)
 			if (c == nullptr) continue;
 			mixS32(h, (int32_t)c->mObjType);
 			mixVec(h, c->mSRT.t);
-			if (GoalItem* goal = dynamic_cast<GoalItem*>(c)) {
+			mixVec(h, c->mSRT.r);
+			mixVec(h, c->mVelocity);
+			mixVec(h, c->mTargetVelocity);
+			mixF32(h, c->mFaceDirection);
+			// Goal check uses the same mObjType test as
+			// ItemMgr::getContainer (itemMgr.cpp), then a static_cast:
+			// no dynamic_cast, so no vptr chase through stale objects.
+			if (c->mObjType == OBJTYPE_Goal) {
+				GoalItem* goal = static_cast<GoalItem*>(c);
 				mixU32(h, (uint32_t)goal->mOnionColour);
 				mixU32(h, goal->mHeldPikis[0]);
 				mixU32(h, goal->mHeldPikis[1]);
@@ -214,6 +238,12 @@ uint64_t hashItem(void)
 				mixS32(h, 0);
 			}
 			mixVec(h, p->mSRT.t);
+			mixVec(h, p->mSRT.r);
+			mixVec(h, p->mVelocity);
+			mixVec(h, p->mTargetVelocity);
+			mixF32(h, p->mFaceDirection);
+			AState<Pellet>* st = p->getCurrState();
+			mixS32(h, st != nullptr ? (int32_t)st->getID() : (int32_t)-1);
 			mixS32(h, (int32_t)p->getState());
 			mixU32(h, (uint32_t)p->mCarrierCount);
 		}
@@ -228,6 +258,10 @@ uint64_t hashItem(void)
 			mixS32(h, (int32_t)b->getNextState());
 			mixF32(h, b->getCurrentLife());
 			mixVec(h, b->mSRT.t);
+			mixVec(h, b->mSRT.r);
+			mixVec(h, b->mVelocity);
+			mixVec(h, b->mTargetVelocity);
+			mixF32(h, b->mFaceDirection);
 		}
 	}
 	return h;
@@ -326,23 +360,46 @@ void pc_state_hash_flush(void)
 void pc_state_hash_tick_end(void)
 {
 	if (!sInitialised) initOnce();
+	// COMMON rule 3: with no netplay switch set, return before walking
+	// any manager. No hashes, no files, no timing change.
+	if (!sLogActive && !sExitAfterSet) return;
+	if (sExitRequested) {
+		// The quit event is already queued; the main loop breaks on its
+		// next pc_window_should_close() check. Fall back to a direct
+		// exit only if the loop is stuck.
+		if (sTick >= sExitTick + 600) {
+			pc_state_hash_flush();
+			pc_input_log_flush();
+			pc_input_log_close();
+			std::fflush(stdout);
+			std::exit(0);
+		}
+		return;
+	}
 	++sTick;
 
-	uint64_t navi  = hashNavi();
-	uint64_t piki  = hashPiki();
-	uint64_t teki  = hashTeki();
-	uint64_t item  = hashItem();
-	uint64_t world = hashWorld();
-	uint64_t rng   = hashRng();
-	uint64_t total = kFnvOffset;
-	mixU64(total, navi);
-	mixU64(total, piki);
-	mixU64(total, teki);
-	mixU64(total, item);
-	mixU64(total, world);
-	mixU64(total, rng);
-
+	uint64_t navi  = 0;
+	uint64_t piki  = 0;
+	uint64_t teki  = 0;
+	uint64_t item  = 0;
+	uint64_t world = 0;
+	uint64_t rng   = 0;
+	uint64_t total = 0;
 	if (sLogActive) {
+		navi  = hashNavi();
+		piki  = hashPiki();
+		teki  = hashTeki();
+		item  = hashItem();
+		world = hashWorld();
+		rng   = hashRng();
+		total = kFnvOffset;
+		mixU64(total, navi);
+		mixU64(total, piki);
+		mixU64(total, teki);
+		mixU64(total, item);
+		mixU64(total, world);
+		mixU64(total, rng);
+
 		std::fprintf(sLogFile, "%llu %016llx %016llx %016llx %016llx %016llx %016llx %016llx\n",
 		             (unsigned long long)sTick, (unsigned long long)total, (unsigned long long)navi,
 		             (unsigned long long)piki, (unsigned long long)teki, (unsigned long long)item,
@@ -353,9 +410,18 @@ void pc_state_hash_tick_end(void)
 	if (sExitAfterSet && sTick >= sExitAfter) {
 		pc_state_hash_flush();
 		pc_input_log_flush();
+		pc_input_log_close();
 		std::fflush(stdout);
-		// The main loop has no external quit-request API (it only breaks on
-		// pc_window_should_close), so exit directly after flushing.
-		std::exit(0);
+		// Clean quit through the same route as normal play: queue SDL_QUIT
+		// so System::run breaks on pc_window_should_close() and main
+		// returns through "[PC Port] Game exited normally.". Stop hashing
+		// further ticks; the counter above is the fallback if the loop
+		// never drains the event.
+		sExitRequested = true;
+		sExitTick      = sTick;
+		SDL_Event ev;
+		std::memset(&ev, 0, sizeof(ev));
+		ev.type = SDL_QUIT;
+		SDL_PushEvent(&ev);
 	}
 }

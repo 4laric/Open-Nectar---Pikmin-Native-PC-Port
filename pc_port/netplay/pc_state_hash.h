@@ -10,39 +10,57 @@
 //
 // Exactly what is hashed (stable simulation data only, never pointers):
 //   navi:  per Navi in manager order: mNaviID; position (mSRT.t xyz),
-//     rotation (mSRT.r xyz), velocity (mVelocity xyz) as float bits;
-//     mHealth bits; current state id (mCurrState->getID(), -1 when null).
+//     rotation (mSRT.r xyz), velocity (mVelocity xyz), drive
+//     (mTargetVelocity xyz) as float bits; mFaceDirection bits; mHealth
+//     bits; current state id (mCurrState->getID(), -1 when null).
 //   piki:  per Piki in manager order: mColor, mHappa, P2 species flags
-//     (purple/white/bulbmin); position, rotation, velocity bits; mHealth
-//     bits; current state id (-1 when null).
+//     (purple/white/bulbmin); position, rotation, velocity, drive bits;
+//     mFaceDirection bits; mHealth bits; current state id (-1 when null).
 //   teki:  per Teki in manager order: mTekiType; position, rotation,
-//     velocity bits; mHealth bits; mStateID.
-//   item:  per itemMgr object in manager order: mObjType; position bits;
-//     GoalItem extras: mOnionColour and mHeldPikis[3]; then per pelletMgr
-//     Pellet in order: config pellet id + pellet type (0 when no config),
-//     position bits, state id, carrier count; then per bossMgr Boss in
-//     order: current/next state id, current life bits, position bits.
-//     Onion/container counts per colour are covered twice on purpose: once
-//     via the GoalItem objects above, once via itemMgr->getContainer(c) for
-//     each Piki colour (0 when that colour has no Onion).
+//     velocity, drive bits; mFaceDirection bits; mHealth bits; mStateID.
+//   item:  per itemMgr object in manager order: mObjType; position,
+//     rotation, velocity, drive bits; mFaceDirection bits; GoalItem extras
+//     (mObjType == OBJTYPE_Goal, via static_cast, never dynamic_cast):
+//     mOnionColour and mHeldPikis[3]; then per pelletMgr Pellet in order:
+//     config pellet id + pellet type (0 when no config), position,
+//     rotation, velocity bits, mFaceDirection bits, current state id
+//     (getCurrState()->getID(), -1 when null), legacy getState(), carrier
+//     count; then per bossMgr Boss in order: current/next state id,
+//     current life bits, position, rotation, velocity bits,
+//     mFaceDirection bits. Onion/container counts per colour are covered
+//     twice on purpose: once via the GoalItem objects above, once via
+//     itemMgr->getContainer(c) for each Piki colour (0 when that colour
+//     has no Onion).
 //   world: gameflow.mWorldClock.mTimeOfDay bits and mCurrentDay, plus
 //     playerState counters (living/born/dead/plucked, 0 when null).
 //   rng:   pc_sim_rng_state() when the m1-det lane's weak symbol resolves,
 //     else 0. (Wall-clock rand() is NOT hashed; it is expected to diverge
 //     until the det lane lands.)
 //   total: FNV-1a 64 over the six sub-hashes in the order above.
-// A null manager (title screen, loading) contributes a sub-hash of 0.
+// A null manager (title screen, loading) contributes a sub-hash of 0: each
+// sub-hash returns literal 0 (not the FNV offset) when its managers are
+// absent. Additionally, naviMgr == nullptr is treated as "no live stage":
+// exitStage reliably nulls naviMgr while pikiMgr/itemMgr/pelletMgr may
+// still point at the released stage, so when naviMgr is null the navi,
+// piki, teki and item sub-hashes are all 0 instead of walking stale
+// objects.
 // Mixing uses FNV-1a 64 throughout.
 //
 // Runtime behaviour:
 //   PIKMIN_STATE_HASH_LOG=<file>: write one line per tick (buffered; the
 //     buffer is flushed every 300 ticks and on exit).
 //   PIKMIN_NETPLAY_EXIT_AFTER_TICKS=<n>: after tick n is hashed, flush every
-//     log and exit the process cleanly with code 0.
+//     log, push an SDL_QUIT event so the main loop breaks and the process
+//     returns through the normal "[PC Port] Game exited normally." path,
+//     and stop hashing further ticks. If the loop has not exited within a
+//     few more ticks, exit directly with code 0 as a fallback (flushing
+//     again first).
 //   PIKMIN_NETPLAY_TEST_PREROLL_RAND=<n>: before the first tick, call rand()
 //     n times, and pc_sim_rand() n times when the weak symbol resolves.
-//   With none of these set, pc_state_hash_tick_end() only bumps the tick
-//   counter bookkeeping needed for nothing else: no files, no log lines.
+//   With none of these set, pc_state_hash_tick_end() returns immediately:
+//     no managers are walked, no hashes are computed, no files are opened,
+//     no log lines are printed, the RNG sequence is unchanged. (The tick
+//     counter is not bumped either; nothing consumes it on this path.)
 
 #include <cstdint>
 

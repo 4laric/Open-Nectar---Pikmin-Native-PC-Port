@@ -3,7 +3,7 @@
 //
 // File format (little-endian binary, "PKNI" v1):
 //   offset  size  field
-//   0       4     magic: 'P' 'K' 'N' 'I' (0x49, 0x4B, 0x4E, 0x49)
+//   0       4     magic: 'P' 'K' 'N' 'I' (0x50, 0x4B, 0x4E, 0x49)
 //   4       2     version: u16, currently 1
 //   6       2     pad count: u16, currently 4
 //   8       2     record size: u16, bytes per tick (currently 44)
@@ -32,7 +32,21 @@
 //     This happens after PADRead, so replay bypasses local window-focus
 //     gating on purpose. Past the end of the file, neutral pads are fed
 //     (all zeros; err kept connected (0) for pad 0, no-controller (-1) for
-//     pads 1-3).
+//     pads 1-3). A replay that was explicitly requested but cannot be
+//     loaded (missing file, truncated header, bad magic, unsupported
+//     version) prints an error and exits the process with code 3, so a
+//     harness run can never mistake an unreplayed session for a replay.
+//   Record and replay may be combined: when both are set, the record is
+//     taken after the replay overwrite, so recording a replayed run must
+//     reproduce the replay file byte-for-byte. The replay is fully loaded
+//     into memory before the record file is opened, so record and replay
+//     may name the same path for an identity check.
+//   Coverage is PADStatus only: scripted overrides that take precedence in
+//     ControllerMgr::updateController (pc_p2_input_script_override and the
+//     autoplay bot that feeds it), mouse/cursor, window-focus gating and
+//     edges derived elsewhere are NOT recorded or replayed. A fixture's
+//     script override silently defeats a replay; keep it unset for
+//     determinism runs.
 //   With neither switch set, pc_input_log_tick() is a no-op: no files are
 //     touched, no log lines are printed, the RNG sequence is unchanged.
 
@@ -94,4 +108,8 @@ void pc_input_log_notify_argv(int argc, char** argv);
 void pc_input_log_tick(void);
 
 // Flush the record file, if any. Called every 300 ticks and on exit.
+
+// Close the record file, if any. Called on the netplay exit path after the
+// final flush.
+void pc_input_log_close(void);
 void pc_input_log_flush(void);
