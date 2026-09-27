@@ -2561,7 +2561,11 @@ void zen::DrawWorldMap::draw(Graphics& gfx)
 {
 	if (mCurrentMode != DrawWorldMapMode::Diary) {
 #if defined(PIKI_PC_PORT)
-		// Las pantallas del mapa dibujan con el ortho 640x480 por defecto.
+		// Las pantallas del mapa dibujan en el lienzo ancho de menús
+		// (DrawScreen::draw). El espacio de toque se toma con ese modo ya
+		// activo; tomado antes salía el 640 estirado y los toques caían
+		// desplazados respecto a los puntos del mapa.
+		pc_gfx_begin_menu_2d();
 		pc_gfx_note_menu_tap_space(640, 480);
 		// Pantalla completa (issue #46): sin recorte 4:3. Fondo y cortinillas
 		// se estiran al ancho; los paneles que asomen se esconden aparte.
