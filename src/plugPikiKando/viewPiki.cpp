@@ -1,6 +1,11 @@
 #include "pc_p2_purple.h"
 #include "pc_p2_white.h"
+#if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_policy.h"
+#else
+#define pc_netplay_sim_visible(x) (x)
+#define pc_netplay_sim_lod_distance(x) (x)
+#endif
 #if defined(PIKI_PC_PORT)
 #include "netplay/pc_sim_rng.h"
 #endif

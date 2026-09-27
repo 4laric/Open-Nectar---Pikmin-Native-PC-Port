@@ -43,6 +43,8 @@
 #include "pc_p2_long_legs.h"
 #include "pc_p2_hardlanes.h"
 #include "pc_p2_chappy.h"
+#else
+#define pc_netplay_sim_visible(x) (x)
 #endif
 #include "pc_randomizer.h"
 #include "FlowController.h"

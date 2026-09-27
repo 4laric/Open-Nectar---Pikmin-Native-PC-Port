@@ -1,5 +1,9 @@
 #include "PlantMgr.h"
+#if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_policy.h"
+#else
+#define pc_netplay_sim_visible(x) (x)
+#endif
 #include "Age.h"
 #include "CreatureProp.h"
 #include "DebugLog.h"

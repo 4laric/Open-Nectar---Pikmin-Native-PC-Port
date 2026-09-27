@@ -1,5 +1,9 @@
 #include "DualCreature.h"
+#if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_policy.h"
+#else
+#define pc_netplay_sim_visible(x) (x)
+#endif
 #include "DebugLog.h"
 #include "Graphics.h"
 #include "ItemMgr.h"
@@ -183,7 +187,7 @@ void DualCreature::refresh(Graphics& gfx)
 
 	if (!_43E) {
 #if defined(VERSION_PIKIDEMO) || defined(VERSION_GPIJ01_01)
-		if (!mIsDynamicsSimpleFixed && gfx.mCamera->isPointVisible(mSRT.t, 2.0f * getBoundingSphereRadius()))
+		if (!mIsDynamicsSimpleFixed && pc_netplay_sim_visible(gfx.mCamera->isPointVisible(mSRT.t, 2.0f * getBoundingSphereRadius())))
 #else
 		if (!mIsDynamicsSimpleFixed && isPointVisible)
 #endif

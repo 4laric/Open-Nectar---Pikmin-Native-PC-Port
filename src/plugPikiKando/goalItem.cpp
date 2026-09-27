@@ -2,7 +2,11 @@
 #include "pc_p2_preview.h"
 #include "pc_bbft.h"
 #include "GoalItem.h"
+#if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_policy.h"
+#else
+#define pc_netplay_sim_visible(x) (x)
+#endif
 #include "FlowController.h"
 #include "teki.h"
 #if defined(PIKI_PC_PORT)

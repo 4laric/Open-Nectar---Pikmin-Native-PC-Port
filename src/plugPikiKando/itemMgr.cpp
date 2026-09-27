@@ -2,7 +2,11 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_coop.h"
 #endif
+#if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_policy.h"
+#else
+#define pc_netplay_sim_visible(x) (x)
+#endif
 #if defined(PIKI_PC_PORT)
 #include "settings/pc_settings.h"
 #endif
