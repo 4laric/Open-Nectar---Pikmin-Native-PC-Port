@@ -1,4 +1,5 @@
 #include "pc_randomizer.h"
+#include "netplay/pc_netplay_det.h"
 #if PIKI_USE_JAUDIO
 #include "port/jaudio_host.h"
 #include "port/audio_sink.h"
@@ -1310,7 +1311,9 @@ void pc_window_swap_buffers(void) {
         SDL_GL_SwapWindow(sWindow);
         // VSync Off must not retain the software presentation limiter. Game
         // simulation uses the fixed-step scheduler independently.
-        if (sVsyncEnabled) {
+        // M1 deterministic netplay: unthrottled replay runs bypass the
+        // limiter as well (fast replay tests; the sim is unchanged).
+        if (sVsyncEnabled && !pc_netplay_unthrottled()) {
             // The interval is the game's setFrameClamp: retraces per logical
             // frame against a 60 Hz base, so 1 is 60 Hz and 2 is 30 Hz. The
             // port adds 0 for 120 Hz, which has no 60 Hz divisor. Mirror

@@ -84,7 +84,13 @@ bool pc_tick_profiler_enabled()
 	// per frame and became the cost it was measuring.
 	static const bool enabled = [] {
 		const char* value = getenv("PIKMIN_TICK_STATS");
-		return (value != nullptr && value[0] == '1') || pc_tick_profiler_hud_enabled();
+		if (value != nullptr && value[0] == '1') return true;
+		if (pc_tick_profiler_hud_enabled()) return true;
+		// M1 deterministic netplay: PIKMIN_NETPLAY_PROFILE_LOG=<file> implies
+		// sampling so the det tick-cost report has data without also setting
+		// PIKMIN_TICK_STATS=1.
+		const char* log = getenv("PIKMIN_NETPLAY_PROFILE_LOG");
+		return log != nullptr && *log != '\0';
 	}();
 	return enabled;
 }
