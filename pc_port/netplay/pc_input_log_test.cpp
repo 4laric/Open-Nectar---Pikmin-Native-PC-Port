@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 // Link stubs: this test exercises only the pure encode/decode API, but it
@@ -19,6 +20,14 @@
 static PADStatus sStubPads[4];
 PADStatus* pc_netplay_pad_status(void) { return sStubPads; }
 void pc_state_hash_before_first_tick(void) {}
+
+// M1/M2 hook probe: counts pre-sim capture calls and stores a fixed yaw.
+static int sHookCalls = 0;
+static void sTestCaptureHook(void)
+{
+	++sHookCalls;
+	pc_input_log_yaw_set(0, 0x1234, 0);
+}
 
 namespace {
 int sFailures = 0;
@@ -177,6 +186,29 @@ int main()
 	// and known angles map to known codes.
 	check(pc_input_log_yaw_quantise(0.0f) == 0, "yaw 0 -> 0");
 	check(pc_input_log_yaw_quantise(6.28318530717958647692f) == 0, "yaw 2pi wraps to 0");
+	// Non-finite camera input maps to neutral 0 instead of UB (m7).
+	check(pc_input_log_yaw_quantise(std::numeric_limits<float>::quiet_NaN()) == 0, "yaw NaN -> 0");
+	check(pc_input_log_yaw_quantise(std::numeric_limits<float>::infinity()) == 0, "yaw inf -> 0");
+	check(pc_input_log_yaw_quantise(-std::numeric_limits<float>::infinity()) == 0, "yaw -inf -> 0");
+
+	// M1/M2: the pre-sim capture hook runs and the yaw slots reset every
+	// tick even with no record or replay file (det mode without files must
+	// get a fresh yaw each tick, never a stale one). Needs
+	// PIKMIN_INPUT_RECORD/PIKMIN_INPUT_REPLAY unset in the test env.
+	{
+		float s = 0.0f, c = 0.0f;
+		check(!pc_netplay_control_yaw(0, &s, &c), "no yaw before the first tick");
+		pc_input_log_set_yaw_capture_fn(&sTestCaptureHook);
+		pc_input_log_tick();
+		check(sHookCalls == 1, "capture hook runs without record/replay");
+		check(pc_input_log_yaw_valid(0), "hook yaw stored for pad 0");
+		check(pc_netplay_control_yaw(0, &s, &c), "stored yaw consumable after tick");
+		// With the hook removed the slots must still clear every tick.
+		pc_input_log_set_yaw_capture_fn(nullptr);
+		pc_input_log_tick();
+		check(sHookCalls == 1, "removed hook is not called");
+		check(!pc_input_log_yaw_valid(0), "yaw cleared every tick without record/replay (M1)");
+	}
 	{
 		const float pi = 3.14159265358979323846f;
 		check(pc_input_log_yaw_quantise(pi) == 0x8000, "yaw pi -> 0x8000");

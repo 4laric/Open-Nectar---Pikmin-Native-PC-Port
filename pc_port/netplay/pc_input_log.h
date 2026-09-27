@@ -35,25 +35,27 @@
 // here; see the lockout table in the m2c handoff.
 //
 // Runtime behaviour:
-//   PIKMIN_INPUT_RECORD=<file> (or --input-record <file>): on each tick,
-//     append the 4 PADStatus records plus yaw/flags. Always writes v2.
+//   PIKMIN_INPUT_RECORD=<file> (or --input-record <file>): before each tick's
+//     simulation, append the 4 PADStatus records plus yaw/flags. Always
+//     writes v2. The yaw is the pre-sim captured value (live camera,
+//     quantised), so the file holds exactly what the sim will use.
 //   PIKMIN_INPUT_REPLAY=<file> (or --input-replay <file>): on each tick,
 //     overwrite the 4 pads with the recorded values for that tick index,
-//     and feed the recorded yaw to the sim (v2) or fall back to the live
-//     camera (v1, as today). This happens after PADRead, so replay bypasses
+//     and feed the recorded yaw to the sim (v2) or capture the live camera
+//     pre-sim (v1, as today). This happens after PADRead, so replay bypasses
 //     local window-focus gating on purpose. Past the end of the file,
 //     neutral pads are fed (all zeros; err kept connected (0) for pad 0,
-//     no-controller (-1) for pads 1-3) and the yaw falls back to live.
-//     A replay that was explicitly requested but cannot be loaded (missing
-//     file, truncated header, bad magic, unsupported version) prints an
-//     error and exits the process with code 3, so a harness run can never
-//     mistake an unreplayed session for a replay.
-//   Record and replay may be combined: the record is written after the
-//     tick's simulation from the replayed pads and the yaw the sim actually
-//     used, so recording a replayed v2 run reproduces the replay file
-//     byte-for-byte. The replay is fully loaded into memory before the
-//     record file is opened, so record and replay may name the same path
-//     for an identity check.
+//     no-controller (-1) for pads 1-3) and the yaw is the pre-sim live
+//     capture. A replay that was explicitly requested but cannot be loaded
+//     (missing file, truncated header, bad magic, unsupported version)
+//     prints an error and exits the process with code 3, so a harness run
+//     can never mistake an unreplayed session for a replay.
+//   Record and replay may be combined: the record is written before the
+//     tick's simulation from the replayed pads and the yaw the sim will use,
+//     so recording a replayed v2 run reproduces the replay file byte-for-
+//     byte. The replay is fully loaded into memory before the record file is
+//     opened, so record and replay may name the same path for an identity
+//     check.
 //   Coverage is PADStatus plus yaw/flags: scripted overrides that take
 //     precedence in ControllerMgr::updateController (pc_p2_input_script_
 //     override and the autoplay bot that feeds it), mouse/cursor, window-
@@ -62,12 +64,28 @@
 //     script override silently defeats a replay; keep it unset for
 //     determinism runs.
 //   With neither switch set, pc_input_log_tick() and pc_input_log_tick_end()
-//     are no-ops: no files are touched, no log lines are printed, the RNG
-//     sequence is unchanged.
+//     touch no files, print no log lines and leave the RNG sequence unchanged.
+//     The per-tick yaw slots are still cleared every tick and the (possibly
+//     null) capture hook still runs, so det mode without a record or replay
+//     file gets a fresh yaw every tick instead of a stale one.
 //
-// Tick split: pc_input_log_tick() runs before the sim (after PADRead);
-// pc_input_log_tick_end() runs after the sim and performs the record
-// write, so the recorded yaw is the quantised value the sim used.
+//   Only det-mode records replay bit-exactly. A non-det record still carries
+//     the quantised yaw, but the sim used the unquantised camera angle that
+//     tick, so replaying it in det mode can differ by up to half an LSB.
+//
+// Tick split: pc_input_log_tick() runs before the sim (after PADRead); it
+// clears the yaw slots, loads the replay pads, runs the capture hook (which
+// fills live yaw for slots without a replayed value), and performs the
+// record write, so the recorded yaw is the quantised value the sim will use.
+// pc_input_log_tick_end() runs after the sim and only advances the tick
+// index (plus periodic flush).
+//
+// Yaw capture hook: engine code (Navi) registers a function that reads each
+// local player's control camera pre-sim and stores the quantised yaw via
+// pc_input_log_yaw_set. Slots already filled from a v2 replay are left
+// alone. pc_input_log_tick calls the hook whenever it is set, including on
+// ticks with no record or replay active, so det mode always starts the sim
+// with fresh yaw. Register once during static init, before the first tick.
 
 #include <cstddef>
 #include <cstdint>
@@ -151,28 +169,32 @@ void pc_input_log_notify_argv(int argc, char** argv);
 // Per-tick hook: call after PADRead (after the hold check), before the sim.
 void pc_input_log_tick(void);
 
+// Yaw capture hook (see above). Null by default; the engine registers its
+// pre-sim camera capture once before the first tick.
+typedef void (*PcYawCaptureFn)(void);
+void pc_input_log_set_yaw_capture_fn(PcYawCaptureFn fn);
+
 // Post-tick hook: call after app->idle() returns, before/after the state
 // hash. Writes the record for the tick that just simulated.
 void pc_input_log_tick_end(void);
 
 // Per-pad yaw for the current tick, for the sim (issue #879).
 // Returns true and fills sin/cos when a yaw is set for this tick (v2 replay
-// value pre-sim, or the live-quantised value a Navi already stored
-// this tick); false when not set (switch off, v1 fallback pre-capture,
-// past-end-of-file). The Navi input path captures the live camera yaw,
-// quantises it and stores it on the first false, so record and replay
-// share one basis construction.
+// value pre-sim, or the pre-sim live capture); false when not set (switch
+// off, or no Navi/camera at capture time). In det mode the sim must never
+// read the camera on a miss: it uses the defined neutral basis (yaw 0)
+// instead, so record and replay share one basis construction.
 bool pc_netplay_control_yaw(int pad, float* sinYaw, float* cosYaw);
 
-// Store the quantised live yaw for pad (called by the Navi input path on
-// the first pc_netplay_control_yaw miss in det/record mode).
+// Store the quantised pre-sim yaw for pad (called by the capture hook for
+// slots without a replayed value, and never from the sim).
 void pc_input_log_yaw_set(int pad, uint16_t yaw, uint8_t flags);
 bool pc_input_log_yaw_valid(int pad);
 uint16_t pc_input_log_yaw_raw(int pad);
 uint8_t pc_input_log_yaw_flags(int pad);
 
-// Whether record / replay is active this run (for the Navi capture gate:
-// store the live yaw when det mode will use it, or when a record needs it,
+// Whether record / replay is active this run (for the capture gate: capture
+// the live yaw when det mode will use it, or when a record needs it,
 // and do no extra work otherwise so the switch-off path is untouched).
 bool pc_input_log_is_record_active(void);
 bool pc_input_log_is_replay_active(void);

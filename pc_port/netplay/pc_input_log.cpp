@@ -149,12 +149,16 @@ PcInputHeaderResult pc_input_log_read_header(const uint8_t* data, size_t len, ui
 
 uint16_t pc_input_log_yaw_quantise(float angleRad)
 {
+	// Non-finite camera axes (never seen, but cheap to guard) map to 0
+	// instead of tripping UB in the float->long conversion below.
+	if (!std::isfinite(angleRad)) return 0;
 	// Map to [0,1) turns, then to 16 bits. floorf keeps negatives exact;
 	// +0.5f rounds to nearest (ties away from the quantised grid edge).
 	const float turns = angleRad / 6.28318530717958647692f;
 	float wrapped     = turns - std::floor(turns);
 	// Guard the wrapped==1.0f edge from float error (angle == +2pi*k).
 	if (wrapped >= 1.0f) wrapped -= 1.0f;
+	if (!std::isfinite(wrapped)) return 0;
 	long q = (long)(wrapped * 65536.0f + 0.5f);
 	return (uint16_t)(q & 0xFFFF);
 }
@@ -185,11 +189,13 @@ uint16_t sReplayVersion = 0;
 size_t sReplayRec    = 0;
 uint64_t sTickIndex  = 0;
 // Current-tick yaw (issue #879). Cleared in pc_input_log_tick; filled from
-// the v2 file when replaying, or stored by the first Navi input use when
-// live (det/record mode). The post-tick record writes what the sim used.
+// the v2 file when replaying, or by the pre-sim capture hook (live camera,
+// quantised) for slots without a replayed value. The pre-sim record writes
+// what the sim will use.
 bool sYawValid[4]     = { false, false, false, false };
 uint16_t sYawRaw[4]   = { 0, 0, 0, 0 };
 uint8_t sYawFlags[4]  = { 0, 0, 0, 0 };
+PcYawCaptureFn sYawCaptureFn = nullptr;
 
 const char* argvValue(int argc, char** argv, const char* flag)
 {
@@ -210,6 +216,8 @@ void pc_input_log_notify_argv(int argc, char** argv)
 
 bool pc_input_log_is_record_active(void) { return sRecordActive; }
 bool pc_input_log_is_replay_active(void) { return sReplayActive; }
+
+void pc_input_log_set_yaw_capture_fn(PcYawCaptureFn fn) { sYawCaptureFn = fn; }
 
 void pc_input_log_yaw_set(int pad, uint16_t yaw, uint8_t flags)
 {
@@ -331,13 +339,28 @@ void pc_input_log_tick(void)
 		// Menu-dwell simulation for acceptance C. Runs before the first
 		// tick's simulation, and only when the switch is set.
 		pc_state_hash_before_first_tick();
-		if (!sRecordActive && !sReplayActive) return;
+		if (!sRecordActive && !sReplayActive) {
+			// Det mode without a record or replay file is a valid M1
+			// configuration (and the mode interactive netplay will run in):
+			// the sim still needs a fresh yaw every tick, so clear the slots
+			// and run the pre-sim capture before returning. The hook itself
+			// checks det/record, so the switch-off path stays untouched.
+			for (int p = 0; p < 4; ++p) sYawValid[p] = false;
+			if (sYawCaptureFn != nullptr) sYawCaptureFn();
+			return;
+		}
 	}
 
-	if (!sRecordActive && !sReplayActive) return;
+	if (!sRecordActive && !sReplayActive) {
+		for (int p = 0; p < 4; ++p) sYawValid[p] = false;
+		if (sYawCaptureFn != nullptr) sYawCaptureFn();
+		return;
+	}
 
-	// Fresh yaw every tick: replayed v2 refills it below; otherwise the
-	// Navi input path stores the live-quantised value on first use.
+	// Fresh yaw every tick: replayed v2 refills it below; the pre-sim
+	// capture hook fills the rest (live camera, quantised). The sim never
+	// reads the camera, so the input for tick N is complete before the sim
+	// for tick N runs.
 	for (int p = 0; p < 4; ++p) sYawValid[p] = false;
 
 	PADStatus* pads = pc_netplay_pad_status();
@@ -360,8 +383,8 @@ void pc_input_log_tick(void)
 						pads[p].analogB      = decoded[p].analogB;
 						pads[p].err          = decoded[p].err;
 					}
-					// v1 carries no yaw: left invalid so the sim takes it
-					// live from the camera, as today.
+					// v1 carries no yaw: left invalid so the pre-sim capture
+					// hook fills it live from the camera, as today.
 				}
 			} else {
 				PcInputPad decoded[4];
@@ -402,15 +425,14 @@ void pc_input_log_tick(void)
 		}
 	}
 
-	// NOTE: the record write moved to pc_input_log_tick_end(), after the
-	// sim, so the filed yaw is the quantised value the sim used.
-}
+	// Pre-sim capture: fill every slot without a replayed value from the
+	// live control cameras (quantised). The hook skips slots already valid
+	// and is a no-op unless det mode or record mode needs it.
+	if (sYawCaptureFn != nullptr) sYawCaptureFn();
 
-void pc_input_log_tick_end(void)
-{
-	if (!sInitialised) return;
-	if (!sRecordActive && !sReplayActive) return;
-
+	// Pre-sim record write: file the pads plus the yaw the sim will use, so
+	// the filed input is exactly what was fed (in-tick pad writers cannot
+	// skew it).
 	if (sRecordActive) {
 		PADStatus* pads = pc_netplay_pad_status();
 		PcInputPad cur[4];
@@ -433,6 +455,12 @@ void pc_input_log_tick_end(void)
 		std::fwrite(out, 1, sizeof(out), sRecordFile);
 		if ((sTickIndex + 1) % 300 == 0) std::fflush(sRecordFile);
 	}
+}
+
+void pc_input_log_tick_end(void)
+{
+	if (!sInitialised) return;
+	if (!sRecordActive && !sReplayActive) return;
 
 	++sTickIndex;
 }
