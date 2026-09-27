@@ -1,5 +1,6 @@
 #include "pc_p2_frog.h"
 #include "pc_p2_frog_policy.h"
+#include "pc_p2_frog_flight.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_randomizer.h"
 #include "Material.h"
@@ -45,7 +46,6 @@ constexpr int FLEE_STUCK_MIN = 3;          // source mShakeOffSticking1 first ti
 constexpr float JUMP_LAUNCH_S = 8.0f / 30.0f; // type1 key event 2 (frame 8)
 constexpr float FLICK_KNOCKBACK = 0.0f;
 constexpr float FLICK_DAMAGE = 0.0f;
-constexpr float APEX_GRAVITY = 2000.0f;    // port: apex = jumpSpeed^2/2g
 
 struct FrogFsm {
     int kind = 0;
@@ -55,11 +55,8 @@ struct FrogFsm {
     Vector3f home;
     Vector3f targetPos;
     bool targetValid = false;
-    float airTimer = 0.0f;
     float groundY = 0.0f;
-    float hopApex = 0.0f;
-    float hopDist = 0.0f;
-    float hopDirX = 0.0f, hopDirZ = 0.0f;
+    p2frog::Flight flight;
     bool launched = false;
     bool escaped = false;
     bool pressDone = false;
@@ -244,25 +241,17 @@ void launchHop(BTeki* actor,FrogFsm& s){
     const Vector3f pos=actor->getPosition();
     const p2frog::Params& p=p2frog::params(s.kind);
     s.groundY=probeFloorY(pos,s.groundY);
-    s.hopApex=(p.jumpSpeed*p.jumpSpeed)/APEX_GRAVITY;
     const float dx=s.targetPos.x-pos.x,dz=s.targetPos.z-pos.z;
     const float len=std::sqrt(dx*dx+dz*dz);
-    s.hopDist=len;
-    if(len>0.0001f){s.hopDirX=dx/len;s.hopDirZ=dz/len;}else{s.hopDirX=0.0f;s.hopDirZ=0.0f;}
-    s.airTimer=0.0f;
+    s.flight=p2frog::launchFlight(pos.x,s.groundY,pos.z,s.targetPos.x,s.targetPos.z,p.airTime,p.jumpSpeed);
     if(len>0.0001f)s.heading=std::atan2(dx,dz);
     actor->setDirection(s.heading);
 }
 void advanceHop(BTeki* actor,FrogFsm& s,float dt){
     const p2frog::Params& p=p2frog::params(s.kind);
-    s.airTimer+=dt;
-    const float half=p.airTime*0.5f;
-    Vector3f& pos=actor->getPosition();
-    if(s.hopDist>0.0001f){const float speed=s.hopDist/p.airTime;
-        pos.x+=s.hopDirX*speed*dt;pos.z+=s.hopDirZ*speed*dt;}
-    if(s.airTimer<half){const float u=s.airTimer/half;pos.y=s.groundY+s.hopApex*std::sin(0.5f*PI_F*u);}
-    else if(s.airTimer<p.airTime){const float u=(s.airTimer-half)/half;pos.y=s.groundY+s.hopApex*std::cos(0.5f*PI_F*u);}
-    else{pos.y=s.groundY;}
+    // Own the complete airborne position: host physics ran before this update.
+    p2frog::advanceFlying(s.flight,s.targetPos.x,s.targetPos.z,p.airTime,dt);
+    actor->getPosition().set(s.flight.x,s.flight.y,s.flight.z);
 }
 }
 void pc_p2_frog_reset(){actors.clear();fsms.clear();pressing.clear();bitteredFrogs.clear();drawn.clear();drawnCorpse.clear();for(auto& b:animated)b.clear();for(auto& b:timing)b.clear();ready=false;}
@@ -404,7 +393,7 @@ void pc_p2_frog_update(BTeki* actor){
     }
     case FRG_JUMP:{
         stop(actor);
-        actor->getPosition().y=s.groundY;
+        if(!s.launched)actor->getPosition().y=s.groundY;
         if(!s.jumpEntryChecked){
             s.jumpEntryChecked=true;
             if(stuckPikminCount(actor)>0&&rand01(s)<p.jumpFail){transition(actor,s,FRG_FAIL,"damage",gen);break;}
@@ -412,21 +401,32 @@ void pc_p2_frog_update(BTeki* actor){
         if(!s.launched&&s.stateTime>=JUMP_LAUNCH_S){
             s.launched=true;launchHop(actor,s);doJumpFlick(actor,s);
         }
+        if(s.launched)advanceHop(actor,s,dt);
         if(s.stateTime>=clipSeconds(s.kind,"type1"))transition(actor,s,FRG_JUMPWAIT,"wait2",gen);
         break;
     }
     case FRG_JUMPWAIT:{
+        stop(actor);
         advanceHop(actor,s,dt);
-        if(s.airTimer>=p.airTime*0.5f||s.stateTime>=clipSeconds(s.kind,"wait2"))transition(actor,s,FRG_FALL,"type2",gen);
+        // Retail wait2 loops frames 18..19 until mAirTime expires, then plays
+        // the remaining tail before Fall applies its separate downward speed.
+        if(p2frog::readyToFall(s.flight.elapsed,s.stateTime,p.airTime,clipSeconds(s.kind,"wait2"))){
+            p2frog::startFall(s.flight,p.fallSpeed);
+            transition(actor,s,FRG_FALL,"type2",gen);
+        }
         break;
     }
     case FRG_FALL:{
-        advanceHop(actor,s,dt);
+        stop(actor);
         // Source StateFall::exec lands on floor-triangle contact (FrogState.cpp:341),
         // not on a timer: transit once the probed floor reaches the falling frog.
-        // The airTimer bound stays as a fallback for a hop with no floor below.
-        const float floorY=probeFloorY(actor->getPosition(),s.groundY);
-        if(floorY>=actor->getPosition().y||s.airTimer>=p.airTime){
+        // Sample the destination, not the takeoff ground height.
+        const Vector3f landing(s.flight.x,s.flight.y,s.flight.z);
+        const float floorY=probeFloorY(landing,s.groundY);
+        const bool landed=p2frog::advanceFalling(s.flight,floorY,dt);
+        actor->getPosition().set(s.flight.x,s.flight.y,s.flight.z);
+        if(landed){
+            s.groundY=floorY;
             actor->getPosition().y=s.groundY;transition(actor,s,FRG_ATTACK,"attack",gen);
         }
         break;

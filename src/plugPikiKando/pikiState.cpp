@@ -3145,8 +3145,6 @@ void PikiPressedState::exec(Piki* piki)
 	if (piki->mDeathTimer < 0.0f) {
 		piki->mDeathTimer = 0.0f;
 		transit(piki, PIKISTATE_Normal);
-		f32 scale = C_PIKI_PARM(piki, mPikiDisplayScale);
-		piki->mSRT.s.set(scale, scale, scale);
 	}
 
 	piki->mVelocity.set(0.0f, 0.0f, 0.0f);
@@ -3160,10 +3158,12 @@ void PikiPressedState::exec(Piki* piki)
 }
 
 /**
- * @brief No explicit cleanup.
+ * @brief Restore scale on every exit, including an interrupting interaction.
  */
 void PikiPressedState::cleanup(Piki* piki)
 {
+	f32 scale = C_PIKI_PARM(piki, mPikiDisplayScale);
+	piki->mSRT.s.set(scale, scale, scale);
 }
 
 /**
