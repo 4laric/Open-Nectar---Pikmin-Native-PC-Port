@@ -896,6 +896,12 @@ target_include_directories(p2_otakara_fx_test PRIVATE pc_port)
 target_compile_definitions(p2_otakara_fx_test PRIVATE P2_OTAKARA_FX_NO_ENGINE)
 target_compile_options(p2_otakara_fx_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_otakara_fx_test COMMAND p2_otakara_fx_test)
+# #884: elemental Dweevil (59-62) creature escape + territory clamp; Bomb 93 chase.
+add_executable(p2_otakara_move_test
+    tools/p2_otakara_move_test.cpp)
+target_include_directories(p2_otakara_move_test PRIVATE pc_port)
+target_compile_options(p2_otakara_move_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_otakara_move_test COMMAND p2_otakara_move_test)
 
 # wf7 dweevil-impl (#871): dead-Dweevil clip choice is engine-free and covers
 # all four species 59-62 (dead forces dead, never attack1).
