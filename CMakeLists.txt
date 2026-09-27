@@ -812,6 +812,45 @@ if(PIKMIN_NETPLAY_BUILD AND NOT ANDROID)
     endif()
 endif()
 
+# Netplay M3 lockstep (issue #880): vendored GekkoNet as its own static
+# library. GekkoLib/src/*.cpp with -std=gnu++20, GEKKONET_NO_ASIO and
+# GEKKONET_STATIC; include dirs include, include/private and thirdparty
+# (zpp). Created and linked into the game exe only when
+# PIKMIN_NETPLAY_BUILD=ON, so the default build is untouched. The game's own
+# netplay code compiles as C++17 and includes only gekkonet.h, which is
+# C-compatible.
+if(PIKMIN_NETPLAY_BUILD AND NOT ANDROID)
+    file(GLOB GEKKONET_SOURCES "third_party/gekkonet/GekkoLib/src/*.cpp")
+    add_library(gekkonet STATIC ${GEKKONET_SOURCES})
+    target_include_directories(gekkonet PUBLIC
+        third_party/gekkonet/GekkoLib/include
+        PRIVATE
+        third_party/gekkonet/GekkoLib/include/private
+        third_party/gekkonet/GekkoLib/thirdparty)
+    target_compile_definitions(gekkonet PUBLIC GEKKONET_STATIC PRIVATE GEKKONET_NO_ASIO)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(gekkonet PRIVATE -std=gnu++20)
+    endif()
+    # Quoted-include priority: on case-insensitive filesystems the game's
+    # include/Event.h would otherwise shadow GekkoNet's private event.h
+    # (directory-wide -I flags precede target ones). -iquote dirs are
+    # searched first for "..." includes; GekkoNet TUs include nothing else
+    # by quoted name, so this is safe.
+    target_compile_options(gekkonet PRIVATE
+        "-iquote${CMAKE_CURRENT_SOURCE_DIR}/third_party/gekkonet/GekkoLib/include/private"
+        "-iquote${CMAKE_CURRENT_SOURCE_DIR}/third_party/gekkonet/GekkoLib/include"
+        "-iquote${CMAKE_CURRENT_SOURCE_DIR}/third_party/gekkonet/GekkoLib/thirdparty")
+    # M3 session driver + UDP transport (game C++17 TUs).
+    target_sources(${NECTAR_GAME} PRIVATE
+        pc_port/netplay/pc_netplay_session.cpp
+        pc_port/netplay/pc_netplay_udp.cpp)
+    target_include_directories(${NECTAR_GAME} PRIVATE third_party/gekkonet/GekkoLib/include)
+    target_link_libraries(${NECTAR_GAME} PRIVATE gekkonet)
+    if(WIN32)
+        target_link_libraries(${NECTAR_GAME} PRIVATE ws2_32)
+    endif()
+endif()
+
 # Host-run accuracy/determinism test for the netplay libm (issue #879).
 # Engine-free: links the libm OBJECT plus the test driver. The driver
 # calls the entry points by their standard names (proving the override
@@ -827,6 +866,27 @@ if(PIKMIN_NETPLAY_BUILD AND PIKMIN_BUILD_TESTS AND NOT ANDROID)
     target_include_directories(pc_netplay_libm_test PRIVATE pc_port)
     target_compile_options(pc_netplay_libm_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_netplay_libm_test COMMAND pc_netplay_libm_test)
+endif()
+
+# Netplay M3 lockstep transport test (issue #880): two GekkoNet sessions in
+# one process over an in-memory adapter with the lossy wrapper, a toy
+# deterministic state, window 0 and 2,000 frames; expects 0 desyncs and
+# identical checksums. Netplay builds only (links the gekkonet target, which
+# the default build never creates).
+if(PIKMIN_NETPLAY_BUILD AND PIKMIN_BUILD_TESTS AND NOT ANDROID)
+    add_executable(pc_netplay_transport_test
+        pc_port/netplay/pc_netplay_transport_test.cpp
+        pc_port/netplay/pc_netplay_udp.cpp)
+    target_include_directories(pc_netplay_transport_test PRIVATE
+        pc_port
+        third_party/gekkonet/GekkoLib/include)
+    target_compile_definitions(pc_netplay_transport_test PRIVATE GEKKONET_STATIC GEKKONET_NO_ASIO)
+    target_compile_options(pc_netplay_transport_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    target_link_libraries(pc_netplay_transport_test PRIVATE gekkonet)
+    if(WIN32)
+        target_link_libraries(pc_netplay_transport_test PRIVATE ws2_32)
+    endif()
+    add_test(NAME pc_netplay_transport_test COMMAND pc_netplay_transport_test)
 endif()
 
 # FP determinism gate (issue #879). Runs objdump over the linked game exe
