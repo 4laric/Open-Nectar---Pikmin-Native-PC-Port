@@ -87,6 +87,12 @@
 // ticks with no record or replay active, so det mode always starts the sim
 // with fresh yaw. Register once during static init, before the first tick.
 
+// Netplay M3 (issue #880): run the registered pre-sim capture hook now,
+// without any record/replay logic. The lockstep session calls this after
+// sampling the local pad so the submitted input carries the yaw the sim
+// will use. No-op when no hook is registered.
+void pc_input_log_capture_yaw(void);
+
 #include <cstddef>
 #include <cstdint>
 #include <vector>

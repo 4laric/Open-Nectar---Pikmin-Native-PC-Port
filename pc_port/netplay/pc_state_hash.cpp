@@ -90,6 +90,13 @@ uint64_t sExitTick      = 0;
 bool sPrerollDone       = false;
 const char* sArgvLog    = nullptr;
 const char* sArgvExit   = nullptr;
+// Netplay M3 lockstep capture (issue #880): last computed hashes, even with
+// no log file open. Written only by pc_state_hash_tick_end().
+bool sNetplayCapture    = false;
+bool sNetplayHaveHash   = false;
+uint64_t sLastTotal     = 0;
+uint64_t sLastSubs[6]   = { 0, 0, 0, 0, 0, 0 };
+uint64_t sLastTick      = 0;
 
 uint64_t parseU64(const char* text, bool& ok)
 {
@@ -352,6 +359,19 @@ void pc_state_hash_before_first_tick(void)
 
 uint64_t pc_state_hash_tick(void) { return sTick; }
 
+void pc_state_hash_set_netplay_capture(bool on) { sNetplayCapture = on; }
+
+bool pc_state_hash_current(uint64_t* total, uint64_t subs[6], uint64_t* tick)
+{
+	if (!sNetplayHaveHash) return false;
+	if (total != nullptr) *total = sLastTotal;
+	if (subs != nullptr) {
+		for (int i = 0; i < 6; ++i) subs[i] = sLastSubs[i];
+	}
+	if (tick != nullptr) *tick = sLastTick;
+	return true;
+}
+
 void pc_state_hash_flush(void)
 {
 	if (sLogFile != nullptr) std::fflush(sLogFile);
@@ -361,8 +381,10 @@ void pc_state_hash_tick_end(void)
 {
 	if (!sInitialised) initOnce();
 	// COMMON rule 3: with no netplay switch set, return before walking
-	// any manager. No hashes, no files, no timing change.
-	if (!sLogActive && !sExitAfterSet) return;
+	// any manager. No hashes, no files, no timing change. (The M3 lockstep
+	// session opts into per-tick hashing via sNetplayCapture even when no
+	// log file is open, so Save events and desync dumps have checksums.)
+	if (!sLogActive && !sExitAfterSet && !sNetplayCapture) return;
 	if (sExitRequested) {
 		// The quit event is already queued; the main loop breaks on its
 		// next pc_window_should_close() check. Fall back to a direct
@@ -385,7 +407,8 @@ void pc_state_hash_tick_end(void)
 	uint64_t world = 0;
 	uint64_t rng   = 0;
 	uint64_t total = 0;
-	if (sLogActive) {
+	// M3 lockstep: hash every tick when capturing, even with no log file.
+	if (sLogActive || sNetplayCapture) {
 		navi  = hashNavi();
 		piki  = hashPiki();
 		teki  = hashTeki();
@@ -400,11 +423,23 @@ void pc_state_hash_tick_end(void)
 		mixU64(total, world);
 		mixU64(total, rng);
 
-		std::fprintf(sLogFile, "%llu %016llx %016llx %016llx %016llx %016llx %016llx %016llx\n",
-		             (unsigned long long)sTick, (unsigned long long)total, (unsigned long long)navi,
-		             (unsigned long long)piki, (unsigned long long)teki, (unsigned long long)item,
-		             (unsigned long long)world, (unsigned long long)rng);
-		if (sTick % 300 == 0) std::fflush(sLogFile);
+		sLastTotal    = total;
+		sLastSubs[0]  = navi;
+		sLastSubs[1]  = piki;
+		sLastSubs[2]  = teki;
+		sLastSubs[3]  = item;
+		sLastSubs[4]  = world;
+		sLastSubs[5]  = rng;
+		sLastTick     = sTick;
+		sNetplayHaveHash = true;
+
+		if (sLogActive) {
+			std::fprintf(sLogFile, "%llu %016llx %016llx %016llx %016llx %016llx %016llx %016llx\n",
+			             (unsigned long long)sTick, (unsigned long long)total, (unsigned long long)navi,
+			             (unsigned long long)piki, (unsigned long long)teki, (unsigned long long)item,
+			             (unsigned long long)world, (unsigned long long)rng);
+			if (sTick % 300 == 0) std::fflush(sLogFile);
+		}
 	}
 
 	if (sExitAfterSet && sTick >= sExitAfter) {

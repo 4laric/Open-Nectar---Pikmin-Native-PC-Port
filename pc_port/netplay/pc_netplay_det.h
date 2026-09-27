@@ -23,6 +23,11 @@ bool pc_netplay_unthrottled(void);              // det mode only: PIKMIN_NETPLAY
 unsigned pc_netplay_tick(void);                 // logical ticks executed so far (app->idle calls), in any mode
 void pc_netplay_on_tick_begin(void);            // called by System::run right before app->idle()
 
+// Netplay M3 (issue #880): force deterministic mode on at runtime. The
+// netplay session calls this once when its switch is set; plain
+// --netplay-deterministic / env parsing in pc_netplay_det_init is unchanged.
+void pc_netplay_det_force_on(void);
+
 // Logical tick period in seconds for a setFrameClamp value: 1/30 at clamp 2,
 // 1/60 at clamp 1, 1/120 at clamp 0 (mirrors PcFrameScheduler::deltaForClamp).
 float pc_netplay_fixed_dt(int frameClamp);

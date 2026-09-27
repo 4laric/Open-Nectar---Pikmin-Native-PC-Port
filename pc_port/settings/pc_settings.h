@@ -134,6 +134,11 @@ int pc_settings_get_hold_to_pluck(void);
 // results/diary is exempt in normal play (only preview/fixture runs dismiss it).
 int pc_settings_get_disable_tutorials(void);
 
+// Netplay M3 (issue #880): passive F1 menu query for the local-input gate.
+// Unlike pc_settings_consume_game_input() this polls nothing and latches
+// nothing, so the netplay session may call it every turn.
+bool pc_settings_menu_open(void);
+
 /// What the mouse wheel controls: 0 = Pikmin colour to throw, 1 = camera zoom.
 int pc_settings_get_mouse_wheel_action(void);
 
