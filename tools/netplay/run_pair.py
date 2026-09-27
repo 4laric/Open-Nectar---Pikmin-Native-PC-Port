@@ -106,7 +106,7 @@ SCRUB_KEYS = (
 )
 
 
-def launch(exe, run, boot, extra_args, env_extra, stdout_log):
+def launch(exe, run, boot, extra_args, env_extra, stdout_log, unthrottled=True):
     cmd = [str(exe.resolve()), "--randomizer-seed", str(boot)] + list(extra_args)
     env = dict(os.environ)
     for key in SCRUB_KEYS:
@@ -114,9 +114,11 @@ def launch(exe, run, boot, extra_args, env_extra, stdout_log):
     env.update(
         PIKMIN_RANDOMIZER_TEST_BACKGROUND="1",
         SDL_AUDIODRIVER="dummy",
-        PIKMIN_NETPLAY_UNTHROTTLED="1",
         NECTAR_SAVE_DIR=str((run / "save").resolve()),
     )
+    # M5: throttled runs (the path humans use: 30 Hz pacing + the
+    # frames-ahead throttle) set PIKMIN_NETPLAY_UNTHROTTLED=0 explicitly.
+    env["PIKMIN_NETPLAY_UNTHROTTLED"] = "1" if unthrottled else "0"
     env.update(env_extra)
     env.pop("BBFT_PORT", None)
     startup = None
@@ -176,6 +178,13 @@ def main(argv=None):
                    help="extra private settings for the joiner only (settings negative test)")
     p.add_argument("--bootstrap-b", type=Path, default=None,
                    help="joiner bootstrap override file (bootstrap negative test)")
+    p.add_argument("--throttled", action="store_true",
+                   help="run the real-time 30 Hz path (no UNTHROTTLED); M5 evidence")
+    p.add_argument("--no-restamp-session", action="store_true",
+                   help="keep --bootstrap-b bytes verbatim (m8 SESSION-strip positive test)")
+    p.add_argument("--session-only-difference", action="store_true",
+                   help="m8 positive test: join bootstrap differs from the host only in "
+                        "SESSION (same FINGERPRINT); the handshake must succeed")
     p.add_argument("--exe-args", nargs="*", default=[])
     p.add_argument("--expect", choices=("sync", "refuse", "disconnect"), default="sync")
     p.add_argument("--kill-joiner-after", type=float, default=20.0,
@@ -189,20 +198,42 @@ def main(argv=None):
     join_run.mkdir(parents=True, exist_ok=True)
 
     token = uuid.uuid4().hex * 2
+    token_join = token
     host_boot = host_run / "bootstrap.txt"
     write_bootstrap(host_boot, token, a.profile)
     join_boot = join_run / "bootstrap.txt"
     if a.bootstrap_b is not None:
         shutil.copyfile(str(a.bootstrap_b.resolve()), str(join_boot))
-        # Re-stamp the per-run SESSION token to this run's token (the
-        # handshake hash strips SESSION lines by design, so the manifest
-        # difference under test is preserved while state.txt admission,
-        # which compares the session token, keeps working).
-        lines = join_boot.read_text().splitlines()
-        lines = [f"SESSION {token}" if ln.startswith("SESSION ") else ln for ln in lines]
-        join_boot.write_text("\n".join(lines) + "\n")
+        if not a.no_restamp_session:
+            # Re-stamp the per-run SESSION token to this run's token (the
+            # handshake hash strips SESSION lines by design, so the manifest
+            # difference under test is preserved while state.txt admission,
+            # which compares the session token, keeps working).
+            lines = join_boot.read_text().splitlines()
+            lines = [f"SESSION {token}" if ln.startswith("SESSION ") else ln for ln in lines]
+            join_boot.write_text("\n".join(lines) + "\n")
+        else:
+            # m8: keep --bootstrap-b bytes verbatim AND stamp the joiner's
+            # state.txt with the join bootstrap's own SESSION, so local
+            # admission passes on both sides while the handshake must still
+            # succeed on the stripped hash (SESSION differs, all else same).
+            for ln in join_boot.read_text().splitlines():
+                if ln.startswith("SESSION "):
+                    token_join = ln[len("SESSION "):].strip()
+                    break
     else:
         write_bootstrap(join_boot, token, a.profile)
+    if a.session_only_difference:
+        # m8 positive test: same manifest, different per-run SESSION token.
+        # The joiner's state.txt (below) uses token_join so local admission
+        # passes; the handshake strips SESSION, so it must succeed.
+        token_join = uuid.uuid4().hex * 2
+        assert token_join != token
+        join_boot.write_text(
+            f"PIKMIN_RANDOMIZER 5\nSESSION {token_join}\nFINGERPRINT {token}\n"
+            f"PROFILE {a.profile}\nCATALOG gameplay-checks-v5\nPLACEMENT identity-v1\n"
+            f"GOAL 25\nDAYS repeat-day29-v1\nCOLOR red\nSTARTING_FLARLIC 10\nEND\n"
+        )
 
     link_assets(host_run, a.assets)
     link_assets(join_run, a.assets)
@@ -264,17 +295,18 @@ def main(argv=None):
 
     stop = threading.Event()
 
-    def refresh(run):
+    def refresh(run, tok):
         while not stop.is_set():
             pending = run / "state.tmp"
             try:
-                pending.write_text(f"PIKMIN_STATE 5 {token} 1 0 127 0 0 END\n")
+                pending.write_text(f"PIKMIN_STATE 5 {tok} 1 0 127 0 0 END\n")
                 os.replace(pending, run / "state.txt")
             except OSError:
                 pass
             stop.wait(0.1)
 
-    threads = [threading.Thread(target=refresh, args=(r,)) for r in (host_run, join_run)]
+    threads = [threading.Thread(target=refresh, args=(host_run, token)),
+               threading.Thread(target=refresh, args=(join_run, token_join))]
     for t in threads:
         t.start()
 
@@ -283,10 +315,12 @@ def main(argv=None):
     host_out = join_out = None
     start = time.time()
     try:
-        host_proc, host_out = launch(a.exe, host_run, host_boot, host_args, host_extra, host_log)
+        host_proc, host_out = launch(a.exe, host_run, host_boot, host_args, host_extra, host_log,
+                                       unthrottled=not a.throttled)
         # Stagger the joiner slightly so the host's socket is bound first.
         time.sleep(1.0)
-        join_proc, join_out = launch(join_exe, join_run, join_boot, join_args, join_extra, join_log)
+        join_proc, join_out = launch(join_exe, join_run, join_boot, join_args, join_extra, join_log,
+                                     unthrottled=not a.throttled)
         if a.expect == "disconnect":
             time.sleep(a.kill_joiner_after)
             if join_proc.poll() is None:
