@@ -1023,7 +1023,18 @@ void UfoItem::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 	mAnimator.updateContext();
 	mShipModel->mShape->updateAnim(gfx, *mtx, nullptr, this);
 
-	if (gameflow.mMoviePlayer->mIsActive || aiCullable()) {
+#if defined(PIKI_PC_PORT)
+	// M2b fix (review M5, resolves m2a open item m1): the presentation pass
+	// submits only what the real local frustum sees. Anchors below stay
+	// authoritative.
+	const bool m2bUfoSubmit = !pc_netplay_present_two_pass_active() || pc_render_is_authoritative()
+	                       || gfx.mCamera->isPointVisible(mSRT.t, 200.0f);
+#endif
+	if (gameflow.mMoviePlayer->mIsActive || aiCullable()
+#if defined(PIKI_PC_PORT)
+	    && m2bUfoSubmit
+#endif
+	) {
 		mShipModel->mShape->drawshape(gfx, *gfx.mCamera, mAnimatedMaterialsList);
 		playerState->renderParts(gfx, mShipModel->mShape);
 	}

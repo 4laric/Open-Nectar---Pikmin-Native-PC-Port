@@ -4,6 +4,8 @@
 #endif
 #if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_policy.h"
+#include "netplay/pc_netplay_present.h"
+#include "timing/pc_render_phase.h"
 #else
 #define pc_netplay_sim_visible(x) (x)
 #endif
@@ -789,6 +791,14 @@ void ItemCreature::refresh(Graphics& gfx)
 	} else {
 		disableAICulling();
 	}
+#if defined(PIKI_PC_PORT)
+	// M2b fix (review M5, resolves m2a open item m1): the presentation pass
+	// re-derives submission from the real local frustum. AI flags above stay
+	// authoritative (enableAICulling no-ops off-phase; det pins the flag).
+	if (pc_netplay_present_two_pass_active() && !pc_render_is_authoritative()) {
+		isOffCamera = !gfx.mCamera->isPointVisible(mSRT.t, getBoundingSphereRadius());
+	}
+#endif
 
 	if (mItemShapeObject) {
 		_3C4 = false;
@@ -1164,6 +1174,14 @@ void BuildingItem::refresh(Graphics& gfx)
 	} else {
 		disableAICulling();
 	}
+#if defined(PIKI_PC_PORT)
+	// M2b fix (review M5, resolves m2a open item m1): the presentation pass
+	// re-derives submission from the real local frustum; AI flags stay
+	// authoritative (see ItemCreature::refresh).
+	if (pc_netplay_present_two_pass_active() && !pc_render_is_authoritative()) {
+		isOffCamera = !gfx.mCamera->isPointVisible(mSRT.t, getBoundingSphereRadius());
+	}
+#endif
 
 	if (mItemShapeObject) {
 		_3C4 = false;

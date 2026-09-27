@@ -219,7 +219,19 @@ void DualCreature::refresh(Graphics& gfx)
 	}
 #endif
 	gfx.mCamera->mLookAtMtx.multiplyTo(mWorldMtx, mtx);
+#if defined(PIKI_PC_PORT)
+	// M2b fix (review M5, resolves m2a open item m1): the presentation pass
+	// submits only what the real local frustum sees, from the stored
+	// authoritative mode/matrix. AI flags and dynamics above stay
+	// authoritative.
+	const bool m2bDualCulled = pc_netplay_present_two_pass_active() && !pc_render_is_authoritative()
+	                        && !gfx.mCamera->isPointVisible(mSRT.t, 2.0f * getBoundingSphereRadius());
+	if (!m2bDualCulled) {
+		doRender(gfx, mtx);
+	}
+#else
 	doRender(gfx, mtx);
+#endif
 #if defined(PIKI_PC_PORT)
 	// M2b: collision creation is sim-only.
 	if (authDual && mIsRealDynamics) {
