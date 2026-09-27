@@ -560,6 +560,7 @@ int clampSpeedPct(int pct) {
 
 void speedPctLabel(int pct, char* value, size_t n) {
     if (pc_hardmode_active()) snprintf(value, n, "1x (Hard)");
+    else if (pc_randomizer_enabled()) snprintf(value, n, "1x (Randomizer)");
     else if (pct == 100) snprintf(value, n, "1x (original)");
     else if (pct % 100 == 0) snprintf(value, n, "%dx", pct / 100);
     else snprintf(value, n, "%d.%dx", pct / 100, (pct % 100) / 10);
@@ -595,6 +596,7 @@ int stepHealthPct(int pct, bool left) {
 
 void healthPctLabel(int pct, const char* special, char* value, size_t n) {
     if (pc_hardmode_active()) snprintf(value, n, "100%% (Hard)");
+    else if (pc_randomizer_enabled()) snprintf(value, n, "100%% (Randomizer)");
     else if (pct < 0) snprintf(value, n, "%s", special);
     else if (pct == 100) snprintf(value, n, "100%% (original)");
     else snprintf(value, n, "%d%%", pct);
@@ -2460,7 +2462,7 @@ void modsRowChange(int row, bool left, bool right) {
     }
     // Day length.
     else if (row == 5) {
-        if (pc_hardmode_active())
+        if (pc_hardmode_active() || pc_randomizer_enabled())
             return;
         // Una parada más tras la lista: Infinite (el antiguo Infinite Day).
         const int stops = kDayMinutesCount + 1;
@@ -2496,19 +2498,19 @@ void modsRowChange(int row, bool left, bool right) {
     }
     // Vida de Olimar, en porcentaje de la original.
     else if (row == 11) {
-        if (pc_hardmode_active())
+        if (pc_hardmode_active() || pc_randomizer_enabled())
             return;
         if (left || right) sPending.naviHealthPct = stepHealthPct(sPending.naviHealthPct, left);
     }
     // Vida de los enemigos, en porcentaje de la original.
     else if (row == 12) {
-        if (pc_hardmode_active())
+        if (pc_hardmode_active() || pc_randomizer_enabled())
             return;
         if (left || right) sPending.tekiHealthPct = stepHealthPct(sPending.tekiHealthPct, left);
     }
     // El dia no avanza.
     else if (row == 13) {
-        if (pc_hardmode_active())
+        if (pc_hardmode_active() || pc_randomizer_enabled())
             return;
         if (left || right) sPending.infiniteDay = sPending.infiniteDay ? 0 : 1;
     }
@@ -2537,9 +2539,11 @@ void modsRowChange(int row, bool left, bool right) {
         if (left || right) sPending.debugKeys = sPending.debugKeys ? 0 : 1;
     }
     else if (row == 20) {
+        if (pc_randomizer_enabled()) return;
         if (left || right) sPending.whistleRadiusPct = stepPct(sPending.whistleRadiusPct, kWhistlePcts, kWhistlePctCount, left);
     }
     else if (row == 21) {
+        if (pc_randomizer_enabled()) return;
         if (left || right) sPending.throwSpeedPct = stepPct(sPending.throwSpeedPct, kThrowSpeedPcts, kThrowSpeedCount, left);
     }
     else if (row == 22) {
@@ -2556,7 +2560,7 @@ void modsRowChange(int row, bool left, bool right) {
     }
     // Cheats (26-32). Hard los anula, como la vida y el día.
     else if (row >= 26 && row <= 32) {
-        if (pc_hardmode_active() || !(left || right))
+        if (pc_hardmode_active() || pc_randomizer_enabled() || !(left || right))
             return;
         switch (row) {
         case 26: sPending.pikiInvincible = !sPending.pikiInvincible; break;
@@ -5129,17 +5133,17 @@ int pc_settings_get_idle_counter(void) {
 }
 
 int pc_settings_get_navi_health_pct(void) {
-    return pc_hardmode_active() ? 100 : sConfig.naviHealthPct;
+    return (pc_hardmode_active() || pc_randomizer_enabled()) ? 100 : sConfig.naviHealthPct;
 }
 
 int pc_settings_get_teki_health_pct(void) {
-    return pc_hardmode_active() ? 100 : sConfig.tekiHealthPct;
+    return (pc_hardmode_active() || pc_randomizer_enabled()) ? 100 : sConfig.tekiHealthPct;
 }
 
 int pc_settings_get_infinite_day(void) {
     // VS: el día no avanza; la partida la cierra su propio reloj.
     if (pc_vs_active()) return 1;
-    return pc_hardmode_active() ? 0 : sConfig.infiniteDay;
+    return (pc_hardmode_active() || pc_randomizer_enabled()) ? 0 : sConfig.infiniteDay;
 }
 
 int pc_settings_get_free_camera(void) {
@@ -5147,11 +5151,11 @@ int pc_settings_get_free_camera(void) {
 }
 
 int pc_settings_get_whistle_radius_pct(void) {
-    return sConfig.whistleRadiusPct;
+    return pc_randomizer_enabled() ? 100 : sConfig.whistleRadiusPct;
 }
 
 float pc_settings_get_throw_speed_scale(void) {
-    return sConfig.throwSpeedPct / 100.0f;
+    return pc_randomizer_enabled() ? 1.0f : sConfig.throwSpeedPct / 100.0f;
 }
 
 int pc_settings_get_throw_cancel_b(void) {
@@ -5261,6 +5265,10 @@ int pc_settings_get_piki_limit(void) {
 }
 
 int pc_settings_get_day_minutes(void) {
+    // The randomizer owns the day clock (original 13.5 min length, 0); a
+    // longer custom day would be a timing advantage. piki_limit stays live:
+    // it is randomizer-owned through pc_randomizer_expanded().
+    if (pc_randomizer_enabled()) return 0;
     if (pc_hardmode_active() && (sConfig.dayMinutes == 0 || sConfig.dayMinutes > PC_HARDMODE_DAY_MINUTES))
         return PC_HARDMODE_DAY_MINUTES;
     return sConfig.dayMinutes;
@@ -5379,6 +5387,7 @@ void modsRowValue(int i, char* value, size_t n) {
         break;
     case 5:
         if (pc_hardmode_active()) snprintf(value, n, "%d min (Hard)", PC_HARDMODE_DAY_MINUTES);
+        else if (pc_randomizer_enabled()) snprintf(value, n, "13.5 min (Randomizer)");
         else if (sPending.infiniteDay) snprintf(value, n, "Infinite");
         else if (sPending.dayMinutes == 0) snprintf(value, n, "13.5 min (original)");
         else snprintf(value, n, "%d min", sPending.dayMinutes);
@@ -5392,6 +5401,7 @@ void modsRowValue(int i, char* value, size_t n) {
     case 12: healthPctLabel(sPending.tekiHealthPct, "Insta Kill", value, n); break;
     case 13:
         if (pc_hardmode_active()) snprintf(value, n, "Off (Hard)");
+        else if (pc_randomizer_enabled()) snprintf(value, n, "Off (Randomizer)");
         else snprintf(value, n, "%s", sPending.infiniteDay ? "On" : "Off (original)");
         break;
     case 14: snprintf(value, n, "%s", sPending.freeCamera ? "On" : "Off (original)"); break;
@@ -5403,8 +5413,16 @@ void modsRowValue(int i, char* value, size_t n) {
     case 17: snprintf(value, n, "%s", sPending.throwWhileMoving ? "On" : "Off (original)"); break;
     case 18: snprintf(value, n, "%s", sPending.firstPerson ? "On" : "Off (original)"); break;
     case 19: snprintf(value, n, "%s", sPending.debugKeys ? "On" : "Off"); break;
-    case 20: snprintf(value, n, sPending.whistleRadiusPct == 100 ? "%d%%  (original)" : "%d%%", sPending.whistleRadiusPct); break;
-    case 21: snprintf(value, n, sPending.throwSpeedPct == 100 ? "%d%%  (original)" : "%d%%", sPending.throwSpeedPct); break;
+    case 20: {
+        if (pc_randomizer_enabled()) snprintf(value, n, "100%% (Randomizer)");
+        else snprintf(value, n, sPending.whistleRadiusPct == 100 ? "%d%%  (original)" : "%d%%", sPending.whistleRadiusPct);
+        break;
+    }
+    case 21: {
+        if (pc_randomizer_enabled()) snprintf(value, n, "100%% (Randomizer)");
+        else snprintf(value, n, sPending.throwSpeedPct == 100 ? "%d%%  (original)" : "%d%%", sPending.throwSpeedPct);
+        break;
+    }
     case 22: snprintf(value, n, "%s", sPending.throwCancelB ? "On" : "Off (original)"); break;
     case 23: snprintf(value, n, "%s", sPending.noTrip ? "On" : "Off (original)"); break;
     case 24: snprintf(value, n, "%s", sPending.onionStep10 ? "On" : "Off (original)"); break;
@@ -5415,6 +5433,7 @@ void modsRowValue(int i, char* value, size_t n) {
         const int on = i == 26 ? sPending.pikiInvincible : i == 27 ? sPending.allFlowers
                      : i == 30 ? sPending.unlockZones : i == 31 ? sPending.noDayAdvance : sPending.allOnions;
         if (pc_hardmode_active()) snprintf(value, n, "Off (Hard)");
+        else if (pc_randomizer_enabled()) snprintf(value, n, "Off (Randomizer)");
         else snprintf(value, n, "%s", on ? "On" : "Off (original)");
         break;
     }
@@ -5672,9 +5691,21 @@ bool hardLocked(const GroupRow& r) {
         && (r.idx == 4 || r.idx == 5 || r.idx == 11 || r.idx == 12 || r.idx == 13);
 }
 
+// Netplay M0: the same cheat rows the getters neutralise under the
+// randomizer are locked in the menu, so the UI cannot show them as live.
+// piki_limit (row 4) stays editable: it is randomizer-owned through
+// pc_randomizer_expanded().
+bool randomizerLocked(const GroupRow& r) {
+    if (r.src != SRC_MODS || !pc_randomizer_enabled()) return false;
+    return r.idx == 5 || r.idx == 11 || r.idx == 12 || r.idx == 13
+        || r.idx == 20 || r.idx == 21
+        || (r.idx >= 26 && r.idx <= 32);
+}
+
 // Motivo por el que una fila no se puede cambiar ahora, o nullptr si se puede.
 const char* disabledReason(const GroupRow& r) {
     if (hardLocked(r)) return "Locked by Hard mode for this save file.";
+    if (randomizerLocked(r)) return "Locked by the Randomizer for this run.";
     switch (r.src) {
     case SRC_MAIN:
         if (r.idx == ROW_RESOLUTION && sPending.displayMode == PC_WINDOW_FULLSCREEN_BORDERLESS)
