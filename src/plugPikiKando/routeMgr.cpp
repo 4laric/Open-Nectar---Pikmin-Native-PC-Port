@@ -8,6 +8,11 @@
 #include "MapMgr.h"
 #include "Route.h"
 #include "UfoItem.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_coop.h"
+#include <queue>
+#include <vector>
+#endif
 #include "UtilityKando.h"
 #include "bugprint.h"
 #include "sysNew.h"
@@ -262,8 +267,73 @@ int PathFinder::findSync(WayPoint** pathWayPoints, int numWPsToFind, int startWP
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+// VS: la búsqueda original es voraz en profundidad (siempre el vecino más
+// cercano al destino, retrocediendo al atascarse). Va bien en las redes
+// escasas de los mapas originales, pero en la cuadrícula densa de la arena
+// con un muro delante da caminos larguísimos y retorcidos. Aquí, camino más
+// corto de verdad (Dijkstra) con las mismas reglas que selectWay: sin puntos
+// cerrados (salvo reintento), sin salir de puntos en el agua en modo
+// AvoidWater y sin pasar por el punto a evitar.
+static int pcShortestPath(PathFinder* finder, WayPoint* (PathFinder::*getWp)(int), PathFinder::Buffer* bufferList, int bufferSize,
+                          int count, int startWPIdx, int destWPIdx, bool includeBlockedPaths, int avoidIdx)
+{
+	std::vector<f32> dist(count, 1e30f);
+	std::vector<int> prev(count, -1);
+	typedef std::pair<f32, int> Item;
+	std::priority_queue<Item, std::vector<Item>, std::greater<Item>> open;
+	dist[startWPIdx] = 0.0f;
+	open.push(Item(0.0f, startWPIdx));
+	while (!open.empty()) {
+		const Item top = open.top();
+		open.pop();
+		const int u = top.second;
+		if (top.first > dist[u]) continue;
+		if (u == destWPIdx) break;
+		WayPoint* wp = (finder->*getWp)(u);
+		if (avoidIdx != -1 && wp->mIndex == avoidIdx) {
+			continue;
+		}
+		if (PathFinder::checkMode(PathFinderMode::AvoidWater) && wp->inWater()) {
+			continue;
+		}
+		for (int i = 0; i < 8; i++) {
+			const int v = wp->mLinkIndices[i];
+			if (v < 0 || v >= count || v == u) continue;
+			WayPoint* next = (finder->*getWp)(v);
+			if (!includeBlockedPaths && !next->mIsOpen) continue;
+			const f32 d = dist[u] + (next->mPosition - wp->mPosition).length();
+			if (d < dist[v]) {
+				dist[v] = d;
+				prev[v] = u;
+				open.push(Item(d, v));
+			}
+		}
+	}
+	if (dist[destWPIdx] >= 1e30f) {
+		return 0;
+	}
+	std::vector<int> path;
+	for (int v = destWPIdx; v != -1; v = prev[v]) path.push_back(v);
+	if (int(path.size()) > bufferSize) {
+		return 0;
+	}
+	for (int i = 0; i < int(path.size()); i++) {
+		bufferList[i].mWayPointIdx = path[path.size() - 1 - i];
+	}
+	return int(path.size());
+}
+#endif
+
 int PathFinder::findSync(PathFinder::Buffer* bufferList, int startWPIdx, int destWPIdx, bool includeBlockedPaths)
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_vs_active()) {
+		const int avoid = checkMode(PathFinderMode::AvoidOwnIndex) ? avoidWayPointIndex : -1;
+		return pcShortestPath(this, &PathFinder::getWayPoint, bufferList, mBufferSize, mGroup->mNumPoints, startWPIdx, destWPIdx,
+		                      includeBlockedPaths, avoid);
+	}
+#endif
 	if (checkMode(PathFinderMode::AvoidWater)) {
 		PRINT("*** AVOID_WATER ROUTE FINDING START (%d - %d)\n", destWPIdx, startWPIdx);
 	}

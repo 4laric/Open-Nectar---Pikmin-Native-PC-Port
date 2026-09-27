@@ -45,6 +45,7 @@
 #include "pc_randomizer.h"
 #include "FlowController.h"
 #include "MoviePlayer.h"
+#include "settings/pc_settings.h"
 #include "teki.h"
 #include "AIConstant.h"
 #include "AIPerf.h"
@@ -177,10 +178,30 @@ void BTeki::viewDraw(Graphics& gfx, immut Matrix4f& mat)
 	mTekiAnimator->updateContext();
 	mTekiShape->mShape->updateAnim(gfx, mat, nullptr, this);
 #ifdef PIKI_PC_PORT
-    if (!pc_p2_demon_manager_draw_actor(this, gfx, mat, true) && !pc_p2_sarai_manager_draw_actor(this, gfx, mat, true) && !pc_p2_kurage_teki_draw(this, gfx, mat, true) && !pc_p2_kogane_draw(this, gfx, mat, true) && !pc_p2_mamuta_draw(this, gfx, mat, true) && !pc_p2_frog_draw(this, gfx, mat, true) && !pc_p2_tank_draw(this, gfx, mat, true) && !pc_p2_kabuto_fsm_draw(this, gfx, mat, true) && !pc_p2_qurione_draw(this, gfx, mat, true) && !pc_p2_shijimi_draw(this, gfx, mat, true) && !pc_p2_dwarf_orange_draw(this, gfx, mat, true) && !pc_p2_kochappy_draw(this, gfx, mat, true) && !pc_p2_chappy_draw(this, gfx, mat, true) && !pc_p2_sheargrub_draw(this, gfx, mat, true) && !pc_p2_snow_draw(this, gfx, mat, true) && !pc_p2_batch2_draw(this, gfx, mat, true) && !pc_p2_batch3_draw(this, gfx, mat, true) && !pc_p2_long_legs_draw(this, gfx, mat, true))
+    if (!pc_p2_demon_manager_draw_actor(this, gfx, mat, true) && !pc_p2_sarai_manager_draw_actor(this, gfx, mat, true) && !pc_p2_kurage_teki_draw(this, gfx, mat, true) && !pc_p2_kogane_draw(this, gfx, mat, true) && !pc_p2_mamuta_draw(this, gfx, mat, true) && !pc_p2_frog_draw(this, gfx, mat, true) && !pc_p2_tank_draw(this, gfx, mat, true) && !pc_p2_kabuto_fsm_draw(this, gfx, mat, true) && !pc_p2_qurione_draw(this, gfx, mat, true) && !pc_p2_shijimi_draw(this, gfx, mat, true) && !pc_p2_dwarf_orange_draw(this, gfx, mat, true) && !pc_p2_kochappy_draw(this, gfx, mat, true) && !pc_p2_chappy_draw(this, gfx, mat, true) && !pc_p2_sheargrub_draw(this, gfx, mat, true) && !pc_p2_snow_draw(this, gfx, mat, true) && !pc_p2_batch2_draw(this, gfx, mat, true) && !pc_p2_batch3_draw(this, gfx, mat, true) && !pc_p2_long_legs_draw(this, gfx, mat, true) && !pc_hd_model_draw_skinned(gfx, mTekiShape->mShape, hdModel(), hdTint()))
 #endif
 	mTekiShape->mShape->drawshape(gfx, *gfx.mCamera, nullptr);
 }
+
+#if defined(PIKI_PC_PORT)
+/**
+ * HD replacement mesh for this enemy type, if a pack is installed.
+ */
+PcHdModelId BTeki::hdModel() const
+{
+	switch (mTekiType) {
+	case TEKI_Chappy: return PC_HD_MODEL_BULBORB_DWARF;
+	case TEKI_Swallow: return PC_HD_MODEL_BULBORB;
+	default: return PC_HD_MODEL_COUNT;
+	}
+}
+
+GXColor BTeki::hdTint() const
+{
+	const GXColor white = { 255, 255, 255, 255 };
+	return white;
+}
+#endif
 
 /**
  * @todo: Documentation
@@ -921,7 +942,7 @@ f32 BTeki::getTekiCollisionSize()
  */
 void BTeki::makeDamaged()
 {
-	mHealth -= mStoredDamage;
+	mHealth -= pc_mods_teki_damage(mStoredDamage);
 	if (mHealth < 0.0f) {
 		mHealth = 0.0f;
 	}
@@ -1324,6 +1345,22 @@ bool BTeki::inSectorPosition(immut Vector3f& targetPos, f32 maxDistance, f32 sec
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+Creature* BTeki::pcRetargetDeadNavi(Creature* target)
+{
+	Navi* other = naviMgr ? naviMgr->getNearestNavi(getPosition()) : nullptr;
+	if (!other || other == target || !other->isAlive()) {
+		return nullptr;
+	}
+	NVector3f pos(getPosition());
+	NVector3f otherPos(other->getPosition());
+	if (pos.distanceXZ(otherPos) > getParameterF(TPF_VisibleRange)) {
+		return nullptr;
+	}
+	return other;
+}
+#endif
+
 bool BTeki::visibleCreature(Creature& target)
 {
 	TekiRecognitionCondition recog(static_cast<Teki*>(this));
@@ -1555,9 +1592,19 @@ bool BTeki::insideDirection(Vector3f& direction)
  */
 Creature* BTeki::getClosestNaviPiki(immut Condition& cond, f32* outDist)
 {
-	Creature* navi = naviMgr->getNavi();
-	if (!cond.satisfy(navi)) {
-		navi = nullptr;
+	// Cooperativo: el navi más cercano que cumpla la condición.
+	Creature* navi = nullptr;
+	f32 naviBest   = 0.0f;
+	for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+		Navi* cand = naviMgr->getNavi(ni);
+		if (!cand || !cond.satisfy(cand)) {
+			continue;
+		}
+		f32 d = calcSphereDistance(*cand);
+		if (!navi || d < naviBest) {
+			navi     = cand;
+			naviBest = d;
+		}
 	}
 
 	Creature* piki   = pikiMgr->findClosest(getPosition(), &cond);
@@ -1667,11 +1714,13 @@ bool BTeki::interactNaviPiki(immut Interaction& interaction, immut Condition& co
  */
 bool BTeki::interactNavi(immut Interaction& interaction, immut Condition& cond)
 {
-	bool res   = false;
-	Navi* navi = naviMgr->getNavi();
-	if (cond.satisfy(navi)) {
-		navi->stimulate(interaction);
-		res = true;
+	bool res = false;
+	for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+		Navi* navi = naviMgr->getNavi(ni);
+		if (navi && cond.satisfy(navi)) {
+			navi->stimulate(interaction);
+			res = true;
+		}
 	}
 
 	return res;
@@ -1784,9 +1833,11 @@ void BTeki::flickLower(InteractFlick& flick)
  */
 bool BTeki::checkNaviPiki(immut Condition& cond)
 {
-	Navi* navi = naviMgr->getNavi();
-	if (cond.satisfy(navi)) {
-		return true;
+	for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
+		Navi* navi = naviMgr->getNavi(ni);
+		if (navi && cond.satisfy(navi)) {
+			return true;
+		}
 	}
 
 	Iterator iter(pikiMgr);
@@ -2164,7 +2215,7 @@ void BTeki::drawTekiShape(Graphics& gfx)
 		}
 
 #ifdef PIKI_PC_PORT
-        if (!pc_p2_demon_manager_draw_actor(this, gfx, onCamMtx, false) && !pc_p2_sarai_manager_draw_actor(this, gfx, onCamMtx, false) && !pc_p2_kurage_teki_draw(this, gfx, onCamMtx, false) && !pc_p2_onikurage_teki_draw(this, gfx, onCamMtx, false) && !pc_p2_king_teki_draw(this, gfx, onCamMtx, false) && !pc_p2_queen_teki_draw(this, gfx, onCamMtx, false) && !pc_p2_kogane_draw(this, gfx, onCamMtx, false) && !pc_p2_mamuta_draw(this, gfx, onCamMtx) && !pc_p2_frog_draw(this, gfx, onCamMtx) && !pc_p2_tank_draw(this, gfx, onCamMtx) && !pc_p2_kabuto_fsm_draw(this, gfx, onCamMtx) && !pc_p2_qurione_draw(this, gfx, onCamMtx, false) && !pc_p2_shijimi_draw(this, gfx, onCamMtx, false) && !pc_p2_giant_breadbug_actor_draw(this, gfx, onCamMtx) && !pc_p2_breadbug_actor_draw(this, gfx, onCamMtx) && !pc_p2_dwarf_orange_draw(this, gfx, onCamMtx) && !pc_p2_kochappy_draw(this, gfx, onCamMtx) && !pc_p2_chappy_draw(this, gfx, onCamMtx) && !pc_p2_sheargrub_draw(this, gfx, onCamMtx) && !pc_p2_snow_draw(this, gfx, onCamMtx) && !pc_p2_batch2_draw(this, gfx, onCamMtx) && !pc_p2_batch3_draw(this, gfx, onCamMtx) && !pc_p2_long_legs_draw(this, gfx, onCamMtx))
+        if (!pc_p2_demon_manager_draw_actor(this, gfx, onCamMtx, false) && !pc_p2_sarai_manager_draw_actor(this, gfx, onCamMtx, false) && !pc_p2_kurage_teki_draw(this, gfx, onCamMtx, false) && !pc_p2_onikurage_teki_draw(this, gfx, onCamMtx, false) && !pc_p2_king_teki_draw(this, gfx, onCamMtx, false) && !pc_p2_queen_teki_draw(this, gfx, onCamMtx, false) && !pc_p2_kogane_draw(this, gfx, onCamMtx, false) && !pc_p2_mamuta_draw(this, gfx, onCamMtx) && !pc_p2_frog_draw(this, gfx, onCamMtx) && !pc_p2_tank_draw(this, gfx, onCamMtx) && !pc_p2_kabuto_fsm_draw(this, gfx, onCamMtx) && !pc_p2_qurione_draw(this, gfx, onCamMtx, false) && !pc_p2_shijimi_draw(this, gfx, onCamMtx, false) && !pc_p2_giant_breadbug_actor_draw(this, gfx, onCamMtx) && !pc_p2_breadbug_actor_draw(this, gfx, onCamMtx) && !pc_p2_dwarf_orange_draw(this, gfx, onCamMtx) && !pc_p2_kochappy_draw(this, gfx, onCamMtx) && !pc_p2_chappy_draw(this, gfx, onCamMtx) && !pc_p2_sheargrub_draw(this, gfx, onCamMtx) && !pc_p2_snow_draw(this, gfx, onCamMtx) && !pc_p2_batch2_draw(this, gfx, onCamMtx) && !pc_p2_batch3_draw(this, gfx, onCamMtx) && !pc_p2_long_legs_draw(this, gfx, onCamMtx) && !pc_hd_model_draw_skinned(gfx, mTekiShape->mShape, hdModel(), hdTint()))
 #endif
 		mTekiShape->mShape->drawshape(gfx, *gfx.mCamera, &mAnimatedMaterials);
 		if (lightType == 1) {

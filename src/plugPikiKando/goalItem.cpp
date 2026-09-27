@@ -4,6 +4,9 @@
 #include "GoalItem.h"
 #include "FlowController.h"
 #include "teki.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_coop.h"
+#endif
 #include "BaseInf.h"
 #include "CreatureCollPart.h"
 #include "DebugLog.h"
@@ -463,11 +466,22 @@ Piki* GoalItem::exitPiki()
 	}
 
 	Navi* navi = naviMgr->getNavi();
+#if defined(PIKI_PC_PORT)
+	// VS: salen hacia el capitán dueño de la cebolla.
+	if (pc_vs_active() && mPcOwner >= 0 && naviMgr->getNavi(mPcOwner)) navi = naviMgr->getNavi(mPcOwner);
+#endif
 	piki->init(navi);
 	piki->resetPosition(legColl->mCentre);
 
 	// always pull the highest stage pikmin out first
 	int happa;
+#if defined(PIKI_PC_PORT)
+	// VS: cada cebolla tiene su propio almacén; el recuento global mezcla a
+	// los dos jugadores.
+	if (pc_vs_active()) {
+		happa = mHeldPikis[Flower] > 0 ? Flower : (mHeldPikis[Bud] > 0 ? Bud : Leaf);
+	} else
+#endif
 	if (pikiInfMgr.mPikiCounts[mOnionColour][Flower] > 0) {
 		happa = Flower;
 	} else if (pikiInfMgr.mPikiCounts[mOnionColour][Bud] > 0) {
@@ -477,6 +491,9 @@ Piki* GoalItem::exitPiki()
 	}
 	piki->setFlower(happa);
 	piki->initColor(mOnionColour);
+#if defined(PIKI_PC_PORT)
+	if (pc_vs_active()) piki->mPlayerId = mPcOwner;
+#endif
 	pikiInfMgr.decPiki(piki);
 	piki->mSRT.s.set(1.0f, 1.0f, 1.0f);
 	piki->mFSM->transit(piki, PIKISTATE_Normal);
