@@ -2386,6 +2386,10 @@ void MapMgr::traceMove(Creature* creature, MoveTrace& trace, f32 timeStep)
 				if (coll->mCreature && coll->mCreature == creature) {
 					continue;
 				}
+				// PC port (#884): opt-in skip of enemy/boss body platforms (see MoveTrace::mIgnoreEnemyCollParts).
+				if (trace.mIgnoreEnemyCollParts && coll->mCreature && (coll->mCreature->isTeki() || coll->mCreature->isBoss())) {
+					continue;
+				}
 				if (collCheckBox.intersects(coll->mBoundingBox)) {
 					for (int j = 0; j < coll->mCollGroupCount; j++) {
 						if (coll->mJointVisibility[coll->mCollGroupList[j]->mJointIndex]) {

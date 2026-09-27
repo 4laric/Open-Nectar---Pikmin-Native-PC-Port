@@ -1,0 +1,160 @@
+// #884 wiring guard: the Kabuto 75 campaign path must reach the tested Stone
+// seam (pc_p2_kabuto_stone_fleet.h). p2_kabuto_stone_fleet_test drives that
+// seam (attackStep / advanceStateTime / stoneTicksFor / Fleet) on host frame
+// clocks, but the shipped glue lives in engine-bound files that cannot be
+// linked into an engine-free test. This guard reads the shipped sources and
+// fails if the glue is reverted or unhooked, e.g. restoring the pre-#884
+// doStoneFire instant InteractAttack cone at half the attack clip, dropping
+// the gameCoreSection stone update/draw hooks, or losing the reset/forget
+// cleanup. Whitespace is ignored when matching.
+//
+// Usage: p2_kabuto_stone_wiring_test [native_source_root]
+// (default: the configured source root, P2_KABUTO_SOURCE_ROOT).
+#include <cstdio>
+#include <fstream>
+#include <sstream>
+#include <string>
+
+#ifndef P2_KABUTO_SOURCE_ROOT
+#define P2_KABUTO_SOURCE_ROOT "."
+#endif
+
+namespace {
+
+int failures = 0;
+int checks = 0;
+
+std::string squeeze(const std::string& s)
+{
+    std::string out;
+    out.reserve(s.size());
+    for (char c : s) {
+        if (c != ' ' && c != '\t' && c != '\r' && c != '\n') {
+            out.push_back(c);
+        }
+    }
+    return out;
+}
+
+bool load(const std::string& root, const char* rel, std::string& out)
+{
+    std::ifstream in(root + "/" + rel, std::ios::binary);
+    if (!in) {
+        std::printf("FAIL open %s/%s\n", root.c_str(), rel);
+        ++failures;
+        return false;
+    }
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    out = squeeze(ss.str());
+    return true;
+}
+
+void check(bool ok, const char* file, const char* what)
+{
+    ++checks;
+    if (!ok) {
+        ++failures;
+        std::printf("FAIL %s: %s\n", file, what);
+    }
+}
+
+bool has(const std::string& text, const char* needle) { return text.find(squeeze(needle)) != std::string::npos; }
+
+// Text from `begin` up to (not including) the first `end` after it; empty if
+// `begin` is missing.
+std::string region(const std::string& text, const char* begin, const char* end)
+{
+    const std::string b = squeeze(begin), e = squeeze(end);
+    const size_t i = text.find(b);
+    if (i == std::string::npos) {
+        return std::string();
+    }
+    const size_t j = text.find(e, i + b.size());
+    return text.substr(i, j == std::string::npos ? std::string::npos : j - i);
+}
+
+} // namespace
+
+int main(int argc, char** argv)
+{
+    const std::string root = argc > 1 ? argv[1] : P2_KABUTO_SOURCE_ROOT;
+    std::string fsm, core, mapCpp, mapH;
+    const char* F = "pc_port/pc_p2_kabuto_fsm.cpp";
+    const char* G = "src/plugPikiKando/gameCoreSection.cpp";
+    const char* M = "src/plugPikiColin/mapMgr.cpp";
+    const char* H = "include/MapMgr.h";
+    if (load(root, F, fsm)) {
+        // KB_ATTACK goes through the tested seam, in source exec order.
+        const std::string attack = region(fsm, "case KB_ATTACK:{", "case KB_FLICK:");
+        check(!attack.empty(), F, "KB_ATTACK case present");
+        check(has(attack, "p2kabutostone::attackStep(fleet,tokenOf(actor),actor->mHealth,s.fireDone,prevStateTime,s.stateTime,"),
+              F, "KB_ATTACK calls p2kabutostone::attackStep with the live health, latch and state clock");
+        check(has(attack, "if(step.action==p2kabutostone::AttackAction::Die){die("), F,
+              "KB_ATTACK transits to Dead on the seam's death gate");
+        check(has(attack, "logStoneFire(s,gen,step);"), F, "KB_ATTACK logs the seam outcome");
+        check(!has(attack, "InteractAttack") && !has(attack, "stimulate("), F,
+              "KB_ATTACK applies no instant interaction (pre-#884 cone)");
+        check(!has(attack, "clipSeconds(\"attack\")*0.5"), F, "KB_ATTACK has no half-clip fire rule");
+        check(has(fsm, "const float prevStateTime=p2kabutostone::advanceStateTime(s.stateTime,dt);"), F,
+              "state clock advanced by the seam's advanceStateTime");
+        check(!has(fsm, "doStoneFire") && !has(fsm, "P2_KABUTO_FIRE generator"), F,
+              "pre-#884 doStoneFire / P2_KABUTO_FIRE cone removed");
+        check(!has(fsm, "kMouthForwardHostApprox"), F, "no host-approximated mouth offset");
+        // Cleanup and ownership.
+        const std::string reset = region(fsm, "void pc_p2_kabuto_fsm_reset(){", "void pc_p2_kabuto_fsm_forget(");
+        check(has(reset, "fleet.reset();") && has(reset, "stoneDebt=0.0;"), F,
+              "reset clears the fleet and the stone clock (teardown / re-entry)");
+        const std::string forget = region(fsm, "void pc_p2_kabuto_fsm_forget(", "float pc_p2_kabuto_fsm_param_f(");
+        check(has(forget, "fleet.forgetOwner(tok)"), F, "forget orphans the shooter's stones instead of dropping them");
+        // Global stone tick / trace / draw.
+        const std::string update = region(fsm, "void pc_p2_kabuto_fsm_update_stones(){", "void pc_p2_kabuto_fsm_draw_stones(");
+        check(has(update, "p2kabutostone::stoneTicksFor(stoneDebt,gsys->getFrameTime())") && has(update, "stoneTick(snap)"),
+              F, "update_stones runs seam-clocked fleet ticks");
+        const std::string tick = region(fsm, "void stoneTick(StoneSnapshot& snap){", "void pc_p2_kabuto_fsm_update_stones(");
+        check(has(tick, "fleet.tick(AICONST.mGravity(),&stoneTrace,&stoneMap,"), F, "stoneTick ticks the fleet with the map trace");
+        check(has(tick, "p2_projectile_apply_engine_strike("), F, "strikes reach the P1 receivers");
+        const std::string trace = region(fsm, "bool stoneTrace(", "struct StoneSnapshot");
+        check(has(trace, "mv.mIgnoreEnemyCollParts=true;") && has(trace, "mapMgr->traceMove(&m.proxy,mv,dt);"), F,
+              "stone trace skips enemy body platforms");
+        check(has(fsm, "void pc_p2_kabuto_fsm_draw_stones(Graphics& gfx){"), F, "stone draw defined");
+        // The Iwagon stand-in shares TekiShapeObject::mAnimContext, which is
+        // null until a live Iwagon draws; updateAnim would then halt on
+        // ERROR("no joint anim!!") (shapeBase.cpp:3358-3361).
+        // The draw is the last definition in the file: take it to the end.
+        const std::string drawTail = region(fsm, "void pc_p2_kabuto_fsm_draw_stones(Graphics& gfx){", "#if");
+        check(has(drawTail, "AnimData*constsharedAnim=so?so->mAnimContext.mData:nullptr;") &&
+                  has(drawTail, "AnimData*constnullAnim=(shape&&shape->mCurrentAnimation)?shape->mCurrentAnimation->mData:nullptr;") &&
+                  has(drawTail, "AnimData*constdrawAnim=sharedAnim?sharedAnim:nullAnim;"),
+              F, "stone draw falls back to the shape's Null Anim when the shared Iwagon context is empty");
+        check(has(drawTail, "if(!shape||!drawAnim)return;"), F, "stone draw skips when no anim data is bindable");
+        {
+            const size_t bind = drawTail.find(squeeze("so->mAnimContext.mData=drawAnim;"));
+            const size_t anim = drawTail.find(squeeze("shape->updateAnim(gfx,view,&frame,nullptr);"));
+            const size_t restore = drawTail.find(squeeze("so->mAnimContext.mData=sharedAnim;"));
+            check(bind != std::string::npos && anim != std::string::npos && restore != std::string::npos &&
+                      bind < anim && anim < restore,
+                  F, "stone draw binds the anim before updateAnim and restores the shared context after");
+        }
+        check(!drawTail.empty(), F, "stone draw region found");
+    }
+    if (load(root, G, core)) {
+        check(has(core, "#include \"pc_p2_kabuto_fsm.h\""), G, "includes pc_p2_kabuto_fsm.h");
+        check(has(core, "pc_p2_kabuto_fsm_update_stones();"), G, "calls pc_p2_kabuto_fsm_update_stones each frame");
+        check(has(core, "pc_p2_kabuto_fsm_draw_stones(gfx);"), G, "calls pc_p2_kabuto_fsm_draw_stones");
+    }
+    if (load(root, M, mapCpp)) {
+        check(has(mapCpp, "if (trace.mIgnoreEnemyCollParts && coll->mCreature && (coll->mCreature->isTeki() || coll->mCreature->isBoss())) {"),
+              M, "traceMove honours MoveTrace::mIgnoreEnemyCollParts");
+    }
+    if (load(root, H, mapH)) {
+        check(has(mapH, "mIgnoreEnemyCollParts   = false;") && has(mapH, "bool mIgnoreEnemyCollParts;"), H,
+              "MoveTrace::mIgnoreEnemyCollParts defaults to false");
+    }
+    std::printf("p2_kabuto_stone_wiring_test root=%s checks=%d failures=%d\n", root.c_str(), checks, failures);
+    if (failures) {
+        return 1;
+    }
+    std::printf("p2_kabuto_stone_wiring_test: all checks passed\n");
+    return 0;
+}
