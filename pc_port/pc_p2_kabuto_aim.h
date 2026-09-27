@@ -106,11 +106,53 @@ inline bool inAttackLane(const Vec3& pos, float faceDir, const Vec3& target, con
 }
 
 // A Navi or Pikmin the host offers to the search / lane test.
+//   alive      - isAttackableTarget eligibility: creature->isAlive() and
+//                isNavi() or a Piki that isPikmin() (Kabuto.cpp:242-245).
+//   searchable - getSearchedTarget eligibility: getNearestNavi takes a live
+//                Navi (enemyAction.cpp:43); getNearestPikmin takes
+//                Piki::isSearchable() = isPikmin && isAlive && !isStickToMouth
+//                (enemyAction.cpp:394, Piki.h:243-249).
 struct Candidate {
     Vec3 pos;
     bool navi = false;
     bool alive = true;
+    bool searchable = true;
 };
+
+// What a host (P1) Pikmin is in P2 terms (#884 round 5).
+//   Active       - an ordinary above-ground Piki (includes being plucked:
+//                  P2 PikiNukareState / AutoNuki are Piki states,
+//                  PikiState.h:39,44,694-696).
+//   Sprout       - P1 PIKISTATE_Grow / Bury / NukareWait: a Pikmin planted or
+//                  in the ground. In P2 that is an ItemPikihead::Item, not a
+//                  Piki (ItemPikihead.h:198), so neither the search
+//                  (Piki-only, enemyAction.cpp:368-410) nor the lane
+//                  (isPiki && isPikmin, Kabuto.cpp:244) ever sees it.
+//   StuckToMouth - P1 PIKISTATE_Swallowed (held in an enemy mouth,
+//                  viewPiki.cpp:671): P2 isStickToMouth, so not searchable;
+//                  the lane has no isStickToMouth test (Kabuto.cpp:242-245)
+//                  and keeps it, as the source does.
+enum class PikminPhase { Active, Sprout, StuckToMouth };
+
+inline Candidate pikminCandidate(const Vec3& pos, bool hostAlive, PikminPhase phase)
+{
+    Candidate c;
+    c.pos = pos;
+    c.navi = false;
+    c.alive = hostAlive && phase != PikminPhase::Sprout;
+    c.searchable = c.alive && phase == PikminPhase::Active;
+    return c;
+}
+
+inline Candidate naviCandidate(const Vec3& pos, bool hostAlive)
+{
+    Candidate c;
+    c.pos = pos;
+    c.navi = true;
+    c.alive = hostAlive;
+    c.searchable = hostAlive;
+    return c;
+}
 
 // First live Navi / Pikmin in the lane, or -1 (for logs).
 inline int attackableIndex(const Vec3& pos, float faceDir, const Candidate* c, int n,
@@ -163,7 +205,7 @@ inline int searchTarget(const Vec3& pos, float faceDir, float viewDeg, const Can
     int navi = -1, piki = -1;
     for (int pass = 0; pass < 2; ++pass) {
         for (int i = 0; i < n; ++i) {
-            if (!c[i].alive || c[i].navi != (pass == 0)) {
+            if (!c[i].alive || !c[i].searchable || c[i].navi != (pass == 0)) {
                 continue;
             }
             if (!(std::fabs(angDist(pos, faceDir, c[i].pos)) <= limit)) {

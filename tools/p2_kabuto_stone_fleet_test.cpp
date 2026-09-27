@@ -13,7 +13,9 @@
 // calls (pc_p2_kabuto_aim.h: isAttackableTarget lane, getSearchedTarget,
 // StateTurn / StateMove / StateWait decisions) against the pre-round-4 native
 // 180 / 0.5 rad gate and FACE_OK Turn exit as negative controls; case 26 pins
-// the strike-buffer deferral and the P2 gravity constant.
+// the strike-buffer deferral and the P2 gravity constant; case 27 (round 5)
+// pins the host target offer: sprouts are never targets, swallowed Pikmin
+// are never searched, against the round-4 isAlive-only offer.
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -1170,6 +1172,100 @@ void case26_strikeCapDefers()
     // P2 gravity constant (aiConstants 560).
     assert(kStoneGravity == 560.0f);
 }
+
+// Round-4 buildAim offered every P1 Piki passing isAlive() (which only
+// excludes Dying / Dead, piki.cpp:2546-2553) as both searchable and in-lane.
+// Kept only as the negative control for case 27.
+aim::Candidate legacyHostPiki(float x, float y, float z)
+{
+    aim::Candidate c = pikiAt(x, y, z);
+    c.alive = true;
+    c.searchable = true;
+    return c;
+}
+
+// Runs KB_TURN (aim::turnExec) for up to `frames` 60 Hz frames from facing
+// +z at the origin. Returns the Attack frame or -1 and the final heading.
+int turnUntilAttack(const aim::Candidate* c, int n, int frames, float& heading)
+{
+    const aim::Vec3 pos = v3(0.0f, 0.0f, 0.0f);
+    const aim::Vec3 wander = v3(0.0f, 0.0f, -100.0f);
+    heading = 0.0f;
+    for (int f = 1; f <= frames; ++f) {
+        const aim::TurnResult r = aim::turnExec(pos, heading, 1.0f / 60.0f, aim::viewAngleDeg(0.0f), c, n, wander);
+        heading = r.faceDir;
+        if (r.next == aim::Next::Attack) {
+            return f;
+        }
+    }
+    return -1;
+}
+
+void case27_sproutsAndSwallowedPikmin()
+{
+    const aim::Vec3 pos = v3(0.0f, 0.0f, 0.0f);
+    const aim::Vec3 ahead150 = v3(0.0f, 0.0f, 150.0f);
+    // Host mapping: sprouts (P1 Grow / Bury / NukareWait) are P2
+    // ItemPikihead, never a Piki target; swallowed Pikmin are P2
+    // isStickToMouth: not searched, still in the source lane; plucking
+    // (Nukare / AutoNuki) stays an ordinary Piki.
+    const aim::Candidate sprout = aim::pikminCandidate(ahead150, true, aim::PikminPhase::Sprout);
+    const aim::Candidate mouth = aim::pikminCandidate(ahead150, true, aim::PikminPhase::StuckToMouth);
+    const aim::Candidate active = aim::pikminCandidate(ahead150, true, aim::PikminPhase::Active);
+    const aim::Candidate dying = aim::pikminCandidate(ahead150, false, aim::PikminPhase::Active);
+    assert(!sprout.alive && !sprout.searchable && !sprout.navi);
+    assert(mouth.alive && !mouth.searchable);
+    assert(active.alive && active.searchable);
+    assert(!dying.alive && !dying.searchable);
+    const aim::Candidate navi = aim::naviCandidate(ahead150, true);
+    assert(navi.navi && navi.alive && navi.searchable);
+
+    // (a) A sprout alone in the lane at 150: the round-4 host offer searched
+    // it and fired at once, although the Stone contact snapshot never holds
+    // a sprout (pc_p2_kabuto_fsm.cpp snapshotAdd: !isAtari || isBuried).
+    const aim::Candidate legacySprout = legacyHostPiki(0.0f, 0.0f, 150.0f);
+    float h = 0.0f;
+    assert(aim::searchTarget(pos, 0.0f, 180.0f, &legacySprout, 1) == 0);
+    assert(turnUntilAttack(&legacySprout, 1, 1, h) == 1);
+    assert(aim::searchTarget(pos, 0.0f, 180.0f, &sprout, 1) == -1);
+    assert(!aim::isAttackableTarget(pos, 0.0f, &sprout, 1));
+    assert(turnUntilAttack(&sprout, 1, 600, h) < 0);
+    const aim::Vec3 wander = v3(0.0f, 0.0f, 100.0f);
+    assert(aim::moveExec(pos, 0.0f, 1.0f / 60.0f, 180.0f, 0.0f, &sprout, 1, wander).target < 0);
+    assert(!aim::waitWantsTurn(0.0f, aim::searchTarget(pos, 0.0f, 180.0f, &sprout, 1) >= 0));
+
+    // (b) Sprout 10 ahead (forward <= 15: never in the lane) plus a Navi 200
+    // away 60 deg off. Round-4 offer: the sprout is the nearest searched
+    // target, the Kabuto already faces it and the lane never holds -> stuck
+    // in KB_TURN. Shipped: the sprout is ignored, the Kabuto turns to the
+    // Navi until the lane holds, fires, and the Stone reaches it.
+    const float sixty = 60.0f * kPi / 180.0f;
+    const aim::Vec3 naviPos = v3(200.0f * std::sin(sixty), 0.0f, 200.0f * std::cos(sixty));
+    const aim::Candidate legacyPair[2] = { legacyHostPiki(0.0f, 0.0f, 10.0f), aim::naviCandidate(naviPos, true) };
+    const aim::Candidate pair[2] = { aim::pikminCandidate(v3(0.0f, 0.0f, 10.0f), true, aim::PikminPhase::Sprout),
+                                     aim::naviCandidate(naviPos, true) };
+    float legacyHeading = 0.0f;
+    const int legacyFrame = turnUntilAttack(legacyPair, 2, 1800, legacyHeading);
+    float heading = 0.0f;
+    const int frame = turnUntilAttack(pair, 2, 1800, heading);
+    std::printf("case27 sprout stall: round-4 attack frame=%d heading=%.2f deg; shipped attack frame=%d heading=%.2f deg\n",
+                legacyFrame, legacyHeading * 180.0f / kPi, frame, heading * 180.0f / kPi);
+    assert(legacyFrame < 0 && std::fabs(legacyHeading) < 1e-3f);
+    assert(frame > 1 && aim::inAttackLane(pos, heading, naviPos));
+    assert(aim::searchTarget(pos, heading, 180.0f, pair, 2) == 1);
+    const int strikes = stoneStrikesFrom(heading, naviPos);
+    std::printf("case27 sprout stall: shipped stone strikes on the Navi=%d\n", strikes);
+    assert(strikes == 1);
+
+    // (c) A swallowed Pikmin: never searched (so never turned toward), but
+    // the lane keeps it as the source isAttackableTarget does.
+    assert(aim::searchTarget(pos, 0.0f, 180.0f, &mouth, 1) == -1);
+    assert(aim::isAttackableTarget(pos, 0.0f, &mouth, 1));
+    const aim::Candidate mouthOff = aim::pikminCandidate(v3(100.0f, 0.0f, 150.0f), true, aim::PikminPhase::StuckToMouth);
+    assert(turnUntilAttack(&mouthOff, 1, 600, h) < 0);
+    // (d) A Pikmin being plucked is an ordinary target.
+    assert(aim::searchTarget(pos, 0.0f, 180.0f, &active, 1) == 0 && turnUntilAttack(&active, 1, 1, h) == 1);
+}
 } // namespace
 
 int main(int argc, char** argv)
@@ -1186,7 +1282,8 @@ int main(int argc, char** argv)
                                 case19_oncePerAttackState, case20_leafContactGeometry,
                                 case21_offAxisTurnsUntilLane, case22_inLaneBeyond180,
                                 case23_laneRefusals, case24_searchAndTurnRate,
-                                case25_moveAndWander, case26_strikeCapDefers };
+                                case25_moveAndWander, case26_strikeCapDefers,
+                                case27_sproutsAndSwallowedPikmin };
     const int count = int(sizeof(cases) / sizeof(cases[0]));
     for (int i = 0; i < count; ++i) {
         if (only == 0 || only == i + 1) {

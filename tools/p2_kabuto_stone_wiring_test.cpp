@@ -130,6 +130,17 @@ int main(int argc, char** argv)
                   !has(fsm, "nearestTarget("),
               F, "pre-round-4 cone gate / FACE_OK exit / XZ-only nearestTarget removed");
         check(!has(fsm, "s.state==KB_TURN&&s.stateTime>5.0f"), F, "no non-source Turn->Move chase after 5 s");
+        // Round 5: the host offer maps P1 Piki states to their P2 object
+        // (sprouts never targets, swallowed never searched), not isAlive only.
+        const std::string phase = region(fsm, "p2kabutoaim::PikminPhasepikminPhase(Piki*p){", "structAimSnapshot{");
+        check(has(phase, "casePIKISTATE_Grow:casePIKISTATE_Bury:casePIKISTATE_NukareWait:returnp2kabutoaim::PikminPhase::Sprout;") &&
+                  has(phase, "casePIKISTATE_Swallowed:returnp2kabutoaim::PikminPhase::StuckToMouth;"),
+              F, "pikminPhase maps Grow/Bury/NukareWait to Sprout and Swallowed to StuckToMouth");
+        const std::string aimBuild = region(fsm, "voidbuildAim(AimSnapshot&a){", "floatrngUnit(");
+        check(has(aimBuild, "push(q,p2kabutoaim::pikminCandidate(aimVec(q->getPosition()),true,pikminPhase(q)));") &&
+                  has(aimBuild, "push(n,p2kabutoaim::naviCandidate(aimVec(n->getPosition()),true));") &&
+                  !has(aimBuild, "k.alive=true;"),
+              F, "buildAim offers Pikmin through pikminCandidate(pikminPhase) and Navis through naviCandidate");
         const std::string wait = region(fsm, "case KB_WAIT:{", "case KB_TURN:{");
         check(has(wait, "p2kabutoaim::waitWantsTurn(s.waitTimer,searched())") && !has(wait, "KB_ATTACK"), F,
               "Wait latches Turn (target or 3 s) and never attacks directly");

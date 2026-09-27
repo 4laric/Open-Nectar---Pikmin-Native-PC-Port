@@ -27,6 +27,7 @@
 #include "Camera.h"
 #include "gameflow.h"
 #include "Piki.h"
+#include "PikiState.h"
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
@@ -123,12 +124,24 @@ p2kabutoaim::Vec3 aimVec(const Vector3f& v){p2kabutoaim::Vec3 r;r.x=v.x;r.y=v.y;
 // Host candidate snapshot for getSearchedTarget / isAttackableTarget: every
 // live Navi (co-op: all of naviMgr) and every live Pikmin, at getPosition()
 // (source uses creature positions, Kabuto.cpp:248, enemyAction.cpp:47-49).
+// P1 Piki::isAlive only excludes Dying / Dead (piki.cpp:2546-2553), so the
+// P1 state is mapped to its P2 object (pc_p2_kabuto_aim.h PikminPhase):
+// planted / in-ground Pikmin are P2 sprouts (never targets), swallowed ones
+// are P2 isStickToMouth (never searched, still in the source lane).
+p2kabutoaim::PikminPhase pikminPhase(Piki* p){
+    switch(p->getState()){
+    case PIKISTATE_Grow:case PIKISTATE_Bury:case PIKISTATE_NukareWait:return p2kabutoaim::PikminPhase::Sprout;
+    case PIKISTATE_Swallowed:return p2kabutoaim::PikminPhase::StuckToMouth;
+    default:return p2kabutoaim::PikminPhase::Active;}
+}
 struct AimSnapshot{std::vector<p2kabutoaim::Candidate> cands;std::vector<Creature*> creatures;};
 void buildAim(AimSnapshot& a){
     a.cands.clear();a.creatures.clear();
-    auto add=[&](Creature* c,bool navi){if(!c||!c->isAlive())return;p2kabutoaim::Candidate k;k.pos=aimVec(c->getPosition());k.navi=navi;k.alive=true;a.cands.push_back(k);a.creatures.push_back(c);};
-    if(naviMgr){Iterator it(naviMgr);CI_LOOP(it){add(static_cast<Navi*>(*it),true);}}
-    if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){add(static_cast<Piki*>(*it),false);}}
+    auto push=[&](Creature* c,const p2kabutoaim::Candidate& k){if(!k.alive&&!k.searchable)return;a.cands.push_back(k);a.creatures.push_back(c);};
+    if(naviMgr){Iterator it(naviMgr);CI_LOOP(it){Navi* n=static_cast<Navi*>(*it);if(!n||!n->isAlive())continue;
+        push(n,p2kabutoaim::naviCandidate(aimVec(n->getPosition()),true));}}
+    if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){Piki* q=static_cast<Piki*>(*it);if(!q||!q->isAlive())continue;
+        push(q,p2kabutoaim::pikminCandidate(aimVec(q->getPosition()),true,pikminPhase(q)));}}
 }
 float rngUnit(KabutoFsm& s){s.rng=s.rng*1664525u+1013904223u;return float((s.rng>>8)&0xffffffu)/16777216.0f;}
 int stuckPikminCount(Creature* c){int n=0;for(Creature* s=c->mStickListHead;s;s=s->mNextSticker){if(!s||!s->isPiki()||!s->isAlive())continue;++n;}return n;}
