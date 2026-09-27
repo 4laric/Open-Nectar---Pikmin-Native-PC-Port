@@ -126,12 +126,18 @@ p2kabutoaim::Vec3 aimVec(const Vector3f& v){p2kabutoaim::Vec3 r;r.x=v.x;r.y=v.y;
 // (source uses creature positions, Kabuto.cpp:248, enemyAction.cpp:47-49).
 // P1 Piki::isAlive only excludes Dying / Dead (piki.cpp:2546-2553), so the
 // P1 state is mapped to its P2 object (pc_p2_kabuto_aim.h PikminPhase):
-// planted / in-ground Pikmin are P2 sprouts (never targets), swallowed ones
-// are P2 isStickToMouth (never searched, still in the source lane).
+// planted / in-ground Pikmin are P2 sprouts (never targets); squashed,
+// electrocuted and swallowed Pikmin are in P2 states whose dead() is true,
+// so P2 Piki::isAlive rejects them (never searched, never in the lane).
+// Any mouth-held Pikmin counts as swallowed: P2 InteractSwallow::actPiki
+// transits every startStickMouth victim to PIKISTATE_Swallowed
+// (interactPiki.cpp:672,689), while P2-bridged mouths here may stick a P1
+// Piki to the mouth without the P1 Swallowed state.
 p2kabutoaim::PikminPhase pikminPhase(Piki* p){
+    if(p->isStickToMouth())return p2kabutoaim::PikminPhase::Dead;
     switch(p->getState()){
     case PIKISTATE_Grow:case PIKISTATE_Bury:case PIKISTATE_NukareWait:return p2kabutoaim::PikminPhase::Sprout;
-    case PIKISTATE_Swallowed:return p2kabutoaim::PikminPhase::StuckToMouth;
+    case PIKISTATE_Pressed:case PIKISTATE_DenkiDying:case PIKISTATE_Swallowed:return p2kabutoaim::PikminPhase::Dead;
     default:return p2kabutoaim::PikminPhase::Active;}
 }
 struct AimSnapshot{std::vector<p2kabutoaim::Candidate> cands;std::vector<Creature*> creatures;};

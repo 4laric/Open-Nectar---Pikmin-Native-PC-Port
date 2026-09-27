@@ -130,12 +130,15 @@ int main(int argc, char** argv)
                   !has(fsm, "nearestTarget("),
               F, "pre-round-4 cone gate / FACE_OK exit / XZ-only nearestTarget removed");
         check(!has(fsm, "s.state==KB_TURN&&s.stateTime>5.0f"), F, "no non-source Turn->Move chase after 5 s");
-        // Round 5: the host offer maps P1 Piki states to their P2 object
-        // (sprouts never targets, swallowed never searched), not isAlive only.
+        // Rounds 5-6: the host offer maps P1 Piki states to their P2 object
+        // (sprouts never targets; Pressed / DenkiDying / Swallowed are P2
+        // dead() states, so P2 isAlive rejects them), not P1 isAlive only.
         const std::string phase = region(fsm, "p2kabutoaim::PikminPhasepikminPhase(Piki*p){", "structAimSnapshot{");
         check(has(phase, "casePIKISTATE_Grow:casePIKISTATE_Bury:casePIKISTATE_NukareWait:returnp2kabutoaim::PikminPhase::Sprout;") &&
-                  has(phase, "casePIKISTATE_Swallowed:returnp2kabutoaim::PikminPhase::StuckToMouth;"),
-              F, "pikminPhase maps Grow/Bury/NukareWait to Sprout and Swallowed to StuckToMouth");
+                  has(phase, "casePIKISTATE_Pressed:casePIKISTATE_DenkiDying:casePIKISTATE_Swallowed:returnp2kabutoaim::PikminPhase::Dead;") &&
+                  has(phase, "if(p->isStickToMouth())returnp2kabutoaim::PikminPhase::Dead;") &&
+                  !has(phase, "StuckToMouth"),
+              F, "pikminPhase maps Grow/Bury/NukareWait to Sprout and Pressed/DenkiDying/Swallowed/mouth-held to Dead");
         const std::string aimBuild = region(fsm, "voidbuildAim(AimSnapshot&a){", "floatrngUnit(");
         check(has(aimBuild, "push(q,p2kabutoaim::pikminCandidate(aimVec(q->getPosition()),true,pikminPhase(q)));") &&
                   has(aimBuild, "push(n,p2kabutoaim::naviCandidate(aimVec(n->getPosition()),true));") &&

@@ -1206,15 +1206,16 @@ void case27_sproutsAndSwallowedPikmin()
     const aim::Vec3 pos = v3(0.0f, 0.0f, 0.0f);
     const aim::Vec3 ahead150 = v3(0.0f, 0.0f, 150.0f);
     // Host mapping: sprouts (P1 Grow / Bury / NukareWait) are P2
-    // ItemPikihead, never a Piki target; swallowed Pikmin are P2
-    // isStickToMouth: not searched, still in the source lane; plucking
+    // ItemPikihead, never a Piki target; swallowed Pikmin are in P2
+    // PikiSwallowedState, whose dead() is true (PikiState.h:823), so P2
+    // isAlive rejects them from search and lane alike; plucking
     // (Nukare / AutoNuki) stays an ordinary Piki.
     const aim::Candidate sprout = aim::pikminCandidate(ahead150, true, aim::PikminPhase::Sprout);
-    const aim::Candidate mouth = aim::pikminCandidate(ahead150, true, aim::PikminPhase::StuckToMouth);
+    const aim::Candidate mouth = aim::pikminCandidate(ahead150, true, aim::PikminPhase::Dead);
     const aim::Candidate active = aim::pikminCandidate(ahead150, true, aim::PikminPhase::Active);
     const aim::Candidate dying = aim::pikminCandidate(ahead150, false, aim::PikminPhase::Active);
     assert(!sprout.alive && !sprout.searchable && !sprout.navi);
-    assert(mouth.alive && !mouth.searchable);
+    assert(!mouth.alive && !mouth.searchable);
     assert(active.alive && active.searchable);
     assert(!dying.alive && !dying.searchable);
     const aim::Candidate navi = aim::naviCandidate(ahead150, true);
@@ -1257,14 +1258,76 @@ void case27_sproutsAndSwallowedPikmin()
     std::printf("case27 sprout stall: shipped stone strikes on the Navi=%d\n", strikes);
     assert(strikes == 1);
 
-    // (c) A swallowed Pikmin: never searched (so never turned toward), but
-    // the lane keeps it as the source isAttackableTarget does.
+    // (c) A swallowed Pikmin: never searched and never in the lane (source
+    // isAttackableTarget tests creature->isAlive(), Kabuto.cpp:242, which is
+    // false in PikiSwallowedState). Round 5 kept it in the lane.
     assert(aim::searchTarget(pos, 0.0f, 180.0f, &mouth, 1) == -1);
-    assert(aim::isAttackableTarget(pos, 0.0f, &mouth, 1));
-    const aim::Candidate mouthOff = aim::pikminCandidate(v3(100.0f, 0.0f, 150.0f), true, aim::PikminPhase::StuckToMouth);
+    assert(!aim::isAttackableTarget(pos, 0.0f, &mouth, 1));
+    const aim::Candidate mouthOff = aim::pikminCandidate(v3(100.0f, 0.0f, 150.0f), true, aim::PikminPhase::Dead);
     assert(turnUntilAttack(&mouthOff, 1, 600, h) < 0);
     // (d) A Pikmin being plucked is an ordinary target.
     assert(aim::searchTarget(pos, 0.0f, 180.0f, &active, 1) == 0 && turnUntilAttack(&active, 1, 1, h) == 1);
+}
+
+// Round-5 host mapping for a P1 Pikmin in a P2 dead() state (Pressed,
+// DenkiDying, Swallowed): Pressed / DenkiDying were Active (searched and in
+// the lane), Swallowed was alive but not searched. Negative control only.
+aim::Candidate round5HostPiki(const aim::Vec3& p, int p1State)
+{
+    aim::Candidate c = pikiAt(p.x, p.y, p.z);
+    c.alive = true;
+    c.searchable = p1State != 8; // PIKISTATE_Swallowed -> round-5 StuckToMouth
+    return c;
+}
+
+void case28_p2DeadStatesAreNotTargets()
+{
+    // A Pikmin 100 dead ahead in a P2 dead() state (squashed by this Stone,
+    // electrocuted, or held in another enemy's mouth) plus a live Navi 200
+    // away at 40 deg. Source (P2 isAlive false, piki.cpp:319-327): the
+    // Pikmin is neither searched nor in the lane, the Kabuto turns to the
+    // Navi, fires once the lane holds, and the Stone reaches it. Round 5
+    // attacked the flattened / swallowed Pikmin at once (heading 0), though
+    // P1 isAtari excludes Pressed and Swallowed (piki.cpp:1586-1587) so the
+    // Stone cannot hit it, and re-attacked it at every Attack end.
+    const aim::Vec3 pos = v3(0.0f, 0.0f, 0.0f);
+    const aim::Vec3 pikiPos = v3(0.0f, 0.0f, 100.0f);
+    const float forty = 40.0f * kPi / 180.0f;
+    const aim::Vec3 naviPos = v3(200.0f * std::sin(forty), 0.0f, 200.0f * std::cos(forty));
+    const char* const names[3] = { "Pressed", "DenkiDying", "Swallowed" };
+    const int p1States[3] = { 33, 35, 8 }; // include/PikiState.h:49,51,24
+    for (int k = 0; k < 3; ++k) {
+        const aim::Candidate dead = aim::pikminCandidate(pikiPos, true, aim::PikminPhase::Dead);
+        assert(!dead.alive && !dead.searchable);
+        const aim::Candidate shipped[2] = { dead, aim::naviCandidate(naviPos, true) };
+        const aim::Candidate legacy[2] = { round5HostPiki(pikiPos, p1States[k]), aim::naviCandidate(naviPos, true) };
+        float legacyHeading = 0.0f;
+        const int legacyFrame = turnUntilAttack(legacy, 2, 1800, legacyHeading);
+        float heading = 0.0f;
+        const int frame = turnUntilAttack(shipped, 2, 1800, heading);
+        const bool legacyLaneOnNavi = aim::inAttackLane(pos, legacyHeading, naviPos);
+        const bool laneOnNavi = aim::inAttackLane(pos, heading, naviPos);
+        std::printf("case28 %s: round-5 attack frame=%d heading=%.1f deg lane_on_navi=%d; shipped attack frame=%d heading=%.1f deg lane_on_navi=%d\n",
+                    names[k], legacyFrame, legacyHeading * 180.0f / kPi, int(legacyLaneOnNavi), frame,
+                    heading * 180.0f / kPi, int(laneOnNavi));
+        // Round 5: fires at once at the dead Pikmin, not at the Navi.
+        assert(legacyFrame == 1 && !legacyLaneOnNavi);
+        // Shipped: the dead Pikmin is invisible; the Navi is searched,
+        // turned to and attacked once the lane holds.
+        assert(aim::searchTarget(pos, 0.0f, 180.0f, shipped, 2) == 1);
+        assert(!aim::isAttackableTarget(pos, 0.0f, &dead, 1));
+        assert(frame > 1 && laneOnNavi && aim::attackableIndex(pos, heading, shipped, 2) == 1);
+        assert(stoneStrikesFrom(heading, naviPos) == 1);
+    }
+    // Alone in the lane, a P2-dead Pikmin never triggers an attack, and
+    // Wait never latches Turn for it before the 3 s timer.
+    const aim::Candidate dead = aim::pikminCandidate(pikiPos, true, aim::PikminPhase::Dead);
+    float h = 0.0f;
+    assert(turnUntilAttack(&dead, 1, 600, h) < 0);
+    assert(!aim::waitWantsTurn(0.0f, aim::searchTarget(pos, 0.0f, 180.0f, &dead, 1) >= 0));
+    assert(aim::moveExec(pos, 0.0f, 1.0f / 60.0f, 180.0f, 0.0f, &dead, 1, v3(0.0f, 0.0f, 50.0f)).next != aim::Next::Attack);
+    // The host dead flag still wins for an Active phase (P1 Dying / Dead).
+    assert(!aim::pikminCandidate(pikiPos, false, aim::PikminPhase::Active).alive);
 }
 } // namespace
 
@@ -1283,7 +1346,7 @@ int main(int argc, char** argv)
                                 case21_offAxisTurnsUntilLane, case22_inLaneBeyond180,
                                 case23_laneRefusals, case24_searchAndTurnRate,
                                 case25_moveAndWander, case26_strikeCapDefers,
-                                case27_sproutsAndSwallowedPikmin };
+                                case27_sproutsAndSwallowedPikmin, case28_p2DeadStatesAreNotTargets };
     const int count = int(sizeof(cases) / sizeof(cases[0]));
     for (int i = 0; i < count; ++i) {
         if (only == 0 || only == i + 1) {

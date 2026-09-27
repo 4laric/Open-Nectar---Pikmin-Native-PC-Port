@@ -119,28 +119,39 @@ struct Candidate {
     bool searchable = true;
 };
 
-// What a host (P1) Pikmin is in P2 terms (#884 round 5).
-//   Active       - an ordinary above-ground Piki (includes being plucked:
-//                  P2 PikiNukareState / AutoNuki are Piki states,
-//                  PikiState.h:39,44,694-696).
-//   Sprout       - P1 PIKISTATE_Grow / Bury / NukareWait: a Pikmin planted or
-//                  in the ground. In P2 that is an ItemPikihead::Item, not a
-//                  Piki (ItemPikihead.h:198), so neither the search
-//                  (Piki-only, enemyAction.cpp:368-410) nor the lane
-//                  (isPiki && isPikmin, Kabuto.cpp:244) ever sees it.
-//   StuckToMouth - P1 PIKISTATE_Swallowed (held in an enemy mouth,
-//                  viewPiki.cpp:671): P2 isStickToMouth, so not searchable;
-//                  the lane has no isStickToMouth test (Kabuto.cpp:242-245)
-//                  and keeps it, as the source does.
-enum class PikminPhase { Active, Sprout, StuckToMouth };
+// What a host (P1) Pikmin is in P2 terms (#884 rounds 5-6).
+//   Active - an ordinary above-ground Piki (includes being plucked:
+//            P2 PikiNukareState / AutoNuki are Piki states,
+//            PikiState.h:39,44,694-696).
+//   Sprout - P1 PIKISTATE_Grow / Bury / NukareWait: a Pikmin planted or in
+//            the ground. In P2 that is an ItemPikihead::Item, not a Piki
+//            (ItemPikihead.h:198), so neither the search (Piki-only,
+//            enemyAction.cpp:368-410) nor the lane (isPiki && isPikmin,
+//            Kabuto.cpp:244) ever sees it.
+//   Dead   - a P1 state whose P2 PikiState reports dead() == true, so the
+//            P2 virtual Piki::isAlive (CF_IsAlive && !mCurrentState->dead(),
+//            piki.cpp:319-327) is false and both the lane (Kabuto.cpp:242)
+//            and the search (Piki::isSearchable, Piki.h:243-249) reject it:
+//              P1 PIKISTATE_Pressed     - P2 PikiPressedState::dead
+//                                         (PikiState.h:761);
+//              P1 PIKISTATE_DenkiDying  - P2 PikiDenkiDyingState::dead
+//                                         (PikiState.h:246);
+//              P1 PIKISTATE_Swallowed   - P2 PikiSwallowedState::dead
+//                                         (PikiState.h:823); P2
+//                                         InteractSwallow::actPiki transits
+//                                         every mouth-held Piki to it
+//                                         (interactPiki.cpp:672,689).
+//            P1 Dying / Dead (P2 PikiState.h:329,215) are already excluded
+//            by the host P1 Piki::isAlive (hostAlive = false).
+enum class PikminPhase { Active, Sprout, Dead };
 
 inline Candidate pikminCandidate(const Vec3& pos, bool hostAlive, PikminPhase phase)
 {
     Candidate c;
     c.pos = pos;
     c.navi = false;
-    c.alive = hostAlive && phase != PikminPhase::Sprout;
-    c.searchable = c.alive && phase == PikminPhase::Active;
+    c.alive = hostAlive && phase == PikminPhase::Active;
+    c.searchable = c.alive;
     return c;
 }
 
