@@ -5166,13 +5166,13 @@ int pc_settings_get_onion_step10(void) {
     return sConfig.onionStep10;
 }
 
-int pc_settings_get_piki_invincible(void) { return pc_hardmode_active() ? 0 : sConfig.pikiInvincible; }
-int pc_settings_get_all_flowers(void) { return pc_hardmode_active() ? 0 : sConfig.allFlowers; }
-float pc_settings_get_carry_speed_scale(void) { return pc_hardmode_active() ? 1.0f : sConfig.carrySpeedPct / 100.0f; }
-float pc_settings_get_navi_speed_scale(void) { return pc_hardmode_active() ? 1.0f : sConfig.naviSpeedPct / 100.0f; }
-int pc_settings_get_unlock_zones(void) { return pc_hardmode_active() ? 0 : sConfig.unlockZones; }
-int pc_settings_get_no_day_advance(void) { return pc_hardmode_active() ? 0 : sConfig.noDayAdvance; }
-int pc_settings_get_all_onions(void) { return pc_hardmode_active() ? 0 : sConfig.allOnions; }
+int pc_settings_get_piki_invincible(void) { return (pc_hardmode_active() || pc_randomizer_enabled()) ? 0 : sConfig.pikiInvincible; }
+int pc_settings_get_all_flowers(void) { return (pc_hardmode_active() || pc_randomizer_enabled()) ? 0 : sConfig.allFlowers; }
+float pc_settings_get_carry_speed_scale(void) { return (pc_hardmode_active() || pc_randomizer_enabled()) ? 1.0f : sConfig.carrySpeedPct / 100.0f; }
+float pc_settings_get_navi_speed_scale(void) { return (pc_hardmode_active() || pc_randomizer_enabled()) ? 1.0f : sConfig.naviSpeedPct / 100.0f; }
+int pc_settings_get_unlock_zones(void) { return (pc_hardmode_active() || pc_randomizer_enabled()) ? 0 : sConfig.unlockZones; }
+int pc_settings_get_no_day_advance(void) { return (pc_hardmode_active() || pc_randomizer_enabled()) ? 0 : sConfig.noDayAdvance; }
+int pc_settings_get_all_onions(void) { return (pc_hardmode_active() || pc_randomizer_enabled()) ? 0 : sConfig.allOnions; }
 
 int pc_settings_get_instant_whistle(void) {
     return sConfig.instantWhistle;

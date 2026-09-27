@@ -381,6 +381,10 @@ bool pc_unlock_all_stages()
 		const char* v = getenv("PIKMIN_UNLOCK_ALL");
 		cached        = (v && *v && *v != '0') ? 1 : 0;
 	}
+	// The randomizer owns stage access through its checks; the test-mode
+	// unlock-all must not leak in (covers both the courseOpen gate below and
+	// the isTutorial shortcut).
+	if (pc_randomizer_enabled()) return false;
 	return cached == 1;
 }
 #endif
