@@ -101,8 +101,45 @@ void pc_settings_p2d_init()
     gsys->setHeap(previousHeap);
 }
 bool pc_settings_p2d_active() { return active; }
-int pc_settings_p2d_text_width(const char* text, int fontWidth)
+// Los textos del port están en UTF-8; la fuente del juego indexa por byte
+// (Latin-1 en la versión europea). Se convierte cada "á", "ñ"... a su byte
+// Latin-1 si la fuente tiene ese glifo, y si no a la letra sin acento.
+static void toFontText(const char* in, char* out, size_t n)
 {
+    static const char* const kAscii = // 0xC0..0xFF
+        "AAAAAAACEEEEIIIIDNOOOOOxOUUUUYTs"
+        "aaaaaaaceeeeiiiidnooooo/ouuuuyty";
+    int capacity = 0;
+    if (font && font->mFont && font->mFont->mTexture && font->mFont->mCharWidth > 0 && font->mFont->mCharHeight > 0)
+        capacity = (font->mFont->mTexture->mWidth / font->mFont->mCharWidth)
+                 * (font->mFont->mTexture->mHeight / font->mFont->mCharHeight);
+    size_t o = 0;
+    for (const unsigned char* p = reinterpret_cast<const unsigned char*>(in); *p && o + 1 < n; ++p) {
+        unsigned c = *p;
+        if ((c == 0xC2 || c == 0xC3) && (p[1] & 0xC0) == 0x80) {
+            c = ((c & 0x1F) << 6) | (p[1] & 0x3F);
+            ++p;
+            if (int(c) - 0x20 >= capacity) {
+                if (c >= 0xC0) c = (unsigned char)kAscii[c - 0xC0];
+                else if (c == 0xBF) c = '?';
+                else if (c == 0xA1) c = '!';
+                else continue;
+            }
+        } else if (c >= 0xC4 && (p[1] & 0xC0) == 0x80) {
+            // Otro carácter UTF-8 multibyte: no está en la fuente, se omite.
+            while ((p[1] & 0xC0) == 0x80) ++p;
+            continue;
+        } // Un byte alto suelto ya es Latin-1 (textos del juego): se deja.
+
+        out[o++] = char(c);
+    }
+    out[o] = '\0';
+}
+
+int pc_settings_p2d_text_width(const char* utf8, int fontWidth)
+{
+    char text[512];
+    toFontText(utf8, text, sizeof(text));
     float result = 0;
     for (const unsigned char* p = reinterpret_cast<const unsigned char*>(text); *p; ++p)
         result += font->getWidth(*p, fontWidth);
@@ -146,7 +183,7 @@ void pc_settings_p2d_text(int x, int y, const char* text, Colour color, int font
     pane->fontWidth = fontWidth;
     pane->fontHeight = fontHeight;
     pane->color = color;
-    std::snprintf(pane->text, sizeof(pane->text), "%s", text);
+    toFontText(text, pane->text, sizeof(pane->text));
 }
 
 void pc_settings_p2d_image(int x, int y, int w, int h, Texture* texture, float u1, float v1, Colour tint, float u0)

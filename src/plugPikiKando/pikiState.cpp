@@ -29,6 +29,9 @@
 #include "gameflow.h"
 #include "teki.h"
 #include "zen/ogTutorial.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_achievements.h"
+#endif
 
 namespace {
 /**
@@ -2870,6 +2873,9 @@ void PikiNukareState::cleanup(Piki* piki)
 		Navi* pluckNavi = naviMgr->getNavi();
 #endif
 		playerState->mDemoFlags.setFlag(DEMOFLAG_PluckRedPikmin, piki);
+#if defined(PIKI_PC_PORT)
+		pc_achievement_unlock(PC_ACH_PIKMIN_RED);
+#endif
 		playerState->mDemoFlags.setFlagOnly(DEMOFLAG_NoPikminTimeout);
 		playerState->mDemoFlags.setFlagOnly(DEMOFLAG_ApproachSeed);
 		playerState->mDemoFlags.setTimer(demoParms->mParms._30(), DEMOFLAG_Unk9, pluckNavi);
@@ -2880,6 +2886,9 @@ void PikiNukareState::cleanup(Piki* piki)
 		if (piki->mNavi) naviMgr->setMovieNavi(piki->mNavi);
 #endif
 		playerState->mDemoFlags.setFlag(DEMOFLAG_PluckYellowPikmin, piki);
+#if defined(PIKI_PC_PORT)
+		pc_achievement_unlock(PC_ACH_PIKMIN_YELLOW);
+#endif
 		playerState->mResultFlags.setOn(zen::RESFLAG_MeetYellowPikminNoBomb);
 		playerState->mResultFlags.setOn(zen::RESFLAG_Onyons);
 		playerState->setContainer(Yellow);
@@ -2890,6 +2899,9 @@ void PikiNukareState::cleanup(Piki* piki)
 		if (piki->mNavi) naviMgr->setMovieNavi(piki->mNavi);
 #endif
 		playerState->mDemoFlags.setFlag(DEMOFLAG_PluckBluePikmin, piki);
+#if defined(PIKI_PC_PORT)
+		pc_achievement_unlock(PC_ACH_PIKMIN_BLUE);
+#endif
 		playerState->mResultFlags.setOn(zen::RESFLAG_MeetBluePikmin);
 		playerState->setContainer(Blue);
 		playerState->setDisplayPikiCount(Blue);

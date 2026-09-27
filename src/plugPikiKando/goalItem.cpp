@@ -421,6 +421,8 @@ Piki* GoalItem::exitPiki()
 #if defined(PIKI_PC_PORT)
 	// VS: salen hacia el capitán dueño de la cebolla.
 	if (pc_vs_active() && mPcOwner >= 0 && naviMgr->getNavi(mPcOwner)) navi = naviMgr->getNavi(mPcOwner);
+	// Coop: salen hacia el capitán que los pidió.
+	else if (!pc_vs_active() && mPcExitNavi >= 0 && naviMgr->getNavi(mPcExitNavi)) navi = naviMgr->getNavi(mPcExitNavi);
 #endif
 	piki->init(navi);
 	piki->resetPosition(legColl->mCentre);

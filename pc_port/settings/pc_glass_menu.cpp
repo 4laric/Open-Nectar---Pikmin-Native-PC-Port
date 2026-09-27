@@ -318,8 +318,16 @@ void textWrapped(int x, int y, int w, const char* text, Colour c, int fw, int fh
 	size_t len = 0;
 	const char* p = text ? text : "";
 	while (*p && y + fh <= maxY) {
+		if (*p == '\n') {
+			// Salto de línea explícito (p. ej. la ayuda de los logros).
+			if (len) pc_settings_p2d_text(x, y, line, c, fw, fh);
+			y += len ? fh + 2 : (fh + 2) / 2;
+			len = 0;
+			p++;
+			continue;
+		}
 		const char* end = p;
-		while (*end && *end != ' ') end++;
+		while (*end && *end != ' ' && *end != '\n') end++;
 		char trial[256];
 		snprintf(trial, sizeof(trial), "%.*s%s%.*s", (int)len, line, len ? " " : "", (int)(end - p), p);
 		if (len && textW(trial, fw) > w) {
@@ -330,7 +338,7 @@ void textWrapped(int x, int y, int w, const char* text, Colour c, int fw, int fh
 		}
 		snprintf(line, sizeof(line), "%s", trial);
 		len = strlen(line);
-		p = *end ? end + 1 : end;
+		p = *end == ' ' ? end + 1 : end;
 	}
 	if (len && y + fh <= maxY) pc_settings_p2d_text(x, y, line, c, fw, fh);
 }
@@ -369,11 +377,25 @@ void drawRows()
 		const Colour label = !on ? (s ? kSelOff : kOff) : (s ? kSelDark : kText);
 		const Colour val   = !on ? (s ? kSelOff : kOff) : (s ? kSelDark : kDim);
 		const char* name = pc_settings_row_label(sGroup, item);
-		pc_settings_p2d_text(r.x + 6, r.y + 2, name, label, kFontW, kFontH);
 		// Valores largos (p. ej. la resolución) se encogen para no pisar la etiqueta.
 		const int room = r.w - 12 - textW(name, kFontW) - 12;
 		int fw = kFontW;
 		while (fw > 7 && textW(value, fw) > room) fw--;
+		// Etiquetas largas (títulos de logros): se encogen y, si aún no caben,
+		// se recortan con "..." para no pisar el valor ni el panel derecho.
+		const int labelRoom = r.w - 12 - (value[0] ? textW(value, fw) + 12 : 0);
+		int lw = kFontW;
+		while (lw > 7 && textW(name, lw) > labelRoom) lw--;
+		char shortName[256];
+		snprintf(shortName, sizeof(shortName), "%s", name);
+		if (textW(shortName, lw) > labelRoom) {
+			size_t n = strlen(shortName);
+			while (n > 0) {
+				snprintf(shortName, sizeof(shortName), "%.*s...", (int)--n, name);
+				if (textW(shortName, lw) <= labelRoom) break;
+			}
+		}
+		pc_settings_p2d_text(r.x + 6, r.y + 2 + (kFontW - lw), shortName, label, lw, kFontH * lw / kFontW);
 		pc_settings_p2d_text(r.x + r.w - 6 - textW(value, fw), r.y + 2 + (kFontW - fw), value, val, fw, kFontH * fw / kFontW);
 	}
 	if (count > kVisible) {

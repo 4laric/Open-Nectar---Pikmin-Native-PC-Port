@@ -39,6 +39,7 @@ void VIWaitForRetrace(void)    {
     // framebuffer is blitted to the window, so it appears on top.
     pc_settings_draw_idle_counter();
     pc_settings_draw_vs_hud();
+    pc_settings_draw_achievement_toast();
     pc_settings_draw();
     pc_glass_menu_draw();
 #endif

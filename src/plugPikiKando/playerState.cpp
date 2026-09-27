@@ -21,6 +21,7 @@
 #include "sysNew.h"
 #if defined(PIKI_PC_PORT)
 #include "settings/pc_settings.h"
+#include "pc_achievements.h"
 #endif
 
 int PlayerState::totalUfoParts = MAX_UFO_PARTS;
@@ -1153,6 +1154,9 @@ void PlayerState::getUfoParts(u32 partID, bool isInvisiblePart)
 		PRINT("Ignoring duplicate UFO part collection %s\n", ID32(partID).mStringID);
 		return;
 	}
+#if defined(PIKI_PC_PORT)
+	pc_achievements_on_ship_part(partID);
+#endif
 	if (!parts && !isInvisiblePart) {
 		STACK_PAD_INLINE(1);
 		PRINT("parts %s is not registered !\n", ID32(partID).mStringID);
@@ -1202,6 +1206,13 @@ void PlayerState::getUfoParts(u32 partID, bool isInvisiblePart)
 	}
 
 	mStagePartsCollected[flowCont.mCurrentStage->mStageID]++;
+#if defined(PIKI_PC_PORT)
+	// "Allergic to Blue": la última pieza del Forest of Hope sin tener aún los azules.
+	if (flowCont.mCurrentStage->mStageID == STAGE_Forest && mStagePartsCollected[STAGE_Forest] >= 8 /* MAX_PARTS_FOREST del mapa */
+	    && !hasContainer(Blue)) {
+		pc_achievement_unlock(PC_ACH_ALLERGIC_TO_BLUE);
+	}
+#endif
 	if (!isInvisiblePart) {
 		parts->mPartVisType = PARTVIS_Visible;
 	} else {

@@ -44,6 +44,7 @@
 #include "pc_permadeath.h"
 #include "pc_coop.h"
 #include "pc_vs.h"
+#include "pc_achievements.h"
 #include "gameflow.h"
 #include "SoundMgr.h"
 #include "pc_art.h"
@@ -109,6 +110,8 @@ struct PcConfig {
 
     // Gamepad button bindings (SDL GameController button IDs)
     int gamepadBindings[PC_KEY_ACT_COUNT];
+    // Coop: bindings del mando de J2 (mismo formato).
+    int gamepadBindingsP2[PC_KEY_ACT_COUNT];
 
     // Mod: chain Pikmin actions (0=off/faithful, 1=on).
     // Off by default. The stock behaviour -- finish a job, walk back to the
@@ -136,6 +139,7 @@ struct PcConfig {
     int whistleRadiusPct = 100; // radio máximo del silbato, % del original
     int throwSpeedPct = 100;    // velocidad de las animaciones de coger y lanzar
     int throwCancelB = 0;       // B con un Pikmin en la mano lo devuelve al grupo
+    int quickGrab = 0;          // el Pikmin elegido aparece en la mano (sin andar hasta ella)
     int noTrip = 0;             // los Pikmin no tropiezan al correr
     int onionStep10 = 0;        // Y + arriba/abajo en la cebolla mueve de 10 en 10
     int instantWhistle = 0;     // los Pikmin silbados se unen sin la reacción de girarse
@@ -238,6 +242,7 @@ struct PcConfig {
         whistleRadiusPct = 100;
         throwSpeedPct = 100;
         throwCancelB = 0;
+        quickGrab = 0;
         noTrip = 0;
         onionStep10 = 0;
         instantWhistle = 0;
@@ -286,6 +291,7 @@ struct PcConfig {
         for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
             keyboardBindings[i] = kDefaultKeyBindings[i];
             gamepadBindings[i] = -1; // -1 = not remapped (use default)
+            gamepadBindingsP2[i] = -1;
         }
     }
 };
@@ -424,6 +430,16 @@ static std::vector<Uint8> gPrevKeys; // previous-frame keyboard state snapshot
 // the keyboard snapshot: settings input is polled from more than one hook per
 // frame, and a held button must not reopen the menu after a modal closes.
 bool sPrevMenuToggleHeld = false;
+bool sPrevMenuToggleHeldP2 = false;
+// Jugador que abrió el menú F1 (0 = J1, 1 = J2 con su mando): decide qué
+// mando lo maneja y qué bindings de mando edita.
+int sMenuPlayer = 0;
+int* pendingPadBinds() { return sMenuPlayer == 1 ? sPending.gamepadBindingsP2 : sPending.gamepadBindings; }
+// Mando que maneja el menú: el de J2 si lo abrió él (y sigue conectado).
+SDL_GameController* menuController() {
+    SDL_GameController* p2 = sMenuPlayer == 1 ? pc_window_get_controller_p2() : nullptr;
+    return p2 ? p2 : pc_window_get_controller();
+}
 
 // Video confirm/revert dialog state.
 bool sVideoConfirmActive = false;
@@ -805,6 +821,7 @@ void applyControls(const PcConfig& config) {
     for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
         pc_window_set_key_binding(i, static_cast<SDL_Scancode>(config.keyboardBindings[i]));
         pc_window_set_gamepad_binding(i, config.gamepadBindings[i]);
+        pc_window_set_gamepad_binding_p2(i, config.gamepadBindingsP2[i]);
     }
 }
 
@@ -875,6 +892,7 @@ void commitPendingOnExit() {
 
 void closeMenu() {
     commitPendingOnExit();
+    sMenuPlayer = 0;
     // No dejar el menu memorizado dentro de la lista: al reabrir F1 se espera
     // la pagina principal.
     sInResolutionSubmenu = false;
@@ -1025,6 +1043,7 @@ void saveConfig() {
     out << "whistleRadiusPct = " << sConfig.whistleRadiusPct << "\n";
     out << "throwSpeedPct = " << sConfig.throwSpeedPct << "\n";
     out << "throwCancelB = " << sConfig.throwCancelB << "\n";
+    out << "quickGrab = " << sConfig.quickGrab << "\n";
     out << "noTrip = " << sConfig.noTrip << "\n";
     out << "onionStep10 = " << sConfig.onionStep10 << "\n";
     out << "instantWhistle = " << sConfig.instantWhistle << "\n";
@@ -1082,6 +1101,9 @@ void saveConfig() {
     // Gamepad bindings
     for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
         out << "gp_" << i << " = " << sConfig.gamepadBindings[i] << "\n";
+    }
+    for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
+        out << "gp2_" << i << " = " << sConfig.gamepadBindingsP2[i] << "\n";
     }
     out.close();
     printf("[PC Settings] Saved %s\n", path.c_str());
@@ -1198,6 +1220,9 @@ void loadConfig() {
         }
         else if (key == "throwSpeedPct") {
             sConfig.throwSpeedPct = std::clamp(atoi(val.c_str()), 50, 200);
+        }
+        else if (key == "quickGrab") {
+            sConfig.quickGrab = atoi(val.c_str()) ? 1 : 0;
         }
         else if (key == "throwCancelB") {
             sConfig.throwCancelB = atoi(val.c_str()) ? 1 : 0;
@@ -1330,15 +1355,16 @@ void loadConfig() {
                 }
             }
         }
-        else if (key.rfind("gp_", 0) == 0) {
-            int idx = atoi(key.substr(3).c_str());
+        else if (key.rfind("gp_", 0) == 0 || key.rfind("gp2_", 0) == 0) {
+            const bool p2 = key[2] == '2';
+            int idx = atoi(key.substr(p2 ? 4 : 3).c_str());
             if (idx >= 0 && idx < PC_KEY_ACT_COUNT) {
                 const int button = atoi(val.c_str());
                 const bool isButton = button >= -1 && button < SDL_CONTROLLER_BUTTON_MAX;
                 const int axis = (button - PC_GP_AXIS_BIND) / 2;
                 const bool isAxis = button >= PC_GP_AXIS_BIND && axis >= 0 && axis < SDL_CONTROLLER_AXIS_MAX;
                 if (isButton || isAxis) {
-                    sConfig.gamepadBindings[idx] = button;
+                    (p2 ? sConfig.gamepadBindingsP2 : sConfig.gamepadBindings)[idx] = button;
                 }
             }
         }
@@ -1624,12 +1650,24 @@ bool vsEndScreenShown();
 void pollMenuInput() {
     sTouchFrameButtons = sTouchButtons;
     sTouchButtons = 0;
-    SDL_GameController* ctl = pc_window_get_controller();
+    // Coop: el Select del mando de J2 también abre el menú, y entonces lo
+    // maneja su mando y edita sus bindings.
+    SDL_GameController* ctl1 = pc_window_get_controller();
+    SDL_GameController* ctl2 = pc_window_get_controller_p2();
+    if (ctl2 == ctl1) ctl2 = nullptr;
+    SDL_GameController* ctl = sMenuOpen ? menuController() : ctl1;
     const bool toggleRequested = sToggleRequested;
     sToggleRequested = false;
-    const bool menuToggleHeld = ctl && SDL_GameControllerGetButton(
-        ctl, SDL_CONTROLLER_BUTTON_BACK) != 0;
-    const bool menuTogglePressed = menuToggleHeld && !sPrevMenuToggleHeld;
+    const bool menuToggleHeld = ctl1 && SDL_GameControllerGetButton(
+        ctl1, SDL_CONTROLLER_BUTTON_BACK) != 0;
+    const bool menuToggleHeldP2 = ctl2 && SDL_GameControllerGetButton(
+        ctl2, SDL_CONTROLLER_BUTTON_BACK) != 0;
+    const bool togglePressedP1 = menuToggleHeld && !sPrevMenuToggleHeld;
+    const bool togglePressedP2 = menuToggleHeldP2 && !sPrevMenuToggleHeldP2;
+    sPrevMenuToggleHeldP2 = menuToggleHeldP2;
+    // Abierto, solo lo cierra el Select de quien lo abrió.
+    const bool menuTogglePressed = sMenuOpen ? (sMenuPlayer == 1 && ctl2 ? togglePressedP2 : togglePressedP1)
+                                             : (togglePressedP1 || togglePressedP2);
     // Latch before every modal early return.  A Select press used while the
     // new-game/video/capture modal owns input must not become a fresh press
     // when that modal exits while the button is still held.
@@ -1709,10 +1747,14 @@ void pollMenuInput() {
     // closing is handled after video confirmation has had first refusal.
     if (keyWentDown(SDL_SCANCODE_F1) || toggleRequested) {
         if (sMenuOpen) closeMenu();
-        else openMenu();
+        else {
+            sMenuPlayer = 0;
+            openMenu();
+        }
         return;
     }
     if (menuTogglePressed && !sMenuOpen) {
+        sMenuPlayer = togglePressedP2 && !togglePressedP1 ? 1 : 0;
         openMenu();
         return;
     }
@@ -1854,7 +1896,7 @@ void pollMenuInput() {
             return;
         }
         if (left || right) {
-            sPending.gamepadBindings[sGamepadSelection] = -1;
+            pendingPadBinds()[sGamepadSelection] = -1;
             return;
         }
         if (keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_K) ||
@@ -2218,7 +2260,7 @@ bool pollButtonCapture(SDL_GameController* ctl) {
         if (ctl || sTouchFrameButtons) {
             const int bind = pc_window_gamepad_first_held_binding(ctl);
             if (bind >= 0) {
-                sPending.gamepadBindings[sGamepadSelection] = bind;
+                pendingPadBinds()[sGamepadSelection] = bind;
                 sWaitingForButton = false;
                 sCaptureWaitRelease = true;
             }
@@ -2484,6 +2526,9 @@ void modsRowChange(int row, bool left, bool right) {
     }
     else if (row == 22) {
         if (left || right) sPending.throwCancelB = sPending.throwCancelB ? 0 : 1;
+    }
+    else if (row == 33) {
+        if (left || right) sPending.quickGrab = sPending.quickGrab ? 0 : 1;
     }
     else if (row == 23) {
         if (left || right) sPending.noTrip = sPending.noTrip ? 0 : 1;
@@ -3015,8 +3060,20 @@ int f1TextWrapped(int x, int y, int w, const char* text, Colour c, int fw, int f
     size_t len = 0;
     const char* p = text ? text : "";
     while (*p && y + fh <= maxY) {
+        // '\n' corta la línea; una línea vacía deja medio renglón de hueco.
+        if (*p == '\n') {
+            if (len) {
+                f1Text(x, y, line, c, fw, fh);
+                y += fh + 2;
+                len = 0;
+            } else {
+                y += (fh + 2) / 2;
+            }
+            p++;
+            continue;
+        }
         const char* end = p;
-        while (*end && *end != ' ') end++;
+        while (*end && *end != ' ' && *end != '\n') end++;
         char trial[256];
         snprintf(trial, sizeof(trial), "%.*s%s%.*s", (int)len, line, len ? " " : "", (int)(end - p), p);
         if (len && f1TextW(trial, fw) > w) {
@@ -3027,13 +3084,39 @@ int f1TextWrapped(int x, int y, int w, const char* text, Colour c, int fw, int f
         }
         snprintf(line, sizeof(line), "%s", trial);
         len = strlen(line);
-        p = *end ? end + 1 : end;
+        p = *end == ' ' ? end + 1 : end;
     }
     if (len && y + fh <= maxY) {
         f1Text(x, y, line, c, fw, fh);
         y += fh + 2;
     }
     return y;
+}
+
+int achievementAtRow(int row); // logro de esa fila de la pestaña, o -1
+
+// Textura del icono de un logro (del juego), cargada una vez.
+Texture* achievementIcon(int id) {
+    static std::map<std::string, Texture*> sIcons;
+    const char* path = pc_achievement_icon(id);
+    auto it = sIcons.find(path);
+    return it != sIcons.end() ? it->second : (sIcons[path] = zen::loadTexExp(path, true, true));
+}
+
+void drawAchievementIcon(DGXGraphics* gfx, Texture* icon, int x, int y, int maxW, int maxH, const Colour& tint) {
+    if (!icon || icon->mWidth <= 0 || icon->mHeight <= 0) return;
+    int ih = maxH, iw = icon->mWidth * ih / icon->mHeight;
+    if (iw > maxW) { iw = maxW; ih = icon->mHeight * iw / icon->mWidth; }
+    const int ix = x + (maxW - iw) / 2, iy = y + (maxH - ih) / 2;
+    if (pc_settings_p2d_active()) {
+        pc_settings_p2d_image(ix, iy, iw, ih, icon, 1.0f, 1.0f, tint, 0.0f);
+    } else {
+        gfx->setColour(tint, true);
+        gfx->setAuxColour(tint);
+        gfx->useTexture(icon, GX_TEXMAP0);
+        gfx->drawRectangle(RectArea(ix, iy, ix + iw, iy + ih), RectArea(0, 0, icon->mWidth, icon->mHeight), nullptr);
+        gfx->useTexture(nullptr, GX_TEXMAP0);
+    }
 }
 
 void drawF1Page(DGXGraphics* gfx) {
@@ -3043,7 +3126,9 @@ void drawF1Page(DGXGraphics* gfx) {
         const char* name = pc_settings_group_name(g);
         const bool on = g == sOpenGroup;
         if (on) f1Plate(gfx, x + 2, kF1TabY - 1, kF1TabW - 4, kF1TabH + 2, 2);
-        f1Text(x + (kF1TabW - f1TextW(name, 10)) / 2, kF1TabY + 3, name, on ? kF1SelDark : kF1Dim, 10, 15);
+        int tfw = 10; // nombres largos ("Achievements") se encogen para caber
+        while (tfw > 7 && f1TextW(name, tfw) > kF1TabW - 6) tfw--;
+        f1Text(x + (kF1TabW - f1TextW(name, tfw)) / 2, kF1TabY + 3 + (10 - tfw), name, on ? kF1SelDark : kF1Dim, tfw, 15 * tfw / 10);
     }
     const int closeX = kF1PanelX + kF1PanelW - 18 - kF1CloseW;
     f1Text(closeX + (kF1CloseW - f1TextW("X", 11)) / 2, kF1TabY + 3, "X", kF1Dim, 11, 16);
@@ -3072,7 +3157,15 @@ void drawF1Page(DGXGraphics* gfx) {
         pc_settings_row_value(sOpenGroup, item, value, sizeof(value));
         const Colour label = !on ? (sel ? kF1SelOff : kF1Off) : (sel ? kF1SelDark : kF1Text);
         const Colour val = !on ? (sel ? kF1SelOff : kF1Off) : (sel ? kF1SelDark : kF1Dim);
-        const char* name = pc_settings_row_label(sOpenGroup, item);
+        // Etiquetas largas (títulos de logros) se recortan con "..." y dejan
+        // sitio al valor.
+        char name[128];
+        snprintf(name, sizeof(name), "%s", pc_settings_row_label(sOpenGroup, item));
+        const int nameRoom = rowW - 12 - (value[0] ? f1TextW(value, 10) + 12 : 0);
+        while (f1TextW(name, 10) > nameRoom && strlen(name) > 4) {
+            name[strlen(name) - 4] = '\0';
+            strcat(name, "...");
+        }
         f1Text(rowX + 6, y + 3, name, label, 10, 15);
         // Valores largos (p. ej. la resolución) se encogen para no pisar la etiqueta.
         const int room = rowW - 12 - f1TextW(name, 10) - 12;
@@ -3123,6 +3216,15 @@ void drawF1Page(DGXGraphics* gfx) {
         f1Plate(gfx, rx - 2, y, rw + 4, kF1OptH - 2, on ? 2 : 1);
         f1Text(rx + (rw - f1TextW(value, 10)) / 2, y + 3, value, on ? kF1SelDark : kF1Off, 10, 15);
         y += kF1OptH;
+        // Logros: su icono, a color si está conseguido y oscurecido si no.
+        if (sOpenGroup == PC_SET_GROUP_ACHIEVEMENTS) {
+            const int achId = achievementAtRow(sGroupSel);
+            if (achId >= 0) {
+                drawAchievementIcon(gfx, achievementIcon(achId), rx, y + 8, rw, 56,
+                                    on ? Colour(255, 255, 255, 255) : Colour(70, 70, 80, 255));
+                y += 64;
+            }
+        }
     }
     f1TextWrapped(rx + 2, y + 12, rw - 4, pc_settings_row_help(sOpenGroup, sGroupSel), kF1Help, 10, 15,
                   kF1ColY + kF1ColH - 6);
@@ -3680,9 +3782,12 @@ void devAssignRestart() {
 
 // Tarjetas del selector de capitán, en orden (índice = PcCaptain).
 const char* const kCaptainNames[PC_CAPTAIN_COUNT] = { "Olimar", "Louie", "Red", "Yellow", "Blue" };
-const char* const kCaptainArt[PC_CAPTAIN_COUNT]   = { "coop_olimar", "coop_louie", nullptr, nullptr, nullptr };
-// Los Pikmin salen de la textura del juego piki3 (116x64): rojo, amarillo y
-// azul tumbados con su hoja, uno al lado del otro. Columnas de cada uno.
+// Sprites al doble (Olimar/Louie de Pikmin 2-e; los Pikmin, de Pikmin Puzzle
+// Cards de GBA, de pie con la hoja).
+const char* const kCaptainArt[PC_CAPTAIN_COUNT] = { "coop_olimar", "coop_louie", "coop_piki_red", "coop_piki_yellow",
+                                                    "coop_piki_blue" };
+// Si falta el PNG de un Pikmin, sale de la textura del juego piki3 (116x64):
+// rojo, amarillo y azul tumbados con su hoja. Columnas de cada uno.
 const int kCaptainPikiCol[PC_CAPTAIN_COUNT][2] = { { 0, 0 }, { 0, 0 }, { 0, 38 }, { 34, 78 }, { 76, 116 } };
 constexpr int kCaptainBoxW = 104, kCaptainBoxH = 120, kCaptainBoxGap = 9;
 constexpr int kCaptainBoxLeft = (620 - (PC_CAPTAIN_COUNT * kCaptainBoxW + (PC_CAPTAIN_COUNT - 1) * kCaptainBoxGap)) / 2;
@@ -3778,14 +3883,13 @@ void captainPickDraw(DGXGraphics* gfx, int panelX, int panelY, int panelW, int p
             gfx->setAuxColour(sel ? Colour(70, 92, 150, 240) : Colour(26, 30, 48, 220));
             gfx->fillRectangle(RectArea(boxX, boxY, boxX + boxW, boxY + boxH));
         }
-        // Sprite (Pikmin 2-e) al doble de tamaño, centrado sobre el nombre.
-        // Olimar/Louie: sprite (Pikmin 2-e) al doble. Pikmin: su trozo de piki3 a tamaño real.
+        // Sprite al doble de tamaño, centrado sobre el nombre y apoyado en la
+        // misma línea que Olimar (32 px de alto). Sin PNG, un Pikmin usa su
+        // trozo de piki3 a tamaño real.
         int ax = 0, aw = 0, ah = 0, scale = 2;
-        Texture* art = nullptr;
-        if (kCaptainArt[i]) {
-            art = pc_art_texture(kCaptainArt[i]);
-            if (art && !pc_art_size(kCaptainArt[i], &aw, &ah)) art = nullptr;
-        } else {
+        Texture* art = pc_art_texture(kCaptainArt[i]);
+        if (art && !pc_art_size(kCaptainArt[i], &aw, &ah)) art = nullptr;
+        if (!art && i >= PC_CAPTAIN_PIKMIN_RED) {
             static Texture* sPiki3 = nullptr;
             if (!sPiki3) sPiki3 = zen::loadTexExp("screen/tex/piki3.bti", true, true);
             art   = sPiki3;
@@ -3796,7 +3900,7 @@ void captainPickDraw(DGXGraphics* gfx, int panelX, int panelY, int panelW, int p
         }
         if (art) {
             const int dw = aw * scale, dh = ah * scale;
-            const int dx = boxX + boxW / 2 - dw / 2, dy = boxY + 10;
+            const int dx = boxX + boxW / 2 - dw / 2, dy = boxY + 10 + (scale == 2 && dh < 64 ? 64 - dh : 0);
             const Colour tint(255, 255, 255, sel ? 255 : 190);
             if (pc_settings_p2d_active()) {
                 pc_settings_p2d_image(dx, dy, dw, dh, art, float(ax + aw) / art->mWidth, float(ah) / art->mHeight, tint,
@@ -4633,6 +4737,73 @@ void pc_settings_draw_vs_hud(void) {
     }
 }
 
+// Aviso de logro (o de logros desactivados por trucos): placa arriba a la
+// derecha, entra y sale con un fundido corto.
+void pc_settings_draw_achievement_toast(void) {
+    if (!gsys || !gsys->mDGXGfx) return;
+    float age = 0.0f;
+    const int id = pc_achievements_toast(&age);
+    const char* blocked = id < 0 ? pc_achievements_blocked_toast(&age) : nullptr;
+    if (id < 0 && !blocked) return;
+    DGXGraphics* gfx = static_cast<DGXGraphics*>(gsys->mDGXGfx);
+    ensureFont();
+    if (!sFont) return;
+    const int screenW = gfx->mScreenWidth, screenH = gfx->mScreenHeight;
+    PcSettingsP2DFrame nativeFrame(screenW, screenH);
+    Matrix4f ortho;
+    gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, screenW, screenH));
+
+    const float fade = std::min(1.0f, std::min(age / 0.25f, (4.5f - age) / 0.4f));
+    const u8 a       = u8(255.0f * std::max(0.0f, fade));
+    const Colour shadow(8, 12, 28, a);
+    char head[48], title[96];
+    if (id >= 0) {
+        const PcAchievementInfo& info = pc_achievement_info(id);
+        snprintf(head, sizeof(head), "Achievement unlocked  (%d pts)", info.points);
+        snprintf(title, sizeof(title), "%s", info.title);
+    } else {
+        snprintf(head, sizeof(head), "Achievements");
+        snprintf(title, sizeof(title), "%s", blocked);
+    }
+    // Títulos largos: se recortan con "..." para no salirse de la pantalla
+    // (el icono ocupa hasta ~120 a la izquierda).
+    const int maxTextW = screenW - 80 - 120;
+    while (menuTextWidth(title) > maxTextW && strlen(title) > 4) {
+        title[strlen(title) - 4] = '\0';
+        strcat(title, "...");
+    }
+    // Icono (textura del juego) a la izquierda, ajustado a 48 de alto.
+    Texture* icon = id >= 0 ? achievementIcon(id) : nullptr;
+    int iw = 0, ih = 0;
+    if (icon && icon->mWidth > 0 && icon->mHeight > 0) {
+        ih = 48;
+        iw = std::min(84, icon->mWidth * ih / icon->mHeight);
+        ih = icon->mHeight * iw / icon->mWidth;
+    }
+    const int textX = iw ? iw + 34 : 20;
+    const int w = std::min(screenW - 40, std::max(menuTextWidth(head), menuTextWidth(title)) + textX + 20);
+    const int h = 66, x = screenW - w - 20, y = 20;
+    if (a > 0) {
+        drawPikminPanel(gfx, x, y, w, h, 14);
+        if (iw) {
+            const int ix = x + 16, iy = y + (h - ih) / 2;
+            const Colour tint(255, 255, 255, a);
+            if (pc_settings_p2d_active()) {
+                pc_settings_p2d_image(ix, iy, iw, ih, icon, 1.0f, 1.0f, tint, 0.0f);
+            } else {
+                gfx->setColour(tint, true);
+                gfx->setAuxColour(tint);
+                gfx->useTexture(icon, GX_TEXMAP0);
+                gfx->drawRectangle(RectArea(ix, iy, ix + iw, iy + ih), RectArea(0, 0, icon->mWidth, icon->mHeight), nullptr);
+                gfx->useTexture(nullptr, GX_TEXMAP0);
+            }
+        }
+        drawTextOutline(x + textX, y + 12, "%s", Colour(255, 229, 120, a), shadow, head);
+        drawTextOutline(x + textX, y + 36, "%s", Colour(255, 255, 255, a), shadow, title);
+    }
+    (void)screenH;
+}
+
 void pc_settings_draw(void) {
     if (!sMenuOpen) return;
     if (!gsys || !gsys->mDGXGfx) return;
@@ -4791,7 +4962,7 @@ void pc_settings_draw(void) {
             bool waiting = sWaitingForButton && selected;
 
             const char* actionName = pc_window_get_key_action_name(i);
-            int boundBtn = sPending.gamepadBindings[i];
+            int boundBtn = pendingPadBinds()[i];
             if (boundBtn < 0) boundBtn = kDefaultGamepadBindings[i];
             const char* btnName = pc_window_get_gamepad_button_name(boundBtn);
 
@@ -5098,6 +5269,10 @@ int pc_settings_get_throw_cancel_b(void) {
     return sConfig.throwCancelB;
 }
 
+int pc_settings_get_quick_grab(void) {
+    return sConfig.quickGrab;
+}
+
 int pc_settings_get_no_trip(void) {
     return sConfig.noTrip;
 }
@@ -5225,6 +5400,7 @@ const char* pc_settings_group_name(int group) {
     case PC_SET_GROUP_GAMEPLAY: return "Gameplay";
     case PC_SET_GROUP_CHEATS: return "Cheats";
     case PC_SET_GROUP_DATA: return "Data";
+    case PC_SET_GROUP_ACHIEVEMENTS: return "Achievements";
     case PC_SET_PICKER_RESOLUTION: return "Resolution";
     case PC_SET_PICKER_TEXPACKS: return "Texture Packs";
     case PC_SET_PICKER_HDMODELS: return "HD Models";
@@ -5243,6 +5419,7 @@ const char* pc_settings_group_summary(int group) {
     case PC_SET_GROUP_GAMEPLAY: return "Pikmin behaviour, co-op";
     case PC_SET_GROUP_CHEATS: return "Day, health, Pikmin limit, whistle";
     case PC_SET_GROUP_DATA: return "Save transfer, reset settings";
+    case PC_SET_GROUP_ACHIEVEMENTS: return "Unlocked achievements and how to get the rest";
     default: return "";
     }
 }
@@ -5335,6 +5512,7 @@ void modsRowValue(int i, char* value, size_t n) {
     case 20: snprintf(value, n, sPending.whistleRadiusPct == 100 ? "%d%%  (original)" : "%d%%", sPending.whistleRadiusPct); break;
     case 21: snprintf(value, n, sPending.throwSpeedPct == 100 ? "%d%%  (original)" : "%d%%", sPending.throwSpeedPct); break;
     case 22: snprintf(value, n, "%s", sPending.throwCancelB ? "On" : "Off (original)"); break;
+    case 33: snprintf(value, n, "%s", sPending.quickGrab ? "On" : "Off (original)"); break;
     case 23: snprintf(value, n, "%s", sPending.noTrip ? "On" : "Off (original)"); break;
     case 24: snprintf(value, n, "%s", sPending.onionStep10 ? "On" : "Off (original)"); break;
     case 25: snprintf(value, n, "%s", sPending.instantWhistle ? "On" : "Off (original)"); break;
@@ -5403,7 +5581,7 @@ namespace {
 // página de vídeo, de Advanced, de Graphics, de Mods...), así que reordenar
 // aquí no toca qué hace cada ajuste ni cómo se guarda: el .conf va por nombre.
 // ---------------------------------------------------------------------------
-enum RowSrc { SRC_MAIN, SRC_ADV, SRC_GFX, SRC_MODS, SRC_DATA, SRC_KEYS, SRC_PADS, SRC_RECENTER };
+enum RowSrc { SRC_MAIN, SRC_ADV, SRC_GFX, SRC_MODS, SRC_DATA, SRC_KEYS, SRC_PADS, SRC_RECENTER, SRC_ACH };
 struct GroupRow {
     RowSrc src;
     int idx;
@@ -5448,6 +5626,7 @@ const GroupRow kControlsRows[] = {
     { SRC_MODS, 2, "Hold to Pluck", "Keep the button held to pluck sprouts one after another." },
     { SRC_MODS, 17, "Throw While Moving", "Throw Pikmin while running, instead of Olimar stopping first." },
     { SRC_MODS, 22, "Cancel Throw With B", "While holding a Pikmin with A, press B to put it back in the squad." },
+    { SRC_MODS, 33, "Quick Grab", "The Pikmin to throw appears in Olimar's hand at once, so throwing is just as fast with the squad behind him." },
     { SRC_MODS, 24, "Onion: Y for Steps of 10", "In the Onion menu, hold Y while moving up or down to move 10 Pikmin at a time." },
     { SRC_ADV, 1, "Stick Dead Zone", "Ignores small stick movements. Raise it if a worn stick drifts." },
     { SRC_ADV, 2, "Stick Invert (X/Y)", "Inverts the movement stick." },
@@ -5462,7 +5641,7 @@ const GroupRow kControlsRows[] = {
 };
 
 const GroupRow kCameraRows[] = {
-    { SRC_MODS, 14, "Free Camera", "Turn the camera with the mouse or right stick, as in Pikmin 3. Swarm gets its own button." },
+    { SRC_MODS, 14, "Free Camera", "Turn the camera as in Pikmin 3: hold Left Shift and move the mouse, or use the right stick on a controller. Swarm gets its own button." },
     { SRC_MODS, 18, "First Person", "Allows a view from Olimar's helmet. Switch in game with its button (V / L3)." },
     { SRC_MODS, 15, "Lock-On", "Target the nearest enemy or object with the Lock-On button (R / R3)." },
     { SRC_MODS, 16, "Charge", "With a target locked, send the whole squad at it." },
@@ -5512,8 +5691,41 @@ const GroupRow kDataRows[] = {
 
 template <size_t N> constexpr int countOf(const GroupRow (&)[N]) { return (int)N; }
 
+// Pestaña de logros: una fila por logro, en orden de lectura (piezas, colores,
+// historia, desafío). idx = PcAchievement.
+const int kAchOrder[PC_ACH_COUNT] = {
+    PC_ACH_PART_MAIN_ENGINE, PC_ACH_PART_POSITRON_GENERATOR, PC_ACH_PART_ETERNAL_FUEL_DYNAMO,
+    PC_ACH_PART_WHIMSICAL_RADAR, PC_ACH_PART_EXTRAORDINARY_BOLT, PC_ACH_PART_NOVA_BLASTER, PC_ACH_PART_SHOCK_ABSORBER,
+    PC_ACH_PART_RADIATION_CANOPY, PC_ACH_PART_SAGITTARIUS, PC_ACH_PART_GEIGER_COUNTER, PC_ACH_PART_SPACE_FLOAT,
+    PC_ACH_PART_IONIUM_JET_1, PC_ACH_PART_AUTOMATIC_GEAR, PC_ACH_PART_OMEGA_STABILIZER, PC_ACH_PART_LIBRA,
+    PC_ACH_PART_GRAVITY_JUMPER, PC_ACH_PART_ANALOG_COMPUTER, PC_ACH_PART_ANTI_DIOXIN_FILTER, PC_ACH_PART_GUARD_SATELLITE,
+    PC_ACH_PART_IONIUM_JET_2, PC_ACH_PART_INTERSTELLAR_RADIO, PC_ACH_PART_CHRONOS_REACTOR, PC_ACH_PART_PILOT_SEAT,
+    PC_ACH_PART_ZIRCONIUM_ROTOR, PC_ACH_PART_REPAIR_TYPE_BOLT, PC_ACH_PART_MASSAGE_MACHINE, PC_ACH_PART_UV_LAMP,
+    PC_ACH_PART_BOWSPRIT, PC_ACH_PART_GLUON_DRIVE, PC_ACH_PART_SECRET_SAFE,
+    PC_ACH_PIKMIN_RED, PC_ACH_PIKMIN_YELLOW, PC_ACH_PIKMIN_BLUE,
+    PC_ACH_GOOLIX, PC_ACH_ALLERGIC_TO_BLUE, PC_ACH_BAD_ENDING, PC_ACH_NORMAL_ENDING, PC_ACH_BEST_ENDING, PC_ACH_SPEED_DEMON,
+    PC_ACH_CHALLENGE_IMPACT_SITE, PC_ACH_CHALLENGE_FOREST_OF_HOPE, PC_ACH_CHALLENGE_FOREST_NAVEL,
+    PC_ACH_CHALLENGE_DISTANT_SPRING, PC_ACH_CHALLENGE_FINAL_TRIAL,
+};
+
+const GroupRow* achievementRows() {
+    static GroupRow rows[PC_ACH_COUNT];
+    static bool built = false;
+    if (!built) {
+        built = true;
+        for (int i = 0; i < PC_ACH_COUNT; i++) {
+            const PcAchievementInfo& info = pc_achievement_info(kAchOrder[i]);
+            rows[i] = { SRC_ACH, kAchOrder[i], info.title, info.description };
+        }
+    }
+    return rows;
+}
+
+int achievementAtRow(int row) { return row >= 0 && row < PC_ACH_COUNT ? kAchOrder[row] : -1; }
+
 const GroupRow* groupRows(int group, int* count) {
     switch (group) {
+    case PC_SET_GROUP_ACHIEVEMENTS: *count = PC_ACH_COUNT; return achievementRows();
     case PC_SET_GROUP_DISPLAY: *count = countOf(kDisplayRows); return kDisplayRows;
     case PC_SET_GROUP_GRAPHICS: *count = countOf(kGraphicsRows); return kGraphicsRows;
     case PC_SET_GROUP_CONTROLS: *count = countOf(kControlsRows); return kControlsRows;
@@ -5538,6 +5750,10 @@ struct GroupSection {
 };
 
 const GroupSection kSections[] = {
+    { PC_SET_GROUP_ACHIEVEMENTS, 0, "SHIP PARTS" },
+    { PC_SET_GROUP_ACHIEVEMENTS, 30, "PIKMIN" },
+    { PC_SET_GROUP_ACHIEVEMENTS, 33, "STORY" },
+    { PC_SET_GROUP_ACHIEVEMENTS, 39, "CHALLENGE MODE" },
     { PC_SET_GROUP_DISPLAY, 0, "DISPLAY" },
     { PC_SET_GROUP_DISPLAY, 3, "RENDERING" },
 #if defined(VERSION_GPIP01)
@@ -5646,7 +5862,7 @@ void startButtonCapture(int action) {
 }
 
 void gamepadBindingName(int action, char* out, size_t n) {
-    int bound = sPending.gamepadBindings[action];
+    int bound = pendingPadBinds()[action];
     if (bound < 0) bound = kDefaultGamepadBindings[action];
     const char* name = bound >= 0 ? pc_window_get_gamepad_button_name(bound) : nullptr;
     snprintf(out, n, "%s", name ? name : "None");
@@ -5683,6 +5899,7 @@ int pc_settings_rows_count(int group) {
 
 bool pc_settings_row_enabled(int group, int row) {
     const GroupRow* r = groupRow(group, row);
+    if (r && r->src == SRC_ACH) return pc_achievement_unlocked(r->idx); // bloqueados en gris
     return !r || !disabledReason(*r);
 }
 
@@ -5693,6 +5910,16 @@ bool pc_settings_row_is_action(int group, int row) {
 }
 
 const char* pc_settings_row_help(int group, int row) {
+    if (const GroupRow* r = groupRow(group, row); r && r->src == SRC_ACH) {
+        static char help[320];
+        const PcAchievementInfo& info = pc_achievement_info(r->idx);
+        const char* blocked = pc_achievements_blocked_reason();
+        snprintf(help, sizeof(help), "%s\n\n%s  %d pts.  Total: %d / %d  (%d / %d pts)%s%s", info.description,
+                 pc_achievement_unlocked(r->idx) ? "Unlocked." : "Locked.", info.points, pc_achievements_unlocked_count(),
+                 (int)PC_ACH_COUNT, pc_achievements_points(), pc_achievements_total_points(), blocked ? "\n\n" : "",
+                 blocked ? blocked : "");
+        return help;
+    }
     if (const GroupRow* r = groupRow(group, row)) {
         const char* reason = disabledReason(*r);
         return reason ? reason : r->help;
@@ -5774,6 +6001,7 @@ void pc_settings_row_value(int group, int row, char* out, unsigned long n) {
 #endif
             else snprintf(out, n, "A: reset");
             break;
+        case SRC_ACH: snprintf(out, n, "%d pts", pc_achievement_info(r->idx).points); break;
         case SRC_KEYS:
         case SRC_PADS: snprintf(out, n, "Open  >"); break;
         case SRC_RECENTER: {
@@ -5860,7 +6088,7 @@ void pc_settings_row_change(int group, int row, int dir, bool ok) {
         else if (dir) sPending.keyboardBindings[row] = kDefaultKeyBindings[row];
     } else if (group == PC_SET_PICKER_GAMEPAD && row >= 0 && row < PC_KEY_ACT_COUNT) {
         if (ok) startButtonCapture(row);
-        else if (dir) sPending.gamepadBindings[row] = -1;
+        else if (dir) pendingPadBinds()[row] = -1;
     } else if (group == PC_SET_PICKER_TEXPACKS && ok) {
         texturePacksRowAction(row, pc_texpack_list_packs());
     } else if (group == PC_SET_PICKER_HDMODELS && ok) {
@@ -5872,7 +6100,7 @@ void pc_settings_row_change(int group, int row, int dir, bool ok) {
 bool pc_settings_capture_active(void) { return sWaitingForKey || sWaitingForButton || sCaptureWaitRelease; }
 
 void pc_settings_capture_poll(void) {
-    SDL_GameController* ctl = pc_window_get_controller();
+    SDL_GameController* ctl = menuController();
     if (sWaitingForKey) { pollKeyCapture(ctl); return; }
     if (sWaitingForButton || sCaptureWaitRelease) pollButtonCapture(ctl);
 }

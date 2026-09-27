@@ -1204,6 +1204,9 @@ void NaviContainerState::enterPikis(Navi* navi, int countToEnter)
  */
 void NaviContainerState::exitPikis(Navi* navi, int countToExit)
 {
+#if defined(PIKI_PC_PORT)
+	navi->mGoalItem->mPcExitNavi = navi->mNaviID;
+#endif
 	navi->mGoalItem->exitPikis(countToExit);
 }
 
@@ -2112,7 +2115,15 @@ void NaviThrowWaitState::init(Navi* navi)
 	// Mod "Throw Speed": por encima del 100 % también se alarga el alcance
 	// para coger. Si no, con el grupo detrás cada Pikmin tiene que andar hasta
 	// la mano y esa caminata, no la animación, marca la cadencia.
-	if (maxDist <= C_NAVI_PARM(navi, mPluckGrabRange) * pcThrowReachScale()) {
+	// Mod "Quick Grab": el Pikmin elegido no anda hasta la mano, aparece en
+	// ella. La cadencia es la misma con el grupo alrededor o detrás.
+	const bool quickGrab = throwPiki && pc_settings_get_quick_grab();
+	if (quickGrab) {
+		if (CollPart* hand = navi->mCollInfo->getSphere('rhnd')) {
+			throwPiki->mSRT.t = hand->mCentre + Vector3f(0.0f, -10.0f, 0.0f);
+		}
+	}
+	if (quickGrab || maxDist <= C_NAVI_PARM(navi, mPluckGrabRange) * pcThrowReachScale()) {
 #else
 	if (maxDist <= C_NAVI_PARM(navi, mPluckGrabRange)) {
 #endif

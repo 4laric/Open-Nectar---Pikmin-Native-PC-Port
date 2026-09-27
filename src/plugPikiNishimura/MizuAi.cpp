@@ -107,8 +107,19 @@ void MizuAi::naviGeyzerJump()
 	Vector3f targetPos = mMizu->mSRT.t + dir;
 	targetPos.y        = mapMgr->getMinY(targetPos.x, targetPos.z, true);
 
-	for (int ni = 0; ni < naviMgr->getNaviCount(); ni++) {
-		naviMgr->getNavi(ni)->stimulate(InteractGeyzer(mMizu, targetPos));
+	const int naviCount = naviMgr->getNaviCount();
+	for (int ni = 0; ni < naviCount; ni++) {
+		Navi* navi = naviMgr->getNavi(ni);
+		// Coop/VS: solo lanza al capitán que está encima del géiser; al otro,
+		// desde lejos, getThrowVelocity lo mandaba al cielo.
+		if (naviCount > 1) {
+			f32 dx = navi->mSRT.t.x - mMizu->mSRT.t.x;
+			f32 dz = navi->mSRT.t.z - mMizu->mSRT.t.z;
+			if (dx * dx + dz * dz > 80.0f * 80.0f) {
+				continue;
+			}
+		}
+		navi->stimulate(InteractGeyzer(mMizu, targetPos));
 	}
 }
 

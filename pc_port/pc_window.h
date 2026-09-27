@@ -106,6 +106,9 @@ extern const int kDefaultGamepadBindings[PC_KEY_ACT_COUNT];
 #define PC_GP_AXIS_BIND 1000
 void pc_window_set_gamepad_binding(int action, int button);
 int pc_window_get_gamepad_binding(int action);
+// Coop: bindings del mando de J2 (mismo formato; -1 = por defecto).
+void pc_window_set_gamepad_binding_p2(int action, int button);
+int pc_window_get_gamepad_binding_p2(int action);
 const char* pc_window_get_gamepad_button_name(int button);
 int pc_window_gamepad_first_held_binding(SDL_GameController* controller);
 bool pc_window_gamepad_bind_held(SDL_GameController* controller, int bind);

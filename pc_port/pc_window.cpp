@@ -181,6 +181,7 @@ static bool sKeyBindingsInitialized = false;
 
 // Gamepad remapping state.
 static int sGamepadBindings[PC_KEY_ACT_COUNT];
+static int sGamepadBindingsP2[PC_KEY_ACT_COUNT]; // Coop: mando de J2
 static bool sGamepadBindingsInitialized = false;
 static int sStickDeadZone = 8;
 static int sStickInvert = 0;
@@ -307,6 +308,7 @@ static void initGamepadBindings() {
     if (sGamepadBindingsInitialized) return;
     for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
         sGamepadBindings[i] = -1; // -1 = use default
+        sGamepadBindingsP2[i] = -1;
     }
     sGamepadBindingsInitialized = true;
 }
@@ -315,6 +317,12 @@ void pc_window_set_gamepad_binding(int action, int button) {
     if (action < 0 || action >= PC_KEY_ACT_COUNT) return;
     initGamepadBindings();
     sGamepadBindings[action] = button;
+}
+
+void pc_window_set_gamepad_binding_p2(int action, int button) {
+    if (action < 0 || action >= PC_KEY_ACT_COUNT) return;
+    initGamepadBindings();
+    sGamepadBindingsP2[action] = button;
 }
 
 void pc_window_set_stick_dead_zone(int deadZone) {
@@ -345,6 +353,13 @@ int pc_window_get_gamepad_binding(int action) {
     if (action < 0 || action >= PC_KEY_ACT_COUNT) return -1;
     initGamepadBindings();
     if (sGamepadBindings[action] >= 0) return sGamepadBindings[action];
+    return kDefaultGamepadBindings[action];
+}
+
+int pc_window_get_gamepad_binding_p2(int action) {
+    if (action < 0 || action >= PC_KEY_ACT_COUNT) return -1;
+    initGamepadBindings();
+    if (sGamepadBindingsP2[action] >= 0) return sGamepadBindingsP2[action];
     return kDefaultGamepadBindings[action];
 }
 
@@ -763,8 +778,10 @@ bool pc_window_init(const char* title, int width, int height) {
 static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& stickX, s8& stickY,
                                    s8& substickX, s8& substickY, u8& triggerL, u8& triggerR, bool& swarmHeld, int player = 0)
 {
-    auto boundButtonPressed = [ctl](int action) {
-        return pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(action));
+    auto boundButtonPressed = [ctl, player](int action) {
+        // Coop: J2 tiene sus propios bindings de mando.
+        return pc_window_gamepad_bind_held(ctl, player == 1 ? pc_window_get_gamepad_binding_p2(action)
+                                                             : pc_window_get_gamepad_binding(action));
     };
     if (boundButtonPressed(PC_KEY_ACT_A)) button |= PAD_BUTTON_A;
     if (boundButtonPressed(PC_KEY_ACT_B)) button |= PAD_BUTTON_B;

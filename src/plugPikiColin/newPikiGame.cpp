@@ -28,6 +28,7 @@
 
 #include "settings/pc_settings.h"
 #include "pc_vs.h"
+#include "pc_achievements.h"
 #include "gl/pc_gfx.h"
 #include "jaudio/piki_scene.h"
 #include "jaudio/pikidemo.h"
@@ -1841,6 +1842,9 @@ ModeState* DayOverModeState::initialisePhaseTwo()
 			      static_cast<int>(GameStat::containerPikis));
 			info.mStageID = flowCont.mCurrentStage->mChalStageID;
 			info.mScore   = GameStat::allPikis;
+#if defined(PIKI_PC_PORT)
+			pc_achievements_on_challenge_score(info.mStageID, info.mScore);
+#endif
 			// check if we got a new hiscore for this course, and update the info if so
 			gameflow.mGamePrefs.checkIsHiscore(info);
 
@@ -1852,9 +1856,15 @@ ModeState* DayOverModeState::initialisePhaseTwo()
 		if (playerState->happyEndable()) {
 			// we have at least 25 parts, we can take off at least
 			flowCont.mEndingType = ENDING_Neutral;
+#if defined(PIKI_PC_PORT)
+			pc_achievement_unlock(PC_ACH_NORMAL_ENDING);
+#endif
 			gameflow.mMoviePlayer->startMovie(DEMOID_NeutralEndingLeaveOK, 0, nullptr, nullptr, nullptr, CAF_AllVisibleMask, true);
 		} else {
 			// uh oh. play ship crashing back down cutscene and start final results
+#if defined(PIKI_PC_PORT)
+			pc_achievement_unlock(PC_ACH_BAD_ENDING);
+#endif
 			gameflow.mMoviePlayer->startMovie(DEMOID_BadEndingFailEscape, 0, nullptr, nullptr, nullptr, CAF_AllVisibleMask, true);
 			makeTotalScoreWindow();
 		}
@@ -3099,6 +3109,10 @@ void GameMovieInterface::parse(GameMovieInterface::SimpleMessage& msg)
 		gamecore->forceDayEnd();
 		gameflow.mIsDayEndTriggered = TRUE;
 		flowCont.mEndingType        = ENDING_Happy;
+#if defined(PIKI_PC_PORT)
+		pc_achievement_unlock(PC_ACH_BEST_ENDING);
+		if (gameflow.mWorldClock.mCurrentDay <= 12) pc_achievement_unlock(PC_ACH_SPEED_DEMON);
+#endif
 		break;
 	}
 	case MOVIECMD_SetPauseAllowed:

@@ -10,6 +10,9 @@
 #include "RumbleMgr.h"
 #include "Slime.h"
 #include "SoundMgr.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_achievements.h"
+#endif
 
 /**
  * @todo: Documentation
@@ -881,6 +884,9 @@ void SlimeAi::initDie(int nextState)
 	setContractGoal();
 	setExpansionGoal();
 	playerState->mResultFlags.setSeen(zen::RESFLAG_Slime);
+#if defined(PIKI_PC_PORT)
+	pc_achievement_unlock(PC_ACH_GOOLIX);
+#endif
 
 	for (int i = 0; i < SLIMECREATURE_COUNT; i++) {
 		zen::particleGenerator* ptclGenK

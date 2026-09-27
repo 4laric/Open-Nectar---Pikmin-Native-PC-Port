@@ -248,6 +248,7 @@ set(PC_PORT_SOURCES
     pc_port/mods/pc_hd_model_convert.cpp
     pc_port/mods/pc_vs_arena.cpp
     pc_port/pc_vs.cpp
+    pc_port/pc_achievements.cpp
     pc_port/pc_file_dialog.cpp
     pc_port/gl/pc_gfx.cpp
     pc_port/gl/pc_tev_shader.cpp

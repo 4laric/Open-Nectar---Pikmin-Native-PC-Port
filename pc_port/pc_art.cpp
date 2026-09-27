@@ -14,6 +14,7 @@
 #define STBI_ONLY_PNG
 #define STBI_NO_STDIO
 #include "stb_image.h"
+#include "pc_art_embedded.h"
 
 namespace {
 
@@ -41,6 +42,14 @@ bool readFile(const char* name, std::vector<unsigned char>& bytes)
 		const size_t got = SDL_RWread(rw, bytes.data(), 1, (size_t)size);
 		SDL_RWclose(rw);
 		if (got == (size_t)size) return true;
+	}
+	// Sin archivo en disco: copia incrustada en el ejecutable (retratos del
+	// selector de capitán).
+	for (const PcEmbeddedArt& e : kEmbeddedArt) {
+		if (std::strcmp(e.name, name) == 0) {
+			bytes.assign(e.data, e.data + e.size);
+			return true;
+		}
 	}
 	return false;
 }

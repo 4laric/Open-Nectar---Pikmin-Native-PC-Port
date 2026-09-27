@@ -151,6 +151,7 @@ public:
 	u32 mHeldPikis[3];                    // _42C, contains counts for leaf/bud/flower
 #if defined(PIKI_PC_PORT)
 	int mPcOwner = -1; ///< VS: jugador dueño de esta cebolla (-1 fuera de VS)
+	int mPcExitNavi = -1; ///< Coop: capitán que pidió sacar Pikmin (-1 = el principal)
 #endif
 	ItemShapeObject* _438[3];             // _438
 	// The GameCube layout stored three (fulcrum, rope) pairs in six adjacent

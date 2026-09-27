@@ -13,6 +13,7 @@ enum PcSettingsGroup {
 	PC_SET_GROUP_GAMEPLAY,    ///< comportamiento de los Pikmin, cooperativo
 	PC_SET_GROUP_CHEATS,      ///< límite de Pikmin, día, vida, silbato, lanzamiento, debug
 	PC_SET_GROUP_DATA,        ///< exportar/importar partida + restaurar ajustes
+	PC_SET_GROUP_ACHIEVEMENTS, ///< logros (pc_achievements): solo lectura
 	PC_SET_GROUP_COUNT,
 	/// Selectores (no aparecen como grupo). OK elige/actúa.
 	PC_SET_PICKER_RESOLUTION = 100,

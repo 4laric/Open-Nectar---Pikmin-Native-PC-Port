@@ -72,6 +72,8 @@ int pc_settings_get_whistle_radius_pct(void);
 float pc_settings_get_throw_speed_scale(void);
 /// B con un Pikmin en la mano (A sujeto) lo devuelve al grupo.
 int pc_settings_get_throw_cancel_b(void);
+/// Mod "Quick Grab": el Pikmin a lanzar aparece en la mano al momento.
+int pc_settings_get_quick_grab(void);
 /// Los Pikmin del grupo no tropiezan al correr.
 int pc_settings_get_no_trip(void);
 /// En el menú de la cebolla, Y + arriba/abajo mueve de 10 en 10.
@@ -107,6 +109,8 @@ float pc_mods_teki_damage(float damage);
 void pc_settings_draw_idle_counter(void);
 /// VS: marcador, reloj, cuenta atrás (lleva la pausa) y pantalla final.
 void pc_settings_draw_vs_hud(void);
+/// Aviso de logro desbloqueado (pc_achievements).
+void pc_settings_draw_achievement_toast(void);
 /// VS: pasa las reglas guardadas (menú previo) a la partida.
 void pc_settings_apply_vs_rules(void);
 /// VS: menú previo con la explicación y las reglas. Resultado: PC_DEVASSIGN_*.

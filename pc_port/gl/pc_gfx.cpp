@@ -1770,7 +1770,17 @@ void pc_gfx_blur_gx_rect(int gxX, int gxY, int gxW, int gxH, int passes)
     glBindFramebuffer_ptr(GL_DRAW_FRAMEBUFFER, sNativeFramebuffer);
     glBlitFramebuffer_ptr(0, 0, wA, hA, x0, y0, x1, y1, GL_COLOR_BUFFER_BIT, GL_LINEAR);
     glBindFramebuffer_ptr(GL_FRAMEBUFFER, sNativeFramebuffer);
+    // Fondo negro semitransparente bajo el panel (F1 / cristal) para que el
+    // texto se lea sobre fondos claros.
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glViewport(0, 0, sRenderWidth, sRenderHeight);
     glEnable(GL_SCISSOR_TEST);
+    glScissor(x0, y0, w, h);
+    dim_draw(180);
 }
 
 static void dim_window_letterbox(GLint outX, GLint outY, GLint outW, GLint outH)

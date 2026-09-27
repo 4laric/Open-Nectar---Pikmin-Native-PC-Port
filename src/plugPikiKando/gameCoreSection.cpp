@@ -1103,6 +1103,11 @@ static void pcVsUpdate(MapMgr* map)
 			}
 			continue;
 		}
+		// Recibiendo daño: no pisar la animación Damage con Job2 (si no, nunca
+		// termina, no se llama finishDamage y queda inmune a más golpes).
+		if (piki->isDamaged()) {
+			continue;
+		}
 		sieging[target]++;
 		piki->mPcSieging                   = true;
 		piki->mActiveAction->pcSetSuspended(true);

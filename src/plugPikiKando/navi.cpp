@@ -2782,14 +2782,10 @@ bool Navi::pcDrawAsPikmin(Graphics& gfx)
 	mPcPikiAnimMgr.changeContext(&obj->mAnimatorB, &obj->mAnimatorA);
 	mPcPikiAnimMgr.updateContext();
 
-	// Misma pose que Olimar, a tamaño de Pikmin.
+	// Misma pose y escala que Olimar: es un capitán, no un Pikmin más. El
+	// modelo del Pikmin (~19 de cuerpo, más la hoja) queda a la altura del de
+	// Olimar (~25 con la antena), así que no hace falta corregir el tamaño.
 	Matrix4f world = mWorldMtx;
-	const f32 k    = mSRT.s.x > 0.0f ? pikiMgr->mPikiParms->mPikiParms.mPikiDisplayScale() / mSRT.s.x : 1.0f;
-	for (int i = 0; i < 3; i++) {
-		for (int j = 0; j < 3; j++) {
-			world.mMtx[i][j] *= k;
-		}
-	}
 	Matrix4f view;
 	gfx.mCamera->mLookAtMtx.multiplyTo(world, view);
 	obj->mShape->updateAnim(gfx, view, nullptr, this);

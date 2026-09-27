@@ -313,6 +313,12 @@ void CPlate::refresh(int slotCount, f32 interpT)
 	mPlateLength = ((4.0f * slotCount) * mCPlateParms.mMaxPosSize() * mCPlateParms.mMaxPosSize()) / (mPlateSize * PI);
 
 	f32 limit = mCPlateParms.mLengthLimit();
+#if defined(PIKI_PC_PORT)
+	// Con el límite de Pikmin por encima del original (100), el tope de largo
+	// solo deja crecer la formación a lo ancho y queda un óvalo aplastado. Se
+	// quita solo en ese caso; con 100 o menos se mantiene el original.
+	if (pc_settings_get_piki_limit() > 100) limit = mPlateLength;
+#endif
 	if (mPlateLength > limit) {
 		mPlateLength = limit;
 		mPlateSize   = ((4.0f * slotCount) * mCPlateParms.mMaxPosSize() * mCPlateParms.mMaxPosSize()) / (mPlateLength * PI);
