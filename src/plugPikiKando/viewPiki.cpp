@@ -1,5 +1,6 @@
 #include "pc_p2_purple.h"
 #include "pc_p2_white.h"
+#include "netplay/pc_sim_rng.h"
 #include "ViewPiki.h"
 #include "AIPerf.h"
 #include "DebugLog.h"
@@ -488,7 +489,9 @@ void ViewPiki::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 	mPikiShape->mShape->calcJointWorldPos(gfx, 6, pos);
 	mEffectPos = pos;
 
-	const Colour drawColour = (isDamaged() && gsys->getRand(1.0f) > 0.5f) ? COLOUR_WHITE : mCurrentColour;
+	// M1 deterministic netplay: damage flash is draw-only, so it draws from
+	// the cosmetic stream and never perturbs the sim stream.
+	const Colour drawColour = (isDamaged() && pc_cosmetic_randf(1.0f) > 0.5f) ? COLOUR_WHITE : mCurrentColour;
 	mPikiShape->mShape->mMaterialList->setColour(drawColour);
 #if defined(PIKI_PC_PORT)
 	// The original piki texture is grey and mCurrentColour paints it; the HD

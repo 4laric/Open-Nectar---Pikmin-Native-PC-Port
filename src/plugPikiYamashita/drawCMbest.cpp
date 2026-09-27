@@ -1,6 +1,7 @@
 #include "DebugLog.h"
 #include "sysNew.h"
 #include "zen/DrawCM.h"
+#include "netplay/pc_sim_rng.h"
 
 /**
  * @todo: Documentation
@@ -80,7 +81,7 @@ protected:
 		mWaitTime += gsys->getFrameTime();
 		if (mWaitTime > mAppearTime) {
 			mWaitTime -= mAppearTime;
-			_1C += Rand(0.05f) + 0.02f;
+			_1C += pc_cosmetic_randf(0.05f) + 0.02f;
 		}
 		_1C += (1.0f - mRootPane->getScale().x) * gsys->getFrameTime();
 		_1C *= 0.95f;

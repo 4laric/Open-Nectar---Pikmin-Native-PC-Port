@@ -1,5 +1,6 @@
 #include "pc_p2_purple_flight.h"
 #include "pc_p2_kurage_visual.h"
+#include "netplay/pc_netplay_det.h"
 #include "pc_p2_teki_lifetime.h"
 #include "pc_p2_kurage_teki.h"
 #include "pc_p2_onikurage_teki.h"
@@ -1998,6 +1999,14 @@ void GameCoreSection::finalSetup()
 GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& camera)
     : Node("gamecore")
 {
+#if defined(PIKI_PC_PORT)
+	// M1 deterministic netplay: reseed the sim stream (and the cosmetic one)
+	// from hash(PIKMIN_NETPLAY_SEED, day index, stage id) so every peer and
+	// every replay of the day draws the same sequence. gameflow carries the
+	// 1-based day; flowCont carries the stage. No-op with the switch off.
+	pc_netplay_det_reseed_for_new_day(gameflow.mWorldClock.mCurrentDay,
+	    flowCont.mCurrentStage != nullptr ? static_cast<int>(flowCont.mCurrentStage->mStageID) : 0);
+#endif
 	mDrawHideType = 0;
 	textDemoState = 0;
 	finishPause();

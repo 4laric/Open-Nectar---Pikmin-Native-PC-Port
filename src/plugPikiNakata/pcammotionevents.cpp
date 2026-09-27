@@ -1,6 +1,7 @@
 #include "DebugLog.h"
 #include "Pcam/Camera.h"
 #include "Pcam/MotionEvents.h"
+#include "netplay/pc_sim_rng.h"
 #include "sysNew.h"
 
 /**
@@ -119,15 +120,18 @@ void PcamRandomMoveEvent::update()
 {
 	PeveEvent::update();
 	NVector3f offset;
-	offset.x = NMathF::rangeRandom(-1.0f, 1.0f);
-	offset.y = NMathF::rangeRandom(-1.0f, 1.0f);
-	offset.z = NMathF::rangeRandom(-1.0f, 1.0f);
+	// M1 deterministic netplay: camera shake is presentation-only (report
+	// section 2b.3), so it draws from the cosmetic stream. Each line below
+	// replaces one NMathF::rangeRandom(-1,1) draw, i.e. 2*r-1 for one rand().
+	offset.x = pc_cosmetic_randf(2.0f) - 1.0f;
+	offset.y = pc_cosmetic_randf(2.0f) - 1.0f;
+	offset.z = pc_cosmetic_randf(2.0f) - 1.0f;
 	offset.scale(mMoveScale);
 	mCamera->getViewpoint().add(offset);
 
-	offset.x = NMathF::rangeRandom(-1.0f, 1.0f);
-	offset.y = NMathF::rangeRandom(-1.0f, 1.0f);
-	offset.z = NMathF::rangeRandom(-1.0f, 1.0f);
+	offset.x = pc_cosmetic_randf(2.0f) - 1.0f;
+	offset.y = pc_cosmetic_randf(2.0f) - 1.0f;
+	offset.z = pc_cosmetic_randf(2.0f) - 1.0f;
 	offset.scale(mMoveScale);
 	mCamera->getWatchpoint().add(offset);
 }

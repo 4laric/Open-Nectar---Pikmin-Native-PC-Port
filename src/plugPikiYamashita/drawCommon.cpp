@@ -1,4 +1,5 @@
 #include "zen/DrawCommon.h"
+#include "netplay/pc_sim_rng.h"
 #include "DebugLog.h"
 #include "P2D/Graph.h"
 #include "P2D/Picture.h"
@@ -334,7 +335,7 @@ bool zen::BalloonPane::invoke(P2DPane* pane)
 		setGoalPos();
 	}
 
-	moveDir.multiply(gsys->getFrameTime() * (0.1f + zen::Rand(0.1f)));
+	moveDir.multiply(gsys->getFrameTime() * (0.1f + pc_cosmetic_randf(0.1f)));
 	mVelocity.add(moveDir);
 	mVelocity.multiply(0.99f);
 	mCurrPos.add(mVelocity);
@@ -370,7 +371,7 @@ bool zen::BalloonPane::invoke(P2DPane* pane)
 void zen::BalloonPane::setGoalPos()
 {
 	Vector3f randOffset;
-	randOffset.set(mGoalRadius * (zen::Rand(2.0f) - 1.0f), mGoalRadius * (zen::Rand(2.0f) - 1.0f), 0.0f);
+	randOffset.set(mGoalRadius * (pc_cosmetic_randf(2.0f) - 1.0f), mGoalRadius * (pc_cosmetic_randf(2.0f) - 1.0f), 0.0f);
 	mGoalPos.set(mHomePos + randOffset);
 }
 
@@ -379,5 +380,5 @@ void zen::BalloonPane::setGoalPos()
  */
 void zen::BalloonPane::setGoalRotate()
 {
-	mGoalRotate = 15.0f * PI / 180.0f * (zen::Rand(2.0f) - 1.0f);
+	mGoalRotate = 15.0f * PI / 180.0f * (pc_cosmetic_randf(2.0f) - 1.0f);
 }

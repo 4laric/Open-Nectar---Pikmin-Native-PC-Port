@@ -3,6 +3,7 @@
 #include "P2D/Picture.h"
 #include "sysNew.h"
 #include "zen/Math.h"
+#include "netplay/pc_sim_rng.h"
 
 /**
  * @todo: Documentation
@@ -97,7 +98,7 @@ public:
 					mVelocityX = -10.0f;
 				}
 				mPositionY = mTargetY;
-				mVelocityY *= Rand(0.2f) + -0.6f;
+				mVelocityY *= pc_cosmetic_randf(0.2f) + -0.6f;
 				mAngularVelocity = gsys->getFrameTime() * (mVelocityX * 0.1f) * 30.0f;
 			}
 
@@ -160,7 +161,7 @@ protected:
 		mPositionX  = 320.0f;
 		mPositionY  = mTargetY - 480.0f;
 		mLetterPic->move(RoundOff(mPositionX), RoundOff(mPositionY));
-		mVelocityX       = Rand(10.0f) - 5.0f;
+		mVelocityX       = pc_cosmetic_randf(10.0f) - 5.0f;
 		mVelocityY       = 0.0f;
 		mAngularVelocity = 0.0f;
 		mScaleVelocity   = 0.0f;
