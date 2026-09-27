@@ -37,6 +37,7 @@
 #include "pc_texpack.h"
 #include "../timing/pc_render_phase.h"
 #include "../timing/pc_tick_profiler.h"
+#include "../netplay/pc_netplay_present.h"
 
 #include "../pc_p2_specular_dir.h"
 #include "pc_opengl.h"
@@ -4457,6 +4458,11 @@ static void proxyShotOnPresent() {
 }
 
 void pc_gfx_present(void) {
+    // M2b null GX (issue #879): authoritative pass issues no GL, no present.
+    if (pc_netplay_present_null_active()) {
+        pc_netplay_present_note_attempt();
+        return;
+    }
     pc_gfx_flush_batch();
 #ifdef GL_TIME_ELAPSED
     if (sPerfGpuSceneActive) {
@@ -5422,6 +5428,11 @@ static void apply_texture_filtering(bool gameRequestedMipmaps)
 }
 
 void pc_gfx_init_tex_obj_rgba(GXTexObj* obj, void* rgba, u16 width, u16 height, GXTexWrapMode wrapS, GXTexWrapMode wrapT) {
+    // M2b null GX: skip uploads without touching GL.
+    if (pc_netplay_present_null_active()) {
+        pc_netplay_present_note_attempt();
+        return;
+    }
     if (!obj || !rgba || width == 0 || height == 0) return;
 
     const uintptr_t key = (uintptr_t)obj;
@@ -5452,6 +5463,11 @@ void pc_gfx_init_tex_obj_rgba(GXTexObj* obj, void* rgba, u16 width, u16 height, 
 }
 
 void pc_gfx_init_tex_obj(GXTexObj* obj, void* imagePtr, u16 width, u16 height, GXTexFmt format, GXTexWrapMode wrapS, GXTexWrapMode wrapT, GXBool mipmap) {
+    if (pc_netplay_present_null_active()) {
+        pc_netplay_present_note_attempt();
+        return;
+    }
+    if (!obj || !imagePtr || width == 0 || height == 0) return;
     if (!obj || !imagePtr || width == 0 || height == 0) return;
 
     uintptr_t key = (uintptr_t)obj;
@@ -5791,6 +5807,10 @@ static bool upload_ci_texture(GXTexObj* obj, const PcCiTexture& ci) {
 
 void pc_gfx_init_tex_obj_ci(GXTexObj* obj, void* imagePtr, u16 width, u16 height, GXCITexFmt format,
                             GXTexWrapMode wrapS, GXTexWrapMode wrapT, GXBool mipmap, u32 tlutName) {
+    if (pc_netplay_present_null_active()) {
+        pc_netplay_present_note_attempt();
+        return;
+    }
     if (!obj || !imagePtr || width == 0 || height == 0) return;
     const uintptr_t key = reinterpret_cast<uintptr_t>(obj);
     const PcTextureSignature signature {
@@ -5811,6 +5831,10 @@ void pc_gfx_init_tex_obj_ci(GXTexObj* obj, void* imagePtr, u16 width, u16 height
 }
 
 void pc_gfx_load_tex_obj(GXTexObj* obj, GXTexMapID id) {
+    if (pc_netplay_present_null_active()) {
+        pc_netplay_present_note_attempt();
+        return;
+    }
     state_touched();
     if (id < GX_TEXMAP0 || id >= GX_MAX_TEXMAP) return;
     if (!obj) {
@@ -7180,6 +7204,14 @@ static void vbo_ring_frame_begin() {
 // Draws whatever has accumulated. Safe to call at any time: a no-op when no
 // batch is open, which is what makes it cheap to place at every flush point.
 void pc_gfx_flush_batch(void) {
+    // M2b null GX: drop submissions without touching GL.
+    if (pc_netplay_present_null_active()) {
+        pc_netplay_present_note_attempt();
+        sBatchOpen = false;
+        sBatchPrims = 0;
+        sBatchVerts.clear();
+        return;
+    }
     if (!sBatchOpen || sBatchVerts.empty()) {
         sBatchOpen  = false;
         sBatchPrims = 0;

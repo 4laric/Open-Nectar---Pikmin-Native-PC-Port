@@ -6,6 +6,9 @@
 #include "sysNew.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_gfx.h"
+#include "netplay/pc_netplay_policy.h"
+#include "netplay/pc_netplay_present.h"
+#include "timing/pc_render_phase.h"
 #endif
 
 /**
@@ -35,6 +38,13 @@ void CullFrustum::vectorToWorldPlane(immut Vector3f& vec, CullingPlane& worldPla
  */
 bool CullFrustum::isPointVisible(immut Vector3f& point, f32 cutoff)
 {
+#if defined(PIKI_PC_PORT)
+	// M2b (issue #879): in the authoritative pass visibility is the M2a
+	// policy value (always visible), never the local-window frustum.
+	if (pc_netplay_present_two_pass_active() && pc_render_is_authoritative()) {
+		return pc_netplay_sim_visible(true);
+	}
+#endif
 	for (int i = 0; i < mActivePlaneCount; i++) {
 		Plane* plane = &mPlanePointers[i]->mPlane;
 		if (point.x * plane->mNormal.x + point.y * plane->mNormal.y + point.z * plane->mNormal.z - plane->mOffset < -cutoff) {
