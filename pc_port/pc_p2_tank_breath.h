@@ -77,6 +77,28 @@ void collect(const Frame& f, const std::vector<T*>& population, Pos pos, Alive a
     }
 }
 
+// Attack trigger: Tank.cpp:266-319 with check=false. The FSM enters
+// TANK_Attack only through isAttackable(false) (TankState.cpp:91,184,724,811),
+// which tests the same emitter box at the full mMaxAttackRange (ratio is not
+// grown when check is false, Tank.cpp:277-280) and returns true for the first
+// alive Pikmin/Navi inside it, making that creature mTargetCreature
+// (:309-310). The trigger region therefore equals the full-range breath box,
+// so every breath the FSM commits to reaches the actor that started it once
+// the range has grown. Returns the first exposed actor, or nullptr.
+inline Frame triggerFrame(float px, float py, float pz, float heading, float maxRange, float radius) {
+    return frame(px, py, pz, heading, maxRange, radius);
+}
+template <class T, class Pos, class Alive>
+T* firstExposed(const Frame& f, const std::vector<T*>& population, Pos pos, Alive alive) {
+    for (T* a : population) {
+        if (!a || !alive(a)) continue;
+        float x, y, z;
+        pos(a, x, y, z);
+        if (exposed(f, x, y, z)) return a;
+    }
+    return nullptr;
+}
+
 // Stimulate a snapshot. A receiver may kill or remove any actor, including
 // later snapshot entries, so liveness is re-checked before each stimulus.
 // Returns the number of stimuli the receivers accepted.

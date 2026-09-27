@@ -214,6 +214,75 @@ void caseCaptains() {
     CHECK_EQ(dispatch(snap, alive, [](FakeNavi*) { return true; }), 2);
 }
 
+// Attack trigger == isAttackable(false) (Tank.cpp:266-319, TankState.cpp:91).
+bool triggers(float heading, float x, float y, float z) {
+    const p2tank::Params& p = p2tank::params(0);
+    const Frame f = triggerFrame(0, 0, 0, heading, p.attackRange, p.attackRadius);
+    Fake a{0, x, y, z, true, P2SpeciesRed};
+    std::vector<Fake*> pop{&a};
+    return firstExposed(f, pop, pos, alive) == &a;
+}
+
+// Does a breath committed now reach a stationary actor at (x,y,z)? Discharge
+// runs from the frame after KEYEVENT_2 to the end of attack.bca.
+bool breathReaches(float heading, float x, float y, float z) {
+    const p2tank::Params& p = p2tank::params(0);
+    Emit e;
+    for (int n = KEYEVENT2_FRAME + 1; n <= ATTACK_CLIP_FRAMES; ++n) {
+        const float r = advance(e, p.attackRange, 1.0f / ANIM_FPS);
+        if (exposed(frame(0, 0, 0, heading, r, p.attackRadius), x, y, z)) return true;
+    }
+    return false;
+}
+
+void caseTriggerSubsetOfBreath() {
+    // Growth reaches full range well inside the discharge window.
+    CHECK(ATTACK_CLIP_FRAMES - KEYEVENT2_FRAME >= 16);
+    int triggered = 0, whiffs = 0;
+    for (float heading : {0.0f, 0.7f, -2.3f, 3.1f}) {
+        for (float x = -200.0f; x <= 200.0f; x += 4.0f)
+            for (float z = -200.0f; z <= 200.0f; z += 4.0f)
+                for (float y : {-30.0f, -10.0f, 0.0f, 20.0f, 35.0f}) {
+                    if (!triggers(heading, x, y, z)) continue;
+                    ++triggered;
+                    if (!breathReaches(heading, x, y, z)) ++whiffs;
+                }
+    }
+    CHECK(triggered > 1000);
+    CHECK_EQ(whiffs, 0);
+}
+
+void caseNoWhiffTriggers() {
+    // Reviewer positions inside the old attackable() cone (distXZ<120 from the
+    // feet, |angle|<0.6 rad) that the source box never contains.
+    const float polar[][2] = {{100, 0.50f}, {60, 0.45f}, {30, 0.0f}, {80, 0.35f}, {10, 0.0f}};
+    for (auto& c : polar) {
+        const float x = c[0] * std::sin(c[1]), z = c[0] * std::cos(c[1]);
+        CHECK(!triggers(0.0f, x, 0.0f, z));
+        CHECK(!breathReaches(0.0f, x, 0.0f, z));
+    }
+    // Full-range box edge: beyond the old 120-unit trigger but inside the box.
+    CHECK(triggers(0.0f, 0.0f, 0.0f, EMIT_FORWARD + 110.0f));
+    CHECK(breathReaches(0.0f, 0.0f, 0.0f, EMIT_FORWARD + 110.0f));
+}
+
+void caseTriggerTargetIsInBox() {
+    // The nearest actor (under the snout) cannot start a breath; an in-box
+    // actor further away is the source mTargetCreature.
+    const p2tank::Params& p = p2tank::params(0);
+    const Frame f = triggerFrame(0, 0, 0, 0.0f, p.attackRange, p.attackRadius);
+    Fake nearOut{0, 0, 0, 20.0f, true, P2SpeciesRed}, farIn{1, 5, 0, IN_Z, true, P2SpeciesRed};
+    Fake deadIn{2, 0, 0, IN_Z, false, P2SpeciesRed};
+    std::vector<Fake*> pop{&nearOut, &deadIn, &farIn};
+    CHECK(firstExposed(f, pop, pos, alive) == &farIn);
+    std::vector<Fake*> none{&nearOut, &deadIn, nullptr};
+    CHECK(firstExposed(f, none, pos, alive) == nullptr);
+    // Captains trigger too (isNavi(), Tank.cpp:295).
+    FakeNavi navi{0, 0, 0, IN_Z, true};
+    std::vector<FakeNavi*> navis{&navi};
+    CHECK(firstExposed(f, navis, pos, alive) == &navi);
+}
+
 void caseParams() {
     for (int kind = 0; kind < 2; ++kind) {
         CHECK(p2tank::params(kind).attackRange == 120.0f);
@@ -237,6 +306,9 @@ int main() {
     caseRemovalDuringDispatch();
     caseNullAndDead();
     caseCaptains();
+    caseTriggerSubsetOfBreath();
+    caseNoWhiffTriggers();
+    caseTriggerTargetIsInBox();
     caseParams();
     if (failures) { std::fprintf(stderr, "p2_tank_breath_test: %d failure(s)\n", failures); return 1; }
     std::puts("p2_tank_breath_test: all cases passed");
