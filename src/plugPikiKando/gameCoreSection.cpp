@@ -55,6 +55,7 @@
 #include <SDL.h>
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
 #include <cmath>
 #include <algorithm>
 #endif
@@ -63,6 +64,7 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_photo_mode.h"
 #include "pc_coop.h"
+#include "netplay/pc_coop_switch.h"
 #include "mods/pc_vs_arena.h"
 #include "pc_vs.h"
 #include "BuildingItem.h"
@@ -1995,6 +1997,26 @@ void GameCoreSection::finalSetup()
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+// Netplay M0: true when any PIKMIN_NETPLAY* environment variable is set.
+// Scans the process environment so future PIKMIN_NETPLAY_* flags also arm
+// the [NETPLAY] marker without touching this call site.
+static bool pc_netplay_marker_env_set()
+{
+#if defined(_WIN32)
+	extern char** _environ;
+	char** env = _environ;
+#else
+	extern char** environ;
+	char** env = environ;
+#endif
+	if (!env) return false;
+	for (; *env; ++env) {
+		if (std::strncmp(*env, "PIKMIN_NETPLAY", 14) == 0 && (*env)[14] != '\0') return true;
+	}
+	return false;
+}
+#endif
 GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& camera)
     : Node("gamecore")
 {
@@ -2147,6 +2169,13 @@ GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& ca
 	// Idempotent; with one Navi the zero-control guard keeps only-captain
 	// capture refused, exactly as the source refuses to strand the player.
 	pc_p2_captain::setup_from_navi_mgr();
+	// Netplay M0: single co-op marker line. It prints only when the co-op
+	// switch armed this run or some PIKMIN_NETPLAY* env var is set, so
+	// ordinary single-player logs are unchanged.
+	if (pc_coop_switch_active() || pc_netplay_marker_env_set()) {
+		std::printf("[NETPLAY] coop_active=%d navis=%d\n", pc_coop_active() ? 1 : 0,
+		            naviMgr->getNaviCount());
+	}
 #else
 	naviMgr->create(1);
 	mNavi = static_cast<Navi*>(naviMgr->birth());

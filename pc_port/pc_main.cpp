@@ -48,6 +48,7 @@ __declspec(dllexport) int           AmdPowerXpressRequestHighPerformance = 1;
 #include "pc_window.h"
 #include "pc_bbft.h"
 #include "pc_gpu_preference.h"
+#include "netplay/pc_coop_switch.h"
 #include "gl/pc_gfx.h"
 #include "gl/pc_texpack.h"
 #ifdef __ANDROID__
@@ -126,6 +127,12 @@ int main(int argc, char* argv[])
         if (std::strcmp(argv[i], "--texture-pack") == 0)
             pc_texpack_request_enable();
     }
+    // Netplay M0: direct-boot co-op switch (--coop / PIKMIN_COOP=1, with
+    // --coop-captains= / PIKMIN_COOP_CAPTAINS=). Arms pending co-op before
+    // any GameCoreSection is constructed; the randomizer direct-boot path
+    // never resets pending, so the switch wins there and stays on for
+    // every day of the run.
+    pc_coop_switch_apply(pc_coop_switch_parse(argc, argv));
     (void)argc;
     (void)argv;
 
