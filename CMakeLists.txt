@@ -256,6 +256,7 @@ set(PC_PORT_SOURCES
     # they join pikmin_pc and the engine-free pc_bbft_test / pc_sim_rng_test.
     pc_port/netplay/pc_netplay_det.cpp
     pc_port/netplay/pc_netplay_policy.cpp
+    pc_port/netplay/pc_netplay_present.cpp
     pc_port/netplay/pc_sim_rng.cpp
     # Challenge host-mode engine runtime bridge (#722, ported from #710
     # db245877; #186 review before shared-line landing): the per-tick runtime
@@ -1721,6 +1722,16 @@ if(PIKMIN_BUILD_TESTS)
         pc_port/netplay/pc_sim_rng.cpp)
     target_compile_options(pc_netplay_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_netplay_policy_test COMMAND pc_netplay_policy_test)
+
+    # Netplay M2b two-pass present module (issue #879). Host-run; covers the
+    # skip-presentation flag and the null-GX counters.
+    add_executable(pc_netplay_present_test
+        pc_port/netplay/pc_netplay_present_test.cpp
+        pc_port/netplay/pc_netplay_present.cpp
+        pc_port/netplay/pc_netplay_det.cpp)
+    target_compile_definitions(pc_netplay_present_test PRIVATE PC_NETPLAY_PRESENT_HOST=1)
+    target_compile_options(pc_netplay_present_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_netplay_present_test COMMAND pc_netplay_present_test)
 
     add_executable(pc_render_phase_test
         pc_port/timing/pc_render_phase_test.cpp
