@@ -1,5 +1,8 @@
 #include "pc_randomizer.h"
 #include "pc_bbft.h"
+#if defined(PIKI_PC_PORT)
+#include "netplay/pc_netplay_det.h"
+#endif
 #include "NewPikiGame.h"
 
 #include "Controller.h"
@@ -3219,6 +3222,13 @@ NewPikiGameSection::NewPikiGameSection()
 	// Default 30 fps; toggle in F1 menu and persisted in pikmin_settings.conf.
 	int fpsModeValue = pc_settings_get_fps_mode();
 	int frameClampValue = 2;  // Default to 30 fps (clamp=2)
+#if defined(PIKI_PC_PORT)
+	// M1 deterministic netplay: gameplay is forced to the original 30 Hz
+	// clamp regardless of the user's fpsMode setting.
+	if (pc_netplay_deterministic()) {
+		frameClampValue = 2;
+	} else
+#endif
 	if (fpsModeValue == 1) {
 		frameClampValue = 1;  // 60 fps
 	} else if (fpsModeValue == 2) {

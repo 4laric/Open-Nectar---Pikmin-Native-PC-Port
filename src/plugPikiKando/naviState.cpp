@@ -6,6 +6,9 @@
 #include "pc_p2_purple.h"
 #include "pc_p2_white.h"
 #include "NaviState.h"
+#if defined(PIKI_PC_PORT)
+#include "netplay/pc_netplay_det.h"
+#endif
 #include "pc_randomizer.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_whistle.h"
@@ -1776,7 +1779,12 @@ void NaviGatherState::init(Navi* navi)
 
 #if defined(PIKI_PC_PORT)
 	// Use the actual whistle action, so controller remapping still works.
-	const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+	// M1 deterministic netplay: the double-tap window counts ticks instead
+	// of wall seconds (ticks at the current tick rate, same 0.35 s
+	// threshold: a 10-tick gap recalls, an 11-tick gap does not at 30 Hz).
+	const double now = pc_netplay_deterministic()
+	    ? static_cast<double>(pc_netplay_tick()) * pc_netplay_fixed_dt(gsys ? gsys->mFrameRate : 2)
+	    : std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 	mTapState.press(now);
 	// A short tap should recruit immediately, even before the animation loop.
 	navi->mWhistleRadiusFrac = pc_whistle_fraction(0.0f);

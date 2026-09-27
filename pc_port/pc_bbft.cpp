@@ -1,5 +1,6 @@
 #include "pc_bbft.h"
 #include "pc_randomizer.h"
+#include "netplay/pc_netplay_det.h"
 #include "pc_p2_challenge_persistence.h"
 #include "pc_p2_challenge_runtime.h"
 #include "pc_p2_challenge_content.h"
@@ -278,8 +279,15 @@ void pc_bbft_update() {
     if (sChallengeContentHook) sChallengeContentHook();
 }
 bool pc_bbft_hold() {
+    // M1 deterministic netplay: losing window focus must not freeze the sim;
+    // it only zeroes the local input (pc_bbft_accept_input() already returns
+    // false while unfocused, and the pad poll zeroes the pads). Only the
+    // randomizer "state not ready" hold stays here; making it a synchronized
+    // event is later netplay work.
+    const bool detMode = pc_netplay_deterministic();
     if (pc_randomizer_enabled()) {
 #ifdef _WIN32
+        if (detMode) return !pc_randomizer_ready();
         const char* background = std::getenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND");
         return !pc_randomizer_ready() || (!(background && !std::strcmp(background, "1")) && !bbft_is_foreground());
 #else
@@ -287,7 +295,7 @@ bool pc_bbft_hold() {
 #endif
     }
 #ifdef _WIN32
-    return enabled && (!bbft_state_ready() || bbft_warp_held() || (!testBackground && !bbft_is_foreground())
+    return enabled && (!bbft_state_ready() || bbft_warp_held() || (!detMode && !testBackground && !bbft_is_foreground())
         || (bbft_region_unlocks() && !bbft_has("Pikmin Access")));
 #else
     return false;

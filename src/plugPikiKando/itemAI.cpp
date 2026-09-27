@@ -1,6 +1,7 @@
 #include "ItemAI.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_coop.h"
+#include "netplay/pc_sim_rng.h"
 #endif
 #include "BaseInf.h"
 #include "BombItem.h"
@@ -755,7 +756,13 @@ void GoalAI::BootEmit::act(AICreature* item)
 		pos.y += 110.0f;
 		seed->init(pos);
 		seed->setColor(obj->mOnionColour);
+#if defined(PIKI_PC_PORT)
+		// M1 deterministic netplay: the discarded draw still advances the
+		// sim stream, so route it (rand() passthrough when off).
+		pc_sim_rand();
+#else
 		rand();
+#endif
 		f32 dir = obj->mFaceDirection;
 		seed->mVelocity.set(sinf(dir) * 290.0f, 800.0f, cosf(dir) * 290.0f);
 		item->playEventSound(item, SE_CONTAINER_PIKIBORN);

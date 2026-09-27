@@ -88,6 +88,9 @@ static f32 pcNaviHurt(f32 damage) { return damage; }
 #include "bugprint.h"
 #include "gameflow.h"
 #include "jaudio/piki_player.h"
+#if defined(PIKI_PC_PORT)
+#include "netplay/pc_sim_rng.h"
+#endif
 #include "sysMath.h"
 #include "sysNew.h"
 #include "teki.h"
@@ -454,7 +457,18 @@ void Navi::startDamageEffect()
 	mDamageEfxC = ptclGenC;
 
 	int vibTypes[2] = { 0, 1 };
+#if defined(PIKI_PC_PORT)
+	// M1 deterministic netplay: this only picks which camera-vibration
+	// pattern plays on damage, so it draws from the cosmetic stream. M1
+	// coupling (known gap): vibration shakes the camera, and the sim still
+	// derives its stick basis from controlCamera() until camera-yaw-as-input
+	// lands (report section 2b.4), so a cosmetic draw-count difference can
+	// feed back into movement. Cross-window-size determinism is NOT claimed
+	// in M1 for this reason.
+	f32 randIdx     = pc_cosmetic_randf(1.0f);
+#else
 	f32 randIdx     = gsys->getRand(1.0f);
+#endif
 	// int vib         = vibTypes[int(2.0f * randIdx * 0.9999999f)];
 #if defined(PIKI_PC_PORT)
 	// Daño propio: solo tiembla la cámara del Olimar golpeado.

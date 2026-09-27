@@ -1,4 +1,5 @@
 #include "pc_randomizer.h"
+#include "netplay/pc_netplay_det.h"
 #if PIKI_USE_JAUDIO
 #include "port/jaudio_host.h"
 #include "port/audio_sink.h"
@@ -1283,6 +1284,15 @@ void pc_window_poll_events(PADStatus* pad) {
         pad[1].substickY    = cy2;
         pad[1].triggerLeft  = tl2;
         pad[1].triggerRight = tr2;
+        // M1 det fix: the sim keeps running while unfocused, so in det mode
+        // the same !accept_input() zeroing applied to pad 0 above must cover
+        // pad 1 (all local input). Off-mode path untouched.
+        if (!pc_bbft_accept_input() && pc_netplay_deterministic()) {
+            pad[1].button = 0;
+            pad[1].stickX = pad[1].stickY = 0;
+            pad[1].substickX = pad[1].substickY = 0;
+            pad[1].triggerLeft = pad[1].triggerRight = 0;
+        }
     }
     if (!acceptInput) {
         pad[1].button = 0;
@@ -1329,7 +1339,9 @@ void pc_window_swap_buffers(void) {
         SDL_GL_SwapWindow(sWindow);
         // VSync Off must not retain the software presentation limiter. Game
         // simulation uses the fixed-step scheduler independently.
-        if (sVsyncEnabled) {
+        // M1 deterministic netplay: unthrottled replay runs bypass the
+        // limiter as well (fast replay tests; the sim is unchanged).
+        if (sVsyncEnabled && !pc_netplay_unthrottled()) {
             // The interval is the game's setFrameClamp: retraces per logical
             // frame against a 60 Hz base, so 1 is 60 Hz and 2 is 30 Hz. The
             // port adds 0 for 120 Hz, which has no 60 Hz divisor. Mirror
