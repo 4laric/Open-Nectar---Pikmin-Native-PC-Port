@@ -46,6 +46,10 @@ STICK_MAX = 96  # comfortable deflection, inside the s8 range
 
 def gen_ticks(nticks: int, seed: int):
     rng = random.Random(seed)
+    # Yaw parameters come from a SEPARATE generator so the PAD stream (rng)
+    # stays exactly the M1 sequence: --v1 output for a fixed seed is
+    # byte-identical to the M1 generator's output. (M2c review M4.)
+    yaw_rng = random.Random(seed * 1000003 + 0x59415701)
     # Walk state: current stick target + ticks remaining on this leg.
     wx, wy = 0, 0
     leg_left = 0
@@ -64,10 +68,10 @@ def gen_ticks(nticks: int, seed: int):
     # Slowly varying control yaw per pad (turns): a base drift plus a
     # gentle sinusoid, so consecutive ticks differ by a fraction of a
     # degree like a real camera, plus per-pad offsets so pads disagree.
-    yaw_base = [rng.uniform(0.0, 1.0) for _ in range(4)]
-    yaw_rate = [rng.uniform(-0.0006, 0.0006) for _ in range(4)]
-    yaw_amp = [rng.uniform(0.0, 0.004) for _ in range(4)]
-    yaw_period = [rng.uniform(300.0, 1200.0) for _ in range(4)]
+    yaw_base = [yaw_rng.uniform(0.0, 1.0) for _ in range(4)]
+    yaw_rate = [yaw_rng.uniform(-0.0006, 0.0006) for _ in range(4)]
+    yaw_amp = [yaw_rng.uniform(0.0, 0.004) for _ in range(4)]
+    yaw_period = [yaw_rng.uniform(300.0, 1200.0) for _ in range(4)]
 
     for tick in range(nticks):
         if leg_left <= 0:
@@ -142,7 +146,7 @@ def gen_ticks(nticks: int, seed: int):
                 yaw_base[p]
                 + yaw_rate[p] * tick
                 + yaw_amp[p] * math.sin(2 * math.pi * tick / yaw_period[p])
-            )
+            ) % 1.0
             yaws.append(int(turns * 65536.0 + 0.5) & 0xFFFF)
         yield (buttons, jx, jy, cx, cy, trig_l, trig_r, yaws)
 

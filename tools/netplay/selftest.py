@@ -8,6 +8,7 @@ netplay_replay_selftest). No game is launched.
 4. Truncates one log, compares (expect exit 1).
 """
 
+import hashlib
 import struct
 import subprocess
 import sys
@@ -83,6 +84,12 @@ def main():
         run_gen(200, 7, gen_v1, extra=("--v1",))
         check(read_pkni(gen_v1, expect_version=1, expect_rec=44, expect_pad=11) == 200,
               "--v1 writes 200 parseable v1 ticks")
+        # M2c review M4: --v1 must reproduce the M1 input stream, not just the
+        # format. Golden SHA-256 of the M1 generator's output for
+        # --ticks 200 --seed 7 (base 7b21c90d2 tools/netplay/gen_inputs.py).
+        M1_GOLDEN_200_S7 = "8796ad2372d53ddd3236105cd09b02a8bdb52f3d10039e787394fd7788bf0cfe"
+        check(hashlib.sha256(gen_v1.read_bytes()).hexdigest() == M1_GOLDEN_200_S7,
+              "--v1 output is byte-identical to the M1 stream (M4)")
 
         base = []
         for t in range(1, 51):
