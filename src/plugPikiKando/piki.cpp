@@ -2468,6 +2468,9 @@ void Piki::init(Navi* navi)
 	mLeaderCreature   = nullptr;
 	mInWaterTimer     = 0;
 	mFiredState       = 0;
+#if defined(PIKI_PC_PORT)
+	mPcSieging = false; // VS: el objeto se recicla; no heredar el asedio de otro Pikmin
+#endif
 	mIsCallable       = true;
 	mLastAnimPosition.set(0.0f, 0.0f, 0.0f);
 	unsetEraseKill();

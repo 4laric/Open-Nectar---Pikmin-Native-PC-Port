@@ -909,6 +909,13 @@ void pc_window_poll_events(PADStatus* pad) {
                 // is invisible to SDL_GetMouseState, so remember every press.
                 if (event.button.button >= 1 && event.button.button <= 8)
                     sMousePressedMask |= SDL_BUTTON(event.button.button);
+                // Menú F1 abierto: el clic izquierdo es un toque (misma lógica
+                // que la pantalla táctil: seleccionar fila / pulsar la ya elegida).
+                if (sSettingsMenuOpen && event.button.button == SDL_BUTTON_LEFT && event.button.which != SDL_TOUCH_MOUSEID) {
+                    int ww = 0, wh = 0;
+                    SDL_GetWindowSize(sWindow, &ww, &wh);
+                    if (ww > 0 && wh > 0) pc_settings_touch_tap(event.button.x / float(ww), event.button.y / float(wh));
+                }
                 break;
             case SDL_MOUSEWHEEL: {
                 // SDL reports natural-scroll flipping through the direction

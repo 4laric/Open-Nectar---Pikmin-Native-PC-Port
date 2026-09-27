@@ -2027,6 +2027,10 @@ void pollMenuInput() {
     bool tabPrev = keyWentDown(SDL_SCANCODE_Q) || keyWentDown(SDL_SCANCODE_PAGEUP);
     bool tabNext = keyWentDown(SDL_SCANCODE_E) || keyWentDown(SDL_SCANCODE_PAGEDOWN) ||
                    keyWentDown(SDL_SCANCODE_TAB);
+    // Ratón: rueda = arriba/abajo, botón derecho = atrás (el izquierdo llega
+    // como toque desde pc_window).
+    if (const int wheel = pc_window_take_wheel_steps()) (wheel > 0 ? up : down) = true;
+    if (pc_window_take_mouse_pressed() & SDL_BUTTON(SDL_BUTTON_RIGHT)) cancel = true;
     if (ctl || sTouchFrameButtons) {
         if (padNavUp(ctl)) up = true;
         if (padNavDown(ctl)) down = true;
@@ -4321,6 +4325,8 @@ void pc_settings_apply_vs_rules(void) {
     r.rocketWin       = sConfig.vsRocketWin != 0;
     r.rocketHp        = kVsRocketHps[std::clamp(sConfig.vsRocketHp, 0, 2)];
     r.bigPieceSeconds = kVsBigPiece[std::clamp(sConfig.vsBigPiece, 0, 3)];
+    // Que la gorda salga antes del final (5 min con "a los 5 min" no saldría nunca).
+    if (r.bigPieceSeconds >= r.matchSeconds) r.bigPieceSeconds = r.matchSeconds * 0.5f;
     // Entre los dos no pueden pasar del límite general del campo.
     r.fieldLimit    = std::min(kVsPikiLimits[std::clamp(sConfig.vsPikiLimit, 0, 2)], pc_settings_get_piki_limit() / 2);
     r.pelletSeconds = kVsPellets[std::clamp(sConfig.vsPellets, 0, 3)];
@@ -4508,7 +4514,10 @@ void pc_settings_draw_vs_hud(void) {
         sVsOverSince = 0;
         sVsEndChoice = 0;
     }
-    if (sMenuOpen || pc_glass_menu_active()) return;
+    // Con un menú del port encima, la cuenta atrás espera (va con reloj real).
+    const bool menuOver = sMenuOpen || pc_glass_menu_active();
+    pc_vs_countdown_set_frozen(menuOver);
+    if (menuOver) return;
     const bool live = sLastGameplayFrameMs != 0 && SDL_GetTicks() - sLastGameplayFrameMs <= 250;
     if (!live && !sPausedByVs) return;
     if (!gsys || !gsys->mDGXGfx) return;

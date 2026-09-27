@@ -940,6 +940,13 @@ ModeState* RunningModeState::update(u32& result)
 	}
 #endif
 	result = UPDATE_ALL; // enable all update types to start, then disable any we don't want.
+#if defined(PIKI_PC_PORT)
+	// VS: nadie se mueve durante la cuenta atrás ni con la partida acabada.
+	// mPauseAll solo para el reloj y el mundo; la IA (capitanes incluidos) va aparte.
+	if (pc_vs_active() && (pc_vs_countdown_holding() || pc_vs_match_over())) {
+		result &= ~UPDATE_AI;
+	}
+#endif
 
 	// if we've entered the end of day cutscene, transit to the day over state to handle the day end phases
 	if (!gameflow.mMoviePlayer->mIsActive && !gameflow.mIsTutorialTextActive && gameflow.mIsDayEndActive) {

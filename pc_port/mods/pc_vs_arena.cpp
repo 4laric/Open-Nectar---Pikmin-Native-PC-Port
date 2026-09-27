@@ -279,6 +279,24 @@ bool inWater(f32 x, f32 z)
 	return false;
 }
 
+// Hondura del fondo en (x, z): 0 fuera, kPondDepth dentro, con una rampa en
+// la orilla y alrededor del islote para que no queden picos de un vértice
+// hundido y su vecino a ras (la cuadrícula es de kCell).
+f32 pondDepth(f32 x, f32 z)
+{
+	f32 best = 0.0f;
+	for (const Pond& p : kPonds) {
+		const f32 dx = x - p.cx, dz = z - p.cz;
+		const f32 e = std::sqrt((dx / p.rx) * (dx / p.rx) + (dz / p.rz) * (dz / p.rz)); // 1 = orilla
+		const f32 d = std::sqrt(dx * dx + dz * dz);
+		const f32 shore  = (1.0f - e) * p.rz / kCell;     // celdas hasta la orilla
+		const f32 island = (d - p.island) / kCell;        // celdas hasta el islote
+		const f32 t      = std::min(1.0f, std::max(0.0f, std::min(shore, island)));
+		best = std::max(best, t * kPondDepth);
+	}
+	return best;
+}
+
 // Compuertas de roca-bomba en el hueco central de cada base.
 constexpr f32 kGateX = 1150.0f;
 
@@ -301,10 +319,13 @@ bool buildMod(std::vector<u8>& out)
 	std::vector<Vector3f> verts;
 	std::vector<Vector3f> normals { Vector3f(0.0f, 1.0f, 0.0f) };
 	// Colores: 0 blanco, 1 blanco transparente (orilla del agua), 2 el del
-	// fondo de la charca original.
-	const u32 colours[3] = { 0xFFFFFFFF, 0xFFFFFF00, 0x868686E3 };
+	// fondo de la charca original, 3 ese fondo transparente (se funde en la orilla).
+	const u32 colours[4] = { 0xFFFFFFFF, 0xFFFFFF00, 0x868686E3, 0x86868600 };
 	std::vector<Vector2f> uv0, uv1;
 	MeshBuild floor { kFloorMat, kFloorFlags }, bed { kBedMat, kBedFlags }, walls { kWallMat, kWallFlags };
+	// Hierba opaca bajo el fondo de la charca: el fondo (23) es translúcido y,
+	// como en el original, se pinta encima de otra capa, no sobre el vacío.
+	MeshBuild under { kFloorMat, kFloorFlags };
 
 	// Suelo en cuadrícula; dentro de las charcas se hunde y es agua.
 	const int cellsX = int(2.0f * kHalfX / kCell), cellsZ = int(2.0f * kHalfZ / kCell);
@@ -313,7 +334,7 @@ bool buildMod(std::vector<u8>& out)
 	for (int iz = 0; iz < vertsZ; iz++) {
 		for (int ix = 0; ix < vertsX; ix++) {
 			const f32 x = -kHalfX + ix * kCell, z = -kHalfZ + iz * kCell;
-			verts.push_back(Vector3f(x, inWater(x, z) ? -kPondDepth : 0.0f, z));
+			verts.push_back(Vector3f(x, -pondDepth(x, z), z));
 			uv0.push_back(Vector2f(x * kFloorUv0, z * kFloorUv0)); // índice = vértice
 			uv1.push_back(Vector2f(x * kFloorUv1, z * kFloorUv1));
 		}
@@ -326,9 +347,15 @@ bool buildMod(std::vector<u8>& out)
 				const f32 cz = (verts[t[0]].z + verts[t[1]].z + verts[t[2]].z) / 3.0f;
 				const bool water = inWater(cx, cz);
 				Tri tri { { t[0], t[1], t[2] }, 0, water ? kWaterCode : kFloorCode, { 0, 0, 0 } };
-				if (water) tri.col[0] = tri.col[1] = tri.col[2] = 2;
 				tri.normal = int(normals.size());
 				normals.push_back(triNormal(verts, tri));
+				if (water) {
+					under.tris.push_back(tri);
+					under.uv0.push_back(t);
+					under.uv1.push_back(t);
+					// El fondo se desvanece hacia la orilla en vez de acabar en dientes.
+					for (int k = 0; k < 3; k++) tri.col[k] = verts[t[k]].y <= -kPondDepth * 0.5f ? 2 : 3;
+				}
 				MeshBuild& m = water ? bed : floor;
 				m.tris.push_back(tri);
 				m.uv0.push_back(t);
@@ -413,7 +440,9 @@ bool buildMod(std::vector<u8>& out)
 					const int a = base + s * 4 + r, b = base + s2 * 4 + r, c = base + s * 4 + r + 1, d = base + s2 * 4 + r + 1;
 					const int uvBase = int(uv0.size()) - kSeg * 4; // UV = mismo orden que los vértices del charco
 					auto uvOf        = [&](int vi) { return uvBase + (vi - base); };
-					for (const std::array<int, 3>& t : { std::array<int, 3> { a, b, c }, std::array<int, 3> { b, d, c } }) {
+					// Orden como el suelo (normal hacia arriba); al revés se descartaban
+					// por cara trasera y el agua no se veía.
+					for (const std::array<int, 3>& t : { std::array<int, 3> { a, c, b }, std::array<int, 3> { b, c, d } }) {
 						Tri tri { { t[0], t[1], t[2] }, 0, 0, { 0, 0, 0 } };
 						for (int k = 0; k < 3; k++) tri.col[k] = alpha[(t[k] - base) % 4];
 						m.tris.push_back(tri);
@@ -425,8 +454,10 @@ bool buildMod(std::vector<u8>& out)
 		water.push_back(m);
 	}
 
-	std::vector<const MeshBuild*> meshes { &floor, &bed, &walls };
-	for (const MeshBuild& m : water) meshes.push_back(&m);
+	// Orden de las translúcidas como en practice.mod (16, 15, 24, 23): el juego
+	// las pinta de la última a la primera, así que el fondo (23) va primero y
+	// el agua encima. Con el fondo al final, tapaba el agua.
+	std::vector<const MeshBuild*> meshes { &floor, &under, &walls, &water[2], &water[0], &water[1], &bed };
 
 	Vector3f bmin(-kHalfX, -kPondDepth, -kHalfZ), bmax(kHalfX, kWallH, kHalfZ);
 
@@ -446,7 +477,7 @@ bool buildMod(std::vector<u8>& out)
 	w.end();
 
 	w.begin(kChunkColour);
-	w.s32(3);
+	w.s32(4);
 	w.pad32();
 	for (u32 c : colours) w.s32(c);
 	w.end();
@@ -476,7 +507,19 @@ bool buildMod(std::vector<u8>& out)
 	w.end();
 
 	copyChunk(kChunkTexture);
-	copyChunk(kChunkTexAttr);
+	{
+		// Todas las mallas de la arena llevan UV a escala de mundo (pasan de
+		// 1 en paredes y suelo), así que las texturas deben repetirse. Algunas
+		// de practice.mod vienen en clamp (la roca de los muretes, p. ej.) y el
+		// borde se estiraba de punta a punta de la pared.
+		const size_t at = w.b.size() + ((32 - w.b.size() % 32) % 32); // tras el pad32 de copyChunk
+		copyChunk(kChunkTexAttr);
+		const u32 count = be32(w.b, at + 8);
+		for (u32 i = 0; i < count; i++) {
+			const size_t tiling = at + 32 + i * 12 + 4; // TexAttr: índice, pad, tiling, ...
+			if (tiling + 2 <= w.b.size()) w.b[tiling] = w.b[tiling + 1] = 0; // repetir en S y T
+		}
+	}
 	copyChunk(kChunkMaterial);
 
 	// Una sola matriz: la articulación 0.
@@ -705,6 +748,25 @@ bool buildIni(std::vector<u8>& out)
 	}
 	const size_t eol = text.find('\n', at);
 	text.replace(at, (eol == std::string::npos ? text.size() : eol) - at, std::string("map_file\t\t") + PC_VS_ARENA_MOD);
+
+	// La luz principal de Impact Site es un foco de 45° pegado al capitán 1:
+	// en la arena todo lo que queda lejos de J1 (la base de J2, la vista
+	// abierta) salía a oscuras. Aquí es un sol paralelo, algo inclinado para
+	// que los muretes también reciban luz, igual para los dos jugadores.
+	for (size_t block = text.find("light 0 {"); block != std::string::npos; block = text.find("light 0 {", block + 1)) {
+		if (text.find('}', block) == std::string::npos) break;
+		auto setField = [&](const char* key, const char* value) {
+			const size_t k = text.find(key, block);
+			if (k == std::string::npos || k > text.find('}', block)) return;
+			const size_t e = text.find('\n', k);
+			text.replace(k, e - k, std::string(key) + "  " + value);
+		};
+		setField("type", "1");
+		setField("attach", "0");
+		setField("direction", "0.32 -0.92 0.23");
+		// Paralela en GX = punto muy lejano sin atenuación, del lado del sol.
+		setField("position", "-32000.00 92000.00 -23000.00");
+	}
 	out.assign(text.begin(), text.end());
 	return true;
 }

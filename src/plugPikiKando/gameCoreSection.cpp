@@ -1000,6 +1000,7 @@ static u32 sVsPieceIds[PC_VS_PIECE_KINDS];
 static void pcVsChoosePieces()
 {
 	for (u32& id : sVsPieceIds) id = 0;
+	pc_vs_set_missing_pieces(false);
 	std::vector<PelletConfig*> parts;
 	for (CoreNode* n = pelletMgr->pcFirstConfig(); n; n = n->mNext) {
 		PelletConfig* c = static_cast<PelletConfig*>(n);
@@ -1007,6 +1008,7 @@ static void pcVsChoosePieces()
 	}
 	if (parts.size() < PC_VS_PIECE_KINDS) {
 		fprintf(stderr, "[VS] only %zu ship parts available\n", parts.size());
+		pc_vs_set_missing_pieces(true);
 		return;
 	}
 	std::stable_sort(parts.begin(), parts.end(), [](PelletConfig* a, PelletConfig* b) {
@@ -1153,17 +1155,15 @@ static void pcVsUpdate(MapMgr* map)
 		pc_vs_announce(player == 0 ? "P1: REINFORCEMENTS IN YOUR ONIONS" : "P2: REINFORCEMENTS IN YOUR ONIONS", 4.0f);
 	}
 
-	for (int player = 0; player < 2; player++) {
-		// Daño fijo por Pikmin: con 20, la vida baja aguanta ~24 s, la normal
-		// ~40 s y la alta ~60 s.
-		if (sieging[player]) pc_vs_damage_rocket(player, sieging[player] * PC_VS_SIEGE_DPS * dt, 1 - player);
-		pc_vs_set_alive(player, alive[player]);
-	}
+	// Daño fijo por Pikmin: con 20, la vida baja aguanta ~24 s, la normal
+	// ~40 s y la alta ~60 s. Los dos a la vez: si caen en el mismo fotograma, empate.
+	pc_vs_damage_rockets(sieging[0] * PC_VS_SIEGE_DPS * dt, sieging[1] * PC_VS_SIEGE_DPS * dt);
+	for (int player = 0; player < 2; player++) pc_vs_set_alive(player, alive[player]);
 
 	if (!wasOver && pc_vs_match_over()) {
 		const int w = pc_vs_winner();
 		const bool destroyed = pc_vs_rocket_hp(0) <= 0.0f || pc_vs_rocket_hp(1) <= 0.0f;
-		const char* msg = w == 2 ? "TIME! DRAW"
+		const char* msg = w == 2 ? (destroyed ? "BOTH ROCKETS DESTROYED! DRAW" : "TIME! DRAW")
 		                : destroyed ? (w == 0 ? "ROCKET DESTROYED! PLAYER 1 WINS" : "ROCKET DESTROYED! PLAYER 2 WINS")
 		                            : (w == 0 ? "TIME! PLAYER 1 WINS" : "TIME! PLAYER 2 WINS");
 		pc_vs_announce(msg, 600.0f);
@@ -1176,6 +1176,7 @@ static void pcVsSetupBases(MapMgr* map)
 {
 	// Cuenta atrás 3, 2, 1, START con el mundo en pausa (la lleva el HUD).
 	pc_vs_countdown_arm();
+	if (pc_vs_missing_pieces()) pc_vs_announce("NO SHIP PARTS FOUND - CHECK GAME FILES", 60.0f);
 
 	// Sin escenas de la historia: todas cuentan como ya vistas (descubrir
 	// cebollas, primer motor, primeros amarillos/azules...). VS no guarda.

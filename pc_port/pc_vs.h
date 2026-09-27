@@ -55,6 +55,8 @@ f32 pc_vs_rocket_hp(int player);
 /// Vida en porcentaje de la máxima.
 int pc_vs_rocket_percent(int player);
 void pc_vs_damage_rocket(int player, f32 amount, int attacker);
+/// Daño a los dos cohetes en el mismo paso: si caen a la vez, empate.
+void pc_vs_damage_rockets(f32 amount0, f32 amount1);
 void pc_vs_repair_rocket(int player, f32 amount);
 /// -1 sin decidir; 0/1 ganador; 2 empate.
 int pc_vs_winner(void);
@@ -68,9 +70,14 @@ void pc_vs_countdown_arm(void);
 int pc_vs_countdown_phase(void);
 /// True mientras el mundo tiene que seguir en pausa (antes del START).
 bool pc_vs_countdown_holding(void);
+/// Congela la cuenta atrás (menús del port abiertos encima).
+void pc_vs_countdown_set_frozen(bool frozen);
 
 /// Aviso grande en pantalla (texto y segundos que quedan de mostrarlo).
 void pc_vs_announce(const char* text, f32 seconds);
+/// No hay piezas de la nave suficientes en los datos del juego.
+void pc_vs_set_missing_pieces(bool missing);
+bool pc_vs_missing_pieces(void);
 const char* pc_vs_announcement(void);
 
 /// Salida de la partida pedida desde la pantalla final o la pausa.

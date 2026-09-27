@@ -24,6 +24,8 @@ int sSerial           = 0;
 // Cuenta atrás: armada -> empieza al primer fotograma visible.
 bool sCountdownArmed  = false;
 double sCountdownT0   = -1.0;
+double sFrozenAt      = -1.0; // >= 0: congelada desde entonces
+bool sMissingPieces   = false;
 constexpr double kLeadIn   = 0.6; // deja terminar el fundido de entrada
 constexpr double kStep     = 1.0; // 3, 2, 1
 constexpr double kStartMsg = 0.9; // "START"
@@ -53,6 +55,7 @@ void pc_vs_match_reset(void)
 	sExitRequest  = PC_VS_EXIT_NONE;
 	sCountdownArmed = false;
 	sCountdownT0    = -1.0;
+	sFrozenAt       = -1.0;
 	sAlive[0] = sAlive[1] = 0;
 	sSerial++;
 }
@@ -135,6 +138,20 @@ void pc_vs_damage_rocket(int player, f32 amount, int attacker)
 	}
 }
 
+void pc_vs_damage_rockets(f32 amount0, f32 amount1)
+{
+	if (pc_vs_match_over() || !sRules.rocketWin) return;
+	const f32 amount[2] = { amount0, amount1 };
+	for (int p = 0; p < 2; p++) {
+		if (amount[p] > 0.0f) sRocketHp[p] = sRocketHp[p] > amount[p] ? sRocketHp[p] - amount[p] : 0.0f;
+	}
+	const bool down0 = sRocketHp[0] <= 0.0f, down1 = sRocketHp[1] <= 0.0f;
+	if (!down0 && !down1) return;
+	sWinner      = down0 && down1 ? 2 : (down0 ? 1 : 0);
+	sWonByRocket = true;
+	fprintf(stderr, "[VS] rocket destroyed: winner %d\n", sWinner);
+}
+
 void pc_vs_repair_rocket(int player, f32 amount)
 {
 	if ((player != 0 && player != 1) || pc_vs_match_over()) return;
@@ -154,7 +171,7 @@ void pc_vs_countdown_arm(void)
 int pc_vs_countdown_phase(void)
 {
 	if (!sCountdownArmed) return -1;
-	const double now = nowSeconds();
+	const double now = sFrozenAt >= 0.0 ? sFrozenAt : nowSeconds();
 	if (sCountdownT0 < 0.0) sCountdownT0 = now; // primer fotograma visible
 	const double t = now - sCountdownT0 - kLeadIn;
 	if (t < 0.0) return 3; // el 3 se ve ya durante el fundido
@@ -164,6 +181,18 @@ int pc_vs_countdown_phase(void)
 	if (t < 3 * kStep + kStartMsg) return 0;
 	sCountdownArmed = false;
 	return -1;
+}
+
+void pc_vs_countdown_set_frozen(bool frozen)
+{
+	if (frozen == (sFrozenAt >= 0.0)) return;
+	const double now = nowSeconds();
+	if (frozen) {
+		sFrozenAt = now;
+	} else {
+		if (sCountdownT0 >= 0.0) sCountdownT0 += now - sFrozenAt; // no cuenta lo congelado
+		sFrozenAt = -1.0;
+	}
 }
 
 bool pc_vs_countdown_holding(void)
@@ -178,6 +207,9 @@ void pc_vs_announce(const char* text, f32 seconds)
 	snprintf(sAnnounce, sizeof(sAnnounce), "%s", text ? text : "");
 	sAnnounceLeft = seconds;
 }
+
+void pc_vs_set_missing_pieces(bool missing) { sMissingPieces = missing; }
+bool pc_vs_missing_pieces(void) { return sMissingPieces; }
 
 const char* pc_vs_announcement(void) { return sAnnounceLeft > 0.0f ? sAnnounce : nullptr; }
 
