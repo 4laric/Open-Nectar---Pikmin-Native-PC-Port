@@ -4000,6 +4000,16 @@ Camera* GameCoreSection::getViewCamera(int view)
 
 void GameCoreSection::drawGameInfoHud(Graphics& gfx)
 {
+#if defined(PIKI_PC_PORT)
+	// M2b fix (review M6): in det co-op each peer shows only its local
+	// captain's HUD fullscreen, not the split layout.
+	if (pc_netplay_present_two_pass_active() && isSplitScreen() && !gameflow.mMoviePlayer->mIsActive) {
+		const int local = pc_netplay_present_local_player();
+		zen::DrawGameInfo* hud = (local == 1 && mDrawGameInfo2) ? mDrawGameInfo2 : mDrawGameInfo;
+		hud->draw(gfx);
+		return;
+	}
+#endif
 	if (!isSplitScreen() || !mDrawGameInfo2 || gameflow.mMoviePlayer->mIsActive) {
 		mDrawGameInfo->draw(gfx);
 		return;
@@ -4038,6 +4048,16 @@ void GameCoreSection::drawGameInfoHud(Graphics& gfx)
 // de su mitad, con el mismo espacio virtual que su HUD.
 void GameCoreSection::drawContainerWindows(Graphics& gfx)
 {
+#if defined(PIKI_PC_PORT)
+	// M2b fix (review M6): det co-op shows only the local player's menu
+	// window fullscreen (mirrors drawGameInfoHud above).
+	if (pc_netplay_present_two_pass_active() && isSplitScreen() && !gameflow.mMoviePlayer->mIsActive) {
+		const int local = pc_netplay_present_local_player();
+		zen::DrawContainer* win = (local == 1 && containerWindow2) ? containerWindow2 : containerWindow;
+		win->draw(gfx);
+		return;
+	}
+#endif
 	if (!isSplitScreen() || !containerWindow2 || gameflow.mMoviePlayer->mIsActive) {
 		containerWindow->draw(gfx);
 		return;
@@ -4197,11 +4217,7 @@ void GameCoreSection::draw(Graphics& gfx)
 		Vector3f pos;
 		gameflow.mMoviePlayer->getLookAtPos(pos);
 		seSystem->update(gfx, pos);
-#if defined(PIKI_PC_PORT)
 	} else if (advanceState) {
-#else
-	} else if (advanceState) {
-#endif
 #if defined(PIKI_PC_PORT)
 		// Pantalla partida: el escuchador va al punto medio entre los dos.
 		if (mNavi2 && mNavi2->isAlive()) {

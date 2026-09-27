@@ -2391,8 +2391,12 @@ public:
 		// cámara. El estado (sonido, efectos) solo avanza en la primera pasada.
 		// M2b: in det co-op each peer renders only its local captain full
 		// screen (no split). Both captains are still simulated.
+		// M2b fix (review M6): same movie/memcard exclusions as splitScreen
+		// (during a co-op cutscene the movie camera owns the view, not the
+		// captain's), so cutscenes keep working in det co-op.
 		const bool detSingleView = pc_netplay_present_two_pass_active() && sGamecoreLive && gamecore
-		                        && gamecore->isSplitScreen();
+		                        && gamecore->isSplitScreen() && !gameflow.mMoviePlayer->mIsActive
+		                        && !(gameflow.mDemoFlags & CinePlayerFlags::NonGameMovie) && !memcardWindow;
 		const bool splitScreen = !detSingleView && sGamecoreLive && gamecore && gamecore->isSplitScreen()
 		                      && !gameflow.mMoviePlayer->mIsActive
 		                      && !(gameflow.mDemoFlags & CinePlayerFlags::NonGameMovie) && !memcardWindow;
@@ -2405,9 +2409,13 @@ public:
 #if defined(PIKI_PC_PORT)
 			// M2b: det co-op presentation shows the local captain full
 			// screen with its own camera. Authoritative keeps SimCamera.
+			// M2b fix (review M6): update the camera for the full-screen
+			// aspect / clip, as beginView does per split view.
 			if (detSingleView && !pc_render_is_authoritative() && sGamecoreLive && gamecore) {
 				Camera* localCam = gamecore->getViewCamera(pc_netplay_present_local_player());
 				if (localCam) {
+					localCam->update(f32(gfx.mScreenWidth) / f32(gfx.mScreenHeight), localCam->mFov,
+					                 pc_first_person_active() ? 3.0f : 100.0f, mCameraFarClip);
 					gfx.setCamera(localCam);
 				}
 			}
