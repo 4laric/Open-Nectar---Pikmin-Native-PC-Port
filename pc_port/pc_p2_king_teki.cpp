@@ -1,4 +1,5 @@
 #include "pc_p2_king_teki.h"
+#include "netplay/pc_netplay_det.h"
 #include "pc_p2_king_teki_policy.h"
 #include "pc_p2_king_policy.h"
 #include "pc_p2_animation.h"
@@ -196,7 +197,14 @@ void pc_p2_king_teki_tick(BTeki* t) {
 	// wander off and drag the fight/carcass away from the squad.
 	t->mSRT.t = b.home;
 	const unsigned now = SDL_GetTicks();
-	clockAcc += float(now - lastTicks) * 0.001f;
+	if (pc_netplay_deterministic()) {
+		// M1: fixed-step advance of 1/30 s per tick (det gameplay is forced
+		// to the 30 Hz clamp), so the behavior clock matches on every peer;
+		// the wall anchor is still refreshed so leaving det mode never injects a jump.
+		clockAcc += pc_netplay_fixed_dt(2);
+	} else {
+		clockAcc += float(now - lastTicks) * 0.001f;
+	}
 	lastTicks = now;
 	int steps = 0;
 	while (clockAcc >= Tick && steps < 4) {

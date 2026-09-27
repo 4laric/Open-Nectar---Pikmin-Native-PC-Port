@@ -35,6 +35,7 @@
 //   P2_POM_INJECT_1 <count>
 //   <generator-u32> <forcedBirthFailures>          x count
 #include "pc_p2_pom.h"
+#include "netplay/pc_netplay_det.h"
 #include "pc_p2_pom_policy.h"
 #include "pc_bbft.h"
 #include "GameStat.h"
@@ -582,7 +583,14 @@ void pc_p2_pom_tick()
 		clockPrimed = true;
 	}
 	const unsigned now = SDL_GetTicks();
-	clockAcc += float(now - clockLast) * 0.001f;
+	if (pc_netplay_deterministic()) {
+		// M1: fixed-step advance of 1/30 s per tick (det gameplay is forced
+		// to the 30 Hz clamp), so the behavior clock matches on every peer;
+		// the wall anchor is still refreshed so leaving det mode never injects a jump.
+		clockAcc += pc_netplay_fixed_dt(2);
+	} else {
+		clockAcc += float(now - clockLast) * 0.001f;
+	}
 	clockLast = now;
 	int steps = 0;
 	while (clockAcc >= SimTick && steps < MaxCatchUpSteps) {

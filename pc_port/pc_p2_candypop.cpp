@@ -15,6 +15,7 @@
 // reported unsupported here (the violet/ivory providers own them); the base Pom
 // is rejected and never bound. Without the file the module is inert.
 #include "pc_p2_candypop.h"
+#include "netplay/pc_netplay_det.h"
 #include "pc_p2_pom_policy.h"
 #include "pc_bbft.h"
 #include "Boss.h"
@@ -218,7 +219,14 @@ void pc_p2_candypop_tick()
 	if (clockLast == 0) {
 		clockLast = now;
 	}
-	clockAcc += float(now - clockLast) * 0.001f;
+	if (pc_netplay_deterministic()) {
+		// M1: fixed-step advance of 1/30 s per tick (det gameplay is forced
+		// to the 30 Hz clamp), so the behavior clock matches on every peer;
+		// the wall anchor is still refreshed so leaving det mode never injects a jump.
+		clockAcc += pc_netplay_fixed_dt(2);
+	} else {
+		clockAcc += float(now - clockLast) * 0.001f;
+	}
 	clockLast = now;
 	int steps = 0;
 	while (clockAcc >= SimTick && steps < MaxCatchUpSteps) {

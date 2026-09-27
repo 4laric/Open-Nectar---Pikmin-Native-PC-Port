@@ -9,6 +9,7 @@
 // fp01, navi/piki 10 fp24, half-height 50 fp02). Missing sidecar = inert;
 // malformed = fail closed.
 #include "pc_p2_bombotakara.h"
+#include "netplay/pc_netplay_det.h"
 #include "pc_p2_bombotakara_policy.h"
 #include "pc_p2_bombsarai_blast.h"
 #include "pc_bbft.h"
@@ -284,7 +285,14 @@ void pc_p2_bombotakara_setup() {
 void pc_p2_bombotakara_update() {
     if (units.empty()) return;
     const unsigned now = SDL_GetTicks();
-    clockAccumulator += static_cast<float>(now - clockLast) * 0.001f;
+    if (pc_netplay_deterministic()) {
+        // M1: fixed-step advance of 1/30 s per tick (det gameplay is forced
+        // to the 30 Hz clamp), so the behavior clock matches on every peer;
+        // the wall anchor is still refreshed so leaving det mode never injects a jump.
+        clockAccumulator += pc_netplay_fixed_dt(2);
+    } else {
+        clockAccumulator += static_cast<float>(now - clockLast) * 0.001f;
+    }
     clockLast = now;
     int steps = 0;
     while (clockAccumulator >= kTickSeconds && steps < 4) {

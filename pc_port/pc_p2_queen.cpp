@@ -4,6 +4,7 @@
 // only: generic physics/damage, captain states, manager/heap lifetime and
 // save/reward code are untouched. HoH crash rocks are recorded but disabled.
 #include "pc_p2_queen.h"
+#include "netplay/pc_netplay_det.h"
 #include "pc_p2_actor_slots.h"
 #include "pc_p2_queen_policy.h"
 #include "pc_p2_animation.h"
@@ -625,7 +626,14 @@ void pc_p2_queen_setup() {
 void pc_p2_queen_update() {
 	if (queens.empty()) return;
 	const unsigned now = SDL_GetTicks();
-	clockAcc += float(now - clockLast) * 0.001f;
+	if (pc_netplay_deterministic()) {
+		// M1: fixed-step advance of 1/30 s per tick (det gameplay is forced
+		// to the 30 Hz clamp), so the behavior clock matches on every peer;
+		// the wall anchor is still refreshed so leaving det mode never injects a jump.
+		clockAcc += pc_netplay_fixed_dt(2);
+	} else {
+		clockAcc += float(now - clockLast) * 0.001f;
+	}
 	clockLast = now;
 	int steps = 0;
 	while (clockAcc >= Tick && steps < 4) { // bounded: never catch up more than 4 ticks
