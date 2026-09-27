@@ -12,6 +12,16 @@
 // -DP2_OTAKARA_MOVE_TEST_USE_LEGACY swaps it in as the implementation under test,
 // which makes this test exit non-zero (the red state).
 //
+// Fix round 1 (#884 review) adds two more negative controls, swapped in by the same
+// -DP2_OTAKARA_MOVE_TEST_USE_LEGACY switch:
+//   * legacyFlickTrigger: the round-0 port Flick trigger (any live Piki within 60,
+//     nearestPiki(pos, FLICK_RADIUS) in pc_p2_otakara.cpp @ ead0c008), which made an
+//     approaching Pikmin stop the escape and force a discharge before a single hit.
+//     Source isStartFlick (enemyAction.cpp:1209-1244) needs more than ip01=6 hits.
+//   * roundZeroPursue: the round-0 BombOtakara destination (raw target, no territory
+//     rule, pc_p2_otakara_move.h @ ead0c008 :123), which let a Volatile Dweevil be led
+//     anywhere; the source bounds its chase with the 1.5 s stimulateBomb fuse.
+//
 // NOTE: checks use an always-evaluated CHECK macro, never bare assert():
 // release build types define NDEBUG, which would compile assert() out.
 #include "pc_p2_otakara_move.h"
@@ -58,11 +68,30 @@ Vec2 newMovePosition(Vec2 self, Vec2 threat, Vec2 home, float speed, float terri
     return movePosition(Mode::Escape, TargetKind::Creature, self, threat, home, speed, territory, clamped);
 }
 
+// Flick trigger: hits = mFlickTimer, stuck = mStuckPikminCount, pikiDist = nearest
+// live Piki distance (stuck or not).
+using FlickFn = bool (*)(float hits, int stuck, float pikiDist);
+// Round-0 port trigger: nearestPiki(pos, FLICK_RADIUS=60) != nullptr.
+bool legacyFlickTrigger(float, int, float pikiDist) { return pikiDist < 60.0f; }
+bool newFlickTrigger(float hits, int stuck, float) { return isStartFlick(hits, stuck); }
+
+// Bomb 93 chase destination: self, target, home, territory.
+using PursueFn = Vec2 (*)(Vec2 self, Vec2 target, Vec2 home, float territory);
+// Round-0 (ead0c008) Mode::Pursue: `return target;` with no territory rule.
+Vec2 roundZeroPursue(Vec2, Vec2 target, Vec2, float) { return target; }
+Vec2 newPursue(Vec2 self, Vec2 target, Vec2 home, float territory) {
+    return movePosition(Mode::Pursue, TargetKind::Creature, self, target, home, kSpeed, territory);
+}
+
 #ifdef P2_OTAKARA_MOVE_TEST_USE_LEGACY
 const MoveFn kUnderTest = legacyMovePosition;
+const FlickFn kFlickUnderTest = legacyFlickTrigger;
+const PursueFn kPursueUnderTest = roundZeroPursue;
 const char* kUnderTestName = "legacy";
 #else
 const MoveFn kUnderTest = newMovePosition;
+const FlickFn kFlickUnderTest = newFlickTrigger;
+const PursueFn kPursueUnderTest = newPursue;
 const char* kUnderTestName = "header";
 #endif
 
@@ -219,6 +248,123 @@ SimResult simulate(MoveFn fn, float angleDeg, int ticks, float speed, float chas
     return r;
 }
 
+struct ApproachResult {
+    bool fled = false;           // the Dweevil ended well away from home
+    int flicks = 0;              // Flicks committed
+    int landedAtFirstFlick = -1; // hits landed in total when the first Flick committed
+    float minCounterAtFlick = 1e9f; // hit counter (mFlickTimer) at each Flick commit
+    float fleeDist = 0.0f;       // Dweevil distance from home when the run ended
+};
+
+// Closed loop over the source Wait/Move/Turn/Flick decision: one Pikmin walks at the
+// Dweevil at `pikiSpeed`; with `hitting`, once in melee (< 15) it lands one hit every
+// 0.5 s (+1 mFlickTimer each, as addDamage(damage, 1.0f)). `stuck` models
+// mStuckPikminCount. Flick event 2 (attack1 frame 12) resets the counter
+// (OtakaraBaseState.cpp:107); the attack1 end runs afterFlick.
+ApproachResult approach(FlickFn flickFn, float angleDeg, float pikiSpeed, bool hitting, int stuck, int ticks) {
+    ApproachResult r;
+    const Vec2 home{0.0f, 0.0f};
+    Vec2 self = home;
+    Vec2 piki = onCircle(self, 100.0f, angleDeg);
+    float heading = headingTo(self, piki);
+    St st = St::Wait;
+    St next = St::Wait;
+    bool pending = false;
+    float stateTime = 0.0f;
+    float hits = 0.0f;
+    int landed = 0;
+    float hitTimer = 0.0f;
+    const float attackClip = 50.0f / 30.0f; // attack1 50 frames
+    const float event2 = 12.0f / 30.0f;     // attack1 frame 12, event type 2
+    for (int t = 0; t < ticks; ++t) {
+        const float prev = stateTime;
+        stateTime += kDt;
+        const float pikiDist = distXZ(self, piki);
+        if (hitting && pikiDist < 15.0f) {
+            hitTimer += kDt;
+            if (hitTimer >= 0.5f) {
+                hitTimer = 0.0f;
+                hits += 1.0f;
+                ++landed;
+            }
+        }
+        Candidate c[1] = {{piki, false, true, false, false}};
+        const bool has = selectThreat(c, 1, self, kSight) >= 0;
+        const Vec2 dest = has ? escapePosition(self, piki, home, kSpeed, kTerritory) : self;
+        const bool facing = has && facingWithinGate(heading, self, dest);
+        if (st == St::Flick) {
+            if (prev < event2 && stateTime >= event2) hits = 0.0f;
+            if (stateTime >= attackClip) {
+                st = afterFlick(false, has, facing);
+                stateTime = 0.0f;
+                pending = false;
+            }
+        } else {
+            const bool flick = flickFn(hits, stuck, pikiDist);
+            if (st == St::Move && facing && !flick) {
+                heading = turnStep(heading, self, dest, kDt);
+                self.x += std::sin(heading) * kSpeed * kDt;
+                self.z += std::cos(heading) * kSpeed * kDt;
+            } else if (st == St::Turn && has) {
+                heading = turnStep(heading, self, dest, kDt);
+            }
+            const St d = decide({st, has, facing, flick, false});
+            if (d != st) {
+                pending = true;
+                next = d;
+            }
+            if (pending && clipEndCrossed(prev, stateTime, clipFor(st))) {
+                if (next == St::Flick) {
+                    if (r.flicks == 0) r.landedAtFirstFlick = landed;
+                    if (hits < r.minCounterAtFlick) r.minCounterAtFlick = hits;
+                    ++r.flicks;
+                }
+                st = next;
+                pending = false;
+                stateTime = 0.0f;
+            }
+        }
+        const Vec2 to{self.x - piki.x, self.z - piki.z};
+        const float l = len(to);
+        if (l > 1.0f) {
+            const float step = std::fmin(pikiSpeed * kDt, l - 1.0f);
+            piki.x += to.x / l * step;
+            piki.z += to.z / l * step;
+        }
+    }
+    r.fleeDist = distXZ(self, home);
+    r.fled = r.fleeDist > 100.0f;
+    return r;
+}
+
+// BombOtakara 93 chasing a Navi that walks straight away from home at `naviSpeed`
+// (stopping 1000 out). Returns the largest distance from home the Bomb body reached.
+float bombLeash(PursueFn fn, float angleDeg, float naviSpeed, int ticks) {
+    const Vec2 home{0.0f, 0.0f};
+    Vec2 self = home;
+    Vec2 navi = onCircle(home, 60.0f, angleDeg);
+    const Vec2 dir{std::sin(angleDeg * kPi / 180.0f), std::cos(angleDeg * kPi / 180.0f)};
+    float heading = headingTo(self, navi);
+    float maxHome = 0.0f;
+    for (int t = 0; t < ticks; ++t) {
+        const Vec2 dest = fn(self, navi, home, kTerritory);
+        if (distXZ(self, dest) > 1.0f) {
+            heading = turnStep(heading, self, dest, kDt);
+            if (facingWithinGate(heading, self, dest)) {
+                self.x += std::sin(heading) * kSpeed * kDt;
+                self.z += std::cos(heading) * kSpeed * kDt;
+            }
+        }
+        if (distXZ(navi, home) < 1000.0f) {
+            navi.x += dir.x * naviSpeed * kDt;
+            navi.z += dir.z * naviSpeed * kDt;
+        }
+        const float h = distXZ(self, home);
+        if (h > maxHome) maxHome = h;
+    }
+    return maxHome;
+}
+
 } // namespace
 
 int main() {
@@ -364,8 +510,104 @@ int main() {
         CHECK(clipEndCrossed(0.1f, 0.2f, 0.0f));
     }
 
-    std::printf("P2_OTAKARA_MOVE_TEST legacy_failures=%d/8 new_failures=%d legacy_clamp_failures=%d/5\n",
-                legacyDirectional, headerDirectional, legacyClamp);
+    // 9. Source isStartFlick thresholds (retail ip01-ip07 = 6/5/12/10/17/20/22).
+    {
+        CHECK(!isStartFlick(0.0f, 0));
+        CHECK(!isStartFlick(6.0f, 0));
+        CHECK(!isStartFlick(6.4f, 0));
+        CHECK(isStartFlick(6.5f, 0)); // rounded half up -> 7 > 6
+        CHECK(isStartFlick(7.0f, 4));
+        CHECK(!isStartFlick(12.0f, 5));
+        CHECK(isStartFlick(13.0f, 9));
+        CHECK(!isStartFlick(17.0f, 10));
+        CHECK(isStartFlick(18.0f, 19));
+        CHECK(!isStartFlick(22.0f, 20));
+        CHECK(isStartFlick(23.0f, 40));
+        CHECK(!isStartFlick(256.0f, 0)); // u8 truncation, as the source
+    }
+
+    // 10. Ordinary approach from eight directions, no hit landed: the Dweevil flees and
+    // never discharges. The round-0 proximity trigger discharged as soon as the Pikmin
+    // closed to 60, before a single hit (negative control).
+    int legacyApproachFlicks = 0;
+    for (int k = 0; k < 8; ++k) {
+        const float deg = 45.0f * float(k);
+        const ApproachResult r = approach(kFlickUnderTest, deg, 60.0f, false, 0, 900);
+        if (r.flicks != 0 || !r.fled) {
+            std::printf("P2_OTAKARA_MOVE_TEST_APPROACH angle=%.0f flicks=%d flee_dist=%.1f\n", deg, r.flicks,
+                        r.fleeDist);
+        }
+        CHECK(r.flicks == 0);
+        CHECK(r.fled);
+        if (approach(legacyFlickTrigger, deg, 60.0f, false, 0, 900).flicks > 0) ++legacyApproachFlicks;
+    }
+    CHECK(legacyApproachFlicks == 8);
+
+    // 11. Hits drive the Flick. A Pikmin faster than the Dweevil stays in melee and
+    // lands a hit every 0.5 s: every Flick commits with the counter above ip01=6 (0
+    // stuck) or ip03=12 (5 stuck), and event 2 resets it, so the Dweevil flees again
+    // between discharges instead of discharging back to back.
+    for (int k = 0; k < 8; k += 2) {
+        const float deg = 45.0f * float(k);
+        const ApproachResult r = approach(kFlickUnderTest, deg, 120.0f, true, 0, 1800);
+        const ApproachResult stuck = approach(kFlickUnderTest, deg, 120.0f, true, 5, 1800);
+        if (r.flicks < 2 || r.minCounterAtFlick < 7.0f || stuck.flicks < 1 || stuck.minCounterAtFlick < 13.0f) {
+            std::printf("P2_OTAKARA_MOVE_TEST_HITS angle=%.0f flicks=%d first_at=%d min_counter=%.0f "
+                        "stuck_flicks=%d stuck_min_counter=%.0f\n",
+                        deg, r.flicks, r.landedAtFirstFlick, r.minCounterAtFlick, stuck.flicks,
+                        stuck.minCounterAtFlick);
+        }
+        CHECK(r.flicks >= 2);
+        CHECK(r.landedAtFirstFlick >= 7);
+        CHECK(r.minCounterAtFlick >= 7.0f);
+        CHECK(stuck.flicks >= 1);
+        CHECK(stuck.minCounterAtFlick >= 13.0f);
+    }
+
+    // 12. BombOtakara 93: chase keeps a territory bound, plus the stimulateBomb fuse.
+    float roundZeroLeash = 0.0f;
+    {
+        const Vec2 home{0.0f, 0.0f};
+        bool clamped = true;
+        CHECK(nearV(pursuePosition(Vec2{50.0f, 0.0f}, Vec2{150.0f, 0.0f}, home, kTerritory, &clamped),
+                    Vec2{150.0f, 0.0f}));
+        CHECK(!clamped);
+        // Target outside the territory while the body is inside: still chased.
+        CHECK(nearV(pursuePosition(Vec2{190.0f, 0.0f}, Vec2{400.0f, 0.0f}, home, kTerritory, &clamped),
+                    Vec2{400.0f, 0.0f}));
+        CHECK(!clamped);
+        // Body outside the territory: the destination is home, clamped.
+        CHECK(nearV(pursuePosition(Vec2{250.0f, 0.0f}, Vec2{400.0f, 0.0f}, home, kTerritory, &clamped), home));
+        CHECK(clamped);
+        CHECK(nearV(movePosition(Mode::Pursue, TargetKind::Creature, Vec2{250.0f, 0.0f}, Vec2{400.0f, 0.0f}, home,
+                                 kSpeed, kTerritory, &clamped),
+                    home));
+        CHECK(clamped);
+        // A Navi walking away at 100 cannot lead the Bomb off: 60 s, 8 directions.
+        for (int k = 0; k < 8; ++k) {
+            const float deg = 45.0f * float(k);
+            const float leash = bombLeash(kPursueUnderTest, deg, 100.0f, 1800);
+            if (leash > kTerritory + 2.0f * kSpeed * kDt) {
+                std::printf("P2_OTAKARA_MOVE_TEST_BOMB_LEASH angle=%.0f max_home=%.1f\n", deg, leash);
+            }
+            CHECK(leash <= kTerritory + 2.0f * kSpeed * kDt);
+            const float old = bombLeash(roundZeroPursue, deg, 100.0f, 1800);
+            if (old > roundZeroLeash) roundZeroLeash = old;
+        }
+        CHECK(roundZeroLeash > 2.0f * kTerritory); // negative control: round 0 is unbounded
+        // stimulateBomb: strictly more than 1.5 s of chase forces the payload.
+        float fuse = 1.0f;
+        CHECK(!bombFuseStep(fuse, 0.5f));
+        CHECK(bombFuseStep(fuse, 0.01f));
+        fuse = 0.0f;
+        int ticks = 1;
+        while (!bombFuseStep(fuse, kDt) && ticks < 1000) ++ticks;
+        CHECK(ticks >= 45 && ticks <= 46); // ~1.5 s at 30 Hz
+    }
+
+    std::printf("P2_OTAKARA_MOVE_TEST legacy_failures=%d/8 new_failures=%d legacy_clamp_failures=%d/5 "
+                "legacy_approach_flicks=%d/8 round0_bomb_max_home=%.0f\n",
+                legacyDirectional, headerDirectional, legacyClamp, legacyApproachFlicks, roundZeroLeash);
     std::printf("P2_OTAKARA_MOVE_TEST %s failures=%d\n", failures ? "FAIL" : "PASS", failures);
     return failures ? 1 : 0;
 }

@@ -16,8 +16,14 @@
 //       THIRD_PI facing gate, Flick then Dead override, commit at KEYEVENT_END.
 //   * EnemyBase::turnToTarget              (EnemyBase.h:463-471), walkToTarget
 //       (enemyAction.cpp:2102-2107).
+//   * EnemyFunc::isStartFlick              (enemyAction.cpp:1209-1244)
+//       hit count (mFlickTimer, +1 per addDamage, OtakaraBase.cpp:563-574 /
+//       enemyBase.cpp:2762-2773) against the ip01-ip07 thresholds keyed on the stuck
+//       Pikmin count; reset by Flick event 2 (OtakaraBaseState.cpp:107).
 // BombOtakara (93) chases its target (StateBombMove, OtakaraBaseState.cpp:812-848),
-// so it uses Mode::Pursue and is never inverted.
+// so it uses Mode::Pursue and is never inverted. Its chase runs a 1.5 s fuse
+// (stimulateBomb, OtakaraBase.cpp:699-707) and keeps the port territory bound
+// (pursuePosition).
 #include <cmath>
 
 namespace p2otakaramove {
@@ -110,9 +116,24 @@ inline Vec2 escapePosition(Vec2 self, Vec2 threat, Vec2 home, float moveSpeed, f
     return sep;
 }
 
+// BombOtakara (93) chase destination. Source StateBombMove/StateBombTurn walk at the
+// chase target with no territory rule (OtakaraBaseState.cpp:823-831, 887-897): the
+// chase is bounded by the stimulateBomb fuse instead (bombFuseStep), and the source
+// carrier is killed once its payload is gone (OtakaraBase.cpp:94-101 clears
+// mTargetCreature; OtakaraBaseState.cpp:761-764/816-819/880-883 kill). The port
+// carrier outlives its blast, so the port keeps the pre-#884 territory rule (old
+// pc_p2_otakara.cpp:810-811) as its bound: once the body is outside the territory
+// the destination is home (clamped=true), otherwise the target.
+inline Vec2 pursuePosition(Vec2 self, Vec2 target, Vec2 home, float territory, bool* clamped = nullptr) {
+    const bool out = distSqXZ(self, home) > territory * territory;
+    if (clamped) *clamped = out;
+    return out ? home : target;
+}
+
 // isMovePositionSet destination. Treasure -> treasure position (OtakaraBase.cpp:370-372,
 // never produced at runtime: no treasure is staged); Creature+Escape -> getTargetPosition;
-// Creature+Pursue -> target position (StateBombMove walkToTarget, OtakaraBaseState.cpp:823-831).
+// Creature+Pursue -> pursuePosition (StateBombMove walkToTarget, OtakaraBaseState.cpp:823-831,
+// plus the port territory bound).
 inline Vec2 movePosition(Mode mode, TargetKind kind, Vec2 self, Vec2 target, Vec2 home, float moveSpeed,
                          float territory, bool* clamped = nullptr) {
     if (clamped) *clamped = false;
@@ -120,7 +141,7 @@ inline Vec2 movePosition(Mode mode, TargetKind kind, Vec2 self, Vec2 target, Vec
     case TargetKind::Treasure:
         return target;
     case TargetKind::Creature:
-        if (mode == Mode::Pursue) return target;
+        if (mode == Mode::Pursue) return pursuePosition(self, target, home, territory, clamped);
         return escapePosition(self, target, home, moveSpeed, territory, clamped);
     default:
         return self;
@@ -143,6 +164,45 @@ inline float turnStep(float heading, Vec2 self, Vec2 dest, float dt) {
     if (step > maxTurn) step = maxTurn;
     if (step < -maxTurn) step = -maxTurn;
     return wrapPi(heading + step);
+}
+
+// Retail ShakeOff thresholds ip01-ip07 (EnemyParmsBase.h:95-101; disc values
+// 6/5/12/10/17/20/22 for every Otakara, docs/PIKMIN2_DWEEVIL_ASSETS.md:144,
+// experimental/pikmin2_dweevil_assets.py:150-151).
+struct ShakeOff {
+    int blowA;     // ip01
+    int sticking1; // ip02
+    int blowB;     // ip03
+    int sticking2; // ip04
+    int blowC;     // ip05
+    int sticking3; // ip06
+    int blowD;     // ip07
+};
+constexpr ShakeOff kRetailShakeOff{6, 5, 12, 10, 17, 20, 22};
+
+// EnemyFunc::isStartFlick(enemy, false) (enemyAction.cpp:1209-1244). flickTimer is the
+// source mFlickTimer: +1.0 per addDamage (Otakara damageTreasure -> addDamage(damage,
+// 1.0f), OtakaraBase.cpp:563-574; EB_FlickEnabled from EnemyBase::onInit,
+// enemyBase.cpp:1074), reset to 0 by Flick event 2 (OtakaraBaseState.cpp:107).
+// stuckCount is mStuckPikminCount (Pikmin stuck to this enemy). Rounded half away
+// from zero and truncated to u8, as the source does.
+inline bool isStartFlick(float flickTimer, int stuckCount, const ShakeOff& p = kRetailShakeOff) {
+    const float flickVal = flickTimer >= 0.0f ? flickTimer + 0.5f : flickTimer - 0.5f;
+    const int flickInt = int(static_cast<unsigned char>(int(flickVal)));
+    if (stuckCount < p.sticking1) return flickInt > p.blowA;
+    if (stuckCount < p.sticking2) return flickInt > p.blowB;
+    if (stuckCount < p.sticking3) return flickInt > p.blowC;
+    return flickInt > p.blowD;
+}
+
+// Obj::stimulateBomb (OtakaraBase.cpp:699-707), called each frame of StateBombMove/
+// StateBombTurn (OtakaraBaseState.cpp:821, 885): the timer (mItemSearchDelayTimer,
+// reset by StateBombWait::init, OtakaraBaseState.cpp:748) grows by dt and the payload
+// is forced once it exceeds 1.5 s. Returns true when the bomb must be forced.
+constexpr float kBombFuseSeconds = 1.5f;
+inline bool bombFuseStep(float& timer, float dt) {
+    timer += dt;
+    return timer > kBombFuseSeconds;
 }
 
 enum class St { Dead, Flick, Wait, Move, Turn };
