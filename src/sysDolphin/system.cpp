@@ -13,6 +13,8 @@
 #include "settings/pc_settings.h"
 #include "timing/pc_render_packet.h"
 #include "mods/pc_vs_arena.h"
+#include "netplay/pc_input_log.h"
+#include "netplay/pc_state_hash.h"
 #endif
 
 #include "bigFont.h"
@@ -362,11 +364,17 @@ void System::run(BaseApp* app)
 			// walking and throw inputs at high refresh rates.
 			mControllerMgr.update();
             if (pc_bbft_hold()) continue; // Input polling may have handled F9.
+#if PIKI_PC_PORT
+			pc_input_log_tick(); // netplay harness: record/replay this tick's pads.
+#endif
 			pc_gfx_enable_capture(pc_replay_test_enabled());
 #endif
 			updateSysClock();
 			OSCheckActiveThreads();
 			app->idle();
+#if PIKI_PC_PORT
+			pc_state_hash_tick_end(); // netplay harness: hash sim state after this tick.
+#endif
 
 			// Identity-replay experiment: re-execute the tick's captured display
 			// lists into a cleared framebuffer and present that. It is NOT the

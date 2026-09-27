@@ -446,6 +446,10 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_photo_mode.cpp
     pc_port/pc_permadeath.cpp
     pc_port/pc_coop.cpp
+    # Netplay determinism harness M1 (#878): input record/replay plus
+    # per-tick state hashes. Opt-in via PIKMIN_INPUT_*/PIKMIN_STATE_HASH_*.
+    pc_port/netplay/pc_input_log.cpp
+    pc_port/netplay/pc_state_hash.cpp
     pc_port/pc_art.cpp
     pc_port/pc_icon.cpp
     pc_port/settings/pc_glass_menu.cpp
@@ -1494,6 +1498,16 @@ if(PIKMIN_BUILD_TESTS)
     target_include_directories(pc_pad_axis_test PRIVATE ${SDL2_INCLUDE_DIRS} pc_port)
     target_compile_options(pc_pad_axis_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_pad_axis_test COMMAND pc_pad_axis_test)
+
+    # Netplay input record/replay format (#878, host-only, no game needed)
+    add_executable(pc_input_log_test pc_port/netplay/pc_input_log_test.cpp pc_port/netplay/pc_input_log.cpp)
+    target_include_directories(pc_input_log_test PRIVATE pc_port include)
+    target_compile_options(pc_input_log_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_input_log_test COMMAND pc_input_log_test)
+
+    # Netplay replay tool self test (#878, tool logic only, launches no game)
+    add_test(NAME netplay_replay_selftest
+        COMMAND py -3.12 "${CMAKE_CURRENT_SOURCE_DIR}/tools/netplay/selftest.py")
 
     # Permadeath save block (no game needed)
     add_executable(pc_permadeath_test pc_port/pc_permadeath_test.cpp pc_port/pc_permadeath.cpp src/sysCommon/stream.cpp src/sysCommon/string.cpp)

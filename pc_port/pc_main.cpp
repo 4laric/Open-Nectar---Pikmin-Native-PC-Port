@@ -48,6 +48,8 @@ __declspec(dllexport) int           AmdPowerXpressRequestHighPerformance = 1;
 #include "pc_window.h"
 #include "pc_bbft.h"
 #include "pc_gpu_preference.h"
+#include "netplay/pc_input_log.h"
+#include "netplay/pc_state_hash.h"
 #include "gl/pc_gfx.h"
 #include "gl/pc_texpack.h"
 #ifdef __ANDROID__
@@ -118,6 +120,11 @@ int main(int argc, char* argv[])
         return pc_jaudio_integration_test();
 #endif
     pc_bbft_init(argc, argv);
+    // Netplay harness switches (--input-record/--input-replay and friends).
+    // Env vars are read lazily on the first tick; argv wins when both name a
+    // path. No-ops unless those switches are set.
+    pc_input_log_notify_argv(argc, argv);
+    pc_state_hash_notify_argv(argc, argv);
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--dump-texture-names") == 0)
             pc_gfx_set_dump_texture_names(1);
