@@ -1,4 +1,5 @@
 #include "Boss.h"
+#include "netplay/pc_netplay_policy.h"
 #include "BossConditions.h"
 #include "DebugLog.h"
 #include "EffectMgr.h"
@@ -549,7 +550,9 @@ void Boss::refreshViewCulling(Graphics& gfx)
 {
 	Vector3f point(mSRT.t);
 	point.y += BOSS_PARM(mRenderSphereHeight);
-	if (!gfx.mCamera->isPointVisible(point, BOSS_PARM(mRenderSphereRadius))) {
+	// M2a netplay culling policy (issue #879): in deterministic mode the sim
+	// sees always-visible.
+	if (!pc_netplay_sim_visible(gfx.mCamera->isPointVisible(point, BOSS_PARM(mRenderSphereRadius)))) {
 		enableAICulling();
 	} else {
 		disableAICulling();

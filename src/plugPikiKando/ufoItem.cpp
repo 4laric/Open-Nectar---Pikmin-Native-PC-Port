@@ -1,4 +1,5 @@
 #include "UfoItem.h"
+#include "netplay/pc_netplay_policy.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_coop.h"
 #include "pc_vs.h"
@@ -990,7 +991,9 @@ void UfoItem::refresh(Graphics& gfx)
 	Vector3f pos = mSRT.t;
 	mWorldMtx.makeSRT(mSRT.s, mSRT.r, pos);
 
-	if (!gfx.mCamera->isPointVisible(mSRT.t, 200.0f)) {
+	// M2a netplay culling policy (issue #879): in deterministic mode the sim
+	// sees always-visible.
+	if (!pc_netplay_sim_visible(gfx.mCamera->isPointVisible(mSRT.t, 200.0f))) {
 		enableAICulling();
 	} else {
 		disableAICulling();

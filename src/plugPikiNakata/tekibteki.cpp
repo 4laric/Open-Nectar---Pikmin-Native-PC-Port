@@ -27,6 +27,7 @@
 #include "pc_p2_kochappy_fsm.h"
 #ifdef PIKI_PC_PORT
 #include "pc_p2_enemy.h"
+#include "netplay/pc_netplay_policy.h"
 #include "pc_p2_sheargrub.h"
 #include "pc_p2_breadbug_actor.h"
 #include "pc_p2_giant_breadbug_actor.h"
@@ -2159,7 +2160,10 @@ void BTeki::drawDefault(Graphics& gfx)
 	clearTekiOption(TEKIOPT_Drawed);
 
 	f32 rad = getBoundingSphereRadius();
-	if (!gfx.mCamera->isPointVisible(getBoundingSphereCentre(), rad)) {
+	// M2a netplay culling policy (issue #879): in deterministic mode the sim
+	// sees always-visible; drawing follows the same value so the sim-affecting
+	// updateAnim/collision/platform work inside drawTekiShape always runs.
+	if (!pc_netplay_sim_visible(gfx.mCamera->isPointVisible(getBoundingSphereCentre(), rad))) {
 		enableAICulling();
 	} else {
 		disableAICulling();

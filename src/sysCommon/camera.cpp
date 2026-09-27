@@ -4,6 +4,7 @@
 #include "Graphics.h"
 #include "Texture.h"
 #include "sysNew.h"
+#include "netplay/pc_netplay_policy.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_gfx.h"
 #endif
@@ -325,6 +326,12 @@ void CullFrustum::update(f32 aspectRatio, f32 fov, f32 zNear, f32 zFar)
 			aspectRatio = windowAspect;
 		}
 	}
+	// M2a netplay aspect pin (issue #879): in deterministic mode the sim
+	// frustum uses the session-fixed 16:9 aspect, never the live window size,
+	// so no sim-affecting visibility test can read the window. (With the
+	// always-visible policy above there is no remaining sim reader of the
+	// frustum planes; this pin removes the aspect input itself.)
+	aspectRatio = pc_netplay_sim_aspect(aspectRatio);
 #endif
 	mAspectRatio   = aspectRatio;
 	mVerticalScale = 1.0f;

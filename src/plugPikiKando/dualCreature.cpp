@@ -1,4 +1,5 @@
 #include "DualCreature.h"
+#include "netplay/pc_netplay_policy.h"
 #include "DebugLog.h"
 #include "Graphics.h"
 #include "ItemMgr.h"
@@ -165,7 +166,13 @@ void DualCreature::refresh(Graphics& gfx)
 #if defined(VERSION_PIKIDEMO) || defined(VERSION_GPIJ01_01)
 	// I don't enjoy splitting this difference in two, but syntax highlighting really hates extra opening braces.
 #else
-	bool isPointVisible = gfx.mCamera->isPointVisible(mSRT.t, 2.0f * getBoundingSphereRadius());
+	// M2a netplay culling policy (issue #879): in deterministic mode the sim
+	// sees always-visible, which also pins the dynamics mode below to real
+	// dynamics (the vanilla on-screen behaviour: nearby pellets/bridges that
+	// gameplay touches use real dynamics; off-screen simple dynamics is a
+	// physics optimisation whose integration differs).
+	bool isPointVisible
+	    = pc_netplay_sim_visible(gfx.mCamera->isPointVisible(mSRT.t, 2.0f * getBoundingSphereRadius()));
 
 	if (isPointVisible) {
 		disableAICulling();
