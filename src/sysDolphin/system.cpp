@@ -430,6 +430,7 @@ void System::run(BaseApp* app)
 			app->idle();
 #if PIKI_PC_PORT
 			if (pc_netplay_deterministic()) pc_netplay_det_profile_note_tick();
+			pc_input_log_tick_end(); // netplay harness: file the yaw the sim used (M2c).
 			pc_state_hash_tick_end(); // netplay harness: hash sim state after this tick.
 #endif
 

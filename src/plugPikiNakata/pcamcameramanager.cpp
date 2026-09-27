@@ -6,6 +6,11 @@
 #include "Peve/Condition.h"
 #include "Peve/Event.h"
 #include "sysNew.h"
+#if defined(PIKI_PC_PORT)
+#include "netplay/pc_netplay_det.h"
+#include <cmath>
+#include <cstdlib>
+#endif
 
 /**
  * @todo: Documentation
@@ -85,6 +90,37 @@ void PcamCameraManager::update()
 	mCamera->control(*mController);
 	mCamera->update();
 	updateVibrationEvent();
+#if defined(PIKI_PC_PORT)
+	// Netplay M2c test hook (issue #879): det-mode-only presentation yaw
+	// wobble. PIKMIN_NETPLAY_TEST_CAMERA_WOBBLE=<degrees> rotates the local
+	// presentation camera's yaw basis sinusoidally with a 97-tick period.
+	// It never changes sim inputs during replay: det-mode Navis build
+	// their stick basis from the recorded input yaw, not from this camera.
+	// On the base exe (camera-read control) the same wobble diverges navi
+	// movement early, which is the control experiment proving yaw-as-input.
+	if (pc_netplay_deterministic()) {
+		const char* wobEnv = std::getenv("PIKMIN_NETPLAY_TEST_CAMERA_WOBBLE");
+		if (wobEnv != nullptr && *wobEnv != '\0') {
+			const double deg = std::atof(wobEnv);
+			if (deg != 0.0) {
+				const double phase  = 6.283185307179586 * (double)pc_netplay_tick() / 97.0;
+				const double wobRad = deg * 3.141592653589793 / 180.0 * std::sin(phase);
+				const float s       = (float)std::sin(wobRad);
+				const float c       = (float)std::cos(wobRad);
+				Camera* cam         = (mCamera != nullptr) ? mCamera->mCamera : nullptr;
+				if (cam != nullptr && (s != 0.0f || c != 1.0f)) {
+					// RotY(wobble) under the engine's row convention
+					// (v' = M v, rows (c,0,-s)/(s,0,c)): absolute per-tick
+					// offset, so update()'s rebuild each tick means no drift.
+					const Vector3f x = cam->mViewXAxis;
+					const Vector3f z = cam->mViewZAxis;
+					cam->mViewXAxis.set(c * x.x - s * x.z, x.y, s * x.x + c * x.z);
+					cam->mViewZAxis.set(c * z.x - s * z.z, z.y, s * z.x + c * z.z);
+				}
+			}
+		}
+	}
+#endif
 }
 
 /**
