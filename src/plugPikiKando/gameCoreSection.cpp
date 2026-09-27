@@ -4003,7 +4003,11 @@ void GameCoreSection::drawGameInfoHud(Graphics& gfx)
 #if defined(PIKI_PC_PORT)
 	// M2b fix (review M6): in det co-op each peer shows only its local
 	// captain's HUD fullscreen, not the split layout.
-	if (pc_netplay_present_two_pass_active() && isSplitScreen() && !gameflow.mMoviePlayer->mIsActive) {
+	// M2b fix2 (review M6 observation): presentation only, so the
+	// authoritative pass does no HUD draw work and stays view-independent
+	// (null_attempted matches between LOCAL_PLAYER 0 and 1).
+	if (pc_netplay_present_two_pass_active() && !pc_render_is_authoritative() && isSplitScreen()
+	    && !gameflow.mMoviePlayer->mIsActive) {
 		const int local = pc_netplay_present_local_player();
 		zen::DrawGameInfo* hud = (local == 1 && mDrawGameInfo2) ? mDrawGameInfo2 : mDrawGameInfo;
 		hud->draw(gfx);
@@ -4051,7 +4055,9 @@ void GameCoreSection::drawContainerWindows(Graphics& gfx)
 #if defined(PIKI_PC_PORT)
 	// M2b fix (review M6): det co-op shows only the local player's menu
 	// window fullscreen (mirrors drawGameInfoHud above).
-	if (pc_netplay_present_two_pass_active() && isSplitScreen() && !gameflow.mMoviePlayer->mIsActive) {
+	// M2b fix2 (review M6 observation): presentation only (see above).
+	if (pc_netplay_present_two_pass_active() && !pc_render_is_authoritative() && isSplitScreen()
+	    && !gameflow.mMoviePlayer->mIsActive) {
 		const int local = pc_netplay_present_local_player();
 		zen::DrawContainer* win = (local == 1 && containerWindow2) ? containerWindow2 : containerWindow;
 		win->draw(gfx);

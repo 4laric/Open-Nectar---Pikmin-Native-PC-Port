@@ -47,12 +47,15 @@ int pc_netplay_present_sim_pass(void);
 
 // Null-GX backend flag (authoritative pass): GL-issuing submission is
 // skipped. Counts attempts (skipped calls) and real GL issued while active.
-// All GL in this architecture goes through pc_gfx.cpp entry points (the GX
-// stubs are CPU-side shims; OGLGraphics is not instantiated — System builds
-// a DGXGraphics), so gating those entries is gating at the GL boundary.
-// The only intentional real GL while null is a one-shot texture-creation
-// upload for textures first created mid-tick (sim-independent bytes;
-// deterministic on every peer). Steady-state replays must show null_gl 0.
+// All GL in this architecture goes through pc_gfx.cpp (the GX stubs are
+// CPU-side shims; OGLGraphics is not instantiated -- System builds a
+// DGXGraphics), and every raw GL call in that TU expands through a counting
+// macro (or the cached-uniform wrappers) into pc_gfx_count_real_gl(), so the
+// real-GL counter is a live measurement at a single choke point, not true by
+// construction. Steady-state replays must show null_gl 0. Uploads happen in
+// presentation, never in the authoritative pass: display lists are skipped at
+// entry (the presentation pass parses/uploads/caches on first draw) and
+// texture inits return before any GL without recording signatures.
 void pc_netplay_present_set_null_gx(int on);
 int pc_netplay_present_null_active(void);
 // GL calls issued while null was active (acceptance: 0 in auth passes).
