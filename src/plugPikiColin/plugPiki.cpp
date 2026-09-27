@@ -195,6 +195,11 @@ void PlugPikiApp::draw(Graphics& gfx)
 	// print load text after we finish a section transition (only if it's meant to be visible, or is fading out)
 	// NB: the code in retail and the DLL do all the preparation to print, but never actually print the text.
 	if (gameflow.mCurrLoadTextAlpha > 0.0f || gameflow.mTargetLoadTextAlpha > 0.0f) {
+#if defined(PIKI_PC_PORT)
+		// M2b fix (review M2): the load-text timer is sim timing; the
+		// presentation pass draws the overlay but must not advance it.
+		if (pc_netplay_present_sim_side()) {
+#endif
 		gameflow.mLoadTextDisplayTimer -= gsys->getFrameTime();
 		if (gameflow.mLoadTextDisplayTimer < 0.0f) {
 			gameflow.mTargetLoadTextAlpha = 0.0f;
@@ -205,6 +210,9 @@ void PlugPikiApp::draw(Graphics& gfx)
 		if (quickABS(gameflow.mCurrLoadTextAlpha - gameflow.mTargetLoadTextAlpha) < 0.1f) {
 			gameflow.mCurrLoadTextAlpha = gameflow.mTargetLoadTextAlpha;
 		}
+#if defined(PIKI_PC_PORT)
+		}
+#endif
 
 		gfx.setColour(Colour(192, 255, 255, gameflow.mCurrLoadTextAlpha), true);
 		gfx.setAuxColour(Colour(192, 192, 255, gameflow.mCurrLoadTextAlpha));
@@ -219,6 +227,13 @@ void PlugPikiApp::draw(Graphics& gfx)
 	gfx.useTexture(nullptr, GX_TEXMAP0);
 
 	// this is actually for allowing buffer time before transiting between sections, rather than fading anything
+#if defined(PIKI_PC_PORT)
+	// M2b fix (review M2): the global fade gates section exits (getFade() ==
+	// 0.0f), so advancing it in both passes would run transitions at double
+	// speed in det mode. Presentation draws the overlay; only the sim side
+	// advances.
+	if (pc_netplay_present_sim_side()) {
+#endif
 	if (gsys->mCurrentFade < gsys->mTargetFade) {
 		// "fading in"
 		gsys->mCurrentFade += gsys->getFrameTime() * gsys->mFadeRate;
@@ -234,6 +249,9 @@ void PlugPikiApp::draw(Graphics& gfx)
 			gsys->mCurrentFade = gsys->mTargetFade;
 		}
 	}
+#if defined(PIKI_PC_PORT)
+	}
+#endif
 
 	// draw timers, if enabled
 	if (gsys->mTimerState != TS_Off) {
@@ -262,6 +280,13 @@ int PlugPikiApp::idle()
 		gsys->mTimer->reset();
 		gsys->mSoftResetPending = false;
 
+#if defined(PIKI_PC_PORT)
+		// M2b fix (review M3): a soft-reset idle returns before
+		// pc_render_begin_authoritative_tick, so make sure section
+		// construction below runs as authoritative, never as a stale
+		// presentation phase from the previous tick.
+		pc_render_end_presentation();
+#endif
 		softReset();
 
 		// re-attach everything
@@ -306,6 +331,10 @@ int PlugPikiApp::idle()
 		if (profiling) {
 			pc_tick_profiler_record(kPcTickRenderAll, clockNow() - authStart);
 		}
+		// Drop any batched geometry while null is still on (the null-gated
+		// flush clears the batch without touching GL); the presentation pass
+		// must not draw the sim pass's vertices.
+		pc_gfx_flush_batch();
 		pc_netplay_present_end_authoritative(*gsys->mDGXGfx);
 
 		// 2. Presentation pass: local view only, real camera + real GL.
@@ -313,6 +342,19 @@ int PlugPikiApp::idle()
 		pc_render_begin_presentation(1.0);
 		gsys->mDGXGfx->resetPresentBuffer();
 		pc_netplay_present_begin_presentation(*gsys->mDGXGfx);
+		// M2b fix (review M1): initRender runs once per idle before the auth
+		// pass. Without a reset here the auth pass's lights, cached
+		// (translucent) shapes and lens flares leak into presentation:
+		// re-adding an already-listed Light truncates the list at itself and
+		// links it into a self-loop (the old DayMgr "stall"), cached shapes
+		// re-flush sim-pool matrices under the real camera, and the cache /
+		// flare counts accumulate toward fatal overflow. Mirror what
+		// beginView(view>0) does, plus flares. The sim matrix pool is
+		// deliberately untouched (presentation allocates separately).
+		gsys->mDGXGfx->mActiveLightMask = 0;
+		gsys->mDGXGfx->mLight.initCore("");
+		gsys->mDGXGfx->resetCacheBuffer();
+		gsys->resetLFlares();
 		// Capture the presented (local) view, not the null pass.
 		pc_gfx_begin_capture(pc_render_tick_serial());
 		const double presentStart = profiling ? clockNow() : 0.0;
@@ -327,6 +369,10 @@ int PlugPikiApp::idle()
 		pc_gfx_end_capture();
 		pc_netplay_present_restore_all_shapes();
 		pc_netplay_present_end_presentation(*gsys->mDGXGfx);
+		// M2b fix (review M3): back to authoritative so doneRender,
+		// parseMessages, hashing and any soft-reset idle run as sim, and the
+		// next presentation starts from a clean save list.
+		pc_render_end_presentation();
 		// M2b acceptance evidence: null-GX counters, one line per 3000
 		// ticks on stdout (native.log). Real GL issued while null was
 		// active must stay 0; attempted counts the skipped submissions.
@@ -341,6 +387,11 @@ int PlugPikiApp::idle()
 		}
 	} else if (pc_netplay_present_two_pass_active() && pc_netplay_present_skip_presentation()) {
 		// M2b helper for m3 resim: authoritative only, null GX, no capture.
+		// Contract note for m3 (review m4): this still runs beginRender (a
+		// real clear), doneRender and waitRetrace below, so a resim tick
+		// would swap a blank frame and throttle. No driver calls this yet;
+		// gate present/retrace here once m3 wires resimulation in (taking
+		// care with the retrace count, which sim timing reads).
 		pc_netplay_present_begin_authoritative(*gsys->mDGXGfx);
 		const double authStart = profiling ? clockNow() : 0.0;
 		renderall();
@@ -348,6 +399,7 @@ int PlugPikiApp::idle()
 			pc_tick_profiler_record(kPcTickRenderAll, clockNow() - authStart);
 			pc_gfx_flush_submit_stats();
 		}
+		pc_gfx_flush_batch();
 		pc_netplay_present_end_authoritative(*gsys->mDGXGfx);
 	} else {
 		// Begin capture for immutable render packets

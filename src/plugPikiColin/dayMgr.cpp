@@ -907,16 +907,11 @@ void DayMgr::menuDecreaseTime(Menu& parent)
  */
 void DayMgr::refresh(Graphics& gfx, f32 time, int numLights)
 {
-#if defined(PIKI_PC_PORT)
-	// M2b: stage lighting is time-based sim state, identical in both passes.
-	// The authoritative pass computes it each tick (lights, sun, fog); the
-	// presentation pass reuses those results instead of recomputing (and
-	// re-adding lights). Recomputing in presentation stalled the first stage
-	// frame during triage, so presentation returns here unconditionally.
-	if (pc_netplay_present_two_pass_active() && !pc_render_is_authoritative()) {
-		return;
-	}
-#endif
+	// M2b (review M1): runs in both passes. Stage lighting is time-based, so
+	// the presentation pass recomputes identical values; the pass driver
+	// resets the light list / shape cache / flares between the passes, which
+	// makes re-adding idempotent (that missing reset was the old first-frame
+	// "stall": re-adding a listed Light self-loops it).
 	TimeSetting* timeSettingStart;
 	TimeSetting* timeSettingEnd;
 
