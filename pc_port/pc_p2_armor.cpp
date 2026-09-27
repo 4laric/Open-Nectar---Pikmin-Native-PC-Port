@@ -305,6 +305,7 @@ void walkTo(BTeki* a, Armor& s, const Vector3f& target, float dt) {
 void stop(BTeki* a) {
     a->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
     a->mVelocity.x = 0.0f;
+    a->mVelocity.y = 0.0f;
     a->mVelocity.z = 0.0f;
 }
 
@@ -643,7 +644,11 @@ void pc_p2_armor_update(BTeki* actor) {
     case ARMOR_MOVE:
     case ARMOR_GOHOME: {
         Creature* target = nearestTarget(pos);
-        if (s.state == ARMOR_MOVE && target) {
+        // Decomp StateGoHome::exec (ArmorState.cpp:470-473): GoHome attacks a
+        // Pikmin inside attack range/angle instead of walking past it, so the
+        // attack gate applies in both MOVE and GOHOME; only the walk
+        // destination differs (target vs home).
+        if (target) {
             const float angle = std::fabs(wrapPi(std::atan2(target->getPosition().x - pos.x,
                                                            target->getPosition().z - pos.z) - s.heading));
             if (distXZ(target->getPosition(), pos) < ATTACK_RANGE && angle < ATTACK_ANGLE) {
@@ -651,8 +656,10 @@ void pc_p2_armor_update(BTeki* actor) {
                 enter(s, ARMOR_ATTACK2, "attack2");
                 break;
             }
+        }
+        if (s.state == ARMOR_MOVE && target) {
             walkTo(actor, s, target->getPosition(), dt);
-        } else if (s.state == ARMOR_GOHOME || !target) {
+        } else {
             walkTo(actor, s, s.home, dt);
         }
         if (distXZ(pos, s.home) > TERRITORY && s.state != ARMOR_GOHOME) {
@@ -709,8 +716,16 @@ void pc_p2_armor_update(BTeki* actor) {
         }
         if (s.stateTime >= clipDuration("eat")) {
             s.captured = nullptr;
-            std::printf("P2_ARMOR_STATE generator=%u state=move\n", generator);
-            enter(s, ARMOR_MOVE, "move");
+            // inst3-frogs carryability fix (#871): resume homing directly when
+            // past TERRITORY instead of spending one MOVE cycle first; the net
+            // route matches the decomp (Move goes GoHome when far, :236-238).
+            if (distXZ(pos, s.home) > TERRITORY) {
+                std::printf("P2_ARMOR_STATE generator=%u state=gohome\n", generator);
+                enter(s, ARMOR_GOHOME, "move");
+            } else {
+                std::printf("P2_ARMOR_STATE generator=%u state=move\n", generator);
+                enter(s, ARMOR_MOVE, "move");
+            }
         }
         break;
     }
@@ -724,16 +739,30 @@ void pc_p2_armor_update(BTeki* actor) {
             }
         }
         if (s.stateTime >= clipDuration("flick")) {
-            std::printf("P2_ARMOR_STATE generator=%u state=move\n", generator);
-            enter(s, ARMOR_MOVE, "move");
+            // Same homing-preserving completion as EAT above (decomp Flick
+            // goes to Move at :739 and Move re-homes when far at :236-238).
+            if (distXZ(pos, s.home) > TERRITORY) {
+                std::printf("P2_ARMOR_STATE generator=%u state=gohome\n", generator);
+                enter(s, ARMOR_GOHOME, "move");
+            } else {
+                std::printf("P2_ARMOR_STATE generator=%u state=move\n", generator);
+                enter(s, ARMOR_MOVE, "move");
+            }
         }
         break;
     }
     case ARMOR_FAIL:
         stop(actor);
         if (s.stateTime >= clipDuration("attack_fail")) {
-            std::printf("P2_ARMOR_STATE generator=%u state=move\n", generator);
-            enter(s, ARMOR_MOVE, "move");
+            // Same homing-preserving completion (decomp Fail goes to Move at
+            // :702 with the same Move re-homing rule).
+            if (distXZ(pos, s.home) > TERRITORY) {
+                std::printf("P2_ARMOR_STATE generator=%u state=gohome\n", generator);
+                enter(s, ARMOR_GOHOME, "move");
+            } else {
+                std::printf("P2_ARMOR_STATE generator=%u state=move\n", generator);
+                enter(s, ARMOR_MOVE, "move");
+            }
         }
         break;
     case ARMOR_DIVE:
