@@ -498,6 +498,19 @@ void pc_p2_hana_update(BTeki* actor) {
     const Vector3f pos = actor->getPosition();
     const unsigned generator = actor->mGenerator ? pc_p2_campaign_token(actor) : 0u;
 
+    // Host-AI suppression drain (rev6-misc5 Finding 1): the P1 TAI reaction
+    // path (TaiDamagingAction) normally applies stored damage through
+    // makeDamaged(), but BTeki::doAI is suppressed for registered actors, so
+    // the source FSM applies pending damage itself. Mirrors
+    // pc_p2_frog_suppress_ai (pc_p2_frog.cpp).
+    if (actor->mStoredDamage > 0.0f) {
+        actor->makeDamaged();
+        if (actor->mHealth > 0.0f) {
+            std::printf("P2_HANA_DAMAGE generator=%u source_id=84 health=%.1f\n", generator, actor->mHealth);
+            std::fflush(stdout);
+        }
+    }
+
     if (actor->mHealth <= 0.0f && s.state != HANA_DEAD) {
         if (!s.deadLogged) {
             std::printf("P2_HANA_DEAD generator=%u source_id=84 health=0\n", generator);
