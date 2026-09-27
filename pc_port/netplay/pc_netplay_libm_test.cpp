@@ -13,7 +13,7 @@
 //     double (verified: 0 ulp vs (float)msvcrt-double on 400k grids), so
 //     the msvcrt reference is a valid proxy for "the mingw libm".
 //     Game-domain bound: max <= 1 ulp (brief item 2/3). Huge trig args
-//     (|x| > 1e10, i.e. past the exact-fmod range) are checksum-only.
+//     (|x| > 2.8e16, i.e. past the double-double-2pi range) are checksum-only.
 //  3. Golden checksum: FNV-1a/64 over every OUR result bit. The constant
 //     below is committed; any machine computing a different checksum is
 //     non-deterministic and the test fails.
@@ -40,7 +40,7 @@ typedef double (*Df2)(double, double);
 
 struct Ref {
 	Df1 sin = nullptr, cos = nullptr, tan = nullptr, asin = nullptr, acos = nullptr, atan = nullptr,
-	    exp = nullptr, log = nullptr, log10 = nullptr;
+	    exp = nullptr, log = nullptr, log10 = nullptr, sqrt = nullptr;
 	Df2 atan2 = nullptr, pow = nullptr, fmod = nullptr, hypot = nullptr;
 	bool ok = false;
 };
@@ -70,12 +70,13 @@ Ref loadRef()
 	get1("exp", r.exp);
 	get1("log", r.log);
 	get1("log10", r.log10);
+	get1("sqrt", r.sqrt);
 	get2("atan2", r.atan2);
 	get2("pow", r.pow);
 	get2("fmod", r.fmod);
 	get2("_hypot", r.hypot);
 	r.ok = r.sin && r.cos && r.tan && r.asin && r.acos && r.atan && r.exp && r.log && r.log10
-	    && r.atan2 && r.pow && r.fmod && r.hypot;
+	    && r.sqrt && r.atan2 && r.pow && r.fmod && r.hypot;
 #else
 	void *m = dlopen("libm.so.6", RTLD_NOW);
 	if (!m)
@@ -93,6 +94,7 @@ Ref loadRef()
 	LOAD1(exp);
 	LOAD1(log);
 	LOAD1(log10);
+	LOAD1(sqrt);
 	LOAD2(atan2);
 	LOAD2(pow);
 	LOAD2(fmod);
@@ -100,7 +102,7 @@ Ref loadRef()
 #undef LOAD1
 #undef LOAD2
 	r.ok = r.sin && r.cos && r.tan && r.asin && r.acos && r.atan && r.exp && r.log && r.log10
-	    && r.atan2 && r.pow && r.fmod && r.hypot;
+	    && r.sqrt && r.atan2 && r.pow && r.fmod && r.hypot;
 #endif
 	return r;
 }
@@ -138,8 +140,9 @@ uint64_t fnv1a(uint64_t h, uint32_t w)
 
 // Committed golden checksum (FNV-1a/64 over every OUR result below).
 // Any machine computing a different value is non-deterministic.
-// Measured 2026-09-27 on x86-64/MinGW: 0x66fcf46eb77fe7d2.
-const uint64_t kGolden = 0x66fcf46eb77fe7d2ULL;
+// Measured 2026-09-27 on x86-64/MinGW: 0x5ebcb536b921975c (review fix:
+// SSE sqrt, dense log grid, FLT_MAX trig checksum-only, no-drop ulp).
+const uint64_t kGolden = 0x5ebcb536b921975cULL;
 
 } // namespace
 
@@ -154,9 +157,11 @@ int main()
 		std::printf("FAIL: could not load platform libm reference\n");
 		return 1;
 	}
-	std::printf("libm ABI version: 0x%016llx\n", (unsigned long long)pc_netplay_libm_grid_checksum());
+	std::printf("libm ABI version: 0x%016llx\n", (unsigned long long)pc_netplay_libm_abi_version());
 
-	unsigned worst1[24] = { 0 };
+	unsigned worst1[26] = { 0 };
+	unsigned long long overBound[26] = { 0 }; // samples with d > bound (review M2)
+	unsigned long long nSamples[26] = { 0 };
 	uint64_t sum = 1469598103934665603ull;
 	auto eatF = [&](float v) { sum = fnv1a(sum, bitsOf(v)); };
 	auto eatD = [&](double v) {
@@ -166,9 +171,15 @@ int main()
 		sum = fnv1a(sum, static_cast<uint32_t>(u >> 32));
 	};
 	auto checkF = [&](unsigned idx, float ours, float expect) {
+		// Review M2: every sample counts. Class/sign mismatches (999) and
+		// any error above the bound are recorded, never silently dropped.
 		unsigned d = ulpDiff(ours, expect);
-		if (d < 900 && d > worst1[idx])
+		nSamples[idx]++;
+		if (d > worst1[idx])
 			worst1[idx] = d;
+		unsigned bound = (idx < 16) ? 1 : ((idx == 24 || idx == 25) ? 0 : 8);
+		if (d > bound)
+			overBound[idx]++;
 		eatF(ours);
 		return d;
 	};
@@ -182,15 +193,21 @@ int main()
 		checkF(1, cosf(x), static_cast<float>(ref.cos(x)));
 	}
 	for (unsigned i = 0; i < 100000; i++) {
-		float x = static_cast<float>(-100.531 + 201.062 * (double)i / 99999.0);
+		float x = static_cast<float>(-100.0 + 200.0 * (double)i / 99999.0);
 		float s = 0, c = 0;
 		sincosf(x, &s, &c);
+		// Same no-drop rule as checkF (review M2).
 		unsigned d1 = ulpDiff(s, static_cast<float>(ref.sin(x)));
 		unsigned d2 = ulpDiff(c, static_cast<float>(ref.cos(x)));
-		if (d1 < 900 && d1 > worst1[2])
+		nSamples[2] += 2;
+		if (d1 > worst1[2])
 			worst1[2] = d1;
-		if (d2 < 900 && d2 > worst1[2])
+		if (d2 > worst1[2])
 			worst1[2] = d2;
+		if (d1 > 1)
+			overBound[2]++;
+		if (d2 > 1)
+			overBound[2]++;
 		eatF(s);
 		eatF(c);
 	}
@@ -216,18 +233,12 @@ int main()
 		float x = static_cast<float>(-100.0 + 200.0 * (double)i / 79999.0);
 		checkF(8, expf(x), static_cast<float>(ref.exp(x)));
 	}
-	for (unsigned i = 0; i < 80000; i++) { // log-spaced powers of two
-		double e = -60.0 + 120.0 * (double)i / 79999.0;
-		int ee = static_cast<int>(e);
-		double base = 2.0, acc = 1.0;
-		int pos = ee < 0 ? -ee : ee;
-		while (pos) {
-			if (pos & 1)
-				acc *= base;
-			base *= base;
-			pos >>= 1;
-		}
-		float x = static_cast<float>(ee < 0 ? 1.0 / acc : acc);
+	for (unsigned i = 0; i < 80000; i++) { // dense mantissa x exponent grid (review m1)
+		// 121 exponents x ~661 mantissas: exercises the non-trivial
+		// pc_log2_split path (the old powers-of-two grid hit u = s = 0).
+		int ee = -60 + static_cast<int>(i % 121);
+		double frac = 1.0 + (double)(i / 121) / (80000.0 / 121.0);
+		float x = static_cast<float>(ldexp(frac, ee));
 		checkF(9, logf(x), static_cast<float>(ref.log(x)));
 		checkF(10, log2f(x), static_cast<float>(ref.log(x) / l2));
 		checkF(11, log10f(x), static_cast<float>(ref.log10(x)));
@@ -254,6 +265,12 @@ int main()
 		float y = static_cast<float>(-1000.0 + 2000.0 * (double)(i / 200) / 199.0);
 		checkF(15, hypotf(x, y), static_cast<float>(ref.hypot(x, y)));
 	}
+	// SSE sqrt overrides (review M1 follow-up): correctly rounded by
+	// hardware, so the bound is 0, stricter than the brief's 1 ulp.
+	for (unsigned i = 0; i < 40000; i++) {
+		float x = static_cast<float>(1000.0 * (double)i / 39999.0);
+		checkF(24, sqrtf(x), static_cast<float>(ref.sqrt(x)));
+	}
 	// Large trig args within the exact range (|x| <= 1e10).
 	for (unsigned i = 0; i < 20000; i++) {
 		float x = static_cast<float>(-1e10 + 2e10 * (double)i / 19999.0);
@@ -268,12 +285,32 @@ int main()
 			static_cast<float>(INFINITY), static_cast<float>(-INFINITY),
 			static_cast<float>(NAN) };
 		for (float x : fedges) {
-			checkF(0, sinf(x), static_cast<float>(ref.sin(x)));
-			checkF(1, cosf(x), static_cast<float>(ref.cos(x)));
-			checkF(3, tanf(x), static_cast<float>(ref.tan(x)));
+			// Review M2: trig past the exact-reduction range (|x| > 2.8e16,
+			// here FLT_MAX) is determinism/checksum-only, never ulp-asserted.
+			if (!(x != x) && x != static_cast<float>(INFINITY)
+			    && x != static_cast<float>(-INFINITY)
+			    && (double)(x < 0 ? -(double)x : (double)x) > 2.8e16) {
+				eatF(sinf(x));
+				eatF(cosf(x));
+				float s = 0, c = 0;
+				sincosf(x, &s, &c);
+				eatF(s);
+				eatF(c);
+				eatF(tanf(x));
+			} else {
+				checkF(0, sinf(x), static_cast<float>(ref.sin(x)));
+				checkF(1, cosf(x), static_cast<float>(ref.cos(x)));
+				checkF(3, tanf(x), static_cast<float>(ref.tan(x)));
+			}
 			checkF(4, atanf(x), static_cast<float>(ref.atan(x)));
 			checkF(8, expf(x), static_cast<float>(ref.exp(x)));
 			checkF(9, logf(x), static_cast<float>(ref.log(x)));
+			checkF(24, sqrtf(x < 0 ? 0 : x), static_cast<float>(ref.sqrt(x < 0 ? 0 : x)));
+		}
+		{
+			float neg[] = { -1.0f, -100.0f, static_cast<float>(-INFINITY) };
+			for (float x : neg)
+				checkF(24, sqrtf(x), static_cast<float>(ref.sqrt(x)));
 		}
 		float aedges[] = { 0.0f, -0.0f, 1.0f, -1.0f, 0.5f, -0.5f, 1.5f, -1.5f,
 			static_cast<float>(INFINITY), static_cast<float>(NAN) };
@@ -305,7 +342,7 @@ int main()
 	// ---- double spot checks (informational bound, brief requires floats) ----
 	{
 		unsigned wsin = 0, wcos = 0, wtan = 0, watan = 0, wlog = 0, wexp = 0, wasin = 0,
-		         wacos = 0;
+		         wacos = 0, wsqrt = 0;
 		auto ud = [](double a, double b) -> unsigned long long {
 			if (std::isnan(a) && std::isnan(b))
 				return 0;
@@ -324,40 +361,46 @@ int main()
 		for (unsigned i = 0; i < 30000; i++) {
 			double x = -100.531 + 201.062 * (double)i / 29999.0;
 			unsigned long long d;
+			// Review M2: no < 900 cap; any error above bound 8 fails below.
 			d = ud(sin(x), ref.sin(x));
-			if (d < 900 && d > wsin)
-				wsin = static_cast<unsigned>(d);
+			if (d > wsin)
+				wsin = static_cast<unsigned>(d > 0xffffffffull ? 0xffffffffull : d);
 			eatD(sin(x));
 			d = ud(cos(x), ref.cos(x));
-			if (d < 900 && d > wcos)
-				wcos = static_cast<unsigned>(d);
+			if (d > wcos)
+				wcos = static_cast<unsigned>(d > 0xffffffffull ? 0xffffffffull : d);
 			eatD(cos(x));
 			d = ud(tan(x), ref.tan(x));
-			if (d < 900 && d > wtan)
-				wtan = static_cast<unsigned>(d);
+			if (d > wtan)
+				wtan = static_cast<unsigned>(d > 0xffffffffull ? 0xffffffffull : d);
 			eatD(tan(x));
 			d = ud(atan(x * 9.9), ref.atan(x * 9.9));
-			if (d < 900 && d > watan)
-				watan = static_cast<unsigned>(d);
+			if (d > watan)
+				watan = static_cast<unsigned>(d > 0xffffffffull ? 0xffffffffull : d);
 			eatD(atan(x));
 			double la = 1.0 + (x + 100.531) * 10.0;
 			d = ud(log(la), ref.log(la));
-			if (d < 900 && d > wlog)
-				wlog = static_cast<unsigned>(d);
+			if (d > wlog)
+				wlog = static_cast<unsigned>(d > 0xffffffffull ? 0xffffffffull : d);
 			eatD(log(la));
 			d = ud(exp(x * 0.5), ref.exp(x * 0.5));
-			if (d < 900 && d > wexp)
-				wexp = static_cast<unsigned>(d);
+			if (d > wexp)
+				wexp = static_cast<unsigned>(d > 0xffffffffull ? 0xffffffffull : d);
 			eatD(exp(x));
 			double aa = -1.0 + 2.0 * (double)(i % 30000) / 29999.0;
 			d = ud(asin(aa), ref.asin(aa));
-			if (d < 900 && d > wasin)
-				wasin = static_cast<unsigned>(d);
+			if (d > wasin)
+				wasin = static_cast<unsigned>(d > 0xffffffffull ? 0xffffffffull : d);
 			eatD(asin(aa));
 			d = ud(acos(aa), ref.acos(aa));
-			if (d < 900 && d > wacos)
-				wacos = static_cast<unsigned>(d);
+			if (d > wacos)
+				wacos = static_cast<unsigned>(d > 0xffffffffull ? 0xffffffffull : d);
 			eatD(acos(aa));
+			double sa = 1000.0 * (double)i / 29999.0;
+			d = ud(sqrt(sa), ref.sqrt(sa));
+			if (d > wsqrt)
+				wsqrt = static_cast<unsigned>(d > 0xffffffffull ? 0xffffffffull : d);
+			eatD(sqrt(sa));
 		}
 		worst1[16] = wsin;
 		worst1[17] = wcos;
@@ -367,17 +410,20 @@ int main()
 		worst1[21] = wacos;
 		worst1[22] = wexp;
 		worst1[23] = wlog;
+		worst1[25] = wsqrt;
 	}
 
-	const char *shortNames[24] = { "sinf", "cosf", "sincosf", "tanf", "atanf", "atan2f", "asinf",
+	const char *shortNames[26] = { "sinf", "cosf", "sincosf", "tanf", "atanf", "atan2f", "asinf",
 		"acosf", "expf", "logf", "log2f", "log10f", "exp2f", "powf", "fmodf", "hypotf", "sin",
-		"cos", "tan", "atan", "asin", "acos", "exp", "log" };
+		"cos", "tan", "atan", "asin", "acos", "exp", "log", "sqrtf", "sqrt" };
 	unsigned fails = 0;
-	for (unsigned i = 0; i < 24; i++) {
-		unsigned bound = (i < 16) ? 1 : 8; // floats: brief requires <= 1
+	for (unsigned i = 0; i < 26; i++) {
+		// floats: brief requires <= 1; doubles: informational 8; sqrt is
+		// exact IEEE (sqrtsd/sqrtss): bound 0.
+		unsigned bound = (i < 16) ? 1 : ((i == 24 || i == 25) ? 0 : 8);
 		bool pass = worst1[i] <= bound;
-		std::printf("ulp %-8s max=%-4u bound=%u %s\n", shortNames[i], worst1[i], bound,
-		    pass ? "ok" : "FAIL");
+		std::printf("ulp %-8s max=%-10u bound=%u over=%llu n=%llu %s\n", shortNames[i],
+		    worst1[i], bound, overBound[i], nSamples[i], pass ? "ok" : "FAIL");
 		if (!pass)
 			fails++;
 	}

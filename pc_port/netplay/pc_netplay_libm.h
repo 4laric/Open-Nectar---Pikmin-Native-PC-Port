@@ -4,7 +4,7 @@
 //
 // This header only declares the self-test hooks. The math entry points
 // themselves (sinf, cosf, sincosf, tanf, atanf, atan2f, asinf, acosf, expf,
-// logf, powf, fmodf, hypotf, log10f/log2f/exp2f and the double versions)
+// logf, powf, fmodf, hypotf, sqrtf, log10f/log2f/exp2f and the double versions)
 // are plain C symbols defined in pc_netplay_libm.c. That TU is linked into
 // the game executable only when PIKMIN_NETPLAY_BUILD=ON, so the default
 // build keeps using the mingw math library untouched.
@@ -21,6 +21,8 @@ int pc_netplay_libm_present(void);
 
 // ABI version of the deterministic libm (bumped on any bit-exact change).
 // The test logs it next to the golden checksum it commits.
+unsigned long long pc_netplay_libm_abi_version(void);
+// Legacy alias kept for compatibility.
 unsigned long long pc_netplay_libm_grid_checksum(void);
 
 #ifdef __cplusplus

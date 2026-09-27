@@ -3,10 +3,10 @@
  * Netplay build only: this TU is added to the link in CMakeLists.txt under
  * `if(PIKMIN_NETPLAY_BUILD)`, so the default build never sees it. The plain
  * C symbols below (sinf, cosf, sincosf, tanf, atanf, atan2f, asinf, acosf,
- * expf, logf, log10f, log2f, exp2f, powf, fmodf, hypotf and the double
- * versions sin, cos, sincos, tan, asin, acos, atan, atan2, exp, log, log10,
- * log2, exp2, pow, fmod, hypot) are strong definitions inside the game
- * executable. At static link they satisfy the game's undefined references,
+ * expf, logf, log10f, log2f, exp2f, powf, fmodf, hypotf, sqrtf and the
+ * double versions sin, cos, sincos, tan, asin, acos, atan, atan2, exp, log,
+ * log10, log2, exp2, pow, fmod, hypot, sqrt) are strong definitions inside
+ * the game executable. At static link they satisfy the game's undefined references,
  * so the linker never pulls the mingw-w64 libm archive members that use
  * x87 transcendentals (fsin/fcos/fsincos/fpatan/f2xm1/fyl2x), and never
  * emits the msvcrt.dll `tan` import thunk. Verified by disassembly: the
@@ -16,14 +16,16 @@
  *
  * Determinism contract: every routine below uses only
  *   - integer bit manipulation on the IEEE-754 representation,
- *   - binary32/binary64 `+ - * /` and `sqrt` (SSE2, exact IEEE-754, bit
- *     identical on every x86-64 CPU for the same inputs),
+ *   - binary32/binary64 `+ - * /` and `sqrt` (SSE2 `sqrtsd`/`sqrtss`,
+ *     exact IEEE-754, bit identical on every x86-64 CPU for the same
+ *     inputs; via the pc_sqrt/pc_sqrtf helpers below, never a CRT
+ *     `sqrt`/`sqrtf` call),
  *   - branches and table lookups.
  * There is no `long double`, no x87 inline asm, and this file is compiled
- * with `-fno-builtin` so GCC never lowers a call to x87 microcode. No
- * routine calls back into the CRT libm (sqrt/sqrtf are the only external
- * float calls; both are exact IEEE operations lowered to SSE `sqrtsd` /
- * `sqrtss`). fenv state is pinned per tick by pc_netplay_det (MXCSR
+ * with per-name `-fno-builtin-sinf ...` (see CMakeLists.txt) so GCC never
+ * lowers one of the overridden names to x87 microcode, while `memcpy`
+ * stays a builtin and folds to a move. No routine calls back into the
+ * CRT libm. fenv state is pinned per tick by pc_netplay_det (MXCSR
  * 0x1F80, x87 word 0x037F), so rounding is always round-to-nearest.
  *
  * Source policy (brief item 2):
@@ -42,9 +44,9 @@
  *     tree: `s_atan.c` (aT[] coefficients, same Sun licence header family)
  *     and the structure of `e_atan2.c`. asin/acos wrap our atan2.
  *   - pow/powf port `e_pow.c` (already in the tree, Sun licence) with
- *     PC-only changes: fdlibm.h bit macros redone with memcpy, fabs via
- *     bit mask, scalbn via exact exponent/mantissa adjustment, sqrt via
- *     lib sqrt, `__float_nan` via 0.0/0.0.
+ *     PC-only changes: fdlibm.h bit macros redone with __builtin_memcpy,
+ *     fabs via bit mask, scalbn via exact exponent/mantissa adjustment,
+ *     sqrt via the SSE pc_sqrt helper above, `__float_nan` via 0.0/0.0.
  *   - exp/log (double) use range reduction plus the polynomial kernels
  *     whose coefficients come from that same `e_pow.c` (P1..P5 for 2^z,
  *     L1..L6/dp_h/dp_l/bp for log2), i.e. fdlibm-style as the brief
@@ -80,36 +82,55 @@
 #include <math.h>
 #include <stdint.h>
 #include <string.h>
+#include <emmintrin.h>
 
 /* ------------------------------------------------------------------ */
-/* Bit helpers (memcpy: no aliasing UB, folds to a move).              */
+/* Bit helpers (__builtin_memcpy: no aliasing UB, folds to a move even */
+/* under -fno-builtin-*; plain memcpy would stay a CRT call there).    */
+/* SSE square roots (exact IEEE-754, never an x87 fsqrt): a plain      */
+/* sqrt() call lowers to sqrtsd + a CRT fallback for errno, which is   */
+/* the mingw x87 fsqrt path this lane exists to close (review M1).     */
 /* ------------------------------------------------------------------ */
+
+static double pc_sqrt(double x)
+{
+	__m128d v = _mm_set_sd(x);
+	v = _mm_sqrt_sd(_mm_setzero_pd(), v);
+	return _mm_cvtsd_f64(v);
+}
+
+static float pc_sqrtf(float x)
+{
+	__m128 v = _mm_set_ss(x);
+	v = _mm_sqrt_ss(v);
+	return _mm_cvtss_f32(v);
+}
 
 static uint32_t f32_bits(float x)
 {
 	uint32_t u;
-	memcpy(&u, &x, 4);
+	__builtin_memcpy(&u, &x, 4);
 	return u;
 }
 
 static float bits_f32(uint32_t u)
 {
 	float x;
-	memcpy(&x, &u, 4);
+	__builtin_memcpy(&x, &u, 4);
 	return x;
 }
 
 static uint64_t f64_bits(double x)
 {
 	uint64_t u;
-	memcpy(&u, &x, 8);
+	__builtin_memcpy(&u, &x, 8);
 	return u;
 }
 
 static double bits_f64(uint64_t u)
 {
 	double x;
-	memcpy(&x, &u, 8);
+	__builtin_memcpy(&x, &u, 8);
 	return x;
 }
 
@@ -181,16 +202,6 @@ static double pc_scalbn(double x, int n)
 		return bits_f64(sign | q);
 	}
 }
-
-/* Set to 1 to route the float trig entry points through the ported MSL
- * algorithm below instead of the double kernels. Kept for archaeology:
- * the MSL port (trigf.c/inverse_trig.c, tables verbatim from the tree)
- * was measured at 100-900 ulp from the mingw libm on game domains
- * (single-precision argument reduction near quadrant boundaries and
- * cancellation in 1-x*x near |x|=1 are inherent to the 1990s console
- * algorithm, not port errors), so the accuracy requirement routes the
- * public entry points through the fdlibm-style double kernels rounded
- * once (<= 1 ulp, verified by pc_netplay_libm_test). */
 
 /* Set to 1 to route the float trig entry points through the ported MSL
  * algorithm below instead of the double kernels. Kept for archaeology:
@@ -484,7 +495,7 @@ static float pc_msl_inv_sqrtf(float x)
 		 * estimate) and refines 3x. On PC the SSE sqrtf gives a
 		 * correctly rounded seed, so two refinements overshoot the
 		 * original precision while staying pure SSE. */
-		float guess = 1.0f / sqrtf(x);
+		float guess = 1.0f / pc_sqrtf(x);
 		guess = half * guess * (three - guess * guess * x);
 		guess = half * guess * (three - guess * guess * x);
 		return guess;
@@ -929,7 +940,7 @@ static double pc_asin_kernel(double x)
 	t = (1.0 - x) * (1.0 + x);
 	if (t < 0.0)
 		t = 0.0;
-	return pc_atan2_kernel(x, sqrt(t));
+	return pc_atan2_kernel(x, pc_sqrt(t));
 }
 
 static double pc_acos_kernel(double x)
@@ -948,7 +959,7 @@ static double pc_acos_kernel(double x)
 	t = (1.0 - x) * (1.0 + x);
 	if (t < 0.0)
 		t = 0.0;
-	return pc_atan2_kernel(sqrt(t), x);
+	return pc_atan2_kernel(pc_sqrt(t), x);
 }
 /* ------------------------------------------------------------------ */
 /* Double exp/log: range reduction + polynomial kernels whose         */
@@ -1013,7 +1024,6 @@ static double pc_exp_kernel(double x)
 static double pc_log2_split(double ax, double *lo)
 {
 	double s, s_h, s_l, t_h, t_l, u, v, p_h, p_l, z_h, z_l, t1, t2, t, r, s2;
-	double z_h2;
 	int n = 0, k, j;
 	int ix;
 	uint64_t uax = f64_bits(ax);
@@ -1054,8 +1064,6 @@ static double pc_log2_split(double ax, double *lo)
 		double bp = k ? PC_BP1 : PC_BP0;
 		double t_hh;
 		uint64_t ut;
-		t_hh = 0.0;
-		ut = f64_bits(t_hh);
 		ut = ((uint64_t)(unsigned)(((ix >> 1) | 0x20000000) + 0x00080000 + (k << 18)) << 32);
 		t_hh = bits_f64(ut);
 		t_l = ax - (t_hh - bp);
@@ -1092,8 +1100,6 @@ static double pc_log2_split(double ax, double *lo)
 		t1 = bits_f64(ut);
 	}
 	t2 = z_l - (((t1 - t) - (k ? PC_DP_H1 : PC_DP_H0)) - z_h);
-	z_h2 = t1 + t2;
-	(void)z_h2;
 	*lo = t2;
 	return t1;
 }
@@ -1176,12 +1182,13 @@ static double pc_hypot_kernel(double x, double y)
 	if (m == 0.0)
 		return 0.0;
 	r = ((ax > ay) ? ay : ax) / m;
-	return m * sqrt(1.0 + r * r);
+	return m * pc_sqrt(1.0 + r * r);
 }
 /* ------------------------------------------------------------------ */
 /* Double pow (ported from the tree's e_pow.c, Sun fdlibm licence).    */
-/* PC changes: bit macros via memcpy, fabs via bit mask, scalbn via    */
-/* exponent adjustment, sqrt via lib sqrt, __float_nan via 0.0/0.0.    */
+/* PC changes: bit macros via __builtin_memcpy, fabs via bit mask,    */
+/* exponent adjustment, sqrt via the SSE pc_sqrt helper above,         */
+/* __float_nan via 0.0/0.0.                                            */
 /* Method (from the original comment): x = 2^n*(1+f); log2(x) = w1+w2  */
 /* in two pieces; y*log2(x) = n+y' in simulated multi-precision;       */
 /* x**y = 2**n * exp(y'*log2). Nearly rounded, including the rule that */
@@ -1270,7 +1277,7 @@ static double pc_pow_kernel(double x, double y)
 			return x * x;
 		if (hy == 0x3fe00000) {
 			if (hx >= 0)
-				return sqrt(x);
+				return pc_sqrt(x);
 		}
 	}
 
@@ -1455,6 +1462,9 @@ static double pc_pow_kernel(double x, double y)
 	r = (z * t1) / (t1 - two) - (w + z * w);
 	z = one - (r - z);
 	j = (int)(f64_bits(z) >> 32);
+	/* n << 20 overflows into the sign bit for large |n|; this is the
+	 * fdlibm idiom and relies on GCC's documented wrapping of signed
+	 * left shift (-fwrapv semantics GCC guarantees for shifts). */
 	j += (n << 20);
 	if ((j >> 20) <= 0)
 		z = pc_scalbn(z, n);
@@ -1466,9 +1476,7 @@ static double pc_pow_kernel(double x, double y)
 	return s * z;
 }
 /* ------------------------------------------------------------------ */
-/* ------------------------------------------------------------------ */
 /* Public entry points. Strong C definitions: at static link these    */
-/* satisfy the game's undefined references, so the mingw libm archive */
 /* satisfy the game's undefined references, so the mingw libm archive */
 /* members (x87) are never pulled and no msvcrt math import is        */
 /* emitted for them.                                                  */
@@ -1572,6 +1580,17 @@ float fmodf(float x, float y) { return (float)pc_fmod_core((double)x, (double)y)
 
 float hypotf(float x, float y) { return (float)pc_hypot_kernel((double)x, (double)y); }
 
+/* Exact IEEE square roots, SSE only (review M1 follow-up: the mingw-w64
+ * sqrt/sqrtf use x87 fldl/fsqrt/fstpl, whose double rounding depends on
+ * the x87 precision-control field. These strong definitions keep the
+ * linker from ever pulling those archive members. sqrtsd/sqrtss are
+ * correctly rounded by hardware, so no accuracy clause applies; the
+ * NaN/Inf/zero/sign cases below just spell out the IEEE behavior the
+ * instructions already implement). */
+double sqrt(double x) { return pc_sqrt(x); }
+
+float sqrtf(float x) { return pc_sqrtf(x); }
+
 double sin(double x)
 {
 	double s, c;
@@ -1628,4 +1647,8 @@ int pc_netplay_libm_present(void) { return 1; }
 /* ABI version of this deterministic libm. Bumped whenever any routine's
  * bit-exact behavior changes; the libm test logs it next to the golden
  * checksum so a checksum mismatch can be told apart from a stale test. */
-unsigned long long pc_netplay_libm_grid_checksum(void) { return 0x6D32642D66700001ull; }
+unsigned long long pc_netplay_libm_abi_version(void) { return 0x6D32642D66700003ull; }
+
+/* Legacy alias (review m6): the old name returned an ABI version, not a
+ * checksum, but existing logs reference it. */
+unsigned long long pc_netplay_libm_grid_checksum(void) { return pc_netplay_libm_abi_version(); }
