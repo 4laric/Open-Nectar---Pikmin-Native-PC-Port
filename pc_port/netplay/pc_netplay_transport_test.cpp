@@ -255,6 +255,11 @@ int main()
 			std::fflush(stdout);
 		}
 		for (int p = 0; p < 2; ++p) {
+			// B3: once a peer reaches kFrames, stop updating it. With
+			// local delay 2 the buffer holds kFrames + 2 frames of input,
+			// so a trailing update would advance it to 2001/2002 and the
+			// exact-count checks below would flake (about half the runs).
+			if (adv[p] >= kFrames) continue;
 			// Feed the current frame's input exactly once: after N
 			// advances the session's current frame is N.
 			if (started[p] && fed[p] == adv[p] && fed[p] < kFrames) {

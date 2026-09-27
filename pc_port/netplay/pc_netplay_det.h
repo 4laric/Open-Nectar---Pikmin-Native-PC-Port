@@ -39,3 +39,8 @@ void pc_netplay_det_reseed_for_new_day(int dayIndex, int stageId);
 
 // PIKMIN_NETPLAY_PROFILE_LOG value, or nullptr when unset/empty. Cached.
 const char* pc_netplay_det_profile_path(void);
+// M3 fix (review M4): periodic world-sim / whole-tick cost report, every 600
+// ticks when PIKMIN_NETPLAY_PROFILE_LOG is set. System::run calls this on
+// the normal path; the lockstep session calls it per Advance so the netplay
+// path reports too. No-op when the env gate is unset.
+void pc_netplay_det_profile_note_tick(void);

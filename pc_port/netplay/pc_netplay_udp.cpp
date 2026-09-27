@@ -267,6 +267,16 @@ void GekkoLink::send_inner(uint32_t ipHostOrder, uint16_t port, const uint8_t* d
 	send_to_peer(ipHostOrder, port, data, len);
 }
 
+// m7: both pending queues are capped (brief: every declared length is
+// bounded). A stray sender can otherwise grow them without bound; beyond
+// the cap the oldest datagram is dropped.
+constexpr size_t kMaxPendingQueue = 512;
+
+void cap_queue(std::vector<UdpSocket::Datagram>& q)
+{
+	if (q.size() > kMaxPendingQueue) q.erase(q.begin(), q.begin() + (q.size() - kMaxPendingQueue));
+}
+
 GekkoNetResult** GekkoLink::receive_inner(int* length)
 {
 	mResults.clear();
@@ -280,6 +290,8 @@ GekkoNetResult** GekkoLink::receive_inner(int* length)
 			}
 			// Unknown channels are dropped.
 		}
+		cap_queue(mGekkoPending);
+		cap_queue(mHandshakePending);
 	}
 	auto emit = [&](const uint8_t* payload, size_t len, uint32_t ip, uint16_t port) {
 		if (len > kMaxDatagram - 1) return; // bounded before use
@@ -333,6 +345,8 @@ std::vector<UdpSocket::Datagram> GekkoLink::drain_handshake()
 				mHandshakePending.push_back(std::move(g));
 			}
 		}
+		cap_queue(mGekkoPending);
+		cap_queue(mHandshakePending);
 	}
 	std::vector<UdpSocket::Datagram> out;
 	out.swap(mHandshakePending);
@@ -411,6 +425,10 @@ LossyLink::~LossyLink()
 {
 	if (g_lossy_send[mSlot] == this) g_lossy_send[mSlot] = nullptr;
 	if (g_lossy_recv[mSlot] == this) g_lossy_recv[mSlot] = nullptr;
+	// m10: release the slot so a third instance in the same process does
+	// not silently steal slot 0. Stack discipline (test creates two, then
+	// destroys both) pops the top; anything else parks at slot 0 reuse.
+	if (mSlot == g_lossy_count - 1) --g_lossy_count;
 	// Anything still delayed belongs to the inner adapter's heap contract;
 	// release it through the inner free triple.
 	for (Delayed& d : mPending) {
@@ -448,8 +466,11 @@ double LossyLink::draw_delay_ms()
 
 void LossyLink::send_inner(GekkoNetAddress* addr, const char* data, int length)
 {
+	// m1: loss applies on receive only. Each packet used to pass one peer's
+	// send drop and the other's receive drop (effective one-way loss ~9.75%
+	// at 5% configured); now the configured lossPct is the effective
+	// one-way rate. Local RNG only, never the sim RNG.
 	if (mInner == nullptr || addr == nullptr || data == nullptr || length <= 0) return;
-	if (draw_drop()) return; // loss applies on send; local RNG only, never the sim RNG
 	mInner->send_data(addr, data, length);
 }
 

@@ -121,9 +121,11 @@ private:
 };
 
 // Lossy wrapper adapter over any inner GekkoNetAdapter: one-way latency,
-// jitter, loss % and reordering. Parameters are explicit (the session reads
-// PIKMIN_NETPLAY_TEST_LATENCY_MS / _JITTER_MS / _LOSS_PCT / _SEED); the
-// randomness is a local std::mt19937 and never touches the sim RNG.
+// jitter, loss % and reordering. Loss is applied once, on receive, so the
+// configured lossPct is the effective one-way rate (m1). Parameters are
+// explicit (the session reads PIKMIN_NETPLAY_TEST_LATENCY_MS / _JITTER_MS /
+// _LOSS_PCT / _SEED); the randomness is a local std::mt19937 and never
+// touches the sim RNG.
 struct LossyParams {
 	double latencyMs = 0.0; // base one-way delay
 	double jitterMs  = 0.0; // extra uniform [0, jitterMs]

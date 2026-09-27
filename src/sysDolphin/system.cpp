@@ -321,7 +321,9 @@ static bool pc_replay_test_enabled()
 // (item 8). Enabled by PIKMIN_NETPLAY_PROFILE_LOG=<file>; appended every 600
 // ticks (20 s at the forced 30 Hz clamp) and mirrored to stdout so hidden
 // smoke runs carry the numbers in their logs. p50 is the profiler median.
-static void pc_netplay_det_profile_note_tick()
+// Non-static so the M3 lockstep session can call it per Advance (review M4);
+// the normal path calls it at the same point below.
+void pc_netplay_det_profile_note_tick()
 {
 	const char* path = pc_netplay_det_profile_path();
 	if (!path) return;

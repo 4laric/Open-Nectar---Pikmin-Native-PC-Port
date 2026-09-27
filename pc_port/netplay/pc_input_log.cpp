@@ -226,6 +226,12 @@ void pc_input_log_capture_yaw(void)
 	if (sYawCaptureFn != nullptr) sYawCaptureFn();
 }
 
+void pc_input_log_capture_yaw_fresh(void)
+{
+	for (int p = 0; p < 4; ++p) sYawValid[p] = false;
+	if (sYawCaptureFn != nullptr) sYawCaptureFn();
+}
+
 void pc_input_log_yaw_set(int pad, uint16_t yaw, uint8_t flags)
 {
 	if (pad < 0 || pad >= 4) return;
