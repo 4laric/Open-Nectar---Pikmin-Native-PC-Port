@@ -67,6 +67,9 @@ std::vector<Injection> injections;
 unsigned long behaviorTick = 0;
 float clockAccumulator = 0.0f;
 unsigned clockLast = 0;
+// M1 det fix: last logical tick that advanced the behavior clock below (0 =
+// unprimed; pc_netplay_tick() is 1-based inside tick bodies).
+unsigned lastDetTick = 0;
 int suppressedCount = 0;
 int blastCount = 0;
 
@@ -221,6 +224,7 @@ void pc_p2_bombotakara_reset() {
     behaviorTick = 0;
     clockAccumulator = 0.0f;
     clockLast = 0;
+    lastDetTick = 0;
     suppressedCount = 0;
     blastCount = 0;
 }
@@ -286,10 +290,16 @@ void pc_p2_bombotakara_update() {
     if (units.empty()) return;
     const unsigned now = SDL_GetTicks();
     if (pc_netplay_deterministic()) {
-        // M1: fixed-step advance of 1/30 s per tick (det gameplay is forced
-        // to the 30 Hz clamp), so the behavior clock matches on every peer;
-        // the wall anchor is still refreshed so leaving det mode never injects a jump.
-        clockAccumulator += pc_netplay_fixed_dt(2);
+        // M1 det fix: tick-counted analogue of the wall clock. The wall code
+        // advances the shared behavior clock by wall time since the last
+        // call; here it advances by logical ticks since the last call, so
+        // every call in one tick advances it once and skipped ticks catch up
+        // (bounded below, as before). The wall anchor is still refreshed so
+        // leaving det mode never injects a jump.
+        const unsigned tickNow = pc_netplay_tick();
+        if (lastDetTick == 0) lastDetTick = tickNow;
+        clockAccumulator += float(tickNow - lastDetTick) * pc_netplay_fixed_dt(gsys ? gsys->mFrameRate : 2);
+        lastDetTick = tickNow;
     } else {
         clockAccumulator += static_cast<float>(now - clockLast) * 0.001f;
     }

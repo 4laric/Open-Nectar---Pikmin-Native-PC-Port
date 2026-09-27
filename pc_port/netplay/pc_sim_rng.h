@@ -33,6 +33,11 @@ void     pc_cosmetic_srand(unsigned seed);
 unsigned pc_cosmetic_rng_state(void);
 void     pc_cosmetic_rng_set_state(unsigned state);
 
+// Records the calling thread as the RNG owner (called by
+// pc_netplay_det_init from main()). Det-mode draws from any other thread log
+// once to stderr; see pc_sim_rng.cpp.
+void pc_sim_rng_note_main_thread(void);
+
 // One-draw float shapers mirroring System::getRand: max * (draw / RAND_MAX).
 inline float pc_sim_randf(float max) { return max * (pc_sim_rand() / float(RAND_MAX)); }
 inline float pc_cosmetic_randf(float max) { return max * (pc_cosmetic_rand() / float(RAND_MAX)); }

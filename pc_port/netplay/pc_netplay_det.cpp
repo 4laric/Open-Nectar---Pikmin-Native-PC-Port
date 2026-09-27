@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cerrno>
 
 #if defined(__SSE__) || defined(__x86_64__) || defined(_M_X64) || defined(_M_IX86)
 #include <xmmintrin.h>
@@ -48,9 +49,20 @@ unsigned readU32Env(const char* name, unsigned fallback)
 {
 	const char* value = std::getenv(name);
 	if (value == nullptr || *value == '\0') return fallback;
+	// M1 det fix: fail loudly instead of silently falling back. strtoul
+	// accepts a leading '-' (wraps) and saturates on overflow, so reject
+	// both, plus trailing garbage and ERANGE.
+	if (value[0] == '-') {
+		std::fprintf(stderr, "[netplay-det] invalid %s='%s', using %u\n", name, value, fallback);
+		return fallback;
+	}
+	errno     = 0;
 	char* end = nullptr;
 	const unsigned long parsed = std::strtoul(value, &end, 0);
-	if (end == value || *end != '\0') return fallback;
+	if (end == value || *end != '\0' || errno == ERANGE || parsed > 0xfffffffful) {
+		std::fprintf(stderr, "[netplay-det] invalid %s='%s', using %u\n", name, value, fallback);
+		return fallback;
+	}
 	return static_cast<unsigned>(parsed);
 }
 
@@ -68,6 +80,10 @@ void pc_netplay_det_init(int argc, char** argv)
 		}
 	}
 	sUnthrottled = sDeterministic && envIsOne("PIKMIN_NETPLAY_UNTHROTTLED");
+	// M1 det fix: record the RNG owner thread (report section 2b.3: the sim
+	// and cosmetic streams are main-thread-only). Production calls this from
+	// main(); the host test calls it from its main thread too.
+	pc_sim_rng_note_main_thread();
 	if (sDeterministic) {
 		std::printf("[netplay-det] deterministic fixed-step mode ON%s\n",
 		    sUnthrottled ? " (unthrottled: one tick per loop, no vsync wait)" : "");
@@ -108,9 +124,14 @@ void pc_netplay_on_tick_begin(void)
 
 float pc_netplay_fixed_dt(int frameClamp)
 {
+	// M1 det fix: mirror PcFrameScheduler::deltaForClamp exactly (kept as a
+	// local mirror, not a call, so this TU stays engine-free and linkable
+	// into the host tests). Callers pass gsys->mFrameRate, the current tick
+	// rate, instead of hard-coding the 30 Hz clamp.
 	if (frameClamp == 0) return 1.0f / 120.0f;
 	if (frameClamp == 1) return 1.0f / 60.0f;
-	return 1.0f / 30.0f;
+	if (frameClamp == 2) return 1.0f / 30.0f;
+	return float(frameClamp) / 60.0f;
 }
 
 void pc_netplay_det_reseed_for_new_day(int dayIndex, int stageId)

@@ -1780,10 +1780,10 @@ void NaviGatherState::init(Navi* navi)
 #if defined(PIKI_PC_PORT)
 	// Use the actual whistle action, so controller remapping still works.
 	// M1 deterministic netplay: the double-tap window counts ticks instead
-	// of wall seconds (tick * 1/30 s at the forced 30 Hz clamp, same 0.35 s
-	// threshold: a 10-tick gap recalls, an 11-tick gap does not).
+	// of wall seconds (ticks at the current tick rate, same 0.35 s
+	// threshold: a 10-tick gap recalls, an 11-tick gap does not at 30 Hz).
 	const double now = pc_netplay_deterministic()
-	    ? static_cast<double>(pc_netplay_tick()) * (1.0 / 30.0)
+	    ? static_cast<double>(pc_netplay_tick()) * pc_netplay_fixed_dt(gsys ? gsys->mFrameRate : 2)
 	    : std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 	mTapState.press(now);
 	// A short tap should recruit immediately, even before the animation loop.

@@ -103,8 +103,11 @@ void pc_p2_purple_feedback_land(Piki* piki, bool enemy)
     const unsigned tick = pc_netplay_tick();
     int rumbleResult = -2;
     // M1 deterministic netplay: throttle by tick counting with the same
-    // duration semantics (5 ticks at 30 Hz >= 150 ms) instead of SDL_GetTicks.
-    const bool throttleOk = detMode ? (!hasPulse || tick - detLastPulseTick >= 5)
+    // duration semantics (ceiling of 150 ms in ticks at the current tick
+    // rate: 5 at 30 Hz) instead of SDL_GetTicks.
+    const unsigned detWindow = static_cast<unsigned>(
+        std::ceil(0.150f / pc_netplay_fixed_dt(gsys ? gsys->mFrameRate : 2)));
+    const bool throttleOk = detMode ? (!hasPulse || tick - detLastPulseTick >= detWindow)
                                     : (!hasPulse || now - lastPulse >= 150);
     if (dx * dx + dz * dz <= 250.0f * 250.0f && throttleOk) {
         if (detMode) {
