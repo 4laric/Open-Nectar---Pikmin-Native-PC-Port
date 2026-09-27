@@ -26,11 +26,20 @@
 //     fp02, lane-20 pinned values) through the shared bombsarai blast primitive
 //     on the live actor's own BTeki tick. The preview-only lane-20 sidecar
 //     (pc_p2_bombotakara) remains a fixture driver only, not the bridge path.
-//   * Wander/wake navigation is a P1-host adaptation of OtakaraBase Move/Turn.
+//   * Wait/Move/Turn follow OtakaraBase isMovePositionSet/getTargetPosition
+//     (OtakaraBase.cpp:361-444, OtakaraBaseState.cpp:165-334) via the engine-free
+//     pc_p2_otakara_move.h (#884): elemental Dweevils (59-62) ESCAPE one moveSpeed
+//     step away from the nearest Pikmin/Navi, clamped to the 200 home territory;
+//     BombOtakara (93) keeps chasing its target (StateBombMove). Transitions commit
+//     at the looped clip end (finishMotion -> KEYEVENT_END). No idle wander.
+//   * The Flick trigger stays the port proximity adaptation (any Piki within 60,
+//     evaluated before the move decision) instead of source isStartFlick
+//     (enemyAction.cpp:1209-1244 hit/stuck thresholds); follow-up in #884.
 //   * View angle is a full circle (hit angle fp23=0 on the disc).
 // No other lane's module is modified; every hook is a no-op for unregistered actors.
 #include "pc_p2_otakara.h"
 #include "pc_p2_otakara_fx.h"
+#include "pc_p2_otakara_move.h"
 #include "pc_p2_dweevil_policy.h"
 #include "pc_p2_bombsarai_blast.h"
 #include "pc_p2_species.h"
@@ -102,9 +111,6 @@ constexpr float SIGHT = 200.0f;       // fp12
 constexpr float TERRITORY = 200.0f;   // fp09 home territory
 constexpr float HIT_RANGE = 60.0f;    // fp22 attack hit range (disc)
 constexpr float FLICK_RADIUS = 60.0f; // trigger the Flick discharge
-constexpr float TURN_RATE = 2.0f;     // port adaptation
-constexpr float WAIT_MIN = 1.0f;      // port adaptation
-constexpr float WAIT_MAX = 2.0f;      // port adaptation
 
 struct Clip {
     std::string name;
@@ -119,12 +125,30 @@ struct Otakara {
     float timer = 0.0f;
     float heading = 0.0f;
     Vector3f home;
-    Vector3f target;
+    Vector3f target; // current isMovePositionSet destination (mMovePosition)
+    State pending = OTA_INVALID; // source mNextState, committed at the clip end
+    bool destClamped = false;
+    bool threatValid = false;
+    bool threatIsNavi = false;
+    p2otakaramove::Vec2 threatPos{0.0f, 0.0f};
+    float decisionLogTimer = 0.0f;
+    // P2_OTAKARA_FLEE_SUMMARY episode (Move/Turn stretch).
+    bool fleeActive = false;
+    bool fleeHasPrev = false;
+    bool fleePrevClamped = false;
+    float fleeDuration = 0.0f;
+    float fleeSampleTimer = 0.0f;
+    float fleeMaxHome = 0.0f;
+    int fleeSamples = 0;
+    int fleeAway = 0;
+    int fleeToward = 0;
+    int fleeBoundary = 0;
+    p2otakaramove::Vec2 fleePrevPos{0.0f, 0.0f};
+    p2otakaramove::Vec2 fleePrevThreat{0.0f, 0.0f};
     int species = p2dweevil::FireId;
     p2dweevil::Stimulus stimulus = p2dweevil::StimFire;
     float life = 150.0f;
     float attack = 10.0f;
-    unsigned rng = 1;
     std::set<int> firedEvents;
     std::string clip = "wait1";
     float phase = 0.0f;
@@ -142,19 +166,8 @@ std::map<PelletView*, Otakara> actors;
 std::map<std::string, Clip> clips;
 bool ready = false;
 
-unsigned nextRand(Otakara& s) {
-    s.rng = s.rng * 1664525u + 1013904223u;
-    return s.rng >> 8;
-}
-float rand01(Otakara& s) { return float(nextRand(s) & 0xffff) / 65535.0f; }
-float randRange(Otakara& s, float lo, float hi) { return lo + (hi - lo) * rand01(s); }
 unsigned genOf(const BTeki* actor) { return actor && actor->mGenerator ? pc_p2_campaign_token(actor) : 0u; }
 
-float wrapPi(float a) {
-    while (a > 3.14159265f) a -= 6.28318531f;
-    while (a < -3.14159265f) a += 6.28318531f;
-    return a;
-}
 float distXZ(const Vector3f& a, const Vector3f& b) {
     const float dx = a.x - b.x, dz = a.z - b.z;
     return std::sqrt(dx * dx + dz * dz);
@@ -183,30 +196,134 @@ Piki* nearestPiki(const Vector3f& pos, float radius) {
     }
     return best;
 }
-Creature* nearestTarget(const Vector3f& pos) {
-    Creature* best = nullptr;
-    float bestSq = SIGHT * SIGHT;
+p2otakaramove::Vec2 v2(const Vector3f& v) { return p2otakaramove::Vec2{v.x, v.z}; }
+
+// isMovePositionSet (OtakaraBase.cpp:361-389) for a creature target: select the
+// threat with getNearestPikminOrNavi semantics (p2otakaramove::selectThreat), then
+// store the escape (59-62) or chase (93) destination in s.target. No treasure is
+// staged, so the treasure branch never applies at runtime. Returns hasTarget.
+bool updateDestination(BTeki* actor, Otakara& s, const Vector3f& pos) {
+    static std::vector<p2otakaramove::Candidate> cands;
+    cands.clear();
     if (naviMgr) {
-        Navi* n = naviMgr->getNavi();
-        if (n && n->isAlive()) {
-            const Vector3f p = n->getPosition();
-            const float dx = p.x - pos.x, dz = p.z - pos.z;
-            const float d = dx * dx + dz * dz;
-            if (d < bestSq) { bestSq = d; best = n; }
+        Iterator it(naviMgr);
+        CI_LOOP(it) {
+            Navi* n = static_cast<Navi*>(*it);
+            if (!n) continue;
+            cands.push_back({v2(n->getPosition()), true, n->isAlive() != 0, false, false});
         }
     }
     if (pikiMgr) {
         Iterator it(pikiMgr);
         CI_LOOP(it) {
             Piki* p = static_cast<Piki*>(*it);
-            if (!p || !p->isAlive()) continue;
-            const Vector3f q = p->getPosition();
-            const float dx = q.x - pos.x, dz = q.z - pos.z;
-            const float d = dx * dx + dz * dz;
-            if (d < bestSq) { bestSq = d; best = p; }
+            if (!p) continue;
+            cands.push_back({v2(p->getPosition()), false, p->isAlive() != 0,
+                             p->getStickObject() == static_cast<Creature*>(actor), p->isStickToMouth() != 0});
         }
     }
-    return best;
+    const int pick = p2otakaramove::selectThreat(cands.data(), int(cands.size()), v2(pos), SIGHT);
+    s.threatValid = pick >= 0;
+    s.destClamped = false;
+    if (!s.threatValid) {
+        s.target.set(pos);
+        return false;
+    }
+    s.threatIsNavi = cands[pick].isNavi;
+    s.threatPos = cands[pick].pos;
+    const p2otakaramove::Mode mode =
+        s.species == p2dweevil::BombId ? p2otakaramove::Mode::Pursue : p2otakaramove::Mode::Escape;
+    const p2otakaramove::Vec2 dest =
+        p2otakaramove::movePosition(mode, p2otakaramove::TargetKind::Creature, v2(pos), cands[pick].pos, v2(s.home),
+                                    speciesMoveSpeed(s.species), TERRITORY, &s.destClamped);
+    s.target.set(dest.x, pos.y, dest.z);
+    return true;
+}
+
+bool facingDest(const Otakara& s, const Vector3f& pos) {
+    return p2otakaramove::facingWithinGate(s.heading, v2(pos), v2(s.target));
+}
+
+State fromSt(p2otakaramove::St st) {
+    switch (st) {
+    case p2otakaramove::St::Dead: return OTA_DEAD;
+    case p2otakaramove::St::Flick: return OTA_FLICK;
+    case p2otakaramove::St::Wait: return OTA_WAIT;
+    case p2otakaramove::St::Move: return OTA_MOVE;
+    case p2otakaramove::St::Turn: return OTA_TURN;
+    }
+    return OTA_WAIT;
+}
+const char* clipFor(State s) {
+    switch (s) {
+    case OTA_DEAD: return "dead";
+    case OTA_FLICK: return "attack1";
+    case OTA_MOVE: return "move1";
+    case OTA_TURN: return "pivot1";
+    default: return "wait1";
+    }
+}
+bool fleeing(State s) { return s == OTA_MOVE || s == OTA_TURN; }
+const char* modeName(const Otakara& s) { return s.species == p2dweevil::BombId ? "pursue" : "escape"; }
+
+// P2_OTAKARA_MOVE_DECISION: on a transition into Move/Turn and at most 1 Hz in Move.
+void logDecision(const Otakara& s, const Vector3f& pos) {
+    const float threatDist = p2otakaramove::distXZ(v2(pos), s.threatPos);
+    const int away = p2otakaramove::distXZ(v2(s.target), s.threatPos) > threatDist ? 1 : 0;
+    std::printf("P2_OTAKARA_MOVE_DECISION generator=%u source_id=%d state=%s mode=%s threat=%s "
+                "threat_dist=%.1f self=%.1f,%.1f threat=%.1f,%.1f dest=%.1f,%.1f dest_home_dist=%.1f "
+                "territory=%.0f clamped=%d away=%d\n",
+                s.generator, s.species, stateName(s.state), modeName(s), s.threatIsNavi ? "navi" : "piki",
+                threatDist, pos.x, pos.z, s.threatPos.x, s.threatPos.z, s.target.x, s.target.z,
+                distXZ(s.target, s.home), TERRITORY, int(s.destClamped), away);
+    std::fflush(stdout);
+}
+
+// P2_OTAKARA_FLEE_SUMMARY: once per Move/Turn episode.
+void endFlee(Otakara& s, const char* end) {
+    if (!s.fleeActive) return;
+    s.fleeActive = false;
+    std::printf("P2_OTAKARA_FLEE_SUMMARY generator=%u source_id=%d mode=%s duration=%.2f samples=%d away=%d "
+                "toward=%d boundary=%d max_home_dist=%.1f end=%s\n",
+                s.generator, s.species, modeName(s), s.fleeDuration, s.fleeSamples, s.fleeAway, s.fleeToward,
+                s.fleeBoundary, s.fleeMaxHome, end);
+    std::fflush(stdout);
+}
+
+// Per-frame episode bookkeeping while in Move/Turn. A sample is taken each 1 s:
+// boundary when the destination was clamped at either end, else away/toward by the
+// sign of dot(pos_now - pos_prev, pos_prev - threat_prev); a displacement under one
+// unit (turning in place) counts only toward samples.
+void trackFlee(Otakara& s, const Vector3f& pos, float dt) {
+    if (!s.fleeActive) return;
+    s.fleeDuration += dt;
+    const float homeDist = distXZ(pos, s.home);
+    if (homeDist > s.fleeMaxHome) s.fleeMaxHome = homeDist;
+    if (!s.fleeHasPrev) {
+        if (!s.threatValid) return;
+        s.fleeHasPrev = true;
+        s.fleePrevPos = v2(pos);
+        s.fleePrevThreat = s.threatPos;
+        s.fleePrevClamped = s.destClamped;
+        s.fleeSampleTimer = 0.0f;
+        return;
+    }
+    s.fleeSampleTimer += dt;
+    if (s.fleeSampleTimer < 1.0f) return;
+    s.fleeSampleTimer = 0.0f;
+    ++s.fleeSamples;
+    const float dx = pos.x - s.fleePrevPos.x, dz = pos.z - s.fleePrevPos.z;
+    const float ax = s.fleePrevPos.x - s.fleePrevThreat.x, az = s.fleePrevPos.z - s.fleePrevThreat.z;
+    const float dot = dx * ax + dz * az;
+    if (s.fleePrevClamped || s.destClamped) {
+        ++s.fleeBoundary;
+    } else if (dx * dx + dz * dz >= 1.0f) {
+        if (dot > 0.0f) ++s.fleeAway;
+        else ++s.fleeToward;
+    }
+    s.fleePrevPos = v2(pos);
+    if (s.threatValid) s.fleePrevThreat = s.threatPos;
+    s.fleePrevClamped = s.destClamped;
 }
 
 // The receiver decides immunity; this mirrors the receiver's own lane-11 matrix
@@ -393,11 +510,36 @@ void doFlick(BTeki* a) {
 }
 
 void enter(Otakara& s, State state, const char* clip, float timer = 0.0f) {
+    if (fleeing(s.state) && !fleeing(state)) {
+        endFlee(s, state == OTA_FLICK ? "flick" : state == OTA_DEAD ? "dead" : "wait");
+    }
+    if (fleeing(state) && !s.fleeActive) {
+        s.fleeActive = true;
+        s.fleeHasPrev = false;
+        s.fleePrevClamped = false;
+        s.fleeDuration = 0.0f;
+        s.fleeSampleTimer = 0.0f;
+        s.fleeMaxHome = 0.0f;
+        s.fleeSamples = s.fleeAway = s.fleeToward = s.fleeBoundary = 0;
+    }
+    s.pending = OTA_INVALID;
+    s.decisionLogTimer = 0.0f;
     s.state = state;
     s.stateTime = 0.0f;
     s.timer = timer;
     s.firedEvents.clear();
     if (clip) s.clip = clip;
+}
+
+// Commit the pending source mNextState when the looped clip reaches its end
+// (finishMotion -> KEYEVENT_END, OtakaraBaseState.cpp:196-198/266-268).
+void commitPending(BTeki* a, Otakara& s, const Vector3f& pos, float prevStateTime) {
+    if (s.pending == OTA_INVALID || s.pending == s.state) return;
+    if (!p2otakaramove::clipEndCrossed(prevStateTime, s.stateTime, clipDuration(s.clip))) return;
+    const State next = s.pending;
+    std::printf("P2_OTAKARA_STATE generator=%u state=%s\n", genOf(a), stateName(next));
+    enter(s, next, clipFor(next));
+    if (fleeing(next)) logDecision(s, pos);
 }
 
 void fireEvents(BTeki* a, Otakara& s) {
@@ -438,6 +580,7 @@ void pc_p2_otakara_forget(BTeki* actor) {
     auto it = actors.find(static_cast<PelletView*>(actor));
     if (it == actors.end()) return;
     const unsigned generator = it->second.generator;
+    endFlee(it->second, "forget");
     actors.erase(it);
     // lane-07 seam (pc_p2_forget_teki in BTeki::doKill / slot reuse): report the
     // registration actually dropping (count after the erase). This marker is
@@ -592,7 +735,6 @@ static bool registerActor(BTeki* actor, int species, unsigned generator) {
     s.life = speciesLife(s.species);
     s.attack = speciesAttack(s.species);
     s.generator = generator;
-    s.rng = (generator * 2654435761u) | 1u;
     s.home = actor->getPosition();
     s.target = s.home;
     s.heading = actor->getDirection();
@@ -777,9 +919,11 @@ void pc_p2_otakara_update(BTeki* actor) {
         enter(s, OTA_DEAD, "dead");
     }
 
+    const float prevStateTime = s.stateTime;
     s.stateTime += dt;
     switch (s.state) {
     case OTA_WAIT: {
+        // Source StateWait::exec (OtakaraBaseState.cpp:165-199): no idle transition.
         actor->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
         actor->mVelocity.x = 0.0f;
         actor->mVelocity.z = 0.0f;
@@ -789,65 +933,85 @@ void pc_p2_otakara_update(BTeki* actor) {
             enter(s, OTA_FLICK, "attack1");
             break;
         }
-        s.timer += dt;
-        if (nearestTarget(pos) && s.timer > WAIT_MIN) {
-            std::printf("P2_OTAKARA_STATE generator=%u state=move\n", generator);
-            enter(s, OTA_MOVE, "move1", randRange(s, 0.5f, 1.5f));
-        } else if (s.timer > WAIT_MAX) {
-            std::printf("P2_OTAKARA_STATE generator=%u state=turn\n", generator);
-            enter(s, OTA_TURN, "pivot1", randRange(s, 0.5f, 1.0f));
-        }
+        const bool hasTarget = updateDestination(actor, s, pos);
+        const State next = fromSt(p2otakaramove::decide(
+            {p2otakaramove::St::Wait, hasTarget, hasTarget && facingDest(s, pos), false, false}));
+        if (next != OTA_WAIT) s.pending = next;
+        commitPending(actor, s, pos, prevStateTime);
         break;
     }
     case OTA_MOVE: {
-        Creature* target = nearestTarget(pos);
+        // Source StateMove::exec (OtakaraBaseState.cpp:225-269): recompute the
+        // destination every frame; walkToTarget while within THIRD_PI, else stop.
         if (nearestPiki(pos, FLICK_RADIUS)) {
             actor->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
             std::printf("P2_OTAKARA_STATE generator=%u state=flick\n", generator);
             enter(s, OTA_FLICK, "attack1");
             break;
         }
-        if (distXZ(pos, s.home) > TERRITORY) s.target = s.home;
-        else if (target) s.target = target->getPosition();
-        const float desired = std::atan2(s.target.x - pos.x, s.target.z - pos.z);
-        const float maxTurn = TURN_RATE * dt;
-        float diff = wrapPi(desired - s.heading);
-        if (diff > maxTurn) diff = maxTurn;
-        if (diff < -maxTurn) diff = -maxTurn;
-        s.heading = wrapPi(s.heading + diff);
-        actor->setDirection(s.heading);
-        const Vector3f drive(std::sin(s.heading) * speciesMoveSpeed(s.species), 0.0f,
-                             std::cos(s.heading) * speciesMoveSpeed(s.species));
-        actor->inputDrive(drive);
-        actor->mVelocity.set(drive);
-        s.timer -= dt;
-        if (s.timer <= 0.0f) {
-            std::printf("P2_OTAKARA_STATE generator=%u state=wait\n", generator);
-            enter(s, OTA_WAIT, "wait1");
+        const bool hasTarget = updateDestination(actor, s, pos);
+        const bool facing = hasTarget && facingDest(s, pos);
+        if (facing) {
+            s.heading = p2otakaramove::turnStep(s.heading, v2(pos), v2(s.target), dt);
+            actor->setDirection(s.heading);
+            const Vector3f drive(std::sin(s.heading) * speciesMoveSpeed(s.species), 0.0f,
+                                 std::cos(s.heading) * speciesMoveSpeed(s.species));
+            actor->inputDrive(drive);
+            actor->mVelocity.set(drive);
+        } else {
+            actor->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
+            actor->mVelocity.x = 0.0f;
+            actor->mVelocity.z = 0.0f;
         }
+        const State next =
+            fromSt(p2otakaramove::decide({p2otakaramove::St::Move, hasTarget, facing, false, false}));
+        if (next != OTA_MOVE) s.pending = next;
+        trackFlee(s, pos, dt);
+        s.decisionLogTimer += dt;
+        if (hasTarget && s.decisionLogTimer >= 1.0f) {
+            s.decisionLogTimer = 0.0f;
+            logDecision(s, pos);
+        }
+        commitPending(actor, s, pos, prevStateTime);
         break;
     }
-    case OTA_TURN:
+    case OTA_TURN: {
+        // Source StateTurn::exec (OtakaraBaseState.cpp:297-334): turnToTarget toward
+        // the destination; Move once the pre-turn angle is within THIRD_PI.
         actor->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
         actor->mVelocity.x = 0.0f;
         actor->mVelocity.z = 0.0f;
         if (nearestPiki(pos, FLICK_RADIUS)) {
             std::printf("P2_OTAKARA_STATE generator=%u state=flick\n", generator);
             enter(s, OTA_FLICK, "attack1");
-        } else if (s.stateTime >= clipDuration("pivot1")) {
-            s.heading = wrapPi(s.heading + randRange(s, -3.14159265f, 3.14159265f));
-            actor->setDirection(s.heading);
-            std::printf("P2_OTAKARA_STATE generator=%u state=wait\n", generator);
-            enter(s, OTA_WAIT, "wait1");
+            break;
         }
+        const bool hasTarget = updateDestination(actor, s, pos);
+        const bool facing = hasTarget && facingDest(s, pos);
+        if (hasTarget) {
+            s.heading = p2otakaramove::turnStep(s.heading, v2(pos), v2(s.target), dt);
+            actor->setDirection(s.heading);
+        }
+        const State next =
+            fromSt(p2otakaramove::decide({p2otakaramove::St::Turn, hasTarget, facing, false, false}));
+        if (next != OTA_TURN) s.pending = next;
+        trackFlee(s, pos, dt);
+        commitPending(actor, s, pos, prevStateTime);
         break;
+    }
     case OTA_FLICK:
         actor->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
         actor->mVelocity.x = 0.0f;
         actor->mVelocity.z = 0.0f;
         if (s.stateTime >= clipDuration("attack1")) {
-            std::printf("P2_OTAKARA_STATE generator=%u state=wait\n", generator);
-            enter(s, OTA_WAIT, "wait1");
+            // Source StateFlick KEYEVENT_END (OtakaraBaseState.cpp:115-133): straight
+            // back to Move/Turn while a threat exists, else Wait.
+            const bool hasTarget = updateDestination(actor, s, pos);
+            const State next = fromSt(p2otakaramove::afterFlick(actor->mHealth <= 0.0f, hasTarget,
+                                                                hasTarget && facingDest(s, pos)));
+            std::printf("P2_OTAKARA_STATE generator=%u state=%s\n", generator, stateName(next));
+            enter(s, next, clipFor(next));
+            if (fleeing(next)) logDecision(s, pos);
         }
         break;
     case OTA_DEAD:
