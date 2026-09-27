@@ -7,6 +7,7 @@
 
 #include "netplay/pc_netplay_present.h"
 
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 
@@ -124,21 +125,41 @@ Camera* pc_netplay_present_sim_camera(void)
 void pc_netplay_present_begin_authoritative(Graphics& gfx)
 {
 	// Route pose math through identity: lookAt * world * joint becomes
-	// world-space. Keep a valid fixed projection by copying the live
-	// camera's projection state at pass start (no sim reader depends on
-	// the aspect after M2a; submission is null-op'd anyway).
+	// world-space. The SimCamera carries fixed session-constant projection
+	// state (16:9, gameplay FOV/clip); no sim reader depends on the live
+	// window aspect after M2a, and submission is null-op'd anyway. Always
+	// installed, even when gfx.mCamera is still null (first stage frame).
 	Camera* sim = pc_netplay_present_sim_camera();
+	sSavedGfx = &gfx;
+	sSavedCamera = gfx.mCamera;
 	if (gfx.mCamera) {
-		sSavedGfx = &gfx;
-		sSavedCamera = gfx.mCamera;
-		sim->mPerspectiveMatrix = gfx.mCamera->mPerspectiveMatrix;
-		sim->mProjectionMatrix = gfx.mCamera->mProjectionMatrix;
 		sim->mFov = gfx.mCamera->mFov;
 		sim->mNear = gfx.mCamera->mNear;
 		sim->mFar = gfx.mCamera->mFar;
-		sim->mAspectRatio = 16.0f / 9.0f;
-		gfx.mCamera = sim;
+	} else {
+		sim->mFov = 60.0f;
+		sim->mNear = 100.0f;
+		sim->mFar = 10000.0f;
 	}
+	sim->mAspectRatio = 16.0f / 9.0f;
+	// Fixed CPU-side perspective (row-major transpose of gluPerspective
+	// with glScalef(1,1,1)), matching OGLGraphics::setPerspective's output
+	// layout without touching GL.
+	{
+		const float fovRad = sim->mFov * 3.141592653589793f / 180.0f;
+		const float f = 1.0f / tanf(fovRad * 0.5f);
+		const float zn = sim->mNear > 0.0f ? sim->mNear : 1.0f;
+		const float zf = sim->mFar > zn ? sim->mFar : zn + 1000.0f;
+		sim->mPerspectiveMatrix.makeIdentity();
+		sim->mPerspectiveMatrix.mMtx[0][0] = f / sim->mAspectRatio;
+		sim->mPerspectiveMatrix.mMtx[1][1] = f;
+		sim->mPerspectiveMatrix.mMtx[2][2] = (zf + zn) / (zn - zf);
+		sim->mPerspectiveMatrix.mMtx[2][3] = (2.0f * zf * zn) / (zn - zf);
+		sim->mPerspectiveMatrix.mMtx[3][2] = -1.0f;
+		sim->mPerspectiveMatrix.mMtx[3][3] = 0.0f;
+	}
+	sim->mProjectionMatrix = sim->mPerspectiveMatrix;
+	gfx.mCamera = sim;
 	sim->mLookAtMtx.makeIdentity();
 	sim->mInverseLookAtMtx.makeIdentity();
 	pc_netplay_present_set_null_gx(1);
@@ -147,7 +168,8 @@ void pc_netplay_present_begin_authoritative(Graphics& gfx)
 void pc_netplay_present_end_authoritative(Graphics& gfx)
 {
 	pc_netplay_present_set_null_gx(0);
-	if (sSavedGfx == &gfx && sSavedCamera) {
+	// Restore the pre-pass camera even when it was null (first stage frame).
+	if (sSavedGfx == &gfx) {
 		gfx.mCamera = sSavedCamera;
 	}
 	sSavedGfx = nullptr;

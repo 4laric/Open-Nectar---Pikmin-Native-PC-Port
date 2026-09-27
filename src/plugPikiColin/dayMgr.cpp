@@ -8,6 +8,10 @@
 #include "NaviMgr.h"
 #include "gameflow.h"
 #include "sysNew.h"
+#if defined(PIKI_PC_PORT)
+#include "netplay/pc_netplay_present.h"
+#include "timing/pc_render_phase.h"
+#endif
 
 //////////////////////////////////////////////////////
 //////////////// PRINT/ERROR DEFINES /////////////////
@@ -903,6 +907,16 @@ void DayMgr::menuDecreaseTime(Menu& parent)
  */
 void DayMgr::refresh(Graphics& gfx, f32 time, int numLights)
 {
+#if defined(PIKI_PC_PORT)
+	// M2b: stage lighting is time-based sim state, identical in both passes.
+	// The authoritative pass computes it each tick (lights, sun, fog); the
+	// presentation pass reuses those results instead of recomputing (and
+	// re-adding lights). Recomputing in presentation stalled the first stage
+	// frame during triage, so presentation returns here unconditionally.
+	if (pc_netplay_present_two_pass_active() && !pc_render_is_authoritative()) {
+		return;
+	}
+#endif
 	TimeSetting* timeSettingStart;
 	TimeSetting* timeSettingEnd;
 
