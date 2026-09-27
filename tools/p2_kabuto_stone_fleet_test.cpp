@@ -1,0 +1,557 @@
+// Engine-free regression for #884: Kabuto 75 fires a travelling, non-homing
+// Stone on KEYEVENT_2 instead of an instant cone strike at half the clip.
+// Cases follow output/claude-orch/p2-884/design-kabuto.md section 4. The
+// legacy rules (half-clip fire tick, immediate 180 / 0.5 rad cone strike) are
+// re-implemented here as negative controls and asserted to violate the
+// properties the fleet satisfies.
+#include <cassert>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <functional>
+#include <vector>
+
+#include "pc_p2_kabuto_stone_fleet.h"
+
+using namespace p2kabutostone;
+
+namespace {
+
+constexpr float kPi = 3.14159265358979323846f;
+constexpr float kGravity = 550.0f; // P1 AICONST mGravity default (AIConstant.h:26)
+constexpr float kDt = P2CannonStone::kSourceDelta;
+constexpr std::uint64_t kShooter = 0x1000;
+
+// Fake flat floor at y = 0 with an optional wall plane at z >= wallZ.
+struct FlatMap {
+    bool hasWall = false;
+    float wallZ = 0.0f;
+    int calls = 0;
+};
+
+bool flatTrace(void* ctx, const P2CannonStoneVec3& base, const P2CannonStoneVec3& vel, float dt,
+               float radius, P2CannonStoneTraceResult& out)
+{
+    FlatMap& m = *static_cast<FlatMap*>(ctx);
+    ++m.calls;
+    P2CannonStoneVec3 p{ base.x + vel.x * dt, base.y + vel.y * dt, base.z + vel.z * dt };
+    P2CannonStoneVec3 v = vel;
+    if (p.y <= 0.0f) {
+        p.y = 0.0f;
+        v.y = 0.0f;
+    }
+    out.wall = false;
+    if (m.hasWall && p.z + radius >= m.wallZ) {
+        p.z = m.wallZ - radius;
+        v.z = 0.0f;
+        out.wall = true;
+    }
+    out.position = p;
+    out.velocity = v;
+    return true;
+}
+
+Target piki(std::uint64_t token, float x, float z, bool onFloor = true)
+{
+    Target t;
+    t.token = token;
+    t.centre = { x, 10.0f, z };
+    t.radius = 10.0f;
+    t.kind = P2CannonStoneContactKind::NaviPiki;
+    t.onFloor = onFloor;
+    t.alive = true;
+    return t;
+}
+
+Target teki(std::uint64_t token, float x, float z, float radius)
+{
+    Target t;
+    t.token = token;
+    t.centre = { x, 30.0f, z };
+    t.radius = radius;
+    t.kind = P2CannonStoneContactKind::Teki;
+    t.onFloor = true;
+    t.alive = true;
+    return t;
+}
+
+struct Log {
+    struct S { int tick; Strike s; };
+    struct D { int tick; DeadEvent d; };
+    struct R { int tick; Released r; };
+    std::vector<S> strikes;
+    std::vector<D> deads;
+    std::vector<R> released;
+    int strikesOn(std::uint64_t token) const
+    {
+        int n = 0;
+        for (const S& s : strikes) {
+            n += s.s.target == token ? 1 : 0;
+        }
+        return n;
+    }
+    const S* firstOn(std::uint64_t token) const
+    {
+        for (const S& s : strikes) {
+            if (s.s.target == token) {
+                return &s;
+            }
+        }
+        return nullptr;
+    }
+};
+
+// Runs `ticks` source ticks; `before(tick, targets)` may move targets first.
+void run(Fleet& fleet, FlatMap& map, std::vector<Target>& targets, int ticks, Log& log,
+         const std::function<void(int, std::vector<Target>&)>& before = nullptr, int tick0 = 1)
+{
+    for (int i = 0; i < ticks; ++i) {
+        const int tick = tick0 + i;
+        if (before) {
+            before(tick, targets);
+        }
+        Strike s[64];
+        DeadEvent d[16];
+        Released r[16];
+        int sn = 0, dn = 0, rn = 0;
+        fleet.tick(kGravity, &flatTrace, &map, targets.data(), int(targets.size()), s, 64, sn, d,
+                   16, dn, r, 16, rn);
+        for (int k = 0; k < sn; ++k) log.strikes.push_back({ tick, s[k] });
+        for (int k = 0; k < dn; ++k) log.deads.push_back({ tick, d[k] });
+        for (int k = 0; k < rn; ++k) log.released.push_back({ tick, r[k] });
+    }
+}
+
+int fireForward(Fleet& fleet, std::uint32_t& id, float heading = 0.0f,
+                P2CannonStoneVec3 kabuto = { 0.0f, 0.0f, 0.0f })
+{
+    return fleet.fire(kShooter, birthPosition(kabuto, heading, kMouthForwardHostApprox), heading, id);
+}
+
+// ---- Legacy (pre-#884) rules, kept only as negative controls ----
+// pc_p2_kabuto_fsm.cpp:258 (old): fire once stateTime >= 0.5 * attack clip.
+int legacyHalfClipTick(int clipFrames)
+{
+    float t = 0.0f;
+    for (int tick = 1; tick < 1000; ++tick) {
+        t += 1.0f / 30.0f;
+        if (t >= 0.5f * clipFrames / 30.0f) {
+            return tick;
+        }
+    }
+    return -1;
+}
+// pc_p2_kabuto_fsm.cpp:122-139 (old): immediate strike on everything with
+// XZ distance < 180 and |angle| < 0.5 rad from the actor's feet.
+bool legacyConeStrikes(const Target& t, float heading = 0.0f)
+{
+    const float dx = t.centre.x, dz = t.centre.z;
+    if (std::sqrt(dx * dx + dz * dz) >= 180.0f) {
+        return false;
+    }
+    float a = std::atan2(dx, dz) - heading;
+    while (a > kPi) a -= 2.0f * kPi;
+    while (a < -kPi) a += 2.0f * kPi;
+    return std::fabs(a) < 0.5f;
+}
+
+// FSM-style accumulation (pc_p2_kabuto_fsm.cpp KB_ATTACK): prev captured
+// before stateTime += dt. Returns the fire tick (or -1) and the count.
+int fireTickFor(const std::vector<float>& dts, float health, int& fires, float& fireTime)
+{
+    float stateTime = 0.0f;
+    bool fireDone = false;
+    int tick = -1;
+    fires = 0;
+    for (size_t i = 0; i < dts.size(); ++i) {
+        const float prev = stateTime;
+        stateTime += dts[i];
+        if (attackMayFire(health, fireDone, prev, stateTime)) {
+            fireDone = true;
+            ++fires;
+            tick = int(i) + 1;
+            fireTime = stateTime;
+        }
+    }
+    return tick;
+}
+
+void case1_key2Timing()
+{
+    const int legacy = legacyHalfClipTick(95);
+    assert(legacy == 48);
+    int fires = 0;
+    float at = 0.0f;
+    {
+        std::vector<float> dts(200, 1.0f / 30.0f);
+        const int tick = fireTickFor(dts, 850.0f, fires, at);
+        std::printf("case1 30Hz fire tick=%d t=%.4f legacy_tick=%d\n", tick, at, legacy);
+        assert(fires == 1);
+        assert(tick == 50); // frame 50 at 30 Hz (51 would only be float drift)
+        assert(tick != 48);
+        assert(tick != legacy); // the old rule is discriminated
+        assert(at >= key2Seconds() - kKey2Epsilon && at < key2Seconds() + 1.0f / 30.0f);
+    }
+    {
+        std::vector<float> dts(400, 1.0f / 60.0f);
+        const int tick = fireTickFor(dts, 850.0f, fires, at);
+        assert(fires == 1);
+        assert(tick == 100);
+    }
+    {
+        std::vector<float> dts;
+        std::uint32_t s = 12345u;
+        for (int i = 0; i < 300; ++i) {
+            s = s * 1664525u + 1013904223u;
+            const float u = float((s >> 8) & 0xffffu) / 65535.0f;
+            dts.push_back(1.0f / 45.0f + u * (1.0f / 20.0f - 1.0f / 45.0f));
+        }
+        const int tick = fireTickFor(dts, 850.0f, fires, at);
+        assert(fires == 1 && tick > 0);
+        float prev = 0.0f;
+        for (int i = 0; i < tick - 1; ++i) prev += dts[size_t(i)];
+        assert(prev < key2Seconds() - kKey2Epsilon && at >= key2Seconds() - kKey2Epsilon);
+    }
+    {
+        std::vector<float> dts(200, 1.0f / 30.0f);
+        const int tick = fireTickFor(dts, 0.0f, fires, at);
+        assert(fires == 0 && tick == -1); // KabutoState.cpp:350-353 death gate first
+    }
+    assert(clipHasKey2(95));
+    assert(!clipHasKey2(50));
+    assert(std::fabs(key2Seconds() - 50.0f / 30.0f) < 1e-6f);
+}
+
+void case2_birthAndConfig()
+{
+    const P2CannonStoneVec3 b = birthPosition({ 10.0f, 7.0f, -3.0f }, kPi / 2.0f, 55.0f);
+    assert(std::fabs(b.y - 32.0f) < 1e-4f); // body Y + 25, not mouth Y
+    assert(std::fabs(b.x - 65.0f) < 1e-3f);
+    assert(std::fabs(b.z - -3.0f) < 1e-3f);
+    const P2CannonStoneConfig c = stoneConfig();
+    assert(c.variant == P2CannonStoneVariant::Stone);
+    assert(c.moveSpeed == 250.0f && c.attackDamage == 10.0f && c.health == 99999.0f);
+    assert(c.turnSpeed == 0.03f && c.maxTurnAngle == 3.0f && c.collisionRadius == 25.0f);
+    assert(c.searchRumbleSpeed == 100.0f && c.sightRadius == 150.0f);
+    Fleet fleet;
+    std::uint32_t id = 0;
+    for (int i = 0; i < 4; ++i) {
+        const int slot = fireForward(fleet, id, 0.3f * i);
+        assert(slot >= 0);
+        assert(!fleet.stone(slot).homing());
+        assert(fleet.stone(slot).sourceToken() == kShooter);
+    }
+}
+
+void case3_travelTime()
+{
+    Fleet fleet;
+    FlatMap map;
+    std::uint32_t id = 0;
+    assert(fireForward(fleet, id) == 0);
+    std::vector<Target> targets{ piki(1, 0.0f, 200.0f) };
+    Log log;
+    run(fleet, map, targets, 60, log);
+    const Log::S* first = log.firstOn(1);
+    assert(first);
+    assert(first->tick > 3);
+    // Grounded Stone: contact centre y 40 vs Pikmin centre y 10, reach
+    // sqrt(50^2 - 30^2) = 40 horizontally -> travel 200 - 55 - 40 = 105.
+    const float expected = (200.0f - 55.0f - 40.0f) / 250.0f;
+    std::printf("case3 first press tick=%d flight=%.3f expected~%.3f travel=%.1f\n", first->tick,
+                first->s.flight, expected, first->s.travel);
+    assert(first->s.flight > 0.3f);
+    assert(first->s.flight >= expected - 2.0f * kDt && first->s.flight <= expected + 2.0f * kDt);
+    assert(first->s.kind == P2CannonStoneStrikeKind::Press);
+    assert(first->s.damage == 10.0f);
+    assert(first->s.owner == kShooter);
+    assert(log.strikesOn(1) == 1);
+    // Negative control: the old cone strikes a Pikmin 150 ahead at flight 0;
+    // the fleet reaches the same Pikmin only after travelling.
+    Fleet f2;
+    FlatMap m2;
+    assert(fireForward(f2, id) >= 0);
+    std::vector<Target> near{ piki(2, 0.0f, 150.0f) };
+    assert(legacyConeStrikes(near[0])); // legacy flight = 0
+    Log l2;
+    run(f2, m2, near, 60, l2);
+    assert(l2.firstOn(2) && l2.firstOn(2)->s.flight > 0.15f);
+}
+
+void case4_stepOut()
+{
+    std::uint32_t id = 0;
+    { // (a) 100 units lateral: never struck.
+        Fleet fleet;
+        FlatMap map;
+        fireForward(fleet, id);
+        std::vector<Target> targets{ piki(1, 100.0f, 200.0f) };
+        Log log;
+        run(fleet, map, targets, 500, log);
+        assert(log.strikes.empty());
+        assert(log.deads.size() == 1 && log.deads[0].d.reason == DeadReason::Timeout);
+    }
+    { // (b) on the path, leaves it at t = 0.2 s before the Stone arrives.
+        Fleet fleet;
+        FlatMap map;
+        fireForward(fleet, id);
+        std::vector<Target> targets{ piki(1, 0.0f, 170.0f) };
+        assert(legacyConeStrikes(targets[0])); // old rule: hit at t = 0
+        Log log;
+        run(fleet, map, targets, 120, log, [](int tick, std::vector<Target>& t) {
+            if (tick == 6) t[0].centre.x = 100.0f;
+        });
+        assert(log.strikes.empty());
+        // Control: staying put on the same spot is struck.
+        Fleet f2;
+        FlatMap m2;
+        fireForward(f2, id);
+        std::vector<Target> stay{ piki(1, 0.0f, 170.0f) };
+        Log l2;
+        run(f2, m2, stay, 120, l2);
+        assert(l2.strikesOn(1) == 1);
+    }
+    { // (c) 60 lateral at 150: inside the old cone, outside the Stone's path.
+        Fleet fleet;
+        FlatMap map;
+        fireForward(fleet, id);
+        std::vector<Target> targets{ piki(1, 60.0f, 150.0f) };
+        assert(legacyConeStrikes(targets[0]));
+        Log log;
+        run(fleet, map, targets, 200, log);
+        assert(log.strikes.empty());
+    }
+}
+
+void case5_noHoming()
+{
+    Fleet fleet;
+    FlatMap map;
+    std::uint32_t id = 0;
+    const int slot = fireForward(fleet, id);
+    assert(slot == 0 && !fleet.stone(slot).homing());
+    const float face0 = fleet.stone(slot).faceDir();
+    std::vector<Target> targets{ piki(1, 100.0f, 200.0f) };
+    auto circle = [](int tick, std::vector<Target>& t) {
+        const float a = tick * 0.15f;
+        t[0].centre.x = 100.0f * std::cos(a);
+        t[0].centre.z = 200.0f + 100.0f * std::sin(a);
+    };
+    float lastZ = fleet.stone(slot).position().z;
+    for (int tick = 1; tick <= 90; ++tick) {
+        Log log;
+        run(fleet, map, targets, 1, log, circle, tick);
+        const P2CannonStone& s = fleet.stone(slot);
+        assert(std::fabs(s.position().x) < 1e-3f);
+        assert(s.faceDir() == face0);
+        // Source move speed 250 along the facing (homing would use 100).
+        assert(std::fabs((s.position().z - lastZ) - 250.0f * kDt) < 1e-2f);
+        lastZ = s.position().z;
+    }
+    assert(fleet.maxLateral(slot) < 1e-3f);
+    // Control: a homing Stone (Rkabuto rule) against the same target deviates.
+    P2CannonStone homing;
+    homing.reset(stoneConfig());
+    assert(homing.birth({ 0.0f, 25.0f, 55.0f }, 0.0f, true, kShooter, 99));
+    float maxX = 0.0f;
+    for (int tick = 1; tick <= 90; ++tick) {
+        std::vector<Target> t{ piki(1, 0.0f, 0.0f) };
+        circle(tick, t);
+        P2CannonStoneTarget tg;
+        tg.hasTarget = true;
+        tg.position = t[0].centre;
+        homing.update(kDt, tg);
+        maxX = std::fmax(maxX, std::fabs(homing.position().x));
+    }
+    assert(maxX > 1.0f);
+}
+
+void case6_row()
+{
+    Fleet fleet;
+    FlatMap map;
+    std::uint32_t id = 0;
+    const int slot = fireForward(fleet, id);
+    std::vector<Target> targets{ piki(1, 0.0f, 150.0f), piki(2, 0.0f, 250.0f),
+                                 piki(3, 0.0f, 350.0f), piki(4, 0.0f, 200.0f, false) };
+    Log log;
+    run(fleet, map, targets, 60, log);
+    assert(log.strikesOn(1) == 1 && log.strikesOn(2) == 1 && log.strikesOn(3) == 1);
+    assert(log.strikesOn(4) == 0); // airborne: no press
+    assert(fleet.stone(slot).isAlive()); // Navi/Piki contact never kills the Stone
+    assert(fleet.hits(slot) == 3);
+    assert(log.deads.empty());
+}
+
+void case7_tekiSingleImpact()
+{
+    Fleet fleet;
+    FlatMap map;
+    std::uint32_t id = 0;
+    const int slot = fireForward(fleet, id);
+    const std::uint32_t firstId = id;
+    std::vector<Target> targets{ teki(7, 0.0f, 150.0f, 20.0f), piki(8, 0.0f, 250.0f) };
+    Log log;
+    int attackTick = -1;
+    P2CannonStoneVec3 deadPos;
+    run(fleet, map, targets, 60, log, [&](int tick, std::vector<Target>& t) {
+        // During the dead hold, move the Pikmin onto the Stone's position.
+        if (!log.deads.empty() && tick > log.deads[0].tick) {
+            deadPos = log.deads[0].d.pos;
+            t[1].centre = { deadPos.x, 10.0f, deadPos.z };
+        }
+    });
+    assert(log.strikesOn(7) == 1);
+    const Log::S* a = log.firstOn(7);
+    attackTick = a->tick;
+    assert(a->s.kind == P2CannonStoneStrikeKind::Attack && a->s.damage == 250.0f);
+    assert(log.deads.size() == 1);
+    assert(log.deads[0].d.reason == DeadReason::Contact);
+    assert(log.deads[0].tick == attackTick + 1);
+    assert(log.deads[0].d.stone == firstId);
+    assert(log.strikesOn(8) == 0);
+    for (const auto& s : log.strikes) assert(s.tick <= log.deads[0].tick);
+    assert(log.released.size() == 1 && log.released[0].r.stone == firstId);
+    assert(log.released[0].tick > log.deads[0].tick);
+    assert(fleet.active() == 0 && !fleet.used(slot));
+    std::uint32_t id2 = 0;
+    assert(fireForward(fleet, id2) == slot && id2 > firstId);
+}
+
+void case8_wall()
+{
+    Fleet fleet;
+    FlatMap map;
+    map.hasWall = true;
+    map.wallZ = 120.0f;
+    std::uint32_t id = 0;
+    fireForward(fleet, id);
+    std::vector<Target> targets{ piki(1, 0.0f, 200.0f) };
+    Log log;
+    run(fleet, map, targets, 60, log);
+    assert(log.deads.size() == 1 && log.deads[0].d.reason == DeadReason::Wall);
+    assert(log.strikes.empty());
+}
+
+void case9_timeout()
+{
+    Fleet fleet;
+    FlatMap map;
+    std::uint32_t id = 0;
+    fireForward(fleet, id);
+    std::vector<Target> targets;
+    Log log;
+    run(fleet, map, targets, 600, log);
+    assert(log.deads.size() == 1);
+    assert(log.deads[0].d.reason == DeadReason::Timeout);
+    assert(log.deads[0].d.flight > 15.0f && log.deads[0].d.flight < 15.0f + 2.0f * kDt);
+    assert(log.released.size() == 1);
+    assert(fleet.active() == 0);
+}
+
+void case10_sourceGrace()
+{
+    Fleet fleet;
+    FlatMap map;
+    std::uint32_t id = 0;
+    const int slot = fireForward(fleet, id);
+    // The shooter's own body overlaps the birth point (55 ahead, radius 80).
+    std::vector<Target> targets{ teki(kShooter, 0.0f, 0.0f, 80.0f) };
+    Log log;
+    run(fleet, map, targets, 29, log); // < 1 s of flight
+    assert(log.strikes.empty());
+    assert(fleet.graceIgnored() > 0);
+    assert(fleet.stone(slot).isAlive());
+    // Not recorded in the ledger: once grace ends a renewed overlap counts.
+    run(fleet, map, targets, 3, log, [&](int, std::vector<Target>& t) {
+        const P2CannonStoneVec3 p = fleet.stone(slot).position();
+        t[0].centre = { p.x, p.y + 40.0f, p.z };
+    }, 30);
+    assert(log.strikesOn(kShooter) == 1);
+    assert(log.firstOn(kShooter)->s.flight >= P2CannonStone::kAtariGraceSeconds);
+}
+
+void case11_exhaustion()
+{
+    Fleet fleet;
+    std::uint32_t id = 0, maxId = 0;
+    for (int i = 0; i < Fleet::capacity(); ++i) {
+        // Stone 0 faces +Z; the others fan out over the back half-plane so
+        // only stone 0 can meet the Teki placed ahead.
+        const float heading = i == 0 ? 0.0f : kPi / 2.0f + kPi * float(i - 1) / 14.0f;
+        assert(fireForward(fleet, id, heading) == i);
+        maxId = id;
+    }
+    std::uint32_t refused = 777;
+    assert(fireForward(fleet, refused) == -1);
+    assert(refused == 777 && fleet.active() == Fleet::capacity());
+    // Stone 0 (heading 0) meets a Teki right in front; the rest fly on.
+    FlatMap map;
+    std::vector<Target> targets{ teki(50, 0.0f, 100.0f, 20.0f) };
+    Log log;
+    run(fleet, map, targets, 40, log);
+    assert(log.released.size() == 1 && log.released[0].r.slot == 0);
+    assert(fleet.active() == Fleet::capacity() - 1);
+    std::uint32_t fresh = 0;
+    assert(fireForward(fleet, fresh) == 0 && fresh > maxId);
+    assert(fleet.active() == Fleet::capacity());
+}
+
+void case12_forgetOwner()
+{
+    Fleet fleet;
+    FlatMap map;
+    std::uint32_t id = 0;
+    const int slot = fireForward(fleet, id);
+    std::vector<Target> targets{ piki(1, 0.0f, 250.0f) };
+    Log log;
+    run(fleet, map, targets, 5, log);
+    assert(fleet.ownedBy(kShooter) == 1);
+    assert(fleet.forgetOwner(kShooter) == 1);
+    assert(fleet.owner(slot) == 0 && fleet.stone(slot).isAlive());
+    run(fleet, map, targets, 60, log, nullptr, 6);
+    assert(log.strikesOn(1) == 1 && log.firstOn(1)->s.owner == 0);
+}
+
+void case13_resetReentry()
+{
+    Fleet fleet;
+    FlatMap map;
+    std::uint32_t a = 0, b = 0;
+    fireForward(fleet, a);
+    fireForward(fleet, b, 1.0f);
+    std::vector<Target> targets{ piki(1, 0.0f, 150.0f) };
+    Log log;
+    run(fleet, map, targets, 5, log);
+    fleet.reset();
+    assert(fleet.active() == 0);
+    Log after;
+    run(fleet, map, targets, 600, after);
+    assert(after.strikes.empty() && after.deads.empty() && after.released.empty());
+    std::uint32_t c = 0;
+    assert(fireForward(fleet, c) >= 0);
+    assert(c > a && c > b);
+}
+
+} // namespace
+
+int main(int argc, char** argv)
+{
+    // Optional single-case selection (used for mutation evidence): `test 4`.
+    const int only = argc > 1 ? std::atoi(argv[1]) : 0;
+    void (*const cases[])() = { case1_key2Timing, case2_birthAndConfig, case3_travelTime,
+                                case4_stepOut, case5_noHoming, case6_row,
+                                case7_tekiSingleImpact, case8_wall, case9_timeout,
+                                case10_sourceGrace, case11_exhaustion, case12_forgetOwner,
+                                case13_resetReentry };
+    const int count = int(sizeof(cases) / sizeof(cases[0]));
+    for (int i = 0; i < count; ++i) {
+        if (only == 0 || only == i + 1) {
+            cases[i]();
+            std::printf("case %d passed\n", i + 1);
+        }
+    }
+    std::printf("p2_kabuto_stone_fleet_test: all checks passed\n");
+    return 0;
+}

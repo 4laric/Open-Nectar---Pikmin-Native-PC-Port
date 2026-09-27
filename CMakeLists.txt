@@ -1251,6 +1251,11 @@ add_executable(p2_kabuto_fsm_policy_test tools/p2_kabuto_fsm_policy_test.cpp)
 target_include_directories(p2_kabuto_fsm_policy_test PRIVATE pc_port)
 target_compile_options(p2_kabuto_fsm_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_kabuto_fsm_policy_test COMMAND p2_kabuto_fsm_policy_test)
+# #884 Kabuto 75 travelling Stone: KEYEVENT_2 emission + fleet lifecycle (engine-free).
+add_executable(p2_kabuto_stone_fleet_test tools/p2_kabuto_stone_fleet_test.cpp pc_port/pc_p2_cannon_stone.cpp)
+target_include_directories(p2_kabuto_stone_fleet_test PRIVATE pc_port)
+target_compile_options(p2_kabuto_stone_fleet_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_kabuto_stone_fleet_test COMMAND p2_kabuto_stone_fleet_test)
 
 # Mamuta OWN FSM policy (own44 #871): engine-free params/state/config contract.
 add_executable(p2_mamuta_fsm_policy_test tools/p2_mamuta_fsm_policy_test.cpp)
