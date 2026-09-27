@@ -1994,9 +1994,6 @@ void GameCoreSection::finalSetup()
 	PRINT("====================== FINAL SETUP DONE ======================\n");
 }
 
-/**
- * @todo: Documentation
- */
 #if defined(PIKI_PC_PORT)
 // Netplay M0: true when any PIKMIN_NETPLAY* environment variable is set.
 // Scans the process environment so future PIKMIN_NETPLAY_* flags also arm
@@ -2004,7 +2001,9 @@ void GameCoreSection::finalSetup()
 static bool pc_netplay_marker_env_set()
 {
 #if defined(_WIN32)
-	extern char** _environ;
+	// _environ comes from <stdlib.h> (via <cstdlib> above); it must not be
+	// redeclared here because under UCRT headers it is a macro over a
+	// static inline accessor, not a plain exported variable.
 	char** env = _environ;
 #else
 	extern char** environ;
@@ -2017,6 +2016,9 @@ static bool pc_netplay_marker_env_set()
 	return false;
 }
 #endif
+/**
+ * @todo: Documentation
+ */
 GameCoreSection::GameCoreSection(Controller* controller, MapMgr* mgr, Camera& camera)
     : Node("gamecore")
 {

@@ -36,6 +36,10 @@ static SDL_GLContext sGLContext = nullptr;
 static SDL_GameController* sControllers[2] = { nullptr, nullptr };
 #define sController sControllers[0]
 static bool sSwarmHeldP2 = false;
+// Free-camera stick drag per player, accumulated by pc_window_read_gamepad
+// and consumed by pcamcamera.cpp. Declared up here so the BBFT input gate in
+// pc_window_poll_events can clear P2's share when input is refused.
+static float sStickCameraDrag[2] = { 0.0f, 0.0f };
 
 // Todos los mandos abiertos, y el dispositivo asignado a cada jugador. Sin
 // asignación explícita (1 jugador, o antes de pasar por el menú) P1 = teclado
@@ -1250,7 +1254,11 @@ void pc_window_poll_events(PADStatus* pad) {
     pad[0].substickY  = substickY;
     pad[0].triggerLeft  = triggerL;
     pad[0].triggerRight = triggerR;
-    if (!pc_bbft_accept_input()) {
+    // Sample the BBFT gate once per poll: it depends on the foreground
+    // window, so two calls could disagree within the same poll and gate P1
+    // but not P2.
+    const bool acceptInput = pc_bbft_accept_input();
+    if (!acceptInput) {
         pad[0].button = 0;
         pad[0].stickX = pad[0].stickY = 0;
         pad[0].substickX = pad[0].substickY = 0;
@@ -1262,7 +1270,10 @@ void pc_window_poll_events(PADStatus* pad) {
     sSwarmHeldP2 = kbSwarm2;
     if (sControllers[1] || sKeyboardOwner == 1) {
         u16 b2 = kbButton2; s8 sx2 = kbStickX2, sy2 = kbStickY2, cx2 = kbSubX2, cy2 = kbSubY2; u8 tl2 = kbTrigL2, tr2 = kbTrigR2;
-        if (sControllers[1])
+        // Skipped while input is refused: pc_window_read_gamepad would
+        // otherwise accumulate P2 free-camera drag (sStickCameraDrag[1]) and
+        // swarm state from a held stick while BBFT holds the frame.
+        if (sControllers[1] && acceptInput)
             pc_window_read_gamepad(sControllers[1], b2, sx2, sy2, cx2, cy2, tl2, tr2, sSwarmHeldP2, 1);
         pad[1].err          = PAD_ERR_NONE;
         pad[1].button       = b2;
@@ -1273,12 +1284,13 @@ void pc_window_poll_events(PADStatus* pad) {
         pad[1].triggerLeft  = tl2;
         pad[1].triggerRight = tr2;
     }
-    if (!pc_bbft_accept_input()) {
+    if (!acceptInput) {
         pad[1].button = 0;
         pad[1].stickX = pad[1].stickY = 0;
         pad[1].substickX = pad[1].substickY = 0;
         pad[1].triggerLeft = pad[1].triggerRight = 0;
         sSwarmHeldP2 = false;
+        sStickCameraDrag[1] = 0.0f;
     }
 #if defined(PIKI_PC_PORT) && defined(PIKI_PC_SETTINGS_MENU)
     // While the settings menu is open, consume the pad so the game underneath
@@ -1663,8 +1675,6 @@ extern "C" float pc_window_take_camera_pitch(void) {
     sCameraPitchDrag = 0.0f;
     return delta;
 }
-
-static float sStickCameraDrag[2] = { 0.0f, 0.0f };
 
 extern "C" void pc_window_add_camera_drag_player(int player, float normalizedDx) {
     if (player < 0 || player > 1) player = 0;
