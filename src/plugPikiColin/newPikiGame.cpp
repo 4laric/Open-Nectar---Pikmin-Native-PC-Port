@@ -2,6 +2,8 @@
 #include "pc_bbft.h"
 #if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_det.h"
+#include "netplay/pc_netplay_present.h"
+#include "timing/pc_render_phase.h"
 #endif
 #include "NewPikiGame.h"
 
@@ -2298,11 +2300,24 @@ public:
 	{
 		Matrix4f orthoMtx;
 
+#if defined(PIKI_PC_PORT)
+		// M2b: movie update is sim; presentation reuses authoritative state.
+		if (!pc_netplay_present_two_pass_active() || pc_render_is_authoritative()) {
+#endif
 		if (!gameflow.mIsUIOverlayActive || gameflow.mIsTutorialTextActive) {
 			// update any cutscenes or text demos
 			gameflow.mMoviePlayer->update();
 		}
+#if defined(PIKI_PC_PORT)
+		}
+#endif
 
+#if defined(PIKI_PC_PORT)
+		// M2b: authoritative pass keeps the SimCamera (world-space pose) and
+		// skips real-camera updates; presentation drives the local view.
+		const bool skipCamForSim = pc_netplay_present_two_pass_active() && pc_render_is_authoritative();
+		if (!skipCamForSim) {
+#endif
 		if (!gameflow.mMoviePlayer->setCamera(gfx)) {
 			// false = no scene currently active, so no preset camera information to go off
 			if (gameflow.mMoviePlayer->mCamTransitionFactor > 0.0f) {
@@ -2366,18 +2381,35 @@ public:
 			gfx.setCamera(&mGameCamera);
 			mGameCamera.update(f32(gfx.mScreenWidth) / f32(gfx.mScreenHeight), mGameCamera.mFov, pc_first_person_active() ? 3.0f : 100.0f, mCameraFarClip);
 		}
+#if defined(PIKI_PC_PORT)
+		} // !skipCamForSim
+#endif
 
 #if defined(PIKI_PC_PORT)
 		// Pantalla partida (PLAN_COOP fase 3): fuera de cinemáticas se dibuja
 		// el mundo dos veces, una por Olimar, cada una en su mitad y con su
 		// cámara. El estado (sonido, efectos) solo avanza en la primera pasada.
-		const bool splitScreen = sGamecoreLive && gamecore && gamecore->isSplitScreen() && !gameflow.mMoviePlayer->mIsActive
+		// M2b: in det co-op each peer renders only its local captain full
+		// screen (no split). Both captains are still simulated.
+		const bool detSingleView = pc_netplay_present_two_pass_active() && sGamecoreLive && gamecore
+		                        && gamecore->isSplitScreen();
+		const bool splitScreen = !detSingleView && sGamecoreLive && gamecore && gamecore->isSplitScreen()
+		                      && !gameflow.mMoviePlayer->mIsActive
 		                      && !(gameflow.mDemoFlags & CinePlayerFlags::NonGameMovie) && !memcardWindow;
 		mSplitViews = splitScreen ? 2 : 1;
 		for (int view = 0; view < mSplitViews; view++) {
 			if (sGamecoreLive && gamecore) gamecore->mRenderPass = view;
 			if (splitScreen) {
 				beginSplitView(gfx, view);
+			}
+#if defined(PIKI_PC_PORT)
+			// M2b: det co-op presentation shows the local captain full
+			// screen with its own camera. Authoritative keeps SimCamera.
+			if (detSingleView && !pc_render_is_authoritative() && sGamecoreLive && gamecore) {
+				Camera* localCam = gamecore->getViewCamera(pc_netplay_present_local_player());
+				if (localCam) {
+					gfx.setCamera(localCam);
+				}
 			}
 #endif
 
@@ -2405,7 +2437,8 @@ public:
 				}
 
 #if defined(PIKI_PC_PORT)
-				if (isDVDNormal && gamecore->mRenderPass == 0) {
+				// M2b: effect update is sim; presentation draws only.
+				if (isDVDNormal && gamecore->mRenderPass == 0 && pc_render_is_authoritative()) {
 #else
 				if (isDVDNormal) {
 #endif
@@ -2482,6 +2515,11 @@ public:
 		if (!mIsInitialSetup) {
 			// check if we should advance the time of day
 			if (!gsys->resetPending() && (!mActiveMenu || gameflow.mMoviePlayer->mIsActive)) {
+#if defined(PIKI_PC_PORT)
+				// M2b: world sim (clock, Node::update, HUD update, updateAI)
+				// runs in the authoritative pass only. Presentation draws.
+				if (!pc_netplay_present_two_pass_active() || pc_render_is_authoritative()) {
+#endif
 				// PIKMIN_TICK_STATS: the world simulation lives here, inside
 				// the draw, so time it apart from the GX translation.
 				const bool profiling = pc_tick_profiler_enabled();
@@ -2520,6 +2558,9 @@ public:
 					    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count()
 					        - simStart);
 				}
+#if defined(PIKI_PC_PORT)
+				}
+#endif
 			}
 		} else {
 			// we're still in initial set up - finalise things so we can start properly

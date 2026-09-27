@@ -2,6 +2,7 @@
 #include "pc_p2_kurage_visual.h"
 #if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_det.h"
+#include "netplay/pc_netplay_present.h"
 #endif
 #include "pc_p2_teki_lifetime.h"
 #include "pc_p2_kurage_teki.h"
@@ -3876,7 +3877,10 @@ void GameCoreSection::updateCoopCameras()
 void GameCoreSection::updateDynamicSplit(f32 dt)
 {
 	Camera* own[2] = { mNavi->mNaviCamera, mGameCamera2 };
-	if (!pc_settings_get_coop_merge_camera()) {
+	// M2b (issue #879): force upstream merged/dynamic co-op camera off in
+	// det mode. Each peer draws its own captain; both captains (and both
+	// cameras' sim-relevant state) are still simulated.
+	if (pc_netplay_present_two_pass_active() || !pc_settings_get_coop_merge_camera()) {
 		// Pantalla partida fija: J1 izquierda/arriba, cámaras propias.
 		mSplitBlend = 1.0f;
 		mP1Side     = 0;
@@ -4166,11 +4170,38 @@ void GameCoreSection::draw(Graphics& gfx)
 	if (mRenderPass != 0) advanceState = false;
 #endif
 	gsys->mTimer->start("se updt", true);
+#if defined(PIKI_PC_PORT)
+	// M2b (issue #879): audio runs in the presentation pass with the
+	// listener at the local captain. Authoritative (sim) never touches it.
+	if (pc_netplay_present_two_pass_active()) {
+		if (!pc_render_is_authoritative()) {
+			if (gameflow.mMoviePlayer->mIsActive) {
+				Vector3f pos;
+				gameflow.mMoviePlayer->getLookAtPos(pos);
+				seSystem->update(gfx, pos);
+			} else if (mNavi2 && mNavi2->isAlive()) {
+				const int local = pc_netplay_present_local_player();
+				Navi* listener = (local == 1) ? mNavi2 : mNavi;
+				if (!listener) {
+					listener = mNavi;
+				}
+				seSystem->update(gfx, listener->mSRT.t);
+			} else {
+				seSystem->update(gfx, mNavi->mSRT.t);
+			}
+		}
+	} else if (advanceState && gameflow.mMoviePlayer->mIsActive) {
+#else
 	if (advanceState && gameflow.mMoviePlayer->mIsActive) {
+#endif
 		Vector3f pos;
 		gameflow.mMoviePlayer->getLookAtPos(pos);
 		seSystem->update(gfx, pos);
+#if defined(PIKI_PC_PORT)
 	} else if (advanceState) {
+#else
+	} else if (advanceState) {
+#endif
 #if defined(PIKI_PC_PORT)
 		// Pantalla partida: el escuchador va al punto medio entre los dos.
 		if (mNavi2 && mNavi2->isAlive()) {

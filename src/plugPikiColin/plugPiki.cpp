@@ -15,6 +15,10 @@
 #include "timing/pc_render_phase.h"
 #include "timing/pc_tick_profiler.h"
 #include "pc_gfx.h"
+#if defined(PIKI_PC_PORT)
+#include "netplay/pc_netplay_det.h"
+#include "netplay/pc_netplay_present.h"
+#endif
 
 #define TIMER_STATE_X           (32) ///< Horizontal position to start printing timer debug text from.
 #define TIMER_STATE_Y           (32) ///< Vertical position to start printing timer debug text from.
@@ -290,6 +294,63 @@ int PlugPikiApp::idle()
 
 	gsys->beginRender();
 
+#if defined(PIKI_PC_PORT)
+	// M2b two-pass frame (issue #879), det mode only. Non-det stays exactly
+	// as today: one pass. The m3 lane can set skip-presentation for future
+	// rollback resimulation (authoritative only).
+	if (pc_netplay_present_two_pass_active() && !pc_netplay_present_skip_presentation()) {
+		// 1. Authoritative pass: today's draw body with SimCamera + null GX.
+		pc_netplay_present_begin_authoritative(*gsys->mDGXGfx);
+		const double authStart = profiling ? clockNow() : 0.0;
+		renderall();
+		if (profiling) {
+			pc_tick_profiler_record(kPcTickRenderAll, clockNow() - authStart);
+		}
+		pc_netplay_present_end_authoritative(*gsys->mDGXGfx);
+
+		// 2. Presentation pass: local view only, real camera + real GL.
+		// Sim blocks are skipped via pc_render_is_authoritative() == false.
+		pc_render_begin_presentation(1.0);
+		gsys->mDGXGfx->resetPresentBuffer();
+		pc_netplay_present_begin_presentation(*gsys->mDGXGfx);
+		// Capture the presented (local) view, not the null pass.
+		pc_gfx_begin_capture(pc_render_tick_serial());
+		const double presentStart = profiling ? clockNow() : 0.0;
+		renderall();
+		if (profiling) {
+			// Presentation cost rides in Whole; keep RenderAll as the sim
+			// pass so world-sim comparisons stay meaningful. Flush stats
+			// once for the presented frame.
+			pc_gfx_flush_submit_stats();
+			(void)presentStart;
+		}
+		pc_gfx_end_capture();
+		pc_netplay_present_restore_all_shapes();
+		pc_netplay_present_end_presentation(*gsys->mDGXGfx);
+	} else if (pc_netplay_present_two_pass_active() && pc_netplay_present_skip_presentation()) {
+		// M2b helper for m3 resim: authoritative only, null GX, no capture.
+		pc_netplay_present_begin_authoritative(*gsys->mDGXGfx);
+		const double authStart = profiling ? clockNow() : 0.0;
+		renderall();
+		if (profiling) {
+			pc_tick_profiler_record(kPcTickRenderAll, clockNow() - authStart);
+			pc_gfx_flush_submit_stats();
+		}
+		pc_netplay_present_end_authoritative(*gsys->mDGXGfx);
+	} else {
+		// Begin capture for immutable render packets
+		pc_gfx_begin_capture(pc_render_tick_serial());
+
+		const double renderStart = profiling ? clockNow() : 0.0;
+		renderall();
+		if (profiling) {
+			pc_tick_profiler_record(kPcTickRenderAll, clockNow() - renderStart);
+			pc_gfx_flush_submit_stats();
+		}
+
+		pc_gfx_end_capture();
+	}
+#else
 	// Begin capture for immutable render packets
 	pc_gfx_begin_capture(pc_render_tick_serial());
 
@@ -301,6 +362,7 @@ int PlugPikiApp::idle()
 	}
 
 	pc_gfx_end_capture();
+#endif
 
 	if (gsys->mDvdErrorCallback) {
 		gsys->mDvdErrorCallback->invoke(*gsys->mDGXGfx);
