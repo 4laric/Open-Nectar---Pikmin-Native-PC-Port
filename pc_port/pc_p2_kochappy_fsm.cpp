@@ -1,8 +1,10 @@
-// Opt-in native source FSM for the Dwarf Orange Bulborb (BlueKochappy,
-// EnemyID 44) on the private P1 Chappy placement vehicle. This is lane-13 gate
-// B ("source behavior"): it replaces the host P1-AI proxy for actors already
-// registered by pc_p2_dwarf_orange, but only when the arena opts in with
-// `p2-dwarf-orange-fsm.txt` (default OFF). Source revision
+// Native source FSM for the Dwarf Orange Bulborb (BlueKochappy,
+// EnemyID 44) on the P1 Chappy placement vehicle. This is lane-13 gate
+// B ("source behavior") + own44 (#871): it replaces the host P1-AI proxy for
+// actors already registered by pc_p2_dwarf_orange. In bridge-mode campaign
+// sessions the audited retail defaults drive the FSM without requiring
+// `p2-dwarf-orange-fsm.txt` (an explicit file still overrides); outside bridge
+// (room preview) the file stays required (default OFF there). Source revision
 // 632af93787b9c95b63f0c13be32b161375ce3a96
 // (include/Game/Entities/KochappyBase.h, src/plugProjectYamashitaU/kochappyState.cpp).
 //
@@ -35,12 +37,14 @@
 //     wait1 frame-60 random-frame latch have no host sound/anim equivalent.
 // Movement uses the source fp06 = 60 speed; turn rate 2.0 rad/s is a recorded
 // adaptation because the host drive API takes a rate, not the source per-frame
-// turn speed fp08. Every hook is a no-op for unregistered actors and for the
-// default-OFF path.
+// turn speed fp08. Every hook is a no-op for unregistered actors and, outside
+// bridge mode, for the default-OFF path (no config file).
 #include "pc_p2_kochappy_fsm.h"
 #include "pc_p2_kochappy_fsm_policy.h"
+#include "pc_p2_campaign_actor.h"
 #include "pc_p2_dwarf_orange.h"
 #include "pc_p2_white.h"
+#include "pc_bbft.h"
 #include "teki.h"
 #include "Interactions.h"
 #include "Piki.h"
@@ -218,13 +222,25 @@ void walkTo(BTeki* actor, FsmActor& state, const Vector3f& target, float dt)
 
 void doFlick(BTeki* actor)
 {
-	if (!pikiMgr) return;
+	// Source StateFlick::exec KEYEVENT_2 (kochappyState.cpp:1772-1779) flicks
+	// stuck Pikmin, nearby Pikmin and nearby Navi with the same shake
+	// (fp17/fp19). The host has no stuck/nearby split, so one contact-radius
+	// sweep covers Pikmin and the captain is flicked on the same radius.
+	if (!pikiMgr && !naviMgr) return;
 	const Vector3f pos = actor->getPosition();
-	Iterator it(pikiMgr);
-	CI_LOOP(it) {
-		Piki* piki = static_cast<Piki*>(*it);
-		if (piki && piki->isAlive() && distXZ(piki->getPosition(), pos) < SHAKE_RANGE) {
-			piki->stimulate(InteractFlick(actor, SHAKE_KNOCKBACK, 0.0f, actor->getDirection()));
+	if (pikiMgr) {
+		Iterator it(pikiMgr);
+		CI_LOOP(it) {
+			Piki* piki = static_cast<Piki*>(*it);
+			if (piki && piki->isAlive() && distXZ(piki->getPosition(), pos) < SHAKE_RANGE) {
+				piki->stimulate(InteractFlick(actor, SHAKE_KNOCKBACK, 0.0f, actor->getDirection()));
+			}
+		}
+	}
+	if (naviMgr) {
+		Navi* navi = naviMgr->getNavi();
+		if (navi && navi->isAlive() && distXZ(navi->getPosition(), pos) < SHAKE_RANGE) {
+			navi->stimulate(InteractFlick(actor, SHAKE_KNOCKBACK, 0.0f, actor->getDirection()));
 		}
 	}
 }
@@ -313,7 +329,7 @@ void enter(BTeki* actor, FsmActor& state, State next)
 	state.swallowFired = false;
 	state.flickFired   = false;
 	actor->startMotion(motionFor(next));
-	const unsigned generator = actor->mGenerator ? actor->mGenerator->_70 : 0u;
+	const unsigned generator = pc_p2_campaign_token(actor);
 	std::printf("P2_KOCHAPPY_STATE generator=%u state=%s\n", generator,
 	            p2kochappyfsm::stateName(next));
 	std::fflush(stdout);
@@ -343,11 +359,25 @@ void pc_p2_kochappy_fsm_setup()
 {
 	pc_p2_kochappy_fsm_reset();
 	if (!tekiMgr) return;
+	// own44 (#871): bridge-mode campaign OWN. The product seed stages the
+	// Dwarf Orange visual/health sidecars via IDENTITY_FAMILY but never stages
+	// the opt-in p2-dwarf-orange-fsm.txt, so in bridge mode the audited retail
+	// defaults drive the FSM without requiring the file (an explicit file
+	// still overrides). Outside bridge (room preview) the file stays required
+	// so the default-OFF preview path is unchanged.
+	const bool bridge = pc_randomizer_p2_bridge() && !pc_pikipelago_room_preview();
 	std::ifstream config("p2-dwarf-orange-fsm.txt");
-	if (!config) return; // default OFF: no host-path change, no markers
-	if (!p2kochappyfsm::parseConfig(config, params)) {
-		std::fprintf(stderr, "Invalid p2-dwarf-orange-fsm.txt\n");
-		std::abort();
+	if (config) {
+		if (!p2kochappyfsm::parseConfig(config, params)) {
+			std::fprintf(stderr, "Invalid p2-dwarf-orange-fsm.txt\n");
+			std::abort();
+		}
+	} else if (!bridge) {
+		return; // default OFF: no host-path change, no markers
+	} else {
+		params = p2kochappyfsm::Params();
+		std::printf("P2_KOCHAPPY_FSM_BRIDGE_DEFAULTS source_id=44\n");
+		std::fflush(stdout);
 	}
 	// Own only the actors the Dwarf Orange module already registered; do not
 	// duplicate identity resolution or bank loading here.
@@ -359,7 +389,7 @@ void pc_p2_kochappy_fsm_setup()
 		selected.push_back(actor);
 	}
 	if (selected.empty()) {
-		std::fprintf(stderr, "p2-dwarf-orange-fsm.txt present but no Dwarf Orange actor\n");
+		std::fprintf(stderr, "p2 dwarf-orange FSM: no Dwarf Orange actor\n");
 		return;
 	}
 	for (Teki* actor : selected) {
@@ -369,12 +399,13 @@ void pc_p2_kochappy_fsm_setup()
 		state.logTimer  = 0.0f;
 		actor->mHealth  = params.health;
 		const Vector3f pos = actor->getPosition();
-		const unsigned generator = actor->mGenerator->_70;
+		const unsigned generator = pc_p2_campaign_token(actor);
 		std::printf("P2_ENEMY_READY species=BlueKochappy source_id=44 native_family=Chappy generator=%u "
 		            "x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=native source_FSM=implemented "
 		            "move_speed=%.0f sight=%.0f attack_range=%.0f attack_angle=%.0f\n",
 		            generator, pos.x, pos.y, pos.z, actor->mHealth, params.health,
 		            params.moveSpeed, params.sight, params.attackRange, params.attackAngle);
+		std::printf("P2_KOCHAPPY_SUPPRESS generator=%u host_ai=suppressed P1_doAI_skipped\n", generator);
 		std::fflush(stdout);
 		enter(actor, state, p2kochappyfsm::STATE_WAIT);
 	}
@@ -407,7 +438,7 @@ void pc_p2_kochappy_fsm_update(BTeki* actor)
 	FsmActor& state = found->second;
 	const float dt = gsys->getFrameTime();
 	if (dt <= 0.0f || dt > 0.5f) return;
-	const unsigned generator = actor->mGenerator ? actor->mGenerator->_70 : 0u;
+	const unsigned generator = pc_p2_campaign_token(actor);
 	const Vector3f pos = actor->getPosition();
 
 	// The P1 Chappy vehicle re-initialises mHealth from its TPF_Life policy at

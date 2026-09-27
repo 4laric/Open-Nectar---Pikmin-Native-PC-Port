@@ -19,6 +19,7 @@
 #include "pc_p2_frog.h"
 #include "pc_p2_kogane.h"
 #include "pc_p2_mamuta.h"
+#include "pc_p2_mamuta_fsm.h"
 #include "pc_p2_tank.h"
 #include "pc_p2_kabuto_fsm.h"
 #include "pc_p2_qurione.h"
@@ -539,6 +540,7 @@ void BTeki::update()
 	pc_p2_hana_update(this);
 	pc_p2_imomushi_update(this);
 	pc_p2_kochappy_fsm_update(this);
+	pc_p2_mamuta_fsm_update(this);
 	pc_p2_chappy_update(this);
 #endif
 	if (mDeadState == 0) {
@@ -653,6 +655,9 @@ void BTeki::doAI()
 		return;
 	}
 	if (pc_p2_kochappy_fsm_suppress_ai(this)) {
+		return;
+	}
+	if (pc_p2_mamuta_fsm_suppress_ai(this)) {
 		return;
 	}
 	if (pc_p2_frog_suppress_ai(this)) {

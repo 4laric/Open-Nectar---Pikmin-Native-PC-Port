@@ -338,6 +338,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_kogane.cpp
     pc_port/pc_p2_mamuta.cpp
     pc_port/pc_p2_mamuta_rules.cpp
+    pc_port/pc_p2_mamuta_fsm.cpp
     pc_port/pc_p2_tank.cpp
     pc_port/pc_p2_hiba.cpp
     pc_port/pc_p2_flora_actor.cpp
@@ -1250,6 +1251,12 @@ add_executable(p2_kabuto_fsm_policy_test tools/p2_kabuto_fsm_policy_test.cpp)
 target_include_directories(p2_kabuto_fsm_policy_test PRIVATE pc_port)
 target_compile_options(p2_kabuto_fsm_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_kabuto_fsm_policy_test COMMAND p2_kabuto_fsm_policy_test)
+
+# Mamuta OWN FSM policy (own44 #871): engine-free params/state/config contract.
+add_executable(p2_mamuta_fsm_policy_test tools/p2_mamuta_fsm_policy_test.cpp)
+target_include_directories(p2_mamuta_fsm_policy_test PRIVATE pc_port)
+target_compile_options(p2_mamuta_fsm_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_mamuta_fsm_policy_test COMMAND p2_mamuta_fsm_policy_test)
 
 # Lane 30 (#242) standalone policy tests. The drop/host-clock and Sarai
 # captor/lifecycle/identity harnesses are dependency-free headers: a test source
