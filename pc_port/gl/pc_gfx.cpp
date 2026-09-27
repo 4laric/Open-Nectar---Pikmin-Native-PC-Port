@@ -818,6 +818,21 @@ static inline void pc_gfx_note_gl_state_change() {
     ++sGlStateEpoch;
 }
 
+// M2b null GX (issue #879 review B1): every pc_gfx entry below that can reach
+// GL returns through here first while the authoritative pass runs. The guard
+// sits before the redundancy caches, so the presentation pass re-emits
+// whatever state it needs. Pure CPU-side setters (state_touched only:
+// channels, lights, matrices, fog parameters, copy-clear colour) are
+// intentionally not gated: they never call GL, and the presentation pass
+// re-establishes everything it draws with.
+static inline bool pc_gfx_null_skip() {
+    if (pc_netplay_present_null_active()) {
+        pc_netplay_present_note_attempt();
+        return true;
+    }
+    return false;
+}
+
 // The pipeline setters (blend, depth, cull, viewport, scissor) keep a
 // redundancy guard so a repeated GX call does not touch GL. post_apply()
 // writes those bits of GL itself -- it disables blend, depth and cull --
@@ -1464,6 +1479,7 @@ static void fill_ui_43_bars() {
 }
 
 void pc_gfx_set_ui_43(int enabled) {
+    if (pc_gfx_null_skip()) return;
     const bool want = enabled != 0;
     if (want != sUi43) {
         sUi43 = want;
@@ -1648,6 +1664,7 @@ void pc_gfx_get_drawable_size(int* width, int* height)
 
 void pc_gfx_overlay_begin(void)
 {
+    if (pc_gfx_null_skip()) return;
     if (!ensure_overlay_program() || sDrawableWidth <= 0 || sDrawableHeight <= 0) return;
     pc_gfx_note_gl_state_change();
     invalidate_gl_pipeline_guards();
@@ -1671,6 +1688,7 @@ void pc_gfx_overlay_begin(void)
 void pc_gfx_overlay_sprite(unsigned texture, float x, float y, float w, float h,
                            float r, float g, float b, float a, float angleRadians)
 {
+    if (pc_gfx_null_skip()) return;
     if (!sOverlayProgram || sDrawableWidth <= 0 || sDrawableHeight <= 0) return;
     const float cx = (x + w * 0.5f) / float(sDrawableWidth) * 2.0f - 1.0f;
     const float cy = 1.0f - (y + h * 0.5f) / float(sDrawableHeight) * 2.0f;
@@ -1687,6 +1705,7 @@ void pc_gfx_overlay_sprite(unsigned texture, float x, float y, float w, float h,
 
 void pc_gfx_overlay_end(void)
 {
+    if (pc_gfx_null_skip()) return;
     if (!sOverlayProgram) return;
     glBindTexture(GL_TEXTURE_2D, 0);
     glBindVertexArray_ptr(0);
@@ -1701,6 +1720,7 @@ void pc_gfx_overlay_end(void)
 
 void pc_gfx_dim_full_target(unsigned char alpha)
 {
+    if (pc_gfx_null_skip()) return;
     const GLint w = sNativeFramebufferReady ? sRenderWidth : sDrawableWidth;
     const GLint h = sNativeFramebufferReady ? sRenderHeight : sDrawableHeight;
     if (w <= 0 || h <= 0 || alpha == 0) return;
@@ -1752,6 +1772,7 @@ static bool blur_target(int i, int w, int h)
 
 void pc_gfx_blur_gx_rect(int gxX, int gxY, int gxW, int gxH, int passes)
 {
+    if (pc_gfx_null_skip()) return;
     if (!sNativeFramebufferReady || !glBlitFramebuffer_ptr || !glBindFramebuffer_ptr) return;
     float sx, sy, ox, oy;
     gx_rect_params(sx, sy, ox, oy);
@@ -4567,6 +4588,7 @@ void pc_gfx_present(void) {
 }
 
 void pc_gfx_set_projection(const Mtx44 mtx, GXProjectionType type) {
+    if (pc_gfx_null_skip()) return;
     state_touched();
     // The orthographic ones matter as much as the perspective ones: the point
     // of this trace is to find where the world stops and the interface starts,
@@ -4693,6 +4715,7 @@ bool pc_gfx_project_current(float x, float y, float z, float* winX, float* winY)
 }
 
 void pc_gfx_set_viewport(f32 xOrig, f32 yOrig, f32 wd, f32 ht, f32 nearZ, f32 farZ) {
+    if (pc_gfx_null_skip()) return;
     (void)nearZ; (void)farZ;
     GLint x, y; GLsizei width, height;
     map_gx_rect(xOrig, yOrig, wd, ht, x, y, width, height);
@@ -4709,6 +4732,7 @@ void pc_gfx_set_viewport(f32 xOrig, f32 yOrig, f32 wd, f32 ht, f32 nearZ, f32 fa
 }
 
 void pc_gfx_set_scissor(u32 xOrig, u32 yOrig, u32 wd, u32 ht) {
+    if (pc_gfx_null_skip()) return;
     GLint x, y; GLsizei width, height;
     map_gx_rect((float)xOrig, (float)yOrig, (float)wd, (float)ht, x, y, width, height);
     static GLint lastX = -1, lastY = -1;
@@ -4779,6 +4803,7 @@ void pc_gfx_set_pipeline_state(const PcGfxPipelineState& st) {
 }
 
 void pc_gfx_set_z_mode(GXBool compareEnable, GXCompare func, GXBool updateEnable) {
+    if (pc_gfx_null_skip()) return;
     sPipelineState.zCompare = compareEnable; sPipelineState.zFunc = func; sPipelineState.zUpdate = updateEnable;
     static bool valid = false;
     static uint32_t seenSerial = 0;
@@ -4810,6 +4835,7 @@ void pc_gfx_set_z_mode(GXBool compareEnable, GXCompare func, GXBool updateEnable
 }
 
 void pc_gfx_set_blend_mode(GXBlendMode type, GXBlendFactor srcFactor, GXBlendFactor dstFactor, GXLogicOp op) {
+    if (pc_gfx_null_skip()) return;
     sPipelineState.blendType = type; sPipelineState.blendSrc = srcFactor; sPipelineState.blendDst = dstFactor; sPipelineState.blendOp = op;
     static bool valid = false;
     static uint32_t seenSerial = 0;
@@ -4882,6 +4908,7 @@ void pc_gfx_set_blend_mode(GXBlendMode type, GXBlendFactor srcFactor, GXBlendFac
 }
 
 void pc_gfx_set_cull_mode(GXCullMode mode) {
+    if (pc_gfx_null_skip()) return;
     sPipelineState.cull = mode;
     static bool valid = false;
     static uint32_t seenSerial = 0;
@@ -4899,6 +4926,7 @@ void pc_gfx_set_cull_mode(GXCullMode mode) {
 }
 
 void pc_gfx_set_color_update(GXBool updateEnable) {
+    if (pc_gfx_null_skip()) return;
     if (sColorUpdate == updateEnable) return;
     sColorUpdate = updateEnable;
     pc_gfx_note_gl_state_change();
@@ -4906,6 +4934,7 @@ void pc_gfx_set_color_update(GXBool updateEnable) {
 }
 
 void pc_gfx_set_alpha_update(GXBool updateEnable) {
+    if (pc_gfx_null_skip()) return;
     if (sAlphaUpdate == updateEnable) return;
     sAlphaUpdate = updateEnable;
     pc_gfx_note_gl_state_change();
@@ -5428,10 +5457,14 @@ static void apply_texture_filtering(bool gameRequestedMipmaps)
 }
 
 void pc_gfx_init_tex_obj_rgba(GXTexObj* obj, void* rgba, u16 width, u16 height, GXTexWrapMode wrapS, GXTexWrapMode wrapT) {
-    // M2b null GX: skip uploads without touching GL.
+    // M2b null GX (review m1): creation uploads go through even in the
+    // authoritative pass. They are sim-independent one-shot uploads (same
+    // bytes on every peer); dropping them leaves textures created by sim
+    // blocks (Node::update / updateAI run only in auth) never uploaded, so
+    // the later load logs "nunca se subió" and draws transparent. Counted as
+    // real GL while null; steady-state replays must still show null_gl 0.
     if (pc_netplay_present_null_active()) {
-        pc_netplay_present_note_attempt();
-        return;
+        pc_netplay_present_note_real();
     }
     if (!obj || !rgba || width == 0 || height == 0) return;
 
@@ -5463,11 +5496,10 @@ void pc_gfx_init_tex_obj_rgba(GXTexObj* obj, void* rgba, u16 width, u16 height, 
 }
 
 void pc_gfx_init_tex_obj(GXTexObj* obj, void* imagePtr, u16 width, u16 height, GXTexFmt format, GXTexWrapMode wrapS, GXTexWrapMode wrapT, GXBool mipmap) {
+    // M2b null GX (review m1): see init_tex_obj_rgba above.
     if (pc_netplay_present_null_active()) {
-        pc_netplay_present_note_attempt();
-        return;
+        pc_netplay_present_note_real();
     }
-    if (!obj || !imagePtr || width == 0 || height == 0) return;
     if (!obj || !imagePtr || width == 0 || height == 0) return;
 
     uintptr_t key = (uintptr_t)obj;
@@ -5807,9 +5839,9 @@ static bool upload_ci_texture(GXTexObj* obj, const PcCiTexture& ci) {
 
 void pc_gfx_init_tex_obj_ci(GXTexObj* obj, void* imagePtr, u16 width, u16 height, GXCITexFmt format,
                             GXTexWrapMode wrapS, GXTexWrapMode wrapT, GXBool mipmap, u32 tlutName) {
+    // M2b null GX (review m1): see init_tex_obj_rgba above.
     if (pc_netplay_present_null_active()) {
-        pc_netplay_present_note_attempt();
-        return;
+        pc_netplay_present_note_real();
     }
     if (!obj || !imagePtr || width == 0 || height == 0) return;
     const uintptr_t key = reinterpret_cast<uintptr_t>(obj);
@@ -7854,6 +7886,16 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
 }
 
 void pc_gfx_end(void) {
+    // M2b null GX: drop the primitive without touching GL. apply_draw_state
+    // below programs uniforms and binds programs on every state change, so
+    // without this every auth-pass material change would issue real GL.
+    if (pc_gfx_null_skip()) {
+        sVertexStream.clear();
+        sInPrimitive = false;
+        sHaveVertex = false;
+        sAttrStep = 0;
+        return;
+    }
     if (sInPrimitive && sHaveVertex) {
         sVertexStream.push_back(sCurVertex);
         sHaveVertex = false;
@@ -9013,6 +9055,7 @@ static void pc_gfx_call_display_list_impl(const void* list, u32 nbytes) {
 }
 
 void pc_gfx_copy_disp(void* dest, GXBool clear) {
+    if (pc_gfx_null_skip()) return;
     pc_gfx_note_gl_state_change();
     (void)dest;
     if (clear) {
