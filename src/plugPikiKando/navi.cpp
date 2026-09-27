@@ -18,7 +18,10 @@
 #include "pc_coop.h"
 #include "pc_window.h"
 #include "pc_gyro.h"
+#include "netplay/pc_netplay_det.h"
+#include "netplay/pc_input_log.h"
 #include "settings/pc_settings.h"
+#include <cstdio>
 #include "mods/pc_hd_models.h"
 #include "gl/pc_gfx.h"
 #if PIKI_PC_TOUCH
@@ -791,6 +794,11 @@ bool pcIsLastNaviStanding(Navi* navi)
 int pc_preferred_throw_color_for(Navi* navi)
 {
 	if (!navi) return -1;
+#if defined(PIKI_PC_PORT)
+	// M2c lockout: the keyboard owner is local UI state, so det mode maps
+	// pads fixedly (pad 0 -> P1 preference, others -> P2) instead.
+	if (pc_netplay_deterministic()) return navi->mNaviID == 0 ? sPreferredThrowColor : sPreferredThrowColorP2;
+#endif
 	if (navi->mNaviID == pc_window_get_keyboard_owner()) return sPreferredThrowColor;
 	return sPreferredThrowColorP2;
 }
@@ -822,14 +830,30 @@ static bool pcSquadHasColor(Navi* navi, int selection)
  */
 static bool pcUpdatePreferredThrowColor(Navi* navi)
 {
+#if defined(PIKI_PC_PORT)
+	// M2c lockout: wheel steps and touch taps live outside PADStatus. Det
+	// mode drains and ignores them, and the keyboard-owner routing becomes
+	// a fixed per-pad mapping so both peers agree.
+	const bool detThrow = pc_netplay_deterministic();
+	if (detThrow) {
+		pc_window_take_wheel_steps();
+#if PIKI_PC_TOUCH
+		pc_touch_take_color_taps();
+#endif
+	}
+	const bool keyboardOwner = detThrow ? (navi->mNaviID == 0) : (navi->mNaviID == pc_window_get_keyboard_owner());
+#else
 	const bool keyboardOwner = navi->mNaviID == pc_window_get_keyboard_owner();
+#endif
 	int& preferred = keyboardOwner ? sPreferredThrowColor : sPreferredThrowColorP2;
 
 	// Tocar el icono del HUD cuenta como una muesca, y funciona aunque la
 	// rueda esté asignada al zoom: en pantalla táctil no hay rueda.
 	int touchSteps = 0;
 #if PIKI_PC_TOUCH
-	if (keyboardOwner) touchSteps = pc_touch_take_color_taps();
+	if (!detThrow && keyboardOwner) touchSteps = pc_touch_take_color_taps();
+#else
+	(void)touchSteps;
 #endif
 	// Cruceta izquierda/derecha como en Pikmin 2 (issue #43): vale para
 	// mando y teclado, con o sin A pulsado. Abajo sigue siendo el original.
@@ -838,7 +862,11 @@ static bool pcUpdatePreferredThrowColor(Navi* navi)
 	// (naviState), which also covers the purple/white/bomb selection classes.
 	// Reading the same keyClick edge here too would step twice per press.
 
+#if defined(PIKI_PC_PORT)
+	const bool wheelOn = !detThrow && keyboardOwner && pc_settings_get_mouse_wheel_action() == 0;
+#else
 	const bool wheelOn = keyboardOwner && pc_settings_get_mouse_wheel_action() == 0;
+#endif
 	if (!wheelOn && touchSteps == 0 && padSteps == 0 && preferred < 0) {
 		return false;
 	}
@@ -904,9 +932,15 @@ Piki* pc_cycle_throw_color(Navi* navi, Piki* current)
 			const f32 candidateDistance = qdist2(piki, navi);
 			if (candidateDistance < distance) { nearest = piki; distance = candidateDistance; }
 		}
-		if (nearest) {
-			// Co-op: the second captain keeps its own preference (upstream #43).
-			(navi->mNaviID == pc_window_get_keyboard_owner() ? sPreferredThrowColor : sPreferredThrowColorP2) = color;
+	if (nearest) {
+		// Co-op: the second captain keeps its own preference (upstream #43).
+		// M2c lockout: det mode maps fixedly by pad, not by keyboard owner.
+		const bool toP1 =
+#if defined(PIKI_PC_PORT)
+		    pc_netplay_deterministic() ? (navi->mNaviID == 0) :
+#endif
+		                                   (navi->mNaviID == pc_window_get_keyboard_owner());
+		(toP1 ? sPreferredThrowColor : sPreferredThrowColorP2) = color;
 			navi->mNextThrowPiki = nearest;
 			return nearest;
 		}
@@ -1117,6 +1151,17 @@ void Navi::postUpdate(int unused, f32 deltaTime)
  */
 void Navi::pcUpdateLockOn()
 {
+#if defined(PIKI_PC_PORT)
+	// M2c lockout: lock-on / charge edges live outside PADStatus, so det
+	// mode drains and ignores them (neutral). Flags byte stays reserved.
+	if (pc_netplay_deterministic()) {
+		pc_window_take_lockon_press();
+		pc_window_take_swarm_press();
+		mPcLockTarget = nullptr;
+		pc_settings_note_lock_on(0);
+		return;
+	}
+#endif
 	// Se consume siempre, esté activo el mod o no, para que una pulsación no
 	// quede encolada y salte sola al activarlo.
 	const bool lockPressed   = pc_window_take_lockon_press();
@@ -1222,6 +1267,11 @@ void Navi::pcUpdateLockOn()
  */
 void Navi::pcPinCursorToLock()
 {
+#if defined(PIKI_PC_PORT)
+	// M2c lockout: det mode never pins the cursor (no lock target, no
+	// first-person pin); it follows the classic stick path in makeVelocity.
+	if (pc_netplay_deterministic()) return;
+#endif
 	if (!mPcLockTarget) {
 		pcPinCursorFirstPerson();
 		return;
@@ -1249,6 +1299,11 @@ void Navi::pcPinCursorToLock()
  */
 void Navi::pcPinCursorFirstPerson()
 {
+#if defined(PIKI_PC_PORT)
+	// M2c lockout: first-person pin reads the view matrix, so det mode
+	// disables it. The presentation camera may still move locally.
+	if (pc_netplay_deterministic()) return;
+#endif
 	if (!pc_first_person_active()) {
 		return;
 	}
@@ -2297,6 +2352,52 @@ void Navi::reviseController(Vector3f& stickPos)
 	STACK_PAD_VAR(2);
 }
 
+#if defined(PIKI_PC_PORT)
+// Netplay M2c (issue #879): per-player control yaw as input.
+//
+// In deterministic mode the stick basis comes from the per-tick input yaw
+// for this Navi's pad channel (mNaviID), never from the camera. The yaw is
+// u16 in 1/65536 turns (see pc_input_log.h). Record and replay share one
+// basis construction: the quantised value feeds sin/cos once, and the
+// resulting (sin, cos) builds the RotY matrix directly through
+// Matrix4f::makeRotate(axis, sin, cos) -- the same sinf/cosf the
+// angle-based makeRotate(axis, angle) uses internally, so lane m2d's
+// deterministic libm swap covers both. With the switch off this helper is
+// never reached and the old camera path runs verbatim.
+static bool pcNaviControlSincos(int naviID, Camera* cam, float* outSin, float* outCos)
+{
+	const bool detMode = pc_netplay_deterministic();
+	const bool recMode = pc_input_log_is_record_active();
+	if (!detMode && !recMode) return false;
+	if (naviID < 0 || naviID > 3) return false;
+	float s = 0.0f, c = 1.0f;
+	if (detMode && pc_netplay_control_yaw(naviID, &s, &c)) {
+		if (outSin != nullptr) *outSin = s;
+		if (outCos != nullptr) *outCos = c;
+		return true;
+	}
+	// Live fallback (live record, v1 replay, or past-end-of-file): quantise
+	// the camera yaw BEFORE the basis so record and replay are bit-identical.
+	// A null camera would crash the old path too; store neutral yaw instead
+	// of crashing when only recording.
+	if (cam == nullptr) {
+		if (!detMode) return false;
+		pc_input_log_yaw_set(naviID, 0, pc_input_log::kFlagsNone);
+		if (outSin != nullptr) *outSin = 0.0f;
+		if (outCos != nullptr) *outCos = 1.0f;
+		return true;
+	}
+	const float liveAngle = NMathF::atan2(cam->mViewXAxis.z, cam->mViewXAxis.x);
+	const uint16_t q      = pc_input_log_yaw_quantise(liveAngle);
+	pc_input_log_yaw_set(naviID, q, pc_input_log::kFlagsNone);
+	if (!detMode) return false;
+	pc_input_log_yaw_sincos(q, &s, &c);
+	if (outSin != nullptr) *outSin = s;
+	if (outCos != nullptr) *outCos = c;
+	return true;
+}
+#endif
+
 /**
  * @todo: Documentation
  *
@@ -2305,6 +2406,16 @@ void Navi::reviseController(Vector3f& stickPos)
 void Navi::makeVelocity(bool isSunset)
 {
 	mNeutralTime += gsys->getFrameTime();
+
+#if defined(PIKI_PC_PORT)
+	// M2c test hook (temporary, env-gated, det-only): navi position every
+	// 300 ticks for the wobble-test long-stretch comparison.
+	if (pc_netplay_deterministic() && std::getenv("PIKMIN_NETPLAY_DEBUG_NAVI_POS") != nullptr
+	    && (pc_netplay_tick() % 300) == 0) {
+		std::printf("[netplay-navi] tick=%u navi=%d pos=(%.2f %.2f %.2f)\n", pc_netplay_tick(), mNaviID,
+		            mSRT.t.x, mSRT.t.y, mSRT.t.z);
+	}
+#endif
 
 	if (mKontroller->keyDown(KBBTN_B) || mKontroller->keyDown(KBBTN_A) || mKontroller->keyDown(KBBTN_X) || mKontroller->keyDown(KBBTN_Z)) {
 		mNeutralTime = 0.0f;
@@ -2332,11 +2443,28 @@ void Navi::makeVelocity(bool isSunset)
 	} else {
 		mMainStick.set(0.0f, 0.0f, 0.0f);
 	}
+#if defined(PIKI_PC_PORT)
+	// M2c: det mode builds the basis from the per-player input yaw, never
+	// from the camera. Switch off: exactly the old path.
+	Camera* ctrlCam   = controlCamera();
+	float yawSin = 0.0f, yawCos = 1.0f;
+	const bool useInputYaw = pcNaviControlSincos(mNaviID, ctrlCam, &yawSin, &yawCos);
+	NTransform3D NRef transform = NTransform3D();
+	if (useInputYaw) {
+		Vector3f yAxis(0.0f, 1.0f, 0.0f);
+		transform.makeRotate(yAxis, yawSin, yawCos);
+	} else {
+		f32 angle                   = NMathF::atan2(ctrlCam->mViewXAxis.z, ctrlCam->mViewXAxis.x);
+		NAxisAngle4f NRef axisAngle = NAxisAngle4f(NVector3f(0.0f, 1.0f, 0.0f), angle);
+		transform.inputAxisAngle(axisAngle);
+	}
+#else
 	Camera* ctrlCam             = controlCamera();
 	f32 angle                   = NMathF::atan2(ctrlCam->mViewXAxis.z, ctrlCam->mViewXAxis.x);
 	NAxisAngle4f NRef axisAngle = NAxisAngle4f(NVector3f(0.0f, 1.0f, 0.0f), angle);
 	NTransform3D NRef transform = NTransform3D();
 	transform.inputAxisAngle(axisAngle);
+#endif
 
 	if (!isSunset) {
 		mTargetVelocity.set(0.0f, 0.0f, 0.0f);
@@ -2388,10 +2516,19 @@ void Navi::makeVelocity(bool isSunset)
 	#ifdef PIKI_PC_PORT
 	// El ratón y el cursor virtual van con el jugador que tiene el teclado;
 	// el otro usa siempre el modo clásico.
-	const bool mouseIsMine = mNaviID == pc_window_get_keyboard_owner();
+	// M2c lockout: in det mode every captain uses the classic stick path.
+	// The keyboard-owner routing, mouse deltas, virtual cursor, gyro
+	// recenter and first-person pin are local presentation state and must
+	// not reach the sim; only the recorded input yaw does.
+	const bool detMode      = pc_netplay_deterministic();
+	const bool mouseIsMine = !detMode && (mNaviID == pc_window_get_keyboard_owner());
 	// "Gyro Recenter": el cursor vuelve delante del capitán, en la dirección
 	// de la cámara, para corregir la deriva acumulada del giroscopio.
-	if (mouseIsMine && pc_gyro_take_recenter_cursor()) {
+	if (detMode) {
+		// Drain the edge so it cannot fire on a later non-det tick.
+		pc_gyro_take_recenter_cursor();
+		pc_window_clear_mouse_cursor_delta();
+	} else if (mouseIsMine && pc_gyro_take_recenter_cursor()) {
 		Vector3f fwd(-ctrlCam->mLookAtMtx.mMtx[2][0], 0.0f, -ctrlCam->mLookAtMtx.mMtx[2][2]);
 		const f32 len = speedy_sqrtf(fwd.x * fwd.x + fwd.z * fwd.z);
 		if (len > 0.0001f) {
@@ -2523,7 +2660,9 @@ void Navi::makeVelocity(bool isSunset)
 	// For cursor-facing logic, use virtual cursor in mouse modes
 	#ifdef PIKI_PC_PORT
 	f32 cursorStickMag = moveStickMag;
-	if (mNaviID == pc_window_get_keyboard_owner() && pc_window_get_control_mode() != PC_CONTROL_CLASSIC) {
+	// M2c lockout: det mode never consults the virtual cursor.
+	if (!detMode && mNaviID == pc_window_get_keyboard_owner()
+	    && pc_window_get_control_mode() != PC_CONTROL_CLASSIC) {
 		cursorStickMag = sqrtf(
 			(pc_window_get_virtual_cursor_x() / 127.0f) * (pc_window_get_virtual_cursor_x() / 127.0f) +
 			(pc_window_get_virtual_cursor_y() / 127.0f) * (pc_window_get_virtual_cursor_y() / 127.0f)
@@ -2568,12 +2707,30 @@ void Navi::makeVelocity(bool isSunset)
  */
 void Navi::makeCStick(bool isSunset)
 {
+	Camera* ctrlCam = controlCamera();
+#if defined(PIKI_PC_PORT)
+	// M2c: det mode builds the basis from the per-player input yaw.
+	// Switch off: exactly the old path.
+	float yawSin = 0.0f, yawCos = 1.0f;
+	const bool useInputYaw = pcNaviControlSincos(mNaviID, ctrlCam, &yawSin, &yawCos);
+	f32 cameraYaw          = 0.0f;
+	NTransform3D NRef transform = NTransform3D();
+	if (useInputYaw) {
+		Vector3f yAxis(0.0f, 1.0f, 0.0f);
+		transform.makeRotate(yAxis, yawSin, yawCos);
+	} else {
+		cameraYaw = NMathF::atan2(ctrlCam->mViewXAxis.z, ctrlCam->mViewXAxis.x);
+		NAxisAngle4f NRef axisAngle = NAxisAngle4f(NVector3f(0.0f, 1.0f, 0.0f), cameraYaw);
+		transform.inputAxisAngle(axisAngle);
+	}
+#else
 	Camera* ctrlCam             = controlCamera();
 	f32 cameraYaw               = NMathF::atan2(ctrlCam->mViewXAxis.z, ctrlCam->mViewXAxis.x);
 	NAxisAngle4f NRef axisAngle = NAxisAngle4f(NVector3f(0.0f, 1.0f, 0.0f), cameraYaw);
 
 	NTransform3D NRef transform = NTransform3D();
 	transform.inputAxisAngle(axisAngle);
+#endif
 
 	NVector3f cStickInput(mKontroller->getSubStickX(), 0.0f, -mKontroller->getSubStickY());
 
@@ -2587,14 +2744,23 @@ void Navi::makeCStick(bool isSunset)
 	// the world below, so the world-space direction is rotated back first.
 	// Con el Charge activo el botón de swarm pasa a lanzar la carga contra el
 	// objetivo fijado, así que aquí deja de dirigir al pelotón.
+	// M2c lockout: swarm_held is a level input outside PADStatus, so det
+	// mode treats it as released (neutral). Pure-button edges (lock-on /
+	// charge takes) are likewise drained and ignored in pcUpdateLockOn.
+	const bool detMode        = pc_netplay_deterministic();
 	const bool swarmIsCharge = pc_settings_get_charge() != 0;
-	const bool swarmHeld     = mNaviID == 0 ? pc_window_swarm_held() : pc_window_swarm_held_p2();
+	const bool swarmHeld     = detMode ? false : (mNaviID == 0 ? pc_window_swarm_held() : pc_window_swarm_held_p2());
 	if (!isSunset && !swarmIsCharge && swarmHeld && cStickInput.length() < 0.05f) {
 		NVector3f toCursor(mCursorWorldPos.x - mSRT.t.x, 0.0f, mCursorWorldPos.z - mSRT.t.z);
 		if (toCursor.length() > 1.0f) {
 			toCursor.normalise();
 			NTransform3D NRef back = NTransform3D();
-			back.inputAxisAngle(NAxisAngle4f(NVector3f(0.0f, 1.0f, 0.0f), -cameraYaw));
+			if (useInputYaw) {
+				Vector3f yAxis(0.0f, 1.0f, 0.0f);
+				back.makeRotate(yAxis, -yawSin, yawCos);
+			} else {
+				back.inputAxisAngle(NAxisAngle4f(NVector3f(0.0f, 1.0f, 0.0f), -cameraYaw));
+			}
 			back.transform(toCursor);
 			cStickInput.set(toCursor.x, 0.0f, toCursor.z);
 		}
