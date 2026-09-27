@@ -3,6 +3,11 @@
 #include "pc_coop.h"
 #endif
 #if defined(PIKI_PC_PORT)
+#include "netplay/pc_netplay_policy.h"
+#else
+#define pc_netplay_sim_visible(x) (x)
+#endif
+#if defined(PIKI_PC_PORT)
 #include "settings/pc_settings.h"
 #endif
 #include "AIConstant.h"
@@ -775,7 +780,10 @@ void ItemCreature::refresh(Graphics& gfx)
 {
 	bool isOffCamera = false;
 
-	if (!gfx.mCamera->isPointVisible(mSRT.t, getBoundingSphereRadius())) {
+	// M2a netplay culling policy (issue #879): in deterministic mode the sim
+	// sees always-visible, so isOffCamera stays false and the draw submission
+	// follows the same value (updateAnim/collisions always run).
+	if (!pc_netplay_sim_visible(gfx.mCamera->isPointVisible(mSRT.t, getBoundingSphereRadius()))) {
 		enableAICulling();
 		isOffCamera = true;
 	} else {
@@ -1149,7 +1157,8 @@ void BuildingItem::refresh(Graphics& gfx)
 	mAnimatedMaterials.animate(&val);
 
 	bool isOffCamera = false;
-	if (!gfx.mCamera->isPointVisible(mSRT.t, getBoundingSphereRadius())) {
+	// M2a netplay culling policy (issue #879): see ItemCreature::refresh.
+	if (!pc_netplay_sim_visible(gfx.mCamera->isPointVisible(mSRT.t, getBoundingSphereRadius()))) {
 		enableAICulling();
 		isOffCamera = true;
 	} else {

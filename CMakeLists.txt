@@ -255,6 +255,7 @@ set(PC_PORT_SOURCES
     # Deterministic netplay fixed-step mode, M1 (issue #878). Engine-free TUs;
     # they join pikmin_pc and the engine-free pc_bbft_test / pc_sim_rng_test.
     pc_port/netplay/pc_netplay_det.cpp
+    pc_port/netplay/pc_netplay_policy.cpp
     pc_port/netplay/pc_sim_rng.cpp
     # Challenge host-mode engine runtime bridge (#722, ported from #710
     # db245877; #186 review before shared-line landing): the per-tick runtime
@@ -1626,6 +1627,17 @@ if(PIKMIN_BUILD_TESTS)
         pc_port/netplay/pc_netplay_det.cpp)
     target_compile_options(pc_sim_rng_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_sim_rng_test COMMAND pc_sim_rng_test)
+
+    # Netplay sim-visibility policy, M2a (issue #879). Host-run; covers the
+    # pass-through contract with the switch off and the pinned sim values
+    # (visible / 16:9 / near LOD) with the switch on.
+    add_executable(pc_netplay_policy_test
+        pc_port/netplay/pc_netplay_policy_test.cpp
+        pc_port/netplay/pc_netplay_policy.cpp
+        pc_port/netplay/pc_netplay_det.cpp
+        pc_port/netplay/pc_sim_rng.cpp)
+    target_compile_options(pc_netplay_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_netplay_policy_test COMMAND pc_netplay_policy_test)
 
     add_executable(pc_render_phase_test
         pc_port/timing/pc_render_phase_test.cpp

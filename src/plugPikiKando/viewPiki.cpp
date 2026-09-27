@@ -1,6 +1,12 @@
 #include "pc_p2_purple.h"
 #include "pc_p2_white.h"
 #if defined(PIKI_PC_PORT)
+#include "netplay/pc_netplay_policy.h"
+#else
+#define pc_netplay_sim_visible(x) (x)
+#define pc_netplay_sim_lod_distance(x) (x)
+#endif
+#if defined(PIKI_PC_PORT)
 #include "netplay/pc_sim_rng.h"
 #endif
 #include "ViewPiki.h"
@@ -632,13 +638,16 @@ void ViewPiki::refresh(Graphics& gfx)
 	}
 	Matrix4f mtx;
 	f32 size = getSize();
-	if (!gfx.mCamera->isPointVisible(mSRT.t, size * 4.0f)) {
+	// M2a netplay culling policy (issue #879): in deterministic mode the sim
+	// sees always-visible, and the camera-distance LOD for sim-affecting head
+	// look/pose is pinned to the near/full LOD.
+	if (!pc_netplay_sim_visible(gfx.mCamera->isPointVisible(mSRT.t, size * 4.0f))) {
 		enableAICulling();
 	} else {
 		disableAICulling();
 		if (AIPerf::useLOD) {
 			Vector3f diff = gfx.mCamera->mPosition - mSRT.t;
-			_528          = diff.length();
+			_528          = pc_netplay_sim_lod_distance(diff.length());
 		} else {
 			_528 = 12800.0f;
 		}

@@ -325,6 +325,9 @@ void CullFrustum::update(f32 aspectRatio, f32 fov, f32 zNear, f32 zFar)
 			aspectRatio = windowAspect;
 		}
 	}
+	// M2a fix (issue #879 review M1): no netplay aspect pin here. The
+	// always-visible policy leaves no sim-affecting reader of the frustum
+	// aspect, so the shared draw frustum keeps the live window aspect.
 #endif
 	mAspectRatio   = aspectRatio;
 	mVerticalScale = 1.0f;
