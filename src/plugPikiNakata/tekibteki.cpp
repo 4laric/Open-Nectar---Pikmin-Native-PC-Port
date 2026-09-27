@@ -679,6 +679,15 @@ void BTeki::doAI()
 	if (pc_p2_groink_teki_suppress_ai(this)) {
 		return;
 	}
+	if (pc_p2_catfish_suppress_ai(this)) {
+		return;
+	}
+	if (pc_p2_hana_suppress_ai(this)) {
+		return;
+	}
+	if (pc_p2_tadpole_suppress_ai(this)) {
+		return;
+	}
 #endif
 	if (pc_p2_qurione_suppress_ai(this)) {
 		return;

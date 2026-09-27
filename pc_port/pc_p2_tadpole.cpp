@@ -290,6 +290,10 @@ float pc_p2_tadpole_param_f(const BTeki* actor, int idx, float fallback) {
     }
 }
 
+bool pc_p2_tadpole_suppress_ai(const BTeki* actor) {
+    return ready && actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor))) != 0;
+}
+
 bool pc_p2_tadpole_clip(const BTeki* actor, const char*& name, float& phase) {
     if (!ready) return false;
     auto it = actors.find(static_cast<PelletView*>(const_cast<BTeki*>(actor)));
