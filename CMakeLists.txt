@@ -1644,7 +1644,9 @@ if(PIKMIN_BUILD_TESTS)
 
     add_executable(pc_tick_profiler_test
         pc_port/timing/pc_tick_profiler_test.cpp
-        pc_port/timing/pc_tick_profiler.cpp)
+        pc_port/timing/pc_tick_profiler.cpp
+        pc_port/netplay/pc_netplay_det.cpp
+        pc_port/netplay/pc_sim_rng.cpp)
     target_include_directories(pc_tick_profiler_test PRIVATE pc_port/timing)
     target_compile_options(pc_tick_profiler_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_tick_profiler_test COMMAND pc_tick_profiler_test)

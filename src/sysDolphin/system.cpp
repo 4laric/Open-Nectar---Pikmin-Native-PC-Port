@@ -543,7 +543,10 @@ void System::updateSysClock()
 		mTotalFrames++;
 		int time = tick - mFpsSampleStart;
 		if (time > OS_TIMER_CLOCK) {
-			mFPS                 = (f64)(OS_TIMER_CLOCK * (mEngineFrames - mFramesAtSampleStart)) / time;
+			// M1 det fix: multiply in f64. __OSBusClock is u32, so the
+			// original (f64)(CLOCK * frames) wraps past ~106 frames/sample
+			// and reads garbage in unthrottled mode (320+ ticks/s).
+			mFPS                 = (f64)OS_TIMER_CLOCK * (f64)(mEngineFrames - mFramesAtSampleStart) / (f64)time;
 			mFpsSampleStart      = tick;
 			mFramesAtSampleStart = mEngineFrames;
 		}

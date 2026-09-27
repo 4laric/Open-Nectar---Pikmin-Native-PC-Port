@@ -1,6 +1,8 @@
 #include "pc_randomizer.h"
 #include "pc_bbft.h"
+#if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_det.h"
+#endif
 #include "NewPikiGame.h"
 
 #include "Controller.h"

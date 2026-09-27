@@ -1,4 +1,5 @@
 #include "pc_tick_profiler.h"
+#include "netplay/pc_netplay_det.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -88,9 +89,14 @@ bool pc_tick_profiler_enabled()
 		if (pc_tick_profiler_hud_enabled()) return true;
 		// M1 deterministic netplay: PIKMIN_NETPLAY_PROFILE_LOG=<file> implies
 		// sampling so the det tick-cost report has data without also setting
-		// PIKMIN_TICK_STATS=1.
+		// PIKMIN_TICK_STATS=1. M1 det fix: only in deterministic mode;
+		// otherwise merely setting the log path would turn on per-tick
+		// sampling, GPU timer queries and the 2 s report without ever
+		// dumping. Init order is safe: first called after main() already ran
+		// pc_netplay_det_init().
 		const char* log = getenv("PIKMIN_NETPLAY_PROFILE_LOG");
-		return log != nullptr && *log != '\0';
+		if (log == nullptr || *log == '\0') return false;
+		return pc_netplay_deterministic();
 	}();
 	return enabled;
 }

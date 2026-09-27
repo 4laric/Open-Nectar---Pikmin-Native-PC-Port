@@ -1,6 +1,8 @@
 #include "pc_p2_purple_flight.h"
 #include "pc_p2_kurage_visual.h"
+#if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_det.h"
+#endif
 #include "pc_p2_teki_lifetime.h"
 #include "pc_p2_kurage_teki.h"
 #include "pc_p2_onikurage_teki.h"

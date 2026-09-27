@@ -1273,6 +1273,15 @@ void pc_window_poll_events(PADStatus* pad) {
         pad[1].substickY    = cy2;
         pad[1].triggerLeft  = tl2;
         pad[1].triggerRight = tr2;
+        // M1 det fix: the sim keeps running while unfocused, so in det mode
+        // the same !accept_input() zeroing applied to pad 0 above must cover
+        // pad 1 (all local input). Off-mode path untouched.
+        if (!pc_bbft_accept_input() && pc_netplay_deterministic()) {
+            pad[1].button = 0;
+            pad[1].stickX = pad[1].stickY = 0;
+            pad[1].substickX = pad[1].substickY = 0;
+            pad[1].triggerLeft = pad[1].triggerRight = 0;
+        }
     }
 #if defined(PIKI_PC_PORT) && defined(PIKI_PC_SETTINGS_MENU)
     // While the settings menu is open, consume the pad so the game underneath
