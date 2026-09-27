@@ -2412,6 +2412,7 @@ public:
 				}
 			}
 #endif
+#endif
 
 		// do any pre-rendering, assuming we're not in a cutscene
 		if (!(gameflow.mDemoFlags & CinePlayerFlags::NonGameMovie)) {

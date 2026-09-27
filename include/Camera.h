@@ -9,6 +9,7 @@
 #include "types.h"
 #if defined(PIKI_PC_PORT)
 #include "timing/pc_render_phase.h"
+#include "netplay/pc_netplay_present.h"
 #endif
 
 class Graphics;
@@ -102,7 +103,6 @@ public:
 			// no second pass, so only return early when the SimCamera is
 			// active (presentation module sets null-GX). The null flag is
 			// the cheapest reliable signal available in this header.
-			extern int pc_netplay_present_null_active(void);
 			if (pc_netplay_present_null_active()) {
 				return planeFlag;
 			}

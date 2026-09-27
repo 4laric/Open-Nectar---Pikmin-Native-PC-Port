@@ -1728,7 +1728,8 @@ if(PIKMIN_BUILD_TESTS)
     add_executable(pc_netplay_present_test
         pc_port/netplay/pc_netplay_present_test.cpp
         pc_port/netplay/pc_netplay_present.cpp
-        pc_port/netplay/pc_netplay_det.cpp)
+        pc_port/netplay/pc_netplay_det.cpp
+        pc_port/netplay/pc_sim_rng.cpp)
     target_compile_definitions(pc_netplay_present_test PRIVATE PC_NETPLAY_PRESENT_HOST=1)
     target_compile_options(pc_netplay_present_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_netplay_present_test COMMAND pc_netplay_present_test)
