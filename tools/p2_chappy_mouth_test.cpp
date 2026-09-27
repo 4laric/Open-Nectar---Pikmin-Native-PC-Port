@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 #include <vector>
 #include "pc_p2_chappy_mouth.h"
 #include "pc_p2_chappy_policy.h"
@@ -581,6 +582,160 @@ int main()
         for (int f = king.firstFrame; f <= king.lastFrame; ++f)
             observe(kw, king, f, origin, 0.0f, prey.data(), (int)prey.size(), occ);
         require(kw.frames == 55, "T16 King window observes 55 frames");
+    }
+
+    // --- T17: King pursuit, turn and gate reasons (#884 round 2) ---
+    // Review of 1a7ee890e: the port King Walk went Walk -> WarCry on every
+    // sighting and never turned or moved toward a target, so with the source
+    // gate a target outside the fixed +-30 deg cone could never be attacked.
+    // Source StateWalk walkFunc/checkTurn and StateTurn (kingChappy.cpp:
+    // 1585-1612, 2505-2521; kingChappyState.cpp:69-107, 1800-1823).
+    {
+        using namespace p2chappymouth::king;
+        // Turn law: remaining angle *= (1 - fp08) per source frame; a
+        // multi-frame step equals the per-frame iteration.
+        {
+            const Vec3 goal{100.0f, 0.0f, 0.0f}; // 90 deg right
+            float h1 = 0.0f;
+            for (int f = 0; f < 10; ++f) h1 = turnStep(h1, origin, goal, 1.0f);
+            const float h10 = turnStep(0.0f, origin, goal, 10.0f);
+            require(std::fabs(h1 - h10) < 1e-4f, "T17 fractional turn step equals per-frame source law");
+            const float expect = 0.5f * PI_F * (1.0f - std::pow(1.0f - TurnFactor, 10.0f));
+            require(std::fabs(h10 - expect) < 1e-4f, "T17 turn factor fp08");
+            float ang = 0.0f;
+            require(turnStep(0.3f, origin, goal, 0.0f, &ang) == 0.3f && std::fabs(ang - (0.5f * PI_F - 0.3f)) < 1e-4f,
+                    "T17 zero frames keeps heading, reports pre-turn angle");
+            require(std::fabs(turnStep(0.0f, origin, goal, 1.0f)) <= MaxTurnDeg * DegToRad + 1e-6f, "T17 fp28 cap");
+        }
+        // checkTurn: proper fp01 60 deg.
+        {
+            const float a61 = 61.0f * DegToRad, a59 = 59.0f * DegToRad;
+            require(needsTurn(origin, 0.0f, Vec3{std::sin(a61) * 100.0f, 0.0f, std::cos(a61) * 100.0f}),
+                    "T17 checkTurn above fp01");
+            require(!needsTurn(origin, 0.0f, Vec3{std::sin(a59) * 100.0f, 0.0f, std::cos(a59) * 100.0f}),
+                    "T17 no turn below fp01");
+        }
+        // Gate reasons (logged on P2_CHAPPY_KING_GATE).
+        {
+            const Vec3 t18{0.0f, 0.0f, 18.0f}, t100{0.0f, 0.0f, 100.0f}, t140{0.0f, 0.0f, 140.0f};
+            const Vec3 side{100.0f * std::sin(35.0f * DegToRad), 0.0f, 100.0f * std::cos(35.0f * DegToRad)};
+            require(gateReason(origin, 0.0f, nullptr) == GateNoTarget, "T17 gate no_target");
+            require(gateReason(origin, 0.0f, &t18) == GateInvisible, "T17 gate invisible (i1-53 captain at 18)");
+            require(gateReason(origin, 0.0f, &t140) == GateRange, "T17 gate range");
+            require(gateReason(origin, 0.0f, &side) == GateAngle, "T17 gate angle");
+            require(gateReason(origin, 0.0f, &t100) == GateOk && attackGate(origin, 0.0f, t100), "T17 gate ok");
+            require(std::string(gateName(GateInvisible)) == "invisible" && std::string(gateName(GateOk)) == "ok",
+                    "T17 gate names");
+        }
+        // Defect oracle: a Pikmin 200 away at 90 deg. The pre-round-2 port
+        // King never changed heading (WarCry loop), so the gate never opened.
+        // (At 120 / 90 deg the source turn law, 2% of the angle per frame,
+        // lets the target slip inside fp06 before the angle drops under
+        // fp21: the source Emperor overruns close side targets.)
+        const Vec3 prey90{200.0f, 0.0f, 0.0f};
+        Candidate lone[1] = {{prey90, true}};
+        {
+            float legacyHeading = 0.0f;
+            bool opened = false;
+            for (int f = 0; f < 900; ++f) {
+                const int pick = selectTarget(origin, legacyHeading, nullptr, lone, 1);
+                if (pick == 0 && attackGate(origin, legacyHeading, prey90)) opened = true;
+            }
+            require(!opened, "T17 legacy frozen King never attacks a target outside its cone");
+        }
+        // Source pursuit: Walk -> Turn -> Walk opens the gate with the target
+        // still outside the invisible range (tongue band).
+        {
+            Walker w;
+            initWalker(w, origin);
+            Vec3 pos = origin;
+            float heading = 0.0f;
+            int state = 0; // 0 walk, 6 turn
+            int attackFrame = -1;
+            float attackDist = 0.0f;
+            bool turned = false;
+            for (int f = 0; f < 600 && attackFrame < 0; ++f) {
+                tickDelay(w, 1.0f);
+                const bool searched = canSearch(w, pos);
+                const int pick = searched ? selectTarget(pos, heading, nullptr, lone, 1) : -1;
+                const Vec3* target = pick == 0 ? &prey90 : nullptr;
+                if (target && attackGate(pos, heading, *target)) {
+                    attackFrame = f;
+                    attackDist = std::sqrt(sqrXZ(pos, *target));
+                    break;
+                }
+                if (state == 0) {
+                    const WalkResult r = walkTick(w, pos, heading, target, 1.0f, 0.5f, 0.5f);
+                    if (r == WalkTurn) {
+                        state = 6;
+                        turned = true;
+                        continue;
+                    }
+                    pos.x += std::sin(heading) * MoveSpeed / 30.0f;
+                    pos.z += std::cos(heading) * MoveSpeed / 30.0f;
+                } else {
+                    if (turnTick(heading, pos, target ? *target : w.goal, target != nullptr, 1.0f)) state = 0;
+                }
+            }
+            require(turned, "T17 a 90 deg target sends the King through Turn (checkTurn)");
+            require(attackFrame > 0 && attackFrame < 200, "T17 source pursuit opens the attack gate");
+            require(attackDist > InvisibleRange && attackDist < AttackRange, "T17 attack starts in the tongue band");
+        }
+        // Stall check: blocked for > 120 frames -> 120-frame search delay, goal home.
+        {
+            Walker w;
+            initWalker(w, Vec3{0.0f, 0.0f, -200.0f});
+            float heading = 0.0f;
+            const Vec3 captain{0.0f, 0.0f, 18.0f};
+            // First check (call 121) only records the position; the second
+            // (call 242) sees < 30 units of travel.
+            for (int f = 0; f < 242; ++f) walkTick(w, origin, heading, &captain, 1.0f, 0.5f, 0.5f);
+            require(w.searchDelay == SearchDelayFrames && goalIsHome(w) && !canSearch(w, origin),
+                    "T17 stall check delays the search and sends the King home");
+            tickDelay(w, 121.0f);
+            require(w.searchDelay == 0.0f && canSearch(w, origin), "T17 search resumes after the delay");
+        }
+        // Incubation (ip01 500): no target -> walk home, Hide at home.
+        {
+            Walker w;
+            initWalker(w, origin);
+            w.goal = Vec3{200.0f, 0.0f, 0.0f};
+            float heading = 0.5f * PI_F;
+            const Vec3 away{150.0f, 0.0f, 0.0f};
+            WalkResult r = WalkOn;
+            for (int f = 0; f < 502; ++f) r = walkTick(w, away, heading, nullptr, 1.0f, 0.5f, 0.5f);
+            require(r != WalkHide && goalIsHome(w), "T17 incubation sends the King home");
+            require(walkTick(w, Vec3{10.0f, 0.0f, 0.0f}, heading, nullptr, 1.0f, 0.5f, 0.5f) == WalkHide,
+                    "T17 Hide on reaching home");
+            require(w.noTargetFrames == 0.0f, "T17 incubation timer reset at Hide");
+            enterWalk(w, false);
+            w.noTargetFrames = 7.0f;
+            enterWalk(w, true);
+            require(w.noTargetFrames == 0.0f, "T17 StateWalk::init resets the timer only with a target");
+        }
+        // setNextGoal.
+        {
+            Walker w;
+            initWalker(w, origin);
+            const Vec3 t{40.0f, 0.0f, 40.0f};
+            nextGoal(w, origin, &t, 0.0f, 0.0f);
+            require(w.goal.x == 40.0f && w.goal.z == 40.0f, "T17 next goal is the target");
+            nextGoal(w, origin, nullptr, 0.0f, 0.25f);
+            require(std::fabs(w.goal.x - 90.0f) < 1e-3f && std::fabs(w.goal.z) < 1e-3f, "T17 wander goal radius 0.3*fp09");
+            nextGoal(w, Vec3{400.0f, 0.0f, 0.0f}, &t, 0.0f, 0.0f);
+            require(goalIsHome(w), "T17 out of territory -> home");
+        }
+        // Census for the gate line.
+        {
+            Candidate c[4] = {
+                {Vec3{0.0f, 0.0f, 30.0f}, true},  // under the chin
+                {Vec3{0.0f, 0.0f, 100.0f}, true}, // band + front
+                {Vec3{0.0f, 0.0f, -40.0f}, true}, // behind (180 deg): outside the cone and not ahead
+                {Vec3{0.0f, 0.0f, 60.0f}, false}, // in a mouth
+            };
+            const Census cs = census(origin, 0.0f, c, 4, maxReach(king));
+            require(cs.underChin == 1 && cs.band == 1 && cs.front == 2, "T17 census under_chin / band / front");
+        }
     }
 
     std::printf("PASS p2_chappy_mouth_test checks=%d\n", gChecks);

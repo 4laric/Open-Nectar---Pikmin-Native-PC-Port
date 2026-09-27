@@ -68,7 +68,8 @@ constexpr float TERRITORY = 300.0f; // port adaptation (source mTerritoryRadius)
 constexpr float HOME_RADIUS = 50.0f; // port adaptation (source mHomeRadius)
 constexpr int FLICK_STUCK_MIN = 3; // source shake-off graduation first tier
 constexpr float LOST_REBIRTH_S = 10.0f; // Kuma proper fp12 respawn (adaptation)
-constexpr float KING_BURROW_IDLE_S = 20.0f; // King ip01 incubation (adaptation)
+constexpr float KING_TURN_MAX_S = 4.0f; // King Turn safety cap (source turns until fp07; adaptation)
+constexpr float KING_GATE_LOG_S = 1.0f; // P2_CHAPPY_KING_GATE rate limit
 constexpr float KING_HIDEWAIT_S = 200.0f / 30.0f; // King ip02 appearance (adaptation)
 constexpr float TURN_DURATION_S = 25.0f / 30.0f; // waitact1 (adaptation)
 constexpr float FLICK_DURATION_S = 80.0f / 30.0f; // flick (adaptation)
@@ -123,6 +124,12 @@ struct ChappyFsm {
     char atkTargetKind = '-'; // latched when the attack state is entered
     float atkTargetDist = -1.0f;
     float atkTargetAngDeg = 0.0f;
+    // #884 round 2: King source pursuit (pc_p2_chappy_mouth.h king::Walker)
+    // and the rate-limited gate-refusal diagnostic.
+    p2chappymouth::king::Walker walker;
+    p2chappymouth::king::Census kingCensus;
+    bool kingSearched = false; // searchTarget ran this tick (not delayed / out of territory)
+    float kingGateLogS = 0.0f;
 };
 std::map<PelletView*, ChappyFsm> fsms;
 
@@ -227,7 +234,7 @@ p2chappymouth::Vec3 mouthVec(const Vector3f& v)
 // else a nearer searchable Pikmin (Piki::isSearchable: alive, not in a mouth;
 // port adds drawn and not a buried sprout) in the +-50 band and outside the
 // fp06 invisible range.
-Creature* kingSearchTarget(BTeki* actor, const ChappyFsm& s)
+Creature* kingSearchTarget(BTeki* actor, ChappyFsm& s)
 {
     const p2chappymouth::Vec3 apos = mouthVec(actor->getPosition());
     Navi* navi = naviMgr ? naviMgr->getNavi() : nullptr;
@@ -250,6 +257,9 @@ Creature* kingSearchTarget(BTeki* actor, const ChappyFsm& s)
     }
     const int pick = p2chappymouth::king::selectTarget(apos, s.heading, navi ? &naviPos : nullptr, cands.data(),
                                                        (int)cands.size());
+    const p2chappymouth::Profile* prof = p2chappymouth::profileForSource(s.spec->source);
+    s.kingCensus = p2chappymouth::king::census(apos, s.heading, cands.data(), (int)cands.size(),
+                                               prof ? p2chappymouth::maxReach(*prof) : 0.0f);
     if (pick == -2) return navi;
     if (pick >= 0) return pikis[pick];
     return nullptr;
@@ -443,6 +453,9 @@ void transition(BTeki* actor, ChappyFsm& s, int next, unsigned gen)
     s.winNearestBehind = false;
     s.winLegacyBehind = false;
     s.winDiag = p2chappymouth::WindowDiag{};
+    if (s.family == p2chappyfsm::FAMILY_KING && next == 0) {
+        p2chappymouth::king::enterWalk(s.walker, s.tickTargetKind != '-'); // StateWalk::init
+    }
     if (isAttackState(s.family, next)) {
         s.atkTargetKind = s.tickTargetKind;
         s.atkTargetDist = s.tickTargetDist;
@@ -486,6 +499,8 @@ void initFsm(PelletView* view, BTeki* actor, const p2chappy::SpeciesParams* spec
     // the pose mesh is drawn with mSRT.s (tekibteki.cpp drawTekiShape). Pin it
     // so a recycled BTeki can never carry a stale P1 TPF_Scale into the draw.
     actor->mSRT.s.set(1.0f, 1.0f, 1.0f);
+    p2chappymouth::king::initWalker(s.walker, p2chappymouth::Vec3{s.home.x, s.home.y, s.home.z});
+    s.kingGateLogS = 0.0f;
     s.wander = s.home;
     s.wanderValid = true;
     s.rng = (token * 2654435761u) | 1u;
@@ -1113,6 +1128,17 @@ bool pc_p2_chappy_bind_dynamic(BTeki* actor, unsigned generatorId, unsigned sour
     return true;
 }
 
+namespace {
+// Source KingChappy::Obj::checkFlick (kingChappy.cpp:2429-2470): below half
+// life the shake-off becomes a WarCry with proper fp13 probability (retail
+// 0.5), else Flick. The start condition stays the port's stuck-Pikmin count.
+void kingFlickOrShout(BTeki* actor, ChappyFsm& s, unsigned generator)
+{
+    const bool shout = actor->mHealth < 0.5f * s.spec->health && rand01(s) < p2chappymouth::king::FlickShoutRate;
+    transition(actor, s, shout ? 4 : 3, generator);
+}
+} // namespace
+
 void pc_p2_chappy_update(BTeki* actor)
 {
     if (!actor || !bankLoaded) return;
@@ -1196,7 +1222,14 @@ void pc_p2_chappy_update(BTeki* actor)
     // tongue attack on a target inside the invisible range, where no kamu slot
     // of the 40..94 window reaches ground prey.
     const bool king = s.family == p2chappyfsm::FAMILY_KING;
-    Creature* target = king ? kingSearchTarget(actor, s) : nearestTarget(pos, s.spec->sight);
+    // King: doSimulation ticks the search delay every frame in every state;
+    // searchTarget early-outs on the delay / home-goal-out-of-territory
+    // (kingChappy.cpp:797-802, 1135-1145).
+    if (king) p2chappymouth::king::tickDelay(s.walker, dt * 30.0f);
+    s.kingSearched = king && p2chappymouth::king::canSearch(s.walker, mouthVec(pos));
+    if (king && !s.kingSearched) s.kingCensus = p2chappymouth::king::Census{};
+    Creature* target = king ? (s.kingSearched ? kingSearchTarget(actor, s) : nullptr)
+                            : nearestTarget(pos, s.spec->sight);
     if (target) actor->setCreaturePointer(0, target);
     else actor->clearCreaturePointer(0);
     const bool sees = target != nullptr;
@@ -1480,20 +1513,57 @@ void pc_p2_chappy_update(BTeki* actor)
             break;
         }
     } else { // KING
+        // #884 round 2: one rate-limited line while Walk/Turn refuses the
+        // attack, so a zero-attack run still shows why (no target, target
+        // under the chin, outside +-30 deg, beyond 3D 130) and where the
+        // Pikmin are relative to the tongue.
+        s.kingGateLogS += dt;
+        if ((s.state == 0 || s.state == 6) && !inRange && s.kingGateLogS >= KING_GATE_LOG_S) {
+            s.kingGateLogS = 0.0f;
+            const p2chappymouth::Vec3 apos = mouthVec(pos);
+            p2chappymouth::Vec3 tpos{0.0f, 0.0f, 0.0f};
+            if (target) tpos = mouthVec(target->getPosition());
+            const p2chappymouth::king::Gate gate =
+                p2chappymouth::king::gateReason(apos, s.heading, target ? &tpos : nullptr);
+            const float dy = target ? tpos.y - apos.y : 0.0f;
+            const float goalDist = std::sqrt(p2chappymouth::king::sqrXZ(s.walker.goal, apos));
+            const float goalAng = p2chappymouth::king::angDist(apos, s.heading, s.walker.goal) * 180.0f / PI_F;
+            std::printf("P2_CHAPPY_KING_GATE generator=%u source_id=%u state=%s reason=%s searched=%d "
+                        "search_delay=%.0f target_kind=%c dist_xz=%.1f dist_3d=%.1f ang_deg=%.1f under_chin=%d "
+                        "band=%d front=%d goal_dist=%.1f goal_ang_deg=%.1f goal_home=%d no_target_frames=%.0f "
+                        "heading_deg=%.1f draw_yaw_deg=%.1f\n",
+                        generator, s.spec->source, fsmStateName(s.family, s.state),
+                        s.kingSearched ? p2chappymouth::king::gateName(gate) : "no_search", s.kingSearched ? 1 : 0,
+                        s.walker.searchDelay, s.tickTargetKind, s.tickTargetDist,
+                        target ? std::sqrt(s.tickTargetDist * s.tickTargetDist + dy * dy) : -1.0f, s.tickTargetAngDeg,
+                        s.kingCensus.underChin, s.kingCensus.band, s.kingCensus.front, goalDist, goalAng,
+                        p2chappymouth::king::goalIsHome(s.walker) ? 1 : 0, s.walker.noTargetFrames,
+                        wrapPi(s.heading) * 180.0f / PI_F, wrapPi(actor->getDirection()) * 180.0f / PI_F);
+            std::fflush(stdout);
+        }
         switch (s.state) {
-        case 0: { // Walk
+        case 0: { // Walk: source StateWalk::exec (kingChappyState.cpp:69-107)
+            // checkAttack runs last in the source, so its transit wins over
+            // checkFlick and checkTurn; checkFlick wins over checkTurn.
             if (inRange) { transition(actor, s, 1, generator); break; }
-            if (flickWanted) { transition(actor, s, 3, generator); break; }
-            if (sees) { transition(actor, s, 4, generator); break; }
-            if (s.stateTime >= KING_BURROW_IDLE_S && !sees) {
-                transition(actor, s, 8, generator);
-                break;
-            }
-            if (target && sees) walkTo(actor, s, target->getPosition(), dt, s.spec->moveSpeed);
-            else {
-                if (!s.wanderValid || distXZ(s.wander, pos) < 20.0f) setWanderTarget(s);
-                walkTo(actor, s, s.wander, dt, s.spec->moveSpeed);
-            }
+            if (flickWanted) { kingFlickOrShout(actor, s, generator); break; }
+            // walkFunc: pursue mGoalPosition (the target while one is held)
+            // with the source turn law, stall check, checkTurn, incubation
+            // and setNextGoal (pc_p2_chappy_mouth.h king::walkTick). The
+            // pre-round-2 port went Walk -> WarCry on every sighting and never
+            // turned or moved toward a target (no source counterpart).
+            const p2chappymouth::Vec3 apos = mouthVec(pos);
+            p2chappymouth::Vec3 tpos{0.0f, 0.0f, 0.0f};
+            if (target) tpos = mouthVec(target->getPosition());
+            const float r0 = rand01(s), r1 = rand01(s);
+            const p2chappymouth::king::WalkResult res =
+                p2chappymouth::king::walkTick(s.walker, apos, s.heading, target ? &tpos : nullptr, dt * 30.0f, r0, r1);
+            actor->setDirection(s.heading);
+            if (res == p2chappymouth::king::WalkHide) { stop(actor); transition(actor, s, 8, generator); break; }
+            if (res == p2chappymouth::king::WalkTurn) { stop(actor); transition(actor, s, 6, generator); break; }
+            const Vector3f drive(std::sin(s.heading) * s.spec->moveSpeed, 0.0f, std::cos(s.heading) * s.spec->moveSpeed);
+            actor->inputDrive(drive);
+            actor->mVelocity.set(drive);
             break;
         }
         case 4: { // WarCry (source roar fp03/fp04 adaptation: log + hold)
@@ -1505,10 +1575,15 @@ void pc_p2_chappy_update(BTeki* actor)
             }
             break;
         }
-        case 6: { // Turn
+        case 6: { // Turn: source StateTurn::exec (kingChappyState.cpp:1800-1823):
+                  // turnFunc toward the target, else the goal, until under
+                  // fp07 (target) / 0.5 rad; checkDead + checkFlick only.
             stop(actor);
-            if (inRange) { transition(actor, s, 1, generator); break; }
-            if (s.stateTime >= TURN_DURATION_S) transition(actor, s, 0, generator);
+            if (flickWanted) { kingFlickOrShout(actor, s, generator); break; }
+            const p2chappymouth::Vec3 aim = target ? mouthVec(target->getPosition()) : s.walker.goal;
+            const bool done = p2chappymouth::king::turnTick(s.heading, mouthVec(pos), aim, target != nullptr, dt * 30.0f);
+            actor->setDirection(s.heading);
+            if (done || s.stateTime >= KING_TURN_MAX_S) transition(actor, s, 0, generator);
             break;
         }
         case 1: { // Attack

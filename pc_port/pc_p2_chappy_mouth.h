@@ -418,13 +418,221 @@ inline int selectTarget(const Vec3& actor, float heading, const Vec3* navi, cons
 }
 
 // Source checkAttack: isTargetAttackable (3D range fp20, angle fp21) and the
-// target must lie outside the invisible range (XZ), else no attack.
+// target must lie outside the invisible range (XZ), else no attack. The
+// reason is logged by the runtime on every refused tick (rate-limited
+// P2_CHAPPY_KING_GATE) so a zero-attack run still carries its geometry.
+enum Gate { GateOk = 0, GateNoTarget, GateRange, GateAngle, GateInvisible };
+
+inline const char* gateName(Gate g)
+{
+    switch (g) {
+    case GateOk: return "ok";
+    case GateNoTarget: return "no_target";
+    case GateRange: return "range";
+    case GateAngle: return "angle";
+    case GateInvisible: return "invisible";
+    }
+    return "?";
+}
+
+inline Gate gateReason(const Vec3& actor, float heading, const Vec3* target)
+{
+    if (!target) return GateNoTarget;
+    const float dx = target->x - actor.x, dy = target->y - actor.y, dz = target->z - actor.z;
+    if (dx * dx + dy * dy + dz * dz >= AttackRange * AttackRange) return GateRange;
+    if (std::fabs(angDist(actor, heading, *target)) > AttackAngleDeg * DegToRad) return GateAngle;
+    return sqrXZ(*target, actor) > InvisibleRange * InvisibleRange ? GateOk : GateInvisible;
+}
+
 inline bool attackGate(const Vec3& actor, float heading, const Vec3& target)
 {
-    const float dx = target.x - actor.x, dy = target.y - actor.y, dz = target.z - actor.z;
-    if (dx * dx + dy * dy + dz * dz >= AttackRange * AttackRange) return false;
-    if (std::fabs(angDist(actor, heading, target)) > AttackAngleDeg * DegToRad) return false;
-    return sqrXZ(target, actor) > InvisibleRange * InvisibleRange;
+    return gateReason(actor, heading, &target) == GateOk;
+}
+
+// ---- Pursuit (#884 round 2) -------------------------------------------------
+// Source StateWalk::exec (kingChappyState.cpp:69-107): walkFunc (searchTarget +
+// EnemyFunc::walkToTarget(mGoalPosition) + the 120-frame stall check,
+// kingChappy.cpp:1585-1612), checkTurn (|angle to goal| > proper fp01 ->
+// Turn, kingChappy.cpp:2505-2521), the incubation timer (ip01 -> walk home,
+// Hide at home) and setNextGoal on reaching the goal (kingChappy.cpp:1103-1124).
+// StateTurn::exec (kingChappyState.cpp:1800-1823) turns by turnFunc until the
+// angle is under proper fp07 (with a target) or 0.5 rad. Retail values from
+// KingChappy/enemyparm.txt. Times are source frames (1/30 s); the runtime
+// passes dt*30, and a fractional step keeps the per-frame turn law exact at
+// integer frames: remaining angle *= (1 - fp08) per frame, capped by fp28.
+constexpr float TurnFactor = 0.02f;         // general fp08 rotation speed rate
+constexpr float MaxTurnDeg = 30.0f;         // general fp28 max rotation per frame
+constexpr float RequiredTurnDeg = 60.0f;    // proper fp01 (decomp default 20)
+constexpr float TurnEndDeg = 40.0f;         // proper fp07 with a target (decomp default 10)
+constexpr float TurnEndNoTargetRad = 0.5f;  // StateTurn::exec default threshold
+constexpr float MoveSpeed = 45.0f;          // general fp06
+constexpr float Territory = 300.0f;         // general fp09
+constexpr float HomeRadius = 30.0f;         // general fp10
+constexpr float ReachGoal = 20.0f;          // StateWalk isReachToGoal(20)
+constexpr float StallFrames = 120.0f;       // walkFunc mWalkingTimer
+constexpr float StallDistSq = 900.0f;       // walkFunc: moved < 30 in 120 frames
+constexpr float SearchDelayFrames = 120.0f; // walkFunc / wallCallback mSearchDelayTimer
+constexpr float IncubationFrames = 500.0f;  // proper ip01 (retail 500)
+constexpr float FlickShoutRate = 0.5f;      // proper fp13: checkFlick WarCry chance below half life
+
+inline float wrapAngle(float a)
+{
+    while (a > 3.14159265f) a -= 2.0f * 3.14159265f;
+    while (a < -3.14159265f) a += 2.0f * 3.14159265f;
+    return a;
+}
+
+// EnemyBase::turnToTarget over `frames` source frames. Returns the new heading;
+// `angOut` receives the angle to `goal` BEFORE the turn (source turnFunc value).
+inline float turnStep(float heading, const Vec3& actor, const Vec3& goal, float frames, float* angOut = nullptr)
+{
+    const float ang = angDist(actor, heading, goal);
+    if (angOut) *angOut = ang;
+    if (!(frames > 0.0f)) return heading;
+    float step = ang * (1.0f - std::pow(1.0f - TurnFactor, frames));
+    const float cap = MaxTurnDeg * DegToRad * frames;
+    if (step > cap) step = cap;
+    if (step < -cap) step = -cap;
+    return wrapAngle(heading + step);
+}
+
+inline bool needsTurn(const Vec3& actor, float heading, const Vec3& goal)
+{
+    return std::fabs(angDist(actor, heading, goal)) > RequiredTurnDeg * DegToRad;
+}
+
+struct Walker {
+    Vec3 home{0, 0, 0};
+    Vec3 goal{0, 0, 0};           // mGoalPosition
+    float searchDelay = 0.0f;     // mSearchDelayTimer (frames)
+    float walkFrames = 0.0f;      // mWalkingTimer
+    Vec3 stallPos{0, 0, 0};       // mPrevWalkingCheckPosition
+    float noTargetFrames = 0.0f;  // StateWalk::mNoTargetTimer
+};
+
+inline void initWalker(Walker& w, const Vec3& home)
+{
+    w = Walker{};
+    w.home = home;
+    w.goal = home;
+    w.stallPos = home;
+}
+
+inline bool goalIsHome(const Walker& w) { return w.goal.x == w.home.x && w.goal.z == w.home.z; }
+
+inline bool outOfTerritory(const Walker& w, const Vec3& pos, float scale)
+{
+    const float r = scale * Territory;
+    return sqrXZ(w.home, pos) > r * r;
+}
+
+// searchTarget early-outs (kingChappy.cpp:1135-1145): delay timer, or the goal
+// is home and the King is beyond 0.8 of its territory.
+inline bool canSearch(const Walker& w, const Vec3& pos)
+{
+    if (w.searchDelay > 0.0f) return false;
+    return !(goalIsHome(w) && outOfTerritory(w, pos, 0.8f));
+}
+
+// doSimulation decrements the delay every frame in every state.
+inline void tickDelay(Walker& w, float frames)
+{
+    w.searchDelay -= frames;
+    if (w.searchDelay < 0.0f) w.searchDelay = 0.0f;
+}
+
+// StateWalk::init: the no-target timer restarts only when a target is held.
+inline void enterWalk(Walker& w, bool hasTarget)
+{
+    if (hasTarget) w.noTargetFrames = 0.0f;
+}
+
+// setNextGoal (kingChappy.cpp:1103-1124). r0/r1 are uniform [0,1] draws.
+inline void nextGoal(Walker& w, const Vec3& pos, const Vec3* target, float r0, float r1)
+{
+    if (outOfTerritory(w, pos, 1.0f)) {
+        w.goal = w.home;
+        return;
+    }
+    if (target) {
+        w.goal = *target;
+        return;
+    }
+    const float rad = Territory * (0.3f + r0);
+    const float a = 2.0f * 3.14159265f * r1;
+    w.goal = Vec3{w.home.x + rad * std::sin(a), w.home.y, w.home.z + rad * std::cos(a)};
+}
+
+enum WalkResult { WalkOn = 0, WalkTurn, WalkHide };
+
+// One StateWalk::exec tick (before checkFlick / checkAttack, which the caller
+// evaluates first because a later source transit overrides an earlier one).
+// `target` is this tick's searchTarget result. Updates `heading` (walkToTarget);
+// the caller drives forward at MoveSpeed along it.
+inline WalkResult walkTick(Walker& w, const Vec3& pos, float& heading, const Vec3* target, float frames, float r0,
+                           float r1)
+{
+    if (target) w.goal = *target; // searchTarget tail (kingChappy.cpp:1181-1183)
+    heading = turnStep(heading, pos, w.goal, frames);
+    w.walkFrames += frames;
+    if (w.walkFrames > StallFrames) {
+        if (sqrXZ(pos, w.stallPos) < StallDistSq) {
+            w.searchDelay = SearchDelayFrames;
+            w.goal = w.home;
+            target = nullptr;
+        }
+        w.stallPos = pos;
+        w.walkFrames = 0.0f;
+    }
+    const WalkResult turn = needsTurn(pos, heading, w.goal) ? WalkTurn : WalkOn;
+    if (!target) w.noTargetFrames += frames;
+    if (outOfTerritory(w, pos, 1.0f) || w.noTargetFrames > IncubationFrames) {
+        w.goal = w.home;
+        w.noTargetFrames = IncubationFrames;
+        if (sqrXZ(pos, w.home) < HomeRadius * HomeRadius) {
+            w.noTargetFrames = 0.0f;
+            return WalkHide;
+        }
+    } else if (sqrXZ(pos, w.goal) < ReachGoal * ReachGoal) {
+        nextGoal(w, pos, target, r0, r1);
+    }
+    return turn;
+}
+
+// One StateTurn::exec tick toward the target (if any) else the goal. Returns
+// true when the turn is done (angle before this tick under the threshold).
+inline bool turnTick(float& heading, const Vec3& pos, const Vec3& aim, bool hasTarget, float frames)
+{
+    float ang = 0.0f;
+    heading = turnStep(heading, pos, aim, frames, &ang);
+    const float thr = hasTarget ? TurnEndDeg * DegToRad : TurnEndNoTargetRad;
+    return std::fabs(ang) < thr;
+}
+
+// Gate-refusal diagnostics: searchable Pikmin in the search cone inside the
+// invisible range (under_chin), inside the attack gate region (band), and
+// ahead within the tongue's ground reach (front).
+struct Census {
+    int underChin = 0;
+    int band = 0;
+    int front = 0;
+};
+
+inline Census census(const Vec3& actor, float heading, const Candidate* piki, int count, float reach)
+{
+    Census c;
+    const float cone = SearchAngleDeg * DegToRad;
+    for (int n = 0; n < count; ++n) {
+        if (!piki[n].searchable) continue;
+        const Vec3& q = piki[n].pos;
+        const float ang = std::fabs(angDist(actor, heading, q));
+        const float d = sqrXZ(q, actor);
+        if (ang <= cone && d <= InvisibleRange * InvisibleRange) ++c.underChin;
+        if (attackGate(actor, heading, q)) ++c.band;
+        const float lz = (q.x - actor.x) * std::sin(heading) + (q.z - actor.z) * std::cos(heading);
+        if (lz > 0.0f && d <= reach * reach) ++c.front;
+    }
+    return c;
 }
 } // namespace king
 
