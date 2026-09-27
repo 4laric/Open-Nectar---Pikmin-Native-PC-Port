@@ -826,17 +826,14 @@ static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& sti
     // Mod "Free Camera": the right stick orbits instead of pushing the squad,
     // the way Pikmin 3 rearranged it. The squad moves to the Swarm button,
     // which defaults to D-pad Down here because the mod frees it up.
-    // M2c lockout: in det mode the C-stick is sim input (recorded in
-    // PADStatus), so it is always fed to the pad; the drag still accumulates
-    // for the local presentation camera, whose effect on the sim goes only
-    // through the recorded input yaw.
+    // Netplay note: the steal happens at sample time, so its result (the
+    // zeroed C-stick) is already inside the recorded PADStatus, and the yaw
+    // the sim uses comes from the recorded input yaw. No det-mode exception.
     if (pc_settings_get_free_camera()) {
         if (abs(rx) > axisDeadZone) {
             // Cada mando gira la cámara de su jugador (en cooperativo, J2 la suya).
             pc_window_add_camera_drag_player(player, -(float)rx / 32767.0f * 0.02f);
-            if (pc_netplay_deterministic()) substickX = pc_pad_axis_from_sdl(rx);
         }
-        if (pc_netplay_deterministic() && abs(ry) > axisDeadZone) substickY = pc_pad_axis_from_sdl(-ry);
         if (SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_DOWN)) swarmHeld = true;
     } else {
         if (abs(rx) > axisDeadZone) substickX = pc_pad_axis_from_sdl(rx);
@@ -1055,11 +1052,10 @@ void pc_window_poll_events(PADStatus* pad) {
     // aiming, so that key stops sending B for as long as it is down. The
     // whistle is unaffected in practice -- right click is wired to B on its
     // own, below -- and with the mod off nothing changes.
-    // M2c lockout: in det mode B is sim input (recorded), so it is never
-    // suppressed; the mouse still orbits the local presentation camera
-    // through freeCamHeld below.
+    // Netplay note: the suppression happens at sample time, so the recorded
+    // PADStatus already carries it. No det-mode exception.
     const bool freeCamHeld = pc_settings_get_free_camera() && held(PC_KEY_ACT_B);
-    const bool freeCamSuppressB = freeCamHeld && !pc_netplay_deterministic();
+    const bool freeCamSuppressB = freeCamHeld;
 
     if (held(PC_KEY_ACT_A))        button |= PAD_BUTTON_A;
     if (held(PC_KEY_ACT_B) && !freeCamSuppressB) button |= PAD_BUTTON_B;
