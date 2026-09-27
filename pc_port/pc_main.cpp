@@ -47,6 +47,7 @@ __declspec(dllexport) int           AmdPowerXpressRequestHighPerformance = 1;
 
 #include "pc_window.h"
 #include "pc_bbft.h"
+#include "netplay/pc_netplay_det.h"
 #include "pc_gpu_preference.h"
 #include "gl/pc_gfx.h"
 #include "gl/pc_texpack.h"
@@ -90,6 +91,10 @@ int main(int argc, char* argv[])
 {
     // Disable stdout buffering so we see logs immediately before any crash
     setvbuf(stdout, NULL, _IONBF, 0);
+
+    // Deterministic netplay mode (M1): parses --netplay-deterministic and the
+    // PIKMIN_NETPLAY_* env vars. Must run before the game starts.
+    pc_netplay_det_init(argc, argv);
 
 #ifdef __ANDROID__
     // Logcat, carpeta del juego y ruta de guardado: antes de que nada abra un
