@@ -1,6 +1,7 @@
 #include "pc_coop_switch.h"
 #include "pc_coop.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -35,10 +36,33 @@ bool parseOne(const char* begin, const char* end, int* out)
 	return false;
 }
 
+bool asciiEqualFold(const char* a, const char* b)
+{
+	while (*a && *b) {
+		char ca = *a, cb = *b;
+		if (ca >= 'A' && ca <= 'Z') ca = char(ca - 'A' + 'a');
+		if (cb >= 'A' && cb <= 'Z') cb = char(cb - 'A' + 'a');
+		if (ca != cb) return false;
+		++a;
+		++b;
+	}
+	return *a == *b;
+}
+
+// Explicit-off words honour PIKMIN_COOP=0 (and friends): a launcher that
+// always exports a captain preference must not force co-op on.
+bool envIsOffWord(const char* v) { return asciiEqualFold(v, "0") || asciiEqualFold(v, "false") || asciiEqualFold(v, "off") || asciiEqualFold(v, "no") || asciiEqualFold(v, "n"); }
+
 bool envOn(const char* name)
 {
 	const char* v = std::getenv(name);
-	return v && *v && *v != '0';
+	if (!v || !*v) return false;
+	return !envIsOffWord(v);
+}
+
+void warnBadCaptains(const char* v)
+{
+	std::printf("[NETPLAY] coop_switch: invalid captains '%s', using olimar,louie\n", v ? v : "");
 }
 
 } // namespace
@@ -60,12 +84,20 @@ PcCoopSwitch pc_coop_switch_parse(int argc, char** argv)
 {
 	PcCoopSwitch sw;
 	const char* cliCaptains = nullptr;
+	// Only --coop / PIKMIN_COOP arm co-op. Captain values only select
+	// captains; PIKMIN_COOP_CAPTAINS alone never arms.
 	if (envOn("PIKMIN_COOP")) sw.coop = true;
 	if (const char* envCaptains = std::getenv("PIKMIN_COOP_CAPTAINS")) {
 		if (*envCaptains) {
-			// Set (even if invalid): co-op on, default captains on bad input.
-			sw.coop = true;
-			pc_coop_switch_parse_captains(envCaptains, &sw.captainP1, &sw.captainP2);
+			int p1 = sw.captainP1, p2 = sw.captainP2;
+			if (pc_coop_switch_parse_captains(envCaptains, &p1, &p2)) {
+				sw.captainP1 = p1;
+				sw.captainP2 = p2;
+			} else if (sw.coop) {
+				// Warn only when the switch is otherwise present, so
+				// default single-player logs stay unchanged.
+				warnBadCaptains(envCaptains);
+			}
 		}
 	}
 	for (int i = 1; i < argc; ++i) {
@@ -79,7 +111,13 @@ PcCoopSwitch pc_coop_switch_parse(int argc, char** argv)
 	if (cliCaptains) {
 		// Explicit CLI captains imply co-op and win over the env pair.
 		sw.coop = true;
-		pc_coop_switch_parse_captains(cliCaptains, &sw.captainP1, &sw.captainP2);
+		int p1 = sw.captainP1, p2 = sw.captainP2;
+		if (pc_coop_switch_parse_captains(cliCaptains, &p1, &p2)) {
+			sw.captainP1 = p1;
+			sw.captainP2 = p2;
+		} else {
+			warnBadCaptains(cliCaptains);
+		}
 	}
 	return sw;
 }

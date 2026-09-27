@@ -8,7 +8,7 @@
 // before. Nothing here touches the randomizer manifest or handshake.
 
 struct PcCoopSwitch {
-	bool coop = false; // --coop / PIKMIN_COOP=1 (or captains given)
+	bool coop = false; // --coop / PIKMIN_COOP (explicit off words honoured)
 	int captainP1 = 0; // PcCaptain index; default Olimar (0) ...
 	int captainP2 = 1; // ... and Louie (1)
 };
@@ -19,10 +19,12 @@ struct PcCoopSwitch {
 // leaves the outputs alone otherwise. No globals, no env, no game state.
 bool pc_coop_switch_parse_captains(const char* text, int* outP1, int* outP2);
 
-// CLI + environment parse. Reads --coop and --coop-captains=<p1>,<p2> from
-// argv, and PIKMIN_COOP / PIKMIN_COOP_CAPTAINS from the environment (either
-// source arms co-op; an explicit CLI captains value wins over the env one).
-// An invalid captains string falls back to the default pair.
+// CLI + environment parse. Only --coop and PIKMIN_COOP arm co-op (an
+// explicit PIKMIN_COOP=0/false/off keeps it off); --coop-captains=<p1>,<p2>
+// and PIKMIN_COOP_CAPTAINS only select captains, except that an explicit CLI
+// --coop-captains value implies co-op and wins over the env pair. An invalid
+// captains string keeps the default pair and prints one [NETPLAY] warning,
+// but only when the switch is otherwise present.
 PcCoopSwitch pc_coop_switch_parse(int argc, char** argv);
 
 // Arms pending co-op and both captains for the coming run. Call once at

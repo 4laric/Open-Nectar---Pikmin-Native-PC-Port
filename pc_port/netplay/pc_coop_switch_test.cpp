@@ -120,21 +120,55 @@ int main()
 	}
 	clearCoopEnv();
 
-	// Env captains pair.
+	// Env captains pair alone selects captains but does not arm co-op.
 	setCoopEnv("PIKMIN_COOP_CAPTAINS", "louie,pikmin-yellow");
 	{
 		char* argv[] = { (char*)"nectar" };
 		PcCoopSwitch sw = pc_coop_switch_parse(1, argv);
-		check(sw.coop && sw.captainP1 == 1 && sw.captainP2 == 3, "PIKMIN_COOP_CAPTAINS arms co-op with pair");
+		check(!sw.coop && sw.captainP1 == 1 && sw.captainP2 == 3, "PIKMIN_COOP_CAPTAINS alone selects pair without arming");
 	}
 	clearCoopEnv();
 
-	// Env captains invalid: co-op on, default captains.
+	// Env captains invalid alone: single-player, defaults kept, silent.
 	setCoopEnv("PIKMIN_COOP_CAPTAINS", "bob");
 	{
 		char* argv[] = { (char*)"nectar" };
 		PcCoopSwitch sw = pc_coop_switch_parse(1, argv);
-		check(sw.coop && sw.captainP1 == 0 && sw.captainP2 == 1, "bad env captains keep defaults");
+		check(!sw.coop && sw.captainP1 == 0 && sw.captainP2 == 1, "bad env captains alone keep defaults without arming");
+	}
+	clearCoopEnv();
+
+	// Env PIKMIN_COOP=1 plus a captains pair: armed with the pair.
+	setCoopEnv("PIKMIN_COOP", "1");
+	setCoopEnv("PIKMIN_COOP_CAPTAINS", "louie,pikmin-yellow");
+	{
+		char* argv[] = { (char*)"nectar" };
+		PcCoopSwitch sw = pc_coop_switch_parse(1, argv);
+		check(sw.coop && sw.captainP1 == 1 && sw.captainP2 == 3, "PIKMIN_COOP=1 with env pair arms with pair");
+	}
+	clearCoopEnv();
+
+	// Explicit off wins over a captain preference.
+	setCoopEnv("PIKMIN_COOP", "0");
+	setCoopEnv("PIKMIN_COOP_CAPTAINS", "louie,louie");
+	{
+		char* argv[] = { (char*)"nectar" };
+		PcCoopSwitch sw = pc_coop_switch_parse(1, argv);
+		check(!sw.coop, "PIKMIN_COOP=0 honours explicit off despite captains");
+	}
+	clearCoopEnv();
+	setCoopEnv("PIKMIN_COOP", "false");
+	{
+		char* argv[] = { (char*)"nectar" };
+		PcCoopSwitch sw = pc_coop_switch_parse(1, argv);
+		check(!sw.coop, "PIKMIN_COOP=false is off");
+	}
+	clearCoopEnv();
+	setCoopEnv("PIKMIN_COOP", "off");
+	{
+		char* argv[] = { (char*)"nectar" };
+		PcCoopSwitch sw = pc_coop_switch_parse(1, argv);
+		check(!sw.coop, "PIKMIN_COOP=off is off");
 	}
 	clearCoopEnv();
 
