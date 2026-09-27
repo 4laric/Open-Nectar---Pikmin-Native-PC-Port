@@ -1252,6 +1252,12 @@ target_include_directories(p2_tank_policy_test PRIVATE pc_port)
 target_compile_options(p2_tank_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_tank_policy_test COMMAND p2_tank_policy_test)
 
+# Tank/Wtank breath exposure: no receiver cap, source box, KEYEVENT_2, growth (#884).
+add_executable(p2_tank_breath_test tools/p2_tank_breath_test.cpp)
+target_include_directories(p2_tank_breath_test PRIVATE pc_port)
+target_compile_options(p2_tank_breath_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_tank_breath_test COMMAND p2_tank_breath_test)
+
 # Kabuto identity policy (inst2-frogs #871).
 add_executable(p2_kabuto_fsm_policy_test tools/p2_kabuto_fsm_policy_test.cpp)
 target_include_directories(p2_kabuto_fsm_policy_test PRIVATE pc_port)
