@@ -4,6 +4,11 @@
 // legacy rules (half-clip fire tick, immediate 180 / 0.5 rad cone strike) are
 // re-implemented here as negative controls and asserted to violate the
 // properties the fleet satisfies.
+// Cases 1 and 14-19 drive the campaign seam the shipped FSM calls verbatim
+// (p2kabutostone::advanceStateTime / attackStep / stoneTicksFor, see
+// pc_p2_kabuto_fsm.cpp KB_ATTACK and pc_p2_kabuto_fsm_update_stones) on host
+// frame clocks. p2_kabuto_stone_wiring_test pins that the shipped FSM and
+// gameCoreSection actually call this seam.
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -126,7 +131,7 @@ void run(Fleet& fleet, FlatMap& map, std::vector<Target>& targets, int ticks, Lo
 int fireForward(Fleet& fleet, std::uint32_t& id, float heading = 0.0f,
                 P2CannonStoneVec3 kabuto = { 0.0f, 0.0f, 0.0f })
 {
-    return fleet.fire(kShooter, birthPosition(kabuto, heading, kMouthForwardHostApprox), heading, id);
+    return fleet.fire(kShooter, mouthBirthPosition(kabuto, heading), heading, id);
 }
 
 // ---- Legacy (pre-#884) rules, kept only as negative controls ----
@@ -156,24 +161,27 @@ bool legacyConeStrikes(const Target& t, float heading = 0.0f)
     return std::fabs(a) < 0.5f;
 }
 
-// FSM-style accumulation (pc_p2_kabuto_fsm.cpp KB_ATTACK): prev captured
-// before stateTime += dt. Returns the fire tick (or -1) and the count.
+// The shipped KB_ATTACK path (pc_p2_kabuto_fsm.cpp): prev from
+// advanceStateTime, then attackStep into a real fleet. Returns the fire tick
+// (or -1) and the count.
 int fireTickFor(const std::vector<float>& dts, float health, int& fires, float& fireTime)
 {
+    Fleet fleet;
     float stateTime = 0.0f;
     bool fireDone = false;
     int tick = -1;
     fires = 0;
     for (size_t i = 0; i < dts.size(); ++i) {
-        const float prev = stateTime;
-        stateTime += dts[i];
-        if (attackMayFire(health, fireDone, prev, stateTime)) {
-            fireDone = true;
+        const float prev = advanceStateTime(stateTime, dts[i]);
+        const AttackStep step =
+            attackStep(fleet, kShooter, health, fireDone, prev, stateTime, { 0.0f, 0.0f, 0.0f }, 0.0f);
+        if (step.action == AttackAction::Fired) {
             ++fires;
             tick = int(i) + 1;
             fireTime = stateTime;
         }
     }
+    assert(fleet.active() == fires);
     return tick;
 }
 
@@ -188,7 +196,8 @@ void case1_key2Timing()
         const int tick = fireTickFor(dts, 850.0f, fires, at);
         std::printf("case1 30Hz fire tick=%d t=%.4f legacy_tick=%d\n", tick, at, legacy);
         assert(fires == 1);
-        assert(tick == 50); // frame 50 at 30 Hz (51 would only be float drift)
+        // Key frame 50 is seen after 51 animator frames (sysShape.cpp:142).
+        assert(tick == 51);
         assert(tick != 48);
         assert(tick != legacy); // the old rule is discriminated
         assert(at >= key2Seconds() - kKey2Epsilon && at < key2Seconds() + 1.0f / 30.0f);
@@ -197,7 +206,7 @@ void case1_key2Timing()
         std::vector<float> dts(400, 1.0f / 60.0f);
         const int tick = fireTickFor(dts, 850.0f, fires, at);
         assert(fires == 1);
-        assert(tick == 100);
+        assert(tick == 102);
     }
     {
         std::vector<float> dts;
@@ -219,16 +228,26 @@ void case1_key2Timing()
         assert(fires == 0 && tick == -1); // KabutoState.cpp:350-353 death gate first
     }
     assert(clipHasKey2(95));
+    assert(clipHasKey2(51));
     assert(!clipHasKey2(50));
-    assert(std::fabs(key2Seconds() - 50.0f / 30.0f) < 1e-6f);
+    assert(std::fabs(key2Seconds() - 51.0f / 30.0f) < 1e-6f);
 }
 
 void case2_birthAndConfig()
 {
-    const P2CannonStoneVec3 b = birthPosition({ 10.0f, 7.0f, -3.0f }, kPi / 2.0f, 55.0f);
-    assert(std::fabs(b.y - 32.0f) < 1e-4f); // body Y + 25, not mouth Y
-    assert(std::fabs(b.x - 65.0f) < 1e-3f);
-    assert(std::fabs(b.z - -3.0f) < 1e-3f);
+    // Retail mouth joint at the KEYEVENT_2 pose (frame 51), model space.
+    assert(kMouthPoseFrame == 51);
+    assert(std::fabs(kMouthLocalZ - 62.898f) < 1e-3f && std::fabs(kMouthLocalX - -0.025f) < 1e-4f);
+    // Heading 0: model +z is world +z.
+    const P2CannonStoneVec3 a = mouthBirthPosition({ 0.0f, 0.0f, 0.0f }, 0.0f);
+    assert(std::fabs(a.x - -0.025f) < 1e-4f && std::fabs(a.z - 62.898f) < 1e-3f && a.y == 25.0f);
+    // Heading pi/2: model +z -> world +x, model +x -> world -z.
+    const P2CannonStoneVec3 b = mouthBirthPosition({ 10.0f, 7.0f, -3.0f }, kPi / 2.0f);
+    assert(std::fabs(b.y - 32.0f) < 1e-4f); // body Y + 25, not mouth Y (38.7)
+    assert(std::fabs(b.x - (10.0f + 62.898f)) < 1e-3f);
+    assert(std::fabs(b.z - (-3.0f + 0.025f)) < 1e-3f);
+    // The previous host approximation (root sphere r55 forward) is gone.
+    assert(std::fabs(a.z - 55.0f) > 5.0f);
     const P2CannonStoneConfig c = stoneConfig();
     assert(c.variant == P2CannonStoneVariant::Stone);
     assert(c.moveSpeed == 250.0f && c.attackDamage == 10.0f && c.health == 99999.0f);
@@ -257,8 +276,8 @@ void case3_travelTime()
     assert(first);
     assert(first->tick > 3);
     // Grounded Stone: contact centre y 40 vs Pikmin centre y 10, reach
-    // sqrt(50^2 - 30^2) = 40 horizontally -> travel 200 - 55 - 40 = 105.
-    const float expected = (200.0f - 55.0f - 40.0f) / 250.0f;
+    // sqrt(50^2 - 30^2) = 40 horizontally -> travel 200 - 62.9 - 40 = 97.1.
+    const float expected = (200.0f - kMouthLocalZ - 40.0f) / 250.0f;
     std::printf("case3 first press tick=%d flight=%.3f expected~%.3f travel=%.1f\n", first->tick,
                 first->s.flight, expected, first->s.travel);
     assert(first->s.flight > 0.3f);
@@ -332,6 +351,7 @@ void case5_noHoming()
     const int slot = fireForward(fleet, id);
     assert(slot == 0 && !fleet.stone(slot).homing());
     const float face0 = fleet.stone(slot).faceDir();
+    const float x0 = fleet.stone(slot).position().x; // mouth lateral offset (-0.025)
     std::vector<Target> targets{ piki(1, 100.0f, 200.0f) };
     auto circle = [](int tick, std::vector<Target>& t) {
         const float a = tick * 0.15f;
@@ -343,7 +363,7 @@ void case5_noHoming()
         Log log;
         run(fleet, map, targets, 1, log, circle, tick);
         const P2CannonStone& s = fleet.stone(slot);
-        assert(std::fabs(s.position().x) < 1e-3f);
+        assert(std::fabs(s.position().x - x0) < 1e-3f);
         assert(s.faceDir() == face0);
         // Source move speed 250 along the facing (homing would use 100).
         assert(std::fabs((s.position().z - lastZ) - 250.0f * kDt) < 1e-2f);
@@ -353,7 +373,7 @@ void case5_noHoming()
     // Control: a homing Stone (Rkabuto rule) against the same target deviates.
     P2CannonStone homing;
     homing.reset(stoneConfig());
-    assert(homing.birth({ 0.0f, 25.0f, 55.0f }, 0.0f, true, kShooter, 99));
+    assert(homing.birth({ 0.0f, 25.0f, kMouthLocalZ }, 0.0f, true, kShooter, 99));
     float maxX = 0.0f;
     for (int tick = 1; tick <= 90; ++tick) {
         std::vector<Target> t{ piki(1, 0.0f, 0.0f) };
@@ -456,7 +476,7 @@ void case10_sourceGrace()
     FlatMap map;
     std::uint32_t id = 0;
     const int slot = fireForward(fleet, id);
-    // The shooter's own body overlaps the birth point (55 ahead, radius 80).
+    // The shooter's own body overlaps the birth point (62.9 ahead, radius 80).
     std::vector<Target> targets{ teki(kShooter, 0.0f, 0.0f, 80.0f) };
     Log log;
     run(fleet, map, targets, 29, log); // < 1 s of flight
@@ -534,6 +554,200 @@ void case13_resetReentry()
     assert(c > a && c > b);
 }
 
+// ---- Campaign seam on host frame clocks ----
+
+// One simulated campaign frame: the KB_ATTACK part of pc_p2_kabuto_fsm_update
+// for one shooter, then pc_p2_kabuto_fsm_update_stones (stoneTicksFor debt +
+// fleet ticks). Mirrors the shipped call order: actors update before the
+// global stone update in the same frame.
+struct Campaign {
+    Fleet fleet;
+    FlatMap map;
+    std::vector<Target> targets;
+    double debt = 0.0;
+    float stateTime = 0.0f;
+    bool fireDone = false;
+    float health = 850.0f;
+    bool inAttack = true;
+    bool shooterAlive = true;
+    float clock = 0.0f;
+    int sourceTicks = 0;
+    struct Birth { float t; float stateTime; AttackStep step; };
+    std::vector<Birth> births;
+    int dies = 0;
+    Log log;
+
+    void frame(float dt)
+    {
+        clock += dt;
+        if (shooterAlive && inAttack) {
+            const float prev = advanceStateTime(stateTime, dt);
+            const AttackStep step =
+                attackStep(fleet, kShooter, health, fireDone, prev, stateTime, { 0.0f, 0.0f, 0.0f }, 0.0f);
+            if (step.action == AttackAction::Die) {
+                ++dies;
+                inAttack = false;
+            } else if (step.action == AttackAction::Fired) {
+                births.push_back({ clock, stateTime, step });
+            }
+        }
+        const int ticks = stoneTicksFor(debt, dt);
+        for (int i = 0; i < ticks && fleet.active() > 0; ++i) {
+            ++sourceTicks;
+            run(fleet, map, targets, 1, log, nullptr, sourceTicks);
+        }
+    }
+    // FSM transition into a fresh attack (transition() resets both).
+    void enterAttack()
+    {
+        stateTime = 0.0f;
+        fireDone = false;
+        inAttack = true;
+    }
+};
+
+void case14_hostClockEmissionAndFlight()
+{
+    // 60 Hz host frames with a little jitter; Pikmin 200 ahead.
+    Campaign c;
+    c.targets = { piki(1, 0.0f, 200.0f) };
+    std::uint32_t s = 7u;
+    float firstStrikeClock = -1.0f;
+    for (int f = 0; f < 240; ++f) {
+        s = s * 1664525u + 1013904223u;
+        const float dt = 1.0f / 60.0f + (float((s >> 8) & 0xffu) / 255.0f - 0.5f) * 0.004f;
+        const size_t before = c.log.strikes.size();
+        c.frame(dt);
+        if (c.log.strikes.size() > before && firstStrikeClock < 0.0f) {
+            firstStrikeClock = c.clock;
+        }
+    }
+    assert(c.births.size() == 1);
+    const Campaign::Birth& b = c.births[0];
+    std::printf("case14 birth t=%.4f key2=%.4f strike_clock=%.3f flight=%.3f\n", b.stateTime,
+                key2Seconds(), firstStrikeClock, c.log.strikes.empty() ? -1.0f : c.log.strikes[0].s.flight);
+    assert(b.stateTime >= key2Seconds() - kKey2Epsilon && b.stateTime < key2Seconds() + 1.0f / 50.0f);
+    assert(std::fabs(b.step.birth.z - kMouthLocalZ) < 1e-3f && b.step.birth.y == 25.0f);
+    assert(!c.fleet.stone(b.step.slot).homing());
+    // Travel before impact: strike strictly after the birth frame, flight > 0.
+    assert(c.log.strikesOn(1) == 1);
+    assert(firstStrikeClock > b.t + 0.3f);
+    assert(c.log.strikes[0].s.flight > 0.3f && c.log.strikes[0].s.kind == P2CannonStoneStrikeKind::Press);
+    // Negative control: the old campaign rule struck this Pikmin at half the
+    // clip (t = 1.583 s) with zero flight; the seam never strikes at birth.
+    assert(legacyConeStrikes(piki(1, 0.0f, 150.0f)));
+}
+
+void case15_killBeforeEvent()
+{
+    // (a) Killed at t = 1.5 s, before KEYEVENT_2: Die, nothing fired, ever.
+    Campaign c;
+    for (int f = 0; f < 120; ++f) {
+        if (c.clock >= 1.5f) c.health = 0.0f;
+        c.frame(1.0f / 30.0f);
+    }
+    assert(c.dies == 1 && c.births.empty() && c.fleet.active() == 0);
+    // (b) Health reaches 0 on the very frame that crosses the event: the
+    //     death gate runs first (KabutoState.cpp:350-353), still no Stone.
+    Campaign d;
+    for (int f = 0; f < 120; ++f) {
+        const float prevT = d.stateTime;
+        if (prevT < key2Seconds() - kKey2Epsilon && prevT + 1.0f / 30.0f >= key2Seconds() - kKey2Epsilon) {
+            d.health = 0.0f;
+        }
+        d.frame(1.0f / 30.0f);
+    }
+    assert(d.dies == 1 && d.births.empty() && d.fleet.active() == 0);
+    // (c) Control: alive through the event fires exactly once.
+    Campaign e;
+    for (int f = 0; f < 120; ++f) e.frame(1.0f / 30.0f);
+    assert(e.dies == 0 && e.births.size() == 1);
+}
+
+void case16_stoneOutlivesShooter()
+{
+    Campaign c;
+    c.targets = { piki(1, 0.0f, 260.0f) };
+    int f = 0;
+    while (c.births.empty() && f++ < 200) c.frame(1.0f / 60.0f);
+    assert(c.births.size() == 1);
+    const int slot = c.births[0].step.slot;
+    // Shooter killed right after firing, then destroyed (forget) next frame.
+    c.health = 0.0f;
+    c.frame(1.0f / 60.0f);
+    assert(c.dies == 1);
+    c.shooterAlive = false;
+    assert(c.fleet.forgetOwner(kShooter) == 1);
+    assert(c.fleet.used(slot) && c.fleet.stone(slot).isAlive());
+    const float z0 = c.fleet.stone(slot).position().z;
+    for (int i = 0; i < 120; ++i) c.frame(1.0f / 60.0f);
+    // The Stone kept travelling without its shooter and pressed the Pikmin,
+    // attributed to no one (owner 0).
+    assert(c.log.strikesOn(1) == 1 && c.log.firstOn(1)->s.owner == 0);
+    assert(!c.fleet.used(slot) || c.fleet.stone(slot).position().z > z0 + 100.0f);
+    assert(c.births.size() == 1); // a dead shooter never fires again
+}
+
+void case17_teardownReentry()
+{
+    Campaign c;
+    c.targets = { piki(1, 0.0f, 400.0f) };
+    while (c.births.empty()) c.frame(1.0f / 30.0f);
+    const std::uint32_t firstId = c.births[0].step.id;
+    for (int i = 0; i < 5; ++i) c.frame(1.0f / 30.0f);
+    assert(c.fleet.active() == 1);
+    // pc_p2_kabuto_fsm_reset: fleet.reset(); stoneDebt = 0.
+    c.fleet.reset();
+    c.debt = 0.0;
+    const size_t strikes = c.log.strikes.size(), deads = c.log.deads.size();
+    for (int i = 0; i < 300; ++i) c.frame(1.0f / 30.0f);
+    assert(c.fleet.active() == 0);
+    assert(c.log.strikes.size() == strikes && c.log.deads.size() == deads);
+    // Re-entry: a fresh attack state fires again with a larger id.
+    c.enterAttack();
+    while (c.births.size() < 2) c.frame(1.0f / 30.0f);
+    assert(c.births[1].step.id > firstId);
+    assert(c.births[1].stateTime >= key2Seconds() - kKey2Epsilon);
+}
+
+void case18_stoneClock()
+{
+    double debt = 0.0;
+    int total = 0;
+    for (int i = 0; i < 30; ++i) {
+        const int t = stoneTicksFor(debt, 1.0f / 30.0f);
+        assert(t == 0 || t == 1);
+        total += t;
+    }
+    assert(total >= 29 && total <= 30);
+    debt = 0.0;
+    total = 0;
+    for (int i = 0; i < 60; ++i) total += stoneTicksFor(debt, 1.0f / 60.0f);
+    assert(total >= 29 && total <= 30);
+    debt = 0.0;
+    assert(stoneTicksFor(debt, 0.5f) == kMaxStoneTicksPerFrame && debt == 0.0);
+    assert(stoneTicksFor(debt, 0.0f) == 0 && stoneTicksFor(debt, -1.0f) == 0 && debt == 0.0);
+}
+
+void case19_oncePerAttackState()
+{
+    Campaign c;
+    for (int f = 0; f < 90; ++f) c.frame(1.0f / 30.0f); // 3 s in one attack state
+    assert(c.births.size() == 1);
+    c.enterAttack();
+    for (int f = 0; f < 90; ++f) c.frame(1.0f / 30.0f);
+    assert(c.births.size() == 2);
+    // Exhaustion is tolerated, not fatal (Kabuto.cpp:283).
+    Fleet full;
+    std::uint32_t id = 0;
+    for (int i = 0; i < Fleet::capacity(); ++i) assert(fireForward(full, id, kPi) >= 0);
+    bool done = false;
+    const AttackStep st =
+        attackStep(full, kShooter, 850.0f, done, key2Seconds() - 0.01f, key2Seconds() + 0.01f, { 0.0f, 0.0f, 0.0f }, 0.0f);
+    assert(st.action == AttackAction::PoolFull && st.slot == -1 && done);
+    assert(full.active() == Fleet::capacity());
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -544,7 +758,10 @@ int main(int argc, char** argv)
                                 case4_stepOut, case5_noHoming, case6_row,
                                 case7_tekiSingleImpact, case8_wall, case9_timeout,
                                 case10_sourceGrace, case11_exhaustion, case12_forgetOwner,
-                                case13_resetReentry };
+                                case13_resetReentry, case14_hostClockEmissionAndFlight,
+                                case15_killBeforeEvent, case16_stoneOutlivesShooter,
+                                case17_teardownReentry, case18_stoneClock,
+                                case19_oncePerAttackState };
     const int count = int(sizeof(cases) / sizeof(cases[0]));
     for (int i = 0; i < count; ++i) {
         if (only == 0 || only == i + 1) {

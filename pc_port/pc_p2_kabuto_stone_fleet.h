@@ -44,13 +44,33 @@ namespace p2kabutostone {
 
 constexpr int kAttackKey2Frame = 50;       // Kabuto attack clip KEYEVENT_2 (retail enemyanimmgr)
 constexpr float kAnimFps = 30.0f;          // enemyAnimatorBase.cpp:4,11
+// The animator raises a key event on the first advance where the integer
+// timer passes the key frame: `mCurAnimKey->getFrame() < (int)mTimer`
+// (sysGCU/sysShape.cpp:142), after `mTimer += speed` from 0 at startAnim
+// (sysShape.cpp:53,139). startMotion pins mNormalizedTime to 1
+// (enemyBase.cpp:2346-2350), so the timer advances mSpeed (30) x dt, one frame
+// per 1/30 s (enemyBase.cpp:1685). The pose is then set to `(int)mTimer`
+// (sysShape.cpp:187) and the model is calc'd in the same doAnimation
+// (enemyBase.cpp:1705-1729). So KEYEVENT_2 at frame 50 is seen by
+// StateAttack::exec once 51 animation frames have elapsed, with the joints
+// posed at frame 51.
+constexpr int kAttackKey2TriggerFrame = kAttackKey2Frame + 1;
 constexpr float kBirthYOffset = 25.0f;     // Kabuto.cpp:276 (over the Kabuto's own Y)
 constexpr float kMapRadius = 25.0f;        // Stone fp01, map sphere (enemyBase.cpp:2080-2089)
 constexpr float kContactRadiusFull = 40.0f; // Rock/Stone enemycoll root r40, scaled (Rock.cpp:346)
-// Host approximation of the "mouth" joint forward offset: the source samples
-// the joint world matrix at attack frame 50, which is not extracted locally.
-// 55 = Kabuto root collision sphere radius. Logged as mouth_source=host_approx.
-constexpr float kMouthForwardHostApprox = 55.0f;
+// Source "mouth" joint (index 3 of the babykabuto enemy.bmd) model-space
+// translation at attack.bca frame 51, the pose the joint world matrix holds
+// when createStoneAttack reads it (Kabuto.cpp:274-276). Extracted from the
+// retail bank (enemy.bmd sha256 e63561e2..., attack.bca sha256 744d34a6...)
+// by output/claude-orch/p2-884/kabuto_mouth_joint.py with the same J3D
+// evaluation the pose banks use (experimental/pikmin2_rigid.joint_matrices).
+// Neighbouring frames: 49 -> (0.002, 39.1, 40.2), 50 -> (-0.009, 38.7, 52.9),
+// 52 -> (-0.039, 33.8, 65.7): the mouth lunges forward through the event.
+// Model space: +z facing, +x left-to-right (R_y(h) maps +x to (cos h, 0,
+// -sin h)); Kabuto mScaleModifier is 1 (enemyBase.cpp:893, never overridden).
+constexpr int kMouthPoseFrame = kAttackKey2TriggerFrame;
+constexpr float kMouthLocalX = -0.025f;
+constexpr float kMouthLocalZ = 62.898f;
 // Host stand-in for the Rock dead.bca length (unverified); matches the
 // arena host's hold (pc_p2_projectiles.cpp kDeadHoldSeconds).
 constexpr float kDeadHoldSeconds = 0.5f;
@@ -73,11 +93,12 @@ inline P2CannonStoneConfig stoneConfig()
     return c;
 }
 
-// KEYEVENT_2 time in attack-state seconds (frame 50 at 30 fps = 1.6667 s).
-inline float key2Seconds() { return static_cast<float>(kAttackKey2Frame) / kAnimFps; }
+// Attack-state seconds at which StateAttack::exec sees KEYEVENT_2: 51
+// animation frames at 30 fps = 1.7 s (see kAttackKey2TriggerFrame).
+inline float key2Seconds() { return static_cast<float>(kAttackKey2TriggerFrame) / kAnimFps; }
 
-// Float tolerance for the accumulated stateTime (50 x float(1/30) sums to just
-// under 5/3); 1e-4 s is 0.003 animation frames.
+// Float tolerance for the accumulated stateTime (51 x float(1/30) can sum to
+// just under 1.7); 1e-4 s is 0.003 animation frames.
 constexpr float kKey2Epsilon = 1.0e-4f;
 
 // True exactly on the host frame whose accumulated attack stateTime first
@@ -88,7 +109,10 @@ inline bool key2Crossed(float prev, float now)
     return prev < k && now >= k;
 }
 
-// The staged attack clip must contain frame 50 or the event can never play.
+// The staged attack clip must contain frame 50 or the event can never play:
+// with total frames <= 50 the key test (sysShape.cpp:142) never sees
+// (int)mTimer > 50 before the timer is clamped to total - 1
+// (sysShape.cpp:173-175) and the clip completes.
 inline bool clipHasKey2(int durationFrames) { return durationFrames > kAttackKey2Frame; }
 
 // StateAttack::exec order (KabutoState.cpp:350-358): a Kabuto with health <= 0
@@ -98,12 +122,21 @@ inline bool attackMayFire(float health, bool fireDone, float prev, float now)
     return health > 0.0f && !fireDone && key2Crossed(prev, now);
 }
 
-// createStoneAttack birth point (Kabuto.cpp:274-277): mouth XZ, body Y + 25.
+// createStoneAttack birth point (Kabuto.cpp:274-277): the mouth joint's world
+// XZ, Y = the Kabuto's own Y + 25 (not the mouth Y). `localX/localZ` are the
+// joint's model-space XZ; the world rotation is R_y(heading) about the feet.
 inline P2CannonStoneVec3 birthPosition(const P2CannonStoneVec3& kabutoPos, float heading,
-                                       float mouthForward)
+                                       float localX, float localZ)
 {
-    return { kabutoPos.x + std::sin(heading) * mouthForward, kabutoPos.y + kBirthYOffset,
-             kabutoPos.z + std::cos(heading) * mouthForward };
+    const float s = std::sin(heading), c = std::cos(heading);
+    return { kabutoPos.x + c * localX + s * localZ, kabutoPos.y + kBirthYOffset,
+             kabutoPos.z - s * localX + c * localZ };
+}
+
+// The source mouth at the KEYEVENT_2 pose.
+inline P2CannonStoneVec3 mouthBirthPosition(const P2CannonStoneVec3& kabutoPos, float heading)
+{
+    return birthPosition(kabutoPos, heading, kMouthLocalX, kMouthLocalZ);
 }
 
 // Host target snapshot entry (one per candidate creature per source tick).
@@ -447,5 +480,72 @@ private:
     std::uint32_t mNextId = 0;
     std::uint64_t mGraceIgnored = 0;
 };
+
+// ---- Campaign seam (called verbatim by pc_p2_kabuto_fsm.cpp) ----
+
+// Accumulates the attack stateTime exactly as the campaign FSM does (prev is
+// captured before `stateTime += dt`). Returns prev.
+inline float advanceStateTime(float& stateTime, float dt)
+{
+    const float prev = stateTime;
+    stateTime += dt;
+    return prev;
+}
+
+enum class AttackAction { None, Die, Fired, PoolFull };
+
+struct AttackStep {
+    AttackAction action = AttackAction::None;
+    int slot = -1;
+    std::uint32_t id = 0;
+    P2CannonStoneVec3 birth;
+};
+
+// One KB_ATTACK tick up to (not including) the clip-end transition, in
+// StateAttack::exec order (KabutoState.cpp:347-358):
+//   1. health <= 0 -> Die (nothing is fired, the caller transits to Dead);
+//   2. on the KEYEVENT_2 crossing, exactly once per attack state, birth one
+//      non-homing Stone at the source mouth (createStoneAttack) into the
+//      shooter-independent fleet. A full fleet is tolerated (PoolFull), as a
+//      failed Rock manager birth is (Kabuto.cpp:283).
+// `fireDone` is the per-state latch the FSM resets on every transition.
+inline AttackStep attackStep(Fleet& fleet, std::uint64_t owner, float health, bool& fireDone,
+                             float prevStateTime, float stateTime,
+                             const P2CannonStoneVec3& kabutoPos, float heading)
+{
+    AttackStep r;
+    if (health <= 0.0f) {
+        r.action = AttackAction::Die;
+        return r;
+    }
+    if (!attackMayFire(health, fireDone, prevStateTime, stateTime)) {
+        return r;
+    }
+    fireDone = true;
+    r.birth = mouthBirthPosition(kabutoPos, heading);
+    r.slot = fleet.fire(owner, r.birth, heading, r.id);
+    r.action = r.slot >= 0 ? AttackAction::Fired : AttackAction::PoolFull;
+    return r;
+}
+
+// Host frames -> 30 Hz source ticks for the fleet (same debt rule as
+// pc_p2_projectiles_update): at most kMaxStoneTicksPerFrame per host frame,
+// dropping the backlog when a frame is longer than that.
+constexpr int kMaxStoneTicksPerFrame = 4;
+inline int stoneTicksFor(double& debt, float dt)
+{
+    if (!(dt > 0.0f)) {
+        return 0;
+    }
+    debt += dt;
+    int ticks = static_cast<int>(debt / P2CannonStone::kSourceDelta);
+    if (ticks > kMaxStoneTicksPerFrame) {
+        ticks = kMaxStoneTicksPerFrame;
+        debt = 0.0;
+    } else {
+        debt -= ticks * static_cast<double>(P2CannonStone::kSourceDelta);
+    }
+    return ticks;
+}
 
 } // namespace p2kabutostone

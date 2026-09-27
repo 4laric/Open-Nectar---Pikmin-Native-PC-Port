@@ -2,9 +2,11 @@
 // Flick/Attack) with mouth-joint stone fire (Stone 74, non-homing for 75).
 // Bridge binds via campaign_ids + bind_source (onion:p2:75); P2 FSM decides
 // every tick, host AI suppressed.
-// #884: the attack births a travelling Stone on KEYEVENT_2 (attack frame 50)
-// into a shooter-independent fleet (pc_p2_kabuto_stone_fleet.h) ticked at
-// 30 Hz from gameCoreSection, instead of an instant cone strike.
+// #884: the attack births a travelling Stone on KEYEVENT_2 (attack frame 50,
+// seen by exec after 51 animation frames) at the source mouth joint into a
+// shooter-independent fleet (pc_p2_kabuto_stone_fleet.h) ticked at 30 Hz from
+// gameCoreSection, instead of an instant cone strike. The attack tick itself
+// is p2kabutostone::attackStep, which the regression test drives directly.
 #include "pc_p2_kabuto_fsm.h"
 #include "pc_p2_kabuto_fsm_policy.h"
 #include "pc_p2_kabuto_stone_fleet.h"
@@ -69,8 +71,6 @@ unsigned slotGen[p2kabutostone::kFleetCapacity]={};
 int slotPosTicks[p2kabutostone::kFleetCapacity]={};
 bool stoneDrawLogged=false;
 std::map<std::uint64_t,BTeki*> shooters;
-constexpr float STONE_DT=P2CannonStone::kSourceDelta;
-constexpr int STONE_MAX_TICKS=4;
 std::uint64_t tokenOf(Creature* c){return static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(c));}
 float wrapPi(float a){while(a>PI_F)a-=2.0f*PI_F;while(a<-PI_F)a+=2.0f*PI_F;return a;}
 float distXZ(const Vector3f& a,const Vector3f& b){const float dx=a.x-b.x,dz=a.z-b.z;return std::sqrt(dx*dx+dz*dz);}
@@ -140,26 +140,25 @@ bool attackable(const KabutoFsm& s,const Vector3f& pos,const Creature* t,float r
     return std::fabs(wrapPi(std::atan2(tp.x-pos.x,tp.z-pos.z)-s.heading))<ATTACK_ANGLE;
 }
 bool shouldFlick(BTeki* a){return stuckPikminCount(a)>=FLICK_STUCK_MIN;}
-// Source StateAttack KEYEVENT_2 -> createStoneAttack (Kabuto.cpp:268-290):
-// Stone 74 born at the mouth XZ and 25 over the Kabuto's own Y, facing the
-// Kabuto, non-homing for 75. The Stone then travels (fleet tick below). The
-// rock emit effect (createRockEmitEffect) is not reproduced.
-void fireStone(BTeki* actor,KabutoFsm& s,unsigned gen){
-    const Vector3f pos=actor->getPosition();
-    const P2CannonStoneVec3 birth=p2kabutostone::birthPosition({pos.x,pos.y,pos.z},s.heading,p2kabutostone::kMouthForwardHostApprox);
-    std::uint32_t id=0;
-    const int slot=fleet.fire(tokenOf(actor),birth,s.heading,id);
-    if(slot<0){
+// Logs the outcome of p2kabutostone::attackStep (source StateAttack KEYEVENT_2
+// -> createStoneAttack, Kabuto.cpp:268-290): Stone 74 born at the "mouth"
+// joint XZ (retail pose at attack frame 51) and 25 over the Kabuto's own Y,
+// facing the Kabuto, non-homing for 75. The Stone then travels (fleet tick
+// below). The rock emit effect (createRockEmitEffect) is not reproduced.
+void logStoneFire(KabutoFsm& s,unsigned gen,const p2kabutostone::AttackStep& step){
+    if(step.action==p2kabutostone::AttackAction::PoolFull){
         // Rock manager birth failure is silently tolerated (Kabuto.cpp:283).
         if(s.poolFullCooldown<=0.0f){s.poolFullCooldown=1.0f;
             std::printf("P2_KABUTO_STONE_POOL_FULL generator=%u active=%d cap=%d\n",gen,fleet.active(),p2kabutostone::Fleet::capacity());std::fflush(stdout);}
         return;
     }
+    if(step.action!=p2kabutostone::AttackAction::Fired)return;
+    const int slot=step.slot;
     slotGen[slot]=gen;slotPosTicks[slot]=0;
     const auto at=timing.find("attack");
-    std::printf("P2_KABUTO_STONE_BIRTH generator=%u source_id=75 stone=%u stone_type=74 slot=%d homing=%d frame=%d t=%.4f clip_frames=%d birth=(%.2f,%.2f,%.2f) face_deg=%.1f mouth_source=host_approx active=%d\n",
-        gen,id,slot,int(fleet.stone(slot).homing()),p2kabutostone::kAttackKey2Frame,s.stateTime,at==timing.end()?0:at->second.duration,
-        birth.x,birth.y,birth.z,s.heading*180.0f/PI_F,fleet.active());
+    std::printf("P2_KABUTO_STONE_BIRTH generator=%u source_id=75 stone=%u stone_type=74 slot=%d homing=%d frame=%d t=%.4f clip_frames=%d birth=(%.2f,%.2f,%.2f) face_deg=%.1f mouth_source=joint pose_frame=%d mouth_local=(%.3f,%.3f) active=%d\n",
+        gen,step.id,slot,int(fleet.stone(slot).homing()),p2kabutostone::kAttackKey2Frame,s.stateTime,at==timing.end()?0:at->second.duration,
+        step.birth.x,step.birth.y,step.birth.z,s.heading*180.0f/PI_F,p2kabutostone::kMouthPoseFrame,p2kabutostone::kMouthLocalX,p2kabutostone::kMouthLocalZ,fleet.active());
     std::fflush(stdout);
 }
 int doFlick(BTeki* actor){
@@ -253,8 +252,7 @@ void pc_p2_kabuto_fsm_update(BTeki* actor){
         std::printf("P2_KABUTO_DAMAGE generator=%u source_id=75 health=%.1f\n",gen,actor->mHealth);std::fflush(stdout);}
     s.lastHealth=actor->mHealth;
     if(s.poolFullCooldown>0.0f)s.poolFullCooldown-=dt;
-    const float prevStateTime=s.stateTime;
-    s.stateTime+=dt;
+    const float prevStateTime=p2kabutostone::advanceStateTime(s.stateTime,dt);
     switch(s.state){
     case KB_WAIT:{
         stop(actor);
@@ -293,11 +291,14 @@ void pc_p2_kabuto_fsm_update(BTeki* actor){
         break;}
     case KB_ATTACK:{
         stop(actor);
-        // StateAttack::exec (KabutoState.cpp:350-358): health gate first, so a
-        // Kabuto killed before frame 50 never fires; then KEYEVENT_2 (retail
-        // attack event frame 50 at 30 fps) births the Stone exactly once.
-        if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
-        if(p2kabutostone::attackMayFire(actor->mHealth,s.fireDone,prevStateTime,s.stateTime)){s.fireDone=true;fireStone(actor,s,gen);}
+        // StateAttack::exec (KabutoState.cpp:350-358) via the tested seam:
+        // health gate first, so a Kabuto killed before the event never fires;
+        // then KEYEVENT_2 (retail attack event frame 50, seen after 51 frames
+        // at 30 fps) births the Stone at the mouth exactly once.
+        const Vector3f ap=actor->getPosition();
+        const p2kabutostone::AttackStep step=p2kabutostone::attackStep(fleet,tokenOf(actor),actor->mHealth,s.fireDone,prevStateTime,s.stateTime,{ap.x,ap.y,ap.z},s.heading);
+        if(step.action==p2kabutostone::AttackAction::Die){die(actor,s,gen,priorForDeath);break;}
+        logStoneFire(s,gen,step);
         if(s.stateTime>=clipSeconds("attack")){
             if(shouldFlick(actor))transition(actor,s,KB_FLICK,"flick",gen);
             else if(distXZ(pos,s.home)>TERRITORY)transition(actor,s,KB_TURN,"wait",gen);
@@ -352,14 +353,23 @@ bool pc_p2_kabuto_fsm_draw(BTeki* actor,Graphics& gfx,const Matrix4f& matrix,boo
 }
 namespace {
 // Host map trace for the Stone in the P2 base-point convention (mPosition is
-// the sphere bottom; P1 traceMove adds/subtracts the radius itself). Dynamic
-// collision is included so gates/platforms stop a Stone like P2 walls do.
+// the sphere bottom; P1 traceMove adds/subtracts the radius itself).
+// Dynamic collision: P2 runs the Stone through platMgr->traceMove too
+// (enemyBase.cpp:2137-2139; EB_PlatformCollEnabled is on by default,
+// enemyBase.cpp:1080, and Rock::onInit never clears it, Rock.cpp:47-94), so
+// bridges/gates/map platforms stop it. P2 platforms are item-only
+// (PlatAttacher users: itemBridge.cpp, itemMgr.cpp, gamePlatMgr.cpp,
+// collinfo.cpp), so P1 enemy/boss body platforms (CreatureCollPart from
+// CreaturePlatMgr::init, tekibteki.cpp:401-402), including the shooter's own,
+// are skipped with MoveTrace::mIgnoreEnemyCollParts. The tracing creature is
+// the unregistered TraceProxy, which owns no parts.
 bool stoneTrace(void* ctx,const P2CannonStoneVec3& base,const P2CannonStoneVec3& vel,float dt,float radius,P2CannonStoneTraceResult& out){
     StoneMap& m=*static_cast<StoneMap*>(ctx);
     if(!mapMgr||!mapMgr->mMapModel)return false;
     if(!std::isfinite(base.x)||!std::isfinite(base.y)||!std::isfinite(base.z)||!std::isfinite(vel.x)||!std::isfinite(vel.y)||!std::isfinite(vel.z))return false;
     m.proxy.clear();
     MoveTrace mv(Vector3f(base.x,base.y,base.z),Vector3f(vel.x,vel.y,vel.z),radius,false);
+    mv.mIgnoreEnemyCollParts=true;
     mapMgr->traceMove(&m.proxy,mv,dt);
     ++m.calls;
     out.position={mv.mPosition.x,mv.mPosition.y,mv.mPosition.z};
@@ -433,11 +443,7 @@ void pc_p2_kabuto_fsm_update_stones(){
     // Same pause/movie gate as pc_p2_projectiles_update.
     const bool active=!gameflow.mPauseAll&&!gameflow.mIsUIOverlayActive&&!(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive);
     if(!active)return;
-    const float dt=gsys->getFrameTime();if(!(dt>0.0f))return;
-    stoneDebt+=dt;
-    int ticks=static_cast<int>(stoneDebt/STONE_DT);
-    if(ticks>STONE_MAX_TICKS){ticks=STONE_MAX_TICKS;stoneDebt=0.0;}
-    else stoneDebt-=ticks*static_cast<double>(STONE_DT);
+    const int ticks=p2kabutostone::stoneTicksFor(stoneDebt,gsys->getFrameTime());
     static StoneSnapshot snap;
     for(int i=0;i<ticks&&fleet.active()>0;++i)stoneTick(snap);
 }
