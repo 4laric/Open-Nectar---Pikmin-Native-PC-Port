@@ -327,6 +327,17 @@ int PlugPikiApp::idle()
 		pc_gfx_end_capture();
 		pc_netplay_present_restore_all_shapes();
 		pc_netplay_present_end_presentation(*gsys->mDGXGfx);
+		// M2b acceptance evidence: null-GX counters, one line per 3000
+		// ticks on stdout (native.log). Real GL issued while null was
+		// active must stay 0; attempted counts the skipped submissions.
+		{
+			const unsigned tick = pc_netplay_tick();
+			if (tick % 3000 == 0) {
+				PRINT("[m2b] tick=%u null_attempted=%llu null_gl=%llu saved_shapes=%llu\n", tick,
+				      pc_netplay_present_null_attempted(), pc_netplay_present_null_gl_calls(),
+				      pc_netplay_present_saved_shapes());
+			}
+		}
 	} else if (pc_netplay_present_two_pass_active() && pc_netplay_present_skip_presentation()) {
 		// M2b helper for m3 resim: authoritative only, null GX, no capture.
 		pc_netplay_present_begin_authoritative(*gsys->mDGXGfx);
