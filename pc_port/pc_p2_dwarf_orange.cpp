@@ -6,6 +6,7 @@
 #include "pc_p2_pose_bank.h"
 #include "pc_p2_pose_shape.h"
 #include "pc_p2_kochappy_stun.h"
+#include "pc_p2_kochappy_fsm.h"
 #include "pc_p2_enemy.h"
 #include "pc_p2_sheargrub.h"
 #include "teki.h"
@@ -26,7 +27,9 @@ std::map<std::string,std::vector<Shape*>> clips;
 std::map<std::string,p2animation::Clip> timing;
 std::set<PelletView*> actors;
  p2dwarforange::Health health;
-bool logged[2]={false,false};
+// own44-fix (#871): one DRAW line per (actor, corpse) so each marker carries
+// its own generator token (mirrors P2_MAMUTA_DRAW per-actor logging).
+std::set<std::pair<PelletView*,int>> logged;
 bool interpolation=false;
 std::map<std::string,std::vector<p2pose::Baked>> baked;
 struct Mutable {Shape* shape=nullptr;p2pose::Pose scratch;std::string clip;float frame=0;bool corpse=false;};
@@ -34,13 +37,14 @@ std::map<PelletView*,Mutable> instances;
 // Source BlueKochappy purple-pikmin stun: fp38 = 5 s (KochappyBase flick/press).
 constexpr float PurpleFitDuration = 5.0f;
 }
-void pc_p2_dwarf_orange_reset(){instances.clear();baked.clear();interpolation=false;clips.clear();timing.clear();actors.clear();health.reset();logged[0]=logged[1]=false;}
+void pc_p2_dwarf_orange_reset(){instances.clear();baked.clear();interpolation=false;clips.clear();timing.clear();actors.clear();health.reset();logged.clear();}
 void pc_p2_dwarf_orange_forget(BTeki* actor){
     instances.erase(static_cast<PelletView*>(actor));
     const bool wasRegistered=actors.erase(static_cast<PelletView*>(actor))!=0;
     // The generator is already detached by dieSoon(), so identity is not
     // available here; the registration transition is the cleanup signal.
     if(wasRegistered){std::printf("P2_DWARF_ORANGE_FORGET registered=1\n");std::fflush(stdout);}
+    logged.erase({static_cast<PelletView*>(actor),0});logged.erase({static_cast<PelletView*>(actor),1});
     health.forget(actor);pc_p2_kochappy_stun_forget(actor);
 }
 float pc_p2_dwarf_orange_max_health(const BTeki* actor,float fallback){return health.life(actor,fallback);}
@@ -136,7 +140,11 @@ void pc_p2_dwarf_orange_setup(){
 }
 bool pc_p2_dwarf_orange_draw(BTeki* actor,Graphics& gfx,const Matrix4f& matrix,bool corpse){
     if(!actors.count(static_cast<PelletView*>(actor)))return false;
-    if(!logged[corpse?1:0]){std::printf("P2_DWARF_ORANGE_DRAW corpse=%d\n",int(corpse));logged[corpse?1:0]=true;}
+    if(logged.insert({static_cast<PelletView*>(actor),corpse?1:0}).second){
+        std::printf("P2_DWARF_ORANGE_DRAW generator=%u corpse=%d %s\n",pc_p2_campaign_token(actor),int(corpse),
+                    pc_p2_kochappy_fsm_suppress_ai(actor)?"OWN_FSM_driven":"P1_gameplay_unchanged");
+        std::fflush(stdout);
+    }
     int motion=actor->mTekiAnimator->getCurrentMotionIndex();
     const char* name=corpse || motion==TekiMotion::Dead?"dead":motion==TekiMotion::Attack?"attack":motion==TekiMotion::Flick?"flick":
         (actor->mVelocity.x*actor->mVelocity.x+actor->mVelocity.z*actor->mVelocity.z>1?"move1":"wait1");
