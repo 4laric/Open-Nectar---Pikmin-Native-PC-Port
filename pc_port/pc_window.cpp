@@ -826,6 +826,9 @@ static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& sti
     // Mod "Free Camera": the right stick orbits instead of pushing the squad,
     // the way Pikmin 3 rearranged it. The squad moves to the Swarm button,
     // which defaults to D-pad Down here because the mod frees it up.
+    // Netplay note: the steal happens at sample time, so its result (the
+    // zeroed C-stick) is already inside the recorded PADStatus, and the yaw
+    // the sim uses comes from the recorded input yaw. No det-mode exception.
     if (pc_settings_get_free_camera()) {
         if (abs(rx) > axisDeadZone) {
             // Cada mando gira la cámara de su jugador (en cooperativo, J2 la suya).
@@ -1049,10 +1052,13 @@ void pc_window_poll_events(PADStatus* pad) {
     // aiming, so that key stops sending B for as long as it is down. The
     // whistle is unaffected in practice -- right click is wired to B on its
     // own, below -- and with the mod off nothing changes.
+    // Netplay note: the suppression happens at sample time, so the recorded
+    // PADStatus already carries it. No det-mode exception.
     const bool freeCamHeld = pc_settings_get_free_camera() && held(PC_KEY_ACT_B);
+    const bool freeCamSuppressB = freeCamHeld;
 
     if (held(PC_KEY_ACT_A))        button |= PAD_BUTTON_A;
-    if (held(PC_KEY_ACT_B) && !freeCamHeld) button |= PAD_BUTTON_B;
+    if (held(PC_KEY_ACT_B) && !freeCamSuppressB) button |= PAD_BUTTON_B;
     if (held(PC_KEY_ACT_X))        button |= PAD_BUTTON_X;
     if (held(PC_KEY_ACT_Y))        button |= PAD_BUTTON_Y;
     if (held(PC_KEY_ACT_Z))        button |= PAD_TRIGGER_Z;

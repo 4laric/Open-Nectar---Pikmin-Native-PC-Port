@@ -116,6 +116,8 @@ def main(argv=None):
         "PIKMIN_NETPLAY_TEST_PREROLL_RAND",
         "PIKMIN_NETPLAY_DETERMINISTIC",
         "PIKMIN_NETPLAY_UNTHROTTLED",
+        "PIKMIN_NETPLAY_TEST_CAMERA_WOBBLE",
+        "PIKMIN_NETPLAY_DEBUG_NAVI_POS",
     ):
         env.pop(key, None)
     env.update(

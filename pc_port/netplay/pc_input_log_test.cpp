@@ -1,14 +1,17 @@
-// Host-run unit test for the PKNI v1 encode/decode API (issue #878).
-// Round-trip, truncated file, bad magic. Engine-free: links only
-// pc_input_log.cpp's pure functions (no PADStatus, no globals).
+// Host-run unit test for the PKNI v1/v2 encode/decode API (issues #878, #879).
+// Round-trip (v2 and v1), v1 back-compat, truncated file, bad magic.
+// Engine-free: links only pc_input_log.cpp's pure functions (no PADStatus,
+// no globals).
 
 #include "netplay/pc_input_log.h"
 
 #include "Dolphin/pad.h"
 #include "netplay/pc_state_hash.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 // Link stubs: this test exercises only the pure encode/decode API, but it
@@ -17,6 +20,14 @@
 static PADStatus sStubPads[4];
 PADStatus* pc_netplay_pad_status(void) { return sStubPads; }
 void pc_state_hash_before_first_tick(void) {}
+
+// M1/M2 hook probe: counts pre-sim capture calls and stores a fixed yaw.
+static int sHookCalls = 0;
+static void sTestCaptureHook(void)
+{
+	++sHookCalls;
+	pc_input_log_yaw_set(0, 0x1234, 0);
+}
 
 namespace {
 int sFailures = 0;
@@ -32,9 +43,10 @@ void check(bool cond, const char* what)
 void fillPads(PcInputPad pads[4])
 {
 	// Cover edges: full button word, stick extremes, trigger extremes,
-	// both err signs.
+	// both err signs, yaw extremes, flags.
 	const uint16_t buttons[4] = { 0x0000, 0xFFFF, 0x0100 | 0x0040, 0x1000 };
 	const int8_t sticks[4][4] = { { 0, 0, 0, 0 }, { 127, 127, -128, -128 }, { -1, 1, 100, -100 }, { 32, -33, 0, 7 } };
+	const uint16_t yaws[4]    = { 0x0000, 0xFFFF, 0x1234, 0x8000 };
 	for (int p = 0; p < 4; ++p) {
 		pads[p].button       = buttons[p];
 		pads[p].stickX       = sticks[p][0];
@@ -46,10 +58,12 @@ void fillPads(PcInputPad pads[4])
 		pads[p].analogA      = (uint8_t)(17 + p);
 		pads[p].analogB      = (uint8_t)(200 - p);
 		pads[p].err          = (p == 0) ? (int8_t)0 : (int8_t)-1;
+		pads[p].controlYaw   = yaws[p];
+		pads[p].flags        = (uint8_t)(p & 1);
 	}
 }
 
-bool padsEqual(const PcInputPad a[4], const PcInputPad b[4])
+bool padsEqual(const PcInputPad a[4], const PcInputPad b[4], bool withYaw)
 {
 	// Field-wise: PcInputPad may carry padding bytes that encode/decode
 	// never touches.
@@ -60,6 +74,7 @@ bool padsEqual(const PcInputPad a[4], const PcInputPad b[4])
 		    || a[p].analogA != b[p].analogA || a[p].analogB != b[p].analogB || a[p].err != b[p].err) {
 			return false;
 		}
+		if (withYaw && (a[p].controlYaw != b[p].controlYaw || a[p].flags != b[p].flags)) return false;
 	}
 	return true;
 }
@@ -67,37 +82,59 @@ bool padsEqual(const PcInputPad a[4], const PcInputPad b[4])
 
 int main()
 {
-	// Round-trip through encode/decode.
+	// v2 round-trip through encode/decode.
 	PcInputPad pads[4];
 	fillPads(pads);
-	uint8_t rec[44];
-	check(pc_input_log_encode_tick(pads, rec) == 44, "encode returns 44 bytes");
+	uint8_t rec[56];
+	check(pc_input_log_encode_tick(pads, rec) == 56, "v2 encode returns 56 bytes");
 	PcInputPad back[4];
 	std::memset(back, 0xAA, sizeof(back));
-	check(pc_input_log_decode_tick(rec, sizeof(rec), back), "decode of full record succeeds");
-	check(padsEqual(pads, back), "round-trip preserves every field");
+	check(pc_input_log_decode_tick(rec, sizeof(rec), back), "v2 decode of full record succeeds");
+	check(padsEqual(pads, back, true), "v2 round-trip preserves every field incl yaw/flags");
 
 	// Byte layout is explicit little-endian, not a struct dump.
 	check(rec[0] == 0x00 && rec[1] == 0x00, "pad0 button LE");
 	PcInputPad hi[4];
 	std::memset(hi, 0, sizeof(hi));
-	hi[1].button = 0x0100;
-	uint8_t recHi[44];
+	hi[1].button     = 0x0100;
+	hi[1].controlYaw = 0x0201;
+	hi[1].flags      = 0x03;
+	uint8_t recHi[56];
 	pc_input_log_encode_tick(hi, recHi);
-	check(recHi[11] == 0x00 && recHi[12] == 0x01, "button serialised LE, not host order dependent");
-	check(recHi[13] == 0 && recHi[22] == 0, "sticks at fixed offsets");
+	check(recHi[14] == 0x00 && recHi[15] == 0x01, "button serialised LE, not host order dependent");
+	check(recHi[16] == 0 && recHi[14 + 14] == 0, "sticks at fixed offsets");
+	// Pad 1 starts at byte 14: 11 PAD bytes, then yaw LE, then flags.
+	check(recHi[14 + 11] == 0x01 && recHi[14 + 12] == 0x02, "yaw serialised LE after the 11 PAD bytes");
+	check(recHi[14 + 13] == 0x03, "flags byte follows yaw");
 
 	// Truncated file: decode must fail for every short length.
-	for (size_t len = 0; len < 44; ++len) {
+	for (size_t len = 0; len < 56; ++len) {
 		PcInputPad tmp[4];
 		char what[64];
-		std::snprintf(what, sizeof(what), "decode rejects %llu bytes", (unsigned long long)len);
+		std::snprintf(what, sizeof(what), "v2 decode rejects %llu bytes", (unsigned long long)len);
 		check(!pc_input_log_decode_tick(rec, len, tmp), what);
 	}
-	check(!pc_input_log_decode_tick(nullptr, 44, back), "decode rejects null data");
-	check(!pc_input_log_decode_tick(rec, 44, nullptr), "decode rejects null pads");
+	check(!pc_input_log_decode_tick(nullptr, 56, back), "decode rejects null data");
+	check(!pc_input_log_decode_tick(rec, 56, nullptr), "decode rejects null pads");
 
-	// Header round-trip.
+	// v1 compat: encode ignores yaw/flags, decode zeroes them.
+	uint8_t recV1[44];
+	check(pc_input_log_encode_tick_v1(pads, recV1) == 44, "v1 encode returns 44 bytes");
+	PcInputPad backV1[4];
+	std::memset(backV1, 0xAA, sizeof(backV1));
+	check(pc_input_log_decode_tick_v1(recV1, sizeof(recV1), backV1), "v1 decode succeeds");
+	check(padsEqual(pads, backV1, false), "v1 round-trip preserves the 11 PAD fields");
+	for (int p = 0; p < 4; ++p) {
+		char what[64];
+		std::snprintf(what, sizeof(what), "v1 decode zeroes yaw/flags pad %d", p);
+		check(backV1[p].controlYaw == 0 && backV1[p].flags == 0, what);
+	}
+	for (size_t len = 0; len < 44; ++len) {
+		PcInputPad tmp[4];
+		check(!pc_input_log_decode_tick_v1(recV1, len, tmp), "v1 decode rejects short");
+	}
+
+	// Header round-trip (v2 default).
 	std::vector<uint8_t> header;
 	pc_input_log_write_header(header);
 	check(header.size() == 10, "header is 10 bytes");
@@ -105,7 +142,14 @@ int main()
 	uint16_t version = 0, padCount = 0, recordSize = 0;
 	check(pc_input_log_read_header(header.data(), header.size(), version, padCount, recordSize)
 	              == PC_INPUT_HEADER_OK
-	      && version == 1 && padCount == 4 && recordSize == 44, "header reads back v1/4/44");
+	      && version == 2 && padCount == 4 && recordSize == 56, "header reads back v2/4/56");
+
+	// v1 header still reads.
+	std::vector<uint8_t> headerV1;
+	pc_input_log_write_header_v1(headerV1);
+	check(pc_input_log_read_header(headerV1.data(), headerV1.size(), version, padCount, recordSize)
+	              == PC_INPUT_HEADER_OK
+	      && version == 1 && padCount == 4 && recordSize == 44, "v1 header reads back v1/4/44");
 
 	// Bad magic.
 	std::vector<uint8_t> bad = header;
@@ -123,7 +167,7 @@ int main()
 
 	// Unsupported version / pad count / record size.
 	std::vector<uint8_t> wrong = header;
-	wrong[4]                   = 2; // version 2
+	wrong[4]                   = 3; // version 3
 	check(pc_input_log_read_header(wrong.data(), wrong.size(), version, padCount, recordSize)
 	          == PC_INPUT_HEADER_UNSUPPORTED,
 	      "future version rejected");
@@ -132,6 +176,50 @@ int main()
 	check(pc_input_log_read_header(wrong.data(), wrong.size(), version, padCount, recordSize)
 	          == PC_INPUT_HEADER_UNSUPPORTED,
 	      "wrong pad count rejected");
+	wrong = header;
+	wrong[8] = 44; // v2 version with v1 size
+	check(pc_input_log_read_header(wrong.data(), wrong.size(), version, padCount, recordSize)
+	          == PC_INPUT_HEADER_UNSUPPORTED,
+	      "version/size mismatch rejected");
+
+	// Yaw quantisation: round-trip through angle is within half an LSB,
+	// and known angles map to known codes.
+	check(pc_input_log_yaw_quantise(0.0f) == 0, "yaw 0 -> 0");
+	check(pc_input_log_yaw_quantise(6.28318530717958647692f) == 0, "yaw 2pi wraps to 0");
+	// Non-finite camera input maps to neutral 0 instead of UB (m7).
+	check(pc_input_log_yaw_quantise(std::numeric_limits<float>::quiet_NaN()) == 0, "yaw NaN -> 0");
+	check(pc_input_log_yaw_quantise(std::numeric_limits<float>::infinity()) == 0, "yaw inf -> 0");
+	check(pc_input_log_yaw_quantise(-std::numeric_limits<float>::infinity()) == 0, "yaw -inf -> 0");
+
+	// M1/M2: the pre-sim capture hook runs and the yaw slots reset every
+	// tick even with no record or replay file (det mode without files must
+	// get a fresh yaw each tick, never a stale one). Needs
+	// PIKMIN_INPUT_RECORD/PIKMIN_INPUT_REPLAY unset in the test env.
+	{
+		float s = 0.0f, c = 0.0f;
+		check(!pc_netplay_control_yaw(0, &s, &c), "no yaw before the first tick");
+		pc_input_log_set_yaw_capture_fn(&sTestCaptureHook);
+		pc_input_log_tick();
+		check(sHookCalls == 1, "capture hook runs without record/replay");
+		check(pc_input_log_yaw_valid(0), "hook yaw stored for pad 0");
+		check(pc_netplay_control_yaw(0, &s, &c), "stored yaw consumable after tick");
+		// With the hook removed the slots must still clear every tick.
+		pc_input_log_set_yaw_capture_fn(nullptr);
+		pc_input_log_tick();
+		check(sHookCalls == 1, "removed hook is not called");
+		check(!pc_input_log_yaw_valid(0), "yaw cleared every tick without record/replay (M1)");
+	}
+	{
+		const float pi = 3.14159265358979323846f;
+		check(pc_input_log_yaw_quantise(pi) == 0x8000, "yaw pi -> 0x8000");
+		float s = 0.0f, c = 0.0f;
+		pc_input_log_yaw_sincos(0x4000, &s, &c);
+		check(std::fabs(s - 1.0f) < 1e-5f && std::fabs(c) < 1e-4f, "yaw 0x4000 is +90deg");
+		pc_input_log_yaw_sincos(0, &s, &c);
+		check(std::fabs(s) < 1e-4f && std::fabs(c - 1.0f) < 1e-5f, "yaw 0 is 0deg");
+		// Negative angles wrap: -pi/2 == 3pi/2.
+		check(pc_input_log_yaw_quantise(-pi / 2.0f) == 0xC000, "yaw -pi/2 wraps to 0xC000");
+	}
 
 	if (sFailures == 0) {
 		std::printf("pc_input_log_test: all checks passed\n");

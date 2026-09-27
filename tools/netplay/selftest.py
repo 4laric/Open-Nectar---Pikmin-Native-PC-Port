@@ -8,6 +8,7 @@ netplay_replay_selftest). No game is launched.
 4. Truncates one log, compares (expect exit 1).
 """
 
+import hashlib
 import struct
 import subprocess
 import sys
@@ -22,28 +23,31 @@ PY = sys.executable
 FORBIDDEN = 0x0800 | 0x1000  # Y | Start
 
 
-def run_gen(ticks, seed, out):
+def run_gen(ticks, seed, out, extra=()):
     r = subprocess.run(
-        [PY, str(GEN), "--ticks", str(ticks), "--seed", str(seed), "--out", str(out)],
+        [PY, str(GEN), "--ticks", str(ticks), "--seed", str(seed), "--out", str(out), *extra],
         capture_output=True, text=True,
     )
     assert r.returncode == 0, f"gen_inputs failed: {r.stderr}"
 
 
-def read_pkni(path):
+def read_pkni(path, expect_version=2, expect_rec=56, expect_pad=14):
     with open(path, "rb") as f:
         blob = f.read()
     assert blob[:4] == b"PKNI", f"bad magic: {blob[:4]!r}"
     version, pads, rec = struct.unpack_from("<HHH", blob, 4)
-    assert (version, pads, rec) == (1, 4, 44), (version, pads, rec)
+    assert (version, pads, rec) == (expect_version, 4, expect_rec), (version, pads, rec)
     body = blob[10:]
-    assert len(body) % 44 == 0, len(body)
-    nticks = len(body) // 44
+    assert len(body) % expect_rec == 0, len(body)
+    nticks = len(body) // expect_rec
     for i in range(nticks):
         for p in range(4):
-            off = i * 44 + p * 11
+            off = i * expect_rec + p * expect_pad
             (buttons,) = struct.unpack_from("<H", body, off)
             assert not buttons & FORBIDDEN, f"tick {i} pad {p}: menu button {buttons:#x}"
+            if expect_version == 2:
+                (flags,) = struct.unpack_from("<B", body, off + 13)
+                assert flags == 0, f"tick {i} pad {p}: flags must be 0, got {flags}"
     return nticks
 
 
@@ -64,12 +68,28 @@ def main():
         tmp = Path(tmp)
         gen_file = tmp / "inputs.pkni"
         run_gen(200, 7, gen_file)
-        check(read_pkni(gen_file) == 200, "gen_inputs writes 200 parseable ticks, no Start/Y")
+        check(read_pkni(gen_file) == 200, "gen_inputs writes 200 parseable v2 ticks, no Start/Y")
 
         # Deterministic: same seed regenerates byte-identical output.
         gen_file2 = tmp / "inputs2.pkni"
         run_gen(200, 7, gen_file2)
         check(gen_file.read_bytes() == gen_file2.read_bytes(), "gen_inputs is seed-deterministic")
+
+        # v2 yaw varies slowly and pads disagree; --v1 keeps the M1 format.
+        with open(gen_file, "rb") as f:
+            blob = f.read()
+        yaws0 = [struct.unpack_from("<H", blob, 10 + p * 14 + 11)[0] for p in range(4)]
+        check(any(y != 0 for y in yaws0), "v2 carries nonzero yaw")
+        gen_v1 = tmp / "inputs_v1.pkni"
+        run_gen(200, 7, gen_v1, extra=("--v1",))
+        check(read_pkni(gen_v1, expect_version=1, expect_rec=44, expect_pad=11) == 200,
+              "--v1 writes 200 parseable v1 ticks")
+        # M2c review M4: --v1 must reproduce the M1 input stream, not just the
+        # format. Golden SHA-256 of the M1 generator's output for
+        # --ticks 200 --seed 7 (base 7b21c90d2 tools/netplay/gen_inputs.py).
+        M1_GOLDEN_200_S7 = "8796ad2372d53ddd3236105cd09b02a8bdb52f3d10039e787394fd7788bf0cfe"
+        check(hashlib.sha256(gen_v1.read_bytes()).hexdigest() == M1_GOLDEN_200_S7,
+              "--v1 output is byte-identical to the M1 stream (M4)")
 
         base = []
         for t in range(1, 51):
