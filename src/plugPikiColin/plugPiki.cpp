@@ -333,9 +333,10 @@ int PlugPikiApp::idle()
 		{
 			const unsigned tick = pc_netplay_tick();
 			if (tick % 3000 == 0) {
-				PRINT("[m2b] tick=%u null_attempted=%llu null_gl=%llu saved_shapes=%llu\n", tick,
-				      pc_netplay_present_null_attempted(), pc_netplay_present_null_gl_calls(),
-				      pc_netplay_present_saved_shapes());
+				printf("[m2b] tick=%u null_attempted=%llu null_gl=%llu saved_shapes=%llu\n", tick,
+				       pc_netplay_present_null_attempted(), pc_netplay_present_null_gl_calls(),
+				       pc_netplay_present_saved_shapes());
+				fflush(stdout);
 			}
 		}
 	} else if (pc_netplay_present_two_pass_active() && pc_netplay_present_skip_presentation()) {
