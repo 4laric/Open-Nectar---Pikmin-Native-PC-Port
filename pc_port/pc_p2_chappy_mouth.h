@@ -289,4 +289,143 @@ inline bool legacyEdible(const Prey& p)
     return p.alive && !p.stuckToAnyMouth && !p.stuckToAny;
 }
 
+// ---- Window diagnostics (never decide a capture) ---------------------------
+// Largest horizontal reach of any slot over the profile's window plus the
+// radius: prey beyond it (or at/behind the feet plane) cannot be captured.
+inline float maxReach(const Profile& p)
+{
+    float best = 0.0f;
+    for (int f = p.firstFrame; f <= p.lastFrame; ++f) {
+        for (int i = 0; i < p.slots; ++i) {
+            const Vec3 l = slotLocal(p, f, i);
+            const float r = std::sqrt(l.x * l.x + l.z * l.z);
+            if (r > best) best = r;
+        }
+    }
+    return best + effectiveRadius(p);
+}
+
+// Aggregated over every evaluated eat frame of one bite / King window.
+struct WindowDiag {
+    int frames = 0;             // eat frames observed
+    float closest = -1.0f;      // min 3D distance eligible prey -> FREE slot (<0: none)
+    Vec3 closestLocal{0, 0, 0}; // that prey in the actor-local frame at that frame
+    int closestFrame = -1;
+    int closestSlot = -1;
+    int front = 0;       // max per frame: eligible prey with local z > 0 within maxReach
+    int stuckSelf = 0;   // max per frame: Pikmin stuck to this eater's body (not the mouth)
+    int eligibleMin = -1; // min per frame eligible count (eligible= in the log is the max)
+};
+
+// Observe one eat frame BEFORE eat() mutates `occupied`.
+inline void observe(WindowDiag& d, const Profile& p, int frame, const Vec3& actor, float heading, const Prey* prey,
+                    int count, const bool* occupied)
+{
+    if (!frameInWindow(p, frame) || p.slots <= 0 || p.slots > MaxSlots) return;
+    ++d.frames;
+    Vec3 slotPos[MaxSlots];
+    for (int i = 0; i < p.slots; ++i) slotPos[i] = slotWorld(p, frame, i, actor, heading);
+    const float reach = maxReach(p);
+    int front = 0, stuck = 0, elig = 0;
+    for (int n = 0; n < count; ++n) {
+        if (prey[n].alive && prey[n].stuckToSelf) ++stuck;
+        if (!eligible(prey[n])) continue;
+        ++elig;
+        const Vec3 l = toLocal(actor, heading, prey[n].pos);
+        if (l.z > 0.0f && std::sqrt(l.x * l.x + l.z * l.z) <= reach) ++front;
+        for (int i = 0; i < p.slots; ++i) {
+            if (occupied[i]) continue;
+            const float dist = distance(slotPos[i], prey[n].pos);
+            if (d.closest < 0.0f || dist < d.closest) {
+                d.closest = dist;
+                d.closestLocal = l;
+                d.closestFrame = frame;
+                d.closestSlot = i;
+            }
+        }
+    }
+    if (front > d.front) d.front = front;
+    if (stuck > d.stuckSelf) d.stuckSelf = stuck;
+    if (d.eligibleMin < 0 || elig < d.eligibleMin) d.eligibleMin = elig;
+}
+
+// ---- KingChappy targeting (#884 runtime diagnosis) --------------------------
+// Source KingChappy::Obj::searchTarget (kingChappy.cpp:1131-1178) and
+// Obj::checkAttack (kingChappy.cpp:1778-1822). The Emperor never starts the
+// tongue attack on a target inside its "invisible range" (proper fp06): the
+// tongue slots only reach ground prey from ~75 units out (kKingTable frames
+// 41..94), so a target under the chin would make the whole 40..94 window
+// sweep empty ground. Pikmin are also filtered to a +-50 height band and must
+// be nearer than the nearest captain in the search cone (shared searchDist).
+// Retail values: KingChappy/enemyparm.txt (fp06 = 80; the decomp default is 70).
+namespace king {
+constexpr float SearchDistance = 500.0f; // general fp14
+constexpr float SearchAngleDeg = 120.0f; // general fp15
+constexpr float SearchHeight = 50.0f;    // searchTarget minY/maxY (kingChappy.cpp:1155-1157)
+constexpr float InvisibleRange = 80.0f;  // proper fp06 "invisible range"
+constexpr float AttackRange = 130.0f;    // general fp20 (3D: Creature::getSqrTargetSeparation)
+constexpr float AttackAngleDeg = 30.0f;  // general fp21
+constexpr float DegToRad = 3.14159265f / 180.0f;
+
+inline float angDist(const Vec3& actor, float heading, const Vec3& target)
+{
+    float a = std::atan2(target.x - actor.x, target.z - actor.z) - heading;
+    while (a > 3.14159265f) a -= 2.0f * 3.14159265f;
+    while (a < -3.14159265f) a += 2.0f * 3.14159265f;
+    return a;
+}
+
+inline float sqrXZ(const Vec3& a, const Vec3& b)
+{
+    const float dx = a.x - b.x, dz = a.z - b.z;
+    return dx * dx + dz * dz;
+}
+
+// Source searchTarget: getNearestNavi within fp14/fp15, then each searchable
+// Pikmin in the +-50 band and search cone with invisible^2 < distXZ^2 <
+// current best (the captain's distance when one was found). Returns -2 for
+// the captain, a Pikmin index, or -1 for no target.
+struct Candidate {
+    Vec3 pos;
+    bool searchable; // Piki::isSearchable (alive, not stuck to a mouth)
+};
+
+inline int selectTarget(const Vec3& actor, float heading, const Vec3* navi, const Candidate* piki, int count)
+{
+    int best = -1;
+    float bestSq = SearchDistance * SearchDistance;
+    const float cone = SearchAngleDeg * DegToRad;
+    if (navi && std::fabs(angDist(actor, heading, *navi)) <= cone) {
+        const float d = sqrXZ(*navi, actor);
+        if (d < bestSq) {
+            bestSq = d;
+            best = -2;
+        }
+    }
+    const float inv = InvisibleRange * InvisibleRange;
+    for (int n = 0; n < count; ++n) {
+        if (!piki[n].searchable) continue;
+        const Vec3& q = piki[n].pos;
+        if (q.y < actor.y - SearchHeight || q.y > actor.y + SearchHeight) continue;
+        if (std::fabs(angDist(actor, heading, q)) > cone) continue;
+        const float d = sqrXZ(q, actor);
+        if (d < bestSq && d > inv) {
+            bestSq = d;
+            best = n;
+        }
+    }
+    return best;
+}
+
+// Source checkAttack: isTargetAttackable (3D range fp20, angle fp21) and the
+// target must lie outside the invisible range (XZ), else no attack.
+inline bool attackGate(const Vec3& actor, float heading, const Vec3& target)
+{
+    const float dx = target.x - actor.x, dy = target.y - actor.y, dz = target.z - actor.z;
+    if (dx * dx + dy * dy + dz * dz >= AttackRange * AttackRange) return false;
+    if (std::fabs(angDist(actor, heading, target)) > AttackAngleDeg * DegToRad) return false;
+    return sqrXZ(target, actor) > InvisibleRange * InvisibleRange;
+}
+} // namespace king
+
 } // namespace p2chappymouth

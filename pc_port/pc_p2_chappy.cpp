@@ -112,6 +112,17 @@ struct ChappyFsm {
     int winNaviHits = 0;
     bool winNearestBehind = false;
     bool winLegacyBehind = false;
+    // #884 runtime diagnosis: per-bite / per-window geometry aggregates and the
+    // target that started the attack (logged on P2_CHAPPY_BITE / EAT_NONE).
+    p2chappymouth::WindowDiag winDiag;
+    float winHeadingDeg = 0.0f;
+    float winDrawYawDeg = 0.0f;
+    char tickTargetKind = '-'; // this tick: n navi, p Pikmin, s Pikmin stuck to self, - none
+    float tickTargetDist = -1.0f;
+    float tickTargetAngDeg = 0.0f;
+    char atkTargetKind = '-'; // latched when the attack state is entered
+    float atkTargetDist = -1.0f;
+    float atkTargetAngDeg = 0.0f;
 };
 std::map<PelletView*, ChappyFsm> fsms;
 
@@ -204,6 +215,44 @@ Creature* nearestTarget(const Vector3f& pos, float sight)
         }
     }
     return best;
+}
+
+p2chappymouth::Vec3 mouthVec(const Vector3f& v)
+{
+    return p2chappymouth::Vec3{v.x, v.y, v.z};
+}
+
+// Source KingChappy::Obj::searchTarget (kingChappy.cpp:1131-1178) through
+// p2chappymouth::king::selectTarget: the captain in the fp14/fp15 search cone,
+// else a nearer searchable Pikmin (Piki::isSearchable: alive, not in a mouth;
+// port adds drawn and not a buried sprout) in the +-50 band and outside the
+// fp06 invisible range.
+Creature* kingSearchTarget(BTeki* actor, const ChappyFsm& s)
+{
+    const p2chappymouth::Vec3 apos = mouthVec(actor->getPosition());
+    Navi* navi = naviMgr ? naviMgr->getNavi() : nullptr;
+    if (navi && !navi->isAlive()) navi = nullptr;
+    p2chappymouth::Vec3 naviPos{};
+    if (navi) naviPos = mouthVec(navi->getPosition());
+    std::vector<Piki*> pikis;
+    std::vector<p2chappymouth::king::Candidate> cands;
+    if (pikiMgr) {
+        Iterator it(pikiMgr);
+        CI_LOOP(it)
+        {
+            Piki* p = static_cast<Piki*>(*it);
+            if (!p) continue;
+            pikis.push_back(p);
+            cands.push_back(p2chappymouth::king::Candidate{
+                mouthVec(p->getPosition()),
+                p->isAlive() && p->isVisible() && !p->isBuried() && !p->isStickToMouth()});
+        }
+    }
+    const int pick = p2chappymouth::king::selectTarget(apos, s.heading, navi ? &naviPos : nullptr, cands.data(),
+                                                       (int)cands.size());
+    if (pick == -2) return navi;
+    if (pick >= 0) return pikis[pick];
+    return nullptr;
 }
 
 int stuckPikminCount(Creature* c)
@@ -371,6 +420,13 @@ const char* fsmStateName(p2chappyfsm::Family family, int state)
     }
 }
 
+bool isAttackState(p2chappyfsm::Family family, int state)
+{
+    if (family == p2chappyfsm::FAMILY_ADULT) return state == p2chappy::ADULT_ATTACK;
+    if (family == p2chappyfsm::FAMILY_KING) return state == 1;
+    return state == 3; // Kuma / KumaKo
+}
+
 void transition(BTeki* actor, ChappyFsm& s, int next, unsigned gen)
 {
     s.state = next;
@@ -386,6 +442,12 @@ void transition(BTeki* actor, ChappyFsm& s, int next, unsigned gen)
     s.winNaviHits = 0;
     s.winNearestBehind = false;
     s.winLegacyBehind = false;
+    s.winDiag = p2chappymouth::WindowDiag{};
+    if (isAttackState(s.family, next)) {
+        s.atkTargetKind = s.tickTargetKind;
+        s.atkTargetDist = s.tickTargetDist;
+        s.atkTargetAngDeg = s.tickTargetAngDeg;
+    }
     auto b = banks.find(s.spec->enumName);
     if (b != banks.end()) {
         if (const char* c = clipForState(b->second, s.family, next)) s.clip = c;
@@ -420,6 +482,10 @@ void initFsm(PelletView* view, BTeki* actor, const p2chappy::SpeciesParams* spec
     s.stateTime = 0.0f;
     s.home = actor->getPosition();
     s.heading = actor->getDirection();
+    // #884: the eat geometry (pc_p2_chappy_mouth.h) is at P2 model scale 1 and
+    // the pose mesh is drawn with mSRT.s (tekibteki.cpp drawTekiShape). Pin it
+    // so a recycled BTeki can never carry a stale P1 TPF_Scale into the draw.
+    actor->mSRT.s.set(1.0f, 1.0f, 1.0f);
     s.wander = s.home;
     s.wanderValid = true;
     s.rng = (token * 2654435761u) | 1u;
@@ -447,11 +513,6 @@ struct EatStats {
     bool nearestBehind = false; // nearest eligible Pikmin within fp22 of the feet is behind
     bool legacyBehind = false;  // the pre-#884 selection would have eaten behind
 };
-
-p2chappymouth::Vec3 mouthVec(const Vector3f& v)
-{
-    return p2chappymouth::Vec3{v.x, v.y, v.z};
-}
 
 // Source EnemyFunc::eatPikmin (enemyAction.cpp:1107-1142) through
 // pc_p2_chappy_mouth.h: every eligible Pikmin within the radius of an EMPTY
@@ -527,6 +588,11 @@ EatStats doEat(BTeki* actor, ChappyFsm& s, unsigned gen, int frame)
                                                    [](const p2chappymouth::Prey& q) { return p2chappymouth::legacyEdible(q); });
     st.legacyBehind = legacy >= 0 && p2chappymouth::toLocal(apos, s.heading, prey[legacy].pos).z <= 0.0f;
     const float radius = p2chappymouth::effectiveRadius(*prof);
+    if (s.winDiag.frames == 0) {
+        s.winHeadingDeg = wrapPi(s.heading) * 180.0f / PI_F;
+        s.winDrawYawDeg = wrapPi(actor->getDirection()) * 180.0f / PI_F;
+    }
+    p2chappymouth::observe(s.winDiag, *prof, frame, apos, s.heading, prey.data(), count, occupied);
     st.captured = p2chappymouth::eat(*prof, frame, apos, s.heading, prey.data(), count, occupied, [&](int n, int slot) {
         const int idx = p2chappymouth::hostPartIndex(slot, hostCount);
         CollPart* part = idx >= 0 ? mouthPart->getChildAt(idx) : nullptr;
@@ -551,17 +617,43 @@ EatStats doEat(BTeki* actor, ChappyFsm& s, unsigned gen, int frame)
     return st;
 }
 
-void logBite(const ChappyFsm& s, unsigned gen, int frame, int first, int last, const EatStats& st, int slots)
+// #884 geometry fields appended to P2_CHAPPY_BITE and P2_CHAPPY_EAT_NONE:
+// closest = min 3D distance from any eligible Pikmin to any FREE slot over the
+// evaluated frames (-1: none), closest_local = that Pikmin in the actor frame
+// at closest_frame, front = max eligible Pikmin ahead within `reach` (slot
+// reach + radius), stuck_self = max Pikmin latched to this body, eligible_min
+// = min eligible per frame, heading_deg / draw_yaw_deg = FSM heading vs the
+// mFaceDirection the draw rotates by (first eat frame), scale = mSRT.s.x,
+// target_* = what started the attack (n navi, p Pikmin, s latched, - none).
+void printDiag(BTeki* actor, const ChappyFsm& s, const p2chappymouth::Profile* prof)
 {
+    const p2chappymouth::WindowDiag& d = s.winDiag;
+    std::printf(" closest=%.1f closest_local=%.1f,%.1f,%.1f closest_frame=%d closest_slot=%d slot_radius=%.1f "
+                "reach=%.1f front=%d stuck_self=%d eligible_min=%d heading_deg=%.1f draw_yaw_deg=%.1f scale=%.2f "
+                "target_kind=%c target_dist=%.1f target_ang_deg=%.1f",
+                d.closest, d.closestLocal.x, d.closestLocal.y, d.closestLocal.z, d.closestFrame, d.closestSlot,
+                prof ? p2chappymouth::effectiveRadius(*prof) : 0.0f, prof ? p2chappymouth::maxReach(*prof) : 0.0f,
+                d.front, d.stuckSelf, d.eligibleMin, s.winHeadingDeg, s.winDrawYawDeg, actor->mSRT.s.x,
+                s.atkTargetKind, s.atkTargetDist, s.atkTargetAngDeg);
+}
+
+void logBite(BTeki* actor, const ChappyFsm& s, unsigned gen, int frame, int first, int last, const EatStats& st,
+             int slots)
+{
+    const p2chappymouth::Profile* prof = p2chappymouth::profileForSource(s.spec->source);
     std::printf("P2_CHAPPY_BITE generator=%u source_id=%u frame=%d window=%d-%d eligible=%d captured=%d "
-                "free_before=%d slots=%d refused_no_host=%d nearest_behind=%d legacy_would_eat_behind=%d\n",
+                "free_before=%d slots=%d refused_no_host=%d nearest_behind=%d legacy_would_eat_behind=%d",
                 gen, s.spec->source, frame, first, last, st.eligible, st.captured, st.freeBefore, slots,
                 st.refusedNoHost, st.nearestBehind ? 1 : 0, st.legacyBehind ? 1 : 0);
+    printDiag(actor, s, prof);
+    std::printf("\n");
     if (st.captured == 0) {
         std::printf("P2_CHAPPY_EAT_NONE generator=%u source_id=%u frame=%d eligible=%d nearest_behind=%d "
-                    "all_occupied=%d refused_no_host=%d\n",
+                    "all_occupied=%d refused_no_host=%d",
                     gen, s.spec->source, frame, st.eligible, st.nearestBehind ? 1 : 0, st.freeBefore == 0 ? 1 : 0,
                     st.refusedNoHost);
+        printDiag(actor, s, prof);
+        std::printf("\n");
     }
     std::fflush(stdout);
 }
@@ -637,7 +729,7 @@ void doBite(BTeki* actor, ChappyFsm& s, unsigned gen, int frame)
     const p2chappymouth::Profile* prof = p2chappymouth::profileForSource(s.spec->source);
     const int eatFrame = prof ? prof->firstFrame : frame;
     const EatStats st = doEat(actor, s, gen, eatFrame);
-    logBite(s, gen, eatFrame, eatFrame, eatFrame, st, prof ? prof->slots : 0);
+    logBite(actor, s, gen, eatFrame, eatFrame, eatFrame, st, prof ? prof->slots : 0);
     std::printf("P2_CHAPPY_ATTACK generator=%u source_id=%u frame=%d navi=%d piki=%d eaten=%d eaten_count=%d\n",
                 gen, s.spec->source, frame, hitNavi, hitPiki, st.captured > 0 ? 1 : 0, st.captured);
     std::fflush(stdout);
@@ -1100,11 +1192,26 @@ void pc_p2_chappy_update(BTeki* actor)
     }
 
     const Vector3f pos = actor->getPosition();
-    Creature* target = nearestTarget(pos, s.spec->sight);
+    // KingChappy uses the source searchTarget / checkAttack gate (#884): no
+    // tongue attack on a target inside the invisible range, where no kamu slot
+    // of the 40..94 window reaches ground prey.
+    const bool king = s.family == p2chappyfsm::FAMILY_KING;
+    Creature* target = king ? kingSearchTarget(actor, s) : nearestTarget(pos, s.spec->sight);
     if (target) actor->setCreaturePointer(0, target);
     else actor->clearCreaturePointer(0);
     const bool sees = target != nullptr;
-    const bool inRange = attackable(s, pos, target);
+    const bool inRange = king ? (target && p2chappymouth::king::attackGate(mouthVec(pos), s.heading,
+                                                                           mouthVec(target->getPosition())))
+                              : attackable(s, pos, target);
+    s.tickTargetKind = '-';
+    s.tickTargetDist = -1.0f;
+    s.tickTargetAngDeg = 0.0f;
+    if (target) {
+        const Vector3f tp = target->getPosition();
+        s.tickTargetKind = !target->isPiki() ? 'n' : (target->getStickObject() == actor ? 's' : 'p');
+        s.tickTargetDist = distXZ(tp, pos);
+        s.tickTargetAngDeg = wrapPi(std::atan2(tp.x - pos.x, tp.z - pos.z) - s.heading) * 180.0f / PI_F;
+    }
     // Source EnemyFunc::isStartFlick keys on Pikmin stuck to the body, not
     // mere proximity: a nearby-swarm latch flicks every few seconds and the
     // bot can never accumulate attackers (round-2 FireChappy stalemate).
@@ -1437,7 +1544,7 @@ void pc_p2_chappy_update(BTeki* actor)
                 win.refusedNoHost = s.winRefusedNoHost;
                 win.nearestBehind = s.winNearestBehind;
                 win.legacyBehind = s.winLegacyBehind;
-                logBite(s, generator, endFrame, prof ? prof->firstFrame : 0, s.lastEatFrame, win,
+                logBite(actor, s, generator, endFrame, prof ? prof->firstFrame : 0, s.lastEatFrame, win,
                         prof ? prof->slots : 0);
                 std::printf("P2_CHAPPY_ATTACK generator=%u source_id=%u frame=%d navi=%d piki=0 eaten=%d "
                             "eaten_count=%d\n",

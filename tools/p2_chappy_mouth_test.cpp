@@ -482,6 +482,107 @@ int main()
                 "T14 legacy_would_eat_behind diagnostic flags the rear pick");
     }
 
+    // --- T15: King attack gate / target search (runtime i1-53 diagnosis) ---
+    // Candidate build: 4 King attacks, 0 captures, captain at tdist=18. The
+    // port gate (XZ < fp20 130 and angle <= fp21 30) started the tongue on
+    // targets under the chin; source checkAttack also requires the target
+    // outside the fp06 invisible range (80), and the tongue slots only reach
+    // ground prey from ~75 out, so a sub-80 trigger sweeps empty ground.
+    {
+        using namespace p2chappymouth::king;
+        const float groundY = -1.5f; // observed prey local_y (i1-2 P2_CHAPPY_EAT lines)
+        auto sweepCaptures = [&](const Vec3& p) {
+            Scene sc;
+            sc.prey.push_back(pikmin(p));
+            for (int f = king.firstFrame; f <= king.lastFrame && sc.captured.empty(); ++f) sc.run(king, f, origin, 0.0f);
+            return !sc.captured.empty();
+        };
+        // Ground prey under the chin is never reachable by any window frame.
+        for (int d = 0; d <= 70; ++d) {
+            require(!sweepCaptures(Vec3{0.0f, groundY, float(d)}), "T15 ground prey inside 70 never reached");
+        }
+        // Every on-axis ground target the source gate admits is reached.
+        for (int d = 81; d <= 129; ++d) {
+            require(sweepCaptures(Vec3{0.0f, groundY, float(d)}), "T15 on-axis ground target 81..129 reached");
+        }
+        for (int d = 95; d <= 125; ++d) {
+            const float a = 20.0f * DegToRad;
+            require(sweepCaptures(Vec3{d * std::sin(a), groundY, d * std::cos(a)}) &&
+                        sweepCaptures(Vec3{-d * std::sin(a), groundY, d * std::cos(a)}),
+                    "T15 +-20 deg ground target 95..125 reached");
+        }
+        // Gate: the i1-53 trigger (captain 18 in front) is refused; 100 ahead is taken.
+        require(!attackGate(origin, 0.0f, Vec3{0.0f, 0.0f, 18.0f}), "T15 gate refuses a target at 18");
+        require(!attackGate(origin, 0.0f, Vec3{0.0f, 0.0f, 80.0f}), "T15 gate refuses the invisible-range edge");
+        require(attackGate(origin, 0.0f, Vec3{0.0f, 0.0f, 100.0f}), "T15 gate takes a target at 100 ahead");
+        require(!attackGate(origin, 0.0f, Vec3{0.0f, 0.0f, 130.0f}), "T15 gate refuses fp20 edge");
+        require(!attackGate(origin, 0.0f, Vec3{0.0f, 90.0f, 100.0f}), "T15 gate range is 3D");
+        {
+            const float a = 35.0f * DegToRad;
+            require(!attackGate(origin, 0.0f, Vec3{100.0f * std::sin(a), 0.0f, 100.0f * std::cos(a)}),
+                    "T15 gate refuses 35 deg");
+            const float h = 1.2f;
+            require(attackGate(Vec3{50.0f, 3.0f, -20.0f}, h,
+                               localToWorld(Vec3{50.0f, 3.0f, -20.0f}, h, Vec3{0.0f, 0.0f, 100.0f})),
+                    "T15 gate follows the heading");
+        }
+        // Legacy port gate on the same trigger admitted it (the defect).
+        {
+            const p2chappy::SpeciesParams* sp = p2chappy::speciesForSource(53);
+            const float d = 18.0f;
+            const bool legacyGate = d < sp->attackRange && 0.0f <= sp->attackAngle;
+            require(legacyGate, "T15 legacy port gate would have attacked at 18");
+            require(sp->attackRange == AttackRange && sp->attackAngle == AttackAngleDeg, "T15 fp20/fp21 agree");
+        }
+        // Target search.
+        const Vec3 naviNear{0.0f, 0.0f, 18.0f};
+        Candidate c[6] = {
+            {Vec3{0.0f, 0.0f, 40.0f}, true},   // 0: inside invisible range
+            {Vec3{0.0f, 0.0f, 100.0f}, true},  // 1: valid
+            {Vec3{0.0f, 60.0f, 90.0f}, true},  // 2: above the +-50 band
+            {Vec3{0.0f, 0.0f, -95.0f}, true},  // 3: behind (outside 120 deg)
+            {Vec3{0.0f, 0.0f, 85.0f}, false},  // 4: in a mouth (not searchable)
+            {Vec3{30.0f, 0.0f, 120.0f}, true}, // 5: valid, farther than 1
+        };
+        require(selectTarget(origin, 0.0f, nullptr, c, 6) == 1, "T15 nearest searchable Pikmin beyond 80 chosen");
+        require(selectTarget(origin, 0.0f, &naviNear, c, 6) == -2,
+                "T15 a captain under the chin blocks Pikmin targets (shared searchDist)");
+        const Vec3 naviFar{0.0f, 0.0f, 300.0f};
+        require(selectTarget(origin, 0.0f, &naviFar, c, 6) == 1, "T15 a nearer Pikmin beats a far captain");
+        const Vec3 naviBehind{0.0f, 0.0f, -30.0f};
+        require(selectTarget(origin, 0.0f, &naviBehind, c, 6) == 1, "T15 a captain behind the cone is ignored");
+        Candidate only[3] = {c[0], c[2], c[4]};
+        require(selectTarget(origin, 0.0f, nullptr, only, 3) == -1, "T15 no valid target");
+    }
+
+    // --- T16: window diagnostics (closest / front / stuck_self) ---
+    {
+        WindowDiag d;
+        std::vector<Prey> prey;
+        prey.push_back(pikmin(add(slotWorld(chappy, 10, 2, origin, 0.0f), Vec3{0.0f, 0.0f, 3.0f})));
+        Prey latched = pikmin(Vec3{0.0f, 20.0f, 10.0f});
+        latched.stuckToSelf = true;
+        latched.stuckToAny = true;
+        prey.push_back(latched);
+        prey.push_back(pikmin(Vec3{0.0f, 0.0f, -30.0f}));
+        bool occ[MaxSlots] = {};
+        observe(d, chappy, 10, origin, 0.0f, prey.data(), (int)prey.size(), occ);
+        require(d.frames == 1 && std::fabs(d.closest - 3.0f) < 1e-3f && d.closestSlot == 2 && d.closestFrame == 10,
+                "T16 closest measured to the nearest free slot");
+        require(std::fabs(d.closestLocal.z - (slotLocal(chappy, 10, 2).z + 3.0f)) < 1e-3f, "T16 closest_local");
+        require(d.front == 1 && d.stuckSelf == 1 && d.eligibleMin == 2, "T16 front / stuck_self / eligible_min");
+        WindowDiag full;
+        bool allOcc[MaxSlots] = {true, true, true, true, true};
+        observe(full, chappy, 10, origin, 0.0f, prey.data(), (int)prey.size(), allOcc);
+        require(full.closest < 0.0f, "T16 no free slot -> closest=-1");
+        require(maxReach(*profileForSource(76)) > 30.0f && maxReach(*profileForSource(76)) < 50.0f,
+                "T16 KumaKo reach");
+        WindowDiag kw;
+        for (int f = king.firstFrame; f <= king.lastFrame; ++f)
+            observe(kw, king, f, origin, 0.0f, prey.data(), (int)prey.size(), occ);
+        require(kw.frames == 55, "T16 King window observes 55 frames");
+    }
+
     std::printf("PASS p2_chappy_mouth_test checks=%d\n", gChecks);
     return 0;
 }
