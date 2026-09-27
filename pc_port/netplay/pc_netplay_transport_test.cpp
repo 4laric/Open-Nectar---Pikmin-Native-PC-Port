@@ -18,6 +18,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <chrono>
+#include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -113,6 +116,24 @@ uint64_t toy_advance(uint64_t state, int frame, const uint8_t inputs[32])
 
 uint32_t toy_checksum(uint64_t state) { return (uint32_t)(state ^ (state >> 32)); }
 
+void set_test_env(const char* name, const char* value)
+{
+#ifdef _WIN32
+	_putenv((std::string(name) + "=" + value).c_str());
+#else
+	setenv(name, value, 1);
+#endif
+}
+
+void clear_test_env(const char* name)
+{
+#ifdef _WIN32
+	_putenv((std::string(name) + "=").c_str());
+#else
+	unsetenv(name);
+#endif
+}
+
 } // namespace
 
 int main()
@@ -157,6 +178,76 @@ int main()
 		CHECK(!pc_netplay_transport::parse_endpoint("999.0.0.1:5", &ip, &port), "bad octet");
 		CHECK(!pc_netplay_transport::parse_endpoint("127.0.0.1:5x", &ip, &port), "trailing junk");
 		CHECK(!pc_netplay_transport::parse_endpoint("127.0.0.1 :5077", &ip, &port), "space junk");
+	}
+	// 2b. Input accumulator (B2 residual, fix round 2): button bits OR
+	// across turns between submits, sticks/triggers/yaw keep the latest
+	// sample, take() clears the button latch.
+	{
+		PcNetplayAccum ac;
+		PcNetplayInput t0 = ac.take();
+		CHECK(t0.buttons == 0, "accum starts neutral");
+		// Tap A on turn 1, tap B + move stick on turn 2, submit once: the
+		// short tap must survive.
+		ac.add(0x0001, 0, 0, 0, 0, 0, 0, 100);
+		ac.add(0x0002, 50, -60, 7, -8, 9, 10, 200);
+		PcNetplayInput m = ac.take();
+		CHECK(m.buttons == 0x0003, "accum ORs buttons across turns");
+		CHECK(m.stickX == 50 && m.stickY == -60 && m.substickX == 7 && m.substickY == -8
+		          && m.triggerL == 9 && m.triggerR == 10,
+		      "accum keeps latest sticks/triggers");
+		CHECK(m.controlYaw == 200, "accum keeps latest yaw");
+		CHECK(m.flags == 0, "accum flags zero");
+		PcNetplayInput t1 = ac.take();
+		CHECK(t1.buttons == 0, "take clears the button latch");
+		CHECK(t1.stickX == 50 && t1.controlYaw == 200, "sticks/yaw stay at latest");
+		ac.reset();
+		PcNetplayInput t2 = ac.take();
+		CHECK(t2.buttons == 0 && t2.stickX == 0 && t2.controlYaw == 0, "reset clears all");
+	}
+	// 2c. Handshake-loss drop hook (M1 follow-up, fix round 2): the first
+	// N handshake-channel sends are dropped (reported as sent, so the
+	// session must recover through its Hello/Ack resends); gekko traffic
+	// is unaffected and delivery resumes after N.
+	{
+		using namespace pc_netplay_transport;
+		set_test_env("PIKMIN_NETPLAY_TEST_DROP_HS_FIRST_N", "2");
+		UdpSocket a, b;
+		CHECK(a.bind(0) && b.bind(0), "loopback bind");
+		CHECK(a.set_peer(0x7F000001, b.local_port()), "a peer");
+		CHECK(b.set_peer(0x7F000001, a.local_port()), "b peer");
+		const uint8_t hello[4] = { 'N', 'P', 'H', '3' };
+		CHECK(a.send_payload(kChannelHandshake, hello, sizeof(hello)), "a hs send 1");
+		CHECK(a.send_payload(kChannelHandshake, hello, sizeof(hello)), "a hs send 2");
+		CHECK(a.send_payload(kChannelHandshake, hello, sizeof(hello)), "a hs send 3");
+		CHECK(a.send_payload(kChannelGekko, hello, sizeof(hello)), "a gekko send");
+		std::this_thread::sleep_for(std::chrono::milliseconds(200));
+		std::vector<UdpSocket::Datagram> got = b.recv();
+		int hs = 0, gekko = 0;
+		for (size_t i = 0; i < got.size(); ++i) {
+			if (got[i].channel == kChannelHandshake) {
+				++hs;
+				CHECK(got[i].payload.size() == sizeof(hello)
+				          && memcmp(got[i].payload.data(), hello, sizeof(hello)) == 0,
+				      "hs payload intact");
+			} else if (got[i].channel == kChannelGekko) {
+				++gekko;
+			}
+		}
+		CHECK(hs == 1, "first 2 handshake sends dropped, 3rd delivered");
+		CHECK(gekko == 1, "gekko channel unaffected by hs drop");
+		clear_test_env("PIKMIN_NETPLAY_TEST_DROP_HS_FIRST_N");
+		// A fresh socket with no env set drops nothing.
+		UdpSocket c;
+		CHECK(c.bind(0), "c bind");
+		CHECK(c.set_peer(0x7F000001, b.local_port()), "c peer");
+		CHECK(c.send_payload(kChannelHandshake, hello, sizeof(hello)), "c hs send");
+		std::this_thread::sleep_for(std::chrono::milliseconds(200));
+		got = b.recv();
+		hs  = 0;
+		for (size_t i = 0; i < got.size(); ++i) {
+			if (got[i].channel == kChannelHandshake) ++hs;
+		}
+		CHECK(hs == 1, "no drop without env");
 	}
 
 	// 3. Two sessions, window 0, lossy in-memory link, 2000 frames.

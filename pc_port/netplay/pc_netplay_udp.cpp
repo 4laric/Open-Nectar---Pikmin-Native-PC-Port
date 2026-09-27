@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <random>
 
 #ifdef _WIN32
@@ -150,6 +151,30 @@ bool UdpSocket::send_to(uint8_t channel, const uint8_t* data, size_t len, uint32
 	if (mSock == -1 || port == 0) return false;
 	if (len + 1 > kMaxDatagram) return false; // bounded before use
 	if (len > 0 && data == nullptr) return false;
+	// Fix round 2 (M1 follow-up): handshake-loss test hook. Drops the
+	// first N handshake-channel sends (N from
+	// PIKMIN_NETPLAY_TEST_DROP_HS_FIRST_N), reporting success so the
+	// session must recover through its resends. With N >= 2 the very
+	// first Hello+Ack burst is gone, which covers the "lost final Ack"
+	// case the review asked for.
+	if (channel == kChannelHandshake) {
+		if (!mHsDropInit) {
+			mHsDropInit = true;
+			if (const char* e = getenv("PIKMIN_NETPLAY_TEST_DROP_HS_FIRST_N")) {
+				char* end       = nullptr;
+				unsigned long n = strtoul(e, &end, 10);
+				if (end != e && *end == '\0') mHsDropFirstN = (unsigned)n;
+			}
+		}
+		if (mHsSends < mHsDropFirstN) {
+			++mHsSends;
+			printf("[netplay] test: dropped handshake datagram %u/%u\n", mHsSends,
+			       mHsDropFirstN);
+			fflush(stdout);
+			return true;
+		}
+		++mHsSends;
+	}
 	uint8_t frame[kMaxDatagram];
 	frame[0] = channel;
 	if (len > 0) memcpy(frame + 1, data, len);

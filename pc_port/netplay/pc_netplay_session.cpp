@@ -15,9 +15,10 @@
 // The per-tick block when netplay is active (brief item 3):
 //   1. mControllerMgr.update() (pumps SDL, samples the local pad; the F1
 //      consume path inside pc_window_poll_events already zeroes the pads
-//      while the menu is open).
-//   2. Build the local input (physical pad 0 + local control yaw, or the
-//      next scripted record).
+//      while the menu is open). Every turn's physical sample is folded into
+//      the button-OR / latest-sticks accumulator (B2 residual fix).
+//   2. Build the local input (accumulator take, or the next scripted
+//      record).
 //   3. gekko_add_local_input for the local player (skipped while ahead).
 //   4. gekko_update_session.
 //   5. Per Advance: inject both inputs into sControllerPad[0]/[1], set each
@@ -32,6 +33,10 @@
 // Pacing: one network turn per System::run loop iteration, slept to 30 Hz
 // (real time) unless PIKMIN_NETPLAY_UNTHROTTLED=1, which runs as fast as the
 // session allows (tests). gekko_frames_ahead() slows us down when ahead.
+// Stall % is wall-clock INCLUDING the pacing sleep, and the logs also give
+// effective tps plus the 1 - tps/30 slot-loss fraction (n2). Local delay is
+// PIKMIN_NETPLAY_DELAY frames (default 2) or "auto" (handshake RTT measure,
+// ceil((RTT/2)/33.3ms)+1, clamped 1..8).
 
 #include "netplay/pc_netplay_session.h"
 
@@ -228,7 +233,8 @@ struct Config {
 	uint16_t hostPort = 0;      // --netplay-host <port>
 	uint32_t joinIp = 0;        // --netplay-join <ip:port>
 	uint16_t joinPort = 0;
-	unsigned localDelay = 2;    // PIKMIN_NETPLAY_DELAY
+	unsigned localDelay = 2;    // PIKMIN_NETPLAY_DELAY (numeric)
+	bool delayAuto = false;     // PIKMIN_NETPLAY_DELAY=auto (fix round 2)
 	uint32_t seed = 0;          // PIKMIN_NETPLAY_SEED
 	std::string bootstrapPath;  // --randomizer-seed <file> or bootstrap.txt
 	std::string localInputFile; // PIKMIN_NETPLAY_LOCAL_INPUT_FILE
@@ -301,6 +307,13 @@ bool sGotAck = false;
 double sHsStartMs = 0;
 double sHsLastSendMs = 0;
 int sRefuseSent = 0;
+// Fix round 2 (DELAY=auto): handshake RTT measurement. Every Hello send is
+// timestamped; each received Ack yields one sample (now - last Hello send),
+// and the minimum is kept. The peer sends its Ack immediately on Hello
+// receipt, so with no loss the first sample is the true RTT; under loss the
+// minimum still excludes the 100 ms resend-phase inflation.
+double sHsLastHelloSendMs = 0;
+double sHsRttMs = -1;
 
 // Run stats.
 uint64_t sSessionTicks = 0;
@@ -317,12 +330,20 @@ double sRunStartMs = 0;
 double sNextTurnMs = 0;
 bool sAheadLogged = false;
 // M5: wall-clock stall accounting. sStallMs accumulates the wall time of
-// loop turns that produced no Advance; stall % = 100 * sStallMs / session
-// wall time. (The old sStalls turn counter is kept for the log line, but
-// under UNTHROTTLED the loop spins ~1500 turns per advance, so the turn
-// ratio is not a wall-clock stall.)
+// loop turns that produced no Advance, INCLUDING the 30 Hz pacing sleep
+// (n2 fix round 2: measuring before the sleep reported 0.7% at 15.3 tps on
+// the real-time path, hiding the ~49% of 30 Hz slots lost). The stall
+// charge is taken after the pacing sleep, from turn start to turn end.
+// (The old sStalls turn counter is kept for the log line, but under
+// UNTHROTTLED the loop spins ~1500 turns per advance, so the turn ratio is
+// not a wall-clock stall.)
 double sStallMs = 0;
 double sSessionStartMs = 0;
+// B2 residual (fix round 2): physical-pad accumulator between submits.
+// Every kSession turn folds its pad sample into this (buttons OR, sticks/
+// yaw latest); each submit takes the merged input. Scripted file inputs
+// bypass it (one record per submit).
+PcNetplayAccum sPadAccum;
 // M3: ring of per-tick hashes so a desync report can dump the desynced
 // frame's sub-hashes, not the latest tick's. GekkoNet frame F maps to hash
 // tick F+1 (ticks are 1-based, frames 0-based). 256 deep: well past the
@@ -654,22 +675,38 @@ PcNetplayInput build_local_input()
 		if (local_ui_open()) in = pc_netplay_input_neutral();
 		return in;
 	}
+	// Physical pad: the merged accumulator (buttons OR'd across every turn
+	// since the last submit, sticks/yaw latest). The driver folds the
+	// current sample in every turn via accum_add_current(), so a tap that
+	// starts and ends between two submit turns is never lost.
+	if (local_ui_open()) {
+		// While the F1 menu is open the local input is neutral, and the
+		// latch is cleared so buttons held before opening do not leak
+		// into the sim after it closes.
+		sPadAccum.reset();
+		return pc_netplay_input_neutral();
+	}
+	return sPadAccum.take();
+}
+
+// B2 residual (fix round 2): fold the current physical pad sample into the
+// accumulator. Called on EVERY kSession turn (submit or stall), so button
+// presses shorter than the submit interval still reach the next submit.
+// The fresh yaw capture keeps the submitted yaw following the live camera
+// (B1); the synced values still win in the sim because inject_input()
+// rewrites the slots before every app->idle().
+void accum_add_current()
+{
+	if (sScriptActive) return; // scripted path consumes one record per submit
+	// B1: fresh capture so the local yaw follows the live camera instead
+	// of freezing at the first injected value.
+	pc_input_log_capture_yaw_fresh();
 	PADStatus* pads = pc_netplay_pad_status();
 	PADStatus s     = pads[0]; // post-PADRead sample (F1 consume applied)
-	PcNetplayInput in;
-	in.buttons    = s.button;
-	in.stickX     = s.stickX;
-	in.stickY     = s.stickY;
-	in.substickX  = s.substickX;
-	in.substickY  = s.substickY;
-	in.triggerL   = s.triggerLeft;
-	in.triggerR   = s.triggerRight;
-	// Local control yaw: this peer's own captain camera slot (host = pad 0,
-	// joiner = pad 1), filled by the M2c pre-sim capture hook just before.
-	if (pc_input_log_yaw_valid(sLocalRole)) in.controlYaw = pc_input_log_yaw_raw(sLocalRole);
-	in.flags = 0;
-	if (local_ui_open()) in = pc_netplay_input_neutral();
-	return in;
+	uint16_t yaw = 0;
+	if (pc_input_log_yaw_valid(sLocalRole)) yaw = pc_input_log_yaw_raw(sLocalRole);
+	sPadAccum.add(s.button, s.stickX, s.stickY, s.substickX, s.substickY,
+	              s.triggerLeft, s.triggerRight, yaw);
 }
 
 void inject_input(int pad, const PcNetplayInput& in)
@@ -787,8 +824,23 @@ void parse_config()
 			std::exit(2);
 		}
 	}
-	sCfg.localDelay = read_unsigned_env("PIKMIN_NETPLAY_DELAY", 2);
-	if (sCfg.localDelay > 8) sCfg.localDelay = 8;
+	// Fix round 2: PIKMIN_NETPLAY_DELAY=auto measures the handshake RTT and
+	// picks ceil((RTT/2) / 33.3 ms) + 1 (clamped 1..8) after the handshake.
+	// Until then localDelay stays at the 2-frame placeholder, which is what
+	// the config hash covers (both peers hash the same placeholder, so an
+	// asymmetric link cannot refuse on config; the chosen values are
+	// logged at session start).
+	if (const char* d = getenv_nonempty("PIKMIN_NETPLAY_DELAY")) {
+		if (std::strcmp(d, "auto") == 0) {
+			sCfg.delayAuto  = true;
+			sCfg.localDelay = 2;
+		} else {
+			sCfg.localDelay = read_unsigned_env("PIKMIN_NETPLAY_DELAY", 2);
+			if (sCfg.localDelay > 8) sCfg.localDelay = 8;
+		}
+	} else {
+		sCfg.localDelay = 2;
+	}
 	sCfg.seed = read_u32_env("PIKMIN_NETPLAY_SEED", 0);
 	const char* bootCli = argv_value(sArgc, sArgv, "--randomizer-seed");
 	sCfg.bootstrapPath  = bootCli != nullptr ? bootCli : "bootstrap.txt";
@@ -903,7 +955,8 @@ bool handshake_pump()
 		send_hello_msg(kHsHello, 0);
 		// Re-send our ack so a lost ack cannot stall the peer.
 		if (sSentAck) send_hello_msg(kHsAck, 0);
-		sHsLastSendMs = now;
+		sHsLastSendMs      = now;
+		sHsLastHelloSendMs = now; // RTT reference for DELAY=auto
 	}
 	std::vector<pc_netplay_transport::UdpSocket::Datagram> grams;
 	if (sLink != nullptr) grams = sLink->drain_handshake();
@@ -945,7 +998,17 @@ bool handshake_pump()
 				send_hello_msg(kHsAck, 0);
 				sSentAck = true;
 			}
-			if (type == kHsAck) sGotAck = true;
+			if (type == kHsAck) {
+				sGotAck = true;
+				// Fix round 2 (DELAY=auto): the peer sends its Ack
+				// immediately on Hello receipt, so now - last Hello send
+				// is one RTT sample; keep the minimum.
+				if (sHsLastHelloSendMs > 0) {
+					const double sample = now - sHsLastHelloSendMs;
+					if (sample >= 0 && (sHsRttMs < 0 || sample < sHsRttMs))
+						sHsRttMs = sample;
+				}
+			}
 		}
 	}
 	return sSentAck && sGotAck;
@@ -959,6 +1022,11 @@ bool handshake_pump()
 // and re-acking keeps one lost datagram from hanging the session. The lossy
 // test wrapper covers only channel 0x02, so handshake loss never showed in
 // the pair runs; this path is exercised by the handshake logic itself.
+// n1 (fix round 2): answer only Hellos. Answering an incoming Ack with an
+// Ack made Acks bounce between the peers for the whole session (each side's
+// final Hello+Ack burst seeded about two such loops of 108-byte datagrams).
+// A lost Ack still recovers: the peer still in handshake re-sends Hello
+// every 100 ms, and every Hello here gets an Ack.
 void answer_handshake_in_session()
 {
 	if (sLink == nullptr || sSock == nullptr) return;
@@ -972,7 +1040,7 @@ void answer_handshake_in_session()
 		if (!parse_hello_msg(g.payload.data(), g.payload.size(), &type, &proto, &h, &refuse))
 			continue;
 		if (type == kHsRefuse) continue; // session already agreed; ignore
-		if (type != kHsHello && type != kHsAck) continue;
+		if (type != kHsHello) continue;  // n1: never answer an Ack with an Ack
 		// Only answer the known peer (host learns it during the handshake;
 		// the joiner always talks to its configured host).
 		if (sCfg.isHost && sHaveRemote
@@ -1059,6 +1127,29 @@ void start_gekko_session()
 	gekko_set_disconnect_timeout(sGekko, 5000);
 	pc_state_hash_set_netplay_capture(true);
 	load_scripted_file();
+	// Fix round 2: DELAY=auto resolves after the handshake RTT is known.
+	// Full speed needs delay >= ceil(one-way latency / 33.3 ms), plus one
+	// frame of margin (one local submit per Advance: delay frames of local
+	// delay cover that many ticks of round trip). Clamped to 1..8. The
+	// config hash covered the 2-frame placeholder on both peers (see
+	// parse_config), so asymmetric links cannot refuse on config.
+	if (sCfg.delayAuto) {
+		unsigned autoDelay = 2;
+		double oneWayMs    = 0;
+		if (sHsRttMs >= 0) {
+			oneWayMs = sHsRttMs / 2.0;
+			const double slots = oneWayMs / 33.3;
+			unsigned d         = (unsigned)slots + 1; // ceil(slots) + 1 margin
+			if ((double)(unsigned)slots < slots) ++d; // exact ceil, no <cmath>
+			if (d < 1) d = 1;
+			if (d > 8) d = 8;
+			autoDelay = d;
+		}
+		sCfg.localDelay = autoDelay;
+		gekko_set_local_delay(sGekko, sLocalHandle, (unsigned char)sCfg.localDelay);
+		printf("[netplay] auto delay: rtt=%.1fms one-way=%.1fms delay=%u\n", sHsRttMs,
+		       oneWayMs, autoDelay);
+	}
 	printf("[netplay] session started: role=%s localHandle=%d delay=%u seed=%u\n",
 	       sCfg.isHost ? "host/P1" : "joiner/P2", sLocalHandle, sCfg.localDelay, sCfg.seed);
 	printf("[netplay] exe=%s\n", sExeHexStr.c_str());
@@ -1198,11 +1289,15 @@ int handle_game_events(System* sys, BaseApp* app)
 				const double tps = wallS > 0 ? (double)sAdvances / wallS : 0.0;
 				const double stallPct =
 				    wallS > 0 ? 100.0 * sStallMs / (wallS * 1000.0) : 0.0;
+				// n2: effective tps plus the fraction of 30 Hz slots lost,
+				// so throttled runs cannot hide behind a sleep-free stall %.
+				const double slotLossPct =
+				    tps >= 30.0 ? 0.0 : 100.0 * (1.0 - tps / 30.0);
 				printf("[netplay] exit after %llu ticks\n", (unsigned long long)sSessionTicks);
 				printf("[netplay] script records consumed: %llu/%llu\n",
 				       (unsigned long long)sScriptIdx, (unsigned long long)sScriptTicks);
-				printf("[netplay] wall=%.1fs tps=%.1f stall=%.1f%% (wall-clock)\n", wallS,
-				       tps, stallPct);
+				printf("[netplay] wall=%.1fs tps=%.1f stall=%.1f%% (wall-clock, incl pacing sleep) slot-loss=%.1f%% vs 30Hz\n",
+				       wallS, tps, stallPct, slotLossPct);
 				fflush(stdout);
 				pc_state_hash_flush();
 				stop_session();
@@ -1241,21 +1336,22 @@ int handle_game_events(System* sys, BaseApp* app)
 	}
 	if (sPhase == kSession && sSessionTicks > 0 && sSessionTicks % 300 == 0 && advances > 0) {
 		const double now = now_ms();
-		const double secs = (now - sRunStartMs) / 1000.0;
-		const double tps  = secs > 0 ? (double)sAdvances / secs : 0.0;
-		// M5: wall-clock stall % (time in turns with no Advance over
-		// session wall time). The turn-counter ratio is kept in the log
-		// for continuity but is NOT the stall metric under UNTHROTTLED.
+		// n2: effective tps is Advances over SESSION wall time (the old
+		// code divided by the handshake-start clock, deflating tps), and
+		// the slot-loss fraction 1 - tps/30 is reported alongside the
+		// wall-clock stall % (which now includes the pacing sleep).
 		const double wallS =
 		    (sSessionStartMs > 0) ? (now - sSessionStartMs) / 1000.0 : 0.0;
+		const double tps = wallS > 0 ? (double)sAdvances / wallS : 0.0;
 		const double wallStallPct =
 		    wallS > 0 ? 100.0 * sStallMs / (wallS * 1000.0) : 0.0;
+		const double slotLossPct = tps >= 30.0 ? 0.0 : 100.0 * (1.0 - tps / 30.0);
 		const double turnStallPct =
 		    (sAdvances + sStalls) > 0 ? 100.0 * (double)sStalls / (double)(sAdvances + sStalls) : 0.0;
 		printf("[netplay] tick=%llu adv=%llu stalls=%llu (turn %.1f%%, wall %.1f%%) "
-		       "tps=%.1f ahead=%.2f saves=%llu submitted=%llu\n",
+		       "tps=%.1f (slot loss %.1f%% vs 30Hz) ahead=%.2f saves=%llu submitted=%llu\n",
 		       (unsigned long long)sSessionTicks, (unsigned long long)sAdvances,
-		       (unsigned long long)sStalls, turnStallPct, wallStallPct, tps,
+		       (unsigned long long)sStalls, turnStallPct, wallStallPct, tps, slotLossPct,
 		       gekko_frames_ahead(sGekko), (unsigned long long)sSaves,
 		       (unsigned long long)sSubmitted);
 		fflush(stdout);
@@ -1362,10 +1458,11 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 	if (sGekko != nullptr) {
 		// M1: keep answering late handshake traffic while in session.
 		answer_handshake_in_session();
+		// B2 residual: fold this turn's physical sample into the
+		// accumulator on every turn (submit or stall), so a tap between
+		// two submit turns still reaches the next submit.
+		accum_add_current();
 		if (sGekkoStarted && sSubmitted == sAdvances) {
-			// B1: fresh capture so the local yaw follows the live camera
-			// instead of freezing at the first injected value.
-			pc_input_log_capture_yaw_fresh();
 			PcNetplayInput local = build_local_input();
 			uint8_t wire[16];
 			pc_netplay_input_encode(local, wire);
@@ -1377,14 +1474,6 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 		// 8. Session events.
 		handle_session_events();
 		if (sPhase != kSession) return true; // stopped inside the handlers
-	}
-	if (advances == 0) {
-		++sStalls;
-		// M5: wall-clock stall accounting (fraction of session wall time
-		// spent in turns with no Advance).
-		sStallMs += now_ms() - turnStartMs;
-		// 9. Waiting: no tick. The turn above already pumped the network
-		// (update_session) and window events (PADRead poll).
 	}
 	// Pacing: real-time 30 Hz ticks; unthrottled runs as fast as the
 	// session allows (tests).
@@ -1408,6 +1497,17 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 		} else {
 			sNextTurnMs = 0; // overrun: no catch-up spiral
 		}
+	}
+	if (advances == 0) {
+		++sStalls;
+		// M5/n2: wall-clock stall accounting (fraction of session wall
+		// time spent in turns with no Advance), INCLUDING the pacing
+		// sleep above: the charge runs from turn start to turn end, so
+		// the throttled path reports honest stall % + slot loss instead
+		// of 0.7% at 15.3 tps.
+		sStallMs += now_ms() - turnStartMs;
+		// 9. Waiting: no tick. The turn above already pumped the network
+		// (update_session) and window events (PADRead poll).
 	}
 	return true;
 }

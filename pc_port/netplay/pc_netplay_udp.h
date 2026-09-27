@@ -54,7 +54,7 @@ public:
 	bool bind(uint16_t port);
 	// Local port actually bound (0 when unbound).
 	uint16_t local_port() const { return mLocalPort; }
-	// Sets the default remote for send_payload().
+ 	// Sets the default remote for send_payload().
 	bool set_peer(uint32_t ipHostOrder, uint16_t port);
 	// Sends channel + payload to the peer. Returns false when no peer is
 	// set, the frame exceeds kMaxDatagram, or the send fails.
@@ -74,13 +74,21 @@ public:
 
 	void close();
 
-private:
-	intptr_t mSock = -1;
-	uint16_t mLocalPort = 0;
-	uint32_t mPeerIp = 0;
-	uint16_t mPeerPort = 0;
-	bool mHasPeer = false;
-};
+ private:
+ 	intptr_t mSock = -1;
+ 	uint16_t mLocalPort = 0;
+ 	uint32_t mPeerIp = 0;
+ 	uint16_t mPeerPort = 0;
+ 	bool mHasPeer = false;
+	// Fix round 2 (M1 follow-up): handshake-loss test hook. Drops the first
+	// N handshake-channel (0x01) sends, reporting success to the caller so
+	// the peer must recover via its Hello/Ack resends. N comes from
+	// PIKMIN_NETPLAY_TEST_DROP_HS_FIRST_N (default 0 = no drop). Gekko
+	// traffic (0x02) is never affected.
+	unsigned mHsDropFirstN = 0;
+	unsigned mHsSends = 0;
+	bool mHsDropInit = false;
+ };
 
 // GekkoNet link: a UdpSocket filtered to the gekko channel, exposed as a
 // GekkoNetAdapter. Address blobs are kAddrBytes (IPv4 + port, network

@@ -103,6 +103,7 @@ SCRUB_KEYS = (
     "PIKMIN_NETPLAY_TEST_REORDER_PCT",
     "PIKMIN_NETPLAY_TEST_REORDER_MS",
     "PIKMIN_NETPLAY_HANDSHAKE_TIMEOUT_MS",
+    "PIKMIN_NETPLAY_TEST_DROP_HS_FIRST_N",
 )
 
 
@@ -162,7 +163,8 @@ def main(argv=None):
     p.add_argument("--seed-a", type=int, default=101, help="host local-input gen seed")
     p.add_argument("--seed-b", type=int, default=202, help="joiner local-input gen seed")
     p.add_argument("--netplay-seed", type=int, default=1, help="PIKMIN_NETPLAY_SEED for both")
-    p.add_argument("--delay", type=int, default=2, help="PIKMIN_NETPLAY_DELAY for both")
+    p.add_argument("--delay", type=str, default="2",
+                   help="PIKMIN_NETPLAY_DELAY for both (frames, or 'auto')")
     p.add_argument("--latency-ms", type=float, default=0.0)
     p.add_argument("--jitter-ms", type=float, default=0.0)
     p.add_argument("--loss-pct", type=float, default=0.0)
