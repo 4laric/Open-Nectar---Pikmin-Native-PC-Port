@@ -252,6 +252,10 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_generated_placement.cpp
     pc_port/pc_p2_campaign_goal_probe.cpp
     pc_port/pc_bbft.cpp
+    # Deterministic netplay fixed-step mode, M1 (issue #878). Engine-free TUs;
+    # they join pikmin_pc and the engine-free pc_bbft_test / pc_sim_rng_test.
+    pc_port/netplay/pc_netplay_det.cpp
+    pc_port/netplay/pc_sim_rng.cpp
     # Challenge host-mode engine runtime bridge (#722, ported from #710
     # db245877; #186 review before shared-line landing): the per-tick runtime
     # bridge plus the landed host-state module, linked into pikmin_pc so the
@@ -699,7 +703,7 @@ if(WIN32)
     add_library(bbft_transport STATIC pc_port/bbft/bbft_transport.c)
     target_link_libraries(pikmin_pc PRIVATE bbft_transport ws2_32)
     target_link_libraries(p2_kurage_runtime PRIVATE bbft_transport ws2_32)
-    add_executable(pc_bbft_test pc_port/pc_bbft_test.cpp pc_port/pc_bbft.cpp pc_port/pc_randomizer.cpp pc_port/pc_p2_delivery_host.cpp)
+    add_executable(pc_bbft_test pc_port/pc_bbft_test.cpp pc_port/pc_bbft.cpp pc_port/pc_randomizer.cpp pc_port/pc_p2_delivery_host.cpp pc_port/netplay/pc_netplay_det.cpp pc_port/netplay/pc_sim_rng.cpp)
     add_test(NAME pc_bbft_test COMMAND pc_bbft_test)
     add_test(NAME pc_bbft_background_test COMMAND pc_bbft_test --background)
     add_executable(jaudio_bbft_test pc_port/audio/jaudio_bbft_test.cpp pc_port/audio/jaudio_sink.cpp)
@@ -738,6 +742,22 @@ option(PIKMIN_NATIVE_OPTIMIZE "Use this build machine's CPU instruction set" ON)
 if(PIKMIN_NATIVE_OPTIMIZE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     foreach(target IN LISTS PIKMIN_OPTIMIZED_TARGETS)
         target_compile_options(${target} PRIVATE -march=native)
+    endforeach()
+endif()
+
+# Deterministic netplay build flags, M1 (issue #878). Adds -ffp-contract=off
+# (no fused multiply-add: identical FP results on any CPU running the same
+# binary) and -ftrivial-auto-var-init=zero (no uninitialized-stack garbage in
+# legacy code) to the game code targets. Mutually exclusive with
+# PIKMIN_NATIVE_OPTIMIZE, and OFF by default so the default build's flags are
+# unchanged.
+option(PIKMIN_NETPLAY_BUILD "Deterministic netplay build flags" OFF)
+if(PIKMIN_NETPLAY_BUILD AND PIKMIN_NATIVE_OPTIMIZE)
+    message(FATAL_ERROR "PIKMIN_NETPLAY_BUILD cannot be combined with PIKMIN_NATIVE_OPTIMIZE")
+endif()
+if(PIKMIN_NETPLAY_BUILD AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    foreach(target IN LISTS PIKMIN_OPTIMIZED_TARGETS)
+        target_compile_options(${target} PRIVATE -ffp-contract=off -ftrivial-auto-var-init=zero)
     endforeach()
 endif()
 
@@ -1562,6 +1582,16 @@ if(PIKMIN_BUILD_TESTS)
         pc_port/timing/pc_frame_scheduler.cpp)
     target_compile_options(pc_frame_scheduler_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_frame_scheduler_test COMMAND pc_frame_scheduler_test)
+
+    # Deterministic netplay RNG streams, M1 (issue #878). Host-run; covers
+    # the MSL sequence, state round-trip, stream independence and the
+    # rand() passthrough when deterministic mode is off.
+    add_executable(pc_sim_rng_test
+        pc_port/netplay/pc_sim_rng_test.cpp
+        pc_port/netplay/pc_sim_rng.cpp
+        pc_port/netplay/pc_netplay_det.cpp)
+    target_compile_options(pc_sim_rng_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_sim_rng_test COMMAND pc_sim_rng_test)
 
     add_executable(pc_render_phase_test
         pc_port/timing/pc_render_phase_test.cpp
