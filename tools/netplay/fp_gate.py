@@ -1,22 +1,28 @@
 """FP determinism gate for netplay builds (issue #879, lane m2d).
 
-Usage: fp_gate.py <exe>
+Usage: fp_gate.py [--objdump PATH] <exe> [<exe> ...]
 
-Runs objdump over the linked game executable and FAILS if it finds:
+Runs objdump over the linked game executable(s) and FAILS if it finds:
   - an x87 transcendental instruction (fsin/fcos/fsincos/fpatan/fptan/
     f2xm1/fyl2x/fyl2xp1) -- mingw-w64 libm implements its transcendentals
     with these, and their microcode results can differ between CPU vendors;
+  - an x87 fsqrt anywhere (review M1: the lane's own libm used the CRT
+    sqrt, which is an x87 fsqrt whose rounding depends on the x87
+    precision-control field; the libm now uses SSE sqrtsd only);
+  - a call to a CRT sqrt/sqrtf from inside a pc_netplay_libm function
+    (same M1 issue, caught at call level in case objdump spells it so);
   - an FMA instruction (vfmadd*/vfmsub*/vfnmadd*) -- the netplay build uses
     -ffp-contract=off, so none may appear (the x86-64 baseline has no FMA);
-  - an import of tan/sin/cos/atan/exp/log/pow (any float/double/long-double
-    or atan2/sincos spelling) from msvcrt/ucrt -- e.g. tan resolved to the
-    system DLL, which varies with the Windows version.
+  - an import of tan/sin/cos/atan/exp/log/pow/hypot (any float/double/
+    long-double or atan2/sincos spelling, plus log10/log2/exp2/sinh/cosh/
+    tanh/cbrt/log1p/expm1 families) from msvcrt/ucrt -- e.g. tan resolved
+    to the system DLL, which varies with the Windows version.
 
 Allowed x87 exceptions (explicit symbol + reason; empty today: after the
 software libm there are no transcendental hits left):
   ALLOW = {}  # (symbol, insn) -> reason
 
-Exit 0 when the exe is clean, 1 with diagnostics otherwise. Each hit is
+Exit 0 when every exe is clean, 1 with diagnostics otherwise. Each hit is
 attributed to its symbol via `nm` so the report names the libm function.
 """
 
@@ -27,7 +33,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-X87 = {"fsin", "fcos", "fsincos", "fpatan", "fptan", "f2xm1", "fyl2x", "fyl2xp1"}
+X87 = {"fsin", "fcos", "fsincos", "fpatan", "fptan", "f2xm1", "fyl2x", "fyl2xp1",
+       "fsqrt"}
 
 # (symbol, insn) -> reason. Documents the exceptional hits the gate lets
 # through, e.g. CRT startup helpers. Empty: no exception is needed.
@@ -39,7 +46,26 @@ MATH_IMPORT_STEMS = {
     "tan", "tanf", "sin", "sinf", "cos", "cosf", "sincos", "sincosf",
     "atan", "atanf", "atan2", "atan2f", "asin", "asinf", "acos", "acosf",
     "exp", "expf", "log", "logf", "pow", "powf",
+    "hypot", "hypotf", "log10", "log10f", "log2", "log2f", "exp2", "exp2f",
+    "sinh", "sinhf", "cosh", "coshf", "tanh", "tanhf", "cbrt", "cbrtf",
+    "log1p", "log1pf", "expm1", "expm1f",
 }
+
+# Symbols owned by pc_netplay_libm.c: public entry points plus pc_* helpers.
+# A call to a CRT sqrt from one of these is an M1 regression even if the
+# x87 fsqrt itself lives in another object.
+LIBM_PUBLIC = {
+    "sinf", "cosf", "sincosf", "tanf", "atanf", "atan2f", "asinf", "acosf",
+    "expf", "logf", "log10f", "log2f", "exp2f", "powf", "fmodf", "hypotf",
+    "sqrtf", "sin", "cos", "sincos", "tan", "asin", "acos", "atan", "atan2",
+    "exp", "log", "log10", "log2", "exp2", "pow", "fmod", "hypot", "sqrt",
+}
+
+SQRT_CALL_RE = re.compile(r"\bsqrtf?\b", re.IGNORECASE)
+
+
+def is_libm_owner(sym):
+    return sym.startswith("pc_") or sym in LIBM_PUBLIC
 
 CRT_DLLS = ("msvcrt", "ucrt", "api-ms-win-crt")
 
@@ -52,18 +78,36 @@ def run(cmd):
 
 
 def main(argv):
-    if len(argv) != 2:
+    args = list(argv[1:])
+    objdump = None
+    if args[:1] == ["--objdump"]:
+        if len(args) < 3:
+            print(__doc__)
+            return 2
+        objdump = args[1]
+        args = args[2:]
+    if not args:
         print(__doc__)
         return 2
-    exe = Path(argv[1])
+    if objdump is None:
+        objdump = shutil.which("objdump")
+    if not objdump:
+        print("fp_gate: FAIL: objdump not on PATH (msys2 mingw64 provides it;"
+              " cmake passes ${CMAKE_OBJDUMP} via --objdump)")
+        return 1
+
+    overall_fail = 0
+    for exe_arg in args:
+        rc = gate_one(Path(exe_arg), objdump)
+        if rc != 0:
+            overall_fail = 1
+    return overall_fail
+
+
+def gate_one(exe, objdump):
     if not exe.is_file():
         print(f"fp_gate: FAIL: no such file: {exe}")
         return 1
-    objdump = shutil.which("objdump")
-    if not objdump:
-        print("fp_gate: FAIL: objdump not on PATH (msys2 mingw64 provides it)")
-        return 1
-
     dis = run([objdump, "-d", str(exe)])
     syms = []
     try:
@@ -100,9 +144,17 @@ def main(argv):
             sym = owner(addr)
             if (sym, insn) in ALLOW:
                 continue
-            kind = "x87-transcendental" if insn in X87 else "fma"
+            kind = "x87" if insn in X87 else "fma"
             fails.append(f"{kind}: {insn} at {m.group(1)} in <{sym}>")
             counts[insn] = counts.get(insn, 0) + 1
+            continue
+        # Review M1, call-level backstop: a CRT sqrt/sqrtf call from inside
+        # a pc_netplay_libm function means the SSE helper was bypassed.
+        if insn in ("call", "callq", "jmp"):
+            addr = int(m.group(1), 16)
+            sym = owner(addr)
+            if is_libm_owner(sym) and SQRT_CALL_RE.search(line):
+                fails.append(f"libm-sqrt-call: {line.strip()} in <{sym}>")
 
     imports = run([objdump, "-p", str(exe)])
     cur_dll = ""
@@ -131,7 +183,7 @@ def main(argv):
         if counts:
             print("fp_gate: insn counts: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
         return 1
-    print(f"fp_gate: PASS: {exe} (no x87 transcendentals, no FMA, no msvcrt math imports)")
+    print(f"fp_gate: PASS: {exe} (no x87, no FMA, no msvcrt math imports, no libm sqrt calls)")
     return 0
 
 
