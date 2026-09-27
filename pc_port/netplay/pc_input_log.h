@@ -1,54 +1,73 @@
 #pragma once
-// Input record/replay for the netplay determinism harness (issue #878).
+// Input record/replay for the netplay determinism harness (issues #878, #879).
 //
-// File format (little-endian binary, "PKNI" v1):
+// File format (little-endian binary, "PKNI" v1/v2):
 //   offset  size  field
 //   0       4     magic: 'P' 'K' 'N' 'I' (0x50, 0x4B, 0x4E, 0x49)
-//   4       2     version: u16, currently 1
+//   4       2     version: u16, 1 or 2
 //   6       2     pad count: u16, currently 4
-//   8       2     record size: u16, bytes per tick (currently 44)
-//   10      44*N  tick records, one per tick, tick index = file order
+//   8       2     record size: u16, bytes per tick (44 for v1, 56 for v2)
+//   10      N*rec tick records, one per tick, tick index = file order
 //
-// Each tick record holds the 4 pads in channel order. Each pad is 11 bytes,
+// Each v1 tick record holds the 4 pads in channel order, 11 bytes each
+// (the M1 PADStatus fields). Each v2 tick record holds the 4 pads in
+// channel order, 14 bytes each: the same 11 PADStatus bytes followed by
+//   11      2     controlYaw: u16 LE, camera control yaw in 1/65536 turns
+//   13      1     flags: u8, reserved, always 0
 // every field serialised explicitly (never a raw struct memcpy, so the file
-// is stable across compilers and struct layouts):
-//   offset  size  field
-//   0       2     button: u16 LE (PAD_BUTTON_* / PAD_TRIGGER_* bits)
-//   2       1     stickX: s8
-//   3       1     stickY: s8
-//   4       1     substickX (C-stick X): s8
-//   5       1     substickY (C-stick Y): s8
-//   6       1     triggerLeft: u8
-//   7       1     triggerRight: u8
-//   8       1     analogA: u8
-//   9       1     analogB: u8
-//   10      1     err: s8 (0 = connected, -1 = no controller, ...)
+// is stable across compilers and struct layouts).
+//
+// Control yaw (issue #879): in netplay deterministic mode the camera yaw
+// each player saw when they pushed the stick is part of that player's
+// per-tick input. Quantisation is u16 in 1/65536 turns:
+//   yaw = round(wrap(angle / 2pi) * 65536) & 0xFFFF
+//   angle = yaw * 2pi / 65536   (0 .. 2pi, congruent mod 2pi)
+// One LSB is ~0.0055 degrees, far below stick noise, while 16 bits keep
+// the packet small (report section 2d budgets u16 yaw + u8 flags). The sim
+// reconstructs sin/cos with the same sinf/cosf the rest of the engine uses
+// (Matrix4f::makeRotate(angle) is sinf/cosf internally), so lane m2d can
+// swap in a deterministic libm at that one point. The basis is always
+// built from the quantised value, never from the live float, so record
+// and replay compute bit-identical values.
+//
+// Flags byte: reserved, always 0. Side channels that are pure buttons
+// (lock-on / charge edges) are neutralised in det mode rather than carried
+// here; see the lockout table in the m2c handoff.
 //
 // Runtime behaviour:
 //   PIKMIN_INPUT_RECORD=<file> (or --input-record <file>): on each tick,
-//     append the 4 PADStatus records.
+//     append the 4 PADStatus records plus yaw/flags. Always writes v2.
 //   PIKMIN_INPUT_REPLAY=<file> (or --input-replay <file>): on each tick,
-//     overwrite the 4 pads with the recorded values for that tick index.
-//     This happens after PADRead, so replay bypasses local window-focus
-//     gating on purpose. Past the end of the file, neutral pads are fed
-//     (all zeros; err kept connected (0) for pad 0, no-controller (-1) for
-//     pads 1-3). A replay that was explicitly requested but cannot be
-//     loaded (missing file, truncated header, bad magic, unsupported
-//     version) prints an error and exits the process with code 3, so a
-//     harness run can never mistake an unreplayed session for a replay.
-//   Record and replay may be combined: when both are set, the record is
-//     taken after the replay overwrite, so recording a replayed run must
-//     reproduce the replay file byte-for-byte. The replay is fully loaded
-//     into memory before the record file is opened, so record and replay
-//     may name the same path for an identity check.
-//   Coverage is PADStatus only: scripted overrides that take precedence in
-//     ControllerMgr::updateController (pc_p2_input_script_override and the
-//     autoplay bot that feeds it), mouse/cursor, window-focus gating and
-//     edges derived elsewhere are NOT recorded or replayed. A fixture's
+//     overwrite the 4 pads with the recorded values for that tick index,
+//     and feed the recorded yaw to the sim (v2) or fall back to the live
+//     camera (v1, as today). This happens after PADRead, so replay bypasses
+//     local window-focus gating on purpose. Past the end of the file,
+//     neutral pads are fed (all zeros; err kept connected (0) for pad 0,
+//     no-controller (-1) for pads 1-3) and the yaw falls back to live.
+//     A replay that was explicitly requested but cannot be loaded (missing
+//     file, truncated header, bad magic, unsupported version) prints an
+//     error and exits the process with code 3, so a harness run can never
+//     mistake an unreplayed session for a replay.
+//   Record and replay may be combined: the record is written after the
+//     tick's simulation from the replayed pads and the yaw the sim actually
+//     used, so recording a replayed v2 run reproduces the replay file
+//     byte-for-byte. The replay is fully loaded into memory before the
+//     record file is opened, so record and replay may name the same path
+//     for an identity check.
+//   Coverage is PADStatus plus yaw/flags: scripted overrides that take
+//     precedence in ControllerMgr::updateController (pc_p2_input_script_
+//     override and the autoplay bot that feeds it), mouse/cursor, window-
+//     focus gating and edges derived elsewhere are NOT recorded or
+//     replayed, except through the det-mode lockout (neutral). A fixture's
 //     script override silently defeats a replay; keep it unset for
 //     determinism runs.
-//   With neither switch set, pc_input_log_tick() is a no-op: no files are
-//     touched, no log lines are printed, the RNG sequence is unchanged.
+//   With neither switch set, pc_input_log_tick() and pc_input_log_tick_end()
+//     are no-ops: no files are touched, no log lines are printed, the RNG
+//     sequence is unchanged.
+//
+// Tick split: pc_input_log_tick() runs before the sim (after PADRead);
+// pc_input_log_tick_end() runs after the sim and performs the record
+// write, so the recorded yaw is the quantised value the sim used.
 
 #include <cstddef>
 #include <cstdint>
@@ -65,28 +84,45 @@ struct PcInputPad {
 	uint8_t analogA;
 	uint8_t analogB;
 	int8_t err;
+	// v2 only; zero for v1 decodes.
+	uint16_t controlYaw;
+	uint8_t flags;
 };
 
 namespace pc_input_log {
-constexpr uint8_t kMagic[4]     = { 'P', 'K', 'N', 'I' };
-constexpr uint16_t kVersion     = 1;
-constexpr uint16_t kPadCount    = 4;
-constexpr size_t kPadBytes      = 11;
-constexpr size_t kRecordBytes   = kPadCount * kPadBytes; // 44
-constexpr size_t kHeaderBytes   = 10;
-constexpr int8_t kErrConnected  = 0;
+constexpr uint8_t kMagic[4]       = { 'P', 'K', 'N', 'I' };
+constexpr uint16_t kVersion       = 2;
+constexpr uint16_t kPadCount      = 4;
+constexpr size_t kPadBytes        = 14;
+constexpr size_t kRecordBytes     = kPadCount * kPadBytes; // 56
+constexpr size_t kHeaderBytes     = 10;
+constexpr int8_t kErrConnected    = 0;
 constexpr int8_t kErrNoController = -1;
+// v1 compat (M1 files).
+constexpr uint16_t kVersionV1     = 1;
+constexpr size_t kPadBytesV1      = 11;
+constexpr size_t kRecordBytesV1   = kPadCount * kPadBytesV1; // 44
+// Yaw: 1/65536 turns per LSB.
+constexpr float kYawTurnsToRad = 6.28318530717958647692f / 65536.0f;
+// Flags: reserved, always zero.
+constexpr uint8_t kFlagsNone = 0;
 } // namespace pc_input_log
 
-// Pure encode/decode API (no globals, no files; host-testable).
-// Encodes 4 pads into exactly 44 bytes. Returns bytes written (44).
-size_t pc_input_log_encode_tick(const PcInputPad pads[4], uint8_t out[44]);
+// Pure encode/decode API, v2 (no globals, no files; host-testable).
+// Encodes 4 pads into exactly 56 bytes. Returns bytes written (56).
+size_t pc_input_log_encode_tick(const PcInputPad pads[4], uint8_t out[56]);
 
-// Decodes 4 pads from the first 44 bytes. Returns false when avail < 44.
+// Decodes 4 pads from the first 56 bytes. Returns false when avail < 56.
 bool pc_input_log_decode_tick(const uint8_t* data, size_t avail, PcInputPad pads[4]);
 
-// Appends the 10-byte header to out.
+// v1 compat: 44-byte records; encode ignores controlYaw/flags, decode sets
+// controlYaw = 0, flags = 0.
+size_t pc_input_log_encode_tick_v1(const PcInputPad pads[4], uint8_t out[44]);
+bool pc_input_log_decode_tick_v1(const uint8_t* data, size_t avail, PcInputPad pads[4]);
+
+// Appends the 10-byte header to out (v2; use version/worker for v1).
 void pc_input_log_write_header(std::vector<uint8_t>& out);
+void pc_input_log_write_header_v1(std::vector<uint8_t>& out);
 
 enum PcInputHeaderResult {
 	PC_INPUT_HEADER_OK          = 0,
@@ -95,10 +131,18 @@ enum PcInputHeaderResult {
 	PC_INPUT_HEADER_UNSUPPORTED = 3, // version, pad count or record size mismatch
 };
 
-// Validates the 10-byte header at data. version/padCount/recordSize are set
-// only on PC_INPUT_HEADER_OK.
+// Validates the 10-byte header at data. Accepts v1 (1/4/44) and v2
+// (2/4/56); version/padCount/recordSize are set only on
+// PC_INPUT_HEADER_OK.
 PcInputHeaderResult pc_input_log_read_header(const uint8_t* data, size_t len, uint16_t& version,
                                              uint16_t& padCount, uint16_t& recordSize);
+
+// Yaw helpers (pure, host-testable). Uses the same sinf/cosf the engine's
+// Matrix4f::makeRotate(angle) uses, so a deterministic libm swap covers
+// both at once (lane m2d).
+uint16_t pc_input_log_yaw_quantise(float angleRad);
+float pc_input_log_yaw_to_angle(uint16_t yaw);
+void pc_input_log_yaw_sincos(uint16_t yaw, float* sinYaw, float* cosYaw);
 
 // Runtime API (engine). argv capture must happen before the first tick
 // (pc_main calls it at startup); env vars are read lazily on the first tick.
@@ -106,6 +150,32 @@ void pc_input_log_notify_argv(int argc, char** argv);
 
 // Per-tick hook: call after PADRead (after the hold check), before the sim.
 void pc_input_log_tick(void);
+
+// Post-tick hook: call after app->idle() returns, before/after the state
+// hash. Writes the record for the tick that just simulated.
+void pc_input_log_tick_end(void);
+
+// Per-pad yaw for the current tick, for the sim (issue #879).
+// Returns true and fills sin/cos when a yaw is set for this tick (v2 replay
+// value pre-sim, or the live-quantised value a Navi already stored
+// this tick); false when not set (switch off, v1 fallback pre-capture,
+// past-end-of-file). The Navi input path captures the live camera yaw,
+// quantises it and stores it on the first false, so record and replay
+// share one basis construction.
+bool pc_netplay_control_yaw(int pad, float* sinYaw, float* cosYaw);
+
+// Store the quantised live yaw for pad (called by the Navi input path on
+// the first pc_netplay_control_yaw miss in det/record mode).
+void pc_input_log_yaw_set(int pad, uint16_t yaw, uint8_t flags);
+bool pc_input_log_yaw_valid(int pad);
+uint16_t pc_input_log_yaw_raw(int pad);
+uint8_t pc_input_log_yaw_flags(int pad);
+
+// Whether record / replay is active this run (for the Navi capture gate:
+// store the live yaw when det mode will use it, or when a record needs it,
+// and do no extra work otherwise so the switch-off path is untouched).
+bool pc_input_log_is_record_active(void);
+bool pc_input_log_is_replay_active(void);
 
 // Flush the record file, if any. Called every 300 ticks and on exit.
 
