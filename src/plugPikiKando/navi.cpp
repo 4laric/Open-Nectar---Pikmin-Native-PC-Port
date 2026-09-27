@@ -20,6 +20,7 @@
 #include "pc_gyro.h"
 #include "netplay/pc_netplay_det.h"
 #include "netplay/pc_input_log.h"
+#include "netplay/pc_netplay_present.h"
 #include "settings/pc_settings.h"
 #include <cstdio>
 #include "mods/pc_hd_models.h"
@@ -2955,6 +2956,12 @@ void Navi::refresh(Graphics& gfx)
 		f32 unusedVal2 = cosf(mFaceDirection);
 		STACK_PAD_VAR(1);
 
+#if defined(PIKI_PC_PORT)
+		// M2b: mCursorWorldPos is sim state (whistle/lock-on/swarm read it);
+		// compute in the authoritative pass only. Presentation draws the
+		// cursor from the stored mWorldMtx with the local camera.
+		if (!pc_netplay_present_two_pass_active() || pc_render_is_authoritative()) {
+#endif
 		mCursorWorldPos   = mCursorPosition + mSRT.t;
 		mCursorWorldPos.y = mapMgr->getMinY(mCursorWorldPos.x, mCursorWorldPos.z, true) + 1.0f;
 
@@ -3020,6 +3027,9 @@ void Navi::refresh(Graphics& gfx)
 			mCursorTrailEfx->setEmitting(moving);
 			if (cursorShown) mCursorTrailLastPos = trailPos;
 		}
+#if defined(PIKI_PC_PORT)
+		} // authoritative cursor/trail writes
+#endif
 
 		if (mIsCursorVisible && getCurrState()->getID() != NAVISTATE_DemoSunset) {
 			gfx.useMatrix(Matrix4f::ident, 0);
@@ -3169,7 +3179,10 @@ bool Navi::pcDrawAsPikmin(Graphics& gfx)
 
 	Vector3f tip(6.0f, 0.0f, 0.0f);
 	obj->mShape->calcJointWorldPos(gfx, 6, tip);
-	mPcPikiLeafTip = tip;
+	// M2b: leaf-tip anchor is authoritative-only.
+	if (!pc_netplay_present_two_pass_active() || pc_render_is_authoritative()) {
+		mPcPikiLeafTip = tip;
+	}
 	return true;
 }
 #endif
@@ -3207,6 +3220,11 @@ void Navi::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 	if (tinted) pc_gfx_clear_mat_color_tint();
 #endif
 	mCollInfo->updateInfo(gfx, false);
+#if defined(PIKI_PC_PORT)
+	// M2b: effect anchors are authoritative-only; presentation reuses the
+	// stored positions for drawing.
+	if (!pc_netplay_present_two_pass_active() || pc_render_is_authoritative()) {
+#endif
 	CollPart* antenna = mCollInfo->getSphere('ante');
 	if (antenna) {
 		mNaviLightPosition = antenna->mCentre;
@@ -3221,6 +3239,11 @@ void Navi::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 	if (pc_captain_piki_color(pcCaptain()) >= 0 && !(mNaviID == 0 && pc_first_person_active())) {
 		mNaviLightPosition = mPcPikiLeafTip;
 	}
+	}
+#endif
+#if defined(PIKI_PC_PORT)
+	// M2b: anchor writes are authoritative-only (see above).
+	if (!pc_netplay_present_two_pass_active() || pc_render_is_authoritative()) {
 #endif
 	if (mNaviLightEfx) {
 		mNaviLightEfx->updatePos(mNaviLightPosition);
@@ -3228,6 +3251,9 @@ void Navi::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 	if (mNaviLightGlowEfx) {
 		mNaviLightGlowEfx->updatePos(mNaviLightPosition);
 	}
+#if defined(PIKI_PC_PORT)
+	}
+#endif
 }
 
 /**

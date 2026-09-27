@@ -2,6 +2,8 @@
 #include "pc_p2_white.h"
 #if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_policy.h"
+#include "netplay/pc_netplay_present.h"
+#include "timing/pc_render_phase.h"
 #else
 #define pc_netplay_sim_visible(x) (x)
 #define pc_netplay_sim_lod_distance(x) (x)
@@ -477,7 +479,14 @@ PcHdModelId ViewPiki::hdHappaModel() const
 void ViewPiki::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 {
 	Vector3f pos;
+#if defined(PIKI_PC_PORT)
+	// M2b: sim-derived positions are authoritative-only; presentation draws
+	// from the stored values.
+	const bool authDemo = !pc_netplay_present_two_pass_active() || pc_render_is_authoritative();
+	if (authDemo && (AIPerf::optLevel <= 2 || mOptUpdateContext.updatable())) {
+#else
 	if (AIPerf::optLevel <= 2 || mOptUpdateContext.updatable()) {
+#endif
 		pos.set(0.0f, 0.0f, 0.0f);
 		mPikiShape->mShape->calcJointWorldPos(gfx, 0, pos);
 		mShadowPos = pos;
@@ -494,8 +503,14 @@ void ViewPiki::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 	} else {
 		pos.set(6.0f, 0.0f, 0.0f);
 	}
+#if defined(PIKI_PC_PORT)
+	if (authDemo) {
+#endif
 	mPikiShape->mShape->calcJointWorldPos(gfx, 6, pos);
 	mEffectPos = pos;
+#if defined(PIKI_PC_PORT)
+	}
+#endif
 
 	// M1 deterministic netplay: damage flash is draw-only, so it draws from
 	// the cosmetic stream and never perturbs the sim stream.

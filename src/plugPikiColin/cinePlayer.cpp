@@ -16,6 +16,8 @@
 #include "zen/Math.h"
 #ifdef PIKI_PC_PORT
 #include "gl/pc_gfx.h"
+#include "netplay/pc_netplay_present.h"
+#include "timing/pc_render_phase.h"
 #endif
 
 /**
@@ -1025,7 +1027,14 @@ void ActorInstance::refresh(immut Matrix4f& mtx, Graphics& gfx, f32* p3)
 		if (p3) {
 			mAnimator.mAnimationCounter = *p3;
 		} else {
+#if defined(PIKI_PC_PORT)
+			// M2b: movie time advances in the authoritative pass only.
+			if (!pc_netplay_present_two_pass_active() || pc_render_is_authoritative()) {
+#endif
 			mAnimator.animate(30.0f);
+#if defined(PIKI_PC_PORT)
+			}
+#endif
 		}
 		mAnimator.updateContext();
 		b      = mAnimator.mAnimationCounter;
@@ -1062,7 +1071,14 @@ void ActorInstance::refresh(immut Matrix4f& mtx, Graphics& gfx, f32* p3)
 		if (check1) {
 			Vector3f pos(0.0f, 0.0f, 0.0f);
 			mActiveActor->mModel->calcJointWorldPos(gfx, 0, pos);
+#if defined(PIKI_PC_PORT)
+			// M2b: cutscene event keys are sim; presentation skips them.
+			if (!pc_netplay_present_two_pass_active() || pc_render_is_authoritative()) {
+#endif
 			checkEventKeys(a, b, pos);
+#if defined(PIKI_PC_PORT)
+			}
+#endif
 		}
 
 		Matrix4f animMtx = mActiveActor->mModel->getAnimMatrix(0);
@@ -1250,7 +1266,13 @@ void ActorInstance::refresh(immut Matrix4f& mtx, Graphics& gfx, f32* p3)
 	if (check1) {
 		Vector3f pos(0.0f, 0.0f, 0.0f);
 		mActiveActor->mModel->calcJointWorldPos(gfx, 0, pos);
+#if defined(PIKI_PC_PORT)
+		if (!pc_netplay_present_two_pass_active() || pc_render_is_authoritative()) {
+#endif
 		checkEventKeys(a, b, pos);
+#if defined(PIKI_PC_PORT)
+		}
+#endif
 	}
 
 #if defined(PIKI_PC_PORT)
