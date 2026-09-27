@@ -902,6 +902,16 @@ add_executable(p2_otakara_move_test
 target_include_directories(p2_otakara_move_test PRIVATE pc_port)
 target_compile_options(p2_otakara_move_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_otakara_move_test COMMAND p2_otakara_move_test)
+# #884: registered Dweevils (59-62, 93) skip the P1 Chappy host squash (thrown-
+# landing smash and InteractPress) like source OtakaraBase (no pressCallBack);
+# policy is engine-free, the hook wiring is checked against the source text.
+add_executable(p2_otakara_press_test
+    tools/p2_otakara_press_test.cpp)
+target_include_directories(p2_otakara_press_test PRIVATE pc_port)
+target_compile_options(p2_otakara_press_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+target_compile_definitions(p2_otakara_press_test PRIVATE
+    P2_OTAKARA_PRESS_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
+add_test(NAME p2_otakara_press_test COMMAND p2_otakara_press_test)
 
 # wf7 dweevil-impl (#871): dead-Dweevil clip choice is engine-free and covers
 # all four species 59-62 (dead forces dead, never attack1).

@@ -48,6 +48,7 @@
 #include "pc_p2_otakara.h"
 #include "pc_p2_otakara_fx.h"
 #include "pc_p2_otakara_move.h"
+#include "pc_p2_otakara_press_policy.h"
 #include "pc_p2_dweevil_policy.h"
 #include "pc_p2_bombsarai_blast.h"
 #include "pc_p2_species.h"
@@ -176,6 +177,10 @@ struct Otakara {
     unsigned generator = 0;
     bool deathSeamLogged = false;
     bool bombDetonated = false;
+    // P2_OTAKARA_PRESS once-per-press gate (pc_p2_otakara_press_policy.h).
+    const void* lastPresser = nullptr;
+    float sincePress = 1.0e6f;
+    unsigned pressCount = 0;
 };
 
 std::map<PelletView*, Otakara> actors;
@@ -665,6 +670,50 @@ void pc_p2_otakara_attack(BTeki* actor, Creature* owner, const char* interaction
     }
 }
 
+namespace {
+const char* presserName(Creature* presser) {
+    if (!presser) return "none";
+    if (presser->isPiki()) return colorName(static_cast<Piki*>(presser)->mColor);
+    if (presser->mObjType == OBJTYPE_Navi) return "navi";
+    if (presser->mObjType == OBJTYPE_Teki) return "teki";
+    return "creature";
+}
+
+// Shared body of the two host squash intercepts. The source decision
+// (pc_p2_otakara_press_policy.h) consumes the press with no damage, no
+// addDamage/mFlickTimer tick and no BombOtakara forceBomb; the presser Pikmin
+// keeps its own P1 flying-collision path (pikiState.cpp:2205-2240: startStick +
+// PikiAction::Attack), matching the P2 latch (pikiState.cpp:2335-2342).
+bool interceptPress(BTeki* actor, Creature* presser, p2otakarapress::Path path) {
+    if (!ready || !actor) return false;
+    auto it = actors.find(static_cast<PelletView*>(actor));
+    const bool registered = it != actors.end();
+    const p2otakarapress::Decision d = p2otakarapress::decide(registered, path);
+    if (!d.consume) return false;
+    Otakara& s = it->second;
+    if (p2otakarapress::shouldLog(s.lastPresser, s.sincePress, presser)) {
+        ++s.pressCount;
+        std::printf("P2_OTAKARA_PRESS generator=%u source_id=%d path=%s presser=%s outcome=%s "
+                    "damage=%.1f counts_as_hit=%d bomb=%d health=%.1f state=%s press=%u\n",
+                    genOf(actor), s.species, p2otakarapress::pathName(path), presserName(presser),
+                    d.outcome, d.damage, d.countsAsHit ? 1 : 0, d.detonatesBomb ? 1 : 0,
+                    actor->mHealth, stateName(s.state), s.pressCount);
+        std::fflush(stdout);
+    }
+    s.lastPresser = presser;
+    s.sincePress = 0.0f;
+    return true;
+}
+} // namespace
+
+bool pc_p2_otakara_pressed(BTeki* actor, Creature* presser) {
+    return interceptPress(actor, presser, p2otakarapress::Path::HostPress);
+}
+
+bool pc_p2_otakara_smashed(BTeki* actor, Creature* presser) {
+    return interceptPress(actor, presser, p2otakarapress::Path::ThrownLanding);
+}
+
 unsigned long pc_p2_otakara_count() { return (unsigned long)actors.size(); }
 bool pc_p2_otakara_registered(BTeki* actor) {
     return actors.count(static_cast<PelletView*>(actor)) != 0;
@@ -918,6 +967,7 @@ void pc_p2_otakara_update(BTeki* actor) {
     Otakara& s = it->second;
     const float dt = gsys->getFrameTime();
     if (dt <= 0.0f || dt > 0.5f) return;
+    s.sincePress += dt;
     const Vector3f pos = actor->getPosition();
     const unsigned generator = genOf(actor);
 

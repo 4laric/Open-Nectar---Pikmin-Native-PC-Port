@@ -11,6 +11,7 @@
 #include "pc_p2_dangomushi.h"
 #include "pc_p2_long_legs.h"
 #include "pc_p2_snakejoint.h"
+#include "pc_p2_otakara.h"
 #endif
 
 /**
@@ -123,6 +124,9 @@ bool InteractPress::actTeki(Teki* teki) immut
 	if (pc_p2_hardlanes_fuefuki_pressed(teki, mOwner)) return true;
 	if (pc_p2_kogane_pressed(teki, mOwner)) {
 		return true; // registered beetles flip instead of the host pressed state
+	}
+	if (pc_p2_otakara_pressed(teki, mOwner)) {
+		return true; // #884: Dweevils have no source pressCallBack; no host squash
 	}
 #endif
 	teki->eventPerformed(TekiEvent(TekiEventType::Pressed, teki, mOwner));
