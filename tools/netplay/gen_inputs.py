@@ -11,6 +11,7 @@ and never opens menus. Pads 1-3 are neutral (no controller).
 """
 
 import argparse
+import math
 import random
 import struct
 import sys
@@ -62,8 +63,6 @@ def gen_ticks(nticks: int, seed: int):
             else:
                 ang = rng.uniform(0, 2 * 3.141592653589793)
                 mag = rng.randint(40, STICK_MAX)
-                import math
-
                 wx = int(round(mag * math.cos(ang)))
                 wy = int(round(mag * math.sin(ang)))
             leg_left = rng.randint(20, 90)

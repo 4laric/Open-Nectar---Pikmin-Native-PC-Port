@@ -57,6 +57,8 @@ def main(argv=None):
     p.add_argument("--preroll-rand", type=int, default=0)
     p.add_argument("--timeout", type=float, default=600)
     p.add_argument("--env", nargs="*", default=[], metavar="K=V")
+    p.add_argument("--record", type=Path, default=None,
+                   help="also record inputs while replaying (identity check: must equal --replay)")
     p.add_argument("--profile", default="foh-day2")
     p.add_argument("--exe-args", nargs="*", default=[])
     a = p.parse_args(argv)
@@ -103,8 +105,20 @@ def main(argv=None):
     thread = threading.Thread(target=refresh)
     thread.start()
 
-    env = dict(
-        os.environ,
+    env = dict(os.environ)
+    # A stray PIKMIN_* netplay switch in the caller's environment must never
+    # leak into the run; the scratch idle_default.py scrubs these and so do we.
+    for key in (
+        "PIKMIN_INPUT_RECORD",
+        "PIKMIN_INPUT_REPLAY",
+        "PIKMIN_STATE_HASH_LOG",
+        "PIKMIN_NETPLAY_EXIT_AFTER_TICKS",
+        "PIKMIN_NETPLAY_TEST_PREROLL_RAND",
+        "PIKMIN_NETPLAY_DETERMINISTIC",
+        "PIKMIN_NETPLAY_UNTHROTTLED",
+    ):
+        env.pop(key, None)
+    env.update(
         PIKMIN_RANDOMIZER_TEST_BACKGROUND="1",
         SDL_AUDIODRIVER="dummy",
         PIKMIN_NETPLAY_DETERMINISTIC="1",
@@ -114,6 +128,8 @@ def main(argv=None):
         PIKMIN_NETPLAY_EXIT_AFTER_TICKS=str(a.ticks),
         NECTAR_SAVE_DIR=str(save_dir),
     )
+    if a.record is not None:
+        env["PIKMIN_INPUT_RECORD"] = str(a.record.resolve())
     if a.preroll_rand:
         env["PIKMIN_NETPLAY_TEST_PREROLL_RAND"] = str(a.preroll_rand)
     env.update(parse_kv(a.env, "env"))
@@ -127,23 +143,25 @@ def main(argv=None):
         startup.wShowWindow = 0
 
     start = time.time()
-    proc = subprocess.Popen(
-        cmd, cwd=str(run), env=env, startupinfo=startup,
-        stdout=open(stdout_log, "w"), stderr=subprocess.STDOUT,
-    )
-    try:
-        rc = proc.wait(timeout=a.timeout)
-    except subprocess.TimeoutExpired:
-        # Only our own child PID is ever signalled.
-        proc.kill()
+    rc = 1
+    with open(stdout_log, "w") as child_out:
+        proc = subprocess.Popen(
+            cmd, cwd=str(run), env=env, startupinfo=startup,
+            stdout=child_out, stderr=subprocess.STDOUT,
+        )
         try:
-            rc = proc.wait(timeout=30)
+            rc = proc.wait(timeout=a.timeout)
         except subprocess.TimeoutExpired:
-            rc = 124
-        print(f"run_replay: timeout after {a.timeout}s, killed pid {proc.pid}")
-    finally:
-        done.set()
-        thread.join()
+            # Only our own child PID is ever signalled.
+            proc.kill()
+            try:
+                rc = proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                rc = 124
+            print(f"run_replay: timeout after {a.timeout}s, killed pid {proc.pid}")
+        finally:
+            done.set()
+            thread.join()
     secs = time.time() - start
 
     nlines = 0
@@ -154,6 +172,25 @@ def main(argv=None):
     print(f"run_replay: exit={rc} ticks={nlines}/{a.ticks} time={secs:.1f}s tps={tps:.1f}")
     print(f"STDOUT_LOG={stdout_log}")
     print(f"HASH_LOG={hash_log}")
+    # A replay run only counts when the child proves it replayed: the
+    # stdout log must show the replay load line and the hash log must hold
+    # exactly --ticks lines. Otherwise a silent fallback to live input
+    # would look like a success.
+    ok = True
+    try:
+        text = stdout_log.read_text(errors="replace")
+    except OSError:
+        text = ""
+    if "[netplay] input replay:" not in text:
+        print("run_replay: FAIL: replay did not load (no '[netplay] input replay:' line)")
+        ok = False
+    if nlines != a.ticks:
+        print(f"run_replay: FAIL: hash lines {nlines} != requested {a.ticks}")
+        ok = False
+    if isinstance(rc, int) and rc != 0:
+        ok = False
+    if not ok:
+        return 1 if (isinstance(rc, int) and rc == 0) else (rc if isinstance(rc, int) else 1)
     return rc if isinstance(rc, int) else 1
 
 

@@ -1506,8 +1506,16 @@ if(PIKMIN_BUILD_TESTS)
     add_test(NAME pc_input_log_test COMMAND pc_input_log_test)
 
     # Netplay replay tool self test (#878, tool logic only, launches no game)
-    add_test(NAME netplay_replay_selftest
-        COMMAND py -3.12 "${CMAKE_CURRENT_SOURCE_DIR}/tools/netplay/selftest.py")
+    # Portable interpreter: py -3.12 on Windows (tree convention), python3
+    # elsewhere so PIKMIN_BUILD_TESTS also works on non-Windows hosts.
+    if(WIN32)
+        add_test(NAME netplay_replay_selftest
+            COMMAND py -3.12 "${CMAKE_CURRENT_SOURCE_DIR}/tools/netplay/selftest.py")
+    else()
+        find_package(Python3 COMPONENTS Interpreter)
+        add_test(NAME netplay_replay_selftest
+            COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/netplay/selftest.py")
+    endif()
 
     # Permadeath save block (no game needed)
     add_executable(pc_permadeath_test pc_port/pc_permadeath_test.cpp pc_port/pc_permadeath.cpp src/sysCommon/stream.cpp src/sysCommon/string.cpp)
