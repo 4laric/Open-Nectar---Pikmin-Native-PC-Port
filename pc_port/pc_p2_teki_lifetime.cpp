@@ -48,6 +48,7 @@
 #include "pc_p2_groink_teki.h"
 #include "pc_p2_long_legs.h"
 #include "pc_p2_mamuta.h"
+#include "pc_p2_mamuta_fsm.h"
 #include "pc_p2_onikurage_teki.h"
 #include "pc_p2_king_teki.h"
 #include "pc_p2_queen_teki.h"
@@ -92,6 +93,7 @@ void pc_p2_forget_teki(BTeki* actor)
 	pc_p2_pom_forget(actor);
 	pc_p2_kogane_forget(actor);
 	pc_p2_mamuta_forget(actor);
+	pc_p2_mamuta_fsm_forget(actor);
 	pc_p2_tank_forget(actor);
 	pc_p2_kabuto_fsm_forget(actor);
 	pc_p2_qurione_forget(actor);
@@ -163,6 +165,7 @@ pc_p2_sarai_manager_reset();
     pc_p2_dweevil_reset();
 	pc_p2_kogane_reset();
 	pc_p2_mamuta_reset();
+	pc_p2_mamuta_fsm_reset();
 	pc_p2_tank_reset();
 	pc_p2_kabuto_fsm_reset();
 	pc_p2_qurione_reset();

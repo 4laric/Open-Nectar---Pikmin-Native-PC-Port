@@ -1,5 +1,6 @@
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_setup_failsafe.h"
+#include "pc_bbft.h"
 #include "pc_p2_dwarf_orange.h"
 #include "pc_p2_dwarf_orange_policy.h"
 #include "pc_p2_pose_bank.h"
@@ -119,7 +120,17 @@ void pc_p2_dwarf_orange_setup(){
         // Single-use: consumed on delivery, cleared on forget/recycle.
         pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor), 44, pc_p2_campaign_token(actor));
         std::printf("P2_DWARF_ORANGE_DELIVERY_BIND generator=%u source_id=44\n", pc_p2_campaign_token(actor));
-        std::printf("P2_ENEMY_READY species=BlueKochappy source_id=44 native_family=Chappy generator=%u x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=P1 purple_stun=bluekochappy_5s\n",pc_p2_campaign_token(actor),pos.x,pos.y,pos.z,actor->mHealth,actor->getParameterF(TPF_Life));
+        // own44b (#871): this READY records the visual/health/stun binding; in
+        // bridge mode (and not room preview, or with p2-dwarf-orange-fsm.txt)
+        // pc_p2_kochappy_fsm owns the actor and the P1 host AI is suppressed
+        // (BTeki::doAI early-return at src/plugPikiNakata/tekibteki.cpp:636,
+        // driven per-frame by BTeki::update at tekibteki.cpp:521 - same pattern
+        // as pc_p2_armor_suppress_ai at tekibteki.cpp:660). The predicate below
+        // exactly matches pc_p2_kochappy_fsm_setup's bridge gate
+        // (pc_randomizer_p2_bridge() && !pc_pikipelago_room_preview()), so
+        // behavior=native below only prints when the FSM will actually own.
+        const bool fsmOwns = (pc_randomizer_p2_bridge() && !pc_pikipelago_room_preview()) || std::ifstream("p2-dwarf-orange-fsm.txt").good();
+        std::printf("P2_ENEMY_READY species=BlueKochappy source_id=44 native_family=Chappy generator=%u x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=%s purple_stun=bluekochappy_5s\n",pc_p2_campaign_token(actor),pos.x,pos.y,pos.z,actor->mHealth,actor->getParameterF(TPF_Life),fsmOwns?"native-FSM-owned":"P1");
     }
     std::printf("P2_DWARF_ORANGE_BANK poses=%zu mod_bytes=%zu texture_attach_calls=%d load_seconds=%.3f\n",poses,total,attachments,std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count());
 }

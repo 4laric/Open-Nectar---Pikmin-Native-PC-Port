@@ -2,6 +2,7 @@
 #include "pc_p2_frog.h"
 #include "pc_p2_kogane.h"
 #include "pc_p2_mamuta.h"
+#include "pc_p2_mamuta_fsm.h"
 #include "pc_p2_waterwraith_register.h"
 #include "pc_p2_tank.h"
 #include "pc_p2_hiba.h"
@@ -168,6 +169,7 @@ void pc_p2_preview_setup() {
             pc_p2_kochappy_fsm_setup();
             pc_p2_kogane_setup();
             pc_p2_mamuta_setup();
+            pc_p2_mamuta_fsm_setup();
             pc_p2_sokkuri_setup();
             pc_p2_otakara_setup();
             pc_p2_chappy_setup();
@@ -330,6 +332,7 @@ void pc_p2_preview_setup() {
     pc_p2_frog_setup();
     pc_p2_kogane_setup();
     pc_p2_mamuta_setup();
+    pc_p2_mamuta_fsm_setup();
     pc_p2_tank_setup();
     pc_p2_hiba_setup();
     pc_p2_flora_setup();
