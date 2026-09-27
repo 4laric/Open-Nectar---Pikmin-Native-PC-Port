@@ -1765,6 +1765,12 @@ add_executable(p2_chappy_fsm_test tools/p2_chappy_fsm_test.cpp)
 target_include_directories(p2_chappy_fsm_test PRIVATE pc_port)
 target_compile_options(p2_chappy_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_chappy_fsm_test COMMAND p2_chappy_fsm_test)
+# p2-884-chappy (#884): engine-free source mouth-slot eating (EnemyFunc::eatPikmin
+# geometry, capacity, eligibility, host-part mapping, King sweep, legacy oracle).
+add_executable(p2_chappy_mouth_test tools/p2_chappy_mouth_test.cpp)
+target_include_directories(p2_chappy_mouth_test PRIVATE pc_port)
+target_compile_options(p2_chappy_mouth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_chappy_mouth_test COMMAND p2_chappy_mouth_test)
 # bot-impl (#871): TEST-ONLY headless autoplay bot policy. Engine-free:
 # the header-only Brain (states, timeouts, giveup/result markers, Kogane
 # damage-and-move-on) plus the inert-when-unset gate (registration only).
