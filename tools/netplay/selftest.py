@@ -196,6 +196,7 @@ def main():
             "[Pikmin Randomizer] START_STAGE 1 day=2\n"
             "[Pikmin Randomizer] CHECK 47 Pikmin: Forest of Hope Landing\n"
             "[Pikmin Randomizer] CHECK_APPLIED 57 Some Streamed Check\n"
+            "[Pikmin Randomizer] DEATHLINK_TOTAL 2\n"
             "[Pikmin Randomizer] CHECK 30 Population: 20 total Pikmin\n"
         )
         good_mirror = (
@@ -242,8 +243,20 @@ def main():
         bad_case("m_dupchecked", "a CHECKED name twice",
                  join_over={"mirror-events.txt": good_mirror + "FRAME 600 CHECKED Some Streamed Check\n"})
         bad_case("m_deaths", "DEATHS not base + deaths.txt lines", host_over={"deaths.txt": "1\n"})
-        bad_case("m_deathlink", "DEATHLINK != final state value",
-                 host_over={"state.txt": "PIKMIN_STATE 9 tok 1 0 127 0 CHECKS 0 DEATHLINK 3 END\n"})
+        bad_case("m_deathlink", "DEATHLINK != the host's applied DEATHLINK_TOTAL",
+                 host_over={"native.log": good_log.replace("DEATHLINK_TOTAL 2", "DEATHLINK_TOTAL 3")})
+        bad_case("m_deathlink_none", "DEATHLINK lines with no applied total on the host",
+                 host_over={"native.log": good_log.replace("[Pikmin Randomizer] DEATHLINK_TOTAL 2\n", "")})
+        bad_case("m_deaths_retract", "a DEATHS total that decreases (fatal for the M4c ingest)",
+                 join_over={"mirror-events.txt": good_mirror.replace("FRAME 310 DEATHS 3", "FRAME 310 DEATHS 5")})
+        bad_case("m_deathlink_retract", "a DEATHLINK total that decreases",
+                 host_over={"native.log": good_log.replace("DEATHLINK_TOTAL 2\n",
+                                                           "DEATHLINK_TOTAL 2\n[Pikmin Randomizer] DEATHLINK_TOTAL 1\n")},
+                 join_over={"mirror-events.txt": good_mirror.replace("FRAME 300 DEATHLINK 2\n",
+                                                                     "FRAME 300 DEATHLINK 2\nFRAME 305 DEATHLINK 1\n")})
+        bad_case("m_received_gap", "RECEIVED indices out of order",
+                 join_over={"mirror-events.txt": good_mirror.replace("FRAME 40 RECEIVED 0 8\nFRAME 40 RECEIVED 1 1\n",
+                                                                     "FRAME 40 RECEIVED 1 1\nFRAME 40 RECEIVED 0 8\n")})
         bad_case("m_emperor", "emperor.txt without EMPEROR", host_over={"emperor.txt": "EMPEROR_DEFEATED a b\n"})
         bad_case("m_received", "RECEIVED not the session list", sess={"received": [8, 2], "pikmin_deaths": 2})
         bad_case("m_nosession", "RECEIVED lines without a session.json", sess=None)

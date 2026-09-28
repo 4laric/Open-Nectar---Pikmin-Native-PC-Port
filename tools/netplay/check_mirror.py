@@ -17,11 +17,22 @@ Checks (exit 0 only when every one holds):
   5. the last DEATHS equals deathsBase (F's pikmin_deaths, else 0) plus the
      host deaths.txt line count, and the last deaths.txt line equals its line
      count (no DEATHS lines when there is no deaths.txt);
-  6. the last DEATHLINK (0 when absent) equals the DEATHLINK value of the
-     host's final state.txt (when the state line carries one);
+  6. the DEATHLINK lines equal, in order, the host's applied stream totals:
+     the `[Pikmin Randomizer] DEATHLINK_TOTAL <n>` lines both peers print
+     when an applied snapshot raises the session total (fix round 1, review
+     E7: the host's final state.txt can be written after the last apply);
   7. EMPEROR is present exactly when host emperor.txt exists;
   8. the RECEIVED lines equal F's received list in index order (none without
-     F).
+     F);
+  9. the stateful rules the root M4c ingest (MirrorStore.apply) treats as
+     fatal, replayed over the whole file (fix round 1, review R8/E7): DEATHS
+     and DEATHLINK totals never decrease, RECEIVED indices run 0, 1, 2, ...
+     with no gap or repeat, and EMPEROR appears at most once. The
+     manifest-level rules (CHECKED names among the manifest's active
+     locations, RECEIVED ids in its item pool, death_link / emperor goal
+     gating) are not replayed: run_pair's synthetic bootstraps have no
+     manifest. Check 4 ties every CHECKED name to a native catalog name the
+     host printed instead.
 
 The pure checks live in verify(); tools/netplay/selftest.py drives them with
 synthetic run dirs and a local stand-in parser.
@@ -36,6 +47,7 @@ from pathlib import Path
 
 CHECK_RE = re.compile(r"\[Pikmin Randomizer\] CHECK (\d+) (.+)$")
 APPLIED_RE = re.compile(r"\[Pikmin Randomizer\] CHECK_APPLIED (\d+) (.+)$")
+DEATHLINK_TOTAL_RE = re.compile(r"\[Pikmin Randomizer\] DEATHLINK_TOTAL (\d+)")
 JOURNALS = ("checks.txt", "deaths.txt", "emperor.txt", "benefits-used.txt")
 
 
@@ -60,18 +72,6 @@ def host_log_checks(text):
         if m:
             checks.append((int(m.group(1)), m.group(2).rstrip("\r")))
     return checks, applied
-
-
-def state_deathlink(text):
-    """DEATHLINK value of a PIKMIN_STATE line, or None when it has none."""
-    words = text.split()
-    for i, w in enumerate(words[:-1]):
-        if w == "DEATHLINK":
-            try:
-                return int(words[i + 1])
-            except ValueError:
-                return None
-    return None
 
 
 def read_text(path):
@@ -153,15 +153,11 @@ def verify(host_run, join_run, parse_line, session=None):
     elif deaths:
         errors.append(f"DEATHS lines {deaths} without a host deaths.txt")
 
-    # 6. DEATHLINK
+    # 6. DEATHLINK == the host's applied totals, in order
     links = [a[0] for _f, t, a in events if t == "DEATHLINK"]
-    final_link = state_deathlink(read_text(host_run / "state.txt") or "")
-    if final_link is not None:
-        got = links[-1] if links else 0
-        if got != final_link:
-            errors.append(f"last DEATHLINK {got} != host final state.txt DEATHLINK {final_link}")
-    elif links:
-        errors.append(f"DEATHLINK lines {links} but the host state has no DEATHLINK")
+    applied_links = [int(m.group(1)) for m in DEATHLINK_TOTAL_RE.finditer(log)]
+    if links != applied_links:
+        errors.append(f"DEATHLINK lines {links} != host applied DEATHLINK_TOTAL {applied_links}")
 
     # 7. EMPEROR
     emperor = sum(1 for _f, t, _a in events if t == "EMPEROR")
@@ -174,6 +170,19 @@ def verify(host_run, join_run, parse_line, session=None):
     want_rec = [(i, item) for i, item in enumerate(received)]
     if [tuple(r) for r in rec] != want_rec:
         errors.append(f"RECEIVED {rec} != session received {want_rec}")
+
+    # 9. stateful ingest rules (root MirrorStore.apply raises on these)
+    last = {"DEATHS": None, "DEATHLINK": None}
+    next_index = 0
+    for frame, tag, args in events:
+        if tag in last:
+            if last[tag] is not None and args[0] < last[tag]:
+                errors.append(f"{tag} retracted at frame {frame}: {args[0]} < {last[tag]}")
+            last[tag] = args[0]
+        elif tag == "RECEIVED":
+            if args[0] != next_index:
+                errors.append(f"RECEIVED index {args[0]} at frame {frame}, expected {next_index}")
+            next_index = max(next_index, args[0] + 1)
 
     return errors, Counter(t for _f, t, _a in events)
 

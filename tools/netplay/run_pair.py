@@ -40,6 +40,7 @@ present in each run dir.
 import argparse
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import threading
@@ -135,6 +136,30 @@ def gen_inputs(ticks, seed, out):
     )
     if r.returncode != 0:
         raise SystemExit(f"gen_inputs failed: {r.stderr[-2000:]}")
+
+
+PKNI_HEADER = 10  # magic(4) + version/pad count/record size (3 x u16 LE)
+
+
+def neutralize_after(path, keep):
+    """M4 B1 fix round 1: keep the first `keep` records of a v2 .pkni as
+    generated and make pad 0 hands-off afterwards (buttons, both sticks,
+    triggers and analog A/B zeroed; the connected byte and control yaw stay
+    as generated). Returns (records, neutralized)."""
+    data = bytearray(Path(path).read_bytes())
+    if data[:4] != b"PKNI":
+        raise SystemExit(f"neutralize_after: {path} is not a PKNI file")
+    version, pads, size = struct.unpack_from("<HHH", data, 4)
+    if version != 2 or pads != 4 or size != 56:
+        raise SystemExit(f"neutralize_after: unsupported PKNI v{version} pads={pads} size={size}")
+    records = (len(data) - PKNI_HEADER) // size
+    changed = 0
+    for i in range(max(0, keep), records):
+        off = PKNI_HEADER + i * size  # pad 0 is the first 14 bytes
+        data[off:off + 10] = bytes(10)
+        changed += 1
+    Path(path).write_bytes(bytes(data))
+    return records, changed
 
 
 SCRUB_KEYS = (
@@ -342,8 +367,24 @@ def main(argv=None):
     p.add_argument("--expect-hold", type=int, default=None, metavar="N",
                    help="M4 B1: implies sync; exactly N hold/held/resume triples, "
                         "identical on both peers, and 0 disconnected lines")
+    p.add_argument("--expect-held-ms", type=float, default=None, metavar="MIN",
+                   help="M4 B1 fix round 1: with --expect-hold, every resume line's "
+                        "held_ms (hold at -> resume, per peer) must be >= MIN")
+    p.add_argument("--min-tuples", type=int, default=None, metavar="N",
+                   help="M4 B1 fix round 1: with --expect-hold, each peer's distinct "
+                        "tuples before each hold frame and after each resume frame "
+                        "must exceed N; otherwise each peer's total must exceed N")
+    p.add_argument("--expect-no-hold", action="store_true",
+                   help="M4 B1 fix round 1 (negative control): implies sync; no hold, "
+                        "held or resume line on either peer")
+    p.add_argument("--host-script-ticks", type=int, default=None, metavar="N",
+                   help="M4 B1 fix round 1: the host's scripted pad 0 plays the seed-a "
+                        "records for the first N submits, then stays hands-off")
+    p.add_argument("--join-script-ticks", type=int, default=None, metavar="N",
+                   help="M4 B1 fix round 1: the same for the joiner (seed b); 0 = "
+                        "hands-off from the first submit")
     a = p.parse_args(argv)
-    if a.expect_hold is not None:
+    if a.expect_hold is not None or a.expect_no_hold:
         a.expect = "sync"
     stale_window = None
     if a.host_stale_window:
@@ -446,6 +487,12 @@ def main(argv=None):
     join_inputs = out / "join_inputs.pkni"
     gen_inputs(a.ticks + 50, a.seed_a, host_inputs)
     gen_inputs(a.ticks + 50, a.seed_b, join_inputs)
+    for who, keep, path in (("host", a.host_script_ticks, host_inputs),
+                            ("join", a.join_script_ticks, join_inputs)):
+        if keep is not None:
+            records, changed = neutralize_after(path, keep)
+            print(f"run_pair: {who} inputs: first {min(keep, records)} of {records} records "
+                  f"scripted, {changed} hands-off")
 
     host_hash = host_run / "hashes.txt"
     join_hash = join_run / "hashes.txt"
@@ -628,6 +675,13 @@ def main(argv=None):
             print(f"run_pair: {who}: {ln}")
         if ms:
             print(f"run_pair: {who}: held_ms={','.join(f'{v:.0f}' for v in ms)}")
+    # Frozen time (held at -> resume, all holds) from the exit line's held=<ms>.
+    for who, log in (("host", host_log), ("join", join_log)):
+        vals = [ln.split(" held=")[1].split("ms")[0] for ln in grep(log, " held=")
+                if " holds=" in ln]
+        if vals:
+            print(f"run_pair: {who}: frozen held={vals[-1]}ms (exit line)")
+    tuple_fail = []
     for who, log, hashes, run in (("host", host_log, host_hash, host_run),
                                   ("join", join_log, join_hash, join_run)):
         starts = len(grep(log, "START_STAGE"))
@@ -637,6 +691,8 @@ def main(argv=None):
                              "mirror-events.txt") if (run / n).exists()]
         print(f"run_pair: {who}: START_STAGE={starts} randomizer_lines={rand} "
               f"distinct_tuples={tuples} files={','.join(files) if files else '-'}")
+        if a.min_tuples is not None and not hh[0] and tuples <= a.min_tuples:
+            tuple_fail.append(f"{who} distinct tuples {tuples} <= {a.min_tuples}")
         for hold, resume in zip(hh[0], hh[2]):
             hf, rf = frame_of(hold), frame_of(resume)
             if hf is not None and rf is not None:
@@ -646,6 +702,9 @@ def main(argv=None):
                 post = hash_tuples(hashes, lo=rf + 1)
                 print(f"run_pair: {who}: tuples before hold frame {hf}={pre} "
                       f"after resume frame {rf}={post}")
+                if a.min_tuples is not None and (pre <= a.min_tuples or post <= a.min_tuples):
+                    tuple_fail.append(f"{who} tuples before {hf}={pre} / after {rf}={post} "
+                                      f"not both > {a.min_tuples}")
 
     ok = True
     if a.expect == "sync":
@@ -674,6 +733,20 @@ def main(argv=None):
             if dis_host or dis_join:
                 print("run_pair: FAIL: disconnected lines present")
                 ok = False
+            if a.expect_held_ms is not None:
+                for who, (_h, _d, _r, ms) in (("host", hh), ("join", hj)):
+                    if not ms or min(ms) < a.expect_held_ms:
+                        print(f"run_pair: FAIL: {who} held_ms {ms} not all >= {a.expect_held_ms:.0f}")
+                        ok = False
+        if a.expect_no_hold:
+            for who, (hold, held, resume, _ms) in (("host", hh), ("join", hj)):
+                if hold or held or resume:
+                    print(f"run_pair: FAIL: {who} has hold/held/resume lines "
+                          f"({len(hold)}/{len(held)}/{len(resume)}) in a negative control")
+                    ok = False
+        for msg in tuple_fail:
+            print(f"run_pair: FAIL: {msg}")
+            ok = False
     elif a.expect == "refuse":
         if rc_host != 4 or rc_join != 4:
             print(f"run_pair: FAIL: expected both exit 4, got {rc_host}/{rc_join}")
