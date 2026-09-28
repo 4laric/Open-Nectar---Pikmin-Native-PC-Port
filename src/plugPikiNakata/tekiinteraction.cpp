@@ -60,6 +60,19 @@ bool InteractAttack::actTeki(Teki* teki) immut
 	if (pc_p2_long_legs_receiver_rejects(teki, this)) {
 		return false; // registered Long Legs rejects damage while bitter-immune (Stay/Land)
 	}
+	// #884: registered Emperor Bulblax, source KingChappy::damageCallBack
+	// (kingChappy.cpp:824-848). A refused hit takes no damage and adds no
+	// flick; a partless hit low under the chin is scaled by 0.2.
+	const f32 kingRate = pc_p2_chappy_king_damage_rate(teki, mOwner, mCollPart);
+	if (kingRate == 0.0f) {
+		return false;
+	}
+	if (kingRate > 0.0f && kingRate != 1.0f) {
+		InteractAttack scaled(mOwner, mCollPart, mDamage * kingRate, _10);
+		const bool scaledAccepted = teki->interact(TekiInteractionKey(TekiInteractType::Attack, &scaled));
+		pc_p2_chappy_attacked(teki, scaledAccepted);
+		return scaledAccepted;
+	}
 #endif
 	const bool damageAccepted = teki->interact(TekiInteractionKey(TekiInteractType::Attack, this));
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
