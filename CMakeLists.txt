@@ -890,6 +890,11 @@ add_executable(p2_dangomushi_hazard_test
 target_include_directories(p2_dangomushi_hazard_test PRIVATE pc_port)
 target_compile_options(p2_dangomushi_hazard_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_dangomushi_hazard_test COMMAND p2_dangomushi_hazard_test)
+add_executable(p2_navi_select_test
+    tools/p2_navi_select_test.cpp)
+target_include_directories(p2_navi_select_test PRIVATE pc_port)
+target_compile_options(p2_navi_select_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_navi_select_test COMMAND p2_navi_select_test)
 add_executable(p2_mar_receipt_registration_test
     tools/p2_mar_receipt_registration_test.cpp
     pc_port/pc_p2_mar_receipt.cpp)
