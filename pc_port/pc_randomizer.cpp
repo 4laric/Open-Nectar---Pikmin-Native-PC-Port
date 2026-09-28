@@ -40,6 +40,11 @@ bool pc_netplay_is_host(void);
 bool pc_netplay_randstate_stream_enabled(void);
 void pc_netplay_randstate_publish(const pc_randstate::PcRandState& st);
 #endif
+#if PIKI_NETPLAY_BUILD
+// Netplay launch lane (issue #887): defined by pc_netplay_launch.cpp, which
+// is linked into every exe compiled with PIKI_NETPLAY_BUILD.
+bool pc_netplay_launch_wants_local_state(void);
+#endif
 
 namespace {
 bool noSticks = false, emperorGoal = false, emperorDefeated = false;
@@ -498,6 +503,35 @@ bool pc_randomizer_init(int argc, char** argv) {
     benefitJournal = directory / "benefits-used.txt";
     loadCampaignCheckpoint();
     enabled = true;
+#if PIKI_NETPLAY_BUILD
+    // Netplay launch lane (issue #887): a one-command netplay session has no
+    // Archipelago, so the launcher asks for a static ready state next to its
+    // fresh run bootstrap: ready, no repairs, the run_pair.py unlock mask
+    // (127, capped to the schema), no Flarlic, no checks, and zero for every
+    // optional section this bootstrap enables. Written in this seed's own
+    // format, so any bootstrap the launcher accepts gets a valid state.
+    if (pc_netplay_launch_wants_local_state() && !std::filesystem::exists(directory / "state.txt")) {
+        const unsigned maxUnlocks = schema >= 5 ? 255u : schema == 4 ? 127u : schema == 3 ? 63u : 31u;
+        std::ostringstream line;
+        line << "PIKMIN_STATE " << schema << ' ' << token << " 1 0 " << std::min(127u, maxUnlocks);
+        if (schema >= 2) line << " 0";
+        line << (schema >= 8 ? " CHECKS 0" : " 0");
+        if (progressiveStats) { line << " UPGRADES"; for (int i = 0; i < 12; ++i) line << " 0"; }
+        if (benefitItems) {
+            line << " BENEFITS";
+            const int kinds = prereleaseTraps ? 9 : proggTraps ? 8 : bombTraps ? 7 : bombDeliveries ? 6 : 5;
+            for (int i = 0; i < kinds; ++i) line << " 0";
+        }
+        if (emperorGoal) line << " EMPEROR 0";
+        if (deathLinkUnit) line << " DEATHLINK 0";
+        line << " END\n";
+        std::ofstream state(directory / "state.txt");
+        state << line.str();
+        state.close();
+        if (!state) fail("cannot write the netplay launcher's state.txt");
+        std::printf("[Pikmin Randomizer] netplay launcher state (no Archipelago): %s", line.str().c_str());
+    }
+#endif
     pc_randomizer_update(); // Validate initial state before creating a handshake.
     std::ofstream hello(directory / "hello.tmp");
     hello << "PIKMIN_HELLO " << schema << ' ' << token << ' ' << fingerprint

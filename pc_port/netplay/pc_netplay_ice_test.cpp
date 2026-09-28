@@ -98,6 +98,140 @@ int main()
 		CHECK(offer != answer, "offer and answer differ");
 	}
 
+	// 1b. v2 bundle offer round trip + strict rejection (launch lane).
+	{
+		SessionBundle bundle;
+		bundle.seed            = 0x12345678;
+		bundle.configText      = "m3-config-v1;fpsMode=0;chainActions=1;";
+		bundle.bootstrapBytes  = "PIKMIN_RANDOMIZER 5\nSESSION abc\nFINGERPRINT abc\nEND\n";
+		std::string offer2, err, sdp;
+		SessionBundle got;
+		CHECK(ice_encode_offer_v2(kFakeSdp, bundle, &offer2, &err), "encode v2 offer");
+		CHECK(offer2.compare(0, 6, "NPIX2-") == 0 && offer2.find('\n') == std::string::npos,
+		      "v2 offer is one line with version prefix");
+		CHECK(ice_decode_offer_v2(offer2, &sdp, &got, &err) && sdp == kFakeSdp,
+		      "v2 offer SDP round trip");
+		CHECK(got.seed == bundle.seed && got.configText == bundle.configText
+		          && got.bootstrapBytes == bundle.bootstrapBytes,
+		      "v2 offer bundle round trip");
+		std::printf("ice_test: v2 offer bytes=%llu\n", (unsigned long long)offer2.size());
+		// Empty bootstrap is allowed (plain non-randomizer boot).
+		{
+			SessionBundle emptyBoot = bundle;
+			emptyBoot.bootstrapBytes.clear();
+			std::string enc, e2, s2;
+			SessionBundle g2;
+			CHECK(ice_encode_offer_v2(kFakeSdp, emptyBoot, &enc, &e2), "encode v2 empty boot");
+			CHECK(ice_decode_offer_v2(enc, &s2, &g2, &e2) && g2.bootstrapBytes.empty()
+			          && g2.seed == bundle.seed && g2.configText == bundle.configText,
+			      "v2 empty bootstrap round trip");
+		}
+		// Garbage is rejected with a reason.
+		const char* bad2[] = {
+			"",
+			"not-a-code",
+			"NPIX2-",
+			"NPIX2-!!!not-base64!!!",
+			"NPIX1-AAAA", // wrong prefix family
+			"NPIX2-AAAA", // valid alphabet, too short
+		};
+		for (size_t i = 0; i < sizeof(bad2) / sizeof(bad2[0]); ++i) {
+			std::string s, e;
+			SessionBundle g;
+			CHECK(!ice_decode_offer_v2(bad2[i], &s, &g, &e) && !e.empty(),
+			      "v2 garbage rejected");
+		}
+		// Corrupted payload (flip a base64 char) fails the CRC/length check.
+		{
+			std::string corrupt = offer2;
+			CHECK(corrupt.size() > 12, "v2 offer long enough to corrupt");
+			corrupt[12] = (corrupt[12] == 'A' ? 'B' : 'A');
+			std::string s, e;
+			SessionBundle g;
+			CHECK(!ice_decode_offer_v2(corrupt, &s, &g, &e), "v2 corrupted code rejected");
+		}
+		// Truncated code is rejected.
+		{
+			std::string s, e;
+			SessionBundle g;
+			CHECK(!ice_decode_offer_v2(offer2.substr(0, offer2.size() / 2), &s, &g, &e),
+			      "v2 truncated code rejected");
+		}
+		// Oversized config block is refused at encode time (bounded before use).
+		{
+			SessionBundle huge = bundle;
+			huge.configText.assign(kMaxBundleConfigBytes + 1, 'x');
+			std::string enc, e;
+			CHECK(!ice_encode_offer_v2(kFakeSdp, huge, &enc, &e) && !e.empty(),
+			      "v2 oversized config refused");
+		}
+		// m1 boundaries: every length is a u16 field, so the bootstrap cap is
+		// 65535. A 65535-byte bootstrap round-trips; 65536 is refused at
+		// encode time (it used to encode as length 0 and fail every decode).
+		{
+			SessionBundle edge = bundle;
+			edge.bootstrapBytes.assign(kMaxBundleBootBytes, 'b');
+			std::string enc, e, s2;
+			SessionBundle g;
+			CHECK(kMaxBundleBootBytes == 65535, "bootstrap cap is 65535");
+			CHECK(ice_encode_offer_v2(kFakeSdp, edge, &enc, &e), "65535-byte bootstrap encodes");
+			CHECK(ice_decode_offer_v2(enc, &s2, &g, &e) && g.bootstrapBytes == edge.bootstrapBytes,
+			      "65535-byte bootstrap round-trips");
+			CHECK(enc.size() <= kMaxOfferV2Chars, "largest-bootstrap offer fits the text cap");
+			std::printf("ice_test: v2 offer with a 65535 B bootstrap = %llu chars (cap %llu)\n",
+			            (unsigned long long)enc.size(), (unsigned long long)kMaxOfferV2Chars);
+			edge.bootstrapBytes.push_back('b');
+			CHECK(!ice_encode_offer_v2(kFakeSdp, edge, &enc, &e) && !e.empty(),
+			      "65536-byte bootstrap refused at encode");
+		}
+		// Text longer than the cap is refused before decoding.
+		{
+			std::string tooLong = "NPIX2-" + std::string(kMaxOfferV2Chars, 'A');
+			std::string s2, e;
+			SessionBundle g;
+			CHECK(!ice_decode_offer_v2(tooLong, &s2, &g, &e) && e.find("too long") != std::string::npos,
+			      "v2 text over the cap refused");
+		}
+		// cfgLen = 0 is refused (the launcher always sends the config block).
+		{
+			SessionBundle noCfg = bundle;
+			noCfg.configText.clear();
+			std::string enc, e, s2;
+			SessionBundle g;
+			CHECK(ice_encode_offer_v2(kFakeSdp, noCfg, &enc, &e), "encode with an empty config block");
+			CHECK(!ice_decode_offer_v2(enc, &s2, &g, &e) && e.find("config length") != std::string::npos,
+			      "v2 cfgLen=0 refused at decode");
+		}
+		// A v1 answer (or offer) fed to the v2 decoder is refused by prefix.
+		{
+			std::string ans, e, s2;
+			SessionBundle g;
+			CHECK(ice_encode_code(false, kFakeSdp, &ans, &e), "encode a v1 answer");
+			CHECK(!ice_decode_offer_v2(ans, &s2, &g, &e) && e.find("NPIX2-") != std::string::npos,
+			      "v1 answer refused by the v2 decoder");
+		}
+		// m9: code files are written atomically (tmp + rename, no tmp left);
+		// @file reads are bounded (a file larger than any code is refused).
+		{
+			const std::string path = "pc_netplay_ice_test_code.txt";
+			std::string e, got;
+			CHECK(ice_write_code_file(path, offer2, &e), "atomic code-file write");
+			FILE* tmp = std::fopen((path + ".tmp").c_str(), "rb");
+			CHECK(tmp == nullptr, "no temporary file left behind");
+			if (tmp != nullptr) std::fclose(tmp);
+			CHECK(ice_read_code_arg("@" + path, &got, &e) && got == offer2, "@file reads the code back");
+			FILE* f = std::fopen(path.c_str(), "wb");
+			if (f != nullptr) {
+				const std::string junk(kMaxOfferV2Chars + 8192, 'A');
+				std::fwrite(junk.data(), 1, junk.size(), f);
+				std::fclose(f);
+			}
+			CHECK(!ice_read_code_arg("@" + path, &got, &e) && e.find("too large") != std::string::npos,
+			      "@file larger than any code refused");
+			std::remove(path.c_str());
+		}
+	}
+
 	// 2. Relay filter unit checks on synthetic SDP.
 	{
 		CHECK(ice_candidate_line_is_relay("a=candidate:3 1 UDP 41819903 10.0.0.5 50002 typ relay"),

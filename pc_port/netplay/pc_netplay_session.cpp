@@ -71,6 +71,8 @@
 #include "netplay/pc_netplay_det.h"
 #include "netplay/pc_netplay_gekko_input.h"
 #include "netplay/pc_netplay_ice.h"
+#include "netplay/pc_netplay_input_sel.h"
+#include "netplay/pc_netplay_launch.h"
 #include "netplay/pc_netplay_pad.h"
 #include "netplay/pc_netplay_present.h"
 #include "netplay/pc_netplay_randstate.h"
@@ -97,6 +99,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -288,10 +291,17 @@ struct Config {
 	std::string iceJoinCode;    // --netplay-ice-join <offer-code-or-@file>
 	unsigned localDelay = 2;    // PIKMIN_NETPLAY_DELAY (numeric)
 	bool delayAuto = false;     // PIKMIN_NETPLAY_DELAY=auto (fix round 2)
-	uint32_t seed = 0;          // PIKMIN_NETPLAY_SEED
+	uint32_t seed = 0;          // PIKMIN_NETPLAY_SEED (launcher joiner: the offer's)
 	std::string bootstrapPath;  // --randomizer-seed <file> or bootstrap.txt
 	std::string localInputFile; // PIKMIN_NETPLAY_LOCAL_INPUT_FILE
 	uint64_t exitAfter = 0;     // PIKMIN_NETPLAY_EXIT_AFTER_TICKS (0 = run)
+	// Launch lane (issue #887): one command per role, no environment
+	// variables. The launcher's own state lives in PcNetplayLaunch
+	// (pc_netplay_launch.h), resolved before engine init.
+	bool launcherMode = false;  // --netplay-host-ice / --netplay-join-ice
+	std::string inputSpec;      // --netplay-input / PIKMIN_NETPLAY_INPUT
+	int inputKind = 0;          // pc_netplay_input_sel::Kind (0 = auto)
+	int inputGamepad = 0;       // gamepad index for kind == gamepad
 };
 
 int sArgc = 0;
@@ -424,6 +434,11 @@ bool sDropFinalAck = false;
 // N3 test hook: PIKMIN_NETPLAY_TEST_LOAD_DELAY_MS sleeps once inside the
 // next stage load on that peer only (see pc_netplay_on_stage_load).
 bool sLoadDelayDone = false;
+// Launch lane test hook (B3 evidence): PIKMIN_NETPLAY_TEST_F1_CYCLE_TICK=<n>
+// opens and closes the F1 menu once, right after tick n, which runs the
+// settings save path mid-session.
+uint64_t sF1CycleTick = 0;
+bool sF1CycleDone = false;
 
 // Run stats.
 uint64_t sSessionTicks = 0;
@@ -940,14 +955,16 @@ bool sha_file(const char* path, uint8_t out[32])
 //   gyroEnabled, disableTutorials,
 //   coopPending(forced 1 in netplay), captainP1, captainP2, coopSplit,
 //   coopMergeCamera,
-//   windowWidth, windowHeight (pre-M2b: both peers must render the same view),
 //   netplaySeed, netplayDelay, protocolVersion.
 //   randStream (M4 external-state stream gate: stream vs legacy polling).
-// Deliberately EXCLUDED (local-only, documented in the handoff): display/
-// render settings (shadows, gamma, resolution scale, vsync), audio settings,
-// key/gamepad bindings, gyro calibration (sensitivity/invert/bias), touch
-// settings, photo-mode state (no sim getter; local overlay), VS rules/mode
-// (co-op sessions only), language.
+// Deliberately EXCLUDED (local-only, documented in the handoff): windowWidth
+// and windowHeight (launch lane: presentation-only, they stay local, so a
+// joiner with a different window size still joins; was: pre-M2b both peers
+// had to render the same view), display/render settings (shadows, gamma,
+// resolution scale, vsync), audio settings, key/gamepad bindings, gyro
+// calibration (sensitivity/invert/bias), touch settings, photo-mode state
+// (no sim getter; local overlay), VS rules/mode (co-op sessions only),
+// language.
 std::string build_config_string()
 {
 	char fbuf[64];
@@ -1004,8 +1021,8 @@ std::string build_config_string()
 	addi("captainP2", pc_coop_captain(1));
 	addi("coopSplit", pc_settings_get_coop_split());
 	addi("coopMergeCamera", pc_settings_get_coop_merge_camera());
-	addi("windowWidth", pc_window_get_width());
-	addi("windowHeight", pc_window_get_height());
+	// Launch lane: windowWidth/windowHeight are presentation-only and stay
+	// local (see the EXCLUDED list above); they are never hashed.
 	addi("netplaySeed", (long long)sCfg.seed);
 	// Fix round 3 (asymmetric delay): GekkoNet local delay is per actor, so
 	// peers may legally use different delays (e.g. 2 and 4). The delay is
@@ -1059,6 +1076,182 @@ bool local_ui_open()
 	// F1 settings overlay: local-only (brief item 7). No F8 tracker exists
 	// in this tree (see handoff deviations); this is the extension point.
 	return pc_settings_menu_open();
+}
+
+// ---- launch lane (issue #887): one command per role, no env vars ----
+//
+// Everything the session needs from the launcher is resolved before engine
+// init by pc_netplay_launch_preinit (pc_netplay_launch.cpp): the private run
+// dir, the run bootstrap (fed to the game as --randomizer-seed), the save
+// dir, the joiner's adopted settings and seed, the input device. Only the
+// ICE code exchange is left for here.
+
+void stop_session(); // defined below with the other session lifecycle hooks
+
+// Host bundle bootstrap: the run bootstrap bytes, bounded by the offer's u16
+// length field (preinit already refused anything longer).
+std::string read_bootstrap_bytes()
+{
+	std::string bytes;
+	FILE* f = fopen(sCfg.bootstrapPath.c_str(), "rb");
+	if (f == nullptr) return bytes;
+	char chunk[8192];
+	while (bytes.size() <= pc_netplay_ice::kMaxBundleBootBytes) {
+		const size_t n = fread(chunk, 1, sizeof(chunk), f);
+		if (n > 0) bytes.append(chunk, n);
+		if (n < sizeof(chunk)) break;
+	}
+	fclose(f);
+	return bytes;
+}
+
+// Prints the code (the one-line format the pair tools grep for), copies it
+// to the clipboard (not in --netplay-test-hidden), writes it atomically to
+// --netplay-code-out / PIKMIN_NETPLAY_ICE_CODE_OUT, and keeps a copy of this
+// peer's own code in its run dir.
+void launcher_emit_code(const char* kind, const std::string& code)
+{
+	const PcNetplayLaunch& L = pc_netplay_launch_setup();
+	printf("[netplay] ice %s code:\n%s\n", kind, code.c_str());
+	fflush(stdout);
+	if (!L.testHidden) {
+		if (SDL_SetClipboardText(code.c_str()) == 0) {
+			printf("[netplay] launch: %s code copied to the clipboard (%llu chars)\n", kind,
+			       (unsigned long long)code.size());
+		} else {
+			printf("[netplay] launch: clipboard copy failed (%s); copy the code above\n", SDL_GetError());
+		}
+		fflush(stdout);
+	}
+	const char* out = nullptr;
+	if (!L.codeOut.empty()) out = L.codeOut.c_str();
+	else out = getenv_nonempty("PIKMIN_NETPLAY_ICE_CODE_OUT");
+	std::string err;
+	if (out != nullptr) {
+		if (!pc_netplay_ice::ice_write_code_file(out, code, &err)) {
+			printf("[netplay] cannot write code file %s: %s\n", out, err.c_str());
+			fflush(stdout);
+			stop_session();
+			std::exit(1);
+		}
+		printf("[netplay] launch: %s code written to %s\n", kind, out);
+		fflush(stdout);
+	}
+	if (!L.runDir.empty()) pc_netplay_ice::ice_write_code_file(L.runDir + "/" + kind + ".txt", code, &err);
+}
+
+// Answer wait: --netplay-answer-in / PIKMIN_NETPLAY_ICE_ANSWER_IN file poll,
+// else stdin (paste + Enter, re-prompting after a bad paste). Stdin is the
+// most robust human option: it works in any console and headless, and needs
+// no key handling in the (possibly hidden) game window.
+bool launcher_wait_answer(const std::function<void()>& pump, std::string* answerOut,
+                          std::string* err)
+{
+	const PcNetplayLaunch& L = pc_netplay_launch_setup();
+	const char* in           = nullptr;
+	if (!L.answerIn.empty()) in = L.answerIn.c_str();
+	else in = getenv_nonempty("PIKMIN_NETPLAY_ICE_ANSWER_IN");
+	if (in != nullptr) {
+		printf("[netplay] launch: waiting for the answer code in %s\n", in);
+		fflush(stdout);
+		return pc_netplay_ice::ice_poll_answer_file(in, pc_netplay_ice::ice_connect_timeout_ms(), pump,
+		                                            answerOut, err);
+	}
+	return pc_netplay_ice::ice_read_answer_stdin(pump, answerOut, err);
+}
+
+// Input ownership: maps --netplay-input onto the pc_window device
+// assignment (sPlayerDevice / sKeyboardOwner / resolvePlayerPads) and the
+// ownership filter. The accumulator then samples the session role's slot.
+void launcher_apply_input()
+{
+	using namespace pc_netplay_input_sel;
+	if (sCfg.inputKind == (int)kInputAuto) {
+		if (!sCfg.inputSpec.empty()) {
+			printf("[netplay] input: auto (today's behaviour)\n");
+			fflush(stdout);
+		}
+		return;
+	}
+	const Kind kind = (Kind)sCfg.inputKind;
+	bool ignoreKb = false, ignorePad = false;
+	filter_for_selection(kind, &ignoreKb, &ignorePad);
+	pc_window_set_netplay_input_filter(ignoreKb, ignorePad);
+	if (kind == kInputKeyboard) {
+		pc_window_input_assign(sLocalRole, PC_INPUT_DEV_KEYBOARD, -1);
+		printf("[netplay] input: keyboard and mouse feed %s (every gamepad ignored; input only "
+		       "while this window has focus)\n",
+		       sLocalRole == 0 ? "host/P1" : "joiner/P2");
+	} else {
+		pc_window_set_netplay_gamepad(sLocalRole, sCfg.inputGamepad);
+		printf("[netplay] input: gamepad #%d feeds %s (every key ignored; the pad keeps working "
+		       "while another window has focus)\n",
+		       sCfg.inputGamepad, sLocalRole == 0 ? "host/P1" : "joiner/P2");
+		if (pc_window_num_gamepads() <= sCfg.inputGamepad)
+			printf("[netplay] input: gamepad #%d is not connected yet; %s stays neutral until it "
+			       "is plugged in\n",
+			       sCfg.inputGamepad, sLocalRole == 0 ? "host/P1" : "joiner/P2");
+	}
+	fflush(stdout);
+}
+
+// One-command host flow: v2 bundle offer (print + clipboard + file), then
+// the answer (file or stdin), then connect.
+bool launcher_host_flow(const pc_netplay_ice::IceNetConfig& nic, const std::function<void()>& pump,
+                        std::string* err)
+{
+	sIce = new pc_netplay_ice::IceSocket();
+	pc_netplay_ice::SessionBundle bundle;
+	bundle.seed           = sCfg.seed;
+	bundle.configText     = build_config_string();
+	bundle.bootstrapBytes = read_bootstrap_bytes();
+	std::string offer;
+	if (!sIce->host_create_offer_v2(nic, bundle, &offer, err, pump)) return false;
+	printf("[netplay] ice offer bundle: seed=%u config=%lluB bootstrap=%lluB\n", bundle.seed,
+	       (unsigned long long)bundle.configText.size(), (unsigned long long)bundle.bootstrapBytes.size());
+	fflush(stdout);
+	launcher_emit_code("offer", offer);
+	std::string answer;
+	if (!launcher_wait_answer(pump, &answer, err)) return false;
+	if (!sIce->host_apply_answer(answer, err)) return false;
+	double completedMs = -1;
+	if (!sIce->wait_connected(pc_netplay_ice::ice_connect_timeout_ms(), &completedMs, err, pump))
+		return false;
+	printf("[netplay] ice transport ready (connect %.0fms)\n", completedMs);
+	fflush(stdout);
+	return true;
+}
+
+// One-command joiner flow: the offer text preinit read (once) and adopted,
+// answer print + clipboard + file, then connect.
+bool launcher_joiner_flow(const pc_netplay_ice::IceNetConfig& nic, const std::function<void()>& pump,
+                          std::string* err)
+{
+	sIce = new pc_netplay_ice::IceSocket();
+	std::string answer;
+	if (!sIce->join_create_answer(nic, pc_netplay_launch_setup().offerCode, &answer, err, pump, nullptr))
+		return false;
+	launcher_emit_code("answer", answer);
+	double completedMs = -1;
+	if (!sIce->wait_connected(pc_netplay_ice::ice_connect_timeout_ms(), &completedMs, err, pump))
+		return false;
+	printf("[netplay] ice transport ready (connect %.0fms)\n", completedMs);
+	fflush(stdout);
+	return true;
+}
+
+// m13: the low-level ICE switches take each side's own settings, bootstrap
+// and seed, so a mismatch there refuses; the likeliest cause is typing
+// --netplay-ice-host/--netplay-ice-join for the launcher's
+// --netplay-host-ice/--netplay-join-ice.
+void print_refusal_hint(uint8_t field)
+{
+	if (!sCfg.iceMode || sCfg.launcherMode) return;
+	if (field != kFieldConfig && field != kFieldBootstrap && field != kFieldSeed) return;
+	printf("[netplay] hint: --netplay-ice-host/--netplay-ice-join are the low-level switches: each "
+	       "side uses its own settings, bootstrap and seed. For one-command play use "
+	       "--netplay-host-ice / --netplay-join-ice (the offer carries the session setup).\n");
+	fflush(stdout);
 }
 
 void load_scripted_file()
@@ -1198,7 +1391,15 @@ void accum_add_current()
 	// of freezing at the first injected value.
 	pc_input_log_capture_yaw_fresh();
 	PADStatus* pads = pc_netplay_pad_status();
-	PADStatus s     = pads[0]; // post-PADRead sample (F1 consume applied)
+	// Launch lane (issue #887): input ownership. auto keeps today's
+	// behaviour (slot 0 on both peers); an explicit --netplay-input samples
+	// the session role's slot, which the device assignment routes the
+	// selected device to. Either way the local player is fed through the
+	// PcNetplayAccum path below.
+	const int padIdx =
+	    pc_netplay_input_sel::local_pad_index(sLocalRole,
+	                                          (pc_netplay_input_sel::Kind)sCfg.inputKind);
+	PADStatus s = pads[padIdx]; // post-PADRead sample (F1 consume applied)
 	uint16_t yaw = 0;
 	if (pc_input_log_yaw_valid(sLocalRole)) yaw = pc_input_log_yaw_raw(sLocalRole);
 	sPadAccum.add(s.button, s.stickX, s.stickY, s.substickX, s.substickY,
@@ -1313,6 +1514,18 @@ void parse_config()
 		fflush(stdout);
 		std::exit(2);
 	}
+	// Launch lane (issue #887): --netplay-host-ice / --netplay-join-ice were
+	// resolved before engine init (pc_netplay_launch_preinit), which also
+	// refused every conflicting switch. The run bootstrap reaches the session
+	// as the injected --randomizer-seed below, like any hand-passed seed.
+	const PcNetplayLaunch& launch = pc_netplay_launch_setup();
+	if (launch.active) {
+		sCfg.isHost       = launch.isHost;
+		sCfg.active       = true;
+		sCfg.iceMode      = true;
+		sCfg.launcherMode = true;
+		sCfg.exitAfter    = launch.testTicks;
+	}
 	if (iceHostVal || iceJoinVal != nullptr) {
 		sCfg.isHost   = iceHostVal;
 		sCfg.active   = true;
@@ -1378,19 +1591,37 @@ void parse_config()
 			sCfg.localDelay = read_unsigned_env("PIKMIN_NETPLAY_DELAY", 2);
 			if (sCfg.localDelay > 8) sCfg.localDelay = 8;
 		}
+	} else if (sCfg.launcherMode) {
+		// Launch lane: DELAY=auto is the default (humans never set it).
+		// An explicit PIKMIN_NETPLAY_DELAY still wins (test surface).
+		sCfg.delayAuto  = true;
+		sCfg.localDelay = 2;
 	} else {
 		sCfg.localDelay = 2;
 	}
-	sCfg.seed = read_u32_env("PIKMIN_NETPLAY_SEED", 0);
+	// Launcher joiner: the offer's seed (preinit also exported it as
+	// PIKMIN_NETPLAY_SEED, which the det reseed reads).
+	sCfg.seed = launch.active ? launch.seed : read_u32_env("PIKMIN_NETPLAY_SEED", 0);
 	const char* bootCli = argv_value(sArgc, sArgv, "--randomizer-seed");
 	sCfg.bootstrapPath  = bootCli != nullptr ? bootCli : "bootstrap.txt";
+	// --netplay-input keyboard|gamepad[:N]|auto (CLI wins, PIKMIN_NETPLAY_INPUT
+	// is the test-surface fallback), validated before engine init by
+	// pc_netplay_launch_preinit (so a gamepad peer's background hint is set
+	// before SDL_Init, m6) for every netplay mode.
+	sCfg.inputSpec    = launch.inputSpec;
+	sCfg.inputKind    = launch.inputKind;
+	sCfg.inputGamepad = launch.inputIndex;
 	const char* lif     = getenv_nonempty("PIKMIN_NETPLAY_LOCAL_INPUT_FILE");
 	if (lif != nullptr) sCfg.localInputFile = lif;
-	uint64_t exitAfter = 0;
-	if (const char* ea = getenv_nonempty("PIKMIN_NETPLAY_EXIT_AFTER_TICKS")) {
-		char* end     = nullptr;
-		unsigned long n = strtoul(ea, &end, 10);
-		if (end != ea && *end == '\0' && n > 0) exitAfter = n;
+	// CLI first, env second (CLI wins): --netplay-test-ticks already set
+	// exitAfter above; the env only fills it in when no CLI value was given.
+	uint64_t exitAfter = sCfg.exitAfter;
+	if (exitAfter == 0) {
+		if (const char* ea = getenv_nonempty("PIKMIN_NETPLAY_EXIT_AFTER_TICKS")) {
+			char* end     = nullptr;
+			unsigned long n = strtoul(ea, &end, 10);
+			if (end != ea && *end == '\0' && n > 0) exitAfter = n;
+		}
 	}
 	sCfg.exitAfter = exitAfter;
 	sLocalRole    = sCfg.isHost ? 0 : 1;
@@ -1418,6 +1649,12 @@ void compute_local_hello()
 	std::string cfg = build_config_string();
 	sha_text(cfg, sLocal.cfg);
 	sCfgHexStr = to_hex(sLocal.cfg, 32);
+	if (sCfg.launcherMode) {
+		// The exact sim settings this peer runs the session with (the joiner's
+		// are the host's, adopted before init); the handshake hashes this text.
+		printf("[netplay] launch: session config %s\n", cfg.c_str());
+		fflush(stdout);
+	}
 	// Bootstrap hash with the SESSION token line removed.
 	sha_text(read_bootstrap_stripped(), sLocal.boot);
 	sBootHexStr  = to_hex(sLocal.boot, 32);
@@ -1548,6 +1785,7 @@ void refuse_and_exit(uint8_t field)
 {
 	printf("[netplay] handshake refused: %s\n", field_name(field));
 	fflush(stdout);
+	print_refusal_hint(field);
 	// Best effort: tell the peer why (5 quick sends; the channel is
 	// unreliable by design under the lossy test wrapper).
 	for (int i = 0; i < 5; ++i) send_hello_msg(kHsRefuse, field, 0);
@@ -1650,6 +1888,7 @@ bool handshake_pump()
 			printf("[netplay] handshake refused: %s\n",
 			       field_name(refuse == 0 ? 99 : refuse));
 			fflush(stdout);
+			print_refusal_hint(refuse);
 			// m12: join the ICE thread before exit.
 			stop_session();
 			std::exit(4);
@@ -2137,6 +2376,15 @@ void pc_netplay_randstate_publish(const pc_randstate::PcRandState& st)
 	sRandNextFrag = 0;
 }
 
+// Launch lane self-test (pc_netplay_launch_selftest.cpp): the exact config
+// text the handshake hashes. Valid until the next call.
+const char* pc_netplay_session_config_text(void)
+{
+	static std::string text;
+	text = build_config_string();
+	return text.c_str();
+}
+
 void pc_netplay_session_notify_argv(int argc, char** argv)
 {
 	sArgc = argc;
@@ -2193,6 +2441,15 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 		PcCoopSwitch sw = pc_coop_switch_parse(sArgc, sArgv);
 		sw.coop         = true;
 		pc_coop_switch_apply(sw);
+		// Launch lane: the co-op switch just reset the captains; the joiner
+		// takes the host's again (they are part of the adopted block).
+		pc_netplay_launch_apply_captains();
+		launcher_apply_input();
+		if (const char* f1 = getenv_nonempty("PIKMIN_NETPLAY_TEST_F1_CYCLE_TICK")) {
+			char* end          = nullptr;
+			unsigned long long n = strtoull(f1, &end, 10);
+			if (end != f1 && *end == '\0' && n > 0) sF1CycleTick = n;
+		}
 		compute_local_hello();
 		printf("[netplay] mode=%s delay=%u seed=%u\n", sCfg.isHost ? "host" : "join",
 		       sCfg.localDelay, sCfg.seed);
@@ -2210,12 +2467,19 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 			       nic.turn.empty() ? "none" : nic.turn.front().host.c_str(),
 			       (int)nic.turnOnly);
 			fflush(stdout);
-			sIce = new pc_netplay_ice::IceSocket();
 			auto pump = [&]() { sys->mControllerMgr.update(); };
 			std::string err;
 			bool ok = false;
-			if (sCfg.isHost) ok = pc_netplay_ice::ice_host_session(nic, pump, sIce, &err);
-			else ok = pc_netplay_ice::ice_join_session(nic, sCfg.iceJoinCode, pump, sIce, &err);
+			// Launch lane: one-command flows (v2 bundle offer, clipboard/file
+			// code exchange) instead of the env-driven M5a exchange. The
+			// low-level switches and env vars below keep working untouched.
+			if (sCfg.launcherMode && sCfg.isHost) ok = launcher_host_flow(nic, pump, &err);
+			else if (sCfg.launcherMode) ok = launcher_joiner_flow(nic, pump, &err);
+			else {
+				sIce = new pc_netplay_ice::IceSocket();
+				if (sCfg.isHost) ok = pc_netplay_ice::ice_host_session(nic, pump, sIce, &err);
+				else ok = pc_netplay_ice::ice_join_session(nic, sCfg.iceJoinCode, pump, sIce, &err);
+			}
 			if (!ok) {
 				printf("[netplay] ice setup failed: %s\n", err.c_str());
 				fflush(stdout);
@@ -2336,6 +2600,14 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 		// 8. Session events.
 		handle_session_events();
 		if (sPhase != kSession) return true; // stopped inside the handlers
+		if (sF1CycleTick > 0 && !sF1CycleDone && sSessionTicks >= sF1CycleTick) {
+			// Test hook: the F1 open/close save path, between two ticks.
+			sF1CycleDone = true;
+			printf("[netplay] test hook: F1 open/close after tick %llu\n",
+			       (unsigned long long)sSessionTicks);
+			fflush(stdout);
+			pc_settings_test_f1_cycle();
+		}
 	}
 	// Pacing: the session owns the single 30 Hz schedule (polish item 1).
 	// Drift-free deadline: next += 1000/30 ms per Advance, with bounded

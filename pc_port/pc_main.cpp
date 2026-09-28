@@ -52,6 +52,12 @@ __declspec(dllexport) int           AmdPowerXpressRequestHighPerformance = 1;
 // by pc_port/netplay/pc_netplay_session.cpp in netplay builds only; null in
 // the default build, so no session TU is linked there.
 __attribute__((weak)) void pc_netplay_session_notify_argv(int argc, char** argv);
+#if PIKI_NETPLAY_BUILD
+// Netplay launch lane (issue #887): the one-command launcher's pre-init stage
+// and settings hook. PIKI_NETPLAY_BUILD is defined for the game exe of
+// netplay builds only, so the default exe has no reference to either.
+#include "netplay/pc_netplay_launch.h"
+#endif
 #include "pc_gpu_preference.h"
 #include "netplay/pc_coop_switch.h"
 #include "netplay/pc_input_log.h"
@@ -98,6 +104,20 @@ int main(int argc, char* argv[])
 {
     // Disable stdout buffering so we see logs immediately before any crash
     setvbuf(stdout, NULL, _IONBF, 0);
+
+#if PIKI_NETPLAY_BUILD
+    // In-exe self-tests for ctest (settings adoption/persistence, input
+    // ownership); they need the game's own settings and window code.
+    if (argc >= 2 && std::strcmp(argv[1], "--netplay-launch-selftest") == 0)
+        return pc_netplay_launch_selftest(argc, argv);
+    // Netplay launch lane (issue #887, B1/B2/M1): the whole session setup is
+    // known before engine init on both sides (the host's bootstrap, the
+    // joiner's offer code), so it is resolved here, first: private run dir,
+    // run bootstrap (appended to argv as --randomizer-seed, the ordinary seed
+    // path), private save root, joiner seed, input device. Inert without a
+    // launcher switch (it then only validates --netplay-input).
+    pc_netplay_launch_preinit(&argc, &argv);
+#endif
 
     // Deterministic netplay mode (M1): parses --netplay-deterministic and the
     // PIKMIN_NETPLAY_* env vars. Must run before the game starts.
@@ -185,6 +205,12 @@ int main(int argc, char* argv[])
     printf("[PC Port] Loading persisted settings...\n");
     fflush(stdout);
     pc_settings_init();
+#if PIKI_NETPLAY_BUILD
+    // Launch lane: settings session guard (both peers) and the joiner's
+    // session-only adoption of the host's sim settings, before anything
+    // reads a sim setting.
+    pc_netplay_launch_post_settings();
+#endif
     if (smallTestWindow) {
         pc_window_set_display_mode(PC_WINDOW_FULLSCREEN_WINDOWED);
         pc_window_set_window_size(windowWidth, windowHeight);

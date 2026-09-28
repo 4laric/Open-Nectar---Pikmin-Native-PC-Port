@@ -37,6 +37,10 @@ bool pc_netplay_session_active(void);
 // calls it through a weak reference so the default build is untouched.
 bool pc_netplay_session_drive(System* sys, BaseApp* app);
 
+// Launch lane (issue #887) self-test hook: the exact config text the
+// handshake hashes (build_config_string). Valid until the next call.
+const char* pc_netplay_session_config_text(void);
+
 // N3 stage-load hook: called (weakly) from GameFlow::softReset inside the
 // synchronous load. Strong-defined here in netplay builds only; null in the
 // default build. Implements PIKMIN_NETPLAY_TEST_LOAD_DELAY_MS (sleep once).
