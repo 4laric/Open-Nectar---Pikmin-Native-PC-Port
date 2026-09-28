@@ -50,6 +50,8 @@
 #include "gl/pc_gfx.h"
 #include "system.h"
 #include "teki.h"
+#include "UtEffect.h"
+#include "KEffect.h"
 
 #include <cmath>
 #include <cstdio>
@@ -371,6 +373,13 @@ void applyBlast(const P2BombSaraiBlastEvent& e) {
             }
             tekis.push_back(t);
         }
+    }
+    // Detonation visual: the P1 bomb-rock explosion effect at the blast centre
+    // (the source Bomb plays its own efx; this is the host equivalent).
+    if (utEffectMgr) {
+        Vector3f centre(e.center.x, e.center.y, e.center.z);
+        EffectParm parm(centre);
+        utEffectMgr->cast(KandoEffect::Bomb, parm);
     }
     int naviHits = 0, pikiHits = 0, tekiHits = 0;
     for (Creature* c : navis) if (c->isAlive() && c->stimulate(InteractBomb(owner, e.naviPikiDamage, nullptr))) ++naviHits;
