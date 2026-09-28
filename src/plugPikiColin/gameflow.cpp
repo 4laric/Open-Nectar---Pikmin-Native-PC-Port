@@ -606,11 +606,14 @@ void GameFlow::hardReset(BaseApp* baseApp)
 	// Debug/evidence knob (#895): start every day at a chosen hour so lighting
 	// captures (noon vs dusk) do not need a full real-time day. Off unless set;
 	// clamped below the end-of-day hour.
+	// LOCAL-ONLY: this changes simulation state (the day clock), so it must
+	// never be set on a netplay/lockstep peer; peers that disagree on it would
+	// desync, and it is not part of any handshake. Solo captures only.
 	if (const char* hour = std::getenv("PIKMIN_DEBUG_START_HOUR")) {
 		const f32 value = static_cast<f32>(std::strtod(hour, nullptr));
 		if (value >= 0.0f && value < mParameters->mEndHour()) {
 			mParameters->mStartHour(value);
-			std::printf("PIKMIN_DEBUG_START_HOUR hour=%.2f\n", value);
+			std::printf("PIKMIN_DEBUG_START_HOUR hour=%.2f local_only=1 (changes the day clock; never set on a netplay peer)\n", value);
 		}
 	}
 #endif
