@@ -23,6 +23,8 @@
 #     <OutDir>\host\native.log / <OutDir>\join\native.log;
 #   * stops only the two processes it started, on every exit path.
 #
+# Windows: both open windowed at -WindowSize (default 960x540), centred on
+# the screen, so drag one aside; -WindowSize off keeps each peer's setting.
 # Assets: -Assets, else <exe folder>\assets, else
 # %APPDATA%\PikminRandomizer\game-data\assets (the installed game data).
 # DLLs: when SDL2.dll is not next to the exe (a build tree), the MinGW runtime
@@ -46,7 +48,8 @@ param(
     [int]$TimeoutSec = 1200,
     [string]$HostInputFile = "",
     [string]$JoinInputFile = "",
-    [int]$PortBase = 0
+    [int]$PortBase = 0,
+    [string]$WindowSize = "960x540"
 )
 
 $ErrorActionPreference = "Stop"
@@ -110,6 +113,10 @@ if (-not (Test-Path -LiteralPath (Join-Path $exeDir "SDL2.dll")) -and (Test-Path
 if ($Hidden) {
     $env:PIKMIN_RANDOMIZER_TEST_BACKGROUND = "1"
     $env:SDL_AUDIODRIVER = "dummy"
+} elseif ($WindowSize -ne "" -and $WindowSize -ne "off") {
+    # Two borderless full-screen windows would cover each other: open both
+    # windowed at this size, centred (drag one aside). Presentation only.
+    $env:PIKMIN_P2_ROOM_WINDOW = $WindowSize
 }
 
 $hostArgs = @("--netplay-host-ice", "--netplay-code-out", $offerFile,

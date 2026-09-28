@@ -131,6 +131,11 @@ plugged in later is also picked up). Close both game windows (or press Ctrl+C in
 - It uses this PC only (loopback, no STUN server), and on a build tree it
   puts `C:\msys64\mingw64\bin` on `PATH` for the two games when `SDL2.dll`
   is not next to the exe.
+- Both windows open windowed at 960x540, centred on the screen: drag one
+  aside, and click the host window before you use the keyboard (keys only
+  reach the window that has focus; the gamepad does not need focus).
+  `-WindowSize WxH` changes the size, `-WindowSize off` keeps each
+  window's own settings.
 - `-Bootstrap <file>` plays a seed; `-HostInput`/`-JoinInput` change the
   devices. `-Hidden` is the automated test mode (hidden, bounded).
 
