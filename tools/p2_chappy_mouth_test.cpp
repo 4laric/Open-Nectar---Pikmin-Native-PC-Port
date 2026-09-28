@@ -627,22 +627,15 @@ int main()
             require(std::string(gateName(GateInvisible)) == "invisible" && std::string(gateName(GateOk)) == "ok",
                     "T17 gate names");
         }
-        // Defect oracle: a Pikmin 200 away at 90 deg. The pre-round-2 port
-        // King never changed heading (WarCry loop), so the gate never opened.
-        // (At 120 / 90 deg the source turn law, 2% of the angle per frame,
-        // lets the target slip inside fp06 before the angle drops under
-        // fp21: the source Emperor overruns close side targets.)
+        // A Pikmin 200 away at 90 deg. (At 120 / 90 deg the source turn law,
+        // 2% of the angle per frame, lets the target slip inside fp06 before
+        // the angle drops under fp21: the source Emperor overruns close side
+        // targets.) Round 3: the former frozen-heading "legacy oracle" here
+        // could not fail (it re-implemented the defect and asserted it); the
+        // Walk-state ordering that caused it is now the pure
+        // king::walkStateStep, pinned in T18.
         const Vec3 prey90{200.0f, 0.0f, 0.0f};
         Candidate lone[1] = {{prey90, true}};
-        {
-            float legacyHeading = 0.0f;
-            bool opened = false;
-            for (int f = 0; f < 900; ++f) {
-                const int pick = selectTarget(origin, legacyHeading, nullptr, lone, 1);
-                if (pick == 0 && attackGate(origin, legacyHeading, prey90)) opened = true;
-            }
-            require(!opened, "T17 legacy frozen King never attacks a target outside its cone");
-        }
         // Source pursuit: Walk -> Turn -> Walk opens the gate with the target
         // still outside the invisible range (tongue band).
         {
@@ -725,16 +718,166 @@ int main()
             nextGoal(w, Vec3{400.0f, 0.0f, 0.0f}, &t, 0.0f, 0.0f);
             require(goalIsHome(w), "T17 out of territory -> home");
         }
-        // Census for the gate line.
+        // Census for the gate line (round 3: front = reachable by a slot).
         {
             Candidate c[4] = {
-                {Vec3{0.0f, 0.0f, 30.0f}, true},  // under the chin
+                {Vec3{0.0f, 0.0f, 30.0f}, true},  // under the chin: ahead but unreachable
                 {Vec3{0.0f, 0.0f, 100.0f}, true}, // band + front
                 {Vec3{0.0f, 0.0f, -40.0f}, true}, // behind (180 deg): outside the cone and not ahead
                 {Vec3{0.0f, 0.0f, 60.0f}, false}, // in a mouth
             };
-            const Census cs = census(origin, 0.0f, c, 4, maxReach(king));
-            require(cs.underChin == 1 && cs.band == 1 && cs.front == 2, "T17 census under_chin / band / front");
+            const Census cs = census(origin, 0.0f, c, 4, &king);
+            require(cs.underChin == 1 && cs.band == 1 && cs.front == 1 && cs.latched == 0,
+                    "T17 census under_chin / band / front (reachable only)");
+        }
+    }
+
+    // --- T18: King checkFlick, shake-off and Walk/Turn priorities (#884 round 3) ---
+    // Review of af1e35f98: with the bot captain parked ~18 in front, the
+    // source prefers that captain and checkAttack refuses it (fp06), so
+    // neither side attacks; the SOURCE breaks the standoff through
+    // Obj::checkFlick (captain inside fp06 adds 0.1 per frame; each hit adds
+    // 1.0) -> Flick. The port flicked only on >= 3 stuck Pikmin and let
+    // Attack win over Flick. kingChappy.cpp:2429-2470, enemyAction.cpp:1209-1240,
+    // enemyBase.cpp:2762-2773, kingChappyState.cpp:69-107, 823-918, 1800-1823.
+    {
+        using namespace p2chappymouth::king;
+        // isStartFlick: round, (int), u8, strictly above the tier threshold.
+        require(!isStartFlick(0.0f, 3) && !isStartFlick(0.0f, 25),
+                "T18 stuck Pikmin alone never start a flick (old port rule: 3 stuck)");
+        require(!isStartFlick(6.49f, 0) && isStartFlick(6.5f, 0) && isStartFlick(6.5f, 4), "T18 tier A: > ip01 6");
+        require(!isStartFlick(12.49f, 5) && isStartFlick(12.5f, 9), "T18 tier B (ip02 5): > ip03 12");
+        require(!isStartFlick(17.49f, 10) && isStartFlick(17.5f, 19), "T18 tier C (ip04 10): > ip05 17");
+        require(!isStartFlick(22.49f, 20) && isStartFlick(22.5f, 60), "T18 tier D (ip06 20): > ip07 22");
+        require(isStartFlick(255.4f, 0) && !isStartFlick(256.2f, 0), "T18 u8 truncation of the rounded timer");
+        require(flickThreshold(4) == 6 && flickThreshold(5) == 12 && flickThreshold(10) == 17 && flickThreshold(20) == 22,
+                "T18 retail shake-off tiers");
+        // Hits: damageCallBack flickSpeed 1.0 per hit.
+        {
+            float t = 0.0f;
+            for (int i = 0; i < 6; ++i) t += FlickPerHit;
+            require(!checkFlick(t, 0, 3, 1.0f), "T18 six hits with three stuck: no flick");
+            t += FlickPerHit;
+            require(checkFlick(t, 0, 3, 1.0f), "T18 seventh hit with three stuck: flick");
+            float t5 = 12.0f;
+            require(!checkFlick(t5, 0, 5, 1.0f) && (t5 += FlickPerHit, checkFlick(t5, 0, 5, 1.0f)),
+                    "T18 five stuck need the 13th hit");
+        }
+        // Captain proximity: 3D separation strictly inside fp06.
+        require(naviInInvisibleRange(origin, Vec3{0.0f, 0.0f, 18.0f}) && naviInInvisibleRange(origin, Vec3{0.0f, 0.0f, 79.9f})
+                    && !naviInInvisibleRange(origin, Vec3{0.0f, 0.0f, 80.0f}),
+                "T18 captain inside fp06");
+        require(!naviInInvisibleRange(origin, Vec3{70.0f, 50.0f, 0.0f}), "T18 checkFlick uses the 3D separation");
+        {
+            // The i1-53 standoff: captain parked at 18, no stuck Pikmin, no hits.
+            float t = 0.0f;
+            int calls = 0;
+            bool fired = false;
+            while (calls < 1000 && !fired) {
+                ++calls;
+                fired = checkFlick(t, 1, 0, 1.0f);
+            }
+            require(fired && calls >= 64 && calls <= 66, "T18 a captain inside fp06 starts a flick after ~65 frames");
+            float t2 = 0.0f;
+            require(!checkFlick(t2, 1, 0, 64.0f) && checkFlick(t2, 1, 0, 1.0f), "T18 fractional ticks accrue per frame");
+            float t3 = 0.0f;
+            require(checkFlick(t3, 2, 0, 33.0f), "T18 two captains accrue twice as fast");
+            float t4 = 0.0f;
+            bool never = true;
+            for (int f = 0; f < 1000; ++f) never = never && !checkFlick(t4, 0, 0, 1.0f);
+            require(never && t4 == 0.0f, "T18 no captain, no hit: the timer never moves");
+        }
+        // Shake geometry around the parked captain (StateFlick KEYEVENT_3).
+        {
+            const Vec3 foot = footPosition(origin, 0.0f);
+            require(foot.z == -FootBack && foot.x == 0.0f, "T18 foot = position - 10 * facing");
+            require(tramples(foot, Vec3{0.0f, 0.0f, 18.0f}), "T18 the parked captain at 18 is trampled (pressed)");
+            require(!tramples(foot, Vec3{0.0f, 0.0f, 40.0f}) && inShakeRange(origin, Vec3{0.0f, 0.0f, 40.0f}),
+                    "T18 a Pikmin at 40 ahead is flicked, not trampled");
+            require(!tramples(foot, Vec3{0.0f, 26.0f, 10.0f}) && !tramples(foot, Vec3{0.0f, -6.0f, 10.0f}),
+                    "T18 trample y band (foot.y - 5, foot.y + 25)");
+            require(!inShakeRange(origin, Vec3{0.0f, 0.0f, 60.0f}) && inShakeRange(origin, Vec3{0.0f, 0.0f, 59.9f}),
+                    "T18 shake range fp19 60 (3D, strict)");
+            require(!tramples(foot, Vec3{0.0f, 0.0f, 50.0f}) && inShakeRange(origin, Vec3{0.0f, 0.0f, 50.0f}),
+                    "T18 a captain at 50 is flicked (flickNearbyNavi), not pressed");
+            require(std::fabs(flickStuckAngle(0.0f) - PI_F) < 1e-5f && std::fabs(flickStuckAngle(0.75f * PI_F) - 1.75f * PI_F) < 1e-5f
+                        && std::fabs(flickStuckAngle(-0.5f * PI_F) - 0.5f * PI_F) < 1e-5f,
+                    "T18 stuck Pikmin fly at roundAng(facing + pi)");
+        }
+        // Walk priorities (walk clip mid-loop: a transit's blend makes every
+        // later check*(true) return early).
+        {
+            WalkInputs in;
+            in.hasTarget = true;
+            require(walkStateStep(in) == NextWalk, "T18 a sighting alone keeps walking (no sees -> WarCry)");
+            in.inRange = true;
+            require(walkStateStep(in) == NextAttack, "T18 checkAttack in range -> Attack");
+            in.flickStart = true;
+            require(walkStateStep(in) == NextFlick, "T18 checkFlick's transit blocks checkAttack (Flick over Attack)");
+            in.shout = true;
+            require(walkStateStep(in) == NextWarCry, "T18 flick below half life with the fp13 roll -> WarCry");
+            in.walker = WalkTurn;
+            require(walkStateStep(in) == NextTurn, "T18 checkTurn's transit blocks checkFlick and checkAttack");
+            WalkInputs h;
+            h.walker = WalkHide;
+            require(walkStateStep(h) == NextHide, "T18 incubation Hide when nothing else transits");
+            h.inRange = true;
+            require(walkStateStep(h) == NextAttack, "T18 deferred Hide loses to checkAttack");
+            h.flickStart = true;
+            require(walkStateStep(h) == NextFlick, "T18 deferred Hide loses to checkFlick");
+            require(turnStateStep(false, false, false) == NextTurn && turnStateStep(true, false, false) == NextWalk
+                        && turnStateStep(true, true, false) == NextFlick && turnStateStep(false, true, true) == NextWarCry,
+                    "T18 Turn: checkFlick wins over the turn ending");
+            require(std::string(walkNextName(NextFlick)) == "flick" && std::string(walkNextName(NextWarCry)) == "warcry",
+                    "T18 names");
+        }
+        // The i1-53 standoff end to end through the runtime's Walk sequence:
+        // captain parked at 18 in front, 12 free Pikmin under the chin, the
+        // King blocked (position fixed). Source: no attack (fp06), a flick
+        // after ~65 frames, before the 242-frame stall.
+        {
+            Walker w;
+            initWalker(w, origin);
+            float heading = 0.0f, timer = 0.0f;
+            const Vec3 captain{0.0f, 0.0f, 18.0f};
+            std::vector<Candidate> crowd;
+            for (int i = 0; i < 12; ++i)
+                crowd.push_back(Candidate{Vec3{-30.0f + 5.0f * i, 0.0f, 25.0f + 3.0f * i}, true});
+            int flickFrame = -1, attackFrame = -1;
+            for (int f = 0; f < 400 && flickFrame < 0 && attackFrame < 0; ++f) {
+                tickDelay(w, 1.0f);
+                const bool searched = canSearch(w, origin);
+                const int pick = searched ? selectTarget(origin, heading, &captain, crowd.data(), (int)crowd.size()) : -1;
+                const Vec3* target = pick == -2 ? &captain : (pick >= 0 ? &crowd[pick].pos : nullptr);
+                WalkInputs in;
+                in.walker = walkTick(w, origin, heading, target, 1.0f, 0.5f, 0.5f);
+                in.hasTarget = target != nullptr;
+                in.flickStart = in.walker != WalkTurn
+                                && checkFlick(timer, naviInInvisibleRange(origin, captain) ? 1 : 0, 0, 1.0f);
+                in.inRange = target && !w.targetDropped && attackGate(origin, heading, *target);
+                const WalkNext next = walkStateStep(in);
+                if (next == NextFlick) flickFrame = f;
+                if (next == NextAttack) attackFrame = f;
+            }
+            require(attackFrame < 0, "T18 standoff: the captain at 18 is never attacked (fp06)");
+            require(flickFrame >= 60 && flickFrame <= 70, "T18 standoff: the source flick timer breaks it (~65 frames)");
+        }
+        // Reachable band: nothing on the ground under the chin (local z <= 60,
+        // any lateral offset) is reached by any slot of the 40..94 window
+        // (the first reachable ground points are z 65 at x +10..+30).
+        {
+            const float reach = maxReach(king);
+            bool any = false;
+            for (int x = -60; x <= 60; x += 5)
+                for (int z = 0; z <= 60; z += 5)
+                    any = any || tongueReaches(king, reach, origin, 0.0f, Vec3{float(x), 0.0f, float(z)});
+            require(!any, "T18 the under-chin ground zone is unreachable");
+            require(tongueReaches(king, reach, origin, 0.0f, Vec3{0.0f, 0.0f, 100.0f}), "T18 ground prey at 100 ahead is reachable");
+            Candidate c[3] = {{Vec3{0.0f, 0.0f, 30.0f}, true}, {Vec3{0.0f, 0.0f, 100.0f}, true}, {Vec3{0.0f, 25.0f, 20.0f}, true}};
+            c[2].latched = true; // latched to the body
+            const Census cs = census(origin, 0.0f, c, 3, &king);
+            require(cs.latched == 1 && cs.underChin == 1 && cs.front == 1 && cs.band == 1,
+                    "T18 census separates free and latched Pikmin");
         }
     }
 

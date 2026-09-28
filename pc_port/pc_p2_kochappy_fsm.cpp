@@ -668,10 +668,14 @@ void pc_p2_kochappy_fsm_update(BTeki* actor)
 			// #884 geometry fields: see pc_p2_chappy.cpp printDiag (same meanings).
 			const p2chappymouth::Profile* prof = p2chappymouth::profileForSource(44);
 			const float tdist = target ? distXZ(target->getPosition(), pos) : -1.0f;
+			const float tang  = target ? wrapPi(std::atan2(target->getPosition().x - pos.x, target->getPosition().z - pos.z)
+			                                    - state.heading) * 180.0f / PI
+			                           : 0.0f;
 			std::printf("P2_KOCHAPPY_EAT generator=%u frame=%.0f eaten=%d slot=%d captured=%d nearest_behind=%d "
 			            "refused_no_host=%d host_slots=%d closest=%.1f closest_local=%.1f,%.1f,%.1f "
 			            "slot_radius=%.1f reach=%.1f front=%d stuck_self=%d eligible_min=%d heading_deg=%.1f "
-			            "draw_yaw_deg=%.1f scale=%.2f target_kind=%c target_dist=%.1f\n",
+			            "draw_yaw_deg=%.1f scale=%.2f target_kind=%c target_dist=%.1f closest_frame=%d closest_slot=%d "
+			            "target_ang_deg=%.1f\n",
 			            generator, ATTACK_EVENT_FRAME, eat.captured > 0 ? 1 : 0, eat.freeBefore > 0 ? 1 : 0,
 			            eat.captured, eat.nearestBehind ? 1 : 0, eat.refusedNoHost, eat.hostSlots, eat.diag.closest,
 			            eat.diag.closestLocal.x, eat.diag.closestLocal.y, eat.diag.closestLocal.z,
@@ -679,7 +683,7 @@ void pc_p2_kochappy_fsm_update(BTeki* actor)
 			            eat.diag.front, eat.diag.stuckSelf, eat.diag.eligibleMin, eat.headingDeg, eat.drawYawDeg,
 			            actor->mSRT.s.x,
 			            !target ? '-' : (!target->isPiki() ? 'n' : (target->getStickObject() == actor ? 's' : 'p')),
-			            tdist);
+			            tdist, eat.diag.closestFrame, eat.diag.closestSlot, tang);
 			std::fflush(stdout);
 		}
 		if (!state.swallowFired && state.stateTime * 30.0f >= SWALLOW_EVENT_FRAME) {

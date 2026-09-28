@@ -387,7 +387,8 @@ inline float sqrXZ(const Vec3& a, const Vec3& b)
 // the captain, a Pikmin index, or -1 for no target.
 struct Candidate {
     Vec3 pos;
-    bool searchable; // Piki::isSearchable (alive, not stuck to a mouth)
+    bool searchable;      // Piki::isSearchable (alive, not stuck to a mouth)
+    bool latched = false; // stuck to THIS King's body (never eaten: EatPikminDefaultCondition)
 };
 
 inline int selectTarget(const Vec3& actor, float heading, const Vec3* navi, const Candidate* piki, int count)
@@ -508,6 +509,7 @@ struct Walker {
     float walkFrames = 0.0f;      // mWalkingTimer
     Vec3 stallPos{0, 0, 0};       // mPrevWalkingCheckPosition
     float noTargetFrames = 0.0f;  // StateWalk::mNoTargetTimer
+    bool targetDropped = false;   // this walkTick's stall check cleared mTargetCreature
 };
 
 inline void initWalker(Walker& w, const Vec3& home)
@@ -572,6 +574,7 @@ enum WalkResult { WalkOn = 0, WalkTurn, WalkHide };
 inline WalkResult walkTick(Walker& w, const Vec3& pos, float& heading, const Vec3* target, float frames, float r0,
                            float r1)
 {
+    w.targetDropped = false;
     if (target) w.goal = *target; // searchTarget tail (kingChappy.cpp:1181-1183)
     heading = turnStep(heading, pos, w.goal, frames);
     w.walkFrames += frames;
@@ -580,6 +583,7 @@ inline WalkResult walkTick(Walker& w, const Vec3& pos, float& heading, const Vec
             w.searchDelay = SearchDelayFrames;
             w.goal = w.home;
             target = nullptr;
+            w.targetDropped = true; // mTargetCreature = nullptr: checkAttack has no target this tick
         }
         w.stallPos = pos;
         w.walkFrames = 0.0f;
@@ -609,30 +613,223 @@ inline bool turnTick(float& heading, const Vec3& pos, const Vec3& aim, bool hasT
     return std::fabs(ang) < thr;
 }
 
-// Gate-refusal diagnostics: searchable Pikmin in the search cone inside the
-// invisible range (under_chin), inside the attack gate region (band), and
-// ahead within the tongue's ground reach (front).
+// Gate-refusal diagnostics (P2_CHAPPY_KING_GATE). Free = searchable and not
+// latched to this King's body; latched Pikmin are counted apart because the
+// source eat condition never takes them (they feed the flick's stuck count).
+//   under_chin: free Pikmin in the search cone inside the invisible range
+//   band:       free Pikmin that would pass the attack gate
+//   front:      free Pikmin that some kamu slot of the 40..94 tongue window
+//               actually reaches (tongueReaches), NOT merely "ahead within
+//               max reach": the under-chin ground zone (local z up to 60;
+//               the first reachable ground is z 65 at x +10..+30) is
+//               unreachable at every frame and is excluded (round 3).
+//   latched:    Pikmin latched to the body (any position)
 struct Census {
     int underChin = 0;
     int band = 0;
     int front = 0;
+    int latched = 0;
 };
 
-inline Census census(const Vec3& actor, float heading, const Candidate* piki, int count, float reach)
+// True when any slot of any frame of the profile's window comes strictly
+// within the slot radius of `q` (the eatPikmin distance test, over the whole
+// window). Prefiltered by the feet plane and the maximum horizontal reach.
+inline bool tongueReaches(const Profile& p, float reach, const Vec3& actor, float heading, const Vec3& q)
+{
+    const Vec3 l = toLocal(actor, heading, q);
+    if (l.z <= 0.0f || l.x * l.x + l.z * l.z > reach * reach) return false;
+    const float r = effectiveRadius(p);
+    for (int f = p.firstFrame; f <= p.lastFrame; ++f) {
+        for (int i = 0; i < p.slots; ++i) {
+            if (distance(slotWorld(p, f, i, actor, heading), q) < r) return true;
+        }
+    }
+    return false;
+}
+
+inline Census census(const Vec3& actor, float heading, const Candidate* piki, int count, const Profile* prof)
 {
     Census c;
     const float cone = SearchAngleDeg * DegToRad;
+    const float reach = prof ? maxReach(*prof) : 0.0f;
     for (int n = 0; n < count; ++n) {
         if (!piki[n].searchable) continue;
+        if (piki[n].latched) {
+            ++c.latched;
+            continue;
+        }
         const Vec3& q = piki[n].pos;
         const float ang = std::fabs(angDist(actor, heading, q));
         const float d = sqrXZ(q, actor);
         if (ang <= cone && d <= InvisibleRange * InvisibleRange) ++c.underChin;
         if (attackGate(actor, heading, q)) ++c.band;
-        const float lz = (q.x - actor.x) * std::sin(heading) + (q.z - actor.z) * std::cos(heading);
-        if (lz > 0.0f && d <= reach * reach) ++c.front;
+        if (prof && tongueReaches(*prof, reach, actor, heading, q)) ++c.front;
     }
     return c;
+}
+
+// ---- Flick / shake-off (#884 round 3) ---------------------------------------
+// Source Obj::checkFlick (kingChappy.cpp:2429-2470), called from StateWalk
+// (kingChappyState.cpp:93) and StateTurn (:1822) only:
+//   * every call, each live captain whose 3D separation is inside proper fp06
+//     (80) adds 0.1 to EnemyBase::mFlickTimer;
+//   * EnemyBase::addDamage adds flickSpeed (1.0 from Obj::damageCallBack,
+//     kingChappy.cpp:824-848) on every damaging hit, in every state
+//     (enemyBase.cpp:2762-2773; EB_FlickEnabled is set in onInit, :1074);
+//   * EnemyFunc::isStartFlick(this, false) (enemyAction.cpp:1209-1240) rounds
+//     the timer, truncates it to u8 and compares it with the shake-off blow
+//     threshold of the stuck-Pikmin tier (mStuckPikminCount, onStickStart/End
+//     enemyBase.cpp:2716-2733);
+//   * below half life, proper fp13 (0.5) of the starts become WarCry.
+// The timer is reset only by the shake itself (StateFlick KEYEVENT_3
+// kingChappyState.cpp:914, StateWarCry KEYEVENT_4 :1742), the bomb damage
+// event (:1658) and doFinishStoneState (kingChappy.cpp:947).
+// StateFlick KEYEVENT_3 (kingChappyState.cpp:864-918): InteractPress
+// (general fp24) on Pikmin and captains inside the trampling disc (proper fp08
+// around mFootPosition = position - 10 * facing, kingChappy.cpp:233-235, y in
+// (foot.y - 5, foot.y + 25)), then flickNearbyPikmin (3D < general fp19, not
+// stuck to the King), flickStickPikmin (general fp16 chance, angle
+// facing + pi) and, only when no captain was trampled, flickNearbyNavi
+// (3D < fp19), all with knockback fp17 and damage fp18
+// (enemyAction.cpp:768-850). StateWarCry KEYEVENT_4 (:1690-1742) does the
+// same three flicks without the trample.
+// Retail values: output/p2play/content/KingChappy/enemyparm.txt; key frames:
+// enemyanimmgr.txt (flick.bca 30:2 35:3, cry.bca 65:4).
+constexpr float NaviFlickPerFrame = 0.1f; // checkFlick, per captain inside fp06
+constexpr float FlickPerHit = 1.0f;       // damageCallBack addDamage(.., 1.0f)
+constexpr int ShakeOffBlowA = 6;          // general ip01
+constexpr int ShakeOffSticking1 = 5;      // general ip02
+constexpr int ShakeOffBlowB = 12;         // general ip03
+constexpr int ShakeOffSticking2 = 10;     // general ip04
+constexpr int ShakeOffBlowC = 17;         // general ip05
+constexpr int ShakeOffSticking3 = 20;     // general ip06
+constexpr int ShakeOffBlowD = 22;         // general ip07
+constexpr float ShakeChance = 1.0f;       // general fp16
+constexpr float ShakeKnockback = 200.0f;  // general fp17
+constexpr float ShakeDamage = 1.0f;       // general fp18
+constexpr float ShakeRange = 60.0f;       // general fp19 (x mScaleModifier, 1)
+constexpr float TramplingRange = 45.0f;   // proper fp08 (x mScaleModifier, 1)
+constexpr float TrampleDamage = 5.0f;     // general fp24 (InteractPress damage)
+constexpr float FootBack = 10.0f;         // doUpdate mFootPosition offset
+constexpr float TrampleAbove = 25.0f;     // yMax = foot.y + 25
+constexpr float TrampleBelow = 5.0f;      // yMin = yMax - 30
+constexpr int FlickEventFrame = 35;       // flick.bca KEYEVENT_3
+constexpr int CryShakeFrame = 65;         // cry.bca KEYEVENT_4
+
+// isStartFlick threshold for a stuck count (the rounded timer must exceed it).
+inline int flickThreshold(int stuck)
+{
+    if (stuck < ShakeOffSticking1) return ShakeOffBlowA;
+    if (stuck < ShakeOffSticking2) return ShakeOffBlowB;
+    if (stuck < ShakeOffSticking3) return ShakeOffBlowC;
+    return ShakeOffBlowD;
+}
+
+// EnemyFunc::isStartFlick without the reset (KingChappy passes false):
+// round half away from zero, (int), then u8 truncation.
+inline bool isStartFlick(float timer, int stuck)
+{
+    const float rounded = timer >= 0.0f ? timer + 0.5f : timer - 0.5f;
+    const int flickInt = (unsigned char)(int)rounded;
+    return flickInt > flickThreshold(stuck);
+}
+
+// One checkFlick call spanning `frames` source frames: accrue 0.1 per frame
+// per captain inside fp06 (`naviInRange`), then test the start condition.
+inline bool checkFlick(float& timer, int naviInRange, int stuck, float frames)
+{
+    if (naviInRange > 0 && frames > 0.0f) timer += NaviFlickPerFrame * float(naviInRange) * frames;
+    return isStartFlick(timer, stuck);
+}
+
+// checkFlick's captain test: 3D separation (Creature::getTargetSeparation)
+// strictly inside proper fp06.
+inline bool naviInInvisibleRange(const Vec3& actor, const Vec3& navi)
+{
+    const float dx = navi.x - actor.x, dy = navi.y - actor.y, dz = navi.z - actor.z;
+    return dx * dx + dy * dy + dz * dz < InvisibleRange * InvisibleRange;
+}
+
+inline Vec3 footPosition(const Vec3& actor, float heading)
+{
+    return Vec3{actor.x - FootBack * std::sin(heading), actor.y, actor.z - FootBack * std::cos(heading)};
+}
+
+// StateFlick KEYEVENT_3 trample test for a Pikmin or captain position.
+inline bool tramples(const Vec3& foot, const Vec3& q)
+{
+    const float yMax = foot.y + TrampleAbove;
+    const float yMin = yMax - (TrampleAbove + TrampleBelow);
+    return q.y < yMax && q.y > yMin && sqrXZ(foot, q) < TramplingRange * TramplingRange;
+}
+
+// flickNearbyPikmin / flickNearbyNavi: 3D distance strictly inside fp19.
+inline bool inShakeRange(const Vec3& actor, const Vec3& q)
+{
+    const float dx = q.x - actor.x, dy = q.y - actor.y, dz = q.z - actor.z;
+    return dx * dx + dy * dy + dz * dz < ShakeRange * ShakeRange;
+}
+
+// flickStickPikmin: angle = roundAng(getFaceDir() + pi), in [0, 2pi).
+inline float flickStuckAngle(float heading)
+{
+    float a = heading + 3.14159265f;
+    while (a >= 2.0f * 3.14159265f) a -= 2.0f * 3.14159265f;
+    while (a < 0.0f) a += 2.0f * 3.14159265f;
+    return a;
+}
+
+// ---- Walk / Turn transition priorities (#884 round 3) -----------------------
+// Source StateWalk::exec (kingChappyState.cpp:69-107) runs, in order:
+// walkFunc (search, walkToTarget, stall) + checkTurn, [Hide as a deferred
+// mNextState], checkDead, checkFlick, checkAttack. checkTurn and checkFlick
+// transit with mAllowAnimBlending = true, so startMotionSelf starts a blend
+// (kingChappy.cpp:2528-2556; BlendAnimator::startBlend sets mIsBlendEnabled,
+// sysShape.cpp:244-255) whenever the walk clip is not on its last frame, and
+// every later check*(true) returns early while that blend is enabled
+// (checkFlick :2435-2439, checkAttack :1784-1790). Hence, with the walk clip
+// mid-loop: Turn > Flick/WarCry > Attack > Hide > keep walking. A sighting by
+// itself never leaves Walk: WarCry is reached only through checkFlick (below
+// half life) or checkDead. Adaptation: the rare tick on the walk clip's last
+// frame (no blend, so a later transit would win) is not modelled.
+enum WalkNext { NextWalk = 0, NextTurn, NextFlick, NextWarCry, NextAttack, NextHide };
+
+inline const char* walkNextName(WalkNext n)
+{
+    switch (n) {
+    case NextWalk: return "walk";
+    case NextTurn: return "turn";
+    case NextFlick: return "flick";
+    case NextWarCry: return "warcry";
+    case NextAttack: return "attack";
+    case NextHide: return "hide";
+    }
+    return "?";
+}
+
+struct WalkInputs {
+    WalkResult walker = WalkOn; // walkTick: WalkTurn (checkTurn), WalkHide (deferred), WalkOn
+    bool flickStart = false;    // checkFlick fired (the caller skips checkFlick after WalkTurn: blend)
+    bool shout = false;         // below half life and the fp13 roll: the flick becomes WarCry
+    bool inRange = false;       // checkAttack gate after walkFunc (a stall drops the target)
+    bool hasTarget = false;     // searchTarget found something; never a transition by itself
+};
+
+inline WalkNext walkStateStep(const WalkInputs& in)
+{
+    if (in.walker == WalkTurn) return NextTurn;
+    if (in.flickStart) return in.shout ? NextWarCry : NextFlick;
+    if (in.inRange) return NextAttack;
+    if (in.walker == WalkHide) return NextHide;
+    return NextWalk;
+}
+
+// Source StateTurn::exec (kingChappyState.cpp:1800-1823): turnFunc, then
+// checkDead / checkFlick; the flick transit wins over the turn ending.
+inline WalkNext turnStateStep(bool turnDone, bool flickStart, bool shout)
+{
+    if (flickStart) return shout ? NextWarCry : NextFlick;
+    return turnDone ? NextWalk : NextTurn;
 }
 } // namespace king
 

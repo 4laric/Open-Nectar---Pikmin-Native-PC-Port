@@ -11,6 +11,7 @@
 #include "pc_p2_dangomushi.h"
 #include "pc_p2_long_legs.h"
 #include "pc_p2_snakejoint.h"
+#include "pc_p2_chappy.h"
 #endif
 
 /**
@@ -64,6 +65,9 @@ bool InteractAttack::actTeki(Teki* teki) immut
 	// Lane 28 (#245 gate 3): real engine receiver observation for the bound
 	// Fuefuki vehicle. No-op for every other actor.
 	pc_p2_hardlanes_fuefuki_hit(teki, mOwner, mDamage, damageAccepted);
+	// #884: Emperor Bulblax flick timer (source addDamage flickSpeed). No-op
+	// for every other actor.
+	pc_p2_chappy_attacked(teki, damageAccepted);
 #endif
 	return damageAccepted;
 }
