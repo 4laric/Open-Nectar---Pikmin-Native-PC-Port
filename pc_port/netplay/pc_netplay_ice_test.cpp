@@ -98,6 +98,75 @@ int main()
 		CHECK(offer != answer, "offer and answer differ");
 	}
 
+	// 1b. v2 bundle offer round trip + strict rejection (launch lane).
+	{
+		SessionBundle bundle;
+		bundle.seed            = 0x12345678;
+		bundle.configText      = "m3-config-v1;fpsMode=0;chainActions=1;";
+		bundle.bootstrapBytes  = "PIKMIN_RANDOMIZER 5\nSESSION abc\nFINGERPRINT abc\nEND\n";
+		std::string offer2, err, sdp;
+		SessionBundle got;
+		CHECK(ice_encode_offer_v2(kFakeSdp, bundle, &offer2, &err), "encode v2 offer");
+		CHECK(offer2.compare(0, 6, "NPIX2-") == 0 && offer2.find('\n') == std::string::npos,
+		      "v2 offer is one line with version prefix");
+		CHECK(ice_decode_offer_v2(offer2, &sdp, &got, &err) && sdp == kFakeSdp,
+		      "v2 offer SDP round trip");
+		CHECK(got.seed == bundle.seed && got.configText == bundle.configText
+		          && got.bootstrapBytes == bundle.bootstrapBytes,
+		      "v2 offer bundle round trip");
+		std::printf("ice_test: v2 offer bytes=%llu\n", (unsigned long long)offer2.size());
+		// Empty bootstrap is allowed (plain non-randomizer boot).
+		{
+			SessionBundle emptyBoot = bundle;
+			emptyBoot.bootstrapBytes.clear();
+			std::string enc, e2, s2;
+			SessionBundle g2;
+			CHECK(ice_encode_offer_v2(kFakeSdp, emptyBoot, &enc, &e2), "encode v2 empty boot");
+			CHECK(ice_decode_offer_v2(enc, &s2, &g2, &e2) && g2.bootstrapBytes.empty()
+			          && g2.seed == bundle.seed && g2.configText == bundle.configText,
+			      "v2 empty bootstrap round trip");
+		}
+		// Garbage is rejected with a reason.
+		const char* bad2[] = {
+			"",
+			"not-a-code",
+			"NPIX2-",
+			"NPIX2-!!!not-base64!!!",
+			"NPIX1-AAAA", // wrong prefix family
+			"NPIX2-AAAA", // valid alphabet, too short
+		};
+		for (size_t i = 0; i < sizeof(bad2) / sizeof(bad2[0]); ++i) {
+			std::string s, e;
+			SessionBundle g;
+			CHECK(!ice_decode_offer_v2(bad2[i], &s, &g, &e) && !e.empty(),
+			      "v2 garbage rejected");
+		}
+		// Corrupted payload (flip a base64 char) fails the CRC/length check.
+		{
+			std::string corrupt = offer2;
+			CHECK(corrupt.size() > 12, "v2 offer long enough to corrupt");
+			corrupt[12] = (corrupt[12] == 'A' ? 'B' : 'A');
+			std::string s, e;
+			SessionBundle g;
+			CHECK(!ice_decode_offer_v2(corrupt, &s, &g, &e), "v2 corrupted code rejected");
+		}
+		// Truncated code is rejected.
+		{
+			std::string s, e;
+			SessionBundle g;
+			CHECK(!ice_decode_offer_v2(offer2.substr(0, offer2.size() / 2), &s, &g, &e),
+			      "v2 truncated code rejected");
+		}
+		// Oversized config block is refused at encode time (bounded before use).
+		{
+			SessionBundle huge = bundle;
+			huge.configText.assign(kMaxBundleConfigBytes + 1, 'x');
+			std::string enc, e;
+			CHECK(!ice_encode_offer_v2(kFakeSdp, huge, &enc, &e) && !e.empty(),
+			      "v2 oversized config refused");
+		}
+	}
+
 	// 2. Relay filter unit checks on synthetic SDP.
 	{
 		CHECK(ice_candidate_line_is_relay("a=candidate:3 1 UDP 41819903 10.0.0.5 50002 typ relay"),

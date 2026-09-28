@@ -129,7 +129,11 @@ std::string b64url_encode(const uint8_t* data, size_t len)
 bool b64url_decode(const std::string& text, std::vector<uint8_t>* out, std::string* err)
 {
 	out->clear();
-	if (text.empty() || text.size() > 16384) {
+	// Launch lane: the v2 offer bundles SDP + settings + bootstrap, so the
+	// alphabet layer accepts up to 128 KiB of base64 (the v1 code check
+	// above still caps v1 codes at 16 KiB of text, and both decoders bound
+	// the raw bytes after decoding).
+	if (text.empty() || text.size() > 131072) {
 		*err = "bad length";
 		return false;
 	}
@@ -365,6 +369,95 @@ bool ice_decode_code(const std::string& text, bool* isOffer, std::string* sdp, s
 	if (crc32_of(raw.data(), 4 + sdpLen) != want) return fail("CRC mismatch");
 	*isOffer = (raw[1] == 'O');
 	*sdp     = std::string(raw.begin() + 4, raw.begin() + 4 + sdpLen);
+	if (sdp->find("a=ice-ufrag:") == std::string::npos
+	    || sdp->find("a=ice-pwd:") == std::string::npos)
+		return fail("SDP missing ice credentials");
+	return true;
+}
+
+// ---- v2 offer codes (session bundle; launch lane) ----
+
+bool ice_encode_offer_v2(const std::string& sdp, const SessionBundle& bundle, std::string* out,
+                         std::string* err)
+{
+	if (sdp.empty() || sdp.size() > kMaxSdpBytes) {
+		if (err != nullptr) *err = "SDP empty or oversized";
+		return false;
+	}
+	if (bundle.configText.size() > kMaxBundleConfigBytes) {
+		if (err != nullptr) *err = "session config block oversized";
+		return false;
+	}
+	if (bundle.bootstrapBytes.size() > kMaxBundleBootBytes) {
+		if (err != nullptr) *err = "bootstrap bytes oversized";
+		return false;
+	}
+	std::vector<uint8_t> raw;
+	raw.reserve(12 + sdp.size() + bundle.configText.size() + bundle.bootstrapBytes.size());
+	raw.push_back(0x02); // version
+	raw.push_back((uint8_t)'O');
+	raw.push_back((uint8_t)((sdp.size() >> 8) & 0xFF));
+	raw.push_back((uint8_t)(sdp.size() & 0xFF));
+	raw.push_back((uint8_t)((bundle.configText.size() >> 8) & 0xFF));
+	raw.push_back((uint8_t)(bundle.configText.size() & 0xFF));
+	raw.push_back((uint8_t)((bundle.bootstrapBytes.size() >> 8) & 0xFF));
+	raw.push_back((uint8_t)(bundle.bootstrapBytes.size() & 0xFF));
+	raw.push_back((uint8_t)((bundle.seed >> 24) & 0xFF));
+	raw.push_back((uint8_t)((bundle.seed >> 16) & 0xFF));
+	raw.push_back((uint8_t)((bundle.seed >> 8) & 0xFF));
+	raw.push_back((uint8_t)(bundle.seed & 0xFF));
+	raw.insert(raw.end(), sdp.begin(), sdp.end());
+	raw.insert(raw.end(), bundle.configText.begin(), bundle.configText.end());
+	raw.insert(raw.end(), bundle.bootstrapBytes.begin(), bundle.bootstrapBytes.end());
+	uint32_t crc = crc32_of(raw.data(), raw.size());
+	raw.push_back((uint8_t)((crc >> 24) & 0xFF));
+	raw.push_back((uint8_t)((crc >> 16) & 0xFF));
+	raw.push_back((uint8_t)((crc >> 8) & 0xFF));
+	raw.push_back((uint8_t)(crc & 0xFF));
+	*out = "NPIX2-" + b64url_encode(raw.data(), raw.size());
+	return true;
+}
+
+bool ice_decode_offer_v2(const std::string& text, std::string* sdp, SessionBundle* bundle,
+                         std::string* err)
+{
+	auto fail = [&](const char* why) {
+		if (err != nullptr) *err = std::string("bad ICE code: ") + why;
+		return false;
+	};
+	std::string t = trim(text);
+	if (t.compare(0, 6, "NPIX2-") != 0) return fail("missing NPIX2- version prefix");
+	if (t.size() > 6 + 131072) return fail("too long (limit 131072)");
+	std::vector<uint8_t> raw;
+	std::string derr;
+	if (!b64url_decode(t.substr(6), &raw, &derr)) return fail(derr.c_str());
+	// Header: version + kind + 3 lengths + seed = 12 bytes, plus CRC 4.
+	if (raw.size() < 12 + 4) return fail("too short");
+	if (raw.size() > 12 + kMaxSdpBytes + kMaxBundleConfigBytes + kMaxBundleBootBytes + 4)
+		return fail("too long");
+	if (raw[0] != 0x02) return fail("unsupported version");
+	if (raw[1] != 'O') return fail("bad kind");
+	const size_t sdpLen = ((size_t)raw[2] << 8) | raw[3];
+	const size_t cfgLen = ((size_t)raw[4] << 8) | raw[5];
+	const size_t bootLen = ((size_t)raw[6] << 8) | raw[7];
+	// Bound every length before allocation or slicing.
+	if (sdpLen == 0 || sdpLen > kMaxSdpBytes) return fail("bad SDP length");
+	if (cfgLen == 0 || cfgLen > kMaxBundleConfigBytes) return fail("bad session config length");
+	if (bootLen > kMaxBundleBootBytes) return fail("bad bootstrap length");
+	if (12 + sdpLen + cfgLen + bootLen + 4 != raw.size()) return fail("length mismatch");
+	uint32_t want = ((uint32_t)raw[12 + sdpLen + cfgLen + bootLen] << 24)
+	    | ((uint32_t)raw[12 + sdpLen + cfgLen + bootLen + 1] << 16)
+	    | ((uint32_t)raw[12 + sdpLen + cfgLen + bootLen + 2] << 8)
+	    | raw[12 + sdpLen + cfgLen + bootLen + 3];
+	if (crc32_of(raw.data(), 12 + sdpLen + cfgLen + bootLen) != want) return fail("CRC mismatch");
+	const uint32_t seed = ((uint32_t)raw[8] << 24) | ((uint32_t)raw[9] << 16)
+	    | ((uint32_t)raw[10] << 8) | raw[11];
+	*sdp = std::string(raw.begin() + 12, raw.begin() + 12 + sdpLen);
+	bundle->configText =
+	    std::string(raw.begin() + 12 + sdpLen, raw.begin() + 12 + sdpLen + cfgLen);
+	bundle->bootstrapBytes = std::string(raw.begin() + 12 + sdpLen + cfgLen,
+	                                     raw.begin() + 12 + sdpLen + cfgLen + bootLen);
+	bundle->seed = seed;
 	if (sdp->find("a=ice-ufrag:") == std::string::npos
 	    || sdp->find("a=ice-pwd:") == std::string::npos)
 		return fail("SDP missing ice credentials");
@@ -688,16 +781,54 @@ bool IceSocket::host_create_offer(const IceNetConfig& cfg, std::string* offerOut
 	return ice_encode_code(true, sdp, offerOut, err);
 }
 
+bool IceSocket::host_create_offer_v2(const IceNetConfig& cfg, const SessionBundle& bundle,
+                                     std::string* offerOut, std::string* err,
+                                     std::function<void()> pump)
+{
+	if (!create_agent(cfg, err)) return false;
+	if (juice_gather_candidates(mAgent) != JUICE_ERR_SUCCESS) {
+		if (err != nullptr)
+			*err = "juice_gather_candidates failed (port range "
+			    + std::to_string(cfg.portBegin) + "-" + std::to_string(cfg.portEnd)
+			    + (cfg.bindAddress.empty() ? "" : ", bind " + cfg.bindAddress) + ")";
+		return false;
+	}
+	if (!wait_gathering_done(ice_gather_timeout_ms(), err, pump)) return false;
+	std::string sdp;
+	if (!local_description(&sdp, err)) return false;
+	if (cfg.turnOnly) {
+		if (!ice_sdp_has_relay(sdp)) {
+			if (err != nullptr)
+				*err = "TURN-only mode gathered no relay candidates; is the TURN "
+				       "server reachable (PIKMIN_NETPLAY_TURN)?";
+			return false;
+		}
+		sdp = ice_filter_relay_candidates(sdp);
+		printf("[netplay] ice: TURN-only mode, host candidates filtered out\n");
+		fflush(stdout);
+	}
+	return ice_encode_offer_v2(sdp, bundle, offerOut, err);
+}
+
 bool IceSocket::join_create_answer(const IceNetConfig& cfg, const std::string& offer,
                                    std::string* answerOut, std::string* err,
-                                   std::function<void()> pump)
+                                   std::function<void()> pump, SessionBundle* bundleOut)
 {
 	bool isOffer = false;
 	std::string offerSdp;
-	if (!ice_decode_code(offer, &isOffer, &offerSdp, err)) return false;
-	if (!isOffer) {
-		if (err != nullptr) *err = "bad ICE code: expected an offer, got an answer";
-		return false;
+	// Launch lane: v2 bundle offers ("NPIX2-...") carry the session setup;
+	// v1 offers ("NPIX1-...") decode exactly as before.
+	if (trim(offer).compare(0, 6, "NPIX2-") == 0) {
+		SessionBundle bundle;
+		if (!ice_decode_offer_v2(offer, &offerSdp, &bundle, err)) return false;
+		if (bundleOut != nullptr) *bundleOut = bundle;
+	} else {
+		if (!ice_decode_code(offer, &isOffer, &offerSdp, err)) return false;
+		if (!isOffer) {
+			if (err != nullptr) *err = "bad ICE code: expected an offer, got an answer";
+			return false;
+		}
+		if (bundleOut != nullptr) *bundleOut = SessionBundle();
 	}
 	// NOTE: set_remote BEFORE local_description so this side takes the
 	// controlled role (RFC 8445 6.1.1); the host does the reverse.
@@ -1110,6 +1241,34 @@ bool ice_host_session(const IceNetConfig& cfg, std::function<void()> pump, IceSo
 	}
 	std::string offer;
 	if (!outSock->host_create_offer(cfg, &offer, err, pump)) return false;
+	if (!ice_emit_code("offer", offer, err)) return false;
+	std::string answer;
+	if (const char* in = getenv_nonempty("PIKMIN_NETPLAY_ICE_ANSWER_IN")) {
+		if (!ice_poll_answer_file(in, ice_connect_timeout_ms(), pump, &answer, err)) return false;
+	} else {
+		if (!ice_read_answer_stdin(pump, &answer, err)) return false;
+	}
+	if (!outSock->host_apply_answer(answer, err)) return false;
+	double completedMs = -1;
+	if (!outSock->wait_connected(ice_connect_timeout_ms(), &completedMs, err, pump)) return false;
+	printf("[netplay] ice transport ready (connect %.0fms)\n", completedMs);
+	fflush(stdout);
+	return true;
+}
+
+bool ice_host_session_v2(const IceNetConfig& cfg, const SessionBundle& bundle,
+                         std::function<void()> pump, IceSocket* outSock, std::string* err)
+{
+	if (outSock == nullptr) {
+		if (err != nullptr) *err = "no socket";
+		return false;
+	}
+	std::string offer;
+	if (!outSock->host_create_offer_v2(cfg, bundle, &offer, err, pump)) return false;
+	printf("[netplay] ice offer bundle: seed=%u config=%lluB bootstrap=%lluB\n", bundle.seed,
+	       (unsigned long long)bundle.configText.size(),
+	       (unsigned long long)bundle.bootstrapBytes.size());
+	fflush(stdout);
 	if (!ice_emit_code("offer", offer, err)) return false;
 	std::string answer;
 	if (const char* in = getenv_nonempty("PIKMIN_NETPLAY_ICE_ANSWER_IN")) {

@@ -103,6 +103,42 @@ bool ice_encode_code(bool isOffer, const std::string& sdp, std::string* out,
 bool ice_decode_code(const std::string& text, bool* isOffer, std::string* sdp,
                      std::string* err);
 
+// ---- session bundle (launch lane, issue #887) ----
+//
+// The v2 offer code ("NPIX2-...") carries the whole session setup, so the
+// joiner needs no file from the host:
+//   "NPIX2-" + base64url(version:1=0x02 | kind:1('O') |
+//                         sdp_len:u16be | cfg_len:u16be | boot_len:u16be |
+//                         seed:u32be | sdp | cfg | boot | crc32:u32be)
+//   sdp  = libjuice local description (<= 8192 bytes, as v1)
+//   cfg  = host sim-relevant settings block, the m3-config-v1 text the M3
+//          handshake hashes (<= 8192 bytes; the joiner adopts it for the
+//          session only, never writing its settings file)
+//   boot = host bootstrap file bytes, raw (<= 65536 bytes; a stock
+//          bootstrap is ~10 lines, so compression would save nothing and
+//          the bytes are stored verbatim; the joiner re-stamps the SESSION
+//          line exactly as tools/netplay/run_pair.py does)
+//   seed = the netplay seed (u32be)
+// Every length is bounded before allocation; the CRC and strict checks of
+// v1 are kept. Answers stay v1 ("NPIX1-..."); only offers have a v2 form.
+struct SessionBundle {
+	uint32_t seed = 0;
+	std::string configText;
+	std::string bootstrapBytes;
+};
+
+// Upper bounds enforced before any allocation in the v2 decode path.
+constexpr size_t kMaxBundleConfigBytes = 8192;
+constexpr size_t kMaxBundleBootBytes   = 65536;
+
+// Encodes an offer SDP plus the session bundle into the "NPIX2-..." code.
+bool ice_encode_offer_v2(const std::string& sdp, const SessionBundle& bundle,
+                         std::string* out, std::string* err);
+// Strict decode of an "NPIX2-..." offer code. On failure returns false with
+// a one-line reason in *err (never throws).
+bool ice_decode_offer_v2(const std::string& text, std::string* sdp, SessionBundle* bundle,
+                         std::string* err);
+
 // Reads a code from a CLI value: "@file" reads the file (trimmed), anything
 // else is the literal code (trimmed).
 bool ice_read_code_arg(const std::string& arg, std::string* code, std::string* err);
@@ -126,11 +162,20 @@ public:
 	bool host_create_offer(const IceNetConfig& cfg, std::string* offerOut,
 	                       std::string* err,
 	                       std::function<void()> pump = std::function<void()>());
+	// Host v2: same, but the offer is an "NPIX2-..." bundle code carrying
+	// the session setup (seed, host config block, bootstrap bytes).
+	bool host_create_offer_v2(const IceNetConfig& cfg, const SessionBundle& bundle,
+	                          std::string* offerOut, std::string* err,
+	                          std::function<void()> pump = std::function<void()>());
 	// Joiner: validates the offer, creates the agent, gathers, returns the
-	// answer code. Pumps pump() while gathering (M3).
+	// answer code. Pumps pump() while gathering (M3). Accepts both v1
+	// ("NPIX1-...") and v2 bundle ("NPIX2-...") offers; when the offer is
+	// v2 and bundleOut is non-null, the session bundle (seed, host config
+	// block, bootstrap bytes) is returned there for the session to adopt.
 	bool join_create_answer(const IceNetConfig& cfg, const std::string& offer,
 	                        std::string* answerOut, std::string* err,
-	                        std::function<void()> pump = std::function<void()>());
+	                        std::function<void()> pump = std::function<void()>(),
+	                        SessionBundle* bundleOut = nullptr);
 	// Host: validates the answer and applies it to the agent.
 	bool host_apply_answer(const std::string& answer, std::string* err);
 	// Blocks (polling) until JUICE_STATE_COMPLETED, FAILED, or timeoutMs.
@@ -240,6 +285,24 @@ private:
 // window). Prints the offer/answer codes and the ice state/pair log lines.
 bool ice_host_session(const IceNetConfig& cfg, std::function<void()> pump, IceSocket* outSock,
                       std::string* err);
+// Blocking host flow with a v2 bundle offer ("NPIX2-..."): the same
+// exchange, but the offer carries the session setup (seed, host config
+// block, bootstrap bytes). Logs the bundle sizes for the pair tool.
+bool ice_host_session_v2(const IceNetConfig& cfg, const SessionBundle& bundle,
+                         std::function<void()> pump, IceSocket* outSock, std::string* err);
+
+// Shared one-shot pieces, also used by the launch-lane one-command flows
+// (declared here; defined in pc_netplay_ice.cpp):
+// PIKMIN_NETPLAY_ICE_TIMEOUT_MS (default 600000 = 10 min).
+double ice_connect_timeout_ms();
+// Polls a file until it holds a valid answer code (logs each new decode
+// error instead of failing silently).
+bool ice_poll_answer_file(const std::string& path, double timeoutMs, std::function<void()> pump,
+                          std::string* answerOut, std::string* err);
+// Reads one answer-code line from stdin on a helper thread while pump()
+// keeps the window alive.
+bool ice_read_answer_stdin(std::function<void()> pump, std::string* answerOut,
+                           std::string* err);
 // Blocking joiner flow: offerArg is the offer code or @file; prints + writes
 // the answer code, then wait_connected.
 bool ice_join_session(const IceNetConfig& cfg, const std::string& offerArg,
