@@ -15,9 +15,11 @@
 // once per Advance, after the state hash: the host writes each entry with its
 // legacy format and durability (checks.txt, benefits-used.txt, emperor.txt,
 // deaths.txt, the P2 delivery ledger); the client writes no journal and turns
-// the entries into mirror-events.txt lines instead. Entries carry the frame
-// of the Advance that pushed them: the flush runs exactly once per Advance,
-// so every entry drained by a flush was pushed during that flush's frame.
+// the entries into mirror-events.txt lines instead. Each Entry carries the
+// frame of the Advance that pushed it (Entry::frame, stamped at push time
+// from the session's current Advance frame), so a flush from anywhere (the
+// per-Advance flush, or the campaign save inside a tick) writes every
+// mirror line with its own event frame.
 //
 // mirror-events.txt grammar (root randomizer/netplay_mirror.py
 // parse_mirror_line is the reference parser): printable ASCII, one event per
@@ -63,6 +65,7 @@ struct Entry {
 	int32_t p2Type = 0;
 	int32_t p2Stage = 0;
 	uint32_t p2Generator = 0;
+	uint32_t frame = 0;      // Advance frame of the push (mirror line frame)
 };
 
 // Bounded FIFO. The sim pushes at most a handful of entries per tick; a
@@ -126,6 +129,12 @@ bool scan_session_json(const char* data, size_t len, SessionLedger& out, std::st
 // checked before any allocation.
 constexpr uint8_t kBulkMirrorLedger = 0x14;
 constexpr uint32_t kLedgerMaxCount = 4096;
+// deathsBase value meaning "the host could not establish the base": the
+// runner's session.json existed at session start but could not be read, so
+// any base the host learns later may already include this run's credited
+// deaths. The client then writes no DEATHS lines at all (a wrong absolute
+// total would be an over-count or a fatal retraction for the M4c runner).
+constexpr uint32_t kLedgerBaseUnknown = 0xFFFFFFFFu;
 struct LedgerMsg {
 	uint32_t deathsBase = 0;
 	uint32_t firstIndex = 0;

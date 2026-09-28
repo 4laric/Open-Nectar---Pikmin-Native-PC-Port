@@ -373,7 +373,7 @@ bool decode_ledger(const uint8_t* data, size_t len, LedgerMsg& out)
 	const uint32_t count = get32(data + 8);
 	if (count > kLedgerMaxCount) return false;
 	if (len != 12 + 4 * (size_t)count) return false;
-	if (deathsBase > kMaxTotal) return false;
+	if (deathsBase > kMaxTotal && deathsBase != kLedgerBaseUnknown) return false;
 	if ((uint64_t)firstIndex + count > (uint64_t)kMaxReceiveIndex) return false;
 	std::vector<uint32_t> ids;
 	ids.reserve(count);

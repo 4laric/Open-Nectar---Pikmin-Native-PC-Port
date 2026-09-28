@@ -267,6 +267,15 @@ int main()
 		t = m;
 		t[3] = 0x01; // deathsBase huge
 		CHECK(!decode_ledger(t.data(), t.size(), d), "deathsBase over range rejected");
+		std::vector<uint8_t> unk = encode_ledger(kLedgerBaseUnknown, 0, nullptr, 0);
+		CHECK(decode_ledger(unk.data(), unk.size(), d) && d.deathsBase == kLedgerBaseUnknown,
+		      "deathsBase 'unknown' sentinel accepted");
+		t = m;
+		t[0] = 0xFE;
+		t[1] = 0xFF;
+		t[2] = 0xFF;
+		t[3] = 0xFF; // 0xFFFFFFFE: over range and not the sentinel
+		CHECK(!decode_ledger(t.data(), t.size(), d), "deathsBase just below the sentinel rejected");
 		t = m;
 		t[7] = 0x01; // firstIndex 16M
 		CHECK(!decode_ledger(t.data(), t.size(), d), "firstIndex over range rejected");
