@@ -14,6 +14,7 @@ private save dir is written.
 """
 
 import argparse
+import hashlib
 import os
 import subprocess
 import sys
@@ -185,6 +186,8 @@ def main(argv=None):
             nlines = sum(1 for line in f if line.strip())
     tps = (nlines / secs) if secs > 0 else 0.0
     print(f"run_replay: exit={rc} ticks={nlines}/{a.ticks} time={secs:.1f}s tps={tps:.1f}")
+    exe_path = a.exe.resolve()
+    print(f"run_replay: exe={exe_path} sha256={hashlib.sha256(exe_path.read_bytes()).hexdigest()}")
     print(f"STDOUT_LOG={stdout_log}")
     print(f"HASH_LOG={hash_log}")
     # A replay run only counts when the child proves it replayed: the

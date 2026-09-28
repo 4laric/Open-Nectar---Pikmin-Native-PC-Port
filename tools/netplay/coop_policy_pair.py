@@ -13,13 +13,18 @@ decisions on both peers:
 * gameplay proof: START_STAGE and `[Pikmin Randomizer]` lines on both peers,
   and the distinct (navi, piki, teki, item) hash tuples.
 
-With --acceptance it also requires a `HEAL captain=2`, an ANCHOR kind whose
-captains alternate, and a `DEATHLINK killed=3 p1=0` line.
+Always: the ANCHOR lines replay the round-robin cursor strictly (see
+check_anchors); any grant off the cursor without a logged ANCHOR_SKIP fails.
+With --acceptance it also requires a `HEAL captain=2`, at least one
+round-robin hand-over between two grants of one kind logged while both
+captains were live (`live=11`, no fallback), and a `DEATHLINK killed=3 p1=0`
+line.
 
 All run_pair.py options pass through unchanged (see run_pair.py --help).
 """
 
 import argparse
+import hashlib
 import re
 import sys
 from pathlib import Path
@@ -67,19 +72,78 @@ def distinct_tuples(hashes):
     return len(seen)
 
 
-def alternating_anchor(lines):
-    """First ANCHOR kind with a 1 -> 2 or 2 -> 1 hand-over between consecutive
-    grants of that kind (a failed placement legitimately repeats a captain,
-    so the whole sequence need not alternate). Returns (kind, sequences)."""
-    per_kind = {}
+ANCHOR_RE = re.compile(r"\[coop-policy\] ANCHOR kind=(\S+) captain=(\d) next=(\d) live=([01])([01])")
+SKIP_RE = re.compile(r"\[coop-policy\] ANCHOR_SKIP kind=(\S+) captain=(\d) reason=(\S+)")
+
+
+def check_anchors(lines):
+    """Strict round-robin check over one peer's [coop-policy] lines.
+
+    Replays the cursor: every kind starts on captain 1 (and again after a
+    `RESET` line). Each ANCHOR grant must land on the cursor captain, unless
+    an ANCHOR_SKIP for that captain was logged right before it (then it is a
+    fallback, marked `*`). The skip reason must agree with the grant's live
+    flags, the grant must go to a live captain, and `next=` must be the other
+    captain. A round-robin hand-over is two consecutive grants of one kind,
+    both logged with `live=11`, the second on the cursor (not a fallback).
+
+    Returns (errors, sequences per kind, hand-overs per kind)."""
+    expected, skips, last = {}, {}, {}
+    errors, seqs, handovers = [], {}, {}
     for ln in lines:
-        m = re.search(r"ANCHOR kind=(\S+) captain=(\d)", ln)
+        if ln.startswith("[coop-policy] RESET "):
+            expected.clear()
+            skips.clear()
+            last.clear()
+            for kind in seqs:
+                seqs[kind].append("|")
+            continue
+        m = SKIP_RE.match(ln)
         if m:
-            per_kind.setdefault(m.group(1), []).append(int(m.group(2)))
-    for kind, caps in per_kind.items():
-        if any(a != b for a, b in zip(caps, caps[1:])):
-            return kind, per_kind
-    return None, per_kind
+            skips.setdefault(m.group(1), []).append((int(m.group(2)), m.group(3)))
+            continue
+        m = ANCHOR_RE.match(ln)
+        if not m:
+            if "] ANCHOR " in ln:
+                errors.append(f"unparsed ANCHOR line: {ln}")
+            continue
+        kind, cap, nxt = m.group(1), int(m.group(2)), int(m.group(3))
+        live = (m.group(4) == "1", m.group(5) == "1")
+        cursor = expected.get(kind, 1)
+        skipped = skips.pop(kind, [])
+        fallback = cap != cursor
+        if fallback and cursor not in [c for c, _ in skipped]:
+            errors.append(f"{kind}: grant on captain {cap} but the cursor was {cursor} and no ANCHOR_SKIP for {cursor}: {ln}")
+        if not fallback and skipped:
+            errors.append(f"{kind}: ANCHOR_SKIP logged for a grant on the cursor captain: {ln}")
+        for c, reason in skipped:
+            if c == cap:
+                errors.append(f"{kind}: captain {c} skipped and granted in one attempt: {ln}")
+            if reason == "not-live" and live[c - 1]:
+                errors.append(f"{kind}: captain {c} skipped as not-live but live={m.group(4)}{m.group(5)}: {ln}")
+            if reason == "placement" and not live[c - 1]:
+                errors.append(f"{kind}: captain {c} placement skip while not live: {ln}")
+        if not live[cap - 1]:
+            errors.append(f"{kind}: grant on a captain that is not live: {ln}")
+        if nxt != 3 - cap:
+            errors.append(f"{kind}: next={nxt} is not the captain after {cap}: {ln}")
+        prev = last.get(kind)
+        if prev and prev[1] == (True, True) and live == (True, True) and not fallback and prev[0] != cap:
+            handovers[kind] = handovers.get(kind, 0) + 1
+        last[kind] = (cap, live)
+        expected[kind] = nxt
+        seqs.setdefault(kind, []).append(f"{cap}{'*' if fallback else ''}")
+    return errors, {k: ",".join(v) for k, v in seqs.items()}, handovers
+
+
+def exe_identity(argv):
+    """`path sha256` of the --exe argument, so the log ties the run to a build."""
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--exe", type=Path)
+    got, _ = pre.parse_known_args(argv)
+    if got.exe is None or not got.exe.is_file():
+        return "exe=? sha256=?"
+    return f"exe={got.exe.resolve()} sha256={hashlib.sha256(got.exe.read_bytes()).hexdigest()}"
 
 
 def main(argv=None):
@@ -95,6 +159,8 @@ def main(argv=None):
     knob = any(item.startswith("PIKMIN_NETPLAY_TEST_COOP_EVENTS=") for item in mine.env)
 
     run_pair.write_bootstrap = write_bootstrap_m4d
+    identity = exe_identity(pass_argv)
+    print(f"coop_policy_pair: {identity}")
     rc = run_pair.main(pass_argv)
     if mine.out is None:
         return rc
@@ -129,15 +195,22 @@ def main(argv=None):
         ok = False
     for ln in lines["host"]:
         print(f"coop_policy_pair: host {ln}")
+    errors, seqs, handovers = check_anchors(lines["host"])
+    print(f"coop_policy_pair: anchors {seqs} (* = logged fallback) round_robin_handovers_both_live={handovers}")
+    for err in errors:
+        print(f"coop_policy_pair: FAIL: anchor {err}")
+    if errors:
+        ok = False
     if mine.acceptance:
         heal = [ln for ln in lines["host"] if ln.startswith("[coop-policy] HEAL captain=2 ")]
-        kind, caps = alternating_anchor(lines["host"])
         dl = [ln for ln in lines["host"] if re.match(r"\[coop-policy\] DEATHLINK killed=3 p1=0 ", ln)]
-        print(f"coop_policy_pair: acceptance heal_captain2={len(heal)} alternating_anchor={kind}:{caps} "
+        rr = sum(handovers.values())
+        print(f"coop_policy_pair: acceptance heal_captain2={len(heal)} round_robin_handovers_both_live={rr} "
               f"deathlink_killed3_p1down={len(dl)}")
-        if not heal or not kind or not dl:
+        if not heal or not rr or not dl:
             print("coop_policy_pair: FAIL: acceptance lines missing")
             ok = False
+    print(f"coop_policy_pair: {identity}")
     print(f"coop_policy_pair: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
 

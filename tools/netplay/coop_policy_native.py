@@ -15,6 +15,7 @@ Exit 0 only when the child exits 0 after printing
 """
 
 import argparse
+import hashlib
 import os
 import re
 import subprocess
@@ -182,6 +183,8 @@ def main(argv=None):
     passed = rc == 0 and f"TEST_ONLY coop_policy_pass case={a.case}" in text
     has_stage = any("START_STAGE" in ln for ln in lines)
     print(f"coop_policy_native: case={a.case} exit={rc} time={secs:.1f}s start_stage={int(has_stage)} log={log}")
+    exe_path = a.exe.resolve()
+    print(f"coop_policy_native: exe={exe_path} sha256={hashlib.sha256(exe_path.read_bytes()).hexdigest()}")
     print(f"coop_policy_native: {'PASS' if passed and has_stage else 'FAIL'}")
     return 0 if passed and has_stage else 1
 
