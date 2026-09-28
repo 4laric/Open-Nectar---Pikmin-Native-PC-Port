@@ -20,6 +20,25 @@
 #include <unordered_map>
 #include <vector>
 
+#if defined(PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
+// Netplay M6a snapshot spike (issue #896): the audio facade is
+// infrastructure. The sim calls it on the main thread inside the tick, and
+// without this scope its shared_ptr control blocks and voice vectors landed
+// in the snapshot region, where a synctest restore rewound their refcounts
+// under the preserved facade statics (use-after-free in pc_audio_tick).
+__attribute__((weak)) void pc_snapshot_spike_infra_push(int category);
+__attribute__((weak)) void pc_snapshot_spike_infra_pop(void);
+namespace {
+struct PcSpikeAudioScope {
+    PcSpikeAudioScope() { if (pc_snapshot_spike_infra_push) pc_snapshot_spike_infra_push(3); }
+    ~PcSpikeAudioScope() { if (pc_snapshot_spike_infra_pop) pc_snapshot_spike_infra_pop(); }
+};
+} // namespace
+#define PC_SPIKE_AUDIO_SCOPE() PcSpikeAudioScope pcSpikeAudioScope_
+#else
+#define PC_SPIKE_AUDIO_SCOPE()
+#endif
+
 static SDL_AudioDeviceID sAudioDevice = 0;
 static SDL_AudioSpec sAudioSpec;
 static AIDCallback sAIDMACallback = nullptr;
@@ -495,6 +514,7 @@ static void audio_callback(void*, Uint8* output, int byteCount) {
 }
 
 bool pc_audio_init(void) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (sAudioDevice != 0) {
         return true;
     }
@@ -527,6 +547,7 @@ bool pc_audio_init(void) {
 }
 
 void pc_audio_shutdown(void) {
+    PC_SPIKE_AUDIO_SCOPE();
 
     if (sAudioDevice != 0) {
         SDL_LockAudioDevice(sAudioDevice);
@@ -550,6 +571,7 @@ void pc_audio_shutdown(void) {
 }
 
 bool pc_audio_play_stx(const char* path) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (!path || !pc_audio_init()) {
         return false;
     }
@@ -635,6 +657,7 @@ bool pc_audio_play_stx(const char* path) {
 }
 
 void pc_audio_stop_stream(void) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (sAudioDevice) {
         SDL_LockAudioDevice(sAudioDevice);
         sStreamVoice.active = false;
@@ -650,6 +673,7 @@ void pc_audio_stop_stream(void) {
 // Jac_DemoFade y pc_audio_fade_sequence_track. Cero corta ya, para que quien
 // necesite parada inmediata siga teniendola.
 void pc_audio_fade_stream(u32 fadeFrames) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (!sAudioDevice) return;
     if (fadeFrames == 0) {
         pc_audio_stop_stream();
@@ -672,6 +696,7 @@ void pc_audio_fade_stream(u32 fadeFrames) {
 }
 
 bool pc_audio_load_wave_bank(const char* path) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (sAudioDevice) SDL_LockAudioDevice(sAudioDevice);
     for (SampleVoice& voice : sSampleVoices) voice = {};
     if (sAudioDevice) SDL_UnlockAudioDevice(sAudioDevice);
@@ -740,10 +765,12 @@ bool pc_audio_load_wave_bank(const char* path) {
 }
 
 void pc_audio_stop_sequence(void) {
+    PC_SPIKE_AUDIO_SCOPE();
     pc_audio_stop_sequence_track(0);
 }
 
 void pc_audio_stop_sequence_track(u8 sequenceTrack) {
+    PC_SPIKE_AUDIO_SCOPE();
     printf("[DEBUG] pc_audio_stop_sequence_track(%u) called\n", sequenceTrack);
     if (sequenceTrack > 1) return;
     auto& voices = sequenceTrack == 0 ? sJamVoices : sBossJamVoices;
@@ -784,10 +811,12 @@ void pc_audio_stop_sequence_track(u8 sequenceTrack) {
 }
 
 bool pc_audio_play_sequence(u32 sequence) {
+    PC_SPIKE_AUDIO_SCOPE();
     return pc_audio_play_sequence_track(0, sequence);
 }
 
 bool pc_audio_play_sequence_track(u8 sequenceTrack, u32 sequence) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (sequenceTrack > 1) return false;
     std::vector<u8> data;
     if (!sSequenceArchive.read(sequence, data)) return false;
@@ -808,6 +837,7 @@ bool pc_audio_play_sequence_track(u8 sequenceTrack, u32 sequence) {
 }
 
 bool pc_audio_sequence_track_active(u8 sequenceTrack) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (sequenceTrack == 0)
         return sJamPlayer.result() == PCJamResult::Ok && sJamPlayer.active();
     if (sequenceTrack == 1)
@@ -816,12 +846,14 @@ bool pc_audio_sequence_track_active(u8 sequenceTrack) {
 }
 
 bool pc_audio_write_sequence_port(u8 sequenceTrack, u8 port, u16 value) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (sequenceTrack == 0) return sJamPlayer.writeRootPort(port, value);
     if (sequenceTrack == 1) return sBossJamPlayer.writeRootPort(port, value);
     return false;
 }
 
 void pc_audio_set_sequence_layers(u16 enabledMask, float volume, u32 fadeFrames) {
+    PC_SPIKE_AUDIO_SCOPE();
     const float enabledVolume = std::clamp(volume, 0.0f, 2.0f);
     sBgmLayerFadeTicks = fadeFrames;
     for (u8 layer = 0; layer < 16; ++layer) {
@@ -835,10 +867,12 @@ void pc_audio_set_sequence_layers(u16 enabledMask, float volume, u32 fadeFrames)
 }
 
 void pc_audio_fade_sequence(float volume, u32 fadeFrames) {
+    PC_SPIKE_AUDIO_SCOPE();
     pc_audio_fade_sequence_track(0, volume, fadeFrames);
 }
 
 void pc_audio_fade_sequence_track(u8 sequenceTrack, float volume, u32 fadeFrames) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (sequenceTrack == 1) {
         sBossTrackTarget = std::clamp(volume, 0.0f, 1.0f);
         sBossTrackFadeTicks = fadeFrames;
@@ -1341,26 +1375,31 @@ static bool restart_se_jam() {
 }
 
 bool pc_audio_send_system_se(u16 id, bool stop) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (sSEJamPlayer.result() != PCJamResult::Ok && !restart_se_jam()) return false;
     return sSEJamPlayer.writeChildPort(9, stop ? 1 : 0, id);
 }
 
 bool pc_audio_send_orima_se(u16 id, bool stop, bool pikiSound) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (sSEJamPlayer.result() != PCJamResult::Ok && !restart_se_jam()) return false;
     const u8 port = stop ? 2 : (pikiSound ? 1 : 0);
     return sSEJamPlayer.writeChildPort(10, port, id);
 }
 
 bool pc_audio_write_se_port(u8 track, u8 port, u16 value) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (sSEJamPlayer.result() != PCJamResult::Ok && !restart_se_jam()) return false;
     return sSEJamPlayer.writeChildPort(track, port, value);
 }
 
 void pc_audio_set_se_track_volume(u8 track, float volume) {
+    PC_SPIKE_AUDIO_SCOPE();
     sSEJamPlayer.setChildVolume(track, volume);
 }
 
 void pc_audio_set_se_track_paused(u8 track, bool paused) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (track >= sSETrackPaused.size()) return;
     sSEJamPlayer.setChildPaused(track, paused);
     if (sAudioDevice) SDL_LockAudioDevice(sAudioDevice);
@@ -1369,6 +1408,7 @@ void pc_audio_set_se_track_paused(u8 track, bool paused) {
 }
 
 void pc_audio_set_events_paused(bool paused) {
+    PC_SPIKE_AUDIO_SCOPE();
     for (u8 child = 0; child < 16; ++child)
         sEventJamPlayer.setChildPaused(child, paused);
     if (sAudioDevice) SDL_LockAudioDevice(sAudioDevice);
@@ -1379,10 +1419,12 @@ void pc_audio_set_events_paused(bool paused) {
 static void (*sEventActionFinishedHook)(u8, u8) = nullptr;
 
 void pc_audio_set_event_action_finished_hook(void (*hook)(u8 event, u8 slot)) {
+    PC_SPIKE_AUDIO_SCOPE();
     sEventActionFinishedHook = hook;
 }
 
 bool pc_audio_send_event_action(u8 event, u8 slot, u16 command, bool stop) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (!kEnablePositionalEventJam) return false;
     if (event >= 16 || slot >= 16) return false;
     if (sEventJamPlayer.result() != PCJamResult::Ok && !restart_event_jam()) return false;
@@ -1399,6 +1441,7 @@ bool pc_audio_send_event_action(u8 event, u8 slot, u16 command, bool stop) {
 }
 
 void pc_audio_set_event_mix(u8 event, float volume, float pan) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (!kEnablePositionalEventJam) return;
     if (event >= 16) return;
     sEventVolumes[event] = std::clamp(volume, 0.0f, 1.0f);
@@ -1406,6 +1449,7 @@ void pc_audio_set_event_mix(u8 event, float volume, float pan) {
 }
 
 void pc_audio_stop_wave(int voiceHandle) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (!sAudioDevice || voiceHandle < 0) return;
     const size_t voiceIndex = static_cast<u32>(voiceHandle) & 0xFF;
     const u16 generation = static_cast<u32>(voiceHandle) >> 8;
@@ -1424,6 +1468,7 @@ void pc_audio_stop_wave(int voiceHandle) {
 
 void pc_audio_update_wave(int voiceHandle, float volume, float pan, float pitch,
                           u8 cutoff, float fxMix, float dolby) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (!sAudioDevice || voiceHandle < 0) return;
     const size_t voiceIndex = static_cast<u32>(voiceHandle) & 0xFF;
     const u16 generation = static_cast<u32>(voiceHandle) >> 8;
@@ -1452,6 +1497,7 @@ void pc_audio_update_wave(int voiceHandle, float volume, float pan, float pitch,
 }
 
 void pc_audio_release_wave(int voiceHandle, u32 releaseFrames, u16 releaseParam) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (!sAudioDevice || voiceHandle < 0) return;
     const size_t voiceIndex = static_cast<u32>(voiceHandle) & 0xFF;
     const u16 generation = static_cast<u32>(voiceHandle) >> 8;
@@ -1484,6 +1530,7 @@ void pc_audio_release_wave(int voiceHandle, u32 releaseFrames, u16 releaseParam)
 // it. Call once every couple of seconds; peaks reset on each report so the
 // figures describe the interval just played, not the loudest thing ever heard.
 void pc_audio_report_levels(void) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (!pc_audio_stats_enabled()) return;
     const int stream = sBusPeak[PC_AUDIO_BUS_STREAM].exchange(0, std::memory_order_relaxed);
     const int bgm    = sBusPeak[PC_AUDIO_BUS_BGM].exchange(0, std::memory_order_relaxed);
@@ -1552,6 +1599,7 @@ void pc_audio_report_levels(void) {
 }
 
 void pc_audio_set_bus_volume(PCAudioBus bus, float volume) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (!sAudioDevice || bus < 0 || bus >= PC_AUDIO_BUS_COUNT) return;
     SDL_LockAudioDevice(sAudioDevice);
     sBusVolumes[bus] = std::clamp(volume, 0.0f, 2.0f);
@@ -1559,6 +1607,7 @@ void pc_audio_set_bus_volume(PCAudioBus bus, float volume) {
 }
 
 void pc_audio_stop_bus(PCAudioBus bus) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (!sAudioDevice || bus < 0 || bus >= PC_AUDIO_BUS_COUNT) return;
     SDL_LockAudioDevice(sAudioDevice);
     for (SampleVoice& voice : sSampleVoices) {
@@ -1571,6 +1620,7 @@ void pc_audio_stop_bus(PCAudioBus bus) {
 }
 
 void pc_audio_set_stereo(bool stereo) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (!sAudioDevice) {
         sStereoOutput = stereo;
         return;
@@ -1581,6 +1631,7 @@ void pc_audio_set_stereo(bool stereo) {
 }
 
 u32 pc_audio_get_active_voice_count(void) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (!sAudioDevice) return 0;
     SDL_LockAudioDevice(sAudioDevice);
     u32 count = 0;
@@ -1592,10 +1643,12 @@ u32 pc_audio_get_active_voice_count(void) {
 }
 
 u32 pc_audio_get_clip_count(void) {
+    PC_SPIKE_AUDIO_SCOPE();
     return sClipCount.load(std::memory_order_relaxed);
 }
 
 void pc_audio_get_metrics(PCAudioMetrics* metrics) {
+    PC_SPIKE_AUDIO_SCOPE();
     if (!metrics) return;
     metrics->sampleRate = sAudioSpec.freq > 0 ? static_cast<u32>(sAudioSpec.freq) : 0;
     metrics->deviceBufferFrames = sAudioSpec.samples;
@@ -1614,6 +1667,7 @@ void pc_audio_get_metrics(PCAudioMetrics* metrics) {
 }
 
 void pc_audio_reset_metrics(void) {
+    PC_SPIKE_AUDIO_SCOPE();
     sCallbackCount.store(0, std::memory_order_relaxed);
     sMixedFrameCount.store(0, std::memory_order_relaxed);
     sPeakActiveVoices.store(0, std::memory_order_relaxed);
@@ -1629,16 +1683,19 @@ void pc_audio_reset_metrics(void) {
 }
 
 u32 pc_audio_wave_count(void) {
+    PC_SPIKE_AUDIO_SCOPE();
     return static_cast<u32>(std::min<size_t>(sWaveBank.waveCount(), UINT32_MAX));
 }
 
 AIDCallback pc_audio_register_dma_callback(AIDCallback callback) {
+    PC_SPIKE_AUDIO_SCOPE();
     AIDCallback old = sAIDMACallback;
     sAIDMACallback = callback;
     return old;
 }
 
 void pc_audio_start_dma(u32 start_addr, u32 length) {
+    PC_SPIKE_AUDIO_SCOPE();
     sDMABaseAddr = start_addr;
     sDMALength = length;
     sDMABytesLeft.store(length, std::memory_order_relaxed);
@@ -1664,6 +1721,7 @@ void pc_audio_start_dma(u32 start_addr, u32 length) {
 }
 
 void pc_audio_stop_dma(void) {
+    PC_SPIKE_AUDIO_SCOPE();
     sDMAActive.store(false, std::memory_order_relaxed);
     sDMABytesLeft.store(0, std::memory_order_relaxed);
     if (sAudioDevice != 0) {
@@ -1675,10 +1733,12 @@ void pc_audio_stop_dma(void) {
 }
 
 u32 pc_audio_get_dma_bytes_left(void) {
+    PC_SPIKE_AUDIO_SCOPE();
     return sDMABytesLeft.load(std::memory_order_relaxed);
 }
 
 void pc_audio_tick(void) {
+    PC_SPIKE_AUDIO_SCOPE();
 
     advance_bgm_mix();
     if (sJamPlayer.result() == PCJamResult::Ok) {

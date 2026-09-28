@@ -13,6 +13,24 @@
 #include "jaudio/app_inter.h"
 #include "jaudio/interface.h"
 #include "jaudio/piki_bgm.h"
+
+#if defined(PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
+// Netplay M6a snapshot spike (issue #896): the Jac_* facade is audio
+// infrastructure. Its scene setup loads instrument and wave banks whose
+// shared_ptr refcounts the (preserved) voice statics share; in the snapshot
+// region a synctest restore rewound them (use-after-free in play_wave_info).
+__attribute__((weak)) void pc_snapshot_spike_infra_push(int category);
+__attribute__((weak)) void pc_snapshot_spike_infra_pop(void);
+namespace {
+struct PcSpikeJacScope {
+    PcSpikeJacScope() { if (pc_snapshot_spike_infra_push) pc_snapshot_spike_infra_push(3); }
+    ~PcSpikeJacScope() { if (pc_snapshot_spike_infra_pop) pc_snapshot_spike_infra_pop(); }
+};
+} // namespace
+#define PC_SPIKE_JAC_SCOPE() PcSpikeJacScope pcSpikeJacScope_
+#else
+#define PC_SPIKE_JAC_SCOPE()
+#endif
 #include "jaudio/piki_scene.h"
 #include "jaudio/piki_player.h"
 #include "jaudio/pikidemo.h"
@@ -319,6 +337,7 @@ DSPTaskInfo* DSPAddTask(DSPTaskInfo* task)                 { (void)task; return 
 /* ── JAudio high-level stubs ── */
 extern "C" {
 void Jac_Start(void* heap, u32 heapSize, u32 aramBase, const char* dataPath) {
+    PC_SPIKE_JAC_SCOPE();
     (void)heap; (void)heapSize; (void)aramBase; (void)dataPath;
     if (pc_audio_init()) {
         printf("[PC Port] Jac_Start() - Native SDL audio backend active\n");
@@ -328,6 +347,7 @@ void Jac_Start(void* heap, u32 heapSize, u32 aramBase, const char* dataPath) {
     }
 }
 void Jac_Gsync(void) {
+    PC_SPIKE_JAC_SCOPE();
     if (sEventResumeFrames != 0 && --sEventResumeFrames == 0)
         apply_gameplay_audio_pause();
     if (!audio_demo_active() && !sMenuOrPauseActive) {
@@ -345,6 +365,7 @@ void Jac_Gsync(void) {
 void Jac_AddDVDBuffer(u8* buffer, u32 size) { (void)buffer; (void)size; }
 void Jac_BackDVDBuffer() { }
 void Jac_SceneSetup(u32 sceneID, u32 stageID) {
+    PC_SPIKE_JAC_SCOPE();
     static const u8 stageBgm[] = { BGM_Tutorial, BGM_Play3, BGM_Cave,
                                    BGM_Yakushima, BGM_Flow };
     if (sceneID == SCENE_ChalSelect) sChallengeMode = true;
@@ -415,6 +436,7 @@ void Jac_SceneSetup(u32 sceneID, u32 stageID) {
     }
 }
 void Jac_SceneExit(u32 sceneID, u32 stageID) {
+    PC_SPIKE_JAC_SCOPE();
     (void)sceneID; (void)stageID;
     pc_audio_stop_sequence();
     pc_audio_stop_sequence_track(1);
@@ -438,6 +460,7 @@ void Jac_SceneExit(u32 sceneID, u32 stageID) {
 u32 Jac_GetCurrentScene() { return sNativeScene; }
 BOOL Jac_TellChgMode() { return sChallengeMode ? TRUE : FALSE; }
 void Jac_PlaySystemSe(s32 seID) {
+    PC_SPIKE_JAC_SCOPE();
     if (seID < 0) return;
     if (seID == JACSYS_ContainerOK) {
         Jac_PlayOrimaSe(JACORIMA_Unk14);
@@ -489,6 +512,7 @@ void Jac_PlaySystemSe(s32 seID) {
 static int sFreeEvents = 16;
 int Jac_CheckFreeEvents() { return sFreeEvents; }
 BOOL Jac_DestroyEvent(s32 idx) {
+    PC_SPIKE_JAC_SCOPE();
     initialize_sound_handles();
     if (idx < 0 || idx >= 16 || !sEvents[idx].active) return FALSE;
     for (int& voice : sEvents[idx].voices) {
@@ -506,6 +530,7 @@ BOOL Jac_DestroyEvent(s32 idx) {
     return TRUE;
 }
 void Jac_UpdateCamera(SVector_*, SVector_*) {
+    PC_SPIKE_JAC_SCOPE();
     bool closeBattle = false;
     for (int i = 0; i < 16; ++i) {
         if (!sEvents[i].active) continue;
@@ -517,11 +542,13 @@ void Jac_UpdateCamera(SVector_*, SVector_*) {
     Jac_SetBgmModeFlag(0, 1, closeBattle);
 }
 void Jac_InitBgm() {
+    PC_SPIKE_JAC_SCOPE();
     sNativeBgm = BGM_PikiSE;
     sNativeBgmMode = 0;
     sNativeBgmVolume = sNativeBgmPreviousVolume = 1.0f;
 }
 void Jac_FadeOutBgm(u32 trackIndex, u32 fadeFrames) {
+    PC_SPIKE_JAC_SCOPE();
     if (trackIndex == 0) {
         sNativeBgmMode |= 8;
         apply_native_bgm_layers(fadeFrames);
@@ -531,6 +558,7 @@ void Jac_FadeOutBgm(u32 trackIndex, u32 fadeFrames) {
 void Jac_StopBgm(u32 trackIndex) { pc_audio_stop_sequence_track(static_cast<u8>(trackIndex)); }
 void Jac_ReadyBgm(u32) {}
 void Jac_PlayBgm(u32 trackIndex, u32 bgmID) {
+    PC_SPIKE_JAC_SCOPE();
     if (trackIndex == 1) {
         if (pc_audio_play_sequence_track(1, bgmID))
             pc_audio_fade_sequence_track(1, 0.0f, 0);
@@ -543,12 +571,14 @@ void Jac_PlayBgm(u32 trackIndex, u32 bgmID) {
     apply_native_bgm_layers(0);
 }
 BOOL Jac_ChangeBgmMode(u32 trackIndex, u8 modeFlags) {
+    PC_SPIKE_JAC_SCOPE();
     if (trackIndex != 0 || modeFlags == sNativeBgmMode) return FALSE;
     sNativeBgmMode = modeFlags;
     apply_native_bgm_layers((modeFlags & 8) ? 30 : 60);
     return TRUE;
 }
 void Jac_SetBgmModeFlag(u32 trackIndex, u8 flagMask, u8 enabled) {
+    PC_SPIKE_JAC_SCOPE();
     if (trackIndex != 0) return;
     const u8 next = enabled ? static_cast<u8>(sNativeBgmMode | flagMask)
                             : static_cast<u8>(sNativeBgmMode & ~flagMask);
@@ -558,6 +588,7 @@ void Jac_BgmFrameWork() {}
 void Jac_MoveBgmTrackVol(BgmControl_*) {}
 void Jac_ChangeBgmTrackVol(BgmControl_*) {}
 void Jac_GameVolume(u8 bgmLevel, u8 seLevel) {
+    PC_SPIKE_JAC_SCOPE();
     static constexpr u16 seVolumes[] = {
         0, 1000, 2000, 4000, 7000, 10000, 13000, 16000, 20000, 25000, 0x7FFF
     };
@@ -576,12 +607,14 @@ void Jac_GameVolume(u8 bgmLevel, u8 seLevel) {
     pc_audio_set_bus_volume(PC_AUDIO_BUS_SE, seVolumes[seLevel] / 32767.0f);
 }
 void Jac_EasyCrossFade(u8 crossfadeMode, u32 fadeFrames) {
+    PC_SPIKE_JAC_SCOPE();
     pc_audio_fade_sequence_track(0, crossfadeMode == 1 ? 0.0f : sNativeBgmVolume,
                                  fadeFrames);
     pc_audio_fade_sequence_track(1, crossfadeMode == 1 ? sNativeBgmVolume : 0.0f,
                                  fadeFrames);
 }
 void Jac_DemoFade(u8 fadeType, u32 fadeFrames, f32 volumeScale) {
+    PC_SPIKE_JAC_SCOPE();
     switch (fadeType) {
     case 0: sNativeBgmVolume = sNativeBgmPreviousVolume; break;
     case 1:
@@ -595,6 +628,7 @@ void Jac_DemoFade(u8 fadeType, u32 fadeFrames, f32 volumeScale) {
 }
 void Jac_ExitBossMode() { Jac_EasyCrossFade(0, 100); }
 void Jac_EnterBossMode() {
+    PC_SPIKE_JAC_SCOPE();
     // Normally track 1 has been advancing silently since scene setup. Recover
     // it lazily if a demo/transition or earlier sequence error removed it.
     if (!pc_audio_sequence_track_active(1)) {
@@ -605,6 +639,7 @@ void Jac_EnterBossMode() {
     Jac_EasyCrossFade(1, 100);
 }
 void Jac_StopSystemSe(s32 id) {
+    PC_SPIKE_JAC_SCOPE();
     if (id == JACSYS_ContainerOK) {
         Jac_StopOrimaSe(JACORIMA_Unk14);
     } else if (id >= 0) {
@@ -612,6 +647,7 @@ void Jac_StopSystemSe(s32 id) {
     }
 }
 void Jac_PlayOrimaSe(u32 id) {
+    PC_SPIKE_JAC_SCOPE();
     if ((id & JACORIMA_PIKISOUND) == 0 && id == JACORIMA_Gather) {
         if (sMenuOrPauseActive || audio_demo_active()) return;
         if (sWhistleVoice >= 0) pc_audio_stop_wave(sWhistleVoice);
@@ -654,6 +690,7 @@ void Jac_PlayOrimaSe(u32 id) {
     }
 }
 void Jac_StopOrimaSe(s32 id) {
+    PC_SPIKE_JAC_SCOPE();
     if ((id & JACORIMA_PIKISOUND) == 0 && id == JACORIMA_Gather) {
         if (sWhistleVoice >= 0) pc_audio_release_wave(sWhistleVoice, 1600, 30);
         sWhistleVoice = -1;
@@ -680,6 +717,7 @@ void Jac_SetDemoPartsID(int id) { sDemoPartsId = static_cast<u8>(std::clamp(id, 
 void Jac_SetDemoOnyons(int count) { sDemoOnyonCount = static_cast<u8>(std::clamp(count, 0, 3)); }
 void Jac_SetDemoPartsCount(int count) { sDemoPartsCount = static_cast<u8>(std::clamp(count, 0, 30)); }
 void Jac_StartDemo(u32 cinemaId) {
+    PC_SPIKE_JAC_SCOPE();
     // Audio configurations with bit 7 set in JAudio's DEMO_STATUS table are
     // streamed STX tracks. Route the known cinematics directly to SDL while
     // the original sequence/DSP engine remains disabled.
@@ -730,6 +768,7 @@ void Jac_StartDemo(u32 cinemaId) {
 // Jac_FinishDemo so a skipped demo never carries its stream onward.
 void Jac_DemoSound(int id) { if (id >= 0) pc_audio_write_se_port(15, 2, static_cast<u16>(id)); }
 BOOL Jac_DemoFrame(int frame) {
+    PC_SPIKE_JAC_SCOPE();
     if (sCurrentDemo < 0) return FALSE;
     while (sDemoTimedEvent != kNoDemoTimedEvent
            && sDemoTimedEvent + 1 < std::size(kDemoTimedData)
@@ -760,6 +799,7 @@ BOOL Jac_DemoFrame(int frame) {
     return TRUE;
 }
 void Jac_FinishDemo() {
+    PC_SPIKE_JAC_SCOPE();
     const u32 finishedDemo = sCurrentDemo >= 0
         ? static_cast<u32>(sCurrentDemo) : UINT32_MAX;
     const u8 fadeMode = finishedDemo < std::size(kDemoBgmFadeMode)
@@ -803,6 +843,7 @@ void Jac_FinishDemo() {
 }
 void Jac_PrepareDemo(u32) {}
 void Jac_StartPartsFindDemo(u32 jingleType, BOOL hasAudio) {
+    PC_SPIKE_JAC_SCOPE();
     if (sPartsFindDemoActive) {
         if (hasAudio) Jac_PlaySystemSe(JACSYS_Unk30);
         return;
@@ -820,6 +861,7 @@ void Jac_StartPartsFindDemo(u32 jingleType, BOOL hasAudio) {
     apply_gameplay_audio_pause();
 }
 void Jac_StartTextDemo(int) {
+    PC_SPIKE_JAC_SCOPE();
     // pikidemo.c exige tres condiciones, no dos: text_demo_state != 1,
     // parts_find_demo_state == 0 y **current_demo_no == DEMOID_FINISHED**, es
     // decir, que no haya ninguna cinemática en curso.
@@ -837,6 +879,7 @@ void Jac_StartTextDemo(int) {
     apply_gameplay_audio_pause();
 }
 void Jac_FinishPartsFindDemo() {
+    PC_SPIKE_JAC_SCOPE();
     if (!sPartsFindDemoActive) return;
     Jac_DemoFade(0, 70, 1.0f);
     sPartsFindDemoActive = false;
@@ -844,6 +887,7 @@ void Jac_FinishPartsFindDemo() {
     apply_gameplay_audio_pause();
 }
 void Jac_FinishTextDemo() {
+    PC_SPIKE_JAC_SCOPE();
     // Mismo guardado que en el arranque: si una cinemática empezó mientras el
     // mensaje seguía activo, la restauración del volumen es suya, no nuestra.
     // Restaurarlo aquí pisaría el volumen que la cinemática tiene guardado.
@@ -854,12 +898,14 @@ void Jac_FinishTextDemo() {
     apply_gameplay_audio_pause();
 }
 void Jac_Freeze_Precall() {
+    PC_SPIKE_JAC_SCOPE();
     // Mirrors AllStop_1Shot + FlushRelease_1Shot without destroying the
     // persistent BGM/stream state before the reset path has committed.
     pc_audio_stop_bus(PC_AUDIO_BUS_SE);
 }
 void Jac_Freeze() { pc_audio_stop_dma(); }
 void Jac_Orima_Walk(s32 groundSoundID, u32) {
+    PC_SPIKE_JAC_SCOPE();
     // Original handle 0x10008: alternate writes are intentional; the JAM
     // track selects the correct left/right foot variation itself.
     sPikiGayaTimer = 0;
@@ -868,6 +914,7 @@ void Jac_Orima_Walk(s32 groundSoundID, u32) {
         pc_audio_write_se_port(8, 0, static_cast<u16>(groundSoundID));
 }
 void Jac_Orima_Formation(s32 stickX, s32 stickY) {
+    PC_SPIKE_JAC_SCOPE();
     static bool active = false;
     if (audio_demo_active() || sMenuOrPauseActive) stickX = stickY = 0;
     stickX = std::clamp(stickX, -127, 127);
@@ -887,6 +934,7 @@ void Jac_Orima_Formation(s32 stickX, s32 stickY) {
 }
 void Jac_StopSe(s32) {}
 void Jac_Piki_Number(u32 pikiNum) {
+    PC_SPIKE_JAC_SCOPE();
     if (pikiNum >= 100) sPikiGayaLevel = 29;
     else if (pikiNum >= 50) sPikiGayaLevel = (pikiNum - 50) / 10 + 25;
     else if (pikiNum >= 25) sPikiGayaLevel = (pikiNum - 25) / 5 + 20;
@@ -967,6 +1015,7 @@ static void event_action_finished(u8 event, u8 slot) {
 }
 
 BOOL Jac_PlayEventAction(int index, int action) {
+    PC_SPIKE_JAC_SCOPE();
     if (index < 0 || index >= 16 || !sEvents[index].active) {
         trace_event_action(index, action, "SIN EVENTO ACTIVO", 0, 0, -1);
         return FALSE;
@@ -1080,6 +1129,7 @@ BOOL Jac_PlayEventAction(int index, int action) {
     return TRUE;
 }
 BOOL Jac_StopEventAction(int index, int action) {
+    PC_SPIKE_JAC_SCOPE();
     if (index < 0 || index >= 16 || action < 0 || !sEvents[index].active) return FALSE;
     for (int slot = 0; slot < 16; ++slot) {
         if (sEvents[index].actions[slot] != action) continue;
@@ -1089,12 +1139,14 @@ BOOL Jac_StopEventAction(int index, int action) {
     return TRUE;
 }
 BOOL Jac_UpdateEventPosition(int index, SVector_* position) {
+    PC_SPIKE_JAC_SCOPE();
     if (index < 0 || index >= 16 || !sEvents[index].active || !position) return FALSE;
     sEvents[index].frameTimer = 100;
     update_event_mix(index, position);
     return TRUE;
 }
 void Jac_InitAllEvent() {
+    PC_SPIKE_JAC_SCOPE();
     initialize_sound_handles();
     pc_audio_set_event_action_finished_hook(event_action_finished);
     for (int index = 0; index < 16; ++index) {
@@ -1114,6 +1166,7 @@ void Jac_InitAllEvent() {
     sFreeEvents = 16;
 }
 int Jac_CreateEvent(u32 type, SVector_* position) {
+    PC_SPIKE_JAC_SCOPE();
     initialize_sound_handles();
     if (type == JACEVENT_NULL || type >= std::size(kEventDistanceScale)) {
         trace_event_action(-1, -1, "TIPO DE EVENTO FUERA DE RANGO", type, 0, -1);
@@ -1142,6 +1195,7 @@ int Jac_CreateEvent(u32 type, SVector_* position) {
     return -1;
 }
 int Jac_GetActiveEvents(u32* eventIDs) {
+    PC_SPIKE_JAC_SCOPE();
     int count = 0;
     if (!eventIDs) return 0;
     for (u32 i = 0; i < 16; ++i)
@@ -1159,6 +1213,7 @@ int Jac_GetActiveEvents(u32* eventIDs) {
 void Jac_NoteDemoSkipped() { sDemoWasSkipped = true; }
 
 void Jac_UpdatePikiGaya() {
+    PC_SPIKE_JAC_SCOPE();
     if (sNativeScene != SCENE_Course || audio_demo_active()) {
         sPikiGayaVolume = 0.0f;
         pc_audio_set_se_track_volume(3, 0.0f);
@@ -1177,6 +1232,7 @@ void Jac_UpdatePikiGaya() {
 }
 
 void Jac_PauseOrimaSe() {
+    PC_SPIKE_JAC_SCOPE();
     Jac_Orima_Formation(0, 0);
     if (sWhistleVoice >= 0) pc_audio_release_wave(sWhistleVoice, 1600, 30);
     sWhistleVoice = -1;
@@ -1196,6 +1252,7 @@ extern "C" {
 void Jac_StreamMovieUpdate() {}
 void Jac_StreamMovieInit(const char*, u8*, int) {}
 int Jac_StreamMovieGetPicture(void* pictureBuffer, int* widthOut, int* heightOut) {
+    PC_SPIKE_JAC_SCOPE();
     if (pictureBuffer) *static_cast<void**>(pictureBuffer) = nullptr;
     if (widthOut) *widthOut = 0;
     if (heightOut) *heightOut = 0;
