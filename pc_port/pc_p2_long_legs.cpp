@@ -23,6 +23,8 @@
 #include "pc_p2_long_legs_fsm.h"
 #include "pc_p2_houdai_fsm.h"
 #include "MapMgr.h"
+#include "EffectMgr.h"
+#include "UtEffect.h"
 #include "pc_p2_cannon_stone.h"
 #include "pc_p2_animation.h"
 #include "pc_p2_campaign_actor.h"
@@ -43,6 +45,7 @@
 #include "Navi.h"
 #include "NaviMgr.h"
 #include "pc_p2_navi_select.h"
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -439,6 +442,25 @@ struct HoudaiStraightShell {
 std::vector<HoudaiStraightShell> houdaiShells;
 constexpr int kHoudaiShellPool = 10;
 
+// Shell visuals: the source THdamaShell/THdamaHit particle sets do not exist in
+// P1, so the shells reuse the P1 effects the Groink shells use (#892): the
+// Beatle rock-shoot halo at the muzzle, a BombLight fire-glow puff along the
+// flight each tick, and the Kando BombLight burst on map impact.
+void houdaiFx(int effect, const Vector3f& pos, const Vector3f* dir) {
+    if (!effectMgr) return;
+    zen::particleGenerator* gen =
+        effectMgr->create(static_cast<EffectMgr::effTypeTable>(effect), pos, nullptr, nullptr);
+    if (gen && dir) {
+        gen->setEmitDir(*dir);
+        gen->setOrientedNormalVector(Vector3f(0.0f, 1.0f, 0.0f));
+    }
+}
+void houdaiImpactFx(const Vector3f& pos) {
+    if (!utEffectMgr) return;
+    EffectParm parm(pos);
+    utEffectMgr->cast(KandoEffect::BombLight, parm);
+}
+
 int houdaiShellCount(BTeki* owner) {
     int n = 0;
     for (const HoudaiStraightShell& s : houdaiShells) n += s.owner == owner;
@@ -506,6 +528,7 @@ void houdaiStepShells(BTeki* owner, ActorState& state, float dt) {
         }
         s.pos = next;
         s.flight += dt;
+        houdaiFx(26, next, nullptr); // EFF_BombLight_FireGlow trail puff
         const Vector3f a(start.x, start.y - 10.0f, start.z);
         const Vector3f b(next.x, next.y - 10.0f, next.z);
         auto report = [&](Creature* c, const char* kind, float dmg, bool accepted) {
@@ -540,6 +563,7 @@ void houdaiStepShells(BTeki* owner, ActorState& state, float dt) {
                 report(t, "teki", 500.0f, ok);
             }
         }
+        if (expire && reason[0] == 'm') houdaiImpactFx(next);
         if (expire) {
             std::printf("P2_HOUDAI_SHELL_END generator=%u shell=%d reason=%s flight=%.2f at=%.1f,%.1f,%.1f\n",
                         s.generator, s.id, reason, s.flight, next.x, next.y, next.z);
@@ -625,12 +649,19 @@ bool houdaiWake(BTeki* actor, const Vector3f& pos, float radius) {
 
 P2HoudaiVec hv(const Vector3f& v) { return P2HoudaiVec{v.x, v.y, v.z}; }
 
+// Wall-clock ms (system clock, epoch) so frame-dump file times can be matched
+// to state markers during the eye check.
+long long houdaiWallMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
 void houdaiLogState(const ActorState& st, P2LongLegsState from, P2LongLegsState to, BTeki* actor) {
     const Vector3f p = actor->getPosition();
     std::printf("P2_LONG_LEGS_STATE species=Houdai generator=%u from=%s state=%s x=%.1f z=%.1f health=%.1f "
-                "flick_timer=%.0f burst_timer=%.1f\n",
+                "flick_timer=%.0f burst_timer=%.1f wall_ms=%lld\n",
                 st.generator, P2LongLegsFsm::stateName(from), P2LongLegsFsm::stateName(to), p.x, p.z,
-                actor->mHealth, st.houdai.flickTimer(), st.houdai.burstTimer());
+                actor->mHealth, st.houdai.flickTimer(), st.houdai.burstTimer(), houdaiWallMs());
 }
 
 // One host frame for a registered Houdai. Returns after the escape.
@@ -749,6 +780,9 @@ void houdaiTick(BTeki* actor, ActorState& state, float dt) {
                 s.pos = Vector3f(out.shellPos.x, out.shellPos.y, out.shellPos.z);
                 s.vel = Vector3f(out.shellVel.x, out.shellVel.y, out.shellVel.z);
                 houdaiShells.push_back(s);
+                const Vector3f dir(s.vel.x / 600.0f, s.vel.y / 600.0f, s.vel.z / 600.0f);
+                houdaiFx(137, s.pos, &dir); // EFF_Beatle_ShootRockHalo
+                houdaiFx(138, s.pos, &dir); // EFF_Beatle_ShootRockSpecks
                 std::printf("P2_HOUDAI_SHELL_FIRE generator=%u shell=%d pos=%.1f,%.1f,%.1f vel=%.1f,%.1f,%.1f "
                             "target_found=%d\n",
                             state.generator, s.id, s.pos.x, s.pos.y, s.pos.z, s.vel.x, s.vel.y, s.vel.z,
