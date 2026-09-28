@@ -4519,6 +4519,9 @@ void pc_gfx_present(void) {
             glReadPixels(0, 0, sRenderWidth, sRenderHeight, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
             char path[512];
             snprintf(path, sizeof path, "%s/frame_%05u.ppm", dumpDir, dumpFrame);
+            // Marks the dump in the log stream so evidence tooling can pair a
+            // frame with the gameplay lines around it (e.g. target distance).
+            if (dumpEvery < 15) std::printf("PIKMIN_FRAME_DUMP frame=%u\n", dumpFrame);
             if (FILE* f = fopen(path, "wb")) {
                 fprintf(f, "P6\n%d %d\n255\n", sRenderWidth, sRenderHeight);
                 for (int y = sRenderHeight - 1; y >= 0; --y) {
