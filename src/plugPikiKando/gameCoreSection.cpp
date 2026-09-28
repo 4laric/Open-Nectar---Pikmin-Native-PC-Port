@@ -5,6 +5,7 @@
 #include "pc_p2_onikurage_teki.h"
 #include "pc_p2_bombsarai_teki.h"
 #include "pc_p2_groink_teki.h"
+#include "pc_p2_breadbug_teki.h"
 #include "pc_p2_king_teki.h"
 #include "pc_p2_queen_teki.h"
 #if defined(PIKI_PC_PORT)
@@ -1982,6 +1983,7 @@ void GameCoreSection::finalSetup()
 	pc_p2_onikurage_teki_setup();
 	pc_p2_bombsarai_teki_setup();
 	pc_p2_groink_teki_setup();
+	pc_p2_breadbug_teki_setup();
 	pc_p2_king_teki_setup();
 	pc_p2_queen_teki_setup();
 	pc_p2_demon_manager_setup();

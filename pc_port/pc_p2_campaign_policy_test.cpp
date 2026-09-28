@@ -14,6 +14,12 @@ int main() {
     }
     for (unsigned source: {0u,1u,41u,45u,58u,99u,999u})
         assert(p2campaign::hostType(source,17,false)==17);
+    // #898: Breadbug (PanModoki 38) rides TEKI_Collec (8); protected spawns keep theirs.
+    for (int original=0;original<34;++original) {
+        assert(p2campaign::hostType(38u,original,false)==8);
+        assert(p2campaign::hostType(38u,original,true)==original);
+    }
+    assert(p2campaign::hasStaticHost(38u));
     for (unsigned source : {9u,23u,34u,44u,54u,56u,57u,59u,60u,61u,62u,63u,65u,69u,70u,71u,78u,79u,101u,17u,18u,24u,25u,15u,75u,26u,27u,84u,93u,66u,97u})
         assert(p2campaign::hasStaticHost(source));
     // inst-chappy (#871, lane complete): Chappy (2), FireChappy (33),
