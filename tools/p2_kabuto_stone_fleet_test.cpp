@@ -9,6 +9,13 @@
 // pc_p2_kabuto_fsm.cpp KB_ATTACK and pc_p2_kabuto_fsm_update_stones) on host
 // frame clocks. p2_kabuto_stone_wiring_test pins that the shipped FSM and
 // gameCoreSection actually call this seam.
+// Cases 21-25 (review round 4) drive the source attack selection the FSM
+// calls (pc_p2_kabuto_aim.h: isAttackableTarget lane, getSearchedTarget,
+// StateTurn / StateMove / StateWait decisions) against the pre-round-4 native
+// 180 / 0.5 rad gate and FACE_OK Turn exit as negative controls; case 26 pins
+// the strike-buffer deferral and the P2 gravity constant; case 27 (round 5)
+// pins the host target offer: sprouts are never targets, swallowed Pikmin
+// are never searched, against the round-4 isAlive-only offer.
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -18,13 +25,14 @@
 #include <vector>
 
 #include "pc_p2_kabuto_stone_fleet.h"
+#include "pc_p2_kabuto_aim.h"
 
 using namespace p2kabutostone;
 
 namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
-constexpr float kGravity = 550.0f; // P1 AICONST mGravity default (AIConstant.h:26)
+constexpr float kGravity = kStoneGravity; // retail P2 aiConstants gravity 560 (round 4; was P1 550)
 constexpr float kDt = P2CannonStone::kSourceDelta;
 constexpr std::uint64_t kShooter = 0x1000;
 
@@ -800,6 +808,527 @@ void case20_leafContactGeometry()
     assert(half.radius == 13.5f && half.centre.y == 12.5f);
 }
 
+
+// ---- Round 4: source attack selection (isAttackableTarget lane) ----
+// p2kabutoaim is what the shipped KB_WAIT / KB_TURN / KB_MOVE call
+// (pc_p2_kabuto_fsm.cpp); the legacy gate below is the pre-round-4 native
+// rule, kept only as a negative control.
+namespace aim = p2kabutoaim;
+
+aim::Vec3 v3(float x, float y, float z)
+{
+    aim::Vec3 v;
+    v.x = x;
+    v.y = y;
+    v.z = z;
+    return v;
+}
+
+aim::Candidate pikiAt(float x, float y, float z)
+{
+    aim::Candidate c;
+    c.pos = v3(x, y, z);
+    c.navi = false;
+    c.alive = true;
+    return c;
+}
+
+// Old pc_p2_kabuto_fsm.cpp:136-141 attackable(): XZ distance < attackRange
+// (180) and |angle| < ATTACK_ANGLE (0.5 rad).
+bool legacyAttackable(const aim::Vec3& pos, float heading, const aim::Vec3& t)
+{
+    const float dx = t.x - pos.x, dz = t.z - pos.z;
+    if (std::sqrt(dx * dx + dz * dz) >= 180.0f) {
+        return false;
+    }
+    return std::fabs(aim::wrapPi(std::atan2(dx, dz) - heading)) < 0.5f;
+}
+
+// Old KB_WAIT / KB_TURN selection (pc_p2_kabuto_fsm.cpp:262-287 at f06fb9cc7):
+// Wait attacks on the legacy gate at clip end or turns when more than
+// FACE_OK_ANGLE (10 deg) off; Turn turns at 2.5 rad/s, attacks on the legacy
+// gate, and drops back to Wait once within 10 deg. Returns the host frame of
+// the first Attack entry or -1, and the heading at that moment.
+int legacyFirstAttackFrame(float heading, const aim::Vec3& t, int frames, float dt, float& outHeading)
+{
+    const aim::Vec3 pos = v3(0.0f, 0.0f, 0.0f);
+    bool turning = false;
+    float stateTime = 0.0f;
+    const float waitClip = 1.0f;
+    for (int f = 1; f <= frames; ++f) {
+        stateTime += dt;
+        const float ang = aim::wrapPi(std::atan2(t.x - pos.x, t.z - pos.z) - heading);
+        if (!turning) {
+            if (stateTime >= waitClip) {
+                stateTime = 0.0f;
+                if (legacyAttackable(pos, heading, t)) {
+                    outHeading = heading;
+                    return f;
+                }
+                if (std::fabs(ang) > 0.174533f) {
+                    turning = true;
+                }
+            }
+        } else {
+            float step = ang;
+            const float cap = 2.5f * dt;
+            if (step > cap) step = cap;
+            if (step < -cap) step = -cap;
+            heading = aim::wrapPi(heading + step);
+            const float after = aim::wrapPi(std::atan2(t.x - pos.x, t.z - pos.z) - heading);
+            if (legacyAttackable(pos, heading, t)) {
+                outHeading = heading;
+                return f;
+            }
+            if (std::fabs(after) <= 0.174533f) {
+                turning = false;
+                stateTime = 0.0f;
+            }
+        }
+    }
+    outHeading = heading;
+    return -1;
+}
+
+// Fires one stone from a Kabuto at the origin facing `heading` and returns
+// the strikes the fleet lands on a grounded Pikmin (centre y 10) at `t`.
+int stoneStrikesFrom(float heading, const aim::Vec3& t)
+{
+    Fleet fleet;
+    FlatMap map;
+    std::uint32_t id = 0;
+    assert(fireForward(fleet, id, heading) >= 0);
+    std::vector<Target> targets{ piki(77, t.x, t.z) };
+    Log log;
+    run(fleet, map, targets, 200, log);
+    return log.strikesOn(77);
+}
+
+// The shipped chain on a host clock for a Kabuto facing +z at the origin:
+// KB_TURN (aim::turnExec) until Attack, then KB_ATTACK (attackStep, heading 0
+// in Campaign::frame) to KEYEVENT_2, then the fleet. Only used with targets
+// already dead ahead, so the attack heading stays 0.
+struct AimRun {
+    int attackFrame = -1;
+    float attackHeading = 0.0f;
+    int strikes = 0;
+    int births = 0;
+    bool attackedOutOfLane = false;
+};
+AimRun runAimAhead(const aim::Candidate& target, int frames, float dt)
+{
+    AimRun r;
+    Campaign c;
+    c.inAttack = false;
+    c.targets = { piki(77, target.pos.x, target.pos.z) };
+    const aim::Vec3 pos = v3(0.0f, 0.0f, 0.0f);
+    const aim::Vec3 wander = v3(0.0f, 0.0f, -100.0f);
+    float heading = 0.0f;
+    for (int f = 1; f <= frames; ++f) {
+        if (!c.inAttack && r.attackFrame < 0) {
+            const aim::TurnResult t = aim::turnExec(pos, heading, dt, aim::viewAngleDeg(0.0f), &target, 1, wander);
+            heading = t.faceDir;
+            if (t.next == aim::Next::Attack) {
+                if (!aim::inAttackLane(pos, heading, target.pos)) {
+                    r.attackedOutOfLane = true;
+                }
+                r.attackFrame = f;
+                r.attackHeading = heading;
+                c.enterAttack();
+            }
+        }
+        c.frame(dt);
+    }
+    assert(std::fabs(r.attackHeading) < 1e-6f);
+    r.births = int(c.births.size());
+    r.strikes = c.log.strikesOn(77);
+    return r;
+}
+
+void case21_offAxisTurnsUntilLane()
+{
+    // Pikmin 150 away, 17 deg off the Kabuto's facing.
+    const float off = 17.0f * kPi / 180.0f;
+    const aim::Candidate t = pikiAt(150.0f * std::sin(off), 0.0f, 150.0f * std::cos(off));
+    const aim::Vec3 pos = v3(0.0f, 0.0f, 0.0f);
+    // Source lane refuses it at the current facing (lateral 43.9 > 15) ...
+    assert(!aim::inAttackLane(pos, 0.0f, t.pos));
+    assert(std::fabs(std::fabs(aim::laneCoords(pos, 0.0f, t.pos).lateral) - 43.86f) < 0.05f);
+    // ... while the legacy gate accepts it and the Stone fired along that
+    // facing misses (negative control: the defect the lane gate fixes).
+    assert(legacyAttackable(pos, 0.0f, t.pos));
+    float legacyHeading = 1.0f;
+    assert(legacyFirstAttackFrame(0.0f, t.pos, 600, 1.0f / 60.0f, legacyHeading) > 0);
+    assert(legacyHeading == 0.0f);
+    const int legacyStrikes = stoneStrikesFrom(legacyHeading, t.pos);
+    std::printf("case21 legacy: attack at heading 0, stone strikes=%d (miss)\n", legacyStrikes);
+    assert(legacyStrikes == 0);
+
+    // Shipped selection: Turn keeps turning (no Attack while out of lane),
+    // enters Attack once the lane holds, and the Stone reaches the Pikmin.
+    float heading = 0.0f;
+    int frames = 0;
+    const aim::Vec3 wander = v3(0.0f, 0.0f, -100.0f);
+    for (; frames < 600; ++frames) {
+        const aim::TurnResult r = aim::turnExec(pos, heading, 1.0f / 60.0f, aim::viewAngleDeg(0.0f), &t, 1, wander);
+        assert(r.target == 0);
+        heading = r.faceDir;
+        if (r.next == aim::Next::Attack) {
+            break;
+        }
+        assert(!aim::inAttackLane(pos, heading, t.pos));
+    }
+    assert(frames > 1 && frames < 600);
+    const aim::LaneCoords lc = aim::laneCoords(pos, heading, t.pos);
+    std::printf("case21 lane: attack after %d frames (%.2f s) face=%.2f deg lateral=%.2f forward=%.1f\n",
+                frames + 1, (frames + 1) / 60.0f, heading * 180.0f / kPi, lc.lateral, lc.forward);
+    assert(std::fabs(lc.lateral) < aim::kLaneHalfWidth && lc.forward > 15.0f);
+    const int strikes = stoneStrikesFrom(heading, t.pos);
+    std::printf("case21 lane: stone strikes=%d\n", strikes);
+    assert(strikes == 1);
+    // The old Turn's FACE_OK exit stalls on a target 10 deg off at 200
+    // (lateral 34.7, beyond the old 180 range): it never attacks. The new
+    // Turn keeps turning until the lane holds.
+    const float ten = 10.0f * kPi / 180.0f;
+    const aim::Candidate far = pikiAt(200.0f * std::sin(ten), 0.0f, 200.0f * std::cos(ten));
+    heading = 0.0f;
+    bool attacked = false;
+    for (int f = 0; f < 600 && !attacked; ++f) {
+        const aim::TurnResult r = aim::turnExec(pos, heading, 1.0f / 60.0f, aim::viewAngleDeg(0.0f), &far, 1, wander);
+        heading = r.faceDir;
+        attacked = r.next == aim::Next::Attack;
+    }
+    assert(attacked && aim::inAttackLane(pos, heading, far.pos));
+    assert(stoneStrikesFrom(heading, far.pos) == 1);
+    float lh = 0.0f;
+    const int legacyFar = legacyFirstAttackFrame(0.0f, far.pos, 1800, 1.0f / 60.0f, lh);
+    std::printf("case21 stall: legacy attack frame=%d over 30 s, lane attacked=%d\n", legacyFar, int(attacked));
+    assert(legacyFar < 0);
+}
+
+void case22_inLaneBeyond180()
+{
+    const aim::Vec3 pos = v3(0.0f, 0.0f, 0.0f);
+    const aim::Candidate t = pikiAt(0.0f, 0.0f, 250.0f);
+    assert(aim::inAttackLane(pos, 0.0f, t.pos));
+    assert(aim::isAttackableTarget(pos, 0.0f, &t, 1));
+    // Legacy gate: 250 >= attackRange 180 -> never fired at, and the old
+    // Wait/Turn selection never reaches Attack for it.
+    assert(!legacyAttackable(pos, 0.0f, t.pos));
+    float lh = 0.0f;
+    const int legacy = legacyFirstAttackFrame(0.0f, t.pos, 1800, 1.0f / 60.0f, lh);
+    // Shipped chain: Turn -> Attack on the first exec, Stone born at
+    // KEYEVENT_2, strike after travel.
+    const AimRun r = runAimAhead(t, 240, 1.0f / 60.0f);
+    std::printf("case22 legacy attack frame=%d; lane attack frame=%d births=%d strikes=%d\n", legacy, r.attackFrame,
+                r.births, r.strikes);
+    assert(legacy < 0);
+    assert(r.attackFrame == 1 && !r.attackedOutOfLane);
+    assert(r.births == 1 && r.strikes == 1);
+    // Lane bounds on forward distance: 340 in, 350 (sight, strict) out.
+    assert(aim::inAttackLane(pos, 0.0f, v3(0.0f, 0.0f, 340.0f)));
+    assert(!aim::inAttackLane(pos, 0.0f, v3(0.0f, 0.0f, 350.0f)));
+}
+
+void case23_laneRefusals()
+{
+    const aim::Vec3 pos = v3(5.0f, 20.0f, -7.0f);
+    auto at = [&](float fwd, float lat, float dy) { return v3(pos.x + lat, pos.y + dy, pos.z + fwd); };
+    // |dy| < fov (100): 99.9 in, 100 / -100 / 150 out.
+    assert(aim::inAttackLane(pos, 0.0f, at(100.0f, 0.0f, 99.9f)));
+    assert(!aim::inAttackLane(pos, 0.0f, at(100.0f, 0.0f, 100.0f)));
+    assert(!aim::inAttackLane(pos, 0.0f, at(100.0f, 0.0f, -100.0f)));
+    assert(!aim::inAttackLane(pos, 0.0f, at(100.0f, 0.0f, 150.0f)));
+    // forward > 15: 15 and below out (including right on top / behind).
+    assert(!aim::inAttackLane(pos, 0.0f, at(15.0f, 0.0f, 0.0f)));
+    assert(!aim::inAttackLane(pos, 0.0f, at(5.0f, 0.0f, 0.0f)));
+    assert(!aim::inAttackLane(pos, 0.0f, at(-100.0f, 0.0f, 0.0f)));
+    assert(aim::inAttackLane(pos, 0.0f, at(15.5f, 0.0f, 0.0f)));
+    // |lateral| < 15 (both sides).
+    assert(aim::inAttackLane(pos, 0.0f, at(100.0f, 14.9f, 0.0f)));
+    assert(aim::inAttackLane(pos, 0.0f, at(100.0f, -14.9f, 0.0f)));
+    assert(!aim::inAttackLane(pos, 0.0f, at(100.0f, 15.0f, 0.0f)));
+    assert(!aim::inAttackLane(pos, 0.0f, at(100.0f, -15.0f, 0.0f)));
+    // Rotated facing: heading 90 deg looks down +x.
+    assert(aim::inAttackLane(pos, kPi / 2.0f, v3(pos.x + 200.0f, pos.y, pos.z + 10.0f)));
+    assert(!aim::inAttackLane(pos, kPi / 2.0f, v3(pos.x, pos.y, pos.z + 200.0f)));
+    // Targets straight ahead but 120 above (|dy| >= fov) or 10 ahead
+    // (forward <= 15) are searched (XZ sight) and turned toward, but never
+    // attacked; the legacy gate (XZ only) attacks both at once.
+    const aim::Candidate high = pikiAt(pos.x, pos.y + 120.0f, pos.z + 100.0f);
+    const aim::Candidate close = pikiAt(pos.x, pos.y, pos.z + 10.0f);
+    const aim::Vec3 wander = v3(0.0f, 0.0f, -100.0f);
+    for (const aim::Candidate* c : { &high, &close }) {
+        float heading = 0.0f;
+        for (int f = 0; f < 300; ++f) {
+            const aim::TurnResult r = aim::turnExec(pos, heading, 1.0f / 60.0f, aim::viewAngleDeg(0.0f), c, 1, wander);
+            assert(r.target == 0 && r.next == aim::Next::Stay);
+            heading = r.faceDir;
+        }
+        assert(legacyAttackable(pos, 0.0f, c->pos));
+    }
+    // A dead candidate never opens the lane.
+    aim::Candidate dead = pikiAt(pos.x, pos.y, pos.z + 100.0f);
+    dead.alive = false;
+    assert(!aim::isAttackableTarget(pos, 0.0f, &dead, 1));
+}
+
+void case24_searchAndTurnRate()
+{
+    const aim::Vec3 pos = v3(0.0f, 0.0f, 0.0f);
+    // View angle: 180 deg while alert (< fp29 15 s), fp13 90 deg after.
+    assert(aim::viewAngleDeg(0.0f) == 180.0f && aim::viewAngleDeg(14.9f) == 180.0f);
+    assert(aim::viewAngleDeg(15.0f) == 90.0f);
+    const aim::Candidate behind = pikiAt(-50.0f, 0.0f, -100.0f); // ~153 deg off
+    assert(aim::searchTarget(pos, 0.0f, 180.0f, &behind, 1) == 0);
+    assert(aim::searchTarget(pos, 0.0f, 90.0f, &behind, 1) == -1);
+    // Sight is XZ 350.
+    const aim::Candidate farT = pikiAt(0.0f, 0.0f, 351.0f);
+    assert(aim::searchTarget(pos, 0.0f, 180.0f, &farT, 1) == -1);
+    // Nearest wins; a Pikmin beats a Navi only when strictly closer.
+    aim::Candidate cs[3] = { pikiAt(0.0f, 0.0f, 200.0f), pikiAt(0.0f, 0.0f, 100.0f), pikiAt(0.0f, 0.0f, 100.0f) };
+    cs[1].navi = true;
+    assert(aim::searchTarget(pos, 0.0f, 180.0f, cs, 3) == 1);
+    cs[2].pos.z = 99.0f;
+    assert(aim::searchTarget(pos, 0.0f, 180.0f, cs, 3) == 2);
+    // turnToTarget per 30 Hz exec: clamp(angle * 0.05, 5 deg).
+    const aim::Vec3 right = v3(100.0f, 0.0f, 0.0f); // +90 deg
+    const aim::TurnStep a = aim::turnToward(pos, 0.0f, right, 1.0f / 30.0f);
+    assert(std::fabs(a.faceDir - 0.05f * kPi / 2.0f) < 1e-5f); // 4.5 deg < cap
+    const aim::Vec3 back = v3(0.001f, 0.0f, -100.0f); // ~180 deg
+    const aim::TurnStep b = aim::turnToward(pos, 0.0f, back, 1.0f / 30.0f);
+    assert(std::fabs(b.faceDir - 5.0f * kPi / 180.0f) < 1e-5f); // capped at 5 deg
+    // Host-rate independence: two 60 Hz frames ~ one 30 Hz exec.
+    const aim::TurnStep h1 = aim::turnToward(pos, 0.0f, right, 1.0f / 60.0f);
+    const aim::TurnStep h2 = aim::turnToward(pos, h1.faceDir, right, 1.0f / 60.0f);
+    assert(std::fabs(h2.faceDir - a.faceDir) < 0.002f);
+}
+
+void case25_moveAndWander()
+{
+    const aim::Vec3 pos = v3(0.0f, 0.0f, 0.0f);
+    const aim::Vec3 home = v3(0.0f, 0.0f, 0.0f);
+    // Wander target within [home 30, territory 150] of home.
+    for (int i = 0; i < 20; ++i) {
+        const aim::Vec3 w = aim::wanderTarget(v3(10.0f, 0.0f, 3.0f), home, i / 20.0f, (19 - i) / 20.0f);
+        const float r = std::sqrt(w.x * w.x + w.z * w.z);
+        assert(r >= 30.0f - 1e-3f && r <= 150.0f + 1e-3f);
+    }
+    const aim::Vec3 wander = v3(0.0f, 0.0f, 100.0f);
+    // No target: walk while facing within 30 deg, Turn beyond, Wait on
+    // timeout (> 6 s) or arrival (< 25).
+    aim::MoveResult m = aim::moveExec(pos, 0.0f, 1.0f / 60.0f, 90.0f, 0.0f, nullptr, 0, wander);
+    assert(m.walk && m.next == aim::Next::Stay);
+    m = aim::moveExec(pos, kPi / 2.0f, 1.0f / 60.0f, 90.0f, 0.0f, nullptr, 0, wander);
+    assert(!m.walk && m.next == aim::Next::Turn);
+    m = aim::moveExec(pos, 0.0f, 1.0f / 60.0f, 90.0f, 6.1f, nullptr, 0, wander);
+    assert(m.next == aim::Next::Wait);
+    m = aim::moveExec(v3(0.0f, 0.0f, 80.0f), 0.0f, 1.0f / 60.0f, 90.0f, 0.0f, nullptr, 0, wander);
+    assert(m.next == aim::Next::Wait);
+    // A searched target: Attack when already in lane, else Turn (source
+    // Move never chases a target).
+    const aim::Candidate inLane = pikiAt(0.0f, 0.0f, 200.0f);
+    const aim::Candidate offLane = pikiAt(60.0f, 0.0f, 200.0f);
+    assert(aim::moveExec(pos, 0.0f, 1.0f / 60.0f, 90.0f, 0.0f, &inLane, 1, wander).next == aim::Next::Attack);
+    m = aim::moveExec(pos, 0.0f, 1.0f / 60.0f, 90.0f, 0.0f, &offLane, 1, wander);
+    assert(m.next == aim::Next::Turn && !m.walk);
+    // Turn with no target heads for the wander point and moves within 30 deg.
+    aim::TurnResult t = aim::turnExec(pos, 0.0f, 1.0f / 60.0f, 90.0f, nullptr, 0, wander);
+    assert(t.target < 0 && t.next == aim::Next::Move);
+    t = aim::turnExec(pos, kPi, 1.0f / 60.0f, 90.0f, nullptr, 0, wander);
+    assert(t.next == aim::Next::Stay);
+    // Wait latches Turn on a target or after 3 s.
+    assert(aim::waitWantsTurn(0.0f, true) && aim::waitWantsTurn(3.1f, false) && !aim::waitWantsTurn(2.9f, false));
+}
+
+void case26_strikeCapDefers()
+{
+    // Two grounded Pikmin reached on the same tick with a 1-strike buffer:
+    // the second is not recorded as struck, and is struck on the next tick.
+    Fleet fleet;
+    FlatMap map;
+    std::uint32_t id = 0;
+    assert(fireForward(fleet, id) >= 0);
+    std::vector<Target> targets{ piki(1, -5.0f, 150.0f), piki(2, 5.0f, 150.0f) };
+    int per[3] = { 0, 0, 0 };
+    int firstTick = -1, secondTick = -1;
+    for (int tick = 1; tick <= 120; ++tick) {
+        Strike s[1];
+        DeadEvent d[16];
+        Released r[16];
+        int sn = 0, dn = 0, rn = 0;
+        fleet.tick(kGravity, &flatTrace, &map, targets.data(), int(targets.size()), s, 1, sn, d, 16, dn, r, 16, rn);
+        assert(sn <= 1);
+        for (int k = 0; k < sn; ++k) {
+            ++per[s[k].target];
+            (firstTick < 0 ? firstTick : secondTick) = tick;
+        }
+    }
+    std::printf("case26 strikes p1=%d p2=%d ticks=%d,%d deferred=%llu\n", per[1], per[2], firstTick, secondTick,
+                static_cast<unsigned long long>(fleet.strikesDeferred()));
+    assert(per[1] == 1 && per[2] == 1);
+    assert(secondTick == firstTick + 1);
+    assert(fleet.strikesDeferred() >= 1);
+    // P2 gravity constant (aiConstants 560).
+    assert(kStoneGravity == 560.0f);
+}
+
+// Round-4 buildAim offered every P1 Piki passing isAlive() (which only
+// excludes Dying / Dead, piki.cpp:2546-2553) as both searchable and in-lane.
+// Kept only as the negative control for case 27.
+aim::Candidate legacyHostPiki(float x, float y, float z)
+{
+    aim::Candidate c = pikiAt(x, y, z);
+    c.alive = true;
+    c.searchable = true;
+    return c;
+}
+
+// Runs KB_TURN (aim::turnExec) for up to `frames` 60 Hz frames from facing
+// +z at the origin. Returns the Attack frame or -1 and the final heading.
+int turnUntilAttack(const aim::Candidate* c, int n, int frames, float& heading)
+{
+    const aim::Vec3 pos = v3(0.0f, 0.0f, 0.0f);
+    const aim::Vec3 wander = v3(0.0f, 0.0f, -100.0f);
+    heading = 0.0f;
+    for (int f = 1; f <= frames; ++f) {
+        const aim::TurnResult r = aim::turnExec(pos, heading, 1.0f / 60.0f, aim::viewAngleDeg(0.0f), c, n, wander);
+        heading = r.faceDir;
+        if (r.next == aim::Next::Attack) {
+            return f;
+        }
+    }
+    return -1;
+}
+
+void case27_sproutsAndSwallowedPikmin()
+{
+    const aim::Vec3 pos = v3(0.0f, 0.0f, 0.0f);
+    const aim::Vec3 ahead150 = v3(0.0f, 0.0f, 150.0f);
+    // Host mapping: sprouts (P1 Grow / Bury / NukareWait) are P2
+    // ItemPikihead, never a Piki target; swallowed Pikmin are in P2
+    // PikiSwallowedState, whose dead() is true (PikiState.h:823), so P2
+    // isAlive rejects them from search and lane alike; plucking
+    // (Nukare / AutoNuki) stays an ordinary Piki.
+    const aim::Candidate sprout = aim::pikminCandidate(ahead150, true, aim::PikminPhase::Sprout);
+    const aim::Candidate mouth = aim::pikminCandidate(ahead150, true, aim::PikminPhase::Dead);
+    const aim::Candidate active = aim::pikminCandidate(ahead150, true, aim::PikminPhase::Active);
+    const aim::Candidate dying = aim::pikminCandidate(ahead150, false, aim::PikminPhase::Active);
+    assert(!sprout.alive && !sprout.searchable && !sprout.navi);
+    assert(!mouth.alive && !mouth.searchable);
+    assert(active.alive && active.searchable);
+    assert(!dying.alive && !dying.searchable);
+    const aim::Candidate navi = aim::naviCandidate(ahead150, true);
+    assert(navi.navi && navi.alive && navi.searchable);
+
+    // (a) A sprout alone in the lane at 150: the round-4 host offer searched
+    // it and fired at once, although the Stone contact snapshot never holds
+    // a sprout (pc_p2_kabuto_fsm.cpp snapshotAdd: !isAtari || isBuried).
+    const aim::Candidate legacySprout = legacyHostPiki(0.0f, 0.0f, 150.0f);
+    float h = 0.0f;
+    assert(aim::searchTarget(pos, 0.0f, 180.0f, &legacySprout, 1) == 0);
+    assert(turnUntilAttack(&legacySprout, 1, 1, h) == 1);
+    assert(aim::searchTarget(pos, 0.0f, 180.0f, &sprout, 1) == -1);
+    assert(!aim::isAttackableTarget(pos, 0.0f, &sprout, 1));
+    assert(turnUntilAttack(&sprout, 1, 600, h) < 0);
+    const aim::Vec3 wander = v3(0.0f, 0.0f, 100.0f);
+    assert(aim::moveExec(pos, 0.0f, 1.0f / 60.0f, 180.0f, 0.0f, &sprout, 1, wander).target < 0);
+    assert(!aim::waitWantsTurn(0.0f, aim::searchTarget(pos, 0.0f, 180.0f, &sprout, 1) >= 0));
+
+    // (b) Sprout 10 ahead (forward <= 15: never in the lane) plus a Navi 200
+    // away 60 deg off. Round-4 offer: the sprout is the nearest searched
+    // target, the Kabuto already faces it and the lane never holds -> stuck
+    // in KB_TURN. Shipped: the sprout is ignored, the Kabuto turns to the
+    // Navi until the lane holds, fires, and the Stone reaches it.
+    const float sixty = 60.0f * kPi / 180.0f;
+    const aim::Vec3 naviPos = v3(200.0f * std::sin(sixty), 0.0f, 200.0f * std::cos(sixty));
+    const aim::Candidate legacyPair[2] = { legacyHostPiki(0.0f, 0.0f, 10.0f), aim::naviCandidate(naviPos, true) };
+    const aim::Candidate pair[2] = { aim::pikminCandidate(v3(0.0f, 0.0f, 10.0f), true, aim::PikminPhase::Sprout),
+                                     aim::naviCandidate(naviPos, true) };
+    float legacyHeading = 0.0f;
+    const int legacyFrame = turnUntilAttack(legacyPair, 2, 1800, legacyHeading);
+    float heading = 0.0f;
+    const int frame = turnUntilAttack(pair, 2, 1800, heading);
+    std::printf("case27 sprout stall: round-4 attack frame=%d heading=%.2f deg; shipped attack frame=%d heading=%.2f deg\n",
+                legacyFrame, legacyHeading * 180.0f / kPi, frame, heading * 180.0f / kPi);
+    assert(legacyFrame < 0 && std::fabs(legacyHeading) < 1e-3f);
+    assert(frame > 1 && aim::inAttackLane(pos, heading, naviPos));
+    assert(aim::searchTarget(pos, heading, 180.0f, pair, 2) == 1);
+    const int strikes = stoneStrikesFrom(heading, naviPos);
+    std::printf("case27 sprout stall: shipped stone strikes on the Navi=%d\n", strikes);
+    assert(strikes == 1);
+
+    // (c) A swallowed Pikmin: never searched and never in the lane (source
+    // isAttackableTarget tests creature->isAlive(), Kabuto.cpp:242, which is
+    // false in PikiSwallowedState). Round 5 kept it in the lane.
+    assert(aim::searchTarget(pos, 0.0f, 180.0f, &mouth, 1) == -1);
+    assert(!aim::isAttackableTarget(pos, 0.0f, &mouth, 1));
+    const aim::Candidate mouthOff = aim::pikminCandidate(v3(100.0f, 0.0f, 150.0f), true, aim::PikminPhase::Dead);
+    assert(turnUntilAttack(&mouthOff, 1, 600, h) < 0);
+    // (d) A Pikmin being plucked is an ordinary target.
+    assert(aim::searchTarget(pos, 0.0f, 180.0f, &active, 1) == 0 && turnUntilAttack(&active, 1, 1, h) == 1);
+}
+
+// Round-5 host mapping for a P1 Pikmin in a P2 dead() state (Pressed,
+// DenkiDying, Swallowed): Pressed / DenkiDying were Active (searched and in
+// the lane), Swallowed was alive but not searched. Negative control only.
+aim::Candidate round5HostPiki(const aim::Vec3& p, int p1State)
+{
+    aim::Candidate c = pikiAt(p.x, p.y, p.z);
+    c.alive = true;
+    c.searchable = p1State != 8; // PIKISTATE_Swallowed -> round-5 StuckToMouth
+    return c;
+}
+
+void case28_p2DeadStatesAreNotTargets()
+{
+    // A Pikmin 100 dead ahead in a P2 dead() state (squashed by this Stone,
+    // electrocuted, or held in another enemy's mouth) plus a live Navi 200
+    // away at 40 deg. Source (P2 isAlive false, piki.cpp:319-327): the
+    // Pikmin is neither searched nor in the lane, the Kabuto turns to the
+    // Navi, fires once the lane holds, and the Stone reaches it. Round 5
+    // attacked the flattened / swallowed Pikmin at once (heading 0), though
+    // P1 isAtari excludes Pressed and Swallowed (piki.cpp:1586-1587) so the
+    // Stone cannot hit it, and re-attacked it at every Attack end.
+    const aim::Vec3 pos = v3(0.0f, 0.0f, 0.0f);
+    const aim::Vec3 pikiPos = v3(0.0f, 0.0f, 100.0f);
+    const float forty = 40.0f * kPi / 180.0f;
+    const aim::Vec3 naviPos = v3(200.0f * std::sin(forty), 0.0f, 200.0f * std::cos(forty));
+    const char* const names[3] = { "Pressed", "DenkiDying", "Swallowed" };
+    const int p1States[3] = { 33, 35, 8 }; // include/PikiState.h:49,51,24
+    for (int k = 0; k < 3; ++k) {
+        const aim::Candidate dead = aim::pikminCandidate(pikiPos, true, aim::PikminPhase::Dead);
+        assert(!dead.alive && !dead.searchable);
+        const aim::Candidate shipped[2] = { dead, aim::naviCandidate(naviPos, true) };
+        const aim::Candidate legacy[2] = { round5HostPiki(pikiPos, p1States[k]), aim::naviCandidate(naviPos, true) };
+        float legacyHeading = 0.0f;
+        const int legacyFrame = turnUntilAttack(legacy, 2, 1800, legacyHeading);
+        float heading = 0.0f;
+        const int frame = turnUntilAttack(shipped, 2, 1800, heading);
+        const bool legacyLaneOnNavi = aim::inAttackLane(pos, legacyHeading, naviPos);
+        const bool laneOnNavi = aim::inAttackLane(pos, heading, naviPos);
+        std::printf("case28 %s: round-5 attack frame=%d heading=%.1f deg lane_on_navi=%d; shipped attack frame=%d heading=%.1f deg lane_on_navi=%d\n",
+                    names[k], legacyFrame, legacyHeading * 180.0f / kPi, int(legacyLaneOnNavi), frame,
+                    heading * 180.0f / kPi, int(laneOnNavi));
+        // Round 5: fires at once at the dead Pikmin, not at the Navi.
+        assert(legacyFrame == 1 && !legacyLaneOnNavi);
+        // Shipped: the dead Pikmin is invisible; the Navi is searched,
+        // turned to and attacked once the lane holds.
+        assert(aim::searchTarget(pos, 0.0f, 180.0f, shipped, 2) == 1);
+        assert(!aim::isAttackableTarget(pos, 0.0f, &dead, 1));
+        assert(frame > 1 && laneOnNavi && aim::attackableIndex(pos, heading, shipped, 2) == 1);
+        assert(stoneStrikesFrom(heading, naviPos) == 1);
+    }
+    // Alone in the lane, a P2-dead Pikmin never triggers an attack, and
+    // Wait never latches Turn for it before the 3 s timer.
+    const aim::Candidate dead = aim::pikminCandidate(pikiPos, true, aim::PikminPhase::Dead);
+    float h = 0.0f;
+    assert(turnUntilAttack(&dead, 1, 600, h) < 0);
+    assert(!aim::waitWantsTurn(0.0f, aim::searchTarget(pos, 0.0f, 180.0f, &dead, 1) >= 0));
+    assert(aim::moveExec(pos, 0.0f, 1.0f / 60.0f, 180.0f, 0.0f, &dead, 1, v3(0.0f, 0.0f, 50.0f)).next != aim::Next::Attack);
+    // The host dead flag still wins for an Active phase (P1 Dying / Dead).
+    assert(!aim::pikminCandidate(pikiPos, false, aim::PikminPhase::Active).alive);
+}
 } // namespace
 
 int main(int argc, char** argv)
@@ -813,7 +1342,11 @@ int main(int argc, char** argv)
                                 case13_resetReentry, case14_hostClockEmissionAndFlight,
                                 case15_killBeforeEvent, case16_stoneOutlivesShooter,
                                 case17_teardownReentry, case18_stoneClock,
-                                case19_oncePerAttackState, case20_leafContactGeometry };
+                                case19_oncePerAttackState, case20_leafContactGeometry,
+                                case21_offAxisTurnsUntilLane, case22_inLaneBeyond180,
+                                case23_laneRefusals, case24_searchAndTurnRate,
+                                case25_moveAndWander, case26_strikeCapDefers,
+                                case27_sproutsAndSwallowedPikmin, case28_p2DeadStatesAreNotTargets };
     const int count = int(sizeof(cases) / sizeof(cases[0]));
     for (int i = 0; i < count; ++i) {
         if (only == 0 || only == i + 1) {

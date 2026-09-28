@@ -112,11 +112,49 @@ int main(int argc, char** argv)
         check(has(update, "p2kabutostone::stoneTicksFor(stoneDebt,gsys->getFrameTime())") && has(update, "stoneTick(snap)"),
               F, "update_stones runs seam-clocked fleet ticks");
         const std::string tick = region(fsm, "void stoneTick(StoneSnapshot& snap){", "void pc_p2_kabuto_fsm_update_stones(");
-        check(has(tick, "fleet.tick(AICONST.mGravity(),&stoneTrace,&stoneMap,"), F, "stoneTick ticks the fleet with the map trace");
+        check(has(tick, "fleet.tick(p2kabutostone::kStoneGravity,&stoneTrace,&stoneMap,"), F,
+              "stoneTick ticks the fleet with the map trace and the retail P2 gravity");
         check(has(tick, "p2_projectile_apply_engine_strike("), F, "strikes reach the P1 receivers");
+        check(has(tick, "buildSnapshot(snap);snapshotOthers(snap);"), F,
+              "pellets / P1 bosses are offered to the Stone as stopping contacts");
+        check(has(tick, "kabutoHost=attack&&code=='t'&&kabutoHostStoneAttack(target,k.damage,hit);"), F,
+              "Teki Attack on a Beatle-hosted Kabuto goes through the Kabuto stored-damage path");
         const std::string trace = region(fsm, "bool stoneTrace(", "struct StoneSnapshot");
         check(has(trace, "mv.mIgnoreEnemyCollParts=true;") && has(trace, "mapMgr->traceMove(&m.proxy,mv,dt);"), F,
               "stone trace skips enemy body platforms");
+        check(has(trace, "mv.mP2WallThreshold=true;"), F, "stone trace uses the P2 wall classification");
+        // Round 4: source attack selection. The attack entry is the lane
+        // (p2kabutoaim, the header p2_kabuto_stone_fleet_test drives), never
+        // the old 180 / 0.5 rad cone, and Turn has no facing-close-enough exit.
+        check(!has(fsm, "boolattackable(") && !has(fsm, "ATTACK_ANGLE") && !has(fsm, "FACE_OK_ANGLE") &&
+                  !has(fsm, "nearestTarget("),
+              F, "pre-round-4 cone gate / FACE_OK exit / XZ-only nearestTarget removed");
+        check(!has(fsm, "s.state==KB_TURN&&s.stateTime>5.0f"), F, "no non-source Turn->Move chase after 5 s");
+        // Rounds 5-6: the host offer maps P1 Piki states to their P2 object
+        // (sprouts never targets; Pressed / DenkiDying / Swallowed are P2
+        // dead() states, so P2 isAlive rejects them), not P1 isAlive only.
+        const std::string phase = region(fsm, "p2kabutoaim::PikminPhasepikminPhase(Piki*p){", "structAimSnapshot{");
+        check(has(phase, "casePIKISTATE_Grow:casePIKISTATE_Bury:casePIKISTATE_NukareWait:returnp2kabutoaim::PikminPhase::Sprout;") &&
+                  has(phase, "casePIKISTATE_Pressed:casePIKISTATE_DenkiDying:casePIKISTATE_Swallowed:returnp2kabutoaim::PikminPhase::Dead;") &&
+                  has(phase, "if(p->isStickToMouth())returnp2kabutoaim::PikminPhase::Dead;") &&
+                  !has(phase, "StuckToMouth"),
+              F, "pikminPhase maps Grow/Bury/NukareWait to Sprout and Pressed/DenkiDying/Swallowed/mouth-held to Dead");
+        const std::string aimBuild = region(fsm, "voidbuildAim(AimSnapshot&a){", "floatrngUnit(");
+        check(has(aimBuild, "push(q,p2kabutoaim::pikminCandidate(aimVec(q->getPosition()),true,pikminPhase(q)));") &&
+                  has(aimBuild, "push(n,p2kabutoaim::naviCandidate(aimVec(n->getPosition()),true));") &&
+                  !has(aimBuild, "k.alive=true;"),
+              F, "buildAim offers Pikmin through pikminCandidate(pikminPhase) and Navis through naviCandidate");
+        const std::string wait = region(fsm, "case KB_WAIT:{", "case KB_TURN:{");
+        check(has(wait, "p2kabutoaim::waitWantsTurn(s.waitTimer,searched())") && !has(wait, "KB_ATTACK"), F,
+              "Wait latches Turn (target or 3 s) and never attacks directly");
+        const std::string turn = region(fsm, "case KB_TURN:{", "case KB_MOVE:{");
+        check(has(turn, "p2kabutoaim::turnExec(apos,s.heading,dt,p2kabutoaim::viewAngleDeg(s.alert),") &&
+                  has(turn, "if(r.next==p2kabutoaim::Next::Attack){logLane(gen,\"turn\",s,pos,aim);transition(actor,s,KB_ATTACK,\"attack\",gen);}") &&
+                  !has(turn, "KB_WAIT,"),
+              F, "Turn turns via turnExec, attacks only on the lane decision, and never drops to Wait");
+        const std::string move = region(fsm, "case KB_MOVE:{", "case KB_ATTACK:{");
+        check(has(move, "p2kabutoaim::moveExec(") && has(move, "if(r.next==p2kabutoaim::Next::Attack)"), F,
+              "Move attacks only on the lane decision");
         check(has(fsm, "void pc_p2_kabuto_fsm_draw_stones(Graphics& gfx){"), F, "stone draw defined");
         // The Iwagon stand-in shares TekiShapeObject::mAnimContext, which is
         // null until a live Iwagon draws; updateAnim would then halt on
@@ -124,9 +162,9 @@ int main(int argc, char** argv)
         // The draw is the last definition in the file: take it to the end.
         const std::string drawTail = region(fsm, "void pc_p2_kabuto_fsm_draw_stones(Graphics& gfx){", "#if");
         check(has(drawTail, "AnimData*constsharedAnim=so?so->mAnimContext.mData:nullptr;") &&
-                  has(drawTail, "AnimData*constnullAnim=(shape&&shape->mCurrentAnimation)?shape->mCurrentAnimation->mData:nullptr;") &&
-                  has(drawTail, "AnimData*constdrawAnim=sharedAnim?sharedAnim:nullAnim;"),
-              F, "stone draw falls back to the shape's Null Anim when the shared Iwagon context is empty");
+                  has(drawTail, "AnimData*constshapeAnim=(shape&&shape->mCurrentAnimation)?shape->mCurrentAnimation->mData:nullptr;") &&
+                  has(drawTail, "AnimData*constdrawAnim=sharedAnim?sharedAnim:shapeAnim;"),
+              F, "stone draw falls back to the shape's current animation data when the shared Iwagon context is empty");
         check(has(drawTail, "if(!shape||!drawAnim)return;"), F, "stone draw skips when no anim data is bindable");
         {
             const size_t bind = drawTail.find(squeeze("so->mAnimContext.mData=drawAnim;"));
@@ -146,10 +184,17 @@ int main(int argc, char** argv)
     if (load(root, M, mapCpp)) {
         check(has(mapCpp, "if (trace.mIgnoreEnemyCollParts && coll->mCreature && (coll->mCreature->isTeki() || coll->mCreature->isBoss())) {"),
               M, "traceMove honours MoveTrace::mIgnoreEnemyCollParts");
+        check(has(mapCpp, "const bool isWall = trace.mP2WallThreshold") &&
+                  has(mapCpp, "(collNormal.y < 0.6f && collNormal.y <= 0.70710677f && collNormal.y >= -0.70710677f)") &&
+                  has(mapCpp, ": (tri->mTriangle.mNormal.y < 0.5f && tri->mTriangle.mNormal.y > -0.5f);") &&
+                  has(mapCpp, "if (collisionType != NoCollision && isWall) {"),
+              M, "traceMove honours MoveTrace::mP2WallThreshold and keeps the P1 rule by default");
     }
     if (load(root, H, mapH)) {
         check(has(mapH, "mIgnoreEnemyCollParts   = false;") && has(mapH, "bool mIgnoreEnemyCollParts;"), H,
               "MoveTrace::mIgnoreEnemyCollParts defaults to false");
+        check(has(mapH, "mP2WallThreshold        = false;") && has(mapH, "bool mP2WallThreshold;"), H,
+              "MoveTrace::mP2WallThreshold defaults to false");
     }
     std::printf("p2_kabuto_stone_wiring_test root=%s checks=%d failures=%d\n", root.c_str(), checks, failures);
     if (failures) {

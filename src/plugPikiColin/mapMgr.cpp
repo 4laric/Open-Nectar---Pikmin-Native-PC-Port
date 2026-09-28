@@ -2299,7 +2299,11 @@ void MapMgr::recTraceMove(CollGroup* collGroupList, MoveTrace& trace, f32 timeSt
 				}
 
 				// if collision is too close to vertical, call it a wall and do the appropriate callback
-				if (collisionType != NoCollision && tri->mTriangle.mNormal.y < 0.5f && tri->mTriangle.mNormal.y > -0.5f) {
+				// PC port (#884 round 4): opt-in P2 wall rule (see MoveTrace::mP2WallThreshold).
+				const bool isWall = trace.mP2WallThreshold
+				                      ? (collNormal.y < 0.6f && collNormal.y <= 0.70710677f && collNormal.y >= -0.70710677f)
+				                      : (tri->mTriangle.mNormal.y < 0.5f && tri->mTriangle.mNormal.y > -0.5f);
+				if (collisionType != NoCollision && isWall) {
 					trace.mObject->wallCallback(tri->mTriangle, currGroup->mPlatCollision);
 				}
 				trace.mObject->mCollPlatform = currGroup->mPlatCollision;
