@@ -29,8 +29,14 @@ Variants:
      file with other sim values: the session runs the host's, stays
      identical, and the joiner's file is byte-identical afterwards even
      though the F1 test hook runs the settings save path mid-session.
-  d  host --bootstrap <file> (a real seed); pass --expect host-refuses for a
-     P2 seed, which the launcher refuses before creating anything.
+  d  host --bootstrap <file> (a real seed). M4 lane B2 (issue #885): a P2
+     seed (ENEMY_P2) plays through the launcher: pass --p2-assets DIR (the
+     joiner's own copy of the seed's P2 assets overlay, handed over as
+     --netplay-p2-assets) and expect sync. --expect join-refuses checks that
+     a P2 offer without --p2-assets is refused before any run folder exists;
+     --env-host / --env-join add test knobs (for example
+     PIKMIN_NETPLAY_TEST_TAMPER_SIDECARS=1) and --expect refuse expects both
+     peers to exit 4 with a `handshake refused` line.
 
 Gameplay proof (every sync pair): both logs carry `[Pikmin Randomizer]
 initialized` and `START_STAGE`, and the navi/piki/teki/item hash columns are
@@ -77,6 +83,8 @@ SCRUB_KEYS = tuple(rp.SCRUB_KEYS) + (
     "PIKMIN_NETPLAY_TEST_F1_CYCLE_TICK",
     "PIKMIN_RANDOMIZER_AUTOPLAY",
     "BBFT_PORT",
+    "PIKMIN_NETPLAY_TEST_TAMPER_SIDECARS",
+    "NECTAR_CARD_DEBUG",
 )
 
 HOST_SETTINGS_C = {
@@ -201,7 +209,8 @@ def tree(path):
     if path is None or not Path(path).exists():
         return out
     for root, dirs, files in os.walk(path):
-        dirs.sort()
+        # B2: never walk into a junction (play/assets points at a P2 overlay).
+        dirs[:] = sorted(d for d in dirs if not os.path.isjunction(os.path.join(root, d)))
         for name in sorted(files):
             full = Path(root) / name
             rel = full.relative_to(path).as_posix()
@@ -225,7 +234,11 @@ def main(argv=None):
     p.add_argument("--seed-a", type=int, default=101, help="host scripted-input seed")
     p.add_argument("--seed-b", type=int, default=202, help="joiner scripted-input seed")
     p.add_argument("--bootstrap-host", type=Path, default=None, help="host --bootstrap <file> (variant d)")
-    p.add_argument("--expect", choices=("sync", "host-refuses"), default="sync")
+    p.add_argument("--expect", choices=("sync", "host-refuses", "join-refuses", "refuse"), default="sync")
+    p.add_argument("--p2-assets", type=Path, default=None,
+                   help="M4 B2: the joiner's P2 assets overlay (passed as --netplay-p2-assets)")
+    p.add_argument("--env-host", nargs="*", default=[], metavar="K=V", help="M4 B2: extra env for the host")
+    p.add_argument("--env-join", nargs="*", default=[], metavar="K=V", help="M4 B2: extra env for the joiner")
     p.add_argument("--f1-cycle-tick", type=int, default=0,
                    help="joiner: open/close F1 after this tick (settings save path); variant c defaults to 1500")
     p.add_argument("--timeout", type=float, default=1200)
@@ -276,6 +289,8 @@ def main(argv=None):
                     PIKMIN_NETPLAY_LOCAL_INPUT_FILE=str(join_inputs),
                     PIKMIN_NETPLAY_ICE_PORT_BEGIN=str(a.port_base + 10),
                     PIKMIN_NETPLAY_ICE_PORT_END=str(a.port_base + 19))
+    host_env.update(rp.parse_kv(a.env_host, "env-host"))
+    join_env.update(rp.parse_kv(a.env_join, "env-join"))
     f1_tick = a.f1_cycle_tick or (1500 if a.variant == "c" else 0)
     if f1_tick:
         join_env["PIKMIN_NETPLAY_TEST_F1_CYCLE_TICK"] = str(f1_tick)
@@ -288,6 +303,8 @@ def main(argv=None):
     join_args = ["--netplay-join-ice", f"@{offer_file}", "--netplay-code-out", str(answer_file),
                  "--netplay-test-hidden", "--netplay-test-ticks", str(a.ticks),
                  "--netplay-input", "gamepad:0"]
+    if a.p2_assets is not None:
+        join_args += ["--netplay-p2-assets", str(a.p2_assets.resolve())]
 
     summary = {"variant": a.variant, "ticks": a.ticks, "exe": str(exe), "exe_sha256": sha256_file(exe),
                "host_cmd": [str(exe)] + host_args, "join_cmd": [str(exe)] + join_args}
@@ -300,6 +317,25 @@ def main(argv=None):
         files.append(f)
         if a.expect == "host-refuses":
             rc_host = host_proc.wait(timeout=120)
+        elif a.expect == "join-refuses":
+            offer = wait_code(offer_file, a.code_timeout, "host offer", [host_proc])
+            summary["offer_chars"] = len(offer)
+            join_proc, f = launch(exe, join_cwd, join_args, join_env, join_log)
+            files.append(f)
+            rc_join = join_proc.wait(timeout=120)
+            # The host waits for an answer that never comes: stop our own PID.
+            if host_proc.poll() is None:
+                host_proc.kill()
+                host_proc.wait(timeout=30)
+            rc_host = host_proc.returncode
+        elif a.expect == "refuse":
+            offer = wait_code(offer_file, a.code_timeout, "host offer", [host_proc])
+            summary["offer_chars"] = len(offer)
+            join_proc, f = launch(exe, join_cwd, join_args, join_env, join_log)
+            files.append(f)
+            for proc in (host_proc, join_proc):
+                proc.wait(timeout=240)
+            rc_host, rc_join = host_proc.returncode, join_proc.returncode
         else:
             offer = wait_code(offer_file, a.code_timeout, "host offer", [host_proc])
             summary["offer_chars"] = len(offer)
@@ -329,7 +365,35 @@ def main(argv=None):
     summary["exit"] = {"host": rc_host, "join": rc_join}
 
     ok = True
-    if a.expect == "host-refuses":
+    # B2: the P2 / checkpoint / transfer lines of both peers, and whether each
+    # peer's hello.txt advertises the P2 bridge.
+    b2 = {}
+    for side, log in (("host", host_log), ("join", join_log)):
+        b2[side] = [ln.strip() for ln in (grep(log, "[netplay] p2") + grep(log, "[netplay] launch: P2")
+                                        + grep(log, "[netplay] checkpoint") + grep(log, "[netplay] transfer")
+                                        + grep(log, "sidecars received") + grep(log, "handshake refused")
+                                        + grep(log, "[netplay] launch: refusing") + grep(log, "settings file pinned"))]
+        rd = run_dir_of(log)
+        hellos = sorted(Path(rd).glob("session/runs/*/hello.txt")) if rd else []
+        b2[side + "_hello_p2_bridge"] = any("p2-enemy-bridge-v1" in h.read_text(errors="replace") for h in hellos)
+    summary["b2"] = b2
+    for side in ("host", "join"):
+        for ln in b2[side]:
+            print(f"launch_pair: {side} {ln}")
+        print(f"launch_pair: {side} hello.txt advertises p2-enemy-bridge-v1: {b2[side + '_hello_p2_bridge']}")
+    if a.expect == "join-refuses":
+        refusal = grep(join_log, "[netplay] launch:")
+        created = grep(join_log, "[netplay] launch: role=")
+        summary["refusal"] = refusal
+        ok = rc_join == 2 and bool(grep(join_log, "--netplay-p2-assets")) and not created
+        print(f"launch_pair: join exit={rc_join} (expect 2), run dir created={bool(created)}")
+        for ln in refusal:
+            print(f"launch_pair: join {ln.strip()}")
+    elif a.expect == "refuse":
+        ref_h, ref_j = grep(host_log, "handshake refused"), grep(join_log, "handshake refused")
+        ok = rc_host == 4 and rc_join == 4 and bool(ref_h) and bool(ref_j)
+        print(f"launch_pair: exit host={rc_host} join={rc_join} (expect 4/4); refused host={ref_h} join={ref_j}")
+    elif a.expect == "host-refuses":
         refusal = grep(host_log, "[netplay] launch: refusing")
         summary["refusal"] = refusal
         created = [ln for ln in grep(host_log, "[netplay] launch: role=")]
