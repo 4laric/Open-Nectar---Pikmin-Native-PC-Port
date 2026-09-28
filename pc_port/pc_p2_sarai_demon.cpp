@@ -554,11 +554,10 @@ void P2SaraiHost::demonAnchorFinalize()
     std::fflush(stdout);
 }
 
-void P2SaraiHost::demonDrawCarcassAtAnchor(Graphics& gfx)
+void P2SaraiHost::demonDrawCarcass(Graphics& gfx, const Matrix4f& modelView)
 {
-    if (!mBoundActor) return;
-    const Vector3f position = mBoundActor->mSRT.t;
-    const float faceDirection = mBoundActor->getDirection();
+    // The carried corpse is the engine Pellet; its viewDraw hands us the
+    // pellet's own model-view matrix, so the carcass follows the carriers.
     if (!mLoaded || !gfx.mCamera || mCarryBank.empty()) return;
     if (!switchPoseMeshes(mCarryBank.c_str())) return;
     // startCarcassMotion(): type5 loops 10..29.
@@ -570,13 +569,20 @@ void P2SaraiHost::demonDrawCarcassAtAnchor(Graphics& gfx)
     for (const auto& pose : samples)
         if (float(pose.frame) <= mCarcassFrame) selected = &pose;
     if (selected) applyPoseFrame(selected->frame);
-    mSRT.t = position;
-    mSRT.r.y = faceDirection;
-    updateMouths();
-    const bool exited = mSceneExited;
-    mSceneExited = false;
-    refresh(gfx);
-    mSceneExited = exited;
+    if (!mShape) return;
+    gfx.setPerspective(gfx.mCamera->mPerspectiveMatrix.mMtx, gfx.mCamera->mFov,
+        gfx.mCamera->mAspectRatio, gfx.mCamera->mNear, gfx.mCamera->mFar, 1.0f);
+    gfx.useMaterial(nullptr);
+    gfx.setDepth(true);
+    Matrix4f view = modelView;
+    mShape->updateAnim(gfx, view, nullptr, nullptr);
+    mShape->drawshape(gfx, *gfx.mCamera, nullptr);
+    if (!mCarcassLogged) {
+        mCarcassLogged = true;
+        std::printf("P2_DEMON_DRAW corpse=1 source_id=32 generator=%u pose=type5 frame=%d\n",
+                    demonGenerator(), selected ? selected->frame : -1);
+        std::fflush(stdout);
+    }
 }
 
 // doAI seam: a Demon-profile anchor runs no P1 strategy (no Dwarf Bulborb bite,

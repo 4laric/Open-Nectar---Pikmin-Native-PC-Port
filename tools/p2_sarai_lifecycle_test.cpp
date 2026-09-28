@@ -101,7 +101,7 @@ void P2SaraiHost::demonAnchorInit() {}
 void P2SaraiHost::demonAnchorDrain() {}
 void P2SaraiHost::demonAnchorFollow() {}
 void P2SaraiHost::demonAnchorFinalize() {}
-void P2SaraiHost::demonDrawCarcassAtAnchor(Graphics&) {}
+void P2SaraiHost::demonDrawCarcass(Graphics&, const Matrix4f&) {}
 void P2SaraiHost::unbindNativeActor(BTeki* actor)
 {
     if (actor && mBoundActor == actor) {

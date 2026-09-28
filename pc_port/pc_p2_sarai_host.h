@@ -175,8 +175,9 @@ public:
     void demonAnchorDrain();
     void demonAnchorFollow();
     void demonAnchorFinalize();
-    // Carcass visual (startCarcassMotion: type5) at the carried anchor corpse.
-    void demonDrawCarcassAtAnchor(Graphics& gfx);
+    // Carcass visual (startCarcassMotion: type5) with the carried pellet's
+    // model-view matrix.
+    void demonDrawCarcass(Graphics& gfx, const Matrix4f& modelView);
     float facing() const { return mFacingRadians; }
     float demonLife() const { return mDemonParms.general.life; }
     bool demonFlying() const { return mDemonEnabled && mFsm.flags().untargetable; }
@@ -283,6 +284,7 @@ private:
     int mDemonLogTicks = 0;
     int mLastDemonState = -1;
     float mCarcassFrame = 0.0f;
+    bool mCarcassLogged = false;
     float demonRand();
     unsigned demonGenerator() const;
     void updateDemon();
