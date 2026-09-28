@@ -4003,9 +4003,16 @@ void GameCoreSection::drawGameInfoHud(Graphics& gfx)
 #if defined(PIKI_PC_PORT)
 	// M2b fix (review M6): in det co-op each peer shows only its local
 	// captain's HUD fullscreen, not the split layout.
-	// M2b fix2 (review M6 observation): presentation only, so the
-	// authoritative pass does no HUD draw work and stays view-independent
-	// (null_attempted matches between LOCAL_PLAYER 0 and 1).
+	// M2b fix2 (review M6 observation): the authoritative pass does no HUD
+	// draw work at all, so it stays view-independent (null_attempted matches
+	// between LOCAL_PLAYER 0 and 1). HUD widgets animate view state per draw
+	// (life-circle tri counts chase health with frame-time steps): drawing in
+	// both passes advances the local HUD twice per tick and the other once,
+	// so auth submission differs per followed captain. Presentation draws the
+	// local single view below.
+	if (pc_netplay_present_two_pass_active() && pc_render_is_authoritative()) {
+		return;
+	}
 	if (pc_netplay_present_two_pass_active() && !pc_render_is_authoritative() && isSplitScreen()
 	    && !gameflow.mMoviePlayer->mIsActive) {
 		const int local = pc_netplay_present_local_player();
@@ -4055,7 +4062,11 @@ void GameCoreSection::drawContainerWindows(Graphics& gfx)
 #if defined(PIKI_PC_PORT)
 	// M2b fix (review M6): det co-op shows only the local player's menu
 	// window fullscreen (mirrors drawGameInfoHud above).
-	// M2b fix2 (review M6 observation): presentation only (see above).
+	// M2b fix2 (review M6 observation): no container draw work in the
+	// authoritative pass (see above).
+	if (pc_netplay_present_two_pass_active() && pc_render_is_authoritative()) {
+		return;
+	}
 	if (pc_netplay_present_two_pass_active() && !pc_render_is_authoritative() && isSplitScreen()
 	    && !gameflow.mMoviePlayer->mIsActive) {
 		const int local = pc_netplay_present_local_player();
