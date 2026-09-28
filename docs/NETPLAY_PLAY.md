@@ -1,117 +1,175 @@
 # Netplay co-op: how to play (one copy-paste code each way)
 
-Two humans can play a co-op session with one copy-paste code in each
-direction and no environment variables. One human testing alone can do the
-same with two windows on one PC (see below). There is no hosted signalling
-or TURN service: the owner decision is *connection codes only*.
+Two players on two PCs can play one co-op session by exchanging one code in
+each direction: the host sends an **offer code**, the joiner sends back an
+**answer code**. Nobody sets environment variables or copies files. One
+player can also test alone with two windows on one PC (see below). There is
+no hosted matchmaking or relay service: the codes are the whole connection
+setup.
 
-## What both people need
+## What both players need
 
-- The **same netplay build** (`nectar.exe`). If the builds differ, the
-  handshake refuses with `[netplay] handshake refused: exe` on both sides.
-  (The check hashes the running exe, so even a one-byte difference refuses.)
-- Their **own game files**. The exe finds them relative to the directory
-  you start it from (its working directory):
-  - `assets/` — the game data (pikmin assets). Point it at your install's
-    assets (a junction/symlink named `assets` works: it only reads).
-  - `pikmin_settings.conf` — your settings, read from the working
-    directory. Only the host's *sim-relevant* settings matter for the
-    session (see below); window size, audio volume and keybinds always stay
-    local to each player.
-  - Saves: each launcher run gets a **private** memory card under its run
-    dir (see below), so your own saves are never touched.
-- A network path between the two PCs. Direct connections use ICE host
-  candidates; if both sides are behind symmetric NATs, see Troubleshooting.
+- The **same netplay build** of `nectar.exe` (a build configured with
+  `-DPIKMIN_NETPLAY_BUILD=ON`). The handshake hashes the running exe, so
+  even a one-byte difference refuses with `[netplay] handshake refused: exe`.
+  A build tree's `bin\nectar.exe` also needs the MinGW runtime DLLs
+  (`SDL2.dll`, `libstdc++-6.dll`, `libgcc_s_seh-1.dll`,
+  `libwinpthread-1.dll`) next to it or on `PATH`; an installed game folder
+  already has them.
+- **Their own game data.** The game reads `assets\` (the game data) and
+  `pikmin_settings.conf` (your settings) from the folder you start it from,
+  its *working directory*. Start the exe from your game folder (the one
+  holding `assets\`), or put a junction named `assets` pointing at your
+  game data into the folder you start from. The launcher never changes the
+  working directory.
+- A network path between the two PCs (see Troubleshooting).
+
+## What the game does for you
+
+When you start with `--netplay-host-ice` or `--netplay-join-ice`, the game
+sets the whole session up before anything else loads:
+
+- It creates a **private run folder** for this session and this player:
+  `netplay\run-<date>-<time>-<host|join>-pid<id>\` next to the exe (or
+  `%LOCALAPPDATA%\Nectar\netplay\` when the exe folder is read-only). Every
+  session gets a new one; it is never reused. Inside it:
+  - `session\runs\<token>\bootstrap.txt`: the session's seed file, with this
+    player's own `SESSION` line, plus the game's `state.txt`/`hello.txt`;
+  - `session\campaign\`: this session's memory card (`card\card0`) and
+    day-end campaign files;
+  - `save\`: the private save folder (`NECTAR_SAVE_DIR`, used for the
+    shader cache);
+  - `launch.txt` (what the session used), `settings-at-start.conf` (a copy
+    of your settings file as it was), and `offer.txt` or `answer.txt` (the
+    code this player produced).
+- Your own memory card and your saves are **never used or written**: the
+  session plays on the run folder's card.
+- **Settings.** The host's sim-relevant settings (the ones that change how
+  the game plays: mods such as chain actions or no tripping, the Pikmin
+  limit, day length, and so on) are the session's. The joiner adopts them
+  for the session only. During the session those settings are locked (an
+  F1 change to them reverts when the menu closes), and your
+  `pikmin_settings.conf` always keeps your own values for them: F1 still
+  saves presentation changes (window size, graphics, bindings), and a save
+  with no such change leaves the file untouched. With the randomizer
+  running, some settings are fixed by the randomizer anyway (day length,
+  health, speeds).
+- **Seed.** Without `--bootstrap`, the host starts the default new game:
+  Forest of Hope day 2, 25 ship parts, red Pikmin, 10 Flarlic (the
+  `tools/netplay/run_pair.py` profile). There is no Archipelago in a netplay
+  session: the game gives itself a fixed ready state (the unlock mask the
+  pair tools use, 127; no parts, no Flarlic, no received items).
 
 ## Host steps
 
-1. Start the game from the folder with your `assets/`:
+1. Open a console (Command Prompt or PowerShell) in your game folder and
+   run:
    `nectar.exe --netplay-host-ice`
-   - With no `--bootstrap`, the host starts a default new-game setup (the
-     `tools/netplay/run_pair.py` profile `foh-day2`). To play a real
-     randomizer seed, pass its bootstrap file:
-     `nectar.exe --netplay-host-ice --bootstrap <seed-bootstrap.txt>`
-2. The game creates a private run dir `netplay/run-<date>-pid<id>/` next to
-   the exe (bootstrap copy, settings copy, private `save/`, logs of both
-   codes) and prints a one-line **offer code**, which it also copies to the
-   clipboard.
-3. Send that offer code to the joiner (chat, DM, anything).
-4. Paste the joiner's **answer code** into the game window's console
-   (standard input) and press Enter. (Alternative for scripted setups: set
-   `PIKMIN_NETPLAY_ICE_ANSWER_IN` to a file holding the answer, or pass
-   `--netplay-answer-in <file>`.)
-5. Both sides wait for `[netplay] ice completed in ...ms`, then the session
-   starts. Delay defaults to `auto` (measured from the handshake).
+   - To play a randomizer seed, add its bootstrap file:
+     `nectar.exe --netplay-host-ice --bootstrap C:\path\to\bootstrap.txt`.
+     Seeds with P2 enemies (`ENEMY_P2` in the file) are refused with an
+     explanation: they need extra per-run files that a code cannot carry.
+2. The game prints a one-line **offer code** (it starts with `NPIX2-`) and
+   copies it to the clipboard.
+3. Send the offer code to the joiner (chat, DM, anything).
+4. When the joiner sends the **answer code** back (it starts with `NPIX1-`),
+   paste it into the host's console and press Enter. A bad paste prints
+   why and asks again; it does not end the session.
+   (Scripts can pass `--netplay-answer-in <file>` instead: the game waits
+   for a valid answer in that file.)
+5. Both games print `[netplay] ice completed in ...ms` and start. The input
+   delay is measured automatically.
 
 ## Joiner steps
 
-1. Start the game from the folder with your `assets/`:
-   `nectar.exe --netplay-join-ice <offer-code>`
-   - The code can also come from a file (`--netplay-join-ice @file.txt`)
-     or straight from the clipboard (`--netplay-join-ice @clipboard`).
-   - **You need no file from the host.** The offer carries the session
-     setup: the netplay seed, the host's sim-relevant settings (adopted for
-     this session only — your `pikmin_settings.conf` on disk is never
-     changed), and the host's bootstrap bytes (written into your private
-     run dir with a fresh per-run SESSION line, exactly as the pair tools
-     do). Window size, volume and keybinds stay yours.
-2. The game prints a one-line **answer code** (also copied to the
-   clipboard) and, with `--netplay-code-out <file>`, to a file. Send it
-   back to the host.
+1. Copy the host's whole offer code, open a console in your game folder,
+   and run one of:
+   - `nectar.exe --netplay-join-ice @clipboard` (reads the clipboard: the
+     easiest, and it has no length limit),
+   - `nectar.exe --netplay-join-ice @C:\path\to\offer.txt` (a file holding
+     the code),
+   - `nectar.exe --netplay-join-ice NPIX2-...` (the code itself; a big
+     offer can exceed the console's command-line limit, 8,191 characters in
+     Command Prompt, so prefer `@clipboard` or `@file` for large seeds).
+   You need no file from the host: the offer carries the seed file, the
+   netplay seed and the host's sim settings.
+2. The game prints a one-line **answer code** and copies it to the
+   clipboard. Send it to the host. (`--netplay-code-out <file>` also writes
+   it to a file, on either side.)
 3. Wait for `[netplay] ice completed in ...ms`; the session starts.
 
-## Local two-window test (one PC, one human)
+Controls: by default each game takes input the usual way. To pin a device,
+add `--netplay-input keyboard` (keys and mouse only, every gamepad
+ignored), `--netplay-input gamepad` or `gamepad:N` (the first or the N-th
+gamepad only, every key ignored; the pad keeps working while another window
+has focus, and a pad plugged in later is picked up), or
+`--netplay-input auto` (the default behaviour). In a session the debug
+hotkeys (F5, F6, F9) do nothing: they would change one player's game only.
 
-Visible run (you play it):
+Keep the console open: it shows the codes and the session log. To keep a
+log file, start the game with `> host.log 2>&1` added (the code is still
+copied to the clipboard and written to the run folder).
+
+## Local two-window test (one PC, one player)
 
 ```
-tools\netplay\play_local.bat -Exe <path\to\nectar.exe>
+tools\netplay\play_local.bat -Exe C:\path\to\netplay\nectar.exe
 ```
 
-It starts a visible host (keyboard) and a visible joiner (first gamepad) on
-loopback over ICE host candidates, moving the codes between them
-automatically through files. Close both windows to finish. With
-`-Bootstrap <file>` the host uses that seed's bootstrap. Input mapping:
-host `--netplay-input keyboard`, joiner `--netplay-input gamepad:0`; see
-`--netplay-input keyboard|gamepad[:N]|auto` (`auto` = today's behaviour,
-a `keyboard` peer ignores every gamepad, a `gamepad` peer ignores every
-key, and a gamepad peer keeps reading its pad while the other window has
-focus).
+It starts a host window (keyboard) and a joiner window (first gamepad) on
+this PC and moves the codes between them through files, so there is nothing
+to paste. The keyboard window is the host; the gamepad drives the joiner
+even while the host window has focus (connect it before you start; a pad
+plugged in later is also picked up). Close both game windows (or press Ctrl+C in the console) to finish.
+
+- Each window gets its own working folder under `-OutDir` (default
+  `%LOCALAPPDATA%\Nectar\netplay-local\host` and `...\join`), with an
+  `assets` junction and its own settings file; each writes its console log
+  there (`native.log`).
+- Game data: `-Assets <folder>`, else `assets\` next to the exe, else the
+  installed game data `%APPDATA%\PikminRandomizer\game-data\assets`.
+- It uses this PC only (loopback, no STUN server), and on a build tree it
+  puts `C:\msys64\mingw64\bin` on `PATH` for the two games when `SDL2.dll`
+  is not next to the exe.
+- `-Bootstrap <file>` plays a seed; `-HostInput`/`-JoinInput` change the
+  devices. `-Hidden` is the automated test mode (hidden, bounded).
 
 ## Troubleshooting
 
-- `[netplay] handshake refused: protocol` — different netplay versions.
-  Use the same build.
-- `[netplay] handshake refused: exe` — different exes. Use the same build.
-- `[netplay] handshake refused: config` — sim-relevant settings differ
-  (old build, or a v1 offer without the session bundle). With the current
-  build the joiner adopts the host's settings automatically; if you see
-  this, one side is out of date.
-- `[netplay] handshake refused: bootstrap` — different randomizer setups
-  (v1 offer path). Use the current build so the offer carries the setup.
-- `[netplay] handshake refused: seed` — netplay seeds differ (v1 offer
-  path). Use the current build so the offer carries the seed.
-- `[netplay] ice setup failed: bad ICE code: ...` — the pasted code was
-  truncated or belongs to the other direction (offers start `NPIX2-`,
-  answers `NPIX1-`). Copy the full single line. Pasted offers are capped
-  at ~16k characters (~12 KB of bootstrap); a bigger seed file must be
-  passed with `--netplay-join-ice @file.txt` instead (stock bootstraps
-  are ~300 B, so paste always fits them).
-- `[netplay] ice setup failed: ICE connect timed out` — no network path.
-  Behind symmetric NAT: play over a VPN mesh (Tailscale/ZeroTier) using the
-  VPN addresses, set up port forwarding, or bring your own TURN server
+- `[netplay] handshake refused: exe` or `protocol`: the builds differ. Use
+  the same `nectar.exe` on both PCs.
+- `[netplay] handshake refused: config`, `bootstrap` or `seed`: the two
+  games did not agree on the session setup. With `--netplay-host-ice` /
+  `--netplay-join-ice` the offer carries it, so this means different builds.
+  The low-level switches `--netplay-ice-host` / `--netplay-ice-join` (note
+  the word order) use each side's own settings, seed file and seed and do
+  refuse here; the game prints a hint when that is the likely cause.
+- `[netplay] launch: ...` at start-up: the launcher refused before creating
+  anything, and says why (for example a P2 seed, a pasted answer code where
+  the offer belongs, an offer from an older build, or a switch that cannot
+  be combined with the launcher).
+- `[netplay] ice setup failed: bad ICE code: ...`: the code was cut off or
+  belongs to the other direction (offers start `NPIX2-`, answers
+  `NPIX1-`). Copy the whole single line.
+- `[netplay] ice setup failed: ...timed out`: no network path between the
+  PCs. Behind symmetric NATs, play over a VPN mesh (Tailscale, ZeroTier) so
+  both PCs see each other's VPN address, forward a UDP port range
+  (`PIKMIN_NETPLAY_ICE_PORT_BEGIN`/`_END`), or bring your own TURN server
   (`PIKMIN_NETPLAY_TURN=host:port:user:pass` on both sides).
-- `TURN-only violated` — strict relay mode selected a direct candidate;
-  your TURN server is unreachable or misconfigured.
-- Where the logs are: each run's console output plus the private run dir
-  `netplay/run-<date>-pid<id>/` next to the exe (bootstrap used, settings
-  copy, `save/`, `offer.txt`, `answer.txt`).
+- `[netplay] input: gamepad #0 is not connected yet`: the pad was not
+  plugged in at start; it is picked up as soon as it connects.
+- Logs: the console output (or your `> file` redirect; `native.log` in the
+  local test), plus the run folder `netplay\run-...\` next to the exe.
 
 ## Current limits
 
-- No Archipelago integration yet.
-- No resume across sessions: quitting ends the run for both.
-- A desync ends the session (`[netplay] desync detected`, exit 5).
-- The low-level switches (`--netplay-host/--netplay-join`,
-  `--netplay-ice-host/--netplay-ice-join`) and environment variables keep
-  working; they are the test surface.
+- No Archipelago: a netplay session plays a seed offline with a fixed
+  ready state; nothing is sent or received.
+- No resume: each session starts a new run folder and a new campaign;
+  quitting ends the session for both players.
+- A desync ends the session (`[netplay] desync detected`).
+- Seeds with P2 enemies (`ENEMY_P2`) are not supported yet (see Host
+  steps).
+- The low-level switches (`--netplay-host`/`--netplay-join`,
+  `--netplay-ice-host`/`--netplay-ice-join`) and their environment
+  variables keep working; they are the test surface.
