@@ -947,8 +947,19 @@ void MemoryCard::saveCurrentGame()
 	writeOneGameFile(gameflow.mGamePrefs.mSpareMemCardSaveIndex - 1);
 	waitPolling();
 #if defined(PIKI_PC_PORT)
+	if (pc_randomizer_netplay_save_barrier_active()) {
+		// Netplay M4 lane B2 (issue #885): the day-end save barrier. The
+		// outcome below is sim-visible (the early return and the slot swap),
+		// so both peers must agree on it inside this tick: each writes its
+		// checkpoint, the peers exchange SAVE_RESULT / SAVE_ACK over the bulk
+		// channel, and both follow the host's result.
+		mDidSaveFail = !pc_randomizer_save_campaign_netplay(
+		    getGameFilePtr(gameflow.mGamePrefs.mSpareMemCardSaveIndex - 1), !mDidSaveFail);
+		if (mDidSaveFail) { gsys->mIsCardSaving = FALSE; return; }
+	} else {
 	if (mDidSaveFail) { gsys->mIsCardSaving = FALSE; return; }
 	pc_randomizer_save_campaign(getGameFilePtr(gameflow.mGamePrefs.mSpareMemCardSaveIndex - 1));
+	}
 #endif
 	saveOptions();
 

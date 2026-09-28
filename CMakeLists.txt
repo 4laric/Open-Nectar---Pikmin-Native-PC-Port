@@ -2032,6 +2032,25 @@ add_test(NAME pc_randomizer_outbox_io_host_noledger_test COMMAND pc_randomizer_o
 add_test(NAME pc_randomizer_outbox_io_client_test COMMAND pc_randomizer_outbox_io_test client)
 add_test(NAME pc_randomizer_outbox_io_client_unknown_test COMMAND pc_randomizer_outbox_io_test client-unknown)
 
+# Netplay M4 lane B2 (issue #885): the engine-free Hello v3 / decision table /
+# bundle / SAVE_RESULT codecs (header-only pc_netplay_transfer.h), and
+# pc_randomizer.cpp's day-end save barrier path, checkpoint info, adoption
+# and join-mode stale set-aside against stub session hooks (one process per
+# role; host-stale must print the historical fatal message and exit).
+add_executable(pc_netplay_transfer_test pc_port/netplay/pc_netplay_transfer_test.cpp)
+target_include_directories(pc_netplay_transfer_test PRIVATE pc_port)
+target_compile_options(pc_netplay_transfer_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME pc_netplay_transfer_test COMMAND pc_netplay_transfer_test)
+add_executable(pc_randomizer_campaign_net_test pc_port/pc_randomizer_campaign_net_test.cpp pc_port/pc_randomizer.cpp pc_port/netplay/pc_netplay_randstate.cpp pc_port/pc_randomizer_outbox.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp)
+target_include_directories(pc_randomizer_campaign_net_test PRIVATE pc_port)
+target_compile_options(pc_randomizer_campaign_net_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME pc_randomizer_campaign_net_host_test COMMAND pc_randomizer_campaign_net_test host)
+add_test(NAME pc_randomizer_campaign_net_client_test COMMAND pc_randomizer_campaign_net_test client)
+add_test(NAME pc_randomizer_campaign_net_join_stale_test COMMAND pc_randomizer_campaign_net_test join-stale)
+add_test(NAME pc_randomizer_campaign_net_host_stale_test COMMAND pc_randomizer_campaign_net_test host-stale)
+set_tests_properties(pc_randomizer_campaign_net_host_stale_test PROPERTIES
+    PASS_REGULAR_EXPRESSION "Pikmin Randomizer. (invalid campaign checkpoint filename|campaign checkpoint header/seed mismatch)")
+
 # Only the isolated diagnostic build includes scripted stock/death fixtures.
 option(PIKMIN_RANDOMIZER_TEST_HOOKS "Enable standalone scripted gameplay test fixtures" OFF)
 if(PIKMIN_RANDOMIZER_TEST_HOOKS)

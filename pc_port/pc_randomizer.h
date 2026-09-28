@@ -145,6 +145,21 @@ void pc_randomizer_observe_obstacle(int stage, int kind, float x, float z, bool 
 bool pc_randomizer_resumed();
 bool pc_randomizer_load_campaign(void* destination);
 void pc_randomizer_save_campaign(const void* source);
+// Netplay M4 lane B2 (issue #885). The day-end save barrier: active only in
+// a netplay session with the external-state stream on; then memoryCard.cpp
+// calls pc_randomizer_save_campaign_netplay (flush, local checkpoint, bulk
+// SAVE_RESULT exchange) and uses its return value, the host's outcome, as
+// !mDidSaveFail on both peers.
+bool pc_randomizer_netplay_save_barrier_active();
+bool pc_randomizer_save_campaign_netplay(const void* source, bool localCardOk);
+// Newest valid checkpoint (loadCampaignCheckpoint rules) and the SHA-256 of
+// its file; gen 0 and zeros = none. False when the randomizer is disabled.
+bool pc_randomizer_checkpoint_info(uint64_t* gen, uint8_t sha[32]);
+// Absolute derived campaign directory ("" when disabled).
+const char* pc_randomizer_campaign_dir();
+// Joiner: re-reads the campaign directory after the transfer phase wrote the
+// host's files (same rules as a boot). True when a checkpoint is resumed.
+bool pc_randomizer_adopt_checkpoint();
 
 bool pc_randomizer_emperor_available();
 void pc_randomizer_emperor_defeated();

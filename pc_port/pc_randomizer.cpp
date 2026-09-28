@@ -7,6 +7,7 @@
 #include "pc_randomizer_p2_roster.h"
 #include "pc_p2_delivery_host.h"
 #include "pc_randomizer_outbox.h"
+#include "netplay/pc_netplay_sha256.h"
 #include <unordered_map>
 #include <cstdint>
 #include <cmath>
@@ -16,11 +17,13 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <set>
 #include <thread>
 #include <tuple>
+#include <vector>
 #ifdef _WIN32
 #include <io.h>
 #else
@@ -45,6 +48,12 @@ __attribute__((weak)) void pc_netplay_mirror_ledger_send(const uint8_t* data, si
 // B1 fix round 1: the frame of the Advance being executed (stamped on each
 // outbox entry at push time, so mirror lines carry their event frame).
 __attribute__((weak)) uint32_t pc_netplay_current_frame(void);
+// Netplay M4 lane B2 (issue #885): the day-end save barrier (bulk only,
+// inside the save tick). Fills *hostOk with the host's outcome and
+// hostSavHex with the host checkpoint's SHA-256 (64 hex + NUL).
+__attribute__((weak)) bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long gen,
+                                                  const uint8_t* sav, size_t savLen, const uint8_t* block,
+                                                  size_t blockLen, bool* hostOk, char hostSavHex[65]);
 #else
 bool pc_netplay_session_active(void);
 bool pc_netplay_is_host(void);
@@ -53,6 +62,9 @@ void pc_netplay_randstate_publish(const pc_randstate::PcRandState& st);
 bool pc_netplay_hold_active(void);
 void pc_netplay_mirror_ledger_send(const uint8_t* data, size_t len);
 uint32_t pc_netplay_current_frame(void);
+bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long gen, const uint8_t* sav,
+                             size_t savLen, const uint8_t* block, size_t blockLen, bool* hostOk,
+                             char hostSavHex[65]);
 #endif
 #if PIKI_NETPLAY_BUILD
 // Netplay launch lane (issue #887): defined by pc_netplay_launch.cpp, which
@@ -123,36 +135,104 @@ uint64_t checkpointHash(const std::string& bytes) {
     for (unsigned char byte : bytes) { hash ^= byte; hash *= 1099511628211ULL; }
     return hash;
 }
-void loadCampaignCheckpoint() {
-    if (!std::filesystem::exists(campaignDirectory)) return;
+// Netplay M4 lane B2 (issue #885): the checkpoint rules of the historical
+// loadCampaignCheckpoint, split into a side-effect-free scan so the
+// handshake's checkpoint info, the joiner's stale-checkpoint set-aside and
+// the post-transfer adoption reuse the one parser. loadCampaignCheckpoint()
+// keeps its exact behaviour: the same checks in the same order, the same
+// fail() messages, and campaignGeneration / campaignBlock /
+// consumedBenefits / campaignResumed set only as before.
+enum CkptScanStatus { kCkptNone, kCkptOk, kCkptBadName, kCkptMismatch, kCkptDamaged };
+struct CkptScan {
+    unsigned long long generation = 0; // newest well-named generation (kCkptOk: the checkpoint's)
     std::filesystem::path latest;
+    std::string block;
+    unsigned used[7] = {};
+};
+CkptScanStatus scanCampaignCheckpoint(CkptScan& s) {
+    if (!std::filesystem::exists(campaignDirectory)) return kCkptNone;
     for (const auto& entry : std::filesystem::directory_iterator(campaignDirectory)) {
         if (entry.path().extension() != ".sav") continue;
         const auto name = entry.path().stem().string();
         if (name.size() != 20 || name.find_first_not_of("0123456789") != std::string::npos)
-            fail("invalid campaign checkpoint filename");
+            return kCkptBadName;
         const auto generation = std::stoull(name);
-        if (generation > campaignGeneration) { campaignGeneration = generation; latest = entry.path(); }
+        if (generation > s.generation) { s.generation = generation; s.latest = entry.path(); }
     }
-    if (latest.empty()) return;
-    std::ifstream file(latest, std::ios::binary);
+    if (s.latest.empty()) return kCkptNone;
+    std::ifstream file(s.latest, std::ios::binary);
     std::string header; std::getline(file, header);
     std::istringstream meta(header);
     std::string magic, savedFingerprint, extra;
     unsigned long long generation; uint64_t hash;
-    unsigned used[7] = {};
     bool valid = bool(meta >> magic >> savedFingerprint >> generation);
-    for (int i = 0; i < (prereleaseTraps ? 7 : proggTraps ? 6 : bombTraps ? 5 : bombDeliveries ? 4 : 3); ++i) valid = valid && bool(meta >> used[i]) && used[i] <= checkCount;
+    for (int i = 0; i < (prereleaseTraps ? 7 : proggTraps ? 6 : bombTraps ? 5 : bombDeliveries ? 4 : 3); ++i) valid = valid && bool(meta >> s.used[i]) && s.used[i] <= checkCount;
     if (!valid || !(meta >> hash) || magic != (prereleaseTraps ? "PIKMIN_CAMPAIGN_5" : proggTraps ? "PIKMIN_CAMPAIGN_4" : bombTraps ? "PIKMIN_CAMPAIGN_3" : bombDeliveries ? "PIKMIN_CAMPAIGN_2" : "PIKMIN_CAMPAIGN_1")
-        || savedFingerprint != fingerprint || generation != campaignGeneration || (meta >> extra))
-        fail("campaign checkpoint header/seed mismatch; preserve campaign files for recovery");
-    campaignBlock.resize(32768);
-    file.read(&campaignBlock[0], 32768);
+        || savedFingerprint != fingerprint || generation != s.generation || (meta >> extra))
+        return kCkptMismatch;
+    s.block.resize(32768);
+    file.read(&s.block[0], 32768);
     if (file.gcount() != 32768 || file.peek() != EOF
-        || checkpointHash(header.substr(0, header.rfind(' ')) + "\n" + campaignBlock) != hash)
-        fail("campaign checkpoint is damaged; preserve campaign files for recovery");
-    for (int i=0; i<7; ++i) consumedBenefits[i] = used[i];
+        || checkpointHash(header.substr(0, header.rfind(' ')) + "\n" + s.block) != hash)
+        return kCkptDamaged;
+    return kCkptOk;
+}
+const char* ckptScanReason(CkptScanStatus st) {
+    return st == kCkptBadName ? "invalid campaign checkpoint filename"
+         : st == kCkptMismatch ? "campaign checkpoint header/seed mismatch; preserve campaign files for recovery"
+         : "campaign checkpoint is damaged; preserve campaign files for recovery";
+}
+void loadCampaignCheckpoint() {
+    CkptScan s;
+    s.generation = campaignGeneration;
+    const CkptScanStatus st = scanCampaignCheckpoint(s);
+    campaignGeneration = s.generation;
+    if (st == kCkptNone) return;
+    if (st != kCkptOk) fail(ckptScanReason(st));
+    campaignBlock = s.block;
+    for (int i=0; i<7; ++i) consumedBenefits[i] = s.used[i];
     campaignResumed = true;
+}
+// B2: a netplay session is configured (the session parses argv/env lazily;
+// pc_main hands it argv before pc_bbft_init). Weak: always false in the
+// default build.
+bool netplay_session() {
+    return pc_netplay_session_active != nullptr && pc_netplay_session_active();
+}
+bool netplay_join_mode() {
+    return netplay_session() && pc_netplay_is_host != nullptr && !pc_netplay_is_host();
+}
+// B2, netplay join mode only: when the local checkpoint would be fatal
+// (foreign fingerprint, damaged, badly named), rename every *.sav in the
+// campaign directory to *.sav.stale-<unix seconds> (never delete) and go on
+// as "none". A valid checkpoint (same seed) is left alone: the handshake's
+// decision table compares it with the host's.
+void set_aside_stale_checkpoint() {
+    CkptScan s;
+    const CkptScanStatus st = scanCampaignCheckpoint(s);
+    if (st == kCkptNone || st == kCkptOk) return;
+    const char* reason = st == kCkptBadName ? "badly named checkpoint file"
+                       : st == kCkptMismatch ? "foreign or mismatched checkpoint header"
+                       : "damaged checkpoint";
+    std::printf("[netplay] local campaign checkpoint is stale (%s); setting it aside\n", reason);
+    const long long now = (long long)std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    std::vector<std::filesystem::path> savs;
+    for (const auto& entry : std::filesystem::directory_iterator(campaignDirectory))
+        if (entry.path().extension() == ".sav") savs.push_back(entry.path());
+    for (const auto& from : savs) {
+        std::filesystem::path to = from;
+        to += ".stale-" + std::to_string(now);
+        for (int n = 1; std::filesystem::exists(to) && n < 1000; ++n) {
+            to = from;
+            to += ".stale-" + std::to_string(now) + "-" + std::to_string(n);
+        }
+        std::error_code ec;
+        std::filesystem::rename(from, to, ec);
+        if (ec) fail("cannot set aside a stale campaign checkpoint; preserve campaign files for recovery");
+        std::printf("[netplay] set aside %s -> %s\n", from.filename().string().c_str(), to.filename().string().c_str());
+    }
+    std::fflush(stdout);
 }
 bool hex64(const std::string& s) {
     return s.size() == 64 && s.find_first_not_of("0123456789abcdef") == std::string::npos;
@@ -614,7 +694,18 @@ bool pc_randomizer_init(int argc, char** argv) {
         fail("run directory already used; launch a new session run");
     // Consumption belongs to the saved world, not to the latest abandoned day.
     benefitJournal = directory / "benefits-used.txt";
+    // Netplay M4 lane B2 (issue #885): in netplay join mode only, a stale
+    // local checkpoint (foreign fingerprint, damaged or badly named) is not
+    // fatal: the host's checkpoint replaces it during the handshake's
+    // transfer phase, so it is set aside (never deleted) and the joiner
+    // continues as "none". The host, and every non-netplay run, keep the
+    // historical fatal behaviour below.
+    if (netplay_join_mode()) set_aside_stale_checkpoint();
     loadCampaignCheckpoint();
+    if (campaignResumed && netplay_session()) {
+        std::printf("[Pikmin Randomizer] CAMPAIGN_RESUMED generation=%llu\n", campaignGeneration);
+        std::fflush(stdout);
+    }
     enabled = true;
 #if PIKI_NETPLAY_BUILD
     // Netplay launch lane (issue #887): a one-command netplay session has no
@@ -1638,16 +1729,19 @@ bool pc_randomizer_load_campaign(void* destination) {
     std::memcpy(destination, campaignBlock.data(), 32768);
     return true;
 }
-void pc_randomizer_save_campaign(const void* source) {
-    if (!enabled) return;
-    // Netplay M4 lane B1 fix round 1 (review B1-C9): journal lines queued in
-    // this tick land before the checkpoint that records their sim state, so a
-    // crash between the two can never leave a check or consumed benefit in
-    // the checkpoint but not in checks.txt / benefits-used.txt. No-op outside
-    // outbox mode. (One line in B2's function; B2 keeps it at its barrier.)
-    pc_randomizer_outbox_flush(0);
-    std::filesystem::create_directories(campaignDirectory);
-    const auto generation = campaignGeneration + 1;
+namespace {
+// Writes the campaign checkpoint for `generation` (tmp + fsync + rename).
+// fatal (every non-netplay save and the netplay host): any failure is fail(),
+// exactly as before. Non-fatal (the netplay client's mirror checkpoint,
+// M4 lane B2): a failure returns false and leaves no .sav behind.
+bool write_campaign_checkpoint(const void* source, unsigned long long generation, bool fatal,
+                               std::string* bytesOut, std::filesystem::path* finalOut) {
+    if (fatal) std::filesystem::create_directories(campaignDirectory);
+    else {
+        std::error_code ec;
+        std::filesystem::create_directories(campaignDirectory, ec);
+        if (ec) return false;
+    }
     std::ostringstream meta;
     meta << (prereleaseTraps ? "PIKMIN_CAMPAIGN_5 " : proggTraps ? "PIKMIN_CAMPAIGN_4 " : bombTraps ? "PIKMIN_CAMPAIGN_3 " : bombDeliveries ? "PIKMIN_CAMPAIGN_2 " : "PIKMIN_CAMPAIGN_1 ") << fingerprint << ' ' << generation;
     for (int i = 0; i < (prereleaseTraps ? 7 : proggTraps ? 6 : bombTraps ? 5 : bombDeliveries ? 4 : 3); ++i) meta << ' ' << consumedBenefits[i];
@@ -1658,7 +1752,10 @@ void pc_randomizer_save_campaign(const void* source) {
     auto final = campaignDirectory / name;
     auto temporary = campaignDirectory / (token + ".tmp");
     FILE* file = std::fopen(temporary.string().c_str(), "wb");
-    if (!file) fail("cannot create campaign checkpoint");
+    if (!file) {
+        if (fatal) fail("cannot create campaign checkpoint");
+        return false;
+    }
     bool ok = std::fwrite(bytes.data(), 1, bytes.size(), file) == bytes.size() && std::fflush(file) == 0;
 #ifdef _WIN32
     if (ok) ok = _commit(_fileno(file)) == 0;
@@ -1666,11 +1763,145 @@ void pc_randomizer_save_campaign(const void* source) {
     if (ok) ok = fsync(fileno(file)) == 0;
 #endif
     if (std::fclose(file) != 0) ok = false;
-    if (!ok) fail("cannot flush campaign checkpoint");
-    std::filesystem::rename(temporary, final);
+    if (!ok) {
+        if (fatal) fail("cannot flush campaign checkpoint");
+        std::error_code ec;
+        std::filesystem::remove(temporary, ec);
+        return false;
+    }
+    if (fatal) std::filesystem::rename(temporary, final);
+    else {
+        std::error_code ec;
+        std::filesystem::rename(temporary, final, ec);
+        if (ec) return false;
+    }
+    if (bytesOut != nullptr) *bytesOut = bytes;
+    if (finalOut != nullptr) *finalOut = final;
+    return true;
+}
+} // namespace
+
+void pc_randomizer_save_campaign(const void* source) {
+    if (!enabled) return;
+    // Netplay M4 lane B1 fix round 1 (review B1-C9): journal lines queued in
+    // this tick land before the checkpoint that records their sim state, so a
+    // crash between the two can never leave a check or consumed benefit in
+    // the checkpoint but not in checks.txt / benefits-used.txt. No-op outside
+    // outbox mode. (One line in B2's function; B2 keeps it at its barrier.)
+    pc_randomizer_outbox_flush(0);
+    const auto generation = campaignGeneration + 1;
+    write_campaign_checkpoint(source, generation, true, nullptr, nullptr);
     campaignGeneration = generation;
     std::printf("[Pikmin Randomizer] CAMPAIGN_SAVED generation=%llu\n", generation);
     std::fflush(stdout);
+}
+
+// ---- Netplay M4 lane B2: day-end save barrier (issue #885) ----
+// True in a netplay session with the external-state stream on (the outbox
+// mode) and the session's barrier hook linked: memoryCard.cpp then takes
+// pc_randomizer_save_campaign_netplay instead of the legacy statements.
+bool pc_randomizer_netplay_save_barrier_active() {
+    return enabled && outbox_active() && pc_netplay_save_barrier != nullptr;
+}
+
+// Inside the day-end save tick, after writeOneGameFile + waitPolling. Both
+// peers run it at the same Advance (lockstep). The host writes its real
+// checkpoint, the client its mirror checkpoint in its own campaign/; the
+// session exchanges SAVE_RESULT / SAVE_ACK over the bulk channel only and
+// returns the host's outcome, which both peers then use as mDidSaveFail. The
+// generation both peers count on is advanced only on the agreed outcome, so
+// the next day's generation numbers agree even when the peers' local
+// results differ.
+bool pc_randomizer_save_campaign_netplay(const void* source, bool localCardOk) {
+    if (!enabled) return localCardOk;
+    const uint32_t frame = pc_netplay_current_frame != nullptr ? pc_netplay_current_frame() : 0;
+    // Flush first: this tick's journal lines land before the checkpoint.
+    pc_randomizer_outbox_flush(frame);
+    const bool host = outbox_host();
+    const unsigned long long generation = campaignGeneration + 1;
+    std::string bytes;
+    std::filesystem::path written;
+    bool localOk = localCardOk;
+    if (localOk) {
+        localOk = write_campaign_checkpoint(source, generation, host, &bytes, &written);
+        if (localOk) std::printf("[Pikmin Randomizer] CAMPAIGN_SAVED generation=%llu\n", generation);
+        else std::printf("[netplay] save barrier: cannot write the local mirror checkpoint %020llu.sav\n", generation);
+        std::fflush(stdout);
+    }
+    bool hostOk = localOk;
+    char hostSavHex[65] = {};
+    pc_netplay_save_barrier(frame, localOk, generation, reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size(),
+                            static_cast<const uint8_t*>(source), 32768, &hostOk, hostSavHex);
+    if (host) {
+        if (hostOk) campaignGeneration = generation;
+        return hostOk;
+    }
+    if (hostOk) {
+        if (!localOk) {
+            std::printf("[netplay] save barrier: local mirror save failed; following the host\n");
+            std::fflush(stdout);
+        }
+        campaignGeneration = generation;
+        pc_randomizer_mirror_save_result(frame, generation, hostSavHex);
+    } else {
+        if (localOk) {
+            // The host's save failed: the day is abandoned there, so this
+            // mirror checkpoint must not stand. Renamed, never deleted.
+            std::filesystem::path to = written;
+            to += ".unconfirmed";
+            for (int n = 1; std::filesystem::exists(to) && n < 1000; ++n) {
+                to = written;
+                to += ".unconfirmed-" + std::to_string(n);
+            }
+            std::error_code ec;
+            std::filesystem::rename(written, to, ec);
+            if (ec) fail("cannot retract an unconfirmed campaign checkpoint; preserve campaign files for recovery");
+            std::printf("[netplay] save barrier: host save failed; retracted %s -> %s (generation stays %llu)\n",
+                        written.filename().string().c_str(), to.filename().string().c_str(), campaignGeneration);
+            std::fflush(stdout);
+        }
+        pc_randomizer_mirror_save_fail(frame, generation);
+    }
+    return hostOk;
+}
+
+// ---- Netplay M4 lane B2: checkpoint info, adoption (issue #885) ----
+// The handshake's checkpoint info: the newest valid checkpoint under the
+// loadCampaignCheckpoint rules (the same scan) and the SHA-256 of its file
+// bytes. gen 0 and zeros = none. False when the randomizer is disabled.
+bool pc_randomizer_checkpoint_info(uint64_t* gen, uint8_t sha[32]) {
+    if (gen != nullptr) *gen = 0;
+    if (sha != nullptr) std::memset(sha, 0, 32);
+    if (!enabled) return false;
+    CkptScan s;
+    if (scanCampaignCheckpoint(s) != kCkptOk) return true;
+    std::ifstream file(s.latest, std::ios::binary);
+    std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    if (gen != nullptr) *gen = s.generation;
+    if (sha != nullptr) pc_netplay_sha::sha256(bytes.data(), bytes.size(), sha);
+    return true;
+}
+
+// The derived campaign directory (absolute), "" when disabled.
+const char* pc_randomizer_campaign_dir() {
+    static std::string dir;
+    dir = enabled ? campaignDirectory.string() : std::string();
+    return dir.c_str();
+}
+
+// Joiner, after the transfer phase wrote the host's checkpoint and card
+// files: re-runs the loadCampaignCheckpoint rules from scratch, so
+// campaignBlock, consumedBenefits, campaignGeneration and campaignResumed
+// are exactly what a boot over these files would have set.
+bool pc_randomizer_adopt_checkpoint() {
+    if (!enabled) return false;
+    campaignGeneration = 0;
+    loadCampaignCheckpoint();
+    if (campaignResumed) {
+        std::printf("[Pikmin Randomizer] CAMPAIGN_RESUMED generation=%llu\n", campaignGeneration);
+        std::fflush(stdout);
+    }
+    return campaignResumed;
 }
 
 // ---- Netplay M4 lane B1: outbox flush, client mirror, ledger (issue #885) ----
