@@ -125,20 +125,32 @@ void pc_netplay_present_reset_counters(void)
 	sSavedShapes = 0;
 }
 
+static int sLocalPlayerDefault = 0;
+
 int pc_netplay_present_local_player(void)
 {
 	if (!sLocalPlayerInit) {
 		sLocalPlayerInit = true;
 		const char* v = std::getenv("PIKMIN_NETPLAY_LOCAL_PLAYER");
-		sLocalPlayerCached = (v && v[0] == '1') ? 1 : 0;
+		if (v && (v[0] == '0' || v[0] == '1') && v[1] == '\0')
+			sLocalPlayerCached = v[0] - '0';
+		else
+			sLocalPlayerCached = sLocalPlayerDefault;
 	}
 	return sLocalPlayerCached;
+}
+
+void pc_netplay_present_set_local_player_default(int player)
+{
+	sLocalPlayerDefault = (player == 1) ? 1 : 0;
+	sLocalPlayerInit    = false;
 }
 
 void pc_netplay_present_reset_local_player(void)
 {
 	sLocalPlayerInit = false;
 	sLocalPlayerCached = 0;
+	sLocalPlayerDefault = 0;
 }
 
 unsigned long long pc_netplay_present_saved_shapes(void)

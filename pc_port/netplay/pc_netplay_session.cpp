@@ -45,6 +45,7 @@
 #include "netplay/pc_netplay_det.h"
 #include "netplay/pc_netplay_gekko_input.h"
 #include "netplay/pc_netplay_pad.h"
+#include "netplay/pc_netplay_present.h"
 #include "netplay/pc_netplay_udp.h"
 #include "netplay/pc_input_log.h"
 #include "netplay/pc_state_hash.h"
@@ -918,6 +919,8 @@ void parse_config()
 	}
 	sCfg.exitAfter = exitAfter;
 	sLocalRole    = sCfg.isHost ? 0 : 1;
+	// Each peer presents its own captain full screen (M2b): host P1, joiner P2.
+	pc_netplay_present_set_local_player_default(sLocalRole);
 	sPhase        = kHandshake;
 }
 

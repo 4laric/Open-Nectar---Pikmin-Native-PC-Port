@@ -70,6 +70,9 @@ void pc_netplay_present_reset_counters(void);
 // reset the cache (tests only).
 int pc_netplay_present_local_player(void);
 void pc_netplay_present_reset_local_player(void);
+// Netplay role default (host = 0, joiner = 1), set by the session before the
+// first stage. An explicit PIKMIN_NETPLAY_LOCAL_PLAYER still wins.
+void pc_netplay_present_set_local_player_default(int player);
 
 // Presentation matrix save/restore accounting (diagnostic).
 unsigned long long pc_netplay_present_saved_shapes(void);
