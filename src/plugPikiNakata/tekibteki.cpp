@@ -28,6 +28,8 @@
 #ifdef PIKI_PC_PORT
 #include "pc_p2_enemy.h"
 #include "netplay/pc_netplay_policy.h"
+#include "netplay/pc_netplay_present.h"
+#include "timing/pc_render_phase.h"
 #include "pc_p2_sheargrub.h"
 #include "pc_p2_breadbug_actor.h"
 #include "pc_p2_giant_breadbug_actor.h"
@@ -2178,7 +2180,20 @@ void BTeki::drawDefault(Graphics& gfx)
 	if (getTekiOption(TEKIOPT_Unk6) && !isCreatureFlag(CF_AIAlwaysActive)) {
 		// some debug flag thing
 	} else {
+#if defined(PIKI_PC_PORT)
+		// M2b fix (review M5, resolves m2a open item m1): the presentation
+		// pass skips off-screen teki entirely on the real local frustum.
+		// The sim work inside drawTekiShape (updateAnim/collisions) is
+		// auth-gated internally; updateAnim routes visible shapes to the
+		// present pool.
+		const bool m2bTekiCulled = pc_netplay_present_two_pass_active() && !pc_render_is_authoritative()
+		                        && !gfx.mCamera->isPointVisible(getBoundingSphereCentre(), rad);
+		if (!m2bTekiCulled) {
+			drawTekiShape(gfx);
+		}
+#else
 		drawTekiShape(gfx);
+#endif
 	}
 
 	if (gsys->mToggleDebugInfo) {

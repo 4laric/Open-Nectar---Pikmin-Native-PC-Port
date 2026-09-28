@@ -2,6 +2,7 @@
 #include "pc_p2_kurage_visual.h"
 #if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_det.h"
+#include "netplay/pc_netplay_present.h"
 #endif
 #include "pc_p2_teki_lifetime.h"
 #include "pc_p2_kurage_teki.h"
@@ -3876,7 +3877,10 @@ void GameCoreSection::updateCoopCameras()
 void GameCoreSection::updateDynamicSplit(f32 dt)
 {
 	Camera* own[2] = { mNavi->mNaviCamera, mGameCamera2 };
-	if (!pc_settings_get_coop_merge_camera()) {
+	// M2b (issue #879): force upstream merged/dynamic co-op camera off in
+	// det mode. Each peer draws its own captain; both captains (and both
+	// cameras' sim-relevant state) are still simulated.
+	if (pc_netplay_present_two_pass_active() || !pc_settings_get_coop_merge_camera()) {
 		// Pantalla partida fija: J1 izquierda/arriba, cámaras propias.
 		mSplitBlend = 1.0f;
 		mP1Side     = 0;
@@ -3996,6 +4000,27 @@ Camera* GameCoreSection::getViewCamera(int view)
 
 void GameCoreSection::drawGameInfoHud(Graphics& gfx)
 {
+#if defined(PIKI_PC_PORT)
+	// M2b fix (review M6): in det co-op each peer shows only its local
+	// captain's HUD fullscreen, not the split layout.
+	// M2b fix2 (review M6 observation): the authoritative pass does no HUD
+	// draw work at all, so it stays view-independent (null_attempted matches
+	// between LOCAL_PLAYER 0 and 1). HUD widgets animate view state per draw
+	// (life-circle tri counts chase health with frame-time steps): drawing in
+	// both passes advances the local HUD twice per tick and the other once,
+	// so auth submission differs per followed captain. Presentation draws the
+	// local single view below.
+	if (pc_netplay_present_two_pass_active() && pc_render_is_authoritative()) {
+		return;
+	}
+	if (pc_netplay_present_two_pass_active() && !pc_render_is_authoritative() && isSplitScreen()
+	    && !gameflow.mMoviePlayer->mIsActive) {
+		const int local = pc_netplay_present_local_player();
+		zen::DrawGameInfo* hud = (local == 1 && mDrawGameInfo2) ? mDrawGameInfo2 : mDrawGameInfo;
+		hud->draw(gfx);
+		return;
+	}
+#endif
 	if (!isSplitScreen() || !mDrawGameInfo2 || gameflow.mMoviePlayer->mIsActive) {
 		mDrawGameInfo->draw(gfx);
 		return;
@@ -4034,6 +4059,22 @@ void GameCoreSection::drawGameInfoHud(Graphics& gfx)
 // de su mitad, con el mismo espacio virtual que su HUD.
 void GameCoreSection::drawContainerWindows(Graphics& gfx)
 {
+#if defined(PIKI_PC_PORT)
+	// M2b fix (review M6): det co-op shows only the local player's menu
+	// window fullscreen (mirrors drawGameInfoHud above).
+	// M2b fix2 (review M6 observation): no container draw work in the
+	// authoritative pass (see above).
+	if (pc_netplay_present_two_pass_active() && pc_render_is_authoritative()) {
+		return;
+	}
+	if (pc_netplay_present_two_pass_active() && !pc_render_is_authoritative() && isSplitScreen()
+	    && !gameflow.mMoviePlayer->mIsActive) {
+		const int local = pc_netplay_present_local_player();
+		zen::DrawContainer* win = (local == 1 && containerWindow2) ? containerWindow2 : containerWindow;
+		win->draw(gfx);
+		return;
+	}
+#endif
 	if (!isSplitScreen() || !containerWindow2 || gameflow.mMoviePlayer->mIsActive) {
 		containerWindow->draw(gfx);
 		return;
@@ -4166,7 +4207,30 @@ void GameCoreSection::draw(Graphics& gfx)
 	if (mRenderPass != 0) advanceState = false;
 #endif
 	gsys->mTimer->start("se updt", true);
+#if defined(PIKI_PC_PORT)
+	// M2b (issue #879): audio runs in the presentation pass with the
+	// listener at the local captain. Authoritative (sim) never touches it.
+	if (pc_netplay_present_two_pass_active()) {
+		if (!pc_render_is_authoritative()) {
+			if (gameflow.mMoviePlayer->mIsActive) {
+				Vector3f pos;
+				gameflow.mMoviePlayer->getLookAtPos(pos);
+				seSystem->update(gfx, pos);
+			} else if (mNavi2 && mNavi2->isAlive()) {
+				const int local = pc_netplay_present_local_player();
+				Navi* listener = (local == 1) ? mNavi2 : mNavi;
+				if (!listener) {
+					listener = mNavi;
+				}
+				seSystem->update(gfx, listener->mSRT.t);
+			} else {
+				seSystem->update(gfx, mNavi->mSRT.t);
+			}
+		}
+	} else if (advanceState && gameflow.mMoviePlayer->mIsActive) {
+#else
 	if (advanceState && gameflow.mMoviePlayer->mIsActive) {
+#endif
 		Vector3f pos;
 		gameflow.mMoviePlayer->getLookAtPos(pos);
 		seSystem->update(gfx, pos);

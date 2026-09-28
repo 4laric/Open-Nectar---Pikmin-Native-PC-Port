@@ -4,6 +4,8 @@
 #include "GoalItem.h"
 #if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_policy.h"
+#include "netplay/pc_netplay_present.h"
+#include "timing/pc_render_phase.h"
 #else
 #define pc_netplay_sim_visible(x) (x)
 #endif
@@ -852,6 +854,17 @@ void GoalItem::refresh(Graphics& gfx)
 		disableAICulling();
 		mSpotModelEff->mIsVisible = true;
 	}
+#if defined(PIKI_PC_PORT)
+	// M2b fix (review M5, resolves m2a open item m1): the presentation pass
+	// draws the spot effect for the real local frustum. The member above
+	// stays authoritative (effect update runs auth-only and re-reads it).
+	const bool m2bGoalPres = pc_netplay_present_two_pass_active() && !pc_render_is_authoritative();
+	const bool m2bGoalVisible
+	    = !m2bGoalPres || gfx.mCamera->isPointVisible(mSRT.t, 200.0f);
+	if (m2bGoalPres && !gameflow.mMoviePlayer->mIsActive) {
+		mSpotModelEff->mIsVisible = m2bGoalVisible;
+	}
+#endif
 
 	gfx.setLighting(true, nullptr);
 	gfx.useMatrix(Matrix4f::ident, 0);
@@ -865,7 +878,11 @@ void GoalItem::refresh(Graphics& gfx)
 	}
 	mAnimatedMaterials.animate(&rate);
 	mItemShapeObject->mShape->updateAnim(gfx, mtx1, nullptr, this);
+#if defined(PIKI_PC_PORT)
+	if (aiCullable() && m2bGoalVisible) {
+#else
 	if (aiCullable()) {
+#endif
         if(!pc_p2_preview_draw_pod(this,gfx,mtx1))mItemShapeObject->mShape->drawshape(gfx, *gfx.mCamera, &mAnimatedMaterials);
 	}
     if(pc_p2_preview_is_pod(this))mSpotModelEff->mIsVisible=false;
