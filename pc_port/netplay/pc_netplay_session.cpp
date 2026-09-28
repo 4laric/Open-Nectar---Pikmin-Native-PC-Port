@@ -97,9 +97,13 @@ bool pc_state_hash_current(uint64_t* total, uint64_t subs[7], uint64_t* tick);
 #if defined(__GNUC__)
 __attribute__((weak)) bool pc_randomizer_apply_net_state(const pc_randstate::PcRandState& st);
 __attribute__((weak)) bool pc_randomizer_get_net_state(pc_randstate::PcRandState* out);
+__attribute__((weak)) bool pc_randomizer_enabled(void);
+__attribute__((weak)) void pc_randomizer_force_net_publish(void);
 #else
 bool pc_randomizer_apply_net_state(const pc_randstate::PcRandState& st);
 bool pc_randomizer_get_net_state(pc_randstate::PcRandState* out);
+bool pc_randomizer_enabled(void);
+void pc_randomizer_force_net_publish(void);
 #endif
 // Runs the registered pre-sim yaw capture hook now (M2c hook), without the
 // record/replay logic of pc_input_log_tick(). Defined in pc_input_log.cpp.
@@ -415,26 +419,35 @@ const HashEntry* hash_ring_find(uint64_t tick)
 // conflicts with the polish lane (pacing/sleep/handshake ownership).
 //
 // Deterministic rule (documented per the brief): the host is the only peer
-// that ever sets HAS_CHUNK. It emits each published generation's 11
-// fragments on 11 consecutive host submits. Every Advance delivers the same
-// host input (p0) on both peers, so both reassemblers complete generation g
-// in the same Advance frame F, and both apply it at the start of the tick
-// for frame F+1, before inject_input() and app->idle(). Duplicate, stale
-// (gen <= applied) or incomplete fragments are no-ops. The reassembly
-// buffer is fed identically on both peers, so both hold identical copies.
+// that ever sets HAS_CHUNK. It emits each published generation's 16
+// fragments on 16 consecutive host submits (a mid-transfer publish waits in
+// a one-deep queue and starts at the next fragment 0, so generations are
+// never mixed). Every Advance delivers the same host input (p0) on both
+// peers, so both reassemblers complete generation g in the same Advance
+// frame F, and both apply it at the start of the tick for frame F+1,
+// before inject_input() and app->idle(). Duplicate, stale (gen <= applied)
+// or incomplete fragments are no-ops. The reassembly buffer is fed
+// identically on both peers, so both hold identical copies.
 //
-// Session start: the host's pc_randomizer_update publishes gen 1 on its
-// first post-activation poll (before the GekkoNet session starts), so the
-// first full snapshot rides the first 11 submits. Pre-apply ticks run on
-// identical init state (same bootstrap minus SESSION, same state.txt), so
-// no gameplay divergence is possible before the first same-frame apply.
-// Full HOLD-gating of the pre-snapshot phase is lane B work.
+// Session start: the host publishes gen 1 at boot (stream-mode update) and
+// start_gekko_session forces a publish whatever the stamp says, so the
+// first full snapshot rides the first 16 submits. Until it applies, both
+// peers run neutral inputs on identical pristine state (randstate_gate_
+// neutral); the gate lifts on the same frame on both peers. Link-liveness
+// HOLD on AP drops stays lane B work.
 double now_ms(); // defined below (wall-clock milliseconds)
 bool sRandStream = false; // cached: session active && env gate on
 pc_randstate::Reassembler sRandReasm;
 uint8_t sRandWire[pc_randstate::kStateBytes] = {};
 bool sRandHaveSnapshot = false; // host published at least one snapshot
-size_t sRandNextFrag = 0;       // next fragment index to embed (0..11)
+size_t sRandNextFrag = 0;       // next fragment index to embed (0..kFragCount)
+// M1 fix: a publish that lands mid-transfer no longer restarts the cursor
+// (which mixed two generations into one CRC-failing buffer on both peers).
+// The newer full snapshot waits in this one-deep queue and swaps in when
+// the in-flight generation's last fragment is submitted. Coalescing is safe
+// because snapshots are full state; at most one waits.
+uint8_t sRandQueuedWire[pc_randstate::kStateBytes] = {};
+bool sRandHaveQueued = false;
 pc_netplay_bulk::BulkChannel sBulk; // M4a bulk 0x03 endpoint (lane B queues)
 
 bool randstate_env_on()
@@ -451,6 +464,14 @@ bool randstate_stream_on() { return sCfg.active && sRandStream; }
 void randstate_embed_on_submit(PcNetplayInput& local)
 {
 	if (!randstate_stream_on() || !sCfg.isHost) return;
+	// A finished transfer picks up the queued generation, if any, before
+	// embedding (M1 fix: generations go out consecutively, never mixed).
+	if (sRandNextFrag >= pc_randstate::kFragCount) {
+		if (!sRandHaveQueued) return;
+		memcpy(sRandWire, sRandQueuedWire, sizeof(sRandWire));
+		sRandHaveQueued = false;
+		sRandNextFrag = 0;
+	}
 	if (!sRandHaveSnapshot || sRandNextFrag >= pc_randstate::kFragCount) return;
 	const uint8_t idx = (uint8_t)sRandNextFrag;
 	local.flags |= pc_netplay_gekko::kFlagsRandChunk;
@@ -471,9 +492,17 @@ void randstate_apply_before_tick(int frame)
 	pc_randstate::PcRandState st;
 	if (!sRandReasm.take_pending(st)) return;
 	const uint32_t gen = st.gen;
-	if (pc_randomizer_apply_net_state != nullptr) pc_randomizer_apply_net_state(st);
+	bool ok = false;
+	if (pc_randomizer_apply_net_state != nullptr) ok = pc_randomizer_apply_net_state(st);
 	sRandReasm.mark_applied(gen);
-	printf("[netplay] randstate gen=%u applied at frame=%d\n", gen, frame);
+	if (ok) {
+		printf("[netplay] randstate gen=%u applied at frame=%d\n", gen, frame);
+	} else {
+		// Visible instead of silent: a validation drop kills the stream
+		// without this line (every later snapshot carries the same bits).
+		printf("[netplay] randstate gen=%u dropped: apply rejected at frame=%d\n", gen,
+		       frame);
+	}
 	fflush(stdout);
 }
 
@@ -489,17 +518,43 @@ void randstate_feed_advance(const PcNetplayInput& hostInput, int frame)
 	sRandReasm.feed(has, hostInput.fragSeq, hostInput.fragData, last, (uint32_t)frame);
 }
 
+// M5 fix: pre-snapshot neutral gate. Until the first snapshot applies,
+// both peers run neutral inputs (no gameplay) on identical pristine state.
+// The gate lifts on the same frame on both peers (same p0 stream implies
+// same completion and apply frames), so hashes stay identical throughout.
+// Without the stream, or without the randomizer, there is nothing to wait
+// for. Pre-apply ticks still hash, still pump the network, and still feed
+// the reassembler above, so gen 1 (which rides the first submits) always
+// arrives.
+bool randstate_gate_neutral()
+{
+	if (!randstate_stream_on()) return false;
+	if (pc_randomizer_enabled == nullptr) return false;
+	if (!pc_randomizer_enabled()) return false;
+	return sRandReasm.applied_gen() == 0;
+}
+
 // Per-turn bulk pump (both peers): drain channel 0x03 into the endpoint,
 // send due frags/acks. Lane A queues no session messages (the reliable
 // transfer is proven by the transport unit test); lane B will queue
-// SAVE_RESULT / Checkpoint here.
+// SAVE_RESULT / Checkpoint here. Message delivery order is NOT guaranteed:
+// each message completes independently when all its fragments arrive (see
+// pc_netplay_udp.h); lane B must sequence SaveResult/Checkpoint itself.
 void bulk_pump()
 {
 	if (!sCfg.active || sLink == nullptr || sSock == nullptr) return;
+	// m2 fix: accept bulk only from the session peer, so an off-path
+	// sender cannot inject or ACK bulk messages. The host learns the
+	// joiner's endpoint from its first hello; the joiner dials the host.
+	const uint32_t peerIp = sCfg.isHost ? sRemoteIp : sCfg.joinIp;
+	const uint16_t peerPort = sCfg.isHost ? sRemotePort : sCfg.joinPort;
+	const bool peerKnown = sCfg.isHost ? sHaveRemote : (peerPort != 0);
 	std::vector<pc_netplay_transport::UdpSocket::Datagram> grams = sLink->drain_bulk();
 	for (auto& g : grams) {
-		if (!g.payload.empty()) sBulk.on_receive(g.payload.data(), g.payload.size());
+		if (peerKnown && (g.fromIpHostOrder != peerIp || g.fromPort != peerPort)) continue;
+		if (!g.payload.empty()) sBulk.on_receive(g.payload.data(), g.payload.size(), now_ms());
 	}
+	sBulk.sweep(now_ms()); // expire abandoned partial reassemblies
 	std::vector<pc_netplay_bulk::BulkChannel::Message> complete = sBulk.poll_complete();
 	for (auto& m : complete) {
 		(void)m; // lane B consumes these; lane A only acks (already queued)
@@ -636,6 +691,7 @@ bool sha_file(const char* path, uint8_t out[32])
 //   coopMergeCamera,
 //   windowWidth, windowHeight (pre-M2b: both peers must render the same view),
 //   netplaySeed, netplayDelay, protocolVersion.
+//   randStream (M4 external-state stream gate: stream vs legacy polling).
 // Deliberately EXCLUDED (local-only, documented in the handoff): display/
 // render settings (shadows, gamma, resolution scale, vsync), audio settings,
 // key/gamepad bindings, gyro calibration (sensitivity/invert/bias), touch
@@ -706,6 +762,11 @@ std::string build_config_string()
 	// the protocol version are. (Previously the numeric delay was hashed,
 	// which refused asymmetric pairs on config.)
 	addi("protocolVersion", (long long)kProtocolVersion);
+	// M4 fix round 1 (m1): the external-state stream gate is per-peer config
+	// that changes the sim (stream vs legacy file polling). A pair with the
+	// gate set differently on each side would desync silently; hashing it
+	// makes the handshake refuse instead.
+	addi("randStream", sRandStream ? 1 : 0);
 	(void)fbuf;
 	return s;
 }
@@ -1409,6 +1470,15 @@ void start_gekko_session()
 	printf("[netplay] config=%s\n", sCfgHexStr.c_str());
 	printf("[netplay] bootstrap=%s\n", sBootHexStr.c_str());
 	fflush(stdout);
+	// M4 fix round 1: fresh session state. The receiver starts empty (the
+	// boot-published host snapshot in sRandWire is kept: it rides the first
+	// submits). The bulk endpoint resets so a previous session's msgIds and
+	// partials cannot collide with this one's. The host then forces a
+	// publish (M5): whatever the stamp says, gen 1 is queued before the
+	// first submit.
+	sRandReasm.reset();
+	sBulk.reset();
+	if (pc_randomizer_force_net_publish != nullptr) pc_randomizer_force_net_publish();
 	sSessionStartMs = now_ms();
 	sPhase          = kSession;
 }
@@ -1514,8 +1584,14 @@ int handle_game_events(System* sys, BaseApp* app)
 			// earliest). Both peers execute the identical sequence.
 			randstate_apply_before_tick(e->data.adv.frame);
 			randstate_feed_advance(p0, e->data.adv.frame);
-			inject_input(0, p0);
-			inject_input(1, p1);
+			if (randstate_gate_neutral()) {
+				// M5: pre-snapshot neutral ticks (identical on both peers).
+				inject_neutral_pad(0);
+				inject_neutral_pad(1);
+			} else {
+				inject_input(0, p0);
+				inject_input(1, p1);
+			}
 			inject_neutral_pad(2);
 			inject_neutral_pad(3);
 			// Exactly one tick: the same per-tick sequence the normal
@@ -1626,28 +1702,31 @@ int handle_game_events(System* sys, BaseApp* app)
 // so the default build and engine-free harnesses are unaffected.
 bool pc_netplay_randstate_stream_enabled(void) { return sCfg.active && sRandStream; }
 bool pc_netplay_is_host(void) { return sCfg.isHost; }
-// Host I/O side publish: encode the snapshot and queue its 11 fragments for
-// the next 11 host submits. A newer generation restarts the fragment cursor;
-// the receiver's CRC/mask logic keeps both peers identical (see Reassembler).
+// Host I/O side publish: encode the snapshot and queue its 16 fragments for
+// the next host submits. A publish that lands mid-transfer waits in a
+// one-deep queue (M1 fix) instead of restarting the cursor; the receiver
+// resets on fragment 0, so both peers stay identical (see Reassembler).
 void pc_netplay_randstate_publish(const pc_randstate::PcRandState& st)
 {
 	if (!sCfg.isHost) return; // only the host publishes
+	if (sRandHaveSnapshot && sRandNextFrag > 0 && sRandNextFrag < pc_randstate::kFragCount) {
+		pc_randstate::encode(st, sRandQueuedWire);
+		sRandHaveQueued = true;
+		return;
+	}
 	pc_randstate::encode(st, sRandWire);
 	sRandHaveSnapshot = true;
-	sRandNextFrag     = 0;
+	sRandNextFrag = 0;
 }
 
 void pc_netplay_session_notify_argv(int argc, char** argv)
 {
 	sArgc = argc;
 	sArgv = argv;
-	// M4a: pc_randomizer_init() runs before this call and its update polls
-	// pc_netplay_session_active() (host/client split), which latches a
-	// pre-argv parse with sArgc == 0: CLI switches would stay invisible
-	// forever (env switches still worked, since getenv needs no argv).
-	// Re-arm the parse so the first System::run turn sees the real argv.
-	// Never re-arm once the session left idle.
-	if (sPhase == kIdle) sInitialised = false;
+	// M4 fix (round 1): pc_main now calls this BEFORE pc_bbft_init, so the
+	// boot-time pc_randomizer_init->update already sees the real argv and
+	// the client takes the stream-only path from the first poll. No re-arm
+	// is needed; a second call (if any) just refreshes the stored argv.
 }
 
 // N3 test hook + long-load survival note. Called (weakly) from

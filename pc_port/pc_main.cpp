@@ -129,16 +129,18 @@ int main(int argc, char* argv[])
     if (argc == 2 && std::strcmp(argv[1], "--audio-self-test") == 0)
         return pc_jaudio_integration_test();
 #endif
+    // Netplay M4 fix round 1 (M4): the session must see argv before
+    // pc_bbft_init runs pc_randomizer_init->update, so the boot-time poll
+    // already takes the stream-only path on the client (never reading
+    // state.txt) and the publish path on the host. Inert without a netplay
+    // switch (and a no-op null check in the default build).
+    if (pc_netplay_session_notify_argv != nullptr) pc_netplay_session_notify_argv(argc, argv);
     pc_bbft_init(argc, argv);
     // Netplay harness switches (--input-record/--input-replay and friends).
     // Env vars are read lazily on the first tick; argv wins when both name a
     // path. No-ops unless those switches are set.
     pc_input_log_notify_argv(argc, argv);
     pc_state_hash_notify_argv(argc, argv);
-    // Netplay M3 lockstep (issue #880): stores argv for --netplay-host /
-    // --netplay-join / --randomizer-seed. Inert without a netplay switch
-    // (and a no-op null check in the default build).
-    if (pc_netplay_session_notify_argv != nullptr) pc_netplay_session_notify_argv(argc, argv);
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--dump-texture-names") == 0)
             pc_gfx_set_dump_texture_names(1);

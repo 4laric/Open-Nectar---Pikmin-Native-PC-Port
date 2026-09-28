@@ -27,11 +27,11 @@ namespace pc_netplay_gekko {
 constexpr size_t kInputBytes = 16;
 constexpr uint8_t kFlagsNone = 0;
 // M4 lane A randomizer snapshot stream (issue #885): the host carries one
-// 44-byte PcRandState per 11 consecutive submits in the input spare bytes.
+// 64-byte PcRandState per 16 consecutive submits in the input spare bytes.
 //   flags bit 0  HAS_CHUNK  this input carries a snapshot fragment
-//   flags bit 1  CHUNK_LAST this fragment is index 10 (the last of 11)
+//   flags bit 1  CHUNK_LAST this fragment is index 15 (the last of 16)
 //   pad[11]      fragment sequence: high nibble stream id (0), low nibble
-//                fragment index 0..10 (see pc_netplay_randstate.h)
+//                fragment index 0..15 (see pc_netplay_randstate.h)
 //   pad[12..15]  4 payload bytes (snapshot bytes idx*4 .. idx*4+3)
 // The joiner never sets these bits. Inputs without HAS_CHUNK decode exactly
 // as before (pad bytes zero), so the wire is unchanged when the stream is
