@@ -1,4 +1,5 @@
 #include "MoviePlayer.h"
+#include "pc_bbft.h"
 #include <cstdio>
 #include "DebugLog.h"
 #include "EffectMgr.h"
@@ -641,6 +642,7 @@ void MoviePlayer::sndStopMovie(MovieInfo* info)
  */
 void MoviePlayer::update()
 {
+    if (pc_bbft_take_skip() && mIsActive) requestSkip();
 	gameflow.mDemoFlags = CinePlayerFlags::Empty;
 	if (gsys->mDvdErrorCode >= DvdError::ReadingDisc) {
 		return;
@@ -736,6 +738,28 @@ void MoviePlayer::update()
 /**
  * @todo: Documentation
  */
+void MoviePlayer::requestSkip()
+{
+    // Day-end/final results own their looping movie backgrounds. Start must
+    // not finish them; the result UI will issue the normal completion command.
+    if (gameflow.mGameInterface && !gameflow.mGameInterface->movieSkipAllowed()) return;
+    // Phase-one day-end movies reuse the gameplay Teki heap. Completing them
+    // early can expose retained actors before the results flow takes ownership.
+    // Intro, gameplay and phase-zero day-end movies keep their normal skip path.
+    for (MovieInfo* info = static_cast<MovieInfo*>(mPlayInfoList.mChild); info;
+         info = static_cast<MovieInfo*>(info->mNext)) {
+        for (int stage = 0; stage < STAGE_COUNT; ++stage) {
+            if (info->mMovieIndex == movie32table[stage] || info->mMovieIndex == movie56table[stage]) return;
+        }
+    }
+    bool requested = false;
+    for (MovieInfo* info = static_cast<MovieInfo*>(mPlayInfoList.mChild); info;
+         info = static_cast<MovieInfo*>(info->mNext)) {
+        if (info->mPlayer) { info->mPlayer->requestSkip(); requested = true; }
+    }
+    if (requested) Jac_NoteDemoSkipped();
+}
+
 void MoviePlayer::skipScene(int sceneSkipFlag)
 {
 #if defined(PIKI_PC_PORT)

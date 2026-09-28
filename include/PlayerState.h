@@ -1,3 +1,4 @@
+#include "pc_bbft.h"
 #ifndef _PLAYERSTATE_H
 #define _PLAYERSTATE_H
 
@@ -141,6 +142,8 @@ public:
 	bool displayPikiCount(int);
 	void setDisplayPikiCount(int);
 	bool hasUfoParts(u32 ufoIndex);
+	void reconcileBbftParts();
+	bool isBbftRestoredPart(u32 partID);
 	void update();
 	void initCourse();
 	void exitCourse();
@@ -174,10 +177,10 @@ public:
 	int getRestParts();
 	void lostUfoParts(u32);
 
-	void setContainer(int color) { mContainerFlag |= 1 << color; }
+	void setContainer(int color) { if (!pc_bbft_color_access(color)) return; mContainerFlag |= 1 << color; }
 	bool hasContainer(int color) { return mContainerFlag & (1 << color); }
 
-	void setBootContainer(int color) { mContainerFlag |= 1 << color + 3; }
+	void setBootContainer(int color) { if (!pc_bbft_color_access(color)) return; mContainerFlag |= 1 << color + 3; }
 	// This member function is named `bootContainer` according to the ILK, but that's inconsistent.
 	bool hasBootContainer(int color) { return mContainerFlag & (1 << color + 3); }
 

@@ -1,4 +1,5 @@
 #include "zen/ogSave.h"
+#include "pc_gfx.h"
 #include "DebugLog.h"
 #include "P2D/Graph.h"
 #include "P2D/Picture.h"
@@ -335,6 +336,16 @@ zen::ogSaveMgr::SaveStatus zen::ogSaveMgr::update(Controller* input)
 		}
 		case ShowingSaveNotice:
 		{
+#if defined(PIKI_PC_PORT)
+			if (gameflow.mGamePrefs.mSpareMemCardSaveIndex < 1 || gameflow.mGamePrefs.mSpareMemCardSaveIndex > 4) {
+				// Finish card preparation and slot selection before starting the
+				// save timer, including games that bypassed the title/file menu.
+				mMemCheckMgr->start();
+				mStatus    = PreparingSave;
+				mAnimTimer = 0.0f;
+				break;
+			}
+#endif
 			if (mAnimTimer < 1.0f) {
 				f32 scale = 3.0f * mAnimTimer / 1.0f;
 				if (scale > 1.0f) {
@@ -458,6 +469,9 @@ void zen::ogSaveMgr::draw(Graphics& gfx)
 
 	P2DPerspGraph graf(0, 0, 640, 480, 30.0f, 1.0f, 5000.0f);
 	graf.setPort();
+#if defined(PIKI_PC_PORT)
+	pc_gfx_note_menu_tap_space(640, 480);
+#endif
 
 #if defined(VERSION_PIKIDEMO) || defined(VERSION_GPIJ01)
 	if (!mFileChkSelected) {

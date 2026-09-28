@@ -6,6 +6,9 @@
 #include "Vector.h"
 #include "Win.h"
 #include "types.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_whistle.h"
+#endif
 
 class NaviState;
 
@@ -50,7 +53,11 @@ enum NaviStateID {
 	NAVISTATE_PikiZero    = 33,
 	NAVISTATE_Clear       = 34,
 	NAVISTATE_IroIro      = 35,
-	NAVISTATE_Count, // 36
+#if defined(PIKI_PC_PORT)
+	NAVISTATE_DemonDrop = 36,
+	NAVISTATE_DemonEscape = 37,
+#endif
+	NAVISTATE_Count, // PC 38; retail 36
 };
 
 /**
@@ -74,6 +81,9 @@ public:
  */
 struct NaviStateMachine : public StateMachine<Navi> {
 	virtual void init(Navi*); // _08
+#if defined(PIKI_PC_PORT)
+	void transit(Navi*, int) override;
+#endif
 
 	NaviState* getNaviState(Navi*);
 
@@ -190,6 +200,11 @@ struct NaviDeadState : public NaviState {
 
 	// _00     = VTBL
 	// _00-_10 = NaviState
+#if defined(PIKI_PC_PORT)
+	// Cooperativo: "caído" = ha muerto pero el otro Olimar sigue vivo. El
+	// cuerpo se queda, el mundo no se pausa y el día no termina.
+	bool mDowned = false;
+#endif
 };
 
 /**
@@ -437,6 +452,9 @@ struct NaviFunbariState : public NaviState {
  * @note Size: 0x1C.
  */
 struct NaviGatherState : public NaviState {
+#if defined(PIKI_PC_PORT)
+	PcWhistleTapState mTapState;
+#endif
 	NaviGatherState();
 
 	virtual void procAnimMsg(Navi*, MsgAnim*); // _20
@@ -842,6 +860,12 @@ struct NaviThrowState : public NaviState {
 	// _00-_10 = NaviState
 	bool mHasThrownPiki; // _10
 	bool _11;  // _11
+#if defined(PIKI_PC_PORT)
+	// Throw press seen during the wind-up, before KEY_Action0 released the
+	// Pikmin. Kept so a rapid mash starts the next grab as soon as the throw
+	// lands instead of being dropped (issues #37 / #40).
+	bool mQueuedThrowPress;
+#endif
 	Piki* mTargetPiki; // _14
 };
 

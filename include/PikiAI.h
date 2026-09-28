@@ -198,6 +198,10 @@ class TopAction : public Action {
 	friend struct PikiSwallowedState;
 
 public:
+#if defined(PIKI_PC_PORT)
+	/// VS: congelar la acción (asedio al cohete rival) y reanudarla.
+	void pcSetSuspended(bool suspended) { mIsSuspended = suspended; }
+#endif
 	/**
 	 * @brief TODO
 	 *
@@ -357,6 +361,9 @@ public:
 	};
 
 	ActAttack(Piki*);
+#if defined(PIKI_PC_PORT)
+	bool targets(Creature* creature) { return mOther.getPtr() == creature; }
+#endif
 
 	virtual ~ActAttack() { }                                   // _44
 	virtual void init(Creature*);                              // _48
@@ -390,6 +397,7 @@ protected:
  * @note Size: 0x24.
  */
 struct ActBoMake : public Action, private PaniAnimKeyListener {
+    friend void pc_randomizer_test_work_damage();
 public:
 	/**
 	 * @brief TODO
@@ -612,6 +620,7 @@ protected:
  * @note Size: 0x34.
  */
 struct ActBreakWall : public Action, public PaniAnimKeyListener {
+    friend void pc_randomizer_test_work_damage();
 public:
 	/**
 	 * @brief TODO
@@ -656,6 +665,7 @@ protected:
  * @note Size: 0x58.
  */
 struct ActBridge : public Action, virtual PaniAnimKeyListener {
+    friend void pc_randomizer_test_work_damage();
 public:
 	/**
 	 * @brief TODO
@@ -1953,6 +1963,7 @@ protected:
  * @note Size: 0xC0.
  */
 struct ActTransport : public Action, virtual PaniAnimKeyListener {
+    friend void pc_randomizer_test_color_stats();
 public:
 	/**
 	 * @brief The state of the action.
@@ -1991,8 +2002,8 @@ protected:
 	void turnOver();
 	bool isStickLeader();
 	f32 getCarriers();
-	int getNumStickers();
-	int calcNumStickers();
+	int getCarryStrength();
+	int calcCarryStrength();
 	Pellet* findPellet();
 	void setSlotIndex();
 	bool gotoLiftPos();
@@ -2034,6 +2045,12 @@ protected:
 	Suckable* mGoal;               // _B0, either GoalItem* or UfoItem*
 	bool mCanCarry;                // _B4
 	                               // _B8-_C0 = PaniAnimKeyListener
+#if defined(PIKI_PC_PORT)
+	// Mod "Better Pathfinding": stall watchdog for the carry route.
+	Vector3f mPcStallCheckPos;
+	f32 mPcStallTimer = 0.0f;
+	bool mPcStallArmed = false;
+#endif
 };
 
 /**

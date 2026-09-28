@@ -1,3 +1,4 @@
+#include "pc_bbft.h"
 #include "Age.h"
 #include "BombItem.h"
 #include "BuildingItem.h"
@@ -167,7 +168,11 @@ Creature* GenObjectItem::birth(BirthInfo& info)
 		return nullptr;
 	}
 
-	// Has onion check
+	// Preserve the original discovery position even when AP ownership replaces
+    // the wild onion with its camp generator.
+    if (mObjType == OBJTYPE_Goal && info.mGenerator->mGeneratorName == 'next')
+        pc_bbft_onion_site(mParameterA(), info.mPosition.x, info.mPosition.z);
+    // Has onion check
 	if (mObjType == OBJTYPE_Goal) {
 		if (!playerState->hasContainer(mParameterA())) {
 			if (info.mGenerator->mGeneratorName != 'next') {

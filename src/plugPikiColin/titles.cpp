@@ -683,17 +683,11 @@ public:
 			drawMenu(gfx, mActiveDebugMenu, 1.0f);
 		} else {
 			// draw PRESS START, main title menu, or hiscore menus as required
-#if defined(PIKI_PC_PORT)
-			pc_gfx_set_menu_clip_43(1);
-#endif
 			startWindow->draw(gfx);
 #if defined(PIKI_PC_PORT)
 			pc_gfx_title_debug_probe("after_start");
 #endif
 			titleWindow->draw(gfx);
-#if defined(PIKI_PC_PORT)
-			pc_gfx_set_menu_clip_43(0);
-#endif
 #if defined(PIKI_PC_PORT)
 			pc_gfx_title_debug_probe("after_title");
 #endif
@@ -819,6 +813,9 @@ void TitlesMovieInterface::message(int cmd, int)
  */
 void TitlesSection::init()
 {
+#if defined(PIKI_PC_PORT)
+	pc_gfx_set_dof_focus(0.0f);
+#endif
 	Node::init("<TitlesSection>");
 	Jac_BackDVDBuffer();
 

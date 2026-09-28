@@ -1,4 +1,7 @@
 #include "PlayerState.h"
+#include <cstdio>
+#include "pc_bbft.h"
+#include "pc_randomizer.h"
 #include "AIConstant.h"
 #include "AIPerf.h"
 #include "DebugLog.h"
@@ -19,11 +22,15 @@
 #include "bugprint.h"
 #include "gameflow.h"
 #include "sysNew.h"
+#if defined(PIKI_PC_PORT)
+#include "settings/pc_settings.h"
+#endif
 
 int PlayerState::totalUfoParts = MAX_UFO_PARTS;
 
 bool preloadUFO = false;
 PlayerState* playerState;
+static bool bbftReplayedParts[30] = {};
 
 /**
  * @todo: Documentation
@@ -85,7 +92,13 @@ void TimeGraph::set(u16 time, int color, int num)
 {
 	int entryIdx = time - mStartTime;
 	if (entryIdx < 0 || entryIdx >= (mEndTime - mStartTime + 1)) {
+#if defined(PIKI_PC_PORT)
+		// Una hora fuera del día (p. ej. la tecla F6 pasando del atardecer) no
+		// tiene casilla en el gráfico: se ignora en vez de parar el juego.
+		return;
+#else
 		ERROR("illegal time int %d\n", time);
+#endif
 	}
 	mEntries[entryIdx].set(color, num);
 }
@@ -109,6 +122,7 @@ int TimeGraph::get(u16 time, int color)
 
 bool PlayerState::isEnding()
 {
+    if (pc_randomizer_enabled()) return false;
 	if (getCurrDay() >= (MAX_DAYS - 1)) {
 		// we've hit our 30-day limit
 		return true;
@@ -153,6 +167,7 @@ bool PlayerState::existUfoParts(u32 id)
  */
 void PlayerState::initGame()
 {
+	for (int part = 0; part < 30; ++part) bbftReplayedParts[part] = false;
 	int i;
 	for (i = 0; i < MAX_DAYS; i++) {
 		mPartsCollectedByDay[i] = 0;
@@ -237,6 +252,13 @@ PlayerState::PlayerState()
 	mPerHourGraph.create(getStartHour(), getEndHour());
 	mPerDayGraph.create(0, getTotalDays());
 	mIsTutorialMode = true;
+#if defined(PIKI_PC_PORT)
+	if (pc_unlock_all_stages()) {
+		// Sin cinemáticas de introducción: todas las banderas de demo puestas.
+		for (int d = 0; d < DEMOFLAG_COUNT; d++) mDemoFlags.setFlagOnly(d);
+		mIsTutorialMode = false;
+	}
+#endif
 	for (i = 0; i < STAGE_COUNT; i++) {
 		mStagePartsCollected[i] = 0;
 	}
@@ -259,8 +281,154 @@ PlayerState::PlayerState()
 /**
  * @todo: Documentation
  */
+static const char* bbftPartName(u32 id) {
+    switch (id) {
+    case UFOID_Bowsprit: return "Pikmin: Bowsprit";
+    case UFOID_GluonDrive: return "Pikmin: Gluon Drive";
+    case UFOID_AntiDioxinFilter: return "Pikmin: Anti-Dioxin Filter";
+    case UFOID_EternalFuelDynamo: return "Pikmin: Eternal Fuel Dynamo";
+    case UFOID_WhimsicalRadar: return "Pikmin: Whimsical Radar";
+    case UFOID_InterstellarRadio: return "Pikmin: Interstellar Radio";
+    case UFOID_GuardSatellite: return "Pikmin: Guard Satellite";
+    case UFOID_ChronosReactor: return "Pikmin: Chronos Reactor";
+    case UFOID_RadiationCanopy: return "Pikmin: Radiation Canopy";
+    case UFOID_GeigerCounter: return "Pikmin: Geiger Counter";
+    case UFOID_Sagittarius: return "Pikmin: Sagittarius";
+    case UFOID_Libra: return "Pikmin: Libra";
+    case UFOID_OmegaStabilizer: return "Pikmin: Omega Stabilizer";
+    case UFOID_IoniumJet1: return "Pikmin: Ionium Jet 1";
+    case UFOID_IoniumJet2: return "Pikmin: Ionium Jet 2";
+    case UFOID_ShockAbsorber: return "Pikmin: Shock Absorber";
+    case UFOID_GravityJumper: return "Pikmin: Gravity Jumper";
+    case UFOID_PilotSeat: return "Pikmin: Pilot's Seat";
+    case UFOID_NovaBlaster: return "Pikmin: Nova Blaster";
+    case UFOID_AutomaticGear: return "Pikmin: Automatic Gear";
+    case UFOID_ZirconiumRotor: return "Pikmin: Zirconium Rotor";
+    case UFOID_ExtraordinaryBolt: return "Pikmin: Extraordinary Bolt";
+    case UFOID_RepairTypeBolt: return "Pikmin: Repair-type Bolt";
+    case UFOID_SpaceFloat: return "Pikmin: Space Float";
+    case UFOID_MassageMachine: return "Pikmin: Massage Machine";
+    case UFOID_SecretSafe: return "Pikmin: Secret Safe";
+    case UFOID_AnalogComputer: return "Pikmin: Analog Computer";
+    case UFOID_UVLamp: return "Pikmin: UV Lamp";
+    default: return nullptr;
+    }
+}
+
+void PlayerState::reconcileBbftParts()
+{
+    if (!pc_bbft_progression()) return;
+    // Retail/AP area membership, indexed by UfoPartIndex. Tutorial parts are
+    // excluded. Reconciliation must not attribute remote parts to today's area.
+    static const int stages[30] = {
+        STAGE_Yakushima, STAGE_Yakushima, STAGE_Cave, STAGE_Forest, -1,
+        STAGE_Forest, STAGE_Yakushima, STAGE_Cave, STAGE_Yakushima, STAGE_Forest,
+        STAGE_Forest, STAGE_Forest, STAGE_Cave, STAGE_Cave, STAGE_Cave,
+        STAGE_Yakushima, STAGE_Forest, STAGE_Cave, STAGE_Yakushima, STAGE_Forest,
+        STAGE_Cave, STAGE_Yakushima, STAGE_Forest, STAGE_Yakushima, STAGE_Cave,
+        STAGE_Yakushima, STAGE_Last, -1, STAGE_Cave, STAGE_Yakushima
+    };
+    bool changed = false;
+    for (int i = 0; i < 30; ++i) {
+        if (stages[i] < 0) continue;
+        u32 id = PelletMgr::getUfoIDFromIndex(i);
+        const char* name = bbftPartName(id);
+        UfoParts* part = findUfoParts(id);
+        if (!name || !part || part->mPartVisType != PARTVIS_Uncollected || !pc_bbft_checked(name)) continue;
+        // Do not call getUfoParts: it reports checks, starts repair animation,
+        // opens vanilla stages and queues result messages. Restore only history.
+        // A remote part from another area may not have its model loaded yet.
+        // Invisible is still collected; never expose a null shape to renderParts.
+        part->mPartVisType = part->mPelletShape ? PARTVIS_Visible : PARTVIS_Invisible;
+        bbftReplayedParts[i] = true;
+        ++mCurrParts;
+        ++mStagePartsCollected[stages[i]];
+        if (id != UFOID_NovaBlaster && id != UFOID_SpaceFloat && id != UFOID_MassageMachine
+            && id != UFOID_SecretSafe && id != UFOID_UVLamp) ++mRequiredUfoPartCount;
+        if (id == UFOID_WhimsicalRadar) mShipEffectPartFlag |= 1;
+        if (id == UFOID_IoniumJet1) mShipEffectPartFlag |= 2;
+        if (id == UFOID_IoniumJet2) mShipEffectPartFlag |= 4;
+        // Keep the registered pose. Not every part provides an After motion;
+        // selecting it during early stage setup can panic in StartAnim.
+        char message[160];
+        std::snprintf(message, sizeof(message), "PIKMIN_PART_REPLAY %s total=%d stage=%d", name, mCurrParts, stages[i]);
+        pc_bbft_milestone(message);
+        changed = true;
+    }
+    if (changed) {
+        mShipUpgradeLevel = mCurrParts >= AICONST._184() ? 5 : mCurrParts >= AICONST._174() ? 4
+            : mCurrParts >= AICONST._164() ? 3 : mCurrParts >= AICONST._154() ? 2 : mCurrParts > 0 ? 1 : 0;
+    }
+}
+
+bool PlayerState::isBbftRestoredPart(u32 id)
+{
+    if (!pc_bbft_progression()) return false;
+    bool replayed = false;
+    for (int i = 0; i < 30; ++i) if (PelletMgr::getUfoIDFromIndex(i) == id) replayed = bbftReplayedParts[i];
+    if (!replayed) return false;
+    const char* name = bbftPartName(id);
+    UfoParts* part = findUfoParts(id);
+    // Let an ordinary in-progress delivery finish its existing native cleanup.
+    return name && part && part != mCurrentRepairingPart && hasUfoParts(id) && pc_bbft_checked(name);
+}
+
+#if defined(PIKI_PC_PORT)
+bool pc_unlock_all_stages()
+{
+	static int cached = -1;
+	if (cached < 0) {
+		const char* v = getenv("PIKMIN_UNLOCK_ALL");
+		cached        = (v && *v && *v != '0') ? 1 : 0;
+	}
+	return cached == 1;
+}
+#endif
+
+#if defined(PIKI_PC_PORT)
+bool pc_cheat_unlock_zones()
+{
+	return pc_settings_get_unlock_zones() != 0;
+}
+
+// Cheat "All Onions": se escribe en la partida, igual que al descubrirlas.
+static void pcCheatGiveOnions(PlayerState* ps)
+{
+	if (!pc_settings_get_all_onions()) return;
+	ps->setContainer(Yellow);
+	ps->setDisplayPikiCount(Yellow);
+	ps->setContainer(Blue);
+	ps->setDisplayPikiCount(Blue);
+}
+#endif
+
 bool PlayerState::courseOpen(int courseID)
 {
+#if defined(PIKI_PC_PORT)
+	if (pc_unlock_all_stages() && courseID >= STAGE_START && courseID <= STAGE_TESTMAP) return true;
+	pcCheatGiveOnions(this);
+	if (pc_cheat_unlock_zones() && courseID >= STAGE_START && courseID <= STAGE_Last) {
+		SET_STAGE_OPEN(gameflow.mPlayState.mCourseOpenFlags, courseID);
+	}
+#endif
+    if (pc_bbft_skip_tutorial() && courseID == STAGE_Practice)
+        return pc_randomizer_enabled() && pc_randomizer_has("Pikmin: Impact Site Access");
+    if (pc_bbft_progression()) {
+        switch (courseID) {
+        case STAGE_Forest: return pc_randomizer_enabled() ? pc_randomizer_has("Pikmin: Forest of Hope Access") : pc_bbft_has("Pikmin Access");
+        case STAGE_Cave: return pc_bbft_has("Pikmin: Forest Navel Access");
+        case STAGE_Yakushima: return pc_bbft_has("Pikmin: Distant Spring Access");
+        case STAGE_Last: return pc_bbft_has("Pikmin: Final Trial Access");
+        default: return false;
+        }
+    }
+    // Reconcile loaded saves without replaying collection cinematics.
+    if (pc_bbft_enabled()) {
+        if (!pc_bbft_skip_tutorial() && hasUfoParts(UFOID_MainEngine)) pc_bbft_check("Pikmin: Main Engine");
+        if (hasUfoParts(UFOID_EternalFuelDynamo)) pc_bbft_check("Pikmin: Eternal Fuel Dynamo");
+        if (pc_bbft_skip_tutorial() && hasUfoParts(UFOID_ShockAbsorber)) pc_bbft_check("Pikmin: Shock Absorber");
+        if (courseID == STAGE_Forest && !pc_bbft_forest_access()) return false;
+    }
 	if (courseID >= STAGE_START && courseID <= STAGE_TESTMAP) {
 		return IS_STAGE_OPEN(gameflow.mPlayState.mCourseOpenFlags, courseID) != 0;
 	}
@@ -547,6 +715,10 @@ void PlayerState::loadCard(RandomAccessStream& data)
  */
 bool PlayerState::isTutorial()
 {
+#if defined(PIKI_PC_PORT)
+	// Modo de prueba (PIKMIN_UNLOCK_ALL): sin tutorial, directo al mapa.
+	if (pc_unlock_all_stages()) return false;
+#endif
 	if (flowCont.mCurrentStage && flowCont.mCurrentStage->mStageID != STAGE_Practice) {
 		return false;
 	}
@@ -688,6 +860,9 @@ void PlayerState::initCourse()
 	mPerHourGraph.init();
 	setNavi(false);
 	setDayEnd(false);
+#if defined(PIKI_PC_PORT)
+	pcCheatGiveOnions(this);
+#endif
 	mHasExtinctionDemoPlayed = false;
 	mNaviLightEfx            = new PermanentEffect;
 	mNaviLightGlowEfx        = new PermanentEffect;
@@ -879,6 +1054,7 @@ void PlayerState::registerUfoParts(int repairAnimJointIndex, u32 modelID, u32 pe
 	part->mRepairAnimJointIndex = repairAnimJointIndex;
 	part->mPelletID             = pelletID;
 	part->mModelID              = modelID;
+    if (pc_bbft_skip_tutorial() && modelID == UFOID_MainEngine) part->mPartVisType = PARTVIS_Visible;
 	PelletShapeObject* shape    = pelletMgr->getShapeObject(modelID);
 	part->initAnim(shape);
 
@@ -1052,6 +1228,7 @@ void PlayerState::startAfterMotions()
 {
 	for (int i = 0; i < mTotalRegisteredParts; i++) {
 		UfoParts* part = &mUfoParts[i];
+		if (part && isBbftRestoredPart(part->mModelID)) continue;
 		if (part && part->mPartVisType != PARTVIS_Uncollected && part->mPelletShape) {
 			PRINT("(%s) : AFTER motion \n", ID32(part->mModelID).mStringID);
 			part->startMotion(PelletMotion::After, PelletMotion::After);
@@ -1065,6 +1242,7 @@ void PlayerState::startAfterMotions()
  */
 void PlayerState::startUfoPartsMotion(u32 id, int anim, bool wantPassiveMotion)
 {
+	if (isBbftRestoredPart(id)) return; // Quiet replay keeps its registered static pose.
 	UfoParts* part = findUfoParts(id);
 	if (part) {
 		if (part->mPelletShape->isMotionFlag(PelletMotionFlags::UsePiston)) {
@@ -1086,6 +1264,15 @@ void PlayerState::startUfoPartsMotion(u32 id, int anim, bool wantPassiveMotion)
  */
 void PlayerState::getUfoParts(u32 partID, bool isInvisiblePart)
 {
+    if (partID == UFOID_PositronGenerator && pc_randomizer_enabled() && pc_randomizer_has("Pikmin: Impact Site Access"))
+        pc_randomizer_check("Pikmin: Positron Generator");
+    if (pc_bbft_progression() && flowCont.mCurrentStage && courseOpen(flowCont.mCurrentStage->mStageID)) {
+        const char* location = bbftPartName(partID);
+        if (location) pc_bbft_check(location);
+    }
+    if (partID == UFOID_MainEngine && !pc_bbft_skip_tutorial()) pc_bbft_check("Pikmin: Main Engine");
+    if (partID == UFOID_EternalFuelDynamo) pc_bbft_check("Pikmin: Eternal Fuel Dynamo");
+    if (partID == UFOID_ShockAbsorber && pc_bbft_skip_tutorial()) pc_bbft_check("Pikmin: Shock Absorber");
 	UfoParts* parts = findUfoParts(partID);
 	// Collection is keyed by part ID, not by the physical Pellet instance.
 	// Never let a duplicated generator/cache entry inflate progression counters

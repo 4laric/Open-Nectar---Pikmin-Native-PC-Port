@@ -33,6 +33,31 @@ DEFINE_PRINT("CinePlayer")
 /// Pointer buffer for storing backup animations during cutscenes (max 256).
 static AnimContext* bcs[0x100];
 
+#if defined(PIKI_PC_PORT)
+static void pcIntroAimUfoTrail(ActorInstance* actor)
+{
+	Vector3f trailDir = -actor->mActorWorldDir;
+	f32 dirLen2       = trailDir.x * trailDir.x + trailDir.y * trailDir.y + trailDir.z * trailDir.z;
+	if (dirLen2 < 0.01f) {
+		// demo01 flies +Z; PCR NJ3 emit is (0,-1,0) and draws a extra downward jet.
+		trailDir.set(0.0f, 0.0f, -1.0f);
+	}
+	for (int i = 0; i < 7; i++) {
+		if (actor->mEffectList[i]) {
+			actor->mEffectList[i]->setEmitDir(trailDir);
+		}
+	}
+	for (int i = 0; i < 4; i++) {
+		if (actor->mEffectGrid[i][0]) {
+			actor->mEffectGrid[i][0]->setEmitDir(trailDir);
+		}
+		if (actor->mEffectGrid[i][1]) {
+			actor->mEffectGrid[i][1]->setEmitDir(trailDir);
+		}
+	}
+}
+#endif
+
 /**
  * @todo: Documentation
  * @note UNUSED Size: 0000A0
@@ -52,6 +77,9 @@ void CineShapeObject::init(immut char* modelPath, immut char* animPath, immut ch
 void CinematicPlayer::init(immut char* cinFilePath)
 {
 	// reset cutscene-specific things
+#ifdef PIKI_PC_PORT
+	mSkipToEnd = false;
+#endif
 	mTotalDuration       = 0;
 	mCurrentData         = nullptr;
 	mCurrentPlaybackTime = 0.0f;
@@ -370,7 +398,32 @@ void CinematicPlayer::skipScene(int sceneSkipFlag)
 BOOL CinematicPlayer::update()
 {
 	BOOL isFinished = FALSE;
-	if (mCurrentScene && mIsPlaying && mSceneSkipFlag == SCENESKIP_NULL && mPlaybackMode == CINMODE_LoopScene) {
+#ifdef PIKI_PC_PORT
+	if (mSkipToEnd && mCurrentScene && mCurrentScene == mPreviousScene) {
+		// Visit one event boundary per update so queued messages are consumed
+		// between events. Render the last authored frame before leaving a scene:
+		// cinematic actors also move real Onions, the ship and Olimar in draw().
+		const float length = abs(mCurrentScene->mEndFrame - mCurrentScene->mStartFrame);
+		const float end = mCurrentSceneStartTime + length;
+		const float last = end - 0.001f;
+		float target = last;
+		if (absF(mCurrentSceneFrame - mCurrentScene->mStartFrame) >= length - 0.01f) {
+			target = end;
+		} else if (mCurrentScene->mEndFrame > mCurrentScene->mStartFrame) {
+			for (AnimKey* key = mCurrentScene->mKey.mNext; key != &mCurrentScene->mKey; key = key->mNext) {
+				if (key->mEventType == ANIMEVENT_None || key->mFrameIndex < mPreviousSceneFrame) continue;
+				const float time = mCurrentSceneStartTime + key->mFrameIndex - mCurrentScene->mStartFrame + 0.001f;
+				if (time >= mCurrentPlaybackTime && time < target) target = time;
+			}
+		}
+		mCurrentPlaybackTime = target;
+	}
+#endif
+	if (mCurrentScene && mIsPlaying && mSceneSkipFlag == SCENESKIP_NULL && mPlaybackMode == CINMODE_LoopScene
+#ifdef PIKI_PC_PORT
+	    && !mSkipToEnd
+#endif
+	) {
 		// loop scene!
 		if (mCurrentPlaybackTime >= (f32)abs(mCurrentScene->mEndFrame - mCurrentScene->mStartFrame) + mCurrentSceneStartTime) {
 			// we're at the end of a loop, so go back to the start of the scene
@@ -480,6 +533,9 @@ BOOL CinematicPlayer::update()
 	// landing, Olimar waking after the crash -- plays at double speed. Advance
 	// by the real elapsed time instead, expressed in those 30 Hz frames, which
 	// is exactly 1.0 per tick at 30 Hz and leaves the original timing intact.
+#ifdef PIKI_PC_PORT
+	if (!mSkipToEnd)
+#endif
 	mCurrentPlaybackTime += gsys->getFrameTime() * 30.0f;
 
 	if (isFinished) {
@@ -627,8 +683,8 @@ void ActorInstance::initInstance()
 		}
 	}
 
-	if (mFlags & CAF_MoveDayEndNavi && naviMgr && naviMgr->getNavi()) {
-		naviMgr->getNavi()->startDayEnd();
+	if (mFlags & CAF_MoveDayEndNavi && naviMgr && naviMgr->getMovieNavi()) {
+		naviMgr->getMovieNavi()->startDayEnd();
 	}
 
 	if (!mIsLeaf) {
@@ -976,7 +1032,7 @@ void ActorInstance::refresh(immut Matrix4f& mtx, Graphics& gfx, f32* p3)
 		check1 = true;
 		d      = &mAnimator.mAnimationCounter;
 	} else if (p3 && mActiveActor->mModel->mCurrentAnimation->mData->mTotalFrameCount) {
-		c = std::fmodf(*p3, mActiveActor->mModel->mCurrentAnimation->mData->mTotalFrameCount);
+		c = fmodf(*p3, mActiveActor->mModel->mCurrentAnimation->mData->mTotalFrameCount);
 		d = &c;
 	}
 
@@ -1158,6 +1214,9 @@ void ActorInstance::refresh(immut Matrix4f& mtx, Graphics& gfx, f32* p3)
 				mEffectList[i]->setEmitDir(-mActorWorldDir);
 			}
 		}
+#if defined(PIKI_PC_PORT)
+		pcIntroAimUfoTrail(this);
+#endif
 	}
 
 	if (mFlags & CAF_MoveAiOnion) {
@@ -1194,13 +1253,32 @@ void ActorInstance::refresh(immut Matrix4f& mtx, Graphics& gfx, f32* p3)
 		checkEventKeys(a, b, pos);
 	}
 
+#if defined(PIKI_PC_PORT)
+	// Key 19 writes dummy (-25000) joints and then this frame's effect update
+	// runs. Recompute the UFO trail sockets so the opening burst emits on the
+	// ship instead of off-camera.
+	if (mMeteorFlag) {
+		mJointPositions[0].set(0.0f, 7.0f, 0.0f);
+		mActiveActor->mModel->calcJointWorldPos(gfx, 0, mJointPositions[0]);
+		mJointPositions[1].set(-14.4f, 14.9f, 14.4f);
+		mActiveActor->mModel->calcJointWorldPos(gfx, 0, mJointPositions[1]);
+		mJointPositions[2].set(-14.4f, 14.9f, -14.4f);
+		mActiveActor->mModel->calcJointWorldPos(gfx, 0, mJointPositions[2]);
+		mJointPositions[3].set(14.4f, 14.9f, 14.4f);
+		mActiveActor->mModel->calcJointWorldPos(gfx, 0, mJointPositions[3]);
+		mJointPositions[4].set(14.4f, 14.9f, -14.4f);
+		mActiveActor->mModel->calcJointWorldPos(gfx, 0, mJointPositions[4]);
+		pcIntroAimUfoTrail(this);
+	}
+#endif
+
 	if (mFlags & (CAF_MoveDayEndNavi | CAF_MoveAiNavi)) {
-		if (naviMgr && naviMgr->getNavi()) {
+		if (naviMgr && naviMgr->getMovieNavi()) {
 			Vector3f pos(0.0f, 0.0f, 0.0f);
 			pos.multMatrix(mActiveActor->mModel->getAnimMatrix(0));
 			pos.multMatrix(gfx.mCamera->mInverseLookAtMtx);
-			naviMgr->getNavi()->updateDayEnd(pos);
-			naviMgr->getNavi()->demoDraw(gfx, nullptr);
+			naviMgr->getMovieNavi()->updateDayEnd(pos);
+			naviMgr->getMovieNavi()->demoDraw(gfx, nullptr);
 		}
 	} else {
 		u32 flags = mActiveActor->mModel->mShapeFlags;

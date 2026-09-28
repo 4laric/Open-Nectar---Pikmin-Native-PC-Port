@@ -58,6 +58,18 @@ int PikiAudioSinkQueue(const int16_t* pcm, size_t frames)
 }
 int PikiAudioSinkResume() { if (!device) return 0; SDL_PauseAudioDevice(device, 0); return 1; }
 void PikiAudioSinkPause() { if (device) SDL_PauseAudioDevice(device, 1); }
+void PikiAudioSinkBBFTHold(int held) {
+    static bool parked = false, wasPlaying = false;
+    if (parked == (held != 0)) return;
+    parked = held != 0;
+    if (!device) return;
+    if (parked) {
+        wasPlaying = SDL_GetAudioDeviceStatus(device) == SDL_AUDIO_PLAYING;
+        SDL_PauseAudioDevice(device, 1);
+    } else if (wasPlaying) {
+        SDL_PauseAudioDevice(device, 0);
+    }
+}
 int PikiAudioSinkFlush() { return device != 0; }
 uint64_t PikiAudioSinkSubmittedFrames() { return submitted; }
 uint64_t PikiAudioSinkQueuedFrames() { return device ? SDL_GetQueuedAudioSize(device) / 4 : 0; }

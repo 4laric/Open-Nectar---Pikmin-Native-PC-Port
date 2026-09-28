@@ -1,4 +1,13 @@
+#include "pc_p2_purple.h"
+#include "pc_p2_purple_flight.h"
+#include "pc_p2_purple_impact.h"
+#include "pc_p2_white.h"
+#include "pc_p2_species.h"
+#include "pc_p2_purple.h"
+#include "pc_randomizer.h"
+#include "pc_bbft.h"
 #include "Piki.h"
+#include "pc_p2_kurage_receiver.h"
 #include "AIConstant.h"
 #include "AIPerf.h"
 #include "Boss.h"
@@ -23,6 +32,8 @@
 #include "UtilityKando.h"
 #include "WeedsItem.h"
 #include "WorkObject.h"
+#include "settings/pc_settings.h"
+#include "pc_coop.h"
 #include "bugprint.h"
 #include "gameflow.h"
 #include "teki.h"
@@ -182,15 +193,17 @@ void Piki::subCntCallback()
  */
 f32 Piki::getAttackPower()
 {
+    if(pc_p2_is_white(this))return pc_p2_white_attack();
+    if(pc_p2_is_purple(this))return pc_p2_purple_attack();
 	if (mColor == Blue) {
-		return pikiMgr->mPikiParms->mPikiParms.mBlueAttackPower();
+		return pikiMgr->mPikiParms->mPikiParms.mBlueAttackPower() * pc_randomizer_color_multiplier(mColor, PC_PIKI_DAMAGE);
 	}
 	if (mColor == Red) {
-		return pikiMgr->mPikiParms->mPikiParms.mRedAttackPower();
+		return pikiMgr->mPikiParms->mPikiParms.mRedAttackPower() * pc_randomizer_color_multiplier(mColor, PC_PIKI_DAMAGE);
 	}
 
 	// yellow
-	return pikiMgr->mPikiParms->mPikiParms.mYellowAttackPower();
+	return pikiMgr->mPikiParms->mPikiParms.mYellowAttackPower() * pc_randomizer_color_multiplier(mColor, PC_PIKI_DAMAGE);
 }
 
 /**
@@ -222,6 +235,15 @@ int Piki::findRoute(int sourceWaypointIndex, int destWaypointIndex, bool isRetry
 	if (ship && ship->mWaypointID == destWaypointIndex) {
 		destinationType = 3;
 	}
+#if defined(PIKI_PC_PORT)
+	// VS: hay dos cohetes y seis cebollas, y las rutas precalculadas por tipo
+	// de meta solo conocen los primeros (y el cohete cambia de punto de camino
+	// tras calcularlas). Camino directo al punto real, como a cualquier otro.
+	if (pc_vs_active()) {
+		destinationType = -1;
+		useAsynchronous = false; // todo por findSync (camino más corto)
+	}
+#endif
 
 	// If destination isn't a special point, try to copy an existing path
 	// from another Piki that's already calculated this route
@@ -637,8 +659,14 @@ void Piki::updateFire()
 {
 	if (mFiredState) {
 		int state = getState();
+#if defined(PIKI_PC_PORT)
+		if (pc_settings_get_piki_invincible()) {
+			mFiredState = 0; // cheat "Invincible Pikmin"
+			return;
+		}
+#endif
 		if (mFiredState != 2 && state != PIKISTATE_Dying && state != PIKISTATE_Dead && state != PIKISTATE_Fired && state != PIKISTATE_Drown
-		    && mColor != Red) {
+		    && !pc_p2_has_red_immunity(this)) {
 			changeMode(PikiMode::FreeMode, mNavi);
 			mFSM->transit(this, PIKISTATE_Fired);
 		}
@@ -673,7 +701,13 @@ bool Piki::isTeki(Piki* target)
 	}
 
 	if (flowCont.mIsVersusMode == TRUE) {
+#if defined(PIKI_PC_PORT)
+		// VS del port: rival = otro dueño. Los que aún no tienen dueño (-1)
+		// no pelean con nadie.
+		return mPlayerId >= 0 && target->mPlayerId >= 0 && target->mPlayerId != mPlayerId;
+#else
 		return target->mNavi != mNavi;
+#endif
 	}
 
 	return false;
@@ -1137,7 +1171,7 @@ int Piki::graspSituation(Creature** outTarget)
 					grassTarget = item;
 				}
 
-			} else if (item->mObjType == OBJTYPE_Bomb && mColor == Yellow && item->isVisible()) {
+			} else if (item->mObjType == OBJTYPE_Bomb && mColor == Yellow && pc_bbft_bomb_rocks() && item->isVisible()) {
 				f32 bombDist = centreDist(this, item);
 				if (bombDist <= item->getCentreSize() + minTestDist) {
 					minTestDist = bombDist;
@@ -1226,7 +1260,7 @@ int Piki::graspSituation(Creature** outTarget)
 	}
 
 	////////// CHECK FOR BOMB GENERATORS (YELLOW ONLY) //////////
-	if (mColor == Yellow) {
+	if (mColor == Yellow && pc_bbft_bomb_rocks()) {
 		Creature* bombGenTarget = nullptr;
 		minTestDist             = pikiMgr->mPikiParms->mPikiParms.mIdleAttackSearchRange();
 		Iterator iterBomb(itemMgr);
@@ -1261,7 +1295,17 @@ int Piki::graspSituation(Creature** outTarget)
  */
 void Piki::initColor(int color)
 {
+    mP2Purple=false;mP2White=false;mP2Bulbmin=false;mP2AnimationTime=0;
+    if (!pc_bbft_color_access(color)) color = Red;
 	mColor = color;
+#if defined(PIKI_PC_PORT)
+	// VS del port: cada jugador tiene los tres colores, así que el dueño no
+	// sale del color (Nintendo: azul J1, rojo J2, amarillo neutral). Nacen
+	// sin dueño y son del primer capitán que los mete en su grupo.
+	if (pc_vs_active()) {
+		mPlayerId = -1;
+	} else
+#endif
 	if (flowCont.mIsVersusMode == TRUE) {
 		switch (color) {
 		case Blue:
@@ -1314,6 +1358,7 @@ void Piki::endKinoko()
  */
 void Piki::setColor(int color)
 {
+    if (!pc_bbft_color_access(color)) color = Red;
 	mColor = color;
 	if (isKinoko()) {
 		mDefaultColour = kinokoColors[mColor];
@@ -1759,6 +1804,70 @@ bool Piki::mayIstick()
 	return false;
 }
 
+#if defined(PIKI_PC_PORT)
+/**
+ * @brief Mod "Blues Only In Water": saca del agua a un Pikmin que entró solo.
+ *
+ * Solo PIKISTATE_Normal cuenta como "por su cuenta": lanzado (Flying) o
+ * golpeado dentro (Flick, Flown) se sigue ahogando, así que el agua no deja
+ * de ser un peligro. Devuelve true si lo ha reubicado.
+ */
+bool Piki::pcStepOutOfWater()
+{
+	if (!pc_settings_get_blues_only_water()) {
+		return false;
+	}
+	if (mColor == Blue || !isAlive()) {
+		return false;
+	}
+
+	// Lista de estados en los que el agua sí debe hacer daño: lanzado por el
+	// capitán, golpeado dentro por un enemigo, o ya fuera de juego. Todo lo
+	// demás -- andar, venir al silbato (LookAt), seguir en formación -- es el
+	// Pikmin moviéndose por su cuenta, y ahí es donde el mod actúa. Antes solo
+	// cubría PIKISTATE_Normal, así que al silbarlos se ahogaban igual.
+	switch (getState()) {
+	case PIKISTATE_Flying:
+	case PIKISTATE_Flown:
+	case PIKISTATE_Flick:
+	case PIKISTATE_Bullet:
+	case PIKISTATE_Hanged:
+	case PIKISTATE_WaterHanged:
+	case PIKISTATE_Drown:
+	case PIKISTATE_Pressed:
+	case PIKISTATE_Swallowed:
+	case PIKISTATE_Dying:
+	case PIKISTATE_Dead:
+		return false;
+	default:
+		break;
+	}
+
+	// Al último suelo seco propio, no al waypoint más cercano: ese podía estar
+	// al otro lado del agua, y el Pikmin aparecía lejos y volvía corriendo.
+	if (mPcHasDryPos) {
+		mSRT.t = mPcLastDryPos;
+	} else {
+		WayPoint* dryWP = routeMgr->findNearestWayPoint('test', mSRT.t, true);
+		if (!dryWP) {
+			return false;
+		}
+		mSRT.t = dryWP->mPosition;
+	}
+
+	mVelocity     = Vector3f(0.0f, 0.0f, 0.0f);
+	mInWaterTimer = 0;
+	mIsPanicked   = false;
+
+	// No se le cambia el modo. Echarlo del escuadrón aquí creaba un bucle:
+	// al silbarlo volvía a entrar, tocaba el agua en el mismo frame y salía
+	// otra vez, así que se quedaba clavado en la orilla para siempre. Sigue
+	// en el escuadrón; lo único que no puede es pisar el agua, y en cuanto
+	// el capitán vuelve a tierra lo sigue con normalidad.
+	return true;
+}
+#endif
+
 /**
  * @todo: Documentation
  */
@@ -1798,7 +1907,13 @@ void Piki::bounceCallback()
 		}
 	}
 
-	if (isDrownSurface && isAlive() && state != PIKISTATE_Dead && state != PIKISTATE_Dying && state != PIKISTATE_Pressed
+#if defined(PIKI_PC_PORT)
+	if (isDrownSurface && pcStepOutOfWater()) {
+		return;
+	}
+#endif
+
+	if (isDrownSurface && isAlive() && !pc_settings_get_piki_invincible() && state != PIKISTATE_Dead && state != PIKISTATE_Dying && state != PIKISTATE_Pressed
 	    && state != PIKISTATE_WaterHanged) {
 		seSystem->playSoundDirect(5, SEW_PIKI_WATERDROP, mSRT.t);
 		startMotion(PaniMotionInfo(PIKIANIM_TYakusui, this), PaniMotionInfo(PIKIANIM_TYakusui));
@@ -2007,6 +2122,16 @@ void Piki::collisionCallback(immut CollEvent& event)
 		return;
 	}
 
+#if defined(PIKI_PC_PORT)
+	// VS: un Pikmin lanzado que choca con el capitán rival lo tumba unos
+	// segundos (sin daño); mientras está en el suelo es invulnerable.
+	if (pc_vs_active() && collider->mObjType == OBJTYPE_Navi && getState() == PIKISTATE_Flying && mPlayerId >= 0
+	    && static_cast<Navi*>(collider)->mNaviID != mPlayerId) {
+		InteractFlick flick(this, 80.0f, 0.0f, atan2f(mVelocity.x, mVelocity.z));
+		collider->stimulate(flick);
+	}
+#endif
+
 	bool distCheck = true;
 	if (!mNavi->mForcePikiDistCheck && mNavi->mCStick.length() < 0.1f) {
 		distCheck = false;
@@ -2128,13 +2253,13 @@ void Piki::collisionCallback(immut CollEvent& event)
 		}
 	}
 
-	if (distCheck && collider->mObjType == OBJTYPE_Bomb && mColor == Yellow && !collider->isGrabbed() && collider->isVisible()
+	if (distCheck && collider->mObjType == OBJTYPE_Bomb && mColor == Yellow && pc_bbft_bomb_rocks() && !collider->isGrabbed() && collider->isVisible()
 	    && collider->isAlive() && mMode == PikiMode::FormationMode && !isHolding()) {
 		changeMode(PikiMode::PickMode, nullptr);
 		return;
 	}
 
-	if (distCheck && collider->mObjType == OBJTYPE_BombGen && mColor == Yellow && !collider->isGrabbed() && collider->isVisible()
+	if (distCheck && collider->mObjType == OBJTYPE_BombGen && mColor == Yellow && pc_bbft_bomb_rocks() && !collider->isGrabbed() && collider->isVisible()
 	    && collider->isAlive() && mMode == PikiMode::FormationMode && !isHolding()) {
 		mActiveAction->abandon(nullptr);
 		mActiveAction->mCurrActionIdx = PikiAction::Mine;
@@ -2243,7 +2368,7 @@ void Piki::setSpeed(f32 speedRatio)
 
 	f32 min = pikiMgr->mPikiParms->mPikiParms.mMinMoveSpeed() * scale;
 
-	mMoveSpeed = (max - min) * speedRatio + min;
+	mMoveSpeed = ((max - min) * speedRatio + min) * pc_randomizer_color_multiplier(mColor, PC_PIKI_MOVEMENT) * (pc_p2_is_white(this)?pc_p2_white_move_multiplier():pc_p2_move_multiplier(this));
 }
 
 /**
@@ -2261,7 +2386,7 @@ f32 Piki::getSpeed(f32 speedRatio)
 
 	f32 min = pikiMgr->mPikiParms->mPikiParms.mMinMoveSpeed() * scale;
 
-	return (max - min) * speedRatio + min;
+	return ((max - min) * speedRatio + min) * pc_randomizer_color_multiplier(mColor, PC_PIKI_MOVEMENT) * (pc_p2_is_white(this)?pc_p2_white_move_multiplier():pc_p2_move_multiplier(this));
 }
 
 /**
@@ -2278,7 +2403,7 @@ void Piki::setSpeed(f32 speedRatio, immut Vector3f& direction)
 		max = pikiMgr->mPikiParms->mPikiParms.mMaxBudMoveSpeed();
 	}
 
-	mMoveSpeed      = (max - min) * speedRatio + min;
+	mMoveSpeed      = ((max - min) * speedRatio + min) * pc_randomizer_color_multiplier(mColor, PC_PIKI_MOVEMENT) * (pc_p2_is_white(this)?pc_p2_white_move_multiplier():pc_p2_move_multiplier(this));
 	mTargetVelocity = mMoveSpeed * direction;
 }
 
@@ -2297,7 +2422,7 @@ void Piki::setSpeed(f32 speedRatio, f32 angle)
 
 	f32 min = pikiMgr->mPikiParms->mPikiParms.mMinMoveSpeed() * scale;
 
-	mMoveSpeed = (max - min) * speedRatio + min;
+	mMoveSpeed = ((max - min) * speedRatio + min) * pc_randomizer_color_multiplier(mColor, PC_PIKI_MOVEMENT) * (pc_p2_is_white(this)?pc_p2_white_move_multiplier():pc_p2_move_multiplier(this));
 	mTargetVelocity.set(mMoveSpeed * cosf(angle), 0.0f, mMoveSpeed * sinf(angle));
 }
 
@@ -2342,6 +2467,8 @@ void Piki::resetPosition(immut Vector3f& pos)
  */
 void Piki::init(Navi* navi)
 {
+	pc_p2_purple_flight_cancel(this);
+	pc_p2_purple_impact_forget(this);
 	mHorizontalRotation = 0.0f;
 	mVerticalRotation   = 0.0f;
 	mSRT.s.set(1.0f, 1.0f, 1.0f);
@@ -2357,6 +2484,9 @@ void Piki::init(Navi* navi)
 	mLeaderCreature   = nullptr;
 	mInWaterTimer     = 0;
 	mFiredState       = 0;
+#if defined(PIKI_PC_PORT)
+	mPcSieging = false; // VS: el objeto se recicla; no heredar el asedio de otro Pikmin
+#endif
 	mIsCallable       = true;
 	mLastAnimPosition.set(0.0f, 0.0f, 0.0f);
 	unsetEraseKill();
@@ -2495,9 +2625,14 @@ void Piki::updateLookCreature()
  */
 void Piki::doAnimation()
 {
+    if(pc_p2_is_purple(this)||pc_p2_is_white(this))mP2AnimationTime+=gsys->getFrameTime();
 	updateWalkAnimation();
 	mLastAnimPosition = mSRT.t;
-	mPikiAnimMgr.updateAnimation(mMotionSpeed);
+	// Change only attack loops, not walking, thrown arcs, plucking or cutscenes.
+    const int motion = mPikiAnimMgr.getUpperAnimator().getCurrentMotionIndex();
+    const bool attackLoop = motion == PIKIANIM_Attack || motion == PIKIANIM_Kuttuku
+        || (motion == PIKIANIM_Job2 && mMode == PikiMode::BreakwallMode);
+    mPikiAnimMgr.updateAnimation(mMotionSpeed, attackLoop ? pc_randomizer_color_multiplier(mColor, PC_PIKI_ATTACK_RATE) : 1.0f);
 }
 
 /**
@@ -2682,6 +2817,14 @@ void Piki::realAI()
 		}
 	}
 
+#if defined(PIKI_PC_PORT)
+	// Caminar al agua entra por aquí, no por bounceCallback: el rescate tiene
+	// que estar en los dos caminos.
+	if (isInWater && pcStepOutOfWater()) {
+		isInWater = false;
+	}
+#endif
+
 	if (isInWater && getState() != PIKISTATE_WaterHanged) {
 		if (mInWaterTimer == 0) {
 			EffectParm rippleParm(&mShadowPos);
@@ -2702,7 +2845,7 @@ void Piki::realAI()
 		}
 
 		if (state != PIKISTATE_Swallowed && state != PIKISTATE_Dead && state != PIKISTATE_Dying && state != PIKISTATE_Pressed
-		    && state != PIKISTATE_Drown && state != PIKISTATE_Flying && mColor != Blue && isAlive()) {
+		    && state != PIKISTATE_Drown && state != PIKISTATE_Flying && mColor != Blue && isAlive() && !pc_settings_get_piki_invincible()) {
 			if (mInWaterTimer >= int(gsys->getRand(1.0f) * pikiMgr->mPikiParms->mPikiParms.mRandStartDrownFrames())
 			                         + pikiMgr->mPikiParms->mPikiParms.mMinStartDrownFrames()) {
 				startMotion(PaniMotionInfo(PIKIANIM_TYakusui, this), PaniMotionInfo(PIKIANIM_TYakusui));
@@ -2710,6 +2853,13 @@ void Piki::realAI()
 			}
 		}
 	} else {
+#if defined(PIKI_PC_PORT)
+		// Suelo seco: lo recordamos por si hay que devolverlo aquí.
+		if (mGroundTriangle) {
+			mPcLastDryPos = mSRT.t;
+			mPcHasDryPos  = true;
+		}
+#endif
 		if (mInWaterTimer) {
 			mInWaterTimer = 0;
 			mRippleEffect->kill();
@@ -2739,6 +2889,12 @@ immut char* Piki::getCurrentMotionName()
  */
 void Piki::doAI()
 {
+	// Yield only while the receiver still owns this live attachment/travel.
+	if (pc_p2_kurage_receiver_controls(this)) {
+		_500.clear();
+		return;
+	}
+
 	int state = getState();
 	if (state == PIKISTATE_Unk34) {
 		mFaceDirection += 1.2f * (HALF_PI * gsys->getFrameTime());
@@ -2765,9 +2921,35 @@ void Piki::doAI()
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+/**
+ * @brief Mod "Charge": manda este Pikmin contra un objetivo concreto.
+ *
+ * changeMode(AttackMode) pasa el capitán y deja que ActAttack elija por su
+ * cuenta; aquí el objetivo es el que el jugador ha fijado, así que se inicia
+ * la acción con él directamente.
+ */
+void Piki::pcChargeAt(Creature* target)
+{
+	if (!target || playerState->inDayEnd()) {
+		return;
+	}
+	mActiveAction->abandon(nullptr);
+	mActiveAction->mCurrActionIdx = PikiAction::Attack;
+	mActiveAction->mChildActions[mActiveAction->mCurrActionIdx].initialise(target);
+}
+#endif
+
 void Piki::changeMode(int newMode, Navi* navi)
 {
 	STACK_PAD_VAR(6); // idk
+#if defined(PIKI_PC_PORT)
+	// VS: un Pikmin sin dueño pasa a ser del capitán a cuyo grupo entra
+	// (arrancarlo, silbarlo o tocarlo acaban aquí).
+	if (pc_vs_active() && newMode == PikiMode::FormationMode && navi && mPlayerId < 0) {
+		mPlayerId = navi->mNaviID;
+	}
+#endif
 	mActiveAction->abandon(nullptr);
 	switch (newMode) {
 	case PikiMode::FreeMode:

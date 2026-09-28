@@ -8,6 +8,32 @@
 #include "zen/TexAnim.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_gfx.h"
+#include <cstring>
+#include <cstdio>
+#endif
+
+
+#if defined(PIKI_PC_PORT)
+void zen::MessageMgr::setFieldLimit(int limit)
+{
+	P2DTextBox* boxes[] = {mRedTextBoxes[MSG_SquadTotalFull], mRedShadowBoxes[MSG_SquadTotalFull],
+	    mBlueTextBoxes[MSG_SquadTotalFull], mBlueShadowBoxes[MSG_SquadTotalFull],
+	    mYellowTextBoxes[MSG_SquadTotalFull], mYellowShadowBoxes[MSG_SquadTotalFull],
+	    mRedTextBoxes[MSG_SquadCapacityFull], mRedShadowBoxes[MSG_SquadCapacityFull],
+	    mBlueTextBoxes[MSG_SquadCapacityFull], mBlueShadowBoxes[MSG_SquadCapacityFull],
+	    mYellowTextBoxes[MSG_SquadCapacityFull], mYellowShadowBoxes[MSG_SquadCapacityFull]};
+	for (int i = 0; i < 12; ++i) {
+		const char* original = mFieldLimitTemplates[i];
+		const char* number = original ? std::strstr(original, "100") : nullptr;
+		if (!number) continue;
+		// Preserve localized text and embedded formatting; retain the original for later upgrades.
+		const size_t capacity = std::strlen(original) + 12;
+		if (!mFieldLimitText[i]) mFieldLimitText[i] = new char[capacity];
+		std::snprintf(mFieldLimitText[i], capacity, "%.*s%d%s", int(number - original), original, limit, number + 3);
+		boxes[i]->setString(mFieldLimitText[i]);
+	}
+}
+#include "settings/pc_settings.h"
 #endif
 
 /**
@@ -32,6 +58,15 @@ const f32 zen::WindowPaneMgr::weightPosGravity = 9.8f;
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+zen::DrawContainer::DrawContainer(int playerNum)
+    : DrawContainer()
+{
+	// El menú lee su propio Controller; P2 lee el pad 1.
+	mController->reset(playerNum);
+}
+#endif
+
 zen::DrawContainer::DrawContainer()
     : mZenController(nullptr)
 {
@@ -167,6 +202,9 @@ void zen::DrawContainer::start(zen::DrawContainer::containerType color, int p2, 
 		mSquadCapacity         = p5;
 		mSquadTotalCount       = p6;
 		mSquadTotalLimit       = p7;
+#if defined(PIKI_PC_PORT)
+		mMessageMgr->setFieldLimit(mSquadTotalLimit);
+#endif
 		mFrameTimer            = 0.0f;
 
 		setDispParam();
@@ -249,6 +287,20 @@ bool zen::DrawContainer::operationStatus()
 	mWindowPaneMgr->update(WindowPaneMgr::MODE_Hold, 0.0f, 0.0f);
 	mMarkerPicture->move(RoundOff(NMathF::sin(mFrameTimer) * 50.0f + mMarkerBasePosition.x),
 	                     RoundOff(NMathF::sin(2.0f * mFrameTimer) * 30.0f + mMarkerBasePosition.y));
+#if defined(PIKI_PC_PORT)
+	// Mod "Onion: Y for Steps of 10": con Y sujeto, cada pulsación o
+	// repetición de arriba/abajo mueve 10 de golpe. Los topes de abajo recortan
+	// al máximo posible y avisan igual que con pasos de 1.
+	const bool pcStep10 = pc_settings_get_onion_step10() && mController->keyDown(KBBTN_Y);
+	if (pcStep10) {
+		mTransferSpeed = 0.0f;
+		if (mZenController.keyRepeat(KBBTN_MSTICK_UP) || mController->keyClick(KBBTN_MSTICK_UP)) {
+			mTransferDelta += 10;
+		} else if (mZenController.keyRepeat(KBBTN_MSTICK_DOWN) || mController->keyClick(KBBTN_MSTICK_DOWN)) {
+			mTransferDelta -= 10;
+		}
+	} else
+#endif
 	if (mZenController.keyRepeat(KBBTN_MSTICK_UP) || mController->keyClick(KBBTN_MSTICK_UP)) {
 		if (mController->keyClick(KBBTN_MSTICK_UP)) {
 			mTransferSpeed = 1.0f;
@@ -399,10 +451,13 @@ void zen::DrawContainer::draw(Graphics& gfx)
 	if (mIsActive) {
 #if defined(PIKI_PC_PORT)
 		pc_gfx_set_hud_wide(1);
+		// En pantalla partida el tamaño virtual puede ser 640 x (>480):
+		// el menú se centra también en vertical.
 		const int virtW = pc_gfx_get_hud_virtual_width();
-		P2DPerspGraph graph(0, 0, virtW, 480, 30.0f, 1.0f, 5000.0f);
+		const int virtH = pc_gfx_get_hud_virtual_height();
+		P2DPerspGraph graph(0, 0, virtW, virtH, 30.0f, 1.0f, 5000.0f);
 		graph.setPort();
-		mScreen.draw((virtW - 640) / 2, 0, &graph);
+		mScreen.draw((virtW - 640) / 2, (virtH - 480) / 2, &graph);
 		pc_gfx_set_hud_wide(0);
 #else
 		mPerspGraph->setPort();

@@ -1,3 +1,4 @@
+#include "pc_p2_campaign_actor.h"
 #include "Age.h"
 #include "DebugLog.h"
 #include "Dolphin/os.h"
@@ -6,6 +7,15 @@
 #include "TekiPersonality.h"
 #include "sysNew.h"
 #include "teki.h"
+#include "pc_randomizer.h"
+#include "pc_p2_generated_placement.h"
+#include "pc_p2_kabuto_host.h"
+#include "pc_p2_placement_probe.h"
+#include <cstdio>
+
+static bool randomizerProtected(TekiPersonality* personality) {
+    return personality->mID.mId != 'none' || personality->getI(TekiPersonality::INT_Parameter0) != 0;
+}
 
 /**
  * @todo: Documentation
@@ -71,7 +81,7 @@ void GenObjectTeki::doWrite(RandomAccessStream& output)
 /**
  * @todo: Documentation
  */
-void GenObjectTeki::updateUseList(Generator*, int)
+void GenObjectTeki::updateUseList(Generator* generator, int)
 {
 	if (mTekiType < TEKI_START || mTekiType >= TEKI_TypeCount) {
 		ERROR("GenObjectTeki::updateUseList:kind:%d\n", mTekiType);
@@ -79,6 +89,13 @@ void GenObjectTeki::updateUseList(Generator*, int)
 	}
 
 	tekiMgr->mUsingType[mTekiType] = true;
+    // Keep original generator identity; reserve replacement assets before birth.
+    const int replacement = pc_randomizer_enemy_for_generator(mTekiType, randomizerProtected(mPersonality), generator);
+    tekiMgr->mUsingType[replacement] = true;
+    // Replacements may spawn their own actors (Cannon Beetle boulders).
+    const int replacementSpawn = tekiMgr->mTekiParams[replacement]->getI(TPI_SpawnType);
+    if (replacementSpawn >= TEKI_START && replacementSpawn < TEKI_TypeCount)
+        tekiMgr->mUsingType[replacementSpawn] = true;
 
 	if (!tekiMgr->hasType(mTekiType)) {
 		ERROR("!tekiMgr->hasType(kind)\n");
@@ -96,7 +113,9 @@ void GenObjectTeki::updateUseList(Generator*, int)
  */
 Creature* GenObjectTeki::birth(BirthInfo& info)
 {
-	Teki* teki = tekiMgr->newTeki(mTekiType);
+    const bool protectedSpawn = randomizerProtected(mPersonality);
+    const int replacement = pc_randomizer_enemy_for_generator(mTekiType, protectedSpawn, info.mGenerator);
+	Teki* teki = tekiMgr->newTeki(replacement);
 	if (!teki) {
 		return nullptr;
 	}
@@ -113,6 +132,33 @@ Creature* GenObjectTeki::birth(BirthInfo& info)
 	}
 
 	teki->mRebirthDay = info.mGenerator->getRebirthDay();
+    if (pc_randomizer_spawn_slots())
+        std::printf("ENEMY_SLOT_BIRTH uid=%u original=%d actual=%d\n", pc_randomizer_generator_id(info.mGenerator), mTekiType, replacement);
+    if (pc_randomizer_enemy_shuffle())
+        std::printf("[Pikmin Randomizer] ENEMY_SPAWN original=%d actual=%d protected=%d x=%.1f z=%.1f\n", mTekiType, replacement, int(protectedSpawn), info.mPosition.x, info.mPosition.z);
+    if (pc_randomizer_p2_bridge() && info.mGenerator) {
+        const unsigned uid = pc_randomizer_generator_id(info.mGenerator);
+        const unsigned source = pc_randomizer_p2_source_for_id(uid);
+        if (source) {
+            std::printf("P2_SEED_RESOLVE source_id=%u target=%u original_type=%d x=%.1f z=%.1f\n",
+                        source, uid, int(mTekiType), info.mPosition.x, info.mPosition.z);
+            // Generated placement (lane 03/04): claim the spawned actor for its
+            // seeded P2 identity module instead of leaving it as a P1 stand-in.
+            // wf7 dweevil-impl (#871): pass the seed uid as the generator id.
+            // The newborn BTeki has no mGenerator yet, so its campaign token
+            // reads 0 here; passing the token created a bogus generator=0
+            // Otakara registration (one actor claimed under two identities).
+            pc_p2_generated_placement_bind(static_cast<BTeki*>(teki), source, uid, uid);
+            // Cannon Beetle family generated-session host (lane 20, #424): no-op
+            // for every source outside 75/95/96.
+            pc_p2_kabuto_bind_dynamic(teki, uid, source);
+            // Lane-04 placement evidence: sample the generated slot's terrain/route
+            // at the birth position. Additive; the slot uid is already resolved.
+            if (uid)
+                pc_p2_placement_probe_birth(info.mPosition.x, info.mPosition.y, info.mPosition.z,
+                                            info.mGenerator->_70, uid, replacement);
+        }
+    }
 	return teki;
 }
 

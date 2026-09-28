@@ -1,4 +1,9 @@
+#include "pc_p2_purple.h"
+#include "pc_p2_cargo_ground.h"
+#include "pc_randomizer.h"
 #include "AIPerf.h"
+#include "pc_bbft.h"
+#include "pc_p2_preview.h"
 #include "Age.h"
 #include "DebugLog.h"
 #include "EffectMgr.h"
@@ -447,13 +452,24 @@ void Pellet::startGoal()
  */
 void Pellet::doCarry(Creature* carryingPiki, immut Vector3f& direction, u16 carrierCount)
 {
+    f32 movement = 1.0f;
+    if (pc_randomizer_color_stats() && carryingPiki->isPiki()) {
+        Stickers crew(this); Iterator it(&crew); int bodies = 0; f32 sum = 0.0f;
+        CI_LOOP(it) {
+            Creature* carrier = *it;
+            if (carrier && carrier->isPiki()) {
+                ++bodies; sum += pc_randomizer_color_multiplier(static_cast<Piki*>(carrier)->mColor, PC_PIKI_MOVEMENT);
+            }
+        }
+        if (bodies) movement = sum / bodies;
+    }
 	if (mCarryState == 1) {
 		mTransitionTimer -= gsys->getFrameTime();
 		if (mTransitionTimer <= 0.0f) {
 			mCarryState = 2;
 		}
 
-		mCarryDirection = direction * 0.5f;
+		mCarryDirection = direction * (0.5f * movement);
 		return;
 	}
 
@@ -469,7 +485,7 @@ void Pellet::doCarry(Creature* carryingPiki, immut Vector3f& direction, u16 carr
 			return;
 		}
 
-		mCarryDirection = direction;
+		mCarryDirection = direction * movement;
 		mPikiCarrier    = carryingPiki;
 		mCarrierCount   = carrierCount;
 		PRINT("%s win\n", ObjType::getName(mPikiCarrier->mObjType));
@@ -479,7 +495,7 @@ void Pellet::doCarry(Creature* carryingPiki, immut Vector3f& direction, u16 carr
 		return;
 	}
 
-	mCarryDirection = direction;
+	mCarryDirection = direction * movement;
 	mPikiCarrier    = carryingPiki;
 	mCarrierCount   = carrierCount;
 }
@@ -761,7 +777,7 @@ Vector3f Pellet::getSlotGlobalPos(int slotID, f32 offset)
  */
 void Pellet::initSlotFlags()
 {
-	mSlotFlags[0] = mSlotFlags[1] = mSlotFlags[2] = 0;
+    for(int& flags:mSlotFlags)flags=0;
 }
 
 /**
@@ -901,7 +917,7 @@ void Pellet::init(immut Vector3f& pos)
 bool Pellet::isFree()
 {
 	// mSlotFlags needs to be int for resetSlotFlags, this seems to be the easier fix
-	if ((u32)(mSlotFlags[0]) == 0 && (u32)(mSlotFlags[1]) == 0 && (u32)(mSlotFlags[2]) == 0) {
+	if ((u32)(mSlotFlags[0]) == 0 && (u32)(mSlotFlags[1]) == 0 && (u32)(mSlotFlags[2]) == 0 && (u32)(mSlotFlags[3]) == 0) {
 		return true;
 	}
 	return false;
@@ -1153,6 +1169,13 @@ static u32 bounceSounds[] = {
  */
 void Pellet::update()
 {
+    if (mConfig && isUfoParts() && playerState->isBbftRestoredPart(mConfig->mModelId.mId)) {
+        // Native kill releases carriers, collision, generator and sound state.
+        // This also removes late enemy drops and already-spawned remote checks.
+        pc_bbft_milestone("PIKMIN_PART_REPLAY_PELLET_REMOVED");
+        kill(false);
+        return;
+    }
 #if defined(VERSION_PIKIDEMO)
 #define ASSERT_POSITION_NOTNAN       \
 	/* Yeah, just the X position. */ \
@@ -1205,7 +1228,7 @@ void Pellet::update()
 	{
 		Creature* piki = *iter;
 		if (piki && piki->isPiki()) {
-			carryCount++;
+			carryCount += pc_piki_carry_strength(static_cast<Piki*>(piki));
 		}
 	}
 
@@ -1228,7 +1251,7 @@ void Pellet::update()
 			{
 				Creature* piki = *iter2;
 				if (piki && piki->isPiki()) {
-					carryCount2++;
+					carryCount2 += pc_piki_carry_strength(static_cast<Piki*>(piki));
 				}
 			}
 
@@ -1257,6 +1280,14 @@ void Pellet::update()
 			mVelocity.x = mCarryDirection.x;
 			mVelocity.z = mCarryDirection.z;
 			mVelocity.y += mCarryDirection.y;
+			if (pc_p2_purples_enabled() && pc_p2_preview_cargo_shape(this)
+			    && mPikiCarrier->isPiki() && getPickOffset() != 0.0f
+			    && mCarrierCounter >= mConfig->mCarryMinPikis()
+			    && mGroundTriangle && !mCollPlatform && mCurrCollisionModel == mapMgr->mMapModel) {
+				const Vector3f& normal = mGroundTriangle->mTriangle.mNormal;
+				mVelocity.y = pc_p2_cargo_uphill_velocity(mVelocity.x, mVelocity.z, mVelocity.y,
+				                                             normal.x, normal.y, normal.z);
+			}
 		}
 
 		if (mapMgr->getMinY(mSRT.t.x, mSRT.t.z, true) > mSRT.t.y) {
@@ -1390,7 +1421,8 @@ void Pellet::doRender(Graphics& gfx, Matrix4f& mtx)
 	}
 
 	if (aiCullable()) {
-		mShapeObject->mShape->drawshape(gfx, *gfx.mCamera, &mAnimatedMaterials);
+		if (!pc_p2_preview_draw(this, gfx, mtx))
+			mShapeObject->mShape->drawshape(gfx, *gfx.mCamera, &mAnimatedMaterials);
 	}
 }
 

@@ -1,4 +1,12 @@
+#include "pc_randomizer.h"
+#include "pc_p2_preview.h"
+#include "pc_bbft.h"
 #include "GoalItem.h"
+#include "FlowController.h"
+#include "teki.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_coop.h"
+#endif
 #include "BaseInf.h"
 #include "CreatureCollPart.h"
 #include "DebugLog.h"
@@ -344,6 +352,41 @@ Vector3f GoalItem::getSuckPos()
 void GoalItem::suckMe(Pellet* item)
 {
 	PelletConfig* config = item->mConfig;
+    // Non-ship pellets reach this callback after their absorption finishes.
+    // Corpse IDs identify the actual spawned species, including replacements.
+    if (pc_randomizer_collection_checks() && config->mPelletType() == PELTYPE_Corpse
+        && config->mPelletColor() == -1 && flowCont.mCurrentStage) {
+        for (int type = 0; type < TEKI_TypeCount; ++type) {
+            if (config->mModelId.mId == static_cast<u32>(TekiMgr::getTypeId(type))) {
+                const bool gameplay = !gameflow.mIsChallengeMode && !gameflow.mPauseAll
+                    && !gameflow.mIsUIOverlayActive && !gameflow.mMoviePlayer->mIsActive;
+                // Lane 06: a bound P2 corpse grants its own ordinary receipt identity;
+                // it must never ALSO credit the P1-proxy bestiary check. The delivery
+                // call returns true only when it handled a bound P2 source.
+                const bool deliveredP2 = item->mPelletView
+                    && pc_randomizer_p2_corpse_delivered(item->mPelletView, type,
+                        flowCont.mCurrentStage->mStageID, gameplay);
+                if (!deliveredP2) {
+                    // bot-unkilled (wf11): under the P2 bridge a Teki corpse with
+                    // a pellet view is a P2 actor's corpse even when unbound
+                    // (static-host families like dwarf_orange/otakara never bind
+                    // lane-06, and consumed single-use bindings read unbound on
+                    // a recycled address). Its P1 host type (e.g. 3/Chappy for
+                    // Wealthy/Fart/BlueKochappy/Otakara) must not mint the P1
+                    // host CHECK (e.g. Deliver Dwarf Bulborb) with zero P2
+                    // deaths. Bound P2 corpses already returned true above;
+                    // unbound P2-actor corpses grant nothing here.
+                    if (pc_randomizer_p2_bridge() && item->mPelletView) {
+                        std::printf("[Pikmin Randomizer] P2_P1_CHECK_SUPPRESSED host_type=%d stage=%d\n",
+                            type, flowCont.mCurrentStage->mStageID);
+                    } else {
+                        pc_randomizer_corpse_delivered(type, flowCont.mCurrentStage->mStageID, gameplay);
+                    }
+                }
+                break;
+            }
+        }
+    }
 	int pikiNum;
 	if (mOnionColour == config->mPelletType()) {
 		pikiNum = config->mMatchingOnyonSeeds();
@@ -388,6 +431,13 @@ void GoalItem::enterGoal(Piki* piki)
  */
 void GoalItem::exitPikis(int pikis)
 {
+    if (pc_randomizer_expanded()) {
+        int available = pc_randomizer_field_capacity() - int(GameStat::mapPikis) - itemMgr->getContainerExitCount();
+        if (available <= 0 || pikis <= 0) return;
+        if (pikis > available) pikis = available;
+    }
+
+    if (!pc_bbft_color_access(mOnionColour)) return;
 	mIsDispensingPikis = true;
 	mPikisToExit += pikis;
 	mPikiSpawnTimer = 0.0f;
@@ -398,6 +448,7 @@ void GoalItem::exitPikis(int pikis)
  */
 Piki* GoalItem::exitPiki()
 {
+    if (!pc_bbft_color_access(mOnionColour)) return nullptr;
 	int leg = gsys->getRand(1.0f) * 3.0f;
 	if (leg >= 3) {
 		leg = 2;
@@ -415,11 +466,22 @@ Piki* GoalItem::exitPiki()
 	}
 
 	Navi* navi = naviMgr->getNavi();
+#if defined(PIKI_PC_PORT)
+	// VS: salen hacia el capitán dueño de la cebolla.
+	if (pc_vs_active() && mPcOwner >= 0 && naviMgr->getNavi(mPcOwner)) navi = naviMgr->getNavi(mPcOwner);
+#endif
 	piki->init(navi);
 	piki->resetPosition(legColl->mCentre);
 
 	// always pull the highest stage pikmin out first
 	int happa;
+#if defined(PIKI_PC_PORT)
+	// VS: cada cebolla tiene su propio almacén; el recuento global mezcla a
+	// los dos jugadores.
+	if (pc_vs_active()) {
+		happa = mHeldPikis[Flower] > 0 ? Flower : (mHeldPikis[Bud] > 0 ? Bud : Leaf);
+	} else
+#endif
 	if (pikiInfMgr.mPikiCounts[mOnionColour][Flower] > 0) {
 		happa = Flower;
 	} else if (pikiInfMgr.mPikiCounts[mOnionColour][Bud] > 0) {
@@ -429,6 +491,9 @@ Piki* GoalItem::exitPiki()
 	}
 	piki->setFlower(happa);
 	piki->initColor(mOnionColour);
+#if defined(PIKI_PC_PORT)
+	if (pc_vs_active()) piki->mPlayerId = mPcOwner;
+#endif
 	pikiInfMgr.decPiki(piki);
 	piki->mSRT.s.set(1.0f, 1.0f, 1.0f);
 	piki->mFSM->transit(piki, PIKISTATE_Normal);
@@ -678,6 +743,7 @@ void GoalItem::startAI(int)
  */
 void GoalItem::startBoot()
 {
+    if (!pc_bbft_color_access(mOnionColour)) return;
 	_3CC = 3;
 	setMotionSpeed(30.0f);
 	C_SAI(this)->start(this, GoalAI::GOAL_BootInit);
@@ -689,6 +755,7 @@ void GoalItem::startBoot()
  */
 void GoalItem::emitPiki()
 {
+    if (!pc_bbft_color_access(mOnionColour)) return;
 	C_SAI(this)->start(this, GoalAI::GOAL_Unk2);
 }
 
@@ -792,8 +859,9 @@ void GoalItem::refresh(Graphics& gfx)
 	mAnimatedMaterials.animate(&rate);
 	mItemShapeObject->mShape->updateAnim(gfx, mtx1, nullptr, this);
 	if (aiCullable()) {
-		mItemShapeObject->mShape->drawshape(gfx, *gfx.mCamera, &mAnimatedMaterials);
+        if(!pc_p2_preview_draw_pod(this,gfx,mtx1))mItemShapeObject->mShape->drawshape(gfx, *gfx.mCamera, &mAnimatedMaterials);
 	}
+    if(pc_p2_preview_is_pod(this))mSpotModelEff->mIsVisible=false;
 	mCollInfo->updateInfo(gfx, false);
 
 	for (int i = 0; i < 3; i++) {
