@@ -34,6 +34,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <map>
 #include <string>
 #include <utility>
@@ -158,5 +159,16 @@ private:
 	uint32_t mNext = 0;
 	std::map<uint32_t, std::vector<uint32_t>> mHeld; // firstIndex -> ids
 };
+
+// ---- stream-host state.txt change stamp ----
+// The stream host must notice every state.txt rewrite. libstdc++ on MinGW
+// implements std::filesystem::last_write_time through stat (whole seconds),
+// so two rewrites inside one second looked identical and the second was
+// only seen at the next rewrite in a later second (or never, for a writer
+// that rewrites only on change); back-to-back changes coalesced into one
+// generation. On Windows this reads the 100 ns FILETIME last-write time
+// (GetFileAttributesExW); elsewhere it falls back to last_write_time.
+// Returns false when the file cannot be stat'ed (missing).
+bool file_write_stamp(const std::filesystem::path& path, uint64_t* out);
 
 } // namespace pc_rand_outbox

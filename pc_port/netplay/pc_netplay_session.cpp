@@ -2715,6 +2715,8 @@ void pc_netplay_randstate_publish(const pc_randstate::PcRandState& st)
 	// queued, which is older; without this the stale queued snapshot went
 	// out after this one and cost 16 submits for a receiver-side no-op.
 	sRandHaveQueued = false;
+	printf("[netplay] randstate gen=%u published (host)\n", st.gen);
+	fflush(stdout);
 }
 
 // ---- Netplay M4 lane B1 public hooks (issue #885) ----

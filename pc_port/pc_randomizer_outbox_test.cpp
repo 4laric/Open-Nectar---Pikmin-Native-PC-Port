@@ -6,9 +6,13 @@
 
 #include "pc_randomizer_outbox.h"
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <thread>
 #include <string>
 #include <utility>
 #include <vector>
@@ -289,6 +293,32 @@ int main()
 		for (uint32_t i = 0; i < ReceivedSequencer::kMaxHeld + 1; ++i)
 			if (!full.offer(10 + 2 * i, { 1 }, out)) dropped = true;
 		CHECK(dropped && full.held() == ReceivedSequencer::kMaxHeld, "held messages are bounded");
+	}
+
+	// 6. Stream-host change stamp: two rewrites 20 ms apart (inside one
+	// second) must give different stamps; a missing file reports false.
+	{
+		namespace fs = std::filesystem;
+		const fs::path f = fs::temp_directory_path()
+		    / ("pc_randomizer_outbox_test_stamp_"
+		       + std::to_string((unsigned long long)std::chrono::steady_clock::now().time_since_epoch().count())
+		       + ".txt");
+		uint64_t a = 0, b = 0;
+		{
+			std::ofstream o(f);
+			o << "one";
+		}
+		CHECK(file_write_stamp(f, &a), "stamp of an existing file");
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+		{
+			std::ofstream o(f);
+			o << "two";
+		}
+		CHECK(file_write_stamp(f, &b), "stamp after a rewrite");
+		CHECK(a != b, "rewrites 20 ms apart get different stamps (sub-second resolution)");
+		std::error_code ec;
+		fs::remove(f, ec);
+		CHECK(!file_write_stamp(f, &a), "missing file has no stamp");
 	}
 
 	if (sFailures == 0) std::printf("pc_randomizer_outbox_test: PASS\n");

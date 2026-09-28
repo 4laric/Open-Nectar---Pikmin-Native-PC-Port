@@ -215,6 +215,10 @@ bool ledgerMissingLogged = false;
 // Host link liveness (HOLD source): state.txt readable, parsed, ready=1 and
 // its stamp changed within 3 s. Computed on the host I/O side only.
 bool linkStateOk = false, linkReady = false;
+// Stream host only: the fine (100 ns) state.txt stamp (see
+// pc_rand_outbox::file_write_stamp); the legacy path keeps lastStamp.
+uint64_t lastFineStamp = 0;
+bool haveFineStamp = false;
 bool outbox_active() {
     return pc_netplay_session_active != nullptr && pc_netplay_session_active()
         && pc_netplay_randstate_stream_enabled != nullptr && pc_netplay_randstate_stream_enabled();
@@ -705,6 +709,28 @@ void ledger_refresh() {
     } while (ledgerSent < ledger.received.size());
     std::fflush(stdout);
 }
+// Stream host, after a successful parse: link liveness, publish on content
+// change only (the run_pair refresher rewrites state.txt every 0.1 s with
+// identical bytes, and a rewrite alone must not bump the generation: each
+// generation costs 16 submits). While a HOLD is requested or in progress
+// nothing is published here; the RESUME snapshot
+// (pc_randomizer_resume_snapshot) carries the latest content with a fresh
+// generation instead.
+void stream_host_take(const ParsedRand& parsed) {
+    linkStateOk = true;
+    linkReady = parsed.ready != 0;
+    lastFresh = std::chrono::steady_clock::now();
+    pc_randstate::PcRandState st;
+    net_from_parsed(parsed, 0, st);
+    const bool holding = pc_netplay_hold_active != nullptr && pc_netplay_hold_active();
+    if (holding || (sHavePublished && pc_randstate::payload_equal(st, sLastPublished))) return;
+    if (++sNetGen == 0) fail("randomizer snapshot generation wrapped");
+    st.gen = sNetGen; // first published generation is 1
+    sLastPublished = st;
+    sHavePublished = true;
+    if (pc_netplay_randstate_publish != nullptr) pc_netplay_randstate_publish(st);
+    ledger_refresh(); // B1: the mirror ledger follows each generation
+}
 } // namespace
 
 void pc_randomizer_update() {
@@ -722,48 +748,39 @@ void pc_randomizer_update() {
         && pc_netplay_randstate_stream_enabled();
     const bool isHost = !stream || pc_netplay_is_host == nullptr || pc_netplay_is_host();
     if (stream && !isHost) return; // client: stream only
+    if (stream) {
+        // B1: the stream host detects every rewrite with the fine stamp, so
+        // changes inside one second are never coalesced or lost.
+        uint64_t fine = 0;
+        if (!pc_rand_outbox::file_write_stamp(directory / "state.txt", &fine)) { linkStateOk = false; return; }
+        if (haveFineStamp && fine == lastFineStamp) return;
+        std::ifstream input(directory / "state.txt");
+        if (!input.is_open()) return; // replace in progress: retry next turn
+        ParsedRand parsed;
+        parse_state_stream(input, parsed); // fail-closed, exactly as before
+        lastFineStamp = fine;
+        haveFineStamp = true;
+        stream_host_take(parsed);
+        return;
+    }
     std::error_code error;
     const auto stamp = std::filesystem::last_write_time(directory / "state.txt", error);
-    // In stream mode the poll never mutates sim-visible state (not even
-    // ready=false on errors): the host sim changes only through stream
-    // applies, so both peers stay identical. B1: the poll feeds the host's
-    // link liveness instead (pc_randomizer_link_live), which drives the
-    // synchronized HOLD/RESUME.
-    if (error) { if (!stream) ready = false; else linkStateOk = false; return; }
+    // Legacy (no stream) poll from here on. The stream host above never
+    // mutates sim-visible state (not even ready=false on errors): the host
+    // sim changes only through stream applies, so both peers stay
+    // identical; its poll feeds the link liveness (pc_randomizer_link_live)
+    // that drives the synchronized HOLD/RESUME instead.
+    if (error) { ready = false; return; }
     if (stamp == lastStamp) {
-        if (!stream && std::chrono::steady_clock::now() - lastFresh > std::chrono::seconds(3)) ready = false;
+        if (std::chrono::steady_clock::now() - lastFresh > std::chrono::seconds(3)) ready = false;
         return;
     }
     std::ifstream input(directory / "state.txt");
     // Windows may briefly deny opening a file being atomically replaced.
     // Pause and retry; an opened but malformed record still fails closed.
-    if (!input.is_open()) { if (!stream) ready = false; return; }
+    if (!input.is_open()) { ready = false; return; }
     ParsedRand parsed;
     parse_state_stream(input, parsed); // fail-closed, exactly as before
-    if (stream) {
-        linkStateOk = true;
-        linkReady = parsed.ready != 0;
-        pc_randstate::PcRandState st;
-        net_from_parsed(parsed, 0, st);
-        // Publish on content change only: the run_pair refresher rewrites
-        // state.txt every 0.1 s with identical bytes, and the stamp alone
-        // must not bump the generation (each generation costs 16 submits).
-        // B1: while a HOLD is requested or in progress nothing is published
-        // here; the RESUME snapshot (pc_randomizer_resume_snapshot) carries
-        // the latest content with a fresh generation instead.
-        const bool holding = pc_netplay_hold_active != nullptr && pc_netplay_hold_active();
-        if (!holding && (!sHavePublished || !pc_randstate::payload_equal(st, sLastPublished))) {
-            if (++sNetGen == 0) fail("randomizer snapshot generation wrapped");
-            st.gen = sNetGen; // first published generation is 1
-            sLastPublished = st;
-            sHavePublished = true;
-            if (pc_netplay_randstate_publish != nullptr) pc_netplay_randstate_publish(st);
-            ledger_refresh(); // B1: the mirror ledger follows each generation
-        }
-        lastStamp = stamp;
-        lastFresh = std::chrono::steady_clock::now();
-        return;
-    }
     apply_parsed(parsed);
     lastStamp = stamp;
     lastFresh = std::chrono::steady_clock::now();
@@ -788,6 +805,7 @@ bool pc_randomizer_force_net_publish() {
     const bool isHost = !stream || pc_netplay_is_host == nullptr || pc_netplay_is_host();
     if (!stream || !isHost) return true;
     lastStamp = std::filesystem::file_time_type{};
+    haveFineStamp = false; // B1: the stream host polls the fine stamp
     linkStateOk = false; // proven again by this poll
     pc_randomizer_update();
     ledger_refresh();
@@ -815,9 +833,8 @@ bool pc_randomizer_link_live() {
 // closed like every other poll.
 bool pc_randomizer_resume_snapshot(pc_randstate::PcRandState* out) {
     if (!enabled || out == nullptr) return false;
-    std::error_code error;
-    const auto stamp = std::filesystem::last_write_time(directory / "state.txt", error);
-    if (error) return false;
+    uint64_t fine = 0;
+    if (!pc_rand_outbox::file_write_stamp(directory / "state.txt", &fine)) return false;
     std::ifstream input(directory / "state.txt");
     if (!input.is_open()) return false;
     ParsedRand parsed;
@@ -830,7 +847,8 @@ bool pc_randomizer_resume_snapshot(pc_randstate::PcRandState* out) {
     sHavePublished = true;
     linkStateOk = true;
     linkReady = parsed.ready != 0;
-    lastStamp = stamp;
+    lastFineStamp = fine;
+    haveFineStamp = true;
     lastFresh = std::chrono::steady_clock::now();
     ledger_refresh();
     *out = st;

@@ -3,6 +3,15 @@
 
 #include <cstdio>
 #include <cstring>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace pc_rand_outbox {
 
@@ -417,6 +426,23 @@ bool ReceivedSequencer::offer(uint32_t firstIndex, const std::vector<uint32_t>& 
 		}
 	}
 	return accepted;
+}
+
+bool file_write_stamp(const std::filesystem::path& path, uint64_t* out)
+{
+	if (out == nullptr) return false;
+#ifdef _WIN32
+	WIN32_FILE_ATTRIBUTE_DATA data;
+	if (!GetFileAttributesExW(path.wstring().c_str(), GetFileExInfoStandard, &data)) return false;
+	*out = ((uint64_t)data.ftLastWriteTime.dwHighDateTime << 32) | (uint64_t)data.ftLastWriteTime.dwLowDateTime;
+	return true;
+#else
+	std::error_code ec;
+	const auto t = std::filesystem::last_write_time(path, ec);
+	if (ec) return false;
+	*out = (uint64_t)t.time_since_epoch().count();
+	return true;
+#endif
 }
 
 } // namespace pc_rand_outbox
