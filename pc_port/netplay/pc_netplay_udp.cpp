@@ -681,9 +681,20 @@ void wr16(std::vector<uint8_t>& v, uint16_t w)
 	v.push_back((uint8_t)((w >> 8) & 0xFF));
 }
 
+// M4 lane B1: the whole 0x10..0x1F range is data, so B1's
+// kBulkMirrorLedger (0x14) and B2's types pass without touching this.
 bool is_data_type(uint8_t t)
 {
-	return t == kBulkRandFull || t == kBulkSaveResult || t == kBulkCheckpoint;
+	return t >= kBulkDataFirst && t <= kBulkDataLast;
+}
+
+// Backoff after the n-th transmission (n >= 1): 100, 200, 400, 800, then
+// capped at 1000 ms.
+double resend_interval_ms(unsigned sends)
+{
+	double ms = kBulkResendMs;
+	for (unsigned i = 1; i < sends && ms < kBulkResendMaxMs; ++i) ms *= 2.0;
+	return ms > kBulkResendMaxMs ? kBulkResendMaxMs : ms;
 }
 
 } // namespace
@@ -698,6 +709,7 @@ void BulkChannel::reset()
 	mComplete.clear();
 	mDoneIds.clear();
 	mNextMsgId = 1;
+	mResends = 0;
 }
 
 bool BulkChannel::send(uint8_t type, const uint8_t* data, size_t len)
@@ -841,11 +853,29 @@ std::vector<std::vector<uint8_t>> BulkChannel::poll_outgoing(double nowMs)
 	out.insert(out.end(), std::make_move_iterator(mAckQueue.begin()),
 	           std::make_move_iterator(mAckQueue.end()));
 	mAckQueue.clear();
+	// Retransmits of in-flight fragments first (their backoff is due), then
+	// first sends while the channel-wide window has room.
+	size_t inFlight = send_in_flight();
 	for (OutMsg& m : mOut) {
 		for (OutFrag& f : m.frags) {
-			if (f.acked) continue;
-			if (!(nowMs - f.lastSendMs >= kBulkResendMs)) continue;
+			if (f.acked || !f.sent) continue;
+			if (nowMs < f.nextSendMs) continue;
+			++f.sends;
+			++mResends;
 			f.lastSendMs = nowMs;
+			f.nextSendMs = nowMs + resend_interval_ms(f.sends);
+			out.push_back(f.bytes);
+		}
+	}
+	for (OutMsg& m : mOut) {
+		for (OutFrag& f : m.frags) {
+			if (f.acked || f.sent) continue;
+			if (inFlight >= kBulkMaxInFlight) return out;
+			f.sent = true;
+			f.sends = 1;
+			f.lastSendMs = nowMs;
+			f.nextSendMs = nowMs + resend_interval_ms(f.sends);
+			++inFlight;
 			out.push_back(f.bytes);
 		}
 	}
@@ -876,6 +906,17 @@ size_t BulkChannel::send_acked_frags() const
 	for (const OutMsg& m : mOut) {
 		for (const OutFrag& f : m.frags) {
 			if (f.acked) ++n;
+		}
+	}
+	return n;
+}
+
+size_t BulkChannel::send_in_flight() const
+{
+	size_t n = 0;
+	for (const OutMsg& m : mOut) {
+		for (const OutFrag& f : m.frags) {
+			if (f.sent && !f.acked) ++n;
 		}
 	}
 	return n;
