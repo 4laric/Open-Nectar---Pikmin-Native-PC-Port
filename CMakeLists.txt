@@ -436,6 +436,10 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_bigtreasure_elements.cpp
     pc_port/pc_p2_bigtreasure_receiver.cpp
     pc_port/pc_randomizer.cpp
+    # Netplay M4 lane A snapshot codec (issue #885): engine-free, linked in
+    # every build next to pc_randomizer.cpp (which calls it). New behaviour
+    # is opt-in at runtime, so default builds are byte-identical.
+    pc_port/netplay/pc_netplay_randstate.cpp
     pc_port/pc_p2_waterwraith.cpp
     pc_port/pc_p2_waterwraith_actor.cpp
     pc_port/pc_p2_kurage.cpp
@@ -712,7 +716,7 @@ if(WIN32)
     add_library(bbft_transport STATIC pc_port/bbft/bbft_transport.c)
     target_link_libraries(pikmin_pc PRIVATE bbft_transport ws2_32)
     target_link_libraries(p2_kurage_runtime PRIVATE bbft_transport ws2_32)
-    add_executable(pc_bbft_test pc_port/pc_bbft_test.cpp pc_port/pc_bbft.cpp pc_port/pc_randomizer.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp pc_port/netplay/pc_netplay_det.cpp pc_port/netplay/pc_sim_rng.cpp)
+    add_executable(pc_bbft_test pc_port/pc_bbft_test.cpp pc_port/pc_bbft.cpp pc_port/pc_randomizer.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp pc_port/netplay/pc_netplay_randstate.cpp pc_port/netplay/pc_netplay_det.cpp pc_port/netplay/pc_sim_rng.cpp)
     # The #871 proxy TU pulls the engine header chain (teki.h), which needs
     # the same forced pc_types.h preinclude as the rest of the build.
     target_compile_options(pc_bbft_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
@@ -1878,9 +1882,16 @@ endif()
 # Standalone adapter harness; exercises real file I/O without game assets.
 # Include the P2 ordinary delivery ledger because pc_randomizer.cpp always links
 # against its host entry points; this only changes probe linkage, not behavior.
-add_executable(pc_randomizer_probe pc_port/pc_randomizer_probe.cpp pc_port/pc_randomizer.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp)
+add_executable(pc_randomizer_probe pc_port/pc_randomizer_probe.cpp pc_port/pc_randomizer.cpp pc_port/netplay/pc_netplay_randstate.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp)
 # Same engine-header preinclude as pc_bbft_test above (pc_p2_proxy.cpp needs it).
 target_compile_options(pc_randomizer_probe PRIVATE ${NATIVE_COMPILE_OPTIONS})
+
+# Netplay M4 lane A snapshot codec + reassembler test (issue #885).
+# Engine-free (no gekkonet/game/SDL link), registered in every build.
+add_executable(pc_netplay_randstate_test pc_port/netplay/pc_netplay_randstate_test.cpp pc_port/netplay/pc_netplay_randstate.cpp)
+target_include_directories(pc_netplay_randstate_test PRIVATE pc_port)
+target_compile_options(pc_netplay_randstate_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME pc_netplay_randstate_test COMMAND pc_netplay_randstate_test)
 
 # Only the isolated diagnostic build includes scripted stock/death fixtures.
 option(PIKMIN_RANDOMIZER_TEST_HOOKS "Enable standalone scripted gameplay test fixtures" OFF)

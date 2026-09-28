@@ -13,6 +13,29 @@
 #ifdef _WIN32
 #include "bbft/bbft_transport.h"
 #endif
+// Netplay M4 lane A (issue #885): the external-state stream replaces the
+// local randomizer-ready hold while a session runs. Strong-defined by
+// pc_netplay_session.cpp in netplay builds only; null otherwise, where the
+// historical hold below runs unchanged.
+#if defined(__GNUC__)
+__attribute__((weak)) bool pc_netplay_session_active(void);
+__attribute__((weak)) bool pc_netplay_randstate_stream_enabled(void);
+#else
+bool pc_netplay_session_active(void);
+bool pc_netplay_randstate_stream_enabled(void);
+#endif
+namespace {
+bool netplay_randstate_stream_hold_exempt()
+{
+#if defined(__GNUC__)
+	return pc_netplay_session_active != nullptr && pc_netplay_session_active()
+	    && pc_netplay_randstate_stream_enabled != nullptr
+	    && pc_netplay_randstate_stream_enabled();
+#else
+	return false;
+#endif
+}
+} // namespace
 static bool enabled = false;
 static int challengeLevel = -1;
 static bool p2RoomPreview = false;
@@ -286,6 +309,12 @@ bool pc_bbft_hold() {
     // event is later netplay work.
     const bool detMode = pc_netplay_deterministic();
     if (pc_randomizer_enabled()) {
+        // M4a: with the external-state stream on, readiness arrives over the
+        // stream at the same tick on both peers; a local file-mtime hold
+        // would freeze the loop (including the netplay driver) before the
+        // first snapshot can apply. Never hold locally here; synchronized
+        // HOLD/RESUME is lane B work.
+        if (netplay_randstate_stream_hold_exempt()) return false;
 #ifdef _WIN32
         if (detMode) return !pc_randomizer_ready();
         const char* background = std::getenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND");

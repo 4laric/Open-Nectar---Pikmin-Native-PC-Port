@@ -26,6 +26,19 @@
 namespace pc_netplay_gekko {
 constexpr size_t kInputBytes = 16;
 constexpr uint8_t kFlagsNone = 0;
+// M4 lane A randomizer snapshot stream (issue #885): the host carries one
+// 64-byte PcRandState per 16 consecutive submits in the input spare bytes.
+//   flags bit 0  HAS_CHUNK  this input carries a snapshot fragment
+//   flags bit 1  CHUNK_LAST this fragment is index 15 (the last of 16)
+//   pad[11]      fragment sequence: high nibble stream id (0), low nibble
+//                fragment index 0..15 (see pc_netplay_randstate.h)
+//   pad[12..15]  4 payload bytes (snapshot bytes idx*4 .. idx*4+3)
+// The joiner never sets these bits. Inputs without HAS_CHUNK decode exactly
+// as before (pad bytes zero), so the wire is unchanged when the stream is
+// idle. Repeated or duplicate fragments decode as ordinary inputs whose
+// fragment payload the reassembler ignores as a no-op.
+constexpr uint8_t kFlagsRandChunk = 0x01;
+constexpr uint8_t kFlagsRandLast = 0x02;
 } // namespace pc_netplay_gekko
 
 struct PcNetplayInput {
@@ -38,6 +51,8 @@ struct PcNetplayInput {
 	uint8_t triggerR = 0;
 	uint16_t controlYaw = 0;
 	uint8_t flags = 0;
+	uint8_t fragSeq = 0;
+	uint8_t fragData[4] = {};
 };
 
 // Encodes exactly 16 bytes. Returns bytes written (16).
@@ -54,11 +69,11 @@ inline size_t pc_netplay_input_encode(const PcNetplayInput& in, uint8_t out[16])
 	out[8]  = (uint8_t)(in.controlYaw & 0xFF);
 	out[9]  = (uint8_t)((in.controlYaw >> 8) & 0xFF);
 	out[10] = in.flags;
-	out[11] = 0;
-	out[12] = 0;
-	out[13] = 0;
-	out[14] = 0;
-	out[15] = 0;
+	out[11] = in.fragSeq;
+	out[12] = in.fragData[0];
+	out[13] = in.fragData[1];
+	out[14] = in.fragData[2];
+	out[15] = in.fragData[3];
 	return pc_netplay_gekko::kInputBytes;
 }
 
@@ -75,6 +90,11 @@ inline bool pc_netplay_input_decode(const uint8_t* data, size_t avail, PcNetplay
 	out.triggerR  = data[7];
 	out.controlYaw = (uint16_t)(data[8] | ((uint16_t)data[9] << 8));
 	out.flags     = data[10];
+	out.fragSeq   = data[11];
+	out.fragData[0] = data[12];
+	out.fragData[1] = data[13];
+	out.fragData[2] = data[14];
+	out.fragData[3] = data[15];
 	return true;
 }
 

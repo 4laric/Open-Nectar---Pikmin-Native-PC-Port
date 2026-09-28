@@ -405,21 +405,31 @@ void cap_queue(std::vector<UdpSocket::Datagram>& q)
 	if (q.size() > kMaxPendingQueue) q.erase(q.begin(), q.begin() + (q.size() - kMaxPendingQueue));
 }
 
+void route_gram(UdpSocket::Datagram& g, std::vector<UdpSocket::Datagram>& gekko,
+                std::vector<UdpSocket::Datagram>& hs, std::vector<UdpSocket::Datagram>& bulk)
+{
+	if (g.channel == kChannelGekko) {
+		gekko.push_back(std::move(g));
+	} else if (g.channel == kChannelHandshake) {
+		hs.push_back(std::move(g));
+	} else if (g.channel == kChannelBulk) {
+		// M4a: bounded like the other queues; oversized payloads are
+		// dropped by the BulkChannel validator, never truncated here.
+		if (g.payload.size() + 1 <= kMaxDatagram) bulk.push_back(std::move(g));
+	}
+	// Unknown channels are dropped.
+}
+
 GekkoNetResult** GekkoLink::receive_inner(int* length)
 {
 	mResults.clear();
 	if (mSock != nullptr) {
 		std::vector<UdpSocket::Datagram> grams = mSock->recv();
-		for (UdpSocket::Datagram& g : grams) {
-			if (g.channel == kChannelGekko) {
-				mGekkoPending.push_back(std::move(g));
-			} else if (g.channel == kChannelHandshake) {
-				mHandshakePending.push_back(std::move(g));
-			}
-			// Unknown channels are dropped.
-		}
+		for (UdpSocket::Datagram& g : grams)
+			route_gram(g, mGekkoPending, mHandshakePending, mBulkPending);
 		cap_queue(mGekkoPending);
 		cap_queue(mHandshakePending);
+		cap_queue(mBulkPending);
 	}
 	auto emit = [&](const uint8_t* payload, size_t len, uint32_t ip, uint16_t port) {
 		if (len > kMaxDatagram - 1) return; // bounded before use
@@ -466,18 +476,31 @@ std::vector<UdpSocket::Datagram> GekkoLink::drain_handshake()
 	// behind an idle GekkoNet poll.
 	if (mSock != nullptr) {
 		std::vector<UdpSocket::Datagram> grams = mSock->recv();
-		for (UdpSocket::Datagram& g : grams) {
-			if (g.channel == kChannelGekko) {
-				mGekkoPending.push_back(std::move(g));
-			} else if (g.channel == kChannelHandshake) {
-				mHandshakePending.push_back(std::move(g));
-			}
-		}
+		for (UdpSocket::Datagram& g : grams)
+			route_gram(g, mGekkoPending, mHandshakePending, mBulkPending);
 		cap_queue(mGekkoPending);
 		cap_queue(mHandshakePending);
+		cap_queue(mBulkPending);
 	}
 	std::vector<UdpSocket::Datagram> out;
 	out.swap(mHandshakePending);
+	return out;
+}
+
+std::vector<UdpSocket::Datagram> GekkoLink::drain_bulk()
+{
+	// M4a: same pump-on-drain as the handshake queue so bulk bytes are not
+	// stuck behind an idle GekkoNet poll.
+	if (mSock != nullptr) {
+		std::vector<UdpSocket::Datagram> grams = mSock->recv();
+		for (UdpSocket::Datagram& g : grams)
+			route_gram(g, mGekkoPending, mHandshakePending, mBulkPending);
+		cap_queue(mGekkoPending);
+		cap_queue(mHandshakePending);
+		cap_queue(mBulkPending);
+	}
+	std::vector<UdpSocket::Datagram> out;
+	out.swap(mBulkPending);
 	return out;
 }
 
@@ -642,3 +665,224 @@ GekkoNetResult** LossyLink::receive_inner(int* length)
 }
 
 } // namespace pc_netplay_transport
+
+// ---- M4 lane A bulk channel (issue #885) ----
+namespace pc_netplay_bulk {
+namespace {
+
+uint16_t rd16(const uint8_t* p) { return (uint16_t)(p[0] | ((uint16_t)p[1] << 8)); }
+
+void wr16(std::vector<uint8_t>& v, uint16_t w)
+{
+	v.push_back((uint8_t)(w & 0xFF));
+	v.push_back((uint8_t)((w >> 8) & 0xFF));
+}
+
+bool is_data_type(uint8_t t)
+{
+	return t == kBulkRandFull || t == kBulkSaveResult || t == kBulkCheckpoint;
+}
+
+} // namespace
+
+BulkChannel::BulkChannel() {}
+
+void BulkChannel::reset()
+{
+	mOut.clear();
+	mIn.clear();
+	mAckQueue.clear();
+	mComplete.clear();
+	mDoneIds.clear();
+	mNextMsgId = 1;
+}
+
+bool BulkChannel::send(uint8_t type, const uint8_t* data, size_t len)
+{
+	if (!is_data_type(type)) return false;
+	if (data == nullptr || len == 0 || len > kBulkMaxMessage) return false;
+	if (mOut.size() >= 4) return false; // bounded send queue
+	OutMsg m;
+	m.msgId = mNextMsgId++;
+	if (mNextMsgId == 0) mNextMsgId = 1; // msgId 0 never goes on the wire
+	const uint16_t count = (uint16_t)((len + kBulkMaxPayload - 1) / kBulkMaxPayload);
+	for (uint16_t idx = 0; idx < count; ++idx) {
+		const size_t off = (size_t)idx * kBulkMaxPayload;
+		size_t take = len - off;
+		if (take > kBulkMaxPayload) take = kBulkMaxPayload;
+		OutFrag f;
+		f.bytes.reserve(11 + take);
+		f.bytes.push_back(type);
+		wr16(f.bytes, m.msgId);
+		wr16(f.bytes, idx);
+		wr16(f.bytes, count);
+		f.bytes.push_back((uint8_t)(len & 0xFF));
+		f.bytes.push_back((uint8_t)((len >> 8) & 0xFF));
+		f.bytes.push_back((uint8_t)((len >> 16) & 0xFF));
+		f.bytes.push_back((uint8_t)((len >> 24) & 0xFF));
+		f.bytes.insert(f.bytes.end(), data + off, data + off + take);
+		m.frags.push_back(std::move(f));
+	}
+	mOut.push_back(std::move(m));
+	return true;
+}
+
+void BulkChannel::on_receive(const uint8_t* data, size_t len, double nowMs)
+{
+	if (data == nullptr || len == 0) return;
+	if (len + 1 > pc_netplay_transport::kMaxDatagram) return; // bounded
+	const uint8_t type = data[0];
+	if (type == kBulkAck) {
+		if (len != 5) return;
+		const uint16_t msgId = rd16(data + 1);
+		const uint16_t idx = rd16(data + 3);
+		for (OutMsg& m : mOut) {
+			if (m.msgId != msgId || idx >= m.frags.size()) continue;
+			m.frags[idx].acked = true;
+		}
+		// Drop fully-acked messages from the head only (in order); later
+		// messages stay queued until everything before them is acked.
+		while (!mOut.empty()) {
+			bool all = true;
+			for (const OutFrag& f : mOut.front().frags) {
+				if (!f.acked) { all = false; break; }
+			}
+			if (!all) break;
+			mOut.erase(mOut.begin());
+		}
+		return;
+	}
+	if (!is_data_type(type)) return; // unknown: drop
+	if (len < 11) return;
+	const uint16_t msgId = rd16(data + 1);
+	const uint16_t idx = rd16(data + 3);
+	const uint16_t count = rd16(data + 5);
+	const uint32_t totalLen = (uint32_t)data[7] | ((uint32_t)data[8] << 8)
+	    | ((uint32_t)data[9] << 16) | ((uint32_t)data[10] << 24);
+	// Every declared length is bounded before allocation or use.
+	if (count == 0 || count > kBulkMaxFrags) return;
+	if (idx >= count) return;
+	if (totalLen == 0 || totalLen > kBulkMaxMessage) return;
+	// totalLen must be consistent with count before any allocation: a full
+	// count-1 fragments plus a non-empty tail.
+	if (totalLen <= (uint32_t)(count - 1) * (uint32_t)kBulkMaxPayload
+	    || totalLen > (uint32_t)count * (uint32_t)kBulkMaxPayload)
+		return;
+	const size_t payload = len - 11;
+	if (payload > kBulkMaxPayload) return;
+	const size_t want = (idx + 1 < count)
+	    ? kBulkMaxPayload
+	    : (size_t)(totalLen - (uint32_t)(count - 1) * (uint32_t)kBulkMaxPayload);
+	if (want == 0 || want > kBulkMaxPayload || payload != want) return;
+	// Duplicate of a completed message: re-ack so the sender drains.
+	for (uint16_t done : mDoneIds) {
+		if (done == msgId) {
+			std::vector<uint8_t> ack;
+			ack.push_back(kBulkAck);
+			wr16(ack, msgId);
+			wr16(ack, idx);
+			mAckQueue.push_back(std::move(ack));
+			return;
+		}
+	}
+	InMsg* slot = nullptr;
+	for (InMsg& m : mIn) {
+		if (m.msgId == msgId) { slot = &m; break; }
+	}
+	if (slot == nullptr) {
+		if (mIn.size() >= 8) return; // bounded: drop until room frees
+		InMsg m;
+		m.type = type;
+		m.msgId = msgId;
+		m.count = count;
+		m.totalLen = totalLen;
+		m.bytes.assign(totalLen, 0);
+		m.have.assign(count, false);
+		m.firstSeenMs = nowMs;
+		mIn.push_back(std::move(m));
+		slot = &mIn.back();
+	} else {
+		// Same msgId must describe the same message; else drop.
+		if (slot->type != type || slot->count != count || slot->totalLen != totalLen
+		    || slot->done)
+			return;
+	}
+	{
+		std::vector<uint8_t> ack;
+		ack.push_back(kBulkAck);
+		wr16(ack, msgId);
+		wr16(ack, idx);
+		mAckQueue.push_back(std::move(ack));
+	}
+	if (slot->have[idx]) return; // duplicate fragment: acked above, no refill
+	memcpy(slot->bytes.data() + (size_t)idx * kBulkMaxPayload, data + 11, payload);
+	slot->have[idx] = true;
+	if (++slot->got == slot->count) {
+		Message done;
+		done.type = slot->type;
+		done.data = slot->bytes;
+		mComplete.push_back(std::move(done));
+		slot->done = true;
+		mDoneIds.push_back(msgId);
+		if (mDoneIds.size() > 16) mDoneIds.erase(mDoneIds.begin());
+		// Free the reassembly slot now; later duplicates re-ack via mDoneIds.
+		for (auto it = mIn.begin(); it != mIn.end(); ++it) {
+			if (it->msgId == msgId) { mIn.erase(it); break; }
+		}
+	}
+}
+
+std::vector<std::vector<uint8_t>> BulkChannel::poll_outgoing(double nowMs)
+{
+	std::vector<std::vector<uint8_t>> out;
+	out.insert(out.end(), std::make_move_iterator(mAckQueue.begin()),
+	           std::make_move_iterator(mAckQueue.end()));
+	mAckQueue.clear();
+	for (OutMsg& m : mOut) {
+		for (OutFrag& f : m.frags) {
+			if (f.acked) continue;
+			if (!(nowMs - f.lastSendMs >= kBulkResendMs)) continue;
+			f.lastSendMs = nowMs;
+			out.push_back(f.bytes);
+		}
+	}
+	return out;
+}
+
+std::vector<BulkChannel::Message> BulkChannel::poll_complete()
+{
+	std::vector<Message> out;
+	out.swap(mComplete);
+	return out;
+}
+
+void BulkChannel::sweep(double nowMs)
+{
+	for (size_t i = 0; i < mIn.size();) {
+		if (!mIn[i].done && nowMs - mIn[i].firstSeenMs >= kBulkPartialTimeoutMs) {
+			mIn.erase(mIn.begin() + i);
+		} else {
+			++i;
+		}
+	}
+}
+
+size_t BulkChannel::send_acked_frags() const
+{
+	size_t n = 0;
+	for (const OutMsg& m : mOut) {
+		for (const OutFrag& f : m.frags) {
+			if (f.acked) ++n;
+		}
+	}
+	return n;
+}
+
+size_t BulkChannel::send_total_frags() const
+{
+	size_t n = 0;
+	for (const OutMsg& m : mOut) n += m.frags.size();
+	return n;
+}
+
+} // namespace pc_netplay_bulk
