@@ -31,34 +31,14 @@ p2posefamily::Actors poseVis;
 void loadAnimation(){
     std::ifstream input("p2-sheargrub-animation.txt");if(!input)return;
     std::vector<p2animation::Clip> banks[2];if(!p2uji::parse(input,banks))std::abort();
+    // #895: compact loader (few Shapes + decoded vectors per clip); the Shapes
+    // stay the nearest-pose fallback. Fail-closed as before.
     size_t total=0;
-    for(int kind=0;kind<2;++kind){std::vector<unsigned char> reference;
-        for(const auto& clip:banks[kind]){size_t clipBytes=0;
-            for(int i=0;i<clip.count;++i){char path[192];std::snprintf(path,sizeof(path),"assets/dataDir/courses/pikmin2room/uji_%s_%s_%02d.mod",ids[kind],clip.name.c_str(),i);
-                std::ifstream file(path,std::ios::binary|std::ios::ate);if(!file)std::abort();auto size=file.tellg();
-                if(size<=0||size>256*1024)std::abort();clipBytes+=size_t(size);total+=size_t(size);
-                if(clipBytes>256*1024||total>2*1024*1024)std::abort();file.seekg(0);
-                std::vector<unsigned char> bytes(size_t(size),0),resources;
-                if(!file.read(reinterpret_cast<char*>(bytes.data()),size)||!p2animation::resources(bytes,resources))std::abort();
-                if(!reference.empty()&&reference!=resources)std::abort();reference=resources;
-            }
-        }
-    }
-    for(int kind=0;kind<2;++kind){Shape* shared=nullptr;
+    for(int kind=0;kind<2;++kind){p2poseload::Shared shared;
         for(const auto& clip:banks[kind]){timing[kind][clip.name]=clip;
-            for(int i=0;i<clip.count;++i){char path[160];std::snprintf(path,sizeof(path),"courses/pikmin2room/uji_%s_%s_%02d.mod",ids[kind],clip.name.c_str(),i);
-                Shape* shape=gameflow.loadShape(path,true);if(!shape)std::abort();
-                if(!shared){shared=shape;for(int t=0;t<shape->mTexAttrCount;++t)if(shape->mTexAttrList[t].mTexture)shape->mTexAttrList[t].mTexture->attach();}
-                else{
-                    if(shape->mMaterialCount!=shared->mMaterialCount||shape->mTexAttrCount!=shared->mTexAttrCount||shape->mTevInfoCount!=shared->mTevInfoCount)std::abort();
-                    for(int j=0;j<shape->mTotalMatpolyCount;++j){auto* poly=shape->mMatpolyList[j];if(!poly||!poly->mMaterial)continue;int material=-1;
-                        for(int m=0;m<shape->mMaterialCount;++m)if(poly->mMaterial==&shape->mMaterialList[m])material=m;
-                        if(material<0)std::abort();poly->mMaterial=&shared->mMaterialList[material];}
-                    shape->mMaterialList=shared->mMaterialList;shape->mTexAttrList=shared->mTexAttrList;shape->mTevInfoList=shared->mTevInfoList;
-                }
-                animated[kind][clip.name].push_back(shape);
-            }
-            poseBank[kind].addClip(clip.name,clip.count,clip.duration,clip.frames,[&](int i){char p[160];std::snprintf(p,sizeof(p),"courses/pikmin2room/uji_%s_%s_%02d.mod",ids[kind],clip.name.c_str(),i);return std::string(p);},shared);
+            std::string error;
+            if(!p2posefamily::loadFamilyClip(poseBank[kind],clip.name,std::string("uji_")+ids[kind]+"_"+clip.name,clip.count,clip.duration,clip.frames,shared,total,animated[kind][clip.name],error)){
+                std::printf("P2_UJI_ANIMATION_INVALID species=%s clip=%s reason=%s\n",ids[kind],clip.name.c_str(),error.c_str());std::fflush(stdout);std::abort();}
         }
     }
     std::printf("P2_UJI_ANIMATION_READY mod_bytes=%zu gameplay=P1_unchanged\n",total);

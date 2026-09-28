@@ -1073,7 +1073,11 @@ void pc_p2_chappy_setup()
             }
         }
     }
-    const p2poseload::Limits limits{1024 * 1024, 1024 * 1024, 48 * 1024 * 1024};
+    // Approved #895 resident budgets (512 KiB per clip, 48 MiB per setup),
+    // shared with every pose-bank loader. loadClip is transactional: a
+    // rejected clip loads no Shapes and never becomes the material owner, so
+    // the legacy fallback below starts clean.
+    const p2poseload::Limits limits = p2poseload::defaultLimits();
     for (const auto& entry : banks) {
         p2poseload::Shared resources;
         p2posefamily::Bank& vis = poseBanks.emplace(entry.second.species, p2posefamily::Bank("CHAPPY")).first->second;

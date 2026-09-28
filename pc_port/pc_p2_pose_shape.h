@@ -33,41 +33,30 @@ inline bool write(Shape& shape,const Pose& pose){
     BoundBox bounds(shape.mVertexList[0],shape.mVertexList[0]);for(int i=1;i<shape.mVertexCount;++i)bounds.expandBound(shape.mVertexList[i]);
     shape.mCourseExtents=bounds;shape.mJointList[0].mBounds=bounds;return true;
 }
-// Per-actor presentation of a decoded pose bank (#895): bracket/lerp the
-// clip's poses at a source frame, crossfade from the last displayed geometry
-// when the clip changes, and write the result into the actor's private Shape.
-// Fade time is advanced by the owning module's simulation update.
+// Per-actor presentation of a decoded pose bank (#895): the engine-free
+// p2motion::Presenter picks the lerped pose (with crossfade on clip change and
+// across a discontinuous loop seam); this writes it into the actor's private
+// Shape. Fade time and staleness advance from the owning module's simulation
+// update through Track::advance.
 struct Track {
     Shape* shape=nullptr;
-    Pose scratch,mixed,display;
-    p2motion::Fade fade;
-    std::string clip;
-    bool shown=false;
+    p2motion::Presenter view;
     void size(const Pose& base){
-        scratch.positions.resize(base.positions.size());scratch.normals.resize(base.normals.size());
-        mixed.positions.resize(base.positions.size());mixed.normals.resize(base.normals.size());
+        view.scratch.positions.resize(base.positions.size());view.scratch.normals.resize(base.normals.size());
+        view.mixed.positions.resize(base.positions.size());view.mixed.normals.resize(base.normals.size());
     }
+    void advance(float seconds){view.advance(seconds);}
 };
-struct Presented { bool ok=false,crossfadeStarted=false; Interval span; };
+struct Presented { bool ok=false,crossfadeStarted=false,wrapBlend=false; Interval span; };
 template<class PoseAt>
 inline Presented present(Track& track,const std::string& clip,std::size_t count,PoseAt poseAt,const std::vector<int>& frames,
-                         float sourceFrame,const p2motion::Tunables& tune){
+                         float sourceFrame,const p2motion::Tunables& tune,bool seamOk=true){
     Presented out;
-    if(!track.shape||!count||frames.size()!=count||!p2motion::interval(frames,sourceFrame,tune.lerp,out.span)
-       ||out.span.left>=count||out.span.right>=count)return out;
-    const Pose& a=poseAt(out.span.left);const Pose& b=poseAt(out.span.right);
-    if(track.scratch.positions.size()!=a.positions.size()||track.scratch.normals.size()!=a.normals.size())track.size(a);
-    if(!blendInto(a,b,out.span.weight,track.scratch))return out;
-    if(track.clip!=clip){
-        if(track.shown&&!track.clip.empty())out.crossfadeStarted=track.fade.begin(track.display,tune.crossfadeSeconds);
-        else track.fade.reset();
-        track.clip=clip;
-    }
-    const Pose* shown=&track.scratch;
-    if(track.fade.active()&&track.fade.mix(track.scratch,track.mixed))shown=&track.mixed;
-    if(!write(*track.shape,*shown))return out;
-    track.display.positions.assign(shown->positions.begin(),shown->positions.end());
-    track.display.normals.assign(shown->normals.begin(),shown->normals.end());
-    track.shown=true;out.ok=true;return out;
+    if(!track.shape)return out;
+    const p2motion::Shown shown=track.view.select(clip,count,poseAt,frames,sourceFrame,seamOk,tune);
+    out.span=shown.span;
+    if(!shown.pose||!write(*track.shape,*shown.pose))return out;
+    track.view.commit(*shown.pose);
+    out.crossfadeStarted=shown.crossfadeStarted;out.wrapBlend=shown.wrapBlend;out.ok=true;return out;
 }
 }

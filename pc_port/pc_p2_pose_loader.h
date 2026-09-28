@@ -1,5 +1,7 @@
 #pragma once
-// Compact pose-bank clip loader shared by batch2/batch3 (#895).
+// Compact pose-bank clip loader shared by every P2 pose-bank draw path (#895):
+// batch2/batch3, Chappy and the dedicated families (Frog, Tank, Kabuto,
+// Sheargrub, Dwarf Orange, Mamuta).
 //
 // Dense banks (12..64 poses per clip) would multiply scene-heap use if every
 // pose became a full Shape. Instead each clip keeps at most
@@ -7,8 +9,17 @@
 // always one: it is the material/texture owner and the private-geometry base)
 // and decodes positions+normals for every pose. Draw paths render through a
 // per-actor private Shape (p2pose::Track); the Shape slots only serve when the
-// private geometry cannot be created or a clip does not decode, in which case
-// every pose index aliases its nearest loaded slot.
+// private geometry cannot be created.
+//
+// A clip whose vectors do not decode (a legacy or malformed bank) loads EVERY
+// pose as a Shape instead, so it keeps its full density on the nearest-pose
+// path; that fallback is reported by P2_POSE_LOADER_FALLBACK, never silent.
+//
+// Loading is transactional per clip: every pose file is read, resource-checked
+// and decoded before the first Shape is created, so a rejected clip leaves no
+// Shapes behind and never becomes the material owner. A failure after Shapes
+// exist (gameflow load or material framing) restores the shared owner,
+// reference and topology to their state before the clip.
 //
 // Budgets are resident bytes, not on-disk bytes: a Shape slot costs its file
 // size, a decoded pose costs its vector payload (topology is compared, then
@@ -29,11 +40,20 @@
 
 namespace p2poseload {
 
+// Resident budgets shared by the dedicated families (the approved #895
+// acceptance numbers: 512 KiB per clip, 48 MiB per setup). PoseFileBytes is
+// the p2pose::decodeBaked cap.
+constexpr std::size_t PoseFileBytes = 1024 * 1024;
+constexpr std::size_t ClipBytes = 512 * 1024;
+constexpr std::size_t TotalBytes = 48 * 1024 * 1024;
+
 struct Limits {
     std::size_t fileBytes;   // one pose file (decodeBaked cap)
     std::size_t clipBytes;   // resident per clip
     std::size_t totalBytes;  // resident per setup
 };
+
+inline Limits defaultLimits() { return Limits{PoseFileBytes, ClipBytes, TotalBytes}; }
 
 struct Clip {
     std::vector<Shape*> shapes;           // one per pose index (slots aliased)
@@ -49,23 +69,32 @@ struct Shared {
     Shape* owner = nullptr;                // material/texture owner
 };
 
+// Gameflow path of pose `index` for a bank stem ("frog_Frog_wait1" ->
+// "courses/pikmin2room/frog_Frog_wait1_03.mod"); `assets` prefixes the
+// on-disk "assets/dataDir/" root.
+inline std::string stemPath(bool assets, const std::string& stem, int index) {
+    char suffix[16];
+    std::snprintf(suffix, sizeof(suffix), "_%02d.mod", index);
+    return std::string(assets ? "assets/dataDir/" : "") + "courses/pikmin2room/" + stem + suffix;
+}
+
+inline std::string bankStem(const std::string& prefix, const std::string& species, const std::string& clip) {
+    return prefix + "_" + species + "_" + clip;
+}
+
 inline void posePath(char* out, std::size_t size, bool assets, const std::string& prefix,
                      const std::string& species, const std::string& clip, int index) {
-    std::snprintf(out, size, "%scourses/pikmin2room/%s_%s_%s_%02d.mod", assets ? "assets/dataDir/" : "",
-                  prefix.c_str(), species.c_str(), clip.c_str(), index);
+    std::snprintf(out, size, "%s", stemPath(assets, bankStem(prefix, species, clip), index).c_str());
 }
 
 // Resident estimate without decoding: full size for Shape slots, 12 bytes per
 // position/normal (tags 16/17 counts) for the rest. Returns false on a missing
 // or unreadable file (the loader reports it).
-inline bool estimate(const std::string& prefix, const std::string& species, const std::string& clip,
-                     int poseCount, std::size_t& clipOut) {
+inline bool estimateStem(const std::string& stem, int poseCount, std::size_t& clipOut) {
     clipOut = 0;
     const auto slots = p2motion::shapeSlots(std::size_t(poseCount), std::size_t(p2motion::tunables().fallbackShapes));
     for (int i = 0; i < poseCount; ++i) {
-        char rel[224];
-        posePath(rel, sizeof(rel), true, prefix, species, clip, i);
-        std::ifstream file(rel, std::ios::binary | std::ios::ate);
+        std::ifstream file(stemPath(true, stem, i), std::ios::binary | std::ios::ate);
         if (!file) return false;
         const auto size = file.tellg();
         if (size <= 0) return false;
@@ -89,61 +118,91 @@ inline bool estimate(const std::string& prefix, const std::string& species, cons
     return true;
 }
 
-// Loads one clip. On failure returns false with `error` set; nothing already
-// counted in `total` is rolled back (callers restore their own snapshot).
-inline bool loadClip(const std::string& prefix, const std::string& species, const std::string& clip,
-                     int poseCount, const Limits& limits, Shared& shared, std::size_t& total, Clip& out,
-                     std::string& error) {
+inline bool estimate(const std::string& prefix, const std::string& species, const std::string& clip,
+                     int poseCount, std::size_t& clipOut) {
+    return estimateStem(bankStem(prefix, species, clip), poseCount, clipOut);
+}
+
+// Loads one clip from `<stem>_00.mod`..`<stem>_NN.mod`. On failure returns
+// false with `error` set, `total` untouched and `shared` restored.
+inline bool loadStem(const std::string& stem, int poseCount, const Limits& limits, Shared& shared,
+                     std::size_t& total, Clip& out, std::string& error) {
     out = Clip();
     if (poseCount == 0) return true;  // unconverted clip: no poses, never drawn
     if (poseCount < 0 || poseCount > 64) { error = "invalid pose count"; return false; }
-    out.slots = p2motion::shapeSlots(std::size_t(poseCount), std::size_t(p2motion::tunables().fallbackShapes));
-    std::vector<Shape*> loaded(std::size_t(poseCount), nullptr);
+    const Shared before = shared;
+    auto rollback = [&](const char* why) {
+        shared = before;
+        out = Clip();
+        error = why;
+        return false;
+    };
+    // Pass 1: read, resource-check and decode every pose; no Shapes yet.
+    std::vector<std::size_t> sizes(std::size_t(poseCount), 0);
+    std::vector<p2pose::Baked> baked;
     bool vectors = true;
-    std::vector<unsigned char> clipTopology;
+    std::vector<unsigned char> clipTopology, reference = shared.reference;
     for (int i = 0; i < poseCount; ++i) {
-        char rel[224];
-        posePath(rel, sizeof(rel), true, prefix, species, clip, i);
-        std::ifstream file(rel, std::ios::binary | std::ios::ate);
-        if (!file) { error = "missing pose bank"; return false; }
+        std::ifstream file(stemPath(true, stem, i), std::ios::binary | std::ios::ate);
+        if (!file) return rollback("missing pose bank");
         const auto size = file.tellg();
-        if (size <= 0 || std::size_t(size) > limits.fileBytes) { error = "pose bank exceeds budget"; return false; }
+        if (size <= 0 || std::size_t(size) > limits.fileBytes) return rollback("pose bank exceeds budget");
+        sizes[std::size_t(i)] = std::size_t(size);
         file.seekg(0);
         std::vector<unsigned char> data(std::size_t(size), 0), resources;
-        if (!file.read(reinterpret_cast<char*>(data.data()), size) || !p2animation::resources(data, resources)) {
-            error = "invalid pose resources";
-            return false;
+        if (!file.read(reinterpret_cast<char*>(data.data()), size) || !p2animation::resources(data, resources))
+            return rollback("invalid pose resources");
+        if (!reference.empty() && reference != resources) return rollback("pose resources differ");
+        reference = resources;
+        if (!vectors) continue;
+        p2pose::Baked pose;
+        if (!p2pose::decodeBaked(data, pose)
+                || (!baked.empty() && (pose.pose.positions.size() != baked.front().pose.positions.size()
+                                       || pose.pose.normals.size() != baked.front().pose.normals.size()))
+                || (!clipTopology.empty() && pose.topology != clipTopology)
+                || (clipTopology.empty() && !shared.topology.empty() && pose.topology != shared.topology)) {
+            vectors = false;
+            baked.clear();
+            continue;
         }
-        if (!shared.reference.empty() && shared.reference != resources) { error = "pose resources differ"; return false; }
-        shared.reference = resources;
-        const bool slot = p2motion::isSlot(out.slots, std::size_t(i));
-        if (vectors) {
-            p2pose::Baked baked;
-            if (!p2pose::decodeBaked(data, baked)
-                    || (!out.baked.empty() && (baked.pose.positions.size() != out.baked.front().pose.positions.size()
-                                               || baked.pose.normals.size() != out.baked.front().pose.normals.size()))
-                    || (!clipTopology.empty() && baked.topology != clipTopology)
-                    || (clipTopology.empty() && !shared.topology.empty() && baked.topology != shared.topology)) {
-                vectors = false;
-                for (const auto& earlier : out.baked) out.resident -= p2motion::poseBytes(earlier.pose);
-                out.baked.clear();
-            } else {
-                if (clipTopology.empty()) clipTopology = baked.topology;
-                std::vector<unsigned char>().swap(baked.topology);
-                out.resident += p2motion::poseBytes(baked.pose);
-                out.baked.push_back(std::move(baked));
-            }
+        if (clipTopology.empty()) clipTopology = pose.topology;
+        std::vector<unsigned char>().swap(pose.topology);
+        baked.push_back(std::move(pose));
+    }
+    // Slots: a few spread Shapes when every pose decoded. Otherwise as many
+    // Shapes as the resident budget allows (every pose when it fits), spread
+    // evenly, and the reduction is reported rather than silent.
+    out.vectors = vectors && baked.size() == std::size_t(poseCount);
+    auto residentOf = [&](const std::vector<std::size_t>& slots) {
+        std::size_t bytes = 0;
+        for (std::size_t i = 0; i < sizes.size(); ++i) {
+            if (p2motion::isSlot(slots, i)) bytes += sizes[i];
+            else if (out.vectors) bytes += p2motion::poseBytes(baked[i].pose);
         }
-        if (slot) out.resident += std::size_t(size);
-        if (out.resident > limits.clipBytes || total + out.resident > limits.totalBytes) {
-            error = "pose bank exceeds budget";
-            return false;
+        return bytes;
+    };
+    auto fits = [&](std::size_t bytes) { return bytes <= limits.clipBytes && total + bytes <= limits.totalBytes; };
+    if (out.vectors) {
+        out.slots = p2motion::shapeSlots(std::size_t(poseCount), std::size_t(p2motion::tunables().fallbackShapes));
+        out.resident = residentOf(out.slots);
+    } else {
+        for (std::size_t n = std::size_t(poseCount); n >= 1; --n) {
+            out.slots = p2motion::shapeSlots(std::size_t(poseCount), n);
+            out.resident = residentOf(out.slots);
+            if (fits(out.resident)) break;
         }
-        if (!slot) continue;
-        char load[200];
-        posePath(load, sizeof(load), false, prefix, species, clip, i);
-        Shape* shape = gameflow.loadShape(load, true);
-        if (!shape) { error = "pose load failed"; return false; }
+    }
+    if (!fits(out.resident)) return rollback("pose bank exceeds budget");
+    if (!out.vectors) {
+        std::printf("P2_POSE_LOADER_FALLBACK stem=%s poses=%d reason=vectors_undecodable shapes=%zu\n", stem.c_str(),
+                    poseCount, out.slots.size());
+    }
+    // Pass 2: Shapes for the slots only.
+    shared.reference = reference;
+    std::vector<Shape*> loaded(std::size_t(poseCount), nullptr);
+    for (std::size_t i : out.slots) {
+        Shape* shape = gameflow.loadShape(stemPath(false, stem, int(i)).c_str(), true);
+        if (!shape) return rollback("pose load failed");
         if (!shared.owner) {
             shared.owner = shape;
             for (int t = 0; t < shape->mTexAttrCount; ++t)
@@ -151,32 +210,43 @@ inline bool loadClip(const std::string& prefix, const std::string& species, cons
         } else {
             if (shape->mMaterialCount != shared.owner->mMaterialCount
                     || shape->mTexAttrCount != shared.owner->mTexAttrCount
-                    || shape->mTevInfoCount != shared.owner->mTevInfoCount) {
-                error = "material framing mismatch";
-                return false;
-            }
+                    || shape->mTevInfoCount != shared.owner->mTevInfoCount)
+                return rollback("material framing mismatch");
             for (int j = 0; j < shape->mTotalMatpolyCount; ++j) {
                 auto* poly = shape->mMatpolyList[j];
                 if (!poly || !poly->mMaterial) continue;
                 int material = -1;
                 for (int m = 0; m < shape->mMaterialCount; ++m)
                     if (poly->mMaterial == &shape->mMaterialList[m]) material = m;
-                if (material < 0) { error = "pose material not found"; return false; }
+                if (material < 0) return rollback("pose material not found");
                 poly->mMaterial = &shared.owner->mMaterialList[material];
             }
             shape->mMaterialList = shared.owner->mMaterialList;
             shape->mTexAttrList = shared.owner->mTexAttrList;
             shape->mTevInfoList = shared.owner->mTevInfoList;
         }
-        loaded[std::size_t(i)] = shape;
+        loaded[i] = shape;
     }
-    out.vectors = vectors && out.baked.size() == std::size_t(poseCount);
-    if (out.vectors && shared.topology.empty()) shared.topology = clipTopology;
-    if (!out.vectors) out.baked.clear();
+    if (out.vectors) {
+        if (shared.topology.empty()) shared.topology = clipTopology;
+        out.baked = std::move(baked);
+    }
     out.shapes.resize(std::size_t(poseCount));
     for (std::size_t i = 0; i < out.shapes.size(); ++i) out.shapes[i] = loaded[p2motion::nearestSlot(out.slots, i)];
     total += out.resident;
     return true;
+}
+
+inline bool loadClip(const std::string& prefix, const std::string& species, const std::string& clip,
+                     int poseCount, const Limits& limits, Shared& shared, std::size_t& total, Clip& out,
+                     std::string& error) {
+    return loadStem(bankStem(prefix, species, clip), poseCount, limits, shared, total, out, error);
+}
+
+// Seam continuity of a loaded clip (see p2motion::seamContinuous).
+inline bool seamOf(const std::vector<p2pose::Baked>& baked, const std::vector<int>& frames) {
+    return p2motion::seamContinuous(
+        baked.size(), [&baked](std::size_t i) -> const p2pose::Pose& { return baked[i].pose; }, frames);
 }
 
 }  // namespace p2poseload

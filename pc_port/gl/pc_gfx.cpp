@@ -4491,9 +4491,29 @@ void pc_gfx_present(void) {
     shadow_frame_reset();
     // PIKMIN_FRAME_DUMP=<dir>: the finished frame as PPM every 15 frames, for
     // looking at a scene where no screenshot tool reaches (Wayland, adb-less).
+    // PIKMIN_FRAME_DUMP_EVERY=<n> changes the interval (1 = every frame, for
+    // motion evidence such as #895 pose interpolation); PIKMIN_FRAME_DUMP_FROM
+    // and PIKMIN_FRAME_DUMP_TO bound the dumped frame numbers.
     if (const char* dumpDir = std::getenv("PIKMIN_FRAME_DUMP")) {
         static unsigned dumpFrame = 0;
-        if (++dumpFrame % 15 == 0 && sRenderWidth > 0 && sRenderHeight > 0) {
+        static const unsigned dumpEvery = [] {
+            const char* raw = std::getenv("PIKMIN_FRAME_DUMP_EVERY");
+            const long v = raw ? std::strtol(raw, nullptr, 10) : 15;
+            return unsigned(v >= 1 && v <= 3600 ? v : 15);
+        }();
+        static const unsigned dumpFrom = [] {
+            const char* raw = std::getenv("PIKMIN_FRAME_DUMP_FROM");
+            const long v = raw ? std::strtol(raw, nullptr, 10) : 0;
+            return unsigned(v > 0 ? v : 0);
+        }();
+        static const unsigned dumpTo = [] {
+            const char* raw = std::getenv("PIKMIN_FRAME_DUMP_TO");
+            const long v = raw ? std::strtol(raw, nullptr, 10) : 0;
+            return v > 0 ? unsigned(v) : ~0u;
+        }();
+        ++dumpFrame;
+        if (dumpFrame % dumpEvery == 0 && dumpFrame >= dumpFrom && dumpFrame <= dumpTo && sRenderWidth > 0
+                && sRenderHeight > 0) {
             std::vector<unsigned char> rgba(size_t(sRenderWidth) * sRenderHeight * 4);
             glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, sourceFramebuffer);
             glReadPixels(0, 0, sRenderWidth, sRenderHeight, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());

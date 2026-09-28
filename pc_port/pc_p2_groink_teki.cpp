@@ -1,3 +1,4 @@
+#include "pc_p2_pose_family.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_setup_failsafe.h"
 #include "pc_p2_groink_teki.h"
@@ -72,6 +73,10 @@ p2groinkfsm::Params sParams[2];     // [0] = 78 MiniHoudai, [1] = 97 FminiHoudai
 p2groinkfsm::Bank sBank = p2groinkfsm::defaultBank();
 std::vector<Shape*> sPoses[p2groinkfsm::AnimCount];
 bool sPosesLoaded = false;
+// #895: decoded pose vectors per clip + per-actor private geometry (lerp +
+// crossfade); sPoses stays the nearest-pose fallback.
+p2posefamily::Bank sPoseBank("GROINK");
+p2posefamily::Actors sPoseVis;
 // Heap-allocated on first campaign setup: the trace owns a Creature proxy,
 // which must not be constructed during static initialisation.
 P2GroinkMapTrace* sTrace = nullptr;
@@ -259,42 +264,6 @@ void loadParams() {
     }
 }
 
-// Pose bank (tank/chappy pattern): shared materials, bounded bytes.
-Shape* loadShape(const std::string& rel, Shape*& shared, std::size_t& total) {
-    const std::string path = "assets/dataDir/courses/pikmin2room/" + rel;
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file) return nullptr;
-    const auto size = file.tellg();
-    if (size <= 0 || size > 1024 * 1024 || total + std::size_t(size) > 24u * 1024 * 1024) return nullptr;
-    total += std::size_t(size);
-    file.seekg(0);
-    std::vector<unsigned char> bytes(std::size_t(size), 0), resources;
-    if (!file.read(reinterpret_cast<char*>(bytes.data()), size) || !p2animation::resources(bytes, resources)) return nullptr;
-    Shape* shape = gameflow.loadShape(("courses/pikmin2room/" + rel).c_str(), true);
-    if (!shape) return nullptr;
-    if (!shared) {
-        shared = shape;
-        for (int t = 0; t < shape->mTexAttrCount; ++t)
-            if (shape->mTexAttrList[t].mTexture) shape->mTexAttrList[t].mTexture->attach();
-    } else {
-        if (shape->mMaterialCount != shared->mMaterialCount || shape->mTexAttrCount != shared->mTexAttrCount
-            || shape->mTevInfoCount != shared->mTevInfoCount) return nullptr;
-        for (int j = 0; j < shape->mTotalMatpolyCount; ++j) {
-            auto* poly = shape->mMatpolyList[j];
-            if (!poly || !poly->mMaterial) continue;
-            int material = -1;
-            for (int m = 0; m < shape->mMaterialCount; ++m)
-                if (poly->mMaterial == &shape->mMaterialList[m]) material = m;
-            if (material < 0) return nullptr;
-            poly->mMaterial = &shared->mMaterialList[material];
-        }
-        shape->mMaterialList = shared->mMaterialList;
-        shape->mTexAttrList = shared->mTexAttrList;
-        shape->mTevInfoList = shared->mTevInfoList;
-    }
-    return shape;
-}
-
 void loadBank() {
     sBank = p2groinkfsm::defaultBank();
     for (auto& v : sPoses) v.clear();
@@ -307,21 +276,25 @@ void loadBank() {
     }
     int staged = 0;
     for (const auto& c : sBank.clip) staged += c.staged ? 1 : 0;
-    // Poses: minihoudai_<clip>_<ii>.mod (pikmin2_minihoudai_assets.pose_name).
-    Shape* shared = nullptr;
+    // Poses: minihoudai_<clip>_<ii>.mod (pikmin2_minihoudai_assets.pose_name),
+    // through the compact loader (#895: a few Shapes per clip plus decoded
+    // vectors; the Shapes stay the nearest-pose fallback).
+    sPoseBank.reset();
+    sPoseVis.clear();
+    p2poseload::Shared shared;
     std::size_t total = 0, poses = 0;
     bool ok = staged > 0;
     for (int a = 0; ok && a < p2groinkfsm::AnimCount; ++a) {
         const auto& clip = sBank.clip[a];
-        if (!clip.staged) continue;
-        for (std::size_t i = 0; i < clip.poses.size(); ++i) {
-            char rel[160];
-            std::snprintf(rel, sizeof(rel), "minihoudai_%s_%02u.mod", clip.name.c_str(), unsigned(i));
-            Shape* shape = loadShape(rel, shared, total);
-            if (!shape) { ok = false; break; }
-            sPoses[a].push_back(shape);
-            ++poses;
+        if (!clip.staged || clip.poses.empty()) continue;
+        std::string error;
+        if (!p2posefamily::loadFamilyClip(sPoseBank, clip.name, "minihoudai_" + clip.name, int(clip.poses.size()),
+                                          clip.frames, clip.poses, shared, total, sPoses[a], error)) {
+            std::printf("P2_GROINK_POSE_LOAD_FAILED clip=%s reason=%s\n", clip.name.c_str(), error.c_str());
+            ok = false;
+            break;
         }
+        poses += clip.poses.size();
     }
     if (!ok) for (auto& v : sPoses) v.clear();
     sPosesLoaded = ok && poses > 0;
@@ -542,6 +515,8 @@ void pc_p2_groink_teki_reset()
     sTail = CarcassTail{};
     sGeneratorObj = nullptr;
     sDrawLogged.clear();
+    sPoseVis.clear();
+    sPoseBank.reset();
     // Stage teardown frees the pose shapes with the stage heap.
     for (auto& poses : sPoses) poses.clear();
     sPosesLoaded = false;
@@ -558,6 +533,7 @@ void pc_p2_groink_teki_forget(BTeki* t)
     if (!t) return;
     const bool wasBound = s.erase(t) > 0;
     sDrawLogged.erase(t);
+    sPoseVis.forget(t);
     if (wasBound) {
         ++sForgetCount;
         std::printf("P2_GROINK_TEKI_FORGET bound=1 remaining=%d count=%u\n",
@@ -878,6 +854,13 @@ bool pc_p2_groink_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, bool 
         for (std::size_t k = 1; k < poses.size() && k < sPoses[anim].size(); ++k)
             if (std::fabs(float(poses[k]) - frame) < std::fabs(float(poses[best]) - frame)) best = k;
     Shape* shape = sPoses[anim][best];
+    {   // #895: lerp + crossfade into a private Shape; nearest pose stays the fallback.
+        const auto& clip = sBank.clip[anim];
+        const float duration = float(clip.frames > 1 ? clip.frames : 2);
+        const float drawFrame = last ? duration - 1.0f
+                                     : (std::isfinite(frame) ? std::max(0.0f, std::min(duration - 1.0f, frame)) : 0.0f);
+        if (Shape* smooth = sPoseVis.draw(t, sPoseBank, clip.name, drawFrame, b.generator)) shape = smooth;
+    }
     shape->updateAnim(gfx, view, nullptr, t);
     pc_gfx_specular_family_scope(1);
     shape->drawshape(gfx, *gfx.mCamera, nullptr);

@@ -5,6 +5,7 @@
 #include "pc_p2_sarai_captor.h"
 #include "pc_p2_sarai_lifecycle.h"
 #include "pc_p2_retail_player.h"
+#include "pc_p2_pose_blend.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -136,7 +137,15 @@ private:
         std::string profile;
         P2SaraiPoseBank bank;
         std::vector<Shape*> meshes;
+        // #895: decoded positions/normals per sampled mesh (empty when any
+        // pose fails to decode: the set then draws its nearest mesh only).
+        std::vector<p2pose::Pose> poses;
+        std::vector<int> frames;
+        bool seamContinuous = true;
     };
+    struct Smooth;             // #895 per-host private geometry (lerp + crossfade)
+    Smooth* mSmooth = nullptr;
+    int mActiveSet = -1;
     Shape* mShape;
     CollPart* mMouths[2];
     Matrix4f mMouthLocal[2];

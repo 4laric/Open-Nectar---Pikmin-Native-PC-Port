@@ -73,15 +73,17 @@ const FamilyDef FAMILIES[] = {
 // Resident budgets (#895): Shape slots cost their file size, decoded poses
 // their vector payload (see pc_p2_pose_loader.h). PoseFileBytes matches the
 // p2pose::decodeBaked cap.
-constexpr size_t PoseFileBytes = 1024 * 1024;    // per pose file
-constexpr size_t ClipBytes = 1024 * 1024;        // resident per clip
-constexpr size_t TotalBytes = 48 * 1024 * 1024;  // resident per setup
+// Approved #895 acceptance budgets, shared with every pose-bank loader.
+constexpr size_t PoseFileBytes = p2poseload::PoseFileBytes;  // per pose file
+constexpr size_t ClipBytes = p2poseload::ClipBytes;          // resident per clip (512 KiB)
+constexpr size_t TotalBytes = p2poseload::TotalBytes;        // resident per setup (48 MiB)
 
 struct Bank {
     std::map<std::string, std::vector<Shape*>> clips;
     std::map<std::string, p2sampled::Clip> clock;
     std::map<std::string, std::vector<p2pose::Baked>> baked;
     std::map<std::string, bool> interp;
+    std::map<std::string, bool> seam;  // loop seam continuous (#895)
     std::string prefix;
     std::string fileSpecies;
 };
@@ -302,7 +304,12 @@ Bank loadBank(const FamilyDef& family, const std::string& species,
         // Vectors drive every draw (nearest or lerp); lerp additionally needs
         // trustworthy frames (a malformed trailer keeps nearest selection).
         bank.interp[row.name] = interpolation && !row.framesMalformed && row.poseCount >= 2;
-        if (loaded.vectors) bank.baked[row.name] = std::move(loaded.baked);
+        if (loaded.vectors) {
+            std::vector<int> frames = clock.poses.frames;
+            if (frames.empty()) frames = p2batch2clock::uniformFrames(row.poseCount, clock.poses.duration);
+            bank.seam[row.name] = p2poseload::seamOf(loaded.baked, frames);
+            bank.baked[row.name] = std::move(loaded.baked);
+        }
     }
     return bank;
 }
@@ -895,16 +902,19 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
             tune.lerp = interpIt != bank.interp.end() && interpIt->second;
             const float drawFrame = holdLast ? float(timing.poses.duration - 1) : float(sourceFrame);
             const auto& bakedVec = bakedIt->second;
+            auto seamIt = bank.seam.find(name);
+            const bool seamOk = seamIt == bank.seam.end() || seamIt->second;
             const p2pose::Presented shown = p2pose::present(
                 blendIt->second.track, name, bakedVec.size(),
-                [&bakedVec](size_t i) -> const p2pose::Pose& { return bakedVec[i].pose; }, frames, drawFrame, tune);
+                [&bakedVec](size_t i) -> const p2pose::Pose& { return bakedVec[i].pose; }, frames, drawFrame, tune,
+                seamOk);
             if (shown.ok) {
                 shape = blendIt->second.track.shape;
                 static unsigned crossfadeLogs = 0;
-                if (shown.crossfadeStarted && crossfadeLogs < 64u) {
+                if ((shown.crossfadeStarted || shown.wrapBlend) && crossfadeLogs < 64u) {
                     ++crossfadeLogs;
-                    std::printf("P2_BATCH2_CROSSFADE key=%s clip=%s ms=%d\n", entry->second.c_str(), name,
-                                int(tune.crossfadeSeconds * 1000.f + .5f));
+                    std::printf("P2_BATCH2_CROSSFADE key=%s clip=%s ms=%d cause=%s\n", entry->second.c_str(), name,
+                                int(tune.crossfadeSeconds * 1000.f + .5f), shown.wrapBlend ? "loop_seam" : "clip_change");
                 }
                 if (blendIt->second.corpse != corpse
                         || proxyDrawn.insert(std::string("blend|") + entry->second + "|" + name).second) {
@@ -1049,7 +1059,7 @@ void pc_p2_batch2_update(BTeki* actor, float seconds) {
     const float speed = actor->mVelocity.x * actor->mVelocity.x + actor->mVelocity.z * actor->mVelocity.z;
     gates[actor].update(speed, seconds, tune);
     auto blendIt = blends.find(actor);
-    if (blendIt != blends.end()) blendIt->second.track.fade.advance(seconds);
+    if (blendIt != blends.end()) blendIt->second.track.advance(seconds);
 }
 
 bool pc_p2_batch2_any_drawn() {
