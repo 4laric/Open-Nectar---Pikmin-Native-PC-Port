@@ -840,7 +840,7 @@ private:
             // for THIS token returns to Aftermath to finish v5 delivery;
             // anything else is GIVEUP reason=target_gone with the token/state
             // as evidence. token==0 (no targets at all) still idles silently.
-            if (result.token != 0 && result.token == in.targetToken && (sawDamage || sawKill)) {
+            if (!resultReported && result.token != 0 && result.token == in.targetToken && (sawDamage || sawKill)) {
                 enter(State::Aftermath, in);
                 return;
             }
@@ -857,7 +857,9 @@ private:
         // rule), kogane-likes excluded, return so the next tick engages the new
         // target. Same-token bounces still resume Aftermath above; only a true
         // token switch with latched combat scores here (no spurious RESULTs).
-        if (result.token != 0 && in.targetToken != 0 && result.token != in.targetToken
+        // #898: a RESULT already reported for result.token must not be
+        // re-reported on every Select tick (multi-target sweep loop).
+        if (!resultReported && result.token != 0 && in.targetToken != 0 && result.token != in.targetToken
             && (sawKill || sawDamage) && !result.koganeLike) {
             finishTarget(in, /*claimedKill*/ false);
             return;
@@ -883,6 +885,7 @@ private:
         amLastCrew = 0;
         amGrowStill = 0.0f;
         result = Result{};
+        resultReported = false;
         result.token = in.targetToken;
         result.koganeLike = isKoganeLike(in.targetSource);
         enter(State::Approach, in);
@@ -1482,6 +1485,7 @@ private:
                           int(result.carried), int(result.received), result.seconds);
         }
         markers.emplace_back(buf);
+        resultReported = true;
         // The driver advances to the next target (or Done when none remain).
         enter(State::Select, in);
     }
@@ -1706,6 +1710,7 @@ private:
     int withdrawCycles = 0; // withdraw-menu repeat count this run
     float throwSpin = 0.0f; // Kurage throw rotation phase
     bool leadValid = false; // #898 press-only lead estimate
+    bool resultReported = false; // #898 RESULT emitted for result.token
     float leadX = 0.0f, leadZ = 0.0f, leadVX = 0.0f, leadVZ = 0.0f;
     bool kingBacking = false; // #884 round 4: King standoff backing off (hysteresis)
     bool kingClosing = false; // #884 round 4: King standoff closing in (hysteresis)
