@@ -134,6 +134,10 @@ struct Params {
     float babyAttackRadius = 30.0f;  // fp22 not staged by the #235 audit: = fp20 (approximation)
     float babyAttackHitAngle = 45.0f; // fp23 not staged: = fp21 (approximation, degrees)
     float babyAttackDamage = 2.0f;   // fp24
+    // Carcass draw fallback staged by the root (pikmin2_queen_stage): the
+    // baked carry poses collapse to a point, so the carcass draws this dead pose.
+    int carcassCarryDegenerate = 0;
+    int carcassDeadPose = -1;
     bool retail = false;             // true once staged parm rows were read
 };
 
@@ -218,7 +222,9 @@ inline bool parseBank(std::istream& in, Bank& bank, Params& params, std::string&
                             {"shake_off_blow_b", &params.shakeOffBlowB}, {"shake_off_sticking_2", &params.shakeOffSticking2},
                             {"shake_off_blow_c", &params.shakeOffBlowC}, {"shake_off_sticking_3", &params.shakeOffSticking3},
                             {"shake_off_blow_d", &params.shakeOffBlowD}, {"max_births", &params.maxBirths},
-                            {"min_births", &params.minBirths}};
+                            {"min_births", &params.minBirths},
+                            {"carcass_carry_degenerate", &params.carcassCarryDegenerate},
+                            {"carcass_dead_pose", &params.carcassDeadPose}};
             bool known = false;
             for (const auto& f : fs) if (name == f.n) { *f.p = v; known = true; }
             for (const auto& i : is) if (name == i.n) { *i.p = int(v); known = true; }
