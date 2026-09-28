@@ -464,6 +464,12 @@ struct Senses {
     bool targetAttacking = false;
     bool naviHpValid = false;
     float naviHp = 0.0f;
+    // #256 Empress Bulblax: she is charging (Flick) or rolling (read-only
+    // via pc_p2_queen_teki_probe). A player recalls the squad and steps off
+    // the roll line along her body axis; dodgeX/Z is that safe point.
+    bool queenDanger = false;
+    float dodgeX = 0.0f;
+    float dodgeZ = 0.0f;
 };
 
 // Pad output for one tick. moveX/moveZ is the desired world-space XZ move
@@ -989,6 +995,27 @@ private:
         observeDamage(in);
         observeDeath(in);
         observeReceipt(in);
+        // #256 Empress Bulblax roll dodge (pad-only player tactic): while she
+        // charges or rolls, hold the whistle and walk to the safe point off
+        // her roll line; resume throwing once she is back in a held state.
+        if (in.queenDanger) {
+            if (!queenDodging) {
+                queenDodging = true;
+                char buf[200];
+                std::snprintf(buf, sizeof(buf), "AUTOPLAY_QUEEN_DODGE start=1 token=%u dodge=(%.0f,%.0f) bot-driven",
+                              in.targetToken, in.dodgeX, in.dodgeZ);
+                markers.emplace_back(buf);
+            }
+            lastCommand.buttons = PadB;
+            steer(in.naviX, in.naviZ, in.dodgeX, in.dodgeZ);
+            return;
+        }
+        if (queenDodging) {
+            queenDodging = false;
+            char buf[160];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_QUEEN_DODGE start=0 token=%u bot-driven", in.targetToken);
+            markers.emplace_back(buf);
+        }
         // Kogane never dies: damage observed -> confirm, then move on. Both
         // the engagement-time flag and the live senses must agree it is
         // Kogane-like, so a mid-fight source switch can never score a stale
@@ -1685,6 +1712,7 @@ private:
     bool kingClosing = false; // #884 round 4: King standoff closing in (hysteresis)
     float kingBackTime = 0.0f; // continuous backing time (sidestep after kingSidestepAfter)
     int kingMode = -1; // last AUTOPLAY_KING_STANDOFF mode (-1 = none this stint)
+    bool queenDodging = false; // #256: stepping off the Empress Bulblax roll line
     bool kingEvading = false; // #884 round 5: leaving the tongue sweep for the current King attack
     float kingEvadeTime = 0.0f; // time spent evading inside kingEvadeClear (sidestep after kingEvadeSideAfter)
     bool kingLowHpMode = false; // last stance used the low-health band (marker field)

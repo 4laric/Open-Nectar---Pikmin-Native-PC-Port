@@ -180,6 +180,7 @@ bool pc_p2_generated_placement_bind(BTeki* actor, unsigned sourceId, unsigned se
     case 57: // Lesser Spotted Jellyfloat (Kurage); muse observer lane 58.
     case 58: // Careening Dirigibug (BombSarai); muse observer lane 59.
     case 78: // Gatling Groink (MiniHoudai); muse observer lane 60.
+    case 30: // Empress Bulblax (Queen) OWN boss slot (#256; pc_p2_queen_teki binds behavior).
         return museBind(actor, sourceId, seedTargetUid, generatorId);
     case 99: // Waterwraith (BlackMan); provider #575, consumer lane 572.
         return waterwraithBind(actor, sourceId, seedTargetUid, generatorId);

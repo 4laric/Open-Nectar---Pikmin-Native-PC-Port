@@ -12,7 +12,7 @@ int main() {
             assert(p2campaign::hostType(sources[i],original,true)==original);
         }
     }
-    for (unsigned source: {0u,1u,41u,45u,58u,99u,999u})
+    for (unsigned source: {0u,1u,31u,41u,45u,58u,99u,999u})
         assert(p2campaign::hostType(source,17,false)==17);
     for (unsigned source : {9u,23u,34u,44u,54u,56u,57u,59u,60u,61u,62u,63u,65u,69u,70u,71u,78u,79u,101u,17u,18u,24u,25u,15u,75u,26u,27u,84u,93u,66u,97u})
         assert(p2campaign::hasStaticHost(source));
@@ -22,6 +22,12 @@ int main() {
     // TEKI_Chappy (3), KumaKochappy (76) rides TEKI_Chappb (31).
     for (unsigned source : {2u,33u,35u,43u,53u,67u,76u})
         assert(p2campaign::hasStaticHost(source));
+    // #256 Empress Bulblax OWN rides TEKI_Swallow (4).
+    assert(p2campaign::hasStaticHost(30u));
+    for (int original = 0; original < 34; ++original) {
+        assert(p2campaign::hostType(30u, original, false) == 4);
+        assert(p2campaign::hostType(30u, original, true) == original);
+    }
     // inst-frogs (#871): 17/18/24/25/15/75 are static now (see list above),
     // so only the 0 sentinel stays non-static here.
     for (unsigned source : {0u})

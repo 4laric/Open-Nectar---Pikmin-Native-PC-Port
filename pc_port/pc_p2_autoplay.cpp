@@ -44,6 +44,7 @@
 // throws + whistle, Kurage body-position throws).
 
 #include "pc_p2_autoplay_policy.h"
+#include "pc_p2_queen_teki.h"
 
 #include "pc_p2_input_script.h"
 #include "pc_p2_campaign_actor.h"
@@ -818,6 +819,18 @@ void pc_p2_autoplay_tick(void)
             const char* kst = nullptr;
             senses.targetAttacking = pc_p2_chappy_probe(pick->actor, &kst, nullptr, nullptr) && kst
                 && std::strcmp(kst, "attack") == 0;
+        }
+        // #256 Empress Bulblax roll dodge senses (read-only FSM probe).
+        if (pick->source == 30) {
+            int qst = -1;
+            float qface = 0.0f, qhx = 0.0f, qhz = 0.0f;
+            if (pc_p2_queen_teki_probe(pick->actor, &qst, &qface, &qhx, &qhz)) {
+                senses.queenDanger = qst == 4 || qst == 5; // Flick / Rolling (Queen.h StateID)
+                const float fx = std::sin(qface), fz = std::cos(qface);
+                const float side = ((naviX - qhx) * fx + (naviZ - qhz) * fz) >= 0.0f ? 1.0f : -1.0f;
+                senses.dodgeX = qhx + fx * side * 320.0f;
+                senses.dodgeZ = qhz + fz * side * 320.0f;
+            }
         }
         // Flyer senses (bot-v2 gap 3): height above ground, grab latch.
         // Kurage's body is on the ground (visual float only), so its XZ body

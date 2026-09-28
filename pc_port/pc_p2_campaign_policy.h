@@ -59,6 +59,7 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     case 93: return 3; // TEKI_Chappy: BombOtakara (Volatile Dweevil)
     case 66: return 4; // TEKI_Swallow: Houdai (Man-at-Legs) proxy vehicle
     case 97: return 0; // TEKI_Frog: FminiHoudai (Gatling Groink pedestal) proxy vehicle
+    case 30: return 4; // TEKI_Swallow: Empress Bulblax OWN vehicle (#256, pc_p2_queen_teki)
     default: return original;
     }
 }
