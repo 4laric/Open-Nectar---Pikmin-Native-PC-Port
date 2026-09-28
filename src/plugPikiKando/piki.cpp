@@ -2894,6 +2894,12 @@ void Piki::doAI()
 		_500.clear();
 		return;
 	}
+	// #245: an Antenna Beetle ActTeki follower walks the beetle's footmark
+	// trail instead of running its P1 action (source Brain ACT_Teki).
+	if (getState() == PIKISTATE_Normal && pc_p2_fuefuki_follower_controls(this)) {
+		_500.clear();
+		return;
+	}
 
 	int state = getState();
 	if (state == PIKISTATE_Unk34) {
@@ -2943,6 +2949,13 @@ void Piki::pcChargeAt(Creature* target)
 void Piki::changeMode(int newMode, Navi* navi)
 {
 	STACK_PAD_VAR(6); // idk
+#if defined(PIKI_PC_PORT)
+	// #245: an ActTeki follower is not callable into a party while its
+	// Antenna Beetle lives (InteractFue::actPiki ACT_Teki branch).
+	if (newMode == PikiMode::FormationMode && pc_p2_fuefuki_follower_blocks_recruit(this)) {
+		return;
+	}
+#endif
 #if defined(PIKI_PC_PORT)
 	// VS: un Pikmin sin dueño pasa a ser del capitán a cuyo grupo entra
 	// (arrancarlo, silbarlo o tocarlo acaban aquí).

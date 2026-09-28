@@ -1,0 +1,798 @@
+// Campaign OWN Antenna Beetle (P2 Fuefuki, source 41), #245. See the header.
+#include "pc_p2_campaign_actor.h"
+#include "pc_p2_setup_failsafe.h"
+#include "pc_p2_fuefuki_teki.h"
+#include "pc_p2_fuefuki_teki_policy.h"
+#include "pc_p2_animation.h"
+#include "pc_p2_navi_select.h"
+#include "pc_randomizer.h"
+#include "Generator.h"
+#include "MapMgr.h"
+#include "Navi.h"
+#include "NaviMgr.h"
+#include "Pellet.h"
+#include "Piki.h"
+#include "PikiMgr.h"
+#include "PikiState.h"
+#include "PaniPikiAnimator.h"
+#include "Shape.h"
+#include "Texture.h"
+#include "Graphics.h"
+#include "gameflow.h"
+#include "gl/pc_gfx.h"
+#include "Interactions.h"
+#include "system.h"
+#include "teki.h"
+#include <cmath>
+#include <cstdio>
+#include <fstream>
+#include <map>
+#include <set>
+#include <string>
+#include <vector>
+
+namespace {
+using p2fuefuki::Actor;
+using p2fuefuki::Commands;
+
+struct Binding {
+    unsigned token = 0;
+    Actor actor;
+    double debt = 0.0;
+    bool pressed = false;
+    float lastHealth = 0.0f;
+    float lastPositiveHealth = 0.0f;
+    bool deadLogged = false;
+    bool escaped = false;   // kill requested -> pcEscapeNow ran
+    bool carcass = false;   // corpse pellet observed
+    bool weighted = false;  // retail carcass carry weight applied
+    bool hidden = false;    // host targetability flags currently cleared
+    float logTimer = 0.0f;
+    unsigned long hostSkips = 0;
+    int claims = 0;
+    int drawLogged = 0;
+};
+
+std::map<BTeki*, Binding> sBound;
+P2FuefukiOwnershipTable sTable;
+std::uint64_t sEpoch = 0;
+
+// Stable Pikmin ids for the ownership table / follow controller.
+std::map<const Piki*, std::uint32_t> sPikiId;
+std::map<std::uint32_t, Piki*> sIdPiki;
+std::uint32_t sNextPikiId = 1;
+// Live ActTeki followers -> owning beetle.
+std::map<const Piki*, BTeki*> sFollowerOwner;
+// Owner-death PIKIPANIC_Panic (astonish) releases still panicking.
+std::map<const Piki*, unsigned> sAstonish;
+
+p2fuefuki::Retail sRetail;
+p2fuefuki::Motions sMotions;
+bool sReady = false;
+
+// Staged pose bank: fuefuki_Fuefuki_<clip>_<ii>.mod, frames from p2-fuefuki-bank.txt.
+struct PoseClip {
+    std::vector<int> frames;
+    std::vector<Shape*> shapes;
+};
+PoseClip sPoses[p2fuefuki::AnimCount];
+bool sPosesLoaded = false;
+std::size_t sPoseCount = 0, sPoseBytes = 0;
+
+std::uint32_t pikiId(const Piki* p)
+{
+    auto it = sPikiId.find(p);
+    if (it != sPikiId.end()) return it->second;
+    const std::uint32_t id = sNextPikiId++;
+    sPikiId[p] = id;
+    sIdPiki[id] = const_cast<Piki*>(p);
+    return id;
+}
+Piki* pikiFor(std::uint32_t id)
+{
+    auto it = sIdPiki.find(id);
+    return it == sIdPiki.end() ? nullptr : it->second;
+}
+
+const char* colorName(int c) { return c == 0 ? "blue" : c == 1 ? "red" : c == 2 ? "yellow" : "other"; }
+
+bool loadParms()
+{
+    sRetail = p2fuefuki::Retail{};
+    std::ifstream in("p2-fuefuki-parms.txt");
+    std::string error = "missing";
+    if (!in || !p2fuefuki::parseEnemyParm(in, sRetail, error)) {
+        std::printf("P2_FUEFUKI_PARMS_INVALID file=p2-fuefuki-parms.txt reason=%s\n", error.c_str());
+        return false;
+    }
+    const auto& f = sRetail.fsm;
+    std::printf("P2_FUEFUKI_PARMS source_id=41 retail=1 life=%.1f move=%.1f turn=%.3f max_turn=%.1f "
+                "territory=%.1f home=%.1f private=%.1f attack_radius=%.1f shake_range=%.1f "
+                "shake_knockback=%.1f shake_damage=%.1f fp01=%.1f fp02=%.1f fp03=%.1f fp11=%.1f fp12=%.1f "
+                "fp13=%.1f fp21=%.1f fp22=%.1f fp31=%.2f\n",
+                sRetail.life, sRetail.moveSpeed, sRetail.turnSpeed, sRetail.maxTurnAngle, sRetail.territoryRadius,
+                sRetail.homeRadius, sRetail.privateRadius, sRetail.attackRadius, sRetail.shakeRange,
+                sRetail.shakeKnockback, sRetail.shakeDamage, f.maxGroundTime, f.minGroundTime, f.airborneTime,
+                f.minWhistleTime, f.maxWhistleTimeNoSquad, f.maxWhistleTimeWithSquad, f.struggleTime, f.jumpTime,
+                f.normalLandingChance);
+    return true;
+}
+
+bool loadMotions()
+{
+    sMotions = p2fuefuki::Motions{};
+    std::ifstream in("p2-fuefuki-motion.txt");
+    std::string error = "missing";
+    if (!in || !p2fuefuki::loadMotions(in, sMotions, error)) {
+        std::printf("P2_FUEFUKI_MOTION_INVALID file=p2-fuefuki-motion.txt reason=%s\n", error.c_str());
+        return false;
+    }
+    std::printf("P2_FUEFUKI_MOTION clips=%d", p2fuefuki::AnimCount);
+    for (int a = 0; a < p2fuefuki::AnimCount; ++a)
+        std::printf(" %s=%d/%zu", p2fuefuki::animName(a), sMotions.clip[a].duration, sMotions.clip[a].events.size());
+    std::printf("\n");
+    return true;
+}
+
+Shape* loadShape(const std::string& rel, Shape*& shared, std::size_t& total)
+{
+    const std::string path = "assets/dataDir/courses/pikmin2room/" + rel;
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file) return nullptr;
+    const auto size = file.tellg();
+    if (size <= 0 || size > 1024 * 1024 || total + std::size_t(size) > 24u * 1024 * 1024) return nullptr;
+    total += std::size_t(size);
+    file.seekg(0);
+    std::vector<unsigned char> bytes(std::size_t(size), 0), resources;
+    if (!file.read(reinterpret_cast<char*>(bytes.data()), size) || !p2animation::resources(bytes, resources)) return nullptr;
+    Shape* shape = gameflow.loadShape(("courses/pikmin2room/" + rel).c_str(), true);
+    if (!shape) return nullptr;
+    if (!shared) {
+        shared = shape;
+        for (int t = 0; t < shape->mTexAttrCount; ++t)
+            if (shape->mTexAttrList[t].mTexture) shape->mTexAttrList[t].mTexture->attach();
+    } else {
+        if (shape->mMaterialCount != shared->mMaterialCount || shape->mTexAttrCount != shared->mTexAttrCount
+            || shape->mTevInfoCount != shared->mTevInfoCount) return nullptr;
+        for (int j = 0; j < shape->mTotalMatpolyCount; ++j) {
+            auto* poly = shape->mMatpolyList[j];
+            if (!poly || !poly->mMaterial) continue;
+            int material = -1;
+            for (int m = 0; m < shape->mMaterialCount; ++m)
+                if (poly->mMaterial == &shape->mMaterialList[m]) material = m;
+            if (material < 0) return nullptr;
+            poly->mMaterial = &shared->mMaterialList[material];
+        }
+        shape->mMaterialList = shared->mMaterialList;
+        shape->mTexAttrList = shared->mTexAttrList;
+        shape->mTevInfoList = shared->mTevInfoList;
+    }
+    return shape;
+}
+
+// p2-fuefuki-bank.txt: `P2_FUEFUKI_BANK_1 <n>` then n rows
+// `clip <name> <frames> <poses> <frame>...` and `END`.
+void loadPoses()
+{
+    for (auto& c : sPoses) c = PoseClip{};
+    sPosesLoaded = false;
+    sPoseCount = sPoseBytes = 0;
+    std::ifstream in("p2-fuefuki-bank.txt");
+    std::string header;
+    int count = 0;
+    if (!in || !(in >> header >> count) || header != "P2_FUEFUKI_BANK_1" || count < 1 || count > p2fuefuki::AnimCount) {
+        std::printf("P2_FUEFUKI_BANK_INVALID reason=header draw=host\n");
+        return;
+    }
+    Shape* shared = nullptr;
+    bool ok = true;
+    for (int i = 0; ok && i < count; ++i) {
+        std::string word, name;
+        int frames = 0, poses = 0;
+        if (!(in >> word >> name >> frames >> poses) || word != "clip" || poses < 0 || poses > 24) { ok = false; break; }
+        int anim = -1;
+        for (int a = 0; a < p2fuefuki::AnimCount; ++a)
+            if (name == p2fuefuki::animName(a)) anim = a;
+        std::vector<int> fr(std::size_t(poses), 0);
+        for (int& f : fr)
+            if (!(in >> f)) ok = false;
+        if (!ok || anim < 0) { ok = false; break; }
+        for (int k = 0; k < poses; ++k) {
+            char rel[160];
+            std::snprintf(rel, sizeof(rel), "fuefuki_Fuefuki_%s_%02d.mod", name.c_str(), k);
+            Shape* shape = loadShape(rel, shared, sPoseBytes);
+            if (!shape) {
+                std::printf("P2_FUEFUKI_BANK_INVALID reason=pose_missing file=%s draw=host\n", rel);
+                ok = false;
+                break;
+            }
+            sPoses[anim].frames.push_back(fr[std::size_t(k)]);
+            sPoses[anim].shapes.push_back(shape);
+            ++sPoseCount;
+        }
+    }
+    std::string end;
+    if (ok && (!(in >> end) || end != "END")) ok = false;
+    if (!ok) {
+        for (auto& c : sPoses) c = PoseClip{};
+        sPoseCount = 0;
+    }
+    sPosesLoaded = ok && sPoseCount > 0;
+    int clips = 0;
+    for (const auto& c : sPoses) clips += c.shapes.empty() ? 0 : 1;
+    std::printf("P2_FUEFUKI_BANK staged_clips=%d poses=%zu bytes=%zu draw=%s landing=%zu landfail=%zu carry=%zu\n",
+                clips, sPoseCount, sPoseBytes, sPosesLoaded ? "p2_model" : "host",
+                sPoses[p2fuefuki::AnimLanding].shapes.size(), sPoses[p2fuefuki::AnimLandFail].shapes.size(),
+                sPoses[p2fuefuki::AnimCarry].shapes.size());
+}
+
+Binding* find(const BTeki* t)
+{
+    auto it = sBound.find(const_cast<BTeki*>(t));
+    return it == sBound.end() ? nullptr : &it->second;
+}
+
+bool pikiCallable(Piki* p)
+{
+    // P1 stand-in for the source PikiState::callable() gate (walk/normal only):
+    // a Pikmin in its Normal state that is not stuck to anything and not buried.
+    return p->getState() == PIKISTATE_Normal && !p->isStickTo() && !p->isBuried();
+}
+
+void setHidden(BTeki* t, Binding& b, bool hide)
+{
+    if (b.hidden == hide) return;
+    b.hidden = hide;
+    if (hide) {
+        // EB_Untargetable: airborne beetle is not a target, not collidable.
+        t->clearTekiOption(TEKIOPT_Atari | TEKIOPT_Visible | TEKIOPT_ShadowVisible | TEKIOPT_LifeGaugeVisible);
+        t->setTekiOption(TEKIOPT_Invincible);
+    } else {
+        t->setTekiOption(TEKIOPT_Atari | TEKIOPT_Visible | TEKIOPT_ShadowVisible);
+        t->clearTekiOption(TEKIOPT_Invincible);
+    }
+    std::printf("P2_FUEFUKI_UNTARGETABLE generator=%u source_id=41 on=%d no_atari=%d invincible=%d\n", b.token,
+                hide ? 1 : 0, hide ? 1 : 0, hide ? 1 : 0);
+}
+
+// ---- followers ------------------------------------------------------------
+void claimFollower(BTeki* t, Binding& b, Piki* p)
+{
+    if (!p || !p->isAlive()) return;
+    const int modeBefore = p->mMode;
+    sFollowerOwner[p] = t;
+    // Brain::start(ACT_Teki): the current action (formation, transport, ...)
+    // is abandoned; the Pikmin leaves the party. No captain write.
+    p->changeMode(PikiMode::FreeMode, p->mNavi);
+    p->startMotion(PaniMotionInfo(PIKIANIM_Walk, p), PaniMotionInfo(PIKIANIM_Walk));
+    ++b.claims;
+    std::printf("P2_FUEFUKI_WHISTLE_CLAIM generator=%u source_id=41 piki=%u color=%s mode_before=%d followers=%d "
+                "claims=%d\n",
+                b.token, pikiId(p), colorName(p->mColor), modeBefore, b.actor.follow().followerCount(), b.claims);
+}
+
+void releaseSuspend(Binding& b, std::uint32_t id)
+{
+    Piki* p = pikiFor(id);
+    if (!p) return;
+    sFollowerOwner.erase(p);
+    if (!p->isAlive()) return;
+    // ActTeki Success + mToEmote: EMOTE_Excitement, then the brain's ACT_Free.
+    p->changeMode(PikiMode::FreeMode, p->mNavi);
+    if (p->getState() == PIKISTATE_Normal) {
+        p->mEmotion = PikiEmotion::Excited;
+        p->mFSM->transit(p, PIKISTATE_Emotion);
+    }
+    std::printf("P2_FUEFUKI_FOLLOW_RELEASE generator=%u source_id=41 piki=%u reason=beetle_airborne next=free_emote\n",
+                b.token, id);
+}
+
+void releasePanic(unsigned token, std::uint32_t id)
+{
+    Piki* p = pikiFor(id);
+    if (!p) return;
+    sFollowerOwner.erase(p);
+    if (!p->isAlive()) return;
+    // ActTeki owner-death branch: PIKISTATE_Panic with PIKIPANIC_Panic.
+    sAstonish[p] = token;
+    p->mFSM->transit(p, PIKISTATE_Panic);
+    std::printf("P2_FUEFUKI_FOLLOW_RELEASE generator=%u source_id=41 piki=%u reason=owner_dead next=panic state=%d\n",
+                token, id, p->getState());
+}
+
+// ---- world snapshot ---------------------------------------------------------
+void buildWorld(BTeki* t, Binding& b, p2fuefuki::World& w)
+{
+    const Vector3f me = t->getPosition();
+    w.x = me.x;
+    w.y = me.y;
+    w.z = me.z;
+    w.health = t->mHealth;
+    w.pressed = b.pressed;
+    b.pressed = false;
+    w.pikis.clear();
+    w.navis.clear();
+    std::uint32_t nid = 1;
+    for (Navi* n : pc_p2_navis()) {
+        if (!n) continue;
+        p2fuefuki::NaviView v;
+        v.id = nid++;
+        v.x = n->getPosition().x;
+        v.z = n->getPosition().z;
+        v.alive = n->isAlive();
+        w.navis.push_back(v);
+    }
+    if (!pikiMgr) return;
+    Iterator it(pikiMgr);
+    CI_LOOP(it) {
+        Piki* p = static_cast<Piki*>(*it);
+        if (!p) continue;
+        p2fuefuki::PikiView v;
+        v.id = pikiId(p);
+        const Vector3f pos = p->getPosition();
+        v.x = pos.x;
+        v.y = pos.y;
+        v.z = pos.z;
+        v.alive = p->isAlive();
+        v.pikmin = true;
+        v.callable = pikiCallable(p);
+        v.stuckToMouth = p->isStickToMouth() != 0;
+        v.stuckToSelf = p->getStickObject() == t;
+        auto owner = sFollowerOwner.find(p);
+        v.followingOther = owner != sFollowerOwner.end() && owner->second != t;
+        w.pikis.push_back(v);
+    }
+}
+
+void applyCommands(BTeki* t, Binding& b, const Commands& c)
+{
+    if (c.transited) {
+        const Vector3f p = t->getPosition();
+        std::printf("P2_FUEFUKI_FSM_STATE generator=%u source_id=41 from=%s state=%s clip=%s x=%.1f z=%.1f "
+                    "health=%.1f appear=%.2f whistle=%.2f squad=%d stuck=%d followers=%d\n",
+                    b.token, p2fuefuki::stateName(c.from), p2fuefuki::stateName(c.to), p2fuefuki::animName(c.anim),
+                    p.x, p.z, t->mHealth, b.actor.fsm().getAppearTimer(), b.actor.fsm().getWhistleTimer(),
+                    b.actor.fsm().squad().squadActive() ? 1 : 0, c.stuck, b.actor.follow().followerCount());
+        if (c.to == P2FuefukiFsmState::Struggle)
+            std::printf("P2_FUEFUKI_STRUGGLE generator=%u source_id=41 pressed=%d stuck=%d\n", b.token,
+                        c.pressAccepted ? 1 : 0, c.stuck);
+        if (c.to == P2FuefukiFsmState::Dead && !b.deadLogged) {
+            b.deadLogged = true;
+            std::printf("P2_FUEFUKI_DEAD generator=%u source_id=41 health=%.1f prior_health=%.1f followers_panic=%zu\n",
+                        b.token, t->mHealth, b.lastPositiveHealth, c.releasedPanic.size());
+        }
+    }
+    if (c.teleport) {
+        Vector3f dest(c.tx, 0.0f, c.tz);
+        dest.y = mapMgr ? mapMgr->getMinY(dest.x, dest.z, true) : t->getPosition().y;
+        t->resetPosition(dest);
+        t->mVelocity.set(0.0f, 0.0f, 0.0f);
+        std::printf("P2_FUEFUKI_LAND_TELEPORT generator=%u source_id=41 x=%.1f y=%.1f z=%.1f face=%.3f clip=%s "
+                    "home=%.1f,%.1f\n",
+                    b.token, dest.x, dest.y, dest.z, c.faceDir, p2fuefuki::animName(c.anim), b.actor.homeX(),
+                    b.actor.homeZ());
+    }
+    if (c.untargetableChanged) setHidden(t, b, c.untargetable);
+    for (std::uint32_t id : c.claimed) claimFollower(t, b, pikiFor(id));
+    for (std::uint32_t id : c.releasedSuspend) releaseSuspend(b, id);
+    for (std::uint32_t id : c.releasedPanic) releasePanic(b.token, id);
+    if (!c.flickStick.empty() || !c.flickPiki.empty() || !c.flickNavi.empty()) {
+        int stick = 0, piki = 0, navi = 0;
+        for (std::uint32_t id : c.flickStick)
+            if (Piki* p = pikiFor(id))
+                if (p->isAlive() && p->getStickObject() == t
+                    && p->stimulate(InteractFlick(t, c.flickKnockback, c.flickDamage, c.flickStickAngle))) ++stick;
+        for (std::uint32_t id : c.flickPiki)
+            if (Piki* p = pikiFor(id))
+                if (p->isAlive() && p->stimulate(InteractFlick(t, c.flickKnockback, c.flickDamage, c.flickNearbyAngle))) ++piki;
+        std::uint32_t nid = 1;
+        for (Navi* n : pc_p2_navis()) {
+            const std::uint32_t id = nid++;
+            if (!n || !n->isAlive()) continue;
+            for (std::uint32_t want : c.flickNavi)
+                if (want == id && n->stimulate(InteractFlick(t, c.flickKnockback, c.flickDamage, c.flickNearbyAngle))) ++navi;
+        }
+        std::printf("P2_FUEFUKI_FLICK generator=%u source_id=41 stick=%d/%zu piki=%d/%zu navi=%d/%zu\n", b.token, stick,
+                    c.flickStick.size(), piki, c.flickPiki.size(), navi, c.flickNavi.size());
+    }
+    // Locomotion: the FSM's velocity/facing; the host integrates with its map
+    // collision (doSimulation stand-in, Groink #888 pattern).
+    t->setDirection(c.faceDir);
+    const Vector3f drive(c.vx, 0.0f, c.vz);
+    t->inputDrive(drive);
+    t->mVelocity.x = drive.x;
+    t->mVelocity.z = drive.z;
+}
+
+void ownTick(BTeki* t, Binding& b, float dt)
+{
+    // Suppressed host strategy: drain stored Pikmin damage here so hits reach
+    // mHealth and the beetle can die naturally (Groink #888 pattern).
+    if (t->mStoredDamage > 0.0f) t->makeDamaged();
+    if (t->mHealth < b.lastHealth && t->mHealth >= 0.0f) {
+        // Attackers: Pikmin stuck on the beetle, and Pikmin in AttackMode within
+        // 60 units (P1 ground attacks on a small host do not stick).
+        int stuck = 0, melee = 0;
+        for (Creature* c = t->mStickListHead; c; c = c->mNextSticker)
+            if (c->isPiki() && c->isAlive()) ++stuck;
+        if (pikiMgr) {
+            const Vector3f me = t->getPosition();
+            Iterator it(pikiMgr);
+            CI_LOOP(it) {
+                Piki* p = static_cast<Piki*>(*it);
+                if (!p || !p->isAlive() || p->mMode != PikiMode::AttackMode) continue;
+                const Vector3f pp = p->getPosition();
+                const float dx = pp.x - me.x, dz = pp.z - me.z;
+                if (dx * dx + dz * dz < 60.0f * 60.0f) ++melee;
+            }
+        }
+        std::printf("P2_FUEFUKI_DAMAGE generator=%u source_id=41 health=%.1f prior=%.1f attackers=%d stuck=%d "
+                    "attack_mode_near=%d state=%s\n",
+                    b.token, t->mHealth, b.lastHealth, stuck + melee, stuck, melee,
+                    p2fuefuki::stateName(b.actor.fsm().getState()));
+    }
+    if (t->mHealth > 0.0f) b.lastPositiveHealth = t->mHealth;
+    b.lastHealth = t->mHealth;
+    b.debt += double(dt);
+    int ticks = int(b.debt / double(p2fuefuki::kSourceDelta));
+    if (ticks > 4) {
+        ticks = 4;
+        b.debt = 0.0;
+    } else {
+        b.debt -= double(ticks) * double(p2fuefuki::kSourceDelta);
+    }
+    Commands last;
+    for (int k = 0; k < ticks && !b.escaped; ++k) {
+        p2fuefuki::World w;
+        buildWorld(t, b, w);
+        last = b.actor.step(w);
+        if (!last.valid) break;
+        applyCommands(t, b, last);
+        if (last.kill) {
+            // Dead KEYEVENT_END -> kill(): the host death funnel (die+dieSoon)
+            // births the LeaveCorpse pellet; dieSoon only runs in the
+            // suppressed doAI, hence pcEscapeNow (Groink/ElecBug pattern).
+            b.escaped = true;
+            t->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
+            t->mVelocity.x = t->mVelocity.z = 0.0f;
+            std::printf("P2_FUEFUKI_ESCAPE generator=%u source_id=41 native=host_escape_now clip=%s\n", b.token,
+                        p2fuefuki::animName(b.actor.anim()));
+            std::fflush(stdout);
+            t->pcEscapeNow();
+            return;
+        }
+    }
+    if (!b.escaped && ticks == 0) {
+        // Keep the last FSM velocity/facing applied between source frames.
+        t->setDirection(b.actor.faceDir());
+    }
+    if (t->mHealth > 0.0f && !b.hidden) t->updateLifeGauge();
+    b.logTimer += dt;
+    if (b.logTimer >= 1.0f) {
+        b.logTimer = 0.0f;
+        const Vector3f p = t->getPosition();
+        // Follower trail evidence: mean/max XZ distance of this beetle's live
+        // ActTeki followers (FOLLOW_DISTANCE 100 keeps them on the trail).
+        float sum = 0.0f, far = 0.0f;
+        int n = 0;
+        for (const auto& f : sFollowerOwner) {
+            if (f.second != t || !f.first) continue;
+            const Vector3f fp = const_cast<Piki*>(f.first)->getPosition();
+            const float d = std::sqrt((fp.x - p.x) * (fp.x - p.x) + (fp.z - p.z) * (fp.z - p.z));
+            sum += d;
+            far = d > far ? d : far;
+            ++n;
+        }
+        if (n > 0)
+            std::printf("P2_FUEFUKI_FOLLOW_TRAIL generator=%u source_id=41 followers=%d mean_dist=%.1f max_dist=%.1f "
+                        "state=%s\n",
+                        b.token, n, sum / float(n), far, p2fuefuki::stateName(b.actor.fsm().getState()));
+        std::printf("P2_FUEFUKI_POS generator=%u source_id=41 state=%s clip=%s frame=%.0f x=%.1f z=%.1f face=%.2f "
+                    "target=%.1f,%.1f health=%.1f followers=%d squad=%d hidden=%d marks=%d host_ai_skipped=%lu\n",
+                    b.token, p2fuefuki::stateName(b.actor.fsm().getState()), p2fuefuki::animName(b.actor.anim()),
+                    b.actor.animFrame(), p.x, p.z, b.actor.faceDir(), b.actor.targetX(), b.actor.targetZ(),
+                    t->mHealth, b.actor.follow().followerCount(), b.actor.fsm().squad().squadActive() ? 1 : 0,
+                    b.hidden ? 1 : 0, b.actor.follow().markCount(), b.hostSkips);
+    }
+    std::fflush(stdout);
+}
+
+// Retail carcass weight (pelletlist_us.szs carcass_config.txt `Fuefuki`:
+// min 3, max 6). The P1 corpse config is shared by every host of this type, so
+// the beetle's own corpse gets a private copy instead of a shared write.
+constexpr int kCarcassMin = 3;
+constexpr int kCarcassMax = 6;
+void carcassTick(BTeki* t, Binding& b)
+{
+    Pellet* pellet = t->mPellet;
+    if (!pellet || !pellet->isAlive()) return;
+    if (!b.carcass) {
+        b.carcass = true;
+        std::printf("P2_FUEFUKI_CARCASS generator=%u source_id=41 x=%.1f z=%.1f clip=carry\n", b.token,
+                    pellet->mSRT.t.x, pellet->mSRT.t.z);
+    }
+    if (!b.weighted && pellet->mConfig) {
+        b.weighted = true;
+        const int hostMin = pellet->mConfig->mCarryMinPikis.mValue;
+        const int hostMax = pellet->mConfig->mCarryMaxPikis.mValue;
+        const bool differs = hostMin != kCarcassMin || hostMax != kCarcassMax;
+        if (differs) {
+            PelletConfig* own = new PelletConfig(*pellet->mConfig);
+            own->mCarryMinPikis.mValue = kCarcassMin;
+            own->mCarryMaxPikis.mValue = kCarcassMax;
+            pellet->mConfig = own;
+        }
+        std::printf("P2_FUEFUKI_CARCASS_WEIGHT generator=%u source_id=41 retail_carry=%d..%d host_carry=%d..%d "
+                    "private_copy=%d source=carcass_config_Fuefuki\n",
+                    b.token, kCarcassMin, kCarcassMax, hostMin, hostMax, differs ? 1 : 0);
+        std::fflush(stdout);
+    }
+}
+} // namespace
+
+// ---------------------------------------------------------------------------
+void pc_p2_fuefuki_teki_reset()
+{
+    const int before = int(sBound.size());
+    sBound.clear();
+    sTable.invalidateDomain();
+    sFollowerOwner.clear();
+    sAstonish.clear();
+    sPikiId.clear();
+    sIdPiki.clear();
+    for (auto& c : sPoses) c = PoseClip{};
+    sPosesLoaded = false;
+    sReady = false;
+    if (before > 0) {
+        std::printf("P2_FUEFUKI_OWN_RESET bound_before=%d\n", before);
+        std::fflush(stdout);
+    }
+}
+
+void pc_p2_fuefuki_teki_forget(BTeki* t)
+{
+    auto it = sBound.find(t);
+    if (it == sBound.end()) return;
+    Binding& b = it->second;
+    for (std::uint32_t id : b.actor.ownerDeath()) releasePanic(b.token, id);
+    for (auto f = sFollowerOwner.begin(); f != sFollowerOwner.end();)
+        f = f->second == t ? sFollowerOwner.erase(f) : std::next(f);
+    std::printf("P2_FUEFUKI_OWN_FORGET generator=%u source_id=41 remaining=%d\n", b.token, int(sBound.size()) - 1);
+    std::fflush(stdout);
+    sBound.erase(it);
+}
+
+bool pc_p2_fuefuki_teki_is_bound(const BTeki* t) { return t && find(t) != nullptr; }
+int pc_p2_fuefuki_teki_bound_count() { return int(sBound.size()); }
+
+bool pc_p2_fuefuki_teki_suppress_ai(const BTeki* t)
+{
+    Binding* b = find(t);
+    if (!b || b->escaped) return false;
+    ++b->hostSkips; // BTeki::doAI returned before the P1 strategy act()
+    return true;
+}
+
+float pc_p2_fuefuki_teki_param_f(const BTeki* t, int idx, float fallback)
+{
+    const Binding* b = find(t);
+    if (!b || b->escaped) return fallback;
+    switch (idx) {
+    case TPF_Life:
+        return sRetail.life;
+    case TPF_VisibleRange:
+    case TPF_VisibleAngle:
+    case TPF_AttackableRange:
+    case TPF_AttackableAngle:
+    case TPF_AttackRange:
+    case TPF_AttackHitRange:
+    case TPF_AttackPower:
+    case TPF_DangerTerritoryRange:
+    case TPF_SafetyTerritoryRange:
+    case TPF_LifeRecoverRate:
+        return 0.0f;
+    default:
+        return fallback;
+    }
+}
+
+bool pc_p2_fuefuki_teki_pressed(BTeki* t, Creature* presser)
+{
+    Binding* b = find(t);
+    if (!b) return false;
+    if (!b->escaped) {
+        b->pressed = true;
+        std::printf("P2_FUEFUKI_PRESS_INTERACT generator=%u source_id=41 presser=%s\n", b->token,
+                    presser && presser->isPiki() ? "piki" : "other");
+    }
+    return true; // no host squash
+}
+
+void pc_p2_fuefuki_teki_setup()
+{
+    pc_p2_fuefuki_teki_reset();
+    if (!pc_randomizer_p2_bridge() || !tekiMgr) return;
+    const std::set<unsigned> wanted = pc_p2_campaign_ids(41);
+    if (wanted.empty()) return;
+    if (!loadParms()) { pc_p2_setup_skip(true, "Fuefuki", "parms_missing"); return; }
+    if (!loadMotions()) { pc_p2_setup_skip(true, "Fuefuki", "motion_table_missing"); return; }
+    loadPoses();
+    sReady = true;
+    Iterator it(tekiMgr);
+    CI_LOOP(it) {
+        BTeki* t = static_cast<BTeki*>(*it);
+        if (!t || pc_p2_campaign_source(t) != 41) continue;
+        const unsigned token = pc_p2_campaign_token(t);
+        if (t->mTekiType != TEKI_Chappy) {
+            std::printf("P2_FUEFUKI_UNBOUND generator=%u type=%d reason=host_type\n", token, t->mTekiType);
+            pc_p2_setup_skip(true, "Fuefuki", "actor_type_mismatch");
+            continue;
+        }
+        if (t->getParameterI(TPI_CorpseType) != TEKICORPSE_LeaveCorpse) {
+            std::printf("P2_FUEFUKI_UNBOUND generator=%u type=%d reason=no_corpse\n", token, t->mTekiType);
+            continue;
+        }
+        Binding& b = sBound[t];
+        b = Binding{};
+        b.token = token;
+        const Vector3f pos = t->getPosition();
+        if (!b.actor.bind(sRetail, sMotions, sTable, ++sEpoch, token, pos.x, pos.y, pos.z, t->getDirection())) {
+            sBound.erase(t);
+            std::printf("P2_FUEFUKI_UNBOUND generator=%u reason=bind_rejected\n", token);
+            continue;
+        }
+        t->mHealth = sRetail.life;
+        b.lastHealth = b.lastPositiveHealth = t->mHealth;
+        const float hostScale = t->mSRT.s.x;
+        t->mSRT.s.set(1.0f, 1.0f, 1.0f);
+        const Commands spawn = b.actor.takeSpawnCommands();
+        std::printf("P2_FUEFUKI_OWN_BIND generator=%u source_id=41 host=TEKI_Chappy host_ai=suppressed fsm=p2_source "
+                    "health=%.1f retail_parms=%d motion_clips=%d draw=%s host_scale=%.2f epoch=%llu state=%s\n",
+                    token, t->mHealth, sRetail.retail ? 1 : 0, p2fuefuki::AnimCount,
+                    sPosesLoaded ? "p2_model" : "host", hostScale, (unsigned long long)sEpoch,
+                    p2fuefuki::stateName(b.actor.fsm().getState()));
+        applyCommands(t, b, spawn);
+        // Ordinary-delivery bridge: the carried carcass grants onion:p2:41 once.
+        pc_randomizer_p2_bind_source(static_cast<PelletView*>(t), 41, token);
+        std::printf("P2_FUEFUKI_DELIVERY_BIND generator=%u source_id=41\n", token);
+        std::printf("P2_ENEMY_READY species=Fuefuki native_family=Chappy generator=%u x=%.3f y=%.3f z=%.3f "
+                    "health=%.1f max_health=%.1f behavior=native source_FSM=implemented attack=whistle_theft\n",
+                    token, pos.x, pos.y, pos.z, t->mHealth, sRetail.life);
+    }
+    std::printf("P2_FUEFUKI_SETUP wanted=%zu bound=%zu\n", wanted.size(), sBound.size());
+    std::fflush(stdout);
+}
+
+void pc_p2_fuefuki_teki_tick(BTeki* t)
+{
+    auto it = sBound.find(t);
+    if (it == sBound.end()) return;
+    Binding& b = it->second;
+    const float dt = gsys ? gsys->getFrameTime() : 0.0f;
+    if (!(dt > 0.0f && dt < 0.5f)) return;
+    if (!b.escaped && t->mDeadState == 0) {
+        ownTick(t, b, dt);
+        return;
+    }
+    if (!b.escaped && t->mDeadState == 1) {
+        // Something outside the FSM called die(): finish the teardown so the
+        // corpse still pelletizes (dieSoon only runs in the suppressed doAI).
+        b.escaped = true;
+        for (std::uint32_t id : b.actor.ownerDeath()) releasePanic(b.token, id);
+        std::printf("P2_FUEFUKI_ESCAPE generator=%u source_id=41 native=host_die_external\n", b.token);
+        std::fflush(stdout);
+        t->pcEscapeNow();
+        return;
+    }
+    carcassTick(t, b);
+}
+
+bool pc_p2_fuefuki_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, bool corpse)
+{
+    Binding* b = find(t);
+    if (!b || !sPosesLoaded || !gfx.mCamera) return false;
+    const bool dead = corpse || b->escaped || t->mDeadState != 0;
+    int anim = b->actor.anim();
+    float frame = b->actor.animFrame();
+    bool lastPose = false;
+    if (dead) {
+        // startCarcassMotion -> FUEFUKIANIM_Carry; the dead clip's last pose if absent.
+        anim = p2fuefuki::AnimCarry;
+        frame = 0.0f;
+        if (sPoses[anim].shapes.empty()) {
+            anim = p2fuefuki::AnimDead;
+            lastPose = true;
+        }
+    } else if (b->actor.fsm().getState() == P2FuefukiFsmState::Stay) {
+        // Stay holds landing frame 0 (authored zero scale): nothing to draw, and
+        // the P1 host model must not show either.
+        return true;
+    }
+    if (anim < 0 || anim >= p2fuefuki::AnimCount || sPoses[anim].shapes.empty()) {
+        anim = !sPoses[p2fuefuki::AnimWait].shapes.empty() ? int(p2fuefuki::AnimWait) : int(p2fuefuki::AnimMove);
+        frame = 0.0f;
+        if (sPoses[anim].shapes.empty()) return false;
+    }
+    const PoseClip& clip = sPoses[anim];
+    std::size_t best = lastPose ? clip.shapes.size() - 1 : 0;
+    if (!lastPose)
+        for (std::size_t k = 1; k < clip.frames.size() && k < clip.shapes.size(); ++k)
+            if (std::fabs(float(clip.frames[k]) - frame) < std::fabs(float(clip.frames[best]) - frame)) best = k;
+    Shape* shape = clip.shapes[best];
+    shape->updateAnim(gfx, view, nullptr, t);
+    pc_gfx_specular_family_scope(1);
+    shape->drawshape(gfx, *gfx.mCamera, nullptr);
+    pc_gfx_specular_family_scope(0);
+    const int bit = dead ? 2 : (1 << (anim + 2));
+    if (!(b->drawLogged & bit)) {
+        b->drawLogged |= bit;
+        std::printf("P2_FUEFUKI_DRAW generator=%u source_id=41 corpse=%d clip=%s pose=%zu face=%.2f model=p2_fuefuki\n",
+                    b->token, dead ? 1 : 0, p2fuefuki::animName(anim), best, t->getDirection());
+        std::fflush(stdout);
+    }
+    return true;
+}
+
+// ---- Piki seams -------------------------------------------------------------
+bool pc_p2_fuefuki_follower_controls(Piki* p)
+{
+    if (sFollowerOwner.empty() || !p) return false;
+    auto it = sFollowerOwner.find(p);
+    if (it == sFollowerOwner.end()) return false;
+    Binding* b = find(it->second);
+    if (!b || b->escaped) {
+        sFollowerOwner.erase(it);
+        return false;
+    }
+    const std::uint32_t id = pikiId(p);
+    if (!p->isAlive()) {
+        b->actor.forgetFollower(id);
+        sFollowerOwner.erase(it);
+        return false;
+    }
+    const float dt = gsys ? gsys->getFrameTime() : 0.0f;
+    BTeki* t = it->second;
+    const Vector3f me = p->getPosition();
+    const Vector3f bp = t->getPosition();
+    const Vector3f bv = t->mVelocity;
+    const P2FuefukiFollowMove move =
+        b->actor.follow().followerTick(id, me.x, me.z, bp.x, bp.z, bv.x, bv.z, dt > 0.0f && dt < 0.5f ? dt : 0.0f);
+    if (move.hasMove) {
+        if (move.stop) {
+            p->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
+        } else {
+            // ActTeki::test_0 -> Piki::setSpeed(mMoveSpeed, dirToFootprint).
+            p->setSpeed(move.speed, Vector3f(move.dirX, 0.0f, move.dirZ));
+        }
+    }
+    return true;
+}
+
+bool pc_p2_fuefuki_follower_blocks_recruit(const Piki* p)
+{
+    return !sFollowerOwner.empty() && p && sFollowerOwner.count(p) != 0;
+}
+
+bool pc_p2_fuefuki_panic_astonish(const Piki* p)
+{
+    return !sAstonish.empty() && p && sAstonish.count(p) != 0;
+}
+
+void pc_p2_fuefuki_panic_end(Piki* p, bool timedOut)
+{
+    auto it = sAstonish.find(p);
+    if (it == sAstonish.end()) return;
+    std::printf("P2_FUEFUKI_PANIC_END generator=%u source_id=41 piki=%u reason=%s state=%d\n", it->second,
+                pikiId(p), timedOut ? "timeout_walk" : "state_change", p->getState());
+    std::fflush(stdout);
+    sAstonish.erase(it);
+}
+
+void pc_p2_fuefuki_note_whistle(Piki* p, Navi* n)
+{
+    auto it = sAstonish.find(p);
+    if (it == sAstonish.end()) return;
+    std::printf("P2_FUEFUKI_RECLAIM generator=%u source_id=41 piki=%u navi=%d via=callPikis\n", it->second, pikiId(p),
+                n ? n->mNaviID : -1);
+    std::fflush(stdout);
+}
