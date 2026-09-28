@@ -247,6 +247,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_demon_bridge.cpp
     pc_port/pc_p2_demon_host.cpp
     pc_port/pc_p2_sarai_host.cpp
+    pc_port/pc_p2_sarai_demon.cpp
     pc_port/pc_p2_sarai_capture_bridge.cpp
     pc_port/pc_p2_sarai_manager.cpp
     pc_port/pc_p2_generated_placement.cpp
@@ -1334,6 +1335,14 @@ add_executable(p2_sarai_captor_lifecycle_test tools/p2_sarai_captor_lifecycle_te
 target_include_directories(p2_sarai_captor_lifecycle_test PRIVATE pc_port)
 target_compile_options(p2_sarai_captor_lifecycle_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_sarai_captor_lifecycle_test COMMAND p2_sarai_captor_lifecycle_test)
+
+# #215 Demon (Bumbling Snitchbug, 32) species-profile policy test. Engine-free:
+# retail parms loader, the Demon 3 s attack timer, Demon::getAttackableTarget
+# geometry, hunt descent, climb/weight decisions and the EnemyBase simulation.
+add_executable(p2_demon_profile_test tools/p2_demon_profile_test.cpp)
+target_include_directories(p2_demon_profile_test PRIVATE pc_port)
+target_compile_options(p2_demon_profile_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_demon_profile_test COMMAND p2_demon_profile_test)
 
 # rd-p2ap-sarai (#439) Sarai seed-bridge campaign test. Engine-free: stub
 # engine headers shadow the real ones (BEFORE pc_port), so the real

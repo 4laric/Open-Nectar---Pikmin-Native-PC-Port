@@ -714,6 +714,10 @@ void BTeki::doAI()
 	if (pc_p2_tadpole_suppress_ai(this)) {
 		return;
 	}
+	// #215: Demon-profile anchors run no P1 strategy (Sarai host owns behaviour).
+	if (pc_p2_sarai_suppress_ai(this)) {
+		return;
+	}
 #endif
 	if (pc_p2_qurione_suppress_ai(this)) {
 		return;
@@ -1955,6 +1959,13 @@ bool BTeki::ignoreAtari(Creature* target)
 	if (target->getStickObject() == this) {
 		return true;
 	}
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	// #215: a flying Demon-profile anchor does not shove captains
+	// (P2 flying enemies disable EB_CollisionActive).
+	if (pc_p2_sarai_ignore_atari(this, target)) {
+		return true;
+	}
+#endif
 
 	return false;
 }
