@@ -15,6 +15,8 @@
 //                  rolls, exclusive claims in one table    (mutant TOKEN_UNUSED)
 //   owner_panic    a live follower is released to Panic when its beetle dies
 //                                                           (mutant NO_PANIC)
+//   press_gate     pressCallBack accepts (Struggle, Pikmin latches) only in the
+//                  mCanStruggle window; absorbs otherwise   (mutant PRESS_ALWAYS)
 //   ring_filter    whistle claims only inside the growing fp22 ring, only
 //                  callable Pikmin                          (mutant RING_IGNORED)
 #undef NDEBUG
@@ -313,13 +315,40 @@ static bool ring_filter()
     return true;
 }
 
+static bool press_gate()
+{
+    const Retail r = retail();
+    P2FuefukiOwnershipTable table;
+    Actor a;
+    Mock m;
+    CHECK(a.bind(r, motions(), table, 1, 2718u, 0.0f, 0.0f, 0.0f, 0.0f));
+    m.apply(a.takeSpawnCommands());
+    // Land before its KEYEVENT_3: pressCallBack returns true (absorbed, the
+    // thrown Pikmin must not latch).
+    CHECK(a.fsm().getState() == S::Land);
+    CHECK(!a.fsm().getCanStruggle());
+    CHECK(!pressAccepted(a.fsm(), true, false));
+    for (int i = 0; i < 120 && !a.fsm().getCanStruggle(); ++i) m.step(a);
+    CHECK(a.fsm().getState() == S::Land && a.fsm().getCanStruggle());
+    // Inside the mCanStruggle window: accepted (Struggle, the Pikmin latches),
+    // but never without a presser or while bittered.
+    CHECK(pressAccepted(a.fsm(), true, false));
+    CHECK(!pressAccepted(a.fsm(), false, false));
+    CHECK(!pressAccepted(a.fsm(), true, true));
+    m.w.pressed = true;
+    const Commands c = m.step(a);
+    CHECK(a.fsm().getState() == S::Struggle && c.transited && c.pressAccepted);
+    CHECK(!pressAccepted(a.fsm(), true, false));
+    return true;
+}
+
 int main(int argc, char** argv)
 {
     struct Case {
         const char* name;
         bool (*fn)();
     } cases[] = {{"appear_roll", appear_roll}, {"host_outputs", host_outputs}, {"multi_token", multi_token},
-                 {"owner_panic", owner_panic}, {"ring_filter", ring_filter}};
+                 {"owner_panic", owner_panic}, {"ring_filter", ring_filter}, {"press_gate", press_gate}};
     const char* only = argc > 1 ? argv[1] : nullptr;
     int ran = 0;
     for (const Case& c : cases) {

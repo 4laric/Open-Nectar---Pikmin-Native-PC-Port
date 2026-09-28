@@ -2950,10 +2950,12 @@ void Piki::changeMode(int newMode, Navi* navi)
 {
 	STACK_PAD_VAR(6); // idk
 #if defined(PIKI_PC_PORT)
-	// #245: an ActTeki follower is not callable into a party while its
-	// Antenna Beetle lives (InteractFue::actPiki ACT_Teki branch).
-	if (newMode == PikiMode::FormationMode && pc_p2_fuefuki_follower_blocks_recruit(this)) {
-		return;
+	// #245: the whistle path into a party is refused for an Antenna Beetle
+	// ActTeki follower in Navi::callPikis (InteractFue::actPiki). Any other
+	// path (day-end gather, co-op transfer, ...) ends the follow here, and a
+	// Pikmin the beetle released logs its reclaim by a captain.
+	if (newMode == PikiMode::FormationMode) {
+		pc_p2_fuefuki_note_formation(this, navi);
 	}
 #endif
 #if defined(PIKI_PC_PORT)

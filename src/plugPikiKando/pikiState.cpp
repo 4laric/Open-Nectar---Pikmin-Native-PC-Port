@@ -2144,13 +2144,6 @@ void PikiFlyingState::procCollideMsg(Piki* piki, MsgCollide* msg)
 	if (colliderType != OBJTYPE_Plant) {
 		SeSystem::playPlayerSe(SE_THROWHIT);
 	}
-	if (colliderType == OBJTYPE_Teki && piki->mVelocity.y < 0.0f) {
-		// #245: source PikiFlyingState::collisionCallback stimulates
-		// InteractPress on a descending contact (pikiState.cpp:2319-2327); a
-		// bound Antenna Beetle routes it to its pressCallBack (Struggle when
-		// mCanStruggle). The ordinary contact below still runs.
-		pc_p2_fuefuki_teki_pressed(static_cast<BTeki*>(static_cast<Teki*>(collider)), piki);
-	}
 	if (colliderType == OBJTYPE_Teki || collider->isBoss()) {
 		PcP2PurpleDirectHit direct;
 		if ((!pc_p2_purple_flight_active(piki) || specialFlightContact) && piki->mVelocity.y < 0.0f) {
@@ -2209,6 +2202,19 @@ void PikiFlyingState::procCollideMsg(Piki* piki, MsgCollide* msg)
 		return;
 	}
 
+	if (colliderType == OBJTYPE_Teki
+	    && pc_p2_fuefuki_teki_flying_press(static_cast<BTeki*>(static_cast<Teki*>(collider)), piki,
+	                                       piki->mVelocity.y < 0.0f)) {
+		// #245: source PikiFlyingState::collisionCallback stimulates
+		// InteractPress on a descending contact (pikiState.cpp:2319-2327). A
+		// bound Antenna Beetle outside its mCanStruggle window returns true
+		// from pressCallBack, so the source skips the stick (pressCheck); the
+		// P1 stand-in is this function's generic non-stick exit below. When
+		// the press is accepted (Struggle) the ordinary latch runs.
+		piki->restartAI();
+		transit(piki, PIKISTATE_Normal);
+		return;
+	}
 	if (colliderType == OBJTYPE_Teki && collider->isOrganic()) {
 		piki->mActiveAction->abandon(nullptr);
 		PRINT_KANDO("FLYING .. collide\n");

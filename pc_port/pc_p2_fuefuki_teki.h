@@ -34,20 +34,39 @@ int pc_p2_fuefuki_teki_bound_count();
 bool pc_p2_fuefuki_teki_suppress_ai(const BTeki*);
 // TPF_Life = retail fp00 and a blinded host strategy while bound and alive.
 float pc_p2_fuefuki_teki_param_f(const BTeki*, int idx, float fallback);
-// InteractPress receiver (source pressCallBack). True when the actor is bound.
+// InteractPress receiver (source pressCallBack). True when the actor is bound
+// (the host squash never runs on a bound beetle).
 bool pc_p2_fuefuki_teki_pressed(BTeki*, Creature* presser);
-// Draw hook: staged P2 pose bank (false -> host model draws).
+// PikiFlyingState descending contact (source PikiFlyingState::collisionCallback
+// InteractPress, pikiState.cpp:2319-2327). Returns true when the source
+// pressCallBack returns true (beetle not in its mCanStruggle window): the press
+// is absorbed and the thrown Pikmin must NOT latch. Returns false when the actor
+// is not bound or the press was accepted (Struggle; the Pikmin latches as usual).
+// `descending` is the source pikiVel.y < 0 gate; an ascending contact never
+// presses (it only logs P2_FUEFUKI_FLY_CONTACT for evidence) and returns false.
+bool pc_p2_fuefuki_teki_flying_press(BTeki*, Piki* presser, bool descending);
+// InteractAttack::actTeki observer: attributes each accepted hit to its source
+// (Pikmin, captain, other) for the DAMAGE marker. No gameplay effect.
+void pc_p2_fuefuki_teki_attacked(BTeki*, Creature* owner, float damage, bool accepted);
+// Draw hook: staged P2 pose bank (false -> host model draws), plus the
+// whistle-ring stand-in while casting.
 bool pc_p2_fuefuki_teki_draw(BTeki*, Graphics&, const Matrix4f&, bool corpse = false);
 
 // Piki-side seams (all are O(1) no-ops while nothing is bound).
 // Piki::doAI: true when a live beetle owns this Pikmin (ActTeki follow ran).
 bool pc_p2_fuefuki_follower_controls(Piki*);
-// Navi::callPikis / Piki::changeMode(FormationMode): an ActTeki follower is not
-// callable while its beetle lives (InteractFue::actPiki ACT_Teki branch).
+// Navi::callPikis: an ActTeki follower is not whistle-callable while its beetle
+// lives (InteractFue::actPiki ACT_Teki branch).
 bool pc_p2_fuefuki_follower_blocks_recruit(const Piki*);
+// Piki::changeMode(FormationMode): any other path into a party (day-end
+// gather, co-op transfer, ...) ends the ActTeki follow (source Brain::start of
+// another action runs ActTeki::cleanup); a Pikmin the beetle released earlier
+// logs P2_FUEFUKI_RECLAIM when it rejoins a captain.
+void pc_p2_fuefuki_note_formation(Piki*, Navi*);
 // PikiPanicState: true when this Panic is the owner-death PIKIPANIC_Panic
 // (astonish) release, not the gas panic.
 bool pc_p2_fuefuki_panic_astonish(const Piki*);
 void pc_p2_fuefuki_panic_end(Piki*, bool timedOut);
-// Navi::callPikis: records a captain whistle reclaim of an astonished follower.
+// Navi::callPikis: records that a captain whistle reached a Pikmin this beetle
+// released (reclaim itself is logged at the formation entry).
 void pc_p2_fuefuki_note_whistle(Piki*, Navi*);
