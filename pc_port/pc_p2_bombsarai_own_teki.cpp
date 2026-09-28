@@ -285,8 +285,10 @@ int countStuck(BTeki* t, int& purple) {
     return stuck;
 }
 
-int groundAttackers(BTeki* t) {
-    // Piki in contact range of the grounded carrier that are not stuck to it.
+int nearbyPikmin(BTeki* t) {
+    // Live Piki within 60u of the grounded carrier that are not stuck to it.
+    // Proximity only, not an attack-state count: the hits that actually move
+    // health are the separate TEKIOPT_DamageCountable hits= field.
     if (!pikiMgr) return 0;
     const Vector3f me = t->getPosition();
     int n = 0;
@@ -381,15 +383,32 @@ void applyBlast(const P2BombSaraiBlastEvent& e) {
         EffectParm parm(centre);
         utEffectMgr->cast(KandoEffect::Bomb, parm);
     }
-    int naviHits = 0, pikiHits = 0, tekiHits = 0;
+    // Receiver damage. P2 InteractBomb::actPiki (interactPiki.cpp:304-327)
+    // sends every Pikmin in the blast into PIKISTATE_Blow with mIsLethal=true:
+    // the Pikmin is blown back and dies. fp24 (naviPikiDamage, 10) is the
+    // captain damage (InteractBomb::actNavi). The P1 host equivalent of a
+    // lethal blow is its own bomb-rock Pikmin damage (PikiMgr p77
+    // mBombDamagePiki, retail 765 > Pikmin health 100): InteractBomb::actPiki
+    // subtracts it and flicks, and PikiFlickState kills the Pikmin on landing
+    // (pikiState.cpp FLS_Landing, mHealth <= 0 -> PIKISTATE_Dead). Captains
+    // keep fp24.
+    const float pikiDamage = (pikiMgr && pikiMgr->mPikiParms)
+                                 ? pikiMgr->mPikiParms->mPikiParms.mBombDamagePiki()
+                                 : 765.0f;
+    int naviHits = 0, pikiHits = 0, tekiHits = 0, pikiLethal = 0;
     for (Creature* c : navis) if (c->isAlive() && c->stimulate(InteractBomb(owner, e.naviPikiDamage, nullptr))) ++naviHits;
-    for (Creature* c : pikis) if (c->isAlive() && c->stimulate(InteractBomb(owner, e.naviPikiDamage, nullptr))) ++pikiHits;
+    for (Creature* c : pikis) {
+        if (!c->isAlive() || !c->stimulate(InteractBomb(owner, pikiDamage, nullptr))) continue;
+        ++pikiHits;
+        if (static_cast<Piki*>(c)->mHealth <= 0.0f) ++pikiLethal;
+    }
     for (Creature* c : tekis) if (c->isAlive() && c->stimulate(InteractBomb(owner, e.tekiDamage, nullptr))) ++tekiHits;
     ++sBlastCount;
     std::printf("P2_BOMBSARAI_OWN_BLAST source_id=58 token=%llu carrier_valid=%d x=%.1f y=%.1f z=%.1f "
-                "navi_hits=%d pikmin_hits=%d teki_hits=%d self_hits=%d n=%d\n",
+                "navi_hits=%d pikmin_hits=%d pikmin_lethal=%d piki_damage=%.1f navi_damage=%.1f teki_hits=%d "
+                "self_hits=%d n=%d\n",
                 (unsigned long long)e.carrierToken, carrier ? 1 : 0, e.center.x, e.center.y, e.center.z,
-                naviHits, pikiHits, tekiHits, self, sBlastCount);
+                naviHits, pikiHits, pikiLethal, pikiDamage, e.naviPikiDamage, tekiHits, self, sBlastCount);
     // Bomb-on-bomb induction (bomb.cpp:348-368, 426-440).
     for (int s = 0; s < sPool.slotCount(); ++s) {
         if (!sPool.slotLive(s)) continue;
@@ -443,8 +462,8 @@ bool ownTick(BTeki* t, Own& o, float dt) {
     }
     if (t->mHealth < before || (t->mHealth < o.lastHealth && t->mHealth >= 0.0f)) {
         std::printf("P2_BOMBSARAI_OWN_DAMAGE source_id=58 token=%u health=%.1f prior=%.1f hits=%d stuck=%d "
-                    "ground_attackers=%d flying=%d state=%s\n",
-                    o.token, t->mHealth, o.lastHealth, o.pendingHits, stuck, t->isFlying() ? 0 : groundAttackers(t),
+                    "nearby_pikmin=%d flying=%d state=%s\n",
+                    o.token, t->mHealth, o.lastHealth, o.pendingHits, stuck, t->isFlying() ? 0 : nearbyPikmin(t),
                     t->isFlying() ? 1 : 0, p2bsown::stateName(o.fsm.state()));
         o.pendingHits = 0;
     }
@@ -578,9 +597,16 @@ void corpseProbe(BTeki* t, Own& o) {
     if (!o.corpse) {
         o.corpse = t->mPellet;
         if (o.corpse && o.corpse->mConfig) {
+            // P2 retail carcass entry for BombSarai (disc user/Abe/Pellet/us/
+            // carcass_config.txt, sha256 a76c4763...de9de0): min 3, max 6,
+            // money 4. The host pellet is only read and compared, never mutated.
+            constexpr int kP2CarcassMin = 3, kP2CarcassMax = 6;
+            const int mn = o.corpse->mConfig->mCarryMinPikis.mValue;
+            const int mx = o.corpse->mConfig->mCarryMaxPikis.mValue;
             std::printf("P2_BOMBSARAI_OWN_CORPSE_CONFIG source_id=58 token=%u carry_min=%d carry_max=%d "
-                        "config=retail_host mutated=0\n",
-                        o.token, o.corpse->mConfig->mCarryMinPikis.mValue, o.corpse->mConfig->mCarryMaxPikis.mValue);
+                        "config=retail_host mutated=0 p2_carcass_min=%d p2_carcass_max=%d p2_match=%d\n",
+                        o.token, mn, mx, kP2CarcassMin, kP2CarcassMax,
+                        (mn == kP2CarcassMin && mx == kP2CarcassMax) ? 1 : 0);
         }
     }
     if (!o.corpse || !o.corpse->isAlive()) return;
