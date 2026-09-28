@@ -437,7 +437,7 @@ void pc_p2_autoplay_tick(void)
     const float naviZ = navi->getPosition().z;
 
     // --- Pikmin census (read-only, except bot-v4 power-mode flowering) ---
-    int alive = 0, nearCount = 0, farCount = 0, transport = 0, distress = 0;
+    int alive = 0, nearCount = 0, farCount = 0, transport = 0, distress = 0, squad = 0;
     std::vector<std::pair<float, float>> transportPos;
     const bool powerMode = p2autoplay::isPowerEnabled();
     {
@@ -450,6 +450,7 @@ void pc_p2_autoplay_tick(void)
             const float d = distXZ(naviX, naviZ, p->getPosition().x, p->getPosition().z);
             if (d < 350.0f) ++nearCount;
             if (d > 550.0f) ++farCount;
+            if (p->mMode == PikiMode::FormationMode) ++squad;
             if (p->mMode == PikiMode::TransportMode) {
                 ++transport;
                 transportPos.emplace_back(p->getPosition().x, p->getPosition().z);
@@ -767,6 +768,7 @@ void pc_p2_autoplay_tick(void)
     senses.onionX = onionX;
     senses.onionZ = onionZ;
     senses.fieldPikmin = alive;
+    senses.squadPikmin = squad;
     senses.onionStored = onionStored;
     senses.onionDist = onionDist;
     senses.containerOpen = navi->getCurrState() && navi->getCurrState()->getID() == NAVISTATE_Container;

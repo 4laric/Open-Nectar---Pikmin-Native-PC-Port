@@ -1248,6 +1248,75 @@ void testAftermathEscortExtension()
           "escort/stall_no_carry_claim");
 }
 
+// #246: the Titan lets go of its stuck Pikmin at Dead, so the aftermath can
+// open with an empty squad. Only then (and only for 73) the bot whistles
+// the strays, in bounded episodes; any other target never whistles here.
+void testTitanAftermathRegroup()
+{
+    p2autoplay::Config cfg;
+    cfg.throwHold = 0.1f;
+    cfg.throwGap = 0.2f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 30;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 1945764764u;
+    s.targetSource = 73;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.tgtX = 100.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    s.targetHealthFrac = 0.5f;
+    brain.update(0.05f, s);
+    s.targetAlive = false;
+    s.targetDist = 40.0f;
+    s.tgtX = 40.0f;
+    s.squadPikmin = 0; // everyone let go at Dead
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "titan-regroup/aftermath");
+    int whistleTicks = 0, episodes = 0;
+    bool prev = false;
+    for (int i = 0; i < 400; ++i) {
+        brain.update(0.05f, s);
+        const bool b = (brain.command().buttons & unsigned(p2autoplay::PadB)) != 0;
+        if (b) ++whistleTicks;
+        if (b && !prev) ++episodes;
+        prev = b;
+        if (brain.current() != p2autoplay::State::Aftermath) break;
+    }
+    CHECK(whistleTicks > 0, "titan-regroup/whistles_empty_squad");
+    CHECK(episodes <= cfg.titanAftermathWhistles, "titan-regroup/bounded_episodes");
+    // With a squad back, no whistle: throws only.
+    p2autoplay::Brain b2(cfg);
+    p2autoplay::Senses t = liveSenses();
+    t.fieldPikmin = 30;
+    b2.update(0.05f, t);
+    b2.update(0.05f, t);
+    t.targetToken = 1945764764u;
+    t.targetSource = 73;
+    t.targetAlive = true;
+    t.targetDist = 100.0f;
+    t.tgtX = 100.0f;
+    b2.update(0.05f, t);
+    b2.update(0.05f, t);
+    t.targetHealthFrac = 0.5f;
+    b2.update(0.05f, t);
+    t.targetAlive = false;
+    t.targetDist = 40.0f;
+    t.tgtX = 40.0f;
+    t.squadPikmin = 12;
+    bool whistled = false;
+    for (int i = 0; i < 100; ++i) {
+        b2.update(0.05f, t);
+        if (b2.command().buttons & unsigned(p2autoplay::PadB)) whistled = true;
+        if (b2.current() != p2autoplay::State::Aftermath) break;
+    }
+    CHECK(!whistled, "titan-regroup/no_whistle_with_squad");
+}
+
 void testAftermathNoWhistle()
 {
     // bot-v5 (v4b diagnosis): aftermath HOLDS whistle (B) while standing
@@ -2959,6 +3028,7 @@ int main()
     testResupply();
     testAftermathEscortExtension();
     testAftermathNoWhistle();
+    testTitanAftermathRegroup();
     testAftermathSeedBackoffRethrow();
     testAftermathEscortNoThrows();
     testAftermathGiveupReasons();
