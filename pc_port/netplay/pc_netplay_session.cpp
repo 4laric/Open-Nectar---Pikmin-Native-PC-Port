@@ -44,6 +44,7 @@
 
 #include "netplay/pc_netplay_det.h"
 #include "netplay/pc_netplay_gekko_input.h"
+#include "netplay/pc_netplay_ice.h"
 #include "netplay/pc_netplay_pad.h"
 #include "netplay/pc_netplay_present.h"
 #include "netplay/pc_netplay_udp.h"
@@ -238,6 +239,8 @@ struct Config {
 	uint16_t hostPort = 0;      // --netplay-host <port>
 	uint32_t joinIp = 0;        // --netplay-join <ip:port>
 	uint16_t joinPort = 0;
+	bool iceMode = false;       // M5a: --netplay-ice-host / --netplay-ice-join
+	std::string iceJoinCode;    // --netplay-ice-join <offer-code-or-@file>
 	unsigned localDelay = 2;    // PIKMIN_NETPLAY_DELAY (numeric)
 	bool delayAuto = false;     // PIKMIN_NETPLAY_DELAY=auto (fix round 2)
 	uint32_t seed = 0;          // PIKMIN_NETPLAY_SEED
@@ -299,6 +302,12 @@ std::string sBootHexStr;
 // Transport / session objects (owned by the session TU, created at handshake).
 pc_netplay_transport::UdpSocket* sSock = nullptr;
 pc_netplay_transport::GekkoLink* sLink = nullptr;
+// M5a ICE transport (issue #887): exactly one of the UDP pair (sSock/sLink)
+// or the ICE pair (sIce/sIceLink) is ever non-null. The session talks to
+// whichever is up through hs_send()/hs_drain() below, so the handshake and
+// GekkoNet flows are unchanged.
+pc_netplay_ice::IceSocket* sIce = nullptr;
+pc_netplay_ice::IceLink* sIceLink = nullptr;
 pc_netplay_transport::LossyLink* sLossy = nullptr;
 GekkoNetAdapter* sAdapter = nullptr;
 GekkoSession* sGekko = nullptr;
@@ -825,6 +834,15 @@ void stop_session()
 		delete sSock;
 		sSock = nullptr;
 	}
+	// M5a ICE teardown (mirrors the UDP pair above; the link dies first so
+	// no trampoline can touch the socket during close).
+	delete sIceLink;
+	sIceLink = nullptr;
+	if (sIce != nullptr) {
+		sIce->close();
+		delete sIce;
+		sIce = nullptr;
+	}
 }
 
 void request_quit()
@@ -845,12 +863,45 @@ void parse_config()
 	const char* joinEnv = getenv_nonempty("PIKMIN_NETPLAY_JOIN");
 	const char* hostVal = hostCli != nullptr ? hostCli : hostEnv;
 	const char* joinVal = joinCli != nullptr ? joinCli : joinEnv;
-	if (hostVal != nullptr && joinVal != nullptr) {
-		printf("[netplay] --netplay-host and --netplay-join are exclusive\n");
+	// M5a ICE switches (issue #887): --netplay-ice-host is a bare flag (the
+	// host has no UDP port to bind); --netplay-ice-join takes the offer code
+	// or @file. Env equivalents: PIKMIN_NETPLAY_ICE_HOST=1,
+	// PIKMIN_NETPLAY_ICE_JOIN=<code-or-@file>.
+	auto argv_present = [](const char* flag) {
+		for (int i = 1; i < sArgc; ++i) {
+			if (sArgv[i] != nullptr && std::strcmp(sArgv[i], flag) == 0) return true;
+		}
+		return false;
+	};
+	const bool iceHostCli = argv_present("--netplay-ice-host");
+	const char* iceJoinCli = argv_value(sArgc, sArgv, "--netplay-ice-join");
+	const char* iceHostEnv = getenv_nonempty("PIKMIN_NETPLAY_ICE_HOST");
+	const char* iceJoinEnv = getenv_nonempty("PIKMIN_NETPLAY_ICE_JOIN");
+	const bool iceHostVal = iceHostCli || (iceHostEnv != nullptr && iceHostEnv[0] == '1');
+	const char* iceJoinVal = iceJoinCli != nullptr ? iceJoinCli : iceJoinEnv;
+	if ((hostVal != nullptr || joinVal != nullptr) && (iceHostVal || iceJoinVal != nullptr)) {
+		printf("[netplay] --netplay-host/--netplay-join and --netplay-ice-host/--netplay-ice-join are exclusive\n");
 		fflush(stdout);
 		std::exit(2);
 	}
-	if (hostVal != nullptr) {
+	if (iceHostVal && iceJoinVal != nullptr) {
+		printf("[netplay] --netplay-ice-host and --netplay-ice-join are exclusive\n");
+		fflush(stdout);
+		std::exit(2);
+	}
+	if (iceHostVal || iceJoinVal != nullptr) {
+		sCfg.isHost   = iceHostVal;
+		sCfg.active   = true;
+		sCfg.iceMode  = true;
+		if (iceJoinVal != nullptr) sCfg.iceJoinCode = iceJoinVal;
+	}
+	if (sCfg.iceMode) {
+		// ICE mode parsed above; the UDP chain is skipped.
+	} else if (hostVal != nullptr && joinVal != nullptr) {
+		printf("[netplay] --netplay-host and --netplay-join are exclusive\n");
+		fflush(stdout);
+		std::exit(2);
+	} else if (hostVal != nullptr) {
 		char* end  = nullptr;
 		long p     = strtol(hostVal, &end, 10);
 		if (end == hostVal || *end != '\0' || p <= 0 || p > 65535) {
@@ -946,6 +997,46 @@ void compute_local_hello()
 	sLocal.seed  = sCfg.seed;
 }
 
+// M5a transport-selection hook (issue #887): the session creates either the
+// UDP socket/adapter or the ICE agent/adapter, and everything below talks
+// through these two helpers. hs_send routes one handshake datagram;
+// hs_drain collects arrived handshake datagrams as UdpSocket::Datagram
+// (the ICE grams convert field-for-field; over ICE the sender fields are
+// the fixed 127.0.0.1:1 placeholder).
+void hs_send(const uint8_t* msg, size_t len)
+{
+	if (sIce != nullptr) {
+		sIce->send_payload(pc_netplay_transport::kChannelHandshake, msg, len);
+		return;
+	}
+	if (sSock == nullptr) return;
+	if (sCfg.isHost) {
+		if (sHaveRemote)
+			sSock->send_to(pc_netplay_transport::kChannelHandshake, msg, len, sRemoteIp,
+			               sRemotePort);
+	} else {
+		sSock->send_payload(pc_netplay_transport::kChannelHandshake, msg, len);
+	}
+}
+
+std::vector<pc_netplay_transport::UdpSocket::Datagram> hs_drain()
+{
+	if (sIceLink != nullptr) {
+		std::vector<pc_netplay_transport::UdpSocket::Datagram> out;
+		for (pc_netplay_ice::IceSocket::Datagram& g : sIceLink->drain_handshake()) {
+			pc_netplay_transport::UdpSocket::Datagram d;
+			d.channel         = g.channel;
+			d.payload         = g.payload;
+			d.fromIpHostOrder = g.fromIpHostOrder;
+			d.fromPort        = g.fromPort;
+			out.push_back(std::move(d));
+		}
+		return out;
+	}
+	if (sLink != nullptr) return sLink->drain_handshake();
+	return std::vector<pc_netplay_transport::UdpSocket::Datagram>();
+}
+
 void send_hello_msg(uint8_t type, uint8_t refuseField, uint64_t nonce)
 {
 	uint8_t msg[kHsLen];
@@ -983,13 +1074,7 @@ void send_hello_msg(uint8_t type, uint8_t refuseField, uint64_t nonce)
 			return;
 		}
 	}
-	if (sCfg.isHost) {
-		if (sHaveRemote)
-			sSock->send_to(pc_netplay_transport::kChannelHandshake, msg, sizeof(msg), sRemoteIp,
-			               sRemotePort);
-	} else {
-		sSock->send_payload(pc_netplay_transport::kChannelHandshake, msg, sizeof(msg));
-	}
+	hs_send(msg, sizeof(msg));
 }
 
 bool parse_hello_msg(const uint8_t* p, size_t len, uint8_t* type, uint16_t* proto, Hello* h,
@@ -1062,8 +1147,7 @@ bool handshake_pump()
 		if (sSentAck) send_hello_msg(kHsAck, 0, sHsLastHelloNonce);
 		sHsLastSendMs = now;
 	}
-	std::vector<pc_netplay_transport::UdpSocket::Datagram> grams;
-	if (sLink != nullptr) grams = sLink->drain_handshake();
+	std::vector<pc_netplay_transport::UdpSocket::Datagram> grams = hs_drain();
 	for (auto& g : grams) {
 		uint8_t type   = 0;
 		uint16_t proto = 0;
@@ -1078,8 +1162,10 @@ bool handshake_pump()
 			fflush(stdout);
 			std::exit(4);
 		}
-		if (sCfg.isHost && !sHaveRemote) {
-			// Learn the joiner's endpoint from its first hello.
+		if (sCfg.isHost && !sHaveRemote && !sCfg.iceMode) {
+			// UDP only: learn the joiner's endpoint from its first hello.
+			// Over ICE the agent is connected 1:1, so sHaveRemote is preset
+			// and there is nothing to learn.
 			sRemoteIp   = g.fromIpHostOrder;
 			sRemotePort = g.fromPort;
 			sHaveRemote = true;
@@ -1145,8 +1231,8 @@ bool handshake_pump()
 // greps for it to prove the M1 path ran).
 void answer_handshake_in_session()
 {
-	if (sLink == nullptr || sSock == nullptr) return;
-	std::vector<pc_netplay_transport::UdpSocket::Datagram> grams = sLink->drain_handshake();
+	if (sIceLink == nullptr && (sLink == nullptr || sSock == nullptr)) return;
+	std::vector<pc_netplay_transport::UdpSocket::Datagram> grams = hs_drain();
 	for (auto& g : grams) {
 		uint8_t type   = 0;
 		uint16_t proto = 0;
@@ -1158,8 +1244,9 @@ void answer_handshake_in_session()
 		if (type == kHsRefuse) continue; // session already agreed; ignore
 		if (type != kHsHello) continue;  // n1: never answer an Ack with an Ack
 		// Only answer the known peer (host learns it during the handshake;
-		// the joiner always talks to its configured host).
-		if (sCfg.isHost && sHaveRemote
+		// the joiner always talks to its configured host). Skipped over ICE:
+		// the agent is connected 1:1 and sender fields are placeholders.
+		if (!sCfg.iceMode && sCfg.isHost && sHaveRemote
 		    && (g.fromIpHostOrder != sRemoteIp || g.fromPort != sRemotePort))
 			continue;
 		send_hello_msg(kHsAck, 0, h.nonce);
@@ -1192,13 +1279,16 @@ void start_gekko_session()
 	if (lp.lossPct > 100) lp.lossPct = 100;
 	const bool lossy = lp.latencyMs > 0 || lp.jitterMs > 0 || lp.lossPct > 0
 	                || (lp.reorderPct > 0 && lp.reorderExtraMs > 0);
+	// M5a: the base adapter is whichever transport is up (UDP or ICE); the
+	// lossy test wrapper and GekkoNet see no difference.
+	GekkoNetAdapter* baseAdapter = (sIceLink != nullptr) ? sIceLink->adapter() : sLink->adapter();
 	if (lossy) {
-		sLossy   = new pc_netplay_transport::LossyLink(sLink->adapter(), lp);
+		sLossy   = new pc_netplay_transport::LossyLink(baseAdapter, lp);
 		sAdapter = sLossy->adapter();
 		printf("[netplay] lossy adapter: latency=%.1fms jitter=%.1fms loss=%.1f%% seed=%u\n",
 		       lp.latencyMs, lp.jitterMs, lp.lossPct, lp.seed);
 	} else {
-		sAdapter = sLink->adapter();
+		sAdapter = baseAdapter;
 	}
 	fflush(stdout);
 	GekkoConfig cfg;
@@ -1549,23 +1639,59 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 		printf("[netplay] mode=%s delay=%u seed=%u\n", sCfg.isHost ? "host" : "join",
 		       sCfg.localDelay, sCfg.seed);
 		fflush(stdout);
-		// Transport up before the handshake pump runs.
-		sSock = new pc_netplay_transport::UdpSocket();
-		if (sCfg.isHost) {
-			if (!sSock->bind(sCfg.hostPort)) {
-				printf("[netplay] bind port %u failed\n", (unsigned)sCfg.hostPort);
+		// Transport up before the handshake pump runs. M5a hook (issue #887):
+		// ICE mode runs the copy-paste signalling exchange over libjuice and
+		// connects the agent; UDP mode binds the socket as before. Exactly
+		// one pair comes up; the handshake and session flows after this are
+		// transport-agnostic (hs_send/hs_drain + the link adapter).
+		if (sCfg.iceMode) {
+			pc_netplay_ice::IceNetConfig nic = pc_netplay_ice::ice_net_config_from_env();
+			printf("[netplay] transport=ice role=%s stun=%s turn=%s turnOnly=%d\n",
+			       sCfg.isHost ? "host" : "join",
+			       nic.stun.empty() ? "none" : nic.stun.front().host.c_str(),
+			       nic.turn.empty() ? "none" : nic.turn.front().host.c_str(),
+			       (int)nic.turnOnly);
+			fflush(stdout);
+			sIce = new pc_netplay_ice::IceSocket();
+			auto pump = [&]() { sys->mControllerMgr.update(); };
+			std::string err;
+			bool ok = false;
+			if (sCfg.isHost) ok = pc_netplay_ice::ice_host_session(nic, pump, sIce, &err);
+			else ok = pc_netplay_ice::ice_join_session(nic, sCfg.iceJoinCode, pump, sIce, &err);
+			if (!ok) {
+				printf("[netplay] ice setup failed: %s\n", err.c_str());
 				fflush(stdout);
 				std::exit(1);
 			}
+			// The agent is connected 1:1: no endpoint learning. GekkoNet
+			// still routes actors by an address blob, so both sides use
+			// the conventional 127.0.0.1:1 placeholder: it matches the
+			// fixed blob IceLink synthesises on receive (the content is
+			// otherwise ignored over ICE).
+			sHaveRemote   = true;
+			sRemoteIp     = 0x7F000001;
+			sRemotePort   = 1;
+			sCfg.joinIp   = 0x7F000001;
+			sCfg.joinPort = 1;
+			sIceLink      = new pc_netplay_ice::IceLink(sIce);
 		} else {
-			if (!sSock->bind(0)) {
-				printf("[netplay] bind ephemeral failed\n");
-				fflush(stdout);
-				std::exit(1);
+			sSock = new pc_netplay_transport::UdpSocket();
+			if (sCfg.isHost) {
+				if (!sSock->bind(sCfg.hostPort)) {
+					printf("[netplay] bind port %u failed\n", (unsigned)sCfg.hostPort);
+					fflush(stdout);
+					std::exit(1);
+				}
+			} else {
+				if (!sSock->bind(0)) {
+					printf("[netplay] bind ephemeral failed\n");
+					fflush(stdout);
+					std::exit(1);
+				}
+				sSock->set_peer(sCfg.joinIp, sCfg.joinPort);
 			}
-			sSock->set_peer(sCfg.joinIp, sCfg.joinPort);
+			sLink = new pc_netplay_transport::GekkoLink(sSock);
 		}
-		sLink = new pc_netplay_transport::GekkoLink(sSock);
 	}
 
 	if (pc_window_should_close()) {

@@ -135,8 +135,9 @@ int main(int argc, char* argv[])
     // path. No-ops unless those switches are set.
     pc_input_log_notify_argv(argc, argv);
     pc_state_hash_notify_argv(argc, argv);
-    // Netplay M3 lockstep (issue #880): stores argv for --netplay-host /
-    // --netplay-join / --randomizer-seed. Inert without a netplay switch
+    // Netplay M3 lockstep (issue #880) + M5a ICE (issue #887): stores argv
+    // for --netplay-host / --netplay-join / --netplay-ice-host /
+    // --netplay-ice-join / --randomizer-seed. Inert without a netplay switch
     // (and a no-op null check in the default build).
     if (pc_netplay_session_notify_argv != nullptr) pc_netplay_session_notify_argv(argc, argv);
     for (int i = 1; i < argc; ++i) {
