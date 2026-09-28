@@ -2604,6 +2604,334 @@ void testKingStandoffOpensGate()
     CHECK(now.naviNearFrames < 60, "king_sim/leaves_fp06_quickly");
 }
 
+
+// #884 round 5: the tongue evade and the low-health guard (policy level).
+void testKingEvadePolicy()
+{
+    namespace K = p2chappymouth::king;
+    const p2autoplay::Config def;
+    const p2chappymouth::Profile* prof = p2chappymouth::profileForSource(53);
+    const float reach = prof ? p2chappymouth::maxReach(*prof) : 1.0e9f;
+    std::printf("INFO king_evade reach=%.1f clear=%.1f\n", reach, def.kingEvadeClear);
+    // XZ outside the farthest slot centre + slot radius cannot touch any
+    // slot sphere at any height (3D >= XZ).
+    CHECK(prof && def.kingEvadeClear > reach && def.kingEvadeClear > K::AttackRange, "king_evade/clear_beyond_reach");
+    // From the band edge the walk out (160 u/s, conservative vs p04 170)
+    // finishes before the first slot frame (40 of attack.bca at 30 fps).
+    CHECK(prof && (def.kingEvadeClear - def.kingStandoffMax) / 160.0f * 30.0f < float(prof->firstFrame) * 0.5f,
+          "king_evade/walk_out_before_first_slot_frame");
+
+    p2autoplay::Config cfg;
+    cfg.throwHold = 0.1f;
+    cfg.throwGap = 0.2f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = kingSenses(53, 113.0f);
+    s.cursorValid = true;
+    s.cursorX = 0.0f;
+    s.cursorZ = 0.0f; // cursor already on the King: hold is neutral
+    s.naviHpValid = true;
+    s.naviHp = 100.0f;
+    CHECK(enterAttack(brain, s), "king_evade/enters_attack");
+    for (int i = 0; i < 10; ++i) brain.update(0.05f, s);
+    brain.takeMarkers();
+    CHECK(brain.command().moveX == 0.0f && brain.command().moveZ == 0.0f, "king_evade/holds_in_band_before_attack");
+
+    // The King commits to an attack: walk straight out at a full stick, no
+    // throws, one evade marker carrying king_attack=1.
+    s.targetAttacking = true;
+    std::vector<std::string> markers;
+    int aOn = 0;
+    bool out = true;
+    for (int i = 0; i < 8; ++i) {
+        brain.update(0.05f, s);
+        const p2autoplay::Command c = brain.command();
+        if (c.buttons & unsigned(p2autoplay::PadA)) ++aOn;
+        if (!(c.moveZ > 0.99f && c.stickScale == 1.0f)) out = false;
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(out, "king_evade/walks_out_of_the_sweep");
+    CHECK(aOn == 0, "king_evade/no_throws_while_walking_out");
+    CHECK(hasMarker(markers, "AUTOPLAY_KING_STANDOFF mode=evade token=530053 dist=113")
+              && hasMarker(markers, "king_attack=1 navi_hp=100 low_hp=0"),
+          "king_evade/evade_marker");
+
+    // Pinned inside Clear past kingEvadeSideAfter: away + 45 degrees.
+    for (int i = 0; i < int(cfg.kingEvadeSideAfter / 0.05f) + 2; ++i) brain.update(0.05f, s);
+    CHECK(std::fabs(brain.command().moveX) > 0.5f && brain.command().moveZ > 0.5f, "king_evade/pinned_sidesteps");
+
+    // Outside Clear while the attack lasts: stand (look band) and throw; do
+    // NOT walk back in (the band's close mode would).
+    s.naviZ = s.targetDist = def.kingEvadeClear + 5.0f;
+    s.cursorZ = s.naviZ; // cursor at the captain: look-steer it toward the King
+    aOn = 0;
+    bool stands = true;
+    for (int i = 0; i < 40; ++i) {
+        brain.update(0.05f, s);
+        const p2autoplay::Command c = brain.command();
+        if (c.buttons & unsigned(p2autoplay::PadA)) ++aOn;
+        if (c.stickScale != cfg.lookStickScale) stands = false;
+    }
+    CHECK(stands && aOn > 0, "king_evade/outside_clear_stands_and_throws");
+
+    // Attack over: the band takes over again (close in from Clear+5).
+    s.targetAttacking = false;
+    markers.clear();
+    brain.update(0.05f, s);
+    markers = brain.takeMarkers();
+    CHECK(brain.command().stickScale == 1.0f && brain.command().moveZ < -0.99f
+              && hasMarker(markers, "AUTOPLAY_KING_STANDOFF mode=close"),
+          "king_evade/attack_over_closes_in");
+
+    // The evade overrides back/side too (attack sensed while backing).
+    s.naviZ = s.targetDist = 90.0f;
+    brain.update(0.05f, s); // back
+    s.targetAttacking = true;
+    brain.update(0.05f, s);
+    markers = brain.takeMarkers();
+    CHECK(hasMarker(markers, "mode=evade") && brain.command().moveZ > 0.99f, "king_evade/overrides_back");
+    s.targetAttacking = false;
+
+    // Low-health guard: at or below kingLowHp the band is [Clear, Clear+30].
+    p2autoplay::Brain low(cfg);
+    p2autoplay::Senses l = kingSenses(53, 150.0f);
+    l.naviHpValid = true;
+    l.naviHp = cfg.kingLowHp;
+    l.cursorValid = true;
+    l.cursorX = 0.0f;
+    l.cursorZ = 0.0f;
+    enterAttack(low, l);
+    low.update(0.05f, l);
+    markers = low.takeMarkers();
+    CHECK(low.command().moveZ > 0.99f && hasMarker(markers, "mode=back") && hasMarker(markers, "low_hp=1"),
+          "king_evade/low_hp_backs_out_of_fp20");
+    l.naviZ = l.targetDist = cfg.kingEvadeClear + 20.0f;
+    for (int i = 0; i < 5; ++i) low.update(0.05f, l);
+    CHECK(low.command().moveX == 0.0f && low.command().moveZ == 0.0f, "king_evade/low_hp_holds_outside_clear");
+    l.naviHp = 100.0f; // healthy again (e.g. a new sortie): the normal band
+    l.naviZ = l.targetDist = 150.0f;
+    low.update(0.05f, l);
+    markers = low.takeMarkers();
+    CHECK(low.command().moveZ < -0.99f && hasMarker(markers, "mode=close") && hasMarker(markers, "low_hp=0"),
+          "king_evade/healthy_band_closes_at_150");
+
+    // Other Chappy families: the attack sense changes nothing (contact steer).
+    const unsigned others[] = {2u, 35u, 76u, 44u};
+    for (unsigned src : others) {
+        p2autoplay::Brain b(cfg);
+        p2autoplay::Senses o = kingSenses(src, 113.0f);
+        o.targetAttacking = true;
+        o.naviHpValid = true;
+        o.naviHp = 10.0f;
+        enterAttack(b, o);
+        bool toward = true;
+        std::vector<std::string> om;
+        for (int i = 0; i < 10; ++i) {
+            b.update(0.05f, o);
+            if (!(b.command().moveZ < -0.99f && b.command().stickScale == 1.0f)) toward = false;
+            const std::vector<std::string> got = b.takeMarkers();
+            om.insert(om.end(), got.begin(), got.end());
+        }
+        char name[96];
+        std::snprintf(name, sizeof(name), "king_evade/source_%u_ignores_attack_sense", src);
+        CHECK(toward && !hasMarker(om, "AUTOPLAY_KING_STANDOFF"), name);
+    }
+}
+
+// #884 round 5: the coupled simulation continued through repeated attacks.
+// Same captain and King model as runKingSim, plus: StateAttack (attack.bca,
+// 95 frames, the King stopped) with the per-frame kamu1..9 slot-sphere test
+// against the captain (port kingNaviContact; one bite per attack counted,
+// 5 HP, attackDamage of the King row), the flick trample (InteractPress 5 HP)
+// and optional hits from Pikmin stuck to the King feeding FlickPerHit. The
+// Brain senses the King's attack state and the captain's health. Captain HP
+// starts at `hp` (Olimar 100, no regen).
+struct KingLongResult {
+    int attacks = 0;
+    int bitten = 0;
+    int presses = 0;
+    int flicks = 0;
+    int evades = 0;
+    float hp = 0.0f;
+    float minDist = 1.0e9f;
+};
+
+KingLongResult runKingLongSim(bool evade, int seconds, float hp, float hitsPerSecond)
+{
+    namespace K = p2chappymouth::king;
+    const p2chappymouth::Profile* prof = p2chappymouth::profileForSource(53);
+    p2autoplay::Config cfg;
+    cfg.attackTimeout = 1.0e6f;
+    cfg.kingEvade = evade;
+    if (!evade) cfg.kingLowHp = 0.0f; // the eeb71a4d4 stance
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = kingSenses(53, 18.0f);
+    enterAttack(brain, s);
+    const float dt = 1.0f / 30.0f;
+    p2chappymouth::Vec3 king{0.0f, 0.0f, 0.0f};
+    float heading = 0.0f;
+    K::Walker walker;
+    K::initWalker(walker, king);
+    p2chappymouth::Vec3 navi{0.0f, 0.0f, 18.0f};
+    float curX = 0.0f, curZ = -150.0f;
+    float flickTimer = 0.0f;
+    int kingState = 0; // 0 walk, 1 turn, 2 flick, 3 attack
+    int stateFrame = 0;
+    bool bitThisAttack = false;
+    float hitAcc = 0.0f;
+    KingLongResult r;
+    r.hp = hp;
+    for (int f = 0; f < seconds * 30; ++f) {
+        s.naviX = navi.x;
+        s.naviZ = navi.z;
+        s.tgtX = king.x;
+        s.tgtZ = king.z;
+        s.targetDist = std::sqrt(K::sqrXZ(navi, king));
+        s.cursorValid = true;
+        s.cursorX = navi.x + curX;
+        s.cursorZ = navi.z + curZ;
+        s.targetAttacking = kingState == 3;
+        s.naviHpValid = true;
+        s.naviHp = r.hp;
+        brain.update(dt, s);
+        const p2autoplay::Command c = brain.command();
+        for (const std::string& m : brain.takeMarkers()) {
+            if (m.find("mode=evade") != std::string::npos) ++r.evades;
+        }
+        if (c.moveX != 0.0f || c.moveZ != 0.0f) {
+            const float mag = c.stickScale * 127.0f / 74.0f;
+            curX += c.moveX * 200.0f * dt;
+            curZ += c.moveZ * 200.0f * dt;
+            const float cl = std::sqrt(curX * curX + curZ * curZ);
+            if (cl > 300.0f) {
+                curX *= 300.0f / cl;
+                curZ *= 300.0f / cl;
+            }
+            if (mag > 0.75f) {
+                navi.x += c.moveX * 160.0f * dt;
+                navi.z += c.moveZ * 160.0f * dt;
+            }
+        }
+        const float nd = std::sqrt(K::sqrXZ(navi, king));
+        if (nd < 18.0f) {
+            const float k = nd > 0.01f ? 18.0f / nd : 1.0f;
+            navi.x = king.x + (navi.x - king.x) * k;
+            navi.z = king.z + (navi.z - king.z) * k;
+        }
+        if (f > 60) r.minDist = std::min(r.minDist, nd);
+        // Hits from latched Pikmin (addDamage flickSpeed, every state).
+        hitAcc += hitsPerSecond * dt;
+        while (hitAcc >= 1.0f) {
+            hitAcc -= 1.0f;
+            flickTimer += K::FlickPerHit;
+        }
+        if (kingState == 2) {
+            ++stateFrame;
+            if (stateFrame == K::FlickEventFrame) {
+                if (K::tramples(K::footPosition(king, heading), navi)) {
+                    ++r.presses;
+                    r.hp -= 5.0f;
+                }
+                flickTimer = 0.0f;
+            }
+            if (stateFrame >= 70) kingState = 0;
+            continue;
+        }
+        if (kingState == 3) {
+            ++stateFrame;
+            if (prof && stateFrame >= prof->firstFrame && stateFrame <= prof->lastFrame) {
+                for (int i = 0; i < prof->slots; ++i) {
+                    const p2chappymouth::Vec3 sw = p2chappymouth::slotWorld(*prof, stateFrame, i, king, heading);
+                    if (p2chappymouth::distance(sw, navi) < p2chappymouth::effectiveRadius(*prof)) {
+                        if (!bitThisAttack) r.hp -= 5.0f;
+                        bitThisAttack = true;
+                    }
+                }
+            }
+            if (stateFrame >= 95) {
+                ++r.attacks;
+                if (bitThisAttack) ++r.bitten;
+                kingState = 0;
+            }
+            continue;
+        }
+        const bool canSearch = K::canSearch(walker, king);
+        const int pick = canSearch ? K::selectTarget(king, heading, &navi, nullptr, 0) : -1;
+        const p2chappymouth::Vec3* target = pick == -2 ? &navi : nullptr;
+        K::tickDelay(walker, 1.0f);
+        if (kingState == 1) {
+            const bool done = K::turnTick(heading, king, target ? *target : walker.goal, target != nullptr, 1.0f);
+            const bool flick = K::checkFlick(flickTimer, K::naviInInvisibleRange(king, navi) ? 1 : 0, 0, 1.0f);
+            const K::WalkNext next = K::turnStateStep(done, flick, false);
+            if (next == K::NextFlick) {
+                kingState = 2;
+                stateFrame = 0;
+                ++r.flicks;
+            } else if (next == K::NextWalk) {
+                kingState = 0;
+            }
+            continue;
+        }
+        K::WalkInputs in;
+        in.walker = K::walkTick(walker, king, heading, target, 1.0f, 0.5f, 0.5f);
+        in.hasTarget = target != nullptr;
+        in.flickStart = in.walker != K::WalkTurn
+            && K::checkFlick(flickTimer, K::naviInInvisibleRange(king, navi) ? 1 : 0, 0, 1.0f);
+        in.inRange = target && !walker.targetDropped && K::attackGate(king, heading, *target);
+        const K::WalkNext next = K::walkStateStep(in);
+        if (next == K::NextAttack) {
+            kingState = 3;
+            stateFrame = 0;
+            bitThisAttack = false;
+            continue;
+        }
+        if (next == K::NextFlick) {
+            kingState = 2;
+            stateFrame = 0;
+            ++r.flicks;
+            continue;
+        }
+        if (next == K::NextTurn) {
+            kingState = 1;
+            continue;
+        }
+        king.x += std::sin(heading) * K::MoveSpeed * dt;
+        king.z += std::cos(heading) * K::MoveSpeed * dt;
+    }
+    return r;
+}
+
+void testKingEvadeLongSim()
+{
+    const int secs = 75; // the i1-53 fight length (AUTOPLAY_RESULT seconds=75)
+    // The eeb71a4d4 stance (no evade): bitten on every attack.
+    const KingLongResult old = runKingLongSim(false, secs, 100.0f, 0.0f);
+    std::printf("INFO king_long evade=0 attacks=%d bitten=%d presses=%d flicks=%d hp=%.0f min_dist=%.0f\n",
+                old.attacks, old.bitten, old.presses, old.flicks, old.hp, old.minDist);
+    CHECK(old.attacks >= 10 && old.bitten >= old.attacks - 1, "king_long/hold_without_evade_is_bitten");
+
+    const float rates[] = {0.0f, 0.5f, 1.0f};
+    for (float hps : rates) {
+        const KingLongResult now = runKingLongSim(true, secs, 100.0f, hps);
+        std::printf("INFO king_long evade=1 hits_per_s=%.1f attacks=%d bitten=%d presses=%d flicks=%d evades=%d "
+                    "hp=%.0f min_dist=%.0f\n",
+                    hps, now.attacks, now.bitten, now.presses, now.flicks, now.evades, now.hp, now.minDist);
+        char name[96];
+        std::snprintf(name, sizeof(name), "king_long/evade_hits_%.1f_no_captain_damage", hps);
+        // Bound: <= 5 HP of captain damage per minute (one bite); the model
+        // predicts 0.
+        CHECK(now.bitten == 0 && now.presses == 0 && now.hp >= 100.0f - 5.0f * secs / 60.0f, name);
+        std::snprintf(name, sizeof(name), "king_long/evade_hits_%.1f_king_keeps_attacking", hps);
+        CHECK(now.attacks >= 10 && now.evades >= now.attacks, name);
+    }
+
+    // Low health: the captain stays out of fp20 and the tongue; no damage.
+    const KingLongResult low = runKingLongSim(true, secs, 30.0f, 0.0f);
+    std::printf("INFO king_long low_hp=30 attacks=%d bitten=%d presses=%d flicks=%d hp=%.0f min_dist=%.0f\n",
+                low.attacks, low.bitten, low.presses, low.flicks, low.hp, low.minDist);
+    CHECK(low.bitten == 0 && low.presses == 0 && low.hp >= 30.0f, "king_long/low_hp_no_damage");
+}
+
 int main()
 {
     testGate();
@@ -2649,6 +2977,8 @@ int main()
     testUnkilledWhistleTimeout();
     testKingStandoffPolicy();
     testKingStandoffOpensGate();
+    testKingEvadePolicy();
+    testKingEvadeLongSim();
     if (failures == 0) {
         std::printf("PASS p2_autoplay\n");
         return 0;

@@ -333,6 +333,26 @@ struct Config {
     float kingStandoffCloseStop = 115.0f;
     float kingSidestepAfter = 3.0f; // backing off this long (wall/pinned) -> sidestep, swapping sides each window
     float kingCursorTol = 20.0f; // hold: cursor within this XZ of the King -> neutral stick (cursor stays put)
+    // #884 round 5: tongue evade. The King's StateAttack attacks a captain
+    // touching any kamu1..9 slot sphere (frames 40..94, radius 25; port
+    // kingNaviContact, InteractAttack 5 HP, no knockback), and those slots
+    // sweep local z 42..142 and x -79..58: the hold band (95..125, in the
+    // +-30 degree attack cone) is inside the sweep. The bot therefore leaves
+    // the sweep as soon as the King is in its attack state
+    // (Senses::targetAttacking) and stays out until the attack ends.
+    // kingEvadeClear must exceed the King profile's maxReach (XZ radius of
+    // the farthest slot centre + slot radius = 166.7; checked in
+    // p2_autoplay_test). From the band edge (125) that is 55 u, about 10
+    // frames at a walk, well inside the 40-frame wind-up before the first
+    // slot frame.
+    bool kingEvade = true;
+    float kingEvadeClear = 180.0f;
+    float kingEvadeSideAfter = 0.5f; // still inside Clear after this long (pinned) -> away + 45 degrees sideways
+    // Low-health guard: at or below kingLowHp (captain mHealth; Olimar has
+    // 100, no field regen) the stance band moves out to [Clear, Clear+30]:
+    // beyond fp20 (130) and the tongue reach, so the King never attacks the
+    // captain; he keeps throwing from there. 0 disables.
+    float kingLowHp = 35.0f;
     float lookStickScale = 0.24f; // 0.24*127 = 30 bytes: |stick| 0.41 (look band), no MSTICK bits (> 32)
 };
 
@@ -437,6 +457,13 @@ struct Senses {
     bool cursorValid = false;
     float cursorX = 0.0f;
     float cursorZ = 0.0f;
+    // #884 round 5: the target is in its attack state (KingChappy StateAttack,
+    // read-only via pc_p2_chappy_probe; the King driver sets it for source 53
+    // only), and the captain's live health (Navi::mHealth). Only the King
+    // stance reads them.
+    bool targetAttacking = false;
+    bool naviHpValid = false;
+    float naviHp = 0.0f;
 };
 
 // Pad output for one tick. moveX/moveZ is the desired world-space XZ move
@@ -513,6 +540,9 @@ public:
         kingClosing = false;
         kingBackTime = 0.0f;
         kingMode = -1;
+        kingEvading = false;
+        kingEvadeTime = 0.0f;
+        kingLowHpMode = false;
         result = Result{};
         markers.clear();
         lastCommand = Command{};
@@ -586,6 +616,9 @@ private:
         kingClosing = false;
         kingBackTime = 0.0f;
         kingMode = -1;
+        kingEvading = false;
+        kingEvadeTime = 0.0f;
+        kingLowHpMode = false;
         emitState(in);
     }
     void holdIdle() { lastCommand = Command{}; }
@@ -1429,7 +1462,6 @@ private:
         enter(State::Select, in);
     }
 
-    // A-press pulse train: hold A for holdSecs, release for gapSecs.
     // #884 round 4: KingChappy attack stance (see isKingStandoff). Modes:
     //   back  - inside kingStandoffMin: walk straight away, no throws (the
     //           cursor trails behind a walking captain, so throws would miss);
@@ -1439,8 +1471,17 @@ private:
     //   close - beyond kingStandoffMax: walk in and throw (the normal attack);
     //   hold  - in the band: look-band stick sliding the cursor onto the King
     //           (neutral once it is there), throw pulses; the captain stands.
+    // #884 round 5 adds:
+    //   evade - the King is in its attack state (Senses::targetAttacking):
+    //           inside kingEvadeClear walk straight away (45 degrees sideways
+    //           after kingEvadeSideAfter), no throws; once outside, stand and
+    //           look/throw as in hold. It overrides every other mode until the
+    //           attack ends, so the tongue slots (reach 166.7) never find the
+    //           captain; the next approach re-enters through close/hold.
+    //   Low-health guard: at or below kingLowHp the band is [Clear, Clear+30]
+    //           instead of [Min, Max] (outside fp20 and the tongue reach).
     // AUTOPLAY_KING_STANDOFF marks each mode change.
-    enum KingMode { KingBack = 0, KingSide, KingClose, KingHold };
+    enum KingMode { KingBack = 0, KingSide, KingClose, KingHold, KingEvade };
     static const char* kingModeName(int m)
     {
         switch (m) {
@@ -1448,74 +1489,128 @@ private:
         case KingSide: return "side";
         case KingClose: return "close";
         case KingHold: return "hold";
+        case KingEvade: return "evade";
         }
         return "?";
+    }
+
+    // Unit XZ direction from the King to the captain (+x when on top of it).
+    static void awayFrom(const Senses& in, float& ax, float& az)
+    {
+        ax = in.naviX - in.tgtX;
+        az = in.naviZ - in.tgtZ;
+        const float len = std::sqrt(ax * ax + az * az);
+        if (len > 1.0f) {
+            ax /= len;
+            az /= len;
+        } else {
+            ax = 1.0f; // on top of the King: any direction out
+            az = 0.0f;
+        }
+    }
+
+    // Away + perpendicular (45 degrees); sign picks the side.
+    void steerAwaySide(float ax, float az, float sign)
+    {
+        const float sx = ax - sign * az, sz = az + sign * ax;
+        const float sl = std::sqrt(sx * sx + sz * sz);
+        lastCommand.moveX = sx / sl;
+        lastCommand.moveZ = sz / sl;
+    }
+
+    // Stand in the look band sliding the cursor onto the King, throw pulses.
+    void kingLookAndThrow(const Senses& in)
+    {
+        const float fx = in.cursorValid ? in.cursorX : in.naviX;
+        const float fz = in.cursorValid ? in.cursorZ : in.naviZ;
+        const float dx = in.tgtX - fx, dz = in.tgtZ - fz;
+        const float len = std::sqrt(dx * dx + dz * dz);
+        if ((!in.cursorValid || len > cfg.kingCursorTol) && len > 1.0f) {
+            lastCommand.moveX = dx / len;
+            lastCommand.moveZ = dz / len;
+            lastCommand.stickScale = cfg.lookStickScale;
+        }
+        pulseA(in, cfg.throwHold, cfg.throwGap);
     }
 
     void tickKingStandoff(float dt, const Senses& in, float limit)
     {
         const float d = in.targetDist;
-        if (d < cfg.kingStandoffMin) {
-            if (!kingBacking) kingBackTime = 0.0f;
-            kingBacking = true;
-            kingClosing = false;
-        } else if (kingBacking && d >= cfg.kingStandoffResume) {
-            kingBacking = false;
-        }
-        if (!kingBacking) {
-            if (d > cfg.kingStandoffMax) kingClosing = true;
-            else if (d <= cfg.kingStandoffCloseStop) kingClosing = false;
-        }
+        const bool lowHp = cfg.kingLowHp > 0.0f && in.naviHpValid && in.naviHp <= cfg.kingLowHp;
+        const float bandMin = lowHp ? cfg.kingEvadeClear : cfg.kingStandoffMin;
+        const float bandResume = lowHp ? cfg.kingEvadeClear + 15.0f : cfg.kingStandoffResume;
+        const float bandMax = lowHp ? cfg.kingEvadeClear + 30.0f : cfg.kingStandoffMax;
+        const float bandCloseStop = lowHp ? cfg.kingEvadeClear + 20.0f : cfg.kingStandoffCloseStop;
+        const bool attacking = cfg.kingEvade && in.targetAttacking;
+        if (attacking && !kingEvading) kingEvadeTime = 0.0f;
+        kingEvading = attacking;
         int mode;
-        if (kingBacking) {
-            kingBackTime += dt;
-            float ax = in.naviX - in.tgtX, az = in.naviZ - in.tgtZ;
-            const float len = std::sqrt(ax * ax + az * az);
-            if (len > 1.0f) {
-                ax /= len;
-                az /= len;
+        if (kingEvading) {
+            mode = KingEvade;
+            // The band hysteresis restarts after the attack.
+            kingBacking = false;
+            kingClosing = false;
+            kingBackTime = 0.0f;
+            if (d < cfg.kingEvadeClear) {
+                kingEvadeTime += dt;
+                float ax, az;
+                awayFrom(in, ax, az);
+                if (kingEvadeTime < cfg.kingEvadeSideAfter) {
+                    lastCommand.moveX = ax;
+                    lastCommand.moveZ = az;
+                } else {
+                    steerAwaySide(ax, az, 1.0f);
+                }
+                pressOn = false; // no throws while walking out of the sweep
+                pressPhase = 0.0f;
             } else {
-                ax = 1.0f; // on top of the King: any direction out
-                az = 0.0f;
+                kingLookAndThrow(in);
             }
-            if (kingBackTime < cfg.kingSidestepAfter) {
-                mode = KingBack;
-                lastCommand.moveX = ax;
-                lastCommand.moveZ = az;
-            } else {
-                mode = KingSide;
-                const int window = int((kingBackTime - cfg.kingSidestepAfter) / cfg.kingSidestepAfter);
-                const float sign = (window % 2 == 0) ? 1.0f : -1.0f;
-                const float sx = ax - sign * az, sz = az + sign * ax; // away + perpendicular (45 deg)
-                const float sl = std::sqrt(sx * sx + sz * sz);
-                lastCommand.moveX = sx / sl;
-                lastCommand.moveZ = sz / sl;
-            }
-            pressOn = false; // no throws while walking away
-            pressPhase = 0.0f;
-        } else if (kingClosing) {
-            mode = KingClose;
-            steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
-            pulseA(in, cfg.throwHold, cfg.throwGap);
         } else {
-            mode = KingHold;
-            const float fx = in.cursorValid ? in.cursorX : in.naviX;
-            const float fz = in.cursorValid ? in.cursorZ : in.naviZ;
-            const float dx = in.tgtX - fx, dz = in.tgtZ - fz;
-            const float len = std::sqrt(dx * dx + dz * dz);
-            if ((!in.cursorValid || len > cfg.kingCursorTol) && len > 1.0f) {
-                lastCommand.moveX = dx / len;
-                lastCommand.moveZ = dz / len;
-                lastCommand.stickScale = cfg.lookStickScale;
+            if (d < bandMin) {
+                if (!kingBacking) kingBackTime = 0.0f;
+                kingBacking = true;
+                kingClosing = false;
+            } else if (kingBacking && d >= bandResume) {
+                kingBacking = false;
             }
-            pulseA(in, cfg.throwHold, cfg.throwGap);
+            if (!kingBacking) {
+                if (d > bandMax) kingClosing = true;
+                else if (d <= bandCloseStop) kingClosing = false;
+            }
+            if (kingBacking) {
+                kingBackTime += dt;
+                float ax, az;
+                awayFrom(in, ax, az);
+                if (kingBackTime < cfg.kingSidestepAfter) {
+                    mode = KingBack;
+                    lastCommand.moveX = ax;
+                    lastCommand.moveZ = az;
+                } else {
+                    mode = KingSide;
+                    const int window = int((kingBackTime - cfg.kingSidestepAfter) / cfg.kingSidestepAfter);
+                    steerAwaySide(ax, az, (window % 2 == 0) ? 1.0f : -1.0f);
+                }
+                pressOn = false; // no throws while walking away
+                pressPhase = 0.0f;
+            } else if (kingClosing) {
+                mode = KingClose;
+                steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+                pulseA(in, cfg.throwHold, cfg.throwGap);
+            } else {
+                mode = KingHold;
+                kingLookAndThrow(in);
+            }
         }
-        if (mode != kingMode) {
+        if (mode != kingMode || lowHp != kingLowHpMode) {
             kingMode = mode;
+            kingLowHpMode = lowHp;
             char buf[256];
             std::snprintf(buf, sizeof(buf),
-                          "AUTOPLAY_KING_STANDOFF mode=%s token=%u dist=%.0f back_time=%.1f bot-driven",
-                          kingModeName(mode), in.targetToken, d, kingBacking ? kingBackTime : 0.0f);
+                          "AUTOPLAY_KING_STANDOFF mode=%s token=%u dist=%.0f back_time=%.1f king_attack=%d "
+                          "navi_hp=%.0f low_hp=%d bot-driven",
+                          kingModeName(mode), in.targetToken, d, kingBacking ? kingBackTime : 0.0f,
+                          in.targetAttacking ? 1 : 0, in.naviHpValid ? in.naviHp : -1.0f, lowHp ? 1 : 0);
             markers.emplace_back(buf);
         }
         if (stateTime >= limit) {
@@ -1524,6 +1619,7 @@ private:
         }
     }
 
+    // A-press pulse train: hold A for holdSecs, release for gapSecs.
     void pulseA(const Senses& in, float holdSecs, float gapSecs)
     {
         (void)in;
@@ -1589,6 +1685,9 @@ private:
     bool kingClosing = false; // #884 round 4: King standoff closing in (hysteresis)
     float kingBackTime = 0.0f; // continuous backing time (sidestep after kingSidestepAfter)
     int kingMode = -1; // last AUTOPLAY_KING_STANDOFF mode (-1 = none this stint)
+    bool kingEvading = false; // #884 round 5: leaving the tongue sweep for the current King attack
+    float kingEvadeTime = 0.0f; // time spent evading inside kingEvadeClear (sidestep after kingEvadeSideAfter)
+    bool kingLowHpMode = false; // last stance used the low-health band (marker field)
     bool announced = false;
     Result result;
     Command lastCommand;
