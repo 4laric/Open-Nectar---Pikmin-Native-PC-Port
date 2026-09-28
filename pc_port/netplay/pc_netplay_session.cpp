@@ -589,6 +589,7 @@ double sFrozenStartMs = 0;      // wall time of this hold's "held at"
 uint64_t sHoldTurns = 0;
 uint64_t sHoldsDone = 0;
 uint32_t sLastAdvanceFrame = 0; // frame of the last completed Advance
+uint32_t sCurAdvanceFrame = 0;  // frame of the Advance being executed (outbox stamps)
 // Host: kBulkMirrorLedger payloads waiting for room in the 4-deep bulk queue.
 std::vector<std::vector<uint8_t>> sLedgerOut;
 constexpr size_t kLedgerOutMax = 256;
@@ -611,6 +612,12 @@ void hold_reset()
 	sHoldTurns = 0;
 	sHoldsDone = 0;
 	sLastAdvanceFrame = 0;
+	sCurAdvanceFrame = 0;
+	// Fix round 1 (B1-C10): no ledger message from an earlier session state
+	// may reach this session's peer. (A process runs one netplay session:
+	// kHandshake is entered only from parse_config, and kSession only ever
+	// goes to kDone, so this is defensive.)
+	sLedgerOut.clear();
 }
 
 bool randstate_env_on()
@@ -737,6 +744,13 @@ void hold_on_advance_begin(const PcNetplayInput& hostInput, int frame)
 		fflush(stdout);
 		return;
 	}
+	// Fix round 1 (B1-C2): a RESUME in hand must be for this hold's H+12.
+	// The strict acceptance in hold_client_on_randfull already refuses any
+	// other; this keeps a stale one from ever pre-arming the submit gate.
+	if (sResumeHave && sResumeFrame != (uint32_t)frame + kHoldLeadFrames) {
+		printf("[netplay] hold at frame=%d: stale RESUME for frame=%u discarded\n", frame, sResumeFrame);
+		sResumeHave = false;
+	}
 	sHolding = true;
 	sHoldFrame = (uint32_t)frame;
 	sHoldStartMs = now_ms();
@@ -859,6 +873,19 @@ void hold_client_on_randfull(const std::vector<uint8_t>& data)
 	}
 	const uint32_t rf = (uint32_t)data[0] | ((uint32_t)data[1] << 8) | ((uint32_t)data[2] << 16)
 	    | ((uint32_t)data[3] << 24);
+	// Fix round 1 (B1-C2 / R11): accept a RESUME only for the hold in
+	// progress. The host sends it only once frozen at H+11, which needs this
+	// client's inputs through H+11, submitted after its Advance H+3 or later,
+	// so a legitimate RESUME always finds sHolding set with this sHoldFrame.
+	// Anything else (a late duplicate completion of an earlier RESUME that
+	// outlived the channel's 16-id dedupe window) is dropped, so it can
+	// never pre-arm the submit gate for the next hold.
+	if (!sHolding || rf != sHoldFrame + kHoldLeadFrames || sResumeHave) {
+		printf("[netplay] RESUME for frame=%u dropped: not the hold in progress (holding=%d hold frame=%u have=%d)\n",
+		       rf, (int)sHolding, sHoldFrame, (int)sResumeHave);
+		fflush(stdout);
+		return;
+	}
 	pc_randstate::PcRandState st;
 	if (!pc_randstate::decode(data.data() + 4, data.size() - 4, st)) {
 		printf("[netplay] RESUME snapshot for frame=%u failed to decode; dropped\n", rf);
@@ -2557,6 +2584,7 @@ int handle_game_events(System* sys, BaseApp* app)
 			// frame F arms frame F+1; apply it now, before the sim runs,
 			// then feed this frame's host fragment (arming F+1 at the
 			// earliest). Both peers execute the identical sequence.
+			sCurAdvanceFrame = (uint32_t)e->data.adv.frame; // B1: outbox entry frame
 			randstate_apply_before_tick(e->data.adv.frame);
 			// B1: HOLD flag in the host input (after the RESUME apply above).
 			hold_on_advance_begin(p0, e->data.adv.frame);
@@ -2723,6 +2751,10 @@ void pc_netplay_randstate_publish(const pc_randstate::PcRandState& st)
 // True while a synchronized HOLD is requested (host) or in progress: the
 // host I/O side then leaves publishing to the RESUME snapshot.
 bool pc_netplay_hold_active(void) { return sCfg.active && (sHolding || sHoldRequested); }
+// Fix round 1 (R9): the frame of the Advance being executed, stamped on each
+// outbox entry at push time so its mirror line carries the event's frame
+// whichever flush writes it.
+uint32_t pc_netplay_current_frame(void) { return sCurAdvanceFrame; }
 // Host: queue one kBulkMirrorLedger payload (sent by bulk_pump as the 4-deep
 // bulk queue frees). Bounded; the mirror is never sim state, so an overflow
 // is logged and dropped rather than fatal.
@@ -2951,8 +2983,11 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 		if (sGekkoStarted && hold_resume_catchup_due()) {
 			// B1: RESUME catch-up submit (see hold_resume_catchup_due). No
 			// snapshot fragment and no HOLD flag ride this input: its
-			// delay copies would only repeat them.
-			PcNetplayInput local = build_local_input();
+			// delay copies would only repeat them. Fix round 1 (B1-C7):
+			// it is neutral, so SetDelay's d copies cannot hold a live
+			// press for d+1 frames, and it consumes no script record and
+			// leaves the pad accumulator latch for the next real submit.
+			PcNetplayInput local = pc_netplay_input_neutral();
 			uint8_t wire[16];
 			pc_netplay_input_encode(local, wire);
 			const uint64_t landing = sAdvances; // == H+12

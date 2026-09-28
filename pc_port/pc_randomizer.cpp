@@ -19,6 +19,7 @@
 #include <sstream>
 #include <string>
 #include <set>
+#include <thread>
 #include <tuple>
 #ifdef _WIN32
 #include <io.h>
@@ -41,6 +42,9 @@ __attribute__((weak)) void pc_netplay_randstate_publish(const pc_randstate::PcRa
 // snapshot), and the host's queue for kBulkMirrorLedger messages.
 __attribute__((weak)) bool pc_netplay_hold_active(void);
 __attribute__((weak)) void pc_netplay_mirror_ledger_send(const uint8_t* data, size_t len);
+// B1 fix round 1: the frame of the Advance being executed (stamped on each
+// outbox entry at push time, so mirror lines carry their event frame).
+__attribute__((weak)) uint32_t pc_netplay_current_frame(void);
 #else
 bool pc_netplay_session_active(void);
 bool pc_netplay_is_host(void);
@@ -48,6 +52,7 @@ bool pc_netplay_randstate_stream_enabled(void);
 void pc_netplay_randstate_publish(const pc_randstate::PcRandState& st);
 bool pc_netplay_hold_active(void);
 void pc_netplay_mirror_ledger_send(const uint8_t* data, size_t len);
+uint32_t pc_netplay_current_frame(void);
 #endif
 #if PIKI_NETPLAY_BUILD
 // Netplay launch lane (issue #887): defined by pc_netplay_launch.cpp, which
@@ -197,24 +202,52 @@ pc_randstate::PcRandState sLastPublished;
 // or the client mirror once per Advance. None of the state below is read by
 // the sim or hashed: checks (not checksJournaled / mirrorChecked) stays the
 // only set the sim reads.
-pc_rand_outbox::Queue sOutbox;
-std::set<unsigned> checksJournaled; // host: slots written to checks.txt this run
-std::set<unsigned> mirrorChecked;   // client: slots written as CHECKED lines
+// The containers live in one function-local static (fix round 1, review R4):
+// no namespace-scope constructor or atexit destructor is registered for
+// them, so a process that never enters outbox mode never constructs them.
+struct OutboxIo {
+    pc_rand_outbox::Queue queue;
+    std::set<unsigned> checksJournaled; // host: slots written to checks.txt this run
+    std::set<unsigned> mirrorChecked;   // client: slots written as CHECKED lines
+    pc_rand_outbox::ReceivedSequencer mirrorReceived; // client RECEIVED order
+};
+OutboxIo& outbox_io() {
+    static OutboxIo io;
+    return io;
+}
+bool outboxUsed = false; // set by the first push; the flush is a no-op before
 bool mirrorEmperor = false;         // client: EMPEROR line written
 uint32_t mirrorLastDeathLink = 0;   // client: last DEATHLINK total written
 uint32_t mirrorLastFrame = 0;       // client: frames never decrease
 uint32_t mirrorDeathsBase = 0;      // client: session.json pikmin_deaths (host ledger)
-pc_rand_outbox::ReceivedSequencer mirrorReceived; // client RECEIVED order
-// Host ledger (runner session.json): deathsBase is captured on the first
-// successful read only (later reads already include this run's deaths.txt
-// credit); receipts are sent from ledgerSent onward.
-bool ledgerBaseSet = false;
+// Client: DEATHS lines wait for the first host ledger message (it carries
+// deathsBase; a line written with base 0 could be a fatal retraction for the
+// M4c runner). DEATHS is an absolute total, so only the latest pending one
+// is kept; it is written with its own event frame when the ledger arrives.
+bool mirrorDeathsPending = false;
+uint32_t mirrorDeathsPendingTotal = 0, mirrorDeathsPendingFrame = 0;
+bool mirrorDeathsSuppressed = false; // host sent kLedgerBaseUnknown
+// Host ledger (runner session.json). deathsBase is fixed once, at session
+// start (pc_randomizer_force_net_publish -> ledger_start), before any Advance
+// and so before this run's deaths.txt has a line the runner could credit.
+// The first ledger message is always sent there, also without session.json
+// (base 0) or with an unreadable one (kLedgerBaseUnknown). Afterwards
+// ledger_poll re-reads session.json whenever its stamp changes (every
+// stream-host poll turn) and sends the receipts from ledgerSent onward.
+bool ledgerStarted = false;
 uint32_t ledgerDeathsBase = 0;
 size_t ledgerSent = 0;
-bool ledgerMissingLogged = false;
+uint64_t ledgerFineStamp = 0;
+bool ledgerHaveStamp = false;
 // Host link liveness (HOLD source): state.txt readable, parsed, ready=1 and
-// its stamp changed within 3 s. Computed on the host I/O side only.
+// its stamp changed within 3 s. Computed on the host I/O side only. The
+// freshness clock is linkFreshAt, touched only by a new state.txt stamp
+// (stream_host_take) and the RESUME read (fix round 1, review B1-C4): the
+// legacy lastFresh is also moved by every applied snapshot. A failed stat
+// never clears linkStateOk (B1-C3): a missing or locked file ages out
+// through the 3 s window instead of one stat blip HOLDing the session.
 bool linkStateOk = false, linkReady = false;
+std::chrono::steady_clock::time_point linkFreshAt;
 // Stream host only: the fine (100 ns) state.txt stamp (see
 // pc_rand_outbox::file_write_stamp); the legacy path keeps lastStamp.
 uint64_t lastFineStamp = 0;
@@ -225,7 +258,10 @@ bool outbox_active() {
 }
 bool outbox_host() { return pc_netplay_is_host == nullptr || pc_netplay_is_host(); }
 void outbox_push(const pc_rand_outbox::Entry& e) {
-    if (!sOutbox.push(e)) fail("netplay outbox overflow");
+    pc_rand_outbox::Entry stamped = e;
+    stamped.frame = pc_netplay_current_frame != nullptr ? pc_netplay_current_frame() : 0;
+    outboxUsed = true;
+    if (!outbox_io().queue.push(stamped)) fail("netplay outbox overflow");
 }
 void parse_state_stream(std::istream& input, ParsedRand& out) {
     std::string magic, session, end, extra;
@@ -311,12 +347,14 @@ void apply_parsed(const ParsedRand& p) {
         if (!deathLinkBaseline) {
             deathLinksSeen = p.deathLinks; deathLinkBaseline = true;
             if (outbox && p.deathLinks > 0) {
+                std::printf("[Pikmin Randomizer] DEATHLINK_TOTAL %u\n", p.deathLinks);
                 pc_rand_outbox::Entry e; e.kind = pc_rand_outbox::Kind::DeathLink; e.total = p.deathLinks; outbox_push(e);
             }
         }
         else if (p.deathLinks < deathLinksSeen) fail("state retracted received DeathLinks");
         else {
             if (outbox && p.deathLinks > deathLinksSeen) {
+                std::printf("[Pikmin Randomizer] DEATHLINK_TOTAL %u\n", p.deathLinks);
                 pc_rand_outbox::Entry e; e.kind = pc_rand_outbox::Kind::DeathLink; e.total = p.deathLinks; outbox_push(e);
             }
             deathLinksPending = std::min(3u, deathLinksPending + (p.deathLinks - deathLinksSeen));
@@ -647,57 +685,61 @@ bool pc_randomizer_init(int argc, char** argv) {
 }
 
 namespace {
-// B1 mirror ledger, host I/O side: read the runner's session.json at
-// directory/../../session.json (root session.py, json.dumps(indent=2)) and
-// send kBulkMirrorLedger messages with every receipt from ledgerSent onward.
-// Runs at session start (pc_randomizer_force_net_publish), on each published
-// generation and at RESUME. The mirror is never sim state: an unreadable
-// file is logged and nothing is sent, never fatal. The first successful read
-// always sends one message (possibly with no receipts) so the client learns
-// deathsBase before any DEATHS line needs it.
-void ledger_refresh() {
-    if (pc_netplay_mirror_ledger_send == nullptr || directory.empty()) return;
-    const std::filesystem::path path = directory.parent_path().parent_path() / "session.json";
+// B1 mirror ledger, host I/O side: the runner's session.json at
+// directory/../../session.json (root session.py, json.dumps(indent=2)) feeds
+// kBulkMirrorLedger messages with every receipt from ledgerSent onward. The
+// mirror is never sim state: nothing here is ever fatal.
+//
+// Fix round 1 (review B1-C5 / R2 / B1-C6 / R7):
+// * ledger_start runs once, at session start (before any Advance, so this
+//   run's deaths.txt is still empty and session.json's pikmin_deaths cannot
+//   include any of this run's deaths). It fixes deathsBase and ALWAYS sends
+//   one message, so the client never has to guess between "no ledger" and
+//   "ledger not arrived yet": base 0 without session.json; the file's
+//   pikmin_deaths when it reads; kLedgerBaseUnknown when it exists but stays
+//   unreadable over 10 attempts 10 ms apart (the client then writes no DEATHS
+//   lines, never a wrong absolute total).
+// * ledger_poll runs on every stream-host poll turn: whenever session.json's
+//   fine stamp changes it re-reads the file and sends the new receipts, so a
+//   receipt that leaves state.txt unchanged still reaches the mirror. A file
+//   locked mid-replace is retried next turn; a malformed one is logged and
+//   skipped until its next rewrite. deathsBase never changes after start.
+// Ledger messages still queued in the session (or in flight on the bulk
+// channel) when the process exits are lost; the next session re-sends from
+// index 0 and the client's RECEIVED sequencer ignores what it already wrote.
+std::filesystem::path ledger_path() {
+    return directory.parent_path().parent_path() / "session.json";
+}
+// 0 = no session.json, 1 = parsed into `out`, 2 = cannot open (transient),
+// 3 = malformed or too large (`reason` says why).
+int ledger_read(pc_rand_outbox::SessionLedger& out, std::string& reason) {
     std::error_code ec;
-    if (!std::filesystem::exists(path, ec)) {
-        if (!ledgerMissingLogged) {
-            ledgerMissingLogged = true;
-            std::printf("[netplay] mirror ledger: no session.json (deathsBase 0, no RECEIVED)\n");
-        }
-        return;
-    }
+    const std::filesystem::path path = ledger_path();
+    if (!std::filesystem::exists(path, ec)) return 0;
     std::string text;
-    {
-        FILE* file = std::fopen(path.string().c_str(), "rb");
-        if (!file) { std::printf("[netplay] mirror ledger: session.json unreadable: cannot open\n"); return; }
-        char buf[65536];
-        size_t n = 0;
-        bool tooBig = false;
-        while ((n = std::fread(buf, 1, sizeof(buf), file)) > 0) {
-            if (text.size() + n > pc_rand_outbox::kMaxSessionJson) { tooBig = true; break; }
-            text.append(buf, n);
-        }
-        std::fclose(file);
-        if (tooBig) { std::printf("[netplay] mirror ledger: session.json unreadable: too large\n"); return; }
+    FILE* file = std::fopen(path.string().c_str(), "rb");
+    if (!file) { reason = "cannot open"; return 2; }
+    char buf[65536];
+    size_t n = 0;
+    bool tooBig = false;
+    while ((n = std::fread(buf, 1, sizeof(buf), file)) > 0) {
+        if (text.size() + n > pc_rand_outbox::kMaxSessionJson) { tooBig = true; break; }
+        text.append(buf, n);
     }
-    pc_rand_outbox::SessionLedger ledger;
-    std::string reason;
-    if (!pc_rand_outbox::scan_session_json(text.data(), text.size(), ledger, reason)) {
-        std::printf("[netplay] mirror ledger: session.json unreadable: %s\n", reason.c_str());
-        return;
-    }
-    bool first = false;
-    if (!ledgerBaseSet) {
-        ledgerBaseSet = true;
-        ledgerDeathsBase = ledger.pikminDeaths;
-        first = true;
-    }
+    std::fclose(file);
+    if (tooBig) { reason = "too large"; return 3; }
+    out = pc_rand_outbox::SessionLedger();
+    if (!pc_rand_outbox::scan_session_json(text.data(), text.size(), out, reason)) return 3;
+    return 1;
+}
+void ledger_send_from(const pc_rand_outbox::SessionLedger& ledger, bool always) {
     if (ledger.received.size() < ledgerSent) {
         std::printf("[netplay] mirror ledger: session.json received shrank (%zu < %zu); ignored\n",
                     ledger.received.size(), ledgerSent);
+        std::fflush(stdout);
         return;
     }
-    if (!first && ledger.received.size() == ledgerSent) return;
+    if (!always && ledger.received.size() == ledgerSent) return;
     do {
         const size_t count = std::min<size_t>(pc_rand_outbox::kLedgerMaxCount, ledger.received.size() - ledgerSent);
         const std::vector<uint8_t> msg = pc_rand_outbox::encode_ledger(ledgerDeathsBase, (uint32_t)ledgerSent,
@@ -708,6 +750,55 @@ void ledger_refresh() {
         ledgerSent += count;
     } while (ledgerSent < ledger.received.size());
     std::fflush(stdout);
+}
+void ledger_start() {
+    if (ledgerStarted || pc_netplay_mirror_ledger_send == nullptr || directory.empty()) return;
+    ledgerStarted = true;
+    pc_rand_outbox::SessionLedger ledger;
+    std::string reason;
+    uint64_t fine = 0;
+    bool haveFine = pc_rand_outbox::file_write_stamp(ledger_path(), &fine);
+    int got = ledger_read(ledger, reason);
+    for (int attempt = 1; (got == 2 || got == 3) && attempt < 10; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        haveFine = pc_rand_outbox::file_write_stamp(ledger_path(), &fine);
+        got = ledger_read(ledger, reason);
+    }
+    if (got == 1) {
+        ledgerDeathsBase = ledger.pikminDeaths;
+        if (haveFine) { ledgerFineStamp = fine; ledgerHaveStamp = true; }
+        std::printf("[netplay] mirror ledger: session start deathsBase=%u received=%zu\n",
+                    ledgerDeathsBase, ledger.received.size());
+        ledger_send_from(ledger, true);
+        return;
+    }
+    if (got == 0) {
+        ledgerDeathsBase = 0;
+        std::printf("[netplay] mirror ledger: no session.json at session start (deathsBase 0, no RECEIVED yet)\n");
+    } else {
+        ledgerDeathsBase = pc_rand_outbox::kLedgerBaseUnknown;
+        std::printf("[netplay] mirror ledger: session.json unreadable at session start: %s; deathsBase unknown, "
+                    "client DEATHS suppressed\n", reason.c_str());
+    }
+    ledger_send_from(pc_rand_outbox::SessionLedger(), true);
+}
+void ledger_poll() {
+    if (!ledgerStarted || pc_netplay_mirror_ledger_send == nullptr || directory.empty()) return;
+    uint64_t fine = 0;
+    if (!pc_rand_outbox::file_write_stamp(ledger_path(), &fine)) return; // absent: nothing new
+    if (ledgerHaveStamp && fine == ledgerFineStamp) return;
+    pc_rand_outbox::SessionLedger ledger;
+    std::string reason;
+    const int got = ledger_read(ledger, reason);
+    if (got == 2) return; // locked mid-replace: retry next turn
+    ledgerFineStamp = fine;
+    ledgerHaveStamp = true;
+    if (got == 3) {
+        std::printf("[netplay] mirror ledger: session.json unreadable: %s\n", reason.c_str());
+        std::fflush(stdout);
+        return;
+    }
+    if (got == 1) ledger_send_from(ledger, false);
 }
 // Stream host, after a successful parse: link liveness, publish on content
 // change only (the run_pair refresher rewrites state.txt every 0.1 s with
@@ -720,6 +811,7 @@ void stream_host_take(const ParsedRand& parsed) {
     linkStateOk = true;
     linkReady = parsed.ready != 0;
     lastFresh = std::chrono::steady_clock::now();
+    linkFreshAt = lastFresh;
     pc_randstate::PcRandState st;
     net_from_parsed(parsed, 0, st);
     const bool holding = pc_netplay_hold_active != nullptr && pc_netplay_hold_active();
@@ -729,7 +821,6 @@ void stream_host_take(const ParsedRand& parsed) {
     sLastPublished = st;
     sHavePublished = true;
     if (pc_netplay_randstate_publish != nullptr) pc_netplay_randstate_publish(st);
-    ledger_refresh(); // B1: the mirror ledger follows each generation
 }
 } // namespace
 
@@ -750,9 +841,14 @@ void pc_randomizer_update() {
     if (stream && !isHost) return; // client: stream only
     if (stream) {
         // B1: the stream host detects every rewrite with the fine stamp, so
-        // changes inside one second are never coalesced or lost.
+        // changes inside one second are never coalesced or lost. A failed
+        // stat (missing, or a transient delete-pending / AV lock) changes
+        // nothing: liveness ages out through the 3 s freshness window
+        // (fix round 1, B1-C3). The runner's session.json is polled on the
+        // same turn (B1-C6).
+        ledger_poll();
         uint64_t fine = 0;
-        if (!pc_rand_outbox::file_write_stamp(directory / "state.txt", &fine)) { linkStateOk = false; return; }
+        if (!pc_rand_outbox::file_write_stamp(directory / "state.txt", &fine)) return;
         if (haveFineStamp && fine == lastFineStamp) return;
         std::ifstream input(directory / "state.txt");
         if (!input.is_open()) return; // replace in progress: retry next turn
@@ -797,6 +893,9 @@ void pc_randomizer_update() {
 // and parsed by this forced poll (the session then HOLDs from its first
 // input, so the neutral gate never waits silently); true otherwise. The
 // forced poll also reads the mirror ledger (session start).
+// Fix round 1 (B1-C3): a transient open/stat failure is retried up to 10
+// times 10 ms apart before the missing-state HOLD is chosen, and the mirror
+// ledger's session-start message always goes out (ledger_start).
 bool pc_randomizer_force_net_publish() {
     if (!enabled) return true;
     const bool netActive = pc_netplay_session_active != nullptr && pc_netplay_session_active();
@@ -808,7 +907,12 @@ bool pc_randomizer_force_net_publish() {
     haveFineStamp = false; // B1: the stream host polls the fine stamp
     linkStateOk = false; // proven again by this poll
     pc_randomizer_update();
-    ledger_refresh();
+    for (int attempt = 1; !linkStateOk && attempt < 10; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        haveFineStamp = false;
+        pc_randomizer_update();
+    }
+    ledger_start();
     return linkStateOk;
 }
 
@@ -822,7 +926,7 @@ bool pc_randomizer_link_live() {
     if (pc_netplay_launch_wants_local_state()) return true;
 #endif
     return linkStateOk && linkReady
-        && std::chrono::steady_clock::now() - lastFresh <= std::chrono::seconds(3);
+        && std::chrono::steady_clock::now() - linkFreshAt <= std::chrono::seconds(3);
 }
 
 // B1 RESUME snapshot (host I/O side): a fresh read of state.txt with a new
@@ -850,7 +954,8 @@ bool pc_randomizer_resume_snapshot(pc_randstate::PcRandState* out) {
     lastFineStamp = fine;
     haveFineStamp = true;
     lastFresh = std::chrono::steady_clock::now();
-    ledger_refresh();
+    linkFreshAt = lastFresh;
+    ledger_poll();
     *out = st;
     return true;
 }
@@ -1061,6 +1166,11 @@ bool pc_randomizer_p2_corpse_delivered(const void* tekiview, int type, int stage
         // Advance (an open failure there is fatal, never a silent false).
         // The client never opens the ledger.
         p2ReceiptGenerators.insert(generatorUid);
+        // Peer-neutral sim-side line on both peers (fix round 1, R6); the
+        // host's P2_ORDINARY_P2_RECEIPT line at flush time is host-only (it
+        // reports the ledger's result, which only the host has).
+        std::printf("[Pikmin Randomizer] P2_ORDINARY_DELIVERY source=%u type=%d stage=%d generator=%u\n",
+            sourceId, type, stage, generatorUid);
         pc_rand_outbox::Entry e;
         e.kind = pc_rand_outbox::Kind::P2Delivery;
         e.p2Source = sourceId;
@@ -1270,7 +1380,10 @@ int pc_randomizer_deathlink_casualties() {
 // makes deathlink_induce a no-op, so DeathLink kills are journaled as
 // ordinary deaths (exact-count evidence). It changes sim state
 // (deathsReported is hashed), so the session hashes it into the handshake
-// config and run_pair scrubs it.
+// config and run_pair scrubs it. Fix round 1 (B1-C8 / R5): it is honoured
+// only while the outbox is active (a netplay session with the stream on),
+// so a netplay build running solo or AP behaves as without the variable
+// (no DeathLink feedback loop through deaths.txt); logged once when honoured.
 bool pc_randomizer_test_deathlink_as_ordinary() {
     static int cached = -1;
     if (cached < 0) {
@@ -1279,10 +1392,21 @@ bool pc_randomizer_test_deathlink_as_ordinary() {
     }
     return cached == 1;
 }
+namespace {
+bool test_deathlink_as_ordinary_now() {
+    if (!pc_randomizer_test_deathlink_as_ordinary() || !outbox_active()) return false;
+    static bool logged = false;
+    if (!logged) {
+        logged = true;
+        std::printf("[netplay] TEST knob PIKMIN_NETPLAY_TEST_DEATHLINK_AS_ORDINARY honoured: DeathLink kills count as ordinary deaths\n");
+    }
+    return true;
+}
+} // namespace
 #endif
 void pc_randomizer_deathlink_induce(const void* piki) {
 #if PIKI_NETPLAY_BUILD
-    if (pc_randomizer_test_deathlink_as_ordinary()) return;
+    if (test_deathlink_as_ordinary_now()) return;
 #endif
     if (piki) inducedDeaths.insert(piki);
 }
@@ -1516,6 +1640,12 @@ bool pc_randomizer_load_campaign(void* destination) {
 }
 void pc_randomizer_save_campaign(const void* source) {
     if (!enabled) return;
+    // Netplay M4 lane B1 fix round 1 (review B1-C9): journal lines queued in
+    // this tick land before the checkpoint that records their sim state, so a
+    // crash between the two can never leave a check or consumed benefit in
+    // the checkpoint but not in checks.txt / benefits-used.txt. No-op outside
+    // outbox mode. (One line in B2's function; B2 keeps it at its barrier.)
+    pc_randomizer_outbox_flush(0);
     std::filesystem::create_directories(campaignDirectory);
     const auto generation = campaignGeneration + 1;
     std::ostringstream meta;
@@ -1575,7 +1705,7 @@ void outbox_flush_host(const std::vector<pc_rand_outbox::Entry>& entries) {
         case pc_rand_outbox::Kind::Check: {
             // A slot is journaled once per run; streamed slots never enter
             // checksJournaled (AP-originated checks are not native).
-            if (!checksJournaled.insert(e.slot).second) break;
+            if (!outbox_io().checksJournaled.insert(e.slot).second) break;
             FILE* file = std::fopen((directory / "checks.txt").string().c_str(), "a");
             if (!file) fail("cannot persist native collection");
             bool ok = std::fprintf(file, "%d\n", int(e.slot)) > 0 && std::fflush(file) == 0;
@@ -1648,14 +1778,34 @@ void outbox_flush_host(const std::vector<pc_rand_outbox::Entry>& entries) {
         }
     }
 }
-// Client: no journal at all; mirror-events.txt lines in the root grammar.
-void outbox_flush_client(const std::vector<pc_rand_outbox::Entry>& entries, uint32_t frame) {
+bool mirrorLedgerSeen = false;
+// Client: one DEATHS line for an absolute run total, or (before the first
+// ledger message) keep it pending: only the latest total matters.
+void mirror_deaths_line(std::vector<std::string>& lines, uint32_t frame, uint32_t total) {
+    if (mirrorDeathsSuppressed) return;
+    if (!mirrorLedgerSeen) {
+        mirrorDeathsPending = true;
+        mirrorDeathsPendingTotal = total;
+        mirrorDeathsPendingFrame = frame;
+        std::printf("[netplay] mirror DEATHS %u pending: no ledger message yet\n", total);
+        return;
+    }
+    const uint64_t absolute = (uint64_t)mirrorDeathsBase + total;
+    const std::string line = absolute > pc_rand_outbox::kMaxTotal ? std::string()
+        : pc_rand_outbox::mirror_deaths(mirror_frame(frame), (uint32_t)absolute);
+    if (line.empty()) std::printf("[netplay] mirror skip DEATHS %llu: out of range\n", (unsigned long long)absolute);
+    else lines.push_back(line);
+}
+// Client: no journal at all; mirror-events.txt lines in the root grammar,
+// each with its entry's own push frame (fix round 1, review R9).
+void outbox_flush_client(const std::vector<pc_rand_outbox::Entry>& entries) {
     std::vector<std::string> lines;
     for (const pc_rand_outbox::Entry& e : entries) {
+        const uint32_t frame = e.frame;
         switch (e.kind) {
         case pc_rand_outbox::Kind::Check:
         case pc_rand_outbox::Kind::CheckApplied: {
-            if (!mirrorChecked.insert(e.slot).second) break;
+            if (!outbox_io().mirrorChecked.insert(e.slot).second) break;
             const char* name = e.slot < checkCount ? checkName(e.slot) : nullptr;
             const std::string line = pc_rand_outbox::mirror_checked(mirror_frame(frame), name);
             if (line.empty()) std::printf("[netplay] mirror skip CHECKED slot=%u: name not expressible\n", e.slot);
@@ -1668,12 +1818,9 @@ void outbox_flush_client(const std::vector<pc_rand_outbox::Entry>& entries, uint
             mirrorEmperor = true;
             lines.push_back(pc_rand_outbox::mirror_emperor(mirror_frame(frame)));
             break;
-        case pc_rand_outbox::Kind::Death: {
-            const std::string line = pc_rand_outbox::mirror_deaths(mirror_frame(frame), mirrorDeathsBase + e.total);
-            if (line.empty()) std::printf("[netplay] mirror skip DEATHS %u: out of range\n", mirrorDeathsBase + e.total);
-            else lines.push_back(line);
+        case pc_rand_outbox::Kind::Death:
+            mirror_deaths_line(lines, frame, e.total);
             break;
-        }
         case pc_rand_outbox::Kind::DeathLink: {
             if (e.total <= mirrorLastDeathLink) break;
             const std::string line = pc_rand_outbox::mirror_deathlink(mirror_frame(frame), e.total);
@@ -1689,18 +1836,21 @@ void outbox_flush_client(const std::vector<pc_rand_outbox::Entry>& entries, uint
     }
     mirror_append(lines);
 }
-bool mirrorLedgerSeen = false;
 } // namespace
 
 // Once per Advance (pc_netplay_session.cpp, after pc_state_hash_tick_end and
-// before the exit-after check), and by the B2 save barrier before it writes.
-// A no-op outside outbox mode (nothing is ever queued there).
+// before the exit-after check), and at the top of pc_randomizer_save_campaign
+// (so a save inside a tick never checkpoints state whose journal lines are
+// still queued). `frame` is the caller's current frame and is not used for
+// the lines: every entry carries its own push frame. A no-op outside outbox
+// mode (nothing is ever queued there; the queue is not even constructed).
 void pc_randomizer_outbox_flush(uint32_t frame) {
-    if (!enabled || sOutbox.size() == 0) return;
+    (void)frame;
+    if (!enabled || !outboxUsed || outbox_io().queue.size() == 0) return;
     std::vector<pc_rand_outbox::Entry> entries;
-    sOutbox.take(entries);
+    outbox_io().queue.take(entries);
     if (outbox_host()) outbox_flush_host(entries);
-    else outbox_flush_client(entries, frame);
+    else outbox_flush_client(entries);
     std::fflush(stdout);
 }
 
@@ -1716,15 +1866,28 @@ void pc_randomizer_mirror_ledger_receive(const uint8_t* data, size_t len, uint32
         std::fflush(stdout);
         return;
     }
+    std::vector<std::string> lines;
     if (!mirrorLedgerSeen) {
+        // The host sends its first message at session start, always; the
+        // base never changes afterwards. A DEATHS total that waited for it
+        // is written now, with its own event frame.
         mirrorLedgerSeen = true;
-        mirrorDeathsBase = msg.deathsBase;
-        std::printf("[netplay] mirror ledger: deathsBase=%u\n", mirrorDeathsBase);
+        if (msg.deathsBase == pc_rand_outbox::kLedgerBaseUnknown) {
+            mirrorDeathsSuppressed = true;
+            std::printf("[netplay] mirror ledger: deathsBase unknown (host session.json unreadable at start); "
+                        "DEATHS lines suppressed\n");
+        } else {
+            mirrorDeathsBase = msg.deathsBase;
+            std::printf("[netplay] mirror ledger: deathsBase=%u\n", mirrorDeathsBase);
+        }
+        if (mirrorDeathsPending) {
+            mirrorDeathsPending = false;
+            mirror_deaths_line(lines, mirrorDeathsPendingFrame, mirrorDeathsPendingTotal);
+        }
     }
     std::vector<std::pair<uint32_t, uint32_t>> fresh;
-    if (!mirrorReceived.offer(msg.firstIndex, msg.ids, fresh))
+    if (!outbox_io().mirrorReceived.offer(msg.firstIndex, msg.ids, fresh))
         std::printf("[netplay] mirror ledger: too many held messages; first=%u dropped\n", msg.firstIndex);
-    std::vector<std::string> lines;
     for (const auto& r : fresh) {
         const std::string line = pc_rand_outbox::mirror_received(mirror_frame(frame), r.first, r.second);
         if (line.empty()) std::printf("[netplay] mirror skip RECEIVED %u %u: out of range\n", r.first, r.second);
