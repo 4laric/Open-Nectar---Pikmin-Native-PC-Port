@@ -929,7 +929,12 @@ bool pc_p2_batch3_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     const p2animation::Clip& timing = bank.timing.at(name);
     const size_t index = timing.index(phase, corpse);
     Shape* shape = poses.at(index < poses.size() ? index : poses.size() - 1);
-    if (interpolation && !corpse) {
+    // #897: the private-geometry blend renders the live Crawbster invisible
+    // (bot runs r1/r2: only the corpse, which skips the blend, was ever on
+    // screen; with PIKMIN_P2_INTERPOLATION=0 the rolling ball, belly-up Turn
+    // and claw flick all draw). DangoMushi uses the nearest staged pose.
+    const bool dangoNearestPose = entry->second == "snagret|DangoMushi";
+    if (interpolation && !corpse && !dangoNearestPose) {
         auto interpIt = bank.interp.find(name);
         auto bakedIt = bank.baked.find(name);
         if (interpIt != bank.interp.end() && interpIt->second && bakedIt != bank.baked.end()
