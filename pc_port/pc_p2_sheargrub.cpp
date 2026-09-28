@@ -11,6 +11,7 @@
 #include "Graphics.h"
 #include "Camera.h"
 #include "gameflow.h"
+#include "pc_p2_pose_family.h"
 #include <map>
 #include <set>
 #include <string>
@@ -25,6 +26,8 @@ Shape* shapes[2][2]={{nullptr,nullptr},{nullptr,nullptr}};
 const char* ids[]={"UjiA","UjiB"};
 std::map<std::string,std::vector<Shape*>> animated[2];
 std::map<std::string,p2animation::Clip> timing[2];
+p2posefamily::Bank poseBank[2]{p2posefamily::Bank("SHEARGRUB"),p2posefamily::Bank("SHEARGRUB")}; // #895
+p2posefamily::Actors poseVis;
 void loadAnimation(){
     std::ifstream input("p2-sheargrub-animation.txt");if(!input)return;
     std::vector<p2animation::Clip> banks[2];if(!p2uji::parse(input,banks))std::abort();
@@ -55,6 +58,7 @@ void loadAnimation(){
                 }
                 animated[kind][clip.name].push_back(shape);
             }
+            poseBank[kind].addClip(clip.name,clip.count,clip.duration,clip.frames,[&](int i){char p[160];std::snprintf(p,sizeof(p),"courses/pikmin2room/uji_%s_%s_%02d.mod",ids[kind],clip.name.c_str(),i);return std::string(p);},shared);
         }
     }
     std::printf("P2_UJI_ANIMATION_READY mod_bytes=%zu gameplay=P1_unchanged\n",total);
@@ -66,8 +70,8 @@ const char* motionClip(int motion,int kind){
     case TekiMotion::Type1:return kind?"attack2":nullptr;case TekiMotion::Type2:return kind?"eat":nullptr;default:return nullptr;}
 }
 }
-void pc_p2_sheargrub_reset(){actors.clear();for(auto& bank:animated)bank.clear();for(auto& bank:timing)bank.clear();for(auto& pair:shapes)for(auto& shape:pair)shape=nullptr;}
-void pc_p2_sheargrub_forget(BTeki* actor){actors.erase(static_cast<PelletView*>(actor));}
+void pc_p2_sheargrub_reset(){for(auto& b:poseBank)b.reset();poseVis.clear();actors.clear();for(auto& bank:animated)bank.clear();for(auto& bank:timing)bank.clear();for(auto& pair:shapes)for(auto& shape:pair)shape=nullptr;}
+void pc_p2_sheargrub_forget(BTeki* actor){poseVis.forget(actor);actors.erase(static_cast<PelletView*>(actor));}
 const char* pc_p2_sheargrub_name(PelletView* view){auto it=actors.find(view);return it==actors.end()?nullptr:ids[it->second.species];}
 bool pc_p2_sheargrub_receipt(PelletView* view,unsigned& generator,int& value){auto it=actors.find(view);if(it==actors.end())return false;generator=it->second.generator;value=it->second.species+1;return true;}
 void pc_p2_sheargrub_setup(){
@@ -94,7 +98,10 @@ bool pc_p2_sheargrub_draw(BTeki* actor,Graphics& gfx,const Matrix4f& matrix,bool
         const char* name=corpse?"dead":motionClip(actor->mTekiAnimator->getCurrentMotionIndex(),kind);
         if(name){int frames=actor->mTekiAnimator->getFrameCount();float phase=frames>1?actor->mTekiAnimator->getCounter()/(frames-1):0;
             if(!corpse&&actor->mStateID==1)phase=0;
-            shape=animated[kind].at(name).at(timing[kind].at(name).index(phase,corpse));}
+            shape=animated[kind].at(name).at(timing[kind].at(name).index(phase,corpse));
+            const p2animation::Clip& clipTiming=timing[kind].at(name); // #895 lerp + crossfade
+            const float sourceFrame=corpse?float(clipTiming.duration-1):std::max(0.f,std::min(1.f,phase))*float(clipTiming.duration-1);
+            if(Shape* smooth=poseVis.draw(actor,poseBank[kind],name,sourceFrame))shape=smooth;}
     }
     if(!shape)std::abort();shape->updateAnim(gfx,matrix,nullptr,actor);shape->drawshape(gfx,*gfx.mCamera,nullptr);return true;
 }

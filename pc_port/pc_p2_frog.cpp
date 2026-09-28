@@ -12,6 +12,7 @@
 #include "Graphics.h"
 #include "Camera.h"
 #include "gameflow.h"
+#include "pc_p2_pose_family.h"
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "Navi.h"
@@ -29,6 +30,8 @@ namespace {
 std::map<PelletView*,int> actors;
 const char* ids[]={"Frog","MaroFrog"};
 std::map<std::string,std::vector<Shape*>> animated[2];
+p2posefamily::Bank poseBank[2]{p2posefamily::Bank("FROG"),p2posefamily::Bank("FROG")}; // #895 interpolated draw
+p2posefamily::Actors poseVis;
 std::map<std::string,p2animation::Clip> timing[2];
 std::set<PelletView*> pressing,bitteredFrogs,drawn,drawnCorpse;
 
@@ -118,6 +121,7 @@ void loadAnimation(std::vector<p2animation::Clip> (&banks)[2]){
                 }
                 animated[kind][clip.name].push_back(shape);
             }
+            poseBank[kind].addClip(clip.name,clip.count,clip.duration,clip.frames,[&](int i){char p[160];std::snprintf(p,sizeof(p),"courses/pikmin2room/frog_%s_%s_%02d.mod",ids[kind],clip.name.c_str(),i);return std::string(p);},shared);
         }
     }
     std::printf("P2_FROG_BANK_READY mod_bytes=%zu gameplay=P1_unchanged\n",total);
@@ -255,8 +259,8 @@ void advanceHop(BTeki* actor,FrogFsm& s,float dt){
     actor->getPosition().set(s.flight.x,s.flight.y,s.flight.z);
 }
 }
-void pc_p2_frog_reset(){actors.clear();fsms.clear();pressing.clear();bitteredFrogs.clear();drawn.clear();drawnCorpse.clear();for(auto& b:animated)b.clear();for(auto& b:timing)b.clear();ready=false;}
-void pc_p2_frog_forget(BTeki* actor){auto* v=static_cast<PelletView*>(actor);pc_randomizer_p2_forget_source(v);actors.erase(v);fsms.erase(v);pressing.erase(v);bitteredFrogs.erase(v);drawn.erase(v);drawnCorpse.erase(v);}
+void pc_p2_frog_reset(){for(auto& b:poseBank)b.reset();poseVis.clear();actors.clear();fsms.clear();pressing.clear();bitteredFrogs.clear();drawn.clear();drawnCorpse.clear();for(auto& b:animated)b.clear();for(auto& b:timing)b.clear();ready=false;}
+void pc_p2_frog_forget(BTeki* actor){poseVis.forget(actor);auto* v=static_cast<PelletView*>(actor);pc_randomizer_p2_forget_source(v);actors.erase(v);fsms.erase(v);pressing.erase(v);bitteredFrogs.erase(v);drawn.erase(v);drawnCorpse.erase(v);}
 void pc_p2_frog_set_bittered(BTeki* actor,bool bittered){auto* view=static_cast<PelletView*>(actor);if(!actors.count(view))return;if(bittered)bitteredFrogs.insert(view);else bitteredFrogs.erase(view);}
 const char* pc_p2_frog_name(PelletView* view){auto i=actors.find(view);return i==actors.end()?nullptr:ids[i->second];}
 float pc_p2_frog_param_f(const BTeki* actor,int idx,float fallback){
@@ -522,6 +526,10 @@ bool pc_p2_frog_draw(BTeki* actor,Graphics& gfx,const Matrix4f& matrix,bool corp
     if(name){
         float phase=corpse?1.0f:(ft!=fsms.end()?ft->second.phase:0.0f);
         shape=animated[kind].at(name).at(timing[kind].at(name).index(phase,corpse));
+        // #895: lerp + crossfade into a private Shape; nearest pose stays the fallback.
+        const p2animation::Clip& clipTiming=timing[kind].at(name);
+        const float sourceFrame=corpse?float(clipTiming.duration-1):std::max(0.f,std::min(1.f,phase))*float(clipTiming.duration-1);
+        if(Shape* smooth=poseVis.draw(actor,poseBank[kind],name,sourceFrame,actor->mGenerator?pc_p2_campaign_token(actor):0u))shape=smooth;
     }
     shape->updateAnim(gfx,matrix,nullptr,actor);
     // lane09 specular-instrumentation hook: bracket the family's own draw so the

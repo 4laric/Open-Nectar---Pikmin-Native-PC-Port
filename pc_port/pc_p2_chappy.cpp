@@ -17,6 +17,8 @@
 #include "Texture.h"
 #include "Material.h"
 #include "gameflow.h"
+#include "pc_p2_pose_family.h"
+#include "pc_p2_pose_loader.h"
 #include "Graphics.h"
 #include "Camera.h"
 #include "PaniAnimator.h"
@@ -42,6 +44,7 @@ namespace {
 struct ClipDef {
     int frames = 0;
     int poses = 0;
+    std::vector<int> poseFrames;  // optional P2_BANK_FRAMES_1 trailer (#895)
 };
 struct SpeciesBank {
     unsigned source = 0;
@@ -57,6 +60,10 @@ p2chappy::Health health;
 bool bankLoaded = false;
 std::set<PelletView*> drawnLive, drawnCorpse;
 size_t bankBytes = 0;
+// #895: decoded pose vectors per species + per-actor private geometry
+// (lerp + crossfade). Shapes above remain the nearest-pose fallback.
+std::map<std::string, p2posefamily::Bank> poseBanks;
+p2posefamily::Actors poseVis;
 
 // Own-identity runtime FSM (inst2-chappy, #871). The P2 FSM decides every
 // tick: movement/targeting/attacks are driven here via inputDrive/mVelocity/
@@ -882,6 +889,8 @@ void pc_p2_chappy_reset()
     drawnLive.clear();
     drawnCorpse.clear();
     bankBytes = 0;
+    poseBanks.clear();
+    poseVis.clear();
 }
 
 void pc_p2_chappy_forget(BTeki* actor)
@@ -897,6 +906,7 @@ void pc_p2_chappy_forget(BTeki* actor)
     drawnLive.erase(view);
     drawnCorpse.erase(view);
     health.forget(view);
+    poseVis.forget(actor);
 }
 
 float pc_p2_chappy_max_health(const BTeki* actor, float fallback)
@@ -989,7 +999,7 @@ void pc_p2_chappy_setup()
     // Bank: P2_CHAPPY_BANK_1, species rows, clip rows.
     std::string token;
     if (!(bank >> token) || token != "P2_CHAPPY_BANK_1") std::abort();
-    std::string word;
+    std::string word, lastSpecies, lastClipName;
     while (bank >> word) {
         if (word == "species") {
             std::string species;
@@ -1008,7 +1018,19 @@ void pc_p2_chappy_setup()
             if (posesWord != "poses" || status != "converted") std::abort();
             if (!banks.count(species)) std::abort();
             if (frames < 1 || frames > 10000 || poses < 1 || poses > 64) std::abort();
-            if (!banks[species].clips.emplace(name, ClipDef{(int)frames, poses}).second) std::abort();
+            if (!banks[species].clips.emplace(name, ClipDef{(int)frames, poses, {}}).second) std::abort();
+            lastSpecies = species;
+            lastClipName = name;
+        } else if (word == "frames") {
+            // P2_BANK_FRAMES_1 trailer (#895): `frames f0,f1,...` for the row above.
+            std::string list;
+            std::vector<int> parsed;
+            if (lastClipName.empty() || !(bank >> list) || !p2batch2clock::parseFramesList(list, parsed)) std::abort();
+            ClipDef& def = banks[lastSpecies].clips[lastClipName];
+            bool ok = int(parsed.size()) == def.poses && parsed.front() == 0 && parsed.back() == def.frames - 1;
+            for (size_t i = 1; ok && i < parsed.size(); ++i) ok = parsed[i] > parsed[i - 1];
+            if (ok) def.poseFrames = parsed;  // malformed lists keep uniform frames
+            lastClipName.clear();
         } else {
             std::abort();
         }
@@ -1036,7 +1058,9 @@ void pc_p2_chappy_setup()
         }
     }
     if (wanted.empty()) return;
-    // Load the staged pose bank before touching actors (fail-closed).
+    // Load the staged pose bank before touching actors (fail-closed on a
+    // missing pose). #895: the compact loader keeps a few full Shapes per clip
+    // and decodes every pose's vectors, so dense banks fit the resident budget.
     for (const auto& entry : banks) {
         for (const auto& clip : entry.second.clips) {
             for (int i = 0; i < clip.second.poses; ++i) {
@@ -1044,27 +1068,53 @@ void pc_p2_chappy_setup()
                 std::snprintf(rel, sizeof(rel),
                               "assets/dataDir/courses/pikmin2room/ch_%s_%s_%02d.mod",
                               entry.second.species.c_str(), clip.first.c_str(), i);
-                std::ifstream probe(rel, std::ios::binary | std::ios::ate);
+                std::ifstream probe(rel, std::ios::binary);
                 if (!probe) std::abort();
-                const auto size = probe.tellg();
-                if (size <= 0 || size_t(size) > 512 * 1024 || bankBytes + size_t(size) > 48 * 1024 * 1024) std::abort();
-                bankBytes += size_t(size);
             }
         }
     }
+    const p2poseload::Limits limits{1024 * 1024, 1024 * 1024, 48 * 1024 * 1024};
     for (const auto& entry : banks) {
+        p2poseload::Shared resources;
+        p2posefamily::Bank& vis = poseBanks.emplace(entry.second.species, p2posefamily::Bank("CHAPPY")).first->second;
         for (const auto& clip : entry.second.clips) {
             std::vector<Shape*>& out = shapes[entry.second.species + "|" + clip.first];
+            p2poseload::Clip loaded;
+            std::string error;
+            if (p2poseload::loadClip("ch", entry.second.species, clip.first, clip.second.poses, limits, resources,
+                                     bankBytes, loaded, error)) {
+                out = loaded.shapes;
+                if (loaded.vectors) {
+                    char base[192];
+                    std::snprintf(base, sizeof(base), "courses/pikmin2room/ch_%s_%s_00.mod",
+                                  entry.second.species.c_str(), clip.first.c_str());
+                    vis.adopt(clip.first, std::move(loaded.baked), clip.second.frames, clip.second.poseFrames,
+                              base, resources.owner);
+                }
+                continue;
+            }
+            // Legacy per-pose Shapes (no shared resources) for a clip the
+            // compact loader rejects; bounded like the original loader.
+            std::printf("P2_CHAPPY_POSE_FALLBACK species=%s clip=%s reason=%s\n", entry.second.species.c_str(),
+                        clip.first.c_str(), error.c_str());
+            out.clear();
             for (int i = 0; i < clip.second.poses; ++i) {
                 char load[192];
                 std::snprintf(load, sizeof(load), "courses/pikmin2room/ch_%s_%s_%02d.mod",
                               entry.second.species.c_str(), clip.first.c_str(), i);
+                char rel[208];
+                std::snprintf(rel, sizeof(rel), "assets/dataDir/%s", load);
+                std::ifstream probe(rel, std::ios::binary | std::ios::ate);
+                const std::streamoff size = probe ? std::streamoff(probe.tellg()) : std::streamoff(-1);
+                if (size <= 0 || size_t(size) > 512 * 1024 || bankBytes + size_t(size) > 48 * 1024 * 1024) std::abort();
+                bankBytes += size_t(size);
                 Shape* shape = gameflow.loadShape(load, true);
                 if (!shape) std::abort();
                 out.push_back(shape);
             }
         }
     }
+    std::printf("P2_CHAPPY_BANK resident_bytes=%zu species=%zu\n", bankBytes, banks.size());
     bankLoaded = true;
     // Bind the actors.
     std::set<unsigned> found;
@@ -2014,6 +2064,21 @@ bool pc_p2_chappy_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
         index = shapesIt->second.size() - 1;
     }
     Shape* shape = shapesIt->second[index];
+    {
+        // #895: interpolated pose (private geometry) when this species' bank
+        // decoded; the nearest pose above stays the fallback.
+        auto vis = poseBanks.find(spec->enumName);
+        auto def = bank->second.clips.find(clip);
+        if (vis != poseBanks.end() && def != bank->second.clips.end()) {
+            float ph = phase;
+            if (!(ph >= 0.0f && ph <= 1.0f)) ph = 0.0f;
+            const int duration = def->second.frames > 1 ? def->second.frames : 2;
+            const float sourceFrame = dead ? float(duration - 1) : ph * float(duration - 1);
+            if (Shape* smooth = poseVis.draw(actor, vis->second, clip, sourceFrame,
+                                             actor->mGenerator ? pc_p2_campaign_token(actor) : 0u))
+                shape = smooth;
+        }
+    }
     // Per-actor first-draw markers (frog pattern): every bound actor logs
     // its own live draw and its own corpse draw with its campaign token, so
     // a bystander drawn first can never consume another actor's evidence.

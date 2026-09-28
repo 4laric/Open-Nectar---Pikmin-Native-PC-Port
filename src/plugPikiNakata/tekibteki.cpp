@@ -39,6 +39,7 @@
 #include "pc_p2_imomushi.h"
 #include "pc_p2_otakara.h"
 #include "pc_p2_batch3.h"
+#include "pc_p2_pose_family.h"
 #include "pc_p2_long_legs.h"
 #include "pc_p2_hardlanes.h"
 #include "pc_p2_chappy.h"
@@ -521,6 +522,9 @@ void BTeki::update()
 	// no-op for every actor not bound as the Queen creature host.
 	pc_p2_queen_teki_tick(this);
     pc_p2_snow_update(this,NSystem::getFrameTime());
+    pc_p2_batch2_update(this,NSystem::getFrameTime());
+    pc_p2_batch3_update(this,NSystem::getFrameTime());
+    pc_p2_pose_family_tick(this,NSystem::getFrameTime());
 	pc_p2_shijimi_update(this);
 	pc_p2_qurione_update(this);
 	pc_p2_elecbug_update(this);

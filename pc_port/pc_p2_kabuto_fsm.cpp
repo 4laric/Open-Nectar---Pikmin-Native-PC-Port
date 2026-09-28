@@ -26,6 +26,7 @@
 #include "Graphics.h"
 #include "Camera.h"
 #include "gameflow.h"
+#include "pc_p2_pose_family.h"
 #include "Piki.h"
 #include "PikiState.h"
 #include "PikiMgr.h"
@@ -84,6 +85,8 @@ std::uint64_t tokenOf(Creature* c){return static_cast<std::uint64_t>(reinterpret
 float wrapPi(float a){while(a>PI_F)a-=2.0f*PI_F;while(a<-PI_F)a+=2.0f*PI_F;return a;}
 float distXZ(const Vector3f& a,const Vector3f& b){const float dx=a.x-b.x,dz=a.z-b.z;return std::sqrt(dx*dx+dz*dz);}
 float clipSeconds(const std::string& name){auto it=timing.find(name);return it==timing.end()?1.0f:it->second.duration/30.0f;}
+p2posefamily::Bank poseBank("KABUTO"); // #895 interpolated draw
+p2posefamily::Actors poseVis;
 void loadAnimation(const std::vector<p2animation::Clip>& bank){
     size_t total=0;std::vector<unsigned char> reference;
     for(const auto& clip:bank){size_t clipBytes=0;
@@ -110,6 +113,7 @@ void loadAnimation(const std::vector<p2animation::Clip>& bank){
             }
             animated[clip.name].push_back(shape);
         }
+        poseBank.addClip(clip.name,clip.count,clip.duration,clip.frames,[&](int i){char p[160];std::snprintf(p,sizeof(p),"courses/pikmin2room/kabuto_Kabuto_%s_%02d.mod",clip.name.c_str(),i);return std::string(p);},shared);
     }
     std::printf("P2_KABUTO_BANK_READY mod_bytes=%zu gameplay=P1_unchanged\n",total);
 }
@@ -213,12 +217,12 @@ void die(BTeki* a,KabutoFsm& s,unsigned gen,float prior){
     transition(a,s,KB_DEAD,"dead",gen);
 }
 }
-void pc_p2_kabuto_fsm_reset(){
+void pc_p2_kabuto_fsm_reset(){poseBank.reset();poseVis.clear();
     if(fleet.active()>0){std::printf("P2_KABUTO_STONE_RESET active=%d\n",fleet.active());std::fflush(stdout);}
     fleet.reset();stoneDebt=0.0;stoneMap.proxy.clear();stoneDrawLogged=false;shooters.clear();
     for(int i=0;i<p2kabutostone::kFleetCapacity;++i){slotGen[i]=0;slotPosTicks[i]=0;}
     actors.clear();fsms.clear();drawn.clear();drawnCorpse.clear();animated.clear();timing.clear();ready=false;}
-void pc_p2_kabuto_fsm_forget(BTeki* a){auto* v=static_cast<PelletView*>(a);
+void pc_p2_kabuto_fsm_forget(BTeki* a){poseVis.forget(a);auto* v=static_cast<PelletView*>(a);
     // The shooter is gone; its stones keep flying and Press is no longer
     // attributed to it (no dangling actor pointer is kept).
     const std::uint64_t tok=tokenOf(a);const int orphaned=fleet.forgetOwner(tok);shooters.erase(tok);
@@ -396,7 +400,11 @@ bool pc_p2_kabuto_fsm_draw(BTeki* actor,Graphics& gfx,const Matrix4f& matrix,boo
     auto ft=fsms.find(static_cast<PelletView*>(actor));
     const char* name=corpse?"dead":(ft!=fsms.end()?ft->second.clip.c_str():p2kabutofsm::motionClip(actor->mTekiAnimator->getCurrentMotionIndex()));
     Shape* shape=animated.at("wait").front();
-    if(name){float phase=corpse?1.0f:(ft!=fsms.end()?ft->second.phase:0.0f);shape=animated.at(name).at(timing.at(name).index(phase,corpse));}
+    if(name){float phase=corpse?1.0f:(ft!=fsms.end()?ft->second.phase:0.0f);shape=animated.at(name).at(timing.at(name).index(phase,corpse));
+        // #895: lerp + crossfade into a private Shape; nearest pose stays the fallback.
+        const p2animation::Clip& clipTiming=timing.at(name);
+        const float sourceFrame=corpse?float(clipTiming.duration-1):std::max(0.f,std::min(1.f,phase))*float(clipTiming.duration-1);
+        if(Shape* smooth=poseVis.draw(actor,poseBank,name,sourceFrame,actor->mGenerator?pc_p2_campaign_token(actor):0u))shape=smooth;}
     shape->updateAnim(gfx,matrix,nullptr,actor);
     pc_gfx_specular_family_scope(1);
     shape->drawshape(gfx,*gfx.mCamera,nullptr);

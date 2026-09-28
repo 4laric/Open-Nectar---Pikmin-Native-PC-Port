@@ -22,6 +22,7 @@
 #include "Graphics.h"
 #include "Camera.h"
 #include "gameflow.h"
+#include "pc_p2_pose_family.h"
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "Navi.h"
@@ -55,6 +56,8 @@ int vmotion(int native){switch(native){case TekiMotion::Move1:return 1;case Teki
 std::map<PelletView*,int> actors;
 const char* ids[]={"Tank","Wtank"};
 std::map<std::string,std::vector<Shape*>> animated[2];
+p2posefamily::Bank poseBank[2]{p2posefamily::Bank("TANK"),p2posefamily::Bank("TANK")}; // #895 interpolated draw
+p2posefamily::Actors poseVis;
 std::map<std::string,p2animation::Clip> timing[2];
 std::set<PelletView*> drawn,drawnCorpse;
 enum TState { TNK_DEAD=0,TNK_WAIT=1,TNK_MOVE=2,TNK_MOVETURN=3,TNK_CHASETURN=4,TNK_ATTACK=5,TNK_FLICK=6 };
@@ -112,6 +115,7 @@ void loadAnimation(std::vector<p2animation::Clip> (&banks)[2]){
                 }
                 animated[kind][clip.name].push_back(shape);
             }
+            poseBank[kind].addClip(clip.name,clip.count,clip.duration,clip.frames,[&](int i){char p[160];std::snprintf(p,sizeof(p),"courses/pikmin2room/tank_%s_%s_%02d.mod",ids[kind],clip.name.c_str(),i);return std::string(p);},shared);
         }
     }
     std::printf("P2_TANK_BANK_READY mod_bytes=%zu gameplay=P1_unchanged\n",total);
@@ -245,8 +249,8 @@ void die(BTeki* actor,TankFsm& s,unsigned gen,float priorHealth){
     transition(actor,s,TNK_DEAD,"dead",gen);
 }
 }
-void pc_p2_tank_reset(){vactors.clear();vlogged.clear();for(auto& c:vclips)c=VClip{};water=nullptr;waterLogged=false;vbytesTotal=0;actors.clear();fsms.clear();drawn.clear();drawnCorpse.clear();for(auto& b:animated)b.clear();for(auto& b:timing)b.clear();ready=false;}
-void pc_p2_tank_forget(BTeki* actor){vactors.erase(actor);vlogged.erase(actor);auto* v=static_cast<PelletView*>(actor);pc_randomizer_p2_forget_source(v);actors.erase(v);fsms.erase(v);drawn.erase(v);drawnCorpse.erase(v);}
+void pc_p2_tank_reset(){for(auto& b:poseBank)b.reset();poseVis.clear();vactors.clear();vlogged.clear();for(auto& c:vclips)c=VClip{};water=nullptr;waterLogged=false;vbytesTotal=0;actors.clear();fsms.clear();drawn.clear();drawnCorpse.clear();for(auto& b:animated)b.clear();for(auto& b:timing)b.clear();ready=false;}
+void pc_p2_tank_forget(BTeki* actor){poseVis.forget(actor);vactors.erase(actor);vlogged.erase(actor);auto* v=static_cast<PelletView*>(actor);pc_randomizer_p2_forget_source(v);actors.erase(v);fsms.erase(v);drawn.erase(v);drawnCorpse.erase(v);}
 float pc_p2_tank_param_f(const BTeki* actor,int idx,float fallback){
     auto i=actors.find(static_cast<PelletView*>(const_cast<BTeki*>(actor)));if(i==actors.end())return fallback;
     const p2tank::Params& p=p2tank::params(i->second);
@@ -482,6 +486,10 @@ bool pc_p2_tank_draw(BTeki* actor,Graphics& gfx,const Matrix4f& view,bool corpse
    if(name){
        float phase=corpse?1.0f:(ft!=fsms.end()?ft->second.phase:0.0f);
        shape=animated[kind].at(name).at(timing[kind].at(name).index(phase,corpse));
+       // #895: lerp + crossfade into a private Shape; nearest pose stays the fallback.
+       const p2animation::Clip& clipTiming=timing[kind].at(name);
+       const float sourceFrame=corpse?float(clipTiming.duration-1):std::max(0.f,std::min(1.f,phase))*float(clipTiming.duration-1);
+       if(Shape* smooth=poseVis.draw(actor,poseBank[kind],name,sourceFrame,actor->mGenerator?pc_p2_campaign_token(actor):0u))shape=smooth;
    }
    shape->updateAnim(gfx,view,nullptr,actor);
    pc_gfx_specular_family_scope(1);
