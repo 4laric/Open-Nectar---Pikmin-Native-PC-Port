@@ -129,6 +129,9 @@ int main(int argc, char* argv[])
     if (argc == 2 && std::strcmp(argv[1], "--audio-self-test") == 0)
         return pc_jaudio_integration_test();
 #endif
+    // Netplay M3/M5a (issues #880 #887): stores argv for --netplay-host /
+    // --netplay-join / --netplay-ice-host / --netplay-ice-join /
+    // --randomizer-seed.
     // Netplay M4 fix round 1 (M4): the session must see argv before
     // pc_bbft_init runs pc_randomizer_init->update, so the boot-time poll
     // already takes the stream-only path on the client (never reading
