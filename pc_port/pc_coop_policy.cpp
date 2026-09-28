@@ -1,6 +1,7 @@
 #include "pc_coop_policy.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 // Netplay M4 D-policy (issue #885). See pc_coop_policy.h for the rules.
@@ -87,6 +88,59 @@ int pc_coop_anchor_advance(PcCoopCursors& cursors, PcCoopAnchorKind kind, int su
 	return cursors.next[kind];
 }
 
+PcCoopAnchorAttempt pc_coop_anchor_try(PcCoopCursors& cursors, PcCoopAnchorKind kind,
+                                       const bool live[PC_COOP_CAPTAINS], PcCoopPlaceFn place, void* ctx)
+{
+	PcCoopAnchorAttempt a;
+	std::memset(&a, 0, sizeof(a));
+	if (kind < 0 || kind >= PC_COOP_ANCHOR_COUNT || !place) return a;
+	a.cursor = clamp_captain(cursors.next[kind]);
+	a.next = a.cursor;
+	if (!live[a.cursor - 1]) {
+		a.skipCaptain[a.skipCount] = a.cursor;
+		a.skipReason[a.skipCount++] = PC_COOP_SKIP_NOT_LIVE;
+	}
+	int order[PC_COOP_CAPTAINS];
+	const int n = pc_coop_anchor_order(cursors, kind, live, order);
+	for (int i = 0; i < n; ++i) {
+		const PcCoopPlaceResult result = place(order[i], ctx);
+		if (result == PC_COOP_PLACE_STOP) {
+			a.captain = -1;
+			return a;
+		}
+		if (result == PC_COOP_PLACE_CONSUMED) {
+			a.captain = order[i];
+			a.next = pc_coop_anchor_advance(cursors, kind, order[i]);
+			return a;
+		}
+		if (a.skipCount < PC_COOP_CAPTAINS) {
+			a.skipCaptain[a.skipCount] = order[i];
+			a.skipReason[a.skipCount++] = PC_COOP_SKIP_PLACEMENT;
+		}
+	}
+	return a;
+}
+
+const char* pc_coop_skip_reason_name(PcCoopSkipReason reason)
+{
+	switch (reason) {
+	case PC_COOP_SKIP_NOT_LIVE: return "not-live";
+	case PC_COOP_SKIP_PLACEMENT: return "placement";
+	default: return "?";
+	}
+}
+
+bool pc_coop_stage_changed(bool started, const PcCoopStageKey& prev, const PcCoopStageKey& cur, const char** reason)
+{
+	const char* why = nullptr;
+	if (!started) why = "start";
+	else if (cur.stage != prev.stage) why = "stage";
+	else if (cur.day != prev.day) why = "day";
+	else if (cur.timeOfDay < prev.timeOfDay) why = "clock";
+	if (reason) *reason = why;
+	return why != nullptr;
+}
+
 // Locale-independent unsigned decimal: digits only.
 static bool parse_uint(const char*& p, unsigned& out)
 {
@@ -159,7 +213,8 @@ int pc_coop_events_parse(const char* text, PcCoopEvent* out, int max, int* badLi
 		if (!at_line_end(q)) {
 			PcCoopEvent ev;
 			std::memset(&ev, 0, sizeof(ev));
-			bool ok = parse_uint(q, ev.tick);
+			// Ticks are 1-based: tick 0 would never fire, so it is rejected.
+			bool ok = parse_uint(q, ev.tick) && ev.tick > 0;
 			skip_blanks(q);
 			if (ok && parse_word(q, "HP")) {
 				ev.kind = PC_COOP_EVENT_HP;
@@ -190,4 +245,43 @@ int pc_coop_events_parse(const char* text, PcCoopEvent* out, int max, int* badLi
 		p = next;
 	}
 	return count;
+}
+
+int pc_coop_events_load(const char* path, PcCoopEvent* out, int max, const char** why, int* badLine)
+{
+	if (why) *why = nullptr;
+	if (badLine) *badLine = 0;
+	FILE* file = path ? std::fopen(path, "rb") : nullptr;
+	if (!file) {
+		if (why) *why = "unreadable";
+		return -1;
+	}
+	// One byte past the limit tells "exactly at the limit" from "too large".
+	static char text[PC_COOP_EVENTS_FILE_MAX + 2];
+	const size_t got = std::fread(text, 1, PC_COOP_EVENTS_FILE_MAX + 1, file);
+	std::fclose(file);
+	if (got > PC_COOP_EVENTS_FILE_MAX) {
+		if (why) *why = "too-large";
+		return -1;
+	}
+	text[got] = '\0';
+	if (std::memchr(text, '\0', got)) {
+		if (why) *why = "bad-line";
+		return -1;
+	}
+	const int count = pc_coop_events_parse(text, out, max, badLine);
+	if (count < 0 && why) *why = "bad-line";
+	return count;
+}
+
+const char* pc_coop_events_knob_path()
+{
+#if defined(PIKI_NETPLAY_BUILD) && PIKI_NETPLAY_BUILD
+	const char* background = std::getenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND");
+	if (!background || std::strcmp(background, "1") != 0) return nullptr;
+	const char* path = std::getenv("PIKMIN_NETPLAY_TEST_COOP_EVENTS");
+	return path && *path ? path : nullptr;
+#else
+	return nullptr;
+#endif
 }
