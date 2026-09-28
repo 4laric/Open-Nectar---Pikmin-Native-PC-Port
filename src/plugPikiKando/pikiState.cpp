@@ -2144,6 +2144,13 @@ void PikiFlyingState::procCollideMsg(Piki* piki, MsgCollide* msg)
 	if (colliderType != OBJTYPE_Plant) {
 		SeSystem::playPlayerSe(SE_THROWHIT);
 	}
+	if (colliderType == OBJTYPE_Teki && piki->mVelocity.y < 0.0f) {
+		// #245: source PikiFlyingState::collisionCallback stimulates
+		// InteractPress on a descending contact (pikiState.cpp:2319-2327); a
+		// bound Antenna Beetle routes it to its pressCallBack (Struggle when
+		// mCanStruggle). The ordinary contact below still runs.
+		pc_p2_fuefuki_teki_pressed(static_cast<BTeki*>(static_cast<Teki*>(collider)), piki);
+	}
 	if (colliderType == OBJTYPE_Teki || collider->isBoss()) {
 		PcP2PurpleDirectHit direct;
 		if ((!pc_p2_purple_flight_active(piki) || specialFlightContact) && piki->mVelocity.y < 0.0f) {
@@ -3325,6 +3332,8 @@ void PikiDenkiDyingState::cleanup(Piki* piki)
  */
 PikiPanicState::PikiPanicState()
     : PikiState(PIKISTATE_Panic, "PANIC")
+    , mAstonish(false)
+    , mAstonishSubState(0)
 {
 }
 
@@ -3337,6 +3346,21 @@ PikiPanicState::PikiPanicState()
  */
 void PikiPanicState::init(Piki* piki)
 {
+	mAstonish = pc_p2_fuefuki_panic_astonish(piki);
+	if (mAstonish) {
+		// Source PikiPanicState::init PIKIPANIC_Panic: no gas flag, no death;
+		// mDramaTimer = 0.3 * randFloat() before the KIZUKU (notice) motion.
+		piki->changeMode(PikiMode::FreeMode, piki->mNavi);
+		piki->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
+		mSurvivalTimer = C_PIKI_PARM(piki, mPanicTime);
+		mSurvivalTimer *= (0.1f * gsys->getRand(1.0f)) + 1.0f;
+		mChangeDirectionTimer = 0.3f * gsys->getRand(1.0f);
+		mMoveDirection        = piki->mFaceDirection;
+		mSpeedRatio           = 1.0f;
+		mAstonishSubState     = 0;
+		piki->mIsPanicked     = true;
+		return;
+	}
 	piki->changeMode(PikiMode::FreeMode, piki->mNavi);
 	piki->startMotion(PaniMotionInfo(PIKIANIM_Moeru), PaniMotionInfo(PIKIANIM_Moeru));
 	piki->enableMotionBlend();
@@ -3354,6 +3378,46 @@ void PikiPanicState::init(Piki* piki)
  */
 void PikiPanicState::exec(Piki* piki)
 {
+	if (mAstonish) {
+		// Source PikiPanicState::exec PIKIPANIC_Panic: drama wait, KIZUKU, then
+		// panicRun; the expired timer transits to the walking state (P1 Normal).
+		if (mAstonishSubState == 0) {
+			piki->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
+			mChangeDirectionTimer -= gsys->getFrameTime();
+			if (mChangeDirectionTimer <= 0.0f) {
+				mAstonishSubState     = 1;
+				mChangeDirectionTimer = 1.0f; // KIZUKU hold
+				piki->startMotion(PaniMotionInfo(PIKIANIM_Kizuku), PaniMotionInfo(PIKIANIM_Kizuku));
+			}
+			return;
+		}
+		if (mAstonishSubState == 1) {
+			piki->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
+			mChangeDirectionTimer -= gsys->getFrameTime();
+			if (mChangeDirectionTimer <= 0.0f) {
+				mAstonishSubState     = 2;
+				mChangeDirectionTimer = 0.0f;
+				piki->startMotion(PaniMotionInfo(PIKIANIM_Run), PaniMotionInfo(PIKIANIM_Run));
+			}
+			return;
+		}
+		piki->setSpeed(mSpeedRatio, mMoveDirection);
+		mSurvivalTimer -= gsys->getFrameTime();
+		mChangeDirectionTimer -= gsys->getFrameTime();
+		if (mSurvivalTimer < 0.0f) {
+			pc_p2_fuefuki_panic_end(piki, true);
+			mAstonish = false;
+			transit(piki, PIKISTATE_Normal);
+			return;
+		}
+		if (mChangeDirectionTimer < 0.0f) {
+			mChangeDirectionTimer = (0.2f * gsys->getRand(1.0f)) + 0.2f;
+			mMoveDirection += (45.0f * gsys->getRand(1.0f)) / 180.0f * PI;
+			mMoveDirection = roundAng(mMoveDirection);
+			mSpeedRatio *= 0.99f;
+		}
+		return;
+	}
 	piki->setSpeed(mSpeedRatio, mMoveDirection);
 	mSurvivalTimer -= gsys->getFrameTime();
 	mChangeDirectionTimer -= gsys->getFrameTime();
@@ -3375,6 +3439,10 @@ void PikiPanicState::exec(Piki* piki)
  */
 void PikiPanicState::cleanup(Piki* piki)
 {
+	if (mAstonish) {
+		mAstonish = false;
+		pc_p2_fuefuki_panic_end(piki, false);
+	}
 	piki->setGasInvincible(0);
 	piki->mIsPanicked = false;
 }

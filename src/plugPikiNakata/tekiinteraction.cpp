@@ -139,6 +139,7 @@ bool InteractPress::actTeki(Teki* teki) immut
 	if (pc_p2_elecbug_pressed(teki, mOwner)) return true;
 	if (pc_p2_sokkuri_pressed(teki, mOwner)) return true;
 	if (pc_p2_hardlanes_fuefuki_pressed(teki, mOwner)) return true;
+	if (pc_p2_fuefuki_teki_pressed(teki, mOwner)) return true; // #245 OWN pressCallBack
 	if (pc_p2_kogane_pressed(teki, mOwner)) {
 		return true; // registered beetles flip instead of the host pressed state
 	}
