@@ -3001,8 +3001,8 @@ static void randomizerApplyBenefits(Navi* navi, MapMgr* map)
 namespace {
 struct CoopPolicyState {
     bool started = false;
-    int stage = -1, day = -1;
-    unsigned tick = 0; // co-op randomizer updateAI calls since the stage started
+    PcCoopStageKey key = {-1, -1, 0.0f}; // stage, day, time of day at the last co-op tick
+    unsigned tick = 0; // co-op randomizer updateAI calls since the stage started (1-based)
     PcCoopCursors cursors = {{1, 1, 1, 1}};
     float prevHp[PC_COOP_CAPTAINS] = {};
     bool prevValid[PC_COOP_CAPTAINS] = {};
@@ -3014,7 +3014,9 @@ struct CoopPolicyState {
     int deliveries = 0, lastDeliveryColor = -1;
 };
 CoopPolicyState sCoopPolicy;
-enum CoopPlace { COOP_PLACE_FAILED, COOP_PLACE_CONSUMED, COOP_PLACE_STOP };
+// Log-only detail of the last failed placement (why the captain was skipped);
+// never read by the sim.
+char sCoopPlaceWhy[48] = "";
 }
 
 // Live captain: the pcIsLastNaviStanding predicate (navi.cpp). A downed
@@ -3058,8 +3060,11 @@ static bool coopDownCaptain(Navi* navi)
 }
 
 // PIKMIN_NETPLAY_TEST_COOP_EVENTS=<file>: scripted HP/DOWN events at fixed
-// co-op ticks, inert when unset. Changes sim state, so a pair must pass the
-// same file to both peers (not yet in the handshake config hash).
+// co-op ticks, inert when unset. It is honoured only by the netplay build in
+// hidden test runs (pc_coop_events_knob_path). Changes sim state, so a pair
+// must pass the same file to both peers (not yet in the handshake config
+// hash). The file is parsed once per process; the tick restarts on every
+// stage entry, so the schedule re-arms each stage/day (logged as "armed").
 static void coopRunTestEvents(Navi* p1, Navi* p2)
 {
     static bool loaded = false;
@@ -3067,22 +3072,19 @@ static void coopRunTestEvents(Navi* p1, Navi* p2)
     static int count = 0;
     if (!loaded) {
         loaded = true;
-        const char* path = std::getenv("PIKMIN_NETPLAY_TEST_COOP_EVENTS");
-        if (path && *path) {
-            std::string text;
-            if (FILE* file = std::fopen(path, "rb")) {
-                char chunk[512];
-                size_t got;
-                while ((got = std::fread(chunk, 1, sizeof(chunk), file)) > 0 && text.size() < 16384) text.append(chunk, got);
-                std::fclose(file);
-                int bad = 0;
-                count = pc_coop_events_parse(text.c_str(), events, PC_COOP_EVENTS_MAX, &bad);
-                if (count < 0) std::printf("[coop-policy] TEST events rejected file=%s line=%d\n", path, bad);
-                else std::printf("[coop-policy] TEST events loaded count=%d\n", count);
-            } else std::printf("[coop-policy] TEST events rejected file=%s unreadable\n", path);
+        if (const char* path = pc_coop_events_knob_path()) {
+            const char* why = nullptr;
+            int bad = 0;
+            count = pc_coop_events_load(path, events, PC_COOP_EVENTS_MAX, &why, &bad);
+            if (count < 0) std::printf("[coop-policy] TEST events rejected file=%s reason=%s line=%d\n", path, why ? why : "?", bad);
+            else std::printf("[coop-policy] TEST events loaded count=%d\n", count);
             if (count < 0) count = 0;
             std::fflush(stdout);
         }
+    }
+    if (count > 0 && sCoopPolicy.tick == 1) {
+        std::printf("[coop-policy] TEST events armed stage=%d day=%d count=%d\n", sCoopPolicy.key.stage, sCoopPolicy.key.day, count);
+        std::fflush(stdout);
     }
     Navi* const navis[PC_COOP_CAPTAINS] = {p1, p2};
     for (int i = 0; i < count; ++i) {
@@ -3104,32 +3106,55 @@ static void coopRunTestEvents(Navi* p1, Navi* p2)
 
 // Rule 2: try the cursor's captain, then the other live captain in the same
 // tick; after a successful consume the cursor moves past the captain used.
+// The loop itself is pc_coop_anchor_try (unit-tested); this adapter only
+// maps captain ids to Navis and logs. When a grant lands on a captain other
+// than the cursor's, the captains passed over are logged first as
+// ANCHOR_SKIP (not-live, or placement with the failure detail), so every
+// fallback is provable from the log. An attempt where nobody could be placed
+// logs nothing (it retries next tick, which would flood the log).
 template <typename Place>
 static bool coopAnchored(PcCoopAnchorKind kind, Navi* const navis[PC_COOP_CAPTAINS], const bool live[PC_COOP_CAPTAINS], Place place)
 {
-    int order[PC_COOP_CAPTAINS];
-    const int n = pc_coop_anchor_order(sCoopPolicy.cursors, kind, live, order);
-    for (int i = 0; i < n; ++i) {
-        const CoopPlace result = place(navis[order[i] - 1]);
-        if (result == COOP_PLACE_STOP) return false;
-        if (result != COOP_PLACE_CONSUMED) continue;
-        const int next = pc_coop_anchor_advance(sCoopPolicy.cursors, kind, order[i]);
-        if (sCoopPolicy.anchorCount < 32) {
-            sCoopPolicy.anchors[sCoopPolicy.anchorCount][0] = kind;
-            sCoopPolicy.anchors[sCoopPolicy.anchorCount][1] = order[i];
-            ++sCoopPolicy.anchorCount;
-        }
-        std::printf("[coop-policy] ANCHOR kind=%s captain=%d next=%d\n", pc_coop_anchor_name(kind), order[i], next);
-        std::fflush(stdout);
-        return true;
+    struct Ctx {
+        Navi* const* navis;
+        Place* place;
+        char why[PC_COOP_CAPTAINS][sizeof(sCoopPlaceWhy)];
+    };
+    Ctx ctx = {navis, &place, {}};
+    const PcCoopAnchorAttempt attempt = pc_coop_anchor_try(sCoopPolicy.cursors, kind, live,
+        [](int captain, void* raw) -> PcCoopPlaceResult {
+            Ctx& c = *static_cast<Ctx*>(raw);
+            sCoopPlaceWhy[0] = '\0';
+            const PcCoopPlaceResult result = (*c.place)(c.navis[captain - 1]);
+            if (result == PC_COOP_PLACE_FAILED) std::snprintf(c.why[captain - 1], sizeof(c.why[0]), "%s", sCoopPlaceWhy);
+            return result;
+        },
+        &ctx);
+    if (attempt.captain <= 0) return false;
+    for (int i = 0; i < attempt.skipCount; ++i) {
+        const int skipped = attempt.skipCaptain[i];
+        Navi* navi = navis[skipped - 1];
+        if (attempt.skipReason[i] == PC_COOP_SKIP_PLACEMENT)
+            std::printf("[coop-policy] ANCHOR_SKIP kind=%s captain=%d reason=placement why=%s x=%.1f z=%.1f\n", pc_coop_anchor_name(kind),
+                skipped, ctx.why[skipped - 1][0] ? ctx.why[skipped - 1] : "?", navi ? navi->mSRT.t.x : 0.0f, navi ? navi->mSRT.t.z : 0.0f);
+        else
+            std::printf("[coop-policy] ANCHOR_SKIP kind=%s captain=%d reason=not-live\n", pc_coop_anchor_name(kind), skipped);
     }
-    return false;
+    if (sCoopPolicy.anchorCount < 32) {
+        sCoopPolicy.anchors[sCoopPolicy.anchorCount][0] = kind;
+        sCoopPolicy.anchors[sCoopPolicy.anchorCount][1] = attempt.captain;
+        ++sCoopPolicy.anchorCount;
+    }
+    std::printf("[coop-policy] ANCHOR kind=%s captain=%d next=%d live=%d%d\n", pc_coop_anchor_name(kind), attempt.captain, attempt.next,
+        int(live[0]), int(live[1]));
+    std::fflush(stdout);
+    return true;
 }
 
 // The single-captain placements, anchored on the given captain. A failed
 // placement (ground/ring/spot) lets the other captain try; a failed spawn
 // or consume stops the attempt for this tick, as it does today.
-static CoopPlace coopBombTrapAt(Navi* navi, MapMgr* map, float& cooldown)
+static PcCoopPlaceResult coopBombTrapAt(Navi* navi, MapMgr* map, float& cooldown)
 {
     Vector3f positions[5];
     int found = 0;
@@ -3137,13 +3162,19 @@ static CoopPlace coopBombTrapAt(Navi* navi, MapMgr* map, float& cooldown)
         const float angle = navi->mFaceDirection + i * (2.0f * PI / 5.0f);
         Vector3f pos = navi->mSRT.t + Vector3f(65.0f * sinf(angle), 0, 65.0f * cosf(angle));
         CollTriInfo* ground = map->getCurrTri(pos.x, pos.z, true);
-        if (!ground || MapCode::getAttribute(ground) == ATTR_Water) break;
+        if (!ground || MapCode::getAttribute(ground) == ATTR_Water) {
+            std::snprintf(sCoopPlaceWhy, sizeof(sCoopPlaceWhy), "ring-%s found=%d", ground ? "water" : "no-ground", found);
+            break;
+        }
         pos.y = map->getMinY(pos.x, pos.z, true);
-        if (std::fabs(pos.y - navi->mSRT.t.y) > 25.0f) break;
+        if (std::fabs(pos.y - navi->mSRT.t.y) > 25.0f) {
+            std::snprintf(sCoopPlaceWhy, sizeof(sCoopPlaceWhy), "ring-height found=%d dy=%.1f", found, pos.y - navi->mSRT.t.y);
+            break;
+        }
         pos.y += 3.0f;
         positions[found++] = pos;
     }
-    if (found != 5) return COOP_PLACE_FAILED;
+    if (found != 5) return PC_COOP_PLACE_FAILED;
     BombItem* spawned[5] = {};
     int count = 0;
     for (; count < 5; ++count) {
@@ -3161,15 +3192,18 @@ static CoopPlace coopBombTrapAt(Navi* navi, MapMgr* map, float& cooldown)
         cooldown = std::max(5.0f, longestFuse + 2.0f);
         std::printf("[Pikmin Randomizer] BOMB_AMBUSH count=5 state=lit fuse=%.2f cooldown=%.2f\n", longestFuse, cooldown);
         std::fflush(stdout);
-        return COOP_PLACE_CONSUMED;
+        return PC_COOP_PLACE_CONSUMED;
     }
     for (int i = 0; i < count; ++i) spawned[i]->kill(false);
-    return COOP_PLACE_STOP;
+    return PC_COOP_PLACE_STOP;
 }
 
-static CoopPlace coopProggAt(Navi* navi, MapMgr* map, float& cooldown)
+static PcCoopPlaceResult coopProggAt(Navi* navi, MapMgr* map, float& cooldown)
 {
-    if (!itemMgr->getNearestContainer(navi->mSRT.t, 12800.0f)) return COOP_PLACE_FAILED;
+    if (!itemMgr->getNearestContainer(navi->mSRT.t, 12800.0f)) {
+        std::snprintf(sCoopPlaceWhy, sizeof(sCoopPlaceWhy), "no-onion-near");
+        return PC_COOP_PLACE_FAILED;
+    }
     for (int sample = 0; sample < 12; ++sample) {
         const float angle = navi->mFaceDirection + PI + sample * (2.0f * PI / 12.0f);
         Vector3f pos = navi->mSRT.t + Vector3f(250.0f * sinf(angle), 0, 250.0f * cosf(angle));
@@ -3178,7 +3212,7 @@ static CoopPlace coopProggAt(Navi* navi, MapMgr* map, float& cooldown)
         pos.y = map->getMinY(pos.x, pos.z, true);
         if (std::fabs(pos.y - navi->mSRT.t.y) > 25.0f) continue;
         Teki* progg = tekiMgr->newTeki(TEKI_Dororo);
-        if (!progg) return COOP_PLACE_STOP;
+        if (!progg) return PC_COOP_PLACE_STOP;
         progg->mGenerator = nullptr;
         progg->mPersonality->reset();
         progg->mPersonality->mPosition = pos;
@@ -3190,15 +3224,16 @@ static CoopPlace coopProggAt(Navi* navi, MapMgr* map, float& cooldown)
             cooldown = 30.0f;
             std::printf("[Pikmin Randomizer] PROGG_AMBUSH count=1 x=%.1f z=%.1f\n", pos.x, pos.z);
             std::fflush(stdout);
-            return COOP_PLACE_CONSUMED;
+            return PC_COOP_PLACE_CONSUMED;
         }
         progg->kill(false);
-        return COOP_PLACE_STOP;
+        return PC_COOP_PLACE_STOP;
     }
-    return COOP_PLACE_FAILED;
+    std::snprintf(sCoopPlaceWhy, sizeof(sCoopPlaceWhy), "no-spot");
+    return PC_COOP_PLACE_FAILED;
 }
 
-static CoopPlace coopFlowersAt(Navi* navi, MapMgr* map, float& cooldown)
+static PcCoopPlaceResult coopFlowersAt(Navi* navi, MapMgr* map, float& cooldown)
 {
     Vector3f positions[5];
     int found = 0;
@@ -3206,12 +3241,18 @@ static CoopPlace coopFlowersAt(Navi* navi, MapMgr* map, float& cooldown)
         const float angle = navi->mFaceDirection + i * (2.0f * PI / 5.0f);
         Vector3f pos = navi->mSRT.t + Vector3f(50.0f * sinf(angle), 0, 50.0f * cosf(angle));
         CollTriInfo* ground = map->getCurrTri(pos.x, pos.z, true);
-        if (!ground || MapCode::getAttribute(ground) == ATTR_Water) break;
+        if (!ground || MapCode::getAttribute(ground) == ATTR_Water) {
+            std::snprintf(sCoopPlaceWhy, sizeof(sCoopPlaceWhy), "ring-%s found=%d", ground ? "water" : "no-ground", found);
+            break;
+        }
         pos.y = map->getMinY(pos.x, pos.z, true);
-        if (std::fabs(pos.y - navi->mSRT.t.y) > 25.0f) break;
+        if (std::fabs(pos.y - navi->mSRT.t.y) > 25.0f) {
+            std::snprintf(sCoopPlaceWhy, sizeof(sCoopPlaceWhy), "ring-height found=%d dy=%.1f", found, pos.y - navi->mSRT.t.y);
+            break;
+        }
         positions[found++] = pos;
     }
-    if (found != 5) return COOP_PLACE_FAILED;
+    if (found != 5) return PC_COOP_PLACE_FAILED;
     MizuItem* spawned[5] = {};
     int count = 0;
     for (; count < 5; ++count) {
@@ -3224,10 +3265,32 @@ static CoopPlace coopFlowersAt(Navi* navi, MapMgr* map, float& cooldown)
         cooldown = 5.0f;
         std::puts("[Pikmin Randomizer] FLOWER_SHOWER nectar=5");
         std::fflush(stdout);
-        return COOP_PLACE_CONSUMED;
+        return PC_COOP_PLACE_CONSUMED;
     }
     for (int i = 0; i < count; ++i) spawned[i]->kill(false);
-    return COOP_PLACE_STOP;
+    return PC_COOP_PLACE_STOP;
+}
+
+// Rule 1: heal target. The last step of randomizerApplyBenefitsCoop, split
+// out so the coop-policy fixture can drive the heal decision on its own
+// without re-running the anchored grants (and their cooldowns) in the same
+// tick. It keeps no state besides the fixture read-back.
+static void coopApplyHeal(Navi* p1, Navi* p2)
+{
+    Navi* const navis[PC_COOP_CAPTAINS] = {p1, p2};
+    if (!pc_randomizer_ready()) return;
+    PcCoopCaptain caps[PC_COOP_CAPTAINS];
+    coopFillCaptains(navis, caps);
+    const PcCoopHealPick heal = pc_coop_pick_heal(caps, sCoopPolicy.prevHp, sCoopPolicy.prevValid);
+    if (heal.captain && pc_randomizer_consume_benefit(PC_BENEFIT_HEAL)) {
+        Navi* target = navis[heal.captain - 1];
+        const float before = target->mHealth;
+        target->mHealth = C_NAVI_PARM(target, mHealth);
+        sCoopPolicy.lastHeal = heal;
+        std::printf("[coop-policy] HEAL captain=%d reason=%s hp=%.1f->%.1f\n", heal.captain,
+            pc_coop_heal_reason_name(heal.reason), before, target->mHealth);
+        std::fflush(stdout);
+    }
 }
 
 // Co-op counterpart of randomizerApplyBenefits: rule 3 (any live captain),
@@ -3256,8 +3319,11 @@ static void randomizerApplyBenefitsCoop(Navi* p1, Navi* p2, MapMgr* map)
     }
     if (bossMgr && pc_randomizer_benefit_pending(PC_BENEFIT_PRERELEASE) && bossMgr->prereleaseSeconds() <= 0.0f)
         coopAnchored(PC_COOP_ANCHOR_PRERELEASE, navis, live, [](Navi* navi) {
-            if (!navi->getCurrState() || navi->getCurrState()->getID() != NAVISTATE_Walk) return COOP_PLACE_FAILED;
-            return bossMgr->beginPrereleaseTrap() ? COOP_PLACE_CONSUMED : COOP_PLACE_STOP;
+            if (!navi->getCurrState() || navi->getCurrState()->getID() != NAVISTATE_Walk) {
+                std::snprintf(sCoopPlaceWhy, sizeof(sCoopPlaceWhy), "not-walking");
+                return PC_COOP_PLACE_FAILED;
+            }
+            return bossMgr->beginPrereleaseTrap() ? PC_COOP_PLACE_CONSUMED : PC_COOP_PLACE_STOP;
         });
     // BOMBS and DELIVERY are Onion-anchored (no captain), so only rule 3 applies.
     bool yellowOnField = false;
@@ -3324,18 +3390,7 @@ static void randomizerApplyBenefitsCoop(Navi* p1, Navi* p2, MapMgr* map)
     nectarCooldown = std::max(0.0f, nectarCooldown - gsys->getFrameTime());
     if (map && nectarCooldown == 0.0f && pc_randomizer_benefit_pending(PC_BENEFIT_FLOWERS))
         coopAnchored(PC_COOP_ANCHOR_FLOWERS, navis, live, [&](Navi* navi) { return coopFlowersAt(navi, map, nectarCooldown); });
-    PcCoopCaptain caps[PC_COOP_CAPTAINS];
-    coopFillCaptains(navis, caps);
-    const PcCoopHealPick heal = pc_coop_pick_heal(caps, sCoopPolicy.prevHp, sCoopPolicy.prevValid);
-    if (heal.captain && pc_randomizer_consume_benefit(PC_BENEFIT_HEAL)) {
-        Navi* target = navis[heal.captain - 1];
-        const float before = target->mHealth;
-        target->mHealth = C_NAVI_PARM(target, mHealth);
-        sCoopPolicy.lastHeal = heal;
-        std::printf("[coop-policy] HEAL captain=%d reason=%s hp=%.1f->%.1f\n", heal.captain,
-            pc_coop_heal_reason_name(heal.reason), before, target->mHealth);
-        std::fflush(stdout);
-    }
+    coopApplyHeal(p1, p2);
 }
 
 // Rule 4: a received DeathLink takes one unit from the combined field pool,
@@ -3374,18 +3429,28 @@ static void randomizerApplyDeathLinkCoop(Navi* p1, Navi* p2)
 }
 
 // The co-op randomizer block of GameCoreSection::updateAI.
+// DRIFT GUARD: the BOMBS, DELIVERY, DeathLink-loop, population, obstacle and
+// colour-observation code here and in randomizerApplyBenefitsCoop /
+// randomizerApplyDeathLinkCoop are copies of the single-captain statements
+// (randomizerApplyBenefits and the else branch in updateAI), kept separate so
+// single-captain play stays byte-identical. Mirror every change to one side
+// on the other; netplay and local co-op always run this side.
 static void randomizerUpdateCoop(Navi* p1, Navi* p2, MapMgr* map)
 {
-    const int stage = flowCont.mCurrentStage ? int(flowCont.mCurrentStage->mStageID) : -1;
-    const int day = int(gameflow.mWorldClock.mCurrentDay);
-    if (!sCoopPolicy.started || stage != sCoopPolicy.stage || day != sCoopPolicy.day) {
-        // A new stage (or day): every cursor back on P1, no HP sample yet.
+    const PcCoopStageKey key = {flowCont.mCurrentStage ? int(flowCont.mCurrentStage->mStageID) : -1,
+        int(gameflow.mWorldClock.mCurrentDay), gameflow.mWorldClock.mTimeOfDay};
+    const char* resetReason = nullptr;
+    if (pc_coop_stage_changed(sCoopPolicy.started, sCoopPolicy.key, key, &resetReason)) {
+        // A new stage entry: every cursor back on P1, no HP sample yet, tick 0.
+        // "clock" covers a repeated day 29 on the same stage and a same-day
+        // reload, where stage and day do not change.
         sCoopPolicy = CoopPolicyState();
         pc_coop_cursors_reset(sCoopPolicy.cursors);
         sCoopPolicy.started = true;
-        sCoopPolicy.stage = stage;
-        sCoopPolicy.day = day;
+        std::printf("[coop-policy] RESET stage=%d day=%d reason=%s\n", key.stage, key.day, resetReason);
+        std::fflush(stdout);
     }
+    sCoopPolicy.key = key;
     ++sCoopPolicy.tick;
     coopRunTestEvents(p1, p2);
     const bool anyLive = coopNaviLive(p1) || coopNaviLive(p2);
@@ -3440,8 +3505,9 @@ static void randomizerUpdateCoop(Navi* p1, Navi* p2, MapMgr* map)
 #if defined(PIKMIN_RANDOMIZER_TEST_HOOKS)
 // M4 D-policy coop-policy fixture (PIKMIN_RANDOMIZER_TEST_SCRIPT=coop-policy,
 // PIKMIN_COOP_POLICY_CASE=<case>, launched with --coop). Isolated fixture
-// process: sets captain HP / down states directly, drives
-// randomizerApplyBenefitsCoop and the co-op DeathLink step, aborts on any
+// process: sets captain HP / down states directly, drives the co-op heal
+// step (coopApplyHeal) directly and lets the production co-op tick make the
+// anchored and DeathLink decisions, aborts on any
 // violation and exits 0 after printing TEST_ONLY coop_policy_pass.
 // Runner protocol: `TEST_ONLY coop_policy_phase case=<c> n=<k>` asks the
 // runner to write phase k's state line (tools/netplay/coop_policy_native.py).
@@ -3479,8 +3545,9 @@ static int coopFixtureAnchors(int kind, char* out, size_t size)
 
 static void coopFixtureHealOnce(Navi* p1, Navi* p2, MapMgr* map, int captain, PcCoopHealReason reason, const char* what)
 {
+    (void)map; // the heal step alone: no anchored grant or cooldown runs twice in this tick
     sCoopPolicy.lastHeal = {0, PC_COOP_HEAL_NONE};
-    randomizerApplyBenefitsCoop(p1, p2, map);
+    coopApplyHeal(p1, p2);
     coopFixtureRequire(sCoopPolicy.lastHeal.captain == captain && sCoopPolicy.lastHeal.reason == reason, what);
 }
 
@@ -3504,7 +3571,7 @@ static void coopPolicyFixture(Navi* p1, Navi* p2, MapMgr* map, int initialColor)
         coopFixtureRequire(pc_randomizer_benefit_pending(PC_BENEFIT_HEAL), "heal pending");
         coopFixtureHp(p2, 0.5f);
         const bool legacyWouldHeal = p1->mHealth < max1;
-        randomizerApplyBenefitsCoop(p1, p2, map);
+        coopApplyHeal(p1, p2);
         coopFixtureRequire(sCoopPolicy.lastHeal.captain == 2, "heal went to P2");
         coopFixtureRequire(coopFixtureFull(p1) && coopFixtureFull(p2), "P2 full again, P1 untouched");
         coopFixtureRequire(!pc_randomizer_benefit_pending(PC_BENEFIT_HEAL), "exactly one heal consumed");
@@ -3527,7 +3594,7 @@ static void coopPolicyFixture(Navi* p1, Navi* p2, MapMgr* map, int initialColor)
     } else if (c == "heal-trigger") {
         coopFixtureRequire(pc_randomizer_benefit_pending(PC_BENEFIT_HEAL), "heal pending");
         sCoopPolicy.lastHeal = {0, PC_COOP_HEAL_NONE};
-        randomizerApplyBenefitsCoop(p1, p2, map);
+        coopApplyHeal(p1, p2);
         coopFixtureRequire(sCoopPolicy.lastHeal.captain == 0 && pc_randomizer_benefit_pending(PC_BENEFIT_HEAL), "full HP: heal stays pending");
         coopFixtureHp(p2, 0.5f); // P2 takes damage since the last sample
         coopFixtureHealOnce(p1, p2, map, 2, PC_COOP_HEAL_TRIGGER, "P2 damaged -> P2 trigger");
@@ -3551,7 +3618,7 @@ static void coopPolicyFixture(Navi* p1, Navi* p2, MapMgr* map, int initialColor)
         coopFixtureRequire(pc_randomizer_benefit_pending(PC_BENEFIT_HEAL), "downed P1 was not healed by the live path");
         const float p1Hp = p1->mHealth;
         coopFixtureHp(p2, 0.5f);
-        randomizerApplyBenefitsCoop(p1, p2, map);
+        coopApplyHeal(p1, p2);
         coopFixtureRequire(sCoopPolicy.lastHeal.captain == 2 && coopFixtureFull(p2), "heal went to P2");
         coopFixtureRequire(p1->mHealth == p1Hp && !coopNaviLive(p1), "P1 never healed");
         coopFixtureRequire(!pc_randomizer_benefit_pending(PC_BENEFIT_HEAL), "one heal consumed");
@@ -3691,6 +3758,10 @@ void GameCoreSection::updateAI()
             // Netplay M4 D-policy (#885): owner co-op policy. The single-captain
             // statements in the else branch are untouched and deliberately not
             // re-indented, so the diff shows them unchanged.
+            // DRIFT GUARD: randomizerUpdateCoop copies the non-anchored parts of
+            // the else branch (and randomizerApplyBenefitsCoop those of
+            // randomizerApplyBenefits). Mirror any change to either side on the
+            // other; netplay and local co-op always take this branch.
             randomizerUpdateCoop(mNavi, mNavi2, mMapMgr);
         } else {
         const bool active = !gameflow.mMoviePlayer->mIsActive && !gameflow.mPauseAll
