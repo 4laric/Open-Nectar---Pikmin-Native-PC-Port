@@ -64,6 +64,12 @@ struct IceNetConfig {
 	uint16_t portBegin = 0; // local port range (0/0 = ephemeral)
 	uint16_t portEnd   = 0;
 	bool turnOnly      = false; // no STUN + relay candidates only
+	// Optional libjuice bind address (juice_config_t.bind_address). Empty =
+	// default (any). Set via PIKMIN_NETPLAY_ICE_BIND (for example
+	// "127.0.0.1"). The lab TURN-only pair binds the TURN server to a
+	// distinct loopback address (127.0.0.2) so per-IP TURN permissions
+	// block the direct path and relay<->relay is forced.
+	std::string bindAddress;
 };
 
 // Defaults per the brief: STUN stun.l.google.com:19302 then
@@ -72,7 +78,14 @@ struct IceNetConfig {
 //   PIKMIN_NETPLAY_TURN     "host:port:user:pass[,...]" (empty = none)
 //   PIKMIN_NETPLAY_ICE_PORT_BEGIN / _END
 //   PIKMIN_NETPLAY_ICE_TURN_ONLY=1
+//   PIKMIN_NETPLAY_ICE_BIND "ip" (empty = any; libjuice bind_address)
+//   PIKMIN_NETPLAY_ICE_TIMEOUT_MS (connect wait; default 600000, 10 min, so a
+//     normal human copy-paste round trip fits; pair tool passes its own value)
+//   PIKMIN_NETPLAY_ICE_GATHER_TIMEOUT_MS (default 15000)
 IceNetConfig ice_net_config_from_env();
+// True when an ICE selected-local description is a relay candidate. Used to
+// enforce TURN-only mode after COMPLETED (both peers must select relay).
+bool ice_selected_local_is_relay(const std::string& selectedLocal);
 
 // ---- connection codes ----
 
@@ -108,18 +121,27 @@ public:
 	IceSocket& operator=(const IceSocket&) = delete;
 
 	// --- signalling (each drives gathering + waits internally) ---
-	// Host: creates the agent, gathers, returns the offer code.
+	// Host: creates the agent, gathers, returns the offer code. Pumps
+	// pump() while gathering so the window stays alive (M3).
 	bool host_create_offer(const IceNetConfig& cfg, std::string* offerOut,
-	                       std::string* err);
+	                       std::string* err,
+	                       std::function<void()> pump = std::function<void()>());
 	// Joiner: validates the offer, creates the agent, gathers, returns the
-	// answer code.
+	// answer code. Pumps pump() while gathering (M3).
 	bool join_create_answer(const IceNetConfig& cfg, const std::string& offer,
-	                        std::string* answerOut, std::string* err);
+	                        std::string* answerOut, std::string* err,
+	                        std::function<void()> pump = std::function<void()>());
 	// Host: validates the answer and applies it to the agent.
 	bool host_apply_answer(const std::string& answer, std::string* err);
 	// Blocks (polling) until JUICE_STATE_COMPLETED, FAILED, or timeoutMs.
-	// On success sets *completedMsOut to ms from agent creation.
-	bool wait_connected(double timeoutMs, double* completedMsOut, std::string* err);
+	// On success sets *completedMsOut to ms from apply_remote() (the ICE
+	// connect time, not counting the human copy-paste; falls back to agent
+	// creation when no remote was applied). Pumps pump() ~every 50 ms so
+	// the SDL window stays alive. In TURN-only mode fails with a clear
+	// "TURN-only violated" error unless the selected local candidate is a
+	// relay candidate.
+	bool wait_connected(double timeoutMs, double* completedMsOut, std::string* err,
+	                    std::function<void()> pump = std::function<void()>());
 
 	// --- transport surface ---
 	// Sends channel + payload through the ICE agent. Returns false when not
@@ -155,7 +177,8 @@ private:
 	static void on_recv(juice_agent_t* agent, const char* data, size_t size, void* userPtr);
 
 	bool create_agent(const IceNetConfig& cfg, std::string* err);
-	bool wait_gathering_done(double timeoutMs, std::string* err);
+	bool wait_gathering_done(double timeoutMs, std::string* err,
+	                         std::function<void()> pump = std::function<void()>());
 	bool local_description(std::string* out, std::string* err);
 	bool apply_remote(const std::string& sdp, bool turnOnly, std::string* err);
 
@@ -169,6 +192,7 @@ private:
 	std::string mSelectedLocal;
 	std::string mSelectedRemote;
 	double mCreateMs = 0;
+	double mConnectStartMs = 0; // set in apply_remote (both descriptions known)
 	double mCompletedMs = -1;
 	bool mTurnOnly = false;
 	bool mClosed = false;

@@ -10,10 +10,26 @@
 #include <string.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <iostream>
 #include <mutex>
 #include <thread>
+
+// The ICE channel/size contract must match the UDP transport exactly: the
+// session talks to either transport through hs_send/hs_drain, and the wire
+// prefix is shared. Reuse-by-value with a compile-time check (m9).
+#include "netplay/pc_netplay_udp.h"
+static_assert(pc_netplay_ice::kChannelHandshake
+                  == pc_netplay_transport::kChannelHandshake,
+              "ICE/UDP handshake channel must match");
+static_assert(pc_netplay_ice::kChannelGekko == pc_netplay_transport::kChannelGekko,
+              "ICE/UDP gekko channel must match");
+static_assert(pc_netplay_ice::kMaxDatagram == pc_netplay_transport::kMaxDatagram,
+              "ICE/UDP max datagram must match");
+static_assert(pc_netplay_ice::kAddrBytes == pc_netplay_transport::kAddrBytes,
+              "ICE/UDP addr bytes must match");
 
 namespace pc_netplay_ice {
 namespace {
@@ -63,16 +79,17 @@ bool parse_host_port(const std::string& text, std::string* host, uint16_t* port)
 
 uint32_t crc32_of(const uint8_t* data, size_t len)
 {
+	// Thread-safe lazy init (m13): libjuice callbacks run on their own
+	// thread, so two agents could race the old non-atomic flag.
+	static std::once_flag once;
 	static uint32_t table[256];
-	static bool init = false;
-	if (!init) {
+	std::call_once(once, []() {
 		for (uint32_t i = 0; i < 256; ++i) {
 			uint32_t c = i;
 			for (int k = 0; k < 8; ++k) c = (c & 1) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
 			table[i] = c;
 		}
-		init = true;
-	}
+	});
 	uint32_t c = 0xFFFFFFFFu;
 	for (size_t i = 0; i < len; ++i) c = table[(c ^ data[i]) & 0xFF] ^ (c >> 8);
 	return c ^ 0xFFFFFFFFu;
@@ -229,7 +246,14 @@ IceNetConfig ice_net_config_from_env()
 	};
 	cfg.portBegin = read_port("PIKMIN_NETPLAY_ICE_PORT_BEGIN");
 	cfg.portEnd   = read_port("PIKMIN_NETPLAY_ICE_PORT_END");
+	// m6: a single bound means a single port (libjuice wants begin<=end;
+	// begin>0,end=0 would make retries negative and fail with only a
+	// generic gather error).
+	if (cfg.portBegin != 0 && cfg.portEnd == 0) cfg.portEnd = cfg.portBegin;
+	if (cfg.portBegin == 0 && cfg.portEnd != 0) cfg.portBegin = cfg.portEnd;
 	if (cfg.portEnd != 0 && cfg.portBegin > cfg.portEnd) cfg.portBegin = cfg.portEnd;
+	if (const char* bind = getenv_nonempty("PIKMIN_NETPLAY_ICE_BIND"))
+		cfg.bindAddress = trim(bind);
 	if (const char* to = getenv_nonempty("PIKMIN_NETPLAY_ICE_TURN_ONLY"))
 		cfg.turnOnly = (to[0] == '1' && to[1] == '\0');
 	if (cfg.turnOnly) cfg.stun.clear(); // relay-only: no STUN by design
@@ -238,15 +262,22 @@ IceNetConfig ice_net_config_from_env()
 
 bool ice_candidate_line_is_relay(const std::string& line)
 {
-	return line.find(" typ relay") != std::string::npos
-	    || line.find(" typ relay\r") != std::string::npos;
+	// m13: a single substring covers both LF and CRLF forms (" typ relay"
+	// is a prefix of " typ relay\r").
+	return line.find(" typ relay") != std::string::npos;
+}
+
+bool ice_selected_local_is_relay(const std::string& selectedLocal)
+{
+	return selectedLocal.find("typ relay") != std::string::npos;
 }
 
 std::string ice_filter_relay_candidates(const std::string& sdp)
 {
 	// Split on LF, tolerating CRLF: strip a trailing CR before matching,
-	// then rejoin with CRLF. A no-relay SDP round-trips byte-identically
-	// when it already uses CRLF (which is what libjuice generates).
+	// then rejoin with CRLF. A CRLF input without candidate lines
+	// round-trips byte-identically (m5: the trailing empty segment after a
+	// final "\r\n" is skipped, so no extra blank line is emitted).
 	std::string out;
 	size_t pos = 0;
 	while (pos <= sdp.size()) {
@@ -254,6 +285,9 @@ std::string ice_filter_relay_candidates(const std::string& sdp)
 		std::string line =
 		    (eol == std::string::npos) ? sdp.substr(pos) : sdp.substr(pos, eol - pos);
 		if (!line.empty() && line[line.size() - 1] == '\r') line.resize(line.size() - 1);
+		// m5: skip the empty trailing segment after a final newline, so a
+		// CRLF input with no filtering round-trips byte-identically.
+		if (line.empty() && pos == sdp.size()) break;
 		bool isCandidate = line.compare(0, 12, "a=candidate:") == 0;
 		if (!isCandidate || ice_candidate_line_is_relay(line)) {
 			out += line;
@@ -447,8 +481,13 @@ void IceSocket::on_state(juice_agent_t* /*agent*/, juice_state_t state, void* us
 		if (self->mClosed) return;
 		self->mSelectedLocal  = ls;
 		self->mSelectedRemote = rs;
-		if (self->mCreateMs > 0 && self->mCompletedMs < 0)
-			self->mCompletedMs = now_ms() - self->mCreateMs;
+		// m2: connect time from apply_remote() (both descriptions known),
+		// falling back to creation only when no remote was applied.
+		if (self->mCompletedMs < 0) {
+			const double base =
+			    self->mConnectStartMs > 0 ? self->mConnectStartMs : self->mCreateMs;
+			if (base > 0) self->mCompletedMs = now_ms() - base;
+		}
 		printf("[netplay] ice selected: local [%s] remote [%s]\n", ls.c_str(), rs.c_str());
 		if (self->mCompletedMs >= 0)
 			printf("[netplay] ice completed in %.0fms\n", self->mCompletedMs);
@@ -517,6 +556,8 @@ bool IceSocket::create_agent(const IceNetConfig& cfg, std::string* err)
 		jc.stun_server_host   = stunHost.c_str();
 		jc.stun_server_port   = cfg.stun.front().port;
 	}
+	std::string bindHost = cfg.bindAddress;
+	if (!bindHost.empty()) jc.bind_address = bindHost.c_str();
 	std::vector<juice_turn_server_t> turn;
 	for (size_t i = 0; i < cfg.turn.size(); ++i) {
 		juice_turn_server_t ts;
@@ -552,9 +593,13 @@ bool IceSocket::create_agent(const IceNetConfig& cfg, std::string* err)
 	return true;
 }
 
-bool IceSocket::wait_gathering_done(double timeoutMs, std::string* err)
+bool IceSocket::wait_gathering_done(double timeoutMs, std::string* err,
+                                    std::function<void()> pump)
 {
+	// M3: pump the caller's window ~every 50 ms so Windows never marks the
+	// game "Not Responding" during the (up to 15 s) gather.
 	const double start = now_ms();
+	double lastPump    = 0;
 	while (true) {
 		{
 			std::lock_guard<std::mutex> lock(*(std::mutex*)mMutex);
@@ -563,6 +608,10 @@ bool IceSocket::wait_gathering_done(double timeoutMs, std::string* err)
 		if (now_ms() - start > timeoutMs) {
 			if (err != nullptr) *err = "candidate gathering timed out";
 			return false;
+		}
+		if (pump && now_ms() - lastPump > 50) {
+			pump();
+			lastPump = now_ms();
 		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(5));
 	}
@@ -584,11 +633,12 @@ bool IceSocket::apply_remote(const std::string& sdp, bool turnOnly, std::string*
 	std::string use = sdp;
 	if (turnOnly) {
 		use = ice_filter_relay_candidates(sdp);
-		if (!ice_sdp_has_relay(sdp) && use == sdp) {
-			// No candidate lines at all (or none relay): keep going; the
-			// connect wait will fail with a clear message.
-		}
+		// No candidate lines at all (or none relay): keep going; the
+		// connect wait will fail with a clear message.
 	}
+	// m2: the ICE connect clock starts when both descriptions are known
+	// (not at agent creation, which includes the human copy-paste).
+	mConnectStartMs = now_ms();
 	if (juice_set_remote_description(mAgent, use.c_str()) != JUICE_ERR_SUCCESS) {
 		if (err != nullptr) *err = "juice_set_remote_description failed";
 		return false;
@@ -610,14 +660,18 @@ double ice_gather_timeout_ms()
 	return 15000.0;
 }
 
-bool IceSocket::host_create_offer(const IceNetConfig& cfg, std::string* offerOut, std::string* err)
+bool IceSocket::host_create_offer(const IceNetConfig& cfg, std::string* offerOut,
+                                    std::string* err, std::function<void()> pump)
 {
 	if (!create_agent(cfg, err)) return false;
 	if (juice_gather_candidates(mAgent) != JUICE_ERR_SUCCESS) {
-		if (err != nullptr) *err = "juice_gather_candidates failed";
+		if (err != nullptr)
+			*err = "juice_gather_candidates failed (port range "
+			    + std::to_string(cfg.portBegin) + "-" + std::to_string(cfg.portEnd)
+			    + (cfg.bindAddress.empty() ? "" : ", bind " + cfg.bindAddress) + ")";
 		return false;
 	}
-	if (!wait_gathering_done(ice_gather_timeout_ms(), err)) return false;
+	if (!wait_gathering_done(ice_gather_timeout_ms(), err, pump)) return false;
 	std::string sdp;
 	if (!local_description(&sdp, err)) return false;
 	if (cfg.turnOnly) {
@@ -635,7 +689,8 @@ bool IceSocket::host_create_offer(const IceNetConfig& cfg, std::string* offerOut
 }
 
 bool IceSocket::join_create_answer(const IceNetConfig& cfg, const std::string& offer,
-                                   std::string* answerOut, std::string* err)
+                                   std::string* answerOut, std::string* err,
+                                   std::function<void()> pump)
 {
 	bool isOffer = false;
 	std::string offerSdp;
@@ -649,13 +704,28 @@ bool IceSocket::join_create_answer(const IceNetConfig& cfg, const std::string& o
 	if (!create_agent(cfg, err)) return false;
 	if (!apply_remote(offerSdp, cfg.turnOnly, err)) return false;
 	if (juice_gather_candidates(mAgent) != JUICE_ERR_SUCCESS) {
-		if (err != nullptr) *err = "juice_gather_candidates failed";
+		if (err != nullptr)
+			*err = "juice_gather_candidates failed (port range "
+			    + std::to_string(cfg.portBegin) + "-" + std::to_string(cfg.portEnd)
+			    + (cfg.bindAddress.empty() ? "" : ", bind " + cfg.bindAddress) + ")";
 		return false;
 	}
-	if (!wait_gathering_done(ice_gather_timeout_ms(), err)) return false;
+	if (!wait_gathering_done(ice_gather_timeout_ms(), err, pump)) return false;
 	std::string sdp;
 	if (!local_description(&sdp, err)) return false;
-	if (cfg.turnOnly) sdp = ice_filter_relay_candidates(sdp);
+	if (cfg.turnOnly) {
+		// M1/m13: the joiner must also gather a relay candidate of its
+		// own; otherwise it would wait the full connect timeout.
+		if (!ice_sdp_has_relay(sdp)) {
+			if (err != nullptr)
+				*err = "TURN-only mode gathered no relay candidates; is the TURN "
+				       "server reachable (PIKMIN_NETPLAY_TURN)?";
+			return false;
+		}
+		sdp = ice_filter_relay_candidates(sdp);
+		printf("[netplay] ice: TURN-only mode, host candidates filtered out\n");
+		fflush(stdout);
+	}
 	return ice_encode_code(false, sdp, answerOut, err);
 }
 
@@ -671,18 +741,30 @@ bool IceSocket::host_apply_answer(const std::string& answer, std::string* err)
 	return apply_remote(sdp, mTurnOnly, err);
 }
 
-bool IceSocket::wait_connected(double timeoutMs, double* completedMsOut, std::string* err)
+bool IceSocket::wait_connected(double timeoutMs, double* completedMsOut, std::string* err,
+                               std::function<void()> pump)
 {
+	// M3: pump the caller's window ~every 50 ms while waiting.
 	const double start = now_ms();
+	double lastPump    = 0;
 	while (true) {
 		int st = 0;
 		{
 			std::lock_guard<std::mutex> lock(*(std::mutex*)mMutex);
-			st = mState;
 			if (mCompletedMs >= 0) {
+				// M1: TURN-only mode must select a relay candidate locally;
+				// otherwise the direct path leaked through (loopback
+				// per-IP permissions) and the run proves nothing.
+				if (mTurnOnly && !ice_selected_local_is_relay(mSelectedLocal)) {
+					if (err != nullptr)
+						*err = std::string("TURN-only violated: selected local is not relay: ")
+						    + (mSelectedLocal.empty() ? "<unknown>" : mSelectedLocal);
+					return false;
+				}
 				if (completedMsOut != nullptr) *completedMsOut = mCompletedMs;
 				return true;
 			}
+			st = mState;
 		}
 		if (st == (int)JUICE_STATE_FAILED) {
 			if (err != nullptr) *err = "ICE failed: no working candidate pair";
@@ -691,6 +773,10 @@ bool IceSocket::wait_connected(double timeoutMs, double* completedMsOut, std::st
 		if (now_ms() - start > timeoutMs) {
 			if (err != nullptr) *err = "ICE connect timed out";
 			return false;
+		}
+		if (pump && now_ms() - lastPump > 50) {
+			pump();
+			lastPump = now_ms();
 		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	}
@@ -718,10 +804,13 @@ std::vector<IceSocket::Datagram> IceSocket::recv()
 	std::vector<Datagram> out;
 	if (mMutex == nullptr) return out;
 	std::lock_guard<std::mutex> lock(*(std::mutex*)mMutex);
-	for (int i = 0; i < kMaxRecvPerPoll && !mQueue.empty(); ++i) {
-		out.push_back(std::move(mQueue.front()));
-		mQueue.erase(mQueue.begin());
-	}
+	// m13: move a batch at once instead of erasing the front per element
+	// (O(n^2) on the bounded queue).
+	const size_t n =
+	    mQueue.size() < (size_t)kMaxRecvPerPoll ? mQueue.size() : (size_t)kMaxRecvPerPoll;
+	out.reserve(n);
+	for (size_t i = 0; i < n; ++i) out.push_back(std::move(mQueue[i]));
+	mQueue.erase(mQueue.begin(), mQueue.begin() + (ptrdiff_t)n);
 	return out;
 }
 
@@ -895,7 +984,9 @@ double ice_connect_timeout_ms()
 		double n  = strtod(v, &end);
 		if (end != v && *end == '\0' && n >= 1000 && n <= 1800000) return n;
 	}
-	return 120000.0;
+	// M3: 10 min by default, so a normal human copy-paste round trip fits.
+	// The pair tool passes an explicit (shorter) timeout for bounded tests.
+	return 600000.0;
 }
 
 void ice_print_code(const char* kind, const std::string& code)
@@ -919,7 +1010,7 @@ bool ice_poll_answer_file(const std::string& path, double timeoutMs, std::functi
 {
 	const double start   = now_ms();
 	double lastPump      = 0;
-	std::string lastErr;
+	std::string lastErr, lastSeen;
 	while (true) {
 		FILE* f = fopen(path.c_str(), "rb");
 		if (f != nullptr) {
@@ -939,7 +1030,15 @@ bool ice_poll_answer_file(const std::string& path, double timeoutMs, std::functi
 					*answerOut = t;
 					return true;
 				}
-				lastErr = derr;
+				// m7 (cheap part): a mangled answer must not fail silently
+				// until the timeout. Log each new content's decode error.
+				if (t != lastSeen) {
+					lastSeen = t;
+					lastErr  = derr;
+					printf("[netplay] ice: answer file not yet valid (%s), waiting\n",
+					       derr.c_str());
+					fflush(stdout);
+				}
 			}
 		}
 		if (now_ms() - start > timeoutMs) {
@@ -961,17 +1060,36 @@ bool ice_read_answer_stdin(std::function<void()> pump, std::string* answerOut, s
 {
 	printf("[netplay] ice: paste the joiner's answer code, then Enter:\n");
 	fflush(stdout);
-	// Pumping matters only before blocking; stdin has no timeout by design
-	// (a human may take minutes). Pump once so the window stays alive until
-	// the read blocks.
-	if (pump) pump();
+	// M3+m8: stdin blocks indefinitely (a human may take minutes), so read
+	// on a helper thread while the main thread keeps pumping the window.
+	// m8: valid codes can reach ~11k chars; accept a full line up to 16390.
+	const size_t kMaxAnswerChars = 16390;
 	std::string line;
-	char buf[8192];
-	if (fgets(buf, sizeof(buf), stdin) == nullptr) {
+	std::atomic<bool> done(false);
+	std::thread reader([&]() {
+		std::string acc;
+		acc.reserve(8192);
+		int c = 0;
+		while ((c = getchar()) != EOF && c != '\n') {
+			if (acc.size() >= kMaxAnswerChars) break;
+			acc.push_back((char)c);
+		}
+		if (c == EOF && acc.empty()) {
+			done = true;
+			return;
+		}
+		line = trim(acc);
+		done = true;
+	});
+	while (!done) {
+		if (pump) pump();
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+	}
+	reader.join();
+	if (line.empty()) {
 		if (err != nullptr) *err = "no answer code on stdin";
 		return false;
 	}
-	line = trim(buf);
 	bool isOffer = true;
 	std::string sdp;
 	if (!ice_decode_code(line, &isOffer, &sdp, err)) return false;
@@ -991,7 +1109,7 @@ bool ice_host_session(const IceNetConfig& cfg, std::function<void()> pump, IceSo
 		return false;
 	}
 	std::string offer;
-	if (!outSock->host_create_offer(cfg, &offer, err)) return false;
+	if (!outSock->host_create_offer(cfg, &offer, err, pump)) return false;
 	if (!ice_emit_code("offer", offer, err)) return false;
 	std::string answer;
 	if (const char* in = getenv_nonempty("PIKMIN_NETPLAY_ICE_ANSWER_IN")) {
@@ -1001,8 +1119,8 @@ bool ice_host_session(const IceNetConfig& cfg, std::function<void()> pump, IceSo
 	}
 	if (!outSock->host_apply_answer(answer, err)) return false;
 	double completedMs = -1;
-	if (!outSock->wait_connected(ice_connect_timeout_ms(), &completedMs, err)) return false;
-	printf("[netplay] ice transport ready (completed in %.0fms)\n", completedMs);
+	if (!outSock->wait_connected(ice_connect_timeout_ms(), &completedMs, err, pump)) return false;
+	printf("[netplay] ice transport ready (connect %.0fms)\n", completedMs);
 	fflush(stdout);
 	return true;
 }
@@ -1016,13 +1134,13 @@ bool ice_join_session(const IceNetConfig& cfg, const std::string& offerArg,
 	}
 	std::string offer;
 	if (!ice_read_code_arg(offerArg, &offer, err)) return false;
-	(void)pump;
 	std::string answer;
-	if (!outSock->join_create_answer(cfg, offer, &answer, err)) return false;
+	// M3: the joiner pumps while gathering (was: (void)pump, never pumped).
+	if (!outSock->join_create_answer(cfg, offer, &answer, err, pump)) return false;
 	if (!ice_emit_code("answer", answer, err)) return false;
 	double completedMs = -1;
-	if (!outSock->wait_connected(ice_connect_timeout_ms(), &completedMs, err)) return false;
-	printf("[netplay] ice transport ready (completed in %.0fms)\n", completedMs);
+	if (!outSock->wait_connected(ice_connect_timeout_ms(), &completedMs, err, pump)) return false;
+	printf("[netplay] ice transport ready (connect %.0fms)\n", completedMs);
 	fflush(stdout);
 	return true;
 }

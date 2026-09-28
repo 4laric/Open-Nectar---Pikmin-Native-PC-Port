@@ -1106,6 +1106,9 @@ void refuse_and_exit(uint8_t field)
 	// unreliable by design under the lossy test wrapper).
 	for (int i = 0; i < 5; ++i) send_hello_msg(kHsRefuse, field, 0);
 	fflush(stdout);
+	// m12: stop the session first so the libjuice agent thread is joined
+	// before exit (its callbacks can otherwise printf during teardown).
+	stop_session();
 	std::exit(4);
 }
 
@@ -1133,6 +1136,8 @@ bool handshake_pump()
 		       now - sHsStartMs, (int)sSentAck, (int)sGotAck,
 		       (unsigned long long)sHsSamples.size());
 		fflush(stdout);
+		// m12: join the ICE thread before exit.
+		stop_session();
 		std::exit(4);
 	}
 	if (now - sHsLastSendMs >= 100) {
@@ -1160,12 +1165,14 @@ bool handshake_pump()
 			printf("[netplay] handshake refused: %s\n",
 			       field_name(refuse == 0 ? 99 : refuse));
 			fflush(stdout);
+			// m12: join the ICE thread before exit.
+			stop_session();
 			std::exit(4);
 		}
-		if (sCfg.isHost && !sHaveRemote && !sCfg.iceMode) {
-			// UDP only: learn the joiner's endpoint from its first hello.
-			// Over ICE the agent is connected 1:1, so sHaveRemote is preset
-			// and there is nothing to learn.
+		if (sCfg.isHost && !sHaveRemote) {
+			// Learn the joiner's endpoint from its first hello. Over ICE
+			// this branch never runs (the agent is connected 1:1, so
+			// sHaveRemote is preset before the handshake pump starts).
 			sRemoteIp   = g.fromIpHostOrder;
 			sRemotePort = g.fromPort;
 			sHaveRemote = true;
@@ -1244,9 +1251,10 @@ void answer_handshake_in_session()
 		if (type == kHsRefuse) continue; // session already agreed; ignore
 		if (type != kHsHello) continue;  // n1: never answer an Ack with an Ack
 		// Only answer the known peer (host learns it during the handshake;
-		// the joiner always talks to its configured host). Skipped over ICE:
-		// the agent is connected 1:1 and sender fields are placeholders.
-		if (!sCfg.iceMode && sCfg.isHost && sHaveRemote
+		// the joiner always talks to its configured host). Over ICE the
+		// sender fields are the fixed 127.0.0.1:1 placeholder, which equals
+		// the preset remote, so this filter already passes there.
+		if (sCfg.isHost && sHaveRemote
 		    && (g.fromIpHostOrder != sRemoteIp || g.fromPort != sRemotePort))
 			continue;
 		send_hello_msg(kHsAck, 0, h.nonce);
@@ -1661,6 +1669,8 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 			if (!ok) {
 				printf("[netplay] ice setup failed: %s\n", err.c_str());
 				fflush(stdout);
+				// m12: join the libjuice thread before exit.
+				stop_session();
 				std::exit(1);
 			}
 			// The agent is connected 1:1: no endpoint learning. GekkoNet
