@@ -200,6 +200,24 @@ int main() {
         require(!cf.fade.active() && near(sh.pose->positions[0].x, 12.f), "stale fade dropped");
     }
 
+    // Death clips that collapse to a point (retail Sokkuri/UmiMushi/Snake
+    // dead): playback and the corpse stop at the last visible pose.
+    {
+        auto blob = [](float s) {
+            return p2pose::Pose{{{-s, 0, 0}, {s, 2 * s, s}}, {{1, 0, 0}, {1, 0, 0}}};
+        };
+        std::vector<p2pose::Pose> shrink{blob(10), blob(9), blob(6), blob(1), blob(0.0001f)};
+        auto at = [&shrink](std::size_t i) -> const p2pose::Pose& { return shrink[i]; };
+        require(p2motion::visibleEnd(shrink.size(), at) == 2, "collapsed tail excluded (6 >= 20% of 10, 1 < 20%)");
+        std::vector<p2pose::Pose> steady{blob(10), blob(9), blob(10)};
+        auto st = [&steady](std::size_t i) -> const p2pose::Pose& { return steady[i]; };
+        require(p2motion::visibleEnd(steady.size(), st) == 2, "no collapse keeps the last pose");
+        require(p2motion::isDeathClip("dead") && p2motion::isDeathClip("dead1") && p2motion::isDeathClip("pdead1")
+                    && p2motion::isDeathClip("dead_p") && !p2motion::isDeathClip("hide1")
+                    && !p2motion::isDeathClip("wait1"),
+                "death clip names");
+    }
+
     std::cout << "p2_pose_motion_test OK checks=" << checks << '\n';
     return 0;
 }

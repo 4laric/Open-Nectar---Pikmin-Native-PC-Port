@@ -237,6 +237,41 @@ inline bool seamContinuous(std::size_t count, PoseAt poseAt, const std::vector<i
     return seam <= std::max(floor, factor * step);
 }
 
+// Death clips (#895). Several retail P2 death animations end with the whole
+// body scaled to zero (Sokkuri dead1/pdead1, UmiMushi dead1, SnakeCrow and
+// SnakeWhole dead): P2 then hands the carcass to a separate pellet. The P1
+// port keeps the actor's own body as the corpse, so a death clip plays only
+// up to its last visible pose and the corpse holds that pose (the previous
+// sparse bake could not convert the collapsed frames at all, which kept the
+// corpse visible by accident).
+inline bool isDeathClip(const std::string& name) {
+    return name.rfind("dead", 0) == 0 || name.rfind("pdead", 0) == 0 || name == "kagebozu_dead";
+}
+
+// Bounding-box diagonal of a pose's positions.
+inline float extent(const p2pose::Pose& pose) {
+    if (pose.positions.empty()) return 0.f;
+    p2pose::Vec lo = pose.positions.front(), hi = lo;
+    for (const auto& v : pose.positions) {
+        lo = {std::min(lo.x, v.x), std::min(lo.y, v.y), std::min(lo.z, v.z)};
+        hi = {std::max(hi.x, v.x), std::max(hi.y, v.y), std::max(hi.z, v.z)};
+    }
+    const double dx = double(hi.x) - lo.x, dy = double(hi.y) - lo.y, dz = double(hi.z) - lo.z;
+    return float(std::sqrt(dx * dx + dy * dy + dz * dz));
+}
+
+// Last pose whose extent is at least `fraction` of the clip's largest (the
+// last visible pose; count-1 when nothing collapses).
+template <class PoseAt>
+inline std::size_t visibleEnd(std::size_t count, PoseAt poseAt, float fraction = 0.2f) {
+    if (!count) return 0;
+    float biggest = 0.f;
+    for (std::size_t i = 0; i < count; ++i) biggest = std::max(biggest, extent(poseAt(i)));
+    for (std::size_t i = count; i-- > 0;)
+        if (extent(poseAt(i)) >= fraction * biggest) return i;
+    return count - 1;
+}
+
 // A P1 loop wrap: the same clip's source frame jumped back by more than half
 // the clip. Forward motion and small jitters are not wraps.
 inline bool isWrap(float lastFrame, float sourceFrame, int lastBakedFrame) {

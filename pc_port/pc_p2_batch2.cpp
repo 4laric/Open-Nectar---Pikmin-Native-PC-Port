@@ -84,6 +84,7 @@ struct Bank {
     std::map<std::string, std::vector<p2pose::Baked>> baked;
     std::map<std::string, bool> interp;
     std::map<std::string, bool> seam;  // loop seam continuous (#895)
+    std::map<std::string, size_t> hold;  // last visible pose (#895 death clips)
     std::string prefix;
     std::string fileSpecies;
 };
@@ -308,6 +309,8 @@ Bank loadBank(const FamilyDef& family, const std::string& species,
             std::vector<int> frames = clock.poses.frames;
             if (frames.empty()) frames = p2batch2clock::uniformFrames(row.poseCount, clock.poses.duration);
             bank.seam[row.name] = p2poseload::seamOf(loaded.baked, frames);
+            bank.hold[row.name] = p2motion::visibleEnd(
+                loaded.baked.size(), [&loaded](size_t i) -> const p2pose::Pose& { return loaded.baked[i].pose; });
             bank.baked[row.name] = std::move(loaded.baked);
         }
     }
@@ -882,7 +885,10 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
         }
     }
     const bool holdLast = corpse || (isDweevil && dead);
-    const size_t index = holdLast ? poses.size() - 1
+    // Death clips stop at their last visible pose (#895, p2motion::isDeathClip).
+    auto holdIt = bank.hold.find(name);
+    const size_t holdIndex = holdIt != bank.hold.end() && holdIt->second < poses.size() ? holdIt->second : poses.size() - 1;
+    const size_t index = holdLast ? holdIndex
                                : (step.pose < poses.size() ? step.pose : poses.size() - 1);
     Shape* shape = poses.at(index);
     // Decoded pose vectors drive the draw (#895): bracket + lerp (or nearest
@@ -900,7 +906,10 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
             p2motion::Tunables tune = p2motion::tunables();
             auto interpIt = bank.interp.find(name);
             tune.lerp = interpIt != bank.interp.end() && interpIt->second;
-            const float drawFrame = holdLast ? float(timing.poses.duration - 1) : float(sourceFrame);
+            float drawFrame = holdLast ? float(timing.poses.duration - 1) : float(sourceFrame);
+            if ((holdLast || p2motion::isDeathClip(name)) && holdIndex < frames.size()
+                    && drawFrame > float(frames[holdIndex]))
+                drawFrame = float(frames[holdIndex]);
             const auto& bakedVec = bakedIt->second;
             auto seamIt = bank.seam.find(name);
             const bool seamOk = seamIt == bank.seam.end() || seamIt->second;

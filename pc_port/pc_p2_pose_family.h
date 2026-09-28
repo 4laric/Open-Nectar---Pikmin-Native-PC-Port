@@ -33,6 +33,7 @@ struct Clip {
     std::vector<int> frames;
     int duration = 1;
     bool seamContinuous = true;
+    float holdFrame = 0.f;  // last visible pose's source frame (death clips stop here)
 };
 
 class Bank {
@@ -55,8 +56,9 @@ public:
         clip.frames = validFrames(explicitFrames, count, clip.duration)
             ? explicitFrames : p2batch2clock::uniformFrames(count, clip.duration);
         for (auto& pose : baked) clip.poses.push_back(std::move(pose.pose));
-        clip.seamContinuous = p2motion::seamContinuous(
-            clip.poses.size(), [&clip](std::size_t i) -> const p2pose::Pose& { return clip.poses[i]; }, clip.frames);
+        auto poseAt = [&clip](std::size_t i) -> const p2pose::Pose& { return clip.poses[i]; };
+        clip.seamContinuous = p2motion::seamContinuous(clip.poses.size(), poseAt, clip.frames);
+        clip.holdFrame = float(clip.frames[p2motion::visibleEnd(clip.poses.size(), poseAt)]);
         if (base_.empty()) base_ = basePath;
         if (!owner_) owner_ = owner;
         clips_[name] = std::move(clip);
@@ -169,6 +171,8 @@ public:
         }
         const p2motion::Tunables& tune = p2motion::tunables();
         const auto& poses = entry->poses;
+        // A death clip stops at its last visible pose (see p2motion::isDeathClip).
+        if (p2motion::isDeathClip(clip) && sourceFrame > entry->holdFrame) sourceFrame = entry->holdFrame;
         const p2pose::Presented shown = p2pose::present(
             it->second, clip, poses.size(), [&poses](std::size_t i) -> const p2pose::Pose& { return poses[i]; },
             entry->frames, sourceFrame, tune, entry->seamContinuous);
