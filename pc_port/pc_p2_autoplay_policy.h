@@ -327,6 +327,10 @@ struct Config {
     // standing with him (source attack path; eating needs a target outside
     // fp06). Hysteresis: back off below Min until Resume; close in above Max
     // until CloseStop; hold (look + throw) in between.
+    // #244 BombSarai 58: on each fresh engagement the squad first stands under
+    // the carrier (no throws) for this long, the way a player waits out the
+    // bomb drop; the carrier's own source Release decides whether it drops.
+    float bombsaraiHold = 6.0f;
     bool kingStandoff = true;
     float kingStandoffMin = 95.0f;
     float kingStandoffResume = 110.0f;
@@ -1075,6 +1079,10 @@ private:
                 giveUp(in, "attack_timeout");
                 finishTarget(in, /*killed*/ false);
             }
+            return;
+        }
+        if (in.targetSource == 58 && stateTime < cfg.bombsaraiHold) {
+            steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
             return;
         }
         if (cfg.kingStandoff && isKingStandoff(in.targetSource)) {
