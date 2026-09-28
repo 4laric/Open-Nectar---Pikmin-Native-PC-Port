@@ -46,6 +46,7 @@
 #include "netplay/pc_netplay_gekko_input.h"
 #include "netplay/pc_netplay_pad.h"
 #include "netplay/pc_netplay_present.h"
+#include "netplay/pc_netplay_randstate.h"
 #include "netplay/pc_netplay_udp.h"
 #include "netplay/pc_input_log.h"
 #include "netplay/pc_state_hash.h"
@@ -86,7 +87,20 @@
 // Declared here to avoid a header dependency cycle; defined in
 // pc_state_hash.cpp. Inert unless pc_state_hash_set_netplay_capture(true).
 void pc_state_hash_set_netplay_capture(bool on);
-bool pc_state_hash_current(uint64_t* total, uint64_t subs[6], uint64_t* tick);
+bool pc_state_hash_current(uint64_t* total, uint64_t subs[7], uint64_t* tick);
+// Netplay M4 lane A randomizer hooks (issue #885). Strong-defined by
+// pc_randomizer.cpp (linked into every game build); null here only in
+// engine-free harnesses, where each use is guarded. The session never
+// touches randomizer state except through these two functions, and only at
+// the deterministic points below (submit embed on the host, apply at tick
+// start on both peers).
+#if defined(__GNUC__)
+__attribute__((weak)) bool pc_randomizer_apply_net_state(const pc_randstate::PcRandState& st);
+__attribute__((weak)) bool pc_randomizer_get_net_state(pc_randstate::PcRandState* out);
+#else
+bool pc_randomizer_apply_net_state(const pc_randstate::PcRandState& st);
+bool pc_randomizer_get_net_state(pc_randstate::PcRandState* out);
+#endif
 // Runs the registered pre-sim yaw capture hook now (M2c hook), without the
 // record/replay logic of pc_input_log_tick(). Defined in pc_input_log.cpp.
 void pc_input_log_capture_yaw(void);
@@ -375,24 +389,128 @@ struct HashEntry {
 	bool valid = false;
 	uint64_t tick = 0;
 	uint64_t total = 0;
-	uint64_t subs[6] = { 0, 0, 0, 0, 0, 0 };
+	uint64_t subs[7] = { 0, 0, 0, 0, 0, 0, 0 };
 };
 constexpr size_t kHashRing = 256;
 HashEntry sHashRing[kHashRing];
 
-void hash_ring_store(uint64_t tick, uint64_t total, const uint64_t subs[6])
+void hash_ring_store(uint64_t tick, uint64_t total, const uint64_t subs[7])
 {
 	HashEntry& e = sHashRing[tick % kHashRing];
 	e.valid      = true;
 	e.tick       = tick;
 	e.total      = total;
-	for (int i = 0; i < 6; ++i) e.subs[i] = subs[i];
+	for (int i = 0; i < 7; ++i) e.subs[i] = subs[i];
 }
 
 const HashEntry* hash_ring_find(uint64_t tick)
 {
 	const HashEntry& e = sHashRing[tick % kHashRing];
 	return (e.valid && e.tick == tick) ? &e : nullptr;
+}
+
+// ---- M4 lane A randomizer external-state stream (issue #885) ----
+//
+// Kept in clearly separated functions (per the brief) to minimise merge
+// conflicts with the polish lane (pacing/sleep/handshake ownership).
+//
+// Deterministic rule (documented per the brief): the host is the only peer
+// that ever sets HAS_CHUNK. It emits each published generation's 11
+// fragments on 11 consecutive host submits. Every Advance delivers the same
+// host input (p0) on both peers, so both reassemblers complete generation g
+// in the same Advance frame F, and both apply it at the start of the tick
+// for frame F+1, before inject_input() and app->idle(). Duplicate, stale
+// (gen <= applied) or incomplete fragments are no-ops. The reassembly
+// buffer is fed identically on both peers, so both hold identical copies.
+//
+// Session start: the host's pc_randomizer_update publishes gen 1 on its
+// first post-activation poll (before the GekkoNet session starts), so the
+// first full snapshot rides the first 11 submits. Pre-apply ticks run on
+// identical init state (same bootstrap minus SESSION, same state.txt), so
+// no gameplay divergence is possible before the first same-frame apply.
+// Full HOLD-gating of the pre-snapshot phase is lane B work.
+double now_ms(); // defined below (wall-clock milliseconds)
+bool sRandStream = false; // cached: session active && env gate on
+pc_randstate::Reassembler sRandReasm;
+uint8_t sRandWire[pc_randstate::kStateBytes] = {};
+bool sRandHaveSnapshot = false; // host published at least one snapshot
+size_t sRandNextFrag = 0;       // next fragment index to embed (0..11)
+pc_netplay_bulk::BulkChannel sBulk; // M4a bulk 0x03 endpoint (lane B queues)
+
+bool randstate_env_on()
+{
+	const char* e = std::getenv("PIKMIN_NETPLAY_RANDSTATE_STREAM");
+	if (e == nullptr || *e == '\0') return true; // enabled by default
+	return !(e[0] == '0' && e[1] == '\0');       // ...=0 disables (negative control)
+}
+
+bool randstate_stream_on() { return sCfg.active && sRandStream; }
+
+// Host input-build step: embed the next pending snapshot fragment into the
+// local input's spare bytes. Runs after build_local_input(), before encode.
+void randstate_embed_on_submit(PcNetplayInput& local)
+{
+	if (!randstate_stream_on() || !sCfg.isHost) return;
+	if (!sRandHaveSnapshot || sRandNextFrag >= pc_randstate::kFragCount) return;
+	const uint8_t idx = (uint8_t)sRandNextFrag;
+	local.flags |= pc_netplay_gekko::kFlagsRandChunk;
+	if (idx + 1 == pc_randstate::kFragCount) local.flags |= pc_netplay_gekko::kFlagsRandLast;
+	local.fragSeq = pc_randstate::frag_seq_make(idx);
+	for (size_t i = 0; i < pc_randstate::kFragBytes; ++i)
+		local.fragData[i] = sRandWire[idx * pc_randstate::kFragBytes + i];
+	++sRandNextFrag;
+}
+
+// Tick-start step (both peers): apply a completed snapshot before the
+// sim runs. Must run before inject_input() / app->idle() for this frame.
+void randstate_apply_before_tick(int frame)
+{
+	if (!randstate_stream_on()) return;
+	if (!sRandReasm.has_pending()) return;
+	if (frame < (int)sRandReasm.pending_frame()) return; // not yet (unreachable; defensive)
+	pc_randstate::PcRandState st;
+	if (!sRandReasm.take_pending(st)) return;
+	const uint32_t gen = st.gen;
+	if (pc_randomizer_apply_net_state != nullptr) pc_randomizer_apply_net_state(st);
+	sRandReasm.mark_applied(gen);
+	printf("[netplay] randstate gen=%u applied at frame=%d\n", gen, frame);
+	fflush(stdout);
+}
+
+// Per-Advance step (both peers): feed the host input's fragment, if any,
+// into the reassembler. p0 is the host input on both peers (role-ordered
+// actors). Runs after randstate_apply_before_tick() so a completion always
+// arms the *next* frame.
+void randstate_feed_advance(const PcNetplayInput& hostInput, int frame)
+{
+	if (!randstate_stream_on()) return;
+	const bool has = (hostInput.flags & pc_netplay_gekko::kFlagsRandChunk) != 0;
+	const bool last = (hostInput.flags & pc_netplay_gekko::kFlagsRandLast) != 0;
+	sRandReasm.feed(has, hostInput.fragSeq, hostInput.fragData, last, (uint32_t)frame);
+}
+
+// Per-turn bulk pump (both peers): drain channel 0x03 into the endpoint,
+// send due frags/acks. Lane A queues no session messages (the reliable
+// transfer is proven by the transport unit test); lane B will queue
+// SAVE_RESULT / Checkpoint here.
+void bulk_pump()
+{
+	if (!sCfg.active || sLink == nullptr || sSock == nullptr) return;
+	std::vector<pc_netplay_transport::UdpSocket::Datagram> grams = sLink->drain_bulk();
+	for (auto& g : grams) {
+		if (!g.payload.empty()) sBulk.on_receive(g.payload.data(), g.payload.size());
+	}
+	std::vector<pc_netplay_bulk::BulkChannel::Message> complete = sBulk.poll_complete();
+	for (auto& m : complete) {
+		(void)m; // lane B consumes these; lane A only acks (already queued)
+		printf("[netplay] bulk msg complete: type=0x%02x len=%llu\n", m.type,
+		       (unsigned long long)m.data.size());
+		fflush(stdout);
+	}
+	std::vector<std::vector<uint8_t>> out = sBulk.poll_outgoing(now_ms());
+	for (auto& d : out) {
+		if (!d.empty()) sSock->send_payload(pc_netplay_transport::kChannelBulk, d.data(), d.size());
+	}
 }
 
 // Scripted local input (PIKMIN_NETPLAY_LOCAL_INPUT_FILE, pkni v2).
@@ -921,6 +1039,9 @@ void parse_config()
 	sLocalRole    = sCfg.isHost ? 0 : 1;
 	// Each peer presents its own captain full screen (M2b): host P1, joiner P2.
 	pc_netplay_present_set_local_player_default(sLocalRole);
+	// M4a: cache the external-state stream gate (env default on; =0 is the
+	// negative control that restores legacy file polling on both peers).
+	sRandStream = randstate_env_on();
 	sPhase        = kHandshake;
 }
 
@@ -1322,13 +1443,13 @@ void handle_session_events()
 			const int frame = ev[i]->data.desynced.frame;
 			const uint64_t wantTick = frame >= 0 ? (uint64_t)frame + 1 : 0;
 			const HashEntry* e      = hash_ring_find(wantTick);
-			uint64_t total = 0, subs[6] = { 0, 0, 0, 0, 0, 0 }, tick = 0;
+			uint64_t total = 0, subs[7] = { 0, 0, 0, 0, 0, 0, 0 }, tick = 0;
 			bool ringHit = false;
 			if (e != nullptr) {
 				total   = e->total;
 				tick    = e->tick;
 				ringHit = true;
-				for (int k = 0; k < 6; ++k) subs[k] = e->subs[k];
+				for (int k = 0; k < 7; ++k) subs[k] = e->subs[k];
 			} else {
 				pc_state_hash_current(&total, subs, &tick);
 			}
@@ -1337,12 +1458,13 @@ void handle_session_events()
 			       ev[i]->data.desynced.remote_checksum, ev[i]->data.desynced.remote_handle);
 			printf("[netplay] desync subs at tick=%llu%s: total=%016llx (fold %08x) "
 			       "navi=%016llx piki=%016llx teki=%016llx item=%016llx world=%016llx "
-			       "rng=%016llx\n",
+			       "rng=%016llx rand=%016llx\n",
 			       (unsigned long long)tick, ringHit ? "" : " (ring miss: latest)",
 			       (unsigned long long)total, fold_hash64(total),
 			       (unsigned long long)subs[0], (unsigned long long)subs[1],
 			       (unsigned long long)subs[2], (unsigned long long)subs[3],
-			       (unsigned long long)subs[4], (unsigned long long)subs[5]);
+			       (unsigned long long)subs[4], (unsigned long long)subs[5],
+			       (unsigned long long)subs[6]);
 			fflush(stdout);
 			pc_state_hash_flush();
 			stop_session();
@@ -1386,6 +1508,12 @@ int handle_game_events(System* sys, BaseApp* app)
 				fflush(stdout);
 				std::abort();
 			}
+			// M4a: same-tick apply pair. A snapshot that completed in
+			// frame F arms frame F+1; apply it now, before the sim runs,
+			// then feed this frame's host fragment (arming F+1 at the
+			// earliest). Both peers execute the identical sequence.
+			randstate_apply_before_tick(e->data.adv.frame);
+			randstate_feed_advance(p0, e->data.adv.frame);
 			inject_input(0, p0);
 			inject_input(1, p1);
 			inject_neutral_pad(2);
@@ -1407,7 +1535,7 @@ int handle_game_events(System* sys, BaseApp* app)
 			pc_input_log_tick_end();
 			pc_state_hash_tick_end();
 			{
-				uint64_t total = 0, subs[6] = { 0, 0, 0, 0, 0, 0 }, tick = 0;
+				uint64_t total = 0, subs[7] = { 0, 0, 0, 0, 0, 0, 0 }, tick = 0;
 				if (pc_state_hash_current(&total, subs, &tick) && tick > 0)
 					hash_ring_store(tick, total, subs);
 			}
@@ -1441,7 +1569,7 @@ int handle_game_events(System* sys, BaseApp* app)
 		}
 		case GekkoSaveEvent: {
 			GekkoGameEvent* e = ev[i];
-			uint64_t total = 0, subs[6] = { 0, 0, 0, 0, 0, 0 }, tick = 0;
+			uint64_t total = 0, subs[7] = { 0, 0, 0, 0, 0, 0, 0 }, tick = 0;
 			pc_state_hash_current(&total, subs, &tick);
 			if (e->data.save.state != nullptr && e->data.save.state_len != nullptr
 			    && *e->data.save.state_len >= 8) {
@@ -1493,10 +1621,33 @@ int handle_game_events(System* sys, BaseApp* app)
 
 } // namespace
 
+// ---- Netplay M4 lane A public hooks (issue #885) ----
+// Read by pc_randomizer.cpp through weak references (null-checked there),
+// so the default build and engine-free harnesses are unaffected.
+bool pc_netplay_randstate_stream_enabled(void) { return sCfg.active && sRandStream; }
+bool pc_netplay_is_host(void) { return sCfg.isHost; }
+// Host I/O side publish: encode the snapshot and queue its 11 fragments for
+// the next 11 host submits. A newer generation restarts the fragment cursor;
+// the receiver's CRC/mask logic keeps both peers identical (see Reassembler).
+void pc_netplay_randstate_publish(const pc_randstate::PcRandState& st)
+{
+	if (!sCfg.isHost) return; // only the host publishes
+	pc_randstate::encode(st, sRandWire);
+	sRandHaveSnapshot = true;
+	sRandNextFrag     = 0;
+}
+
 void pc_netplay_session_notify_argv(int argc, char** argv)
 {
 	sArgc = argc;
 	sArgv = argv;
+	// M4a: pc_randomizer_init() runs before this call and its update polls
+	// pc_netplay_session_active() (host/client split), which latches a
+	// pre-argv parse with sArgc == 0: CLI switches would stay invisible
+	// forever (env switches still worked, since getenv needs no argv).
+	// Re-arm the parse so the first System::run turn sees the real argv.
+	// Never re-arm once the session left idle.
+	if (sPhase == kIdle) sInitialised = false;
 }
 
 // N3 test hook + long-load survival note. Called (weakly) from
@@ -1615,12 +1766,18 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 	if (sGekko != nullptr) {
 		// M1: keep answering late handshake traffic while in session.
 		answer_handshake_in_session();
+		// M4a: pump the bulk 0x03 channel (acks now, lane-B messages later).
+		bulk_pump();
 		// B2 residual: fold this turn's physical sample into the
 		// accumulator on every turn (submit or stall), so a tap between
 		// two submit turns still reaches the next submit.
 		accum_add_current();
 		if (sGekkoStarted && sSubmitted == sAdvances) {
 			PcNetplayInput local = build_local_input();
+			// M4a: the host embeds the next snapshot fragment here (the
+			// joiner never sets chunk bits). Input-build ownership stays
+			// in this function; pacing/handshake below are untouched.
+			randstate_embed_on_submit(local);
 			uint8_t wire[16];
 			pc_netplay_input_encode(local, wire);
 			gekko_add_local_input(sGekko, sLocalHandle, wire);
