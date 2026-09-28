@@ -1279,6 +1279,9 @@ struct PcCiTexture {
     GXTexWrapMode wrapT = GX_CLAMP;
     u32 tlutName = 0;
     bool mipmap = false;
+    // Raw GX bytes copy (gx_base_level_size); image points into it when
+    // non-empty, so the description never aliases reset heap (m4).
+    std::vector<u8> owned;
 };
 static std::unordered_map<uintptr_t, PcTlut> sTlutObjects;
 static std::unordered_map<u32, PcTlut> sLoadedTluts;
@@ -1297,13 +1300,16 @@ struct PcDeferredRgba {
 	GXTexWrapMode wrapT = GX_CLAMP;
 };
 struct PcDeferredTex {
-	const u8* image = nullptr;
 	u16 width = 0;
 	u16 height = 0;
 	u32 format = 0;
 	GXTexWrapMode wrapS = GX_CLAMP;
 	GXTexWrapMode wrapT = GX_CLAMP;
 	bool mipmap = false;
+	// Raw GX bytes copy (gx_base_level_size); image points into it when
+	// non-empty, so the deferred entry never aliases reset heap (m4).
+	const u8* image = nullptr;
+	std::vector<u8> owned;
 };
 static std::unordered_map<uintptr_t, PcDeferredRgba> sNullDeferredRgba;
 static std::unordered_map<uintptr_t, PcDeferredTex> sNullDeferredTex;
@@ -1321,6 +1327,29 @@ static void pc_gfx_note_deferred_init()
 // sobre un bloque comprimido es GL_INVALID_OPERATION, y además la cadena ya
 // viene con el pack.
 static std::unordered_map<GLuint, bool> sExternalMipChain;
+
+// Polish fix (review M2): authoritative-pass inits are mutually exclusive
+// per key. Drops the live cache entry (GL name deferred, never drawn stale),
+// the signature, and all three pending maps; the caller then sets exactly
+// one of sCiTextures / sNullDeferredRgba / sNullDeferredTex.
+static void null_auth_invalidate(uintptr_t key)
+{
+    auto cached = sTextureCache.find(key);
+    if (cached != sTextureCache.end()) {
+        sNullDoomedTextures.push_back(cached->second);
+        sExternalMipChain.erase(cached->second);
+        sTextureCache.erase(cached);
+        auto bytesIt = sTextureBytes.find(key);
+        if (bytesIt != sTextureBytes.end()) {
+            sTextureBytesLive -= bytesIt->second;
+            sTextureBytes.erase(bytesIt);
+        }
+    }
+    sTextureSignatures.erase(key);
+    sCiTextures.erase(key);
+    sNullDeferredRgba.erase(key);
+    sNullDeferredTex.erase(key);
+}
 
 // ── Volcado de nombres de textura (--dump-texture-names, PLAN_TEXTURAS_HD fase 0) ──
 // Reproduce TextureInfo::CalculateTextureName de Dolphin para poder cotejar las
@@ -5487,6 +5516,12 @@ void pc_gfx_release_texture(void* gxTexObj)
 {
     if (!gxTexObj) return;
     const uintptr_t key = reinterpret_cast<uintptr_t>(gxTexObj);
+    // M2/m4: release clears every per-key record, including the deferred maps
+    // (their bytes are freed here, not leaked) — even when no live GL name
+    // exists for the key.
+    sCiTextures.erase(key);
+    sNullDeferredRgba.erase(key);
+    sNullDeferredTex.erase(key);
     auto it = sTextureCache.find(key);
     if (it == sTextureCache.end()) return;
 
@@ -5627,13 +5662,10 @@ void pc_gfx_init_tex_obj_rgba(GXTexObj* obj, void* rgba, u16 width, u16 height, 
     if (!obj || !rgba || width == 0 || height == 0) return;
     if (pc_gfx_null_skip()) {
         const uintptr_t nullKey = reinterpret_cast<uintptr_t>(obj);
-        auto cached = sTextureCache.find(nullKey);
-        if (cached != sTextureCache.end()) {
-            sNullDoomedTextures.push_back(cached->second);
-            sExternalMipChain.erase(cached->second);
-            sTextureCache.erase(cached);
-        }
-        sTextureSignatures.erase(nullKey);
+        // RGBA always retains: the movie hands a new picture each frame in
+        // the same buffer, so "same pointer, same size" must still re-upload
+        // (a signature early-out like the palettised path would freeze it).
+        null_auth_invalidate(nullKey);
         PcDeferredRgba def;
         def.width = width;
         def.height = height;
@@ -5643,13 +5675,15 @@ void pc_gfx_init_tex_obj_rgba(GXTexObj* obj, void* rgba, u16 width, u16 height, 
         const u8* src = static_cast<const u8*>(rgba);
         def.rgba.assign(src, src + bytes);
         sNullDeferredRgba[nullKey] = std::move(def);
-        // A later non-CI init for the same key supersedes the rgba copy.
-        sNullDeferredTex.erase(nullKey);
         pc_gfx_note_deferred_init();
         return;
     }
 
     const uintptr_t key = (uintptr_t)obj;
+    // M2: a real upload supersedes any stale authoritative-pass deferred
+    // entry for a reused key; the fresh image is authoritative now.
+    sNullDeferredRgba.erase(key);
+    sNullDeferredTex.erase(key);
     GLuint texId = 0;
     auto it = sTextureCache.find(key);
     if (it != sTextureCache.end()) {
@@ -5682,29 +5716,36 @@ void pc_gfx_init_tex_obj(GXTexObj* obj, void* imagePtr, u16 width, u16 height, G
     if (!obj || !imagePtr || width == 0 || height == 0) return;
     if (pc_gfx_null_skip()) {
         const uintptr_t nullKey = reinterpret_cast<uintptr_t>(obj);
-        auto cached = sTextureCache.find(nullKey);
-        if (cached != sTextureCache.end()) {
-            sNullDoomedTextures.push_back(cached->second);
-            sExternalMipChain.erase(cached->second);
-            sTextureCache.erase(cached);
-            auto bytesIt = sTextureBytes.find(nullKey);
-            if (bytesIt != sTextureBytes.end()) {
-                sTextureBytesLive -= bytesIt->second;
-                sTextureBytes.erase(bytesIt);
-            }
+        // m4: skip the churn when nothing changed (matches the non-auth
+        // signature early-out below): same params over a live cache entry
+        // keep the texture without a decode/upload/delete cycle.
+        const PcTextureSignature incoming {
+            imagePtr, width, height, static_cast<u32>(format), wrapS, wrapT, false, 0
+        };
+        const auto sigIt = sTextureSignatures.find(nullKey);
+        if (sigIt != sTextureSignatures.end() && sigIt->second == incoming
+            && sTextureCache.find(nullKey) != sTextureCache.end()) {
+            return;
         }
-        sTextureSignatures.erase(nullKey);
+        null_auth_invalidate(nullKey);
         PcDeferredTex def;
-        def.image = static_cast<const u8*>(imagePtr);
         def.width = width;
         def.height = height;
         def.format = static_cast<u32>(format);
         def.wrapS = wrapS;
         def.wrapT = wrapT;
         def.mipmap = (mipmap != GX_FALSE);
-        sNullDeferredTex[nullKey] = def;
-        // A later rgba init for the same key supersedes this entry.
-        sNullDeferredRgba.erase(nullKey);
+        // m4: own the bytes (gx_base_level_size) so the entry never aliases
+        // a heap buffer that a section/movie reset frees before presentation.
+        const size_t rawBytes = gx_base_level_size(width, height, static_cast<u32>(format));
+        if (rawBytes > 0) {
+            const u8* src = static_cast<const u8*>(imagePtr);
+            def.owned.assign(src, src + rawBytes);
+            def.image = def.owned.data();
+        } else {
+            def.image = static_cast<const u8*>(imagePtr); // unknown layout: cannot copy
+        }
+        sNullDeferredTex[nullKey] = std::move(def);
         pc_gfx_note_deferred_init();
         return;
     }
@@ -5718,6 +5759,9 @@ void pc_gfx_init_tex_obj(GXTexObj* obj, void* imagePtr, u16 width, u16 height, G
         && sTextureCache.find(key) != sTextureCache.end()) {
         return;
     }
+    // M2: the fresh upload supersedes any stale deferred entry for a reused key.
+    sNullDeferredRgba.erase(key);
+    sNullDeferredTex.erase(key);
 
     if (sDumpTextureNames) {
         dump_dolphin_texture_name(static_cast<const u8*>(imagePtr), width, height,
@@ -6053,9 +6097,28 @@ void pc_gfx_init_tex_obj_ci(GXTexObj* obj, void* imagePtr, u16 width, u16 height
     if (!obj || !imagePtr || width == 0 || height == 0) return;
     if (pc_gfx_null_skip()) {
         const uintptr_t nullKey = reinterpret_cast<uintptr_t>(obj);
+        // M2/m4: mutually exclusive per key (a stale CI entry used to shadow
+        // a newer non-CI deferred init for a reused address), signature
+        // early-out against churn, owned bytes against heap resets.
+        const PcTextureSignature incoming {
+            imagePtr, width, height, static_cast<u32>(format), wrapS, wrapT, true, tlutName
+        };
+        const auto sigIt = sTextureSignatures.find(nullKey);
+        if (sigIt != sTextureSignatures.end() && sigIt->second == incoming
+            && sTextureCache.find(nullKey) != sTextureCache.end()) {
+            return;
+        }
+        null_auth_invalidate(nullKey);
         PcCiTexture nullCi { static_cast<const u8*>(imagePtr), width, height, format, wrapS, wrapT, tlutName,
                              mipmap != GX_FALSE };
-        sCiTextures[nullKey] = nullCi;
+        const size_t rawBytes = gx_base_level_size(width, height, static_cast<u32>(format));
+        if (rawBytes > 0) {
+            const u8* src = static_cast<const u8*>(imagePtr);
+            nullCi.owned.assign(src, src + rawBytes);
+            nullCi.image = nullCi.owned.data();
+        }
+        sCiTextures[nullKey] = std::move(nullCi);
+        pc_gfx_note_deferred_init();
         return;
     }
     const uintptr_t key = reinterpret_cast<uintptr_t>(obj);
@@ -6067,10 +6130,22 @@ void pc_gfx_init_tex_obj_ci(GXTexObj* obj, void* imagePtr, u16 width, u16 height
         && sTextureCache.find(key) != sTextureCache.end()) {
         return;
     }
+    // M2: the fresh upload supersedes any stale deferred entry for a reused key.
+    sNullDeferredRgba.erase(key);
+    sNullDeferredTex.erase(key);
 
     PcCiTexture ci { static_cast<const u8*>(imagePtr), width, height, format, wrapS, wrapT, tlutName,
                      mipmap != GX_FALSE };
-    sCiTextures[key] = ci;
+    // m4: own the bytes so the stored description never aliases reset heap.
+    {
+        const size_t rawBytes = gx_base_level_size(width, height, static_cast<u32>(format));
+        if (rawBytes > 0) {
+            const u8* src = static_cast<const u8*>(imagePtr);
+            ci.owned.assign(src, src + rawBytes);
+            ci.image = ci.owned.data();
+        }
+    }
+    sCiTextures[key] = std::move(ci);
     if (upload_ci_texture(obj, ci)) {
         sTextureSignatures[key] = signature;
     }
