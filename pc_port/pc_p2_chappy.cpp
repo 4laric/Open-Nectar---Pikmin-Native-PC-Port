@@ -1073,7 +1073,7 @@ void pc_p2_chappy_setup()
             }
         }
     }
-    // Approved #895 resident budgets (512 KiB per clip, 48 MiB per setup),
+    // #895 resident budgets (owner-approved 1 MiB per clip, 48 MiB per setup),
     // shared with every pose-bank loader. loadClip is transactional: a
     // rejected clip loads no Shapes and never becomes the material owner, so
     // the legacy fallback below starts clean.

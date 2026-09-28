@@ -73,9 +73,9 @@ const FamilyDef FAMILIES[] = {
 // Resident budgets (#895): Shape slots cost their file size, decoded poses
 // their vector payload (see pc_p2_pose_loader.h). PoseFileBytes matches the
 // p2pose::decodeBaked cap.
-// Approved #895 acceptance budgets, shared with every pose-bank loader.
+// #895 budgets (owner-approved 1 MiB per clip), shared with every pose-bank loader.
 constexpr size_t PoseFileBytes = p2poseload::PoseFileBytes;  // per pose file
-constexpr size_t ClipBytes = p2poseload::ClipBytes;          // resident per clip (512 KiB)
+constexpr size_t ClipBytes = p2poseload::ClipBytes;          // resident per clip (1 MiB)
 constexpr size_t TotalBytes = p2poseload::TotalBytes;        // resident per setup (48 MiB)
 
 struct Bank {

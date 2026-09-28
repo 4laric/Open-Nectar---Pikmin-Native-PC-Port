@@ -40,11 +40,11 @@
 
 namespace p2poseload {
 
-// Resident budgets shared by the dedicated families (the approved #895
-// acceptance numbers: 512 KiB per clip, 48 MiB per setup). PoseFileBytes is
-// the p2pose::decodeBaked cap.
+// Resident budgets shared by every pose-bank loader (#895). The owner
+// approved 1 MiB resident per clip (was 512 KiB) and 48 MiB per setup.
+// PoseFileBytes is the p2pose::decodeBaked cap.
 constexpr std::size_t PoseFileBytes = 1024 * 1024;
-constexpr std::size_t ClipBytes = 512 * 1024;
+constexpr std::size_t ClipBytes = 1024 * 1024;
 constexpr std::size_t TotalBytes = 48 * 1024 * 1024;
 
 struct Limits {
