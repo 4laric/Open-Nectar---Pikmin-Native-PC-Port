@@ -12,10 +12,16 @@ int main() {
             assert(p2campaign::hostType(sources[i],original,true)==original);
         }
     }
-    for (unsigned source: {0u,1u,41u,45u,58u,99u,999u})
+    for (unsigned source: {0u,1u,41u,45u,99u,999u})
         assert(p2campaign::hostType(source,17,false)==17);
     for (unsigned source : {9u,23u,34u,44u,54u,56u,57u,59u,60u,61u,62u,63u,65u,69u,70u,71u,78u,79u,101u,17u,18u,24u,25u,15u,75u,26u,27u,84u,93u,66u,97u})
         assert(p2campaign::hasStaticHost(source));
+    // #244 OWN: Careening Dirigibug rides TEKI_Napkid (11) statically.
+    for (int original = 0; original < 34; ++original) {
+        assert(p2campaign::hostType(58u, original, false) == 11);
+        assert(p2campaign::hostType(58u, original, true) == original);
+    }
+    assert(p2campaign::hasStaticHost(58u));
     // inst-chappy (#871, lane complete): Chappy (2), FireChappy (33),
     // YellowChappy (43) and KingChappy (53) ride TEKI_Swallow (4),
     // KumaChappy (35) rides TEKI_Swallob (32), LeafChappy (67) rides
