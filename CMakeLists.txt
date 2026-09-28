@@ -403,6 +403,7 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_groink_hit.cpp
     pc_port/pc_p2_groink_strike.cpp
     pc_port/pc_p2_groink_carcass.cpp
+    pc_port/pc_p2_groink_fsm.cpp
     pc_port/pc_p2_groink_teki.cpp
     pc_port/pc_p2_projectiles.cpp
     pc_port/pc_p2_hardlanes.cpp
@@ -1942,6 +1943,14 @@ add_executable(p2_groink_volley_test tools/p2_groink_volley_test.cpp pc_port/pc_
 target_include_directories(p2_groink_volley_test PRIVATE pc_port)
 target_compile_options(p2_groink_volley_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_groink_volley_test COMMAND p2_groink_volley_test)
+# #888 WP5: engine-free NormMiniHoudai/FixMiniHoudai source FSM (states,
+# animation key events, gun aim, 3-shell volleys, shake-off, death).
+add_executable(p2_groink_fsm_test tools/p2_groink_fsm_test.cpp pc_port/pc_p2_groink_fsm.cpp
+    pc_port/pc_p2_groink.cpp pc_port/pc_p2_groink_attack.cpp pc_port/pc_p2_groink_volley.cpp
+    pc_port/pc_p2_groink_hit.cpp pc_port/pc_p2_groink_target.cpp)
+target_include_directories(p2_groink_fsm_test PRIVATE pc_port)
+target_compile_options(p2_groink_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_groink_fsm_test COMMAND p2_groink_fsm_test)
 add_executable(p2_groink_hit_test tools/p2_groink_hit_test.cpp pc_port/pc_p2_groink_hit.cpp)
 target_include_directories(p2_groink_hit_test PRIVATE pc_port)
 target_compile_options(p2_groink_hit_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
