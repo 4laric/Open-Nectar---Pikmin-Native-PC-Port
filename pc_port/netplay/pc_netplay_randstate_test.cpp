@@ -276,6 +276,56 @@ int main()
 		for (int i = 10; i < 16; ++i) padZero = padZero && wi[i] == 0;
 		CHECK(padZero, "idle input wire unchanged (flags+pad zero)");
 	}
+	// 10. M4 lane B1 first-apply rule: the first snapshot (nothing applied
+	// yet) applies at max(kFirstApplyFrame, completion + 1), whatever the
+	// delay; later generations keep completion + 1.
+	{
+		for (uint32_t delay = 1; delay <= 8; ++delay) {
+			Reassembler r;
+			PcRandState st = sample_state(1);
+			uint8_t wire[kStateBytes];
+			encode(st, wire);
+			// Host submits 0..15 land on frames delay..delay+15.
+			for (uint8_t idx = 0; idx < kFragCount; ++idx) {
+				uint8_t p[4];
+				for (int i = 0; i < 4; ++i) p[i] = wire[idx * 4 + i];
+				r.feed(true, frag_seq_make(idx), p, idx + 1 == kFragCount, delay + idx);
+			}
+			CHECK(r.has_pending() && r.pending_frame() == kFirstApplyFrame,
+			      "first snapshot applies at frame 32 at every delay 1..8");
+			PcRandState got;
+			CHECK(r.take_pending(got), "first snapshot taken");
+			r.mark_applied(got.gen);
+			PcRandState st2 = sample_state(2);
+			uint8_t wire2[kStateBytes];
+			encode(st2, wire2);
+			feed_wire(r, wire2, 40);
+			CHECK(r.has_pending() && r.pending_frame() == 41, "later gens keep completion + 1");
+		}
+		// discard_pending_upto: the RESUME snapshot supersedes pending gens.
+		Reassembler r;
+		PcRandState a = sample_state(3);
+		uint8_t wa[kStateBytes];
+		encode(a, wa);
+		feed_wire(r, wa, 10);
+		CHECK(r.has_pending() && r.pending_gen() == 3, "gen 3 pending");
+		CHECK(!r.discard_pending_upto(2), "pending gen 3 survives a gen 2 resume");
+		CHECK(r.has_pending(), "still pending");
+		CHECK(r.discard_pending_upto(3), "gen 3 dropped by a gen 3 resume");
+		CHECK(!r.has_pending(), "nothing pending after discard");
+		r.mark_applied(4);
+		feed_wire(r, wa, 20);
+		CHECK(!r.has_pending(), "stale gen after resume is a no-op");
+		// The HOLD flag bit round-trips next to the chunk bits.
+		PcNetplayInput in;
+		in.flags = pc_netplay_gekko::kFlagsHold | pc_netplay_gekko::kFlagsRandChunk;
+		uint8_t w[16];
+		pc_netplay_input_encode(in, w);
+		PcNetplayInput out;
+		CHECK(pc_netplay_input_decode(w, 16, out) && w[10] == 0x05
+		          && (out.flags & pc_netplay_gekko::kFlagsHold) != 0,
+		      "HOLD flag bit 2 on the wire");
+	}
 
 	if (sFailures == 0) std::printf("pc_netplay_randstate_test: PASS\n");
 	else std::printf("pc_netplay_randstate_test: %d FAILURES\n", sFailures);

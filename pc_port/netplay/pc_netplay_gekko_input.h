@@ -12,7 +12,7 @@
 //   6       1     triggerL u8
 //   7       1     triggerR u8
 //   8       2     control yaw u16, M2c quantisation (1/65536 turns)
-//   10      1     flags u8 (reserved, always 0; cf. pc_input_log v2 flags)
+//   10      1     flags u8 (0 unless M4: bits 0/1 randstate chunk, bit 2 HOLD)
 //   11      5     zero padding to 16 bytes
 //
 // Engine-free and host-testable: only <cstdint>/<cstddef>. The session layer
@@ -39,6 +39,13 @@ constexpr uint8_t kFlagsNone = 0;
 // fragment payload the reassembler ignores as a no-op.
 constexpr uint8_t kFlagsRandChunk = 0x01;
 constexpr uint8_t kFlagsRandLast = 0x02;
+// M4 lane B1 synchronized HOLD (issue #885): the host sets this on exactly
+// one submitted input (edge-triggered) when its randomizer link goes down.
+// That input's GekkoNet frame H is the hold frame on both peers: both keep
+// submitting through frame H+11 (kHoldLeadFrames 12 exceeds the maximum
+// local delay 8), advance through H+11 and then stop until the host's
+// RESUME snapshot (bulk kBulkRandFull) is in hand. The joiner never sets it.
+constexpr uint8_t kFlagsHold = 0x04;
 } // namespace pc_netplay_gekko
 
 struct PcNetplayInput {
