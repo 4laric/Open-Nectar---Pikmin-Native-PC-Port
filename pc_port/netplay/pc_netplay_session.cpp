@@ -41,9 +41,11 @@
 // peer converges. Stall turns (no Advance) never spend a whole slot: they
 // pump the network and wait ~1 ms, so the 30 Hz budget is spent on ticks, not
 // waits. Short waits use one shared high-resolution waitable timer (the
-// timer carries the bulk, only the ~1.5 ms tail spins), so throttled pairs
-// hold 30 Hz without pinning a core; timer-resolution power throttling is
-// ignored only while the session runs.
+// timer carries the bulk; a slot wait spins at most its last 1 ms and poll
+// waits never spin), so throttled pairs hold 30 Hz and a lobby wait idles
+// without pinning a core. While the session runs, the process opts out of
+// timer-resolution power throttling (its timer-resolution requests are
+// always honoured); at session end control returns to the system.
 // PIKMIN_NETPLAY_UNTHROTTLED=1 runs as fast as the session allows (tests).
 // Stall % is the wall-clock share of no-Advance turns (the slot wait lives on
 // advance turns and is never charged as stall); the logs also give effective
@@ -470,14 +472,16 @@ double now_ms()
 // ~15.6ms), which quantised both the handshake RTT samples and the 30 Hz
 // slot wait. The bulk of every short wait therefore runs on a waitable timer
 // created with CREATE_WAITABLE_TIMER_HIGH_RESOLUTION (declared in
-// synchapi.h); only a ~1.5 ms tail spins (n1: the spin tail stays small, at
-// most about 1-2 ms). The timer-resolution power-throttling opt-out
+// synchapi.h). Slot waits spin only a tail of at most 1 ms; poll waits
+// (handshake, stall turns) block on the timer and never spin (fix3 R2-2/R2-3).
+// The timer-resolution power-throttling opt-out
 // (SetProcessInformation / PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
 // resolved at runtime because its declaration needs _WIN32_WINNT >= 0x0602
 // while this build defaults to 0x0601) is held only while a netplay session
-// runs. The timeBeginPeriod path below is the fallback for when waitable
-// timer creation itself fails; it keeps the old single-sample coarse/fine
-// classification.
+// runs. If the high-resolution flag is unsupported (Windows before 1803) the
+// plain waitable timer is used with timeBeginPeriod(1) held until exit
+// (R2-4); if no waitable timer can be created at all, the timeBeginPeriod
+// path keeps the old single-sample coarse/fine classification.
 #ifdef _WIN32
 static bool sHiresTimerReady = false;
 static HANDLE sHiresTimer = NULL; // waitable timer for the bulk of short waits
@@ -505,12 +509,21 @@ static void ensure_hires_timer()
 		sHiresTimer = timer;
 		sHiresTimerHighRes = true;
 	} else {
+		// Fix3 R2-4: plain-timer fallback still raises the timer resolution, so
+		// pre-1803 Windows does not quantise slot sleeps to 15.6 ms.
+		// Paired with timeEndPeriod in hires_timer_teardown at exit.
 		timer = CreateWaitableTimerW(NULL, FALSE, NULL);
-		if (timer != NULL) sHiresTimer = timer;
+		if (timer != NULL) {
+			sHiresTimer = timer;
+			sHiresTimerHighRes = false;
+			timeBeginPeriod(1);
+			sHiresPeriodBegun = true;
+		}
 	}
 	if (sHiresTimer != NULL) {
-		printf("[netplay] timer path: %swaitable timer\n",
-		       sHiresTimerHighRes ? "high-resolution " : "plain ");
+		printf("[netplay] timer path: %swaitable timer%s\n",
+		       sHiresTimerHighRes ? "high-resolution " : "plain ",
+		       sHiresTimerHighRes ? "" : " + timeBeginPeriod(1)");
 	} else {
 		timeBeginPeriod(1);
 		sHiresPeriodBegun = true;
@@ -527,47 +540,61 @@ static void ensure_hires_timer()
 static inline void ensure_hires_timer() {}
 #endif
 
-static void sleep_hires_ms(double ms)
+// Waits ms. Everything except the last spinTailMs blocks; the tail spins so a
+// slot deadline lands precisely (fix3 R2-3: at most 1 ms, and the caller adds
+// no spin of its own). Poll waits (handshake, stall turns) pass
+// spinTailMs = 0 and block for the whole wait, never spinning (R2-2): the
+// high-resolution timer's ~0.5 ms precision is ample for a 1 ms poll.
+static void sleep_hires_ms(double ms, double spinTailMs = 1.0)
 {
 	if (ms <= 0) return;
+	if (spinTailMs < 0) spinTailMs = 0;
+	if (spinTailMs > 1.0) spinTailMs = 1.0;
 	ensure_hires_timer();
 	const double start = now_ms();
+	const double blockMs = ms - spinTailMs;
 #ifdef _WIN32
 	if (sHiresTimer != NULL) {
-		// Waitable-timer path: the timer carries the bulk, so Sleep
-		// granularity never matters; only the ~1.5 ms tail spins (n1).
-		const double bulk = ms - 1.5;
-		if (bulk > 0.5) {
+		// Waitable-timer path (high-resolution, or plain + timeBeginPeriod).
+		if (blockMs > 0.05) {
 			LARGE_INTEGER due;
-			due.QuadPart = -(LONGLONG)(bulk * 10000.0); // ms to 100 ns units
+			due.QuadPart = -(LONGLONG)(blockMs * 10000.0); // ms to 100 ns units
 			if (SetWaitableTimer(sHiresTimer, &due, 0, NULL, NULL, FALSE)) {
 				WaitForSingleObject(sHiresTimer, INFINITE);
 			} else {
 				std::this_thread::sleep_for(
-				    std::chrono::duration<double, std::milli>(bulk));
+				    std::chrono::duration<double, std::milli>(blockMs));
 			}
 		}
-	} else if (!sHiresCoarse && ms > 2.5) {
-		// Fallback path only (waitable timer creation failed): sleep the
-		// bulk, spin only the ~2 ms tail. Coarse timers spin instead, as
-		// Sleep would quantise to 15.6 ms.
-		std::this_thread::sleep_for(
-		    std::chrono::duration<double, std::milli>(ms - 2.0));
+	} else if (!sHiresCoarse || spinTailMs == 0) {
+		// timeBeginPeriod fallback (waitable timer creation failed). On a
+		// coarse timer a precise slot wait still spins (Sleep would round
+		// up to 15.6 ms), but a poll wait always blocks: a late poll only
+		// costs latency, a spinning one costs a core.
+		if (blockMs > 0.05)
+			std::this_thread::sleep_for(
+			    std::chrono::duration<double, std::milli>(blockMs));
 	}
 #else
-	if (ms > 2.5)
+	if (blockMs > 0.05)
 		std::this_thread::sleep_for(
-		    std::chrono::duration<double, std::milli>(ms - 2.0));
+		    std::chrono::duration<double, std::milli>(blockMs));
 #endif
+	if (spinTailMs == 0) return;
 	const double deadline = start + ms;
 	while (now_ms() < deadline - 0.3) std::this_thread::yield();
 	while (now_ms() < deadline) {
 	}
 }
 
-// Fix2 n1: timer-resolution power-throttling opt-out, held only while a
-// netplay session runs. The constants and PROCESS_POWER_THROTTLING_STATE are
-// declared unconditionally, but the SetProcessInformation function
+// Fix3 R2-1: timer-resolution power-throttling opt-out, held only while a
+// netplay session runs. "Always honour timer resolution requests" is
+// ControlMask = PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION with
+// StateMask = 0; handing control back to the system is ControlMask = 0 with
+// StateMask = 0. (Setting StateMask to the flag instead means "always
+// ignore" timer resolution requests, which is the opposite of this opt-out.)
+// The constants and PROCESS_POWER_THROTTLING_STATE are declared
+// unconditionally, but the SetProcessInformation function
 // declaration needs _WIN32_WINNT >= 0x0602 while this build defaults to
 // 0x0601, so resolve it at runtime via GetProcAddress: on Windows 8+ it is
 // in kernel32, elsewhere the session simply runs without the opt-out.
@@ -597,12 +624,21 @@ static void netplay_timer_power_opt(bool on)
 	if (on == active) return;
 	PROCESS_POWER_THROTTLING_STATE state;
 	state.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
-	state.ControlMask = PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
-	state.StateMask = on ? PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION : 0;
+	if (on) {
+		// Always honour timer resolution requests while the session
+		// runs (Control = flag, State = 0).
+		state.ControlMask = PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+		state.StateMask = 0;
+	} else {
+		// Hand timer-throttling control back to the system.
+		state.ControlMask = 0;
+		state.StateMask = 0;
+	}
 	if (fn(GetCurrentProcess(), ProcessPowerThrottling, &state, sizeof(state))) {
 		active = on;
 		printf("[netplay] power-throttling opt-out: %s\n",
-		       on ? "timer resolution ignored while session runs" : "restored");
+		       on ? "timer resolution requests always honoured while session runs"
+		          : "released (timer-resolution throttling back under system control)");
 	} else {
 		printf("[netplay] power-throttling opt-out: failed (%lu)\n",
 		       (unsigned long)GetLastError());
@@ -1031,7 +1067,8 @@ void stop_session()
 		delete sSock;
 		sSock = nullptr;
 	}
-	// Fix2 n1: the session is over, hand timer-resolution throttling back.
+	// Fix3 R2-1: the session is over, hand timer-resolution throttling back
+	// to the system (ControlMask = StateMask = 0).
 	netplay_timer_power_opt(false);
 }
 
@@ -1847,8 +1884,8 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 			sSock->set_peer(sCfg.joinIp, sCfg.joinPort);
 		}
 		sLink = new pc_netplay_transport::GekkoLink(sSock);
-		// Fix2 n1: ignore timer-resolution power throttling while the
-		// session runs (restored in stop_session).
+		// Fix3 R2-1: always honour this process's timer-resolution requests
+		// while the session runs (released in stop_session).
 		netplay_timer_power_opt(true);
 	}
 
@@ -1880,12 +1917,15 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 		// Polish: poll every ~1 ms (not 5 ms) so the nonce-matched RTT
 		// measures the wire, not the poll phase (else +30-50 ms bias picks
 		// one frame too many at 50/100/200 ms one-way). The wait is the
-		// hires sleep+spin below, not Sleep(1): hidden processes do not
+		// hires timer wait below, not Sleep(1): hidden processes do not
 		// get 1 ms Sleep granularity (B1), so a plain sleep quantises
 		// every sample to the 15.6 ms tick.
 		sys->mControllerMgr.update();
 		if (handshake_pump()) start_gekko_session();
-		sleep_hires_ms(1.0);
+		// Fix3 R2-2: the 1 ms poll blocks on the waitable timer (spin tail
+		// 0), so a host waiting with no joiner idles instead of pinning a
+		// core.
+		sleep_hires_ms(1.0, 0.0);
 		return true;
 	}
 
@@ -1954,14 +1994,11 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 			double now = now_ms();
 			if (sNextTurnMs == 0) sNextTurnMs = now + kSlotMs;
 			if (now < sNextTurnMs) {
-				// Wait the bulk on the high-resolution waitable timer, spin
-				// only the ~2 ms tail (M3/n1): a full yield-spin pins a core
-				// per instance for the session.
+				// Fix3 R2-3: one call; the timer carries the bulk and
+				// sleep_hires_ms owns the whole spin tail (at most 1 ms per
+				// slot, no caller-side spin).
 				const double wait = sNextTurnMs - now;
-				if (wait > 2.5) sleep_hires_ms(wait - 2.0);
-				while (now_ms() < sNextTurnMs - 0.3) std::this_thread::yield();
-				while (now_ms() < sNextTurnMs) {
-				}
+				if (wait > 0.05) sleep_hires_ms(wait);
 				sNextTurnMs += kSlotMs * effAdv + extraMs;
 			} else {
 				// Overrun: bounded catch-up. Far behind (long load inside
@@ -1976,10 +2013,11 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 			}
 		} else {
 			// Stall turn: keep pumping without spending a whole slot.
-			// The network was already pumped above; a ~1 ms hires wait
+			// The network was already pumped above; a ~1 ms timer wait
 			// avoids a busy spin while keeping poll latency far under a
 			// slot (plain Sleep(1) is ~15.6 ms in hidden runs, B1).
-			sleep_hires_ms(1.0);
+			// Fix3 R2-2: spin tail 0, so stall turns block on the timer.
+			sleep_hires_ms(1.0, 0.0);
 		}
 	}
 	if (advances == 0) {
