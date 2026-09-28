@@ -17,6 +17,13 @@
 #include <mutex>
 #include <thread>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
 // The ICE channel/size contract must match the UDP transport exactly: the
 // session talks to either transport through hs_send/hs_drain, and the wire
 // prefix is shared. Reuse-by-value with a compile-time check (m9).
@@ -169,6 +176,7 @@ bool b64url_decode(const std::string& text, std::vector<uint8_t>* out, std::stri
 
 constexpr size_t kMaxSdpBytes = 8192;
 constexpr size_t kMaxRawBytes = 12288;
+static_assert(kMaxSdpBytes == kMaxBundleSdpBytes, "v1 and v2 share the SDP cap");
 
 } // namespace
 
@@ -427,7 +435,9 @@ bool ice_decode_offer_v2(const std::string& text, std::string* sdp, SessionBundl
 	};
 	std::string t = trim(text);
 	if (t.compare(0, 6, "NPIX2-") != 0) return fail("missing NPIX2- version prefix");
-	if (t.size() > 6 + 131072) return fail("too long (limit 131072)");
+	// Bounded before decoding: no valid v2 offer is longer than this.
+	if (t.size() > kMaxOfferV2Chars)
+		return fail(("too long (limit " + std::to_string(kMaxOfferV2Chars) + ")").c_str());
 	std::vector<uint8_t> raw;
 	std::string derr;
 	if (!b64url_decode(t.substr(6), &raw, &derr)) return fail(derr.c_str());
@@ -474,14 +484,26 @@ bool ice_read_code_arg(const std::string& arg, std::string* code, std::string* e
 			if (err != nullptr) *err = "cannot open code file " + path;
 			return false;
 		}
+		// Bounded read: a file larger than the longest valid code (plus
+		// whitespace slack) is refused instead of read in full.
+		const size_t kMaxCodeFileBytes = kMaxOfferV2Chars + 4096;
 		std::string raw;
 		char chunk[4096];
+		bool tooBig = false;
 		while (true) {
 			size_t n = fread(chunk, 1, sizeof(chunk), f);
 			if (n > 0) raw.append(chunk, n);
+			if (raw.size() > kMaxCodeFileBytes) {
+				tooBig = true;
+				break;
+			}
 			if (n < sizeof(chunk)) break;
 		}
 		fclose(f);
+		if (tooBig) {
+			if (err != nullptr) *err = "code file is too large to be a connection code: " + path;
+			return false;
+		}
 		*code = trim(raw);
 		if (code->empty()) {
 			if (err != nullptr) *err = "code file is empty: " + path;
@@ -500,16 +522,35 @@ bool ice_read_code_arg(const std::string& arg, std::string* code, std::string* e
 bool ice_write_code_file(const std::string& path, const std::string& code, std::string* err)
 {
 	if (path.empty()) return true;
-	FILE* f = fopen(path.c_str(), "wb");
+	// m9: write a temporary file next to the target, then rename it over the
+	// target, so a reader polling the path sees either nothing or the whole
+	// code (never an empty or half-written file).
+	const std::string tmp = path + ".tmp";
+	FILE* f               = fopen(tmp.c_str(), "wb");
 	if (f == nullptr) {
-		if (err != nullptr) *err = "cannot write code file " + path;
+		if (err != nullptr) *err = "cannot write code file " + tmp;
 		return false;
 	}
 	bool ok = fwrite(code.c_str(), 1, code.size(), f) == code.size()
 	    && fwrite("\n", 1, 1, f) == 1;
-	fclose(f);
-	if (!ok && err != nullptr) *err = "short write to " + path;
-	return ok;
+	ok = (fclose(f) == 0) && ok;
+	if (!ok) {
+		remove(tmp.c_str());
+		if (err != nullptr) *err = "short write to " + tmp;
+		return false;
+	}
+#ifdef _WIN32
+	const bool moved =
+	    MoveFileExA(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+	const bool moved = rename(tmp.c_str(), path.c_str()) == 0;
+#endif
+	if (!moved) {
+		remove(tmp.c_str());
+		if (err != nullptr) *err = "cannot rename " + tmp + " to " + path;
+		return false;
+	}
+	return true;
 }
 
 // ---- IceSocket ----
@@ -1193,42 +1234,71 @@ bool ice_read_answer_stdin(std::function<void()> pump, std::string* answerOut, s
 	fflush(stdout);
 	// M3+m8: stdin blocks indefinitely (a human may take minutes), so read
 	// on a helper thread while the main thread keeps pumping the window.
-	// m8: valid codes can reach ~11k chars; accept a full line up to 16390.
+	// m8: valid codes can reach ~11k chars; accept a full line up to 16390
+	// (answers are ~221 chars; the slack only bounds a runaway paste).
+	// m4: one bad paste must not end the host. Every line is decoded; a bad
+	// one prints why and the prompt repeats. Only EOF ends the wait.
 	const size_t kMaxAnswerChars = 16390;
-	std::string line;
+	std::string answer;
+	std::string lastErr;
 	std::atomic<bool> done(false);
 	std::thread reader([&]() {
-		std::string acc;
-		acc.reserve(8192);
-		int c = 0;
-		while ((c = getchar()) != EOF && c != '\n') {
-			if (acc.size() >= kMaxAnswerChars) break;
-			acc.push_back((char)c);
+		while (true) {
+			std::string acc;
+			acc.reserve(1024);
+			int c         = 0;
+			bool overflow = false;
+			while ((c = getchar()) != EOF && c != '\n') {
+				if (acc.size() >= kMaxAnswerChars) {
+					overflow = true;
+					continue; // drain the rest of the runaway line
+				}
+				acc.push_back((char)c);
+			}
+			const std::string line = trim(acc);
+			if (overflow) {
+				lastErr = "bad ICE code: pasted line longer than " + std::to_string(kMaxAnswerChars)
+				        + " characters";
+			} else if (!line.empty()) {
+				bool isOffer = true;
+				std::string sdp, derr;
+				if (line.compare(0, 6, "NPIX2-") == 0) {
+					lastErr = "bad ICE code: that is an offer code (NPIX2-); paste the joiner's "
+					          "answer code (NPIX1-...) instead";
+				} else if (!ice_decode_code(line, &isOffer, &sdp, &derr)) {
+					lastErr = derr;
+				} else if (isOffer) {
+					lastErr = "bad ICE code: expected an answer, got an offer";
+				} else {
+					answer = line;
+					done   = true;
+					return;
+				}
+			}
+			if (c == EOF) {
+				done = true;
+				return;
+			}
+			if (!line.empty() || overflow) {
+				printf("[netplay] ice: %s\n[netplay] ice: paste the joiner's answer code again, "
+				       "then Enter:\n",
+				       lastErr.c_str());
+				fflush(stdout);
+			}
 		}
-		if (c == EOF && acc.empty()) {
-			done = true;
-			return;
-		}
-		line = trim(acc);
-		done = true;
 	});
 	while (!done) {
 		if (pump) pump();
 		std::this_thread::sleep_for(std::chrono::milliseconds(50));
 	}
 	reader.join();
-	if (line.empty()) {
-		if (err != nullptr) *err = "no answer code on stdin";
+	if (answer.empty()) {
+		if (err != nullptr)
+			*err = lastErr.empty() ? std::string("no answer code on stdin")
+			                       : "no valid answer code on stdin (last: " + lastErr + ")";
 		return false;
 	}
-	bool isOffer = true;
-	std::string sdp;
-	if (!ice_decode_code(line, &isOffer, &sdp, err)) return false;
-	if (isOffer) {
-		if (err != nullptr) *err = "bad ICE code: expected an answer, got an offer";
-		return false;
-	}
-	*answerOut = line;
+	*answerOut = answer;
 	return true;
 }
 
@@ -1241,34 +1311,6 @@ bool ice_host_session(const IceNetConfig& cfg, std::function<void()> pump, IceSo
 	}
 	std::string offer;
 	if (!outSock->host_create_offer(cfg, &offer, err, pump)) return false;
-	if (!ice_emit_code("offer", offer, err)) return false;
-	std::string answer;
-	if (const char* in = getenv_nonempty("PIKMIN_NETPLAY_ICE_ANSWER_IN")) {
-		if (!ice_poll_answer_file(in, ice_connect_timeout_ms(), pump, &answer, err)) return false;
-	} else {
-		if (!ice_read_answer_stdin(pump, &answer, err)) return false;
-	}
-	if (!outSock->host_apply_answer(answer, err)) return false;
-	double completedMs = -1;
-	if (!outSock->wait_connected(ice_connect_timeout_ms(), &completedMs, err, pump)) return false;
-	printf("[netplay] ice transport ready (connect %.0fms)\n", completedMs);
-	fflush(stdout);
-	return true;
-}
-
-bool ice_host_session_v2(const IceNetConfig& cfg, const SessionBundle& bundle,
-                         std::function<void()> pump, IceSocket* outSock, std::string* err)
-{
-	if (outSock == nullptr) {
-		if (err != nullptr) *err = "no socket";
-		return false;
-	}
-	std::string offer;
-	if (!outSock->host_create_offer_v2(cfg, bundle, &offer, err, pump)) return false;
-	printf("[netplay] ice offer bundle: seed=%u config=%lluB bootstrap=%lluB\n", bundle.seed,
-	       (unsigned long long)bundle.configText.size(),
-	       (unsigned long long)bundle.bootstrapBytes.size());
-	fflush(stdout);
 	if (!ice_emit_code("offer", offer, err)) return false;
 	std::string answer;
 	if (const char* in = getenv_nonempty("PIKMIN_NETPLAY_ICE_ANSWER_IN")) {

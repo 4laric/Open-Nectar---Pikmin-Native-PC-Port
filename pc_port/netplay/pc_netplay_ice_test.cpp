@@ -165,6 +165,71 @@ int main()
 			CHECK(!ice_encode_offer_v2(kFakeSdp, huge, &enc, &e) && !e.empty(),
 			      "v2 oversized config refused");
 		}
+		// m1 boundaries: every length is a u16 field, so the bootstrap cap is
+		// 65535. A 65535-byte bootstrap round-trips; 65536 is refused at
+		// encode time (it used to encode as length 0 and fail every decode).
+		{
+			SessionBundle edge = bundle;
+			edge.bootstrapBytes.assign(kMaxBundleBootBytes, 'b');
+			std::string enc, e, s2;
+			SessionBundle g;
+			CHECK(kMaxBundleBootBytes == 65535, "bootstrap cap is 65535");
+			CHECK(ice_encode_offer_v2(kFakeSdp, edge, &enc, &e), "65535-byte bootstrap encodes");
+			CHECK(ice_decode_offer_v2(enc, &s2, &g, &e) && g.bootstrapBytes == edge.bootstrapBytes,
+			      "65535-byte bootstrap round-trips");
+			CHECK(enc.size() <= kMaxOfferV2Chars, "largest-bootstrap offer fits the text cap");
+			std::printf("ice_test: v2 offer with a 65535 B bootstrap = %llu chars (cap %llu)\n",
+			            (unsigned long long)enc.size(), (unsigned long long)kMaxOfferV2Chars);
+			edge.bootstrapBytes.push_back('b');
+			CHECK(!ice_encode_offer_v2(kFakeSdp, edge, &enc, &e) && !e.empty(),
+			      "65536-byte bootstrap refused at encode");
+		}
+		// Text longer than the cap is refused before decoding.
+		{
+			std::string tooLong = "NPIX2-" + std::string(kMaxOfferV2Chars, 'A');
+			std::string s2, e;
+			SessionBundle g;
+			CHECK(!ice_decode_offer_v2(tooLong, &s2, &g, &e) && e.find("too long") != std::string::npos,
+			      "v2 text over the cap refused");
+		}
+		// cfgLen = 0 is refused (the launcher always sends the config block).
+		{
+			SessionBundle noCfg = bundle;
+			noCfg.configText.clear();
+			std::string enc, e, s2;
+			SessionBundle g;
+			CHECK(ice_encode_offer_v2(kFakeSdp, noCfg, &enc, &e), "encode with an empty config block");
+			CHECK(!ice_decode_offer_v2(enc, &s2, &g, &e) && e.find("config length") != std::string::npos,
+			      "v2 cfgLen=0 refused at decode");
+		}
+		// A v1 answer (or offer) fed to the v2 decoder is refused by prefix.
+		{
+			std::string ans, e, s2;
+			SessionBundle g;
+			CHECK(ice_encode_code(false, kFakeSdp, &ans, &e), "encode a v1 answer");
+			CHECK(!ice_decode_offer_v2(ans, &s2, &g, &e) && e.find("NPIX2-") != std::string::npos,
+			      "v1 answer refused by the v2 decoder");
+		}
+		// m9: code files are written atomically (tmp + rename, no tmp left);
+		// @file reads are bounded (a file larger than any code is refused).
+		{
+			const std::string path = "pc_netplay_ice_test_code.txt";
+			std::string e, got;
+			CHECK(ice_write_code_file(path, offer2, &e), "atomic code-file write");
+			FILE* tmp = std::fopen((path + ".tmp").c_str(), "rb");
+			CHECK(tmp == nullptr, "no temporary file left behind");
+			if (tmp != nullptr) std::fclose(tmp);
+			CHECK(ice_read_code_arg("@" + path, &got, &e) && got == offer2, "@file reads the code back");
+			FILE* f = std::fopen(path.c_str(), "wb");
+			if (f != nullptr) {
+				const std::string junk(kMaxOfferV2Chars + 8192, 'A');
+				std::fwrite(junk.data(), 1, junk.size(), f);
+				std::fclose(f);
+			}
+			CHECK(!ice_read_code_arg("@" + path, &got, &e) && e.find("too large") != std::string::npos,
+			      "@file larger than any code refused");
+			std::remove(path.c_str());
+		}
 	}
 
 	// 2. Relay filter unit checks on synthetic SDP.
