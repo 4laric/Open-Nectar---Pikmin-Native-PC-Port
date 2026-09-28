@@ -93,7 +93,10 @@ focus).
   path). Use the current build so the offer carries the seed.
 - `[netplay] ice setup failed: bad ICE code: ...` — the pasted code was
   truncated or belongs to the other direction (offers start `NPIX2-`,
-  answers `NPIX1-`). Copy the full single line.
+  answers `NPIX1-`). Copy the full single line. Pasted offers are capped
+  at ~16k characters (~12 KB of bootstrap); a bigger seed file must be
+  passed with `--netplay-join-ice @file.txt` instead (stock bootstraps
+  are ~300 B, so paste always fits them).
 - `[netplay] ice setup failed: ICE connect timed out` — no network path.
   Behind symmetric NAT: play over a VPN mesh (Tailscale/ZeroTier) using the
   VPN addresses, set up port forwarding, or bring your own TURN server
