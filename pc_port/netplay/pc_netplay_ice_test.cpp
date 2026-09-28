@@ -1,7 +1,11 @@
 // Netplay M5a host-run ICE test (issue #887).
 //
-// Two libjuice agents in one process connect over loopback with host
-// candidates only (no STUN/TURN, so no external network is required):
+// Two libjuice agents in one process connect with host candidates only
+// (no STUN/TURN, so no external network is required). m4: libjuice excludes
+// 127.x candidates unless JUICE_ENABLE_LOCALHOST_ADDRESS=1, so the selected
+// pair is normally a LAN host candidate (for example 192.168.x), not
+// loopback. The test therefore needs a live non-loopback IPv4 interface and
+// may fail offline or on CI without one:
 //   1. connection-code encode/decode round-trips, and garbage is rejected;
 //   2. the copy-paste flow (offer -> answer -> apply) reaches COMPLETED on
 //      both agents;
@@ -15,6 +19,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <thread>
@@ -104,6 +109,13 @@ int main()
 		CHECK(filtered.find(" typ host") == std::string::npos, "host filtered out");
 		CHECK(filtered.find(" typ srflx") == std::string::npos, "srflx filtered out");
 		CHECK(filtered.find("a=ice-ufrag:") != std::string::npos, "ufrag kept");
+		// m5: no extra blank line is emitted for a trailing newline.
+		CHECK(filtered.empty() || filtered.compare(filtered.size() - 4, 4, "\r\n\r\n") != 0,
+		      "no trailing blank line");
+		{
+			const std::string noCand = "a=ice-ufrag:x\r\na=ice-pwd:y\r\n";
+			CHECK(ice_filter_relay_candidates(noCand) == noCand, "CRLF round trip");
+		}
 		CHECK(!ice_sdp_has_relay(kFakeSdp), "fake SDP has no relay");
 		CHECK(ice_sdp_has_relay("a=candidate:3 1 UDP 1 10.0.0.5 9 typ relay\r\n"),
 		      "relay SDP detected");
@@ -201,6 +213,34 @@ int main()
 			}
 		}
 		CHECK(pong, "handshake ping-pong");
+	}
+
+	// 5. m9: IceLink (GekkoNet adapter) round trip over the same pair.
+	{
+		IceLink joinLink(&joinSock);
+		const uint8_t hello[6] = { 'g', 'e', 'k', 'k', 'o', '!' };
+		CHECK(hostSock.send_payload(kChannelGekko, hello, sizeof(hello)), "icelink send");
+		bool gotIt = false;
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+		while (!gotIt && std::chrono::steady_clock::now() < deadline) {
+			int n = 0;
+			GekkoNetResult** res = joinLink.receive_inner(&n);
+			for (int i = 0; i < n; ++i) {
+				if (res[i] != nullptr && res[i]->data_len == sizeof(hello)
+				    && res[i]->data != nullptr
+				    && memcmp(res[i]->data, hello, sizeof(hello)) == 0
+				    && res[i]->addr.size == kAddrBytes)
+					gotIt = true;
+				// receive_inner owns the results; release via the adapter.
+				if (res[i] != nullptr) {
+					free(res[i]->addr.data);
+					free(res[i]->data);
+					free(res[i]);
+				}
+			}
+			if (!gotIt) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+		}
+		CHECK(gotIt, "icelink adapter round trip");
 	}
 
 	if (sFailures == 0) std::printf("pc_netplay_ice_test: PASS\n");

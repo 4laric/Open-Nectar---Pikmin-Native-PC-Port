@@ -47,6 +47,7 @@ ICE_SCRUB_KEYS = (
     "PIKMIN_NETPLAY_ICE_PORT_END",
     "PIKMIN_NETPLAY_ICE_TIMEOUT_MS",
     "PIKMIN_NETPLAY_ICE_GATHER_TIMEOUT_MS",
+    "PIKMIN_NETPLAY_ICE_BIND",
 )
 
 
@@ -90,6 +91,10 @@ def main(argv=None):
     p.add_argument("--turn-only", action="store_true",
                    help="relay-only mode against a local juice_server")
     p.add_argument("--turn-port", type=int, default=48020)
+    p.add_argument("--turn-bind", type=str, default="127.0.0.2",
+                   help="bind address for the local TURN server and its relays. "
+                        "M1: a distinct loopback address (not 127.0.0.1) forces "
+                        "relay<->relay: per-IP TURN permissions then block the direct path")
     p.add_argument("--turn-user", type=str, default="m5a")
     p.add_argument("--turn-pass", type=str, default="m5a-relay-test")
     p.add_argument("--turn-relay-begin", type=int, default=48030)
@@ -159,7 +164,7 @@ def main(argv=None):
             raise SystemExit("ice_pair: --turn-only needs --turn-server-exe")
         cmd = [str(a.turn_server_exe.resolve()), "--port", str(a.turn_port),
                "--user", a.turn_user, "--pass", a.turn_pass,
-               "--bind", "127.0.0.1",
+               "--bind", a.turn_bind,
                "--relay-begin", str(a.turn_relay_begin),
                "--relay-end", str(a.turn_relay_end)]
         startup = None
@@ -185,9 +190,9 @@ def main(argv=None):
         if not ready:
             rc = turn_proc.poll()
             raise SystemExit(f"ice_pair: TURN server did not start (exit={rc})")
-        print(f"ice_pair: TURN server pid {turn_proc.pid} on 127.0.0.1:{a.turn_port}")
+        print(f"ice_pair: TURN server pid {turn_proc.pid} on {a.turn_bind}:{a.turn_port}")
         turn_env_turn = {
-            "PIKMIN_NETPLAY_TURN": f"127.0.0.1:{a.turn_port}:{a.turn_user}:{a.turn_pass}",
+            "PIKMIN_NETPLAY_TURN": f"{a.turn_bind}:{a.turn_port}:{a.turn_user}:{a.turn_pass}",
             "PIKMIN_NETPLAY_ICE_TURN_ONLY": "1",
         }
 
@@ -211,12 +216,34 @@ def main(argv=None):
     base_extra.update(rp.parse_kv(a.env, "env"))
 
     # Negative test: a corrupted offer must be rejected cleanly.
+    # m1: corrupt a real, well-formed offer by flipping one base64 char, so
+    # the joiner must fail on CRC (not on a synthetic version error).
     if a.neg_bad_code:
+        import base64
+        import binascii
+
+        def _encode_offer(sdp: str) -> str:
+            raw = bytearray()
+            raw.append(0x01)
+            raw.append(ord("O"))
+            raw.append((len(sdp) >> 8) & 0xFF)
+            raw.append(len(sdp) & 0xFF)
+            raw.extend(sdp.encode())
+            raw.extend(binascii.crc32(bytes(raw)).to_bytes(4, "big"))
+            return "NPIX1-" + base64.urlsafe_b64encode(bytes(raw)).decode().rstrip("=")
+
+        _sdp = ("a=ice-ufrag:negUfrag1234\r\n"
+                "a=ice-pwd:negPasswordPassword1234567890\r\n"
+                "a=candidate:1 1 UDP 2113937151 192.168.2.61 50001 typ host\r\n")
+        _good = _encode_offer(_sdp)
+        _lst = list(_good)
+        _pos = 12 if len(_lst) > 12 else len(_lst) - 1
+        _lst[_pos] = "B" if _lst[_pos] != "B" else "A"
+        bad = "".join(_lst)
         neg_extra = dict(base_extra)
         neg_extra["PIKMIN_STATE_HASH_LOG"] = str(join_hash)
         neg_extra["PIKMIN_NETPLAY_LOCAL_INPUT_FILE"] = str(join_inputs.resolve())
         neg_extra["PIKMIN_NETPLAY_EXIT_AFTER_TICKS"] = "10"
-        bad = "NPIX1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
         stop = threading.Event()
 
         def refresh(run, tok):
@@ -392,11 +419,23 @@ def main(argv=None):
         print("ice_pair: FAIL: missing ice completed lines")
         ok = False
     if a.turn_only:
-        relay_host = [ln for ln in ice_sel_host if "relay" in ln]
-        relay_join = [ln for ln in ice_sel_join if "relay" in ln]
-        print(f"ice_pair: relay selected lines host={len(relay_host)} join={len(relay_join)}")
+        # M1: require "typ relay" inside the local [...] bracket of BOTH
+        # peers. Checking the whole line is not enough: the host can select
+        # local srflx + remote relay while the joiner learns the host's
+        # direct address as prflx.
+        def _local_is_relay(line: str) -> bool:
+            i = line.find("local [")
+            if i < 0:
+                return False
+            j = line.find("]", i)
+            seg = line[i:j] if j >= 0 else line[i:]
+            return "typ relay" in seg
+
+        relay_host = [ln for ln in ice_sel_host if _local_is_relay(ln)]
+        relay_join = [ln for ln in ice_sel_join if _local_is_relay(ln)]
+        print(f"ice_pair: relay-local selected lines host={len(relay_host)} join={len(relay_join)}")
         if not relay_host or not relay_join:
-            print("ice_pair: FAIL: TURN-only pair did not select a relay candidate")
+            print("ice_pair: FAIL: TURN-only pair did not select a relay candidate LOCALLY on both peers")
             ok = False
     print(f"ice_pair: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
