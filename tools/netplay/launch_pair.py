@@ -146,6 +146,10 @@ def launch(exe, cwd, args, env_extra, log_path):
     for key in SCRUB_KEYS:
         env.pop(key, None)
     env.update(PIKMIN_RANDOMIZER_TEST_BACKGROUND="1", SDL_AUDIODRIVER="dummy")
+    # Loopback-only sockets: test peers never touch a real adapter, so
+    # Windows Firewall never prompts for the per-run exe copies.
+    env["PIKMIN_NETPLAY_UDP_BIND"] = "127.0.0.1"
+    env["PIKMIN_NETPLAY_ICE_BIND"] = "127.0.0.1"
     env.update(env_extra)
     startup = None
     if sys.platform == "win32":

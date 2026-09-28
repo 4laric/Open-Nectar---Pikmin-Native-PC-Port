@@ -167,6 +167,10 @@ def launch(exe, run, boot, extra_args, env_extra, stdout_log, unthrottled=True):
     # M5: throttled runs (the path humans use: 30 Hz pacing + the
     # frames-ahead throttle) set PIKMIN_NETPLAY_UNTHROTTLED=0 explicitly.
     env["PIKMIN_NETPLAY_UNTHROTTLED"] = "1" if unthrottled else "0"
+    # Loopback-only sockets: test peers never touch a real adapter, so
+    # Windows Firewall never prompts for the per-run exe copies.
+    env["PIKMIN_NETPLAY_UDP_BIND"] = "127.0.0.1"
+    env["PIKMIN_NETPLAY_ICE_BIND"] = "127.0.0.1"
     env.update(env_extra)
     env.pop("BBFT_PORT", None)
     startup = None

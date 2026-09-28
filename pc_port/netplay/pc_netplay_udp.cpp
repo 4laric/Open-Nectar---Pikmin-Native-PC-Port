@@ -120,6 +120,13 @@ bool UdpSocket::bind(uint16_t port)
 	memset(&addr, 0, sizeof(addr));
 	addr.sin_family      = AF_INET;
 	addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	// Local tests (tools/netplay harnesses, play_local) set
+	// PIKMIN_NETPLAY_UDP_BIND=127.0.0.1: a loopback-only socket never
+	// raises the Windows Firewall prompt. Real play binds every interface.
+	if (const char* b = getenv("PIKMIN_NETPLAY_UDP_BIND")) {
+		in_addr a;
+		if (*b && inet_pton(AF_INET, b, &a) == 1) addr.sin_addr = a;
+	}
 	addr.sin_port        = htons(port);
 	if (::bind(s, (sockaddr*)&addr, sizeof(addr)) != 0) {
 		sock_close(s);

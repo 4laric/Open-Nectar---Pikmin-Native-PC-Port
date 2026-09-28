@@ -107,6 +107,10 @@ foreach ($f in @($offerFile, $answerFile, "$offerFile.tmp", "$answerFile.tmp")) 
 
 # Environment for the two peers (inherited by Start-Process).
 $env:PIKMIN_NETPLAY_STUN = "none"
+# Loopback-only sockets for the local test: Windows Firewall never prompts
+# for a socket bound to 127.0.0.1 (real two-PC play binds every interface).
+$env:PIKMIN_NETPLAY_ICE_BIND = "127.0.0.1"
+$env:PIKMIN_NETPLAY_UDP_BIND = "127.0.0.1"
 if (-not (Test-Path -LiteralPath (Join-Path $exeDir "SDL2.dll")) -and (Test-Path "C:\msys64\mingw64\bin\SDL2.dll")) {
     $env:PATH = "C:\msys64\mingw64\bin;" + $env:PATH
 }
