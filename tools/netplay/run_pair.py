@@ -372,8 +372,9 @@ def main(argv=None):
                         "held_ms (hold at -> resume, per peer) must be >= MIN")
     p.add_argument("--min-tuples", type=int, default=None, metavar="N",
                    help="M4 B1 fix round 1: with --expect-hold, each peer's distinct "
-                        "tuples before each hold frame and after each resume frame "
-                        "must exceed N; otherwise each peer's total must exceed N")
+                        "tuples after each resume frame, and before each hold frame "
+                        "when that frame exceeds N, must exceed N; otherwise each "
+                        "peer's total must exceed N")
     p.add_argument("--expect-no-hold", action="store_true",
                    help="M4 B1 fix round 1 (negative control): implies sync; no hold, "
                         "held or resume line on either peer")
@@ -702,7 +703,11 @@ def main(argv=None):
                 post = hash_tuples(hashes, lo=rf + 1)
                 print(f"run_pair: {who}: tuples before hold frame {hf}={pre} "
                       f"after resume frame {rf}={post}")
-                if a.min_tuples is not None and (pre <= a.min_tuples or post <= a.min_tuples):
+                # Before the hold only when the hold frame leaves room for
+                # more than N distinct tuples (a missing-state HOLD at frame
+                # 4 cannot have any gameplay before it).
+                pre_due = a.min_tuples is not None and hf > a.min_tuples
+                if a.min_tuples is not None and ((pre_due and pre <= a.min_tuples) or post <= a.min_tuples):
                     tuple_fail.append(f"{who} tuples before {hf}={pre} / after {rf}={post} "
                                       f"not both > {a.min_tuples}")
 
