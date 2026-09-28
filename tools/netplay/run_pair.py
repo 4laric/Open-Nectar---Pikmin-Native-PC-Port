@@ -35,10 +35,24 @@ to <out>/session.json, the runner ledger the host reads). The summary adds
 the hold/resume lines, per-peer START_STAGE / [Pikmin Randomizer] /
 distinct navi-piki-teki-item tuple counts and the journal/mirror files
 present in each run dir.
+
+M4 lane B2 (issue #885) sessions across day ends: --token HEX64 reuses a run
+token (SESSION and FINGERPRINT; session 2 must reuse session 1's, otherwise
+its checkpoint's fingerprint does not match); --run-name NAME puts the run
+dirs at out/host/NAME and out/join/peer/NAME while the derived campaign dirs
+stay out/campaign and out/join/campaign, so a second session reuses both
+campaigns; --join-campaign-mode keep|clear|foreign:<file.sav>|newer prepares
+the joiner's campaign before launch (clear moves it aside to
+campaign.moved-<n>; foreign plants a checkpoint from another run; newer
+plants a valid copy of the host's newest checkpoint re-stamped as the next
+generation, header and hash included). The summary adds both peers'
+checkpoint / transfer / save barrier / CAMPAIGN_RESUMED / reseed lines and
+the distinct tuples after the day-3 reseed tick.
 """
 
 import argparse
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -67,6 +81,66 @@ def parse_kv(items, what):
         key, value = item.split("=", 1)
         out[key.strip()] = value.strip()
     return out
+
+
+def fnv1a64(data):
+    """pc_randomizer.cpp checkpointHash (FNV-1a 64)."""
+    h = 14695981039346656037
+    for byte in data:
+        h ^= byte
+        h = (h * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return h
+
+
+def restamp_checkpoint(src, dst, new_gen):
+    """B2 --join-campaign-mode newer: a VALID checkpoint for new_gen: the
+    header's generation field is replaced and the FNV-1a hash recomputed
+    (a bare rename would be a header/name mismatch, which the joiner sets
+    aside as stale instead of reporting a newer checkpoint)."""
+    raw = Path(src).read_bytes()
+    nl = raw.index(b"\n")
+    header, block = raw[:nl].decode("ascii"), raw[nl + 1:]
+    parts = header.split(" ")
+    parts[2] = str(new_gen)
+    body = " ".join(parts[:-1])
+    h = fnv1a64(body.encode("ascii") + b"\n" + block)
+    Path(dst).write_bytes((body + " " + str(h) + "\n").encode("ascii") + block)
+
+
+def prepare_join_campaign(mode, host_campaign, join_campaign):
+    """B2: prepare the joiner's campaign dir; returns a description."""
+    if mode in (None, "keep"):
+        return "keep"
+    if mode == "clear":
+        if not join_campaign.exists():
+            return "clear (nothing to move)"
+        n = 1
+        while (join_campaign.parent / f"campaign.moved-{n}").exists():
+            n += 1
+        dest = join_campaign.parent / f"campaign.moved-{n}"
+        join_campaign.rename(dest)
+        return f"clear (moved to {dest.name})"
+    if mode.startswith("foreign:"):
+        src = Path(mode[len("foreign:"):])
+        join_campaign.mkdir(parents=True, exist_ok=True)
+        dst = join_campaign / src.name
+        if dst.exists():
+            n = 1
+            while (join_campaign / f"{src.name}.harness-replaced-{n}").exists():
+                n += 1
+            dst.rename(join_campaign / f"{src.name}.harness-replaced-{n}")
+        shutil.copyfile(str(src), str(dst))
+        return f"foreign ({src} -> {dst.name})"
+    if mode == "newer":
+        savs = sorted(p for p in host_campaign.glob("*.sav") if re.match(r"^\d{20}\.sav$", p.name))
+        if not savs:
+            raise SystemExit("--join-campaign-mode newer: the host has no checkpoint")
+        gen = int(savs[-1].name[:20]) + 1
+        join_campaign.mkdir(parents=True, exist_ok=True)
+        dst = join_campaign / f"{gen:020d}.sav"
+        restamp_checkpoint(savs[-1], dst, gen)
+        return f"newer ({savs[-1].name} re-stamped as {dst.name})"
+    raise SystemExit(f"bad --join-campaign-mode {mode}")
 
 
 def write_bootstrap(path, token, profile, flarlic=10):
@@ -384,7 +458,18 @@ def main(argv=None):
     p.add_argument("--join-script-ticks", type=int, default=None, metavar="N",
                    help="M4 B1 fix round 1: the same for the joiner (seed b); 0 = "
                         "hands-off from the first submit")
+    p.add_argument("--token", type=str, default=None, metavar="HEX64",
+                   help="M4 B2: reuse this run token (SESSION and FINGERPRINT); default random, printed")
+    p.add_argument("--run-name", type=str, default="run",
+                   help="M4 B2: run dirs out/host/NAME and out/join/peer/NAME (the campaigns stay "
+                        "out/campaign and out/join/campaign)")
+    p.add_argument("--join-campaign-mode", type=str, default="keep",
+                   help="M4 B2: keep | clear | foreign:<file.sav> | newer (see the module docstring)")
     a = p.parse_args(argv)
+    if a.token is not None and not re.match(r"^[0-9a-f]{64}$", a.token):
+        raise SystemExit("--token wants 64 lowercase hex characters")
+    if not re.match(r"^[A-Za-z0-9._-]+$", a.run_name):
+        raise SystemExit("--run-name wants a plain folder name")
     if a.expect_hold is not None or a.expect_no_hold:
         a.expect = "sync"
     stale_window = None
@@ -407,12 +492,16 @@ def main(argv=None):
     # terminates and the pair disconnects). In production the peers are on
     # different machines; per-peer dirs are the faithful layout, and they
     # make the post-test save comparison meaningful.
-    host_run = out / "host" / "run"
-    join_run = out / "join" / "peer" / "run"
+    host_run = out / "host" / a.run_name
+    join_run = out / "join" / "peer" / a.run_name
     host_run.mkdir(parents=True, exist_ok=True)
     join_run.mkdir(parents=True, exist_ok=True)
+    # B2: prepare the joiner's derived campaign dir (parent^2(join run)).
+    campaign_note = prepare_join_campaign(a.join_campaign_mode, out / "campaign", out / "join" / "campaign")
+    print(f"run_pair: join campaign: {campaign_note}")
 
-    token = uuid.uuid4().hex * 2
+    token = a.token if a.token is not None else uuid.uuid4().hex * 2
+    print(f"run_pair: token {token}")
     token_join = token
     host_boot = host_run / "bootstrap.txt"
     template = None
@@ -484,8 +573,9 @@ def main(argv=None):
             pass
 
     # Per-peer scripted local inputs (brief: two different seeds).
-    host_inputs = out / "host_inputs.pkni"
-    join_inputs = out / "join_inputs.pkni"
+    tag = "" if a.run_name == "run" else a.run_name + "_"
+    host_inputs = out / f"{tag}host_inputs.pkni"
+    join_inputs = out / f"{tag}join_inputs.pkni"
     gen_inputs(a.ticks + 50, a.seed_a, host_inputs)
     gen_inputs(a.ticks + 50, a.seed_b, join_inputs)
     for who, keep, path in (("host", a.host_script_ticks, host_inputs),
@@ -710,6 +800,26 @@ def main(argv=None):
                 if a.min_tuples is not None and ((pre_due and pre <= a.min_tuples) or post <= a.min_tuples):
                     tuple_fail.append(f"{who} tuples before {hf}={pre} / after {rf}={post} "
                                       f"not both > {a.min_tuples}")
+
+    # B2 summary: checkpoint decision, transfer, save barrier, resume, reseed.
+    b2_needles = ("[netplay] checkpoint", "[netplay] transfer", "[netplay] save barrier",
+                  "CAMPAIGN_RESUMED", "CAMPAIGN_SAVED", "[netplay] local campaign checkpoint is stale",
+                  "[netplay] set aside", "[netplay] local checkpoint:", "reseed day=", "START_STAGE",
+                  "handshake refused")
+    for who, log, hashes in (("host", host_log, host_hash), ("join", join_log, join_hash)):
+        try:
+            text = Path(log).read_text(errors="replace").splitlines()
+        except OSError:
+            text = []
+        for ln in text:
+            if any(n in ln for n in b2_needles):
+                print(f"run_pair: {who}: {ln.strip()}")
+        for ln in text:
+            m = re.search(r"reseed day=(\d+) .*tick=(\d+)", ln)
+            if m:
+                after = hash_tuples(hashes, lo=int(m.group(2)) + 1)
+                print(f"run_pair: {who}: distinct tuples after the day-{m.group(1)} reseed tick "
+                      f"{m.group(2)}: {after}")
 
     ok = True
     if a.expect == "sync":
