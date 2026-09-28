@@ -38,6 +38,7 @@
 #include "../timing/pc_render_phase.h"
 #include "../timing/pc_tick_profiler.h"
 #include "../netplay/pc_netplay_present.h"
+#include "../netplay/pc_netplay_det.h"
 
 #include "../pc_p2_specular_dir.h"
 #include "pc_opengl.h"
@@ -171,96 +172,109 @@ static PCGLGETQUERYOBJECTUI64VPROC glGetQueryObjectui64v_ptr = nullptr;
 // bypasses the function-like macro so the real function/pointer is called.
 // The 7 uniform pointers aliased to cached_uniform* below are NOT wrapped
 // here; the cached wrappers count internally before each real call instead.
-static inline void pc_gfx_count_real_gl()
+// Real-GL tripwire (see above). The optional name lets triage print which
+// entry fired: PIKMIN_NETPLAY_DEBUG_REAL_GL=1 logs the first few while null
+// is active. The cached-uniform wrappers below call this without a name.
+static inline void pc_gfx_count_real_gl(const char* what = "uniform")
 {
 	if (pc_netplay_present_null_active()) {
 		pc_netplay_present_note_real();
+		static int sDbgReported = 0;
+		if (sDbgReported < 6) {
+			const char* en = std::getenv("PIKMIN_NETPLAY_DEBUG_REAL_GL");
+			if (en && en[0] == '1') {
+				fprintf(stderr, "[m2b-debug] real GL while null: %s at tick %u\n", what ? what : "?",
+				        pc_netplay_tick());
+				fflush(stderr);
+				++sDbgReported;
+			}
+		}
 	}
 }
-#define glActiveTexture_ptr(...) (pc_gfx_count_real_gl(), (glActiveTexture_ptr)(__VA_ARGS__))
-#define glAttachShader_ptr(...) (pc_gfx_count_real_gl(), (glAttachShader_ptr)(__VA_ARGS__))
-#define glBeginQuery_ptr(...) (pc_gfx_count_real_gl(), (glBeginQuery_ptr)(__VA_ARGS__))
-#define glBindAttribLocation_ptr(...) (pc_gfx_count_real_gl(), (glBindAttribLocation_ptr)(__VA_ARGS__))
-#define glBindBuffer_ptr(...) (pc_gfx_count_real_gl(), (glBindBuffer_ptr)(__VA_ARGS__))
-#define glBindFramebuffer_ptr(...) (pc_gfx_count_real_gl(), (glBindFramebuffer_ptr)(__VA_ARGS__))
-#define glBindRenderbuffer_ptr(...) (pc_gfx_count_real_gl(), (glBindRenderbuffer_ptr)(__VA_ARGS__))
-#define glBindTexture(...) (pc_gfx_count_real_gl(), (glBindTexture)(__VA_ARGS__))
-#define glBindVertexArray_ptr(...) (pc_gfx_count_real_gl(), (glBindVertexArray_ptr)(__VA_ARGS__))
-#define glBlendEquation_ptr(...) (pc_gfx_count_real_gl(), (glBlendEquation_ptr)(__VA_ARGS__))
-#define glBlendFunc(...) (pc_gfx_count_real_gl(), (glBlendFunc)(__VA_ARGS__))
-#define glBlitFramebuffer_ptr(...) (pc_gfx_count_real_gl(), (glBlitFramebuffer_ptr)(__VA_ARGS__))
-#define glBufferData_ptr(...) (pc_gfx_count_real_gl(), (glBufferData_ptr)(__VA_ARGS__))
-#define glBufferSubData_ptr(...) (pc_gfx_count_real_gl(), (glBufferSubData_ptr)(__VA_ARGS__))
-#define glCheckFramebufferStatus_ptr(...) (pc_gfx_count_real_gl(), (glCheckFramebufferStatus_ptr)(__VA_ARGS__))
-#define glClear(...) (pc_gfx_count_real_gl(), (glClear)(__VA_ARGS__))
-#define glClearColor(...) (pc_gfx_count_real_gl(), (glClearColor)(__VA_ARGS__))
-#define glClearDepth(...) (pc_gfx_count_real_gl(), (glClearDepth)(__VA_ARGS__))
-#define glClearDepthf(...) (pc_gfx_count_real_gl(), (glClearDepthf)(__VA_ARGS__))
-#define glClientWaitSync_ptr(...) (pc_gfx_count_real_gl(), (glClientWaitSync_ptr)(__VA_ARGS__))
-#define glColorMask(...) (pc_gfx_count_real_gl(), (glColorMask)(__VA_ARGS__))
-#define glCompileShader_ptr(...) (pc_gfx_count_real_gl(), (glCompileShader_ptr)(__VA_ARGS__))
-#define glCreateProgram_ptr(...) (pc_gfx_count_real_gl(), (glCreateProgram_ptr)(__VA_ARGS__))
-#define glCreateShader_ptr(...) (pc_gfx_count_real_gl(), (glCreateShader_ptr)(__VA_ARGS__))
-#define glCullFace(...) (pc_gfx_count_real_gl(), (glCullFace)(__VA_ARGS__))
-#define glDeleteProgram_ptr(...) (pc_gfx_count_real_gl(), (glDeleteProgram_ptr)(__VA_ARGS__))
-#define glDeleteShader_ptr(...) (pc_gfx_count_real_gl(), (glDeleteShader_ptr)(__VA_ARGS__))
-#define glDeleteSync_ptr(...) (pc_gfx_count_real_gl(), (glDeleteSync_ptr)(__VA_ARGS__))
-#define glDeleteTextures(...) (pc_gfx_count_real_gl(), (glDeleteTextures)(__VA_ARGS__))
-#define glDepthFunc(...) (pc_gfx_count_real_gl(), (glDepthFunc)(__VA_ARGS__))
-#define glDepthMask(...) (pc_gfx_count_real_gl(), (glDepthMask)(__VA_ARGS__))
-#define glDisable(...) (pc_gfx_count_real_gl(), (glDisable)(__VA_ARGS__))
-#define glDrawArrays(...) (pc_gfx_count_real_gl(), (glDrawArrays)(__VA_ARGS__))
-#define glEnable(...) (pc_gfx_count_real_gl(), (glEnable)(__VA_ARGS__))
-#define glEnableVertexAttribArray_ptr(...) (pc_gfx_count_real_gl(), (glEnableVertexAttribArray_ptr)(__VA_ARGS__))
-#define glEndQuery_ptr(...) (pc_gfx_count_real_gl(), (glEndQuery_ptr)(__VA_ARGS__))
-#define glFenceSync_ptr(...) (pc_gfx_count_real_gl(), (glFenceSync_ptr)(__VA_ARGS__))
-#define glFramebufferRenderbuffer_ptr(...) (pc_gfx_count_real_gl(), (glFramebufferRenderbuffer_ptr)(__VA_ARGS__))
-#define glFramebufferTexture2D_ptr(...) (pc_gfx_count_real_gl(), (glFramebufferTexture2D_ptr)(__VA_ARGS__))
-#define glFrontFace(...) (pc_gfx_count_real_gl(), (glFrontFace)(__VA_ARGS__))
-#define glGenBuffers_ptr(...) (pc_gfx_count_real_gl(), (glGenBuffers_ptr)(__VA_ARGS__))
-#define glGenFramebuffers_ptr(...) (pc_gfx_count_real_gl(), (glGenFramebuffers_ptr)(__VA_ARGS__))
-#define glGenQueries_ptr(...) (pc_gfx_count_real_gl(), (glGenQueries_ptr)(__VA_ARGS__))
-#define glGenRenderbuffers_ptr(...) (pc_gfx_count_real_gl(), (glGenRenderbuffers_ptr)(__VA_ARGS__))
-#define glGenTextures(...) (pc_gfx_count_real_gl(), (glGenTextures)(__VA_ARGS__))
-#define glGenVertexArrays_ptr(...) (pc_gfx_count_real_gl(), (glGenVertexArrays_ptr)(__VA_ARGS__))
-#define glGenerateMipmap_ptr(...) (pc_gfx_count_real_gl(), (glGenerateMipmap_ptr)(__VA_ARGS__))
-#define glGetActiveUniform_ptr(...) (pc_gfx_count_real_gl(), (glGetActiveUniform_ptr)(__VA_ARGS__))
-#define glGetBooleanv(...) (pc_gfx_count_real_gl(), (glGetBooleanv)(__VA_ARGS__))
-#define glGetError(...) (pc_gfx_count_real_gl(), (glGetError)(__VA_ARGS__))
-#define glGetFloatv(...) (pc_gfx_count_real_gl(), (glGetFloatv)(__VA_ARGS__))
-#define glGetIntegerv(...) (pc_gfx_count_real_gl(), (glGetIntegerv)(__VA_ARGS__))
-#define glGetProgramBinary_ptr(...) (pc_gfx_count_real_gl(), (glGetProgramBinary_ptr)(__VA_ARGS__))
-#define glGetProgramInfoLog_ptr(...) (pc_gfx_count_real_gl(), (glGetProgramInfoLog_ptr)(__VA_ARGS__))
-#define glGetProgramiv_ptr(...) (pc_gfx_count_real_gl(), (glGetProgramiv_ptr)(__VA_ARGS__))
-#define glGetQueryObjectiv_ptr(...) (pc_gfx_count_real_gl(), (glGetQueryObjectiv_ptr)(__VA_ARGS__))
-#define glGetQueryObjectui64v_ptr(...) (pc_gfx_count_real_gl(), (glGetQueryObjectui64v_ptr)(__VA_ARGS__))
-#define glGetShaderInfoLog_ptr(...) (pc_gfx_count_real_gl(), (glGetShaderInfoLog_ptr)(__VA_ARGS__))
-#define glGetShaderiv_ptr(...) (pc_gfx_count_real_gl(), (glGetShaderiv_ptr)(__VA_ARGS__))
-#define glGetString(...) (pc_gfx_count_real_gl(), (glGetString)(__VA_ARGS__))
-#define glGetUniformLocation_ptr(...) (pc_gfx_count_real_gl(), (glGetUniformLocation_ptr)(__VA_ARGS__))
-#define glGetUniformiv_ptr(...) (pc_gfx_count_real_gl(), (glGetUniformiv_ptr)(__VA_ARGS__))
-#define glInvalidateFramebuffer_ptr(...) (pc_gfx_count_real_gl(), (glInvalidateFramebuffer_ptr)(__VA_ARGS__))
-#define glIsEnabled(...) (pc_gfx_count_real_gl(), (glIsEnabled)(__VA_ARGS__))
-#define glLinkProgram_ptr(...) (pc_gfx_count_real_gl(), (glLinkProgram_ptr)(__VA_ARGS__))
-#define glLogicOp(...) (pc_gfx_count_real_gl(), (glLogicOp)(__VA_ARGS__))
-#define glMapBufferRange_ptr(...) (pc_gfx_count_real_gl(), (glMapBufferRange_ptr)(__VA_ARGS__))
-#define glPixelStorei(...) (pc_gfx_count_real_gl(), (glPixelStorei)(__VA_ARGS__))
-#define glProgramBinary_ptr(...) (pc_gfx_count_real_gl(), (glProgramBinary_ptr)(__VA_ARGS__))
-#define glProgramParameteri_ptr(...) (pc_gfx_count_real_gl(), (glProgramParameteri_ptr)(__VA_ARGS__))
-#define glReadPixels(...) (pc_gfx_count_real_gl(), (glReadPixels)(__VA_ARGS__))
-#define glRenderbufferStorage_ptr(...) (pc_gfx_count_real_gl(), (glRenderbufferStorage_ptr)(__VA_ARGS__))
-#define glScissor(...) (pc_gfx_count_real_gl(), (glScissor)(__VA_ARGS__))
-#define glShaderSource_ptr(...) (pc_gfx_count_real_gl(), (glShaderSource_ptr)(__VA_ARGS__))
-#define glTexImage2D(...) (pc_gfx_count_real_gl(), (glTexImage2D)(__VA_ARGS__))
-#define glTexParameterf(...) (pc_gfx_count_real_gl(), (glTexParameterf)(__VA_ARGS__))
-#define glTexParameteri(...) (pc_gfx_count_real_gl(), (glTexParameteri)(__VA_ARGS__))
-#define glUniform2f_ptr(...) (pc_gfx_count_real_gl(), (glUniform2f_ptr)(__VA_ARGS__))
-#define glUniform3f_ptr(...) (pc_gfx_count_real_gl(), (glUniform3f_ptr)(__VA_ARGS__))
-#define glUniform4fv_ptr(...) (pc_gfx_count_real_gl(), (glUniform4fv_ptr)(__VA_ARGS__))
-#define glUnmapBuffer_ptr(...) (pc_gfx_count_real_gl(), (glUnmapBuffer_ptr)(__VA_ARGS__))
-#define glUseProgram_ptr(...) (pc_gfx_count_real_gl(), (glUseProgram_ptr)(__VA_ARGS__))
-#define glVertexAttribPointer_ptr(...) (pc_gfx_count_real_gl(), (glVertexAttribPointer_ptr)(__VA_ARGS__))
-#define glViewport(...) (pc_gfx_count_real_gl(), (glViewport)(__VA_ARGS__))
+#define glActiveTexture_ptr(...) (pc_gfx_count_real_gl("glActiveTexture_ptr"), (glActiveTexture_ptr)(__VA_ARGS__))
+#define glAttachShader_ptr(...) (pc_gfx_count_real_gl("glAttachShader_ptr"), (glAttachShader_ptr)(__VA_ARGS__))
+#define glBeginQuery_ptr(...) (pc_gfx_count_real_gl("glBeginQuery_ptr"), (glBeginQuery_ptr)(__VA_ARGS__))
+#define glBindAttribLocation_ptr(...) (pc_gfx_count_real_gl("glBindAttribLocation_ptr"), (glBindAttribLocation_ptr)(__VA_ARGS__))
+#define glBindBuffer_ptr(...) (pc_gfx_count_real_gl("glBindBuffer_ptr"), (glBindBuffer_ptr)(__VA_ARGS__))
+#define glBindFramebuffer_ptr(...) (pc_gfx_count_real_gl("glBindFramebuffer_ptr"), (glBindFramebuffer_ptr)(__VA_ARGS__))
+#define glBindRenderbuffer_ptr(...) (pc_gfx_count_real_gl("glBindRenderbuffer_ptr"), (glBindRenderbuffer_ptr)(__VA_ARGS__))
+#define glBindTexture(...) (pc_gfx_count_real_gl("glBindTexture"), (glBindTexture)(__VA_ARGS__))
+#define glBindVertexArray_ptr(...) (pc_gfx_count_real_gl("glBindVertexArray_ptr"), (glBindVertexArray_ptr)(__VA_ARGS__))
+#define glBlendEquation_ptr(...) (pc_gfx_count_real_gl("glBlendEquation_ptr"), (glBlendEquation_ptr)(__VA_ARGS__))
+#define glBlendFunc(...) (pc_gfx_count_real_gl("glBlendFunc"), (glBlendFunc)(__VA_ARGS__))
+#define glBlitFramebuffer_ptr(...) (pc_gfx_count_real_gl("glBlitFramebuffer_ptr"), (glBlitFramebuffer_ptr)(__VA_ARGS__))
+#define glBufferData_ptr(...) (pc_gfx_count_real_gl("glBufferData_ptr"), (glBufferData_ptr)(__VA_ARGS__))
+#define glBufferSubData_ptr(...) (pc_gfx_count_real_gl("glBufferSubData_ptr"), (glBufferSubData_ptr)(__VA_ARGS__))
+#define glCheckFramebufferStatus_ptr(...) (pc_gfx_count_real_gl("glCheckFramebufferStatus_ptr"), (glCheckFramebufferStatus_ptr)(__VA_ARGS__))
+#define glClear(...) (pc_gfx_count_real_gl("glClear"), (glClear)(__VA_ARGS__))
+#define glClearColor(...) (pc_gfx_count_real_gl("glClearColor"), (glClearColor)(__VA_ARGS__))
+#define glClearDepth(...) (pc_gfx_count_real_gl("glClearDepth"), (glClearDepth)(__VA_ARGS__))
+#define glClearDepthf(...) (pc_gfx_count_real_gl("glClearDepthf"), (glClearDepthf)(__VA_ARGS__))
+#define glClientWaitSync_ptr(...) (pc_gfx_count_real_gl("glClientWaitSync_ptr"), (glClientWaitSync_ptr)(__VA_ARGS__))
+#define glColorMask(...) (pc_gfx_count_real_gl("glColorMask"), (glColorMask)(__VA_ARGS__))
+#define glCompileShader_ptr(...) (pc_gfx_count_real_gl("glCompileShader_ptr"), (glCompileShader_ptr)(__VA_ARGS__))
+#define glCreateProgram_ptr(...) (pc_gfx_count_real_gl("glCreateProgram_ptr"), (glCreateProgram_ptr)(__VA_ARGS__))
+#define glCreateShader_ptr(...) (pc_gfx_count_real_gl("glCreateShader_ptr"), (glCreateShader_ptr)(__VA_ARGS__))
+#define glCullFace(...) (pc_gfx_count_real_gl("glCullFace"), (glCullFace)(__VA_ARGS__))
+#define glDeleteProgram_ptr(...) (pc_gfx_count_real_gl("glDeleteProgram_ptr"), (glDeleteProgram_ptr)(__VA_ARGS__))
+#define glDeleteShader_ptr(...) (pc_gfx_count_real_gl("glDeleteShader_ptr"), (glDeleteShader_ptr)(__VA_ARGS__))
+#define glDeleteSync_ptr(...) (pc_gfx_count_real_gl("glDeleteSync_ptr"), (glDeleteSync_ptr)(__VA_ARGS__))
+#define glDeleteTextures(...) (pc_gfx_count_real_gl("glDeleteTextures"), (glDeleteTextures)(__VA_ARGS__))
+#define glDepthFunc(...) (pc_gfx_count_real_gl("glDepthFunc"), (glDepthFunc)(__VA_ARGS__))
+#define glDepthMask(...) (pc_gfx_count_real_gl("glDepthMask"), (glDepthMask)(__VA_ARGS__))
+#define glDisable(...) (pc_gfx_count_real_gl("glDisable"), (glDisable)(__VA_ARGS__))
+#define glDrawArrays(...) (pc_gfx_count_real_gl("glDrawArrays"), (glDrawArrays)(__VA_ARGS__))
+#define glEnable(...) (pc_gfx_count_real_gl("glEnable"), (glEnable)(__VA_ARGS__))
+#define glEnableVertexAttribArray_ptr(...) (pc_gfx_count_real_gl("glEnableVertexAttribArray_ptr"), (glEnableVertexAttribArray_ptr)(__VA_ARGS__))
+#define glEndQuery_ptr(...) (pc_gfx_count_real_gl("glEndQuery_ptr"), (glEndQuery_ptr)(__VA_ARGS__))
+#define glFenceSync_ptr(...) (pc_gfx_count_real_gl("glFenceSync_ptr"), (glFenceSync_ptr)(__VA_ARGS__))
+#define glFramebufferRenderbuffer_ptr(...) (pc_gfx_count_real_gl("glFramebufferRenderbuffer_ptr"), (glFramebufferRenderbuffer_ptr)(__VA_ARGS__))
+#define glFramebufferTexture2D_ptr(...) (pc_gfx_count_real_gl("glFramebufferTexture2D_ptr"), (glFramebufferTexture2D_ptr)(__VA_ARGS__))
+#define glFrontFace(...) (pc_gfx_count_real_gl("glFrontFace"), (glFrontFace)(__VA_ARGS__))
+#define glGenBuffers_ptr(...) (pc_gfx_count_real_gl("glGenBuffers_ptr"), (glGenBuffers_ptr)(__VA_ARGS__))
+#define glGenFramebuffers_ptr(...) (pc_gfx_count_real_gl("glGenFramebuffers_ptr"), (glGenFramebuffers_ptr)(__VA_ARGS__))
+#define glGenQueries_ptr(...) (pc_gfx_count_real_gl("glGenQueries_ptr"), (glGenQueries_ptr)(__VA_ARGS__))
+#define glGenRenderbuffers_ptr(...) (pc_gfx_count_real_gl("glGenRenderbuffers_ptr"), (glGenRenderbuffers_ptr)(__VA_ARGS__))
+#define glGenTextures(...) (pc_gfx_count_real_gl("glGenTextures"), (glGenTextures)(__VA_ARGS__))
+#define glGenVertexArrays_ptr(...) (pc_gfx_count_real_gl("glGenVertexArrays_ptr"), (glGenVertexArrays_ptr)(__VA_ARGS__))
+#define glGenerateMipmap_ptr(...) (pc_gfx_count_real_gl("glGenerateMipmap_ptr"), (glGenerateMipmap_ptr)(__VA_ARGS__))
+#define glGetActiveUniform_ptr(...) (pc_gfx_count_real_gl("glGetActiveUniform_ptr"), (glGetActiveUniform_ptr)(__VA_ARGS__))
+#define glGetBooleanv(...) (pc_gfx_count_real_gl("glGetBooleanv"), (glGetBooleanv)(__VA_ARGS__))
+#define glGetError(...) (pc_gfx_count_real_gl("glGetError"), (glGetError)(__VA_ARGS__))
+#define glGetFloatv(...) (pc_gfx_count_real_gl("glGetFloatv"), (glGetFloatv)(__VA_ARGS__))
+#define glGetIntegerv(...) (pc_gfx_count_real_gl("glGetIntegerv"), (glGetIntegerv)(__VA_ARGS__))
+#define glGetProgramBinary_ptr(...) (pc_gfx_count_real_gl("glGetProgramBinary_ptr"), (glGetProgramBinary_ptr)(__VA_ARGS__))
+#define glGetProgramInfoLog_ptr(...) (pc_gfx_count_real_gl("glGetProgramInfoLog_ptr"), (glGetProgramInfoLog_ptr)(__VA_ARGS__))
+#define glGetProgramiv_ptr(...) (pc_gfx_count_real_gl("glGetProgramiv_ptr"), (glGetProgramiv_ptr)(__VA_ARGS__))
+#define glGetQueryObjectiv_ptr(...) (pc_gfx_count_real_gl("glGetQueryObjectiv_ptr"), (glGetQueryObjectiv_ptr)(__VA_ARGS__))
+#define glGetQueryObjectui64v_ptr(...) (pc_gfx_count_real_gl("glGetQueryObjectui64v_ptr"), (glGetQueryObjectui64v_ptr)(__VA_ARGS__))
+#define glGetShaderInfoLog_ptr(...) (pc_gfx_count_real_gl("glGetShaderInfoLog_ptr"), (glGetShaderInfoLog_ptr)(__VA_ARGS__))
+#define glGetShaderiv_ptr(...) (pc_gfx_count_real_gl("glGetShaderiv_ptr"), (glGetShaderiv_ptr)(__VA_ARGS__))
+#define glGetString(...) (pc_gfx_count_real_gl("glGetString"), (glGetString)(__VA_ARGS__))
+#define glGetUniformLocation_ptr(...) (pc_gfx_count_real_gl("glGetUniformLocation_ptr"), (glGetUniformLocation_ptr)(__VA_ARGS__))
+#define glGetUniformiv_ptr(...) (pc_gfx_count_real_gl("glGetUniformiv_ptr"), (glGetUniformiv_ptr)(__VA_ARGS__))
+#define glInvalidateFramebuffer_ptr(...) (pc_gfx_count_real_gl("glInvalidateFramebuffer_ptr"), (glInvalidateFramebuffer_ptr)(__VA_ARGS__))
+#define glIsEnabled(...) (pc_gfx_count_real_gl("glIsEnabled"), (glIsEnabled)(__VA_ARGS__))
+#define glLinkProgram_ptr(...) (pc_gfx_count_real_gl("glLinkProgram_ptr"), (glLinkProgram_ptr)(__VA_ARGS__))
+#define glLogicOp(...) (pc_gfx_count_real_gl("glLogicOp"), (glLogicOp)(__VA_ARGS__))
+#define glMapBufferRange_ptr(...) (pc_gfx_count_real_gl("glMapBufferRange_ptr"), (glMapBufferRange_ptr)(__VA_ARGS__))
+#define glPixelStorei(...) (pc_gfx_count_real_gl("glPixelStorei"), (glPixelStorei)(__VA_ARGS__))
+#define glProgramBinary_ptr(...) (pc_gfx_count_real_gl("glProgramBinary_ptr"), (glProgramBinary_ptr)(__VA_ARGS__))
+#define glProgramParameteri_ptr(...) (pc_gfx_count_real_gl("glProgramParameteri_ptr"), (glProgramParameteri_ptr)(__VA_ARGS__))
+#define glReadPixels(...) (pc_gfx_count_real_gl("glReadPixels"), (glReadPixels)(__VA_ARGS__))
+#define glRenderbufferStorage_ptr(...) (pc_gfx_count_real_gl("glRenderbufferStorage_ptr"), (glRenderbufferStorage_ptr)(__VA_ARGS__))
+#define glScissor(...) (pc_gfx_count_real_gl("glScissor"), (glScissor)(__VA_ARGS__))
+#define glShaderSource_ptr(...) (pc_gfx_count_real_gl("glShaderSource_ptr"), (glShaderSource_ptr)(__VA_ARGS__))
+#define glTexImage2D(...) (pc_gfx_count_real_gl("glTexImage2D"), (glTexImage2D)(__VA_ARGS__))
+#define glTexParameterf(...) (pc_gfx_count_real_gl("glTexParameterf"), (glTexParameterf)(__VA_ARGS__))
+#define glTexParameteri(...) (pc_gfx_count_real_gl("glTexParameteri"), (glTexParameteri)(__VA_ARGS__))
+#define glUniform2f_ptr(...) (pc_gfx_count_real_gl("glUniform2f_ptr"), (glUniform2f_ptr)(__VA_ARGS__))
+#define glUniform3f_ptr(...) (pc_gfx_count_real_gl("glUniform3f_ptr"), (glUniform3f_ptr)(__VA_ARGS__))
+#define glUniform4fv_ptr(...) (pc_gfx_count_real_gl("glUniform4fv_ptr"), (glUniform4fv_ptr)(__VA_ARGS__))
+#define glUnmapBuffer_ptr(...) (pc_gfx_count_real_gl("glUnmapBuffer_ptr"), (glUnmapBuffer_ptr)(__VA_ARGS__))
+#define glUseProgram_ptr(...) (pc_gfx_count_real_gl("glUseProgram_ptr"), (glUseProgram_ptr)(__VA_ARGS__))
+#define glVertexAttribPointer_ptr(...) (pc_gfx_count_real_gl("glVertexAttribPointer_ptr"), (glVertexAttribPointer_ptr)(__VA_ARGS__))
+#define glViewport(...) (pc_gfx_count_real_gl("glViewport"), (glViewport)(__VA_ARGS__))
 
 #include <SDL2/SDL.h>
 
@@ -1230,6 +1244,9 @@ static void resolve_tev_konst(u8 stage, float out[4]) {
 
 // Map of GXTexObj pointers to OpenGL Texture IDs
 static std::unordered_map<uintptr_t, GLuint> sTextureCache;
+// M2b fix2 (issue #879 B1): GL names released while null is active cannot be
+// deleted there (no GL in auth); they wait here for the next real present.
+static std::vector<GLuint> sNullDoomedTextures;
 // What the cache is costing. Every GX texture is expanded to RGBA8 -- the
 // console's formats are 4 and 8 bits per pixel, so this is four to eight times
 // the original -- and nothing ever gave one back until now.
@@ -3208,6 +3225,11 @@ static void perf_gpu_scene_begin() {
 }
 
 void pc_gfx_begin_frame(void) {
+    // M2b fix2 (issue #879 B1): no GL in the authoritative pass. This runs
+    // per renderall (both passes) via GXInvalidateVtxCache and issues a VBO
+    // ring fence plus framebuffer-resize GL; the presentation pass owns all
+    // of that (window-derived values are identical across passes).
+    if (pc_gfx_null_skip()) return;
     sUi43 = false;
     sHudWide = false;
     sMenuClip43 = false;
@@ -4587,6 +4609,15 @@ void pc_gfx_present(void) {
         pc_netplay_present_note_attempt();
         return;
     }
+    // M2b fix2: free GL names released during authoritative passes (heap
+    // resets on section/movie transitions). They are unbound and uncached
+    // already; the delete itself must be real GL.
+    if (!sNullDoomedTextures.empty()) {
+        for (GLuint doomed : sNullDoomedTextures) {
+            glDeleteTextures(1, &doomed);
+        }
+        sNullDoomedTextures.clear();
+    }
     pc_gfx_flush_batch();
 #ifdef GL_TIME_ELAPSED
     if (sPerfGpuSceneActive) {
@@ -5441,7 +5472,14 @@ void pc_gfx_release_texture(void* gxTexObj)
     for (int unit = 0; unit < 8; ++unit) {
         if (sBoundTextures[unit] == id) sBoundTextures[unit] = 0;
     }
-    glDeleteTextures(1, &id);
+    // M2b fix2 (issue #879 B1): no GL in the authoritative pass (heap resets
+    // on section/movie transitions run there). The CPU forgets the texture
+    // now; the GL name is freed on the next real present.
+    if (pc_gfx_null_skip()) {
+        sNullDoomedTextures.push_back(id);
+    } else {
+        glDeleteTextures(1, &id);
+    }
     sExternalMipChain.erase(id);
     sTextureCache.erase(it);
     sTextureSignatures.erase(key);
@@ -8620,6 +8658,12 @@ static void mesh_arena_reset() {
     ++sMeshResets;
     // Draws already queued may still read the arena: the next upload waits
     // on this fence before writing over them. Level loads can afford it.
+    // M2b fix2 (issue #879 B1): heap resets on section/movie transitions run
+    // in the authoritative pass, where no draws are queued (all submission
+    // is gated) and no GL may issue. The CPU invalidation above still runs
+    // so presentation cannot reuse freed display lists; only the fence is
+    // skipped.
+    if (pc_gfx_null_skip()) return;
     if (glFenceSync_ptr) {
         if (sMeshArenaResetFence && glDeleteSync_ptr) glDeleteSync_ptr(sMeshArenaResetFence);
         sMeshArenaResetFence = glFenceSync_ptr(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
