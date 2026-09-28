@@ -298,7 +298,7 @@ Bank loadBank(const FamilyDef& family, const std::string& species,
         if (!p2poseload::loadClip(family.prefix, species, row.name, row.poseCount, limits, shared,
                                   bytesTotal, loaded, error))
             return softFail(error.empty() ? "pose load failed" : error);
-        bank.clips[row.name] = loaded.shapes;
+        if (!loaded.shapes.empty()) bank.clips[row.name] = loaded.shapes;  // 0-pose rows stay undrawable
         // Vectors drive every draw (nearest or lerp); lerp additionally needs
         // trustworthy frames (a malformed trailer keeps nearest selection).
         bank.interp[row.name] = interpolation && !row.framesMalformed && row.poseCount >= 2;

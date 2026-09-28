@@ -350,7 +350,7 @@ Bank loadBank(const FamilyDef& family, const std::string& species,
         if (!p2poseload::loadClip(family.prefix, species, clip.name, clip.poseCount, limits, shared,
                                   bytesTotal, loaded, error))
             fail(error.empty() ? "pose load failed" : error.c_str());
-        bank.clips[clip.name] = loaded.shapes;
+        if (!loaded.shapes.empty()) bank.clips[clip.name] = loaded.shapes;  // 0-pose rows stay undrawable
         bank.interp[clip.name] = interpolation && !clip.framesMalformed && clip.poseCount >= 2;
         if (loaded.vectors) bank.baked[clip.name] = std::move(loaded.baked);
     }

@@ -95,7 +95,8 @@ inline bool loadClip(const std::string& prefix, const std::string& species, cons
                      int poseCount, const Limits& limits, Shared& shared, std::size_t& total, Clip& out,
                      std::string& error) {
     out = Clip();
-    if (poseCount < 1 || poseCount > 64) { error = "invalid pose count"; return false; }
+    if (poseCount == 0) return true;  // unconverted clip: no poses, never drawn
+    if (poseCount < 0 || poseCount > 64) { error = "invalid pose count"; return false; }
     out.slots = p2motion::shapeSlots(std::size_t(poseCount), std::size_t(p2motion::tunables().fallbackShapes));
     std::vector<Shape*> loaded(std::size_t(poseCount), nullptr);
     bool vectors = true;
