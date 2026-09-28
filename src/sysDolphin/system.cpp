@@ -298,6 +298,15 @@ void System::waitRetrace()
  * @todo: Documentation
  */
 #if PIKI_PC_PORT
+// Netplay M3 lockstep driver (issue #880). Weak-linked: strong-defined by
+// pc_port/netplay/pc_netplay_session.cpp in netplay builds only. The default
+// build has no definition, the pointer is null, and the loop below runs the
+// normal path exactly as before.
+class BaseApp;
+__attribute__((weak)) bool pc_netplay_session_drive(System* sys, BaseApp* app);
+#endif
+
+#if PIKI_PC_PORT
 // Read once; see the call site below for why this is not the 60 FPS switch.
 static bool pc_replay_test_enabled()
 {
@@ -312,7 +321,9 @@ static bool pc_replay_test_enabled()
 // (item 8). Enabled by PIKMIN_NETPLAY_PROFILE_LOG=<file>; appended every 600
 // ticks (20 s at the forced 30 Hz clamp) and mirrored to stdout so hidden
 // smoke runs carry the numbers in their logs. p50 is the profiler median.
-static void pc_netplay_det_profile_note_tick()
+// Non-static so the M3 lockstep session can call it per Advance (review M4);
+// the normal path calls it at the same point below.
+void pc_netplay_det_profile_note_tick()
 {
 	const char* path = pc_netplay_det_profile_path();
 	if (!path) return;
@@ -372,6 +383,15 @@ void System::run(BaseApp* app)
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
+#if PIKI_PC_PORT
+		// Netplay M3 lockstep (issue #880): when a netplay switch is set, the
+		// session owns the whole loop turn (handshake, tick(s), network wait
+		// or shutdown pacing). Weak-linked: null in the default build, so
+		// the normal path below runs exactly as before.
+		if (pc_netplay_session_drive != nullptr && pc_netplay_session_drive(this, app)) {
+			continue;
+		}
+#endif
 		Jac_Gsync();
 		CARDProbe(0);
 		CARDProbe(1);

@@ -87,6 +87,18 @@
 // ticks with no record or replay active, so det mode always starts the sim
 // with fresh yaw. Register once during static init, before the first tick.
 
+// Netplay M3 (issue #880): run the registered pre-sim capture hook now,
+// without any record/replay logic. The lockstep session calls this after
+// sampling the local pad so the submitted input carries the yaw the sim
+// will use. No-op when no hook is registered.
+void pc_input_log_capture_yaw(void);
+// Netplay M3 fix (review B1): like capture_yaw, but clears sYawValid[0..3]
+// first so the hook refills the local slot from the live camera. The plain
+// capture skips slots already marked valid (replay hits), and the lockstep
+// inject path marks slots 0/1 valid on every Advance, so without the clear
+// the local yaw would freeze at the first injected value.
+void pc_input_log_capture_yaw_fresh(void);
+
 #include <cstddef>
 #include <cstdint>
 #include <vector>

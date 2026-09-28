@@ -29,6 +29,13 @@
 /// Global game state.
 GameFlow gameflow;
 
+#if PIKI_PC_PORT
+// Netplay M3 N3 stage-load hook (issue #880, fix round 3). Weak-linked:
+// strong-defined by pc_port/netplay/pc_netplay_session.cpp in netplay builds
+// only; null in the default build, where softReset runs exactly as before.
+__attribute__((weak)) void pc_netplay_on_stage_load(void);
+#endif
+
 /// Global game application.
 BaseApp* app;
 
@@ -628,6 +635,13 @@ void GameFlow::hardReset(BaseApp* baseApp)
  */
 void GameFlow::softReset()
 {
+#if PIKI_PC_PORT
+	// N3: the synchronous stage load below blocks GekkoNet pumping. The
+	// netplay hook sleeps once here when PIKMIN_NETPLAY_TEST_LOAD_DELAY_MS
+	// is set (test only); production survival comes from the larger
+	// PIKMIN_NETPLAY_DISCONNECT_MS timeout. Null in default builds.
+	if (pc_netplay_on_stage_load != nullptr) pc_netplay_on_stage_load();
+#endif
 	// make sure we don't debug-print all this while soft-resetting.
 	BOOL togglePrint   = gsys->mTogglePrint;
 	gsys->mTogglePrint = TERNARY_DEVELOP(TRUE, FALSE);

@@ -29,6 +29,15 @@ static void sTestCaptureHook(void)
 	pc_input_log_yaw_set(0, 0x1234, 0);
 }
 
+// B1 probe: mirrors the production Navi hook (navi.cpp), which leaves slots
+// already marked valid alone and fills the rest from the live camera.
+static void sTestCaptureHookChecked(void)
+{
+	++sHookCalls;
+	if (pc_input_log_yaw_valid(0)) return;
+	pc_input_log_yaw_set(0, 0x1234, 0);
+}
+
 namespace {
 int sFailures = 0;
 
@@ -208,6 +217,20 @@ int main()
 		pc_input_log_tick();
 		check(sHookCalls == 1, "removed hook is not called");
 		check(!pc_input_log_yaw_valid(0), "yaw cleared every tick without record/replay (M1)");
+	}
+	// B1: the fresh capture clears stale injected yaw before running the
+	// hook, so the lockstep session gets the live camera yaw every submit.
+	{
+		pc_input_log_set_yaw_capture_fn(&sTestCaptureHookChecked);
+		pc_input_log_yaw_set(0, 0x5555, 0);
+		check(pc_input_log_yaw_raw(0) == 0x5555, "injected yaw stored");
+		pc_input_log_capture_yaw(); // Navi-style hook skips valid slots
+		check(pc_input_log_yaw_raw(0) == 0x5555, "plain capture keeps stale injected yaw");
+		pc_input_log_capture_yaw_fresh();
+		check(pc_input_log_yaw_raw(0) == 0x1234, "fresh capture refreshes from the hook");
+		check(sHookCalls == 3, "fresh capture runs the hook");
+		pc_input_log_set_yaw_capture_fn(nullptr);
+		pc_input_log_tick();
 	}
 	{
 		const float pi = 3.14159265358979323846f;

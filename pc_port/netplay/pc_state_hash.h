@@ -80,3 +80,14 @@ void pc_state_hash_flush(void);
 
 // Current 1-based tick count (0 before the first tick end).
 uint64_t pc_state_hash_tick(void);
+
+// Netplay M3 lockstep (issue #880): Save-event checksums and desync dumps.
+// pc_state_hash_set_netplay_capture(true) makes pc_state_hash_tick_end()
+// compute and remember the sub-hashes every tick even when no hash log file
+// is open (the switch-off path is untouched: with capture off and no log,
+// tick_end still returns before walking any manager).
+// pc_state_hash_current() returns the last computed total, the six
+// sub-hashes (navi, piki, teki, item, world, rng) and the tick that
+// produced them; false when nothing has been computed yet.
+void pc_state_hash_set_netplay_capture(bool on);
+bool pc_state_hash_current(uint64_t* total, uint64_t subs[6], uint64_t* tick);

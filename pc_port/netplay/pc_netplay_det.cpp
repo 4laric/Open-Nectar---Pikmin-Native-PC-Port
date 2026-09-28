@@ -95,6 +95,16 @@ bool pc_netplay_deterministic(void) { return sDeterministic; }
 
 bool pc_netplay_unthrottled(void) { return sDeterministic && sUnthrottled; }
 
+void pc_netplay_det_force_on(void)
+{
+	sDeterministic = true;
+	sUnthrottled   = sUnthrottled || envIsOne("PIKMIN_NETPLAY_UNTHROTTLED");
+	pc_sim_rng_note_main_thread();
+	std::printf("[netplay-det] deterministic fixed-step mode ON (forced by netplay)%s\n",
+	    sUnthrottled ? " (unthrottled: as fast as the session allows)" : "");
+	std::fflush(stdout);
+}
+
 unsigned pc_netplay_tick(void) { return sTick; }
 
 void pc_netplay_on_tick_begin(void)

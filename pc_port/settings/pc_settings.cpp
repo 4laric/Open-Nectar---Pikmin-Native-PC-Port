@@ -3281,6 +3281,9 @@ bool pc_settings_consume_game_input(void) {
     return sMenuOpen || promptWasOpen;
 }
 
+// Netplay M3 (issue #880): passive F1 menu query. No polling, no latching.
+bool pc_settings_menu_open(void) { return sMenuOpen; }
+
 void pc_settings_apply_video(void) {
     if (!sVideoConfirmActive && isVideoSettingChanged()) {
         applyVideo();

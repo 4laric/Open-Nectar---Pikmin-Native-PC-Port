@@ -48,6 +48,10 @@ __declspec(dllexport) int           AmdPowerXpressRequestHighPerformance = 1;
 #include "pc_window.h"
 #include "pc_bbft.h"
 #include "netplay/pc_netplay_det.h"
+// Netplay M3 lockstep (issue #880): weak-linked argv capture. Strong-defined
+// by pc_port/netplay/pc_netplay_session.cpp in netplay builds only; null in
+// the default build, so no session TU is linked there.
+__attribute__((weak)) void pc_netplay_session_notify_argv(int argc, char** argv);
 #include "pc_gpu_preference.h"
 #include "netplay/pc_coop_switch.h"
 #include "netplay/pc_input_log.h"
@@ -131,6 +135,10 @@ int main(int argc, char* argv[])
     // path. No-ops unless those switches are set.
     pc_input_log_notify_argv(argc, argv);
     pc_state_hash_notify_argv(argc, argv);
+    // Netplay M3 lockstep (issue #880): stores argv for --netplay-host /
+    // --netplay-join / --randomizer-seed. Inert without a netplay switch
+    // (and a no-op null check in the default build).
+    if (pc_netplay_session_notify_argv != nullptr) pc_netplay_session_notify_argv(argc, argv);
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--dump-texture-names") == 0)
             pc_gfx_set_dump_texture_names(1);
