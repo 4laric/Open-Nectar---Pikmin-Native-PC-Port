@@ -25,6 +25,22 @@
 #include <unistd.h>
 #endif
 
+// Netplay M4 lane A session hooks (issue #885). Strong-defined by
+// pc_netplay_session.cpp in netplay builds only; null here in the default
+// build (and in engine-free harnesses like pc_randomizer_probe), where every
+// use below is guarded by a null check and the historical path runs.
+#if defined(__GNUC__)
+__attribute__((weak)) bool pc_netplay_session_active(void);
+__attribute__((weak)) bool pc_netplay_is_host(void);
+__attribute__((weak)) bool pc_netplay_randstate_stream_enabled(void);
+__attribute__((weak)) void pc_netplay_randstate_publish(const pc_randstate::PcRandState& st);
+#else
+bool pc_netplay_session_active(void);
+bool pc_netplay_is_host(void);
+bool pc_netplay_randstate_stream_enabled(void);
+void pc_netplay_randstate_publish(const pc_randstate::PcRandState& st);
+#endif
+
 namespace {
 bool noSticks = false, emperorGoal = false, emperorDefeated = false;
 bool enabled = false, ready = false, goalReported = false, permanentChecks = false, noExploration = false, colorPopulation = false;
@@ -139,6 +155,141 @@ const char* checkName(unsigned i) {
 int index(const char* name) {
     if (name) for (unsigned i = 0; i < checkCount; ++i) if (!std::strcmp(name, checkName(i))) return (int)i;
     return -1;
+}
+// M4 lane A split of pc_randomizer_update (issue #885): the file poll
+// (parse_state_stream) is the host I/O side; the sim side is apply_parsed().
+// The solo/AP path parses then applies through the same apply_parsed(), so
+// behaviour is byte-identical when netplay is off.
+struct ParsedRand {
+    unsigned ready = 0, repairs = 0, unlocks = 0, flarlic = 0;
+    std::set<unsigned> checks;
+    unsigned stats[3][4] = {};
+    unsigned benefits[9] = {};
+    unsigned emperor = 0, deathLinks = 0;
+};
+// Netplay publish generation. The first published snapshot is gen 1; gen 0
+// never goes on the wire (the reassembler drops it as stale).
+uint32_t sNetGen = 0;
+bool sHavePublished = false;
+pc_randstate::PcRandState sLastPublished;
+void parse_state_stream(std::istream& input, ParsedRand& out) {
+    std::string magic, session, end, extra;
+    unsigned version, newReady, newRepairs, newUnlocks, newFlarlic = 0;
+    std::set<unsigned> newChecks;
+    bool parsed = bool(input >> magic >> version >> session >> newReady >> newRepairs >> newUnlocks);
+    if (parsed && schema >= 2) parsed = bool(input >> newFlarlic);
+    if (schema >= 8) {
+        std::string marker; unsigned count;
+        if (!parsed || !(input >> marker >> count) || marker != "CHECKS" || count > checkCount) fail("invalid check set header");
+        for (unsigned i = 0; i < count; ++i) {
+            unsigned slot;
+            if (!(input >> slot) || slot >= checkCount || !newChecks.insert(slot).second) fail("invalid or duplicate check index");
+        }
+    } else {
+        std::uint64_t mask = 0;
+        parsed = parsed && bool(input >> mask);
+        if (parsed && mask >= (1ull << checkCount)) fail("invalid legacy check mask");
+        for (unsigned i = 0; i < checkCount; ++i) if (mask & (1ull << i)) newChecks.insert(i);
+    }
+    parsed = parsed && bool(input >> end);
+    unsigned newStats[3][4] = {};
+    if (progressiveStats) {
+        if (!parsed || end != "UPGRADES") fail("missing progressive stat state");
+        for (int c = 0; c < 3; ++c) for (int stat = 0; stat < 4; ++stat) {
+            if (!(input >> newStats[c][stat]) || newStats[c][stat] > (stat == 0 || stat == 3 ? 2u : 1u) * (doubledStats ? 2u : 1u)
+                || newStats[c][stat] < statUpgrades[c][stat]) fail("invalid or retracted stat upgrade");
+        }
+        parsed = bool(input >> end);
+    }
+    unsigned newBenefits[9] = {};
+    if (benefitItems) {
+        if (!parsed || end != "BENEFITS") fail("missing benefit state");
+        for (int kind = 0; kind < (prereleaseTraps ? 9 : proggTraps ? 8 : bombTraps ? 7 : bombDeliveries ? 6 : 5); ++kind)
+            if (!(input >> newBenefits[kind]) || newBenefits[kind] > (kind < 3 || kind >= 5 ? checkCount : 2u)
+                || newBenefits[kind] < benefits[kind] || ((kind < 3 || kind >= 5) && newBenefits[kind] < consumedBenefits[consumedIndex(static_cast<PcBenefit>(kind))]))
+                fail("invalid or retracted benefit receipt");
+        parsed = bool(input >> end);
+    }
+    unsigned newEmperor = 0;
+    if (emperorGoal) {
+        if (!parsed || end != "EMPEROR" || !(input >> newEmperor) || newEmperor > 1 || (newEmperor && newRepairs < 25)) fail("invalid Emperor state");
+        parsed = bool(input >> end);
+    }
+    unsigned newDeathLinks = 0;
+    if (deathLinkUnit) {
+        if (!parsed || end != "DEATHLINK" || !(input >> newDeathLinks)) fail("invalid DeathLink state");
+        parsed = bool(input >> end);
+    }
+    if (!parsed || magic != "PIKMIN_STATE" || version != schema || session != token || newReady > 1
+        || newRepairs > 25 || newUnlocks > (schema >= 5 ? 255u : schema == 4 ? 127u : schema == 3 ? 63u : 31u) || newFlarlic > 10 - startingFlarlic
+        || end != "END" || (input >> extra))
+        fail("invalid state: identity, version or range mismatch");
+    // Inventory is monotonic within this authenticated run.
+    if (newRepairs < repairs || (newUnlocks & unlocks) != unlocks || newFlarlic < flarlic)
+        fail("state attempted to retract received progression");
+    out.ready = newReady;
+    out.repairs = newRepairs;
+    out.unlocks = newUnlocks;
+    out.flarlic = newFlarlic;
+    out.checks = newChecks;
+    for (int c = 0; c < 3; ++c) for (int stat = 0; stat < 4; ++stat) out.stats[c][stat] = newStats[c][stat];
+    for (int kind = 0; kind < 9; ++kind) out.benefits[kind] = newBenefits[kind];
+    out.emperor = newEmperor;
+    out.deathLinks = newDeathLinks;
+}
+void apply_parsed(const ParsedRand& p) {
+    if (progressiveStats) for (int c = 0; c < 3; ++c) for (int stat = 0; stat < 4; ++stat) {
+        if (statUpgrades[c][stat] != p.stats[c][stat])
+            std::printf("[Pikmin Randomizer] STAT_UPGRADE color=%d stat=%d tier=%u\n", c, stat, p.stats[c][stat]);
+        statUpgrades[c][stat] = p.stats[c][stat];
+        colorStats[c][stat] = baseColorStats[c][stat] + (stat == 3 ? p.stats[c][stat] : 25 * p.stats[c][stat]);
+    }
+    for (int kind = 0; kind < 9; ++kind) benefits[kind] = p.benefits[kind];
+    emperorDefeated = emperorDefeated || p.emperor != 0;
+    if (deathLinkUnit) {
+        if (!deathLinkBaseline) { deathLinksSeen = p.deathLinks; deathLinkBaseline = true; }
+        else if (p.deathLinks < deathLinksSeen) fail("state retracted received DeathLinks");
+        else {
+            deathLinksPending = std::min(3u, deathLinksPending + (p.deathLinks - deathLinksSeen));
+            deathLinksSeen = p.deathLinks;
+        }
+    }
+    ready = p.ready != 0;
+    repairs = p.repairs;
+    unlocks = p.unlocks;
+    if (flarlic != p.flarlic) std::printf("[Pikmin Randomizer] CAPACITY %u\n", 10 * (startingFlarlic + p.flarlic));
+    flarlic = p.flarlic;
+    checks.insert(p.checks.begin(), p.checks.end());
+    if (pc_randomizer_goal() && !goalReported) {
+        goalReported = true;
+        std::puts("[Pikmin Randomizer] GOAL: Seed complete.");
+    }
+}
+void net_from_parsed(const ParsedRand& p, uint32_t gen, pc_randstate::PcRandState& st) {
+    // u8/u16 field widths are fail-closed here so a range breach is loud
+    // instead of a silent truncation divergence.
+    if (p.deathLinks > 0xFFFFu) fail("netplay state stream DeathLink count exceeds u16");
+    if (checkCount > 255u) fail("netplay state stream benefit range exceeds u8");
+    st.ver = pc_randstate::kVersion;
+    st.ready = (uint8_t)(p.ready != 0 ? 1 : 0);
+    st.repairs = (uint8_t)p.repairs;
+    st.unlocks = (uint8_t)p.unlocks;
+    st.flarlic = (uint8_t)p.flarlic;
+    st.emperor = (uint8_t)(p.emperor != 0 ? 1 : 0);
+    st.deathLinks = (uint16_t)p.deathLinks;
+    uint32_t mask = 0;
+    for (unsigned slot : p.checks) {
+        // v1 stream limit: slots 0..31. Higher slots fail closed so a limit
+        // breach is loud instead of a silent sim divergence (known gap).
+        if (slot >= 32) fail("netplay state stream carries check slots 0..31 only");
+        mask |= (uint32_t)(1u << slot);
+    }
+    st.checksLo = mask;
+    for (int c = 0; c < 3; ++c) for (int s = 0; s < 4; ++s) st.stats[c * 4 + s] = (uint8_t)p.stats[c][s];
+    for (int kind = 0; kind < 9; ++kind) st.benefits[kind] = (uint8_t)p.benefits[kind];
+    st.rsv[0] = st.rsv[1] = st.rsv[2] = 0;
+    st.gen = gen; // stamped by the publisher (0 = unstamped)
+    st.crc = 0;   // computed by encode()
 }
 }
 
@@ -388,99 +539,144 @@ bool pc_randomizer_init(int argc, char** argv) {
 
 void pc_randomizer_update() {
     if (!enabled) return;
+    // Netplay M4 lane A (issue #885): when the session is active and the
+    // external-state stream is enabled, file polling changes meaning. The
+    // host I/O side polls state.txt exactly as today but never applies: on
+    // content change it bumps `gen` and hands a fresh PcRandState to the
+    // session, which streams it to both peers for same-tick apply. The
+    // client never reads state.txt: its state comes only from the stream.
+    // With the stream disabled (or no session), the historical path below
+    // runs byte-identically through the shared apply_parsed().
+    const bool netActive = pc_netplay_session_active != nullptr && pc_netplay_session_active();
+    const bool stream = netActive && pc_netplay_randstate_stream_enabled != nullptr
+        && pc_netplay_randstate_stream_enabled();
+    const bool isHost = !stream || pc_netplay_is_host == nullptr || pc_netplay_is_host();
+    if (stream && !isHost) return; // client: stream only
     std::error_code error;
     const auto stamp = std::filesystem::last_write_time(directory / "state.txt", error);
-    if (error) { ready = false; return; }
+    // In stream mode the poll never mutates sim-visible state (not even
+    // ready=false on errors): the host sim changes only through stream
+    // applies, so both peers stay identical. Lane B owns link-liveness HOLD.
+    if (error) { if (!stream) ready = false; return; }
     if (stamp == lastStamp) {
-        if (std::chrono::steady_clock::now() - lastFresh > std::chrono::seconds(3)) ready = false;
+        if (!stream && std::chrono::steady_clock::now() - lastFresh > std::chrono::seconds(3)) ready = false;
         return;
     }
     std::ifstream input(directory / "state.txt");
     // Windows may briefly deny opening a file being atomically replaced.
     // Pause and retry; an opened but malformed record still fails closed.
-    if (!input.is_open()) { ready = false; return; }
-    std::string magic, session, end, extra;
-    unsigned version, newReady, newRepairs, newUnlocks, newFlarlic = 0;
-    std::set<unsigned> newChecks;
-    bool parsed = bool(input >> magic >> version >> session >> newReady >> newRepairs >> newUnlocks);
-    if (parsed && schema >= 2) parsed = bool(input >> newFlarlic);
-    if (schema >= 8) {
-        std::string marker; unsigned count;
-        if (!parsed || !(input >> marker >> count) || marker != "CHECKS" || count > checkCount) fail("invalid check set header");
-        for (unsigned i = 0; i < count; ++i) {
-            unsigned slot;
-            if (!(input >> slot) || slot >= checkCount || !newChecks.insert(slot).second) fail("invalid or duplicate check index");
+    if (!input.is_open()) { if (!stream) ready = false; return; }
+    ParsedRand parsed;
+    parse_state_stream(input, parsed); // fail-closed, exactly as before
+    if (stream) {
+        pc_randstate::PcRandState st;
+        net_from_parsed(parsed, 0, st);
+        // Publish on content change only: the run_pair refresher rewrites
+        // state.txt every 0.1 s with identical bytes, and the stamp alone
+        // must not bump the generation (each generation costs 11 submits).
+        if (!sHavePublished || !pc_randstate::payload_equal(st, sLastPublished)) {
+            if (++sNetGen == 0) fail("randomizer snapshot generation wrapped");
+            st.gen = sNetGen; // first published generation is 1
+            sLastPublished = st;
+            sHavePublished = true;
+            if (pc_netplay_randstate_publish != nullptr) pc_netplay_randstate_publish(st);
         }
-    } else {
-        std::uint64_t mask = 0;
-        parsed = parsed && bool(input >> mask);
-        if (parsed && mask >= (1ull << checkCount)) fail("invalid legacy check mask");
-        for (unsigned i = 0; i < checkCount; ++i) if (mask & (1ull << i)) newChecks.insert(i);
+        lastStamp = stamp;
+        lastFresh = std::chrono::steady_clock::now();
+        return;
     }
-    parsed = parsed && bool(input >> end);
-    unsigned newStats[3][4] = {};
-    if (progressiveStats) {
-        if (!parsed || end != "UPGRADES") fail("missing progressive stat state");
-        for (int c = 0; c < 3; ++c) for (int stat = 0; stat < 4; ++stat) {
-            if (!(input >> newStats[c][stat]) || newStats[c][stat] > (stat == 0 || stat == 3 ? 2u : 1u) * (doubledStats ? 2u : 1u)
-                || newStats[c][stat] < statUpgrades[c][stat]) fail("invalid or retracted stat upgrade");
-        }
-        parsed = bool(input >> end);
-    }
-    unsigned newBenefits[9] = {};
-    if (benefitItems) {
-        if (!parsed || end != "BENEFITS") fail("missing benefit state");
-        for (int kind = 0; kind < (prereleaseTraps ? 9 : proggTraps ? 8 : bombTraps ? 7 : bombDeliveries ? 6 : 5); ++kind)
-            if (!(input >> newBenefits[kind]) || newBenefits[kind] > (kind < 3 || kind >= 5 ? checkCount : 2u)
-                || newBenefits[kind] < benefits[kind] || ((kind < 3 || kind >= 5) && newBenefits[kind] < consumedBenefits[consumedIndex(static_cast<PcBenefit>(kind))]))
-                fail("invalid or retracted benefit receipt");
-        parsed = bool(input >> end);
-    }
-    unsigned newEmperor = 0;
-    if (emperorGoal) {
-        if (!parsed || end != "EMPEROR" || !(input >> newEmperor) || newEmperor > 1 || (newEmperor && newRepairs < 25)) fail("invalid Emperor state");
-        parsed = bool(input >> end);
-    }
-    unsigned newDeathLinks = 0;
-    if (deathLinkUnit) {
-        if (!parsed || end != "DEATHLINK" || !(input >> newDeathLinks)) fail("invalid DeathLink state");
-        parsed = bool(input >> end);
-    }
-    if (!parsed || magic != "PIKMIN_STATE" || version != schema || session != token || newReady > 1
-        || newRepairs > 25 || newUnlocks > (schema >= 5 ? 255u : schema == 4 ? 127u : schema == 3 ? 63u : 31u) || newFlarlic > 10 - startingFlarlic
-        || end != "END" || (input >> extra))
-        fail("invalid state: identity, version or range mismatch");
-    // Inventory is monotonic within this authenticated run.
-    if (newRepairs < repairs || (newUnlocks & unlocks) != unlocks || newFlarlic < flarlic)
-        fail("state attempted to retract received progression");
-    if (progressiveStats) for (int c = 0; c < 3; ++c) for (int stat = 0; stat < 4; ++stat) {
-        if (statUpgrades[c][stat] != newStats[c][stat])
-            std::printf("[Pikmin Randomizer] STAT_UPGRADE color=%d stat=%d tier=%u\n", c, stat, newStats[c][stat]);
-        statUpgrades[c][stat] = newStats[c][stat];
-        colorStats[c][stat] = baseColorStats[c][stat] + (stat == 3 ? newStats[c][stat] : 25 * newStats[c][stat]);
-    }
-    for (int kind = 0; kind < 9; ++kind) benefits[kind] = newBenefits[kind];
-    emperorDefeated = emperorDefeated || newEmperor != 0;
-    if (deathLinkUnit) {
-        if (!deathLinkBaseline) { deathLinksSeen = newDeathLinks; deathLinkBaseline = true; }
-        else if (newDeathLinks < deathLinksSeen) fail("state retracted received DeathLinks");
-        else {
-            deathLinksPending = std::min(3u, deathLinksPending + (newDeathLinks - deathLinksSeen));
-            deathLinksSeen = newDeathLinks;
-        }
-    }
-    ready = newReady != 0;
-    repairs = newRepairs;
-    unlocks = newUnlocks;
-    if (flarlic != newFlarlic) std::printf("[Pikmin Randomizer] CAPACITY %u\n", 10 * (startingFlarlic + newFlarlic));
-    flarlic = newFlarlic;
-    checks.insert(newChecks.begin(), newChecks.end());
+    apply_parsed(parsed);
     lastStamp = stamp;
     lastFresh = std::chrono::steady_clock::now();
-    if (pc_randomizer_goal() && !goalReported) {
-        goalReported = true;
-        std::puts("[Pikmin Randomizer] GOAL: Seed complete.");
+}
+
+bool pc_randomizer_apply_net_state(const pc_randstate::PcRandState& st) {
+    if (!enabled) return false;
+    // Validate like the file path, then apply exactly what the file path
+    // would have applied. Fail-closed on anything out of range or retracted.
+    const unsigned maxUnlocks = schema >= 5 ? 255u : schema == 4 ? 127u : schema == 3 ? 63u : 31u;
+    if (st.ver != pc_randstate::kVersion || st.ready > 1 || st.repairs > 25
+        || st.unlocks > maxUnlocks || st.flarlic > 10 - startingFlarlic || st.emperor > 1)
+        fail("invalid net randomizer state: version or range mismatch");
+    const unsigned tierUnit = doubledStats ? 2u : 1u;
+    for (int c = 0; c < 3; ++c) for (int s = 0; s < 4; ++s) {
+        const unsigned tierMax = (s == 0 || s == 3 ? 2u : 1u) * tierUnit;
+        if (st.stats[c * 4 + s] > tierMax || st.stats[c * 4 + s] < statUpgrades[c][s])
+            fail("invalid or retracted net stat upgrade");
     }
+    const int kindCount = prereleaseTraps ? 9 : proggTraps ? 8 : bombTraps ? 7 : bombDeliveries ? 6 : 5;
+    for (int kind = 0; kind < 9; ++kind) {
+        const unsigned receiptMax = kind < kindCount ? (kind < 3 || kind >= 5 ? checkCount : 2u) : 0u;
+        if (st.benefits[kind] > receiptMax || st.benefits[kind] < benefits[kind]
+            || ((kind < 3 || kind >= 5) && st.benefits[kind] < consumedBenefits[consumedIndex(static_cast<PcBenefit>(kind))]))
+            fail("invalid or retracted net benefit receipt");
+    }
+    if (emperorGoal && st.emperor && st.repairs < 25)
+        fail("invalid net Emperor state");
+    if (st.repairs < repairs || ((unsigned)st.unlocks & unlocks) != unlocks || st.flarlic < flarlic)
+        fail("net state attempted to retract received progression");
+    ParsedRand parsed;
+    parsed.ready = st.ready;
+    parsed.repairs = st.repairs;
+    parsed.unlocks = st.unlocks;
+    parsed.flarlic = st.flarlic;
+    for (unsigned slot = 0; slot < 32; ++slot)
+        if (st.checksLo & (1u << slot)) {
+            if (slot >= checkCount) fail("invalid net check index");
+            parsed.checks.insert(slot);
+        }
+    for (int c = 0; c < 3; ++c) for (int s = 0; s < 4; ++s) parsed.stats[c][s] = st.stats[c * 4 + s];
+    for (int kind = 0; kind < 9; ++kind) parsed.benefits[kind] = st.benefits[kind];
+    parsed.emperor = st.emperor;
+    parsed.deathLinks = st.deathLinks;
+    if (deathLinkUnit) {
+        if (deathLinkBaseline && parsed.deathLinks < deathLinksSeen)
+            fail("net state retracted received DeathLinks");
+    }
+    apply_parsed(parsed);
+    lastFresh = std::chrono::steady_clock::now();
+    return true;
+}
+
+bool pc_randomizer_get_net_state(pc_randstate::PcRandState* out) {
+    if (!enabled || out == nullptr) return false;
+    pc_randstate::PcRandState st;
+    st.ver = pc_randstate::kVersion;
+    st.ready = ready ? 1 : 0;
+    st.repairs = (uint8_t)repairs;
+    st.unlocks = (uint8_t)unlocks;
+    st.flarlic = (uint8_t)flarlic;
+    st.emperor = emperorDefeated ? 1 : 0;
+    st.deathLinks = (uint16_t)deathLinksSeen;
+    uint32_t mask = 0;
+    for (unsigned slot : checks) {
+        if (slot >= 32) fail("netplay state stream carries check slots 0..31 only");
+        mask |= (uint32_t)(1u << slot);
+    }
+    st.checksLo = mask;
+    for (int c = 0; c < 3; ++c) for (int s = 0; s < 4; ++s) st.stats[c * 4 + s] = (uint8_t)statUpgrades[c][s];
+    for (int kind = 0; kind < 9; ++kind) st.benefits[kind] = (uint8_t)benefits[kind];
+    st.gen = 0; // stamped by the publisher
+    st.crc = 0; // computed by encode()
+    *out = st;
+    return true;
+}
+
+uint64_t pc_randomizer_hash() {
+    if (!enabled) return 0;
+    uint64_t h = 14695981039346656037ULL;
+    const auto mix = [&](uint64_t v) {
+        for (int i = 0; i < 8; ++i) { h ^= (uint8_t)((v >> (i * 8)) & 0xFF); h *= 1099511628211ULL; }
+    };
+    uint64_t head = (ready ? 1ULL : 0ULL) | ((uint64_t)repairs << 8) | ((uint64_t)unlocks << 16)
+        | ((uint64_t)flarlic << 24) | ((uint64_t)(emperorDefeated ? 1 : 0) << 32)
+        | ((uint64_t)deathLinksSeen << 40) | ((uint64_t)deathLinksPending << 48);
+    mix(head);
+    mix(deathsReported);
+    for (unsigned slot : checks) mix(slot);
+    for (int c = 0; c < 3; ++c) for (int s = 0; s < 4; ++s) mix(statUpgrades[c][s]);
+    for (int kind = 0; kind < 9; ++kind) mix(((uint64_t)benefits[kind] << 32) | consumedBenefits[consumedIndex(static_cast<PcBenefit>(kind))]);
+    return h;
 }
 
 bool pc_randomizer_prerelease_traps() { return enabled && prereleaseTraps; }

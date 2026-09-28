@@ -1,4 +1,6 @@
 #pragma once
+#include "netplay/pc_netplay_randstate.h"
+#include <cstdint>
 enum PcPikminStat { PC_PIKI_DAMAGE, PC_PIKI_MOVEMENT, PC_PIKI_ATTACK_RATE };
 bool pc_randomizer_color_stats();
 float pc_randomizer_color_multiplier(int color, PcPikminStat stat);
@@ -7,6 +9,19 @@ int pc_randomizer_carry_strength(int color);
 bool pc_randomizer_init(int argc, char** argv);
 bool pc_randomizer_enabled();
 void pc_randomizer_update();
+// Netplay M4 lane A external-state stream (issue #885). The sim-side apply
+// validates a received snapshot and applies exactly what pc_randomizer_update
+// would have applied from state.txt (repairs, unlocks, flarlic, checks, stat
+// tiers, benefits, emperor, deathLinks, ready). Monotonicity violations fail
+// closed, exactly like the file path. Returns false when the randomizer is
+// disabled (no-op); otherwise applies and returns true.
+bool pc_randomizer_apply_net_state(const pc_randstate::PcRandState& st);
+// Fills the sim-visible payload of the current randomizer state (gen left 0;
+// the caller stamps it). Returns false when disabled.
+bool pc_randomizer_get_net_state(pc_randstate::PcRandState* out);
+// Canonical 64-bit hash of the sim-visible randomizer state for the M1 state
+// hash `rand` column. 0 when disabled.
+uint64_t pc_randomizer_hash();
 bool pc_randomizer_ready();
 bool pc_randomizer_has(const char* name);
 bool pc_randomizer_checked(const char* name);
