@@ -606,7 +606,13 @@ Navi::Navi(CreatureProp* props, int naviID)
 	// slot 1 only: slot 0 already mapped to port 1, while a second captain would
 	// otherwise request a nonexistent port 2. Source P2 maps each Navi to its own
 	// pad; that input split is not ported.
-	mKontroller = new Kontroller(1);
+	// Upstream co-op (pc_coop_active): each captain reads its own pad, as in
+	// the source (Kontroller(naviID + 1)); captain 2 is pad 1, which the
+	// local second controller or the netplay joiner feeds. Keeping
+	// Kontroller(1) there made captain 2 mirror pad 0 (#887: the joiner's
+	// gamepad reached pad 1 but never moved its captain). The P2 survivor
+	// captain (non-co-op) keeps the lane 12 single-pad binding.
+	mKontroller = new Kontroller(pc_coop_active() ? naviID + 1 : 1);
 	mSize       = 20.0f;
 
 	memStat->start("naviStateM");
@@ -1452,7 +1458,10 @@ void Navi::update()
 	// neutral input instead of mirroring the active captain (source P2 maps each
 	// Navi to its own pad; that split is not ported). Single-captain play always
 	// polls (naviMgr is a single Navi, so getActiveNavi() == this).
-	if (!naviMgr || naviMgr->getActiveNavi() == this) {
+	// Upstream co-op: every captain polls its own pad (Kontroller(naviID + 1)),
+	// so captain 2 must update too; gating it on getActiveNavi() left it on
+	// neutral input for the whole session (#887).
+	if (!naviMgr || pc_coop_active() || naviMgr->getActiveNavi() == this) {
 		mKontroller->update();
 	}
 	mWalkAnimPrevDir = mFaceDirection;
