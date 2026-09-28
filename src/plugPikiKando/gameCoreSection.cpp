@@ -48,6 +48,7 @@
 #include "pc_p2_hardlanes.h"
 #include "pc_p2_projectiles.h"
 #include "pc_p2_kabuto_fsm.h"
+#include "pc_p2_dangomushi.h"
 #include "pc_p2_long_legs.h"
 #include "pc_randomizer.h"
 #include "MapCode.h"
@@ -4251,6 +4252,7 @@ void GameCoreSection::draw(Graphics& gfx)
 	pc_p2_king_draw(gfx);
 	pc_p2_tank_draw_water(gfx);
 	pc_p2_kabuto_fsm_draw_stones(gfx);
+	pc_p2_dangomushi_draw_rain(gfx);
 }
 
 /**
