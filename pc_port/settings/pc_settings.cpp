@@ -5289,6 +5289,109 @@ int pc_settings_get_debug_keys(void) {
     return sConfig.debugKeys;
 }
 
+// Netplay launch lane (issue #887): session-only adoption of the host's
+// sim-relevant settings block. Parses the m3-config-v1 "k=v;..." text the
+// M3 handshake hashes and writes the in-memory sConfig fields for
+// sim-relevant keys only. saveConfig() is never called, so the joiner's
+// settings file on disk is untouched. Presentation-only keys
+// (windowWidth, windowHeight) stay local per the brief; env/session-owned
+// keys (netplaySeed, protocolVersion, randStream, coopPending) are ignored.
+// Unknown or malformed pairs are ignored. Float-scale keys arrive as 0x
+// hex IEEE-754 bits (as build_config_string emits them) and map back onto
+// the underlying percent fields with the same clamps the file loader uses.
+void pc_settings_apply_session_block(const char* text)
+{
+    if (text == nullptr) return;
+    // Skip the "m3-config-v1;" prefix when present; parse the rest as k=v;.
+    std::string s(text);
+    size_t pos = 0;
+    if (s.compare(0, 13, "m3-config-v1;") == 0) pos = 13;
+    auto set01 = [](int& field, long v) { field = (v != 0) ? 1 : 0; };
+    while (pos < s.size()) {
+        size_t semi = s.find(';', pos);
+        std::string pair = (semi == std::string::npos) ? s.substr(pos) : s.substr(pos, semi - pos);
+        pos = (semi == std::string::npos) ? s.size() : semi + 1;
+        size_t eq = pair.find('=');
+        if (eq == std::string::npos) continue;
+        std::string key = pair.substr(0, eq);
+        std::string val = pair.substr(eq + 1);
+        if (key.empty() || val.empty() || val.size() > 32) continue;
+        char* end = nullptr;
+        const bool isHex = val.compare(0, 2, "0x") == 0 || val.compare(0, 2, "0X") == 0;
+        long num = strtol(val.c_str(), &end, isHex ? 16 : 10);
+        if (end == val.c_str() || *end != '\0') continue;
+        if (key == "fpsMode") {
+            sConfig.fpsMode = (int)num;
+            if (sConfig.fpsMode < 0) sConfig.fpsMode = 0;
+            if (sConfig.fpsMode > 2) sConfig.fpsMode = 2;
+        } else if (key == "chainActions") set01(sConfig.chainActions, num);
+        else if (key == "holdToPluck") set01(sConfig.holdToPluck, num);
+        else if (key == "instantWhistle") set01(sConfig.instantWhistle, num);
+        else if (key == "whistleRadiusPct") {
+            sConfig.whistleRadiusPct = (int)num;
+            if (sConfig.whistleRadiusPct < 50) sConfig.whistleRadiusPct = 50;
+            if (sConfig.whistleRadiusPct > 300) sConfig.whistleRadiusPct = 300;
+        } else if (key == "pikiLimit") {
+            sConfig.pikiLimit = (int)num;
+            if (sConfig.pikiLimit < 50 || sConfig.pikiLimit > 999) sConfig.pikiLimit = 100;
+        } else if (key == "dayMinutes") {
+            sConfig.dayMinutes = (int)num;
+            if (sConfig.dayMinutes == 10 || sConfig.dayMinutes < 1 || sConfig.dayMinutes > 120)
+                sConfig.dayMinutes = 0;
+        } else if (key == "infiniteDay") set01(sConfig.infiniteDay, num);
+        else if (key == "noDayAdvance") set01(sConfig.noDayAdvance, num);
+        else if (key == "unlockZones") set01(sConfig.unlockZones, num);
+        else if (key == "allOnions") set01(sConfig.allOnions, num);
+        else if (key == "pikiInvincible") set01(sConfig.pikiInvincible, num);
+        else if (key == "allFlowers") set01(sConfig.allFlowers, num);
+        else if (key == "carrySpeedScale" || key == "naviSpeedScale" || key == "throwSpeedScale") {
+            // 0x hex float bits -> percent stops (same clamps as the loader).
+            uint32_t bits = (uint32_t)(num & 0xFFFFFFFFL);
+            float f = 1.0f;
+            memcpy(&f, &bits, sizeof(f));
+            int pct = (int)(f * 100.0f + (f >= 0 ? 0.5f : -0.5f));
+            if (key == "throwSpeedScale") {
+                if (pct < 50) pct = 50;
+                if (pct > 200) pct = 200;
+                sConfig.throwSpeedPct = pct;
+            } else if (key == "carrySpeedScale") {
+                sConfig.carrySpeedPct = clampSpeedPct(pct);
+            } else {
+                sConfig.naviSpeedPct = clampSpeedPct(pct);
+            }
+        } else if (key == "naviHealthPct") sConfig.naviHealthPct = clampHealthPct((int)num);
+        else if (key == "tekiHealthPct") sConfig.tekiHealthPct = clampHealthPct((int)num);
+        else if (key == "betterPathfinding") set01(sConfig.betterPathfinding, num);
+        else if (key == "bluesOnlyWater") set01(sConfig.bluesOnlyWater, num);
+        else if (key == "throwCancelB") set01(sConfig.throwCancelB, num);
+        else if (key == "noTrip") set01(sConfig.noTrip, num);
+        else if (key == "onionStep10") set01(sConfig.onionStep10, num);
+        else if (key == "lockOn") set01(sConfig.lockOn, num);
+        else if (key == "charge") set01(sConfig.charge, num);
+        else if (key == "throwWhileMoving") set01(sConfig.throwWhileMoving, num);
+        else if (key == "firstPerson") set01(sConfig.firstPerson, num);
+        else if (key == "freeCamera") set01(sConfig.freeCamera, num);
+        else if (key == "idleCounter") set01(sConfig.idleCounter, num);
+        else if (key == "debugKeys") set01(sConfig.debugKeys, num);
+        else if (key == "gyroEnabled") set01(sConfig.gyroEnabled, num);
+        else if (key == "disableTutorials") set01(sConfig.disableTutorials, num);
+        else if (key == "coopSplit") set01(sConfig.coopSplit, num);
+        else if (key == "coopMergeCamera") set01(sConfig.coopMergeCamera, num);
+        else if (key == "captainP1") {
+            int c = (int)(num % PC_CAPTAIN_COUNT);
+            if (c < 0) c += PC_CAPTAIN_COUNT;
+            pc_coop_set_captain(0, c);
+        } else if (key == "captainP2") {
+            int c = (int)(num % PC_CAPTAIN_COUNT);
+            if (c < 0) c += PC_CAPTAIN_COUNT;
+            pc_coop_set_captain(1, c);
+        }
+        // Ignored by design: windowWidth, windowHeight (presentation-only,
+        // stay local), coopPending (forced 1 by the session), netplaySeed,
+        // protocolVersion, randStream (env/session-owned), and anything else.
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Modelo de filas para otras interfaces (pc_settings_rows.h)
 // ---------------------------------------------------------------------------

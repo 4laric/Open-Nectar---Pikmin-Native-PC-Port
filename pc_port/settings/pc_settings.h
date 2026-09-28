@@ -139,6 +139,16 @@ int pc_settings_get_disable_tutorials(void);
 // nothing, so the netplay session may call it every turn.
 bool pc_settings_menu_open(void);
 
+// Netplay launch lane (issue #887): session-only adoption of the host's
+// sim-relevant settings block (the m3-config-v1 "k=v;..." text carried in
+// the v2 offer code). Parses the block and writes the in-memory sConfig
+// fields for sim-relevant keys only, WITHOUT writing the settings file, so
+// the joiner's file on disk is untouched. Presentation-only keys
+// (windowWidth, windowHeight) and non-setting keys (netplaySeed,
+// protocolVersion, randStream, coopPending) are ignored: window size stays
+// local, the rest is owned by the session/env. Unknown keys are ignored.
+void pc_settings_apply_session_block(const char* text);
+
 /// What the mouse wheel controls: 0 = Pikmin colour to throw, 1 = camera zoom.
 int pc_settings_get_mouse_wheel_action(void);
 

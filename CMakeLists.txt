@@ -1794,6 +1794,12 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_coop_switch_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_coop_switch_test COMMAND pc_coop_switch_test)
 
+    # Netplay input-ownership selection (launch lane; header-only, no SDL/game)
+    add_executable(pc_netplay_input_sel_test pc_port/netplay/pc_netplay_input_sel_test.cpp)
+    target_include_directories(pc_netplay_input_sel_test PRIVATE pc_port)
+    target_compile_options(pc_netplay_input_sel_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_netplay_input_sel_test COMMAND pc_netplay_input_sel_test)
+
     # Host software DSP test (not linked into main game)
     add_executable(pc_dsp_host_test
         pc_port/audio/pc_dsp_host_test.cpp
