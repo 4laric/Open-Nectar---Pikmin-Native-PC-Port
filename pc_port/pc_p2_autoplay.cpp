@@ -49,6 +49,7 @@
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_kogane.h"
+#include "pc_p2_chappy.h"
 #include "pc_randomizer.h"
 #include "Controller.h"
 
@@ -76,6 +77,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <cstdio>
 #include <queue>
 #include <set>
@@ -777,6 +779,15 @@ void pc_p2_autoplay_tick(void)
     senses.corpseMoving = corpseMoving;
     senses.corpseMoved = corpseMoved;
     senses.targetDead = deadSignal;
+    // #884 round 4: the live throw cursor (read-only) for the King standoff
+    // hold (Navi::mCursorPosition is the XZ offset from the captain).
+    senses.cursorValid = true;
+    senses.cursorX = naviX + navi->mCursorPosition.x;
+    senses.cursorZ = naviZ + navi->mCursorPosition.z;
+    // #884 round 5: the captain's live health for the King stance's
+    // low-health guard (read-only).
+    senses.naviHpValid = true;
+    senses.naviHp = navi->mHealth;
     // Onion receipt for this token (bot-v2 gap 1): durable delivery-ledger
     // query, read-only. carried=1 in RESULT means this was seen.
     senses.receiptSeen = sEngage.token ? pc_randomizer_p2_receipt_seen(sEngage.token) : false;
@@ -800,6 +811,14 @@ void pc_p2_autoplay_tick(void)
         }
         if (pick->source == 79 && pc_p2_sokkuri_revealed(pick->actor)) senses.targetRevealed = true;
         else if (pick->source == 79) senses.targetRevealed = false;
+        // #884 round 5: KingChappy in its attack state (read-only FSM probe;
+        // what a player sees as the King rearing up to tongue). The stance
+        // leaves the tongue sweep while it lasts.
+        if (p2autoplay::isKingStandoff(pick->source)) {
+            const char* kst = nullptr;
+            senses.targetAttacking = pc_p2_chappy_probe(pick->actor, &kst, nullptr, nullptr) && kst
+                && std::strcmp(kst, "attack") == 0;
+        }
         // Flyer senses (bot-v2 gap 3): height above ground, grab latch.
         // Kurage's body is on the ground (visual float only), so its XZ body
         // position above is already the throw aim; Sarai throws only when low
@@ -918,8 +937,11 @@ void pc_p2_autoplay_tick(void)
         const float lz = -s * cmd.moveX + c * cmd.moveZ;
         float sx = lx > 1.0f ? 1.0f : (lx < -1.0f ? -1.0f : lx);
         float sy = lz > 1.0f ? -1.0f : (lz < -1.0f ? 1.0f : -lz);
-        stickX = int(sx * 127.0f);
-        stickY = int(sy * 127.0f);
+        // #884 round 4: the King standoff hold scales the stick into the
+        // P1 look band (Command::stickScale); everything else stays 1.
+        const float scale = (cmd.stickScale > 0.0f && cmd.stickScale < 1.0f) ? cmd.stickScale : 1.0f;
+        stickX = int(sx * scale * 127.0f);
+        stickY = int(sy * scale * 127.0f);
         if (stickX > 32) buttons |= unsigned(p2autoplay::PadMainRight);
         else if (stickX < -32) buttons |= unsigned(p2autoplay::PadMainLeft);
         if (stickY > 32) buttons |= unsigned(p2autoplay::PadMainUp);
@@ -959,7 +981,7 @@ void pc_p2_autoplay_tick(void)
                                     || st == p2autoplay::State::Aftermath)
                 ? senses.targetDist
                 : onionDist;
-            std::printf("AUTOPLAY_NAVI state=%s navi=(%.0f,%.0f) tgt=(%.0f,%.0f) tdist=%.0f leg=(%.0f,%.0f) move=(%.2f,%.2f) stick=(%d,%d) btn=%u nstate=%d open=%d yaw=%.2f vel=%.1f mstick=%.2f hp=%.2f scat=%d field=%d bot-driven\n",
+            std::printf("AUTOPLAY_NAVI state=%s navi=(%.0f,%.0f) tgt=(%.0f,%.0f) tdist=%.0f leg=(%.0f,%.0f) move=(%.2f,%.2f) stick=(%d,%d) btn=%u nstate=%d open=%d yaw=%.2f vel=%.1f mstick=%.2f hp=%.2f scat=%d field=%d navi_hp=%.1f cursor=(%.0f,%.0f) king_attack=%d bot-driven\n",
                         p2autoplay::stateName(st), naviX, naviZ,
                         (st == p2autoplay::State::Approach || st == p2autoplay::State::Attack
                          || st == p2autoplay::State::Aftermath)
@@ -971,7 +993,8 @@ void pc_p2_autoplay_tick(void)
                             : onionZ,
                         showDist, legX, legZ, cmd.moveX, cmd.moveZ, stickX, stickY, buttons,
                         stateId, senses.containerOpen ? 1 : 0, yawDbg, velLen, stickLen,
-                        senses.targetHealthFrac, senses.scattered ? 1 : 0, alive);
+                        senses.targetHealthFrac, senses.scattered ? 1 : 0, alive,
+                        navi->mHealth, senses.cursorX, senses.cursorZ, senses.targetAttacking ? 1 : 0);
             std::fflush(stdout);
         }
     }
