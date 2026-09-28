@@ -847,11 +847,21 @@ if(PIKMIN_BUILD_TESTS)
 # -DP2_CHALLENGE_GUARD_INCLUDE_DIR=<canonical scripts dir>. No vendored copy.
 set(P2_CHALLENGE_GUARD_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/../scripts" CACHE PATH
     "Directory containing the canonical p2_fixture_captain_guard.h")
-if(NOT EXISTS "${P2_CHALLENGE_GUARD_INCLUDE_DIR}/p2_fixture_captain_guard.h")
+# A standalone native checkout (upstream CI, packaging) has no root scripts/;
+# the two guard-dependent fixtures are then skipped instead of failing the
+# whole configure. An explicitly passed directory must still hold the header.
+set(P2_CHALLENGE_GUARD_FOUND OFF)
+if(EXISTS "${P2_CHALLENGE_GUARD_INCLUDE_DIR}/p2_fixture_captain_guard.h")
+    set(P2_CHALLENGE_GUARD_FOUND ON)
+elseif(DEFINED CACHE{P2_CHALLENGE_GUARD_INCLUDE_DIR} AND NOT P2_CHALLENGE_GUARD_INCLUDE_DIR STREQUAL "${CMAKE_SOURCE_DIR}/../scripts")
     message(FATAL_ERROR
         "p2_fixture_captain_guard.h not found in ${P2_CHALLENGE_GUARD_INCLUDE_DIR}; "
         "pass -DP2_CHALLENGE_GUARD_INCLUDE_DIR=<canonical scripts dir>")
+else()
+    message(STATUS "p2_fixture_captain_guard.h not found (no root scripts/); "
+        "skipping p2_challenge_mode_fixture and p2_challenge_boot_fixture")
 endif()
+if(P2_CHALLENGE_GUARD_FOUND)
 add_executable(p2_challenge_mode_fixture
     tools/p2_challenge_mode_fixture.cpp
     pc_port/pc_p2_challenge_mode.cpp)
@@ -872,6 +882,7 @@ target_include_directories(p2_challenge_boot_fixture PRIVATE
     ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
 target_compile_options(p2_challenge_boot_fixture PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_challenge_boot_fixture COMMAND p2_challenge_boot_fixture)
+endif() # P2_CHALLENGE_GUARD_FOUND
 
 add_executable(p2_dangomushi_hazard_test
     tools/p2_dangomushi_hazard_test.cpp
