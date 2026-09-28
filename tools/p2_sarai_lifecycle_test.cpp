@@ -90,6 +90,18 @@ bool P2SaraiHost::bindNativeActor(BTeki* actor, unsigned generatorId, int tekiTy
     (void)tekiType;
     return true;
 }
+// #215 Demon profile seams (engine side lives in pc_p2_sarai_demon.cpp).
+bool P2SaraiHost::enableDemon(const p2demon::Parms& parms, const p2retail::Table&, const char* prefix,
+                              const Vector3f&, unsigned)
+{
+    mDemonEnabled = gSaraiHostPresent && parms.retail && prefix != nullptr;
+    return mDemonEnabled;
+}
+void P2SaraiHost::demonAnchorInit() {}
+void P2SaraiHost::demonAnchorDrain() {}
+void P2SaraiHost::demonAnchorFollow() {}
+void P2SaraiHost::demonAnchorFinalize() {}
+void P2SaraiHost::demonDrawCarcassAtAnchor(Graphics&) {}
 void P2SaraiHost::unbindNativeActor(BTeki* actor)
 {
     if (actor && mBoundActor == actor) {

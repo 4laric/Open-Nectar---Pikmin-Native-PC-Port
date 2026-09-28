@@ -75,13 +75,19 @@ bool pc_p2_generated_placement_sweep_sarai()
 {
     if (!pc_randomizer_p2_bridge() || !tekiMgr) return false;
     const std::set<unsigned> wanted = pc_p2_campaign_ids(23);
-    if (wanted.empty()) return false;
+    // #215: Demon (32) rides the same host/manager with its species profile.
+    const std::set<unsigned> demons = pc_p2_campaign_ids(32);
+    if (wanted.empty() && demons.empty()) return false;
     bool bound = false;
     Iterator actors(tekiMgr);
     CI_LOOP(actors) {
         BTeki* actor = static_cast<BTeki*>(*actors);
         if (!actor || !actor->mGenerator) continue;
         const unsigned token = pc_p2_campaign_token(actor);
+        if (demons.count(token)) {
+            if (pc_p2_sarai_manager_bind_demon(actor, token, token)) bound = true;
+            continue;
+        }
         if (!wanted.count(token)) continue;
         // The dynamic binder skips already-bound actors and actors whose
         // sidecar is absent, quietly returning false for both.
@@ -141,6 +147,15 @@ bool pc_p2_generated_placement_bind(BTeki* actor, unsigned sourceId, unsigned se
     case 23: // Swooping Snitchbug (Sarai); lane 30.
         if (pc_p2_sarai_manager_bind_dynamic(actor, generatorId, seedTargetUid)) {
             std::printf("P2_GENERATED_PLACEMENT source_id=23 target=%u bound=1\n", seedTargetUid);
+            std::fflush(stdout);
+            return true;
+        }
+        return false;
+    case 32: // Bumbling Snitchbug (Demon), Sarai host species profile (#215).
+        // The newborn actor has no generator yet (campaign token 0), so the
+        // birth-time claim fails closed and the setup sweep binds it.
+        if (pc_p2_sarai_manager_bind_demon(actor, generatorId, seedTargetUid)) {
+            std::printf("P2_GENERATED_PLACEMENT source_id=32 target=%u bound=1\n", seedTargetUid);
             std::fflush(stdout);
             return true;
         }
