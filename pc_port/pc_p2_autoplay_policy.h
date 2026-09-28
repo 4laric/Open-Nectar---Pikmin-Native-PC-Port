@@ -235,6 +235,19 @@ inline unsigned sourceForSpeciesName(const char* name)
 inline bool isKoganeLike(unsigned source) { return source == 9; }
 inline bool isFlyer(unsigned source) { return source == 23 || source == 57 || source == 32 || source == 72; }
 
+// #884 round 4: KingChappy (53) keeps the captain OUT of the source
+// invisible range while attacking. Source searchTarget prefers a captain in
+// the search cone and caps the Pikmin search at his distance
+// (kingChappy.cpp:1131-1178); checkAttack refuses any target inside proper
+// fp06 = 80 (kingChappy.cpp:1778-1822; port king::gateReason); checkFlick
+// adds 0.1 per frame while a captain is within 3D fp06 (kingChappy.cpp:
+// 2429-2470) and the flick tramples captains within 45 of the foot
+// (kingChappyState.cpp:867-918, InteractPress 5 HP). A bot captain parked in
+// contact (i1-53: tdist=18) therefore holds the King in a no-attack standoff
+// while being stomped every flick. Only the King has this gate; every other
+// family keeps the unchanged contact steer.
+inline bool isKingStandoff(unsigned source) { return source == 53; }
+
 // Numeric filter matches a generator key; otherwise a species name match.
 inline bool matchTarget(unsigned token, unsigned source, const char* species, const std::string& filter)
 {
@@ -305,6 +318,22 @@ struct Config {
     int powerWantSquad = 80; // bot-v6: power-mode one-step squad readiness (field>=80, no menu)
     int maxWithdrawCycles = 6; // repeat the withdraw menu until field>=wantSquad or Onion empty
     int resupplyThreshold = 5; // Attack/Approach below this field count + Onion stock => disengage + withdraw
+    // #884 round 4 KingChappy standoff (isKingStandoff). XZ distances; the
+    // source gates are 3D, and 3D >= XZ, so XZ >= kingStandoffMin keeps the
+    // captain outside fp06 (80) and the flick shake range (fp19 60) whatever
+    // the height. kingStandoffMax stays under general fp20 (130, 3D attack
+    // range) so the King can still target the captain and tongue the squad
+    // standing with him (source attack path; eating needs a target outside
+    // fp06). Hysteresis: back off below Min until Resume; close in above Max
+    // until CloseStop; hold (look + throw) in between.
+    bool kingStandoff = true;
+    float kingStandoffMin = 95.0f;
+    float kingStandoffResume = 110.0f;
+    float kingStandoffMax = 125.0f;
+    float kingStandoffCloseStop = 115.0f;
+    float kingSidestepAfter = 3.0f; // backing off this long (wall/pinned) -> sidestep, swapping sides each window
+    float kingCursorTol = 20.0f; // hold: cursor within this XZ of the King -> neutral stick (cursor stays put)
+    float lookStickScale = 0.24f; // 0.24*127 = 30 bytes: |stick| 0.41 (look band), no MSTICK bits (> 32)
 };
 
 // Power-mode effective withdraw targets (bot-v4, bot-v4b): up to ~100 Pikmin.
@@ -401,6 +430,13 @@ struct Senses {
     bool scattered = false; // squad scattered: whistle regroup
     bool squadDistress = false; // grabbed/thrown-off/burning Pikmin: whistle regroup (bot-v4)
     bool waypointLeg = false; // steer the detour waypoint, not the target
+    // #884 round 4: live throw cursor (navi position + Navi::mCursorPosition,
+    // world XZ). Only the King standoff hold reads it, to slide the cursor
+    // onto the King instead of past it; without it the hold look-steers at
+    // the King itself.
+    bool cursorValid = false;
+    float cursorX = 0.0f;
+    float cursorZ = 0.0f;
 };
 
 // Pad output for one tick. moveX/moveZ is the desired world-space XZ move
@@ -412,6 +448,14 @@ struct Command {
     float moveX = 0.0f;
     float moveZ = 0.0f;
     bool menuHold = false;
+    // #884 round 4: stick deflection scale for (moveX, moveZ). 1 = full
+    // (walk). Config::lookStickScale puts the stick inside the P1 "look"
+    // band (mNeutralStickThreshold 0.1 < |stick| <= mCursorMoveStickThreshold
+    // 0.75, NaviMgr.h:72-73; |stick| = byte / 74, controller.cpp:78): the
+    // captain stops (mTargetVelocity = 0), faces the cursor, and the cursor
+    // slides along the stick at mCursorMoveSpeed (navi.cpp:2475-2489,
+    // 2531-2538). Used only by the King standoff hold.
+    float stickScale = 1.0f;
 };
 
 struct Result {
@@ -465,6 +509,10 @@ public:
         amGrowStill = 0.0f; // bot-v7: time without crew growth in SeedGrow
         withdrawCycles = 0;
         throwSpin = 0.0f;
+        kingBacking = false;
+        kingClosing = false;
+        kingBackTime = 0.0f;
+        kingMode = -1;
         result = Result{};
         markers.clear();
         lastCommand = Command{};
@@ -534,6 +582,10 @@ private:
         wantReplan = false;
         progressBest = 1.0e30f;
         approachReplans = 0;
+        kingBacking = false;
+        kingClosing = false;
+        kingBackTime = 0.0f;
+        kingMode = -1;
         emitState(in);
     }
     void holdIdle() { lastCommand = Command{}; }
@@ -991,6 +1043,10 @@ private:
             }
             return;
         }
+        if (cfg.kingStandoff && isKingStandoff(in.targetSource)) {
+            tickKingStandoff(dt, in, limit);
+            return;
+        }
         // Kurage: body is on the ground (visual float only) so throw at the
         // body position; high HP means a longer window, and throws rotate to
         // spread Pikmin around the bell.
@@ -1374,6 +1430,100 @@ private:
     }
 
     // A-press pulse train: hold A for holdSecs, release for gapSecs.
+    // #884 round 4: KingChappy attack stance (see isKingStandoff). Modes:
+    //   back  - inside kingStandoffMin: walk straight away, no throws (the
+    //           cursor trails behind a walking captain, so throws would miss);
+    //   side  - backing for kingSidestepAfter without reaching Resume
+    //           (pinned on a wall or the body): walk away + sideways at 45
+    //           degrees, the side swapping every window, no throws;
+    //   close - beyond kingStandoffMax: walk in and throw (the normal attack);
+    //   hold  - in the band: look-band stick sliding the cursor onto the King
+    //           (neutral once it is there), throw pulses; the captain stands.
+    // AUTOPLAY_KING_STANDOFF marks each mode change.
+    enum KingMode { KingBack = 0, KingSide, KingClose, KingHold };
+    static const char* kingModeName(int m)
+    {
+        switch (m) {
+        case KingBack: return "back";
+        case KingSide: return "side";
+        case KingClose: return "close";
+        case KingHold: return "hold";
+        }
+        return "?";
+    }
+
+    void tickKingStandoff(float dt, const Senses& in, float limit)
+    {
+        const float d = in.targetDist;
+        if (d < cfg.kingStandoffMin) {
+            if (!kingBacking) kingBackTime = 0.0f;
+            kingBacking = true;
+            kingClosing = false;
+        } else if (kingBacking && d >= cfg.kingStandoffResume) {
+            kingBacking = false;
+        }
+        if (!kingBacking) {
+            if (d > cfg.kingStandoffMax) kingClosing = true;
+            else if (d <= cfg.kingStandoffCloseStop) kingClosing = false;
+        }
+        int mode;
+        if (kingBacking) {
+            kingBackTime += dt;
+            float ax = in.naviX - in.tgtX, az = in.naviZ - in.tgtZ;
+            const float len = std::sqrt(ax * ax + az * az);
+            if (len > 1.0f) {
+                ax /= len;
+                az /= len;
+            } else {
+                ax = 1.0f; // on top of the King: any direction out
+                az = 0.0f;
+            }
+            if (kingBackTime < cfg.kingSidestepAfter) {
+                mode = KingBack;
+                lastCommand.moveX = ax;
+                lastCommand.moveZ = az;
+            } else {
+                mode = KingSide;
+                const int window = int((kingBackTime - cfg.kingSidestepAfter) / cfg.kingSidestepAfter);
+                const float sign = (window % 2 == 0) ? 1.0f : -1.0f;
+                const float sx = ax - sign * az, sz = az + sign * ax; // away + perpendicular (45 deg)
+                const float sl = std::sqrt(sx * sx + sz * sz);
+                lastCommand.moveX = sx / sl;
+                lastCommand.moveZ = sz / sl;
+            }
+            pressOn = false; // no throws while walking away
+            pressPhase = 0.0f;
+        } else if (kingClosing) {
+            mode = KingClose;
+            steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            pulseA(in, cfg.throwHold, cfg.throwGap);
+        } else {
+            mode = KingHold;
+            const float fx = in.cursorValid ? in.cursorX : in.naviX;
+            const float fz = in.cursorValid ? in.cursorZ : in.naviZ;
+            const float dx = in.tgtX - fx, dz = in.tgtZ - fz;
+            const float len = std::sqrt(dx * dx + dz * dz);
+            if ((!in.cursorValid || len > cfg.kingCursorTol) && len > 1.0f) {
+                lastCommand.moveX = dx / len;
+                lastCommand.moveZ = dz / len;
+                lastCommand.stickScale = cfg.lookStickScale;
+            }
+            pulseA(in, cfg.throwHold, cfg.throwGap);
+        }
+        if (mode != kingMode) {
+            kingMode = mode;
+            char buf[256];
+            std::snprintf(buf, sizeof(buf),
+                          "AUTOPLAY_KING_STANDOFF mode=%s token=%u dist=%.0f back_time=%.1f bot-driven",
+                          kingModeName(mode), in.targetToken, d, kingBacking ? kingBackTime : 0.0f);
+            markers.emplace_back(buf);
+        }
+        if (stateTime >= limit) {
+            giveUp(in, "attack_timeout");
+            finishTarget(in, /*killed*/ false);
+        }
+    }
+
     void pulseA(const Senses& in, float holdSecs, float gapSecs)
     {
         (void)in;
@@ -1435,6 +1585,10 @@ private:
     bool sawReceipt = false; // Onion receipt latched (authoritative for carried)
     int withdrawCycles = 0; // withdraw-menu repeat count this run
     float throwSpin = 0.0f; // Kurage throw rotation phase
+    bool kingBacking = false; // #884 round 4: King standoff backing off (hysteresis)
+    bool kingClosing = false; // #884 round 4: King standoff closing in (hysteresis)
+    float kingBackTime = 0.0f; // continuous backing time (sidestep after kingSidestepAfter)
+    int kingMode = -1; // last AUTOPLAY_KING_STANDOFF mode (-1 = none this stint)
     bool announced = false;
     Result result;
     Command lastCommand;
