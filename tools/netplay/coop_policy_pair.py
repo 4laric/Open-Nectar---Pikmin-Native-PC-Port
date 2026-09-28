@@ -68,15 +68,17 @@ def distinct_tuples(hashes):
 
 
 def alternating_anchor(lines):
-    """First ANCHOR kind whose consecutive captains alternate (>= 2 grants)."""
+    """First ANCHOR kind with a 1 -> 2 or 2 -> 1 hand-over between consecutive
+    grants of that kind (a failed placement legitimately repeats a captain,
+    so the whole sequence need not alternate). Returns (kind, sequences)."""
     per_kind = {}
     for ln in lines:
         m = re.search(r"ANCHOR kind=(\S+) captain=(\d)", ln)
         if m:
             per_kind.setdefault(m.group(1), []).append(int(m.group(2)))
     for kind, caps in per_kind.items():
-        if len(caps) >= 2 and all(a != b for a, b in zip(caps, caps[1:])):
-            return kind, caps
+        if any(a != b for a, b in zip(caps, caps[1:])):
+            return kind, per_kind
     return None, per_kind
 
 
