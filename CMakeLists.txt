@@ -456,6 +456,8 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_photo_mode.cpp
     pc_port/pc_permadeath.cpp
     pc_port/pc_coop.cpp
+    # Netplay M4 D-policy (#885): owner co-op randomizer policy (engine-free).
+    pc_port/pc_coop_policy.cpp
     # Direct-boot co-op switch (netplay M0): CLI/env parse + apply. New
     # netplay code lives under pc_port/netplay/.
     pc_port/netplay/pc_coop_switch.cpp
@@ -1818,6 +1820,12 @@ if(PIKMIN_BUILD_TESTS)
     target_include_directories(pc_coop_switch_test PRIVATE pc_port)
     target_compile_options(pc_coop_switch_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_coop_switch_test COMMAND pc_coop_switch_test)
+
+    # Netplay M4 D-policy co-op randomizer rules (#885; engine-free, no game needed)
+    add_executable(pc_coop_policy_test pc_port/pc_coop_policy_test.cpp pc_port/pc_coop_policy.cpp)
+    target_include_directories(pc_coop_policy_test PRIVATE pc_port)
+    target_compile_options(pc_coop_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_coop_policy_test COMMAND pc_coop_policy_test)
 
     # Netplay input-ownership selection (launch lane; header-only, no SDL/game)
     add_executable(pc_netplay_input_sel_test pc_port/netplay/pc_netplay_input_sel_test.cpp)
