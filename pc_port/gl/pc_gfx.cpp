@@ -38,6 +38,7 @@
 #include "../timing/pc_render_phase.h"
 #include "../timing/pc_tick_profiler.h"
 #include "../netplay/pc_netplay_present.h"
+#include "pc_gfx_deferred_tex.h"
 
 #include "../pc_p2_specular_dir.h"
 #include "pc_opengl.h"
@@ -247,6 +248,8 @@ static inline void pc_gfx_count_real_gl()
 #define glLogicOp(...) (pc_gfx_count_real_gl(), (glLogicOp)(__VA_ARGS__))
 #define glMapBufferRange_ptr(...) (pc_gfx_count_real_gl(), (glMapBufferRange_ptr)(__VA_ARGS__))
 #define glPixelStorei(...) (pc_gfx_count_real_gl(), (glPixelStorei)(__VA_ARGS__))
+#define glPolygonOffset(...) (pc_gfx_count_real_gl(), (glPolygonOffset)(__VA_ARGS__))
+#define glDrawBuffers_ptr(...) (pc_gfx_count_real_gl(), (glDrawBuffers_ptr)(__VA_ARGS__))
 #define glProgramBinary_ptr(...) (pc_gfx_count_real_gl(), (glProgramBinary_ptr)(__VA_ARGS__))
 #define glProgramParameteri_ptr(...) (pc_gfx_count_real_gl(), (glProgramParameteri_ptr)(__VA_ARGS__))
 #define glReadPixels(...) (pc_gfx_count_real_gl(), (glReadPixels)(__VA_ARGS__))
@@ -1268,24 +1271,116 @@ struct PcTlut {
     // activo: el hash de paleta de Dolphin se calcula sobre ellos.
     std::vector<u8> raw;
 };
-struct PcCiTexture {
-    const u8* image = nullptr;
-    u16 width = 0;
-    u16 height = 0;
-    GXCITexFmt format = GX_TF_C4;
-    GXTexWrapMode wrapS = GX_CLAMP;
-    GXTexWrapMode wrapT = GX_CLAMP;
-    u32 tlutName = 0;
-    bool mipmap = false;
-};
+// (Fix2 M2/m3: the CI description is PcDeferredCi in pc_gfx_deferred_tex.h;
+// the three pending maps live in the PcDeferredTexStore unit below.)
 static std::unordered_map<uintptr_t, PcTlut> sTlutObjects;
 static std::unordered_map<u32, PcTlut> sLoadedTluts;
-static std::unordered_map<uintptr_t, PcCiTexture> sCiTextures;
+// Polish (issue #880 item 6, fix2 M2/m3): authoritative-pass deferred inits.
+// The auth pass issues no GL, so the init parameters are retained in the
+// standalone PcDeferredTexStore unit (move-only entries read through bytes(),
+// so no pointer into a map entry outlives it) and the upload happens lazily
+// on first presentation use (pc_gfx_load_tex_obj fallback below). A re-init
+// of an already-cached key during auth invalidates the stale cache entry (GL
+// name deferred to sNullDoomedTextures), so presentation never draws stale.
+static PcDeferredTexStore sNullDeferred;
+// Fix2 m3 runtime trigger: PIKMIN_NETPLAY_TEST_FORCE_AUTH_TEXINIT=<n> routes
+// the next n texture inits (across the rgba / palettised / CI entry points)
+// through the deferred record path. Deviation (fix3 R2-6): the knob records
+// OUTSIDE the authoritative pass, in the normal presentation-side init, so a
+// frame-dump run proves record, take and lazy upload, but not the auth-only
+// interplay (load suppressed until presentation, doomed names deleted at
+// present). The log line names the path ("(forced)" vs "(auth)") and the
+// counts are printed at exit. The re-upload that drains a taken entry runs
+// under sForceAuthDrain, so it always takes the real GL path instead of
+// re-deferring (which would never upload).
+static bool sForceAuthDrain = false;
+static long sForceAuthRemaining = -1;
+static bool pc_gfx_force_auth_texinit_consume()
+{
+    if (sForceAuthDrain) return false;
+    if (sForceAuthRemaining < 0) {
+        sForceAuthRemaining = 0;
+        if (const char* e = std::getenv("PIKMIN_NETPLAY_TEST_FORCE_AUTH_TEXINIT")) {
+            char* end = nullptr;
+            unsigned long n = strtoul(e, &end, 10);
+            if (end != e && *end == '\0') sForceAuthRemaining = (long)n;
+        }
+    }
+    if (sForceAuthRemaining <= 0) return false;
+    --sForceAuthRemaining;
+    return true;
+}
+// Fix3 R2-6: how many inits took the deferred path, and how many of those
+// were uploaded on first presentation use. Printed once at exit, and only
+// when at least one init was deferred, so runs that never defer log nothing
+// new.
+static long sDeferredAuthInits = 0;
+static long sDeferredForcedInits = 0;
+static long sDeferredDrains = 0;
+static void pc_gfx_log_deferred_counts()
+{
+    printf("[netplay] deferred texture inits: auth=%ld forced=%ld drained=%ld\n",
+           sDeferredAuthInits, sDeferredForcedInits, sDeferredDrains);
+    fflush(stdout);
+}
+static void pc_gfx_note_deferred_init(bool forced)
+{
+    static bool loggedAuth = false;
+    static bool loggedForced = false;
+    if (sDeferredAuthInits == 0 && sDeferredForcedInits == 0) {
+        std::atexit(pc_gfx_log_deferred_counts);
+    }
+    if (forced) {
+        ++sDeferredForcedInits;
+        if (!loggedForced) {
+            loggedForced = true;
+            printf("[netplay] deferred texture init (forced): test knob, recorded outside "
+                   "the authoritative pass (upload on first presentation use)\n");
+            fflush(stdout);
+        }
+    } else {
+        ++sDeferredAuthInits;
+        if (!loggedAuth) {
+            loggedAuth = true;
+            printf("[netplay] deferred texture init (auth): recorded in the authoritative "
+                   "pass (upload on first presentation use)\n");
+            fflush(stdout);
+        }
+    }
+}
 // Texturas con reemplazo HD del pack (PLAN_TEXTURAS_HD fase 1): texId -> si
 // trae cadena de mips propia. Sobre estas hay que saltarse glGenerateMipmap:
 // sobre un bloque comprimido es GL_INVALID_OPERATION, y además la cadena ya
 // viene con el pack.
 static std::unordered_map<GLuint, bool> sExternalMipChain;
+
+// Polish fix (review M2): authoritative-pass inits are mutually exclusive
+// per key. Drops the live cache entry (GL name deferred, never drawn stale),
+// the signature, and all three pending store maps; the caller then records
+// exactly one of CI / deferred-RGBA / deferred-tex.
+static void null_auth_invalidate(uintptr_t key)
+{
+    auto cached = sTextureCache.find(key);
+    if (cached != sTextureCache.end()) {
+        const GLuint doomed = cached->second;
+        sNullDoomedTextures.push_back(doomed);
+        // Fix3 R2-7: clear the bind cache for the retired GL name, the same
+        // way the release path does, so a later reuse of the name by GL
+        // cannot be skipped as a redundant bind.
+        for (int unit = 0; unit < 8; ++unit) {
+            if (sBoundTextures[unit] == doomed) sBoundTextures[unit] = 0;
+        }
+        sExternalMipChain.erase(doomed);
+        sTextureCache.erase(cached);
+        auto bytesIt = sTextureBytes.find(key);
+        if (bytesIt != sTextureBytes.end()) {
+            sTextureBytesLive -= bytesIt->second;
+            sTextureBytes.erase(bytesIt);
+        }
+    }
+    sTextureSignatures.erase(key);
+    sNullDeferred.invalidate(key);
+}
 
 // ── Volcado de nombres de textura (--dump-texture-names, PLAN_TEXTURAS_HD fase 0) ──
 // Reproduce TextureInfo::CalculateTextureName de Dolphin para poder cotejar las
@@ -5452,6 +5547,10 @@ void pc_gfx_release_texture(void* gxTexObj)
 {
     if (!gxTexObj) return;
     const uintptr_t key = reinterpret_cast<uintptr_t>(gxTexObj);
+    // M2/m4: release clears every per-key record, including the deferred store
+    // (their bytes are freed here, not leaked) — even when no live GL name
+    // exists for the key.
+    sNullDeferred.release(key);
     auto it = sTextureCache.find(key);
     if (it == sTextureCache.end()) return;
 
@@ -5586,14 +5685,35 @@ static void apply_texture_filtering(bool gameRequestedMipmaps)
 }
 
 void pc_gfx_init_tex_obj_rgba(GXTexObj* obj, void* rgba, u16 width, u16 height, GXTexWrapMode wrapS, GXTexWrapMode wrapT) {
-    // M2b fix2 (issue #879 B1): uploads happen in presentation, never in the
-    // authoritative pass. The presentation pass re-executes the init when it
-    // first needs the texture (movie pictures upload every call; steady-state
-    // inits never run during auth, so nothing is lost).
+    // Polish (issue #880 item 6): retain the init parameters in auth and
+    // upload lazily on first presentation use; invalidate any stale cache
+    // entry so a re-init during auth never leaves the old image live.
     if (!obj || !rgba || width == 0 || height == 0) return;
-    if (pc_gfx_null_skip()) return;
+    const bool inAuth = pc_gfx_null_skip();
+    const bool forced = !inAuth && pc_gfx_force_auth_texinit_consume();
+    if (inAuth || forced) {
+        const uintptr_t nullKey = reinterpret_cast<uintptr_t>(obj);
+        // RGBA always retains: the movie hands a new picture each frame in
+        // the same buffer, so "same pointer, same size" must still re-upload
+        // (a signature early-out like the palettised path would freeze it).
+        null_auth_invalidate(nullKey);
+        PcDeferredRgba def;
+        def.width = width;
+        def.height = height;
+        def.wrapS = static_cast<int32_t>(wrapS);
+        def.wrapT = static_cast<int32_t>(wrapT);
+        const size_t bytes = (size_t)width * (size_t)height * 4;
+        const uint8_t* src = static_cast<const uint8_t*>(rgba);
+        def.rgba.assign(src, src + bytes);
+        sNullDeferred.record_rgba(nullKey, std::move(def));
+        pc_gfx_note_deferred_init(forced);
+        return;
+    }
 
     const uintptr_t key = (uintptr_t)obj;
+    // M2: a real upload supersedes any stale authoritative-pass deferred
+    // entry for a reused key; the fresh image is authoritative now.
+    sNullDeferred.erase_deferred(key);
     GLuint texId = 0;
     auto it = sTextureCache.find(key);
     if (it != sTextureCache.end()) {
@@ -5621,10 +5741,50 @@ void pc_gfx_init_tex_obj_rgba(GXTexObj* obj, void* rgba, u16 width, u16 height, 
 }
 
 void pc_gfx_init_tex_obj(GXTexObj* obj, void* imagePtr, u16 width, u16 height, GXTexFmt format, GXTexWrapMode wrapS, GXTexWrapMode wrapT, GXBool mipmap) {
-    // M2b fix2 (issue #879 B1): see init_tex_obj_rgba above. No signature is
-    // recorded on the null path, so presentation does the full upload.
+    // Polish (issue #880 item 6): see init_tex_obj_rgba above. Retain the
+    // init parameters in auth; erase any stale cache entry.
     if (!obj || !imagePtr || width == 0 || height == 0) return;
-    if (pc_gfx_null_skip()) return;
+    const bool inAuth = pc_gfx_null_skip();
+    const bool forced = !inAuth && pc_gfx_force_auth_texinit_consume();
+    if (inAuth || forced) {
+        const uintptr_t nullKey = reinterpret_cast<uintptr_t>(obj);
+        // m4: skip the churn when nothing changed (matches the non-auth
+        // signature early-out below): same params over a live cache entry
+        // keep the texture without a decode/upload/delete cycle.
+        const PcTextureSignature incoming {
+            imagePtr, width, height, static_cast<u32>(format), wrapS, wrapT, false, 0
+        };
+        const auto sigIt = sTextureSignatures.find(nullKey);
+        if (sigIt != sTextureSignatures.end() && sigIt->second == incoming
+            && sTextureCache.find(nullKey) != sTextureCache.end()) {
+            return;
+        }
+        null_auth_invalidate(nullKey);
+        PcDeferredTex def;
+        def.width = width;
+        def.height = height;
+        def.format = static_cast<uint32_t>(format);
+        def.wrapS = static_cast<int32_t>(wrapS);
+        def.wrapT = static_cast<int32_t>(wrapT);
+        def.mipmap = (mipmap != GX_FALSE);
+        // m4: own the bytes (gx_base_level_size) so the entry never aliases
+        // a heap buffer that a section/movie reset frees before presentation.
+        // Fix2 M2: the owned copy is read through bytes(); alias stays null
+        // whenever owned is populated, so no raw member can dangle.
+        // Fix3 R2-5: keep the game's original source pointer; the drain
+        // puts it (not the owned copy's address) into the signature.
+        def.sigImage = imagePtr;
+        const size_t rawBytes = gx_base_level_size(width, height, static_cast<u32>(format));
+        if (rawBytes > 0) {
+            const uint8_t* src = static_cast<const uint8_t*>(imagePtr);
+            def.owned.assign(src, src + rawBytes);
+        } else {
+            def.alias = static_cast<const uint8_t*>(imagePtr); // unknown layout: cannot copy
+        }
+        sNullDeferred.record_tex(nullKey, std::move(def));
+        pc_gfx_note_deferred_init(forced);
+        return;
+    }
 
     uintptr_t key = (uintptr_t)obj;
     const PcTextureSignature signature {
@@ -5635,6 +5795,8 @@ void pc_gfx_init_tex_obj(GXTexObj* obj, void* imagePtr, u16 width, u16 height, G
         && sTextureCache.find(key) != sTextureCache.end()) {
         return;
     }
+    // M2: the fresh upload supersedes any stale deferred entry for a reused key.
+    sNullDeferred.erase_deferred(key);
 
     if (sDumpTextureNames) {
         dump_dolphin_texture_name(static_cast<const u8*>(imagePtr), width, height,
@@ -5876,12 +6038,15 @@ void pc_gfx_load_tlut(GXTlutObj* obj, u32 tlutName) {
     if (it != sTlutObjects.end()) sLoadedTluts[tlutName] = it->second;
 }
 
-static bool upload_ci_texture(GXTexObj* obj, const PcCiTexture& ci) {
+static bool upload_ci_texture(GXTexObj* obj, const PcDeferredCi& ci) {
+    // Fix2 M2: the source bytes always come through bytes() (owned copy when
+    // populated), never a raw member, so this stays valid after map moves.
+    const uint8_t* image = ci.bytes();
     auto paletteIt = sLoadedTluts.find(ci.tlutName);
-    if (!obj || !ci.image || paletteIt == sLoadedTluts.end() || paletteIt->second.rgba.empty()) return false;
+    if (!obj || !image || paletteIt == sLoadedTluts.end() || paletteIt->second.rgba.empty()) return false;
     const PcTlut& palette = paletteIt->second;
     if (sDumpTextureNames) {
-        dump_dolphin_texture_name(ci.image, ci.width, ci.height, static_cast<u32>(ci.format),
+        dump_dolphin_texture_name(image, ci.width, ci.height, static_cast<u32>(ci.format),
                                   ci.mipmap,
                                   palette.raw.empty() ? nullptr : palette.raw.data(),
                                   palette.raw.size() / 2);
@@ -5898,13 +6063,13 @@ static bool upload_ci_texture(GXTexObj* obj, const PcCiTexture& ci) {
                     const int local = y * tileWidth + x;
                     u32 paletteIndex = 0;
                     if (ci.format == GX_TF_C4) {
-                        const u8 packed = ci.image[tileOffset + local / 2];
+                        const u8 packed = image[tileOffset + local / 2];
                         paletteIndex = (local & 1) ? (packed & 0xF) : (packed >> 4);
                     } else if (ci.format == GX_TF_C8) {
-                        paletteIndex = ci.image[tileOffset + local];
+                        paletteIndex = image[tileOffset + local];
                     } else {
-                        paletteIndex = ((u32(ci.image[tileOffset + local * 2]) << 8)
-                                      | ci.image[tileOffset + local * 2 + 1]) & 0x3FFF;
+                        paletteIndex = ((u32(image[tileOffset + local * 2]) << 8)
+                                      | image[tileOffset + local * 2 + 1]) & 0x3FFF;
                     }
                     const int dstX = tileX + x, dstY = tileY + y;
                     const size_t paletteOffset = static_cast<size_t>(paletteIndex) * 4;
@@ -5938,7 +6103,7 @@ static bool upload_ci_texture(GXTexObj* obj, const PcCiTexture& ci) {
         char texPackName[96];
         int glLevels = 0;
         size_t gpuBytes = 0;
-        if (compute_dolphin_name(ci.image, ci.width, ci.height, static_cast<u32>(ci.format),
+        if (compute_dolphin_name(image, ci.width, ci.height, static_cast<u32>(ci.format),
                                  ci.mipmap,
                                  palette.raw.empty() ? nullptr : palette.raw.data(),
                                  palette.raw.size() / 2,
@@ -5968,11 +6133,41 @@ void pc_gfx_init_tex_obj_ci(GXTexObj* obj, void* imagePtr, u16 width, u16 height
     // presentation load_tex_obj fallback can upload on first draw; no
     // signature is recorded, so presentation does the full upload.
     if (!obj || !imagePtr || width == 0 || height == 0) return;
-    if (pc_gfx_null_skip()) {
+    const bool inAuth = pc_gfx_null_skip();
+    const bool forced = !inAuth && pc_gfx_force_auth_texinit_consume();
+    if (inAuth || forced) {
         const uintptr_t nullKey = reinterpret_cast<uintptr_t>(obj);
-        PcCiTexture nullCi { static_cast<const u8*>(imagePtr), width, height, format, wrapS, wrapT, tlutName,
-                             mipmap != GX_FALSE };
-        sCiTextures[nullKey] = nullCi;
+        // M2/m4: mutually exclusive per key (a stale CI entry used to shadow
+        // a newer non-CI deferred init for a reused address), signature
+        // early-out against churn, owned bytes against heap resets.
+        const PcTextureSignature incoming {
+            imagePtr, width, height, static_cast<u32>(format), wrapS, wrapT, true, tlutName
+        };
+        const auto sigIt = sTextureSignatures.find(nullKey);
+        if (sigIt != sTextureSignatures.end() && sigIt->second == incoming
+            && sTextureCache.find(nullKey) != sTextureCache.end()) {
+            return;
+        }
+        null_auth_invalidate(nullKey);
+        PcDeferredCi nullCi;
+        nullCi.width = width;
+        nullCi.height = height;
+        nullCi.format = static_cast<int32_t>(format);
+        nullCi.wrapS = static_cast<int32_t>(wrapS);
+        nullCi.wrapT = static_cast<int32_t>(wrapT);
+        nullCi.tlutName = tlutName;
+        nullCi.mipmap = (mipmap != GX_FALSE);
+        nullCi.deferred = true; // counted as a drain when presentation uploads it
+        const size_t rawBytes = gx_base_level_size(width, height, static_cast<u32>(format));
+        if (rawBytes > 0) {
+            const uint8_t* src = static_cast<const uint8_t*>(imagePtr);
+            nullCi.owned.assign(src, src + rawBytes);
+            // alias stays null: bytes() reads owned (M2).
+        } else {
+            nullCi.alias = static_cast<const uint8_t*>(imagePtr);
+        }
+        sNullDeferred.record_ci(nullKey, std::move(nullCi));
+        pc_gfx_note_deferred_init(forced);
         return;
     }
     const uintptr_t key = reinterpret_cast<uintptr_t>(obj);
@@ -5984,11 +6179,30 @@ void pc_gfx_init_tex_obj_ci(GXTexObj* obj, void* imagePtr, u16 width, u16 height
         && sTextureCache.find(key) != sTextureCache.end()) {
         return;
     }
-
-    PcCiTexture ci { static_cast<const u8*>(imagePtr), width, height, format, wrapS, wrapT, tlutName,
-                     mipmap != GX_FALSE };
-    sCiTextures[key] = ci;
-    if (upload_ci_texture(obj, ci)) {
+    PcDeferredCi ci;
+    ci.width = width;
+    ci.height = height;
+    ci.format = static_cast<int32_t>(format);
+    ci.wrapS = static_cast<int32_t>(wrapS);
+    ci.wrapT = static_cast<int32_t>(wrapT);
+    ci.tlutName = tlutName;
+    ci.mipmap = (mipmap != GX_FALSE);
+    // m4: own the bytes so the stored description never aliases reset heap.
+    {
+        const size_t rawBytes = gx_base_level_size(width, height, static_cast<u32>(format));
+        if (rawBytes > 0) {
+            const uint8_t* src = static_cast<const uint8_t*>(imagePtr);
+            ci.owned.assign(src, src + rawBytes);
+        } else {
+            ci.alias = static_cast<const uint8_t*>(imagePtr);
+        }
+    }
+    // Fix2 M2: record first, then read through the stored map entry. Reading
+    // the moved-from local after it was moved into the store is a
+    // use-after-move (it worked only because vector move keeps the buffer).
+    sNullDeferred.record_ci(key, std::move(ci));
+    const PcDeferredCi* stored = sNullDeferred.find_ci(key);
+    if (stored != nullptr && upload_ci_texture(obj, *stored)) {
         sTextureSignatures[key] = signature;
     }
 }
@@ -6008,8 +6222,56 @@ void pc_gfx_load_tex_obj(GXTexObj* obj, GXTexMapID id) {
     uintptr_t key = (uintptr_t)obj;
     auto it = sTextureCache.find(key);
     if (it == sTextureCache.end()) {
-        auto ci = sCiTextures.find(key);
-        if (ci != sCiTextures.end() && upload_ci_texture(obj, ci->second)) it = sTextureCache.find(key);
+        const PcDeferredCi* ci = sNullDeferred.find_ci(key);
+        if (ci != nullptr && upload_ci_texture(obj, *ci)) {
+            // A non-auth CI init whose palette was not loaded yet also
+            // uploads here; only deferred records count as drains (R2-6).
+            if (ci->deferred) ++sDeferredDrains;
+            it = sTextureCache.find(key);
+        }
+    }
+    // Polish item 6: authoritative-pass deferred inits upload lazily here,
+    // on first presentation use. The stale cache entry was already erased
+    // in auth, so this is the full upload, not a stale rebind.
+    // Fix2 M2: take moves the entry into a local before the map node is
+    // erased, and the init reads local.bytes(); no pointer outlives the entry.
+    if (it == sTextureCache.end()) {
+        PcDeferredRgba copy;
+        if (sNullDeferred.take_rgba(key, &copy)) {
+            sForceAuthDrain = true;
+            pc_gfx_init_tex_obj_rgba(obj, copy.rgba.data(), copy.width, copy.height,
+                                     (GXTexWrapMode)copy.wrapS, (GXTexWrapMode)copy.wrapT);
+            sForceAuthDrain = false;
+            it = sTextureCache.find(key);
+            if (it != sTextureCache.end()) ++sDeferredDrains;
+        }
+    }
+    if (it == sTextureCache.end()) {
+        PcDeferredTex taken;
+        if (sNullDeferred.take_tex(key, &taken)) {
+            sForceAuthDrain = true;
+            pc_gfx_init_tex_obj(obj, (void*)taken.bytes(), taken.width, taken.height,
+                                (GXTexFmt)taken.format, (GXTexWrapMode)taken.wrapS,
+                                (GXTexWrapMode)taken.wrapT,
+                                taken.mipmap ? GX_TRUE : GX_FALSE);
+            sForceAuthDrain = false;
+            // Fix3 R2-5: the upload decoded from taken.bytes(), which dies at
+            // the end of this block, so init stored that address in the
+            // signature. Put the game's original source pointer back: the
+            // no-change early-out then compares the live game pointer, and no
+            // signature points at freed memory. An entry without one (never
+            // produced by the record path) drops the signature instead.
+            auto sigIt = sTextureSignatures.find(key);
+            if (sigIt != sTextureSignatures.end()) {
+                if (taken.sigImage != nullptr) {
+                    sigIt->second.image = taken.sigImage;
+                } else {
+                    sTextureSignatures.erase(sigIt);
+                }
+            }
+            it = sTextureCache.find(key);
+            if (it != sTextureCache.end()) ++sDeferredDrains;
+        }
     }
     if (it != sTextureCache.end()) {
         sActiveGLTextures[id] = it->second;

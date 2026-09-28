@@ -473,6 +473,7 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_vs.cpp
     pc_port/pc_file_dialog.cpp
     pc_port/gl/pc_gfx.cpp
+    pc_port/gl/pc_gfx_deferred_tex.cpp
     pc_port/gl/pc_tev_shader.cpp
     pc_port/gl/pc_postprocess.cpp
     pc_port/gl/pc_texpack.cpp
@@ -1910,6 +1911,16 @@ if(PIKMIN_BUILD_TESTS)
     target_include_directories(pc_postprocess_test PRIVATE pc_port/gl)
     target_compile_options(pc_postprocess_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_postprocess_test COMMAND pc_postprocess_test)
+
+    # Polish deferred texture-init store (issues #879 #880, fix2 m3): links
+    # the real unit, not a model of it. No GL context needed.
+    add_executable(pc_gfx_deferred_test
+        pc_port/gl/pc_gfx_deferred_test.cpp
+        pc_port/gl/pc_gfx_deferred_tex.cpp
+    )
+    target_include_directories(pc_gfx_deferred_test PRIVATE pc_port/gl)
+    target_compile_options(pc_gfx_deferred_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_gfx_deferred_test COMMAND pc_gfx_deferred_test)
 
     add_executable(pc_render_packet_test
         pc_port/timing/pc_render_packet_test.cpp

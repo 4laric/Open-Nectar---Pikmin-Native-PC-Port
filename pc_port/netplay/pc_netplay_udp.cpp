@@ -238,7 +238,6 @@ std::vector<UdpSocket::Datagram> UdpSocket::recv()
 		if (s == 0) s = 0x853C49E6748FEA9BULL;
 		mHsRng = s;
 	}
-	const double now = hs_now_ms();
 	for (int i = 0; i < kMaxRecvPerPoll; ++i) {
 		uint8_t frame[kMaxDatagram];
 		sockaddr_in from;
@@ -248,6 +247,10 @@ std::vector<UdpSocket::Datagram> UdpSocket::recv()
 		                   (sockaddr*)&from, &fromLen);
 		if (got <= 0) break; // none available (non-blocking) or error: stop
 		if (got < 2) continue; // channel + at least one payload byte
+		// Polish fix (review B1): stamp each datagram's arrival time
+		// individually, not the poll-start time for the whole batch, so an
+		// impaired handshake hop carries one delay, not delay + poll phase.
+		const double arrival = hs_now_ms();
 		UdpSocket::Datagram d;
 		d.channel         = frame[0];
 		d.payload.assign(frame + 1, frame + got);
@@ -265,7 +268,7 @@ std::vector<UdpSocket::Datagram> UdpSocket::recv()
 			out.push_back(std::move(d));
 		} else {
 			HsDelayed hd;
-			hd.deliverAtMs = now + delay;
+			hd.deliverAtMs = arrival + delay;
 			hd.gram        = std::move(d);
 			mHsDelayed.push_back(std::move(hd));
 			if (mHsDelayed.size() > 512)
