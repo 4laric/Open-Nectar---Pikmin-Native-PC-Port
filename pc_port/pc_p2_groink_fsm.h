@@ -19,6 +19,25 @@
 // candidate creatures, a route graph and a map trace) and executes the
 // returned commands (face/velocity, flicks, shell hits, kill request). No
 // engine type is referenced, so every decision is unit-testable.
+//
+// Adaptations kept (each is forced by the P1 host or by missing data):
+//  * CellIterator queries -> the host snapshot (captains in naviMgr index
+//    order, Piki in pikiMgr order, enemies), filtered by the source spheres.
+//  * P2 mRouteMgr waypoints -> the P1 'test' carry-route graph; nearest is
+//    RouteMgr::findNearestWayPoint (open points) instead of WPSearchArg.
+//  * EB_Colliding is not reported by the host (caution resets on damage and
+//    stuck Pikmin only). addDamage calls = P1 InteractAttack count; the
+//    source partless damage/4 (damageCallBack) is not reproduced.
+//  * doSimulationGround blends x/z only; y, gravity and map collision stay
+//    with the P1 host, which integrates the returned velocity.
+//  * Clip timing: attack1 is retail; the other seven clips and the kuti
+//    muzzle are placeholders until the run stages p2-groink-bank.txt.
+//  * randFloat/randInt/randWeightFloat use a per-actor LCG (generator seed);
+//    atan2/sin/cos replace the JMAAtan2Radian and dolsin/dolcos tables.
+//  * Stone/earthquake/bitter/movie hooks and all effects/sounds are not
+//    ported (no P1 source); Dead KEYEVENT_2 is surfaced as `deadBomb`.
+//  * A transit to MINIHOUDAI_NULL (only reachable with a looping clip that
+//    lacks LOOP_END) restarts the current state instead of indexing -1.
 #include "pc_p2_groink.h"
 #include "pc_p2_groink_attack.h"
 #include "pc_p2_groink_hit.h"
@@ -112,8 +131,7 @@ struct Bank {
 // Fallback bank used when the run stages no p2-groink-bank.txt. attack1 is
 // the retail GPVE01 contract recorded in engine/tools/P2_GROINK_ATTACK.md
 // (44 frames; events (11,2) (22,3) (25,4) (32,5)); every other clip and the
-// muzzle are PLACEHOLDERS that only keep the FSM progressing (see
-// DEVELOPMENT.md "Gatling Groink" for the list).
+// muzzle are PLACEHOLDERS that only keep the FSM progressing.
 Bank defaultBank();
 // p2-groink-bank.txt (see the .cpp for the grammar). Clips are keyed by
 // AnimID; a missing clip keeps its fallback. Fails closed on malformed rows.
