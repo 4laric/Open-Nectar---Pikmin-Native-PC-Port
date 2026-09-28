@@ -832,6 +832,53 @@ inline WalkNext turnStateStep(bool turnDone, bool flickStart, bool shout)
     if (flickStart) return shout ? NextWarCry : NextFlick;
     return turnDone ? NextWalk : NextTurn;
 }
+
+// Source KingChappy::Obj::damageCallBack (kingChappy.cpp:824-848). The King
+// takes damage, and so the addDamage flickSpeed (FlickPerHit) into
+// mFlickTimer, only from:
+//   bittered              -> damage * 0.1 (EB_Bittered; no P1 path sets it)
+//   a collision part      -> damage * 1.0 if the attacker is alive and stuck
+//                            (Creature::isStickTo, to anything)
+//   no collision part     -> damage * 0.2 if the attacker is alive, stands
+//                            below King.y + 5 and is within 40 XZ of the
+//                            King centre (strict)
+// Everything else returns false: no damage, no flick.
+constexpr float DamageLowHeight = 5.0f;     // creaturePos.y < 5 + mPosition.y
+constexpr float DamageLowRadius = 40.0f;    // sqrDistanceXZ < SQUARE(40)
+constexpr float PartlessDamageRate = 0.2f;  // addDamage(damage * 0.2f, 1.0f)
+constexpr float BitteredDamageRate = 0.1f;  // addDamage(damage * 0.1f, 1.0f)
+
+enum DamageAccept { DamageRefused = 0, DamageStuck, DamageLowPartless, DamageBittered };
+
+struct DamageAttacker {
+    bool present = false;     // InteractAttack::mOwner != nullptr
+    bool hasCollPart = false; // InteractAttack::mCollPart != nullptr
+    bool alive = false;       // Creature::isAlive
+    bool stuck = false;       // Creature::isStickTo (to anything)
+    Vec3 pos{0.0f, 0.0f, 0.0f};
+};
+
+inline DamageAccept damageAccept(const Vec3& king, const DamageAttacker& a, bool bittered)
+{
+    if (bittered) return DamageBittered;
+    // The source dereferences the attacker unconditionally; an ownerless hit
+    // (no P1 attacker reaches the King this way) is refused here.
+    if (!a.present || !a.alive) return DamageRefused;
+    if (a.hasCollPart) return a.stuck ? DamageStuck : DamageRefused;
+    if (!(a.pos.y < DamageLowHeight + king.y)) return DamageRefused;
+    const float dx = a.pos.x - king.x, dz = a.pos.z - king.z;
+    return dx * dx + dz * dz < DamageLowRadius * DamageLowRadius ? DamageLowPartless : DamageRefused;
+}
+
+inline float damageRate(DamageAccept d)
+{
+    switch (d) {
+    case DamageStuck: return 1.0f;
+    case DamageLowPartless: return PartlessDamageRate;
+    case DamageBittered: return BitteredDamageRate;
+    default: return 0.0f;
+    }
+}
 } // namespace king
 
 } // namespace p2chappymouth

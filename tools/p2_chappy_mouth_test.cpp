@@ -881,6 +881,82 @@ int main()
         }
     }
 
+    // --- T19: King damageCallBack acceptance (#884 round 4) ---
+    // Review of c1dc3df7e: the port added FlickPerHit for every InteractAttack
+    // the P1 host accepted, including P1 ground attacks (aiAttack.cpp:672/691,
+    // collPart nullptr, from anywhere around the body). Source
+    // KingChappy::Obj::damageCallBack (kingChappy.cpp:824-848) accepts only a
+    // stuck attacker with a collision part (x1.0) or a partless attacker low
+    // (y < King.y + 5) within 40 XZ (x0.2); everything else is no damage and
+    // no flickSpeed. actTeki applies king::damageAccept before the host.
+    {
+        using namespace p2chappymouth::king;
+        const Vec3 kp{100.0f, 10.0f, 50.0f};
+        auto attacker = [&](bool part, bool alive, bool stuck, float dx, float dy, float dz) {
+            DamageAttacker a;
+            a.present = true;
+            a.hasCollPart = part;
+            a.alive = alive;
+            a.stuck = stuck;
+            a.pos = Vec3{kp.x + dx, kp.y + dy, kp.z + dz};
+            return a;
+        };
+        // (a) collision part: alive and stuck, wherever on the body.
+        require(damageAccept(kp, attacker(true, true, true, 60.0f, 40.0f, 0.0f), false) == DamageStuck,
+                "T19 a stuck attacker with a part is accepted (x1.0)");
+        require(damageRate(DamageStuck) == 1.0f, "T19 stuck rate 1.0");
+        require(damageAccept(kp, attacker(true, true, false, 5.0f, 0.0f, 0.0f), false) == DamageRefused,
+                "T19 a part without a stick is refused");
+        require(damageAccept(kp, attacker(true, false, true, 5.0f, 0.0f, 0.0f), false) == DamageRefused,
+                "T19 a dead stuck attacker is refused");
+        // (b) no collision part: low and within 40 XZ of the centre only.
+        require(damageAccept(kp, attacker(false, true, false, 70.0f, 0.0f, 0.0f), false) == DamageRefused,
+                "T19 a free ground attacker at 70 XZ is refused (P1 aiAttack ground hit)");
+        require(damageAccept(kp, attacker(false, true, false, 0.0f, 0.0f, -90.0f), false) == DamageRefused,
+                "T19 a free ground attacker behind the King is refused");
+        require(damageAccept(kp, attacker(false, true, false, 18.0f, 2.0f, 18.0f), false) == DamageLowPartless,
+                "T19 a low partless attacker within 40 is accepted (captain punch under the chin)");
+        require(damageRate(DamageLowPartless) == 0.2f, "T19 low partless rate 0.2");
+        require(damageAccept(kp, attacker(false, true, false, 39.9f, 0.0f, 0.0f), false) == DamageLowPartless
+                    && damageAccept(kp, attacker(false, true, false, 40.0f, 0.0f, 0.0f), false) == DamageRefused,
+                "T19 the XZ radius is 40, strict");
+        require(damageAccept(kp, attacker(false, true, false, 10.0f, 4.99f, 0.0f), false) == DamageLowPartless
+                    && damageAccept(kp, attacker(false, true, false, 10.0f, 5.0f, 0.0f), false) == DamageRefused,
+                "T19 the low band is y < King.y + 5, strict");
+        require(damageAccept(kp, attacker(false, true, false, 10.0f, 20.0f, 0.0f), false) == DamageRefused,
+                "T19 a high partless attacker within 40 is refused");
+        require(damageAccept(kp, attacker(false, true, true, 10.0f, 30.0f, 0.0f), false) == DamageRefused,
+                "T19 a partless hit from a stuck attacker still needs the low band");
+        require(damageAccept(kp, attacker(false, false, false, 10.0f, 0.0f, 0.0f), false) == DamageRefused,
+                "T19 a dead partless attacker is refused");
+        require(damageAccept(kp, DamageAttacker{}, false) == DamageRefused, "T19 an ownerless hit is refused");
+        require(damageAccept(kp, attacker(false, true, false, 90.0f, 50.0f, 0.0f), true) == DamageBittered
+                    && damageRate(DamageBittered) == 0.1f,
+                "T19 bittered accepts everything at x0.1");
+        require(damageRate(DamageRefused) == 0.0f, "T19 refused rate 0");
+        // End to end through the hook order (filter, then FlickPerHit only on
+        // accepted hits): 20 ground hits from around the body never move the
+        // timer, so three stuck Pikmin do not flick; seven stuck-part hits do.
+        {
+            float timer = 0.0f;
+            bool flicked = false;
+            for (int i = 0; i < 20; ++i) {
+                const float ang = i * 0.3f;
+                const DamageAttacker a = attacker(false, true, false, 70.0f * std::sin(ang), 0.0f, 70.0f * std::cos(ang));
+                if (damageRate(damageAccept(kp, a, false)) > 0.0f) timer += FlickPerHit;
+                flicked = flicked || checkFlick(timer, 0, 3, 0.0f);
+            }
+            require(!flicked && timer == 0.0f, "T19 ground attacks around the body add no flickSpeed");
+            int hits = 0;
+            for (; hits < 20 && !flicked; ++hits) {
+                if (damageRate(damageAccept(kp, attacker(true, true, true, 30.0f, 35.0f, 0.0f), false)) > 0.0f)
+                    timer += FlickPerHit;
+                flicked = checkFlick(timer, 0, 3, 0.0f);
+            }
+            require(flicked && hits == 7, "T19 the seventh stuck-attacker hit flicks (three stuck)");
+        }
+    }
+
     std::printf("PASS p2_chappy_mouth_test checks=%d\n", gChecks);
     return 0;
 }

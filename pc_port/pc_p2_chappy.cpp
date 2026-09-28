@@ -134,8 +134,12 @@ struct ChappyFsm {
     // #884 round 3: source EnemyBase::mFlickTimer for the King (checkFlick
     // captain proximity + damageCallBack flickSpeed), with diagnostics.
     float kingFlickTimer = 0.0f;
-    int kingFlickHits = 0; // accepted InteractAttack hits since bind (each +1.0)
+    int kingFlickHits = 0; // hits the source damageCallBack accepts since bind (each +1.0)
     int kingNaviNear = 0;  // captains inside fp06 at the last checkFlick
+    // #884 round 4: source damageCallBack acceptance (king::damageAccept).
+    int kingHitsStuck = 0;   // collision-part hits from stuck attackers (x1.0)
+    int kingHitsLow = 0;     // partless hits low within 40 XZ (x0.2)
+    int kingHitsRefused = 0; // refused: no damage, no flick
 };
 std::map<PelletView*, ChappyFsm> fsms;
 
@@ -1171,9 +1175,11 @@ void logKingFlickStart(BTeki* actor, const ChappyFsm& s, unsigned generator, con
 {
     const int stuck = stuckPikminCount(actor);
     std::printf("P2_CHAPPY_KING_FLICK_START generator=%u source_id=%u from=%s next=%s flick_timer=%.2f "
-                "flick_need=%d stuck_self=%d navi_near=%d hits=%d health=%.1f\n",
+                "flick_need=%d stuck_self=%d navi_near=%d hits=%d health=%.1f hits_stuck=%d hits_low=%d "
+                "hits_refused=%d\n",
                 generator, s.spec->source, from, shout ? "warcry" : "flick", s.kingFlickTimer,
-                p2chappymouth::king::flickThreshold(stuck), stuck, s.kingNaviNear, s.kingFlickHits, actor->mHealth);
+                p2chappymouth::king::flickThreshold(stuck), stuck, s.kingNaviNear, s.kingFlickHits, actor->mHealth,
+                s.kingHitsStuck, s.kingHitsLow, s.kingHitsRefused);
     std::fflush(stdout);
 }
 
@@ -1279,13 +1285,59 @@ void kingApply(BTeki* actor, ChappyFsm& s, unsigned generator, p2chappymouth::ki
 }
 } // namespace
 
+// Source KingChappy::Obj::damageCallBack (kingChappy.cpp:824-848) through
+// pc_p2_chappy_mouth.h king::damageAccept, evaluated on the InteractAttack
+// fields (mOwner, mCollPart) before the P1 host sees the hit. A refused hit
+// takes no damage and adds no flickSpeed; a partless hit low within 40 XZ is
+// scaled by 0.2. P1 Pikmin that latch onto the King always carry their stick
+// part (aiAttack.cpp:495-518, pikiState.cpp startStick/startStickObject), so
+// the latched-attacker kill path is kept; P1 ground attacks
+// (aiAttack.cpp:672/691, collPart nullptr) and captain punches
+// (naviState.cpp:3237) count only from under the chin, as in the source.
+// Bittered is never set (no P1 spray path). Returns < 0 for every actor that
+// is not a live registered King (host path unchanged).
+float pc_p2_chappy_king_damage_rate(BTeki* actor, Creature* owner, CollPart* part)
+{
+    if (!actor) return -1.0f;
+    auto ft = fsms.find(static_cast<PelletView*>(actor));
+    if (ft == fsms.end() || ft->second.family != p2chappyfsm::FAMILY_KING) return -1.0f;
+    ChappyFsm& s = ft->second;
+    if (s.state == 2) return -1.0f; // Dead: host corpse path
+    namespace K = p2chappymouth::king;
+    K::DamageAttacker a;
+    a.present = owner != nullptr;
+    a.hasCollPart = part != nullptr;
+    if (owner) {
+        a.alive = owner->isAlive();
+        a.stuck = owner->isStickTo();
+        a.pos = mouthVec(owner->getPosition());
+    }
+    const p2chappymouth::Vec3 kp = mouthVec(actor->getPosition());
+    const K::DamageAccept d = K::damageAccept(kp, a, false);
+    if (d == K::DamageStuck) ++s.kingHitsStuck;
+    else if (d == K::DamageLowPartless) ++s.kingHitsLow;
+    else if (d == K::DamageRefused) ++s.kingHitsRefused;
+    // Rate-limited: the first of each kind, then every 100th refusal.
+    const bool first = (d == K::DamageStuck && s.kingHitsStuck == 1) || (d == K::DamageLowPartless && s.kingHitsLow == 1)
+                       || (d == K::DamageRefused && s.kingHitsRefused == 1);
+    if (first || (d == K::DamageRefused && s.kingHitsRefused % 100 == 0)) {
+        const float dx = a.pos.x - kp.x, dz = a.pos.z - kp.z;
+        std::printf("P2_CHAPPY_KING_DAMAGE source_id=%u verdict=%s owner=%s part=%d alive=%d stuck=%d dxz=%.1f dy=%.1f "
+                    "hits_stuck=%d hits_low=%d hits_refused=%d health=%.1f\n",
+                    s.spec->source, d == K::DamageStuck ? "stuck" : d == K::DamageLowPartless ? "low" : "refused",
+                    !owner ? "none" : owner->isPiki() ? "piki" : owner->mObjType == OBJTYPE_Navi ? "navi" : "other",
+                    a.hasCollPart ? 1 : 0, a.alive ? 1 : 0, a.stuck ? 1 : 0, std::sqrt(dx * dx + dz * dz), a.pos.y - kp.y,
+                    s.kingHitsStuck, s.kingHitsLow, s.kingHitsRefused, actor->mHealth);
+        std::fflush(stdout);
+    }
+    return K::damageRate(d);
+}
+
 // Source EnemyBase::addDamage flickSpeed (enemyBase.cpp:2762-2773) for the
-// King: every accepted InteractAttack (tekiinteraction.cpp) adds 1.0 to the
-// flick timer, in every state. No-op for every other actor and family.
-// Adaptation: the source KingChappy::damageCallBack takes damage (and so
-// flickSpeed) only from creatures stuck to it or standing low within 40 of it
-// (kingChappy.cpp:824-848); the P1 host accepts every attack, so every
-// accepted hit counts.
+// King: every hit that damageCallBack accepts adds 1.0 to the flick timer, in
+// every state. InteractAttack::actTeki calls this only after
+// pc_p2_chappy_king_damage_rate passed the hit, so a refused hit never gets
+// here. No-op for every other actor and family.
 void pc_p2_chappy_attacked(BTeki* actor, bool accepted)
 {
     if (!actor || !accepted) return;
