@@ -46,6 +46,7 @@
 #include "pc_p2_imomushi.h"
 #include "pc_p2_otakara.h"
 #include "pc_p2_groink_teki.h"
+#include "pc_p2_bombsarai_teki.h"
 #include "pc_p2_chappy.h"
 #include "pc_p2_long_legs.h"
 #endif
@@ -467,8 +468,8 @@ public:
 		const f32 before_umimushi=pc_p2_jigumo_param_f(this,idx,before_jigumo);
 		const f32 qurione=pc_p2_otakara_param_f(this,idx,pc_p2_umimushi_param_f(this,idx,before_umimushi));
 		const f32 legs=pc_p2_long_legs_param_f(this,idx,qurione);
-		if(idx==TPF_Life)return pc_p2_chappy_max_health(this,pc_p2_groink_teki_param_f(this,idx,pc_p2_dwarf_orange_max_health(this,pc_p2_kochappy_max_health(this,pc_p2_snow_max_health(this,legs)))));
-		return pc_p2_chappy_param_f(this, idx, legs);
+		if(idx==TPF_Life)return pc_p2_bombsarai_teki_param_f(this,idx,pc_p2_chappy_max_health(this,pc_p2_groink_teki_param_f(this,idx,pc_p2_dwarf_orange_max_health(this,pc_p2_kochappy_max_health(this,pc_p2_snow_max_health(this,legs))))));
+		return pc_p2_bombsarai_teki_param_f(this, idx, pc_p2_chappy_param_f(this, idx, legs));
 #endif
 		return value;
 	} // see TekiFloatParams enum

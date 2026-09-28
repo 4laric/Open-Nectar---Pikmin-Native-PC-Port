@@ -36,6 +36,9 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     case 14: return 20; // TEKI_KabekuiC: Tobi Shearwig host
     case 54: return 24; // TEKI_Miurin: Mamuta
     case 57: case 78: return 0; // TEKI_Frog: Jellyfloat/Groink sidecar hosts
+    // #244 OWN: Careening Dirigibug rides the P1 flying vehicle TEKI_Napkid
+    // (11); pc_p2_bombsarai_own_setup binds only this host type.
+    case 58: return 11; // TEKI_Napkid: BombSarai OWN campaign host
     case 17: return 0; // TEKI_Frog: Yellow Wollywog (inst-frogs #871)
     case 18: return 33; // TEKI_Frow: Wollywog (inst-frogs #871)
     case 24: return 15; // TEKI_Tank: Fiery Blowhog (inst2-frogs #871)
