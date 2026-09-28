@@ -1974,8 +1974,9 @@ void BTeki::bounceCallback()
 /**
  * @todo: Documentation
  */
-void BTeki::wallCallback(immut Plane&, DynCollObject*)
+void BTeki::wallCallback(immut Plane& wallPlane, DynCollObject*)
 {
+	pc_p2_dangomushi_wall(this, wallPlane); // #897: no-op unless a registered Crawbster
 	eventPerformed(TekiEvent(TekiEventType::Wall, static_cast<Teki*>(this)));
 }
 

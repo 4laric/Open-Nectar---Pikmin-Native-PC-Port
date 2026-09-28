@@ -1,6 +1,8 @@
 #pragma once
 class BTeki;
 class Creature;
+class Plane;
+class Graphics;
 
 // Family-owned snagret-family source behavior for the batch-3 Chappy placement
 // vehicle: Segmented Crawbster (DangoMushi, EnemyID 94) (#174/#376/#407).
@@ -27,3 +29,10 @@ bool pc_p2_dangomushi_invulnerable(const BTeki*);
 // never runs. Damage still reaches mHealth via the update-phase
 // mStoredDamage -> makeDamaged() drain; death finalizes via pcEscapeNow().
 bool pc_p2_dangomushi_suppress_ai(const BTeki*);
+// Source Obj::wallCallback (#897): BTeki::wallCallback forwards the wall
+// plane; a rolling registered Crawbster that hits it at speed > 100 and
+// dot(vel, n) < -0.5 crashes into StateTurn. No-op for any other actor.
+void pc_p2_dangomushi_wall(BTeki*, const Plane&);
+// Draws the live rain Rocks/Egg (createCrashEnemy children) with the P1
+// Iwagon boulder stand-in mesh. No-op when no Crawbster rain is alive.
+void pc_p2_dangomushi_draw_rain(Graphics&);
