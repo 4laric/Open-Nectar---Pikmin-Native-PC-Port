@@ -62,6 +62,9 @@ __attribute__((weak)) void pc_netplay_session_notify_argv(int argc, char** argv)
 #include "netplay/pc_coop_switch.h"
 #include "netplay/pc_input_log.h"
 #include "netplay/pc_state_hash.h"
+#if defined(PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
+#include "netplay/pc_snapshot_spike.h"
+#endif
 #include "gl/pc_gfx.h"
 #include "gl/pc_texpack.h"
 #ifdef __ANDROID__
@@ -122,6 +125,10 @@ int main(int argc, char* argv[])
     // Deterministic netplay mode (M1): parses --netplay-deterministic and the
     // PIKMIN_NETPLAY_* env vars. Must run before the game starts.
     pc_netplay_det_init(argc, argv);
+#if defined(PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
+    // M6a spike (#896): inert unless PIKMIN_NETPLAY_SNAPSHOT_SPIKE=1.
+    pc_snapshot_spike_init();
+#endif
 
 #ifdef __ANDROID__
     // Logcat, carpeta del juego y ruta de guardado: antes de que nada abra un

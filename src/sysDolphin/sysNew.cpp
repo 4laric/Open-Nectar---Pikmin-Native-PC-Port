@@ -203,6 +203,10 @@ void* piki_pc_alloc(size_t size)
 	return result;
 }
 
+#if defined(PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
+__attribute__((weak)) void pc_snapshot_spike_unknown_free(void* ptr);
+#endif
+
 void piki_pc_free(void* ptr)
 {
 	if (!ptr) {
@@ -230,35 +234,85 @@ void piki_pc_free(void* ptr)
 		}
 	}
 	sUnknownFrees++;
+#if defined(PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
+	if (pc_snapshot_spike_unknown_free) pc_snapshot_spike_unknown_free(ptr);
+#endif
 }
+
+#if defined(PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
+// Netplay M6a snapshot spike (issue #896): main-thread SIM allocations go to
+// the spike's write-watched region; everything else keeps the path above.
+// Weak: targets that compile this TU without the spike TU still link, and
+// the spike itself is inert unless PIKMIN_NETPLAY_SNAPSHOT_SPIKE=1.
+__attribute__((weak)) void* pc_snapshot_spike_new(size_t size, void* returnAddress);
+__attribute__((weak)) bool pc_snapshot_spike_delete(void* ptr, void* returnAddress);
+__attribute__((weak)) void pc_snapshot_spike_preserve(const void* p, size_t bytes);
+
+unsigned long long piki_pc_spike_unknown_frees(void)
+{
+	return sUnknownFrees;
+}
+
+// The malloc tracking table is infrastructure: a synctest restore must never
+// roll it back while the C heap itself stays where it is.
+void piki_pc_spike_register_preserve(void)
+{
+	if (!pc_snapshot_spike_preserve) return;
+	pc_snapshot_spike_preserve(&sAllocMutex, sizeof(sAllocMutex));
+	pc_snapshot_spike_preserve(sBootBuckets, sizeof(sBootBuckets));
+	pc_snapshot_spike_preserve(&sLiveAllocations, sizeof(sLiveAllocations));
+	pc_snapshot_spike_preserve(&sLiveBytes, sizeof(sLiveBytes));
+	pc_snapshot_spike_preserve(&sPeakAllocations, sizeof(sPeakAllocations));
+	pc_snapshot_spike_preserve(&sPeakBytes, sizeof(sPeakBytes));
+	pc_snapshot_spike_preserve(&sTotalAllocations, sizeof(sTotalAllocations));
+	pc_snapshot_spike_preserve(&sTotalFrees, sizeof(sTotalFrees));
+	pc_snapshot_spike_preserve(&sUnknownFrees, sizeof(sUnknownFrees));
+	pc_snapshot_spike_preserve(&sDumpRegistered, sizeof(sDumpRegistered));
+	pc_snapshot_spike_preserve(sClassBytes, sizeof(sClassBytes));
+	pc_snapshot_spike_preserve(sClassCount, sizeof(sClassCount));
+	pc_snapshot_spike_preserve(&sLargestBlock, sizeof(sLargestBlock));
+}
+
+#define PIKI_SPIKE_NEW(size) if (pc_snapshot_spike_new) { if (void* spikeBlock = pc_snapshot_spike_new((size), __builtin_return_address(0))) return spikeBlock; }
+#define PIKI_SPIKE_DELETE(ptr) if (pc_snapshot_spike_delete && pc_snapshot_spike_delete(ptr, __builtin_return_address(0))) return;
+#else
+#define PIKI_SPIKE_NEW(size)
+#define PIKI_SPIKE_DELETE(ptr)
+#endif
 
 void* operator new(size_t size)
 {
+	PIKI_SPIKE_NEW(size)
 	return piki_pc_alloc(size);
 }
 
 void* operator new[](size_t size)
 {
+	PIKI_SPIKE_NEW(size)
 	return piki_pc_alloc(size);
 }
 
 void operator delete(void* ptr) noexcept
 {
+	PIKI_SPIKE_DELETE(ptr)
 	piki_pc_free(ptr);
 }
 
 void operator delete[](void* ptr) noexcept
 {
+	PIKI_SPIKE_DELETE(ptr)
 	piki_pc_free(ptr);
 }
 
 void operator delete(void* ptr, size_t) noexcept
 {
+	PIKI_SPIKE_DELETE(ptr)
 	piki_pc_free(ptr);
 }
 
 void operator delete[](void* ptr, size_t) noexcept
 {
+	PIKI_SPIKE_DELETE(ptr)
 	piki_pc_free(ptr);
 }
 #endif

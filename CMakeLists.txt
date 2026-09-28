@@ -818,6 +818,36 @@ if(PIKMIN_NETPLAY_BUILD AND NOT ANDROID)
     endif()
 endif()
 
+# Netplay M6a snapshot spike (issue #896). Measurement-only spike, OFF by
+# default and only valid on top of PIKMIN_NETPLAY_BUILD. When ON, the spike
+# TU is added to the game exes and PIKMIN_NETPLAY_SNAPSHOT_SPIKE=1 is defined
+# for exactly the TUs that carry hooks (so turning it on rebuilds only
+# those); the exe also writes a link map for the globals preserve list. With
+# the option OFF nothing here exists and every hook compiles out. At runtime
+# the spike stays inert unless PIKMIN_NETPLAY_SNAPSHOT_SPIKE=1 is set.
+option(PIKMIN_NETPLAY_SNAPSHOT_SPIKE "Netplay M6a snapshot/restore measurement spike" OFF)
+if(PIKMIN_NETPLAY_SNAPSHOT_SPIKE AND NOT PIKMIN_NETPLAY_BUILD)
+    message(FATAL_ERROR "PIKMIN_NETPLAY_SNAPSHOT_SPIKE requires PIKMIN_NETPLAY_BUILD")
+endif()
+if(PIKMIN_NETPLAY_SNAPSHOT_SPIKE AND WIN32 AND NOT ANDROID)
+    set_property(SOURCE
+        src/sysDolphin/sysNew.cpp
+        src/sysDolphin/system.cpp
+        src/plugPikiColin/plugPiki.cpp
+        pc_port/pc_main.cpp
+        pc_port/dolphin_stubs/os_stubs.cpp
+        pc_port/audio/pc_audio.cpp
+        pc_port/dolphin_stubs/audio_stubs.cpp
+        pc_port/netplay/pc_state_hash.cpp
+        pc_port/netplay/pc_snapshot_spike.cpp
+        APPEND PROPERTY COMPILE_DEFINITIONS PIKMIN_NETPLAY_SNAPSHOT_SPIKE=1)
+    target_sources(${NECTAR_GAME} PRIVATE pc_port/netplay/pc_snapshot_spike.cpp)
+    if(TARGET p2_kurage_runtime)
+        target_sources(p2_kurage_runtime PRIVATE pc_port/netplay/pc_snapshot_spike.cpp)
+    endif()
+    target_link_options(${NECTAR_GAME} PRIVATE "-Wl,-Map=${CMAKE_BINARY_DIR}/nectar.map")
+endif()
+
 # Netplay M3 lockstep (issue #880): vendored GekkoNet as its own static
 # library. GekkoLib/src/*.cpp with -std=gnu++20, GEKKONET_NO_ASIO and
 # GEKKONET_STATIC; include dirs include, include/private and thirdparty

@@ -18,6 +18,9 @@
 #if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_det.h"
 #include "netplay/pc_netplay_present.h"
+#if defined(PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
+#include "netplay/pc_snapshot_spike.h"
+#endif
 #endif
 
 #define TIMER_STATE_X           (32) ///< Horizontal position to start printing timer debug text from.
@@ -336,6 +339,12 @@ int PlugPikiApp::idle()
 		// must not draw the sim pass's vertices.
 		pc_gfx_flush_batch();
 		pc_netplay_present_end_authoritative(*gsys->mDGXGfx);
+#if defined(PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
+		// M6a spike (#896): the authoritative pass ends here; the presentation
+		// pass below is infrastructure (its allocations stay on malloc).
+		pc_snapshot_spike_auth_end();
+		pc_snapshot_spike_infra_push(kPcSpikeInfraPresent);
+#endif
 
 		// 2. Presentation pass: local view only, real camera + real GL.
 		// Sim blocks are skipped via pc_render_is_authoritative() == false.
@@ -373,6 +382,9 @@ int PlugPikiApp::idle()
 		// parseMessages, hashing and any soft-reset idle run as sim, and the
 		// next presentation starts from a clean save list.
 		pc_render_end_presentation();
+#if defined(PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
+		pc_snapshot_spike_infra_pop();
+#endif
 		// M2b acceptance evidence: null-GX counters, one line per 3000
 		// ticks on stdout (native.log). Real GL issued while null was
 		// active must stay 0; attempted counts the skipped submissions.
@@ -433,7 +445,13 @@ int PlugPikiApp::idle()
 	}
 	gsys->mTimer->start("render", true);
 	const double doneStart = profiling ? clockNow() : 0.0;
+#if defined(PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
+	pc_snapshot_spike_infra_push(kPcSpikeInfraDoneRender);
 	gsys->doneRender();
+	pc_snapshot_spike_infra_pop();
+#else
+	gsys->doneRender();
+#endif
 	if (profiling) {
 		pc_tick_profiler_record(kPcTickDoneRender, clockNow() - doneStart);
 		pc_tick_profiler_record(kPcTickWhole, clockNow() - tickStart);
