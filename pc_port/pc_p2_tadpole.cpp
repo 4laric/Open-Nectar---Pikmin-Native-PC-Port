@@ -31,6 +31,7 @@
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Generator.h"
 #include "gameflow.h"
 #include <cmath>
@@ -148,8 +149,8 @@ bool nearestTargetPos(const Vector3f& pos, Vector3f& out) {
     bool found = false;
     float bestSq = SIGHT * SIGHT;
     if (naviMgr) {
-        Navi* n = naviMgr->getNavi();
-        if (n && n->isAlive()) {
+        for (Navi* n : pc_p2_navis()) {
+            if (!n->isAlive()) continue;
             const Vector3f p = n->getPosition();
             const float d = distXZsq(p, pos);
             if (d < bestSq) { bestSq = d; out = p; found = true; }

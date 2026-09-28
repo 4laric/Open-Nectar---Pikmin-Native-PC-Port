@@ -8,6 +8,7 @@
 #include "MapMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Pellet.h"
 #include "Piki.h"
 #include "PikiMgr.h"
@@ -188,8 +189,8 @@ Creature* liveNearestTarget(const Vector3f& pos) {
     Creature* best = nullptr;
     float bestSq = kLiveSight * kLiveSight;
     if (naviMgr) {
-        Navi* n = naviMgr->getNavi();
-        if (n && n->isAlive()) {
+        for (Navi* n : pc_p2_navis()) {
+            if (!n->isAlive()) continue;
             const Vector3f p = n->getPosition();
             const float dx = p.x - pos.x, dz = p.z - pos.z;
             const float d = dx * dx + dz * dz;
@@ -222,7 +223,7 @@ void liveFire(BTeki* t, Binding& b, Creature* target) {
     if (target->isPiki()) {
         Piki* p = static_cast<Piki*>(target);
         p->stimulate(InteractBomb(t, kLiveShotDamage, nullptr));
-    } else if (naviMgr && target == naviMgr->getNavi()) {
+    } else if (pc_p2_is_navi(target)) {
         target->stimulate(InteractBomb(t, kLiveShotDamage, nullptr));
     }
     std::printf("P2_GROINK_LIVE_FIRE generator=%u source_id=97 x=%.2f z=%.2f tx=%.2f tz=%.2f damage=%.1f\n",

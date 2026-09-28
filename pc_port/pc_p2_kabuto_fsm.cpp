@@ -31,6 +31,7 @@
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Pellet.h"
 #include "Boss.h"
 #include "Interactions.h"
@@ -190,7 +191,7 @@ int doFlick(BTeki* actor){
         if(distXZ(q->getPosition(),pos)<120.0f)pikis.push_back(q);}}
     for(Piki* q:pikis){if(!q||!q->isAlive())continue;
         if(q->stimulate(InteractFlick(actor,300.0f,0.0f,FLICK_BACKWARDS_ANGLE)))++hit;}
-    if(naviMgr){Navi* n=naviMgr->getNavi();if(n&&n->isAlive()&&distXZ(n->getPosition(),pos)<120.0f)
+    for(Navi* n:pc_p2_navis()){if(n->isAlive()&&distXZ(n->getPosition(),pos)<120.0f)
         if(n->stimulate(InteractFlick(actor,300.0f,0.0f,FLICK_BACKWARDS_ANGLE)))++hit;}
     return hit;
 }

@@ -50,6 +50,7 @@
 #include "PikiState.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Generator.h"
 #include "StateMachine.h"
 #include "system.h"
@@ -116,8 +117,8 @@ Creature* nearestCreature(const Vector3f& pos, float radius)
 	Creature* best = nullptr;
 	float bestSq   = radius * radius;
 	if (naviMgr) {
-		Navi* navi = naviMgr->getNavi();
-		if (navi && navi->isAlive()) {
+		for (Navi* navi : pc_p2_navis()) {
+			if (!navi->isAlive()) continue;
 			const Vector3f p = navi->getPosition();
 			const float dx = p.x - pos.x, dz = p.z - pos.z;
 			const float d  = dx * dx + dz * dz;
@@ -223,9 +224,8 @@ void doFlick(BTeki* actor, unsigned generator)
 			}
 		}
 	}
-	if (naviMgr) {
-		Navi* navi = naviMgr->getNavi();
-		if (navi && navi->isAlive() && distXZ(navi->getPosition(), pos) < params.flickRange) {
+	for (Navi* navi : pc_p2_navis()) {
+		if (navi->isAlive() && distXZ(navi->getPosition(), pos) < params.flickRange) {
 			if (navi->stimulate(InteractFlick(actor, params.flickKnockback, params.flickDamage, actor->getDirection()))) ++hit;
 		}
 	}
@@ -266,8 +266,8 @@ void doBury(BTeki* actor, unsigned generator)
 		}
 	}
 	if (naviMgr) {
-		Navi* navi = naviMgr->getNavi();
-		if (navi && navi->isAlive()) {
+		for (Navi* navi : pc_p2_navis()) {
+			if (!navi->isAlive()) continue;
 			const Vector3f np = navi->getPosition();
 			const float dx = np.x - pos.x, dz = np.z - pos.z;
 			if (dx * dx + dz * dz <= params.attackRange * params.attackRange) {

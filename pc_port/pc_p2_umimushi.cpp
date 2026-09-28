@@ -46,6 +46,7 @@
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Generator.h"
 #include "gameflow.h"
 #include <cmath>
@@ -187,9 +188,16 @@ bool clipLoops(const std::string& name) {
     return it != clips.end() && it->second.loop;
 }
 
-Navi* activeNavi() {
+// Source isChangeNavi (umiMushi.cpp:849-853): getActiveNavi, or the nearest
+// captain in two-player mode. Searches and area effects walk every captain.
+Navi* activeNavi(const Vector3f& pos) {
     if (!naviMgr) return nullptr;
-    Navi* n = naviMgr->getNavi();
+    Navi* n = pc_p2_source_active_navi(pos);
+    return (n && n->isAlive()) ? n : nullptr;
+}
+Navi* nearestNavi(const Vector3f& pos) {
+    if (!naviMgr) return nullptr;
+    Navi* n = pc_p2_nearest_navi(pos);
     return (n && n->isAlive()) ? n : nullptr;
 }
 Piki* nearestPiki(const Vector3f& pos, float radius) {
@@ -228,8 +236,9 @@ Piki* nearestPikiAngle(const Vector3f& pos, float heading, float radius, float a
 }
 bool isStartFlick(const Vector3f& pos) {
     if (nearestPiki(pos, SHAKE_RANGE)) return true;
-    Navi* n = activeNavi();
-    return n && distXZ(n->getPosition(), pos) < SHAKE_RANGE;
+    for (Navi* n : pc_p2_navis())
+        if (n->isAlive() && distXZ(n->getPosition(), pos) < SHAKE_RANGE) return true;
+    return false;
 }
 int flickNearby(BTeki* a) {
     const Vector3f pos = a->getPosition();
@@ -246,8 +255,8 @@ int flickNearby(BTeki* a) {
             ++hit;
         }
     }
-    Navi* n = activeNavi();
-    if (n && distXZ(n->getPosition(), pos) < SHAKE_RANGE) {
+    for (Navi* n : pc_p2_navis()) {
+        if (!n->isAlive() || distXZ(n->getPosition(), pos) >= SHAKE_RANGE) continue;
         const Vector3f q = n->getPosition();
         const float angle = std::atan2(q.x - pos.x, q.z - pos.z);
         n->stimulate(InteractFlick(a, SHAKE_KNOCKBACK, SHAKE_DAMAGE, angle));
@@ -256,10 +265,11 @@ int flickNearby(BTeki* a) {
     return hit;
 }
 void attackNearbyNavi(BTeki* a) {
-    Navi* n = activeNavi();
-    if (!n) return;
-    if (distXZ(n->getPosition(), a->getPosition()) < ATTACK_HIT) {
-        n->stimulate(InteractAttack(a, nullptr, ATTACK_DAMAGE, false));
+    for (Navi* n : pc_p2_navis()) {
+        if (!n->isAlive()) continue;
+        if (distXZ(n->getPosition(), a->getPosition()) < ATTACK_HIT) {
+            n->stimulate(InteractAttack(a, nullptr, ATTACK_DAMAGE, false));
+        }
     }
 }
 void stop(BTeki* a) {
@@ -331,9 +341,9 @@ void outMove(BTeki* a, Umi& s) {
 bool isChangeNavi(BTeki* a, Umi& s) {
     // Source umiMushi.cpp:843: Blind never retargets a Navi (returns false).
     if (s.blind) return false;
-    Navi* navi = activeNavi();
-    if (!navi) return false;
     const Vector3f pos = a->getPosition();
+    Navi* navi = activeNavi(pos);
+    if (!navi) return false;
     float dist = SEARCH_DISTANCE;
     if (s.targetNavi) dist *= 1.2f;
     dist *= dist;
@@ -362,7 +372,7 @@ bool isFindTarget(BTeki* a, Umi& s) {
             return true;
         }
     }
-    Navi* navi = activeNavi();
+    Navi* navi = nearestNavi(pos); // source getNearestNavi (umiMushi.cpp:916)
     if (navi && distXZ(navi->getPosition(), pos) < SEARCH_DISTANCE) {
         s.goal = navi->getPosition();
         return true;

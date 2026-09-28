@@ -25,6 +25,7 @@
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Stickers.h"
 #include "system.h"
 #include <algorithm>
@@ -211,8 +212,8 @@ Creature* nearestTarget(const Vector3f& pos, float sight)
     Creature* best = nullptr;
     float bestSq = sight * sight;
     if (naviMgr) {
-        Navi* n = naviMgr->getNavi();
-        if (n && n->isAlive()) {
+        for (Navi* n : pc_p2_navis()) {
+            if (!n->isAlive()) continue;
             const Vector3f p = n->getPosition();
             const float dx = p.x - pos.x, dz = p.z - pos.z;
             const float d = dx * dx + dz * dz;
@@ -247,10 +248,20 @@ p2chappymouth::Vec3 mouthVec(const Vector3f& v)
 Creature* kingSearchTarget(BTeki* actor, ChappyFsm& s)
 {
     const p2chappymouth::Vec3 apos = mouthVec(actor->getPosition());
-    Navi* navi = naviMgr ? naviMgr->getNavi() : nullptr;
-    if (navi && !navi->isAlive()) navi = nullptr;
+    // Source EnemyFunc::getNearestNavi (kingChappy.cpp:1143-1144): the nearest
+    // alive captain inside the search cone/distance, then Pikmin compared
+    // against its distance. Probe each captain alone through selectTarget
+    // (-2 = accepted captain) and keep the XZ-nearest in index order.
+    Navi* navi = nullptr;
     p2chappymouth::Vec3 naviPos{};
-    if (navi) naviPos = mouthVec(navi->getPosition());
+    float naviSq = 0.0f;
+    for (Navi* n : pc_p2_navis()) {
+        if (!n->isAlive()) continue;
+        const p2chappymouth::Vec3 np = mouthVec(n->getPosition());
+        if (p2chappymouth::king::selectTarget(apos, s.heading, &np, nullptr, 0) != -2) continue;
+        const float d = p2chappymouth::king::sqrXZ(np, apos);
+        if (!navi || d < naviSq) { navi = n; naviPos = np; naviSq = d; }
+    }
     std::vector<Piki*> pikis;
     std::vector<p2chappymouth::king::Candidate> cands;
     if (pikiMgr) {
@@ -692,15 +703,16 @@ void logBite(BTeki* actor, const ChappyFsm& s, unsigned gen, int frame, int firs
 int kingNaviContact(BTeki* actor, const ChappyFsm& s, const p2chappymouth::Profile& prof, int frame)
 {
     if (!naviMgr) return 0;
-    Navi* n = naviMgr->getNavi();
-    if (!n || !n->isAlive()) return 0;
     const p2chappymouth::Vec3 apos = mouthVec(actor->getPosition());
-    const p2chappymouth::Vec3 np = mouthVec(n->getPosition());
     int hits = 0;
-    for (int i = 0; i < prof.slots; ++i) {
-        const p2chappymouth::Vec3 slot = p2chappymouth::slotWorld(prof, frame, i, apos, s.heading);
-        if (p2chappymouth::distance(slot, np) < p2chappymouth::effectiveRadius(prof)) {
-            if (n->stimulate(InteractAttack(actor, nullptr, s.spec->attackDamage, false))) ++hits;
+    for (Navi* n : pc_p2_navis()) {
+        if (!n->isAlive()) continue;
+        const p2chappymouth::Vec3 np = mouthVec(n->getPosition());
+        for (int i = 0; i < prof.slots; ++i) {
+            const p2chappymouth::Vec3 slot = p2chappymouth::slotWorld(prof, frame, i, apos, s.heading);
+            if (p2chappymouth::distance(slot, np) < p2chappymouth::effectiveRadius(prof)) {
+                if (n->stimulate(InteractAttack(actor, nullptr, s.spec->attackDamage, false))) ++hits;
+            }
         }
     }
     return hits;
@@ -739,8 +751,8 @@ void doBite(BTeki* actor, ChappyFsm& s, unsigned gen, int frame)
     const Vector3f pos = actor->getPosition();
     int hitNavi = 0, hitPiki = 0;
     if (naviMgr) {
-        Navi* n = naviMgr->getNavi();
-        if (n && n->isAlive()) {
+        for (Navi* n : pc_p2_navis()) {
+            if (!n->isAlive()) continue;
             const Vector3f np = n->getPosition();
             if (distXZ(np, pos) < s.spec->attackHitRange) {
                 const float ang = std::fabs(wrapPi(std::atan2(np.x - pos.x, np.z - pos.z) - s.heading));
@@ -777,9 +789,8 @@ void doFlick(BTeki* actor, const ChappyFsm& s, unsigned gen, int frame)
             }
         }
     }
-    if (naviMgr) {
-        Navi* n = naviMgr->getNavi();
-        if (n && n->isAlive() && distXZ(n->getPosition(), pos) < s.spec->attackHitRange) {
+    for (Navi* n : pc_p2_navis()) {
+        if (n->isAlive() && distXZ(n->getPosition(), pos) < s.spec->attackHitRange) {
             if (n->stimulate(InteractFlick(actor, 300.0f, 0.0f, FLICK_BACKWARDS_ANGLE))) ++hit;
         }
     }
@@ -806,9 +817,8 @@ void doFireAura(BTeki* actor, ChappyFsm& s, unsigned gen)
             }
         }
     }
-    if (naviMgr) {
-        Navi* n = naviMgr->getNavi();
-        if (n && n->isAlive() && distXZ(n->getPosition(), pos) < s.spec->attackHitRange) {
+    for (Navi* n : pc_p2_navis()) {
+        if (n->isAlive() && distXZ(n->getPosition(), pos) < s.spec->attackHitRange) {
             if (n->stimulate(InteractFire(actor, s.spec->attackDamage))) ++hit;
         }
     }

@@ -41,6 +41,7 @@
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "GlobalGameOptions.h"
 #include "Generator.h"
 #include "gameflow.h"
@@ -162,9 +163,8 @@ ElecBug* lookup(BTeki* actor) {
     return it == actors.end() ? nullptr : &it->second;
 }
 bool targetInSight(const Vector3f& pos) {
-    if (naviMgr) {
-        Navi* n = naviMgr->getNavi();
-        if (n && n->isAlive() && distXZ(n->getPosition(), pos) < SIGHT) return true;
+    for (Navi* n : pc_p2_navis()) {
+        if (n->isAlive() && distXZ(n->getPosition(), pos) < SIGHT) return true;
     }
     if (pikiMgr) {
         Iterator it(pikiMgr);

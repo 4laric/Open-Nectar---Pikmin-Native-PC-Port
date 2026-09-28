@@ -35,6 +35,7 @@
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Generator.h"
 #include "gameflow.h"
 #include <cmath>
@@ -133,9 +134,8 @@ bool clipLoops(Uji& s, const std::string& name) {
     return c && c->loop;
 }
 bool targetInSight(const Vector3f& pos, float sight) {
-    if (naviMgr) {
-        Navi* n = naviMgr->getNavi();
-        if (n && n->isAlive() && distXZ(n->getPosition(), pos) < sight) return true;
+    for (Navi* n : pc_p2_navis()) {
+        if (n->isAlive() && distXZ(n->getPosition(), pos) < sight) return true;
     }
     if (pikiMgr) {
         Iterator it(pikiMgr);
@@ -147,9 +147,8 @@ bool targetInSight(const Vector3f& pos, float sight) {
     return false;
 }
 bool targetInRange(const Vector3f& pos, float range) {
-    if (naviMgr) {
-        Navi* n = naviMgr->getNavi();
-        if (n && n->isAlive() && distXZ(n->getPosition(), pos) < range) return true;
+    for (Navi* n : pc_p2_navis()) {
+        if (n->isAlive() && distXZ(n->getPosition(), pos) < range) return true;
     }
     if (pikiMgr) {
         Iterator it(pikiMgr);
@@ -228,8 +227,8 @@ Creature* nearestFoe(const Vector3f& pos, float range) {
     Creature* best = nullptr;
     float bestSq = range * range;
     if (naviMgr) {
-        Navi* n = naviMgr->getNavi();
-        if (n && n->isAlive()) {
+        for (Navi* n : pc_p2_navis()) {
+            if (!n->isAlive()) continue;
             const float dx = n->getPosition().x - pos.x, dz = n->getPosition().z - pos.z;
             const float d = dx * dx + dz * dz;
             if (d < bestSq) { bestSq = d; best = n; }
@@ -255,7 +254,7 @@ void ujiStrike(BTeki* a, Uji& s, unsigned generator) {
     s.attackHit = true;
     Creature* victim = nearestFoe(a->getPosition(), s.parms.attackRange);
     if (!victim) return;
-    const bool navi = naviMgr && victim == naviMgr->getNavi();
+    const bool navi = pc_p2_is_navi(victim);
     victim->stimulate(InteractAttack(a, nullptr, s.parms.bridgeDamage, false));
     std::printf("P2_UJI_ATTACK generator=%u source_id=%d target=%s damage=%.1f state=%s\n",
                 generator, s.sourceId, navi ? "navi" : "pikmin",
