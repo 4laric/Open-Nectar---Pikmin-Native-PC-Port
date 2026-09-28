@@ -338,6 +338,8 @@ void pc_p2_sarai_manager_update_actor(BTeki* actor)
     auto it = s.find(actor);
     if (it == s.end()) return;
     auto& binding = it->second;
+    // Finalised Demon corpse: nothing left to drive (see draw_actor).
+    if (binding.species->demon && binding.escaped) return;
     if (!binding.host->revalidateNativeActor(actor, binding.generator, binding.type)) {
         corpses[actor] = binding.generator;
         s.erase(it);
@@ -401,11 +403,18 @@ void pc_p2_sarai_manager_update_actor(BTeki* actor)
     }
 }
 
-bool pc_p2_sarai_manager_draw_actor(BTeki* actor, Graphics& gfx, const Matrix4f&, bool)
+bool pc_p2_sarai_manager_draw_actor(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool corpse)
 {
     auto it = s.find(actor);
     if (it == s.end()) return false;
     auto& binding = it->second;
+    // A finalised Demon corpse has detached its generator (revalidation would
+    // fail); the binding stays until the central forget seam, so the carried
+    // pellet keeps the Demon carcass visual instead of the P1 vehicle's.
+    if (binding.species->demon && binding.escaped) {
+        if (corpse) binding.host->demonDrawCarcass(gfx, matrix);
+        return true;
+    }
     if (!binding.host->revalidateNativeActor(actor, binding.generator, binding.type)) {
         s.erase(it);
         return false;
@@ -413,8 +422,7 @@ bool pc_p2_sarai_manager_draw_actor(BTeki* actor, Graphics& gfx, const Matrix4f&
     if (binding.species->demon) {
         // Demon: the live host draws its own mesh; after the anchor becomes the
         // carried corpse, the host draws the retail carcass pose (type5) at it.
-        if (binding.escaped) binding.host->demonDrawCarcassAtAnchor(gfx);
-        else binding.host->refresh(gfx);
+        binding.host->refresh(gfx);
         return true;
     }
     // Suppress the retail anchor draw; the host owns the Sarai visual. A dead
