@@ -64,7 +64,12 @@
 // PIKMIN_NETPLAY_TEST_PROTOCOL_VERSION overrides the local version and
 // PIKMIN_NETPLAY_TEST_HANDSHAKE_LEN=108 sends the v1 length to exercise the
 // cross-length refuse path. The refuse field is fixed at offset 107 in every
-// version.
+// version. M4 lane B2 (issue #885): protocol v3 (252 bytes, layout in
+// pc_netplay_transfer.h) adds the checkpoint / card / P2 digests; the test
+// length hook also accepts 116 (the v2 length). A new kTransfer phase between
+// the handshake and GekkoNet moves the host's checkpoint and P2 sidecars to
+// the joiner over the bulk channel, and pc_netplay_save_barrier agrees the
+// day-end save outcome inside the save tick (bulk channel only).
 
 #include "netplay/pc_netplay_session.h"
 

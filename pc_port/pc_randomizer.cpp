@@ -1822,6 +1822,20 @@ bool pc_randomizer_save_campaign_netplay(const void* source, bool localCardOk) {
     std::string bytes;
     std::filesystem::path written;
     bool localOk = localCardOk;
+#if PIKI_NETPLAY_BUILD
+    // TEST ONLY (netplay builds): PIKMIN_NETPLAY_TEST_HOST_SAVE_FAIL=1 makes the
+    // HOST's day-end save report a failure (as if its card write failed), so a
+    // pair exercises the client's retract / SAVE_FAIL path at runtime. Both
+    // peers follow the host's outcome, so the sim stays identical; the knob is
+    // ignored on the client.
+    if (host && localOk) {
+        const char* knob = std::getenv("PIKMIN_NETPLAY_TEST_HOST_SAVE_FAIL");
+        if (knob != nullptr && knob[0] == '1' && knob[1] == '\0') {
+            localOk = false;
+            std::printf("[netplay] test: host day-end save forced to fail\n");
+        }
+    }
+#endif
     if (localOk) {
         localOk = write_campaign_checkpoint(source, generation, host, &bytes, &written);
         if (localOk) std::printf("[Pikmin Randomizer] CAMPAIGN_SAVED generation=%llu\n", generation);
