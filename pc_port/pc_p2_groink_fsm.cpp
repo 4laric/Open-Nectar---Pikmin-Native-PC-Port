@@ -631,7 +631,10 @@ void Fsm::execState() {
     const float health = mIn->health;
     switch (mState) {
     case State::Dead: // MiniHoudaiState.cpp:51-71
-        if (mAnim.is(Key2)) mOut->deadBomb = true;
+        if (mAnim.is(Key2)) {
+            mOut->deadBomb = true;
+            mOut->deadMuzzle = worldMuzzle(mPos);
+        }
         else if (mAnim.is(KeyEnd)) mOut->killRequest = true;
         break;
     case State::Rebirth: // :99-156
@@ -674,8 +677,11 @@ void Fsm::execState() {
                 // MiniHoudaiShotGunMgr::emitShotGun (MiniHoudaiShotGun.cpp:407-451)
                 std::array<P2GroinkVec3, P2GroinkVolley::kVolleySize> samples{};
                 for (auto& s : samples) s = {randFloat(), randFloat(), randFloat()};
-                const auto e = mShells.emit(worldMuzzle(mPos), mGun.speed(), samples);
+                const P2GroinkMuzzle muzzle = worldMuzzle(mPos);
+                const auto e = mShells.emit(muzzle, mGun.speed(), samples);
                 mOut->volley += e.valid ? int(e.count) : 0;
+                mOut->shotFired = true;
+                mOut->volleyMuzzle = muzzle;
                 mOut->volleySpeed = mGun.speed();
                 mOut->volleyAngle = mGun.angle();
                 mOut->volleyTarget = mTargetPos;

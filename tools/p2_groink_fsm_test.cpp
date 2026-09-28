@@ -248,6 +248,24 @@ int main() {
                 if (o.volley > maxShells) maxShells = o.volley;
                 if (emitFrame < 0) emitFrame = frameBefore;
                 check(o.volleySpeed > 0.0f, "shell speed comes from the locked aim");
+                // #892: the flash basis is the one the shells left from.
+                check(o.shotFired, "a volley tick reports emitShotGun (TChibiShoot)");
+                const P2GroinkVec3 m0 = o.volleyMuzzle.column0;
+                const float ml = std::sqrt(m0.x * m0.x + m0.y * m0.y + m0.z * m0.z);
+                bool along = ml > 0.0f;
+                for (std::size_t sl = 0; sl < P2GroinkVolley::kCapacity && along; ++sl) {
+                    const P2GroinkShell sh = f.shells().shell(sl);
+                    if (!sh.active) continue;
+                    // 3D: the kuti axis is steep (lobbed shells), so compare full
+                    // directions; the source spread is +-0.1 per axis (< ~10 deg),
+                    // gravity has acted for one update at most.
+                    const P2GroinkVec3 v = sh.velocity;
+                    const float vl = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+                    if (vl > 0.0f) along = (v.x * m0.x + v.y * m0.y + v.z * m0.z) / (vl * ml) > 0.9f;
+                }
+                check(along, "live shells fly along the reported muzzle axis");
+            } else {
+                check(!o.shotFired, "no emitShotGun without a volley while the pool has room");
             }
             if (o.lockedOn) ++locks;
             if (inAttack && f.animator().isStopped() && f.gun().rotating() && !f.gun().locked()) stoppedWhileAiming = true;
@@ -311,12 +329,20 @@ int main() {
         f.init(params, bank, false, w.pos, 0.0f, 9u, nullptr);
         for (int i = 0; i < 5; ++i) step(f, w);
         w.health = 0.0f;
-        bool dead = false, kill = false;
+        bool dead = false, kill = false, deadBomb = false;
         for (int i = 0; i < 300 && !kill; ++i) {
             TickOutput o = step(f, w);
             dead = dead || entered(o, State::Dead);
             kill = o.killRequest;
+            if (o.deadBomb) {
+                deadBomb = true;
+                const P2GroinkMuzzle want = f.worldMuzzle(w.pos);
+                check(near(o.deadMuzzle.column3.x, want.column3.x, 1e-2f) && near(o.deadMuzzle.column3.y, want.column3.y, 1e-2f)
+                      && near(o.deadMuzzle.column3.z, want.column3.z, 1e-2f),
+                      "dead KEYEVENT_2 reports the kuti basis (createDeadBombEmitEffect)");
+            }
         }
+        check(deadBomb, "the dead clip reaches KEYEVENT_2");
         check(dead && kill && f.state() == State::Dead, "0 HP -> Dead -> END kill request");
         check(near(std::hypot(step(f, w).velocity.x, 0.0f), 0.0f, 1e-3f), "Dead stops the target velocity");
     }
