@@ -165,6 +165,22 @@ inline bool isPowerEnabled()
     return v && v[0] && std::strcmp(v, "0") != 0;
 }
 
+// #244 test tooling: PIKMIN_RANDOMIZER_AUTOPLAY_BOMBSARAI_HOLD=<seconds>
+// overrides Config::bombsaraiHold (the "stand under the carrier" hold) so a
+// run can throw while the carrier still holds its bomb. Inert unless the
+// autoplay gate is on; a missing or unparsable value keeps the default.
+inline float bombsaraiHoldSeconds(float fallback)
+{
+    if (!isEnabled()) return fallback;
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_BOMBSARAI_HOLD");
+    if (v && v[0]) {
+        char* end = nullptr;
+        const double d = std::strtod(v, &end);
+        if (end && end != v && *end == 0 && d >= 0.0 && d < 600.0) return float(d);
+    }
+    return fallback;
+}
+
 inline float powerDamageMult()
 {
     if (!isPowerEnabled()) return 1.0f;
@@ -1081,7 +1097,7 @@ private:
             }
             return;
         }
-        if (in.targetSource == 58 && stateTime < cfg.bombsaraiHold) {
+        if (in.targetSource == 58 && stateTime < bombsaraiHoldSeconds(cfg.bombsaraiHold)) {
             steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
             return;
         }
