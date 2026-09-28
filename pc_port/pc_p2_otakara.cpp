@@ -61,6 +61,7 @@
 #include "Pellet.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Generator.h"
 #include "gameflow.h"
 #include <cmath>
@@ -400,8 +401,8 @@ void applyBombBlast(BTeki* a, Otakara& s, const char* trigger) {
         Iterator it(pikiMgr);
         CI_LOOP(it) { addReceiver(static_cast<Creature*>(static_cast<Piki*>(*it)), P2BombSaraiReceiverKind::Piki); }
     }
-    if (naviMgr && naviMgr->getNavi()) {
-        addReceiver(static_cast<Creature*>(naviMgr->getNavi()), P2BombSaraiReceiverKind::Navi);
+    for (Navi* navi : pc_p2_navis()) {
+        addReceiver(static_cast<Creature*>(navi), P2BombSaraiReceiverKind::Navi);
     }
     if (receivers.empty()) {
         std::printf("P2_BOMBOTAKARA_BLAST generator=%u payload=93 center=%.3f,%.3f,%.3f radius=%.1f "

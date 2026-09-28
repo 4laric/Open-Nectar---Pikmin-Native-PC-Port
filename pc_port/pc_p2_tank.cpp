@@ -26,6 +26,7 @@
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Interactions.h"
 #include "MapMgr.h"
 #include "gl/pc_gfx.h"
@@ -138,7 +139,7 @@ void turnTo(BTeki* a,TankFsm& s,const Vector3f& target,float dt,float rate){
 }
 Creature* nearestTarget(const Vector3f& pos,float sight){
     Creature* best=nullptr;float bestSq=sight*sight;
-    if(naviMgr){Navi* n=naviMgr->getNavi();if(n&&n->isAlive()){const Vector3f p=n->getPosition();
+    for(Navi* n:pc_p2_navis()){if(n->isAlive()){const Vector3f p=n->getPosition();
         const float dx=p.x-pos.x,dz=p.z-pos.z,d=dx*dx+dz*dz;if(d<bestSq){bestSq=d;best=n;}}}
     if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(!p||!p->isAlive())continue;
         const Vector3f q=p->getPosition();const float dx=q.x-pos.x,dz=q.z-pos.z,d=dx*dx+dz*dz;if(d<bestSq){bestSq=d;best=p;}}}
@@ -222,7 +223,7 @@ int doFlick(BTeki* actor,TankFsm& s){
         if(distXZ(q->getPosition(),pos)<p.flickRange)pikis.push_back(q);}}
     for(Piki* q:pikis){if(!q||!q->isAlive())continue;
         if(q->stimulate(InteractFlick(actor,300.0f,0.0f,FLICK_BACKWARDS_ANGLE)))++hit;}
-    if(naviMgr){Navi* n=naviMgr->getNavi();if(n&&n->isAlive()&&distXZ(n->getPosition(),pos)<p.flickRange)
+    for(Navi* n:pc_p2_navis()){if(n->isAlive()&&distXZ(n->getPosition(),pos)<p.flickRange)
         if(n->stimulate(InteractFlick(actor,300.0f,0.0f,FLICK_BACKWARDS_ANGLE)))++hit;}
     return hit;
 }

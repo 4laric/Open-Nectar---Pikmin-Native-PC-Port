@@ -16,6 +16,7 @@
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Interactions.h"
 #include "MapMgr.h"
 #include <fstream>
@@ -145,7 +146,7 @@ void turnTo(BTeki* a,FrogFsm& s,const Vector3f& target,float dt){
 }
 Creature* nearestTarget(const Vector3f& pos,float sight){
     Creature* best=nullptr;float bestSq=sight*sight;
-    if(naviMgr){Navi* n=naviMgr->getNavi();if(n&&n->isAlive()){const Vector3f p=n->getPosition();
+    for(Navi* n:pc_p2_navis()){if(n->isAlive()){const Vector3f p=n->getPosition();
         const float dx=p.x-pos.x,dz=p.z-pos.z,d=dx*dx+dz*dz;if(d<bestSq){bestSq=d;best=n;}}}
     if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(!p||!p->isAlive())continue;
         const Vector3f q=p->getPosition();const float dx=q.x-pos.x,dz=q.z-pos.z,d=dx*dx+dz*dz;if(d<bestSq){bestSq=d;best=p;}}}
@@ -178,14 +179,14 @@ bool shouldFlick(BTeki* actor){return stuckPikminCount(actor)>=FLEE_STUCK_MIN;}
 // MaroFrog attackNaviPosition: an in-range living captain overrides the jump
 // landing point (the source captain retarget).
 void retargetNavi(BTeki* actor,FrogFsm& s){
-    // Source attackNaviPosition iterates every captain (P2 two-captain); the P1
-    // host exposes one active Navi, so this matches nearestTarget and uses
-    // getNavi() rather than an all-Navi iterator.
+    // Source attackNaviPosition iterates every captain with no break
+    // (MaroFrog.cpp:21-34): the last alive in-range captain in index order wins.
     if(s.kind!=1||!naviMgr)return;
-    Navi* n=naviMgr->getNavi();
-    if(!n||!n->isAlive())return;
-    const Vector3f np=n->getPosition();
-    if(distXZ(actor->getPosition(),np)<p2frog::params(s.kind).attackRange){s.targetPos=np;s.targetValid=true;}
+    for(Navi* n:pc_p2_navis()){
+        if(!n->isAlive())continue;
+        const Vector3f np=n->getPosition();
+        if(distXZ(actor->getPosition(),np)<p2frog::params(s.kind).attackRange){s.targetPos=np;s.targetValid=true;}
+    }
 }
 // Source StateJump KEYEVENT_2: flickNearbyNavi + flickNearbyPikmin (non-damaging
 // adjacent shake; the P2 water branch is absent on the dry P1 host).
@@ -195,7 +196,7 @@ void doJumpFlick(BTeki* actor,FrogFsm& s){
     int hit=0;
     if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){Piki* q=static_cast<Piki*>(*it);if(!q||!q->isAlive())continue;
         if(distXZ(q->getPosition(),pos)<range){if(q->stimulate(InteractFlick(actor,FLICK_KNOCKBACK,FLICK_DAMAGE,FLICK_BACKWARDS_ANGLE)))++hit;}}}
-    if(naviMgr){Navi* n=naviMgr->getNavi();if(n&&n->isAlive()&&distXZ(n->getPosition(),pos)<range)
+    for(Navi* n:pc_p2_navis()){if(n->isAlive()&&distXZ(n->getPosition(),pos)<range)
         if(n->stimulate(InteractFlick(actor,FLICK_KNOCKBACK,FLICK_DAMAGE,FLICK_BACKWARDS_ANGLE)))++hit;}
     std::printf("P2_FROG_JUMP_FLICK species=%s hit=%d\n",ids[s.kind],hit);std::fflush(stdout);
 }

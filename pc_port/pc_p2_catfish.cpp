@@ -45,6 +45,7 @@
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Generator.h"
 #include "gameflow.h"
 #include <cmath>
@@ -162,8 +163,8 @@ Creature* nearestTarget(const Vector3f& pos) {
     Creature* best = nullptr;
     float bestSq = SIGHT * SIGHT;
     if (naviMgr) {
-        Navi* n = naviMgr->getNavi();
-        if (n && n->isAlive()) {
+        for (Navi* n : pc_p2_navis()) {
+            if (!n->isAlive()) continue;
             const Vector3f p = n->getPosition();
             const float dx = p.x - pos.x, dz = p.z - pos.z;
             const float d = dx * dx + dz * dz;
@@ -198,11 +199,6 @@ Piki* nearestPiki(const Vector3f& pos, float radius) {
         }
     }
     return best;
-}
-Navi* activeNavi() {
-    if (!naviMgr) return nullptr;
-    Navi* n = naviMgr->getNavi();
-    return (n && n->isAlive()) ? n : nullptr;
 }
 int slotIndexOf(const Catfish& s, const Piki* p) {
     for (int i = 0; i < p2catfish::kMouthSlots; ++i)
@@ -260,12 +256,13 @@ int doFlick(BTeki* a, Catfish& s) {
             }
         }
     }
-    Navi* navi = activeNavi();
-    if (navi && p2catfish::inFlickRange(distXZ(navi->getPosition(), pos))) {
-        if (navi->stimulate(InteractFlick(a, p2catfish::kFlickKnockback,
-                                          p2catfish::kFlickDamage,
-                                          FLICK_BACKWARDS_ANGLE))) {
-            ++hit;
+    for (Navi* navi : pc_p2_navis()) {
+        if (navi->isAlive() && p2catfish::inFlickRange(distXZ(navi->getPosition(), pos))) {
+            if (navi->stimulate(InteractFlick(a, p2catfish::kFlickKnockback,
+                                              p2catfish::kFlickDamage,
+                                              FLICK_BACKWARDS_ANGLE))) {
+                ++hit;
+            }
         }
     }
     return hit;
@@ -341,8 +338,8 @@ void transition(Catfish& s, State state, const char* clip, unsigned generator) {
 // the captured Pikmin are consumed exactly once at the banked swallow event.
 void biteEvent(BTeki* actor, Catfish& s, unsigned generator, int frame) {
     const Vector3f pos = actor->getPosition();
-    Navi* navi = activeNavi();
-    if (navi) {
+    for (Navi* navi : pc_p2_navis()) {
+        if (!navi->isAlive()) continue;
         const Vector3f np = navi->getPosition();
         if (p2catfish::attackNaviHits(distXZ(np, pos), targetAngle(s, pos, np))) {
             navi->stimulate(InteractAttack(actor, nullptr, p2catfish::kAttackDamage, false));

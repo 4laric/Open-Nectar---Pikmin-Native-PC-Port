@@ -61,6 +61,7 @@
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Generator.h"
 #include "gameflow.h"
 #include "GameStat.h"
@@ -230,8 +231,8 @@ Creature* nearestTarget(const Vector3f& pos, float radius) {
     Creature* best = nullptr;
     float bestSq = radius * radius;
     if (naviMgr) {
-        Navi* n = naviMgr->getNavi();
-        if (n && n->isAlive()) {
+        for (Navi* n : pc_p2_navis()) {
+            if (!n->isAlive()) continue;
             const Vector3f p = n->getPosition();
             const float dx = p.x - pos.x, dz = p.z - pos.z;
             const float d = dx * dx + dz * dz;
@@ -323,7 +324,7 @@ void setState(BTeki* a, Dango& s, State state, const char* clip) {
 void rollingMove(BTeki* a, Dango& s, const Vector3f& pos) {
     Creature* target = nullptr;
     if (naviMgr) {
-        Navi* n = naviMgr->getNavi();
+        Navi* n = pc_p2_source_active_navi(pos); // source getActiveNavi (DangoMushi.cpp:414)
         if (n && n->isAlive()) target = n;
     }
     if (!target) target = nearestTarget(pos, SIGHT);
@@ -632,7 +633,7 @@ void tickRain(Dango& s, BTeki* actor, const Vector3f& pos, float dt) {
                 if (dx * dx + dy * dy + dz * dz > radiusSq) return;
                 applyRainRockContact(s, k, kind, creature, actor, generator);
             };
-            consider(naviMgr ? naviMgr->getNavi() : nullptr, P2RockHazardContactKind::NaviPiki);
+            for (Navi* navi : pc_p2_navis()) consider(navi, P2RockHazardContactKind::NaviPiki);
             if (pikiMgr) {
                 Iterator pikiIt(pikiMgr);
                 CI_LOOP(pikiIt) {
@@ -656,8 +657,8 @@ void tickRain(Dango& s, BTeki* actor, const Vector3f& pos, float dt) {
                 return dx * dx + dy * dy + dz * dz
                     <= kRainEggContactRadius * kRainEggContactRadius;
             };
-            Navi* navi = naviMgr ? naviMgr->getNavi() : nullptr;
-            if (navi && navi->isAlive() && near(navi)) touched = true;
+            for (Navi* navi : pc_p2_navis())
+                if (navi->isAlive() && near(navi)) { touched = true; break; }
             if (!touched && pikiMgr) {
                 Iterator it(pikiMgr);
                 CI_LOOP(it) {
@@ -1017,7 +1018,7 @@ void pc_p2_dangomushi_update(BTeki* actor) {
             // captain (the source rain centre). No-op when the slot pool is full.
             Vector3f rainCentre = pos;
             if (naviMgr) {
-                Navi* active = naviMgr->getNavi();
+                Navi* active = pc_p2_source_active_navi(pos); // DangoMushi.cpp:563
                 if (active && active->isAlive()) rainCentre = active->getPosition();
             }
             spawnRainRocks(s, actor, rainCentre, s.heading, hzo.rocksToSpawn,

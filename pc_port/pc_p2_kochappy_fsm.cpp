@@ -58,6 +58,7 @@
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Generator.h"
 #include "Stickers.h"
 #include "system.h"
@@ -128,8 +129,8 @@ Creature* nearestCreature(const Vector3f& pos, float radius)
 	Creature* best = nullptr;
 	float bestSq   = radius * radius;
 	if (naviMgr) {
-		Navi* navi = naviMgr->getNavi();
-		if (navi && navi->isAlive()) {
+		for (Navi* navi : pc_p2_navis()) {
+			if (!navi->isAlive()) continue;
 			const Vector3f p = navi->getPosition();
 			const float dx = p.x - pos.x, dz = p.z - pos.z;
 			const float d  = dx * dx + dz * dz;
@@ -226,9 +227,8 @@ void doFlick(BTeki* actor)
 			}
 		}
 	}
-	if (naviMgr) {
-		Navi* navi = naviMgr->getNavi();
-		if (navi && navi->isAlive() && distXZ(navi->getPosition(), pos) < SHAKE_RANGE) {
+	for (Navi* navi : pc_p2_navis()) {
+		if (navi->isAlive() && distXZ(navi->getPosition(), pos) < SHAKE_RANGE) {
 			navi->stimulate(InteractFlick(actor, SHAKE_KNOCKBACK, 0.0f, actor->getDirection()));
 		}
 	}
@@ -656,12 +656,13 @@ void pc_p2_kochappy_fsm_update(BTeki* actor)
 			state.attackFired = true;
 			// Source attackNavi (kochappyState.cpp:1403-1406) bites the captain
 			// only; Pikmin are eaten by the mouth slot, never damaged here.
-			Navi* navi = naviMgr ? naviMgr->getNavi() : nullptr;
-			if (navi && navi->isAlive() && distXZ(navi->getPosition(), pos) < params.attackHitRange) {
-				navi->stimulate(InteractAttack(actor, nullptr, params.attackDamage, false));
-				std::printf("P2_KOCHAPPY_ATTACK generator=%u frame=%.0f damage=%.0f\n", generator,
-				            ATTACK_EVENT_FRAME, params.attackDamage);
-				std::fflush(stdout);
+			for (Navi* navi : pc_p2_navis()) {
+				if (navi->isAlive() && distXZ(navi->getPosition(), pos) < params.attackHitRange) {
+					navi->stimulate(InteractAttack(actor, nullptr, params.attackDamage, false));
+					std::printf("P2_KOCHAPPY_ATTACK generator=%u frame=%.0f damage=%.0f\n", generator,
+					            ATTACK_EVENT_FRAME, params.attackDamage);
+					std::fflush(stdout);
+				}
 			}
 			// Source eatPikmin (KEYEVENT_2): mouth-slot eat (pc_p2_chappy_mouth.h).
 			const EatStats eat = doEat(actor, state, generator);
