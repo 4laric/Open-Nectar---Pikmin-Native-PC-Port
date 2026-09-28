@@ -35,23 +35,32 @@
 // limiter in pc_window.cpp stays off there, otherwise two stacked pacers cap
 // throttled pairs at ~21 tps). Drift-free deadline: next += 1000/30 ms per
 // Advance, with bounded catch-up (snap forward when more than ~5 slots
-// behind, so an overrun never costs more than a slot and never spirals).
-// gekko_frames_ahead() slows down proportionally and small when ahead past
-// 0.75 (quarter-slot share, capped at a few ms). Stall turns (no Advance)
-// never spend a whole slot: they pump the network and sleep ~1 ms, so the
-// 30 Hz budget is spent on ticks, not waits. PIKMIN_NETPLAY_UNTHROTTLED=1
-// runs as fast as the session allows (tests).
-// Stall % is wall-clock INCLUDING the pacing sleep, and the logs also give
-// effective tps plus the 1 - tps/30 slot-loss fraction (n2). Local delay is
+// behind, at most 2 slots per turn so hiccups replay over several turns).
+// gekko_frames_ahead() stretches the deadline proportionally and small when
+// ahead past 0.75 (0.05 slot per frame, capped at 10% of a slot), so an ahead
+// peer converges. Stall turns (no Advance) never spend a whole slot: they
+// pump the network and wait ~1 ms, so the 30 Hz budget is spent on ticks, not
+// waits. Short waits use one shared hires timer (sleep the bulk, spin only
+// the ~2 ms tail), so throttled pairs hold 30 Hz without pinning a core.
+// PIKMIN_NETPLAY_UNTHROTTLED=1 runs as fast as the session allows (tests).
+// Stall % is the wall-clock share of no-Advance turns (the slot wait lives on
+// advance turns and is never charged as stall); the logs also give effective
+// tps plus the 1 - tps/30 slot-loss fraction (n2). Local delay is
 // PIKMIN_NETPLAY_DELAY frames (default 2) or "auto" (nonce-matched median
-// handshake RTT, ceil((RTT/2)/33.333ms)+1, clamped 1..8; delay is per-peer,
-// not hashed). Disconnect timeout is PIKMIN_NETPLAY_DISCONNECT_MS (default
-// 15000) so synchronous stage loads survive (N3). Trade-off: a real peer loss
-// now takes ~15 s to detect (GekkoNet wall-clock idle timer); use 5000 only
-// for tests, where a 9 s load must disconnect. Handshake wire: stable 7-byte
-// header prefix (magic 4 + type 1 + proto LE16) parsed before the full length
-// check, so a protocol mismatch refuses fast with code 4 instead of a 30 s
-// timeout; PIKMIN_NETPLAY_TEST_PROTOCOL_VERSION overrides the local version.
+// handshake RTT, ceil((RTT/2)/33.333ms - 0.05)+1 with a 0.05-slot boundary
+// tolerance, clamped 1..8; delay is per-peer, not hashed). Disconnect timeout
+// is PIKMIN_NETPLAY_DISCONNECT_MS (default 15000) so synchronous stage loads
+// survive (N3). Trade-off: a real peer loss now takes ~15 s to detect
+// (GekkoNet wall-clock idle timer); use 5000 only for tests, where a 9 s load
+// must disconnect. No adaptive loading-bit: it would need a handshake or
+// keepalive bit designed across this lane and m4a's input flags; fixed 15000
+// + documented trade-off instead. Handshake wire: stable 7-byte header prefix
+// (magic 4 + type 1 + proto LE16) parsed before the full length check, so a
+// protocol mismatch refuses fast with code 4 instead of a 30 s timeout;
+// PIKMIN_NETPLAY_TEST_PROTOCOL_VERSION overrides the local version and
+// PIKMIN_NETPLAY_TEST_HANDSHAKE_LEN=108 sends the v1 length to exercise the
+// cross-length refuse path. The refuse field is fixed at offset 107 in every
+// version.
 
 #include "netplay/pc_netplay_session.h"
 
@@ -399,10 +408,9 @@ double sRunStartMs = 0;
 double sNextTurnMs = 0;
 bool sAheadLogged = false;
 // M5: wall-clock stall accounting. sStallMs accumulates the wall time of
-// loop turns that produced no Advance, INCLUDING the 30 Hz pacing sleep
-// (n2 fix round 2: measuring before the sleep reported 0.7% at 15.3 tps on
-// the real-time path, hiding the ~49% of 30 Hz slots lost). The stall
-// charge is taken after the pacing sleep, from turn start to turn end.
+// loop turns that produced no Advance (advance turns own the slot wait, so
+// the pacing sleep is never charged as stall; fix m1). The charge runs from
+// turn start to turn end.
 // (The old sStalls turn counter is kept for the log line, but under
 // UNTHROTTLED the loop spins ~1500 turns per advance, so the turn ratio is
 // not a wall-clock stall.)
@@ -451,6 +459,66 @@ double now_ms()
 {
 	using namespace std::chrono;
 	return duration<double, std::milli>(steady_clock::now().time_since_epoch()).count();
+}
+
+// Polish fix round (review B1/M3/m8): one shared high-resolution timer setup.
+// Hidden (TEST_BACKGROUND) processes on Windows 11 do not get the
+// timeBeginPeriod(1) granularity they ask for (sleep_for(1ms) sleeps ~15.6ms),
+// which quantised both the handshake RTT samples and the 30 Hz slot wait.
+// The granularity is measured once; fine timers sleep the bulk and spin only
+// the last ~2 ms (M3: no pinned core for real players), while coarse timers
+// spin the short waits instead (accurate handshake polls and slot waits in
+// hidden test runs). timeBeginPeriod is paired with timeEndPeriod at exit.
+#ifdef _WIN32
+static bool sHiresTimerReady = false;
+static bool sHiresCoarse = false; // true when Sleep(1) is quantised (~15.6 ms)
+static void hires_timer_teardown()
+{
+	timeEndPeriod(1);
+}
+static void ensure_hires_timer()
+{
+	if (sHiresTimerReady) return;
+	sHiresTimerReady = true;
+	// NOTE: SetProcessInformation(ProcessPowerThrottling,
+	// IGNORE_TIMER_RESOLUTION) would opt hidden instances out of the
+	// coarse tick, but MinGW does not declare it; instead the waits below
+	// are chosen from a one-time measurement, so hidden runs stay accurate
+	// by spinning while visible (real-player) runs sleep.
+	timeBeginPeriod(1);
+	std::atexit(hires_timer_teardown);
+	const double t0 = now_ms();
+	std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	sHiresCoarse = (now_ms() - t0) > 5.0;
+	printf("[netplay] timer granularity: sleep(1ms) took %.1fms (%s)\n",
+	       now_ms() - t0, sHiresCoarse ? "coarse: spin waits" : "fine: sleep+spin tail");
+	fflush(stdout);
+}
+#else
+static inline void ensure_hires_timer() {}
+#endif
+
+static void sleep_hires_ms(double ms)
+{
+	if (ms <= 0) return;
+	ensure_hires_timer();
+	const double start = now_ms();
+#ifdef _WIN32
+	// Fine timer: sleep the bulk, spin only the ~2 ms tail (low CPU, M3).
+	// Coarse timer (hidden runs): Sleep would quantise to 15.6 ms, so spin
+	// the whole short wait instead; the schedule stays drift-free either way.
+	if (!sHiresCoarse && ms > 2.5)
+		std::this_thread::sleep_for(
+		    std::chrono::duration<double, std::milli>(ms - 2.0));
+#else
+	if (ms > 2.5)
+		std::this_thread::sleep_for(
+		    std::chrono::duration<double, std::milli>(ms - 2.0));
+#endif
+	const double deadline = start + ms;
+	while (now_ms() < deadline - 0.3) std::this_thread::yield();
+	while (now_ms() < deadline) {
+	}
 }
 
 const char* getenv_nonempty(const char* name)
@@ -937,8 +1005,8 @@ void parse_config()
 		}
 	}
 	// Fix round 3: PIKMIN_NETPLAY_DELAY=auto measures the nonce-matched
-	// median handshake RTT and picks ceil((RTT/2) / 33.3 ms) + 1 (clamped
-	// 1..8) after the handshake. Numeric delays are per-peer (GekkoNet delay
+	// median handshake RTT and picks ceil((RTT/2) / 33.3 ms - 0.05) + 1
+	// (clamped 1..8) after the handshake. Numeric delays are per-peer (GekkoNet delay
 	// is per actor) and are NOT part of the config hash, so asymmetric
 	// pairs (e.g. 2 and 4) start without refusing.
 	if (const char* d = getenv_nonempty("PIKMIN_NETPLAY_DELAY")) {
@@ -1012,6 +1080,24 @@ void send_hello_msg(uint8_t type, uint8_t refuseField, uint64_t nonce)
 	msg[106] = (uint8_t)((sLocal.seed >> 24) & 0xFF);
 	msg[107] = refuseField;
 	for (int b = 0; b < 8; ++b) msg[108 + b] = (uint8_t)((nonce >> (b * 8)) & 0xFF);
+	// Test hook: PIKMIN_NETPLAY_TEST_HANDSHAKE_LEN=108 truncates the frame to
+	// the v1 length so the 108-byte cross-version refuse path is exercised,
+	// not just the version field (m2). Any other value sends kHsLen.
+	size_t wireLen = sizeof(msg);
+	{
+		static int sHsLenInit = 0;
+		static size_t sHsLen  = 0;
+		if (!sHsLenInit) {
+			sHsLenInit = 1;
+			sHsLen     = sizeof(msg);
+			if (const char* e = std::getenv("PIKMIN_NETPLAY_TEST_HANDSHAKE_LEN")) {
+				char* end         = nullptr;
+				unsigned long n = strtoul(e, &end, 10);
+				if (end != e && *end == '\0' && n == kHsLenV1) sHsLen = (size_t)n;
+			}
+		}
+		wireLen = sHsLen;
+	}
 	// Fix round 3 (M1 test): PIKMIN_NETPLAY_TEST_DROP_FINAL_ACK=1 drops
 	// handshake-phase Acks (the Ack(s) sent just before entering the
 	// session), reporting success so the peer must recover via in-session
@@ -1032,10 +1118,10 @@ void send_hello_msg(uint8_t type, uint8_t refuseField, uint64_t nonce)
 	}
 	if (sCfg.isHost) {
 		if (sHaveRemote)
-			sSock->send_to(pc_netplay_transport::kChannelHandshake, msg, sizeof(msg), sRemoteIp,
+			sSock->send_to(pc_netplay_transport::kChannelHandshake, msg, wireLen, sRemoteIp,
 			               sRemotePort);
 	} else {
-		sSock->send_payload(pc_netplay_transport::kChannelHandshake, msg, sizeof(msg));
+		sSock->send_payload(pc_netplay_transport::kChannelHandshake, msg, wireLen);
 	}
 }
 
@@ -1136,9 +1222,10 @@ bool handshake_pump()
 		if (hdrProto != local_protocol_version()) {
 			// A refuse notice itself is honoured even cross-version when
 			// its header parses; otherwise report the local mismatch.
+			// The refuse field is fixed at offset 107 in every version
+			// (v1 len 108, v2 len 116), so it reads the same either way.
 			if (hdrType == kHsRefuse && g.payload.size() >= kHsHeaderLen + 101) {
-				uint8_t rf = g.payload.size() == kHsLen ? g.payload[107]
-				                                        : g.payload[kHsLenV1 - 1];
+				uint8_t rf = g.payload[107];
 				printf("[netplay] handshake refused: %s\n",
 				       field_name(rf == 0 ? 99 : rf));
 				fflush(stdout);
@@ -1340,7 +1427,11 @@ void start_gekko_session()
 	// ceil(one-way latency / (1000/30) ms), plus one frame of margin (one
 	// local submit per Advance). Clamped to 1..8. The delay is not part of
 	// the config hash, so asymmetric links pick per-peer values without
-	// refusing. Formula: ceil((RTT/2)/33.333)+1.
+	// refusing. Formula: ceil((RTT/2)/33.333 - 0.05)+1: the 0.05-slot
+	// tolerance keeps the exact-boundary rows (100/200 ms one-way sit
+	// exactly on ceil steps) from flipping one frame high on a few ms of
+	// measurement overhead. It never lowers a pick by more than the margin
+	// the +1 already adds.
 	if (sCfg.delayAuto) {
 		unsigned autoDelay = 2;
 		double oneWayMs    = 0;
@@ -1349,8 +1440,10 @@ void start_gekko_session()
 		if (rttMed >= 0) {
 			oneWayMs = rttMed / 2.0;
 			const double slots = oneWayMs / (1000.0 / 30.0);
-			unsigned d         = (unsigned)slots + 1; // ceil(slots) + 1 margin
-			if ((double)(unsigned)slots < slots) ++d; // exact ceil, no <cmath>
+			double adj         = slots - 0.05;
+			if (adj < 0) adj = 0;
+			unsigned d = (unsigned)adj + 1; // ceil(adj) + 1 margin
+			if ((double)(unsigned)adj < adj) ++d; // exact ceil, no <cmath>
 			if (d < 1) d = 1;
 			if (d > 8) d = 8;
 			autoDelay = d;
@@ -1359,6 +1452,19 @@ void start_gekko_session()
 		gekko_set_local_delay(sGekko, sLocalHandle, (unsigned char)sCfg.localDelay);
 		printf("[netplay] auto delay: rtt=%.1fms (median of %llu) one-way=%.1fms delay=%u\n",
 		       rttMed, (unsigned long long)sHsSamples.size(), oneWayMs, autoDelay);
+		// Per-sample evidence (review B1): the sorted RTT samples behind
+		// the median, so quantization or impairment bias stays visible.
+		{
+			std::vector<double> sorted = sHsSamples;
+			std::sort(sorted.begin(), sorted.end());
+			std::string line = "[netplay] auto delay samples:";
+			char cell[32];
+			for (size_t i = 0; i < sorted.size() && i < 16; ++i) {
+				snprintf(cell, sizeof(cell), " %.1f", sorted[i]);
+				line += cell;
+			}
+			printf("%s\n", line.c_str());
+		}
 	}
 	printf("[netplay] session started: role=%s localHandle=%d delay=%u seed=%u\n",
 	       sCfg.isHost ? "host/P1" : "joiner/P2", sLocalHandle, sCfg.localDelay, sCfg.seed);
@@ -1509,7 +1615,7 @@ int handle_game_events(System* sys, BaseApp* app)
 				printf("[netplay] exit after %llu ticks\n", (unsigned long long)sSessionTicks);
 				printf("[netplay] script records consumed: %llu/%llu\n",
 				       (unsigned long long)sScriptIdx, (unsigned long long)sScriptTicks);
-				printf("[netplay] wall=%.1fs tps=%.1f stall=%.1f%% (wall-clock, incl pacing sleep) slot-loss=%.1f%% vs 30Hz\n",
+				printf("[netplay] wall=%.1fs tps=%.1f stall=%.1f%% (wall-clock no-Advance turns; slot wait excluded) slot-loss=%.1f%% vs 30Hz\n",
 				       wallS, tps, stallPct, slotLossPct);
 				fflush(stdout);
 				pc_state_hash_flush();
@@ -1676,21 +1782,13 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 		// edge latches twice per turn, so only poll once.
 		// Polish: poll every ~1 ms (not 5 ms) so the nonce-matched RTT
 		// measures the wire, not the poll phase (else +30-50 ms bias picks
-		// one frame too many at 50/100/200 ms one-way). Needs 1 ms timer
-		// resolution (Windows sleeps ~15.6 ms by default, adding ~31 ms of
-		// pump quantization to every RTT sample); winmm-linked.
-#ifdef _WIN32
-		{
-			static bool sHsTimerRes = false;
-			if (!sHsTimerRes) {
-				sHsTimerRes = true;
-				timeBeginPeriod(1);
-			}
-		}
-#endif
+		// one frame too many at 50/100/200 ms one-way). The wait is the
+		// hires sleep+spin below, not Sleep(1): hidden processes do not
+		// get 1 ms Sleep granularity (B1), so a plain sleep quantises
+		// every sample to the 15.6 ms tick.
 		sys->mControllerMgr.update();
 		if (handshake_pump()) start_gekko_session();
-		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		sleep_hires_ms(1.0);
 		return true;
 	}
 
@@ -1730,48 +1828,43 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 	// Pacing: the session owns the single 30 Hz schedule (polish item 1).
 	// Drift-free deadline: next += 1000/30 ms per Advance, with bounded
 	// catch-up (snap forward when more than ~5 slots behind, so an overrun
-	// never costs more than a slot and never spirals). Stall turns never
-	// spend a whole slot: they pump and sleep ~1 ms.
+	// never costs more than a slot and never spirals; at most 2 slots of
+	// catch-up per turn, m5, so a hiccup replays over several turns instead
+	// of one burst + one long pause). Stall turns never spend a whole slot:
+	// they pump and sleep ~1 ms. The frames-ahead correction is applied to
+	// the schedule itself (M1): sleeping after the deadline only shifts one
+	// turn's phase and never converges, so the ahead peer stretches its own
+	// deadline by a small proportional share instead.
 	if (!unthrottled) {
-#ifdef _WIN32
-		// Windows sleep granularity (~15 ms) overshoots the 33 ms pacing
-		// sleep and caps throttled tps at ~25 even on loopback. Request
-		// 1 ms resolution once per process so the sleep below (plus the
-		// sub-sleep spin) sustains 29.5+ tps. winmm-linked.
-		static bool sTimerRes = false;
-		if (!sTimerRes) {
-			sTimerRes = true;
-			timeBeginPeriod(1);
-		}
-#endif
 		constexpr double kSlotMs = 1000.0 / 30.0;
 		constexpr double kMaxCatchupSlots = 5.0;
+		constexpr double kMaxAdvanceSlots = 2.0; // m5: burst cap per turn
 		if (advances > 0) {
-			// Proportional, small frames-ahead slow-down: a quarter-slot
-			// share per ahead-frame past 0.75, capped at 5 ms. The old
-			// ahead > 6 skip never fired (|ahead| <= 2.5); the old 0.5
-			// share taken before the slot wait stacked into the schedule.
+			// Proportional, small frames-ahead slow-down on the schedule:
+			// 0.05 slot per ahead-frame past 0.75, capped at 10% of a slot
+			// (~3.3 ms). Persistent (added to the deadline), so a peer that
+			// stays ahead converges instead of re-phasing one turn (M1).
 			const float aheadNow =
 			    (sGekko != nullptr) ? gekko_frames_ahead(sGekko) : 0.0f;
 			double extraMs = 0.0;
 			if (aheadNow > 0.75f) {
-				extraMs = (double)(aheadNow - 0.75f) * kSlotMs * 0.25;
-				if (extraMs > 5.0) extraMs = 5.0;
+				extraMs = (double)(aheadNow - 0.75f) * kSlotMs * 0.05;
+				const double cap = kSlotMs * 0.10;
+				if (extraMs > cap) extraMs = cap;
 			}
+			double effAdv = (double)advances;
+			if (effAdv > kMaxAdvanceSlots) effAdv = kMaxAdvanceSlots;
 			double now = now_ms();
 			if (sNextTurnMs == 0) sNextTurnMs = now + kSlotMs;
 			if (now < sNextTurnMs) {
-				// Yield-spin the slot wait (no Sleep): Sleep() overshoots
-				// by ~0.5-1 ms per tick even at 1 ms resolution (≈29.3 tps
-				// cap); yielding lets the peer run while holding the
-				// deadline precisely, with a tight 0.3 ms busy tail.
+				// Sleep the bulk, spin only the ~2 ms tail (M3): a full
+				// yield-spin pins a core per instance for the session.
+				const double wait = sNextTurnMs - now;
+				if (wait > 2.5) sleep_hires_ms(wait - 2.0);
 				while (now_ms() < sNextTurnMs - 0.3) std::this_thread::yield();
 				while (now_ms() < sNextTurnMs) {
 				}
-				if (extraMs > 0.0)
-					std::this_thread::sleep_for(
-					    std::chrono::duration<double, std::milli>(extraMs));
-				sNextTurnMs += kSlotMs * (double)advances;
+				sNextTurnMs += kSlotMs * effAdv + extraMs;
 			} else {
 				// Overrun: bounded catch-up. Far behind (long load inside
 				// an Advance) snaps to now + slot; a small overrun keeps
@@ -1780,26 +1873,23 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 				if (behind > kMaxCatchupSlots * kSlotMs) {
 					sNextTurnMs = now + kSlotMs;
 				} else {
-					sNextTurnMs += kSlotMs * (double)advances;
+					sNextTurnMs += kSlotMs * effAdv + extraMs;
 				}
-				if (extraMs > 0.0)
-					std::this_thread::sleep_for(
-					    std::chrono::duration<double, std::milli>(extraMs));
 			}
 		} else {
 			// Stall turn: keep pumping without spending a whole slot.
-			// The network was already pumped above; a ~1 ms sleep avoids
-			// a busy spin while keeping poll latency far under a slot.
-			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			// The network was already pumped above; a ~1 ms hires wait
+			// avoids a busy spin while keeping poll latency far under a
+			// slot (plain Sleep(1) is ~15.6 ms in hidden runs, B1).
+			sleep_hires_ms(1.0);
 		}
 	}
 	if (advances == 0) {
 		++sStalls;
-		// M5/n2: wall-clock stall accounting (fraction of session wall
-		// time spent in turns with no Advance), INCLUDING the pacing
-		// sleep above: the charge runs from turn start to turn end, so
-		// the throttled path reports honest stall % + slot loss instead
-		// of 0.7% at 15.3 tps.
+		// M5/n2 + fix m1: wall-clock stall accounting is the wall time of
+		// turns with no Advance (advance turns own the slot wait, so it is
+		// never charged as stall). The charge runs from turn start to turn
+		// end; report it next to tps and the 1 - tps/30 slot-loss fraction.
 		sStallMs += now_ms() - turnStartMs;
 		// 9. Waiting: no tick. The turn above already pumped the network
 		// (update_session) and window events (PADRead poll).
