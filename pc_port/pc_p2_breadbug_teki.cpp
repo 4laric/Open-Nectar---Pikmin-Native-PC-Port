@@ -21,6 +21,7 @@
 #include "gl/pc_gfx.h"
 #include "system.h"
 #include "teki.h"
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -51,6 +52,7 @@ struct Binding {
     int attacksIgnored = 0;
     int eventsConsumed = 0;
     int presses = 0, pressesRejected = 0;
+    int flyContactsRising = 0;  // thrown Pikmin that touched it while still rising (no press)
     bool hidden = false;
     float logTimer = 0.0f;
     float corpseTimer = 0.0f;
@@ -64,6 +66,12 @@ bb::Bank sBank = bb::defaultBank();
 std::vector<Shape*> sPoses[bb::AnimCount];
 bool sPosesLoaded = false;
 std::map<BTeki*, int> sDrawLogged;
+
+// Wall-clock milliseconds, so frame dumps (file mtimes) can be matched to markers.
+long long wallMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+}
 
 Binding* find(const BTeki* t) {
     auto i = s.find(const_cast<BTeki*>(t));
@@ -226,9 +234,13 @@ bool otherTekiStuck(Pellet* p, const BTeki* self) {
     return false;
 }
 
+int sPelletsAlive = 0;
+float sPelletNearest = -1.0f;
 void snapshot(BTeki* t, std::vector<bb::PelletInfo>& out, std::vector<Pellet*>& who) {
     out.clear();
     who.clear();
+    sPelletsAlive = 0;
+    sPelletNearest = -1.0f;
     if (!pelletMgr) return;
     const Vector3f me = t->getPosition();
     Iterator it(pelletMgr);
@@ -237,11 +249,17 @@ void snapshot(BTeki* t, std::vector<bb::PelletInfo>& out, std::vector<Pellet*>& 
         if (!p || !p->isAlive() || !p->mConfig) continue;
         const Vector3f& pos = p->mSRT.t;
         const float dx = pos.x - me.x, dz = pos.z - me.z;
+        ++sPelletsAlive;
+        if (sPelletNearest < 0.0f || std::sqrt(dx * dx + dz * dz) < sPelletNearest) sPelletNearest = std::sqrt(dx * dx + dz * dz);
         if (dx * dx + dz * dz > 1000.0f * 1000.0f && t->getStickObject() != p) continue;
         bb::PelletInfo info;
         info.id = idOf(p);
         info.pos = {pos.x, pos.y, pos.z};
-        info.bottomY = pos.y - 0.5f * p->getCylinderHeight();
+        // findNearestPellet compares the pellet's base with the Breadbug's
+        // feet (retail: centre - 0.5 * cylinder height). A P1 pellet's origin
+        // already is its base (Pellet::update puts the life gauge at
+        // mSRT.t.y + height + 5), so the base is mSRT.t.y itself.
+        info.bottomY = pos.y;
         info.radius = p->getBottomRadius();
         info.carryMin = p->mConfig->mCarryMinPikis();
         info.carryMax = p->mConfig->mCarryMaxPikis();
@@ -270,8 +288,8 @@ Pellet* pelletFor(const std::vector<bb::PelletInfo>& infos, const std::vector<Pe
 
 void logState(const Binding& b, bb::State from, bb::State to, BTeki* t) {
     const Vector3f p = t->getPosition();
-    std::printf("P2_BREADBUG_OWN_STATE generator=%u source_id=38 from=%s to=%s x=%.1f z=%.1f health=%.1f\n",
-                b.generator, bb::stateName(from), bb::stateName(to), p.x, p.z, b.fsm.health());
+    std::printf("P2_BREADBUG_OWN_STATE generator=%u source_id=38 from=%s to=%s x=%.1f z=%.1f health=%.1f wall=%lld\n",
+                b.generator, bb::stateName(from), bb::stateName(to), p.x, p.z, b.fsm.health(), wallMs());
 }
 
 void setHidden(BTeki* t, Binding& b, bool hidden) {
@@ -368,15 +386,15 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
                             b.generator, o.contestPiki, o.contestSelf);
             if (e == bb::State::Dead && !b.deadLogged) {
                 b.deadLogged = true;
-                std::printf("P2_BREADBUG_OWN_DEAD generator=%u source_id=38 health=%.1f\n", b.generator, b.fsm.health());
+                std::printf("P2_BREADBUG_OWN_DEAD generator=%u source_id=38 health=%.1f wall=%lld\n", b.generator, b.fsm.health(), wallMs());
             }
         }
         if (o.damageKind != bb::DamageKind::None) {
             const char* kind = o.damageKind == bb::DamageKind::Press ? "P2_BREADBUG_OWN_PRESS"
                              : o.damageKind == bb::DamageKind::Suck ? "P2_BREADBUG_OWN_SUCK_DAMAGE"
                                                                      : "P2_BREADBUG_OWN_EXTERNAL_DAMAGE";
-            std::printf("%s generator=%u source_id=38 hp_before=%.1f hp_after=%.1f state_before=%s\n", kind,
-                        b.generator, o.hpBefore, o.hpAfter, bb::stateName(before));
+            std::printf("%s generator=%u source_id=38 hp_before=%.1f hp_after=%.1f state_before=%s wall=%lld\n", kind,
+                        b.generator, o.hpBefore, o.hpAfter, bb::stateName(before), wallMs());
         }
         if (o.pressRejected) {
             ++b.pressesRejected;
@@ -458,10 +476,11 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         const bb::Vec3& wp = b.fsm.nextWayPoint();
         std::printf("P2_BREADBUG_OWN_POS generator=%u source_id=38 state=%s anim=%d frame=%.0f x=%.1f z=%.1f "
                     "home=%.1f,%.1f next=%.1f,%.1f health=%.1f target=%d held=%d pellets=%zu tai_changes=%d "
-                    "attacks_ignored=%d events_consumed=%d presses=%d\n",
+                    "attacks_ignored=%d events_consumed=%d presses=%d fly_rising=%d pellets_alive=%d nearest_pellet=%.0f wall=%lld\n",
                     b.generator, bb::stateName(b.fsm.state()), b.fsm.animator().anim(), b.fsm.animator().frame(),
                     p.x, p.z, b.fsm.home().x, b.fsm.home().z, wp.x, wp.z, b.fsm.health(), b.fsm.target() ? 1 : 0,
-                    b.held ? 1 : 0, infos.size(), b.taiChanges, b.attacksIgnored, b.eventsConsumed, b.presses);
+                    b.held ? 1 : 0, infos.size(), b.taiChanges, b.attacksIgnored, b.eventsConsumed, b.presses,
+                    b.flyContactsRising, sPelletsAlive, sPelletNearest, wallMs());
     }
     std::fflush(stdout);
     if (kill && !b.escaped) {
@@ -585,8 +604,8 @@ void pc_p2_breadbug_teki_tick(BTeki* t) {
         b.corpseTimer += dt;
         if (b.corpseTimer >= 2.0f) {
             b.corpseTimer = 0.0f;
-            std::printf("P2_BREADBUG_OWN_CORPSE_CARRY generator=%u source_id=38 x=%.1f z=%.1f carriers=%.1f state=%d\n",
-                        b.generator, c->mSRT.t.x, c->mSRT.t.z, pikiStrength(c), c->getState());
+            std::printf("P2_BREADBUG_OWN_CORPSE_CARRY generator=%u source_id=38 x=%.1f z=%.1f carriers=%.1f state=%d wall=%lld\n",
+                        b.generator, c->mSRT.t.x, c->mSRT.t.z, pikiStrength(c), c->getState(), wallMs());
         }
         std::fflush(stdout);
     }
@@ -605,12 +624,16 @@ bool pc_p2_breadbug_teki_event(BTeki* t, const TekiEvent& event) {
         // PikiFlyingState::collisionCallback (pikiState.cpp:2322-2330): a
         // thrown Pikmin touching the enemy while falling sends InteractPress.
         Piki* piki = static_cast<Piki*>(event.mOther);
+        if (piki->isAlive() && piki->getState() == PIKISTATE_Flying && piki->mVelocity.y >= 0.0f
+            && !b->pressedFlight.count(piki)) {
+            ++b->flyContactsRising;  // rising contact: retail sends no press (vel.y < 0 only)
+        }
         if (piki->isAlive() && piki->getState() == PIKISTATE_Flying && piki->mVelocity.y < 0.0f
             && !b->pressedFlight.count(piki)) {
             b->pressedFlight.insert(piki);
             ++b->pendingPresses;
-            std::printf("P2_BREADBUG_OWN_PRESS_CONTACT generator=%u source_id=38 vy=%.1f state=%s\n", b->generator,
-                        piki->mVelocity.y, bb::stateName(b->fsm.state()));
+            std::printf("P2_BREADBUG_OWN_PRESS_CONTACT generator=%u source_id=38 vy=%.1f state=%s wall=%lld\n", b->generator,
+                        piki->mVelocity.y, bb::stateName(b->fsm.state()), wallMs());
             std::fflush(stdout);
         }
     }
