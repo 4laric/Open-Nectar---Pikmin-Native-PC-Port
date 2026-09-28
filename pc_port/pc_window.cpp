@@ -1679,6 +1679,28 @@ void pc_window_set_netplay_gamepad(int player, int index) {
 }
 
 unsigned pc_window_netplay_blocked_hotkeys(void) { return sNetplayBlockedHotkeys; }
+
+void pc_window_netplay_input_trace(char* buf, int size) {
+    if (buf == nullptr || size <= 0) return;
+    const Uint32 flags = sWindow ? SDL_GetWindowFlags(sWindow) : 0;
+    int n = std::snprintf(buf, (size_t)size,
+                          "focus=%d accept=%d ignKb=%d ignPad=%d kbOwner=%d explicit=%d open=%d want=p%d#%d",
+                          (flags & SDL_WINDOW_INPUT_FOCUS) ? 1 : 0, pc_bbft_accept_input() ? 1 : 0,
+                          (int)sNetplayIgnoreKeyboard, (int)sNetplayIgnoreGamepads, sKeyboardOwner,
+                          (int)sPlayerDeviceExplicit, (int)sOpenPads.size(), sNetplayPadPlayer, sNetplayPadIndex);
+    for (int p = 0; p < 2 && n > 0 && n < size; p++) {
+        SDL_GameController* ctl = sControllers[p];
+        n += std::snprintf(buf + n, (size_t)(size - n), " | P%d dev=%d/%d ctl=%d", p + 1, sPlayerDevice[p].kind,
+                           (int)sPlayerDevice[p].id, ctl ? 1 : 0);
+        if (ctl && n > 0 && n < size) {
+            n += std::snprintf(buf + n, (size_t)(size - n), " att=%d lx=%d ly=%d a=%d",
+                               SDL_GameControllerGetAttached(ctl) ? 1 : 0,
+                               (int)SDL_GameControllerGetAxis(ctl, SDL_CONTROLLER_AXIS_LEFTX),
+                               (int)SDL_GameControllerGetAxis(ctl, SDL_CONTROLLER_AXIS_LEFTY),
+                               (int)SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_A));
+        }
+    }
+}
 #endif
 
 const char* pc_window_gamepad_name(int gamepadId) {

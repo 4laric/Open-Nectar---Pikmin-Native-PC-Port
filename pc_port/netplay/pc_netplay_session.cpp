@@ -1380,6 +1380,9 @@ PcNetplayInput build_local_input()
 // The fresh yaw capture keeps the submitted yaw following the live camera
 // (B1); the synced values still win in the sim because inject_input()
 // rewrites the slots before every app->idle().
+// Diagnostic (PIKMIN_NETPLAY_INPUT_TRACE=1): last inputs injected per pad.
+PcNetplayInput sTraceInjected[2] = {};
+
 void accum_add_current()
 {
 	// Fix round 3 item 5: in script-via-accum mode the every-turn physical
@@ -1400,6 +1403,37 @@ void accum_add_current()
 	    pc_netplay_input_sel::local_pad_index(sLocalRole,
 	                                          (pc_netplay_input_sel::Kind)sCfg.inputKind);
 	PADStatus s = pads[padIdx]; // post-PADRead sample (F1 consume applied)
+	{
+		// Diagnostic (PIKMIN_NETPLAY_INPUT_TRACE=1): once a second, or when the
+		// sampled slot changes, log where a local pad value got to: device
+		// routing and raw SDL state, both pad slots after PADRead, the slot
+		// sampled for the local input, and the last injected inputs. Log-only.
+		static int sTrace = -1;
+		static unsigned sTraceCalls = 0;
+		static PADStatus sTraceLast = {};
+		if (sTrace < 0) {
+			const char* e = std::getenv("PIKMIN_NETPLAY_INPUT_TRACE");
+			sTrace = (e != nullptr && e[0] == '1') ? 1 : 0;
+		}
+		if (sTrace == 1) {
+			const bool changed = s.button != sTraceLast.button || s.stickX != sTraceLast.stickX
+			                     || s.stickY != sTraceLast.stickY;
+			if (changed || (sTraceCalls % 30) == 0) {
+				char dev[512];
+				pc_window_netplay_input_trace(dev, (int)sizeof(dev));
+				printf("[netplay] input-trace call=%u adv=%llu role=%d kind=%d slot=%d "
+				       "pad0=%04x/%d,%d pad1=%04x/%d,%d sampled=%04x/%d,%d inj0=%04x/%d,%d inj1=%04x/%d,%d %s\n",
+				       sTraceCalls, (unsigned long long)sAdvances, sLocalRole, (int)sCfg.inputKind, padIdx,
+				       pads[0].button, pads[0].stickX, pads[0].stickY, pads[1].button, pads[1].stickX,
+				       pads[1].stickY, s.button, s.stickX, s.stickY, sTraceInjected[0].buttons,
+				       sTraceInjected[0].stickX, sTraceInjected[0].stickY, sTraceInjected[1].buttons,
+				       sTraceInjected[1].stickX, sTraceInjected[1].stickY, dev);
+				fflush(stdout);
+			}
+			sTraceLast = s;
+			++sTraceCalls;
+		}
+	}
 	uint16_t yaw = 0;
 	if (pc_input_log_yaw_valid(sLocalRole)) yaw = pc_input_log_yaw_raw(sLocalRole);
 	sPadAccum.add(s.button, s.stickX, s.stickY, s.substickX, s.substickY,
@@ -1408,6 +1442,7 @@ void accum_add_current()
 
 void inject_input(int pad, const PcNetplayInput& in)
 {
+	if (pad == 0 || pad == 1) sTraceInjected[pad] = in;
 	PADStatus* pads = pc_netplay_pad_status();
 	pads[pad].button       = in.buttons;
 	pads[pad].stickX       = in.stickX;

@@ -144,6 +144,10 @@ void pc_window_set_netplay_input_filter(bool ignoreKeyboard, bool ignoreGamepads
 void pc_window_set_netplay_gamepad(int player, int index);
 // F6/F9 presses the ownership/session rule dropped so far (self-test).
 unsigned pc_window_netplay_blocked_hotkeys(void);
+// Diagnostic (PIKMIN_NETPLAY_INPUT_TRACE=1): one-line snapshot of the local
+// device routing (focus, ownership flags, per-player device and raw SDL
+// stick/A state). Read-only; never touches pads or the sim.
+void pc_window_netplay_input_trace(char* buf, int size);
 // Jugador (0/1) que tiene el teclado; el ratón va con él.
 int  pc_window_get_keyboard_owner(void);
 const char* pc_window_gamepad_name(int gamepadId);
