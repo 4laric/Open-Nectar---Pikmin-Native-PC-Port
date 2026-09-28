@@ -270,6 +270,7 @@ void net_from_parsed(const ParsedRand& p, uint32_t gen, pc_randstate::PcRandStat
     // instead of a silent truncation divergence.
     if (p.deathLinks > 0xFFFFu) fail("netplay state stream DeathLink count exceeds u16");
     if (checkCount > 255u) fail("netplay state stream benefit range exceeds u8");
+    if (checkCount > pc_randstate::kCheckSlots) fail("netplay state stream catalog exceeds wire bitset");
     st.ver = pc_randstate::kVersion;
     st.ready = (uint8_t)(p.ready != 0 ? 1 : 0);
     st.repairs = (uint8_t)p.repairs;
@@ -277,14 +278,13 @@ void net_from_parsed(const ParsedRand& p, uint32_t gen, pc_randstate::PcRandStat
     st.flarlic = (uint8_t)p.flarlic;
     st.emperor = (uint8_t)(p.emperor != 0 ? 1 : 0);
     st.deathLinks = (uint16_t)p.deathLinks;
-    uint32_t mask = 0;
+    for (size_t i = 0; i < pc_randstate::kCheckBytes; ++i) st.checks[i] = 0;
     for (unsigned slot : p.checks) {
-        // v1 stream limit: slots 0..31. Higher slots fail closed so a limit
-        // breach is loud instead of a silent sim divergence (known gap).
-        if (slot >= 32) fail("netplay state stream carries check slots 0..31 only");
-        mask |= (uint32_t)(1u << slot);
+        // Single shared width (pc_randstate::kCheckBytes): encoder and
+        // decoder agree, and every catalog up to 192 slots fits.
+        if (slot >= pc_randstate::kCheckSlots) fail("netplay state stream check slot exceeds wire bitset");
+        st.checks[slot / 8] |= (uint8_t)(1u << (slot % 8));
     }
-    st.checksLo = mask;
     for (int c = 0; c < 3; ++c) for (int s = 0; s < 4; ++s) st.stats[c * 4 + s] = (uint8_t)p.stats[c][s];
     for (int kind = 0; kind < 9; ++kind) st.benefits[kind] = (uint8_t)p.benefits[kind];
     st.rsv[0] = st.rsv[1] = st.rsv[2] = 0;
@@ -573,7 +573,7 @@ void pc_randomizer_update() {
         net_from_parsed(parsed, 0, st);
         // Publish on content change only: the run_pair refresher rewrites
         // state.txt every 0.1 s with identical bytes, and the stamp alone
-        // must not bump the generation (each generation costs 11 submits).
+        // must not bump the generation (each generation costs 16 submits).
         if (!sHavePublished || !pc_randstate::payload_equal(st, sLastPublished)) {
             if (++sNetGen == 0) fail("randomizer snapshot generation wrapped");
             st.gen = sNetGen; // first published generation is 1
@@ -588,6 +588,24 @@ void pc_randomizer_update() {
     apply_parsed(parsed);
     lastStamp = stamp;
     lastFresh = std::chrono::steady_clock::now();
+}
+
+// Netplay M4 lane A fix round 1 (M5): force a publish on session activation,
+// whatever the stamp says. The boot-time update may have latched lastStamp
+// before the session existed (CLI mode), so a runner that rewrites only on
+// change would otherwise never stream gen 1. Clearing the stamp makes the
+// next update re-read; when the content is new (or nothing was ever
+// published) it bumps gen and queues the snapshot before the first submit.
+// When the content is unchanged and already queued, this is a no-op.
+void pc_randomizer_force_net_publish() {
+    if (!enabled) return;
+    const bool netActive = pc_netplay_session_active != nullptr && pc_netplay_session_active();
+    const bool stream = netActive && pc_netplay_randstate_stream_enabled != nullptr
+        && pc_netplay_randstate_stream_enabled();
+    const bool isHost = !stream || pc_netplay_is_host == nullptr || pc_netplay_is_host();
+    if (!stream || !isHost) return;
+    lastStamp = std::filesystem::file_time_type{};
+    pc_randomizer_update();
 }
 
 bool pc_randomizer_apply_net_state(const pc_randstate::PcRandState& st) {
@@ -620,8 +638,8 @@ bool pc_randomizer_apply_net_state(const pc_randstate::PcRandState& st) {
     parsed.repairs = st.repairs;
     parsed.unlocks = st.unlocks;
     parsed.flarlic = st.flarlic;
-    for (unsigned slot = 0; slot < 32; ++slot)
-        if (st.checksLo & (1u << slot)) {
+    for (unsigned slot = 0; slot < pc_randstate::kCheckSlots; ++slot)
+        if (st.checks[slot / 8] & (uint8_t)(1u << (slot % 8))) {
             if (slot >= checkCount) fail("invalid net check index");
             parsed.checks.insert(slot);
         }
@@ -648,12 +666,11 @@ bool pc_randomizer_get_net_state(pc_randstate::PcRandState* out) {
     st.flarlic = (uint8_t)flarlic;
     st.emperor = emperorDefeated ? 1 : 0;
     st.deathLinks = (uint16_t)deathLinksSeen;
-    uint32_t mask = 0;
+    for (size_t i = 0; i < pc_randstate::kCheckBytes; ++i) st.checks[i] = 0;
     for (unsigned slot : checks) {
-        if (slot >= 32) fail("netplay state stream carries check slots 0..31 only");
-        mask |= (uint32_t)(1u << slot);
+        if (slot >= pc_randstate::kCheckSlots) fail("netplay state stream check slot exceeds wire bitset");
+        st.checks[slot / 8] |= (uint8_t)(1u << (slot % 8));
     }
-    st.checksLo = mask;
     for (int c = 0; c < 3; ++c) for (int s = 0; s < 4; ++s) st.stats[c * 4 + s] = (uint8_t)statUpgrades[c][s];
     for (int kind = 0; kind < 9; ++kind) st.benefits[kind] = (uint8_t)benefits[kind];
     st.gen = 0; // stamped by the publisher

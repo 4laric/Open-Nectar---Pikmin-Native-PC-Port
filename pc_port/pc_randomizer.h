@@ -19,6 +19,10 @@ bool pc_randomizer_apply_net_state(const pc_randstate::PcRandState& st);
 // Fills the sim-visible payload of the current randomizer state (gen left 0;
 // the caller stamps it). Returns false when disabled.
 bool pc_randomizer_get_net_state(pc_randstate::PcRandState* out);
+// Fix round 1 (M5): re-read state.txt on session activation and publish when
+// the content is new or nothing was ever published. Host + stream only;
+// no-op otherwise (client never reads the file after boot).
+void pc_randomizer_force_net_publish();
 // Canonical 64-bit hash of the sim-visible randomizer state for the M1 state
 // hash `rand` column. 0 when disabled.
 uint64_t pc_randomizer_hash();
