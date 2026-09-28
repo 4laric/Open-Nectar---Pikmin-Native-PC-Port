@@ -26,8 +26,37 @@ Interpretations for the owner to confirm:
 * Bombs-at-Onion and the +10 Pikmin delivery are Onion-anchored and are not
   rotated; "delivery anchors" is read as the captain-anchored Flower Shower.
 * Exploration (Land checks) stays anchored to P1 and needs P1 live.
-* Cursors, the HP samples and the event tick reset when the stage or day
-  changes.
+* Cursors, the HP samples and the event tick reset on every stage entry:
+  a stage or day change, or the time of day going backwards. The last case
+  covers a repeated day 29 on the same stage (`pc_randomizer_next_day` pins
+  the day at 29) and a same-day reload, where stage and day stay the same.
+  Each reset logs `[coop-policy] RESET stage=<s> day=<d> reason=<start|stage|day|clock>`.
+* "Delivery anchors" may instead mean BOMB_DELIVERY / PIKMIN_DELIVERY. If
+  so, the 3-bomb ring would get its own cursor on the captains with the
+  Onion as the fallback; not done pending the owner's answer.
+
+## Anchor log lines
+
+* `[coop-policy] ANCHOR kind=<k> captain=<n> next=<m> live=<p1><p2>` for
+  every grant (`live` = which captains were live for that attempt).
+* `[coop-policy] ANCHOR_SKIP kind=<k> captain=<n> reason=not-live` or
+  `reason=placement why=<ring-no-ground|ring-water|ring-height|no-onion-near|no-spot|not-walking> ... x= z=`
+  right before an ANCHOR that landed on a captain other than the cursor's,
+  one per captain passed over. An attempt where nobody could be placed logs
+  nothing (it retries next tick).
+* `coop_policy_pair.py` replays the cursor from these lines and fails on any
+  grant off the cursor without a matching ANCHOR_SKIP.
+
+The attempt loop is `pc_coop_anchor_try` (engine-free, unit-tested), which
+`coopAnchored` in `gameCoreSection.cpp` calls.
+
+## Drift guard
+
+The co-op branch carries copies of the single-captain BOMBS, DELIVERY,
+DeathLink loop and observation code so that single-captain play stays
+byte-identical. Mirror every change to one side on the other; netplay and
+local co-op always run the co-op side. Factoring the shared pieces into
+helpers is an integration item, to be proven with the M1 replay comparison.
 
 The decisions are pure functions in `pc_port/pc_coop_policy.{h,cpp}`
 (`pc_coop_policy_test`). All state is sim state (no RNG, no wall clock), so
@@ -37,9 +66,17 @@ lockstep peers agree. Co-op-only log lines start with `[coop-policy]`.
 
 * `PIKMIN_NETPLAY_TEST_COOP_EVENTS=<file>` (inert when unset): up to 64 lines
   `<tick> HP <1|2> <fraction>` or `<tick> DOWN <1|2>`, `<tick>` = co-op
-  randomizer `updateAI` calls since the stage started. `DOWN` knocks a
-  captain down like `Navi::finishDamage` and refuses the last one standing.
-  Pass the same file to both peers; it is not in the handshake config hash.
+  randomizer `updateAI` calls since the stage started, 1-based (tick 0 is
+  rejected). `DOWN` knocks a captain down like `Navi::finishDamage` and
+  refuses the last one standing.
+  * Compiled only into the netplay build (`PIKI_NETPLAY_BUILD`) and honoured
+    only with `PIKMIN_RANDOMIZER_TEST_BACKGROUND=1`; the default build never
+    reads it.
+  * Parsed once per process; a file over 16384 bytes is rejected whole. The
+    tick restarts at every stage entry, so the schedule re-arms each
+    stage/day (`[coop-policy] TEST events armed stage= day= count=`).
+  * Pass the same file to both peers; it is not in the handshake config hash
+    yet (integration item for B1).
 * `PIKMIN_RANDOMIZER_TEST_SCRIPT=coop-policy` + `PIKMIN_COOP_POLICY_CASE`
   (TEST_HOOKS builds only): `tools/netplay/coop_policy_native.py --case
   <heal-p2-only|heal-lowest|heal-trigger|heal-p1-down|anchors|any-alive|deathlink-p1-down>`.
