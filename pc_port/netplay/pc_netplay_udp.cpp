@@ -198,6 +198,47 @@ std::vector<UdpSocket::Datagram> UdpSocket::recv()
 {
 	std::vector<UdpSocket::Datagram> out;
 	if (mSock == -1) return out;
+	// Fix round 3: handshake-channel impairment shares the gekko test knobs
+	// (LATENCY/JITTER/LOSS_MS/PCT + SEED), applied receive-side so the
+	// one-way delay model matches LossyLink and DELAY=auto measures it.
+	if (!mHsImpInit) {
+		mHsImpInit = true;
+		double lat = 0.0, jit = 0.0, loss = 0.0;
+		uint32_t seed = 0;
+		if (const char* e = getenv("PIKMIN_NETPLAY_TEST_LATENCY_MS")) {
+			char* end = nullptr;
+			double v  = strtod(e, &end);
+			if (end != e && *end == '\0' && v > 0) lat = v;
+		}
+		if (const char* e = getenv("PIKMIN_NETPLAY_TEST_JITTER_MS")) {
+			char* end = nullptr;
+			double v  = strtod(e, &end);
+			if (end != e && *end == '\0' && v > 0) jit = v;
+		}
+		if (const char* e = getenv("PIKMIN_NETPLAY_TEST_LOSS_PCT")) {
+			char* end = nullptr;
+			double v  = strtod(e, &end);
+			if (end != e && *end == '\0' && v > 0) loss = v;
+		}
+		if (const char* e = getenv("PIKMIN_NETPLAY_TEST_SEED")) {
+			char* end       = nullptr;
+			unsigned long n = strtoul(e, &end, 10);
+			if (end != e && *end == '\0') seed = (uint32_t)n;
+		}
+		if (loss < 0) loss = 0;
+		if (loss > 100) loss = 100;
+		if (lat < 0) lat = 0;
+		if (jit < 0) jit = 0;
+		mHsLatMs   = lat;
+		mHsJitMs   = jit;
+		mHsLossPct = loss;
+		// Local stream: same seed env as the gekko wrapper, mixed with the
+		// local port so the two peers do not draw identical sequences.
+		uint64_t s = (uint64_t)seed + 0x9E3779B97F4A7C15ULL + (uint64_t)mLocalPort * 0xBF58476D1CE4E5B9ULL;
+		if (s == 0) s = 0x853C49E6748FEA9BULL;
+		mHsRng = s;
+	}
+	const double now = hs_now_ms();
 	for (int i = 0; i < kMaxRecvPerPoll; ++i) {
 		uint8_t frame[kMaxDatagram];
 		sockaddr_in from;
@@ -212,7 +253,35 @@ std::vector<UdpSocket::Datagram> UdpSocket::recv()
 		d.payload.assign(frame + 1, frame + got);
 		d.fromIpHostOrder = ntohl(from.sin_addr.s_addr);
 		d.fromPort        = ntohs(from.sin_port);
-		out.push_back(std::move(d));
+		if (d.channel != kChannelHandshake) {
+			out.push_back(std::move(d));
+			continue;
+		}
+		// Handshake channel: loss then delay.
+		if (hs_draw_drop()) continue;
+		double delay = mHsLatMs;
+		if (mHsJitMs > 0.0) delay += hs_draw_uniform(0.0, mHsJitMs);
+		if (delay <= 0.0) {
+			out.push_back(std::move(d));
+		} else {
+			HsDelayed hd;
+			hd.deliverAtMs = now + delay;
+			hd.gram        = std::move(d);
+			mHsDelayed.push_back(std::move(hd));
+			if (mHsDelayed.size() > 512)
+				mHsDelayed.erase(mHsDelayed.begin(),
+				                 mHsDelayed.begin() + (mHsDelayed.size() - 512));
+		}
+	}
+	if (!mHsDelayed.empty()) {
+		std::stable_sort(mHsDelayed.begin(), mHsDelayed.end(),
+		                  [](const HsDelayed& a, const HsDelayed& b) {
+			                  return a.deliverAtMs < b.deliverAtMs;
+		                  });
+		size_t due = 0;
+		while (due < mHsDelayed.size() && mHsDelayed[due].deliverAtMs <= hs_now_ms()) ++due;
+		for (size_t i = 0; i < due; ++i) out.push_back(std::move(mHsDelayed[i].gram));
+		if (due > 0) mHsDelayed.erase(mHsDelayed.begin(), mHsDelayed.begin() + due);
 	}
 	return out;
 }
@@ -225,6 +294,40 @@ void UdpSocket::close()
 	}
 	mLocalPort = 0;
 	mHasPeer   = false;
+}
+
+double UdpSocket::hs_now_ms() const
+{
+	using namespace std::chrono;
+	return duration<double, std::milli>(steady_clock::now().time_since_epoch()).count();
+}
+
+static uint64_t hs_xorshift64(uint64_t& s)
+{
+	// xorshift64*: self-contained so the header stays engine-free without
+	// <random>; only the handshake test impairment uses it, never the sim.
+	uint64_t x = s;
+	x ^= x >> 12;
+	x ^= x << 25;
+	x ^= x >> 27;
+	s = x;
+	return x * 0x2545F4914F6CDD1DULL;
+}
+
+double UdpSocket::hs_draw_uniform(double lo, double hi)
+{
+	if (!(hi > lo)) return lo;
+	uint64_t r = hs_xorshift64(mHsRng);
+	// 53-bit mantissa uniform in [0,1).
+	double u = (double)(r >> 11) * (1.0 / 9007199254740992.0);
+	return lo + u * (hi - lo);
+}
+
+bool UdpSocket::hs_draw_drop()
+{
+	if (mHsLossPct <= 0.0) return false;
+	if (mHsLossPct >= 100.0) return true;
+	return hs_draw_uniform(0.0, 100.0) < mHsLossPct;
 }
 
 // ---- GekkoLink ----

@@ -74,12 +74,12 @@ public:
 
 	void close();
 
- private:
- 	intptr_t mSock = -1;
- 	uint16_t mLocalPort = 0;
- 	uint32_t mPeerIp = 0;
- 	uint16_t mPeerPort = 0;
- 	bool mHasPeer = false;
+private:
+	intptr_t mSock = -1;
+	uint16_t mLocalPort = 0;
+	uint32_t mPeerIp = 0;
+	uint16_t mPeerPort = 0;
+	bool mHasPeer = false;
 	// Fix round 2 (M1 follow-up): handshake-loss test hook. Drops the first
 	// N handshake-channel (0x01) sends, reporting success to the caller so
 	// the peer must recover via its Hello/Ack resends. N comes from
@@ -88,6 +88,24 @@ public:
 	unsigned mHsDropFirstN = 0;
 	unsigned mHsSends = 0;
 	bool mHsDropInit = false;
+	// Fix round 3: handshake-channel test impairment. PIKMIN_NETPLAY_TEST_
+	// LATENCY/JITTER/LOSS_MS/PCT apply to handshake datagrams too (receive-
+	// side delay/loss, mirroring the LossyLink one-way model for gekko),
+	// so DELAY=auto measures the impaired RTT. Gekko traffic is unaffected
+	// here (it goes through LossyLink); unknown channels are dropped.
+	bool mHsImpInit = false;
+	double mHsLatMs = 0.0;
+	double mHsJitMs = 0.0;
+	double mHsLossPct = 0.0;
+	uint64_t mHsRng = 0;
+	struct HsDelayed {
+		double deliverAtMs = 0.0;
+		Datagram gram;
+	};
+	std::vector<HsDelayed> mHsDelayed;
+	double hs_now_ms() const;
+	double hs_draw_uniform(double lo, double hi);
+	bool hs_draw_drop();
  };
 
 // GekkoNet link: a UdpSocket filtered to the gekko channel, exposed as a

@@ -36,3 +36,8 @@ bool pc_netplay_session_active(void);
 // Strong-defined by the netplay session TU (netplay builds only); System
 // calls it through a weak reference so the default build is untouched.
 bool pc_netplay_session_drive(System* sys, BaseApp* app);
+
+// N3 stage-load hook: called (weakly) from GameFlow::softReset inside the
+// synchronous load. Strong-defined here in netplay builds only; null in the
+// default build. Implements PIKMIN_NETPLAY_TEST_LOAD_DELAY_MS (sleep once).
+void pc_netplay_on_stage_load(void);

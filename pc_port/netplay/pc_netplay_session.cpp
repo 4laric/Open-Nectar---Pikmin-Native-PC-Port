@@ -35,8 +35,10 @@
 // session allows (tests). gekko_frames_ahead() slows us down when ahead.
 // Stall % is wall-clock INCLUDING the pacing sleep, and the logs also give
 // effective tps plus the 1 - tps/30 slot-loss fraction (n2). Local delay is
-// PIKMIN_NETPLAY_DELAY frames (default 2) or "auto" (handshake RTT measure,
-// ceil((RTT/2)/33.3ms)+1, clamped 1..8).
+// PIKMIN_NETPLAY_DELAY frames (default 2) or "auto" (nonce-matched median
+// handshake RTT, ceil((RTT/2)/33.3ms)+1, clamped 1..8; delay is per-peer,
+// not hashed). Disconnect timeout is PIKMIN_NETPLAY_DISCONNECT_MS (default
+// 15000) so synchronous stage loads survive (N3).
 
 #include "netplay/pc_netplay_session.h"
 
@@ -60,6 +62,7 @@
 
 #include <SDL2/SDL.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -74,6 +77,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <mmsystem.h>
 #endif
 
 // pc_state_hash additions (M3): capture the last tick's hashes even when no
@@ -249,7 +253,11 @@ bool sInitialised = false;
 
 // Handshake constants.
 constexpr char kHsMagic[4] = { 'N', 'P', 'H', '3' };
-constexpr uint16_t kProtocolVersion = 1;
+// Fix round 3: wire bump for the nonce echo (Hello carries a fresh 8-byte
+// nonce, Ack echoes the Hello nonce it answers). Old (v1, 108-byte) peers
+// fail the length check and ignore, so a mixed pair refuses by timeout
+// rather than desyncing.
+constexpr uint16_t kProtocolVersion = 2;
 constexpr uint8_t kHsHello  = 1;
 constexpr uint8_t kHsAck    = 2;
 constexpr uint8_t kHsRefuse = 3;
@@ -259,7 +267,7 @@ constexpr uint8_t kFieldExe = 2;
 constexpr uint8_t kFieldConfig = 3;
 constexpr uint8_t kFieldBootstrap = 4;
 constexpr uint8_t kFieldSeed = 5;
-constexpr size_t kHsLen = 4 + 1 + 2 + 32 + 32 + 32 + 4 + 1; // 108
+constexpr size_t kHsLen = 4 + 1 + 2 + 32 + 32 + 32 + 4 + 1 + 8; // 116
 
 const char* field_name(uint8_t f)
 {
@@ -278,6 +286,7 @@ struct Hello {
 	uint8_t cfg[32];
 	uint8_t boot[32];
 	uint32_t seed = 0;
+	uint64_t nonce = 0; // Hello: fresh send nonce; Ack: echoed Hello nonce
 };
 
 Hello sLocal;
@@ -307,13 +316,26 @@ bool sGotAck = false;
 double sHsStartMs = 0;
 double sHsLastSendMs = 0;
 int sRefuseSent = 0;
-// Fix round 2 (DELAY=auto): handshake RTT measurement. Every Hello send is
-// timestamped; each received Ack yields one sample (now - last Hello send),
-// and the minimum is kept. The peer sends its Ack immediately on Hello
-// receipt, so with no loss the first sample is the true RTT; under loss the
-// minimum still excludes the 100 ms resend-phase inflation.
-double sHsLastHelloSendMs = 0;
-double sHsRttMs = -1;
+// Fix round 3 (DELAY=auto): nonce-matched RTT measurement. Every Hello send
+// gets a fresh 8-byte nonce with its send timestamp recorded; each received
+// Ack echoes the Hello nonce it answers, so the sample is now - send[nonce]
+// for the matching send, not the latest resend. Samples are median-filtered
+// (at least 5 required when delay=auto) instead of the old minimum, which
+// biased down under periodic resends.
+uint64_t sHsNextNonce = 1;
+uint64_t sHsLastHelloNonce = 0; // last Hello nonce received (for Ack echo)
+std::vector<std::pair<uint64_t, double>> sHsSendTimes; // nonce -> send ms
+std::vector<double> sHsSamples;                        // RTT samples, ms
+double sHsRttMs = -1; // median at resolve time (-1 = none yet)
+// Fix round 3 (M1 test): drop handshake-phase Acks when
+// PIKMIN_NETPLAY_TEST_DROP_FINAL_ACK=1. The dropping peer still sets
+// sSentAck and enters the session on the peer's Ack, while the peer never
+// gets an Ack and must recover via in-session Hello answers.
+bool sDropFinalAckInit = false;
+bool sDropFinalAck = false;
+// N3 test hook: PIKMIN_NETPLAY_TEST_LOAD_DELAY_MS sleeps once inside the
+// next stage load on that peer only (see pc_netplay_on_stage_load).
+bool sLoadDelayDone = false;
 
 // Run stats.
 uint64_t sSessionTicks = 0;
@@ -559,7 +581,11 @@ std::string build_config_string()
 	addi("windowWidth", pc_window_get_width());
 	addi("windowHeight", pc_window_get_height());
 	addi("netplaySeed", (long long)sCfg.seed);
-	addi("netplayDelay", (long long)sCfg.localDelay);
+	// Fix round 3 (asymmetric delay): GekkoNet local delay is per actor, so
+	// peers may legally use different delays (e.g. 2 and 4). The delay is
+	// therefore NOT part of the handshake hash; only the seed (shared) and
+	// the protocol version are. (Previously the numeric delay was hashed,
+	// which refused asymmetric pairs on config.)
 	addi("protocolVersion", (long long)kProtocolVersion);
 	(void)fbuf;
 	return s;
@@ -666,11 +692,46 @@ PcNetplayInput scripted_record(size_t idx)
 	return in;
 }
 
+bool script_via_accum()
+{
+	// Fix round 3 item 5: PIKMIN_NETPLAY_TEST_SCRIPT_VIA_ACCUM=1 feeds
+	// scripted records through the same PcNetplayAccum path live pads use.
+	static bool init = false;
+	static bool on  = false;
+	if (!init) {
+		init = true;
+		if (const char* e = std::getenv("PIKMIN_NETPLAY_TEST_SCRIPT_VIA_ACCUM"))
+			on = (e[0] == '1' && e[1] == '\0');
+	}
+	return on;
+}
+
 PcNetplayInput build_local_input()
 {
 	// Scripted input for tests (brief item 8): pad-0 records (+ yaw) from
 	// the file, one per local input submission, instead of the pad.
 	if (sScriptActive) {
+		if (script_via_accum()) {
+			// Item 5: route the record through the live-pad accumulator
+			// (add then take) so the driver wiring is exercised at
+			// runtime. The every-turn physical fold in accum_add_current
+			// still runs (neutral in hidden runs), and the scripted
+			// record overwrites sticks/yaw (latest-wins) and ORs buttons
+			// onto neutral, so the submitted input is exactly the scripted
+			// record: deterministic 1:1, identical hashes to direct mode.
+			PcNetplayInput rec = scripted_record(sScriptIdx++);
+			if (local_ui_open()) {
+				sPadAccum.reset();
+				return pc_netplay_input_neutral();
+			}
+			sPadAccum.add_input(rec);
+			PcNetplayInput out = sPadAccum.take();
+			if (sScriptIdx == 1) {
+				printf("[netplay] script via accum: records feed PcNetplayAccum\n");
+				fflush(stdout);
+			}
+			return out;
+		}
 		PcNetplayInput in = scripted_record(sScriptIdx++);
 		if (local_ui_open()) in = pc_netplay_input_neutral();
 		return in;
@@ -697,7 +758,11 @@ PcNetplayInput build_local_input()
 // rewrites the slots before every app->idle().
 void accum_add_current()
 {
-	if (sScriptActive) return; // scripted path consumes one record per submit
+	// Fix round 3 item 5: in script-via-accum mode the every-turn physical
+	// fold still runs (neutral in hidden runs), so the driver wiring has
+	// runtime coverage; the scripted record is merged on top at submit time
+	// (see build_local_input) and wins (latest/OR-onto-neutral).
+	if (sScriptActive && !script_via_accum()) return; // direct script path
 	// B1: fresh capture so the local yaw follows the live camera instead
 	// of freezing at the first injected value.
 	pc_input_log_capture_yaw_fresh();
@@ -824,12 +889,11 @@ void parse_config()
 			std::exit(2);
 		}
 	}
-	// Fix round 2: PIKMIN_NETPLAY_DELAY=auto measures the handshake RTT and
-	// picks ceil((RTT/2) / 33.3 ms) + 1 (clamped 1..8) after the handshake.
-	// Until then localDelay stays at the 2-frame placeholder, which is what
-	// the config hash covers (both peers hash the same placeholder, so an
-	// asymmetric link cannot refuse on config; the chosen values are
-	// logged at session start).
+	// Fix round 3: PIKMIN_NETPLAY_DELAY=auto measures the nonce-matched
+	// median handshake RTT and picks ceil((RTT/2) / 33.3 ms) + 1 (clamped
+	// 1..8) after the handshake. Numeric delays are per-peer (GekkoNet delay
+	// is per actor) and are NOT part of the config hash, so asymmetric
+	// pairs (e.g. 2 and 4) start without refusing.
 	if (const char* d = getenv_nonempty("PIKMIN_NETPLAY_DELAY")) {
 		if (std::strcmp(d, "auto") == 0) {
 			sCfg.delayAuto  = true;
@@ -879,7 +943,7 @@ void compute_local_hello()
 	sLocal.seed  = sCfg.seed;
 }
 
-void send_hello_msg(uint8_t type, uint8_t refuseField)
+void send_hello_msg(uint8_t type, uint8_t refuseField, uint64_t nonce)
 {
 	uint8_t msg[kHsLen];
 	msg[0] = (uint8_t)kHsMagic[0];
@@ -897,6 +961,25 @@ void send_hello_msg(uint8_t type, uint8_t refuseField)
 	msg[105] = (uint8_t)((sLocal.seed >> 16) & 0xFF);
 	msg[106] = (uint8_t)((sLocal.seed >> 24) & 0xFF);
 	msg[107] = refuseField;
+	for (int b = 0; b < 8; ++b) msg[108 + b] = (uint8_t)((nonce >> (b * 8)) & 0xFF);
+	// Fix round 3 (M1 test): PIKMIN_NETPLAY_TEST_DROP_FINAL_ACK=1 drops
+	// handshake-phase Acks (the Ack(s) sent just before entering the
+	// session), reporting success so the peer must recover via in-session
+	// Hello answers. In-session answers (sPhase == kSession) are never
+	// dropped.
+	if (type == kHsAck && sPhase == kHandshake) {
+		if (!sDropFinalAckInit) {
+			sDropFinalAckInit = true;
+			if (const char* e = std::getenv("PIKMIN_NETPLAY_TEST_DROP_FINAL_ACK"))
+				sDropFinalAck = (e[0] == '1' && e[1] == '\0');
+		}
+		if (sDropFinalAck) {
+			printf("[netplay] test: dropped final handshake Ack (echo=%llu)\n",
+			       (unsigned long long)nonce);
+			fflush(stdout);
+			return;
+		}
+	}
 	if (sCfg.isHost) {
 		if (sHaveRemote)
 			sSock->send_to(pc_netplay_transport::kChannelHandshake, msg, sizeof(msg), sRemoteIp,
@@ -921,6 +1004,9 @@ bool parse_hello_msg(const uint8_t* p, size_t len, uint8_t* type, uint16_t* prot
 	h->seed      = (uint32_t)p[103] | ((uint32_t)p[104] << 8) | ((uint32_t)p[105] << 16)
 	         | ((uint32_t)p[106] << 24);
 	*refuseField = p[107];
+	uint64_t nonce = 0;
+	for (int b = 0; b < 8; ++b) nonce |= (uint64_t)p[108 + b] << (b * 8);
+	h->nonce = nonce;
 	return true;
 }
 
@@ -930,9 +1016,17 @@ void refuse_and_exit(uint8_t field)
 	fflush(stdout);
 	// Best effort: tell the peer why (5 quick sends; the channel is
 	// unreliable by design under the lossy test wrapper).
-	for (int i = 0; i < 5; ++i) send_hello_msg(kHsRefuse, field);
+	for (int i = 0; i < 5; ++i) send_hello_msg(kHsRefuse, field, 0);
 	fflush(stdout);
 	std::exit(4);
+}
+
+double handshake_rtt_median()
+{
+	if (sHsSamples.empty()) return -1;
+	std::vector<double> v = sHsSamples;
+	std::sort(v.begin(), v.end());
+	return v[v.size() / 2];
 }
 
 // Returns true once the GekkoNet session may start.
@@ -947,16 +1041,23 @@ bool handshake_pump()
 	}
 	const double timeoutMs = (double)read_unsigned_env("PIKMIN_NETPLAY_HANDSHAKE_TIMEOUT_MS", 30000);
 	if (now - sHsStartMs > timeoutMs) {
-		printf("[netplay] handshake timeout after %.0f ms\n", now - sHsStartMs);
+		printf("[netplay] handshake timeout after %.0f ms (sentAck=%d gotAck=%d rttSamples=%llu)\n",
+		       now - sHsStartMs, (int)sSentAck, (int)sGotAck,
+		       (unsigned long long)sHsSamples.size());
 		fflush(stdout);
 		std::exit(4);
 	}
 	if (now - sHsLastSendMs >= 100) {
-		send_hello_msg(kHsHello, 0);
-		// Re-send our ack so a lost ack cannot stall the peer.
-		if (sSentAck) send_hello_msg(kHsAck, 0);
-		sHsLastSendMs      = now;
-		sHsLastHelloSendMs = now; // RTT reference for DELAY=auto
+		const uint64_t nonce = sHsNextNonce++;
+		send_hello_msg(kHsHello, 0, nonce);
+		sHsSendTimes.emplace_back(nonce, now);
+		if (sHsSendTimes.size() > 64)
+			sHsSendTimes.erase(sHsSendTimes.begin(),
+			                   sHsSendTimes.begin() + (sHsSendTimes.size() - 64));
+		// Re-send our ack so a lost ack cannot stall the peer. Echo the
+		// last Hello nonce seen (the peer matches it to its send).
+		if (sSentAck) send_hello_msg(kHsAck, 0, sHsLastHelloNonce);
+		sHsLastSendMs = now;
 	}
 	std::vector<pc_netplay_transport::UdpSocket::Datagram> grams;
 	if (sLink != nullptr) grams = sLink->drain_handshake();
@@ -988,29 +1089,41 @@ bool handshake_pump()
 		if (type == kHsHello || type == kHsAck) {
 			// Compare in field order; the first mismatch refuses.
 			// (Ack echoes the sender's own values, which matched ours
-			// when it sent the ack, so re-checking is harmless.)
+			// when it sent the ack, so re-checking is harmless. The nonce
+			// is excluded: it differs per send by design.)
 			if (proto != kProtocolVersion) refuse_and_exit(kFieldProto);
 			if (memcmp(h.exe, sLocal.exe, 32) != 0) refuse_and_exit(kFieldExe);
 			if (memcmp(h.cfg, sLocal.cfg, 32) != 0) refuse_and_exit(kFieldConfig);
 			if (memcmp(h.boot, sLocal.boot, 32) != 0) refuse_and_exit(kFieldBootstrap);
 			if (h.seed != sLocal.seed) refuse_and_exit(kFieldSeed);
-			if (type == kHsHello && !sSentAck) {
-				send_hello_msg(kHsAck, 0);
-				sSentAck = true;
+			if (type == kHsHello) {
+				sHsLastHelloNonce = h.nonce;
+				if (!sSentAck) {
+					send_hello_msg(kHsAck, 0, h.nonce);
+					sSentAck = true;
+				}
 			}
 			if (type == kHsAck) {
 				sGotAck = true;
-				// Fix round 2 (DELAY=auto): the peer sends its Ack
-				// immediately on Hello receipt, so now - last Hello send
-				// is one RTT sample; keep the minimum.
-				if (sHsLastHelloSendMs > 0) {
-					const double sample = now - sHsLastHelloSendMs;
-					if (sample >= 0 && (sHsRttMs < 0 || sample < sHsRttMs))
-						sHsRttMs = sample;
+				// Fix round 3: nonce-matched RTT sample. The Ack echoes
+				// the Hello nonce it answers; match it against our send
+				// table instead of the latest resend.
+				for (auto& st : sHsSendTimes) {
+					if (st.first == h.nonce) {
+						const double sample = now - st.second;
+						if (sample >= 0 && sample < 60000)
+							sHsSamples.push_back(sample);
+						break;
+					}
 				}
 			}
 		}
 	}
+	// Fix round 3: with DELAY=auto the session starts only after at least 5
+	// RTT samples, so the median is meaningful. The 100 ms resend gives ~5
+	// Hellos in 500 ms; loss only delays this, it cannot deadlock it
+	// (handshake timeout still applies).
+	if (sCfg.delayAuto && sSentAck && sGotAck && sHsSamples.size() < 5) return false;
 	return sSentAck && sGotAck;
 }
 
@@ -1019,14 +1132,14 @@ bool handshake_pump()
 // moves on; if that Ack is lost, the other peer keeps sending Hello until
 // its 30 s timeout while this peer sits in a session with no remote (the
 // disconnect timeout only applies after a connection exists). Draining here
-// and re-acking keeps one lost datagram from hanging the session. The lossy
-// test wrapper covers only channel 0x02, so handshake loss never showed in
-// the pair runs; this path is exercised by the handshake logic itself.
+// and re-acking keeps one lost datagram from hanging the session.
 // n1 (fix round 2): answer only Hellos. Answering an incoming Ack with an
 // Ack made Acks bounce between the peers for the whole session (each side's
-// final Hello+Ack burst seeded about two such loops of 108-byte datagrams).
+// final Hello+Ack burst seeded about two such loops of 116-byte datagrams).
 // A lost Ack still recovers: the peer still in handshake re-sends Hello
 // every 100 ms, and every Hello here gets an Ack.
+// Fix round 3 item 3: each in-session answer is logged (the Ack-drop test
+// greps for it to prove the M1 path ran).
 void answer_handshake_in_session()
 {
 	if (sLink == nullptr || sSock == nullptr) return;
@@ -1046,7 +1159,10 @@ void answer_handshake_in_session()
 		if (sCfg.isHost && sHaveRemote
 		    && (g.fromIpHostOrder != sRemoteIp || g.fromPort != sRemotePort))
 			continue;
-		send_hello_msg(kHsAck, 0);
+		send_hello_msg(kHsAck, 0, h.nonce);
+		printf("[netplay] answered in-session Hello with Ack (echo=%llu)\n",
+		       (unsigned long long)h.nonce);
+		fflush(stdout);
 	}
 }
 
@@ -1124,20 +1240,33 @@ void start_gekko_session()
 		sLocalHandle = gekko_add_actor(sGekko, GekkoLocalPlayer, nullptr);
 	}
 	gekko_set_local_delay(sGekko, sLocalHandle, (unsigned char)sCfg.localDelay);
-	gekko_set_disconnect_timeout(sGekko, 5000);
+	// N3: sessions must survive synchronous stage loads inside app->idle(),
+	// which block GekkoNet pumping for longer than the old 5 s timeout. The
+	// load is synchronous and deterministic (both peers load the same stage
+	// at the same tick), so no input exchange is needed mid-load; the only
+	// failure is the idle timeout firing. Pumping mid-load would need a
+	// second thread driving a non-thread-safe library, and refactoring the
+	// load into pumpable steps touches gameflow/plugPiki/system broadly, so
+	// the chosen design is a larger, configurable timeout (default 15000).
+	unsigned disconnectMs = read_unsigned_env("PIKMIN_NETPLAY_DISCONNECT_MS", 15000);
+	if (disconnectMs < 1000) disconnectMs = 1000;
+	gekko_set_disconnect_timeout(sGekko, disconnectMs);
+	printf("[netplay] disconnect timeout: %ums\n", disconnectMs);
 	pc_state_hash_set_netplay_capture(true);
 	load_scripted_file();
-	// Fix round 2: DELAY=auto resolves after the handshake RTT is known.
-	// Full speed needs delay >= ceil(one-way latency / 33.3 ms), plus one
-	// frame of margin (one local submit per Advance: delay frames of local
-	// delay cover that many ticks of round trip). Clamped to 1..8. The
-	// config hash covered the 2-frame placeholder on both peers (see
-	// parse_config), so asymmetric links cannot refuse on config.
+	// Fix round 3: DELAY=auto resolves from the nonce-matched median RTT
+	// (at least 5 samples; the handshake gate above guarantees it). Full
+	// speed needs delay >= ceil(one-way latency / 33.3 ms), plus one frame
+	// of margin (one local submit per Advance). Clamped to 1..8. The delay
+	// is not part of the config hash, so asymmetric links pick per-peer
+	// values without refusing.
 	if (sCfg.delayAuto) {
 		unsigned autoDelay = 2;
 		double oneWayMs    = 0;
-		if (sHsRttMs >= 0) {
-			oneWayMs = sHsRttMs / 2.0;
+		double rttMed      = handshake_rtt_median();
+		sHsRttMs           = rttMed;
+		if (rttMed >= 0) {
+			oneWayMs = rttMed / 2.0;
 			const double slots = oneWayMs / 33.3;
 			unsigned d         = (unsigned)slots + 1; // ceil(slots) + 1 margin
 			if ((double)(unsigned)slots < slots) ++d; // exact ceil, no <cmath>
@@ -1147,8 +1276,8 @@ void start_gekko_session()
 		}
 		sCfg.localDelay = autoDelay;
 		gekko_set_local_delay(sGekko, sLocalHandle, (unsigned char)sCfg.localDelay);
-		printf("[netplay] auto delay: rtt=%.1fms one-way=%.1fms delay=%u\n", sHsRttMs,
-		       oneWayMs, autoDelay);
+		printf("[netplay] auto delay: rtt=%.1fms (median of %llu) one-way=%.1fms delay=%u\n",
+		       rttMed, (unsigned long long)sHsSamples.size(), oneWayMs, autoDelay);
 	}
 	printf("[netplay] session started: role=%s localHandle=%d delay=%u seed=%u\n",
 	       sCfg.isHost ? "host/P1" : "joiner/P2", sLocalHandle, sCfg.localDelay, sCfg.seed);
@@ -1367,6 +1496,31 @@ void pc_netplay_session_notify_argv(int argc, char** argv)
 	sArgv = argv;
 }
 
+// N3 test hook + long-load survival note. Called (weakly) from
+// GameFlow::softReset on section changes, i.e. inside the synchronous stage
+// load that runs within app->idle() during one Advance tick. When
+// PIKMIN_NETPLAY_TEST_LOAD_DELAY_MS=<n> is set, sleeps n ms exactly once
+// (the next stage load on that peer only) so the pair test can prove the
+// session survives a load longer than the old 5 s timeout. The sleep is
+// wall-clock only: it blocks GekkoNet pumping exactly like a real slow disk,
+// without touching sim state, RNG or hashes. No-op without a netplay switch.
+void pc_netplay_on_stage_load(void)
+{
+	if (!sInitialised || !sCfg.active) return;
+	if (sLoadDelayDone) return;
+	const char* e = std::getenv("PIKMIN_NETPLAY_TEST_LOAD_DELAY_MS");
+	if (e == nullptr || *e == '\0') return;
+	char* end         = nullptr;
+	unsigned long n = strtoul(e, &end, 10);
+	if (end == e || *end != '\0' || n == 0) return;
+	sLoadDelayDone = true;
+	printf("[netplay] test load delay: sleeping %lums inside stage load\n", n);
+	fflush(stdout);
+	std::this_thread::sleep_for(std::chrono::milliseconds(n));
+	printf("[netplay] test load delay: done\n");
+	fflush(stdout);
+}
+
 bool pc_netplay_session_active(void)
 {
 	if (!sInitialised) {
@@ -1478,6 +1632,17 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 	// Pacing: real-time 30 Hz ticks; unthrottled runs as fast as the
 	// session allows (tests).
 	if (!unthrottled) {
+#ifdef _WIN32
+		// Fix round 3: Windows sleep granularity (~15 ms) overshoots the
+		// 33 ms pacing sleep and caps throttled tps at ~25 even on loopback.
+		// Request 1 ms resolution once per process so the sleep below (plus
+		// the sub-sleep spin) actually sustains 28+ tps. winmm-linked.
+		static bool sTimerRes = false;
+		if (!sTimerRes) {
+			sTimerRes = true;
+			timeBeginPeriod(1);
+		}
+#endif
 		// m2: the old ahead > 6 skip never fired (|ahead| <= 2.5 in the
 		// logs). Slow down proportionally when ahead instead: sleep a
 		// share of the frame budget per ahead-frame past 0.75.
@@ -1491,8 +1656,15 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 		const double now = now_ms();
 		if (sNextTurnMs == 0) sNextTurnMs = now + 1000.0 / 30.0;
 		if (now < sNextTurnMs) {
-			std::this_thread::sleep_for(
-			    std::chrono::duration<double, std::milli>(sNextTurnMs - now));
+			// Fix round 3: Windows sleep granularity (~15 ms) overshoots a
+			// single 33 ms sleep and caps throttled tps at ~25. Sleep most
+			// of the wait, then spin the last ~3 ms so the 30 Hz pacing
+			// actually sustains 28+ tps on a 100 ms link with auto delay.
+			const double waitMs = sNextTurnMs - now;
+			if (waitMs > 4.0)
+				std::this_thread::sleep_for(
+				    std::chrono::duration<double, std::milli>(waitMs - 3.0));
+			while (now_ms() < sNextTurnMs) std::this_thread::yield();
 			sNextTurnMs += 1000.0 / 30.0;
 		} else {
 			sNextTurnMs = 0; // overrun: no catch-up spiral

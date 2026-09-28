@@ -847,7 +847,7 @@ if(PIKMIN_NETPLAY_BUILD AND NOT ANDROID)
     target_include_directories(${NECTAR_GAME} PRIVATE third_party/gekkonet/GekkoLib/include)
     target_link_libraries(${NECTAR_GAME} PRIVATE gekkonet)
     if(WIN32)
-        target_link_libraries(${NECTAR_GAME} PRIVATE ws2_32)
+        target_link_libraries(${NECTAR_GAME} PRIVATE ws2_32 winmm)
     endif()
 endif()
 

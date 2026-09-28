@@ -104,6 +104,10 @@ SCRUB_KEYS = (
     "PIKMIN_NETPLAY_TEST_REORDER_MS",
     "PIKMIN_NETPLAY_HANDSHAKE_TIMEOUT_MS",
     "PIKMIN_NETPLAY_TEST_DROP_HS_FIRST_N",
+    "PIKMIN_NETPLAY_TEST_DROP_FINAL_ACK",
+    "PIKMIN_NETPLAY_DISCONNECT_MS",
+    "PIKMIN_NETPLAY_TEST_LOAD_DELAY_MS",
+    "PIKMIN_NETPLAY_TEST_SCRIPT_VIA_ACCUM",
 )
 
 
@@ -165,6 +169,10 @@ def main(argv=None):
     p.add_argument("--netplay-seed", type=int, default=1, help="PIKMIN_NETPLAY_SEED for both")
     p.add_argument("--delay", type=str, default="2",
                    help="PIKMIN_NETPLAY_DELAY for both (frames, or 'auto')")
+    p.add_argument("--delay-host", type=str, default=None,
+                   help="PIKMIN_NETPLAY_DELAY for the host only (asymmetric test)")
+    p.add_argument("--delay-join", type=str, default=None,
+                   help="PIKMIN_NETPLAY_DELAY for the joiner only (asymmetric test)")
     p.add_argument("--latency-ms", type=float, default=0.0)
     p.add_argument("--jitter-ms", type=float, default=0.0)
     p.add_argument("--loss-pct", type=float, default=0.0)
@@ -285,10 +293,14 @@ def main(argv=None):
     host_extra = dict(base_extra)
     host_extra["PIKMIN_STATE_HASH_LOG"] = str(host_hash)
     host_extra["PIKMIN_NETPLAY_LOCAL_INPUT_FILE"] = str(host_inputs.resolve())
+    if a.delay_host is not None:
+        host_extra["PIKMIN_NETPLAY_DELAY"] = str(a.delay_host)
     host_extra.update(parse_kv(a.env_host, "env-host"))
     join_extra = dict(base_extra)
     join_extra["PIKMIN_STATE_HASH_LOG"] = str(join_hash)
     join_extra["PIKMIN_NETPLAY_LOCAL_INPUT_FILE"] = str(join_inputs.resolve())
+    if a.delay_join is not None:
+        join_extra["PIKMIN_NETPLAY_DELAY"] = str(a.delay_join)
     join_extra.update(parse_kv(a.env_join, "env-join"))
 
     join_exe = a.exe_b.resolve() if a.exe_b is not None else a.exe.resolve()
