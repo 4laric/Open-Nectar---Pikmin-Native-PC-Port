@@ -915,7 +915,7 @@ int main()
         require(damageAccept(kp, attacker(false, true, false, 0.0f, 0.0f, -90.0f), false) == DamageRefused,
                 "T19 a free ground attacker behind the King is refused");
         require(damageAccept(kp, attacker(false, true, false, 18.0f, 2.0f, 18.0f), false) == DamageLowPartless,
-                "T19 a low partless attacker within 40 is accepted (captain punch under the chin)");
+                "T19 a low partless attacker within 40 is accepted (P1 ground Pikmin under the chin)");
         require(damageRate(DamageLowPartless) == 0.2f, "T19 low partless rate 0.2");
         require(damageAccept(kp, attacker(false, true, false, 39.9f, 0.0f, 0.0f), false) == DamageLowPartless
                     && damageAccept(kp, attacker(false, true, false, 40.0f, 0.0f, 0.0f), false) == DamageRefused,
@@ -930,6 +930,30 @@ int main()
         require(damageAccept(kp, attacker(false, false, false, 10.0f, 0.0f, 0.0f), false) == DamageRefused,
                 "T19 a dead partless attacker is refused");
         require(damageAccept(kp, DamageAttacker{}, false) == DamageRefused, "T19 an ownerless hit is refused");
+        // Round-5 review: the source captain punch always carries a part
+        // (R naviState.cpp:1614-1627), so damageCallBack takes the part branch
+        // and refuses it (a captain is never isStickTo). The P1 host punch
+        // (W naviState.cpp:3237) is partless; sourceHasCollPart maps it back.
+        {
+            auto punch = [&](float dx, float dy, float dz) {
+                return attacker(sourceHasCollPart(false, true), true, false, dx, dy, dz);
+            };
+            require(damageAccept(kp, punch(18.0f, 2.0f, 18.0f), false) == DamageRefused,
+                    "T19 a captain punch from under the chin is refused (source part branch, not stuck)");
+            require(damageAccept(kp, punch(0.0f, 0.0f, 10.0f), false) == DamageRefused
+                        && damageAccept(kp, punch(70.0f, 0.0f, 0.0f), false) == DamageRefused,
+                    "T19 a captain punch is refused from any position");
+            require(damageAccept(kp, punch(0.0f, 0.0f, 10.0f), true) == DamageBittered,
+                    "T19 a captain punch lands only on a bittered King (x0.1)");
+            // Twenty under-chin punches add no flickSpeed.
+            float timer = 0.0f;
+            for (int i = 0; i < 20; ++i)
+                if (damageRate(damageAccept(kp, punch(10.0f, 0.0f, 10.0f), false)) > 0.0f) timer += FlickPerHit;
+            require(timer == 0.0f, "T19 under-chin captain punches add no flickSpeed");
+        }
+        require(sourceHasCollPart(false, true) && sourceHasCollPart(true, false) && sourceHasCollPart(true, true)
+                    && !sourceHasCollPart(false, false),
+                "T19 a captain owner always has a source part; others keep the host part");
         require(damageAccept(kp, attacker(false, true, false, 90.0f, 50.0f, 0.0f), true) == DamageBittered
                     && damageRate(DamageBittered) == 0.1f,
                 "T19 bittered accepts everything at x0.1");

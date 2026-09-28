@@ -852,11 +852,24 @@ enum DamageAccept { DamageRefused = 0, DamageStuck, DamageLowPartless, DamageBit
 
 struct DamageAttacker {
     bool present = false;     // InteractAttack::mOwner != nullptr
-    bool hasCollPart = false; // InteractAttack::mCollPart != nullptr
+    bool hasCollPart = false; // source mCollPart != nullptr (see sourceHasCollPart)
     bool alive = false;       // Creature::isAlive
     bool stuck = false;       // Creature::isStickTo (to anything)
     Vec3 pos{0.0f, 0.0f, 0.0f};
 };
+
+// Source collision-part presence for a hit the P1 host delivers. A source
+// captain punch always carries a part: NaviPunchState::hitCallback attacks
+// only when collpart is non-null and builds InteractAttack(mNavi, damage,
+// collpart) (R naviState.cpp:1614-1627). damageCallBack therefore always
+// takes the collision-part branch for a punch and, a captain never being
+// isStickTo, refuses it from any position. The P1 host punch
+// (W naviState.cpp:3237) passes collPart nullptr, so a captain owner is
+// mapped back to "has a part"; every other attacker keeps the host part.
+inline bool sourceHasCollPart(bool hostHasPart, bool ownerIsNavi)
+{
+    return hostHasPart || ownerIsNavi;
+}
 
 inline DamageAccept damageAccept(const Vec3& king, const DamageAttacker& a, bool bittered)
 {

@@ -1291,9 +1291,12 @@ void kingApply(BTeki* actor, ChappyFsm& s, unsigned generator, p2chappymouth::ki
 // takes no damage and adds no flickSpeed; a partless hit low within 40 XZ is
 // scaled by 0.2. P1 Pikmin that latch onto the King always carry their stick
 // part (aiAttack.cpp:495-518, pikiState.cpp startStick/startStickObject), so
-// the latched-attacker kill path is kept; P1 ground attacks
-// (aiAttack.cpp:672/691, collPart nullptr) and captain punches
-// (naviState.cpp:3237) count only from under the chin, as in the source.
+// the latched-attacker kill path is kept. P1 ground attacks
+// (aiAttack.cpp:672/691, collPart nullptr) count only low within 40 XZ, as
+// source partless hits. A captain punch is mapped to the source part branch
+// (king::sourceHasCollPart: the source punch always carries a part,
+// R naviState.cpp:1614-1627; the P1 punch at W naviState.cpp:3237 has none),
+// so it is refused from any position, as in the source.
 // Bittered is never set (no P1 spray path). Returns < 0 for every actor that
 // is not a live registered King (host path unchanged).
 float pc_p2_chappy_king_damage_rate(BTeki* actor, Creature* owner, CollPart* part)
@@ -1306,7 +1309,7 @@ float pc_p2_chappy_king_damage_rate(BTeki* actor, Creature* owner, CollPart* par
     namespace K = p2chappymouth::king;
     K::DamageAttacker a;
     a.present = owner != nullptr;
-    a.hasCollPart = part != nullptr;
+    a.hasCollPart = K::sourceHasCollPart(part != nullptr, owner && owner->mObjType == OBJTYPE_Navi);
     if (owner) {
         a.alive = owner->isAlive();
         a.stuck = owner->isStickTo();
