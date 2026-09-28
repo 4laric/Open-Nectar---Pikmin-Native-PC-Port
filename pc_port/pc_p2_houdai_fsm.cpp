@@ -446,12 +446,17 @@ void P2HoudaiFsm::update(const P2HoudaiInput& in, P2HoudaiOutput& out)
     out.state = mState;
     out.drawHidden = mState == P2LongLegsState::Stay;
     out.landDrop = mState == P2LongLegsState::Land ? 1.0f - clamp01(mFrame / 100.0f) : 0.0f;
-    switch (mState) {
-    case P2LongLegsState::Land: out.damageRate = 0.25f; break;
+    out.damageRate = damageRateFor(mState);
+}
+
+float P2HoudaiFsm::damageRateFor(P2LongLegsState state) {
+    switch (state) {
+    case P2LongLegsState::Land: return 0.25f;
+    case P2LongLegsState::Stay:
     case P2LongLegsState::Wait:
     case P2LongLegsState::Flick:
     case P2LongLegsState::Walk:
-    case P2LongLegsState::Shot: out.damageRate = 1.0f; break;
-    default: out.damageRate = 0.0f; break;
+    case P2LongLegsState::Shot: return 1.0f;
+    default: return 0.0f;
     }
 }

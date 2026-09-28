@@ -49,14 +49,15 @@ int main()
     assert(P2HoudaiFsm::isStartFlickFor(parms, 60, 31.0f));
 
     // Stay -> Land (wake) -> Wait after the 230-frame landing clip; the
-    // receiver rejects in Stay, takes 0.25x in Land, 1x awake.
+    // US damageCallBack takes a stuck hit at 1x in Stay (and wakes it), 0.25x
+    // in Land, 1x awake.
     {
         P2HoudaiFsm fsm;
         fsm.reset(parms, P2HoudaiVec{}, 0.0f);
         P2HoudaiInput in = base();
         P2HoudaiOutput out;
         fsm.update(in, out);
-        assert(fsm.state() == S::Stay && out.drawHidden && out.damageRate == 0.0f);
+        assert(fsm.state() == S::Stay && out.drawHidden && out.damageRate == 1.0f);
         in.damageAttempt = true; // damage in Stay wakes the boss into Land
         fsm.update(in, out);
         assert(out.entered && fsm.state() == S::Land && out.damageRate == 0.25f);

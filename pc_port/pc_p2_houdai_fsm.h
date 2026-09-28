@@ -132,6 +132,11 @@ public:
     const P2HoudaiParms& parms() const { return mParms; }
     bool isStartFlick(int stuck) const;
     static bool isStartFlickFor(const P2HoudaiParms& p, int stuck, float flickTimer);
+    // Source Houdai::damageCallBack (Houdai.cpp:223-236, US build) multiplier
+    // for a stuck-Pikmin hit in `state`: the US check is only isStickTo, and
+    // only Land scales (0.25x). Stay therefore takes full damage (and the
+    // EB_TakingDamage flag wakes it into Land). Dead takes nothing.
+    static float damageRateFor(P2LongLegsState state);
 
 private:
     void enter(P2LongLegsState next, const P2HoudaiInput& in, P2HoudaiOutput& out);

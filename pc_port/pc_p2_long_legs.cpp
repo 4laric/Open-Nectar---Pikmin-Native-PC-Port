@@ -45,6 +45,10 @@
 #include "Navi.h"
 #include "NaviMgr.h"
 #include "pc_p2_navi_select.h"
+#include "PikiState.h"
+#include "PlayerState.h"
+#include "SoundMgr.h"
+#include "settings/pc_settings.h"
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -110,6 +114,8 @@ struct ActorState {
     int shellHits[3] = {0, 0, 0};   // piki, navi, teki
     int flicks = 0;
     int receiverAccepted = 0, receiverRejected = 0;
+    bool scaleLogged = false;       // per-actor P2_HOUDAI_SCALE line
+    bool stayIntangible = false;    // Stay: host collision/shadow/gauge off
 };
 
 std::map<BTeki*, ActorState> actors;      // actor -> species + policy state
@@ -503,6 +509,59 @@ bool houdaiCapsuleHit(const Vector3f& start, const Vector3f& end, float radius, 
     return d1 > -radius && d1 < searchRadius;
 }
 
+// HoudaiShotGunNode::update (HoudaiShotGun.cpp:218-229) blasts a hit Pikmin or
+// captain with InteractBomb(owner, attackDamage, &blastDir), where blastDir is
+// the sideways offset from the shell line (dot2 * vec2, flattened, normalised
+// to 100) plus y 100 for Pikmin. P1's InteractBomb has no direction and flicks
+// away from the owner's position, so a Pikmin under the gun flew away from the
+// boss body instead of sideways off the shell line. This receiver keeps every
+// P1 bomb gate and side effect (interactBattle.cpp InteractBomb::actPiki) and
+// only aims the flick along the source blast direction.
+struct HoudaiShellBlast : public InteractBomb {
+    HoudaiShellBlast(Creature* owner, f32 damage, const Vector3f& blast)
+        : InteractBomb(owner, damage, nullptr), mBlast(blast) {}
+    // PikiFlickState flies at -strength * (sin, cos)(mRotationAngle), so the
+    // angle that sends the Pikmin along +blast is atan2(-x, -z).
+    bool actPiki(Piki* piki) immut override {
+        if (pc_settings_get_piki_invincible()) return false;
+        if (!piki->isAlive()) return false;
+        const int st = piki->getState();
+        if (st == PIKISTATE_Drown || st == PIKISTATE_Dead || st == PIKISTATE_Dying || st == PIKISTATE_Flick)
+            return false;
+        if (piki->aiCullable() && !playerState->mDemoFlags.isFlag(DEMOFLAG_FirstBombDeath))
+            playerState->mDemoFlags.setFlagOnly(DEMOFLAG_FirstBombDeath);
+        playerState->mResultFlags.setOn(zen::RESFLAG_PikminBombDeath);
+        piki->playEventSound(mOwner, SE_PIKI_DAMAGED);
+        piki->mHealth -= mDamage;
+        piki->mLifeGauge.updValue(piki->mHealth, C_PIKI_PARM(piki, mPikiMaxHealth));
+        if (mBlast.x != 0.0f || mBlast.z != 0.0f) {
+            piki->mRotationAngle = std::atan2(-mBlast.x, -mBlast.z);
+        } else {
+            Vector3f diff = mOwner->mSRT.t - piki->mSRT.t;
+            diff.normalise();
+            piki->mRotationAngle = atan2f(diff.x, diff.z);
+        }
+        piki->mFlickIntensity = 180.0f;
+        piki->mFSM->transit(piki, PIKISTATE_Flick);
+        return true;
+    }
+    Vector3f mBlast;
+};
+
+// Source blastDir for a creature at `at` hit by the shell segment start->end.
+Vector3f houdaiBlastDir(const Vector3f& start, const Vector3f& end, const Vector3f& at, bool piki) {
+    const float lx = end.x - start.x, lz = end.z - start.z;
+    // vec2 = cross(yAxis, vec1) flattened: (v1.z, 0, -v1.x)
+    float v2x = lz, v2z = -lx;
+    const float n2 = std::sqrt(v2x * v2x + v2z * v2z);
+    if (n2 < 1.0e-6f) { v2x = 1.0f; v2z = 0.0f; } else { v2x /= n2; v2z /= n2; }
+    const float d2 = v2x * (at.x - start.x) + v2z * (at.z - start.z);
+    float bx = d2 * v2x, bz = d2 * v2z;
+    const float nb = std::sqrt(bx * bx + bz * bz);
+    if (nb > 1.0e-6f) { bx /= nb; bz /= nb; } else { bx = 0.0f; bz = 0.0f; }
+    return Vector3f(bx * 100.0f, piki ? 100.0f : 0.0f, bz * 100.0f);
+}
+
 void houdaiStepShells(BTeki* owner, ActorState& state, float dt) {
     const Vector3f home = owner->getPosition();
     const float radius = state.houdai.parms().attackRadius;
@@ -531,27 +590,36 @@ void houdaiStepShells(BTeki* owner, ActorState& state, float dt) {
         houdaiFx(26, next, nullptr); // EFF_BombLight_FireGlow trail puff
         const Vector3f a(start.x, start.y - 10.0f, start.z);
         const Vector3f b(next.x, next.y - 10.0f, next.z);
-        auto report = [&](Creature* c, const char* kind, float dmg, bool accepted) {
+        auto report = [&](Creature* c, const char* kind, float dmg, bool accepted, const Vector3f& blast) {
             const Vector3f p = c->getPosition();
             std::printf("P2_HOUDAI_SHELL_HIT generator=%u shell=%d kind=%s damage=%.1f accepted=%d "
-                        "at=%.1f,%.1f,%.1f flight=%.2f\n",
-                        s.generator, s.id, kind, dmg, int(accepted), p.x, p.y, p.z, s.flight);
+                        "at=%.1f,%.1f,%.1f flight=%.2f blast=%.0f,%.0f,%.0f\n",
+                        s.generator, s.id, kind, dmg, int(accepted), p.x, p.y, p.z, s.flight,
+                        blast.x, blast.y, blast.z);
         };
         if (pikiMgr) {
             Iterator pit(pikiMgr);
             CI_LOOP(pit) {
                 Piki* p = static_cast<Piki*>(*pit);
                 if (!p || !p->isAlive() || !houdaiCapsuleHit(a, b, radius, p->getPosition())) continue;
-                const bool ok = p->stimulate(InteractBomb(owner, damage, nullptr));
+                const Vector3f blast = houdaiBlastDir(a, b, p->getPosition(), true);
+                const bool ok = p->stimulate(HoudaiShellBlast(owner, damage, blast));
                 if (ok) ++state.shellHits[0];
-                report(p, "piki", damage, ok);
+                report(p, "piki", damage, ok, blast);
             }
         }
         for (Navi* n : pc_p2_navis()) {
             if (!n || !n->isAlive() || !houdaiCapsuleHit(a, b, radius, n->getPosition())) continue;
+            // NaviFlickState flies back along -mFaceDirection: face against
+            // the source blast so the captain is thrown along it; restore the
+            // facing when the bomb is refused (invincible / PikiZero).
+            const Vector3f blast = houdaiBlastDir(a, b, n->getPosition(), false);
+            const float face = n->mFaceDirection;
+            if (blast.x != 0.0f || blast.z != 0.0f) n->mFaceDirection = std::atan2(-blast.x, -blast.z);
             const bool ok = n->stimulate(InteractBomb(owner, damage, nullptr));
+            if (!ok) n->mFaceDirection = face;
             if (ok) ++state.shellHits[1];
-            report(n, "navi", damage, ok);
+            report(n, "navi", damage, ok, blast);
         }
         if (tekiMgr) {
             Iterator tit(tekiMgr);
@@ -560,7 +628,7 @@ void houdaiStepShells(BTeki* owner, ActorState& state, float dt) {
                 if (!t || t == owner || !t->isAlive() || !houdaiCapsuleHit(a, b, radius, t->getPosition())) continue;
                 const bool ok = t->stimulate(InteractBomb(owner, 500.0f, nullptr));
                 if (ok) ++state.shellHits[2];
-                report(t, "teki", 500.0f, ok);
+                report(t, "teki", 500.0f, ok, Vector3f(0.0f, 0.0f, 0.0f));
             }
         }
         if (expire && reason[0] == 'm') houdaiImpactFx(next);
@@ -664,6 +732,22 @@ void houdaiLogState(const ActorState& st, P2LongLegsState from, P2LongLegsState 
                 actor->mHealth, st.houdai.flickTimer(), st.houdai.burstTimer(), houdaiWallMs());
 }
 
+// Source Stay keeps the boss up in the dormant drop-in pose, out of reach, so
+// nothing can stick to it. The port hides the bind mesh in Stay; without this
+// the host Swallow collision stayed live at ground level and Pikmin could
+// latch onto an invisible body. Clear Atari (creatureCollision.cpp:34 skips
+// non-Atari pairs), shadow and life gauge while dormant; restore on Land.
+void houdaiSetIntangible(BTeki* actor, ActorState& state, bool on) {
+    if (on == state.stayIntangible) return;
+    state.stayIntangible = on;
+    constexpr int kOpts = TEKIOPT_Atari | TEKIOPT_ShadowVisible | TEKIOPT_LifeGaugeVisible;
+    Teki* teki = static_cast<Teki*>(actor);
+    if (on) teki->clearTekiOption(kOpts);
+    else teki->setTekiOption(kOpts);
+    std::printf("P2_HOUDAI_INTANGIBLE generator=%u on=%d atari=%d\n", state.generator, int(on),
+                int(teki->isAtari()));
+}
+
 // One host frame for a registered Houdai. Returns after the escape.
 void houdaiTick(BTeki* actor, ActorState& state, float dt) {
     if (actor->mStoredDamage > 0.0f) actor->makeDamaged();
@@ -719,9 +803,8 @@ void houdaiTick(BTeki* actor, ActorState& state, float dt) {
             const float sy = std::sqrt(w.mMtx[0][1] * w.mMtx[0][1] + w.mMtx[1][1] * w.mMtx[1][1]
                                        + w.mMtx[2][1] * w.mMtx[2][1]);
             in.modelScale = (sy > 0.05f && sy < 20.0f) ? sy : 1.0f;
-            static bool scaleLogged = false;
-            if (!scaleLogged) {
-                scaleLogged = true;
+            if (!state.scaleLogged) {
+                state.scaleLogged = true;
                 std::printf("P2_HOUDAI_SCALE generator=%u draw_scale=%.3f gun_height=%.1f\n", state.generator,
                             in.modelScale, parms.gunHeight * in.modelScale);
             }
@@ -807,6 +890,7 @@ void houdaiTick(BTeki* actor, ActorState& state, float dt) {
         static_cast<Teki*>(actor)->setDirection(out.bodyFace);
         houdaiStepShells(actor, state, P2HoudaiFsm::kDelta);
         state.drawHidden = out.drawHidden;
+        houdaiSetIntangible(actor, state, out.drawHidden);
         state.landDrop = out.landDrop;
         state.damageable = out.damageRate > 0.0f;
         state.bitterImmune = after == P2LongLegsState::Stay || after == P2LongLegsState::Land;
@@ -976,6 +1060,7 @@ void pc_p2_long_legs_setup() {
             teki->setTekiOption(TEKIOPT_DamageCountable);
             state.lastDamageCount = teki->mDamageCount;
             state.drawHidden = true;
+            houdaiSetIntangible(teki, state, true);
             std::printf("P2_HOUDAI_OWN_BIND generator=%u health=%.0f home=%.1f,%.1f,%.1f brain=P2HoudaiFsm "
                         "parms=disc private=%.0f territory=%.0f search_height=%.0f search_angle=%.0f\n",
                         generator, teki->mHealth, state.homePos.x, state.homePos.y, state.homePos.z,
@@ -1387,9 +1472,10 @@ float pc_p2_long_legs_damage_rate(Teki* teki, Creature* attacker) {
     const P2LongLegsState s = st.houdai.state();
     float rate = 0.0f;
     if (stuckPiki) {
+        // US damageCallBack applies the hit in Stay too; StateStay::exec then
+        // sees EB_TakingDamage and transits to Land.
+        rate = P2HoudaiFsm::damageRateFor(s);
         if (s == P2LongLegsState::Stay) st.damageAttempt = true;
-        else if (s == P2LongLegsState::Land) rate = 0.25f;
-        else if (s != P2LongLegsState::Dead) rate = 1.0f;
     }
     if (rate > 0.0f) ++st.receiverAccepted;
     else ++st.receiverRejected;
@@ -1434,7 +1520,19 @@ void pc_p2_long_legs_update_all() {
     // Sweeping is done from the guarded per-actor tick (pc_p2_long_legs_update),
     // not here: an unconditional per-frame sweep stalled the stage-2 FSM.
     if (actors.empty()) return;
-    for (const auto& entry : actors) pc_p2_long_legs_update(entry.first);
+    // Tick in generator-token order, not pointer order (std::map<BTeki*> sorts
+    // by address, which differs between netplay peers and would reorder the
+    // per-actor gsys->getRand draws). Snapshot first: a tick can reach the
+    // host teardown, and forget() erases from `actors`.
+    std::vector<std::pair<unsigned, BTeki*>> order;
+    order.reserve(actors.size());
+    for (const auto& entry : actors) order.emplace_back(entry.second.generator, entry.first);
+    std::sort(order.begin(), order.end(),
+              [](const std::pair<unsigned, BTeki*>& x, const std::pair<unsigned, BTeki*>& y) {
+                  return x.first < y.first;
+              });
+    for (const auto& entry : order)
+        if (actors.count(entry.second)) pc_p2_long_legs_update(entry.second);
 }
 
 unsigned long pc_p2_long_legs_corpse_count() {
