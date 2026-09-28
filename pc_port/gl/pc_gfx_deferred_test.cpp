@@ -1,30 +1,19 @@
-// Host test for the polish deferred texture-init contract (issue #880 item 6).
+// Host test for the polish deferred texture-init store (issues #879 #880).
 //
-// The real upload needs a GL context, so this tests the bookkeeping rules the
-// pc_gfx.cpp implementation follows (mirrored here without GL):
-//   - an authoritative-pass init retains its parameters for lazy presentation
-//     upload;
-//   - a re-init of an already-cached key during auth invalidates the stale
-//     cache entry (GL name deferred, not drawn stale);
-//   - rgba, non-CI and CI defers are mutually exclusive per key (M2: a stale
-//     CI entry never shadows a newer non-CI deferred init);
-//   - a same-signature auth re-init over a live entry is a no-op (m4: no churn);
-//   - release clears every per-key record, even with no live entry (m4: no leak);
-//   - a presentation upload clears any stale deferred entry for the key (M2);
-//   - first presentation use takes (and clears) the deferred entry.
-//
-// NOTE (review m3, accepted gap): this is still a contract model, not the
-// real code: pc_gfx.cpp's maps are file-static and its upload needs GL, so
-// the test cannot link it. The model mirrors null_auth_invalidate() and the
-// three auth paths rule for rule; runtime coverage is the null_gl=0 +
-// no-missing-texture logs + frame dumps in the handoff.
+// Unlike the earlier contract model, this links the real unit
+// (pc_gfx_deferred_tex.cpp) and exercises its record / take / invalidate /
+// release paths, including the fix2 M2 regression: a taken owned entry must
+// keep correct bytes after the map node is gone (the old code copied the
+// struct, so the copy's pointer still aimed at the erased entry's buffer).
 //
 // Uses the check()/failures pattern (never bare assert(): Release defines
 // NDEBUG).
 
+#include "pc_gfx_deferred_tex.h"
+
 #include <cstdint>
 #include <cstdio>
-#include <map>
+#include <type_traits>
 #include <vector>
 
 static int failures = 0;
@@ -37,211 +26,124 @@ static void check(bool condition, const char* message)
 	}
 }
 
-// Minimal model of the pc_gfx.cpp maps (keys only; values are opaque here).
-// Mirrors the M2 mutual-exclusivity rules: exactly one of ci / deferred-rgba /
-// deferred-tex per key; release clears all three; a same-signature re-init
-// over a live cache entry is a no-op (no churn); a presentation upload clears
-// any stale deferred entry for the key.
-static std::map<uintptr_t, int> modelCache; // key -> fake GL id
-static std::map<uintptr_t, std::vector<uint8_t>> modelDeferredRgba;
-static std::map<uintptr_t, int> modelDeferredTex; // key -> fake format
-static std::map<uintptr_t, int> modelCi;          // key -> fake CI format
-static std::map<uintptr_t, int> modelSig;         // key -> fake signature
-static std::vector<int> modelDoomed;
-
-static void model_invalidate(uintptr_t key)
+static PcDeferredTex make_tex(uint8_t fill, size_t len)
 {
-	auto cached = modelCache.find(key);
-	if (cached != modelCache.end()) {
-		modelDoomed.push_back(cached->second);
-		modelCache.erase(cached);
-	}
-	modelSig.erase(key);
-	modelCi.erase(key);
-	modelDeferredRgba.erase(key);
-	modelDeferredTex.erase(key);
-}
-
-static void model_auth_init_rgba(uintptr_t key, const std::vector<uint8_t>& bytes)
-{
-	// RGBA always retains (movie: same pointer, new picture each frame).
-	model_invalidate(key);
-	modelDeferredRgba[key] = bytes;
-}
-
-static void model_auth_init_tex(uintptr_t key, int format, int sig)
-{
-	auto s = modelSig.find(key);
-	if (s != modelSig.end() && s->second == sig
-	    && modelCache.find(key) != modelCache.end())
-		return; // same-signature no-op: no churn
-	model_invalidate(key);
-	modelDeferredTex[key] = format;
-	modelSig[key]         = sig;
-}
-
-static void model_auth_init_ci(uintptr_t key, int format, int sig)
-{
-	auto s = modelSig.find(key);
-	if (s != modelSig.end() && s->second == sig
-	    && modelCache.find(key) != modelCache.end())
-		return;
-	model_invalidate(key);
-	modelCi[key]  = format;
-	modelSig[key] = sig;
-}
-
-static void model_present_init(uintptr_t key, int glId, int sig)
-{
-	// A real upload supersedes any stale deferred entry for the key.
-	modelDeferredRgba.erase(key);
-	modelDeferredTex.erase(key);
-	modelCache[key] = glId;
-	modelSig[key]   = sig;
-}
-
-static void model_release(uintptr_t key)
-{
-	modelCi.erase(key);
-	modelDeferredRgba.erase(key);
-	modelDeferredTex.erase(key);
-	auto cached = modelCache.find(key);
-	if (cached != modelCache.end()) {
-		modelDoomed.push_back(cached->second);
-		modelCache.erase(cached);
-	}
-	modelSig.erase(key);
-}
-
-// Returns true when a presentation upload would run (deferred taken).
-static bool model_presentation_load(uintptr_t key)
-{
-	if (modelCache.find(key) != modelCache.end()) return false; // already live
-	auto dr = modelDeferredRgba.find(key);
-	if (dr != modelDeferredRgba.end()) {
-		check(!dr->second.empty(), "deferred rgba must retain bytes");
-		modelDeferredRgba.erase(dr);
-		modelDeferredTex.erase(key);
-		modelCache[key] = 1000 + (int)(key & 0xFF);
-		return true;
-	}
-	auto dt = modelDeferredTex.find(key);
-	if (dt != modelDeferredTex.end()) {
-		modelDeferredTex.erase(dt);
-		modelDeferredRgba.erase(key);
-		modelCache[key] = 2000 + (int)(key & 0xFF);
-		return true;
-	}
-	return false;
+	PcDeferredTex def;
+	def.width = 8;
+	def.height = 8;
+	def.format = 3;
+	def.wrapS = 1;
+	def.wrapT = 1;
+	def.mipmap = false;
+	def.alias = nullptr;
+	def.owned.assign(len, fill);
+	return def;
 }
 
 int main()
 {
-	// 1. Auth rgba init retains bytes and lazily uploads on first use.
-	modelCache.clear();
-	modelDeferredRgba.clear();
-	modelDeferredTex.clear();
-	modelCi.clear();
-	modelSig.clear();
-	modelDoomed.clear();
+	static_assert(!std::is_copy_constructible<PcDeferredTex>::value,
+	              "PcDeferredTex must be move-only (M2)");
+	static_assert(!std::is_copy_assignable<PcDeferredTex>::value,
+	              "PcDeferredTex must be move-only (M2)");
+	static_assert(!std::is_copy_constructible<PcDeferredCi>::value,
+	              "PcDeferredCi must be move-only (M2)");
+	static_assert(std::is_move_constructible<PcDeferredTex>::value,
+	              "PcDeferredTex must stay movable for take");
+
+	PcDeferredTexStore store;
+
+	// 1. Record an owned entry, take it, erase it: bytes stay correct after
+	// the map node is gone (the M2 use-after-free regression).
 	const uintptr_t k1 = 0x1001;
-	model_auth_init_rgba(k1, std::vector<uint8_t> { 1, 2, 3, 4 });
-	check(modelCache.find(k1) == modelCache.end(), "auth init must not populate cache");
-	check(modelDeferredRgba.find(k1) != modelDeferredRgba.end(),
-	      "auth rgba init must retain parameters");
-	check(model_presentation_load(k1), "first presentation use must upload deferred rgba");
-	check(modelCache.find(k1) != modelCache.end(), "upload must populate cache");
-	check(modelDeferredRgba.find(k1) == modelDeferredRgba.end(),
-	      "deferred rgba must clear after upload");
-	check(!model_presentation_load(k1), "second use must be a plain rebind");
+	const std::vector<uint8_t> want { 1, 2, 3, 4, 5, 6, 7, 8 };
+	{
+		PcDeferredTex def = make_tex(0, 0);
+		def.owned = want;
+		store.record_tex(k1, std::move(def));
+	}
+	check(store.tex_size() == 1, "record_tex must retain the entry");
+	PcDeferredTex taken;
+	check(store.take_tex(k1, &taken), "take_tex must take a recorded entry");
+	check(store.empty(), "take must leave the store empty");
+	check(taken.bytes() != nullptr, "taken entry must expose bytes");
+	{
+		bool match = taken.owned.size() == want.size();
+		for (size_t i = 0; match && i < want.size(); ++i) match = taken.bytes()[i] == want[i];
+		check(match, "taken bytes must still be correct after the erase (M2)");
+	}
+	check(!store.take_tex(k1, &taken), "second take must miss");
 
-	// 2. Re-init of a cached key in auth invalidates the stale entry.
-	modelCache[k1] = 42;
-	modelSig[k1]   = 7;
-	model_auth_init_tex(k1, 7, 8);
-	check(modelCache.find(k1) == modelCache.end(), "stale cache must be erased on auth re-init");
-	check(modelDoomed.size() == 1 && modelDoomed[0] == 42,
-	      "stale GL name must be deferred, not leaked");
-	check(modelDeferredTex.find(k1) != modelDeferredTex.end(),
-	      "auth tex init must retain parameters");
-	check(model_presentation_load(k1), "presentation must upload the re-init");
+	// 1b. Same for the RGBA path (already move-based, pinned here).
+	const uintptr_t k1b = 0x100b;
+	{
+		PcDeferredRgba def;
+		def.width = 2;
+		def.height = 2;
+		def.rgba = want;
+		store.record_rgba(k1b, std::move(def));
+	}
+	PcDeferredRgba takenRgba;
+	check(store.take_rgba(k1b, &takenRgba), "take_rgba must take a recorded entry");
+	check(store.empty(), "rgba take must leave the store empty");
+	check(takenRgba.rgba == want, "taken rgba bytes must match");
 
-	// 3. Rgba and tex defers supersede each other per key.
-	modelCache.clear();
-	modelDeferredRgba.clear();
-	modelDeferredTex.clear();
-	modelCi.clear();
-	modelSig.clear();
-	modelDoomed.clear();
+	// 2. A re-init during the authoritative pass invalidates the stale
+	// entry: CI once, then non-CI for the same key (heap reuse), and back.
 	const uintptr_t k2 = 0x2002;
-	model_auth_init_rgba(k2, std::vector<uint8_t> { 9, 9 });
-	model_auth_init_tex(k2, 3, 30);
-	check(modelDeferredRgba.find(k2) == modelDeferredRgba.end(),
-	      "tex init must supersede a pending rgba defer");
-	check(modelDeferredTex.find(k2) != modelDeferredTex.end(),
-	      "tex defer must remain after supersede");
-	model_auth_init_rgba(k2, std::vector<uint8_t> { 5 });
-	check(modelDeferredTex.find(k2) == modelDeferredTex.end(),
-	      "rgba init must supersede a pending tex defer");
+	{
+		PcDeferredCi ci;
+		ci.width = 8;
+		ci.height = 8;
+		ci.format = 5;
+		ci.owned = want;
+		store.record_ci(k2, std::move(ci));
+	}
+	check(store.find_ci(k2) != nullptr, "record_ci must retain the CI description");
+	store.record_tex(k2, make_tex(9, 8));
+	check(store.find_ci(k2) == nullptr,
+	      "non-CI re-init must erase the stale CI entry (M2)");
+	check(store.tex_size() == 1, "non-CI re-init must retain its own parameters");
+	store.record_rgba(k2, PcDeferredRgba());
+	check(store.tex_size() == 0 && store.rgba_size() == 1,
+	      "rgba re-init must supersede a pending tex defer");
+	{
+		PcDeferredCi ci;
+		ci.width = 4;
+		ci.height = 4;
+		store.record_ci(k2, std::move(ci));
+	}
+	check(store.rgba_size() == 0 && store.find_ci(k2) != nullptr,
+	      "CI re-init must supersede a pending rgba defer");
+	// A take of one deferred kind drops the rival deferred entry.
+	store.record_tex(k2, make_tex(7, 4));
+	PcDeferredTex rival;
+	check(store.take_tex(k2, &rival), "take must succeed with a rival present");
+	check(store.empty(), "take must drop the rival deferred entry");
 
-	// 4. M2: a CI auth init dooms the mutual-exclusion rivals. A key that
-	// was CI once and is re-inited as non-CI in auth must not re-upload the
-	// stale CI description (the M2 stale-image case).
-	modelCache.clear();
-	modelDeferredRgba.clear();
-	modelDeferredTex.clear();
-	modelCi.clear();
-	modelSig.clear();
-	modelDoomed.clear();
-	const uintptr_t k3 = 0x3003;
-	modelCache[k3] = 77;
-	modelSig[k3]   = 1;
-	model_auth_init_ci(k3, 5, 2);
-	check(modelCi.find(k3) != modelCi.end(), "auth CI init must retain the CI description");
-	check(modelDeferredRgba.find(k3) == modelDeferredRgba.end()
-	      && modelDeferredTex.find(k3) == modelDeferredTex.end(),
-	      "CI init must clear rival deferred entries");
-	model_auth_init_tex(k3, 9, 3); // heap reuse: same address, now non-CI
-	check(modelCi.find(k3) == modelCi.end(),
-	      "non-CI auth re-init must erase the stale CI entry (M2)");
-	check(modelDeferredTex.find(k3) != modelDeferredTex.end(),
-	      "non-CI auth re-init must retain its own parameters");
-	check(model_presentation_load(k3), "presentation must upload the non-CI re-init");
+	// 3. Release clears everything, even with entries in all three maps on
+	// distinct keys.
+	const uintptr_t k3a = 0x300a, k3b = 0x300b, k3c = 0x300c;
+	store.record_tex(k3a, make_tex(1, 4));
+	store.record_rgba(k3b, PcDeferredRgba());
+	{
+		PcDeferredCi ci;
+		store.record_ci(k3c, std::move(ci));
+	}
+	store.release(k3a);
+	store.release(k3b);
+	store.release(k3c);
+	check(store.empty(), "release must clear every per-key record (m4)");
+	store.record_tex(k3a, make_tex(2, 4));
+	store.clear();
+	check(store.empty(), "clear must empty the store");
 
-	// 5. m4: same-signature auth re-init over a live cache entry is a no-op.
-	modelCache.clear();
-	modelDeferredRgba.clear();
-	modelDeferredTex.clear();
-	modelCi.clear();
-	modelSig.clear();
-	modelDoomed.clear();
-	const uintptr_t k4 = 0x4004;
-	model_present_init(k4, 55, 11);
-	model_auth_init_tex(k4, 9, 11);
-	check(modelCache.find(k4) != modelCache.end() && modelCache[k4] == 55,
-	      "same-signature auth re-init must keep the live entry (no churn)");
-	check(modelDoomed.empty(), "same-signature re-init must doom nothing");
-	check(modelDeferredTex.find(k4) == modelDeferredTex.end(),
-	      "same-signature re-init must retain nothing");
-
-	// 6. m4/M2: release clears every per-key record, even with no live entry.
-	modelCi[k4]           = 5;
-	modelDeferredRgba[k4] = std::vector<uint8_t> { 1 };
-	modelDeferredTex[k4]  = 9;
-	model_release(k4);
-	check(modelCache.find(k4) == modelCache.end()
-	      && modelCi.find(k4) == modelCi.end()
-	      && modelDeferredRgba.find(k4) == modelDeferredRgba.end()
-	      && modelDeferredTex.find(k4) == modelDeferredTex.end()
-	      && modelSig.find(k4) == modelSig.end(),
-	      "release must clear cache, CI, both defers and signature");
-
-	// 7. M2: a presentation upload supersedes a stale deferred entry.
-	const uintptr_t k5 = 0x5005;
-	model_auth_init_tex(k5, 4, 40); // auth retains while presentation was away
-	model_present_init(k5, 66, 41); // fresh real upload wins
-	check(modelDeferredTex.find(k5) == modelDeferredTex.end(),
-	      "presentation upload must clear a stale deferred entry");
+	// 4. bytes() prefers the owned copy over a stale alias.
+	PcDeferredTex aliased;
+	aliased.alias = want.data();
+	aliased.owned = want;
+	check(aliased.bytes() == aliased.owned.data(),
+	      "bytes() must read the owned copy, never the alias, when populated");
 
 	std::printf("PcGfxDeferred: %s\n", failures ? "FAILED" : "all tests passed");
 	return failures ? 1 : 0;
