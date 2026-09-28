@@ -19,6 +19,7 @@
 #include <cstring>
 #include <ctime>
 #include <chrono>
+#include <random>
 #include <string>
 #include <thread>
 #include <vector>
@@ -410,6 +411,70 @@ int main()
 	gekko_destroy(&s[0]);
 	gekko_destroy(&s[1]);
 	g_pipe = nullptr;
+
+	// 4. M4a bulk channel 0x03 (issue #885): a 64 KiB blob plus one small
+	// message per lane-B type, moved reliably between two BulkChannels over
+	// a lossy in-memory link (10% loss each way, 5 ms pump). Byte-identical
+	// on receipt; the sender drains once every fragment is acked.
+	{
+		using namespace pc_netplay_bulk;
+		BulkChannel a, b;
+		std::vector<uint8_t> blob(65536);
+		for (size_t i = 0; i < blob.size(); ++i)
+			blob[i] = (uint8_t)(((i * 2654435761u) >> 16) & 0xFF);
+		CHECK(a.send(kBulkCheckpoint, blob.data(), blob.size()), "bulk send 64KiB");
+		const uint8_t tiny[3] = { 1, 2, 3 };
+		CHECK(a.send(kBulkRandFull, tiny, sizeof(tiny)), "bulk send randfull");
+		CHECK(a.send(kBulkSaveResult, tiny, sizeof(tiny)), "bulk send saveresult");
+		std::vector<uint8_t> tooBig(kBulkMaxMessage + 1, 0);
+		CHECK(!a.send(kBulkCheckpoint, tooBig.data(), tooBig.size()), "bulk oversize rejected");
+		CHECK(!a.send(0x42, tiny, sizeof(tiny)), "bulk bad type rejected");
+		CHECK(!a.send(kBulkCheckpoint, nullptr, 0), "bulk empty rejected");
+		const uint8_t junk[4] = { 0x10, 0x00, 0x00, 0x00 };
+		b.on_receive(junk, sizeof(junk));
+		b.on_receive(nullptr, 0);
+		CHECK(b.poll_complete().empty(), "junk completes nothing");
+		CHECK(a.send_total_frags() == 64 + 1 + 1, "bulk frag count 64KiB=64 + 2x1");
+
+		std::mt19937 rng(777);
+		std::uniform_real_distribution<double> drop(0.0, 100.0);
+		std::vector<std::vector<uint8_t>> a2b, b2a;
+		double now = 0.0;
+		std::vector<BulkChannel::Message> got;
+		bool done = false;
+		for (int step = 0; step < 60000 && !done; ++step, now += 5.0) {
+			for (auto& d : a.poll_outgoing(now)) {
+				if (drop(rng) >= 10.0) a2b.push_back(std::move(d));
+			}
+			for (auto& d : b.poll_outgoing(now)) {
+				if (drop(rng) >= 10.0) b2a.push_back(std::move(d));
+			}
+			for (auto& d : a2b) b.on_receive(d.data(), d.size());
+			a2b.clear();
+			for (auto& d : b2a) a.on_receive(d.data(), d.size());
+			b2a.clear();
+			for (auto& m : b.poll_complete()) got.push_back(std::move(m));
+			done = got.size() == 3 && a.send_total_frags() == 0;
+		}
+		CHECK(done, "bulk delivered 3/3 messages and drained under 10% loss");
+		if (got.size() == 3) {
+			bool ck = false, rf = false, sr = false;
+			for (auto& m : got) {
+				if (m.type == kBulkCheckpoint && m.data.size() == blob.size()
+				    && memcmp(m.data.data(), blob.data(), blob.size()) == 0)
+					ck = true;
+				if (m.type == kBulkRandFull && m.data.size() == sizeof(tiny)
+				    && memcmp(m.data.data(), tiny, sizeof(tiny)) == 0)
+					rf = true;
+				if (m.type == kBulkSaveResult && m.data.size() == sizeof(tiny)
+				    && memcmp(m.data.data(), tiny, sizeof(tiny)) == 0)
+					sr = true;
+			}
+			CHECK(ck, "bulk 64KiB byte-identical");
+			CHECK(rf, "bulk randfull round trip");
+			CHECK(sr, "bulk saveresult round trip");
+		}
+	}
 
 	if (sFailures == 0) std::printf("pc_netplay_transport_test: PASS (2000 frames, 0 desyncs)\n");
 	else std::printf("pc_netplay_transport_test: %d FAILURES\n", sFailures);

@@ -30,6 +30,10 @@
 namespace pc_netplay_transport {
 constexpr uint8_t kChannelHandshake = 0x01;
 constexpr uint8_t kChannelGekko     = 0x02;
+// M4 lane A bulk channel (issue #885): fragmented, acknowledged and
+// length-bounded. Carries full randomizer snapshots, SAVE_RESULT and the
+// host checkpoint (see pc_netplay_bulk below). Unknown channels are dropped.
+constexpr uint8_t kChannelBulk      = 0x03;
 constexpr size_t kMaxDatagram      = 4096;
 constexpr size_t kAddrBytes        = 6; // IPv4 + port, network order
 constexpr int kMaxRecvPerPoll      = 64;
@@ -127,9 +131,14 @@ public:
 	// Test hook: inject a received gekko payload without a socket.
 	void inject_for_test(const uint8_t* data, size_t len);
 
-	// Drains datagrams arrived on the handshake channel (0x01). The
+ 	// Drains datagrams arrived on the handshake channel (0x01). The
 	// session handshake pump calls this; GekkoNet never sees them.
 	std::vector<UdpSocket::Datagram> drain_handshake();
+
+	// Drains datagrams arrived on the bulk channel (0x03, M4 lane A). The
+	// session bulk pump feeds these to its BulkChannel; GekkoNet never
+	// sees them.
+	std::vector<UdpSocket::Datagram> drain_bulk();
 
 	// Called by the C send_data trampoline.
 	void send_to_peer(uint32_t ipHostOrder, uint16_t port, const uint8_t* data, size_t len);
@@ -137,13 +146,14 @@ public:
 	// Called by the C receive_data trampoline.
 	struct GekkoNetResult** receive_inner(int* length);
 
-private:
-	UdpSocket* mSock;
-	GekkoNetAdapter mAdapter;
-	std::vector<struct GekkoNetResult*> mResults;
-	std::vector<std::vector<uint8_t>> mInjected;
-	std::vector<UdpSocket::Datagram> mGekkoPending;
-	std::vector<UdpSocket::Datagram> mHandshakePending;
+ private:
+ 	UdpSocket* mSock;
+ 	GekkoNetAdapter mAdapter;
+ 	std::vector<struct GekkoNetResult*> mResults;
+ 	std::vector<std::vector<uint8_t>> mInjected;
+ 	std::vector<UdpSocket::Datagram> mGekkoPending;
+ 	std::vector<UdpSocket::Datagram> mHandshakePending;
+	std::vector<UdpSocket::Datagram> mBulkPending;
 };
 
 // Lossy wrapper adapter over any inner GekkoNetAdapter: one-way latency,
@@ -194,8 +204,94 @@ private:
 	struct Rng;
 	Rng* mRng;
 
-	static double now_ms();
-	double draw_delay_ms();
-	bool draw_drop();
+ 	static double now_ms();
+ 	double draw_delay_ms();
+ 	bool draw_drop();
 };
 } // namespace pc_netplay_transport
+
+// Netplay M4 lane A reliable bulk channel over datagrams with channel byte
+// 0x03 (issue #885). Fragmented (<=1024 payload bytes per fragment),
+// acknowledged per fragment, retransmitted on a 100 ms timer, and with every
+// declared length bounded before allocation (max message 256 KiB).
+//
+// Wire format (all multi-byte fields little-endian):
+//   DATA: [0]=type (0x10/0x11/0x12), [1..2]=msgId, [3..4]=fragIdx,
+//         [5..6]=fragCount, [7..10]=totalLen, [11..]=payload (<=1024 B;
+//         exactly 1024 except the last fragment, which carries the remainder)
+//   ACK:  [0]=0x7F, [1..2]=msgId, [3..4]=fragIdx (5 bytes)
+// Message types (M4 plan section 2b; Lane B owns SaveResult/Checkpoint
+// payloads, lane A proves the channel with a 64 KiB blob):
+//   kBulkRandFull=0x10, kBulkSaveResult=0x11, kBulkCheckpoint=0x12.
+//
+// Engine-free like the rest of this TU. The session owns one endpoint per
+// peer and pumps it each turn; the unit test drives two endpoints over a
+// lossy in-memory queue.
+namespace pc_netplay_bulk {
+constexpr uint8_t kBulkRandFull = 0x10;
+constexpr uint8_t kBulkSaveResult = 0x11;
+constexpr uint8_t kBulkCheckpoint = 0x12;
+constexpr uint8_t kBulkAck = 0x7F;
+constexpr size_t kBulkMaxPayload = 1024;
+constexpr size_t kBulkMaxMessage = 262144; // 256 KiB, hard bound before alloc
+constexpr size_t kBulkMaxFrags = kBulkMaxMessage / kBulkMaxPayload; // 256
+constexpr double kBulkResendMs = 100.0;
+
+class BulkChannel {
+public:
+	BulkChannel();
+
+	// Queues one message for reliable delivery. Returns false when the
+	// type is not a data type, len is 0 or exceeds kBulkMaxMessage, or the
+	// (bounded, 4-deep) send queue is full.
+	bool send(uint8_t type, const uint8_t* data, size_t len);
+
+	// Feeds one received 0x03 payload (channel byte already stripped).
+	// Malformed or out-of-bound datagrams are dropped, never acted on.
+	void on_receive(const uint8_t* data, size_t len);
+
+	// Outgoing 0x03 payloads due at nowMs (unacked data fragments needing
+	// (re)transmit plus pending acks). The caller sends each on the bulk
+	// channel. Acks are emitted once; data fragments repeat every 100 ms
+	// until acked.
+	std::vector<std::vector<uint8_t>> poll_outgoing(double nowMs);
+
+	struct Message {
+		uint8_t type = 0;
+		std::vector<uint8_t> data;
+	};
+	// Completed inbound messages since the last call.
+	std::vector<Message> poll_complete();
+
+	// Test hooks.
+	size_t send_acked_frags() const;
+	size_t send_total_frags() const;
+
+private:
+	struct OutFrag {
+		std::vector<uint8_t> bytes; // full DATA datagram payload
+		bool acked = false;
+		double lastSendMs = -1e18;
+	};
+	struct OutMsg {
+		uint16_t msgId = 0;
+		std::vector<OutFrag> frags;
+	};
+	struct InMsg {
+		uint8_t type = 0;
+		uint16_t msgId = 0;
+		uint16_t count = 0;
+		uint32_t totalLen = 0;
+		std::vector<uint8_t> bytes;
+		std::vector<bool> have;
+		uint16_t got = 0;
+		bool done = false;
+	};
+	uint16_t mNextMsgId = 1;
+	std::vector<OutMsg> mOut;
+	std::vector<InMsg> mIn; // bounded to 8 partial reassemblies
+	std::vector<std::vector<uint8_t>> mAckQueue;
+	std::vector<Message> mComplete;
+	std::vector<uint16_t> mDoneIds; // recently completed msgIds (dup re-ack)
+};
+} // namespace pc_netplay_bulk
