@@ -685,7 +685,7 @@ inline Census census(const Vec3& actor, float heading, const Candidate* piki, in
 // kingChappyState.cpp:914, StateWarCry KEYEVENT_4 :1658), the bomb damage
 // event (StateDamage KEYEVENT_4 :1742) and doFinishStoneState
 // (kingChappy.cpp:947).
-// StateFlick KEYEVENT_3 (kingChappyState.cpp:864-918): InteractPress
+// StateFlick KEYEVENT_3 (kingChappyState.cpp:867-918): InteractPress
 // (general fp24) on Pikmin and captains inside the trampling disc (proper fp08
 // around mFootPosition = position - 10 * facing, kingChappy.cpp:233-235, y in
 // (foot.y - 5, foot.y + 25)), then flickNearbyPikmin (3D < general fp19, not

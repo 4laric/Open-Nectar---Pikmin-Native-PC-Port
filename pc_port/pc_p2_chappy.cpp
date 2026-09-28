@@ -1177,7 +1177,7 @@ void logKingFlickStart(BTeki* actor, const ChappyFsm& s, unsigned generator, con
     std::fflush(stdout);
 }
 
-// Source StateFlick KEYEVENT_3 (trample = true; kingChappyState.cpp:864-918)
+// Source StateFlick KEYEVENT_3 (trample = true; kingChappyState.cpp:867-918)
 // and StateWarCry KEYEVENT_4 (trample = false; :1620-1659) with the retail
 // fp24/fp08 trample and fp16-fp19 shake (pc_p2_chappy_mouth.h king::).
 // Order: trample (InteractPress), flickNearbyPikmin, flickStickPikmin,
