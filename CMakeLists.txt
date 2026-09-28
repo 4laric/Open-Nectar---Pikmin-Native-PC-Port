@@ -1837,6 +1837,14 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_postprocess_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_postprocess_test COMMAND pc_postprocess_test)
 
+    # Polish deferred texture-init contract (issue #880 item 6): host-run
+    # bookkeeping rules, no GL context needed.
+    add_executable(pc_gfx_deferred_test
+        pc_port/gl/pc_gfx_deferred_test.cpp
+    )
+    target_compile_options(pc_gfx_deferred_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_gfx_deferred_test COMMAND pc_gfx_deferred_test)
+
     add_executable(pc_render_packet_test
         pc_port/timing/pc_render_packet_test.cpp
         pc_port/timing/pc_render_packet.cpp)
