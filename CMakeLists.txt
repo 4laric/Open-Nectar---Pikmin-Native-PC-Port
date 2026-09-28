@@ -852,6 +852,76 @@ if(PIKMIN_NETPLAY_BUILD AND NOT ANDROID)
     endif()
 endif()
 
+# Netplay M5a ICE transport (issue #887): vendored libjuice v1.7.4 as its own
+# static library. third_party/libjuice/src/*.c as C11, with JUICE_STATIC and
+# the no-Nettle defines from its CMakeLists (USE_NETTLE=0, RELEASE=1 in
+# Release); links ws2_32 and bcrypt on Windows. Created and linked only when
+# PIKMIN_NETPLAY_BUILD=ON, so the default build is untouched (verified with
+# nm: the default exe has 0 juice symbols). NOTE: NATIVE_COMPILE_OPTIONS is
+# C++-only (-fpermissive etc.) and is deliberately NOT applied to this C
+# target.
+if(PIKMIN_NETPLAY_BUILD AND NOT ANDROID)
+    file(GLOB LIBJUICE_SOURCES "third_party/libjuice/src/*.c")
+    add_library(juice STATIC ${LIBJUICE_SOURCES})
+    set_target_properties(juice PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+    target_include_directories(juice PUBLIC
+        third_party/libjuice/include
+        PRIVATE
+        third_party/libjuice/include/juice
+        third_party/libjuice/src)
+    target_compile_definitions(juice PUBLIC JUICE_STATIC PRIVATE USE_NETTLE=0)
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        target_compile_definitions(juice PRIVATE RELEASE=1)
+    endif()
+    if(WIN32)
+        target_compile_definitions(juice PRIVATE WIN32_LEAN_AND_MEAN)
+        target_link_libraries(juice PUBLIC ws2_32 bcrypt)
+    endif()
+    find_package(Threads REQUIRED)
+    target_link_libraries(juice PRIVATE Threads::Threads)
+    # M5a ICE session driver + transport (game C++17 TUs).
+    target_sources(${NECTAR_GAME} PRIVATE
+        pc_port/netplay/pc_netplay_ice.cpp)
+    target_include_directories(${NECTAR_GAME} PRIVATE third_party/libjuice/include)
+    target_link_libraries(${NECTAR_GAME} PRIVATE juice)
+endif()
+
+# Netplay M5a host-run ICE test (issue #887): two libjuice agents in one
+# process connect over loopback with host candidates only (no STUN/TURN, so
+# no external network), a 64 KiB transfer through the channel interface
+# arrives intact, and the code encode/decode round-trips while garbage is
+# rejected. Netplay builds only (links the juice target, which the default
+# build never creates).
+if(PIKMIN_NETPLAY_BUILD AND PIKMIN_BUILD_TESTS AND NOT ANDROID)
+    add_executable(pc_netplay_ice_test
+        pc_port/netplay/pc_netplay_ice_test.cpp
+        pc_port/netplay/pc_netplay_ice.cpp)
+    target_include_directories(pc_netplay_ice_test PRIVATE
+        pc_port
+        third_party/libjuice/include
+        third_party/gekkonet/GekkoLib/include)
+    target_compile_definitions(pc_netplay_ice_test PRIVATE GEKKONET_STATIC GEKKONET_NO_ASIO)
+    target_compile_options(pc_netplay_ice_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    target_link_libraries(pc_netplay_ice_test PRIVATE juice gekkonet)
+    if(WIN32)
+        target_link_libraries(pc_netplay_ice_test PRIVATE ws2_32)
+    endif()
+    add_test(NAME pc_netplay_ice_test COMMAND pc_netplay_ice_test)
+endif()
+
+# Netplay M5a local TURN server helper (issue #887): tiny exe around
+# libjuice's own juice_server_create for the TURN-only pair test. Netplay
+# builds only.
+if(PIKMIN_NETPLAY_BUILD AND NOT ANDROID)
+    add_executable(netplay_turn_server tools/netplay/ice_turn_server.cpp)
+    target_include_directories(netplay_turn_server PRIVATE third_party/libjuice/include)
+    target_compile_options(netplay_turn_server PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    target_link_libraries(netplay_turn_server PRIVATE juice)
+    if(WIN32)
+        target_link_libraries(netplay_turn_server PRIVATE ws2_32)
+    endif()
+endif()
+
 # Host-run accuracy/determinism test for the netplay libm (issue #879).
 # Engine-free: links the libm OBJECT plus the test driver. The driver
 # calls the entry points by their standard names (proving the override
