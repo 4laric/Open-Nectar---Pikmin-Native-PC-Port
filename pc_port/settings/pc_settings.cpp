@@ -39,8 +39,12 @@
 #include <atomic>
 #include <filesystem>
 #include <mutex>
+#include <sstream>
 
 #include "pc_window.h"
+#if PIKI_NETPLAY_BUILD
+#include "netplay/pc_netplay_session.h"
+#endif
 #include "pc_gyro.h"
 #include "pc_permadeath.h"
 #include "pc_coop.h"
@@ -1043,20 +1047,17 @@ void pc_settings_set_language(unsigned char language) {
 
 namespace {
 
-void saveConfig() {
-    std::string path = std::string(kConfigFilename);
-    std::ofstream out(path, std::ios::out | std::ios::trunc);
-    if (!out) {
-        printf("[PC Settings] Failed to write %s\n", path.c_str());
-        return;
-    }
+// Renders a config exactly as the settings file stores it (one key per
+// line, in the order below). saveConfig() writes this text.
+std::string renderConfig(const PcConfig& c) {
+    std::ostringstream out;
     out << "# Open Nectar settings (F1 in-game to change)\n";
-    out << "windowWidth = " << sConfig.windowWidth << "\n";
-    out << "windowHeight = " << sConfig.windowHeight << "\n";
-    out << "displayMode = " << sConfig.displayMode << "\n";
-    out << "aspectRatioMode = " << sConfig.aspectRatioMode << "\n";
-    out << "refreshRate = " << sConfig.refreshRate << "\n";
-    out << "vsync = " << (sConfig.vsync ? 1 : 0) << "\n";
+    out << "windowWidth = " << c.windowWidth << "\n";
+    out << "windowHeight = " << c.windowHeight << "\n";
+    out << "displayMode = " << c.displayMode << "\n";
+    out << "aspectRatioMode = " << c.aspectRatioMode << "\n";
+    out << "refreshRate = " << c.refreshRate << "\n";
+    out << "vsync = " << (c.vsync ? 1 : 0) << "\n";
     {
         // Written back so the key survives a save from the F1 menu. The value
         // is whatever pc_settings_startup_language() resolved at boot: this is
@@ -1064,81 +1065,108 @@ void saveConfig() {
         static const char* const kCodes[] = { "en", "de", "fr", "es", "it", "nl" };
         out << "language = " << kCodes[pc_settings_get_language()] << "\n";
     }
-    out << "renderScale = " << sConfig.renderScale << "\n";
-    out << "fpsMode = " << sConfig.fpsMode << "\n";
-    out << "chainActions = " << sConfig.chainActions << "\n";
-    out << "holdToPluck = " << sConfig.holdToPluck << "\n";
-    out << "disableTutorials = " << sConfig.disableTutorials << "\n";
-    out << "betterPathfinding = " << sConfig.betterPathfinding << "\n";
-    out << "bluesOnlyWater = " << sConfig.bluesOnlyWater << "\n";
-    out << "idleCounter = " << sConfig.idleCounter << "\n";
-    out << "naviHealthPct = " << sConfig.naviHealthPct << "\n";
-    out << "tekiHealthPct = " << sConfig.tekiHealthPct << "\n";
-    out << "infiniteDay = " << sConfig.infiniteDay << "\n";
-    out << "freeCamera = " << sConfig.freeCamera << "\n";
-    out << "whistleRadiusPct = " << sConfig.whistleRadiusPct << "\n";
-    out << "throwSpeedPct = " << sConfig.throwSpeedPct << "\n";
-    out << "throwCancelB = " << sConfig.throwCancelB << "\n";
-    out << "noTrip = " << sConfig.noTrip << "\n";
-    out << "onionStep10 = " << sConfig.onionStep10 << "\n";
-    out << "instantWhistle = " << sConfig.instantWhistle << "\n";
-    out << "pikiInvincible = " << sConfig.pikiInvincible << "\n";
-    out << "allFlowers = " << sConfig.allFlowers << "\n";
-    out << "carrySpeedPct = " << sConfig.carrySpeedPct << "\n";
-    out << "naviSpeedPct = " << sConfig.naviSpeedPct << "\n";
-    out << "unlockZones = " << sConfig.unlockZones << "\n";
-    out << "noDayAdvance = " << sConfig.noDayAdvance << "\n";
-    out << "allOnions = " << sConfig.allOnions << "\n";
-    out << "vsDuration = " << sConfig.vsDuration << "\n";
-    out << "vsRocketWin = " << sConfig.vsRocketWin << "\n";
-    out << "vsRocketHp = " << sConfig.vsRocketHp << "\n";
-    out << "vsBigPiece = " << sConfig.vsBigPiece << "\n";
-    out << "vsPikiLimit = " << sConfig.vsPikiLimit << "\n";
-    out << "vsPellets = " << sConfig.vsPellets << "\n";
-    out << "lockOn = " << sConfig.lockOn << "\n";
-    out << "charge = " << sConfig.charge << "\n";
-    out << "throwWhileMoving = " << sConfig.throwWhileMoving << "\n";
-    out << "firstPerson = " << sConfig.firstPerson << "\n";
-    out << "mouseWheelAction = " << sConfig.mouseWheelAction << "\n";
-    out << "pikiLimit = " << sConfig.pikiLimit << "\n";
-    out << "dayLength = " << sConfig.dayMinutes << "\n";
-    out << "coopPlayers = " << sConfig.coopPlayers << "\n";
-    out << "coopSplit = " << sConfig.coopSplit << "\n";
-    out << "coopMergeCamera = " << sConfig.coopMergeCamera << "\n";
-    out << "antialiasing = " << sConfig.antialiasing << "\n";
-    out << "fog = " << sConfig.fog << "\n";
-    out << "perPixelLighting = " << sConfig.perPixelLighting << "\n";
-    out << "shadows = " << sConfig.shadows << "\n";
-    out << "bloom = " << sConfig.bloom << "\n";
-    out << "ssao = " << sConfig.ssao << "\n";
-    out << "dof = " << sConfig.dof << "\n";
-    out << "anisotropy = " << sConfig.anisotropy << "\n";
-    out << "colourGrading = " << sConfig.colourGrading << "\n";
-    out << "gamma = " << sConfig.gamma << "\n";
-    out << "brightness = " << sConfig.brightness << "\n";
-    out << "saturation = " << sConfig.saturation << "\n";
-    out << "debugKeys = " << sConfig.debugKeys << "\n";
-    out << "texturePack = " << sConfig.texturePack << "\n";
-    out << "texturePackEnabled = " << sConfig.texturePackEnabled << "\n";
-    out << "controlMode = " << sConfig.controlMode << "\n";
-    out << "mouseSensitivity = " << sConfig.mouseSensitivity << "\n";
-    out << "gyroEnabled = " << sConfig.gyroEnabled << "\n";
-    out << "gyroSensitivity = " << sConfig.gyroSensitivity << "\n";
-    out << "gyroInvert = " << sConfig.gyroInvert << "\n";
-    out << "gyroBias = " << sConfig.gyroBias[0] << " " << sConfig.gyroBias[1] << " " << sConfig.gyroBias[2] << "\n";
-    out << "stickDeadZone = " << sConfig.stickDeadZone << "\n";
-    out << "stickInvert = " << sConfig.stickInvert << "\n";
-    out << "cStickInvert = " << sConfig.cStickInvert << "\n";
+    out << "renderScale = " << c.renderScale << "\n";
+    out << "fpsMode = " << c.fpsMode << "\n";
+    out << "chainActions = " << c.chainActions << "\n";
+    out << "holdToPluck = " << c.holdToPluck << "\n";
+    out << "disableTutorials = " << c.disableTutorials << "\n";
+    out << "betterPathfinding = " << c.betterPathfinding << "\n";
+    out << "bluesOnlyWater = " << c.bluesOnlyWater << "\n";
+    out << "idleCounter = " << c.idleCounter << "\n";
+    out << "naviHealthPct = " << c.naviHealthPct << "\n";
+    out << "tekiHealthPct = " << c.tekiHealthPct << "\n";
+    out << "infiniteDay = " << c.infiniteDay << "\n";
+    out << "freeCamera = " << c.freeCamera << "\n";
+    out << "whistleRadiusPct = " << c.whistleRadiusPct << "\n";
+    out << "throwSpeedPct = " << c.throwSpeedPct << "\n";
+    out << "throwCancelB = " << c.throwCancelB << "\n";
+    out << "noTrip = " << c.noTrip << "\n";
+    out << "onionStep10 = " << c.onionStep10 << "\n";
+    out << "instantWhistle = " << c.instantWhistle << "\n";
+    out << "pikiInvincible = " << c.pikiInvincible << "\n";
+    out << "allFlowers = " << c.allFlowers << "\n";
+    out << "carrySpeedPct = " << c.carrySpeedPct << "\n";
+    out << "naviSpeedPct = " << c.naviSpeedPct << "\n";
+    out << "unlockZones = " << c.unlockZones << "\n";
+    out << "noDayAdvance = " << c.noDayAdvance << "\n";
+    out << "allOnions = " << c.allOnions << "\n";
+    out << "vsDuration = " << c.vsDuration << "\n";
+    out << "vsRocketWin = " << c.vsRocketWin << "\n";
+    out << "vsRocketHp = " << c.vsRocketHp << "\n";
+    out << "vsBigPiece = " << c.vsBigPiece << "\n";
+    out << "vsPikiLimit = " << c.vsPikiLimit << "\n";
+    out << "vsPellets = " << c.vsPellets << "\n";
+    out << "lockOn = " << c.lockOn << "\n";
+    out << "charge = " << c.charge << "\n";
+    out << "throwWhileMoving = " << c.throwWhileMoving << "\n";
+    out << "firstPerson = " << c.firstPerson << "\n";
+    out << "mouseWheelAction = " << c.mouseWheelAction << "\n";
+    out << "pikiLimit = " << c.pikiLimit << "\n";
+    out << "dayLength = " << c.dayMinutes << "\n";
+    out << "coopPlayers = " << c.coopPlayers << "\n";
+    out << "coopSplit = " << c.coopSplit << "\n";
+    out << "coopMergeCamera = " << c.coopMergeCamera << "\n";
+    out << "antialiasing = " << c.antialiasing << "\n";
+    out << "fog = " << c.fog << "\n";
+    out << "perPixelLighting = " << c.perPixelLighting << "\n";
+    out << "shadows = " << c.shadows << "\n";
+    out << "bloom = " << c.bloom << "\n";
+    out << "ssao = " << c.ssao << "\n";
+    out << "dof = " << c.dof << "\n";
+    out << "anisotropy = " << c.anisotropy << "\n";
+    out << "colourGrading = " << c.colourGrading << "\n";
+    out << "gamma = " << c.gamma << "\n";
+    out << "brightness = " << c.brightness << "\n";
+    out << "saturation = " << c.saturation << "\n";
+    out << "debugKeys = " << c.debugKeys << "\n";
+    out << "texturePack = " << c.texturePack << "\n";
+    out << "texturePackEnabled = " << c.texturePackEnabled << "\n";
+    out << "controlMode = " << c.controlMode << "\n";
+    out << "mouseSensitivity = " << c.mouseSensitivity << "\n";
+    out << "gyroEnabled = " << c.gyroEnabled << "\n";
+    out << "gyroSensitivity = " << c.gyroSensitivity << "\n";
+    out << "gyroInvert = " << c.gyroInvert << "\n";
+    out << "gyroBias = " << c.gyroBias[0] << " " << c.gyroBias[1] << " " << c.gyroBias[2] << "\n";
+    out << "stickDeadZone = " << c.stickDeadZone << "\n";
+    out << "stickInvert = " << c.stickInvert << "\n";
+    out << "cStickInvert = " << c.cStickInvert << "\n";
     // Keyboard bindings
     for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
-        out << "key_" << i << " = " << sConfig.keyboardBindings[i] << "\n";
+        out << "key_" << i << " = " << c.keyboardBindings[i] << "\n";
     }
     // Gamepad bindings
     for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
-        out << "gp_" << i << " = " << sConfig.gamepadBindings[i] << "\n";
+        out << "gp_" << i << " = " << c.gamepadBindings[i] << "\n";
     }
+    return out.str();
+}
+
+void writeConfigText(const std::string& text) {
+    std::string path = std::string(kConfigFilename);
+    std::ofstream out(path, std::ios::out | std::ios::trunc);
+    if (!out) {
+        printf("[PC Settings] Failed to write %s\n", path.c_str());
+        return;
+    }
+    out << text;
     out.close();
     printf("[PC Settings] Saved %s\n", path.c_str());
+}
+
+#if PIKI_NETPLAY_BUILD
+bool sessionGuardedSave(); // netplay session guard, defined below
+#endif
+
+// The single choke point every settings save goes through (F1 close, video
+// confirm, glass menu, reset, player count, VS rules, texture packs).
+void saveConfig() {
+#if PIKI_NETPLAY_BUILD
+    // Netplay launch lane (issue #887, B3): during a netplay session the
+    // sim-relevant keys are session-owned. The save keeps them locked in
+    // memory and writes this player's own values for them to disk.
+    if (sessionGuardedSave()) return;
+#endif
+    writeConfigText(renderConfig(sConfig));
 }
 
 void loadConfig() {
@@ -1678,6 +1706,21 @@ void pcVsRulesInput();
 void pcVsEndScreenInput();
 bool vsEndScreenShown();
 
+void openMenu() {
+    sPending = sConfig;
+    sPending.controlMode = pc_window_get_control_mode();
+    sMenuOpen = true;
+    pc_window_set_settings_menu_open(true);
+    sOpenGroup = PC_SET_GROUP_DISPLAY;
+    sGroupSel = 0;
+    sF1Scroll = 0;
+    sF1OptFocus = false;
+    sVideoConfirmActive = false;
+    rebuildResolutionList();
+    const int idx = resolutionIndexFor(pc_window_get_width(), pc_window_get_height());
+    sResolutionIdx = idx >= 0 ? idx : defaultResolutionIndex();
+}
+
 void pollMenuInput() {
     sTouchFrameButtons = sTouchButtons;
     sTouchButtons = 0;
@@ -1746,21 +1789,6 @@ void pollMenuInput() {
         pc_glass_menu_input();
         return;
     }
-
-    auto openMenu = [] {
-        sPending = sConfig;
-        sPending.controlMode = pc_window_get_control_mode();
-        sMenuOpen = true;
-        pc_window_set_settings_menu_open(true);
-        sOpenGroup = PC_SET_GROUP_DISPLAY;
-        sGroupSel = 0;
-        sF1Scroll = 0;
-        sF1OptFocus = false;
-        sVideoConfirmActive = false;
-        rebuildResolutionList();
-        const int idx = resolutionIndexFor(pc_window_get_width(), pc_window_get_height());
-        sResolutionIdx = idx >= 0 ? idx : defaultResolutionIndex();
-    };
 
     // F1 always toggles. Select/View can open the menu while it is closed;
     // closing is handled after video confirmation has had first refusal.
@@ -5286,27 +5314,109 @@ int pc_settings_get_coop_merge_camera(void) {
 }
 
 int pc_settings_get_debug_keys(void) {
+#if PIKI_NETPLAY_BUILD
+    // Netplay (m7): the debug hotkeys read the keyboard and change the sim
+    // locally, outside lockstep. Off on both peers for the whole session.
+    if (pc_netplay_session_active()) return 0;
+#endif
     return sConfig.debugKeys;
 }
 
-// Netplay launch lane (issue #887): session-only adoption of the host's
-// sim-relevant settings block. Parses the m3-config-v1 "k=v;..." text the
-// M3 handshake hashes and writes the in-memory sConfig fields for
-// sim-relevant keys only. saveConfig() is never called, so the joiner's
-// settings file on disk is untouched. Presentation-only keys
-// (windowWidth, windowHeight) stay local per the brief; env/session-owned
-// keys (netplaySeed, protocolVersion, randStream, coopPending) are ignored.
-// Unknown or malformed pairs are ignored. Float-scale keys arrive as 0x
-// hex IEEE-754 bits (as build_config_string emits them) and map back onto
-// the underlying percent fields with the same clamps the file loader uses.
-void pc_settings_apply_session_block(const char* text)
-{
+#if PIKI_NETPLAY_BUILD
+// ---------------------------------------------------------------------------
+// Netplay launch lane (issue #887): settings session guard
+// ---------------------------------------------------------------------------
+//
+// A netplay session owns the sim-relevant settings: the keys the M3
+// handshake hashes (build_config_string in pc_netplay_session.cpp). The
+// joiner adopts the host's values for the session; neither peer may change
+// them mid-session (that would desync). Presentation keys (window size,
+// graphics, bindings, ...) stay local and still save normally.
+//
+// B3 contract, enforced at the single choke point saveConfig():
+//   * in memory, the session keys are re-imposed on every save, so an F1
+//     edit of a sim row reverts when the menu closes (the rows are locked);
+//   * on disk, the session keys are written with this player's OWN values
+//     (as loaded when the session began), never the adopted ones;
+//   * when nothing but session keys would differ from what the session
+//     started from, the file is left untouched (byte-identical).
+// Every save path goes through saveConfig(): F1 close (closeMenu ->
+// commitPendingOnExit), window-size confirm (confirmVideoSettings), the
+// glass menu (pc_settings_rows_end(true)), reset to defaults, the
+// player-count prompt, the VS rules prompt and the texture-pack toggles.
+
+namespace {
+
+// Session keys: PcConfig field and its settings-file key.
+#define PC_SESSION_FIELDS(X)                                                                          \
+    X(fpsMode, "fpsMode") X(chainActions, "chainActions") X(holdToPluck, "holdToPluck")               \
+    X(instantWhistle, "instantWhistle") X(whistleRadiusPct, "whistleRadiusPct")                       \
+    X(pikiLimit, "pikiLimit") X(dayMinutes, "dayLength") X(infiniteDay, "infiniteDay")                \
+    X(noDayAdvance, "noDayAdvance") X(unlockZones, "unlockZones") X(allOnions, "allOnions")           \
+    X(pikiInvincible, "pikiInvincible") X(allFlowers, "allFlowers")                                   \
+    X(carrySpeedPct, "carrySpeedPct") X(naviSpeedPct, "naviSpeedPct")                                 \
+    X(naviHealthPct, "naviHealthPct") X(tekiHealthPct, "tekiHealthPct")                               \
+    X(betterPathfinding, "betterPathfinding") X(bluesOnlyWater, "bluesOnlyWater")                     \
+    X(throwSpeedPct, "throwSpeedPct") X(throwCancelB, "throwCancelB") X(noTrip, "noTrip")             \
+    X(onionStep10, "onionStep10") X(lockOn, "lockOn") X(charge, "charge")                             \
+    X(throwWhileMoving, "throwWhileMoving") X(firstPerson, "firstPerson")                             \
+    X(freeCamera, "freeCamera") X(idleCounter, "idleCounter") X(debugKeys, "debugKeys")               \
+    X(gyroEnabled, "gyroEnabled") X(disableTutorials, "disableTutorials") X(coopSplit, "coopSplit")   \
+    X(coopMergeCamera, "coopMergeCamera")
+
+bool sSessionGuard = false;
+PcConfig sSessionConfig;    // the session's values (locked)
+PcConfig sDiskConfig;       // this player's own values, as the file holds them
+std::string sDiskRender;    // renderConfig(sDiskConfig)
+
+void copySessionFields(PcConfig& dst, const PcConfig& src) {
+#define PC_COPY_SESSION_FIELD(f, k) dst.f = src.f;
+    PC_SESSION_FIELDS(PC_COPY_SESSION_FIELD)
+#undef PC_COPY_SESSION_FIELD
+}
+
+int countSessionFields() {
+    int n = 0;
+#define PC_COUNT_SESSION_FIELD(f, k) ++n;
+    PC_SESSION_FIELDS(PC_COUNT_SESSION_FIELD)
+#undef PC_COUNT_SESSION_FIELD
+    return n;
+}
+
+bool sessionGuardedSave() {
+    if (!sSessionGuard) return false;
+    copySessionFields(sConfig, sSessionConfig); // sim rows stay the session's
+    PcConfig out = sConfig;
+    copySessionFields(out, sDiskConfig);        // the file keeps this player's own
+    const std::string text = renderConfig(out);
+    if (text == sDiskRender) {
+        printf("[PC Settings] netplay session: no local change to save; %s left untouched\n",
+               kConfigFilename);
+        return true;
+    }
+    writeConfigText(text);
+    sDiskConfig = out;
+    sDiskRender = text;
+    printf("[PC Settings] netplay session: saved local changes; the %d session-locked keys keep "
+           "this player's own values\n",
+           countSessionFields());
+    return true;
+}
+
+// Inverse of build_config_string for the settings it hashes: parses the
+// host's "m3-config-v1;k=v;..." block and sets each field so the same getter
+// returns the host's value. Each clamp is the one the settings file uses for
+// the key that field is saved under today (M2: dayMinutes is saved as
+// "dayLength", 0..120, where 10 is a live menu stop; the legacy "dayMinutes"
+// file key's 10->0 migration does not apply). Window size and the
+// session/env-owned keys (coopPending, netplaySeed, protocolVersion,
+// randStream) are ignored; unknown or malformed pairs are ignored.
+void applySessionBlock(const char* text) {
     if (text == nullptr) return;
-    // Skip the "m3-config-v1;" prefix when present; parse the rest as k=v;.
     std::string s(text);
     size_t pos = 0;
     if (s.compare(0, 13, "m3-config-v1;") == 0) pos = 13;
-    auto set01 = [](int& field, long v) { field = (v != 0) ? 1 : 0; };
+    auto set01 = [](int& field, long long v) { field = (v != 0) ? 1 : 0; };
     while (pos < s.size()) {
         size_t semi = s.find(';', pos);
         std::string pair = (semi == std::string::npos) ? s.substr(pos) : s.substr(pos, semi - pos);
@@ -5318,47 +5428,31 @@ void pc_settings_apply_session_block(const char* text)
         if (key.empty() || val.empty() || val.size() > 32) continue;
         char* end = nullptr;
         const bool isHex = val.compare(0, 2, "0x") == 0 || val.compare(0, 2, "0X") == 0;
-        long num = strtol(val.c_str(), &end, isHex ? 16 : 10);
+        const long long num = strtoll(val.c_str(), &end, isHex ? 16 : 10);
         if (end == val.c_str() || *end != '\0') continue;
-        if (key == "fpsMode") {
-            sConfig.fpsMode = (int)num;
-            if (sConfig.fpsMode < 0) sConfig.fpsMode = 0;
-            if (sConfig.fpsMode > 2) sConfig.fpsMode = 2;
-        } else if (key == "chainActions") set01(sConfig.chainActions, num);
+        if (key == "fpsMode") sConfig.fpsMode = std::clamp((int)num, 0, 2);
+        else if (key == "chainActions") set01(sConfig.chainActions, num);
         else if (key == "holdToPluck") set01(sConfig.holdToPluck, num);
         else if (key == "instantWhistle") set01(sConfig.instantWhistle, num);
-        else if (key == "whistleRadiusPct") {
-            sConfig.whistleRadiusPct = (int)num;
-            if (sConfig.whistleRadiusPct < 50) sConfig.whistleRadiusPct = 50;
-            if (sConfig.whistleRadiusPct > 300) sConfig.whistleRadiusPct = 300;
-        } else if (key == "pikiLimit") {
-            sConfig.pikiLimit = (int)num;
-            if (sConfig.pikiLimit < 50 || sConfig.pikiLimit > 999) sConfig.pikiLimit = 100;
-        } else if (key == "dayMinutes") {
-            sConfig.dayMinutes = (int)num;
-            if (sConfig.dayMinutes == 10 || sConfig.dayMinutes < 1 || sConfig.dayMinutes > 120)
-                sConfig.dayMinutes = 0;
-        } else if (key == "infiniteDay") set01(sConfig.infiniteDay, num);
+        else if (key == "whistleRadiusPct") sConfig.whistleRadiusPct = std::clamp((int)num, 50, 300);
+        else if (key == "pikiLimit") sConfig.pikiLimit = (num < 50 || num > 999) ? 100 : (int)num;
+        else if (key == "dayMinutes") sConfig.dayMinutes = (num < 0 || num > 120) ? 0 : (int)num;
+        else if (key == "infiniteDay") set01(sConfig.infiniteDay, num);
         else if (key == "noDayAdvance") set01(sConfig.noDayAdvance, num);
         else if (key == "unlockZones") set01(sConfig.unlockZones, num);
         else if (key == "allOnions") set01(sConfig.allOnions, num);
         else if (key == "pikiInvincible") set01(sConfig.pikiInvincible, num);
         else if (key == "allFlowers") set01(sConfig.allFlowers, num);
         else if (key == "carrySpeedScale" || key == "naviSpeedScale" || key == "throwSpeedScale") {
-            // 0x hex float bits -> percent stops (same clamps as the loader).
-            uint32_t bits = (uint32_t)(num & 0xFFFFFFFFL);
+            // 0x hex IEEE-754 bits of pct / 100.0f back to the percent field;
+            // pct / 100.0f round-trips exactly for every stored percent.
+            const uint32_t bits = (uint32_t)(num & 0xFFFFFFFFll);
             float f = 1.0f;
             memcpy(&f, &bits, sizeof(f));
-            int pct = (int)(f * 100.0f + (f >= 0 ? 0.5f : -0.5f));
-            if (key == "throwSpeedScale") {
-                if (pct < 50) pct = 50;
-                if (pct > 200) pct = 200;
-                sConfig.throwSpeedPct = pct;
-            } else if (key == "carrySpeedScale") {
-                sConfig.carrySpeedPct = clampSpeedPct(pct);
-            } else {
-                sConfig.naviSpeedPct = clampSpeedPct(pct);
-            }
+            const int pct = (int)(f * 100.0f + (f >= 0 ? 0.5f : -0.5f));
+            if (key == "throwSpeedScale") sConfig.throwSpeedPct = std::clamp(pct, 50, 200);
+            else if (key == "carrySpeedScale") sConfig.carrySpeedPct = clampSpeedPct(pct);
+            else sConfig.naviSpeedPct = clampSpeedPct(pct);
         } else if (key == "naviHealthPct") sConfig.naviHealthPct = clampHealthPct((int)num);
         else if (key == "tekiHealthPct") sConfig.tekiHealthPct = clampHealthPct((int)num);
         else if (key == "betterPathfinding") set01(sConfig.betterPathfinding, num);
@@ -5377,20 +5471,266 @@ void pc_settings_apply_session_block(const char* text)
         else if (key == "disableTutorials") set01(sConfig.disableTutorials, num);
         else if (key == "coopSplit") set01(sConfig.coopSplit, num);
         else if (key == "coopMergeCamera") set01(sConfig.coopMergeCamera, num);
-        else if (key == "captainP1") {
+        else if (key == "captainP1" || key == "captainP2") {
             int c = (int)(num % PC_CAPTAIN_COUNT);
             if (c < 0) c += PC_CAPTAIN_COUNT;
-            pc_coop_set_captain(0, c);
-        } else if (key == "captainP2") {
-            int c = (int)(num % PC_CAPTAIN_COUNT);
-            if (c < 0) c += PC_CAPTAIN_COUNT;
-            pc_coop_set_captain(1, c);
+            pc_coop_set_captain(key == "captainP1" ? 0 : 1, c);
         }
-        // Ignored by design: windowWidth, windowHeight (presentation-only,
-        // stay local), coopPending (forced 1 by the session), netplaySeed,
-        // protocolVersion, randStream (env/session-owned), and anything else.
     }
 }
+
+} // namespace
+
+void pc_settings_session_begin(const char* adoptBlock) {
+    sDiskConfig = sConfig;
+    sDiskRender = renderConfig(sDiskConfig);
+    if (adoptBlock != nullptr) applySessionBlock(adoptBlock);
+    sSessionConfig = sConfig;
+    sPending = sConfig;
+    sSessionGuard = true;
+    printf("[PC Settings] netplay session: the %d sim-relevant keys are locked for the session; "
+           "%s keeps this player's own values\n",
+           countSessionFields(), kConfigFilename);
+    if (adoptBlock != nullptr) {
+        std::string diff;
+        int changed = 0;
+#define PC_DIFF_SESSION_FIELD(f, k)                                                   \
+    if (sDiskConfig.f != sSessionConfig.f) {                                          \
+        char cell[96];                                                                \
+        snprintf(cell, sizeof(cell), "%s%s %d->%d", changed ? ", " : "", k,           \
+                 sDiskConfig.f, sSessionConfig.f);                                    \
+        diff += cell;                                                                 \
+        ++changed;                                                                    \
+    }
+        PC_SESSION_FIELDS(PC_DIFF_SESSION_FIELD)
+#undef PC_DIFF_SESSION_FIELD
+        printf("[PC Settings] netplay session: adopted the host's sim settings for this session "
+               "only (%d differ from this player's file)%s%s\n",
+               changed, changed ? ": " : "", diff.c_str());
+    }
+    fflush(stdout);
+}
+
+void pc_settings_test_f1_cycle(void) {
+    // Exactly what pressing F1 twice does: open (openMenu) and close
+    // (closeMenu -> commitPendingOnExit -> saveConfig).
+    openMenu();
+    closeMenu();
+    printf("[PC Settings] test hook: F1 menu opened and closed (save path ran)\n");
+    fflush(stdout);
+}
+
+namespace {
+
+std::string readWholeFile(const char* path) {
+    std::ifstream in(path, std::ios::binary);
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+std::map<std::string, std::string> parseSettingsFile(const char* path) {
+    std::map<std::string, std::string> kv;
+    std::ifstream in(path);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        const size_t eq = line.find(" = ");
+        if (line.empty() || line[0] == '#' || eq == std::string::npos) continue;
+        kv[line.substr(0, eq)] = line.substr(eq + 3);
+    }
+    return kv;
+}
+
+void writeText(const char* path, const std::string& text) {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << text;
+}
+
+struct SelftestCase {
+    const char* name;
+    const char* host;   // settings file lines for the host
+    const char* joiner; // differs from the host on every session key
+    int hostCaptains[2];
+    int joinerCaptains[2];
+};
+
+// Every case differs on every session key; the edge values are the ones the
+// review named: the 10-minute day, pikiLimit bounds, speed/throw/health
+// stops at both ends (health -1 = Infinite/Insta Kill), and charge=1 with
+// lockOn=0 (hashed as charge=0).
+const SelftestCase kSelftestCases[] = {
+    { "all-keys",
+      "fpsMode = 1\nchainActions = 1\nholdToPluck = 1\ninstantWhistle = 1\nwhistleRadiusPct = 150\n"
+      "pikiLimit = 300\ndayLength = 10\ninfiniteDay = 1\nnoDayAdvance = 1\nunlockZones = 1\n"
+      "allOnions = 1\npikiInvincible = 1\nallFlowers = 1\ncarrySpeedPct = 150\nnaviSpeedPct = 200\n"
+      "naviHealthPct = -1\ntekiHealthPct = 25\nbetterPathfinding = 1\nbluesOnlyWater = 1\n"
+      "throwSpeedPct = 175\nthrowCancelB = 1\nnoTrip = 1\nonionStep10 = 1\nlockOn = 1\ncharge = 1\n"
+      "throwWhileMoving = 1\nfirstPerson = 1\nfreeCamera = 1\nidleCounter = 1\ndebugKeys = 1\n"
+      "gyroEnabled = 1\ndisableTutorials = 0\ncoopSplit = 1\ncoopMergeCamera = 1\n",
+      "fpsMode = 2\nchainActions = 0\nholdToPluck = 0\ninstantWhistle = 0\nwhistleRadiusPct = 50\n"
+      "pikiLimit = 999\ndayLength = 20\ninfiniteDay = 0\nnoDayAdvance = 0\nunlockZones = 0\n"
+      "allOnions = 0\npikiInvincible = 0\nallFlowers = 0\ncarrySpeedPct = 500\nnaviSpeedPct = 100\n"
+      "naviHealthPct = 500\ntekiHealthPct = 300\nbetterPathfinding = 0\nbluesOnlyWater = 0\n"
+      "throwSpeedPct = 50\nthrowCancelB = 0\nnoTrip = 0\nonionStep10 = 0\nlockOn = 0\ncharge = 0\n"
+      "throwWhileMoving = 0\nfirstPerson = 0\nfreeCamera = 0\nidleCounter = 0\ndebugKeys = 0\n"
+      "gyroEnabled = 0\ndisableTutorials = 1\ncoopSplit = 0\ncoopMergeCamera = 0\n"
+      "windowWidth = 800\nwindowHeight = 600\ngamma = 1.5\n",
+      { 2, 3 }, { 0, 1 } },
+    { "edges",
+      "fpsMode = 2\nchainActions = 0\nholdToPluck = 1\ninstantWhistle = 0\nwhistleRadiusPct = 300\n"
+      "pikiLimit = 50\ndayLength = 120\ninfiniteDay = 0\nnoDayAdvance = 1\nunlockZones = 0\n"
+      "allOnions = 1\npikiInvincible = 0\nallFlowers = 1\ncarrySpeedPct = 500\nnaviSpeedPct = 400\n"
+      "naviHealthPct = 25\ntekiHealthPct = -1\nbetterPathfinding = 0\nbluesOnlyWater = 1\n"
+      "throwSpeedPct = 50\nthrowCancelB = 0\nnoTrip = 1\nonionStep10 = 0\nlockOn = 0\ncharge = 1\n"
+      "throwWhileMoving = 0\nfirstPerson = 1\nfreeCamera = 0\nidleCounter = 1\ndebugKeys = 0\n"
+      "gyroEnabled = 1\ndisableTutorials = 1\ncoopSplit = 0\ncoopMergeCamera = 1\n",
+      "fpsMode = 0\nchainActions = 1\nholdToPluck = 0\ninstantWhistle = 1\nwhistleRadiusPct = 50\n"
+      "pikiLimit = 999\ndayLength = 10\ninfiniteDay = 1\nnoDayAdvance = 0\nunlockZones = 1\n"
+      "allOnions = 0\npikiInvincible = 1\nallFlowers = 0\ncarrySpeedPct = 100\nnaviSpeedPct = 100\n"
+      "naviHealthPct = -1\ntekiHealthPct = 25\nbetterPathfinding = 1\nbluesOnlyWater = 0\n"
+      "throwSpeedPct = 200\nthrowCancelB = 1\nnoTrip = 0\nonionStep10 = 1\nlockOn = 1\ncharge = 0\n"
+      "throwWhileMoving = 1\nfirstPerson = 0\nfreeCamera = 1\nidleCounter = 0\ndebugKeys = 1\n"
+      "gyroEnabled = 0\ndisableTutorials = 0\ncoopSplit = 1\ncoopMergeCamera = 0\n",
+      { 4, 0 }, { 1, 2 } },
+    { "original-day",
+      "fpsMode = 0\nchainActions = 1\nholdToPluck = 0\ninstantWhistle = 1\nwhistleRadiusPct = 75\n"
+      "pikiLimit = 999\ndayLength = 0\ninfiniteDay = 1\nnoDayAdvance = 0\nunlockZones = 1\n"
+      "allOnions = 0\npikiInvincible = 1\nallFlowers = 0\ncarrySpeedPct = 250\nnaviSpeedPct = 150\n"
+      "naviHealthPct = 150\ntekiHealthPct = 500\nbetterPathfinding = 1\nbluesOnlyWater = 0\n"
+      "throwSpeedPct = 125\nthrowCancelB = 1\nnoTrip = 0\nonionStep10 = 1\nlockOn = 1\ncharge = 0\n"
+      "throwWhileMoving = 1\nfirstPerson = 0\nfreeCamera = 1\nidleCounter = 0\ndebugKeys = 1\n"
+      "gyroEnabled = 0\ndisableTutorials = 0\ncoopSplit = 1\ncoopMergeCamera = 0\n",
+      "fpsMode = 1\nchainActions = 0\nholdToPluck = 1\ninstantWhistle = 0\nwhistleRadiusPct = 250\n"
+      "pikiLimit = 50\ndayLength = 7\ninfiniteDay = 0\nnoDayAdvance = 1\nunlockZones = 0\n"
+      "allOnions = 1\npikiInvincible = 0\nallFlowers = 1\ncarrySpeedPct = 300\nnaviSpeedPct = 500\n"
+      "naviHealthPct = 75\ntekiHealthPct = 50\nbetterPathfinding = 0\nbluesOnlyWater = 1\n"
+      "throwSpeedPct = 150\nthrowCancelB = 0\nnoTrip = 1\nonionStep10 = 0\nlockOn = 0\ncharge = 1\n"
+      "throwWhileMoving = 0\nfirstPerson = 1\nfreeCamera = 0\nidleCounter = 1\ndebugKeys = 0\n"
+      "gyroEnabled = 1\ndisableTutorials = 1\ncoopSplit = 0\ncoopMergeCamera = 1\n",
+      { 1, 4 }, { 3, 2 } },
+};
+
+} // namespace
+
+int pc_settings_netplay_selftest(const char* (*configTextFn)(void)) {
+    auto configText = [&]() { return std::string(configTextFn()); };
+    int checks = 0, failures = 0;
+    auto check = [&](bool ok, const std::string& what) {
+        ++checks;
+        if (!ok) {
+            ++failures;
+            printf("FAIL: %s\n", what.c_str());
+        }
+    };
+    // No window here: applyVideo/applyGraphics are GL work, the probing
+    // flag already skips them (the F1 option probe uses it the same way).
+    sProbing = true;
+    const char* path = kConfigFilename;
+    for (const SelftestCase& tc : kSelftestCases) {
+        const std::string name = tc.name;
+        sSessionGuard = false;
+        // Host side: its own file, its config text.
+        writeText(path, tc.host);
+        loadConfig();
+        sPending = sConfig;
+        const PcConfig hostCfg = sConfig;
+        pc_coop_set_captain(0, tc.hostCaptains[0]);
+        pc_coop_set_captain(1, tc.hostCaptains[1]);
+        const std::string hostText = configText();
+        // Joiner side: a file that differs on every session key.
+        writeText(path, tc.joiner);
+        loadConfig();
+        sPending = sConfig;
+        pc_coop_set_captain(0, tc.joinerCaptains[0]);
+        pc_coop_set_captain(1, tc.joinerCaptains[1]);
+        const PcConfig joinerCfg = sConfig;
+#define PC_CHECK_DIFFERS(f, k) \
+        check(hostCfg.f != joinerCfg.f, name + ": joiner file differs from the host on " + k);
+        PC_SESSION_FIELDS(PC_CHECK_DIFFERS)
+#undef PC_CHECK_DIFFERS
+        check(configText() != hostText, name + ": joiner config text differs before adoption");
+        const std::map<std::string, std::string> joinerFile = parseSettingsFile(path);
+        const std::string joinerBytes = readWholeFile(path);
+        // M2: adoption maps every key exactly as the handshake hashes it.
+        pc_settings_session_begin(hostText.c_str());
+        const std::string adopted = configText();
+        check(adopted == hostText, name + ": adopted config text equals the host's");
+        if (adopted != hostText) printf("  host   %s\n  joiner %s\n", hostText.c_str(), adopted.c_str());
+
+        // B3: every save path, then the file and memory checks.
+        auto fileKeepsJoinerValues = [&](const char* step) {
+            const std::map<std::string, std::string> now = parseSettingsFile(path);
+#define PC_CHECK_ON_DISK(f, k)                                                                      \
+            {                                                                                     \
+                auto it = now.find(k);                                                            \
+                auto was = joinerFile.find(k);                                                    \
+                check(it != now.end() && was != joinerFile.end() && it->second == was->second,    \
+                      name + ": " + step + ": " + k + " on disk keeps the joiner's own value");   \
+            }
+            PC_SESSION_FIELDS(PC_CHECK_ON_DISK)
+#undef PC_CHECK_ON_DISK
+            check(configText() == hostText, name + ": " + step + ": session values stay locked in memory");
+        };
+        pc_settings_test_f1_cycle();
+        check(readWholeFile(path) == joinerBytes, name + ": F1 open/close leaves the file byte-identical");
+        check(configText() == hostText, name + ": F1 open/close keeps the session values");
+        // An F1 edit of a sim row reverts on close (locked) and never lands.
+        openMenu();
+        sPending.chainActions = sPending.chainActions ? 0 : 1;
+        sPending.pikiLimit = sPending.pikiLimit == 150 ? 200 : 150;
+        closeMenu();
+        check(readWholeFile(path) == joinerBytes, name + ": F1 sim-row edit leaves the file byte-identical");
+        check(configText() == hostText, name + ": F1 sim-row edit reverts to the session value");
+        pc_settings_rows_begin();
+        pc_settings_rows_end(true);
+        check(readWholeFile(path) == joinerBytes, name + ": glass menu save leaves the file byte-identical");
+        // Window size (a local key): confirmVideoSettings saves it.
+        sPending = sConfig;
+        sPending.windowWidth = 1024;
+        sPending.windowHeight = 768;
+        confirmVideoSettings();
+        {
+            const std::map<std::string, std::string> now = parseSettingsFile(path);
+            auto w = now.find("windowWidth");
+            check(w != now.end() && w->second == "1024", name + ": window size change is saved");
+        }
+        fileKeepsJoinerValues("window size");
+        // Player-count prompt accept path (pcPlayerCountPromptInput).
+        sConfig.coopPlayers = sConfig.coopPlayers == 2 ? 1 : 2;
+        saveConfig();
+        fileKeepsJoinerValues("player count");
+        // VS rules prompt accept path (pcVsRulesInput).
+        sConfig.vsDuration = (sConfig.vsDuration + 1) % 3;
+        saveConfig();
+        fileKeepsJoinerValues("VS rules");
+        // Texture-pack toggles (texturePacksRowAction: enable, then disable).
+        sConfig.texturePack = "selftest-pack";
+        sConfig.texturePackEnabled = 1;
+        sPending.texturePack = "selftest-pack";
+        sPending.texturePackEnabled = 1;
+        saveConfig();
+        fileKeepsJoinerValues("texture pack on");
+        sConfig.texturePackEnabled = 0;
+        sConfig.texturePack.clear();
+        sPending.texturePackEnabled = 0;
+        sPending.texturePack.clear();
+        saveConfig();
+        fileKeepsJoinerValues("texture pack off");
+        // Reset to defaults.
+        resetToDefaults();
+        fileKeepsJoinerValues("reset to defaults");
+        sSessionGuard = false;
+    }
+    sProbing = false;
+    remove(path);
+    printf("netplay settings selftest: %s (%d checks, %d failures, %d cases)\n",
+           failures == 0 ? "PASS" : "FAIL", checks, failures,
+           (int)(sizeof(kSelftestCases) / sizeof(kSelftestCases[0])));
+    return failures == 0 ? 0 : 1;
+}
+
+#endif // PIKI_NETPLAY_BUILD
 
 // ---------------------------------------------------------------------------
 // Modelo de filas para otras interfaces (pc_settings_rows.h)

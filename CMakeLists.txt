@@ -889,6 +889,31 @@ if(PIKMIN_NETPLAY_BUILD AND NOT ANDROID)
         pc_port/netplay/pc_netplay_ice.cpp)
     target_include_directories(${NECTAR_GAME} PRIVATE third_party/libjuice/include)
     target_link_libraries(${NECTAR_GAME} PRIVATE juice)
+    # Launch lane (issue #887): the one-command launcher's pre-init stage and
+    # its in-exe self-tests. PIKI_NETPLAY_BUILD compiles the launcher hooks in
+    # pc_main/pc_window/pc_settings/pc_randomizer into this exe only, so the
+    # default exe carries no launcher code or symbols (m11).
+    target_sources(${NECTAR_GAME} PRIVATE
+        pc_port/netplay/pc_netplay_launch.cpp
+        pc_port/netplay/pc_netplay_launch_selftest.cpp)
+    target_compile_definitions(${NECTAR_GAME} PRIVATE PIKI_NETPLAY_BUILD=1)
+endif()
+
+# Launch lane (issue #887): in-exe self-tests (they need the game's settings
+# and window code). settings: the host-settings adoption round trip over
+# every hashed key (M2) and every settings save path (B3). input/input-session:
+# input ownership through pc_window_poll_events with an SDL virtual gamepad
+# (M4, m5, m7). Each run works in its own subdir of the build dir.
+if(PIKMIN_NETPLAY_BUILD AND PIKMIN_BUILD_TESTS AND NOT ANDROID)
+    add_test(NAME netplay_launch_settings_selftest
+        COMMAND $<TARGET_FILE:${NECTAR_GAME}> --netplay-launch-selftest settings
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    add_test(NAME netplay_launch_input_selftest
+        COMMAND $<TARGET_FILE:${NECTAR_GAME}> --netplay-launch-selftest input
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    add_test(NAME netplay_launch_input_session_selftest
+        COMMAND $<TARGET_FILE:${NECTAR_GAME}> --netplay-launch-selftest input-session
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 endif()
 
 # Netplay M5a host-run ICE test (issue #887): two libjuice agents in one
@@ -1799,6 +1824,13 @@ if(PIKMIN_BUILD_TESTS)
     target_include_directories(pc_netplay_input_sel_test PRIVATE pc_port)
     target_compile_options(pc_netplay_input_sel_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_netplay_input_sel_test COMMAND pc_netplay_input_sel_test)
+
+    # Netplay launcher pure pieces (launch lane; header-only, no SDL/game):
+    # SESSION re-stamp, bootstrap acceptance, run layout, code classes.
+    add_executable(pc_netplay_launch_test pc_port/netplay/pc_netplay_launch_test.cpp)
+    target_include_directories(pc_netplay_launch_test PRIVATE pc_port)
+    target_compile_options(pc_netplay_launch_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_netplay_launch_test COMMAND pc_netplay_launch_test)
 
     # Host software DSP test (not linked into main game)
     add_executable(pc_dsp_host_test

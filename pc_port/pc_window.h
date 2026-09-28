@@ -131,19 +131,19 @@ int  pc_window_num_gamepads(void);
 void pc_window_input_reset_assignment(void);
 void pc_window_input_assign(int player, int kind, int gamepadId);
 int  pc_window_input_get_assignment(int player, int* gamepadId);
-// Netplay launch lane (issue #887): per-peer input ownership. Selects which
-// physical device family feeds the netplay local player: ignoreKeyboard
-// drops every key/mouse contribution, ignoreGamepads drops every gamepad
-// contribution. `auto` behaviour is both false. Engine-pure setters: safe
-// to call without a window (they only flip flags).
+// Netplay launch lane (issue #887): per-peer input ownership, netplay builds
+// only (defined under PIKI_NETPLAY_BUILD). Selects which physical device
+// family feeds the netplay local player: ignoreKeyboard drops every key and
+// mouse contribution (and a gamepad peer keeps its pad with the window in the
+// background), ignoreGamepads drops every gamepad contribution. `auto` is
+// both false.
 void pc_window_set_netplay_input_filter(bool ignoreKeyboard, bool ignoreGamepads);
-// True when device family kind (PC_INPUT_DEV_*) currently feeds the local
-// player. Pure query over the flags above; the input-ownership test drives
-// the device-resolution decision through this.
-bool pc_window_netplay_device_allowed(int kind);
-// SDL_JoystickID of the index-th open gamepad (0 = first), or -1 when there
-// is none. Pure query over the open-pad list; no SDL call.
-int pc_window_netplay_gamepad_id(int index);
+// --netplay-input gamepad:N: `player` is fed by the index-th open gamepad
+// (0 = first). Re-resolved on every hotplug until that pad is open; the
+// slot stays neutral meanwhile.
+void pc_window_set_netplay_gamepad(int player, int index);
+// F6/F9 presses the ownership/session rule dropped so far (self-test).
+unsigned pc_window_netplay_blocked_hotkeys(void);
 // Jugador (0/1) que tiene el teclado; el ratón va con él.
 int  pc_window_get_keyboard_owner(void);
 const char* pc_window_gamepad_name(int gamepadId);
