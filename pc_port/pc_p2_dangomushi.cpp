@@ -194,6 +194,7 @@ struct Dango {
     float lastLoggedHealth = -1.0f;
     bool carcassApplied = false;
     int rockDrawTurn = -1;
+    std::string drawnClip;
     std::set<int> firedEvents;
     std::string clip = "fly";
     float phase = 0.0f;
@@ -881,6 +882,13 @@ bool pc_p2_dangomushi_clip(const BTeki* actor, const char*& name, float& phase) 
     if (it == actors.end()) return false;
     name = it->second.clip.c_str();
     phase = it->second.phase;
+    // Draw evidence: one line per clip change of the drawn P2 model.
+    if (it->second.drawnClip != it->second.clip) {
+        it->second.drawnClip = it->second.clip;
+        std::printf("P2_DANGOMUSHI_CLIP_DRAW generator=%u clip=%s phase=%.2f state=%s\n",
+                    tokenOf(const_cast<BTeki*>(actor)), name, phase, stateName(it->second.state));
+        std::fflush(stdout);
+    }
     return true;
 }
 bool pc_p2_dangomushi_suppress_ai(const BTeki* actor) {
