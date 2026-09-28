@@ -234,6 +234,11 @@ inline unsigned sourceForSpeciesName(const char* name)
 
 inline bool isKoganeLike(unsigned source) { return source == 9; }
 inline bool isFlyer(unsigned source) { return source == 23 || source == 57 || source == 32 || source == 72; }
+// #898: the Breadbug (38) takes no attack damage (source damageCallBack is
+// bitter-only): only a thrown Pikmin landing on it while falling hurts it
+// (press). The bot leads its throws onto the walking body and keeps a
+// longer attack window; it is still pad input only.
+inline bool isPressOnly(unsigned source) { return source == 38; }
 
 // #884 round 4: KingChappy (53) keeps the captain OUT of the source
 // invisible range while attacking. Source searchTarget prefers a captain in
@@ -303,6 +308,8 @@ struct Config {
     float corpseOutOfReach = 800.0f; // tdist past this at giveup names corpse_out_of_reach
     float koganeConfirm = 20.0f; // after Kogane damage, watch escapes then move on
     float kurageAttackMultiplier = 2.0f; // Kurage has high HP: longer attack window
+    float pressOnlyAttackMultiplier = 5.0f; // #898 press-only targets: one press per landed throw
+    float pressLeadSeconds = 0.6f; // #898 aim ahead of a walking press-only target
     float saraiLowHeight = 120.0f; // Sarai thrown at only when within this height above ground (or grabbing)
     float throwRange = 260.0f; // XZ distance at which throws start
     float arriveRadius = 90.0f; // XZ distance considered "at" the Onion
@@ -536,6 +543,8 @@ public:
         amGrowStill = 0.0f; // bot-v7: time without crew growth in SeedGrow
         withdrawCycles = 0;
         throwSpin = 0.0f;
+        leadValid = false;
+        leadVX = leadVZ = 0.0f;
         kingBacking = false;
         kingClosing = false;
         kingBackTime = 0.0f;
@@ -1000,7 +1009,9 @@ private:
         }
         const bool sarai = in.targetSource == 23;
         const bool kurage = in.targetSource == 57 || in.targetSource == 72;
-        const float limit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout;
+        const bool pressOnly = isPressOnly(in.targetSource);
+        const float limit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier
+                          : pressOnly ? cfg.attackTimeout * cfg.pressOnlyAttackMultiplier : cfg.attackTimeout;
         // Whistle first, then re-throw (bot-v4: real players do this):
         // - Sarai holding a Pikmin (targetGrabbing): whistle frees the grab;
         // - grabbed/thrown-off/burning squad (squadDistress: mouth-stuck,
@@ -1053,7 +1064,7 @@ private:
             // undamaged's bound + cooldown (forces throw windows) with the
             // kurage-aware limit both lanes used (unkilled limit == wlimit).
             {
-                const float wlimit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout;
+                const float wlimit = limit;
                 if (stateTime >= wlimit) {
                     giveUp(in, "attack_timeout");
                     finishTarget(in, /*killed*/ false);
@@ -1085,6 +1096,19 @@ private:
         // spread Pikmin around the bell.
         float aimX = in.tgtX, aimZ = in.tgtZ;
         float gap = cfg.throwGap;
+        if (pressOnly) {
+            // Lead the throw by the target's observed ground velocity.
+            if (leadValid && dt > 0.0f) {
+                const float vx = (in.tgtX - leadX) / dt, vz = (in.tgtZ - leadZ) / dt;
+                leadVX += (vx - leadVX) * 0.2f;
+                leadVZ += (vz - leadVZ) * 0.2f;
+            }
+            leadX = in.tgtX;
+            leadZ = in.tgtZ;
+            leadValid = true;
+            aimX += leadVX * cfg.pressLeadSeconds;
+            aimZ += leadVZ * cfg.pressLeadSeconds;
+        }
         if (kurage) {
             throwSpin += dt * 1.5f;
             const float dx = in.tgtX - in.naviX, dz = in.tgtZ - in.naviZ;
@@ -1681,6 +1705,8 @@ private:
     bool sawReceipt = false; // Onion receipt latched (authoritative for carried)
     int withdrawCycles = 0; // withdraw-menu repeat count this run
     float throwSpin = 0.0f; // Kurage throw rotation phase
+    bool leadValid = false; // #898 press-only lead estimate
+    float leadX = 0.0f, leadZ = 0.0f, leadVX = 0.0f, leadVZ = 0.0f;
     bool kingBacking = false; // #884 round 4: King standoff backing off (hysteresis)
     bool kingClosing = false; // #884 round 4: King standoff closing in (hysteresis)
     float kingBackTime = 0.0f; // continuous backing time (sidestep after kingSidestepAfter)
