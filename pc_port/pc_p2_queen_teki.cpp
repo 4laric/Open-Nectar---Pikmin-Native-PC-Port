@@ -338,7 +338,11 @@ void rollPress(BTeki* t, Binding& b) {
         CI_LOOP(it) {
             Piki* p = static_cast<Piki*>(*it);
             if (!p || !p->isAlive() || !inBox(p->getPosition())) continue;
-            const bool ok = p->stimulate(InteractPress(t, P.attackDamage));
+            // P2 InteractPress::actPiki -> PikiPressedState always crushes the
+            // Pikmin (interactPiki.cpp:584-604); the P1 pressed state only
+            // kills at health <= 0, so the press carries the Pikmin's health.
+            const float crush = p->mHealth > P.attackDamage ? p->mHealth : P.attackDamage;
+            const bool ok = p->stimulate(InteractPress(t, crush));
             if (ok) { ++b.rollPresses; ++b.rollPressPiki; }
             log("piki", p, ok);
         }
@@ -467,7 +471,7 @@ void becomeCarcass(BTeki* t, Binding& b) {
                 pellet->mConfig ? pellet->mConfig->mCarryMaxPikis.mValue : -1, p.x, p.z,
                 pellet->mConfig ? pellet->mConfig->mMatchingOnyonSeeds.mValue : -1,
                 pellet->mConfig ? pellet->mConfig->mNonMatchingOnyonSeeds.mValue : -1,
-                sPoses[AnimCarry].empty() ? "dead_last" : "carry");
+                sParams.carcassCarryDegenerate ? "dead_pose_fallback" : (sPoses[AnimCarry].empty() ? "dead_last" : "carry"));
     std::fflush(stdout);
 }
 
@@ -940,7 +944,12 @@ bool pc_p2_queen_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& matrix, bool
     int anim = b.fsm.animator().anim();
     float frame = b.fsm.animator().frame();
     bool last = false;
-    if (dead) {
+    if (dead && sParams.carcassCarryDegenerate && sParams.carcassDeadPose >= 0
+        && sParams.carcassDeadPose < int(sPoses[AnimDead].size())) {
+        // Staged carry poses collapse (see pikmin2_queen_stage.carcass_pose_rows).
+        anim = AnimDead;
+        frame = float(sBank.clip[AnimDead].poses[std::size_t(sParams.carcassDeadPose)]);
+    } else if (dead) {
         if (!sPoses[AnimCarry].empty()) {
             anim = AnimCarry;
             // Carry clip loops 10..29 while the carcass is hauled.
