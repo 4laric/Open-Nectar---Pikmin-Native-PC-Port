@@ -54,12 +54,54 @@ def parse_kv(items, what):
     return out
 
 
-def write_bootstrap(path, token, profile):
+def write_bootstrap(path, token, profile, flarlic=10):
     path.write_text(
         f"PIKMIN_RANDOMIZER 5\nSESSION {token}\nFINGERPRINT {token}\n"
         f"PROFILE {profile}\nCATALOG gameplay-checks-v5\nPLACEMENT identity-v1\n"
-        f"GOAL 25\nDAYS repeat-day29-v1\nCOLOR red\nSTARTING_FLARLIC 10\nEND\n"
+        f"GOAL 25\nDAYS repeat-day29-v1\nCOLOR red\nSTARTING_FLARLIC {flarlic}\nEND\n"
     )
+
+
+def load_state_script(path, token):
+    """M4a --host-state-script/--join-state-script loader (issue #885).
+
+    Text file, one schedule entry per line: `<seconds> <PIKMIN_STATE ...>`.
+    `{TOKEN}` in a line is replaced with the peer's run token. The first
+    entry must be at t=0 (the refresher's initial content); later entries
+    switch the hosted state.txt at that many wall seconds after the refresher
+    starts. Blank lines and `#` comments are ignored.
+    """
+    sched = []
+    for lineno, raw in enumerate(Path(path).read_text().splitlines(), 1):
+        ln = raw.strip()
+        if not ln or ln.startswith("#"):
+            continue
+        t, _, line = ln.partition(" ")
+        try:
+            ft = float(t)
+        except ValueError:
+            raise SystemExit(f"state script {path}:{lineno}: bad time {t!r}")
+        if ft < 0 or not line.strip().startswith("PIKMIN_STATE"):
+            raise SystemExit(
+                f"state script {path}:{lineno}: want '<seconds> PIKMIN_STATE ...'")
+        sched.append((ft, line.replace("{TOKEN}", token).strip() + "\n"))
+    sched.sort(key=lambda e: e[0])
+    if not sched or sched[0][0] != 0:
+        raise SystemExit(f"state script {path}: first entry must be at t=0")
+    return sched
+
+
+def apply_lines(path):
+    """Canonical `[netplay] randstate gen=<g> applied at frame=<F>` lines."""
+    try:
+        text = Path(path).read_text(errors="replace")
+    except OSError:
+        return []
+    out = []
+    for ln in text.splitlines():
+        if "randstate gen=" in ln and "applied at frame=" in ln:
+            out.append(ln[ln.index("randstate"):].strip())
+    return out
 
 
 def link_assets(run, assets):
@@ -108,6 +150,7 @@ SCRUB_KEYS = (
     "PIKMIN_NETPLAY_DISCONNECT_MS",
     "PIKMIN_NETPLAY_TEST_LOAD_DELAY_MS",
     "PIKMIN_NETPLAY_TEST_SCRIPT_VIA_ACCUM",
+    "PIKMIN_NETPLAY_RANDSTATE_STREAM",
 )
 
 
@@ -199,6 +242,15 @@ def main(argv=None):
     p.add_argument("--expect", choices=("sync", "refuse", "disconnect"), default="sync")
     p.add_argument("--kill-joiner-after", type=float, default=20.0,
                    help="disconnect test: seconds after start to kill the joiner")
+    p.add_argument("--flarlic", type=int, default=10,
+                   help="STARTING_FLARLIC in both bootstraps (M4a: <10 allows a "
+                        "flarlic change in a state script)")
+    p.add_argument("--host-state-script", type=Path, default=None,
+                   help="M4a: schedule file for the host state.txt refresher "
+                        "(lines: '<seconds> PIKMIN_STATE ...', {TOKEN} = run token)")
+    p.add_argument("--join-state-script", type=Path, default=None,
+                   help="M4a: schedule file for the joiner state.txt refresher "
+                        "(negative control: a deliberately different schedule)")
     a = p.parse_args(argv)
 
     out = a.out.resolve()
@@ -210,7 +262,7 @@ def main(argv=None):
     token = uuid.uuid4().hex * 2
     token_join = token
     host_boot = host_run / "bootstrap.txt"
-    write_bootstrap(host_boot, token, a.profile)
+    write_bootstrap(host_boot, token, a.profile, a.flarlic)
     join_boot = join_run / "bootstrap.txt"
     if a.bootstrap_b is not None:
         shutil.copyfile(str(a.bootstrap_b.resolve()), str(join_boot))
@@ -232,7 +284,7 @@ def main(argv=None):
                     token_join = ln[len("SESSION "):].strip()
                     break
     else:
-        write_bootstrap(join_boot, token, a.profile)
+        write_bootstrap(join_boot, token, a.profile, a.flarlic)
     if a.session_only_difference:
         # m8 positive test: same manifest, different per-run SESSION token.
         # The joiner's state.txt (below) uses token_join so local admission
@@ -309,18 +361,33 @@ def main(argv=None):
 
     stop = threading.Event()
 
-    def refresh(run, tok):
+    def default_sched(tok):
+        return [(0.0, f"PIKMIN_STATE 5 {tok} 1 0 127 0 0 END\n")]
+
+    sched_host = load_state_script(a.host_state_script, token) if a.host_state_script else default_sched(token)
+    sched_join = load_state_script(a.join_state_script, token_join) if a.join_state_script else default_sched(token_join)
+
+    t0 = time.time()
+
+    def refresh_sched(run, sched):
         while not stop.is_set():
+            el = time.time() - t0
+            cur = sched[0][1]
+            for ft, line in sched:
+                if ft <= el:
+                    cur = line
+                else:
+                    break
             pending = run / "state.tmp"
             try:
-                pending.write_text(f"PIKMIN_STATE 5 {tok} 1 0 127 0 0 END\n")
+                pending.write_text(cur)
                 os.replace(pending, run / "state.txt")
             except OSError:
                 pass
             stop.wait(0.1)
 
-    threads = [threading.Thread(target=refresh, args=(host_run, token)),
-               threading.Thread(target=refresh, args=(join_run, token_join))]
+    threads = [threading.Thread(target=refresh_sched, args=(host_run, sched_host)),
+               threading.Thread(target=refresh_sched, args=(join_run, sched_join))]
     for t in threads:
         t.start()
 
@@ -401,6 +468,10 @@ def main(argv=None):
     ref_host = grep(host_log, "handshake refused")
     ref_join = grep(join_log, "handshake refused")
     dis_host = grep(host_log, "disconnected:")
+    # M4a same-frame apply pair: the canonical randstate apply lines must be
+    # identical on both peers (same gens at the same frames).
+    app_host = apply_lines(host_log)
+    app_join = apply_lines(join_log)
 
     print(f"run_pair: expect={a.expect} ticks={a.ticks} time={secs:.1f}s")
     print(f"run_pair: host exit={rc_host} hashes={n_host} log={host_log}")
@@ -410,6 +481,11 @@ def main(argv=None):
     print(f"run_pair: desync lines host={len(des_host)} join={len(des_join)}")
     print(f"run_pair: refused lines host={len(ref_host)} join={len(ref_join)}")
     print(f"run_pair: disconnected lines host={len(dis_host)}")
+    print(f"run_pair: randstate applies host={len(app_host)} join={len(app_join)}")
+    for ln in app_host[:12]:
+        print(f"run_pair: apply host: {ln}")
+    for ln in app_join[:12]:
+        print(f"run_pair: apply join: {ln}")
 
     ok = True
     if a.expect == "sync":
@@ -418,6 +494,9 @@ def main(argv=None):
         if cmp_rc != 0:
             ok = False
         if des_host or des_join:
+            ok = False
+        if app_host != app_join:
+            print("run_pair: FAIL: randstate apply lines differ between peers")
             ok = False
         if n_host != a.ticks or n_join != a.ticks:
             print(f"run_pair: FAIL: hash lines {n_host}/{n_join} != requested {a.ticks}")

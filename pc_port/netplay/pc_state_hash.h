@@ -4,7 +4,7 @@
 // disprove, that the game is deterministic.
 //
 // Log format (PIKMIN_STATE_HASH_LOG=<file>): after every tick, one text line:
-//   <tick> <total> <navi> <piki> <teki> <item> <world> <rng>
+//   <tick> <total> <navi> <piki> <teki> <item> <world> <rng> <rand>
 // <tick> is the 1-based tick count in decimal; every other column is a 64-bit
 // hash printed as 16 lowercase hex digits.
 //
@@ -36,7 +36,13 @@
 //   rng:   pc_sim_rng_state() when the m1-det lane's weak symbol resolves,
 //     else 0. (Wall-clock rand() is NOT hashed; it is expected to diverge
 //     until the det lane lands.)
-//   total: FNV-1a 64 over the six sub-hashes in the order above.
+//   rand:  pc_randomizer_hash() when the M4a lane's weak symbol resolves
+//     (the sim-visible randomizer POD: ready, repairs, unlocks, flarlic,
+//     emperor, DeathLinks, checks, stat tiers, benefit receipts/consumption),
+//     else 0. With the netplay stream both peers apply snapshots at the
+//     same tick, so this column stays identical; with the stream disabled
+//     and divergent state.txt schedules it is the first column to differ.
+//   total: FNV-1a 64 over the seven sub-hashes in the order above.
 // A null manager (title screen, loading) contributes a sub-hash of 0: each
 // sub-hash returns literal 0 (not the FNV offset) when its managers are
 // absent. Additionally, naviMgr == nullptr is treated as "no live stage":
@@ -86,8 +92,8 @@ uint64_t pc_state_hash_tick(void);
 // compute and remember the sub-hashes every tick even when no hash log file
 // is open (the switch-off path is untouched: with capture off and no log,
 // tick_end still returns before walking any manager).
-// pc_state_hash_current() returns the last computed total, the six
-// sub-hashes (navi, piki, teki, item, world, rng) and the tick that
+// pc_state_hash_current() returns the last computed total, the seven
+// sub-hashes (navi, piki, teki, item, world, rng, rand) and the tick that
 // produced them; false when nothing has been computed yet.
 void pc_state_hash_set_netplay_capture(bool on);
-bool pc_state_hash_current(uint64_t* total, uint64_t subs[6], uint64_t* tick);
+bool pc_state_hash_current(uint64_t* total, uint64_t subs[7], uint64_t* tick);

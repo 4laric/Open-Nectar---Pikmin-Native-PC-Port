@@ -9,13 +9,13 @@ when the files have different line counts or a line fails to parse.
 
 import sys
 
-COLUMNS = ["total", "navi", "piki", "teki", "item", "world", "rng"]
+COLUMNS = ["total", "navi", "piki", "teki", "item", "world", "rng", "rand"]
 
 
 def parse_line(line, lineno, path):
     parts = line.split()
-    if len(parts) != 8:
-        return None, f"{path}:{lineno}: expected 8 columns, got {len(parts)}"
+    if len(parts) != 8 and len(parts) != 9:
+        return None, f"{path}:{lineno}: expected 8 or 9 columns, got {len(parts)}"
     tick_tok = parts[0]
     try:
         # Tick is decimal; accept 16-digit hex too (forward compatibility).
@@ -49,6 +49,13 @@ def main(argv):
 
     rows_a = [ln for ln in lines_a if ln.strip()]
     rows_b = [ln for ln in lines_b if ln.strip()]
+    if rows_a and rows_b:
+        wa = len(rows_a[0].split())
+        wb = len(rows_b[0].split())
+        if wa != wb:
+            print(f"width mismatch: {argv[1]} has {wa} columns, {argv[2]} has {wb} columns "
+                  f"(8 = legacy, 9 = with rand)")
+            return 1
     n = min(len(rows_a), len(rows_b))
     for i in range(n):
         pa, err = parse_line(rows_a[i].strip(), i + 1, argv[1])

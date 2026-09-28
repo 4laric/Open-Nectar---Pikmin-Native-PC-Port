@@ -29,10 +29,14 @@
 __attribute__((weak)) bool pc_netplay_deterministic(void);
 __attribute__((weak)) unsigned pc_sim_rng_state(void);
 __attribute__((weak)) int pc_sim_rand(void);
+// Netplay M4 lane A (issue #885): canonical hash of the sim-visible
+// randomizer state. Null when the randomizer TU is not linked.
+__attribute__((weak)) uint64_t pc_randomizer_hash(void);
 #else
 bool pc_netplay_deterministic(void);
 unsigned pc_sim_rng_state(void);
 int pc_sim_rand(void);
+uint64_t pc_randomizer_hash(void);
 #endif
 
 namespace {
@@ -95,7 +99,7 @@ const char* sArgvExit   = nullptr;
 bool sNetplayCapture    = false;
 bool sNetplayHaveHash   = false;
 uint64_t sLastTotal     = 0;
-uint64_t sLastSubs[6]   = { 0, 0, 0, 0, 0, 0 };
+uint64_t sLastSubs[7]   = { 0, 0, 0, 0, 0, 0, 0 };
 uint64_t sLastTick      = 0;
 
 uint64_t parseU64(const char* text, bool& ok)
@@ -303,6 +307,19 @@ uint64_t hashRng(void)
 	return 0;
 }
 
+uint64_t hashRand(void)
+{
+	// M4a: 0 when the randomizer TU is not linked or the randomizer is off
+	// (pc_randomizer_hash returns 0 then); identical on both peers either
+	// way, and divergent exactly when the sim-visible randomizer state is.
+#if defined(__GNUC__)
+	if (pc_randomizer_hash != nullptr) return (uint64_t)pc_randomizer_hash();
+#else
+	if (pc_randomizer_hash != nullptr) return (uint64_t)pc_randomizer_hash();
+#endif
+	return 0;
+}
+
 void initOnce(void)
 {
 	sInitialised = true;
@@ -361,12 +378,12 @@ uint64_t pc_state_hash_tick(void) { return sTick; }
 
 void pc_state_hash_set_netplay_capture(bool on) { sNetplayCapture = on; }
 
-bool pc_state_hash_current(uint64_t* total, uint64_t subs[6], uint64_t* tick)
+bool pc_state_hash_current(uint64_t* total, uint64_t subs[7], uint64_t* tick)
 {
 	if (!sNetplayHaveHash) return false;
 	if (total != nullptr) *total = sLastTotal;
 	if (subs != nullptr) {
-		for (int i = 0; i < 6; ++i) subs[i] = sLastSubs[i];
+		for (int i = 0; i < 7; ++i) subs[i] = sLastSubs[i];
 	}
 	if (tick != nullptr) *tick = sLastTick;
 	return true;
@@ -406,6 +423,7 @@ void pc_state_hash_tick_end(void)
 	uint64_t item  = 0;
 	uint64_t world = 0;
 	uint64_t rng   = 0;
+	uint64_t rand  = 0;
 	uint64_t total = 0;
 	// M3 lockstep: hash every tick when capturing, even with no log file.
 	if (sLogActive || sNetplayCapture) {
@@ -415,6 +433,7 @@ void pc_state_hash_tick_end(void)
 		item  = hashItem();
 		world = hashWorld();
 		rng   = hashRng();
+		rand  = hashRand();
 		total = kFnvOffset;
 		mixU64(total, navi);
 		mixU64(total, piki);
@@ -422,6 +441,7 @@ void pc_state_hash_tick_end(void)
 		mixU64(total, item);
 		mixU64(total, world);
 		mixU64(total, rng);
+		mixU64(total, rand);
 
 		sLastTotal    = total;
 		sLastSubs[0]  = navi;
@@ -430,14 +450,15 @@ void pc_state_hash_tick_end(void)
 		sLastSubs[3]  = item;
 		sLastSubs[4]  = world;
 		sLastSubs[5]  = rng;
+		sLastSubs[6]  = rand;
 		sLastTick     = sTick;
 		sNetplayHaveHash = true;
 
 		if (sLogActive) {
-			std::fprintf(sLogFile, "%llu %016llx %016llx %016llx %016llx %016llx %016llx %016llx\n",
+			std::fprintf(sLogFile, "%llu %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx\n",
 			             (unsigned long long)sTick, (unsigned long long)total, (unsigned long long)navi,
 			             (unsigned long long)piki, (unsigned long long)teki, (unsigned long long)item,
-			             (unsigned long long)world, (unsigned long long)rng);
+			             (unsigned long long)world, (unsigned long long)rng, (unsigned long long)rand);
 			if (sTick % 300 == 0) std::fflush(sLogFile);
 		}
 	}
