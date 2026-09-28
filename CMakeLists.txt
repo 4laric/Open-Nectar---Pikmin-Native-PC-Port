@@ -2022,6 +2022,15 @@ add_executable(pc_randomizer_outbox_test pc_port/pc_randomizer_outbox_test.cpp p
 target_include_directories(pc_randomizer_outbox_test PRIVATE pc_port)
 target_compile_options(pc_randomizer_outbox_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME pc_randomizer_outbox_test COMMAND pc_randomizer_outbox_test)
+# B1 fix round 1: pc_randomizer.cpp's outbox-active host journals and client
+# mirror (exact bytes) against stub session hooks, one process per role.
+add_executable(pc_randomizer_outbox_io_test pc_port/pc_randomizer_outbox_io_test.cpp pc_port/pc_randomizer.cpp pc_port/netplay/pc_netplay_randstate.cpp pc_port/pc_randomizer_outbox.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp)
+target_include_directories(pc_randomizer_outbox_io_test PRIVATE pc_port)
+target_compile_options(pc_randomizer_outbox_io_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME pc_randomizer_outbox_io_host_test COMMAND pc_randomizer_outbox_io_test host)
+add_test(NAME pc_randomizer_outbox_io_host_noledger_test COMMAND pc_randomizer_outbox_io_test host-noledger)
+add_test(NAME pc_randomizer_outbox_io_client_test COMMAND pc_randomizer_outbox_io_test client)
+add_test(NAME pc_randomizer_outbox_io_client_unknown_test COMMAND pc_randomizer_outbox_io_test client-unknown)
 
 # Only the isolated diagnostic build includes scripted stock/death fixtures.
 option(PIKMIN_RANDOMIZER_TEST_HOOKS "Enable standalone scripted gameplay test fixtures" OFF)
