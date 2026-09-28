@@ -213,13 +213,13 @@ def sites(path, exe, top):
         print("| category | module | function | count | bytes |")
         print("|---|---|---|---|---|")
         for cat, mod, rva, count, nbytes in entries[:top]:
-            fn = sym.name(rva) if mod.lower().endswith("nectar.exe") else f"+0x{rva:x}"
+            fn = sym.name(rva) if mod.lower().endswith(".exe") else f"+0x{rva:x}"
             print(f"| {cat} | {mod} | `{fn}` | {count} | {nbytes} |")
         # aggregate by category x function for the off-region table
         if label == "off":
             agg = {}
             for cat, mod, rva, count, nbytes in entries:
-                fn = sym.name(rva) if mod.lower().endswith("nectar.exe") else mod
+                fn = sym.name(rva) if mod.lower().endswith(".exe") else mod
                 key = (cat, fn)
                 c, b = agg.get(key, (0, 0))
                 agg[key] = (c + count, b + nbytes)
