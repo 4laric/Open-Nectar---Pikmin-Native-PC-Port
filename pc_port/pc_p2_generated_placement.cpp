@@ -153,7 +153,13 @@ bool pc_p2_generated_placement_bind(BTeki* actor, unsigned sourceId, unsigned se
         return false;
     case 32: // Bumbling Snitchbug (Demon), Sarai host species profile (#215).
         // The newborn actor has no generator yet (campaign token 0), so the
-        // birth-time claim fails closed and the setup sweep binds it.
+        // birth-time claim defers and the setup sweep binds it.
+        if (!actor->mGenerator) {
+            std::printf("P2_GENERATED_PLACEMENT source_id=32 target=%u bound=0 reason=deferred_to_setup_sweep\n",
+                        seedTargetUid);
+            std::fflush(stdout);
+            return false;
+        }
         if (pc_p2_sarai_manager_bind_demon(actor, generatorId, seedTargetUid)) {
             std::printf("P2_GENERATED_PLACEMENT source_id=32 target=%u bound=1\n", seedTargetUid);
             std::fflush(stdout);
