@@ -145,6 +145,45 @@ int main()
 	check(aliased.bytes() == aliased.owned.data(),
 	      "bytes() must read the owned copy, never the alias, when populated");
 
+	// 5. Fix3 R2-5: the deferred tex entry carries the game's original source
+	// pointer for the texture signature. The take must preserve it, and it
+	// must be distinct from bytes() (the owned copy, which dies with the
+	// taken local): the drain stores sigImage, never bytes(), in the signature.
+	const uintptr_t k5 = 0x5005;
+	static const uint8_t gameBuf[4] = { 9, 8, 7, 6 };
+	{
+		PcDeferredTex def = make_tex(0, 0);
+		def.owned.assign(gameBuf, gameBuf + sizeof(gameBuf));
+		def.sigImage = static_cast<const void*>(gameBuf);
+		store.record_tex(k5, std::move(def));
+	}
+	PcDeferredTex taken5;
+	check(store.take_tex(k5, &taken5), "take must succeed for the sigImage entry");
+	check(taken5.sigImage == static_cast<const void*>(gameBuf),
+	      "take must preserve the original source pointer (R2-5)");
+	check(static_cast<const void*>(taken5.bytes()) != taken5.sigImage,
+	      "the owned copy must not alias the game's source pointer (R2-5)");
+	{
+		bool match = taken5.owned.size() == sizeof(gameBuf);
+		for (size_t i = 0; match && i < sizeof(gameBuf); ++i) match = taken5.bytes()[i] == gameBuf[i];
+		check(match, "sigImage entry bytes must still match after the take");
+	}
+
+	// 6. Fix3 R2-6: the CI "deferred" mark survives record and lookup, and
+	// defaults to false (a presentation-side CI init is not a deferred one).
+	const uintptr_t k6a = 0x600a, k6b = 0x600b;
+	{
+		PcDeferredCi ci;
+		ci.deferred = true;
+		store.record_ci(k6a, std::move(ci));
+		store.record_ci(k6b, PcDeferredCi());
+	}
+	check(store.find_ci(k6a) != nullptr && store.find_ci(k6a)->deferred,
+	      "a deferred CI record must keep its mark");
+	check(store.find_ci(k6b) != nullptr && !store.find_ci(k6b)->deferred,
+	      "a presentation-side CI record must not be marked deferred");
+	store.clear();
+
 	std::printf("PcGfxDeferred: %s\n", failures ? "FAILED" : "all tests passed");
 	return failures ? 1 : 0;
 }

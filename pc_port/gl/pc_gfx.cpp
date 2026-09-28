@@ -1285,10 +1285,14 @@ static std::unordered_map<u32, PcTlut> sLoadedTluts;
 static PcDeferredTexStore sNullDeferred;
 // Fix2 m3 runtime trigger: PIKMIN_NETPLAY_TEST_FORCE_AUTH_TEXINIT=<n> routes
 // the next n texture inits (across the rgba / palettised / CI entry points)
-// through the deferred record path even outside the authoritative pass, so a
-// frame-dump run exercises the lazy-upload path at runtime. The re-upload
-// that drains a taken entry runs under sForceAuthDrain, so it always takes
-// the real GL path instead of re-deferring (which would never upload).
+// through the deferred record path. Deviation (fix3 R2-6): the knob records
+// OUTSIDE the authoritative pass, in the normal presentation-side init, so a
+// frame-dump run proves record, take and lazy upload, but not the auth-only
+// interplay (load suppressed until presentation, doomed names deleted at
+// present). The log line names the path ("(forced)" vs "(auth)") and the
+// counts are printed at exit. The re-upload that drains a taken entry runs
+// under sForceAuthDrain, so it always takes the real GL path instead of
+// re-deferring (which would never upload).
 static bool sForceAuthDrain = false;
 static long sForceAuthRemaining = -1;
 static bool pc_gfx_force_auth_texinit_consume()
@@ -1306,14 +1310,43 @@ static bool pc_gfx_force_auth_texinit_consume()
     --sForceAuthRemaining;
     return true;
 }
-static bool sNullDeferredLogged = false;
-static void pc_gfx_note_deferred_init()
+// Fix3 R2-6: how many inits took the deferred path, and how many of those
+// were uploaded on first presentation use. Printed once at exit, and only
+// when at least one init was deferred, so runs that never defer log nothing
+// new.
+static long sDeferredAuthInits = 0;
+static long sDeferredForcedInits = 0;
+static long sDeferredDrains = 0;
+static void pc_gfx_log_deferred_counts()
 {
-	if (!sNullDeferredLogged) {
-		sNullDeferredLogged = true;
-		printf("[netplay] deferred texture init in authoritative pass (upload on first presentation use)\n");
-		fflush(stdout);
-	}
+    printf("[netplay] deferred texture inits: auth=%ld forced=%ld drained=%ld\n",
+           sDeferredAuthInits, sDeferredForcedInits, sDeferredDrains);
+    fflush(stdout);
+}
+static void pc_gfx_note_deferred_init(bool forced)
+{
+    static bool loggedAuth = false;
+    static bool loggedForced = false;
+    if (sDeferredAuthInits == 0 && sDeferredForcedInits == 0) {
+        std::atexit(pc_gfx_log_deferred_counts);
+    }
+    if (forced) {
+        ++sDeferredForcedInits;
+        if (!loggedForced) {
+            loggedForced = true;
+            printf("[netplay] deferred texture init (forced): test knob, recorded outside "
+                   "the authoritative pass (upload on first presentation use)\n");
+            fflush(stdout);
+        }
+    } else {
+        ++sDeferredAuthInits;
+        if (!loggedAuth) {
+            loggedAuth = true;
+            printf("[netplay] deferred texture init (auth): recorded in the authoritative "
+                   "pass (upload on first presentation use)\n");
+            fflush(stdout);
+        }
+    }
 }
 // Texturas con reemplazo HD del pack (PLAN_TEXTURAS_HD fase 1): texId -> si
 // trae cadena de mips propia. Sobre estas hay que saltarse glGenerateMipmap:
@@ -1329,8 +1362,15 @@ static void null_auth_invalidate(uintptr_t key)
 {
     auto cached = sTextureCache.find(key);
     if (cached != sTextureCache.end()) {
-        sNullDoomedTextures.push_back(cached->second);
-        sExternalMipChain.erase(cached->second);
+        const GLuint doomed = cached->second;
+        sNullDoomedTextures.push_back(doomed);
+        // Fix3 R2-7: clear the bind cache for the retired GL name, the same
+        // way the release path does, so a later reuse of the name by GL
+        // cannot be skipped as a redundant bind.
+        for (int unit = 0; unit < 8; ++unit) {
+            if (sBoundTextures[unit] == doomed) sBoundTextures[unit] = 0;
+        }
+        sExternalMipChain.erase(doomed);
         sTextureCache.erase(cached);
         auto bytesIt = sTextureBytes.find(key);
         if (bytesIt != sTextureBytes.end()) {
@@ -5650,7 +5690,8 @@ void pc_gfx_init_tex_obj_rgba(GXTexObj* obj, void* rgba, u16 width, u16 height, 
     // entry so a re-init during auth never leaves the old image live.
     if (!obj || !rgba || width == 0 || height == 0) return;
     const bool inAuth = pc_gfx_null_skip();
-    if (inAuth || pc_gfx_force_auth_texinit_consume()) {
+    const bool forced = !inAuth && pc_gfx_force_auth_texinit_consume();
+    if (inAuth || forced) {
         const uintptr_t nullKey = reinterpret_cast<uintptr_t>(obj);
         // RGBA always retains: the movie hands a new picture each frame in
         // the same buffer, so "same pointer, same size" must still re-upload
@@ -5665,7 +5706,7 @@ void pc_gfx_init_tex_obj_rgba(GXTexObj* obj, void* rgba, u16 width, u16 height, 
         const uint8_t* src = static_cast<const uint8_t*>(rgba);
         def.rgba.assign(src, src + bytes);
         sNullDeferred.record_rgba(nullKey, std::move(def));
-        pc_gfx_note_deferred_init();
+        pc_gfx_note_deferred_init(forced);
         return;
     }
 
@@ -5704,7 +5745,8 @@ void pc_gfx_init_tex_obj(GXTexObj* obj, void* imagePtr, u16 width, u16 height, G
     // init parameters in auth; erase any stale cache entry.
     if (!obj || !imagePtr || width == 0 || height == 0) return;
     const bool inAuth = pc_gfx_null_skip();
-    if (inAuth || pc_gfx_force_auth_texinit_consume()) {
+    const bool forced = !inAuth && pc_gfx_force_auth_texinit_consume();
+    if (inAuth || forced) {
         const uintptr_t nullKey = reinterpret_cast<uintptr_t>(obj);
         // m4: skip the churn when nothing changed (matches the non-auth
         // signature early-out below): same params over a live cache entry
@@ -5729,6 +5771,9 @@ void pc_gfx_init_tex_obj(GXTexObj* obj, void* imagePtr, u16 width, u16 height, G
         // a heap buffer that a section/movie reset frees before presentation.
         // Fix2 M2: the owned copy is read through bytes(); alias stays null
         // whenever owned is populated, so no raw member can dangle.
+        // Fix3 R2-5: keep the game's original source pointer; the drain
+        // puts it (not the owned copy's address) into the signature.
+        def.sigImage = imagePtr;
         const size_t rawBytes = gx_base_level_size(width, height, static_cast<u32>(format));
         if (rawBytes > 0) {
             const uint8_t* src = static_cast<const uint8_t*>(imagePtr);
@@ -5737,7 +5782,7 @@ void pc_gfx_init_tex_obj(GXTexObj* obj, void* imagePtr, u16 width, u16 height, G
             def.alias = static_cast<const uint8_t*>(imagePtr); // unknown layout: cannot copy
         }
         sNullDeferred.record_tex(nullKey, std::move(def));
-        pc_gfx_note_deferred_init();
+        pc_gfx_note_deferred_init(forced);
         return;
     }
 
@@ -6089,7 +6134,8 @@ void pc_gfx_init_tex_obj_ci(GXTexObj* obj, void* imagePtr, u16 width, u16 height
     // signature is recorded, so presentation does the full upload.
     if (!obj || !imagePtr || width == 0 || height == 0) return;
     const bool inAuth = pc_gfx_null_skip();
-    if (inAuth || pc_gfx_force_auth_texinit_consume()) {
+    const bool forced = !inAuth && pc_gfx_force_auth_texinit_consume();
+    if (inAuth || forced) {
         const uintptr_t nullKey = reinterpret_cast<uintptr_t>(obj);
         // M2/m4: mutually exclusive per key (a stale CI entry used to shadow
         // a newer non-CI deferred init for a reused address), signature
@@ -6111,6 +6157,7 @@ void pc_gfx_init_tex_obj_ci(GXTexObj* obj, void* imagePtr, u16 width, u16 height
         nullCi.wrapT = static_cast<int32_t>(wrapT);
         nullCi.tlutName = tlutName;
         nullCi.mipmap = (mipmap != GX_FALSE);
+        nullCi.deferred = true; // counted as a drain when presentation uploads it
         const size_t rawBytes = gx_base_level_size(width, height, static_cast<u32>(format));
         if (rawBytes > 0) {
             const uint8_t* src = static_cast<const uint8_t*>(imagePtr);
@@ -6120,7 +6167,7 @@ void pc_gfx_init_tex_obj_ci(GXTexObj* obj, void* imagePtr, u16 width, u16 height
             nullCi.alias = static_cast<const uint8_t*>(imagePtr);
         }
         sNullDeferred.record_ci(nullKey, std::move(nullCi));
-        pc_gfx_note_deferred_init();
+        pc_gfx_note_deferred_init(forced);
         return;
     }
     const uintptr_t key = reinterpret_cast<uintptr_t>(obj);
@@ -6176,7 +6223,12 @@ void pc_gfx_load_tex_obj(GXTexObj* obj, GXTexMapID id) {
     auto it = sTextureCache.find(key);
     if (it == sTextureCache.end()) {
         const PcDeferredCi* ci = sNullDeferred.find_ci(key);
-        if (ci != nullptr && upload_ci_texture(obj, *ci)) it = sTextureCache.find(key);
+        if (ci != nullptr && upload_ci_texture(obj, *ci)) {
+            // A non-auth CI init whose palette was not loaded yet also
+            // uploads here; only deferred records count as drains (R2-6).
+            if (ci->deferred) ++sDeferredDrains;
+            it = sTextureCache.find(key);
+        }
     }
     // Polish item 6: authoritative-pass deferred inits upload lazily here,
     // on first presentation use. The stale cache entry was already erased
@@ -6191,6 +6243,7 @@ void pc_gfx_load_tex_obj(GXTexObj* obj, GXTexMapID id) {
                                      (GXTexWrapMode)copy.wrapS, (GXTexWrapMode)copy.wrapT);
             sForceAuthDrain = false;
             it = sTextureCache.find(key);
+            if (it != sTextureCache.end()) ++sDeferredDrains;
         }
     }
     if (it == sTextureCache.end()) {
@@ -6202,7 +6255,22 @@ void pc_gfx_load_tex_obj(GXTexObj* obj, GXTexMapID id) {
                                 (GXTexWrapMode)taken.wrapT,
                                 taken.mipmap ? GX_TRUE : GX_FALSE);
             sForceAuthDrain = false;
+            // Fix3 R2-5: the upload decoded from taken.bytes(), which dies at
+            // the end of this block, so init stored that address in the
+            // signature. Put the game's original source pointer back: the
+            // no-change early-out then compares the live game pointer, and no
+            // signature points at freed memory. An entry without one (never
+            // produced by the record path) drops the signature instead.
+            auto sigIt = sTextureSignatures.find(key);
+            if (sigIt != sTextureSignatures.end()) {
+                if (taken.sigImage != nullptr) {
+                    sigIt->second.image = taken.sigImage;
+                } else {
+                    sTextureSignatures.erase(sigIt);
+                }
+            }
             it = sTextureCache.find(key);
+            if (it != sTextureCache.end()) ++sDeferredDrains;
         }
     }
     if (it != sTextureCache.end()) {

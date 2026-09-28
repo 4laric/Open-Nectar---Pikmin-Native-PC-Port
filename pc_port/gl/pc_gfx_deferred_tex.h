@@ -36,6 +36,12 @@ struct PcDeferredTex {
 	const uint8_t* alias = nullptr;
 	// Owned copy of the raw GX bytes; wins over alias.
 	std::vector<uint8_t> owned;
+	// Fix3 R2-5: the game's original source pointer, for signature equality
+	// only and never dereferenced. The drain uploads from bytes() and then
+	// stores this pointer in the texture signature, so the no-change
+	// early-out compares the live game pointer and no signature points at
+	// the freed owned copy.
+	const void* sigImage = nullptr;
 	PcDeferredTex() = default;
 	PcDeferredTex(const PcDeferredTex&) = delete;
 	PcDeferredTex& operator=(const PcDeferredTex&) = delete;
@@ -53,6 +59,10 @@ struct PcDeferredCi {
 	int32_t wrapT = 0;
 	uint32_t tlutName = 0;
 	bool mipmap = false;
+	// Fix3 R2-6: recorded by a deferred (auth or forced) init, as opposed to
+	// a presentation-side CI init waiting for its palette. Only deferred
+	// entries count as drains when presentation uploads them.
+	bool deferred = false;
 	// Owned copy of the raw GX bytes; wins over alias.
 	std::vector<uint8_t> owned;
 	PcDeferredCi() = default;
