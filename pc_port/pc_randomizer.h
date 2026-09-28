@@ -1,5 +1,6 @@
 #pragma once
 #include "netplay/pc_netplay_randstate.h"
+#include <cstddef>
 #include <cstdint>
 enum PcPikminStat { PC_PIKI_DAMAGE, PC_PIKI_MOVEMENT, PC_PIKI_ATTACK_RATE };
 bool pc_randomizer_color_stats();
@@ -22,7 +23,34 @@ bool pc_randomizer_get_net_state(pc_randstate::PcRandState* out);
 // Fix round 1 (M5): re-read state.txt on session activation and publish when
 // the content is new or nothing was ever published. Host + stream only;
 // no-op otherwise (client never reads the file after boot).
-void pc_randomizer_force_net_publish();
+// M4 lane B1: returns false only on the stream host when this forced poll
+// could not read and parse state.txt (the session then HOLDs from its first
+// input); true otherwise. Also reads the runner's session.json ledger.
+bool pc_randomizer_force_net_publish();
+// ---- Netplay M4 lane B1 (issue #885) ----
+// Confirmed-frame outbox flush: the host writes the queued external writes
+// (checks.txt, benefits-used.txt, emperor.txt, deaths.txt, the P2 delivery
+// ledger) with their historical format and durability; the client writes
+// mirror-events.txt lines instead. Called once per Advance by the session
+// and by the B2 save barrier before it writes. No-op outside outbox mode.
+void pc_randomizer_outbox_flush(uint32_t frame);
+// Host I/O side link liveness for the synchronized HOLD: state.txt readable,
+// parsed, ready=1 and rewritten within 3 s. Always true in launcher sessions
+// and when the randomizer is disabled.
+bool pc_randomizer_link_live();
+// Host RESUME snapshot: fresh state.txt read with a new generation. False
+// when state.txt cannot be read right now (retry later).
+bool pc_randomizer_resume_snapshot(pc_randstate::PcRandState* out);
+// Client: one kBulkMirrorLedger payload (RECEIVED lines, deathsBase).
+void pc_randomizer_mirror_ledger_receive(const uint8_t* data, size_t len, uint32_t frame);
+// B2 writer API for the client mirror (no-op on the host / outside netplay).
+// shaHex is the lowercase hex SHA-256 of the checkpoint (64 characters).
+void pc_randomizer_mirror_save_result(uint32_t frame, unsigned long long gen, const char* shaHex);
+void pc_randomizer_mirror_save_fail(uint32_t frame, unsigned long long gen);
+#if PIKI_NETPLAY_BUILD
+// TEST-ONLY (netplay builds): PIKMIN_NETPLAY_TEST_DEATHLINK_AS_ORDINARY=1.
+bool pc_randomizer_test_deathlink_as_ordinary();
+#endif
 // Canonical 64-bit hash of the sim-visible randomizer state for the M1 state
 // hash `rand` column. 0 when disabled.
 uint64_t pc_randomizer_hash();

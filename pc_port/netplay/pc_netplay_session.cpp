@@ -129,12 +129,26 @@ bool pc_state_hash_current(uint64_t* total, uint64_t subs[7], uint64_t* tick);
 __attribute__((weak)) bool pc_randomizer_apply_net_state(const pc_randstate::PcRandState& st);
 __attribute__((weak)) bool pc_randomizer_get_net_state(pc_randstate::PcRandState* out);
 __attribute__((weak)) bool pc_randomizer_enabled(void);
-__attribute__((weak)) void pc_randomizer_force_net_publish(void);
+__attribute__((weak)) bool pc_randomizer_force_net_publish(void);
+// M4 lane B1 (issue #885): outbox flush, host link liveness, RESUME
+// snapshot, client mirror ledger and the sim-affecting TEST knob. Same weak
+// pattern: strong in pc_randomizer.cpp, null only in engine-free harnesses.
+__attribute__((weak)) void pc_randomizer_outbox_flush(uint32_t frame);
+__attribute__((weak)) bool pc_randomizer_link_live(void);
+__attribute__((weak)) bool pc_randomizer_resume_snapshot(pc_randstate::PcRandState* out);
+__attribute__((weak)) void pc_randomizer_mirror_ledger_receive(const uint8_t* data, size_t len,
+                                                               uint32_t frame);
+__attribute__((weak)) bool pc_randomizer_test_deathlink_as_ordinary(void);
 #else
 bool pc_randomizer_apply_net_state(const pc_randstate::PcRandState& st);
 bool pc_randomizer_get_net_state(pc_randstate::PcRandState* out);
 bool pc_randomizer_enabled(void);
-void pc_randomizer_force_net_publish(void);
+bool pc_randomizer_force_net_publish(void);
+void pc_randomizer_outbox_flush(uint32_t frame);
+bool pc_randomizer_link_live(void);
+bool pc_randomizer_resume_snapshot(pc_randstate::PcRandState* out);
+void pc_randomizer_mirror_ledger_receive(const uint8_t* data, size_t len, uint32_t frame);
+bool pc_randomizer_test_deathlink_as_ordinary(void);
 #endif
 // Runs the registered pre-sim yaw capture hook now (M2c hook), without the
 // record/replay logic of pc_input_log_tick(). Defined in pc_input_log.cpp.
@@ -533,6 +547,72 @@ uint8_t sRandQueuedWire[pc_randstate::kStateBytes] = {};
 bool sRandHaveQueued = false;
 pc_netplay_bulk::BulkChannel sBulk; // M4a bulk 0x03 endpoint (lane B queues)
 
+// ---- M4 lane B1 synchronized HOLD/RESUME + mirror ledger (issue #885) ----
+//
+// The host's randomizer link (pc_randomizer_link_live: state.txt readable,
+// ready=1, rewritten within 3 s; always live in launcher sessions) going
+// down makes the host set kFlagsHold on exactly one submitted input. That
+// input's frame H is the hold frame on both peers (p0 is the host input on
+// both). Each peer keeps submitting until its next local input would land
+// on frame H+kHoldLeadFrames (the frame of a submit is its index plus the
+// local delay: GekkoNet InputBuffer::AddLocalInput stores the input of
+// current frame c at c + delay, and the sSubmitted == sAdvances gate makes
+// c == sSubmitted), so both peers advance through H+11 and then produce no
+// Advance. While held every turn still answers handshakes, pumps bulk,
+// updates GekkoNet (its 500 ms NetworkHealth packets keep both disconnect
+// timers fed) and handles session events. When the link is live again and
+// the freeze point is reached, the host sends bulk kBulkRandFull
+// {u32 resumeFrame = H+12, 64-byte snapshot with a fresh gen} and resumes
+// submitting; the client resumes submitting only once it holds that
+// snapshot, so frame H+12 cannot advance anywhere before it. Both apply it
+// at the tick start of H+12 (before inject_input), drop any pending
+// fragment generation <= gen and mark gen applied. kHoldLeadFrames must
+// exceed the maximum local delay (8): when a peer learns H (Advance H) it
+// has submitted at most frame H + delay <= H+8, so no input past H+11 can
+// exist yet on either peer.
+constexpr uint32_t kHoldLeadFrames = 12;
+bool sHoldAtFirstInput = false; // host: state.txt missing at session start
+bool sHoldRequested = false;    // host: flagged input submitted, Advance H not yet seen
+uint64_t sHoldExpectFrame = 0;  // host: submit index + delay of the flagged input
+bool sHolding = false;          // both: Advance H seen, RESUME not yet applied
+uint32_t sHoldFrame = 0;
+double sHoldStartMs = 0;
+bool sHeldLogged = false;
+bool sResumeHave = false;       // host: RESUME sent; client: RESUME received
+uint32_t sResumeFrame = 0;
+pc_randstate::PcRandState sResumeState;
+bool sResumePrepared = false;   // host: snapshot built, bulk queue was full
+uint8_t sResumePayload[4 + pc_randstate::kStateBytes] = {};
+double sHoldMs = 0;             // wall time frozen (held at -> resume), all holds
+double sHoldBeatMs = 0;         // last frozen heartbeat log
+double sFrozenStartMs = 0;      // wall time of this hold's "held at"
+uint64_t sHoldTurns = 0;
+uint64_t sHoldsDone = 0;
+uint32_t sLastAdvanceFrame = 0; // frame of the last completed Advance
+// Host: kBulkMirrorLedger payloads waiting for room in the 4-deep bulk queue.
+std::vector<std::vector<uint8_t>> sLedgerOut;
+constexpr size_t kLedgerOutMax = 256;
+
+void hold_reset()
+{
+	sHoldAtFirstInput = false;
+	sHoldRequested = false;
+	sHoldExpectFrame = 0;
+	sHolding = false;
+	sHoldFrame = 0;
+	sHoldStartMs = 0;
+	sHeldLogged = false;
+	sResumeHave = false;
+	sResumeFrame = 0;
+	sResumeState = pc_randstate::PcRandState();
+	sResumePrepared = false;
+	sHoldMs = 0;
+	sHoldBeatMs = 0;
+	sHoldTurns = 0;
+	sHoldsDone = 0;
+	sLastAdvanceFrame = 0;
+}
+
 bool randstate_env_on()
 {
 	const char* e = std::getenv("PIKMIN_NETPLAY_RANDSTATE_STREAM");
@@ -570,6 +650,35 @@ void randstate_embed_on_submit(PcNetplayInput& local)
 void randstate_apply_before_tick(int frame)
 {
 	if (!randstate_stream_on()) return;
+	// B1 RESUME: the bulk snapshot applies at the tick start of H+12 on
+	// both peers, before any fragment generation it supersedes.
+	if (sHolding && (uint32_t)frame == sHoldFrame + kHoldLeadFrames) {
+		if (!sResumeHave || sResumeFrame != (uint32_t)frame) {
+			printf("[netplay] resume: frame=%d reached without its RESUME snapshot (have=%d for=%u)\n",
+			       frame, (int)sResumeHave, sResumeFrame);
+			fflush(stdout);
+			std::abort();
+		}
+		const uint32_t gen = sResumeState.gen;
+		const bool dropped = sRandReasm.discard_pending_upto(gen);
+		bool ok = false;
+		if (pc_randomizer_apply_net_state != nullptr) ok = pc_randomizer_apply_net_state(sResumeState);
+		sRandReasm.mark_applied(gen);
+		if (ok) printf("[netplay] randstate gen=%u applied at frame=%d\n", gen, frame);
+		else printf("[netplay] randstate gen=%u dropped: apply rejected at frame=%d\n", gen, frame);
+		if (dropped) printf("[netplay] resume superseded a pending fragment generation\n");
+		const double resumeMs = now_ms();
+		// held_ms: wall time from this peer's "hold at" (Advance H) to the
+		// RESUME apply. The frozen part (held at -> resume) is exact wall
+		// time and is what the stall / tps / slot-loss figures exclude.
+		if (sHeldLogged) sHoldMs += resumeMs - sFrozenStartMs;
+		printf("[netplay] resume at frame=%d gen=%u held_ms=%.0f\n", frame, gen, resumeMs - sHoldStartMs);
+		fflush(stdout);
+		sHolding = false;
+		sHeldLogged = false;
+		sResumeHave = false;
+		++sHoldsDone;
+	}
 	if (!sRandReasm.has_pending()) return;
 	if (frame < (int)sRandReasm.pending_frame()) return; // not yet (unreachable; defensive)
 	pc_randstate::PcRandState st;
@@ -617,6 +726,152 @@ bool randstate_gate_neutral()
 	return sRandReasm.applied_gen() == 0;
 }
 
+// B1: Advance-start hold detection (both peers, after the tick-start apply
+// so a RESUME at H+12 is complete before a later flag is looked at).
+void hold_on_advance_begin(const PcNetplayInput& hostInput, int frame)
+{
+	if (!randstate_stream_on()) return;
+	if ((hostInput.flags & pc_netplay_gekko::kFlagsHold) == 0) return;
+	if (sHolding) {
+		printf("[netplay] hold flag at frame=%d ignored: hold in progress\n", frame);
+		fflush(stdout);
+		return;
+	}
+	sHolding = true;
+	sHoldFrame = (uint32_t)frame;
+	sHoldStartMs = now_ms();
+	sHeldLogged = false;
+	printf("[netplay] hold at frame=%d freeze-after=%u\n", frame, sHoldFrame + kHoldLeadFrames - 1);
+	if (sCfg.isHost) {
+		// Verify the frame arithmetic against GekkoNet: the flagged input
+		// was submit index k with local delay d, so it must be frame k + d.
+		printf("[netplay] hold frame check: host flagged submit frame=%llu, gekko frame=%d (%s)\n",
+		       (unsigned long long)sHoldExpectFrame, frame,
+		       sHoldExpectFrame == (uint64_t)frame ? "match" : "MISMATCH");
+		sHoldRequested = false;
+	}
+	fflush(stdout);
+}
+
+// B1: after the Advance for `frame` completed (tick ran, outbox flushed).
+void hold_after_advance(int frame)
+{
+	if (sHolding && !sHeldLogged && (uint32_t)frame == sHoldFrame + kHoldLeadFrames - 1) {
+		sHeldLogged = true;
+		sFrozenStartMs = now_ms();
+		printf("[netplay] held at frame=%d\n", frame);
+		fflush(stdout);
+	}
+}
+
+// B1: frozen = no further Advance can happen until RESUME (H+11 is done).
+bool hold_frozen() { return sHolding && sAdvances >= (uint64_t)sHoldFrame + kHoldLeadFrames; }
+
+// B1 submit gate: keep submitting while the next local input lands on a
+// frame <= H+11; then stop until the RESUME snapshot is in hand.
+bool hold_blocks_submit()
+{
+	if (!sHolding) return false;
+	const uint64_t next = sSubmitted + sCfg.localDelay;
+	if (next < (uint64_t)sHoldFrame + kHoldLeadFrames) return false;
+	return !sResumeHave;
+}
+
+// B1 RESUME catch-up. A frozen peer submitted through frame H+11 and then
+// advanced to current frame H+12, so sSubmitted + delay == sAdvances: its
+// next ordinary submit would land on H+12+delay, and GekkoNet's InputBuffer
+// drops any non-sequential local input, so frame H+12 could never get this
+// peer's input (a deadlock). The catch-up submit sets the local delay to 0,
+// adds the input (it lands on the current frame H+12), then restores the
+// delay: InputBuffer::SetDelay, growing from 0, appends `delay` copies of
+// that input on H+13..H+12+delay. Those copies are ordinary local inputs
+// (sent to the remote like any other), so both peers see the same inputs.
+// Afterwards the ordinary gate resumes at sAdvances == H+13, whose submit
+// lands on H+13+delay. A peer that got the RESUME snapshot before it
+// stopped (sSubmitted == sAdvances) simply keeps using the ordinary gate.
+bool hold_resume_catchup_due()
+{
+	if (!sHolding || !sResumeHave || sCfg.localDelay == 0) return false;
+	const uint64_t resumeFrame = (uint64_t)sHoldFrame + kHoldLeadFrames;
+	return sAdvances == resumeFrame && sSubmitted + sCfg.localDelay == resumeFrame;
+}
+
+// B1 host: flag exactly one submitted input when the link goes down (or on
+// the first input when state.txt was missing at session start). Stream mode
+// only; never in launcher sessions (their static state is always live).
+void hold_host_maybe_flag(PcNetplayInput& local)
+{
+	if (!randstate_stream_on() || !sCfg.isHost || sCfg.launcherMode) return;
+	if (sHolding || sHoldRequested) return;
+	if (pc_randomizer_enabled == nullptr || !pc_randomizer_enabled()) return;
+	bool down = sHoldAtFirstInput;
+	if (!down && pc_randomizer_link_live != nullptr && !pc_randomizer_link_live()) down = true;
+	if (!down) return;
+	sHoldAtFirstInput = false;
+	local.flags |= pc_netplay_gekko::kFlagsHold;
+	sHoldRequested = true;
+	sHoldExpectFrame = sSubmitted + sCfg.localDelay;
+	printf("[netplay] hold requested: host link down; HOLD flag on submit=%llu (frame %llu)\n",
+	       (unsigned long long)sSubmitted, (unsigned long long)sHoldExpectFrame);
+	fflush(stdout);
+}
+
+// B1 host: once frozen and the link is live again, send the RESUME snapshot.
+// A full 4-deep bulk queue keeps the prepared payload for the next turn (the
+// generation is bumped once).
+void hold_host_try_resume()
+{
+	if (!sCfg.isHost || !sHolding || sResumeHave) return;
+	if (!hold_frozen()) return;
+	if (!sResumePrepared) {
+		if (pc_randomizer_link_live == nullptr || !pc_randomizer_link_live()) return;
+		pc_randstate::PcRandState st;
+		if (pc_randomizer_resume_snapshot == nullptr || !pc_randomizer_resume_snapshot(&st)) return;
+		const uint32_t rf = sHoldFrame + kHoldLeadFrames;
+		sResumePayload[0] = (uint8_t)(rf & 0xFF);
+		sResumePayload[1] = (uint8_t)((rf >> 8) & 0xFF);
+		sResumePayload[2] = (uint8_t)((rf >> 16) & 0xFF);
+		sResumePayload[3] = (uint8_t)((rf >> 24) & 0xFF);
+		pc_randstate::encode(st, sResumePayload + 4);
+		sResumeState = st;
+		sResumeFrame = rf;
+		sResumePrepared = true;
+		// An older snapshot still waiting for the fragment stream is
+		// superseded by this one (it would only arrive stale).
+		sRandHaveQueued = false;
+	}
+	if (!sBulk.send(pc_netplay_bulk::kBulkRandFull, sResumePayload, sizeof(sResumePayload))) return;
+	sResumePrepared = false;
+	sResumeHave = true;
+	printf("[netplay] resume: host link live, RESUME gen=%u for frame=%u sent\n", sResumeState.gen,
+	       sResumeFrame);
+	fflush(stdout);
+}
+
+// B1 client: a completed kBulkRandFull message.
+void hold_client_on_randfull(const std::vector<uint8_t>& data)
+{
+	if (sCfg.isHost) return;
+	if (data.size() != sizeof(sResumePayload)) {
+		printf("[netplay] RESUME snapshot malformed (len=%llu); dropped\n", (unsigned long long)data.size());
+		fflush(stdout);
+		return;
+	}
+	const uint32_t rf = (uint32_t)data[0] | ((uint32_t)data[1] << 8) | ((uint32_t)data[2] << 16)
+	    | ((uint32_t)data[3] << 24);
+	pc_randstate::PcRandState st;
+	if (!pc_randstate::decode(data.data() + 4, data.size() - 4, st)) {
+		printf("[netplay] RESUME snapshot for frame=%u failed to decode; dropped\n", rf);
+		fflush(stdout);
+		return;
+	}
+	sResumeState = st;
+	sResumeFrame = rf;
+	sResumeHave = true;
+	printf("[netplay] resume: RESUME gen=%u for frame=%u received\n", st.gen, rf);
+	fflush(stdout);
+}
+
 // Per-turn bulk pump (both peers): drain channel 0x03 into the endpoint,
 // send due frags/acks. Lane A queues no session messages (the reliable
 // transfer is proven by the transport unit test); lane B will queue
@@ -640,10 +895,20 @@ void bulk_pump()
 	sBulk.sweep(now_ms()); // expire abandoned partial reassemblies
 	std::vector<pc_netplay_bulk::BulkChannel::Message> complete = sBulk.poll_complete();
 	for (auto& m : complete) {
-		(void)m; // lane B consumes these; lane A only acks (already queued)
 		printf("[netplay] bulk msg complete: type=0x%02x len=%llu\n", m.type,
 		       (unsigned long long)m.data.size());
 		fflush(stdout);
+		// B1 consumers (client side; the host never receives these types).
+		if (m.type == pc_netplay_bulk::kBulkRandFull) hold_client_on_randfull(m.data);
+		else if (m.type == pc_netplay_bulk::kBulkMirrorLedger && !sCfg.isHost
+		         && pc_randomizer_mirror_ledger_receive != nullptr)
+			pc_randomizer_mirror_ledger_receive(m.data.data(), m.data.size(), sLastAdvanceFrame);
+	}
+	// B1 host: queued mirror-ledger messages go out as bulk queue room frees.
+	while (sCfg.isHost && !sLedgerOut.empty() && sBulk.can_send()) {
+		const std::vector<uint8_t>& d = sLedgerOut.front();
+		if (!sBulk.send(pc_netplay_bulk::kBulkMirrorLedger, d.data(), d.size())) break;
+		sLedgerOut.erase(sLedgerOut.begin());
 	}
 	std::vector<std::vector<uint8_t>> out = sBulk.poll_outgoing(now_ms());
 	for (auto& d : out) {
@@ -1035,6 +1300,12 @@ std::string build_config_string()
 	// gate set differently on each side would desync silently; hashing it
 	// makes the handshake refuse instead.
 	addi("randStream", sRandStream ? 1 : 0);
+	// M4 lane B1: PIKMIN_NETPLAY_TEST_DEATHLINK_AS_ORDINARY changes sim state
+	// (induced DeathLink kills count as ordinary deaths; deathsReported is
+	// hashed), so a pair with the knob set on one side refuses on config.
+	addi("testDeathlinkAsOrdinary",
+	     (pc_randomizer_test_deathlink_as_ordinary != nullptr
+	      && pc_randomizer_test_deathlink_as_ordinary()) ? 1 : 0);
 	(void)fbuf;
 	return s;
 }
@@ -2167,7 +2438,19 @@ void start_gekko_session()
 	// first submit.
 	sRandReasm.reset();
 	sBulk.reset();
-	if (pc_randomizer_force_net_publish != nullptr) pc_randomizer_force_net_publish();
+	hold_reset();
+	bool hostState = true;
+	if (pc_randomizer_force_net_publish != nullptr) hostState = pc_randomizer_force_net_publish();
+	// M4 lane B1 (lane A recheck item 3): a host whose state.txt cannot be
+	// read at session start HOLDs from its first input instead of running
+	// the neutral gate indefinitely without a word. The RESUME snapshot is
+	// then gen 1 and the neutral gate stays up until it applies.
+	if (!hostState && randstate_stream_on() && sCfg.isHost && !sCfg.launcherMode
+	    && pc_randomizer_enabled != nullptr && pc_randomizer_enabled()) {
+		printf("[netplay] hold: host state.txt missing at session start\n");
+		fflush(stdout);
+		sHoldAtFirstInput = true;
+	}
 	sSessionStartMs = now_ms();
 	// Polish pacing: the drift-free deadline starts here (not at handshake
 	// start), so the first session turn never takes the overrun path.
@@ -2275,6 +2558,8 @@ int handle_game_events(System* sys, BaseApp* app)
 			// then feed this frame's host fragment (arming F+1 at the
 			// earliest). Both peers execute the identical sequence.
 			randstate_apply_before_tick(e->data.adv.frame);
+			// B1: HOLD flag in the host input (after the RESUME apply above).
+			hold_on_advance_begin(p0, e->data.adv.frame);
 			randstate_feed_advance(p0, e->data.adv.frame);
 			if (randstate_gate_neutral()) {
 				// M5: pre-snapshot neutral ticks (identical on both peers).
@@ -2307,13 +2592,24 @@ int handle_game_events(System* sys, BaseApp* app)
 				if (pc_state_hash_current(&total, subs, &tick) && tick > 0)
 					hash_ring_store(tick, total, subs);
 			}
+			// M4 lane B1: confirmed-frame outbox flush, once per Advance,
+			// after the state hash and before the exit-after check so the
+			// last tick's entries land before exit. Host: journals; client:
+			// mirror-events.txt. No-op outside outbox mode.
+			if (pc_randomizer_outbox_flush != nullptr)
+				pc_randomizer_outbox_flush((uint32_t)e->data.adv.frame);
+			sLastAdvanceFrame = (uint32_t)e->data.adv.frame;
+			hold_after_advance(e->data.adv.frame);
 			++sSessionTicks;
 			++advances;
 			++sAdvances;
 			if (sCfg.exitAfter > 0 && sSessionTicks >= sCfg.exitAfter) {
 				const double nowW = now_ms();
-				const double wallS =
-				    (sSessionStartMs > 0) ? (nowW - sSessionStartMs) / 1000.0 : 0.0;
+				// B1: frozen HOLD time is excluded from the stall %, tps and
+				// slot-loss figures and reported separately as held=.
+				double wallS =
+				    (sSessionStartMs > 0) ? (nowW - sSessionStartMs - sHoldMs) / 1000.0 : 0.0;
+				if (wallS < 0) wallS = 0;
 				const double tps = wallS > 0 ? (double)sAdvances / wallS : 0.0;
 				const double stallPct =
 				    wallS > 0 ? 100.0 * sStallMs / (wallS * 1000.0) : 0.0;
@@ -2324,8 +2620,8 @@ int handle_game_events(System* sys, BaseApp* app)
 				printf("[netplay] exit after %llu ticks\n", (unsigned long long)sSessionTicks);
 				printf("[netplay] script records consumed: %llu/%llu\n",
 				       (unsigned long long)sScriptIdx, (unsigned long long)sScriptTicks);
-				printf("[netplay] wall=%.1fs tps=%.1f stall=%.1f%% (wall-clock no-Advance turns; slot wait excluded) slot-loss=%.1f%% vs 30Hz\n",
-				       wallS, tps, stallPct, slotLossPct);
+				printf("[netplay] wall=%.1fs tps=%.1f stall=%.1f%% (wall-clock no-Advance turns; slot wait excluded) slot-loss=%.1f%% vs 30Hz held=%.0fms holds=%llu\n",
+				       wallS, tps, stallPct, slotLossPct, sHoldMs, (unsigned long long)sHoldsDone);
 				fflush(stdout);
 				pc_state_hash_flush();
 				stop_session();
@@ -2368,8 +2664,9 @@ int handle_game_events(System* sys, BaseApp* app)
 		// code divided by the handshake-start clock, deflating tps), and
 		// the slot-loss fraction 1 - tps/30 is reported alongside the
 		// wall-clock stall % (which now includes the pacing sleep).
-		const double wallS =
-		    (sSessionStartMs > 0) ? (now - sSessionStartMs) / 1000.0 : 0.0;
+		double wallS =
+		    (sSessionStartMs > 0) ? (now - sSessionStartMs - sHoldMs) / 1000.0 : 0.0; // B1: hold excluded
+		if (wallS < 0) wallS = 0;
 		const double tps = wallS > 0 ? (double)sAdvances / wallS : 0.0;
 		const double wallStallPct =
 		    wallS > 0 ? 100.0 * sStallMs / (wallS * 1000.0) : 0.0;
@@ -2377,11 +2674,11 @@ int handle_game_events(System* sys, BaseApp* app)
 		const double turnStallPct =
 		    (sAdvances + sStalls) > 0 ? 100.0 * (double)sStalls / (double)(sAdvances + sStalls) : 0.0;
 		printf("[netplay] tick=%llu adv=%llu stalls=%llu (turn %.1f%%, wall %.1f%%) "
-		       "tps=%.1f (slot loss %.1f%% vs 30Hz) ahead=%.2f saves=%llu submitted=%llu\n",
+		       "tps=%.1f (slot loss %.1f%% vs 30Hz) ahead=%.2f saves=%llu submitted=%llu held=%.0fms\n",
 		       (unsigned long long)sSessionTicks, (unsigned long long)sAdvances,
 		       (unsigned long long)sStalls, turnStallPct, wallStallPct, tps, slotLossPct,
 		       gekko_frames_ahead(sGekko), (unsigned long long)sSaves,
-		       (unsigned long long)sSubmitted);
+		       (unsigned long long)sSubmitted, sHoldMs);
 		fflush(stdout);
 	}
 	return advances;
@@ -2404,11 +2701,38 @@ void pc_netplay_randstate_publish(const pc_randstate::PcRandState& st)
 	if (sRandHaveSnapshot && sRandNextFrag > 0 && sRandNextFrag < pc_randstate::kFragCount) {
 		pc_randstate::encode(st, sRandQueuedWire);
 		sRandHaveQueued = true;
+		// B1 (lane A recheck item 1): make the one-deep queue visible, so a
+		// pair can prove the queued generation still applies on both peers.
+		printf("[netplay] randstate gen=%u queued behind in-flight fragment %u/%u\n", st.gen,
+		       (unsigned)sRandNextFrag, (unsigned)pc_randstate::kFragCount);
+		fflush(stdout);
 		return;
 	}
 	pc_randstate::encode(st, sRandWire);
 	sRandHaveSnapshot = true;
 	sRandNextFrag = 0;
+	// B1 (lane A recheck item 2): a direct write supersedes anything still
+	// queued, which is older; without this the stale queued snapshot went
+	// out after this one and cost 16 submits for a receiver-side no-op.
+	sRandHaveQueued = false;
+}
+
+// ---- Netplay M4 lane B1 public hooks (issue #885) ----
+// True while a synchronized HOLD is requested (host) or in progress: the
+// host I/O side then leaves publishing to the RESUME snapshot.
+bool pc_netplay_hold_active(void) { return sCfg.active && (sHolding || sHoldRequested); }
+// Host: queue one kBulkMirrorLedger payload (sent by bulk_pump as the 4-deep
+// bulk queue frees). Bounded; the mirror is never sim state, so an overflow
+// is logged and dropped rather than fatal.
+void pc_netplay_mirror_ledger_send(const uint8_t* data, size_t len)
+{
+	if (!sCfg.active || !sCfg.isHost || data == nullptr || len == 0) return;
+	if (sLedgerOut.size() >= kLedgerOutMax) {
+		printf("[netplay] mirror ledger: send queue full; message dropped\n");
+		fflush(stdout);
+		return;
+	}
+	sLedgerOut.emplace_back(data, data + len);
 }
 
 // Launch lane self-test (pc_netplay_launch_selftest.cpp): the exact config
@@ -2613,22 +2937,51 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 	if (sGekko != nullptr) {
 		// M1: keep answering late handshake traffic while in session.
 		answer_handshake_in_session();
+		// B1: once frozen and live again, the host queues the RESUME
+		// snapshot (before bulk_pump so it goes out this turn).
+		hold_host_try_resume();
 		// M4a: pump the bulk 0x03 channel (acks now, lane-B messages later).
 		bulk_pump();
 		// B2 residual: fold this turn's physical sample into the
 		// accumulator on every turn (submit or stall), so a tap between
 		// two submit turns still reaches the next submit.
 		accum_add_current();
-		if (sGekkoStarted && sSubmitted == sAdvances) {
+		if (sGekkoStarted && hold_resume_catchup_due()) {
+			// B1: RESUME catch-up submit (see hold_resume_catchup_due). No
+			// snapshot fragment and no HOLD flag ride this input: its
+			// delay copies would only repeat them.
+			PcNetplayInput local = build_local_input();
+			uint8_t wire[16];
+			pc_netplay_input_encode(local, wire);
+			const uint64_t landing = sAdvances; // == H+12
+			gekko_set_local_delay(sGekko, sLocalHandle, 0);
+			gekko_add_local_input(sGekko, sLocalHandle, wire);
+			gekko_set_local_delay(sGekko, sLocalHandle, (unsigned char)sCfg.localDelay);
+			sSubmitted = landing + 1;
+			printf("[netplay] resume: catch-up input for frame=%llu at delay 0, delay %u restored "
+			       "(frames %llu..%llu repeat it)\n",
+			       (unsigned long long)landing, sCfg.localDelay, (unsigned long long)(landing + 1),
+			       (unsigned long long)(landing + sCfg.localDelay));
+			fflush(stdout);
+		} else if (sGekkoStarted && sSubmitted == sAdvances && !hold_blocks_submit()) {
 			PcNetplayInput local = build_local_input();
 			// M4a: the host embeds the next snapshot fragment here (the
 			// joiner never sets chunk bits). Input-build ownership stays
 			// in this function; pacing/handshake below are untouched.
 			randstate_embed_on_submit(local);
+			// B1: the host flags exactly one input when its link is down.
+			hold_host_maybe_flag(local);
 			uint8_t wire[16];
 			pc_netplay_input_encode(local, wire);
 			gekko_add_local_input(sGekko, sLocalHandle, wire);
 			++sSubmitted;
+			if (sHolding && sSubmitted - 1 + sCfg.localDelay
+			                    == (uint64_t)sHoldFrame + kHoldLeadFrames - 1) {
+				printf("[netplay] hold: last pre-hold input frame=%llu (submit=%llu delay=%u)\n",
+				       (unsigned long long)(sSubmitted - 1 + sCfg.localDelay),
+				       (unsigned long long)(sSubmitted - 1), sCfg.localDelay);
+				fflush(stdout);
+			}
 		}
 		// 4-5. Advance + per-tick block.
 		advances = handle_game_events(sys, app);
@@ -2702,7 +3055,23 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 			sleep_hires_ms(1.0, 0.0);
 		}
 	}
-	if (advances == 0) {
+	if (advances == 0 && hold_frozen()) {
+		// B1: a frozen HOLD turn slept like a stall turn above, but its
+		// wall time is held time, not stall: it is never charged to the
+		// stall figures. The frozen wall time itself (held at -> resume) is
+		// accumulated exactly into sHoldMs at the RESUME apply and excluded
+		// from the stall %, tps and slot-loss figures (reported as held=).
+		++sHoldTurns;
+		const double holdNow = now_ms();
+		// Heartbeat every 5 s of freeze: proves the held peer keeps pumping.
+		if (holdNow - sHoldBeatMs >= 5000.0) {
+			sHoldBeatMs = holdNow;
+			printf("[netplay] holding: frozen after frame=%u for %.0f ms (turns=%llu resume=%d)\n",
+			       sHoldFrame + kHoldLeadFrames - 1, holdNow - sHoldStartMs,
+			       (unsigned long long)sHoldTurns, (int)sResumeHave);
+			fflush(stdout);
+		}
+	} else if (advances == 0) {
 		++sStalls;
 		// M5/n2 + fix m1: wall-clock stall accounting is the wall time of
 		// turns with no Advance (advance turns own the slot wait, so it is
