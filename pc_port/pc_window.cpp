@@ -30,6 +30,11 @@
 #include <string>
 #include <vector>
 
+// Weak-linked: strong-defined by pc_port/netplay/pc_netplay_session.cpp in
+// netplay builds only. Null in the default build, so the presentation limiter
+// below runs exactly as before there.
+__attribute__((weak)) bool pc_netplay_session_active(void);
+
 static SDL_Window*   sWindow = nullptr;
 static SDL_GLContext sGLContext = nullptr;
 // Mandos resueltos por jugador: sControllers[0] = P1, [1] = P2. Se recalculan
@@ -1347,7 +1352,13 @@ void pc_window_swap_buffers(void) {
         // simulation uses the fixed-step scheduler independently.
         // M1 deterministic netplay: unthrottled replay runs bypass the
         // limiter as well (fast replay tests; the sim is unchanged).
-        if (sVsyncEnabled && !pc_netplay_unthrottled()) {
+        // Polish pacing (issue #880): while a netplay session runs, the
+        // session owns the single 30 Hz schedule (drift-free deadline in
+        // pc_netplay_session.cpp). The presentation limiter stays off there,
+        // otherwise two stacked 30 Hz pacers cap throttled pairs at ~21 tps.
+        const bool netplayOwnsPacing =
+            (pc_netplay_session_active != nullptr) && pc_netplay_session_active();
+        if (sVsyncEnabled && !pc_netplay_unthrottled() && !netplayOwnsPacing) {
             // The interval is the game's setFrameClamp: retraces per logical
             // frame against a 60 Hz base, so 1 is 60 Hz and 2 is 30 Hz. The
             // port adds 0 for 120 Hz, which has no 60 Hz divisor. Mirror
