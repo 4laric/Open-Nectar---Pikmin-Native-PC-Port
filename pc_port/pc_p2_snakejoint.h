@@ -19,6 +19,9 @@ class Creature;
 void pc_p2_snakejoint_setup();
 void pc_p2_snakejoint_reset();
 void pc_p2_snakejoint_forget(BTeki*);
+// Death-/birth-time Piki forget hook (#886): drop a held-mouth registration
+// for a Pikmin that died or whose pool slot is being reused.
+void pc_p2_snakejoint_forget_piki(class Piki*);
 void pc_p2_snakejoint_update(BTeki*);
 bool pc_p2_snakejoint_suppress_ai(const BTeki*);
 // Engine-free suppression predicate shared by pc_p2_snakejoint_suppress_ai

@@ -42,6 +42,9 @@ class Creature;
 void pc_p2_umimushi_setup();
 void pc_p2_umimushi_reset();
 void pc_p2_umimushi_forget(BTeki*);
+// Death-/birth-time Piki forget hook (#886): drop a held-mouth registration
+// for a Pikmin that died or whose pool slot is being reused.
+void pc_p2_umimushi_forget_piki(class Piki*);
 void pc_p2_umimushi_update(BTeki*);
 bool pc_p2_umimushi_suppress_ai(const BTeki*);
 // Engine-free suppression predicate shared by pc_p2_umimushi_suppress_ai

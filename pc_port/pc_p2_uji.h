@@ -11,6 +11,9 @@ class Teki;
 void pc_p2_uji_setup();
 void pc_p2_uji_reset();
 void pc_p2_uji_forget(BTeki*);
+// Death-/birth-time Piki forget hook (#886): drop a held-mouth registration
+// for a Pikmin that died or whose pool slot is being reused.
+void pc_p2_uji_forget_piki(class Piki*);
 void pc_p2_uji_update(BTeki*);
 float pc_p2_uji_param_f(const BTeki*, int idx, float fallback);
 bool pc_p2_uji_clip(const BTeki*, const char*& name, float& phase);
