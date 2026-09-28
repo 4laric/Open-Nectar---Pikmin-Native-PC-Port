@@ -306,6 +306,12 @@ struct Config {
     // #246: the Titan Dweevil (73) soaks 4 x 6000 weapon HP before its 5000
     // body HP is exposed; the bot keeps throwing for a longer window.
     float titanAttackMultiplier = 3.0f;
+    // #246: a Titan lets go of every stuck Pikmin at Dead (deathProcedure
+    // setAlive(false)) ~11 s before its corpse forms, so the aftermath can
+    // start with an empty squad and nobody to seed-throw. A player whistles
+    // the strays: bounded episodes, only while the squad is empty.
+    int titanAftermathWhistles = 3;
+    float titanAftermathWhistleHold = 1.5f;
     float saraiLowHeight = 120.0f; // Sarai thrown at only when within this height above ground (or grabbing)
     float throwRange = 260.0f; // XZ distance at which throws start
     float arriveRadius = 90.0f; // XZ distance considered "at" the Onion
@@ -412,6 +418,7 @@ struct Senses {
     float wpZ = 0.0f;
     // Onion / squad facts for the withdraw phase.
     int fieldPikmin = 0; // live field Pikmin
+    int squadPikmin = 0; // #246: live Pikmin following the captain (FormationMode)
     int onionStored = 0; // Pikmin stored in the nearest stocked Onion
     float onionDist = 1.0e30f; // XZ distance to that Onion
     bool containerOpen = false; // Onion container UI is up
@@ -537,6 +544,8 @@ public:
         amHadEnough = false; // bot-v7: the lift was viable (escorted)
         amLastCrew = 0; // bot-v7: high-water crew for SeedGrow progress
         amGrowStill = 0.0f; // bot-v7: time without crew growth in SeedGrow
+        amWhistles = 0;
+        amWhistleTime = 0.0f;
         withdrawCycles = 0;
         throwSpin = 0.0f;
         kingBacking = false;
@@ -876,6 +885,8 @@ private:
         amHadEnough = false;
         amLastCrew = 0;
         amGrowStill = 0.0f;
+        amWhistles = 0;
+        amWhistleTime = 0.0f;
         result = Result{};
         result.token = in.targetToken;
         result.koganeLike = isKoganeLike(in.targetSource);
@@ -1133,6 +1144,18 @@ private:
         // Pikmin at the navi 36-65 u from the corpse so no carry ever
         // initiates (v4b diagnosis). Deliver with stick + throws only.
         const bool carryActive = in.transportSeen || in.carryCount > 0 || in.pelletCarriers > 0;
+        // #246 exception to the no-whistle rule (see titanAftermathWhistles):
+        // Titan only, empty squad, strays on the field, bounded episodes.
+        if (in.targetSource == 73
+            && (amWhistleTime > 0.0f
+                || (in.squadPikmin == 0 && in.fieldPikmin > in.pelletCarriers
+                    && amWhistles < cfg.titanAftermathWhistles))) {
+            if (amWhistleTime <= 0.0f) ++amWhistles;
+            amWhistleTime += dt;
+            lastCommand.buttons = PadB;
+            if (amWhistleTime >= cfg.titanAftermathWhistleHold) amWhistleTime = 0.0f;
+            return;
+        }
         if (sawReceipt) {
             // Onion receipt landed: score it promptly. received=1 comes ONLY
             // from this token's own ledger line; bystander CHECK
@@ -1679,6 +1702,8 @@ private:
     bool amHadEnough = false; // bot-v7: the lift escorted (viable) before shrinking
     int amLastCrew = 0; // bot-v7: high-water crew for SeedGrow progress
     float amGrowStill = 0.0f; // bot-v7: time without crew growth in SeedGrow
+    int amWhistles = 0;         // #246 Titan aftermath regroup episodes used
+    float amWhistleTime = 0.0f; // #246 current regroup whistle hold
     float initialHealthFrac = 1.0f;
     bool sawDamage = false;
     bool sawKill = false; // generic death latched (any species)

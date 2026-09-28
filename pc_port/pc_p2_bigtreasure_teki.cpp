@@ -252,6 +252,35 @@ Creature* creatureFor(const Snapshot& snap, std::uint64_t id) {
     return id >= 1 && id <= snap.who.size() ? snap.who[std::size_t(id - 1)] : nullptr;
 }
 
+// Diagnostic census of the field Pikmin around the Titan (mode/state/stick),
+// logged at Dead entry and when the corpse forms.
+void pikiCensus(const Binding& b, BTeki* t, const char* when) {
+    if (!pikiMgr) return;
+    int alive = 0, stuck = 0, near = 0, formation = 0, free = 0, transport = 0, other = 0;
+    std::map<int, int> states;
+    const Vector3f me = t->getPosition();
+    Iterator it(pikiMgr);
+    CI_LOOP(it) {
+        Piki* p = static_cast<Piki*>(*it);
+        if (!p || !p->isAlive()) continue;
+        ++alive;
+        if (p->getStickObject() == t) ++stuck;
+        const Vector3f q = p->getPosition();
+        const float dx = q.x - me.x, dz = q.z - me.z;
+        if (dx * dx + dz * dz < 300.0f * 300.0f) ++near;
+        if (p->mMode == PikiMode::FormationMode) ++formation;
+        else if (p->mMode == PikiMode::FreeMode) ++free;
+        else if (p->mMode == PikiMode::TransportMode) ++transport;
+        else ++other;
+        ++states[p->getState()];
+    }
+    std::printf("P2_BIGTREASURE_PIKI_CENSUS generator=%u source_id=73 when=%s alive=%d stuck=%d near=%d formation=%d "
+                "free=%d transport=%d other=%d states=",
+                b.generator, when, alive, stuck, near, formation, free, transport, other);
+    for (const auto& kv : states) std::printf("%d:%d,", kv.first, kv.second);
+    std::printf("\n");
+}
+
 void logState(const Binding& b, const Transition& tr, BTeki* t) {
     const Vector3f p = t->getPosition();
     std::printf("P2_BIGTREASURE_FSM generator=%u source_id=73 from=%s state=%s x=%.1f z=%.1f health=%.1f weapons=%d "
@@ -291,6 +320,7 @@ void applyOutput(BTeki* t, Binding& b, const Snapshot& snap, const TickOutput& o
             // StateDead::init -> deathProcedure -> setAlive(false): stuck
             // Pikmin let go (aiAttack drops a non-alive stick target) and no
             // further hit lands. The host death funnel runs at KEYEVENT_END.
+            pikiCensus(b, t, "dead_enter");
             t->clearTekiOption(TEKIOPT_Alive);
             std::printf("P2_BIGTREASURE_DEAD generator=%u source_id=73 health=%.1f weapons=%d\n", b.generator,
                         t->mHealth, b.fsm.ownership().weaponCount());
@@ -579,8 +609,17 @@ void pc_p2_bigtreasure_teki_tick(BTeki* t) {
     auto i = s.find(t);
     if (i == s.end()) return;
     Binding& b = i->second;
-    if (b.began) return;
     const float dt = gsys ? gsys->getFrameTime() : 0.0f;
+    if (b.began) {
+        // Corpse phase: periodic Pikmin census for the carry diagnosis.
+        b.logTimer += dt;
+        if (b.logTimer >= 5.0f) {
+            b.logTimer = 0.0f;
+            pikiCensus(b, t, "corpse_phase");
+            std::fflush(stdout);
+        }
+        return;
+    }
     if (t->mDeadState == 0) {
         if (!(dt > 0.0f && dt < 0.5f)) return;
         ownTick(t, b, dt); // may run the host teardown; never touch b after it
@@ -599,6 +638,7 @@ void pc_p2_bigtreasure_teki_tick(BTeki* t) {
         b.began = true;
         std::printf("P2_BIGTREASURE_CORPSE generator=%u source_id=73 pellet=%d x=%.1f z=%.1f\n", b.generator,
                     t->mPellet ? 1 : 0, t->mSRT.t.x, t->mSRT.t.z);
+        pikiCensus(b, t, "corpse");
         std::fflush(stdout);
     }
 }
