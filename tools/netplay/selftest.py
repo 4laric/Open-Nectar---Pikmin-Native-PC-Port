@@ -121,6 +121,33 @@ def main():
         r = run_cmp(ha, hd)
         check(r.returncode == 1 and "mismatch" in r.stdout, "compare reports length mismatch")
 
+        # m6: 9-column (with rand) logs compare, and a mid-file width change
+        # is an error rather than a misaligned compare.
+        base9 = [ln + f" {'77' * 8}" for ln in base]
+        h9a = tmp / "e.hash"
+        h9b = tmp / "f.hash"
+        h9a.write_text("\n".join(base9) + "\n")
+        h9b.write_text("\n".join(base9) + "\n")
+        r = run_cmp(h9a, h9b)
+        check(r.returncode == 0 and "identical: 50 ticks" in r.stdout,
+              "compare identical 9-column logs exits 0")
+        mut9 = list(base9)
+        row9 = mut9[10].split()
+        row9[8] = "88" * 8  # rand column at tick 11
+        mut9[10] = " ".join(row9)
+        h9c = tmp / "g.hash"
+        h9c.write_text("\n".join(mut9) + "\n")
+        r = run_cmp(h9a, h9c)
+        check(r.returncode == 1 and "tick 11" in r.stdout and "rand" in r.stdout,
+              "compare reports divergent rand column")
+        ragged = list(base9)
+        ragged[20] = " ".join(ragged[20].split()[:8])  # 8-col row mid-file
+        h9d = tmp / "h.hash"
+        h9d.write_text("\n".join(ragged) + "\n")
+        r = run_cmp(h9a, h9d)
+        check(r.returncode == 1 and "expected 9 columns" in r.stdout,
+              "compare rejects mid-file width change")
+
     if failures:
         print(f"selftest: {failures} failure(s)")
         return 1

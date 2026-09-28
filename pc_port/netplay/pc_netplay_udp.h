@@ -131,7 +131,7 @@ public:
 	// Test hook: inject a received gekko payload without a socket.
 	void inject_for_test(const uint8_t* data, size_t len);
 
- 	// Drains datagrams arrived on the handshake channel (0x01). The
+	// Drains datagrams arrived on the handshake channel (0x01). The
 	// session handshake pump calls this; GekkoNet never sees them.
 	std::vector<UdpSocket::Datagram> drain_handshake();
 
@@ -147,12 +147,12 @@ public:
 	struct GekkoNetResult** receive_inner(int* length);
 
  private:
- 	UdpSocket* mSock;
- 	GekkoNetAdapter mAdapter;
- 	std::vector<struct GekkoNetResult*> mResults;
- 	std::vector<std::vector<uint8_t>> mInjected;
- 	std::vector<UdpSocket::Datagram> mGekkoPending;
- 	std::vector<UdpSocket::Datagram> mHandshakePending;
+	UdpSocket* mSock;
+	GekkoNetAdapter mAdapter;
+	std::vector<struct GekkoNetResult*> mResults;
+	std::vector<std::vector<uint8_t>> mInjected;
+	std::vector<UdpSocket::Datagram> mGekkoPending;
+	std::vector<UdpSocket::Datagram> mHandshakePending;
 	std::vector<UdpSocket::Datagram> mBulkPending;
 };
 
@@ -204,9 +204,9 @@ private:
 	struct Rng;
 	Rng* mRng;
 
- 	static double now_ms();
- 	double draw_delay_ms();
- 	bool draw_drop();
+	static double now_ms();
+	double draw_delay_ms();
+	bool draw_drop();
 };
 } // namespace pc_netplay_transport
 
@@ -226,7 +226,11 @@ private:
 //
 // Engine-free like the rest of this TU. The session owns one endpoint per
 // peer and pumps it each turn; the unit test drives two endpoints over a
-// lossy in-memory queue.
+// lossy in-memory queue. Ordering: messages complete independently, in the
+// order their last fragment arrives; delivery order across messages is NOT
+// guaranteed (lane B sequences SaveResult/Checkpoint itself if it needs
+// order). Retransmit is a flat 100 ms per unacked fragment with no window;
+// the queue depths (4 outbound, 8 inbound) bound the burst.
 namespace pc_netplay_bulk {
 constexpr uint8_t kBulkRandFull = 0x10;
 constexpr uint8_t kBulkSaveResult = 0x11;
@@ -236,10 +240,17 @@ constexpr size_t kBulkMaxPayload = 1024;
 constexpr size_t kBulkMaxMessage = 262144; // 256 KiB, hard bound before alloc
 constexpr size_t kBulkMaxFrags = kBulkMaxMessage / kBulkMaxPayload; // 256
 constexpr double kBulkResendMs = 100.0;
+constexpr double kBulkPartialTimeoutMs = 30000.0; // abandoned reassembly TTL
 
 class BulkChannel {
 public:
 	BulkChannel();
+
+	// Resets all session state (send queue, partial reassemblies, ack
+	// queue, completed queue, done ids, msgId counter). The session calls
+	// this on session start so a previous session's msgIds and partials
+	// cannot collide with the new one's (u16 msgIds restart at 1).
+	void reset();
 
 	// Queues one message for reliable delivery. Returns false when the
 	// type is not a data type, len is 0 or exceeds kBulkMaxMessage, or the
@@ -248,7 +259,12 @@ public:
 
 	// Feeds one received 0x03 payload (channel byte already stripped).
 	// Malformed or out-of-bound datagrams are dropped, never acted on.
-	void on_receive(const uint8_t* data, size_t len);
+	// nowMs stamps new partial reassemblies for the sweep() TTL below.
+	void on_receive(const uint8_t* data, size_t len, double nowMs);
+
+	// Drops partial inbound reassemblies older than kBulkPartialTimeoutMs,
+	// so abandoned transfers cannot wedge the bounded (8-deep) receiver.
+	void sweep(double nowMs);
 
 	// Outgoing 0x03 payloads due at nowMs (unacked data fragments needing
 	// (re)transmit plus pending acks). The caller sends each on the bulk
@@ -286,6 +302,7 @@ private:
 		std::vector<bool> have;
 		uint16_t got = 0;
 		bool done = false;
+		double firstSeenMs = 0.0;
 	};
 	uint16_t mNextMsgId = 1;
 	std::vector<OutMsg> mOut;

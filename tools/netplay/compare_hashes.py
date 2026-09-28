@@ -56,6 +56,14 @@ def main(argv):
             print(f"width mismatch: {argv[1]} has {wa} columns, {argv[2]} has {wb} columns "
                   f"(8 = legacy, 9 = with rand)")
             return 1
+    # m6 fix: the width must hold on every row, not just the first (a
+    # mid-file truncation from 9 to 8 columns used to compare misaligned).
+    for path, rows in ((argv[1], rows_a), (argv[2], rows_b)):
+        expect = len(rows[0].split()) if rows else 0
+        for i, ln in enumerate(rows):
+            if len(ln.split()) != expect:
+                print(f"{path}:{i + 1}: expected {expect} columns, got {len(ln.split())}")
+                return 1
     n = min(len(rows_a), len(rows_b))
     for i in range(n):
         pa, err = parse_line(rows_a[i].strip(), i + 1, argv[1])

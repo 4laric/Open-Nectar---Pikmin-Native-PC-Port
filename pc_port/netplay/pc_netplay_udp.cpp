@@ -687,6 +687,16 @@ bool is_data_type(uint8_t t)
 
 BulkChannel::BulkChannel() {}
 
+void BulkChannel::reset()
+{
+	mOut.clear();
+	mIn.clear();
+	mAckQueue.clear();
+	mComplete.clear();
+	mDoneIds.clear();
+	mNextMsgId = 1;
+}
+
 bool BulkChannel::send(uint8_t type, const uint8_t* data, size_t len)
 {
 	if (!is_data_type(type)) return false;
@@ -717,7 +727,7 @@ bool BulkChannel::send(uint8_t type, const uint8_t* data, size_t len)
 	return true;
 }
 
-void BulkChannel::on_receive(const uint8_t* data, size_t len)
+void BulkChannel::on_receive(const uint8_t* data, size_t len, double nowMs)
 {
 	if (data == nullptr || len == 0) return;
 	if (len + 1 > pc_netplay_transport::kMaxDatagram) return; // bounded
@@ -788,6 +798,7 @@ void BulkChannel::on_receive(const uint8_t* data, size_t len)
 		m.totalLen = totalLen;
 		m.bytes.assign(totalLen, 0);
 		m.have.assign(count, false);
+		m.firstSeenMs = nowMs;
 		mIn.push_back(std::move(m));
 		slot = &mIn.back();
 	} else {
@@ -843,6 +854,17 @@ std::vector<BulkChannel::Message> BulkChannel::poll_complete()
 	std::vector<Message> out;
 	out.swap(mComplete);
 	return out;
+}
+
+void BulkChannel::sweep(double nowMs)
+{
+	for (size_t i = 0; i < mIn.size();) {
+		if (!mIn[i].done && nowMs - mIn[i].firstSeenMs >= kBulkPartialTimeoutMs) {
+			mIn.erase(mIn.begin() + i);
+		} else {
+			++i;
+		}
+	}
 }
 
 size_t BulkChannel::send_acked_frags() const
