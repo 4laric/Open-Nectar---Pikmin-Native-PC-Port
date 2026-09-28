@@ -149,15 +149,18 @@ Bank defaultBank() {
     };
     // Retail (P2_GROINK_ATTACK.md, attack1.bca sha 98fab1f1...): 44 frames.
     bank.clip[AnimAttack] = make(44, {{11, Key2}, {22, Key3}, {25, Key4}, {32, Key5}});
-    // PLACEHOLDERS (no retail registry in this checkout). Looping clips get a
-    // LOOP_START/LOOP_END pair so the source finishMotion -> END exit exists.
-    bank.clip[AnimWalk] = make(40, {{1, KeyLoopStart}, {20, Key2}, {38, KeyLoopEnd}});
-    bank.clip[AnimTurn] = make(30, {{1, KeyLoopStart}, {28, KeyLoopEnd}});
+    // Retail key events for the other clips (minihoudai/enemyanimmgr.txt,
+    // disc-verified in the root docs/PIKMIN2_CANNON_PROJECTILE_ASSETS.md:102).
+    // Their total frame counts are NOT known here: the counts below are
+    // PLACEHOLDERS a few frames past the last event, replaced by the staged
+    // bank (bca durations).
+    bank.clip[AnimWalk] = make(36, {{10, KeyLoopStart}, {18, Key2}, {25, KeyLoopEnd}});
     bank.clip[AnimSearch] = make(60, {});
-    bank.clip[AnimFlick] = make(40, {{15, Key2}});
-    bank.clip[AnimDead] = make(60, {{20, Key2}, {40, Key3}});
-    bank.clip[AnimCarry] = make(30, {});
-    bank.clip[AnimRebirth] = make(60, {{20, Key2}, {40, Key3}});
+    bank.clip[AnimTurn] = make(30, {{5, KeyLoopStart}, {16, KeyLoopEnd}});
+    bank.clip[AnimFlick] = make(40, {{10, Key2}});
+    bank.clip[AnimDead] = make(70, {{32, Key2}, {52, Key3}});
+    bank.clip[AnimCarry] = make(40, {{10, KeyLoopStart}, {29, KeyLoopEnd}});
+    bank.clip[AnimRebirth] = make(60, {{32, Key2}, {45, Key3}});
     for (int a = 0; a < AnimCount; ++a) bank.clip[a].name = animDefaultName(a);
     // PLACEHOLDER kuti basis: forward +Z, up +Y, 30 up / 20 ahead of the root.
     bank.muzzle = {{0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f}, {-1.0f, 0.0f, 0.0f}, {0.0f, 30.0f, 20.0f}};

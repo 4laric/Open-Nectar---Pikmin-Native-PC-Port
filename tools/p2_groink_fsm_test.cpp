@@ -157,7 +157,7 @@ int main() {
         std::string err;
         check(parseBank(text, b, err), "bank parses");
         check(b.clip[AnimAttack].staged && b.clip[AnimAttack].poses.size() == 3 && b.muzzleStaged, "bank clip + muzzle");
-        check(!b.clip[AnimWalk].staged && b.clip[AnimWalk].frames == 40, "unlisted clip keeps fallback");
+        check(!b.clip[AnimWalk].staged && b.clip[AnimWalk].frames == 36 && b.clip[AnimWalk].events.size() == 3, "unlisted clip keeps fallback");
         std::istringstream bad("P2_GROINK_BANK_1 1\nclip 3 attack1 44 1 50 2 0\nEND\n");
         Bank c = defaultBank();
         check(!parseBank(bad, c, err), "event beyond clip fails closed");

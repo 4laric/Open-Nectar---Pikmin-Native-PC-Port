@@ -30,8 +30,9 @@
 //    source partless damage/4 (damageCallBack) is not reproduced.
 //  * doSimulationGround blends x/z only; y, gravity and map collision stay
 //    with the P1 host, which integrates the returned velocity.
-//  * Clip timing: attack1 is retail; the other seven clips and the kuti
-//    muzzle are placeholders until the run stages p2-groink-bank.txt.
+//  * Clip timing: attack1 is retail; the other seven clips have retail key
+//    events but placeholder frame counts, and the kuti muzzle is a
+//    placeholder, until the run stages p2-groink-bank.txt.
 //  * randFloat/randInt/randWeightFloat use a per-actor LCG (generator seed);
 //    atan2/sin/cos replace the JMAAtan2Radian and dolsin/dolcos tables.
 //  * Stone/earthquake/bitter/movie hooks and all effects/sounds are not
@@ -130,8 +131,9 @@ struct Bank {
 };
 // Fallback bank used when the run stages no p2-groink-bank.txt. attack1 is
 // the retail GPVE01 contract recorded in engine/tools/P2_GROINK_ATTACK.md
-// (44 frames; events (11,2) (22,3) (25,4) (32,5)); every other clip and the
-// muzzle are PLACEHOLDERS that only keep the FSM progressing.
+// (44 frames; events (11,2) (22,3) (25,4) (32,5)); the other clips carry the
+// retail key events but PLACEHOLDER frame counts, and the muzzle is a
+// placeholder. The root stages the real bank as p2-groink-bank.txt.
 Bank defaultBank();
 // p2-groink-bank.txt (see the .cpp for the grammar). Clips are keyed by
 // AnimID; a missing clip keeps its fallback. Fails closed on malformed rows.
