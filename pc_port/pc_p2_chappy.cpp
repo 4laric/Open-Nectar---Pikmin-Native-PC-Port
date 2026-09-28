@@ -1178,7 +1178,7 @@ void logKingFlickStart(BTeki* actor, const ChappyFsm& s, unsigned generator, con
 }
 
 // Source StateFlick KEYEVENT_3 (trample = true; kingChappyState.cpp:864-918)
-// and StateWarCry KEYEVENT_4 (trample = false; :1690-1742) with the retail
+// and StateWarCry KEYEVENT_4 (trample = false; :1620-1659) with the retail
 // fp24/fp08 trample and fp16-fp19 shake (pc_p2_chappy_mouth.h king::).
 // Order: trample (InteractPress), flickNearbyPikmin, flickStickPikmin,
 // flickNearbyNavi unless a captain was trampled; then mFlickTimer = 0.
@@ -1742,7 +1742,7 @@ void pc_p2_chappy_update(BTeki* actor)
             actor->mVelocity.set(drive);
             break;
         }
-        case 4: { // WarCry: source StateWarCry (kingChappyState.cpp:1650-1760),
+        case 4: { // WarCry: source StateWarCry (kingChappyState.cpp:1588-1680),
                   // cry.bca; KEYEVENT_4 (frame 65) shakes off stuck and nearby
                   // Pikmin and nearby captains and resets the flick timer.
             stop(actor);

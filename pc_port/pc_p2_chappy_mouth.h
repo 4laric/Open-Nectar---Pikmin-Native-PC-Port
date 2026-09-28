@@ -682,8 +682,9 @@ inline Census census(const Vec3& actor, float heading, const Candidate* piki, in
 //     enemyBase.cpp:2716-2733);
 //   * below half life, proper fp13 (0.5) of the starts become WarCry.
 // The timer is reset only by the shake itself (StateFlick KEYEVENT_3
-// kingChappyState.cpp:914, StateWarCry KEYEVENT_4 :1742), the bomb damage
-// event (:1658) and doFinishStoneState (kingChappy.cpp:947).
+// kingChappyState.cpp:914, StateWarCry KEYEVENT_4 :1658), the bomb damage
+// event (StateDamage KEYEVENT_4 :1742) and doFinishStoneState
+// (kingChappy.cpp:947).
 // StateFlick KEYEVENT_3 (kingChappyState.cpp:864-918): InteractPress
 // (general fp24) on Pikmin and captains inside the trampling disc (proper fp08
 // around mFootPosition = position - 10 * facing, kingChappy.cpp:233-235, y in
@@ -691,7 +692,7 @@ inline Census census(const Vec3& actor, float heading, const Candidate* piki, in
 // stuck to the King), flickStickPikmin (general fp16 chance, angle
 // facing + pi) and, only when no captain was trampled, flickNearbyNavi
 // (3D < fp19), all with knockback fp17 and damage fp18
-// (enemyAction.cpp:768-850). StateWarCry KEYEVENT_4 (:1690-1742) does the
+// (enemyAction.cpp:768-850). StateWarCry KEYEVENT_4 (:1620-1659) does the
 // same three flicks without the trample.
 // Retail values: output/p2play/content/KingChappy/enemyparm.txt; key frames:
 // enemyanimmgr.txt (flick.bca 30:2 35:3, cry.bca 65:4).
