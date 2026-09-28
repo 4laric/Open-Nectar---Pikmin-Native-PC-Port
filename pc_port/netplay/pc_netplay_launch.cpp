@@ -6,6 +6,7 @@
 #include "netplay/pc_netplay_ice.h"
 #include "netplay/pc_netplay_input_sel.h"
 #include "netplay/pc_netplay_launch_util.h"
+#include "netplay/pc_netplay_transfer.h"
 #include "settings/pc_settings.h"
 #include "pc_coop.h"
 
@@ -28,11 +29,15 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <winioctl.h>
 #else
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #endif
+
+// Netplay M4 lane B2: pins the settings file (pc_settings.cpp, netplay builds).
+void pc_settings_pin_config_path(const char* absolutePath);
 
 namespace {
 
@@ -43,6 +48,8 @@ PcNetplayLaunch sSetup;
 // whole process because every later consumer holds the pointer.
 std::vector<std::string> sArgStore;
 std::vector<char*> sArgv;
+// M4 lane B2: the host's P2 sidecar source folder (its --bootstrap folder).
+std::string sP2SidecarDir;
 
 [[noreturn]] void die(const char* fmt, ...)
 {
@@ -201,6 +208,175 @@ bool dir_writable(const std::string& dir)
 	return true;
 }
 
+// ---- M4 lane B2 (issue #885): P2 play directory helpers ----
+bool is_dir(const std::string& path)
+{
+#ifdef _WIN32
+	const DWORD a = GetFileAttributesA(path.c_str());
+	return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY) != 0;
+#else
+	struct stat st;
+	return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+#endif
+}
+
+std::string absolute_path(const std::string& path)
+{
+#ifdef _WIN32
+	char buf[4096];
+	const DWORD n = GetFullPathNameA(path.c_str(), sizeof(buf), buf, nullptr);
+	if (n == 0 || n >= sizeof(buf)) return std::string();
+	std::string p = forward_slashes(std::string(buf, n));
+#else
+	char buf[4096];
+	if (realpath(path.c_str(), buf) == nullptr) return std::string();
+	std::string p(buf);
+#endif
+	while (p.size() > 3 && p.back() == '/') p.pop_back();
+	return p;
+}
+
+std::string current_dir()
+{
+#ifdef _WIN32
+	char buf[4096];
+	const DWORD n = GetCurrentDirectoryA(sizeof(buf), buf);
+	if (n == 0 || n >= sizeof(buf)) return std::string();
+	return forward_slashes(std::string(buf, n));
+#else
+	char buf[4096];
+	return getcwd(buf, sizeof(buf)) != nullptr ? std::string(buf) : std::string();
+#endif
+}
+
+bool change_dir(const std::string& path)
+{
+#ifdef _WIN32
+	return SetCurrentDirectoryA(path.c_str()) != 0;
+#else
+	return chdir(path.c_str()) == 0;
+#endif
+}
+
+// Directory junction link -> target (Windows: an NTFS mount point, which
+// needs no privilege; elsewhere a directory symlink). The junction lives in
+// this run's private play/ folder; nothing ever writes through it (the game
+// only reads assets/), and it is removed with the run folder by rmdir, which
+// never follows it.
+bool make_junction(const std::string& link, const std::string& target, std::string* err)
+{
+#ifdef _WIN32
+	auto widen = [](const std::string& s) {
+		const int n = MultiByteToWideChar(CP_ACP, 0, s.c_str(), (int)s.size(), nullptr, 0);
+		std::wstring w((size_t)(n > 0 ? n : 0), L'\0');
+		if (n > 0) MultiByteToWideChar(CP_ACP, 0, s.c_str(), (int)s.size(), &w[0], n);
+		return w;
+	};
+	std::wstring wtarget = widen(target);
+	wchar_t full[4096];
+	const DWORD fn = GetFullPathNameW(wtarget.c_str(), 4096, full, nullptr);
+	if (fn == 0 || fn >= 4096) {
+		*err = "cannot resolve " + target;
+		return false;
+	}
+	std::wstring print(full, fn);
+	while (print.size() > 3 && (print.back() == L'\\' || print.back() == L'/')) print.pop_back();
+	const std::wstring subst = std::wstring(1, L'\\') + L"??" + std::wstring(1, L'\\') + print;
+	const std::wstring wlink = widen(link);
+	if (!CreateDirectoryW(wlink.c_str(), nullptr)) {
+		*err = "cannot create " + link;
+		return false;
+	}
+	HANDLE h = CreateFileW(wlink.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+	                       FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+	if (h == INVALID_HANDLE_VALUE) {
+		RemoveDirectoryW(wlink.c_str());
+		*err = "cannot open " + link;
+		return false;
+	}
+	// REPARSE_DATA_BUFFER, MountPointReparseBuffer variant: an 8-byte header
+	// (tag, data length, reserved), then four USHORT offsets/lengths and the
+	// substitute and print names, each NUL-terminated.
+	const size_t substBytes = subst.size() * sizeof(wchar_t);
+	const size_t printBytes = print.size() * sizeof(wchar_t);
+	const size_t dataLen    = 8 + substBytes + sizeof(wchar_t) + printBytes + sizeof(wchar_t);
+	std::vector<uint8_t> buf(8 + dataLen, 0);
+	auto put16 = [&](size_t at, size_t v) {
+		buf[at]     = (uint8_t)(v & 0xFF);
+		buf[at + 1] = (uint8_t)((v >> 8) & 0xFF);
+	};
+	const DWORD tag = IO_REPARSE_TAG_MOUNT_POINT;
+	memcpy(buf.data(), &tag, 4);
+	put16(4, dataLen);
+	put16(8, 0);                                  // SubstituteNameOffset
+	put16(10, substBytes);                        // SubstituteNameLength
+	put16(12, substBytes + sizeof(wchar_t));      // PrintNameOffset
+	put16(14, printBytes);                        // PrintNameLength
+	memcpy(buf.data() + 16, subst.data(), substBytes);
+	memcpy(buf.data() + 16 + substBytes + sizeof(wchar_t), print.data(), printBytes);
+	DWORD ret = 0;
+	const BOOL ok = DeviceIoControl(h, FSCTL_SET_REPARSE_POINT, buf.data(), (DWORD)buf.size(), nullptr, 0, &ret, nullptr);
+	CloseHandle(h);
+	if (!ok) {
+		RemoveDirectoryW(wlink.c_str());
+		*err = "cannot make the junction " + link + " (error " + std::to_string((unsigned long)GetLastError()) + ")";
+		return false;
+	}
+	return true;
+#else
+	if (symlink(target.c_str(), link.c_str()) != 0) {
+		*err = "cannot link " + link;
+		return false;
+	}
+	return true;
+#endif
+}
+
+// Host: copies the P2 sidecar set (regular files directly in `from` whose
+// names match ^(p2|sarai)-[a-z0-9-]+\.txt$) into `to`. Returns the count.
+bool copy_sidecars(const std::string& from, const std::string& to, size_t* count, size_t* bytes, std::string* err)
+{
+	*count = 0;
+	*bytes = 0;
+	std::vector<std::string> names;
+#ifdef _WIN32
+	WIN32_FIND_DATAA fd;
+	HANDLE h = FindFirstFileA((from + "/*").c_str(), &fd);
+	if (h == INVALID_HANDLE_VALUE) {
+		*err = "cannot list " + from;
+		return false;
+	}
+	do {
+		if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 && pc_netplay_xfer::sidecar_name_ok(fd.cFileName))
+			names.push_back(fd.cFileName);
+	} while (FindNextFileA(h, &fd));
+	FindClose(h);
+#else
+	*err = "P2 sidecar copy needs Windows here";
+	return false;
+#endif
+	std::sort(names.begin(), names.end());
+	for (const std::string& n : names) {
+		std::string data;
+		const long got = read_file_bounded(from + "/" + n, pc_netplay_xfer::kMaxBundleFileBytes, &data);
+		if (got < 0 || (size_t)got > pc_netplay_xfer::kMaxBundleFileBytes) {
+			*err = "sidecar " + n + " is unreadable or too large";
+			return false;
+		}
+		if (!write_file(to + "/" + n, data)) {
+			*err = "cannot write " + to + "/" + n;
+			return false;
+		}
+		++*count;
+		*bytes += data.size();
+	}
+	if (*bytes > pc_netplay_xfer::kMaxSidecarTotal) {
+		*err = "the sidecar set is larger than 2 MiB";
+		return false;
+	}
+	return true;
+}
+
 // The run_pair.py profile (foh-day2, identity placements, 25-repair goal,
 // red start, 10 Flarlic), with a fresh FINGERPRINT per session so every
 // launcher session is its own campaign. Its SESSION line is a placeholder:
@@ -304,13 +480,67 @@ void parse_captains(const std::string& block)
 	}
 }
 
-const char* kP2Refusal =
-    "this seed uses P2 enemies (ENEMY_P2). P2 seeds read per-run sidecar files from the "
-    "working directory (p2-*-actors/bank/profile.txt, an assets/ overlay and "
-    "p2-binding-receipt.json, several hundred KB) that a connection code cannot carry and the "
-    "handshake does not check, so the two players would silently run different enemies. "
-    "Netplay sessions support seeds without ENEMY_P2 (or the default bootstrap: leave out "
-    "--bootstrap).";
+// M4 lane B2: where the P2 overlay comes from. Runs before any run folder
+// exists, so every refusal leaves nothing behind.
+void resolve_p2_overlay(int argc, char** argv, const char* bootCli)
+{
+	const char* assetsArg = argv_value(argc, argv, "--netplay-p2-assets");
+	if (sSetup.isHost && assetsArg != nullptr)
+		die("--netplay-p2-assets is joiner-only: the host's P2 overlay is <its --bootstrap folder>/assets");
+	if (!sSetup.p2) {
+		if (assetsArg != nullptr)
+			die("--netplay-p2-assets is only for P2 seeds; %s has no ENEMY_P2", sSetup.isHost ? "--bootstrap" : "this offer");
+		return;
+	}
+	if (sSetup.isHost) {
+		const std::string boot = absolute_path(bootCli != nullptr ? bootCli : "");
+		const size_t slash = boot.find_last_of('/');
+		const std::string dir = slash == std::string::npos ? std::string() : boot.substr(0, slash);
+		sSetup.p2AssetsDir = dir.empty() ? std::string() : dir + "/assets";
+		if (sSetup.p2AssetsDir.empty() || !is_dir(sSetup.p2AssetsDir))
+			die("this seed uses P2 enemies (ENEMY_P2), but its folder has no assets/ overlay (%s); host from the "
+			    "seed's own folder",
+			    sSetup.p2AssetsDir.c_str());
+		sP2SidecarDir = dir;
+	} else {
+		if (assetsArg == nullptr)
+			die("this offer is a P2 seed (ENEMY_P2): pass --netplay-p2-assets <folder> with your own copy of the "
+			    "seed's P2 assets overlay (the one the host plays from); it is checked, never sent");
+		sSetup.p2AssetsDir = absolute_path(assetsArg);
+		if (sSetup.p2AssetsDir.empty() || !is_dir(sSetup.p2AssetsDir))
+			die("--netplay-p2-assets %s is not a folder", assetsArg);
+	}
+}
+
+// M4 lane B2: the P2 play directory, made the working directory here (before
+// pc_settings_init and every cwd-relative asset or sidecar read).
+void setup_play_dir()
+{
+	const std::string original = current_dir();
+	if (original.empty()) die("cannot read the working directory");
+	sSetup.settingsPath = original + "/pikmin_settings.conf";
+	sSetup.playDir      = play_dir(sSetup.runDir);
+	if (!make_dirs(sSetup.playDir)) die("cannot create %s", sSetup.playDir.c_str());
+	std::string err;
+	if (!make_junction(sSetup.playDir + "/assets", sSetup.p2AssetsDir, &err)) die("%s", err.c_str());
+	size_t copied = 0, bytes = 0;
+	if (sSetup.isHost && !copy_sidecars(sP2SidecarDir, sSetup.playDir, &copied, &bytes, &err))
+		die("cannot stage the P2 sidecars: %s", err.c_str());
+	// Paths the session opens later stay the ones the player gave.
+	if (!sSetup.codeOut.empty()) sSetup.codeOut = absolute_path(sSetup.codeOut);
+	if (!sSetup.answerIn.empty()) sSetup.answerIn = absolute_path(sSetup.answerIn);
+	pc_settings_pin_config_path(sSetup.settingsPath.c_str());
+	if (!change_dir(sSetup.playDir)) die("cannot enter %s", sSetup.playDir.c_str());
+	printf("[netplay] launch: P2 seed: working directory %s (assets -> %s)\n", sSetup.playDir.c_str(),
+	       sSetup.p2AssetsDir.c_str());
+	if (sSetup.isHost)
+		printf("[netplay] launch: P2 sidecars: %llu files (%llu B) copied from %s\n", (unsigned long long)copied,
+		       (unsigned long long)bytes, sP2SidecarDir.c_str());
+	else
+		printf("[netplay] launch: P2 sidecars arrive from the host before the session starts\n");
+	printf("[netplay] launch: settings file pinned to %s\n", sSetup.settingsPath.c_str());
+	fflush(stdout);
+}
 
 } // namespace
 
@@ -347,7 +577,8 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 	const bool hostIce   = argv_present(argc, argv, "--netplay-host-ice");
 	const bool joinIce   = argv_present(argc, argv, "--netplay-join-ice");
 	const char* launcherOnly[] = { "--bootstrap", "--netplay-code-out", "--netplay-answer-in",
-		                           "--netplay-test-hidden", "--netplay-test-ticks" };
+		                           "--netplay-test-hidden", "--netplay-test-ticks",
+		                           "--netplay-p2-assets" };
 	if (!hostIce && !joinIce) {
 		for (const char* flag : launcherOnly) {
 			if (argv_present(argc, argv, flag))
@@ -477,11 +708,13 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 	{
 		std::string err;
 		bool p2 = false;
-		if (!validate_bootstrap(boot, &err, &p2)) {
-			if (p2) die("refusing %s: %s", sSetup.isHost ? "--bootstrap" : "the offer's bootstrap", kP2Refusal);
+		if (!validate_bootstrap(boot, &err, &p2))
 			die("refusing %s: %s", sSetup.isHost ? "--bootstrap" : "the offer's bootstrap", err.c_str());
-		}
+		sSetup.p2 = p2;
 	}
+	// M4 lane B2: a P2 seed needs its overlay (refused here, before any run
+	// folder exists, when it is missing).
+	resolve_p2_overlay(argc, argv, sSetup.isHost ? argv_value(argc, argv, "--bootstrap") : nullptr);
 	std::string stamped;
 	{
 		std::string err;
@@ -562,6 +795,9 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 		rec += "input " + (sSetup.inputSpec.empty() ? std::string("auto") : sSetup.inputSpec) + "\n";
 		write_file(sSetup.runDir + "/launch.txt", rec);
 	}
+	// M4 lane B2: a P2 seed runs in <run>/play (after the records above, which
+	// read the original working directory's settings file).
+	if (sSetup.p2) setup_play_dir();
 
 	// ---- argv: feed the run bootstrap through the ordinary seed path ----
 	sArgStore.clear();

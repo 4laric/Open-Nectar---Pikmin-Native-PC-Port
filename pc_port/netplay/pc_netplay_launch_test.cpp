@@ -89,13 +89,26 @@ int main()
 		nul[5]          = '\0';
 		CHECK(!validate_bootstrap(nul, &err, &p2), "NUL bytes refused");
 		// The real 918-byte P2 seeds carry ENEMY_P2 (+ optional P2_PROXY_TIER).
+		// M4 lane B2: accepted and flagged P2 (the launcher runs them in a
+		// play/ directory); detection is token-based (review R13).
 		const std::string withP2 = "PIKMIN_RANDOMIZER 9\nSESSION " + kTok
 		                         + "\nENEMIES 0\nENEMY_P2 1 abc 1 5465461 76\nEND\n";
-		CHECK(!validate_bootstrap(withP2, &err, &p2) && p2, "ENEMY_P2 refused as the P2 refusal (M3)");
+		CHECK(validate_bootstrap(withP2, &err, &p2) && p2, "ENEMY_P2 accepted and flagged P2");
 		const std::string withTier = "PIKMIN_RANDOMIZER 9\nSESSION " + kTok + "\nP2_PROXY_TIER 1\nEND\n";
-		CHECK(!validate_bootstrap(withTier, &err, &p2) && p2, "P2_PROXY_TIER refused as P2");
+		CHECK(validate_bootstrap(withTier, &err, &p2) && p2, "P2_PROXY_TIER flagged P2");
 		const std::string crlfP2 = "PIKMIN_RANDOMIZER 9\r\nSESSION " + kTok + "\r\nENEMY_P2 1\r\nEND\r\n";
-		CHECK(!validate_bootstrap(crlfP2, &err, &p2) && p2, "ENEMY_P2 on a CRLF line refused");
+		CHECK(validate_bootstrap(crlfP2, &err, &p2) && p2, "ENEMY_P2 on a CRLF line flagged P2");
+		const std::string indented = "PIKMIN_RANDOMIZER 9\nSESSION " + kTok + "\n   \tENEMY_P2 1 abc 1 5 7\nEND\n";
+		CHECK(validate_bootstrap(indented, &err, &p2) && p2, "indented ENEMY_P2 flagged P2 (R13)");
+		const std::string joined = "PIKMIN_RANDOMIZER 9\nSESSION " + kTok + "\nENEMIES 0 ENEMY_P2 1 abc 1 5 7 END\n";
+		CHECK(validate_bootstrap(joined, &err, &p2) && p2, "ENEMY_P2 joined onto another line flagged P2 (R13)");
+		const std::string joinedTier = "PIKMIN_RANDOMIZER 9\nSESSION " + kTok + "\nEND P2_PROXY_TIER 1\n";
+		CHECK(validate_bootstrap(joinedTier, &err, &p2) && p2, "joined P2_PROXY_TIER flagged P2 (R13)");
+		CHECK(bootstrap_needs_p2("x\tP2_ANYTHING y") && bootstrap_needs_p2("ENEMY_P2") && !bootstrap_needs_p2("ENEMY_P21")
+		          && !bootstrap_needs_p2("XENEMY_P2 AP2_X") && !bootstrap_needs_p2("") && !bootstrap_needs_p2("p2_lower"),
+		      "token rules: whole ENEMY_P2 token or a P2_ prefix, case-sensitive");
+		CHECK(validate_bootstrap(boot("SESSION " + kTok + "\nENEMIES_P2X 1\n"), &err, &p2) && !p2,
+		      "a token merely containing P2 is not P2");
 		// m1: the u16 cap, 65535 accepted, 65536 refused.
 		std::string big = boot("SESSION " + kTok + "\n");
 		big.resize(kMaxBootstrapBytes, ' ');

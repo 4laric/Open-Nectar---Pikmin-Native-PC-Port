@@ -76,6 +76,20 @@
 namespace {
 
 constexpr const char* kConfigFilename = "pikmin_settings.conf";
+#if PIKI_NETPLAY_BUILD
+// Netplay M4 lane B2 (issue #885): a P2 netplay session runs with a per-run
+// play/ directory as its working directory; the launcher pins the settings
+// file to the absolute path of the ORIGINAL working directory's
+// pikmin_settings.conf, so the saveConfig choke point keeps working on the
+// player's own file. Empty = the historical cwd-relative name.
+std::string sConfigPathPin;
+#endif
+const char* configFilename() {
+#if PIKI_NETPLAY_BUILD
+    if (!sConfigPathPin.empty()) return sConfigPathPin.c_str();
+#endif
+    return kConfigFilename;
+}
 
 struct PcConfig {
     int windowWidth = 1280;
@@ -1004,6 +1018,14 @@ static void trimCString(char* text)
         text[--n] = '\0';
 }
 
+#if PIKI_NETPLAY_BUILD
+// Netplay M4 lane B2 (issue #885): see configFilename(). Called by the
+// launcher's pre-init (before pc_settings_init) for a P2 session only.
+void pc_settings_pin_config_path(const char* absolutePath) {
+    sConfigPathPin = absolutePath != nullptr ? absolutePath : "";
+}
+#endif
+
 unsigned char pc_settings_startup_language(void) {
     static unsigned char language = 0;
     static int seeded = 0;
@@ -1012,7 +1034,7 @@ unsigned char pc_settings_startup_language(void) {
         language = 0;
         if (const char* fromEnvironment = getenv("NECTAR_LANGUAGE")) {
             language = decodeLanguageCode(fromEnvironment, 0);
-        } else if (FILE* in = fopen(kConfigFilename, "r")) {
+        } else if (FILE* in = fopen(configFilename(), "r")) {
             char line[512];
             while (fgets(line, sizeof(line), in)) {
                 char* equals = strchr(line, '=');
@@ -1142,7 +1164,7 @@ std::string renderConfig(const PcConfig& c) {
 }
 
 void writeConfigText(const std::string& text) {
-    std::string path = std::string(kConfigFilename);
+    std::string path = std::string(configFilename());
     std::ofstream out(path, std::ios::out | std::ios::trunc);
     if (!out) {
         printf("[PC Settings] Failed to write %s\n", path.c_str());
@@ -1171,7 +1193,7 @@ void saveConfig() {
 
 void loadConfig() {
     sConfig.applyDefaults();
-    std::string path = std::string(kConfigFilename);
+    std::string path = std::string(configFilename());
     std::ifstream in(path, std::ios::in);
     if (!in) {
         printf("[PC Settings] No config file (%s); using defaults.\n", path.c_str());
@@ -5391,7 +5413,7 @@ bool sessionGuardedSave() {
     const std::string text = renderConfig(out);
     if (text == sDiskRender) {
         printf("[PC Settings] netplay session: no local change to save; %s left untouched\n",
-               kConfigFilename);
+               configFilename());
         return true;
     }
     writeConfigText(text);
@@ -5490,7 +5512,7 @@ void pc_settings_session_begin(const char* adoptBlock) {
     sSessionGuard = true;
     printf("[PC Settings] netplay session: the %d sim-relevant keys are locked for the session; "
            "%s keeps this player's own values\n",
-           countSessionFields(), kConfigFilename);
+           countSessionFields(), configFilename());
     if (adoptBlock != nullptr) {
         std::string diff;
         int changed = 0;
