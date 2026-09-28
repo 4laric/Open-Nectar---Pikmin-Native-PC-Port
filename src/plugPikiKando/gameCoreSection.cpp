@@ -2478,6 +2478,7 @@ void GameCoreSection::update()
 	}
 	pc_p2_hardlanes_update();
 	pc_p2_projectiles_update();
+	pc_p2_queen_teki_frame();
 	pc_p2_kabuto_fsm_update_stones();
 	pc_p2_bombsarai_teki_update_bombs();
 	pc_p2_long_legs_update_all();
