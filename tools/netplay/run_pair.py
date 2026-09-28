@@ -21,6 +21,20 @@ Expectations (--expect):
   refuse      both exit 4 with a '[netplay] handshake refused:' line
   disconnect  joiner is killed mid-session; host exits 0 with a
               '[netplay] disconnected:' line
+  --expect-hold N (M4 lane B1) implies sync and additionally requires
+              exactly N '[netplay] hold at' / 'held at' / 'resume at'
+              triples, identical on both peers (the per-peer held_ms is
+              compared separately), and no 'disconnected:' line.
+
+M4 lane B1 (issue #885) inputs: --bootstrap-template (both bootstraps from
+one template, {TOKEN} = run token for SESSION and FINGERPRINT),
+--host-stale-window START:SECONDS (the host refresher writes nothing in
+[START, START+SECONDS) wall seconds), --host-state-missing-until SECONDS
+(no host state.txt at all until then) and --host-session-json FILE (copied
+to <out>/session.json, the runner ledger the host reads). The summary adds
+the hold/resume lines, per-peer START_STAGE / [Pikmin Randomizer] /
+distinct navi-piki-teki-item tuple counts and the journal/mirror files
+present in each run dir.
 """
 
 import argparse
@@ -151,6 +165,7 @@ SCRUB_KEYS = (
     "PIKMIN_NETPLAY_TEST_LOAD_DELAY_MS",
     "PIKMIN_NETPLAY_TEST_SCRIPT_VIA_ACCUM",
     "PIKMIN_NETPLAY_RANDSTATE_STREAM",
+    "PIKMIN_NETPLAY_TEST_DEATHLINK_AS_ORDINARY",
 )
 
 
@@ -180,6 +195,67 @@ def launch(exe, run, boot, extra_args, env_extra, stdout_log, unthrottled=True):
         stdout=child_out, stderr=subprocess.STDOUT,
     )
     return proc, child_out
+
+
+def hold_lines(path):
+    """M4 lane B1: (hold, held, resume, held_ms) from one native log.
+
+    resume lines are canonicalised without their per-peer ` held_ms=<ms>`
+    suffix (wall time differs per peer); the ms values come back separately.
+    """
+    try:
+        text = Path(path).read_text(errors="replace")
+    except OSError:
+        return [], [], [], []
+    hold, held, resume, ms = [], [], [], []
+    for ln in text.splitlines():
+        if "[netplay] hold at frame=" in ln:
+            hold.append(ln[ln.index("hold at"):].strip())
+        elif "[netplay] held at frame=" in ln:
+            held.append(ln[ln.index("held at"):].strip())
+        elif "[netplay] resume at frame=" in ln:
+            body = ln[ln.index("resume at"):].strip()
+            if " held_ms=" in body:
+                body, _, val = body.partition(" held_ms=")
+                try:
+                    ms.append(float(val))
+                except ValueError:
+                    ms.append(-1.0)
+            resume.append(body)
+    return hold, held, resume, ms
+
+
+def hash_tuples(path, lo=None, hi=None):
+    """Distinct (navi, piki, teki, item) tuples of a hash log, i.e.
+    awk '{print $3,$4,$5,$6}' hashes.txt | sort -u | wc -l, optionally
+    restricted to ticks lo <= tick <= hi."""
+    seen = set()
+    try:
+        with open(path, "r", errors="replace") as f:
+            for line in f:
+                cols = line.split()
+                if len(cols) < 6:
+                    continue
+                try:
+                    tick = int(cols[0])
+                except ValueError:
+                    continue
+                if lo is not None and tick < lo:
+                    continue
+                if hi is not None and tick > hi:
+                    continue
+                seen.add(tuple(cols[2:6]))
+    except OSError:
+        return 0
+    return len(seen)
+
+
+def frame_of(line):
+    """Integer after 'frame=' in a canonical hold/held/resume line."""
+    try:
+        return int(line.split("frame=", 1)[1].split()[0])
+    except (IndexError, ValueError):
+        return None
 
 
 def count_lines(path):
@@ -251,7 +327,31 @@ def main(argv=None):
     p.add_argument("--join-state-script", type=Path, default=None,
                    help="M4a: schedule file for the joiner state.txt refresher "
                         "(negative control: a deliberately different schedule)")
+    p.add_argument("--bootstrap-template", type=Path, default=None,
+                   help="M4 B1: both peers' bootstrap from this template; {TOKEN} "
+                        "becomes the run token (SESSION and FINGERPRINT)")
+    p.add_argument("--host-stale-window", type=str, default=None, metavar="START:SECONDS",
+                   help="M4 B1: the host state.txt refresher writes nothing during "
+                        "[START, START+SECONDS) wall seconds (link goes stale -> HOLD)")
+    p.add_argument("--host-state-missing-until", type=float, default=None, metavar="SECONDS",
+                   help="M4 B1: the host has no state.txt at all until SECONDS "
+                        "(any existing file is removed first)")
+    p.add_argument("--host-session-json", type=Path, default=None,
+                   help="M4 B1: copied to parent^2(host run)/session.json, i.e. "
+                        "<out>/session.json (the runner mirror ledger)")
+    p.add_argument("--expect-hold", type=int, default=None, metavar="N",
+                   help="M4 B1: implies sync; exactly N hold/held/resume triples, "
+                        "identical on both peers, and 0 disconnected lines")
     a = p.parse_args(argv)
+    if a.expect_hold is not None:
+        a.expect = "sync"
+    stale_window = None
+    if a.host_stale_window:
+        try:
+            st0, _, dur = a.host_stale_window.partition(":")
+            stale_window = (float(st0), float(st0) + float(dur))
+        except ValueError:
+            raise SystemExit("--host-stale-window wants START:SECONDS")
 
     out = a.out.resolve()
     # Slice lane (issue #880): each peer gets a per-peer campaign dir.
@@ -273,9 +373,16 @@ def main(argv=None):
     token = uuid.uuid4().hex * 2
     token_join = token
     host_boot = host_run / "bootstrap.txt"
-    write_bootstrap(host_boot, token, a.profile, a.flarlic)
+    template = None
+    if a.bootstrap_template is not None:
+        template = a.bootstrap_template.read_text().replace("{TOKEN}", token)
+        host_boot.write_text(template)
+    else:
+        write_bootstrap(host_boot, token, a.profile, a.flarlic)
     join_boot = join_run / "bootstrap.txt"
-    if a.bootstrap_b is not None:
+    if template is not None and a.bootstrap_b is None:
+        join_boot.write_text(template)
+    elif a.bootstrap_b is not None:
         shutil.copyfile(str(a.bootstrap_b.resolve()), str(join_boot))
         if not a.no_restamp_session:
             # Re-stamp the per-run SESSION token to this run's token (the
@@ -325,6 +432,14 @@ def main(argv=None):
 
     for run in (host_run, join_run):
         (run / "save").mkdir(exist_ok=True)
+    if a.host_session_json is not None:
+        # B1: the host reads the runner ledger at parent^2(run)/session.json.
+        shutil.copyfile(str(a.host_session_json.resolve()), str(host_run.parent.parent / "session.json"))
+    if a.host_state_missing_until is not None:
+        try:
+            (host_run / "state.txt").unlink()
+        except FileNotFoundError:
+            pass
 
     # Per-peer scripted local inputs (brief: two different seeds).
     host_inputs = out / "host_inputs.pkni"
@@ -380,9 +495,15 @@ def main(argv=None):
 
     t0 = time.time()
 
-    def refresh_sched(run, sched):
+    def refresh_sched(run, sched, host=False):
         while not stop.is_set():
             el = time.time() - t0
+            if host and a.host_state_missing_until is not None and el < a.host_state_missing_until:
+                stop.wait(0.1)  # B1: no host state.txt at all yet
+                continue
+            if host and stale_window is not None and stale_window[0] <= el < stale_window[1]:
+                stop.wait(0.1)  # B1: stale link window, nothing written
+                continue
             cur = sched[0][1]
             for ft, line in sched:
                 if ft <= el:
@@ -397,8 +518,8 @@ def main(argv=None):
                 pass
             stop.wait(0.1)
 
-    threads = [threading.Thread(target=refresh_sched, args=(host_run, sched_host)),
-               threading.Thread(target=refresh_sched, args=(join_run, sched_join))]
+    threads = [threading.Thread(target=refresh_sched, args=(host_run, sched_host, True)),
+               threading.Thread(target=refresh_sched, args=(join_run, sched_join, False))]
     for t in threads:
         t.start()
 
@@ -479,6 +600,7 @@ def main(argv=None):
     ref_host = grep(host_log, "handshake refused")
     ref_join = grep(join_log, "handshake refused")
     dis_host = grep(host_log, "disconnected:")
+    dis_join = grep(join_log, "disconnected:")
     # M4a same-frame apply pair: the canonical randstate apply lines must be
     # identical on both peers (same gens at the same frames).
     app_host = apply_lines(host_log)
@@ -497,6 +619,33 @@ def main(argv=None):
         print(f"run_pair: apply host: {ln}")
     for ln in app_join[:12]:
         print(f"run_pair: apply join: {ln}")
+    # M4 lane B1 summary: hold/resume lines, gameplay proof, run-dir files.
+    hh = hold_lines(host_log)
+    hj = hold_lines(join_log)
+    print(f"run_pair: disconnected lines join={len(dis_join)}")
+    for who, (hold, held, resume, ms) in (("host", hh), ("join", hj)):
+        for ln in hold + held + resume:
+            print(f"run_pair: {who}: {ln}")
+        if ms:
+            print(f"run_pair: {who}: held_ms={','.join(f'{v:.0f}' for v in ms)}")
+    for who, log, hashes, run in (("host", host_log, host_hash, host_run),
+                                  ("join", join_log, join_hash, join_run)):
+        starts = len(grep(log, "START_STAGE"))
+        rand = len(grep(log, "[Pikmin Randomizer]"))
+        tuples = hash_tuples(hashes)
+        files = [n for n in ("checks.txt", "deaths.txt", "emperor.txt", "benefits-used.txt",
+                             "mirror-events.txt") if (run / n).exists()]
+        print(f"run_pair: {who}: START_STAGE={starts} randomizer_lines={rand} "
+              f"distinct_tuples={tuples} files={','.join(files) if files else '-'}")
+        for hold, resume in zip(hh[0], hh[2]):
+            hf, rf = frame_of(hold), frame_of(resume)
+            if hf is not None and rf is not None:
+                # tick = frame + 1: ticks <= H ran before the hold frame,
+                # ticks > R ran from the resume frame on.
+                pre = hash_tuples(hashes, hi=hf)
+                post = hash_tuples(hashes, lo=rf + 1)
+                print(f"run_pair: {who}: tuples before hold frame {hf}={pre} "
+                      f"after resume frame {rf}={post}")
 
     ok = True
     if a.expect == "sync":
@@ -512,6 +661,19 @@ def main(argv=None):
         if n_host != a.ticks or n_join != a.ticks:
             print(f"run_pair: FAIL: hash lines {n_host}/{n_join} != requested {a.ticks}")
             ok = False
+        if a.expect_hold is not None:
+            n = a.expect_hold
+            for who, (hold, held, resume, _ms) in (("host", hh), ("join", hj)):
+                if len(hold) != n or len(held) != n or len(resume) != n:
+                    print(f"run_pair: FAIL: {who} hold/held/resume counts "
+                          f"{len(hold)}/{len(held)}/{len(resume)} != {n}")
+                    ok = False
+            if hh[:3] != hj[:3]:
+                print("run_pair: FAIL: hold/held/resume lines differ between peers")
+                ok = False
+            if dis_host or dis_join:
+                print("run_pair: FAIL: disconnected lines present")
+                ok = False
     elif a.expect == "refuse":
         if rc_host != 4 or rc_join != 4:
             print(f"run_pair: FAIL: expected both exit 4, got {rc_host}/{rc_join}")
