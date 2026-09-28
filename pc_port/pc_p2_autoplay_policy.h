@@ -233,7 +233,8 @@ inline unsigned sourceForSpeciesName(const char* name)
 }
 
 inline bool isKoganeLike(unsigned source) { return source == 9; }
-inline bool isFlyer(unsigned source) { return source == 23 || source == 57 || source == 32 || source == 72; }
+// #244: 58 BombSarai hovers at fp01 and is engaged by throwing Pikmin onto it.
+inline bool isFlyer(unsigned source) { return source == 23 || source == 57 || source == 58 || source == 32 || source == 72; }
 
 // #884 round 4: KingChappy (53) keeps the captain OUT of the source
 // invisible range while attacking. Source searchTarget prefers a captain in

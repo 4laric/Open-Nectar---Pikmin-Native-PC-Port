@@ -2450,6 +2450,7 @@ void GameCoreSection::update()
 	pc_p2_hardlanes_update();
 	pc_p2_projectiles_update();
 	pc_p2_kabuto_fsm_update_stones();
+	pc_p2_bombsarai_teki_update_bombs();
 	pc_p2_long_legs_update_all();
 
 	if (GameStat::allPikis == 0 && GameStat::maxPikis > 0) {
@@ -4251,6 +4252,7 @@ void GameCoreSection::draw(Graphics& gfx)
 	pc_p2_king_draw(gfx);
 	pc_p2_tank_draw_water(gfx);
 	pc_p2_kabuto_fsm_draw_stones(gfx);
+	pc_p2_bombsarai_teki_draw_bombs(gfx);
 }
 
 /**
