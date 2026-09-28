@@ -1684,10 +1684,26 @@ void pc_window_netplay_input_trace(char* buf, int size) {
     if (buf == nullptr || size <= 0) return;
     const Uint32 flags = sWindow ? SDL_GetWindowFlags(sWindow) : 0;
     int n = std::snprintf(buf, (size_t)size,
-                          "focus=%d accept=%d ignKb=%d ignPad=%d kbOwner=%d explicit=%d open=%d want=p%d#%d",
+                          "bg=%s kbfocus=%d focus=%d accept=%d ignKb=%d ignPad=%d kbOwner=%d explicit=%d open=%d want=p%d#%d",
+                          SDL_GetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS)
+                              ? SDL_GetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS) : "unset",
+                          SDL_GetKeyboardFocus() != nullptr ? 1 : 0,
                           (flags & SDL_WINDOW_INPUT_FOCUS) ? 1 : 0, pc_bbft_accept_input() ? 1 : 0,
                           (int)sNetplayIgnoreKeyboard, (int)sNetplayIgnoreGamepads, sKeyboardOwner,
                           (int)sPlayerDeviceExplicit, (int)sOpenPads.size(), sNetplayPadPlayer, sNetplayPadIndex);
+    // Background-read probe: the DualSense accelerometer is noisy at rest,
+    // so changing values prove HID reports are being read by this process.
+    if (!sOpenPads.empty() && n > 0 && n < size) {
+        SDL_GameController* pctl = sOpenPads[0].ctl;
+        static SDL_GameController* sProbeCtl = nullptr;
+        if (sProbeCtl != pctl && SDL_GameControllerHasSensor(pctl, SDL_SENSOR_ACCEL)) {
+            SDL_GameControllerSetSensorEnabled(pctl, SDL_SENSOR_ACCEL, SDL_TRUE);
+            sProbeCtl = pctl;
+        }
+        float acc[3] = { 0.0f, 0.0f, 0.0f };
+        const int ok = SDL_GameControllerGetSensorData(pctl, SDL_SENSOR_ACCEL, acc, 3);
+        n += std::snprintf(buf + n, (size_t)(size - n), " acc=%d:%.4f,%.4f,%.4f", ok, acc[0], acc[1], acc[2]);
+    }
     for (int p = 0; p < 2 && n > 0 && n < size; p++) {
         SDL_GameController* ctl = sControllers[p];
         n += std::snprintf(buf + n, (size_t)(size - n), " | P%d dev=%d/%d ctl=%d", p + 1, sPlayerDevice[p].kind,
@@ -1698,6 +1714,13 @@ void pc_window_netplay_input_trace(char* buf, int size) {
                                (int)SDL_GameControllerGetAxis(ctl, SDL_CONTROLLER_AXIS_LEFTX),
                                (int)SDL_GameControllerGetAxis(ctl, SDL_CONTROLLER_AXIS_LEFTY),
                                (int)SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_A));
+            SDL_Joystick* joy = SDL_GameControllerGetJoystick(ctl);
+            const SDL_JoystickGUID guid = SDL_JoystickGetGUID(joy);
+            const char* path = SDL_GameControllerPath(ctl);
+            if (n > 0 && n < size)
+                n += std::snprintf(buf + n, (size_t)(size - n), " drv=%c type=%d path=%.60s",
+                                   (guid.data[14] >= 32 && guid.data[14] < 127) ? (char)guid.data[14] : '?',
+                                   (int)SDL_GameControllerGetType(ctl), path ? path : "none");
         }
     }
 }
