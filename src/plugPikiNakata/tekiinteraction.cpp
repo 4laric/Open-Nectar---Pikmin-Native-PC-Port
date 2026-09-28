@@ -60,6 +60,16 @@ bool InteractAttack::actTeki(Teki* teki) immut
 	if (pc_p2_long_legs_receiver_rejects(teki, this)) {
 		return false; // registered Long Legs rejects damage while bitter-immune (Stay/Land)
 	}
+	// #173: registered Man-at-Legs, source Houdai::damageCallBack (stuck
+	// Pikmin only, Land 0.25x). -1 leaves every other actor untouched.
+	const f32 legsRate = pc_p2_long_legs_damage_rate(teki, mOwner);
+	if (legsRate == 0.0f) {
+		return false;
+	}
+	if (legsRate > 0.0f && legsRate != 1.0f) {
+		InteractAttack scaledLegs(mOwner, mCollPart, mDamage * legsRate, _10);
+		return teki->interact(TekiInteractionKey(TekiInteractType::Attack, &scaledLegs));
+	}
 	// #884: registered Emperor Bulblax, source KingChappy::damageCallBack
 	// (kingChappy.cpp:824-848). A refused hit takes no damage and adds no
 	// flick; a partless hit low under the chin is scaled by 0.2.
@@ -109,6 +119,9 @@ bool InteractBomb::actTeki(Teki* teki) immut
 	}
 	if (pc_p2_long_legs_receiver_rejects(teki, &attack)) {
 		return false; // registered Long Legs is bitter-immune to bombs too
+	}
+	if (pc_p2_long_legs_damage_rate(teki, mOwner) == 0.0f) {
+		return false; // #173: Man-at-Legs takes no bomb damage (stuck Pikmin only)
 	}
 	return teki->interact(
 	    TekiInteractionKey(TekiInteractType::Attack, stack_new(InteractAttack)(mOwner, nullptr, mDamage * bombFactor, false)));
