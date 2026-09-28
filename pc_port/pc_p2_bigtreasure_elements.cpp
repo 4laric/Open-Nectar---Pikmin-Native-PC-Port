@@ -10,7 +10,9 @@ bool P2BigTreasureElementRuntime::start(int weapon, const P2BigTreasureVec3& ori
                                         float groundHeight, float weaponHealth,
                                         float damagedPick, float pick01)
 {
+    const P2BigTreasureElementAim aim = mAim;
     reset();
+    mAim = aim;
     if (weapon < 0 || weapon >= P2BTWEAPON_Count) {
         return false;
     }
@@ -27,7 +29,8 @@ bool P2BigTreasureElementRuntime::start(int weapon, const P2BigTreasureVec3& ori
     case P2BTWEAPON_Water:
         return mWater.start(p2_bigtreasure_water_params(weaponHealth));
     case P2BTWEAPON_Elec: {
-        const P2BigTreasureVec3 joint{ origin.x, origin.y + kElecJointRaise, origin.z };
+        P2BigTreasureVec3 joint{ origin.x, origin.y + kElecJointRaise, origin.z };
+        if (mAim.set) joint = mAim.emit;
         return mElec.start(p2_bigtreasure_elec_params(weaponHealth, pick01), joint, 0.0f,
                            zero, zero, zero);
     }
@@ -72,6 +75,7 @@ void P2BigTreasureElementRuntime::reset()
     mOrigin = P2BigTreasureVec3{};
     mGasArms = 3;
     mPrevNodes = 0;
+    mAim = P2BigTreasureElementAim{};
 }
 
 void P2BigTreasureElementRuntime::tick(float delta, const P2BigTreasureElementHost& host,
@@ -92,9 +96,10 @@ void P2BigTreasureElementRuntime::tick(float delta, const P2BigTreasureElementHo
         break;
     case P2BTWEAPON_Water: {
         if (mWater.tickEmitter(delta)) {
-            const P2BigTreasureVec3 emit{ mOrigin.x, mGround + kWaterEmitRaise, mOrigin.z };
-            const P2BigTreasureVec3 target{ mOrigin.x, mGround,
-                                            mOrigin.z + kWaterTargetRange };
+            P2BigTreasureVec3 emit{ mOrigin.x, mGround + kWaterEmitRaise, mOrigin.z };
+            P2BigTreasureVec3 target{ mOrigin.x, mGround, mOrigin.z + kWaterTargetRange };
+            if (mAim.set) emit = mAim.emit;
+            if (mAim.set && mAim.haveWaterTarget) target = mAim.waterTarget;
             mWater.emitShot(emit, target, 0.0f, 0.0f, delta);
         }
         int groundHits = 0;
@@ -104,7 +109,8 @@ void P2BigTreasureElementRuntime::tick(float delta, const P2BigTreasureElementHo
         break;
     }
     case P2BTWEAPON_Elec: {
-        const P2BigTreasureVec3 joint{ mOrigin.x, mOrigin.y + kElecJointRaise, mOrigin.z };
+        P2BigTreasureVec3 joint{ mOrigin.x, mOrigin.y + kElecJointRaise, mOrigin.z };
+        if (mAim.set) joint = mAim.emit;
         int bounces = 0;
         mElec.tick(delta, joint, host.trace, host.context, &bounces);
         out.bounces = bounces;
@@ -127,8 +133,9 @@ bool P2BigTreasureElementRuntime::queryHit(const P2BigTreasureVec3& target, int*
     }
     switch (mWeapon) {
     case P2BTWEAPON_Fire: {
-        const P2BigTreasureVec3 emit{ mOrigin.x, mGround + 60.0f, mOrigin.z };
-        const P2BigTreasureVec3 dir{ 0.0f, 0.0f, 1.0f };
+        P2BigTreasureVec3 emit{ mOrigin.x, mGround + 60.0f, mOrigin.z };
+        P2BigTreasureVec3 dir{ 0.0f, 0.0f, 1.0f };
+        if (mAim.set) { emit = mAim.emit; dir = mAim.direction; }
         for (int i = 0; i < P2BigTreasureFirePolicy::kCapacity; ++i) {
             if (mFire.nodeRatio(i) <= 0.0f) continue;
             if (mFire.nodeHit(i, emit, dir, target)) {
@@ -139,7 +146,8 @@ bool P2BigTreasureElementRuntime::queryHit(const P2BigTreasureVec3& target, int*
         return false;
     }
     case P2BTWEAPON_Gas: {
-        const P2BigTreasureVec3 emit{ mOrigin.x, mGround + 60.0f, mOrigin.z };
+        P2BigTreasureVec3 emit{ mOrigin.x, mGround + 60.0f, mOrigin.z };
+        if (mAim.set) emit = mAim.emit;
         const float ratio = mGas.nodeRatio(0);
         for (int arm = 0; arm < mGasArms; ++arm) {
             if (mGas.nodeHit(emit, arm, ratio, target)) {

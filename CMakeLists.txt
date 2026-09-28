@@ -430,6 +430,8 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_bigtreasure_animclock.cpp
     pc_port/pc_p2_bigtreasure_elements.cpp
     pc_port/pc_p2_bigtreasure_receiver.cpp
+    pc_port/pc_p2_bigtreasure_own.cpp
+    pc_port/pc_p2_bigtreasure_teki.cpp
     pc_port/pc_randomizer.cpp
     pc_port/pc_p2_waterwraith.cpp
     pc_port/pc_p2_waterwraith_actor.cpp
@@ -1193,6 +1195,19 @@ add_executable(p2_bigtreasure_motion_test
 target_include_directories(p2_bigtreasure_motion_test PRIVATE pc_port)
 target_compile_options(p2_bigtreasure_motion_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_bigtreasure_motion_test COMMAND p2_bigtreasure_motion_test)
+
+# #246 OWN: Titan Dweevil campaign core (source-order FSM, IK gait, key-event
+# animator, damage routing, element aim). Engine-free.
+add_executable(p2_bigtreasure_own_test
+    tools/p2_bigtreasure_own_test.cpp
+    pc_port/pc_p2_bigtreasure_own.cpp
+    pc_port/pc_p2_bigtreasure.cpp
+    pc_port/pc_p2_bigtreasure_attacks.cpp
+    pc_port/pc_p2_bigtreasure_elements.cpp
+    pc_port/pc_p2_bigtreasure_receiver.cpp)
+target_include_directories(p2_bigtreasure_own_test PRIVATE pc_port)
+target_compile_options(p2_bigtreasure_own_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_bigtreasure_own_test COMMAND p2_bigtreasure_own_test)
 # Lane 31 (#443 / #175) engine-free Waterwraith/Tyre tests. -UNDEBUG keeps the
 # assert-based fixtures active in the Release native gate.
 add_executable(p2_waterwraith_policy_test

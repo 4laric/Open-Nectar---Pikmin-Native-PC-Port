@@ -59,6 +59,9 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     case 93: return 3; // TEKI_Chappy: BombOtakara (Volatile Dweevil)
     case 66: return 4; // TEKI_Swallow: Houdai (Man-at-Legs) proxy vehicle
     case 97: return 0; // TEKI_Frog: FminiHoudai (Gatling Groink pedestal) proxy vehicle
+    // #246 OWN: BigTreasure (Titan Dweevil) rides the TEKI_Swallow placement
+    // vehicle driven by pc_p2_bigtreasure_teki (source-order core).
+    case 73: return 4; // TEKI_Swallow: BigTreasure campaign actor
     default: return original;
     }
 }

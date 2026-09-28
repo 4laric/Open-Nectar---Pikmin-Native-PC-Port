@@ -50,6 +50,7 @@
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_kogane.h"
 #include "pc_p2_chappy.h"
+#include "pc_p2_bigtreasure_teki.h"
 #include "pc_randomizer.h"
 #include "Controller.h"
 
@@ -591,7 +592,9 @@ void pc_p2_autoplay_tick(void)
             c.z = actor->getPosition().z;
             c.dist = distXZ(naviX, naviZ, c.x, c.z);
             c.actor = actor;
-            c.health = actor->mHealth;
+            // #246: a bound Titan's weapons take the hits first; sense body +
+            // weapon HP so progress (and the damaged latch) is visible.
+            c.health = pc_p2_bigtreasure_teki_effective_health(actor, actor->mHealth);
             candidates.push_back(c);
         }
     }
