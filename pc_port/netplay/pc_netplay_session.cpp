@@ -40,8 +40,10 @@
 // ahead past 0.75 (0.05 slot per frame, capped at 10% of a slot), so an ahead
 // peer converges. Stall turns (no Advance) never spend a whole slot: they
 // pump the network and wait ~1 ms, so the 30 Hz budget is spent on ticks, not
-// waits. Short waits use one shared hires timer (sleep the bulk, spin only
-// the ~2 ms tail), so throttled pairs hold 30 Hz without pinning a core.
+// waits. Short waits use one shared high-resolution waitable timer (the
+// timer carries the bulk, only the ~1.5 ms tail spins), so throttled pairs
+// hold 30 Hz without pinning a core; timer-resolution power throttling is
+// ignored only while the session runs.
 // PIKMIN_NETPLAY_UNTHROTTLED=1 runs as fast as the session allows (tests).
 // Stall % is the wall-clock share of no-Advance turns (the slot wait lives on
 // advance turns and is never charged as stall); the logs also give effective
@@ -101,6 +103,7 @@
 #endif
 #include <windows.h>
 #include <mmsystem.h>
+#include <synchapi.h>
 #endif
 
 // pc_state_hash additions (M3): capture the last tick's hashes even when no
@@ -461,38 +464,64 @@ double now_ms()
 	return duration<double, std::milli>(steady_clock::now().time_since_epoch()).count();
 }
 
-// Polish fix round (review B1/M3/m8): one shared high-resolution timer setup.
-// Hidden (TEST_BACKGROUND) processes on Windows 11 do not get the
-// timeBeginPeriod(1) granularity they ask for (sleep_for(1ms) sleeps ~15.6ms),
-// which quantised both the handshake RTT samples and the 30 Hz slot wait.
-// The granularity is measured once; fine timers sleep the bulk and spin only
-// the last ~2 ms (M3: no pinned core for real players), while coarse timers
-// spin the short waits instead (accurate handshake polls and slot waits in
-// hidden test runs). timeBeginPeriod is paired with timeEndPeriod at exit.
+// Polish fix round (review B1/M3/m8, fix2 n1): one shared high-resolution
+// timer setup. Hidden (TEST_BACKGROUND) processes on Windows 11 do not get
+// the timeBeginPeriod(1) granularity they ask for (sleep_for(1ms) sleeps
+// ~15.6ms), which quantised both the handshake RTT samples and the 30 Hz
+// slot wait. The bulk of every short wait therefore runs on a waitable timer
+// created with CREATE_WAITABLE_TIMER_HIGH_RESOLUTION (declared in
+// synchapi.h); only a ~1.5 ms tail spins (n1: the spin tail stays small, at
+// most about 1-2 ms). The timer-resolution power-throttling opt-out
+// (SetProcessInformation / PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
+// resolved at runtime because its declaration needs _WIN32_WINNT >= 0x0602
+// while this build defaults to 0x0601) is held only while a netplay session
+// runs. The timeBeginPeriod path below is the fallback for when waitable
+// timer creation itself fails; it keeps the old single-sample coarse/fine
+// classification.
 #ifdef _WIN32
 static bool sHiresTimerReady = false;
-static bool sHiresCoarse = false; // true when Sleep(1) is quantised (~15.6 ms)
+static HANDLE sHiresTimer = NULL; // waitable timer for the bulk of short waits
+static bool sHiresTimerHighRes = false; // created with the high-resolution flag
+static bool sHiresPeriodBegun = false; // fallback path owns a timeBeginPeriod
+static bool sHiresCoarse = false; // fallback path only: Sleep(1) quantised
 static void hires_timer_teardown()
 {
-	timeEndPeriod(1);
+	if (sHiresTimer != NULL) {
+		CloseHandle(sHiresTimer);
+		sHiresTimer = NULL;
+	}
+	if (sHiresPeriodBegun) {
+		sHiresPeriodBegun = false;
+		timeEndPeriod(1);
+	}
 }
 static void ensure_hires_timer()
 {
 	if (sHiresTimerReady) return;
 	sHiresTimerReady = true;
-	// NOTE: SetProcessInformation(ProcessPowerThrottling,
-	// IGNORE_TIMER_RESOLUTION) would opt hidden instances out of the
-	// coarse tick, but MinGW does not declare it; instead the waits below
-	// are chosen from a one-time measurement, so hidden runs stay accurate
-	// by spinning while visible (real-player) runs sleep.
-	timeBeginPeriod(1);
-	std::atexit(hires_timer_teardown);
-	const double t0 = now_ms();
-	std::this_thread::sleep_for(std::chrono::milliseconds(1));
-	sHiresCoarse = (now_ms() - t0) > 5.0;
-	printf("[netplay] timer granularity: sleep(1ms) took %.1fms (%s)\n",
-	       now_ms() - t0, sHiresCoarse ? "coarse: spin waits" : "fine: sleep+spin tail");
+	HANDLE timer =
+	    CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+	if (timer != NULL) {
+		sHiresTimer = timer;
+		sHiresTimerHighRes = true;
+	} else {
+		timer = CreateWaitableTimerW(NULL, FALSE, NULL);
+		if (timer != NULL) sHiresTimer = timer;
+	}
+	if (sHiresTimer != NULL) {
+		printf("[netplay] timer path: %swaitable timer\n",
+		       sHiresTimerHighRes ? "high-resolution " : "plain ");
+	} else {
+		timeBeginPeriod(1);
+		sHiresPeriodBegun = true;
+		const double t0 = now_ms();
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		sHiresCoarse = (now_ms() - t0) > 5.0;
+		printf("[netplay] timer path: timeBeginPeriod fallback (waitable timer unavailable; %s)\n",
+		       sHiresCoarse ? "coarse: spin waits" : "fine: sleep+spin tail");
+	}
 	fflush(stdout);
+	std::atexit(hires_timer_teardown);
 }
 #else
 static inline void ensure_hires_timer() {}
@@ -504,12 +533,27 @@ static void sleep_hires_ms(double ms)
 	ensure_hires_timer();
 	const double start = now_ms();
 #ifdef _WIN32
-	// Fine timer: sleep the bulk, spin only the ~2 ms tail (low CPU, M3).
-	// Coarse timer (hidden runs): Sleep would quantise to 15.6 ms, so spin
-	// the whole short wait instead; the schedule stays drift-free either way.
-	if (!sHiresCoarse && ms > 2.5)
+	if (sHiresTimer != NULL) {
+		// Waitable-timer path: the timer carries the bulk, so Sleep
+		// granularity never matters; only the ~1.5 ms tail spins (n1).
+		const double bulk = ms - 1.5;
+		if (bulk > 0.5) {
+			LARGE_INTEGER due;
+			due.QuadPart = -(LONGLONG)(bulk * 10000.0); // ms to 100 ns units
+			if (SetWaitableTimer(sHiresTimer, &due, 0, NULL, NULL, FALSE)) {
+				WaitForSingleObject(sHiresTimer, INFINITE);
+			} else {
+				std::this_thread::sleep_for(
+				    std::chrono::duration<double, std::milli>(bulk));
+			}
+		}
+	} else if (!sHiresCoarse && ms > 2.5) {
+		// Fallback path only (waitable timer creation failed): sleep the
+		// bulk, spin only the ~2 ms tail. Coarse timers spin instead, as
+		// Sleep would quantise to 15.6 ms.
 		std::this_thread::sleep_for(
 		    std::chrono::duration<double, std::milli>(ms - 2.0));
+	}
 #else
 	if (ms > 2.5)
 		std::this_thread::sleep_for(
@@ -519,6 +563,54 @@ static void sleep_hires_ms(double ms)
 	while (now_ms() < deadline - 0.3) std::this_thread::yield();
 	while (now_ms() < deadline) {
 	}
+}
+
+// Fix2 n1: timer-resolution power-throttling opt-out, held only while a
+// netplay session runs. The constants and PROCESS_POWER_THROTTLING_STATE are
+// declared unconditionally, but the SetProcessInformation function
+// declaration needs _WIN32_WINNT >= 0x0602 while this build defaults to
+// 0x0601, so resolve it at runtime via GetProcAddress: on Windows 8+ it is
+// in kernel32, elsewhere the session simply runs without the opt-out.
+static void netplay_timer_power_opt(bool on)
+{
+#ifdef _WIN32
+	static bool resolved = false;
+	typedef BOOL(WINAPI* SetProcessInformationFn)(HANDLE, PROCESS_INFORMATION_CLASS, LPVOID, DWORD);
+	static SetProcessInformationFn fn = nullptr;
+	static bool active = false;
+	static bool unavailableLogged = false;
+	if (!resolved) {
+		resolved = true;
+		HMODULE kernel = GetModuleHandleW(L"kernel32.dll");
+		if (kernel != nullptr)
+			fn = (SetProcessInformationFn)GetProcAddress(kernel, "SetProcessInformation");
+	}
+	if (fn == nullptr) {
+		if (!unavailableLogged) {
+			unavailableLogged = true;
+			printf("[netplay] power-throttling opt-out: unavailable "
+			       "(SetProcessInformation not found)\n");
+			fflush(stdout);
+		}
+		return;
+	}
+	if (on == active) return;
+	PROCESS_POWER_THROTTLING_STATE state;
+	state.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+	state.ControlMask = PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+	state.StateMask = on ? PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION : 0;
+	if (fn(GetCurrentProcess(), ProcessPowerThrottling, &state, sizeof(state))) {
+		active = on;
+		printf("[netplay] power-throttling opt-out: %s\n",
+		       on ? "timer resolution ignored while session runs" : "restored");
+	} else {
+		printf("[netplay] power-throttling opt-out: failed (%lu)\n",
+		       (unsigned long)GetLastError());
+	}
+	fflush(stdout);
+#else
+	(void)on;
+#endif
 }
 
 const char* getenv_nonempty(const char* name)
@@ -939,6 +1031,8 @@ void stop_session()
 		delete sSock;
 		sSock = nullptr;
 	}
+	// Fix2 n1: the session is over, hand timer-resolution throttling back.
+	netplay_timer_power_opt(false);
 }
 
 void request_quit()
@@ -1753,6 +1847,9 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 			sSock->set_peer(sCfg.joinIp, sCfg.joinPort);
 		}
 		sLink = new pc_netplay_transport::GekkoLink(sSock);
+		// Fix2 n1: ignore timer-resolution power throttling while the
+		// session runs (restored in stop_session).
+		netplay_timer_power_opt(true);
 	}
 
 	if (pc_window_should_close()) {
@@ -1857,8 +1954,9 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 			double now = now_ms();
 			if (sNextTurnMs == 0) sNextTurnMs = now + kSlotMs;
 			if (now < sNextTurnMs) {
-				// Sleep the bulk, spin only the ~2 ms tail (M3): a full
-				// yield-spin pins a core per instance for the session.
+				// Wait the bulk on the high-resolution waitable timer, spin
+				// only the ~2 ms tail (M3/n1): a full yield-spin pins a core
+				// per instance for the session.
 				const double wait = sNextTurnMs - now;
 				if (wait > 2.5) sleep_hires_ms(wait - 2.0);
 				while (now_ms() < sNextTurnMs - 0.3) std::this_thread::yield();
