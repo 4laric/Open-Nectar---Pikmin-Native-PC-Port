@@ -159,8 +159,11 @@ void pc_netplay_det_reseed_for_new_day(int dayIndex, int stageId)
 	// Cosmetic stream: same hash with a fixed odd-xor so menu/draw-only draws
 	// never alias the sim stream, even for seed 0 / day 1 / stage 0.
 	pc_cosmetic_srand(hash ^ 0x9E3779B9u);
-	std::printf("[netplay-det] reseed day=%d stage=%d sessionSeed=%u hash=0x%08x\n", dayIndex, stageId,
-	    sessionSeed, hash);
+	// Slice lane (issue #880): annotate the day-boundary tick so single and
+	// pair runs can quote the exact tick where the next day's stage loads.
+	// Log-only; the RNG sequence and timing are untouched.
+	std::printf("[netplay-det] reseed day=%d stage=%d sessionSeed=%u hash=0x%08x tick=%u\n", dayIndex,
+	    stageId, sessionSeed, hash, sTick);
 	std::fflush(stdout);
 }
 

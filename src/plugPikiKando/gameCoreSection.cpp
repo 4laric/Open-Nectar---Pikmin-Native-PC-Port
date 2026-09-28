@@ -4196,6 +4196,19 @@ void GameCoreSection::endViews(Graphics& gfx, Camera* mainCamera)
  */
 void GameCoreSection::draw(Graphics& gfx)
 {
+#if defined(PIKI_PC_PORT)
+	// Day-end teardown (slice lane, issue #880): the results screen exits to
+	// the quitter, whose postUpdate runs exitStage() and softReset(). A stale
+	// draw of this section can still run afterwards with the stage managers
+	// released (exitStage() nulls naviMgr; the other managers are heap
+	// objects). Drawing that state dereferences released memory
+	// (e.g. naviMgr->refresh below). There is nothing meaningful to draw, so
+	// return early. Only reachable post-teardown, otherwise behaviour is
+	// unchanged. Same class as the #47/#48 setMovieNavi guard above.
+	if (naviMgr == nullptr) {
+		return;
+	}
+#endif
 	gfx.mCamera->mProjectionMatrix = gfx.mCamera->mPerspectiveMatrix;
 	gfx.mCamera->mProjectionMatrix.multiply(gfx.mCamera->mLookAtMtx);
 	bool advanceState = true;

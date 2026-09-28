@@ -254,8 +254,19 @@ def main(argv=None):
     a = p.parse_args(argv)
 
     out = a.out.resolve()
-    host_run = out / "host"
-    join_run = out / "join"
+    # Slice lane (issue #880): each peer gets a per-peer campaign dir.
+    # pc_randomizer.cpp derives it as bootstrap-grandparent + "campaign", so
+    # the run dirs sit at different depths to force different grandparents:
+    # parent^2(out/host/run) is out, while parent^2(out/join/peer/run) is
+    # out/join. Day-end writes a
+    # card save and a campaign checkpoint from inside the sim on both peers
+    # at the same tick; sharing one campaign dir makes the two writers
+    # collide on the same checkpoint file (filesystem rename error, the loser
+    # terminates and the pair disconnects). In production the peers are on
+    # different machines; per-peer dirs are the faithful layout, and they
+    # make the post-test save comparison meaningful.
+    host_run = out / "host" / "run"
+    join_run = out / "join" / "peer" / "run"
     host_run.mkdir(parents=True, exist_ok=True)
     join_run.mkdir(parents=True, exist_ok=True)
 
