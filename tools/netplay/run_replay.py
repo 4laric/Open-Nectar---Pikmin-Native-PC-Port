@@ -61,6 +61,12 @@ def main(argv=None):
                    help="also record inputs while replaying (identity check: must equal --replay)")
     p.add_argument("--profile", default="foh-day2")
     p.add_argument("--exe-args", nargs="*", default=[])
+    p.add_argument("--bootstrap-template", type=Path, default=None,
+                   help="M4d: bootstrap file to use instead of the built-in schema-5 one "
+                        "({TOKEN} = run token)")
+    p.add_argument("--state-line", default=None,
+                   help="M4d: state.txt line to refresh instead of the built-in schema-5 one "
+                        "({TOKEN} = run token)")
     a = p.parse_args(argv)
 
     run = a.out.resolve()
@@ -68,11 +74,18 @@ def main(argv=None):
 
     token = uuid.uuid4().hex * 2
     boot = run / "bootstrap.txt"
-    boot.write_text(
-        f"PIKMIN_RANDOMIZER 5\nSESSION {token}\nFINGERPRINT {token}\n"
-        f"PROFILE {a.profile}\nCATALOG gameplay-checks-v5\nPLACEMENT identity-v1\n"
-        f"GOAL 25\nDAYS repeat-day29-v1\nCOLOR red\nSTARTING_FLARLIC 10\nEND\n"
-    )
+    if a.bootstrap_template is not None:
+        boot.write_text(a.bootstrap_template.read_text().replace("{TOKEN}", token))
+    else:
+        boot.write_text(
+            f"PIKMIN_RANDOMIZER 5\nSESSION {token}\nFINGERPRINT {token}\n"
+            f"PROFILE {a.profile}\nCATALOG gameplay-checks-v5\nPLACEMENT identity-v1\n"
+            f"GOAL 25\nDAYS repeat-day29-v1\nCOLOR red\nSTARTING_FLARLIC 10\nEND\n"
+        )
+    if a.state_line is not None:
+        state_text = a.state_line.replace("{TOKEN}", token).strip() + "\n"
+    else:
+        state_text = f"PIKMIN_STATE 5 {token} 1 0 127 0 0 END\n"
 
     assets_link = run / "assets"
     if not assets_link.exists():
@@ -98,7 +111,7 @@ def main(argv=None):
     def refresh():
         while not done.is_set():
             pending = run / "state.tmp"
-            pending.write_text(f"PIKMIN_STATE 5 {token} 1 0 127 0 0 END\n")
+            pending.write_text(state_text)
             os.replace(pending, run / "state.txt")
             done.wait(0.1)
 
