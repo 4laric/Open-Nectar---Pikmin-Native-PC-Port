@@ -549,6 +549,19 @@ void pc_p2_breadbug_teki_setup() {
             loaded = true;
             loadParams();
             loadBank();
+            // One-shot census of the stage's pellets (read-only diagnosis of
+            // what a wandering Breadbug can find; fp14 search is 500).
+            if (pelletMgr) {
+                Iterator pit(pelletMgr);
+                CI_LOOP(pit) {
+                    Pellet* p = static_cast<Pellet*>(*pit);
+                    if (!p || !p->isAlive() || !p->mConfig) continue;
+                    std::printf("P2_BREADBUG_OWN_PELLET_CENSUS model=%s min=%d max=%d x=%.0f y=%.0f z=%.0f ufo=%d state=%d\n",
+                                p->mConfig->mModelId.mStringID, int(p->mConfig->mCarryMinPikis()),
+                                int(p->mConfig->mCarryMaxPikis()), p->mSRT.t.x, p->mSRT.t.y, p->mSRT.t.z,
+                                p->isUfoParts() ? 1 : 0, p->getState());
+                }
+            }
         }
         Binding& b = s[static_cast<BTeki*>(t)];
         b = Binding{};
