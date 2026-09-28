@@ -406,6 +406,8 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_groink_fsm.cpp
     pc_port/pc_p2_groink_teki.cpp
     pc_port/pc_p2_groink_fx.cpp
+    pc_port/pc_p2_breadbug_fsm.cpp
+    pc_port/pc_p2_breadbug_teki.cpp
     pc_port/pc_p2_projectiles.cpp
     pc_port/pc_p2_hardlanes.cpp
     pc_port/pc_p2_fuefuki_visual.cpp
@@ -1953,6 +1955,11 @@ target_compile_options(p2_groink_volley_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -
 add_test(NAME p2_groink_volley_test COMMAND p2_groink_volley_test)
 # #888 WP5: engine-free NormMiniHoudai/FixMiniHoudai source FSM (states,
 # animation key events, gun aim, 3-shell volleys, shake-off, death).
+# #898 Breadbug (PanModoki 38) engine-free source FSM.
+add_executable(p2_breadbug_fsm_test tools/p2_breadbug_fsm_test.cpp pc_port/pc_p2_breadbug_fsm.cpp)
+target_include_directories(p2_breadbug_fsm_test PRIVATE pc_port)
+target_compile_options(p2_breadbug_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_breadbug_fsm_test COMMAND p2_breadbug_fsm_test)
 add_executable(p2_groink_fsm_test tools/p2_groink_fsm_test.cpp pc_port/pc_p2_groink_fsm.cpp
     pc_port/pc_p2_groink.cpp pc_port/pc_p2_groink_attack.cpp pc_port/pc_p2_groink_volley.cpp
     pc_port/pc_p2_groink_hit.cpp pc_port/pc_p2_groink_target.cpp)
