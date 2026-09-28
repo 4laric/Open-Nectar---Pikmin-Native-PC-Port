@@ -303,6 +303,9 @@ struct Config {
     float corpseOutOfReach = 800.0f; // tdist past this at giveup names corpse_out_of_reach
     float koganeConfirm = 20.0f; // after Kogane damage, watch escapes then move on
     float kurageAttackMultiplier = 2.0f; // Kurage has high HP: longer attack window
+    // #246: the Titan Dweevil (73) soaks 4 x 6000 weapon HP before its 5000
+    // body HP is exposed; the bot keeps throwing for a longer window.
+    float titanAttackMultiplier = 3.0f;
     float saraiLowHeight = 120.0f; // Sarai thrown at only when within this height above ground (or grabbing)
     float throwRange = 260.0f; // XZ distance at which throws start
     float arriveRadius = 90.0f; // XZ distance considered "at" the Onion
@@ -1000,7 +1003,9 @@ private:
         }
         const bool sarai = in.targetSource == 23;
         const bool kurage = in.targetSource == 57 || in.targetSource == 72;
-        const float limit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout;
+        const bool titan = in.targetSource == 73;
+        const float limit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier
+                          : titan  ? cfg.attackTimeout * cfg.titanAttackMultiplier : cfg.attackTimeout;
         // Whistle first, then re-throw (bot-v4: real players do this):
         // - Sarai holding a Pikmin (targetGrabbing): whistle frees the grab;
         // - grabbed/thrown-off/burning squad (squadDistress: mouth-stuck,
@@ -1053,7 +1058,8 @@ private:
             // undamaged's bound + cooldown (forces throw windows) with the
             // kurage-aware limit both lanes used (unkilled limit == wlimit).
             {
-                const float wlimit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout;
+                const float wlimit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier
+                                   : titan  ? cfg.attackTimeout * cfg.titanAttackMultiplier : cfg.attackTimeout;
                 if (stateTime >= wlimit) {
                     giveUp(in, "attack_timeout");
                     finishTarget(in, /*killed*/ false);
