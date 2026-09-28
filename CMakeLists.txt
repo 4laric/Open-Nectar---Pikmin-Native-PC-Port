@@ -1134,7 +1134,7 @@ target_include_directories(p2_fuefuki_owner_death_test PRIVATE pc_port)
 target_compile_options(p2_fuefuki_owner_death_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_fuefuki_owner_death_test COMMAND p2_fuefuki_owner_death_test)
 
-# #245 OWN campaign policy: five engine-free regressions, each paired with a
+# #245 OWN campaign policy: six engine-free regressions, each paired with a
 # mutant build that injects the defect the case guards (WILL_FAIL). A case that
 # passes against its own mutant is not evidence.
 add_executable(p2_fuefuki_teki_policy_test tools/p2_fuefuki_teki_policy_test.cpp)
@@ -1142,7 +1142,8 @@ target_include_directories(p2_fuefuki_teki_policy_test PRIVATE pc_port)
 target_compile_options(p2_fuefuki_teki_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_fuefuki_teki_policy_test COMMAND p2_fuefuki_teki_policy_test)
 foreach(pair IN ITEMS "APPEAR_ZERO:appear_roll" "NO_HIDE:host_outputs" "TOKEN_UNUSED:multi_token"
-                      "NO_PANIC:owner_panic" "RING_IGNORED:ring_filter")
+                      "NO_PANIC:owner_panic" "RING_IGNORED:ring_filter"
+                      "PRESS_ALWAYS:press_gate")
     string(REPLACE ":" ";" parts "${pair}")
     list(GET parts 0 mutant)
     list(GET parts 1 testcase)

@@ -291,6 +291,25 @@ struct Commands {
     bool intruder = false;
 };
 
+// ------------------------------------------------------------------ press
+// Source Obj::pressCallBack / hipdropCallBack (Fuefuki.cpp:163-185): with a
+// presser, mCanStruggle and no EB_Bittered the beetle transits to Struggle and
+// the callback returns false, so PikiFlyingState::collisionCallback goes on to
+// latch the Pikmin; otherwise it returns true and the descending Pikmin does
+// NOT latch (pressCheck). A dead or already struggling beetle never accepts
+// (the flying callback only presses living enemies; Struggle clears the flag).
+inline bool pressAccepted(const P2FuefukiFsm& fsm, bool presser, bool bittered)
+{
+    const P2FuefukiFsmState st = fsm.getState();
+#ifdef P2_FUEFUKI_MUTANT_PRESS_ALWAYS
+    (void)bittered;
+    return presser && st != P2FuefukiFsmState::Dead;
+#else
+    return presser && fsm.getCanStruggle() && !bittered && st != P2FuefukiFsmState::Dead
+           && st != P2FuefukiFsmState::Struggle;
+#endif
+}
+
 // ------------------------------------------------------------------ actor
 class Actor {
 public:
