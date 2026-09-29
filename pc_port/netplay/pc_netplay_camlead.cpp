@@ -376,7 +376,9 @@ bool pc_netplay_camlead_predicting(void)
 
 int pc_netplay_camlead_drag_owner(void)
 {
-	return sArmed ? sRole : -1;
+	// Session-wide (also with the lead off): a routing fix for the joiner,
+	// not part of the lead.
+	return sSession ? sRole : -1;
 }
 
 void pc_netplay_camlead_note_snap(PcamCamera* cam)
@@ -504,6 +506,16 @@ void pc_netplay_camlead_end_presentation(Graphics& gfx)
 
 Camera* pc_netplay_camlead_control_camera(int pad, Camera* cam)
 {
-	if (!sArmed || !sLeadValid || pad != sRole) return cam;
-	return &sLeadCam;
+	if (!sSession || pad != sRole) return cam;
+	if (sArmed && sLeadValid) return &sLeadCam;
+	// This peer's own captain's camera, the one it presents. The second
+	// captain's Navi::mNaviCamera is P1's camera (finalSetup's second-captain
+	// setup copies it), so the joiner used to submit the yaw of P1's camera,
+	// not of its own view. Session-wide, lead on or off; for the host this
+	// is the same camera as before.
+	PcamCameraManager* mgr = (sRole == 1) ? cameraMgrP2 : cameraMgrP1;
+	if (mgr != nullptr && mgr->mCamera != nullptr && mgr->mCamera->mCamera != nullptr) {
+		return mgr->mCamera->mCamera;
+	}
+	return cam;
 }

@@ -15,8 +15,8 @@ differs from the resting view just before the event, as frames after the
 event's record index (0 = the frame the input is submitted, i.e. the next
 presented frame). A fifth event, a mouse free-camera drag injected with
 PIKMIN_NETPLAY_TEST_CAMERA_DRAG at a known frame, checks the drag routing:
-the drag is immediate in both modes, and with the lead on the joiner's own
-view turns (with the opt-out the joiner's drag still lands on P1's camera,
+the drag is immediate in both modes and turns each peer's own view (the
+routing fix is session-wide; the joiner's drag used to land on P1's camera,
 which the joiner never shows). It also compares the two runs' hash logs (the
 lead camera must not change the simulation) and prints the gameplay proof
 (START_STAGE on both peers, distinct navi/piki/teki/item tuples).
@@ -226,10 +226,9 @@ def main(argv=None):
                 lat_o = None if fo is None else fo - ev
                 table.append((delay, peer, kind, ev, lat_l, lat_o, okl and oko))
                 if kind == "drag":
-                    # Immediate in both modes on the host; the joiner's own
-                    # view only turns with the lead's drag routing.
-                    want_o = 0 if peer == "host" else None
-                    if lat_l != 0 or lat_o != want_o or not (okl and oko):
+                    # Immediate in both modes, on both peers (the drag goes
+                    # straight into the sim camera, no input delay).
+                    if lat_l != 0 or lat_o != 0 or not (okl and oko):
                         failures += 1
                 elif lat_l != 0 or lat_o != delay + 1 or not (okl and oko):
                     failures += 1

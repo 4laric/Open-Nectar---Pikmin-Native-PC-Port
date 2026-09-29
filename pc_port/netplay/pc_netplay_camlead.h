@@ -17,8 +17,11 @@
 //   - netplay only: every entry point is inert until the lockstep session
 //     calls pc_netplay_camlead_session_begin, which only netplay builds do;
 //   - opt-out: PIKMIN_NETPLAY_CAMERA_LEAD=0 renders the sim camera, exactly
-//     as before (the yaw sampler reads the sim camera too, and the
-//     free-camera drag keeps its per-slot routing).
+//     as before, and the yaw sampler reads that sim camera;
+//   - joiner fixes, session-wide (lead on or off): this peer's own pad
+//     samples the camera this peer presents for its own captain (the joiner
+//     used to sample P1's camera), and every local free-camera drag turns
+//     this peer's own captain's camera (the joiner's used to turn P1's).
 // Diagnostics: PIKMIN_NETPLAY_CAMERA_TRACE=1 logs one `[netplay] camlead`
 // line per presented frame; PIKMIN_NETPLAY_CAMERA_SHOT=<dir>:<f1>,<f2>,...
 // writes the presented frame at those GekkoNet frames as BMP files;
@@ -56,8 +59,9 @@ Camera* pc_netplay_camlead_view(int localPlayer, Camera* simView);
 // End of the presentation pass: puts gfx.mCamera back to the sim camera,
 // logs the trace line, and drops the correction when no view was presented.
 void pc_netplay_camlead_end_presentation(Graphics& gfx);
-// Local control-yaw sampler (navi.cpp): the camera whose yaw the local pad
-// `pad` submits. The lead camera while it is what the player sees.
+// Local control-yaw sampler (navi.cpp): the camera whose yaw pad `pad`
+// submits. In a session, for this peer's own pad: the lead camera while it is
+// presented, else this peer's own captain's sim camera. Otherwise `cam`.
 Camera* pc_netplay_camlead_control_camera(int pad, Camera* cam);
 // PcamCameraManager::update, right after the sim camera's own update and
 // before its vibration events: records the posture the sim camera shows.
@@ -68,8 +72,8 @@ void pc_netplay_camlead_note_snap(PcamCamera* cam);
 // True while the lead runs its prediction on the sim camera: camera sounds
 // are muted (they play when the sim applies the input).
 bool pc_netplay_camlead_predicting(void);
-// Free-camera drag routing (PcamCamera::control): the captain whose camera
-// takes every local drag in a lockstep session with the lead on, else -1
+// Free-camera drag routing (PcamCamera::control): in a lockstep session the
+// captain whose camera takes every local drag (this peer's own), else -1
 // (the drag keeps its per-slot routing).
 int pc_netplay_camlead_drag_owner(void);
 #endif

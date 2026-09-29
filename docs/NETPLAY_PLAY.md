@@ -118,12 +118,15 @@ recentring behind your captain (L click), zoom (R) and the camera angle (Z).
 The camera still follows your captain where the game actually has them, so
 during a fast turn the view swings round straight away and your captain
 starts walking in the new direction a moment later, the same moment as any
-other move. Your stick always means "the way the camera was facing when you
-pushed it", as before. With the Free Camera mod, the mouse and the right
-stick turn your own captain's camera on both PCs (the joiner's mouse used to
-do nothing). To go back to the old camera, which moves with the same delay
-as your captain, set `PIKMIN_NETPLAY_CAMERA_LEAD=0` before starting the
-game (either player; it only changes that player's own view). The console
+other move. Your stick always means "the way your camera was facing on your
+screen when you pushed it", for the host and the joiner alike (the joiner's
+stick used to follow the host captain's camera instead, so after either
+player turned a camera the joiner walked off at an angle). With the Free
+Camera mod, the mouse and the right stick turn your own captain's camera on
+both PCs (the joiner's used to do nothing). To go back to the old camera,
+which moves with the same delay as your captain, set
+`PIKMIN_NETPLAY_CAMERA_LEAD=0` before starting the game (either player; it
+only changes that player's own view; the two joiner fixes stay). The console
 says which one you have: `[netplay] camera lead: on` or `off`.
 
 Keep the console open: it shows the codes and the session log. To keep a
