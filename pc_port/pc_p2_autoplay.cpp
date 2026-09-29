@@ -475,7 +475,12 @@ void pc_p2_autoplay_tick(void)
             if (p->mMode == PikiMode::BreakwallMode || p->mMode == PikiMode::BridgeMode
                 || p->mMode == PikiMode::PushstoneMode || p->mMode == PikiMode::RopeMode)
                 ++workCount;
-            if (p->mMode == PikiMode::FreeMode) freePos.emplace_back(p->getPosition().x, p->getPosition().z);
+            // #901: recruitable = not following, not carrying, not on its way
+            // out (idle, fighting, working): a whistle calls these back.
+            if (p->mMode != PikiMode::FormationMode && p->mMode != PikiMode::TransportMode
+                && p->getState() != PIKISTATE_Bury && p->getState() != PIKISTATE_Dying && p->getState() != PIKISTATE_Dead
+                && p->getState() != PIKISTATE_Swallowed && p->getState() != PIKISTATE_NukareWait)
+                freePos.emplace_back(p->getPosition().x, p->getPosition().z);
             // bot-v4 power mode: flowers through the normal maturity path
             // (virtual ViewPiki::setFlower, the same call the nectar GrowUp,
             // Onion exit, and pluck paths use). No direct mHappa pokes.
