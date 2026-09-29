@@ -95,6 +95,15 @@ static_assert(unsigned(p2autoplay::PadStart) == unsigned(KBBTN_START), "autoplay
 
 namespace {
 
+// Engagement token: the campaign token, or for a #901 TEST-ONLY P1 target
+// (whose retail _70 may be zero) its seed generator uid.
+unsigned botToken(const BTeki* actor)
+{
+    if (actor && actor->mGenerator && p2autoplay::isP1TargetUid(pc_randomizer_generator_id(actor->mGenerator)))
+        return pc_randomizer_generator_id(actor->mGenerator);
+    return pc_p2_campaign_token(actor);
+}
+
 float distXZ(float ax, float az, float bx, float bz)
 {
     const float dx = ax - bx, dz = az - bz;
@@ -576,7 +585,7 @@ void pc_p2_autoplay_tick(void)
             BTeki* actor = static_cast<BTeki*>(teki);
             if (!actor->mGenerator) continue;
             if (!actor->isAlive() || actor->mHealth <= 0.0f) continue;
-            const unsigned token = pc_p2_campaign_token(actor);
+            const unsigned token = botToken(actor);
             if (!token) continue;
             unsigned source = pc_randomizer_p2_source_for(actor);
             if (!source) source = pc_randomizer_p2_source_for_id(token);
@@ -659,7 +668,7 @@ void pc_p2_autoplay_tick(void)
             Teki* t = static_cast<Teki*>(*dit);
             if (!t || !t->mGenerator) continue;
             BTeki* b = static_cast<BTeki*>(t);
-            if (pc_p2_campaign_token(b) != sEngage.token) continue;
+            if (botToken(b) != sEngage.token) continue;
             sEngage.hostType = b->mTekiType; // bot-v7: corpse-config key while the body exists
             if (b->mHealth <= 0.0f || !b->isAlive() || b->mDeadState != 0 || b->mPellet != nullptr) {
                 deadSignal = true;
