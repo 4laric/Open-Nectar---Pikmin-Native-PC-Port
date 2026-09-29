@@ -24,6 +24,19 @@ bool partExists(unsigned id)
     return playerState->existUfoParts(id);
 }
 
+// Four-character part id ('uf06'); ID32::mStringID is host byte order.
+struct PartName {
+    char s[5];
+    explicit PartName(unsigned id)
+    {
+        for (int i = 0; i < 4; ++i) {
+            const char c = char((id >> (24 - 8 * i)) & 0xff);
+            s[i] = (c >= 32 && c < 127) ? c : '?';
+        }
+        s[4] = 0;
+    }
+};
+
 unsigned generatorUid(BTeki* teki)
 {
     return teki && teki->mGenerator ? pc_randomizer_generator_id(teki->mGenerator) : 0u;
@@ -41,8 +54,7 @@ unsigned pc_held_part_for_pellet_config(int pelletConfigIdx)
 
 void pc_held_part_log_assign(unsigned partId, unsigned source, unsigned target, int p1Boss)
 {
-    ID32 id(partId);
-    std::printf("P2_HELD_PART_ASSIGN part=%s source_id=%u target=%u p1_boss=%d via=arena\n", id.mStringID, source,
+    std::printf("P2_HELD_PART_ASSIGN part=%s source_id=%u target=%u p1_boss=%d via=arena\n", PartName(partId).s, source,
                 target, p1Boss);
     std::fflush(stdout);
 }
@@ -53,8 +65,8 @@ bool pc_held_part_birth(BTeki* teki)
     ID32& id = teki->mPersonality->mID;
     const bool isPart = Pellet::isUfoPartsID(id.mId);
     if (!isPart) return false;
-    char name[5];
-    std::snprintf(name, sizeof(name), "%s", id.mStringID);
+    const PartName partName(id.mId);
+    const char* name = partName.s;
     const bool exists = partExists(id.mId);
     if (!p2heldpart::keepAtBirth(isPart, exists)) {
         std::printf("P2_HELD_PART_CLEAR part=%s generator=%u teki=%d source_id=%u reason=exists\n", name,
@@ -76,7 +88,7 @@ bool pc_held_part_claim_spawn_items(BTeki* teki)
     if (teki->mPersonality && Pellet::isUfoPartsID(teki->mPersonality->mID.mId)) {
         pc_held_part_ensure_shape(teki->mPersonality->mID.mId);
         std::printf("P2_HELD_PART_DROP part=%s generator=%u teki=%d source_id=%u via=spawnItems health=%.1f\n",
-                    teki->mPersonality->mID.mStringID, generatorUid(teki), int(teki->mTekiType),
+                    PartName(teki->mPersonality->mID.mId).s, generatorUid(teki), int(teki->mTekiType),
                     pc_randomizer_p2_source_for(teki), double(teki->mHealth));
         std::fflush(stdout);
     }
@@ -93,10 +105,10 @@ bool pc_held_part_drop(BTeki* teki, const char* via)
     if (teki->mPcHeldPartDropped || !isPart || teki->mHealth > 0.0f) return false;
     const p2heldpart::Drop drop = p2heldpart::onDeath(false, isPart, teki->mHealth, partExists(id));
     teki->mPcHeldPartDropped = true;
-    ID32 name(id);
+    const PartName name(id);
     if (drop == p2heldpart::Drop::AlreadyExists) {
         if (radarInfo) radarInfo->detachParts(teki);
-        std::printf("P2_HELD_PART_SKIP part=%s generator=%u teki=%d reason=exists via=%s\n", name.mStringID,
+        std::printf("P2_HELD_PART_SKIP part=%s generator=%u teki=%d reason=exists via=%s\n", name.s,
                     generatorUid(teki), int(teki->mTekiType), via ? via : "?");
         std::fflush(stdout);
         return false;
@@ -107,7 +119,7 @@ bool pc_held_part_drop(BTeki* teki, const char* via)
     const bool spawned = partExists(id);
     const Vector3f& pos = teki->getPosition();
     std::printf("P2_HELD_PART_DROP part=%s generator=%u teki=%d source_id=%u via=%s ok=%d x=%.1f z=%.1f\n",
-                name.mStringID, generatorUid(teki), int(teki->mTekiType), pc_randomizer_p2_source_for(teki),
+                name.s, generatorUid(teki), int(teki->mTekiType), pc_randomizer_p2_source_for(teki),
                 via ? via : "?", spawned ? 1 : 0, double(pos.x), double(pos.z));
     std::fflush(stdout);
     return spawned;
@@ -117,7 +129,6 @@ void pc_held_part_ensure_shape(unsigned partId)
 {
     if (!pelletMgr || !Pellet::isUfoPartsID(partId)) return;
     if (pelletMgr->pcEnsureShape(partId)) return;
-    ID32 name(partId);
-    std::printf("P2_HELD_PART_SHAPE part=%s ok=0\n", name.mStringID);
+    std::printf("P2_HELD_PART_SHAPE part=%s ok=0\n", PartName(partId).s);
     std::fflush(stdout);
 }

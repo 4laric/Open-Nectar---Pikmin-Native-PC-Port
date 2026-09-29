@@ -583,8 +583,7 @@ void pc_p2_autoplay_tick(void)
             // #901 TEST-ONLY regression target: a vanilla P1 teki named by its
             // seed generator uid (PIKMIN_RANDOMIZER_AUTOPLAY_P1_UID), so the bot
             // can fight a P1 part holder. Pseudo source 0 is never a species.
-            if (!source && p2autoplay::p1TargetUid()
-                && pc_randomizer_generator_id(actor->mGenerator) == p2autoplay::p1TargetUid()) {
+            if (!source && p2autoplay::isP1TargetUid(pc_randomizer_generator_id(actor->mGenerator))) {
                 source = p2autoplay::kP1TargetSource;
             }
             if (!source) continue; // not P2-bound
