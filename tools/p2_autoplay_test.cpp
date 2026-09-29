@@ -1309,6 +1309,105 @@ void testAftermathEscortExtension()
           "escort/stall_no_carry_claim");
 }
 
+void testAftermathCursorAimCorpse()
+{
+    // #898: a cursor-aim corpse (Breadbug 38) is never walked onto. Far: walk
+    // in, no throws. Near: step back. In the band: look-band stick slides the
+    // cursor onto the corpse and A pulses only with the cursor on it.
+    p2autoplay::Config cfg;
+    cfg.throwHold = 0.1f;
+    cfg.throwGap = 0.1f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 1945764764u;
+    s.targetSource = 38;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.naviX = 0.0f;
+    s.naviZ = 0.0f;
+    s.tgtX = 100.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    s.targetHealthFrac = 0.5f;
+    brain.update(0.05f, s);
+    s.targetAlive = false;
+    s.targetDead = true;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "cursor-aim/aftermath");
+    s.cursorValid = true;
+    // Far (d=150, cursor 78 u ahead of the captain): walk in, never throw.
+    s.targetDist = 150.0f;
+    s.tgtX = 150.0f;
+    s.cursorX = 78.0f;
+    s.cursorZ = 0.0f;
+    bool farThrow = false, farWalk = false;
+    for (int i = 0; i < 20; ++i) {
+        brain.update(0.05f, s);
+        const p2autoplay::Command c = brain.command();
+        if (c.buttons & unsigned(p2autoplay::PadA)) farThrow = true;
+        if (c.moveX > 0.9f && c.stickScale == 1.0f) farWalk = true;
+    }
+    CHECK(!farThrow, "cursor-aim/no_throw_far");
+    CHECK(farWalk, "cursor-aim/walks_in_far");
+    // On top of it (d=20): step back, never press into it.
+    s.targetDist = 20.0f;
+    s.tgtX = 20.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.command().moveX < -0.9f, "cursor-aim/steps_back_near");
+    CHECK(!(brain.command().buttons & unsigned(p2autoplay::PadA)), "cursor-aim/no_throw_near");
+    // Band (d=55), cursor 30 u past the corpse: look-band slide, no release.
+    s.targetDist = 55.0f;
+    s.tgtX = 55.0f;
+    s.cursorX = 85.0f;
+    bool bandThrow = false;
+    for (int i = 0; i < 10; ++i) {
+        brain.update(0.05f, s);
+        const p2autoplay::Command c = brain.command();
+        if (c.buttons & unsigned(p2autoplay::PadA)) bandThrow = true;
+        CHECK(c.stickScale == cfg.lookStickScale && c.moveX < -0.9f, "cursor-aim/look_band_slides_back");
+    }
+    CHECK(!bandThrow, "cursor-aim/no_throw_off_target");
+    // Cursor on the corpse: stand still (no walk stick) and throw.
+    s.cursorX = 58.0f;
+    bool onThrow = false, walked = false;
+    for (int i = 0; i < 10; ++i) {
+        brain.update(0.05f, s);
+        const p2autoplay::Command c = brain.command();
+        if (c.buttons & unsigned(p2autoplay::PadA)) onThrow = true;
+        if (c.moveX != 0.0f || c.moveZ != 0.0f) walked = true;
+    }
+    CHECK(onThrow, "cursor-aim/throws_on_target");
+    CHECK(!walked, "cursor-aim/stands_still_on_target");
+    // Any other species keeps the generic walk-onto seed.
+    p2autoplay::Brain other(cfg);
+    p2autoplay::Senses o = liveSenses();
+    o.fieldPikmin = 20;
+    other.update(0.05f, o);
+    other.update(0.05f, o);
+    o.targetToken = 650002;
+    o.targetSource = 2;
+    o.targetAlive = true;
+    o.targetDist = 100.0f;
+    o.tgtX = 100.0f;
+    other.update(0.05f, o);
+    other.update(0.05f, o);
+    o.targetHealthFrac = 0.5f;
+    other.update(0.05f, o);
+    o.targetAlive = false;
+    o.targetDead = true;
+    o.targetDist = 20.0f;
+    o.tgtX = 20.0f;
+    o.cursorValid = true;
+    o.cursorX = 98.0f;
+    other.update(0.05f, o);
+    other.update(0.05f, o);
+    CHECK(other.current() == p2autoplay::State::Aftermath && other.command().moveX > 0.9f, "cursor-aim/other_species_walks_onto");
+}
+
 void testAftermathNoWhistle()
 {
     // bot-v5 (v4b diagnosis): aftermath HOLDS whistle (B) while standing
@@ -3008,6 +3107,7 @@ int main()
     testReceiptWait();
     testGenericDeath();
     testNoDeliverAbandonsCorpse();
+    testAftermathCursorAimCorpse();
     testDoneReengagesLateTarget();
     testWithdrawRepeat();
     testSaraiFlyer();

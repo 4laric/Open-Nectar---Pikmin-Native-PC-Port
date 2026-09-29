@@ -7,6 +7,9 @@
 #include "pc_p2_purple.h"
 #include "pc_randomizer.h"
 #include "Interactions.h"
+#include "MapCode.h"
+#include "Navi.h"
+#include "NaviMgr.h"
 #include "Pellet.h"
 #include "PelletState.h"
 #include "Piki.h"
@@ -64,6 +67,9 @@ struct Binding {
     float corpseTimer = 0.0f;
     float lastContestPiki = -1.0f;
     bool lastCanBack = true;
+    float motionTimer = 0.0f;   // Damage/Dead/corpse motion diagnostics (read-only)
+    bool motionValid = false;
+    float motionX = 0.0f, motionZ = 0.0f;
 };
 std::map<BTeki*, Binding> s;
 
@@ -82,6 +88,64 @@ long long wallMs() {
 Binding* find(const BTeki* t) {
     auto i = s.find(const_cast<BTeki*>(t));
     return i == s.end() ? nullptr : &i->second;
+}
+
+// #898 read-only motion diagnostics: what moves a Damage/Dead body or its
+// corpse pellet? Logs the host velocities, the ground slip code, the captain
+// and the nearest Pikmin (every 0.25 s in Damage/Dead, 1 s for the corpse).
+// Never writes game state.
+void logMotion(Binding& b, const char* phase, Creature* body, float dt, float period) {
+    b.motionTimer += dt;
+    if (b.motionTimer < period) return;
+    b.motionTimer = 0.0f;
+    const Vector3f p = body->mSRT.t;
+    const float dx = b.motionValid ? p.x - b.motionX : 0.0f, dz = b.motionValid ? p.z - b.motionZ : 0.0f;
+    b.motionValid = true;
+    b.motionX = p.x;
+    b.motionZ = p.z;
+    int slip = -1, attr = -1;
+    float ny = 0.0f;
+    if (body->mGroundTriangle) {
+        slip = MapCode::getSlipCode(body->mGroundTriangle);
+        attr = MapCode::getAttribute(body->mGroundTriangle);
+        ny = body->mGroundTriangle->mTriangle.mNormal.y;
+    }
+    float nd = -1.0f, nx = 0.0f, nz = 0.0f, nvx = 0.0f, nvz = 0.0f;
+    if (naviMgr && naviMgr->getNavi()) {
+        Navi* n = naviMgr->getNavi();
+        nx = n->mSRT.t.x;
+        nz = n->mSRT.t.z;
+        nd = std::sqrt((nx - p.x) * (nx - p.x) + (nz - p.z) * (nz - p.z));
+        nvx = n->mVelocity.x;
+        nvz = n->mVelocity.z;
+    }
+    int near40 = 0, pd_state = -1, pd_mode = -1;
+    float pd = 1e9f, pvx = 0.0f, pvz = 0.0f;
+    if (pikiMgr) {
+        Iterator it(pikiMgr);
+        CI_LOOP(it) {
+            Piki* k = static_cast<Piki*>(*it);
+            if (!k || !k->isAlive()) continue;
+            const float kx = k->mSRT.t.x - p.x, kz = k->mSRT.t.z - p.z;
+            const float d = std::sqrt(kx * kx + kz * kz);
+            if (d < 40.0f) ++near40;
+            if (d < pd) {
+                pd = d;
+                pd_state = k->getState();
+                pd_mode = int(k->mMode);
+                pvx = k->mVelocity.x;
+                pvz = k->mVelocity.z;
+            }
+        }
+    }
+    std::printf("P2_BREADBUG_OWN_MOTION generator=%u source_id=38 phase=%s x=%.1f y=%.1f z=%.1f dx=%.1f dz=%.1f "
+                "vel=%.1f,%.1f,%.1f drive=%.1f,%.1f vol=%.1f,%.1f slip=%d attr=%d ny=%.3f ground=%d "
+                "navi_d=%.1f navi=%.0f,%.0f navi_vel=%.0f,%.0f piki_near40=%d piki_d=%.1f piki_state=%d piki_mode=%d "
+                "piki_vel=%.0f,%.0f coll_vel=%d wall=%lld\n",
+                b.generator, phase, p.x, p.y, p.z, dx, dz, body->mVelocity.x, body->mVelocity.y, body->mVelocity.z,
+                body->mTargetVelocity.x, body->mTargetVelocity.z, body->mVolatileVelocity.x, body->mVolatileVelocity.z,
+                slip, attr, ny, body->mGroundTriangle ? 1 : 0, nd, nx, nz, nvx, nvz, near40, pd < 1e8f ? pd : -1.0f,
+                pd_state, pd_mode, pvx, pvz, int(body->mHasCollChangedVelocity), wallMs());
 }
 
 // P1 carry-route graph ('test' handle) as the source WayPoint graph; the
@@ -536,6 +600,8 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         kill = o.killRequest;
     }
     if (t->mHealth > 0.0f) t->updateLifeGauge();
+    if (b.fsm.state() == bb::State::Damage || b.fsm.state() == bb::State::Dead)
+        logMotion(b, bb::stateName(b.fsm.state()), t, dt, 0.25f);
     b.logTimer += dt;
     if (b.logTimer >= 1.0f) {
         b.logTimer = 0.0f;
@@ -702,6 +768,7 @@ void pc_p2_breadbug_teki_tick(BTeki* t) {
                         b.generator, c->mSRT.t.x, c->mSRT.t.z, int(c->mConfig->mCarryMinPikis()),
                         int(c->mConfig->mCarryMaxPikis()));
         }
+        logMotion(b, "corpse", c, dt, 1.0f);
         b.corpseTimer += dt;
         if (b.corpseTimer >= 2.0f) {
             b.corpseTimer = 0.0f;

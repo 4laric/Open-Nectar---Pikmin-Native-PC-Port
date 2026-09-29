@@ -253,6 +253,14 @@ inline bool isFlyer(unsigned source) { return source == 23 || source == 57 || so
 // (press). The bot leads its throws onto the walking body and keeps a
 // longer attack window; it is still pad input only.
 inline bool isPressOnly(unsigned source) { return source == 38; }
+// #898 aftermath: the Breadbug corpse is small. Walking onto it (the generic
+// seed) shoves it ahead of the captain (pellet collision, navi at ~20 u) and
+// the walking cursor sits ~78 u ahead, so thrown Pikmin fly over it and land
+// past it (v2c: carriers=0 for 60 s, cursor 78 u beyond the corpse). For
+// these corpses the bot stands off, slides the cursor onto the corpse with
+// the P1 look band (the captain stands still) and throws only when the
+// cursor is on it. Pad input only, like every other bot stance.
+inline bool aimsCorpseWithCursor(unsigned source) { return source == 38; }
 
 // #884 round 4: KingChappy (53) keeps the captain OUT of the source
 // invisible range while attacking. Source searchTarget prefers a captain in
@@ -324,6 +332,9 @@ struct Config {
     float kurageAttackMultiplier = 2.0f; // Kurage has high HP: longer attack window
     float pressOnlyAttackMultiplier = 5.0f; // #898 press-only targets: one press per landed throw
     float pressLeadSeconds = 0.6f; // #898 aim ahead of a walking press-only target
+    float corpseAimNear = 40.0f; // #898 cursor-aim corpses: closer than this -> step back (never shove it)
+    float corpseAimFar = 70.0f; // #898 cursor-aim corpses: farther than this -> walk in (no throws)
+    float corpseCursorTol = 12.0f; // #898 cursor-aim corpses: throw only with the cursor this close
     bool noDeliver = false; // #898 TEST-ONLY: abandon corpses (also env NO_DELIVER)
     float noDeliverWhistle = 3.0f; // #898 whistle hold before abandoning a corpse
     float saraiLowHeight = 120.0f; // Sarai thrown at only when within this height above ground (or grabbing)
@@ -684,9 +695,42 @@ private:
     // whistle). Shared by Seed (no grabs yet) and SeedGrow (short crew).
     void seedSteerThrow(const Senses& in)
     {
+        if (!in.waypointLeg && in.targetToken != 0 && in.cursorValid && aimsCorpseWithCursor(in.targetSource)) {
+            cursorAimThrow(in);
+            return;
+        }
         if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
         else if (in.targetToken != 0) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
         if (in.targetDist <= cfg.throwRange && in.targetToken != 0) pulseA(in, cfg.throwHold, cfg.throwGap);
+    }
+
+    // #898: stand off the corpse, slide the cursor onto it, throw on it.
+    void cursorAimThrow(const Senses& in)
+    {
+        const float d = in.targetDist;
+        if (d > cfg.corpseAimFar) {
+            steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            pressOn = false; // no throws while walking: the cursor trails the stick
+            pressPhase = 0.0f;
+            return;
+        }
+        if (d < cfg.corpseAimNear) {
+            steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            pressOn = false;
+            pressPhase = 0.0f;
+            return;
+        }
+        const float dx = in.tgtX - in.cursorX, dz = in.tgtZ - in.cursorZ;
+        const float len = std::sqrt(dx * dx + dz * dz);
+        if (len > cfg.corpseCursorTol && len > 1.0f) {
+            lastCommand.moveX = dx / len;
+            lastCommand.moveZ = dz / len;
+            lastCommand.stickScale = cfg.lookStickScale;
+            // Keep holding a Pikmin already in hand; release only on target.
+            if (pressOn) lastCommand.buttons |= PadA;
+            return;
+        }
+        pulseA(in, cfg.throwHold, cfg.throwGap);
     }
 
     void tickWithdrawSeek(float dt, const Senses& in)
