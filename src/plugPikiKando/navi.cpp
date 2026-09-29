@@ -16,6 +16,8 @@
 #include "GameStat.h"
 #include "pc_permadeath.h"
 #include "pc_coop.h"
+#include "pc_p2_captain_switch_policy.h"
+#include "pc_p2_captain.h"
 #include "pc_window.h"
 #include "pc_gyro.h"
 #include "settings/pc_settings.h"
@@ -1374,13 +1376,13 @@ void Navi::update()
 	}
 #endif
 
-	// Lane 12 (#130): only the controlled captain polls the shared pad; an
-	// inactive second captain never updates its Kontroller, so it observes
-	// neutral input instead of mirroring the active captain (source P2 maps each
-	// Navi to its own pad; that split is not ported). Single-captain play always
-	// polls (naviMgr is a single Navi, so getActiveNavi() == this).
-	if (!naviMgr || naviMgr->getActiveNavi() == this) {
+	// Only the opt-in single-player pair shares a pad. Clear the inactive
+	// captain's previous input; skipped polling alone leaves stale controls.
+	// Co-op/VS retain their per-player polling.
+	if (!pc_p2_captain::single_player_switch_enabled() || naviMgr->getActiveNavi() == this) {
 		mKontroller->update();
+	} else {
+		p2_captain_neutral_input(*mKontroller);
 	}
 	mWalkAnimPrevDir = mFaceDirection;
 	Creature::update();
