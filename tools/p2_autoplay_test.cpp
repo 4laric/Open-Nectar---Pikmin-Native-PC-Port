@@ -2964,8 +2964,8 @@ void testRollerStance()
     CHECK(!threw, "roller/stand_no_throws");
     CHECK(c.moveZ > 0.9f, "roller/stand_backs_off");
     // Inside the band: hold still.
-    s.naviZ = 340.0f;
-    s.targetDist = 340.0f;
+    s.naviZ = 230.0f;
+    s.targetDist = 230.0f;
     brain.update(0.05f, s);
     c = brain.command();
     CHECK(c.moveX == 0.0f && c.moveZ == 0.0f, "roller/stand_holds_band");
