@@ -66,6 +66,8 @@ unsigned benefits[9] = {}, consumedBenefits[7] = {};
 bool maturityItems = false;
 unsigned maturity[3] = {};
 unsigned dayLengthItems = 0, dayLengthStep = 0, dayLength = 0;
+// Whistle Pluck item: the seed carries it, and once received it stays on.
+bool whistlePluckItem = false, whistlePluck = false;
 // DeathLink: the first state value read is the baseline, so links received while
 // the game was closed never replay. Pending links are bounded; each applies once.
 unsigned deathLinkUnit = 0, deathLinksSeen = 0, deathLinksPending = 0, deathsReported = 0;
@@ -265,6 +267,12 @@ bool pc_randomizer_init(int argc, char** argv) {
             || dayLengthStep < 10 || dayLengthStep > 100 || dayLengthStep % 5) fail("invalid day length mode");
         input >> end;
     }
+    if (end == "WHISTLE_PLUCK") {
+        unsigned version;
+        if (!benefitItems || !(input >> version) || version != 1) fail("invalid whistle pluck mode");
+        whistlePluckItem = true;
+        input >> end;
+    }
     if (end == "DEATHLINK") {
         if (schema != 9 || !(input >> deathLinkUnit) || deathLinkUnit < 1 || deathLinkUnit > 100) fail("invalid DeathLink unit");
         input >> end;
@@ -387,6 +395,7 @@ bool pc_randomizer_init(int argc, char** argv) {
     if (prereleaseTraps) hello << " prerelease-trap-v1";
     if (maturityItems) hello << " progressive-maturity-v1";
     if (dayLengthItems) hello << " progressive-day-length-v1";
+    if (whistlePluckItem) hello << " whistle-pluck-item-v1";
     if (slotEnemies) hello << " enemy-slots-v1";
     if (groupEnemies) hello << " enemy-groups-v1";
     if (campaignEnemies) hello << " enemy-campaign-v1";
@@ -466,6 +475,12 @@ void pc_randomizer_update() {
             fail("invalid or retracted day length");
         parsed = bool(input >> end);
     }
+    unsigned newWhistlePluck = 0;
+    if (whistlePluckItem) {
+        if (!parsed || end != "WHISTLEPLUCK" || !(input >> newWhistlePluck) || newWhistlePluck > 1 || (whistlePluck && !newWhistlePluck))
+            fail("invalid or retracted whistle pluck");
+        parsed = bool(input >> end);
+    }
     unsigned newEmperor = 0;
     if (emperorGoal) {
         if (!parsed || end != "EMPEROR" || !(input >> newEmperor) || newEmperor > 1 || (newEmperor && newRepairs < 25)) fail("invalid Emperor state");
@@ -496,6 +511,8 @@ void pc_randomizer_update() {
     }
     if (dayLength != newDayLength) std::printf("[Pikmin Randomizer] DAY_LENGTH count=%u percent=%u\n", newDayLength, 100 + dayLengthStep * newDayLength);
     dayLength = newDayLength;
+    if (!whistlePluck && newWhistlePluck) std::printf("[Pikmin Randomizer] WHISTLE_PLUCK received\n");
+    whistlePluck = newWhistlePluck != 0;
     emperorDefeated = emperorDefeated || newEmperor != 0;
     if (deathLinkUnit) {
         if (!deathLinkBaseline) { deathLinksSeen = newDeathLinks; deathLinkBaseline = true; }
@@ -522,6 +539,10 @@ void pc_randomizer_update() {
 bool pc_randomizer_prerelease_traps() { return enabled && prereleaseTraps; }
 int pc_randomizer_maturity(int color) {
     return enabled && maturityItems && color >= 0 && color < 3 ? int(maturity[color]) : 0;
+}
+int pc_randomizer_whistle_pluck() {
+    if (!enabled || !whistlePluckItem) return -1;
+    return whistlePluck ? 1 : 0;
 }
 float pc_randomizer_day_length_multiplier() {
     return enabled && dayLengthItems ? 1.0f + 0.01f * float(dayLengthStep * dayLength) : 1.0f;

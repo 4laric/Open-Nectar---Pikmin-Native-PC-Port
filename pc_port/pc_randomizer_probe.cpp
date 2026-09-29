@@ -225,6 +225,7 @@ int main(int argc, char** argv) {
                 std::printf("CAPTAIN_MOVE %.2f\n", pc_randomizer_captain_movement_multiplier());
                 std::printf("MATURITY_PROBE blue=%d red=%d yellow=%d day=%.2f\n", pc_randomizer_maturity(0),
                     pc_randomizer_maturity(1), pc_randomizer_maturity(2), pc_randomizer_day_length_multiplier());
+                std::printf("WHISTLE_PLUCK_PROBE %d\n", pc_randomizer_whistle_pluck());
                 std::printf("BENEFIT_PROBE used=%d whistle=%.2f pluck=%.2f\n", used,
                     pc_randomizer_benefit_multiplier(PC_BENEFIT_WHISTLE), pc_randomizer_benefit_multiplier(PC_BENEFIT_PLUCK));
                 for (int arg = 1; arg < argc; ++arg) if (!std::strcmp(argv[arg], "--save-probe")) {
