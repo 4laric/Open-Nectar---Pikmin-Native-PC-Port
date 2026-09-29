@@ -173,6 +173,13 @@ def save_compact(r):
     return r["ww_hot_ms"] + r["save_ms"] + r["gcmp_ms"] + r["gsave_ms"]
 
 
+def save_probe(r):
+    """Compact region measured with the probe: one GetWriteWatch(RESET) over a
+    separate write-watched region of the touched size with this tick's dirty
+    page count, in the game process."""
+    return r["ww_probe_ms"] + r["save_ms"] + r["gcmp_ms"] + r["gsave_ms"]
+
+
 def resim_cost(r, with_done=False):
     c = r["auth_ms"] + r.get("parse_ms", 0.0)
     if with_done:
@@ -338,7 +345,15 @@ def budget(rows, title, restore_k, sync_note):
     print("- save (current layout) = GetWriteWatch over the three zones + undo/shadow copies + globals compare + globals save")
     if have_split:
         print("- save (compact, measured) = GetWriteWatch over the touched extents only (hot pass) + the same copies and globals work")
-    saves = [("current", save_current)] + ([("compact", save_compact)] if have_split else [])
+    have_probe = rows[0].get("ww_probe_ms") is not None and any(r.get("ww_probe_ms", -1) >= 0 for r in rows)
+    if have_probe:
+        print("- save (compact, probe) = one GetWriteWatch(RESET) over a separate write-watched region of the probe size, "
+              "dirtied with this tick's page count + the same copies and globals work")
+        pz = [r["ww_probe0_ms"] for r in rows]
+        pp = [r["ww_probe_ms"] for r in rows]
+        print(f"- probe GetWriteWatch: with this tick's dirty pages p50 {fmt(pct(pp, 50))} / p95 {fmt(pct(pp, 95))} ms; "
+              f"with none dirty p50 {fmt(pct(pz, 50))} / p95 {fmt(pct(pz, 95))} ms")
+    saves = [("current", save_current)] + ([("compact", save_compact)] if have_split else [])         + ([("compact probe", save_probe)] if have_probe else [])
     for name, fn in saves:
         v = [fn(r) for r in rows]
         p95 = pct(v, 95)

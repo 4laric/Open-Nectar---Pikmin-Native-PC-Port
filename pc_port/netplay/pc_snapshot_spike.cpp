@@ -282,6 +282,9 @@ struct State {
 	bool wwSplit;    // hot/cold GetWriteWatch split (MV-2)
 	bool offTrack;   // track off-region blocks for the pointer scan
 	bool mallocAudit;
+	uint8_t* probe;     // compact-region probe (MV-2), MEM_WRITE_WATCH
+	size_t probeBytes;
+	double probeMs, probe0Ms;
 	uint32_t nowwPages;
 	int auditEvery;
 	bool ptrScan;
@@ -1359,7 +1362,7 @@ void openCsv()
 	    "ww_z0_ms,ww_z1_ms,ww_z2_ms,ww_calls,committed_mb,"
 	    "phase,pikis,sys_busy,present_ms,done_ms,parse_ms,retrace_ms,"
 	    "ww_hot_ms,ww_cold_ms,ww_hot_calls,ww_cold_calls,rd_hot,rd_cold,hot_mb,cold_mb,"
-	    "grestore_ms,ww_late,conc_r,conc_g,missed,sync_phase\n");
+	    "grestore_ms,ww_late,conc_r,conc_g,missed,sync_phase,ww_probe_ms,ww_probe0_ms\n");
 }
 
 double touchedMb()
@@ -2170,6 +2173,19 @@ void pc_snapshot_spike_init(void)
 	s->ptrScan        = s->auditEvery > 0 && envIs("PIKMIN_NETPLAY_SNAPSHOT_SPIKE_PTRSCAN", "1");
 	s->offTrack       = s->ptrScan;
 	s->mallocAudit    = envIs("PIKMIN_NETPLAY_SNAPSHOT_SPIKE_MALLOC_AUDIT", "1");
+	// Compact-region probe (MV-2): a separate write-watched region of the
+	// touched size; each tick the spike dirties as many of its pages as the
+	// sim dirtied and times one GetWriteWatch(RESET) over it, then a second
+	// call with nothing dirty (the per-call fixed cost), in the real process.
+	if (s->writeWatch && envInt("PIKMIN_NETPLAY_SNAPSHOT_SPIKE_PROBE_MB", 0) > 0) {
+		s->probeBytes = size_t(envInt("PIKMIN_NETPLAY_SNAPSHOT_SPIKE_PROBE_MB", 0)) << 20;
+		s->probe      = static_cast<uint8_t*>(VirtualAlloc(nullptr, s->probeBytes, MEM_RESERVE | MEM_COMMIT | MEM_WRITE_WATCH, PAGE_READWRITE));
+		if (s->probe) {
+			for (size_t o = 0; o < s->probeBytes; o += kPage) s->probe[o] = 1;
+		} else {
+			s->probeBytes = 0;
+		}
+	}
 	uint8_t* base = nullptr;
 	for (uintptr_t want : kPreferredBases) {
 		base = static_cast<uint8_t*>(VirtualAlloc(reinterpret_cast<void*>(want), kReserve,
@@ -2634,6 +2650,26 @@ void pc_snapshot_spike_tick_end(void)
 		gfullMs = msSince(t0);
 	}
 
+	// 5b. compact-region probe: dirty the same number of probe pages (spread
+	// over it), then time GetWriteWatch(RESET) over the whole probe region,
+	// and once more with nothing dirty. The writes are not timed.
+	s->probeMs = s->probe0Ms = -1.0;
+	if (s->probe) {
+		const size_t pages = s->probeBytes / kPage;
+		const size_t n     = s->dirtyCount < pages ? s->dirtyCount : pages;
+		const size_t step  = n ? pages / n : 1;
+		for (size_t i = 0; i < n; ++i) s->probe[(i * step) * kPage + (tick & 63) * 8] = uint8_t(tick);
+		ULONG_PTR count = s->wwCap;
+		DWORD gran      = 0;
+		t0              = now();
+		GetWriteWatch(WRITE_WATCH_FLAG_RESET, s->probe, s->probeBytes, s->wwAddrs, &count, &gran);
+		s->probeMs = msSince(t0);
+		count      = s->wwCap;
+		t0         = now();
+		GetWriteWatch(WRITE_WATCH_FLAG_RESET, s->probe, s->probeBytes, s->wwAddrs, &count, &gran);
+		s->probe0Ms = msSince(t0);
+	}
+
 	// 6. coverage audit and pointer scan
 	s->missed = -1;
 	if (s->auditEvery > 0 && tick % uint64_t(s->auditEvery) == 0) {
@@ -2652,7 +2688,7 @@ void pc_snapshot_spike_tick_end(void)
 		    "%.4f,%.4f,%.4f,%u,%.2f,"
 		    "%d,%d,%.1f,%.4f,%.4f,%.4f,%.4f,"
 		    "%.4f,%.4f,%u,%u,%u,%u,%.2f,%.2f,"
-		    "%.4f,%u,%u,%u,%lld,%d\n",
+		    "%.4f,%u,%u,%u,%lld,%d,%.4f,%.4f\n",
 		    (unsigned long long)tick, pc_netplay_tick(), live ? 1 : 0, s->syncPhase == 2 ? 1 : 0, authMs, idleMs,
 		    frameMs, s->rdAuth, s->rdPost, s->dirtyCount, rdMeta, rdArena, rdSmall, rdLarge, s->globDirtyCount,
 		    s->wwMs, saveMs, restoreMs, restoreWwMs, gcmpMs, gsaveMs, fullMs, fullMb, gfullMs,
@@ -2668,7 +2704,7 @@ void pc_snapshot_spike_tick_end(void)
 		        + kArenaSize + kMetaCommit) / (1024.0 * 1024.0),
 		    phase, pikis, s->sysBusy, presentMs, doneMs, parseMs, retraceMs,
 		    s->wwHotMs, s->wwColdMs, s->wwHotCalls, s->wwColdCalls, s->rdHot, s->rdCold, s->hotMb, s->coldMb,
-		    grestoreMs, s->wwLate, s->concRegion, s->concGlobal, (long long)s->missed, s->syncPhase);
+		    grestoreMs, s->wwLate, s->concRegion, s->concGlobal, (long long)s->missed, s->syncPhase, s->probeMs, s->probe0Ms);
 		if (tick % 300 == 0) std::fflush(s->csv);
 	}
 	s->ticksLogged++;
