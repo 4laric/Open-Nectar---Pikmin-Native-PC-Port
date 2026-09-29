@@ -75,13 +75,19 @@ bool pc_p2_generated_placement_sweep_sarai()
 {
     if (!pc_randomizer_p2_bridge() || !tekiMgr) return false;
     const std::set<unsigned> wanted = pc_p2_campaign_ids(23);
-    if (wanted.empty()) return false;
+    // #215: Demon (32) rides the same host/manager with its species profile.
+    const std::set<unsigned> demons = pc_p2_campaign_ids(32);
+    if (wanted.empty() && demons.empty()) return false;
     bool bound = false;
     Iterator actors(tekiMgr);
     CI_LOOP(actors) {
         BTeki* actor = static_cast<BTeki*>(*actors);
         if (!actor || !actor->mGenerator) continue;
         const unsigned token = pc_p2_campaign_token(actor);
+        if (demons.count(token)) {
+            if (pc_p2_sarai_manager_bind_demon(actor, token, token)) bound = true;
+            continue;
+        }
         if (!wanted.count(token)) continue;
         // The dynamic binder skips already-bound actors and actors whose
         // sidecar is absent, quietly returning false for both.
@@ -145,6 +151,21 @@ bool pc_p2_generated_placement_bind(BTeki* actor, unsigned sourceId, unsigned se
             return true;
         }
         return false;
+    case 32: // Bumbling Snitchbug (Demon), Sarai host species profile (#215).
+        // The newborn actor has no generator yet (campaign token 0), so the
+        // birth-time claim defers and the setup sweep binds it.
+        if (!actor->mGenerator) {
+            std::printf("P2_GENERATED_PLACEMENT source_id=32 target=%u bound=0 reason=deferred_to_setup_sweep\n",
+                        seedTargetUid);
+            std::fflush(stdout);
+            return false;
+        }
+        if (pc_p2_sarai_manager_bind_demon(actor, generatorId, seedTargetUid)) {
+            std::printf("P2_GENERATED_PLACEMENT source_id=32 target=%u bound=1\n", seedTargetUid);
+            std::fflush(stdout);
+            return true;
+        }
+        return false;
     case 42: // Orange Bulborb (BlueChappy, adult); lane 42.
         if (pc_p2_bluechappy_bind_dynamic(actor, generatorId, sourceId)) {
             std::printf("P2_GENERATED_PLACEMENT source_id=42 target=%u bound=1\n", seedTargetUid);
@@ -176,7 +197,16 @@ bool pc_p2_generated_placement_bind(BTeki* actor, unsigned sourceId, unsigned se
             return true;
         }
         return false;
-    case 41: // Antenna Beetle (Fuefuki); muse observer lane 57.
+    case 41: // Antenna Beetle (Fuefuki); #245 OWN campaign module.
+        // pc_p2_fuefuki_teki_setup binds the seed actor to the source FSM
+        // (hostType 41 -> TEKI_Chappy, suppressed host AI) at finalSetup.
+        if (pc_randomizer_p2_bridge() && pc_randomizer_p2_source_for_id(seedTargetUid) == 41) {
+            std::printf("P2_GENERATED_PLACEMENT source_id=41 target=%u generator=%u bound=1 module=fuefuki_teki\n",
+                        seedTargetUid, generatorId);
+            std::fflush(stdout);
+            return true;
+        }
+        return museBind(actor, sourceId, seedTargetUid, generatorId);
     case 57: // Lesser Spotted Jellyfloat (Kurage); muse observer lane 58.
     case 58: // Careening Dirigibug (BombSarai); muse observer lane 59.
     case 78: // Gatling Groink (MiniHoudai); muse observer lane 60.
