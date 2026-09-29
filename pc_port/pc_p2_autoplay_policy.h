@@ -373,9 +373,16 @@ struct Config {
     float rollerStandMax = 400.0f;
     float rollerWakeDist = 110.0f; // walk inside fp11 (150) to wake it from Stay
     float rollerEvadeRange = 650.0f;
-    float rollerThrowGap = 0.30f; // Turn window: throw faster than the generic gap
+    float rollerThrowGap = 0.10f; // Turn window: throw as fast as the pad allows (ar7: ~2/s left 13-15 hits per window)
+    float rollerThrowHold = 0.08f;
     float rollerAttackTimeout = 900.0f; // a multi-cycle boss fight, not one throw burst
     float rollerChaseDist = 1100.0f; // the ball rolls away far; only a real loss re-approaches
+    // Tier gate: the Impact arena sits on an upper tier (y=20) above the box
+    // corridor (y=-30). XZ-close across the ledge is not "in range" (ar6: the
+    // bot stood 400 below the ledge for minutes while the Crawbster could not
+    // reach it). Past this |dy| the roller keeps approaching over the route.
+    float rollerTierDy = 40.0f;
+    float rollerHomeLeash = 200.0f; // back-off blends toward home past this XZ distance from it
     // #897 power-mode resupply: the power squad is the whole stocked Onion,
     // so after a crush the Onion is empty and the v4 resupply (needs stock)
     // never fired (r5 field=1, r6 no resupply). Below this field count power
@@ -507,6 +514,14 @@ struct Senses {
     // #897 roller stance senses (read-only DangoMushi probe; the driver sets
     // them for source 94 only). Dormant = still in Stay (hidden).
     bool targetDormant = false;
+    // #897 the roller's home (where it was first seen, in Stay): the arena
+    // floor. Evade/back-off lean toward it so the captain does not walk off
+    // the arena tier (ar7: an evade dropped him off the Impact ledge).
+    bool homeValid = false;
+    float homeX = 0.0f;
+    float homeZ = 0.0f;
+    bool targetDyValid = false; // #897 target height minus captain height is known
+    float targetDy = 0.0f;
     bool targetRolling = false;
     bool targetVulnerable = false;
     float targetVelX = 0.0f;
@@ -612,6 +627,7 @@ public:
         pushedThisStint = false;
         regroupClock = 0.0f;
         legKnown = false;
+        tierReplanAsked = false;
         result = Result{};
         markers.clear();
         lastCommand = Command{};
@@ -698,6 +714,7 @@ private:
         pushing = false;
         regroupClock = 0.0f;
         legKnown = false;
+        tierReplanAsked = false;
         emitState(in);
     }
     void holdIdle() { lastCommand = Command{}; }
@@ -1000,7 +1017,17 @@ private:
         observeReceipt(in);
         const float closeEnough = isFlyer(in.targetSource) ? cfg.throwRange : cfg.throwRange * 0.75f;
         const float need = in.targetRevealed ? closeEnough : 120.0f; // walk onto disguised Sokkuri
-        if (in.targetDist <= need) {
+        const bool otherTier = rollerOtherTier(in);
+        if (otherTier && !tierReplanAsked && !in.waypointLeg) {
+            // Straight at it only hits the ledge: ask for a route now.
+            tierReplanAsked = true;
+            wantReplan = true;
+            char buf[200];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_TIER token=%u dy=%.0f dist=%.0f replan=1 bot-driven",
+                          in.targetToken, in.targetDy, in.targetDist);
+            markers.emplace_back(buf);
+        }
+        if (in.targetDist <= need && !otherTier) {
             enter(State::Attack, in);
             return;
         }
@@ -1142,6 +1169,14 @@ private:
         // bot-undamaged: fled/teleporting ground targets re-enter approach;
         // straight-line attack steer cannot cross the map.
         if (in.targetDist > (roller ? cfg.rollerChaseDist : cfg.attackChaseDist)) {
+            enter(State::Approach, in);
+            return;
+        }
+        if (roller && rollerOtherTier(in) && !in.targetVulnerable) {
+            char buf[200];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_TIER token=%u dy=%.0f dist=%.0f state=attack bot-driven",
+                          in.targetToken, in.targetDy, in.targetDist);
+            markers.emplace_back(buf);
             enter(State::Approach, in);
             return;
         }
@@ -1573,6 +1608,12 @@ private:
         enter(State::Select, in);
     }
 
+    bool rollerOtherTier(const Senses& in) const
+    {
+        return cfg.rollerStance && isRollerStance(in.targetSource) && in.targetDyValid
+            && std::fabs(in.targetDy) > cfg.rollerTierDy;
+    }
+
     // #897 push obstacle (Approach only). Returns true while it owns the pad.
     bool tickObstaclePush(float dt, const Senses& in)
     {
@@ -1752,12 +1793,26 @@ private:
                           in.targetHealthFrac);
             markers.emplace_back(buf);
             rollerWhistleTime = 0.0f;
+            punishClock = 0.0f;
+            punishThrows = 0;
         }
         switch (mode) {
-        case RollerPunish:
+        case RollerPunish: {
             steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
-            if (in.targetDist <= cfg.throwRange) pulseA(in, cfg.throwHold, cfg.rollerThrowGap);
+            const bool wasOn = pressOn;
+            if (in.targetDist <= cfg.throwRange) pulseA(in, cfg.rollerThrowHold, cfg.rollerThrowGap);
+            if (pressOn && !wasOn) ++punishThrows;
+            punishClock += dt;
+            if (punishClock >= 1.0f) {
+                punishClock = 0.0f;
+                char buf[200];
+                std::snprintf(buf, sizeof(buf),
+                              "AUTOPLAY_ROLLER_PUNISH dist=%.0f field=%d presses=%d hp=%.3f bot-driven",
+                              in.targetDist, in.fieldPikmin, punishThrows, in.targetHealthFrac);
+                markers.emplace_back(buf);
+            }
             return;
+        }
         case RollerWake:
             if (in.targetDist > cfg.rollerWakeDist) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
             return;
@@ -1783,6 +1838,17 @@ private:
                 px = -px;
                 pz = -pz;
             }
+            // Off the roll line either way works; take the side toward the
+            // arena floor (home) when the captain is not already between
+            // the ball and that side by a wide margin.
+            if (in.homeValid) {
+                const float hx = in.homeX - in.naviX, hz = in.homeZ - in.naviZ;
+                const float lateral = std::fabs(ax * px + az * pz);
+                if (hx * px + hz * pz < 0.0f && lateral < 120.0f) {
+                    px = -px;
+                    pz = -pz;
+                }
+            }
             // Ahead of the ball: sideways plus a little away; behind it (it
             // is rolling off): just sideways.
             const float ahead = ax * vx + az * vz;
@@ -1801,8 +1867,25 @@ private:
         default:
             break;
         }
-        if (in.targetDist < cfg.rollerStandMin) steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
-        else if (in.targetDist > cfg.rollerStandMax) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+        if (in.targetDist < cfg.rollerStandMin) {
+            steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            // Back off along the arena floor: blend toward home once the
+            // captain is more than rollerHomeLeash from it.
+            if (in.homeValid) {
+                const float hx = in.homeX - in.naviX, hz = in.homeZ - in.naviZ;
+                const float hl = std::sqrt(hx * hx + hz * hz);
+                if (hl > cfg.rollerHomeLeash) {
+                    float mx = lastCommand.moveX + hx / hl, mz = lastCommand.moveZ + hz / hl;
+                    const float ml = std::sqrt(mx * mx + mz * mz);
+                    if (ml > 1.0e-3f) {
+                        lastCommand.moveX = mx / ml;
+                        lastCommand.moveZ = mz / ml;
+                    }
+                }
+            }
+        } else if (in.targetDist > cfg.rollerStandMax) {
+            steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+        }
         rollerWhistleTime += dt;
         if ((in.scattered || in.squadDistress) && std::fmod(rollerWhistleTime, 2.5f) < cfg.whistleHold * 0.5f)
             lastCommand.buttons = PadB;
@@ -2036,12 +2119,15 @@ private:
     bool kingLowHpMode = false; // last stance used the low-health band (marker field)
     int rollerMode = -1; // #897 last AUTOPLAY_ROLLER mode (-1 = none this stint)
     float rollerWhistleTime = 0.0f; // #897 stand-mode whistle pulse clock
+    float punishClock = 0.0f; // #897 punish diagnostics clock
+    int punishThrows = 0; // #897 A presses this punish stint
     bool powerResupplying = false; // #897 power resupply leg in progress (survives enter())
     bool powerAtOnion = false; // #897 reached the Onion on this resupply visit
     float pushTime = 0.0f; // #897 time spent pushing obstacles this approach stint
     bool pushing = false; // #897 obstacle push active
     bool pushedThisStint = false; // #897 pushed a box since the last reset (regroup pulses)
     float regroupClock = 0.0f; // #897 post-push whistle pulse clock
+    bool tierReplanAsked = false; // #897 one immediate replan per approach when the target is on another tier
     bool legKnown = false; // #897 approach progress is measured to this detour leg
     float legX = 0.0f;
     float legZ = 0.0f;
