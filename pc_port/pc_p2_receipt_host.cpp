@@ -3,6 +3,8 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <filesystem>
+#include <fstream>
 
 namespace {
 struct ReceiptHost {
@@ -32,6 +34,9 @@ P2ReceiptHostHandle pc_p2_receipt_host_open(const char* path)
 		return nullptr;
 	}
 	const std::string key(path);
+    std::error_code readError;
+    const bool present = std::filesystem::exists(key, readError);
+    if (readError || (present && !std::ifstream(key).good())) return nullptr;
 	const auto existing = receiptHosts.find(key);
 	if (existing != receiptHosts.end()) {
 		return existing->second.get();
