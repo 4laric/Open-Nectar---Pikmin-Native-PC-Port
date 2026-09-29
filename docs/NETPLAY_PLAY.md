@@ -114,6 +114,69 @@ Keep the console open: it shows the codes and the session log. To keep a
 log file, start the game with `> host.log 2>&1` added (the code is still
 copied to the clipboard and written to the run folder).
 
+## The netplay HUD
+
+During a session a small box in the top-right corner shows how the
+connection is doing:
+
+```
+NETPLAY  good
+ping 42 ms  jitter 3 ms
+delay 2 (67 ms)  stalls 0 / 10 s
+```
+
+- **NETPLAY good / fair / poor** (green / yellow / red; `measuring` in grey
+  until the first ping): *good* is a ping of at most 100 ms, jitter of at
+  most 15 ms and no stall in the last 10 s; *fair* is a ping of at most
+  200 ms, jitter of at most 40 ms and at most 3 stalls in the last 10 s;
+  anything worse is *poor*.
+- **ping**: the round trip to the other game (the average of the last 10
+  measurements); **jitter**: how much it changes between measurements.
+- **delay**: the input delay in frames (one frame is 33 ms at 30 Hz). Your
+  own captain moves this many frames after you press, so both games can
+  apply every input on the same frame.
+- **stalls / 10 s**: how often, in the last 10 seconds, this game had to
+  wait at least one frame for the other game's input (the picture pauses
+  briefly). Stage loads and Archipelago pauses are not counted.
+
+**F4** shows or hides the box; on a gamepad press **both sticks in (L3 +
+R3)** together. F4 does nothing while you have bound it to a game action in
+the controls; a keyboard-only game (`--netplay-input keyboard`) ignores the
+pad chord. The box is hidden while the F1 menu is open. It never changes
+the game: the other player's game is not told about it. The same numbers go
+to the log every 30 s (`[netplay] link: ...`).
+
+## When a session ends (desync, lost connection, quit)
+
+If the two games stop agreeing (a desync), the connection is lost, or the
+other player closes their game, the session ends. The game then shows a
+banner for up to 10 seconds (any key or button closes it early) and prints
+the same message in the console, for example:
+
+```
+[netplay] ==== netplay session ended ====
+[netplay] CONNECTION LOST: no data from the other game for too long (it may have crashed or lost its network).
+[netplay] Last saved day: day 3 (the campaign continues from the start of day 3); checkpoint 1.
+[netplay] To carry on from that day: run host.bat and answer Y to "Continue last campaign?", or run:
+[netplay]   nectar.exe --netplay-host-ice --continue
+[netplay] Your partner joins as usual (join.bat); your saved day is sent to them automatically.
+```
+
+- **DESYNC** (exit code 5): the games disagreed about the game state.
+- **DESYNC AT THE DAY-END SAVE** (exit code 5) / **SAVE NOT AGREED** (exit
+  code 6): the day-end save did not finish the same way on both games, so
+  that day does not count; the campaign continues from the day before.
+- **CONNECTION LOST**: no data from the other game for 15 s (60 s during a
+  stage load).
+- **THE OTHER PLAYER LEFT**: the other game was closed. A game that is
+  closed mid-session tells the other one at once, so it no longer waits
+  15 s.
+
+Nothing is lost except the day in progress: the campaign continues from the
+last day that ended with the day-end save on both games (see below). If no
+day has ended yet, the message says so, and the next session starts a new
+campaign.
+
 ## Local two-window test (one PC, one player)
 
 ```
@@ -196,10 +259,52 @@ a different checkpoint of the same day, refuses (`handshake refused:
 checkpoint`). A joiner checkpoint from another seed or a damaged one is set
 aside (renamed `*.sav.stale-<time>`, never deleted) and replaced.
 
-The one-command launcher (`--netplay-host-ice`) starts every session in a
-new run folder, so it always starts a new campaign today; resuming across
-evenings runs through the pair tools (`tools/netplay/run_pair.py
---run-name ... --token ...`), which keep both campaign folders.
+### Continue the campaign (`--continue`)
+
+The one-command launcher starts every session in a new run folder. Without
+`--continue` that is a new campaign. To carry on with the last campaign,
+the **host** adds `--continue`:
+
+```
+nectar.exe --netplay-host-ice --continue
+```
+
+(the playtest `host.bat` asks `Continue last campaign? [Y/n]` and adds it
+for you). The joiner does nothing different: it joins with the usual offer
+code, and the host's saved day reaches it at the handshake (`[netplay]
+checkpoint adopted`).
+
+- `--continue` picks the newest host run folder (under `netplay\` next to
+  the exe, or `%LOCALAPPDATA%\Nectar\netplay\`) whose campaign has a
+  day-end save **both** games agreed on, and says which:
+  `[netplay] launch: --continue: continuing the campaign of ...\run-...:
+  checkpoint 1 (day 3)`. Both games then start that day from its
+  beginning.
+- It never continues a half-saved day: a day-end save that did not finish
+  on both games (exit 5 or 6 at the save, or a game that crashed during
+  it) is skipped, and the day before it is used. Each run folder keeps a
+  small `campaign-record.txt` for this (which saves both games agreed on).
+- `--continue <run folder>` continues that run folder instead (for example
+  an older campaign, or a run where you were the joiner: its campaign is the
+  same, so either player can host the next session).
+- `--continue` with `--bootstrap <seed file>` continues the newest campaign
+  **of that seed**.
+- The seed file and the netplay seed come from the continued run; the
+  settings are this session's, as always.
+- Nothing is moved or deleted: the saved day, the memory card and the
+  campaign's other files are **copied** into the new run folder, and the
+  old run folder stays exactly as it was.
+- No saved day yet (the first day never ended with a save): `--continue`
+  says so (`--continue: no saved day yet ...`) and offers a new campaign
+  instead (`Start a new campaign instead? [Y/n]`; without a console it
+  starts one).
+
+Seeds with P2 enemies continue too: the continued run's `play\` folder
+(its sidecars and P2 receipt ledgers) and its P2 assets overlay are used
+again; if that overlay was moved, pass `--netplay-p2-assets <folder>`.
+
+Resuming through the pair tools (`tools/netplay/run_pair.py --run-name ...
+--token ...`, which keep both campaign folders) keeps working as before.
 
 Every session needs a new run folder on both sides (the game refuses a run
 folder that was already used), and the joiner's `mirror-events.txt` starts
@@ -253,6 +358,10 @@ folder), not append the second evening to the first evening's run.
   it did not reach the save within 60 s while still connected; that day is
   not saved, and the next session continues from the last day both games
   saved.
+- `[netplay] launch: --continue: no saved day yet ...`: none of the host's
+  run folders has a day that ended with the day-end save on both games (for
+  example the first day never ended). Answer Y (or just press Enter) to
+  start a new campaign; `--continue <run folder>` picks a specific run.
 - Logs: the console output (or your `> file` redirect; `native.log` in the
   local test), plus the run folder `netplay\run-...\` next to the exe.
 
@@ -260,10 +369,13 @@ folder), not append the second evening to the first evening's run.
 
 - No Archipelago: a netplay session plays a seed offline with a fixed
   ready state; nothing is sent or received.
-- No resume through the one-command launcher: each launcher session starts
-  a new run folder and a new campaign (resume works through the pair tools,
-  see "Two sessions in a row"); quitting ends the session for both players.
-- A desync ends the session (`[netplay] desync detected`).
+- A desync, a lost connection or a quit ends the session for both players;
+  nothing carries over but the last day both games saved, which the host
+  continues with `--continue` (see "Continue the campaign"). There is no
+  mid-session reconnect.
+- The HUD's stall count is this game's own (a wait of at least one frame
+  for the other game's input); it cannot show a stall while it happens,
+  because the picture itself waits.
 - Seeds with P2 enemies need each player's own copy of the seed's P2
   assets overlay (see "Seeds with P2 enemies").
 - The low-level switches (`--netplay-host`/`--netplay-join`,
