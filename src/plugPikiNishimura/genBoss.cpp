@@ -6,6 +6,7 @@
 #include "sysNew.h"
 #include "pc_randomizer.h"
 #include "pc_p2_boss_arena.h"
+#include "pc_held_part.h"
 #include "pc_p2_boss_arena_policy.h"
 #include "pc_p2_placement_probe.h"
 #include "teki.h"
@@ -125,6 +126,10 @@ void GenObjectBoss::updateUseList(Generator* generator, int count)
 	const int p2Host = pc_p2_boss_arena_host(generator);
 	if (p2Host >= 0) {
 		tekiMgr->mUsingType[p2Host] = true;
+		// #901: the arena boss holds the P1 boss's ship part; load its shape
+		// with the stage like any other part holder.
+		const unsigned heldPart = pc_held_part_for_pellet_config(mPelletConfigIdx);
+		if (heldPart) pelletMgr->addUseList(heldPart);
 		return;
 	}
 	if (pc_p2_boss_arena_suppressed(generator)) {

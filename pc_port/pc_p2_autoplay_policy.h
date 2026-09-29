@@ -146,6 +146,15 @@ inline bool isEnabled()
 
 // Optional target filter: PIKMIN_RANDOMIZER_AUTOPLAY_TARGET=<generator key or
 // species name>. Empty means "nearest live P2-bound teki".
+// #901 TEST-ONLY: generator uid of one vanilla P1 teki the bot may fight
+// (PIKMIN_RANDOMIZER_AUTOPLAY_P1_UID), for the held-part regression run.
+constexpr unsigned kP1TargetSource = 0xFFFFu;
+inline unsigned p1TargetUid()
+{
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_P1_UID");
+    return v && v[0] ? unsigned(std::strtoul(v, nullptr, 10)) : 0u;
+}
+
 inline std::string targetFilter()
 {
     const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_TARGET");

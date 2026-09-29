@@ -580,6 +580,13 @@ void pc_p2_autoplay_tick(void)
             if (!token) continue;
             unsigned source = pc_randomizer_p2_source_for(actor);
             if (!source) source = pc_randomizer_p2_source_for_id(token);
+            // #901 TEST-ONLY regression target: a vanilla P1 teki named by its
+            // seed generator uid (PIKMIN_RANDOMIZER_AUTOPLAY_P1_UID), so the bot
+            // can fight a P1 part holder. Pseudo source 0 is never a species.
+            if (!source && p2autoplay::p1TargetUid()
+                && pc_randomizer_generator_id(actor->mGenerator) == p2autoplay::p1TargetUid()) {
+                source = p2autoplay::kP1TargetSource;
+            }
             if (!source) continue; // not P2-bound
             if (sCompleted.count(token)) continue;
             const char* name = sourceDisplayName(source);
@@ -685,6 +692,7 @@ void pc_p2_autoplay_tick(void)
     if (sEngage.token && sEngage.deadLatch && pelletMgr && !sEngage.bodyPresent) {
         float best2 = 600.0f * 600.0f;
         Pellet* best = nullptr;
+        bool bestPart = false;
         Iterator pit(pelletMgr);
         CI_LOOP(pit)
         {
@@ -693,9 +701,14 @@ void pc_p2_autoplay_tick(void)
             const float dx = pel->getPosition().x - sEngage.lastX;
             const float dz = pel->getPosition().z - sEngage.lastZ;
             const float d2 = dx * dx + dz * dz;
-            if (d2 < best2) {
+            // #901: a ship part the target dropped outranks its corpse, so the
+            // bot escorts the part to the ship (the check under test).
+            const bool part = pel->isUfoParts();
+            if (bestPart && !part) continue;
+            if ((part && !bestPart && d2 < 600.0f * 600.0f) || d2 < best2) {
                 best2 = d2;
                 best = pel;
+                bestPart = part;
             }
         }
         if (best) {

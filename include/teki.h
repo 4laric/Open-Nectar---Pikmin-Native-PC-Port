@@ -642,6 +642,11 @@ public:
 	SearchData mTekiSearchData[3];                // _42C
 	WayPoint** mRouteWayPoints;                   // _450, array of something, unsure what
 	                                              // _454 = PaniAnimKeyListener
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	// #901 generic held ship part: set once the held part has dropped (any
+	// death funnel), so exactly one part pellet spawns. Sim state; reset().
+	bool mPcHeldPartDropped = false;
+#endif
 };
 
 /**
