@@ -180,9 +180,10 @@ real campaign checkpoint (`session\campaign\<generation>.sav`) and the
 card; the joiner writes the same files as a mirror; the two games then agree
 on the host's result before either continues (a `[netplay] save barrier`
 line in both logs). The joiner's mirror is written as `<generation>.sav.pending`
-and only becomes `<generation>.sav` once the host reports success. If either
-game has not heard from the other within 10 s, the day is abandoned as it
-would be without netplay (exit 6); if the two saves differ, both games stop
+and only becomes `<generation>.sav` once the host reports success. If the
+other game disconnects there (no network traffic for 15 s), or is still
+connected but has not reached the save within 60 s, the day is abandoned as
+it would be without netplay (exit 6); if the two saves differ, both games stop
 with exit 5 (a desync). Either way the joiner renames its unconfirmed mirror
 to `*.sav.unconfirmed` (never deleted), so the next session sees the last
 day both games agreed on and simply receives the host's checkpoint.
