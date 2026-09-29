@@ -11,18 +11,30 @@
 //               returned; a local card failure writes nothing and keeps the
 //               generation; checkpoint_info reports the newest checkpoint and
 //               the SHA-256 of its file.
-//   client      the mirror checkpoint follows the host: SAVE_RESULT with the
-//               host's digest; a host failure renames the mirror checkpoint to
-//               .unconfirmed (never deleted), keeps the generation and writes
-//               SAVE_FAIL; a local failure under a host success follows the
-//               host (the generation still advances); adopt re-reads the
-//               directory like a boot (CAMPAIGN_RESUMED generation=<g>).
+//   client      the mirror checkpoint is <name>.sav.pending while the barrier
+//               runs (fix round 1, C2) and becomes <name>.sav only after the
+//               host's ok (SAVE_RESULT with the host's digest); a host failure
+//               renames it to .sav.unconfirmed (never deleted), keeps the
+//               generation and writes SAVE_FAIL; a local failure under a host
+//               success follows the host (the generation still advances);
+//               adopt re-reads the directory like a boot
+//               (CAMPAIGN_RESUMED generation=<g>).
+//   client-abandon  the barrier is abandoned (the session's exit 5/6 path
+//               calls pc_randomizer_netplay_barrier_abandoned): the pending
+//               checkpoint is retracted to .sav.unconfirmed and no .sav of
+//               that generation exists (fix round 1, C2).
 //   join-stale  netplay join mode: a foreign-fingerprint checkpoint and a
 //               badly named .sav are set aside as *.sav.stale-<secs> at init
 //               instead of failing, and the joiner continues as "none".
-//   host-stale  the host keeps the fatal behaviour (exit 2; WILL_FAIL).
+//   host-stale-foreign / host-stale-badname  (fix round 1, X8) the host keeps
+//               the fatal behaviour: each role runs itself as a child process
+//               over ONE planted file (a foreign-fingerprint .sav, or a badly
+//               named .sav) and requires exit code 2 and the exact historical
+//               message.
 //
-// Each role runs in its own process under <cwd>/campaign_net_<role>/.
+// Each role runs in its own process under a per-process folder
+// <cwd>/campaign_net_<role>_<pid>/ (fix round 1, C11/E4: concurrent ctest
+// runs cannot collide, and a folder that cannot be cleared fails loudly).
 
 #include "pc_randomizer.h"
 #include "netplay/pc_netplay_sha256.h"
@@ -34,6 +46,14 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#ifdef _WIN32
+#include <process.h>
+#define CAMPAIGN_NET_TEST_PID _getpid()
+#else
+#include <sys/wait.h>
+#include <unistd.h>
+#define CAMPAIGN_NET_TEST_PID getpid()
+#endif
 
 namespace {
 bool gHost = true;
@@ -41,12 +61,14 @@ uint32_t gFrame = 0;
 int gFailures = 0;
 // Scripted barrier.
 bool gBarrierHostOk = true;
+bool gBarrierAbandon = false;
 std::string gBarrierHostHex(64, 'a');
 int gBarrierCalls = 0;
 uint32_t gBarrierFrame = 0;
 bool gBarrierLocalOk = false;
 unsigned long long gBarrierGen = 0;
 std::string gBarrierSav;
+std::filesystem::path gCamp;
 
 #define CHECK(cond, what)                                                   \
 	do {                                                                    \
@@ -91,6 +113,20 @@ size_t count_prefix(const std::filesystem::path& dir, const std::string& prefix)
 		if (e.path().filename().string().compare(0, prefix.size(), prefix) == 0) ++n;
 	return n;
 }
+
+// Runs this executable with `role` as a child process, output to `out`;
+// returns its exit code (-1 when it could not be run).
+int run_child(const char* self, const std::string& role, const std::filesystem::path& out)
+{
+	// cmd.exe strips one outer pair of quotes, hence the extra pair.
+	const std::string cmd = "\"\"" + std::string(self) + "\" " + role + " > \"" + out.string() + "\" 2>&1\"";
+#ifdef _WIN32
+	return std::system(cmd.c_str());
+#else
+	const int st = std::system(cmd.substr(1, cmd.size() - 2).c_str());
+	return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+#endif
+}
 } // namespace
 
 // ---- strong definitions of pc_randomizer.cpp's weak session hooks ----
@@ -101,6 +137,11 @@ void pc_netplay_randstate_publish(const pc_randstate::PcRandState&) {}
 bool pc_netplay_hold_active(void) { return false; }
 void pc_netplay_mirror_ledger_send(const uint8_t*, size_t) {}
 uint32_t pc_netplay_current_frame(void) { return gFrame; }
+void pc_netplay_abort_desync(const char* why)
+{
+	std::printf("pc_randomizer_campaign_net_test: unexpected desync abort: %s\n", why);
+	std::exit(5);
+}
 bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long gen, const uint8_t* sav, size_t savLen,
                              const uint8_t*, size_t blockLen, bool* hostOk, char hostSavHex[65])
 {
@@ -119,10 +160,31 @@ bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long ge
 			hx = pc_netplay_sha::hex(d, 32);
 		}
 		std::memcpy(hostSavHex, hx.c_str(), 65);
-	} else {
-		*hostOk = gBarrierHostOk;
-		std::memcpy(hostSavHex, gBarrierHostHex.c_str(), 65);
+		return true;
 	}
+	// Client (fix round 1, C2): while the barrier runs, no .sav of this
+	// generation exists; the mirror is the .pending file, with these bytes.
+	if (localOk) {
+		CHECK(!std::filesystem::exists(gCamp / sav_name(gen)), "no unconfirmed .sav during the barrier");
+		CHECK(slurp(gCamp / (sav_name(gen) + ".pending")) == gBarrierSav,
+		      "the pending mirror checkpoint holds the bytes handed to the barrier");
+	}
+	if (gBarrierAbandon) {
+		// The session's exit 5/6 path: retract, then the process exits.
+		pc_randomizer_netplay_barrier_abandoned();
+		CHECK(!std::filesystem::exists(gCamp / sav_name(gen)) && !std::filesystem::exists(gCamp / (sav_name(gen) + ".pending"))
+		          && std::filesystem::exists(gCamp / (sav_name(gen) + ".unconfirmed")),
+		      "an abandoned barrier retracts the pending checkpoint to .unconfirmed");
+		uint64_t g = 9;
+		uint8_t sha[32];
+		CHECK(pc_randomizer_checkpoint_info(&g, sha) && g == gen - 1,
+		      "after the retraction the newest checkpoint is the last agreed one");
+		std::printf("pc_randomizer_campaign_net_test client-abandon: %s (%d failures)\n",
+		            gFailures == 0 ? "PASS" : "FAIL", gFailures);
+		std::exit(gFailures == 0 ? 0 : 1);
+	}
+	*hostOk = gBarrierHostOk;
+	std::memcpy(hostSavHex, gBarrierHostHex.c_str(), 65);
 	return true;
 }
 
@@ -130,31 +192,64 @@ int main(int argc, char** argv)
 {
 	setvbuf(stdout, nullptr, _IONBF, 0);
 	const std::string role = argc > 1 ? argv[1] : "";
-	if (role != "host" && role != "client" && role != "join-stale" && role != "host-stale") {
-		std::printf("usage: pc_randomizer_campaign_net_test host|client|join-stale|host-stale\n");
+	const bool known = role == "host" || role == "client" || role == "client-abandon" || role == "join-stale"
+	                || role == "host-stale-foreign" || role == "host-stale-badname"
+	                || role == "host-stale-foreign-child" || role == "host-stale-badname-child";
+	if (!known) {
+		std::printf("usage: pc_randomizer_campaign_net_test host|client|client-abandon|join-stale|"
+		            "host-stale-foreign|host-stale-badname\n");
 		return 2;
 	}
-	gHost = role == "host" || role == "host-stale";
 	namespace fs = std::filesystem;
-	const fs::path root = fs::current_path() / ("campaign_net_" + role);
+	if (role == "host-stale-foreign" || role == "host-stale-badname") {
+		// Parent: the fatal path must exit 2 with the historical message.
+		const fs::path out = fs::current_path() / ("campaign_net_" + role + "_" + std::to_string(CAMPAIGN_NET_TEST_PID) + ".log");
+		const int rc = run_child(argv[0], role + "-child", out);
+		const std::string text = slurp(out);
+		const std::string want = role == "host-stale-foreign"
+		                           ? "[Pikmin Randomizer] campaign checkpoint header/seed mismatch; preserve campaign files for recovery"
+		                           : "[Pikmin Randomizer] invalid campaign checkpoint filename";
+		CHECK(rc == 2, "the host exits 2 on a stale checkpoint");
+		CHECK(text.find(want) != std::string::npos, "the historical fatal message");
+		CHECK(text.find("REACHED") == std::string::npos, "init never returned");
+		std::printf("child exit %d, output:\n%s", rc, text.c_str());
+		std::error_code ec;
+		fs::remove(out, ec);
+		std::printf("pc_randomizer_campaign_net_test %s: %s (%d failures)\n", role.c_str(),
+		            gFailures == 0 ? "PASS" : "FAIL", gFailures);
+		return gFailures == 0 ? 0 : 1;
+	}
+	gHost = role == "host" || role == "host-stale-foreign-child" || role == "host-stale-badname-child";
+	const fs::path root = fs::current_path() / ("campaign_net_" + role + "_" + std::to_string(CAMPAIGN_NET_TEST_PID));
 	std::error_code ec;
 	fs::remove_all(root, ec);
+	if (ec) {
+		std::printf("FAIL: cannot clear the fixture folder %s: %s\n", root.string().c_str(), ec.message().c_str());
+		return 1;
+	}
 	const fs::path sess = root / "sess";
 	const fs::path run = sess / "runs" / "run1";
 	const fs::path camp = sess / "campaign";
-	fs::create_directories(run);
-	fs::create_directories(camp);
+	gCamp = camp;
+	fs::create_directories(run, ec);
+	fs::create_directories(camp, ec);
+	if (ec || !fs::is_directory(run) || !fs::is_directory(camp)) {
+		std::printf("FAIL: cannot create the fixture folders under %s\n", root.string().c_str());
+		return 1;
+	}
 	{
 		std::ofstream b(run / "bootstrap.txt", std::ios::binary);
 		b << "PIKMIN_RANDOMIZER 9\nSESSION " << kToken << "\nFINGERPRINT " << kPrint
 		  << "\nPROFILE foh-day2\nCATALOG gameplay-checks-v9\nPLACEMENT identity-v1\nGOAL emperor25\n"
 		     "DAYS repeat-day29-v1\nCOLOR red\nCHECKSET 6\nENEMIES 0\nEND\n";
 	}
-	if (role == "join-stale" || role == "host-stale") {
-		// A foreign campaign (another seed's fingerprint) and a badly named .sav.
+	if (role == "join-stale" || role == "host-stale-foreign-child") {
+		// A foreign campaign (another seed's fingerprint).
 		std::ofstream f(camp / sav_name(1), std::ios::binary);
 		f << "PIKMIN_CAMPAIGN_1 " << kOther << " 1 0 0 0 123\n" << std::string(32768, 'x');
-		f.close();
+	}
+	if (role == "join-stale" || role == "host-stale-badname-child") {
+		// A badly named .sav.
 		std::ofstream g(camp / "notes.sav", std::ios::binary);
 		g << "junk";
 	}
@@ -163,7 +258,11 @@ int main(int argc, char** argv)
 	char arg1[] = "--randomizer-seed";
 	char* args[] = { arg0, arg1, seedArg.data(), nullptr };
 	CHECK(pc_randomizer_init(3, args), "init with the test bootstrap");
-	// (host-stale never gets here: init fails with exit 2.)
+	if (role == "host-stale-foreign-child" || role == "host-stale-badname-child") {
+		// Never reached: init must have exited 2.
+		std::printf("REACHED past init\n");
+		return 0;
+	}
 	if (role == "join-stale") {
 		CHECK(!fs::exists(camp / sav_name(1)) && !fs::exists(camp / "notes.sav"), "stale .sav files set aside");
 		CHECK(count_prefix(camp, sav_name(1) + ".stale-") == 1 && count_prefix(camp, "notes.sav.stale-") == 1,
@@ -183,7 +282,8 @@ int main(int argc, char** argv)
 	if (role == "host") {
 		gFrame = 27000;
 		CHECK(pc_randomizer_save_campaign_netplay(block.data(), true), "host save: host ok");
-		CHECK(fs::exists(camp / sav_name(1)), "host checkpoint gen 1 written");
+		CHECK(fs::exists(camp / sav_name(1)) && !fs::exists(camp / (sav_name(1) + ".pending")),
+		      "host checkpoint gen 1 written under its real name");
 		CHECK(gBarrierCalls == 1 && gBarrierFrame == 27000 && gBarrierLocalOk && gBarrierGen == 1,
 		      "barrier called with frame 27000, gen 1, local ok");
 		CHECK(gBarrierSav == slurp(camp / sav_name(1)), "the barrier hashes the exact .sav bytes");
@@ -200,17 +300,28 @@ int main(int argc, char** argv)
 		CHECK(fs::exists(camp / sav_name(2)), "the generation did not advance on the failure (gen 2 now)");
 		CHECK(!fs::exists(run / "mirror-events.txt"), "the host writes no mirror");
 	}
+	if (role == "client-abandon") {
+		gFrame = 27000;
+		CHECK(pc_randomizer_save_campaign_netplay(block.data(), true), "client: host ok (gen 1)");
+		gBarrierAbandon = true;
+		gFrame          = 60000;
+		pc_randomizer_save_campaign_netplay(block.data(), true); // exits from the barrier stub
+		std::printf("FAIL: the abandoned barrier returned\n");
+		return 1;
+	}
 	if (role == "client" || role == "join-stale") {
 		const std::string hostHex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 		gBarrierHostHex = hostHex;
 		gBarrierHostOk  = true;
 		gFrame          = 27000;
 		CHECK(pc_randomizer_save_campaign_netplay(block.data(), true), "client: host ok");
-		CHECK(fs::exists(camp / sav_name(1)), "mirror checkpoint gen 1 written");
+		CHECK(fs::exists(camp / sav_name(1)) && !fs::exists(camp / (sav_name(1) + ".pending")),
+		      "mirror checkpoint gen 1 published under its real name after the host's ok");
 		gBarrierHostOk = false;
 		gFrame         = 60000;
 		CHECK(!pc_randomizer_save_campaign_netplay(block.data(), true), "client: host failed");
-		CHECK(!fs::exists(camp / sav_name(2)) && fs::exists(camp / (sav_name(2) + ".unconfirmed")),
+		CHECK(!fs::exists(camp / sav_name(2)) && !fs::exists(camp / (sav_name(2) + ".pending"))
+		          && fs::exists(camp / (sav_name(2) + ".unconfirmed")),
 		      "the unconfirmed mirror checkpoint is renamed, never deleted");
 		gBarrierHostOk = true;
 		gFrame         = 90000;
@@ -234,5 +345,6 @@ int main(int argc, char** argv)
 
 	std::printf("pc_randomizer_campaign_net_test %s: %s (%d failures)\n", role.c_str(), gFailures == 0 ? "PASS" : "FAIL",
 	            gFailures);
+	if (gFailures == 0) fs::remove_all(root, ec); // best effort; the name is unique per process
 	return gFailures == 0 ? 0 : 1;
 }

@@ -37,6 +37,13 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#ifdef _WIN32
+#include <process.h>
+#define OUTBOX_IO_TEST_PID _getpid()
+#else
+#include <unistd.h>
+#define OUTBOX_IO_TEST_PID getpid()
+#endif
 
 namespace {
 bool gHost = true;
@@ -111,9 +118,16 @@ int main(int argc, char** argv)
 	}
 	gHost = role == "host" || role == "host-noledger";
 	namespace fs = std::filesystem;
-	const fs::path root = fs::current_path() / ("outbox_io_" + role);
+	// B2 fix round 1 (E4): a per-process fixture folder, so concurrent ctest
+	// runs in one build dir cannot collide; a folder that cannot be cleared
+	// fails loudly instead of leaving stale state behind.
+	const fs::path root = fs::current_path() / ("outbox_io_" + role + "_" + std::to_string(OUTBOX_IO_TEST_PID));
 	std::error_code ec;
 	fs::remove_all(root, ec);
+	if (ec) {
+		std::printf("FAIL: cannot clear the fixture folder %s: %s\n", root.string().c_str(), ec.message().c_str());
+		return 1;
+	}
 	const fs::path sess = root / "sess";
 	const fs::path run = sess / "runs" / "run1";
 	fs::create_directories(run);
@@ -284,5 +298,6 @@ int main(int argc, char** argv)
 		return 1;
 	}
 	std::printf("pc_randomizer_outbox_io_test %s: PASS\n", role.c_str());
+	fs::remove_all(root, ec); // best effort; the folder name is unique per process
 	return 0;
 }

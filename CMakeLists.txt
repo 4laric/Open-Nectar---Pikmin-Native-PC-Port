@@ -2047,9 +2047,12 @@ target_compile_options(pc_randomizer_campaign_net_test PRIVATE ${NATIVE_COMPILE_
 add_test(NAME pc_randomizer_campaign_net_host_test COMMAND pc_randomizer_campaign_net_test host)
 add_test(NAME pc_randomizer_campaign_net_client_test COMMAND pc_randomizer_campaign_net_test client)
 add_test(NAME pc_randomizer_campaign_net_join_stale_test COMMAND pc_randomizer_campaign_net_test join-stale)
-add_test(NAME pc_randomizer_campaign_net_host_stale_test COMMAND pc_randomizer_campaign_net_test host-stale)
-set_tests_properties(pc_randomizer_campaign_net_host_stale_test PROPERTIES
-    PASS_REGULAR_EXPRESSION "Pikmin Randomizer. (invalid campaign checkpoint filename|campaign checkpoint header/seed mismatch)")
+# B2 fix round 1: the pending mirror checkpoint retracted by an abandoned
+# barrier (C2), and the host's two fatal stale cases split (X8); each fatal
+# role runs itself as a child and asserts exit code 2 plus the exact message.
+add_test(NAME pc_randomizer_campaign_net_client_abandon_test COMMAND pc_randomizer_campaign_net_test client-abandon)
+add_test(NAME pc_randomizer_campaign_net_host_stale_foreign_test COMMAND pc_randomizer_campaign_net_test host-stale-foreign)
+add_test(NAME pc_randomizer_campaign_net_host_stale_badname_test COMMAND pc_randomizer_campaign_net_test host-stale-badname)
 
 # Only the isolated diagnostic build includes scripted stock/death fixtures.
 option(PIKMIN_RANDOMIZER_TEST_HOOKS "Enable standalone scripted gameplay test fixtures" OFF)
