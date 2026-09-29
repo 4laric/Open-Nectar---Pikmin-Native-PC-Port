@@ -128,11 +128,11 @@ bool pc_coop_stage_changed(bool started, const PcCoopStageKey& prev, const PcCoo
 //                                         the sunset safety range
 //   `<tick> SUNSET`                       the clock jumps to the day's end
 //                                         hour; the normal day end follows
-// The day end sets the clock back, which resets the policy (reason=clock)
-// and re-arms the schedule inside the day-end sequence; these four kinds are
-// refused there (`TEST refused ... reason=day-end`), so they never mutate the
-// sequence they set up. They fire again on the next stage/day, like HP/DOWN.
-// Committed fixture: tools/netplay/fixtures/coop_dayend_home.events.
+// The day end sets the clock back and re-arms the schedule inside the day-end sequence: these four kinds are
+// refused there (reason=day-end) and fire again on the next stage/day, like HP/DOWN. DISMISS is
+// Navi::releasePikis, which walks the plate the captain's control update refreshes, so it releases nobody
+// during the stage-start movie; SUNSET is refused there (reason=stage-start). Committed fixtures:
+// tools/netplay/fixtures/coop_dayend_{home,squad}.events (docs/NETPLAY_COOP_POLICY.md).
 enum { PC_COOP_EVENTS_MAX = 64, PC_COOP_EVENT_TEXT = 48, PC_COOP_EVENT_SQUAD_MAX = 200 };
 enum PcCoopEventKind {
 	PC_COOP_EVENT_HP = 0,
