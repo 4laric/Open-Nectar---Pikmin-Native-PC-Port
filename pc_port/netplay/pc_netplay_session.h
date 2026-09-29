@@ -50,6 +50,8 @@ void pc_netplay_on_stage_load(void);
 
 // M4 gap-fix lane S (issue #885): keep-alive entry for long main-thread loops
 // (site = pc_netplay_loadguard::Site). Called weakly from pc_gfx.cpp (TEV
-// program creation) and dvd_stubs.cpp (DVDOpen/DVDRead); inert outside a
-// netplay session tick. Null in the default build.
+// program creation), dvd_stubs.cpp (DVDOpen/DVDRead) and the day-end save
+// (memoryCard.cpp / cardutil.cpp card I/O waits, pc_randomizer.cpp checkpoint
+// write; fix round 1); inert outside a netplay session tick. Null in the
+// default build.
 void pc_netplay_load_keepalive(int site);

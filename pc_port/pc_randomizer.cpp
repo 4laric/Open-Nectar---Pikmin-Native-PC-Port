@@ -8,6 +8,7 @@
 #include "pc_p2_delivery_host.h"
 #include "pc_randomizer_outbox.h"
 #include "netplay/pc_netplay_sha256.h"
+#include "netplay/pc_netplay_loadguard.h"
 #include <unordered_map>
 #include <cstdint>
 #include <cmath>
@@ -56,6 +57,10 @@ __attribute__((weak)) bool pc_netplay_save_barrier(uint32_t frame, bool localOk,
                                                   size_t blockLen, bool* hostOk, char hostSavHex[65]);
 // B2 fix round 1 (C3, C7, C12): ends the session as a desync (exit 5).
 __attribute__((weak)) void pc_netplay_abort_desync(const char* why);
+// M4 gap-fix lane S fix round 1 (MJ1): keep-alive network poll between the
+// steps of the day-end save (netplay/pc_netplay_loadguard.h, kSiteSave);
+// inert outside a netplay session tick.
+__attribute__((weak)) void pc_netplay_load_keepalive(int site);
 #else
 bool pc_netplay_session_active(void);
 bool pc_netplay_is_host(void);
@@ -68,6 +73,7 @@ bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long ge
                              size_t savLen, const uint8_t* block, size_t blockLen, bool* hostOk,
                              char hostSavHex[65]);
 void pc_netplay_abort_desync(const char* why);
+void pc_netplay_load_keepalive(int site);
 #endif
 #if PIKI_NETPLAY_BUILD
 // Netplay launch lane (issue #887): defined by pc_netplay_launch.cpp, which
@@ -1864,8 +1870,15 @@ void pc_randomizer_netplay_barrier_abandoned() {
 bool pc_randomizer_save_campaign_netplay(const void* source, bool localCardOk) {
     if (!enabled) return localCardOk;
     const uint32_t frame = pc_netplay_current_frame != nullptr ? pc_netplay_current_frame() : 0;
+    // Lane S fix round 1 (MJ1): each step of this save (journal flush,
+    // checkpoint write) is file I/O inside the save tick; between the steps
+    // the session polls the network (rate-limited, no Advance, no sim state).
+    const auto keepalive = []() {
+        if (pc_netplay_load_keepalive != nullptr) pc_netplay_load_keepalive(pc_netplay_loadguard::kSiteSave);
+    };
     // Flush first: this tick's journal lines land before the checkpoint.
     pc_randomizer_outbox_flush(frame);
+    keepalive();
     const bool host = outbox_host();
     const unsigned long long generation = campaignGeneration + 1;
     std::string bytes;
@@ -1905,6 +1918,7 @@ bool pc_randomizer_save_campaign_netplay(const void* source, bool localCardOk) {
         // only after the host's ok, so a barrier that ends in exit 5/6, or a
         // client killed mid-barrier, never leaves an unconfirmed .sav behind.
         localOk = write_campaign_checkpoint(source, generation, host, &bytes, &written, host ? nullptr : ".pending");
+        keepalive();
         if (localOk && host) std::printf("[Pikmin Randomizer] CAMPAIGN_SAVED generation=%llu\n", generation);
         else if (localOk) netplayPendingCheckpoint = written;
         else std::printf("[netplay] save barrier: cannot write the local mirror checkpoint %020llu.sav\n", generation);

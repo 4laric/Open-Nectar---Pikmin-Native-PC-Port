@@ -2,7 +2,8 @@
 //
 // Part 1 covers the engine-free policy in pc_netplay_loadguard.h: the stall
 // injector's env parser, role match and slicing, the load window's
-// open/extend/close rules and the keep-alive rate gate.
+// open/extend/close rules, the keep-alive rate gate and (fix round 1) the day-end
+// save barrier's wait for a connected peer.
 //
 // Part 2 checks the GekkoNet behaviour the design relies on against the
 // vendored library itself (two GekkoGameSessions over an in-memory link, a
@@ -361,6 +362,16 @@ void policy_tests()
 		const uint32_t F = 1000, X = F + kLoadWindowFrames;
 		for (uint32_t d = 1; d <= 8; ++d) CHECK(X - d - 1 >= F + 21, "peer past its load frame + 21");
 	}
+	// Fix round 1 (MJ1): the day-end save barrier's wait for a connected peer.
+	{
+		CHECK(barrier_deadline_ms(false, 60000) == kBarrierLegacyMs, "guard off: B2's fixed 10 s");
+		CHECK(barrier_deadline_ms(true, 60000) == 60000, "guard on: the load timeout");
+		CHECK(barrier_deadline_ms(true, 120000) == 120000, "guard on: follows a raised load timeout");
+		CHECK(barrier_deadline_ms(true, 5000) == kBarrierLegacyMs, "guard on: never below the 10 s it replaces");
+		CHECK(std::strcmp(site_name(kSiteSave), "save") == 0 && std::strcmp(site_name(kSiteShader), "tev") == 0
+		          && std::strcmp(site_name(99), "other") == 0 && kSiteSave < kSiteCount,
+		      "site names and the save site");
+	}
 	// Keep-alive gate.
 	{
 		KeepAliveGate g;
@@ -376,18 +387,24 @@ void gekko_tests()
 {
 	const unsigned kTimeout = 1000; // ms, short so the test is quick
 	const double kStall     = 2.5 * kTimeout;
+	// Fix round 1 (evidence review 6): the detection-latency bounds allow
+	// +1500 ms, so a heavily loaded machine (ctest -j, other builds) cannot
+	// push a correct drop out of the bound; A's stall is long enough that
+	// the drop still happens inside it.
+	const double kLateMs    = 1500.0;
+	const double kStallA    = 3.5 * kTimeout;
 	// A. Stall without any pump: both peers end up disconnected.
 	{
 		Pair pr(kTimeout);
 		CHECK(pr.run_until(30, 10000), "A: warm-up to frame 30");
 		const double t0 = now_ms();
-		pr.stall(1, kStall, 0.0); // the joiner blocks, no pump
+		pr.stall(1, kStallA, 0.0); // the joiner blocks, no pump
 		CHECK(pr.dropped[0], "A: running peer drops the silent peer");
 		if (pr.dropped[0]) {
 			const double lat = pr.droppedAt[0] - t0;
 			std::printf("A: running peer dropped the stalled peer %.0f ms into a %.0f ms stall (timeout %u ms)\n", lat,
-			            kStall, kTimeout);
-			CHECK(lat >= kTimeout - 50 && lat <= kTimeout + 500, "A: drop after about the timeout");
+			            kStallA, kTimeout);
+			CHECK(lat >= kTimeout - 50 && lat <= kTimeout + kLateMs, "A: drop after about the timeout");
 		}
 		// The stalled peer resumes: it reads the Disconnect messages.
 		for (int i = 0; i < 500 && !pr.dropped[1]; ++i) {
@@ -481,7 +498,7 @@ void gekko_tests()
 		if (pr.dropped[0]) {
 			const double lat = pr.droppedAt[0] - t0;
 			std::printf("E: survivor reported the dead peer after %.0f ms (timeout %u ms)\n", lat, kTimeout);
-			CHECK(lat >= kTimeout - 50 && lat <= kTimeout + 500, "E: detected after about the timeout");
+			CHECK(lat >= kTimeout - 50 && lat <= kTimeout + kLateMs, "E: detected after about the timeout");
 		}
 	}
 }

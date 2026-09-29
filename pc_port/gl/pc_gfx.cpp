@@ -38,6 +38,7 @@
 #include "../timing/pc_render_phase.h"
 #include "../timing/pc_tick_profiler.h"
 #include "../netplay/pc_netplay_present.h"
+#include "../netplay/pc_netplay_loadguard.h"
 #include "pc_gfx_deferred_tex.h"
 
 #include "../pc_p2_specular_dir.h"
@@ -7132,7 +7133,7 @@ static void use_program_for_current_state() {
     // programs the netplay keep-alive polls the network so the peer's
     // disconnect timer keeps being fed. Weak: null in the default build, and
     // inert outside a netplay session tick.
-    if (pc_netplay_load_keepalive != nullptr) pc_netplay_load_keepalive(1 /* kSiteShader */);
+    if (pc_netplay_load_keepalive != nullptr) pc_netplay_load_keepalive(pc_netplay_loadguard::kSiteShader);
     if (!program) {
         // One failure is treated as a permanent fallback: a configuration this
         // generator cannot express must not be retried for every draw.

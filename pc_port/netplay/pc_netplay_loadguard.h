@@ -9,24 +9,32 @@
 // A peer blocked inside one Advance tick (a synchronous stage load, or the
 // presentation pass specialising TEV programs: 65 of them took ~16 s under
 // load in integ-m4) sends nothing, so its peer drops it after 15 s, and the
-// blocked peer then reads the peer's Disconnect messages and drops too. Both
-// peers block at the same tick when both load, so a slow load on both sides
-// fails the same way.
+// blocked peer then reads the peer's Disconnect messages and drops too. The
+// failure needs one peer to be silent for more than the timeout while the
+// other keeps polling: a one-sided stall, or two stalls of unequal length or
+// at different times. Two equal stalls at the same moment usually survive
+// even without the guard, because GekkoNet stamps last_received_message
+// with the time a datagram is processed, so each peer drains the other's
+// queued datagrams right after its own block (lane S runs N3/N7).
 //
 // The guard has two parts; each can be switched off on its own.
 //
-// (a) Main-thread keep-alive pump. The long loops call
+// (a) Main-thread keep-alive network poll. The long loops call
 //     pc_netplay_load_keepalive(site) between their steps: after each TEV
 //     program is created (pc_gfx.cpp), on every DVDOpen/DVDRead (stage and
-//     archive I/O, dvd_stubs.cpp) and at the stage-load hook. Inside an
-//     Advance tick, at most once per kKeepAliveIntervalMs, it pumps the bulk
-//     channel and calls gekko_network_poll: receive, ack, resend unacked
-//     inputs and the 500 ms NetworkHealth. It never produces or consumes an
-//     Advance, submits no input and touches no sim state, so the simulation
-//     cannot change: this is exactly the pump the B2 day-end save barrier
-//     already runs inside its save tick. The loading peer keeps talking, so
-//     neither peer's idle timer runs, and a real peer loss is still detected
-//     after the normal timeout.
+//     archive I/O, dvd_stubs.cpp), at the stage-load hook, and while the
+//     day-end save waits for its card I/O or writes its checkpoint. Inside an
+//     Advance tick, at most once per kKeepAliveIntervalMs, it calls
+//     gekko_network_poll only: receive, ack, resend unacked inputs and the
+//     500 ms NetworkHealth. It deliberately does NOT pump the bulk channel
+//     (the bulk channel has no idle timer and resends until acked, and its
+//     consumers run between ticks; see loadguard_pump). It never produces or
+//     consumes an Advance, submits no input and touches no sim state, so the
+//     simulation cannot change: it is the same GekkoNet poll the B2 day-end
+//     save barrier already runs inside its save tick. The loading peer keeps
+//     talking, so neither peer's idle timer runs, and a real peer loss is
+//     still detected after the normal timeout. It cannot split one single
+//     long step (one huge read, CPU work between two call sites).
 //
 // (b) Load-window timeout extension. Every stage load runs inside the same
 //     Advance frame F on both peers (the sim is identical), so each peer
@@ -39,9 +47,29 @@
 //     index s lands on frame s + delay and is made after s Advances), so the
 //     peer is demonstrably out of its load and inputs flow again when the
 //     timeout drops back. This covers a single un-pumpable block (one huge
-//     read, a driver stall) that (a) cannot split. Cost: a peer that dies
+//     read, a driver stall) that (a) cannot split. Costs: a peer that dies
 //     inside a load window is detected after the load timeout, not the
-//     normal one.
+//     normal one; and a B1 HOLD that freezes the session less than
+//     kLoadWindowFrames after a stage load keeps the window open for the
+//     whole hold (no Advance runs to close it), so during that hold a dead
+//     peer is also reported after the load timeout (60 s). Both peers keep
+//     polling in a hold, so a live peer is never dropped by it.
+//
+// The B2 day-end save barrier (pc_netplay_save_barrier) waits inside the
+// save tick for the peer, which may still be up to `delay` frames behind in
+// a long tick of its own. With the guard on, the barrier lets GekkoNet
+// decide peer death (it abandons the day as soon as GekkoNet reports the
+// peer disconnected: the normal timeout, or the load timeout in a window)
+// and otherwise waits up to barrier_deadline_ms() (the load timeout, 60 s by
+// default), which only ends a wait for a peer that keeps polling but never
+// arrives. With the guard off it keeps B2's fixed 10 s.
+//
+// Rollback (not used today: lockstep, no runahead). The window, the stage
+// load count and the stall targeting are keyed to frames that run once on
+// both peers, so the session skips them for rolling-back or running-ahead
+// Advances (a resimulated stage load neither opens nor extends a window, and
+// the window closes only on a first execution); the keep-alive still polls
+// in those ticks.
 //
 // (c) (pre-warming the TEV programs in the handshake) was rejected: the
 // programs a stage needs are only known once its materials draw, and it does
@@ -61,7 +89,21 @@ enum Site {
 	kSiteDvd       = 2, // DVDOpen / DVDRead (dvd_stubs.cpp)
 	kSiteStageLoad = 3, // GameFlow::softReset (the N3 stage-load hook)
 	kSiteStall     = 4, // between two slices of the test stall injector
+	kSiteSave      = 5, // day-end save: card I/O wait, checkpoint write (fix round 1)
+	kSiteCount     = 6, // per-site counters are indexed 0..kSiteCount-1
 };
+
+inline const char* site_name(int site)
+{
+	switch (site) {
+	case kSiteShader: return "tev";
+	case kSiteDvd: return "dvd";
+	case kSiteStageLoad: return "load";
+	case kSiteStall: return "stall";
+	case kSiteSave: return "save";
+	default: return "other";
+	}
+}
 
 // Minimum wall time between two keep-alive pumps inside one tick. GekkoNet
 // resends unacked inputs every 200 ms and sends NetworkHealth every 500 ms,
@@ -74,6 +116,19 @@ constexpr unsigned kDefaultLoadDisconnectMs = 60000;
 constexpr uint32_t kLoadWindowFrames = 30;
 // A tick that takes longer than this is logged with its keep-alive figures.
 constexpr double kLongTickMs = 2000.0;
+// B2's fixed day-end save barrier wait, kept when the guard is off.
+constexpr unsigned kBarrierLegacyMs = 10000;
+
+// Fix round 1 (MJ1): the longest the day-end save barrier waits for a peer
+// that GekkoNet still reports connected. Guard off: B2's fixed 10 s. Guard
+// on: the load timeout (never below the 10 s it replaces), i.e. the same
+// bound a single slow step gets inside a load window; a dead or hung peer
+// ends the wait earlier through GekkoNet's own disconnect.
+inline unsigned barrier_deadline_ms(bool guard, unsigned loadMs)
+{
+	if (!guard) return kBarrierLegacyMs;
+	return loadMs < kBarrierLegacyMs ? kBarrierLegacyMs : loadMs;
+}
 
 // Rate limit for the keep-alive pump.
 class KeepAliveGate {

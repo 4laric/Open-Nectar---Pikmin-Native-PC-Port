@@ -14,6 +14,8 @@
 #include <vector>
 #include <string>
 
+#include "../netplay/pc_netplay_loadguard.h"
+
 // Netplay M4 gap-fix lane S (issue #885) keep-alive entry (see
 // pc_port/netplay/pc_netplay_loadguard.h): a slow stage load reads many files
 // inside one netplay session tick, so each open/read lets the session poll the
@@ -22,7 +24,7 @@
 // default build.
 __attribute__((weak)) void pc_netplay_load_keepalive(int site);
 static inline void dvd_netplay_keepalive() {
-    if (pc_netplay_load_keepalive != nullptr) pc_netplay_load_keepalive(2 /* kSiteDvd */);
+    if (pc_netplay_load_keepalive != nullptr) pc_netplay_load_keepalive(pc_netplay_loadguard::kSiteDvd);
 }
 
 static std::unordered_map<DVDFileInfo*, FILE*> sOpenFiles;
