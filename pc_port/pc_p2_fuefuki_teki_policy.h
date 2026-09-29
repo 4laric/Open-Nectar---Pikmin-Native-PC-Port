@@ -28,6 +28,7 @@
 #include "pc_p2_retail_player.h"
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <istream>
 #include <map>
 #include <sstream>
@@ -43,6 +44,15 @@ constexpr float kEscapeSpeed = 1500.0f;        // StateJump::exec hard-coded
 constexpr float kTurnEndAngleDeg = 30.0f;      // StateTurn turnToTargetPos(..., 30)
 constexpr float kArriveDistSq = 625.0f;        // Obj::isArriveTarget
 constexpr float kFlickBackwardAngle = -1000.0f; // EnemyFunc.h FLICK_BACKWARD_ANGLE
+// P1 safety guard on Obj::setTargetPosition (not in the source). The source
+// picks any point in the territory ring; P2 maps are authored so every point
+// there is valid ground. A P1 map is not: d4 (#245) landed on a ledge ~76 u
+// above home, walked back onto it, died there, and the carcass route to the
+// Onion ran into a closed waypoint. The host supplies a TargetProbe; each roll
+// the probe rejects is re-rolled (up to kTargetTries source rolls, all from the
+// per-token FSM RNG, so the choice stays deterministic), and if every roll is
+// rejected the target falls back to home, which the placement audit proved.
+constexpr int kTargetTries = 8;
 
 // ------------------------------------------------------------------ parms
 // General (EnemyParmsBase) + proper (Fuefuki::Parms::ProperParms) values the
@@ -270,6 +280,8 @@ struct Commands {
     float vx = 0.0f, vz = 0.0f;
     bool teleport = false;
     float tx = 0.0f, tz = 0.0f;         // host resolves ground height
+    int targetTries = 0;                // guarded rolls spent on this target
+    bool targetFallback = false;        // every roll rejected -> home
     // Visibility / targetability (EB_Untargetable mirror).
     bool untargetable = false;
     bool untargetableChanged = false;
@@ -313,6 +325,16 @@ inline bool pressAccepted(const P2FuefukiFsm& fsm, bool presser, bool bittered)
 // ------------------------------------------------------------------ actor
 class Actor {
 public:
+    // Host reachability probe for Land/Walk targets (see kTargetTries). Set it
+    // before bind(): the onInit Land teleport already asks it. Unset = source
+    // behaviour (every roll accepted).
+    using TargetProbe = std::function<bool(float x, float z)>;
+    void setTargetProbe(TargetProbe probe) { probe_ = std::move(probe); }
+    int lastTargetTries() const { return lastTries_; }
+    bool lastTargetFallback() const { return lastFallback_; }
+    int rejectedTargets() const { return rejected_; }
+    int fallbackTargets() const { return fallbacks_; }
+
     // `epoch` must be unique and nonzero per actor within `table` (the host uses
     // a monotonically increasing bind counter); `token` is the seed slot uid.
     bool bind(const Retail& retail, const Motions& motions, P2FuefukiOwnershipTable& table,
@@ -572,18 +594,34 @@ private:
     }
 
     // Obj::setTargetPosition (not a cave: P1 has no caves).
+    // With a host probe, rejected rolls are re-rolled and the last resort is
+    // home (P1 safety guard, see kTargetTries).
     void setTargetPosition(bool landing)
     {
-        const float range = retail_.territoryRadius - retail_.homeRadius;
-        const float dist = retail_.homeRadius + fsm_.randWeight(range > 0.0f ? range : 0.0f);
-        float angle;
-        if (landing) {
-            angle = fsm_.randWeight(kTau);
-        } else {
-            angle = std::atan2(x_ - homeX_, z_ - homeZ_) + fsm_.randWeight(kPi) + 0.5f * kPi;
+        lastTries_ = 0;
+        lastFallback_ = false;
+        for (int attempt = 0; attempt < kTargetTries; ++attempt) {
+            const float range = retail_.territoryRadius - retail_.homeRadius;
+            const float dist = retail_.homeRadius + fsm_.randWeight(range > 0.0f ? range : 0.0f);
+            float angle;
+            if (landing) {
+                angle = fsm_.randWeight(kTau);
+            } else {
+                angle = std::atan2(x_ - homeX_, z_ - homeZ_) + fsm_.randWeight(kPi) + 0.5f * kPi;
+            }
+            targetX_ = dist * std::sin(angle) + homeX_;
+            targetZ_ = dist * std::cos(angle) + homeZ_;
+            ++lastTries_;
+#ifdef P2_FUEFUKI_MUTANT_NO_TARGET_GUARD
+            return;
+#endif
+            if (!probe_ || probe_(targetX_, targetZ_)) return;
+            ++rejected_;
         }
-        targetX_ = dist * std::sin(angle) + homeX_;
-        targetZ_ = dist * std::cos(angle) + homeZ_;
+        lastFallback_ = true;
+        ++fallbacks_;
+        targetX_ = homeX_;
+        targetZ_ = homeZ_;
     }
 
     void startAnim(int a, bool play)
@@ -622,6 +660,8 @@ private:
             c.teleport = true;
             c.tx = targetX_;
             c.tz = targetZ_;
+            c.targetTries = lastTries_;
+            c.targetFallback = lastFallback_;
             x_ = targetX_;
             z_ = targetZ_;
             faceDir_ = roundAng(fsm_.randWeight(kTau));
@@ -678,6 +718,11 @@ private:
     float targetX_ = 0.0f, targetZ_ = 0.0f;
     float faceDir_ = 0.0f;
     float velX_ = 0.0f, velZ_ = 0.0f;
+    TargetProbe probe_;
+    int lastTries_ = 0;
+    bool lastFallback_ = false;
+    int rejected_ = 0;
+    int fallbacks_ = 0;
 };
 
 } // namespace p2fuefuki

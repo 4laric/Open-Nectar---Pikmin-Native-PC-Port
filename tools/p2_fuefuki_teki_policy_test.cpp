@@ -19,6 +19,8 @@
 //                  mCanStruggle window; absorbs otherwise   (mutant PRESS_ALWAYS)
 //   ring_filter    whistle claims only inside the growing fp22 ring, only
 //                  callable Pikmin                          (mutant RING_IGNORED)
+//   target_guard   P1 safety guard: Land/Walk targets the host probe rejects
+//                  are re-rolled; all rejected -> home      (mutant NO_TARGET_GUARD)
 #undef NDEBUG
 #include "pc_p2_fuefuki_teki_policy.h"
 #include <cassert>
@@ -342,13 +344,60 @@ static bool press_gate()
     return true;
 }
 
+// P1 safety guard on setTargetPosition: the host probe rejects the x > 0 half
+// of the territory (stand-in for a ledge / closed-route region). No Land
+// teleport and no Walk target may land there, and a probe that rejects
+// everything sends the beetle home.
+static bool target_guard()
+{
+    const Retail r = retail();
+    const Motions mo = motions();
+    int rerolled = 0, unprobed = 0;
+    for (std::uint32_t token = 1; token <= 8; ++token) {
+        P2FuefukiOwnershipTable table;
+        Actor a;
+        int asked = 0;
+        a.setTargetProbe([&](float x, float) {
+            ++asked;
+            return x <= 0.0f;
+        });
+        CHECK(a.bind(r, mo, table, token, token * 7919u, 0.0f, 0.0f, 0.0f, 0.0f));
+        const Commands spawn = a.takeSpawnCommands();
+        CHECK(spawn.teleport);
+        CHECK(spawn.tx <= 0.0f);
+        if (asked == 0) ++unprobed;
+        if (spawn.targetTries > 1) ++rerolled;
+        // Walk targets over a long quiet run (Land -> Whisle -> Wait -> Turn ->
+        // Walk cycles) must respect the probe too.
+        Mock m;
+        m.apply(spawn);
+        for (int i = 0; i < 3000; ++i) {
+            const Commands c = m.step(a);
+            if (c.teleport) CHECK(c.tx <= 0.0f);
+            if (a.fsm().getState() == S::Walk || a.fsm().getState() == S::Turn) CHECK(a.targetX() <= 0.0f);
+        }
+    }
+    CHECK(rerolled > 0 && unprobed == 0);
+    // Every roll rejected: the Land target is home, flagged as a fallback.
+    P2FuefukiOwnershipTable table;
+    Actor a;
+    a.setTargetProbe([](float, float) { return false; });
+    CHECK(a.bind(r, mo, table, 1, 99u, 40.0f, 0.0f, -25.0f, 0.0f));
+    const Commands spawn = a.takeSpawnCommands();
+    CHECK(spawn.teleport && spawn.targetFallback && spawn.targetTries == kTargetTries);
+    CHECK(std::fabs(spawn.tx - 40.0f) < 1e-3f && std::fabs(spawn.tz + 25.0f) < 1e-3f);
+    CHECK(a.fallbackTargets() == 1 && a.rejectedTargets() == kTargetTries);
+    return true;
+}
+
 int main(int argc, char** argv)
 {
     struct Case {
         const char* name;
         bool (*fn)();
     } cases[] = {{"appear_roll", appear_roll}, {"host_outputs", host_outputs}, {"multi_token", multi_token},
-                 {"owner_panic", owner_panic}, {"ring_filter", ring_filter}, {"press_gate", press_gate}};
+                 {"owner_panic", owner_panic}, {"ring_filter", ring_filter}, {"press_gate", press_gate},
+                 {"target_guard", target_guard}};
     const char* only = argc > 1 ? argv[1] : nullptr;
     int ran = 0;
     for (const Case& c : cases) {

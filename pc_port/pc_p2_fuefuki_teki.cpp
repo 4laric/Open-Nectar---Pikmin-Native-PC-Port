@@ -8,6 +8,8 @@
 #include "pc_randomizer.h"
 #include "Generator.h"
 #include "MapMgr.h"
+#include "MapCode.h"
+#include "Route.h"
 #include "Navi.h"
 #include "NaviMgr.h"
 #include "Pellet.h"
@@ -28,6 +30,7 @@
 #include <cstdio>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -69,6 +72,16 @@ struct Binding {
     int stayDrawCalls = 0;   // draw hook calls while Stay (drawn nothing)
     int stayFrames = 0;      // engine ticks spent in Stay this airborne spell
     int stayVisibleTicks = 0; // Stay ticks with TEKIOPT_Visible still set (want 0)
+    // P1 target guard (policy kTargetTries): home ground height / waypoint and
+    // per-reason rejection counts since the last LAND_TELEPORT marker.
+    float homeY = 0.0f;
+    int homeWp = -1;
+    int rejNoGround = 0, rejWater = 0, rejDy = 0, rejNoRoute = 0, rejClosed = 0;
+    int guardAccepted = 0;
+    // Airborne hold (Jump after takeoff + Stay): XZ held while untargetable.
+    bool airHeld = false;
+    float airX = 0.0f, airZ = 0.0f, airCorrection = 0.0f;
+    int airTicks = 0;
 };
 
 std::map<BTeki*, Binding> sBound;
@@ -380,6 +393,78 @@ void buildWorld(BTeki* t, Binding& b, p2fuefuki::World& w)
     }
 }
 
+// ---- P1 target guard --------------------------------------------------------
+// Source Obj::setTargetPosition rolls any point of the territory ring; the P2
+// maps are authored for that. P1 maps are not: d4 (#245) put the beetle on a
+// ledge ~76 u above its home, it walked back onto it and died there, and the
+// carcass route to the Onion stalled on a closed waypoint (P1 TUT_Rute "path
+// blocked"). A Land or Walk target is accepted only when (1) a non-water ground
+// triangle lies under it, (2) its ground height is within kTargetMaxDy of home,
+// and (3) its nearest route waypoint is within the placement audit's route
+// coverage radius and connects to home's waypoint through open, pebble-free
+// waypoints (the passability test aiTransport.cpp uses to stall carriers).
+// Rejected rolls re-roll in the policy; all rejected -> home.
+constexpr float kTargetMaxDy = 50.0f;
+constexpr float kTargetRouteRadius = 200.0f; // pc_p2_placement_probe.cpp kRouteCoverageRadius
+
+bool wpPassable(WayPoint* wp)
+{
+    return wp && wp->mIsOpen && !(wp->mFlags & WayPointFlags::Pebble);
+}
+
+int nearestWp(float x, float y, float z, float& xzDist)
+{
+    xzDist = -1.0f;
+    if (!routeMgr || routeMgr->getNumWayPoints('test') <= 0) return -1;
+    WayPoint* wp = routeMgr->findNearestWayPoint('test', Vector3f(x, y, z), false);
+    if (!wp) return -1;
+    const float dx = wp->mPosition.x - x, dz = wp->mPosition.z - z;
+    xzDist = std::sqrt(dx * dx + dz * dz);
+    return wp->mIndex;
+}
+
+bool wpConnected(int from, int to)
+{
+    if (from < 0 || to < 0 || !routeMgr) return false;
+    if (from == to) return true;
+    const int n = routeMgr->getNumWayPoints('test');
+    if (from >= n || to >= n) return false;
+    std::vector<char> seen(std::size_t(n), 0);
+    std::vector<int> queue{from};
+    seen[std::size_t(from)] = 1;
+    for (std::size_t head = 0; head < queue.size(); ++head) {
+        WayPoint* wp = routeMgr->getWayPoint('test', queue[head]);
+        if (!wp) continue;
+        for (int i = 0; i < wp->mLinkCount && i < 8; ++i) {
+            const int next = wp->mLinkIndices[i];
+            if (next < 0 || next >= n || seen[std::size_t(next)]) continue;
+            if (!wpPassable(routeMgr->getWayPoint('test', next))) continue;
+            if (next == to) return true;
+            seen[std::size_t(next)] = 1;
+            queue.push_back(next);
+        }
+    }
+    return false;
+}
+
+bool targetOk(Binding& b, float x, float z)
+{
+    if (!mapMgr) return true;
+    CollTriInfo* tri = mapMgr->getCurrTri(x, z, true);
+    if (!tri) { ++b.rejNoGround; return false; }
+    if (MapCode::getAttribute(tri) == ATTR_Water) { ++b.rejWater; return false; }
+    const float y = mapMgr->getMinY(x, z, true);
+    if (!std::isfinite(y) || std::fabs(y - b.homeY) > kTargetMaxDy) { ++b.rejDy; return false; }
+    if (b.homeWp >= 0) {
+        float d = -1.0f;
+        const int wp = nearestWp(x, y, z, d);
+        if (wp < 0 || d > kTargetRouteRadius) { ++b.rejNoRoute; return false; }
+        if (!wpConnected(wp, b.homeWp)) { ++b.rejClosed; return false; }
+    }
+    ++b.guardAccepted;
+    return true;
+}
+
 void applyCommands(BTeki* t, Binding& b, const Commands& c)
 {
     if (c.transited) {
@@ -410,10 +495,20 @@ void applyCommands(BTeki* t, Binding& b, const Commands& c)
         dest.y = mapMgr ? mapMgr->getMinY(dest.x, dest.z, true) : t->getPosition().y;
         t->resetPosition(dest);
         t->mVelocity.set(0.0f, 0.0f, 0.0f);
+        if (b.airHeld) {
+            b.airX = dest.x;
+            b.airZ = dest.z;
+        }
         std::printf("P2_FUEFUKI_LAND_TELEPORT generator=%u source_id=41 x=%.1f y=%.1f z=%.1f face=%.3f clip=%s "
-                    "home=%.1f,%.1f\n",
+                    "home=%.1f,%.1f home_y=%.1f dy=%.1f tries=%d fallback=%d\n",
                     b.token, dest.x, dest.y, dest.z, c.faceDir, p2fuefuki::animName(c.anim), b.actor.homeX(),
-                    b.actor.homeZ());
+                    b.actor.homeZ(), b.homeY, dest.y - b.homeY, c.targetTries, c.targetFallback ? 1 : 0);
+        std::printf("P2_FUEFUKI_TARGET_GUARD generator=%u source_id=41 accepted=%d rej_noground=%d rej_water=%d "
+                    "rej_dy=%d rej_noroute=%d rej_closed=%d rejected_total=%d fallbacks_total=%d home_wp=%d "
+                    "max_dy=%.0f\n",
+                    b.token, b.guardAccepted, b.rejNoGround, b.rejWater, b.rejDy, b.rejNoRoute, b.rejClosed,
+                    b.actor.rejectedTargets(), b.actor.fallbackTargets(), b.homeWp, kTargetMaxDy);
+        b.guardAccepted = b.rejNoGround = b.rejWater = b.rejDy = b.rejNoRoute = b.rejClosed = 0;
     }
     if (c.untargetableChanged) setHidden(t, b, c.untargetable);
     if (c.transited && c.to == P2FuefukiFsmState::Whisle) {
@@ -481,6 +576,44 @@ void pinDead(BTeki* t, Binding& b)
     t->mVolatileVelocity.x = t->mVolatileVelocity.z = 0.0f;
 }
 
+// While untargetable (Jump after KEYEVENT_3, then Stay) the source beetle is
+// off-map and nothing can touch it until Land teleports it home-relative. The
+// P1 host keeps integrating (the Jump escape velocity, creature separation), so
+// it drifted hundreds of units invisibly (d5) and could fall into a pit or
+// water, where the host_die_external path would pelletize the corpse at that
+// hidden position. Hold the XZ where the hide began (pinDead pattern) until the
+// beetle is targetable again; log how much drift was cancelled.
+void holdAirborne(BTeki* t, Binding& b)
+{
+    const bool airborne = b.hidden && b.actor.fsm().getState() != P2FuefukiFsmState::Dead;
+    Vector3f p = t->getPosition();
+    if (!airborne) {
+        if (b.airHeld) {
+            b.airHeld = false;
+            std::printf("P2_FUEFUKI_AIR_HOLD_SUMMARY generator=%u source_id=41 x=%.1f z=%.1f ticks=%d "
+                        "drift_cancelled=%.1f\n",
+                        b.token, b.airX, b.airZ, b.airTicks, b.airCorrection);
+        }
+        return;
+    }
+    if (!b.airHeld) {
+        b.airHeld = true;
+        b.airX = p.x;
+        b.airZ = p.z;
+        b.airCorrection = 0.0f;
+        b.airTicks = 0;
+        std::printf("P2_FUEFUKI_AIR_HOLD generator=%u source_id=41 x=%.1f z=%.1f state=%s\n", b.token, p.x, p.z,
+                    p2fuefuki::stateName(b.actor.fsm().getState()));
+    }
+    const float dx = p.x - b.airX, dz = p.z - b.airZ;
+    b.airCorrection += std::sqrt(dx * dx + dz * dz);
+    ++b.airTicks;
+    t->mSRT.t.set(b.airX, p.y, b.airZ);
+    t->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
+    t->mVelocity.x = t->mVelocity.z = 0.0f;
+    t->mVolatileVelocity.x = t->mVolatileVelocity.z = 0.0f;
+}
+
 void ownTick(BTeki* t, Binding& b, float dt)
 {
     // Suppressed host strategy: drain stored Pikmin damage here so hits reach
@@ -537,6 +670,7 @@ void ownTick(BTeki* t, Binding& b, float dt)
         if (!last.valid) break;
         applyCommands(t, b, last);
         pinDead(t, b);
+        holdAirborne(t, b);
         if (last.kill) {
             std::printf("P2_FUEFUKI_DEAD_PIN_SUMMARY generator=%u source_id=41 x=%.1f z=%.1f ticks=%d "
                         "push_cancelled=%.1f max_step=%.2f\n",
@@ -559,6 +693,7 @@ void ownTick(BTeki* t, Binding& b, float dt)
         t->setDirection(b.actor.faceDir());
     }
     pinDead(t, b);
+    holdAirborne(t, b);
     if (b.actor.fsm().getState() == P2FuefukiFsmState::Stay) {
         ++b.stayFrames;
         if (t->getTekiOption(TEKIOPT_Visible)) ++b.stayVisibleTicks;
@@ -614,10 +749,16 @@ void carcassTick(BTeki* t, Binding& b)
         const int hostMax = pellet->mConfig->mCarryMaxPikis.mValue;
         const bool differs = hostMin != kCarcassMin || hostMax != kCarcassMax;
         if (differs) {
-            PelletConfig* own = new PelletConfig(*pellet->mConfig);
-            own->mCarryMinPikis.mValue = kCarcassMin;
-            own->mCarryMaxPikis.mValue = kCarcassMax;
-            pellet->mConfig = own;
+            // One private copy per distinct host config, owned here and reused
+            // by every later carcass (no per-carcass allocation).
+            static std::map<const PelletConfig*, std::unique_ptr<PelletConfig>> sOwnConfigs;
+            std::unique_ptr<PelletConfig>& own = sOwnConfigs[pellet->mConfig];
+            if (!own) {
+                own.reset(new PelletConfig(*pellet->mConfig));
+                own->mCarryMinPikis.mValue = kCarcassMin;
+                own->mCarryMaxPikis.mValue = kCarcassMax;
+            }
+            pellet->mConfig = own.get();
         }
         std::printf("P2_FUEFUKI_CARCASS_WEIGHT generator=%u source_id=41 retail_carry=%d..%d host_carry=%d..%d "
                     "private_copy=%d source=carcass_config_Fuefuki\n",
@@ -857,6 +998,19 @@ void pc_p2_fuefuki_teki_setup()
         b = Binding{};
         b.token = token;
         const Vector3f pos = t->getPosition();
+        // Target guard reference: home ground height and route waypoint.
+        b.homeY = mapMgr ? mapMgr->getMinY(pos.x, pos.z, true) : pos.y;
+        if (!std::isfinite(b.homeY)) b.homeY = pos.y;
+        {
+            float d = -1.0f;
+            const int wp = nearestWp(pos.x, b.homeY, pos.z, d);
+            b.homeWp = wp >= 0 && d <= kTargetRouteRadius ? wp : -1;
+            std::printf("P2_FUEFUKI_GUARD_HOME generator=%u source_id=41 home_y=%.1f home_wp=%d wp_dist=%.1f "
+                        "max_dy=%.0f route_radius=%.0f\n",
+                        token, b.homeY, b.homeWp, d, kTargetMaxDy, kTargetRouteRadius);
+        }
+        Binding* bp = &b;
+        b.actor.setTargetProbe([bp](float x, float z) { return targetOk(*bp, x, z); });
         if (!b.actor.bind(sRetail, sMotions, sTable, ++sEpoch, token, pos.x, pos.y, pos.z, t->getDirection())) {
             sBound.erase(t);
             std::printf("P2_FUEFUKI_UNBOUND generator=%u reason=bind_rejected\n", token);
