@@ -122,7 +122,9 @@ struct PcConfig {
     // normal play and only preview/fixture runs (pc_pikipelago_room_preview())
     // auto-dismiss it.
     int disableTutorials = 1;
-    // Mod: unstick Pikmin that stop making progress along a route (0=off, 1=on).
+    // Mod: better Pikmin routing (0=off/faithful, 1=on). Shortest routes in
+    // place of the greedy search, followers that route round walls to their
+    // leader, and carry parties that restart when they stall.
     int betterPathfinding = 0;
     // Mod: a non-blue Pikmin that wanders into water on its own is pushed back
     // to dry land instead of drowning. Being thrown in still drowns it.
@@ -5559,7 +5561,7 @@ const GroupRow kGameplayRows[] = {
     { SRC_MODS, 25, "Instant Whistle Response", "Whistled Pikmin join the squad at once, without stopping to turn and look first." },
     { SRC_MODS, 33, "Whistle Pluck", "Hold the whistle over sprouts to pluck them one after another." },
     { SRC_MODS, 1, "Chain Pikmin Actions", "Pikmin that finish a task go on to the next one nearby." },
-    { SRC_MODS, 8, "Better Pathfinding", "Gets Pikmin moving again when they stall on their route." },
+    { SRC_MODS, 8, "Better Pathfinding", "Shortest carry routes, squad Pikmin find a way round walls, stalled carriers restart." },
     { SRC_MODS, 9, "Blues Only In Water", "Only blue Pikmin walk into water on their own." },
     { SRC_MODS, 10, "Idle Pikmin Counter", "Shows how many Pikmin are standing idle." },
     { SRC_MODS, 23, "No Tripping", "Pikmin running in the squad never trip and fall behind." },

@@ -57,6 +57,11 @@ int pc_settings_get_shadows(void);
 // breaks it and then carries the pellet to the Onion. Off by default, so the
 // stock port stays faithful.
 int pc_settings_get_chain_actions(void);
+// Returns 1 while the "Better Pathfinding" mod is on. Retail routes Pikmin with
+// a greedy search, carries along an onion cost table built from its first
+// answers, and gives squad Pikmin no route at all; the mod swaps in shortest
+// paths, lets followers route round walls to their leader, and restarts carry
+// parties that stall. Off by default.
 int pc_settings_get_better_pathfinding(void);
 int pc_settings_get_blues_only_water(void);
 int pc_settings_get_idle_counter(void);
