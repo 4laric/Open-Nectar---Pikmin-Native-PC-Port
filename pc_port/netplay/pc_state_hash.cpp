@@ -38,6 +38,14 @@ unsigned pc_sim_rng_state(void);
 int pc_sim_rand(void);
 uint64_t pc_randomizer_hash(void);
 #endif
+// Netplay gapfix C (issue #885): the co-op randomizer policy's sim state
+// (gameCoreSection.cpp). False when co-op is not active, so single-captain
+// hashes are unchanged. Declared weak so this TU links without the game.
+#if defined(__GNUC__)
+__attribute__((weak)) bool pc_coop_policy_state_hash(uint64_t* out);
+#else
+bool pc_coop_policy_state_hash(uint64_t* out);
+#endif
 
 namespace {
 constexpr uint64_t kFnvOffset = 14695981039346656037ULL;
@@ -312,12 +320,18 @@ uint64_t hashRand(void)
 	// M4a: 0 when the randomizer TU is not linked or the randomizer is off
 	// (pc_randomizer_hash returns 0 then); identical on both peers either
 	// way, and divergent exactly when the sim-visible randomizer state is.
+	uint64_t h = 0;
 #if defined(__GNUC__)
-	if (pc_randomizer_hash != nullptr) return (uint64_t)pc_randomizer_hash();
+	if (pc_randomizer_hash != nullptr) h = (uint64_t)pc_randomizer_hash();
 #else
-	if (pc_randomizer_hash != nullptr) return (uint64_t)pc_randomizer_hash();
+	if (pc_randomizer_hash != nullptr) h = (uint64_t)pc_randomizer_hash();
 #endif
-	return 0;
+	// Gapfix C (#885): while co-op is active, the co-op policy state (its
+	// cursors, tick, HP samples and cooldowns decide who gets each grant) is
+	// folded in. Single-captain play folds nothing: the column is unchanged.
+	uint64_t coop = 0;
+	if (pc_coop_policy_state_hash != nullptr && pc_coop_policy_state_hash(&coop)) mixU64(h, coop);
+	return h;
 }
 
 void initOnce(void)
