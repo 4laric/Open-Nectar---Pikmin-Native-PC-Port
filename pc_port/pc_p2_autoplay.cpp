@@ -881,7 +881,20 @@ void pc_p2_autoplay_tick(void)
             senses.obstacleX = ox;
             senses.obstacleZ = oz;
             senses.obstacleDist = d;
-            senses.obstacleMoving = static_cast<HinderRock*>(w)->isMoving();
+            HinderRock* rock = static_cast<HinderRock*>(w);
+            senses.obstacleMoving = rock->isMoving();
+            // Near-face aim: extent of the box footprint toward the captain
+            // (max over its four corners) plus a margin.
+            const float ux = d > 1.0f ? (naviX - ox) / d : 0.0f, uz = d > 1.0f ? (naviZ - oz) / d : 1.0f;
+            float ext = 0.0f;
+            for (int v = 0; v < 4; ++v) {
+                const Vector3f c = rock->getVertex(v);
+                const float e = (c.x - ox) * ux + (c.z - oz) * uz;
+                if (e > ext && e < 400.0f) ext = e;
+            }
+            if (ext <= 1.0f) ext = 50.0f;
+            senses.obstacleAimX = ox + ux * (ext + 22.0f);
+            senses.obstacleAimZ = oz + uz * (ext + 22.0f);
         }
     }
     // Onion receipt for this token (bot-v2 gap 1): durable delivery-ledger
