@@ -16,7 +16,7 @@
 #include "BaseInf.h"
 #include "ItemMgr.h"
 #include "GameStat.h"
-#include "RamStream.h"
+#include "Stream.h"
 #include "pc_randomizer.h"
 #include "pc_p2_ship.h"
 #include "pc_p2_ship_store.h"
@@ -106,3 +106,4 @@ int main(int argc, char** argv) {
     gsys->Initialise(); pc_settings_p2d_init(); nodeMgr = new NodeMgr();
     gsys->run(new PurpleCampaignApp()); return 0;
 }
+
