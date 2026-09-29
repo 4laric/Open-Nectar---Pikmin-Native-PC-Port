@@ -1428,10 +1428,13 @@ float pc_p2_long_legs_param_f(const BTeki* actor, int idx, float fallback) {
         return 0.0f;
     case TPF_Life: {
         // #173: BTeki::update clamps mHealth to getMaxLife() every frame, so
-        // the host Swallow life (1100) silently capped the source 2800 set at
-        // bind. Houdai reports its disc max life; 56/69 keep the old path.
+        // the host vehicle life (e.g. 130, Swallow 1100) silently capped the
+        // source value set at bind. Every Long Legs reports its disc max life:
+        // Houdai 2800 from its own brain parms, Damagumo 1300 / BigFoot 10000
+        // from P2LongLegsFsmParms.
         const ActorState& st = actors.find(const_cast<BTeki*>(actor))->second;
-        return st.isHoudai ? st.houdai.parms().maxHealth : fallback;
+        const float srcMax = st.isHoudai ? st.houdai.parms().maxHealth : st.parms.maxHealth;
+        return srcMax > 0.0f ? srcMax : fallback;
     }
     default:
         return fallback;

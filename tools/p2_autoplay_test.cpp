@@ -630,6 +630,42 @@ void testSaraiFlyer()
     CHECK(aOn > 0, "sarai/throws_when_low");
 }
 
+void testBigFootLongAttack()
+{
+    // #173: BigFoot 69 fights at its source 10000 HP, so its attack window is
+    // multiplied like Kurage; a plain target still times out at the base.
+    p2autoplay::Config cfg;
+    cfg.attackTimeout = 1.0f;
+    cfg.bigFootAttackMultiplier = 3.0f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 1945764764u;
+    s.targetSource = 69;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.tgtX = 100.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    std::vector<std::string> markers;
+    for (int i = 0; i < 40; ++i) { // 2.0s: past base 1.0s, inside 3.0s
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(brain.current() == p2autoplay::State::Attack, "bigfoot/outlasts_base_timeout");
+    CHECK(!hasMarker(markers, "AUTOPLAY_GIVEUP reason=attack_timeout"), "bigfoot/no_early_giveup");
+    for (int i = 0; i < 30; ++i) { // total 3.5s > 3.0s extended window
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_GIVEUP reason=attack_timeout"), "bigfoot/times_out_at_extended");
+}
+
 void testKurageLongAttack()
 {
     // bot-v2 gap 3 (Kurage 57): high HP -> attack window is multiplied, and
@@ -2949,6 +2985,7 @@ int main()
     testWithdrawRepeat();
     testSaraiFlyer();
     testKurageLongAttack();
+    testBigFootLongAttack();
     testReplanRepeats();
     testStuckCarriesNaviPos();
     testUnreachableGiveup();

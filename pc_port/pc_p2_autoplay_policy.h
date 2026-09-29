@@ -303,6 +303,9 @@ struct Config {
     float corpseOutOfReach = 800.0f; // tdist past this at giveup names corpse_out_of_reach
     float koganeConfirm = 20.0f; // after Kogane damage, watch escapes then move on
     float kurageAttackMultiplier = 2.0f; // Kurage has high HP: longer attack window
+    // #173: BigFoot 69 keeps its source 10000 HP (was capped to the 130 host
+    // life); ~10 HP/s at power 3 needs ~930 s, so widen its attack window.
+    float bigFootAttackMultiplier = 5.0f;
     float saraiLowHeight = 120.0f; // Sarai thrown at only when within this height above ground (or grabbing)
     float throwRange = 260.0f; // XZ distance at which throws start
     float arriveRadius = 90.0f; // XZ distance considered "at" the Onion
@@ -1000,7 +1003,9 @@ private:
         }
         const bool sarai = in.targetSource == 23;
         const bool kurage = in.targetSource == 57 || in.targetSource == 72;
-        const float limit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout;
+        const float limit = kurage                   ? cfg.attackTimeout * cfg.kurageAttackMultiplier
+                            : in.targetSource == 69 ? cfg.attackTimeout * cfg.bigFootAttackMultiplier
+                                                     : cfg.attackTimeout;
         // Whistle first, then re-throw (bot-v4: real players do this):
         // - Sarai holding a Pikmin (targetGrabbing): whistle frees the grab;
         // - grabbed/thrown-off/burning squad (squadDistress: mouth-stuck,
@@ -1053,8 +1058,7 @@ private:
             // undamaged's bound + cooldown (forces throw windows) with the
             // kurage-aware limit both lanes used (unkilled limit == wlimit).
             {
-                const float wlimit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout;
-                if (stateTime >= wlimit) {
+                if (stateTime >= limit) {
                     giveUp(in, "attack_timeout");
                     finishTarget(in, /*killed*/ false);
                     return;
