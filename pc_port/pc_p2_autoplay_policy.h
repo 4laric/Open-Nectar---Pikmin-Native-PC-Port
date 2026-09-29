@@ -379,6 +379,14 @@ struct Config {
     float partRingMax = 160.0f;
     float partWhistleCooldown = 5.0f; // gap between gather whistles
     float partFreeFar = 120.0f; // free-Pikmin centroid this far from the part: whistle there (carriers safe)
+    // #901 route obstacles: after a STUCK window next to an unfinished gate /
+    // bridge / hinder rock, stand off it, swarm and throw the squad onto it
+    // (formed Pikmin that touch a gate break it, piki.cpp collisionCallback
+    // isSluice; thrown Pikmin landing on a bridge or rock work it,
+    // pikiState.cpp flying collide), bounded by obstacleTimeout.
+    float obstacleRingMin = 70.0f;
+    float obstacleRingMax = 150.0f;
+    float obstacleTimeout = 150.0f;
  // 0.24*127 = 30 bytes: |stick| 0.41 (look band), no MSTICK bits (> 32)
 };
 
@@ -491,6 +499,13 @@ struct Senses {
     // progress on it while a route is active, so a detour that first leads
     // away from the target is not called STUCK and thrown away.
     float pathRemaining = 0.0f;
+    // #901 route obstacles (TEST-ONLY bot): the nearest unfinished P1 work
+    // obstacle near the captain (gate, bridge, hinder rock; kind 1/2/3, 0 =
+    // none) and the Pikmin working one now (BreakWall/Bridge/Pushstone).
+    int obstacleKind = 0;
+    float obstacleX = 0.0f;
+    float obstacleZ = 0.0f;
+    int workCount = 0;
     // #884 round 4: live throw cursor (navi position + Navi::mCursorPosition,
     // world XZ). Only the King standoff hold reads it, to slide the cursor
     // onto the King instead of past it; without it the hold look-steers at
@@ -563,6 +578,10 @@ public:
         progressBest = 1.0e30f;
         approachReplans = 0;
         approachOnRoute = false;
+        obsWork = false;
+        obsTime = 0.0f;
+        obsLogTime = 0.0f;
+        obsGiveups = 0;
         initialHealthFrac = 1.0f;
         sawDamage = false;
         sawKill = false;
@@ -663,6 +682,10 @@ private:
         progressBest = 1.0e30f;
         approachReplans = 0;
         approachOnRoute = false;
+        obsWork = false;
+        obsTime = 0.0f;
+        obsLogTime = 0.0f;
+        obsGiveups = 0;
         kingBacking = false;
         kingClosing = false;
         kingBackTime = 0.0f;
@@ -971,6 +994,7 @@ private:
             enter(State::Attack, in);
             return;
         }
+        if (tickObstacle(dt, in)) return;
         // Progress / stuck tracking on straight-line distance, or on the
         // remaining route length while a route is active (#901: a
         // straight-line window threw away every long detour into a far arena).
@@ -1020,6 +1044,77 @@ private:
             giveUp(in, "approach_timeout");
             finishTarget(in, /*killed*/ false);
         }
+    }
+
+    // #901 route obstacle work (TEST-ONLY). Returns true while it owns the
+    // pad this tick. Starts only after a STUCK window with an unfinished
+    // obstacle near the captain; ends when no unfinished obstacle is near any
+    // more, or after obstacleTimeout (then the normal replan / unreachable
+    // rules resume).
+    bool tickObstacle(float dt, const Senses& in)
+    {
+        if (!obsWork) {
+            if (in.obstacleKind == 0 || approachReplans < 1 || obsGiveups >= 2) return false;
+            obsWork = true;
+            obsTime = 0.0f;
+            obsLogTime = 0.0f;
+            char buf[200];
+            std::snprintf(buf, sizeof(buf),
+                          "AUTOPLAY_OBSTACLE start kind=%d at=(%.0f,%.0f) token=%u bot-driven",
+                          in.obstacleKind, in.obstacleX, in.obstacleZ, in.targetToken);
+            markers.emplace_back(buf);
+        }
+        if (in.obstacleKind == 0) {
+            obsWork = false;
+            char buf[160];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_OBSTACLE done seconds=%.0f token=%u bot-driven",
+                          obsTime, in.targetToken);
+            markers.emplace_back(buf);
+            approachReplans = 0;
+            stuckWindowDist = 1.0e30f;
+            stuckWindowStart = 0.0f;
+            wantReplan = true; // the way is open: route again
+            return false;
+        }
+        obsTime += dt;
+        stateTime -= dt; // obstacle work does not spend the approach budget
+        if (obsTime >= cfg.obstacleTimeout) {
+            obsWork = false;
+            ++obsGiveups;
+            char buf[160];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_OBSTACLE timeout kind=%d work=%d token=%u bot-driven",
+                          in.obstacleKind, in.workCount, in.targetToken);
+            markers.emplace_back(buf);
+            return false;
+        }
+        obsLogTime -= dt;
+        if (obsLogTime <= 0.0f) {
+            obsLogTime = 5.0f;
+            char buf[200];
+            std::snprintf(buf, sizeof(buf),
+                          "AUTOPLAY_OBSTACLE work kind=%d work=%d at=(%.0f,%.0f) seconds=%.0f bot-driven",
+                          in.obstacleKind, in.workCount, in.obstacleX, in.obstacleZ, obsTime);
+            markers.emplace_back(buf);
+        }
+        const float dx = in.obstacleX - in.naviX, dz = in.obstacleZ - in.naviZ;
+        const float d = std::sqrt(dx * dx + dz * dz);
+        if (d > cfg.obstacleRingMax) {
+            steer(in.naviX, in.naviZ, in.obstacleX, in.obstacleZ);
+        } else if (d < cfg.obstacleRingMin) {
+            steerAway(in.naviX, in.naviZ, in.obstacleX, in.obstacleZ);
+        } else {
+            // Look band: the captain stops and the cursor slides onto it.
+            steer(in.naviX, in.naviZ, in.obstacleX, in.obstacleZ);
+            lastCommand.stickScale = cfg.lookStickScale;
+            pulseA(in, cfg.throwHold, cfg.throwGap);
+        }
+        if (d > 1.0f) {
+            lastCommand.swarmX = dx / d;
+            lastCommand.swarmZ = dz / d;
+        }
+        stuckWindowDist = 1.0e30f;
+        stuckWindowStart = 0.0f;
+        return true;
     }
 
     void tickAttack(float dt, const Senses& in)
@@ -1803,6 +1898,10 @@ private:
     float progressBest = 1.0e30f;
     int approachReplans = 0; // consecutive STUCK windows in this Approach stint (bot-v3)
     bool approachOnRoute = false; // #901: approach progress metric is the route length
+    bool obsWork = false; // #901: working a route obstacle in Approach
+    float obsTime = 0.0f; // #901: time spent on the current obstacle episode
+    float obsLogTime = 0.0f;
+    int obsGiveups = 0; // #901: obstacle episodes that timed out this Approach stint
     // bot-v5 aftermath delivery phases (pad-only; never whistles).
     enum AftermathPhase {
         AftermathSeed = 0, // walk onto the corpse + throw to seed grabs

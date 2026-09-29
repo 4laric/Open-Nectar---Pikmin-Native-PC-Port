@@ -72,6 +72,8 @@
 #include "MapMgr.h"
 #include "Route.h"
 #include "Camera.h"
+#include "BuildingItem.h"
+#include "WorkObject.h"
 #include "gameflow.h"
 
 #include <algorithm>
@@ -450,6 +452,7 @@ void pc_p2_autoplay_tick(void)
     // --- Pikmin census (read-only, except bot-v4 power-mode flowering) ---
     int alive = 0, nearCount = 0, farCount = 0, transport = 0, distress = 0;
     int partyCount = 0; // #901: FormationMode Pikmin following this captain
+    int workCount = 0; // #901: Pikmin working a gate / bridge / hinder rock
     std::vector<std::pair<float, float>> transportPos;
     std::vector<std::pair<float, float>> freePos; // #901: idle FreeMode Pikmin
     const bool powerMode = p2autoplay::isPowerEnabled();
@@ -468,6 +471,9 @@ void pc_p2_autoplay_tick(void)
                 transportPos.emplace_back(p->getPosition().x, p->getPosition().z);
             }
             if (p->mMode == PikiMode::FormationMode && p->mNavi == navi) ++partyCount;
+            if (p->mMode == PikiMode::BreakwallMode || p->mMode == PikiMode::BridgeMode
+                || p->mMode == PikiMode::PushstoneMode)
+                ++workCount;
             if (p->mMode == PikiMode::FreeMode) freePos.emplace_back(p->getPosition().x, p->getPosition().z);
             // bot-v4 power mode: flowers through the normal maturity path
             // (virtual ViewPiki::setFlower, the same call the nectar GrowUp,
@@ -825,6 +831,40 @@ void pc_p2_autoplay_tick(void)
     senses.carryWant = sEngage.carryWant; // bot-v7: declared minimum (0 = unknown)
     senses.trackingPart = trackedPellet && trackedPellet->isUfoParts();
     senses.partGone = partGone;
+    senses.workCount = workCount;
+    {
+        // #901: nearest unfinished route obstacle within 450 u of the captain
+        // (read-only): gates (sluices), bridges, hinder rocks.
+        float bestD = 450.0f;
+        auto consider = [&](Creature* obj, int kind) {
+            const float d = distXZ(naviX, naviZ, obj->getPosition().x, obj->getPosition().z);
+            if (d < bestD) {
+                bestD = d;
+                senses.obstacleKind = kind;
+                senses.obstacleX = obj->getPosition().x;
+                senses.obstacleZ = obj->getPosition().z;
+            }
+        };
+        if (itemMgr->getMeltingPotMgr()) {
+            Iterator oit(itemMgr->getMeltingPotMgr());
+            CI_LOOP(oit)
+            {
+                Creature* obj = *oit;
+                if (obj && obj->isSluice() && obj->isAlive() && !static_cast<BuildingItem*>(obj)->isCompleted())
+                    consider(obj, 1);
+            }
+        }
+        if (workObjectMgr) {
+            Iterator oit(workObjectMgr);
+            CI_LOOP(oit)
+            {
+                WorkObject* obj = static_cast<WorkObject*>(*oit);
+                if (!obj || obj->isFinished()) continue;
+                if (obj->isBridge()) consider(obj, 2);
+                else if (obj->isHinderRock()) consider(obj, 3);
+            }
+        }
+    }
     senses.partyCount = partyCount;
     if (senses.trackingPart) {
         // Idle Pikmin within 600 u of the part, and their centroid.

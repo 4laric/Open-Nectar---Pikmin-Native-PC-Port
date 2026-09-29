@@ -3027,6 +3027,47 @@ void testApproachRouteProgress()
     CHECK(hasMarker(markers, "AUTOPLAY_STUCK state=approach"), "route/stuck_when_route_stalls");
 }
 
+void testApproachObstacleWork()
+{
+    // #901: STUCK beside an unfinished gate: stand off, swarm and throw at it
+    // without spending the unreachable budget; a finished gate re-routes.
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 90;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 901003;
+    s.targetSource = 44;
+    s.targetAlive = true;
+    s.targetDist = 1500.0f;
+    s.tgtX = 1500.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Approach, "obstacle/approach");
+    s.obstacleKind = 1;
+    s.obstacleX = 100.0f;
+    s.obstacleZ = 0.0f;
+    std::vector<std::string> markers;
+    bool swarmed = false, threw = false;
+    for (int i = 0; i < 1200; ++i) { // 60 s pinned at the gate
+        brain.update(0.05f, s);
+        if (brain.command().swarmX > 0.9f) swarmed = true;
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) threw = true;
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_OBSTACLE start kind=1"), "obstacle/start");
+    CHECK(swarmed, "obstacle/swarms_at_gate");
+    CHECK(threw, "obstacle/throws_at_gate");
+    CHECK(!hasMarker(markers, "target_unreachable"), "obstacle/not_unreachable_while_working");
+    CHECK(brain.current() == p2autoplay::State::Approach, "obstacle/still_approaching");
+    s.obstacleKind = 0; // gate broken
+    brain.update(0.05f, s);
+    const std::vector<std::string> got = brain.takeMarkers();
+    CHECK(hasMarker(got, "AUTOPLAY_OBSTACLE done"), "obstacle/done");
+    CHECK(brain.replanWanted(), "obstacle/replans_after_done");
+}
+
 int main()
 {
     testGate();
@@ -3076,6 +3117,7 @@ int main()
     testKingEvadeLongSim();
     testPartGatherSwarm();
     testApproachRouteProgress();
+    testApproachObstacleWork();
     if (failures == 0) {
         std::printf("PASS p2_autoplay\n");
         return 0;
