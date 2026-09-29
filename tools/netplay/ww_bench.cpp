@@ -17,6 +17,14 @@
 //       committed after the last reset, commit-then-write in one interval,
 //       decommit + recommit + write, and a write from another thread between
 //       a RESET collect and the next one. Prints reported / written counts.
+//   ww_bench.exe layout          (M6b item 3) one GetWriteWatch(RESET) call
+//       per rep, constant call count, over ranges of 32/72/128/200/512/1024
+//       MB whose tail past a fixed 32 MB touched prefix is (a) touched,
+//       (b) committed but never touched, (c) reserved and never committed.
+//       800 pages of the prefix are dirtied before each call. Prints the
+//       p50/p95 per cell and a least-squares fit ms = a + b * MB per tail
+//       state (a = per-call cost, b = per-MB cost), plus system busy % over
+//       the bench (GetSystemTimes) so a loaded run is visible.
 
 #include <windows.h>
 
@@ -215,9 +223,120 @@ static int commitBench()
 	return 0;
 }
 
+static double pctOf(std::vector<double> v, double p)
+{
+	std::sort(v.begin(), v.end());
+	const double i = (double(v.size()) - 1.0) * p / 100.0;
+	const size_t lo = size_t(i);
+	const size_t hi = std::min(lo + 1, v.size() - 1);
+	return v[lo] + (v[hi] - v[lo]) * (i - double(lo));
+}
+
+static uint64_t ft64(const FILETIME& f) { return (uint64_t(f.dwHighDateTime) << 32) | f.dwLowDateTime; }
+
+struct BusySample {
+	uint64_t idle = 0, kernel = 0, user = 0;
+	void take()
+	{
+		FILETIME i, k, u;
+		GetSystemTimes(&i, &k, &u);
+		idle   = ft64(i);
+		kernel = ft64(k);
+		user   = ft64(u);
+	}
+	double busySince(const BusySample& a) const
+	{
+		const uint64_t tot = (kernel - a.kernel) + (user - a.user);
+		return tot ? 100.0 * double(tot - (idle - a.idle)) / double(tot) : -1.0;
+	}
+};
+
+// M6b item 3: per-call vs per-MB cost of GetWriteWatch(RESET) depending on
+// the state of the scanned range's tail (touched / committed untouched /
+// reserved). One call per rep, so the call count is constant across cells.
+static int layoutBench()
+{
+	const size_t prefixMb   = 32;
+	const size_t rangesMb[] = { 32, 72, 128, 200, 512, 1024 };
+	const char* tails[]     = { "touched", "committed", "reserved" };
+	const size_t dirty      = 800;
+	const int reps          = 300;
+	std::vector<void*> addrs(size_t(1024) << 8);
+	BusySample b0;
+	b0.take();
+	std::printf("tail,range_mb,dirty_pages,reps,ww_ms_p50,ww_ms_p95,reported_p50\n");
+	struct Pt {
+		int tail;
+		double mb, ms;
+	};
+	std::vector<Pt> pts;
+	for (int t = 0; t < 3; ++t) {
+		for (size_t mb : rangesMb) {
+			if (t > 0 && mb == prefixMb) continue; // no tail: same as touched
+			const size_t bytes  = mb << 20;
+			const size_t prefix = prefixMb << 20;
+			uint8_t* base = static_cast<uint8_t*>(VirtualAlloc(nullptr, bytes, MEM_RESERVE | MEM_WRITE_WATCH, PAGE_READWRITE));
+			if (!base) {
+				std::printf("reserve failed at %zu MB\n", mb);
+				return 1;
+			}
+			const size_t commitBytes = t == 2 ? prefix : bytes;
+			if (!VirtualAlloc(base, commitBytes, MEM_COMMIT, PAGE_READWRITE)) {
+				std::printf("commit failed at %zu MB\n", mb);
+				return 1;
+			}
+			const size_t touchBytes = t == 0 ? bytes : prefix;
+			for (size_t o = 0; o < touchBytes; o += kPage) base[o] = 1;
+			ULONG_PTR count = addrs.size();
+			DWORD gran      = 0;
+			GetWriteWatch(WRITE_WATCH_FLAG_RESET, base, bytes, addrs.data(), &count, &gran);
+			const size_t prefixPages = prefix / kPage;
+			const size_t stride      = prefixPages / dirty;
+			std::vector<double> ms;
+			std::vector<double> rep;
+			for (int r = 0; r < reps; ++r) {
+				for (size_t i = 0; i < dirty; ++i) base[(i * stride) * kPage + (r & 63) * 8] = uint8_t(r);
+				count           = addrs.size();
+				const double t0 = msNow();
+				GetWriteWatch(WRITE_WATCH_FLAG_RESET, base, bytes, addrs.data(), &count, &gran);
+				ms.push_back(msNow() - t0);
+				rep.push_back(double(count));
+			}
+			std::printf("%s,%zu,%zu,%d,%.4f,%.4f,%.0f\n", tails[t], mb, dirty, reps, pctOf(ms, 50), pctOf(ms, 95),
+			    pctOf(rep, 50));
+			std::fflush(stdout);
+			pts.push_back({ t, double(mb), pctOf(ms, 50) });
+			VirtualFree(base, 0, MEM_RELEASE);
+		}
+	}
+	// fit per tail state over its points plus the shared 32 MB touched point
+	std::printf("fit,tail,a_ms_per_call,b_us_per_mb,points\n");
+	for (int t = 0; t < 3; ++t) {
+		double sx = 0, sy = 0, sxx = 0, sxy = 0;
+		int n = 0;
+		for (const Pt& p : pts) {
+			if (p.tail != t && !(p.tail == 0 && p.mb == double(prefixMb))) continue;
+			sx += p.mb;
+			sy += p.ms;
+			sxx += p.mb * p.mb;
+			sxy += p.mb * p.ms;
+			++n;
+		}
+		const double den = double(n) * sxx - sx * sx;
+		const double b   = den != 0.0 ? (double(n) * sxy - sx * sy) / den : 0.0;
+		const double a   = n ? (sy - b * sx) / double(n) : 0.0;
+		std::printf("fit,%s,%.4f,%.3f,%d\n", tails[t], a, b * 1000.0, n);
+	}
+	BusySample b1;
+	b1.take();
+	std::printf("busy_pct_over_bench,%.1f\n", b1.busySince(b0));
+	return 0;
+}
+
 int main(int argc, char** argv)
 {
 	if (argc > 1 && !std::strcmp(argv[1], "threads")) return threadBench();
 	if (argc > 1 && !std::strcmp(argv[1], "commit")) return commitBench();
+	if (argc > 1 && !std::strcmp(argv[1], "layout")) return layoutBench();
 	return gridBench();
 }

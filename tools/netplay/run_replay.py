@@ -62,6 +62,9 @@ def main(argv=None):
                    help="also record inputs while replaying (identity check: must equal --replay)")
     p.add_argument("--profile", default="foh-day2")
     p.add_argument("--exe-args", nargs="*", default=[])
+    p.add_argument("--throttled", action="store_true",
+                   help="M6b (#896): run at the game's own 30 Hz pacing, i.e. without "
+                        "PIKMIN_NETPLAY_UNTHROTTLED (controlled measurement protocol)")
     p.add_argument("--bootstrap-template", type=Path, default=None,
                    help="M4d: bootstrap file to use instead of the built-in schema-5 one "
                         "({TOKEN} = run token)")
@@ -151,6 +154,8 @@ def main(argv=None):
         PIKMIN_NETPLAY_EXIT_AFTER_TICKS=str(a.ticks),
         NECTAR_SAVE_DIR=str(save_dir),
     )
+    if a.throttled:
+        env.pop("PIKMIN_NETPLAY_UNTHROTTLED", None)
     if a.record is not None:
         env["PIKMIN_INPUT_RECORD"] = str(a.record.resolve())
     if a.preroll_rand:

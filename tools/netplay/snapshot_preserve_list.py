@@ -32,6 +32,10 @@ INFRA_GLOBS = [
     "pc_port/pc_gyro.cpp", "pc_port/netplay/pc_netplay_session.cpp", "pc_port/netplay/pc_netplay_udp.cpp",
     "pc_port/netplay/pc_netplay_ice.cpp", "pc_port/netplay/pc_netplay_launch*.cpp",
     "pc_port/netplay/pc_netplay_present.cpp", "pc_port/netplay/pc_snapshot_spike.cpp",
+    # M6b production snapshot (#896): its own statics are infrastructure (the
+    # crowd bootstrap in pc_snapshot_game.cpp is sim and stays out).
+    "pc_port/netplay/pc_snapshot.cpp", "pc_port/netplay/pc_snapshot_region.cpp",
+    "pc_port/netplay/pc_snapshot_ring.cpp",
     "src/sysDolphin/sysNew.cpp",
 ]
 SIM_GLOBS = ["src/**/*.cpp", "pc_port/*.cpp", "pc_port/netplay/*.cpp", "pc_port/mods/**/*.cpp", "include/**/*.h"]
