@@ -963,6 +963,17 @@ if(PIKMIN_NETPLAY_BUILD AND NOT ANDROID)
     endif()
 endif()
 
+# Netplay M5c lane B (issue #887): loopback UDP impairment proxy for pair
+# tests (latency schedule, jitter, loss, periodic link blocks; model in
+# pc_netplay_impair.h). Exe-independent, so a baseline on an older exe sees
+# the same link. Test tool, netplay builds on Windows only.
+if(PIKMIN_NETPLAY_BUILD AND WIN32 AND NOT ANDROID)
+    add_executable(netplay_impair_proxy tools/netplay/udp_impair_proxy.cpp)
+    target_include_directories(netplay_impair_proxy PRIVATE pc_port)
+    target_compile_options(netplay_impair_proxy PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    target_link_libraries(netplay_impair_proxy PRIVATE ws2_32 winmm)
+endif()
+
 # Host-run accuracy/determinism test for the netplay libm (issue #879).
 # Engine-free: links the libm OBJECT plus the test driver. The driver
 # calls the entry points by their standard names (proving the override
