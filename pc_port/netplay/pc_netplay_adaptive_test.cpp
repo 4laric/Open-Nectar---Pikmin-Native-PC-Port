@@ -145,7 +145,7 @@ void test_controller()
 		DelayController c;
 		c.configure(pol);
 		c.start(0);
-		feed_rtt(c, 0, 60000, 93); // measured 93 = net 60 + one slot: need 2 -> cap 5
+		feed_rtt(c, 0, 60000, 93); // measured 93 = net 60 + one slot: need 2 -> cap 4
 		unsigned cur = run_frames(c, 0, 10000, 2, nullptr, nullptr);
 		CHECK(cur == 2, "no stalls: no change");
 		for (double t = 10000; t < 20000; t += 300) add_stall(c, t, 40);
@@ -153,8 +153,8 @@ void test_controller()
 		cur = run_frames(c, 10000, 11000, cur, &ups, nullptr);
 		CHECK(cur == 3 && ups == 1, "first raise within 1 s of sustained lateness");
 		cur = run_frames(c, 11000, 20000, cur, &ups, nullptr);
-		CHECK(cur == 5, "raises stop at the rtt cap (need 2 + 3)");
-		CHECK(ups == 3, "one step per raise at this lateness");
+		CHECK(cur == 4, "raises stop at the rtt cap (need 2 + 2)");
+		CHECK(ups == 2, "one step per raise at this lateness");
 	}
 	// Heavy lateness raises by two.
 	{
@@ -174,6 +174,21 @@ void test_controller()
 		ups = 0;
 		cur = run_frames(c1, 5000, 5400, 2, &ups, nullptr);
 		CHECK(cur == 3 && ups == 1, "one 350 ms spike raises by 1");
+	}
+	// Lateness explained by this peer's own slow ticks never raises.
+	{
+		DelayController c;
+		c.configure(pol);
+		c.start(0);
+		feed_rtt(c, 0, 30000, 93);
+		c.add_self_overrun(4900, 250); // a 283 ms tick: our next inputs were 250 ms late
+		add_stall(c, 5100, 200, 1);    // ... and the peer waited for them
+		unsigned cur = run_frames(c, 5000, 8000, 2, nullptr, nullptr);
+		CHECK(cur == 2, "own slow tick explains the reported lateness");
+		c.add_self_overrun(9000, 40);
+		add_stall(c, 9100, 200, 4); // more than the overrun: genuine lateness
+		cur = run_frames(c, 9000, 9500, cur, nullptr, nullptr);
+		CHECK(cur == 3, "lateness beyond own slow ticks raises");
 	}
 	// Hitches (>= 1 s) never count; the reporter drops load-window stalls.
 	{
@@ -199,8 +214,8 @@ void test_controller()
 		DelayController c;
 		c.configure(pol);
 		c.start(0);
-		feed_rtt(c, 0, 30000, 60);
-		for (double t = 1000; t < 4000; t += 200) add_stall(c, t, 50);
+		feed_rtt(c, 0, 30000, 93);
+		for (double t = 1000; t < 4000; t += 200) add_stall(c, t, 50, 1);
 		unsigned cur = run_frames(c, 1000, 4000, 2, nullptr, nullptr, true);
 		CHECK(cur == 2, "frozen: no change");
 		cur = run_frames(c, 4000, 4100, cur, nullptr, nullptr, false);

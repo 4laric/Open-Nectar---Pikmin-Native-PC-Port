@@ -2065,12 +2065,13 @@ uint32_t fold_hash64(uint64_t v) { return (uint32_t)(v ^ (v >> 32)); }
 // delay setters and gekko_network_stats. Each peer reports its own counted
 // stalls to the other every 250 ms (kHsAdvice on the handshake channel,
 // unreliable, cumulative) and adapts its own delay to the stalls the other
-// reports: the remote waits when this peer's inputs arrive late. A delay change moves which frame
-// this peer's next inputs land on; every frame still gets exactly one local
-// input, built in frame order (one scripted record per frame), and both
-// peers advance a frame only with its confirmed inputs, so both peers run
-// identical inputs and a scripted pair replays a fixed-delay run's per-frame
-// inputs exactly (record F - d0 on frame F).
+// reports (the remote waits when this peer's inputs arrive late), less this
+// peer's own slow ticks. A delay change moves which frame this peer's next
+// inputs land on; every frame still gets exactly one local input, built in
+// frame order (one scripted record per frame), and both peers advance a
+// frame only with its confirmed inputs, so both peers run identical inputs
+// and a scripted pair replays a fixed-delay run's per-frame inputs exactly
+// (record F - d0 on frame F).
 //
 //   PIKMIN_NETPLAY_ADAPTIVE_DELAY  unset/1: on in real-time sessions (off in
 //                                  unthrottled test runs, where every turn
@@ -2080,13 +2081,15 @@ uint32_t fold_hash64(uint64_t v) { return (uint32_t)(v ^ (v >> 32)); }
 //   PIKMIN_NETPLAY_TEST_DELAY_SCHEDULE=<frame>:<delay>[,...]  test only:
 //                                  forced changes at those frames (the
 //                                  controller is off; works unthrottled)
+//   PIKMIN_NETPLAY_STALL_TRACE=1   diagnostic: one line per stall event and
+//                                  per tick of 50 ms or more
 //
 // Freeze rules (no change at all, evidence still gathered): a B1 HOLD in
 // progress or requested (the hold arithmetic keys on the delay), a lane S load
-// window (its stalls are load time, and its close-frame argument needs the
-// delay unchanged across it), a shrink still in progress, and the first
-// kAdaptiveWarmupFrames. Maximum delay stays 8 (B1 kHoldLeadFrames 12, lane S
-// load window), minimum 1.
+// window (its stalls are load time), a shrink still in progress, and the
+// first kAdaptiveWarmupFrames (the two schedules settle after the first
+// load). The delay stays in 1..8: B1's kHoldLeadFrames (12) and lane S's
+// load-window close frame both assume a delay of at most 8.
 constexpr uint64_t kAdaptiveWarmupFrames = 150;
 constexpr double kRttSampleMs = 500.0; // GekkoNet's NetworkHealth period
 constexpr double kAdviceMs = 250.0;    // advice period (pc_netplay_adaptive::Policy::reportPeriodMs)
@@ -2119,6 +2122,18 @@ uint32_t sAdviceSeq = 0;
 double sAdviceNextMs = 0;
 pc_netplay_adaptive::AdviceReceiver sAdviceIn;
 double sPeerLateMs = 0; // lateness the peer reported (this peer's inputs late there)
+double sSelfOverrunMs = 0; // own tick overrun beyond a slot, outside load windows
+float sStallAhead = 0;     // gekko_frames_ahead() when the open stall began (trace)
+int sStallTrace = -1;      // PIKMIN_NETPLAY_STALL_TRACE=1: one line per stall event / slow tick
+
+bool stall_trace()
+{
+	if (sStallTrace < 0) {
+		const char* e = std::getenv("PIKMIN_NETPLAY_STALL_TRACE");
+		sStallTrace = (e != nullptr && e[0] == '1' && e[1] == '\0') ? 1 : 0;
+	}
+	return sStallTrace == 1;
+}
 
 double session_s(double nowMs) { return sSessionStartMs > 0 ? (nowMs - sSessionStartMs) / 1000.0 : 0.0; }
 
@@ -2151,6 +2166,7 @@ void adaptive_configure()
 	sAdviceNextMs = 0;
 	sAdviceIn.reset();
 	sPeerLateMs = 0;
+	sSelfOverrunMs = 0;
 	sNextLand = sCfg.localDelay; // the first add fills frames 0..d-1 with GekkoNet's empty input
 	pc_netplay_adaptive::Policy pol;
 	sDelayCtl.configure(pol);
@@ -2307,9 +2323,35 @@ void adaptive_close_stall()
 	sStats.add_stall(e);
 	// Reported to the peer (its inputs were late here), never fed to this
 	// peer's own controller.
-	if (pc_netplay_adaptive::stall_counted(e, sDelayCtl.policy().hitchMs)) {
+	const bool counted = pc_netplay_adaptive::stall_counted(e, sDelayCtl.policy().hitchMs);
+	if (counted) {
 		sLateMs += e.durMs;
 		++sLateEvents;
+	}
+	if (stall_trace()) {
+		printf("[netplay] stall-trace: stall frame=%llu t=%.3fs dur=%.1fms excluded=%d counted=%d ahead=%.2f delay=%u\n",
+		       (unsigned long long)sAdvances, session_s(e.startMs), e.durMs, (int)e.excluded, (int)counted,
+		       sStallAhead, sCfg.localDelay);
+		fflush(stdout);
+	}
+}
+
+// After each Advance's tick: a tick longer than a slot delays this peer's
+// next inputs by the overrun (the peer will report the wait); outside load
+// windows (whose stalls nobody reports) it offsets reported lateness.
+void adaptive_note_tick(double tickMs)
+{
+	if (tickMs <= pc_netplay_adaptive::kSlotMs) return;
+	const double over = tickMs - pc_netplay_adaptive::kSlotMs;
+	const double now = now_ms();
+	if (!sLgWindow.is_open()) {
+		sSelfOverrunMs += over;
+		sDelayCtl.add_self_overrun(now, over);
+	}
+	if (stall_trace() && tickMs >= 50.0) {
+		printf("[netplay] stall-trace: slow tick frame=%llu t=%.3fs tick=%.1fms window=%d\n",
+		       (unsigned long long)sAdvances, session_s(now), tickMs, (int)sLgWindow.is_open());
+		fflush(stdout);
 	}
 }
 
@@ -2365,7 +2407,10 @@ void adaptive_note_stall_turn(double startMs, double durMs)
 		sStallOpen = true;
 		sStallStartMs = startMs;
 		sStallDurMs = 0;
-		sStallExcluded = sLgWindow.is_open();
+		// Never reported: a load window (load time, lane S), and the first
+		// frames, while the two 30 Hz schedules settle after the first load.
+		sStallExcluded = sLgWindow.is_open() || sAdvances < kAdaptiveWarmupFrames;
+		sStallAhead = sGekko != nullptr ? gekko_frames_ahead(sGekko) : 0.0f;
 	}
 	sStallDurMs += durMs;
 }
@@ -2397,13 +2442,13 @@ void adaptive_stats_line(const char* tag)
 	const pc_netplay_adaptive::FrameTimeHist& f = sStats.frames();
 	printf("[netplay] %s: t=%.1fs frame=%llu delay=%u (start %u, range %u..%u, up %llu down %llu) "
 	       "stalls=%llu total=%.0fms max=%.0fms excluded=%llu last10s=%llu/%.0fms reported=%.0fms "
-	       "peer: delay=%d late=%.0fms reports=%llu "
+	       "slow-ticks=%.0fms peer: delay=%d late=%.0fms reports=%llu "
 	       "rtt last=%.0f p50=%.0f p95=%.0f jitter=%.1f samples=%llu "
 	       "frames=%llu p50=%.1f p95=%.1f p99=%.1f max=%.1f >50ms=%llu >100ms=%llu\n",
 	       tag, session_s(now), (unsigned long long)sAdvances, sCfg.localDelay, sDelayStart, sDelayLow, sDelayHigh,
 	       (unsigned long long)sDelayUps, (unsigned long long)sDelayDowns, (unsigned long long)sStats.stall_count(),
 	       sStats.stall_total_ms(), sStats.stall_max_ms(), (unsigned long long)sStats.stall_excluded(),
-	       (unsigned long long)n10, ms10, sLateMs, sAdviceIn.have() ? (int)sAdviceIn.last().delay : -1, sPeerLateMs,
+	       (unsigned long long)n10, ms10, sLateMs, sSelfOverrunMs, sAdviceIn.have() ? (int)sAdviceIn.last().delay : -1, sPeerLateMs,
 	       (unsigned long long)sAdviceIn.reports(), sStats.rtt_last(), sStats.rtt_percentile(50), sStats.rtt_percentile(95),
 	       sStats.rtt_jitter(), (unsigned long long)sStats.rtt_samples(), (unsigned long long)f.count(),
 	       f.percentile(50), f.percentile(95), f.percentile(99), f.max_ms(), (unsigned long long)f.at_least(50.0),
@@ -2413,6 +2458,8 @@ void adaptive_stats_line(const char* tag)
 
 // Once per session, from stop_session (exit-after, disconnect, desync,
 // window close): the final figures, the delay timeline and the histogram.
+// "excluded" stalls (load window, first frames) are in every total but never
+// reported to the peer; "reported" is what this peer told the peer.
 void adaptive_final_stats()
 {
 	if (!sAdaptiveConfigured || sStatsFinalDone || sSessionStartMs <= 0) return;
@@ -4291,6 +4338,7 @@ int handle_game_events(System* sys, BaseApp* app)
 			                     e->data.adv.rolling_back || e->data.adv.running_ahead);
 			app->idle();
 			loadguard_tick_end();
+			adaptive_note_tick(now_ms() - sLgTickStartMs); // M5c lane B: own slow ticks
 			pc_netplay_det_profile_note_tick();
 			pc_input_log_tick_end();
 			pc_state_hash_tick_end();

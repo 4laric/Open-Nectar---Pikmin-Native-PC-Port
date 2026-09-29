@@ -27,22 +27,29 @@
 // handshake channel (a small unreliable "advice" datagram every 250 ms with
 // cumulative totals, so a lost one costs nothing), and each peer's controller
 // runs on the stalls the REMOTE reports:
-//   - up quickly: reported lateness since the last change, inside the last
-//     kUpWindowMs, of at least kUpStallMs raises d by 1 (by 2 when it is three
-//     times that over at least three late events: sustained, not one spike),
-//     at most once per kUpCooldownMs. A raise stops at need(RTT p50) +
-//     kMaxExtraOverRtt, so stalls that no delay can fix (a peer that cannot
-//     hold 30 Hz) cost at most that many frames;
-//   - down slowly: kDownHoldMs since the last change with at most
-//     kDownStallTolMs of reported lateness inside it, reports arriving
+//   - up quickly: reported lateness inside the last upWindowMs (3 s), and
+//     not before settleMs (0.8 s) after the last change (earlier reports
+//     still describe inputs sent before it), of at least upStallMs (100 ms)
+//     raises d by 1 (by 2 when it is three times that over at least three
+//     late events: sustained, not one spike), at most once per upCooldownMs
+//     (1 s). A raise stops at need(RTT p50) + maxExtraOverRtt (2), so stalls
+//     that no delay can fix (a peer that cannot hold 30 Hz) cost at most two
+//     frames;
+//   - down slowly: downHoldMs (15 s) since the last change with at most
+//     downStallTolMs (50 ms) of reported lateness inside it, reports arriving
 //     throughout (no news is not good news), and need(RTT p50 over the same
-//     span) <= d - 1, lowers d by 1. A raise within kBackoffWindowMs of a
-//     lowering doubles the hold (up to kMaxDownHoldMs); a lowering that
-//     survives kBackoffResetMs resets it;
-//   - counted stalls (what a peer reports) exclude events of kHitchMs or
+//     span) <= d - 1, lowers d by 1. A raise within backoffWindowMs (30 s) of
+//     a lowering doubles the hold (up to 120 s); a lowering that survives
+//     backoffResetMs (60 s) resets it;
+//   - counted stalls (what a peer reports) exclude events of hitchMs (1 s) or
 //     longer (a load, a driver hang or an outage: at most 8 frames of delay
-//     cannot hide them) and stalls inside a lane S load window; both stay in
-//     the stats;
+//     cannot hide them), stalls inside a lane S load window and stalls in
+//     the session's first frames (time sync settling); all stay in the stats;
+//   - a slow tick on THIS peer (an Advance longer than a slot: a shader
+//     compile, a GC pause) delays this peer's next inputs by its overrun, and
+//     the peer duly reports the wait. The delay is for the network, so the
+//     controller subtracts this peer's own overrun (outside load windows,
+//     from selfLeadMs (1 s) before the window on) from the reported lateness;
 //   - need(rtt) is the handshake auto-delay formula, ceil((rtt/2)/33.3 ms -
 //     0.05) + 1, clamped to [min, max], applied to the measured in-session
 //     RTT minus one slot of turn quantization (Policy::rttBiasMs).
@@ -300,7 +307,11 @@ struct Policy {
 	double upWindowMs = 3000;
 	double upStallMs = 100;
 	double upCooldownMs = 1000;
-	unsigned maxExtraOverRtt = 3;
+	// A change reaches the peer's stalls only after the new inputs land and
+	// the next report comes back (about (d + 1) frames + the advice period +
+	// one way), so lateness reported this soon after a change is stale.
+	double settleMs = 800;
+	unsigned maxExtraOverRtt = 2;
 	double downHoldMs = 15000;
 	double downStallTolMs = 50;
 	double backoffWindowMs = 30000;
@@ -319,6 +330,7 @@ struct Policy {
 	// one-way measured p50 165 ms against 120 on a bare echo.)
 	double rttBiasMs = kSlotMs;
 	unsigned bigStepEvents = 3;   // a +2 step needs this many late events (sustained, not one spike)
+	double selfLeadMs = 1000;     // own overrun this far before the window still explains lateness
 };
 
 struct Decision {
@@ -371,6 +383,19 @@ public:
 		if (net < 0) net = 0;
 		return delay_for_rtt(net, mP.minDelay, mP.maxDelay);
 	}
+	// This peer's own tick overrun (tick ms beyond one slot) at atMs.
+	void add_self_overrun(double atMs, double ms)
+	{
+		mSelf.push_back(RttSample{ atMs, ms });
+		trim(atMs);
+	}
+	double self_overrun_ms(double fromMs, double toMs) const
+	{
+		double ms = 0;
+		for (const RttSample& o : mSelf)
+			if (o.atMs >= fromMs && o.atMs <= toMs) ms += o.rttMs;
+		return ms;
+	}
 	// A report arrived (with or without lateness): the down rule needs them.
 	void add_report(double atMs)
 	{
@@ -418,8 +443,10 @@ public:
 		// Backoff reset: a lowering that stuck long enough.
 		if (mLastDownMs > mLastUpMs && nowMs - mLastDownMs >= mP.backoffResetMs) mHoldMs = mP.downHoldMs;
 		// Up: lateness since the last change, inside the window.
-		const double from = std::max(nowMs - mP.upWindowMs, mLastChangeMs);
-		const double late = counted_stall_ms(from, nowMs);
+		const double from = std::max(nowMs - mP.upWindowMs, mLastChangeMs + mP.settleMs);
+		const double reported = counted_stall_ms(from, nowMs);
+		const double own = self_overrun_ms(from - mP.selfLeadMs, nowMs);
+		const double late = reported > own ? reported - own : 0.0;
 		if (late >= mP.upStallMs && nowMs - mLastUpMs >= mP.upCooldownMs) {
 			const double p50 = rtt_percentile(nowMs - mP.rttWindowUpMs, nowMs, 50);
 			unsigned cap = mP.maxDelay;
@@ -433,8 +460,8 @@ public:
 				d.target = std::min(cap, cur + step);
 				d.changed = true;
 				char buf[160];
-				snprintf(buf, sizeof(buf), "up: peer late %.0fms in %.1fs, rtt p50 %.0fms, cap %u", late,
-				         (nowMs - from) / 1000.0, p50, cap);
+				snprintf(buf, sizeof(buf), "up: peer late %.0fms (own slow ticks %.0fms) in %.1fs, rtt p50 %.0fms, cap %u",
+				         reported, own, (nowMs - from) / 1000.0, p50, cap);
 				d.reason = buf;
 				if (nowMs - mLastDownMs < mP.backoffWindowMs) {
 					mHoldMs = std::min(mP.maxDownHoldMs, mHoldMs * 2.0);
@@ -492,6 +519,8 @@ private:
 		// Keep what the longest window can still read (2x the longest hold).
 		const double keep = 2.0 * std::max(mP.maxDownHoldMs, mP.upWindowMs);
 		const double cut = nowMs - keep;
+		mSelf.erase(mSelf.begin(),
+		            std::find_if(mSelf.begin(), mSelf.end(), [cut](const RttSample& r) { return r.atMs >= cut; }));
 		const auto keepFrom = std::find_if(mStalls.begin(), mStalls.end(),
 		                                   [cut](const StallEvent& e) { return e.startMs >= cut; });
 		mEvents.erase(mEvents.begin(), mEvents.begin() + (keepFrom - mStalls.begin()));
@@ -506,6 +535,7 @@ private:
 	std::vector<StallEvent> mStalls;
 	std::vector<uint32_t> mEvents; // late events per mStalls entry
 	std::vector<RttSample> mRtt;
+	std::vector<RttSample> mSelf; // own tick overruns (atMs, ms)
 	std::vector<double> mReports;
 	double mLastChangeMs = 0;
 	double mLastUpMs = -1e18;
