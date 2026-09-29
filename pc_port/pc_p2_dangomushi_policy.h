@@ -26,7 +26,8 @@
 //                       Purple Pikmin get InteractFlick(fp17 shakeKnockback,
 //                       fp18 shakeDamage); other Pikmin get InteractHanaChirashi
 //                       (blown + wither to Leaf); a Navi hit by the hand gets
-//                       the InteractWind Navi flick with fp24 attackDamage.
+//                       the InteractWind::actNavi flick (flat 300 push) with
+//                       fp24 attackDamage.
 //   * armWindow      -- StateFlick::exec: attack_2 KEYEVENT_2 sets
 //                       mIsArmSwinging, KEYEVENT_3 clears it (26:2,32:3,38:2,
 //                       50:3,57:2,65:3).
@@ -50,6 +51,7 @@ constexpr float kAttackDamage = 10.0f;      // general fp24
 constexpr float kShakeKnockback = 200.0f;   // general fp17
 constexpr float kShakeDamage = 1.0f;        // general fp18
 constexpr float kFps = 30.0f;
+constexpr float kNaviFlickPush = 300.0f;    // DangoMushi.cpp:845 targetPos *= 300
 
 // ---------------------------------------------------------------- roll/wall
 inline bool wallCrash(bool rolling, float vx, float vy, float vz,
@@ -150,6 +152,46 @@ inline float attackFrame(float stateTime) {
     return float(kAttackLoopStart) + std::fmod(f - float(kAttackLoopEnd), L);
 }
 
+// StateAttack::exec (DangoMushiState.cpp:414-466): after 15 s finishMotion()
+// lets the running loop pass reach LOOP_END, where mIsRolling/mIsBall clear;
+// the tail (uncurl) then plays to END and the state transits to Wait.
+constexpr int kAttackClipFrames = 140;      // staged bank row `attack 140`
+struct AttackClock {
+    float frame = 0.0f;
+    bool tail = false;      // loop left: rolling stopped, uncurl playing
+    bool finished = false;  // END reached: transit to Wait
+};
+inline AttackClock attackClock(float stateTime, float finishAt,
+                               int clipFrames = kAttackClipFrames) {
+    AttackClock c;
+    const float f = stateTime * kFps;
+    if (f < float(kAttackLoopEnd) || finishAt < 0.0f) {
+        c.frame = attackFrame(stateTime);
+        return c;
+    }
+    const float L = float(kAttackLoopEnd - kAttackLoopStart);
+    const float finishFrame = finishAt * kFps;
+    float wrap = float(kAttackLoopEnd);
+    if (finishFrame > wrap) wrap += std::ceil((finishFrame - wrap) / L) * L;
+    if (f < wrap) {
+        c.frame = float(kAttackLoopStart) + std::fmod(f - float(kAttackLoopEnd), L);
+        return c;
+    }
+    c.tail = true;
+    c.frame = float(kAttackLoopEnd) + (f - wrap);
+    const float endFrame = float(clipFrames - 1);
+    if (c.frame >= endFrame) { c.frame = endFrame; c.finished = true; }
+    return c;
+}
+
+// Roll-crush damage (see rollCrush in pc_p2_dangomushi.cpp): P2 kills every
+// pressed Pikmin (PikiPressedState::exec -> kill), so a Pikmin press carries
+// lethal damage on the P1 receiver; a Navi takes the source fp24.
+inline float pressDamage(bool piki, float health) {
+    if (!piki) return kAttackDamage;
+    return health > kAttackDamage ? health : kAttackDamage;
+}
+
 // ---------------------------------------------------------------- reactions
 enum class TargetKind { Pikmin, PurplePikmin, Navi };
 enum class Reaction { None, Flick, Wither, NaviFlick };
@@ -175,12 +217,21 @@ inline ReactionOut shakeReaction(TargetKind k) {
 inline ReactionOut flickReaction(TargetKind k) {
     ReactionOut r;
     if (k == TargetKind::Navi) {
-        r.kind = Reaction::NaviFlick; r.knockback = kShakeKnockback; r.damage = kAttackDamage;
+        // InteractHanaChirashi has no actNavi, so the P2 Navi receiver is
+        // InteractWind::actNavi: NaviFlickState with the flat 300-unit push
+        // (DangoMushi.cpp:842-848) and fp24 damage.
+        r.kind = Reaction::NaviFlick; r.knockback = kNaviFlickPush; r.damage = kAttackDamage;
     } else {
         r = shakeReaction(k);
     }
     return r;
 }
+
+// Flick angle for a victim at (dx, dz) from the crab. Both the P1 and the P2
+// flick receivers push along -(sin a, cos a) (P2 InteractFlick::actPiki,
+// P1 PikiFlickState/NaviFlickState), so `a` points from the victim to the crab
+// (source JMAAtan2Radian(crab - target), DangoMushi.cpp:852).
+inline float flickAngle(float dx, float dz) { return std::atan2(-dx, -dz); }
 
 // attack_2 arm-swing windows (KEYEVENT_2 opens, KEYEVENT_3 closes).
 inline bool armWindow(float frame) {

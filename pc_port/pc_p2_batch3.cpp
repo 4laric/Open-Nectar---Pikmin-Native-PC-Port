@@ -60,7 +60,9 @@ const FamilyDef FAMILIES[] = {
     {"flying", "fly", "p2-flying-actors.txt", "p2-flying-bank.txt"},
     {"snagret", "snake", "p2-snagret-actors.txt", "p2-snagret-bank.txt"},
 };
-constexpr size_t ClipBytes = 512 * 1024;         // per clip
+// Per clip: the DangoMushi bank samples up to 40 adaptive poses per clip
+// (~73 KB each, #897) so the roll/turn/claw motion blends from real key poses.
+constexpr size_t ClipBytes = 4 * 1024 * 1024;     // per clip
 constexpr size_t TotalBytes = 48 * 1024 * 1024;  // per setup
 
 struct ClipRow {
@@ -929,12 +931,7 @@ bool pc_p2_batch3_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     const p2animation::Clip& timing = bank.timing.at(name);
     const size_t index = timing.index(phase, corpse);
     Shape* shape = poses.at(index < poses.size() ? index : poses.size() - 1);
-    // #897: the private-geometry blend renders the live Crawbster invisible
-    // (bot runs r1/r2: only the corpse, which skips the blend, was ever on
-    // screen; with PIKMIN_P2_INTERPOLATION=0 the rolling ball, belly-up Turn
-    // and claw flick all draw). DangoMushi uses the nearest staged pose.
-    const bool dangoNearestPose = entry->second == "snagret|DangoMushi";
-    if (interpolation && !corpse && !dangoNearestPose) {
+    if (interpolation && !corpse) {
         auto interpIt = bank.interp.find(name);
         auto bakedIt = bank.baked.find(name);
         if (interpIt != bank.interp.end() && interpIt->second && bakedIt != bank.baked.end()
