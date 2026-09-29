@@ -32,7 +32,7 @@
 #include "pc_p2_ship_store.h"
 #include "pc_p2_purple.h"
 #include "pc_p2_input_script.h"
-#include "Dolphin/pad.h"
+#include "Controller.h"
 #include "gameflow.h"
 #include "WorldClock.h"
 #include "pc_window.h"
@@ -158,7 +158,7 @@ class PurpleCampaignApp : public PlugPikiApp {
         // Remain input-neutral during the sunset itself. Once the ordinary
         // sequence advances the day, edge-triggered A drives diary/results/save.
         const bool confirming = sunsetSeen && gameflow.mWorldClock.mCurrentDay == expectedDay;
-        pc_p2_input_script_set(1, confirming && (sunsetTicks % 20 < 4) ? PAD_BUTTON_A : 0, 0, 0);
+        pc_p2_input_script_set(1, confirming && (sunsetTicks % 20 < 4) ? KBBTN_A : 0, 0, 0);
         if (sunsetTicks % 120 == 0)
             std::printf("P2_PURPLE_DAYEND_PROGRESS ticks=%d active=%d day=%d stock=%d save_index=%u\n",
                 sunsetTicks, int(gameflow.mIsDayEndActive), gameflow.mWorldClock.mCurrentDay,
@@ -263,6 +263,8 @@ public:
             require(!captainSeen || expectedTeardown, "captain disappeared outside expected sunset teardown");
         }
         require(++ticks < (sunsetRequested ? 15000 : 6000), "fixture timeout");
+        if (std::getenv("P2_PURPLE_RESUME"))
+            pc_p2_input_script_set(1, (!n || gameflow.mIsUIOverlayActive) && ticks % 20 < 4 ? KBBTN_A : 0, 0, 0);
         if (sunsetRequested) {
             advanceSunset();
             if (gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive)
