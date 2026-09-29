@@ -23,6 +23,16 @@ other's campaigns):
   quit        the joiner's window is closed mid-session (WM_CLOSE to its
               hidden window): it tells the host at once (quit notice) and
               both print the recovery message.
+  p2          --continue plumbing for a seed with P2 enemies (--p2-bootstrap,
+              --p2-assets): S1 plays the seed from its own folder; a day-2
+              checkpoint is then SYNTHESISED into S1's host campaign (a real
+              day-2-end game block from --p2-donor-sav, re-signed with the P2
+              seed's fingerprint and checkpoint header, plus the donor card
+              files and two record lines), because the scripted pad cannot be
+              relied on to reach and accept a P2 day-end save; S2 continues it
+              with --continue --bootstrap <seed>: the overlay recorded by S1,
+              the sidecars from S1's play/ folder, the joiner's transfer, and
+              day 3 on both peers. The seed folder is checked unchanged.
 
 Every scenario checks that the continued run folder is unchanged by the
 session that continued it (same files, same bytes: --continue only reads it).
@@ -137,7 +147,7 @@ class Ctx:
 
 
 def run_session(ctx, name, ticks, host_extra=(), host_env=None, join_env=None, expect="sync",
-                kill_join_at=None, close_join_at=None, stage=None):
+                kill_join_at=None, close_join_at=None, stage=None, join_extra=()):
     a = ctx.a
     out = ctx.root / name
     if out.exists():
@@ -180,6 +190,7 @@ def run_session(ctx, name, ticks, host_extra=(), host_env=None, join_env=None, e
     host_args += list(host_extra)
     join_args = ["--netplay-join-ice", f"@{offer}", "--netplay-code-out", str(answer), "--netplay-test-hidden",
                  "--netplay-test-ticks", str(ticks), "--netplay-input", "gamepad:0"]
+    join_args += list(join_extra)
     s = {"name": name, "ticks": ticks, "expect": expect, "exe": str(exe), "exe_sha256": lp.sha256_file(exe),
          "host_cmd": [str(exe)] + host_args, "join_cmd": [str(exe)] + join_args,
          "host_env": {k: v for k, v in henv.items() if k.startswith("PIKMIN_NETPLAY_TEST") or k.endswith("DELAY")},
@@ -259,6 +270,8 @@ def run_session(ctx, name, ticks, host_extra=(), host_env=None, join_env=None, e
                                  "[netplay] test:"),
             "hud": lines_with(log, "[netplay] hud"),
             "link": lines_with(log, "[netplay] link:")[-3:],
+            "p2": lines_with(log, "[netplay] launch: P2", "sidecars received", "[netplay] p2 digests",
+                             "[netplay] transfer: sending"),
         }
         if rd:
             for fname in ("campaign-record.txt", "launch.txt"):
@@ -439,11 +452,87 @@ def scenario_quit(ctx):
     ctx.check(s1["exit"] == {"host": 0, "join": 0}, f"s1: both exit 0 ({s1['exit']})")
 
 
+def fnv1a64(data):
+    h = 14695981039346656037
+    for b in data:
+        h ^= b
+        h = (h * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return h
+
+
+def seed_flags_header(boot_text):
+    """(magic, used-count) of pc_randomizer.cpp write_campaign_checkpoint for
+    a bootstrap: BENEFITS <mode> sets bombDeliveries (bit 0 of mode-1),
+    bombTraps (bit 2), proggTraps (bit 3) and prereleaseTraps (bit 4)."""
+    mode = 0
+    toks = boot_text.split()
+    for i, t in enumerate(toks[:-1]):
+        if t == "BENEFITS":
+            mode = int(toks[i + 1])
+    m = mode - 1 if mode > 0 else 0
+    if mode > 0 and m & 16:
+        return "PIKMIN_CAMPAIGN_5", 7
+    if mode > 0 and m & 8:
+        return "PIKMIN_CAMPAIGN_4", 6
+    if mode > 0 and m & 4:
+        return "PIKMIN_CAMPAIGN_3", 5
+    if mode > 0 and m & 1:
+        return "PIKMIN_CAMPAIGN_2", 4
+    return "PIKMIN_CAMPAIGN_1", 3
+
+
+def scenario_p2(ctx):
+    a = ctx.a
+    boot = a.p2_bootstrap.resolve()
+    seed_dir = boot.parent
+    before_seed = folder_digest(seed_dir)
+    s1 = run_session(ctx, "s1", a.nosave_ticks, host_extra=["--bootstrap", str(boot)],
+                     join_extra=["--netplay-p2-assets", str(a.p2_assets.resolve())])
+    gameplay_ok(ctx, s1, "s1", a.min_distinct // 4)
+    ctx.check(s1["exit"] == {"host": 0, "join": 0}, f"s1: both exit 0 ({s1['exit']})")
+    ctx.check(any("p2_assets " in ln for ln in s1["host"].get("launch.txt") or []), "s1 host: launch.txt records p2_assets")
+    host_run = Path(s1["host"]["run_dir"])
+    # Synthesise the day-2-end checkpoint (see the module docstring).
+    text = boot.read_text(errors="replace")
+    fp = text.split("FINGERPRINT", 1)[1].split()[0]
+    magic, used = seed_flags_header(text)
+    donor = a.p2_donor_sav.read_bytes()
+    block = donor[donor.index(b"\n") + 1:]
+    meta = f"{magic} {fp} 1" + " 0" * used
+    sav = (meta + f" {fnv1a64((meta + chr(10)).encode() + block)}\n").encode() + block
+    camp = host_run / "session" / "campaign"
+    (camp / "card" / "card0").mkdir(parents=True, exist_ok=True)
+    (camp / "00000000000000000001.sav").write_bytes(sav)
+    donor_card = a.p2_donor_sav.parent / "card" / "card0"
+    for f in sorted(donor_card.iterdir()):
+        (camp / "card" / "card0" / f.name).write_bytes(f.read_bytes())
+    with open(host_run / "campaign-record.txt", "a", newline="\n") as f:
+        f.write("saved gen=1 frame=0 day_ended=2 synthetic=continue_pairs-p2\nday gen=1 day=3\n")
+    print(f"continue_pairs: [p2] synthesised {magic} gen 1 ({len(sav)} B) from {a.p2_donor_sav} into {camp}")
+    ctx.check(True, f"p2: synthetic day-2 checkpoint {magic}/{used} written into {camp} (test setup)")
+    run_before = folder_digest(host_run)
+    s2 = run_session(ctx, "s2", a.continue_ticks, host_extra=["--continue", "--bootstrap", str(boot)],
+                     join_extra=["--netplay-p2-assets", str(a.p2_assets.resolve())])
+    ctx.check(folder_digest(host_run) == run_before, "s2: the continued P2 run folder is unchanged")
+    continue_ok(ctx, s2, "s2", str(host_run))
+    ctx.check(any("assets -> " in ln and Path(a.p2_assets).name in ln.replace("\\", "/") for ln in s2["host"]["p2"])
+              or any("assets -> " in ln for ln in s2["host"]["p2"]), "s2 host: P2 working directory with the overlay")
+    ctx.check(any("sidecars:" in ln and "copied from" in ln and "/play" in ln.replace("\\", "/") for ln in s2["host"]["p2"]),
+              "s2 host: P2 sidecars copied from the continued run's play/ folder")
+    gameplay_ok(ctx, s2, "s2", a.min_distinct // 4)
+    ctx.check(s2["exit"] == {"host": 0, "join": 0}, f"s2: both exit 0 ({s2['exit']})")
+    ctx.check(folder_digest(seed_dir) == before_seed, f"the seed folder {seed_dir} is unchanged")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--exe", type=Path, required=True, help="netplay build nectar.exe (copied into each stage)")
     p.add_argument("--out", type=Path, required=True, help="evidence root; <out>/<scenario>/ must not exist")
-    p.add_argument("--scenario", choices=("clean", "desync", "disconnect", "nosave", "quit"), required=True)
+    p.add_argument("--scenario", choices=("clean", "desync", "disconnect", "nosave", "quit", "p2"), required=True)
+    p.add_argument("--p2-bootstrap", type=Path, default=None, help="p2: the seed's bootstrap.txt (its folder holds assets/)")
+    p.add_argument("--p2-assets", type=Path, default=None, help="p2: the joiner's copy of the overlay")
+    p.add_argument("--p2-donor-sav", type=Path, default=None,
+                   help="p2: a real day-2-end checkpoint of the same PROFILE (its game block and card are reused)")
     p.add_argument("--assets", type=Path, default=rp.DEFAULT_ASSETS)
     p.add_argument("--port-base", type=int, default=48850)
     p.add_argument("--seed-a", type=int, default=101)
@@ -472,6 +561,8 @@ def main(argv=None):
         scenario_dayend(ctx, a.scenario)
     elif a.scenario == "nosave":
         scenario_nosave(ctx)
+    elif a.scenario == "p2":
+        scenario_p2(ctx)
     else:
         scenario_quit(ctx)
     ok = all(c["ok"] for c in ctx.checks)

@@ -4051,6 +4051,20 @@ void handle_session_events()
 			       (unsigned long long)subs[6]);
 			fflush(stdout);
 			pc_state_hash_flush();
+			// M5c lane C: GekkoNet queues this peer's own checksum for the
+			// desynced frame in the same update that found the mismatch, and
+			// sends it on the next network poll. Stopping at once left the
+			// other game without it: only one peer saw the desync, and the
+			// other waited 15 s and reported a lost connection. Keep polling
+			// the network for up to 1 s (no Advance, no event consumed), like
+			// the save barrier's desync linger, so both games stop with exit 5.
+			{
+				const double l0 = now_ms();
+				while (sGekko != nullptr && now_ms() - l0 < 1000.0) {
+					gekko_network_poll(sGekko);
+					sleep_hires_ms(5.0, 0.0);
+				}
+			}
 			stop_session();
 			sPhase = kDone;
 			// M5c lane C: the final message, then the end banner (exit 5 when
