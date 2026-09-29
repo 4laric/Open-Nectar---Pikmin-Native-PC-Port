@@ -6,6 +6,11 @@
 //   TURN   linear 32..108 window (~2.5 s), clip never looped
 //   SHAKE  no setBodyCollision(true) sticker shake at window close
 //   FLICK  zero-damage flick to Pikmin only; captains untouched, no Purple rule
+// and the #897 review (0cec11053) regressions:
+//   CRUSH_LETHAL   InteractPress(10) only stunned a flower/bud Pikmin on P1
+//   FLICK_DIR      the claw flick pushed victims toward the crab
+//   ROLL_FINISH    15 s timeout jumped straight to Wait (no loop run-out/uncurl)
+//   TURN_DEATH     death in Turn skipped the tail (source finishMotion)
 // Sections report independently so a mutant run shows exactly what regressed.
 #include "pc_p2_dangomushi_policy.h"
 
@@ -137,6 +142,63 @@ void flickSection() {
     CHECK(inArmArc(0.0f, 120.0f, 0.0f));
     CHECK(!inArmArc(0.0f, -120.0f, 0.0f));
 }
+// P1 PikiPressedState::exec (pikiState.cpp:3133): a pressed Pikmin dies on
+// its first tick iff health <= 0 after the press damage; otherwise it recovers.
+bool p1PressKills(float health, float damage) { return health - damage <= 0.0f; }
+
+void crushLethalSection() {
+    // P2 kills every pressed Pikmin, whatever its maturity/health.
+    for (float health : {1.0f, 10.0f, 20.0f, 40.0f, 100.0f})
+        CHECK(p1PressKills(health, pressDamage(true, health)));
+    // The old fp24-only press left a 20 HP flower Pikmin alive (the r4 bug).
+    CHECK(!p1PressKills(20.0f, kAttackDamage));
+    // A Navi keeps the source fp24 press damage.
+    CHECK(pressDamage(false, 100.0f) == kAttackDamage);
+}
+
+void flickDirSection() {
+    // Victim in front (+z) and to the right (+x): pushed further away.
+    const float dxs[] = {0.0f, 120.0f, -80.0f, 60.0f};
+    const float dzs[] = {120.0f, 0.0f, 50.0f, -90.0f};
+    for (int i = 0; i < 4; ++i) {
+        const float a = flickAngle(dxs[i], dzs[i]);
+        const float vx = -std::sin(a), vz = -std::cos(a);
+        CHECK(vx * dxs[i] + vz * dzs[i] > 0.0f);
+    }
+    // Navi hand hit: the flat 300 push of InteractWind::actNavi.
+    CHECK(flickReaction(TargetKind::Navi).knockback == 300.0f);
+}
+
+void rollFinishSection() {
+    // No finish: loops 50..100 forever.
+    const AttackClock loop = attackClock(20.0f, -1.0f);
+    CHECK(!loop.tail && !loop.finished && loop.frame >= 50.0f && loop.frame < 100.0f);
+    // finishMotion at 15 s (frame 450): the loop wraps at 450 (100 + 7*50),
+    // then the uncurl tail 100..139 plays and END finishes.
+    const AttackClock before = attackClock(14.9f, 15.0f);
+    CHECK(!before.tail);
+    const AttackClock tail = attackClock(15.0f + 20.0f / kFps, 15.0f);
+    CHECK(tail.tail && !tail.finished && std::fabs(tail.frame - 120.0f) < 0.5f);
+    const AttackClock done = attackClock(15.0f + 40.0f / kFps, 15.0f);
+    CHECK(done.tail && done.finished);
+    // A finish requested mid-pass runs that pass out first.
+    const AttackClock mid = attackClock(15.2f, 15.1f);
+    CHECK(!mid.tail);
+}
+
+void turnDeathSection() {
+    // Health 0 at 2.0 s (frame 60, inside the loop): finishMotion -> the pass
+    // ends at LOOP_END 81, the tail plays, key 3 and END are reached long
+    // before FLIP_TIME would have allowed.
+    const TurnClock atDeath = turnClock(2.0f, 2.0f);
+    CHECK(atDeath.looping && !atDeath.finished);
+    const TurnClock tail = turnClock(3.2f, 2.0f);   // frame 96 -> tail 81 + 15
+    CHECK(tail.tail && !tail.finished);
+    const TurnClock end = turnClock(4.2f, 2.0f);
+    CHECK(end.finished && end.closed);
+    // Without a death the same time is still inside the loop.
+    CHECK(turnClock(4.2f).looping);
+}
 } // namespace
 
 int main() {
@@ -145,6 +207,10 @@ int main() {
     section("DANGOMUSHI_TURN_WINDOW", turnSection);
     section("DANGOMUSHI_SHAKE", shakeSection);
     section("DANGOMUSHI_FLICK", flickSection);
+    section("DANGOMUSHI_CRUSH_LETHAL", crushLethalSection);
+    section("DANGOMUSHI_FLICK_DIR", flickDirSection);
+    section("DANGOMUSHI_ROLL_FINISH", rollFinishSection);
+    section("DANGOMUSHI_TURN_DEATH", turnDeathSection);
     if (gFailures) {
         std::printf("FAIL DANGOMUSHI_POLICY failures=%d\n", gFailures);
         return 1;

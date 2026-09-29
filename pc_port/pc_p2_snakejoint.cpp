@@ -593,6 +593,11 @@ void pc_p2_snakejoint_setup() {
                         }
                     }
                     clipBank[species][name] = clip;
+                } else if (token == "frames") {
+                    // Optional per-clip pose-frame list (batch-3 grammar; the
+                    // DangoMushi rows carry it since #897).
+                    std::string list;
+                    if (!(bank >> list)) break;
                 } else {
                     break;
                 }

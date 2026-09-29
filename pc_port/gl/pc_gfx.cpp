@@ -8449,8 +8449,11 @@ static void mesh_arena_reset() {
     }
 }
 
+static std::vector<std::pair<uintptr_t, uintptr_t>> sDynamicVertexRanges;
+
 void pc_gfx_invalidate_resident_meshes(void) {
     if (!sResidentMeshes.empty()) mesh_arena_reset();
+    sDynamicVertexRanges.clear(); // heap reset: the blend shapes die with it
 }
 
 void pc_gfx_invalidate_cpu_range(const void* addr, size_t bytes) {
@@ -8463,6 +8466,29 @@ void pc_gfx_invalidate_cpu_range(const void* addr, size_t bytes) {
         else ++it;
     }
     // Arena space of dropped meshes is only reclaimed by a full reset.
+}
+
+// CPU-rewritten vertex storage (P2 pose blending rewrites a private shape's
+// vertex/normal arrays every frame). A mesh reading any of these ranges is
+// never made resident: caching it would freeze the first blended pose, and
+// rebuilding it every frame would exhaust the arena. Cleared with the arena.
+
+void pc_gfx_mark_dynamic_vertex_range(const void* addr, size_t bytes) {
+    if (!addr || bytes == 0) return;
+    const uintptr_t lo = uintptr_t(addr), hi = lo + bytes;
+    for (const auto& r : sDynamicVertexRanges)
+        if (r.first == lo && r.second == hi) {
+            pc_gfx_invalidate_cpu_range(addr, bytes);
+            return;
+        }
+    sDynamicVertexRanges.emplace_back(lo, hi);
+    pc_gfx_invalidate_cpu_range(addr, bytes);
+}
+
+static bool mesh_reads_dynamic_range(uintptr_t lo, uintptr_t hi) {
+    for (const auto& r : sDynamicVertexRanges)
+        if (r.first < hi && lo < r.second) return true;
+    return false;
 }
 
 // Copies the built vertices into the arena and registers the mesh. Returns
@@ -8970,6 +8996,8 @@ static void pc_gfx_call_display_list_impl(const void* list, u32 nbytes) {
         }
     }
     flushPendingStrip();
+    if (building && !sMeshBuild.empty() && mesh_reads_dynamic_range(mesh.lo, mesh.hi))
+        building = false;
     if (building && !sMeshBuild.empty()) {
         mesh.paletteSlots = meshMaxSlot + 1;
         const double uploadT0 = submit_clock_ms();
