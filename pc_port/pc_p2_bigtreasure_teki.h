@@ -17,6 +17,9 @@ class Matrix4f;
 //   p2_bigtreasure_events.txt (P2_RETAIL_EVENTS_1, 29 clips)
 //   p2-bigtreasure-bank.txt   (P2_BIGTREASURE_BANK_1: pose frames, otakara_*
 //                              joint matrices per pose, leg layout)
+//   p2-bigtreasure-coll.txt   (verbatim bigtreasure/enemycoll.txt: the Titan's
+//                              own CollPart tree, replacing the host's while
+//                              bound; late spawns bind on their first tick)
 //   assets/dataDir/courses/pikmin2room/bigtreasure_<clip>_<ii>.mod and
 //   bigtreasure_pellet_<weapon>.mod
 // All emissions are P2_BIGTREASURE_* markers keyed on the generator token.
@@ -26,10 +29,12 @@ void pc_p2_bigtreasure_teki_forget(BTeki*);
 void pc_p2_bigtreasure_teki_tick(BTeki*);
 bool pc_p2_bigtreasure_teki_is_bound(const BTeki*);
 // Per-hit ingress from BTeki::interact (InteractAttack, before the host
-// strategy sees it): records the
-// attacker and damage so the core can attribute the hit to the Titan part on
-// the attacker's side. No-op for unbound actors.
-void pc_p2_bigtreasure_attack(BTeki* teki, Creature* attacker, float damage);
+// strategy sees it): records the attacker, damage and the InteractAttack
+// CollPart (the part a Pikmin is stuck to; nullptr for a ground swing). The
+// bound Titan wears its own retail collision tree, so the part decides the
+// target exactly as BigTreasure::damageCallBack does. No-op when unbound.
+class CollPart;
+void pc_p2_bigtreasure_attack(BTeki* teki, Creature* attacker, float damage, CollPart* part);
 // Blind the suppressed host and give it the source body life (fp00).
 float pc_p2_bigtreasure_teki_param_f(const BTeki* teki, int idx, float fallback);
 bool pc_p2_bigtreasure_teki_suppress_ai(const BTeki* teki);

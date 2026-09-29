@@ -7,6 +7,7 @@
 #include "pc_p2_species.h"
 #include "pc_p2_animation.h"
 #include "pc_bbft.h"
+#include "Collision.h"
 #include "Generator.h"
 #include "GlobalGameOptions.h"
 #include "Graphics.h"
@@ -26,8 +27,11 @@
 #include <cstdio>
 #include <fstream>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
+
+extern Matrix4f invCamMat; // collInfo.cpp: camera inverse used by CollPart::getMatrix
 
 namespace {
 using namespace p2btown;
@@ -48,9 +52,24 @@ struct DroppedWeapon {
     bool resting = false;
 };
 
+// Own collision (#246 fix stage): the retail enemycoll.txt tree as real P1
+// CollParts on the Titan, replacing the Swallow host's CollInfo while bound.
+struct OwnColl {
+    CollInfo* host = nullptr;          // the host's CollInfo, restored on forget
+    CollInfo* own = nullptr;           // never freed (see restoreHostColl)
+    std::vector<ObjCollInfo*> nodes;   // sColl order
+    std::vector<CollPart*> parts;      // sColl order (nullptr if not built)
+    bool unarmedCodes = false;         // tam1/tam2 switched to 'st__'
+};
+
 struct Binding {
     unsigned generator = 0;
     Fsm fsm;
+    OwnColl coll;
+    bool anchorValid = false;  // hardConstraintOn: the host must not be pushed
+    Vector3f anchor;
+    bool moving = false;
+    int recvStim = 0, recvAccepted = 0, recvNaviFallback = 0;
     std::vector<Hit> pending;   // hits recorded by interactDefault since the last tick
     float debt = 0.0f;         // 30 Hz source clock debt
     float lastHealth = 0.0f;
@@ -75,6 +94,28 @@ std::vector<Shape*> sPoses[AnimCount];
 Shape* sPellet[P2BTWEAPON_Count] = {};
 bool sPosesLoaded = false;
 std::map<BTeki*, int> sDrawLogged;
+std::vector<CollNode> sColl;          // retail enemycoll.txt (pre-order)
+bool sSetupDone = false;              // late spawns bind lazily after setup
+std::set<BTeki*> sConsidered;         // actors already checked for a lazy bind
+// Host CollInfo per actor that currently wears an own CollInfo. Survives
+// reset() so a pooled actor always gets its host tree back on forget.
+std::map<BTeki*, CollInfo*> sHostColl;
+
+u32 fourcc(const std::string& id) {
+    u32 v = 0;
+    for (int i = 0; i < 4; ++i) v = (v << 8) | u32(static_cast<unsigned char>(i < int(id.size()) ? id[i] : '_'));
+    return v;
+}
+
+int partOf(const Binding& b, const CollPart* part) {
+    if (!part) return PartNone;
+    for (std::size_t i = 0; i < b.coll.parts.size(); ++i)
+        if (b.coll.parts[i] == part) {
+            const int w = weaponForPartId(sColl[i].id);
+            return w >= 0 ? w : PartOther;
+        }
+    return PartOther;
+}
 
 Binding* find(const BTeki* t) {
     auto i = s.find(const_cast<BTeki*>(t));
@@ -165,6 +206,19 @@ bool loadInputs(bool bridge) {
             return !pc_p2_setup_skip(bridge, "BigTreasure", "events_invalid");
         }
     }
+    {
+        std::ifstream in("p2-bigtreasure-coll.txt");
+        std::string error;
+        if (!in) {
+            std::printf("P2_BIGTREASURE_COLL_MISSING\n");
+            return !pc_p2_setup_skip(bridge, "BigTreasure", "coll_missing");
+        }
+        if (!parseCollTree(in, sColl, error)) {
+            std::printf("P2_BIGTREASURE_COLL_INVALID reason=%s\n", error.c_str());
+            return !pc_p2_setup_skip(bridge, "BigTreasure", "coll_invalid");
+        }
+        std::printf("P2_BIGTREASURE_COLL nodes=%zu source=enemycoll.txt\n", sColl.size());
+    }
     sBank = defaultBank();
     {
         std::ifstream in("p2-bigtreasure-bank.txt");
@@ -215,7 +269,7 @@ struct Snapshot {
     std::vector<Candidate> c;
     std::vector<Creature*> who;
 };
-void buildSnapshot(BTeki* self, Snapshot& snap) {
+void buildSnapshot(BTeki* self, const Binding& b, Snapshot& snap) {
     snap.c.clear();
     snap.who.clear();
     auto add = [&](Creature* cr, Candidate cand) {
@@ -242,6 +296,7 @@ void buildSnapshot(BTeki* self, Snapshot& snap) {
             Creature* stick = p->getStickObject();
             cand.stuckToSelf = stick == self;
             cand.stuckElsewhere = stick && stick != self;
+            cand.stuckPart = stick == self ? partOf(b, p->getStickPart()) : PartNone;
             cand.blue = p->mColor == Blue;
             cand.buried = p->isBuried() || p->isStickToMouth();
             add(p, cand);
@@ -306,8 +361,11 @@ bool stimulateElement(BTeki* t, Creature* c, const ElementHit& eh) {
     }
     case P2BigTreasureReceiverStimulus::None: return false;
     }
-    if (!accepted && eh.navi && hit.stimulus != P2BigTreasureReceiverStimulus::Gas) {
-        c->stimulate(InteractAttack(t, nullptr, 0.0f, false));
+    if (!accepted && eh.navi) {
+        // Every element (gas included): flick with *_NAVI_FLICK_CHANCE, else a
+        // 0-damage attack (BigTreasureAttack.cpp fire/gas/bubble/elec loops).
+        if (eh.naviFlick) c->stimulate(InteractFlick(t, 0.0f, 0.0f, FLICK_BACKWARDS_ANGLE));
+        else c->stimulate(InteractAttack(t, nullptr, 0.0f, false));
     }
     return accepted;
 }
@@ -360,14 +418,28 @@ void applyOutput(BTeki* t, Binding& b, const Snapshot& snap, const TickOutput& o
         std::printf("P2_BIGTREASURE_ATTACK_EMIT generator=%u source_id=73 weapon=%s nodes=%d\n", b.generator,
                     weaponName(b.fsm.elements().activeWeapon()), o.attackNodes);
     }
-    if (o.attackFinished) std::printf("P2_BIGTREASURE_ATTACK_FINISH generator=%u source_id=73\n", b.generator);
+    if (o.attackFinished) {
+        std::printf("P2_BIGTREASURE_ATTACK_FINISH generator=%u source_id=73 stimulated=%d accepted=%d navi_fallback=%d\n",
+                    b.generator, b.recvStim, b.recvAccepted, b.recvNaviFallback);
+        b.recvStim = b.recvAccepted = b.recvNaviFallback = 0;
+    }
     for (const ElementHit& eh : o.elementHits) {
         Creature* c = creatureFor(snap, eh.id);
         if (!c || !c->isAlive()) continue;
         const bool accepted = stimulateElement(t, c, eh);
-        std::printf("P2_BIGTREASURE_RECV generator=%u source_id=73 weapon=%s target=%s color=%d accepted=%d\n",
+        ++b.recvStim;
+        if (accepted) ++b.recvAccepted;
+        if (!accepted && eh.navi) ++b.recvNaviFallback;
+        // Source re-stimulates every update; log the first contact and the
+        // first acceptance per target per attack.
+        int& seen = b.recvCount[c];
+        const int bit = accepted ? 2 : 1;
+        if (seen & bit) continue;
+        seen |= bit;
+        std::printf("P2_BIGTREASURE_RECV generator=%u source_id=73 weapon=%s target=%s color=%d accepted=%d%s\n",
                     b.generator, p2_bigtreasure_receiver_stimulus_name(eh.hit.stimulus), eh.navi ? "navi" : "piki",
-                    eh.navi ? -1 : int(static_cast<Piki*>(c)->mColor), accepted ? 1 : 0);
+                    eh.navi ? -1 : int(static_cast<Piki*>(c)->mColor), accepted ? 1 : 0,
+                    !accepted && eh.navi ? (eh.naviFlick ? " fallback=flick" : " fallback=attack0") : "");
     }
     for (const Drop& d : o.drops) {
         if (d.weapon >= 0) {
@@ -393,6 +465,95 @@ void applyOutput(BTeki* t, Binding& b, const Snapshot& snap, const TickOutput& o
     }
 }
 
+// setupBigTreasureCollision (BigTreasure.cpp:671-700): a dropped weapon's
+// part turns '_t__' with radius 0 (radius applied in updateColl); tam1/tam2
+// are '_t__' while any weapon is captured and 'st__' once none is.
+void setupCollisionCodes(Binding& b) {
+    if (!b.coll.own) return;
+    const bool unarmed = b.fsm.ownership().weaponCount() == 0;
+    for (std::size_t i = 0; i < b.coll.nodes.size(); ++i) {
+        ObjCollInfo* n = b.coll.nodes[i];
+        const std::string& id = sColl[i].id;
+        const int w = weaponForPartId(id);
+        if (w >= 0 && !b.fsm.ownership().isWeaponAttached(w)) n->mCode.setID('_t__');
+        if (id == "tam1" || id == "tam2") n->mCode.setID(unarmed ? 'st__' : '_t__');
+    }
+    if (unarmed && !b.coll.unarmedCodes) {
+        b.coll.unarmedCodes = true;
+        std::printf("P2_BIGTREASURE_COLL_UNARMED generator=%u source_id=73 tam=st__\n", b.generator);
+    }
+}
+
+void updateColl(Binding& b) {
+    if (!b.coll.own) return;
+    for (std::size_t i = 0; i < b.coll.parts.size(); ++i) {
+        CollPart* part = b.coll.parts[i];
+        if (!part) continue;
+        const CollNode& n = sColl[i];
+        const Vec3 c = b.fsm.collCentre(n);
+        part->mCentre.set(c.x, c.y, c.z);
+        const int w = weaponForPartId(n.id);
+        part->mRadius = w >= 0 && !b.fsm.ownership().isWeaponAttached(w) ? 0.0f : n.radius;
+    }
+}
+
+bool buildColl(BTeki* t, Binding& b) {
+    if (sColl.empty() || !t->mCollInfo) return false;
+    OwnColl& oc = b.coll;
+    oc.nodes.clear();
+    oc.parts.clear();
+    for (const CollNode& n : sColl) {
+        auto* node = new ObjCollInfo();
+        node->mId.setID(fourcc(n.id));
+        node->mCode.setID(fourcc(n.code));
+        node->mRadius = n.radius;
+        node->mCentrePosition.set(n.offset.x, n.offset.y, n.offset.z);
+        node->mJointIndex = n.joint;
+        oc.nodes.push_back(node);
+    }
+    for (std::size_t i = 0; i < sColl.size(); ++i)
+        if (sColl[i].parent >= 0) oc.nodes[std::size_t(sColl[i].parent)]->add(oc.nodes[i]);
+    const int capacity = int(sColl.size()) + 1 > 32 ? int(sColl.size()) + 1 : 32; // >= any host tree (22)
+    oc.own = new CollInfo(capacity);
+    oc.own->initInfoTree(oc.nodes[0]);
+    int tubes = 0;
+    for (std::size_t i = 0; i < sColl.size(); ++i) {
+        CollPart* part = oc.own->getSphere(fourcc(sColl[i].id));
+        if (part) {
+            part->mIsUpdateActive = false; // no parent shape: updateColl owns centre/radius
+            part->mJointMatrix = Matrix4f::ident;
+        }
+        oc.parts.push_back(part);
+    }
+    // setupCollision: makeTubeTree on the four leg roots (child chains).
+    for (const char* leg : {"lft1", "lht1", "rft1", "rht1"}) {
+        int depth = 0;
+        for (CollPart* p = oc.own->getSphere(fourcc(leg)); p && p->getChild(); p = p->getChild()) ++depth;
+        if (depth > 0) {
+            oc.own->makeTubesChild(fourcc(leg), depth);
+            ++tubes;
+        }
+    }
+    oc.host = t->mCollInfo;
+    t->mCollInfo = oc.own;
+    sHostColl[t] = oc.host;
+    setupCollisionCodes(b);
+    updateColl(b);
+    std::printf("P2_BIGTREASURE_COLL_BIND generator=%u source_id=73 parts=%zu tubes=%d host_parts_replaced=1\n",
+                b.generator, oc.parts.size(), tubes);
+    return true;
+}
+
+void restoreHostColl(BTeki* t) {
+    // The own CollInfo is intentionally never freed: stuck Pikmin may still
+    // hold CollPart pointers into it, and a pooled actor re-inits whatever
+    // mCollInfo it holds.
+    auto i = sHostColl.find(t);
+    if (i == sHostColl.end()) return;
+    if (i->second) t->mCollInfo = i->second;
+    sHostColl.erase(i);
+}
+
 void stepDropped(Binding& b, float dt) {
     for (DroppedWeapon& d : b.dropped) {
         if (d.resting) continue;
@@ -410,6 +571,21 @@ void stepDropped(Binding& b, float dt) {
 
 // Live tick. Returns true once the host teardown ran.
 bool ownTick(BTeki* t, Binding& b, float dt) {
+    // hardConstraintOn: the source Titan is never pushed. Weight 0 already
+    // stops P1 collision impulses (getiMass); a standing Titan is also held
+    // on its anchor against anything else that moves the host.
+    if (!b.moving) {
+        if (!b.anchorValid) {
+            b.anchor = t->mSRT.t;
+            b.anchorValid = true;
+        } else {
+            t->mSRT.t.x = b.anchor.x;
+            t->mSRT.t.z = b.anchor.z;
+            t->mVolatileVelocity.x = t->mVolatileVelocity.z = 0.0f;
+        }
+    } else {
+        b.anchorValid = false;
+    }
     b.debt += dt;
     int ticks = int(b.debt / kSourceDelta);
     if (ticks > 4) ticks = 4;
@@ -421,7 +597,7 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
     t->mStoredDamage = 0.0f;
     if (ticks <= 0) return false;
     Snapshot snap;
-    buildSnapshot(t, snap);
+    buildSnapshot(t, b, snap);
     bool kill = false;
     for (int k = 0; k < ticks && !kill; ++k) {
         TickInput in;
@@ -452,11 +628,14 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         // Movement/facing are the gait's; the P1 host integrates them.
         t->setDirection(o.faceDir);
         const Vector3f drive(o.velocity.x, 0.0f, o.velocity.z);
+        b.moving = drive.x != 0.0f || drive.z != 0.0f;
         t->inputDrive(drive);
         t->mVelocity.x = drive.x;
         t->mVelocity.z = drive.z;
         kill = o.killRequest;
+        if (!o.drops.empty()) setupCollisionCodes(b);
     }
+    updateColl(b);
     stepDropped(b, dt);
     if (t->mHealth > 0.0f) t->updateLifeGauge();
     b.logTimer += dt;
@@ -464,16 +643,21 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         b.logTimer = 0.0f;
         const Vector3f p = t->getPosition();
         const Fsm& f = b.fsm;
-        int stuck = 0;
-        for (const Candidate& c : snap.c) stuck += c.stuckToSelf && c.alive ? 1 : 0;
+        int stuck = 0, onWeapon = 0, onBody = 0;
+        for (const Candidate& c : snap.c) {
+            if (!(c.stuckToSelf && c.alive)) continue;
+            ++stuck;
+            if (c.stuckPart >= 0) ++onWeapon;
+            else if (c.stuckPart == PartOther) ++onBody;
+        }
         std::printf("P2_BIGTREASURE_POS generator=%u source_id=73 state=%s anim=%s frame=%.0f x=%.1f z=%.1f face=%.2f "
                     "target=%.1f,%.1f home=%.1f,%.1f health=%.1f weapons=%d hp=%.0f/%.0f/%.0f/%.0f stuck=%d steps=%d "
-                    "ik=%d flick=%.0f limit=%.2f ignored=%d\n",
+                    "stuck_weapon=%d stuck_body=%d ik=%d flick=%.0f limit=%.2f ignored=%d\n",
                     b.generator, stateName(f.state()), animClipName(f.animator().anim()) ? animClipName(f.animator().anim()) : "-",
                     f.animator().frame(), p.x, p.z, t->getDirection(), f.targetPosition().x, f.targetPosition().z,
                     f.home().x, f.home().z, t->mHealth, f.ownership().weaponCount(), f.ownership().weaponHealth(0),
                     f.ownership().weaponHealth(1), f.ownership().weaponHealth(2), f.ownership().weaponHealth(3), stuck,
-                    f.gait().steps(), f.gait().active() ? 1 : 0, f.flickTimer(), f.attackLimitTimer(), b.ignored);
+                    f.gait().steps(), onWeapon, onBody, f.gait().active() ? 1 : 0, f.flickTimer(), f.attackLimitTimer(), b.ignored);
     }
     std::fflush(stdout);
     if (kill && !b.escaped) {
@@ -496,6 +680,8 @@ void pc_p2_bigtreasure_teki_reset() {
     const int before = int(s.size());
     s.clear();
     sDrawLogged.clear();
+    sConsidered.clear();
+    sSetupDone = false;
     for (auto& v : sPoses) v.clear();
     for (Shape*& p : sPellet) p = nullptr;
     sPosesLoaded = false;
@@ -508,6 +694,8 @@ void pc_p2_bigtreasure_teki_reset() {
 
 void pc_p2_bigtreasure_teki_forget(BTeki* t) {
     if (!t) return;
+    restoreHostColl(t);
+    sConsidered.erase(t);
     if (s.erase(t) > 0) {
         std::printf("P2_BIGTREASURE_TEKI_FORGET remaining=%d\n", int(s.size()));
         std::fflush(stdout);
@@ -517,12 +705,11 @@ void pc_p2_bigtreasure_teki_forget(BTeki* t) {
 
 bool pc_p2_bigtreasure_teki_is_bound(const BTeki* t) { return t && find(t) != nullptr; }
 
-void pc_p2_bigtreasure_attack(BTeki* teki, Creature* attacker, float damage) {
+void pc_p2_bigtreasure_attack(BTeki* teki, Creature* attacker, float damage, CollPart* part) {
     Binding* b = find(teki);
     if (!b || b->began || !attacker) return;
-    const Vector3f p = attacker->getPosition();
     Hit h;
-    h.attacker = {p.x, p.y, p.z};
+    h.part = partOf(*b, part);
     h.damage = damage;
     h.fromPiki = attacker->isPiki();
     if (b->pending.size() < 512) b->pending.push_back(h);
@@ -534,6 +721,8 @@ float pc_p2_bigtreasure_teki_param_f(const BTeki* teki, int idx, float fallback)
     switch (idx) {
     case TPF_Life:
         return b->fsm.params().health;
+    case TPF_Weight:
+        return 0.0f; // hardConstraintOn: getiMass() == 0, never pushed
     case TPF_VisibleRange:
     case TPF_VisibleAngle:
     case TPF_AttackableRange:
@@ -563,10 +752,49 @@ bool pc_p2_bigtreasure_teki_suppress_ai(const BTeki* teki) {
     return b && !b->began;
 }
 
+namespace {
+bool bindActor(BTeki* t, const char* when) {
+    const unsigned gen = pc_p2_campaign_token(t);
+    Binding& b = s[t];
+    b = Binding{};
+    b.generator = gen;
+    const Vector3f pos = t->getPosition();
+    b.fsm.init(sParams, sBank, sAnimator, {pos.x, pos.y, pos.z}, t->getDirection(), (gen * 2654435761u) | 1u);
+    t->mHealth = sParams.health;
+    b.lastHealth = t->mHealth;
+    if (!buildColl(t, b)) {
+        std::printf("P2_BIGTREASURE_COLL_BIND_FAILED generator=%u source_id=73\n", gen);
+        s.erase(t);
+        return false;
+    }
+    const int corpse = t->getParameterI(TPI_CorpseType);
+    std::printf("P2_BIGTREASURE_BIND generator=%u source_id=73 host_type=%d health=%.1f weapons=%d louie=1 "
+                "state=%s draw=%s corpse_type=%d x=%.1f z=%.1f when=%s\n",
+                gen, int(t->mTekiType), t->mHealth, b.fsm.ownership().weaponCount(), stateName(b.fsm.state()),
+                sPosesLoaded ? "p2_model" : "host", corpse, pos.x, pos.z, when);
+    // Ordinary-delivery bridge (lane 06): the corpse substitute the owner
+    // must approve -- the host's LeaveCorpse pellet grants onion:p2:73.
+    pc_randomizer_p2_bind_source(static_cast<PelletView*>(t), 73u, gen);
+    std::printf("P2_BIGTREASURE_DELIVERY_BIND generator=%u source_id=73 reward=host_corpse_substitute\n", gen);
+    std::fflush(stdout);
+    return true;
+}
+
+bool prepare(bool bridge) {
+    if (sReady) return true;
+    if (!loadInputs(bridge)) return false;
+    if (!sTrace) sTrace = new P2BigTreasureMapTrace;
+    sTrace->reset(mapMgr);
+    sReady = true;
+    return true;
+}
+} // namespace
+
 void pc_p2_bigtreasure_teki_setup() {
     pc_p2_bigtreasure_teki_reset();
     const bool bridge = pc_randomizer_p2_bridge();
     if (!bridge || !tekiMgr) return;
+    sSetupDone = true;
     bool any = false;
     {
         Iterator it(tekiMgr);
@@ -576,38 +804,28 @@ void pc_p2_bigtreasure_teki_setup() {
         }
     }
     if (!any) return;
-    if (!loadInputs(bridge)) return;
-    if (!sTrace) sTrace = new P2BigTreasureMapTrace;
-    sTrace->reset(mapMgr);
-    sReady = true;
+    if (!prepare(bridge)) return;
     Iterator it(tekiMgr);
     CI_LOOP(it) {
         auto* t = static_cast<Teki*>(*it);
         if (!t || !t->mGenerator || pc_p2_campaign_source(t) != 73) continue;
-        const unsigned gen = pc_p2_campaign_token(t);
-        Binding& b = s[static_cast<BTeki*>(t)];
-        b = Binding{};
-        b.generator = gen;
-        const Vector3f pos = t->getPosition();
-        b.fsm.init(sParams, sBank, sAnimator, {pos.x, pos.y, pos.z}, t->getDirection(), (gen * 2654435761u) | 1u);
-        t->mHealth = sParams.health;
-        b.lastHealth = t->mHealth;
-        const int corpse = t->getParameterI(TPI_CorpseType);
-        std::printf("P2_BIGTREASURE_BIND generator=%u source_id=73 host_type=%d health=%.1f weapons=%d louie=1 "
-                    "state=%s draw=%s corpse_type=%d x=%.1f z=%.1f\n",
-                    gen, int(t->mTekiType), t->mHealth, b.fsm.ownership().weaponCount(), stateName(b.fsm.state()),
-                    sPosesLoaded ? "p2_model" : "host", corpse, pos.x, pos.z);
-        // Ordinary-delivery bridge (lane 06): the corpse substitute the owner
-        // must approve -- the host's LeaveCorpse pellet grants onion:p2:73.
-        pc_randomizer_p2_bind_source(static_cast<PelletView*>(t), 73u, gen);
-        std::printf("P2_BIGTREASURE_DELIVERY_BIND generator=%u source_id=73 reward=host_corpse_substitute\n", gen);
-        std::fflush(stdout);
+        sConsidered.insert(t);
+        bindActor(t, "setup");
     }
 }
 
 void pc_p2_bigtreasure_teki_tick(BTeki* t) {
     auto i = s.find(t);
-    if (i == s.end()) return;
+    if (i == s.end()) {
+        // Late spawn (respawn / later generator): bind on its first live tick
+        // after setup. Each actor lifetime is considered once.
+        if (!sSetupDone || !t || t->mTekiType != TEKI_Swallow || t->mDeadState != 0 || !t->isAlive()) return;
+        if (!sConsidered.insert(t).second) return;
+        if (!t->mGenerator || pc_p2_campaign_source(t) != 73) return;
+        if (!prepare(pc_randomizer_p2_bridge())) return;
+        bindActor(t, "late_spawn");
+        return;
+    }
     Binding& b = i->second;
     const float dt = gsys ? gsys->getFrameTime() : 0.0f;
     if (b.began) {
@@ -647,6 +865,16 @@ bool pc_p2_bigtreasure_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, 
     auto i = s.find(t);
     if (i == s.end() || !sPosesLoaded || !gfx.mCamera) return false;
     Binding& b = i->second;
+    if (b.coll.own && gfx.mCamera) {
+        // CollPart::getMatrix() = invCamMat * mJointMatrix with the centre as
+        // translation: give our parts the Titan yaw in the same camera frame.
+        invCamMat = gfx.mCamera->mInverseLookAtMtx;
+        Matrix4f yaw, camYaw;
+        yaw.makeSRT(Vector3f(1.0f, 1.0f, 1.0f), Vector3f(0.0f, t->getDirection(), 0.0f), Vector3f(0.0f, 0.0f, 0.0f));
+        gfx.mCamera->mLookAtMtx.multiplyTo(yaw, camYaw);
+        for (CollPart* part : b.coll.parts)
+            if (part) part->mJointMatrix = camYaw;
+    }
     const bool dead = corpse || b.began || t->mDeadState != 0;
     int anim = b.fsm.animator().anim();
     float frame = b.fsm.animator().frame();

@@ -292,54 +292,106 @@ void testDamageRouting() {
     wakeAndLand(s);
     // Land quarters Pikmin damage (damageCallBack BIGTREASURE_Land).
     const float elec0 = s.fsm.ownership().weaponHealth(P2BTWEAPON_Elec);
-    Hit front{{0, 0, 120}, 100.0f, true};
-    s.step({front});
+    s.step({Hit{P2BTWEAPON_Elec, 100.0f, true}});
     CHECK(std::fabs(s.fsm.ownership().weaponHealth(P2BTWEAPON_Elec) - (elec0 - 25.0f)) < 0.01f, "dmg/land_quarter");
     s.runUntil(State::ItemWalk, 400);
-    // Sides map to the otakara joints: front elec, left fire, back gas, right water.
-    const float face = s.fsm.gait().faceDir();
-    auto around = [&](float a) { return Vec3{s.pos.x + 120.0f * std::sin(face + a), 0.0f, s.pos.z + 120.0f * std::cos(face + a)}; };
+    // Each weapon's own CollPart damages exactly that weapon.
     const float w0[4] = {s.fsm.ownership().weaponHealth(0), s.fsm.ownership().weaponHealth(1),
                          s.fsm.ownership().weaponHealth(2), s.fsm.ownership().weaponHealth(3)};
-    TickOutput o = s.step({{around(0.0f), 10.0f, true}, {around(kPi / 2), 20.0f, true},
-                           {around(kPi), 30.0f, true}, {around(-kPi / 2), 40.0f, true}});
+    TickOutput o = s.step({Hit{P2BTWEAPON_Elec, 10.0f, true}, Hit{P2BTWEAPON_Fire, 20.0f, true},
+                           Hit{P2BTWEAPON_Gas, 30.0f, true}, Hit{P2BTWEAPON_Water, 40.0f, true}});
     CHECK(std::fabs(w0[0] - s.fsm.ownership().weaponHealth(0) - 10.0f) < 0.01f
               && std::fabs(w0[1] - s.fsm.ownership().weaponHealth(1) - 20.0f) < 0.01f
               && std::fabs(w0[2] - s.fsm.ownership().weaponHealth(2) - 30.0f) < 0.01f
               && std::fabs(w0[3] - s.fsm.ownership().weaponHealth(3) - 40.0f) < 0.01f,
-          "dmg/sides_map_to_weapons");
+          "dmg/weapon_parts_map_to_weapons");
     CHECK(o.bodyDamage == 0.0f && s.health == 5000.0f, "dmg/no_body_damage_while_armed");
-    // Knock off the elec weapon; the drop pops (0,100,0) and flicks its stickers.
-    s.cand.push_back({2, around(0.0f), true, false, true, true});
-    s.step({{around(0.0f), 7000.0f, true}});
-    TickOutput d;
-    bool dropped = false;
-    for (int i = 0; i < 3 && !dropped; ++i) {
-        d = s.step();
-        for (const auto& drop : s.log.empty() ? d.drops : d.drops) (void)drop;
-        if (!d.drops.empty()) dropped = true;
+    // #246 fix: a hit with no CollPart (P1 ground swing at the legs/body) or on
+    // a non-weapon Titan part does nothing while armed -- the retired
+    // nearest-joint attribution turned these into weapon damage.
+    {
+        const float before[4] = {s.fsm.ownership().weaponHealth(0), s.fsm.ownership().weaponHealth(1),
+                                 s.fsm.ownership().weaponHealth(2), s.fsm.ownership().weaponHealth(3)};
+        const float flick0 = s.fsm.flickTimer();
+        TickOutput n = s.step({Hit{PartNone, 500.0f, true}, Hit{PartOther, 500.0f, true}});
+        bool same = true;
+        for (int w = 0; w < 4; ++w) same = same && s.fsm.ownership().weaponHealth(w) == before[w];
+        CHECK(same && n.bodyDamage == 0.0f && s.fsm.flickTimer() == flick0, "dmg/no_part_or_body_part_does_nothing_while_armed");
+        CHECK(n.ignoredHits == 2, "dmg/unmatched_hits_counted_ignored");
     }
-    // (the drop fires on the damage tick's updateTreasure)
+    // Captains' punches are not Pikmin (source: creature->isPiki()).
+    {
+        const float before = s.fsm.ownership().weaponHealth(P2BTWEAPON_Elec);
+        s.step({Hit{P2BTWEAPON_Elec, 50.0f, false}});
+        CHECK(s.fsm.ownership().weaponHealth(P2BTWEAPON_Elec) == before, "dmg/non_piki_ignored");
+    }
+    // Knock off the elec weapon; hits on its (now cleared) part are "other".
+    s.step({Hit{P2BTWEAPON_Elec, 7000.0f, true}});
     CHECK(!s.fsm.ownership().isWeaponAttached(P2BTWEAPON_Elec), "dmg/weapon_knocked_off_at_zero");
-    // Hits on the dropped side now land on the (unexposed) body: ignored.
-    TickOutput ign = s.step({{around(0.0f), 500.0f, true}});
-    CHECK(ign.ignoredHits == 1 && ign.bodyDamage == 0.0f, "dmg/dropped_side_is_body_ignored_while_armed");
+    TickOutput ign = s.step({Hit{P2BTWEAPON_Elec, 500.0f, true}});
+    CHECK(ign.ignoredHits == 1 && ign.bodyDamage == 0.0f, "dmg/dropped_part_is_body_ignored_while_armed");
 }
 
 void testDropEventAndPartFlick() {
     Sim s;
     wakeAndLand(s);
     s.runUntil(State::ItemWalk, 400);
-    const float face = s.fsm.gait().faceDir();
-    const Vec3 front{s.pos.x + 120.0f * std::sin(face), 0.0f, s.pos.z + 120.0f * std::cos(face)};
-    const Vec3 back{s.pos.x - 120.0f * std::sin(face), 0.0f, s.pos.z - 120.0f * std::cos(face)};
-    s.cand.push_back({2, front, true, false, true, true});
-    s.cand.push_back({3, back, true, false, true, true});
-    TickOutput o = s.step({{front, 6000.0f, true}});
+    const Vec3 near{s.pos.x + 50.0f, 0.0f, s.pos.z};
+    Candidate onElec{2, near, true, false, true, true};
+    onElec.stuckPart = P2BTWEAPON_Elec;
+    Candidate onGas{3, near, true, false, true, true}; // same position, other part
+    onGas.stuckPart = P2BTWEAPON_Gas;
+    s.cand.push_back(onElec);
+    s.cand.push_back(onGas);
+    TickOutput o = s.step({Hit{P2BTWEAPON_Elec, 6000.0f, true}});
     CHECK(o.drops.size() == 1 && o.drops[0].weapon == P2BTWEAPON_Elec && o.drops[0].velocity.y == 100.0f,
           "drop/elec_pops_up_100");
+    // flickStickCollPartPikmin: by the part stuck to, not by position.
     CHECK(o.partFlick.size() == 1 && o.partFlick[0] == 2, "drop/flicks_only_that_parts_stickers");
     CHECK(o.drops.size() == 1 && o.drops[0].position.y > 100.0f, "drop/at_the_otakara_joint");
+}
+
+void testCollTree() {
+    // Retail bigtreasure/enemycoll.txt layout (research import, GPVE01).
+    const char* tree =
+        "10 # child count\n250.0 # radius\n{none}\n{____}\n0 -110 0\n0\n0\n# child\n{\n"
+        "0\n30\n{tam1}\n{st__}\n0 -35 0\n0\n0\n"
+        "0\n25\n{elec}\n{st__}\n0 0 0\n19\n0\n"
+        "0\n25\n{fire}\n{st__}\n0 0 0\n21\n0\n"
+        "0\n25\n{gasi}\n{st__}\n0 0 0\n23\n0\n"
+        "0\n25\n{mizu}\n{st__}\n0 0 0\n26\n0\n"
+        "1\n5\n{lft1}\n{_t__}\n0 -20 0\n0\n0\n{\n1\n5\n{lft2}\n{_t__}\n92.5 -62.5 0\n13\n0\n{\n0\n5\n{lft5}\n{_t__}\n0 0 0\n15\n0\n}\n}\n"
+        "0\n5\n{lht1}\n{_t__}\n0 -20 0\n0\n0\n"
+        "0\n5\n{rft1}\n{_t__}\n0 -20 0\n0\n0\n"
+        "0\n5\n{rht1}\n{_t__}\n0 -20 0\n0\n0\n"
+        "0\n30\n{tam2}\n{st__}\n0 -55 0\n0\n0\n}\n";
+    std::istringstream in(tree);
+    std::vector<CollNode> nodes;
+    std::string error;
+    const bool ok = parseCollTree(in, nodes, error);
+    CHECK(ok && nodes.size() == 13, "coll/parses_retail_tree");
+    if (!ok || nodes.size() != 13) return;
+    CHECK(nodes[0].id == "none" && nodes[0].radius == 250.0f && nodes[0].parent == -1, "coll/root_bound");
+    CHECK(nodes[2].id == "elec" && nodes[2].joint == 19 && nodes[2].parent == 0 && nodes[2].radius == 25.0f,
+          "coll/weapon_part");
+    CHECK(nodes[7].id == "lft2" && nodes[7].parent == 6 && nodes[8].id == "lft5" && nodes[8].parent == 7,
+          "coll/leg_chain_parents");
+    CHECK(weaponForPartId("gasi") == P2BTWEAPON_Gas && weaponForPartId("mizu") == P2BTWEAPON_Water
+              && weaponForPartId("tam1") == -1, "coll/part_ids");
+    std::istringstream bad("1\n5\n{none}\n{____}\n0 0 0\n0\n0\n");
+    CHECK(!parseCollTree(bad, nodes, error), "coll/fails_closed");
+    // Part centres: weapons ride their joint; tam spheres hang under kosi.
+    Sim s;
+    const Vec3 elec = s.fsm.collCentre(CollNode{"elec", "st__", 25.0f, {0, 0, 0}, 19, 0, 0});
+    const Vec3 joint = s.fsm.jointWorld(JointElec);
+    CHECK(std::fabs(elec.x - joint.x) < 1e-3f && std::fabs(elec.y - joint.y) < 1e-3f && std::fabs(elec.z - joint.z) < 1e-3f,
+          "coll/weapon_centre_is_joint");
+    const Vec3 tam = s.fsm.collCentre(CollNode{"tam1", "st__", 30.0f, {0, -35, 0}, 0, 0, 0});
+    const Vec3 kosi = s.fsm.jointWorld(JointKosi);
+    CHECK(std::fabs(tam.y - (kosi.y - 35.0f)) < 1e-3f, "coll/tam_offset_in_kosi_frame");
+    const Vec3 foot = s.fsm.collCentre(CollNode{"lft5", "_t__", 5.0f, {0, 0, 0}, 15, 0, 0});
+    const Vec3& gf = s.fsm.gait().foot(3);
+    CHECK(std::fabs(foot.x - gf.x) < 1e-3f && std::fabs(foot.z - gf.z) < 1e-3f, "coll/leg_end_on_gait_foot");
 }
 
 // Knock off every weapon but `keep`.
@@ -348,8 +400,9 @@ void stripTo(Sim& s, int keep) {
     const float ang[4] = {0.0f, kPi / 2, kPi, -kPi / 2};
     for (int w = 0; w < 4; ++w) {
         if (w == keep) continue;
-        const Vec3 p{s.pos.x + 120.0f * std::sin(face + ang[w]), 0.0f, s.pos.z + 120.0f * std::cos(face + ang[w])};
-        s.step({{p, 6000.0f, true}});
+        (void)face;
+        (void)ang;
+        s.step({Hit{w, 6000.0f, true}});
     }
 }
 
@@ -406,7 +459,7 @@ void testStagedFireJoint() {
         Mat34 m;
         // column 0 = (0, -0.25, -1) (backward, slightly down), at 60 u height.
         m.m[0][0] = 0.0f; m.m[1][0] = -0.25f; m.m[2][0] = -1.0f;
-        m.m[0][3] = 0.0f; m.m[1][3] = 60.0f; m.m[2][3] = 0.0f;
+        m.m[0][3] = 0.0f; m.m[1][3] = 30.0f; m.m[2][3] = 0.0f; // retail attackf* fire_eff ~y29
         bank.clip[anim].poses[0].joint[JointFireEff] = m;
         bank.clip[anim].poses[0].have[JointFireEff] = true;
     }
@@ -438,6 +491,9 @@ void testStagedFireJoint() {
     }
     CHECK(started == P2BTWEAPON_Fire, "atk/staged_fire_started");
     CHECK(backHits >= 1 && frontHits == 0, "atk/fire_direction_from_eff_joint_column0");
+    // Source receivers have no per-attack handled set: a target inside the
+    // flame is stimulated on every update (the receiver state gates repeats).
+    CHECK(backHits >= 2, "atk/receivers_restimulated_each_update");
 }
 
 // All weapons gone: ItemWalk swaps to the dropitem clip, DropItem END goes
@@ -471,7 +527,7 @@ void testDeath() {
     // Body exposed: hits now damage health (x1 outside Land).
     int body = 0;
     for (int i = 0; i < 400 && s.health > 0.0f; ++i) {
-        TickOutput o = s.step({{{s.pos.x + 10, 0, s.pos.z}, 100.0f, true}});
+        TickOutput o = s.step({Hit{PartOther, 100.0f, true}});
         if (o.bodyHits) ++body;
     }
     CHECK(body >= 50 && s.health <= 0.0f, "death/body_damage_after_zero_weapons");
@@ -481,7 +537,7 @@ void testDeath() {
     // deathProcedure setAlive(false): hits after Dead do nothing.
     {
         const float before = s.health;
-        TickOutput o = s.step({{{s.pos.x + 10, 0, s.pos.z}, 100.0f, true}});
+        TickOutput o = s.step({Hit{PartOther, 100.0f, true}});
         CHECK(o.bodyDamage == 0.0f && o.deadHits == 1 && s.health == before, "death/no_damage_after_dead");
     }
     bool louie = false, kill = false;
@@ -503,8 +559,12 @@ void testFlickFromStuckPikmin() {
     s.runUntil(State::ItemWalk, 400);
     const float face = s.fsm.gait().faceDir();
     const Vec3 front{s.pos.x + 120.0f * std::sin(face), 0.0f, s.pos.z + 120.0f * std::cos(face)};
-    for (int k = 0; k < 3; ++k) s.cand.push_back({std::uint64_t(20 + k), front, true, false, true, true});
-    std::vector<Hit> hits(10, Hit{front, 1.0f, true});
+    for (int k = 0; k < 3; ++k) {
+        Candidate c{std::uint64_t(20 + k), front, true, false, true, true};
+        c.stuckPart = P2BTWEAPON_Elec;
+        s.cand.push_back(c);
+    }
+    std::vector<Hit> hits(10, Hit{P2BTWEAPON_Elec, 1.0f, true});
     s.step(hits);
     CHECK(s.fsm.flickTimer() >= 10.0f, "flick/timer_counts_weapon_hits");
     int pre = s.runUntil(State::PreAttack, 400);
@@ -544,6 +604,7 @@ int main() {
     testWakeLandWalk();
     testDamageRouting();
     testDropEventAndPartFlick();
+    testCollTree();
     testAttackLoopFireDirection();
     testStagedFireJoint();
     testUnarmedWalk();

@@ -508,7 +508,6 @@ void Fsm::init(const Params& params, const Bank& bank, const Animator& animator,
     mStateTimer = 0.0f;
     mNext = State::Null;
     resetAttackLimitTimer(); // onInit
-    mHandled.clear();
     // FSM start in Stay (onInit: mFsm->start(this, BIGTREASURE_Stay)).
     TickOutput scratch;
     mState = State::Stay;
@@ -540,14 +539,130 @@ Vec3 Fsm::jointWorld(int joint) const {
     return {mPos.x + c * x + s * z, mPos.y + y, mPos.z - s * x + c * z};
 }
 
-int Fsm::partForAttacker(const Vec3& attacker) const {
-    int best = -1;
-    float bestD = 0.0f;
-    for (int w = 0; w < P2BTWEAPON_Count; ++w) {
-        const float d = distXZ2(jointWorld(w), attacker);
-        if (best < 0 || d < bestD) { best = w; bestD = d; }
+Vec3 Fsm::jointPoint(int joint, const Vec3& local) const {
+    const Mat34& m = jointModel(joint);
+    const float x = m.m[0][0] * local.x + m.m[0][1] * local.y + m.m[0][2] * local.z + m.m[0][3];
+    const float y = m.m[1][0] * local.x + m.m[1][1] * local.y + m.m[1][2] * local.z + m.m[1][3];
+    const float z = m.m[2][0] * local.x + m.m[2][1] * local.y + m.m[2][2] * local.z + m.m[2][3];
+    const float s = std::sin(mFaceDir), c = std::cos(mFaceDir);
+    return {mPos.x + c * x + s * z, mPos.y + y, mPos.z - s * x + c * z};
+}
+
+Vec3 Fsm::collCentre(const CollNode& node) const {
+    const int weapon = weaponForPartId(node.id);
+    if (weapon >= 0) return jointPoint(weapon, node.offset);
+    // Leg chains: lft (lfoot, gait leg 3), lht (lhand, 1), rft (rfoot, 2),
+    // rht (rhand, 0). Link 1 is the hip (kosi frame, its retail offset);
+    // links 2..5 run on a polyline from the hip to the gait foot (no leg IK
+    // joint solve in P1; the feet are the ported IKSystemBase feet).
+    if (node.id.size() == 4 && node.id[3] >= '2' && node.id[3] <= '5') {
+        const std::string leg = node.id.substr(0, 3);
+        const int gaitLeg = leg == "rht" ? 0 : leg == "lht" ? 1 : leg == "rft" ? 2 : leg == "lft" ? 3 : -1;
+        if (gaitLeg >= 0) {
+            const int link = node.id[3] - '0';
+            const Vec3 hip = jointPoint(JointKosi, {0.0f, -20.0f, 0.0f});
+            const Vec3& f = mGait.foot(gaitLeg);
+            const Vec3 foot{f.x, mPos.y, f.z};
+            static const float kFrac[6] = {0.0f, 0.0f, 0.3f, 0.55f, 0.8f, 1.0f};
+            static const float kLift[6] = {0.0f, 0.0f, 30.0f, 30.0f, 15.0f, 0.0f};
+            const float t = kFrac[link];
+            return {hip.x + (foot.x - hip.x) * t, hip.y + (foot.y - hip.y) * t + kLift[link],
+                    hip.z + (foot.z - hip.z) * t};
+        }
     }
-    return best;
+    // Joint 0 (kosi): the root bound sphere, tam1/tam2, the leg hips.
+    return jointPoint(JointKosi, node.offset);
+}
+
+int weaponForPartId(const std::string& id) {
+    // setupTreasure collTags: 'elec', 'fire', 'gasi', 'mizu'.
+    if (id == "elec") return P2BTWEAPON_Elec;
+    if (id == "fire") return P2BTWEAPON_Fire;
+    if (id == "gasi") return P2BTWEAPON_Gas;
+    if (id == "mizu") return P2BTWEAPON_Water;
+    return -1;
+}
+
+namespace {
+struct CollReader {
+    std::vector<std::string> tok;
+    std::size_t at = 0;
+    std::vector<CollNode>* out = nullptr;
+    bool next(std::string& t) {
+        if (at >= tok.size()) return false;
+        t = tok[at++];
+        return true;
+    }
+    bool number(float& v) {
+        std::string t;
+        if (!next(t)) return false;
+        char* end = nullptr;
+        v = std::strtof(t.c_str(), &end);
+        return end && *end == 0 && std::isfinite(v);
+    }
+    bool tag(std::string& v) {
+        std::string t;
+        if (!next(t) || t.size() != 6 || t.front() != '{' || t.back() != '}') return false;
+        v = t.substr(1, 4);
+        return true;
+    }
+    // node := count radius {id} {code} x y z joint attribute [ '{' node*count '}' ]
+    bool node(int parent, int depth) {
+        if (depth > 16 || out->size() >= 128) return false;
+        float c = 0, r = 0, x = 0, y = 0, z = 0, j = 0, a = 0;
+        CollNode n;
+        if (!number(c) || !number(r) || !tag(n.id) || !tag(n.code) || !number(x) || !number(y) || !number(z)
+            || !number(j) || !number(a))
+            return false;
+        if (c < 0.0f || c > 64.0f || r < 0.0f || r > 10000.0f || j < 0.0f || j > 255.0f) return false;
+        n.radius = r;
+        n.offset = {x, y, z};
+        n.joint = int(j);
+        n.attribute = int(a);
+        n.parent = parent;
+        out->push_back(n);
+        const int self = int(out->size()) - 1;
+        const int count = int(c);
+        if (count == 0) return true;
+        std::string b;
+        if (!next(b) || b != "{") return false;
+        for (int i = 0; i < count; ++i)
+            if (!node(self, depth + 1)) return false;
+        return next(b) && b == "}";
+    }
+};
+} // namespace
+
+bool parseCollTree(std::istream& in, std::vector<CollNode>& out, std::string& error) {
+    out.clear();
+    CollReader r;
+    r.out = &out;
+    std::string line;
+    while (std::getline(in, line)) {
+        const auto hash = line.find('#');
+        if (hash != std::string::npos) line.erase(hash);
+        std::istringstream ls(line);
+        std::string t;
+        while (ls >> t) r.tok.push_back(t);
+    }
+    if (!r.node(-1, 0)) {
+        error = "malformed node";
+        out.clear();
+        return false;
+    }
+    if (r.at != r.tok.size()) {
+        error = "trailing tokens";
+        out.clear();
+        return false;
+    }
+    int weapons = 0;
+    for (const CollNode& n : out) weapons += weaponForPartId(n.id) >= 0 ? 1 : 0;
+    if (weapons != P2BTWEAPON_Count) {
+        error = "weapon parts";
+        out.clear();
+        return false;
+    }
+    return true;
 }
 
 bool Fsm::isStartFlick() const {
@@ -902,7 +1017,6 @@ void Fsm::exec(TickOutput& out) {
                 mElements.setAim(buildAim(mAttackIndex));
                 if (mElements.start(mAttackIndex, emit, mIn ? mIn->groundY : mPos.y, hp, randWeightFloat(1.0f),
                                     randWeightFloat(1.0f))) {
-                    mHandled.clear();
                     out.attackStarted = mAttackIndex;
                     out.fireVariant = mAttackIndex == P2BTWEAPON_Fire ? mFireVariant : -1;
                 }
@@ -972,11 +1086,13 @@ void Fsm::applyHits(TickOutput& out) {
             out.deadHits += 1;
             continue;
         }
-        const int part = partForAttacker(h.attacker);
-        const int coll = mOwn.isWeaponAttached(part) ? part : -1;
+        // mTreasureCollParts[i] == collpart: only a captured weapon's own part
+        // (a dropped weapon's part pointer is cleared, so it is "other").
+        const bool hasPart = h.part != PartNone;
+        const int coll = h.part >= 0 && h.part < P2BTWEAPON_Count && mOwn.isWeaponAttached(h.part) ? h.part : -1;
         bool pinch = false;
-        const P2BigTreasureDamageResult r =
-            mOwn.damageCallBack(h.fromPiki, true, coll, h.damage, static_cast<P2BigTreasurePhase>(int(mState)), false, &pinch);
+        const P2BigTreasureDamageResult r = mOwn.damageCallBack(h.fromPiki, hasPart, coll, h.damage,
+                                                                static_cast<P2BigTreasurePhase>(int(mState)), false, &pinch);
         const float adjusted = mState == State::Land ? h.damage * P2BigTreasureOwnership::kLandDamageFactor : h.damage;
         if (r == P2BTDMG_Weapon) {
             out.weaponHits[coll] += 1;
@@ -1024,7 +1140,8 @@ P2BigTreasureElementAim Fsm::buildAim(int weapon) {
         // Unstaged bank fallback: face + fire variant (F, FR right, FL left, FB back).
         const float yaw = mFaceDir + (mFireVariant == 1 ? -kPi / 2 : mFireVariant == 2 ? kPi / 2 : mFireVariant == 3 ? kPi : 0.0f);
         aim.direction = {std::sin(yaw), 0.0f, std::cos(yaw)};
-        if (weapon == P2BTWEAPON_Fire) aim.emit = {mPos.x, mPos.y + 60.0f, mPos.z};
+        // (retail attackf* poses hold otakara_fire_eff at y ~29 above the owner)
+        if (weapon == P2BTWEAPON_Fire) aim.emit = {mPos.x, mPos.y + 30.0f, mPos.z};
     }
     if (weapon == P2BTWEAPON_Water) {
         // getWaterTargetCreature: a random non-Blue Pikmin, else the nearest
@@ -1069,12 +1186,19 @@ void Fsm::updateAttack(TickOutput& out) {
     for (std::size_t i = 0; i < mIn->count; ++i) {
         const Candidate& c = mIn->candidates[i];
         if (!c.alive || !(c.navi || c.pikmin)) continue;
+        // Source receivers stimulate every creature inside a node on every
+        // update (no per-attack handled set); the receiver's own state gates
+        // repeats. A captain's refusal falls back to flick-or-attack.
         if (!mElements.queryHit(c.pos)) continue;
-        if (std::find(mHandled.begin(), mHandled.end(), c.id) != mHandled.end()) continue;
-        mHandled.push_back(c.id);
         ElementHit eh;
         eh.id = c.id;
         eh.navi = c.navi;
+        if (c.navi) {
+            // FIRE 0.33, GAS 0.67, WATER 1.0, ELEC 0.5 (BigTreasureAttack.cpp:9-12)
+            const float chance = weapon == P2BTWEAPON_Fire ? 0.33f : weapon == P2BTWEAPON_Gas ? 0.67f
+                               : weapon == P2BTWEAPON_Water ? 1.0f : 0.5f;
+            eh.naviFlick = randWeightFloat(1.0f) < chance;
+        }
         eh.hit = p2_bigtreasure_receiver_resolve(weapon, aim.emit, mParams.attackDamage, c.pos);
         out.elementHits.push_back(eh);
     }
@@ -1094,7 +1218,7 @@ void Fsm::updateTreasure(TickOutput& out) {
         out.drops.push_back({w, where[w], drops[k].velocity});
         for (std::size_t i = 0; mIn && i < mIn->count; ++i) {
             const Candidate& c = mIn->candidates[i];
-            if (c.pikmin && c.alive && c.stuckToSelf && partForAttacker(c.pos) == w) out.partFlick.push_back(c.id);
+            if (c.pikmin && c.alive && c.stuckToSelf && c.stuckPart == w) out.partFlick.push_back(c.id);
         }
     }
     out.partFlickAngle = kFlickBackwardAngle;
