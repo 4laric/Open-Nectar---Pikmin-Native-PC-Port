@@ -674,9 +674,17 @@ def synctest(rows, notes, sym, dsym):
 
 def spread(runs, filt):
     """p50/p95 of the key metrics per run, and the spread across runs (MV-6)."""
-    keys = [("save current", save_current), ("save compact", save_compact),
+    def split_only(fn):
+        return lambda r: fn(r) if r.get("ww_hot_calls", 0) > 0 else None
+
+    def probe_only(fn):
+        return lambda r: fn(r) if r.get("ww_probe_ms", -1) >= 0 else None
+
+    keys = [("save current layout", save_current), ("save compact (hot extents)", split_only(save_compact)),
+            ("save compact (probe)", probe_only(save_probe)),
             ("auth", lambda r: r["auth_ms"]), ("resim (auth+parse)", resim_cost),
-            ("frame", lambda r: r["frame_ms"]), ("ww", lambda r: r["ww_ms"]), ("ww hot", lambda r: r["ww_hot_ms"])]
+            ("frame", lambda r: r["frame_ms"]), ("ww", lambda r: r["ww_ms"]), ("ww hot", split_only(lambda r: r["ww_hot_ms"])),
+            ("ww probe", probe_only(lambda r: r["ww_probe_ms"])), ("sys_busy %", lambda r: r.get("sys_busy", -1))]
     print(f"\n### Spread across runs (MV-6; steady live ticks{', sys_busy filter' if filt else ''})\n")
     print("| metric | " + " | ".join(Path(r).parent.parent.name if Path(r).name == 'run' else Path(r).name for r, _ in runs) +
           " | p95 min..max |")
@@ -685,7 +693,7 @@ def spread(runs, filt):
         cells, p95s = [], []
         for _, rows in runs:
             try:
-                v = [fn(r) for r in rows]
+                v = [x for x in (fn(r) for r in rows) if x is not None and x >= 0]
             except (KeyError, TypeError):
                 v = []
             if not v:
