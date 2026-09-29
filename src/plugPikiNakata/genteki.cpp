@@ -11,7 +11,10 @@
 #include "pc_p2_generated_placement.h"
 #include "pc_p2_kabuto_host.h"
 #include "pc_p2_placement_probe.h"
+#include "pc_p2_boss_arena.h"
+#include "pc_p2_boss_arena_policy.h"
 #include <cstdio>
+#include <cstdlib>
 
 static bool randomizerProtected(TekiPersonality* personality) {
     return personality->mID.mId != 'none' || personality->getI(TekiPersonality::INT_Parameter0) != 0;
@@ -138,6 +141,13 @@ Creature* GenObjectTeki::birth(BirthInfo& info)
         std::printf("[Pikmin Randomizer] ENEMY_SPAWN original=%d actual=%d protected=%d x=%.1f z=%.1f\n", mTekiType, replacement, int(protectedSpawn), info.mPosition.x, info.mPosition.z);
     if (pc_randomizer_p2_bridge() && info.mGenerator) {
         const unsigned uid = pc_randomizer_generator_id(info.mGenerator);
+        // P2 boss arenas: read-only clearance measurement of the teki-hosted
+        // P1 boss arenas (Puffstool, Cannon Beetle), opt-in.
+        if (std::getenv("PIKMIN_P2_BOSS_ARENA_PROBE") && p2bossarena::isArenaUid(uid))
+            {
+            pc_p2_boss_arena_probe(info.mPosition.x, info.mPosition.y, info.mPosition.z, uid, "p1teki", mTekiType);
+            pc_p2_placement_probe_birth(info.mPosition.x, info.mPosition.y, info.mPosition.z, info.mGenerator->_70, uid, mTekiType);
+        }
         const unsigned source = pc_randomizer_p2_source_for_id(uid);
         if (source) {
             std::printf("P2_SEED_RESOLVE source_id=%u target=%u original_type=%d x=%.1f z=%.1f\n",
