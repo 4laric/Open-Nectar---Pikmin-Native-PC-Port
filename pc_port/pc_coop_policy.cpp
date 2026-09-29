@@ -285,3 +285,78 @@ const char* pc_coop_events_knob_path()
 	return nullptr;
 #endif
 }
+
+// Netplay gapfix C (issue #885): config and state hashes, perturb knob.
+namespace {
+constexpr uint64_t kCoopFnvOffset = 14695981039346656037ULL;
+constexpr uint64_t kCoopFnvPrime = 1099511628211ULL;
+
+void coop_fnv(uint64_t& h, const void* data, size_t len)
+{
+	const unsigned char* p = static_cast<const unsigned char*>(data);
+	for (size_t i = 0; i < len; ++i) {
+		h ^= p[i];
+		h *= kCoopFnvPrime;
+	}
+}
+
+void coop_fnv_u32(uint64_t& h, uint32_t v)
+{
+	unsigned char b[4];
+	for (int i = 0; i < 4; ++i) b[i] = static_cast<unsigned char>((v >> (i * 8)) & 0xFF);
+	coop_fnv(h, b, 4);
+}
+
+void coop_fnv_f32(uint64_t& h, float v)
+{
+	uint32_t bits = 0;
+	std::memcpy(&bits, &v, sizeof(bits));
+	coop_fnv_u32(h, bits);
+}
+} // namespace
+
+uint64_t pc_coop_events_file_hash(const char* path)
+{
+	if (!path) return 0;
+	uint64_t h = kCoopFnvOffset;
+	FILE* file = std::fopen(path, "rb");
+	if (!file) return h;
+	unsigned char chunk[4096];
+	size_t got = 0;
+	while ((got = std::fread(chunk, 1, sizeof(chunk), file)) > 0) coop_fnv(h, chunk, got);
+	std::fclose(file);
+	return h;
+}
+
+uint64_t pc_coop_events_config_hash() { return pc_coop_events_file_hash(pc_coop_events_knob_path()); }
+
+uint64_t pc_coop_state_hash(const PcCoopHashState& s)
+{
+	uint64_t h = kCoopFnvOffset;
+	coop_fnv_u32(h, s.started ? 1u : 0u);
+	coop_fnv_u32(h, static_cast<uint32_t>(s.key.stage));
+	coop_fnv_u32(h, static_cast<uint32_t>(s.key.day));
+	coop_fnv_f32(h, s.key.timeOfDay);
+	coop_fnv_u32(h, s.tick);
+	for (int k = 0; k < PC_COOP_ANCHOR_COUNT; ++k) coop_fnv_u32(h, static_cast<uint32_t>(s.cursors.next[k]));
+	for (int i = 0; i < PC_COOP_CAPTAINS; ++i) coop_fnv_f32(h, s.prevHp[i]);
+	for (int i = 0; i < PC_COOP_CAPTAINS; ++i) coop_fnv_u32(h, s.prevValid[i] ? 1u : 0u);
+	for (int i = 0; i < PC_COOP_COOLDOWNS; ++i) coop_fnv_f32(h, s.cooldown[i]);
+	return h ? h : 1; // 0 stays "nothing folded"
+}
+
+unsigned pc_coop_perturb_knob_tick()
+{
+#if defined(PIKI_NETPLAY_BUILD) && PIKI_NETPLAY_BUILD
+	const char* background = std::getenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND");
+	if (!background || std::strcmp(background, "1") != 0) return 0;
+	const char* text = std::getenv("PIKMIN_NETPLAY_TEST_COOP_PERTURB");
+	if (!text || !*text) return 0;
+	const char* p = text;
+	unsigned tick = 0;
+	if (!parse_uint(p, tick) || *p != '\0') return 0;
+	return tick;
+#else
+	return 0;
+#endif
+}
