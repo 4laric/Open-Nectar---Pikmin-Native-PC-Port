@@ -494,8 +494,9 @@ void BTeki::startAI(int)
 	ID32& id = mPersonality->mID;
 	PRINT_NAKATA("BTeki::reset:%08x:item:%s\n", this, id.mStringID);
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
-	// #901: a holder whose part already exists (collected, cached, on the
-	// ground) is born without it: no radar marker, no drop.
+	// #901: a P2-bound holder whose part already exists (collected, cached,
+	// on the ground) is born without it: no radar marker, no drop. A P1
+	// holder always holds (vanilla); pc_held_part_birth only logs it.
 	if (Pellet::isUfoPartsID(id.mId) && pc_held_part_birth(this)) {
 #else
 	if (Pellet::isUfoPartsID(id.mId)) {
@@ -798,10 +799,11 @@ void BTeki::dieSoon()
 {
 	PRINT_NAKATA("dieSoon:%08x:\n", this);
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
-	// #901 generic held ship part: every real death (health spent) reaches
-	// here before the corpse branch and detachGenerator, including NoCorpse
-	// families and pcEscapeNow. Latched with spawnItems; no-op on escape.
-	pc_held_part_drop(this, "dieSoon");
+	// #901 generic held ship part: a P2-bound holder's real death (health
+	// spent) reaches here before the corpse branch and detachGenerator,
+	// including NoCorpse families and pcEscapeNow. Latched with spawnItems;
+	// no-op on escape. A P1 holder is vanilla: it drops only in spawnItems.
+	if (pc_held_part_p2_source(this)) pc_held_part_drop(this, "dieSoon");
 #endif
 	clearTekiOption(TEKIOPT_Alive | TEKIOPT_Visible | TEKIOPT_ShadowVisible | TEKIOPT_Atari);
 	if (getParameterI(TPI_CorpseType) == TEKICORPSE_LeaveCorpse) {

@@ -122,6 +122,9 @@ void GenObjectTeki::updateUseList(Generator* generator, int)
 Creature* GenObjectTeki::birth(BirthInfo& info)
 {
     const bool protectedSpawn = randomizerProtected(mPersonality, info.mGenerator);
+    // #901: a P1 part-holder slot handed to a seed-bound P2 occupant.
+    const bool heldPartTransfer = pc_held_part_transfers(mPersonality->mID.mId,
+        mPersonality->getI(TekiPersonality::INT_Parameter0), info.mGenerator);
     const int replacement = pc_randomizer_enemy_for_generator(mTekiType, protectedSpawn, info.mGenerator);
 	Teki* teki = tekiMgr->newTeki(replacement);
 	if (!teki) {
@@ -132,8 +135,20 @@ Creature* GenObjectTeki::birth(BirthInfo& info)
 	mPersonality->mNestPosition.set(info.mScale);
 	mPersonality->mFaceDirection = info.mRotation.y;
 	teki->mPersonality->input(*mPersonality);
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	// #901: the newborn has no mGenerator until birth returns; let the
+	// held-part birth decision see this slot's P2 binding.
+	if (heldPartTransfer) {
+		const unsigned uid = pc_randomizer_generator_id(info.mGenerator);
+		pc_held_part_log_assign(mPersonality->mID.mId, pc_randomizer_p2_source_for_id(uid), uid, mTekiType, "slot");
+		pc_held_part_birth_uid(uid);
+	}
+#endif
 	teki->reset();
 	teki->startAI(0);
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	pc_held_part_birth_uid(0);
+#endif
 	teki->mSRT.r = info.mRotation;
 	if (info.mGenerator->doAdjustFaceDir()) {
 		teki->setCreatureFlag(CF_AdjustFaceDirOnSpawn);

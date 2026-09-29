@@ -141,7 +141,7 @@ Creature* pc_p2_boss_arena_birth(BirthInfo& info, const GenObjectBoss& boss)
     const unsigned heldPart = pc_held_part_for_pellet_config(boss.mPelletConfigIdx);
     if (heldPart) {
         personality->mID.setID(heldPart);
-        pc_held_part_log_assign(heldPart, source, uid, boss.mBossID);
+        pc_held_part_log_assign(heldPart, source, uid, boss.mBossID, "arena");
     }
     personality->mPosition.set(info.mPosition);
     personality->mNestPosition.set(info.mScale);
@@ -154,8 +154,10 @@ Creature* pc_p2_boss_arena_birth(BirthInfo& info, const GenObjectBoss& boss)
         personality->setF(TekiPersonality::FLT_PelletAppearChance, 1.0f);
     }
     teki->mPersonality->input(*personality);
+    pc_held_part_birth_uid(uid); // the newborn has no mGenerator yet
     teki->reset();
     teki->startAI(0);
+    pc_held_part_birth_uid(0);
     teki->mSRT.r = info.mRotation;
     if (info.mGenerator->doAdjustFaceDir()) teki->setCreatureFlag(CF_AdjustFaceDirOnSpawn);
     teki->mRebirthDay = info.mGenerator->getRebirthDay();
