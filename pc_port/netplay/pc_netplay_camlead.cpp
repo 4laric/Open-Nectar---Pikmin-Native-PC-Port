@@ -155,7 +155,7 @@ struct Stats {
 	uint64_t repeats      = 0; // presentations of an already-stepped tick (not stepped again)
 	uint64_t gaps         = 0; // predictions whose pending window had a missing landing frame
 	uint64_t viewInAuth   = 0; // view() reached in the authoritative pass (must be 0)
-	uint64_t dayEndViews  = 0; // gameplay views inside the day-end sequence (no lead)
+	uint64_t dayEndViews  = 0; // gameplay views inside the day-end sequence (no prediction)
 	float maxCorr         = 0.0f;
 };
 Stats sStats;
@@ -497,18 +497,6 @@ Camera* pc_netplay_camlead_view(int localPlayer, Camera* simView)
 		drop_correction();
 		return simView;
 	}
-	if (gameflow.mIsDayEndActive) {
-		// The day-end sequence: the sunset demo drives the camera, and the
-		// gameplay view shows up only on single frames between its
-		// cinematics. A lead there would only replay the demo's own camera
-		// motion a few ticks early (a one-frame pop; fix round 1, evidence
-		// review E1), so the view is exactly the sim camera until the next
-		// day starts.
-		sRow.simUpdated = postOk && post.frame == sFrame;
-		++sStats.dayEndViews;
-		drop_correction();
-		return simView;
-	}
 	if (pc != sCorrCam) {
 		sCorr.reset();
 		sCorrCam     = pc;
@@ -523,6 +511,8 @@ Camera* pc_netplay_camlead_view(int localPlayer, Camera* simView)
 	}
 	const bool simUpdated = postOk && post.frame == sFrame;
 	sRow.simUpdated       = simUpdated;
+	const bool dayEnd     = gameflow.mIsDayEndActive != 0;
+	if (dayEnd) ++sStats.dayEndViews;
 	if (simUpdated && sStepped && sLastStepFrame == sFrame) {
 		// A second presentation of a tick the filter already stepped for
 		// (review m3: stall smoothing that re-presents, a soft-reset idle
@@ -530,6 +520,18 @@ Camera* pc_netplay_camlead_view(int localPlayer, Camera* simView)
 		// sim tick, so it is shown as it is, not stepped again.
 		sRow.repeat = true;
 		++sStats.repeats;
+	} else if (simUpdated && dayEnd) {
+		// The day-end sequence: the sunset demo drives the camera, and the
+		// gameplay view shows up only on its first frame and on single
+		// frames between its cinematics. A prediction there would replay the
+		// demo's own camera motion a few ticks early (a one-frame pop; fix
+		// round 1, evidence review E1). So no prediction: the correction
+		// only decays with the camera's own homing (targets equal), and the
+		// view settles onto the sim camera without a jump.
+		const float none[3] = { 0.0f, 0.0f, 0.0f };
+		sCorr.step(none, none, 0.0f, pc->getCurrentHomingSpeed(), pc->getParameterF(PCAMF_FovHomingSpeed));
+		sStepped       = true;
+		sLastStepFrame = sFrame;
 	} else if (simUpdated) {
 		float dTgt[3], dPv[3], dFov = 0.0f;
 		if (predict(mgr, pc, dTgt, dPv, &dFov)) {
