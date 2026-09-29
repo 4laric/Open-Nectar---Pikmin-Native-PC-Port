@@ -520,6 +520,10 @@ struct Senses {
     float obstacleZ = 0.0f;
     float obstacleDist = 1.0e30f;
     bool obstacleMoving = false;
+    // Throw aim: a point just outside the face toward the captain (a throw
+    // at the centre lands ON the box and those Pikmin never push; ar2).
+    float obstacleAimX = 0.0f;
+    float obstacleAimZ = 0.0f;
 };
 
 // Pad output for one tick. moveX/moveZ is the desired world-space XZ move
@@ -1579,18 +1583,33 @@ private:
             pushedThisStint = true;
             char buf[200];
             std::snprintf(buf, sizeof(buf),
-                          "AUTOPLAY_OBSTACLE phase=push at=(%.0f,%.0f) dist=%.0f field=%d bot-driven",
-                          in.obstacleX, in.obstacleZ, in.obstacleDist, in.fieldPikmin);
+                          "AUTOPLAY_OBSTACLE phase=push at=(%.0f,%.0f) aim=(%.0f,%.0f) dist=%.0f field=%d bot-driven",
+                          in.obstacleX, in.obstacleZ, in.obstacleAimX, in.obstacleAimZ, in.obstacleDist,
+                          in.fieldPikmin);
             markers.emplace_back(buf);
         }
         pushTime += dt;
         stuckWindowStart = 0.0f; // pushing is progress, not a stuck window
         steer(in.naviX, in.naviZ, in.obstacleX, in.obstacleZ);
         if (in.obstacleDist <= cfg.obstaclePushDist) {
-            // In range: look-band stick (the captain stops and faces the box,
-            // the cursor slides onto it) and throw.
-            lastCommand.stickScale = cfg.lookStickScale;
-            pulseA(in, cfg.throwHold, cfg.obstaclePushGap);
+            // In range: look-band stick (the captain stops and faces the
+            // cursor, which slides along the stick) moving the cursor onto the
+            // near-face aim point; throw once it is there.
+            lastCommand.moveX = 0.0f;
+            lastCommand.moveZ = 0.0f;
+            float cx = in.cursorX, cz = in.cursorZ;
+            if (!in.cursorValid) {
+                cx = in.obstacleAimX;
+                cz = in.obstacleAimZ;
+            }
+            const float ex = in.obstacleAimX - cx, ez = in.obstacleAimZ - cz;
+            const float el = std::sqrt(ex * ex + ez * ez);
+            if (el > cfg.kingCursorTol) {
+                lastCommand.moveX = ex / el;
+                lastCommand.moveZ = ez / el;
+                lastCommand.stickScale = cfg.lookStickScale;
+            }
+            if (el <= cfg.kingCursorTol * 2.0f) pulseA(in, cfg.throwHold, cfg.obstaclePushGap);
         }
         return true;
     }

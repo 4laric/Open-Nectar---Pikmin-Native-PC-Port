@@ -3125,13 +3125,21 @@ void testObstaclePush()
     CHECK(brain.command().moveZ < -0.9f && brain.command().stickScale == 1.0f, "obstacle/walks_to_box");
     CHECK(hasMarker(brain.takeMarkers(), "AUTOPLAY_OBSTACLE phase=push"), "obstacle/push_marker");
     s.obstacleDist = 120.0f;
+    s.obstacleAimX = 0.0f;
+    s.obstacleAimZ = -140.0f; // near face, toward the captain at z=0 side
+    s.cursorValid = true;
+    s.cursorX = 0.0f;
+    s.cursorZ = -175.0f; // 35 past the aim: slide back with the look band
     bool threw = false;
     for (int i = 0; i < 400; ++i) { // 20 s at the box: no STUCK, no giveup
         brain.update(0.05f, s);
         if (brain.command().buttons & unsigned(p2autoplay::PadA)) threw = true;
     }
     auto m = brain.takeMarkers();
-    CHECK(threw && brain.command().stickScale < 1.0f, "obstacle/throws_look_band");
+    CHECK(threw && brain.command().stickScale < 1.0f && brain.command().moveZ > 0.9f, "obstacle/throws_look_band_to_face");
+    s.cursorZ = -140.0f; // on the aim: neutral stick, keep throwing
+    brain.update(0.05f, s);
+    CHECK(brain.command().moveX == 0.0f && brain.command().moveZ == 0.0f, "obstacle/cursor_on_face_holds");
     CHECK(!hasMarker(m, "AUTOPLAY_STUCK") && brain.current() == p2autoplay::State::Approach, "obstacle/no_stuck_while_pushing");
     s.obstacleValid = false;
     s.scattered = false;
