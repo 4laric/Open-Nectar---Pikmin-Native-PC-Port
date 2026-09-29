@@ -9,6 +9,11 @@ class BirthInfo;
 class Generator;
 class GenObjectBoss;
 
+// Re-key a P1 boss generator that is a day-file alias of a bound arena primary
+// (pc_p2_boss_arena_policy.h kAlias) to the primary's uid, so the seed binding,
+// the family setup and the corpse receipt all see one generator token.
+void pc_p2_boss_arena_rekey(Generator* generator);
+
 // Host teki type to reserve for a bound arena generator, or -1 when the
 // generator is not a bound P2 boss arena spawn.
 int pc_p2_boss_arena_host(Generator* generator);

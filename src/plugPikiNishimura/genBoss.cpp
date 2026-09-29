@@ -121,6 +121,7 @@ void GenObjectBoss::updateUseList(Generator* generator, int count)
 {
 	// P2 boss arenas: a bound arena spawn reserves its P2 boss vehicle instead
 	// of the P1 boss; a suppressed arena mate reserves nothing.
+	pc_p2_boss_arena_rekey(generator);
 	const int p2Host = pc_p2_boss_arena_host(generator);
 	if (p2Host >= 0) {
 		tekiMgr->mUsingType[p2Host] = true;
@@ -179,6 +180,7 @@ void GenObjectBoss::updateUseList(Generator* generator, int count)
 Creature* GenObjectBoss::birth(BirthInfo& info)
 {
 	if (pc_randomizer_p2_bridge() && info.mGenerator) {
+		pc_p2_boss_arena_rekey(info.mGenerator);
 		const unsigned uid = pc_randomizer_generator_id(info.mGenerator);
 		if (std::getenv("PIKMIN_P2_BOSS_ARENA_PROBE") && p2bossarena::isArenaUid(uid))
 			{

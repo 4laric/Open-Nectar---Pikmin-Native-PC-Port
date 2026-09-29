@@ -3,10 +3,12 @@
 // P1 boss arenas and replace the P1 boss there. Engine-free policy table.
 //
 // The seed (root randomizer/p2_boss_arenas.py, docs/PIKMIN2_ADMITTED_PLACEMENT.json
-// "arenas") binds every *spawn* generator uid of a chosen arena to the P2 boss
-// through the ordinary ENEMY_P2 line. This header only carries what the wire
-// cannot: the P1 boss generators that share an arena with a spawn generator and
-// must stay empty while the arena holds a P2 boss (`suppress`), plus the full
+// "arenas") binds a chosen arena's primary spawn uid to the P2 boss through the
+// ordinary ENEMY_P2 line. This header carries what the wire cannot: the other
+// day-file generators of the same encounter, re-keyed to the primary so the
+// boss keeps one generator token (`alias`); the P1 boss generators that share
+// an arena with the spawn generator and must stay empty while the arena holds
+// a P2 boss (`suppress`); and the full
 // arena generator set so the read-only clearance probe can measure every arena,
 // including the protected ones (ship-part holders, goal boss) that are not yet
 // eligible. tests/test_p2_boss_arenas.py pins this table against the root
@@ -15,6 +17,20 @@
 // Generator uids are the spawn-slot catalogue ids (crc32 of
 // "pikrando-spawn/<stage>/<file>@<offset>", randomizer/spawn_data.py).
 namespace p2bossarena {
+
+struct Alias {
+    unsigned uid;      // same encounter on another day file
+    unsigned primary;  // arena primary spawn uid it is re-keyed to
+};
+
+// Impact Goolix: practice/{10..28}.gen@1764 are the 8.gen@1764 encounter on
+// later even day files.
+static const Alias kAlias[] = {
+    {2380628347u, 4019261003u}, {2299547974u, 4019261003u}, {2215518465u, 4019261003u},
+    {2163994940u, 4019261003u}, {2654126479u, 4019261003u}, {336062330u, 4019261003u},
+    {284309319u, 4019261003u},  {502023936u, 4019261003u},  {421107517u, 4019261003u},
+    {131114894u, 4019261003u},
+};
 
 struct Suppress {
     unsigned uid;      // P1 boss generator left empty
@@ -47,6 +63,14 @@ static const unsigned kArenaUids[] = {
     // last_emperor: init.gen@976 King, ship part + Emperor goal (protected)
     3759070123u,
 };
+
+// Returns the arena primary uid `uid` is re-keyed to, or 0.
+inline unsigned aliasPrimary(unsigned uid)
+{
+    for (const Alias& row : kAlias)
+        if (row.uid == uid) return row.primary;
+    return 0;
+}
 
 // Returns the arena spawn uid that suppresses `uid`, or 0.
 inline unsigned suppressPrimary(unsigned uid)

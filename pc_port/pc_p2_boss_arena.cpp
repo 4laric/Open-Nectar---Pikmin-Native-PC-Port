@@ -37,6 +37,18 @@ bool finite(float x, float y, float z)
 
 } // namespace
 
+void pc_p2_boss_arena_rekey(Generator* generator)
+{
+    if (!generator || !pc_randomizer_p2_bridge()) return;
+    const unsigned uid = pc_randomizer_generator_id(generator);
+    const unsigned primary = p2bossarena::aliasPrimary(uid);
+    if (primary && pc_randomizer_p2_source_for_id(primary)) {
+        pc_randomizer_set_generator_id(generator, primary);
+        std::printf("P2_BOSS_ARENA_ALIAS generator=%u primary=%u\n", uid, primary);
+        std::fflush(stdout);
+    }
+}
+
 int pc_p2_boss_arena_host(Generator* generator)
 {
     const unsigned source = boundSource(generator, nullptr);
