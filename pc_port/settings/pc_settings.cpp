@@ -2566,6 +2566,9 @@ void modsRowChange(int row, bool left, bool right) {
     else if (row == 33) {
         if (left || right) sPending.whistlePluck = sPending.whistlePluck ? 0 : 1;
     }
+    else if (row == 34) {
+        if (left || right) sPending.disableTutorials = sPending.disableTutorials ? 0 : 1;
+    }
     // Cheats (26-32). Hard los anula, como la vida y el día.
     else if (row >= 26 && row <= 32) {
         if (pc_hardmode_active() || !(left || right))
@@ -5426,6 +5429,7 @@ void modsRowValue(int i, char* value, size_t n) {
     case 24: snprintf(value, n, "%s", sPending.onionStep10 ? "On" : "Off (original)"); break;
     case 25: snprintf(value, n, "%s", sPending.instantWhistle ? "On" : "Off (original)"); break;
     case 33: snprintf(value, n, "%s", sPending.whistlePluck ? "On" : "Off (original)"); break;
+    case 34: snprintf(value, n, "%s", sPending.disableTutorials ? "On" : "Off (original)"); break;
     case 28: speedPctLabel(sPending.carrySpeedPct, value, n); break;
     case 29: speedPctLabel(sPending.naviSpeedPct, value, n); break;
     case 26: case 27: case 30: case 31: case 32: {
@@ -5560,6 +5564,7 @@ const GroupRow kCameraRows[] = {
 const GroupRow kGameplayRows[] = {
     { SRC_MODS, 25, "Instant Whistle Response", "Whistled Pikmin join the squad at once, without stopping to turn and look first." },
     { SRC_MODS, 33, "Whistle Pluck", "Hold the whistle over sprouts to pluck them one after another." },
+    { SRC_MODS, 34, "Disable Tutorials", "Skips the informational hint popups. Story, part and ending text still show." },
     { SRC_MODS, 1, "Chain Pikmin Actions", "Pikmin that finish a task go on to the next one nearby." },
     { SRC_MODS, 8, "Better Pathfinding", "Shortest carry routes, squad Pikmin find a way round walls, stalled carriers restart." },
     { SRC_MODS, 9, "Blues Only In Water", "Only blue Pikmin walk into water on their own." },
