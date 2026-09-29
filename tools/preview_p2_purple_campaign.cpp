@@ -53,6 +53,12 @@ static void p2_fixture_require_captain(bool dead, bool deadState, float hp, int 
 static void require(bool ok, const char* why) {
     if (!ok) { std::printf("P2_PURPLE_CAMPAIGN_FAIL %s\n", why); std::fflush(nullptr); std::_Exit(1); }
 }
+struct TransportFixtureAccess : ActTransport {
+    static int slot(const ActTransport& action) {
+        int ActTransport::* member = &TransportFixtureAccess::mSlotIndex;
+        return action.*member;
+    }
+};
 class PurpleCampaignApp : public PlugPikiApp {
     int ticks = 0;
     bool captainSeen = false;
@@ -68,14 +74,17 @@ class PurpleCampaignApp : public PlugPikiApp {
         auto assign = [&](Piki* p) {
             p->mActiveAction->abandon(nullptr);
             require(p->isAlive() && p->getState() == PIKISTATE_Normal && !p->isStickTo(), "carry actor not ready");
-            Vector3f beside = cargo->mSRT.t + Vector3f(-(cargo->getCentreSize() + 15), 0, 0);
-            beside.y = mapMgr->getMinY(beside.x, beside.z, true);
-            p->resetPosition(beside);
-            p->mVelocity.set(0,0,0); p->mTargetVelocity.set(0,0,0); p->mVolatileVelocity.set(0,0,0);
-            std::printf("P2_PURPLE_CARRY_ASSIGN purple=%d carrier_position_staged=1 approach_pathfinding_validated=0\n",int(pc_p2_is_purple(p)));
             p->mActiveAction->mCurrActionIdx = PikiAction::Transport;
             p->mActiveAction->mChildActions[PikiAction::Transport].initialise(cargo);
             p->mMode = PikiMode::TransportMode;
+            const auto* action = static_cast<ActTransport*>(p->mActiveAction->mChildActions[PikiAction::Transport].mAction);
+            const int slot = TransportFixtureAccess::slot(*action);
+            require(slot >= 0 && cargo->isSlotFree(slot), "native carry slot unavailable");
+            // Stage once before the first action update. Native exec still must
+            // attach, count strength, lift and transport; approach is excluded.
+            p->resetPosition(cargo->getSlotGlobalPos(slot, 0.0f));
+            p->mVelocity.set(0,0,0); p->mTargetVelocity.set(0,0,0); p->mVolatileVelocity.set(0,0,0);
+            std::printf("P2_PURPLE_CARRY_ASSIGN purple=%d slot=%d slot_position_staged=1 approach_bypassed=1\n",int(pc_p2_is_purple(p)),slot);
         };
         auto release = [&](Piki* p) {
             p->mActiveAction->abandon(nullptr);
@@ -146,8 +155,11 @@ class PurpleCampaignApp : public PlugPikiApp {
         require(gameflow.mWorldClock.mCurrentDay <= expectedDay, "unexpected extra day advance");
         // A fresh native save index is updated AFTER memoryCard.cpp calls the
         // campaign writer. The external harness must still require its log.
-        if (sunsetSeen && gameflow.mGamePrefs.mMostRecentSaveIndex != saveIndexBefore) {
-            require(gameflow.mGamePrefs.mHasSaveGame, "native save completion flag missing");
+        // Creating the initial card also advances the index, before any game
+        // save exists. Wait for both signals rather than treating formatting
+        // as a failed/completed campaign save.
+        if (sunsetSeen && gameflow.mGamePrefs.mHasSaveGame
+            && gameflow.mGamePrefs.mMostRecentSaveIndex != saveIndexBefore) {
             require(gameflow.mWorldClock.mCurrentDay == expectedDay, "save did not advance expected day");
             require(flowerStockOne(), "sunset stock/maturity not conserved");
             std::printf("P2_PURPLE_DAYEND_EVIDENCE day_before=%d expected_day=%d day=%d stock=1 flower=1 native_save_index_before=%u native_save_index_after=%u external_campaign_saved_required=1\n",
