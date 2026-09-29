@@ -1945,6 +1945,13 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_netplay_present_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_netplay_present_test COMMAND pc_netplay_present_test)
 
+    # Netplay M5c lane A lead camera core (issue #887; header-only, no game):
+    # key mapping, input history, prediction window, correction filter.
+    add_executable(pc_netplay_camlead_test pc_port/netplay/pc_netplay_camlead_test.cpp)
+    target_include_directories(pc_netplay_camlead_test PRIVATE pc_port)
+    target_compile_options(pc_netplay_camlead_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_netplay_camlead_test COMMAND pc_netplay_camlead_test)
+
     add_executable(pc_render_phase_test
         pc_port/timing/pc_render_phase_test.cpp
         pc_port/timing/pc_render_phase.cpp)
