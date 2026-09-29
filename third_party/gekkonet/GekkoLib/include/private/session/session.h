@@ -7,6 +7,8 @@
 struct GekkoSession {
     virtual void Init(GekkoConfig* config) = 0;
     virtual void SetLocalDelay(i32 player, u8 delay) {}
+    // Open Nectar local extension (issue #887): see gekko_set_local_delay_nofill.
+    virtual void SetLocalDelayNoFill(i32 player, u8 delay) {}
     virtual void SetRunahead(u8 runahead) {}
     virtual void SetNetAdapter(GekkoNetAdapter* adapter) {}
     virtual i32 AddActor(GekkoPlayerType type, GekkoNetAddress* addr) { return -1; }

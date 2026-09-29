@@ -168,6 +168,14 @@ void Gekko::InputBuffer::SetDelay(u8 delay)
 	}
 }
 
+void Gekko::InputBuffer::SetDelayNoFill(u8 delay)
+{
+	// Open Nectar local extension (issue #887): the gap a larger delay opens
+	// (frames _last_received_input + 1 .. current + delay - 1) is left for the
+	// caller, whose next AddLocalInput calls fill it one frame at a time.
+	_input_delay = delay;
+}
+
 u8 Gekko::InputBuffer::GetDelay() 
 {
 	return _input_delay;

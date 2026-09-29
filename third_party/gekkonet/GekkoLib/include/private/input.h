@@ -42,6 +42,11 @@ namespace Gekko {
 
 		void SetDelay(u8 delay);
 
+		// Open Nectar local extension (netplay M5c lane B, issue #887): set
+		// the delay without filling a grown gap with copies of the last
+		// input. The caller adds one input per new frame afterwards.
+		void SetDelayNoFill(u8 delay);
+
 		u8 GetDelay();
 		
 		void SetInputPredictionWindow(u8 input_window);

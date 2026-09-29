@@ -212,6 +212,15 @@ GEKKONET_API void gekko_set_disconnect_timeout(GekkoSession* session, unsigned i
 // session uses it, trading input lag for less mispredictions.
 GEKKONET_API void gekko_set_local_delay(GekkoSession* session, int player, unsigned char delay);
 
+// Open Nectar local extension (netplay M5c lane B, issue #887): sets a local
+// player's delay without touching its input buffer. gekko_set_local_delay
+// fills a grown delay with copies of the last input; this variant leaves the
+// gap for the caller, who must then add exactly one input per new frame
+// (each gekko_add_local_input lands on current frame + delay, and the buffer
+// only accepts the next sequential frame). Shrinking behaves exactly like
+// gekko_set_local_delay (nothing is touched either way).
+GEKKONET_API void gekko_set_local_delay_nofill(GekkoSession* session, int player, unsigned char delay);
+
 // simulates the given amount of frames ahead every update and rewinds them
 // on the next one, which hides local input delay.
 GEKKONET_API void gekko_set_runahead(GekkoSession* session, unsigned char runahead);
