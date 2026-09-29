@@ -43,3 +43,7 @@ void pc_p2_dangomushi_wall(BTeki*, const Plane&);
 // Draws the live rain Rocks/Egg (createCrashEnemy children) with the P1
 // Iwagon boulder stand-in mesh. No-op when no Crawbster rain is alive.
 void pc_p2_dangomushi_draw_rain(Graphics&);
+// Frustum-cull radius override for a Crawbster corpse pellet (#897): the
+// Swallow host's TPF_CorpseSize (10) made the whole 200-unit body pop out
+// while its carriers and counter were still on screen. Returns 0 otherwise.
+float pc_p2_dangomushi_cull_radius(Creature* creature);

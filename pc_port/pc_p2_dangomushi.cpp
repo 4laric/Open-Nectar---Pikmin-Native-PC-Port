@@ -1244,8 +1244,43 @@ void pc_p2_dangomushi_wall(BTeki* actor, const Plane& plane) {
     setState(actor, s, DANGO_TURN, "turn");
 }
 
+float pc_p2_dangomushi_cull_radius(Creature* creature) {
+    if (!ready || !creature || creature->mObjType != OBJTYPE_Pellet) return 0.0f;
+    Pellet* pellet = static_cast<Pellet*>(creature);
+    if (!pellet->mPelletView) return 0.0f;
+    auto it = actors.find(pellet->mPelletView);
+    if (it == actors.end() || !it->second.escaped) return 0.0f;
+    // P2 culls the DangoMushi by its LOD radius (enemyparm fp32 = 250,
+    // user/Abe/... DangoMushi EnemyParmsBase), which covers the 200-unit
+    // enemycoll root sphere; keep the corpse on screen as long as that is.
+    return 250.0f;
+}
+
 void pc_p2_dangomushi_draw_rain(Graphics& gfx) {
     if (!ready || actors.empty() || !gfx.mCamera || !tekiMgr) return;
+    // #897 carry diagnosis: the P1 DualCreature::refresh frustum test that
+    // gates the corpse pellet's draw, evaluated here once a second.
+    static unsigned cullFrame = 0;
+    if (++cullFrame % 60u == 0u) {
+        for (auto& entry : actors) {
+            if (!entry.second.escaped) continue;
+            Pellet* pellet = static_cast<BTeki*>(entry.first)->mPellet;
+            if (!pellet) continue;
+            const Vector3f& p = pellet->mSRT.t;
+            const float radius = pellet->getBoundingSphereRadius();
+            Camera& cam = *gfx.mCamera;
+            int worst = -1;
+            float worstD = 1e9f;
+            for (int i = 0; i < cam.mActivePlaneCount; ++i) {
+                const Plane& pl = cam.mPlanePointers[i]->mPlane;
+                const float d = p.x * pl.mNormal.x + p.y * pl.mNormal.y + p.z * pl.mNormal.z - pl.mOffset;
+                if (d < worstD) { worstD = d; worst = i; }
+            }
+            std::printf("P2_DANGOMUSHI_CORPSE_CULL visible=%d radius=%.1f planes=%d worst=%d d=%.1f "
+                        "px=%.1f py=%.1f pz=%.1f\n", int(cam.isPointVisible(p, 2.0f * radius)), radius,
+                        cam.mActivePlaneCount, worst, worstD, p.x, p.y, p.z);
+        }
+    }
     bool any = false;
     for (auto& entry : actors) {
         const Dango& s = entry.second;
@@ -1584,12 +1619,15 @@ void pc_p2_dangomushi_update(BTeki* actor) {
         // matrix. Log the pellet too so a carry can be checked against it.
         Pellet* corpsePellet = s.escaped ? actor->mPellet : nullptr;
         std::printf("P2_DANGOMUSHI_POS generator=%u state=%s clip=%s phase=%.2f x=%.2f z=%.2f "
-                    "health=%.1f corpse_pellet=%d px=%.2f py=%.2f pz=%.2f carriers=%d\n", generator,
+                    "health=%.1f corpse_pellet=%d px=%.2f py=%.2f pz=%.2f carriers=%d vis=%d pstate=%d pick=%.1f\n", generator,
                     stateName(s.state), s.clip.c_str(), s.phase, pos.x, pos.z, actor->mHealth,
                     int(corpsePellet != nullptr), corpsePellet ? corpsePellet->mSRT.t.x : 0.0f,
                     corpsePellet ? corpsePellet->mSRT.t.y : 0.0f,
                     corpsePellet ? corpsePellet->mSRT.t.z : 0.0f,
-                    corpsePellet ? int(corpsePellet->mCarrierCount) : 0);
+                    corpsePellet ? int(corpsePellet->mCarrierCount) : 0,
+                    corpsePellet ? int(corpsePellet->aiCullable()) : 0,
+                    corpsePellet ? corpsePellet->getState() : -1,
+                    corpsePellet ? corpsePellet->getPickOffset() : 0.0f);
         std::fflush(stdout);
     }
     // Step any live Rock/Egg children the hazard decisions created.
