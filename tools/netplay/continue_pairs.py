@@ -321,8 +321,11 @@ def continue_ok(ctx, s, name, from_run, gen=1, day=3):
     ok &= ctx.check(any(f"checkpoint adopted gen={gen}" in ln for ln in j["checkpoint"]),
                     f"{name} join: checkpoint adopted gen={gen}")
     for side in ("host", "join"):
-        ok &= ctx.check(any(f"START_STAGE 1 day={day} resumed=1 generation={gen}" in ln for ln in s[side]["start_stage"]),
-                        f"{name} {side}: START_STAGE 1 day={day} resumed=1 generation={gen}")
+        # The resumed first stage starts through MapSelect (stage id 0 in the
+        # log, as in B2's resume evidence).
+        ok &= ctx.check(any("START_STAGE" in ln and f" day={day} resumed=1 generation={gen}" in ln
+                            for ln in s[side]["start_stage"]),
+                        f"{name} {side}: START_STAGE ... day={day} resumed=1 generation={gen}")
         rec = s[side].get("campaign-record.txt") or []
         ok &= ctx.check(any(r.startswith(f"start gen={gen} ") for r in rec), f"{name} {side}: record 'start gen={gen}'")
     rec = h.get("campaign-record.txt") or []
