@@ -333,16 +333,18 @@ private:
 inline bool isLivingThing(bool bittered, bool alive) { return bittered && alive; }
 
 // #898 fix: randomizer policy for the CarryEnd/Hide cargo consume. Retail
-// endCarry destroys whatever the Breadbug dragged home. A carcass that still
-// owes a randomizer delivery check (a live P2 ordinary-delivery binding keyed
-// on its own generator token) is SPARED instead: it is released at the nest,
-// stays carriable, and the Breadbug that spared it never picks it again. The
-// Pikmin still hanging on are killed either way (retail endCarry), and every
-// other cargo (pellets, unbound carcasses) is destroyed as in retail. A check
-// is therefore never forfeited by a Breadbug.
-enum class ConsumeOutcome { Destroy, SpareCheckBound };
-inline ConsumeOutcome consumeOutcome(bool carcass, bool checkBound) {
-    return carcass && checkBound ? ConsumeOutcome::SpareCheckBound : ConsumeOutcome::Destroy;
+// endCarry destroys whatever the Breadbug dragged home. In the port a teki
+// CARCASS is never destroyed: it is released at the nest, stays carriable, and
+// the Breadbug that spared it never picks it again. Reasons: (1) a carcass may
+// owe a randomizer delivery check (onion:p2:<source> on its own generator
+// token), which a Breadbug must never forfeit; (2) the only teardown the
+// port's corpse pipeline (PelletView, P2 forget hooks, receipt bookkeeping)
+// has been validated through is the Onion suck, not InteractKill. Plain
+// pellets are eaten as in retail (the P1 Collec putting recipe). The Pikmin
+// still hanging on are killed either way (retail endCarry).
+enum class ConsumeOutcome { Destroy, SpareCarcass };
+inline ConsumeOutcome consumeOutcome(bool carcass) {
+    return carcass ? ConsumeOutcome::SpareCarcass : ConsumeOutcome::Destroy;
 }
 
 float roundAng(float angle);

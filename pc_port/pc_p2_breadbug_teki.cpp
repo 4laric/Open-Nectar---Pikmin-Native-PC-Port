@@ -54,7 +54,7 @@ struct Binding {
     int attacksIgnoredPiki = 0, attacksIgnoredNavi = 0;  // backstop leak by attacker kind
     int targetSkips = 0;        // target selections refused (isLivingThing seam)
     std::set<std::string> skipSitesLogged;
-    std::set<Pellet*> spared;   // check-bound carcasses released at the nest (equality only)
+    std::set<Pellet*> spared;   // carcasses released at the nest (equality only)
     int consumed = 0, sparedCount = 0;
     int eventsConsumed = 0;
     int presses = 0, pressesRejected = 0;
@@ -324,13 +324,13 @@ void consumeCargo(BTeki* t, Binding& b, Pellet* p) {
     }
     if (t->getStickObject() == p) p->endStickTeki(t);
     const bool carcass = p->mPelletView != nullptr;
-    // #898 fix: a carcass still owing its randomizer delivery check (live P2
-    // ordinary-delivery binding on its own generator token) is spared, never
-    // destroyed: released at the nest, still carriable, never re-picked by
-    // this Breadbug. Everything else is eaten (retail endCarry).
+    // #898 fix: a teki carcass is spared, never destroyed (consumeOutcome):
+    // released at the nest, still carriable, never re-picked by this
+    // Breadbug. Plain pellets are eaten (retail endCarry). The bound source
+    // is logged to show which delivery check the spare preserved.
     const unsigned boundSource = carcass ? pc_randomizer_p2_source_for(p->mPelletView) : 0u;
     const unsigned boundGen = carcass ? pc_randomizer_p2_generator_for(p->mPelletView) : 0u;
-    const bool destroy = bb::consumeOutcome(carcass, boundSource != 0) == bb::ConsumeOutcome::Destroy;
+    const bool destroy = bb::consumeOutcome(carcass) == bb::ConsumeOutcome::Destroy;
     if (destroy) {
         p->stimulate(InteractKill(t, 0));
         ++b.consumed;
@@ -342,7 +342,7 @@ void consumeCargo(BTeki* t, Binding& b, Pellet* p) {
     std::printf("P2_BREADBUG_OWN_CONSUME generator=%u source_id=38 cargo_carcass=%d cargo_bound_source=%u "
                 "cargo_generator=%u destroyed=%d spared=%s pikmin_killed=%d pellet_alive_after=%d wall=%lld\n",
                 b.generator, carcass ? 1 : 0, boundSource, boundGen, destroy ? 1 : 0,
-                destroy ? "no" : "check_bound", killed, p->isAlive() ? 1 : 0, wallMs());
+                destroy ? "no" : (boundSource ? "carcass_check_bound" : "carcass"), killed, p->isAlive() ? 1 : 0, wallMs());
 }
 
 bool ownTick(BTeki* t, Binding& b, float dt) {
