@@ -28,6 +28,18 @@ DEFINE_ERROR(__LINE__) // Never used in the DLL
  */
 DEFINE_PRINT("MemoryCard")
 
+// (Placed below DEFINE_ERROR(__LINE__) so its line number does not move.)
+#if defined(PIKI_PC_PORT)
+#include "netplay/pc_netplay_loadguard.h"
+// Netplay M4 gap-fix lane S fix round 1 (issue #885): keep-alive entry (see
+// pc_port/netplay/pc_netplay_loadguard.h). The day-end save waits here for the
+// card worker thread inside one netplay session tick, so each turn of the wait
+// lets the session poll the network (rate-limited there, inert outside a
+// session tick). Weak-linked: strong-defined by pc_netplay_session.cpp in
+// netplay builds only; null in the default build.
+__attribute__((weak)) void pc_netplay_load_keepalive(int site);
+#endif
+
 static CARDStat cst;
 static CARDMemoryCard CardWorkArea ATTRIBUTE_ALIGN(32);
 u8 cardData[CARD_DATA_SIZE];
@@ -543,6 +555,7 @@ void MemoryCard::waitPolling()
 	// sin ceder deja el núcleo saturado durante todo el guardado. Cedemos la
 	// CPU igual que `CardUtilIdleWhileBusy()`.
 	while (!hasCardFinished()) {
+		if (pc_netplay_load_keepalive != nullptr) pc_netplay_load_keepalive(pc_netplay_loadguard::kSiteSave);
 		OSYieldThread();
 	}
 #else

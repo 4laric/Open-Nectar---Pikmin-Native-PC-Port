@@ -38,6 +38,7 @@
 #include "../timing/pc_render_phase.h"
 #include "../timing/pc_tick_profiler.h"
 #include "../netplay/pc_netplay_present.h"
+#include "../netplay/pc_netplay_loadguard.h"
 #include "pc_gfx_deferred_tex.h"
 
 #include "../pc_p2_specular_dir.h"
@@ -45,6 +46,11 @@
 #ifdef __ANDROID__
 #include "../android/pc_android.h"
 #endif
+
+// Netplay M4 gap-fix lane S (issue #885) keep-alive entry (see
+// pc_port/netplay/pc_netplay_loadguard.h). Weak-linked: strong-defined by
+// pc_netplay_session.cpp in netplay builds only; null in the default build.
+__attribute__((weak)) void pc_netplay_load_keepalive(int site);
 
 // ── GL Function Pointers (Loaded via SDL_GL_GetProcAddress) ──
 typedef void (APIENTRYP PFNGLGENBUFFERSPROC) (GLsizei n, GLuint *buffers);
@@ -7122,6 +7128,12 @@ static void use_program_for_current_state() {
     printf("[PC GX] specialised TEV program #%zu: %u stages, %.1f ms%s\n",
            sTevPrograms.size() + 1, (unsigned)sNumTevStages, submit_clock_ms() - compileT0,
            program ? "" : " (FAILED)");
+    // Netplay M4 gap-fix lane S (issue #885): a burst of these (65 in ~16 s
+    // under load at a P2 stage start) blocks one session tick; between two
+    // programs the netplay keep-alive polls the network so the peer's
+    // disconnect timer keeps being fed. Weak: null in the default build, and
+    // inert outside a netplay session tick.
+    if (pc_netplay_load_keepalive != nullptr) pc_netplay_load_keepalive(pc_netplay_loadguard::kSiteShader);
     if (!program) {
         // One failure is treated as a permanent fallback: a configuration this
         // generator cannot express must not be retried for every draw.

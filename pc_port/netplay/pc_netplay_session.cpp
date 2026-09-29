@@ -53,14 +53,22 @@
 // PIKMIN_NETPLAY_DELAY frames (default 2) or "auto" (nonce-matched median
 // handshake RTT, ceil((RTT/2)/33.333ms - 0.05)+1 with a 0.05-slot boundary
 // tolerance, clamped 1..8; delay is per-peer, not hashed). Disconnect timeout
-// is PIKMIN_NETPLAY_DISCONNECT_MS (default 15000) so synchronous stage loads
-// survive (N3). Trade-off: a real peer loss now takes ~15 s to detect
-// (GekkoNet wall-clock idle timer); use 5000 only for tests, where a 9 s load
-// must disconnect. No adaptive loading-bit: it would need a handshake or
-// keepalive bit designed across this lane and m4a's input flags; fixed 15000
-// + documented trade-off instead. Handshake wire: stable 7-byte header prefix
-// (magic 4 + type 1 + proto LE16) parsed before the full length check, so a
-// protocol mismatch refuses fast with code 4 instead of a 30 s timeout;
+// is PIKMIN_NETPLAY_DISCONNECT_MS (default 15000) (N3). Trade-off: a real peer
+// loss takes ~15 s to detect (GekkoNet wall-clock idle timer); use 5000 only
+// for tests. Long blocking loads (M4 gap-fix lane S, issue #885): the load
+// guard (pc_netplay_loadguard.h) keeps a loading peer talking with a
+// main-thread keep-alive network poll between the steps of the long loops
+// (TEV program creation, DVD reads, the day-end save's I/O), and raises the
+// timeout to 60 s from each stage load until 30 frames later on both peers (a
+// deterministic window, no message needed); a peer that dies inside that
+// window is detected after the window's timeout instead. The window also
+// changes the old N3 negative control: PIKMIN_NETPLAY_DISCONNECT_MS=5000 with
+// a 9 s PIKMIN_NETPLAY_TEST_LOAD_DELAY_MS no longer disconnects (the load
+// runs under the 60 s window timeout); that control now needs
+// PIKMIN_NETPLAY_LOAD_GUARD=0 (or PIKMIN_NETPLAY_LOAD_WINDOW=0).
+// Handshake wire: stable 7-byte header prefix (magic 4 + type 1 + proto LE16)
+// parsed before the full length check, so a protocol mismatch refuses fast
+// with code 4 instead of a 30 s timeout;
 // PIKMIN_NETPLAY_TEST_PROTOCOL_VERSION overrides the local version and
 // PIKMIN_NETPLAY_TEST_HANDSHAKE_LEN=108 sends the v1 length to exercise the
 // cross-length refuse path. The refuse field is fixed at offset 107 in every
@@ -78,6 +86,7 @@
 #include "netplay/pc_netplay_ice.h"
 #include "netplay/pc_netplay_input_sel.h"
 #include "netplay/pc_netplay_launch.h"
+#include "netplay/pc_netplay_loadguard.h"
 #include "netplay/pc_netplay_pad.h"
 #include "netplay/pc_netplay_present.h"
 #include "netplay/pc_netplay_randstate.h"
@@ -101,6 +110,7 @@
 #include <SDL2/SDL.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -464,6 +474,39 @@ bool sDropFinalAck = false;
 // N3 test hook: PIKMIN_NETPLAY_TEST_LOAD_DELAY_MS sleeps once inside the
 // next stage load on that peer only (see pc_netplay_on_stage_load).
 bool sLoadDelayDone = false;
+// M4 gap-fix lane S (issue #885): load guard (pc_netplay_loadguard.h has the
+// design). sInAdvance is true only while app->idle() runs inside an Advance,
+// the only place the keep-alive may pump. Per-tick figures feed the long-tick
+// log line; session totals feed the stop_session summary. The long loops also
+// run on other threads (the audio / system DVD threads, the loading-screen
+// thread), so the keep-alive acts only on the session's own thread: the
+// thread id is written before the first tick, and sInAdvance (atomic) is set
+// only by that thread, so another thread that sees it true also sees the id.
+std::atomic<bool> sInAdvance{ false };
+std::thread::id sLgMainThread;
+bool sLgConfigured = false;
+bool sLgGuard = true;        // PIKMIN_NETPLAY_LOAD_GUARD (fix round 1: also the save barrier's wait)
+bool sLgKeepAlive = true;
+bool sLgSpeculative = false; // the tick being executed is a rollback / runahead re-run (MN7)
+pc_netplay_loadguard::KeepAliveGate sLgGate;
+pc_netplay_loadguard::LoadWindow sLgWindow;
+pc_netplay_loadguard::StallPlan sLgStall;
+bool sLgStallDone = false;
+uint32_t sLgStageLoads = 0;  // stage loads inside session ticks
+uint32_t sLgTickFrame = 0;   // frame of the tick being executed
+double sLgTickStartMs = 0;   // wall time the current tick's app->idle() began
+double sLgLastPumpMs = 0;    // last network pump inside this tick (or its start)
+double sLgTickMaxGapMs = 0;  // longest stretch without a pump inside this tick
+uint64_t sLgTickPumps = 0;   // keep-alive pumps inside this tick
+uint64_t sLgPumps = 0;       // keep-alive pumps, whole session
+uint64_t sLgSitePumps[pc_netplay_loadguard::kSiteCount] = {}; // ... by call site
+uint64_t sLgWindows = 0;     // load windows opened
+uint64_t sLgLongTicks = 0;   // ticks longer than kLongTickMs
+double sLgLongestTickMs = 0; // longest tick of the session
+double sLgWorstGapMs = 0;    // longest unpumped stretch inside any long tick
+double sLgWindowOpenMs = 0;  // wall time the current window opened
+uint32_t sLgWindowFirst = 0; // frame of the stage load that opened it
+bool sLgSummaryDone = false;
 // Launch lane test hook (B3 evidence): PIKMIN_NETPLAY_TEST_F1_CYCLE_TICK=<n>
 // opens and closes the F1 menu once, right after tick n, which runs the
 // settings save path mid-session.
@@ -1998,8 +2041,12 @@ void inject_neutral_pad(int pad)
 
 uint32_t fold_hash64(uint64_t v) { return (uint32_t)(v ^ (v >> 32)); }
 
+void loadguard_summary(); // M4 gap-fix lane S, defined with the load guard below
+
 void stop_session()
 {
+	loadguard_summary(); // lane S: once per session; no-op unless the session started
+	sInAdvance = false;
 	if (sGekko != nullptr) {
 		GekkoSession* s = sGekko;
 		sGekko          = nullptr;
@@ -3321,6 +3368,228 @@ void answer_handshake_in_session()
 	}
 }
 
+// ---- M4 gap-fix lane S: load guard (issue #885) ----
+// Design and GekkoNet evidence: pc_netplay_loadguard.h. Switches, read once
+// at session start (netplay sessions only):
+//   PIKMIN_NETPLAY_LOAD_GUARD=0        (a) and (b) off, and the day-end save
+//                                      barrier back to B2's fixed 10 s: the
+//                                      pre-fix behaviour, for the runs that
+//                                      show the test bites
+//   PIKMIN_NETPLAY_LOAD_KEEPALIVE=0    (a) off (the keep-alive pump)
+//   PIKMIN_NETPLAY_LOAD_WINDOW=0       (b) off (the load-window extension)
+//   PIKMIN_NETPLAY_LOAD_DISCONNECT_MS  timeout inside a load window (default
+//                                      60000; never below the normal one), and
+//                                      the save barrier's wait for a peer that
+//                                      is still connected (never below 10 s)
+// plus the PIKMIN_NETPLAY_TEST_STALL_* injector (pc_netplay_loadguard.h).
+void loadguard_configure(unsigned normalMs)
+{
+	using namespace pc_netplay_loadguard;
+	const bool guard  = read_unsigned_env("PIKMIN_NETPLAY_LOAD_GUARD", 1) != 0;
+	sLgGuard          = guard;
+	sLgKeepAlive      = guard && read_unsigned_env("PIKMIN_NETPLAY_LOAD_KEEPALIVE", 1) != 0;
+	const bool window = guard && read_unsigned_env("PIKMIN_NETPLAY_LOAD_WINDOW", 1) != 0;
+	sLgWindow.configure(window, normalMs,
+	                    read_unsigned_env("PIKMIN_NETPLAY_LOAD_DISCONNECT_MS", kDefaultLoadDisconnectMs));
+	sLgGate.reset();
+	sLgStallDone = false;
+	sLgStageLoads = 0;
+	sLgPumps = sLgWindows = sLgLongTicks = 0;
+	for (uint64_t& n : sLgSitePumps) n = 0;
+	sLgSpeculative = false;
+	sLgLongestTickMs = sLgWorstGapMs = 0;
+	sLgSummaryDone = false;
+	sInAdvance = false;
+	sLgMainThread = std::this_thread::get_id(); // the session driver's thread
+	std::string err;
+	if (!parse_stall_plan(getenv_nonempty("PIKMIN_NETPLAY_TEST_STALL_MS"), getenv_nonempty("PIKMIN_NETPLAY_TEST_STALL_AT"),
+	                      getenv_nonempty("PIKMIN_NETPLAY_TEST_STALL_ROLE"),
+	                      getenv_nonempty("PIKMIN_NETPLAY_TEST_STALL_SLICE_MS"), &sLgStall, &err))
+		printf("[netplay] test stall: ignored (%s)\n", err.c_str());
+	sLgConfigured = true;
+	const char* ka = sLgKeepAlive ? "on (network poll at most every 50 ms inside a tick)" : "off";
+	if (window)
+		printf("[netplay] load guard: keep-alive=%s load window=on (disconnect timeout %u ms from a stage load until "
+		       "%u frames later, %u ms otherwise)\n",
+		       ka, sLgWindow.load_ms(), (unsigned)kLoadWindowFrames, normalMs);
+	else
+		printf("[netplay] load guard: keep-alive=%s load window=off (disconnect timeout %u ms throughout)\n", ka,
+		       normalMs);
+	printf("[netplay] load guard: day-end save barrier waits up to %u ms for a connected peer%s\n",
+	       barrier_deadline_ms(guard, sLgWindow.load_ms()),
+	       guard ? " (a peer GekkoNet reports disconnected ends it earlier)" : " (B2 fixed wait)");
+	if (sLgStall.enabled) {
+		const char* at = sLgStall.at == StallAt::Load ? "load" : sLgStall.at == StallAt::Shader ? "shader" : "tick";
+		printf("[netplay] test stall: armed at=%s#%llu role=%s total=%ums slice=%ums; this peer %s\n", at,
+		       (unsigned long long)sLgStall.index, stall_role_name(sLgStall.roles), sLgStall.totalMs,
+		       sLgStall.sliceMs, stall_applies_to(sLgStall, sCfg.isHost) ? "stalls" : "does not stall");
+	}
+	fflush(stdout);
+}
+
+// One keep-alive network pump inside a tick: GekkoNet's network layer only
+// (receive, ack, resend unacked inputs, NetworkHealth, idle-timer check; no
+// Advance, no game or session event consumed), as the B2 save barrier does
+// inside its save tick. The bulk channel is left to the next loop turn: it
+// has no idle timer (it resends until acked) and its consumers run between
+// ticks. A disconnect found here is queued as a session event and handled
+// right after this tick (handle_session_events).
+void loadguard_pump(double now, int site)
+{
+	if (sGekko != nullptr) gekko_network_poll(sGekko);
+	if (site >= 0 && site < pc_netplay_loadguard::kSiteCount) ++sLgSitePumps[site];
+	const double gap = now - sLgLastPumpMs;
+	if (gap > sLgTickMaxGapMs) sLgTickMaxGapMs = gap;
+	sLgLastPumpMs = now;
+	sLgGate.pumped(now);
+	++sLgTickPumps;
+	++sLgPumps;
+}
+
+// A network poll made inside a tick by other code (the B2 save barrier's
+// wait loop): counted as a pump for the long-tick figures and the gate.
+void loadguard_note_external_poll()
+{
+	if (!sInAdvance) return;
+	const double now = now_ms();
+	const double gap = now - sLgLastPumpMs;
+	if (gap > sLgTickMaxGapMs) sLgTickMaxGapMs = gap;
+	sLgLastPumpMs = now;
+	sLgGate.pumped(now);
+}
+
+// Keep-alive entry (the public pc_netplay_load_keepalive and the stall
+// slices). Inert outside an Advance tick, and with (a) switched off.
+void loadguard_keepalive(int site)
+{
+	if (!sInAdvance || !sLgKeepAlive || sPhase != kSession || sGekko == nullptr) return;
+	if (std::this_thread::get_id() != sLgMainThread) return; // never from another thread
+	const double now = now_ms();
+	if (!sLgGate.due(now)) return;
+	loadguard_pump(now, site);
+}
+
+// Test stall (wall clock only): slices separated by the keep-alive entry the
+// real long loops call.
+void loadguard_run_stall(const char* where)
+{
+	using namespace pc_netplay_loadguard;
+	sLgStallDone = true;
+	printf("[netplay] test stall: begin role=%s at=%s frame=%u total=%ums slice=%ums keep-alive=%s\n",
+	       sCfg.isHost ? "host" : "join", where, sLgTickFrame, sLgStall.totalMs, sLgStall.sliceMs,
+	       sLgKeepAlive ? "on" : "off");
+	fflush(stdout);
+	const double t0 = now_ms();
+	for (unsigned i = 0;; ++i) {
+		const unsigned ms = stall_slice_ms(sLgStall, i);
+		if (ms == 0) break;
+		if (i > 0) loadguard_keepalive(kSiteStall);
+		std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+	}
+	printf("[netplay] test stall: end after %.0f ms\n", now_ms() - t0);
+	fflush(stdout);
+}
+
+// Called with the stall site; runs the stall once when the plan targets it.
+void loadguard_maybe_stall(pc_netplay_loadguard::StallAt at, uint64_t index, const char* where)
+{
+	if (sLgStallDone || !sInAdvance || sLgSpeculative || !stall_applies_to(sLgStall, sCfg.isHost)) return;
+	if (sLgStall.at != at || sLgStall.index != index) return;
+	loadguard_run_stall(where);
+}
+
+// Around app->idle() inside an Advance. `speculative`: a rolling-back or
+// running-ahead re-run (never in lockstep), which keeps the keep-alive but
+// neither opens, extends nor closes a window nor fires a test stall (MN7).
+void loadguard_tick_begin(uint32_t frame, bool speculative)
+{
+	sLgSpeculative  = speculative;
+	sInAdvance      = true;
+	sLgTickFrame    = frame;
+	sLgTickStartMs  = now_ms();
+	sLgLastPumpMs   = sLgTickStartMs;
+	sLgTickMaxGapMs = 0;
+	sLgTickPumps    = 0;
+	// tick:<n> is the hash tick (GekkoNet frame F is hash tick F+1).
+	loadguard_maybe_stall(pc_netplay_loadguard::StallAt::Tick, (uint64_t)frame + 1, "tick");
+}
+
+void loadguard_tick_end()
+{
+	sInAdvance       = false;
+	const double now = now_ms();
+	const double gap = now - sLgLastPumpMs;
+	if (gap > sLgTickMaxGapMs) sLgTickMaxGapMs = gap;
+	const double tickMs = now - sLgTickStartMs;
+	if (tickMs > sLgLongestTickMs) sLgLongestTickMs = tickMs;
+	if (tickMs > pc_netplay_loadguard::kLongTickMs) {
+		++sLgLongTicks;
+		if (sLgTickMaxGapMs > sLgWorstGapMs) sLgWorstGapMs = sLgTickMaxGapMs;
+		printf("[netplay] long tick: frame=%u took %.0f ms; keep-alive pumps=%llu, longest stretch without a network "
+		       "poll %.0f ms (load window %s)\n",
+		       sLgTickFrame, tickMs, (unsigned long long)sLgTickPumps, sLgTickMaxGapMs,
+		       sLgWindow.is_open() ? "open" : "closed");
+		fflush(stdout);
+	}
+}
+
+// After each completed Advance: close the load window once frame F+30 ran
+// (first executions only: a resimulated frame never closes it).
+void loadguard_after_advance(uint32_t frame, bool speculative)
+{
+	if (speculative || !sLgWindow.after_advance(frame)) return;
+	if (sGekko != nullptr) gekko_set_disconnect_timeout(sGekko, sLgWindow.normal_ms());
+	printf("[netplay] load window: closed at frame=%u (opened at frame=%u, last stage load at frame=%u, %.0f ms "
+	       "open); disconnect timeout %u ms\n",
+	       frame, sLgWindowFirst, sLgWindow.open_frame(), now_ms() - sLgWindowOpenMs, sLgWindow.normal_ms());
+	fflush(stdout);
+}
+
+// Stage load inside a session tick (GameFlow::softReset -> the N3 hook).
+void loadguard_on_stage_load()
+{
+	if (!sInAdvance || sPhase != kSession || sGekko == nullptr) return;
+	if (sLgSpeculative) {
+		// A resimulated stage load (rollback only): keep talking, but the
+		// window, the load count and load:<n> stay keyed to first executions.
+		loadguard_keepalive(pc_netplay_loadguard::kSiteStageLoad);
+		return;
+	}
+	++sLgStageLoads;
+	const bool wasOpen = sLgWindow.is_open();
+	if (sLgWindow.open(sLgTickFrame)) {
+		gekko_set_disconnect_timeout(sGekko, sLgWindow.load_ms());
+		sLgWindowOpenMs = now_ms();
+		sLgWindowFirst  = sLgTickFrame;
+		++sLgWindows;
+		printf("[netplay] load window: open at frame=%u (stage load %u); disconnect timeout %u ms until frame=%u\n",
+		       sLgTickFrame, sLgStageLoads, sLgWindow.load_ms(), sLgWindow.close_frame());
+		fflush(stdout);
+	} else if (wasOpen) {
+		printf("[netplay] load window: stage load %u at frame=%u extends it to frame=%u\n", sLgStageLoads,
+		       sLgTickFrame, sLgWindow.close_frame());
+		fflush(stdout);
+	}
+	loadguard_keepalive(pc_netplay_loadguard::kSiteStageLoad);
+	loadguard_maybe_stall(pc_netplay_loadguard::StallAt::Load, sLgStageLoads, "load");
+}
+
+// Session totals, once (stop_session runs on every exit path).
+void loadguard_summary()
+{
+	if (!sLgConfigured || sLgSummaryDone) return;
+	sLgSummaryDone = true;
+	using pc_netplay_loadguard::site_name;
+	printf("[netplay] load guard summary: keep-alive pumps=%llu (%s=%llu %s=%llu %s=%llu %s=%llu %s=%llu) load "
+	       "windows=%llu long ticks=%llu longest tick=%.0f ms longest stretch without a network poll in a long "
+	       "tick=%.0f ms\n",
+	       (unsigned long long)sLgPumps, site_name(1), (unsigned long long)sLgSitePumps[1], site_name(2),
+	       (unsigned long long)sLgSitePumps[2], site_name(3), (unsigned long long)sLgSitePumps[3], site_name(4),
+	       (unsigned long long)sLgSitePumps[4], site_name(5), (unsigned long long)sLgSitePumps[5],
+	       (unsigned long long)sLgWindows, (unsigned long long)sLgLongTicks, sLgLongestTickMs, sLgWorstGapMs);
+	fflush(stdout);
+}
+
 void start_gekko_session()
 {
 	sGekko = nullptr;
@@ -3399,17 +3668,22 @@ void start_gekko_session()
 	}
 	gekko_set_local_delay(sGekko, sLocalHandle, (unsigned char)sCfg.localDelay);
 	// N3: sessions must survive synchronous stage loads inside app->idle(),
-	// which block GekkoNet pumping for longer than the old 5 s timeout. The
-	// load is synchronous and deterministic (both peers load the same stage
-	// at the same tick), so no input exchange is needed mid-load; the only
-	// failure is the idle timeout firing. Pumping mid-load would need a
-	// second thread driving a non-thread-safe library, and refactoring the
-	// load into pumpable steps touches gameflow/plugPiki/system broadly, so
-	// the chosen design is a larger, configurable timeout (default 15000).
+	// which block the loop turn's GekkoNet pumping. The load is synchronous
+	// and deterministic (both peers load the same stage at the same tick), so
+	// no input exchange is needed mid-load; the only failure is the idle
+	// timeout firing. The normal timeout is PIKMIN_NETPLAY_DISCONNECT_MS
+	// (default 15000). M4 gap-fix lane S (issue #885): a 15 s timeout alone
+	// failed on a ~16 s TEV specialisation under load (integ-m4 section 3.4),
+	// so the load guard (loadguard_configure above; pc_netplay_loadguard.h)
+	// adds (a) a main-thread keep-alive network poll that the long loops call
+	// between their steps (same thread, no Advance, so no second thread and
+	// no load refactor), and (b) a deterministic load-window extension of this
+	// timeout from each stage load to 30 frames later.
 	unsigned disconnectMs = read_unsigned_env("PIKMIN_NETPLAY_DISCONNECT_MS", 15000);
 	if (disconnectMs < 1000) disconnectMs = 1000;
 	gekko_set_disconnect_timeout(sGekko, disconnectMs);
 	printf("[netplay] disconnect timeout: %ums\n", disconnectMs);
+	loadguard_configure(disconnectMs);
 	pc_state_hash_set_netplay_capture(true);
 	load_scripted_file();
 	// Polish DELAY=auto: nonce-matched median RTT (at least 5 samples; the
@@ -3619,7 +3893,10 @@ int handle_game_events(System* sys, BaseApp* app)
 			(void)OSCheckActiveThreads();
 			sys->updateSysClock();
 			pc_netplay_on_tick_begin();
+			loadguard_tick_begin((uint32_t)e->data.adv.frame, // lane S: keep-alive may pump inside
+			                     e->data.adv.rolling_back || e->data.adv.running_ahead);
 			app->idle();
+			loadguard_tick_end();
 			pc_netplay_det_profile_note_tick();
 			pc_input_log_tick_end();
 			pc_state_hash_tick_end();
@@ -3636,6 +3913,8 @@ int handle_game_events(System* sys, BaseApp* app)
 				pc_randomizer_outbox_flush((uint32_t)e->data.adv.frame);
 			sLastAdvanceFrame = (uint32_t)e->data.adv.frame;
 			hold_after_advance(e->data.adv.frame);
+			loadguard_after_advance((uint32_t)e->data.adv.frame,
+			                        e->data.adv.rolling_back || e->data.adv.running_ahead);
 			++sSessionTicks;
 			++advances;
 			++sAdvances;
@@ -3798,6 +4077,17 @@ void pc_netplay_mirror_ledger_send(const uint8_t* data, size_t len)
 // fix round 1 C1/C6):
 //   * no peer message (or ledger) within 10 s of entering the barrier:
 //     `[netplay] save barrier timeout`, exit 6 (today's abandoned day);
+//     M4 gap-fix lane S fix round 1 (MJ1): with the load guard on (the
+//     default), the peer may still be in a long tick of its own up to `delay`
+//     frames back (a TEV burst at sunset, a cold disk, AV scanning its save),
+//     kept alive by the keep-alive poll, so a fixed 10 s was the tightest
+//     liveness timer in the session. The barrier now lets GekkoNet decide
+//     peer death: it abandons the day (exit 6, the same retraction) as soon
+//     as GekkoNet reports the peer disconnected (its idle timer: 15 s, or the
+//     load timeout inside a load window), and otherwise waits up to
+//     pc_netplay_loadguard::barrier_deadline_ms (the load timeout, 60 s by
+//     default), which only ends the wait for a peer that keeps polling but
+//     never arrives. PIKMIN_NETPLAY_LOAD_GUARD=0 keeps the fixed 10 s;
 //   * a different frame, generation or game-file block, or both checkpoints
 //     written with different digests: a desync, exit 5.
 // Before either exit the client retracts the checkpoint it wrote for this
@@ -3812,6 +4102,10 @@ bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long ge
 	if (!sCfg.active || sPhase != kSession) return false;
 	const double t0 = now_ms();
 	const double ioMs = sCurAdvanceStartMs > 0 ? t0 - sCurAdvanceStartMs : 0.0;
+	// Lane S fix round 1 (MJ1): how long to wait for a peer GekkoNet still
+	// reports connected; with the guard on, a GekkoNet disconnect ends it.
+	const bool liveByGekko = sLgGuard;
+	const unsigned deadlineMs = pc_netplay_loadguard::barrier_deadline_ms(sLgGuard, sLgWindow.load_ms());
 	pc_netplay_xfer::SaveResult mine;
 	mine.frame = frame;
 	mine.ok    = localOk ? 1 : 0;
@@ -3832,12 +4126,14 @@ bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long ge
 	const uint8_t waitType = sCfg.isHost ? kBulkSaveAck : kBulkSaveResult;
 	sB2Out.push_back(B2Msg{ sendType, pc_netplay_xfer::encode_save_result(mine) });
 	printf("[netplay] save barrier enter: frame=%u gen=%llu local_ok=%d; this tick's save I/O before the barrier "
-	       "took %.0f ms\n",
-	       frame, gen, (int)mine.ok, ioMs);
+	       "took %.0f ms; waits up to %u ms%s\n",
+	       frame, gen, (int)mine.ok, ioMs, deadlineMs,
+	       liveByGekko ? " while GekkoNet reports the peer connected" : "");
 	fflush(stdout);
 	auto pump = [&]() {
 		bulk_pump();
 		if (sGekko != nullptr) gekko_network_poll(sGekko);
+		loadguard_note_external_poll(); // lane S: long-tick figures count this wait's polls
 	};
 	auto die = [&](int code) {
 		if (code == 5) {
@@ -3890,9 +4186,28 @@ bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long ge
 			ledgerWaitLogged = true;
 		}
 		if (have && ledgerDone) break;
-		if (now_ms() - t0 > 10000.0) {
-			printf("[netplay] save barrier timeout (frame=%u gen=%llu, no %s from the peer within 10 s)\n", frame,
-			       gen, !have ? (sCfg.isHost ? "SAVE_ACK" : "SAVE_RESULT") : "ledger messages");
+		const char* missing = !have ? (sCfg.isHost ? "SAVE_ACK" : "SAVE_RESULT") : "ledger messages";
+		if (liveByGekko && sGekko != nullptr) {
+			// The polls above run GekkoNet's idle check; a peer it dropped
+			// (or that sent Disconnect) is queued as a session event, which
+			// this does not consume (handle_session_events would, after the
+			// tick, but this exits first).
+			int n = 0;
+			GekkoSessionEvent** ev = gekko_session_events(sGekko, &n);
+			for (int i = 0; ev != nullptr && i < n; ++i) {
+				if (ev[i] == nullptr || ev[i]->type != GekkoPlayerDisconnected) continue;
+				printf("[netplay] disconnected: handle=%d (inside the day-end save barrier)\n",
+				       ev[i]->data.disconnected.handle);
+				printf("[netplay] save barrier timeout (frame=%u gen=%llu, no %s: the peer disconnected after "
+				       "%.0f ms in the barrier; GekkoNet timeout %u ms)\n",
+				       frame, gen, missing, now_ms() - t0,
+				       sLgWindow.is_open() ? sLgWindow.load_ms() : sLgWindow.normal_ms());
+				die(6);
+			}
+		}
+		if (now_ms() - t0 > (double)deadlineMs) {
+			printf("[netplay] save barrier timeout (frame=%u gen=%llu, no %s from the peer within %.0f s)\n", frame,
+			       gen, missing, deadlineMs / 1000.0);
 			die(6);
 		}
 		sleep_hires_ms(1.0, 0.0);
@@ -3980,9 +4295,14 @@ void pc_netplay_session_notify_argv(int argc, char** argv)
 // session survives a load longer than the old 5 s timeout. The sleep is
 // wall-clock only: it blocks GekkoNet pumping exactly like a real slow disk,
 // without touching sim state, RNG or hashes. No-op without a netplay switch.
+// M4 gap-fix lane S (issue #885): inside a session tick this hook first opens
+// the load window (b), pumps the keep-alive (a) and runs a load-targeted test
+// stall (PIKMIN_NETPLAY_TEST_STALL_*); the legacy single sleep above stays a
+// plain un-pumped block, so it exercises the load window alone.
 void pc_netplay_on_stage_load(void)
 {
 	if (!sInitialised || !sCfg.active) return;
+	loadguard_on_stage_load();
 	if (sLoadDelayDone) return;
 	const char* e = std::getenv("PIKMIN_NETPLAY_TEST_LOAD_DELAY_MS");
 	if (e == nullptr || *e == '\0') return;
@@ -3995,6 +4315,25 @@ void pc_netplay_on_stage_load(void)
 	std::this_thread::sleep_for(std::chrono::milliseconds(n));
 	printf("[netplay] test load delay: done\n");
 	fflush(stdout);
+}
+
+// M4 gap-fix lane S (issue #885): keep-alive entry for the long main-thread
+// loops (pc_netplay_loadguard.h, part (a)). Called weakly between the steps
+// of a long operation: kSiteShader after each specialised TEV program is
+// created (pc_gfx.cpp), kSiteDvd on DVDOpen/DVDRead (dvd_stubs.cpp), kSiteSave
+// while the day-end save waits for its card I/O (memoryCard.cpp waitPolling,
+// cardutil.cpp CardUtilIdleWhileBusy) and around its checkpoint write
+// (pc_randomizer.cpp; fix round 1, MJ1). Inert
+// unless a netplay session tick is executing: then, at most every 50 ms, one
+// GekkoNet network poll (no Advance, no sim state). The shader site is also
+// where PIKMIN_NETPLAY_TEST_STALL_AT=shader stalls. Null in default builds.
+void pc_netplay_load_keepalive(int site)
+{
+	if (!sInAdvance) return; // outside a session tick (and every non-netplay run)
+	if (std::this_thread::get_id() != sLgMainThread) return; // DVD/audio/loading threads
+	if (site == pc_netplay_loadguard::kSiteShader)
+		loadguard_maybe_stall(pc_netplay_loadguard::StallAt::Shader, 1, "shader");
+	loadguard_keepalive(site);
 }
 
 bool pc_netplay_session_active(void)

@@ -180,9 +180,10 @@ real campaign checkpoint (`session\campaign\<generation>.sav`) and the
 card; the joiner writes the same files as a mirror; the two games then agree
 on the host's result before either continues (a `[netplay] save barrier`
 line in both logs). The joiner's mirror is written as `<generation>.sav.pending`
-and only becomes `<generation>.sav` once the host reports success. If either
-game has not heard from the other within 10 s, the day is abandoned as it
-would be without netplay (exit 6); if the two saves differ, both games stop
+and only becomes `<generation>.sav` once the host reports success. If the
+other game disconnects there (no network traffic for 15 s), or is still
+connected but has not reached the save within 60 s, the day is abandoned as
+it would be without netplay (exit 6); if the two saves differ, both games stop
 with exit 5 (a desync). Either way the joiner renames its unconfirmed mirror
 to `*.sav.unconfirmed` (never deleted), so the next session sees the last
 day both games agreed on and simply receives the host's checkpoint.
@@ -235,6 +236,23 @@ folder), not append the second evening to the first evening's run.
   (`PIKMIN_NETPLAY_TURN=host:port:user:pass` on both sides).
 - `[netplay] input: gamepad #0 is not connected yet`: the pad was not
   plugged in at start; it is picked up as soon as it connects.
+- `[netplay] disconnected: handle=...`: the other game stopped answering
+  for 15 s (60 s while a stage is loading, from the load until 30 frames
+  later), or it quit or crashed. Shader compiles, stage and file loads and
+  the day-end save's card writes keep the connection alive while they run,
+  and a stage load may take up to 60 s even as one uninterrupted step. A
+  slow PC can still drop the session if one single step outside a stage
+  load (for example one very slow disk write, or a driver hang) freezes the
+  game for more than 15 s. `[netplay] long tick: ...` lines show any tick
+  that blocked for more than 2 s and how often the network was polled during
+  it. If a stage load freezes one PC just before a pause for a lost
+  Archipelago link, a crashed partner is reported after 60 s instead of 15 s
+  until the pause ends.
+- `[netplay] save barrier timeout ...` (exit 6): at the end of a day both
+  games save and compare the result. The other game disconnected there, or
+  it did not reach the save within 60 s while still connected; that day is
+  not saved, and the next session continues from the last day both games
+  saved.
 - Logs: the console output (or your `> file` redirect; `native.log` in the
   local test), plus the run folder `netplay\run-...\` next to the exe.
 

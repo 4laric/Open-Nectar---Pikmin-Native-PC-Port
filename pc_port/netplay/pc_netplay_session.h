@@ -43,5 +43,15 @@ const char* pc_netplay_session_config_text(void);
 
 // N3 stage-load hook: called (weakly) from GameFlow::softReset inside the
 // synchronous load. Strong-defined here in netplay builds only; null in the
-// default build. Implements PIKMIN_NETPLAY_TEST_LOAD_DELAY_MS (sleep once).
+// default build. Implements PIKMIN_NETPLAY_TEST_LOAD_DELAY_MS (sleep once),
+// and, inside a session tick, the load guard's load window and load-targeted
+// test stall (M4 gap-fix lane S, pc_netplay_loadguard.h).
 void pc_netplay_on_stage_load(void);
+
+// M4 gap-fix lane S (issue #885): keep-alive entry for long main-thread loops
+// (site = pc_netplay_loadguard::Site). Called weakly from pc_gfx.cpp (TEV
+// program creation), dvd_stubs.cpp (DVDOpen/DVDRead) and the day-end save
+// (memoryCard.cpp / cardutil.cpp card I/O waits, pc_randomizer.cpp checkpoint
+// write; fix round 1); inert outside a netplay session tick. Null in the
+// default build.
+void pc_netplay_load_keepalive(int site);
