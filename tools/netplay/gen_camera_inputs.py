@@ -22,7 +22,9 @@ Two modes:
           --attention-at F (L click). Each option may repeat. The control yaw
           stays 0. Record i is the peer's i-th submitted input: it lands on
           GekkoNet frame i + delay, and the lead camera shows it on the
-          frame it is submitted.
+          frame it is submitted. Fix round 1: --start-at F (Start click; on
+          the host it opens the pause menu) and --a-at F (A click; "Continue"
+          in the pause menu) for the pause-cut evidence.
 """
 
 import argparse
@@ -45,6 +47,8 @@ TRIG_Z = gen_inputs.TRIG_Z
 TRIG_R = gen_inputs.TRIG_R
 TRIG_L = gen_inputs.TRIG_L
 BTN_X = gen_inputs.BTN_X
+BTN_A = gen_inputs.BTN_A
+BTN_START = 0x1000  # PAD_BUTTON_START (Dolphin/pad.h)
 
 
 def _pack(buttons, sx, sy, cx, cy, tl, tr, connected, yaw):
@@ -130,7 +134,8 @@ def heavy(ticks: int, seed: int):
         yield (buttons, sx, sy, cx, cy, tl, tr, int(yaw * 65536.0 + 0.5))
 
 
-def probe(ticks: int, turns, turn_len: int, turn_stick: int, turn_trigger: int, zooms, angles, attentions):
+def probe(ticks: int, turns, turn_len: int, turn_stick: int, turn_trigger: int, zooms, angles, attentions,
+          starts=(), a_presses=()):
     events = {}
     for f in turns:
         for i in range(turn_len):
@@ -144,6 +149,15 @@ def probe(ticks: int, turns, turn_len: int, turn_stick: int, turn_trigger: int, 
     for f in attentions:
         events.setdefault(f, []).append("attention")
         events.setdefault(f + 1, []).append("attention")
+    # Fix round 1 (evidence review E1): Start opens the pause menu (host
+    # pad only: newPikiGame reads P1's Kontroller), A on its first item,
+    # "Continue", closes it.
+    for f in starts:
+        events.setdefault(f, []).append("start")
+        events.setdefault(f + 1, []).append("start")
+    for f in a_presses:
+        events.setdefault(f, []).append("a")
+        events.setdefault(f + 1, []).append("a")
     for t in range(ticks):
         buttons, sx, tl, tr = 0, 0, 0, 0
         for ev in events.get(t, ()):
@@ -158,6 +172,10 @@ def probe(ticks: int, turns, turn_len: int, turn_stick: int, turn_trigger: int, 
             elif ev == "attention":
                 buttons |= TRIG_L
                 tl = 200
+            elif ev == "start":
+                buttons |= BTN_START
+            elif ev == "a":
+                buttons |= BTN_A
         yield (buttons, sx, 0, 0, 0, tl, tr, 0)
 
 
@@ -175,6 +193,10 @@ def main(argv=None):
     p.add_argument("--zoom-at", type=int, action="append", default=[])
     p.add_argument("--angle-at", type=int, action="append", default=[])
     p.add_argument("--attention-at", type=int, action="append", default=[])
+    p.add_argument("--start-at", type=int, action="append", default=[],
+                   help="probe: Start click (2 records) at this record; opens the pause menu on the host")
+    p.add_argument("--a-at", type=int, action="append", default=[],
+                   help="probe: A click (2 records) at this record; picks 'Continue' in the pause menu")
     a = p.parse_args(argv)
     if a.ticks <= 0:
         print("gen_camera_inputs: --ticks must be positive", file=sys.stderr)
@@ -183,7 +205,7 @@ def main(argv=None):
         n = _write(a.out, heavy(a.ticks, a.seed))
     else:
         n = _write(a.out, probe(a.ticks, a.turn_at, a.turn_len, _clamp8(a.turn_stick), max(0, min(255, a.turn_trigger)),
-                                a.zoom_at, a.angle_at, a.attention_at))
+                                a.zoom_at, a.angle_at, a.attention_at, a.start_at, a.a_at))
     print(f"gen_camera_inputs: wrote {n} {a.mode} records to {a.out}")
     return 0
 

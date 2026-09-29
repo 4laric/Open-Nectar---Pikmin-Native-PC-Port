@@ -185,8 +185,17 @@ def main(argv=None):
                 summary = [ln for ln in log.splitlines() if "camera lead summary" in ln]
                 print(f"camera_lead_probe: delay {delay} {mode} {peer}: START_STAGE={starts} tuples={len(tuples)} "
                       f"{summary[-1].split('] ', 1)[-1] if summary else 'no summary'}")
-                if starts < 1:
+                if starts < 1 or not summary:
                     failures += 1
+                    continue
+                # Fix round 1: contract counters that must stay 0 (review
+                # m4: view reached in the authoritative pass; review M2: a
+                # missing landing frame in the pending window).
+                counters = dict(re.findall(r"(\w+)=(\d+)(?:\s|$)", summary[-1]))
+                for key in ("sim_saw_lead", "view_in_auth", "gaps"):
+                    if counters.get(key, "0") != "0":
+                        print(f"camera_lead_probe: delay {delay} {mode} {peer}: {key}={counters[key]} (must be 0)")
+                        failures += 1
         # Hash logs: lead vs opt-out, per peer (the same inputs); in live-yaw
         # mode the two runs submit different yaws, so each run's host and
         # joiner logs are compared instead.
