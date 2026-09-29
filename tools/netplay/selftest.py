@@ -344,8 +344,12 @@ def main():
         check(argv[argv.index("--host-state-script") + 1] == str(st)
               and argv[argv.index("--join-state-script") + 1] == str(st)
               and argv[argv.index("--env") + 1] == f"PIKMIN_NETPLAY_TEST_COOP_EVENTS={ev}"
-              and "A=1" in argv and ev.read_text().splitlines()[1:] == ["40 HP 2 0.5", "1000 DOWN 1"],
-              "coop_policy_pair --acceptance passes the built-in schedule and events")
+              and "A=1" in argv and ev.read_text().splitlines()[1:] == ["40 HP 2 0.5", "1000 DOWN 1"]
+              and argv[argv.index("--profile") + 1] == "impact-day2",
+              "coop_policy_pair --acceptance passes the built-in schedule, events and profile")
+        argv2 = coop_policy_pair.acceptance_argv(["--profile", "navel-day2"], tmp / "acc2", [])
+        check(argv2.count("--profile") == 1 and argv2[1] == "navel-day2",
+              "coop_policy_pair --acceptance keeps an explicit --profile")
         check(coop_policy_pair.wall_clock_deathlink_steps(st) == [],
               "the built-in acceptance schedule keys every DeathLink rise to a frame")
         wall = tmp / "states-wall.txt"

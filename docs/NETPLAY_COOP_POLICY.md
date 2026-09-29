@@ -129,4 +129,8 @@ lockstep peers agree. Co-op-only log lines start with `[coop-policy]`.
   DeathLink at tick 1200 after the tick-1000 down, a bomb trap and a fifth
   shower at tick 1800) and the built-in events (`40 HP 2 0.5`,
   `1000 DOWN 1`); a user schedule that raises DEATHLINK on a wall-clock key
-  is refused.
+  is refused. Without `--profile` it runs on `impact-day2`: on `foh-day2` the
+  landing-site slopes make ring placements fail at random along the scripted
+  walk and the co-op start loses most field Pikmin early, which turns the
+  round-robin and DeathLink assertions into input luck. Hands-off inputs do not
+  work either: the first-nectar tutorial is modal and needs an input.

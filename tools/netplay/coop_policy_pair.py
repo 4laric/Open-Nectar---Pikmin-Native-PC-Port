@@ -32,7 +32,18 @@ scripted `1000 DOWN 1`, and the run failed. So:
   PIKMIN_NETPLAY_TEST_COOP_EVENTS it also writes and passes
   ACCEPTANCE_EVENTS (`40 HP 2 0.5`, `1000 DOWN 1`);
 * --acceptance with a user schedule refuses (before launching) any entry
-  that raises DEATHLINK on a wall-clock key.
+  that raises DEATHLINK on a wall-clock key;
+* --acceptance without --profile runs on impact-day2 (ACCEPTANCE_PROFILE).
+  The assertions are about policy decisions, not terrain: on foh-day2 the
+  slopes around the landing site make the 50-unit Flower Shower ring fail
+  at random along the scripted random walk (a gapfix C run logged
+  `ANCHOR_SKIP ... why=ring-height` for P1 twice, so no both-live hand-over
+  happened before the tick-1000 down), and B1 measured that a foh-day2 co-op
+  start loses most of its field Pikmin within ~60 s, which starves the
+  DeathLink. impact-day2 keeps both captains on flat ground and the squad
+  alive. Hands-off inputs are not an option: the first-nectar tutorial
+  (tu_tx29) is a modal window that only an input dismisses, and while it is
+  up the randomizer tick (and so the DeathLink) never runs.
 
 Gapfix C (issue #885) HOLD check, always on: for every synchronized HOLD in
 a peer's log, no grant or policy decision may appear between its
@@ -70,6 +81,7 @@ ACCEPTANCE_STATES = (
     "f1800 PIKMIN_STATE 9 {TOKEN} 1 0 127 0 CHECKS 0 BENEFITS 0 5 1 0 0 0 1 0 0 DEATHLINK 1 END\n"
 )
 ACCEPTANCE_EVENTS = "# P2 hurt early, P1 knocked down at co-op tick 1000\n40 HP 2 0.5\n1000 DOWN 1\n"
+ACCEPTANCE_PROFILE = "impact-day2"
 DEATHLINK_RE = re.compile(r"\bDEATHLINK (\d+)\b")
 
 
@@ -92,6 +104,9 @@ def acceptance_argv(argv, out, env_items):
     and events file when the caller passed none. Returns the new argv."""
     argv = list(argv)
     out.mkdir(parents=True, exist_ok=True)
+    if "--profile" not in argv:
+        argv += ["--profile", ACCEPTANCE_PROFILE]
+        print(f"coop_policy_pair: acceptance: profile {ACCEPTANCE_PROFILE} (flat landing site, squad survives)")
     if "--host-state-script" not in argv:
         states = out / "acceptance-states.txt"
         states.write_text(ACCEPTANCE_STATES)
