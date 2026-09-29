@@ -167,6 +167,12 @@ def run_session(ctx, name, ticks, host_extra=(), host_env=None, join_env=None, e
     jenv = dict(common, PIKMIN_STATE_HASH_LOG=str(join_hash), PIKMIN_NETPLAY_LOCAL_INPUT_FILE=str(jin),
                 PIKMIN_NETPLAY_ICE_PORT_BEGIN=str(a.port_base + 10),
                 PIKMIN_NETPLAY_ICE_PORT_END=str(a.port_base + 19), PIKMIN_NETPLAY_DELAY=str(a.delay_join))
+    if a.hud_shot_frames:
+        for side, env in (("host", henv), ("join", jenv)):
+            shots = out / f"shots-{side}"
+            shots.mkdir()
+            env["PIKMIN_NETPLAY_TEST_HUD_SHOT"] = str(shots)
+            env["PIKMIN_NETPLAY_TEST_HUD_SHOT_FRAME"] = a.hud_shot_frames
     henv.update(host_env or {})
     jenv.update(join_env or {})
     host_args = ["--netplay-host-ice", "--netplay-code-out", str(offer), "--netplay-answer-in", str(answer),
@@ -377,6 +383,16 @@ def scenario_dayend(ctx, kind):
     continue_ok(ctx, s2, "s2", host_run)
     gameplay_ok(ctx, s2, "s2", a.min_distinct)
     ctx.check(s2["exit"] == {"host": 0, "join": 0}, f"s2: both exit 0 ({s2['exit']})")
+    if kind == "clean" and not a.skip_s3:
+        # S3: `--continue <run folder>` naming S1's JOINER run: its mirror
+        # campaign is the same campaign, so either player can host next.
+        join_run = s1["join"]["run_dir"]
+        jbefore = folder_digest(join_run)
+        s3 = run_session(ctx, "s3", a.nosave_ticks, host_extra=["--continue", join_run], expect="sync")
+        ctx.check(bool(jbefore) and folder_digest(join_run) == jbefore, "s3: the named joiner run folder is unchanged")
+        continue_ok(ctx, s3, "s3", join_run)
+        gameplay_ok(ctx, s3, "s3", a.min_distinct // 2)
+        ctx.check(s3["exit"] == {"host": 0, "join": 0}, f"s3: both exit 0 ({s3['exit']})")
 
 
 def scenario_nosave(ctx):
@@ -438,6 +454,10 @@ def main(argv=None):
     p.add_argument("--nosave-ticks", type=int, default=1500)
     p.add_argument("--min-distinct", type=int, default=1000)
     p.add_argument("--timeout", type=float, default=2400)
+    p.add_argument("--hud-shot-frames", default="",
+                   help="comma list of frames: both peers write HUD captures to <session>/shots-<side>/ "
+                        "(and banner.bmp on an end banner)")
+    p.add_argument("--skip-s3", action="store_true", help="clean: skip the --continue <joiner run> session")
     p.add_argument("--code-timeout", type=float, default=180)
     a = p.parse_args(argv)
     ctx = Ctx(a, a.scenario)
