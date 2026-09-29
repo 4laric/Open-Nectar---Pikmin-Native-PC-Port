@@ -211,6 +211,11 @@ public:
     // landed this update (or -1) for diagnostics.
     int update(const Vec3& ownerPos, float ownerFace, const Vec3& target, float dt);
     const Vec3& centre() const { return mCentre; }
+    // IKSystemMgr::mTraceCentrePosition: a damped spring (calcTraceCentre-
+    // Position) that follows the foot-average centre. The source draws the
+    // body there (BigTreasure doAnimationIKSystem) while mPosition, and so
+    // collision and gameplay, is the raw centre, which sways with each step.
+    const Vec3& traceCentre() const { return mTrace; }
     float faceDir() const { return mFaceDir; }
     int legState(int leg) const { return mLegState[leg]; }
     float moveRatio(int leg) const { return mLeg[leg].ratio; }
@@ -233,6 +238,7 @@ private:
     int mLegState[4] = {0, 0, 0, 0};
     bool mActive = false, mInMotion = false, mOnGround = false;
     Vec3 mCentre;
+    Vec3 mTrace, mTraceVel;
     float mFaceDir = 0.0f;
     int mSteps = 0;
 };

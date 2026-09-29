@@ -1991,6 +1991,10 @@ bool BTeki::interact(immut TekiInteractionKey& key)
 	// collision tree to a weapon or, unarmed, the body). The P1 host
 	// strategy (TaiSwallow: lower-body damage scaling, stored damage) must not
 	// see it, so the raw hit is recorded here, before strategy dispatch.
+	// This intercepts EVERY Attack interaction on a bound Titan, not only
+	// Pikmin ones: captain punches and P1 bomb-rock blasts also stop here and
+	// never reach TaiSwallow. The core then ignores them, as the source does
+	// (BigTreasure::damageCallBack only accepts creature->isPiki()).
 	if (key.mInteractionType == TekiInteractType::Attack && pc_p2_bigtreasure_teki_is_bound(this)) {
 		InteractAttack* attack = (InteractAttack*)key.mInteraction;
 		if (getTekiOption(TEKIOPT_Invincible)) {

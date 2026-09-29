@@ -281,7 +281,8 @@ void Gait::init(const GaitParams& params, const LegLayout& legs, const Vec3& pos
     for (int i = 0; i < 4; ++i) mLegAngle[i] = legs.angle[i];
     mDistance = legs.distance;
     mActive = mInMotion = mOnGround = false;
-    mCentre = position;
+    mCentre = mTrace = position;
+    mTraceVel = {};
     mFaceDir = round0(faceDir);
     mSteps = 0;
     for (int i = 0; i < 4; ++i) {
@@ -366,7 +367,7 @@ void Gait::setNextCentrePosition(const Vec3& ownerPos, float ownerFace, const Ve
 
 int Gait::update(const Vec3& ownerPos, float ownerFace, const Vec3& target, float dt) {
     if (!mActive) {
-        mCentre = ownerPos;
+        mCentre = mTrace = ownerPos; // calcTraceCentrePosition, IK inactive
         mFaceDir = round0(ownerFace);
         return -1;
     }
@@ -423,6 +424,16 @@ int Gait::update(const Vec3& ownerPos, float ownerFace, const Vec3& target, floa
     c.x *= 0.25f;
     c.z *= 0.25f;
     mCentre = c;
+    // calcTraceCentrePosition (IKSystemMgr.cpp:474-487), IKSystemParms
+    // defaults mTraceMoveRate 0.1 / mTraceVelocityDampingFactor 0.7 (the
+    // landing height kick only moves y, which the host owns here).
+    mTraceVel.x += (mCentre.x - mTrace.x) * 0.1f;
+    mTraceVel.z += (mCentre.z - mTrace.z) * 0.1f;
+    mTrace.x += mTraceVel.x;
+    mTrace.z += mTraceVel.z;
+    mTrace.y = mCentre.y;
+    mTraceVel.x *= 0.7f;
+    mTraceVel.z *= 0.7f;
     return landed;
 }
 

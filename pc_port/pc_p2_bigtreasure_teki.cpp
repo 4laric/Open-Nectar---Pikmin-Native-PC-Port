@@ -6,6 +6,7 @@
 #include "pc_p2_navi_select.h"
 #include "pc_p2_species.h"
 #include "pc_p2_animation.h"
+#include "pc_p2_test_day_cycle.h"
 #include "pc_bbft.h"
 #include "Collision.h"
 #include "Generator.h"
@@ -64,11 +65,9 @@ struct OwnColl {
 
 struct Binding {
     unsigned generator = 0;
+    Vector3f hold;             // bind position: Stay/Land keep the host here
     Fsm fsm;
     OwnColl coll;
-    bool anchorValid = false;  // hardConstraintOn: the host must not be pushed
-    Vector3f anchor;
-    bool moving = false;
     int recvStim = 0, recvAccepted = 0, recvNaviFallback = 0;
     std::vector<Hit> pending;   // hits recorded by interactDefault since the last tick
     float debt = 0.0f;         // 30 Hz source clock debt
@@ -97,8 +96,9 @@ std::map<BTeki*, int> sDrawLogged;
 std::vector<CollNode> sColl;          // retail enemycoll.txt (pre-order)
 bool sSetupDone = false;              // late spawns bind lazily after setup
 std::set<BTeki*> sConsidered;         // actors already checked for a lazy bind
-// Host CollInfo per actor that currently wears an own CollInfo. Survives
-// reset() so a pooled actor always gets its host tree back on forget.
+// Host CollInfo per actor that currently wears an own CollInfo. forget()
+// restores it on the death funnel / pool reuse; reset() (stage boundary)
+// restores every remaining entry and clears the map.
 std::map<BTeki*, CollInfo*> sHostColl;
 
 u32 fourcc(const std::string& id) {
@@ -387,6 +387,7 @@ void applyOutput(BTeki* t, Binding& b, const Snapshot& snap, const TickOutput& o
     }
     for (int w = 0; w < P2BTWEAPON_Count; ++w) {
         if (!o.weaponHits[w]) continue;
+        pc_p2_test_day_cycle_note("hurt");
         std::printf("P2_BIGTREASURE_DAMAGE generator=%u source_id=73 part=%s hits=%d damage=%.1f hp=%.1f state=%s%s\n",
                     b.generator, weaponName(w), o.weaponHits[w], o.weaponDamage[w], b.fsm.ownership().weaponHealth(w),
                     stateName(b.fsm.state()), o.pinchSmoke[w] ? " pinch=1" : "");
@@ -484,8 +485,22 @@ void setupCollisionCodes(Binding& b) {
     }
 }
 
-void updateColl(Binding& b) {
+void updateColl(BTeki* t, Binding& b) {
     if (!b.coll.own) return;
+    // CollPart::getMatrix() = invCamMat * mJointMatrix (+ centre). Give every
+    // part mJointMatrix = R(invCamMat)^T * yaw so gameplay reads (stuck
+    // Pikmin) get the Titan yaw whether or not it was drawn this frame; the
+    // draw pass writes the same product for its own camera.
+    {
+        Matrix4f yaw, camRot, camYaw;
+        yaw.makeSRT(Vector3f(1.0f, 1.0f, 1.0f), Vector3f(0.0f, t->getDirection(), 0.0f), Vector3f(0.0f, 0.0f, 0.0f));
+        camRot.makeIdentity();
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 3; ++c) camRot.mMtx[r][c] = invCamMat.mMtx[c][r];
+        camRot.multiplyTo(yaw, camYaw);
+        for (CollPart* part : b.coll.parts)
+            if (part) part->mJointMatrix = camYaw;
+    }
     for (std::size_t i = 0; i < b.coll.parts.size(); ++i) {
         CollPart* part = b.coll.parts[i];
         if (!part) continue;
@@ -542,7 +557,7 @@ bool buildColl(BTeki* t, Binding& b) {
     t->mPlatMgr.release();
     sHostColl[t] = oc.host;
     setupCollisionCodes(b);
-    updateColl(b);
+    updateColl(t, b);
     std::printf("P2_BIGTREASURE_COLL_BIND generator=%u source_id=73 parts=%zu tubes=%d host_parts_replaced=1\n",
                 b.generator, oc.parts.size(), tubes);
     return true;
@@ -575,20 +590,21 @@ void stepDropped(Binding& b, float dt) {
 
 // Live tick. Returns true once the host teardown ran.
 bool ownTick(BTeki* t, Binding& b, float dt) {
-    // hardConstraintOn: the source Titan is never pushed. Weight 0 already
-    // stops P1 collision impulses (getiMass); a standing Titan is also held
-    // on its anchor against anything else that moves the host.
-    if (!b.moving) {
-        if (!b.anchorValid) {
-            b.anchor = t->mSRT.t;
-            b.anchorValid = true;
-        } else {
-            t->mSRT.t.x = b.anchor.x;
-            t->mSRT.t.z = b.anchor.z;
-            t->mVolatileVelocity.x = t->mVolatileVelocity.z = 0.0f;
-        }
-    } else {
-        b.anchorValid = false;
+    // hardConstraintOn: the source Titan is never pushed. Weight 0 stops P1
+    // collision impulses (getiMass() == 0) and no knockback velocity is kept.
+    // While the IK runs the host position is never written: it follows the IK centre
+    // through the velocity below, exactly as BigTreasure::doUpdate sets
+    // mPosition = IKSystemMgr::mCentrePosition. (An earlier standing-anchor
+    // pin sampled "moving" from the last source sub-tick; #246 review.)
+    t->mVolatileVelocity.x = t->mVolatileVelocity.z = 0.0f;
+    // Before Land's startProgramedIK the IK is off and the source Titan does
+    // not move at all (Stay/Land at its birth point); the P1 host would
+    // otherwise settle a few units on the arena slope. Keyed on the FSM
+    // state, not on sampled velocity. Once the IK runs, the host tracks the
+    // IK centre through the velocity below and is never written.
+    if (!b.fsm.gait().active()) {
+        t->mSRT.t.x = b.hold.x;
+        t->mSRT.t.z = b.hold.z;
     }
     b.debt += dt;
     int ticks = int(b.debt / kSourceDelta);
@@ -632,14 +648,13 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         // Movement/facing are the gait's; the P1 host integrates them.
         t->setDirection(o.faceDir);
         const Vector3f drive(o.velocity.x, 0.0f, o.velocity.z);
-        b.moving = drive.x != 0.0f || drive.z != 0.0f;
         t->inputDrive(drive);
         t->mVelocity.x = drive.x;
         t->mVelocity.z = drive.z;
         kill = o.killRequest;
         if (!o.drops.empty()) setupCollisionCodes(b);
     }
-    updateColl(b);
+    updateColl(t, b);
     stepDropped(b, dt);
     if (t->mHealth > 0.0f) t->updateLifeGauge();
     b.logTimer += dt;
@@ -656,12 +671,13 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         }
         std::printf("P2_BIGTREASURE_POS generator=%u source_id=73 state=%s anim=%s frame=%.0f x=%.1f z=%.1f face=%.2f "
                     "target=%.1f,%.1f home=%.1f,%.1f health=%.1f weapons=%d hp=%.0f/%.0f/%.0f/%.0f stuck=%d steps=%d "
-                    "stuck_weapon=%d stuck_body=%d ik=%d flick=%.0f limit=%.2f ignored=%d\n",
+                    "stuck_weapon=%d stuck_body=%d ik=%d flick=%.0f limit=%.2f ignored=%d centre=%.1f,%.1f trace=%.1f,%.1f\n",
                     b.generator, stateName(f.state()), animClipName(f.animator().anim()) ? animClipName(f.animator().anim()) : "-",
                     f.animator().frame(), p.x, p.z, t->getDirection(), f.targetPosition().x, f.targetPosition().z,
                     f.home().x, f.home().z, t->mHealth, f.ownership().weaponCount(), f.ownership().weaponHealth(0),
                     f.ownership().weaponHealth(1), f.ownership().weaponHealth(2), f.ownership().weaponHealth(3), stuck,
-                    f.gait().steps(), onWeapon, onBody, f.gait().active() ? 1 : 0, f.flickTimer(), f.attackLimitTimer(), b.ignored);
+                    f.gait().steps(), onWeapon, onBody, f.gait().active() ? 1 : 0, f.flickTimer(), f.attackLimitTimer(), b.ignored,
+                    f.gait().centre().x, f.gait().centre().z, f.gait().traceCentre().x, f.gait().traceCentre().z);
     }
     std::fflush(stdout);
     if (kill && !b.escaped) {
@@ -682,6 +698,19 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
 
 void pc_p2_bigtreasure_teki_reset() {
     const int before = int(s.size());
+    // Stage boundary (pc_p2_reset_all_teki runs while every stage creature is
+    // still valid): hand each bound actor its host CollInfo back and drop the
+    // map. Keeping entries across the stage heap reset let the next day's
+    // TekiMgr::newTeki -> forget write yesterday's freed CollInfo into a new
+    // Teki that reused the address (#246 re-entry review).
+    int restored = 0;
+    for (auto& e : sHostColl) {
+        if (e.first && e.second) {
+            e.first->mCollInfo = e.second;
+            ++restored;
+        }
+    }
+    sHostColl.clear();
     s.clear();
     sDrawLogged.clear();
     sConsidered.clear();
@@ -690,8 +719,8 @@ void pc_p2_bigtreasure_teki_reset() {
     for (Shape*& p : sPellet) p = nullptr;
     sPosesLoaded = false;
     sReady = false;
-    if (before > 0) {
-        std::printf("P2_BIGTREASURE_TEKI_RESET bound_before=%d\n", before);
+    if (before > 0 || restored > 0) {
+        std::printf("P2_BIGTREASURE_TEKI_RESET bound_before=%d host_coll_restored=%d\n", before, restored);
         std::fflush(stdout);
     }
 }
@@ -700,6 +729,10 @@ void pc_p2_bigtreasure_teki_forget(BTeki* t) {
     if (!t) return;
     restoreHostColl(t);
     sConsidered.erase(t);
+    {
+        auto it = s.find(t);
+        if (it != s.end() && it->second.began) pc_p2_test_day_cycle_note("delivered");
+    }
     if (s.erase(t) > 0) {
         std::printf("P2_BIGTREASURE_TEKI_FORGET remaining=%d\n", int(s.size()));
         std::fflush(stdout);
@@ -780,6 +813,7 @@ bool bindActor(BTeki* t, const char* when) {
     b = Binding{};
     b.generator = gen;
     const Vector3f pos = t->getPosition();
+    b.hold = pos;
     b.fsm.init(sParams, sBank, sAnimator, {pos.x, pos.y, pos.z}, t->getDirection(), (gen * 2654435761u) | 1u);
     t->mHealth = sParams.health;
     b.lastHealth = t->mHealth;
@@ -897,6 +931,17 @@ bool pc_p2_bigtreasure_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, 
             if (part) part->mJointMatrix = camYaw;
     }
     const bool dead = corpse || b.began || t->mDeadState != 0;
+    // The source draws the living body at the IK trace centre, a damped
+    // spring behind the foot-average centre that the host (mPosition)
+    // follows (BigTreasure::doAnimationIKSystem). view = L * T(host) R S, so
+    // moving the model by d is view + L_rot * d in the translation column.
+    Matrix4f bodyView = view;
+    if (!dead && b.fsm.gait().active()) {
+        const Vec3& tr = b.fsm.gait().traceCentre();
+        const float d[3] = {tr.x - t->mSRT.t.x, 0.0f, tr.z - t->mSRT.t.z};
+        const Matrix4f& L = gfx.mCamera->mLookAtMtx;
+        for (int r = 0; r < 3; ++r) bodyView.mMtx[r][3] += L.mMtx[r][0] * d[0] + L.mMtx[r][2] * d[2];
+    }
     int anim = b.fsm.animator().anim();
     float frame = b.fsm.animator().frame();
     bool last = false;
@@ -915,7 +960,7 @@ bool pc_p2_bigtreasure_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, 
         for (std::size_t k = 1; k < poses.size() && k < sPoses[anim].size(); ++k)
             if (std::fabs(float(poses[k].frame) - frame) < std::fabs(float(poses[best].frame) - frame)) best = k;
     Shape* shape = sPoses[anim][best];
-    shape->updateAnim(gfx, view, nullptr, t);
+    shape->updateAnim(gfx, bodyView, nullptr, t);
     pc_gfx_specular_family_scope(1);
     shape->drawshape(gfx, *gfx.mCamera, nullptr);
     // Captured weapons ride the staged pose's otakara_* joint (model space).
@@ -930,7 +975,7 @@ bool pc_p2_bigtreasure_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, 
             joint.mMtx[3][0] = joint.mMtx[3][1] = joint.mMtx[3][2] = 0.0f;
             joint.mMtx[3][3] = 1.0f;
             Matrix4f pelletView;
-            view.multiplyTo(joint, pelletView);
+            bodyView.multiplyTo(joint, pelletView);
             sPellet[w]->updateAnim(gfx, pelletView, nullptr, nullptr);
             sPellet[w]->drawshape(gfx, *gfx.mCamera, nullptr);
             ++drawn;

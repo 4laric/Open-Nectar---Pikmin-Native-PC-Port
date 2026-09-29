@@ -221,6 +221,37 @@ void testGait() {
     const float turned = std::fabs(std::remainder(t.faceDir(), kTau));
     CHECK(turned > 0.8f && turned < 1.3f, "gait/turns_in_place_by_max_turn");
     CHECK(std::fabs(t.centre().x) < 5.0f && std::fabs(t.centre().z) < 5.0f, "gait/turn_keeps_centre");
+
+    // #246 review ("the Titan snaps back to its spawn point"): turning in
+    // place moves one foot at a time, so the foot-average centre (the source
+    // mPosition, which the host follows) swings away mid-cycle and returns to
+    // the cycle start once all four feet have stepped. It is continuous: no
+    // single source tick moves it far. The drawn body rides the damped trace
+    // centre, which swings less.
+    Gait w;
+    w.init(gp, legs, {0, 0, 0}, 0.0f);
+    w.startProgramedIK({0, 0, 0}, 0.0f);
+    w.startIKMotion();
+    float swing = 0.0f, traceSwing = 0.0f, maxStep = 0.0f;
+    Vec3 prevC = w.centre();
+    int turnCycles = 0, lastLeg = 0;
+    for (int i = 0; i < 4000 && turnCycles < 2; ++i) {
+        w.update(w.centre(), w.faceDir(), {0, 0, -1000}, kSourceDelta);
+        const Vec3& c = w.centre();
+        swing = std::max(swing, std::sqrt(c.x * c.x + c.z * c.z));
+        const Vec3& tr = w.traceCentre();
+        traceSwing = std::max(traceSwing, std::sqrt(tr.x * tr.x + tr.z * tr.z));
+        maxStep = std::max(maxStep, std::sqrt((c.x - prevC.x) * (c.x - prevC.x) + (c.z - prevC.z) * (c.z - prevC.z)));
+        prevC = c;
+        const int s = w.legState(3);
+        if (s == 3 && lastLeg != 3) ++turnCycles;
+        lastLeg = s;
+    }
+    CHECK(turnCycles == 2, "gait/two_turn_cycles");
+    CHECK(swing > 20.0f, "gait/turn_sways_centre_mid_cycle");
+    CHECK(std::fabs(w.centre().x) < 1e-2f && std::fabs(w.centre().z) < 1e-2f, "gait/turn_cycles_return_to_start");
+    CHECK(maxStep < 10.0f, "gait/centre_moves_continuously");
+    CHECK(traceSwing < swing, "gait/trace_centre_damps_sway");
 }
 
 void testAnimator() {
