@@ -237,7 +237,8 @@ inputs time to reach the other game.
   presses take effect changes.
 - A hitch longer than the delay still shows as a short freeze, for example
   a Wi-Fi hiccup of a few hundred ms. While the game waits for the other
-  game's input it does not draw new frames.
+  game's input it does not draw new frames; the music keeps playing and
+  the window stays responsive (it can be moved, and closing it works).
 
 The console shows a `[netplay] stats:` line every 300 frames (10 s): your
 delay and the other game's, the waits (`stalls=`, `last10s=`), the ping
@@ -312,7 +313,7 @@ start the game with the environment variable
 - A desync ends the session (`[netplay] desync detected`).
 - A hitch longer than the input delay (a Wi-Fi hiccup, a slow load on one
   PC) freezes the picture until the other game's input arrives: frames are
-  not drawn while the game waits.
+  not drawn while the game waits (the music keeps playing).
 - Seeds with P2 enemies need each player's own copy of the seed's P2
   assets overlay (see "Seeds with P2 enemies").
 - The low-level switches (`--netplay-host`/`--netplay-join`,
