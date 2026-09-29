@@ -33,6 +33,14 @@ other's campaigns):
               with --continue --bootstrap <seed>: the overlay recorded by S1,
               the sidecars from S1's play/ folder, the joiner's transfer, and
               day 3 on both peers. The seed folder is checked unchanged.
+  savedesync  a half-saved day: S1's day-2-end save fails its barrier
+              (PIKMIN_NETPLAY_TEST_BARRIER_CORRUPT=sav on the host), both
+              peers exit 5 after the host already wrote its gen-1 checkpoint;
+              S2's --continue must skip that valid but unagreed checkpoint,
+              say there is no saved day and start a new campaign.
+  savetimeout the same with the save-barrier timeout (exit 6): the joiner
+              stalls in its save tick (PIKMIN_NETPLAY_TEST_STALL_*, still
+              connected) past the host's 60 s barrier deadline.
 
 Every scenario checks that the continued run folder is unchanged by the
 session that continued it (same files, same bytes: --continue only reads it).
@@ -461,6 +469,97 @@ def fnv1a64(data):
     return h
 
 
+def run_fingerprint(run_dir):
+    """The FINGERPRINT of a launcher run's stamped bootstrap ('' if none)."""
+    for boot in sorted(Path(run_dir).glob("session/runs/*/bootstrap.txt")):
+        toks = boot.read_text(errors="replace").split()
+        for i, t in enumerate(toks[:-1]):
+            if t == "FINGERPRINT":
+                return toks[i + 1]
+    return ""
+
+
+def checkpoint_valid(sav, fingerprint, gen):
+    """pc_netplay_continue.h check_checkpoint(): the header fingerprint and
+    generation, the 32 KiB block, and the FNV-1a 64 hash over them. True means
+    only a missing campaign-record line keeps --continue off this file."""
+    eol = sav.find(b"\n")
+    if eol <= 0 or len(sav) != eol + 1 + 32768:
+        return False
+    header = sav[:eol].decode(errors="replace")
+    tok = header.split(" ")
+    if len(tok) < 5 or not tok[0].startswith("PIKMIN_CAMPAIGN_") or tok[1] != fingerprint:
+        return False
+    if not tok[2].isdigit() or int(tok[2]) != gen or not tok[-1].isdigit():
+        return False
+    signed = (header[:header.rfind(" ")] + "\n").encode() + sav[eol + 1:]
+    return fnv1a64(signed) == int(tok[-1])
+
+
+def scenario_halfsave(ctx, kind):
+    """A day-end save that did NOT finish on both games: the host has already
+    written its checkpoint (pc_randomizer.cpp writes the host's .sav before the
+    barrier), but the barrier fails, so that day must never be continued.
+      savedesync   PIKMIN_NETPLAY_TEST_BARRIER_CORRUPT=sav on the host: the
+                   checkpoint digests differ, both peers exit 5 at the save.
+      savetimeout  the joiner stalls (PIKMIN_NETPLAY_TEST_STALL_*, keep-alive
+                   on, so it stays connected) in its save tick for longer than
+                   the host's barrier deadline: the host exits 6.
+    S2's --continue must skip the host's valid-but-unagreed checkpoint, say
+    there is no saved day, and start a new campaign in sync."""
+    a = ctx.a
+    host_env, join_env = {}, {}
+    if kind == "savedesync":
+        host_env["PIKMIN_NETPLAY_TEST_BARRIER_CORRUPT"] = "sav"
+        codes = {"host": 5, "join": 5}
+        needle = "DESYNC AT THE DAY-END SAVE"
+    else:
+        stall = {"PIKMIN_NETPLAY_TEST_STALL_MS": str(a.barrier_stall_ms),
+                 "PIKMIN_NETPLAY_TEST_STALL_AT": f"tick:{a.barrier_frame}",
+                 "PIKMIN_NETPLAY_TEST_STALL_ROLE": "join"}
+        host_env.update(stall)
+        join_env.update(stall)
+        codes = {"host": 6, "join": 6}
+        needle = "SAVE NOT AGREED"
+    s1 = run_session(ctx, "s1", a.dayend_ticks, host_env=host_env, join_env=join_env, expect=kind)
+    ctx.check(s1["exit"] == codes, f"s1: exit codes {s1['exit']} (want {codes})")
+    host_run = s1["host"]["run_dir"]
+    for side in ("host", "join"):
+        ab = [ln for ln in s1[side]["barrier"] if "save barrier abandoned" in ln or "save barrier timeout" in ln]
+        ctx.check(bool(ab), f"s1 {side}: the day-end save barrier failed ({ab[:1]})")
+        ctx.check(not any("save barrier frame=" in ln for ln in s1[side]["barrier"]),
+                  f"s1 {side}: no agreed save barrier")
+        rec = s1[side].get("campaign-record.txt") or []
+        ctx.check(any(r.startswith("abandoned gen=1 exit=") for r in rec) and
+                  not any(r.startswith("saved ") for r in rec),
+                  f"s1 {side}: record has 'abandoned gen=1' and no 'saved' line")
+    recovery_ok(ctx, s1, "s1", "host", [needle, "Nothing is saved yet", "starts a new campaign"])
+    recovery_ok(ctx, s1, "s1", "join", ["Nothing is saved yet"])
+    # The half-saved day: the host's unagreed checkpoint is on disk and valid.
+    sav = Path(host_run) / "session" / "campaign" / "00000000000000000001.sav"
+    fp = run_fingerprint(host_run)
+    ctx.check(sav.is_file() and checkpoint_valid(sav.read_bytes(), fp, 1),
+              f"s1 host: the unagreed day-end checkpoint {sav.name} is on disk and valid (fingerprint {fp[:16]}...), "
+              f"so only the record keeps --continue off it")
+    jsav = Path(s1["join"]["run_dir"]) / "session" / "campaign" / "00000000000000000001.sav"
+    ctx.check(not jsav.exists(), "s1 join: no published gen-1 checkpoint (its mirror stayed pending or was retracted)")
+    before = folder_digest(host_run)
+    s2 = run_session(ctx, "s2", a.continue_ticks, host_extra=["--continue"])
+    ctx.check(folder_digest(host_run) == before, f"s2: the old run folder is unchanged ({len(before)} files)")
+    run_posix = Path(host_run).as_posix()
+    ctx.check(any(run_posix in ln.replace("\\", "/") and "no day-end save both games agreed on" in ln
+                  for ln in s2["host"]["continue"]),
+              "s2 host: S1's run is skipped: 'no day-end save both games agreed on'")
+    ctx.check(any("no saved day yet" in ln for ln in s2["host"]["continue"]), "s2 host: 'no saved day yet'")
+    ctx.check(any("starting a new campaign instead" in ln for ln in s2["host"]["continue"]),
+              "s2 host: 'starting a new campaign instead'")
+    for side in ("host", "join"):
+        ctx.check(any("START_STAGE 1 day=2" in ln for ln in s2[side]["start_stage"]), f"s2 {side}: new campaign on day 2")
+        ctx.check(not s2[side]["resumed"], f"s2 {side}: nothing resumed")
+    gameplay_ok(ctx, s2, "s2", a.min_distinct)
+    ctx.check(s2["exit"] == {"host": 0, "join": 0}, f"s2: both exit 0 ({s2['exit']})")
+
+
 def seed_flags_header(boot_text):
     """(magic, used-count) of pc_randomizer.cpp write_campaign_checkpoint for
     a bootstrap: BENEFITS <mode> sets bombDeliveries (bit 0 of mode-1),
@@ -529,7 +628,8 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--exe", type=Path, required=True, help="netplay build nectar.exe (copied into each stage)")
     p.add_argument("--out", type=Path, required=True, help="evidence root; <out>/<scenario>/ must not exist")
-    p.add_argument("--scenario", choices=("clean", "desync", "disconnect", "nosave", "quit", "p2"), required=True)
+    p.add_argument("--scenario", choices=("clean", "desync", "disconnect", "nosave", "quit", "p2", "savedesync",
+                                          "savetimeout"), required=True)
     p.add_argument("--p2-bootstrap", type=Path, default=None, help="p2: the seed's bootstrap.txt (its folder holds assets/)")
     p.add_argument("--p2-assets", type=Path, default=None, help="p2: the joiner's copy of the overlay")
     p.add_argument("--p2-donor-sav", type=Path, default=None,
@@ -543,6 +643,11 @@ def main(argv=None):
     p.add_argument("--dayend-ticks", type=int, default=31500)
     p.add_argument("--event-frame", type=int, default=30000, help="day-3 frame of the desync / joiner kill")
     p.add_argument("--quit-frame", type=int, default=1500)
+    p.add_argument("--barrier-frame", type=int, default=28457,
+                   help="savetimeout: the day-2-end save barrier frame of these inputs and delays (the joiner's "
+                        "test stall lands in that save tick)")
+    p.add_argument("--barrier-stall-ms", type=int, default=75000,
+                   help="savetimeout: the joiner's stall, longer than the host's 60 s barrier deadline")
     p.add_argument("--continue-ticks", type=int, default=3000)
     p.add_argument("--nosave-ticks", type=int, default=1500)
     p.add_argument("--min-distinct", type=int, default=1000)
@@ -564,6 +669,8 @@ def main(argv=None):
         scenario_nosave(ctx)
     elif a.scenario == "p2":
         scenario_p2(ctx)
+    elif a.scenario in ("savedesync", "savetimeout"):
+        scenario_halfsave(ctx, a.scenario)
     else:
         scenario_quit(ctx)
     ok = all(c["ok"] for c in ctx.checks)
