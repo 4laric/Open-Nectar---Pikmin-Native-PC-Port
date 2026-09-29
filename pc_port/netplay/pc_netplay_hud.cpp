@@ -152,7 +152,7 @@ std::vector<std::string> wrap(const std::string& text, int maxW, int fontW)
 	return out;
 }
 
-void draw_box(const PcNetplayHudInfo& info, int W)
+void draw_box(const PcNetplayHudInfo& info, int W, int H)
 {
 	char l1[64], l2[64], l3[80];
 	pc_netplay_hud::format_lines(info.numbers, l1, sizeof l1, l2, sizeof l2, l3, sizeof l3);
@@ -169,7 +169,9 @@ void draw_box(const PcNetplayHudInfo& info, int W)
 	const int bw = tw + 2 * pad + 10;
 	const int bh = 3 * lh + 24;
 	const int x  = W - bw - 6;
-	const int y  = 6;
+	// Right edge, just below the game's "day N" badge in the top-right corner
+	// (which ends about a fifth of the way down), clear of the sun meter.
+	const int y  = (int)(H * 0.235f);
 	pc_settings_p2d_plate(x, y, bw, bh, 0);
 	pc_settings_p2d_text(x + pad + 2, y + 10, l1, rgba(qc), 10, 14);
 	const Colour body(235, 235, 235, 255);
@@ -231,7 +233,7 @@ void pc_netplay_hud_draw(void)
 		Matrix4f ortho;
 		gfx->setOrthogonal(ortho.mMtx, RectArea(0, 0, W, H));
 		if (info.banner) draw_banner(info, W, H);
-		else draw_box(info, W);
+		else draw_box(info, W, H);
 	}
 	if (sShotDir.empty()) return;
 	if (!info.banner && sShotNext < sShotFrames.size() && (long long)info.frame >= sShotFrames[sShotNext]) {

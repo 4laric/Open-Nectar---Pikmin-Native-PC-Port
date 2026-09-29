@@ -116,8 +116,8 @@ copied to the clipboard and written to the run folder).
 
 ## The netplay HUD
 
-During a session a small box in the top-right corner shows how the
-connection is doing:
+During a session a small box on the right, just below the day counter,
+shows how the connection is doing:
 
 ```
 NETPLAY  good

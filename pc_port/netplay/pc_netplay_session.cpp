@@ -3721,7 +3721,16 @@ void print_end_message(pc_netplay_continue::EndKind kind, int code)
 	                                                                  : "CONNECTION LOST";
 	sBannerError = kind != pc_netplay_continue::EndKind::PeerQuit && kind != pc_netplay_continue::EndKind::LocalQuit;
 	sBannerLines.clear();
-	for (size_t i = 1; i < lines.size() && sBannerLines.size() < 5; ++i) sBannerLines.push_back(lines[i]);
+	for (size_t i = 1; i < lines.size() && sBannerLines.size() < 5; ++i) {
+		std::string l = lines[i];
+		// The title already names what happened: the body keeps the reason.
+		const size_t colon = l.find(": ");
+		if (i == 1 && colon != std::string::npos && colon < 40) {
+			l = l.substr(colon + 2);
+			if (!l.empty() && l[0] >= 'a' && l[0] <= 'z') l[0] = (char)(l[0] - 'a' + 'A');
+		}
+		sBannerLines.push_back(l);
+	}
 }
 
 // Between ticks only (handle_session_events): keep presenting frames with

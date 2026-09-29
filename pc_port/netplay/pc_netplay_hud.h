@@ -8,7 +8,8 @@
 // below and the local keyboard/pad state, and writes nothing the simulation
 // or the netplay input reads.
 //
-//   HUD     top-right box: connection quality (colour), ping and jitter
+//   HUD     a box on the right edge, below the game's "day N" badge:
+//           connection quality (colour), ping and jitter
 //           (GekkoNet's round-trip statistics), the current input delay and
 //           the stalls of the last 10 s (pc_netplay_hud_model.h).
 //   Toggle  F4 on the keyboard, or both stick buttons (L3 + R3) together on
