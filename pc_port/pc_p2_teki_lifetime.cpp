@@ -47,6 +47,7 @@
 #include "pc_p2_bombsarai_teki.h"
 #include "pc_p2_groink_teki.h"
 #include "pc_p2_breadbug_teki.h"
+#include "pc_p2_bigtreasure_teki.h"
 #include "pc_p2_long_legs.h"
 #include "pc_p2_mamuta.h"
 #include "pc_p2_mamuta_fsm.h"
@@ -102,6 +103,7 @@ void pc_p2_forget_teki(BTeki* actor)
 	pc_p2_kurage_teki_forget(actor);
 	pc_p2_groink_teki_forget(actor);
 	pc_p2_breadbug_teki_forget(actor);
+	pc_p2_bigtreasure_teki_forget(actor);
 	pc_p2_onikurage_teki_forget(actor);
 	pc_p2_bombsarai_teki_forget(actor);
 	pc_p2_king_teki_forget(actor);
@@ -175,6 +177,7 @@ pc_p2_sarai_manager_reset();
 	pc_p2_kurage_teki_reset();
 	pc_p2_groink_teki_reset();
 	pc_p2_breadbug_teki_reset();
+	pc_p2_bigtreasure_teki_reset();
 	pc_p2_onikurage_teki_reset();
 	pc_p2_bombsarai_teki_reset();
 	pc_p2_king_teki_reset();

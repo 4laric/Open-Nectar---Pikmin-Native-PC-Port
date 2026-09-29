@@ -29,6 +29,9 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     // for the Dwarf Bulborb; the P1 enum for it is TEKI_Chappy, and there is no
     // TEKI_Kochappy in include/teki.h.
     case 23: return 3; // TEKI_Chappy: Sarai ordinary-host path
+    // #215: Demon (Bumbling Snitchbug) is a Sarai::Obj subclass and rides the
+    // same Sarai host/anchor vehicle with its species profile.
+    case 32: return 3; // TEKI_Chappy: Demon profile of the Sarai host
     case 28: case 68: return 3; // TEKI_Chappy: ElecBug/TamagoMushi ground hosts
     case 94: return 4; // TEKI_Swallow: DangoMushi snagret host
     case 12: return 18; // TEKI_KabekuiA: UjiA Female Sheargrub host
@@ -62,6 +65,9 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     // #898: Breadbug (PanModoki 38) rides the P1 Breadbug host TEKI_Collec (8)
     // as a placement vehicle only; pc_p2_breadbug_teki runs the source FSM.
     case 38: return 8; // TEKI_Collec: Breadbug OWN vehicle
+    // #246 OWN: BigTreasure (Titan Dweevil) rides the TEKI_Swallow placement
+    // vehicle driven by pc_p2_bigtreasure_teki (source-order core).
+    case 73: return 4; // TEKI_Swallow: BigTreasure campaign actor
     default: return original;
     }
 }

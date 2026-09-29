@@ -38,6 +38,8 @@ void pc_p2_batch2_setup();
 void pc_p2_batch2_rebind();
 void pc_p2_batch2_reset();
 void pc_p2_batch2_forget(BTeki*);
+// Simulation tick (#895): advances move/wait hysteresis and clip crossfades.
+void pc_p2_batch2_update(BTeki*, float seconds);
 bool pc_p2_batch2_draw(BTeki*, Graphics&, const Matrix4f&, bool corpse = false);
 // Runtime evidence helper: true once any live or corpse pose has been drawn.
 bool pc_p2_batch2_any_drawn();
