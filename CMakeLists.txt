@@ -429,6 +429,8 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_bombsarai_map_trace.cpp
     pc_port/pc_p2_bombsarai_terrain.cpp
     pc_port/pc_p2_bombsarai_teki.cpp
+    pc_port/pc_p2_bombsarai_own.cpp
+    pc_port/pc_p2_bombsarai_own_teki.cpp
     pc_port/pc_p2_bigtreasure.cpp
     pc_port/pc_p2_bigtreasure_attacks.cpp
     pc_port/pc_p2_bigtreasure_fsm.cpp
@@ -1090,6 +1092,14 @@ add_executable(p2_bombsarai_fsm_test
 target_include_directories(p2_bombsarai_fsm_test PRIVATE pc_port)
 target_compile_options(p2_bombsarai_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_bombsarai_fsm_test COMMAND p2_bombsarai_fsm_test)
+
+# #244 OWN campaign port: source-faithful engine-free BombSarai machine.
+add_executable(p2_bombsarai_own_test
+    tools/p2_bombsarai_own_test.cpp
+    pc_port/pc_p2_bombsarai_own.cpp)
+target_include_directories(p2_bombsarai_own_test PRIVATE pc_port)
+target_compile_options(p2_bombsarai_own_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_bombsarai_own_test COMMAND p2_bombsarai_own_test)
 
 add_executable(p2_bombsarai_bomb_test
     tools/p2_bombsarai_bomb_test.cpp

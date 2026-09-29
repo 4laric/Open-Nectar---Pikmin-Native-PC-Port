@@ -128,6 +128,7 @@ const char* sourceDisplayName(unsigned source)
     case 9: return "Kogane";
     case 23: return "Sarai";
     case 57: return "Kurage";
+    case 58: return "BombSarai";
     case 54: return "Miulin";
     case 44: return "BlueKochappy";
     case 59: return "FireOtakara";

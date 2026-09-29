@@ -183,6 +183,22 @@ inline bool isPowerEnabled()
     return v && v[0] && std::strcmp(v, "0") != 0;
 }
 
+// #244 test tooling: PIKMIN_RANDOMIZER_AUTOPLAY_BOMBSARAI_HOLD=<seconds>
+// overrides Config::bombsaraiHold (the "stand under the carrier" hold) so a
+// run can throw while the carrier still holds its bomb. Inert unless the
+// autoplay gate is on; a missing or unparsable value keeps the default.
+inline float bombsaraiHoldSeconds(float fallback)
+{
+    if (!isEnabled()) return fallback;
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_BOMBSARAI_HOLD");
+    if (v && v[0]) {
+        char* end = nullptr;
+        const double d = std::strtod(v, &end);
+        if (end && end != v && *end == 0 && d >= 0.0 && d < 600.0) return float(d);
+    }
+    return fallback;
+}
+
 // #898 TEST-ONLY observation knob: PIKMIN_RANDOMIZER_AUTOPLAY_NO_DELIVER.
 // After a kill the bot does NOT deliver the corpse: it holds the whistle for
 // noDeliverWhistle seconds (calls the squad off the corpse) and reports, then
@@ -273,7 +289,8 @@ inline unsigned sourceForSpeciesName(const char* name)
 }
 
 inline bool isKoganeLike(unsigned source) { return source == 9; }
-inline bool isFlyer(unsigned source) { return source == 23 || source == 57 || source == 32 || source == 72; }
+// #244: 58 BombSarai hovers at fp01 and is engaged by throwing Pikmin onto it.
+inline bool isFlyer(unsigned source) { return source == 23 || source == 57 || source == 58 || source == 32 || source == 72; }
 // #898: the Breadbug (38) takes no attack damage (source damageCallBack is
 // bitter-only): only a thrown Pikmin landing on it while falling hurts it
 // (press). The bot leads its throws onto the walking body and keeps a
@@ -421,6 +438,10 @@ struct Config {
     // standing with him (source attack path; eating needs a target outside
     // fp06). Hysteresis: back off below Min until Resume; close in above Max
     // until CloseStop; hold (look + throw) in between.
+    // #244 BombSarai 58: on each fresh engagement the squad first stands under
+    // the carrier (no throws) for this long, the way a player waits out the
+    // bomb drop; the carrier's own source Release decides whether it drops.
+    float bombsaraiHold = 6.0f;
     bool kingStandoff = true;
     float kingStandoffMin = 95.0f;
     float kingStandoffResume = 110.0f;
@@ -1661,6 +1682,10 @@ private:
                 giveUp(in, "attack_timeout");
                 finishTarget(in, /*killed*/ false);
             }
+            return;
+        }
+        if (in.targetSource == 58 && stateTime < bombsaraiHoldSeconds(cfg.bombsaraiHold)) {
+            steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
             return;
         }
         if ((cfg.kingStandoff && isKingStandoff(in.targetSource))
