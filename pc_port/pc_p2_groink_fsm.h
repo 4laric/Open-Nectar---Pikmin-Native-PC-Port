@@ -240,9 +240,14 @@ struct TickOutput {
     int volley = 0;
     float volleySpeed = 0.0f, volleyAngle = 0.0f;
     P2GroinkVec3 volleyTarget;
+    // emitShotGun ran (its TChibiShoot fires even when the pool is full,
+    // MiniHoudaiShotGun.cpp:1385) and the kuti basis passed to emit (#892).
+    bool shotFired = false;
+    P2GroinkMuzzle volleyMuzzle;
     std::vector<HitCommand> hits;
     int terminals = 0;
     bool deadBomb = false;     // Dead KEYEVENT_2 (effects/sound only)
+    P2GroinkMuzzle deadMuzzle; // kuti basis at deadBomb (createDeadBombEmitEffect, #892)
     bool killRequest = false;  // Dead KEYEVENT_END -> kill(nullptr)
     bool lockedOn = false;     // gun lock edge this update
 };

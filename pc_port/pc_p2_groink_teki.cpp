@@ -5,11 +5,13 @@
 #include "pc_p2_groink_carcass.h"
 #include "pc_p2_groink_clock.h"
 #include "pc_p2_groink_fsm.h"
+#include "pc_p2_groink_fx.h"
 #include "pc_p2_groink_map_trace.h"
 #include "pc_p2_animation.h"
 #include "pc_p2_preview.h"
 #include "pc_bbft.h"
 #include "Generator.h"
+#include "MapCode.h"
 #include "MapMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
@@ -64,6 +66,11 @@ struct Binding {
     bool reviveSkipLogged = false;
     float logTimer = 0.0f;
     int volleys = 0;
+    P2GroinkShellFx fx;         // #892 shell visuals (one-shot P1 effects, no retained handles)
+    int fxTrails = 0;
+    bool haveAim = false;       // last volley target, for the draw-facing diagnostic
+    Vector3f aim;
+    int faceLogTick = 0;
 };
 std::map<BTeki*, Binding> s;
 
@@ -428,6 +435,8 @@ void applyOutput(BTeki* t, Binding& b, const Snapshot& snap, const p2groinkfsm::
     }
     if (o.volley) {
         ++b.volleys;
+        b.haveAim = true;
+        b.aim = Vector3f(o.volleyTarget.x, o.volleyTarget.y, o.volleyTarget.z);
         std::printf("P2_GROINK_VOLLEY generator=%u source_id=%u shells=%d speed=%.1f angle=%.3f target=%.1f,%.1f,%.1f n=%d\n",
                     b.generator, sourceOf(b), o.volley, o.volleySpeed, o.volleyAngle, o.volleyTarget.x,
                     o.volleyTarget.y, o.volleyTarget.z, b.volleys);
@@ -450,6 +459,45 @@ void applyOutput(BTeki* t, Binding& b, const Snapshot& snap, const p2groinkfsm::
                         b.generator, sourceOf(b), h.hit.kind == P2GroinkHitKind::Bomb ? "bomb" : "wind",
                         c->isPiki() ? "piki" : (c->mObjType == OBJTYPE_Navi ? "navi" : "teki"), h.hit.damage,
                         h.primary ? 1 : 0);
+    }
+}
+
+// #892: P1 water floor at an impact point (source mapMgr->findWater ->
+// THdamaHit3); P1 marks water on the floor triangle (itemAI.cpp:189).
+bool waterAt(void*, const P2GroinkVec3& at) {
+    if (!mapMgr) return false;
+    CollTriInfo* tri = mapMgr->getCurrTri(at.x, at.z, true);
+    return tri && MapCode::getAttribute(tri) == ATTR_Water;
+}
+
+const char* fxName(P2GroinkFxKind k) {
+    switch (k) {
+    case P2GroinkFxKind::Shoot: return "shoot";
+    case P2GroinkFxKind::Trail: return "trail";
+    case P2GroinkFxKind::Hit: return "hit";
+    case P2GroinkFxKind::WaterHit: return "water";
+    }
+    return "?";
+}
+
+void applyEffects(Binding& b, const p2groinkfsm::TickOutput& o) {
+    P2GroinkFxTick tick;
+    tick.volley = o.shotFired;
+    tick.volleyMuzzle = o.volleyMuzzle;
+    tick.deadBomb = o.deadBomb;
+    tick.deadMuzzle = o.deadMuzzle;
+    tick.terminals = o.terminals;
+    tick.shells = &b.fsm.shells();
+    for (const P2GroinkFxCommand& c : b.fx.onTick(tick, waterAt, nullptr)) {
+        pc_p2_groink_fx_spawn(c);
+        if (c.kind == P2GroinkFxKind::Trail) {
+            ++b.fxTrails;
+            continue;
+        }
+        std::printf("P2_GROINK_FX generator=%u source_id=%u kind=%s slot=%zu pos=%.1f,%.1f,%.1f dir=%.2f,%.2f,%.2f "
+                    "trails=%d\n",
+                    b.generator, sourceOf(b), fxName(c.kind), c.slot, c.pos.x, c.pos.y, c.pos.z, c.dir.x, c.dir.y,
+                    c.dir.z, b.fxTrails);
     }
 }
 
@@ -492,6 +540,7 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         last = b.fsm.tick(in);
         if (!last.valid) break;
         applyOutput(t, b, snap, last, shown);
+        applyEffects(b, last);
         kill = last.killRequest;
     }
     b.pendingHits = 0;
@@ -524,6 +573,7 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         // suppressed doAI, hence pcEscapeNow (long-legs/chappy pattern).
         b.escaped = true;
         b.fsm.forceFinishShotGun();
+        b.fx.reset(); // source onKill fades every TChibiShell; one-shot puffs need no stop
         t->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
         t->mVelocity.x = t->mVelocity.z = 0.0f;
         std::printf("P2_GROINK_ESCAPE generator=%u source_id=%u native=host_escape_now\n", b.generator, sourceOf(b));
@@ -532,6 +582,14 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         return true;
     }
     return false;
+}
+
+// #892 facing diagnostic: screen compass of a world XZ direction (0 = up the
+// screen, 90 = right), from the camera look-at rotation (view x right, y up).
+float screenDeg(const Matrix4f& look, float dx, float dz) {
+    const float vx = look.mMtx[0][0] * dx + look.mMtx[0][2] * dz;
+    const float vy = look.mMtx[1][0] * dx + look.mMtx[1][2] * dz;
+    return std::atan2(vx, vy) * 57.2957795f;
 }
 } // namespace
 
@@ -882,6 +940,21 @@ bool pc_p2_groink_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, bool 
     pc_gfx_specular_family_scope(1);
     shape->drawshape(gfx, *gfx.mCamera, nullptr);
     pc_gfx_specular_family_scope(0);
+    if (!dead && ++b.faceLogTick % 30 == 1) {
+        const Matrix4f& look = gfx.mCamera->mLookAtMtx;
+        const float face = t->getDirection();
+        const Vector3f p = t->getPosition();
+        float aimDeg = 0.0f, velDeg = 0.0f;
+        const float vx = t->mVelocity.x, vz = t->mVelocity.z;
+        if (b.haveAim) aimDeg = screenDeg(look, b.aim.x - p.x, b.aim.z - p.z);
+        if (vx * vx + vz * vz > 1.0f) velDeg = screenDeg(look, vx, vz);
+        std::printf("P2_GROINK_FACE generator=%u state=%s face_deg=%.1f screen_fwd_deg=%.1f screen_aim_deg=%s%.1f "
+                    "screen_vel_deg=%s%.1f clip=%s\n",
+                    b.generator, p2groinkfsm::stateName(b.fsm.state()), face * 57.2957795f,
+                    screenDeg(look, std::sin(face), std::cos(face)), b.haveAim ? "" : "na:", aimDeg,
+                    (vx * vx + vz * vz > 1.0f) ? "" : "na:", velDeg, sBank.clip[anim].name.c_str());
+        std::fflush(stdout);
+    }
     int& logged = sDrawLogged[t];
     const int bit = dead ? 2 : 1;
     if (!(logged & bit)) {
