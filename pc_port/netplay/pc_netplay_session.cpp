@@ -81,8 +81,10 @@
 
 #include "netplay/pc_netplay_session.h"
 
+#include "netplay/pc_netplay_continue.h"
 #include "netplay/pc_netplay_det.h"
 #include "netplay/pc_netplay_gekko_input.h"
+#include "netplay/pc_netplay_hud.h"
 #include "netplay/pc_netplay_ice.h"
 #include "netplay/pc_netplay_input_sel.h"
 #include "netplay/pc_netplay_launch.h"
@@ -3590,6 +3592,212 @@ void loadguard_summary()
 	fflush(stdout);
 }
 
+// ---- M5c lane C (issue #887): campaign record, recovery message, HUD feed ----
+// Presentation and bookkeeping only: nothing below is read by the sim, and
+// every file write goes to this peer's own run folder.
+//
+// Campaign record (launcher mode): <run>/campaign-record.txt names the
+// day-end saves both games agreed on, so --continue never resumes a
+// half-saved day (pc_netplay_continue.h has the format). Lines: `start` when
+// the GekkoNet session starts (the checkpoint both sides now play from),
+// `saved` when the day-end barrier agrees, `day` at the first day start after
+// either (which day that checkpoint plays on from), `abandoned` for a barrier
+// that ends the session, `end` for how the session ended.
+bool sRecOn = false;                  // launcher mode with a run folder
+std::string sRecPath;
+unsigned long long sRecGen = 0;       // newest checkpoint both games agreed on
+int sRecDay = 0;                      // the day it plays on from (0 = unknown)
+int sRecDayEnded = 0;                 // the day whose end it saved (0 = unknown)
+bool sRecAwaitDay = false;            // the next day start names sRecDay
+unsigned sRecReseeds = 0;             // pc_netplay_det_reseed_count() last seen
+bool sEndPrinted = false;             // the final message went out once
+// HUD feed: the local stall counter (pc_netplay_hud_model.h) and GekkoNet's
+// round-trip statistics, refreshed at most every 250 ms.
+pc_netplay_hud::StallWindow sHudStalls;
+double sStallRunMs = 0;               // current run of stall turns
+double sHudNetMs = 0;
+GekkoNetworkStats sHudNet;
+bool sHudHaveNet = false;
+uint64_t sLinkLogAdvances = 0;
+// End banner (after a desync or disconnect handled between ticks).
+bool sBannerOn = false;
+bool sBannerError = false;
+int sBannerExit = -1;                 // exit code once it closes (-1: normal quit)
+double sBannerStartMs = 0;
+double sBannerMs = 0;
+std::string sBannerTitle;
+std::vector<std::string> sBannerLines;
+double sLastAdvanceWallMs = 0;        // wall time of the last Advance turn
+// TEST ONLY (netplay build, hidden test runs): PIKMIN_NETPLAY_TEST_DESYNC_AT_FRAME=<f>
+// flips this peer's reported checksum from frame f on, so GekkoNet reports a
+// desync on both peers at the next confirmed check without any sim change
+// (the recovery path's pair test). Not in the config hash, like the co-op
+// perturb knob.
+int64_t sTestDesyncFrame = -1;
+bool sTestDesyncLogged = false;
+
+void rec_append(const std::string& line)
+{
+	if (!sRecOn || line.empty()) return;
+	FILE* f = fopen(sRecPath.c_str(), "ab");
+	if (f == nullptr) {
+		printf("[netplay] campaign record: cannot append to %s\n", sRecPath.c_str());
+		return;
+	}
+	fwrite(line.data(), 1, line.size(), f);
+	fflush(f);
+	fclose(f);
+}
+
+// Once, when the GekkoNet session starts: both peers now play from the
+// host's checkpoint (B2's handshake adopted or confirmed it).
+void rec_session_start()
+{
+	const PcNetplayLaunch& launch = pc_netplay_launch_setup();
+	sRecOn   = launch.active && !launch.runDir.empty();
+	sRecPath = sRecOn ? launch.runDir + "/campaign-record.txt" : std::string();
+	sRecGen  = b2_host_hello().ckptGen;
+	sRecDay  = (launch.continued && launch.continueGen == sRecGen) ? launch.continueDay : 0;
+	sRecDayEnded = 0;
+	sRecAwaitDay = sRecGen > 0;
+	sRecReseeds  = pc_netplay_det_reseed_count();
+	rec_append(pc_netplay_continue::record_line_start(sRecGen, sCfg.isHost));
+	if (const char* e = getenv_nonempty("PIKMIN_NETPLAY_TEST_DESYNC_AT_FRAME")) {
+		const char* bg = getenv_nonempty("PIKMIN_RANDOMIZER_TEST_BACKGROUND");
+		char* end = nullptr;
+		const long long v = strtoll(e, &end, 10);
+		if (bg != nullptr && std::strcmp(bg, "1") == 0 && end != e && *end == '\0' && v >= 0) sTestDesyncFrame = v;
+	}
+}
+
+// After every Advance: a day start after a checkpoint names its day.
+void rec_after_advance()
+{
+	const unsigned n = pc_netplay_det_reseed_count();
+	if (n == sRecReseeds) return;
+	sRecReseeds = n;
+	if (sRecAwaitDay && sRecGen > 0) {
+		sRecAwaitDay = false;
+		sRecDay      = pc_netplay_det_last_reseed_day();
+		rec_append(pc_netplay_continue::record_line_day(sRecGen, sRecDay));
+	}
+}
+
+std::string exe_file_name()
+{
+	std::string p = exe_path();
+	for (char& c : p) {
+		if (c == '\\') c = '/';
+	}
+	const size_t slash = p.find_last_of('/');
+	return slash == std::string::npos ? (p.empty() ? std::string("nectar.exe") : p) : p.substr(slash + 1);
+}
+
+// The final message on a session end (console, and the banner text), once.
+void print_end_message(pc_netplay_continue::EndKind kind, int code)
+{
+	if (sEndPrinted) return;
+	sEndPrinted = true;
+	pc_netplay_continue::EndInfo e;
+	e.kind     = kind;
+	e.host     = sCfg.isHost;
+	e.launcher = sCfg.launcherMode;
+	e.frame    = sLastAdvanceFrame;
+	e.gen      = sRecGen;
+	e.day      = sRecDay;
+	e.dayEnded = sRecDayEnded;
+	e.exe      = exe_file_name();
+	if (!sCfg.inputSpec.empty()) e.extraArgs = "--netplay-input " + sCfg.inputSpec;
+	const std::vector<std::string> lines = pc_netplay_continue::recovery_lines(e);
+	for (const std::string& l : lines) printf("[netplay] %s\n", l.c_str());
+	fflush(stdout);
+	rec_append(pc_netplay_continue::record_line_end(pc_netplay_continue::end_kind_name(kind), code, sLastAdvanceFrame));
+	// Banner text: the headline, the saved day and the action lines.
+	sBannerTitle = kind == pc_netplay_continue::EndKind::Desync       ? "DESYNC - SESSION STOPPED"
+	             : kind == pc_netplay_continue::EndKind::SaveDesync   ? "DESYNC AT THE DAY-END SAVE"
+	             : kind == pc_netplay_continue::EndKind::SaveTimeout  ? "DAY-END SAVE NOT AGREED"
+	             : kind == pc_netplay_continue::EndKind::PeerQuit     ? "THE OTHER PLAYER LEFT"
+	             : kind == pc_netplay_continue::EndKind::LocalQuit    ? "SESSION ENDED"
+	                                                                  : "CONNECTION LOST";
+	sBannerError = kind != pc_netplay_continue::EndKind::PeerQuit && kind != pc_netplay_continue::EndKind::LocalQuit;
+	sBannerLines.clear();
+	for (size_t i = 1; i < lines.size() && sBannerLines.size() < 5; ++i) sBannerLines.push_back(lines[i]);
+}
+
+// Between ticks only (handle_session_events): keep presenting frames with
+// the end banner before the process exits. PIKMIN_NETPLAY_BANNER_MS
+// (default 10000, 1500 in hidden test runs, 0 = no banner).
+void begin_banner(int exitCode)
+{
+	const char* bg = getenv_nonempty("PIKMIN_RANDOMIZER_TEST_BACKGROUND");
+	const bool hidden = bg != nullptr && std::strcmp(bg, "1") == 0;
+	sBannerMs = (double)read_unsigned_env("PIKMIN_NETPLAY_BANNER_MS", hidden ? 1500u : 10000u);
+	if (sBannerMs > 60000.0) sBannerMs = 60000.0;
+	sBannerExit    = exitCode;
+	sBannerStartMs = now_ms();
+	sBannerOn      = sBannerMs > 0;
+	if (sBannerOn) {
+		pc_window_discard_button_presses();
+		printf("[netplay] end banner: shown for up to %.0f ms (any key or button closes it)\n", sBannerMs);
+		fflush(stdout);
+	}
+}
+
+// The HUD feed's stall bookkeeping, once per loop turn in kSession.
+void hud_turn(int advances, double turnMs, double now)
+{
+	if (advances > 0) {
+		if (sStallRunMs > 0) sHudStalls.add(now, sStallRunMs);
+		sStallRunMs        = 0;
+		sLastAdvanceWallMs = now;
+		return;
+	}
+	// A stall turn counts once the session advanced at least once, outside a
+	// HOLD freeze and outside a stage-load window (loading, not the network).
+	if (sAdvances > 0 && !hold_frozen() && !sLgWindow.is_open()) sStallRunMs += turnMs;
+}
+
+void hud_refresh_net(double now)
+{
+	if (sGekko == nullptr || (sHudHaveNet && now - sHudNetMs < 250.0)) return;
+	memset(&sHudNet, 0, sizeof(sHudNet));
+	gekko_network_stats(sGekko, sCfg.isHost ? 1 : 0, &sHudNet); // the remote actor's handle
+	sHudNetMs   = now;
+	sHudHaveNet = true;
+}
+
+// Every 900 Advances (30 s): the numbers the HUD shows, for logs.
+void hud_link_log()
+{
+	if (sAdvances < sLinkLogAdvances + 900) return;
+	sLinkLogAdvances = sAdvances;
+	const double now = now_ms();
+	hud_refresh_net(now);
+	printf("[netplay] link: ping=%.0fms (last %ums) jitter=%.1fms delay=%u stalls: last10s=%u (%.0f ms) "
+	       "session=%llu (%.0f ms, max %.0f ms) kbps in=%.1f out=%.1f hud=%s\n",
+	       sHudNet.avg_ping, (unsigned)sHudNet.last_ping, sHudNet.jitter, sCfg.localDelay, sHudStalls.count(now),
+	       sHudStalls.stalled_ms(now), (unsigned long long)sHudStalls.total(), sHudStalls.total_ms(),
+	       sHudStalls.max_ms(), sHudNet.kb_received * 8.0f, sHudNet.kb_sent * 8.0f,
+	       pc_netplay_hud_visible() ? "on" : "off");
+	fflush(stdout);
+}
+
+// Local quit (the window closed mid-session): tell the other game at once
+// (GekkoNet's Disconnect notice) instead of letting it wait for its 15 s
+// timeout. A few network polls send it; no Advance can happen here.
+void send_quit_notice()
+{
+	if (sGekko == nullptr || !sGekkoStarted) return;
+	gekko_disconnect_actor(sGekko, sLocalHandle);
+	const double t0 = now_ms();
+	while (now_ms() - t0 < 250.0) {
+		gekko_network_poll(sGekko);
+		sleep_hires_ms(5.0, 0.0);
+	}
+	printf("[netplay] quit: this game left the session; the other game was told\n");
+	fflush(stdout);
+}
+
 void start_gekko_session()
 {
 	sGekko = nullptr;
@@ -3763,6 +3971,8 @@ void start_gekko_session()
 	// Polish pacing: the drift-free deadline starts here (not at handshake
 	// start), so the first session turn never takes the overrun path.
 	sNextTurnMs = sSessionStartMs + 1000.0 / 30.0;
+	// M5c lane C: the campaign record's `start` line (launcher mode).
+	rec_session_start();
 	sPhase          = kSession;
 }
 
@@ -3782,14 +3992,26 @@ void handle_session_events()
 			printf("[netplay] gekko session started\n");
 			sGekkoStarted = true;
 			break;
-		case GekkoPlayerDisconnected:
+		case GekkoPlayerDisconnected: {
 			printf("[netplay] disconnected: handle=%d\n", ev[i]->data.disconnected.handle);
 			fflush(stdout);
 			pc_state_hash_flush();
+			// M5c lane C: a disconnect right after the last Advance is the
+			// other game's quit notice (it left); a timeout comes only after
+			// the disconnect timeout without data. Then the final message and
+			// the end banner; the quit follows when the banner closes.
+			const double sinceAdvanceMs = sLastAdvanceWallMs > 0 ? now_ms() - sLastAdvanceWallMs : 1e9;
+			const double quitWindowMs   = std::min(2500.0, 0.5 * (double)sLgWindow.normal_ms());
+			const bool peerQuit         = sinceAdvanceMs < quitWindowMs;
 			stop_session();
 			sPhase = kDone;
-			request_quit();
+			print_end_message(peerQuit ? pc_netplay_continue::EndKind::PeerQuit
+			                           : pc_netplay_continue::EndKind::Disconnect,
+			                  0);
+			begin_banner(-1);
+			if (!sBannerOn) request_quit();
 			return; // session is gone: stop processing this batch
+		}
 		case GekkoDesyncDetected: {
 			// M3: dump the desynced frame's sub-hashes from the ring, not
 			// the latest tick's. GekkoNet frame F maps to hash tick F+1.
@@ -3822,9 +4044,13 @@ void handle_session_events()
 			pc_state_hash_flush();
 			stop_session();
 			sPhase = kDone;
+			// M5c lane C: the final message, then the end banner (exit 5 when
+			// it closes; at once without a banner, as before).
+			print_end_message(pc_netplay_continue::EndKind::Desync, 5);
 			fflush(stdout);
-			std::exit(5);
-			break;
+			begin_banner(5);
+			if (!sBannerOn) std::exit(5);
+			return;
 		}
 		default:
 			break;
@@ -3912,6 +4138,7 @@ int handle_game_events(System* sys, BaseApp* app)
 			if (pc_randomizer_outbox_flush != nullptr)
 				pc_randomizer_outbox_flush((uint32_t)e->data.adv.frame);
 			sLastAdvanceFrame = (uint32_t)e->data.adv.frame;
+			rec_after_advance(); // M5c lane C: campaign record (which day a checkpoint plays on from)
 			hold_after_advance(e->data.adv.frame);
 			loadguard_after_advance((uint32_t)e->data.adv.frame,
 			                        e->data.adv.rolling_back || e->data.adv.running_ahead);
@@ -3957,7 +4184,21 @@ int handle_game_events(System* sys, BaseApp* app)
 					e->data.save.state[b] = (uint8_t)((frame >> (b * 8)) & 0xFF);
 				*e->data.save.state_len = 8;
 			}
-			if (e->data.save.checksum != nullptr) *e->data.save.checksum = fold_hash64(total);
+			if (e->data.save.checksum != nullptr) {
+				*e->data.save.checksum = fold_hash64(total);
+				// M5c lane C TEST knob: report a wrong checksum from frame f on
+				// (the sim is untouched), so both peers take the desync path.
+				if (sTestDesyncFrame >= 0 && (int64_t)e->data.save.frame >= sTestDesyncFrame) {
+					*e->data.save.checksum ^= 0x5A5A5A5Au;
+					if (!sTestDesyncLogged) {
+						sTestDesyncLogged = true;
+						printf("[netplay] test: this peer reports altered checksums from frame=%d (desync "
+						       "injection; the sim is unchanged)\n",
+						       e->data.save.frame);
+						fflush(stdout);
+					}
+				}
+			}
 			++sSaves;
 			break;
 		}
@@ -4150,6 +4391,12 @@ bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long ge
 		pc_state_hash_flush();
 		stop_session();
 		sPhase = kDone;
+		// M5c lane C: this save is never continued from (the record says so),
+		// and the final message names the last day both games did agree on.
+		rec_append(pc_netplay_continue::record_line_abandoned(gen, code));
+		print_end_message(code == 5 ? pc_netplay_continue::EndKind::SaveDesync
+		                            : pc_netplay_continue::EndKind::SaveTimeout,
+		                  code);
 		std::exit(code);
 	};
 	pc_netplay_xfer::SaveResult peer;
@@ -4251,6 +4498,15 @@ bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long ge
 		const std::string hx = to_hex(h.savSha, 32);
 		memcpy(hostSavHex, hx.c_str(), 65);
 	}
+	// M5c lane C: an agreed, successful day-end save is the newest checkpoint
+	// --continue may use; the next day start names the day it plays on from.
+	if (h.ok != 0) {
+		sRecGen      = gen;
+		sRecDay      = 0;
+		sRecDayEnded = pc_netplay_det_last_reseed_day();
+		sRecAwaitDay = true;
+		rec_append(pc_netplay_continue::record_line_saved(gen, frame, sRecDayEnded));
+	}
 	return true;
 }
 
@@ -4265,6 +4521,7 @@ void pc_netplay_abort_desync(const char* why)
 	pc_state_hash_flush();
 	stop_session();
 	sPhase = kDone;
+	print_end_message(pc_netplay_continue::EndKind::SaveDesync, 5); // M5c lane C
 	std::exit(5);
 }
 
@@ -4343,6 +4600,41 @@ bool pc_netplay_session_active(void)
 		sInitialised = true;
 	}
 	return sCfg.active;
+}
+
+// M5c lane C (issue #887): the HUD's numbers and the end banner's text, read
+// once per presented frame by pc_netplay_hud.cpp. Wall clock and network
+// statistics only; nothing here feeds the sim.
+bool pc_netplay_hud_info(PcNetplayHudInfo* out)
+{
+	if (out == nullptr || !sInitialised || !sCfg.active) return false;
+	*out           = PcNetplayHudInfo();
+	out->isHost    = sCfg.isHost;
+	out->inputKind = sCfg.inputKind;
+	out->frame     = sLastAdvanceFrame;
+	const double now = now_ms();
+	if (sPhase == kSession && sGekko != nullptr && sGekkoStarted && sAdvances > 0) {
+		hud_refresh_net(now);
+		out->running                = true;
+		out->numbers.havePing       = sHudHaveNet && sHudNet.avg_ping > 0.0f;
+		out->numbers.pingMs         = sHudNet.avg_ping;
+		out->numbers.jitterMs       = sHudNet.jitter;
+		out->numbers.delay          = sCfg.localDelay;
+		out->numbers.stalls10s      = sHudStalls.count(now);
+		out->numbers.stallMs10s     = sHudStalls.stalled_ms(now);
+	}
+	if (sBannerOn) {
+		out->banner       = true;
+		out->bannerError  = sBannerError;
+		out->bannerLeftMs = sBannerMs - (now - sBannerStartMs);
+		snprintf(out->bannerTitle, sizeof(out->bannerTitle), "%s", sBannerTitle.c_str());
+		out->bannerLines = 0;
+		for (const std::string& l : sBannerLines) {
+			if (out->bannerLines >= 5) break;
+			snprintf(out->bannerLine[out->bannerLines++], sizeof(out->bannerLine[0]), "%s", l.c_str());
+		}
+	}
+	return true;
 }
 
 bool pc_netplay_session_drive(System* sys, BaseApp* app)
@@ -4442,14 +4734,45 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 		// Relinquish the loop so System::run breaks at its should_close
 		// check (before any further tick) and shuts down normally.
 		if (sPhase != kDone) {
+			// M5c lane C: a player who closes the game mid-session tells the
+			// other game at once, and gets the "how to continue" message.
+			const bool inSession = sPhase == kSession && sGekko != nullptr && sGekkoStarted;
+			if (inSession) send_quit_notice();
 			pc_state_hash_flush();
 			stop_session();
 			sPhase = kDone;
+			if (inSession) print_end_message(pc_netplay_continue::EndKind::LocalQuit, 0);
+		}
+		if (sBannerOn && sBannerExit >= 0) {
+			fflush(stdout);
+			std::exit(sBannerExit); // closed during a desync banner: keep its exit code
 		}
 		return false;
 	}
 
 	if (sPhase == kDone) {
+		if (sBannerOn) {
+			// M5c lane C: the end banner, between ticks (no sim runs): one
+			// presented frame per turn at ~30 Hz, drawn by the HUD
+			// (pc_netplay_hud.cpp) over a cleared screen, until it times out
+			// or any key or button is pressed.
+			int kind = 0, pad = 0;
+			const bool dismissed = pc_window_take_button_press(&kind, &pad);
+			const double shown   = now_ms() - sBannerStartMs;
+			if (dismissed || shown >= sBannerMs) {
+				sBannerOn = false;
+				printf("[netplay] end banner: closed after %.0f ms (%s)\n", shown, dismissed ? "key" : "timeout");
+				fflush(stdout);
+				if (sBannerExit >= 0) std::exit(sBannerExit);
+				request_quit();
+				return true;
+			}
+			sys->beginRender();
+			sys->doneRender();
+			sys->waitRetrace(); // overlays (the banner) + present + swap + window events
+			sleep_hires_ms(33.0);
+			return true;
+		}
 		// Drain the quit event requested above (nothing else polls while
 		// the driver owns the loop), then relinquish so the loop breaks.
 		pc_window_poll_events(nullptr);
@@ -4626,6 +4949,12 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 			// Fix3 R2-2: spin tail 0, so stall turns block on the timer.
 			sleep_hires_ms(1.0, 0.0);
 		}
+	}
+	// M5c lane C: the HUD's local stall counter and its 30 s link log line.
+	{
+		const double turnEnd = now_ms();
+		hud_turn(advances, turnEnd - turnStartMs, turnEnd);
+		if (advances > 0) hud_link_log();
 	}
 	if (advances == 0 && hold_frozen()) {
 		// B1: a frozen HOLD turn slept like a stall turn above, but its

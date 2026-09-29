@@ -3,6 +3,7 @@
 
 #include "netplay/pc_netplay_launch.h"
 
+#include "netplay/pc_netplay_continue.h"
 #include "netplay/pc_netplay_ice.h"
 #include "netplay/pc_netplay_input_sel.h"
 #include "netplay/pc_netplay_launch_util.h"
@@ -13,6 +14,7 @@
 #include <SDL2/SDL.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <cstdarg>
@@ -20,6 +22,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <random>
 #include <string>
 #include <vector>
@@ -30,6 +33,7 @@
 #endif
 #include <windows.h>
 #include <winioctl.h>
+#include <io.h>
 #else
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -542,6 +546,283 @@ void setup_play_dir()
 	fflush(stdout);
 }
 
+// ---- M5c lane C (issue #887): --continue, recovery v1 ----
+// `--netplay-host-ice --continue [run folder]` starts a new session (new run
+// folder, new peer token, as always) from the newest day-end save both games
+// agreed on. The picked checkpoint, the card and the campaign's other files
+// are COPIED into the new run's campaign dir; the old run folder is only
+// read, never changed, and nothing is ever deleted. The bootstrap is the old
+// run's (its FINGERPRINT is what the checkpoint carries), re-stamped with the
+// new token; the netplay seed is the old run's too. The joiner needs no extra
+// step: B2's handshake sends it the host's checkpoint and card.
+namespace fs = std::filesystem;
+using namespace pc_netplay_continue;
+
+bool read_path_bounded(const fs::path& p, size_t cap, std::string* out)
+{
+	const long n = read_file_bounded(p.string(), cap, out);
+	return n >= 0 && (size_t)n <= cap;
+}
+
+// One run folder, as --continue sees it.
+struct ContinueCandidate {
+	std::string dir;          // absolute, '/'-separated
+	bool named = false;       // the folder name parsed as a launcher run
+	RunName name;
+	bool hostRole = false;    // launch.txt role (else the name's)
+	std::string launchText;   // <run>/launch.txt
+	std::string bootText;     // the run's stamped bootstrap
+	std::string fingerprint;
+	fs::path campaign;        // <run>/session/campaign
+	unsigned long long gen = 0; // picked checkpoint (0 = none)
+	int day = 0;              // the day it plays on from (0 = unknown)
+	int dayEnded = 0;
+	bool recordPresent = false;
+	std::string why;          // why nothing was picked
+};
+
+std::string lower_ascii(std::string s)
+{
+	for (char& c : s) c = (char)std::tolower((unsigned char)c);
+	return s;
+}
+
+// Reads one run folder: launch.txt, its bootstrap, the campaign dir, and the
+// record; picks the newest valid checkpoint the record confirms.
+void evaluate_run(ContinueCandidate* c)
+{
+	std::error_code ec;
+	const fs::path dir(c->dir);
+	if (!read_path_bounded(dir / "launch.txt", 1u << 16, &c->launchText)) c->launchText.clear();
+	const std::string role = launch_value(c->launchText, "role");
+	c->hostRole = role.empty() ? (c->named && c->name.host) : role == "host";
+	// The bootstrap: session/runs/<token>/bootstrap.txt (the token from
+	// launch.txt; else the only folder under session/runs).
+	fs::path boot;
+	const std::string token = launch_value(c->launchText, "token");
+	if (pc_netplay_launch_util::is_token(token)) boot = dir / "session" / "runs" / token / "bootstrap.txt";
+	if (boot.empty() || !fs::is_regular_file(boot, ec)) {
+		boot.clear();
+		int found = 0;
+		for (fs::directory_iterator it(dir / "session" / "runs", ec), end; !ec && it != end; it.increment(ec)) {
+			if (it->is_directory(ec) && fs::is_regular_file(it->path() / "bootstrap.txt", ec)) {
+				boot = it->path() / "bootstrap.txt";
+				++found;
+			}
+		}
+		if (found != 1) boot.clear();
+	}
+	if (boot.empty() || !read_path_bounded(boot, kMaxBootstrapBytes, &c->bootText)) {
+		c->why = "no readable session bootstrap";
+		return;
+	}
+	c->fingerprint = bootstrap_fingerprint(c->bootText);
+	if (c->fingerprint.empty()) {
+		c->why = "its bootstrap has no FINGERPRINT";
+		return;
+	}
+	c->campaign = dir / "session" / "campaign";
+	std::vector<unsigned long long> valid;
+	size_t seen = 0;
+	for (fs::directory_iterator it(c->campaign, ec), end; !ec && it != end; it.increment(ec)) {
+		unsigned long long g = 0;
+		if (!it->is_regular_file(ec) || !checkpoint_gen_from_name(it->path().filename().string(), &g)) continue;
+		++seen;
+		std::string bytes;
+		if (!read_path_bounded(it->path(), 1u << 20, &bytes)) continue;
+		const CkptCheck chk = check_checkpoint(bytes, c->fingerprint, g);
+		if (chk == CkptCheck::Ok) valid.push_back(g);
+		else
+			printf("[netplay] launch: --continue: %s: %s is %s; not used\n", c->dir.c_str(),
+			       it->path().filename().string().c_str(), ckpt_check_name(chk));
+	}
+	std::string recText;
+	const bool recPresent = read_path_bounded(dir / "campaign-record.txt", 1u << 20, &recText);
+	const Record rec = parse_record(recPresent ? recText : std::string(), recPresent);
+	c->recordPresent = recPresent;
+	c->gen = pick_generation(valid, rec);
+	if (c->gen == 0) {
+		c->why = seen == 0 ? "no saved day" : (valid.empty() ? "no valid checkpoint" : "no day-end save both games agreed on");
+		return;
+	}
+	auto d = rec.dayOf.find(c->gen);
+	if (d != rec.dayOf.end()) c->day = d->second;
+	auto e = rec.dayEnded.find(c->gen);
+	if (e != rec.dayEnded.end()) c->dayEnded = e->second;
+}
+
+// Where launcher run folders live: <exe dir>/netplay and the read-only-exe
+// fallback %LOCALAPPDATA%/Nectar/netplay.
+std::vector<std::string> run_bases()
+{
+	std::vector<std::string> bases;
+	const std::string exe = exe_dir();
+	bases.push_back(exe.empty() ? std::string("netplay") : exe + "/netplay");
+	if (const char* local = getenv_nonempty("LOCALAPPDATA")) {
+		const std::string fb = forward_slashes(local) + "/Nectar/netplay";
+		if (lower_ascii(fb) != lower_ascii(bases[0])) bases.push_back(fb);
+	}
+	return bases;
+}
+
+// Copies the continued campaign into the new run: the picked checkpoint, the
+// card files, and the campaign's other ledgers (for example
+// p2-delivery-receipts.txt). Never a temporary, pending, unconfirmed or
+// set-aside file, and never a newer checkpoint than the picked one.
+void copy_campaign(const ContinueCandidate& c, const std::string& toDir, size_t* files, uint64_t* bytes)
+{
+	*files = 0;
+	*bytes = 0;
+	std::error_code ec;
+	const fs::path to(toDir);
+	fs::create_directories(to / "card" / "card0", ec);
+	if (ec) die("--continue: cannot create %s", (to / "card" / "card0").string().c_str());
+	auto copy_one = [&](const fs::path& from, const fs::path& dst) {
+		std::string data;
+		if (!read_path_bounded(from, pc_netplay_xfer::kMaxBundleFileBytes, &data))
+			die("--continue: cannot read %s (or it is larger than %u bytes); nothing was changed in %s",
+			    from.string().c_str(), (unsigned)pc_netplay_xfer::kMaxBundleFileBytes, c.dir.c_str());
+		if (!write_file(dst.string(), data)) die("--continue: cannot write %s", dst.string().c_str());
+		++*files;
+		*bytes += data.size();
+	};
+	copy_one(c.campaign / checkpoint_name(c.gen), to / checkpoint_name(c.gen));
+	for (fs::directory_iterator it(c.campaign / "card" / "card0", ec), end; !ec && it != end; it.increment(ec)) {
+		const std::string n = it->path().filename().string();
+		if (it->is_regular_file(ec) && pc_netplay_xfer::card_file_name_ok(n)) copy_one(it->path(), to / "card" / "card0" / n);
+	}
+	for (fs::directory_iterator it(c.campaign, ec), end; !ec && it != end; it.increment(ec)) {
+		const std::string n = it->path().filename().string();
+		if (!it->is_regular_file(ec)) continue;
+		if (n.find(".sav") != std::string::npos || n.find(".tmp") != std::string::npos || n[0] == '.') continue;
+		copy_one(it->path(), to / n);
+	}
+}
+
+// The P2 overlay and sidecar source of a continued P2 campaign: the old run's
+// recorded overlay (launch.txt p2_assets; older runs: the host's original
+// --bootstrap folder's assets/, or --netplay-p2-assets here), and the old
+// run's play/ folder, which holds the sidecars as that session left them
+// (the P2 receipt ledgers included).
+void continue_p2_sources(const ContinueCandidate& c, const char* assetsArg)
+{
+	std::string overlay = assetsArg != nullptr ? absolute_path(assetsArg) : launch_value(c.launchText, "p2_assets");
+	if (overlay.empty() && c.hostRole) {
+		const std::string src = launch_value(c.launchText, "bootstrap_source");
+		const size_t slash = forward_slashes(src).find_last_of('/');
+		if (slash != std::string::npos) overlay = forward_slashes(src).substr(0, slash) + "/assets";
+	}
+	if (overlay.empty() || !is_dir(overlay))
+		die("--continue: this campaign uses P2 enemies, but its P2 assets overlay is not known or missing (%s); "
+		    "pass --netplay-p2-assets <folder> with the seed's assets overlay",
+		    overlay.empty() ? "not recorded" : overlay.c_str());
+	sSetup.p2AssetsDir = overlay;
+	const std::string oldPlay = c.dir + "/play";
+	if (is_dir(oldPlay)) sP2SidecarDir = oldPlay;
+	else {
+		const std::string src = forward_slashes(launch_value(c.launchText, "bootstrap_source"));
+		const size_t slash = src.find_last_of('/');
+		sP2SidecarDir = slash == std::string::npos ? std::string() : src.substr(0, slash);
+		if (sP2SidecarDir.empty() || !is_dir(sP2SidecarDir))
+			die("--continue: this P2 campaign's sidecar files are gone (%s has no play/ folder)", c.dir.c_str());
+	}
+}
+
+// Interactive consoles get a question; scripts and hidden runs get the default.
+bool ask_yes_default(const char* question)
+{
+#ifdef _WIN32
+	const bool interactive = _isatty(_fileno(stdin)) != 0;
+#else
+	const bool interactive = isatty(fileno(stdin)) != 0;
+#endif
+	if (!interactive || sSetup.testHidden) {
+		printf("[netplay] launch: %s [Y/n] Y (not an interactive console)\n", question);
+		fflush(stdout);
+		return true;
+	}
+	printf("[netplay] launch: %s [Y/n] ", question);
+	fflush(stdout);
+	char line[64];
+	if (fgets(line, sizeof(line), stdin) == nullptr) return true;
+	const std::string a = trim(line);
+	return !(a == "n" || a == "N" || a == "no" || a == "No" || a == "NO");
+}
+
+// Resolves --continue. Returns false (after saying so) when there is no saved
+// day to continue and the player takes a new campaign instead. `fpFilter`: a
+// --bootstrap seed's FINGERPRINT (only that seed's campaigns), or "".
+bool resolve_continue(const std::string& folderArg, const std::string& fpFilter, ContinueCandidate* out)
+{
+	std::vector<ContinueCandidate> cands;
+	std::string where;
+	if (!folderArg.empty()) {
+		ContinueCandidate c;
+		c.dir = absolute_path(folderArg);
+		if (c.dir.empty() || !is_dir(c.dir)) die("--continue %s: no such folder", folderArg.c_str());
+		const size_t slash = c.dir.find_last_of('/');
+		c.named = parse_run_name(slash == std::string::npos ? c.dir : c.dir.substr(slash + 1), &c.name);
+		if (!c.named && !is_dir(c.dir + "/session/campaign"))
+			die("--continue %s: not a netplay run folder (expected netplay\\run-...-host-pid...\\ with "
+			    "session\\campaign inside)",
+			    folderArg.c_str());
+		cands.push_back(c);
+		where = c.dir;
+	} else {
+		for (const std::string& base : run_bases()) {
+			std::error_code ec;
+			if (!is_dir(base)) continue;
+			where += (where.empty() ? "" : " and ") + base;
+			for (fs::directory_iterator it(base, ec), end; !ec && it != end; it.increment(ec)) {
+				if (!it->is_directory(ec)) continue;
+				ContinueCandidate c;
+				c.named = parse_run_name(it->path().filename().string(), &c.name);
+				if (!c.named || !c.name.host) continue; // bare --continue: the host's own campaigns
+				c.dir = forward_slashes(it->path().string());
+				cands.push_back(c);
+			}
+		}
+		std::stable_sort(cands.begin(), cands.end(),
+		                 [](const ContinueCandidate& a, const ContinueCandidate& b) { return run_newer(a.name, b.name); });
+		if (where.empty()) where = run_bases()[0];
+	}
+	size_t checked = 0;
+	for (ContinueCandidate& c : cands) {
+		++checked;
+		evaluate_run(&c);
+		if (c.gen != 0 && !fpFilter.empty() && c.fingerprint != fpFilter) {
+			c.gen = 0;
+			c.why = "another seed than --bootstrap";
+		}
+		if (c.gen != 0) {
+			*out = c;
+			return true;
+		}
+		if (!folderArg.empty() || checked <= 5)
+			printf("[netplay] launch: --continue: %s: %s\n", c.dir.c_str(), c.why.c_str());
+	}
+	if (folderArg.empty())
+		printf("[netplay] launch: --continue: no saved day yet: none of the %llu host run folder%s under %s has a "
+		       "day-end save that both games agreed on%s.\n",
+		       (unsigned long long)checked, checked == 1 ? "" : "s", where.c_str(),
+		       fpFilter.empty() ? "" : " (only campaigns of the --bootstrap seed count)");
+	else
+		printf("[netplay] launch: --continue: no saved day yet: %s has no day-end save that both games agreed "
+		       "on%s.\n",
+		       where.c_str(), fpFilter.empty() ? "" : " for the --bootstrap seed");
+	printf("[netplay] launch: --continue: a campaign can be continued once one of its days has ended with the "
+	       "day-end save on both games.\n");
+	fflush(stdout);
+	if (!ask_yes_default("Start a new campaign instead?")) {
+		printf("[netplay] launch: not starting: there is no saved campaign to continue.\n");
+		fflush(stdout);
+		std::exit(2);
+	}
+	printf("[netplay] launch: --continue: starting a new campaign instead.\n");
+	fflush(stdout);
+	return false;
+}
+
 } // namespace
 
 const PcNetplayLaunch& pc_netplay_launch_setup(void) { return sSetup; }
@@ -578,7 +859,7 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 	const bool joinIce   = argv_present(argc, argv, "--netplay-join-ice");
 	const char* launcherOnly[] = { "--bootstrap", "--netplay-code-out", "--netplay-answer-in",
 		                           "--netplay-test-hidden", "--netplay-test-ticks",
-		                           "--netplay-p2-assets" };
+		                           "--netplay-p2-assets", "--continue" };
 	if (!hostIce && !joinIce) {
 		for (const char* flag : launcherOnly) {
 			if (argv_present(argc, argv, flag))
@@ -626,6 +907,25 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 			die("--bootstrap is host-only: the joiner gets the bootstrap from the offer code");
 		if (argv_present(argc, argv, "--netplay-answer-in"))
 			die("--netplay-answer-in is host-only (the joiner prints its answer)");
+		if (argv_present(argc, argv, "--continue")) {
+			// M5c lane C: nothing to do on this side; say so instead of refusing.
+			printf("[netplay] launch: --continue is for the host; the joiner needs no extra step (the host's "
+			       "saved day arrives at the handshake). Ignored.\n");
+			fflush(stdout);
+		}
+	}
+	// M5c lane C (issue #887): --continue [run folder] (host). The optional
+	// folder is the next argument unless that is another switch.
+	bool wantContinue = false;
+	std::string continueArg;
+	if (hostIce) {
+		for (int i = 1; i < argc; ++i) {
+			if (argv[i] == nullptr || std::strcmp(argv[i], "--continue") != 0) continue;
+			wantContinue = true;
+			if (i + 1 < argc && argv[i + 1] != nullptr && argv[i + 1][0] != '-' && argv[i + 1][0] != '\0')
+				continueArg = argv[i + 1];
+			break;
+		}
 	}
 	if (const char* v = argv_value(argc, argv, "--netplay-code-out")) sSetup.codeOut = v;
 	if (const char* v = argv_value(argc, argv, "--netplay-answer-in")) sSetup.answerIn = v;
@@ -647,6 +947,7 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 
 	// ---- the session bootstrap (and, for the joiner, the whole bundle) ----
 	std::string boot;
+	ContinueCandidate cont; // M5c lane C: the continued campaign (cont.gen != 0)
 	if (sSetup.isHost) {
 		const char* bootCli = argv_value(argc, argv, "--bootstrap");
 		if (bootCli != nullptr) {
@@ -665,6 +966,41 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 			char* end               = nullptr;
 			const unsigned long long v = strtoull(seedEnv, &end, 0);
 			if (end != seedEnv && *end == '\0' && v <= 0xFFFFFFFFull) sSetup.seed = (uint32_t)v;
+		}
+		// M5c lane C: --continue replaces the bootstrap (and the netplay
+		// seed) with the continued run's. With --bootstrap only that seed's
+		// campaigns are candidates. No saved day: a new campaign, as above.
+		if (wantContinue) {
+			const std::string fpFilter = bootCli != nullptr ? bootstrap_fingerprint(boot) : std::string();
+			if (bootCli != nullptr && fpFilter.empty()) die("--bootstrap %s has no FINGERPRINT line", bootCli);
+			if (resolve_continue(continueArg, fpFilter, &cont)) {
+				boot                   = cont.bootText;
+				sSetup.bootstrapSource = "continue " + cont.dir;
+				sSetup.continued       = true;
+				sSetup.continueFrom    = cont.dir;
+				sSetup.continueGen     = cont.gen;
+				sSetup.continueDay     = cont.day;
+				const std::string oldSeed = launch_value(cont.launchText, "seed");
+				char* end                 = nullptr;
+				const unsigned long long v = strtoull(oldSeed.c_str(), &end, 10);
+				if (seedEnv == nullptr && !oldSeed.empty() && end != nullptr && *end == '\0' && v <= 0xFFFFFFFFull) {
+					sSetup.seed = (uint32_t)v;
+					// The deterministic day reseed reads the seed from the
+					// environment (pc_netplay_det), like the joiner's.
+					set_env("PIKMIN_NETPLAY_SEED", std::to_string(sSetup.seed));
+				} else if (seedEnv != nullptr && !oldSeed.empty() && oldSeed != std::to_string(sSetup.seed)) {
+					printf("[netplay] launch: --continue: PIKMIN_NETPLAY_SEED=%u replaces the campaign's netplay "
+					       "seed %s\n",
+					       sSetup.seed, oldSeed.c_str());
+				}
+				char dayText[48] = "day unknown";
+				if (cont.day > 0) snprintf(dayText, sizeof(dayText), "day %d", cont.day);
+				else if (cont.dayEnded > 0) snprintf(dayText, sizeof(dayText), "the day after day %d", cont.dayEnded);
+				printf("[netplay] launch: --continue: continuing the campaign of %s: checkpoint %llu (%s)%s\n",
+				       cont.dir.c_str(), cont.gen, dayText,
+				       cont.recordPresent ? "" : " (a run from an older build: its newest valid checkpoint)");
+				fflush(stdout);
+			}
 		}
 	} else {
 		const char* joinArg = argv_value(argc, argv, "--netplay-join-ice");
@@ -713,8 +1049,15 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 		sSetup.p2 = p2;
 	}
 	// M4 lane B2: a P2 seed needs its overlay (refused here, before any run
-	// folder exists, when it is missing).
-	resolve_p2_overlay(argc, argv, sSetup.isHost ? argv_value(argc, argv, "--bootstrap") : nullptr);
+	// folder exists, when it is missing). M5c lane C: a continued P2 campaign
+	// takes the overlay and sidecars its previous run used.
+	if (sSetup.continued && sSetup.p2) {
+		continue_p2_sources(cont, argv_value(argc, argv, "--netplay-p2-assets"));
+	} else {
+		if (sSetup.continued && argv_present(argc, argv, "--netplay-p2-assets"))
+			die("--netplay-p2-assets is only for P2 seeds; the continued campaign has no ENEMY_P2");
+		resolve_p2_overlay(argc, argv, sSetup.isHost ? argv_value(argc, argv, "--bootstrap") : nullptr);
+	}
 	std::string stamped;
 	{
 		std::string err;
@@ -763,6 +1106,25 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 	if (!make_dirs(layout.bootstrapDir) || !make_dirs(layout.saveDir))
 		die("cannot create the run layout under %s", sSetup.runDir.c_str());
 	if (!write_file(layout.bootstrapPath, stamped)) die("cannot write %s", layout.bootstrapPath.c_str());
+	// M5c lane C: the continued campaign's files, copied (never moved) into
+	// this run's campaign dir before the randomizer loads it; the record
+	// names the carried checkpoint as agreed (it was, in the run it came from).
+	{
+		std::string rec = record_header();
+		if (sSetup.continued) {
+			size_t files   = 0;
+			uint64_t bytes = 0;
+			copy_campaign(cont, layout.campaignDir, &files, &bytes);
+			printf("[netplay] launch: --continue: copied checkpoint %s and %llu more file%s (%llu B in all) into "
+			       "this run; %s is unchanged\n",
+			       checkpoint_name(cont.gen).c_str(), (unsigned long long)(files - 1), files == 2 ? "" : "s",
+			       (unsigned long long)bytes, cont.dir.c_str());
+			fflush(stdout);
+			rec += record_line_carried(cont.gen, cont.day, cont.dir);
+		}
+		if (!write_file(sSetup.runDir + "/campaign-record.txt", rec))
+			die("cannot write %s/campaign-record.txt", sSetup.runDir.c_str());
+	}
 
 	// ---- process environment for the engine ----
 	// B2: the card/save root is resolved at boot (CARDInit), so the private
@@ -793,6 +1155,13 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 		rec += "save " + layout.saveDir + "\n";
 		rec += "seed " + std::to_string(sSetup.seed) + "\n";
 		rec += "input " + (sSetup.inputSpec.empty() ? std::string("auto") : sSetup.inputSpec) + "\n";
+		// M5c lane C: what --continue reads back from this run later.
+		if (sSetup.p2) rec += "p2_assets " + sSetup.p2AssetsDir + "\n";
+		if (sSetup.continued) {
+			rec += "continue_from " + sSetup.continueFrom + "\n";
+			rec += "continue_gen " + std::to_string(sSetup.continueGen) + "\n";
+			rec += "continue_day " + std::to_string(sSetup.continueDay) + "\n";
+		}
 		write_file(sSetup.runDir + "/launch.txt", rec);
 	}
 	// M4 lane B2: a P2 seed runs in <run>/play (after the records above, which

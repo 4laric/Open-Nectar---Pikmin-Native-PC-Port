@@ -907,6 +907,10 @@ if(PIKMIN_NETPLAY_BUILD AND NOT ANDROID)
     target_sources(${NECTAR_GAME} PRIVATE
         pc_port/netplay/pc_netplay_launch.cpp
         pc_port/netplay/pc_netplay_launch_selftest.cpp)
+    # M5c lane C (issue #887): the session HUD and end banner (drawn from
+    # vi_stubs.cpp under PIKI_NETPLAY_BUILD; presentation only).
+    target_sources(${NECTAR_GAME} PRIVATE
+        pc_port/netplay/pc_netplay_hud.cpp)
     target_compile_definitions(${NECTAR_GAME} PRIVATE PIKI_NETPLAY_BUILD=1)
 endif()
 
@@ -1869,6 +1873,18 @@ if(PIKMIN_BUILD_TESTS)
     target_include_directories(pc_netplay_launch_test PRIVATE pc_port)
     target_compile_options(pc_netplay_launch_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_netplay_launch_test COMMAND pc_netplay_launch_test)
+
+    # Netplay M5c lane C (issue #887; header-only, no SDL/game): --continue's
+    # run folders, checkpoint checks, campaign record and recovery message,
+    # and the session HUD's stall window, quality colour and text.
+    add_executable(pc_netplay_continue_test pc_port/netplay/pc_netplay_continue_test.cpp)
+    target_include_directories(pc_netplay_continue_test PRIVATE pc_port)
+    target_compile_options(pc_netplay_continue_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_netplay_continue_test COMMAND pc_netplay_continue_test)
+    add_executable(pc_netplay_hud_model_test pc_port/netplay/pc_netplay_hud_model_test.cpp)
+    target_include_directories(pc_netplay_hud_model_test PRIVATE pc_port)
+    target_compile_options(pc_netplay_hud_model_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_netplay_hud_model_test COMMAND pc_netplay_hud_model_test)
 
     # Host software DSP test (not linked into main game)
     add_executable(pc_dsp_host_test
