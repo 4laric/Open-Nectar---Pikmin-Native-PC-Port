@@ -105,6 +105,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -179,6 +180,19 @@ inline bool isPowerEnabled()
 {
     if (!isEnabled()) return false;
     const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER");
+    return v && v[0] && std::strcmp(v, "0") != 0;
+}
+
+// #898 TEST-ONLY observation knob: PIKMIN_RANDOMIZER_AUTOPLAY_NO_DELIVER.
+// After a kill the bot does NOT deliver the corpse: it holds the whistle for
+// noDeliverWhistle seconds (calls the squad off the corpse) and reports, then
+// Done walks back to the Onion and idles. Used to watch what the world does
+// with an abandoned carcass (a Breadbug dragging it home) - pad input only,
+// nothing is forced. Inert unless the autoplay gate is on.
+inline bool noDeliverEnabled()
+{
+    if (!isEnabled()) return false;
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_NO_DELIVER");
     return v && v[0] && std::strcmp(v, "0") != 0;
 }
 
@@ -260,6 +274,19 @@ inline unsigned sourceForSpeciesName(const char* name)
 
 inline bool isKoganeLike(unsigned source) { return source == 9; }
 inline bool isFlyer(unsigned source) { return source == 23 || source == 57 || source == 32 || source == 72; }
+// #898: the Breadbug (38) takes no attack damage (source damageCallBack is
+// bitter-only): only a thrown Pikmin landing on it while falling hurts it
+// (press). The bot leads its throws onto the walking body and keeps a
+// longer attack window; it is still pad input only.
+inline bool isPressOnly(unsigned source) { return source == 38; }
+// #898 aftermath: the Breadbug corpse is small. Walking onto it (the generic
+// seed) shoves it ahead of the captain (pellet collision, navi at ~20 u) and
+// the walking cursor sits ~78 u ahead, so thrown Pikmin fly over it and land
+// past it (v2c: carriers=0 for 60 s, cursor 78 u beyond the corpse). For
+// these corpses the bot stands off, slides the cursor onto the corpse with
+// the P1 look band (the captain stands still) and throws only when the
+// cursor is on it. Pad input only, like every other bot stance.
+inline bool aimsCorpseWithCursor(unsigned source) { return source == 38; }
 
 // #884 round 4: KingChappy (53) keeps the captain OUT of the source
 // invisible range while attacking. Source searchTarget prefers a captain in
@@ -340,6 +367,14 @@ struct Config {
     float corpseOutOfReach = 800.0f; // tdist past this at giveup names corpse_out_of_reach
     float koganeConfirm = 20.0f; // after Kogane damage, watch escapes then move on
     float kurageAttackMultiplier = 2.0f; // Kurage has high HP: longer attack window
+    float pressOnlyAttackMultiplier = 5.0f; // #898 press-only targets: one press per landed throw
+    float pressLeadSeconds = 0.6f; // #898 aim ahead of a walking press-only target
+    float corpseAimNear = 40.0f; // #898 cursor-aim corpses: closer than this -> step back (never shove it)
+    float corpseAimFar = 70.0f; // #898 cursor-aim corpses: farther than this -> walk in (no throws)
+    float corpseCursorTol = 12.0f; // #898 cursor-aim corpses: throw only with the cursor this close
+    float corpseAimWhistleCooldown = 10.0f; // #898 cursor-aim corpses: throw window after a regroup whistle
+    bool noDeliver = false; // #898 TEST-ONLY: abandon corpses (also env NO_DELIVER)
+    float noDeliverWhistle = 3.0f; // #898 whistle hold before abandoning a corpse
     // #246: the Titan Dweevil (73) soaks 4 x 6000 weapon HP before its 5000
     // body HP is exposed, and only a Pikmin stuck on a weapon's own part
     // damages it; the bot keeps throwing for a longer window (bot assistance).
@@ -703,6 +738,8 @@ public:
         whistleTime = 0.0f;
         whistling = false;
         whistleCooldown = 0.0f;
+        aimWhistleLeft = 0.0f;
+        aimWhistleCooldown = 0.0f;
         menuTaps = 0;
         menuHoldTime = 0.0f;
         menuConfirmed = false;
@@ -743,6 +780,8 @@ public:
         pgSawPart = false;
         withdrawCycles = 0;
         throwSpin = 0.0f;
+        leadValid = false;
+        leadVX = leadVZ = 0.0f;
         kingBacking = false;
         kingClosing = false;
         kingBackTime = 0.0f;
@@ -839,6 +878,8 @@ private:
         whistleTime = 0.0f;
         whistling = false;
         whistleCooldown = 0.0f;
+        aimWhistleLeft = 0.0f;
+        aimWhistleCooldown = 0.0f;
         menuTaps = 0;
         menuHoldTime = 0.0f;
         menuConfirmed = false;
@@ -908,6 +949,10 @@ private:
     // whistle). Shared by Seed (no grabs yet) and SeedGrow (short crew).
     void seedSteerThrow(const Senses& in)
     {
+        if (!in.waypointLeg && in.targetToken != 0 && in.cursorValid && aimsCorpseWithCursor(in.targetSource)) {
+            cursorAimThrow(in);
+            return;
+        }
         // #246 a8-a11: standing ON the Titan corpse put the throw cursor
         // (~95 u ahead of the captain) past it, so thrown Pikmin landed idle
         // and the crew never grew past 1-2 of 10. For the Titan, hold a
@@ -943,6 +988,56 @@ private:
         if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
         else if (in.targetToken != 0) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
         if (in.targetDist <= cfg.throwRange && in.targetToken != 0) pulseA(in, cfg.throwHold, cfg.throwGap);
+    }
+
+    // #898: stand off the corpse, slide the cursor onto it, throw on it.
+    void cursorAimThrow(const Senses& in)
+    {
+        const float d = in.targetDist;
+        // Regroup: throws need Pikmin at the captain. After the presses the
+        // squad is spread over the kill site (y1: 53 on the field, fewer than
+        // 5 near the captain, 2 carriers for 100 s, no throw ever landed).
+        // This path only runs while the crew is short (Seed / SeedGrow), so a
+        // stuck partial crew loses nothing to the whistle. Whistle for
+        // whistleHold, then a throw window of corpseAimWhistleCooldown.
+        if (aimWhistleCooldown > 0.0f) aimWhistleCooldown -= lastDt;
+        if (aimWhistleLeft <= 0.0f && in.scattered && aimWhistleCooldown <= 0.0f && d <= cfg.throwRange) {
+            aimWhistleLeft = cfg.whistleHold;
+            char buf[128];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_AIM_REGROUP token=%u tdist=%.0f bot-driven", in.targetToken, d);
+            markers.emplace_back(buf);
+        }
+        if (aimWhistleLeft > 0.0f) {
+            aimWhistleLeft -= lastDt;
+            if (aimWhistleLeft <= 0.0f) aimWhistleCooldown = cfg.corpseAimWhistleCooldown;
+            lastCommand.buttons = PadB;
+            pressOn = false;
+            pressPhase = 0.0f;
+            return;
+        }
+        if (d > cfg.corpseAimFar) {
+            steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            pressOn = false; // no throws while walking: the cursor trails the stick
+            pressPhase = 0.0f;
+            return;
+        }
+        if (d < cfg.corpseAimNear) {
+            steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            pressOn = false;
+            pressPhase = 0.0f;
+            return;
+        }
+        const float dx = in.tgtX - in.cursorX, dz = in.tgtZ - in.cursorZ;
+        const float len = std::sqrt(dx * dx + dz * dz);
+        if (len > cfg.corpseCursorTol && len > 1.0f) {
+            lastCommand.moveX = dx / len;
+            lastCommand.moveZ = dz / len;
+            lastCommand.stickScale = cfg.lookStickScale;
+            // Keep holding a Pikmin already in hand; release only on target.
+            if (pressOn) lastCommand.buttons |= PadA;
+            return;
+        }
+        pulseA(in, cfg.throwHold, cfg.throwGap);
     }
 
     void tickWithdrawSeek(float dt, const Senses& in)
@@ -1116,7 +1211,7 @@ private:
             // for THIS token returns to Aftermath to finish v5 delivery;
             // anything else is GIVEUP reason=target_gone with the token/state
             // as evidence. token==0 (no targets at all) still idles silently.
-            if (result.token != 0 && result.token == in.targetToken && (sawDamage || sawKill)) {
+            if (!resultReported && result.token != 0 && result.token == in.targetToken && (sawDamage || sawKill)) {
                 enter(State::Aftermath, in);
                 return;
             }
@@ -1133,7 +1228,9 @@ private:
         // rule), kogane-likes excluded, return so the next tick engages the new
         // target. Same-token bounces still resume Aftermath above; only a true
         // token switch with latched combat scores here (no spurious RESULTs).
-        if (result.token != 0 && in.targetToken != 0 && result.token != in.targetToken
+        // #898: a RESULT already reported for result.token must not be
+        // re-reported on every Select tick (multi-target sweep loop).
+        if (!resultReported && result.token != 0 && in.targetToken != 0 && result.token != in.targetToken
             && (sawKill || sawDamage) && !result.koganeLike) {
             finishTarget(in, /*claimedKill*/ false);
             return;
@@ -1162,6 +1259,7 @@ private:
         amWhistleTime = 0.0f;
         amRegroupWalk = 0.0f;
         result = Result{};
+        resultReported = false;
         result.token = in.targetToken;
         result.koganeLike = isKoganeLike(in.targetSource);
         enter(State::Approach, in);
@@ -1422,11 +1520,13 @@ private:
         }
         const bool sarai = in.targetSource == 23;
         const bool kurage = in.targetSource == 57 || in.targetSource == 72;
+        const bool pressOnly = isPressOnly(in.targetSource);
         const bool titan = in.targetSource == 73;
         const bool roller = cfg.rollerStance && isRollerStance(in.targetSource);
         const float limit = roller ? cfg.rollerAttackTimeout
             : kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier
-            : titan ? cfg.attackTimeout * cfg.titanAttackMultiplier : cfg.attackTimeout;
+            : titan ? cfg.attackTimeout * cfg.titanAttackMultiplier
+            : pressOnly ? cfg.attackTimeout * cfg.pressOnlyAttackMultiplier : cfg.attackTimeout;
         // Whistle first, then re-throw (bot-v4: real players do this):
         // - Sarai holding a Pikmin (targetGrabbing): whistle frees the grab;
         // - grabbed/thrown-off/burning squad (squadDistress: mouth-stuck,
@@ -1492,7 +1592,8 @@ private:
             // kurage-aware limit both lanes used (unkilled limit == wlimit).
             {
                 const float wlimit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier
-                                   : titan  ? cfg.attackTimeout * cfg.titanAttackMultiplier : cfg.attackTimeout;
+                                   : titan  ? cfg.attackTimeout * cfg.titanAttackMultiplier
+                                   : pressOnly ? cfg.attackTimeout * cfg.pressOnlyAttackMultiplier : cfg.attackTimeout;
                 if (stateTime >= wlimit) {
                     giveUp(in, "attack_timeout");
                     finishTarget(in, /*killed*/ false);
@@ -1524,6 +1625,19 @@ private:
         // spread Pikmin around the bell.
         float aimX = in.aimValid ? in.aimX : in.tgtX, aimZ = in.aimValid ? in.aimZ : in.tgtZ;
         float gap = cfg.throwGap;
+        if (pressOnly) {
+            // Lead the throw by the target's observed ground velocity.
+            if (leadValid && dt > 0.0f) {
+                const float vx = (in.tgtX - leadX) / dt, vz = (in.tgtZ - leadZ) / dt;
+                leadVX += (vx - leadVX) * 0.2f;
+                leadVZ += (vz - leadVZ) * 0.2f;
+            }
+            leadX = in.tgtX;
+            leadZ = in.tgtZ;
+            leadValid = true;
+            aimX += leadVX * cfg.pressLeadSeconds;
+            aimZ += leadVZ * cfg.pressLeadSeconds;
+        }
         if (kurage) {
             throwSpin += dt * 1.5f;
             const float dx = in.tgtX - in.naviX, dz = in.tgtZ - in.naviZ;
@@ -1588,6 +1702,18 @@ private:
         if ((!in.targetAlive || in.targetDead) && !sawDamage && !sawKill && !sawCarry && !sawReceipt) {
             // Target gone with no combat observed: nothing to wait for.
             finishTarget(in, /*claimedKill*/ false);
+            return;
+        }
+        if (sawKill && !sawReceipt && (cfg.noDeliver || noDeliverEnabled())) {
+            // #898 TEST-ONLY: abandon the corpse (whistle the squad off it).
+            if (stateTime < cfg.noDeliverWhistle) {
+                lastCommand.buttons = PadB;
+                return;
+            }
+            char buf[160];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_NO_DELIVER token=%u corpse_left=1 bot-driven", in.targetToken);
+            markers.emplace_back(buf);
+            finishTarget(in, /*killed*/ true);
             return;
         }
         // bot-v5: NEVER whistle here (no PadB). Holding whistle gathers
@@ -1911,6 +2037,13 @@ private:
             enter(State::WithdrawMenu, in);
             return;
         }
+        // #898: a matching target that was not listed when Done was entered
+        // (a Snagret still underground, a late spawn) re-engages. A token the
+        // bot already scored or gave up on never does, so this cannot loop.
+        if (in.targetToken != 0 && in.targetAlive && !settledTokens.count(in.targetToken)) {
+            enter(State::Select, in);
+            return;
+        }
         // No more targets: idle near the Onion (bot-v3: enemies may walk to
         // the squad, which is how bc1/bc2 scored its only kills). Pad-only,
         // still gated by update(); neutral when there is no Onion to hold.
@@ -1972,6 +2105,7 @@ private:
         std::snprintf(buf, sizeof(buf), "AUTOPLAY_GIVEUP reason=%s token=%u state=%s bot-driven",
                       reason, in.targetToken, stateName(state));
         markers.emplace_back(buf);
+        if (in.targetToken) settledTokens.insert(in.targetToken);
     }
 
     // bot-v5: aftermath giveup names WHY the delivery failed so the evidence
@@ -2036,6 +2170,8 @@ private:
                           int(result.carried), int(result.received), result.seconds);
         }
         markers.emplace_back(buf);
+        resultReported = true;
+        if (result.token) settledTokens.insert(result.token);
         // The combat latches belong to the finished token. Left set, the next
         // Select saw "token switch with latched combat scores" against a second
         // live target of the same species and re-emitted this RESULT every
@@ -2516,6 +2652,8 @@ private:
     float whistleTime = 0.0f;
     bool whistling = false;
     float whistleCooldown = 0.0f;
+    float aimWhistleLeft = 0.0f; // #898 cursor-aim regroup whistle remaining
+    float aimWhistleCooldown = 0.0f; // #898 throw window after a regroup whistle
     int menuTaps = 0;
     float menuHoldTime = 0.0f;
     bool menuConfirmed = false;
@@ -2566,6 +2704,10 @@ private:
     bool sawReceipt = false; // Onion receipt latched (authoritative for carried)
     int withdrawCycles = 0; // withdraw-menu repeat count this run
     float throwSpin = 0.0f; // Kurage throw rotation phase
+    bool leadValid = false; // #898 press-only lead estimate
+    bool resultReported = false; // #898 RESULT emitted for result.token
+    std::set<unsigned> settledTokens; // #898 tokens already scored or given up (Done never re-engages them)
+    float leadX = 0.0f, leadZ = 0.0f, leadVX = 0.0f, leadVZ = 0.0f;
     bool kingBacking = false; // #884 round 4: King standoff backing off (hysteresis)
     bool kingClosing = false; // #884 round 4: King standoff closing in (hysteresis)
     float kingBackTime = 0.0f; // continuous backing time (sidestep after kingSidestepAfter)

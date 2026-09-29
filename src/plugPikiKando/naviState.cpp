@@ -5,6 +5,7 @@
 #endif
 #include "pc_p2_purple.h"
 #include "pc_p2_white.h"
+#include "pc_p2_breadbug_teki.h"
 #include "NaviState.h"
 #include "pc_randomizer.h"
 #if defined(PIKI_PC_PORT)
@@ -842,7 +843,11 @@ void NaviWalkState::exec(Navi* navi)
 			{
 				Creature* teki = *tekiIter;
 				if (!roughCull(teki, navi, teki->getCentreSize() + navi->getCentreSize() + 10.0f) && teki->isAlive() && teki->isVisible()
-				    && !teki->isFlying() && teki->isOrganic()) {
+				    && !teki->isFlying() && teki->isOrganic()
+#if defined(PIKI_PC_PORT)
+				    && !pc_p2_breadbug_teki_untargetable(teki, "navi_attack_entry") // #898
+#endif
+				) {
 					Vector3f diff = teki->mSRT.t - navi->mSRT.t;
 					f32 unused    = atan2f(diff.x, diff.z);
 					if (diff.length() <= teki->getCentreSize() + navi->getCentreSize() + 10.0f) {
@@ -3233,6 +3238,11 @@ void NaviAttackState::exec(Navi* navi)
 	CI_LOOP(it)
 	{
 		Creature* teki = *it;
+#if defined(PIKI_PC_PORT)
+		if (pc_p2_breadbug_teki_untargetable(teki, "navi_punch")) {
+			continue; // #898
+		}
+#endif
 		if (teki->isAlive() && teki->isVisible() && !teki->isFlying()) {
 			Vector3f diff = teki->mSRT.t - navi->mSRT.t;
 			f32 angle     = atan2f(diff.x, diff.z);

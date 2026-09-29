@@ -13,6 +13,7 @@
 #include "pc_p2_snakejoint.h"
 #include "pc_p2_otakara.h"
 #include "pc_p2_chappy.h"
+#include "pc_p2_breadbug_teki.h"
 #endif
 
 /**
@@ -44,6 +45,8 @@ bool InteractAttack::actTeki(Teki* teki) immut
 {
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
 	if (pc_p2_hana_rejects_attack(teki)) return true;
+	// #898: PanModoki::damageCallBack applies damage only while bittered.
+	if (pc_p2_breadbug_teki_attack(teki, mOwner, mDamage)) return false;
 	if (pc_p2_elecbug_attacked(teki)) return true;
 	if (pc_p2_kogane_attacked(teki)) {
 		return true; // registered beetles take no attack damage (P2: only flips)

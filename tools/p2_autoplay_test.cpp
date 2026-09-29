@@ -548,6 +548,67 @@ void testGenericDeath()
           "generic-death/result_claims_kill");
 }
 
+void testNoDeliverAbandonsCorpse()
+{
+    // #898 TEST-ONLY observation knob: after a kill the bot whistles the squad
+    // off the corpse for noDeliverWhistle seconds, reports, and never delivers.
+    p2autoplay::Config cfg;
+    cfg.noDeliver = true;
+    cfg.noDeliverWhistle = 0.5f;
+    cfg.receiptTimeout = 60.0f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 3921089765u;
+    s.targetSource = 34;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.targetHealthFrac = 1.0f;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetDead = true;
+    s.targetAlive = false;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "no-deliver/aftermath");
+    bool whistled = false;
+    std::vector<std::string> markers;
+    for (int i = 0; i < 40 && brain.current() == p2autoplay::State::Aftermath; ++i) {
+        brain.update(0.05f, s);
+        const p2autoplay::Command c = brain.command();
+        if (c.buttons & p2autoplay::PadB) whistled = true;
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(whistled, "no-deliver/whistles_squad_off");
+    CHECK(brain.current() != p2autoplay::State::Aftermath, "no-deliver/leaves_aftermath");
+    CHECK(hasMarker(markers, "AUTOPLAY_NO_DELIVER token=3921089765"), "no-deliver/marker");
+    CHECK(hasMarker(markers, "AUTOPLAY_RESULT target=3921089765 damaged=1 killed=1 carried=0"),
+          "no-deliver/result_not_carried");
+}
+
+void testDoneReengagesLateTarget()
+{
+    // #898: Done re-engages a matching target that surfaces later (a Snagret
+    // underground at Select), but never a token it already gave up on.
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Done, "late-target/done_when_none_listed");
+    s.targetToken = 3921089765u;
+    s.targetSource = 34;
+    s.targetAlive = true;
+    s.targetDist = 300.0f;
+    s.targetHealthFrac = 1.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Select, "late-target/reengages_from_done");
+}
+
 void testWithdrawRepeat()
 {
     // bot-v2 gap 4: a 5-Pikmin first cycle loops back for another cycle
@@ -1536,6 +1597,127 @@ void testTitanSeedStandoff()
     }
     CHECK(threw, "titan-seed/throws_from_ring");
     CHECK(scale < 0.5f, "titan-seed/look_band_aim");
+}
+
+void testAftermathCursorAimCorpse()
+{
+    // #898: a cursor-aim corpse (Breadbug 38) is never walked onto. Far: walk
+    // in, no throws. Near: step back. In the band: look-band stick slides the
+    // cursor onto the corpse and A pulses only with the cursor on it.
+    p2autoplay::Config cfg;
+    cfg.throwHold = 0.1f;
+    cfg.throwGap = 0.1f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 1945764764u;
+    s.targetSource = 38;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.naviX = 0.0f;
+    s.naviZ = 0.0f;
+    s.tgtX = 100.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    s.targetHealthFrac = 0.5f;
+    brain.update(0.05f, s);
+    s.targetAlive = false;
+    s.targetDead = true;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "cursor-aim/aftermath");
+    s.cursorValid = true;
+    // Far (d=150, cursor 78 u ahead of the captain): walk in, never throw.
+    s.targetDist = 150.0f;
+    s.tgtX = 150.0f;
+    s.cursorX = 78.0f;
+    s.cursorZ = 0.0f;
+    bool farThrow = false, farWalk = false;
+    for (int i = 0; i < 20; ++i) {
+        brain.update(0.05f, s);
+        const p2autoplay::Command c = brain.command();
+        if (c.buttons & unsigned(p2autoplay::PadA)) farThrow = true;
+        if (c.moveX > 0.9f && c.stickScale == 1.0f) farWalk = true;
+    }
+    CHECK(!farThrow, "cursor-aim/no_throw_far");
+    CHECK(farWalk, "cursor-aim/walks_in_far");
+    // On top of it (d=20): step back, never press into it.
+    s.targetDist = 20.0f;
+    s.tgtX = 20.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.command().moveX < -0.9f, "cursor-aim/steps_back_near");
+    CHECK(!(brain.command().buttons & unsigned(p2autoplay::PadA)), "cursor-aim/no_throw_near");
+    // Band (d=55), cursor 30 u past the corpse: look-band slide, no release.
+    s.targetDist = 55.0f;
+    s.tgtX = 55.0f;
+    s.cursorX = 85.0f;
+    bool bandThrow = false;
+    for (int i = 0; i < 10; ++i) {
+        brain.update(0.05f, s);
+        const p2autoplay::Command c = brain.command();
+        if (c.buttons & unsigned(p2autoplay::PadA)) bandThrow = true;
+        CHECK(c.stickScale == cfg.lookStickScale && c.moveX < -0.9f, "cursor-aim/look_band_slides_back");
+    }
+    CHECK(!bandThrow, "cursor-aim/no_throw_off_target");
+    // Cursor on the corpse: stand still (no walk stick) and throw.
+    s.cursorX = 58.0f;
+    bool onThrow = false, walked = false;
+    for (int i = 0; i < 10; ++i) {
+        brain.update(0.05f, s);
+        const p2autoplay::Command c = brain.command();
+        if (c.buttons & unsigned(p2autoplay::PadA)) onThrow = true;
+        if (c.moveX != 0.0f || c.moveZ != 0.0f) walked = true;
+    }
+    CHECK(onThrow, "cursor-aim/throws_on_target");
+    CHECK(!walked, "cursor-aim/stands_still_on_target");
+    // Scattered squad (nobody at the captain): whistle once to regroup, then
+    // a throw window with no whistle.
+    s.scattered = true;
+    bool regroupB = false;
+    std::vector<std::string> aimMarkers;
+    for (int i = 0; i < 10; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadB)) regroupB = true;
+        const std::vector<std::string> got = brain.takeMarkers();
+        aimMarkers.insert(aimMarkers.end(), got.begin(), got.end());
+    }
+    CHECK(regroupB, "cursor-aim/scattered_whistles");
+    CHECK(hasMarker(aimMarkers, "AUTOPLAY_AIM_REGROUP token=1945764764"), "cursor-aim/regroup_marker");
+    for (int i = 0; i < 40; ++i) brain.update(0.05f, s); // finish the whistle hold
+    bool windowB = false, windowA = false;
+    for (int i = 0; i < 40; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadB)) windowB = true;
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) windowA = true;
+    }
+    CHECK(!windowB && windowA, "cursor-aim/throw_window_after_regroup");
+    s.scattered = false;
+    // Any other species keeps the generic walk-onto seed.
+    p2autoplay::Brain other(cfg);
+    p2autoplay::Senses o = liveSenses();
+    o.fieldPikmin = 20;
+    other.update(0.05f, o);
+    other.update(0.05f, o);
+    o.targetToken = 650002;
+    o.targetSource = 2;
+    o.targetAlive = true;
+    o.targetDist = 100.0f;
+    o.tgtX = 100.0f;
+    other.update(0.05f, o);
+    other.update(0.05f, o);
+    o.targetHealthFrac = 0.5f;
+    other.update(0.05f, o);
+    o.targetAlive = false;
+    o.targetDead = true;
+    o.targetDist = 20.0f;
+    o.tgtX = 20.0f;
+    o.cursorValid = true;
+    o.cursorX = 98.0f;
+    other.update(0.05f, o);
+    other.update(0.05f, o);
+    CHECK(other.current() == p2autoplay::State::Aftermath && other.command().moveX > 0.9f, "cursor-aim/other_species_walks_onto");
 }
 
 void testAftermathNoWhistle()
@@ -3762,6 +3944,9 @@ int main()
     testKoganePathNeedsEngagement();
     testReceiptWait();
     testGenericDeath();
+    testNoDeliverAbandonsCorpse();
+    testAftermathCursorAimCorpse();
+    testDoneReengagesLateTarget();
     testWithdrawRepeat();
     testSaraiFlyer();
     testKurageLongAttack();

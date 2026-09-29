@@ -62,6 +62,9 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     case 93: return 3; // TEKI_Chappy: BombOtakara (Volatile Dweevil)
     case 66: return 4; // TEKI_Swallow: Houdai (Man-at-Legs) proxy vehicle
     case 97: return 0; // TEKI_Frog: FminiHoudai (Gatling Groink pedestal) proxy vehicle
+    // #898: Breadbug (PanModoki 38) rides the P1 Breadbug host TEKI_Collec (8)
+    // as a placement vehicle only; pc_p2_breadbug_teki runs the source FSM.
+    case 38: return 8; // TEKI_Collec: Breadbug OWN vehicle
     // #246 OWN: BigTreasure (Titan Dweevil) rides the TEKI_Swallow placement
     // vehicle driven by pc_p2_bigtreasure_teki (source-order core).
     case 73: return 4; // TEKI_Swallow: BigTreasure campaign actor
