@@ -105,16 +105,26 @@ class PurpleCampaignApp : public PlugPikiApp {
             require(cargo && cargo->mConfig->mCarryMinPikis() == 10, "loaded native ten pellet unavailable");
             Vector3f pos = n->mSRT.t + Vector3f(80, 0, 0);
             pos.y = mapMgr->getMinY(pos.x, pos.z, true) + 5;
-            cargo->init(pos); cargo->startAI(0); cargoStart = pos;
+            cargo->init(pos); cargo->startAI(TRUE); cargoStart = pos;
             carryPhase = 1; carryTicks = 0;
             std::puts("P2_PURPLE_CARRY_BEGIN injected_cargo=1 native_weight=10 scripted_assignment=1");
         } else if (carryPhase == 1) {
+            require(cargo->isAlive(), "carry cargo died before assignment");
             const Vector3f delta = cargo->mSRT.t - cargoStart;
-            carryStable = delta.x*delta.x + delta.y*delta.y + delta.z*delta.z < 0.0001f ? carryStable+1 : 0;
-            cargoStart = cargo->mSRT.t;
-            // Appear is intentionally invisible; Transport correctly rejects
-            // it. Observe native readiness rather than assuming sixty ticks.
+            const float drift = delta.x*delta.x + delta.z*delta.z;
+            require(std::isfinite(drift) && std::isfinite(cargo->mSRT.t.y), "carry cargo position invalid");
+            // A supported instant spawn excludes appearance from this fixture.
+            // Observe an uncarried horizontal baseline; vertical physics jitter
+            // must not prevent a test of horizontal carry displacement.
+            if (carryTicks < 90 || drift >= 0.25f) {
+                cargoStart = cargo->mSRT.t; carryStable = 0;
+            } else ++carryStable;
+            if (carryTicks % 30 == 0)
+                std::printf("P2_PURPLE_CARGO_READY tick=%d state=%d visible=%d ground=%d stable=%d drift=%.3f pos=%.2f,%.2f,%.2f velocity=%.2f,%.2f,%.2f movie_flags=%u\n",
+                    carryTicks,cargo->getState(),int(cargo->isVisible()),int(cargo->onGround()),carryStable,std::sqrt(drift),
+                    cargo->mSRT.t.x,cargo->mSRT.t.y,cargo->mSRT.t.z,cargo->mVelocity.x,cargo->mVelocity.y,cargo->mVelocity.z,unsigned(pelletMgr->mMovieFlags));
             if (carryStable >= 30 && cargo->isVisible() && cargo->getState() == PELSTATE_Normal) {
+                cargoStart = cargo->mSRT.t;
                 assign(controlRed); carryPhase = 2; carryTicks = 0;
             }
         } else if (carryPhase >= 2) {
@@ -124,7 +134,7 @@ class PurpleCampaignApp : public PlugPikiApp {
             if (carryPhase == 2) {
                 require(distanceSquared < 4, "one ordinary Pikmin moved native ten pellet");
                 if (cargo->mCarrierCounter == 1 && carryTicks >= 120) {
-                    release(controlRed); assign(purple); carryPhase = 3; carryTicks = 0;
+                    release(controlRed); cargoStart = cargo->mSRT.t; assign(purple); carryPhase = 3; carryTicks = 0;
                     std::puts("P2_PURPLE_CARRY_RED_CONTROL_PASS strength=1 displacement_under_2=1");
                 }
             } else {
