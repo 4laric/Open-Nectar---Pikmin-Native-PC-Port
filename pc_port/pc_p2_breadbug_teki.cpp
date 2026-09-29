@@ -541,6 +541,18 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         b.logTimer = 0.0f;
         const Vector3f p = t->getPosition();
         const bb::Vec3& wp = b.fsm.nextWayPoint();
+        if (b.held) {
+            // Haul diagnostics (read-only): is the cargo driven, grounded, moving?
+            Pellet* c = b.held;
+            std::printf("P2_BREADBUG_OWN_HAUL generator=%u source_id=38 state=%s cargo=%.1f,%.1f,%.1f vel=%.1f,%.1f,%.1f "
+                        "dir=%.1f,%.1f carrier_self=%d carry_state=%d ground=%d pellet_state=%d pick=%.1f crew=%.1f "
+                        "min=%d next=%.1f,%.1f pathfinding=%d path_len=%zu\n",
+                        b.generator, bb::stateName(b.fsm.state()), c->mSRT.t.x, c->mSRT.t.y, c->mSRT.t.z,
+                        c->mVelocity.x, c->mVelocity.y, c->mVelocity.z, c->mCarryDirection.x, c->mCarryDirection.z,
+                        c->mPikiCarrier == t ? 1 : 0, int(c->mCarryState), c->onGround() ? 1 : 0, c->getState(),
+                        c->getPickOffset(), pikiStrength(c), int(c->mConfig->mCarryMinPikis()), wp.x, wp.z, b.fsm.pathfinding() ? 1 : 0,
+                        b.fsm.pathLength());
+        }
         std::printf("P2_BREADBUG_OWN_POS generator=%u source_id=38 state=%s anim=%d frame=%.0f x=%.1f z=%.1f "
                     "home=%.1f,%.1f next=%.1f,%.1f health=%.1f target=%d held=%d pellets=%zu tai_changes=%d "
                     "attacks_ignored=%d target_skips=%d consumed=%d spared=%d events_consumed=%d presses=%d fly_rising=%d "
