@@ -7,6 +7,10 @@
 
 class BTeki;
 
+// P2 source bound to this actor (family binding or seed generator uid), 0 for
+// a P1 actor.
+unsigned pc_held_part_p2_source(BTeki* teki);
+
 // Ship part carried by the P1 boss generator's pellet config, or 0 when the
 // arena boss holds none. Resolved at runtime (BossMgr::setBossParam rule).
 unsigned pc_held_part_for_pellet_config(int pelletConfigIdx);

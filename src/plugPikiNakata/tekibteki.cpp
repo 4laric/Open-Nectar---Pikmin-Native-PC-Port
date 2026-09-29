@@ -785,7 +785,7 @@ void BTeki::die()
     // #901: a P2-bound actor's real death drops its held ship part here, so
     // families that finalize through die() alone (no dieSoon) still drop.
     // P1 strategies keep their vanilla spawnItems/dieSoon timing.
-    if (!mDeadState && pc_randomizer_p2_source_for(this)) pc_held_part_drop(this, "die");
+    if (!mDeadState && pc_held_part_p2_source(this)) pc_held_part_drop(this, "die");
 
     mDeadState = 1;
     pc_p2_otakara_died(this); // lane-22 host death-seam hook; no-op for unregistered actors
