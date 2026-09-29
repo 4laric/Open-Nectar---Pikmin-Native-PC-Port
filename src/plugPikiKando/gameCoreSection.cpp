@@ -3100,14 +3100,41 @@ static void coopRunTestEvents(Navi* p1, Navi* p2)
     for (int i = 0; i < count; ++i) {
         const PcCoopEvent& ev = events[i];
         if (ev.tick != sCoopPolicy.tick) continue;
-        Navi* navi = navis[ev.captain - 1];
         std::printf("[coop-policy] TEST event tick=%u %s\n", sCoopPolicy.tick, ev.text);
         const char* refused = nullptr;
+        if (ev.kind == PC_COOP_EVENT_SUNSET) {
+            // Gap-fix K (#885): jump to the day's end hour; RunningModeState::update
+            // then runs the ordinary time-expiry day end (cleanupDayEnd, the
+            // sunset movie and its Fue event) on both peers from this sim tick.
+            gameflow.mWorldClock.setTime(gameflow.mParameters->mEndHour());
+            std::fflush(stdout);
+            continue;
+        }
+        Navi* navi = navis[ev.captain - 1];
         if (!coopNaviLive(navi)) refused = "not-live";
         else if (ev.kind == PC_COOP_EVENT_HP) {
             const float hp = ev.fraction * C_NAVI_PARM(navi, mHealth);
             if (hp <= 1.0f) refused = "hp-at-most-1";
             else navi->mHealth = hp;
+        } else if (ev.kind == PC_COOP_EVENT_SQUAD) {
+            // Gap-fix K (#885): the first <count> Pikmin (pikiMgr order) in the
+            // other captain's squad join this one, as the coop-policy fixture's
+            // deathlink-p1-down split does; they then follow and belong to it.
+            Navi* from = navis[2 - ev.captain];
+            int moved = 0;
+            Iterator it(pikiMgr);
+            CI_LOOP(it) {
+                if (moved >= ev.count) break;
+                Piki* piki = static_cast<Piki*>(*it);
+                if (!piki || !piki->isAlive() || piki->mNavi != from || piki->mMode != PikiMode::FormationMode) continue;
+                piki->mNavi = navi;
+                piki->changeMode(PikiMode::FormationMode, navi);
+                ++moved;
+            }
+            std::printf("[coop-policy] TEST squad tick=%u captain=%d moved=%d\n", sCoopPolicy.tick, ev.captain, moved);
+            if (!moved) refused = "no-squad";
+        } else if (ev.kind == PC_COOP_EVENT_DISMISS) {
+            navi->releasePikis();
         } else if (!coopDownCaptain(navi)) refused = "last-standing";
         if (refused) std::printf("[coop-policy] TEST refused tick=%u %s reason=%s\n", sCoopPolicy.tick, ev.text, refused);
         std::fflush(stdout);

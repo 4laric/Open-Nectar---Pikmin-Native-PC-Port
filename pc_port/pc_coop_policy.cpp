@@ -232,6 +232,26 @@ int pc_coop_events_parse(const char* text, PcCoopEvent* out, int max, int* badLi
 				ok = parse_uint(q, cap) && (cap == 1 || cap == 2);
 				ev.captain = int(cap);
 				if (ok) std::snprintf(ev.text, sizeof(ev.text), "DOWN %d", ev.captain);
+			} else if (ok && parse_word(q, "SQUAD")) {
+				ev.kind = PC_COOP_EVENT_SQUAD;
+				skip_blanks(q);
+				unsigned cap = 0, n = 0;
+				ok = parse_uint(q, cap) && (cap == 1 || cap == 2);
+				ev.captain = int(cap);
+				skip_blanks(q);
+				ok = ok && parse_uint(q, n) && n >= 1 && n <= PC_COOP_EVENT_SQUAD_MAX;
+				ev.count = int(n);
+				if (ok) std::snprintf(ev.text, sizeof(ev.text), "SQUAD %d %d", ev.captain, ev.count);
+			} else if (ok && parse_word(q, "DISMISS")) {
+				ev.kind = PC_COOP_EVENT_DISMISS;
+				skip_blanks(q);
+				unsigned cap = 0;
+				ok = parse_uint(q, cap) && (cap == 1 || cap == 2);
+				ev.captain = int(cap);
+				if (ok) std::snprintf(ev.text, sizeof(ev.text), "DISMISS %d", ev.captain);
+			} else if (ok && parse_word(q, "SUNSET")) {
+				ev.kind = PC_COOP_EVENT_SUNSET;
+				std::snprintf(ev.text, sizeof(ev.text), "SUNSET");
 			} else {
 				ok = false;
 			}

@@ -271,6 +271,27 @@ void testEvents()
 	bad = 0;
 	check(pc_coop_events_parse("1 DOWN 1\n0 HP 2 0.5", ev, PC_COOP_EVENTS_MAX, &bad) == -1 && bad == 2, "events: tick 0 on line 2");
 	check(pc_coop_events_parse("1 DOWN 1", ev, PC_COOP_EVENTS_MAX, &bad) == 1 && ev[0].tick == 1, "events: tick 1 accepted");
+
+	// M4 gap-fix K (#885): day-end kinds.
+	bad = -7;
+	n = pc_coop_events_parse("30 SQUAD 2 10\n60 DISMISS 2 # free near the Onion\n90 SUNSET\n5 SQUAD 1 200", ev, PC_COOP_EVENTS_MAX,
+	                         &bad);
+	check(n == 4 && bad == 0, "events: SQUAD / DISMISS / SUNSET lines");
+	if (n == 4) {
+		check(ev[0].tick == 30 && ev[0].kind == PC_COOP_EVENT_SQUAD && ev[0].captain == 2 && ev[0].count == 10, "events: 30 SQUAD 2 10");
+		check(std::string_view(ev[0].text) == "SQUAD 2 10", "events: canonical SQUAD text");
+		check(ev[1].tick == 60 && ev[1].kind == PC_COOP_EVENT_DISMISS && ev[1].captain == 2, "events: 60 DISMISS 2");
+		check(std::string_view(ev[1].text) == "DISMISS 2", "events: canonical DISMISS text");
+		check(ev[2].tick == 90 && ev[2].kind == PC_COOP_EVENT_SUNSET && ev[2].captain == 0, "events: 90 SUNSET");
+		check(std::string_view(ev[2].text) == "SUNSET", "events: canonical SUNSET text");
+		check(ev[3].count == PC_COOP_EVENT_SQUAD_MAX, "events: SQUAD count at the maximum");
+	}
+	const char* badDayEndLines[] = { "10 SQUAD 2", "10 SQUAD 3 5", "10 SQUAD 2 0", "10 SQUAD 2 201", "10 DISMISS", "10 DISMISS 0",
+	                                 "10 SUNSET 1", "10 SUNSETX", "10 SQUAD 2 5 x" };
+	for (const char* line : badDayEndLines) {
+		bad = 0;
+		check(pc_coop_events_parse(line, ev, PC_COOP_EVENTS_MAX, &bad) == -1 && bad == 1, line);
+	}
 }
 
 std::string tempPath(const char* name)
