@@ -348,7 +348,16 @@ void initOnce(void)
 		}
 	}
 }
+#if defined(PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
+// Netplay M6a snapshot spike (issue #896): the synctest re-advances ticks
+// after a restore; those re-run ticks must not append duplicate lines.
+bool sSpikeSuppressLog = false;
+#endif
 } // namespace
+
+#if defined(PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
+void pc_state_hash_spike_suppress_log(bool on) { sSpikeSuppressLog = on; }
+#endif
 
 void pc_state_hash_notify_argv(int argc, char** argv)
 {
@@ -454,7 +463,11 @@ void pc_state_hash_tick_end(void)
 		sLastTick     = sTick;
 		sNetplayHaveHash = true;
 
+#if defined(PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
+		if (sLogActive && !sSpikeSuppressLog) {
+#else
 		if (sLogActive) {
+#endif
 			std::fprintf(sLogFile, "%llu %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx\n",
 			             (unsigned long long)sTick, (unsigned long long)total, (unsigned long long)navi,
 			             (unsigned long long)piki, (unsigned long long)teki, (unsigned long long)item,

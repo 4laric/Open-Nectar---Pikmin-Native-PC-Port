@@ -112,8 +112,15 @@ def main(argv=None):
     def refresh():
         while not done.is_set():
             pending = run / "state.tmp"
-            pending.write_text(state_text)
-            os.replace(pending, run / "state.txt")
+            # M6a (#896): the game may hold state.txt open at the instant of
+            # the replace (PermissionError on Windows). Unhandled, that error
+            # killed this thread, state.txt went stale and the run parked for
+            # good in the randomizer not-ready hold. Retry on the next pass.
+            try:
+                pending.write_text(state_text)
+                os.replace(pending, run / "state.txt")
+            except OSError:
+                pass
             done.wait(0.1)
 
     thread = threading.Thread(target=refresh)
