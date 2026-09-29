@@ -3108,8 +3108,11 @@ static void coopRunTestEvents(Navi* p1, Navi* p2)
             // sunset movie and its Fue event) on both peers from this sim tick.
             gameflow.mWorldClock.setTime(gameflow.mParameters->mEndHour());
             // What the day-end enter paths will see: each captain's stored
-            // Onion (-1 = none) and the Pikmin it owns, in its squad or free.
-            int squad[PC_COOP_CAPTAINS] = {}, loose[PC_COOP_CAPTAINS] = {};
+            // Onion (-1 = none) and the Pikmin it owns, in its squad or free;
+            // near = free ones within the sunset safety range of an Onion or
+            // the ship, which enterFreePikmins sends in at cleanupDayEnd.
+            int squad[PC_COOP_CAPTAINS] = {}, loose[PC_COOP_CAPTAINS] = {}, near[PC_COOP_CAPTAINS] = {};
+            const f32 range = pikiMgr->mPikiParms->mPikiParms.mSunsetSafetyRange();
             Iterator it(pikiMgr);
             CI_LOOP(it) {
                 Piki* piki = static_cast<Piki*>(*it);
@@ -3117,12 +3120,25 @@ static void coopRunTestEvents(Navi* p1, Navi* p2)
                 for (int c = 0; c < PC_COOP_CAPTAINS; ++c) {
                     if (!navis[c] || piki->mNavi != navis[c]) continue;
                     if (piki->mMode == PikiMode::FormationMode) ++squad[c];
-                    else if (piki->mMode == PikiMode::FreeMode) ++loose[c];
+                    else if (piki->mMode == PikiMode::FreeMode) {
+                        ++loose[c];
+                        bool safe = false;
+                        for (int color = 0; color < PikiColorCount && !safe; ++color) {
+                            GoalItem* goal = itemMgr->getContainer(color);
+                            safe = goal && qdist2(goal->mSRT.t.x, goal->mSRT.t.z, piki->mSRT.t.x, piki->mSRT.t.z) <= range;
+                        }
+                        if (!safe && itemMgr->getUfo()) {
+                            const Vector3f pos = itemMgr->getUfo()->getGoalPos();
+                            safe = qdist2(pos.x, pos.z, piki->mSRT.t.x, piki->mSRT.t.z) <= range;
+                        }
+                        if (safe) ++near[c];
+                    }
                 }
             }
-            std::printf("[coop-policy] TEST sunset tick=%u p1goal=%d p2goal=%d squad=%d,%d free=%d,%d\n", sCoopPolicy.tick,
-                (p1 && p1->mGoalItem) ? int(p1->mGoalItem->mOnionColour) : -1,
-                (p2 && p2->mGoalItem) ? int(p2->mGoalItem->mOnionColour) : -1, squad[0], squad[1], loose[0], loose[1]);
+            std::printf("[coop-policy] TEST sunset tick=%u p1goal=%d p2goal=%d squad=%d,%d free=%d,%d near=%d,%d\n",
+                sCoopPolicy.tick, (p1 && p1->mGoalItem) ? int(p1->mGoalItem->mOnionColour) : -1,
+                (p2 && p2->mGoalItem) ? int(p2->mGoalItem->mOnionColour) : -1, squad[0], squad[1], loose[0], loose[1], near[0],
+                near[1]);
             std::fflush(stdout);
             continue;
         }
@@ -3150,7 +3166,20 @@ static void coopRunTestEvents(Navi* p1, Navi* p2)
             std::printf("[coop-policy] TEST squad tick=%u captain=%d moved=%d\n", sCoopPolicy.tick, ev.captain, moved);
             if (!moved) refused = "no-squad";
         } else if (ev.kind == PC_COOP_EVENT_DISMISS) {
+            auto squadOf = [](Navi* owner) {
+                int n = 0;
+                Iterator it(pikiMgr);
+                CI_LOOP(it) {
+                    Piki* piki = static_cast<Piki*>(*it);
+                    if (piki && piki->isAlive() && piki->mNavi == owner && piki->mMode == PikiMode::FormationMode) ++n;
+                }
+                return n;
+            };
+            const int before = squadOf(navi);
             navi->releasePikis();
+            const int released = before - squadOf(navi);
+            std::printf("[coop-policy] TEST dismiss tick=%u captain=%d released=%d\n", sCoopPolicy.tick, ev.captain, released);
+            if (!released) refused = "none-released";
         } else if (!coopDownCaptain(navi)) refused = "last-standing";
         if (refused) std::printf("[coop-policy] TEST refused tick=%u %s reason=%s\n", sCoopPolicy.tick, ev.text, refused);
         std::fflush(stdout);
