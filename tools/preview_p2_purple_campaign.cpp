@@ -72,7 +72,8 @@ class PurpleCampaignApp : public PlugPikiApp {
                 input->changeMode(PikiMode::FreeMode,n); input->mFSM->transit(input,PIKISTATE_Flying);
                 // Sweep the scripted reticle through the native arc; its nominal
                 // endpoint is not the ground intercept when hold height varies.
-                const float aimScale = 0.5f + 0.1f * ((phaseTicks / 60) % 6);
+                const char* fixedAim = std::getenv("P2_PURPLE_AIM_SCALE");
+                const float aimScale = fixedAim ? std::atof(fixedAim) : 0.8f + 0.1f * ((phaseTicks / 60) % 9);
                 Vector3f aim = n->mSRT.t + (violet->mSRT.t - n->mSRT.t) * aimScale;
                 n->throwPiki(input,aim);
                 std::printf("P2_PURPLE_SCRIPTED_THROW real_collision=1 aim_scale=%.2f captain=%.1f,%.1f,%.1f velocity=%.1f,%.1f,%.1f\n",
