@@ -228,10 +228,11 @@ inputs time to reach the other game.
   up to 2 minutes).
 - Every change prints one line, for example
   `[netplay] delay change: 2 -> 3 at frame=591 ... (up: peer late 215ms ...)`.
-- It never changes during a pause for a lost Archipelago link, just after a
-  stage load, or in the first 5 s. It never goes more than 2 frames above
-  what the ping needs, and a slow moment on your own PC (a shader being
-  built) does not raise it: a delay only hides network time.
+- It never changes during a pause for a lost Archipelago link, in the 5 s
+  after such a pause, just after a stage load, or in the first 5 s. It
+  never goes more than 2 frames above what the ping needs, and a slow
+  moment on your own PC (a shader being built) does not raise it: a delay
+  only hides network time.
 - Changing the delay never changes the game: both games still apply
   exactly the same inputs on exactly the same frames. Only the moment your
   presses take effect changes.

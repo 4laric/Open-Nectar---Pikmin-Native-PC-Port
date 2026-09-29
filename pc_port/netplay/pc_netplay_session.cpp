@@ -728,6 +728,8 @@ void randstate_embed_on_submit(PcNetplayInput& local)
 	++sRandNextFrag;
 }
 
+void adaptive_note_resume(uint64_t frame); // M5c lane B, defined with the adaptive delay below
+
 // Tick-start step (both peers): apply a completed snapshot before the
 // sim runs. Must run before inject_input() / app->idle() for this frame.
 void randstate_apply_before_tick(int frame)
@@ -761,6 +763,7 @@ void randstate_apply_before_tick(int frame)
 		sHeldLogged = false;
 		sResumeHave = false;
 		++sHoldsDone;
+		adaptive_note_resume((uint64_t)frame); // M5c lane B: settle span after the freeze
 	}
 	if (!sRandReasm.has_pending()) return;
 	if (frame < (int)sRandReasm.pending_frame()) return; // not yet (unreachable; defensive)
@@ -2087,9 +2090,14 @@ uint32_t fold_hash64(uint64_t v) { return (uint32_t)(v ^ (v >> 32)); }
 // Freeze rules (no change at all, evidence still gathered): a B1 HOLD in
 // progress or requested (the hold arithmetic keys on the delay), a lane S load
 // window (its stalls are load time), a shrink still in progress, and the
-// first kAdaptiveWarmupFrames (the two schedules settle after the first
-// load). The delay stays in 1..8: B1's kHoldLeadFrames (12) and lane S's
-// load-window close frame both assume a delay of at most 8.
+// settle span: the first kAdaptiveWarmupFrames of the session (the two
+// schedules settle after the first load) and after each B1 RESUME (both
+// schedules restart from the freeze, one peer a one-way trip later, so the
+// first frames wait the way a session start does). A HOLD, a load window
+// and a settle span also pause the controller's clock, and stalls inside a
+// load window or a settle span are never reported. The delay stays in 1..8:
+// B1's kHoldLeadFrames (12) and lane S's load-window close frame both
+// assume a delay of at most 8.
 constexpr uint64_t kAdaptiveWarmupFrames = 150;
 constexpr double kRttSampleMs = 500.0; // GekkoNet's NetworkHealth period
 constexpr double kAdviceMs = 250.0;    // advice period (pc_netplay_adaptive::Policy::reportPeriodMs)
@@ -2108,6 +2116,7 @@ uint64_t sDelayUps = 0;
 uint64_t sDelayDowns = 0;
 std::string sDelayTimeline;     // "+<s>s@<frame>:<delay> ..."
 std::string sPendingWhy;        // reason of a growth submitted this turn
+uint64_t sSettleUntil = 0;      // settle span: frames below this (warm-up, after a B1 RESUME)
 bool sStallOpen = false;
 double sStallStartMs = 0;
 double sStallDurMs = 0;
@@ -2176,6 +2185,7 @@ void adaptive_configure()
 	sPrevTurnStalled = true;
 	sOwnLagPrev = 0;
 	sNextLand = sCfg.localDelay; // the first add fills frames 0..d-1 with GekkoNet's empty input
+	sSettleUntil = kAdaptiveWarmupFrames;
 	pc_netplay_adaptive::Policy pol;
 	sDelayCtl.configure(pol);
 	sDelayCtl.start(now_ms());
@@ -2221,13 +2231,24 @@ void adaptive_log_change(unsigned from, unsigned to, const std::string& why)
 	fflush(stdout);
 }
 
+// B1 RESUME applied at the tick start of `frame` (both peers): the settle
+// span starts again, as after the first load (see the freeze rules above).
+void adaptive_note_resume(uint64_t frame)
+{
+	if (!sAdaptiveConfigured) return;
+	sSettleUntil = frame + kAdaptiveWarmupFrames;
+	printf("[netplay] adaptive delay: settle after resume until frame=%llu (stalls not reported, no change)\n",
+	       (unsigned long long)sSettleUntil);
+	fflush(stdout);
+}
+
 // Why no change may start now (nullptr: free to change).
 const char* adaptive_frozen()
 {
 	if (sHolding || sHoldRequested) return "hold";
 	if (sLgWindow.is_open()) return "load window";
 	if (!pc_netplay_adaptive::submit_due(sNextLand, sAdvances, sCfg.localDelay)) return "transition";
-	if (sAdvances < kAdaptiveWarmupFrames) return "warm-up";
+	if (sAdvances < sSettleUntil) return "settle";
 	return nullptr;
 }
 
@@ -2446,9 +2467,10 @@ void adaptive_note_stall_turn(double startMs, double durMs)
 		sStallOpen = true;
 		sStallStartMs = startMs;
 		sStallDurMs = 0;
-		// Never reported: a load window (load time, lane S), and the first
-		// frames, while the two 30 Hz schedules settle after the first load.
-		sStallExcluded = sLgWindow.is_open() || sAdvances < kAdaptiveWarmupFrames;
+		// Never reported: a load window (load time, lane S), and the settle
+		// span, while the two 30 Hz schedules settle after the first load or
+		// after a B1 RESUME.
+		sStallExcluded = sLgWindow.is_open() || sAdvances < sSettleUntil;
 		sStallAhead = sGekko != nullptr ? gekko_frames_ahead(sGekko) : 0.0f;
 	}
 	sStallDurMs += durMs;
@@ -2458,10 +2480,10 @@ void adaptive_note_stall_turn(double startMs, double durMs)
 void adaptive_poll(double nowMs)
 {
 	if (sGekko == nullptr || !sGekkoStarted) return;
-	// A B1 HOLD (requested or in progress) or a lane S load window pauses
-	// the controller's clock: the paused span is no evidence either way
-	// (DelayController::note_pause).
-	if (sHolding || sHoldRequested || sLgWindow.is_open()) sDelayCtl.note_pause(nowMs);
+	// A B1 HOLD (requested or in progress), a lane S load window or a settle
+	// span pauses the controller's clock: the paused span is no evidence
+	// either way (DelayController::note_pause).
+	if (sHolding || sHoldRequested || sLgWindow.is_open() || sAdvances < sSettleUntil) sDelayCtl.note_pause(nowMs);
 	adaptive_send_advice(nowMs);
 	if (nowMs < sRttNextMs) return;
 	sRttNextMs = nowMs + kRttSampleMs;

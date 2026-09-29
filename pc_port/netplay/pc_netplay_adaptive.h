@@ -44,7 +44,8 @@
 //   - counted stalls (what a peer reports) exclude events of hitchMs (1 s) or
 //     longer (a load, a driver hang or an outage: at most 8 frames of delay
 //     cannot hide them), stalls inside a lane S load window and stalls in
-//     the session's first frames (time sync settling); all stay in the stats;
+//     a settle span (the session's first frames and the first frames after
+//     a B1 RESUME: time sync settling); all stay in the stats;
 //   - lateness of THIS peer (a turn that starts behind its 30 Hz schedule:
 //     a long tick such as a shader compile, a late wake-up on a loaded
 //     machine) delays this peer's next inputs, and the peer duly reports the
@@ -57,9 +58,10 @@
 //     0.05) + 1, clamped to [min, max], applied to the measured in-session
 //     RTT minus one slot of turn quantization (Policy::rttBiasMs).
 // The session freezes the controller (no change at all) during a B1 HOLD,
-// inside a load window, mid-transition, and during the first frames. A HOLD
-// or a load window also restarts its clock (DelayController::note_pause), so
-// the paused span never counts as evidence either way.
+// inside a load window, mid-transition, and during a settle span. A HOLD,
+// a load window or a settle span also restarts its clock
+// (DelayController::note_pause), so the paused span never counts as
+// evidence either way.
 //
 // SubmitGate is the frame arithmetic of a transition (the session and the
 // two-session GekkoNet test both use it). GekkoNet's InputBuffer stores the
