@@ -7,6 +7,7 @@
 #include "pc_p2_purple_impact.h"
 #include "pc_p2_purple_flight.h"
 #include "pc_p2_white.h"
+#include "pc_p2_breadbug_teki.h"
 #include "pc_p2_species.h"
 #include "pc_p2_bulbmin.h"
 #include "Navi.h"
@@ -1158,6 +1159,9 @@ void Navi::pcUpdateLockOn()
 				Creature* teki = *iter;
 				if (!teki->isTeki() || !teki->isAlive() || !teki->isVisible()) {
 					continue;
+				}
+				if (pc_p2_breadbug_teki_untargetable(teki, "navi_lock_on")) {
+					continue; // #898
 				}
 				Vector3f sep = teki->mSRT.t - mCursorWorldPos;
 				f32 dist     = speedy_sqrtf(sep.x * sep.x + sep.z * sep.z);

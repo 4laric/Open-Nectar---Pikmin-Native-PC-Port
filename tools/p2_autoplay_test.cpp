@@ -528,6 +528,46 @@ void testGenericDeath()
           "generic-death/result_claims_kill");
 }
 
+void testNoDeliverAbandonsCorpse()
+{
+    // #898 TEST-ONLY observation knob: after a kill the bot whistles the squad
+    // off the corpse for noDeliverWhistle seconds, reports, and never delivers.
+    p2autoplay::Config cfg;
+    cfg.noDeliver = true;
+    cfg.noDeliverWhistle = 0.5f;
+    cfg.receiptTimeout = 60.0f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 3921089765u;
+    s.targetSource = 34;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.targetHealthFrac = 1.0f;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetDead = true;
+    s.targetAlive = false;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "no-deliver/aftermath");
+    bool whistled = false;
+    std::vector<std::string> markers;
+    for (int i = 0; i < 40 && brain.current() == p2autoplay::State::Aftermath; ++i) {
+        brain.update(0.05f, s);
+        const p2autoplay::Command c = brain.command();
+        if (c.buttons & p2autoplay::PadB) whistled = true;
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(whistled, "no-deliver/whistles_squad_off");
+    CHECK(brain.current() != p2autoplay::State::Aftermath, "no-deliver/leaves_aftermath");
+    CHECK(hasMarker(markers, "AUTOPLAY_NO_DELIVER token=3921089765"), "no-deliver/marker");
+    CHECK(hasMarker(markers, "AUTOPLAY_RESULT target=3921089765 damaged=1 killed=1 carried=0"),
+          "no-deliver/result_not_carried");
+}
+
 void testWithdrawRepeat()
 {
     // bot-v2 gap 4: a 5-Pikmin first cycle loops back for another cycle
@@ -2946,6 +2986,7 @@ int main()
     testKoganePathNeedsEngagement();
     testReceiptWait();
     testGenericDeath();
+    testNoDeliverAbandonsCorpse();
     testWithdrawRepeat();
     testSaraiFlyer();
     testKurageLongAttack();

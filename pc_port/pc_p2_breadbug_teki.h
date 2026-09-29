@@ -1,5 +1,6 @@
 #pragma once
 class BTeki;
+class Creature;
 class Graphics;
 class Matrix4f;
 class TekiEvent;
@@ -28,7 +29,18 @@ bool pc_p2_breadbug_teki_suppress_ai(const BTeki*);
 bool pc_p2_breadbug_teki_event(BTeki*, const TekiEvent&);
 // InteractAttack::actTeki seam: an ordinary attack on an OWN Breadbug is
 // refused (damageCallBack is bitter-only). True = this sidecar decided.
-bool pc_p2_breadbug_teki_attack(BTeki*, float damage);
+// With the target-selection seam below this is a backstop only: a campaign run
+// must show zero of these (attacker kind is logged to find any leak).
+bool pc_p2_breadbug_teki_attack(BTeki*, const Creature* attacker, float damage);
+// Target-selection seam (#898 fix): retail PanModokiBase::isLivingThing() is
+// true only while bittered (PanModokiBase.h:93), and Pikmin free/attack AI
+// (pikiAI.cpp:260/574/666), the captain's swarm (naviState.cpp:598) and a
+// thrown Pikmin's stick (pikiState.cpp:2336) all skip a non-living teki. The
+// port has no bitter spray, so a live bound Breadbug is never a Pikmin,
+// captain punch, swarm or lock-on target. `site` names the P1 caller; the
+// first skip per site is logged and all are counted (P2_BREADBUG_OWN_POS
+// target_skips=). False for anything that is not a live bound Breadbug.
+bool pc_p2_breadbug_teki_untargetable(const Creature*, const char* site);
 // getParameterF chain: source life for TPF_Life, no P1 life regeneration.
 float pc_p2_breadbug_teki_param_f(const BTeki*, int idx, float fallback);
 // Draw hook: staged PanModoki pose bank keyed on the FSM clip/frame; the
