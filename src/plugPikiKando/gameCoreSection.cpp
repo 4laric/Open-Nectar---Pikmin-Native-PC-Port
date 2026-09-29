@@ -3166,18 +3166,17 @@ static void coopRunTestEvents(Navi* p1, Navi* p2)
             std::printf("[coop-policy] TEST squad tick=%u captain=%d moved=%d\n", sCoopPolicy.tick, ev.captain, moved);
             if (!moved) refused = "no-squad";
         } else if (ev.kind == PC_COOP_EVENT_DISMISS) {
-            auto squadOf = [](Navi* owner) {
-                int n = 0;
-                Iterator it(pikiMgr);
-                CI_LOOP(it) {
-                    Piki* piki = static_cast<Piki*>(*it);
-                    if (piki && piki->isAlive() && piki->mNavi == owner && piki->mMode == PikiMode::FormationMode) ++n;
-                }
-                return n;
-            };
-            const int before = squadOf(navi);
-            navi->releasePikis();
-            const int released = before - squadOf(navi);
+            // The captain's squad goes free where it stands (FreeMode, still
+            // owned by it). Navi::releasePikis released none of a squad built
+            // by SQUAD in these runs, so this frees each member directly.
+            int released = 0;
+            Iterator it(pikiMgr);
+            CI_LOOP(it) {
+                Piki* piki = static_cast<Piki*>(*it);
+                if (!piki || !piki->isAlive() || piki->mNavi != navi || piki->mMode != PikiMode::FormationMode) continue;
+                piki->changeMode(PikiMode::FreeMode, navi);
+                ++released;
+            }
             std::printf("[coop-policy] TEST dismiss tick=%u captain=%d released=%d\n", sCoopPolicy.tick, ev.captain, released);
             if (!released) refused = "none-released";
         } else if (!coopDownCaptain(navi)) refused = "last-standing";

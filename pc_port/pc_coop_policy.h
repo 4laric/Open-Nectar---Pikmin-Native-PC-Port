@@ -121,8 +121,8 @@ bool pc_coop_stage_changed(bool started, const PcCoopStageKey& prev, const PcCoo
 // with captain 2 owning Pikmin in a few hundred ticks instead of ~26,500:
 //   `<tick> SQUAD <1|2> <count 1..200>`  up to <count> Pikmin in the other
 //                                         captain's squad join this one's
-//   `<tick> DISMISS <1|2>`                that captain disbands its squad
-//                                         (Navi::releasePikis, the X button)
+//   `<tick> DISMISS <1|2>`                that captain's squad goes free
+//                                         where it stands (still owned by it)
 //   `<tick> SUNSET`                       the clock jumps to the day's end
 //                                         hour; the normal day end follows
 enum { PC_COOP_EVENTS_MAX = 64, PC_COOP_EVENT_TEXT = 48, PC_COOP_EVENT_SQUAD_MAX = 200 };
