@@ -809,6 +809,11 @@ static void loadBank() {
                 }
                 clips[name] = clip;
             }
+        } else if (token == "frames") {
+            // P2_BANK_FRAMES_1 trailer (#895): per-pose source frames,
+            // consumed by the batch draw paths; skip its list token here.
+            std::string framesList;
+            bank >> framesList;
         } else {
             break;
         }
