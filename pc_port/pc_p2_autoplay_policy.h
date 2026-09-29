@@ -413,6 +413,7 @@ inline bool corpseDisplaced(float dx, float dz)
 // Plain-data senses gathered by the engine-linked driver each tick.
 struct Senses {
     bool enabled = false; // PIKMIN_RANDOMIZER_AUTOPLAY gate
+    bool trackingPart = false; // #901: the tracked pellet is a dropped ship part
     bool naviAlive = false; // controlled captain exists and is alive
     float dt = 0.016f; // logical tick length (seconds)
     // Geometry (world XZ). The Brain steers in world space; the driver
@@ -1123,6 +1124,13 @@ private:
         }
     }
 
+    // #901: a dropped ship part is a heavy carry the squad is seeded onto a
+    // few Pikmin at a time, so it gets more bounded re-seed cycles.
+    int rethrowMax(const Senses& in) const
+    {
+        return in.trackingPart ? cfg.aftermathRethrowMax * 4 : cfg.aftermathRethrowMax;
+    }
+
     void tickAftermath(float dt, const Senses& in)
     {
         if (in.containerOpen) {
@@ -1203,7 +1211,7 @@ private:
                     }
                 }
                 if (amStallTime >= cfg.carryStallWait) {
-                    if (amRethrows >= cfg.aftermathRethrowMax) {
+                    if (amRethrows >= rethrowMax(in)) {
                         giveUpAftermath(in, "carry_stalled");
                         // bot-deliver (#871): never claim a kill without a death
                         // latch (bc5 55 Hanachirashi: aftermath timeout with no
@@ -1240,7 +1248,7 @@ private:
                 if (amHadEnough) {
                     // Regression: this lift escorted before (sufficient crew
                     // or motion) and fell short again.
-                    if (amRethrows >= cfg.aftermathRethrowMax) {
+                    if (amRethrows >= rethrowMax(in)) {
                         giveUpAftermath(in, "carry_stalled");
                         // bot-deliver (#871): killed from sawKill, not claimed.
                         finishTarget(in, /*killed*/ false);
@@ -1272,7 +1280,7 @@ private:
                     amGrowStill += dt;
                 }
                 if (amGrowStill >= cfg.carryStallWait) {
-                    if (amRethrows >= cfg.aftermathRethrowMax) {
+                    if (amRethrows >= rethrowMax(in)) {
                         giveUpAftermath(in, "carry_stalled");
                         // bot-deliver (#871): killed from sawKill, not claimed.
                         finishTarget(in, /*killed*/ false);
@@ -1295,7 +1303,7 @@ private:
             amHadEnough = false;
             if (wasHeld) {
                 // Carry lost en route: re-seed while rethrows remain.
-                if (amRethrows >= cfg.aftermathRethrowMax) {
+                if (amRethrows >= rethrowMax(in)) {
                     giveUpAftermath(in, "carry_stalled");
                     // bot-deliver (#871): killed from sawKill, not claimed.
                     finishTarget(in, /*killed*/ false);
@@ -1312,7 +1320,7 @@ private:
                 if (in.targetToken != 0) steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
                 if (in.targetDist >= cfg.aftermathBackoffDist || amPhaseTime >= cfg.aftermathSettleWait) {
                     // Settled out of contact: re-approach + re-throw if allowed.
-                    if (amRethrows >= cfg.aftermathRethrowMax) {
+                    if (amRethrows >= rethrowMax(in)) {
                         giveUpAftermath(in, "carry_no_grab");
                         // bot-deliver (#871): killed from sawKill, not claimed.
                         finishTarget(in, /*killed*/ false);

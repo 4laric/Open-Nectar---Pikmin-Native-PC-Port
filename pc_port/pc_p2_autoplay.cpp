@@ -796,6 +796,7 @@ void pc_p2_autoplay_tick(void)
     senses.carryCount = sEngage.carryNear;
     senses.pelletCarriers = sEngage.pelletCarriers;
     senses.carryWant = sEngage.carryWant; // bot-v7: declared minimum (0 = unknown)
+    senses.trackingPart = trackedPellet && trackedPellet->isUfoParts();
     senses.pelletExists = sEngage.bodyPresent || sEngage.pelletFound || !sEngage.deadLatch;
     senses.corpseMoving = corpseMoving;
     senses.corpseMoved = corpseMoved;
