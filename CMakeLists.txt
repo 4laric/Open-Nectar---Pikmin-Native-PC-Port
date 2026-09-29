@@ -1033,6 +1033,27 @@ if(PIKMIN_NETPLAY_BUILD AND PIKMIN_BUILD_TESTS AND NOT ANDROID)
     add_test(NAME pc_netplay_loadguard_test COMMAND pc_netplay_loadguard_test)
 endif()
 
+# Netplay M5c lane B (issue #887): adaptive input delay and session stats
+# (pc_netplay_adaptive.h: controller, frame-time histogram, schedule parsing,
+# transition arithmetic), the impairment model (pc_netplay_impair.h), and
+# delay transitions against the vendored GekkoNet (two in-memory sessions
+# growing and shrinking their delays mid-run with scripted per-frame inputs:
+# both peers see identical inputs, and every frame F carries record F - d0).
+# Netplay builds only (links gekkonet).
+if(PIKMIN_NETPLAY_BUILD AND PIKMIN_BUILD_TESTS AND NOT ANDROID)
+    add_executable(pc_netplay_adaptive_test pc_port/netplay/pc_netplay_adaptive_test.cpp)
+    target_include_directories(pc_netplay_adaptive_test PRIVATE
+        pc_port
+        third_party/gekkonet/GekkoLib/include)
+    target_compile_definitions(pc_netplay_adaptive_test PRIVATE GEKKONET_STATIC GEKKONET_NO_ASIO)
+    target_compile_options(pc_netplay_adaptive_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    target_link_libraries(pc_netplay_adaptive_test PRIVATE gekkonet)
+    if(WIN32)
+        target_link_libraries(pc_netplay_adaptive_test PRIVATE ws2_32)
+    endif()
+    add_test(NAME pc_netplay_adaptive_test COMMAND pc_netplay_adaptive_test)
+endif()
+
 # FP determinism gate (issue #879). Runs objdump over the linked game exe
 # and fails on any x87 op (transcendentals and fsqrt), any FMA
 # instruction, any libm sqrt call from the netplay TU, or any

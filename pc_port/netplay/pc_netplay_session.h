@@ -55,3 +55,23 @@ void pc_netplay_on_stage_load(void);
 // write; fix round 1); inert outside a netplay session tick. Null in the
 // default build.
 void pc_netplay_load_keepalive(int site);
+// M5c lane B (issue #887): live session figures for a HUD (presentation
+// only; lane C). False outside a running session. rtt* are GekkoNet's
+// last_ping samples (every 500 ms, -1 before the first), jitter is the mean
+// absolute difference of successive samples, and the stall figures are the
+// session's stall events (runs of turns with no Advance; see
+// pc_netplay_adaptive.h). The same figures are logged as "[netplay] stats:"
+// every 300 ticks and as "[netplay] stats final:" at the session's end.
+struct PcNetplayLiveStats {
+	unsigned delay = 0;     // current local input delay (frames)
+	int adaptive = 0;       // 1 when the adaptive delay may change it
+	float rttLastMs = -1;
+	float rttP50Ms = -1;
+	float jitterMs = 0;
+	unsigned stallsLast10s = 0;
+	float stallMsLast10s = 0;
+	unsigned long long stallCount = 0;
+	float stallTotalMs = 0;
+	int stallOpen = 0;      // 1 while the session is waiting right now
+};
+bool pc_netplay_live_stats(PcNetplayLiveStats* out);
