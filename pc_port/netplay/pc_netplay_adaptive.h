@@ -57,7 +57,9 @@
 //     0.05) + 1, clamped to [min, max], applied to the measured in-session
 //     RTT minus one slot of turn quantization (Policy::rttBiasMs).
 // The session freezes the controller (no change at all) during a B1 HOLD,
-// inside a load window, mid-transition, and during the first frames.
+// inside a load window, mid-transition, and during the first frames. A HOLD
+// or a load window also restarts its clock (DelayController::note_pause), so
+// the paused span never counts as evidence either way.
 //
 // SubmitGate is the frame arithmetic of a transition (the session and the
 // two-session GekkoNet test both use it). GekkoNet's InputBuffer stores the
@@ -517,6 +519,18 @@ public:
 
 	// An externally forced change (test schedule): restarts the hold.
 	void note_forced_change(double nowMs) { mLastChangeMs = nowMs; }
+
+	// A pause at nowMs (a B1 HOLD requested or in progress, a lane S load
+	// window; the session calls this on every paused turn). A paused span
+	// is neither lateness nor clean evidence: while held no inputs flow but
+	// the peer's reports keep arriving clean, and a load's waits are never
+	// reported. So a pause restarts the clock like a change: once it ends,
+	// the up rule reads reports from settleMs after it (the resume's own
+	// catch-up waits are stale), and the down rule needs a whole hold of
+	// play after it. (First HOLD pair with the controller on: both peers
+	// lowered on the first frame after a 22 s hold and raised by 2 one
+	// second later.)
+	void note_pause(double nowMs) { mLastChangeMs = nowMs; }
 
 private:
 	void trim(double nowMs)

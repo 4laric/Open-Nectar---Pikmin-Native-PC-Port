@@ -232,6 +232,51 @@ void test_controller()
 		cur = run_frames(c, 4000, 4100, cur, nullptr, nullptr, false);
 		CHECK(cur == 4, "unfrozen: the gathered lateness raises at once");
 	}
+	// A pause (B1 HOLD, load window) is no evidence: the clean reports that
+	// keep arriving while held never lower the delay on the first frame
+	// after it, and the resume's own catch-up waits (inside settleMs) never
+	// raise it.
+	{
+		DelayController c;
+		c.configure(pol);
+		c.start(0);
+		feed_rtt(c, 0, 80000, 93); // need 2
+		feed_reports(c, 0, 80000);
+		unsigned cur = 3;
+		for (double t = 5000; t < 27000; t += kSlotMs) {
+			c.note_pause(t);
+			Decision d = c.decide(t, cur, true); // the session's freeze
+			if (d.changed) cur = d.target;
+		}
+		add_stall(c, 27300, 300, 4); // resume catch-up, 0.3 s after the pause
+		int ups = 0, downs = 0;
+		cur = run_frames(c, 27000, 41900, cur, &ups, &downs);
+		CHECK(cur == 3 && ups == 0 && downs == 0, "pause: no change for a hold after it ends");
+		// The catch-up wait (300 ms at 27.3 s) is inside the first clean
+		// window, so the lowering waits until the window has moved past it.
+		cur = run_frames(c, 41900, 42700, cur, &ups, &downs);
+		CHECK(cur == 2 && downs == 1 && ups == 0, "pause: lowered a whole clean hold after it");
+		// Without note_pause the same span would have lowered at once.
+		DelayController c2;
+		c2.configure(pol);
+		c2.start(0);
+		feed_rtt(c2, 0, 80000, 93);
+		feed_reports(c2, 0, 80000);
+		cur = run_frames(c2, 5000, 27000, 3, nullptr, nullptr, true);
+		downs = 0;
+		cur = run_frames(c2, 27000, 27100, cur, nullptr, &downs);
+		CHECK(cur == 2 && downs == 1, "pause control: a frozen-only span lowers on the first frame");
+		// Genuine lateness after the settle span still raises.
+		DelayController c3;
+		c3.configure(pol);
+		c3.start(0);
+		feed_rtt(c3, 0, 80000, 93);
+		for (double t = 5000; t < 27000; t += kSlotMs) c3.note_pause(t);
+		add_stall(c3, 28500, 150, 2);
+		ups = 0;
+		cur = run_frames(c3, 27000, 29000, 2, &ups, nullptr);
+		CHECK(cur == 3 && ups == 1, "pause: lateness after the settle span raises");
+	}
 	// Slow lowering: a clean hold with RTT headroom, one step per hold.
 	{
 		DelayController c;

@@ -2458,6 +2458,10 @@ void adaptive_note_stall_turn(double startMs, double durMs)
 void adaptive_poll(double nowMs)
 {
 	if (sGekko == nullptr || !sGekkoStarted) return;
+	// A B1 HOLD (requested or in progress) or a lane S load window pauses
+	// the controller's clock: the paused span is no evidence either way
+	// (DelayController::note_pause).
+	if (sHolding || sHoldRequested || sLgWindow.is_open()) sDelayCtl.note_pause(nowMs);
 	adaptive_send_advice(nowMs);
 	if (nowMs < sRttNextMs) return;
 	sRttNextMs = nowMs + kRttSampleMs;
