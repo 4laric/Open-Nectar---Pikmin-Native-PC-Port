@@ -42,6 +42,12 @@
 //     else 0. With the netplay stream both peers apply snapshots at the
 //     same tick, so this column stays identical; with the stream disabled
 //     and divergent state.txt schedules it is the first column to differ.
+//     Gapfix C (issue #885): while co-op is active (pc_coop_active() and
+//     the co-op randomizer branch has run), the co-op policy's sim state
+//     (pc_coop_policy_state_hash: reset key, tick, round-robin cursors, HP
+//     samples, and the bomb trap / Progg / nectar cooldowns) is mixed in
+//     as one more u64 after pc_randomizer_hash(). Single-captain play
+//     mixes nothing, so its column is byte-identical to before.
 //   total: FNV-1a 64 over the seven sub-hashes in the order above.
 // A null manager (title screen, loading) contributes a sub-hash of 0: each
 // sub-hash returns literal 0 (not the FNV offset) when its managers are

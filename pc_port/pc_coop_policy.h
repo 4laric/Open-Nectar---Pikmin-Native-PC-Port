@@ -19,6 +19,8 @@
 // always break to the lower index. No RNG and no wall clock anywhere, so
 // the same inputs give the same answer on both lockstep peers.
 
+#include <cstdint>
+
 enum { PC_COOP_CAPTAINS = 2 };
 
 struct PcCoopCaptain {
@@ -142,5 +144,44 @@ int pc_coop_events_load(const char* path, PcCoopEvent* out, int max, const char*
 // only in hidden test runs (PIKMIN_RANDOMIZER_TEST_BACKGROUND=1). The
 // default build never reads the variable.
 const char* pc_coop_events_knob_path();
+
+// Netplay gapfix C (issue #885): handshake config hash input for the knob.
+// FNV-1a 64 over the file's bytes; 0 when path is null (knob unset, or not
+// honoured: default build or not a hidden test run). An unreadable file
+// hashes as zero bytes (the FNV-1a offset basis), which still differs from
+// "no knob". The session folds pc_coop_events_config_hash() into the config
+// string as `coopEvents`, so a pair whose peers load different event files
+// (or only one of them) is refused with "handshake refused: config".
+uint64_t pc_coop_events_file_hash(const char* path);
+uint64_t pc_coop_events_config_hash();
+
+// Netplay gapfix C (issue #885): the co-op policy's sim state, as the
+// per-tick state hash folds it (pc_state_hash.cpp, rand sub-hash) while the
+// co-op branch is active. Decision state only: the per-stage policy state
+// (reset key, tick, cursors, the HP samples of rule 1) and the three co-op
+// cooldowns (bomb trap, Progg, nectar), which persist across stages. The
+// fixture read-back fields and log-only text are not sim state.
+enum { PC_COOP_COOLDOWNS = 3 };
+struct PcCoopHashState {
+	bool started;
+	PcCoopStageKey key;
+	unsigned tick;
+	PcCoopCursors cursors;
+	float prevHp[PC_COOP_CAPTAINS];
+	bool prevValid[PC_COOP_CAPTAINS];
+	float cooldown[PC_COOP_COOLDOWNS]; // bomb trap, Progg, nectar
+};
+// FNV-1a 64 over every field in declaration order, little-endian, floats
+// by their bit patterns. Never 0.
+uint64_t pc_coop_state_hash(const PcCoopHashState& state);
+
+// Test knob (PIKMIN_NETPLAY_TEST_COOP_PERTURB=<tick>): at that co-op tick
+// one peer flips its Flower Shower cursor, a change nothing else in the sim
+// reads until the next Flower Shower, so only the state-hash fold can see
+// it. It proves desync detection for the co-op policy state, so it is
+// deliberately NOT in the handshake config hash. Compiled only into the
+// netplay build and honoured only in hidden test runs, like the events
+// knob; 0 when unset, not honoured or not a positive decimal.
+unsigned pc_coop_perturb_knob_tick();
 
 #endif // PC_COOP_POLICY_H

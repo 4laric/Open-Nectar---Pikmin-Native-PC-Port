@@ -3,8 +3,8 @@
 Applies in co-op only: `pc_coop_active()` with a second captain
 (`GameCoreSection::mNavi2`). Every netplay session is co-op, and so is local
 `--coop` / `PIKMIN_COOP=1`. Single-captain play is unchanged (the co-op code
-is an early branch in `GameCoreSection::updateAI`; the single-captain
-statements sit untouched in its `else`).
+is an early branch in `GameCoreSection::updateAI`; since gapfix C both
+branches call the same shared randomizer steps, see "Shared steps").
 
 ## Owner rules (final)
 
@@ -50,17 +50,49 @@ Interpretations for the owner to confirm:
 The attempt loop is `pc_coop_anchor_try` (engine-free, unit-tested), which
 `coopAnchored` in `gameCoreSection.cpp` calls.
 
-## Drift guard
+## Shared steps (gapfix C4, replaces the drift guard)
 
-The co-op branch carries copies of the single-captain BOMBS, DELIVERY,
-DeathLink loop and observation code so that single-captain play stays
-byte-identical. Mirror every change to one side on the other; netplay and
-local co-op always run the co-op side. Factoring the shared pieces into
-helpers is an integration item, to be proven with the M1 replay comparison.
+Both branches of `GameCoreSection::updateAI` call the same helpers in
+`gameCoreSection.cpp` (defined just above `randomizerApplyBenefits`), so a
+gate or a fix lands once for single-captain play, local co-op and every
+netplay session:
+
+| Helper | Step |
+|---|---|
+| `randomizerTickOpen` | the tick gate: no movie, pause or UI overlay |
+| `randomizerPrereleaseClock` | prerelease trap end (day end, no captain standing) and tick |
+| `randomizerBombTrapAt`, `randomizerProggAt` (+ `randomizerProggAlive`), `randomizerFlowersAt` | the captain-anchored placements; single-captain play passes its one captain, the co-op branch passes each candidate through `coopAnchored` |
+| `randomizerBombDelivery` | BOMBS (Onion-anchored) |
+| `randomizerPikminDelivery` | DELIVERY (Onion-anchored); returns the Onion colour |
+| `randomizerApplyDeathLink` | the DeathLink loop, one consume per link; optional per-captain squad counts |
+| `randomizerObserveWorld` | population, colour and obstacle observations |
+| `randomizerObserveExploration` | Land checks for one captain (co-op: P1, only while live) |
+
+simReady (`pc_randomizer_ready()`) is checked by both benefit steps and inside
+every `pc_randomizer_*` call; B1's outbox sits inside
+`pc_randomizer_consume_benefit` / `_check` / `_observe_*` / `_deathlink_*`; a
+synchronized HOLD freezes the whole sim, so no `updateAI` runs while held. Each
+helper is the statement sequence it replaced, and single-captain output is
+proven byte-identical by the M1, benefits and heal replays.
 
 The decisions are pure functions in `pc_port/pc_coop_policy.{h,cpp}`
 (`pc_coop_policy_test`). All state is sim state (no RNG, no wall clock), so
 lockstep peers agree. Co-op-only log lines start with `[coop-policy]`.
+
+## Hashes (gapfix C)
+
+* **Config hash.** The session hashes `coopEvents=<FNV-1a 64 of the
+  PIKMIN_NETPLAY_TEST_COOP_EVENTS file, 16 hex digits>` next to `randStream`
+  (0 when the knob is unset or not honoured). A pair whose peers load
+  different event files, or only one of them, is refused with
+  `[netplay] handshake refused: config`.
+* **State hash.** While co-op is active (`pc_coop_active()` and the co-op
+  branch has run), `pc_coop_policy_state_hash` folds the policy's sim state
+  into the per-tick `rand` sub-hash: the reset key, the tick, the four
+  cursors, the HP samples (`prevHp`/`prevValid`) and the three co-op
+  cooldowns (bomb trap, Progg, nectar). Single-captain play folds nothing, so
+  its hashes are unchanged. The randstate snapshot (`PcRandState`) is the
+  host's external AP state, not sim state, so this state is not in it.
 
 ## Test hooks
 
@@ -75,8 +107,16 @@ lockstep peers agree. Co-op-only log lines start with `[coop-policy]`.
   * Parsed once per process; a file over 16384 bytes is rejected whole. The
     tick restarts at every stage entry, so the schedule re-arms each
     stage/day (`[coop-policy] TEST events armed stage= day= count=`).
-  * Pass the same file to both peers; it is not in the handshake config hash
-    yet (integration item for B1).
+  * Pass the same file to both peers: its FNV-1a is in the handshake config
+    hash (`coopEvents`), so a mismatch is refused on config.
+* `PIKMIN_NETPLAY_TEST_COOP_PERTURB=<tick>` (netplay build, hidden test runs
+  only, deliberately not in the config hash): at that co-op tick this peer
+  alone flips its Flower Shower cursor
+  (`[coop-policy] TEST perturb tick= kind=FLOWERS cursor=a->b`). Nothing else
+  reads the cursor until the next Flower Shower, so only the state-hash fold
+  can see it. `run_pair.py --expect hash-desync --env-host
+  PIKMIN_NETPLAY_TEST_COOP_PERTURB=<tick>` checks that the pair stops with
+  `[netplay] desync detected:` (exit 5).
 * `PIKMIN_RANDOMIZER_TEST_SCRIPT=coop-policy` + `PIKMIN_COOP_POLICY_CASE`
   (TEST_HOOKS builds only): `tools/netplay/coop_policy_native.py --case
   <heal-p2-only|heal-lowest|heal-trigger|heal-p1-down|anchors|any-alive|deathlink-p1-down>`.
@@ -84,3 +124,13 @@ lockstep peers agree. Co-op-only log lines start with `[coop-policy]`.
   `anchors` with `--profile navel-day2` to include it.
 * `tools/netplay/coop_policy_pair.py` = `run_pair.py` with the schema-9
   bootstrap plus identical-`[coop-policy]`-lines checks on both peers.
+  `--acceptance` without a schedule uses a built-in schedule keyed to sim
+  frames (`run_pair` `f<tick>` keys: heal and four showers at tick 300, the
+  DeathLink at tick 1200 after the tick-1000 down, a bomb trap and a fifth
+  shower at tick 1800) and the built-in events (`40 HP 2 0.5`,
+  `1000 DOWN 1`); a user schedule that raises DEATHLINK on a wall-clock key
+  is refused. Without `--profile` it runs on `impact-day2`: on `foh-day2` the
+  landing-site slopes make ring placements fail at random along the scripted
+  walk and the co-op start loses most field Pikmin early, which turns the
+  round-robin and DeathLink assertions into input luck. Hands-off inputs do not
+  work either: the first-nectar tutorial is modal and needs an input.

@@ -87,6 +87,7 @@
 #include "netplay/pc_state_hash.h"
 #include "netplay/pc_coop_switch.h"
 #include "pc_coop.h"
+#include "pc_coop_policy.h"
 #include "pc_window.h"
 #include "settings/pc_settings.h"
 
@@ -1460,6 +1461,9 @@ bool sha_file(const char* path, uint8_t out[32])
 //   coopMergeCamera,
 //   netplaySeed, netplayDelay, protocolVersion.
 //   randStream (M4 external-state stream gate: stream vs legacy polling).
+//   testDeathlinkAsOrdinary (M4 B1 test knob).
+//   coopEvents (gapfix C: FNV-1a 64 of the PIKMIN_NETPLAY_TEST_COOP_EVENTS
+//   file, 0 when the knob is unset or not honoured; 16 hex digits).
 // Deliberately EXCLUDED (local-only, documented in the handoff): windowWidth
 // and windowHeight (launch lane: presentation-only, they stay local, so a
 // joiner with a different window size still joins; was: pre-M2b both peers
@@ -1544,7 +1548,16 @@ std::string build_config_string()
 	addi("testDeathlinkAsOrdinary",
 	     (pc_randomizer_test_deathlink_as_ordinary != nullptr
 	      && pc_randomizer_test_deathlink_as_ordinary()) ? 1 : 0);
-	(void)fbuf;
+	// Gapfix C (#885): PIKMIN_NETPLAY_TEST_COOP_EVENTS scripts captain HP and
+	// downs into the co-op policy (sim state). The FNV-1a of the file's bytes
+	// (0 without the knob) is hashed next to randStream, so a pair whose
+	// peers load different event files, or only one of them, refuses on
+	// config instead of desyncing. The perturb knob
+	// (PIKMIN_NETPLAY_TEST_COOP_PERTURB) is deliberately NOT hashed: it
+	// exists to prove that a one-sided co-op state change is caught as a
+	// desync by the state hash.
+	snprintf(fbuf, sizeof(fbuf), "coopEvents=%016llx;", (unsigned long long)pc_coop_events_config_hash());
+	s += fbuf;
 	return s;
 }
 

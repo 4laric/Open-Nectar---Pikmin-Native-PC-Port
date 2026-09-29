@@ -2,15 +2,19 @@
 // heal selection (trigger / lowest / tie / downed), the round-robin anchor
 // cursor with skip-dead and placement fallback (through pc_coop_anchor_try,
 // the loop the engine runs), the any-live predicate, the per-stage reset
-// edge, and the test-event parser and loader. No game, no window, no assets.
+// edge, and the test-event parser and loader. Gapfix C adds the coopEvents
+// config-hash input and the co-op state hash. No game, no window, no assets.
 
 #include "pc_coop_policy.h"
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace {
 
@@ -335,6 +339,85 @@ void testEventsLoad()
 	check(pc_coop_events_knob_path() == nullptr, "knob: compiled out without PIKI_NETPLAY_BUILD");
 }
 
+// Gapfix C (#885): the coopEvents config-hash input.
+void testConfigHash()
+{
+	check(pc_coop_events_file_hash(nullptr) == 0, "config hash: no knob -> 0");
+	// FNV-1a 64 reference values: "" is the offset basis, "a" is the
+	// published test vector.
+	const std::string empty = tempPath("empty.txt");
+	check(writeFile(empty, ""), "config hash: write empty file");
+	check(pc_coop_events_file_hash(empty.c_str()) == 0xcbf29ce484222325ULL, "config hash: empty file -> offset basis");
+	check(pc_coop_events_file_hash(tempPath("missing.txt").c_str()) == 0xcbf29ce484222325ULL,
+	      "config hash: unreadable file -> offset basis (differs from no knob)");
+	const std::string a = tempPath("a.txt");
+	check(writeFile(a, "a"), "config hash: write 'a'");
+	check(pc_coop_events_file_hash(a.c_str()) == 0xaf63dc4c8601ec8cULL, "config hash: FNV-1a 64 of 'a'");
+	// Byte-exact: a changed tick, and CRLF vs LF, both change the hash.
+	const std::string one = tempPath("one.txt"), two = tempPath("two.txt"), crlf = tempPath("crlf.txt");
+	check(writeFile(one, "40 HP 2 0.5\n1000 DOWN 1\n") && writeFile(two, "40 HP 2 0.5\n1001 DOWN 1\n")
+	          && writeFile(crlf, "40 HP 2 0.5\r\n1000 DOWN 1\r\n"),
+	      "config hash: write event files");
+	const uint64_t h1 = pc_coop_events_file_hash(one.c_str());
+	check(h1 == pc_coop_events_file_hash(one.c_str()), "config hash: stable");
+	check(h1 != pc_coop_events_file_hash(two.c_str()), "config hash: a different schedule differs");
+	check(h1 != pc_coop_events_file_hash(crlf.c_str()), "config hash: the bytes are hashed, not the parse");
+	// Larger than one read chunk and than the events-file limit: all bytes count.
+	const std::string big = tempPath("big.txt"), big2 = tempPath("big2.txt");
+	std::string text(PC_COOP_EVENTS_FILE_MAX + 5000, '#');
+	check(writeFile(big, text), "config hash: write big file");
+	text[text.size() - 1] = '!';
+	check(writeFile(big2, text), "config hash: write big file variant");
+	check(pc_coop_events_file_hash(big.c_str()) != pc_coop_events_file_hash(big2.c_str()), "config hash: the last byte counts");
+	for (const std::string& f : { empty, a, one, two, crlf, big, big2 }) std::remove(f.c_str());
+	// Not a netplay build: the knob reads nothing, so the session folds 0.
+	check(pc_coop_events_config_hash() == 0, "config hash: 0 when the knob is compiled out");
+	check(pc_coop_perturb_knob_tick() == 0, "perturb knob: compiled out without PIKI_NETPLAY_BUILD");
+}
+
+// Gapfix C (#885): the co-op state hash folded into the per-tick state hash.
+void testStateHash()
+{
+	PcCoopHashState base;
+	std::memset(&base, 0, sizeof(base));
+	base.started = true;
+	base.key = { 1, 2, 7.5f };
+	base.tick = 300;
+	pc_coop_cursors_reset(base.cursors);
+	base.prevHp[0] = 100.0f;
+	base.prevHp[1] = 50.0f;
+	base.prevValid[0] = base.prevValid[1] = true;
+	base.cooldown[0] = 5.0f;
+	base.cooldown[1] = 0.0f;
+	base.cooldown[2] = 2.5f;
+	const uint64_t h = pc_coop_state_hash(base);
+	check(h != 0 && h == pc_coop_state_hash(base), "state hash: nonzero and stable");
+	// Every field is folded: changing any one changes the hash.
+	auto differs = [&](void (*mutate)(PcCoopHashState&), const char* what) {
+		PcCoopHashState s = base;
+		mutate(s);
+		check(pc_coop_state_hash(s) != h, what);
+	};
+	differs([](PcCoopHashState& s) { s.started = false; }, "state hash: started");
+	differs([](PcCoopHashState& s) { s.key.stage = 2; }, "state hash: stage");
+	differs([](PcCoopHashState& s) { s.key.day = 3; }, "state hash: day");
+	differs([](PcCoopHashState& s) { s.key.timeOfDay = 7.25f; }, "state hash: time of day");
+	differs([](PcCoopHashState& s) { s.tick = 301; }, "state hash: tick");
+	differs([](PcCoopHashState& s) { s.cursors.next[PC_COOP_ANCHOR_BOMB_TRAP] = 2; }, "state hash: bomb trap cursor");
+	differs([](PcCoopHashState& s) { s.cursors.next[PC_COOP_ANCHOR_PROGG] = 2; }, "state hash: Progg cursor");
+	differs([](PcCoopHashState& s) { s.cursors.next[PC_COOP_ANCHOR_PRERELEASE] = 2; }, "state hash: prerelease cursor");
+	differs([](PcCoopHashState& s) { s.cursors.next[PC_COOP_ANCHOR_FLOWERS] = 2; }, "state hash: Flower Shower cursor (the perturb knob's field)");
+	differs([](PcCoopHashState& s) { s.prevHp[0] = 99.0f; }, "state hash: P1 HP sample");
+	differs([](PcCoopHashState& s) { s.prevHp[1] = 49.0f; }, "state hash: P2 HP sample");
+	differs([](PcCoopHashState& s) { s.prevValid[0] = false; }, "state hash: P1 sample valid");
+	differs([](PcCoopHashState& s) { s.prevValid[1] = false; }, "state hash: P2 sample valid");
+	differs([](PcCoopHashState& s) { s.cooldown[0] = 4.9f; }, "state hash: bomb trap cooldown");
+	differs([](PcCoopHashState& s) { s.cooldown[1] = 0.1f; }, "state hash: Progg cooldown");
+	differs([](PcCoopHashState& s) { s.cooldown[2] = 2.4f; }, "state hash: nectar cooldown");
+	// Swapping the two captains' samples is a different state.
+	differs([](PcCoopHashState& s) { std::swap(s.prevHp[0], s.prevHp[1]); }, "state hash: captain order");
+}
+
 } // namespace
 
 int main()
@@ -346,6 +429,8 @@ int main()
 	testStageKey();
 	testEvents();
 	testEventsLoad();
+	testConfigHash();
+	testStateHash();
 	if (sFailures) {
 		std::printf("pc_coop_policy_test: %d/%d checks FAILED\n", sFailures, sChecks);
 		return 1;

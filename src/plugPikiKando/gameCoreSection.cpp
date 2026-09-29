@@ -2821,81 +2821,182 @@ void pc_randomizer_test_color_stats()
 }
 #endif
 
-static void randomizerApplyBenefits(Navi* navi, MapMgr* map)
+// Netplay gapfix C4 (#885): the randomizer steps both paths share. The
+// single-captain path (randomizerApplyBenefits and the else branch in
+// GameCoreSection::updateAI) and the co-op branch (randomizerUpdateCoop,
+// randomizerApplyBenefitsCoop, randomizerApplyDeathLinkCoop) call these same
+// functions, so a gate or a fix lands once for both. The gates they carry:
+// randomizerTickOpen (no movie, pause or UI overlay); simReady
+// (pc_randomizer_ready(), checked by both benefit steps and inside every
+// pc_randomizer_* call below); B1's outbox (inside
+// pc_randomizer_consume_benefit, _check, _observe_* and _deathlink_*). A
+// synchronized HOLD freezes the whole sim, so no updateAI runs while held.
+// Each helper is the statement sequence it replaced, moved unchanged (the
+// placements gained only the log-only sPlaceWhy detail and a result code).
+#include "pc_coop_policy.h"
+
+namespace {
+// Log-only detail of the last failed placement (why a co-op captain was
+// skipped); never read by the sim.
+char sPlaceWhy[48] = "";
+}
+
+// Movies, pauses and UI overlays stop the randomizer tick.
+static bool randomizerTickOpen()
 {
-    if (!pc_randomizer_ready() || !navi || !navi->isAlive() || !itemMgr || !pikiMgr) return;
-    // Active gameplay time only: never empty a backlog of traps in one frame.
-    static float bombTrapCooldown = 0.0f;
-    bombTrapCooldown = std::max(0.0f, bombTrapCooldown - gsys->getFrameTime());
-    if (map && bombTrapCooldown == 0.0f && pc_randomizer_benefit_pending(PC_BENEFIT_BOMB_TRAP)) {
-        Vector3f positions[5];
-        int found = 0;
-        for (int i = 0; i < 5; ++i) {
-            const float angle = navi->mFaceDirection + i * (2.0f * PI / 5.0f);
-            Vector3f pos = navi->mSRT.t + Vector3f(65.0f * sinf(angle), 0, 65.0f * cosf(angle));
-            CollTriInfo* ground = map->getCurrTri(pos.x, pos.z, true);
-            if (!ground || MapCode::getAttribute(ground) == ATTR_Water) break;
-            pos.y = map->getMinY(pos.x, pos.z, true);
-            if (std::fabs(pos.y - navi->mSRT.t.y) > 25.0f) break;
-            pos.y += 3.0f;
-            positions[found++] = pos;
-        }
-        if (found == 5) {
-            BombItem* spawned[5] = {};
-            int count = 0;
-            for (; count < 5; ++count) {
-                spawned[count] = static_cast<BombItem*>(itemMgr->birth(OBJTYPE_Bomb));
-                if (!spawned[count]) break;
-                spawned[count]->init(positions[count]);
-                spawned[count]->startAI(0);
-            }
-            if (count == 5 && pc_randomizer_consume_benefit(PC_BENEFIT_BOMB_TRAP)) {
-                float longestFuse = 0.0f;
-                for (int i = 0; i < 5; ++i) {
-                    C_SAI(spawned[i])->start(spawned[i], BombAI::BOMB_Set);
-                    longestFuse = std::max(longestFuse, spawned[i]->mSAICtx.mCurrentItemHealth);
-                }
-                bombTrapCooldown = std::max(5.0f, longestFuse + 2.0f);
-                std::printf("[Pikmin Randomizer] BOMB_AMBUSH count=5 state=lit fuse=%.2f cooldown=%.2f\n", longestFuse, bombTrapCooldown);
-                std::fflush(stdout);
-            } else for (int i = 0; i < count; ++i) spawned[i]->kill(false);
-        }
+    return !gameflow.mMoviePlayer->mIsActive && !gameflow.mPauseAll && !gameflow.mIsUIOverlayActive;
+}
+
+// The prerelease trap ends at day end or when no captain stands, and runs
+// down while the randomizer tick is active.
+static void randomizerPrereleaseClock(bool captainsDown, bool active)
+{
+    if (bossMgr) {
+        if (playerState->mInDayEnd || captainsDown) bossMgr->endPrereleaseTrap();
+        else if (active) bossMgr->tickPrereleaseTrap(gsys->getFrameTime());
     }
-    static float proggCooldown = 0.0f;
-    proggCooldown = std::max(0.0f, proggCooldown - gsys->getFrameTime());
-    if (map && tekiMgr && proggCooldown == 0.0f && pc_randomizer_benefit_pending(PC_BENEFIT_PROGG)
-        && itemMgr->getNearestContainer(navi->mSRT.t, 12800.0f)) {
-        bool livingProgg = false;
-        Iterator enemies(tekiMgr);
-        CI_LOOP(enemies) {
-            Teki* enemy = static_cast<Teki*>(*enemies);
-            if (enemy && enemy->mTekiType == TEKI_Dororo && enemy->isAlive()) { livingProgg = true; break; }
-        }
-        if (!livingProgg) for (int sample = 0; sample < 12; ++sample) {
-            const float angle = navi->mFaceDirection + PI + sample * (2.0f * PI / 12.0f);
-            Vector3f pos = navi->mSRT.t + Vector3f(250.0f * sinf(angle), 0, 250.0f * cosf(angle));
-            CollTriInfo* ground = map->getCurrTri(pos.x, pos.z, true);
-            if (!ground || MapCode::getAttribute(ground) == ATTR_Water) continue;
-            pos.y = map->getMinY(pos.x, pos.z, true);
-            if (std::fabs(pos.y - navi->mSRT.t.y) > 25.0f) continue;
-            Teki* progg = tekiMgr->newTeki(TEKI_Dororo);
-            if (!progg) break;
-            progg->mGenerator = nullptr;
-            progg->mPersonality->reset();
-            progg->mPersonality->mPosition = pos;
-            progg->mPersonality->mNestPosition = pos;
-            progg->mPersonality->mFaceDirection = angle + PI;
-            progg->reset();
-            if (pc_randomizer_consume_benefit(PC_BENEFIT_PROGG)) {
-                progg->startAI(0);
-                proggCooldown = 30.0f;
-                std::printf("[Pikmin Randomizer] PROGG_AMBUSH count=1 x=%.1f z=%.1f\n", pos.x, pos.z);
-                std::fflush(stdout);
-            } else progg->kill(false);
+}
+
+// Bomb trap: five lit bombs on a ring around the captain. FAILED when the
+// ring does not fit (the co-op branch then tries the other captain), STOP
+// when a spawn or the consume fails, CONSUMED (cooldown set) otherwise.
+static PcCoopPlaceResult randomizerBombTrapAt(Navi* navi, MapMgr* map, float& cooldown)
+{
+    Vector3f positions[5];
+    int found = 0;
+    for (int i = 0; i < 5; ++i) {
+        const float angle = navi->mFaceDirection + i * (2.0f * PI / 5.0f);
+        Vector3f pos = navi->mSRT.t + Vector3f(65.0f * sinf(angle), 0, 65.0f * cosf(angle));
+        CollTriInfo* ground = map->getCurrTri(pos.x, pos.z, true);
+        if (!ground || MapCode::getAttribute(ground) == ATTR_Water) {
+            std::snprintf(sPlaceWhy, sizeof(sPlaceWhy), "ring-%s found=%d", ground ? "water" : "no-ground", found);
             break;
         }
+        pos.y = map->getMinY(pos.x, pos.z, true);
+        if (std::fabs(pos.y - navi->mSRT.t.y) > 25.0f) {
+            std::snprintf(sPlaceWhy, sizeof(sPlaceWhy), "ring-height found=%d dy=%.1f", found, pos.y - navi->mSRT.t.y);
+            break;
+        }
+        pos.y += 3.0f;
+        positions[found++] = pos;
     }
-    if (bossMgr && navi->getCurrState() && navi->getCurrState()->getID() == NAVISTATE_Walk) bossMgr->beginPrereleaseTrap();
+    if (found != 5) return PC_COOP_PLACE_FAILED;
+    BombItem* spawned[5] = {};
+    int count = 0;
+    for (; count < 5; ++count) {
+        spawned[count] = static_cast<BombItem*>(itemMgr->birth(OBJTYPE_Bomb));
+        if (!spawned[count]) break;
+        spawned[count]->init(positions[count]);
+        spawned[count]->startAI(0);
+    }
+    if (count == 5 && pc_randomizer_consume_benefit(PC_BENEFIT_BOMB_TRAP)) {
+        float longestFuse = 0.0f;
+        for (int i = 0; i < 5; ++i) {
+            C_SAI(spawned[i])->start(spawned[i], BombAI::BOMB_Set);
+            longestFuse = std::max(longestFuse, spawned[i]->mSAICtx.mCurrentItemHealth);
+        }
+        cooldown = std::max(5.0f, longestFuse + 2.0f);
+        std::printf("[Pikmin Randomizer] BOMB_AMBUSH count=5 state=lit fuse=%.2f cooldown=%.2f\n", longestFuse, cooldown);
+        std::fflush(stdout);
+        return PC_COOP_PLACE_CONSUMED;
+    }
+    for (int i = 0; i < count; ++i) spawned[i]->kill(false);
+    return PC_COOP_PLACE_STOP;
+}
+
+// A Progg ambush waits while a Progg still lives.
+static bool randomizerProggAlive()
+{
+    Iterator enemies(tekiMgr);
+    CI_LOOP(enemies) {
+        Teki* enemy = static_cast<Teki*>(*enemies);
+        if (enemy && enemy->mTekiType == TEKI_Dororo && enemy->isAlive()) return true;
+    }
+    return false;
+}
+
+// Progg ambush: one Progg on a 250-unit ring behind the captain, only near
+// an Onion. Results as for randomizerBombTrapAt.
+static PcCoopPlaceResult randomizerProggAt(Navi* navi, MapMgr* map, float& cooldown)
+{
+    if (!itemMgr->getNearestContainer(navi->mSRT.t, 12800.0f)) {
+        std::snprintf(sPlaceWhy, sizeof(sPlaceWhy), "no-onion-near");
+        return PC_COOP_PLACE_FAILED;
+    }
+    for (int sample = 0; sample < 12; ++sample) {
+        const float angle = navi->mFaceDirection + PI + sample * (2.0f * PI / 12.0f);
+        Vector3f pos = navi->mSRT.t + Vector3f(250.0f * sinf(angle), 0, 250.0f * cosf(angle));
+        CollTriInfo* ground = map->getCurrTri(pos.x, pos.z, true);
+        if (!ground || MapCode::getAttribute(ground) == ATTR_Water) continue;
+        pos.y = map->getMinY(pos.x, pos.z, true);
+        if (std::fabs(pos.y - navi->mSRT.t.y) > 25.0f) continue;
+        Teki* progg = tekiMgr->newTeki(TEKI_Dororo);
+        if (!progg) return PC_COOP_PLACE_STOP;
+        progg->mGenerator = nullptr;
+        progg->mPersonality->reset();
+        progg->mPersonality->mPosition = pos;
+        progg->mPersonality->mNestPosition = pos;
+        progg->mPersonality->mFaceDirection = angle + PI;
+        progg->reset();
+        if (pc_randomizer_consume_benefit(PC_BENEFIT_PROGG)) {
+            progg->startAI(0);
+            cooldown = 30.0f;
+            std::printf("[Pikmin Randomizer] PROGG_AMBUSH count=1 x=%.1f z=%.1f\n", pos.x, pos.z);
+            std::fflush(stdout);
+            return PC_COOP_PLACE_CONSUMED;
+        }
+        progg->kill(false);
+        return PC_COOP_PLACE_STOP;
+    }
+    std::snprintf(sPlaceWhy, sizeof(sPlaceWhy), "no-spot");
+    return PC_COOP_PLACE_FAILED;
+}
+
+// Flower Shower: five nectar drops on a ring around the captain. Results as
+// for randomizerBombTrapAt.
+static PcCoopPlaceResult randomizerFlowersAt(Navi* navi, MapMgr* map, float& cooldown)
+{
+    Vector3f positions[5];
+    int found = 0;
+    for (int i = 0; i < 5; ++i) {
+        const float angle = navi->mFaceDirection + i * (2.0f * PI / 5.0f);
+        Vector3f pos = navi->mSRT.t + Vector3f(50.0f * sinf(angle), 0, 50.0f * cosf(angle));
+        CollTriInfo* ground = map->getCurrTri(pos.x, pos.z, true);
+        if (!ground || MapCode::getAttribute(ground) == ATTR_Water) {
+            std::snprintf(sPlaceWhy, sizeof(sPlaceWhy), "ring-%s found=%d", ground ? "water" : "no-ground", found);
+            break;
+        }
+        pos.y = map->getMinY(pos.x, pos.z, true);
+        if (std::fabs(pos.y - navi->mSRT.t.y) > 25.0f) {
+            std::snprintf(sPlaceWhy, sizeof(sPlaceWhy), "ring-height found=%d dy=%.1f", found, pos.y - navi->mSRT.t.y);
+            break;
+        }
+        positions[found++] = pos;
+    }
+    if (found != 5) return PC_COOP_PLACE_FAILED;
+    MizuItem* spawned[5] = {};
+    int count = 0;
+    for (; count < 5; ++count) {
+        // Native nectar appearance/drinking, with no deferred second allocation.
+        spawned[count] = static_cast<MizuItem*>(itemMgr->birth(OBJTYPE_Water));
+        if (!spawned[count]) break;
+        spawned[count]->init(positions[count]);
+        spawned[count]->startAI(0);
+    }
+    if (count == 5 && pc_randomizer_consume_benefit(PC_BENEFIT_FLOWERS)) {
+        cooldown = 5.0f;
+        std::puts("[Pikmin Randomizer] FLOWER_SHOWER nectar=5");
+        std::fflush(stdout);
+        return PC_COOP_PLACE_CONSUMED;
+    }
+    for (int i = 0; i < count; ++i) spawned[i]->kill(false);
+    return PC_COOP_PLACE_STOP;
+}
+
+// BOMBS: three loose, unlit bombs at the first owned Onion once a yellow
+// Pikmin is on the field. Onion-anchored: no captain.
+static void randomizerBombDelivery(MapMgr* map)
+{
     bool yellowOnField = false;
     if (pc_randomizer_benefit_pending(PC_BENEFIT_BOMBS)) {
         Iterator it(pikiMgr);
@@ -2940,6 +3041,12 @@ static void randomizerApplyBenefits(Navi* navi, MapMgr* map)
             }
         }
     }
+}
+
+// DELIVERY: ten Pikmin into the owned Onion that has the fewest. Returns that
+// Onion's colour, or -1 when nothing was delivered.
+static int randomizerPikminDelivery()
+{
     if (pc_randomizer_benefit_pending(PC_BENEFIT_DELIVERY)) {
         int selected = -1;
         const char* onions[] = {"Blue Onion", "Red Onion", "Yellow Onion"};
@@ -2952,39 +3059,107 @@ static void randomizerApplyBenefits(Navi* navi, MapMgr* map)
             GameStat::containerPikis.add(selected, 10);
             GameStat::update();
             std::printf("[Pikmin Randomizer] PIKMIN_DELIVERY color=%d count=10\n", selected);
+            return selected;
         }
     }
+    return -1;
+}
+
+// A received DeathLink takes up to one unit of living field Pikmin through
+// the ordinary dying animation. Onion stock and the captains are untouched.
+// Returns -1 when no link is pending, else the number killed (one consume per
+// link, whatever the count). squad (optional) counts the victims by leader:
+// [0] followed p1, [1] followed p2.
+static int randomizerApplyDeathLink(Navi* p1, Navi* p2, int squad[2])
+{
+    const int casualties = pc_randomizer_deathlink_casualties();
+    if (!casualties) return -1;
+    int killed = 0;
+    Iterator it(pikiMgr);
+    CI_LOOP(it) {
+        if (killed >= casualties) break;
+        Piki* piki = static_cast<Piki*>(*it);
+        if (!piki || !piki->isAlive() || piki->isKinoko()) continue;
+        const int mode = piki->mMode, state = piki->getState();
+        if (mode == PikiMode::EnterMode || mode == PikiMode::ExitMode || mode == PikiMode::KinokoMode) continue;
+        if (state == PIKISTATE_Dying || state == PIKISTATE_Dead || state == PIKISTATE_Swallowed
+            || state == PIKISTATE_Drown || state == PIKISTATE_Fired || state == PIKISTATE_Bubble) continue;
+        if (squad) {
+            if (piki->mNavi == p1) ++squad[0];
+            else if (piki->mNavi == p2) ++squad[1];
+        }
+        pc_randomizer_deathlink_induce(piki);
+        piki->changeMode(PikiMode::FreeMode, piki->mNavi);
+        piki->mFSM->transit(piki, PIKISTATE_Dying);
+        ++killed;
+    }
+    pc_randomizer_deathlink_consume(killed);
+    return killed;
+}
+
+// Population, colour and obstacle observations (sim-side check triggers).
+static void randomizerObserveWorld()
+{
+    const int field = int(GameStat::formationPikis) + int(GameStat::freePikis) + int(GameStat::workPikis);
+    pc_randomizer_observe_population(field, true);
+    pc_randomizer_observe_total_population(int(GameStat::allPikis), true);
+    for (int color = PikiMinColor; color < PikiColorCount; ++color)
+        pc_randomizer_observe_color_population(color, GameStat::allPikis[color], true);
+    if (flowCont.mCurrentStage) {
+        auto observe = [](Creature* obj, int kind, bool complete) {
+            if (!obj || !obj->mGenerator) return;
+            const Vector3f pos = obj->mGenerator->mGenPosition + obj->mGenerator->mGenOffset;
+            pc_randomizer_observe_obstacle(flowCont.mCurrentStage->mStageID, kind, pos.x, pos.z, complete, true);
+        };
+        if (itemMgr) {
+            Iterator it(itemMgr->mMeltingPotMgr);
+            CI_LOOP(it) {
+                Creature* obj = *it;
+                if (!obj) continue;
+                if (obj->isSluice()) observe(obj, obj->mObjType, static_cast<BuildingItem*>(obj)->isCompleted());
+                else if (obj->mObjType == OBJTYPE_Kusa) observe(obj, 100, obj->mMaxHealth > 0 && obj->mHealth >= obj->mMaxHealth);
+            }
+        }
+        if (workObjectMgr) {
+            Iterator it(workObjectMgr);
+            CI_LOOP(it) {
+                WorkObject* obj = static_cast<WorkObject*>(*it);
+                if (obj && (obj->isBridge() || obj->isHinderRock())) observe(obj, obj->isBridge() ? 101 : 102, obj->isFinished());
+            }
+        }
+    }
+}
+
+// Exploration (Land checks), anchored on one captain.
+static void randomizerObserveExploration(Navi* navi)
+{
+    UfoItem* ship = itemMgr ? itemMgr->getUfo() : nullptr;
+    if (ship && flowCont.mCurrentStage) {
+        const Vector3f base = ship->getGoalPos();
+        pc_randomizer_observe_exploration(flowCont.mCurrentStage->mStageID,
+            navi->getPosition().x - base.x, navi->getPosition().z - base.z, navi->mGroundTriangle != nullptr, true);
+    }
+}
+
+static void randomizerApplyBenefits(Navi* navi, MapMgr* map)
+{
+    if (!pc_randomizer_ready() || !navi || !navi->isAlive() || !itemMgr || !pikiMgr) return;
+    // Active gameplay time only: never empty a backlog of traps in one frame.
+    static float bombTrapCooldown = 0.0f;
+    bombTrapCooldown = std::max(0.0f, bombTrapCooldown - gsys->getFrameTime());
+    if (map && bombTrapCooldown == 0.0f && pc_randomizer_benefit_pending(PC_BENEFIT_BOMB_TRAP))
+        randomizerBombTrapAt(navi, map, bombTrapCooldown);
+    static float proggCooldown = 0.0f;
+    proggCooldown = std::max(0.0f, proggCooldown - gsys->getFrameTime());
+    if (map && tekiMgr && proggCooldown == 0.0f && pc_randomizer_benefit_pending(PC_BENEFIT_PROGG) && !randomizerProggAlive())
+        randomizerProggAt(navi, map, proggCooldown);
+    if (bossMgr && navi->getCurrState() && navi->getCurrState()->getID() == NAVISTATE_Walk) bossMgr->beginPrereleaseTrap();
+    randomizerBombDelivery(map);
+    randomizerPikminDelivery();
     static float nectarCooldown = 0.0f;
     nectarCooldown = std::max(0.0f, nectarCooldown - gsys->getFrameTime());
-    if (map && nectarCooldown == 0.0f && pc_randomizer_benefit_pending(PC_BENEFIT_FLOWERS)) {
-        Vector3f positions[5];
-        int found = 0;
-        for (int i = 0; i < 5; ++i) {
-            const float angle = navi->mFaceDirection + i * (2.0f * PI / 5.0f);
-            Vector3f pos = navi->mSRT.t + Vector3f(50.0f * sinf(angle), 0, 50.0f * cosf(angle));
-            CollTriInfo* ground = map->getCurrTri(pos.x, pos.z, true);
-            if (!ground || MapCode::getAttribute(ground) == ATTR_Water) break;
-            pos.y = map->getMinY(pos.x, pos.z, true);
-            if (std::fabs(pos.y - navi->mSRT.t.y) > 25.0f) break;
-            positions[found++] = pos;
-        }
-        if (found == 5) {
-            MizuItem* spawned[5] = {};
-            int count = 0;
-            for (; count < 5; ++count) {
-                // Native nectar appearance/drinking, with no deferred second allocation.
-                spawned[count] = static_cast<MizuItem*>(itemMgr->birth(OBJTYPE_Water));
-                if (!spawned[count]) break;
-                spawned[count]->init(positions[count]);
-                spawned[count]->startAI(0);
-            }
-            if (count == 5 && pc_randomizer_consume_benefit(PC_BENEFIT_FLOWERS)) {
-                nectarCooldown = 5.0f;
-                std::puts("[Pikmin Randomizer] FLOWER_SHOWER nectar=5");
-                std::fflush(stdout);
-            } else for (int i = 0; i < count; ++i) spawned[i]->kill(false);
-        }
-    }
+    if (map && nectarCooldown == 0.0f && pc_randomizer_benefit_pending(PC_BENEFIT_FLOWERS))
+        randomizerFlowersAt(navi, map, nectarCooldown);
     if (navi->mHealth < C_NAVI_PARM(navi, mHealth) && pc_randomizer_consume_benefit(PC_BENEFIT_HEAL))
         navi->mHealth = C_NAVI_PARM(navi, mHealth);
 }
@@ -2992,11 +3167,13 @@ static void randomizerApplyBenefits(Navi* navi, MapMgr* map)
 // Netplay M4 D-policy (issue #885): the owner's co-op randomizer policy.
 // Everything from here to GameCoreSection::updateAI runs only in co-op
 // (pc_coop_active() with a second captain); single-captain play keeps
-// randomizerApplyBenefits above and its updateAI statements unchanged. The
-// decisions themselves are pure functions in pc_port/pc_coop_policy.
+// randomizerApplyBenefits above and its updateAI statements. The decisions
+// themselves are pure functions in pc_port/pc_coop_policy; the grant,
+// DeathLink and observation steps are the shared helpers above.
 // All state below is sim state: it changes only inside updateAI, uses no RNG
-// and no wall clock, so both lockstep peers hold identical values.
-#include "pc_coop_policy.h"
+// and no wall clock, so both lockstep peers hold identical values. The
+// per-tick state hash folds it while co-op is active
+// (pc_coop_policy_state_hash, gapfix C).
 
 namespace {
 struct CoopPolicyState {
@@ -3014,9 +3191,13 @@ struct CoopPolicyState {
     int deliveries = 0, lastDeliveryColor = -1;
 };
 CoopPolicyState sCoopPolicy;
-// Log-only detail of the last failed placement (why the captain was skipped);
-// never read by the sim.
-char sCoopPlaceWhy[48] = "";
+// The co-op cooldowns, one per kind with a cooldown, as in single-captain
+// play. Like the single-captain function statics they persist across
+// stages (sCoopPolicy resets per stage; these do not). Namespace scope so
+// the state hash can read them.
+float sCoopBombTrapCooldown = 0.0f;
+float sCoopProggCooldown = 0.0f;
+float sCoopNectarCooldown = 0.0f;
 }
 
 // Live captain: the pcIsLastNaviStanding predicate (navi.cpp). A downed
@@ -3061,10 +3242,12 @@ static bool coopDownCaptain(Navi* navi)
 
 // PIKMIN_NETPLAY_TEST_COOP_EVENTS=<file>: scripted HP/DOWN events at fixed
 // co-op ticks, inert when unset. It is honoured only by the netplay build in
-// hidden test runs (pc_coop_events_knob_path). Changes sim state, so a pair
-// must pass the same file to both peers (not yet in the handshake config
-// hash). The file is parsed once per process; the tick restarts on every
-// stage entry, so the schedule re-arms each stage/day (logged as "armed").
+// hidden test runs (pc_coop_events_knob_path). It changes sim state, so the
+// session folds the file's FNV-1a into the handshake config hash
+// (`coopEvents`, gapfix C): a pair whose peers pass different files, or only
+// one of them, is refused on config. The file is parsed once per process;
+// the tick restarts on every stage entry, so the schedule re-arms each
+// stage/day (logged as "armed").
 static void coopRunTestEvents(Navi* p1, Navi* p2)
 {
     static bool loaded = false;
@@ -3104,6 +3287,22 @@ static void coopRunTestEvents(Navi* p1, Navi* p2)
     }
 }
 
+// PIKMIN_NETPLAY_TEST_COOP_PERTURB=<tick> (pc_coop_perturb_knob_tick: netplay
+// build, hidden test runs only; deliberately not in the config hash): at
+// that co-op tick this peer alone flips its Flower Shower cursor. Nothing
+// else reads the cursor until the next Flower Shower, so only the state-hash
+// fold can see the difference: the desync-detection proof (gapfix C).
+static void coopTestPerturb()
+{
+    static const unsigned perturbTick = pc_coop_perturb_knob_tick();
+    if (!perturbTick || sCoopPolicy.tick != perturbTick) return;
+    int& next = sCoopPolicy.cursors.next[PC_COOP_ANCHOR_FLOWERS];
+    const int before = next;
+    next = before == 1 ? 2 : 1;
+    std::printf("[coop-policy] TEST perturb tick=%u kind=FLOWERS cursor=%d->%d\n", sCoopPolicy.tick, before, next);
+    std::fflush(stdout);
+}
+
 // Rule 2: try the cursor's captain, then the other live captain in the same
 // tick; after a successful consume the cursor moves past the captain used.
 // The loop itself is pc_coop_anchor_try (unit-tested); this adapter only
@@ -3118,15 +3317,15 @@ static bool coopAnchored(PcCoopAnchorKind kind, Navi* const navis[PC_COOP_CAPTAI
     struct Ctx {
         Navi* const* navis;
         Place* place;
-        char why[PC_COOP_CAPTAINS][sizeof(sCoopPlaceWhy)];
+        char why[PC_COOP_CAPTAINS][sizeof(sPlaceWhy)];
     };
     Ctx ctx = {navis, &place, {}};
     const PcCoopAnchorAttempt attempt = pc_coop_anchor_try(sCoopPolicy.cursors, kind, live,
         [](int captain, void* raw) -> PcCoopPlaceResult {
             Ctx& c = *static_cast<Ctx*>(raw);
-            sCoopPlaceWhy[0] = '\0';
+            sPlaceWhy[0] = '\0';
             const PcCoopPlaceResult result = (*c.place)(c.navis[captain - 1]);
-            if (result == PC_COOP_PLACE_FAILED) std::snprintf(c.why[captain - 1], sizeof(c.why[0]), "%s", sCoopPlaceWhy);
+            if (result == PC_COOP_PLACE_FAILED) std::snprintf(c.why[captain - 1], sizeof(c.why[0]), "%s", sPlaceWhy);
             return result;
         },
         &ctx);
@@ -3149,126 +3348,6 @@ static bool coopAnchored(PcCoopAnchorKind kind, Navi* const navis[PC_COOP_CAPTAI
         int(live[0]), int(live[1]));
     std::fflush(stdout);
     return true;
-}
-
-// The single-captain placements, anchored on the given captain. A failed
-// placement (ground/ring/spot) lets the other captain try; a failed spawn
-// or consume stops the attempt for this tick, as it does today.
-static PcCoopPlaceResult coopBombTrapAt(Navi* navi, MapMgr* map, float& cooldown)
-{
-    Vector3f positions[5];
-    int found = 0;
-    for (int i = 0; i < 5; ++i) {
-        const float angle = navi->mFaceDirection + i * (2.0f * PI / 5.0f);
-        Vector3f pos = navi->mSRT.t + Vector3f(65.0f * sinf(angle), 0, 65.0f * cosf(angle));
-        CollTriInfo* ground = map->getCurrTri(pos.x, pos.z, true);
-        if (!ground || MapCode::getAttribute(ground) == ATTR_Water) {
-            std::snprintf(sCoopPlaceWhy, sizeof(sCoopPlaceWhy), "ring-%s found=%d", ground ? "water" : "no-ground", found);
-            break;
-        }
-        pos.y = map->getMinY(pos.x, pos.z, true);
-        if (std::fabs(pos.y - navi->mSRT.t.y) > 25.0f) {
-            std::snprintf(sCoopPlaceWhy, sizeof(sCoopPlaceWhy), "ring-height found=%d dy=%.1f", found, pos.y - navi->mSRT.t.y);
-            break;
-        }
-        pos.y += 3.0f;
-        positions[found++] = pos;
-    }
-    if (found != 5) return PC_COOP_PLACE_FAILED;
-    BombItem* spawned[5] = {};
-    int count = 0;
-    for (; count < 5; ++count) {
-        spawned[count] = static_cast<BombItem*>(itemMgr->birth(OBJTYPE_Bomb));
-        if (!spawned[count]) break;
-        spawned[count]->init(positions[count]);
-        spawned[count]->startAI(0);
-    }
-    if (count == 5 && pc_randomizer_consume_benefit(PC_BENEFIT_BOMB_TRAP)) {
-        float longestFuse = 0.0f;
-        for (int i = 0; i < 5; ++i) {
-            C_SAI(spawned[i])->start(spawned[i], BombAI::BOMB_Set);
-            longestFuse = std::max(longestFuse, spawned[i]->mSAICtx.mCurrentItemHealth);
-        }
-        cooldown = std::max(5.0f, longestFuse + 2.0f);
-        std::printf("[Pikmin Randomizer] BOMB_AMBUSH count=5 state=lit fuse=%.2f cooldown=%.2f\n", longestFuse, cooldown);
-        std::fflush(stdout);
-        return PC_COOP_PLACE_CONSUMED;
-    }
-    for (int i = 0; i < count; ++i) spawned[i]->kill(false);
-    return PC_COOP_PLACE_STOP;
-}
-
-static PcCoopPlaceResult coopProggAt(Navi* navi, MapMgr* map, float& cooldown)
-{
-    if (!itemMgr->getNearestContainer(navi->mSRT.t, 12800.0f)) {
-        std::snprintf(sCoopPlaceWhy, sizeof(sCoopPlaceWhy), "no-onion-near");
-        return PC_COOP_PLACE_FAILED;
-    }
-    for (int sample = 0; sample < 12; ++sample) {
-        const float angle = navi->mFaceDirection + PI + sample * (2.0f * PI / 12.0f);
-        Vector3f pos = navi->mSRT.t + Vector3f(250.0f * sinf(angle), 0, 250.0f * cosf(angle));
-        CollTriInfo* ground = map->getCurrTri(pos.x, pos.z, true);
-        if (!ground || MapCode::getAttribute(ground) == ATTR_Water) continue;
-        pos.y = map->getMinY(pos.x, pos.z, true);
-        if (std::fabs(pos.y - navi->mSRT.t.y) > 25.0f) continue;
-        Teki* progg = tekiMgr->newTeki(TEKI_Dororo);
-        if (!progg) return PC_COOP_PLACE_STOP;
-        progg->mGenerator = nullptr;
-        progg->mPersonality->reset();
-        progg->mPersonality->mPosition = pos;
-        progg->mPersonality->mNestPosition = pos;
-        progg->mPersonality->mFaceDirection = angle + PI;
-        progg->reset();
-        if (pc_randomizer_consume_benefit(PC_BENEFIT_PROGG)) {
-            progg->startAI(0);
-            cooldown = 30.0f;
-            std::printf("[Pikmin Randomizer] PROGG_AMBUSH count=1 x=%.1f z=%.1f\n", pos.x, pos.z);
-            std::fflush(stdout);
-            return PC_COOP_PLACE_CONSUMED;
-        }
-        progg->kill(false);
-        return PC_COOP_PLACE_STOP;
-    }
-    std::snprintf(sCoopPlaceWhy, sizeof(sCoopPlaceWhy), "no-spot");
-    return PC_COOP_PLACE_FAILED;
-}
-
-static PcCoopPlaceResult coopFlowersAt(Navi* navi, MapMgr* map, float& cooldown)
-{
-    Vector3f positions[5];
-    int found = 0;
-    for (int i = 0; i < 5; ++i) {
-        const float angle = navi->mFaceDirection + i * (2.0f * PI / 5.0f);
-        Vector3f pos = navi->mSRT.t + Vector3f(50.0f * sinf(angle), 0, 50.0f * cosf(angle));
-        CollTriInfo* ground = map->getCurrTri(pos.x, pos.z, true);
-        if (!ground || MapCode::getAttribute(ground) == ATTR_Water) {
-            std::snprintf(sCoopPlaceWhy, sizeof(sCoopPlaceWhy), "ring-%s found=%d", ground ? "water" : "no-ground", found);
-            break;
-        }
-        pos.y = map->getMinY(pos.x, pos.z, true);
-        if (std::fabs(pos.y - navi->mSRT.t.y) > 25.0f) {
-            std::snprintf(sCoopPlaceWhy, sizeof(sCoopPlaceWhy), "ring-height found=%d dy=%.1f", found, pos.y - navi->mSRT.t.y);
-            break;
-        }
-        positions[found++] = pos;
-    }
-    if (found != 5) return PC_COOP_PLACE_FAILED;
-    MizuItem* spawned[5] = {};
-    int count = 0;
-    for (; count < 5; ++count) {
-        spawned[count] = static_cast<MizuItem*>(itemMgr->birth(OBJTYPE_Water));
-        if (!spawned[count]) break;
-        spawned[count]->init(positions[count]);
-        spawned[count]->startAI(0);
-    }
-    if (count == 5 && pc_randomizer_consume_benefit(PC_BENEFIT_FLOWERS)) {
-        cooldown = 5.0f;
-        std::puts("[Pikmin Randomizer] FLOWER_SHOWER nectar=5");
-        std::fflush(stdout);
-        return PC_COOP_PLACE_CONSUMED;
-    }
-    for (int i = 0; i < count; ++i) spawned[i]->kill(false);
-    return PC_COOP_PLACE_STOP;
 }
 
 // Rule 1: heal target. The last step of randomizerApplyBenefitsCoop, split
@@ -3295,146 +3374,63 @@ static void coopApplyHeal(Navi* p1, Navi* p2)
 
 // Co-op counterpart of randomizerApplyBenefits: rule 3 (any live captain),
 // rule 2 (round-robin anchors) and rule 1 (heal target). Cooldowns stay one
-// per kind, as in single-captain play.
+// per kind, as in single-captain play. The placements, BOMBS and DELIVERY are
+// the shared helpers.
 static void randomizerApplyBenefitsCoop(Navi* p1, Navi* p2, MapMgr* map)
 {
     Navi* const navis[PC_COOP_CAPTAINS] = {p1, p2};
     const bool live[PC_COOP_CAPTAINS] = {coopNaviLive(p1), coopNaviLive(p2)};
     if (!pc_randomizer_ready() || !(live[0] || live[1]) || !itemMgr || !pikiMgr) return;
-    static float bombTrapCooldown = 0.0f;
-    bombTrapCooldown = std::max(0.0f, bombTrapCooldown - gsys->getFrameTime());
-    if (map && bombTrapCooldown == 0.0f && pc_randomizer_benefit_pending(PC_BENEFIT_BOMB_TRAP))
-        coopAnchored(PC_COOP_ANCHOR_BOMB_TRAP, navis, live, [&](Navi* navi) { return coopBombTrapAt(navi, map, bombTrapCooldown); });
-    static float proggCooldown = 0.0f;
-    proggCooldown = std::max(0.0f, proggCooldown - gsys->getFrameTime());
-    if (map && tekiMgr && proggCooldown == 0.0f && pc_randomizer_benefit_pending(PC_BENEFIT_PROGG)) {
-        bool livingProgg = false;
-        Iterator enemies(tekiMgr);
-        CI_LOOP(enemies) {
-            Teki* enemy = static_cast<Teki*>(*enemies);
-            if (enemy && enemy->mTekiType == TEKI_Dororo && enemy->isAlive()) { livingProgg = true; break; }
-        }
-        if (!livingProgg)
-            coopAnchored(PC_COOP_ANCHOR_PROGG, navis, live, [&](Navi* navi) { return coopProggAt(navi, map, proggCooldown); });
-    }
+    sCoopBombTrapCooldown = std::max(0.0f, sCoopBombTrapCooldown - gsys->getFrameTime());
+    if (map && sCoopBombTrapCooldown == 0.0f && pc_randomizer_benefit_pending(PC_BENEFIT_BOMB_TRAP))
+        coopAnchored(PC_COOP_ANCHOR_BOMB_TRAP, navis, live, [&](Navi* navi) { return randomizerBombTrapAt(navi, map, sCoopBombTrapCooldown); });
+    sCoopProggCooldown = std::max(0.0f, sCoopProggCooldown - gsys->getFrameTime());
+    if (map && tekiMgr && sCoopProggCooldown == 0.0f && pc_randomizer_benefit_pending(PC_BENEFIT_PROGG) && !randomizerProggAlive())
+        coopAnchored(PC_COOP_ANCHOR_PROGG, navis, live, [&](Navi* navi) { return randomizerProggAt(navi, map, sCoopProggCooldown); });
     if (bossMgr && pc_randomizer_benefit_pending(PC_BENEFIT_PRERELEASE) && bossMgr->prereleaseSeconds() <= 0.0f)
         coopAnchored(PC_COOP_ANCHOR_PRERELEASE, navis, live, [](Navi* navi) {
             if (!navi->getCurrState() || navi->getCurrState()->getID() != NAVISTATE_Walk) {
-                std::snprintf(sCoopPlaceWhy, sizeof(sCoopPlaceWhy), "not-walking");
+                std::snprintf(sPlaceWhy, sizeof(sPlaceWhy), "not-walking");
                 return PC_COOP_PLACE_FAILED;
             }
             return bossMgr->beginPrereleaseTrap() ? PC_COOP_PLACE_CONSUMED : PC_COOP_PLACE_STOP;
         });
     // BOMBS and DELIVERY are Onion-anchored (no captain), so only rule 3 applies.
-    bool yellowOnField = false;
-    if (pc_randomizer_benefit_pending(PC_BENEFIT_BOMBS)) {
-        Iterator it(pikiMgr);
-        CI_LOOP(it) {
-            Piki* piki = static_cast<Piki*>(*it);
-            if (piki && piki->isAlive() && piki->mColor == Yellow) {
-                yellowOnField = true;
-                break;
-            }
-        }
+    randomizerBombDelivery(map);
+    const int delivered = randomizerPikminDelivery();
+    if (delivered >= 0) {
+        ++sCoopPolicy.deliveries;
+        sCoopPolicy.lastDeliveryColor = delivered;
     }
-    if (map && yellowOnField && pc_randomizer_benefit_pending(PC_BENEFIT_BOMBS)) {
-        GoalItem* landing = nullptr;
-        const char* names[] = {"Blue Onion", "Red Onion", "Yellow Onion"};
-        for (int color = 0; color < 3 && !landing; ++color)
-            if (pc_randomizer_has(names[color]) && playerState->hasBootContainer(color)) landing = itemMgr->getContainer(color);
-        if (landing) {
-            Vector3f positions[3];
-            int found = 0;
-            for (int sample = 0; sample < 12 && found < 3; ++sample) {
-                const float angle = sample * (2.0f * PI / 12.0f);
-                Vector3f pos = landing->mSRT.t + Vector3f(40.0f * sinf(angle), 0, 40.0f * cosf(angle));
-                CollTriInfo* ground = map->getCurrTri(pos.x, pos.z, true);
-                if (!ground || MapCode::getAttribute(ground) == ATTR_Water) continue;
-                pos.y = map->getMinY(pos.x, pos.z, true);
-                if (std::fabs(pos.y - landing->mSRT.t.y) > 25.0f) continue;
-                pos.y += 3.0f;
-                positions[found++] = pos;
-            }
-            if (found == 3) {
-                BombItem* spawned[3] = {};
-                int count = 0;
-                for (; count < 3; ++count) {
-                    spawned[count] = static_cast<BombItem*>(itemMgr->birth(OBJTYPE_Bomb));
-                    if (!spawned[count]) break;
-                    spawned[count]->init(positions[count]);
-                    spawned[count]->startAI(0); // Unlit, loose and available for normal pickup.
-                }
-                if (count == 3 && pc_randomizer_consume_benefit(PC_BENEFIT_BOMBS))
-                    std::puts("[Pikmin Randomizer] BOMB_DELIVERY count=3 state=unlit");
-                else for (int i = 0; i < count; ++i) spawned[i]->kill(false);
-            }
-        }
-    }
-    if (pc_randomizer_benefit_pending(PC_BENEFIT_DELIVERY)) {
-        int selected = -1;
-        const char* onions[] = {"Blue Onion", "Red Onion", "Yellow Onion"};
-        for (int color = 0; color < 3; ++color)
-            if (pc_randomizer_has(onions[color]) && playerState->hasBootContainer(color) && itemMgr->getContainer(color)
-                && (selected < 0 || GameStat::allPikis[color] < GameStat::allPikis[selected])) selected = color;
-        if (selected >= 0 && pc_randomizer_consume_benefit(PC_BENEFIT_DELIVERY)) {
-            itemMgr->getContainer(selected)->mHeldPikis[Leaf] += 10;
-            pikiInfMgr.mPikiCounts[selected][Leaf] += 10;
-            GameStat::containerPikis.add(selected, 10);
-            GameStat::update();
-            std::printf("[Pikmin Randomizer] PIKMIN_DELIVERY color=%d count=10\n", selected);
-            ++sCoopPolicy.deliveries;
-            sCoopPolicy.lastDeliveryColor = selected;
-        }
-    }
-    static float nectarCooldown = 0.0f;
-    nectarCooldown = std::max(0.0f, nectarCooldown - gsys->getFrameTime());
-    if (map && nectarCooldown == 0.0f && pc_randomizer_benefit_pending(PC_BENEFIT_FLOWERS))
-        coopAnchored(PC_COOP_ANCHOR_FLOWERS, navis, live, [&](Navi* navi) { return coopFlowersAt(navi, map, nectarCooldown); });
+    sCoopNectarCooldown = std::max(0.0f, sCoopNectarCooldown - gsys->getFrameTime());
+    if (map && sCoopNectarCooldown == 0.0f && pc_randomizer_benefit_pending(PC_BENEFIT_FLOWERS))
+        coopAnchored(PC_COOP_ANCHOR_FLOWERS, navis, live, [&](Navi* navi) { return randomizerFlowersAt(navi, map, sCoopNectarCooldown); });
     coopApplyHeal(p1, p2);
 }
 
 // Rule 4: a received DeathLink takes one unit from the combined field pool,
-// whichever captain the Pikmin follow; one consume per link.
+// whichever captain the Pikmin follow; one consume per link (the shared
+// randomizerApplyDeathLink), logged with the split by owner.
 static void randomizerApplyDeathLinkCoop(Navi* p1, Navi* p2)
 {
-    if (const int casualties = pc_randomizer_deathlink_casualties()) {
-        int killed = 0, squad[PC_COOP_CAPTAINS] = {};
-        Iterator it(pikiMgr);
-        CI_LOOP(it) {
-            if (killed >= casualties) break;
-            Piki* piki = static_cast<Piki*>(*it);
-            if (!piki || !piki->isAlive() || piki->isKinoko()) continue;
-            const int mode = piki->mMode, state = piki->getState();
-            if (mode == PikiMode::EnterMode || mode == PikiMode::ExitMode || mode == PikiMode::KinokoMode) continue;
-            if (state == PIKISTATE_Dying || state == PIKISTATE_Dead || state == PIKISTATE_Swallowed
-                || state == PIKISTATE_Drown || state == PIKISTATE_Fired || state == PIKISTATE_Bubble) continue;
-            if (piki->mNavi == p1) ++squad[0];
-            else if (piki->mNavi == p2) ++squad[1];
-            pc_randomizer_deathlink_induce(piki);
-            piki->changeMode(PikiMode::FreeMode, piki->mNavi);
-            piki->mFSM->transit(piki, PIKISTATE_Dying);
-            ++killed;
-        }
-        pc_randomizer_deathlink_consume(killed);
-        sCoopPolicy.lastLive[0] = coopNaviLive(p1);
-        sCoopPolicy.lastLive[1] = coopNaviLive(p2);
-        sCoopPolicy.lastKilled = killed;
-        sCoopPolicy.lastSquad[0] = squad[0];
-        sCoopPolicy.lastSquad[1] = squad[1];
-        ++sCoopPolicy.deathLinks;
-        std::printf("[coop-policy] DEATHLINK killed=%d p1=%d p2=%d squadP1=%d squadP2=%d\n", killed,
-            sCoopPolicy.lastLive[0], sCoopPolicy.lastLive[1], squad[0], squad[1]);
-        std::fflush(stdout);
-    }
+    int squad[PC_COOP_CAPTAINS] = {};
+    const int killed = randomizerApplyDeathLink(p1, p2, squad);
+    if (killed < 0) return;
+    sCoopPolicy.lastLive[0] = coopNaviLive(p1);
+    sCoopPolicy.lastLive[1] = coopNaviLive(p2);
+    sCoopPolicy.lastKilled = killed;
+    sCoopPolicy.lastSquad[0] = squad[0];
+    sCoopPolicy.lastSquad[1] = squad[1];
+    ++sCoopPolicy.deathLinks;
+    std::printf("[coop-policy] DEATHLINK killed=%d p1=%d p2=%d squadP1=%d squadP2=%d\n", killed,
+        sCoopPolicy.lastLive[0], sCoopPolicy.lastLive[1], squad[0], squad[1]);
+    std::fflush(stdout);
 }
 
-// The co-op randomizer block of GameCoreSection::updateAI.
-// DRIFT GUARD: the BOMBS, DELIVERY, DeathLink-loop, population, obstacle and
-// colour-observation code here and in randomizerApplyBenefitsCoop /
-// randomizerApplyDeathLinkCoop are copies of the single-captain statements
-// (randomizerApplyBenefits and the else branch in updateAI), kept separate so
-// single-captain play stays byte-identical. Mirror every change to one side
-// on the other; netplay and local co-op always run this side.
+// The co-op randomizer block of GameCoreSection::updateAI. It runs the same
+// shared steps as the single-captain block (tick gate, prerelease clock,
+// BOMBS, DELIVERY, DeathLink, observations, exploration); only the
+// captain-dependent decisions differ (anchors, heal target, any-live).
 static void randomizerUpdateCoop(Navi* p1, Navi* p2, MapMgr* map)
 {
     const PcCoopStageKey key = {flowCont.mCurrentStage ? int(flowCont.mCurrentStage->mStageID) : -1,
@@ -3453,53 +3449,43 @@ static void randomizerUpdateCoop(Navi* p1, Navi* p2, MapMgr* map)
     sCoopPolicy.key = key;
     ++sCoopPolicy.tick;
     coopRunTestEvents(p1, p2);
+    coopTestPerturb();
     const bool anyLive = coopNaviLive(p1) || coopNaviLive(p2);
-    const bool active = !gameflow.mMoviePlayer->mIsActive && !gameflow.mPauseAll
-        && !gameflow.mIsUIOverlayActive && anyLive;
-    if (bossMgr) {
-        if (playerState->mInDayEnd || !anyLive) bossMgr->endPrereleaseTrap();
-        else if (active) bossMgr->tickPrereleaseTrap(gsys->getFrameTime());
-    }
+    const bool active = randomizerTickOpen() && anyLive;
+    randomizerPrereleaseClock(!anyLive, active);
     if (!active || playerState->mInDayEnd) return;
     randomizerApplyBenefitsCoop(p1, p2, map);
     coopSampleHp(p1, p2);
     randomizerApplyDeathLinkCoop(p1, p2);
-    const int field = int(GameStat::formationPikis) + int(GameStat::freePikis) + int(GameStat::workPikis);
-    pc_randomizer_observe_population(field, true);
-    pc_randomizer_observe_total_population(int(GameStat::allPikis), true);
-    for (int color = PikiMinColor; color < PikiColorCount; ++color)
-        pc_randomizer_observe_color_population(color, GameStat::allPikis[color], true);
-    if (flowCont.mCurrentStage) {
-        auto observe = [](Creature* obj, int kind, bool complete) {
-            if (!obj || !obj->mGenerator) return;
-            const Vector3f pos = obj->mGenerator->mGenPosition + obj->mGenerator->mGenOffset;
-            pc_randomizer_observe_obstacle(flowCont.mCurrentStage->mStageID, kind, pos.x, pos.z, complete, true);
-        };
-        if (itemMgr) {
-            Iterator it(itemMgr->mMeltingPotMgr);
-            CI_LOOP(it) {
-                Creature* obj = *it;
-                if (!obj) continue;
-                if (obj->isSluice()) observe(obj, obj->mObjType, static_cast<BuildingItem*>(obj)->isCompleted());
-                else if (obj->mObjType == OBJTYPE_Kusa) observe(obj, 100, obj->mMaxHealth > 0 && obj->mHealth >= obj->mMaxHealth);
-            }
-        }
-        if (workObjectMgr) {
-            Iterator it(workObjectMgr);
-            CI_LOOP(it) {
-                WorkObject* obj = static_cast<WorkObject*>(*it);
-                if (obj && (obj->isBridge() || obj->isHinderRock())) observe(obj, obj->isBridge() ? 101 : 102, obj->isFinished());
-            }
-        }
-    }
+    randomizerObserveWorld();
     // Exploration stays anchored to P1 and needs P1 live, so a downed P1's
     // position never produces a Land check.
-    UfoItem* ship = itemMgr ? itemMgr->getUfo() : nullptr;
-    if (ship && flowCont.mCurrentStage && coopNaviLive(p1)) {
-        const Vector3f base = ship->getGoalPos();
-        pc_randomizer_observe_exploration(flowCont.mCurrentStage->mStageID,
-            p1->getPosition().x - base.x, p1->getPosition().z - base.z, p1->mGroundTriangle != nullptr, true);
+    if (coopNaviLive(p1)) randomizerObserveExploration(p1);
+}
+
+// Netplay gapfix C (#885): the co-op policy's sim state for the per-tick
+// state hash, which folds it into its rand sub-hash (pc_state_hash.cpp calls
+// this through a weak reference). False, with nothing to fold, unless co-op
+// is active and the co-op branch has run, so single-captain hashes are
+// unchanged. Rollback or a late join would restore exactly these fields.
+bool pc_coop_policy_state_hash(uint64_t* out)
+{
+    if (!out || !pc_coop_active() || !sCoopPolicy.started) return false;
+    PcCoopHashState state;
+    std::memset(&state, 0, sizeof(state));
+    state.started = sCoopPolicy.started;
+    state.key = sCoopPolicy.key;
+    state.tick = sCoopPolicy.tick;
+    state.cursors = sCoopPolicy.cursors;
+    for (int i = 0; i < PC_COOP_CAPTAINS; ++i) {
+        state.prevHp[i] = sCoopPolicy.prevHp[i];
+        state.prevValid[i] = sCoopPolicy.prevValid[i];
     }
+    state.cooldown[0] = sCoopBombTrapCooldown;
+    state.cooldown[1] = sCoopProggCooldown;
+    state.cooldown[2] = sCoopNectarCooldown;
+    *out = pc_coop_state_hash(state);
+    return true;
 }
 
 #if defined(PIKMIN_RANDOMIZER_TEST_HOOKS)
@@ -3755,79 +3741,23 @@ void GameCoreSection::updateAI()
     if (pc_randomizer_expanded()) {
         AICONST.mMaxPikisOnField(pc_randomizer_field_capacity());
         if (pc_coop_active() && mNavi && mNavi2) {
-            // Netplay M4 D-policy (#885): owner co-op policy. The single-captain
-            // statements in the else branch are untouched and deliberately not
-            // re-indented, so the diff shows them unchanged.
-            // DRIFT GUARD: randomizerUpdateCoop copies the non-anchored parts of
-            // the else branch (and randomizerApplyBenefitsCoop those of
-            // randomizerApplyBenefits). Mirror any change to either side on the
-            // other; netplay and local co-op always take this branch.
+            // Netplay M4 D-policy (#885): owner co-op policy. Both branches run
+            // the shared randomizer steps defined above randomizerApplyBenefits
+            // (gapfix C4), so a gate or a fix applied there covers single-captain
+            // play, local co-op and every netplay session at once. Only the
+            // captain-dependent decisions (anchors, heal target, any-live) are
+            // co-op specific.
             randomizerUpdateCoop(mNavi, mNavi2, mMapMgr);
         } else {
-        const bool active = !gameflow.mMoviePlayer->mIsActive && !gameflow.mPauseAll
-            && !gameflow.mIsUIOverlayActive && mNavi && mNavi->mHealth > 0.0f;
-        if (bossMgr) {
-            if (playerState->mInDayEnd || (mNavi && mNavi->mHealth <= 0)) bossMgr->endPrereleaseTrap();
-            else if (active) bossMgr->tickPrereleaseTrap(gsys->getFrameTime());
-        }
-        if (active && !playerState->mInDayEnd) {
-            randomizerApplyBenefits(mNavi, mMapMgr);
-            if (const int casualties = pc_randomizer_deathlink_casualties()) {
-                // A received DeathLink takes up to one unit of living field Pikmin
-                // through the ordinary dying animation. Onion stock and Olimar are untouched.
-                int killed = 0;
-                Iterator it(pikiMgr);
-                CI_LOOP(it) {
-                    if (killed >= casualties) break;
-                    Piki* piki = static_cast<Piki*>(*it);
-                    if (!piki || !piki->isAlive() || piki->isKinoko()) continue;
-                    const int mode = piki->mMode, state = piki->getState();
-                    if (mode == PikiMode::EnterMode || mode == PikiMode::ExitMode || mode == PikiMode::KinokoMode) continue;
-                    if (state == PIKISTATE_Dying || state == PIKISTATE_Dead || state == PIKISTATE_Swallowed
-                        || state == PIKISTATE_Drown || state == PIKISTATE_Fired || state == PIKISTATE_Bubble) continue;
-                    pc_randomizer_deathlink_induce(piki);
-                    piki->changeMode(PikiMode::FreeMode, piki->mNavi);
-                    piki->mFSM->transit(piki, PIKISTATE_Dying);
-                    ++killed;
-                }
-                pc_randomizer_deathlink_consume(killed);
-            }
-            const int field = int(GameStat::formationPikis) + int(GameStat::freePikis) + int(GameStat::workPikis);
-            pc_randomizer_observe_population(field, true);
-            pc_randomizer_observe_total_population(int(GameStat::allPikis), true);
-            for (int color = PikiMinColor; color < PikiColorCount; ++color)
-                pc_randomizer_observe_color_population(color, GameStat::allPikis[color], true);
-            if (flowCont.mCurrentStage) {
-                auto observe = [](Creature* obj, int kind, bool complete) {
-                    if (!obj || !obj->mGenerator) return;
-                    const Vector3f pos = obj->mGenerator->mGenPosition + obj->mGenerator->mGenOffset;
-                    pc_randomizer_observe_obstacle(flowCont.mCurrentStage->mStageID, kind, pos.x, pos.z, complete, true);
-                };
-                if (itemMgr) {
-                    Iterator it(itemMgr->mMeltingPotMgr);
-                    CI_LOOP(it) {
-                        Creature* obj = *it;
-                        if (!obj) continue;
-                        if (obj->isSluice()) observe(obj, obj->mObjType, static_cast<BuildingItem*>(obj)->isCompleted());
-                        else if (obj->mObjType == OBJTYPE_Kusa) observe(obj, 100, obj->mMaxHealth > 0 && obj->mHealth >= obj->mMaxHealth);
-                    }
-                }
-                if (workObjectMgr) {
-                    Iterator it(workObjectMgr);
-                    CI_LOOP(it) {
-                        WorkObject* obj = static_cast<WorkObject*>(*it);
-                        if (obj && (obj->isBridge() || obj->isHinderRock())) observe(obj, obj->isBridge() ? 101 : 102, obj->isFinished());
-                    }
-                }
-            }
-            UfoItem* ship = itemMgr ? itemMgr->getUfo() : nullptr;
-            if (ship && flowCont.mCurrentStage) {
-                const Vector3f base = ship->getGoalPos();
-                pc_randomizer_observe_exploration(flowCont.mCurrentStage->mStageID,
-                    mNavi->getPosition().x - base.x, mNavi->getPosition().z - base.z, mNavi->mGroundTriangle != nullptr, true);
+            const bool active = randomizerTickOpen() && mNavi && mNavi->mHealth > 0.0f;
+            randomizerPrereleaseClock(mNavi && mNavi->mHealth <= 0, active);
+            if (active && !playerState->mInDayEnd) {
+                randomizerApplyBenefits(mNavi, mMapMgr);
+                randomizerApplyDeathLink(nullptr, nullptr, nullptr);
+                randomizerObserveWorld();
+                randomizerObserveExploration(mNavi);
             }
         }
-        } // single-captain randomizer block
     }
     static bool randomizerWeightsLogged = false;
     if (pc_randomizer_enabled() && pelletMgr && !randomizerWeightsLogged) {

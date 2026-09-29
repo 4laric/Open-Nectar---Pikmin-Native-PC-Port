@@ -31,6 +31,10 @@ Expectations (--expect):
               exactly N '[netplay] hold at' / 'held at' / 'resume at'
               triples, identical on both peers (the per-peer held_ms is
               compared separately), and no 'disconnected:' line.
+  hash-desync (gapfix C, issue #885) a per-tick state-hash desync: at least
+              one peer logs '[netplay] desync detected:' and exits 5, no
+              peer exits 0, and compare_hashes reports where the two hash
+              logs first diverge and which columns differ.
 
 M4 lane B1 (issue #885) inputs: --bootstrap-template (both bootstraps from
 one template, {TOKEN} = run token for SESSION and FINGERPRINT),
@@ -41,6 +45,18 @@ to <out>/session.json, the runner ledger the host reads). The summary adds
 the hold/resume lines, per-peer START_STAGE / [Pikmin Randomizer] /
 distinct navi-piki-teki-item tuple counts and the journal/mirror files
 present in each run dir.
+
+Gapfix C (issue #885) sim-frame keyed state scripts: an entry may be keyed
+`f<N> PIKMIN_STATE ...` instead of `<seconds> PIKMIN_STATE ...`. Such an
+entry takes effect once that peer's own hash log shows tick >= N (the
+refresher reads the last complete line of hashes.txt; the game flushes it
+every 300 ticks, so a key fires at the first flush at or after N: use
+multiples of 300 for an exact lower bound). Entries apply strictly in file
+order: each one waits for its own key and for every entry before it, so a
+DeathLink keyed to a frame can never land before the field is populated,
+however slowly a loaded machine runs. Scripts with only `<seconds>` keys
+behave exactly as before (sorted by time). Every step switch is printed in
+the summary with its wall time and the tick the refresher saw.
 
 M4 lane B2 (issue #885) sessions across day ends: --token HEX64 reuses a run
 token (SESSION and FINGERPRINT; session 2 must reuse session 1's, otherwise
@@ -160,30 +176,96 @@ def write_bootstrap(path, token, profile, flarlic=10):
 def load_state_script(path, token):
     """M4a --host-state-script/--join-state-script loader (issue #885).
 
-    Text file, one schedule entry per line: `<seconds> <PIKMIN_STATE ...>`.
-    `{TOKEN}` in a line is replaced with the peer's run token. The first
-    entry must be at t=0 (the refresher's initial content); later entries
-    switch the hosted state.txt at that many wall seconds after the refresher
-    starts. Blank lines and `#` comments are ignored.
+    Text file, one schedule entry per line: `<seconds> <PIKMIN_STATE ...>`
+    or (gapfix C) `f<N> <PIKMIN_STATE ...>`, keyed to sim tick N of the
+    peer's own hash log. `{TOKEN}` in a line is replaced with the peer's run
+    token. The first entry must be at t=0 (the refresher's initial content);
+    later entries switch the hosted state.txt at that many wall seconds
+    after the refresher starts, or once the peer's sim reaches tick N.
+    Blank lines and `#` comments are ignored.
+
+    Returns a list of (kind, value, line), kind "t" (seconds) or "f"
+    (tick). A script with only time keys is sorted by time, as before; a
+    script with any tick key keeps file order (each entry waits for the
+    previous one), and its time keys and tick keys must each be
+    non-decreasing.
     """
     sched = []
     for lineno, raw in enumerate(Path(path).read_text().splitlines(), 1):
         ln = raw.strip()
         if not ln or ln.startswith("#"):
             continue
-        t, _, line = ln.partition(" ")
+        key, _, line = ln.partition(" ")
+        kind = "t"
         try:
-            ft = float(t)
+            if key[:1] in ("f", "F"):
+                kind = "f"
+                value = int(key[1:])
+            else:
+                value = float(key)
         except ValueError:
-            raise SystemExit(f"state script {path}:{lineno}: bad time {t!r}")
-        if ft < 0 or not line.strip().startswith("PIKMIN_STATE"):
+            raise SystemExit(f"state script {path}:{lineno}: bad key {key!r} "
+                             "(want seconds or f<tick>)")
+        if value < 0 or (kind == "f" and value < 1) or not line.strip().startswith("PIKMIN_STATE"):
             raise SystemExit(
-                f"state script {path}:{lineno}: want '<seconds> PIKMIN_STATE ...'")
-        sched.append((ft, line.replace("{TOKEN}", token).strip() + "\n"))
-    sched.sort(key=lambda e: e[0])
-    if not sched or sched[0][0] != 0:
+                f"state script {path}:{lineno}: want '<seconds> PIKMIN_STATE ...' "
+                "or 'f<tick> PIKMIN_STATE ...' (tick >= 1)")
+        sched.append((kind, value, line.replace("{TOKEN}", token).strip() + "\n"))
+    if all(kind == "t" for kind, _v, _l in sched):
+        sched.sort(key=lambda e: e[1])
+    if not sched or sched[0][0] != "t" or sched[0][1] != 0:
         raise SystemExit(f"state script {path}: first entry must be at t=0")
+    if any(kind == "f" for kind, _v, _l in sched):
+        for kind in ("t", "f"):
+            vals = [v for k, v, _l in sched if k == kind]
+            if vals != sorted(vals):
+                raise SystemExit(f"state script {path}: {kind}-keys must be non-decreasing "
+                                 "in a frame-keyed script (entries apply in file order)")
     return sched
+
+
+def sched_step(sched, idx, elapsed, tick):
+    """Advance a schedule cursor: the index of the entry to host now.
+
+    Starting from `idx`, move past every following entry whose key has been
+    reached (time key: elapsed wall seconds >= value; tick key: the peer's
+    hash-log tick >= value), in file order, stopping at the first entry not
+    yet reached."""
+    while idx + 1 < len(sched):
+        kind, value, _line = sched[idx + 1]
+        reached = elapsed >= value if kind == "t" else (tick is not None and tick >= value)
+        if not reached:
+            break
+        idx += 1
+    return idx
+
+
+def hash_log_tick(path, cache=None):
+    """Last complete tick in a per-tick hash log, or None when there is none
+    yet. Reads only the tail; `cache` (a dict) skips the read when the size
+    is unchanged. Never raises: the game may be rewriting the file."""
+    cache = {} if cache is None else cache
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return cache.get("tick")
+    if size == cache.get("size"):
+        return cache.get("tick")
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, size - 1024))
+            tail = f.read(1024)
+    except OSError:
+        return cache.get("tick")
+    tick = cache.get("tick")
+    for raw in reversed(tail.split(b"\n")[:-1]):  # complete lines only
+        cols = raw.split()
+        if len(cols) >= 2 and cols[0].isdigit():
+            tick = int(cols[0])
+            break
+    cache["size"] = size
+    cache["tick"] = tick
+    return tick
 
 
 def apply_lines(path):
@@ -276,6 +358,8 @@ SCRUB_KEYS = (
     "PIKMIN_NETPLAY_TEST_BARRIER_CORRUPT",
     "PIKMIN_NETPLAY_TEST_HOST_DIE_AT_BARRIER",
     "PIKMIN_NETPLAY_TEST_BULK_DROP_SAVE",
+    "PIKMIN_NETPLAY_TEST_COOP_EVENTS",
+    "PIKMIN_NETPLAY_TEST_COOP_PERTURB",
     "NECTAR_CARD_DEBUG",
 )
 
@@ -430,7 +514,8 @@ def main(argv=None):
                    help="m8 positive test: join bootstrap differs from the host only in "
                         "SESSION (same FINGERPRINT); the handshake must succeed")
     p.add_argument("--exe-args", nargs="*", default=[])
-    p.add_argument("--expect", choices=("sync", "refuse", "disconnect", "desync", "barrier-timeout"),
+    p.add_argument("--expect", choices=("sync", "refuse", "disconnect", "desync", "barrier-timeout",
+                                        "hash-desync"),
                    default="sync")
     p.add_argument("--kill-joiner-after", type=float, default=20.0,
                    help="disconnect test: seconds after start to kill the joiner")
@@ -439,7 +524,8 @@ def main(argv=None):
                         "flarlic change in a state script)")
     p.add_argument("--host-state-script", type=Path, default=None,
                    help="M4a: schedule file for the host state.txt refresher "
-                        "(lines: '<seconds> PIKMIN_STATE ...', {TOKEN} = run token)")
+                        "(lines: '<seconds> PIKMIN_STATE ...' or, gapfix C, 'f<tick> "
+                        "PIKMIN_STATE ...' keyed to the peer's sim tick; {TOKEN} = run token)")
     p.add_argument("--join-state-script", type=Path, default=None,
                    help="M4a: schedule file for the joiner state.txt refresher "
                         "(negative control: a deliberately different schedule)")
@@ -643,14 +729,19 @@ def main(argv=None):
     stop = threading.Event()
 
     def default_sched(tok):
-        return [(0.0, f"PIKMIN_STATE 5 {tok} 1 0 127 0 0 END\n")]
+        return [("t", 0.0, f"PIKMIN_STATE 5 {tok} 1 0 127 0 0 END\n")]
 
     sched_host = load_state_script(a.host_state_script, token) if a.host_state_script else default_sched(token)
     sched_join = load_state_script(a.join_state_script, token_join) if a.join_state_script else default_sched(token_join)
 
     t0 = time.time()
+    steps = {"host": [], "join": []}  # gapfix C: (index, key, wall s, tick seen)
 
     def refresh_sched(run, sched, host=False):
+        who = "host" if host else "join"
+        idx = 0
+        tick_cache = {}
+        framed = any(kind == "f" for kind, _v, _l in sched)
         while not stop.is_set():
             el = time.time() - t0
             if host and a.host_state_missing_until is not None and el < a.host_state_missing_until:
@@ -659,12 +750,13 @@ def main(argv=None):
             if host and stale_window is not None and stale_window[0] <= el < stale_window[1]:
                 stop.wait(0.1)  # B1: stale link window, nothing written
                 continue
-            cur = sched[0][1]
-            for ft, line in sched:
-                if ft <= el:
-                    cur = line
-                else:
-                    break
+            tick = hash_log_tick(run / "hashes.txt", tick_cache) if framed else None
+            new_idx = sched_step(sched, idx, el, tick)
+            for i in range(idx + 1, new_idx + 1):
+                kind, value, _line = sched[i]
+                steps[who].append((i, f"f{value}" if kind == "f" else f"{value:g}s", el, tick))
+            idx = new_idx
+            cur = sched[idx][2]
             pending = run / "state.tmp"
             try:
                 pending.write_text(cur)
@@ -770,6 +862,9 @@ def main(argv=None):
     print(f"run_pair: refused lines host={len(ref_host)} join={len(ref_join)}")
     print(f"run_pair: disconnected lines host={len(dis_host)}")
     print(f"run_pair: randstate applies host={len(app_host)} join={len(app_join)}")
+    for who in ("host", "join"):
+        for i, key, el, tick in steps[who]:
+            print(f"run_pair: {who} state step {i} ({key}) at wall {el:.1f}s tick_seen={tick}")
     for ln in app_host[:12]:
         print(f"run_pair: apply host: {ln}")
     for ln in app_join[:12]:
@@ -903,6 +998,29 @@ def main(argv=None):
             if not [ln for ln in grep(log, "[netplay] save barrier:") if "mismatch" in ln]:
                 print(f"run_pair: FAIL: no save barrier mismatch line on the {who}")
                 ok = False
+    elif a.expect == "hash-desync":
+        # Gapfix C: a deliberate one-sided sim-state change (for example
+        # PIKMIN_NETPLAY_TEST_COOP_PERTURB on one peer) must be caught by the
+        # per-tick state hash: a '[netplay] desync detected:' line, exit 5 on
+        # every detecting peer, and no clean exit.
+        detectors = [who for who, lines in (("host", des_host), ("join", des_join)) if lines]
+        for ln in des_host + des_join + grep(host_log, "desync subs") + grep(join_log, "desync subs"):
+            print(f"run_pair: {ln.strip()}")
+        if not detectors:
+            print("run_pair: FAIL: no '[netplay] desync detected:' line on either peer")
+            ok = False
+        for who, rc, lines in (("host", rc_host, des_host), ("join", rc_join, des_join)):
+            if lines and rc != 5:
+                print(f"run_pair: FAIL: the {who} detected the desync but exited {rc}, not 5")
+                ok = False
+            if rc == 0:
+                print(f"run_pair: FAIL: the {who} exited 0: the run was not stopped by the desync")
+                ok = False
+        r = subprocess.run([sys.executable, str(CMP), str(host_hash), str(join_hash)],
+                           capture_output=True, text=True)
+        tail = (r.stdout + r.stderr).strip().splitlines()
+        for ln in tail:
+            print(f"run_pair: compare: {ln}")
     elif a.expect == "barrier-timeout":
         # B2 fix round 1 (C2): the host dies at its day-end save (test knob,
         # exit 7); the joiner's barrier times out (exit 6) and retracts.
