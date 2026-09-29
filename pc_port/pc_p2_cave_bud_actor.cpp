@@ -12,6 +12,11 @@
 #include "pc_p2_cave_bud.h"
 #include "pc_p2_cave_rooms_engine.h"
 #include "pc_p2_pom_policy.h"
+#include "pc_p2_receipt_host.h"
+#include <fstream>
+#include <filesystem>
+#include <sstream>
+#include <cstdlib>
 
 #include "Interactions.h"
 #include "ItemMgr.h"
@@ -128,6 +133,26 @@ void pc_p2_cave_bud_setup()
                     actor.slot_id.c_str(), actor.colour.c_str(), actor.segment, actor.count,
                     actor.x, actor.y, actor.z);
     }
+    std::error_code readError;
+    const bool present=std::filesystem::exists("p2-cave-bud-entry.txt",readError);
+    std::ifstream saved("p2-cave-bud-entry.txt");
+    if (readError || (present && !saved)) {
+        std::fputs("Cannot read P2 cave bud checkpoint\n",stderr); std::abort();
+    }
+    if (saved) {
+        std::string magic, cave, id, extra; unsigned long long seed; int floor, count;
+        bool valid=bool(saved>>magic>>seed>>cave>>floor>>count)
+            && magic=="P2_CAVE_BUD_STATE_1" && seed==layout->seed
+            && cave==layout->cave && floor==layout->floor && count==int(actors.size());
+        for (BudActor& actor : actors) {
+            int used=-1;
+            if (!(saved>>id>>used) || id!=actor.slot_id || used<0 || used>actor.count) valid=false;
+            actor.used=used; actor.done=used==actor.count;
+        }
+        if ((saved>>extra) || !saved.eof()) valid=false;
+        if (!valid) { std::fputs("Invalid P2 cave bud checkpoint\n",stderr); std::abort(); }
+        std::printf("P2_CAVE_BUD_RESTORE actors=%zu\n",actors.size());
+    }
     if (!actors.empty()) std::fflush(stdout);
 }
 
@@ -189,4 +214,16 @@ bool pc_p2_cave_bud_pending()
 {
     for (const BudActor& actor : actors) if (actor.pending) return true;
     return false;
+}
+
+bool pc_p2_cave_bud_save(const char* path)
+{
+    const P2CaveRoomLayout* layout=pc_p2_cave_rooms_layout();
+    if (!layout || actors.empty()) return true;
+    if (pc_p2_cave_bud_pending()) return false;
+    std::ostringstream out;
+    out << "P2_CAVE_BUD_STATE_1\n" << layout->seed << ' ' << layout->cave << ' '
+        << layout->floor << ' ' << actors.size() << '\n';
+    for (const BudActor& actor : actors) out << actor.slot_id << ' ' << actor.used << '\n';
+    return pc_p2_receipt_host_atomic_write(path,out.str().c_str());
 }

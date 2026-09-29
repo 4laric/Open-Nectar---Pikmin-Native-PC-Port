@@ -28,3 +28,6 @@ bool pc_p2_cave_bud_position(const char* colour, Vector3f& out);
 
 // Conversion output still waiting for item-manager capacity.
 bool pc_p2_cave_bud_pending();
+
+// Snapshot conversion budgets at the same floor boundary as the squad.
+bool pc_p2_cave_bud_save(const char* path);
