@@ -627,8 +627,14 @@ void pc_p2_autoplay_tick(void)
     // fight an arena it cannot route to. Never runs in normal play.
     {
         static bool teleported = false;
+        static int settleTicks = 0;
         float tx = 0.0f, tz = 0.0f;
-        if (!teleported && mapMgr && alive >= (powerMode ? 80 : 20) && p2autoplay::teleportTarget(tx, tz)) {
+        // Wait for the whole Onion queue (up to ~15 s after the squad first reaches
+        // the threshold) so the last births are not left at the Onion.
+        const int need = powerMode ? 80 : 20;
+        if (!teleported && alive >= need) ++settleTicks;
+        if (!teleported && mapMgr && alive >= need && (alive >= 98 || settleTicks > 450)
+            && p2autoplay::teleportTarget(tx, tz)) {
             teleported = true;
             const float ty = mapMgr->getMinY(tx, tz, true);
             Vector3f at(tx, ty, tz);
@@ -822,6 +828,12 @@ void pc_p2_autoplay_tick(void)
             // #901: a ship part the target dropped outranks its corpse, so the
             // bot escorts the part to the ship (the check under test).
             const bool part = pel->isUfoParts();
+            // #901: until a part is adopted, only a part that appeared near the death
+            // spot counts (a level's own parts elsewhere are not the held part).
+            if (part && !sEngage.partConfig && sEngage.deathRecorded) {
+                const float px = pel->getPosition().x - sEngage.deathX, pz = pel->getPosition().z - sEngage.deathZ;
+                if (px * px + pz * pz > 250.0f * 250.0f) continue;
+            }
             if (partsOnly && !part) continue;
             if (bestPart && !part) continue;
             if ((part && !bestPart && d2 < 600.0f * 600.0f) || d2 < best2) {

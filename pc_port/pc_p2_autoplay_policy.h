@@ -653,6 +653,8 @@ public:
         pgCooldown = 0.0f;
         pgLogTime = 0.0f;
         pgSawPart = false;
+        pgCrewBest = 0;
+        pgStall = 0.0f;
         withdrawCycles = 0;
         throwSpin = 0.0f;
         kingBacking = false;
@@ -1623,6 +1625,12 @@ private:
             return false;
         }
         if (pgCooldown > 0.0f) pgCooldown -= dt;
+        if (crew > pgCrewBest) {
+            pgCrewBest = crew;
+            pgStall = 0.0f;
+        } else {
+            pgStall += dt;
+        }
         const int need = in.carryWant > 0 ? in.carryWant - crew : 10;
         const float fdx = in.freeX - in.tgtX, fdz = in.freeZ - in.tgtZ;
         const bool freeFar = fdx * fdx + fdz * fdz > cfg.partFreeFar * cfg.partFreeFar;
@@ -1650,8 +1658,12 @@ private:
             lastCommand.buttons |= PadB;
             return true;
         }
-        // Swarm: hold the ring around the part and push the party into it.
-        if (in.waypointLeg && in.targetDist > cfg.partRingMax) {
+        // Swarm: hold the ring around the part and push the party into it. A crew
+        // that stopped growing (the swarm did not reach the part from the ring)
+        // walks the captain in close so the party touches the pellet.
+        if (pgStall > 8.0f) {
+            if (in.targetDist > 45.0f) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+        } else if (in.waypointLeg && in.targetDist > cfg.partRingMax) {
             steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
         } else if (in.targetDist > cfg.partRingMax) {
             steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
@@ -2027,6 +2039,8 @@ private:
     float pgCooldown = 0.0f; // #901: time until the next gather whistle may start
     float pgLogTime = 0.0f; // #901: AUTOPLAY_PART_GATHER rate limit
     bool pgSawPart = false; // #901: this aftermath tracked a dropped ship part
+    int pgCrewBest = 0; // #901: best crew seen; a crew that stops growing closes the ring
+    float pgStall = 0.0f;
     float initialHealthFrac = 1.0f;
     bool sawDamage = false;
     bool sawKill = false; // generic death latched (any species)
