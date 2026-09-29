@@ -3898,11 +3898,14 @@ bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long ge
 		       to_hex(mine.cardSha, 32).c_str(), to_hex(peer.cardSha, 32).c_str());
 		die(5);
 		break;
-	case pc_netplay_xfer::BarrierVerdict::DigestMismatch:
-		printf("[netplay] save barrier: checkpoint digest mismatch host=%s local=%s\n",
-		       to_hex(h.savSha, 32).c_str(), to_hex(mine.savSha, 32).c_str());
+	case pc_netplay_xfer::BarrierVerdict::DigestMismatch: {
+		// Both digests, named by role, so the two peers print the same line.
+		const pc_netplay_xfer::SaveResult& j = sCfg.isHost ? peer : mine;
+		printf("[netplay] save barrier: checkpoint digest mismatch host=%s joiner=%s (desync)\n",
+		       to_hex(h.savSha, 32).c_str(), to_hex(j.savSha, 32).c_str());
 		die(5);
 		break;
+	}
 	case pc_netplay_xfer::BarrierVerdict::Agree:
 		break;
 	}
