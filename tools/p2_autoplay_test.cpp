@@ -3183,6 +3183,67 @@ void testDetourLegProgress()
     CHECK(stuck, "detour/stalled_leg_stucks");
 }
 
+// #897 tier gate: a Crawbster on the ledge above is not "in range"; the
+// approach asks for a route at once; an attack that finds it on another
+// tier goes back to Approach; other species are unaffected.
+void testRollerTier()
+{
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = kingSenses(94, 150.0f);
+    CHECK(enterAttack(brain, s), "tier/attack");
+    s.targetDyValid = true;
+    s.targetDy = 50.0f;
+    s.targetDist = 150.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Approach, "tier/attack_back_to_approach");
+    brain.takeMarkers();
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Approach && brain.replanWanted(), "tier/approach_replans_not_attacks");
+    CHECK(hasMarker(brain.takeMarkers(), "AUTOPLAY_TIER"), "tier/marker");
+    brain.clearReplan();
+    s.targetDy = 5.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Attack, "tier/same_tier_attacks");
+    p2autoplay::Brain other(cfg);
+    p2autoplay::Senses o = kingSenses(44, 150.0f);
+    CHECK(enterAttack(other, o), "tier/control_attack");
+    o.targetDyValid = true;
+    o.targetDy = 50.0f;
+    o.targetDist = 150.0f;
+    other.update(0.05f, o);
+    CHECK(other.current() == p2autoplay::State::Attack, "tier/control_unaffected");
+}
+
+// #897 home lean: the evade picks the side toward the arena floor (home)
+// when the captain is near the roll line; back-off blends toward home.
+void testRollerHomeLean()
+{
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = kingSenses(94, 150.0f);
+    CHECK(enterAttack(brain, s), "home/attack");
+    s.homeValid = true;
+    s.homeX = -300.0f;
+    s.homeZ = 300.0f;
+    s.targetRolling = true;
+    s.targetVelX = 0.0f;
+    s.targetVelZ = 200.0f;
+    s.naviX = 10.0f;
+    s.naviZ = 300.0f;
+    s.targetDist = 300.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.command().moveX < -0.8f, "home/evade_toward_home_side");
+    s.targetRolling = false;
+    s.naviX = 0.0f;
+    s.naviZ = 150.0f;
+    s.targetDist = 150.0f;
+    s.homeX = -600.0f;
+    s.homeZ = 0.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.command().moveX < -0.3f && brain.command().moveZ > 0.3f, "home/backoff_blends_home");
+}
+
 int main()
 {
     testGate();
@@ -3234,6 +3295,8 @@ int main()
     testPowerResupply();
     testObstaclePush();
     testDetourLegProgress();
+    testRollerTier();
+    testRollerHomeLean();
     if (failures == 0) {
         std::printf("PASS p2_autoplay\n");
         return 0;

@@ -127,6 +127,9 @@ struct Engagement {
     int initialNectar = 0;
     float lastX = 0.0f;
     float lastZ = 0.0f;
+    bool homeValid = false; // #897 roller home (first sighting, still in Stay)
+    float homeX = 0.0f;
+    float homeZ = 0.0f;
     bool lastAlive = false;
     bool carryLatch = false;
     bool deadLatch = false; // generic death observed (any species, gap 5)
@@ -261,6 +264,27 @@ std::vector<int> nearestWpIdx(float x, float z, int k, float y = NAN)
     std::sort(scored.begin(), scored.end(), [](const Scored& a, const Scored& b) { return a.d < b.d; });
     for (int i = 0; i < int(scored.size()) && int(out.size()) < k; ++i) out.push_back(scored[i].idx);
     return out;
+}
+
+// #897: reach radius for a detour leg = the route waypoint's own radius
+// (clamped 30..80) when the leg is a waypoint; 80 for sidesteps. The flat 80
+// cut the Impact Site ramp corners (waypoints r=19..23) into the walls.
+float legReachRadius(float x, float z)
+{
+    if (!routeMgr) return 80.0f;
+    const u32 handle = 'test';
+    const int n = routeMgr->getNumWayPoints(handle);
+    for (int i = 0; i < n && i < 4096; ++i) {
+        WayPoint* wp = routeMgr->getWayPoint(handle, i);
+        if (!wp) continue;
+        if (std::fabs(wp->mPosition.x - x) < 1.0f && std::fabs(wp->mPosition.z - z) < 1.0f) {
+            float r = wp->mRadius;
+            if (r < 30.0f) r = 30.0f;
+            if (r > 80.0f) r = 80.0f;
+            return r;
+        }
+    }
+    return 80.0f;
 }
 
 bool detourSeen(float x, float z)
@@ -619,6 +643,29 @@ void pc_p2_autoplay_tick(void)
     // links/open/water flags and every HinderRock/Bridge work object, so a
     // STUCK can be read against the real graph and obstacles.
     static bool sMapDumped = false;
+    static int sHinderFinished = -1; // #897 finished-count at the last work dump
+    if (sMapDumped && workObjectMgr) {
+        int finished = 0;
+        Iterator fit(workObjectMgr);
+        CI_LOOP(fit)
+        {
+            WorkObject* w = static_cast<WorkObject*>(*fit);
+            if (w && w->isHinderRock() && w->isFinished()) ++finished;
+        }
+        if (finished != sHinderFinished) {
+            sHinderFinished = finished;
+            Iterator wit(workObjectMgr);
+            CI_LOOP(wit)
+            {
+                WorkObject* w = static_cast<WorkObject*>(*wit);
+                if (!w || !w->isHinderRock()) continue;
+                std::printf("AUTOPLAY_MAP_WORK kind=hinder x=%.0f y=%.0f z=%.0f finished=%d navi=(%.0f,%.0f,%.0f) bot-driven\n",
+                            w->getPosition().x, w->getPosition().y, w->getPosition().z, w->isFinished() ? 1 : 0,
+                            navi->getPosition().x, navi->getPosition().y, navi->getPosition().z);
+            }
+            std::fflush(stdout);
+        }
+    }
     if (!sMapDumped && routeMgr && workObjectMgr) {
         sMapDumped = true;
         const u32 handle = 'test';
@@ -971,6 +1018,16 @@ void pc_p2_autoplay_tick(void)
             senses.targetAttacking = pc_p2_chappy_probe(pick->actor, &kst, nullptr, nullptr) && kst
                 && std::strcmp(kst, "attack") == 0;
         }
+        if (!sEngage.homeValid) {
+            sEngage.homeValid = true;
+            sEngage.homeX = pick->x;
+            sEngage.homeZ = pick->z;
+        }
+        senses.homeValid = sEngage.homeValid;
+        senses.homeX = sEngage.homeX;
+        senses.homeZ = sEngage.homeZ;
+        senses.targetDyValid = true;
+        senses.targetDy = pick->actor->getPosition().y - navi->getPosition().y;
         // #897 roller stance: Crawbster FSM facts (read-only probe).
         if (p2autoplay::isRollerStance(pick->source)) {
             const char* dst = nullptr;
@@ -1050,7 +1107,7 @@ void pc_p2_autoplay_tick(void)
         sLegTime += dt > 0.0f && dt <= 0.5f ? dt : 0.016f;
         float legX = sPath[sPathIdx].first, legZ = sPath[sPathIdx].second;
         while (sPathIdx < sPath.size()
-               && (distXZ(naviX, naviZ, legX, legZ) < 80.0f || sLegTime > 25.0f)) {
+               && (distXZ(naviX, naviZ, legX, legZ) < legReachRadius(legX, legZ) || sLegTime > 25.0f)) {
             ++sPathIdx;
             sLegTime = 0.0f;
             if (sPathIdx < sPath.size()) {
@@ -1151,7 +1208,7 @@ void pc_p2_autoplay_tick(void)
                                     || st == p2autoplay::State::Aftermath)
                 ? senses.targetDist
                 : onionDist;
-            std::printf("AUTOPLAY_NAVI state=%s navi=(%.0f,%.0f) tgt=(%.0f,%.0f) tdist=%.0f leg=(%.0f,%.0f) move=(%.2f,%.2f) stick=(%d,%d) btn=%u nstate=%d open=%d yaw=%.2f vel=%.1f mstick=%.2f hp=%.2f scat=%d field=%d navi_hp=%.1f cursor=(%.0f,%.0f) king_attack=%d bot-driven\n",
+            std::printf("AUTOPLAY_NAVI state=%s navi=(%.0f,%.0f) tgt=(%.0f,%.0f) tdist=%.0f leg=(%.0f,%.0f) move=(%.2f,%.2f) stick=(%d,%d) btn=%u nstate=%d open=%d yaw=%.2f vel=%.1f mstick=%.2f hp=%.2f scat=%d field=%d navi_hp=%.1f cursor=(%.0f,%.0f) king_attack=%d ny=%.0f bot-driven\n",
                         p2autoplay::stateName(st), naviX, naviZ,
                         (st == p2autoplay::State::Approach || st == p2autoplay::State::Attack
                          || st == p2autoplay::State::Aftermath)
@@ -1164,7 +1221,8 @@ void pc_p2_autoplay_tick(void)
                         showDist, legX, legZ, cmd.moveX, cmd.moveZ, stickX, stickY, buttons,
                         stateId, senses.containerOpen ? 1 : 0, yawDbg, velLen, stickLen,
                         senses.targetHealthFrac, senses.scattered ? 1 : 0, alive,
-                        navi->mHealth, senses.cursorX, senses.cursorZ, senses.targetAttacking ? 1 : 0);
+                        navi->mHealth, senses.cursorX, senses.cursorZ, senses.targetAttacking ? 1 : 0,
+                        navi->getPosition().y);
             std::fflush(stdout);
         }
     }
