@@ -617,7 +617,13 @@ void GameCoreSection::enterFreePikmins()
 						}
 						piki->mFSM->transit(piki, PIKISTATE_Normal);
 						navi->mGoalItem = itemMgr->getContainer(piki->mColor);
+#if defined(PIKI_PC_PORT)
+						// Co-op (#885 gap-fix K): the goal is on `navi` (P1), not on
+						// the Pikmin's own captain; changeMode reads it from here.
+						piki->changeMode(PikiMode::EnterMode, navi);
+#else
 						piki->changeMode(PikiMode::EnterMode, nullptr);
+#endif
 						goalSafe++;
 						break;
 					}
@@ -631,7 +637,11 @@ void GameCoreSection::enterFreePikmins()
 							}
 							piki->mFSM->transit(piki, PIKISTATE_Normal);
 							navi->mGoalItem = itemMgr->getContainer(piki->mColor);
+#if defined(PIKI_PC_PORT)
+							piki->changeMode(PikiMode::EnterMode, navi); // #885 gap-fix K, as above
+#else
 							piki->changeMode(PikiMode::EnterMode, nullptr);
+#endif
 							ufoSafe++;
 							break;
 						}
