@@ -165,6 +165,19 @@ inline bool isPowerEnabled()
     return v && v[0] && std::strcmp(v, "0") != 0;
 }
 
+// #898 TEST-ONLY observation knob: PIKMIN_RANDOMIZER_AUTOPLAY_NO_DELIVER.
+// After a kill the bot does NOT deliver the corpse: it holds the whistle for
+// noDeliverWhistle seconds (calls the squad off the corpse) and reports, then
+// Done walks back to the Onion and idles. Used to watch what the world does
+// with an abandoned carcass (a Breadbug dragging it home) - pad input only,
+// nothing is forced. Inert unless the autoplay gate is on.
+inline bool noDeliverEnabled()
+{
+    if (!isEnabled()) return false;
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_NO_DELIVER");
+    return v && v[0] && std::strcmp(v, "0") != 0;
+}
+
 inline float powerDamageMult()
 {
     if (!isPowerEnabled()) return 1.0f;
@@ -310,6 +323,8 @@ struct Config {
     float kurageAttackMultiplier = 2.0f; // Kurage has high HP: longer attack window
     float pressOnlyAttackMultiplier = 5.0f; // #898 press-only targets: one press per landed throw
     float pressLeadSeconds = 0.6f; // #898 aim ahead of a walking press-only target
+    bool noDeliver = false; // #898 TEST-ONLY: abandon corpses (also env NO_DELIVER)
+    float noDeliverWhistle = 3.0f; // #898 whistle hold before abandoning a corpse
     float saraiLowHeight = 120.0f; // Sarai thrown at only when within this height above ground (or grabbing)
     float throwRange = 260.0f; // XZ distance at which throws start
     float arriveRadius = 90.0f; // XZ distance considered "at" the Onion
@@ -1148,6 +1163,18 @@ private:
         if ((!in.targetAlive || in.targetDead) && !sawDamage && !sawKill && !sawCarry && !sawReceipt) {
             // Target gone with no combat observed: nothing to wait for.
             finishTarget(in, /*claimedKill*/ false);
+            return;
+        }
+        if (sawKill && !sawReceipt && (cfg.noDeliver || noDeliverEnabled())) {
+            // #898 TEST-ONLY: abandon the corpse (whistle the squad off it).
+            if (stateTime < cfg.noDeliverWhistle) {
+                lastCommand.buttons = PadB;
+                return;
+            }
+            char buf[160];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_NO_DELIVER token=%u corpse_left=1 bot-driven", in.targetToken);
+            markers.emplace_back(buf);
+            finishTarget(in, /*killed*/ true);
             return;
         }
         // bot-v5: NEVER whistle here (no PadB). Holding whistle gathers

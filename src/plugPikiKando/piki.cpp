@@ -2,6 +2,7 @@
 #include "pc_p2_purple_flight.h"
 #include "pc_p2_purple_impact.h"
 #include "pc_p2_white.h"
+#include "pc_p2_breadbug_teki.h"
 #include "pc_p2_species.h"
 #include "pc_p2_purple.h"
 #include "pc_randomizer.h"
@@ -971,6 +972,12 @@ int Piki::graspSituation(Creature** outTarget)
 		if (roughCull(teki, this, minTestDist + teki->getCentreSize())) {
 			continue;
 		}
+#if defined(PIKI_PC_PORT)
+		// #898: an unbittered OWN Breadbug is not a living thing (retail pikiAI skips it).
+		if (pc_p2_breadbug_teki_untargetable(teki, "piki_grasp_situation")) {
+			continue;
+		}
+#endif
 		if (teki->isVisible() && teki->isAlive() && !teki->isFlying() && teki->isOrganic() && !teki->isStickTo()) {
 			f32 tekiDist = qdist2(this, teki);
 			if (tekiDist <= minTestDist + teki->getCentreSize()) {
@@ -2188,7 +2195,11 @@ void Piki::collisionCallback(immut CollEvent& event)
 	}
 
 	if (AICONST.mDoCStickAttack() && (collider->mObjType == OBJTYPE_Teki || collider->isBoss()) && collider->isOrganic()
-	    && mMode == PikiMode::FormationMode && getState() != PIKISTATE_Pressed) {
+	    && mMode == PikiMode::FormationMode && getState() != PIKISTATE_Pressed
+#if defined(PIKI_PC_PORT)
+	    && !pc_p2_breadbug_teki_untargetable(collider, "piki_formation_contact") // #898 swarm
+#endif
+	) {
 		ActCrowd* crowd = static_cast<ActCrowd*>(mActiveAction->getCurrAction());
 		if (crowd && crowd->mState == ActCrowd::STATE_Formed) {
 			mActiveAction->abandon(nullptr);
@@ -2933,6 +2944,9 @@ void Piki::pcChargeAt(Creature* target)
 {
 	if (!target || playerState->inDayEnd()) {
 		return;
+	}
+	if (pc_p2_breadbug_teki_untargetable(target, "piki_charge")) {
+		return; // #898
 	}
 	mActiveAction->abandon(nullptr);
 	mActiveAction->mCurrActionIdx = PikiAction::Attack;

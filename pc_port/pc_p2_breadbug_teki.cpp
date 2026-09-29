@@ -10,6 +10,7 @@
 #include "Pellet.h"
 #include "PelletState.h"
 #include "Piki.h"
+#include "PikiAI.h"
 #include "PikiMgr.h"
 #include "PikiState.h"
 #include "Route.h"
@@ -50,6 +51,11 @@ struct Binding {
     int taiState = -1;          // P1 Collec mStateID at bind (must never change)
     int taiChanges = 0;
     int attacksIgnored = 0;
+    int attacksIgnoredPiki = 0, attacksIgnoredNavi = 0;  // backstop leak by attacker kind
+    int targetSkips = 0;        // target selections refused (isLivingThing seam)
+    std::set<std::string> skipSitesLogged;
+    std::set<Pellet*> spared;   // check-bound carcasses released at the nest (equality only)
+    int consumed = 0, sparedCount = 0;
     int eventsConsumed = 0;
     int presses = 0, pressesRejected = 0;
     int flyContactsRising = 0;  // thrown Pikmin that touched it while still rising (no press)
@@ -236,7 +242,7 @@ bool otherTekiStuck(Pellet* p, const BTeki* self) {
 
 int sPelletsAlive = 0;
 float sPelletNearest = -1.0f;
-void snapshot(BTeki* t, std::vector<bb::PelletInfo>& out, std::vector<Pellet*>& who) {
+void snapshot(BTeki* t, const Binding& b, std::vector<bb::PelletInfo>& out, std::vector<Pellet*>& who) {
     out.clear();
     who.clear();
     sPelletsAlive = 0;
@@ -271,7 +277,8 @@ void snapshot(BTeki* t, std::vector<bb::PelletInfo>& out, std::vector<Pellet*>& 
         // the goal / swallowed, pellets held in a mouth.
         info.captured = p->mStuckMouthPart != nullptr;
         info.pickable = !p->isUfoParts() && !p->mConfig->mModelId.match('NAVI') && !info.inGoal
-                     && p->getState() != PELSTATE_Swallowed && p->getState() != PELSTATE_Dead;
+                     && p->getState() != PELSTATE_Swallowed && p->getState() != PELSTATE_Dead
+                     && !b.spared.count(p);  // #898: a carcass this Breadbug spared stays spared
         info.otherTekiStuck = otherTekiStuck(p, t);
         info.carcass = p->mPelletView != nullptr;
         info.slotFree = true;
@@ -317,9 +324,25 @@ void consumeCargo(BTeki* t, Binding& b, Pellet* p) {
     }
     if (t->getStickObject() == p) p->endStickTeki(t);
     const bool carcass = p->mPelletView != nullptr;
-    p->stimulate(InteractKill(t, 0));
-    std::printf("P2_BREADBUG_OWN_CONSUME generator=%u source_id=38 cargo_carcass=%d pikmin_killed=%d\n",
-                b.generator, carcass ? 1 : 0, killed);
+    // #898 fix: a carcass still owing its randomizer delivery check (live P2
+    // ordinary-delivery binding on its own generator token) is spared, never
+    // destroyed: released at the nest, still carriable, never re-picked by
+    // this Breadbug. Everything else is eaten (retail endCarry).
+    const unsigned boundSource = carcass ? pc_randomizer_p2_source_for(p->mPelletView) : 0u;
+    const unsigned boundGen = carcass ? pc_randomizer_p2_generator_for(p->mPelletView) : 0u;
+    const bool destroy = bb::consumeOutcome(carcass, boundSource != 0) == bb::ConsumeOutcome::Destroy;
+    if (destroy) {
+        p->stimulate(InteractKill(t, 0));
+        ++b.consumed;
+    } else {
+        p->mVelocity.x = p->mVelocity.z = 0.0f;
+        b.spared.insert(p);
+        ++b.sparedCount;
+    }
+    std::printf("P2_BREADBUG_OWN_CONSUME generator=%u source_id=38 cargo_carcass=%d cargo_bound_source=%u "
+                "cargo_generator=%u destroyed=%d spared=%s pikmin_killed=%d pellet_alive_after=%d wall=%lld\n",
+                b.generator, carcass ? 1 : 0, boundSource, boundGen, destroy ? 1 : 0,
+                destroy ? "no" : "check_bound", killed, p->isAlive() ? 1 : 0, wallMs());
 }
 
 bool ownTick(BTeki* t, Binding& b, float dt) {
@@ -350,7 +373,7 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
     std::vector<Pellet*> who;
     bool kill = false;
     for (int k = 0; k < ticks && !kill; ++k) {
-        snapshot(t, infos, who);
+        snapshot(t, b, infos, who);
         Creature* stick = t->getStickObject();
         Pellet* held = stick && stick->isObjType(OBJTYPE_Pellet) ? static_cast<Pellet*>(stick) : nullptr;
         bb::TickInput in;
@@ -476,10 +499,12 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         const bb::Vec3& wp = b.fsm.nextWayPoint();
         std::printf("P2_BREADBUG_OWN_POS generator=%u source_id=38 state=%s anim=%d frame=%.0f x=%.1f z=%.1f "
                     "home=%.1f,%.1f next=%.1f,%.1f health=%.1f target=%d held=%d pellets=%zu tai_changes=%d "
-                    "attacks_ignored=%d events_consumed=%d presses=%d fly_rising=%d pellets_alive=%d nearest_pellet=%.0f wall=%lld\n",
+                    "attacks_ignored=%d target_skips=%d consumed=%d spared=%d events_consumed=%d presses=%d fly_rising=%d "
+                    "pellets_alive=%d nearest_pellet=%.0f wall=%lld\n",
                     b.generator, bb::stateName(b.fsm.state()), b.fsm.animator().anim(), b.fsm.animator().frame(),
                     p.x, p.z, b.fsm.home().x, b.fsm.home().z, wp.x, wp.z, b.fsm.health(), b.fsm.target() ? 1 : 0,
-                    b.held ? 1 : 0, infos.size(), b.taiChanges, b.attacksIgnored, b.eventsConsumed, b.presses,
+                    b.held ? 1 : 0, infos.size(), b.taiChanges, b.attacksIgnored, b.targetSkips, b.consumed,
+                    b.sparedCount, b.eventsConsumed, b.presses,
                     b.flyContactsRising, sPelletsAlive, sPelletNearest, wallMs());
     }
     std::fflush(stdout);
@@ -494,8 +519,10 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         t->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
         t->mVelocity.x = t->mVelocity.z = 0.0f;
         std::printf("P2_BREADBUG_OWN_ESCAPE generator=%u source_id=38 native=host_escape_now tai_changes=%d "
-                    "attacks_ignored=%d presses=%d presses_rejected=%d\n",
-                    b.generator, b.taiChanges, b.attacksIgnored, b.presses, b.pressesRejected);
+                    "attacks_ignored=%d attacks_ignored_piki=%d attacks_ignored_navi=%d target_skips=%d presses=%d "
+                    "presses_rejected=%d consumed=%d spared=%d\n",
+                    b.generator, b.taiChanges, b.attacksIgnored, b.attacksIgnoredPiki, b.attacksIgnoredNavi,
+                    b.targetSkips, b.presses, b.pressesRejected, b.consumed, b.sparedCount);
         std::fflush(stdout);
         t->pcEscapeNow();
         return true;
@@ -570,9 +597,11 @@ void pc_p2_breadbug_teki_setup() {
         b.fsm.init(sParams, sBank, {pos.x, pos.y, pos.z}, t->getDirection(), (gen * 2654435761u) | 1u, &sRoute);
         t->mHealth = b.fsm.health();
         b.taiState = t->mStateID;
-        // Retail PanModoki is not a living thing while unbittered (isLivingThing):
-        // no Pikmin latch. The P1 Collec already clears ORGANIC at strategy
-        // start; keep it cleared for the bound actor.
+        // Retail PanModoki is not a living thing while unbittered (isLivingThing).
+        // Clearing ORGANIC only stops the organic-gated P1 paths (thrown stick,
+        // formation contact, captain punch entry); it does NOT stop P1 ground
+        // attacks. Every P1 target-selection site asks
+        // pc_p2_breadbug_teki_untargetable() instead (#898 fix).
         t->clearTekiOption(TEKIOPT_Organic);
         std::printf("P2_BREADBUG_OWN_BIND generator=%u source_id=38 host_type=%d health=%.1f retail_parms=%d draw=%s "
                     "home=%.1f,%.1f wp=%d state=%s tai_state=%d\n",
@@ -653,14 +682,45 @@ bool pc_p2_breadbug_teki_event(BTeki* t, const TekiEvent& event) {
     return true;  // the P1 Collec TAI never sees an OWN Breadbug's events
 }
 
-bool pc_p2_breadbug_teki_attack(BTeki* t, float damage) {
+bool pc_p2_breadbug_teki_attack(BTeki* t, const Creature* attacker, float damage) {
     Binding* b = find(t);
     if (!b || b->escaped) return false;
     ++b->attacksIgnored;
+    const char* kind = "other";
+    int action = -1, state = -1;
+    if (attacker && attacker->mObjType == OBJTYPE_Piki) {
+        kind = "piki";
+        ++b->attacksIgnoredPiki;
+        Piki* pk = static_cast<Piki*>(const_cast<Creature*>(attacker));
+        state = pk->getState();
+        action = pk->mActiveAction ? pk->mActiveAction->mCurrActionIdx : -1;
+    } else if (attacker && attacker->mObjType == OBJTYPE_Navi) {
+        kind = "navi";
+        ++b->attacksIgnoredNavi;
+    }
     if (b->attacksIgnored <= 5 || b->attacksIgnored % 50 == 0)
-        std::printf("P2_BREADBUG_OWN_ATTACK_IGNORED generator=%u source_id=38 damage=%.1f health=%.1f count=%d\n",
-                    b->generator, damage, b->fsm.health(), b->attacksIgnored);
+        std::printf("P2_BREADBUG_OWN_ATTACK_IGNORED generator=%u source_id=38 attacker=%s piki_state=%d piki_action=%d "
+                    "damage=%.1f health=%.1f count=%d\n",
+                    b->generator, kind, state, action, damage, b->fsm.health(), b->attacksIgnored);
     std::fflush(stdout);
+    return true;
+}
+
+bool pc_p2_breadbug_teki_untargetable(const Creature* c, const char* site) {
+    if (!c || c->mObjType != OBJTYPE_Teki) return false;
+    BTeki* t = static_cast<BTeki*>(const_cast<Creature*>(c));
+    Binding* b = find(t);
+    if (!b || b->escaped || t->mDeadState != 0) return false;
+    // The port has no bitter spray: a bound Breadbug is always unbittered.
+    constexpr bool bittered = false;
+    if (bb::isLivingThing(bittered, b->fsm.health() > 0.0f)) return false;
+    ++b->targetSkips;
+    const std::string where = site ? site : "?";
+    if (b->skipSitesLogged.insert(where).second) {
+        std::printf("P2_BREADBUG_OWN_TARGET_SKIP generator=%u source_id=38 site=%s living=0 bittered=0 count=%d wall=%lld\n",
+                    b->generator, where.c_str(), b->targetSkips, wallMs());
+        std::fflush(stdout);
+    }
     return true;
 }
 

@@ -326,6 +326,25 @@ private:
     TickOutput* mOut = nullptr;
 };
 
+// #898 fix: PanModokiBase::isLivingThing() (PanModokiBase.h:93) is true only
+// while bittered. Pikmin/captain target selection skips a non-living teki, so
+// an unbittered live Breadbug is never an attack target. The port has no
+// bitter spray (always unbittered), but the rule keeps the source shape.
+inline bool isLivingThing(bool bittered, bool alive) { return bittered && alive; }
+
+// #898 fix: randomizer policy for the CarryEnd/Hide cargo consume. Retail
+// endCarry destroys whatever the Breadbug dragged home. A carcass that still
+// owes a randomizer delivery check (a live P2 ordinary-delivery binding keyed
+// on its own generator token) is SPARED instead: it is released at the nest,
+// stays carriable, and the Breadbug that spared it never picks it again. The
+// Pikmin still hanging on are killed either way (retail endCarry), and every
+// other cargo (pellets, unbound carcasses) is destroyed as in retail. A check
+// is therefore never forfeited by a Breadbug.
+enum class ConsumeOutcome { Destroy, SpareCheckBound };
+inline ConsumeOutcome consumeOutcome(bool carcass, bool checkBound) {
+    return carcass && checkBound ? ConsumeOutcome::SpareCheckBound : ConsumeOutcome::Destroy;
+}
+
 float roundAng(float angle);
 float angDist(float first, float second);
 

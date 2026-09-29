@@ -313,6 +313,17 @@ void testHide() {
     check(h.consumed, "Hide END consumes the cargo (endCarry)");
     check(near(h.fsm.health(), 1100.0f), "Hide END refills health to fp00");
 }
+
+void testLivingAndConsumePolicy() {
+    check(!isLivingThing(false, true), "unbittered live Breadbug is not a living thing (no Pikmin/captain target)");
+    check(isLivingThing(true, true), "bittered live Breadbug is a living thing");
+    check(!isLivingThing(true, false), "dead is never a living thing");
+    check(consumeOutcome(true, true) == ConsumeOutcome::SpareCheckBound,
+          "a carcass still owing its delivery check is spared (check never forfeited)");
+    check(consumeOutcome(true, false) == ConsumeOutcome::Destroy, "an unbound carcass is eaten (retail endCarry)");
+    check(consumeOutcome(false, false) == ConsumeOutcome::Destroy, "a pellet is eaten (retail endCarry)");
+    check(consumeOutcome(false, true) == ConsumeOutcome::Destroy, "only carcasses carry a delivery binding");
+}
 } // namespace
 
 int main() {
@@ -324,6 +335,7 @@ int main() {
     testDeath();
     testSuck();
     testHide();
+    testLivingAndConsumePolicy();
     if (failures) {
         std::fprintf(stderr, "%d failure(s)\n", failures);
         return 1;
