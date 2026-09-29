@@ -1,3 +1,7 @@
+#include "pc_p2_ship.h"
+#include "pc_p2_ship_store.h"
+#include "pc_p2_purple.h"
+#include "pc_p2_purple_motion.h"
 #include "pc_p2_purple_flight.h"
 #include "pc_p2_kurage_visual.h"
 #include "pc_p2_teki_lifetime.h"
@@ -510,6 +514,7 @@ void GameCoreSection::exitDayEnd()
 	{
 		Piki* piki = (Piki*)*it;
 		if (piki->isAlive()) {
+            if (pc_p2_ship_special(piki)) { if (pc_p2_ship_deposit(piki)) ++entered; continue; }
 			GoalItem* item = itemMgr->getContainer(piki->mColor);
 			if (item) {
 				item->enterGoal(piki);
@@ -1806,6 +1811,8 @@ void GameCoreSection::initStage()
 				item->mSRT.t.y = mMapMgr->getMinY(item->mSRT.t.x, item->mSRT.t.z, true);
 				item->init(item->mSRT.t);
 				item->setColor(item->mSeedColor);
+                // init/setColor clear experimental identity; restore it afterward.
+                if (pc_randomizer_purple_campaign()) a->restore(item);
 				item->startAI(0);
 				C_SAI(item)->start(item, PikiHeadAI::PIKIHEAD_Wait);
 				PRINT(" NEW PIKIHEAD ****\n");
@@ -1990,6 +1997,12 @@ void GameCoreSection::finalSetup()
 	pc_p2_demon_manager_setup();
 	pc_p2_sarai_manager_setup();
 	pc_p2_preview_setup();
+    if (pc_randomizer_purple_campaign()) {
+        pc_p2_purple_setup();
+        pc_p2_purple_motion_setup();
+        pc_p2_purple_flight_setup();
+        std::printf("P2_SHIP_READY stored=%d controls=F10_withdraw_ShiftF10_deposit near_ship=180\n", p2ship::stock.total());
+    }
 	pc_p2_snow_campaign_setup();
 	// Actor-lifetime (#397): mark the new scene ready for lifecycle fixtures.
 	pc_p2_scene_begin();
@@ -2455,7 +2468,7 @@ void GameCoreSection::update()
 	pc_p2_kabuto_fsm_update_stones();
 	pc_p2_long_legs_update_all();
 
-	if (GameStat::allPikis == 0 && GameStat::maxPikis > 0) {
+	if (GameStat::allPikis == 0 && (!pc_randomizer_purple_campaign() || p2ship::stock.total() == 0) && GameStat::maxPikis > 0) {
 #if defined(PIKI_PC_PORT)
 		// Cooperativo: la secuencia de extinción la hace un Olimar vivo, no
 		// un cuerpo caído. Si el vivo ya está en ella, no se repite.
@@ -2994,6 +3007,9 @@ void GameCoreSection::updateAI()
     pc_p2_cave_tick();
     pc_p2_giant_breadbug_actor_tick();
     pc_p2_breadbug_actor_tick();
+    const bool shipActive = !gameflow.mMoviePlayer->mIsActive && !gameflow.mPauseAll
+        && !gameflow.mIsUIOverlayActive && !playerState->mInDayEnd && mNavi && mNavi->mHealth > 0.0f;
+    pc_p2_ship_tick(naviMgr ? naviMgr->getActiveNavi() : nullptr, shipActive);
     if (pc_randomizer_expanded()) {
         AICONST.mMaxPikisOnField(pc_randomizer_field_capacity());
         const bool active = !gameflow.mMoviePlayer->mIsActive && !gameflow.mPauseAll
@@ -3026,7 +3042,7 @@ void GameCoreSection::updateAI()
             }
             const int field = int(GameStat::formationPikis) + int(GameStat::freePikis) + int(GameStat::workPikis);
             pc_randomizer_observe_population(field, true);
-            pc_randomizer_observe_total_population(int(GameStat::allPikis), true);
+            pc_randomizer_observe_total_population(int(GameStat::allPikis) + (pc_randomizer_purple_campaign() ? p2ship::stock.total() : 0), true);
             for (int color = PikiMinColor; color < PikiColorCount; ++color)
                 pc_randomizer_observe_color_population(color, GameStat::allPikis[color], true);
             if (flowCont.mCurrentStage) {

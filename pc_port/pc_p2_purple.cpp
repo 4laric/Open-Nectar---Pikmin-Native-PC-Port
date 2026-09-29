@@ -1,4 +1,7 @@
 #include "pc_p2_purple.h"
+#include "pc_p2_purple_campaign_policy.h"
+#include "FlowController.h"
+#include "StageInfo.h"
 #include "pc_p2_purple_impact.h"
 #include "pc_p2_purple_direct.h"
 #include "pc_p2_purple_flight.h"
@@ -36,6 +39,14 @@ namespace {
 bool enabled=false;
 unsigned long long conversionSequence=0;
 float stats[9]={};
+const p2purplecampaign::Config& campaignConfig() {
+    static const auto config=[](){
+        p2purplecampaign::Config result;std::ifstream in("p2-purple-campaign.txt");
+        if(!p2purplecampaign::parse(in,result))std::abort();
+        return result;
+    }();
+    return config;
+}
 struct Clip {float seconds=1;std::vector<Shape*> shapes;std::vector<Matrix4f> happa;std::vector<bool> seen;};
 std::map<std::string,Clip> clips;
 Shape* growth[3]={};
@@ -46,7 +57,7 @@ Shape* shape(const std::string& name) {
     return result;
 }
 }
-bool pc_p2_purples_enabled(){return pc_pikipelago_room_preview() && enabled;}
+bool pc_p2_purples_enabled(){return (pc_pikipelago_room_preview() || pc_randomizer_purple_campaign()) && enabled;}
 bool pc_p2_is_purple(const Piki* p){return pc_p2_purples_enabled() && p && p->mP2Purple;}
 void pc_p2_make_purple(Piki* p) {
     if(!pc_p2_purples_enabled())std::abort();
@@ -68,9 +79,10 @@ float pc_p2_transport_speed(Pellet* pellet,float fallback) {
 }
 void pc_p2_purple_setup() {
     enabled=false;clips.clear();pc_p2_purple_impact_reset();pc_p2_purple_direct_reset();
-    if(!pc_pikipelago_room_preview())return;
-    std::ifstream in("p2-purple.txt");if(!in)return;
-    std::string word;in>>word;if(word!="P2_PURPLE_1" || !pc_p2_preview_goal())std::abort();
+    if(!pc_pikipelago_room_preview() && !pc_randomizer_purple_campaign())return;
+    if(pc_randomizer_purple_campaign())(void)campaignConfig();
+    std::ifstream in("p2-purple.txt");if(!in){if(pc_randomizer_purple_campaign())std::abort();return;}
+    std::string word;in>>word;if(word!="P2_PURPLE_1" || (!pc_randomizer_purple_campaign() && !pc_p2_preview_goal()))std::abort();
     if(!(in>>word) || word!="stats")std::abort();
     for(float& value:stats)if(!(in>>value) || !std::isfinite(value) || value<0 || value>1000)std::abort();
     for(const char* expected:{"wait","walk","attack1"}) {
@@ -118,7 +130,10 @@ bool pc_p2_draw_purple(Piki* p,Graphics& gfx) {
     return true;
 }
 bool pc_p2_violet(const Pom* pom){
-    if(!pc_pikipelago_room_preview() || !pom)return false;
+    if(!pom)return false;
+    if(pc_randomizer_purple_campaign())return pom->mGenerator && flowCont.mCurrentStage
+        && campaignConfig().matches(flowCont.mCurrentStage->mStageID,pom->mGenerator->_70);
+    if(!pc_pikipelago_room_preview())return false;
     static const bool requested=[](){std::ifstream file("p2-purple.txt");return bool(file);}();
     return requested;
 }
@@ -149,7 +164,7 @@ void pc_p2_purple_status() {
     if(!pc_p2_purples_enabled())return;
     int purple=0,other=0;Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(p && p->isAlive()){if(pc_p2_is_purple(p))++purple;else ++other;}}
     if(SDL_Window* window=SDL_GL_GetCurrentWindow()) {
-        std::string title="Pikipelago - Purple preview: "+std::to_string(purple)+" Purple, "+std::to_string(other)+" other field Pikmin | "+std::to_string(pc_p2_preview_pokos())+" Pokos";
+        std::string title=(pc_randomizer_purple_campaign()?"Pikipelago - Purple campaign: ":"Pikipelago - Purple preview: ")+std::to_string(purple)+" Purple, "+std::to_string(other)+" other field Pikmin | "+std::to_string(pc_p2_preview_pokos())+" Pokos";
         SDL_SetWindowTitle(window,title.c_str());
     }
 }
