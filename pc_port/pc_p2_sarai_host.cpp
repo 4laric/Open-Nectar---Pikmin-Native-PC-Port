@@ -149,6 +149,7 @@ Vector3f P2SaraiHost::staticMouthCentre(unsigned slot) const
 void P2SaraiHost::update()
 {
     if (!mLoaded) return;
+    if (mDemonEnabled) { updateDemon(); return; }
     if (mNaturalEnabled) { updateNatural(); return; }
     updateMouths();
 }

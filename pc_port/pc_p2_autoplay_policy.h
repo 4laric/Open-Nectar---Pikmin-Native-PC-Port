@@ -146,6 +146,23 @@ inline bool isEnabled()
 
 // Optional target filter: PIKMIN_RANDOMIZER_AUTOPLAY_TARGET=<generator key or
 // species name>. Empty means "nearest live P2-bound teki".
+// #901 TEST-ONLY: generator uids (comma list) of vanilla P1 teki the bot may
+// fight (PIKMIN_RANDOMIZER_AUTOPLAY_P1_UID), for the held-part regression run.
+constexpr unsigned kP1TargetSource = 0xFFFFu;
+inline bool isP1TargetUid(unsigned uid)
+{
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_P1_UID");
+    if (!uid || !v || !v[0]) return false;
+    while (*v) {
+        char* end = nullptr;
+        const unsigned long n = std::strtoul(v, &end, 10);
+        if (end == v) break;
+        if (unsigned(n) == uid) return true;
+        v = *end ? end + 1 : end;
+    }
+    return false;
+}
+
 inline std::string targetFilter()
 {
     const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_TARGET");
@@ -163,6 +180,15 @@ inline bool isPowerEnabled()
     if (!isEnabled()) return false;
     const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER");
     return v && v[0] && std::strcmp(v, "0") != 0;
+}
+
+// #901 TEST-ONLY: leave a dropped ship part on the ground (whistle the squad
+// off it and stop) so a day-end carry-over of an uncarried held part can be
+// observed. PIKMIN_RANDOMIZER_AUTOPLAY_NO_PART_CARRY=1.
+inline bool noPartCarry()
+{
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_NO_PART_CARRY");
+    return v && v[0] == '1';
 }
 
 inline float powerDamageMult()
@@ -402,6 +428,29 @@ struct Config {
     float obstaclePushGap = 0.35f;
     float obstaclePushMax = 120.0f;
     float obstacleRegroupEvery = 6.0f; // after a push: whistle pulse period while scattered
+    // #901 part gather: stand in this XZ ring around a dropped ship part and
+    // swarm (C-stick) the party onto it; formed Pikmin that touch a pellet
+    // with a free slot start carrying it (piki.cpp collisionCallback
+    // OBJTYPE_Pellet, distCheck true while the C-stick is held).
+    float partRingMin = 80.0f;
+    float partRingMax = 160.0f;
+    float partWhistleCooldown = 5.0f; // gap between gather whistles
+    float partFreeFar = 120.0f; // free-Pikmin centroid this far from the part: whistle there (carriers safe)
+    // #901 route obstacles: after a STUCK window next to an unfinished gate /
+    // bridge / hinder rock, stand off it, swarm and throw the squad onto it
+    // (formed Pikmin that touch a gate break it, piki.cpp collisionCallback
+    // isSluice; thrown Pikmin landing on a bridge or rock work it,
+    // pikiState.cpp flying collide), bounded by obstacleTimeout.
+    float obstacleRingMin = 70.0f;
+    float obstacleRingMax = 150.0f;
+    float obstacleTimeout = 150.0f;
+    float obstacleHardTimeout = 420.0f; // hard (23) gates: far more health per stage
+    // #901 ranged attack: an approach that goes STUCK this close to a ground
+    // target (a ledge or pit rim between them) throws from where it stands,
+    // sliding the cursor onto the target in the look band (cursor reach is
+    // mCursorMaxRadius 300, NaviMgr.h p46), instead of routing away.
+    float rangedAttackDist = 290.0f;
+ // 0.24*127 = 30 bytes: |stick| 0.41 (look band), no MSTICK bits (> 32)
 };
 
 // Power-mode effective withdraw targets (bot-v4, bot-v4b): up to ~100 Pikmin.
@@ -444,6 +493,16 @@ inline bool corpseDisplaced(float dx, float dz)
 // Plain-data senses gathered by the engine-linked driver each tick.
 struct Senses {
     bool enabled = false; // PIKMIN_RANDOMIZER_AUTOPLAY gate
+    bool trackingPart = false; // #901: the tracked pellet is a dropped ship part
+    // #901 part gather (TEST-ONLY, read only while trackingPart): the
+    // captain's party (FormationMode Pikmin following him), idle FreeMode
+    // Pikmin near the part and their XZ centroid, and a latch that the part
+    // this engagement tracked has left the field (delivered to the ship).
+    int partyCount = 0;
+    int freeCount = 0;
+    float freeX = 0.0f;
+    float freeZ = 0.0f;
+    bool partGone = false;
     bool naviAlive = false; // controlled captain exists and is alive
     float dt = 0.016f; // logical tick length (seconds)
     // Geometry (world XZ). The Brain steers in world space; the driver
@@ -498,6 +557,31 @@ struct Senses {
     bool scattered = false; // squad scattered: whistle regroup
     bool squadDistress = false; // grabbed/thrown-off/burning Pikmin: whistle regroup (bot-v4)
     bool waypointLeg = false; // steer the detour waypoint, not the target
+    // #901: XZ length still to walk along the planned route (captain -> active
+    // leg -> remaining legs -> target); 0 = no route. Approach measures
+    // progress on it while a route is active, so a detour that first leads
+    // away from the target is not called STUCK and thrown away.
+    float pathRemaining = 0.0f;
+    // #901 route obstacles (TEST-ONLY bot): the nearest unfinished P1 work
+    // obstacle near the captain (gate, bridge, hinder rock, climbing stalk;
+    // kind 1/2/3/4, 0 = none) and the Pikmin working one now
+    // (BreakWall/Bridge/Pushstone/Rope).
+    int obstacleKind = 0;
+    float obstacleX = 0.0f;
+    float obstacleZ = 0.0f;
+    int workCount = 0;
+    // Diagnostics for the log: the obstacle's object type (22 soft gate,
+    // 23 hard gate, bridge/rock = their WorkObject kind), build stage and
+    // health. Bomb gates (24/25) are never reported: punching cannot open them.
+    int obstacleType = 0;
+    // #901: a movie (e.g. the first-gate-down demo), a UI overlay or a global
+    // pause holds the sim. The Brain then taps A (the P1 skip / dismiss
+    // input) and freezes its own clocks instead of calling the world STUCK.
+    bool movieActive = false;
+    bool overlayActive = false;
+    int obstacleStage = 0;
+    int obstacleStages = 0;
+    float obstacleHealth = 0.0f;
     // #884 round 4: live throw cursor (navi position + Navi::mCursorPosition,
     // world XZ). Only the King standoff hold reads it, to slide the cursor
     // onto the King instead of past it; without it the hold look-steers at
@@ -531,15 +615,15 @@ struct Senses {
     int powerRestocks = 0;
     // #897 push obstacle: nearest unfinished HinderRock in front of the
     // approach (driver: within its scan range and ahead of the current leg).
-    bool obstacleValid = false;
-    float obstacleX = 0.0f;
-    float obstacleZ = 0.0f;
-    float obstacleDist = 1.0e30f;
-    bool obstacleMoving = false;
+    bool pushValid = false;
+    float pushX = 0.0f;
+    float pushZ = 0.0f;
+    float pushDist = 1.0e30f;
+    bool pushMoving = false;
     // Throw aim: a point just outside the face toward the captain (a throw
     // at the centre lands ON the box and those Pikmin never push; ar2).
-    float obstacleAimX = 0.0f;
-    float obstacleAimZ = 0.0f;
+    float pushAimX = 0.0f;
+    float pushAimZ = 0.0f;
 };
 
 // Pad output for one tick. moveX/moveZ is the desired world-space XZ move
@@ -559,6 +643,10 @@ struct Command {
     // slides along the stick at mCursorMoveSpeed (navi.cpp:2475-2489,
     // 2531-2538). Used only by the King standoff hold.
     float stickScale = 1.0f;
+    // #901: world-space XZ C-stick (swarm) direction; (0,0) = C-stick idle.
+    // The driver converts it through the camera basis like moveX/moveZ.
+    float swarmX = 0.0f;
+    float swarmZ = 0.0f;
 };
 
 struct Result {
@@ -593,6 +681,12 @@ public:
         wantReplan = false;
         progressBest = 1.0e30f;
         approachReplans = 0;
+        approachOnRoute = false;
+        obsWork = false;
+        obsTime = 0.0f;
+        obsLogTime = 0.0f;
+        obsGiveups = 0;
+        rangedAttack = false;
         initialHealthFrac = 1.0f;
         sawDamage = false;
         sawKill = false;
@@ -610,6 +704,10 @@ public:
         amHadEnough = false; // bot-v7: the lift was viable (escorted)
         amLastCrew = 0; // bot-v7: high-water crew for SeedGrow progress
         amGrowStill = 0.0f; // bot-v7: time without crew growth in SeedGrow
+        pgWhistle = 0.0f;
+        pgCooldown = 0.0f;
+        pgLogTime = 0.0f;
+        pgSawPart = false;
         withdrawCycles = 0;
         throwSpin = 0.0f;
         kingBacking = false;
@@ -663,6 +761,21 @@ public:
             holdIdle();
             return;
         }
+        if ((in.movieActive || in.overlayActive) && !in.containerOpen && state != State::Idle
+            && state != State::WithdrawMenu) {
+            uiWaitTime += dt;
+            uiLogTime -= dt;
+            if (uiLogTime <= 0.0f) {
+                uiLogTime = 5.0f;
+                char buf[160];
+                std::snprintf(buf, sizeof(buf), "AUTOPLAY_UI_WAIT movie=%d overlay=%d seconds=%.0f state=%s bot-driven",
+                              in.movieActive ? 1 : 0, in.overlayActive ? 1 : 0, uiWaitTime, stateName(state));
+                markers.emplace_back(buf);
+            }
+            pulseA(in, cfg.throwHold, 1.0f);
+            return;
+        }
+        uiWaitTime = 0.0f;
         stateTime += dt;
         switch (state) {
         case State::Idle: tickIdle(in); break;
@@ -701,6 +814,12 @@ private:
         wantReplan = false;
         progressBest = 1.0e30f;
         approachReplans = 0;
+        approachOnRoute = false;
+        obsWork = false;
+        obsTime = 0.0f;
+        obsLogTime = 0.0f;
+        obsGiveups = 0;
+        rangedAttack = false;
         kingBacking = false;
         kingClosing = false;
         kingBackTime = 0.0f;
@@ -1050,13 +1169,21 @@ private:
             return;
         }
         if (tickObstaclePush(dt, in)) return;
-        // Progress / stuck tracking on straight-line distance. #897: while a
-        // detour leg is active, progress is measured to that leg (a real
-        // route may first lead AWAY from the target: the Impact Site ramp
-        // from the box corridor east to the upper tier), and reaching a new
-        // leg is progress in itself.
-        float metric = in.targetDist;
-        if (in.waypointLeg) {
+        if (tickObstacle(dt, in)) return;
+        // Progress / stuck tracking on straight-line distance, or on the
+        // remaining route length while a route is active (#901: a
+        // straight-line window threw away every long detour into a far arena).
+        // #897: with a detour leg but no route length, progress is measured
+        // to that leg (a real route may first lead AWAY from the target: the
+        // Impact Site ramp from the box corridor east to the upper tier), and
+        // reaching a new leg is progress in itself.
+        const bool onRoute = in.waypointLeg && in.pathRemaining > 0.0f;
+        float metric = onRoute ? in.pathRemaining : in.targetDist;
+        if (onRoute != approachOnRoute) {
+            approachOnRoute = onRoute;
+            stuckWindowDist = 1.0e30f; // re-anchor on the new metric
+        }
+        if (in.waypointLeg && !onRoute) {
             const float lx = in.wpX - in.naviX, lz = in.wpZ - in.naviZ;
             metric = std::sqrt(lx * lx + lz * lz);
             if (!legKnown || std::fabs(in.wpX - legX) > 1.0f || std::fabs(in.wpZ - legZ) > 1.0f) {
@@ -1085,9 +1212,21 @@ private:
                               in.targetToken, in.targetDist, in.naviX, in.naviZ,
                               approachReplans + 1);
                 markers.emplace_back(buf);
+                // #901: replan once first (the route may climb to the
+                // target's own floor level); throw from range only when that
+                // replan also stalls here.
+                if (in.targetDist <= cfg.rangedAttackDist && !isFlyer(in.targetSource) && approachReplans >= 1) {
+                    char rbuf[160];
+                    std::snprintf(rbuf, sizeof(rbuf), "AUTOPLAY_RANGED token=%u dist=%.0f bot-driven",
+                                  in.targetToken, in.targetDist);
+                    markers.emplace_back(rbuf);
+                    enter(State::Attack, in);
+                    rangedAttack = true;
+                    return;
+                }
                 wantReplan = true;
                 ++approachReplans;
-                stuckWindowDist = progressBest;
+                stuckWindowDist = 1.0e30f; // the replan changes the route: re-anchor
                 stuckWindowStart = 0.0f;
                 if (approachReplans >= cfg.maxApproachReplans) {
                     // Target out of reach after N replans: GIVEUP with a
@@ -1110,6 +1249,79 @@ private:
             giveUp(in, "approach_timeout");
             finishTarget(in, /*killed*/ false);
         }
+    }
+
+    // #901 route obstacle work (TEST-ONLY). Returns true while it owns the
+    // pad this tick. Starts only after a STUCK window with an unfinished
+    // obstacle near the captain; ends when no unfinished obstacle is near any
+    // more, or after obstacleTimeout (then the normal replan / unreachable
+    // rules resume).
+    bool tickObstacle(float dt, const Senses& in)
+    {
+        if (!obsWork) {
+            if (in.obstacleKind == 0 || approachReplans < 1 || obsGiveups >= 2) return false;
+            obsWork = true;
+            obsTime = 0.0f;
+            obsLogTime = 0.0f;
+            char buf[200];
+            std::snprintf(buf, sizeof(buf),
+                          "AUTOPLAY_OBSTACLE start kind=%d at=(%.0f,%.0f) token=%u bot-driven",
+                          in.obstacleKind, in.obstacleX, in.obstacleZ, in.targetToken);
+            markers.emplace_back(buf);
+        }
+        if (in.obstacleKind == 0) {
+            obsWork = false;
+            char buf[160];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_OBSTACLE done seconds=%.0f token=%u bot-driven",
+                          obsTime, in.targetToken);
+            markers.emplace_back(buf);
+            approachReplans = 0;
+            stuckWindowDist = 1.0e30f;
+            stuckWindowStart = 0.0f;
+            wantReplan = true; // the way is open: route again
+            return false;
+        }
+        obsTime += dt;
+        stateTime -= dt; // obstacle work does not spend the approach budget
+        const float limit = in.obstacleType == 23 ? cfg.obstacleHardTimeout : cfg.obstacleTimeout;
+        if (obsTime >= limit) {
+            obsWork = false;
+            ++obsGiveups;
+            char buf[160];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_OBSTACLE timeout kind=%d work=%d token=%u bot-driven",
+                          in.obstacleKind, in.workCount, in.targetToken);
+            markers.emplace_back(buf);
+            return false;
+        }
+        obsLogTime -= dt;
+        if (obsLogTime <= 0.0f) {
+            obsLogTime = 5.0f;
+            char buf[200];
+            std::snprintf(buf, sizeof(buf),
+                          "AUTOPLAY_OBSTACLE work kind=%d type=%d stage=%d/%d health=%.0f work=%d at=(%.0f,%.0f) seconds=%.0f bot-driven",
+                          in.obstacleKind, in.obstacleType, in.obstacleStage, in.obstacleStages, in.obstacleHealth,
+                          in.workCount, in.obstacleX, in.obstacleZ, obsTime);
+            markers.emplace_back(buf);
+        }
+        const float dx = in.obstacleX - in.naviX, dz = in.obstacleZ - in.naviZ;
+        const float d = std::sqrt(dx * dx + dz * dz);
+        if (d > cfg.obstacleRingMax) {
+            steer(in.naviX, in.naviZ, in.obstacleX, in.obstacleZ);
+        } else if (d < cfg.obstacleRingMin) {
+            steerAway(in.naviX, in.naviZ, in.obstacleX, in.obstacleZ);
+        } else {
+            // Look band: the captain stops and the cursor slides onto it.
+            steer(in.naviX, in.naviZ, in.obstacleX, in.obstacleZ);
+            lastCommand.stickScale = cfg.lookStickScale;
+            pulseA(in, cfg.throwHold, cfg.throwGap);
+        }
+        if (d > 1.0f) {
+            lastCommand.swarmX = dx / d;
+            lastCommand.swarmZ = dz / d;
+        }
+        stuckWindowDist = 1.0e30f;
+        stuckWindowStart = 0.0f;
+        return true;
     }
 
     void tickAttack(float dt, const Senses& in)
@@ -1260,14 +1472,27 @@ private:
             }
             gap = cfg.throwGap * (1.0f + 0.4f * std::sin(throwSpin * 0.7f));
         }
-        // Keep the stick toward the target so the cursor aims at it, and
-        // pulse A to throw. Flyers are thrown at from range as the game allows.
-        steer(in.naviX, in.naviZ, aimX, aimZ);
-        pulseA(in, cfg.throwHold, gap);
+        if (rangedAttack && in.targetDist <= cfg.rangedAttackDist + 60.0f) {
+            // #901: the captain cannot close in: stand, slide the cursor onto
+            // the target and throw over whatever is between.
+            kingLookAndThrow(in);
+        } else {
+            // Keep the stick toward the target so the cursor aims at it, and
+            // pulse A to throw. Flyers are thrown at from range as the game allows.
+            steer(in.naviX, in.naviZ, aimX, aimZ);
+            pulseA(in, cfg.throwHold, gap);
+        }
         if (stateTime >= limit) {
             giveUp(in, "attack_timeout");
             finishTarget(in, /*killed*/ false);
         }
+    }
+
+    // #901: a dropped ship part is a heavy carry the squad is seeded onto a
+    // few Pikmin at a time, so it gets more bounded re-seed cycles.
+    int rethrowMax(const Senses& in) const
+    {
+        return in.trackingPart ? cfg.aftermathRethrowMax * 4 : cfg.aftermathRethrowMax;
     }
 
     void tickAftermath(float dt, const Senses& in)
@@ -1282,6 +1507,21 @@ private:
         if (in.corpseMoving || in.corpseMoved) sawMove = true;
         observeDeath(in);
         observeReceipt(in);
+        if (in.trackingPart && noPartCarry()) {
+            // #901 TEST-ONLY: hold the whistle a few seconds so every Pikmin
+            // near the part rejoins the party, then stop engaging; the part
+            // stays where it dropped.
+            if (amPhaseTime < 4.0f) {
+                lastCommand.buttons = PadB;
+                return;
+            }
+            char buf[160];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_PART_LEFT token=%u seconds=%.0f bot-driven", in.targetToken,
+                          stateTime);
+            markers.emplace_back(buf);
+            finishTarget(in, /*killed*/ sawKill);
+            return;
+        }
         if ((!in.targetAlive || in.targetDead) && !sawDamage && !sawKill && !sawCarry && !sawReceipt) {
             // Target gone with no combat observed: nothing to wait for.
             finishTarget(in, /*claimedKill*/ false);
@@ -1291,6 +1531,29 @@ private:
         // Pikmin at the navi 36-65 u from the corpse so no carry ever
         // initiates (v4b diagnosis). Deliver with stick + throws only.
         const bool carryActive = in.transportSeen || in.carryCount > 0 || in.pelletCarriers > 0;
+        if (in.trackingPart) pgSawPart = true;
+        if (pgSawPart && in.partGone) {
+            // #901: the tracked ship part left the field (sucked into the
+            // ship: UfoItem::finishSuck -> pc_bbft_check). The CHECK line in
+            // the log is the evidence; the bot just scores and moves on.
+            char buf[160];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_PART_GONE token=%u seconds=%.0f bot-driven",
+                          in.targetToken, stateTime);
+            markers.emplace_back(buf);
+            finishTarget(in, /*killed*/ false);
+            return;
+        }
+        if (in.trackingPart && tickPartGather(dt, in)) {
+            // #901: a short ship-part crew is gathered by whistle + swarm, not
+            // by the corpse throw/re-seed cycle (throws overshoot a big part:
+            // r4 crew 12/20 after three re-seeds). Same window as a corpse.
+            const float waitBase = (sawKill || sawDamage) ? cfg.receiptTimeout : cfg.aftermathTimeout;
+            if (stateTime >= waitBase * 2.0f) {
+                giveUpAftermath(in, "part_short_crew");
+                finishTarget(in, /*killed*/ false);
+            }
+            return;
+        }
         if (sawReceipt) {
             // Onion receipt landed: score it promptly. received=1 comes ONLY
             // from this token's own ledger line; bystander CHECK
@@ -1350,7 +1613,7 @@ private:
                     }
                 }
                 if (amStallTime >= cfg.carryStallWait) {
-                    if (amRethrows >= cfg.aftermathRethrowMax) {
+                    if (amRethrows >= rethrowMax(in)) {
                         giveUpAftermath(in, "carry_stalled");
                         // bot-deliver (#871): never claim a kill without a death
                         // latch (bc5 55 Hanachirashi: aftermath timeout with no
@@ -1387,7 +1650,7 @@ private:
                 if (amHadEnough) {
                     // Regression: this lift escorted before (sufficient crew
                     // or motion) and fell short again.
-                    if (amRethrows >= cfg.aftermathRethrowMax) {
+                    if (amRethrows >= rethrowMax(in)) {
                         giveUpAftermath(in, "carry_stalled");
                         // bot-deliver (#871): killed from sawKill, not claimed.
                         finishTarget(in, /*killed*/ false);
@@ -1419,7 +1682,7 @@ private:
                     amGrowStill += dt;
                 }
                 if (amGrowStill >= cfg.carryStallWait) {
-                    if (amRethrows >= cfg.aftermathRethrowMax) {
+                    if (amRethrows >= rethrowMax(in)) {
                         giveUpAftermath(in, "carry_stalled");
                         // bot-deliver (#871): killed from sawKill, not claimed.
                         finishTarget(in, /*killed*/ false);
@@ -1442,7 +1705,7 @@ private:
             amHadEnough = false;
             if (wasHeld) {
                 // Carry lost en route: re-seed while rethrows remain.
-                if (amRethrows >= cfg.aftermathRethrowMax) {
+                if (amRethrows >= rethrowMax(in)) {
                     giveUpAftermath(in, "carry_stalled");
                     // bot-deliver (#871): killed from sawKill, not claimed.
                     finishTarget(in, /*killed*/ false);
@@ -1459,7 +1722,7 @@ private:
                 if (in.targetToken != 0) steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
                 if (in.targetDist >= cfg.aftermathBackoffDist || amPhaseTime >= cfg.aftermathSettleWait) {
                     // Settled out of contact: re-approach + re-throw if allowed.
-                    if (amRethrows >= cfg.aftermathRethrowMax) {
+                    if (amRethrows >= rethrowMax(in)) {
                         giveUpAftermath(in, "carry_no_grab");
                         // bot-deliver (#871): killed from sawKill, not claimed.
                         finishTarget(in, /*killed*/ false);
@@ -1489,6 +1752,63 @@ private:
             // bot-deliver (#871): killed from sawKill, not claimed (55 fix).
             finishTarget(in, /*killed*/ false);
         }
+    }
+
+    // #901 part gather (TEST-ONLY bot). Returns false once the crew meets the
+    // part's declared minimum, so the normal escort follows the haul to the
+    // ship. Pad-only: stick + B (gather whistle) + C-stick (swarm).
+    bool tickPartGather(float dt, const Senses& in)
+    {
+        const int crew = in.pelletCarriers > 0 ? in.pelletCarriers : in.carryCount;
+        if (in.carryWant > 0 && crew >= in.carryWant) {
+            pgWhistle = 0.0f;
+            return false;
+        }
+        if (pgCooldown > 0.0f) pgCooldown -= dt;
+        const int need = in.carryWant > 0 ? in.carryWant - crew : 10;
+        const float fdx = in.freeX - in.tgtX, fdz = in.freeZ - in.tgtZ;
+        const bool freeFar = fdx * fdx + fdz * fdz > cfg.partFreeFar * cfg.partFreeFar;
+        pgLogTime -= dt;
+        if (pgLogTime <= 0.0f) {
+            pgLogTime = 5.0f;
+            char buf[200];
+            std::snprintf(buf, sizeof(buf),
+                          "AUTOPLAY_PART_GATHER crew=%d want=%d party=%d free=%d free_far=%d tdist=%.0f bot-driven",
+                          crew, in.carryWant, in.partyCount, in.freeCount, freeFar ? 1 : 0, in.targetDist);
+            markers.emplace_back(buf);
+        }
+        if (pgWhistle <= 0.0f && pgCooldown <= 0.0f && in.partyCount < need && in.freeCount >= 3
+            && (freeFar || crew * 2 < in.carryWant || in.carryWant <= 0)) {
+            // Idle Pikmin are not in the party: call them. Whistling over the
+            // part also calls its crew, so that happens only while the crew is
+            // under half the minimum (they rejoin the swarm right away).
+            pgWhistle = cfg.whistleHold;
+            pgCooldown = cfg.partWhistleCooldown + cfg.whistleHold;
+        }
+        if (pgWhistle > 0.0f) {
+            pgWhistle -= dt;
+            // Walk the cursor (ahead of the captain) over the idle Pikmin.
+            steer(in.naviX, in.naviZ, in.freeX, in.freeZ);
+            lastCommand.buttons |= PadB;
+            return true;
+        }
+        // Swarm: hold the ring around the part and push the party into it.
+        if (in.waypointLeg && in.targetDist > cfg.partRingMax) {
+            steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+        } else if (in.targetDist > cfg.partRingMax) {
+            steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+        } else if (in.targetDist < cfg.partRingMin) {
+            steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+        }
+        if (in.targetDist < 2.5f * cfg.partRingMax) {
+            const float dx = in.tgtX - in.naviX, dz = in.tgtZ - in.naviZ;
+            const float len = std::sqrt(dx * dx + dz * dz);
+            if (len > 1.0f) {
+                lastCommand.swarmX = dx / len;
+                lastCommand.swarmZ = dz / len;
+            }
+        }
+        return true;
     }
 
     void tickDone(float dt, const Senses& in)
@@ -1642,13 +1962,13 @@ private:
     // #897 push obstacle (Approach only). Returns true while it owns the pad.
     bool tickObstaclePush(float dt, const Senses& in)
     {
-        const bool want = in.obstacleValid && pushTime < cfg.obstaclePushMax;
+        const bool want = in.pushValid && pushTime < cfg.obstaclePushMax;
         if (!want) {
             if (pushing) {
                 pushing = false;
                 char buf[200];
                 std::snprintf(buf, sizeof(buf), "AUTOPLAY_OBSTACLE phase=%s push_s=%.0f field=%d bot-driven",
-                              in.obstacleValid ? "budget" : "cleared", pushTime, in.fieldPikmin);
+                              in.pushValid ? "budget" : "cleared", pushTime, in.fieldPikmin);
                 markers.emplace_back(buf);
                 stuckWindowDist = 1.0e30f; // fresh progress window after the push
                 approachReplans = 0;
@@ -1671,14 +1991,14 @@ private:
             char buf[200];
             std::snprintf(buf, sizeof(buf),
                           "AUTOPLAY_OBSTACLE phase=push at=(%.0f,%.0f) aim=(%.0f,%.0f) dist=%.0f field=%d bot-driven",
-                          in.obstacleX, in.obstacleZ, in.obstacleAimX, in.obstacleAimZ, in.obstacleDist,
+                          in.pushX, in.pushZ, in.pushAimX, in.pushAimZ, in.pushDist,
                           in.fieldPikmin);
             markers.emplace_back(buf);
         }
         pushTime += dt;
         stuckWindowStart = 0.0f; // pushing is progress, not a stuck window
-        steer(in.naviX, in.naviZ, in.obstacleX, in.obstacleZ);
-        if (in.obstacleDist <= cfg.obstaclePushDist) {
+        steer(in.naviX, in.naviZ, in.pushX, in.pushZ);
+        if (in.pushDist <= cfg.obstaclePushDist) {
             // In range: look-band stick (the captain stops and faces the
             // cursor, which slides along the stick) moving the cursor onto the
             // near-face aim point; throw once it is there.
@@ -1686,10 +2006,10 @@ private:
             lastCommand.moveZ = 0.0f;
             float cx = in.cursorX, cz = in.cursorZ;
             if (!in.cursorValid) {
-                cx = in.obstacleAimX;
-                cz = in.obstacleAimZ;
+                cx = in.pushAimX;
+                cz = in.pushAimZ;
             }
-            const float ex = in.obstacleAimX - cx, ez = in.obstacleAimZ - cz;
+            const float ex = in.pushAimX - cx, ez = in.pushAimZ - cz;
             const float el = std::sqrt(ex * ex + ez * ez);
             if (el > cfg.kingCursorTol) {
                 lastCommand.moveX = ex / el;
@@ -2110,6 +2430,14 @@ private:
     bool wantReplan = false;
     float progressBest = 1.0e30f;
     int approachReplans = 0; // consecutive STUCK windows in this Approach stint (bot-v3)
+    bool approachOnRoute = false; // #901: approach progress metric is the route length
+    bool obsWork = false; // #901: working a route obstacle in Approach
+    float uiWaitTime = 0.0f; // #901: time the sim has been held by a movie / overlay
+    bool rangedAttack = false; // #901: Attack entered from a STUCK approach near the target
+    float uiLogTime = 0.0f;
+    float obsTime = 0.0f; // #901: time spent on the current obstacle episode
+    float obsLogTime = 0.0f;
+    int obsGiveups = 0; // #901: obstacle episodes that timed out this Approach stint
     // bot-v5 aftermath delivery phases (pad-only; never whistles).
     enum AftermathPhase {
         AftermathSeed = 0, // walk onto the corpse + throw to seed grabs
@@ -2127,6 +2455,10 @@ private:
     bool amHadEnough = false; // bot-v7: the lift escorted (viable) before shrinking
     int amLastCrew = 0; // bot-v7: high-water crew for SeedGrow progress
     float amGrowStill = 0.0f; // bot-v7: time without crew growth in SeedGrow
+    float pgWhistle = 0.0f; // #901: remaining gather-whistle hold
+    float pgCooldown = 0.0f; // #901: time until the next gather whistle may start
+    float pgLogTime = 0.0f; // #901: AUTOPLAY_PART_GATHER rate limit
+    bool pgSawPart = false; // #901: this aftermath tracked a dropped ship part
     float initialHealthFrac = 1.0f;
     bool sawDamage = false;
     bool sawKill = false; // generic death latched (any species)

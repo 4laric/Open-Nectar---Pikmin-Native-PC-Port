@@ -3137,16 +3137,16 @@ void testObstaclePush()
     brain.update(0.05f, s);
     CHECK(brain.current() == p2autoplay::State::Approach, "obstacle/approach");
     brain.takeMarkers();
-    s.obstacleValid = true;
-    s.obstacleX = 0.0f;
-    s.obstacleZ = -300.0f;
-    s.obstacleDist = 300.0f;
+    s.pushValid = true;
+    s.pushX = 0.0f;
+    s.pushZ = -300.0f;
+    s.pushDist = 300.0f;
     brain.update(0.05f, s);
     CHECK(brain.command().moveZ < -0.9f && brain.command().stickScale == 1.0f, "obstacle/walks_to_box");
     CHECK(hasMarker(brain.takeMarkers(), "AUTOPLAY_OBSTACLE phase=push"), "obstacle/push_marker");
-    s.obstacleDist = 120.0f;
-    s.obstacleAimX = 0.0f;
-    s.obstacleAimZ = -140.0f; // near face, toward the captain at z=0 side
+    s.pushDist = 120.0f;
+    s.pushAimX = 0.0f;
+    s.pushAimZ = -140.0f; // near face, toward the captain at z=0 side
     s.cursorValid = true;
     s.cursorX = 0.0f;
     s.cursorZ = -175.0f; // 35 past the aim: slide back with the look band
@@ -3161,7 +3161,7 @@ void testObstaclePush()
     brain.update(0.05f, s);
     CHECK(brain.command().moveX == 0.0f && brain.command().moveZ == 0.0f, "obstacle/cursor_on_face_holds");
     CHECK(!hasMarker(m, "AUTOPLAY_STUCK") && brain.current() == p2autoplay::State::Approach, "obstacle/no_stuck_while_pushing");
-    s.obstacleValid = false;
+    s.pushValid = false;
     s.scattered = false;
     brain.update(0.05f, s);
     CHECK(hasMarker(brain.takeMarkers(), "AUTOPLAY_OBSTACLE phase=cleared"), "obstacle/cleared_marker");
@@ -3264,6 +3264,220 @@ void testRollerHomeLean()
     CHECK(brain.command().moveX < -0.3f && brain.command().moveZ > 0.3f, "home/backoff_blends_home");
 }
 
+void testPartGatherSwarm()
+{
+    // #901: a dropped ship part short of its minimum is gathered by a whistle
+    // over idle Pikmin, then a C-stick swarm onto the part (never throws);
+    // a full crew escorts; the part leaving the field scores the target.
+    p2autoplay::Config cfg;
+    cfg.whistleHold = 0.2f;
+    cfg.partWhistleCooldown = 0.5f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 90;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 901001;
+    s.targetSource = 44;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.tgtX = 100.0f;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetHealthFrac = 0.5f;
+    brain.update(0.05f, s);
+    s.targetAlive = false;
+    s.targetDead = true;
+    s.trackingPart = true;
+    s.carryWant = 20;
+    s.pelletCarriers = 2;
+    s.carryCount = 2;
+    s.transportSeen = true;
+    s.partyCount = 5;
+    s.freeCount = 40;
+    s.freeX = 400.0f;
+    s.freeZ = 0.0f;
+    s.targetDist = 100.0f;
+    brain.update(0.05f, s); // attack sees the death -> aftermath
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "part/aftermath");
+    brain.update(0.05f, s);
+    CHECK(brain.command().buttons & unsigned(p2autoplay::PadB), "part/whistles_idle_squad");
+    CHECK(brain.command().moveX > 0.5f, "part/whistle_walks_to_idle");
+    for (int i = 0; i < 6; ++i) brain.update(0.05f, s); // whistle ends
+    s.partyCount = 60;
+    brain.update(0.05f, s);
+    CHECK(!(brain.command().buttons & unsigned(p2autoplay::PadB)), "part/no_whistle_with_party");
+    CHECK(!(brain.command().buttons & unsigned(p2autoplay::PadA)), "part/no_throws");
+    CHECK(brain.command().swarmX > 0.9f, "part/swarms_at_part");
+    s.pelletCarriers = 20;
+    s.carryCount = 20;
+    brain.update(0.05f, s);
+    CHECK(brain.command().swarmX == 0.0f && brain.command().swarmZ == 0.0f, "part/full_crew_no_swarm");
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "part/escorts");
+    s.partGone = true;
+    brain.update(0.05f, s);
+    const std::vector<std::string> got = brain.takeMarkers();
+    CHECK(hasMarker(got, "AUTOPLAY_PART_GONE token=901001"), "part/gone_marker");
+    CHECK(hasMarker(got, "AUTOPLAY_RESULT target=901001"), "part/result");
+}
+
+void testApproachRouteProgress()
+{
+    // #901: while a route is active, approach progress is the remaining route
+    // length; a detour that leads away from the target is not STUCK.
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 901002;
+    s.targetSource = 44;
+    s.targetAlive = true;
+    s.targetDist = 2000.0f;
+    s.tgtX = 2000.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Approach, "route/approach");
+    s.waypointLeg = true;
+    s.wpX = -500.0f;
+    s.pathRemaining = 4000.0f;
+    std::vector<std::string> markers;
+    for (int i = 0; i < 400; ++i) { // 20 s walking away along the route
+        s.targetDist += 5.0f;
+        s.pathRemaining -= 8.0f;
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(!hasMarker(markers, "AUTOPLAY_STUCK"), "route/no_stuck_on_detour");
+    CHECK(brain.current() == p2autoplay::State::Approach, "route/still_approaching");
+    for (int i = 0; i < 200; ++i) { // route stalls
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_STUCK state=approach"), "route/stuck_when_route_stalls");
+}
+
+void testApproachObstacleWork()
+{
+    // #901: STUCK beside an unfinished gate: stand off, swarm and throw at it
+    // without spending the unreachable budget; a finished gate re-routes.
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 90;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 901003;
+    s.targetSource = 44;
+    s.targetAlive = true;
+    s.targetDist = 1500.0f;
+    s.tgtX = 1500.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Approach, "obstacle/approach");
+    s.obstacleKind = 1;
+    s.obstacleX = 100.0f;
+    s.obstacleZ = 0.0f;
+    std::vector<std::string> markers;
+    bool swarmed = false, threw = false;
+    for (int i = 0; i < 1200; ++i) { // 60 s pinned at the gate
+        brain.update(0.05f, s);
+        if (brain.command().swarmX > 0.9f) swarmed = true;
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) threw = true;
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_OBSTACLE start kind=1"), "obstacle/start");
+    CHECK(swarmed, "obstacle/swarms_at_gate");
+    CHECK(threw, "obstacle/throws_at_gate");
+    CHECK(!hasMarker(markers, "target_unreachable"), "obstacle/not_unreachable_while_working");
+    CHECK(brain.current() == p2autoplay::State::Approach, "obstacle/still_approaching");
+    s.obstacleKind = 0; // gate broken
+    brain.update(0.05f, s);
+    const std::vector<std::string> got = brain.takeMarkers();
+    CHECK(hasMarker(got, "AUTOPLAY_OBSTACLE done"), "obstacle/done");
+    CHECK(brain.replanWanted(), "obstacle/replans_after_done");
+}
+
+void testUiWaitTapsA()
+{
+    // #901: a movie or UI overlay holds the sim; the Brain taps A and does not
+    // advance its own clocks (no STUCK, no timeouts) until it clears.
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 901004;
+    s.targetSource = 44;
+    s.targetAlive = true;
+    s.targetDist = 1500.0f;
+    s.tgtX = 1500.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Approach, "ui/approach");
+    s.movieActive = true;
+    std::vector<std::string> markers;
+    bool tapped = false;
+    for (int i = 0; i < 4000; ++i) { // 200 s held (longer than approachTimeout)
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) tapped = true;
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(tapped, "ui/taps_a");
+    CHECK(hasMarker(markers, "AUTOPLAY_UI_WAIT movie=1"), "ui/logged");
+    CHECK(!hasMarker(markers, "AUTOPLAY_STUCK") && !hasMarker(markers, "AUTOPLAY_GIVEUP"), "ui/no_stuck_no_giveup");
+    CHECK(brain.current() == p2autoplay::State::Approach, "ui/still_approaching");
+}
+
+void testRangedAttackWhenStuckNear()
+{
+    // #901: STUCK within rangedAttackDist of a ground target: attack from
+    // here, sliding the cursor onto it in the look band and throwing.
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 90;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 901005;
+    s.targetSource = 44;
+    s.targetAlive = true;
+    s.targetDist = 250.0f;
+    s.tgtX = 250.0f;
+    s.cursorValid = true;
+    s.cursorX = 60.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Approach, "ranged/approach");
+    std::vector<std::string> markers;
+    for (int i = 0; i < 200 && brain.current() == p2autoplay::State::Approach; ++i) {
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_RANGED token=901005"), "ranged/marker");
+    CHECK(brain.current() == p2autoplay::State::Attack, "ranged/attack");
+    // The first STUCK replans (a route to the target's floor level); only the
+    // second stalled window throws from range.
+    size_t firstStuck = markers.size(), ranged = markers.size();
+    for (size_t i = 0; i < markers.size(); ++i) {
+        if (firstStuck == markers.size() && markers[i].find("AUTOPLAY_STUCK") == 0) firstStuck = i;
+        if (markers[i].find("AUTOPLAY_RANGED") == 0) ranged = i;
+    }
+    CHECK(firstStuck < ranged && markers[firstStuck].find("replan=1") != std::string::npos,
+          "ranged/replans_first");
+    bool look = false, threw = false;
+    for (int i = 0; i < 40; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().stickScale < 0.5f && brain.command().moveX > 0.5f) look = true;
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) threw = true;
+    }
+    CHECK(look, "ranged/cursor_slides_in_look_band");
+    CHECK(threw, "ranged/throws");
+}
+
 int main()
 {
     testGate();
@@ -3317,6 +3531,11 @@ int main()
     testDetourLegProgress();
     testRollerTier();
     testRollerHomeLean();
+    testPartGatherSwarm();
+    testApproachRouteProgress();
+    testApproachObstacleWork();
+    testUiWaitTapsA();
+    testRangedAttackWhenStuckNear();
     if (failures == 0) {
         std::printf("PASS p2_autoplay\n");
         return 0;
