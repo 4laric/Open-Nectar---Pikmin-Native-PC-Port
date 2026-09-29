@@ -512,6 +512,11 @@ struct Senses {
     // 23 hard gate, bridge/rock = their WorkObject kind), build stage and
     // health. Bomb gates (24/25) are never reported: punching cannot open them.
     int obstacleType = 0;
+    // #901: a movie (e.g. the first-gate-down demo), a UI overlay or a global
+    // pause holds the sim. The Brain then taps A (the P1 skip / dismiss
+    // input) and freezes its own clocks instead of calling the world STUCK.
+    bool movieActive = false;
+    bool overlayActive = false;
     int obstacleStage = 0;
     int obstacleStages = 0;
     float obstacleHealth = 0.0f;
@@ -652,6 +657,21 @@ public:
             holdIdle();
             return;
         }
+        if ((in.movieActive || in.overlayActive) && !in.containerOpen && state != State::Idle
+            && state != State::WithdrawMenu) {
+            uiWaitTime += dt;
+            uiLogTime -= dt;
+            if (uiLogTime <= 0.0f) {
+                uiLogTime = 5.0f;
+                char buf[160];
+                std::snprintf(buf, sizeof(buf), "AUTOPLAY_UI_WAIT movie=%d overlay=%d seconds=%.0f state=%s bot-driven",
+                              in.movieActive ? 1 : 0, in.overlayActive ? 1 : 0, uiWaitTime, stateName(state));
+                markers.emplace_back(buf);
+            }
+            pulseA(in, cfg.throwHold, 1.0f);
+            return;
+        }
+        uiWaitTime = 0.0f;
         stateTime += dt;
         switch (state) {
         case State::Idle: tickIdle(in); break;
@@ -1910,6 +1930,8 @@ private:
     int approachReplans = 0; // consecutive STUCK windows in this Approach stint (bot-v3)
     bool approachOnRoute = false; // #901: approach progress metric is the route length
     bool obsWork = false; // #901: working a route obstacle in Approach
+    float uiWaitTime = 0.0f; // #901: time the sim has been held by a movie / overlay
+    float uiLogTime = 0.0f;
     float obsTime = 0.0f; // #901: time spent on the current obstacle episode
     float obsLogTime = 0.0f;
     int obsGiveups = 0; // #901: obstacle episodes that timed out this Approach stint

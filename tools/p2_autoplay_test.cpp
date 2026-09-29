@@ -3068,6 +3068,38 @@ void testApproachObstacleWork()
     CHECK(brain.replanWanted(), "obstacle/replans_after_done");
 }
 
+void testUiWaitTapsA()
+{
+    // #901: a movie or UI overlay holds the sim; the Brain taps A and does not
+    // advance its own clocks (no STUCK, no timeouts) until it clears.
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 901004;
+    s.targetSource = 44;
+    s.targetAlive = true;
+    s.targetDist = 1500.0f;
+    s.tgtX = 1500.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Approach, "ui/approach");
+    s.movieActive = true;
+    std::vector<std::string> markers;
+    bool tapped = false;
+    for (int i = 0; i < 4000; ++i) { // 200 s held (longer than approachTimeout)
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) tapped = true;
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(tapped, "ui/taps_a");
+    CHECK(hasMarker(markers, "AUTOPLAY_UI_WAIT movie=1"), "ui/logged");
+    CHECK(!hasMarker(markers, "AUTOPLAY_STUCK") && !hasMarker(markers, "AUTOPLAY_GIVEUP"), "ui/no_stuck_no_giveup");
+    CHECK(brain.current() == p2autoplay::State::Approach, "ui/still_approaching");
+}
+
 int main()
 {
     testGate();
@@ -3118,6 +3150,7 @@ int main()
     testPartGatherSwarm();
     testApproachRouteProgress();
     testApproachObstacleWork();
+    testUiWaitTapsA();
     if (failures == 0) {
         std::printf("PASS p2_autoplay\n");
         return 0;

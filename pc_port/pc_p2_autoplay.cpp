@@ -75,6 +75,7 @@
 #include "BuildingItem.h"
 #include "WorkObject.h"
 #include "gameflow.h"
+#include "MoviePlayer.h"
 
 #include <algorithm>
 #include <chrono>
@@ -832,6 +833,8 @@ void pc_p2_autoplay_tick(void)
     senses.trackingPart = trackedPellet && trackedPellet->isUfoParts();
     senses.partGone = partGone;
     senses.workCount = workCount;
+    senses.movieActive = gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive;
+    senses.overlayActive = gameflow.mIsUIOverlayActive || gameflow.mPauseAll;
     {
         // #901: nearest unfinished route obstacle within 600 u of the captain
         // (read-only): gates (sluices), bridges, hinder rocks, climbing
