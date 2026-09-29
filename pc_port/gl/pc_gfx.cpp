@@ -4613,27 +4613,10 @@ void pc_gfx_proxy_shot_notify(const char* key) {
     sProxyShotPending.push_back(pending);
 }
 
-static void proxyShotWrite(const std::string& key) {
-    if (!glBindFramebuffer_ptr || sDrawableWidth <= 0 || sDrawableHeight <= 0) return;
-    const int w = sDrawableWidth;
-    const int h = sDrawableHeight;
-    std::string species = key;
-    const std::string::size_type bar = key.find('|');
-    if (bar != std::string::npos) species = key.substr(bar + 1);
-    if (species.empty()) return;
-    const std::string path = sProxyShotDir + "/" + species + ".bmp";
-    // The presented frame lives in the default framebuffer (READ is still the
-    // post source after the blit); copy the state handling from the existing
-    // glReadPixels probes: bind explicitly, use tight packing, restore after.
-    glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, 0);
-    GLint packAlign = 4;
-    glGetIntegerv(GL_PACK_ALIGNMENT, &packAlign);
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    std::vector<unsigned char> rgb(size_t(w) * size_t(h) * 3, 0);
-    glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, rgb.data());
-    glPixelStorei(GL_PACK_ALIGNMENT, packAlign);
+// Writes bottom-up tightly packed RGB rows as an uncompressed 24-bit BMP.
+static bool shotWriteBmp(const std::string& path, int w, int h, const std::vector<unsigned char>& rgb) {
     FILE* out = std::fopen(path.c_str(), "wb");
-    if (!out) return;
+    if (!out) return false;
     const int rowStride = (w * 3 + 3) & ~3;
     const uint32_t imageSize = uint32_t(rowStride) * uint32_t(h);
     const uint32_t fileSize = 54 + imageSize;
@@ -4674,8 +4657,58 @@ static void proxyShotWrite(const std::string& key) {
         ok = std::fwrite(row.data(), 1, size_t(rowStride), out) == size_t(rowStride);
     }
     std::fclose(out);
-    if (!ok) return;
+    return ok;
+}
+
+static void proxyShotWrite(const std::string& key) {
+    if (!glBindFramebuffer_ptr || sDrawableWidth <= 0 || sDrawableHeight <= 0) return;
+    const int w = sDrawableWidth;
+    const int h = sDrawableHeight;
+    std::string species = key;
+    const std::string::size_type bar = key.find('|');
+    if (bar != std::string::npos) species = key.substr(bar + 1);
+    if (species.empty()) return;
+    const std::string path = sProxyShotDir + "/" + species + ".bmp";
+    // The presented frame lives in the default framebuffer (READ is still the
+    // post source after the blit); copy the state handling from the existing
+    // glReadPixels probes: bind explicitly, use tight packing, restore after.
+    glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, 0);
+    GLint packAlign = 4;
+    glGetIntegerv(GL_PACK_ALIGNMENT, &packAlign);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    std::vector<unsigned char> rgb(size_t(w) * size_t(h) * 3, 0);
+    glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, rgb.data());
+    glPixelStorei(GL_PACK_ALIGNMENT, packAlign);
+    if (!shotWriteBmp(path, w, h, rgb)) return;
     std::printf("P2_PROXY_SHOT key=%s file=%s w=%d h=%d\n", key.c_str(), path.c_str(), w, h);
+    std::fflush(stdout);
+}
+
+// Netplay M5c lane A (issue #887, test-only): one-shot frame capture for the
+// lead-camera diagnostics. The request is armed by pc_netplay_camlead and
+// served by the next present from the finished frame's framebuffer (the
+// same source PIKMIN_FRAME_DUMP reads, so it works for a hidden window).
+static std::string sFrameShotPath;
+
+void pc_gfx_request_frame_shot(const char* path) {
+    sFrameShotPath = (path != nullptr) ? path : "";
+}
+
+static void frameShotWrite(GLuint sourceFramebuffer) {
+    const std::string path = sFrameShotPath;
+    sFrameShotPath.clear();
+    if (!glBindFramebuffer_ptr || sRenderWidth <= 0 || sRenderHeight <= 0) return;
+    const int w = sRenderWidth;
+    const int h = sRenderHeight;
+    glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, sourceFramebuffer);
+    GLint packAlign = 4;
+    glGetIntegerv(GL_PACK_ALIGNMENT, &packAlign);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    std::vector<unsigned char> rgb(size_t(w) * size_t(h) * 3, 0);
+    glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, rgb.data());
+    glPixelStorei(GL_PACK_ALIGNMENT, packAlign);
+    const bool ok = shotWriteBmp(path, w, h, rgb);
+    std::printf("[netplay] camlead shot: %s %s (%dx%d)\n", ok ? "wrote" : "FAILED", path.c_str(), w, h);
     std::fflush(stdout);
 }
 
@@ -4739,6 +4772,8 @@ void pc_gfx_present(void) {
     }
     sPostRanThisFrame = false;
     shadow_frame_reset();
+    // Netplay M5c lane A (test-only): a pending lead-camera frame capture.
+    if (!sFrameShotPath.empty()) frameShotWrite(sourceFramebuffer);
     // PIKMIN_FRAME_DUMP=<dir>: the finished frame as PPM every 15 frames, for
     // looking at a scene where no screenshot tool reaches (Wayland, adb-less).
     if (const char* dumpDir = std::getenv("PIKMIN_FRAME_DUMP")) {
