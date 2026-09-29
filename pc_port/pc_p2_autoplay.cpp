@@ -51,6 +51,7 @@
 #include "pc_p2_kogane.h"
 #include "pc_p2_chappy.h"
 #include "pc_p2_dangomushi.h"
+#include "WorkObject.h"
 #include "pc_randomizer.h"
 #include "Controller.h"
 
@@ -853,6 +854,36 @@ void pc_p2_autoplay_tick(void)
     senses.naviHpValid = true;
     senses.naviHp = navi->mHealth;
     senses.powerRestocks = sPowerRestocks;
+    // #897 push obstacle (read-only): nearest unfinished HinderRock within
+    // 400 of the captain and ahead of where the Brain is steering (the
+    // current waypoint leg, else the target).
+    if (workObjectMgr && pick && sBrain.current() == p2autoplay::State::Approach) {
+        float aheadX = pick->x, aheadZ = pick->z;
+        if (!sPath.empty() && sPathIdx < sPath.size()) {
+            aheadX = sPath[sPathIdx].first;
+            aheadZ = sPath[sPathIdx].second;
+        }
+        const float hx = aheadX - naviX, hz = aheadZ - naviZ;
+        const float hl = std::sqrt(hx * hx + hz * hz);
+        float best = 400.0f;
+        Iterator wit(workObjectMgr);
+        CI_LOOP(wit)
+        {
+            WorkObject* w = static_cast<WorkObject*>(*wit);
+            if (!w || !w->isHinderRock() || w->isFinished()) continue;
+            const float ox = w->getPosition().x, oz = w->getPosition().z;
+            const float d = distXZ(naviX, naviZ, ox, oz);
+            if (d >= best) continue;
+            const float dot = hl > 1.0f && d > 1.0f ? ((ox - naviX) * hx + (oz - naviZ) * hz) / (hl * d) : 1.0f;
+            if (dot < 0.2f && d > 200.0f) continue;
+            best = d;
+            senses.obstacleValid = true;
+            senses.obstacleX = ox;
+            senses.obstacleZ = oz;
+            senses.obstacleDist = d;
+            senses.obstacleMoving = static_cast<HinderRock*>(w)->isMoving();
+        }
+    }
     // Onion receipt for this token (bot-v2 gap 1): durable delivery-ledger
     // query, read-only. carried=1 in RESULT means this was seen.
     senses.receiptSeen = sEngage.token ? pc_randomizer_p2_receipt_seen(sEngage.token) : false;

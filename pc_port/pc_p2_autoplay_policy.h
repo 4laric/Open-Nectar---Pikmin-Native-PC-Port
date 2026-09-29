@@ -384,6 +384,16 @@ struct Config {
     // Brain re-selects. 0 disables.
     int powerResupplyField = 25;
     int powerRestockMax = 12;
+    // #897 push obstacles: a P1 HinderRock (the Impact Site cardboard box)
+    // blocks the only walk to the impact_goolix arena (ar1: 6 STUCK at the
+    // box -> target_unreachable). When the driver reports an unfinished box
+    // in front of the approach, close to obstaclePushDist and throw at it;
+    // thrown Pikmin push it (HinderRock::workable). Stuck windows do not count
+    // while pushing; obstaclePushMax bounds one approach stint.
+    float obstaclePushDist = 150.0f;
+    float obstaclePushGap = 0.35f;
+    float obstaclePushMax = 120.0f;
+    float obstacleRegroupEvery = 6.0f; // after a push: whistle pulse period while scattered
 };
 
 // Power-mode effective withdraw targets (bot-v4, bot-v4b): up to ~100 Pikmin.
@@ -503,6 +513,13 @@ struct Senses {
     float targetVelZ = 0.0f;
     // #897 power resupply: restocks the driver has already spent this run.
     int powerRestocks = 0;
+    // #897 push obstacle: nearest unfinished HinderRock in front of the
+    // approach (driver: within its scan range and ahead of the current leg).
+    bool obstacleValid = false;
+    float obstacleX = 0.0f;
+    float obstacleZ = 0.0f;
+    float obstacleDist = 1.0e30f;
+    bool obstacleMoving = false;
 };
 
 // Pad output for one tick. moveX/moveZ is the desired world-space XZ move
@@ -586,6 +603,10 @@ public:
         rollerWhistleTime = 0.0f;
         powerResupplying = false;
         powerAtOnion = false;
+        pushTime = 0.0f;
+        pushing = false;
+        pushedThisStint = false;
+        regroupClock = 0.0f;
         result = Result{};
         markers.clear();
         lastCommand = Command{};
@@ -668,6 +689,9 @@ private:
         rollerMode = -1;
         rollerWhistleTime = 0.0f;
         powerAtOnion = false;
+        pushTime = 0.0f;
+        pushing = false;
+        regroupClock = 0.0f;
         emitState(in);
     }
     void holdIdle() { lastCommand = Command{}; }
@@ -974,6 +998,7 @@ private:
             enter(State::Attack, in);
             return;
         }
+        if (tickObstaclePush(dt, in)) return;
         // Progress / stuck tracking on straight-line distance.
         if (stuckWindowDist >= 1.0e29f) {
             stuckWindowDist = in.targetDist;
@@ -1523,6 +1548,53 @@ private:
         enter(State::Select, in);
     }
 
+    // #897 push obstacle (Approach only). Returns true while it owns the pad.
+    bool tickObstaclePush(float dt, const Senses& in)
+    {
+        const bool want = in.obstacleValid && pushTime < cfg.obstaclePushMax;
+        if (!want) {
+            if (pushing) {
+                pushing = false;
+                char buf[200];
+                std::snprintf(buf, sizeof(buf), "AUTOPLAY_OBSTACLE phase=%s push_s=%.0f field=%d bot-driven",
+                              in.obstacleValid ? "budget" : "cleared", pushTime, in.fieldPikmin);
+                markers.emplace_back(buf);
+                stuckWindowDist = 1.0e30f; // fresh progress window after the push
+                approachReplans = 0;
+            }
+            if (pushedThisStint && in.scattered) {
+                // Pushers stay at the box: short whistle pulses on the way.
+                regroupClock += dt;
+                if (std::fmod(regroupClock, cfg.obstacleRegroupEvery) < 1.0f) {
+                    if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+                    else steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+                    lastCommand.buttons = PadB;
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (!pushing) {
+            pushing = true;
+            pushedThisStint = true;
+            char buf[200];
+            std::snprintf(buf, sizeof(buf),
+                          "AUTOPLAY_OBSTACLE phase=push at=(%.0f,%.0f) dist=%.0f field=%d bot-driven",
+                          in.obstacleX, in.obstacleZ, in.obstacleDist, in.fieldPikmin);
+            markers.emplace_back(buf);
+        }
+        pushTime += dt;
+        stuckWindowStart = 0.0f; // pushing is progress, not a stuck window
+        steer(in.naviX, in.naviZ, in.obstacleX, in.obstacleZ);
+        if (in.obstacleDist <= cfg.obstaclePushDist) {
+            // In range: look-band stick (the captain stops and faces the box,
+            // the cursor slides onto it) and throw.
+            lastCommand.stickScale = cfg.lookStickScale;
+            pulseA(in, cfg.throwHold, cfg.obstaclePushGap);
+        }
+        return true;
+    }
+
     // #897 power-mode resupply trigger (Approach/Attack). Returns true when
     // it switched state.
     bool wantPowerResupply(const Senses& in, const char* from)
@@ -1926,6 +1998,10 @@ private:
     float rollerWhistleTime = 0.0f; // #897 stand-mode whistle pulse clock
     bool powerResupplying = false; // #897 power resupply leg in progress (survives enter())
     bool powerAtOnion = false; // #897 reached the Onion on this resupply visit
+    float pushTime = 0.0f; // #897 time spent pushing obstacles this approach stint
+    bool pushing = false; // #897 obstacle push active
+    bool pushedThisStint = false; // #897 pushed a box since the last reset (regroup pulses)
+    float regroupClock = 0.0f; // #897 post-push whistle pulse clock
     bool announced = false;
     Result result;
     Command lastCommand;
