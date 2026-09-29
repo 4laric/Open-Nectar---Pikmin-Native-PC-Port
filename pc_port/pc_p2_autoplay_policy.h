@@ -313,6 +313,9 @@ struct Config {
     // the strays: bounded episodes, only while the squad is empty.
     int titanAftermathWhistles = 3;
     float titanAftermathWhistleHold = 1.5f;
+    float titanRegroupWalk = 12.0f; // #246: max walk to the stray centroid per regroup episode
+    float titanSeedRingMin = 60.0f;  // #246: Titan corpse seeding standoff ring (cursor ~95 u ahead)
+    float titanSeedRingMax = 140.0f;
     float saraiLowHeight = 120.0f; // Sarai thrown at only when within this height above ground (or grabbing)
     float throwRange = 260.0f; // XZ distance at which throws start
     float arriveRadius = 90.0f; // XZ distance considered "at" the Onion
@@ -420,6 +423,11 @@ struct Senses {
     // Onion / squad facts for the withdraw phase.
     int fieldPikmin = 0; // live field Pikmin
     int squadPikmin = 0; // #246: live Pikmin following the captain (FormationMode)
+    // #246: idle field Pikmin (FreeMode, not carrying, not in distress) and
+    // their centroid, so a Titan aftermath can walk to them before whistling.
+    int strayPikmin = 0;
+    float strayX = 0.0f;
+    float strayZ = 0.0f;
     int onionStored = 0; // Pikmin stored in the nearest stocked Onion
     float onionDist = 1.0e30f; // XZ distance to that Onion
     bool containerOpen = false; // Onion container UI is up
@@ -558,6 +566,7 @@ public:
         amGrowStill = 0.0f; // bot-v7: time without crew growth in SeedGrow
         amWhistles = 0;
         amWhistleTime = 0.0f;
+        amRegroupWalk = 0.0f;
         withdrawCycles = 0;
         throwSpin = 0.0f;
         kingBacking = false;
@@ -683,6 +692,21 @@ private:
     // whistle). Shared by Seed (no grabs yet) and SeedGrow (short crew).
     void seedSteerThrow(const Senses& in)
     {
+        // #246 a8-a11: standing ON the Titan corpse put the throw cursor
+        // (~95 u ahead of the captain) past it, so thrown Pikmin landed idle
+        // and the crew never grew past 1-2 of 10. For the Titan, hold a
+        // standoff ring and slide the cursor onto the corpse in the P1 look
+        // band (the King standoff's aim), then throw.
+        if (in.targetSource == 73 && in.targetToken != 0 && !in.waypointLeg && in.cursorValid) {
+            if (in.targetDist < cfg.titanSeedRingMin) {
+                steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            } else if (in.targetDist > cfg.titanSeedRingMax) {
+                steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            } else {
+                kingLookAndThrow(in);
+            }
+            return;
+        }
         if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
         else if (in.targetToken != 0) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
         if (in.targetDist <= cfg.throwRange && in.targetToken != 0) pulseA(in, cfg.throwHold, cfg.throwGap);
@@ -899,6 +923,7 @@ private:
         amGrowStill = 0.0f;
         amWhistles = 0;
         amWhistleTime = 0.0f;
+        amRegroupWalk = 0.0f;
         result = Result{};
         result.token = in.targetToken;
         result.koganeLike = isKoganeLike(in.targetSource);
@@ -1182,15 +1207,34 @@ private:
         // initiates (v4b diagnosis). Deliver with stick + throws only.
         const bool carryActive = in.transportSeen || in.carryCount > 0 || in.pelletCarriers > 0;
         // #246 exception to the no-whistle rule (see titanAftermathWhistles):
-        // Titan only, empty squad, strays on the field, bounded episodes.
+        // Titan only, strays on the field, bounded episodes. It fires when the
+        // squad is empty, or when squad plus crew cannot reach the corpse's
+        // carry minimum while idle strays could (a8/a9: 7 in the squad, 40
+        // idle strays scattered by the fight, crew stuck at 1 of 10). The
+        // captain first walks to the strays' centroid (at most
+        // titanRegroupWalk seconds), then holds the whistle there.
+        const int amCrew = in.pelletCarriers > 0 ? in.pelletCarriers : in.carryCount;
+        const bool amShort = in.squadPikmin == 0
+            || (in.carryWant > 0 && in.squadPikmin + amCrew < in.carryWant && in.strayPikmin > 0);
         if (in.targetSource == 73
-            && (amWhistleTime > 0.0f
-                || (in.squadPikmin == 0 && in.fieldPikmin > in.pelletCarriers
+            && (amWhistleTime > 0.0f || amRegroupWalk > 0.0f
+                || (amShort && in.fieldPikmin > in.pelletCarriers
                     && amWhistles < cfg.titanAftermathWhistles))) {
+            if (amWhistleTime <= 0.0f && in.strayPikmin > 0 && amRegroupWalk < cfg.titanRegroupWalk) {
+                const float sx = in.strayX - in.naviX, sz = in.strayZ - in.naviZ;
+                if (sx * sx + sz * sz > 60.0f * 60.0f) {
+                    amRegroupWalk += dt;
+                    steer(in.naviX, in.naviZ, in.strayX, in.strayZ);
+                    return;
+                }
+            }
             if (amWhistleTime <= 0.0f) ++amWhistles;
             amWhistleTime += dt;
             lastCommand.buttons = PadB;
-            if (amWhistleTime >= cfg.titanAftermathWhistleHold) amWhistleTime = 0.0f;
+            if (amWhistleTime >= cfg.titanAftermathWhistleHold) {
+                amWhistleTime = 0.0f;
+                amRegroupWalk = 0.0f;
+            }
             return;
         }
         if (sawReceipt) {
@@ -1743,6 +1787,7 @@ private:
     float amGrowStill = 0.0f; // bot-v7: time without crew growth in SeedGrow
     int amWhistles = 0;         // #246 Titan aftermath regroup episodes used
     float amWhistleTime = 0.0f; // #246 current regroup whistle hold
+    float amRegroupWalk = 0.0f; // #246 time spent walking to the strays this episode
     float initialHealthFrac = 1.0f;
     bool sawDamage = false;
     bool sawKill = false; // generic death latched (any species)

@@ -580,6 +580,8 @@ void pc_p2_autoplay_tick(void)
 
     // --- Pikmin census (read-only, except bot-v4 power-mode flowering) ---
     int alive = 0, nearCount = 0, farCount = 0, transport = 0, distress = 0, squad = 0;
+    int strays = 0;
+    float strayX = 0.0f, strayZ = 0.0f;
     std::vector<std::pair<float, float>> transportPos;
     const bool powerMode = p2autoplay::isPowerEnabled();
     {
@@ -593,6 +595,12 @@ void pc_p2_autoplay_tick(void)
             if (d < 350.0f) ++nearCount;
             if (d > 550.0f) ++farCount;
             if (p->mMode == PikiMode::FormationMode) ++squad;
+            // #246: idle strays (not following, not carrying) within 600 u.
+            if (p->mMode == PikiMode::FreeMode && d < 600.0f) {
+                ++strays;
+                strayX += p->getPosition().x;
+                strayZ += p->getPosition().z;
+            }
             if (p->mMode == PikiMode::TransportMode) {
                 ++transport;
                 transportPos.emplace_back(p->getPosition().x, p->getPosition().z);
@@ -911,6 +919,9 @@ void pc_p2_autoplay_tick(void)
     senses.onionZ = onionZ;
     senses.fieldPikmin = alive;
     senses.squadPikmin = squad;
+    senses.strayPikmin = strays;
+    senses.strayX = strays ? strayX / float(strays) : naviX;
+    senses.strayZ = strays ? strayZ / float(strays) : naviZ;
     senses.onionStored = onionStored;
     senses.onionDist = onionDist;
     senses.containerOpen = navi->getCurrState() && navi->getCurrState()->getID() == NAVISTATE_Container;
