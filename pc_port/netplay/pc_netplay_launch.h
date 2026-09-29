@@ -13,7 +13,8 @@
 //        new-game bootstrap; joiner: reads the offer code exactly once
 //        (literal, @file, or @clipboard through the Win32 clipboard, since
 //        SDL is not up yet) and decodes the v2 session bundle;
-//      - refuses bootstraps the launcher cannot carry (P2 sidecar seeds);
+//      - P2 seeds (M4 lane B2): the joiner needs --netplay-p2-assets DIR;
+//        the run gets a play/ working directory (see PcNetplayLaunch::p2);
 //      - creates this run's private dir (per run AND per peer) and writes
 //        the bootstrap two levels inside it, re-stamped with this peer's
 //        SESSION token, so the randomizer's derived campaign dir is private;
@@ -32,9 +33,11 @@
 //   4. pc_netplay_session_drive(): only the answer-code exchange (ICE data
 //      only) is left for after init.
 //
-// Working directory: never changed. Players start the exe from their game
-// folder; assets/ and pikmin_settings.conf stay cwd-relative, and every
-// run-dir file is addressed by absolute path.
+// Working directory: never changed for ordinary seeds. Players start the exe
+// from their game folder; assets/ and pikmin_settings.conf stay
+// cwd-relative, and every run-dir file is addressed by absolute path. A P2
+// seed (M4 lane B2) changes it to <run>/play before pc_settings_init, with
+// the settings file pinned to the original folder's pikmin_settings.conf.
 
 #include <cstdint>
 #include <string>
@@ -48,6 +51,16 @@ struct PcNetplayLaunch {
 	std::string saveDir;       // absolute: <runDir>/save (NECTAR_SAVE_DIR)
 	std::string token;         // this peer's SESSION token (64 lowercase hex)
 	std::string bootstrapSource; // "default", the --bootstrap path, or "offer bundle"
+	// M4 lane B2 (issue #885): P2 seeds (ENEMY_P2 / P2_* tokens) run with
+	// <runDir>/play as the working directory, set before pc_settings_init:
+	// play/assets is a junction to the overlay (host: <bootstrap dir>/assets,
+	// joiner: --netplay-p2-assets DIR) and the host copies its sidecar set
+	// (p2-*.txt, sarai-*.txt) there; the joiner receives it in the transfer
+	// phase. pikmin_settings.conf stays the original working directory's.
+	bool p2 = false;
+	std::string playDir;       // absolute; empty unless p2
+	std::string p2AssetsDir;   // absolute overlay dir behind play/assets
+	std::string settingsPath;  // absolute pinned settings file (p2 only)
 	std::string offerCode;     // joiner: the offer text, read exactly once
 	uint32_t seed = 0;         // netplay seed (host: env or 0; joiner: bundle)
 	std::string configBlock;   // joiner: the host's m3-config-v1 block

@@ -22,6 +22,15 @@
 #include <cfenv>
 #endif
 
+// Netplay M4 lane B2 fix round 1 (issue #885, C5/E1): a resumed netplay
+// campaign's stage start (pc_randomizer.cpp prints START_STAGE there, netplay
+// sessions only). Weak: null where pc_randomizer.cpp is not linked.
+#if defined(__GNUC__)
+__attribute__((weak)) void pc_randomizer_netplay_stage_start(int day, int stage);
+#else
+void pc_randomizer_netplay_stage_start(int day, int stage);
+#endif
+
 namespace {
 
 bool sDeterministic = false;
@@ -165,6 +174,8 @@ void pc_netplay_det_reseed_for_new_day(int dayIndex, int stageId)
 	std::printf("[netplay-det] reseed day=%d stage=%d sessionSeed=%u hash=0x%08x tick=%u\n", dayIndex,
 	    stageId, sessionSeed, hash, sTick);
 	std::fflush(stdout);
+	// B2 fix round 1: log-only, after the reseed (RNG and timing untouched).
+	if (pc_randomizer_netplay_stage_start != nullptr) pc_randomizer_netplay_stage_start(dayIndex, stageId);
 }
 
 const char* pc_netplay_det_profile_path(void)

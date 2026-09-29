@@ -169,7 +169,24 @@ void Reassembler::feed(bool hasChunk, uint8_t seq, const uint8_t payload[kFragBy
 	mPending = st;
 	mPendingGen = st.gen;
 	mPendingFrame = frame + 1; // apply at the start of the tick for frame F+1
+	if (mAppliedGen == 0) {
+		// B1 first-apply rule: delay-independent first snapshot frame.
+		if (mPendingFrame > kFirstApplyFrame) {
+			std::printf("[netplay] randstate gen=%u first apply late: frame=%u > %u\n", st.gen,
+			            mPendingFrame, kFirstApplyFrame);
+			std::fflush(stdout);
+		} else {
+			mPendingFrame = kFirstApplyFrame;
+		}
+	}
 	mHasPending = true;
+}
+
+bool Reassembler::discard_pending_upto(uint32_t gen)
+{
+	if (!mHasPending || mPendingGen > gen) return false;
+	mHasPending = false;
+	return true;
 }
 
 bool Reassembler::take_pending(PcRandState& out)

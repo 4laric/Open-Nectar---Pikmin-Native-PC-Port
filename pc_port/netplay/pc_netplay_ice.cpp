@@ -33,6 +33,8 @@ static_assert(pc_netplay_ice::kChannelHandshake
               "ICE/UDP handshake channel must match");
 static_assert(pc_netplay_ice::kChannelGekko == pc_netplay_transport::kChannelGekko,
               "ICE/UDP gekko channel must match");
+static_assert(pc_netplay_ice::kChannelBulk == pc_netplay_transport::kChannelBulk,
+              "ICE/UDP bulk channel must match");
 static_assert(pc_netplay_ice::kMaxDatagram == pc_netplay_transport::kMaxDatagram,
               "ICE/UDP max datagram must match");
 static_assert(pc_netplay_ice::kAddrBytes == pc_netplay_transport::kAddrBytes,
@@ -1067,27 +1069,36 @@ void IceLink::send_to_peer(uint32_t /*ip*/, uint16_t /*port*/, const uint8_t* da
 
 constexpr size_t kMaxPendingQueue = 512;
 
+// M4 lane B2 (issue #885): one routing step for every drain, now with the
+// bulk channel. Each queue is capped at kMaxPendingQueue (oldest dropped);
+// a bulk payload is bounded like over UDP (the BulkChannel validator drops
+// anything malformed, never a truncated copy).
+void IceLink::route(std::vector<IceSocket::Datagram>& grams)
+{
+	for (IceSocket::Datagram& g : grams) {
+		if (g.channel == kChannelGekko) {
+			mGekkoPending.push_back(std::move(g));
+		} else if (g.channel == kChannelHandshake) {
+			mHandshakePending.push_back(std::move(g));
+		} else if (g.channel == kChannelBulk) {
+			if (g.payload.size() + 1 <= kMaxDatagram) mBulkPending.push_back(std::move(g));
+		}
+		// Unknown channels are dropped.
+	}
+	auto cap = [](std::vector<IceSocket::Datagram>& q) {
+		if (q.size() > kMaxPendingQueue) q.erase(q.begin(), q.begin() + (q.size() - kMaxPendingQueue));
+	};
+	cap(mGekkoPending);
+	cap(mHandshakePending);
+	cap(mBulkPending);
+}
+
 GekkoNetResult** IceLink::receive_inner(int* length)
 {
 	mResults.clear();
 	if (mSock != nullptr) {
 		std::vector<IceSocket::Datagram> grams = mSock->recv();
-		for (IceSocket::Datagram& g : grams) {
-			if (g.channel == kChannelGekko) {
-				mGekkoPending.push_back(std::move(g));
-			} else if (g.channel == kChannelHandshake) {
-				mHandshakePending.push_back(std::move(g));
-			}
-			// Unknown channels are dropped.
-		}
-		if (mGekkoPending.size() > kMaxPendingQueue)
-			mGekkoPending.erase(mGekkoPending.begin(),
-			                    mGekkoPending.begin()
-			                        + (mGekkoPending.size() - kMaxPendingQueue));
-		if (mHandshakePending.size() > kMaxPendingQueue)
-			mHandshakePending.erase(mHandshakePending.begin(),
-			                        mHandshakePending.begin()
-			                            + (mHandshakePending.size() - kMaxPendingQueue));
+		route(grams);
 	}
 	auto emit = [&](const uint8_t* payload, size_t len) {
 		if (len > kMaxDatagram - 1) return; // bounded before use
@@ -1125,24 +1136,24 @@ std::vector<IceSocket::Datagram> IceLink::drain_handshake()
 {
 	if (mSock != nullptr) {
 		std::vector<IceSocket::Datagram> grams = mSock->recv();
-		for (IceSocket::Datagram& g : grams) {
-			if (g.channel == kChannelGekko) {
-				mGekkoPending.push_back(std::move(g));
-			} else if (g.channel == kChannelHandshake) {
-				mHandshakePending.push_back(std::move(g));
-			}
-		}
-		if (mGekkoPending.size() > kMaxPendingQueue)
-			mGekkoPending.erase(mGekkoPending.begin(),
-			                    mGekkoPending.begin()
-			                        + (mGekkoPending.size() - kMaxPendingQueue));
-		if (mHandshakePending.size() > kMaxPendingQueue)
-			mHandshakePending.erase(mHandshakePending.begin(),
-			                        mHandshakePending.begin()
-			                            + (mHandshakePending.size() - kMaxPendingQueue));
+		route(grams);
 	}
 	std::vector<IceSocket::Datagram> out;
 	out.swap(mHandshakePending);
+	return out;
+}
+
+std::vector<IceSocket::Datagram> IceLink::drain_bulk()
+{
+	// Same pump-on-drain as the handshake queue, so bulk bytes are not stuck
+	// behind an idle GekkoNet poll (and flow before GekkoNet exists: the
+	// checkpoint transfer runs between the handshake and the session).
+	if (mSock != nullptr) {
+		std::vector<IceSocket::Datagram> grams = mSock->recv();
+		route(grams);
+	}
+	std::vector<IceSocket::Datagram> out;
+	out.swap(mBulkPending);
 	return out;
 }
 

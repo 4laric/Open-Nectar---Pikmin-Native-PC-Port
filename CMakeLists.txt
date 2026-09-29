@@ -440,6 +440,10 @@ pc_port/pc_p2_projectile_host.cpp
     # every build next to pc_randomizer.cpp (which calls it). New behaviour
     # is opt-in at runtime, so default builds are byte-identical.
     pc_port/netplay/pc_netplay_randstate.cpp
+    # Netplay M4 lane B1 outbox/mirror/ledger module (issue #885): engine-free,
+    # linked wherever pc_randomizer.cpp is. Inert unless a netplay session
+    # with the external-state stream is active.
+    pc_port/pc_randomizer_outbox.cpp
     pc_port/pc_p2_waterwraith.cpp
     pc_port/pc_p2_waterwraith_actor.cpp
     pc_port/pc_p2_kurage.cpp
@@ -717,7 +721,7 @@ if(WIN32)
     add_library(bbft_transport STATIC pc_port/bbft/bbft_transport.c)
     target_link_libraries(pikmin_pc PRIVATE bbft_transport ws2_32)
     target_link_libraries(p2_kurage_runtime PRIVATE bbft_transport ws2_32)
-    add_executable(pc_bbft_test pc_port/pc_bbft_test.cpp pc_port/pc_bbft.cpp pc_port/pc_randomizer.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp pc_port/netplay/pc_netplay_randstate.cpp pc_port/netplay/pc_netplay_det.cpp pc_port/netplay/pc_sim_rng.cpp)
+    add_executable(pc_bbft_test pc_port/pc_bbft_test.cpp pc_port/pc_bbft.cpp pc_port/pc_randomizer.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp pc_port/netplay/pc_netplay_randstate.cpp pc_port/pc_randomizer_outbox.cpp pc_port/netplay/pc_netplay_det.cpp pc_port/netplay/pc_sim_rng.cpp)
     # The #871 proxy TU pulls the engine header chain (teki.h), which needs
     # the same forced pc_types.h preinclude as the rest of the build.
     target_compile_options(pc_bbft_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
@@ -2001,7 +2005,7 @@ endif()
 # Standalone adapter harness; exercises real file I/O without game assets.
 # Include the P2 ordinary delivery ledger because pc_randomizer.cpp always links
 # against its host entry points; this only changes probe linkage, not behavior.
-add_executable(pc_randomizer_probe pc_port/pc_randomizer_probe.cpp pc_port/pc_randomizer.cpp pc_port/netplay/pc_netplay_randstate.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp)
+add_executable(pc_randomizer_probe pc_port/pc_randomizer_probe.cpp pc_port/pc_randomizer.cpp pc_port/netplay/pc_netplay_randstate.cpp pc_port/pc_randomizer_outbox.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp)
 # Same engine-header preinclude as pc_bbft_test above (pc_p2_proxy.cpp needs it).
 target_compile_options(pc_randomizer_probe PRIVATE ${NATIVE_COMPILE_OPTIONS})
 
@@ -2011,6 +2015,44 @@ add_executable(pc_netplay_randstate_test pc_port/netplay/pc_netplay_randstate_te
 target_include_directories(pc_netplay_randstate_test PRIVATE pc_port)
 target_compile_options(pc_netplay_randstate_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME pc_netplay_randstate_test COMMAND pc_netplay_randstate_test)
+
+# Netplay M4 lane B1 outbox / mirror line / session.json ledger test
+# (issue #885). Engine-free, registered in every build.
+add_executable(pc_randomizer_outbox_test pc_port/pc_randomizer_outbox_test.cpp pc_port/pc_randomizer_outbox.cpp)
+target_include_directories(pc_randomizer_outbox_test PRIVATE pc_port)
+target_compile_options(pc_randomizer_outbox_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME pc_randomizer_outbox_test COMMAND pc_randomizer_outbox_test)
+# B1 fix round 1: pc_randomizer.cpp's outbox-active host journals and client
+# mirror (exact bytes) against stub session hooks, one process per role.
+add_executable(pc_randomizer_outbox_io_test pc_port/pc_randomizer_outbox_io_test.cpp pc_port/pc_randomizer.cpp pc_port/netplay/pc_netplay_randstate.cpp pc_port/pc_randomizer_outbox.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp)
+target_include_directories(pc_randomizer_outbox_io_test PRIVATE pc_port)
+target_compile_options(pc_randomizer_outbox_io_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME pc_randomizer_outbox_io_host_test COMMAND pc_randomizer_outbox_io_test host)
+add_test(NAME pc_randomizer_outbox_io_host_noledger_test COMMAND pc_randomizer_outbox_io_test host-noledger)
+add_test(NAME pc_randomizer_outbox_io_client_test COMMAND pc_randomizer_outbox_io_test client)
+add_test(NAME pc_randomizer_outbox_io_client_unknown_test COMMAND pc_randomizer_outbox_io_test client-unknown)
+
+# Netplay M4 lane B2 (issue #885): the engine-free Hello v3 / decision table /
+# bundle / SAVE_RESULT codecs (header-only pc_netplay_transfer.h), and
+# pc_randomizer.cpp's day-end save barrier path, checkpoint info, adoption
+# and join-mode stale set-aside against stub session hooks (one process per
+# role; host-stale must print the historical fatal message and exit).
+add_executable(pc_netplay_transfer_test pc_port/netplay/pc_netplay_transfer_test.cpp)
+target_include_directories(pc_netplay_transfer_test PRIVATE pc_port)
+target_compile_options(pc_netplay_transfer_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME pc_netplay_transfer_test COMMAND pc_netplay_transfer_test)
+add_executable(pc_randomizer_campaign_net_test pc_port/pc_randomizer_campaign_net_test.cpp pc_port/pc_randomizer.cpp pc_port/netplay/pc_netplay_randstate.cpp pc_port/pc_randomizer_outbox.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp)
+target_include_directories(pc_randomizer_campaign_net_test PRIVATE pc_port)
+target_compile_options(pc_randomizer_campaign_net_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME pc_randomizer_campaign_net_host_test COMMAND pc_randomizer_campaign_net_test host)
+add_test(NAME pc_randomizer_campaign_net_client_test COMMAND pc_randomizer_campaign_net_test client)
+add_test(NAME pc_randomizer_campaign_net_join_stale_test COMMAND pc_randomizer_campaign_net_test join-stale)
+# B2 fix round 1: the pending mirror checkpoint retracted by an abandoned
+# barrier (C2), and the host's two fatal stale cases split (X8); each fatal
+# role runs itself as a child and asserts exit code 2 plus the exact message.
+add_test(NAME pc_randomizer_campaign_net_client_abandon_test COMMAND pc_randomizer_campaign_net_test client-abandon)
+add_test(NAME pc_randomizer_campaign_net_host_stale_foreign_test COMMAND pc_randomizer_campaign_net_test host-stale-foreign)
+add_test(NAME pc_randomizer_campaign_net_host_stale_badname_test COMMAND pc_randomizer_campaign_net_test host-stale-badname)
 
 # Only the isolated diagnostic build includes scripted stock/death fixtures.
 option(PIKMIN_RANDOMIZER_TEST_HOOKS "Enable standalone scripted gameplay test fixtures" OFF)

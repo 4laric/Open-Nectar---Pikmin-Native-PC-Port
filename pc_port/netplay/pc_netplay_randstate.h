@@ -48,6 +48,13 @@ constexpr size_t kPayloadBytes = 60; // bytes covered by the CRC
 constexpr uint8_t kVersion = 2;
 constexpr size_t kFragCount = 16; // 64 bytes at 4 payload bytes per fragment
 constexpr size_t kFragBytes = 4;
+// M4 lane B1 (lane A recheck item 5): the first snapshot (nothing applied
+// yet) applies at the tick start of max(kFirstApplyFrame, completion + 1),
+// so the gen-1 apply frame no longer moves with the local delay (it was 18
+// at delay 2 and 20 at delay 4). At every delay 1..8 the 16 fragments
+// complete by frame 23, so gen 1 lands at 32 whatever the delay; a later
+// completion is logged as a warning. Later generations keep completion + 1.
+constexpr uint32_t kFirstApplyFrame = 32;
 
 // Fragment sequence byte (input pad[11]): high nibble = stream id (0 for the
 // randomizer snapshot stream), low nibble = fragment index 0..15.
@@ -129,6 +136,10 @@ public:
 	// nothing was pending.
 	bool take_pending(PcRandState& out);
 	void mark_applied(uint32_t gen);
+	// M4 lane B1 RESUME: drops a pending snapshot whose generation is
+	// <= gen (the bulk RESUME snapshot supersedes it). Returns true when one
+	// was dropped.
+	bool discard_pending_upto(uint32_t gen);
 
 	uint32_t applied_gen() const { return mAppliedGen; }
 	void reset();

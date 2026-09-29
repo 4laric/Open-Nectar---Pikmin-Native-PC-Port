@@ -13,6 +13,7 @@
 
 #include "gekkonet.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -494,6 +495,83 @@ int main()
 		c.reset();
 		CHECK(c.send_total_frags() == 0 && c.send_acked_frags() == 0, "reset drains sender");
 		CHECK(d.poll_complete().empty(), "reset fixture quiet");
+	}
+
+	// 4c. M4 lane B1 backoff + window (issue #885). A 256 KiB message (256
+	// fragments, the channel maximum) over 10% loss each way arrives
+	// byte-identical; then a 3 s 100% blackout costs at most 32 x 5
+	// retransmits (window 32, per-fragment backoff 100/200/400/800/1000 ms)
+	// and the transfer still completes afterwards. The in-flight count never
+	// exceeds the window. A 0x14 mirror-ledger message rides the same run.
+	{
+		using namespace pc_netplay_bulk;
+		std::vector<uint8_t> big(kBulkMaxMessage);
+		for (size_t i = 0; i < big.size(); ++i) big[i] = (uint8_t)(((i * 40503u) >> 7) & 0xFF);
+		const uint8_t ledger[12] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+		const uint8_t typeE = 0x1E; // any 0x10..0x1F type is data now
+		std::mt19937 rng(4242);
+		std::uniform_real_distribution<double> drop(0.0, 100.0);
+		for (int phase = 0; phase < 2; ++phase) {
+			BulkChannel a, b;
+			CHECK(a.send(kBulkCheckpoint, big.data(), big.size()), "bulk send 256KiB");
+			CHECK(a.send(kBulkMirrorLedger, ledger, sizeof(ledger)), "bulk send 0x14 ledger");
+			CHECK(a.send(typeE, ledger, 4), "bulk send 0x1E accepted");
+			CHECK(!a.send(0x20, ledger, 4) && !a.send(0x0F, ledger, 4), "types outside 0x10..0x1F rejected");
+			CHECK(a.send_total_frags() == 256 + 1 + 1, "256 KiB is 256 frags");
+			double now = 0.0;
+			std::vector<BulkChannel::Message> got;
+			bool done = false;
+			size_t maxInFlight = 0;
+			uint64_t blackoutResends = 0;
+			bool blackoutSeen = false;
+			// phase 1: blackout [20, 3020) ms (mid-transfer), 100% loss both ways.
+			const double boStart = 20.0, boEnd = 3020.0;
+			uint64_t resendsAtStart = 0;
+			for (int step = 0; step < 200000 && !done; ++step, now += 5.0) {
+				const bool blackout = phase == 1 && now >= boStart && now < boEnd;
+				if (phase == 1 && now >= boStart && !blackoutSeen) {
+					blackoutSeen = true;
+					resendsAtStart = a.resend_count();
+				}
+				if (phase == 1 && now >= boEnd && blackoutSeen && blackoutResends == 0)
+					blackoutResends = a.resend_count() - resendsAtStart + 1; // +1: mark taken
+				std::vector<std::vector<uint8_t>> a2b = a.poll_outgoing(now);
+				std::vector<std::vector<uint8_t>> b2a = b.poll_outgoing(now);
+				maxInFlight = std::max(maxInFlight, a.send_in_flight());
+				for (auto& d : a2b) {
+					if (!blackout && drop(rng) >= 10.0) b.on_receive(d.data(), d.size(), now);
+				}
+				for (auto& d : b2a) {
+					if (!blackout && drop(rng) >= 10.0) a.on_receive(d.data(), d.size(), now);
+				}
+				for (auto& m : b.poll_complete()) got.push_back(std::move(m));
+				done = got.size() == 3 && a.send_total_frags() == 0;
+			}
+			CHECK(done, phase == 0 ? "256 KiB + 2 delivered and drained under 10% loss"
+			                        : "transfer completes after a 3 s blackout");
+			CHECK(maxInFlight <= kBulkMaxInFlight, "in-flight data fragments never exceed 32");
+			bool bigOk = false, ledOk = false;
+			for (auto& m : got) {
+				if (m.type == kBulkCheckpoint && m.data.size() == big.size()
+				    && memcmp(m.data.data(), big.data(), big.size()) == 0)
+					bigOk = true;
+				if (m.type == kBulkMirrorLedger && m.data.size() == sizeof(ledger)) ledOk = true;
+			}
+			CHECK(bigOk, "256 KiB byte-identical");
+			CHECK(ledOk, "0x14 ledger round trip");
+			if (phase == 1) {
+				const uint64_t n = blackoutResends > 0 ? blackoutResends - 1 : 0;
+				std::printf("bulk blackout: %llu retransmits in 3 s (bound %u), completed at %.0f ms, "
+				            "max in flight %zu\n",
+				            (unsigned long long)n, (unsigned)(kBulkMaxInFlight * 5), now, maxInFlight);
+				CHECK(blackoutResends > 0, "blackout window observed");
+				CHECK(n <= kBulkMaxInFlight * 5, "blackout retransmits <= 32 x 5");
+			} else {
+				std::printf("bulk 256 KiB over 10%% loss: completed at %.0f ms, %llu retransmits, "
+				            "max in flight %zu\n",
+				            now, (unsigned long long)a.resend_count(), maxInFlight);
+			}
+		}
 	}
 
 	if (sFailures == 0) std::printf("pc_netplay_transport_test: PASS (2000 frames, 0 desyncs)\n");

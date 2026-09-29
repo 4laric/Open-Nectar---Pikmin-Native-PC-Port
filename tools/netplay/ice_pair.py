@@ -16,12 +16,20 @@ the tool starts the local netplay_turn_server helper (libjuice
 juice_server) and both peers use it in relay-only mode.
 
 Modelled on run_pair.py; most launch/compare helpers are reused from it.
+
+M4 lane B2 (issue #885): --token HEX64 reuses a run token, and
+--host-campaign-from DIR runs the pair with per-peer campaign dirs (the
+run_pair layout out/host/run + out/join/peer/run, so the campaigns are
+out/campaign and out/join/campaign) after copying DIR's checkpoints and
+card into the host's campaign: with an empty joiner campaign the session
+starts with the checkpoint transfer over ICE (bulk channel 0x03).
 After both peers exit it compares hash logs, greps for desync/refused lines,
 and reports each peer's time to ICE completed plus the selected pairs.
 """
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -111,18 +119,35 @@ def main(argv=None):
     p.add_argument("--throttled", action="store_true")
     p.add_argument("--neg-bad-code", action="store_true",
                    help="negative test only: join with a corrupted offer, expect clean reject")
+    p.add_argument("--token", type=str, default=None, metavar="HEX64",
+                   help="M4 B2: reuse this run token (SESSION and FINGERPRINT)")
+    p.add_argument("--host-campaign-from", type=Path, default=None,
+                   help="M4 B2: per-peer campaigns; copy this campaign folder (*.sav + card/) "
+                        "into the host's before launch")
     a = p.parse_args(argv)
 
     for key in ICE_SCRUB_KEYS:
         os.environ.pop(key, None)
 
     out = a.out.resolve()
-    host_run = out / "host"
-    join_run = out / "join"
+    if a.host_campaign_from is not None:
+        # B2: per-peer campaign dirs (parent^2 of each run dir differs).
+        host_run = out / "host" / "run"
+        join_run = out / "join" / "peer" / "run"
+    else:
+        host_run = out / "host"
+        join_run = out / "join"
     host_run.mkdir(parents=True, exist_ok=True)
     join_run.mkdir(parents=True, exist_ok=True)
+    if a.host_campaign_from is not None:
+        dst = out / "campaign"
+        if dst.exists():
+            raise SystemExit(f"ice_pair: {dst} exists; use a fresh --out")
+        shutil.copytree(str(a.host_campaign_from.resolve()), str(dst))
+        print(f"ice_pair: host campaign copied from {a.host_campaign_from} "
+              f"({sorted(q.name for q in dst.iterdir())})")
 
-    token = uuid.uuid4().hex * 2
+    token = a.token if a.token is not None else uuid.uuid4().hex * 2
     host_boot = host_run / "bootstrap.txt"
     rp.write_bootstrap(host_boot, token, a.profile)
     join_boot = join_run / "bootstrap.txt"
@@ -396,6 +421,14 @@ def main(argv=None):
     print(f"ice_pair: compare exit={cmp_rc}: {cmp_tail}")
     print(f"ice_pair: desync lines host={len(des_host)} join={len(des_join)}")
     print(f"ice_pair: refused lines host={len(ref_host)} join={len(ref_join)}")
+    # B2: the checkpoint decision / transfer / resume lines of both peers.
+    for who, log in (("host", host_log), ("join", join_log)):
+        for needle in ("[netplay] checkpoint", "[netplay] transfer", "CAMPAIGN_RESUMED", "bulk msg complete"):
+            for ln in rp.grep(log, needle):
+                print(f"ice_pair: {who} {ln.strip()}")
+        print(f"ice_pair: {who} START_STAGE={len(rp.grep(log, 'START_STAGE'))} "
+              f"randomizer_lines={len(rp.grep(log, '[Pikmin Randomizer]'))}")
+    print(f"ice_pair: distinct tuples host={rp.hash_tuples(host_hash)} join={rp.hash_tuples(join_hash)}")
     for ln in ice_done_host:
         print(f"ice_pair: host {ln.strip()}")
     for ln in ice_done_join:

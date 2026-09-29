@@ -86,14 +86,29 @@ inline bool restamp_session(const std::string& text, const std::string& token, s
 	return true;
 }
 
-// True when a line of the bootstrap needs the P2 enemy bridge sidecars:
-// ENEMY_P2 (and its P2_PROXY_TIER continuation). Those seeds read per-run
-// files from the working directory (p2-*-actors/bank/profile.txt, an
-// assets/ overlay, p2-binding-receipt.json, several hundred KB in total)
-// that a connection code cannot carry and the handshake does not hash.
-inline bool line_needs_p2_sidecars(const std::string& line)
+// True when the bootstrap needs the P2 enemy bridge: any whitespace-
+// separated token ENEMY_P2 or P2_* (review R13: the randomizer's parser reads
+// tokens, not lines, so an indented or joined ENEMY_P2 / P2_PROXY_TIER is P2
+// too). Those seeds read per-run sidecar files from the working directory
+// (p2-*.txt, sarai-*.txt) and an assets/ overlay; M4 lane B2 (issue #885)
+// runs them in a per-run play/ directory: the host's sidecars travel in the
+// transfer phase, each peer brings its own overlay, and the handshake
+// checks both digests.
+inline bool bootstrap_needs_p2(const std::string& text)
 {
-	return line.compare(0, 8, "ENEMY_P2") == 0 || line.compare(0, 3, "P2_") == 0;
+	auto ws = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f'; };
+	size_t i = 0;
+	const size_t n = text.size();
+	while (i < n) {
+		while (i < n && ws(text[i])) ++i;
+		const size_t start = i;
+		while (i < n && !ws(text[i])) ++i;
+		if (i == start) break;
+		const size_t len = i - start;
+		if ((len == 8 && text.compare(start, 8, "ENEMY_P2") == 0) || (len >= 3 && text.compare(start, 3, "P2_") == 0))
+			return true;
+	}
+	return false;
 }
 
 // What the launcher accepts as a session bootstrap, before the randomizer's
@@ -101,10 +116,10 @@ inline bool line_needs_p2_sidecars(const std::string& line)
 //   * non-empty and at most kMaxBootstrapBytes;
 //   * no NUL bytes;
 //   * starts with "PIKMIN_RANDOMIZER ";
-//   * exactly one "SESSION " line (the re-stamp rule);
-//   * no P2 enemy-bridge lines (refused: sidecars cannot travel).
-// Returns false with a one-line reason; *p2 is set when the refusal is the
-// P2 one (so the caller can print the longer explanation).
+//   * exactly one "SESSION " line (the re-stamp rule).
+// Returns false with a one-line reason. *p2 tells whether the seed needs the
+// P2 enemy bridge (bootstrap_needs_p2); M4 lane B2 no longer refuses those,
+// the launcher runs them in a play/ directory instead.
 inline bool validate_bootstrap(const std::string& text, std::string* err, bool* p2 = nullptr)
 {
 	if (p2 != nullptr) *p2 = false;
@@ -126,15 +141,18 @@ inline bool validate_bootstrap(const std::string& text, std::string* err, bool* 
 		std::string line = text.substr(pos, eol - pos);
 		if (!line.empty() && line.back() == '\r') line.pop_back();
 		if (line.compare(0, 8, "SESSION ") == 0) ++sessions;
-		if (line_needs_p2_sidecars(line)) {
-			if (p2 != nullptr) *p2 = true;
-			return fail("bootstrap uses P2 enemies (" + line.substr(0, line.find(' ')) + ")");
-		}
 		pos = eol + 1;
 	}
 	if (sessions != 1) return fail("bootstrap has no single SESSION line");
+	if (p2 != nullptr) *p2 = bootstrap_needs_p2(text);
 	return true;
 }
+
+// M4 lane B2: the P2 play directory. A P2 session runs with <run>/play as its
+// working directory (the sidecars and assets/ are read cwd-relative there):
+// play/assets is a junction to the overlay (host: <bootstrap dir>/assets;
+// joiner: --netplay-p2-assets DIR) and play/ holds the sidecar set.
+inline std::string play_dir(const std::string& runDir) { return runDir + "/play"; }
 
 // Per-run, per-peer layout under the run dir R (absolute):
 //   R/session/runs/<token>/bootstrap.txt   --randomizer-seed target

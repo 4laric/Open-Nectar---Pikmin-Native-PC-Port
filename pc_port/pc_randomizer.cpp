@@ -6,6 +6,8 @@
 #include "pc_randomizer_campaign_catalog.h"
 #include "pc_randomizer_p2_roster.h"
 #include "pc_p2_delivery_host.h"
+#include "pc_randomizer_outbox.h"
+#include "netplay/pc_netplay_sha256.h"
 #include <unordered_map>
 #include <cstdint>
 #include <cmath>
@@ -15,10 +17,13 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <set>
+#include <thread>
 #include <tuple>
+#include <vector>
 #ifdef _WIN32
 #include <io.h>
 #else
@@ -34,11 +39,35 @@ __attribute__((weak)) bool pc_netplay_session_active(void);
 __attribute__((weak)) bool pc_netplay_is_host(void);
 __attribute__((weak)) bool pc_netplay_randstate_stream_enabled(void);
 __attribute__((weak)) void pc_netplay_randstate_publish(const pc_randstate::PcRandState& st);
+// Netplay M4 lane B1 (issue #885), same weak pattern: true while a
+// synchronized HOLD is requested or in progress (the host I/O side then
+// polls state.txt for liveness only and leaves publishing to the RESUME
+// snapshot), and the host's queue for kBulkMirrorLedger messages.
+__attribute__((weak)) bool pc_netplay_hold_active(void);
+__attribute__((weak)) void pc_netplay_mirror_ledger_send(const uint8_t* data, size_t len);
+// B1 fix round 1: the frame of the Advance being executed (stamped on each
+// outbox entry at push time, so mirror lines carry their event frame).
+__attribute__((weak)) uint32_t pc_netplay_current_frame(void);
+// Netplay M4 lane B2 (issue #885): the day-end save barrier (bulk only,
+// inside the save tick). Fills *hostOk with the host's outcome and
+// hostSavHex with the host checkpoint's SHA-256 (64 hex + NUL).
+__attribute__((weak)) bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long gen,
+                                                  const uint8_t* sav, size_t savLen, const uint8_t* block,
+                                                  size_t blockLen, bool* hostOk, char hostSavHex[65]);
+// B2 fix round 1 (C3, C7, C12): ends the session as a desync (exit 5).
+__attribute__((weak)) void pc_netplay_abort_desync(const char* why);
 #else
 bool pc_netplay_session_active(void);
 bool pc_netplay_is_host(void);
 bool pc_netplay_randstate_stream_enabled(void);
 void pc_netplay_randstate_publish(const pc_randstate::PcRandState& st);
+bool pc_netplay_hold_active(void);
+void pc_netplay_mirror_ledger_send(const uint8_t* data, size_t len);
+uint32_t pc_netplay_current_frame(void);
+bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long gen, const uint8_t* sav,
+                             size_t savLen, const uint8_t* block, size_t blockLen, bool* hostOk,
+                             char hostSavHex[65]);
+void pc_netplay_abort_desync(const char* why);
 #endif
 #if PIKI_NETPLAY_BUILD
 // Netplay launch lane (issue #887): defined by pc_netplay_launch.cpp, which
@@ -109,36 +138,104 @@ uint64_t checkpointHash(const std::string& bytes) {
     for (unsigned char byte : bytes) { hash ^= byte; hash *= 1099511628211ULL; }
     return hash;
 }
-void loadCampaignCheckpoint() {
-    if (!std::filesystem::exists(campaignDirectory)) return;
+// Netplay M4 lane B2 (issue #885): the checkpoint rules of the historical
+// loadCampaignCheckpoint, split into a side-effect-free scan so the
+// handshake's checkpoint info, the joiner's stale-checkpoint set-aside and
+// the post-transfer adoption reuse the one parser. loadCampaignCheckpoint()
+// keeps its exact behaviour: the same checks in the same order, the same
+// fail() messages, and campaignGeneration / campaignBlock /
+// consumedBenefits / campaignResumed set only as before.
+enum CkptScanStatus { kCkptNone, kCkptOk, kCkptBadName, kCkptMismatch, kCkptDamaged };
+struct CkptScan {
+    unsigned long long generation = 0; // newest well-named generation (kCkptOk: the checkpoint's)
     std::filesystem::path latest;
+    std::string block;
+    unsigned used[7] = {};
+};
+CkptScanStatus scanCampaignCheckpoint(CkptScan& s) {
+    if (!std::filesystem::exists(campaignDirectory)) return kCkptNone;
     for (const auto& entry : std::filesystem::directory_iterator(campaignDirectory)) {
         if (entry.path().extension() != ".sav") continue;
         const auto name = entry.path().stem().string();
         if (name.size() != 20 || name.find_first_not_of("0123456789") != std::string::npos)
-            fail("invalid campaign checkpoint filename");
+            return kCkptBadName;
         const auto generation = std::stoull(name);
-        if (generation > campaignGeneration) { campaignGeneration = generation; latest = entry.path(); }
+        if (generation > s.generation) { s.generation = generation; s.latest = entry.path(); }
     }
-    if (latest.empty()) return;
-    std::ifstream file(latest, std::ios::binary);
+    if (s.latest.empty()) return kCkptNone;
+    std::ifstream file(s.latest, std::ios::binary);
     std::string header; std::getline(file, header);
     std::istringstream meta(header);
     std::string magic, savedFingerprint, extra;
     unsigned long long generation; uint64_t hash;
-    unsigned used[7] = {};
     bool valid = bool(meta >> magic >> savedFingerprint >> generation);
-    for (int i = 0; i < (prereleaseTraps ? 7 : proggTraps ? 6 : bombTraps ? 5 : bombDeliveries ? 4 : 3); ++i) valid = valid && bool(meta >> used[i]) && used[i] <= checkCount;
+    for (int i = 0; i < (prereleaseTraps ? 7 : proggTraps ? 6 : bombTraps ? 5 : bombDeliveries ? 4 : 3); ++i) valid = valid && bool(meta >> s.used[i]) && s.used[i] <= checkCount;
     if (!valid || !(meta >> hash) || magic != (prereleaseTraps ? "PIKMIN_CAMPAIGN_5" : proggTraps ? "PIKMIN_CAMPAIGN_4" : bombTraps ? "PIKMIN_CAMPAIGN_3" : bombDeliveries ? "PIKMIN_CAMPAIGN_2" : "PIKMIN_CAMPAIGN_1")
-        || savedFingerprint != fingerprint || generation != campaignGeneration || (meta >> extra))
-        fail("campaign checkpoint header/seed mismatch; preserve campaign files for recovery");
-    campaignBlock.resize(32768);
-    file.read(&campaignBlock[0], 32768);
+        || savedFingerprint != fingerprint || generation != s.generation || (meta >> extra))
+        return kCkptMismatch;
+    s.block.resize(32768);
+    file.read(&s.block[0], 32768);
     if (file.gcount() != 32768 || file.peek() != EOF
-        || checkpointHash(header.substr(0, header.rfind(' ')) + "\n" + campaignBlock) != hash)
-        fail("campaign checkpoint is damaged; preserve campaign files for recovery");
-    for (int i=0; i<7; ++i) consumedBenefits[i] = used[i];
+        || checkpointHash(header.substr(0, header.rfind(' ')) + "\n" + s.block) != hash)
+        return kCkptDamaged;
+    return kCkptOk;
+}
+const char* ckptScanReason(CkptScanStatus st) {
+    return st == kCkptBadName ? "invalid campaign checkpoint filename"
+         : st == kCkptMismatch ? "campaign checkpoint header/seed mismatch; preserve campaign files for recovery"
+         : "campaign checkpoint is damaged; preserve campaign files for recovery";
+}
+void loadCampaignCheckpoint() {
+    CkptScan s;
+    s.generation = campaignGeneration;
+    const CkptScanStatus st = scanCampaignCheckpoint(s);
+    campaignGeneration = s.generation;
+    if (st == kCkptNone) return;
+    if (st != kCkptOk) fail(ckptScanReason(st));
+    campaignBlock = s.block;
+    for (int i=0; i<7; ++i) consumedBenefits[i] = s.used[i];
     campaignResumed = true;
+}
+// B2: a netplay session is configured (the session parses argv/env lazily;
+// pc_main hands it argv before pc_bbft_init). Weak: always false in the
+// default build.
+bool netplay_session() {
+    return pc_netplay_session_active != nullptr && pc_netplay_session_active();
+}
+bool netplay_join_mode() {
+    return netplay_session() && pc_netplay_is_host != nullptr && !pc_netplay_is_host();
+}
+// B2, netplay join mode only: when the local checkpoint would be fatal
+// (foreign fingerprint, damaged, badly named), rename every *.sav in the
+// campaign directory to *.sav.stale-<unix seconds> (never delete) and go on
+// as "none". A valid checkpoint (same seed) is left alone: the handshake's
+// decision table compares it with the host's.
+void set_aside_stale_checkpoint() {
+    CkptScan s;
+    const CkptScanStatus st = scanCampaignCheckpoint(s);
+    if (st == kCkptNone || st == kCkptOk) return;
+    const char* reason = st == kCkptBadName ? "badly named checkpoint file"
+                       : st == kCkptMismatch ? "foreign or mismatched checkpoint header"
+                       : "damaged checkpoint";
+    std::printf("[netplay] local campaign checkpoint is stale (%s); setting it aside\n", reason);
+    const long long now = (long long)std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    std::vector<std::filesystem::path> savs;
+    for (const auto& entry : std::filesystem::directory_iterator(campaignDirectory))
+        if (entry.path().extension() == ".sav") savs.push_back(entry.path());
+    for (const auto& from : savs) {
+        std::filesystem::path to = from;
+        to += ".stale-" + std::to_string(now);
+        for (int n = 1; std::filesystem::exists(to) && n < 1000; ++n) {
+            to = from;
+            to += ".stale-" + std::to_string(now) + "-" + std::to_string(n);
+        }
+        std::error_code ec;
+        std::filesystem::rename(from, to, ec);
+        if (ec) fail("cannot set aside a stale campaign checkpoint; preserve campaign files for recovery");
+        std::printf("[netplay] set aside %s -> %s\n", from.filename().string().c_str(), to.filename().string().c_str());
+    }
+    std::fflush(stdout);
 }
 bool hex64(const std::string& s) {
     return s.size() == 64 && s.find_first_not_of("0123456789abcdef") == std::string::npos;
@@ -177,6 +274,78 @@ struct ParsedRand {
 uint32_t sNetGen = 0;
 bool sHavePublished = false;
 pc_randstate::PcRandState sLastPublished;
+
+// ---- Netplay M4 lane B1 outbox (issue #885) ----
+// `outbox active` = netplay session active AND the external-state stream on
+// (the same switch as lane A's stream). When inactive, every external write
+// site below runs its historical code byte for byte (the negative-control
+// PIKMIN_NETPLAY_RANDSTATE_STREAM=0 stays per-peer legacy). When active, a
+// site makes its sim-side change immediately and identically on both peers
+// and pushes an entry; pc_randomizer_outbox_flush() writes the host journals
+// or the client mirror once per Advance. None of the state below is read by
+// the sim or hashed: checks (not checksJournaled / mirrorChecked) stays the
+// only set the sim reads.
+// The containers live in one function-local static (fix round 1, review R4):
+// no namespace-scope constructor or atexit destructor is registered for
+// them, so a process that never enters outbox mode never constructs them.
+struct OutboxIo {
+    pc_rand_outbox::Queue queue;
+    std::set<unsigned> checksJournaled; // host: slots written to checks.txt this run
+    std::set<unsigned> mirrorChecked;   // client: slots written as CHECKED lines
+    pc_rand_outbox::ReceivedSequencer mirrorReceived; // client RECEIVED order
+};
+OutboxIo& outbox_io() {
+    static OutboxIo io;
+    return io;
+}
+bool outboxUsed = false; // set by the first push; the flush is a no-op before
+bool mirrorEmperor = false;         // client: EMPEROR line written
+uint32_t mirrorLastDeathLink = 0;   // client: last DEATHLINK total written
+uint32_t mirrorLastFrame = 0;       // client: frames never decrease
+uint32_t mirrorDeathsBase = 0;      // client: session.json pikmin_deaths (host ledger)
+// Client: DEATHS lines wait for the first host ledger message (it carries
+// deathsBase; a line written with base 0 could be a fatal retraction for the
+// M4c runner). DEATHS is an absolute total, so only the latest pending one
+// is kept; it is written with its own event frame when the ledger arrives.
+bool mirrorDeathsPending = false;
+uint32_t mirrorDeathsPendingTotal = 0, mirrorDeathsPendingFrame = 0;
+bool mirrorDeathsSuppressed = false; // host sent kLedgerBaseUnknown
+// Host ledger (runner session.json). deathsBase is fixed once, at session
+// start (pc_randomizer_force_net_publish -> ledger_start), before any Advance
+// and so before this run's deaths.txt has a line the runner could credit.
+// The first ledger message is always sent there, also without session.json
+// (base 0) or with an unreadable one (kLedgerBaseUnknown). Afterwards
+// ledger_poll re-reads session.json whenever its stamp changes (every
+// stream-host poll turn) and sends the receipts from ledgerSent onward.
+bool ledgerStarted = false;
+uint32_t ledgerDeathsBase = 0;
+size_t ledgerSent = 0;
+uint64_t ledgerFineStamp = 0;
+bool ledgerHaveStamp = false;
+// Host link liveness (HOLD source): state.txt readable, parsed, ready=1 and
+// its stamp changed within 3 s. Computed on the host I/O side only. The
+// freshness clock is linkFreshAt, touched only by a new state.txt stamp
+// (stream_host_take) and the RESUME read (fix round 1, review B1-C4): the
+// legacy lastFresh is also moved by every applied snapshot. A failed stat
+// never clears linkStateOk (B1-C3): a missing or locked file ages out
+// through the 3 s window instead of one stat blip HOLDing the session.
+bool linkStateOk = false, linkReady = false;
+std::chrono::steady_clock::time_point linkFreshAt;
+// Stream host only: the fine (100 ns) state.txt stamp (see
+// pc_rand_outbox::file_write_stamp); the legacy path keeps lastStamp.
+uint64_t lastFineStamp = 0;
+bool haveFineStamp = false;
+bool outbox_active() {
+    return pc_netplay_session_active != nullptr && pc_netplay_session_active()
+        && pc_netplay_randstate_stream_enabled != nullptr && pc_netplay_randstate_stream_enabled();
+}
+bool outbox_host() { return pc_netplay_is_host == nullptr || pc_netplay_is_host(); }
+void outbox_push(const pc_rand_outbox::Entry& e) {
+    pc_rand_outbox::Entry stamped = e;
+    stamped.frame = pc_netplay_current_frame != nullptr ? pc_netplay_current_frame() : 0;
+    outboxUsed = true;
+    if (!outbox_io().queue.push(stamped)) fail("netplay outbox overflow");
+}
 void parse_state_stream(std::istream& input, ParsedRand& out) {
     std::string magic, session, end, extra;
     unsigned version, newReady, newRepairs, newUnlocks, newFlarlic = 0;
@@ -250,11 +419,27 @@ void apply_parsed(const ParsedRand& p) {
         colorStats[c][stat] = baseColorStats[c][stat] + (stat == 3 ? p.stats[c][stat] : 25 * p.stats[c][stat]);
     }
     for (int kind = 0; kind < 9; ++kind) benefits[kind] = p.benefits[kind];
+    // B1: in outbox mode a streamed latch or DeathLink rise also becomes a
+    // client mirror event (EMPEROR / DEATHLINK). Sim state is untouched.
+    const bool outbox = outbox_active();
+    if (outbox && !emperorDefeated && p.emperor != 0) {
+        pc_rand_outbox::Entry e; e.kind = pc_rand_outbox::Kind::EmperorApplied; outbox_push(e);
+    }
     emperorDefeated = emperorDefeated || p.emperor != 0;
     if (deathLinkUnit) {
-        if (!deathLinkBaseline) { deathLinksSeen = p.deathLinks; deathLinkBaseline = true; }
+        if (!deathLinkBaseline) {
+            deathLinksSeen = p.deathLinks; deathLinkBaseline = true;
+            if (outbox && p.deathLinks > 0) {
+                std::printf("[Pikmin Randomizer] DEATHLINK_TOTAL %u\n", p.deathLinks);
+                pc_rand_outbox::Entry e; e.kind = pc_rand_outbox::Kind::DeathLink; e.total = p.deathLinks; outbox_push(e);
+            }
+        }
         else if (p.deathLinks < deathLinksSeen) fail("state retracted received DeathLinks");
         else {
+            if (outbox && p.deathLinks > deathLinksSeen) {
+                std::printf("[Pikmin Randomizer] DEATHLINK_TOTAL %u\n", p.deathLinks);
+                pc_rand_outbox::Entry e; e.kind = pc_rand_outbox::Kind::DeathLink; e.total = p.deathLinks; outbox_push(e);
+            }
             deathLinksPending = std::min(3u, deathLinksPending + (p.deathLinks - deathLinksSeen));
             deathLinksSeen = p.deathLinks;
         }
@@ -264,7 +449,18 @@ void apply_parsed(const ParsedRand& p) {
     unlocks = p.unlocks;
     if (flarlic != p.flarlic) std::printf("[Pikmin Randomizer] CAPACITY %u\n", 10 * (startingFlarlic + p.flarlic));
     flarlic = p.flarlic;
-    checks.insert(p.checks.begin(), p.checks.end());
+    if (outbox) {
+        // B1: a streamed CHECKS apply that adds a slot is logged on both
+        // peers and mirrored by the client as CHECKED (insert order is the
+        // set order, identical on both peers).
+        for (unsigned slot : p.checks) {
+            if (!checks.insert(slot).second) continue;
+            std::printf("[Pikmin Randomizer] CHECK_APPLIED %u %s\n", slot, checkName(slot));
+            pc_rand_outbox::Entry e; e.kind = pc_rand_outbox::Kind::CheckApplied; e.slot = slot; outbox_push(e);
+        }
+    } else {
+        checks.insert(p.checks.begin(), p.checks.end());
+    }
     if (pc_randomizer_goal() && !goalReported) {
         goalReported = true;
         std::puts("[Pikmin Randomizer] GOAL: Seed complete.");
@@ -501,7 +697,18 @@ bool pc_randomizer_init(int argc, char** argv) {
         fail("run directory already used; launch a new session run");
     // Consumption belongs to the saved world, not to the latest abandoned day.
     benefitJournal = directory / "benefits-used.txt";
+    // Netplay M4 lane B2 (issue #885): in netplay join mode only, a stale
+    // local checkpoint (foreign fingerprint, damaged or badly named) is not
+    // fatal: the host's checkpoint replaces it during the handshake's
+    // transfer phase, so it is set aside (never deleted) and the joiner
+    // continues as "none". The host, and every non-netplay run, keep the
+    // historical fatal behaviour below.
+    if (netplay_join_mode()) set_aside_stale_checkpoint();
     loadCampaignCheckpoint();
+    if (campaignResumed && netplay_session()) {
+        std::printf("[Pikmin Randomizer] CAMPAIGN_RESUMED generation=%llu\n", campaignGeneration);
+        std::fflush(stdout);
+    }
     enabled = true;
 #if PIKI_NETPLAY_BUILD
     // Netplay launch lane (issue #887): a one-command netplay session has no
@@ -571,6 +778,146 @@ bool pc_randomizer_init(int argc, char** argv) {
     return true;
 }
 
+namespace {
+// B1 mirror ledger, host I/O side: the runner's session.json at
+// directory/../../session.json (root session.py, json.dumps(indent=2)) feeds
+// kBulkMirrorLedger messages with every receipt from ledgerSent onward. The
+// mirror is never sim state: nothing here is ever fatal.
+//
+// Fix round 1 (review B1-C5 / R2 / B1-C6 / R7):
+// * ledger_start runs once, at session start (before any Advance, so this
+//   run's deaths.txt is still empty and session.json's pikmin_deaths cannot
+//   include any of this run's deaths). It fixes deathsBase and ALWAYS sends
+//   one message, so the client never has to guess between "no ledger" and
+//   "ledger not arrived yet": base 0 without session.json; the file's
+//   pikmin_deaths when it reads; kLedgerBaseUnknown when it exists but stays
+//   unreadable over 10 attempts 10 ms apart (the client then writes no DEATHS
+//   lines, never a wrong absolute total).
+// * ledger_poll runs on every stream-host poll turn: whenever session.json's
+//   fine stamp changes it re-reads the file and sends the new receipts, so a
+//   receipt that leaves state.txt unchanged still reaches the mirror. A file
+//   locked mid-replace is retried next turn; a malformed one is logged and
+//   skipped until its next rewrite. deathsBase never changes after start.
+// Ledger messages still queued in the session (or in flight on the bulk
+// channel) when the process exits are lost; the next session re-sends from
+// index 0 and the client's RECEIVED sequencer ignores what it already wrote.
+std::filesystem::path ledger_path() {
+    return directory.parent_path().parent_path() / "session.json";
+}
+// 0 = no session.json, 1 = parsed into `out`, 2 = cannot open (transient),
+// 3 = malformed or too large (`reason` says why).
+int ledger_read(pc_rand_outbox::SessionLedger& out, std::string& reason) {
+    std::error_code ec;
+    const std::filesystem::path path = ledger_path();
+    if (!std::filesystem::exists(path, ec)) return 0;
+    std::string text;
+    FILE* file = std::fopen(path.string().c_str(), "rb");
+    if (!file) { reason = "cannot open"; return 2; }
+    char buf[65536];
+    size_t n = 0;
+    bool tooBig = false;
+    while ((n = std::fread(buf, 1, sizeof(buf), file)) > 0) {
+        if (text.size() + n > pc_rand_outbox::kMaxSessionJson) { tooBig = true; break; }
+        text.append(buf, n);
+    }
+    std::fclose(file);
+    if (tooBig) { reason = "too large"; return 3; }
+    out = pc_rand_outbox::SessionLedger();
+    if (!pc_rand_outbox::scan_session_json(text.data(), text.size(), out, reason)) return 3;
+    return 1;
+}
+void ledger_send_from(const pc_rand_outbox::SessionLedger& ledger, bool always) {
+    if (ledger.received.size() < ledgerSent) {
+        std::printf("[netplay] mirror ledger: session.json received shrank (%zu < %zu); ignored\n",
+                    ledger.received.size(), ledgerSent);
+        std::fflush(stdout);
+        return;
+    }
+    if (!always && ledger.received.size() == ledgerSent) return;
+    do {
+        const size_t count = std::min<size_t>(pc_rand_outbox::kLedgerMaxCount, ledger.received.size() - ledgerSent);
+        const std::vector<uint8_t> msg = pc_rand_outbox::encode_ledger(ledgerDeathsBase, (uint32_t)ledgerSent,
+            count ? ledger.received.data() + ledgerSent : nullptr, (uint32_t)count);
+        pc_netplay_mirror_ledger_send(msg.data(), msg.size());
+        std::printf("[netplay] mirror ledger: sent deathsBase=%u first=%zu count=%zu\n",
+                    ledgerDeathsBase, ledgerSent, count);
+        ledgerSent += count;
+    } while (ledgerSent < ledger.received.size());
+    std::fflush(stdout);
+}
+void ledger_start() {
+    if (ledgerStarted || pc_netplay_mirror_ledger_send == nullptr || directory.empty()) return;
+    ledgerStarted = true;
+    pc_rand_outbox::SessionLedger ledger;
+    std::string reason;
+    uint64_t fine = 0;
+    bool haveFine = pc_rand_outbox::file_write_stamp(ledger_path(), &fine);
+    int got = ledger_read(ledger, reason);
+    for (int attempt = 1; (got == 2 || got == 3) && attempt < 10; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        haveFine = pc_rand_outbox::file_write_stamp(ledger_path(), &fine);
+        got = ledger_read(ledger, reason);
+    }
+    if (got == 1) {
+        ledgerDeathsBase = ledger.pikminDeaths;
+        if (haveFine) { ledgerFineStamp = fine; ledgerHaveStamp = true; }
+        std::printf("[netplay] mirror ledger: session start deathsBase=%u received=%zu\n",
+                    ledgerDeathsBase, ledger.received.size());
+        ledger_send_from(ledger, true);
+        return;
+    }
+    if (got == 0) {
+        ledgerDeathsBase = 0;
+        std::printf("[netplay] mirror ledger: no session.json at session start (deathsBase 0, no RECEIVED yet)\n");
+    } else {
+        ledgerDeathsBase = pc_rand_outbox::kLedgerBaseUnknown;
+        std::printf("[netplay] mirror ledger: session.json unreadable at session start: %s; deathsBase unknown, "
+                    "client DEATHS suppressed\n", reason.c_str());
+    }
+    ledger_send_from(pc_rand_outbox::SessionLedger(), true);
+}
+void ledger_poll() {
+    if (!ledgerStarted || pc_netplay_mirror_ledger_send == nullptr || directory.empty()) return;
+    uint64_t fine = 0;
+    if (!pc_rand_outbox::file_write_stamp(ledger_path(), &fine)) return; // absent: nothing new
+    if (ledgerHaveStamp && fine == ledgerFineStamp) return;
+    pc_rand_outbox::SessionLedger ledger;
+    std::string reason;
+    const int got = ledger_read(ledger, reason);
+    if (got == 2) return; // locked mid-replace: retry next turn
+    ledgerFineStamp = fine;
+    ledgerHaveStamp = true;
+    if (got == 3) {
+        std::printf("[netplay] mirror ledger: session.json unreadable: %s\n", reason.c_str());
+        std::fflush(stdout);
+        return;
+    }
+    if (got == 1) ledger_send_from(ledger, false);
+}
+// Stream host, after a successful parse: link liveness, publish on content
+// change only (the run_pair refresher rewrites state.txt every 0.1 s with
+// identical bytes, and a rewrite alone must not bump the generation: each
+// generation costs 16 submits). While a HOLD is requested or in progress
+// nothing is published here; the RESUME snapshot
+// (pc_randomizer_resume_snapshot) carries the latest content with a fresh
+// generation instead.
+void stream_host_take(const ParsedRand& parsed) {
+    linkStateOk = true;
+    linkReady = parsed.ready != 0;
+    lastFresh = std::chrono::steady_clock::now();
+    linkFreshAt = lastFresh;
+    pc_randstate::PcRandState st;
+    net_from_parsed(parsed, 0, st);
+    const bool holding = pc_netplay_hold_active != nullptr && pc_netplay_hold_active();
+    if (holding || (sHavePublished && pc_randstate::payload_equal(st, sLastPublished))) return;
+    if (++sNetGen == 0) fail("randomizer snapshot generation wrapped");
+    st.gen = sNetGen; // first published generation is 1
+    sLastPublished = st;
+    sHavePublished = true;
+    if (pc_netplay_randstate_publish != nullptr) pc_netplay_randstate_publish(st);
+}
+} // namespace
+
 void pc_randomizer_update() {
     if (!enabled) return;
     // Netplay M4 lane A (issue #885): when the session is active and the
@@ -586,39 +933,44 @@ void pc_randomizer_update() {
         && pc_netplay_randstate_stream_enabled();
     const bool isHost = !stream || pc_netplay_is_host == nullptr || pc_netplay_is_host();
     if (stream && !isHost) return; // client: stream only
+    if (stream) {
+        // B1: the stream host detects every rewrite with the fine stamp, so
+        // changes inside one second are never coalesced or lost. A failed
+        // stat (missing, or a transient delete-pending / AV lock) changes
+        // nothing: liveness ages out through the 3 s freshness window
+        // (fix round 1, B1-C3). The runner's session.json is polled on the
+        // same turn (B1-C6).
+        ledger_poll();
+        uint64_t fine = 0;
+        if (!pc_rand_outbox::file_write_stamp(directory / "state.txt", &fine)) return;
+        if (haveFineStamp && fine == lastFineStamp) return;
+        std::ifstream input(directory / "state.txt");
+        if (!input.is_open()) return; // replace in progress: retry next turn
+        ParsedRand parsed;
+        parse_state_stream(input, parsed); // fail-closed, exactly as before
+        lastFineStamp = fine;
+        haveFineStamp = true;
+        stream_host_take(parsed);
+        return;
+    }
     std::error_code error;
     const auto stamp = std::filesystem::last_write_time(directory / "state.txt", error);
-    // In stream mode the poll never mutates sim-visible state (not even
-    // ready=false on errors): the host sim changes only through stream
-    // applies, so both peers stay identical. Lane B owns link-liveness HOLD.
-    if (error) { if (!stream) ready = false; return; }
+    // Legacy (no stream) poll from here on. The stream host above never
+    // mutates sim-visible state (not even ready=false on errors): the host
+    // sim changes only through stream applies, so both peers stay
+    // identical; its poll feeds the link liveness (pc_randomizer_link_live)
+    // that drives the synchronized HOLD/RESUME instead.
+    if (error) { ready = false; return; }
     if (stamp == lastStamp) {
-        if (!stream && std::chrono::steady_clock::now() - lastFresh > std::chrono::seconds(3)) ready = false;
+        if (std::chrono::steady_clock::now() - lastFresh > std::chrono::seconds(3)) ready = false;
         return;
     }
     std::ifstream input(directory / "state.txt");
     // Windows may briefly deny opening a file being atomically replaced.
     // Pause and retry; an opened but malformed record still fails closed.
-    if (!input.is_open()) { if (!stream) ready = false; return; }
+    if (!input.is_open()) { ready = false; return; }
     ParsedRand parsed;
     parse_state_stream(input, parsed); // fail-closed, exactly as before
-    if (stream) {
-        pc_randstate::PcRandState st;
-        net_from_parsed(parsed, 0, st);
-        // Publish on content change only: the run_pair refresher rewrites
-        // state.txt every 0.1 s with identical bytes, and the stamp alone
-        // must not bump the generation (each generation costs 16 submits).
-        if (!sHavePublished || !pc_randstate::payload_equal(st, sLastPublished)) {
-            if (++sNetGen == 0) fail("randomizer snapshot generation wrapped");
-            st.gen = sNetGen; // first published generation is 1
-            sLastPublished = st;
-            sHavePublished = true;
-            if (pc_netplay_randstate_publish != nullptr) pc_netplay_randstate_publish(st);
-        }
-        lastStamp = stamp;
-        lastFresh = std::chrono::steady_clock::now();
-        return;
-    }
     apply_parsed(parsed);
     lastStamp = stamp;
     lastFresh = std::chrono::steady_clock::now();
@@ -631,15 +983,75 @@ void pc_randomizer_update() {
 // next update re-read; when the content is new (or nothing was ever
 // published) it bumps gen and queues the snapshot before the first submit.
 // When the content is unchanged and already queued, this is a no-op.
-void pc_randomizer_force_net_publish() {
-    if (!enabled) return;
+// B1: returns false only on the stream host when state.txt could not be read
+// and parsed by this forced poll (the session then HOLDs from its first
+// input, so the neutral gate never waits silently); true otherwise. The
+// forced poll also reads the mirror ledger (session start).
+// Fix round 1 (B1-C3): a transient open/stat failure is retried up to 10
+// times 10 ms apart before the missing-state HOLD is chosen, and the mirror
+// ledger's session-start message always goes out (ledger_start).
+bool pc_randomizer_force_net_publish() {
+    if (!enabled) return true;
     const bool netActive = pc_netplay_session_active != nullptr && pc_netplay_session_active();
     const bool stream = netActive && pc_netplay_randstate_stream_enabled != nullptr
         && pc_netplay_randstate_stream_enabled();
     const bool isHost = !stream || pc_netplay_is_host == nullptr || pc_netplay_is_host();
-    if (!stream || !isHost) return;
+    if (!stream || !isHost) return true;
     lastStamp = std::filesystem::file_time_type{};
+    haveFineStamp = false; // B1: the stream host polls the fine stamp
+    linkStateOk = false; // proven again by this poll
     pc_randomizer_update();
+    for (int attempt = 1; !linkStateOk && attempt < 10; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        haveFineStamp = false;
+        pc_randomizer_update();
+    }
+    ledger_start();
+    return linkStateOk;
+}
+
+// B1 host link liveness: state.txt readable and parsed, its ready field 1,
+// and its stamp changed within 3 s (the historical staleness threshold).
+// Launcher sessions write a static state.txt that is never rewritten and
+// have no Archipelago link, so they are always live. Host I/O side only.
+bool pc_randomizer_link_live() {
+    if (!enabled) return true;
+#if PIKI_NETPLAY_BUILD
+    if (pc_netplay_launch_wants_local_state()) return true;
+#endif
+    return linkStateOk && linkReady
+        && std::chrono::steady_clock::now() - linkFreshAt <= std::chrono::seconds(3);
+}
+
+// B1 RESUME snapshot (host I/O side): a fresh read of state.txt with a new
+// generation. Clears the stamp so the next ordinary poll re-reads, records
+// the content as published (no duplicate generation afterwards) and
+// refreshes the mirror ledger. Returns false when state.txt cannot be read
+// now (the session retries on a later turn); a malformed record fails
+// closed like every other poll.
+bool pc_randomizer_resume_snapshot(pc_randstate::PcRandState* out) {
+    if (!enabled || out == nullptr) return false;
+    uint64_t fine = 0;
+    if (!pc_rand_outbox::file_write_stamp(directory / "state.txt", &fine)) return false;
+    std::ifstream input(directory / "state.txt");
+    if (!input.is_open()) return false;
+    ParsedRand parsed;
+    parse_state_stream(input, parsed);
+    pc_randstate::PcRandState st;
+    net_from_parsed(parsed, 0, st);
+    if (++sNetGen == 0) fail("randomizer snapshot generation wrapped");
+    st.gen = sNetGen;
+    sLastPublished = st;
+    sHavePublished = true;
+    linkStateOk = true;
+    linkReady = parsed.ready != 0;
+    lastFineStamp = fine;
+    haveFineStamp = true;
+    lastFresh = std::chrono::steady_clock::now();
+    linkFreshAt = lastFresh;
+    ledger_poll();
+    *out = st;
+    return true;
 }
 
 bool pc_randomizer_apply_net_state(const pc_randstate::PcRandState& st) {
@@ -737,6 +1149,26 @@ bool pc_randomizer_benefit_pending(PcBenefit kind) {
 }
 bool pc_randomizer_consume_benefit(PcBenefit kind) {
     if (!pc_randomizer_benefit_pending(kind)) return false;
+    if (outbox_active()) {
+        // B1 outbox mode (issue #885). Both peers consume in the same tick;
+        // the host journals the line in pc_randomizer_outbox_flush at the
+        // end of this same Advance, i.e. before the next tick runs and
+        // before any campaign save (a save happens in a later tick, and the
+        // B2 save barrier flushes the outbox before it writes). Persist-
+        // before-apply still holds where it matters: if the process dies
+        // between this apply and the flush, the unsaved day is lost with it,
+        // and consumption belongs to the saved world (consumedBenefits is
+        // restored from the campaign checkpoint at relaunch), so the benefit
+        // is never granted twice.
+        ++consumedBenefits[consumedIndex(kind)];
+        std::printf("[Pikmin Randomizer] BENEFIT_USED kind=%d count=%u\n", int(kind), consumedBenefits[consumedIndex(kind)]);
+        pc_rand_outbox::Entry e;
+        e.kind = pc_rand_outbox::Kind::Benefit;
+        e.benefitKind = int(kind);
+        e.count = consumedBenefits[consumedIndex(kind)];
+        outbox_push(e);
+        return true;
+    }
     // Persist before applying a non-transactional native effect: never duplicate it on replay.
     FILE* file = std::fopen(benefitJournal.string().c_str(), "a");
     if (!file) fail("cannot open benefit consumption journal");
@@ -819,6 +1251,29 @@ bool pc_randomizer_p2_corpse_delivered(const void* tekiview, int type, int stage
         std::printf("[Pikmin Randomizer] P2_ORDINARY_DELIVERY SKIP source=%u no_generator_uid\n", sourceId);
         pc_randomizer_p2_forget_source(tekiview);
         return false;
+    }
+    if (outbox_active()) {
+        // B1 outbox mode: the return value and the receipt set must not
+        // depend on host-only ledger I/O (a different sim branch on one
+        // peer). Both peers treat a bound source with a generator uid as
+        // Granted; the host opens the ledger and delivers at the end of this
+        // Advance (an open failure there is fatal, never a silent false).
+        // The client never opens the ledger.
+        p2ReceiptGenerators.insert(generatorUid);
+        // Peer-neutral sim-side line on both peers (fix round 1, R6); the
+        // host's P2_ORDINARY_P2_RECEIPT line at flush time is host-only (it
+        // reports the ledger's result, which only the host has).
+        std::printf("[Pikmin Randomizer] P2_ORDINARY_DELIVERY source=%u type=%d stage=%d generator=%u\n",
+            sourceId, type, stage, generatorUid);
+        pc_rand_outbox::Entry e;
+        e.kind = pc_rand_outbox::Kind::P2Delivery;
+        e.p2Source = sourceId;
+        e.p2Type = type;
+        e.p2Stage = stage;
+        e.p2Generator = generatorUid;
+        outbox_push(e);
+        pc_randomizer_p2_forget_source(tekiview);
+        return true;
     }
     // Open the durable ordinary receipt ledger once per process, at a path stable
     // across a save + process restart (the session campaign directory).
@@ -987,6 +1442,16 @@ bool pc_randomizer_goal() { return enabled && repairs == 25 && (!emperorGoal || 
 bool pc_randomizer_emperor_available() { return !enabled || !emperorGoal || (ready && repairs == 25); }
 void pc_randomizer_emperor_defeated() {
     if (!enabled || !emperorGoal || !ready || repairs != 25 || emperorDefeated) return;
+    if (outbox_active()) {
+        // B1 outbox mode: latch and report on both peers now; the host
+        // writes emperor.tmp -> emperor.txt at the end of this Advance.
+        emperorDefeated = true;
+        std::puts("[Pikmin Randomizer] GOAL: Emperor Bulblax defeated!");
+        pc_rand_outbox::Entry e;
+        e.kind = pc_rand_outbox::Kind::Emperor;
+        outbox_push(e);
+        return;
+    }
     FILE* file = std::fopen((directory / "emperor.tmp").string().c_str(), "w");
     if (!file) fail("cannot persist Emperor defeat");
     bool ok = std::fprintf(file, "EMPEROR_DEFEATED %s %s\n", token.c_str(), fingerprint.c_str()) > 0 && std::fflush(file) == 0;
@@ -1004,7 +1469,39 @@ void pc_randomizer_emperor_defeated() {
 int pc_randomizer_deathlink_casualties() {
     return enabled && deathLinkUnit && ready && deathLinksPending ? int(deathLinkUnit) : 0;
 }
+#if PIKI_NETPLAY_BUILD
+// B1 TEST-ONLY knob (netplay builds only): PIKMIN_NETPLAY_TEST_DEATHLINK_AS_ORDINARY=1
+// makes deathlink_induce a no-op, so DeathLink kills are journaled as
+// ordinary deaths (exact-count evidence). It changes sim state
+// (deathsReported is hashed), so the session hashes it into the handshake
+// config and run_pair scrubs it. Fix round 1 (B1-C8 / R5): it is honoured
+// only while the outbox is active (a netplay session with the stream on),
+// so a netplay build running solo or AP behaves as without the variable
+// (no DeathLink feedback loop through deaths.txt); logged once when honoured.
+bool pc_randomizer_test_deathlink_as_ordinary() {
+    static int cached = -1;
+    if (cached < 0) {
+        const char* v = std::getenv("PIKMIN_NETPLAY_TEST_DEATHLINK_AS_ORDINARY");
+        cached = (v && v[0] == '1' && v[1] == '\0') ? 1 : 0;
+    }
+    return cached == 1;
+}
+namespace {
+bool test_deathlink_as_ordinary_now() {
+    if (!pc_randomizer_test_deathlink_as_ordinary() || !outbox_active()) return false;
+    static bool logged = false;
+    if (!logged) {
+        logged = true;
+        std::printf("[netplay] TEST knob PIKMIN_NETPLAY_TEST_DEATHLINK_AS_ORDINARY honoured: DeathLink kills count as ordinary deaths\n");
+    }
+    return true;
+}
+} // namespace
+#endif
 void pc_randomizer_deathlink_induce(const void* piki) {
+#if PIKI_NETPLAY_BUILD
+    if (test_deathlink_as_ordinary_now()) return;
+#endif
     if (piki) inducedDeaths.insert(piki);
 }
 void pc_randomizer_deathlink_consume(int killed) {
@@ -1015,6 +1512,22 @@ void pc_randomizer_deathlink_consume(int killed) {
 }
 void pc_randomizer_observe_pikmin_death(const void* piki) {
     if (!enabled || !deathLinkUnit) return;
+    if (outbox_active()) {
+        // B1 outbox mode: count on both peers now, visible in both logs; the
+        // host appends the running total to deaths.txt at the end of this
+        // Advance and the client mirrors it as DEATHS.
+        if (piki && inducedDeaths.erase(piki)) {
+            std::printf("[Pikmin Randomizer] PIKMIN_DEATH induced\n");
+            return;
+        }
+        ++deathsReported;
+        std::printf("[Pikmin Randomizer] PIKMIN_DEATH ordinary total=%u\n", deathsReported);
+        pc_rand_outbox::Entry e;
+        e.kind = pc_rand_outbox::Kind::Death;
+        e.total = deathsReported;
+        outbox_push(e);
+        return;
+    }
     if (piki && inducedDeaths.erase(piki)) return; // Induced casualties never feed the outgoing threshold.
     FILE* file = std::fopen((directory / "deaths.txt").string().c_str(), "a");
     if (!file) fail("cannot open Pikmin death journal");
@@ -1055,6 +1568,18 @@ void pc_randomizer_check(const char* name) {
         fail("unknown native collection identity");
     }
     if (checks.count(unsigned(slot))) return;
+    if (outbox_active()) {
+        // B1 outbox mode: the sim set changes on both peers now; the host
+        // appends the slot to checks.txt at the end of this Advance (once,
+        // via checksJournaled) and the client mirrors it as CHECKED.
+        checks.insert(unsigned(slot));
+        std::printf("[Pikmin Randomizer] CHECK %d %s\n", slot, name);
+        pc_rand_outbox::Entry e;
+        e.kind = pc_rand_outbox::Kind::Check;
+        e.slot = unsigned(slot);
+        outbox_push(e);
+        return;
+    }
     FILE* file = std::fopen((directory / "checks.txt").string().c_str(), "a");
     if (!file) fail("cannot persist native collection");
     bool ok = std::fprintf(file, "%d\n", slot) > 0 && std::fflush(file) == 0;
@@ -1207,10 +1732,22 @@ bool pc_randomizer_load_campaign(void* destination) {
     std::memcpy(destination, campaignBlock.data(), 32768);
     return true;
 }
-void pc_randomizer_save_campaign(const void* source) {
-    if (!enabled) return;
-    std::filesystem::create_directories(campaignDirectory);
-    const auto generation = campaignGeneration + 1;
+namespace {
+// Writes the campaign checkpoint for `generation` (tmp + fsync + rename).
+// fatal (every non-netplay save and the netplay host): any failure is fail(),
+// exactly as before. Non-fatal (the netplay client's mirror checkpoint,
+// M4 lane B2): a failure returns false and leaves no .sav behind.
+// suffix (fix round 1, C2): the client writes `<name>.sav.pending`, which no
+// checkpoint scan reads, and renames it to `.sav` only after the host's ok.
+bool write_campaign_checkpoint(const void* source, unsigned long long generation, bool fatal,
+                               std::string* bytesOut, std::filesystem::path* finalOut,
+                               const char* suffix = nullptr) {
+    if (fatal) std::filesystem::create_directories(campaignDirectory);
+    else {
+        std::error_code ec;
+        std::filesystem::create_directories(campaignDirectory, ec);
+        if (ec) return false;
+    }
     std::ostringstream meta;
     meta << (prereleaseTraps ? "PIKMIN_CAMPAIGN_5 " : proggTraps ? "PIKMIN_CAMPAIGN_4 " : bombTraps ? "PIKMIN_CAMPAIGN_3 " : bombDeliveries ? "PIKMIN_CAMPAIGN_2 " : "PIKMIN_CAMPAIGN_1 ") << fingerprint << ' ' << generation;
     for (int i = 0; i < (prereleaseTraps ? 7 : proggTraps ? 6 : bombTraps ? 5 : bombDeliveries ? 4 : 3); ++i) meta << ' ' << consumedBenefits[i];
@@ -1219,9 +1756,13 @@ void pc_randomizer_save_campaign(const void* source) {
     std::string bytes = meta.str() + " " + std::to_string(hash) + "\n" + block;
     char name[32]; std::snprintf(name, sizeof(name), "%020llu.sav", generation);
     auto final = campaignDirectory / name;
+    if (suffix != nullptr) final += suffix;
     auto temporary = campaignDirectory / (token + ".tmp");
     FILE* file = std::fopen(temporary.string().c_str(), "wb");
-    if (!file) fail("cannot create campaign checkpoint");
+    if (!file) {
+        if (fatal) fail("cannot create campaign checkpoint");
+        return false;
+    }
     bool ok = std::fwrite(bytes.data(), 1, bytes.size(), file) == bytes.size() && std::fflush(file) == 0;
 #ifdef _WIN32
     if (ok) ok = _commit(_fileno(file)) == 0;
@@ -1229,9 +1770,512 @@ void pc_randomizer_save_campaign(const void* source) {
     if (ok) ok = fsync(fileno(file)) == 0;
 #endif
     if (std::fclose(file) != 0) ok = false;
-    if (!ok) fail("cannot flush campaign checkpoint");
-    std::filesystem::rename(temporary, final);
+    if (!ok) {
+        if (fatal) fail("cannot flush campaign checkpoint");
+        std::error_code ec;
+        std::filesystem::remove(temporary, ec);
+        return false;
+    }
+    if (fatal) std::filesystem::rename(temporary, final);
+    else {
+        std::error_code ec;
+        std::filesystem::rename(temporary, final, ec);
+        if (ec) return false;
+    }
+    if (bytesOut != nullptr) *bytesOut = bytes;
+    if (finalOut != nullptr) *finalOut = final;
+    return true;
+}
+} // namespace
+
+void pc_randomizer_save_campaign(const void* source) {
+    if (!enabled) return;
+    // Netplay M4 lane B1 fix round 1 (review B1-C9): journal lines queued in
+    // this tick land before the checkpoint that records their sim state, so a
+    // crash between the two can never leave a check or consumed benefit in
+    // the checkpoint but not in checks.txt / benefits-used.txt. No-op outside
+    // outbox mode. (One line in B2's function; B2 keeps it at its barrier.)
+    pc_randomizer_outbox_flush(0);
+    const auto generation = campaignGeneration + 1;
+    write_campaign_checkpoint(source, generation, true, nullptr, nullptr);
     campaignGeneration = generation;
     std::printf("[Pikmin Randomizer] CAMPAIGN_SAVED generation=%llu\n", generation);
     std::fflush(stdout);
+}
+
+// ---- Netplay M4 lane B2: day-end save barrier (issue #885) ----
+// True in a netplay session with the external-state stream on (the outbox
+// mode) and the session's barrier hook linked: memoryCard.cpp then takes
+// pc_randomizer_save_campaign_netplay instead of the legacy statements.
+bool pc_randomizer_netplay_save_barrier_active() {
+    return enabled && outbox_active() && pc_netplay_save_barrier != nullptr;
+}
+bool pc_randomizer_netplay_agreed_saves() {
+    return enabled && outbox_active();
+}
+
+// Inside the day-end save tick, after writeOneGameFile + waitPolling. Both
+// peers run it at the same Advance (lockstep). The host writes its real
+// checkpoint, the client its mirror checkpoint in its own campaign/; the
+// session exchanges SAVE_RESULT / SAVE_ACK over the bulk channel only and
+// returns the host's outcome, which both peers then use as mDidSaveFail. The
+// generation both peers count on is advanced only on the agreed outcome, so
+// the next day's generation numbers agree even when the peers' local
+// results differ.
+namespace {
+// B2 fix round 1 (C2): the client's mirror checkpoint written for the save
+// in progress (`<name>.sav.pending`), until the barrier confirms or retracts it.
+std::filesystem::path netplayPendingCheckpoint;
+// Renames a checkpoint file to `<final>.unconfirmed` (or -<n>), never deleting.
+std::filesystem::path retract_checkpoint(const std::filesystem::path& from, const std::filesystem::path& final) {
+    std::filesystem::path to = final;
+    to += ".unconfirmed";
+    for (int n = 1; std::filesystem::exists(to) && n < 1000; ++n) {
+        to = final;
+        to += ".unconfirmed-" + std::to_string(n);
+    }
+    std::error_code ec;
+    std::filesystem::rename(from, to, ec);
+    if (ec) fail("cannot retract an unconfirmed campaign checkpoint; preserve campaign files for recovery");
+    return to;
+}
+std::filesystem::path pending_final(const std::filesystem::path& pending) {
+    std::filesystem::path final = pending;
+    final.replace_extension(); // drops ".pending"
+    return final;
+}
+} // namespace
+
+// B2 fix round 1 (C2): the session calls this (weakly) just before it exits
+// from inside the barrier (exit 5 desync or exit 6 timeout). The client's
+// unconfirmed checkpoint for this save is retracted, never deleted, so the
+// next session sees the generation both peers last agreed on.
+void pc_randomizer_netplay_barrier_abandoned() {
+    if (netplayPendingCheckpoint.empty()) return;
+    const std::filesystem::path final = pending_final(netplayPendingCheckpoint);
+    const std::filesystem::path to = retract_checkpoint(netplayPendingCheckpoint, final);
+    std::printf("[netplay] save barrier abandoned; retracted %s -> %s (generation stays %llu)\n",
+                netplayPendingCheckpoint.filename().string().c_str(), to.filename().string().c_str(),
+                campaignGeneration);
+    std::fflush(stdout);
+    netplayPendingCheckpoint.clear();
+}
+
+bool pc_randomizer_save_campaign_netplay(const void* source, bool localCardOk) {
+    if (!enabled) return localCardOk;
+    const uint32_t frame = pc_netplay_current_frame != nullptr ? pc_netplay_current_frame() : 0;
+    // Flush first: this tick's journal lines land before the checkpoint.
+    pc_randomizer_outbox_flush(frame);
+    const bool host = outbox_host();
+    const unsigned long long generation = campaignGeneration + 1;
+    std::string bytes;
+    std::filesystem::path written;
+    bool localOk = localCardOk;
+#if PIKI_NETPLAY_BUILD
+    // TEST ONLY (netplay builds): PIKMIN_NETPLAY_TEST_HOST_DIE_AT_BARRIER=1 makes
+    // the HOST exit abruptly (_Exit 7, no cleanup) at its day-end save, before
+    // it writes its checkpoint or answers the barrier, so a pair shows the
+    // client's barrier timeout (exit 6) and its retraction (fix round 1, C2).
+    if (host) {
+        const char* knob = std::getenv("PIKMIN_NETPLAY_TEST_HOST_DIE_AT_BARRIER");
+        if (knob != nullptr && knob[0] == '1' && knob[1] == '\0') {
+            std::printf("[netplay] test: host dies at the day-end save (before its checkpoint)\n");
+            std::fflush(stdout);
+            std::_Exit(7);
+        }
+    }
+#endif
+#if PIKI_NETPLAY_BUILD
+    // TEST ONLY (netplay builds): PIKMIN_NETPLAY_TEST_HOST_SAVE_FAIL=1 makes the
+    // HOST's day-end save report a failure (as if its card write failed), so a
+    // pair exercises the client's retract / SAVE_FAIL path at runtime. Both
+    // peers follow the host's outcome, so the sim stays identical; the knob is
+    // ignored on the client.
+    if (host && localOk) {
+        const char* knob = std::getenv("PIKMIN_NETPLAY_TEST_HOST_SAVE_FAIL");
+        if (knob != nullptr && knob[0] == '1' && knob[1] == '\0') {
+            localOk = false;
+            std::printf("[netplay] test: host day-end save forced to fail\n");
+        }
+    }
+#endif
+    if (localOk) {
+        // The host writes its real checkpoint; the client writes its mirror
+        // as <name>.sav.pending (fix round 1, C2) and publishes it as .sav
+        // only after the host's ok, so a barrier that ends in exit 5/6, or a
+        // client killed mid-barrier, never leaves an unconfirmed .sav behind.
+        localOk = write_campaign_checkpoint(source, generation, host, &bytes, &written, host ? nullptr : ".pending");
+        if (localOk && host) std::printf("[Pikmin Randomizer] CAMPAIGN_SAVED generation=%llu\n", generation);
+        else if (localOk) netplayPendingCheckpoint = written;
+        else std::printf("[netplay] save barrier: cannot write the local mirror checkpoint %020llu.sav\n", generation);
+        std::fflush(stdout);
+    }
+    bool hostOk = localOk;
+    char hostSavHex[65] = {};
+    const bool agreed = pc_netplay_save_barrier != nullptr
+                     && pc_netplay_save_barrier(frame, localOk, generation,
+                                                reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size(),
+                                                static_cast<const uint8_t*>(source), 32768, &hostOk, hostSavHex);
+    // Fix round 1 (C7): the barrier only returns false outside a running
+    // session, which cannot happen while the barrier is active; never go on
+    // with this peer's local outcome as if it were the agreed one.
+    if (!agreed) {
+        pc_randomizer_netplay_barrier_abandoned();
+        if (pc_netplay_abort_desync != nullptr)
+            pc_netplay_abort_desync("save barrier: no running session to agree the day-end save with");
+        fail("netplay save barrier without a running session");
+    }
+    if (host) {
+        if (hostOk) campaignGeneration = generation;
+        return hostOk;
+    }
+    netplayPendingCheckpoint.clear();
+    if (hostOk) {
+        if (localOk) {
+            // Publish the mirror checkpoint under its real name.
+            const std::filesystem::path final = pending_final(written);
+            std::error_code ec;
+            std::filesystem::rename(written, final, ec);
+            if (ec) {
+                localOk = false;
+                std::printf("[netplay] save barrier: cannot publish %s as %s (%s)\n",
+                            written.filename().string().c_str(), final.filename().string().c_str(),
+                            ec.message().c_str());
+            } else {
+                std::printf("[Pikmin Randomizer] CAMPAIGN_SAVED generation=%llu\n", generation);
+            }
+        }
+        if (!localOk) std::printf("[netplay] save barrier: local mirror save failed; following the host\n");
+        std::fflush(stdout);
+        campaignGeneration = generation;
+        pc_randomizer_mirror_save_result(frame, generation, hostSavHex);
+    } else {
+        if (localOk) {
+            // The host's save failed: the day is abandoned there, so this
+            // mirror checkpoint must not stand. Renamed, never deleted.
+            const std::filesystem::path to = retract_checkpoint(written, pending_final(written));
+            std::printf("[netplay] save barrier: host save failed; retracted %s -> %s (generation stays %llu)\n",
+                        written.filename().string().c_str(), to.filename().string().c_str(), campaignGeneration);
+            std::fflush(stdout);
+        }
+        pc_randomizer_mirror_save_fail(frame, generation);
+    }
+    return hostOk;
+}
+
+// B2 fix round 1 (C12): the client's own card write failed while the host's
+// save succeeded, and memoryCard.cpp rewrote the game file from the same
+// in-memory block. If that failed too, this peer's card no longer matches
+// the host's, and later card reads could branch the sim: end the session.
+void pc_randomizer_netplay_card_rewrite_result(bool ok) {
+    if (ok) {
+        std::printf("[netplay] save barrier: local card write failed; rewrote the game file from the agreed block\n");
+        std::fflush(stdout);
+        return;
+    }
+    if (pc_netplay_abort_desync != nullptr)
+        pc_netplay_abort_desync("save barrier: this peer cannot write the agreed game file to its memory card");
+    fail("netplay: cannot write the agreed game file to the memory card");
+}
+
+// B2 fix round 1 (C3): the options write after an agreed save is local I/O
+// only; its outcome must not reach the sim (memoryCard.cpp restores the
+// agreed mDidSaveFail after it). Logged when it failed here.
+void pc_randomizer_netplay_options_result(bool ok) {
+    if (ok) return;
+    std::printf("[netplay] save barrier: this peer's options write failed (local only; the agreed save "
+                "outcome stands)\n");
+    std::fflush(stdout);
+}
+
+// B2 fix round 1 (C5/E1): a resumed netplay session starts its first stage
+// through MapSelect, not the direct-boot path that prints START_STAGE; the
+// deterministic day reseed (GameCoreSection) reports that stage start here
+// so both peers log `START_STAGE <stage> day=<d> resumed=1`. Netplay
+// sessions only, once per process, resumed campaigns only.
+void pc_randomizer_netplay_stage_start(int day, int stage) {
+    static bool printed = false;
+    if (printed || !enabled || !campaignResumed || !netplay_session()) return;
+    printed = true;
+    std::printf("[Pikmin Randomizer] START_STAGE %d day=%d resumed=1 generation=%llu\n", stage, day,
+                campaignGeneration);
+    std::fflush(stdout);
+}
+
+// ---- Netplay M4 lane B2: checkpoint info, adoption (issue #885) ----
+// The handshake's checkpoint info: the newest valid checkpoint under the
+// loadCampaignCheckpoint rules (the same scan) and the SHA-256 of its file
+// bytes. gen 0 and zeros = none. False when the randomizer is disabled.
+bool pc_randomizer_checkpoint_info(uint64_t* gen, uint8_t sha[32]) {
+    if (gen != nullptr) *gen = 0;
+    if (sha != nullptr) std::memset(sha, 0, 32);
+    if (!enabled) return false;
+    CkptScan s;
+    if (scanCampaignCheckpoint(s) != kCkptOk) return true;
+    std::ifstream file(s.latest, std::ios::binary);
+    std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    if (gen != nullptr) *gen = s.generation;
+    if (sha != nullptr) pc_netplay_sha::sha256(bytes.data(), bytes.size(), sha);
+    return true;
+}
+
+// The derived campaign directory (absolute), "" when disabled.
+const char* pc_randomizer_campaign_dir() {
+    static std::string dir;
+    dir = enabled ? campaignDirectory.string() : std::string();
+    return dir.c_str();
+}
+
+// Joiner, after the transfer phase wrote the host's checkpoint and card
+// files: re-runs the loadCampaignCheckpoint rules from scratch, so
+// campaignBlock, consumedBenefits, campaignGeneration and campaignResumed
+// are exactly what a boot over these files would have set.
+bool pc_randomizer_adopt_checkpoint() {
+    if (!enabled) return false;
+    campaignGeneration = 0;
+    loadCampaignCheckpoint();
+    if (campaignResumed) {
+        std::printf("[Pikmin Randomizer] CAMPAIGN_RESUMED generation=%llu\n", campaignGeneration);
+        std::fflush(stdout);
+    }
+    return campaignResumed;
+}
+
+// ---- Netplay M4 lane B1: outbox flush, client mirror, ledger (issue #885) ----
+namespace {
+uint32_t mirror_frame(uint32_t frame) {
+    if (frame < mirrorLastFrame) frame = mirrorLastFrame; // frames never decrease
+    mirrorLastFrame = frame;
+    return frame;
+}
+// Client only. Binary append ("ab"): text mode on Windows would write CRLF
+// and the reference parser rejects a carriage return. One fflush per batch,
+// no fsync. Each line is echoed to stdout as `[netplay] mirror <line>`.
+void mirror_append(const std::vector<std::string>& lines) {
+    if (lines.empty()) return;
+    FILE* file = std::fopen((directory / "mirror-events.txt").string().c_str(), "ab");
+    if (!file) fail("cannot open netplay mirror-events.txt");
+    bool ok = true;
+    for (const std::string& line : lines) {
+        ok = ok && std::fwrite(line.data(), 1, line.size(), file) == line.size() && std::fputc(0x0A, file) != EOF;
+        std::printf("[netplay] mirror %s\n", line.c_str());
+    }
+    ok = std::fflush(file) == 0 && ok;
+    ok = std::fclose(file) == 0 && ok;
+    if (!ok) fail("netplay mirror-events.txt write failed");
+    std::fflush(stdout);
+}
+// Host: every entry in push order, each with its historical format and
+// durability; any write failure is fail() (exit 2), exactly as before.
+void outbox_flush_host(const std::vector<pc_rand_outbox::Entry>& entries) {
+    for (const pc_rand_outbox::Entry& e : entries) {
+        switch (e.kind) {
+        case pc_rand_outbox::Kind::Check: {
+            // A slot is journaled once per run; streamed slots never enter
+            // checksJournaled (AP-originated checks are not native).
+            if (!outbox_io().checksJournaled.insert(e.slot).second) break;
+            FILE* file = std::fopen((directory / "checks.txt").string().c_str(), "a");
+            if (!file) fail("cannot persist native collection");
+            bool ok = std::fprintf(file, "%d\n", int(e.slot)) > 0 && std::fflush(file) == 0;
+#ifdef _WIN32
+            ok = ok && _commit(_fileno(file)) == 0;
+#else
+            ok = ok && fsync(fileno(file)) == 0;
+#endif
+            ok = std::fclose(file) == 0 && ok;
+            if (!ok) fail("native collection persistence failed");
+            break;
+        }
+        case pc_rand_outbox::Kind::Benefit: {
+            FILE* file = std::fopen(benefitJournal.string().c_str(), "a");
+            if (!file) fail("cannot open benefit consumption journal");
+            bool ok = std::fprintf(file, "%s %d %u\n", fingerprint.c_str(), int(e.benefitKind), e.count) > 0 && std::fflush(file) == 0;
+#ifdef _WIN32
+            ok = ok && _commit(_fileno(file)) == 0;
+#else
+            ok = ok && fsync(fileno(file)) == 0;
+#endif
+            if (std::fclose(file) != 0 || !ok) fail("cannot persist benefit consumption");
+            break;
+        }
+        case pc_rand_outbox::Kind::Emperor: {
+            FILE* file = std::fopen((directory / "emperor.tmp").string().c_str(), "w");
+            if (!file) fail("cannot persist Emperor defeat");
+            bool ok = std::fprintf(file, "EMPEROR_DEFEATED %s %s\n", token.c_str(), fingerprint.c_str()) > 0 && std::fflush(file) == 0;
+#ifdef _WIN32
+            ok = ok && _commit(_fileno(file)) == 0;
+#else
+            ok = ok && fsync(fileno(file)) == 0;
+#endif
+            ok = std::fclose(file) == 0 && ok;
+            if (!ok) fail("Emperor defeat persistence failed");
+            std::filesystem::rename(directory / "emperor.tmp", directory / "emperor.txt");
+            break;
+        }
+        case pc_rand_outbox::Kind::Death: {
+            FILE* file = std::fopen((directory / "deaths.txt").string().c_str(), "a");
+            if (!file) fail("cannot open Pikmin death journal");
+            bool ok = std::fprintf(file, "%u\n", e.total) > 0 && std::fflush(file) == 0;
+            ok = std::fclose(file) == 0 && ok;
+            if (!ok) fail("Pikmin death journal write failed");
+            break;
+        }
+        case pc_rand_outbox::Kind::P2Delivery: {
+            if (!p2DeliveryHost) {
+                const std::filesystem::path path = campaignDirectory.empty()
+                    ? directory / "p2-delivery-receipts.txt"
+                    : campaignDirectory / "p2-delivery-receipts.txt";
+                p2DeliveryHost = pc_p2_delivery_host_open(path.string().c_str());
+                // Fatal on the host in outbox mode: the sim already took the
+                // Granted branch on both peers, so a silent skip would lose
+                // the receipt.
+                if (!p2DeliveryHost) fail("P2 ordinary delivery ledger open failed");
+            }
+            const std::string& seed = fingerprint.empty() ? token : fingerprint;
+            const P2DeliveryHostResult result = pc_p2_delivery_host_deliver(p2DeliveryHost, seed.c_str(),
+                e.p2Source, e.p2Type, e.p2Stage, e.p2Generator, "corpse");
+            std::printf("[Pikmin Randomizer] P2_ORDINARY_P2_RECEIPT seed=%s id=onion:p2:%u:%d generator=%u new=%d\n",
+                seed.c_str(), e.p2Source, e.p2Stage, e.p2Generator, int(result == P2DeliveryHostResult::Granted));
+            if (result == P2DeliveryHostResult::Error) fail("P2 ordinary delivery ledger write failed");
+            break;
+        }
+        case pc_rand_outbox::Kind::CheckApplied:
+        case pc_rand_outbox::Kind::EmperorApplied:
+        case pc_rand_outbox::Kind::DeathLink:
+            break; // mirror-only events: the host runner reads its own state
+        }
+    }
+}
+bool mirrorLedgerSeen = false;
+// Client: one DEATHS line for an absolute run total, or (before the first
+// ledger message) keep it pending: only the latest total matters.
+void mirror_deaths_line(std::vector<std::string>& lines, uint32_t frame, uint32_t total) {
+    if (mirrorDeathsSuppressed) return;
+    if (!mirrorLedgerSeen) {
+        mirrorDeathsPending = true;
+        mirrorDeathsPendingTotal = total;
+        mirrorDeathsPendingFrame = frame;
+        std::printf("[netplay] mirror DEATHS %u pending: no ledger message yet\n", total);
+        return;
+    }
+    const uint64_t absolute = (uint64_t)mirrorDeathsBase + total;
+    const std::string line = absolute > pc_rand_outbox::kMaxTotal ? std::string()
+        : pc_rand_outbox::mirror_deaths(mirror_frame(frame), (uint32_t)absolute);
+    if (line.empty()) std::printf("[netplay] mirror skip DEATHS %llu: out of range\n", (unsigned long long)absolute);
+    else lines.push_back(line);
+}
+// Client: no journal at all; mirror-events.txt lines in the root grammar,
+// each with its entry's own push frame (fix round 1, review R9).
+void outbox_flush_client(const std::vector<pc_rand_outbox::Entry>& entries) {
+    std::vector<std::string> lines;
+    for (const pc_rand_outbox::Entry& e : entries) {
+        const uint32_t frame = e.frame;
+        switch (e.kind) {
+        case pc_rand_outbox::Kind::Check:
+        case pc_rand_outbox::Kind::CheckApplied: {
+            if (!outbox_io().mirrorChecked.insert(e.slot).second) break;
+            const char* name = e.slot < checkCount ? checkName(e.slot) : nullptr;
+            const std::string line = pc_rand_outbox::mirror_checked(mirror_frame(frame), name);
+            if (line.empty()) std::printf("[netplay] mirror skip CHECKED slot=%u: name not expressible\n", e.slot);
+            else lines.push_back(line);
+            break;
+        }
+        case pc_rand_outbox::Kind::Emperor:
+        case pc_rand_outbox::Kind::EmperorApplied:
+            if (mirrorEmperor) break;
+            mirrorEmperor = true;
+            lines.push_back(pc_rand_outbox::mirror_emperor(mirror_frame(frame)));
+            break;
+        case pc_rand_outbox::Kind::Death:
+            mirror_deaths_line(lines, frame, e.total);
+            break;
+        case pc_rand_outbox::Kind::DeathLink: {
+            if (e.total <= mirrorLastDeathLink) break;
+            const std::string line = pc_rand_outbox::mirror_deathlink(mirror_frame(frame), e.total);
+            if (line.empty()) { std::printf("[netplay] mirror skip DEATHLINK %u: out of range\n", e.total); break; }
+            mirrorLastDeathLink = e.total;
+            lines.push_back(line);
+            break;
+        }
+        case pc_rand_outbox::Kind::Benefit:
+        case pc_rand_outbox::Kind::P2Delivery:
+            break; // host journals only; no mirror tag
+        }
+    }
+    mirror_append(lines);
+}
+} // namespace
+
+// Once per Advance (pc_netplay_session.cpp, after pc_state_hash_tick_end and
+// before the exit-after check), and at the top of pc_randomizer_save_campaign
+// (so a save inside a tick never checkpoints state whose journal lines are
+// still queued). `frame` is the caller's current frame and is not used for
+// the lines: every entry carries its own push frame. A no-op outside outbox
+// mode (nothing is ever queued there; the queue is not even constructed).
+void pc_randomizer_outbox_flush(uint32_t frame) {
+    (void)frame;
+    if (!enabled || !outboxUsed || outbox_io().queue.size() == 0) return;
+    std::vector<pc_rand_outbox::Entry> entries;
+    outbox_io().queue.take(entries);
+    if (outbox_host()) outbox_flush_host(entries);
+    else outbox_flush_client(entries);
+    std::fflush(stdout);
+}
+
+// Client: one kBulkMirrorLedger message from the host. The first message
+// fixes deathsBase; RECEIVED lines follow in index order without gaps at the
+// client's current frame (bulk delivery is unordered; the sequencer holds a
+// message that would leave a gap).
+void pc_randomizer_mirror_ledger_receive(const uint8_t* data, size_t len, uint32_t frame) {
+    if (!enabled || !outbox_active() || outbox_host()) return;
+    pc_rand_outbox::LedgerMsg msg;
+    if (!pc_rand_outbox::decode_ledger(data, len, msg)) {
+        std::printf("[netplay] mirror ledger: malformed message (len=%zu) dropped\n", len);
+        std::fflush(stdout);
+        return;
+    }
+    std::vector<std::string> lines;
+    if (!mirrorLedgerSeen) {
+        // The host sends its first message at session start, always; the
+        // base never changes afterwards. A DEATHS total that waited for it
+        // is written now, with its own event frame.
+        mirrorLedgerSeen = true;
+        if (msg.deathsBase == pc_rand_outbox::kLedgerBaseUnknown) {
+            mirrorDeathsSuppressed = true;
+            std::printf("[netplay] mirror ledger: deathsBase unknown (host session.json unreadable at start); "
+                        "DEATHS lines suppressed\n");
+        } else {
+            mirrorDeathsBase = msg.deathsBase;
+            std::printf("[netplay] mirror ledger: deathsBase=%u\n", mirrorDeathsBase);
+        }
+        if (mirrorDeathsPending) {
+            mirrorDeathsPending = false;
+            mirror_deaths_line(lines, mirrorDeathsPendingFrame, mirrorDeathsPendingTotal);
+        }
+    }
+    std::vector<std::pair<uint32_t, uint32_t>> fresh;
+    if (!outbox_io().mirrorReceived.offer(msg.firstIndex, msg.ids, fresh))
+        std::printf("[netplay] mirror ledger: too many held messages; first=%u dropped\n", msg.firstIndex);
+    for (const auto& r : fresh) {
+        const std::string line = pc_rand_outbox::mirror_received(mirror_frame(frame), r.first, r.second);
+        if (line.empty()) std::printf("[netplay] mirror skip RECEIVED %u %u: out of range\n", r.first, r.second);
+        else lines.push_back(line);
+    }
+    mirror_append(lines);
+    std::fflush(stdout);
+}
+
+// B2 writer API: the day-end save barrier reports its outcome to the client
+// mirror. Client + outbox mode only; a no-op on the host and outside netplay.
+void pc_randomizer_mirror_save_result(uint32_t frame, unsigned long long gen, const char* shaHex) {
+    if (!enabled || !outbox_active() || outbox_host()) return;
+    const std::string line = pc_rand_outbox::mirror_save_result(mirror_frame(frame), gen, shaHex);
+    if (line.empty()) { std::printf("[netplay] mirror skip SAVE_RESULT gen=%llu: not expressible\n", gen); return; }
+    mirror_append(std::vector<std::string>{ line });
+}
+void pc_randomizer_mirror_save_fail(uint32_t frame, unsigned long long gen) {
+    if (!enabled || !outbox_active() || outbox_host()) return;
+    const std::string line = pc_rand_outbox::mirror_save_fail(mirror_frame(frame), gen);
+    if (line.empty()) { std::printf("[netplay] mirror skip SAVE_FAIL gen=%llu: not expressible\n", gen); return; }
+    mirror_append(std::vector<std::string>{ line });
 }

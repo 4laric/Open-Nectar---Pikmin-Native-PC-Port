@@ -8,7 +8,10 @@
 // Wire format: identical to pc_netplay_udp. Every datagram sent through
 // juice_send() carries a 1-byte channel prefix:
 //   0x01  handshake (session hello/ack; consumed by pc_netplay_session)
-//   0x02  gekko     (GekkoNet packets; the only channel IceLink exposes)
+//   0x02  gekko     (GekkoNet packets; the only channel the adapter exposes)
+//   0x03  bulk      (M4 lane B2, issue #885: the reliable bulk channel, the
+//                   same pc_netplay_bulk::BulkChannel wire as over UDP;
+//                   IceLink::drain_bulk hands it to the session)
 // Unknown channels are dropped. Every declared length is bounded before use
 // (kMaxDatagram); oversized datagrams are dropped, never truncated.
 //
@@ -38,6 +41,7 @@
 namespace pc_netplay_ice {
 constexpr uint8_t kChannelHandshake = 0x01;
 constexpr uint8_t kChannelGekko     = 0x02;
+constexpr uint8_t kChannelBulk      = 0x03; // M4 lane B2
 constexpr size_t kMaxDatagram      = 4096;
 constexpr size_t kAddrBytes        = 6; // fixed placeholder blob over ICE
 constexpr int kMaxRecvPerPoll      = 64;
@@ -279,17 +283,27 @@ public:
 	// session handshake pump calls this; GekkoNet never sees them.
 	std::vector<IceSocket::Datagram> drain_handshake();
 
+	// Drains datagrams arrived on the bulk channel (0x03, M4 lane B2),
+	// like GekkoLink::drain_bulk: pumps the socket once, then hands the
+	// bulk queue to the session's BulkChannel. GekkoNet never sees them.
+	std::vector<IceSocket::Datagram> drain_bulk();
+
 	// Called by the C send_data trampoline.
 	void send_to_peer(uint32_t ipHostOrder, uint16_t port, const uint8_t* data, size_t len);
 	// Called by the C receive_data trampoline.
 	struct GekkoNetResult** receive_inner(int* length);
 
 private:
+	// Routes one received datagram to its channel queue (unknown channels
+	// are dropped), then caps every queue.
+	void route(std::vector<IceSocket::Datagram>& grams);
+
 	IceSocket* mSock;
 	GekkoNetAdapter mAdapter;
 	std::vector<struct GekkoNetResult*> mResults;
 	std::vector<IceSocket::Datagram> mGekkoPending;
 	std::vector<IceSocket::Datagram> mHandshakePending;
+	std::vector<IceSocket::Datagram> mBulkPending;
 };
 
 // ---- one-shot signalling orchestration (called by the session) ----

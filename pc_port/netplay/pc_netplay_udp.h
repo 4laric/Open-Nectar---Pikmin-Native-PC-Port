@@ -212,34 +212,50 @@ private:
 
 // Netplay M4 lane A reliable bulk channel over datagrams with channel byte
 // 0x03 (issue #885). Fragmented (<=1024 payload bytes per fragment),
-// acknowledged per fragment, retransmitted on a 100 ms timer, and with every
-// declared length bounded before allocation (max message 256 KiB).
+// acknowledged per fragment, and with every declared length bounded before
+// allocation (max message 256 KiB).
 //
 // Wire format (all multi-byte fields little-endian):
-//   DATA: [0]=type (0x10/0x11/0x12), [1..2]=msgId, [3..4]=fragIdx,
+//   DATA: [0]=type (0x10..0x1F), [1..2]=msgId, [3..4]=fragIdx,
 //         [5..6]=fragCount, [7..10]=totalLen, [11..]=payload (<=1024 B;
 //         exactly 1024 except the last fragment, which carries the remainder)
 //   ACK:  [0]=0x7F, [1..2]=msgId, [3..4]=fragIdx (5 bytes)
-// Message types (M4 plan section 2b; Lane B owns SaveResult/Checkpoint
-// payloads, lane A proves the channel with a 64 KiB blob):
-//   kBulkRandFull=0x10, kBulkSaveResult=0x11, kBulkCheckpoint=0x12.
+// Data types are the range 0x10..0x1F (M4 plan section 2b plus lane B):
+//   kBulkRandFull=0x10 (B1 RESUME: u32 resumeFrame + 64-byte PcRandState),
+//   kBulkSaveResult=0x11, kBulkCheckpoint=0x12 (B2),
+//   kBulkMirrorLedger=0x14 (B1 client mirror RECEIVED/deathsBase ledger).
 //
 // Engine-free like the rest of this TU. The session owns one endpoint per
 // peer and pumps it each turn; the unit test drives two endpoints over a
 // lossy in-memory queue. Ordering: messages complete independently, in the
 // order their last fragment arrives; delivery order across messages is NOT
 // guaranteed (lane B sequences SaveResult/Checkpoint itself if it needs
-// order). Retransmit is a flat 100 ms per unacked fragment with no window;
-// the queue depths (4 outbound, 8 inbound) bound the burst.
+// order).
+//
+// Retransmit (M4 lane B1, lane A review m2 remainder): per-fragment
+// exponential backoff 100, 200, 400, 800 ms, then capped at 1000 ms; the
+// schedule belongs to the fragment and ends when it is acked. At most
+// kBulkMaxInFlight (32) unacked data fragments are in flight across the
+// whole channel (a fragment is in flight from its first send until its
+// ack); a fragment never sent waits for window room. Acks are exempt from
+// the window and are sent once per received data fragment. So a 100%
+// blackout of T seconds costs at most 32 x (retransmits per fragment in T)
+// datagrams, e.g. <= 32 x 5 in 3 s, instead of every fragment every 100 ms.
+// The queue depths (4 outbound messages, 8 inbound) bound the rest.
 namespace pc_netplay_bulk {
 constexpr uint8_t kBulkRandFull = 0x10;
 constexpr uint8_t kBulkSaveResult = 0x11;
 constexpr uint8_t kBulkCheckpoint = 0x12;
+constexpr uint8_t kBulkMirrorLedger = 0x14;
+constexpr uint8_t kBulkDataFirst = 0x10; // data types are 0x10..0x1F
+constexpr uint8_t kBulkDataLast = 0x1F;
 constexpr uint8_t kBulkAck = 0x7F;
 constexpr size_t kBulkMaxPayload = 1024;
 constexpr size_t kBulkMaxMessage = 262144; // 256 KiB, hard bound before alloc
 constexpr size_t kBulkMaxFrags = kBulkMaxMessage / kBulkMaxPayload; // 256
-constexpr double kBulkResendMs = 100.0;
+constexpr double kBulkResendMs = 100.0;     // first retransmit interval
+constexpr double kBulkResendMaxMs = 1000.0; // backoff cap
+constexpr size_t kBulkMaxInFlight = 32;     // unacked data fragments, channel-wide
 constexpr double kBulkPartialTimeoutMs = 30000.0; // abandoned reassembly TTL
 
 class BulkChannel {
@@ -266,11 +282,14 @@ public:
 	// so abandoned transfers cannot wedge the bounded (8-deep) receiver.
 	void sweep(double nowMs);
 
-	// Outgoing 0x03 payloads due at nowMs (unacked data fragments needing
-	// (re)transmit plus pending acks). The caller sends each on the bulk
-	// channel. Acks are emitted once; data fragments repeat every 100 ms
-	// until acked.
+	// Outgoing 0x03 payloads due at nowMs (pending acks, then due data
+	// fragments). The caller sends each on the bulk channel. Acks are
+	// emitted once; an unacked data fragment is retransmitted on its
+	// backoff schedule (100/200/400/800/1000 ms), and new fragments are
+	// first sent only while fewer than kBulkMaxInFlight are in flight.
 	std::vector<std::vector<uint8_t>> poll_outgoing(double nowMs);
+	// True when send() has room for one more message (4-deep queue).
+	bool can_send() const { return mOut.size() < 4; }
 
 	struct Message {
 		uint8_t type = 0;
@@ -282,12 +301,18 @@ public:
 	// Test hooks.
 	size_t send_acked_frags() const;
 	size_t send_total_frags() const;
+	size_t send_in_flight() const;
+	// Data datagrams re-sent (not first sends) since construction/reset.
+	uint64_t resend_count() const { return mResends; }
 
 private:
 	struct OutFrag {
 		std::vector<uint8_t> bytes; // full DATA datagram payload
 		bool acked = false;
+		bool sent = false;       // first send done (in flight until acked)
 		double lastSendMs = -1e18;
+		double nextSendMs = 0.0; // due time of the next retransmit
+		unsigned sends = 0;      // transmissions so far (backoff exponent)
 	};
 	struct OutMsg {
 		uint16_t msgId = 0;
@@ -310,5 +335,6 @@ private:
 	std::vector<std::vector<uint8_t>> mAckQueue;
 	std::vector<Message> mComplete;
 	std::vector<uint16_t> mDoneIds; // recently completed msgIds (dup re-ack)
+	uint64_t mResends = 0;
 };
 } // namespace pc_netplay_bulk

@@ -21,7 +21,7 @@ setup.
   its *working directory*. Start the exe from your game folder (the one
   holding `assets\`), or put a junction named `assets` pointing at your
   game data into the folder you start from. The launcher never changes the
-  working directory.
+  working directory, except for seeds with P2 enemies (see below).
 - A network path between the two PCs (see Troubleshooting).
 
 ## What the game does for you
@@ -67,8 +67,9 @@ sets the whole session up before anything else loads:
    `nectar.exe --netplay-host-ice`
    - To play a randomizer seed, add its bootstrap file:
      `nectar.exe --netplay-host-ice --bootstrap C:\path\to\bootstrap.txt`.
-     Seeds with P2 enemies (`ENEMY_P2` in the file) are refused with an
-     explanation: they need extra per-run files that a code cannot carry.
+     Seeds with P2 enemies (`ENEMY_P2` in the file) work too: host from the
+     seed's own folder (the one holding the seed's `assets\` overlay and its
+     `p2-*.txt` / `sarai-*.txt` files); see "Seeds with P2 enemies".
 2. The game prints a one-line **offer code** (it starts with `NPIX2-`) and
    copies it to the clipboard.
 3. Send the offer code to the joiner (chat, DM, anything).
@@ -96,6 +97,9 @@ sets the whole session up before anything else loads:
 2. The game prints a one-line **answer code** and copies it to the
    clipboard. Send it to the host. (`--netplay-code-out <file>` also writes
    it to a file, on either side.)
+   For a seed with P2 enemies, also pass `--netplay-p2-assets <folder>`:
+   your own copy of that seed's P2 assets overlay (see "Seeds with P2
+   enemies"); without it the joiner refuses before creating anything.
 3. Wait for `[netplay] ice completed in ...ms`; the session starts.
 
 Controls: by default each game takes input the usual way. To pin a device,
@@ -139,6 +143,69 @@ plugged in later is also picked up). Close both game windows (or press Ctrl+C in
 - `-Bootstrap <file>` plays a seed; `-HostInput`/`-JoinInput` change the
   devices. `-Hidden` is the automated test mode (hidden, bounded).
 
+## Seeds with P2 enemies
+
+A seed with `ENEMY_P2` (or any `P2_...` word) reads extra per-run files from
+the working directory: the P2 sidecars (`p2-*.txt`, `sarai-*.txt`,
+`demon-*.txt`, `damagumo-*.json` and `p2_bigtreasure_events.txt`, next to
+the seed's `bootstrap.txt`) and a P2 `assets\` overlay (the room models in
+`assets\dataDir\courses\pikmin2room\`, about 35 MB, the stage files in
+`assets\dataDir\stages\`, `assets\config.ini` and `assets\p2-*.txt`).
+For such a seed the launcher:
+
+- makes `<run folder>\play\` the working directory before anything loads,
+  with `play\assets` a junction to the overlay (the host's is the seed
+  folder's `assets\`; the joiner's is its `--netplay-p2-assets` folder);
+  your `pikmin_settings.conf` stays the one in the folder you started from;
+- copies the host's sidecars into its `play\`, and sends them to the joiner
+  before the session starts (the joiner's `play\` receives them);
+- never sends the overlay: it is game content. Each player brings their own
+  copy (a full copy, or one with junctioned folders: only the content
+  counts), and the handshake compares a digest of both (`handshake refused:
+  p2assets` when they differ). The sidecars are checked against the host's
+  digest too (`handshake refused: sidecars`).
+
+With the low-level switches the joiner's working folder receives the host's
+sidecars the same way; its own sidecar files that differ are moved to
+`sidecar-set-aside-<time>\` (never deleted). The host's P2 receipt ledgers
+(`p2-*-receipts.txt`) are sidecars too, so they travel with the set.
+
+`p2-binding-receipt.json`, the `*-install.json` files and
+`overlay-manifest.json` are not needed at run time and are not sent.
+
+## Two sessions in a row (resume)
+
+At the end of a day both games save at the same moment. The host writes the
+real campaign checkpoint (`session\campaign\<generation>.sav`) and the
+card; the joiner writes the same files as a mirror; the two games then agree
+on the host's result before either continues (a `[netplay] save barrier`
+line in both logs). The joiner's mirror is written as `<generation>.sav.pending`
+and only becomes `<generation>.sav` once the host reports success. If either
+game has not heard from the other within 10 s, the day is abandoned as it
+would be without netplay (exit 6); if the two saves differ, both games stop
+with exit 5 (a desync). Either way the joiner renames its unconfirmed mirror
+to `*.sav.unconfirmed` (never deleted), so the next session sees the last
+day both games agreed on and simply receives the host's checkpoint.
+
+When a session starts, the two games compare their newest checkpoints:
+the same checkpoint on both sides plays on; a joiner that is behind (or has
+none) gets the host's checkpoint and card before the session starts
+(`[netplay] checkpoint adopted`); a joiner that is ahead of the host, or has
+a different checkpoint of the same day, refuses (`handshake refused:
+checkpoint`). A joiner checkpoint from another seed or a damaged one is set
+aside (renamed `*.sav.stale-<time>`, never deleted) and replaced.
+
+The one-command launcher (`--netplay-host-ice`) starts every session in a
+new run folder, so it always starts a new campaign today; resuming across
+evenings runs through the pair tools (`tools/netplay/run_pair.py
+--run-name ... --token ...`), which keep both campaign folders.
+
+Every session needs a new run folder on both sides (the game refuses a run
+folder that was already used), and the joiner's `mirror-events.txt` starts
+again at frame 0 in each one. A runner that ingests the joiner's mirror must
+therefore treat each session as its own run (a new peer token and run
+folder), not append the second evening to the first evening's run.
+
 ## Troubleshooting
 
 - `[netplay] handshake refused: exe` or `protocol`: the builds differ. Use
@@ -150,9 +217,14 @@ plugged in later is also picked up). Close both game windows (or press Ctrl+C in
   the word order) use each side's own settings, seed file and seed and do
   refuse here; the game prints a hint when that is the likely cause.
 - `[netplay] launch: ...` at start-up: the launcher refused before creating
-  anything, and says why (for example a P2 seed, a pasted answer code where
+  anything, and says why (for example a P2 offer without
+  `--netplay-p2-assets`, a pasted answer code where
   the offer belongs, an offer from an older build, or a switch that cannot
   be combined with the launcher).
+- `[netplay] handshake refused: checkpoint`: the two campaigns cannot be
+  reconciled (the joiner is ahead of the host, or both saved different
+  worlds). `sidecars` / `p2assets`: the P2 files differ (see "Seeds with P2
+  enemies").
 - `[netplay] ice setup failed: bad ICE code: ...`: the code was cut off or
   belongs to the other direction (offers start `NPIX2-`, answers
   `NPIX1-`). Copy the whole single line.
@@ -170,11 +242,12 @@ plugged in later is also picked up). Close both game windows (or press Ctrl+C in
 
 - No Archipelago: a netplay session plays a seed offline with a fixed
   ready state; nothing is sent or received.
-- No resume: each session starts a new run folder and a new campaign;
-  quitting ends the session for both players.
+- No resume through the one-command launcher: each launcher session starts
+  a new run folder and a new campaign (resume works through the pair tools,
+  see "Two sessions in a row"); quitting ends the session for both players.
 - A desync ends the session (`[netplay] desync detected`).
-- Seeds with P2 enemies (`ENEMY_P2`) are not supported yet (see Host
-  steps).
+- Seeds with P2 enemies need each player's own copy of the seed's P2
+  assets overlay (see "Seeds with P2 enemies").
 - The low-level switches (`--netplay-host`/`--netplay-join`,
   `--netplay-ice-host`/`--netplay-ice-join`) and their environment
   variables keep working; they are the test surface.

@@ -377,6 +377,64 @@ int main()
 		CHECK(gotIt, "icelink adapter round trip");
 	}
 
+	// 6. M4 lane B2 (issue #885): the bulk channel 0x03 over ICE. Three bulk
+	// datagrams (one of them the largest valid payload, kMaxDatagram - 1
+	// bytes) plus a gekko and a handshake datagram go host -> joiner; the
+	// joiner's IceLink::drain_bulk returns exactly the bulk ones, intact and in
+	// order, while the gekko one still reaches the adapter and the handshake
+	// one drain_handshake. An unknown channel (0x09) is dropped.
+	{
+		IceLink joinLink(&joinSock);
+		std::vector<std::vector<uint8_t>> bulk;
+		bulk.push_back(std::vector<uint8_t>{ 0x10, 1, 0, 0, 0, 1, 0 });
+		bulk.push_back(std::vector<uint8_t>(kMaxDatagram - 1, 0x5A));
+		bulk.push_back(std::vector<uint8_t>{ 0x7F, 1, 0, 0, 0 });
+		const uint8_t gk[4]    = { 'g', 'k', '0', '3' };
+		const uint8_t hs[4]    = { 'h', 's', '0', '3' };
+		const uint8_t junk[3]  = { 'x', 'y', 'z' };
+		for (const auto& b : bulk) CHECK(hostSock.send_payload(kChannelBulk, b.data(), b.size()), "bulk send");
+		CHECK(hostSock.send_payload(kChannelGekko, gk, sizeof(gk)), "gekko send (bulk section)");
+		CHECK(hostSock.send_payload(kChannelHandshake, hs, sizeof(hs)), "hs send (bulk section)");
+		CHECK(hostSock.send_payload(0x09, junk, sizeof(junk)), "unknown-channel send");
+		CHECK(!hostSock.send_payload(kChannelBulk, bulk[1].data(), kMaxDatagram), "oversized bulk refused by the sender");
+		std::vector<std::vector<uint8_t>> gotBulk;
+		bool gotGk = false, gotHs = false, gotJunk = false;
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+		while ((gotBulk.size() < bulk.size() || !gotGk || !gotHs) && std::chrono::steady_clock::now() < deadline) {
+			for (IceSocket::Datagram& g : joinLink.drain_bulk()) {
+				if (g.channel != kChannelBulk) gotJunk = true;
+				gotBulk.push_back(g.payload);
+			}
+			for (IceSocket::Datagram& g : joinLink.drain_handshake()) {
+				if (g.channel == kChannelHandshake && g.payload.size() == sizeof(hs)
+				    && memcmp(g.payload.data(), hs, sizeof(hs)) == 0)
+					gotHs = true;
+				else gotJunk = true;
+			}
+			int n = 0;
+			GekkoNetResult** res = joinLink.receive_inner(&n);
+			for (int i = 0; i < n; ++i) {
+				if (res[i] == nullptr) continue;
+				if (res[i]->data_len == sizeof(gk) && memcmp(res[i]->data, gk, sizeof(gk)) == 0) gotGk = true;
+				else gotJunk = true;
+				free(res[i]->addr.data);
+				free(res[i]->data);
+				free(res[i]);
+			}
+			if (gotBulk.size() < bulk.size() || !gotGk || !gotHs)
+				std::this_thread::sleep_for(std::chrono::milliseconds(2));
+		}
+		CHECK(gotBulk.size() == bulk.size(), "bulk datagrams drained");
+		bool intact = gotBulk.size() == bulk.size();
+		for (size_t i = 0; intact && i < bulk.size(); ++i) intact = gotBulk[i] == bulk[i];
+		CHECK(intact, "bulk payloads intact and in order (largest valid payload included)");
+		CHECK(gotGk, "gekko datagram still reaches the adapter");
+		CHECK(gotHs, "handshake datagram still reaches drain_handshake");
+		CHECK(!gotJunk, "no datagram on the wrong queue; unknown channel dropped");
+		std::printf("bulk over ice: %llu datagrams (max %llu B) drained on channel 0x03\n",
+		            (unsigned long long)gotBulk.size(), (unsigned long long)(kMaxDatagram - 1));
+	}
+
 	if (sFailures == 0) std::printf("pc_netplay_ice_test: PASS\n");
 	else std::printf("pc_netplay_ice_test: %d FAILURES\n", sFailures);
 	return sFailures == 0 ? 0 : 1;

@@ -21,11 +21,46 @@ Expectations (--expect):
   refuse      both exit 4 with a '[netplay] handshake refused:' line
   disconnect  joiner is killed mid-session; host exits 0 with a
               '[netplay] disconnected:' line
+  desync      (B2 fix round 1) a day-end save barrier desync: both exit 5,
+              both with a '[netplay] save barrier: ... mismatch' line
+  barrier-timeout  (B2 fix round 1, with --env-host
+              PIKMIN_NETPLAY_TEST_HOST_DIE_AT_BARRIER=1) the host exits 7 at
+              its day-end save; the joiner exits 6 with '[netplay] save
+              barrier timeout' and retracts its pending checkpoint
+  --expect-hold N (M4 lane B1) implies sync and additionally requires
+              exactly N '[netplay] hold at' / 'held at' / 'resume at'
+              triples, identical on both peers (the per-peer held_ms is
+              compared separately), and no 'disconnected:' line.
+
+M4 lane B1 (issue #885) inputs: --bootstrap-template (both bootstraps from
+one template, {TOKEN} = run token for SESSION and FINGERPRINT),
+--host-stale-window START:SECONDS (the host refresher writes nothing in
+[START, START+SECONDS) wall seconds), --host-state-missing-until SECONDS
+(no host state.txt at all until then) and --host-session-json FILE (copied
+to <out>/session.json, the runner ledger the host reads). The summary adds
+the hold/resume lines, per-peer START_STAGE / [Pikmin Randomizer] /
+distinct navi-piki-teki-item tuple counts and the journal/mirror files
+present in each run dir.
+
+M4 lane B2 (issue #885) sessions across day ends: --token HEX64 reuses a run
+token (SESSION and FINGERPRINT; session 2 must reuse session 1's, otherwise
+its checkpoint's fingerprint does not match); --run-name NAME puts the run
+dirs at out/host/NAME and out/join/peer/NAME while the derived campaign dirs
+stay out/campaign and out/join/campaign, so a second session reuses both
+campaigns; --join-campaign-mode keep|clear|foreign:<file.sav>|newer prepares
+the joiner's campaign before launch (clear moves it aside to
+campaign.moved-<n>; foreign plants a checkpoint from another run; newer
+plants a valid copy of the host's newest checkpoint re-stamped as the next
+generation, header and hash included). The summary adds both peers'
+checkpoint / transfer / save barrier / CAMPAIGN_RESUMED / reseed lines and
+the distinct tuples after the day-3 reseed tick.
 """
 
 import argparse
 import os
+import re
 import shutil
+import struct
 import subprocess
 import sys
 import threading
@@ -52,6 +87,66 @@ def parse_kv(items, what):
         key, value = item.split("=", 1)
         out[key.strip()] = value.strip()
     return out
+
+
+def fnv1a64(data):
+    """pc_randomizer.cpp checkpointHash (FNV-1a 64)."""
+    h = 14695981039346656037
+    for byte in data:
+        h ^= byte
+        h = (h * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return h
+
+
+def restamp_checkpoint(src, dst, new_gen):
+    """B2 --join-campaign-mode newer: a VALID checkpoint for new_gen: the
+    header's generation field is replaced and the FNV-1a hash recomputed
+    (a bare rename would be a header/name mismatch, which the joiner sets
+    aside as stale instead of reporting a newer checkpoint)."""
+    raw = Path(src).read_bytes()
+    nl = raw.index(b"\n")
+    header, block = raw[:nl].decode("ascii"), raw[nl + 1:]
+    parts = header.split(" ")
+    parts[2] = str(new_gen)
+    body = " ".join(parts[:-1])
+    h = fnv1a64(body.encode("ascii") + b"\n" + block)
+    Path(dst).write_bytes((body + " " + str(h) + "\n").encode("ascii") + block)
+
+
+def prepare_join_campaign(mode, host_campaign, join_campaign):
+    """B2: prepare the joiner's campaign dir; returns a description."""
+    if mode in (None, "keep"):
+        return "keep"
+    if mode == "clear":
+        if not join_campaign.exists():
+            return "clear (nothing to move)"
+        n = 1
+        while (join_campaign.parent / f"campaign.moved-{n}").exists():
+            n += 1
+        dest = join_campaign.parent / f"campaign.moved-{n}"
+        join_campaign.rename(dest)
+        return f"clear (moved to {dest.name})"
+    if mode.startswith("foreign:"):
+        src = Path(mode[len("foreign:"):])
+        join_campaign.mkdir(parents=True, exist_ok=True)
+        dst = join_campaign / src.name
+        if dst.exists():
+            n = 1
+            while (join_campaign / f"{src.name}.harness-replaced-{n}").exists():
+                n += 1
+            dst.rename(join_campaign / f"{src.name}.harness-replaced-{n}")
+        shutil.copyfile(str(src), str(dst))
+        return f"foreign ({src} -> {dst.name})"
+    if mode == "newer":
+        savs = sorted(p for p in host_campaign.glob("*.sav") if re.match(r"^\d{20}\.sav$", p.name))
+        if not savs:
+            raise SystemExit("--join-campaign-mode newer: the host has no checkpoint")
+        gen = int(savs[-1].name[:20]) + 1
+        join_campaign.mkdir(parents=True, exist_ok=True)
+        dst = join_campaign / f"{gen:020d}.sav"
+        restamp_checkpoint(savs[-1], dst, gen)
+        return f"newer ({savs[-1].name} re-stamped as {dst.name})"
+    raise SystemExit(f"bad --join-campaign-mode {mode}")
 
 
 def write_bootstrap(path, token, profile, flarlic=10):
@@ -123,6 +218,30 @@ def gen_inputs(ticks, seed, out):
         raise SystemExit(f"gen_inputs failed: {r.stderr[-2000:]}")
 
 
+PKNI_HEADER = 10  # magic(4) + version/pad count/record size (3 x u16 LE)
+
+
+def neutralize_after(path, keep):
+    """M4 B1 fix round 1: keep the first `keep` records of a v2 .pkni as
+    generated and make pad 0 hands-off afterwards (buttons, both sticks,
+    triggers and analog A/B zeroed; the connected byte and control yaw stay
+    as generated). Returns (records, neutralized)."""
+    data = bytearray(Path(path).read_bytes())
+    if data[:4] != b"PKNI":
+        raise SystemExit(f"neutralize_after: {path} is not a PKNI file")
+    version, pads, size = struct.unpack_from("<HHH", data, 4)
+    if version != 2 or pads != 4 or size != 56:
+        raise SystemExit(f"neutralize_after: unsupported PKNI v{version} pads={pads} size={size}")
+    records = (len(data) - PKNI_HEADER) // size
+    changed = 0
+    for i in range(max(0, keep), records):
+        off = PKNI_HEADER + i * size  # pad 0 is the first 14 bytes
+        data[off:off + 10] = bytes(10)
+        changed += 1
+    Path(path).write_bytes(bytes(data))
+    return records, changed
+
+
 SCRUB_KEYS = (
     "PIKMIN_INPUT_RECORD",
     "PIKMIN_INPUT_REPLAY",
@@ -151,6 +270,13 @@ SCRUB_KEYS = (
     "PIKMIN_NETPLAY_TEST_LOAD_DELAY_MS",
     "PIKMIN_NETPLAY_TEST_SCRIPT_VIA_ACCUM",
     "PIKMIN_NETPLAY_RANDSTATE_STREAM",
+    "PIKMIN_NETPLAY_TEST_DEATHLINK_AS_ORDINARY",
+    "PIKMIN_NETPLAY_TEST_HOST_SAVE_FAIL",
+    "PIKMIN_NETPLAY_TEST_TAMPER_SIDECARS",
+    "PIKMIN_NETPLAY_TEST_BARRIER_CORRUPT",
+    "PIKMIN_NETPLAY_TEST_HOST_DIE_AT_BARRIER",
+    "PIKMIN_NETPLAY_TEST_BULK_DROP_SAVE",
+    "NECTAR_CARD_DEBUG",
 )
 
 
@@ -184,6 +310,67 @@ def launch(exe, run, boot, extra_args, env_extra, stdout_log, unthrottled=True):
         stdout=child_out, stderr=subprocess.STDOUT,
     )
     return proc, child_out
+
+
+def hold_lines(path):
+    """M4 lane B1: (hold, held, resume, held_ms) from one native log.
+
+    resume lines are canonicalised without their per-peer ` held_ms=<ms>`
+    suffix (wall time differs per peer); the ms values come back separately.
+    """
+    try:
+        text = Path(path).read_text(errors="replace")
+    except OSError:
+        return [], [], [], []
+    hold, held, resume, ms = [], [], [], []
+    for ln in text.splitlines():
+        if "[netplay] hold at frame=" in ln:
+            hold.append(ln[ln.index("hold at"):].strip())
+        elif "[netplay] held at frame=" in ln:
+            held.append(ln[ln.index("held at"):].strip())
+        elif "[netplay] resume at frame=" in ln:
+            body = ln[ln.index("resume at"):].strip()
+            if " held_ms=" in body:
+                body, _, val = body.partition(" held_ms=")
+                try:
+                    ms.append(float(val))
+                except ValueError:
+                    ms.append(-1.0)
+            resume.append(body)
+    return hold, held, resume, ms
+
+
+def hash_tuples(path, lo=None, hi=None):
+    """Distinct (navi, piki, teki, item) tuples of a hash log, i.e.
+    awk '{print $3,$4,$5,$6}' hashes.txt | sort -u | wc -l, optionally
+    restricted to ticks lo <= tick <= hi."""
+    seen = set()
+    try:
+        with open(path, "r", errors="replace") as f:
+            for line in f:
+                cols = line.split()
+                if len(cols) < 6:
+                    continue
+                try:
+                    tick = int(cols[0])
+                except ValueError:
+                    continue
+                if lo is not None and tick < lo:
+                    continue
+                if hi is not None and tick > hi:
+                    continue
+                seen.add(tuple(cols[2:6]))
+    except OSError:
+        return 0
+    return len(seen)
+
+
+def frame_of(line):
+    """Integer after 'frame=' in a canonical hold/held/resume line."""
+    try:
+        return int(line.split("frame=", 1)[1].split()[0])
+    except (IndexError, ValueError):
+        return None
 
 
 def count_lines(path):
@@ -243,7 +430,8 @@ def main(argv=None):
                    help="m8 positive test: join bootstrap differs from the host only in "
                         "SESSION (same FINGERPRINT); the handshake must succeed")
     p.add_argument("--exe-args", nargs="*", default=[])
-    p.add_argument("--expect", choices=("sync", "refuse", "disconnect"), default="sync")
+    p.add_argument("--expect", choices=("sync", "refuse", "disconnect", "desync", "barrier-timeout"),
+                   default="sync")
     p.add_argument("--kill-joiner-after", type=float, default=20.0,
                    help="disconnect test: seconds after start to kill the joiner")
     p.add_argument("--flarlic", type=int, default=10,
@@ -255,7 +443,59 @@ def main(argv=None):
     p.add_argument("--join-state-script", type=Path, default=None,
                    help="M4a: schedule file for the joiner state.txt refresher "
                         "(negative control: a deliberately different schedule)")
+    p.add_argument("--bootstrap-template", type=Path, default=None,
+                   help="M4 B1: both peers' bootstrap from this template; {TOKEN} "
+                        "becomes the run token (SESSION and FINGERPRINT)")
+    p.add_argument("--host-stale-window", type=str, default=None, metavar="START:SECONDS",
+                   help="M4 B1: the host state.txt refresher writes nothing during "
+                        "[START, START+SECONDS) wall seconds (link goes stale -> HOLD)")
+    p.add_argument("--host-state-missing-until", type=float, default=None, metavar="SECONDS",
+                   help="M4 B1: the host has no state.txt at all until SECONDS "
+                        "(any existing file is removed first)")
+    p.add_argument("--host-session-json", type=Path, default=None,
+                   help="M4 B1: copied to parent^2(host run)/session.json, i.e. "
+                        "<out>/session.json (the runner mirror ledger)")
+    p.add_argument("--expect-hold", type=int, default=None, metavar="N",
+                   help="M4 B1: implies sync; exactly N hold/held/resume triples, "
+                        "identical on both peers, and 0 disconnected lines")
+    p.add_argument("--expect-held-ms", type=float, default=None, metavar="MIN",
+                   help="M4 B1 fix round 1: with --expect-hold, every resume line's "
+                        "held_ms (hold at -> resume, per peer) must be >= MIN")
+    p.add_argument("--min-tuples", type=int, default=None, metavar="N",
+                   help="M4 B1 fix round 1: with --expect-hold, each peer's distinct "
+                        "tuples after each resume frame, and before each hold frame "
+                        "when that frame exceeds N, must exceed N; otherwise each "
+                        "peer's total must exceed N")
+    p.add_argument("--expect-no-hold", action="store_true",
+                   help="M4 B1 fix round 1 (negative control): implies sync; no hold, "
+                        "held or resume line on either peer")
+    p.add_argument("--host-script-ticks", type=int, default=None, metavar="N",
+                   help="M4 B1 fix round 1: the host's scripted pad 0 plays the seed-a "
+                        "records for the first N submits, then stays hands-off")
+    p.add_argument("--join-script-ticks", type=int, default=None, metavar="N",
+                   help="M4 B1 fix round 1: the same for the joiner (seed b); 0 = "
+                        "hands-off from the first submit")
+    p.add_argument("--token", type=str, default=None, metavar="HEX64",
+                   help="M4 B2: reuse this run token (SESSION and FINGERPRINT); default random, printed")
+    p.add_argument("--run-name", type=str, default="run",
+                   help="M4 B2: run dirs out/host/NAME and out/join/peer/NAME (the campaigns stay "
+                        "out/campaign and out/join/campaign)")
+    p.add_argument("--join-campaign-mode", type=str, default="keep",
+                   help="M4 B2: keep | clear | foreign:<file.sav> | newer (see the module docstring)")
     a = p.parse_args(argv)
+    if a.token is not None and not re.match(r"^[0-9a-f]{64}$", a.token):
+        raise SystemExit("--token wants 64 lowercase hex characters")
+    if not re.match(r"^[A-Za-z0-9._-]+$", a.run_name):
+        raise SystemExit("--run-name wants a plain folder name")
+    if a.expect_hold is not None or a.expect_no_hold:
+        a.expect = "sync"
+    stale_window = None
+    if a.host_stale_window:
+        try:
+            st0, _, dur = a.host_stale_window.partition(":")
+            stale_window = (float(st0), float(st0) + float(dur))
+        except ValueError:
+            raise SystemExit("--host-stale-window wants START:SECONDS")
 
     out = a.out.resolve()
     # Slice lane (issue #880): each peer gets a per-peer campaign dir.
@@ -269,17 +509,28 @@ def main(argv=None):
     # terminates and the pair disconnects). In production the peers are on
     # different machines; per-peer dirs are the faithful layout, and they
     # make the post-test save comparison meaningful.
-    host_run = out / "host" / "run"
-    join_run = out / "join" / "peer" / "run"
+    host_run = out / "host" / a.run_name
+    join_run = out / "join" / "peer" / a.run_name
     host_run.mkdir(parents=True, exist_ok=True)
     join_run.mkdir(parents=True, exist_ok=True)
+    # B2: prepare the joiner's derived campaign dir (parent^2(join run)).
+    campaign_note = prepare_join_campaign(a.join_campaign_mode, out / "campaign", out / "join" / "campaign")
+    print(f"run_pair: join campaign: {campaign_note}")
 
-    token = uuid.uuid4().hex * 2
+    token = a.token if a.token is not None else uuid.uuid4().hex * 2
+    print(f"run_pair: token {token}")
     token_join = token
     host_boot = host_run / "bootstrap.txt"
-    write_bootstrap(host_boot, token, a.profile, a.flarlic)
+    template = None
+    if a.bootstrap_template is not None:
+        template = a.bootstrap_template.read_text().replace("{TOKEN}", token)
+        host_boot.write_text(template)
+    else:
+        write_bootstrap(host_boot, token, a.profile, a.flarlic)
     join_boot = join_run / "bootstrap.txt"
-    if a.bootstrap_b is not None:
+    if template is not None and a.bootstrap_b is None:
+        join_boot.write_text(template)
+    elif a.bootstrap_b is not None:
         shutil.copyfile(str(a.bootstrap_b.resolve()), str(join_boot))
         if not a.no_restamp_session:
             # Re-stamp the per-run SESSION token to this run's token (the
@@ -329,12 +580,27 @@ def main(argv=None):
 
     for run in (host_run, join_run):
         (run / "save").mkdir(exist_ok=True)
+    if a.host_session_json is not None:
+        # B1: the host reads the runner ledger at parent^2(run)/session.json.
+        shutil.copyfile(str(a.host_session_json.resolve()), str(host_run.parent.parent / "session.json"))
+    if a.host_state_missing_until is not None:
+        try:
+            (host_run / "state.txt").unlink()
+        except FileNotFoundError:
+            pass
 
     # Per-peer scripted local inputs (brief: two different seeds).
-    host_inputs = out / "host_inputs.pkni"
-    join_inputs = out / "join_inputs.pkni"
+    tag = "" if a.run_name == "run" else a.run_name + "_"
+    host_inputs = out / f"{tag}host_inputs.pkni"
+    join_inputs = out / f"{tag}join_inputs.pkni"
     gen_inputs(a.ticks + 50, a.seed_a, host_inputs)
     gen_inputs(a.ticks + 50, a.seed_b, join_inputs)
+    for who, keep, path in (("host", a.host_script_ticks, host_inputs),
+                            ("join", a.join_script_ticks, join_inputs)):
+        if keep is not None:
+            records, changed = neutralize_after(path, keep)
+            print(f"run_pair: {who} inputs: first {min(keep, records)} of {records} records "
+                  f"scripted, {changed} hands-off")
 
     host_hash = host_run / "hashes.txt"
     join_hash = join_run / "hashes.txt"
@@ -384,9 +650,15 @@ def main(argv=None):
 
     t0 = time.time()
 
-    def refresh_sched(run, sched):
+    def refresh_sched(run, sched, host=False):
         while not stop.is_set():
             el = time.time() - t0
+            if host and a.host_state_missing_until is not None and el < a.host_state_missing_until:
+                stop.wait(0.1)  # B1: no host state.txt at all yet
+                continue
+            if host and stale_window is not None and stale_window[0] <= el < stale_window[1]:
+                stop.wait(0.1)  # B1: stale link window, nothing written
+                continue
             cur = sched[0][1]
             for ft, line in sched:
                 if ft <= el:
@@ -401,8 +673,8 @@ def main(argv=None):
                 pass
             stop.wait(0.1)
 
-    threads = [threading.Thread(target=refresh_sched, args=(host_run, sched_host)),
-               threading.Thread(target=refresh_sched, args=(join_run, sched_join))]
+    threads = [threading.Thread(target=refresh_sched, args=(host_run, sched_host, True)),
+               threading.Thread(target=refresh_sched, args=(join_run, sched_join, False))]
     for t in threads:
         t.start()
 
@@ -483,6 +755,7 @@ def main(argv=None):
     ref_host = grep(host_log, "handshake refused")
     ref_join = grep(join_log, "handshake refused")
     dis_host = grep(host_log, "disconnected:")
+    dis_join = grep(join_log, "disconnected:")
     # M4a same-frame apply pair: the canonical randstate apply lines must be
     # identical on both peers (same gens at the same frames).
     app_host = apply_lines(host_log)
@@ -501,6 +774,70 @@ def main(argv=None):
         print(f"run_pair: apply host: {ln}")
     for ln in app_join[:12]:
         print(f"run_pair: apply join: {ln}")
+    # M4 lane B1 summary: hold/resume lines, gameplay proof, run-dir files.
+    hh = hold_lines(host_log)
+    hj = hold_lines(join_log)
+    print(f"run_pair: disconnected lines join={len(dis_join)}")
+    for who, (hold, held, resume, ms) in (("host", hh), ("join", hj)):
+        for ln in hold + held + resume:
+            print(f"run_pair: {who}: {ln}")
+        if ms:
+            print(f"run_pair: {who}: held_ms={','.join(f'{v:.0f}' for v in ms)}")
+    # Frozen time (held at -> resume, all holds) from the exit line's held=<ms>.
+    for who, log in (("host", host_log), ("join", join_log)):
+        vals = [ln.split(" held=")[1].split("ms")[0] for ln in grep(log, " held=")
+                if " holds=" in ln]
+        if vals:
+            print(f"run_pair: {who}: frozen held={vals[-1]}ms (exit line)")
+    tuple_fail = []
+    for who, log, hashes, run in (("host", host_log, host_hash, host_run),
+                                  ("join", join_log, join_hash, join_run)):
+        starts = len(grep(log, "START_STAGE"))
+        rand = len(grep(log, "[Pikmin Randomizer]"))
+        tuples = hash_tuples(hashes)
+        files = [n for n in ("checks.txt", "deaths.txt", "emperor.txt", "benefits-used.txt",
+                             "mirror-events.txt") if (run / n).exists()]
+        print(f"run_pair: {who}: START_STAGE={starts} randomizer_lines={rand} "
+              f"distinct_tuples={tuples} files={','.join(files) if files else '-'}")
+        if a.min_tuples is not None and not hh[0] and tuples <= a.min_tuples:
+            tuple_fail.append(f"{who} distinct tuples {tuples} <= {a.min_tuples}")
+        for hold, resume in zip(hh[0], hh[2]):
+            hf, rf = frame_of(hold), frame_of(resume)
+            if hf is not None and rf is not None:
+                # tick = frame + 1: ticks <= H ran before the hold frame,
+                # ticks > R ran from the resume frame on.
+                pre = hash_tuples(hashes, hi=hf)
+                post = hash_tuples(hashes, lo=rf + 1)
+                print(f"run_pair: {who}: tuples before hold frame {hf}={pre} "
+                      f"after resume frame {rf}={post}")
+                # Before the hold only when the hold frame leaves room for
+                # more than N distinct tuples (a missing-state HOLD at frame
+                # 4 cannot have any gameplay before it).
+                pre_due = a.min_tuples is not None and hf > a.min_tuples
+                if a.min_tuples is not None and ((pre_due and pre <= a.min_tuples) or post <= a.min_tuples):
+                    tuple_fail.append(f"{who} tuples before {hf}={pre} / after {rf}={post} "
+                                      f"not both > {a.min_tuples}")
+
+    # B2 summary: checkpoint decision, transfer, save barrier, resume, reseed.
+    b2_needles = ("[netplay] checkpoint", "[netplay] transfer", "[netplay] save barrier",
+                  "CAMPAIGN_RESUMED", "CAMPAIGN_SAVED", "[netplay] local campaign checkpoint is stale",
+                  "[netplay] set aside", "[netplay] local checkpoint:", "reseed day=", "START_STAGE",
+                  "handshake refused", "[netplay] bulk impairment", "[netplay] test:", "[netplay] desync",
+                  "[netplay] p2 ", "[netplay] sidecars")
+    for who, log, hashes in (("host", host_log, host_hash), ("join", join_log, join_hash)):
+        try:
+            text = Path(log).read_text(errors="replace").splitlines()
+        except OSError:
+            text = []
+        for ln in text:
+            if any(n in ln for n in b2_needles):
+                print(f"run_pair: {who}: {ln.strip()}")
+        for ln in text:
+            m = re.search(r"reseed day=(\d+) .*tick=(\d+)", ln)
+            if m:
+                after = hash_tuples(hashes, lo=int(m.group(2)) + 1)
+                print(f"run_pair: {who}: distinct tuples after the day-{m.group(1)} reseed tick "
+                      f"{m.group(2)}: {after}")
 
     ok = True
     if a.expect == "sync":
@@ -516,6 +853,33 @@ def main(argv=None):
         if n_host != a.ticks or n_join != a.ticks:
             print(f"run_pair: FAIL: hash lines {n_host}/{n_join} != requested {a.ticks}")
             ok = False
+        if a.expect_hold is not None:
+            n = a.expect_hold
+            for who, (hold, held, resume, _ms) in (("host", hh), ("join", hj)):
+                if len(hold) != n or len(held) != n or len(resume) != n:
+                    print(f"run_pair: FAIL: {who} hold/held/resume counts "
+                          f"{len(hold)}/{len(held)}/{len(resume)} != {n}")
+                    ok = False
+            if hh[:3] != hj[:3]:
+                print("run_pair: FAIL: hold/held/resume lines differ between peers")
+                ok = False
+            if dis_host or dis_join:
+                print("run_pair: FAIL: disconnected lines present")
+                ok = False
+            if a.expect_held_ms is not None:
+                for who, (_h, _d, _r, ms) in (("host", hh), ("join", hj)):
+                    if not ms or min(ms) < a.expect_held_ms:
+                        print(f"run_pair: FAIL: {who} held_ms {ms} not all >= {a.expect_held_ms:.0f}")
+                        ok = False
+        if a.expect_no_hold:
+            for who, (hold, held, resume, _ms) in (("host", hh), ("join", hj)):
+                if hold or held or resume:
+                    print(f"run_pair: FAIL: {who} has hold/held/resume lines "
+                          f"({len(hold)}/{len(held)}/{len(resume)}) in a negative control")
+                    ok = False
+        for msg in tuple_fail:
+            print(f"run_pair: FAIL: {msg}")
+            ok = False
     elif a.expect == "refuse":
         if rc_host != 4 or rc_join != 4:
             print(f"run_pair: FAIL: expected both exit 4, got {rc_host}/{rc_join}")
@@ -529,6 +893,24 @@ def main(argv=None):
             ok = False
         if not dis_host:
             print("run_pair: FAIL: expected a disconnected line on the host")
+            ok = False
+    elif a.expect == "desync":
+        # B2 fix round 1 (C1): a barrier desync must end BOTH peers with exit 5.
+        if rc_host != 5 or rc_join != 5:
+            print(f"run_pair: FAIL: expected both exit 5, got {rc_host}/{rc_join}")
+            ok = False
+        for who, log in (("host", host_log), ("join", join_log)):
+            if not [ln for ln in grep(log, "[netplay] save barrier:") if "mismatch" in ln]:
+                print(f"run_pair: FAIL: no save barrier mismatch line on the {who}")
+                ok = False
+    elif a.expect == "barrier-timeout":
+        # B2 fix round 1 (C2): the host dies at its day-end save (test knob,
+        # exit 7); the joiner's barrier times out (exit 6) and retracts.
+        if rc_host != 7 or rc_join != 6:
+            print(f"run_pair: FAIL: expected host exit 7 and joiner exit 6, got {rc_host}/{rc_join}")
+            ok = False
+        if not grep(join_log, "[netplay] save barrier timeout"):
+            print("run_pair: FAIL: no save barrier timeout line on the joiner")
             ok = False
     print(f"run_pair: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
