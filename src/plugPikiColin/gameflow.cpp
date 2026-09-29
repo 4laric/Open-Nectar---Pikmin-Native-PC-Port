@@ -637,9 +637,9 @@ void GameFlow::softReset()
 {
 #if PIKI_PC_PORT
 	// N3: the synchronous stage load below blocks GekkoNet pumping. The
-	// netplay hook sleeps once here when PIKMIN_NETPLAY_TEST_LOAD_DELAY_MS
-	// is set (test only); production survival comes from the larger
-	// PIKMIN_NETPLAY_DISCONNECT_MS timeout. Null in default builds.
+	// netplay hook opens the load guard's window and runs the test stall /
+	// PIKMIN_NETPLAY_TEST_LOAD_DELAY_MS hooks; survival comes from the load
+	// guard (pc_netplay_loadguard.h, issue #885). Null in default builds.
 	if (pc_netplay_on_stage_load != nullptr) pc_netplay_on_stage_load();
 #endif
 	// make sure we don't debug-print all this while soft-resetting.
