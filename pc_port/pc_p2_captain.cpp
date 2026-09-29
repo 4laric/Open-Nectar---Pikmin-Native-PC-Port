@@ -3,6 +3,7 @@
 #include "pc_p2_second_captain.h"
 #include "pc_coop.h"
 #include "NaviState.h"
+#include "Kontroller.h"
 #include "Pcam/CameraManager.h"
 #include "gameflow.h"
 #include "CinematicPlayer.h"
@@ -224,6 +225,13 @@ void update_player_switch()
         && current->mKontroller->keyDown(KBBTN_DPAD_UP);
     const bool pressed = g_switchPress.update(enabled, down);
     if (!enabled) return;
+    // Death/capture can change the roster independently of this key binding.
+    // The camera manager holds its own controller pointer as well as a target.
+    // Reconcile both before processing a new switch (also covers survivor-down).
+    if (current && current->mKontroller && cameraMgr
+        && cameraMgr->mController != current->mKontroller) {
+        p2_captain_bind_camera(*cameraMgr, *current);
+    }
     if (!g_switchHintShown) {
         std::printf("P2_CAPTAIN_CONTROLS switch=D-pad-Up (keyboard Up by default; remappable)\n");
         g_switchHintShown = true;
@@ -239,7 +247,7 @@ void update_player_switch()
     p2_captain_neutral_input(*current->mKontroller);
     p2_captain_neutral_input(*next->mKontroller);
     current->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
-    cameraMgr->startCamera(next);
+    p2_captain_bind_camera(*cameraMgr, *next);
     std::printf("P2_CAPTAIN_SWITCH from=%d to=%d\n", current->getNaviIndex(), next->getNaviIndex());
 }
 

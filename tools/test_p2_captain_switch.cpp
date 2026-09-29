@@ -18,6 +18,17 @@ struct Scene {
     int active=0, ownershipWrites=0;
 };
 
+struct CameraNavi { Input* mKontroller; };
+struct Camera {
+    Input* mController;
+    CameraNavi* target = nullptr;
+    void startCamera(CameraNavi* navi) {
+        // Binding the target alone is insufficient: camera update polls this.
+        assert(mController == navi->mKontroller);
+        target = navi;
+    }
+};
+
 int main() {
     P2CaptainSwitchPress edge;
     assert(!edge.update(false, true));
@@ -43,6 +54,14 @@ int main() {
     assert(!(old.mMainStickX | old.mMainStickY | old.mSubStickX | old.mSubStickY
         | old.mAnalogA | old.mAnalogB | old.mTriggerL | old.mTriggerR));
     assert(old.mPlayerNum==2 && old.mIsControllerFrozen);
+    Input selected;
+    CameraNavi first{&old}, second{&selected};
+    Camera camera{&old};
+    p2_captain_bind_camera(camera,second);
+    assert(camera.target==&second && camera.mController->mMainStickX==74);
+    // Reconciliation is equally valid for the automatic survivor transition.
+    p2_captain_bind_camera(camera,first);
+    assert(camera.target==&first && camera.mController==&old);
 
     Scene scene;
     P2CaptainHostOps ops;
@@ -64,7 +83,17 @@ int main() {
     ops.notifyActive=[](void* c,int slot) {static_cast<Scene*>(c)->active=slot;};
     P2CaptainAdapter adapter;
     assert(adapter.bind(ops) && adapter.setup());
+    assert(p2_captain_input_owner(true,0,scene.active,0));
+    assert(!p2_captain_input_owner(true,1,scene.active,0));
     assert(adapter.switchActive(1) && scene.active==1);
+    // Mouse/wheel/global queues now belong to captain 1 although the device
+    // remains assigned to player 0. Inactive captain 0 cannot consume them.
+    assert(!p2_captain_input_owner(true,0,scene.active,0));
+    assert(p2_captain_input_owner(true,1,scene.active,0));
+    // Without the opt-in pair, preserve assigned keyboard/gamepad ownership.
+    assert(p2_captain_input_owner(false,0,scene.active,0));
+    assert(!p2_captain_input_owner(false,1,scene.active,0));
+    assert(p2_captain_input_owner(false,1,0,1));
     assert(adapter.switchActive(0) && scene.active==0);
     assert(scene.owner[0]==0 && scene.owner[1]==1 && scene.ownershipWrites==0);
     scene.health[1]=0;
