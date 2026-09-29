@@ -31,6 +31,30 @@ except ImportError:  # non-Windows: junctions unavailable; caller must symlink
 DEFAULT_ASSETS = Path("C:/Users/alari/bbft/dist/cohesion/pikmin/assets")
 
 
+def refresh_loop(run, state_text, done, errors, replace=None, period=0.1):
+    """Keep run/state.txt fresh (rewritten every `period` s) until `done`.
+
+    Gapfix C (issue #885): os.replace can raise PermissionError [WinError 5]
+    while the game holds state.txt open for its poll, and write_text can meet
+    a transient AV / delete-pending lock. An uncaught error used to kill the
+    refresher thread; the legacy poll then saw a stale state.txt and paused
+    the sim until the run timed out. Every OSError (PermissionError is one)
+    is now counted in errors["n"] / errors["last"] and retried on the next
+    turn, as in coop_policy_native.py and run_pair.py, so the loop never
+    dies. `replace` is injectable for tools/netplay/selftest.py.
+    """
+    replace = os.replace if replace is None else replace
+    while not done.is_set():
+        pending = run / "state.tmp"
+        try:
+            pending.write_text(state_text)
+            replace(pending, run / "state.txt")
+        except OSError as exc:
+            errors["n"] += 1
+            errors["last"] = f"{type(exc).__name__}: {exc}"
+        done.wait(period)
+
+
 def parse_kv(items, what):
     out = {}
     for item in items or []:
@@ -108,15 +132,8 @@ def main(argv=None):
     stdout_log = run / "native.log"
 
     done = threading.Event()
-
-    def refresh():
-        while not done.is_set():
-            pending = run / "state.tmp"
-            pending.write_text(state_text)
-            os.replace(pending, run / "state.txt")
-            done.wait(0.1)
-
-    thread = threading.Thread(target=refresh)
+    refresh_errors = {"n": 0, "last": ""}
+    thread = threading.Thread(target=refresh_loop, args=(run, state_text, done, refresh_errors))
     thread.start()
 
     env = dict(os.environ)
@@ -186,6 +203,8 @@ def main(argv=None):
             nlines = sum(1 for line in f if line.strip())
     tps = (nlines / secs) if secs > 0 else 0.0
     print(f"run_replay: exit={rc} ticks={nlines}/{a.ticks} time={secs:.1f}s tps={tps:.1f}")
+    print(f"run_replay: refresher retried errors={refresh_errors['n']}"
+          + (f" last={refresh_errors['last']}" if refresh_errors["n"] else ""))
     exe_path = a.exe.resolve()
     print(f"run_replay: exe={exe_path} sha256={hashlib.sha256(exe_path.read_bytes()).hexdigest()}")
     print(f"STDOUT_LOG={stdout_log}")
