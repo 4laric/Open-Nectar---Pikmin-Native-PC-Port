@@ -22,6 +22,10 @@
 
 #include <cstdint>
 
+// The end banner's body: the final message's lines after its title
+// (headline, saved day, up to four "how to carry on" lines).
+constexpr int kBannerMaxLines = 6;
+
 struct PcNetplayHudInfo {
 	bool running = false;       // a session is advancing (the HUD may show)
 	bool isHost = false;
@@ -34,7 +38,7 @@ struct PcNetplayHudInfo {
 	double bannerLeftMs = 0;    // until the banner closes by itself
 	char bannerTitle[96] = {};
 	int bannerLines = 0;
-	char bannerLine[5][192] = {};
+	char bannerLine[kBannerMaxLines][192] = {};
 };
 
 // Session side (pc_netplay_session.cpp): false when no netplay session exists.

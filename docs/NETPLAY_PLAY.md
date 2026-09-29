@@ -62,11 +62,14 @@ sets the whole session up before anything else loads:
 
 ## Host steps
 
-1. Open a console (Command Prompt or PowerShell) in your game folder and
+1. Open a console (PowerShell or Command Prompt) in your game folder and
    run:
-   `nectar.exe --netplay-host-ice`
+   `.\nectar.exe --netplay-host-ice`
+   (PowerShell needs the `.\`: it does not run a program from the current
+   folder by its bare name; Command Prompt accepts it too. Every command
+   on this page is written so that it works in both.)
    - To play a randomizer seed, add its bootstrap file:
-     `nectar.exe --netplay-host-ice --bootstrap C:\path\to\bootstrap.txt`.
+     `.\nectar.exe --netplay-host-ice --bootstrap C:\path\to\bootstrap.txt`.
      Seeds with P2 enemies (`ENEMY_P2` in the file) work too: host from the
      seed's own folder (the one holding the seed's `assets\` overlay and its
      `p2-*.txt` / `sarai-*.txt` files); see "Seeds with P2 enemies".
@@ -85,13 +88,16 @@ sets the whole session up before anything else loads:
 
 1. Copy the host's whole offer code, open a console in your game folder,
    and run one of:
-   - `nectar.exe --netplay-join-ice @clipboard` (reads the clipboard: the
-     easiest, and it has no length limit),
-   - `nectar.exe --netplay-join-ice @C:\path\to\offer.txt` (a file holding
-     the code),
-   - `nectar.exe --netplay-join-ice NPIX2-...` (the code itself; a big
+   - `.\nectar.exe --netplay-join-ice "@clipboard"` (reads the clipboard:
+     the easiest, and it has no length limit),
+   - `.\nectar.exe --netplay-join-ice "@C:\path\to\offer.txt"` (a file
+     holding the code),
+   - `.\nectar.exe --netplay-join-ice NPIX2-...` (the code itself; a big
      offer can exceed the console's command-line limit, 8,191 characters in
      Command Prompt, so prefer `@clipboard` or `@file` for large seeds).
+   Keep the double quotes around `"@..."`: in PowerShell a bare `@clipboard`
+   is its splatting syntax and silently passes nothing, so the game would
+   get no offer code. Command Prompt removes the quotes as usual.
    You need no file from the host: the offer carries the seed file, the
    netplay seed and the host's sim settings.
 2. The game prints a one-line **answer code** and copies it to the
@@ -157,10 +163,14 @@ the same message in the console, for example:
 [netplay] ==== netplay session ended ====
 [netplay] CONNECTION LOST: no data from the other game for too long (it may have crashed or lost its network).
 [netplay] Last saved day: day 3 (the campaign continues from the start of day 3); checkpoint 1.
-[netplay] To carry on from that day: run host.bat and answer Y to "Continue last campaign?", or run:
-[netplay]   nectar.exe --netplay-host-ice --continue
-[netplay] Your partner joins as usual (join.bat); your saved day is sent to them automatically.
+[netplay] To carry on from that day, run this in the game's folder (PowerShell or Command Prompt):
+[netplay]   .\host.bat --continue
+[netplay]   or: .\nectar.exe --netplay-host-ice --continue
+[netplay] Your partner joins as usual (.\join.bat); your saved day is sent to them automatically.
 ```
+
+The `or:` line repeats this game's own `--netplay-input` switch, if it had
+one. The joiner's message names the same commands for the host.
 
 - **DESYNC** (exit code 5): the games disagreed about the game state.
 - **DESYNC AT THE DAY-END SAVE** (exit code 5) / **SAVE NOT AGREED** (exit
@@ -266,10 +276,11 @@ The one-command launcher starts every session in a new run folder. Without
 the **host** adds `--continue`:
 
 ```
-nectar.exe --netplay-host-ice --continue
+.\nectar.exe --netplay-host-ice --continue
 ```
 
-(the playtest `host.bat` asks `Continue last campaign? [Y/n]` and adds it
+or, in the playtest folder, `.\host.bat --continue` (host.bat passes its
+switches on; a host.bat that asks `Continue last campaign? [Y/n]` adds it
 for you). The joiner does nothing different: it joins with the usual offer
 code, and the host's saved day reaches it at the handshake (`[netplay]
 checkpoint adopted`).
@@ -286,7 +297,9 @@ checkpoint adopted`).
   small `campaign-record.txt` for this (which saves both games agreed on).
 - `--continue <run folder>` continues that run folder instead (for example
   an older campaign, or a run where you were the joiner: its campaign is the
-  same, so either player can host the next session).
+  same, so either player can host the next session). Quote a folder that
+  holds spaces:
+  `.\nectar.exe --netplay-host-ice --continue "C:\My Games\netplay\run-20260929-140000-join-pid1234"`.
 - `--continue` with `--bootstrap <seed file>` continues the newest campaign
   **of that seed**.
 - The seed file and the netplay seed come from the continued run; the

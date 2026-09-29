@@ -427,14 +427,38 @@ inline std::string saved_day_line(const EndInfo& e)
 	return s;
 }
 
-// Every line of the final message, without the "[netplay] " prefix.
+// A program in the game's folder, as typed in a console opened there. The
+// ".\" prefix is what PowerShell needs (it does not run programs from the
+// current folder by bare name), and Command Prompt accepts it too. A name
+// with anything but letters, digits, '.', '_' or '-' is quoted for
+// PowerShell with its call operator: & '.\my game.exe'.
+inline std::string local_command(const std::string& file)
+{
+	bool plain = !file.empty();
+	for (char c : file) {
+		const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' ||
+		                c == '_' || c == '-';
+		if (!ok) plain = false;
+	}
+	if (plain) return ".\\" + file;
+	std::string quoted;
+	for (char c : file) {
+		quoted += c;
+		if (c == '\'') quoted += '\''; // PowerShell doubles a quote inside '...'
+	}
+	return "& '.\\" + quoted + "'";
+}
+
+// Every line of the final message, without the "[netplay] " prefix. The
+// commands are typed in a console opened in the game's folder (PowerShell
+// or Command Prompt: see local_command).
 inline std::vector<std::string> recovery_lines(const EndInfo& e)
 {
 	std::vector<std::string> out;
 	out.push_back("==== netplay session ended ====");
 	out.push_back(end_headline(e));
 	out.push_back(saved_day_line(e));
-	const std::string exe = e.exe.empty() ? std::string("nectar.exe") : e.exe;
+	const std::string exe   = local_command(e.exe.empty() ? std::string("nectar.exe") : e.exe);
 	const std::string extra = e.extraArgs.empty() ? std::string() : " " + e.extraArgs;
 	if (!e.launcher) {
 		out.push_back("To carry on, start both games again with the same switches; the host's last saved day is "
@@ -443,21 +467,22 @@ inline std::vector<std::string> recovery_lines(const EndInfo& e)
 	}
 	if (e.gen == 0) {
 		if (e.host)
-			out.push_back("To play again: run host.bat (or " + exe + " --netplay-host-ice" + extra +
-			              ") and your partner joins as before; that starts a new campaign.");
+			out.push_back("To play again: run .\\host.bat (or " + exe + " --netplay-host-ice" + extra +
+			              ") in the game's folder and your partner joins as before; that starts a new campaign.");
 		else
-			out.push_back("To play again: the host runs host.bat and you join as before (join.bat); that starts a "
-			              "new campaign.");
+			out.push_back("To play again: the host runs .\\host.bat and you join as before (.\\join.bat); that "
+			              "starts a new campaign.");
 		return out;
 	}
 	if (e.host) {
-		out.push_back("To carry on from that day: run host.bat and answer Y to \"Continue last campaign?\", or run:");
-		out.push_back("  " + exe + " --netplay-host-ice --continue" + extra);
-		out.push_back("Your partner joins as usual (join.bat); your saved day is sent to them automatically.");
+		out.push_back("To carry on from that day, run this in the game's folder (PowerShell or Command Prompt):");
+		out.push_back("  .\\host.bat --continue");
+		out.push_back("  or: " + exe + " --netplay-host-ice --continue" + extra);
+		out.push_back("Your partner joins as usual (.\\join.bat); your saved day is sent to them automatically.");
 	} else {
-		out.push_back("To carry on from that day: the host runs host.bat and answers Y to \"Continue last "
-		              "campaign?\" (or " + exe + " --netplay-host-ice --continue).");
-		out.push_back("You join as usual (join.bat); the host's saved day is sent to you automatically.");
+		out.push_back("To carry on from that day: the host runs .\\host.bat --continue (or " + exe +
+		              " --netplay-host-ice --continue) in the game's folder.");
+		out.push_back("You join as usual (.\\join.bat); the host's saved day is sent to you automatically.");
 	}
 	return out;
 }

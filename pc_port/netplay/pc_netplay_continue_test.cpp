@@ -155,11 +155,15 @@ int main()
 		std::vector<std::string> l = recovery_lines(e);
 		CHECK(contains(l, "DESYNC") && contains(l, "at frame 30012"), "what happened");
 		CHECK(contains(l, "Last saved day: day 3"), "the last saved day");
-		CHECK(contains(l, "nectar.exe --netplay-host-ice --continue --netplay-input keyboard"), "the exact command");
-		CHECK(contains(l, "host.bat"), "the .bat route");
+		CHECK(contains(l, "  or: .\\nectar.exe --netplay-host-ice --continue --netplay-input keyboard"),
+		      "the exact command, PowerShell-ready (.\\ prefix)");
+		CHECK(contains(l, "  .\\host.bat --continue"), "the .bat route with --continue");
+		CHECK(contains(l, "PowerShell or Command Prompt"), "which consoles the commands are for");
 		e.host = false;
 		l = recovery_lines(e);
-		CHECK(contains(l, "the host runs host.bat") && contains(l, "You join as usual"), "joiner wording");
+		CHECK(contains(l, "the host runs .\\host.bat --continue (or .\\nectar.exe --netplay-host-ice --continue)") &&
+		          contains(l, "You join as usual"),
+		      "joiner wording");
 		e.kind = EndKind::SaveTimeout;
 		e.gen = 0;
 		e.day = 0;
@@ -167,12 +171,15 @@ int main()
 		CHECK(contains(l, "SAVE NOT AGREED") && contains(l, "Nothing is saved yet") && contains(l, "new campaign"),
 		      "no saved day: a new campaign");
 		CHECK(!contains(l, "--continue"), "no continue command without a saved day");
-		CHECK(contains(l, "the host runs host.bat and you join as before") && !contains(l, "--netplay-input"),
+		CHECK(contains(l, "the host runs .\\host.bat and you join as before") && !contains(l, "--netplay-input"),
 		      "joiner: the host's command, not this peer's switches");
 		e.host = true;
 		l = recovery_lines(e);
-		CHECK(contains(l, "run host.bat (or nectar.exe --netplay-host-ice --netplay-input keyboard)"),
+		CHECK(contains(l, "run .\\host.bat (or .\\nectar.exe --netplay-host-ice --netplay-input keyboard)"),
 		      "host: its own command with its switches");
+		CHECK(local_command("nectar.exe") == ".\\nectar.exe", "plain exe name: .\\ prefix");
+		CHECK(local_command("nectar (2).exe") == "& '.\\nectar (2).exe'", "spaces: PowerShell call operator");
+		CHECK(local_command("it's.exe") == "& '.\\it''s.exe'", "a quote is doubled");
 		e.kind = EndKind::PeerQuit;
 		e.gen = 2;
 		e.day = 0;

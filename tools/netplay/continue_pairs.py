@@ -385,7 +385,9 @@ def scenario_dayend(ctx, kind):
         ctx.check(s1["exit"] == {"host": 5, "join": 5}, f"s1: both exit 5 ({s1['exit']})")
         for side in ("host", "join"):
             ctx.check(any("desync detected" in ln for ln in s1[side]["events"]), f"s1 {side}: desync detected")
-            recovery_ok(ctx, s1, "s1", side, ["DESYNC", "Last saved day: day 3", "--continue"])
+            # The commands are PowerShell-ready (.\ prefix); cmd accepts them too.
+            recovery_ok(ctx, s1, "s1", side, ["DESYNC", "Last saved day: day 3", ".\\host.bat --continue",
+                                              ".\\nectar.exe --netplay-host-ice --continue"])
             ctx.check(any("closed after" in ln for ln in s1[side]["banner"]), f"s1 {side}: end banner shown and closed")
         ctx.check(any(r.startswith("end kind=desync code=5") for r in s1["host"].get("campaign-record.txt") or []),
                   "s1 host: record 'end kind=desync code=5'")
@@ -395,7 +397,8 @@ def scenario_dayend(ctx, kind):
     elif kind == "disconnect":
         ctx.check(s1["exit"]["host"] == 0, f"s1: host exit 0 after the lost connection ({s1['exit']})")
         ctx.check(any("disconnected" in ln for ln in s1["host"]["events"]), "s1 host: disconnected")
-        recovery_ok(ctx, s1, "s1", "host", ["CONNECTION LOST", "Last saved day: day 3", "--continue"])
+        recovery_ok(ctx, s1, "s1", "host", ["CONNECTION LOST", "Last saved day: day 3", "  .\\host.bat --continue",
+                                            "  or: .\\nectar.exe --netplay-host-ice --continue"])
         ctx.check(s1.get("acted_at_join_hash_lines", 0) >= a.event_frame, f"s1: joiner killed on day 3 at hash "
                   f"line {s1.get('acted_at_join_hash_lines')}")
     host_run = s1["host"]["run_dir"]

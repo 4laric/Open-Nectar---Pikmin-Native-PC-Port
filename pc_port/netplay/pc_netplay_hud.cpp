@@ -188,7 +188,7 @@ void draw_banner(const PcNetplayHudInfo& info, int W, int H)
 	for (int i = 0; i < info.bannerLines; ++i) {
 		for (const std::string& l : wrap(info.bannerLine[i], textW, fw)) body.push_back(l);
 	}
-	if (body.size() > 12) body.resize(12);
+	if (body.size() > 14) body.resize(14); // at most 374 units tall in all
 	char footer[96];
 	const int left = info.bannerLeftMs > 0 ? (int)(info.bannerLeftMs / 1000.0 + 0.999) : 0;
 	snprintf(footer, sizeof footer, "Closing in %d s - press any key or button to close now.", left);
