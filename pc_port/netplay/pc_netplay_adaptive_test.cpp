@@ -140,7 +140,7 @@ unsigned run_frames(DelayController& c, double fromMs, double toMs, unsigned cur
 void test_controller()
 {
 	Policy pol;
-	// Quick raise on sustained lateness, stopping at need(rtt p50) + 3.
+	// Quick raise on sustained lateness, stopping at need(rtt p50) + 2.
 	{
 		DelayController c;
 		c.configure(pol);
@@ -174,6 +174,17 @@ void test_controller()
 		ups = 0;
 		cur = run_frames(c1, 5000, 5400, 2, &ups, nullptr);
 		CHECK(cur == 3 && ups == 1, "one 350 ms spike raises by 1");
+	}
+	// No RTT samples yet (the first seconds): one step at a time, even on
+	// heavy sustained lateness.
+	{
+		DelayController c;
+		c.configure(pol);
+		c.start(0);
+		add_stall(c, 5000, 350, 4);
+		int ups = 0;
+		unsigned cur = run_frames(c, 5000, 5400, 2, &ups, nullptr);
+		CHECK(cur == 3 && ups == 1, "no rtt samples: heavy lateness raises by 1 only");
 	}
 	// Lateness explained by this peer's own slow ticks never raises.
 	{

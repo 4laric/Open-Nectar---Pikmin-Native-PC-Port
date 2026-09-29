@@ -333,7 +333,7 @@ struct Policy {
 	// one-way measured p50 165 ms against 120 on a bare echo.)
 	double rttBiasMs = kSlotMs;
 	unsigned bigStepEvents = 3;   // a +2 step needs this many late events (sustained, not one spike)
-	double selfLeadMs = 1000;     // own overrun this far before the window still explains lateness
+	double selfLeadMs = 1000;     // own lag this far before the window still explains lateness
 };
 
 struct Decision {
@@ -453,7 +453,8 @@ public:
 		const double late = reported > own ? reported - own : 0.0;
 		if (late >= mP.upStallMs && nowMs - mLastUpMs >= mP.upCooldownMs) {
 			const double p50 = rtt_percentile(nowMs - mP.rttWindowUpMs, nowMs, 50);
-			unsigned cap = mP.maxDelay;
+			// Without enough RTT samples yet, one step at a time.
+			unsigned cap = std::min(mP.maxDelay, cur + 1);
 			if (p50 >= 0) {
 				const unsigned need = need_for_measured(p50);
 				cap = std::min(mP.maxDelay, need + mP.maxExtraOverRtt);
@@ -464,7 +465,7 @@ public:
 				d.target = std::min(cap, cur + step);
 				d.changed = true;
 				char buf[160];
-				snprintf(buf, sizeof(buf), "up: peer late %.0fms (own slow ticks %.0fms) in %.1fs, rtt p50 %.0fms, cap %u",
+				snprintf(buf, sizeof(buf), "up: peer late %.0fms (own lag %.0fms) in %.1fs, rtt p50 %.0fms, cap %u",
 				         reported, own, (nowMs - from) / 1000.0, p50, cap);
 				d.reason = buf;
 				if (nowMs - mLastDownMs < mP.backoffWindowMs) {
