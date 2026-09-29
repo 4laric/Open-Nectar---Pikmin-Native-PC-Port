@@ -30,6 +30,9 @@ void pc_p2_fuefuki_teki_forget(BTeki*);
 void pc_p2_fuefuki_teki_tick(BTeki*);
 bool pc_p2_fuefuki_teki_is_bound(const BTeki*);
 int pc_p2_fuefuki_teki_bound_count();
+// Read-only bot sense: true while a bound, living beetle is in its whistle
+// cast (source StateWhisle), the only state that claims Pikmin.
+bool pc_p2_fuefuki_teki_casting(const BTeki*);
 // Host suppression: true while a bound beetle is alive or playing its dead clip.
 bool pc_p2_fuefuki_teki_suppress_ai(const BTeki*);
 // TPF_Life = retail fp00 and a blinded host strategy while bound and alive.

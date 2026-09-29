@@ -50,6 +50,7 @@
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_kogane.h"
 #include "pc_p2_chappy.h"
+#include "pc_p2_fuefuki_teki.h"
 #include "pc_randomizer.h"
 #include "Controller.h"
 
@@ -437,6 +438,8 @@ void pc_p2_autoplay_tick(void)
 
     // --- Pikmin census (read-only, except bot-v4 power-mode flowering) ---
     int alive = 0, nearCount = 0, farCount = 0, transport = 0, distress = 0;
+    int panicCount = 0; // #245: Pikmin in PIKISTATE_Panic, nearest XZ to the captain
+    float panicNearest = 1.0e30f;
     std::vector<std::pair<float, float>> transportPos;
     const bool powerMode = p2autoplay::isPowerEnabled();
     {
@@ -465,6 +468,10 @@ void pc_p2_autoplay_tick(void)
                 || pst == PIKISTATE_Swallowed || pst == PIKISTATE_Panic || pst == PIKISTATE_Drown
                 || pst == PIKISTATE_Bubble || p->isFired() || p->isStickToMouth())
                 ++distress;
+            if (pst == PIKISTATE_Panic) {
+                ++panicCount;
+                panicNearest = std::min(panicNearest, d);
+            }
         }
     }
     if (powerMode) sPowerSeconds += (dt > 0.0f && dt <= 0.5f) ? dt : 0.016f;
@@ -769,6 +776,8 @@ void pc_p2_autoplay_tick(void)
     senses.containerOpen = navi->getCurrState() && navi->getCurrState()->getID() == NAVISTATE_Container;
     senses.scattered = (farCount >= 3) || (alive >= 10 && nearCount < 5);
     senses.squadDistress = distress > 0;
+    senses.panicCount = panicCount; // #245 Fuefuki owner-death Panic reclaim
+    senses.panicNearest = panicNearest;
     // bot-v5: live per-corpse carry (was a forever latch on ANY transport).
     // receiptSeen stays the per-token ledger query (per-token bystander-proof).
     senses.transportSeen = carryActive;
@@ -819,6 +828,10 @@ void pc_p2_autoplay_tick(void)
             senses.targetAttacking = pc_p2_chappy_probe(pick->actor, &kst, nullptr, nullptr) && kst
                 && std::strcmp(kst, "attack") == 0;
         }
+        // #245: the Antenna Beetle's whistle cast (read-only FSM probe). The
+        // Fuefuki stance leaves the growing cast ring while it lasts.
+        if (p2autoplay::isFuefukiStandoff(pick->source))
+            senses.targetAttacking = pc_p2_fuefuki_teki_casting(pick->actor);
         // Flyer senses (bot-v2 gap 3): height above ground, grab latch.
         // Kurage's body is on the ground (visual float only), so its XZ body
         // position above is already the throw aim; Sarai throws only when low

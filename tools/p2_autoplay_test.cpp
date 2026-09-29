@@ -2306,6 +2306,154 @@ bool enterAttack(p2autoplay::Brain& brain, p2autoplay::Senses s)
     return brain.current() == p2autoplay::State::Attack;
 }
 
+// #245 Antenna Beetle (41) stance + owner-death Panic reclaim.
+void testFuefukiStancePolicy()
+{
+    const p2autoplay::Config def;
+    // Throwing band inside the 130 cast ring (fp22) and well inside the
+    // 300 cursor radius; the cast evade clears the full ring.
+    CHECK(def.fuefukiStandoffMax < 130.0f && def.fuefukiStandoffMin > 0.0f
+              && def.fuefukiStandoffResume > def.fuefukiStandoffMin
+              && def.fuefukiStandoffCloseStop < def.fuefukiStandoffMax
+              && def.fuefukiStandoffCloseStop >= def.fuefukiStandoffResume
+              && def.fuefukiEvadeClear > 130.0f,
+          "fuefuki/band_throws_evade_clears_ring");
+    CHECK(p2autoplay::isFuefukiStandoff(41) && !p2autoplay::isFuefukiStandoff(53)
+              && !p2autoplay::isFuefukiStandoff(2) && !p2autoplay::isKingStandoff(41),
+          "fuefuki/only_source_41");
+    CHECK(def.panicReclaimRadius < 100.0f && def.panicReclaimMax > 0, "fuefuki/panic_radius_inside_whistle");
+
+    p2autoplay::Config cfg;
+    cfg.throwHold = 0.1f;
+    cfg.throwGap = 0.2f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = kingSenses(41, 40.0f);
+    s.targetToken = 410041;
+    CHECK(enterAttack(brain, s), "fuefuki/enters_attack");
+    // Too close (under the band): back straight out, no throws.
+    std::vector<std::string> markers;
+    int aOn = 0;
+    bool away = true;
+    for (int i = 0; i < 20; ++i) {
+        brain.update(0.05f, s);
+        const p2autoplay::Command c = brain.command();
+        if (c.buttons & unsigned(p2autoplay::PadA)) ++aOn;
+        if (!(c.moveZ > 0.99f)) away = false;
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(away && aOn == 0, "fuefuki/backs_out_under_band");
+    CHECK(hasMarker(markers, "AUTOPLAY_FUEFUKI_STANDOFF mode=back token=410041 dist=40"), "fuefuki/back_marker");
+    CHECK(!hasMarker(markers, "AUTOPLAY_KING_STANDOFF"), "fuefuki/not_king_marker");
+    // In the band, not casting: look-band cursor onto the beetle, throw pulses.
+    s.naviZ = s.targetDist = 75.0f;
+    s.cursorValid = true;
+    s.cursorX = 0.0f;
+    s.cursorZ = 8.0f;
+    markers.clear();
+    aOn = 0;
+    bool neutral = true;
+    for (int i = 0; i < 40; ++i) {
+        brain.update(0.05f, s);
+        const p2autoplay::Command c = brain.command();
+        if (c.buttons & unsigned(p2autoplay::PadA)) ++aOn;
+        if (c.moveX != 0.0f || c.moveZ != 0.0f) neutral = false;
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(neutral && aOn > 0 && aOn < 40, "fuefuki/hold_throws_in_band");
+    CHECK(hasMarker(markers, "AUTOPLAY_FUEFUKI_STANDOFF mode=hold"), "fuefuki/hold_marker");
+    // Whistle cast: walk straight out of the ring, no throws, even in the band.
+    s.targetAttacking = true;
+    markers.clear();
+    aOn = 0;
+    away = true;
+    // 8 ticks = 0.4 s, under kingEvadeSideAfter (a pinned captain sidesteps).
+    for (int i = 0; i < 8; ++i) {
+        brain.update(0.05f, s);
+        const p2autoplay::Command c = brain.command();
+        if (c.buttons & unsigned(p2autoplay::PadA)) ++aOn;
+        if (!(c.moveZ > 0.99f)) away = false;
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(away && aOn == 0, "fuefuki/evades_cast");
+    CHECK(hasMarker(markers, "AUTOPLAY_FUEFUKI_STANDOFF mode=evade"), "fuefuki/evade_marker");
+    // Outside the ring during the cast: stand and aim, no walking back in.
+    s.naviZ = s.targetDist = 170.0f;
+    bool stood = true;
+    for (int i = 0; i < 10; ++i) {
+        brain.update(0.05f, s);
+        const p2autoplay::Command c = brain.command();
+        if (c.stickScale >= 1.0f && (c.moveX != 0.0f || c.moveZ < -0.5f)) stood = false;
+    }
+    CHECK(stood, "fuefuki/no_approach_during_cast");
+    // Cast over: close back into the band.
+    s.targetAttacking = false;
+    bool closes = false;
+    for (int i = 0; i < 10; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().moveZ < -0.99f) closes = true;
+    }
+    CHECK(closes, "fuefuki/closes_after_cast");
+    // Low captain health keeps the Fuefuki band (the King-only guard would
+    // move it out to 180+ and walk the captain away from 75).
+    s.naviZ = s.targetDist = 75.0f;
+    s.naviHpValid = true;
+    s.naviHp = 10.0f;
+    for (int i = 0; i < 5; ++i) brain.update(0.05f, s);
+    bool stays = true;
+    for (int i = 0; i < 10; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().moveX != 0.0f || brain.command().moveZ != 0.0f) stays = false;
+    }
+    CHECK(stays, "fuefuki/no_lowhp_band");
+
+    // Death with panicking followers near the captain: bounded reclaim whistles.
+    s.targetAlive = false;
+    s.targetDead = true;
+    s.targetDist = 40.0f;
+    s.naviZ = 40.0f;
+    s.panicCount = 12;
+    s.panicNearest = 30.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "fuefuki/aftermath");
+    markers = brain.takeMarkers();
+    int bTicks = 0;
+    for (int i = 0; i < 1200 && brain.current() == p2autoplay::State::Aftermath; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadB)) ++bTicks;
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    int reclaims = 0;
+    for (const std::string& m : markers)
+        if (m.find("AUTOPLAY_PANIC_RECLAIM token=410041") != std::string::npos) ++reclaims;
+    CHECK(reclaims == cfg.panicReclaimMax, "fuefuki/panic_reclaim_bounded");
+    CHECK(bTicks > 0 && bTicks <= int(cfg.panicReclaimMax * (cfg.whistleHold / 0.05f + 2.0f)),
+          "fuefuki/panic_whistle_bounded_hold");
+
+    // Out of range: no whistle. Other species: never (aftermath no-whistle rule).
+    for (unsigned src : {41u, 2u}) {
+        p2autoplay::Brain b2(cfg);
+        p2autoplay::Senses t = kingSenses(src, 170.0f);
+        t.targetToken = 410042;
+        CHECK(enterAttack(b2, t), "fuefuki/enters_attack_2");
+        t.targetAlive = false;
+        t.targetDead = true;
+        t.targetDist = 40.0f;
+        t.naviZ = 40.0f;
+        t.panicCount = 12;
+        t.panicNearest = src == 41u ? 95.0f : 10.0f;
+        bool whistled = false;
+        for (int i = 0; i < 200; ++i) {
+            b2.update(0.05f, t);
+            if (b2.command().buttons & unsigned(p2autoplay::PadB)) whistled = true;
+        }
+        CHECK(!whistled, src == 41u ? "fuefuki/no_reclaim_out_of_range" : "fuefuki/no_reclaim_other_species");
+    }
+}
+
 void testKingStandoffPolicy()
 {
     const p2autoplay::Config def;
@@ -2976,6 +3124,7 @@ int main()
     testUnkilledOniKurageWindow();
     testUnkilledWhistleTimeout();
     testKingStandoffPolicy();
+    testFuefukiStancePolicy();
     testKingStandoffOpensGate();
     testKingEvadePolicy();
     testKingEvadeLongSim();

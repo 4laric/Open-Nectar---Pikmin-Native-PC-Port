@@ -248,6 +248,17 @@ inline bool isFlyer(unsigned source) { return source == 23 || source == 57 || so
 // family keeps the unchanged contact steer.
 inline bool isKingStandoff(unsigned source) { return source == 53; }
 
+// #245 Antenna Beetle (Fuefuki) stance. The beetle's whistle claims every
+// Pikmin inside attackRadius (fp22 = 130, FuefukiState.cpp updateWhisle), so
+// a captain in contact loses his whole squad each cast (d4: 76 held at
+// death) and never throws. A player fights it from range: stand outside the
+// cast ring and lob Pikmin onto its back, which is also the only way to
+// reach the source pressCallBack (a thrown Pikmin landing while mCanStruggle
+// flips it into Struggle, Fuefuki.cpp:163-168). The stance reuses the King
+// back/close/hold machinery with its own band (Config::fuefuki*); the King's
+// tongue evade and low-health band do not apply. Pad input only.
+inline bool isFuefukiStandoff(unsigned source) { return source == 41; }
+
 // Numeric filter matches a generator key; otherwise a species name match.
 inline bool matchTarget(unsigned token, unsigned source, const char* species, const std::string& filter)
 {
@@ -353,6 +364,30 @@ struct Config {
     // beyond fp20 (130) and the tongue reach, so the King never attacks the
     // captain; he keeps throwing from there. 0 disables.
     float kingLowHp = 35.0f;
+    // #245 Fuefuki stance band (XZ). d5 showed a band outside the cast ring
+    // (150-195) never lands a throw: the cursor trails the backing stick and
+    // P1 throws land at the cursor, so no thrown Pikmin ever reached the
+    // beetle (presses=0). The stance now holds a throwing band inside the
+    // ring while the beetle is not casting and leaves the ring
+    // (fuefukiEvadeClear) for the whole whistle cast (Senses::targetAttacking,
+    // source StateWhisle; the ring grows to fp22 = 130 over 1 s, so the
+    // captain at <= 95 walks out ahead of it).
+    bool fuefukiStandoff = true;
+    float fuefukiStandoffMin = 55.0f;
+    float fuefukiStandoffResume = 65.0f;
+    float fuefukiStandoffMax = 95.0f;
+    float fuefukiStandoffCloseStop = 85.0f;
+    float fuefukiEvadeClear = 165.0f;
+    // #245 owner-death Panic reclaim (Aftermath, Fuefuki targets only): the
+    // beetle's followers go into an astonish Panic when it dies
+    // (FuefukiState.cpp StateDead -> releasing the whistle hold). A player
+    // whistles them back before carrying; the bot does the same when a
+    // panicking Pikmin is inside panicReclaimRadius (under the 100 u whistle
+    // max radius, NaviMgr.h:27), for whistleHold, at most panicReclaimMax
+    // times per engagement, with whistleCooldown between.
+    bool panicReclaim = true;
+    float panicReclaimRadius = 90.0f;
+    int panicReclaimMax = 4;
     float lookStickScale = 0.24f; // 0.24*127 = 30 bytes: |stick| 0.41 (look band), no MSTICK bits (> 32)
 };
 
@@ -464,6 +499,11 @@ struct Senses {
     bool targetAttacking = false;
     bool naviHpValid = false;
     float naviHp = 0.0f;
+    // #245: Pikmin in PIKISTATE_Panic (any cause) and the XZ distance from
+    // the captain to the nearest one (1e30 when none). Only the Fuefuki
+    // Aftermath panic reclaim reads them.
+    int panicCount = 0;
+    float panicNearest = 1.0e30f;
 };
 
 // Pad output for one tick. moveX/moveZ is the desired world-space XZ move
@@ -543,6 +583,10 @@ public:
         kingEvading = false;
         kingEvadeTime = 0.0f;
         kingLowHpMode = false;
+        amPanicWhistles = 0;
+        amPanicWhistle = false;
+        amPanicTime = 0.0f;
+        amPanicCooldown = 0.0f;
         result = Result{};
         markers.clear();
         lastCommand = Command{};
@@ -873,6 +917,10 @@ private:
         amHadEnough = false;
         amLastCrew = 0;
         amGrowStill = 0.0f;
+        amPanicWhistles = 0;
+        amPanicWhistle = false;
+        amPanicTime = 0.0f;
+        amPanicCooldown = 0.0f;
         result = Result{};
         result.token = in.targetToken;
         result.koganeLike = isKoganeLike(in.targetSource);
@@ -1076,7 +1124,8 @@ private:
             }
             return;
         }
-        if (cfg.kingStandoff && isKingStandoff(in.targetSource)) {
+        if ((cfg.kingStandoff && isKingStandoff(in.targetSource))
+            || (cfg.fuefukiStandoff && isFuefukiStandoff(in.targetSource))) {
             tickKingStandoff(dt, in, limit);
             return;
         }
@@ -1127,6 +1176,33 @@ private:
         // Pikmin at the navi 36-65 u from the corpse so no carry ever
         // initiates (v4b diagnosis). Deliver with stick + throws only.
         const bool carryActive = in.transportSeen || in.carryCount > 0 || in.pelletCarriers > 0;
+        // #245 owner-death Panic reclaim (Fuefuki only; see Config). The one
+        // exception to "never whistle here": a short, bounded whistle while a
+        // panicking follower of the dead beetle is in range, so the squad it
+        // stole can crew the carry. Carry sensing and seeding resume after.
+        if (amPanicCooldown > 0.0f) amPanicCooldown -= dt;
+        if (cfg.panicReclaim && isFuefukiStandoff(in.targetSource) && !sawReceipt) {
+            if (!amPanicWhistle && in.panicCount > 0 && in.panicNearest <= cfg.panicReclaimRadius
+                && amPanicWhistles < cfg.panicReclaimMax && amPanicCooldown <= 0.0f) {
+                amPanicWhistle = true;
+                amPanicTime = 0.0f;
+                ++amPanicWhistles;
+                char buf[256];
+                std::snprintf(buf, sizeof(buf),
+                              "AUTOPLAY_PANIC_RECLAIM token=%u panic=%d nearest=%.0f whistle=%d/%d bot-driven",
+                              in.targetToken, in.panicCount, in.panicNearest, amPanicWhistles, cfg.panicReclaimMax);
+                markers.emplace_back(buf);
+            }
+            if (amPanicWhistle) {
+                amPanicTime += dt;
+                lastCommand.buttons = PadB;
+                if (amPanicTime >= cfg.whistleHold) {
+                    amPanicWhistle = false;
+                    amPanicCooldown = cfg.whistleCooldown;
+                }
+                return;
+            }
+        }
         if (sawReceipt) {
             // Onion receipt landed: score it promptly. received=1 comes ONLY
             // from this token's own ledger line; bystander CHECK
@@ -1536,12 +1612,16 @@ private:
     void tickKingStandoff(float dt, const Senses& in, float limit)
     {
         const float d = in.targetDist;
-        const bool lowHp = cfg.kingLowHp > 0.0f && in.naviHpValid && in.naviHp <= cfg.kingLowHp;
-        const float bandMin = lowHp ? cfg.kingEvadeClear : cfg.kingStandoffMin;
-        const float bandResume = lowHp ? cfg.kingEvadeClear + 15.0f : cfg.kingStandoffResume;
-        const float bandMax = lowHp ? cfg.kingEvadeClear + 30.0f : cfg.kingStandoffMax;
-        const float bandCloseStop = lowHp ? cfg.kingEvadeClear + 20.0f : cfg.kingStandoffCloseStop;
-        const bool attacking = cfg.kingEvade && in.targetAttacking;
+        const bool fue = isFuefukiStandoff(in.targetSource);
+        const bool lowHp = !fue && cfg.kingLowHp > 0.0f && in.naviHpValid && in.naviHp <= cfg.kingLowHp;
+        const float bandMin = fue ? cfg.fuefukiStandoffMin : lowHp ? cfg.kingEvadeClear : cfg.kingStandoffMin;
+        const float bandResume = fue ? cfg.fuefukiStandoffResume
+                                 : lowHp ? cfg.kingEvadeClear + 15.0f : cfg.kingStandoffResume;
+        const float bandMax = fue ? cfg.fuefukiStandoffMax : lowHp ? cfg.kingEvadeClear + 30.0f : cfg.kingStandoffMax;
+        const float bandCloseStop = fue ? cfg.fuefukiStandoffCloseStop
+                                    : lowHp ? cfg.kingEvadeClear + 20.0f : cfg.kingStandoffCloseStop;
+        const bool attacking = fue ? in.targetAttacking : cfg.kingEvade && in.targetAttacking;
+        const float evadeClear = fue ? cfg.fuefukiEvadeClear : cfg.kingEvadeClear;
         if (attacking && !kingEvading) kingEvadeTime = 0.0f;
         kingEvading = attacking;
         int mode;
@@ -1551,7 +1631,7 @@ private:
             kingBacking = false;
             kingClosing = false;
             kingBackTime = 0.0f;
-            if (d < cfg.kingEvadeClear) {
+            if (d < evadeClear) {
                 kingEvadeTime += dt;
                 float ax, az;
                 awayFrom(in, ax, az);
@@ -1607,9 +1687,9 @@ private:
             kingLowHpMode = lowHp;
             char buf[256];
             std::snprintf(buf, sizeof(buf),
-                          "AUTOPLAY_KING_STANDOFF mode=%s token=%u dist=%.0f back_time=%.1f king_attack=%d "
+                          "%s mode=%s token=%u dist=%.0f back_time=%.1f king_attack=%d "
                           "navi_hp=%.0f low_hp=%d bot-driven",
-                          kingModeName(mode), in.targetToken, d, kingBacking ? kingBackTime : 0.0f,
+                          fue ? "AUTOPLAY_FUEFUKI_STANDOFF" : "AUTOPLAY_KING_STANDOFF", kingModeName(mode), in.targetToken, d, kingBacking ? kingBackTime : 0.0f,
                           in.targetAttacking ? 1 : 0, in.naviHpValid ? in.naviHp : -1.0f, lowHp ? 1 : 0);
             markers.emplace_back(buf);
         }
@@ -1688,6 +1768,10 @@ private:
     bool kingEvading = false; // #884 round 5: leaving the tongue sweep for the current King attack
     float kingEvadeTime = 0.0f; // time spent evading inside kingEvadeClear (sidestep after kingEvadeSideAfter)
     bool kingLowHpMode = false; // last stance used the low-health band (marker field)
+    int amPanicWhistles = 0; // #245: panic reclaim whistles used this engagement
+    bool amPanicWhistle = false; // #245: holding a panic reclaim whistle
+    float amPanicTime = 0.0f;
+    float amPanicCooldown = 0.0f;
     bool announced = false;
     Result result;
     Command lastCommand;

@@ -724,6 +724,12 @@ void pc_p2_fuefuki_teki_forget(BTeki* t)
 bool pc_p2_fuefuki_teki_is_bound(const BTeki* t) { return t && find(t) != nullptr; }
 int pc_p2_fuefuki_teki_bound_count() { return int(sBound.size()); }
 
+bool pc_p2_fuefuki_teki_casting(const BTeki* t)
+{
+    Binding* b = t ? find(t) : nullptr;
+    return b && !b->escaped && b->actor.fsm().getState() == P2FuefukiFsmState::Whisle;
+}
+
 bool pc_p2_fuefuki_teki_suppress_ai(const BTeki* t)
 {
     Binding* b = find(t);
