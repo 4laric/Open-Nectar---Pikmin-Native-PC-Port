@@ -72,6 +72,7 @@
 #include "ItemMgr.h"
 #include "MapMgr.h"
 #include "Route.h"
+#include "WorkObject.h"
 #include "Camera.h"
 #include "gameflow.h"
 
@@ -221,7 +222,59 @@ bool bfsPath(int selfIdx, int tgtIdx, std::vector<std::pair<float, float>>& out)
 }
 
 // bot-v3: k nearest open land waypoints to (x,z), closest first.
-std::vector<int> nearestWpIdx(float x, float z, int k)
+// #246/#899: a waypoint under a P1 HinderRock (the Impact Site box comes to
+// rest on wp (-347,-30,709)) is inside the box, never a reachable leg.
+bool underHinderRock(float x, float z)
+{
+    if (!workObjectMgr) return false;
+    Iterator it(workObjectMgr);
+    CI_LOOP(it)
+    {
+        WorkObject* obj = static_cast<WorkObject*>(*it);
+        if (!obj || !obj->isHinderRock()) continue;
+        const float r = static_cast<HinderRock*>(obj)->getCentreSize() * 0.5f;
+        if (distXZ(x, z, obj->getPosition().x, obj->getPosition().z) < (r > 40.0f ? r : 40.0f)) return true;
+    }
+    return false;
+}
+
+// Height of the route waypoint a path leg was built from (legs keep only
+// x/z), or NAN for a synthetic leg (sidestep, box push).
+float waypointYAt(float x, float z)
+{
+    if (!routeMgr) return NAN;
+    const int n = routeMgr->getNumWayPoints('test');
+    for (int i = 0; i < n && n <= 4096; ++i) {
+        WayPoint* wp = routeMgr->getWayPoint('test', i);
+        if (wp && std::fabs(wp->mPosition.x - x) < 0.5f && std::fabs(wp->mPosition.z - z) < 0.5f) return wp->mPosition.y;
+    }
+    return NAN;
+}
+
+// #246/#899: a leg counts as reached within 80 units, except around a level
+// change: when the leg's waypoint is off the captain's level, or the next leg
+// climbs/descends from it, it must be reached within 30. Otherwise the
+// captain cuts the corner under a ledge and presses into its wall (Impact
+// Site pit: wp (-177,-30,714) -> ramp top (-281,18,719) -> (-420,20,718)).
+float legReachRadius(size_t idx, float naviY)
+{
+    std::vector<std::pair<float, float>>& path = sPath;
+    if (idx >= path.size()) return 80.0f;
+    const float y = waypointYAt(path[idx].first, path[idx].second);
+    if (!std::isfinite(y)) return 80.0f;
+    if (std::isfinite(naviY) && std::fabs(y - naviY) > 20.0f) return 30.0f;
+    if (idx + 1 < path.size()) {
+        const float ny = waypointYAt(path[idx + 1].first, path[idx + 1].second);
+        if (std::isfinite(ny) && std::fabs(ny - y) > 20.0f) return 30.0f;
+    }
+    return 80.0f;
+}
+
+// #246/#899: when `levelY` is finite, waypoints more than 35 units above or
+// below it rank after every on-level one: a start waypoint on a ledge over
+// the captain's head is not a reachable first leg (Impact Site box pit:
+// wp (-420,20,718) above the corridor floor at -30).
+std::vector<int> nearestWpIdx(float x, float z, int k, float levelY = NAN)
 {
     std::vector<int> out;
     if (!routeMgr) return out;
@@ -238,8 +291,10 @@ std::vector<int> nearestWpIdx(float x, float z, int k)
     for (int i = 0; i < n; ++i) {
         WayPoint* wp = routeMgr->getWayPoint(handle, i);
         if (!wp || !wp->mIsOpen || wp->inWater()) continue;
+        if (underHinderRock(wp->mPosition.x, wp->mPosition.z)) continue; // not a standable leg
         const float dx = wp->mPosition.x - pos.x, dz = wp->mPosition.z - pos.z;
-        scored.push_back({ dx * dx + dz * dz, i });
+        const bool offLevel = std::isfinite(levelY) && std::fabs(wp->mPosition.y - levelY) > 35.0f;
+        scored.push_back({ dx * dx + dz * dz + (offLevel ? 1.0e8f : 0.0f), i });
     }
     std::sort(scored.begin(), scored.end(), [](const Scored& a, const Scored& b) { return a.d < b.d; });
     for (int i = 0; i < int(scored.size()) && int(out.size()) < k; ++i) out.push_back(scored[i].idx);
@@ -296,6 +351,72 @@ bool graphLegs(PathFinder* finder, int startIdx, int goalIdx,
     return !out.empty();
 }
 
+// #246/#899: an unfinished P1 HinderRock (pushable box, e.g. the Impact
+// Site box in front of the Goolix arena) closes the route to a target. A
+// player walks the squad into it and the formation Pikmin push it through
+// the normal collision path (piki.cpp PushstoneMode). The bot does the same:
+// on a STUCK approach with an unfinished box nearby it walks to the box's
+// push side (opposite its destination) and then into the box, holding there
+// while it moves, for at most kHinderBudget seconds per process. Only pad
+// input is published; the box, its pushers and its route are untouched.
+float sNaviY = NAN; // live captain height for level-aware start waypoints
+HinderRock* sHinder = nullptr;
+bool sHinderLeg = false;
+float sHinderTime = 0.0f;
+constexpr float kHinderBudget = 120.0f;
+
+HinderRock* nearestOpenHinderRock(float x, float z, float maxDist)
+{
+    if (!workObjectMgr) return nullptr;
+    HinderRock* best = nullptr;
+    float bestDist = maxDist;
+    Iterator it(workObjectMgr);
+    CI_LOOP(it)
+    {
+        WorkObject* obj = static_cast<WorkObject*>(*it);
+        if (!obj || !obj->isHinderRock() || obj->isFinished()) continue;
+        const float d = distXZ(x, z, obj->getPosition().x, obj->getPosition().z);
+        if (d < bestDist) {
+            bestDist = d;
+            best = static_cast<HinderRock*>(obj);
+        }
+    }
+    return best;
+}
+
+bool planHinderRock(float naviX, float naviZ)
+{
+    if (sHinderTime >= kHinderBudget) return false;
+    HinderRock* box = nearestOpenHinderRock(naviX, naviZ, 500.0f);
+    if (!box) return false;
+    const Vector3f pos = box->getPosition();
+    float ax = box->mDestinationPosition.x - pos.x, az = box->mDestinationPosition.z - pos.z;
+    float len = std::sqrt(ax * ax + az * az);
+    if (len < 1.0f) {
+        ax = pos.x - naviX;
+        az = pos.z - naviZ;
+        len = std::sqrt(ax * ax + az * az);
+        if (len < 1.0f) return false;
+    }
+    ax /= len;
+    az /= len;
+    const float size = box->getCentreSize();
+    sPath.clear();
+    sPathIdx = 0;
+    sLegTime = 0.0f;
+    sPath.emplace_back(pos.x - ax * (size + 90.0f), pos.z - az * (size + 90.0f)); // push side
+    sPath.emplace_back(pos.x, pos.z);                                             // into the box
+    sHinder = box;
+    sHinderLeg = true;
+    std::printf("AUTOPLAY_HINDER_PUSH token=%u box=(%.0f,%.0f) dest=(%.0f,%.0f) size=%.0f need=%d navi=(%.0f,%.0f) "
+                "stand=(%.0f,%.0f) bot-driven\n",
+                sEngage.token, double(pos.x), double(pos.z), double(box->mDestinationPosition.x),
+                double(box->mDestinationPosition.z), double(size), box->mAmountPushersToStart, double(naviX),
+                double(naviZ), double(sPath[0].first), double(sPath[0].second));
+    std::fflush(stdout);
+    return true;
+}
+
 void planDetour(float naviX, float naviZ, float tgtX, float tgtZ)
 {
     // Per-engagement replan sequencing (token change resets the history so
@@ -319,7 +440,7 @@ void planDetour(float naviX, float naviZ, float tgtX, float tgtZ)
     if (!routeMgr) {
         failReason = "no_routemgr";
     } else {
-        const std::vector<int> starts = nearestWpIdx(naviX, naviZ, 3);
+        const std::vector<int> starts = nearestWpIdx(naviX, naviZ, 3, sNaviY);
         const std::vector<int> goals = nearestWpIdx(tgtX, tgtZ, 3);
         PathFinder* finder = routeMgr->getPathFinder('test');
         if (starts.empty()) failReason = "no_start_wp";
@@ -432,9 +553,30 @@ void pc_p2_autoplay_tick(void)
         return;
     }
 
+    // #246/#899: a text ("tutorial") window, e.g. the first 100-Pikmin-in-the-
+    // field discovery that power mode's squad triggers, freezes the captain
+    // until A closes it (newPikiGame.cpp handleTutorialWindow). Tap A (a press
+    // edge every 6 frames) and hold the Brain until the window is gone, so its
+    // stuck/replan timers do not run against a frozen captain.
+    {
+        static int sTextFrames = 0;
+        if (gameflow.mIsTutorialTextActive) {
+            if (sTextFrames++ == 0) {
+                std::printf("AUTOPLAY_TEXT_DISMISS navi=(%.0f,%.0f) bot-driven\n", double(navi->getPosition().x),
+                            double(navi->getPosition().z));
+                std::fflush(stdout);
+            }
+            pc_p2_input_script_set(1, ((sTextFrames / 6) & 1) ? unsigned(p2autoplay::PadA) : 0u, 0, 0);
+            return;
+        }
+        sTextFrames = 0;
+    }
+
     const float dt = gsys ? gsys->getFrameTime() : 0.016f;
     const float naviX = navi->getPosition().x;
     const float naviZ = navi->getPosition().z;
+    sNaviY = navi->getPosition().y;
+    const float naviY = sNaviY;
 
     // --- Pikmin census (read-only, except bot-v4 power-mode flowering) ---
     int alive = 0, nearCount = 0, farCount = 0, transport = 0, distress = 0, squad = 0;
@@ -874,6 +1016,8 @@ void pc_p2_autoplay_tick(void)
             planDetour(naviX, naviZ, onionX, onionZ);
         } else if (sBrain.current() == p2autoplay::State::Done && hasOnion) {
             planDetour(naviX, naviZ, onionX, onionZ);
+        } else if (pick && sBrain.current() == p2autoplay::State::Approach && planHinderRock(naviX, naviZ)) {
+            // walking the squad into a route-closing box first (#246/#899)
         } else if (pick) {
             planDetour(naviX, naviZ, pick->x, pick->z);
         } else if (sEngage.token) {
@@ -883,11 +1027,72 @@ void pc_p2_autoplay_tick(void)
     }
     // Waypoint-by-waypoint following: steer each leg until reached (80u) or
     // its 25s budget expires, then advance; the Brain steers the active leg.
-    if (!sPath.empty() && sPathIdx < sPath.size()) {
+    if (sHinderLeg) {
+        const float step = dt > 0.0f && dt <= 0.5f ? dt : 0.016f;
+        sHinderTime += step;
+        const bool done = !sHinder || sHinder->isFinished();
+        if (done || sHinderTime >= kHinderBudget || sPath.empty()
+            || sBrain.current() != p2autoplay::State::Approach) {
+            std::printf("AUTOPLAY_HINDER_END finished=%d seconds=%.0f moving=%d navi=(%.0f,%.0f) bot-driven\n",
+                        int(sHinder && sHinder->isFinished()), double(sHinderTime),
+                        int(sHinder && sHinder->isMoving()), double(naviX), double(naviZ));
+            if (sHinder && mapMgr) {
+                // Ground profile along the push line through the box (read-only).
+                const Vector3f bp = sHinder->getPosition();
+                float ax = sHinder->mDestinationPosition.x - bp.x, az = sHinder->mDestinationPosition.z - bp.z;
+                const float len = std::sqrt(ax * ax + az * az);
+                if (len > 1.0f) { ax /= len; az /= len; } else { ax = 0.0f; az = -1.0f; }
+                std::printf("AUTOPLAY_HINDER_PROFILE box=(%.0f,%.0f,%.0f) navi_y=%.0f", double(bp.x), double(bp.y),
+                            double(bp.z), double(navi->getPosition().y));
+                for (int k = -6; k <= 6; ++k) {
+                    const float px = bp.x + ax * 40.0f * float(k), pz = bp.z + az * 40.0f * float(k);
+                    std::printf(" %d:%.0f/%.0f", k * 40, double(mapMgr->getMinY(px, pz, false)),
+                                double(mapMgr->getMinY(px, pz, true)));
+                }
+                std::printf(" bot-driven\n");
+                if (routeMgr) {
+                    const int n = routeMgr->getNumWayPoints('test');
+                    for (int i = 0; i < n && n <= 4096; ++i) {
+                        WayPoint* wp = routeMgr->getWayPoint('test', i);
+                        if (!wp || distXZ(wp->mPosition.x, wp->mPosition.z, bp.x, bp.z) > 450.0f) continue;
+                        std::printf("AUTOPLAY_HINDER_WP idx=%d pos=(%.0f,%.0f,%.0f) open=%d links=", i,
+                                    double(wp->mPosition.x), double(wp->mPosition.y), double(wp->mPosition.z),
+                                    int(wp->mIsOpen));
+                        for (int l = 0; l < 8; ++l)
+                            if (wp->mLinkIndices[l] >= 0) std::printf("%d,", wp->mLinkIndices[l]);
+                        std::printf(" bot-driven\n");
+                    }
+                }
+                std::fflush(stdout);
+            }
+            sHinderLeg = false;
+            sHinder = nullptr;
+            sPath.clear();
+            sPathIdx = 0;
+            sLegTime = 0.0f;
+        } else if (sPathIdx == 0) {
+            // Leg 0: reach the push side (80u or 25 s), then leg 1 holds.
+            sLegTime += step;
+            if (distXZ(naviX, naviZ, sPath[0].first, sPath[0].second) < 80.0f || sLegTime > 25.0f) {
+                sPathIdx = 1;
+                sLegTime = 0.0f;
+            }
+            senses.waypointLeg = true;
+            senses.obstacleWork = true;
+            senses.wpX = sPath[sPathIdx].first;
+            senses.wpZ = sPath[sPathIdx].second;
+        } else {
+            // Leg 1: keep walking into the box (it moves: follow its centre).
+            senses.waypointLeg = true;
+            senses.obstacleWork = true;
+            senses.wpX = sHinder->getPosition().x;
+            senses.wpZ = sHinder->getPosition().z;
+        }
+    } else if (!sPath.empty() && sPathIdx < sPath.size()) {
         sLegTime += dt > 0.0f && dt <= 0.5f ? dt : 0.016f;
         float legX = sPath[sPathIdx].first, legZ = sPath[sPathIdx].second;
         while (sPathIdx < sPath.size()
-               && (distXZ(naviX, naviZ, legX, legZ) < 80.0f || sLegTime > 25.0f)) {
+               && (distXZ(naviX, naviZ, legX, legZ) < legReachRadius(sPathIdx, naviY) || sLegTime > 25.0f)) {
             ++sPathIdx;
             sLegTime = 0.0f;
             if (sPathIdx < sPath.size()) {

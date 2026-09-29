@@ -1317,6 +1317,81 @@ void testTitanAftermathRegroup()
     CHECK(!whistled, "titan-regroup/no_whistle_with_squad");
 }
 
+void testObstacleWorkAndDetourProgress()
+{
+    // #246/#899: (a) while the driver walks the squad into a HinderRock
+    // (Senses::obstacleWork) the captain stands still by design: no STUCK,
+    // no target_unreachable, no approach_timeout. (b) On a route-graph
+    // detour leg, progress is measured to the leg waypoint: walking away
+    // from the target toward the leg is not a stall.
+    p2autoplay::Config cfg;
+    cfg.approachTimeout = 2.0f;
+    cfg.stuckWindow = 0.2f;
+    cfg.stuckMinProgress = 30.0f;
+    cfg.maxApproachReplans = 3;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 4019261003u;
+    s.targetSource = 73;
+    s.targetAlive = true;
+    s.targetDist = 500.0f;
+    s.tgtX = 500.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    s.obstacleWork = true;
+    s.waypointLeg = true;
+    s.wpX = 0.0f;
+    s.wpZ = 50.0f;
+    std::vector<std::string> markers;
+    for (int i = 0; i < 100; ++i) { // 5 s: 25 stuck windows, 2.5x the approach timeout
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+        if (brain.replanWanted()) brain.clearReplan();
+    }
+    CHECK(!hasMarker(markers, "AUTOPLAY_STUCK"), "obstacle/no_stuck_while_pushing");
+    CHECK(!hasMarker(markers, "AUTOPLAY_GIVEUP"), "obstacle/no_giveup_while_pushing");
+    CHECK(brain.current() == p2autoplay::State::Approach, "obstacle/still_approach");
+    CHECK(brain.command().moveZ > 0.5f, "obstacle/steers_into_box");
+
+    // (b) detour leg: target distance grows while the captain closes on the leg.
+    p2autoplay::Brain b2(cfg);
+    p2autoplay::Senses t = liveSenses();
+    t.fieldPikmin = 20;
+    b2.update(0.05f, t);
+    b2.update(0.05f, t);
+    t.targetToken = 4019261003u;
+    t.targetSource = 73;
+    t.targetAlive = true;
+    t.targetDist = 500.0f;
+    t.tgtX = 500.0f;
+    b2.update(0.05f, t); // -> approach
+    t.waypointLeg = true;
+    t.wpX = -600.0f; // leg lies away from the target
+    t.wpZ = 0.0f;
+    std::vector<std::string> m2;
+    for (int i = 0; i < 30; ++i) {
+        t.naviX -= 10.0f; // closing on the leg at 200 u/s
+        t.targetDist += 10.0f; // ...and so moving away from the target
+        b2.update(0.05f, t);
+        const std::vector<std::string> got = b2.takeMarkers();
+        m2.insert(m2.end(), got.begin(), got.end());
+        if (b2.replanWanted()) b2.clearReplan();
+    }
+    CHECK(!hasMarker(m2, "AUTOPLAY_STUCK"), "detour/leg_progress_not_stuck");
+    // ...but a captain pressed against a wall on the leg is still STUCK.
+    for (int i = 0; i < 12; ++i) {
+        b2.update(0.05f, t);
+        const std::vector<std::string> got = b2.takeMarkers();
+        m2.insert(m2.end(), got.begin(), got.end());
+        if (b2.replanWanted()) b2.clearReplan();
+    }
+    CHECK(hasMarker(m2, "AUTOPLAY_STUCK state=approach"), "detour/leg_stall_is_stuck");
+}
+
 void testAftermathNoWhistle()
 {
     // bot-v5 (v4b diagnosis): aftermath HOLDS whistle (B) while standing
@@ -3029,6 +3104,7 @@ int main()
     testAftermathEscortExtension();
     testAftermathNoWhistle();
     testTitanAftermathRegroup();
+    testObstacleWorkAndDetourProgress();
     testAftermathSeedBackoffRethrow();
     testAftermathEscortNoThrows();
     testAftermathGiveupReasons();

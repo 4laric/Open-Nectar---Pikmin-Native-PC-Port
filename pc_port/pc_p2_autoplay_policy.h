@@ -466,6 +466,12 @@ struct Senses {
     bool scattered = false; // squad scattered: whistle regroup
     bool squadDistress = false; // grabbed/thrown-off/burning Pikmin: whistle regroup (bot-v4)
     bool waypointLeg = false; // steer the detour waypoint, not the target
+    // #246/#899: the driver is walking the squad into an unfinished P1
+    // HinderRock (pushable box) on the approach route. Pikmin push it by the
+    // normal formation collision (piki.cpp PushstoneMode); the captain stands
+    // still meanwhile, so these windows are not "stuck" and do not age the
+    // approach timeout. The driver caps the total obstacle time.
+    bool obstacleWork = false;
     // #884 round 4: live throw cursor (navi position + Navi::mCursorPosition,
     // world XZ). Only the King standoff hold reads it, to slide the cursor
     // onto the King instead of past it; without it the hold look-steers at
@@ -940,13 +946,38 @@ private:
             enter(State::Attack, in);
             return;
         }
-        // Progress / stuck tracking on straight-line distance.
-        if (stuckWindowDist >= 1.0e29f) {
-            stuckWindowDist = in.targetDist;
+        if (in.obstacleWork) {
+            // Pushing a HinderRock: steer into it, no stuck window, no
+            // approach-timeout ageing (the driver bounds the push time).
+            stateTime -= dt;
+            stuckWindowDist = 1.0e30f;
             stuckWindowStart = 0.0f;
-            progressBest = in.targetDist;
+            steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+            return;
         }
-        if (in.targetDist < progressBest) progressBest = in.targetDist;
+        // Progress / stuck tracking on straight-line distance. #246/#899:
+        // while a route-graph detour leg is active, progress is measured to
+        // that leg's waypoint, not the target: a detour that first leads
+        // away from the target (Impact Site box pit: east round the pit,
+        // then west over the box) is progress, not a stall. A new leg
+        // restarts the window.
+        float trackDist = in.targetDist;
+        if (in.waypointLeg) {
+            const float wdx = in.wpX - in.naviX, wdz = in.wpZ - in.naviZ;
+            trackDist = std::sqrt(wdx * wdx + wdz * wdz);
+            if (!trackingLeg || in.wpX != trackLegX || in.wpZ != trackLegZ) stuckWindowDist = 1.0e30f;
+            trackLegX = in.wpX;
+            trackLegZ = in.wpZ;
+        } else if (trackingLeg) {
+            stuckWindowDist = 1.0e30f;
+        }
+        trackingLeg = in.waypointLeg;
+        if (stuckWindowDist >= 1.0e29f) {
+            stuckWindowDist = trackDist;
+            stuckWindowStart = 0.0f;
+            progressBest = trackDist;
+        }
+        if (trackDist < progressBest) progressBest = trackDist;
         stuckWindowStart += dt;
         if (stuckWindowStart >= cfg.stuckWindow) {
             if (stuckWindowDist - progressBest < cfg.stuckMinProgress) {
@@ -1690,6 +1721,8 @@ private:
     float stuckWindowDist = 1.0e30f;
     bool wantReplan = false;
     float progressBest = 1.0e30f;
+    bool trackingLeg = false; // approach stuck window follows a detour leg (#246/#899)
+    float trackLegX = 0.0f, trackLegZ = 0.0f;
     int approachReplans = 0; // consecutive STUCK windows in this Approach stint (bot-v3)
     // bot-v5 aftermath delivery phases (pad-only; never whistles).
     enum AftermathPhase {
