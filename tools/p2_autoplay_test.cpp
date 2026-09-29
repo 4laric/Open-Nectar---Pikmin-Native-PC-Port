@@ -3100,6 +3100,43 @@ void testUiWaitTapsA()
     CHECK(brain.current() == p2autoplay::State::Approach, "ui/still_approaching");
 }
 
+void testRangedAttackWhenStuckNear()
+{
+    // #901: STUCK within rangedAttackDist of a ground target: attack from
+    // here, sliding the cursor onto it in the look band and throwing.
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 90;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 901005;
+    s.targetSource = 44;
+    s.targetAlive = true;
+    s.targetDist = 250.0f;
+    s.tgtX = 250.0f;
+    s.cursorValid = true;
+    s.cursorX = 60.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Approach, "ranged/approach");
+    std::vector<std::string> markers;
+    for (int i = 0; i < 200 && brain.current() == p2autoplay::State::Approach; ++i) {
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_RANGED token=901005"), "ranged/marker");
+    CHECK(brain.current() == p2autoplay::State::Attack, "ranged/attack");
+    bool look = false, threw = false;
+    for (int i = 0; i < 40; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().stickScale < 0.5f && brain.command().moveX > 0.5f) look = true;
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) threw = true;
+    }
+    CHECK(look, "ranged/cursor_slides_in_look_band");
+    CHECK(threw, "ranged/throws");
+}
+
 int main()
 {
     testGate();
@@ -3151,6 +3188,7 @@ int main()
     testApproachRouteProgress();
     testApproachObstacleWork();
     testUiWaitTapsA();
+    testRangedAttackWhenStuckNear();
     if (failures == 0) {
         std::printf("PASS p2_autoplay\n");
         return 0;

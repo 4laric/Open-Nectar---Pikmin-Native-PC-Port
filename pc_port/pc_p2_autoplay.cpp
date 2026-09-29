@@ -840,8 +840,14 @@ void pc_p2_autoplay_tick(void)
         // (read-only): gates (sluices), bridges, hinder rocks, climbing
         // stalks (Kusa: formed Pikmin that touch one climb it, RopeMode).
         float bestD = 600.0f;
+        // Only an obstacle on the way counts: next to the captain, or nearer
+        // the target than he is (a bridge behind him is not the blocker).
+        const float obsTx = pick ? pick->x : sEngage.lastX, obsTz = pick ? pick->z : sEngage.lastZ;
+        const float naviToTarget = distXZ(naviX, naviZ, obsTx, obsTz);
         auto consider = [&](Creature* obj, int kind, int stage, int stages) {
             const float d = distXZ(naviX, naviZ, obj->getPosition().x, obj->getPosition().z);
+            const float toTarget = distXZ(obj->getPosition().x, obj->getPosition().z, obsTx, obsTz);
+            if (d > 200.0f && toTarget > naviToTarget + 100.0f) return;
             if (d < bestD) {
                 bestD = d;
                 senses.obstacleKind = kind;

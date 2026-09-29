@@ -388,6 +388,11 @@ struct Config {
     float obstacleRingMax = 150.0f;
     float obstacleTimeout = 150.0f;
     float obstacleHardTimeout = 420.0f; // hard (23) gates: far more health per stage
+    // #901 ranged attack: an approach that goes STUCK this close to a ground
+    // target (a ledge or pit rim between them) throws from where it stands,
+    // sliding the cursor onto the target in the look band (cursor reach is
+    // mCursorMaxRadius 300, NaviMgr.h p46), instead of routing away.
+    float rangedAttackDist = 290.0f;
  // 0.24*127 = 30 bytes: |stick| 0.41 (look band), no MSTICK bits (> 32)
 };
 
@@ -596,6 +601,7 @@ public:
         obsTime = 0.0f;
         obsLogTime = 0.0f;
         obsGiveups = 0;
+        rangedAttack = false;
         initialHealthFrac = 1.0f;
         sawDamage = false;
         sawKill = false;
@@ -715,6 +721,7 @@ private:
         obsTime = 0.0f;
         obsLogTime = 0.0f;
         obsGiveups = 0;
+        rangedAttack = false;
         kingBacking = false;
         kingClosing = false;
         kingBackTime = 0.0f;
@@ -1048,6 +1055,15 @@ private:
                               in.targetToken, in.targetDist, in.naviX, in.naviZ,
                               approachReplans + 1);
                 markers.emplace_back(buf);
+                if (in.targetDist <= cfg.rangedAttackDist && !isFlyer(in.targetSource)) {
+                    char rbuf[160];
+                    std::snprintf(rbuf, sizeof(rbuf), "AUTOPLAY_RANGED token=%u dist=%.0f bot-driven",
+                                  in.targetToken, in.targetDist);
+                    markers.emplace_back(rbuf);
+                    enter(State::Attack, in);
+                    rangedAttack = true;
+                    return;
+                }
                 wantReplan = true;
                 ++approachReplans;
                 stuckWindowDist = 1.0e30f; // the replan changes the route: re-anchor
@@ -1281,10 +1297,16 @@ private:
             }
             gap = cfg.throwGap * (1.0f + 0.4f * std::sin(throwSpin * 0.7f));
         }
-        // Keep the stick toward the target so the cursor aims at it, and
-        // pulse A to throw. Flyers are thrown at from range as the game allows.
-        steer(in.naviX, in.naviZ, aimX, aimZ);
-        pulseA(in, cfg.throwHold, gap);
+        if (rangedAttack && in.targetDist <= cfg.rangedAttackDist + 60.0f) {
+            // #901: the captain cannot close in: stand, slide the cursor onto
+            // the target and throw over whatever is between.
+            kingLookAndThrow(in);
+        } else {
+            // Keep the stick toward the target so the cursor aims at it, and
+            // pulse A to throw. Flyers are thrown at from range as the game allows.
+            steer(in.naviX, in.naviZ, aimX, aimZ);
+            pulseA(in, cfg.throwHold, gap);
+        }
         if (stateTime >= limit) {
             giveUp(in, "attack_timeout");
             finishTarget(in, /*killed*/ false);
@@ -1931,6 +1953,7 @@ private:
     bool approachOnRoute = false; // #901: approach progress metric is the route length
     bool obsWork = false; // #901: working a route obstacle in Approach
     float uiWaitTime = 0.0f; // #901: time the sim has been held by a movie / overlay
+    bool rangedAttack = false; // #901: Attack entered from a STUCK approach near the target
     float uiLogTime = 0.0f;
     float obsTime = 0.0f; // #901: time spent on the current obstacle episode
     float obsLogTime = 0.0f;
