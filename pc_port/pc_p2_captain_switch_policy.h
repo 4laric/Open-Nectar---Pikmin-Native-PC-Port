@@ -24,6 +24,12 @@ inline bool p2_captain_input_owner(bool singlePlayerPair, int captain,
     return captain == (singlePlayerPair ? activeCaptain : deviceOwner);
 }
 
+// The shared local pad and mouse/touch drag accumulate in physical player 0,
+// even while the camera targets captain 1. Co-op retains a separate stream.
+inline int p2_captain_camera_drag_player(bool singlePlayerPair, int targetCaptain) {
+    return singlePlayerPair ? 0 : targetCaptain;
+}
+
 // PcamCameraManager::startCamera changes only the target. Bind its input too,
 // otherwise it continues reading the neutralized old captain's controller.
 template<class CameraT, class NaviT>

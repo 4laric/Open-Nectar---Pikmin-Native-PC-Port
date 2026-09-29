@@ -86,6 +86,11 @@ int main() {
     assert(p2_captain_input_owner(true,0,scene.active,0));
     assert(!p2_captain_input_owner(true,1,scene.active,0));
     assert(adapter.switchActive(1) && scene.active==1);
+    // Right-stick drag and mouse/touch remain in physical stream zero when
+    // captain 1 becomes the camera target. Co-op must still use stream one.
+    const float dragStreams[2] = {0.75f, -0.25f};
+    assert(dragStreams[p2_captain_camera_drag_player(true,scene.active)]==0.75f);
+    assert(dragStreams[p2_captain_camera_drag_player(false,scene.active)]==-0.25f);
     // Mouse/wheel/global queues now belong to captain 1 although the device
     // remains assigned to player 0. Inactive captain 0 cannot consume them.
     assert(!p2_captain_input_owner(true,0,scene.active,0));
@@ -95,6 +100,7 @@ int main() {
     assert(!p2_captain_input_owner(false,1,scene.active,0));
     assert(p2_captain_input_owner(false,1,0,1));
     assert(adapter.switchActive(0) && scene.active==0);
+    assert(dragStreams[p2_captain_camera_drag_player(true,scene.active)]==0.75f);
     assert(scene.owner[0]==0 && scene.owner[1]==1 && scene.ownershipWrites==0);
     scene.health[1]=0;
     assert(adapter.refresh());
