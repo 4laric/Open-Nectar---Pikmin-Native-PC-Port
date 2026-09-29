@@ -301,6 +301,20 @@ int Piki::findRoute(int sourceWaypointIndex, int destWaypointIndex, bool isRetry
 
 	// Calculate new path
 	int handle;
+#if defined(PIKI_PC_PORT)
+	// Better Pathfinding: one exact search for every destination, onions and the
+	// ship included, instead of the greedy walk or the onion cost table. It is
+	// cheap enough to answer now, so the asynchronous path is not needed.
+	if (pc_settings_get_better_pathfinding()) {
+		mUseAsyncPathfinding = false;
+		handle = routeMgr->getPathFinder('test')->findSyncShortest(mPathBuffers, sourceWaypointIndex, destWaypointIndex, isRetryAttempt);
+		if (!handle) {
+			mRouteDestinationIndex = -1;
+			mRouteSourceIndex      = -1;
+		}
+		return handle;
+	}
+#endif
 	if (destinationType != -1) {
 		handle = routeMgr->getPathFinder('test')->findSyncOnyon(mSRT.t, mPathBuffers, sourceWaypointIndex, destinationType, isRetryAttempt);
 		if (!handle) {
@@ -410,6 +424,11 @@ bool Piki::initRouteTrace(immut Vector3f& targetPos, bool p2)
 	}
 
 	WayPoint* nearestTargetWP = routeMgr->findNearestWayPoint('test', targetPos, false);
+#if defined(PIKI_PC_PORT)
+	if (wp1 && wp2 && nearestTargetWP && pc_settings_get_better_pathfinding()) {
+		nearestPikiWP = routeMgr->pickRouteStart(mSRT.t, wp1, wp2, nearestTargetWP->mIndex, onlyLand);
+	}
+#endif
 	mRouteStartPos            = mSRT.t;
 	mRouteGoalPos             = targetPos;
 

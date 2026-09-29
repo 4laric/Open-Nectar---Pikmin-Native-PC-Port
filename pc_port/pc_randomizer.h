@@ -85,6 +85,10 @@ bool pc_randomizer_prerelease_traps();
 bool pc_randomizer_consume_benefit(PcBenefit kind);
 float pc_randomizer_benefit_multiplier(PcBenefit kind);
 float pc_randomizer_captain_movement_multiplier();
+// Received maturity tier (0 leaf, 1 bud, 2 flower) for a native color: blue 0, red 1, yellow 2.
+int pc_randomizer_maturity(int color);
+// Playable day length scale from Progressive Day Length items; 1.0 when disabled.
+float pc_randomizer_day_length_multiplier();
 void pc_randomizer_observe_color_population(int color, int totalPikmin, bool gameplay);
 void pc_randomizer_observe_total_population(int totalPikmin, bool gameplay);
 void pc_randomizer_corpse_delivered(int type, int stage, bool gameplay);

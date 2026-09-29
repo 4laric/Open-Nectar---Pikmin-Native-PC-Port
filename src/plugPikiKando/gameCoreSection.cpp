@@ -2944,6 +2944,44 @@ static void randomizerApplyBenefits(Navi* navi, MapMgr* map)
             } else for (int i = 0; i < count; ++i) spawned[i]->kill(false);
         }
     }
+    // Progressive maturity is a level, not a consumable: keep every Pikmin of a
+    // color at or above its received tier. Field Pikmin grow only in ordinary
+    // states (never mid-pluck, eaten, dying or mushroomed) and are caught on a
+    // later sweep; Onion stock moves up in both counters the withdrawal uses.
+    static float maturitySweep = 0.0f;
+    maturitySweep = std::max(0.0f, maturitySweep - gsys->getFrameTime());
+    if (maturitySweep == 0.0f) {
+        maturitySweep = 0.25f;
+        int grown = 0;
+        Iterator it(pikiMgr);
+        CI_LOOP(it) {
+            Piki* piki = static_cast<Piki*>(*it);
+            if (!piki || !piki->isAlive() || piki->mColor < 0 || piki->mColor > 2) continue;
+            const int tier = pc_randomizer_maturity(piki->mColor);
+            if (piki->mHappa >= tier || !piki->getCurrState()) continue;
+            const int state = piki->getCurrState()->getID();
+            if (state != PIKISTATE_Normal && state != PIKISTATE_LookAt && state != PIKISTATE_Emotion) continue;
+            piki->setFlower(tier);
+            if (grown++ == 0) seSystem->playPikiSound(SEF_PIKI_GROW4, piki->mSRT.t);
+        }
+        for (int color = 0; color < 3; ++color) {
+            const int tier = pc_randomizer_maturity(color);
+            GoalItem* onion = itemMgr->getContainer(color);
+            for (int happa = Leaf; happa < tier; ++happa) {
+                grown += pikiInfMgr.mPikiCounts[color][happa];
+                pikiInfMgr.mPikiCounts[color][tier] += pikiInfMgr.mPikiCounts[color][happa];
+                pikiInfMgr.mPikiCounts[color][happa] = 0;
+                if (onion) {
+                    onion->mHeldPikis[tier] += onion->mHeldPikis[happa];
+                    onion->mHeldPikis[happa] = 0;
+                }
+            }
+        }
+        if (grown) {
+            std::printf("[Pikmin Randomizer] MATURITY_APPLIED count=%d\n", grown);
+            std::fflush(stdout);
+        }
+    }
     if (navi->mHealth < C_NAVI_PARM(navi, mHealth) && pc_randomizer_consume_benefit(PC_BENEFIT_HEAL))
         navi->mHealth = C_NAVI_PARM(navi, mHealth);
 }

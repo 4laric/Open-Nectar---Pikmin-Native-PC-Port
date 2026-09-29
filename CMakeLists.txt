@@ -303,6 +303,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_purple_motion.cpp
     pc_port/pc_p2_purple_impact.cpp
     pc_port/pc_p2_purple_direct.cpp
+    pc_port/pc_whistle_pluck.cpp
+    pc_port/pc_route_planner.cpp
     pc_port/pc_p2_purple_flight.cpp
     pc_port/pc_p2_purple_feedback.cpp
     pc_port/pc_p2_kochappy_stun.cpp
@@ -1536,6 +1538,11 @@ if(PIKMIN_BUILD_TESTS)
     target_include_directories(pc_generator_cache_validation_test PRIVATE pc_port/save)
     target_compile_options(pc_generator_cache_validation_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_generator_cache_validation_test COMMAND pc_generator_cache_validation_test)
+
+    # Better Pathfinding planner checked against brute force (not linked into main game)
+    add_executable(pc_route_planner_test pc_port/pc_route_planner_test.cpp pc_port/pc_route_planner.cpp)
+    target_compile_options(pc_route_planner_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_route_planner_test COMMAND pc_route_planner_test)
 
     # Envelope smoke test executable (not linked into main game)
     add_executable(pc_envelope_test pc_port/audio/pc_envelope_test.cpp pc_port/audio/pc_envelope.cpp)
