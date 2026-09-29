@@ -17,6 +17,13 @@ void pc_p2_dangomushi_forget(BTeki*);
 void pc_p2_dangomushi_update(BTeki*);
 float pc_p2_dangomushi_param_f(const BTeki*, int idx, float fallback);
 bool pc_p2_dangomushi_clip(const BTeki*, const char*& name, float& phase);
+// TEST-ONLY autoplay read-only probe (#897 bot roll evade): the registered
+// Crawbster's FSM state name, whether it is rolling (StateAttack ball roll),
+// whether the Turn stickable window is open (damage admitted), and the roll
+// drive velocity (XZ). Returns false (outputs untouched) for any other actor.
+// No logging, no mutation.
+bool pc_p2_dangomushi_probe(const BTeki*, const char** state, bool* rolling, bool* stickable,
+                            float* driveX, float* driveZ);
 
 // Damage admission for a registered Crawbster (#174/#376). Returns true while
 // the actor must reject attack/bomb damage: the source body is invulnerable

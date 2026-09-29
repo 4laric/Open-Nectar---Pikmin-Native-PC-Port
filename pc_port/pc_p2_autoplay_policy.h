@@ -248,6 +248,17 @@ inline bool isFlyer(unsigned source) { return source == 23 || source == 57 || so
 // family keeps the unchanged contact steer.
 inline bool isKingStandoff(unsigned source) { return source == 53; }
 
+// #897 bot roll evade: Segmented Crawbster (DangoMushi, 94). The body is
+// invulnerable except inside the Turn stickable window (EB_Invulnerable,
+// DangoMushiState.cpp:530), its StateAttack ball roll presses every grounded
+// Pikmin it touches (PikiPressedState: lethal), and it only wakes from Stay
+// inside fp11 (150). A squad thrown at the ball outside the window therefore
+// only feeds the next roll (r5/r6: 93/93 and 77/77 pressed Pikmin died). The
+// roller stance wakes it, then holds a standoff with no throws, dodges the
+// roll sideways with the squad whistled tight, and throws everything only
+// while the Turn window is open. Only 94 has this stance.
+inline bool isRollerStance(unsigned source) { return source == 94; }
+
 // Numeric filter matches a generator key; otherwise a species name match.
 inline bool matchTarget(unsigned token, unsigned source, const char* species, const std::string& filter)
 {
@@ -354,6 +365,25 @@ struct Config {
     // captain; he keeps throwing from there. 0 disables.
     float kingLowHp = 35.0f;
     float lookStickScale = 0.24f; // 0.24*127 = 30 bytes: |stick| 0.41 (look band), no MSTICK bits (> 32)
+    // #897 roller stance (isRollerStance). The standoff band sits around the
+    // source fp20 attack range (300) so the Crawbster keeps coming and rolls;
+    // the dodge starts while the ball is within rollerEvadeRange.
+    bool rollerStance = true;
+    float rollerStandMin = 280.0f;
+    float rollerStandMax = 400.0f;
+    float rollerWakeDist = 110.0f; // walk inside fp11 (150) to wake it from Stay
+    float rollerEvadeRange = 650.0f;
+    float rollerThrowGap = 0.30f; // Turn window: throw faster than the generic gap
+    float rollerAttackTimeout = 900.0f; // a multi-cycle boss fight, not one throw burst
+    float rollerChaseDist = 1100.0f; // the ball rolls away far; only a real loss re-approaches
+    // #897 power-mode resupply: the power squad is the whole stocked Onion,
+    // so after a crush the Onion is empty and the v4 resupply (needs stock)
+    // never fired (r5 field=1, r6 no resupply). Below this field count power
+    // mode walks back to the Onion, the driver restocks it through the same
+    // power stock path and exits it again (AUTOPLAY_POWER_RESTOCK), then the
+    // Brain re-selects. 0 disables.
+    int powerResupplyField = 25;
+    int powerRestockMax = 12;
 };
 
 // Power-mode effective withdraw targets (bot-v4, bot-v4b): up to ~100 Pikmin.
@@ -464,6 +494,15 @@ struct Senses {
     bool targetAttacking = false;
     bool naviHpValid = false;
     float naviHp = 0.0f;
+    // #897 roller stance senses (read-only DangoMushi probe; the driver sets
+    // them for source 94 only). Dormant = still in Stay (hidden).
+    bool targetDormant = false;
+    bool targetRolling = false;
+    bool targetVulnerable = false;
+    float targetVelX = 0.0f;
+    float targetVelZ = 0.0f;
+    // #897 power resupply: restocks the driver has already spent this run.
+    int powerRestocks = 0;
 };
 
 // Pad output for one tick. moveX/moveZ is the desired world-space XZ move
@@ -543,6 +582,10 @@ public:
         kingEvading = false;
         kingEvadeTime = 0.0f;
         kingLowHpMode = false;
+        rollerMode = -1;
+        rollerWhistleTime = 0.0f;
+        powerResupplying = false;
+        powerAtOnion = false;
         result = Result{};
         markers.clear();
         lastCommand = Command{};
@@ -552,6 +595,9 @@ public:
     State current() const { return state; }
     Command command() const { return lastCommand; }
     bool replanWanted() const { return wantReplan; }
+    // #897: the Brain is back at the Onion for a power-mode resupply and wants
+    // the driver to restock + exit it (driver: once per visit, bounded).
+    bool wantsPowerRestock() const { return state == State::WithdrawSeek && powerResupplying && powerAtOnion; }
     void clearReplan() { wantReplan = false; }
     std::vector<std::string> takeMarkers()
     {
@@ -619,6 +665,9 @@ private:
         kingEvading = false;
         kingEvadeTime = 0.0f;
         kingLowHpMode = false;
+        rollerMode = -1;
+        rollerWhistleTime = 0.0f;
+        powerAtOnion = false;
         emitState(in);
     }
     void holdIdle() { lastCommand = Command{}; }
@@ -677,6 +726,10 @@ private:
             if (in.containerOpen) {
                 // v3 guard preserved: never steer while the UI is up.
                 enter(State::WithdrawMenu, in);
+                return;
+            }
+            if (powerResupplying) {
+                tickPowerResupply(dt, in);
                 return;
             }
             if (in.fieldPikmin >= cfg.powerWantSquad) {
@@ -900,6 +953,7 @@ private:
             }
             return;
         }
+        if (wantPowerResupply(in, "approach")) return;
         if (in.fieldPikmin < cfg.resupplyThreshold && in.hasOnion && in.onionStored > 0) {
             // bot-v4: squad eaten en route and the Onion still stocks:
             // disengage, walk back, withdraw more, then return.
@@ -975,6 +1029,7 @@ private:
             enter(State::Aftermath, in); // whistle back, watch the corpse
             return;
         }
+        if (wantPowerResupply(in, "attack")) return;
         if (in.fieldPikmin < cfg.resupplyThreshold && in.hasOnion && in.onionStored > 0) {
             // bot-v4: squad eaten mid-fight and the Onion still stocks:
             // disengage, walk back, withdraw more, then return.
@@ -1000,7 +1055,9 @@ private:
         }
         const bool sarai = in.targetSource == 23;
         const bool kurage = in.targetSource == 57 || in.targetSource == 72;
-        const float limit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout;
+        const bool roller = cfg.rollerStance && isRollerStance(in.targetSource);
+        const float limit = roller ? cfg.rollerAttackTimeout
+            : (kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout);
         // Whistle first, then re-throw (bot-v4: real players do this):
         // - Sarai holding a Pikmin (targetGrabbing): whistle frees the grab;
         // - grabbed/thrown-off/burning squad (squadDistress: mouth-stuck,
@@ -1034,8 +1091,12 @@ private:
         }
         // bot-undamaged: fled/teleporting ground targets re-enter approach;
         // straight-line attack steer cannot cross the map.
-        if (in.targetDist > cfg.attackChaseDist) {
+        if (in.targetDist > (roller ? cfg.rollerChaseDist : cfg.attackChaseDist)) {
             enter(State::Approach, in);
+            return;
+        }
+        if (roller) {
+            tickRollerStance(dt, in, limit);
             return;
         }
         if (whistleCooldown > 0.0f) whistleCooldown -= dt;
@@ -1462,6 +1523,179 @@ private:
         enter(State::Select, in);
     }
 
+    // #897 power-mode resupply trigger (Approach/Attack). Returns true when
+    // it switched state.
+    bool wantPowerResupply(const Senses& in, const char* from)
+    {
+        if (!isPowerEnabled() || cfg.powerResupplyField <= 0 || !in.hasOnion) return false;
+        if (in.fieldPikmin >= cfg.powerResupplyField) return false;
+        if (in.onionStored <= 0 && in.powerRestocks >= cfg.powerRestockMax) return false;
+        if (in.targetVulnerable) return false; // finish the open Turn window first
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+                      "AUTOPLAY_RESUPPLY field=%d stored=%d token=%u state=%s power=1 restocks=%d bot-driven",
+                      in.fieldPikmin, in.onionStored, in.targetToken, from, in.powerRestocks);
+        markers.emplace_back(buf);
+        powerResupplying = true;
+        enter(State::WithdrawSeek, in);
+        return true;
+    }
+
+    // #897 power resupply leg: walk back to the Onion (waypoint aware), stand
+    // at it while the driver restocks + exits the squad, whistle the new
+    // Pikmin in, then re-select once the field is back to powerWantSquad.
+    void tickPowerResupply(float dt, const Senses& in)
+    {
+        if (!in.hasOnion) {
+            powerResupplying = false;
+            enter(State::Select, in);
+            return;
+        }
+        const float at = cfg.arriveRadius * 2.0f;
+        if (!powerAtOnion && in.onionDist <= at) powerAtOnion = true;
+        if (!powerAtOnion) {
+            if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+            else steer(in.naviX, in.naviZ, in.onionX, in.onionZ);
+        } else {
+            // Short whistle pulses gather the exiting Pikmin into the party.
+            pressPhase += dt;
+            if (std::fmod(pressPhase, 2.0f) < 0.6f) lastCommand.buttons = PadB;
+        }
+        if (powerAtOnion && in.fieldPikmin >= cfg.powerWantSquad) {
+            powerResupplying = false;
+            enter(State::Select, in);
+            return;
+        }
+        if (powerAtOnion && in.onionStored <= 0 && in.powerRestocks >= cfg.powerRestockMax
+            && in.fieldPikmin > 0 && stateTime > 20.0f) {
+            powerResupplying = false; // restock budget spent: fight with what is out
+            enter(State::Select, in);
+            return;
+        }
+        // Stuck walking back: same replan contract as the normal path.
+        if (!powerAtOnion) {
+            if (stuckWindowDist >= 1.0e29f) {
+                stuckWindowDist = in.onionDist;
+                stuckWindowStart = 0.0f;
+                progressBest = in.onionDist;
+            }
+            if (in.onionDist < progressBest) progressBest = in.onionDist;
+            stuckWindowStart += dt;
+            if (stuckWindowStart >= cfg.stuckWindow) {
+                if (stuckWindowDist - progressBest < cfg.stuckMinProgress) {
+                    char buf[256];
+                    std::snprintf(buf, sizeof(buf),
+                                  "AUTOPLAY_STUCK state=withdraw_seek onion_dist=%.0f navi=(%.0f,%.0f) bot-driven",
+                                  in.onionDist, in.naviX, in.naviZ);
+                    markers.emplace_back(buf);
+                    wantReplan = true;
+                }
+                stuckWindowDist = progressBest;
+                stuckWindowStart = 0.0f;
+            }
+        }
+        if (stateTime >= cfg.withdrawTimeout * 2.0f) {
+            giveUp(in, "resupply_timeout");
+            powerResupplying = false;
+            enter(State::Select, in);
+        }
+    }
+
+    // #897 roller stance (see isRollerStance). Modes:
+    //   wake   - still in Stay: walk inside fp11 so it drops in;
+    //   punish - Turn stickable window open: close in and throw fast;
+    //   evade  - ball rolling within rollerEvadeRange: whistle held (squad
+    //            tight on the captain) and walk off the roll line, on the
+    //            captain's side of it, with a little distance added;
+    //   stand  - otherwise: hold [rollerStandMin, rollerStandMax] with no
+    //            throws (the body rejects damage), whistle pulses to regroup.
+    enum RollerMode { RollerWake = 0, RollerPunish, RollerEvade, RollerStand };
+    static const char* rollerModeName(int m)
+    {
+        switch (m) {
+        case RollerWake: return "wake";
+        case RollerPunish: return "punish";
+        case RollerEvade: return "evade";
+        case RollerStand: return "stand";
+        }
+        return "none";
+    }
+    void tickRollerStance(float dt, const Senses& in, float limit)
+    {
+        if (stateTime >= limit) {
+            giveUp(in, "attack_timeout");
+            finishTarget(in, /*killed*/ false);
+            return;
+        }
+        int mode = RollerStand;
+        if (in.targetVulnerable) mode = RollerPunish;
+        else if (in.targetRolling && in.targetDist < cfg.rollerEvadeRange) mode = RollerEvade;
+        else if (in.targetDormant) mode = RollerWake;
+        if (mode != rollerMode) {
+            rollerMode = mode;
+            char buf[256];
+            std::snprintf(buf, sizeof(buf),
+                          "AUTOPLAY_ROLLER mode=%s token=%u dist=%.0f field=%d hp=%.3f bot-driven",
+                          rollerModeName(mode), in.targetToken, in.targetDist, in.fieldPikmin,
+                          in.targetHealthFrac);
+            markers.emplace_back(buf);
+            rollerWhistleTime = 0.0f;
+        }
+        switch (mode) {
+        case RollerPunish:
+            steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            if (in.targetDist <= cfg.throwRange) pulseA(in, cfg.throwHold, cfg.rollerThrowGap);
+            return;
+        case RollerWake:
+            if (in.targetDist > cfg.rollerWakeDist) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            return;
+        case RollerEvade: {
+            float vx = in.targetVelX, vz = in.targetVelZ;
+            float vlen = std::sqrt(vx * vx + vz * vz);
+            const float ax = in.naviX - in.tgtX, az = in.naviZ - in.tgtZ;
+            if (vlen < 1.0f) {
+                // No drive velocity yet: assume it rolls straight at us.
+                vx = ax;
+                vz = az;
+                vlen = std::sqrt(vx * vx + vz * vz);
+            }
+            if (vlen < 1.0f) {
+                vx = 1.0f;
+                vz = 0.0f;
+                vlen = 1.0f;
+            }
+            vx /= vlen;
+            vz /= vlen;
+            float px = -vz, pz = vx;
+            if (ax * px + az * pz < 0.0f) {
+                px = -px;
+                pz = -pz;
+            }
+            // Ahead of the ball: sideways plus a little away; behind it (it
+            // is rolling off): just sideways.
+            const float ahead = ax * vx + az * vz;
+            const float away = ahead > 0.0f ? 0.35f : 0.0f;
+            float mx = px + vx * away, mz = pz + vz * away;
+            const float ml = std::sqrt(mx * mx + mz * mz);
+            if (ml > 1.0e-3f) {
+                mx /= ml;
+                mz /= ml;
+            }
+            lastCommand.moveX = mx;
+            lastCommand.moveZ = mz;
+            lastCommand.buttons = PadB;
+            return;
+        }
+        default:
+            break;
+        }
+        if (in.targetDist < cfg.rollerStandMin) steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+        else if (in.targetDist > cfg.rollerStandMax) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+        rollerWhistleTime += dt;
+        if ((in.scattered || in.squadDistress) && std::fmod(rollerWhistleTime, 2.5f) < cfg.whistleHold * 0.5f)
+            lastCommand.buttons = PadB;
+    }
+
     // #884 round 4: KingChappy attack stance (see isKingStandoff). Modes:
     //   back  - inside kingStandoffMin: walk straight away, no throws (the
     //           cursor trails behind a walking captain, so throws would miss);
@@ -1688,6 +1922,10 @@ private:
     bool kingEvading = false; // #884 round 5: leaving the tongue sweep for the current King attack
     float kingEvadeTime = 0.0f; // time spent evading inside kingEvadeClear (sidestep after kingEvadeSideAfter)
     bool kingLowHpMode = false; // last stance used the low-health band (marker field)
+    int rollerMode = -1; // #897 last AUTOPLAY_ROLLER mode (-1 = none this stint)
+    float rollerWhistleTime = 0.0f; // #897 stand-mode whistle pulse clock
+    bool powerResupplying = false; // #897 power resupply leg in progress (survives enter())
+    bool powerAtOnion = false; // #897 reached the Onion on this resupply visit
     bool announced = false;
     Result result;
     Command lastCommand;

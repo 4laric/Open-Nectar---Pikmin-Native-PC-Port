@@ -50,6 +50,7 @@
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_kogane.h"
 #include "pc_p2_chappy.h"
+#include "pc_p2_dangomushi.h"
 #include "pc_randomizer.h"
 #include "Controller.h"
 
@@ -167,6 +168,10 @@ std::vector<std::pair<float, float>> sDetourHist;
 long long sTicks = 0;
 std::chrono::steady_clock::time_point sFpsStart = std::chrono::steady_clock::now();
 bool sFpsLogged = false;
+int sPowerRestocks = 0; // #897 power resupply restocks spent this process
+bool sPowerRestockVisit = false; // #897 one restock per Onion visit
+int sTextTick = 0; // #897 tutorial-text A tap clock
+bool sTextOpen = false; // #897 tutorial text window seen open (edge log)
 bool sPowerLogged = false; // bot-v4: AUTOPLAY_POWER is logged exactly once per process
 bool sPowerStocked = false; // bot-v4b: power-mode Onion stock runs once per process
 float sPowerSeconds = 0.0f; // bot-v6: game-time seconds since the first live power tick
@@ -431,6 +436,31 @@ void pc_p2_autoplay_tick(void)
         return;
     }
 
+    // #897: a tutorial / part-discovery text window (createTutorialWindow,
+    // gameflow.mIsTutorialTextActive) freezes the field until A or B is
+    // clicked (ogScrMessageMgr keyClick). The Brain must not count that
+    // time as a stuck approach (a2-impact: tu_tx window at the Goolix
+    // approach -> 6 STUCK -> target_unreachable). Tap A (4 ticks down, 8 up:
+    // keyClick needs the edge) and hold the Brain until it closes. Normal
+    // pad input only.
+    if (gameflow.mIsTutorialTextActive) {
+        if (!sTextOpen) {
+            sTextOpen = true;
+            std::printf("AUTOPLAY_TEXT_DISMISS open=1 navi=(%.0f,%.0f) bot-driven\n",
+                        navi->getPosition().x, navi->getPosition().z);
+            std::fflush(stdout);
+        }
+        const bool down = (sTextTick++ % 12) < 4;
+        pc_p2_input_script_set(1, down ? unsigned(p2autoplay::PadA) : 0u, 0, 0);
+        return;
+    }
+    if (sTextOpen) {
+        sTextOpen = false;
+        sTextTick = 0;
+        std::printf("AUTOPLAY_TEXT_DISMISS open=0 bot-driven\n");
+        std::fflush(stdout);
+    }
+
     const float dt = gsys ? gsys->getFrameTime() : 0.016f;
     const float naviX = navi->getPosition().x;
     const float naviZ = navi->getPosition().z;
@@ -535,6 +565,40 @@ void pc_p2_autoplay_tick(void)
                 if (total > 0) stockOnion->exitPikis(total);
             }
             sPowerStocked = true;
+        }
+    }
+
+    // #897 power resupply (TEST-ONLY, power mode only): the Brain walked the
+    // captain back to the Onion after a crush (wantsPowerRestock). Top the
+    // start-colour Onion up again through the SAME bookkeeping as the one-time
+    // power stock above and queue it out through the normal exit path, once
+    // per visit, at most powerRestockMax times per process.
+    if (!sBrain.wantsPowerRestock()) sPowerRestockVisit = false;
+    if (powerMode && sPowerStocked && playerState && sBrain.wantsPowerRestock() && !sPowerRestockVisit
+        && sPowerRestocks < p2autoplay::Config().powerRestockMax) {
+        sPowerRestockVisit = true;
+        int stockColor = pc_randomizer_enabled() ? pc_randomizer_start_color() : Red;
+        if (stockColor < PikiMinColor || stockColor > PikiMaxColor) stockColor = Red;
+        GoalItem* stockOnion = itemMgr ? itemMgr->getContainer(stockColor) : nullptr;
+        if (stockOnion) {
+            const int stored = stockOnion->getTotalStorePikis();
+            const int delta = p2autoplay::powerStockDelta(true, stored, alive, int(GameStat::allPikis),
+                                                          pc_settings_get_piki_limit());
+            if (delta > 0) {
+                pikiInfMgr.mPikiCounts[stockColor][Leaf] += delta;
+                stockOnion->mHeldPikis[Leaf] += (u32)delta;
+                GameStat::containerPikis.add(stockColor, delta);
+                playerState->mTotalBornPikiNum += delta;
+                playerState->mLivingPikiNum += delta;
+                playerState->mTotalPluckedPikiCount += delta;
+                GameStat::update();
+            }
+            const int total = stockOnion->getTotalStorePikis();
+            if (total > 0) stockOnion->exitPikis(total);
+            ++sPowerRestocks;
+            std::printf("AUTOPLAY_POWER_RESTOCK n=%d color=%d added=%d exit=%d field=%d bot-driven\n",
+                        sPowerRestocks, stockColor, delta > 0 ? delta : 0, total, alive);
+            std::fflush(stdout);
         }
     }
 
@@ -788,6 +852,7 @@ void pc_p2_autoplay_tick(void)
     // low-health guard (read-only).
     senses.naviHpValid = true;
     senses.naviHp = navi->mHealth;
+    senses.powerRestocks = sPowerRestocks;
     // Onion receipt for this token (bot-v2 gap 1): durable delivery-ledger
     // query, read-only. carried=1 in RESULT means this was seen.
     senses.receiptSeen = sEngage.token ? pc_randomizer_p2_receipt_seen(sEngage.token) : false;
@@ -818,6 +883,19 @@ void pc_p2_autoplay_tick(void)
             const char* kst = nullptr;
             senses.targetAttacking = pc_p2_chappy_probe(pick->actor, &kst, nullptr, nullptr) && kst
                 && std::strcmp(kst, "attack") == 0;
+        }
+        // #897 roller stance: Crawbster FSM facts (read-only probe).
+        if (p2autoplay::isRollerStance(pick->source)) {
+            const char* dst = nullptr;
+            bool rolling = false, stickable = false;
+            float vx = 0.0f, vz = 0.0f;
+            if (pc_p2_dangomushi_probe(pick->actor, &dst, &rolling, &stickable, &vx, &vz)) {
+                senses.targetDormant = dst && std::strcmp(dst, "stay") == 0;
+                senses.targetRolling = rolling;
+                senses.targetVulnerable = stickable;
+                senses.targetVelX = vx;
+                senses.targetVelZ = vz;
+            }
         }
         // Flyer senses (bot-v2 gap 3): height above ground, grab latch.
         // Kurage's body is on the ground (visual float only), so its XZ body

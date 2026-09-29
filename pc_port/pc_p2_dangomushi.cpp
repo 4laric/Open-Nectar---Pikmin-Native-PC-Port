@@ -953,6 +953,19 @@ bool pc_p2_dangomushi_clip(const BTeki* actor, const char*& name, float& phase) 
     }
     return true;
 }
+bool pc_p2_dangomushi_probe(const BTeki* actor, const char** state, bool* rolling, bool* stickable,
+                            float* driveX, float* driveZ) {
+    if (!ready || !actor) return false;
+    auto it = actors.find(static_cast<PelletView*>(const_cast<BTeki*>(actor)));
+    if (it == actors.end()) return false;
+    const Dango& s = it->second;
+    if (state) *state = stateName(s.state);
+    if (rolling) *rolling = s.rolling;
+    if (stickable) *stickable = s.stickable;
+    if (driveX) *driveX = s.driveX;
+    if (driveZ) *driveZ = s.driveZ;
+    return true;
+}
 bool pc_p2_dangomushi_suppress_ai(const BTeki* actor) {
     return ready && actors.count(static_cast<PelletView*>(const_cast<BTeki*>(actor))) != 0;
 }
