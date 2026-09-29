@@ -81,9 +81,10 @@ lockstep peers agree. Co-op-only log lines start with `[coop-policy]`.
       the formation plate, which the captain's control update refreshes, and
       that does not run during the stage-start movie (co-op ticks 1 to ~280
       on `foh-day2`). It then logs `released=0 kept=N`.
-    * `SUNSET` is refused while that movie runs or a captain is still in
-      `NAVISTATE_Starting` (`reason=stage-start`). A day end started there
-      never gives the captains control, and every squad is left behind.
+    * `SUNSET` is refused while any movie runs (on these fixtures, the
+      stage-start one) or a captain is still in `NAVISTATE_Starting`
+      (`reason=stage-start`). A day end started during the stage start never
+      gives the captains control, and every squad is left behind.
     * The day end sets the clock back and re-arms the schedule, so all four
       kinds are refused inside the day-end sequence (`reason=day-end`). They
       fire again on the next stage/day.
