@@ -69,5 +69,20 @@ void pc_snapshot_spike_infra_pop(void);
 // back (infrastructure statics such as the malloc tracking table).
 void pc_snapshot_spike_preserve(const void* p, size_t bytes);
 
+// operator new post-hook for a block that stayed on malloc: records it in the
+// off-region block table when the pointer-scan audit is on. Returns p.
+void* pc_snapshot_spike_note_off(void* p, size_t size, void* returnAddress);
+
+// Timing marks inside PlugPikiApp::idle (fix round 1, MV-5): the parts of a
+// tick after the authoritative pass, so a resim tick can be costed as
+// auth + the sim work that follows presentation.
+enum PcSnapshotSpikeMark {
+	kPcSpikeMarkPresentEnd = 1, // presentation pass finished
+	kPcSpikeMarkDoneBegin  = 2, // gsys->doneRender() about to run
+	kPcSpikeMarkDoneEnd    = 3, // gsys->doneRender() returned
+	kPcSpikeMarkParseEnd   = 4, // parseMessages() returned (waitRetrace next)
+};
+void pc_snapshot_spike_mark(int which);
+
 // True while the synctest re-advances ticks after a restore.
 bool pc_snapshot_spike_resimulating(void);

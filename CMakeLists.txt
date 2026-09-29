@@ -840,12 +840,18 @@ if(PIKMIN_NETPLAY_SNAPSHOT_SPIKE AND WIN32 AND NOT ANDROID)
         pc_port/dolphin_stubs/audio_stubs.cpp
         pc_port/netplay/pc_state_hash.cpp
         pc_port/netplay/pc_snapshot_spike.cpp
+        pc_port/netplay/pc_snapshot_spike_game.cpp
         APPEND PROPERTY COMPILE_DEFINITIONS PIKMIN_NETPLAY_SNAPSHOT_SPIKE=1)
-    target_sources(${NECTAR_GAME} PRIVATE pc_port/netplay/pc_snapshot_spike.cpp)
+    target_sources(${NECTAR_GAME} PRIVATE pc_port/netplay/pc_snapshot_spike.cpp pc_port/netplay/pc_snapshot_spike_game.cpp)
     if(TARGET p2_kurage_runtime)
-        target_sources(p2_kurage_runtime PRIVATE pc_port/netplay/pc_snapshot_spike.cpp)
+        target_sources(p2_kurage_runtime PRIVATE pc_port/netplay/pc_snapshot_spike.cpp pc_port/netplay/pc_snapshot_spike_game.cpp)
     endif()
     target_link_options(${NECTAR_GAME} PRIVATE "-Wl,-Map=${CMAKE_BINARY_DIR}/nectar.map")
+    # Fix round 1 (MV-4/F6): the spike exe links libstdc++ and libgcc
+    # statically, so allocations made inside the C++ runtime (std::string,
+    # std::filesystem, stream buffers) go through the exe's operator new
+    # and malloc imports, where the spike can route and count them.
+    target_link_options(${NECTAR_GAME} PRIVATE -static-libstdc++ -static-libgcc)
 endif()
 
 # Netplay M3 lockstep (issue #880): vendored GekkoNet as its own static
@@ -1936,6 +1942,17 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_definitions(pc_netplay_present_test PRIVATE PC_NETPLAY_PRESENT_HOST=1)
     target_compile_options(pc_netplay_present_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_netplay_present_test COMMAND pc_netplay_present_test)
+
+    # Netplay M6a snapshot spike (issue #896), fix round 1 (F12): host-run
+    # test of the spike's region allocator through its public hooks. Only
+    # with the spike option; the engine-side hooks are stubbed in the test.
+    if(PIKMIN_NETPLAY_SNAPSHOT_SPIKE AND WIN32)
+        add_executable(pc_snapshot_spike_test
+            pc_port/netplay/pc_snapshot_spike_test.cpp
+            pc_port/netplay/pc_snapshot_spike.cpp)
+        target_compile_options(pc_snapshot_spike_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+        add_test(NAME pc_snapshot_spike_test COMMAND pc_snapshot_spike_test)
+    endif()
 
     add_executable(pc_render_phase_test
         pc_port/timing/pc_render_phase_test.cpp

@@ -384,6 +384,7 @@ int PlugPikiApp::idle()
 		pc_render_end_presentation();
 #if defined(PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
 		pc_snapshot_spike_infra_pop();
+		pc_snapshot_spike_mark(kPcSpikeMarkPresentEnd);
 #endif
 		// M2b acceptance evidence: null-GX counters, one line per 3000
 		// ticks on stdout (native.log). Real GL issued while null was
@@ -446,9 +447,11 @@ int PlugPikiApp::idle()
 	gsys->mTimer->start("render", true);
 	const double doneStart = profiling ? clockNow() : 0.0;
 #if defined(PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
+	pc_snapshot_spike_mark(kPcSpikeMarkDoneBegin);
 	pc_snapshot_spike_infra_push(kPcSpikeInfraDoneRender);
 	gsys->doneRender();
 	pc_snapshot_spike_infra_pop();
+	pc_snapshot_spike_mark(kPcSpikeMarkDoneEnd);
 #else
 	gsys->doneRender();
 #endif
@@ -462,6 +465,9 @@ int PlugPikiApp::idle()
 	if (gameflow.mGameInterface) {
 		gameflow.mGameInterface->parseMessages();
 	}
+#if defined(PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
+	pc_snapshot_spike_mark(kPcSpikeMarkParseEnd);
+#endif
 
 	gsys->mTimer->_stop("all");
 

@@ -247,6 +247,7 @@ void piki_pc_free(void* ptr)
 __attribute__((weak)) void* pc_snapshot_spike_new(size_t size, void* returnAddress);
 __attribute__((weak)) bool pc_snapshot_spike_delete(void* ptr, void* returnAddress);
 __attribute__((weak)) void pc_snapshot_spike_preserve(const void* p, size_t bytes);
+__attribute__((weak)) void* pc_snapshot_spike_note_off(void* p, size_t size, void* returnAddress);
 
 unsigned long long piki_pc_spike_unknown_frees(void)
 {
@@ -273,7 +274,7 @@ void piki_pc_spike_register_preserve(void)
 	pc_snapshot_spike_preserve(&sLargestBlock, sizeof(sLargestBlock));
 }
 
-#define PIKI_SPIKE_NEW(size) if (pc_snapshot_spike_new) { if (void* spikeBlock = pc_snapshot_spike_new((size), __builtin_return_address(0))) return spikeBlock; }
+#define PIKI_SPIKE_NEW(size) if (pc_snapshot_spike_new) { if (void* spikeBlock = pc_snapshot_spike_new((size), __builtin_return_address(0))) return spikeBlock; if (pc_snapshot_spike_note_off) return pc_snapshot_spike_note_off(piki_pc_alloc(size), (size), __builtin_return_address(0)); }
 #define PIKI_SPIKE_DELETE(ptr) if (pc_snapshot_spike_delete && pc_snapshot_spike_delete(ptr, __builtin_return_address(0))) return;
 #else
 #define PIKI_SPIKE_NEW(size)

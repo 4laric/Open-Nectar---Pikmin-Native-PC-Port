@@ -2,7 +2,9 @@
 //
 // Measurement code, not production rollback: it favours visibility over
 // speed and tolerates crashes. Nothing here runs unless the CMake option
-// PIKMIN_NETPLAY_SNAPSHOT_SPIKE is ON *and* PIKMIN_NETPLAY_SNAPSHOT_SPIKE=1.
+// PIKMIN_NETPLAY_SNAPSHOT_SPIKE is ON *and* PIKMIN_NETPLAY_SNAPSHOT_SPIKE=1
+// (the crowd bootstrap in pc_snapshot_spike_game.cpp is the one exception:
+// it follows its own env var so a crowd run has a spike-off M1 twin).
 //
 // Rules this TU keeps:
 //   * it never calls operator new (it is called from inside operator new):
@@ -16,12 +18,38 @@
 // when it is made on the thread that called pc_snapshot_spike_init (main)
 // and none of these hold:
 //   - an infrastructure scope is open (presentation pass, doneRender, the
-//     os_stubs thread/mutex/queue maps);
+//     os_stubs thread/mutex/queue maps, the audio facade);
 //   - the System::run loop has started and we are outside app->idle()
 //     (input polling, input log, state hash, window events).
 // Everything else (other threads, static init before main, the scopes
 // above, region exhaustion) stays on malloc and is counted per category and
 // per call site (return address of operator new).
+//
+// Modes and switches (env):
+//   PIKMIN_NETPLAY_SNAPSHOT_SPIKE_MODE=timing   production save path only:
+//       GetWriteWatch + undo/shadow copies + globals compare/save. No
+//       content-identical restore, no periodic full copy, no coverage checks.
+//       Default is the measurement mode (everything below).
+//   PIKMIN_NETPLAY_SNAPSHOT_SPIKE_WW=0          region reserved without
+//       MEM_WRITE_WATCH; the save copies an emulated dirty set of the same
+//       size (..._NOWW_PAGES, default 740) so both A/B arms move the same
+//       bytes (MV-8).
+//   PIKMIN_NETPLAY_SNAPSHOT_SPIKE_WW_SPLIT=1    GetWriteWatch runs over the
+//       touched extents ("hot", what a compact region would scan) and over
+//       the rest of the zones ("cold") separately, both with RESET (MV-2).
+//   PIKMIN_NETPLAY_SNAPSHOT_SPIKE_AUDIT=N       every N ticks: per-page hash
+//       of every committed region page, compared with the previous audit;
+//       a page that changed without write watch reporting it is a missed
+//       write (MV-3).
+//   PIKMIN_NETPLAY_SNAPSHOT_SPIKE_PTRSCAN=1     with AUDIT: track off-region
+//       blocks and scan region/globals/off-region blocks for cross pointers
+//       at each audit (MV-4).
+//   PIKMIN_NETPLAY_SNAPSHOT_SPIKE_MALLOC_AUDIT=1 hook the exe's malloc,
+//       calloc, realloc and free imports and count them by category and call
+//       site (MV-4).
+//   PIKMIN_NETPLAY_SNAPSHOT_SYNCTEST=k|cycle    crude synctest, k fixed or
+//       cycling 1..7; ..._RESTORE=dedup|naive; ..._DIVERGE=1 perturbs the
+//       first pass's inputs; ..._ANY=1 allows anchors over non-live ticks.
 
 #include "netplay/pc_snapshot_spike.h"
 
@@ -45,6 +73,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 
 class NaviMgr;
 extern NaviMgr* naviMgr;
@@ -59,6 +88,12 @@ void piki_pc_spike_register_preserve(void);
 // os_stubs.cpp defines these inside its extern "C" block.
 extern "C" bool pc_os_stubs_static_arena(void** lo, size_t* bytes);
 extern "C" void pc_os_stubs_spike_register_preserve(void);
+// pc_snapshot_spike_game.cpp (engine headers live there).
+void pc_snapshot_spike_game_tick(uint64_t tick);
+void pc_snapshot_spike_game_sample(int* phase, int* pikis);
+uint64_t pc_snapshot_spike_game_audio_hash(void);
+void pc_snapshot_spike_game_perturb_input(void);
+void pc_snapshot_spike_game_describe(void);
 
 extern "C" char __data_start__[];
 extern "C" char __data_end__[];
@@ -97,6 +132,12 @@ constexpr size_t kUndoPoolPages = 65536; // 256 MB reserved, committed lazily
 constexpr int kFullEvery        = 30; // full-copy measurement period (ticks)
 constexpr int kMaxK             = 8;
 constexpr int kPreserveMax      = 16384;
+constexpr size_t kHotGapPages   = 64; // touched extents closer than this merge
+constexpr size_t kMaxRuns       = 65536;
+constexpr size_t kSmallUnits    = (kSmallEnd - kSmallOff) / 16;
+constexpr size_t kLargePages    = (kLargeEnd - kLargeOff) / kPage;
+constexpr size_t kOffTableCap   = size_t(1) << 20;
+constexpr size_t kPairCap       = size_t(1) << 16;
 
 const uintptr_t kPreferredBases[] = {
 	0x00000E0000000000ull,
@@ -128,6 +169,7 @@ struct Meta {
 	LargeFree* largeHead; // address ordered
 	uint64_t liveBytes;
 	uint64_t liveBlocks;
+	uint8_t* largeCommitHw; // large zone committed up to here; never decommitted (F8)
 };
 
 enum OffCategory {
@@ -135,13 +177,26 @@ enum OffCategory {
 	kOffOtherThread,     // not the main thread
 	kOffPresent,         // presentation pass scope
 	kOffDoneRender,      // doneRender scope
-	kOffInfraOther,      // other infra scope (os_stubs maps)
+	kOffInfraOther,      // other infra scope (os_stubs maps, audio facade)
 	kOffOutsideIdle,     // main loop, outside app->idle()
 	kOffRegionFull,      // region exhausted
 	kOffCount
 };
 const char* const kOffNames[kOffCount] = {
-	"pre_init", "other_thread", "present", "done_render", "infra_os_stubs", "outside_idle", "region_full",
+	"pre_init", "other_thread", "present", "done_render", "infra_other", "outside_idle", "region_full",
+};
+
+// malloc audit categories (MV-4)
+enum MallocCategory {
+	kMallocOtherThread = 0,
+	kMallocMainInfra,      // main thread, infra scope open
+	kMallocMainOutsideIdle,
+	kMallocMainSim,        // main thread, inside idle, no infra scope: SIM domain
+	kMallocMainPreLoop,    // main thread before System::run (boot)
+	kMallocCount
+};
+const char* const kMallocNames[kMallocCount] = {
+	"other_thread", "main_infra", "main_outside_idle", "main_sim", "main_boot",
 };
 
 const char* const kUnknownNames[4] = { "arena_zone", "image", "private_heap", "other" };
@@ -175,13 +230,39 @@ struct UndoTick {
 	bool valid;
 };
 
+struct Run {
+	uint8_t* lo;
+	uint8_t* hi;
+	uint8_t zone;
+	uint8_t hot;
+};
+
+struct OffBlock {
+	uintptr_t ptr; // 0 = empty slot
+	uintptr_t size;
+	uintptr_t ra;
+};
+
+struct Pair {
+	uintptr_t src;
+	uintptr_t dst;
+	uint64_t count;
+	uint32_t kind; // 0 empty, 1 region->off, 2 globals->off, 3 off->region
+	uint32_t pad;
+};
+
 struct SyncResult {
 	uint64_t anchor;
 	int k;
 	int firstBad;     // 0 = match; else 1-based offset of first mismatching tick
 	unsigned badMask; // sub-hash columns that differed at firstBad
+	int audioBad;     // 0 = audio hash matched every step; else first step
 	uint32_t regionDiffPages;
+	uint32_t regionUnreported; // differing pages write watch never reported
 	uint32_t globalDiffPages;
+	uint32_t globalPresDiffPages; // preserved bytes differing (not restored)
+	uint32_t regionUnion;
+	uint32_t globalUnion;
 	uint32_t onlyFirst;  // pages dirtied in the first pass but not the resim
 	uint32_t onlySecond; // pages dirtied in the resim but not the first pass
 };
@@ -192,10 +273,21 @@ struct State {
 	bool loopStarted;
 	bool inIdle;
 	bool authMarked;
-	bool doRestore;  // content-identical real restore each tick (default on)
+	bool timing;     // production save path only
+	bool doRestore;  // content-identical real restore each tick (measure mode)
 	bool writeWatch; // region reserved with MEM_WRITE_WATCH and measured (default on)
 	bool splitAuth;  // extra GetWriteWatch at the end of the auth pass (default off)
+	bool wwSplit;    // hot/cold GetWriteWatch split (MV-2)
+	bool offTrack;   // track off-region blocks for the pointer scan
+	bool mallocAudit;
+	uint32_t nowwPages;
+	int auditEvery;
+	bool ptrScan;
 	double wwZoneMs[3];
+	double wwHotMs, wwColdMs;
+	uint32_t wwHotCalls, wwColdCalls;
+	uint32_t rdHot, rdCold;
+	double hotMb, coldMb;
 	uint32_t wwCalls;
 	void* lastDeleteRa; // main thread: return address of the delete in flight
 	uint64_t unknownByKind[4];
@@ -204,6 +296,7 @@ struct State {
 	DWORD mainTid;
 	SRWLOCK lock;
 	SRWLOCK siteLock;
+	SRWLOCK offLock;
 
 	// region
 	uint8_t* base;
@@ -213,6 +306,9 @@ struct State {
 	uint32_t caps[kNumClasses];
 	bool shadowCommitted[kGranules];
 	bool scratchCommitted[kGranules];
+	uintptr_t* smallSite; // per 16-byte unit of the small zone: alloc site at a block header
+	bool smallSiteCommitted[(kSmallUnits * sizeof(uintptr_t)) / kGranule + 1];
+	uintptr_t* largeSite; // per page of the large zone: alloc site at a live block header
 
 	// write watch
 	void** wwAddrs;
@@ -221,10 +317,20 @@ struct State {
 	uint32_t* dirtyList;
 	uint32_t dirtyCount;
 	uint32_t epoch;
-	uint64_t* touched; // bitmap: pages ever written and still committed
+	uint64_t* touched; // bitmap: pages ever reported written
+	bool runsStale;
+	Run* runs;
+	uint32_t runCount;
+	uint32_t* carryList; // pages written after the tick's collect (ww_late)
+	uint32_t* restoreTmp; // measurement-mode restore list
+	uint8_t* runsSmallHi; // zone bounds the hot/cold runs were built for
+	uint8_t* runsLargeHi;
+	uint32_t carryCount;
+	uint64_t* dirtySince; // audit: pages reported since the last audit
 	uint32_t rdAuth;
 	uint32_t rdPost;
 	double wwMs;
+	uint32_t nowwCursor;
 
 	// undo pools
 	uint8_t* rUndo;       // kUndoPoolPages pages
@@ -236,7 +342,7 @@ struct State {
 	uint64_t gUndoPages;
 	uint64_t gUndoCursor;
 	UndoTick ring[kUndoRing];
-	bool barrier; // set by decommit / oversize ticks; cleared each tick end
+	bool barrier; // set by oversize ticks; cleared each tick end
 
 	// globals
 	Range glob[4];
@@ -247,10 +353,11 @@ struct State {
 	uint8_t** globPagePtr; // page index -> address
 	uint32_t* globDirty;
 	uint32_t globDirtyCount;
-	PreserveSeg* preserveSegs;
+	PreserveSeg* preserveSegs; // sorted by page after a rebuild
 	uint32_t preserveCount;
 	uint32_t preserveCap;
-	uint8_t* globPreserved; // per global page: 1 if any preserve seg on it
+	uint32_t* presFirst; // per global page: first seg index
+	uint16_t* presCount; // per global page: seg count (0 = not preserved)
 	Range* preserveRaw; // kPreserveMax entries
 	int preserveRawCount;
 	bool preserveBatch; // loading a preserve file: rebuild the segments once at the end
@@ -260,51 +367,93 @@ struct State {
 	int64_t tFrame;
 	int64_t tIdle;
 	int64_t tAuth;
+	int64_t tPresentEnd;
+	int64_t tDoneBegin;
+	int64_t tDoneEnd;
+	int64_t tParseEnd;
 	int64_t tIdleEnd;
 	double instrInIdleMs;
+	// machine load (MV-6)
+	uint64_t loadIdle, loadKernel, loadUser;
+	double sysBusy;
 
 	// counters (this tick)
 	uint64_t allocs, allocBytes, frees, freeBytes;
 	uint64_t offAllocs, offBytes;
 	uint64_t regionFreesOffMain;
 	uint64_t badFrees;
+	uint32_t wwLate, concRegion, concGlobal;
+	int64_t missed; // audit: -1 = no audit this tick
 	// totals
 	volatile LONG64 offCount[kOffCount];
 	volatile LONG64 offBytesTotal[kOffCount];
+	volatile LONG64 mallocCount[kMallocCount];
+	volatile LONG64 mallocBytes[kMallocCount];
+	volatile LONG64 freeCalls;
 	uint64_t totalAllocs, totalAllocBytes, totalFrees, totalFreeBytes;
 	uint64_t totalRegionFreesOffMain;
-	uint64_t decommitCalls;
+	uint64_t totalWwLate, totalConcRegion, totalConcGlobal;
+	uint64_t audits, auditMissed, auditPages;
 	uint64_t smallHwBytes;
 
 	Site* regionSites;
 	Site* offSites;
 	Site* unknownSites;
+	Site* mallocSites;
 	uint64_t siteOverflow;
+
+	// off-region block table (pointer scan)
+	OffBlock* offTable;
+	uint64_t offLive;
+	uint64_t offOverflow;
+	Pair* pairs;
+	OffBlock* offSorted;
+
+	// audit hashes
+	uint64_t* pageHash;
+	uint64_t* auditHave; // bitmap: pageHash valid
+	uint64_t zeroHash;
+	FILE* auditLog;
+	FILE* gdirtyLog;
 
 	FILE* csv;
 	FILE* syncCsv;
 	uint64_t ticksLogged;
 
 	// synctest
-	int syncK;
+	int syncKArg; // 0 off, 1..kMaxK fixed, -1 cycle 1..7
+	int syncK;    // this test's k
 	int syncPeriod;
 	uint64_t syncStart;
+	uint64_t syncEnd; // no new anchor from here (the run exits soon)
+	bool syncDedup;
+	bool syncDiverge;
+	bool syncAny;
+	bool syncFullHash;
 	int syncPhase; // 0 idle, 1 first pass, 2 resim
 	uint64_t syncAnchor;
 	int syncStep;
 	uint64_t syncHash[kMaxK + 1][8];
-	uint8_t* syncStash;      // first-pass post-state of the union pages
-	uint32_t* syncStashIdx;  // region page index (bit31 = globals page)
-	uint32_t syncStashCount;
-	uint32_t syncStashCap;
+	uint64_t syncAudio[kMaxK + 1];
+	uint8_t* syncFull;       // first-pass end copy of every touched region page
+	bool syncFullCommitted[kGranules];
+	uint64_t* syncTouched;   // touched bitmap at first-pass end
+	uint64_t* syncPageHash;  // full-hash mode: first-pass end hash of every committed page
+	uint8_t* syncGFull;      // first-pass end copy of every global page
 	uint32_t* syncMark;      // per region page: 1 first pass, 2 resim, 3 both
 	uint8_t* syncGMark;
-	uint64_t syncTests, syncMatches, syncAborted;
+	uint32_t* rStamp;        // dedup restore: per region page
+	uint32_t* gStamp;        // dedup restore: per global page
+	uint32_t stamp;
+	uint32_t* restoredList;
+	uint64_t syncTests, syncMatches, syncAborted, syncAudioBadTests, syncTestIndex;
+	uint64_t syncTestsK[kMaxK + 1], syncMatchesK[kMaxK + 1];
 	int syncFirstBad;
 	unsigned syncBadMask;
+	int syncAudioBad;
 	uint64_t syncNextAt;
-	double syncRestoreMs;
-	uint32_t syncRestorePages;
+	double rsTotalMs, rsRegionMs, rsShadowMs, rsGlobMs, rsWwMs;
+	uint32_t rsRegionPages, rsGlobPages, rsEntries;
 };
 
 State* S = nullptr; // set once by init; the pointee lives outside every bracket
@@ -320,10 +469,14 @@ inline int64_t now()
 }
 
 inline double msSince(int64_t t0) { return double(now() - t0) * S->msPerCount; }
+inline double msBetween(int64_t a, int64_t b) { return double(b - a) * S->msPerCount; }
 
 inline bool onMain() { return GetCurrentThreadId() == S->mainTid; }
 
 inline size_t alignUp(size_t v, size_t a) { return (v + a - 1) & ~(a - 1); }
+
+inline bool bitGet(const uint64_t* b, size_t i) { return (b[i >> 6] >> (i & 63)) & 1; }
+inline void bitSet(uint64_t* b, size_t i) { b[i >> 6] |= 1ull << (i & 63); }
 
 void* osReserve(size_t bytes)
 {
@@ -333,6 +486,11 @@ void* osReserve(size_t bytes)
 bool osCommit(void* p, size_t bytes)
 {
 	return VirtualAlloc(p, bytes, MEM_COMMIT, PAGE_READWRITE) != nullptr;
+}
+
+void* osAllocZero(size_t bytes)
+{
+	return VirtualAlloc(nullptr, bytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 }
 
 void ensureGranules(uint8_t* poolBase, bool* committed, size_t granules, size_t offset, size_t bytes)
@@ -347,6 +505,22 @@ void ensureGranules(uint8_t* poolBase, bool* committed, size_t granules, size_t 
 			}
 			committed[g] = true;
 		}
+	}
+}
+
+uintptr_t exeBase() { return reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr)); }
+
+void moduleOf(uintptr_t addr, char* name, size_t cap, uintptr_t* modBase)
+{
+	HMODULE mod = nullptr;
+	std::strncpy(name, "?", cap);
+	GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+	    reinterpret_cast<LPCSTR>(addr), &mod);
+	*modBase = reinterpret_cast<uintptr_t>(mod);
+	if (mod) {
+		GetModuleFileNameA(mod, name, DWORD(cap));
+		const char* slash = std::strrchr(name, '\\');
+		if (slash) std::memmove(name, slash + 1, std::strlen(slash + 1) + 1);
 	}
 }
 
@@ -380,6 +554,155 @@ void noteSite(Site* table, uintptr_t ra, size_t bytes, uint32_t cat)
 }
 
 // ---------------------------------------------------------------------------
+// Off-region block table (linear probing, backward-shift delete)
+// ---------------------------------------------------------------------------
+inline size_t offSlot(uintptr_t p) { return size_t(((p >> 4) * 0x9E3779B97F4A7C15ull) >> 44) & (kOffTableCap - 1); }
+
+void offInsert(void* ptr, size_t size, uintptr_t ra)
+{
+	if (!ptr) return;
+	const uintptr_t p = reinterpret_cast<uintptr_t>(ptr);
+	AcquireSRWLockExclusive(&S->offLock);
+	if (S->offLive >= kOffTableCap - kOffTableCap / 8) {
+		S->offOverflow++;
+		ReleaseSRWLockExclusive(&S->offLock);
+		return;
+	}
+	size_t i = offSlot(p);
+	while (S->offTable[i].ptr && S->offTable[i].ptr != p) i = (i + 1) & (kOffTableCap - 1);
+	if (!S->offTable[i].ptr) S->offLive++;
+	S->offTable[i] = { p, size, ra };
+	ReleaseSRWLockExclusive(&S->offLock);
+}
+
+void offRemove(void* ptr)
+{
+	if (!ptr) return;
+	const uintptr_t p = reinterpret_cast<uintptr_t>(ptr);
+	AcquireSRWLockExclusive(&S->offLock);
+	size_t i = offSlot(p);
+	while (S->offTable[i].ptr && S->offTable[i].ptr != p) i = (i + 1) & (kOffTableCap - 1);
+	if (S->offTable[i].ptr == p) {
+		S->offLive--;
+		size_t hole = i;
+		size_t j    = i;
+		for (;;) {
+			j = (j + 1) & (kOffTableCap - 1);
+			if (!S->offTable[j].ptr) break;
+			const size_t home = offSlot(S->offTable[j].ptr);
+			// move j into the hole when its home is not in (hole, j]
+			const bool inRange = hole <= j ? (home > hole && home <= j) : (home > hole || home <= j);
+			if (!inRange) {
+				S->offTable[hole] = S->offTable[j];
+				hole              = j;
+			}
+		}
+		S->offTable[hole] = { 0, 0, 0 };
+	}
+	ReleaseSRWLockExclusive(&S->offLock);
+}
+
+// ---------------------------------------------------------------------------
+// malloc import hooks (MV-4)
+// ---------------------------------------------------------------------------
+typedef void* (*MallocFn)(size_t);
+typedef void* (*CallocFn)(size_t, size_t);
+typedef void* (*ReallocFn)(void*, size_t);
+typedef void (*FreeFn)(void*);
+MallocFn gRealMalloc   = nullptr;
+CallocFn gRealCalloc   = nullptr;
+ReallocFn gRealRealloc = nullptr;
+FreeFn gRealFree       = nullptr;
+
+void mallocNote(void* p, size_t n, void* ra)
+{
+	State* s = S;
+	if (!s || !s->active || !p) return;
+	int cat;
+	if (!onMain()) cat = kMallocOtherThread;
+	else if (s->infraDepth > 0) cat = kMallocMainInfra;
+	else if (!s->loopStarted) cat = kMallocMainPreLoop;
+	else if (!s->inIdle) cat = kMallocMainOutsideIdle;
+	else cat = kMallocMainSim;
+	InterlockedIncrement64(&s->mallocCount[cat]);
+	InterlockedAdd64(&s->mallocBytes[cat], LONG64(n));
+	noteSite(s->mallocSites, reinterpret_cast<uintptr_t>(ra), n, uint32_t(cat));
+	if (s->offTrack) offInsert(p, n, reinterpret_cast<uintptr_t>(ra));
+}
+
+void* hookMalloc(size_t n)
+{
+	void* p = gRealMalloc(n);
+	mallocNote(p, n, __builtin_return_address(0));
+	return p;
+}
+
+void* hookCalloc(size_t a, size_t b)
+{
+	void* p = gRealCalloc(a, b);
+	mallocNote(p, a * b, __builtin_return_address(0));
+	return p;
+}
+
+void* hookRealloc(void* old, size_t n)
+{
+	if (old && S && S->offTrack) offRemove(old);
+	void* p = gRealRealloc(old, n);
+	mallocNote(p, n, __builtin_return_address(0));
+	return p;
+}
+
+void hookFree(void* p)
+{
+	if (p && S) {
+		InterlockedIncrement64(&S->freeCalls);
+		if (S->offTrack) offRemove(p);
+	}
+	gRealFree(p);
+}
+
+int patchImports()
+{
+	uint8_t* mod    = reinterpret_cast<uint8_t*>(GetModuleHandleA(nullptr));
+	auto* dos       = reinterpret_cast<IMAGE_DOS_HEADER*>(mod);
+	auto* nt        = reinterpret_cast<IMAGE_NT_HEADERS*>(mod + dos->e_lfanew);
+	const auto& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+	if (!dir.VirtualAddress) return 0;
+	int patched = 0;
+	for (auto* imp = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(mod + dir.VirtualAddress); imp->Name; ++imp) {
+		auto* orig  = reinterpret_cast<IMAGE_THUNK_DATA*>(mod + (imp->OriginalFirstThunk ? imp->OriginalFirstThunk : imp->FirstThunk));
+		auto* thunk = reinterpret_cast<IMAGE_THUNK_DATA*>(mod + imp->FirstThunk);
+		for (; orig->u1.AddressOfData; ++orig, ++thunk) {
+			if (IMAGE_SNAP_BY_ORDINAL(orig->u1.Ordinal)) continue;
+			const char* name = reinterpret_cast<const char*>(reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(mod + orig->u1.AddressOfData)->Name);
+			void* repl       = nullptr;
+			void** real      = nullptr;
+			if (!std::strcmp(name, "malloc")) {
+				repl = reinterpret_cast<void*>(&hookMalloc);
+				real = reinterpret_cast<void**>(&gRealMalloc);
+			} else if (!std::strcmp(name, "calloc")) {
+				repl = reinterpret_cast<void*>(&hookCalloc);
+				real = reinterpret_cast<void**>(&gRealCalloc);
+			} else if (!std::strcmp(name, "realloc")) {
+				repl = reinterpret_cast<void*>(&hookRealloc);
+				real = reinterpret_cast<void**>(&gRealRealloc);
+			} else if (!std::strcmp(name, "free")) {
+				repl = reinterpret_cast<void*>(&hookFree);
+				real = reinterpret_cast<void**>(&gRealFree);
+			}
+			if (!repl || *real) continue;
+			DWORD old = 0;
+			if (!VirtualProtect(&thunk->u1.Function, sizeof(thunk->u1.Function), PAGE_READWRITE, &old)) continue;
+			*real               = reinterpret_cast<void*>(thunk->u1.Function);
+			thunk->u1.Function  = reinterpret_cast<ULONG_PTR>(repl);
+			VirtualProtect(&thunk->u1.Function, sizeof(thunk->u1.Function), old, &old);
+			++patched;
+		}
+	}
+	return patched;
+}
+
+// ---------------------------------------------------------------------------
 // Region allocator
 // ---------------------------------------------------------------------------
 void buildClasses()
@@ -407,29 +730,37 @@ uint32_t classOf(size_t n)
 	return lo;
 }
 
-void clearTouched(size_t page0, size_t pages)
+void noteSmallSite(uint8_t* hdr, uintptr_t ra)
 {
-	for (size_t p = page0; p < page0 + pages; ++p) S->touched[p >> 6] &= ~(1ull << (p & 63));
+	const size_t unit = size_t(hdr - (S->base + kSmallOff)) / 16;
+	const size_t off  = unit * sizeof(uintptr_t);
+	ensureGranules(reinterpret_cast<uint8_t*>(S->smallSite), S->smallSiteCommitted,
+	    sizeof(S->smallSiteCommitted), off, sizeof(uintptr_t));
+	S->smallSite[unit] = ra ? ra : 1;
 }
 
-// Pages that are decommitted read as zero once recommitted and are not
-// reported by write watch, so the shadow is zeroed to match and rollback
-// across this tick is refused (barrier).
-void regionDecommit(uint8_t* p, size_t bytes)
+bool isZeroPage(const uint8_t* p)
 {
-	if (bytes == 0) return;
-	VirtualFree(p, bytes, MEM_DECOMMIT);
-	S->decommitCalls++;
-	const size_t off = size_t(p - S->base);
-	clearTouched(off / kPage, bytes / kPage);
-	for (size_t o = off; o < off + bytes;) {
-		size_t g    = o / kGranule;
-		size_t gEnd = (g + 1) * kGranule;
-		size_t e    = gEnd < off + bytes ? gEnd : off + bytes;
-		if (S->shadowCommitted[g]) std::memset(S->shadow + o, 0, e - o);
-		o = e;
+	const uint64_t* w = reinterpret_cast<const uint64_t*>(p);
+	uint64_t acc      = 0;
+	for (size_t i = 0; i < kPage / 8; ++i) acc |= w[i];
+	return acc == 0;
+}
+
+// Zero [p, p + bytes) (page aligned end, p may be mid-page) without writing
+// pages that are already zero: a page write watch never reported is only
+// read, so reuse does not dirty (or physically commit) untouched pages.
+void zeroSpan(uint8_t* p, size_t bytes)
+{
+	uint8_t* end = p + bytes;
+	while (p < end) {
+		uint8_t* pageLo = reinterpret_cast<uint8_t*>(reinterpret_cast<uintptr_t>(p) & ~uintptr_t(kPage - 1));
+		uint8_t* pageHi = pageLo + kPage < end ? pageLo + kPage : end;
+		const size_t idx = size_t(pageLo - S->base) / kPage;
+		if (p != pageLo || pageHi != pageLo + kPage) std::memset(p, 0, size_t(pageHi - p));
+		else if (bitGet(S->touched, idx) || !isZeroPage(pageLo)) std::memset(pageLo, 0, kPage);
+		p = pageHi;
 	}
-	S->barrier = true;
 }
 
 void largeUnlink(LargeFree* f)
@@ -439,7 +770,10 @@ void largeUnlink(LargeFree* f)
 	if (f->next) f->next->prev = f->prev;
 }
 
-void* largeAlloc(size_t n)
+// Large spans stay committed once committed (F8): a free no longer
+// decommits, so it no longer makes the tick non-rollbackable. A reused span
+// is zero-filled instead (the sim relies on zeroed blocks, as before).
+void* largeAlloc(size_t n, uintptr_t ra)
 {
 	Meta* m           = S->meta;
 	const size_t need = alignUp(sizeof(BlockHdr) + n, kPage);
@@ -448,15 +782,15 @@ void* largeAlloc(size_t n)
 		if (f->h.cap >= need && (!best || f->h.cap < best->h.cap)) best = f;
 	}
 	uint8_t* blk = nullptr;
+	size_t span  = 0;
 	if (best) {
 		blk          = reinterpret_cast<uint8_t*>(best);
-		size_t span  = best->h.cap;
+		span         = best->h.cap;
 		LargeFree* p = best->prev;
 		LargeFree* x = best->next;
 		largeUnlink(best);
 		if (span - need >= kLargeSplitMin) {
 			uint8_t* rem = blk + need;
-			osCommit(rem, kPage);
 			LargeFree* r = reinterpret_cast<LargeFree*>(rem);
 			r->h.magic   = kMagicFreeL;
 			r->h.cls     = kLargeCls;
@@ -468,25 +802,31 @@ void* largeAlloc(size_t n)
 			if (x) x->prev = r;
 			span = need;
 		}
-		if (span > kPage) osCommit(blk + kPage, span - kPage);
-		std::memset(blk + sizeof(BlockHdr), 0, kPage - sizeof(BlockHdr));
-		BlockHdr* h = reinterpret_cast<BlockHdr*>(blk);
-		h->magic    = kMagicLive;
-		h->cls      = kLargeCls;
-		h->cap      = span - sizeof(BlockHdr);
+		zeroSpan(blk + sizeof(BlockHdr), span - sizeof(BlockHdr));
 	} else {
 		blk = m->largeWild;
 		if (blk + need > S->base + kLargeEnd) return nullptr;
-		if (!osCommit(blk, need)) return nullptr;
+		span           = need;
+		uint8_t* oldHw = m->largeCommitHw;
+		if (blk + need > oldHw) {
+			uint8_t* from = blk > oldHw ? blk : oldHw;
+			if (!osCommit(from, size_t(blk + need - from))) return nullptr;
+			m->largeCommitHw = blk + need;
+		}
+		// Below the old commit high-water mark the pages may hold a freed
+		// block's bytes (a tail given back to the wilderness): zero them.
+		// Pages committed just now are zero already.
+		uint8_t* dirtyEnd = oldHw < blk + need ? oldHw : blk + need;
+		if (dirtyEnd > blk) zeroSpan(blk, size_t(dirtyEnd - blk));
 		m->largeWild += need;
-		BlockHdr* h = reinterpret_cast<BlockHdr*>(blk);
-		h->magic    = kMagicLive;
-		h->cls      = kLargeCls;
-		h->cap      = need - sizeof(BlockHdr);
 	}
 	BlockHdr* h = reinterpret_cast<BlockHdr*>(blk);
+	h->magic    = kMagicLive;
+	h->cls      = kLargeCls;
+	h->cap      = span - sizeof(BlockHdr);
 	m->liveBytes += h->cap;
 	m->liveBlocks++;
+	S->largeSite[size_t(blk - (S->base + kLargeOff)) / kPage] = ra ? ra : 1;
 	return h + 1;
 }
 
@@ -497,7 +837,7 @@ void largeFree(BlockHdr* h)
 	size_t span  = h->cap + sizeof(BlockHdr);
 	m->liveBytes -= h->cap;
 	m->liveBlocks--;
-	if (span > kPage) regionDecommit(blk + kPage, span - kPage);
+	S->largeSite[size_t(blk - (S->base + kLargeOff)) / kPage] = 0;
 	LargeFree* f = reinterpret_cast<LargeFree*>(blk);
 	f->h.magic   = kMagicFreeL;
 	f->h.cls     = kLargeCls;
@@ -518,27 +858,24 @@ void largeFree(BlockHdr* h)
 	if (next && blk + f->h.cap == reinterpret_cast<uint8_t*>(next)) {
 		f->h.cap += next->h.cap;
 		largeUnlink(next);
-		regionDecommit(reinterpret_cast<uint8_t*>(next), kPage);
 	}
 	// coalesce backward
 	if (prev && reinterpret_cast<uint8_t*>(prev) + prev->h.cap == blk) {
 		prev->h.cap += f->h.cap;
 		largeUnlink(f);
-		regionDecommit(blk, kPage);
 		f = prev;
 	}
-	// give the tail back to the wilderness
+	// give the tail back to the wilderness (it stays committed)
 	if (reinterpret_cast<uint8_t*>(f) + f->h.cap == m->largeWild) {
 		largeUnlink(f);
-		regionDecommit(reinterpret_cast<uint8_t*>(f), kPage);
 		m->largeWild = reinterpret_cast<uint8_t*>(f);
 	}
 }
 
-void* regionAlloc(size_t n)
+void* regionAlloc(size_t n, uintptr_t ra)
 {
 	if (n == 0) n = 1;
-	if (n > kSmallMax) return largeAlloc(n);
+	if (n > kSmallMax) return largeAlloc(n, ra);
 	Meta* m          = S->meta;
 	const uint32_t c = classOf(n);
 	const size_t cap = S->caps[c];
@@ -548,6 +885,7 @@ void* regionAlloc(size_t n)
 		BlockHdr* h     = static_cast<BlockHdr*>(p) - 1;
 		h->magic        = kMagicLive;
 		std::memset(p, 0, cap);
+		noteSmallSite(reinterpret_cast<uint8_t*>(h), ra);
 	} else {
 		const size_t need = sizeof(BlockHdr) + cap;
 		uint8_t* at       = m->smallWild;
@@ -563,19 +901,23 @@ void* regionAlloc(size_t n)
 		h->cap      = cap;
 		m->smallWild = at + need;
 		p            = h + 1; // fresh committed memory is already zero
+		noteSmallSite(at, ra);
 	}
 	m->liveBytes += cap;
 	m->liveBlocks++;
 	return p;
 }
 
-// Returns freed payload bytes, or 0 for a bad pointer.
-size_t regionFree(void* p)
+// Returns freed payload bytes. A bad pointer inside the region aborts (F7).
+size_t regionFree(void* p, void* ra)
 {
 	BlockHdr* h = static_cast<BlockHdr*>(p) - 1;
 	if (h->magic != kMagicLive) {
 		S->badFrees++;
-		return 0;
+		std::printf("[m6a] FATAL bad region free %p magic=0x%08x caller rva=0x%llx tick=%llu\n", p, h->magic,
+		    (unsigned long long)(reinterpret_cast<uintptr_t>(ra) - exeBase()), (unsigned long long)pc_state_hash_tick());
+		std::fflush(stdout);
+		std::abort();
 	}
 	const size_t cap = h->cap;
 	if (h->cls == kLargeCls) {
@@ -589,6 +931,44 @@ size_t regionFree(void* p)
 	m->liveBytes -= cap;
 	m->liveBlocks--;
 	return cap;
+}
+
+// Allocation site of the region block that holds region offset off; 1 for
+// the arena zone (AyuHeap sys heap, not attributed); 0 when not in a block.
+uintptr_t regionSiteOf(size_t off, size_t* blockOff)
+{
+	*blockOff = 0;
+	if (off < kSmallOff) return 1;
+	if (off < kSmallEnd) {
+		uint8_t* p = S->base + off;
+		if (p >= S->meta->smallWild) return 0;
+		size_t unit = (off - kSmallOff) / 16;
+		for (size_t back = 0; back <= kSmallMax / 16 + 1 && unit - back < kSmallUnits; ++back) {
+			const size_t u = unit - back;
+			const size_t g = (u * sizeof(uintptr_t)) / kGranule;
+			if (!S->smallSiteCommitted[g]) return 0;
+			if (S->smallSite[u]) {
+				*blockOff = off - (kSmallOff + u * 16);
+				return S->smallSite[u];
+			}
+			if (u == 0) break;
+		}
+		return 0;
+	}
+	size_t pg = (off - kLargeOff) / kPage;
+	for (size_t back = 0; back <= pg; ++back) {
+		const size_t q = pg - back;
+		if (S->largeSite[q]) {
+			const BlockHdr* h = reinterpret_cast<const BlockHdr*>(S->base + kLargeOff + q * kPage);
+			const size_t hdrOff = kLargeOff + q * kPage;
+			if (off < hdrOff + sizeof(BlockHdr) + h->cap) {
+				*blockOff = off - hdrOff;
+				return S->largeSite[q];
+			}
+			return 0;
+		}
+	}
+	return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -625,24 +1005,35 @@ void setupGlobals()
 	S->globPages = 0;
 	for (int i = 0; i < S->nGlob; ++i) S->globPages += size_t(S->glob[i].hi - S->glob[i].lo) / kPage;
 	S->globBytes   = S->globPages * kPage;
-	S->globShadow  = static_cast<uint8_t*>(VirtualAlloc(nullptr, S->globBytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+	S->globShadow  = static_cast<uint8_t*>(osAllocZero(S->globBytes));
 	S->globPagePtr = static_cast<uint8_t**>(std::calloc(S->globPages, sizeof(uint8_t*)));
 	S->globDirty   = static_cast<uint32_t*>(std::calloc(S->globPages, sizeof(uint32_t)));
-	S->globPreserved = static_cast<uint8_t*>(std::calloc(S->globPages, 1));
+	S->presFirst   = static_cast<uint32_t*>(std::calloc(S->globPages, sizeof(uint32_t)));
+	S->presCount   = static_cast<uint16_t*>(std::calloc(S->globPages, sizeof(uint16_t)));
 	S->syncGMark   = static_cast<uint8_t*>(std::calloc(S->globPages, 1));
+	S->gStamp      = static_cast<uint32_t*>(std::calloc(S->globPages, sizeof(uint32_t)));
 	uint64_t gp = 0;
 	for (int i = 0; i < S->nGlob; ++i) {
 		for (uint8_t* p = S->glob[i].lo; p < S->glob[i].hi; p += kPage) S->globPagePtr[gp++] = p;
 	}
 	// Undo pool for globals: enough for every page on every ring tick.
 	S->gUndoPages = S->globPages * 4;
-	S->gUndo      = static_cast<uint8_t*>(VirtualAlloc(nullptr, S->gUndoPages * kPage, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+	S->gUndo      = static_cast<uint8_t*>(osAllocZero(S->gUndoPages * kPage));
 	S->gUndoIdx   = static_cast<uint32_t*>(std::calloc(S->gUndoPages, sizeof(uint32_t)));
 	// Initial shadow: the globals as they are right now.
 	for (uint64_t i = 0; i < S->globPages; ++i) std::memcpy(S->globShadow + i * kPage, S->globPagePtr[i], kPage);
 }
 
-// Map a global byte range to per-page preserve segments.
+int cmpSeg(const void* a, const void* b)
+{
+	const PreserveSeg* x = static_cast<const PreserveSeg*>(a);
+	const PreserveSeg* y = static_cast<const PreserveSeg*>(b);
+	if (x->page != y->page) return x->page < y->page ? -1 : 1;
+	return x->off < y->off ? -1 : x->off > y->off ? 1 : 0;
+}
+
+// Map a global byte range to per-page preserve segments, indexed by page
+// (F11: the restore no longer scans every segment per preserved page).
 void buildPreserveSegs()
 {
 	for (int r = 0; r < S->preserveRawCount; ++r) {
@@ -659,8 +1050,14 @@ void buildPreserveSegs()
 				S->preserveSegs = static_cast<PreserveSeg*>(std::realloc(S->preserveSegs, S->preserveCap * sizeof(PreserveSeg)));
 			}
 			S->preserveSegs[S->preserveCount++] = { uint32_t(i), uint16_t(a - p0), uint16_t(b - a) };
-			S->globPreserved[i] = 1;
 		}
+	}
+	if (S->preserveCount) std::qsort(S->preserveSegs, S->preserveCount, sizeof(PreserveSeg), cmpSeg);
+	std::memset(S->presCount, 0, S->globPages * sizeof(uint16_t));
+	for (uint32_t s = 0; s < S->preserveCount; ++s) {
+		const uint32_t pg = S->preserveSegs[s].page;
+		if (S->presCount[pg] == 0) S->presFirst[pg] = s;
+		S->presCount[pg]++;
 	}
 }
 
@@ -668,26 +1065,38 @@ void buildPreserveSegs()
 void restoreGlobalPage(uint64_t gi, const uint8_t* src)
 {
 	uint8_t* dst = S->globPagePtr[gi];
-	if (!S->globPreserved[gi]) {
+	const uint32_t n = S->presCount[gi];
+	if (n == 0) {
 		std::memcpy(dst, src, kPage);
 		return;
 	}
-	uint8_t keep[kPage];
-	std::memcpy(keep, dst, kPage);
-	std::memcpy(dst, src, kPage);
-	for (uint32_t s = 0; s < S->preserveCount; ++s) {
-		const PreserveSeg& seg = S->preserveSegs[s];
-		if (seg.page == gi) std::memcpy(dst + seg.off, keep + seg.off, seg.len);
+	// copy the gaps between the (sorted) preserved segments only
+	const PreserveSeg* seg = S->preserveSegs + S->presFirst[gi];
+	size_t at              = 0;
+	for (uint32_t k = 0; k < n; ++k) {
+		if (seg[k].off > at) std::memcpy(dst + at, src + at, seg[k].off - at);
+		const size_t end = size_t(seg[k].off) + seg[k].len;
+		if (end > at) at = end;
 	}
+	if (at < kPage) std::memcpy(dst + at, src + at, kPage - at);
+}
+
+// Build the preserved-byte mask of global page gi.
+void presMask(uint64_t gi, uint8_t* mask)
+{
+	std::memset(mask, 0, kPage);
+	const PreserveSeg* seg = S->preserveSegs + S->presFirst[gi];
+	for (uint32_t k = 0; k < S->presCount[gi]; ++k) std::memset(mask + seg[k].off, 1, seg[k].len);
 }
 
 // ---------------------------------------------------------------------------
 // Write watch
 // ---------------------------------------------------------------------------
 // Write watch is queried per used zone (meta + arena, the committed small
-// zone, the large zone below its wilderness) rather than over the whole
-// 2 GB reservation; the per-zone cost is logged so the scan cost can be
-// related to the committed size.
+// zone, the large zone below its commit high-water mark) rather than over
+// the whole 2 GB reservation; the per-zone cost is logged so the scan cost
+// can be related to the committed size. With the hot/cold split each zone is
+// cut into the touched extents and the rest.
 struct Zone {
 	uint8_t* lo;
 	uint8_t* hi;
@@ -697,38 +1106,137 @@ int usedZones(Zone* z)
 {
 	z[0] = { S->base, S->base + kArenaOff + kArenaSize };
 	z[1] = { S->base + kSmallOff, S->meta->smallCommitted };
-	z[2] = { S->base + kLargeOff, S->meta->largeWild };
+	uint8_t* largeHi = S->meta->largeCommitHw > S->meta->largeWild ? S->meta->largeCommitHw : S->meta->largeWild;
+	z[2] = { S->base + kLargeOff, largeHi };
 	return 3;
+}
+
+void addRun(uint8_t* lo, uint8_t* hi, int zone, bool hot)
+{
+	if (hi <= lo || S->runCount >= kMaxRuns) return;
+	S->runs[S->runCount++] = { lo, hi, uint8_t(zone), uint8_t(hot ? 1 : 0) };
+}
+
+void buildRuns()
+{
+	S->runCount = 0;
+	Zone z[3];
+	usedZones(z);
+	addRun(z[1].lo, z[1].hi, 1, true); // the small zone is all live data
+	for (int zi : { 0, 2 }) {
+		const size_t p0 = size_t(z[zi].lo - S->base) / kPage;
+		const size_t p1 = size_t(z[zi].hi - S->base) / kPage;
+		size_t cold     = p0; // start of the pending cold stretch
+		size_t p        = p0;
+		while (p < p1) {
+			if (!bitGet(S->touched, p)) {
+				++p;
+				continue;
+			}
+			size_t e = p;
+			// extend over touched pages and gaps shorter than kHotGapPages
+			for (;;) {
+				while (e < p1 && bitGet(S->touched, e)) ++e;
+				size_t g = e;
+				while (g < p1 && g - e < kHotGapPages && !bitGet(S->touched, g)) ++g;
+				if (g < p1 && g - e < kHotGapPages && bitGet(S->touched, g)) {
+					e = g;
+					continue;
+				}
+				break;
+			}
+			addRun(S->base + cold * kPage, S->base + p * kPage, zi, false);
+			addRun(S->base + p * kPage, S->base + e * kPage, zi, true);
+			cold = e;
+			p    = e;
+		}
+		addRun(S->base + cold * kPage, S->base + p1 * kPage, zi, false);
+	}
+	S->runsStale = false;
+}
+
+// One GetWriteWatch call over [lo, hi): records the dirty pages; returns the
+// number reported.
+uint32_t watchRange(uint8_t* lo, uint8_t* hi, int zone, DWORD flags, bool record, double* ms)
+{
+	const int64_t t0 = now();
+	ULONG_PTR count  = S->wwCap;
+	DWORD gran       = 0;
+	const UINT rc    = GetWriteWatch(flags, lo, size_t(hi - lo), S->wwAddrs, &count, &gran);
+	const double dt  = msSince(t0);
+	*ms += dt;
+	if (flags) {
+		S->wwZoneMs[zone] += dt;
+		S->wwCalls++;
+	}
+	if (rc != 0) {
+		std::fprintf(stderr, "[m6a] GetWriteWatch failed (%lu)\n", GetLastError());
+		return 0;
+	}
+	if (!record) return uint32_t(count);
+	for (ULONG_PTR i = 0; i < count; ++i) {
+		const size_t idx = size_t(static_cast<uint8_t*>(S->wwAddrs[i]) - S->base) / kPage;
+		if (idx >= kPages) continue;
+		if (!bitGet(S->touched, idx)) {
+			bitSet(S->touched, idx);
+			S->runsStale = true;
+		}
+		if (S->dirtySince) bitSet(S->dirtySince, idx);
+		if (S->pageMark[idx] != S->epoch) {
+			S->pageMark[idx]              = S->epoch;
+			S->dirtyList[S->dirtyCount++] = uint32_t(idx);
+		}
+	}
+	return uint32_t(count);
 }
 
 uint32_t collectWriteWatch()
 {
 	if (!S->writeWatch) return 0;
-	Zone z[3];
-	const int n    = usedZones(z);
+	// pages another thread wrote after the previous tick's collect (ww_late)
+	for (uint32_t i = 0; i < S->carryCount; ++i) {
+		const uint32_t idx = S->carryList[i];
+		if (S->pageMark[idx] != S->epoch) {
+			S->pageMark[idx]              = S->epoch;
+			S->dirtyList[S->dirtyCount++] = idx;
+		}
+	}
+	S->carryCount  = 0;
 	uint32_t total = 0;
+	if (S->wwSplit) {
+		if (S->runsStale) buildRuns();
+		// the zones' bounds move with the wilderness; rebuild when they do
+		Zone z[3];
+		usedZones(z);
+		if (z[1].hi != S->runsSmallHi || z[2].hi != S->runsLargeHi) {
+			buildRuns();
+			S->runsSmallHi = z[1].hi;
+			S->runsLargeHi = z[2].hi;
+		}
+		for (uint32_t r = 0; r < S->runCount; ++r) {
+			const Run& run = S->runs[r];
+			double* ms     = run.hot ? &S->wwHotMs : &S->wwColdMs;
+			const uint32_t n = watchRange(run.lo, run.hi, run.zone, WRITE_WATCH_FLAG_RESET, true, ms);
+			const double mb  = double(run.hi - run.lo) / (1024.0 * 1024.0);
+			if (run.hot) {
+				S->wwHotCalls++;
+				S->rdHot += n;
+				S->hotMb += mb;
+			} else {
+				S->wwColdCalls++;
+				S->rdCold += n;
+				S->coldMb += mb;
+			}
+			total += n;
+		}
+		return total;
+	}
+	Zone z[3];
+	const int n = usedZones(z);
 	for (int k = 0; k < n; ++k) {
 		if (z[k].hi <= z[k].lo) continue;
-		const int64_t t0 = now();
-		ULONG_PTR count  = S->wwCap;
-		DWORD gran       = 0;
-		const UINT rc    = GetWriteWatch(WRITE_WATCH_FLAG_RESET, z[k].lo, size_t(z[k].hi - z[k].lo), S->wwAddrs, &count, &gran);
-		S->wwZoneMs[k] += msSince(t0);
-		S->wwCalls++;
-		if (rc != 0) {
-			std::fprintf(stderr, "[m6a] GetWriteWatch failed (%lu)\n", GetLastError());
-			continue;
-		}
-		for (ULONG_PTR i = 0; i < count; ++i) {
-			const size_t idx = size_t(static_cast<uint8_t*>(S->wwAddrs[i]) - S->base) / kPage;
-			if (idx >= kPages) continue;
-			S->touched[idx >> 6] |= 1ull << (idx & 63);
-			if (S->pageMark[idx] != S->epoch) {
-				S->pageMark[idx]              = S->epoch;
-				S->dirtyList[S->dirtyCount++] = uint32_t(idx);
-			}
-		}
-		total += uint32_t(count);
+		double ms = 0.0;
+		total += watchRange(z[k].lo, z[k].hi, k, WRITE_WATCH_FLAG_RESET, true, &ms);
 	}
 	return total;
 }
@@ -741,6 +1249,79 @@ void resetWriteWatch()
 	for (int k = 0; k < n; ++k) {
 		if (z[k].hi > z[k].lo) ResetWriteWatch(z[k].lo, size_t(z[k].hi - z[k].lo));
 	}
+}
+
+// Measurement mode, before the post-restore reset: pages reported written
+// since this tick's collect that are not this tick's dirty pages were
+// written by someone else (another thread) after the collect. They are
+// carried into the next tick's dirty set instead of being lost to the reset.
+uint32_t collectLate()
+{
+	Zone z[3];
+	const int n    = usedZones(z);
+	uint32_t late  = 0;
+	for (int k = 0; k < n; ++k) {
+		if (z[k].hi <= z[k].lo) continue;
+		ULONG_PTR count = S->wwCap;
+		DWORD gran      = 0;
+		if (GetWriteWatch(0, z[k].lo, size_t(z[k].hi - z[k].lo), S->wwAddrs, &count, &gran) != 0) continue;
+		for (ULONG_PTR i = 0; i < count; ++i) {
+			const size_t idx = size_t(static_cast<uint8_t*>(S->wwAddrs[i]) - S->base) / kPage;
+			if (idx >= kPages || S->pageMark[idx] == S->epoch) continue;
+			late++;
+			if (S->carryCount < kPages) S->carryList[S->carryCount++] = uint32_t(idx);
+			if (S->dirtySince) bitSet(S->dirtySince, idx);
+		}
+	}
+	return late;
+}
+
+// No write watch (A/B arm): an emulated dirty set with the in-game zone mix
+// (~66% small zone, ~29% large zone, ~5% arena), rotating every tick.
+void emulateDirty()
+{
+	Zone z[3];
+	usedZones(z);
+	const uint32_t n     = S->nowwPages;
+	const uint32_t nArena = n * 5 / 100;
+	const uint32_t nLarge = n * 29 / 100;
+	const uint32_t nSmall = n - nArena - nLarge;
+	const uint32_t parts[3] = { nArena, nSmall, nLarge };
+	S->nowwCursor++;
+	for (int k = 0; k < 3; ++k) {
+		const size_t p0 = size_t(z[k].lo - S->base) / kPage + (k == 0 ? kArenaOff / kPage : 0);
+		const size_t p1 = size_t(z[k].hi - S->base) / kPage;
+		if (p1 <= p0 || parts[k] == 0) continue;
+		const size_t span   = p1 - p0;
+		const size_t stride = span / parts[k] ? span / parts[k] : 1;
+		for (uint32_t i = 0; i < parts[k]; ++i) {
+			const size_t idx = p0 + (size_t(i) * stride + S->nowwCursor) % span;
+			if (S->pageMark[idx] != S->epoch) {
+				S->pageMark[idx]              = S->epoch;
+				S->dirtyList[S->dirtyCount++] = uint32_t(idx);
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Machine load (MV-6): system busy % over the last sample interval
+// ---------------------------------------------------------------------------
+inline uint64_t ft64(const FILETIME& f) { return (uint64_t(f.dwHighDateTime) << 32) | f.dwLowDateTime; }
+
+void sampleLoad()
+{
+	FILETIME idle, kernel, user;
+	if (!GetSystemTimes(&idle, &kernel, &user)) return;
+	const uint64_t i = ft64(idle), k = ft64(kernel), u = ft64(user);
+	if (S->loadKernel) {
+		const uint64_t di = i - S->loadIdle, dk = k - S->loadKernel, du = u - S->loadUser;
+		const uint64_t tot = dk + du; // kernel time includes idle time
+		if (tot) S->sysBusy = 100.0 * double(tot - di) / double(tot);
+	}
+	S->loadIdle   = i;
+	S->loadKernel = k;
+	S->loadUser   = u;
 }
 
 // ---------------------------------------------------------------------------
@@ -762,7 +1343,10 @@ void openCsv()
 	    "ww_ms,save_ms,restore_ms,restore_ww_ms,gcmp_ms,gsave_ms,full_ms,full_mb,gfull_ms,"
 	    "allocs,alloc_bytes,frees,free_bytes,live_blocks,live_mb,small_hw_mb,large_hw_mb,touched_mb,"
 	    "off_allocs,off_bytes,region_frees_off_main,unknown_frees,undo_ok,barrier,"
-	    "ww_z0_ms,ww_z1_ms,ww_z2_ms,ww_calls,committed_mb\n");
+	    "ww_z0_ms,ww_z1_ms,ww_z2_ms,ww_calls,committed_mb,"
+	    "phase,pikis,sys_busy,present_ms,done_ms,parse_ms,retrace_ms,"
+	    "ww_hot_ms,ww_cold_ms,ww_hot_calls,ww_cold_calls,rd_hot,rd_cold,hot_mb,cold_mb,"
+	    "grestore_ms,ww_late,conc_r,conc_g,missed,sync_phase\n");
 }
 
 double touchedMb()
@@ -772,8 +1356,9 @@ double touchedMb()
 	return double(n) * kPage / (1024.0 * 1024.0);
 }
 
-// Copy every touched run of the region into the scratch reservation.
-double fullCopy(double* mbOut)
+// Copy every touched run of the region into dst (a lazily committed 2 GB
+// reservation); returns ms and the MB copied.
+double copyTouched(uint8_t* dst, bool* committed, double* mbOut)
 {
 	const int64_t t0 = now();
 	uint64_t pages   = 0;
@@ -789,16 +1374,202 @@ double fullCopy(double* mbOut)
 			continue;
 		}
 		size_t e = p;
-		while (e < kPages && (S->touched[e >> 6] & (1ull << (e & 63)))) ++e;
+		while (e < kPages && bitGet(S->touched, e)) ++e;
 		const size_t off   = p * kPage;
 		const size_t bytes = (e - p) * kPage;
-		ensureGranules(S->scratch, S->scratchCommitted, kGranules, off, bytes);
-		std::memcpy(S->scratch + off, S->base + off, bytes);
+		ensureGranules(dst, committed, kGranules, off, bytes);
+		std::memcpy(dst + off, S->base + off, bytes);
 		pages += e - p;
 		p = e;
 	}
 	*mbOut = double(pages) * kPage / (1024.0 * 1024.0);
 	return msSince(t0);
+}
+
+// ---------------------------------------------------------------------------
+// Audit (MV-3): per-page hashes of every committed region page
+// ---------------------------------------------------------------------------
+uint64_t hashPage(const uint8_t* p)
+{
+	const uint64_t* w = reinterpret_cast<const uint64_t*>(p);
+	uint64_t a = 0x9E3779B97F4A7C15ull, b = 0xC2B2AE3D27D4EB4Full;
+	for (size_t i = 0; i < kPage / 8; i += 2) {
+		a = (a ^ w[i]) * 0xFF51AFD7ED558CCDull;
+		b = (b ^ w[i + 1]) * 0xC4CEB9FE1A85EC53ull;
+	}
+	return a ^ (b >> 1) ^ (b << 63);
+}
+
+template <typename Fn> void forEachCommittedPage(Fn fn)
+{
+	Zone z[3];
+	usedZones(z);
+	// meta (committed part only), arena, small, large up to the commit hw
+	for (size_t p = 0; p < kMetaCommit / kPage; ++p) fn(p);
+	for (size_t p = kArenaOff / kPage; p < (kArenaOff + kArenaSize) / kPage; ++p) fn(p);
+	for (size_t p = kSmallOff / kPage; p < size_t(z[1].hi - S->base) / kPage; ++p) fn(p);
+	for (size_t p = kLargeOff / kPage; p < size_t(S->meta->largeCommitHw - S->base) / kPage; ++p) fn(p);
+}
+
+void runAudit(uint64_t tick)
+{
+	uint64_t missed = 0, pages = 0, changed = 0;
+	forEachCommittedPage([&](size_t p) {
+		const uint64_t h    = hashPage(S->base + p * kPage);
+		const uint64_t prev = bitGet(S->auditHave, p) ? S->pageHash[p] : S->zeroHash;
+		if (h != prev) {
+			changed++;
+			if (!bitGet(S->dirtySince, p)) {
+				missed++;
+				if (S->auditLog && missed <= 32) {
+					size_t bo            = 0;
+					const uintptr_t site = regionSiteOf(p * kPage, &bo);
+					std::fprintf(S->auditLog, "#missed tick=%llu page_off=0x%llx site_rva=0x%llx blk_off=0x%llx\n",
+					    (unsigned long long)tick, (unsigned long long)(p * kPage),
+					    (unsigned long long)(site > 1 ? site - exeBase() : site), (unsigned long long)bo);
+				}
+			}
+		}
+		S->pageHash[p] = h;
+		bitSet(S->auditHave, p);
+		pages++;
+	});
+	std::memset(S->dirtySince, 0, kPages / 8);
+	S->audits++;
+	S->auditMissed += missed;
+	S->auditPages += pages;
+	S->missed = int64_t(missed);
+	if (S->auditLog) {
+		std::fprintf(S->auditLog, "audit tick=%llu pages=%llu changed=%llu missed=%llu\n", (unsigned long long)tick,
+		    (unsigned long long)pages, (unsigned long long)changed, (unsigned long long)missed);
+		std::fflush(S->auditLog);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Pointer scan (MV-4)
+// ---------------------------------------------------------------------------
+void pairAdd(uint32_t kind, uintptr_t src, uintptr_t dst)
+{
+	uintptr_t h = ((src * 0x9E3779B97F4A7C15ull) ^ (dst * 0xC2B2AE3D27D4EB4Full) ^ kind) >> 20;
+	for (size_t probe = 0; probe < kPairCap; ++probe) {
+		Pair& p = S->pairs[(h + probe) & (kPairCap - 1)];
+		if (p.kind == kind && p.src == src && p.dst == dst) {
+			p.count++;
+			return;
+		}
+		if (p.kind == 0) {
+			p = { src, dst, 1, kind, 0 };
+			return;
+		}
+	}
+}
+
+int cmpOff(const void* a, const void* b)
+{
+	const OffBlock* x = static_cast<const OffBlock*>(a);
+	const OffBlock* y = static_cast<const OffBlock*>(b);
+	return x->ptr < y->ptr ? -1 : x->ptr > y->ptr ? 1 : 0;
+}
+
+int cmpPair(const void* a, const void* b)
+{
+	const Pair* x = static_cast<const Pair*>(a);
+	const Pair* y = static_cast<const Pair*>(b);
+	return x->count < y->count ? 1 : x->count > y->count ? -1 : 0;
+}
+
+const OffBlock* findOff(const OffBlock* sorted, size_t n, uintptr_t v)
+{
+	size_t lo = 0, hi = n;
+	while (lo < hi) {
+		const size_t mid = (lo + hi) / 2;
+		if (sorted[mid].ptr <= v) lo = mid + 1;
+		else hi = mid;
+	}
+	if (lo == 0) return nullptr;
+	const OffBlock* b = &sorted[lo - 1];
+	return v < b->ptr + b->size ? b : nullptr;
+}
+
+void runPtrScan(uint64_t tick)
+{
+	AcquireSRWLockExclusive(&S->offLock); // blocks off-region frees for the scan
+	size_t n = 0;
+	for (size_t i = 0; i < kOffTableCap; ++i)
+		if (S->offTable[i].ptr) S->offSorted[n++] = S->offTable[i];
+	std::qsort(S->offSorted, n, sizeof(OffBlock), cmpOff);
+	std::memset(S->pairs, 0, sizeof(Pair) * kPairCap);
+	const uintptr_t lo = n ? S->offSorted[0].ptr : 0;
+	const uintptr_t hi = n ? S->offSorted[n - 1].ptr + S->offSorted[n - 1].size : 0;
+	uint64_t rToOff = 0, gToOff = 0, offToR = 0, gToR = 0;
+	// 1. region (touched pages) -> off-region blocks
+	for (size_t p = 0; p < kPages; ++p) {
+		if (!bitGet(S->touched, p)) continue;
+		const uint64_t* w = reinterpret_cast<const uint64_t*>(S->base + p * kPage);
+		for (size_t i = 0; i < kPage / 8; ++i) {
+			const uintptr_t v = w[i];
+			if (v < lo || v >= hi) continue;
+			const OffBlock* b = findOff(S->offSorted, n, v);
+			if (!b) continue;
+			size_t bo = 0;
+			pairAdd(1, regionSiteOf(p * kPage + i * 8, &bo), b->ra);
+			rToOff++;
+		}
+	}
+	// 2. globals -> off-region blocks; globals -> region (count only)
+	const uintptr_t rLo = reinterpret_cast<uintptr_t>(S->base);
+	const uintptr_t rHi = rLo + kReserve;
+	for (uint64_t g = 0; g < S->globPages; ++g) {
+		const uint64_t* w = reinterpret_cast<const uint64_t*>(S->globPagePtr[g]);
+		for (size_t i = 0; i < kPage / 8; ++i) {
+			const uintptr_t v = w[i];
+			if (v >= rLo && v < rHi) {
+				gToR++;
+				continue;
+			}
+			if (v < lo || v >= hi) continue;
+			const OffBlock* b = findOff(S->offSorted, n, v);
+			if (!b) continue;
+			pairAdd(2, reinterpret_cast<uintptr_t>(w + i), b->ra);
+			gToOff++;
+		}
+	}
+	// 3. off-region blocks -> region
+	for (size_t k = 0; k < n; ++k) {
+		const OffBlock& b = S->offSorted[k];
+		const uint64_t* w = reinterpret_cast<const uint64_t*>(b.ptr);
+		const size_t words = b.size / 8;
+		if (b.ptr & 7) continue;
+		for (size_t i = 0; i < words; ++i) {
+			const uintptr_t v = w[i];
+			if (v < rLo || v >= rHi) continue;
+			size_t bo = 0;
+			pairAdd(3, b.ra, regionSiteOf(size_t(v - rLo), &bo));
+			offToR++;
+		}
+	}
+	ReleaseSRWLockExclusive(&S->offLock);
+	// report: top pairs per kind (module-relative rvas; globals as exe rvas)
+	const char* path = std::getenv("PIKMIN_NETPLAY_SNAPSHOT_SPIKE_PTRSCAN_LOG");
+	if (!path || !*path) path = "snapshot_spike_ptrscan.txt";
+	FILE* out = std::fopen(path, "a");
+	if (!out) return;
+	std::qsort(S->pairs, kPairCap, sizeof(Pair), cmpPair);
+	const uintptr_t exe = exeBase();
+	std::fprintf(out, "scan tick=%llu off_blocks=%zu region_to_off=%llu globals_to_off=%llu off_to_region=%llu globals_to_region=%llu\n",
+	    (unsigned long long)tick, n, (unsigned long long)rToOff, (unsigned long long)gToOff,
+	    (unsigned long long)offToR, (unsigned long long)gToR);
+	const char* kinds[4] = { "", "region_to_off", "globals_to_off", "off_to_region" };
+	int shown[4]         = { 0, 0, 0, 0 };
+	for (size_t i = 0; i < kPairCap && S->pairs[i].kind; ++i) {
+		const Pair& p = S->pairs[i];
+		if (shown[p.kind]++ >= 80) continue;
+		auto rel = [exe](uintptr_t a) -> unsigned long long { return a > 1 && a >= exe && a < exe + 0x20000000ull ? (unsigned long long)(a - exe) : (unsigned long long)a; };
+		std::fprintf(out, "pair tick=%llu kind=%s src=0x%llx dst=0x%llx count=%llu\n", (unsigned long long)tick, kinds[p.kind],
+		    rel(p.src), rel(p.dst), (unsigned long long)p.count);
+	}
+	std::fclose(out);
 }
 
 // ---------------------------------------------------------------------------
@@ -810,7 +1581,10 @@ void syncLogOpen()
 	if (!path || !*path) path = "snapshot_synctest.csv";
 	S->syncCsv = std::fopen(path, "w");
 	if (S->syncCsv) {
-		std::fprintf(S->syncCsv, "anchor,k,first_bad,bad_mask,region_diff_pages,global_diff_pages,only_first,only_second,restore_ms,restored_pages\n");
+		std::fprintf(S->syncCsv,
+		    "anchor,k,first_bad,bad_mask,region_diff_pages,global_diff_pages,only_first,only_second,restore_ms,restored_pages,"
+		    "audio_bad,region_unreported,global_pres_diff,region_union,global_union,restore_region_ms,restore_shadow_ms,"
+		    "restore_glob_ms,restore_ww_ms,restored_region,restored_glob,undo_entries,dedup,diverge,sys_busy\n");
 	}
 }
 
@@ -829,135 +1603,207 @@ void syncCaptureHash(int step)
 	pc_state_hash_current(&total, subs, &tick);
 	S->syncHash[step][0] = total;
 	for (int i = 0; i < 7; ++i) S->syncHash[step][i + 1] = subs[i];
+	S->syncAudio[step] = pc_snapshot_spike_game_audio_hash();
 }
 
-void stashAdd(uint32_t tag, const uint8_t* src)
-{
-	if (S->syncStashCount == S->syncStashCap) return;
-	std::memcpy(S->syncStash + size_t(S->syncStashCount) * kPage, src, kPage);
-	S->syncStashIdx[S->syncStashCount++] = tag;
-}
-
-// Roll region and globals back from the end of tick `to` to the end of the
-// anchor tick by replaying undo entries newest first.
-void syncRollback(uint64_t from, uint64_t anchor, double* ms, uint32_t* pages)
+// Roll region and globals back from the end of tick `from` to the end of
+// the anchor tick.
+//   dedup (default): oldest undo entry first, each page restored once (its
+//     pre-image from the first tick that dirtied it is its anchor state);
+//     region copies, shadow copies, globals and the write-watch reset are
+//     timed separately.
+//   naive: every undo entry newest first, region + shadow copy per entry.
+void syncRollback(uint64_t from, uint64_t anchor)
 {
 	const int64_t t0 = now();
-	uint32_t n       = 0;
-	for (uint64_t t = from; t > anchor; --t) {
-		const UndoTick& u = S->ring[t % kUndoRing];
-		for (uint32_t i = 0; i < u.rCount; ++i) {
-			const uint64_t slot = (u.rStart + i) % kUndoPoolPages;
-			const uint32_t idx  = S->rUndoIdx[slot];
-			const uint8_t* src  = S->rUndo + slot * kPage;
-			std::memcpy(S->base + size_t(idx) * kPage, src, kPage);
-			std::memcpy(S->shadow + size_t(idx) * kPage, src, kPage);
-			++n;
+	uint32_t rp = 0, gp = 0, entries = 0;
+	double regionMs = 0, shadowMs = 0, globMs = 0;
+	if (S->syncDedup) {
+		if (++S->stamp == 0) {
+			std::memset(S->rStamp, 0, kPages * sizeof(uint32_t));
+			std::memset(S->gStamp, 0, S->globPages * sizeof(uint32_t));
+			S->stamp = 1;
 		}
-		for (uint32_t i = 0; i < u.gCount; ++i) {
-			const uint64_t slot = (u.gStart + i) % S->gUndoPages;
-			const uint32_t gi   = S->gUndoIdx[slot];
-			const uint8_t* src  = S->gUndo + slot * kPage;
-			restoreGlobalPage(gi, src);
-			std::memcpy(S->globShadow + size_t(gi) * kPage, src, kPage);
-			++n;
+		int64_t a = now();
+		for (uint64_t t = anchor + 1; t <= from; ++t) {
+			const UndoTick& u = S->ring[t % kUndoRing];
+			for (uint32_t i = 0; i < u.rCount; ++i) {
+				const uint64_t slot = (u.rStart + i) % kUndoPoolPages;
+				const uint32_t idx  = S->rUndoIdx[slot];
+				++entries;
+				if (S->rStamp[idx] == S->stamp) continue;
+				S->rStamp[idx] = S->stamp;
+				std::memcpy(S->base + size_t(idx) * kPage, S->rUndo + slot * kPage, kPage);
+				S->restoredList[rp++] = idx;
+			}
 		}
+		regionMs = msSince(a);
+		a        = now();
+		for (uint32_t i = 0; i < rp; ++i) {
+			const size_t off = size_t(S->restoredList[i]) * kPage;
+			std::memcpy(S->shadow + off, S->base + off, kPage);
+		}
+		shadowMs = msSince(a);
+		a        = now();
+		for (uint64_t t = anchor + 1; t <= from; ++t) {
+			const UndoTick& u = S->ring[t % kUndoRing];
+			for (uint32_t i = 0; i < u.gCount; ++i) {
+				const uint64_t slot = (u.gStart + i) % S->gUndoPages;
+				const uint32_t gi   = S->gUndoIdx[slot];
+				++entries;
+				if (S->gStamp[gi] == S->stamp) continue;
+				S->gStamp[gi] = S->stamp;
+				const uint8_t* src = S->gUndo + slot * kPage;
+				restoreGlobalPage(gi, src);
+				std::memcpy(S->globShadow + size_t(gi) * kPage, src, kPage);
+				++gp;
+			}
+		}
+		globMs = msSince(a);
+	} else {
+		int64_t a = now();
+		for (uint64_t t = from; t > anchor; --t) {
+			const UndoTick& u = S->ring[t % kUndoRing];
+			for (uint32_t i = 0; i < u.rCount; ++i) {
+				const uint64_t slot = (u.rStart + i) % kUndoPoolPages;
+				const uint32_t idx  = S->rUndoIdx[slot];
+				const uint8_t* src  = S->rUndo + slot * kPage;
+				std::memcpy(S->base + size_t(idx) * kPage, src, kPage);
+				std::memcpy(S->shadow + size_t(idx) * kPage, src, kPage);
+				++rp;
+				++entries;
+			}
+		}
+		regionMs = msSince(a);
+		a        = now();
+		for (uint64_t t = from; t > anchor; --t) {
+			const UndoTick& u = S->ring[t % kUndoRing];
+			for (uint32_t i = 0; i < u.gCount; ++i) {
+				const uint64_t slot = (u.gStart + i) % S->gUndoPages;
+				const uint32_t gi   = S->gUndoIdx[slot];
+				const uint8_t* src  = S->gUndo + slot * kPage;
+				restoreGlobalPage(gi, src);
+				std::memcpy(S->globShadow + size_t(gi) * kPage, src, kPage);
+				++gp;
+				++entries;
+			}
+		}
+		globMs = msSince(a);
 	}
 	// The restore's own writes are not sim changes.
+	const int64_t w = now();
 	resetWriteWatch();
-	*ms    = msSince(t0);
-	*pages = n;
+	S->rsWwMs        = msSince(w);
+	S->rsTotalMs     = msSince(t0);
+	S->rsRegionMs    = regionMs;
+	S->rsShadowMs    = shadowMs;
+	S->rsGlobMs      = globMs;
+	S->rsRegionPages = rp;
+	S->rsGlobPages   = gp;
+	S->rsEntries     = entries;
+	if (S->dirtySince) {
+		for (uint64_t t = anchor + 1; t <= from; ++t) {
+			const UndoTick& u = S->ring[t % kUndoRing];
+			for (uint32_t i = 0; i < u.rCount; ++i) bitSet(S->dirtySince, S->rUndoIdx[(u.rStart + i) % kUndoPoolPages]);
+		}
+	}
 }
 
-// First byte of global page gi that differs from `was`, ignoring preserved
-// bytes (they are never restored, so they legitimately differ); -1 if none.
-int firstGlobalDiff(uint64_t gi, const uint8_t* was)
+// Offset of the first non-preserved byte of global page gi that differs
+// from `was`; -1 if none. *presDiff reports a differing preserved byte.
+int firstGlobalDiff(uint64_t gi, const uint8_t* was, bool* presDiff)
 {
-	const uint8_t* now = S->globPagePtr[gi];
-	if (!S->globPreserved[gi]) {
-		if (std::memcmp(was, now, kPage) == 0) return -1;
+	const uint8_t* cur = S->globPagePtr[gi];
+	*presDiff          = false;
+	if (std::memcmp(was, cur, kPage) == 0) return -1;
+	if (S->presCount[gi] == 0) {
 		int at = 0;
-		while (at < int(kPage) && was[at] == now[at]) ++at;
+		while (at < int(kPage) && was[at] == cur[at]) ++at;
 		return at;
 	}
 	uint8_t mask[kPage];
-	std::memset(mask, 0, sizeof(mask));
-	for (uint32_t k = 0; k < S->preserveCount; ++k) {
-		const PreserveSeg& seg = S->preserveSegs[k];
-		if (seg.page == gi) std::memset(mask + seg.off, 1, seg.len);
-	}
+	presMask(gi, mask);
+	int first = -1;
 	for (int at = 0; at < int(kPage); ++at) {
-		if (!mask[at] && was[at] != now[at]) return at;
+		if (was[at] == cur[at]) continue;
+		if (mask[at]) *presDiff = true;
+		else if (first < 0) first = at;
 	}
-	return -1;
+	return first;
+}
+
+void syncMarkPass(uint64_t anchor, uint64_t tick, uint32_t bit)
+{
+	for (uint64_t t = anchor + 1; t <= tick; ++t) {
+		const UndoTick& u = S->ring[t % kUndoRing];
+		if (!u.valid || u.tick != t) continue;
+		for (uint32_t i = 0; i < u.rCount; ++i) S->syncMark[S->rUndoIdx[(u.rStart + i) % kUndoPoolPages]] |= bit;
+		for (uint32_t i = 0; i < u.gCount; ++i) S->syncGMark[S->gUndoIdx[(u.gStart + i) % S->gUndoPages]] |= uint8_t(bit);
+	}
+}
+
+void syncAbort(uint64_t tick)
+{
+	S->syncAborted++;
+	S->syncPhase  = 0;
+	S->syncNextAt = tick + S->syncPeriod;
+	pc_state_hash_spike_suppress_log(false);
 }
 
 void syncOnTickEnd(uint64_t tick, bool live, bool undoOk)
 {
-	if (S->syncK <= 0) return;
+	if (S->syncKArg == 0) return;
+	const bool liveOk = live || S->syncAny;
 	if (S->syncPhase == 0) {
-		if (!live || !undoOk || tick < S->syncStart || tick < S->syncNextAt) return;
+		if (!liveOk || !undoOk || tick < S->syncStart || tick < S->syncNextAt || tick >= S->syncEnd) return;
+		S->syncK      = S->syncKArg > 0 ? S->syncKArg : 1 + int(S->syncTestIndex % 7);
+		S->syncTestIndex++;
 		S->syncPhase  = 1;
 		S->syncAnchor = tick;
 		S->syncStep   = 0;
 		syncCaptureHash(0);
-		for (size_t w = 0; w < kPages; ++w) S->syncMark[w] = 0;
+		std::memset(S->syncMark, 0, kPages * sizeof(uint32_t));
 		std::memset(S->syncGMark, 0, S->globPages);
+		// divergent mode: the perturbed first pass must not reach hashes.txt
+		if (S->syncDiverge) pc_state_hash_spike_suppress_log(true);
 		return;
 	}
 	if (S->syncPhase == 1) {
 		S->syncStep++;
 		syncCaptureHash(S->syncStep);
-		if (!undoOk || !live) {
-			S->syncAborted++;
-			S->syncPhase  = 0;
-			S->syncNextAt = tick + S->syncPeriod;
+		if (!undoOk || !liveOk) {
+			syncAbort(tick);
 			return;
 		}
 		if (S->syncStep < S->syncK) return;
-		// First pass done: stash the post-state of every page it dirtied,
-		// then roll back to the anchor.
-		S->syncStashCount = 0;
-		for (uint64_t t = S->syncAnchor + 1; t <= tick; ++t) {
-			const UndoTick& u = S->ring[t % kUndoRing];
-			for (uint32_t i = 0; i < u.rCount; ++i) {
-				const uint32_t idx = S->rUndoIdx[(u.rStart + i) % kUndoPoolPages];
-				if (!(S->syncMark[idx] & 1)) {
-					S->syncMark[idx] |= 1;
-					stashAdd(idx, S->base + size_t(idx) * kPage);
-				}
-			}
-			for (uint32_t i = 0; i < u.gCount; ++i) {
-				const uint32_t gi = S->gUndoIdx[(u.gStart + i) % S->gUndoPages];
-				if (!(S->syncGMark[gi] & 1)) {
-					S->syncGMark[gi] |= 1;
-					stashAdd(gi | 0x80000000u, S->globPagePtr[gi]);
-				}
-			}
-		}
-		double ms       = 0;
-		uint32_t pages  = 0;
 		for (uint64_t t = S->syncAnchor + 1; t <= tick; ++t) {
 			if (!ringHas(t)) {
-				S->syncAborted++;
-				S->syncPhase  = 0;
-				S->syncNextAt = tick + S->syncPeriod;
+				syncAbort(tick);
 				return;
 			}
 		}
-		syncRollback(tick, S->syncAnchor, &ms, &pages);
-		S->syncRestoreMs    = ms;
-		S->syncRestorePages = pages;
-		S->syncPhase        = 2;
-		S->syncStep         = 0;
-		S->syncFirstBad     = 0;
-		S->syncBadMask      = 0;
-		pc_state_hash_spike_suppress_log(true);
+		// First pass done: remember what it dirtied and (identical-input
+		// mode) the whole touched region and all globals, then roll back.
+		syncMarkPass(S->syncAnchor, tick, 1);
+		if (!S->syncDiverge) {
+			double mb = 0;
+			copyTouched(S->syncFull, S->syncFullCommitted, &mb);
+			std::memcpy(S->syncTouched, S->touched, kPages / 8);
+			for (uint64_t g = 0; g < S->globPages; ++g) std::memcpy(S->syncGFull + g * kPage, S->globPagePtr[g], kPage);
+			if (S->syncFullHash) forEachCommittedPage([](size_t p) { S->syncPageHash[p] = hashPage(S->base + p * kPage); });
+		}
+		syncRollback(tick, S->syncAnchor);
+		S->syncPhase    = 2;
+		S->syncStep     = 0;
+		S->syncFirstBad = 0;
+		S->syncBadMask  = 0;
+		S->syncAudioBad = 0;
+		pc_state_hash_spike_suppress_log(!S->syncDiverge);
 		return;
 	}
 	// syncPhase == 2: resimulating
 	S->syncStep++;
-	{
+	if (!S->syncDiverge) {
 		uint64_t total = 0, subs[7] = {}, t = 0;
 		pc_state_hash_current(&total, subs, &t);
 		const uint64_t* want = S->syncHash[S->syncStep];
@@ -971,66 +1817,108 @@ void syncOnTickEnd(uint64_t tick, bool live, bool undoOk)
 				S->syncBadMask  = mask;
 			}
 		}
+		if (!S->syncAudioBad && pc_snapshot_spike_game_audio_hash() != S->syncAudio[S->syncStep]) S->syncAudioBad = S->syncStep;
 	}
 	if (S->syncStep < S->syncK) return;
-	// Resim done: compare the pages the first pass dirtied against its stash.
+	syncMarkPass(S->syncAnchor, tick, 2);
 	SyncResult r = {};
 	r.anchor     = S->syncAnchor;
 	r.k          = S->syncK;
 	r.firstBad   = S->syncFirstBad;
 	r.badMask    = S->syncBadMask;
-	for (uint64_t t = S->syncAnchor + 1; t <= tick; ++t) {
-		const UndoTick& u = S->ring[t % kUndoRing];
-		if (!u.valid || u.tick != t) continue;
-		for (uint32_t i = 0; i < u.rCount; ++i) {
-			const uint32_t idx = S->rUndoIdx[(u.rStart + i) % kUndoPoolPages];
-			S->syncMark[idx] |= 2;
-		}
-		for (uint32_t i = 0; i < u.gCount; ++i) {
-			const uint32_t gi = S->gUndoIdx[(u.gStart + i) % S->gUndoPages];
-			S->syncGMark[gi] |= 2;
-		}
-	}
-	for (uint32_t s = 0; s < S->syncStashCount; ++s) {
-		const uint32_t tag = S->syncStashIdx[s];
-		const uint8_t* was = S->syncStash + size_t(s) * kPage;
-		if (tag & 0x80000000u) {
-			const uint32_t gi = tag & 0x7fffffffu;
-			const int at      = firstGlobalDiff(gi, was);
-			if (at >= 0) {
-				if (r.globalDiffPages < 16 && S->syncCsv) {
-					std::fprintf(S->syncCsv, "#gdiff anchor=%llu rva=0x%llx\n", (unsigned long long)r.anchor,
-					    (unsigned long long)(uintptr_t(S->globPagePtr[gi]) + at - uintptr_t(GetModuleHandleA(nullptr))));
-				}
-				r.globalDiffPages++;
-			}
-		} else {
-			const uint8_t* now = S->base + size_t(tag) * kPage;
-			if (std::memcmp(was, now, kPage) != 0) {
-				int at = 0;
-				while (at < int(kPage) && was[at] == now[at]) ++at;
-				if (r.regionDiffPages < 16 && S->syncCsv) {
-					std::fprintf(S->syncCsv, "#rdiff anchor=%llu off=0x%llx\n", (unsigned long long)r.anchor,
-					    (unsigned long long)(size_t(tag) * kPage + at));
-				}
-				r.regionDiffPages++;
-			}
-		}
-	}
+	r.audioBad   = S->syncAudioBad;
 	for (size_t w = 0; w < kPages; ++w) {
-		if (S->syncMark[w] == 1) r.onlyFirst++;
-		else if (S->syncMark[w] == 2) r.onlySecond++;
+		const uint32_t m = S->syncMark[w];
+		if (!m) continue;
+		r.regionUnion++;
+		if (m == 1) r.onlyFirst++;
+		else if (m == 2) r.onlySecond++;
 	}
 	for (uint64_t g = 0; g < S->globPages; ++g) {
-		if (S->syncGMark[g] == 1) r.onlyFirst++;
-		else if (S->syncGMark[g] == 2) r.onlySecond++;
+		const uint8_t m = S->syncGMark[g];
+		if (!m) continue;
+		r.globalUnion++;
+		if (m == 1) r.onlyFirst++;
+		else if (m == 2) r.onlySecond++;
+	}
+	if (!S->syncDiverge) {
+		// Every page touched at either end (not only what write watch
+		// reported this test) against its first-pass end state.
+		static const uint8_t zero[kPage] = {};
+		int logged = 0;
+		for (size_t p = 0; p < kPages; ++p) {
+			const bool then = bitGet(S->syncTouched, p);
+			const bool nowT = bitGet(S->touched, p);
+			if (!then && !nowT) continue;
+			const uint8_t* was = then ? S->syncFull + p * kPage : zero;
+			const uint8_t* cur = S->base + p * kPage;
+			if (std::memcmp(was, cur, kPage) == 0) continue;
+			r.regionDiffPages++;
+			const bool reported = S->syncMark[p] != 0;
+			if (!reported) r.regionUnreported++;
+			if (logged < 16 && S->syncCsv) {
+				int at = 0;
+				while (at < int(kPage) && was[at] == cur[at]) ++at;
+				size_t bo            = 0;
+				const uintptr_t site = regionSiteOf(p * kPage + at, &bo);
+				std::fprintf(S->syncCsv, "#rdiff anchor=%llu off=0x%llx site_rva=0x%llx blk_off=0x%llx reported=%d\n",
+				    (unsigned long long)r.anchor, (unsigned long long)(p * kPage + at),
+				    (unsigned long long)(site > 1 ? site - exeBase() : site), (unsigned long long)bo, reported ? 1 : 0);
+				logged++;
+			}
+		}
+		if (S->syncFullHash) {
+			uint32_t hashDiff = 0;
+			forEachCommittedPage([&hashDiff](size_t p) {
+				if (hashPage(S->base + p * kPage) != S->syncPageHash[p]) hashDiff++;
+			});
+			if (S->syncCsv) std::fprintf(S->syncCsv, "#fullhash anchor=%llu committed_pages_differing=%u\n", (unsigned long long)r.anchor, hashDiff);
+		}
+		const uintptr_t exe = exeBase();
+		int glogged = 0, plogged = 0;
+		for (uint64_t g = 0; g < S->globPages; ++g) {
+			bool pres    = false;
+			const int at = firstGlobalDiff(g, S->syncGFull + g * kPage, &pres);
+			if (at >= 0) {
+				r.globalDiffPages++;
+				if (glogged++ < 16 && S->syncCsv) {
+					std::fprintf(S->syncCsv, "#gdiff anchor=%llu rva=0x%llx reported=%d\n", (unsigned long long)r.anchor,
+					    (unsigned long long)(uintptr_t(S->globPagePtr[g]) + at - exe), S->syncGMark[g] ? 1 : 0);
+				}
+			}
+			if (pres) {
+				r.globalPresDiffPages++;
+				if (plogged < 24 && S->syncCsv && S->syncTests < 40) {
+					uint8_t mask[kPage];
+					presMask(g, mask);
+					const uint8_t* was = S->syncGFull + g * kPage;
+					const uint8_t* cur = S->globPagePtr[g];
+					for (int b = 0; b < int(kPage) && plogged < 24; ++b) {
+						if (mask[b] && was[b] != cur[b]) {
+							std::fprintf(S->syncCsv, "#pdiff anchor=%llu rva=0x%llx\n", (unsigned long long)r.anchor,
+							    (unsigned long long)(uintptr_t(cur) + b - exe));
+							plogged++;
+							while (b + 1 < int(kPage) && mask[b + 1]) ++b; // one line per segment
+						}
+					}
+				}
+			}
+		}
 	}
 	S->syncTests++;
-	if (!r.firstBad) S->syncMatches++;
+	S->syncTestsK[r.k]++;
+	if (!r.firstBad) {
+		S->syncMatches++;
+		S->syncMatchesK[r.k]++;
+	}
+	if (r.audioBad) S->syncAudioBadTests++;
 	if (S->syncCsv) {
-		std::fprintf(S->syncCsv, "%llu,%d,%d,0x%x,%u,%u,%u,%u,%.3f,%llu\n", (unsigned long long)r.anchor, r.k,
-		    r.firstBad, r.badMask, r.regionDiffPages, r.globalDiffPages, r.onlyFirst, r.onlySecond,
-		    S->syncRestoreMs, (unsigned long long)S->syncRestorePages);
+		std::fprintf(S->syncCsv,
+		    "%llu,%d,%d,0x%x,%u,%u,%u,%u,%.4f,%u,%d,%u,%u,%u,%u,%.4f,%.4f,%.4f,%.4f,%u,%u,%u,%d,%d,%.1f\n",
+		    (unsigned long long)r.anchor, r.k, r.firstBad, r.badMask, r.regionDiffPages, r.globalDiffPages, r.onlyFirst,
+		    r.onlySecond, S->rsTotalMs, S->rsRegionPages + S->rsGlobPages, r.audioBad, r.regionUnreported,
+		    r.globalPresDiffPages, r.regionUnion, r.globalUnion, S->rsRegionMs, S->rsShadowMs, S->rsGlobMs, S->rsWwMs,
+		    S->rsRegionPages, S->rsGlobPages, S->rsEntries, S->syncDedup ? 1 : 0, S->syncDiverge ? 1 : 0, S->sysBusy);
 		std::fflush(S->syncCsv);
 	}
 	pc_state_hash_spike_suppress_log(false);
@@ -1051,7 +1939,7 @@ int cmpSiteCount(const void* a, const void* b)
 
 void dumpSites(FILE* out, const char* label, Site* table)
 {
-	Site* copy = static_cast<Site*>(std::malloc(sizeof(Site) * kSites));
+	Site* copy = static_cast<Site*>(osAllocZero(sizeof(Site) * kSites));
 	if (!copy) return;
 	size_t n = 0;
 	for (size_t i = 0; i < kSites; ++i)
@@ -1059,22 +1947,17 @@ void dumpSites(FILE* out, const char* label, Site* table)
 	std::qsort(copy, n, sizeof(Site), cmpSiteCount);
 	std::fprintf(out, "[m6a] %s call sites: %zu distinct\n", label, n);
 	for (size_t i = 0; i < n && i < 400; ++i) {
-		HMODULE mod = nullptr;
-		char name[MAX_PATH] = "?";
-		GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-		    reinterpret_cast<LPCSTR>(copy[i].ra), &mod);
-		if (mod) {
-			GetModuleFileNameA(mod, name, sizeof(name));
-			const char* slash = std::strrchr(name, '\\');
-			if (slash) std::memmove(name, slash + 1, std::strlen(slash + 1) + 1);
-		}
-		std::fprintf(out, "[m6a] site %s cat=%s module=%s rva=0x%llx count=%llu bytes=%llu\n", label,
-		    table == S->offSites ? kOffNames[copy[i].cat]
-		    : table == S->unknownSites ? kUnknownNames[copy[i].cat & 3] : "region", name,
-		    (unsigned long long)(copy[i].ra - reinterpret_cast<uintptr_t>(mod)),
-		    (unsigned long long)copy[i].count, (unsigned long long)copy[i].bytes);
+		char name[MAX_PATH];
+		uintptr_t mod = 0;
+		moduleOf(copy[i].ra, name, sizeof(name), &mod);
+		const char* cat = table == S->offSites       ? kOffNames[copy[i].cat]
+		                : table == S->unknownSites   ? kUnknownNames[copy[i].cat & 3]
+		                : table == S->mallocSites    ? kMallocNames[copy[i].cat % kMallocCount]
+		                                             : "region";
+		std::fprintf(out, "[m6a] site %s cat=%s module=%s rva=0x%llx count=%llu bytes=%llu\n", label, cat, name,
+		    (unsigned long long)(copy[i].ra - mod), (unsigned long long)copy[i].count, (unsigned long long)copy[i].bytes);
 	}
-	std::free(copy);
+	VirtualFree(copy, 0, MEM_RELEASE);
 }
 
 void atExitReport()
@@ -1086,15 +1969,14 @@ void atExitReport()
 	if (!path || !*path) path = "snapshot_spike_sites.txt";
 	FILE* out = std::fopen(path, "w");
 	if (!out) out = stdout;
-	std::fprintf(out, "[m6a] exe_base=0x%llx region_base=0x%llx\n",
-	    (unsigned long long)reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr)),
-	    (unsigned long long)reinterpret_cast<uintptr_t>(S->base));
-	std::fprintf(out, "[m6a] region allocs=%llu bytes=%llu frees=%llu bytes=%llu live_blocks=%llu live_bytes=%llu frees_off_main=%llu bad_frees=%llu decommits=%llu\n",
+	std::fprintf(out, "[m6a] exe_base=0x%llx region_base=0x%llx mode=%s ww=%d split=%d\n",
+	    (unsigned long long)exeBase(), (unsigned long long)reinterpret_cast<uintptr_t>(S->base),
+	    S->timing ? "timing" : "measure", S->writeWatch ? 1 : 0, S->wwSplit ? 1 : 0);
+	std::fprintf(out, "[m6a] region allocs=%llu bytes=%llu frees=%llu bytes=%llu live_blocks=%llu live_bytes=%llu frees_off_main=%llu bad_frees=%llu\n",
 	    (unsigned long long)S->totalAllocs, (unsigned long long)S->totalAllocBytes,
 	    (unsigned long long)S->totalFrees, (unsigned long long)S->totalFreeBytes,
 	    (unsigned long long)S->meta->liveBlocks, (unsigned long long)S->meta->liveBytes,
-	    (unsigned long long)S->totalRegionFreesOffMain, (unsigned long long)S->badFrees,
-	    (unsigned long long)S->decommitCalls);
+	    (unsigned long long)S->totalRegionFreesOffMain, (unsigned long long)S->badFrees);
 	std::fprintf(out, "[m6a] off-region pre_init(count only, before the spike state) count=%lld bytes=%lld\n",
 	    sPreInitCount, sPreInitBytes);
 	for (int c = 0; c < kOffCount; ++c) {
@@ -1104,10 +1986,32 @@ void atExitReport()
 	std::fprintf(out, "[m6a] unknown_frees=%llu site_overflow=%llu globals_pages=%llu preserve_segs=%u\n",
 	    piki_pc_spike_unknown_frees(),
 	    (unsigned long long)S->siteOverflow, (unsigned long long)S->globPages, S->preserveCount);
-	if (S->syncK > 0) {
-		std::fprintf(out, "[m6a] synctest k=%d tests=%llu matches=%llu aborted=%llu\n", S->syncK,
-		    (unsigned long long)S->syncTests, (unsigned long long)S->syncMatches,
-		    (unsigned long long)S->syncAborted);
+	std::fprintf(out, "[m6a] coverage: ww_late=%llu conc_region=%llu conc_globals=%llu audits=%llu audit_pages=%llu audit_missed=%llu\n",
+	    (unsigned long long)S->totalWwLate, (unsigned long long)S->totalConcRegion,
+	    (unsigned long long)S->totalConcGlobal, (unsigned long long)S->audits, (unsigned long long)S->auditPages,
+	    (unsigned long long)S->auditMissed);
+	if (S->mallocAudit) {
+		for (int c = 0; c < kMallocCount; ++c) {
+			std::fprintf(out, "[m6a] malloc %s count=%lld bytes=%lld\n", kMallocNames[c], (long long)S->mallocCount[c],
+			    (long long)S->mallocBytes[c]);
+		}
+		std::fprintf(out, "[m6a] malloc free_calls=%lld hooks=%d\n", (long long)S->freeCalls, gRealMalloc ? 1 : 0);
+	}
+	if (S->offTrack) {
+		std::fprintf(out, "[m6a] off-table live=%llu overflow=%llu\n", (unsigned long long)S->offLive,
+		    (unsigned long long)S->offOverflow);
+	}
+	if (S->syncKArg != 0) {
+		std::fprintf(out, "[m6a] synctest k=%d tests=%llu matches=%llu aborted=%llu audio_bad_tests=%llu dedup=%d diverge=%d\n",
+		    S->syncKArg, (unsigned long long)S->syncTests, (unsigned long long)S->syncMatches,
+		    (unsigned long long)S->syncAborted, (unsigned long long)S->syncAudioBadTests, S->syncDedup ? 1 : 0,
+		    S->syncDiverge ? 1 : 0);
+		for (int k = 1; k <= kMaxK; ++k) {
+			if (S->syncTestsK[k]) {
+				std::fprintf(out, "[m6a] synctest k=%d tests=%llu matches=%llu\n", k,
+				    (unsigned long long)S->syncTestsK[k], (unsigned long long)S->syncMatchesK[k]);
+			}
+		}
 	}
 	std::fprintf(out, "[m6a] unknown frees by kind: arena_zone=%llu image=%llu private_heap=%llu other=%llu\n",
 	    (unsigned long long)S->unknownByKind[0], (unsigned long long)S->unknownByKind[1],
@@ -1115,6 +2019,7 @@ void atExitReport()
 	dumpSites(out, "off", S->offSites);
 	dumpSites(out, "unknown", S->unknownSites);
 	dumpSites(out, "region", S->regionSites);
+	if (S->mallocAudit) dumpSites(out, "malloc", S->mallocSites);
 	if (out != stdout) std::fclose(out);
 	std::printf("[m6a] exit report written (%s); region live_blocks=%llu live_bytes=%llu synctests=%llu matches=%llu\n",
 	    path, (unsigned long long)S->meta->liveBlocks, (unsigned long long)S->meta->liveBytes,
@@ -1126,20 +2031,18 @@ LONG WINAPI crashFilter(EXCEPTION_POINTERS* info)
 {
 	if (S && info && info->ExceptionRecord) {
 		const EXCEPTION_RECORD* e = info->ExceptionRecord;
-		HMODULE mod = nullptr;
-		char name[MAX_PATH] = "?";
-		GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-		    static_cast<LPCSTR>(e->ExceptionAddress), &mod);
-		if (mod) GetModuleFileNameA(mod, name, sizeof(name));
+		char name[MAX_PATH];
+		uintptr_t mod = 0;
+		moduleOf(reinterpret_cast<uintptr_t>(e->ExceptionAddress), name, sizeof(name), &mod);
 		const unsigned long long data = e->NumberParameters >= 2 ? (unsigned long long)e->ExceptionInformation[1] : 0ull;
 		std::printf("[m6a] CRASH code=0x%08lx module=%s rva=0x%llx data=0x%llx tid_main=%d tick=%llu sync_phase=%d sync_anchor=%llu sync_step=%d\n",
 		    (unsigned long)e->ExceptionCode, name,
-		    (unsigned long long)(reinterpret_cast<uintptr_t>(e->ExceptionAddress) - reinterpret_cast<uintptr_t>(mod)), data,
+		    (unsigned long long)(reinterpret_cast<uintptr_t>(e->ExceptionAddress) - mod), data,
 		    GetCurrentThreadId() == S->mainTid ? 1 : 0, (unsigned long long)pc_state_hash_tick(), S->syncPhase,
 		    (unsigned long long)S->syncAnchor, S->syncStep);
 		// Crude stack scan: every qword near RSP that points into the exe
 		// image, as an rva (the first ones are the most recent callers).
-		const uintptr_t exe = reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr));
+		const uintptr_t exe = exeBase();
 		const uint64_t* sp  = reinterpret_cast<const uint64_t*>(info->ContextRecord->Rsp);
 		int shown           = 0;
 		std::printf("[m6a] CRASH stack exe rvas:");
@@ -1167,7 +2070,7 @@ void loadPreserveFile()
 		std::fprintf(stderr, "[m6a] cannot open preserve file %s\n", path);
 		return;
 	}
-	const uintptr_t exe = reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr));
+	const uintptr_t exe = exeBase();
 	unsigned long long lo = 0, hi = 0;
 	char line[1024];
 	int n = 0;
@@ -1185,6 +2088,45 @@ void loadPreserveFile()
 	std::printf("[m6a] preserve file %s: %d ranges\n", path, n);
 }
 
+bool envIs(const char* name, const char* value)
+{
+	const char* v = std::getenv(name);
+	return v && !std::strcmp(v, value);
+}
+
+int envInt(const char* name, int fallback)
+{
+	const char* v = std::getenv(name);
+	return (v && *v) ? std::atoi(v) : fallback;
+}
+
+// Globals changed-byte ranges for a sample tick (MV-11), before the save
+// copies the live page into the shadow.
+void logGlobalsDirty(uint64_t tick)
+{
+	if (!S->gdirtyLog) return;
+	const uintptr_t exe = exeBase();
+	int runs            = 0;
+	for (uint32_t j = 0; j < S->globDirtyCount && runs < 1024; ++j) {
+		const uint64_t gi  = S->globDirty[j];
+		const uint8_t* was = S->globShadow + gi * kPage;
+		const uint8_t* cur = S->globPagePtr[gi];
+		int b              = 0;
+		while (b < int(kPage) && runs < 1024) {
+			if (was[b] == cur[b]) {
+				++b;
+				continue;
+			}
+			int e = b;
+			while (e < int(kPage) && (was[e] != cur[e] || (e + 8 < int(kPage) && std::memcmp(was + e, cur + e, 8) != 0))) ++e;
+			std::fprintf(S->gdirtyLog, "%llu %llx %llx\n", (unsigned long long)tick,
+			    (unsigned long long)(uintptr_t(cur) + b - exe), (unsigned long long)(uintptr_t(cur) + e - exe));
+			runs++;
+			b = e;
+		}
+	}
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -1195,23 +2137,30 @@ void pc_snapshot_spike_init(void)
 	const char* on = std::getenv("PIKMIN_NETPLAY_SNAPSHOT_SPIKE");
 	if (!on || on[0] != '1' || on[1] != '\0' || S) return;
 
-	State* s = static_cast<State*>(VirtualAlloc(nullptr, sizeof(State), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+	State* s = static_cast<State*>(osAllocZero(sizeof(State)));
 	if (!s) return;
 	InitializeSRWLock(&s->lock);
 	InitializeSRWLock(&s->siteLock);
+	InitializeSRWLock(&s->offLock);
 	s->mainTid = GetCurrentThreadId();
 	LARGE_INTEGER f;
 	QueryPerformanceFrequency(&f);
 	s->msPerCount = 1000.0 / double(f.QuadPart);
 
 	const char* wwEnv = std::getenv("PIKMIN_NETPLAY_SNAPSHOT_SPIKE_WW");
-	s->writeWatch = !(wwEnv && wwEnv[0] == '0');
-	const char* splitEnv = std::getenv("PIKMIN_NETPLAY_SNAPSHOT_SPIKE_SPLIT");
-	s->splitAuth = splitEnv && splitEnv[0] == '1';
+	s->writeWatch     = !(wwEnv && wwEnv[0] == '0');
+	s->splitAuth      = envIs("PIKMIN_NETPLAY_SNAPSHOT_SPIKE_SPLIT", "1");
+	s->wwSplit        = envIs("PIKMIN_NETPLAY_SNAPSHOT_SPIKE_WW_SPLIT", "1");
+	s->timing         = envIs("PIKMIN_NETPLAY_SNAPSHOT_SPIKE_MODE", "timing");
+	s->nowwPages      = uint32_t(envInt("PIKMIN_NETPLAY_SNAPSHOT_SPIKE_NOWW_PAGES", 740));
+	s->auditEvery     = s->writeWatch ? envInt("PIKMIN_NETPLAY_SNAPSHOT_SPIKE_AUDIT", 0) : 0;
+	s->ptrScan        = s->auditEvery > 0 && envIs("PIKMIN_NETPLAY_SNAPSHOT_SPIKE_PTRSCAN", "1");
+	s->offTrack       = s->ptrScan;
+	s->mallocAudit    = envIs("PIKMIN_NETPLAY_SNAPSHOT_SPIKE_MALLOC_AUDIT", "1");
 	uint8_t* base = nullptr;
 	for (uintptr_t want : kPreferredBases) {
 		base = static_cast<uint8_t*>(VirtualAlloc(reinterpret_cast<void*>(want), kReserve,
-		    wwEnv && wwEnv[0] == '0' ? MEM_RESERVE : (MEM_RESERVE | MEM_WRITE_WATCH), PAGE_READWRITE));
+		    s->writeWatch ? (MEM_RESERVE | MEM_WRITE_WATCH) : MEM_RESERVE, PAGE_READWRITE));
 		if (base) break;
 	}
 	if (!base) {
@@ -1224,30 +2173,57 @@ void pc_snapshot_spike_init(void)
 	buildClasses();
 	osCommit(base + kMetaOff, kMetaCommit);
 	osCommit(base + kArenaOff, kArenaSize);
-	Meta* m          = reinterpret_cast<Meta*>(base + kMetaOff);
-	m->magic         = 0x4D36414D45544131ull;
-	m->smallWild     = base + kSmallOff;
+	Meta* m           = reinterpret_cast<Meta*>(base + kMetaOff);
+	m->magic          = 0x4D36414D45544131ull;
+	m->smallWild      = base + kSmallOff;
 	m->smallCommitted = base + kSmallOff;
-	m->largeWild     = base + kLargeOff;
-	s->meta          = m;
+	m->largeWild      = base + kLargeOff;
+	m->largeCommitHw  = base + kLargeOff;
+	s->meta           = m;
 
-	s->shadow   = static_cast<uint8_t*>(osReserve(kReserve));
-	s->scratch  = static_cast<uint8_t*>(osReserve(kReserve));
-	s->wwCap    = kPages;
-	s->wwAddrs  = static_cast<void**>(VirtualAlloc(nullptr, kPages * sizeof(void*), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
-	s->pageMark = static_cast<uint32_t*>(VirtualAlloc(nullptr, kPages * sizeof(uint32_t), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
-	s->dirtyList = static_cast<uint32_t*>(VirtualAlloc(nullptr, kPages * sizeof(uint32_t), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
-	s->touched  = static_cast<uint64_t*>(VirtualAlloc(nullptr, kPages / 8, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
-	s->rUndo    = static_cast<uint8_t*>(osReserve(kUndoPoolPages * kPage));
-	s->rUndoIdx = static_cast<uint32_t*>(VirtualAlloc(nullptr, kUndoPoolPages * sizeof(uint32_t), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
-	s->syncMark = static_cast<uint32_t*>(VirtualAlloc(nullptr, kPages * sizeof(uint32_t), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
-	s->regionSites = static_cast<Site*>(VirtualAlloc(nullptr, sizeof(Site) * kSites, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
-	s->offSites    = static_cast<Site*>(VirtualAlloc(nullptr, sizeof(Site) * kSites, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
-	s->unknownSites = static_cast<Site*>(VirtualAlloc(nullptr, sizeof(Site) * kSites, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+	s->shadow     = static_cast<uint8_t*>(osReserve(kReserve));
+	s->scratch    = static_cast<uint8_t*>(osReserve(kReserve));
+	s->smallSite  = static_cast<uintptr_t*>(osReserve(kSmallUnits * sizeof(uintptr_t)));
+	s->largeSite  = static_cast<uintptr_t*>(osAllocZero(kLargePages * sizeof(uintptr_t)));
+	s->wwCap      = kPages;
+	s->wwAddrs    = static_cast<void**>(osAllocZero(kPages * sizeof(void*)));
+	s->pageMark   = static_cast<uint32_t*>(osAllocZero(kPages * sizeof(uint32_t)));
+	s->dirtyList  = static_cast<uint32_t*>(osAllocZero(kPages * sizeof(uint32_t)));
+	s->carryList  = static_cast<uint32_t*>(osAllocZero(kPages * sizeof(uint32_t)));
+	s->restoreTmp = static_cast<uint32_t*>(osAllocZero(kPages * sizeof(uint32_t)));
+	s->touched    = static_cast<uint64_t*>(osAllocZero(kPages / 8));
+	s->runs       = static_cast<Run*>(osAllocZero(kMaxRuns * sizeof(Run)));
+	s->runsStale  = true;
+	s->rUndo      = static_cast<uint8_t*>(osReserve(kUndoPoolPages * kPage));
+	s->rUndoIdx   = static_cast<uint32_t*>(osAllocZero(kUndoPoolPages * sizeof(uint32_t)));
+	s->regionSites  = static_cast<Site*>(osAllocZero(sizeof(Site) * kSites));
+	s->offSites     = static_cast<Site*>(osAllocZero(sizeof(Site) * kSites));
+	s->unknownSites = static_cast<Site*>(osAllocZero(sizeof(Site) * kSites));
+	s->mallocSites  = static_cast<Site*>(osAllocZero(sizeof(Site) * kSites));
 	s->epoch       = 1;
+	s->missed      = -1;
+	s->sysBusy     = -1.0;
 	s->preserveRaw = static_cast<Range*>(std::calloc(kPreserveMax, sizeof(Range)));
-	const char* restore = std::getenv("PIKMIN_NETPLAY_SNAPSHOT_SPIKE_RESTORE");
-	s->doRestore   = !(restore && restore[0] == '0');
+	s->doRestore   = !s->timing && !envIs("PIKMIN_NETPLAY_SNAPSHOT_SPIKE_RESTORE", "0");
+	if (s->auditEvery > 0) {
+		s->dirtySince = static_cast<uint64_t*>(osAllocZero(kPages / 8));
+		s->auditHave  = static_cast<uint64_t*>(osAllocZero(kPages / 8));
+		s->pageHash   = static_cast<uint64_t*>(osAllocZero(kPages * sizeof(uint64_t)));
+		static const uint8_t zero[kPage] = {};
+		s->zeroHash   = hashPage(zero);
+		const char* ap = std::getenv("PIKMIN_NETPLAY_SNAPSHOT_SPIKE_AUDIT_LOG");
+		s->auditLog    = std::fopen((ap && *ap) ? ap : "snapshot_spike_audit.txt", "w");
+	}
+	if (s->offTrack) {
+		s->offTable  = static_cast<OffBlock*>(osAllocZero(kOffTableCap * sizeof(OffBlock)));
+		s->offSorted = static_cast<OffBlock*>(osAllocZero(kOffTableCap * sizeof(OffBlock)));
+		s->pairs     = static_cast<Pair*>(osAllocZero(kPairCap * sizeof(Pair)));
+		if (!s->offTable || !s->offSorted || !s->pairs) s->offTrack = s->ptrScan = false;
+	}
+	if (!s->timing) {
+		const char* gp = std::getenv("PIKMIN_NETPLAY_SNAPSHOT_SPIKE_GDIRTY_LOG");
+		s->gdirtyLog   = std::fopen((gp && *gp) ? gp : "snapshot_spike_gdirty.txt", "w");
+	}
 
 	setupGlobals();
 	piki_pc_spike_register_preserve();
@@ -1256,28 +2232,46 @@ void pc_snapshot_spike_init(void)
 
 	const char* k = std::getenv("PIKMIN_NETPLAY_SNAPSHOT_SYNCTEST");
 	if (k && *k) {
-		s->syncK = std::atoi(k);
-		if (s->syncK < 0) s->syncK = 0;
-		if (s->syncK > kMaxK) s->syncK = kMaxK;
-		const char* period = std::getenv("PIKMIN_NETPLAY_SNAPSHOT_SYNCTEST_PERIOD");
-		s->syncPeriod      = (period && *period) ? std::atoi(period) : 30;
+		if (!std::strcmp(k, "cycle") || !std::strcmp(k, "1-7")) s->syncKArg = -1;
+		else s->syncKArg = std::atoi(k);
+		if (s->syncKArg > kMaxK) s->syncKArg = kMaxK;
+		if (s->syncKArg < -1) s->syncKArg = 0;
+		s->syncPeriod     = envInt("PIKMIN_NETPLAY_SNAPSHOT_SYNCTEST_PERIOD", 30);
 		if (s->syncPeriod < 1) s->syncPeriod = 1;
 		const char* start = std::getenv("PIKMIN_NETPLAY_SNAPSHOT_SYNCTEST_START");
 		s->syncStart      = (start && *start) ? std::strtoull(start, nullptr, 10) : 600;
-		s->syncStashCap   = 16384;
-		s->syncStash      = static_cast<uint8_t*>(VirtualAlloc(nullptr, size_t(s->syncStashCap) * kPage, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
-		s->syncStashIdx   = static_cast<uint32_t*>(std::calloc(s->syncStashCap, sizeof(uint32_t)));
-		if (!s->syncStash) s->syncStashCap = 0;
+		// A test still open when the harness exits would leave its ticks
+		// unlogged (divergent mode suppresses the first pass): stop early.
+		const char* exitAfter = std::getenv("PIKMIN_NETPLAY_EXIT_AFTER_TICKS");
+		const uint64_t endAt  = (exitAfter && *exitAfter) ? std::strtoull(exitAfter, nullptr, 10) : 0;
+		s->syncEnd            = endAt > uint64_t(2 * kMaxK + 2) ? endAt - uint64_t(2 * kMaxK + 2) : ~0ull;
+		s->syncDedup      = !envIs("PIKMIN_NETPLAY_SNAPSHOT_SYNCTEST_RESTORE", "naive");
+		s->syncDiverge    = envIs("PIKMIN_NETPLAY_SNAPSHOT_SYNCTEST_DIVERGE", "1");
+		s->syncAny        = envIs("PIKMIN_NETPLAY_SNAPSHOT_SYNCTEST_ANY", "1");
+		s->syncFullHash   = envIs("PIKMIN_NETPLAY_SNAPSHOT_SYNCTEST_FULLHASH", "1");
+		s->syncFull       = static_cast<uint8_t*>(osReserve(kReserve));
+		s->syncTouched    = static_cast<uint64_t*>(osAllocZero(kPages / 8));
+		s->syncGFull      = static_cast<uint8_t*>(osAllocZero(s->globBytes));
+		s->syncMark       = static_cast<uint32_t*>(osAllocZero(kPages * sizeof(uint32_t)));
+		s->rStamp         = static_cast<uint32_t*>(osAllocZero(kPages * sizeof(uint32_t)));
+		s->restoredList   = static_cast<uint32_t*>(osAllocZero(kPages * sizeof(uint32_t)));
+		if (s->syncFullHash) s->syncPageHash = static_cast<uint64_t*>(osAllocZero(kPages * sizeof(uint64_t)));
 		syncLogOpen();
 	}
 
 	openCsv();
 	std::atexit(atExitReport);
 	SetUnhandledExceptionFilter(crashFilter);
+	sampleLoad();
 	s->active = true;
-	std::printf("[m6a] snapshot spike ON: region=%p reserve=%zu MB globals=%llu pages (%llu KB) restore=%d synctest_k=%d period=%d preserve=%u\n",
+	int hooks = 0;
+	if (s->mallocAudit) hooks = patchImports();
+	pc_snapshot_spike_game_describe();
+	std::printf("[m6a] snapshot spike ON: region=%p reserve=%zu MB globals=%llu pages (%llu KB) mode=%s ww=%d split=%d "
+	            "audit=%d ptrscan=%d malloc_hooks=%d synctest_k=%d period=%d dedup=%d diverge=%d preserve=%u\n",
 	    (void*)base, kReserve >> 20, (unsigned long long)s->globPages, (unsigned long long)(s->globBytes >> 10),
-	    s->doRestore ? 1 : 0, s->syncK, s->syncPeriod, s->preserveCount);
+	    s->timing ? "timing" : "measure", s->writeWatch ? 1 : 0, s->wwSplit ? 1 : 0, s->auditEvery, s->ptrScan ? 1 : 0,
+	    hooks, s->syncKArg, s->syncPeriod, s->syncDedup ? 1 : 0, s->syncDiverge ? 1 : 0, s->preserveCount);
 	std::fflush(stdout);
 }
 
@@ -1298,7 +2292,7 @@ void* pc_snapshot_spike_new(size_t size, void* ra)
 	else if (s->loopStarted && !s->inIdle) cat = kOffOutsideIdle;
 	else {
 		AcquireSRWLockExclusive(&s->lock);
-		void* p = regionAlloc(size);
+		void* p = regionAlloc(size, reinterpret_cast<uintptr_t>(ra));
 		if (p) {
 			const size_t cap = static_cast<BlockHdr*>(p)[-1].cap;
 			s->allocs++;
@@ -1311,7 +2305,7 @@ void* pc_snapshot_spike_new(size_t size, void* ra)
 			noteSite(s->regionSites, reinterpret_cast<uintptr_t>(ra), size, 0);
 			if (size >= (size_t(1) << 20)) {
 				std::printf("[m6a] big region block %zu KB at %p (caller rva 0x%llx) tick=%llu\n", size >> 10, p,
-				    (unsigned long long)(reinterpret_cast<uintptr_t>(ra) - reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr))),
+				    (unsigned long long)(reinterpret_cast<uintptr_t>(ra) - exeBase()),
 				    (unsigned long long)pc_state_hash_tick());
 			}
 			return p;
@@ -1328,6 +2322,13 @@ void* pc_snapshot_spike_new(size_t size, void* ra)
 	return nullptr;
 }
 
+void* pc_snapshot_spike_note_off(void* p, size_t size, void* ra)
+{
+	State* s = S;
+	if (s && s->active && s->offTrack && p) offInsert(p, size, reinterpret_cast<uintptr_t>(ra));
+	return p;
+}
+
 bool pc_snapshot_spike_delete(void* ptr, void* ra)
 {
 	State* s = S;
@@ -1335,18 +2336,26 @@ bool pc_snapshot_spike_delete(void* ptr, void* ra)
 	uint8_t* p = static_cast<uint8_t*>(ptr);
 	if (p < s->base + kSmallOff || p >= s->base + kReserve) {
 		if (onMain()) s->lastDeleteRa = ra;
+		if (s->offTrack) offRemove(ptr);
 		return false;
 	}
+	if (!onMain()) {
+		// F5: a region free from another thread would race the tick-end
+		// save and make region addresses depend on thread timing. None was
+		// ever seen; refuse it loudly instead of tolerating it.
+		s->regionFreesOffMain++;
+		s->totalRegionFreesOffMain++;
+		std::printf("[m6a] FATAL region free %p from a non-main thread (caller rva 0x%llx) tick=%llu\n", ptr,
+		    (unsigned long long)(reinterpret_cast<uintptr_t>(ra) - exeBase()), (unsigned long long)pc_state_hash_tick());
+		std::fflush(stdout);
+		std::abort();
+	}
 	AcquireSRWLockExclusive(&s->lock);
-	const size_t cap = regionFree(ptr);
+	const size_t cap = regionFree(ptr, ra);
 	s->frees++;
 	s->freeBytes += cap;
 	s->totalFrees++;
 	s->totalFreeBytes += cap;
-	if (!onMain()) {
-		s->regionFreesOffMain++;
-		s->totalRegionFreesOffMain++;
-	}
 	ReleaseSRWLockExclusive(&s->lock);
 	return true;
 }
@@ -1392,9 +2401,13 @@ void pc_snapshot_spike_frame_begin(void)
 void pc_snapshot_spike_idle_begin(void)
 {
 	if (!S || !S->active) return;
+	// divergent synctest: perturb the first pass's inputs (the pads are
+	// final here: pc_input_log_tick ran; the controllers read them in idle)
+	if (S->syncPhase == 1 && S->syncDiverge) pc_snapshot_spike_game_perturb_input();
 	S->inIdle        = true;
 	S->authMarked    = false;
 	S->instrInIdleMs = 0.0;
+	S->tPresentEnd = S->tDoneBegin = S->tDoneEnd = S->tParseEnd = 0;
 	S->tIdle         = now();
 }
 
@@ -1408,6 +2421,19 @@ void pc_snapshot_spike_auth_end(void)
 	const double ww = msSince(t0);
 	S->wwMs += ww;
 	S->instrInIdleMs += ww;
+}
+
+void pc_snapshot_spike_mark(int which)
+{
+	if (!S || !S->active || !S->inIdle) return;
+	const int64_t t = now();
+	switch (which) {
+	case kPcSpikeMarkPresentEnd: S->tPresentEnd = t; break;
+	case kPcSpikeMarkDoneBegin: S->tDoneBegin = t; break;
+	case kPcSpikeMarkDoneEnd: S->tDoneEnd = t; break;
+	case kPcSpikeMarkParseEnd: S->tParseEnd = t; break;
+	default: break;
+	}
 }
 
 void pc_snapshot_spike_idle_end(void)
@@ -1443,7 +2469,6 @@ void pc_snapshot_spike_preserve(const void* p, size_t bytes)
 	if (S->preserveBatch) return;
 	// (re)build the per-page segments from scratch
 	S->preserveCount = 0;
-	if (S->globPreserved) std::memset(S->globPreserved, 0, S->globPages);
 	buildPreserveSegs();
 }
 
@@ -1451,18 +2476,33 @@ bool pc_snapshot_spike_resimulating(void) { return S && S->active && S->syncPhas
 
 void pc_snapshot_spike_tick_end(void)
 {
+	// Crowd bootstrap (MV-7): runs with the spike on or off, before this
+	// tick's collect so its writes are in this tick's dirty set.
+	pc_snapshot_spike_game_tick(pc_state_hash_tick());
 	State* s = S;
 	if (!s || !s->active) return;
-	const int64_t tEnd  = now();
+	const int64_t tEnd   = now();
 	const double frameMs = double(tEnd - s->tFrame) * s->msPerCount;
 	const double idleMs  = double(s->tIdleEnd - s->tIdle) * s->msPerCount - s->instrInIdleMs;
 	const double authMs  = s->authMarked ? double(s->tAuth - s->tIdle) * s->msPerCount : idleMs;
+	const double presentMs = (s->authMarked && s->tPresentEnd) ? msBetween(s->tAuth, s->tPresentEnd) : 0.0;
+	const double doneMs    = (s->tDoneBegin && s->tDoneEnd) ? msBetween(s->tDoneBegin, s->tDoneEnd) : 0.0;
+	const double parseMs   = (s->tDoneEnd && s->tParseEnd) ? msBetween(s->tDoneEnd, s->tParseEnd) : 0.0;
+	const double retraceMs = s->tParseEnd ? msBetween(s->tParseEnd, s->tIdleEnd) : 0.0;
 	const uint64_t tick  = pc_state_hash_tick();
 	const bool live      = naviMgr != nullptr;
+	int phase = 0, pikis = 0;
+	pc_snapshot_spike_game_sample(&phase, &pikis);
+	if (tick % 30 == 0) sampleLoad();
 
 	// 1. dirty pages since the auth-end collection (or since the last tick)
 	int64_t t0 = now();
-	s->rdPost  = collectWriteWatch();
+	if (s->writeWatch) {
+		s->rdPost = collectWriteWatch();
+	} else {
+		emulateDirty();
+		s->rdPost = s->dirtyCount;
+	}
 	s->wwMs += msSince(t0);
 	if (!s->authMarked || !s->splitAuth) {
 		s->rdAuth = s->rdPost;
@@ -1479,12 +2519,12 @@ void pc_snapshot_spike_tick_end(void)
 
 	// 2. save: old shadow -> undo pool, region -> shadow
 	t0 = now();
-	UndoTick& u    = s->ring[tick % kUndoRing];
-	u.tick         = tick;
-	u.valid        = false;
+	UndoTick& u     = s->ring[tick % kUndoRing];
+	u.tick          = tick;
+	u.valid         = false;
 	const bool fits = s->dirtyCount <= kUndoPoolPages / 2 && !s->barrier;
-	u.rStart       = s->rUndoCursor;
-	u.rCount       = 0;
+	u.rStart        = s->rUndoCursor;
+	u.rCount        = 0;
 	for (uint32_t i = 0; i < s->dirtyCount; ++i) {
 		const size_t idx = s->dirtyList[i];
 		const size_t off = idx * kPage;
@@ -1501,38 +2541,44 @@ void pc_snapshot_spike_tick_end(void)
 	}
 	const double saveMs = msSince(t0);
 
-	// 3. restore (content-identical): shadow -> region for the same pages
+	// 3. measurement mode: content-identical restore shadow -> region for the
+	// same pages. Pages that changed since the save copy (a concurrent
+	// writer) are counted and left alone, not clobbered (MV-3). Then pages
+	// written after the collect by anyone else are carried into the next
+	// tick instead of being lost to the reset.
 	double restoreMs = 0.0, restoreWwMs = 0.0;
-	if (s->doRestore) {
-		t0 = now();
+	s->wwLate = s->concRegion = s->concGlobal = 0;
+	if (s->doRestore && s->writeWatch) {
+		uint32_t n = 0;
 		for (uint32_t i = 0; i < s->dirtyCount; ++i) {
 			const size_t off = size_t(s->dirtyList[i]) * kPage;
+			if (std::memcmp(s->base + off, s->shadow + off, kPage) != 0) s->concRegion++;
+			else s->restoreTmp[n++] = s->dirtyList[i];
+		}
+		t0 = now();
+		for (uint32_t i = 0; i < n; ++i) {
+			const size_t off = size_t(s->restoreTmp[i]) * kPage;
 			std::memcpy(s->base + off, s->shadow + off, kPage);
 		}
 		restoreMs = msSince(t0);
+		s->wwLate = collectLate();
 		t0        = now();
 		resetWriteWatch();
 		restoreWwMs = msSince(t0);
-	} else {
-		t0 = now();
-		for (uint32_t i = 0; i < s->dirtyCount; ++i) {
-			const size_t off = size_t(s->dirtyList[i]) * kPage;
-			ensureGranules(s->scratch, s->scratchCommitted, kGranules, off, kPage);
-			std::memcpy(s->scratch + off, s->shadow + off, kPage);
-		}
-		restoreMs = msSince(t0);
+		s->totalWwLate += s->wwLate;
+		s->totalConcRegion += s->concRegion;
 	}
 
 	// 4. globals: compare against the shadow; changed pages are saved
-	// (skipped with the write-watch measurement off: alloc-only A/B mode)
 	t0 = now();
 	s->globDirtyCount = 0;
-	for (uint64_t i = 0; s->writeWatch && i < s->globPages; ++i) {
+	for (uint64_t i = 0; i < s->globPages; ++i) {
 		if (std::memcmp(s->globPagePtr[i], s->globShadow + i * kPage, kPage) != 0) {
 			s->globDirty[s->globDirtyCount++] = uint32_t(i);
 		}
 	}
 	const double gcmpMs = msSince(t0);
+	if (!s->timing && live && tick % 1000 == 0) logGlobalsDirty(tick);
 	t0 = now();
 	u.gStart = s->gUndoCursor;
 	u.gCount = 0;
@@ -1548,14 +2594,38 @@ void pc_snapshot_spike_tick_end(void)
 	const double gsaveMs = msSince(t0);
 	u.valid = fits;
 
-	// 5. periodic full copies
+	// 4b. measurement mode: the real globals restore of the pages just saved
+	// (content-identical, preserve list applied), timed (MV-11). A page that
+	// changed since the save copy is counted and skipped.
+	double grestoreMs = 0.0;
+	if (s->doRestore) {
+		uint32_t n = 0;
+		for (uint32_t j = 0; j < s->globDirtyCount; ++j) {
+			const uint64_t i = s->globDirty[j];
+			if (std::memcmp(s->globPagePtr[i], s->globShadow + i * kPage, kPage) != 0) s->concGlobal++;
+			else s->globDirty[n++] = uint32_t(i);
+		}
+		t0 = now();
+		for (uint32_t j = 0; j < n; ++j) restoreGlobalPage(s->globDirty[j], s->globShadow + size_t(s->globDirty[j]) * kPage);
+		grestoreMs = msSince(t0);
+		s->totalConcGlobal += s->concGlobal;
+	}
+
+	// 5. periodic full copies (measurement mode)
 	double fullMs = -1.0, fullMb = -1.0, gfullMs = -1.0;
-	if (s->writeWatch && tick % kFullEvery == 0) {
-		fullMs = fullCopy(&fullMb);
+	if (!s->timing && s->writeWatch && tick % kFullEvery == 0) {
+		fullMs = copyTouched(s->scratch, s->scratchCommitted, &fullMb);
 		t0     = now();
 		ensureGranules(s->scratch, s->scratchCommitted, kGranules, 0, s->globBytes);
 		for (uint64_t i = 0; i < s->globPages; ++i) std::memcpy(s->scratch + i * kPage, s->globPagePtr[i], kPage);
 		gfullMs = msSince(t0);
+	}
+
+	// 6. coverage audit and pointer scan
+	s->missed = -1;
+	if (s->auditEvery > 0 && tick % uint64_t(s->auditEvery) == 0) {
+		runAudit(tick);
+		if (s->ptrScan && live && (s->audits % 10) == 1) runPtrScan(tick);
 	}
 
 	const unsigned long long unknownFrees = piki_pc_spike_unknown_frees();
@@ -1566,7 +2636,10 @@ void pc_snapshot_spike_tick_end(void)
 		    "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.2f,%.4f,"
 		    "%llu,%llu,%llu,%llu,%llu,%.3f,%.3f,%.3f,%.2f,"
 		    "%llu,%llu,%llu,%llu,%d,%d,"
-		    "%.4f,%.4f,%.4f,%u,%.2f\n",
+		    "%.4f,%.4f,%.4f,%u,%.2f,"
+		    "%d,%d,%.1f,%.4f,%.4f,%.4f,%.4f,"
+		    "%.4f,%.4f,%u,%u,%u,%u,%.2f,%.2f,"
+		    "%.4f,%u,%u,%u,%lld,%d\n",
 		    (unsigned long long)tick, pc_netplay_tick(), live ? 1 : 0, s->syncPhase == 2 ? 1 : 0, authMs, idleMs,
 		    frameMs, s->rdAuth, s->rdPost, s->dirtyCount, rdMeta, rdArena, rdSmall, rdLarge, s->globDirtyCount,
 		    s->wwMs, saveMs, restoreMs, restoreWwMs, gcmpMs, gsaveMs, fullMs, fullMb, gfullMs,
@@ -1575,16 +2648,19 @@ void pc_snapshot_spike_tick_end(void)
 		    double(s->meta->liveBytes) / (1024.0 * 1024.0),
 		    double(s->meta->smallWild - (s->base + kSmallOff)) / (1024.0 * 1024.0),
 		    double(s->meta->largeWild - (s->base + kLargeOff)) / (1024.0 * 1024.0),
-		    (tick % kFullEvery == 0) ? touchedMb() : -1.0, (unsigned long long)s->offAllocs,
+		    (!s->timing && tick % kFullEvery == 0) ? touchedMb() : -1.0, (unsigned long long)s->offAllocs,
 		    (unsigned long long)s->offBytes, (unsigned long long)s->regionFreesOffMain, unknownFrees,
 		    u.valid ? 1 : 0, s->barrier ? 1 : 0, s->wwZoneMs[0], s->wwZoneMs[1], s->wwZoneMs[2], s->wwCalls,
-		    double((s->meta->smallCommitted - (s->base + kSmallOff)) + (s->meta->largeWild - (s->base + kLargeOff))
-		        + kArenaSize + kMetaCommit) / (1024.0 * 1024.0));
+		    double((s->meta->smallCommitted - (s->base + kSmallOff)) + (s->meta->largeCommitHw - (s->base + kLargeOff))
+		        + kArenaSize + kMetaCommit) / (1024.0 * 1024.0),
+		    phase, pikis, s->sysBusy, presentMs, doneMs, parseMs, retraceMs,
+		    s->wwHotMs, s->wwColdMs, s->wwHotCalls, s->wwColdCalls, s->rdHot, s->rdCold, s->hotMb, s->coldMb,
+		    grestoreMs, s->wwLate, s->concRegion, s->concGlobal, (long long)s->missed, s->syncPhase);
 		if (tick % 300 == 0) std::fflush(s->csv);
 	}
 	s->ticksLogged++;
 
-	// 6. synctest state machine (may roll region + globals back)
+	// 7. synctest state machine (may roll region + globals back)
 	syncOnTickEnd(tick, live, u.valid);
 
 	// reset per-tick state
@@ -1597,6 +2673,9 @@ void pc_snapshot_spike_tick_end(void)
 	s->rdAuth = s->rdPost = 0;
 	s->wwMs     = 0.0;
 	s->wwZoneMs[0] = s->wwZoneMs[1] = s->wwZoneMs[2] = 0.0;
+	s->wwHotMs = s->wwColdMs = 0.0;
+	s->wwHotCalls = s->wwColdCalls = s->rdHot = s->rdCold = 0;
+	s->hotMb = s->coldMb = 0.0;
 	s->wwCalls  = 0;
 	s->allocs = s->allocBytes = s->frees = s->freeBytes = 0;
 	s->offAllocs = s->offBytes = 0;
@@ -1605,21 +2684,7 @@ void pc_snapshot_spike_tick_end(void)
 	s->authMarked = false;
 }
 
-#else // !_WIN32: the spike is Windows-only (write watch); inert elsewhere.
-
-void pc_snapshot_spike_init(void) {}
-bool pc_snapshot_spike_active(void) { return false; }
-void* pc_snapshot_spike_new(size_t, void*) { return nullptr; }
-bool pc_snapshot_spike_delete(void*) { return false; }
-bool pc_snapshot_spike_arena(void**, size_t*) { return false; }
-void pc_snapshot_spike_frame_begin(void) {}
-void pc_snapshot_spike_idle_begin(void) {}
-void pc_snapshot_spike_auth_end(void) {}
-void pc_snapshot_spike_idle_end(void) {}
-void pc_snapshot_spike_tick_end(void) {}
-void pc_snapshot_spike_infra_push(int) {}
-void pc_snapshot_spike_infra_pop(void) {}
-void pc_snapshot_spike_preserve(const void*, size_t) {}
-bool pc_snapshot_spike_resimulating(void) { return false; }
-
+#else // !_WIN32: the spike is Windows-only (write watch); a build with the
+      // option on elsewhere is a configuration error, not a silent no-op.
+#error "PIKMIN_NETPLAY_SNAPSHOT_SPIKE is Windows-only (MEM_WRITE_WATCH); CMake adds this TU only under WIN32"
 #endif
