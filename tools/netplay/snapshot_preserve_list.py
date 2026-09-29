@@ -88,11 +88,56 @@ def base_names(sym):
     return [n for n in names if TOKEN.fullmatch(n)]
 
 
+def foreign_ranges(map_path):
+    """M6b (#896): .data/.bss input sections that come from outside the game's own
+    objects -- the CRT (crt2.o, libmingwex: gdtoa's Bigint freelist and its
+    critical section, libmsvcrt, libmingw32), static libstdc++/libgcc (locale,
+    EH emergency pool) and third-party infra libs (libjuice, bbft transport).
+    None of it is sim state; rolling it back corrupted the CRT (M6b
+    runs/g1B-foh-b: every %f printed zeros from tick 28218, then a crash).
+    Game code is LTO'd (ltrans objects) or a CMakeFiles object: kept.
+    Returns (lo_rva, hi_rva, label) ranges."""
+    out = []
+    section = None
+    pending = None
+    entry = re.compile(r"^ (\S+)\s+0x([0-9a-fA-F]+)\s+0x([0-9a-fA-F]+)\s+(.+)$")
+    cont = re.compile(r"^\s+0x([0-9a-fA-F]+)\s+0x([0-9a-fA-F]+)\s+(.+)$")
+    with open(map_path, errors="replace") as fh:
+        for line in fh:
+            line = line.rstrip()
+            if line and not line[0].isspace():
+                section = line.split()[0]
+                pending = None
+                continue
+            if section not in (".data", ".bss"):
+                continue
+            m = entry.match(line)
+            if m:
+                name, addr, size, obj = m.group(1), int(m.group(2), 16), int(m.group(3), 16), m.group(4)
+            elif pending is not None and cont.match(line):
+                c = cont.match(line)
+                name, addr, size, obj = pending, int(c.group(1), 16), int(c.group(2), 16), c.group(3)
+            else:
+                m2 = re.match(r"^ (\.(?:data|bss)\S*|COMMON)$", line)
+                pending = m2.group(1) if m2 else None
+                continue
+            pending = None
+            if not name.startswith((".data", ".bss", "COMMON")) or size == 0 or addr < IMAGE_BASE:
+                continue
+            if "ltrans" in obj or "CMakeFiles" in obj:
+                continue
+            lib = re.sub(r"\(.*", "", obj).replace("\\", "/").rsplit("/", 1)[-1]
+            out.append((addr - IMAGE_BASE, addr + size - IMAGE_BASE, f"[{lib}] {name}"))
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--exe", required=True)
     ap.add_argument("--src", required=True, help="native worktree root")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--map", default=None,
+                    help="M6b: link map; also preserve every .data/.bss input section not from a game object")
     a = ap.parse_args(argv)
     root = Path(a.src)
     infra_files = sorted({p for g in INFRA_GLOBS for p in root.glob(g)})
@@ -133,6 +178,10 @@ def main(argv=None):
             continue
         if any(bn in only_infra for n in names for bn in base_names(n)):
             lines.append((addr - IMAGE_BASE, end - IMAGE_BASE, names[0]))
+    if a.map:
+        foreign = foreign_ranges(a.map)
+        lines.extend(foreign)
+        print(f"{len(foreign)} foreign .data/.bss input sections, {sum(h - l for l, h, _ in foreign)} bytes")
     uniq = sorted(set(lines))
     with open(a.out, "w") as f:
         f.write(f"# preserve list for {a.exe}: {len(uniq)} symbols, infra files {len(infra_files)}, sim files {len(sim_files)}\n")
