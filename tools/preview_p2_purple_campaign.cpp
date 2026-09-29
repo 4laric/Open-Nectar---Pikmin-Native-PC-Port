@@ -70,8 +70,13 @@ class PurpleCampaignApp : public PlugPikiApp {
             if (input && input->isAlive() && !pc_p2_is_purple(input) && !input->isStickTo() && violet
                 && input->getState() == PIKISTATE_Normal && phaseTicks % 60 == 0) {
                 input->changeMode(PikiMode::FreeMode,n); input->mFSM->transit(input,PIKISTATE_Flying);
-                n->throwPiki(input,violet->mSRT.t);
-                std::puts("P2_PURPLE_SCRIPTED_THROW real_collision=1");
+                // Sweep the scripted reticle through the native arc; its nominal
+                // endpoint is not the ground intercept when hold height varies.
+                const float aimScale = 0.5f + 0.1f * ((phaseTicks / 60) % 6);
+                Vector3f aim = n->mSRT.t + (violet->mSRT.t - n->mSRT.t) * aimScale;
+                n->throwPiki(input,aim);
+                std::printf("P2_PURPLE_SCRIPTED_THROW real_collision=1 aim_scale=%.2f captain=%.1f,%.1f,%.1f velocity=%.1f,%.1f,%.1f\n",
+                    aimScale,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,input->mVelocity.x,input->mVelocity.y,input->mVelocity.z);
             }
             Iterator heads(itemMgr->getPikiHeadMgr());
             CI_LOOP(heads) {
