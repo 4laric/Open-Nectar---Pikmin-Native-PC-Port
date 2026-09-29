@@ -45,11 +45,14 @@
 //     longer (a load, a driver hang or an outage: at most 8 frames of delay
 //     cannot hide them), stalls inside a lane S load window and stalls in
 //     the session's first frames (time sync settling); all stay in the stats;
-//   - a slow tick on THIS peer (an Advance longer than a slot: a shader
-//     compile, a GC pause) delays this peer's next inputs by its overrun, and
-//     the peer duly reports the wait. The delay is for the network, so the
-//     controller subtracts this peer's own overrun (outside load windows,
-//     from selfLeadMs (1 s) before the window on) from the reported lateness;
+//   - lateness of THIS peer (a turn that starts behind its 30 Hz schedule:
+//     a long tick such as a shader compile, a late wake-up on a loaded
+//     machine) delays this peer's next inputs, and the peer duly reports the
+//     wait. The delay is for the network, so the controller subtracts this
+//     peer's own lateness (outside load windows, from selfLeadMs (1 s) before
+//     the window on) from the reported lateness. (First clean-60 runs on a
+//     machine shared with other lanes: 5.2 s of slow ticks on both peers in
+//     one run, 0.1-0.4 s in the next.);
 //   - need(rtt) is the handshake auto-delay formula, ceil((rtt/2)/33.3 ms -
 //     0.05) + 1, clamped to [min, max], applied to the measured in-session
 //     RTT minus one slot of turn quantization (Policy::rttBiasMs).
@@ -383,7 +386,8 @@ public:
 		if (net < 0) net = 0;
 		return delay_for_rtt(net, mP.minDelay, mP.maxDelay);
 	}
-	// This peer's own tick overrun (tick ms beyond one slot) at atMs.
+	// This peer's own input lateness (ms its turn start fell further behind
+	// the 30 Hz schedule) at atMs.
 	void add_self_overrun(double atMs, double ms)
 	{
 		mSelf.push_back(RttSample{ atMs, ms });

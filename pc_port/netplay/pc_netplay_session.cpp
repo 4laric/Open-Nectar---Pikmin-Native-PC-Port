@@ -2122,7 +2122,11 @@ uint32_t sAdviceSeq = 0;
 double sAdviceNextMs = 0;
 pc_netplay_adaptive::AdviceReceiver sAdviceIn;
 double sPeerLateMs = 0; // lateness the peer reported (this peer's inputs late there)
-double sSelfOverrunMs = 0; // own tick overrun beyond a slot, outside load windows
+double sSelfOverrunMs = 0; // own input lateness vs the 30 Hz schedule, outside load windows
+double sNextDueMs = 0;     // when the next session turn is due to start (pacing schedule)
+bool sHaveDue = false;
+bool sPrevTurnStalled = true;
+double sOwnLagPrev = 0;
 float sStallAhead = 0;     // gekko_frames_ahead() when the open stall began (trace)
 int sStallTrace = -1;      // PIKMIN_NETPLAY_STALL_TRACE=1: one line per stall event / slow tick
 
@@ -2167,6 +2171,10 @@ void adaptive_configure()
 	sAdviceIn.reset();
 	sPeerLateMs = 0;
 	sSelfOverrunMs = 0;
+	sNextDueMs = 0;
+	sHaveDue = false;
+	sPrevTurnStalled = true;
+	sOwnLagPrev = 0;
 	sNextLand = sCfg.localDelay; // the first add fills frames 0..d-1 with GekkoNet's empty input
 	pc_netplay_adaptive::Policy pol;
 	sDelayCtl.configure(pol);
@@ -2336,18 +2344,49 @@ void adaptive_close_stall()
 	}
 }
 
-// After each Advance's tick: a tick longer than a slot delays this peer's
-// next inputs by the overrun (the peer will report the wait); outside load
-// windows (whose stalls nobody reports) it offsets reported lateness.
+// Own lateness. This peer produces its next input at the start of each turn,
+// and the 30 Hz schedule says when that turn is due (sNextDueMs, set by the
+// pacing block of the previous advance turn). A turn that starts late
+// because of this peer (a long tick, a late wake-up of a loaded machine)
+// delays its input by that much, and the peer will report the wait. The lag
+// only counts where it grows (a catch-up run of turns after one long tick
+// shrinks it again), never after a stall turn (then the lag is the peer's
+// doing: the baseline resets), and not inside a load window (nobody reports
+// those stalls). The controller subtracts it from the reported lateness.
+void adaptive_note_turn_start(double turnStartMs)
+{
+	if (!sAdaptiveConfigured || !sGekkoStarted || sAdvances == 0 || pc_netplay_unthrottled()) return;
+	const double lag = (sHaveDue && turnStartMs > sNextDueMs) ? turnStartMs - sNextDueMs : 0.0;
+	if (sPrevTurnStalled || !sHaveDue) {
+		sOwnLagPrev = lag;
+		return;
+	}
+	const double grew = lag - sOwnLagPrev;
+	sOwnLagPrev = lag;
+	if (grew <= 0 || sLgWindow.is_open()) return;
+	sSelfOverrunMs += grew;
+	sDelayCtl.add_self_overrun(turnStartMs, grew);
+	if (stall_trace() && grew >= 20.0) {
+		printf("[netplay] stall-trace: own lag frame=%llu t=%.3fs +%.1fms (behind schedule %.1fms)\n",
+		       (unsigned long long)sAdvances, session_s(turnStartMs), grew, lag);
+		fflush(stdout);
+	}
+}
+
+// End of a session turn: the pacing's next due time (advance turns only).
+void adaptive_note_turn_end(bool advanced, bool haveDue, double nextDueMs)
+{
+	sPrevTurnStalled = !advanced;
+	if (advanced && haveDue) {
+		sNextDueMs = nextDueMs;
+		sHaveDue = true;
+	}
+}
+
+// After each Advance's tick (trace only).
 void adaptive_note_tick(double tickMs)
 {
-	if (tickMs <= pc_netplay_adaptive::kSlotMs) return;
-	const double over = tickMs - pc_netplay_adaptive::kSlotMs;
 	const double now = now_ms();
-	if (!sLgWindow.is_open()) {
-		sSelfOverrunMs += over;
-		sDelayCtl.add_self_overrun(now, over);
-	}
 	if (stall_trace() && tickMs >= 50.0) {
 		printf("[netplay] stall-trace: slow tick frame=%llu t=%.3fs tick=%.1fms window=%d\n",
 		       (unsigned long long)sAdvances, session_s(now), tickMs, (int)sLgWindow.is_open());
@@ -2442,7 +2481,7 @@ void adaptive_stats_line(const char* tag)
 	const pc_netplay_adaptive::FrameTimeHist& f = sStats.frames();
 	printf("[netplay] %s: t=%.1fs frame=%llu delay=%u (start %u, range %u..%u, up %llu down %llu) "
 	       "stalls=%llu total=%.0fms max=%.0fms excluded=%llu last10s=%llu/%.0fms reported=%.0fms "
-	       "slow-ticks=%.0fms peer: delay=%d late=%.0fms reports=%llu "
+	       "own-lag=%.0fms peer: delay=%d late=%.0fms reports=%llu "
 	       "rtt last=%.0f p50=%.0f p95=%.0f jitter=%.1f samples=%llu "
 	       "frames=%llu p50=%.1f p95=%.1f p99=%.1f max=%.1f >50ms=%llu >100ms=%llu\n",
 	       tag, session_s(now), (unsigned long long)sAdvances, sCfg.localDelay, sDelayStart, sDelayLow, sDelayHigh,
@@ -4338,7 +4377,7 @@ int handle_game_events(System* sys, BaseApp* app)
 			                     e->data.adv.rolling_back || e->data.adv.running_ahead);
 			app->idle();
 			loadguard_tick_end();
-			adaptive_note_tick(now_ms() - sLgTickStartMs); // M5c lane B: own slow ticks
+			adaptive_note_tick(now_ms() - sLgTickStartMs); // M5c lane B: slow-tick trace
 			pc_netplay_det_profile_note_tick();
 			pc_input_log_tick_end();
 			pc_state_hash_tick_end();
@@ -4958,6 +4997,7 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 	// kSession.
 	const bool unthrottled = pc_netplay_unthrottled();
 	const double turnStartMs = now_ms();
+	adaptive_note_turn_start(turnStartMs); // M5c lane B: own input lateness
 	// 1. Sample the local pad (pumps SDL via PADRead).
 	sys->mControllerMgr.update();
 	// 2-3. Build + submit the local input, at most one per Advance (B2).
@@ -5042,6 +5082,8 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 	// the schedule itself (M1): sleeping after the deadline only shifts one
 	// turn's phase and never converges, so the ahead peer stretches its own
 	// deadline by a small proportional share instead.
+	double nextDueMs = 0; // M5c lane B: see adaptive_note_turn_start
+	bool haveDue = false;
 	if (!unthrottled) {
 		constexpr double kSlotMs = 1000.0 / 30.0;
 		constexpr double kMaxCatchupSlots = 5.0;
@@ -5063,6 +5105,8 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 			if (effAdv > kMaxAdvanceSlots) effAdv = kMaxAdvanceSlots;
 			double now = now_ms();
 			if (sNextTurnMs == 0) sNextTurnMs = now + kSlotMs;
+			nextDueMs = sNextTurnMs; // M5c lane B: the next turn is due here (a snap moves it to now)
+			haveDue = true;
 			if (now < sNextTurnMs) {
 				// Fix3 R2-3: one call; the timer carries the bulk and
 				// sleep_hires_ms owns the whole spin tail (at most 1 ms per
@@ -5077,6 +5121,7 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 				const double behind = now - sNextTurnMs;
 				if (behind > kMaxCatchupSlots * kSlotMs) {
 					sNextTurnMs = now + kSlotMs;
+					nextDueMs = now;
 				} else {
 					sNextTurnMs += kSlotMs * effAdv + extraMs;
 				}
@@ -5120,6 +5165,7 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 		// (update_session) and window events (PADRead poll).
 	}
 	if (advances > 0) adaptive_close_stall(); // M5c lane B: the stall (if any) ended
+	adaptive_note_turn_end(advances > 0, haveDue, nextDueMs);
 	adaptive_poll(now_ms());                  // M5c lane B: RTT sample every 500 ms
 	return true;
 }
