@@ -1622,6 +1622,13 @@ private:
                           int(result.carried), int(result.received), result.seconds);
         }
         markers.emplace_back(buf);
+        // The combat latches belong to the finished token. Left set, the next
+        // Select saw "token switch with latched combat scores" against a second
+        // live target of the same species and re-emitted this RESULT every
+        // tick (#897 Groink 78 re-run: 3,700 duplicate RESULT lines).
+        sawDamage = false;
+        sawKill = false;
+        sawReceipt = false;
         // The driver advances to the next target (or Done when none remain).
         enter(State::Select, in);
     }

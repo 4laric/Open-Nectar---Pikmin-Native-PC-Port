@@ -338,6 +338,26 @@ void testCombatFlow()
           "combat/result_kill_carry");
     CHECK(hasMarker(markers, "received=1"), "combat/result_received");
     CHECK(hasMarker(markers, "bot-driven"), "combat/result_labelled_bot_driven");
+
+    // A second live target of the same species after the RESULT: exactly one
+    // RESULT for the first token, then the new token is engaged (#897).
+    s.targetToken = 5465462;
+    s.targetAlive = true;
+    s.targetDead = false;
+    s.targetDamagedLatch = false;
+    s.receiptSeen = false;
+    s.transportSeen = false;
+    s.targetHealthFrac = 1.0f;
+    s.targetDist = 1000.0f;
+    int again = 0;
+    for (int i = 0; i < 20; ++i) {
+        brain.update(0.05f, s);
+        for (const std::string& m : brain.takeMarkers())
+            if (m.find("AUTOPLAY_RESULT target=5465461") != std::string::npos) ++again;
+    }
+    CHECK(again == 0, "combat/no_duplicate_result_on_next_token");
+    CHECK(brain.current() == p2autoplay::State::Approach || brain.current() == p2autoplay::State::Attack,
+          "combat/engages_next_token");
 }
 
 void testKoganeMovesOn()
