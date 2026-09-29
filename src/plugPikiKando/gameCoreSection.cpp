@@ -3069,7 +3069,7 @@ static bool coopDownCaptain(Navi* navi)
     return true;
 }
 
-// PIKMIN_NETPLAY_TEST_COOP_EVENTS=<file>: scripted HP/DOWN events at fixed
+// PIKMIN_NETPLAY_TEST_COOP_EVENTS=<file>: scripted test events (grammar in pc_coop_policy.h) at fixed
 // co-op ticks, inert when unset. It is honoured only by the netplay build in
 // hidden test runs (pc_coop_events_knob_path). Changes sim state, so a pair
 // must pass the same file to both peers (not yet in the handshake config
@@ -3102,6 +3102,17 @@ static void coopRunTestEvents(Navi* p1, Navi* p2)
         if (ev.tick != sCoopPolicy.tick) continue;
         std::printf("[coop-policy] TEST event tick=%u %s\n", sCoopPolicy.tick, ev.text);
         const char* refused = nullptr;
+        // Gap-fix K fix1 (#885): the day end sets the clock back, which resets
+        // the policy (reason=clock) and re-arms this schedule inside the
+        // day-end sequence. The day-end kinds set that sequence up, so they
+        // must not mutate it: refuse them until the next stage entry.
+        const bool dayEndKind = ev.kind == PC_COOP_EVENT_SQUAD || ev.kind == PC_COOP_EVENT_DISMISS
+                             || ev.kind == PC_COOP_EVENT_HOME || ev.kind == PC_COOP_EVENT_SUNSET;
+        if (dayEndKind && playerState->inDayEnd()) {
+            std::printf("[coop-policy] TEST refused tick=%u %s reason=day-end\n", sCoopPolicy.tick, ev.text);
+            std::fflush(stdout);
+            continue;
+        }
         if (ev.kind == PC_COOP_EVENT_SUNSET) {
             // Gap-fix K (#885): jump to the day's end hour; RunningModeState::update
             // then runs the ordinary time-expiry day end (cleanupDayEnd, the
@@ -3150,15 +3161,22 @@ static void coopRunTestEvents(Navi* p1, Navi* p2)
             else navi->mHealth = hp;
         } else if (ev.kind == PC_COOP_EVENT_SQUAD) {
             // Gap-fix K (#885): the first <count> Pikmin (pikiMgr order) in the
-            // other captain's squad join this one, as the coop-policy fixture's
-            // deathlink-p1-down split does; they then follow and belong to it.
+            // other captain's squad join this one; they then follow and belong
+            // to it. Fix1: the squad action is abandoned while mNavi is still
+            // the old captain, so ActCrowd::cleanup decrements that captain's
+            // plate count (it reads mPiki->mNavi) as it releases the slot, the
+            // order pc_p2_captain.cpp live_prepare_capture keeps. Changing
+            // mNavi first left the old plate's count too high and the new
+            // one's at 0 with slots taken, so the new captain's plate walked
+            // nobody (Navi::releasePikis, the Fue enter).
             Navi* from = navis[2 - ev.captain];
             int moved = 0;
             Iterator it(pikiMgr);
             CI_LOOP(it) {
                 if (moved >= ev.count) break;
                 Piki* piki = static_cast<Piki*>(*it);
-                if (!piki || !piki->isAlive() || piki->mNavi != from || piki->mMode != PikiMode::FormationMode) continue;
+                if (!from || !piki || !piki->isAlive() || piki->mNavi != from || piki->mMode != PikiMode::FormationMode) continue;
+                piki->mActiveAction->abandon(nullptr);
                 piki->mNavi = navi;
                 piki->changeMode(PikiMode::FormationMode, navi);
                 ++moved;
@@ -3167,18 +3185,24 @@ static void coopRunTestEvents(Navi* p1, Navi* p2)
             if (!moved) refused = "no-squad";
         } else if (ev.kind == PC_COOP_EVENT_DISMISS) {
             // The captain's squad goes free where it stands (FreeMode, still
-            // owned by it). Navi::releasePikis released none of a squad built
-            // by SQUAD in these runs, so this frees each member directly.
-            int released = 0;
-            Iterator it(pikiMgr);
-            CI_LOOP(it) {
-                Piki* piki = static_cast<Piki*>(*it);
-                if (!piki || !piki->isAlive() || piki->mNavi != navi || piki->mMode != PikiMode::FormationMode) continue;
-                piki->changeMode(PikiMode::FreeMode, navi);
-                ++released;
-            }
-            std::printf("[coop-policy] TEST dismiss tick=%u captain=%d released=%d\n", sCoopPolicy.tick, ev.captain, released);
-            if (!released) refused = "none-released";
+            // owned by it), through the game's own dismiss (Navi::releasePikis,
+            // which walks the captain's formation plate). released = squad
+            // members owned by it before minus after.
+            auto squadOf = [](Navi* owner) {
+                int n = 0;
+                Iterator it(pikiMgr);
+                CI_LOOP(it) {
+                    Piki* piki = static_cast<Piki*>(*it);
+                    if (piki && piki->isAlive() && piki->mNavi == owner && piki->mMode == PikiMode::FormationMode) ++n;
+                }
+                return n;
+            };
+            const int before = squadOf(navi);
+            navi->releasePikis();
+            const int kept = squadOf(navi);
+            std::printf("[coop-policy] TEST dismiss tick=%u captain=%d released=%d kept=%d\n", sCoopPolicy.tick, ev.captain, before - kept,
+                kept);
+            if (before - kept <= 0) refused = "none-released";
         } else if (ev.kind == PC_COOP_EVENT_HOME) {
             // The captain's free Pikmin stand by the Onion of their colour (the
             // ship when that Onion is absent), 60 units out, well inside the
@@ -3794,12 +3818,16 @@ static void coopPolicyFixture(Navi* p1, Navi* p2, MapMgr* map, int initialColor)
     } else if (c == "deathlink-p1-down") {
         if (step == 0) {
             // Split the field squad: every other Pikmin in P1's squad moves to P2.
+            // Gap-fix K fix1 (#885): abandon the squad action while mNavi is
+            // still P1, so ActCrowd::cleanup decrements P1's plate count, not
+            // P2's (as the SQUAD test event does).
             int moved = 0, index = 0;
             Iterator it(pikiMgr);
             CI_LOOP(it) {
                 Piki* piki = static_cast<Piki*>(*it);
                 if (!piki || !piki->isAlive() || piki->mNavi != p1 || piki->mMode != PikiMode::FormationMode) continue;
                 if (index++ % 2) continue;
+                piki->mActiveAction->abandon(nullptr);
                 piki->mNavi = p2;
                 piki->changeMode(PikiMode::FormationMode, p2);
                 ++moved;
