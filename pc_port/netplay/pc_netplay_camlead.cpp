@@ -155,6 +155,7 @@ struct Stats {
 	uint64_t repeats      = 0; // presentations of an already-stepped tick (not stepped again)
 	uint64_t gaps         = 0; // predictions whose pending window had a missing landing frame
 	uint64_t viewInAuth   = 0; // view() reached in the authoritative pass (must be 0)
+	uint64_t dayEndViews  = 0; // gameplay views inside the day-end sequence (no lead)
 	float maxCorr         = 0.0f;
 };
 Stats sStats;
@@ -353,7 +354,7 @@ void pc_netplay_camlead_session_end(void)
 	std::printf("[netplay] camera lead summary: %s views=%llu lead_frames=%llu predictions=%llu steps=%llu "
 	            "max_steps=%d start_cuts=%llu held=%llu snaps=%llu drops=%llu max_corr=%.2f sim_saw_lead=%llu "
 	            "held_overlay=%llu held_pauseall=%llu held_other=%llu repeats=%llu gaps=%llu view_in_auth=%llu "
-	            "own_camera=%s\n",
+	            "day_end_views=%llu own_camera=%s\n",
 	            sArmed ? "on" : "off", (unsigned long long)sStats.views, (unsigned long long)sStats.leadFrames,
 	            (unsigned long long)sStats.predictions, (unsigned long long)sStats.steps, sStats.maxSteps,
 	            (unsigned long long)sStats.startStops, (unsigned long long)sStats.held,
@@ -361,7 +362,8 @@ void pc_netplay_camlead_session_end(void)
 	            (unsigned long long)sStats.simSawLead, (unsigned long long)sStats.heldOverlay,
 	            (unsigned long long)sStats.heldPauseAll, (unsigned long long)sStats.heldOther,
 	            (unsigned long long)sStats.repeats, (unsigned long long)sStats.gaps,
-	            (unsigned long long)sStats.viewInAuth, sJoinerOwn ? "on" : "off");
+	            (unsigned long long)sStats.viewInAuth, (unsigned long long)sStats.dayEndViews,
+	            sJoinerOwn ? "on" : "off");
 	std::fflush(stdout);
 	sSession    = false;
 	sArmed      = false;
@@ -492,6 +494,18 @@ Camera* pc_netplay_camlead_view(int localPlayer, Camera* simView)
 	// peer's own captain (PIKMIN_NETPLAY_LOCAL_PLAYER can show the other).
 	if (localPlayer != sRole || pc == nullptr || pc->mCamera == nullptr || mgr->mController == nullptr
 	    || pc->mTargetCreature == nullptr || !pc->mIsActive || pc_first_person_active()) {
+		drop_correction();
+		return simView;
+	}
+	if (gameflow.mIsDayEndActive) {
+		// The day-end sequence: the sunset demo drives the camera, and the
+		// gameplay view shows up only on single frames between its
+		// cinematics. A lead there would only replay the demo's own camera
+		// motion a few ticks early (a one-frame pop; fix round 1, evidence
+		// review E1), so the view is exactly the sim camera until the next
+		// day starts.
+		sRow.simUpdated = postOk && post.frame == sFrame;
+		++sStats.dayEndViews;
 		drop_correction();
 		return simView;
 	}
