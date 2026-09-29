@@ -836,13 +836,17 @@ void pc_p2_autoplay_tick(void)
         // #901: nearest unfinished route obstacle within 450 u of the captain
         // (read-only): gates (sluices), bridges, hinder rocks.
         float bestD = 450.0f;
-        auto consider = [&](Creature* obj, int kind) {
+        auto consider = [&](Creature* obj, int kind, int stage, int stages) {
             const float d = distXZ(naviX, naviZ, obj->getPosition().x, obj->getPosition().z);
             if (d < bestD) {
                 bestD = d;
                 senses.obstacleKind = kind;
                 senses.obstacleX = obj->getPosition().x;
                 senses.obstacleZ = obj->getPosition().z;
+                senses.obstacleType = obj->mObjType;
+                senses.obstacleStage = stage;
+                senses.obstacleStages = stages;
+                senses.obstacleHealth = obj->mHealth;
             }
         };
         if (itemMgr->getMeltingPotMgr()) {
@@ -850,8 +854,12 @@ void pc_p2_autoplay_tick(void)
             CI_LOOP(oit)
             {
                 Creature* obj = *oit;
-                if (obj && obj->isSluice() && obj->isAlive() && !static_cast<BuildingItem*>(obj)->isCompleted())
-                    consider(obj, 1);
+                // Bomb gates (24/25) open only to bombs: never a punch target.
+                if (obj && (obj->mObjType == OBJTYPE_SluiceSoft || obj->mObjType == OBJTYPE_SluiceHard) && obj->isAlive()
+                    && !static_cast<BuildingItem*>(obj)->isCompleted()) {
+                    BuildingItem* gate = static_cast<BuildingItem*>(obj);
+                    consider(obj, 1, gate->mCurrStage, gate->mNumStages);
+                }
             }
         }
         if (workObjectMgr) {
@@ -860,8 +868,8 @@ void pc_p2_autoplay_tick(void)
             {
                 WorkObject* obj = static_cast<WorkObject*>(*oit);
                 if (!obj || obj->isFinished()) continue;
-                if (obj->isBridge()) consider(obj, 2);
-                else if (obj->isHinderRock()) consider(obj, 3);
+                if (obj->isBridge()) consider(obj, 2, 0, 0);
+                else if (obj->isHinderRock()) consider(obj, 3, 0, 0);
             }
         }
     }

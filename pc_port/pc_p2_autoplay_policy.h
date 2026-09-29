@@ -387,6 +387,7 @@ struct Config {
     float obstacleRingMin = 70.0f;
     float obstacleRingMax = 150.0f;
     float obstacleTimeout = 150.0f;
+    float obstacleHardTimeout = 420.0f; // hard (23) gates: far more health per stage
  // 0.24*127 = 30 bytes: |stick| 0.41 (look band), no MSTICK bits (> 32)
 };
 
@@ -506,6 +507,13 @@ struct Senses {
     float obstacleX = 0.0f;
     float obstacleZ = 0.0f;
     int workCount = 0;
+    // Diagnostics for the log: the obstacle's object type (22 soft gate,
+    // 23 hard gate, bridge/rock = their WorkObject kind), build stage and
+    // health. Bomb gates (24/25) are never reported: punching cannot open them.
+    int obstacleType = 0;
+    int obstacleStage = 0;
+    int obstacleStages = 0;
+    float obstacleHealth = 0.0f;
     // #884 round 4: live throw cursor (navi position + Navi::mCursorPosition,
     // world XZ). Only the King standoff hold reads it, to slide the cursor
     // onto the King instead of past it; without it the hold look-steers at
@@ -1078,7 +1086,8 @@ private:
         }
         obsTime += dt;
         stateTime -= dt; // obstacle work does not spend the approach budget
-        if (obsTime >= cfg.obstacleTimeout) {
+        const float limit = in.obstacleType == 23 ? cfg.obstacleHardTimeout : cfg.obstacleTimeout;
+        if (obsTime >= limit) {
             obsWork = false;
             ++obsGiveups;
             char buf[160];
@@ -1092,8 +1101,9 @@ private:
             obsLogTime = 5.0f;
             char buf[200];
             std::snprintf(buf, sizeof(buf),
-                          "AUTOPLAY_OBSTACLE work kind=%d work=%d at=(%.0f,%.0f) seconds=%.0f bot-driven",
-                          in.obstacleKind, in.workCount, in.obstacleX, in.obstacleZ, obsTime);
+                          "AUTOPLAY_OBSTACLE work kind=%d type=%d stage=%d/%d health=%.0f work=%d at=(%.0f,%.0f) seconds=%.0f bot-driven",
+                          in.obstacleKind, in.obstacleType, in.obstacleStage, in.obstacleStages, in.obstacleHealth,
+                          in.workCount, in.obstacleX, in.obstacleZ, obsTime);
             markers.emplace_back(buf);
         }
         const float dx = in.obstacleX - in.naviX, dz = in.obstacleZ - in.naviZ;
