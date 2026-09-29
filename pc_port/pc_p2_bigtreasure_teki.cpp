@@ -751,6 +751,23 @@ float pc_p2_bigtreasure_teki_effective_health(const BTeki* teki, float fallback)
     return hp;
 }
 
+bool pc_p2_bigtreasure_teki_aim_point(const BTeki* teki, float x, float z, float* outX, float* outZ) {
+    const Binding* b = find(teki);
+    if (!b || b->began || b->deadLogged || !outX || !outZ) return false;
+    float best = -1.0f;
+    for (int w = 0; w < P2BTWEAPON_Count; ++w) {
+        if (!b->fsm.ownership().isWeaponAttached(w)) continue;
+        const Vec3 p = b->fsm.jointWorld(w);
+        const float d = (p.x - x) * (p.x - x) + (p.z - z) * (p.z - z);
+        if (best < 0.0f || d < best) {
+            best = d;
+            *outX = p.x;
+            *outZ = p.z;
+        }
+    }
+    return best >= 0.0f;
+}
+
 bool pc_p2_bigtreasure_teki_suppress_ai(const BTeki* teki) {
     const Binding* b = find(teki);
     return b && !b->began;

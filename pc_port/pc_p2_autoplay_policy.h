@@ -304,8 +304,9 @@ struct Config {
     float koganeConfirm = 20.0f; // after Kogane damage, watch escapes then move on
     float kurageAttackMultiplier = 2.0f; // Kurage has high HP: longer attack window
     // #246: the Titan Dweevil (73) soaks 4 x 6000 weapon HP before its 5000
-    // body HP is exposed; the bot keeps throwing for a longer window.
-    float titanAttackMultiplier = 3.0f;
+    // body HP is exposed, and only a Pikmin stuck on a weapon's own part
+    // damages it; the bot keeps throwing for a longer window (bot assistance).
+    float titanAttackMultiplier = 6.0f;
     // #246: a Titan lets go of every stuck Pikmin at Dead (deathProcedure
     // setAlive(false)) ~11 s before its corpse forms, so the aftermath can
     // start with an empty squad and nobody to seed-throw. A player whistles
@@ -427,6 +428,11 @@ struct Senses {
     unsigned targetSource = 0;
     float tgtX = 0.0f;
     float tgtZ = 0.0f;
+    // #246 bot assistance: a throw aim point other than the actor centre
+    // (the Titan's nearest captured weapon, the only stickable part).
+    bool aimValid = false;
+    float aimX = 0.0f;
+    float aimZ = 0.0f;
     float targetDist = 1.0e30f; // XZ distance navi -> target
     bool targetAlive = false;
     float targetHealthFrac = 1.0f; // 1 == untouched
@@ -1100,7 +1106,7 @@ private:
         // Kurage: body is on the ground (visual float only) so throw at the
         // body position; high HP means a longer window, and throws rotate to
         // spread Pikmin around the bell.
-        float aimX = in.tgtX, aimZ = in.tgtZ;
+        float aimX = in.aimValid ? in.aimX : in.tgtX, aimZ = in.aimValid ? in.aimZ : in.tgtZ;
         float gap = cfg.throwGap;
         if (kurage) {
             throwSpin += dt * 1.5f;
