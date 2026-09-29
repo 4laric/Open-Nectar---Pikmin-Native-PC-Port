@@ -22,6 +22,7 @@
 #include "pc_p2_long_legs.h"
 #include "pc_p2_long_legs_fsm.h"
 #include "pc_p2_houdai_fsm.h"
+#include "pc_p2_long_legs_ik.h"
 #include "MapMgr.h"
 #include "EffectMgr.h"
 #include "UtEffect.h"
@@ -36,6 +37,9 @@
 #include "Interactions.h"
 #include "Generator.h"
 #include "Shape.h"
+#include "Joint.h"
+#include "Material.h"
+#include "system.h"
 #include "Texture.h"
 #include "Graphics.h"
 #include "Camera.h"
@@ -116,7 +120,23 @@ struct ActorState {
     int receiverAccepted = 0, receiverRejected = 0;
     bool scaleLogged = false;       // per-actor P2_HOUDAI_SCALE line
     bool stayIntangible = false;    // Stay: host collision/shadow/gauge off
+    // #173 walk animation: source IKSystemMgr legs over the rigid skin
+    // sidecar, drawn through a private copy of the bind mesh. Draw-only: it
+    // reads the brain's strides and the map floor, draws no RNG and never
+    // moves the host body, so gameplay and lockstep state are unchanged.
+    Shape* ikShape = nullptr;
+    bool ikStarted = false;
+    bool ikDrawLogged = false;
+    p2ik::Mgr ik;
+    int ikStrides = 0, ikLifts = 0, ikPlants = 0;
 };
+
+// Rigid skin of the Man-at-Legs bind mesh (longlegs_Houdai_skin_00.txt) and
+// the skin joint index of every IK leg joint (Houdai::setupIKSystem order).
+p2ik::Skin houdaiSkin;
+bool houdaiSkinReady = false;
+int houdaiLegJoint[p2ik::kLegCount][3];
+float houdaiSkinBindError = 0.0f;
 
 std::map<BTeki*, ActorState> actors;      // actor -> species + policy state
 // Naturally dead Long Legs proxy corpses, keyed on the corpse Pellet* the engine
@@ -748,6 +768,200 @@ void houdaiSetIntangible(BTeki* actor, ActorState& state, bool on) {
                 int(teki->isAtari()));
 }
 
+// ---- #173 IK legs ---------------------------------------------------------
+
+const p2ik::Parms& houdaiIkParms() {
+    static const p2ik::Parms parms = p2ik::houdaiParms();
+    return parms;
+}
+
+// Source mapMgr->getMinY for the leg IK (foot landing height).
+float houdaiGround(void*, float x, float z) {
+    return mapMgr ? mapMgr->getMinY(x, z, true) : 0.0f;
+}
+
+p2ik::M34 houdaiM34(const Matrix4f& m) {
+    p2ik::M34 r;
+    for (int row = 0; row < 3; ++row)
+        for (int col = 0; col < 4; ++col) r.m[row][col] = m.mMtx[row][col];
+    return r;
+}
+
+// Body world matrix at tick time: T(pos) * RotY(face) * S(scale), the same
+// SRT BTeki::refresh builds mWorldMtx from (P1 facing: forward = sin, cos).
+p2ik::M34 houdaiBodyMatrix(BTeki* actor) {
+    const Vector3f p = actor->getPosition();
+    const float face = static_cast<Teki*>(actor)->getDirection();
+    const float s = (actor->mSRT.s.y > 0.05f && actor->mSRT.s.y < 20.0f) ? actor->mSRT.s.y : 1.0f;
+    const float c = std::cos(face), n = std::sin(face);
+    p2ik::M34 m;
+    m.m[0][0] = c * s;  m.m[0][1] = 0.0f; m.m[0][2] = n * s; m.m[0][3] = p.x;
+    m.m[1][0] = 0.0f;   m.m[1][1] = s;    m.m[1][2] = 0.0f;  m.m[1][3] = p.y;
+    m.m[2][0] = -n * s; m.m[2][1] = 0.0f; m.m[2][2] = c * s; m.m[2][3] = p.z;
+    return m;
+}
+
+void houdaiLegJoints(const p2ik::M34& world, p2ik::M34 out[p2ik::kLegCount][3]) {
+    for (int l = 0; l < p2ik::kLegCount; ++l)
+        for (int j = 0; j < 3; ++j) out[l][j] = p2ik::mul(world, houdaiSkin.bind[size_t(houdaiLegJoint[l][j])]);
+}
+
+// Houdai::updateIKSystem, driven by the brain's stride choice: capture the
+// planted bind feet once the boss has landed, start one leg cycle per brain
+// stride, and advance the legs one source frame.
+void houdaiIkStep(BTeki* actor, ActorState& state, const P2HoudaiOutput& out) {
+    if (!state.ikShape) return;
+    const P2LongLegsState now = state.houdai.state();
+    if (!state.ikStarted) {
+        if (out.drawHidden || out.landDrop > 0.0f || now == P2LongLegsState::Stay
+                || now == P2LongLegsState::Land)
+            return;
+        p2ik::M34 legs[p2ik::kLegCount][3];
+        houdaiLegJoints(houdaiBodyMatrix(actor), legs);
+        const Vector3f p = actor->getPosition();
+        const float face = static_cast<Teki*>(actor)->getDirection();
+        state.ik.init(p2ik::V3(p.x, p.y, p.z), face);
+        state.ik.startProgramedIK(legs, p2ik::V3(p.x, p.y, p.z), face);
+        state.ikStarted = true;
+        std::printf("P2_HOUDAI_IK_START generator=%u state=%s foot_radius=%.1f leg_angles=%.2f,%.2f,%.2f,%.2f "
+                    "thigh=%.1f shin=%.1f\n",
+                    state.generator, P2LongLegsFsm::stateName(now), state.ik.distanceOffset(),
+                    state.ik.legAngle(0), state.ik.legAngle(1), state.ik.legAngle(2), state.ik.legAngle(3),
+                    state.ik.leg(0).topToMiddle, state.ik.leg(0).middleToBottom);
+    }
+    if (out.strideStart) {
+        state.ik.startCycleTo(p2ik::V3(out.strideTo.x, 0.0f, out.strideTo.z), out.strideFace, houdaiIkParms(),
+                              houdaiGround, nullptr);
+        ++state.ikStrides;
+        ++state.ikLifts;
+        std::printf("P2_HOUDAI_IK_STRIDE generator=%u n=%d to=%.1f,%.1f face=%.3f lifts=%d plants=%d\n",
+                    state.generator, state.ikStrides, out.strideTo.x, out.strideTo.z, out.strideFace,
+                    state.ikLifts, state.ikPlants);
+    }
+    p2ik::M34 legs[p2ik::kLegCount][3];
+    houdaiLegJoints(houdaiBodyMatrix(actor), legs);
+    state.ik.update(houdaiIkParms(), P2HoudaiFsm::kDelta, houdaiGround, nullptr, legs);
+    for (int l = 0; l < p2ik::kLegCount; ++l) {
+        if (state.ik.liftedMask() & (1 << l)) ++state.ikLifts;
+        if (state.ik.plantedMask() & (1 << l)) ++state.ikPlants;
+    }
+}
+
+// Pose the private mesh: every non-leg joint keeps its bind matrix, the twelve
+// leg joints take the IK result (IKSystemMgr::makeMatrix on the world joints
+// under the drawn body) mapped back to model space.
+bool houdaiIkPose(BTeki* actor, ActorState& state) {
+    if (!state.ikShape || !state.ikStarted || !houdaiSkinReady) return false;
+    const p2ik::M34 world = houdaiM34(actor->mWorldMtx);
+    p2ik::M34 inv;
+    if (!p2ik::inverse(world, inv)) return false;
+    static std::vector<p2ik::M34> joints;
+    static std::vector<p2ik::V3> pos, nrm;
+    joints = houdaiSkin.bind;
+    p2ik::M34 legs[p2ik::kLegCount][3];
+    houdaiLegJoints(world, legs);
+    state.ik.makeMatrix(legs, houdaiIkParms());
+    for (int l = 0; l < p2ik::kLegCount; ++l)
+        for (int j = 0; j < 3; ++j) joints[size_t(houdaiLegJoint[l][j])] = p2ik::mul(inv, legs[l][j]);
+    houdaiSkin.evaluate(joints, pos, nrm);
+    Shape* shape = state.ikShape;
+    for (size_t i = 0; i < pos.size(); ++i) shape->mVertexList[i].set(pos[i].x, pos[i].y, pos[i].z);
+    for (size_t i = 0; i < nrm.size(); ++i) shape->mNormalList[i].set(nrm[i].x, nrm[i].y, nrm[i].z);
+    BoundBox bounds(shape->mVertexList[0], shape->mVertexList[0]);
+    for (int i = 1; i < shape->mVertexCount; ++i) bounds.expandBound(shape->mVertexList[i]);
+    shape->mCourseExtents = bounds;
+    shape->mJointList[0].mBounds = bounds;
+    if (!state.ikDrawLogged) {
+        state.ikDrawLogged = true;
+        std::printf("P2_HOUDAI_IK_DRAW generator=%u positions=%zu normals=%zu private_geometry=1\n",
+                    state.generator, pos.size(), nrm.size());
+    }
+    return true;
+}
+
+// Private copy of the bind mesh for one Man-at-Legs (materials and textures
+// shared with the species shape, like p2pose::privateShape).
+Shape* houdaiPrivateShape(const char* rel, Shape& shared) {
+    const int previousHeap = gsys->setHeap(SYSHEAP_App);
+    Shape* model = gsys->getShape(rel, rel, nullptr, true);
+    gsys->setHeap(previousHeap);
+    if (!model || model->mJointCount != 1 || model->mVertexCount != int(houdaiSkin.posLocal.size())
+            || model->mNormalCount != int(houdaiSkin.nrmLocal.size())
+            || model->mMaterialCount != shared.mMaterialCount || model->mTexAttrCount != shared.mTexAttrCount
+            || model->mTevInfoCount != shared.mTevInfoCount || model->mVertexList == shared.mVertexList)
+        return nullptr;
+    for (int j = 0; j < model->mTotalMatpolyCount; ++j) {
+        auto* poly = model->mMatpolyList[j];
+        if (!poly || !poly->mMaterial) continue;
+        int material = -1;
+        for (int m = 0; m < model->mMaterialCount; ++m)
+            if (poly->mMaterial == &model->mMaterialList[m]) material = m;
+        if (material < 0) return nullptr;
+        poly->mMaterial = &shared.mMaterialList[material];
+    }
+    model->mMaterialList = shared.mMaterialList;
+    model->mTexAttrList = shared.mTexAttrList;
+    model->mTevInfoList = shared.mTevInfoList;
+    return model;
+}
+
+// Load the skin sidecar and give every Houdai its private posable mesh. Any
+// missing or mismatched input leaves the actor on the static bind draw.
+void houdaiIkSetup(const SpeciesDef& def, Shape* shared) {
+    houdaiSkinReady = false;
+    std::ifstream file("assets/dataDir/courses/pikmin2room/longlegs_Houdai_skin_00.txt", std::ios::binary);
+    if (!file || !shared) {
+        std::printf("P2_HOUDAI_IK_SKIN status=absent pose=bind\n");
+        return;
+    }
+    const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    std::string error;
+    if (!houdaiSkin.parse(text, &error)) {
+        std::printf("P2_HOUDAI_IK_SKIN status=invalid error=%s pose=bind\n", error.c_str());
+        return;
+    }
+    for (int l = 0; l < p2ik::kLegCount; ++l)
+        for (int j = 0; j < 3; ++j) {
+            houdaiLegJoint[l][j] = houdaiSkin.joint(p2ik::kHoudaiLegJoints[l][j]);
+            if (houdaiLegJoint[l][j] < 0) {
+                std::printf("P2_HOUDAI_IK_SKIN status=missing_joint joint=%s pose=bind\n",
+                            p2ik::kHoudaiLegJoints[l][j]);
+                return;
+            }
+        }
+    if (shared->mVertexCount != int(houdaiSkin.posLocal.size())
+            || shared->mNormalCount != int(houdaiSkin.nrmLocal.size())) {
+        std::printf("P2_HOUDAI_IK_SKIN status=count_mismatch mod=%d/%d skin=%zu/%zu pose=bind\n",
+                    shared->mVertexCount, shared->mNormalCount, houdaiSkin.posLocal.size(),
+                    houdaiSkin.nrmLocal.size());
+        return;
+    }
+    // The bind matrices must reproduce the installed bind mesh.
+    std::vector<p2ik::V3> pos, nrm;
+    houdaiSkin.evaluate(houdaiSkin.bind, pos, nrm);
+    float worst = 0.0f;
+    for (size_t i = 0; i < pos.size(); ++i) {
+        const Vector3f& v = shared->mVertexList[i];
+        worst = std::fmax(worst, std::fabs(v.x - pos[i].x) + std::fabs(v.y - pos[i].y) + std::fabs(v.z - pos[i].z));
+    }
+    houdaiSkinBindError = worst;
+    if (!(worst < 0.05f)) {
+        std::printf("P2_HOUDAI_IK_SKIN status=bind_mismatch max_error=%.4f pose=bind\n", worst);
+        return;
+    }
+    houdaiSkinReady = true;
+    const std::string rel = std::string("courses/pikmin2room/") + def.mod;
+    for (auto& entry : actors) {
+        ActorState& state = entry.second;
+        if (!state.isHoudai) continue;
+        state.ikShape = houdaiPrivateShape(rel.c_str(), *shared);
+        std::printf("P2_HOUDAI_IK_READY generator=%u joints=%zu positions=%zu normals=%zu bind_error=%.5f "
+                    "private_geometry=%d rng=0 body=brain\n",
+                    state.generator, houdaiSkin.bind.size(), houdaiSkin.posLocal.size(),
+                    houdaiSkin.nrmLocal.size(), worst, int(state.ikShape != nullptr));
+    }
+}
+
 // One host frame for a registered Houdai. Returns after the escape.
 void houdaiTick(BTeki* actor, ActorState& state, float dt) {
     if (actor->mStoredDamage > 0.0f) actor->makeDamaged();
@@ -892,6 +1106,7 @@ void houdaiTick(BTeki* actor, ActorState& state, float dt) {
         state.drawHidden = out.drawHidden;
         houdaiSetIntangible(actor, state, out.drawHidden);
         state.landDrop = out.landDrop;
+        houdaiIkStep(actor, state, out);
         state.damageable = out.damageRate > 0.0f;
         state.bitterImmune = after == P2LongLegsState::Stay || after == P2LongLegsState::Land;
         if (out.deadEnd && !state.deadEscapeDone) {
@@ -966,6 +1181,7 @@ void pc_p2_long_legs_reset() {
     houdaiShells.clear();
     bytesTotal = 0;
     logged[0] = logged[1] = false;
+    houdaiSkinReady = false;
 }
 
 void pc_p2_long_legs_forget(BTeki* actor) {
@@ -1107,6 +1323,7 @@ void pc_p2_long_legs_setup() {
             }
         }
         shapes[species] = loadBind(*def);
+        if (species == "Houdai") houdaiIkSetup(*def, shapes[species]);
     }
     for (const auto& entry : actors)
         std::printf("P2_LONG_LEGS_BIND generator=%u species=%s pose=bind visual_only=0 "
@@ -1386,6 +1603,11 @@ bool pc_p2_long_legs_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, b
             for (int r = 0; r < 3; ++r) dropped.mMtx[r][3] += dropped.mMtx[r][1] * dy;
             shape->updateAnim(gfx, dropped, nullptr, actor);
             shape->drawshape(gfx, *gfx.mCamera, nullptr);
+            return true;
+        }
+        if (houdaiIkPose(actor, state)) {
+            state.ikShape->updateAnim(gfx, matrix, nullptr, actor);
+            state.ikShape->drawshape(gfx, *gfx.mCamera, nullptr);
             return true;
         }
     }

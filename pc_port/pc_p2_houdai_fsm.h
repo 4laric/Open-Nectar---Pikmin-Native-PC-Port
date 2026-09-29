@@ -100,6 +100,8 @@ struct P2HoudaiOutput {
     P2HoudaiVec bodyPos;
     float bodyFace = 0.0f;
     bool strideStart = false;
+    P2HoudaiVec strideTo;       // stride end centre (setNextCentrePosition), valid on strideStart
+    float strideFace = 0.0f;    // stride end facing, valid on strideStart
     P2HoudaiVec walkTarget;
     // Shot bookkeeping edges (diagnostics)
     bool aimStart = false, burstOn = false, burstOff = false, aimEnd = false;

@@ -382,6 +382,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_dangomushi_hazard.cpp
     pc_port/pc_p2_long_legs_fsm.cpp
     pc_port/pc_p2_houdai_fsm.cpp
+    pc_port/pc_p2_long_legs_ik.cpp
     pc_port/pc_p2_long_legs.cpp
     pc_port/pc_p2_cannon_stone.cpp
     pc_port/pc_p2_egg_hazard.cpp
@@ -1012,6 +1013,13 @@ add_executable(p2_houdai_fsm_test
 target_include_directories(p2_houdai_fsm_test PRIVATE pc_port)
 target_compile_options(p2_houdai_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_houdai_fsm_test COMMAND p2_houdai_fsm_test)
+
+add_executable(p2_long_legs_ik_test
+    tools/p2_long_legs_ik_test.cpp
+    pc_port/pc_p2_long_legs_ik.cpp)
+target_include_directories(p2_long_legs_ik_test PRIVATE pc_port)
+target_compile_options(p2_long_legs_ik_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_long_legs_ik_test COMMAND p2_long_legs_ik_test)
 
 add_executable(p2_inst_legs_policy_test
     tools/p2_inst_legs_policy_test.cpp

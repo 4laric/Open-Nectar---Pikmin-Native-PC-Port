@@ -415,6 +415,8 @@ void P2HoudaiFsm::update(const P2HoudaiInput& in, P2HoudaiOutput& out)
         if (mStrideT >= mParms.strideSeconds && mIkInMotion) {
             startStride(in.pos, mFace);
             out.strideStart = true;
+            out.strideTo = mStrideTo;
+            out.strideFace = mFaceTo;
         }
         if (mStrideT < mParms.strideSeconds) {
             mStrideT += dt;
