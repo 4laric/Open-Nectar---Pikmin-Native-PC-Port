@@ -67,8 +67,10 @@ struct LineRoute : Route {
         out = points[size_t(i)];
         return true;
     }
+    bool noPath = false;  // #898: a carry graph with no path home
     bool path(int from, int to, std::vector<int>& out) const override {
         out.clear();
+        if (noPath) return false;
         const int step = from <= to ? 1 : -1;
         for (int i = from;; i += step) { out.push_back(i); if (i == to) break; }
         return true;
@@ -342,6 +344,17 @@ void testBackWatchdog() {
     check(!trip, "a moving haul never trips the watchdog");
 }
 
+void testNoRouteHaulsHome() {
+    // #898 port fallback: with no route-graph path home the Breadbug hauls
+    // straight at the nest instead of standing in Back with the cargo.
+    Host h;
+    h.route.noPath = true;
+    testGrab(h);
+    check(!h.fsm.pathfinding(), "no route path home");
+    check(h.until(State::CarryEnd, 3000) >= 0, "no-path haul still reaches home -> CarryEnd");
+    check(h.until(State::Appear, 800) >= 0 && h.consumed, "then Hide consumes and Appear");
+}
+
 void testLivingAndConsumePolicy() {
     check(!isLivingThing(false, true), "unbittered live Breadbug is not a living thing (no Pikmin/captain target)");
     check(isLivingThing(true, true), "bittered live Breadbug is a living thing");
@@ -363,6 +376,7 @@ int main() {
     testHide();
     testLivingAndConsumePolicy();
     testBackWatchdog();
+    testNoRouteHaulsHome();
     if (failures) {
         std::fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

@@ -272,6 +272,8 @@ public:
     float carryStrength() const { return mCarryStrength; }
     const PelletCarry& contest() const { return mCarry; }
     const Vec3& nextWayPoint() const { return mNextWp; }
+    bool pathfinding() const { return mPathfinding; }  // #898 haul diagnostics
+    std::size_t pathLength() const { return mPath.size(); }
     // damageCallBack (panModoki.cpp:450-456): an ordinary attack is refused
     // unless bittered. The port never bitters, so this is always false and
     // no health changes; the host logs OWN_ATTACK_IGNORED.
@@ -292,6 +294,7 @@ private:
     bool isReachToGoal(float radius);
     bool isCarryToGoal();
     bool canBack() const;
+    bool isCarryHomeDirect() const;
     bool isTargetable(const PelletInfo& p) const;
     const PelletInfo* findNearestPellet() const;
     void releaseCarryTarget();

@@ -497,6 +497,12 @@ void Fsm::setPathFinder() {
     mPathfinding = true;
 }
 
+// #898 port fallback (no route path): home reached when within the relaxed
+// home radius the source uses for a slowed carry (isCarryToGoal, 60 units).
+bool Fsm::isCarryHomeDirect() const {
+    return sqr2D(mPos, mHome) < 60.0f * 60.0f;
+}
+
 // isCarryToGoal (panModoki.cpp:856-915).
 bool Fsm::isCarryToGoal() {
     if (!mPathfinding) return false;
@@ -748,7 +754,21 @@ void Fsm::execState() {
         if (mHealth <= 0.0f) { transit(State::Dead); return; }
         if (mNext == State::Null) {
             if (!mPathfinding) setPathFinder();       // isEndPathFinder retry
-            if (mPathfinding) carryTarget(1.0f);
+            if (mPathfinding) {
+                carryTarget(1.0f);
+            } else {
+                // #898 port fallback: no route-graph path home (the P1 carry
+                // graph can be split by closed gates, or have no edge near the
+                // nest). Standing still with the cargo is a deadlock, so haul
+                // straight at the nest; the watchdog below bounds a wedge.
+                mNextWp = mHome;
+                carryTarget(1.0f);
+                if (isCarryHomeDirect()) {
+                    mTargetVel = mCurrentVel = Vec3();
+                    transit(State::CarryEnd);
+                    return;
+                }
+            }
             // #898 port watchdog (not in source): the P1 map can wedge a
             // hauled carcass against a wall on the way to a route node. Every
             // 60 ticks without 10 units of progress, skip to the next node of
