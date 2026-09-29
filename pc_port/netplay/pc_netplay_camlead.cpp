@@ -154,10 +154,12 @@ float pitch_deg(const NVector3f& view, const NVector3f& watch)
 	return std::asin((view.y - watch.y) / d) * 57.29578f;
 }
 
+// The yaw exactly as the local sampler quantises it (navi.cpp
+// pcNaviCaptureControlYaw), so trace and submitted yaws compare directly.
 uint16_t yaw_of(const Camera* cam)
 {
 	if (cam == nullptr) return 0;
-	return pc_input_log_yaw_quantise(std::atan2(cam->mViewXAxis.z, cam->mViewXAxis.x));
+	return pc_input_log_yaw_quantise(NMathF::atan2(cam->mViewXAxis.z, cam->mViewXAxis.x));
 }
 
 void parse_shots()
@@ -326,6 +328,12 @@ void pc_netplay_camlead_session_end(void)
 
 void pc_netplay_camlead_note_local_input(uint64_t frame, const PcNetplayInput& in)
 {
+	if (!sSession) return;
+	if (sTrace) {
+		// The submitted control yaw, sampled from the presented camera of
+		// the last presented frame (landing frame = submit + delay).
+		std::printf("[netplay] camlead submit f=%llu yaw=%u\n", (unsigned long long)frame, (unsigned)in.controlYaw);
+	}
 	if (!sArmed) return;
 	sHist.note(frame, in);
 }

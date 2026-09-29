@@ -57,6 +57,39 @@ def parse_trace(log: Path):
     return rows
 
 
+SUBMIT = re.compile(r"\[netplay\] camlead submit f=(\d+) yaw=(\d+)")
+
+
+def parse_submits(log: Path):
+    out = []
+    for line in log.read_text(errors="replace").splitlines():
+        m = SUBMIT.search(line)
+        if m:
+            out.append((int(m.group(1)), int(m.group(2))))
+    return out
+
+
+def yaw_follow(rows, submits, delay, turn_record):
+    """Live-yaw check: each submitted yaw (landing frame L = record + delay)
+    against the view yaw of the frame presented just before it was sampled
+    (L - delay - 1). Returns (checked, mismatches, first record >= the turn
+    whose submitted yaw differs from the one before, relative to the turn)."""
+    checked = mismatches = 0
+    first = None
+    prev = None
+    for landing, yaw in submits:
+        shown = rows.get(landing - delay - 1)
+        if shown is not None:
+            checked += 1
+            if shown["view"][0] != yaw:
+                mismatches += 1
+        record = landing - delay
+        if first is None and prev is not None and record >= turn_record and yaw != prev:
+            first = record - turn_record
+        prev = yaw
+    return checked, mismatches, first
+
+
 def first_change(rows, event, column, window=60):
     """First frame >= event - 2 whose `column` tuple differs from the rest
     value at event - 1. Returns (frame, rest_ok)."""
@@ -92,6 +125,11 @@ def main(argv=None):
     p.add_argument("--host-base", type=int, default=900, help="host turn record index")
     p.add_argument("--shot-frames", default="", help="PIKMIN_NETPLAY_CAMERA_SHOT frames for the host (a,b,c)")
     p.add_argument("--extra-env", nargs="*", default=[])
+    p.add_argument("--live-yaw", action="store_true",
+                   help="PIKMIN_NETPLAY_TEST_SCRIPT_LIVE_YAW=1 on both peers: scripted pads, live control yaw. "
+                        "Checks that every submitted yaw is the view yaw the peer presented when it was sampled; "
+                        "lead and opt-out then submit different yaws, so their hash logs differ by design and only "
+                        "host vs joiner is compared")
     a = p.parse_args(argv)
 
     a.out.mkdir(parents=True, exist_ok=True)
@@ -108,6 +146,8 @@ def main(argv=None):
         for mode in ("lead", "optout"):
             out = a.out / f"d{delay}-{mode}"
             env = ["PIKMIN_NETPLAY_CAMERA_TRACE=1"] + list(a.extra_env)
+            if a.live_yaw:
+                env.append("PIKMIN_NETPLAY_TEST_SCRIPT_LIVE_YAW=1")
             if mode == "optout":
                 env.append("PIKMIN_NETPLAY_CAMERA_LEAD=0")
             env_host = [f"PIKMIN_NETPLAY_LOCAL_INPUT_FILE={(inputs / 'probe-host.pkni').resolve()}",
@@ -147,7 +187,29 @@ def main(argv=None):
                       f"{summary[-1].split('] ', 1)[-1] if summary else 'no summary'}")
                 if starts < 1:
                     failures += 1
-        # Hash logs: lead vs opt-out, per peer.
+        # Hash logs: lead vs opt-out, per peer (the same inputs); in live-yaw
+        # mode the two runs submit different yaws, so each run's host and
+        # joiner logs are compared instead.
+        if a.live_yaw:
+            for mode, out in runs.items():
+                r = subprocess.run([sys.executable, str(COMPARE), str(out / "host/run/hashes.txt"),
+                                    str(out / "join/peer/run/hashes.txt")], capture_output=True, text=True)
+                print(f"camera_lead_probe: delay {delay} {mode} hashes host vs joiner: {r.stdout.strip()} (exit {r.returncode})")
+                if r.returncode != 0:
+                    failures += 1
+            r = subprocess.run([sys.executable, str(COMPARE), str(runs["lead"] / "host/run/hashes.txt"),
+                                str(runs["optout"] / "host/run/hashes.txt")], capture_output=True, text=True)
+            print(f"camera_lead_probe: delay {delay} hashes lead vs opt-out (expected to differ): {r.stdout.strip()}")
+            for mode, out in runs.items():
+                for peer, turn in (("host", ev_host["turn"]), ("join", ev_join["turn"])):
+                    checked, bad, first = yaw_follow(parse_trace(peer_log(out, peer)), parse_submits(peer_log(out, peer)),
+                                                     delay, turn)
+                    print(f"camera_lead_probe: delay {delay} {mode} {peer}: submitted yaw == presented view yaw for "
+                          f"{checked - bad}/{checked} submits; first yaw change {first} records after the turn")
+                    want = 1 if mode == "lead" else delay + 2
+                    if bad != 0 or checked == 0 or first != want:
+                        failures += 1
+            continue
         for peer, rel in (("host", "host/run/hashes.txt"), ("join", "join/peer/run/hashes.txt")):
             r = subprocess.run([sys.executable, str(COMPARE), str(runs["lead"] / rel), str(runs["optout"] / rel)],
                                capture_output=True, text=True)

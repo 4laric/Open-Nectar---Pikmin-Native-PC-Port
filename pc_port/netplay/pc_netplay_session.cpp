@@ -1898,6 +1898,26 @@ bool script_via_accum()
 	return on;
 }
 
+bool script_live_yaw()
+{
+	// M5c lane A (issue #887) test knob: PIKMIN_NETPLAY_TEST_SCRIPT_LIVE_YAW=1
+	// keeps the scripted pad bytes but submits the live control yaw the
+	// sampler reads (the presented camera: the lead camera while it is
+	// shown), so a scripted pair exercises the live yaw path.
+	static bool init = false;
+	static bool on  = false;
+	if (!init) {
+		init = true;
+		if (const char* e = std::getenv("PIKMIN_NETPLAY_TEST_SCRIPT_LIVE_YAW"))
+			on = (e[0] == '1' && e[1] == '\0');
+		if (on) {
+			printf("[netplay] test: scripted pads with the live control yaw\n");
+			fflush(stdout);
+		}
+	}
+	return on;
+}
+
 PcNetplayInput build_local_input()
 {
 	// Scripted input for tests (brief item 8): pad-0 records (+ yaw) from
@@ -1925,7 +1945,12 @@ PcNetplayInput build_local_input()
 			return out;
 		}
 		PcNetplayInput in = scripted_record(sScriptIdx++);
-		if (local_ui_open()) in = pc_netplay_input_neutral();
+		if (local_ui_open()) {
+			in = pc_netplay_input_neutral();
+		} else if (script_live_yaw()) {
+			pc_input_log_capture_yaw_fresh();
+			in.controlYaw = pc_input_log_yaw_valid(sLocalRole) ? pc_input_log_yaw_raw(sLocalRole) : 0;
+		}
 		return in;
 	}
 	// Physical pad: the merged accumulator (buttons OR'd across every turn
