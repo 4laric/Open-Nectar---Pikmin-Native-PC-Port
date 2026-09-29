@@ -996,6 +996,27 @@ if(PIKMIN_NETPLAY_BUILD AND PIKMIN_BUILD_TESTS AND NOT ANDROID)
     add_test(NAME pc_netplay_transport_test COMMAND pc_netplay_transport_test)
 endif()
 
+# Netplay M4 gap-fix lane S (issue #885): the load guard's engine-free policy
+# (pc_netplay_loadguard.h: stall-injector parsing/slicing, load window,
+# keep-alive gate) and the GekkoNet behaviour it relies on, checked against
+# the vendored library with two in-memory sessions (a silent peer is dropped
+# by both sides; network polls keep a stalled peer alive without an Advance
+# and leave an executing Advance untouched; a raised timeout survives one
+# block; a dead peer is still detected). Netplay builds only (links gekkonet).
+if(PIKMIN_NETPLAY_BUILD AND PIKMIN_BUILD_TESTS AND NOT ANDROID)
+    add_executable(pc_netplay_loadguard_test pc_port/netplay/pc_netplay_loadguard_test.cpp)
+    target_include_directories(pc_netplay_loadguard_test PRIVATE
+        pc_port
+        third_party/gekkonet/GekkoLib/include)
+    target_compile_definitions(pc_netplay_loadguard_test PRIVATE GEKKONET_STATIC GEKKONET_NO_ASIO)
+    target_compile_options(pc_netplay_loadguard_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    target_link_libraries(pc_netplay_loadguard_test PRIVATE gekkonet)
+    if(WIN32)
+        target_link_libraries(pc_netplay_loadguard_test PRIVATE ws2_32)
+    endif()
+    add_test(NAME pc_netplay_loadguard_test COMMAND pc_netplay_loadguard_test)
+endif()
+
 # FP determinism gate (issue #879). Runs objdump over the linked game exe
 # and fails on any x87 op (transcendentals and fsqrt), any FMA
 # instruction, any libm sqrt call from the netplay TU, or any
