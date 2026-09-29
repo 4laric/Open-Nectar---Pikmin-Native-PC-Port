@@ -845,6 +845,15 @@ void GameCoreSection::cleanupDayEnd()
 			playerState->mResultFlags.setOn(zen::RESFLAG_PikminLeftBehind);
 		}
 	}
+    // The vanilla sunset safety pass above decides survivors. Store specials
+    // before the Onion-only movie routing; they need no Red Onion actor.
+    if (pc_randomizer_purple_campaign()) {
+        Iterator survivors(pikiMgr);
+        CI_LOOP(survivors) {
+            Piki* piki = static_cast<Piki*>(*survivors);
+            if (pc_p2_ship_special(piki) && piki->isAlive()) pc_p2_ship_deposit(piki);
+        }
+    }
 	PRINT("++++++ %d PIKIS KILLED\n", killed);
 	tekiMgr->killAll();
 	bossMgr->killAll();
@@ -1812,7 +1821,7 @@ void GameCoreSection::initStage()
 				item->init(item->mSRT.t);
 				item->setColor(item->mSeedColor);
                 // init/setColor clear experimental identity; restore it afterward.
-                if (pc_randomizer_purple_campaign()) a->restore(item);
+                if (pc_randomizer_purple_campaign()) a->doRestore(item);
 				item->startAI(0);
 				C_SAI(item)->start(item, PikiHeadAI::PIKIHEAD_Wait);
 				PRINT(" NEW PIKIHEAD ****\n");
@@ -3043,8 +3052,21 @@ void GameCoreSection::updateAI()
             const int field = int(GameStat::formationPikis) + int(GameStat::freePikis) + int(GameStat::workPikis);
             pc_randomizer_observe_population(field, true);
             pc_randomizer_observe_total_population(int(GameStat::allPikis) + (pc_randomizer_purple_campaign() ? p2ship::stock.total() : 0), true);
+            int specialAliases[3] = {};
+            if (pc_randomizer_purple_campaign()) {
+                Iterator live(pikiMgr);
+                CI_LOOP(live) {
+                    Piki* p = static_cast<Piki*>(*live);
+                    if (p && p->isAlive() && (p->mP2Purple || p->mP2White)) ++specialAliases[p->mColor];
+                }
+                Iterator sprouts(itemMgr->getPikiHeadMgr());
+                CI_LOOP(sprouts) {
+                    PikiHeadItem* p = static_cast<PikiHeadItem*>(*sprouts);
+                    if (p && (p->mP2Purple || p->mP2White)) ++specialAliases[p->mSeedColor];
+                }
+            }
             for (int color = PikiMinColor; color < PikiColorCount; ++color)
-                pc_randomizer_observe_color_population(color, GameStat::allPikis[color], true);
+                pc_randomizer_observe_color_population(color, std::max(0, GameStat::allPikis[color] - specialAliases[color]), true);
             if (flowCont.mCurrentStage) {
                 auto observe = [](Creature* obj, int kind, bool complete) {
                     if (!obj || !obj->mGenerator) return;
