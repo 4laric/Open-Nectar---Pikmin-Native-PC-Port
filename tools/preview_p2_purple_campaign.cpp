@@ -22,6 +22,7 @@
 #include "pc_p2_ship_store.h"
 #include "pc_p2_purple.h"
 #include "pc_window.h"
+#include "pc_gpu_preference.h"
 #include "pc_bbft.h"
 #include "settings/pc_settings.h"
 #include "settings/pc_settings_p2d.h"
@@ -96,8 +97,9 @@ public:
 int main(int argc, char** argv) {
     if (std::getenv("P2_FIXTURE_FORCE_CAPTAIN_DOWN")) p2_fixture_require_captain(false, false, 0, 0);
     setvbuf(stdout, nullptr, _IONBF, 0);
-    if (!pc_randomizer_init(argc, argv)) return 2;
+    SDL_SetMainReady(); pc_gpu_preference_apply();
     pc_bbft_init(argc, argv);
+    if (!pc_randomizer_purple_campaign()) return 2;
     if (!pc_window_init("Purple campaign storage fixture", 960, 540)) return 3;
     pc_settings_init();
     pc_window_set_display_mode(PC_WINDOW_FULLSCREEN_WINDOWED);
