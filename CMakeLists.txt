@@ -294,6 +294,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_economy.cpp
     pc_port/pc_p2_teki_lifetime.cpp
     pc_port/pc_p2_placement_probe.cpp
+    pc_port/pc_p2_boss_arena.cpp
+    pc_port/pc_held_part.cpp
     pc_port/pc_p2_input_script.cpp
     # TEST-ONLY headless autoplay bot (bot-impl): scripted player driving the
     # normal pad path. Env-gated (PIKMIN_RANDOMIZER_AUTOPLAY), inert otherwise.
@@ -1269,6 +1271,20 @@ add_executable(p2_campaign_policy_test
 target_include_directories(p2_campaign_policy_test PRIVATE pc_port)
 target_compile_options(p2_campaign_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_campaign_policy_test COMMAND p2_campaign_policy_test)
+
+# P2 boss arenas (owner ruling 2026-09-29): engine-free suppress/probe table.
+add_executable(p2_boss_arena_policy_test
+    pc_port/pc_p2_boss_arena_policy_test.cpp)
+target_include_directories(p2_boss_arena_policy_test PRIVATE pc_port)
+target_compile_options(p2_boss_arena_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_boss_arena_policy_test COMMAND p2_boss_arena_policy_test)
+
+# Generic held ship part (#901): engine-free birth/drop contract.
+add_executable(pc_held_part_policy_test
+    pc_port/pc_held_part_policy_test.cpp)
+target_include_directories(pc_held_part_policy_test PRIVATE pc_port)
+target_compile_options(pc_held_part_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_held_part_policy_test COMMAND pc_held_part_policy_test)
 
 # Frog identity policy (inst-frogs #871): engine-free params/FSM/clip contract.
 add_executable(p2_frog_policy_test tools/p2_frog_policy_test.cpp)
