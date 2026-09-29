@@ -63,6 +63,13 @@ frames differ between the peers. Dead-peer tests: --expect disconnect with
 --kill-role join|host picks the victim, --kill-on-line TEXT [--kill-delay S]
 kills it once its native.log shows TEXT, the survivor's 'disconnected:'
 latency after the kill is printed, and --max-detect-s bounds it.
+Fix round 1: the load guard switches and the stall injector are scrubbed
+from the inherited environment (pass them with --env/--env-host/--env-join);
+a targeted kill fails the run when its trigger line never appeared or the
+victim had already exited; and a sync or disconnect run fails when a peer
+armed a test stall that applies to it ('test stall: armed ... this peer
+stalls') but never logged 'test stall: begin'. The stall durations are
+printed.
 """
 
 import argparse
@@ -285,6 +292,16 @@ SCRUB_KEYS = (
     "PIKMIN_NETPLAY_TEST_BARRIER_CORRUPT",
     "PIKMIN_NETPLAY_TEST_HOST_DIE_AT_BARRIER",
     "PIKMIN_NETPLAY_TEST_BULK_DROP_SAVE",
+    # M4 gap-fix lane S (fix round 1, MN1): a stale export must never turn the
+    # load guard off or inject a stall into a regression pair.
+    "PIKMIN_NETPLAY_LOAD_GUARD",
+    "PIKMIN_NETPLAY_LOAD_KEEPALIVE",
+    "PIKMIN_NETPLAY_LOAD_WINDOW",
+    "PIKMIN_NETPLAY_LOAD_DISCONNECT_MS",
+    "PIKMIN_NETPLAY_TEST_STALL_MS",
+    "PIKMIN_NETPLAY_TEST_STALL_AT",
+    "PIKMIN_NETPLAY_TEST_STALL_ROLE",
+    "PIKMIN_NETPLAY_TEST_STALL_SLICE_MS",
     "NECTAR_CARD_DEBUG",
 )
 
@@ -700,6 +717,7 @@ def main(argv=None):
 
     rc_host, rc_join = 1, 1
     detect_s = None  # M4 gap-fix S: survivor's disconnect latency after a targeted kill
+    kill_fail = []   # fix round 1 (MN2): the targeted kill did not test anything
     host_proc = join_proc = None
     host_out = join_out = None
     start = time.time()
@@ -717,6 +735,7 @@ def main(argv=None):
             victim_log, survivor_log = (host_log, join_log) if a.kill_role == "host" else (join_log, host_log)
             if a.kill_on_line is None:
                 time.sleep(a.kill_joiner_after)
+                seen = True
             else:
                 t_wait = time.time()
                 seen = False
@@ -725,6 +744,9 @@ def main(argv=None):
                     if not seen:
                         time.sleep(0.05)
                 print(f"run_pair: kill trigger {'seen' if seen else 'NOT seen'}: {a.kill_on_line!r}")
+                if not seen:
+                    kill_fail.append(f"kill trigger {a.kill_on_line!r} never appeared in the "
+                                     f"{a.kill_role}'s log")
                 if seen and a.kill_delay > 0:
                     time.sleep(a.kill_delay)
             t_kill = time.time()
@@ -733,6 +755,8 @@ def main(argv=None):
                 victim.kill()
             else:
                 print(f"run_pair: {a.kill_role} already exited ({victim.poll()}) before the kill")
+                kill_fail.append(f"the {a.kill_role} exited ({victim.poll()}) before the kill, so "
+                                 "nothing was killed")
             t_detect = None
             while survivor.poll() is None and time.time() - t_kill < a.timeout:
                 if grep(survivor_log, "disconnected:"):
@@ -927,8 +951,26 @@ def main(argv=None):
     win_same = win_frames["host"] == win_frames["join"]
     print(f"run_pair: load windows host={len(win_frames['host'])} join={len(win_frames['join'])} "
           f"frames {'identical' if win_same else 'DIFFER'}")
+    # Fix round 1 (MN3): a peer that armed a stall applying to it must have
+    # stalled; otherwise the run would pass without testing anything.
+    stall_fail = []
+    for who, log in (("host", host_log), ("join", join_log)):
+        armed = [ln for ln in grep(log, "[netplay] test stall: armed") if "this peer stalls" in ln]
+        begins = grep(log, "[netplay] test stall: begin")
+        ends = [re.search(r"test stall: end after (\d+) ms", ln) for ln in grep(log, "[netplay] test stall: end")]
+        took = [int(m.group(1)) for m in ends if m]
+        if armed or begins:
+            print(f"run_pair: {who}: test stall armed={len(armed)} fired={len(begins)} "
+                  f"durations_ms={','.join(str(v) for v in took) if took else '-'}")
+        if armed and not begins:
+            stall_fail.append(f"{who} armed a test stall for itself but never stalled "
+                              "(no 'test stall: begin' line)")
 
     ok = True
+    if a.expect in ("sync", "disconnect"):
+        for msg in stall_fail:
+            print(f"run_pair: FAIL: {msg}")
+            ok = False
     if a.expect == "sync":
         if not win_same:
             print("run_pair: FAIL: load window frames differ between peers")
@@ -990,6 +1032,9 @@ def main(argv=None):
             ok = False
         if a.max_detect_s is not None and (detect_s is None or detect_s > a.max_detect_s):
             print(f"run_pair: FAIL: detection {detect_s} s not within {a.max_detect_s} s of the kill")
+            ok = False
+        for msg in kill_fail:
+            print(f"run_pair: FAIL: {msg}")
             ok = False
     elif a.expect == "desync":
         # B2 fix round 1 (C1): a barrier desync must end BOTH peers with exit 5.
