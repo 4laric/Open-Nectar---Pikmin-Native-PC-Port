@@ -92,6 +92,7 @@ struct Host {
     std::vector<State> seen;
     TickOutput last;
     bool consumed = false, killed = false;
+    bool frozen = false;  // #898: cargo wedged against the map (never moves)
 
     PelletInfo* cargo() {
         for (auto& p : pellets) if (p.id == held) return &p;
@@ -122,6 +123,7 @@ struct Host {
         if (PelletInfo* c = cargo()) {
             Vec3 v = last.pulled ? last.pullVelocity : (c->pikiStrength > 0.0f ? crewVel : Vec3());
             if (last.holdCargo) v = last.homeNudge, v.x *= 30.0f, v.z *= 30.0f;
+            if (frozen) v = Vec3();
             c->velocity = v;
             c->pos.x += v.x * kSourceDelta;
             c->pos.z += v.z * kSourceDelta;
@@ -314,6 +316,32 @@ void testHide() {
     check(near(h.fsm.health(), 1100.0f), "Hide END refills health to fp00");
 }
 
+void testBackWatchdog() {
+    // #898 port watchdog: a haul wedged against the map (the cargo never
+    // moves) skips route nodes, then releases the cargo instead of standing
+    // in Back forever.
+    Host h;
+    testGrab(h);
+    h.frozen = true;
+    bool skipped = false, released = false;
+    for (int i = 0; i < 60 * (kBackStuckRelease + 2) && !released; ++i) {
+        h.step();
+        skipped = skipped || h.last.backStuckSkip;
+        released = released || h.last.backStuckRelease;
+    }
+    check(skipped, "wedged Back skips to the next route node");
+    check(released && h.fsm.state() == State::Wait && h.held == 0, "still wedged: cargo released, Back -> Wait");
+    // A haul that keeps moving never trips the watchdog.
+    Host m;
+    testGrab(m);
+    bool trip = false;
+    for (int i = 0; i < 600 && m.fsm.state() == State::Back; ++i) {
+        m.step();
+        trip = trip || m.last.backStuckSkip || m.last.backStuckRelease;
+    }
+    check(!trip, "a moving haul never trips the watchdog");
+}
+
 void testLivingAndConsumePolicy() {
     check(!isLivingThing(false, true), "unbittered live Breadbug is not a living thing (no Pikmin/captain target)");
     check(isLivingThing(true, true), "bittered live Breadbug is a living thing");
@@ -334,6 +362,7 @@ int main() {
     testSuck();
     testHide();
     testLivingAndConsumePolicy();
+    testBackWatchdog();
     if (failures) {
         std::fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

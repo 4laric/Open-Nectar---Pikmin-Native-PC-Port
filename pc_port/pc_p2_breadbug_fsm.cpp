@@ -467,10 +467,28 @@ void Fsm::setPathFinder() {
     mPath.clear();
     const Route* route = mIn ? mIn->route : nullptr;
     if (!route) return;
-    const int from = route->nearest(mPos);
-    if (from < 0 || mWp1 < 0) return;
+    if (mWp1 < 0) return;
+    // #898 fix: start from the nearest carry-route EDGE when the host has one,
+    // taking whichever end gives the shorter trip home (distance to the end +
+    // path length); else the nearest waypoint.
+    int starts[2] = {-1, -1};
+    int ea = -1, eb = -1;
+    if (route->nearestEdge(mPos, ea, eb)) { starts[0] = ea; starts[1] = eb; }
+    else starts[0] = route->nearest(mPos);
     std::vector<int> nodes;
-    if (!route->path(from, mWp1, nodes) || nodes.empty()) return;
+    float bestCost = 0.0f;
+    for (int from : starts) {
+        if (from < 0) continue;
+        std::vector<int> cand;
+        if (!route->path(from, mWp1, cand) || cand.empty()) continue;
+        float cost = 0.0f;
+        WayPointInfo a, b;
+        if (route->get(cand.front(), a)) cost += std::sqrt(sqr2D(mPos, a.pos));
+        for (std::size_t i = 1; i < cand.size(); ++i)
+            if (route->get(cand[i - 1], a) && route->get(cand[i], b)) cost += std::sqrt(sqr2D(a.pos, b.pos));
+        if (nodes.empty() || cost < bestCost) { nodes = cand; bestCost = cost; }
+    }
+    if (nodes.empty()) return;
     mPath = nodes;
     mWp3 = mWp2;
     mWp2 = nodes.front();
@@ -638,6 +656,8 @@ void Fsm::transit(State next) {
         if (cargo()) mOut->stopCargo = true;
         setPathFinder();
         mNext = State::Null;
+        mBackTimer = mBackStuck = 0;
+        mBackCheck = mPos;
         break;
     case State::Pulled:  // StatePulled::init
         mAnim.start(&c[AnimPulled], AnimPulled);
@@ -729,6 +749,37 @@ void Fsm::execState() {
         if (mNext == State::Null) {
             if (!mPathfinding) setPathFinder();       // isEndPathFinder retry
             if (mPathfinding) carryTarget(1.0f);
+            // #898 port watchdog (not in source): the P1 map can wedge a
+            // hauled carcass against a wall on the way to a route node. Every
+            // 60 ticks without 10 units of progress, skip to the next node of
+            // the path (home after the last); after kBackStuckRelease such
+            // checks in a row, drop the cargo (releaseCarryTarget -> Wait) so
+            // neither the Breadbug nor the cargo is stuck forever.
+            if (++mBackTimer >= 60) {
+                mBackTimer = 0;
+                if (sqr2D(mPos, mBackCheck) < 100.0f) {
+                    if (++mBackStuck >= kBackStuckRelease) {
+                        mOut->backStuckRelease = true;
+                        releaseCarryTarget();
+                        transit(State::Wait);
+                        return;
+                    }
+                    mOut->backStuckSkip = true;
+                    bool advanced = false;
+                    for (std::size_t i = 0; i < mPath.size(); ++i) {
+                        if (mPath[i] != mWp2) continue;
+                        mWp3 = mWp2;
+                        mWp2 = i + 1 < mPath.size() ? mPath[i + 1] : mWp1;
+                        WayPointInfo wp;
+                        if (mIn->route && mIn->route->get(mWp2, wp)) { mNextWp = wp.pos; advanced = true; }
+                        break;
+                    }
+                    if (!advanced) mNextWp = mHome;
+                } else {
+                    mBackStuck = 0;
+                }
+                mBackCheck = mPos;
+            }
             if (!canBack()) {
                 transit(State::Pulled);
                 return;

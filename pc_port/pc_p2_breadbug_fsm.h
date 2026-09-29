@@ -59,6 +59,7 @@ constexpr float kSourceDelta = 1.0f / 30.0f;
 constexpr float kDefaultAnimSpeed = 30.0f;  // EnemyAnimatorBase::defaultAnimSpeed
 constexpr float kCarrySizeDiff = 20.0f;     // PanModokiBase::Obj() mCarrySizeDiff (small Breadbug)
 constexpr int kMaxHeldTreasures = 15;       // PANMODOKI_MaxHeldTreasures
+constexpr int kBackStuckRelease = 8;       // #898 port watchdog: 8 x 60 ticks (16 s) wedged in Back -> release
 
 struct Vec3 { float x = 0.0f, y = 0.0f, z = 0.0f; };
 
@@ -202,6 +203,11 @@ public:
     virtual bool get(int index, WayPointInfo& out) const = 0;
     // Synchronous testPathfinder: waypoint indices from `from` to `to` inclusive.
     virtual bool path(int from, int to, std::vector<int>& out) const = 0;
+    // #898 fix: the carry-route edge nearest `pos` (both ends). The source
+    // pathfinder starts from the nearest EDGE (panModoki.cpp findNextRoutePoint
+    // "nearest edge -> nearest open waypoint"); the nearest waypoint alone
+    // can sit behind a wall. Default: no edge query (nearest waypoint only).
+    virtual bool nearestEdge(const Vec3&, int& a, int& b) const { (void)a; (void)b; return false; }
 };
 
 struct TickInput {
@@ -227,6 +233,8 @@ struct TickOutput {
     std::uint64_t stickTo = 0;   // StateStick: startStick(target) + startPick
     bool release = false;        // endStick + giveup
     bool releaseReverse = false; // releaseCarryTarget from Back: negate pellet x/z velocity
+    bool backStuckSkip = false;  // #898: Back made no progress; skipped to the next route node
+    bool backStuckRelease = false; // #898: Back wedged too long; cargo released (Wait)
     bool stopCargo = false;      // Back init: pellet velocity 0
     bool pulled = false;         // PelletCarry::pull succeeded this update
     Vec3 pullVelocity;           //  ... with this pellet velocity
@@ -320,6 +328,8 @@ private:
     int mFindNextRouteCounter = 0;
     int mMoveToWpTimer = 0, mMoveSpeedTimer = 0;
     int mStateTimer = 0;         // StateWait/Hide/Stick timers
+    int mBackTimer = 0, mBackStuck = 0;  // #898 Back progress watchdog
+    Vec3 mBackCheck;
     std::uint32_t mRng = 1;
     // current tick
     const TickInput* mIn = nullptr;

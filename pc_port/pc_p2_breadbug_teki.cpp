@@ -92,6 +92,18 @@ struct P1Route : bb::Route {
         WayPoint* wp = routeMgr->findNearestWayPoint('test', Vector3f(p.x, p.y, p.z), false);
         return wp ? wp->mIndex : -1;
     }
+    bool nearestEdge(const bb::Vec3& p, int& a, int& b) const override {
+        a = b = -1;
+        if (!routeMgr || routeMgr->getNumWayPoints('test') <= 0) return false;
+        WayPoint* s0 = nullptr;
+        WayPoint* s1 = nullptr;
+        // Land edges only (a hauled carcass is not floated), open ends only.
+        routeMgr->findNearestEdge(&s0, &s1, 'test', Vector3f(p.x, p.y, p.z), false, true, false);
+        if (!s0 || !s1) return false;
+        a = s0->mIndex;
+        b = s1->mIndex;
+        return true;
+    }
     bool get(int index, bb::WayPointInfo& out) const override {
         if (!routeMgr || index < 0 || index >= routeMgr->getNumWayPoints('test')) return false;
         WayPoint* wp = routeMgr->getWayPoint('test', index);
@@ -449,6 +461,15 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
             ++b.pressesRejected;
             std::printf("P2_BREADBUG_OWN_PRESS_IGNORED generator=%u source_id=38 state=%s\n", b.generator,
                         bb::stateName(b.fsm.state()));
+        }
+        if (o.backStuckSkip)
+            std::printf("P2_BREADBUG_OWN_BACK_STUCK generator=%u source_id=38 action=skip_node x=%.1f z=%.1f wall=%lld\n",
+                        b.generator, t->getPosition().x, t->getPosition().z, wallMs());
+        if (o.backStuckRelease) {
+            // Never re-pick the cargo it could not haul (no grab/wedge loop).
+            if (held) b.spared.insert(held);
+            std::printf("P2_BREADBUG_OWN_BACK_STUCK generator=%u source_id=38 action=release x=%.1f z=%.1f wall=%lld\n",
+                        b.generator, t->getPosition().x, t->getPosition().z, wallMs());
         }
         if (o.refilled)
             std::printf("P2_BREADBUG_OWN_HIDE_REFILL generator=%u source_id=38 health=%.1f\n", b.generator, b.fsm.health());
