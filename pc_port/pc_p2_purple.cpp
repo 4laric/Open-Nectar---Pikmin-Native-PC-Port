@@ -146,7 +146,13 @@ int pc_p2_convert_violet(Pom* pom, int remaining) {
         const char* input=pc_p2_is_purple(p)?"purple":p->mColor==Red?"red":p->mColor==Blue?"blue":p->mColor==Yellow?"yellow":"unknown";
         bool sameColor=pc_p2_is_purple(p);
         if(used>=remaining && !sameColor){p->endStickObject();p->mFSM->transit(p,PIKISTATE_Normal);p->changeMode(PikiMode::FreeMode,naviMgr->getNavi());it.dec();continue;}
+        // One-for-one replacement may reserve one transient slot at the field
+        // limit, exactly like native burying. Restore the manager flag even when
+        // the pool is exhausted; the living input is retained on allocation failure.
+        const bool oldBuryMode = PikiHeadMgr::buryMode;
+        PikiHeadMgr::buryMode = true;
         PikiHeadItem* sprout=static_cast<PikiHeadItem*>(itemMgr->birth(OBJTYPE_Pikihead));
+        PikiHeadMgr::buryMode = oldBuryMode;
         if(!sprout){p->endStickObject();p->mFSM->transit(p,PIKISTATE_Normal);p->changeMode(PikiMode::FreeMode,naviMgr->getNavi());it.dec();continue;}
         Vector3f position=pom->mSRT.t;position.y+=50;sprout->init(position);sprout->setColor(Red);sprout->mP2Purple=true;
         float angle=converted*1.256637f;sprout->mVelocity.set(120*std::sin(angle),500,120*std::cos(angle));
