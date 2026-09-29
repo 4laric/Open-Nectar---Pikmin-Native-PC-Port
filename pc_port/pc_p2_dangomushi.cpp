@@ -1579,9 +1579,17 @@ void pc_p2_dangomushi_update(BTeki* actor) {
     s.logTimer += dt;
     if (s.logTimer >= 1.0f) {
         s.logTimer = 0.0f;
+        // After the carcass swap the teki stays at its death spot; the corpse
+        // is the pellet, drawn through BTeki::viewDraw at the pellet's own
+        // matrix. Log the pellet too so a carry can be checked against it.
+        Pellet* corpsePellet = s.escaped ? actor->mPellet : nullptr;
         std::printf("P2_DANGOMUSHI_POS generator=%u state=%s clip=%s phase=%.2f x=%.2f z=%.2f "
-                    "health=%.1f\n", generator, stateName(s.state), s.clip.c_str(), s.phase, pos.x,
-                    pos.z, actor->mHealth);
+                    "health=%.1f corpse_pellet=%d px=%.2f py=%.2f pz=%.2f carriers=%d\n", generator,
+                    stateName(s.state), s.clip.c_str(), s.phase, pos.x, pos.z, actor->mHealth,
+                    int(corpsePellet != nullptr), corpsePellet ? corpsePellet->mSRT.t.x : 0.0f,
+                    corpsePellet ? corpsePellet->mSRT.t.y : 0.0f,
+                    corpsePellet ? corpsePellet->mSRT.t.z : 0.0f,
+                    corpsePellet ? int(corpsePellet->mCarrierCount) : 0);
         std::fflush(stdout);
     }
     // Step any live Rock/Egg children the hazard decisions created.
