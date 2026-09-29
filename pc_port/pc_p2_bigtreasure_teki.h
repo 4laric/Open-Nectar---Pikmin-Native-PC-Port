@@ -41,6 +41,11 @@ bool pc_p2_bigtreasure_teki_suppress_ai(const BTeki* teki);
 // Read-only probe for the test-only autoplay bot: body health plus the live
 // weapon HP of a bound, living Titan; `fallback` for anything else.
 float pc_p2_bigtreasure_teki_effective_health(const BTeki* teki, float fallback);
+// Read-only probe for the test-only autoplay bot (#246 bot assistance): the
+// world XZ of the captured weapon nearest (x, z) -- where a player aims the
+// throw cursor, since only the weapon parts are stickable while armed.
+// False when unbound or unarmed.
+bool pc_p2_bigtreasure_teki_aim_point(const BTeki* teki, float x, float z, float* outX, float* outZ);
 // Draws the staged P2 pose for the FSM's clip/frame with the captured
 // weapons on the animated otakara_* joints (corpse: last dead pose).
 bool pc_p2_bigtreasure_teki_draw(BTeki* teki, Graphics& gfx, const Matrix4f& view, bool corpse = false);

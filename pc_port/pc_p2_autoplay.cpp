@@ -801,6 +801,8 @@ void pc_p2_autoplay_tick(void)
         senses.targetSource = pick->source;
         senses.tgtX = pick->x;
         senses.tgtZ = pick->z;
+        senses.aimValid = pick->source == 73
+                          && pc_p2_bigtreasure_teki_aim_point(pick->actor, naviX, naviZ, &senses.aimX, &senses.aimZ);
         senses.targetDist = pick->dist;
         senses.targetAlive = true;
         senses.targetHealthFrac = pick->health / (sEngage.initialHealth > 0.0f ? sEngage.initialHealth : 1.0f);
