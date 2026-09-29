@@ -41,8 +41,15 @@ std::map<BTeki*, Binding> s;
 std::vector<std::unique_ptr<P2SaraiHost>> hosts;
 // Naturally dead Sarai anchors: kept until the central forget/reset seam so the
 // Pod delivery receipt can still resolve the corpse after the live binding is
-// revoked (mirrors the Kurage/Mamuta pattern).
-std::map<BTeki*, unsigned> corpses;
+// revoked (mirrors the Kurage/Mamuta pattern). The species is kept with the
+// corpse so a Demon anchor that lands here (finalised, or failing revalidation
+// before finalisation) can never resolve as a private-room corpse:sarai
+// receipt (#215 review).
+struct Corpse {
+    unsigned generator;
+    const P2SaraiSpecies* species;
+};
+std::map<BTeki*, Corpse> corpses;
 
 // Exactly one match is required so a stale/ambiguous scene fails closed.
 bool findOwnerActor(unsigned wantedGenerator, int wantedType, BTeki*& match)
@@ -294,6 +301,12 @@ bool bindSpecies(BTeki* actor, unsigned generatorId, unsigned seedTargetUid, con
     auto host = sp.demon ? buildDemonHost(actor, generatorId) : buildHost(actor, generatorId, true);
     if (!host) {
         std::printf("P2_GENERATED_PLACEMENT source_id=%u target=%u bound=0 reason=host\n", sp.sourceId, seedTargetUid);
+        // #215 review: a seed slot assigned to the Demon whose staged demon-*
+        // files are missing stays a plain P1 anchor and can never deliver its
+        // check. Say so loudly instead of leaving only the generic marker.
+        if (sp.demon)
+            std::printf("P2_DEMON_HOST_UNAVAILABLE source_id=32 generator=%u target=%u "
+                        "reason=staging slot_check_unreachable=1\n", generatorId, seedTargetUid);
         std::fflush(stdout);
         return false;
     }
@@ -341,7 +354,7 @@ void pc_p2_sarai_manager_update_actor(BTeki* actor)
     // Finalised Demon corpse: nothing left to drive (see draw_actor).
     if (binding.species->demon && binding.escaped) return;
     if (!binding.host->revalidateNativeActor(actor, binding.generator, binding.type)) {
-        corpses[actor] = binding.generator;
+        corpses[actor] = {binding.generator, binding.species};
         s.erase(it);
         return;
     }
@@ -367,7 +380,7 @@ void pc_p2_sarai_manager_update_actor(BTeki* actor)
             }
             if (binding.host->demonKillRequested()) {
                 binding.escaped = true;
-                corpses[actor] = binding.generator;
+                corpses[actor] = {binding.generator, binding.species};
                 binding.host->demonAnchorFinalize();
             }
         }
@@ -378,7 +391,7 @@ void pc_p2_sarai_manager_update_actor(BTeki* actor)
     // behaviour and visual. On death the engine corpse path takes over.
     if (actor->isAlive()) actor->mSRT.t = binding.host->position();
     else {
-        corpses[actor] = binding.generator;
+        corpses[actor] = {binding.generator, binding.species};
         if (!binding.sawDeath) {
             binding.sawDeath = true;
             std::printf("P2_SARAI_DEAD source_id=23 generator=%u health=%.1f\n",
@@ -441,8 +454,8 @@ bool pc_p2_sarai_receipt(PelletView* view, unsigned& generator)
     if (i != s.end() && i->second.species->demon) return false;
     if (i != s.end()) { generator = i->second.generator; return true; }
     auto c = corpses.find(t);
-    if (c == corpses.end()) return false;
-    generator = c->second;
+    if (c == corpses.end() || c->second.species->demon) return false;
+    generator = c->second.generator;
     return true;
 }
 
