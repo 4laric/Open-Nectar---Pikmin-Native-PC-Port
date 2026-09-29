@@ -338,6 +338,26 @@ void testCombatFlow()
           "combat/result_kill_carry");
     CHECK(hasMarker(markers, "received=1"), "combat/result_received");
     CHECK(hasMarker(markers, "bot-driven"), "combat/result_labelled_bot_driven");
+
+    // A second live target of the same species after the RESULT: exactly one
+    // RESULT for the first token, then the new token is engaged (#897).
+    s.targetToken = 5465462;
+    s.targetAlive = true;
+    s.targetDead = false;
+    s.targetDamagedLatch = false;
+    s.receiptSeen = false;
+    s.transportSeen = false;
+    s.targetHealthFrac = 1.0f;
+    s.targetDist = 1000.0f;
+    int again = 0;
+    for (int i = 0; i < 20; ++i) {
+        brain.update(0.05f, s);
+        for (const std::string& m : brain.takeMarkers())
+            if (m.find("AUTOPLAY_RESULT target=5465461") != std::string::npos) ++again;
+    }
+    CHECK(again == 0, "combat/no_duplicate_result_on_next_token");
+    CHECK(brain.current() == p2autoplay::State::Approach || brain.current() == p2autoplay::State::Attack,
+          "combat/engages_next_token");
 }
 
 void testKoganeMovesOn()
@@ -3202,6 +3222,532 @@ void testKingEvadeLongSim()
     CHECK(low.bitten == 0 && low.presses == 0 && low.hp >= 30.0f, "king_long/low_hp_no_damage");
 }
 
+// #897 roller stance (Crawbster 94): wake from Stay, no throws while the
+// body rejects damage, sideways dodge with the whistle held while the ball
+// rolls, throws only inside the Turn stickable window.
+void testRollerStance()
+{
+    CHECK(p2autoplay::isRollerStance(94) && !p2autoplay::isRollerStance(53) && !p2autoplay::isRollerStance(44),
+          "roller/only_94");
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = kingSenses(94, 150.0f);
+    CHECK(enterAttack(brain, s), "roller/enters_attack");
+    // Dormant (Stay): walk in to wake it, no throws.
+    s.targetDormant = true;
+    s.naviZ = 150.0f;
+    s.targetDist = 150.0f;
+    brain.update(0.05f, s);
+    p2autoplay::Command c = brain.command();
+    CHECK(c.moveZ < -0.9f && !(c.buttons & unsigned(p2autoplay::PadA)), "roller/wake_walks_in");
+    CHECK(hasMarker(brain.takeMarkers(), "AUTOPLAY_ROLLER mode=wake"), "roller/wake_marker");
+    // Awake, invulnerable, close: back off, never throw.
+    s.targetDormant = false;
+    s.naviZ = 150.0f;
+    s.targetDist = 150.0f;
+    bool threw = false;
+    for (int i = 0; i < 60; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) threw = true;
+    }
+    c = brain.command();
+    CHECK(!threw, "roller/stand_no_throws");
+    CHECK(c.moveZ > 0.9f, "roller/stand_backs_off");
+    // Inside the band: hold still.
+    s.naviZ = 230.0f;
+    s.targetDist = 230.0f;
+    brain.update(0.05f, s);
+    c = brain.command();
+    CHECK(c.moveX == 0.0f && c.moveZ == 0.0f, "roller/stand_holds_band");
+    // Rolling straight at the captain (+z): dodge sideways (x), whistle held.
+    s.targetRolling = true;
+    s.targetVelX = 0.0f;
+    s.targetVelZ = 200.0f;
+    s.naviX = 10.0f;
+    s.naviZ = 300.0f;
+    s.targetDist = 300.0f;
+    brain.update(0.05f, s);
+    c = brain.command();
+    CHECK(std::fabs(c.moveX) > 0.8f && c.moveX > 0.0f, "roller/evade_sideways_own_side");
+    CHECK((c.buttons & unsigned(p2autoplay::PadB)) != 0, "roller/evade_whistles");
+    CHECK(!(c.buttons & unsigned(p2autoplay::PadA)), "roller/evade_no_throw");
+    CHECK(hasMarker(brain.takeMarkers(), "AUTOPLAY_ROLLER mode=evade"), "roller/evade_marker");
+    // Turn window open: close in and throw.
+    s.targetRolling = false;
+    s.targetVulnerable = true;
+    s.naviX = 0.0f;
+    s.naviZ = 200.0f;
+    s.targetDist = 200.0f;
+    threw = false;
+    for (int i = 0; i < 40; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) threw = true;
+    }
+    c = brain.command();
+    CHECK(threw && c.moveZ < -0.9f, "roller/punish_throws_in_window");
+    // A far roll does not drop back to Approach before rollerChaseDist.
+    s.targetVulnerable = false;
+    s.naviZ = 800.0f;
+    s.targetDist = 800.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Attack, "roller/no_chase_at_800");
+    // Control: a non-roller in the same geometry throws as before.
+    p2autoplay::Brain other(cfg);
+    p2autoplay::Senses o = kingSenses(44, 150.0f);
+    CHECK(enterAttack(other, o), "roller/control_attack");
+    o.targetDist = 150.0f;
+    threw = false;
+    for (int i = 0; i < 40; ++i) {
+        other.update(0.05f, o);
+        if (other.command().buttons & unsigned(p2autoplay::PadA)) threw = true;
+    }
+    CHECK(threw, "roller/control_throws");
+}
+
+// #897 power resupply: the power squad drains the Onion, so a crushed squad
+// walks back, asks the driver to restock (wantsPowerRestock) and re-selects
+// once the field is back to powerWantSquad; never while the Turn window is
+// open; never in normal mode (control).
+void testPowerResupply()
+{
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", "1");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "10");
+    {
+        p2autoplay::Config cfg;
+        p2autoplay::Brain brain(cfg);
+        p2autoplay::Senses s = kingSenses(94, 150.0f);
+        s.fieldPikmin = 90;
+        s.hasOnion = true;
+        s.onionStored = 0;
+        s.onionX = 0.0f;
+        s.onionZ = 1000.0f;
+        s.onionDist = 850.0f;
+        // Power WithdrawSeek wants field>=80 before Select.
+        p2autoplay::Senses pre = s;
+        pre.targetToken = 0;
+        brain.update(0.05f, pre);
+        brain.update(0.05f, pre);
+        s.targetDist = 150.0f;
+        brain.update(0.05f, s);
+        brain.update(0.05f, s);
+        CHECK(brain.current() == p2autoplay::State::Attack, "powerresupply/attacks");
+        brain.takeMarkers();
+        // Window open with a short squad: keep punishing.
+        s.fieldPikmin = 10;
+        s.targetVulnerable = true;
+        brain.update(0.05f, s);
+        CHECK(brain.current() == p2autoplay::State::Attack, "powerresupply/not_in_window");
+        s.targetVulnerable = false;
+        brain.update(0.05f, s);
+        CHECK(brain.current() == p2autoplay::State::WithdrawSeek, "powerresupply/disengages_empty_onion");
+        CHECK(hasMarker(brain.takeMarkers(), "AUTOPLAY_RESUPPLY field=10 stored=0"), "powerresupply/marker");
+        CHECK(!brain.wantsPowerRestock(), "powerresupply/no_restock_far");
+        brain.update(0.05f, s);
+        CHECK(brain.command().moveZ > 0.9f, "powerresupply/walks_to_onion");
+        s.naviZ = 950.0f;
+        s.onionDist = 50.0f;
+        brain.update(0.05f, s);
+        CHECK(brain.wantsPowerRestock(), "powerresupply/restock_at_onion");
+        CHECK(brain.current() == p2autoplay::State::WithdrawSeek, "powerresupply/waits_for_squad");
+        s.powerRestocks = 1;
+        s.fieldPikmin = 85;
+        brain.update(0.05f, s);
+        CHECK(brain.current() == p2autoplay::State::Select, "powerresupply/reselects");
+        CHECK(!brain.wantsPowerRestock(), "powerresupply/restock_cleared");
+        // Budget spent and nothing stocked: no further resupply.
+        p2autoplay::Brain b2(cfg);
+        p2autoplay::Senses t = s;
+        t.fieldPikmin = 90;
+        t.naviZ = 150.0f;
+        t.targetDist = 150.0f;
+        t.onionDist = 850.0f;
+        b2.update(0.05f, t);
+        b2.update(0.05f, t);
+        b2.update(0.05f, t);
+        b2.update(0.05f, t);
+        t.powerRestocks = cfg.powerRestockMax;
+        t.fieldPikmin = 10;
+        b2.update(0.05f, t);
+        CHECK(b2.current() == p2autoplay::State::Attack, "powerresupply/budget_spent");
+    }
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", nullptr);
+    {
+        // Control: normal mode, empty Onion: no resupply (v4 rule unchanged).
+        p2autoplay::Config cfg;
+        p2autoplay::Brain brain(cfg);
+        p2autoplay::Senses s = kingSenses(94, 150.0f);
+        s.hasOnion = true;
+        s.onionStored = 0;
+        s.onionDist = 850.0f;
+        CHECK(enterAttack(brain, s), "powerresupply/control_attack");
+        s.fieldPikmin = 10;
+        brain.update(0.05f, s);
+        CHECK(brain.current() == p2autoplay::State::Attack, "powerresupply/control_normal_mode");
+    }
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
+}
+
+// #897 push obstacle: an unfinished box ahead of the approach is closed on
+// and thrown at (look-band stick in range); stuck windows do not fire while
+// pushing; once it is finished the approach resumes.
+void testObstaclePush()
+{
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 940001;
+    s.targetSource = 94;
+    s.targetAlive = true;
+    s.tgtX = 0.0f;
+    s.tgtZ = -1000.0f;
+    s.targetDist = 1000.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Approach, "obstacle/approach");
+    brain.takeMarkers();
+    s.pushValid = true;
+    s.pushX = 0.0f;
+    s.pushZ = -300.0f;
+    s.pushDist = 300.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.command().moveZ < -0.9f && brain.command().stickScale == 1.0f, "obstacle/walks_to_box");
+    CHECK(hasMarker(brain.takeMarkers(), "AUTOPLAY_OBSTACLE phase=push"), "obstacle/push_marker");
+    s.pushDist = 120.0f;
+    s.pushAimX = 0.0f;
+    s.pushAimZ = -140.0f; // near face, toward the captain at z=0 side
+    s.cursorValid = true;
+    s.cursorX = 0.0f;
+    s.cursorZ = -175.0f; // 35 past the aim: slide back with the look band
+    bool threw = false;
+    for (int i = 0; i < 400; ++i) { // 20 s at the box: no STUCK, no giveup
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) threw = true;
+    }
+    auto m = brain.takeMarkers();
+    CHECK(threw && brain.command().stickScale < 1.0f && brain.command().moveZ > 0.9f, "obstacle/throws_look_band_to_face");
+    s.cursorZ = -140.0f; // on the aim: neutral stick, keep throwing
+    brain.update(0.05f, s);
+    CHECK(brain.command().moveX == 0.0f && brain.command().moveZ == 0.0f, "obstacle/cursor_on_face_holds");
+    CHECK(!hasMarker(m, "AUTOPLAY_STUCK") && brain.current() == p2autoplay::State::Approach, "obstacle/no_stuck_while_pushing");
+    s.pushValid = false;
+    s.scattered = false;
+    brain.update(0.05f, s);
+    CHECK(hasMarker(brain.takeMarkers(), "AUTOPLAY_OBSTACLE phase=cleared"), "obstacle/cleared_marker");
+    CHECK(brain.command().moveZ < -0.9f && !(brain.command().buttons & unsigned(p2autoplay::PadA)), "obstacle/resumes_approach");
+}
+
+// #897 detour progress: a leg that leads away from the target is progress
+// while the captain closes on the leg (no STUCK); a stalled leg still STUCKs.
+void testDetourLegProgress()
+{
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 940002;
+    s.targetSource = 94;
+    s.targetAlive = true;
+    s.tgtX = -400.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s);
+    brain.takeMarkers();
+    s.waypointLeg = true;
+    s.wpX = 400.0f;
+    s.wpZ = 0.0f;
+    bool stuck = false;
+    for (int i = 0; i < 200; ++i) { // 10 s walking east, away from the target
+        s.naviX = float(i) * 1.8f;
+        s.targetDist = s.naviX + 400.0f;
+        brain.update(0.05f, s);
+        if (hasMarker(brain.takeMarkers(), "AUTOPLAY_STUCK")) stuck = true;
+    }
+    CHECK(!stuck, "detour/away_leg_is_progress");
+    for (int i = 0; i < 200; ++i) { // stalled on the leg: STUCK fires
+        brain.update(0.05f, s);
+        if (hasMarker(brain.takeMarkers(), "AUTOPLAY_STUCK")) stuck = true;
+    }
+    CHECK(stuck, "detour/stalled_leg_stucks");
+}
+
+// #897 tier gate: a Crawbster on the ledge above is not "in range"; the
+// approach asks for a route at once; an attack that finds it on another
+// tier goes back to Approach; other species are unaffected.
+void testRollerTier()
+{
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = kingSenses(94, 150.0f);
+    CHECK(enterAttack(brain, s), "tier/attack");
+    s.targetDyValid = true;
+    s.targetDy = 50.0f;
+    s.targetDist = 150.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Approach, "tier/attack_back_to_approach");
+    brain.takeMarkers();
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Approach && brain.replanWanted(), "tier/approach_replans_not_attacks");
+    CHECK(hasMarker(brain.takeMarkers(), "AUTOPLAY_TIER"), "tier/marker");
+    brain.clearReplan();
+    s.targetDy = 5.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Attack, "tier/same_tier_attacks");
+    p2autoplay::Brain other(cfg);
+    p2autoplay::Senses o = kingSenses(44, 150.0f);
+    CHECK(enterAttack(other, o), "tier/control_attack");
+    o.targetDyValid = true;
+    o.targetDy = 50.0f;
+    o.targetDist = 150.0f;
+    other.update(0.05f, o);
+    CHECK(other.current() == p2autoplay::State::Attack, "tier/control_unaffected");
+}
+
+// #897 home lean: the evade picks the side toward the arena floor (home)
+// when the captain is near the roll line; back-off blends toward home.
+void testRollerHomeLean()
+{
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = kingSenses(94, 150.0f);
+    CHECK(enterAttack(brain, s), "home/attack");
+    s.homeValid = true;
+    s.homeX = -300.0f;
+    s.homeZ = 300.0f;
+    s.targetRolling = true;
+    s.targetVelX = 0.0f;
+    s.targetVelZ = 200.0f;
+    s.naviX = 10.0f;
+    s.naviZ = 300.0f;
+    s.targetDist = 300.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.command().moveX < -0.8f, "home/evade_toward_home_side");
+    s.targetRolling = false;
+    s.naviX = 0.0f;
+    s.naviZ = 150.0f;
+    s.targetDist = 150.0f;
+    s.homeX = -600.0f;
+    s.homeZ = 0.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.command().moveX < -0.3f && brain.command().moveZ > 0.3f, "home/backoff_blends_home");
+}
+
+void testPartGatherSwarm()
+{
+    // #901: a dropped ship part short of its minimum is gathered by a whistle
+    // over idle Pikmin, then a C-stick swarm onto the part (never throws);
+    // a full crew escorts; the part leaving the field scores the target.
+    p2autoplay::Config cfg;
+    cfg.whistleHold = 0.2f;
+    cfg.partWhistleCooldown = 0.5f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 90;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 901001;
+    s.targetSource = 44;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.tgtX = 100.0f;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetHealthFrac = 0.5f;
+    brain.update(0.05f, s);
+    s.targetAlive = false;
+    s.targetDead = true;
+    s.trackingPart = true;
+    s.carryWant = 20;
+    s.pelletCarriers = 2;
+    s.carryCount = 2;
+    s.transportSeen = true;
+    s.partyCount = 5;
+    s.freeCount = 40;
+    s.freeX = 400.0f;
+    s.freeZ = 0.0f;
+    s.targetDist = 100.0f;
+    brain.update(0.05f, s); // attack sees the death -> aftermath
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "part/aftermath");
+    brain.update(0.05f, s);
+    CHECK(brain.command().buttons & unsigned(p2autoplay::PadB), "part/whistles_idle_squad");
+    CHECK(brain.command().moveX > 0.5f, "part/whistle_walks_to_idle");
+    for (int i = 0; i < 6; ++i) brain.update(0.05f, s); // whistle ends
+    s.partyCount = 60;
+    brain.update(0.05f, s);
+    CHECK(!(brain.command().buttons & unsigned(p2autoplay::PadB)), "part/no_whistle_with_party");
+    CHECK(!(brain.command().buttons & unsigned(p2autoplay::PadA)), "part/no_throws");
+    CHECK(brain.command().swarmX > 0.9f, "part/swarms_at_part");
+    s.pelletCarriers = 20;
+    s.carryCount = 20;
+    brain.update(0.05f, s);
+    CHECK(brain.command().swarmX == 0.0f && brain.command().swarmZ == 0.0f, "part/full_crew_no_swarm");
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "part/escorts");
+    s.partGone = true;
+    brain.update(0.05f, s);
+    const std::vector<std::string> got = brain.takeMarkers();
+    CHECK(hasMarker(got, "AUTOPLAY_PART_GONE token=901001"), "part/gone_marker");
+    CHECK(hasMarker(got, "AUTOPLAY_RESULT target=901001"), "part/result");
+}
+
+void testApproachRouteProgress()
+{
+    // #901: while a route is active, approach progress is the remaining route
+    // length; a detour that leads away from the target is not STUCK.
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 901002;
+    s.targetSource = 44;
+    s.targetAlive = true;
+    s.targetDist = 2000.0f;
+    s.tgtX = 2000.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Approach, "route/approach");
+    s.waypointLeg = true;
+    s.wpX = -500.0f;
+    s.pathRemaining = 4000.0f;
+    std::vector<std::string> markers;
+    for (int i = 0; i < 400; ++i) { // 20 s walking away along the route
+        s.targetDist += 5.0f;
+        s.pathRemaining -= 8.0f;
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(!hasMarker(markers, "AUTOPLAY_STUCK"), "route/no_stuck_on_detour");
+    CHECK(brain.current() == p2autoplay::State::Approach, "route/still_approaching");
+    for (int i = 0; i < 200; ++i) { // route stalls
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_STUCK state=approach"), "route/stuck_when_route_stalls");
+}
+
+void testApproachObstacleWork()
+{
+    // #901: STUCK beside an unfinished gate: stand off, swarm and throw at it
+    // without spending the unreachable budget; a finished gate re-routes.
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 90;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 901003;
+    s.targetSource = 44;
+    s.targetAlive = true;
+    s.targetDist = 1500.0f;
+    s.tgtX = 1500.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Approach, "obstacle/approach");
+    s.obstacleKind = 1;
+    s.obstacleX = 100.0f;
+    s.obstacleZ = 0.0f;
+    std::vector<std::string> markers;
+    bool swarmed = false, threw = false;
+    for (int i = 0; i < 1200; ++i) { // 60 s pinned at the gate
+        brain.update(0.05f, s);
+        if (brain.command().swarmX > 0.9f) swarmed = true;
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) threw = true;
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_OBSTACLE start kind=1"), "obstacle/start");
+    CHECK(swarmed, "obstacle/swarms_at_gate");
+    CHECK(threw, "obstacle/throws_at_gate");
+    CHECK(!hasMarker(markers, "target_unreachable"), "obstacle/not_unreachable_while_working");
+    CHECK(brain.current() == p2autoplay::State::Approach, "obstacle/still_approaching");
+    s.obstacleKind = 0; // gate broken
+    brain.update(0.05f, s);
+    const std::vector<std::string> got = brain.takeMarkers();
+    CHECK(hasMarker(got, "AUTOPLAY_OBSTACLE done"), "obstacle/done");
+    CHECK(brain.replanWanted(), "obstacle/replans_after_done");
+}
+
+void testUiWaitTapsA()
+{
+    // #901: a movie or UI overlay holds the sim; the Brain taps A and does not
+    // advance its own clocks (no STUCK, no timeouts) until it clears.
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 901004;
+    s.targetSource = 44;
+    s.targetAlive = true;
+    s.targetDist = 1500.0f;
+    s.tgtX = 1500.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Approach, "ui/approach");
+    s.movieActive = true;
+    std::vector<std::string> markers;
+    bool tapped = false;
+    for (int i = 0; i < 4000; ++i) { // 200 s held (longer than approachTimeout)
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) tapped = true;
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(tapped, "ui/taps_a");
+    CHECK(hasMarker(markers, "AUTOPLAY_UI_WAIT movie=1"), "ui/logged");
+    CHECK(!hasMarker(markers, "AUTOPLAY_STUCK") && !hasMarker(markers, "AUTOPLAY_GIVEUP"), "ui/no_stuck_no_giveup");
+    CHECK(brain.current() == p2autoplay::State::Approach, "ui/still_approaching");
+}
+
+void testRangedAttackWhenStuckNear()
+{
+    // #901: STUCK within rangedAttackDist of a ground target: attack from
+    // here, sliding the cursor onto it in the look band and throwing.
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 90;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 901005;
+    s.targetSource = 44;
+    s.targetAlive = true;
+    s.targetDist = 250.0f;
+    s.tgtX = 250.0f;
+    s.cursorValid = true;
+    s.cursorX = 60.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Approach, "ranged/approach");
+    std::vector<std::string> markers;
+    for (int i = 0; i < 200 && brain.current() == p2autoplay::State::Approach; ++i) {
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_RANGED token=901005"), "ranged/marker");
+    CHECK(brain.current() == p2autoplay::State::Attack, "ranged/attack");
+    // The first STUCK replans (a route to the target's floor level); only the
+    // second stalled window throws from range.
+    size_t firstStuck = markers.size(), ranged = markers.size();
+    for (size_t i = 0; i < markers.size(); ++i) {
+        if (firstStuck == markers.size() && markers[i].find("AUTOPLAY_STUCK") == 0) firstStuck = i;
+        if (markers[i].find("AUTOPLAY_RANGED") == 0) ranged = i;
+    }
+    CHECK(firstStuck < ranged && markers[firstStuck].find("replan=1") != std::string::npos,
+          "ranged/replans_first");
+    bool look = false, threw = false;
+    for (int i = 0; i < 40; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().stickScale < 0.5f && brain.command().moveX > 0.5f) look = true;
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) threw = true;
+    }
+    CHECK(look, "ranged/cursor_slides_in_look_band");
+    CHECK(threw, "ranged/throws");
+}
+
 int main()
 {
     testGate();
@@ -3253,6 +3799,17 @@ int main()
     testKingStandoffOpensGate();
     testKingEvadePolicy();
     testKingEvadeLongSim();
+    testRollerStance();
+    testPowerResupply();
+    testObstaclePush();
+    testDetourLegProgress();
+    testRollerTier();
+    testRollerHomeLean();
+    testPartGatherSwarm();
+    testApproachRouteProgress();
+    testApproachObstacleWork();
+    testUiWaitTapsA();
+    testRangedAttackWhenStuckNear();
     if (failures == 0) {
         std::printf("PASS p2_autoplay\n");
         return 0;

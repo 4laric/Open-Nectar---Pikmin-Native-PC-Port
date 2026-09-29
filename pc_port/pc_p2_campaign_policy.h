@@ -29,6 +29,9 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     // for the Dwarf Bulborb; the P1 enum for it is TEKI_Chappy, and there is no
     // TEKI_Kochappy in include/teki.h.
     case 23: return 3; // TEKI_Chappy: Sarai ordinary-host path
+    // #215: Demon (Bumbling Snitchbug) is a Sarai::Obj subclass and rides the
+    // same Sarai host/anchor vehicle with its species profile.
+    case 32: return 3; // TEKI_Chappy: Demon profile of the Sarai host
     case 28: case 68: return 3; // TEKI_Chappy: ElecBug/TamagoMushi ground hosts
     case 94: return 4; // TEKI_Swallow: DangoMushi snagret host
     case 12: return 18; // TEKI_KabekuiA: UjiA Female Sheargrub host

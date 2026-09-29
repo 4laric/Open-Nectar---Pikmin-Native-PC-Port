@@ -3,6 +3,7 @@
 #include "pc_p2_boss_arena_policy.h"
 #include "pc_p2_campaign_policy.h"
 #include "pc_p2_generated_placement.h"
+#include "pc_held_part.h"
 #include "pc_p2_kabuto_host.h"
 #include "pc_p2_placement_probe.h"
 #include "pc_randomizer.h"
@@ -55,6 +56,19 @@ int pc_p2_boss_arena_host(Generator* generator)
     if (!source) return -1;
     const int host = p2bossarena::hostFor(source, p2campaign::hostType);
     return (host >= TEKI_START && host < TEKI_TypeCount) ? host : -1;
+}
+
+void pc_p2_reserve_source_extras(Generator* generator)
+{
+    const unsigned source = boundSource(generator, nullptr);
+    if (source == 94 && tekiMgr && !tekiMgr->mUsingType[TEKI_Iwagon]) {
+        // Without this the rain Rocks/Egg are simulated but never drawn on a
+        // stage whose own generators hold no Iwagon (the impact_goolix arena).
+        tekiMgr->mUsingType[TEKI_Iwagon] = true;
+        std::printf("P2_DANGOMUSHI_RAIN_MESH_RESERVED generator=%u type=%d\n",
+                    pc_randomizer_generator_id(generator), int(TEKI_Iwagon));
+        std::fflush(stdout);
+    }
 }
 
 bool pc_p2_boss_arena_suppressed(Generator* generator)
@@ -129,11 +143,19 @@ Creature* pc_p2_boss_arena_birth(BirthInfo& info, const GenObjectBoss& boss)
         return nullptr;
     }
     // Same personality hand-off as GenObjectTeki::birth. The P1 boss's number
-    // pellet reward carries over; the arena is never a ship-part holder
-    // (protected arenas are not eligible, root p2_boss_arenas.py).
+    // pellet reward carries over, and so does its held ship part (#901): the
+    // part goes in the personality mID exactly like a P1 part-holder teki,
+    // resolved from the generator's pellet config like BossMgr::setBossParam.
+    // BTeki::startAI then registers it (or clears it when it already exists)
+    // and the BTeki death funnels drop it once.
     static TekiPersonality* personality = nullptr;
     if (!personality) personality = new TekiPersonality();
     personality->reset();
+    const unsigned heldPart = pc_held_part_for_pellet_config(boss.mPelletConfigIdx);
+    if (heldPart) {
+        personality->mID.setID(heldPart);
+        pc_held_part_log_assign(heldPart, source, uid, boss.mBossID, "arena");
+    }
     personality->mPosition.set(info.mPosition);
     personality->mNestPosition.set(info.mScale);
     personality->mFaceDirection = info.mRotation.y;
@@ -145,8 +167,10 @@ Creature* pc_p2_boss_arena_birth(BirthInfo& info, const GenObjectBoss& boss)
         personality->setF(TekiPersonality::FLT_PelletAppearChance, 1.0f);
     }
     teki->mPersonality->input(*personality);
+    pc_held_part_birth_uid(uid); // the newborn has no mGenerator yet
     teki->reset();
     teki->startAI(0);
+    pc_held_part_birth_uid(0);
     teki->mSRT.r = info.mRotation;
     if (info.mGenerator->doAdjustFaceDir()) teki->setCreatureFlag(CF_AdjustFaceDirOnSpawn);
     teki->mRebirthDay = info.mGenerator->getRebirthDay();

@@ -29,6 +29,7 @@
 #include <chrono>
 
 #include "settings/pc_settings.h"
+#include "settings/pc_tutorial_policy.h"
 #include "pc_vs.h"
 #include "gl/pc_gfx.h"
 #include "jaudio/piki_scene.h"
@@ -2959,6 +2960,17 @@ void GameMovieInterface::parse(GameMovieInterface::SimpleMessage& msg)
 	switch (cmd) {
 	case MOVIECMD_TextDemo:
 	{
+#if defined(PIKI_PC_PORT)
+		// Mod "Disable Tutorials": drop the six informational hints before a
+		// window is allocated. Story, recovery, part and ending text still open.
+		if (pc_should_skip_tutorial(pc_settings_get_disable_tutorials(), data)) {
+			// Match normal text dismissal: release an associated movie wait too.
+			if (gameflow.mMoviePlayer->mIsActive) {
+				gameflow.mMoviePlayer->skipScene(SCENESKIP_Skip);
+			}
+			break;
+		}
+#endif
 		// open a text window - data here should use the zen::ogScrTutorialMgr::EnumTutorial enum (text ID)
 		PRINT("***** START TUTORIAL WINDOW\n");
 		int ufoPartID = -1;
