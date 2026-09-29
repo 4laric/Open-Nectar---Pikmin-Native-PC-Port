@@ -20,12 +20,18 @@
 //
 // Adaptations (each forced by the P1 host or by missing data; see also the
 // teki glue in pc_p2_bigtreasure_teki.cpp):
-//  * Damage parts: the P1 host has no per-weapon CollPart. Each counted hit is
-//    attributed to the Titan part nearest the attacker in XZ among the four
-//    otakara_* joints (elec front, fire left, gas back, water right in the
-//    retail bind pose). The nearest joint's weapon takes the hit when still
-//    captured; otherwise the hit lands on the body (tam1/tam2), which is only
-//    damageable once every weapon is gone -- the source damageCallBack rule.
+//  * Damage parts (#246 fix stage): the Titan carries its OWN collision tree,
+//    built by the teki glue from the retail bigtreasure/enemycoll.txt (root
+//    r250, tam1/tam2 body spheres, the four r25 weapon spheres elec/fire/gasi/
+//    mizu on the otakara_* joints, four leg tube chains). A P1 InteractAttack
+//    carries the CollPart the Pikmin is stuck to (nullptr for a ground swing);
+//    the glue classifies it as a weapon part, another Titan part or none, and
+//    damageCallBack routes it exactly as the source does: a weapon part hits
+//    that weapon; no part (or a non-Piki source) does nothing; any other part
+//    damages the body only once every weapon is gone. setupBigTreasureCollision
+//    is mirrored: tam1/tam2 are '_t__' (not stickable) while armed and 'st__'
+//    after the last drop; a dropped weapon's part becomes '_t__' radius 0.
+//    Leg tube positions follow the gait feet (no leg IK joint solve).
 //  * Blend animation: startBlendAnimation starts the new clip immediately;
 //    KEYEVENT_END_BLEND is not produced (the 30-frame visual blend is not
 //    reproduced). The one-frame event latch of EnemyBase::onKeyEvent is kept.
@@ -273,14 +279,35 @@ struct Candidate {
     bool stuckElsewhere = false; // isStickTo() && mSticker != Titan
     bool blue = false;          // Blue Pikmin (never a water shot target)
     bool buried = false;        // not searchable (Piki::isSearchable)
+    int stuckPart = -2;         // HitPart of the Titan CollPart it is stuck to
 };
-// One counted Pikmin/captain hit (P1 InteractAttack) with the attacker's
-// position (a stuck Pikmin, or the nearest attacker when none is stuck).
+// Titan collision part carried by a hit (BigTreasure::damageCallBack's
+// `collpart`): one of the four weapon parts (P2BigTreasureWeapon order:
+// elec, fire, gasi, mizu), another Titan part, or none (a P1 ground swing
+// passes no CollPart).
+enum HitPart : int { PartNone = -2, PartOther = -1 };
+// One counted P1 InteractAttack on the Titan.
 struct Hit {
-    Vec3 attacker;
+    int part = PartNone;
     float damage = 0.0f;
     bool fromPiki = true;
 };
+
+// Retail enemycoll.txt node (CollTree text format): child count, radius,
+// {id}, {code}, offset, joint index, attribute, then `{ children }`.
+struct CollNode {
+    std::string id, code;
+    float radius = 0.0f;
+    Vec3 offset;
+    int joint = 0;
+    int attribute = 0;
+    int parent = -1; // index into the flat pre-order list, -1 for the root
+};
+// Parses the retail tree into pre-order nodes. Fails closed on malformed input.
+bool parseCollTree(std::istream& in, std::vector<CollNode>& out, std::string& error);
+// Weapon index (P2BigTreasureWeapon) of a weapon part id ("elec", "fire",
+// "gasi", "mizu"), else -1. setupTreasure collTags order.
+int weaponForPartId(const std::string& id);
 struct TickInput {
     Vec3 position;
     float health = 0.0f;       // body health (host mHealth) BEFORE this tick's body damage
@@ -294,6 +321,10 @@ struct TickInput {
 struct ElementHit {
     std::uint64_t id = 0;
     bool navi = false;
+    // BigTreasureAttack.cpp: a captain that refuses the element stimulus is
+    // flicked (randWeightFloat(1) < *_NAVI_FLICK_CHANCE) or gets a 0-damage
+    // InteractAttack. The roll is drawn from the actor RNG up front.
+    bool naviFlick = false;
     P2BigTreasureReceiverHit hit;
 };
 struct Drop {
@@ -364,6 +395,13 @@ public:
     Vec3 jointWorld(int joint) const;
     // Current pose matrix for a joint in model space (nearest staged pose).
     const Mat34& jointModel(int joint) const;
+    // World position of a point given in a joint's local frame.
+    Vec3 jointPoint(int joint, const Vec3& local) const;
+    // World centre of a retail collision node at the current pose/gait, for
+    // the glue's CollParts: joint-0 (kosi) nodes use their offset in the kosi
+    // frame, weapon parts ride their otakara_* joint, leg chain nodes
+    // (lft/lht/rft/rht 2..5) lie on the hip-to-gait-foot polyline.
+    Vec3 collCentre(const CollNode& node) const;
     const P2BigTreasureElementRuntime& elements() const { return mElements; }
 
     // Test seams.
@@ -389,7 +427,6 @@ private:
     float attackTimeMax() const;
     void flickStick(TickOutput& out, const char* reason);
     void startBlend(int anim) { mAnim.start(anim); }
-    int partForAttacker(const Vec3& attacker) const; // weapon index of nearest joint
     void applyHits(TickOutput& out);
     void updateAttack(TickOutput& out);
     P2BigTreasureElementAim buildAim(int weapon);
@@ -419,7 +456,6 @@ private:
     std::uint32_t mRng = 1;
     const TickInput* mIn = nullptr;
     int mStuck = 0;
-    std::vector<std::uint64_t> mHandled; // per-attack receiver handled set
 };
 
 } // namespace p2btown

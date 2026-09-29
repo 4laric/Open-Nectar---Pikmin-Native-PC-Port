@@ -1987,7 +1987,8 @@ bool BTeki::interact(immut TekiInteractionKey& key)
 {
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
 	// #246 OWN: a campaign Titan Dweevil owns every Pikmin hit (source
-	// damageCallBack routes it to a weapon or, unarmed, the body). The P1 host
+	// damageCallBack routes it by the hit CollPart of the Titan's own
+	// collision tree to a weapon or, unarmed, the body). The P1 host
 	// strategy (TaiSwallow: lower-body damage scaling, stored damage) must not
 	// see it, so the raw hit is recorded here, before strategy dispatch.
 	if (key.mInteractionType == TekiInteractType::Attack && pc_p2_bigtreasure_teki_is_bound(this)) {
@@ -1995,7 +1996,7 @@ bool BTeki::interact(immut TekiInteractionKey& key)
 		if (getTekiOption(TEKIOPT_Invincible)) {
 			return false;
 		}
-		pc_p2_bigtreasure_attack(this, attack->mOwner, attack->mDamage);
+		pc_p2_bigtreasure_attack(this, attack->mOwner, attack->mDamage, attack->mCollPart);
 		setCreaturePointer(1, attack->mOwner);
 		return true;
 	}
