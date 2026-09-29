@@ -6,6 +6,11 @@
 #include "Joint.h"
 #include "Material.h"
 #include "system.h"
+#include <cstddef>
+
+// pc_port/gl/pc_gfx.cpp: drop and never re-cache resident meshes built from
+// vertex storage the CPU rewrites (the GameCube code DCFlushRange()s it).
+extern "C" void pc_gfx_mark_dynamic_vertex_range(const void* addr, size_t bytes);
 
 namespace p2pose {
 // Call on the App heap. Geometry is private; audited bank resources are shared.
@@ -23,6 +28,12 @@ inline bool apply(Shape& shape,const Pose& a,const Pose& b,float weight,Pose& sc
     for(size_t i=0;i<scratch.positions.size();++i){const auto v=scratch.positions[i];shape.mVertexList[i].set(v.x,v.y,v.z);}
     for(size_t i=0;i<scratch.normals.size();++i){const auto v=scratch.normals[i];shape.mNormalList[i].set(v.x,v.y,v.z);}
     BoundBox bounds(shape.mVertexList[0],shape.mVertexList[0]);for(int i=1;i<shape.mVertexCount;++i)bounds.expandBound(shape.mVertexList[i]);
+    // The resident-mesh cache keys on the display list; without this the
+    // first blended pose is frozen for the life of the level (#897: the
+    // Crawbster's first pose is its fly drop-in 1200 units up, so the live
+    // model was never on screen).
+    pc_gfx_mark_dynamic_vertex_range(shape.mVertexList,size_t(shape.mVertexCount)*sizeof(shape.mVertexList[0]));
+    pc_gfx_mark_dynamic_vertex_range(shape.mNormalList,size_t(shape.mNormalCount)*sizeof(shape.mNormalList[0]));
     shape.mCourseExtents=bounds;shape.mJointList[0].mBounds=bounds;return true;
 }
 // Write one pose into a private single-joint Shape and refresh its bounds.
@@ -31,6 +42,10 @@ inline bool write(Shape& shape,const Pose& pose){
     for(size_t i=0;i<pose.positions.size();++i){const auto v=pose.positions[i];shape.mVertexList[i].set(v.x,v.y,v.z);}
     for(size_t i=0;i<pose.normals.size();++i){const auto v=pose.normals[i];shape.mNormalList[i].set(v.x,v.y,v.z);}
     BoundBox bounds(shape.mVertexList[0],shape.mVertexList[0]);for(int i=1;i<shape.mVertexCount;++i)bounds.expandBound(shape.mVertexList[i]);
+    // Same resident-cache rule as apply(): the #895 Track path rewrites this
+    // private Shape every frame (#897).
+    pc_gfx_mark_dynamic_vertex_range(shape.mVertexList,size_t(shape.mVertexCount)*sizeof(shape.mVertexList[0]));
+    pc_gfx_mark_dynamic_vertex_range(shape.mNormalList,size_t(shape.mNormalCount)*sizeof(shape.mNormalList[0]));
     shape.mCourseExtents=bounds;shape.mJointList[0].mBounds=bounds;return true;
 }
 // Per-actor presentation of a decoded pose bank (#895): the engine-free
