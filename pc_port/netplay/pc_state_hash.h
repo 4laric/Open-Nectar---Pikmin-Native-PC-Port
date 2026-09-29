@@ -82,6 +82,16 @@
 #define PC_SPIKE_CALL(call)
 #endif
 
+// Netplay M6b production snapshot (issue #896): the same same-line hook
+// pattern for the production snapshot. Empty unless the CMake option
+// PIKMIN_NETPLAY_SNAPSHOT defines the macro for this TU.
+#if defined(PIKMIN_NETPLAY_SNAPSHOT)
+#include "netplay/pc_snapshot.h"
+#define PC_SNAP_CALL(call) call
+#else
+#define PC_SNAP_CALL(call)
+#endif
+
 // argv capture must happen before the first tick (pc_main calls it at
 // startup); env vars are read lazily on the first tick end.
 void pc_state_hash_notify_argv(int argc, char** argv);

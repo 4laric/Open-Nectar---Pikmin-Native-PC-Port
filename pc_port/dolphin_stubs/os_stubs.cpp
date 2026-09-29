@@ -48,6 +48,29 @@ struct PcSpikeInfraScope {
 #define PC_SPIKE_INFRA_SCOPE()
 #endif
 
+#if defined(PIKMIN_NETPLAY_SNAPSHOT)
+// Netplay M6b production snapshot (issue #896): the thread / mutex / queue
+// maps below are infrastructure. Their functions run inside a SIM scope when
+// the sim calls them (stage loads) and mutate the maps through operator[],
+// so they open an infra scope (allocations stay on malloc); a restore never
+// rolls the map statics back. The simulated arena moves into the snapshot
+// region at the first arena query. Weak: other targets compile this TU
+// without the snapshot TUs.
+__attribute__((weak)) bool pc_snapshot_arena(void** lo, size_t* bytes);
+__attribute__((weak)) void pc_snapshot_infra_push(void);
+__attribute__((weak)) void pc_snapshot_infra_pop(void);
+__attribute__((weak)) void pc_snapshot_preserve(const void* p, size_t bytes);
+namespace {
+struct PcSnapInfraScope {
+    PcSnapInfraScope() { if (pc_snapshot_infra_push) pc_snapshot_infra_push(); }
+    ~PcSnapInfraScope() { if (pc_snapshot_infra_pop) pc_snapshot_infra_pop(); }
+};
+} // namespace
+#define PC_SNAP_INFRA_SCOPE() PcSnapInfraScope pcSnapInfraScope_
+#else
+#define PC_SNAP_INFRA_SCOPE()
+#endif
+
 /* ──────────────────────────────────────────────
  *  Global variables that were hardware-mapped on GC
  * ────────────────────────────────────────────── */
@@ -231,7 +254,7 @@ void OSYieldThread()                         { std::this_thread::yield(); }
 
 BOOL OSCreateThread(OSThread* thread, OSThreadStartFunction func, void* param,
                     void* stack, u32 stackSize, OSPriority priority, u16 attr) {
-    PC_SPIKE_INFRA_SCOPE();
+    PC_SPIKE_INFRA_SCOPE(); PC_SNAP_INFRA_SCOPE();
     (void)stack; (void)stackSize; (void)priority; (void)attr;
     memset(thread, 0, sizeof(OSThread));
     thread->state = OS_THREAD_STATE_READY;
@@ -246,7 +269,7 @@ void OSCancelThread(OSThread* thread)        { (void)thread; }
 void OSDetachThread(OSThread* thread)        { (void)thread; }
 
 s32  OSResumeThread(OSThread* thread) {
-    PC_SPIKE_INFRA_SCOPE();
+    PC_SPIKE_INFRA_SCOPE(); PC_SNAP_INFRA_SCOPE();
     std::lock_guard<std::mutex> lock(sGlobalMtx);
     auto it = sThreads.find(thread);
     if (it != sThreads.end() && !it->second.thrd) {
@@ -264,7 +287,7 @@ void OSClearStack(u8 val)                    { (void)val; }
 OSPriority OSGetThreadPriority(OSThread* thread) { (void)thread; return 16; }
 BOOL OSIsThreadSuspended(OSThread* thread)   { (void)thread; return FALSE; }
 BOOL OSJoinThread(OSThread* thread, void** val) { 
-    PC_SPIKE_INFRA_SCOPE();
+    PC_SPIKE_INFRA_SCOPE(); PC_SNAP_INFRA_SCOPE();
     (void)val;
     std::thread* t = nullptr;
     {
@@ -290,17 +313,17 @@ OSSwitchThreadCallback OSSetSwitchThreadCallback(OSSwitchThreadCallback callback
  *  Mutex & Cond
  * ────────────────────────────────────────────── */
 void OSInitMutex(OSMutex* mutex) { 
-    PC_SPIKE_INFRA_SCOPE();
+    PC_SPIKE_INFRA_SCOPE(); PC_SNAP_INFRA_SCOPE();
     std::lock_guard<std::mutex> lock(sGlobalMtx);
     sMutexes[mutex] = new std::mutex();
 }
 void OSInitCond(OSCond* cond) {
-    PC_SPIKE_INFRA_SCOPE();
+    PC_SPIKE_INFRA_SCOPE(); PC_SNAP_INFRA_SCOPE();
     std::lock_guard<std::mutex> lock(sGlobalMtx);
     sConds[cond] = new std::condition_variable();
 }
 void OSWaitCond(OSCond* cond, OSMutex* mutex) {
-    PC_SPIKE_INFRA_SCOPE();
+    PC_SPIKE_INFRA_SCOPE(); PC_SNAP_INFRA_SCOPE();
     std::condition_variable* cv;
     std::mutex* m;
     {
@@ -315,12 +338,12 @@ void OSWaitCond(OSCond* cond, OSMutex* mutex) {
     }
 }
 void OSSignalCond(OSCond* cond) {
-    PC_SPIKE_INFRA_SCOPE();
+    PC_SPIKE_INFRA_SCOPE(); PC_SNAP_INFRA_SCOPE();
     std::lock_guard<std::mutex> lock(sGlobalMtx);
     if (sConds.count(cond)) sConds[cond]->notify_one();
 }
 void OSLockMutex(OSMutex* mutex) {
-    PC_SPIKE_INFRA_SCOPE();
+    PC_SPIKE_INFRA_SCOPE(); PC_SNAP_INFRA_SCOPE();
     std::mutex* m;
     {
         std::lock_guard<std::mutex> lock(sGlobalMtx);
@@ -329,7 +352,7 @@ void OSLockMutex(OSMutex* mutex) {
     if (m) m->lock();
 }
 void OSUnlockMutex(OSMutex* mutex) {
-    PC_SPIKE_INFRA_SCOPE();
+    PC_SPIKE_INFRA_SCOPE(); PC_SNAP_INFRA_SCOPE();
     std::mutex* m;
     {
         std::lock_guard<std::mutex> lock(sGlobalMtx);
@@ -338,7 +361,7 @@ void OSUnlockMutex(OSMutex* mutex) {
     if (m) m->unlock();
 }
 BOOL OSTryLockMutex(OSMutex* mutex) {
-    PC_SPIKE_INFRA_SCOPE();
+    PC_SPIKE_INFRA_SCOPE(); PC_SNAP_INFRA_SCOPE();
     std::mutex* m;
     {
         std::lock_guard<std::mutex> lock(sGlobalMtx);
@@ -352,7 +375,7 @@ BOOL OSTryLockMutex(OSMutex* mutex) {
  *  Message Queues (Real implementation)
  * ────────────────────────────────────────────── */
 void OSInitMessageQueue(OSMessageQueue* queue, OSMessage* buffer, s32 count) {
-    PC_SPIKE_INFRA_SCOPE();
+    PC_SPIKE_INFRA_SCOPE(); PC_SNAP_INFRA_SCOPE();
     queue->msgArray = buffer;
     queue->msgCount = count;
     queue->firstIndex = 0;
@@ -362,7 +385,7 @@ void OSInitMessageQueue(OSMessageQueue* queue, OSMessage* buffer, s32 count) {
 }
 
 BOOL OSSendMessage(OSMessageQueue* queue, OSMessage msg, s32 flags) {
-    PC_SPIKE_INFRA_SCOPE();
+    PC_SPIKE_INFRA_SCOPE(); PC_SNAP_INFRA_SCOPE();
     MsgQueueData* qd;
     {
         std::lock_guard<std::mutex> lock(sGlobalMtx);
@@ -383,7 +406,7 @@ BOOL OSSendMessage(OSMessageQueue* queue, OSMessage msg, s32 flags) {
 }
 
 BOOL OSReceiveMessage(OSMessageQueue* queue, OSMessage* msg, s32 flags) {
-    PC_SPIKE_INFRA_SCOPE();
+    PC_SPIKE_INFRA_SCOPE(); PC_SNAP_INFRA_SCOPE();
     MsgQueueData* qd;
     {
         std::lock_guard<std::mutex> lock(sGlobalMtx);
@@ -404,7 +427,7 @@ BOOL OSReceiveMessage(OSMessageQueue* queue, OSMessage* msg, s32 flags) {
 }
 
 BOOL OSJamMessage(OSMessageQueue* queue, OSMessage msg, s32 flags) {
-    PC_SPIKE_INFRA_SCOPE();
+    PC_SPIKE_INFRA_SCOPE(); PC_SNAP_INFRA_SCOPE();
     MsgQueueData* qd;
     {
         std::lock_guard<std::mutex> lock(sGlobalMtx);
@@ -467,10 +490,47 @@ void pc_os_stubs_spike_register_preserve(void)
 #define PC_SPIKE_ARENA_ONCE()
 #endif
 
-void* OSGetArenaLo()               { PC_SPIKE_ARENA_ONCE(); return sArenaLo; }
-void* OSGetArenaHi()               { PC_SPIKE_ARENA_ONCE(); return sArenaHi; }
-void  OSSetArenaLo(void* lo)       { PC_SPIKE_ARENA_ONCE(); sArenaLo = lo; }
-void  OSSetArenaHi(void* hi)       { PC_SPIKE_ARENA_ONCE(); sArenaHi = hi; }
+#if defined(PIKMIN_NETPLAY_SNAPSHOT)
+// Netplay M6b (#896): decided once, at the first arena query (System::
+// Initialise): the snapshot region's arena zone when the snapshot is active,
+// else the static array for the whole run.
+static void pcSnapArenaOnce()
+{
+    static bool decided = false;
+    if (decided) return;
+    decided = true;
+    void* lo = nullptr;
+    size_t bytes = 0;
+    if (pc_snapshot_arena && pc_snapshot_arena(&lo, &bytes)) {
+        sArenaLo = lo;
+        sArenaHi = static_cast<u8*>(lo) + bytes;
+        printf("[snapshot] OS arena in the snapshot region (%p, %zu MB)\n", lo, bytes >> 20);
+    }
+}
+bool pc_os_stubs_snapshot_static_arena(void** lo, size_t* bytes)
+{
+    *lo = sArenaMemory;
+    *bytes = sizeof(sArenaMemory);
+    return true;
+}
+void pc_os_stubs_snapshot_register_preserve(void)
+{
+    if (!pc_snapshot_preserve) return;
+    pc_snapshot_preserve(&sThreads, sizeof(sThreads));
+    pc_snapshot_preserve(&sMutexes, sizeof(sMutexes));
+    pc_snapshot_preserve(&sConds, sizeof(sConds));
+    pc_snapshot_preserve(&sMsgQueues, sizeof(sMsgQueues));
+    pc_snapshot_preserve(&sGlobalMtx, sizeof(sGlobalMtx));
+}
+#define PC_SNAP_ARENA_ONCE() pcSnapArenaOnce()
+#else
+#define PC_SNAP_ARENA_ONCE()
+#endif
+
+void* OSGetArenaLo()               { PC_SPIKE_ARENA_ONCE(); PC_SNAP_ARENA_ONCE(); return sArenaLo; }
+void* OSGetArenaHi()               { PC_SPIKE_ARENA_ONCE(); PC_SNAP_ARENA_ONCE(); return sArenaHi; }
+void  OSSetArenaLo(void* lo)       { PC_SPIKE_ARENA_ONCE(); PC_SNAP_ARENA_ONCE(); sArenaLo = lo; }
+void  OSSetArenaHi(void* hi)       { PC_SPIKE_ARENA_ONCE(); PC_SNAP_ARENA_ONCE(); sArenaHi = hi; }
 void* OSInitAlloc(void* lo, void* hi, int maxHeaps) {
     (void)hi; (void)maxHeaps;
     return lo;

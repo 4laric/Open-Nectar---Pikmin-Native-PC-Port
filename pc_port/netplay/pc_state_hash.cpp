@@ -353,10 +353,17 @@ void initOnce(void)
 // after a restore; those re-run ticks must not append duplicate lines.
 bool sSpikeSuppressLog = false;
 #endif
+#if defined(PIKMIN_NETPLAY_SNAPSHOT)
+// Netplay M6b production snapshot (issue #896): same, for its synctest.
+bool sSnapSuppressLog = false;
+#endif
 } // namespace
 
 #if defined(PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
 void pc_state_hash_spike_suppress_log(bool on) { sSpikeSuppressLog = on; }
+#endif
+#if defined(PIKMIN_NETPLAY_SNAPSHOT)
+void pc_state_hash_snapshot_suppress_log(bool on) { sSnapSuppressLog = on; }
 #endif
 
 void pc_state_hash_notify_argv(int argc, char** argv)
@@ -465,6 +472,8 @@ void pc_state_hash_tick_end(void)
 
 #if defined(PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
 		if (sLogActive && !sSpikeSuppressLog) {
+#elif defined(PIKMIN_NETPLAY_SNAPSHOT)
+		if (sLogActive && !sSnapSuppressLog) {
 #else
 		if (sLogActive) {
 #endif

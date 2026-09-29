@@ -860,6 +860,54 @@ if(PIKMIN_NETPLAY_SNAPSHOT_SPIKE AND WIN32 AND NOT ANDROID)
     target_link_options(${NECTAR_GAME} PRIVATE -static-libstdc++ -static-libgcc)
 endif()
 
+# Netplay M6b production snapshot/restore for rollback (issue #896). OFF by
+# default; requires PIKMIN_NETPLAY_BUILD, Windows (MEM_WRITE_WATCH) and not
+# Android, and excludes the M6a spike (both hook operator new). When ON, the
+# snapshot TUs join the game exes and PIKMIN_NETPLAY_SNAPSHOT=1 is defined for
+# exactly the TUs that carry hooks, so the option never changes any other
+# object. The snapshot exe links libstdc++/libgcc statically (C++ runtime
+# allocations go through the exe's operator new and CRT imports) and at a
+# fixed image base (vtables and function pointers inside region blocks are the
+# same in every process, C2-9), and writes a link map for the globals
+# preserve list. At runtime everything stays inert unless
+# PIKMIN_NETPLAY_SNAPSHOT=1 is set.
+option(PIKMIN_NETPLAY_SNAPSHOT "Netplay M6b production snapshot/restore for rollback" OFF)
+if(PIKMIN_NETPLAY_SNAPSHOT AND NOT PIKMIN_NETPLAY_BUILD)
+    message(FATAL_ERROR "PIKMIN_NETPLAY_SNAPSHOT requires PIKMIN_NETPLAY_BUILD")
+endif()
+if(PIKMIN_NETPLAY_SNAPSHOT AND (NOT WIN32 OR ANDROID))
+    message(FATAL_ERROR "PIKMIN_NETPLAY_SNAPSHOT is Windows-only (MEM_WRITE_WATCH) and not supported on Android")
+endif()
+if(PIKMIN_NETPLAY_SNAPSHOT AND PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
+    message(FATAL_ERROR "PIKMIN_NETPLAY_SNAPSHOT and PIKMIN_NETPLAY_SNAPSHOT_SPIKE both hook operator new; enable one")
+endif()
+if(PIKMIN_NETPLAY_SNAPSHOT)
+    set(PC_SNAPSHOT_SOURCES
+        pc_port/netplay/pc_snapshot.cpp
+        pc_port/netplay/pc_snapshot_region.cpp
+        pc_port/netplay/pc_snapshot_ring.cpp
+        pc_port/netplay/pc_snapshot_game.cpp)
+    set_property(SOURCE
+        src/sysDolphin/sysNew.cpp
+        src/sysDolphin/system.cpp
+        src/plugPikiColin/plugPiki.cpp
+        src/plugPikiColin/gameflow.cpp
+        pc_port/pc_main.cpp
+        pc_port/dolphin_stubs/os_stubs.cpp
+        pc_port/audio/pc_audio.cpp
+        pc_port/dolphin_stubs/audio_stubs.cpp
+        pc_port/netplay/pc_state_hash.cpp
+        ${PC_SNAPSHOT_SOURCES}
+        APPEND PROPERTY COMPILE_DEFINITIONS PIKMIN_NETPLAY_SNAPSHOT=1)
+    set(PC_SNAPSHOT_LINK_OPTIONS -static-libstdc++ -static-libgcc -Wl,--disable-dynamicbase -Wl,--disable-high-entropy-va)
+    target_sources(${NECTAR_GAME} PRIVATE ${PC_SNAPSHOT_SOURCES})
+    target_link_options(${NECTAR_GAME} PRIVATE "-Wl,-Map=${CMAKE_BINARY_DIR}/nectar.map" ${PC_SNAPSHOT_LINK_OPTIONS})
+    if(TARGET p2_kurage_runtime)
+        target_sources(p2_kurage_runtime PRIVATE ${PC_SNAPSHOT_SOURCES})
+        target_link_options(p2_kurage_runtime PRIVATE ${PC_SNAPSHOT_LINK_OPTIONS})
+    endif()
+endif()
+
 # Netplay M3 lockstep (issue #880): vendored GekkoNet as its own static
 # library. GekkoLib/src/*.cpp with -std=gnu++20, GEKKONET_NO_ASIO and
 # GEKKONET_STATIC; include dirs include, include/private and thirdparty
@@ -1964,6 +2012,19 @@ if(PIKMIN_BUILD_TESTS)
             pc_port/netplay/pc_snapshot_spike.cpp)
         target_compile_options(pc_snapshot_spike_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
         add_test(NAME pc_snapshot_spike_test COMMAND pc_snapshot_spike_test)
+    endif()
+
+    # Netplay M6b production snapshot (issue #896): host test of the region
+    # allocator and the page ring (alignment, classes, split/coalesce, zero
+    # fill, address determinism, ring restore per k, the fatal paths as death
+    # tests). Only with the snapshot option.
+    if(PIKMIN_NETPLAY_SNAPSHOT AND WIN32)
+        add_executable(pc_snapshot_test
+            pc_port/netplay/pc_snapshot_test.cpp
+            pc_port/netplay/pc_snapshot_region.cpp
+            pc_port/netplay/pc_snapshot_ring.cpp)
+        target_compile_options(pc_snapshot_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+        add_test(NAME pc_snapshot_test COMMAND pc_snapshot_test)
     endif()
 
     add_executable(pc_render_phase_test

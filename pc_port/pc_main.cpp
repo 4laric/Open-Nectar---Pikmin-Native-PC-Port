@@ -129,6 +129,10 @@ int main(int argc, char* argv[])
     // M6a spike (#896): inert unless PIKMIN_NETPLAY_SNAPSHOT_SPIKE=1.
     pc_snapshot_spike_init();
 #endif
+#if defined(PIKMIN_NETPLAY_SNAPSHOT)
+    // M6b production snapshot (#896): inert unless PIKMIN_NETPLAY_SNAPSHOT=1.
+    pc_snapshot_init();
+#endif
 
 #ifdef __ANDROID__
     // Logcat, carpeta del juego y ruta de guardado: antes de que nada abra un

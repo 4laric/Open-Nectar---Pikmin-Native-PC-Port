@@ -37,6 +37,10 @@ DEFINE_ERROR(__LINE__) // Never used in the DLL
  */
 DEFINE_PRINT("plugPiki")
 
+#if defined(PIKI_PC_PORT) && defined(PIKMIN_NETPLAY_SNAPSHOT)
+#include "netplay/pc_snapshot.h"
+#endif
+
 /**
  * @brief Performs a full system reset, including timers and the overlay heap, intended for boot setup.
  */
@@ -59,12 +63,31 @@ void PlugPikiApp::hardReset()
 	// a C-heap block that nothing gives back. A hard reset would otherwise
 	// abandon the whole overlay heap, which is most of the simulated arena.
 	static u8* sPreviousOverlayHeap = nullptr;
+#if defined(PIKMIN_NETPLAY_SNAPSHOT)
+	// Netplay M6b (#896): with the snapshot on, the overlay heap is carved
+	// from the sys heap exactly as on the console (same size; the sys heap is
+	// the region's arena zone), so the sys, ovl and app heaps share one
+	// compact write-watched range.
+	u8* buf = nullptr;
+	if (pc_snapshot_active()) {
+		buf = static_cast<u8*>(sysHeap->push(sysHeap->getMaxFree()));
+		if (!buf) ERROR("snapshot: overlay heap does not fit the sys heap");
+	} else {
+		delete[] sPreviousOverlayHeap;
+		sPreviousOverlayHeap = nullptr;
+		buf                  = new u8[sysHeap->getMaxFree()];
+		sPreviousOverlayHeap = buf;
+	}
+#else
 	delete[] sPreviousOverlayHeap;
 	sPreviousOverlayHeap = nullptr;
 #endif
+#endif
+#if !defined(PIKMIN_NETPLAY_SNAPSHOT)
 	u8* buf      = new u8[sysHeap->getMaxFree()];
 #if defined(PIKI_PC_PORT)
 	sPreviousOverlayHeap = buf;
+#endif
 #endif
 	sysHeap->setAllocType(oldAlloc);
 
@@ -345,6 +368,11 @@ int PlugPikiApp::idle()
 		pc_snapshot_spike_auth_end();
 		pc_snapshot_spike_infra_push(kPcSpikeInfraPresent);
 #endif
+#if defined(PIKMIN_NETPLAY_SNAPSHOT)
+		// M6b (#896): the authoritative pass ends here; the SIM scope that
+		// pc_snapshot_idle_begin opened closes (presentation stays on malloc).
+		pc_snapshot_auth_end();
+#endif
 
 		// 2. Presentation pass: local view only, real camera + real GL.
 		// Sim blocks are skipped via pc_render_is_authoritative() == false.
@@ -463,7 +491,14 @@ int PlugPikiApp::idle()
 
 	// process any messages that have built up this frame
 	if (gameflow.mGameInterface) {
+#if defined(PIKMIN_NETPLAY_SNAPSHOT)
+		// M6b (#896): parseMessages is sim work (it re-runs in a resim tick).
+		pc_snapshot_sim_push(kPcSnapSimParse);
 		gameflow.mGameInterface->parseMessages();
+		pc_snapshot_sim_pop();
+#else
+		gameflow.mGameInterface->parseMessages();
+#endif
 	}
 #if defined(PIKMIN_NETPLAY_SNAPSHOT_SPIKE)
 	pc_snapshot_spike_mark(kPcSpikeMarkParseEnd);
@@ -486,6 +521,11 @@ PlugPikiApp::PlugPikiApp()
 
 	// initial boot-up - hard reset app
 	gsys->setHeap(SYSHEAP_Sys);
+#if defined(PIKMIN_NETPLAY_SNAPSHOT)
+	// M6b (#896): the boot heap setup (AyuHeaps, gameflow, the system hard
+	// reset below) is sim state: SIM scope for the whole construction.
+	pc_snapshot_sim_push(kPcSnapSimBoot);
+#endif
 	hardReset();
 
 	// set up command stream for linking between "services"
@@ -512,6 +552,9 @@ PlugPikiApp::PlugPikiApp()
 	PRINT("*--------------- <%s> after all system setup %.2fk free \n", gsys->getHeap(gsys->mActiveHeapIdx)->mName,
 	      gsys->getHeap(gsys->mActiveHeapIdx)->getFree() / 1024.0f);
 	gsys->mForcePrint = FALSE;
+#if defined(PIKMIN_NETPLAY_SNAPSHOT)
+	pc_snapshot_sim_pop();
+#endif
 
 	// unset heap index - it will be set fresh next frame
 	gsys->setHeap(SYSHEAP_NULL);

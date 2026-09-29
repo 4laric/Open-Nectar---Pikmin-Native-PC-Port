@@ -371,7 +371,7 @@ void System::run(BaseApp* app)
     // 30 FPS path for nothing. Re-evaluated each tick so the settings menu can
     // switch modes at runtime.
 
-	while (true) {
+	while (true) { PC_SNAP_CALL(pc_snapshot_loop_top());
         pc_bbft_update();
         if (pc_bbft_hold()) {
             // Freeze all app ticks, including creatures, movies and day time.
@@ -426,7 +426,7 @@ void System::run(BaseApp* app)
 		PcFrameSchedule schedule = frameScheduler.advance(now, mFrameRate);
 #endif
 
-		if (schedule.logicalTicks > 0) { PC_SPIKE_CALL(pc_snapshot_spike_frame_begin());
+		if (schedule.logicalTicks > 0) { PC_SPIKE_CALL(pc_snapshot_spike_frame_begin()); PC_SNAP_CALL(pc_snapshot_frame_begin());
 #if PIKI_PC_PORT
 			// Sample input once per logical tick, not once per loop iteration.
 			// Only a tick consumes it, and the pad reader is edge shaped: a
@@ -447,11 +447,11 @@ void System::run(BaseApp* app)
 			// M1 deterministic netplay: count the tick (and pin the FP
 			// environment) immediately before the tick body runs.
 			pc_netplay_on_tick_begin();
-			PC_SPIKE_CALL(pc_snapshot_spike_idle_begin()); app->idle(); PC_SPIKE_CALL(pc_snapshot_spike_idle_end());
+			PC_SPIKE_CALL(pc_snapshot_spike_idle_begin()); PC_SNAP_CALL(pc_snapshot_idle_begin()); app->idle(); PC_SPIKE_CALL(pc_snapshot_spike_idle_end()); PC_SNAP_CALL(pc_snapshot_idle_end());
 #if PIKI_PC_PORT
 			if (pc_netplay_deterministic()) pc_netplay_det_profile_note_tick();
 			pc_input_log_tick_end(); // netplay harness: file the yaw the sim used (M2c).
-			pc_state_hash_tick_end(); PC_SPIKE_CALL(pc_snapshot_spike_tick_end()); // netplay harness: hash sim state after this tick.
+			pc_state_hash_tick_end(); PC_SPIKE_CALL(pc_snapshot_spike_tick_end()); PC_SNAP_CALL(pc_snapshot_tick_end()); // netplay harness: hash sim state after this tick.
 #endif
 
 			// Identity-replay experiment: re-execute the tick's captured display

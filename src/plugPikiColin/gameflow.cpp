@@ -52,6 +52,9 @@ BOOL _yPrint  = TRUE;
  * @note UNUSED Size: 00009C
  */
 DEFINE_ERROR(__LINE__) // Never used in the DLL
+#if defined(PIKI_PC_PORT) && defined(PIKMIN_NETPLAY_SNAPSHOT)
+#include "netplay/pc_snapshot.h"
+#endif
 
 /**
  * @note UNUSED Size: 0000F4
@@ -642,6 +645,11 @@ void GameFlow::softReset()
 	// PIKMIN_NETPLAY_DISCONNECT_MS timeout. Null in default builds.
 	if (pc_netplay_on_stage_load != nullptr) pc_netplay_on_stage_load();
 #endif
+#if defined(PIKMIN_NETPLAY_SNAPSHOT)
+	// Netplay M6b (#896): a soft reset (stage load, section change) is a
+	// rollback barrier; the snapshot ring re-baselines at this tick's end.
+	pc_snapshot_barrier("softReset");
+#endif
 	// make sure we don't debug-print all this while soft-resetting.
 	BOOL togglePrint   = gsys->mTogglePrint;
 	gsys->mTogglePrint = TERNARY_DEVELOP(TRUE, FALSE);
@@ -668,12 +676,30 @@ void GameFlow::softReset()
 		// it here: the reset immediately above has already declared everything
 		// in the old app heap dead.
 		static u8* sPreviousAppStack = nullptr;
+#if defined(PIKMIN_NETPLAY_SNAPSHOT)
+		// Netplay M6b (#896): with the snapshot on, the app stack is carved
+		// from the Ovl heap as on the console (the reset above reclaims the
+		// previous one), inside the region's compact arena zone.
+		u8* appStack = nullptr;
+		if (pc_snapshot_active()) {
+			appStack = static_cast<u8*>(heap->push(heap->getMaxFree()));
+			if (!appStack) ERROR("snapshot: app stack does not fit the ovl heap");
+		} else {
+			delete[] sPreviousAppStack;
+			sPreviousAppStack = nullptr;
+			appStack          = new u8[heap->getMaxFree()];
+			sPreviousAppStack = appStack;
+		}
+#else
 		delete[] sPreviousAppStack;
 		sPreviousAppStack = nullptr;
 #endif
+#endif
+#if !defined(PIKMIN_NETPLAY_SNAPSHOT)
 		u8* appStack = new u8[heap->getMaxFree()];
 #if defined(PIKI_PC_PORT)
 		sPreviousAppStack = appStack;
+#endif
 #endif
 		heap->setAllocType(type);
 		gsys->mHeaps[SYSHEAP_App].init("app", AYU_STACK_GROW_UP, appStack, max);

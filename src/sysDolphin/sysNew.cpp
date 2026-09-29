@@ -18,6 +18,9 @@
 #include <limits>
 #include <mutex>
 #include <new>
+#if defined(PIKMIN_NETPLAY_SNAPSHOT)
+#include <malloc.h>
+#endif
 #ifndef _WIN32
 #include <sys/mman.h>
 #endif
@@ -281,41 +284,136 @@ void piki_pc_spike_register_preserve(void)
 #define PIKI_SPIKE_DELETE(ptr)
 #endif
 
+#if defined(PIKMIN_NETPLAY_SNAPSHOT)
+// Netplay M6b production snapshot (issue #896): main-thread operator new
+// inside a SIM scope goes to the write-watched snapshot region; everything
+// else keeps the path below. Weak: targets that compile this TU without the
+// snapshot TUs still link, and the snapshot is inert unless
+// PIKMIN_NETPLAY_SNAPSHOT=1.
+__attribute__((weak)) void* pc_snapshot_new(size_t size, size_t align, void* returnAddress);
+__attribute__((weak)) bool pc_snapshot_delete(void* ptr, size_t align, void* returnAddress);
+__attribute__((weak)) void pc_snapshot_preserve(const void* p, size_t bytes);
+
+unsigned long long piki_pc_snapshot_unknown_frees(void)
+{
+	return sUnknownFrees;
+}
+
+// The malloc tracking table is infrastructure: a restore must never roll it
+// back while the C heap itself stays where it is.
+void piki_pc_snapshot_register_preserve(void)
+{
+	if (!pc_snapshot_preserve) return;
+	pc_snapshot_preserve(&sAllocMutex, sizeof(sAllocMutex));
+	pc_snapshot_preserve(sBootBuckets, sizeof(sBootBuckets));
+	pc_snapshot_preserve(&sLiveAllocations, sizeof(sLiveAllocations));
+	pc_snapshot_preserve(&sLiveBytes, sizeof(sLiveBytes));
+	pc_snapshot_preserve(&sPeakAllocations, sizeof(sPeakAllocations));
+	pc_snapshot_preserve(&sPeakBytes, sizeof(sPeakBytes));
+	pc_snapshot_preserve(&sTotalAllocations, sizeof(sTotalAllocations));
+	pc_snapshot_preserve(&sTotalFrees, sizeof(sTotalFrees));
+	pc_snapshot_preserve(&sUnknownFrees, sizeof(sUnknownFrees));
+	pc_snapshot_preserve(&sDumpRegistered, sizeof(sDumpRegistered));
+	pc_snapshot_preserve(sClassBytes, sizeof(sClassBytes));
+	pc_snapshot_preserve(sClassCount, sizeof(sClassCount));
+	pc_snapshot_preserve(&sLargestBlock, sizeof(sLargestBlock));
+}
+
+#define PIKI_SNAP_NEW(size) if (pc_snapshot_new) { if (void* snapBlock = pc_snapshot_new((size), 16, __builtin_return_address(0))) return snapBlock; }
+#define PIKI_SNAP_DELETE(ptr) if (pc_snapshot_delete && pc_snapshot_delete((ptr), 16, __builtin_return_address(0))) return;
+#else
+#define PIKI_SNAP_NEW(size)
+#define PIKI_SNAP_DELETE(ptr)
+#endif
+
 void* operator new(size_t size)
 {
-	PIKI_SPIKE_NEW(size)
+	PIKI_SPIKE_NEW(size) PIKI_SNAP_NEW(size)
 	return piki_pc_alloc(size);
 }
 
 void* operator new[](size_t size)
 {
-	PIKI_SPIKE_NEW(size)
+	PIKI_SPIKE_NEW(size) PIKI_SNAP_NEW(size)
 	return piki_pc_alloc(size);
 }
 
 void operator delete(void* ptr) noexcept
 {
-	PIKI_SPIKE_DELETE(ptr)
+	PIKI_SPIKE_DELETE(ptr) PIKI_SNAP_DELETE(ptr)
 	piki_pc_free(ptr);
 }
 
 void operator delete[](void* ptr) noexcept
 {
-	PIKI_SPIKE_DELETE(ptr)
+	PIKI_SPIKE_DELETE(ptr) PIKI_SNAP_DELETE(ptr)
 	piki_pc_free(ptr);
 }
 
 void operator delete(void* ptr, size_t) noexcept
 {
-	PIKI_SPIKE_DELETE(ptr)
+	PIKI_SPIKE_DELETE(ptr) PIKI_SNAP_DELETE(ptr)
 	piki_pc_free(ptr);
 }
 
 void operator delete[](void* ptr, size_t) noexcept
 {
-	PIKI_SPIKE_DELETE(ptr)
+	PIKI_SPIKE_DELETE(ptr) PIKI_SNAP_DELETE(ptr)
 	piki_pc_free(ptr);
 }
+
+#if defined(PIKMIN_NETPLAY_SNAPSHOT)
+// M6b (#896, C2-9): over-aligned operator new/delete. libstdc++'s defaults
+// go to _aligned_malloc, off the region; these keep SIM allocations in it
+// and pair the rest with _aligned_malloc/_aligned_free themselves.
+static void* piki_snap_aligned_new(size_t size, std::align_val_t al, void* ra)
+{
+	const size_t align = static_cast<size_t>(al);
+	if (pc_snapshot_new) {
+		if (void* snapBlock = pc_snapshot_new(size, align, ra)) return snapBlock;
+	}
+	void* p = _aligned_malloc(size ? size : 1, align);
+	if (!p) throw std::bad_alloc();
+	return p;
+}
+
+static void piki_snap_aligned_delete(void* ptr, std::align_val_t al, void* ra)
+{
+	if (!ptr) return;
+	if (pc_snapshot_delete && pc_snapshot_delete(ptr, static_cast<size_t>(al), ra)) return;
+	_aligned_free(ptr);
+}
+
+void* operator new(size_t size, std::align_val_t al)
+{
+	return piki_snap_aligned_new(size, al, __builtin_return_address(0));
+}
+
+void* operator new[](size_t size, std::align_val_t al)
+{
+	return piki_snap_aligned_new(size, al, __builtin_return_address(0));
+}
+
+void operator delete(void* ptr, std::align_val_t al) noexcept
+{
+	piki_snap_aligned_delete(ptr, al, __builtin_return_address(0));
+}
+
+void operator delete[](void* ptr, std::align_val_t al) noexcept
+{
+	piki_snap_aligned_delete(ptr, al, __builtin_return_address(0));
+}
+
+void operator delete(void* ptr, size_t, std::align_val_t al) noexcept
+{
+	piki_snap_aligned_delete(ptr, al, __builtin_return_address(0));
+}
+
+void operator delete[](void* ptr, size_t, std::align_val_t al) noexcept
+{
+	piki_snap_aligned_delete(ptr, al, __builtin_return_address(0));
+}
+#endif
 #endif
 
 /**
