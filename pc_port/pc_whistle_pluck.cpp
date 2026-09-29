@@ -1,6 +1,7 @@
 #include "pc_whistle_pluck.h"
 #include "settings/pc_settings.h"
 #include "pc_coop.h"
+#include "pc_randomizer.h"
 #include "pc_p2_purple.h"
 #include "pc_p2_white.h"
 #include "Navi.h"
@@ -16,7 +17,10 @@
 
 bool pc_whistle_pluck(Navi* navi, float radius)
 {
-    if (!pc_settings_get_whistle_pluck() || !navi || !pikiMgr || !itemMgr
+    // A seed carrying the Whistle Pluck item decides; otherwise the Mods setting does.
+    const int fromItem = pc_randomizer_whistle_pluck();
+    const bool allowed = fromItem >= 0 ? fromItem == 1 : pc_settings_get_whistle_pluck() != 0;
+    if (!allowed || !navi || !pikiMgr || !itemMgr
         || !std::isfinite(radius) || radius <= 0.0f || navi->mHealth <= 0.0f
         || !playerState || playerState->inDayEnd()
         || gameflow.mPauseAll || gameflow.mIsUIOverlayActive
