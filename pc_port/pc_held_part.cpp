@@ -10,6 +10,7 @@
 #include "PlayerState.h"
 #include "RadarInfo.h"
 #include "TekiPersonality.h"
+#include "Traversable.h"
 #include "teki.h"
 
 #include <cstdio>
@@ -152,9 +153,28 @@ bool pc_held_part_drop(BTeki* teki, const char* via)
     if (radarInfo) radarInfo->detachParts(teki);
     const bool spawned = partExists(id);
     const Vector3f& pos = teki->getPosition();
-    std::printf("P2_HELD_PART_DROP part=%s generator=%u teki=%d source_id=%u via=%s ok=%d x=%.1f z=%.1f\n",
+    // The spawned pellet itself (read-only scan): where it is and how fast it
+    // was launched, so a carry can be followed from the log.
+    Vector3f pelPos(0.0f, 0.0f, 0.0f), pelVel(0.0f, 0.0f, 0.0f);
+    int minCarriers = -1;
+    if (pelletMgr) {
+        Iterator it(pelletMgr);
+        CI_LOOP(it)
+        {
+            Pellet* pel = static_cast<Pellet*>(*it);
+            if (pel && pel->isAlive() && pel->mConfig && pel->mConfig->mModelId.mId == id) {
+                pelPos = pel->getPosition();
+                pelVel = pel->mVelocity;
+                minCarriers = pel->mConfig->mCarryMinPikis();
+                break;
+            }
+        }
+    }
+    std::printf("P2_HELD_PART_DROP part=%s generator=%u teki=%d source_id=%u via=%s ok=%d x=%.1f z=%.1f "
+                "pellet=(%.1f,%.1f,%.1f) vel=(%.1f,%.1f,%.1f) min_carriers=%d\n",
                 name.s, generatorUid(teki), int(teki->mTekiType), source, via ? via : "?", spawned ? 1 : 0,
-                double(pos.x), double(pos.z));
+                double(pos.x), double(pos.z), double(pelPos.x), double(pelPos.y), double(pelPos.z), double(pelVel.x),
+                double(pelVel.y), double(pelVel.z), minCarriers);
     std::fflush(stdout);
     return spawned;
 }
