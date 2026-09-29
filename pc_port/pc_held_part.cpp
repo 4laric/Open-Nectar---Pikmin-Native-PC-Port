@@ -125,6 +125,12 @@ bool pc_held_part_drop(BTeki* teki, const char* via)
     return spawned;
 }
 
+bool pc_held_part_transfers(unsigned heldId, int parameter0, const void* generator)
+{
+    if (!generator || parameter0 != 0 || !Pellet::isUfoPartsID(heldId) || !pc_randomizer_p2_bridge()) return false;
+    return pc_randomizer_p2_source_for_id(pc_randomizer_generator_id(generator)) != 0;
+}
+
 void pc_held_part_ensure_shape(unsigned partId)
 {
     if (!pelletMgr || !Pellet::isUfoPartsID(partId)) return;

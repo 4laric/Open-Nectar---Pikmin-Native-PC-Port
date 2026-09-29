@@ -23,6 +23,11 @@ bool pc_held_part_drop(BTeki* teki, const char* via);
 // spawn should run now; latches so no other funnel drops it again.
 bool pc_held_part_claim_spawn_items(BTeki* teki);
 
+// A P1 teki slot whose only protection is a held ship part (mID a UFO part,
+// Parameter0 unset) stops being protected when the seed binds a P2 source
+// there: the P2 occupant is born from the same personality and holds the part.
+bool pc_held_part_transfers(unsigned heldId, int parameter0, const void* generator);
+
 // Make sure the part's pellet shape exists before a late spawn
 // (PCT_LoadIfExists / un** parts are otherwise built only at stage init).
 void pc_held_part_ensure_shape(unsigned partId);

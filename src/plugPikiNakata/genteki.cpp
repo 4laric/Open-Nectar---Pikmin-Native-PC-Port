@@ -14,9 +14,14 @@
 #include "pc_p2_boss_arena.h"
 #include "pc_p2_boss_arena_policy.h"
 #include <cstdio>
+#include "pc_held_part.h"
 #include <cstdlib>
 
-static bool randomizerProtected(TekiPersonality* personality) {
+static bool randomizerProtected(TekiPersonality* personality, const void* generator) {
+    // #901: a seed-bound P2 occupant takes over a P1 ship-part holder; the
+    // part stays in the personality mID and transfers to it.
+    if (pc_held_part_transfers(personality->mID.mId, personality->getI(TekiPersonality::INT_Parameter0), generator))
+        return false;
     return personality->mID.mId != 'none' || personality->getI(TekiPersonality::INT_Parameter0) != 0;
 }
 
@@ -93,7 +98,7 @@ void GenObjectTeki::updateUseList(Generator* generator, int)
 
 	tekiMgr->mUsingType[mTekiType] = true;
     // Keep original generator identity; reserve replacement assets before birth.
-    const int replacement = pc_randomizer_enemy_for_generator(mTekiType, randomizerProtected(mPersonality), generator);
+    const int replacement = pc_randomizer_enemy_for_generator(mTekiType, randomizerProtected(mPersonality, generator), generator);
     tekiMgr->mUsingType[replacement] = true;
     // Replacements may spawn their own actors (Cannon Beetle boulders).
     const int replacementSpawn = tekiMgr->mTekiParams[replacement]->getI(TPI_SpawnType);
@@ -116,7 +121,7 @@ void GenObjectTeki::updateUseList(Generator* generator, int)
  */
 Creature* GenObjectTeki::birth(BirthInfo& info)
 {
-    const bool protectedSpawn = randomizerProtected(mPersonality);
+    const bool protectedSpawn = randomizerProtected(mPersonality, info.mGenerator);
     const int replacement = pc_randomizer_enemy_for_generator(mTekiType, protectedSpawn, info.mGenerator);
 	Teki* teki = tekiMgr->newTeki(replacement);
 	if (!teki) {
