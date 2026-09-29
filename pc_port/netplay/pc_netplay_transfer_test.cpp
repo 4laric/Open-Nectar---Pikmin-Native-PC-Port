@@ -169,6 +169,10 @@ int main()
 		CHECK(sidecars_needed(a, b), "host sidecars, joiner none: send");
 		std::memcpy(b.sidecarSha, a.sidecarSha, 32);
 		CHECK(!sidecars_needed(a, b), "same sidecar digest: nothing to send");
+		// Fix round 1 (C13): an empty host set against a non-empty joiner set
+		// is a transfer too (the joiner's files are set aside).
+		Hello c;
+		CHECK(sidecars_needed(c, b), "host none, joiner sidecars: send the empty set");
 	}
 
 	// 4. Bundles.
@@ -184,11 +188,24 @@ int main()
 		CHECK(sidecar_name_ok("p2-aquatic-actors.txt") && sidecar_name_ok("sarai-waitact1-poses.txt")
 		          && sidecar_name_ok("p2-x.txt"),
 		      "sidecar regex accepts p2-/sarai- names");
+		// Fix round 1 (E3): every file the P2 code opens cwd-relative.
+		CHECK(sidecar_name_ok("demon-mouths.txt") && sidecar_name_ok("demon-waitact2-poses.txt")
+		          && sidecar_name_ok("demon-host-bindings.txt") && sidecar_name_ok("damagumo-family.json")
+		          && sidecar_name_ok("damagumo-slot-312004.json") && sidecar_name_ok("p2_bigtreasure_events.txt")
+		          && sidecar_name_ok("p2-flora-receipts.txt"),
+		      "sidecar allowlist accepts demon-*.txt, damagumo-*.json, p2_bigtreasure_events.txt");
 		CHECK(!sidecar_name_ok("p2-.txt") && !sidecar_name_ok("p2-Upper.txt") && !sidecar_name_ok("p2-a.json")
-		          && !sidecar_name_ok("p2_a.txt") && !sidecar_name_ok("demon-mouths.txt") && !sidecar_name_ok("../p2-a.txt")
+		          && !sidecar_name_ok("p2_a.txt") && !sidecar_name_ok("demon-.txt") && !sidecar_name_ok("../p2-a.txt")
 		          && !sidecar_name_ok("p2-a b.txt") && !sidecar_name_ok("p2-binding-receipt.json")
+		          && !sidecar_name_ok("damagumo-.json") && !sidecar_name_ok("damagumo-family.txt")
+		          && !sidecar_name_ok("demon-a.json") && !sidecar_name_ok("aquatic-install.json")
+		          && !sidecar_name_ok("overlay-manifest.json") && !sidecar_name_ok("p2_bigtreasure_events.txt.tmp")
 		          && !sidecar_name_ok("p2-a.txt.tmp") && !sidecar_name_ok(std::string(200, 'a')),
-		      "sidecar regex refuses everything else");
+		      "sidecar allowlist refuses everything else");
+		CHECK(card_file_name_ok("Pikmin dataFile") && card_file_name_ok(".meta_Pikmin dataFile")
+		          && !card_file_name_ok("Pikmin dataFile.xfer-tmp") && !card_file_name_ok("Other")
+		          && !card_file_name_ok("card0/Pikmin dataFile"),
+		      "card file names: exactly the two the card stub writes");
 
 		// Round trip, split over several messages.
 		std::vector<File> set;
@@ -375,13 +392,40 @@ int main()
 		r.gen   = 7;
 		fill(r.savSha, 9);
 		fill(r.cardSha, 10);
+		r.ledgerCount = 0x01020304u;
 		const std::vector<uint8_t> w = encode_save_result(r);
-		CHECK(w.size() == 77 && kSaveResultLen == 77, "SAVE_RESULT is 77 bytes");
+		CHECK(w.size() == 81 && kSaveResultLen == 81, "SAVE_RESULT is 81 bytes");
+		CHECK(w[77] == 4 && w[78] == 3 && w[79] == 2 && w[80] == 1, "ledgerCount is a little-endian u32 at 77");
 		SaveResult g;
 		CHECK(decode_save_result(w.data(), w.size(), &g) && g.frame == 27100 && g.ok == 1 && g.gen == 7
-		          && std::memcmp(g.savSha, r.savSha, 32) == 0 && std::memcmp(g.cardSha, r.cardSha, 32) == 0,
+		          && std::memcmp(g.savSha, r.savSha, 32) == 0 && std::memcmp(g.cardSha, r.cardSha, 32) == 0
+		          && g.ledgerCount == 0x01020304u,
 		      "SAVE_RESULT round trip");
-		CHECK(!decode_save_result(w.data(), 76, &g), "short SAVE_RESULT refused");
+		CHECK(!decode_save_result(w.data(), 80, &g) && !decode_save_result(w.data(), 77, &g),
+		      "short (and the old 77-byte) SAVE_RESULT refused");
+		// Fix round 1 (C1/C6): the barrier verdict is the same function on both
+		// roles; every mismatch must be seen from either side.
+		{
+			SaveResult h = r, c = r; // host and client, agreeing
+			auto both = [&](BarrierVerdict want) {
+				return barrier_verdict(h, c) == want && barrier_verdict(c, h) == want;
+			};
+			CHECK(both(BarrierVerdict::Agree), "agreeing results: agree on both roles");
+			c.savSha[5] ^= 1;
+			CHECK(both(BarrierVerdict::DigestMismatch), "both ok, different .sav digest: mismatch on the host too");
+			c.ok = 0;
+			CHECK(both(BarrierVerdict::Agree), "a failed local write: its (zero) .sav digest is not compared");
+			c.ok = 1;
+			std::memcpy(c.savSha, h.savSha, 32);
+			c.cardSha[0] ^= 1;
+			CHECK(both(BarrierVerdict::BlockMismatch), "different game-file block: mismatch on both roles");
+			c.ok = 0;
+			CHECK(both(BarrierVerdict::BlockMismatch), "block mismatch whatever the ok flags");
+			std::memcpy(c.cardSha, h.cardSha, 32);
+			c.ok  = 1;
+			c.gen = h.gen + 1;
+			CHECK(both(BarrierVerdict::GenMismatch), "different generation: mismatch on both roles");
+		}
 		std::vector<uint8_t> bad = w;
 		bad[4]                   = 2;
 		CHECK(!decode_save_result(bad.data(), bad.size(), &g), "ok must be 0 or 1");

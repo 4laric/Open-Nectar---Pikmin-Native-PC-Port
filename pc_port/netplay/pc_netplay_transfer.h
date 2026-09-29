@@ -35,10 +35,14 @@
 //   {u16 nameLen, name, u32 len, bytes}. Names come from an exact allowlist
 //   (checkpoint_name_ok / sidecar_name_ok); duplicates are refused.
 //
-// kBulkSaveResult 0x11 (host) / kBulkSaveAck 0x13 (client), 77 bytes:
-//   u32 frame, u8 ok, u64 gen, u8 savSha[32], u8 cardSha[32]
+// kBulkSaveResult 0x11 (host) / kBulkSaveAck 0x13 (client), 81 bytes:
+//   u32 frame, u8 ok, u64 gen, u8 savSha[32], u8 cardSha[32],
+//   u32 ledgerCount
 //   (plan section 2b's 42-byte struct plus the card block digest; gen is
-//   u64 like campaignGeneration).
+//   u64 like campaignGeneration). ledgerCount (fix round 1, X6): the host's
+//   count of kBulkMirrorLedger messages queued this session, including the
+//   save tick's flush; the client applies that many before it writes its
+//   SAVE_RESULT mirror line. The client sends 0.
 //
 // kBulkTransferDone 0x15 (joiner to host), 73 bytes:
 //   u8 flags (1 checkpoint adopted, 2 sidecars written), u64 gen,
@@ -236,10 +240,12 @@ inline CkptAction decide_checkpoint(const Hello& host, const Hello& joiner, cons
 	return sameCard ? CkptAction::InSync : CkptAction::Transfer;
 }
 
-// True when the joiner must receive the host's P2 sidecar set.
+// True when the joiner must receive the host's P2 sidecar set (fix round 1,
+// C13: in every mode, and also when the host's set is empty and the
+// joiner's is not, so the joiner's extra files are set aside).
 inline bool sidecars_needed(const Hello& host, const Hello& joiner)
 {
-	return !pc_netplay_sha::is_zero(host.sidecarSha, 32) && std::memcmp(host.sidecarSha, joiner.sidecarSha, 32) != 0;
+	return std::memcmp(host.sidecarSha, joiner.sidecarSha, 32) != 0;
 }
 
 // ---- file bundles ----
@@ -280,21 +286,46 @@ inline bool checkpoint_name_ok(const std::string& n)
 	return is_checkpoint_sav_name(n) || n == kCardDataName || n == kCardMetaName;
 }
 
-// `^(p2|sarai)-[a-z0-9-]+\.txt$`
+// The files the native P2 code opens relative to the working directory
+// (fix round 1, E3; derived with
+//   grep -rhno '"[A-Za-z0-9_./-]*\.\(txt\|json\)"' pc_port/pc_p2_*.cpp):
+//   `^(p2|sarai|demon)-[a-z0-9-]+\.txt$`  (demon-*: pc_p2_demon_host.cpp)
+//   `^damagumo-[a-z0-9-]+\.json$`        (pc_p2_dangomushi.cpp)
+//   `p2_bigtreasure_events.txt`           (pc_p2_hardlanes.cpp)
+// p2-binding-receipt.json, *-install.json and overlay-manifest.json are never
+// read by the native code and stay out.
 inline bool sidecar_name_ok(const std::string& n)
 {
-	if (n.size() > kMaxBundleName || n.size() < 5 || n.compare(n.size() - 4, 4, ".txt") != 0) return false;
-	size_t start = 0;
-	if (n.compare(0, 3, "p2-") == 0) start = 3;
-	else if (n.compare(0, 6, "sarai-") == 0) start = 6;
-	else return false;
-	const size_t end = n.size() - 4;
+	if (n.size() > kMaxBundleName) return false;
+	if (n == "p2_bigtreasure_events.txt") return true;
+	size_t start = 0, end = 0;
+	if (n.size() > 5 && n.compare(n.size() - 4, 4, ".txt") == 0) {
+		end = n.size() - 4;
+		if (n.compare(0, 3, "p2-") == 0) start = 3;
+		else if (n.compare(0, 6, "sarai-") == 0) start = 6;
+		else if (n.compare(0, 6, "demon-") == 0) start = 6;
+		else return false;
+	} else if (n.size() > 5 && n.compare(n.size() - 5, 5, ".json") == 0) {
+		end = n.size() - 5;
+		if (n.compare(0, 9, "damagumo-") == 0) start = 9;
+		else return false;
+	} else {
+		return false;
+	}
 	if (end <= start) return false;
 	for (size_t i = start; i < end; ++i) {
 		const char c = n[i];
 		if (!((c >= 'a' && c <= 'z') || is_digit(c) || c == '-')) return false;
 	}
 	return true;
+}
+
+// Names directly in campaign/card/card0/ that the card stub writes for this
+// game (card_stubs.cpp dataPath/metaPath with basecardname "Pikmin
+// dataFile"). Anything else there cannot travel (fix round 1, C9).
+inline bool card_file_name_ok(const std::string& n)
+{
+	return n == "Pikmin dataFile" || n == ".meta_Pikmin dataFile";
 }
 
 inline bool name_ok(BundleKind kind, const std::string& n)
@@ -541,13 +572,14 @@ inline void assets_digest(std::vector<AssetEntry> entries, uint8_t out[32])
 }
 
 // ---- day-end SAVE_RESULT / SAVE_ACK ----
-constexpr size_t kSaveResultLen = 4 + 1 + 8 + 32 + 32; // 77
+constexpr size_t kSaveResultLen = 4 + 1 + 8 + 32 + 32 + 4; // 81
 struct SaveResult {
 	uint32_t frame     = 0;
 	uint8_t ok         = 0;
 	uint64_t gen       = 0;
 	uint8_t savSha[32] = {};
 	uint8_t cardSha[32] = {};
+	uint32_t ledgerCount = 0;
 };
 inline std::vector<uint8_t> encode_save_result(const SaveResult& r)
 {
@@ -557,6 +589,7 @@ inline std::vector<uint8_t> encode_save_result(const SaveResult& r)
 	put_u64(m.data() + 5, r.gen);
 	std::memcpy(m.data() + 13, r.savSha, 32);
 	std::memcpy(m.data() + 45, r.cardSha, 32);
+	put_u32(m.data() + 77, r.ledgerCount);
 	return m;
 }
 inline bool decode_save_result(const uint8_t* p, size_t len, SaveResult* r)
@@ -567,7 +600,22 @@ inline bool decode_save_result(const uint8_t* p, size_t len, SaveResult* r)
 	r->gen   = get_u64(p + 5);
 	std::memcpy(r->savSha, p + 13, 32);
 	std::memcpy(r->cardSha, p + 45, 32);
+	r->ledgerCount = get_u32(p + 77);
 	return true;
+}
+
+// The day-end barrier's desync checks (fix round 1, C1/C6), one pure
+// function so both roles apply exactly the same rules to the same pair of
+// results (host and client each pass their own as `mine`): the generation,
+// then the 0x8000 game-file block digest (whatever the ok flags), then,
+// when both checkpoints were written, the checkpoint file digest.
+enum class BarrierVerdict { Agree, GenMismatch, BlockMismatch, DigestMismatch };
+inline BarrierVerdict barrier_verdict(const SaveResult& mine, const SaveResult& peer)
+{
+	if (mine.gen != peer.gen) return BarrierVerdict::GenMismatch;
+	if (std::memcmp(mine.cardSha, peer.cardSha, 32) != 0) return BarrierVerdict::BlockMismatch;
+	if (mine.ok && peer.ok && std::memcmp(mine.savSha, peer.savSha, 32) != 0) return BarrierVerdict::DigestMismatch;
+	return BarrierVerdict::Agree;
 }
 
 // ---- kBulkTransferDone ----
