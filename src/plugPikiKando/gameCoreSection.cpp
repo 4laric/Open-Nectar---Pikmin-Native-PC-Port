@@ -3179,6 +3179,28 @@ static void coopRunTestEvents(Navi* p1, Navi* p2)
             }
             std::printf("[coop-policy] TEST dismiss tick=%u captain=%d released=%d\n", sCoopPolicy.tick, ev.captain, released);
             if (!released) refused = "none-released";
+        } else if (ev.kind == PC_COOP_EVENT_HOME) {
+            // The captain's free Pikmin stand by the Onion of their colour (the
+            // ship when that Onion is absent), 60 units out, well inside the
+            // sunset safety range, so enterFreePikmins picks them up.
+            static const f32 ringX[8] = {60.0f, 0.0f, -60.0f, 0.0f, 42.0f, -42.0f, 42.0f, -42.0f};
+            static const f32 ringZ[8] = {0.0f, 60.0f, 0.0f, -60.0f, 42.0f, 42.0f, -42.0f, -42.0f};
+            int placed = 0;
+            Iterator it(pikiMgr);
+            CI_LOOP(it) {
+                Piki* piki = static_cast<Piki*>(*it);
+                if (!piki || !piki->isAlive() || piki->mNavi != navi || piki->mMode != PikiMode::FreeMode) continue;
+                Vector3f base;
+                if (GoalItem* goal = itemMgr->getContainer(piki->mColor)) base = goal->mSRT.t;
+                else if (itemMgr->getUfo()) base = itemMgr->getUfo()->getGoalPos();
+                else continue;
+                Vector3f pos(base.x + ringX[placed % 8], 0.0f, base.z + ringZ[placed % 8]);
+                pos.y = mapMgr->getMinY(pos.x, pos.z, true);
+                piki->resetPosition(pos);
+                ++placed;
+            }
+            std::printf("[coop-policy] TEST home tick=%u captain=%d placed=%d\n", sCoopPolicy.tick, ev.captain, placed);
+            if (!placed) refused = "none-free";
         } else if (!coopDownCaptain(navi)) refused = "last-standing";
         if (refused) std::printf("[coop-policy] TEST refused tick=%u %s reason=%s\n", sCoopPolicy.tick, ev.text, refused);
         std::fflush(stdout);

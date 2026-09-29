@@ -249,6 +249,13 @@ int pc_coop_events_parse(const char* text, PcCoopEvent* out, int max, int* badLi
 				ok = parse_uint(q, cap) && (cap == 1 || cap == 2);
 				ev.captain = int(cap);
 				if (ok) std::snprintf(ev.text, sizeof(ev.text), "DISMISS %d", ev.captain);
+			} else if (ok && parse_word(q, "HOME")) {
+				ev.kind = PC_COOP_EVENT_HOME;
+				skip_blanks(q);
+				unsigned cap = 0;
+				ok = parse_uint(q, cap) && (cap == 1 || cap == 2);
+				ev.captain = int(cap);
+				if (ok) std::snprintf(ev.text, sizeof(ev.text), "HOME %d", ev.captain);
 			} else if (ok && parse_word(q, "SUNSET")) {
 				ev.kind = PC_COOP_EVENT_SUNSET;
 				std::snprintf(ev.text, sizeof(ev.text), "SUNSET");

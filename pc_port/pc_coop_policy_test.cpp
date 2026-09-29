@@ -286,8 +286,11 @@ void testEvents()
 		check(std::string_view(ev[2].text) == "SUNSET", "events: canonical SUNSET text");
 		check(ev[3].count == PC_COOP_EVENT_SQUAD_MAX, "events: SQUAD count at the maximum");
 	}
+	n = pc_coop_events_parse("21 HOME 2", ev, PC_COOP_EVENTS_MAX, &bad);
+	check(n == 1 && ev[0].kind == PC_COOP_EVENT_HOME && ev[0].captain == 2 && std::string_view(ev[0].text) == "HOME 2",
+	      "events: 21 HOME 2");
 	const char* badDayEndLines[] = { "10 SQUAD 2", "10 SQUAD 3 5", "10 SQUAD 2 0", "10 SQUAD 2 201", "10 DISMISS", "10 DISMISS 0",
-	                                 "10 SUNSET 1", "10 SUNSETX", "10 SQUAD 2 5 x" };
+	                                 "10 SUNSET 1", "10 SUNSETX", "10 SQUAD 2 5 x", "10 HOME", "10 HOME 3" };
 	for (const char* line : badDayEndLines) {
 		bad = 0;
 		check(pc_coop_events_parse(line, ev, PC_COOP_EVENTS_MAX, &bad) == -1 && bad == 1, line);

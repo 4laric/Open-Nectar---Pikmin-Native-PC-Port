@@ -123,6 +123,9 @@ bool pc_coop_stage_changed(bool started, const PcCoopStageKey& prev, const PcCoo
 //                                         captain's squad join this one's
 //   `<tick> DISMISS <1|2>`                that captain's squad goes free
 //                                         where it stands (still owned by it)
+//   `<tick> HOME <1|2>`                   that captain's free Pikmin stand by
+//                                         their Onion (or the ship), inside
+//                                         the sunset safety range
 //   `<tick> SUNSET`                       the clock jumps to the day's end
 //                                         hour; the normal day end follows
 enum { PC_COOP_EVENTS_MAX = 64, PC_COOP_EVENT_TEXT = 48, PC_COOP_EVENT_SQUAD_MAX = 200 };
@@ -131,7 +134,8 @@ enum PcCoopEventKind {
 	PC_COOP_EVENT_DOWN,
 	PC_COOP_EVENT_SQUAD,
 	PC_COOP_EVENT_DISMISS,
-	PC_COOP_EVENT_SUNSET
+	PC_COOP_EVENT_SUNSET,
+	PC_COOP_EVENT_HOME
 };
 struct PcCoopEvent {
 	unsigned tick;
