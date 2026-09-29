@@ -856,6 +856,11 @@ if(PIKMIN_NETPLAY_BUILD AND NOT ANDROID)
     target_sources(${NECTAR_GAME} PRIVATE
         pc_port/netplay/pc_netplay_session.cpp
         pc_port/netplay/pc_netplay_udp.cpp)
+    # M4 gap-fix lane K (issue #885): failure-path diagnostics for the
+    # netplay exe only (they log, then the game halts as before).
+    target_sources(${NECTAR_GAME} PRIVATE
+        pc_port/netplay/pc_netplay_diag.cpp
+        pc_port/netplay/pc_netplay_diag_bt.cpp)
     target_include_directories(${NECTAR_GAME} PRIVATE third_party/gekkonet/GekkoLib/include)
     target_link_libraries(${NECTAR_GAME} PRIVATE gekkonet)
     if(WIN32)
