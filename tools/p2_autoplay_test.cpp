@@ -2932,6 +2932,171 @@ void testKingEvadeLongSim()
     CHECK(low.bitten == 0 && low.presses == 0 && low.hp >= 30.0f, "king_long/low_hp_no_damage");
 }
 
+// #897 roller stance (Crawbster 94): wake from Stay, no throws while the
+// body rejects damage, sideways dodge with the whistle held while the ball
+// rolls, throws only inside the Turn stickable window.
+void testRollerStance()
+{
+    CHECK(p2autoplay::isRollerStance(94) && !p2autoplay::isRollerStance(53) && !p2autoplay::isRollerStance(44),
+          "roller/only_94");
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = kingSenses(94, 150.0f);
+    CHECK(enterAttack(brain, s), "roller/enters_attack");
+    // Dormant (Stay): walk in to wake it, no throws.
+    s.targetDormant = true;
+    s.naviZ = 150.0f;
+    s.targetDist = 150.0f;
+    brain.update(0.05f, s);
+    p2autoplay::Command c = brain.command();
+    CHECK(c.moveZ < -0.9f && !(c.buttons & unsigned(p2autoplay::PadA)), "roller/wake_walks_in");
+    CHECK(hasMarker(brain.takeMarkers(), "AUTOPLAY_ROLLER mode=wake"), "roller/wake_marker");
+    // Awake, invulnerable, close: back off, never throw.
+    s.targetDormant = false;
+    s.naviZ = 150.0f;
+    s.targetDist = 150.0f;
+    bool threw = false;
+    for (int i = 0; i < 60; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) threw = true;
+    }
+    c = brain.command();
+    CHECK(!threw, "roller/stand_no_throws");
+    CHECK(c.moveZ > 0.9f, "roller/stand_backs_off");
+    // Inside the band: hold still.
+    s.naviZ = 340.0f;
+    s.targetDist = 340.0f;
+    brain.update(0.05f, s);
+    c = brain.command();
+    CHECK(c.moveX == 0.0f && c.moveZ == 0.0f, "roller/stand_holds_band");
+    // Rolling straight at the captain (+z): dodge sideways (x), whistle held.
+    s.targetRolling = true;
+    s.targetVelX = 0.0f;
+    s.targetVelZ = 200.0f;
+    s.naviX = 10.0f;
+    s.naviZ = 300.0f;
+    s.targetDist = 300.0f;
+    brain.update(0.05f, s);
+    c = brain.command();
+    CHECK(std::fabs(c.moveX) > 0.8f && c.moveX > 0.0f, "roller/evade_sideways_own_side");
+    CHECK((c.buttons & unsigned(p2autoplay::PadB)) != 0, "roller/evade_whistles");
+    CHECK(!(c.buttons & unsigned(p2autoplay::PadA)), "roller/evade_no_throw");
+    CHECK(hasMarker(brain.takeMarkers(), "AUTOPLAY_ROLLER mode=evade"), "roller/evade_marker");
+    // Turn window open: close in and throw.
+    s.targetRolling = false;
+    s.targetVulnerable = true;
+    s.naviX = 0.0f;
+    s.naviZ = 200.0f;
+    s.targetDist = 200.0f;
+    threw = false;
+    for (int i = 0; i < 40; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) threw = true;
+    }
+    c = brain.command();
+    CHECK(threw && c.moveZ < -0.9f, "roller/punish_throws_in_window");
+    // A far roll does not drop back to Approach before rollerChaseDist.
+    s.targetVulnerable = false;
+    s.naviZ = 800.0f;
+    s.targetDist = 800.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Attack, "roller/no_chase_at_800");
+    // Control: a non-roller in the same geometry throws as before.
+    p2autoplay::Brain other(cfg);
+    p2autoplay::Senses o = kingSenses(44, 150.0f);
+    CHECK(enterAttack(other, o), "roller/control_attack");
+    o.targetDist = 150.0f;
+    threw = false;
+    for (int i = 0; i < 40; ++i) {
+        other.update(0.05f, o);
+        if (other.command().buttons & unsigned(p2autoplay::PadA)) threw = true;
+    }
+    CHECK(threw, "roller/control_throws");
+}
+
+// #897 power resupply: the power squad drains the Onion, so a crushed squad
+// walks back, asks the driver to restock (wantsPowerRestock) and re-selects
+// once the field is back to powerWantSquad; never while the Turn window is
+// open; never in normal mode (control).
+void testPowerResupply()
+{
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", "1");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "10");
+    {
+        p2autoplay::Config cfg;
+        p2autoplay::Brain brain(cfg);
+        p2autoplay::Senses s = kingSenses(94, 150.0f);
+        s.fieldPikmin = 90;
+        s.hasOnion = true;
+        s.onionStored = 0;
+        s.onionX = 0.0f;
+        s.onionZ = 1000.0f;
+        s.onionDist = 850.0f;
+        // Power WithdrawSeek wants field>=80 before Select.
+        p2autoplay::Senses pre = s;
+        pre.targetToken = 0;
+        brain.update(0.05f, pre);
+        brain.update(0.05f, pre);
+        s.targetDist = 150.0f;
+        brain.update(0.05f, s);
+        brain.update(0.05f, s);
+        CHECK(brain.current() == p2autoplay::State::Attack, "powerresupply/attacks");
+        brain.takeMarkers();
+        // Window open with a short squad: keep punishing.
+        s.fieldPikmin = 10;
+        s.targetVulnerable = true;
+        brain.update(0.05f, s);
+        CHECK(brain.current() == p2autoplay::State::Attack, "powerresupply/not_in_window");
+        s.targetVulnerable = false;
+        brain.update(0.05f, s);
+        CHECK(brain.current() == p2autoplay::State::WithdrawSeek, "powerresupply/disengages_empty_onion");
+        CHECK(hasMarker(brain.takeMarkers(), "AUTOPLAY_RESUPPLY field=10 stored=0"), "powerresupply/marker");
+        CHECK(!brain.wantsPowerRestock(), "powerresupply/no_restock_far");
+        brain.update(0.05f, s);
+        CHECK(brain.command().moveZ > 0.9f, "powerresupply/walks_to_onion");
+        s.naviZ = 950.0f;
+        s.onionDist = 50.0f;
+        brain.update(0.05f, s);
+        CHECK(brain.wantsPowerRestock(), "powerresupply/restock_at_onion");
+        CHECK(brain.current() == p2autoplay::State::WithdrawSeek, "powerresupply/waits_for_squad");
+        s.powerRestocks = 1;
+        s.fieldPikmin = 85;
+        brain.update(0.05f, s);
+        CHECK(brain.current() == p2autoplay::State::Select, "powerresupply/reselects");
+        CHECK(!brain.wantsPowerRestock(), "powerresupply/restock_cleared");
+        // Budget spent and nothing stocked: no further resupply.
+        p2autoplay::Brain b2(cfg);
+        p2autoplay::Senses t = s;
+        t.fieldPikmin = 90;
+        t.naviZ = 150.0f;
+        t.targetDist = 150.0f;
+        t.onionDist = 850.0f;
+        b2.update(0.05f, t);
+        b2.update(0.05f, t);
+        b2.update(0.05f, t);
+        b2.update(0.05f, t);
+        t.powerRestocks = cfg.powerRestockMax;
+        t.fieldPikmin = 10;
+        b2.update(0.05f, t);
+        CHECK(b2.current() == p2autoplay::State::Attack, "powerresupply/budget_spent");
+    }
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", nullptr);
+    {
+        // Control: normal mode, empty Onion: no resupply (v4 rule unchanged).
+        p2autoplay::Config cfg;
+        p2autoplay::Brain brain(cfg);
+        p2autoplay::Senses s = kingSenses(94, 150.0f);
+        s.hasOnion = true;
+        s.onionStored = 0;
+        s.onionDist = 850.0f;
+        CHECK(enterAttack(brain, s), "powerresupply/control_attack");
+        s.fieldPikmin = 10;
+        brain.update(0.05f, s);
+        CHECK(brain.current() == p2autoplay::State::Attack, "powerresupply/control_normal_mode");
+    }
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
+}
+
 int main()
 {
     testGate();
@@ -2979,6 +3144,8 @@ int main()
     testKingStandoffOpensGate();
     testKingEvadePolicy();
     testKingEvadeLongSim();
+    testRollerStance();
+    testPowerResupply();
     if (failures == 0) {
         std::printf("PASS p2_autoplay\n");
         return 0;
