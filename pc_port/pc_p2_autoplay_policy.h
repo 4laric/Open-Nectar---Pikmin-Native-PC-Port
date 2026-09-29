@@ -369,8 +369,8 @@ struct Config {
     // source fp20 attack range (300) so the Crawbster keeps coming and rolls;
     // the dodge starts while the ball is within rollerEvadeRange.
     bool rollerStance = true;
-    float rollerStandMin = 280.0f;
-    float rollerStandMax = 400.0f;
+    float rollerStandMin = 180.0f; // ar8: a 280..400 band sat outside fp20 (300) and the Crawbster never rolled
+    float rollerStandMax = 270.0f;
     float rollerWakeDist = 110.0f; // walk inside fp11 (150) to wake it from Stay
     float rollerEvadeRange = 650.0f;
     float rollerThrowGap = 0.10f; // Turn window: throw as fast as the pad allows (ar7: ~2/s left 13-15 hits per window)
