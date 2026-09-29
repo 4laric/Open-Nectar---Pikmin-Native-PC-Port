@@ -306,6 +306,31 @@ void setHidden(BTeki* t, Binding& b, bool hidden) {
     else t->setTekiOption(TEKIOPT_Atari | TEKIOPT_ShadowVisible);
 }
 
+// #898 fix: the source PelletCarry (FSM) decides the tug; the P1 pellet must
+// follow it exactly. P1 Pellet::doCarry arbitrates by sticker count with a
+// 3.5 s ownership swap, and the Pikmin pass numStickers, which counts the
+// Breadbug itself: a Breadbug presenting crew+1 tied them, and the two sides
+// swapped ownership every 3.5 s pulling opposite ways (g2: 5-6 carriers vs a
+// winning Breadbug, 20 minutes of stalemate). So while the FSM says the
+// Breadbug owns the cargo it is written as the carrier directly, with a count
+// no Pikmin crew can exceed; when the FSM says the Pikmin won, or the
+// Breadbug lets go, its ownership is cleared so the Pikmin carry at once.
+void ownCargo(Pellet* p, BTeki* t, float vx, float vz) {
+    p->mPikiCarrier = t;
+    p->mCarrierCount = 0xFFFF;
+    p->mCarryState = 2;
+    p->mTransitionTimer = 0.0f;
+    p->mCarryDirection.set(vx, 0.0f, vz);
+}
+void yieldCargo(Pellet* p, BTeki* t) {
+    if (!p || p->mPikiCarrier != t) return;
+    p->mPikiCarrier = nullptr;
+    p->mCarrierCount = 0;
+    p->mCarryState = 0;
+    p->mTransitionTimer = 0.0f;
+    p->mCarryDirection.set(0.0f, 0.0f, 0.0f);
+}
+
 // Kill the Pikmin still stuck to a consumed cargo (endCarry InteractKill),
 // then the cargo itself (P1 Collec putting recipe: InteractKill).
 void consumeCargo(BTeki* t, Binding& b, Pellet* p) {
@@ -322,6 +347,7 @@ void consumeCargo(BTeki* t, Binding& b, Pellet* p) {
             }
         }
     }
+    yieldCargo(p, t);
     if (t->getStickObject() == p) p->endStickTeki(t);
     const bool carcass = p->mPelletView != nullptr;
     // #898 fix: a teki carcass is spared, never destroyed (consumeOutcome):
@@ -429,6 +455,7 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         // Commands.
         if (o.release && held) {
             if (o.releaseReverse) { held->mVelocity.x = -held->mVelocity.x; held->mVelocity.z = -held->mVelocity.z; }
+            yieldCargo(held, t);
             held->endStickTeki(t);
             std::printf("P2_BREADBUG_OWN_RELEASE generator=%u source_id=38 reverse=%d\n", b.generator, o.releaseReverse ? 1 : 0);
             held = nullptr;
@@ -444,13 +471,9 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         }
         if (held && o.stopCargo) { held->mVelocity.x = 0.0f; held->mVelocity.z = 0.0f; }
         if (held && o.contest) {
-            // P1 Pellet::doCarry keeps the carrier whose count is strictly
-            // higher; the source PelletCarry already decided the tug, so the
-            // winning Breadbug presents one more than the current crew.
-            const int crew = int(std::ceil(o.contestPiki));
-            if (o.pulled) {
-                held->doCarry(t, Vector3f(o.pullVelocity.x, 0.0f, o.pullVelocity.z), u16(crew + 1));
-            }
+            // The source PelletCarry decided the tug (see ownCargo).
+            if (o.pulled) ownCargo(held, t, o.pullVelocity.x, o.pullVelocity.z);
+            else if (!o.canBack) yieldCargo(held, t);
             if (o.contestPiki != b.lastContestPiki || o.canBack != b.lastCanBack) {
                 b.lastContestPiki = o.contestPiki;
                 b.lastCanBack = o.canBack;
@@ -461,7 +484,7 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         if (held && o.holdCargo) {
             // CarryEnd/Hide: the cargo is in the mouth (updateCaptureMatrix);
             // the home nudge moves the cargo and the Breadbug riding it.
-            held->doCarry(t, Vector3f(0.0f, 0.0f, 0.0f), u16(int(std::ceil(pikiStrength(held))) + 1));
+            ownCargo(held, t, 0.0f, 0.0f);
             held->mVelocity.x = held->mVelocity.z = 0.0f;
             held->mSRT.t.x += o.homeNudge.x;
             held->mSRT.t.z += o.homeNudge.z;
@@ -514,7 +537,10 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         // suppressed doAI, hence pcEscapeNow (Groink/long-legs pattern).
         b.escaped = true;
         if (Creature* stick = t->getStickObject())
-            if (stick->isObjType(OBJTYPE_Pellet)) static_cast<Pellet*>(stick)->endStickTeki(t);
+            if (stick->isObjType(OBJTYPE_Pellet)) {
+                yieldCargo(static_cast<Pellet*>(stick), t);
+                static_cast<Pellet*>(stick)->endStickTeki(t);
+            }
         setHidden(t, b, false);
         t->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
         t->mVelocity.x = t->mVelocity.z = 0.0f;
