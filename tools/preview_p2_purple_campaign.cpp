@@ -120,9 +120,9 @@ class PurpleCampaignApp : public PlugPikiApp {
                 cargoStart = cargo->mSRT.t; carryStable = 0;
             } else ++carryStable;
             if (carryTicks % 30 == 0)
-                std::printf("P2_PURPLE_CARGO_READY tick=%d state=%d visible=%d ground=%d stable=%d drift=%.3f pos=%.2f,%.2f,%.2f velocity=%.2f,%.2f,%.2f movie_flags=%u\n",
+                std::printf("P2_PURPLE_CARGO_READY tick=%d state=%d visible=%d ground=%d stable=%d drift=%.3f pos=%.2f,%.2f,%.2f velocity=%.2f,%.2f,%.2f updates_enabled=%u\n",
                     carryTicks,cargo->getState(),int(cargo->isVisible()),int(cargo->onGround()),carryStable,std::sqrt(drift),
-                    cargo->mSRT.t.x,cargo->mSRT.t.y,cargo->mSRT.t.z,cargo->mVelocity.x,cargo->mVelocity.y,cargo->mVelocity.z,unsigned(pelletMgr->mMovieFlags));
+                    cargo->mSRT.t.x,cargo->mSRT.t.y,cargo->mSRT.t.z,cargo->mVelocity.x,cargo->mVelocity.y,cargo->mVelocity.z,unsigned(pelletMgr->isMovieFlag(4)));
             if (carryStable >= 30 && cargo->isVisible() && cargo->getState() == PELSTATE_Normal) {
                 cargoStart = cargo->mSRT.t;
                 assign(controlRed); carryPhase = 2; carryTicks = 0;
