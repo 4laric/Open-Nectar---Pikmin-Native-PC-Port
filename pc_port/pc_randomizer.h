@@ -152,6 +152,23 @@ void pc_randomizer_save_campaign(const void* source);
 // !mDidSaveFail on both peers.
 bool pc_randomizer_netplay_save_barrier_active();
 bool pc_randomizer_save_campaign_netplay(const void* source, bool localCardOk);
+// B2 fix round 1: after the agreed save, memoryCard.cpp reports a rewrite of
+// this peer's game file (C12; false ends the session, exit 5) and the local
+// options write (C3; logged, never sim-visible). The session calls
+// pc_randomizer_netplay_barrier_abandoned just before a barrier exit 5/6
+// (C2: the client retracts its unconfirmed checkpoint), and the netplay
+// day reseed calls pc_randomizer_netplay_stage_start (C5: a resumed
+// session's START_STAGE line).
+void pc_randomizer_netplay_card_rewrite_result(bool ok);
+void pc_randomizer_netplay_options_result(bool ok);
+void pc_randomizer_netplay_barrier_abandoned();
+void pc_randomizer_netplay_stage_start(int day, int stage);
+// True in a netplay session with the external-state stream on (the outbox
+// mode), i.e. whenever save outcomes are agreed rather than local. Unlike
+// pc_randomizer_netplay_save_barrier_active it does not reference the
+// session's barrier symbol, so card code reachable from engine-only targets
+// can call it (fix round 1, C3: MemoryCard::didSaveFail).
+bool pc_randomizer_netplay_agreed_saves();
 // Newest valid checkpoint (loadCampaignCheckpoint rules) and the SHA-256 of
 // its file; gen 0 and zeros = none. False when the randomizer is disabled.
 bool pc_randomizer_checkpoint_info(uint64_t* gen, uint8_t sha[32]);

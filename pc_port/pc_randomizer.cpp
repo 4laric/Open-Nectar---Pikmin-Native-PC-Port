@@ -54,6 +54,8 @@ __attribute__((weak)) uint32_t pc_netplay_current_frame(void);
 __attribute__((weak)) bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long gen,
                                                   const uint8_t* sav, size_t savLen, const uint8_t* block,
                                                   size_t blockLen, bool* hostOk, char hostSavHex[65]);
+// B2 fix round 1 (C3, C7, C12): ends the session as a desync (exit 5).
+__attribute__((weak)) void pc_netplay_abort_desync(const char* why);
 #else
 bool pc_netplay_session_active(void);
 bool pc_netplay_is_host(void);
@@ -65,6 +67,7 @@ uint32_t pc_netplay_current_frame(void);
 bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long gen, const uint8_t* sav,
                              size_t savLen, const uint8_t* block, size_t blockLen, bool* hostOk,
                              char hostSavHex[65]);
+void pc_netplay_abort_desync(const char* why);
 #endif
 #if PIKI_NETPLAY_BUILD
 // Netplay launch lane (issue #887): defined by pc_netplay_launch.cpp, which
@@ -1734,8 +1737,11 @@ namespace {
 // fatal (every non-netplay save and the netplay host): any failure is fail(),
 // exactly as before. Non-fatal (the netplay client's mirror checkpoint,
 // M4 lane B2): a failure returns false and leaves no .sav behind.
+// suffix (fix round 1, C2): the client writes `<name>.sav.pending`, which no
+// checkpoint scan reads, and renames it to `.sav` only after the host's ok.
 bool write_campaign_checkpoint(const void* source, unsigned long long generation, bool fatal,
-                               std::string* bytesOut, std::filesystem::path* finalOut) {
+                               std::string* bytesOut, std::filesystem::path* finalOut,
+                               const char* suffix = nullptr) {
     if (fatal) std::filesystem::create_directories(campaignDirectory);
     else {
         std::error_code ec;
@@ -1750,6 +1756,7 @@ bool write_campaign_checkpoint(const void* source, unsigned long long generation
     std::string bytes = meta.str() + " " + std::to_string(hash) + "\n" + block;
     char name[32]; std::snprintf(name, sizeof(name), "%020llu.sav", generation);
     auto final = campaignDirectory / name;
+    if (suffix != nullptr) final += suffix;
     auto temporary = campaignDirectory / (token + ".tmp");
     FILE* file = std::fopen(temporary.string().c_str(), "wb");
     if (!file) {
@@ -1803,6 +1810,9 @@ void pc_randomizer_save_campaign(const void* source) {
 bool pc_randomizer_netplay_save_barrier_active() {
     return enabled && outbox_active() && pc_netplay_save_barrier != nullptr;
 }
+bool pc_randomizer_netplay_agreed_saves() {
+    return enabled && outbox_active();
+}
 
 // Inside the day-end save tick, after writeOneGameFile + waitPolling. Both
 // peers run it at the same Advance (lockstep). The host writes its real
@@ -1812,6 +1822,45 @@ bool pc_randomizer_netplay_save_barrier_active() {
 // generation both peers count on is advanced only on the agreed outcome, so
 // the next day's generation numbers agree even when the peers' local
 // results differ.
+namespace {
+// B2 fix round 1 (C2): the client's mirror checkpoint written for the save
+// in progress (`<name>.sav.pending`), until the barrier confirms or retracts it.
+std::filesystem::path netplayPendingCheckpoint;
+// Renames a checkpoint file to `<final>.unconfirmed` (or -<n>), never deleting.
+std::filesystem::path retract_checkpoint(const std::filesystem::path& from, const std::filesystem::path& final) {
+    std::filesystem::path to = final;
+    to += ".unconfirmed";
+    for (int n = 1; std::filesystem::exists(to) && n < 1000; ++n) {
+        to = final;
+        to += ".unconfirmed-" + std::to_string(n);
+    }
+    std::error_code ec;
+    std::filesystem::rename(from, to, ec);
+    if (ec) fail("cannot retract an unconfirmed campaign checkpoint; preserve campaign files for recovery");
+    return to;
+}
+std::filesystem::path pending_final(const std::filesystem::path& pending) {
+    std::filesystem::path final = pending;
+    final.replace_extension(); // drops ".pending"
+    return final;
+}
+} // namespace
+
+// B2 fix round 1 (C2): the session calls this (weakly) just before it exits
+// from inside the barrier (exit 5 desync or exit 6 timeout). The client's
+// unconfirmed checkpoint for this save is retracted, never deleted, so the
+// next session sees the generation both peers last agreed on.
+void pc_randomizer_netplay_barrier_abandoned() {
+    if (netplayPendingCheckpoint.empty()) return;
+    const std::filesystem::path final = pending_final(netplayPendingCheckpoint);
+    const std::filesystem::path to = retract_checkpoint(netplayPendingCheckpoint, final);
+    std::printf("[netplay] save barrier abandoned; retracted %s -> %s (generation stays %llu)\n",
+                netplayPendingCheckpoint.filename().string().c_str(), to.filename().string().c_str(),
+                campaignGeneration);
+    std::fflush(stdout);
+    netplayPendingCheckpoint.clear();
+}
+
 bool pc_randomizer_save_campaign_netplay(const void* source, bool localCardOk) {
     if (!enabled) return localCardOk;
     const uint32_t frame = pc_netplay_current_frame != nullptr ? pc_netplay_current_frame() : 0;
@@ -1822,6 +1871,20 @@ bool pc_randomizer_save_campaign_netplay(const void* source, bool localCardOk) {
     std::string bytes;
     std::filesystem::path written;
     bool localOk = localCardOk;
+#if PIKI_NETPLAY_BUILD
+    // TEST ONLY (netplay builds): PIKMIN_NETPLAY_TEST_HOST_DIE_AT_BARRIER=1 makes
+    // the HOST exit abruptly (_Exit 7, no cleanup) at its day-end save, before
+    // it writes its checkpoint or answers the barrier, so a pair shows the
+    // client's barrier timeout (exit 6) and its retraction (fix round 1, C2).
+    if (host) {
+        const char* knob = std::getenv("PIKMIN_NETPLAY_TEST_HOST_DIE_AT_BARRIER");
+        if (knob != nullptr && knob[0] == '1' && knob[1] == '\0') {
+            std::printf("[netplay] test: host dies at the day-end save (before its checkpoint)\n");
+            std::fflush(stdout);
+            std::_Exit(7);
+        }
+    }
+#endif
 #if PIKI_NETPLAY_BUILD
     // TEST ONLY (netplay builds): PIKMIN_NETPLAY_TEST_HOST_SAVE_FAIL=1 makes the
     // HOST's day-end save report a failure (as if its card write failed), so a
@@ -1837,39 +1900,60 @@ bool pc_randomizer_save_campaign_netplay(const void* source, bool localCardOk) {
     }
 #endif
     if (localOk) {
-        localOk = write_campaign_checkpoint(source, generation, host, &bytes, &written);
-        if (localOk) std::printf("[Pikmin Randomizer] CAMPAIGN_SAVED generation=%llu\n", generation);
+        // The host writes its real checkpoint; the client writes its mirror
+        // as <name>.sav.pending (fix round 1, C2) and publishes it as .sav
+        // only after the host's ok, so a barrier that ends in exit 5/6, or a
+        // client killed mid-barrier, never leaves an unconfirmed .sav behind.
+        localOk = write_campaign_checkpoint(source, generation, host, &bytes, &written, host ? nullptr : ".pending");
+        if (localOk && host) std::printf("[Pikmin Randomizer] CAMPAIGN_SAVED generation=%llu\n", generation);
+        else if (localOk) netplayPendingCheckpoint = written;
         else std::printf("[netplay] save barrier: cannot write the local mirror checkpoint %020llu.sav\n", generation);
         std::fflush(stdout);
     }
     bool hostOk = localOk;
     char hostSavHex[65] = {};
-    pc_netplay_save_barrier(frame, localOk, generation, reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size(),
-                            static_cast<const uint8_t*>(source), 32768, &hostOk, hostSavHex);
+    const bool agreed = pc_netplay_save_barrier != nullptr
+                     && pc_netplay_save_barrier(frame, localOk, generation,
+                                                reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size(),
+                                                static_cast<const uint8_t*>(source), 32768, &hostOk, hostSavHex);
+    // Fix round 1 (C7): the barrier only returns false outside a running
+    // session, which cannot happen while the barrier is active; never go on
+    // with this peer's local outcome as if it were the agreed one.
+    if (!agreed) {
+        pc_randomizer_netplay_barrier_abandoned();
+        if (pc_netplay_abort_desync != nullptr)
+            pc_netplay_abort_desync("save barrier: no running session to agree the day-end save with");
+        fail("netplay save barrier without a running session");
+    }
     if (host) {
         if (hostOk) campaignGeneration = generation;
         return hostOk;
     }
+    netplayPendingCheckpoint.clear();
     if (hostOk) {
-        if (!localOk) {
-            std::printf("[netplay] save barrier: local mirror save failed; following the host\n");
-            std::fflush(stdout);
+        if (localOk) {
+            // Publish the mirror checkpoint under its real name.
+            const std::filesystem::path final = pending_final(written);
+            std::error_code ec;
+            std::filesystem::rename(written, final, ec);
+            if (ec) {
+                localOk = false;
+                std::printf("[netplay] save barrier: cannot publish %s as %s (%s)\n",
+                            written.filename().string().c_str(), final.filename().string().c_str(),
+                            ec.message().c_str());
+            } else {
+                std::printf("[Pikmin Randomizer] CAMPAIGN_SAVED generation=%llu\n", generation);
+            }
         }
+        if (!localOk) std::printf("[netplay] save barrier: local mirror save failed; following the host\n");
+        std::fflush(stdout);
         campaignGeneration = generation;
         pc_randomizer_mirror_save_result(frame, generation, hostSavHex);
     } else {
         if (localOk) {
             // The host's save failed: the day is abandoned there, so this
             // mirror checkpoint must not stand. Renamed, never deleted.
-            std::filesystem::path to = written;
-            to += ".unconfirmed";
-            for (int n = 1; std::filesystem::exists(to) && n < 1000; ++n) {
-                to = written;
-                to += ".unconfirmed-" + std::to_string(n);
-            }
-            std::error_code ec;
-            std::filesystem::rename(written, to, ec);
-            if (ec) fail("cannot retract an unconfirmed campaign checkpoint; preserve campaign files for recovery");
+            const std::filesystem::path to = retract_checkpoint(written, pending_final(written));
             std::printf("[netplay] save barrier: host save failed; retracted %s -> %s (generation stays %llu)\n",
                         written.filename().string().c_str(), to.filename().string().c_str(), campaignGeneration);
             std::fflush(stdout);
@@ -1877,6 +1961,45 @@ bool pc_randomizer_save_campaign_netplay(const void* source, bool localCardOk) {
         pc_randomizer_mirror_save_fail(frame, generation);
     }
     return hostOk;
+}
+
+// B2 fix round 1 (C12): the client's own card write failed while the host's
+// save succeeded, and memoryCard.cpp rewrote the game file from the same
+// in-memory block. If that failed too, this peer's card no longer matches
+// the host's, and later card reads could branch the sim: end the session.
+void pc_randomizer_netplay_card_rewrite_result(bool ok) {
+    if (ok) {
+        std::printf("[netplay] save barrier: local card write failed; rewrote the game file from the agreed block\n");
+        std::fflush(stdout);
+        return;
+    }
+    if (pc_netplay_abort_desync != nullptr)
+        pc_netplay_abort_desync("save barrier: this peer cannot write the agreed game file to its memory card");
+    fail("netplay: cannot write the agreed game file to the memory card");
+}
+
+// B2 fix round 1 (C3): the options write after an agreed save is local I/O
+// only; its outcome must not reach the sim (memoryCard.cpp restores the
+// agreed mDidSaveFail after it). Logged when it failed here.
+void pc_randomizer_netplay_options_result(bool ok) {
+    if (ok) return;
+    std::printf("[netplay] save barrier: this peer's options write failed (local only; the agreed save "
+                "outcome stands)\n");
+    std::fflush(stdout);
+}
+
+// B2 fix round 1 (C5/E1): a resumed netplay session starts its first stage
+// through MapSelect, not the direct-boot path that prints START_STAGE; the
+// deterministic day reseed (GameCoreSection) reports that stage start here
+// so both peers log `START_STAGE <stage> day=<d> resumed=1`. Netplay
+// sessions only, once per process, resumed campaigns only.
+void pc_randomizer_netplay_stage_start(int day, int stage) {
+    static bool printed = false;
+    if (printed || !enabled || !campaignResumed || !netplay_session()) return;
+    printed = true;
+    std::printf("[Pikmin Randomizer] START_STAGE %d day=%d resumed=1 generation=%llu\n", stage, day,
+                campaignGeneration);
+    std::fflush(stdout);
 }
 
 // ---- Netplay M4 lane B2: checkpoint info, adoption (issue #885) ----

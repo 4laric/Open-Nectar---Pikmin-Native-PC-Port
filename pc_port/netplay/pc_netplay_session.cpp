@@ -153,6 +153,9 @@ __attribute__((weak)) bool pc_randomizer_checkpoint_info(uint64_t* gen, uint8_t 
 __attribute__((weak)) const char* pc_randomizer_campaign_dir(void);
 __attribute__((weak)) bool pc_randomizer_adopt_checkpoint(void);
 __attribute__((weak)) bool pc_randomizer_p2_bridge(void);
+// B2 fix round 1 (C2): the barrier is abandoned (exit 5 or 6); the client
+// retracts the checkpoint it wrote for this save before the process exits.
+__attribute__((weak)) void pc_randomizer_netplay_barrier_abandoned(void);
 #else
 bool pc_randomizer_apply_net_state(const pc_randstate::PcRandState& st);
 bool pc_randomizer_get_net_state(pc_randstate::PcRandState* out);
@@ -167,6 +170,7 @@ bool pc_randomizer_checkpoint_info(uint64_t* gen, uint8_t sha[32]);
 const char* pc_randomizer_campaign_dir(void);
 bool pc_randomizer_adopt_checkpoint(void);
 bool pc_randomizer_p2_bridge(void);
+void pc_randomizer_netplay_barrier_abandoned(void);
 #endif
 // Runs the registered pre-sim yaw capture hook now (M2c hook), without the
 // record/replay logic of pc_input_log_tick(). Defined in pc_input_log.cpp.
@@ -604,6 +608,14 @@ uint32_t sCurAdvanceFrame = 0;  // frame of the Advance being executed (outbox s
 // Host: kBulkMirrorLedger payloads waiting for room in the 4-deep bulk queue.
 std::vector<std::vector<uint8_t>> sLedgerOut;
 constexpr size_t kLedgerOutMax = 256;
+// B2 fix round 1 (X6): kBulkMirrorLedger messages the host queued this
+// session (carried in its SaveResult) and the client applied, so the client
+// writes a day's SAVE_RESULT mirror line only after that day's ledger lines.
+uint32_t sLedgerQueued = 0;
+uint32_t sLedgerApplied = 0;
+// B2 fix round 1 (C15): wall time the Advance being executed started, so the
+// barrier can log how long this peer's own save I/O kept GekkoNet silent.
+double sCurAdvanceStartMs = 0;
 
 void hold_reset()
 {
@@ -939,6 +951,116 @@ bool b2_type(uint8_t t)
 	    || t == kBulkSidecars;
 }
 
+// B2 fix round 1 (C4/E2): the test impairment knobs that LossyLink applies to
+// GekkoNet (PIKMIN_NETPLAY_TEST_LATENCY_MS / _JITTER_MS / _LOSS_PCT, seeded by
+// _SEED) also apply to received bulk (0x03) datagrams, so the save barrier and
+// the transfer phase run over the same impaired link. Receive side on each
+// peer (like the handshake channel), so each direction is impaired once.
+// PIKMIN_NETPLAY_TEST_BULK_DROP_SAVE=<n> additionally drops the first n
+// received SAVE_RESULT / SAVE_ACK data fragments, forcing a retransmit inside
+// the barrier. Test only: with none of the knobs set nothing is drawn or held.
+double read_double_env(const char* name, double fallback); // defined below
+uint32_t read_u32_env(const char* name, uint32_t fallback); // defined below
+unsigned read_unsigned_env(const char* name, unsigned fallback); // defined below
+struct BulkImpair {
+	bool init = false;
+	bool on = false;
+	double latMs = 0, jitMs = 0, lossPct = 0;
+	uint32_t rng = 1;
+	unsigned dropSave = 0;
+	uint64_t received = 0, dropped = 0, delayed = 0, droppedSave = 0;
+	struct Held {
+		double atMs = 0;
+		std::vector<uint8_t> bytes;
+	};
+	std::vector<Held> held;
+};
+BulkImpair sBulkImp;
+
+double bulk_impair_draw()
+{
+	uint32_t x = sBulkImp.rng; // xorshift32
+	x ^= x << 13;
+	x ^= x >> 17;
+	x ^= x << 5;
+	sBulkImp.rng = x;
+	return (double)(x >> 8) / 16777216.0;
+}
+
+void bulk_impair_init()
+{
+	BulkImpair& b = sBulkImp;
+	b.init = true;
+	b.latMs = read_double_env("PIKMIN_NETPLAY_TEST_LATENCY_MS", 0.0);
+	b.jitMs = read_double_env("PIKMIN_NETPLAY_TEST_JITTER_MS", 0.0);
+	b.lossPct = read_double_env("PIKMIN_NETPLAY_TEST_LOSS_PCT", 0.0);
+	if (b.latMs < 0) b.latMs = 0;
+	if (b.jitMs < 0) b.jitMs = 0;
+	if (b.lossPct < 0) b.lossPct = 0;
+	if (b.lossPct > 100) b.lossPct = 100;
+	b.on = b.latMs > 0 || b.jitMs > 0 || b.lossPct > 0;
+	b.rng = (read_u32_env("PIKMIN_NETPLAY_TEST_SEED", 0) ^ 0xB0F1C3A5u) + (sCfg.isHost ? 1u : 2u);
+	if (b.rng == 0) b.rng = 1;
+	b.dropSave = read_unsigned_env("PIKMIN_NETPLAY_TEST_BULK_DROP_SAVE", 0);
+	if (b.on || b.dropSave > 0) {
+		printf("[netplay] bulk impairment (test): latency=%.1fms jitter=%.1fms loss=%.1f%% drop_save=%u\n", b.latMs,
+		       b.jitMs, b.lossPct, b.dropSave);
+		fflush(stdout);
+	}
+}
+
+// One received bulk payload: delivered now, held for its delay, or dropped.
+void bulk_impair_in(std::vector<uint8_t>&& p)
+{
+	BulkImpair& b = sBulkImp;
+	if (!b.init) bulk_impair_init();
+	++b.received;
+	if (b.dropSave > 0 && !p.empty() && (p[0] == kBulkSaveResult || p[0] == kBulkSaveAck)) {
+		--b.dropSave;
+		++b.droppedSave;
+		printf("[netplay] test: dropped a received bulk %s fragment (%u more to drop)\n",
+		       p[0] == kBulkSaveResult ? "SAVE_RESULT" : "SAVE_ACK", b.dropSave);
+		fflush(stdout);
+		return;
+	}
+	if (!b.on) {
+		sBulk.on_receive(p.data(), p.size(), now_ms());
+		return;
+	}
+	if (b.lossPct > 0 && bulk_impair_draw() * 100.0 < b.lossPct) {
+		++b.dropped;
+		return;
+	}
+	double d = b.latMs;
+	if (b.jitMs > 0) d += bulk_impair_draw() * b.jitMs;
+	if (d <= 0) {
+		sBulk.on_receive(p.data(), p.size(), now_ms());
+		return;
+	}
+	++b.delayed;
+	BulkImpair::Held h;
+	h.atMs = now_ms() + d;
+	h.bytes = std::move(p);
+	b.held.push_back(std::move(h));
+	if (b.held.size() > 512) b.held.erase(b.held.begin(), b.held.begin() + (long)(b.held.size() - 512));
+}
+
+// Delivers the held payloads that are due, in hold order.
+void bulk_impair_release()
+{
+	BulkImpair& b = sBulkImp;
+	if (b.held.empty()) return;
+	const double now = now_ms();
+	for (size_t i = 0; i < b.held.size();) {
+		if (b.held[i].atMs <= now) {
+			sBulk.on_receive(b.held[i].bytes.data(), b.held[i].bytes.size(), now);
+			b.held.erase(b.held.begin() + (long)i);
+		} else {
+			++i;
+		}
+	}
+}
+
 // Per-turn bulk pump (both peers): drain channel 0x03 into the endpoint,
 // send due frags/acks. Message delivery order is NOT guaranteed: each
 // message completes independently when all its fragments arrive (see
@@ -954,7 +1076,7 @@ void bulk_pump()
 		// ICE is connected 1:1 (the sender fields are the fixed placeholder),
 		// so every bulk datagram is the session peer's.
 		for (pc_netplay_ice::IceSocket::Datagram& g : sIceLink->drain_bulk())
-			if (!g.payload.empty()) sBulk.on_receive(g.payload.data(), g.payload.size(), now_ms());
+			if (!g.payload.empty()) bulk_impair_in(std::move(g.payload));
 	} else {
 		// m2 fix: accept bulk only from the session peer, so an off-path
 		// sender cannot inject or ACK bulk messages. The host learns the
@@ -965,9 +1087,10 @@ void bulk_pump()
 		std::vector<pc_netplay_transport::UdpSocket::Datagram> grams = sLink->drain_bulk();
 		for (auto& g : grams) {
 			if (peerKnown && (g.fromIpHostOrder != peerIp || g.fromPort != peerPort)) continue;
-			if (!g.payload.empty()) sBulk.on_receive(g.payload.data(), g.payload.size(), now_ms());
+			if (!g.payload.empty()) bulk_impair_in(std::move(g.payload));
 		}
 	}
+	bulk_impair_release(); // B2 fix round 1: impaired payloads that are due
 	sBulk.sweep(now_ms()); // expire abandoned partial reassemblies
 	std::vector<pc_netplay_bulk::BulkChannel::Message> complete = sBulk.poll_complete();
 	for (auto& m : complete) {
@@ -977,9 +1100,10 @@ void bulk_pump()
 		// B1 consumers (client side; the host never receives these types).
 		if (m.type == pc_netplay_bulk::kBulkRandFull) hold_client_on_randfull(m.data);
 		else if (m.type == pc_netplay_bulk::kBulkMirrorLedger && !sCfg.isHost
-		         && pc_randomizer_mirror_ledger_receive != nullptr)
+		         && pc_randomizer_mirror_ledger_receive != nullptr) {
 			pc_randomizer_mirror_ledger_receive(m.data.data(), m.data.size(), sLastAdvanceFrame);
-		else if (b2_type(m.type)) {
+			++sLedgerApplied; // B2 fix round 1 (X6): the barrier waits for the host's count
+		} else if (b2_type(m.type)) {
 			// B2: kept for the transfer phase / the save barrier.
 			if (sB2Inbox.size() >= kB2InboxMax) {
 				printf("[netplay] bulk: B2 inbox full; type=0x%02x dropped\n", m.type);
@@ -1629,6 +1753,8 @@ bool launcher_joiner_flow(const pc_netplay_ice::IceNetConfig& nic, const std::fu
 // and seed, so a mismatch there refuses; the likeliest cause is typing
 // --netplay-ice-host/--netplay-ice-join for the launcher's
 // --netplay-host-ice/--netplay-join-ice.
+void b2_refusal_view(uint8_t field); // B2 fix round 1 (X7/E5), defined below
+
 void print_refusal_hint(uint8_t field)
 {
 	if (!sCfg.iceMode || sCfg.launcherMode) return;
@@ -2153,9 +2279,48 @@ bool read_sidecar_set(const fs::path& dir, std::vector<File>* out, std::string* 
 	return true;
 }
 
-// P2 overlay digest over cwd-relative assets/dataDir/courses/pikmin2room/**
-// and assets/p2-*.txt: sorted relative paths (from assets/) plus each file's
-// SHA-256. The content never travels; each peer brings its own overlay.
+// SHA-256 of a file named by a (possibly non-ASCII) path.
+bool sha_path(const fs::path& p, uint8_t out[32], uint64_t* size)
+{
+#ifdef _WIN32
+	FILE* f = _wfopen(p.c_str(), L"rb");
+#else
+	FILE* f = fopen(p.c_str(), "rb");
+#endif
+	if (f == nullptr) return false;
+	pc_netplay_sha::Sha256 s;
+	static uint8_t chunk[65536];
+	uint64_t total = 0;
+	bool bad = false;
+	while (true) {
+		const size_t n = fread(chunk, 1, sizeof(chunk), f);
+		if (n > 0) s.update(chunk, n);
+		total += n;
+		if (n < sizeof(chunk)) {
+			bad = ferror(f) != 0;
+			break;
+		}
+	}
+	fclose(f);
+	if (bad) return false;
+	s.final(out);
+	*size = total;
+	return true;
+}
+
+// P2 overlay digest (B2 fix round 1, X1/C10). Scope, all cwd-relative:
+//   assets/dataDir/courses/pikmin2room/**  the P2 room models;
+//   assets/dataDir/stages/**               the stage .ini files and the .gen
+//                                          generators (the overlay rewrites
+//                                          stages/stage1/*.gen);
+//   assets/config.ini, assets/.pikmin-assets and assets/p2-*.txt.
+// Junctions and symlinks are followed and paths are lexical (relative to
+// assets/, '/'-separated, UTF-8), so an overlay that is a full copy, a
+// junction, or a copy with junctioned subfolders gives the same digest for
+// the same content. Sorted paths plus each file's SHA-256; the content never
+// travels, each peer brings its own overlay.
+const char* kP2AssetsScope = "assets/dataDir/courses/pikmin2room/**, assets/dataDir/stages/**, assets/config.ini, "
+                             "assets/.pikmin-assets, assets/p2-*.txt";
 bool p2_assets_digest(uint8_t out[32], size_t* files, uint64_t* bytes, std::string* err)
 {
 	std::vector<pc_netplay_xfer::AssetEntry> entries;
@@ -2165,36 +2330,47 @@ bool p2_assets_digest(uint8_t out[32], size_t* files, uint64_t* bytes, std::stri
 	const fs::path assets = "assets";
 	auto add = [&](const fs::path& p) -> bool {
 		pc_netplay_xfer::AssetEntry e;
-		e.path = fs::relative(p, assets, ec).generic_string();
-		if (ec || e.path.empty()) {
-			*err = "cannot relativise " + p.string();
+		e.path = p.lexically_relative(assets).generic_u8string();
+		if (e.path.empty() || e.path.compare(0, 2, "..") == 0) {
+			*err = "cannot relativise " + p.generic_u8string();
 			return false;
 		}
-		if (!sha_file(p.string().c_str(), e.sha)) {
-			*err = "cannot read " + p.string();
+		uint64_t size = 0;
+		if (!sha_path(p, e.sha, &size)) {
+			*err = "cannot read " + p.generic_u8string();
 			return false;
 		}
-		*bytes += fs::file_size(p, ec);
+		*bytes += size;
 		entries.push_back(e);
 		return true;
 	};
-	const fs::path room = assets / "dataDir" / "courses" / "pikmin2room";
-	if (fs::is_directory(room, ec)) {
-		for (fs::recursive_directory_iterator it(room, fs::directory_options::follow_directory_symlink, ec), end;
+	auto walk = [&](const fs::path& root) -> bool {
+		if (!fs::is_directory(root, ec)) return true;
+		for (fs::recursive_directory_iterator it(root, fs::directory_options::follow_directory_symlink, ec), end;
 		     it != end && !ec; it.increment(ec)) {
-			if (it->is_regular_file(ec) && !add(it->path())) return false;
+			std::error_code ec2;
+			if (it->is_regular_file(ec2) && !add(it->path())) return false;
 		}
 		if (ec) {
-			*err = "cannot walk " + room.string();
+			*err = "cannot walk " + root.generic_u8string() + ": " + ec.message();
 			return false;
 		}
-	}
+		return true;
+	};
+	if (!walk(assets / "dataDir" / "courses" / "pikmin2room")) return false;
+	if (!walk(assets / "dataDir" / "stages")) return false;
 	if (fs::is_directory(assets, ec)) {
-		for (const auto& entry : fs::directory_iterator(assets, ec)) {
-			const std::string name = entry.path().filename().string();
-			if (name.size() > 7 && name.compare(0, 3, "p2-") == 0 && name.compare(name.size() - 4, 4, ".txt") == 0
-			    && entry.is_regular_file(ec) && !add(entry.path()))
-				return false;
+		for (fs::directory_iterator it(assets, ec), end; it != end && !ec; it.increment(ec)) {
+			const std::string name = it->path().filename().generic_u8string();
+			std::error_code ec2;
+			const bool wanted = name == "config.ini" || name == ".pikmin-assets"
+			                 || (name.size() > 7 && name.compare(0, 3, "p2-") == 0
+			                     && name.compare(name.size() - 4, 4, ".txt") == 0);
+			if (wanted && it->is_regular_file(ec2) && !add(it->path())) return false;
+		}
+		if (ec) {
+			*err = "cannot list assets/: " + ec.message();
+			return false;
 		}
 	}
 	*files = entries.size();
@@ -2219,6 +2395,11 @@ void compute_local_hello_b2()
 	pc_netplay_xfer::card_digest(card, sLocal.cardSha);
 	printf("[netplay] local checkpoint: gen=%llu sha=%s card=%s (%llu card files)\n", (unsigned long long)gen,
 	       hex16(sLocal.ckptSha).c_str(), hex16(sLocal.cardSha).c_str(), (unsigned long long)card.size());
+	for (const File& f : card)
+		if (!pc_netplay_xfer::card_file_name_ok(f.name))
+			printf("[netplay] campaign card: warning: '%s' in card0/ is not a card file this game writes (it is a "
+			       "card entry for the game, and it cannot be transferred)\n",
+			       f.name.c_str());
 	if (b2_p2_mode()) {
 		std::vector<File> side;
 		if (!read_sidecar_set(fs::current_path(), &side, &err)) {
@@ -2240,10 +2421,9 @@ void compute_local_hello_b2()
 		printf("[netplay] p2 sidecars: %llu files, %llu B in %s, sidecarSha=%s\n", (unsigned long long)side.size(),
 		       (unsigned long long)sideBytes, fs::current_path().string().c_str(),
 		       to_hex(sLocal.sidecarSha, 32).c_str());
-		printf("[netplay] p2 overlay: %llu files, %llu B (assets/dataDir/courses/pikmin2room/**, assets/p2-*.txt), "
-		       "p2AssetsSha=%s (%.0f ms)\n",
-		       (unsigned long long)assetFiles, (unsigned long long)assetBytes, to_hex(sLocal.p2AssetsSha, 32).c_str(),
-		       now_ms() - t0);
+		printf("[netplay] p2 overlay: %llu files, %llu B (%s), p2AssetsSha=%s (%.0f ms)\n",
+		       (unsigned long long)assetFiles, (unsigned long long)assetBytes, kP2AssetsScope,
+		       to_hex(sLocal.p2AssetsSha, 32).c_str(), now_ms() - t0);
 		if (assetFiles == 0)
 			printf("[netplay] p2 overlay: warning: no P2 overlay files under assets/ (the room models are missing)\n");
 	}
@@ -2404,9 +2584,32 @@ void log_checkpoint_line(pc_netplay_xfer::CkptAction action, const char* why)
 	fflush(stdout);
 }
 
+// B2 fix round 1 (X7/E5): the peer that RECEIVES a checkpoint, sidecars or
+// p2assets refusal logs its own view before exiting: the decision line when
+// it already holds the other peer's Hello (the same table both sides
+// evaluate), otherwise its local digests.
+void b2_refusal_view(uint8_t field)
+{
+	if (field != kFieldCheckpoint && field != kFieldSidecars && field != kFieldP2Assets) return;
+	if (sHaveRemoteHello) {
+		const char* why = nullptr;
+		const pc_netplay_xfer::CkptAction action = pc_netplay_xfer::decide_checkpoint(b2_host_hello(),
+		                                                                              b2_join_hello(), &why);
+		log_checkpoint_line(action, why);
+	} else {
+		printf("[netplay] checkpoint: %s gen=%llu sha=%s card=%s (the refusal came before the %s's Hello)\n",
+		       sCfg.isHost ? "host" : "joiner", (unsigned long long)sLocal.ckptGen, hex16(sLocal.ckptSha).c_str(),
+		       hex16(sLocal.cardSha).c_str(), sCfg.isHost ? "joiner" : "host");
+	}
+	if (field != kFieldCheckpoint)
+		printf("[netplay] p2 digests: local sidecarSha=%s p2AssetsSha=%s\n", to_hex(sLocal.sidecarSha, 32).c_str(),
+		       to_hex(sLocal.p2AssetsSha, 32).c_str());
+	fflush(stdout);
+}
+
 // Called for every accepted Hello/Ack (after the M3 field checks): refuses
-// a checkpoint the table cannot reconcile, an overlay mismatch, and (outside
-// launcher mode, where nothing transfers them) a sidecar mismatch.
+// a checkpoint the table cannot reconcile and an overlay mismatch. A sidecar
+// mismatch is a sidecar transfer in every mode (B2 fix round 1, C13).
 void handshake_check_b2(const Hello& h)
 {
 	sRemote          = h;
@@ -2426,13 +2629,6 @@ void handshake_check_b2(const Hello& h)
 		fflush(stdout);
 		refuse_and_exit(kFieldP2Assets);
 	}
-	if (!sCfg.launcherMode && memcmp(H.sidecarSha, J.sidecarSha, 32) != 0) {
-		printf("[netplay] p2 sidecar mismatch: host sidecarSha=%s joiner sidecarSha=%s (only the one-command "
-		       "launcher transfers sidecars)\n",
-		       to_hex(H.sidecarSha, 32).c_str(), to_hex(J.sidecarSha, 32).c_str());
-		fflush(stdout);
-		refuse_and_exit(kFieldSidecars);
-	}
 }
 
 // Transfer phase state.
@@ -2448,13 +2644,16 @@ bool sXferSideDone = false;
 bool sXferDoneSent = false;
 size_t sXferCkptFiles = 0, sXferSideFiles = 0;
 
-// Atomic write: <path>.xfer-tmp, flushed and synced, then renamed over the
-// target (replacing it).
-bool atomic_write(const fs::path& path, const std::string& bytes, std::string* err)
+// Atomic write: <tmpDir>/.xfer-<name>.tmp, flushed and synced, then renamed
+// onto the target. B2 fix round 1 (C9): the temporary lives in tmpDir (the
+// campaign root for card files), never inside card0/, where the card stub
+// would list a leftover as a card entry. Callers move a differing existing
+// target aside first (write_keeping_old).
+bool atomic_write(const fs::path& path, const std::string& bytes, const fs::path& tmpDir, std::string* err)
 {
 	std::error_code ec;
 	fs::create_directories(path.parent_path(), ec);
-	const fs::path tmp = path.string() + ".xfer-tmp";
+	const fs::path tmp = tmpDir / (".xfer-" + path.filename().string() + ".tmp");
 	FILE* f = fopen(tmp.string().c_str(), "wb");
 	if (f == nullptr) {
 		*err = "cannot create " + tmp.string();
@@ -2517,6 +2716,15 @@ bool host_checkpoint_messages(std::vector<std::vector<uint8_t>>* msgs, size_t* f
 		*err = "card files changed since the handshake";
 		return false;
 	}
+	// B2 fix round 1 (C9): only the card files the stub writes can travel; name
+	// anything else so the host can move it out instead of guessing.
+	for (const File& f : card) {
+		if (!pc_netplay_xfer::card_file_name_ok(f.name)) {
+			*err = "the host's card folder " + (dir / "card" / "card0").string() + " holds '" + f.name +
+			       "', which is not a card file this game writes; move it out of that folder and start again";
+			return false;
+		}
+	}
 	for (File& f : card) set.push_back(File{ "card/card0/" + f.name, std::move(f.bytes) });
 	pc_netplay_xfer::sort_files(set);
 	*files = set.size();
@@ -2562,18 +2770,29 @@ void transfer_fail(uint8_t field, const std::string& why)
 // the GekkoNet session right away or the transfer phase first.
 void on_handshake_done()
 {
+	// B2 fix round 1 (C14): the decision below is over the remote Hello; a
+	// path that got here without one must not decide over zeros.
+	if (!sHaveRemoteHello) {
+		printf("[netplay] handshake: completed without the peer's Hello (internal error); refusing\n");
+		fflush(stdout);
+		refuse_and_exit(kFieldCheckpoint);
+	}
 	// The bulk endpoint starts fresh here, once per session, before any B2
 	// message (it used to reset in start_gekko_session; the transfer phase
 	// now runs in between, so msgIds must not restart after it).
 	sBulk.reset();
 	sB2Inbox.clear();
 	sB2Out.clear();
+	sLedgerQueued = 0;
+	sLedgerApplied = 0;
 	const Hello& H = b2_host_hello();
 	const Hello& J = b2_join_hello();
 	const char* why = nullptr;
 	sXferAction = pc_netplay_xfer::decide_checkpoint(H, J, &why);
 	sXferNeedCkpt = sXferAction == pc_netplay_xfer::CkptAction::Transfer;
-	sXferNeedSidecars = sCfg.launcherMode && pc_netplay_xfer::sidecars_needed(H, J);
+	// B2 fix round 1 (C13): sidecars travel in every mode, not only the
+	// launcher's (the host's P2 receipt ledgers match the set too).
+	sXferNeedSidecars = pc_netplay_xfer::sidecars_needed(H, J);
 	log_checkpoint_line(sXferAction, why);
 	if (!pc_netplay_sha::is_zero(H.sidecarSha, 32) || !pc_netplay_sha::is_zero(H.p2AssetsSha, 32)) {
 		printf("[netplay] p2 digests: host sidecarSha=%s p2AssetsSha=%s\n", to_hex(H.sidecarSha, 32).c_str(),
@@ -2635,6 +2854,7 @@ void transfer_handshake_pump()
 			continue;
 		if (type == kHsRefuse) {
 			printf("[netplay] handshake refused: %s\n", field_name(refuse == 0 ? 99 : refuse));
+			b2_refusal_view(refuse);
 			fflush(stdout);
 			stop_session();
 			std::exit(4);
@@ -2643,41 +2863,120 @@ void transfer_handshake_pump()
 	}
 }
 
+long long unix_secs()
+{
+	return (long long)std::chrono::duration_cast<std::chrono::seconds>(
+	           std::chrono::system_clock::now().time_since_epoch())
+	    .count();
+}
+
+// Moves `from` into `asideDir` (created on demand), never deleting; a name
+// already taken there gets a -<n> suffix. False (err set) on any failure.
+bool move_aside(const fs::path& from, const fs::path& asideDir, std::string* err)
+{
+	std::error_code ec;
+	fs::create_directories(asideDir, ec);
+	if (ec) {
+		*err = "cannot create " + asideDir.string() + ": " + ec.message();
+		return false;
+	}
+	fs::path to = asideDir / from.filename();
+	for (int n = 1; fs::exists(to, ec) && n < 1000; ++n)
+		to = asideDir / (from.filename().string() + "-" + std::to_string(n));
+	fs::rename(from, to, ec);
+	if (ec) {
+		*err = "cannot move " + from.string() + " to " + to.string() + ": " + ec.message();
+		return false;
+	}
+	return true;
+}
+
+// B2 fix round 1 (X10): writes `bytes` to `target` atomically, but an
+// existing target with other bytes is moved into asideDir first instead of
+// being overwritten in place. Identical bytes are left untouched.
+bool write_keeping_old(const fs::path& target, const std::string& bytes, const fs::path& asideDir,
+                       const fs::path& tmpDir, bool* movedAside, std::string* err)
+{
+	*movedAside = false;
+	std::error_code ec;
+	if (fs::exists(target, ec)) {
+		std::string old;
+		if (read_small_file(target, bytes.size(), &old) && old == bytes) return true;
+		if (!move_aside(target, asideDir, err)) return false;
+		*movedAside = true;
+	}
+	return atomic_write(target, bytes, tmpDir, err);
+}
+
 // Joiner: writes the verified checkpoint bundle into its own campaign/ and
-// adopts it. Card files the host does not have are moved aside (never
-// deleted), so card0/ then holds exactly the host's set.
+// adopts it. Card files the host does not have, and existing files with other
+// bytes, are moved aside (never deleted), so card0/ then holds exactly the
+// host's set; fix round 1 (C8) checks that on disk before adopting.
 void joiner_adopt_checkpoint(const std::vector<File>& files)
 {
 	const fs::path dir = b2_campaign_dir();
 	if (dir.empty()) transfer_fail(kFieldCheckpoint, "no campaign directory (randomizer off)");
+	const Hello& H = b2_host_hello();
 	const fs::path card0 = dir / "card" / "card0";
+	const long long secs = unix_secs();
+	const fs::path cardAside = dir / ("card-set-aside-" + std::to_string(secs));
+	const fs::path ckptAside = dir / ("checkpoint-set-aside-" + std::to_string(secs));
 	std::error_code ec;
+	std::string err;
 	std::vector<std::string> keep;
 	for (const File& f : files)
 		if (f.name.compare(0, 11, "card/card0/") == 0) keep.push_back(f.name.substr(11));
+	// Collect first, then move: the folder is never changed while listed.
+	std::vector<fs::path> extra;
 	if (fs::is_directory(card0, ec)) {
-		const long long secs = (long long)std::chrono::duration_cast<std::chrono::seconds>(
-		                           std::chrono::system_clock::now().time_since_epoch())
-		                           .count();
-		const fs::path aside = dir / ("card-set-aside-" + std::to_string(secs));
-		for (const auto& entry : fs::directory_iterator(card0, ec)) {
-			const std::string name = entry.path().filename().string();
-			if (!entry.is_regular_file(ec) || std::find(keep.begin(), keep.end(), name) != keep.end()) continue;
-			fs::create_directories(aside, ec);
-			fs::rename(entry.path(), aside / name, ec);
-			printf("[netplay] transfer: card file %s is not the host's; moved to %s\n", name.c_str(),
-			       aside.string().c_str());
+		for (fs::directory_iterator it(card0, ec), end; !ec && it != end; it.increment(ec)) {
+			std::error_code ec2;
+			if (!it->is_regular_file(ec2)) continue;
+			const std::string name = it->path().filename().string();
+			if (std::find(keep.begin(), keep.end(), name) == keep.end()) extra.push_back(it->path());
 		}
+		if (ec) transfer_fail(kFieldCheckpoint, "cannot list " + card0.string() + ": " + ec.message());
+	}
+	for (const fs::path& p : extra) {
+		if (!move_aside(p, cardAside, &err)) transfer_fail(kFieldCheckpoint, err);
+		printf("[netplay] transfer: card file %s is not the host's; moved to %s\n", p.filename().string().c_str(),
+		       cardAside.string().c_str());
 	}
 	size_t bytes = 0;
 	for (const File& f : files) {
-		std::string err;
-		if (!atomic_write(dir / fs::path(f.name), f.bytes, &err)) transfer_fail(kFieldCheckpoint, err);
+		const bool isCard = f.name.compare(0, 11, "card/card0/") == 0;
+		const fs::path& aside = isCard ? cardAside : ckptAside;
+		bool moved = false;
+		if (!write_keeping_old(dir / fs::path(f.name), f.bytes, aside, dir, &moved, &err))
+			transfer_fail(kFieldCheckpoint, err);
+		if (moved)
+			printf("[netplay] transfer: the previous %s had other bytes; moved to %s\n", f.name.c_str(),
+			       aside.string().c_str());
 		bytes += f.bytes.size();
 	}
+	// On disk now: exactly the host's card set and checkpoint.
+	std::vector<File> card;
+	if (!read_card_files(&card, &err)) transfer_fail(kFieldCheckpoint, "after writing the host's files: " + err);
+	uint8_t cs[32];
+	pc_netplay_xfer::card_digest(card, cs);
+	if (memcmp(cs, H.cardSha, 32) != 0)
+		transfer_fail(kFieldCheckpoint, "after writing the host's files the card folder digest is " + to_hex(cs, 32) +
+		                                    ", not the host's " + to_hex(H.cardSha, 32));
+	if (H.ckptGen != 0) {
+		char name[32];
+		snprintf(name, sizeof(name), "%020llu.sav", (unsigned long long)H.ckptGen);
+		std::string sav;
+		uint8_t ss[32];
+		if (!read_small_file(dir / name, pc_netplay_xfer::kMaxBundleFileBytes, &sav))
+			transfer_fail(kFieldCheckpoint, std::string("cannot read back ") + name);
+		pc_netplay_sha::sha256(sav.data(), sav.size(), ss);
+		if (memcmp(ss, H.ckptSha, 32) != 0)
+			transfer_fail(kFieldCheckpoint, std::string(name) + " on disk does not match the host's digest");
+	}
+	printf("[netplay] transfer: on-disk check: card=%s (%llu files)%s\n", hex16(cs).c_str(),
+	       (unsigned long long)card.size(), H.ckptGen != 0 ? ", checkpoint sha matches" : "");
 	bool resumed = false;
 	if (pc_randomizer_adopt_checkpoint != nullptr) resumed = pc_randomizer_adopt_checkpoint();
-	const Hello& H = b2_host_hello();
 	printf("[netplay] checkpoint adopted gen=%llu sha=%s card=%s files=%llu (%llu B) resumed=%d in %.0f ms\n",
 	       (unsigned long long)H.ckptGen, hex16(H.ckptSha).c_str(), hex16(H.cardSha).c_str(),
 	       (unsigned long long)files.size(), (unsigned long long)bytes, (int)resumed, now_ms() - sXferStartMs);
@@ -2685,14 +2984,46 @@ void joiner_adopt_checkpoint(const std::vector<File>& files)
 	sXferCkptFiles = files.size();
 }
 
+// Joiner: writes the host's sidecar set into the working directory. Its own
+// sidecar-named files that the host lacks, and same-named files with other
+// bytes, are moved to sidecar-set-aside-<secs>/ (never deleted); fix round 1
+// (C13) then re-reads the set from disk and requires the host's digest.
 void joiner_write_sidecars(const std::vector<File>& files)
 {
+	const fs::path cwd = fs::current_path();
+	const fs::path aside = cwd / ("sidecar-set-aside-" + std::to_string(unix_secs()));
+	std::string err;
+	std::vector<fs::path> extra;
+	std::error_code ec;
+	for (fs::directory_iterator it(cwd, ec), end; !ec && it != end; it.increment(ec)) {
+		const std::string name = it->path().filename().string();
+		std::error_code ec2;
+		if (!pc_netplay_xfer::sidecar_name_ok(name) || !it->is_regular_file(ec2)) continue;
+		bool hostHas = false;
+		for (const File& f : files) hostHas = hostHas || f.name == name;
+		if (!hostHas) extra.push_back(it->path());
+	}
+	if (ec) transfer_fail(kFieldSidecars, "cannot list " + cwd.string() + ": " + ec.message());
+	for (const fs::path& p : extra) {
+		if (!move_aside(p, aside, &err)) transfer_fail(kFieldSidecars, err);
+		printf("[netplay] transfer: sidecar %s is not the host's; moved to %s\n", p.filename().string().c_str(),
+		       aside.string().c_str());
+	}
 	size_t bytes = 0;
 	for (const File& f : files) {
-		std::string err;
-		if (!atomic_write(fs::current_path() / f.name, f.bytes, &err)) transfer_fail(kFieldSidecars, err);
+		bool moved = false;
+		if (!write_keeping_old(cwd / f.name, f.bytes, aside, cwd, &moved, &err)) transfer_fail(kFieldSidecars, err);
+		if (moved)
+			printf("[netplay] transfer: the previous %s had other bytes; moved to %s\n", f.name.c_str(),
+			       aside.string().c_str());
 		bytes += f.bytes.size();
 	}
+	std::vector<File> side;
+	if (!read_sidecar_set(cwd, &side, &err)) transfer_fail(kFieldSidecars, "after writing the host's sidecars: " + err);
+	uint8_t ds[32];
+	pc_netplay_xfer::sidecar_digest(side, ds);
+	if (memcmp(ds, b2_host_hello().sidecarSha, 32) != 0)
+		transfer_fail(kFieldSidecars, "after writing the host's sidecars the folder digest is " + to_hex(ds, 32));
 	printf("[netplay] sidecars received: %llu files (%llu B) written to %s, sidecarSha=%s in %.0f ms\n",
 	       (unsigned long long)files.size(), (unsigned long long)bytes, fs::current_path().string().c_str(),
 	       to_hex(b2_host_hello().sidecarSha, 32).c_str(), now_ms() - sXferStartMs);
@@ -2878,6 +3209,7 @@ bool handshake_pump()
 		if (type == kHsRefuse) {
 			printf("[netplay] handshake refused: %s\n",
 			       field_name(refuse == 0 ? 99 : refuse));
+			b2_refusal_view(refuse);
 			fflush(stdout);
 			print_refusal_hint(refuse);
 			// m12: join the ICE thread before exit.
@@ -3247,6 +3579,7 @@ int handle_game_events(System* sys, BaseApp* app)
 			// then feed this frame's host fragment (arming F+1 at the
 			// earliest). Both peers execute the identical sequence.
 			sCurAdvanceFrame = (uint32_t)e->data.adv.frame; // B1: outbox entry frame
+			sCurAdvanceStartMs = now_ms();                  // B2 fix round 1 (C15): barrier I/O log
 			randstate_apply_before_tick(e->data.adv.frame);
 			// B1: HOLD flag in the host input (after the RESUME apply above).
 			hold_on_advance_begin(p0, e->data.adv.frame);
@@ -3429,22 +3762,34 @@ void pc_netplay_mirror_ledger_send(const uint8_t* data, size_t len)
 		return;
 	}
 	sLedgerOut.emplace_back(data, data + len);
+	++sLedgerQueued; // B2 fix round 1 (X6): carried in the host's SaveResult
 }
 
 // ---- Netplay M4 lane B2: day-end SAVE_RESULT barrier (issue #885) ----
 // Called by pc_randomizer_save_campaign_netplay inside the day-end save tick
 // (one Advance, the same frame on both peers), after this peer wrote (or
 // failed to write) its checkpoint. The host sends kBulkSaveResult, the client
-// kBulkSaveAck, both {u32 frame, u8 ok, u64 gen, savSha[32], cardSha[32]}
-// (cardSha: SHA-256 of the 0x8000 game-file block just written). Each side
-// then pumps ONLY the bulk channel (never GekkoNet: no Advance can happen
-// inside a tick) until it holds the peer's message for this frame, waiting
-// 1 ms between polls, like a synchronous stage load blocks (the N3 note in
-// start_gekko_session). The agreed outcome is the host's ok.
-//   * no peer message within 10 s (below the 15 s GekkoNet disconnect):
+// kBulkSaveAck, both {u32 frame, u8 ok, u64 gen, savSha[32], cardSha[32],
+// u32 ledgerCount} (cardSha: SHA-256 of the 0x8000 game-file block just
+// written; ledgerCount: the host's kBulkMirrorLedger messages queued this
+// session, 0 from the client). Each side then waits, 1 ms between polls,
+// until it holds the peer's message for this frame (the client also until it
+// applied that many ledger messages, fix round 1 X6), like a synchronous
+// stage load blocks (the N3 note in start_gekko_session). No Advance can
+// happen inside a tick; B2 fix round 1 (X5/C15) still polls GekkoNet's
+// network layer (gekko_network_poll: receive, ack, resend the unacked
+// inputs, health; no Advance, no events consumed), so a lost input datagram
+// is resent and neither peer's 15 s GekkoNet disconnect runs while both are
+// in the barrier. The agreed outcome is the host's ok. Both roles apply the
+// same checks to the same pair of results (pc_netplay_xfer::barrier_verdict,
+// fix round 1 C1/C6):
+//   * no peer message (or ledger) within 10 s of entering the barrier:
 //     `[netplay] save barrier timeout`, exit 6 (today's abandoned day);
-//   * both ok with different checkpoint digests, a different generation or
-//     a different frame: a desync, exit 5.
+//   * a different frame, generation or game-file block, or both checkpoints
+//     written with different digests: a desync, exit 5.
+// Before either exit the client retracts the checkpoint it wrote for this
+// save (fix round 1 C2), and a desync first lingers (<= 2 s) until this
+// peer's own message is acknowledged, so both peers see the mismatch.
 // Returns false (and *hostOk = localOk) outside a running session.
 bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long gen, const uint8_t* sav, size_t savLen,
                              const uint8_t* block, size_t blockLen, bool* hostOk, char hostSavHex[65])
@@ -3452,27 +3797,57 @@ bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long ge
 	if (hostOk != nullptr) *hostOk = localOk;
 	if (hostSavHex != nullptr) hostSavHex[0] = '\0';
 	if (!sCfg.active || sPhase != kSession) return false;
+	const double t0 = now_ms();
+	const double ioMs = sCurAdvanceStartMs > 0 ? t0 - sCurAdvanceStartMs : 0.0;
 	pc_netplay_xfer::SaveResult mine;
 	mine.frame = frame;
 	mine.ok    = localOk ? 1 : 0;
 	mine.gen   = gen;
+	mine.ledgerCount = sCfg.isHost ? sLedgerQueued : 0;
 	if (localOk && sav != nullptr && savLen > 0) pc_netplay_sha::sha256(sav, savLen, mine.savSha);
 	if (block != nullptr && blockLen > 0) pc_netplay_sha::sha256(block, blockLen, mine.cardSha);
+	// TEST ONLY (netplay builds): PIKMIN_NETPLAY_TEST_BARRIER_CORRUPT=sav|block
+	// flips one bit of this peer's own checkpoint / game-file block digest, as
+	// a real one-peer desync would, so a pair proves that BOTH peers exit 5.
+	if (const char* t = getenv_nonempty("PIKMIN_NETPLAY_TEST_BARRIER_CORRUPT")) {
+		const bool s = strcmp(t, "sav") == 0, b = strcmp(t, "block") == 0;
+		if (s) mine.savSha[0] ^= 1;
+		if (b) mine.cardSha[0] ^= 1;
+		if (s || b) printf("[netplay] test: this peer's %s digest altered at the barrier\n", t);
+	}
 	const uint8_t sendType = sCfg.isHost ? kBulkSaveResult : kBulkSaveAck;
 	const uint8_t waitType = sCfg.isHost ? kBulkSaveAck : kBulkSaveResult;
 	sB2Out.push_back(B2Msg{ sendType, pc_netplay_xfer::encode_save_result(mine) });
+	printf("[netplay] save barrier enter: frame=%u gen=%llu local_ok=%d; this tick's save I/O before the barrier "
+	       "took %.0f ms\n",
+	       frame, gen, (int)mine.ok, ioMs);
+	fflush(stdout);
+	auto pump = [&]() {
+		bulk_pump();
+		if (sGekko != nullptr) gekko_network_poll(sGekko);
+	};
 	auto die = [&](int code) {
+		if (code == 5) {
+			// Let the peer see our message too, so it reaches the same verdict.
+			const double l0 = now_ms();
+			while (!bulk_all_acked() && now_ms() - l0 < 2000.0) {
+				pump();
+				sleep_hires_ms(1.0, 0.0);
+			}
+		}
+		if (pc_randomizer_netplay_barrier_abandoned != nullptr) pc_randomizer_netplay_barrier_abandoned();
+		printf("[netplay] save barrier abandoned: exit %d after %.0f ms\n", code, now_ms() - t0);
 		fflush(stdout);
 		pc_state_hash_flush();
 		stop_session();
 		sPhase = kDone;
 		std::exit(code);
 	};
-	const double t0 = now_ms();
 	pc_netplay_xfer::SaveResult peer;
 	bool have = false;
-	while (!have) {
-		bulk_pump();
+	bool ledgerWaitLogged = false;
+	while (true) {
+		pump();
 		std::vector<uint8_t> d;
 		while (!have && b2_take(waitType, &d)) {
 			pc_netplay_xfer::SaveResult r;
@@ -3492,31 +3867,53 @@ bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long ge
 			peer = r;
 			have = true;
 		}
-		if (have) break;
+		// The client writes SAVE_RESULT only after the host's ledger lines of
+		// this session have been applied (they were queued before the
+		// SaveResult, but bulk delivery is unordered).
+		const bool ledgerDone = sCfg.isHost || !have || sLedgerApplied >= peer.ledgerCount;
+		if (have && !ledgerDone && !ledgerWaitLogged) {
+			printf("[netplay] save barrier: waiting for host ledger messages (%u of %u applied)\n", sLedgerApplied,
+			       peer.ledgerCount);
+			ledgerWaitLogged = true;
+		}
+		if (have && ledgerDone) break;
 		if (now_ms() - t0 > 10000.0) {
 			printf("[netplay] save barrier timeout (frame=%u gen=%llu, no %s from the peer within 10 s)\n", frame,
-			       gen, sCfg.isHost ? "SAVE_ACK" : "SAVE_RESULT");
+			       gen, !have ? (sCfg.isHost ? "SAVE_ACK" : "SAVE_RESULT") : "ledger messages");
 			die(6);
 		}
 		sleep_hires_ms(1.0, 0.0);
 	}
-	bulk_pump(); // our message (and the peer's ack) go out now
+	pump(); // our message (and the peer's ack) go out now
 	const double waitMs = now_ms() - t0;
 	const pc_netplay_xfer::SaveResult& h = sCfg.isHost ? mine : peer;
-	if (peer.gen != mine.gen) {
+	switch (pc_netplay_xfer::barrier_verdict(mine, peer)) {
+	case pc_netplay_xfer::BarrierVerdict::GenMismatch:
 		printf("[netplay] save barrier: generation mismatch local=%llu peer=%llu (desync)\n",
 		       (unsigned long long)mine.gen, (unsigned long long)peer.gen);
 		die(5);
-	}
-	if (h.ok && mine.ok && memcmp(h.savSha, mine.savSha, 32) != 0) {
-		printf("[netplay] save barrier: checkpoint digest mismatch host=%s local=%s\n", to_hex(h.savSha, 32).c_str(),
-		       to_hex(mine.savSha, 32).c_str());
+		break;
+	case pc_netplay_xfer::BarrierVerdict::BlockMismatch:
+		printf("[netplay] save barrier: game-file block mismatch local=%s peer=%s (desync)\n",
+		       to_hex(mine.cardSha, 32).c_str(), to_hex(peer.cardSha, 32).c_str());
 		die(5);
+		break;
+	case pc_netplay_xfer::BarrierVerdict::DigestMismatch:
+		printf("[netplay] save barrier: checkpoint digest mismatch host=%s local=%s\n",
+		       to_hex(h.savSha, 32).c_str(), to_hex(mine.savSha, 32).c_str());
+		die(5);
+		break;
+	case pc_netplay_xfer::BarrierVerdict::Agree:
+		break;
 	}
 	printf("[netplay] save barrier frame=%u gen=%llu host_ok=%d local_ok=%d sav=%s\n", frame, gen, (int)h.ok,
 	       (int)mine.ok, hex16(h.savSha).c_str());
-	printf("[netplay] save barrier wait: %.0f ms (bulk channel only; GekkoNet not pumped) card block=%s peer=%s\n",
-	       waitMs, hex16(mine.cardSha).c_str(), hex16(peer.cardSha).c_str());
+	printf("[netplay] save barrier wait: %.0f ms (bulk pumped, GekkoNet network-polled, no Advance) card block=%s "
+	       "peer=%s ledger=%u/%u bulk resends=%llu bulk rx impaired: dropped=%llu delayed=%llu save-dropped=%llu\n",
+	       waitMs, hex16(mine.cardSha).c_str(), hex16(peer.cardSha).c_str(),
+	       sCfg.isHost ? sLedgerQueued : sLedgerApplied, sCfg.isHost ? sLedgerQueued : peer.ledgerCount,
+	       (unsigned long long)sBulk.resend_count(), (unsigned long long)sBulkImp.dropped,
+	       (unsigned long long)sBulkImp.delayed, (unsigned long long)sBulkImp.droppedSave);
 	fflush(stdout);
 	if (hostOk != nullptr) *hostOk = h.ok != 0;
 	if (hostSavHex != nullptr) {
@@ -3524,6 +3921,20 @@ bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long ge
 		memcpy(hostSavHex, hx.c_str(), 65);
 	}
 	return true;
+}
+
+// B2 fix round 1 (C12, C3): a local card outcome that cannot be brought back
+// in line with the agreed one ends the session as a desync (exit 5) instead
+// of letting this peer's sim branch alone.
+void pc_netplay_abort_desync(const char* why)
+{
+	printf("[netplay] desync: %s\n", why != nullptr ? why : "(unspecified)");
+	fflush(stdout);
+	if (!sCfg.active) std::exit(5);
+	pc_state_hash_flush();
+	stop_session();
+	sPhase = kDone;
+	std::exit(5);
 }
 
 // Launch lane self-test (pc_netplay_launch_selftest.cpp): the exact config
