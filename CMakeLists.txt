@@ -414,6 +414,7 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_groink_fsm.cpp
     pc_port/pc_p2_groink_teki.cpp
     pc_port/pc_p2_groink_fx.cpp
+    pc_port/pc_p2_fuefuki_teki.cpp
     pc_port/pc_p2_breadbug_fsm.cpp
     pc_port/pc_p2_breadbug_teki.cpp
     pc_port/pc_p2_projectiles.cpp
@@ -1165,6 +1166,34 @@ add_executable(p2_fuefuki_owner_death_test tools/p2_fuefuki_owner_death_test.cpp
 target_include_directories(p2_fuefuki_owner_death_test PRIVATE pc_port)
 target_compile_options(p2_fuefuki_owner_death_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_fuefuki_owner_death_test COMMAND p2_fuefuki_owner_death_test)
+
+# #245 OWN campaign policy: seven engine-free regressions, each paired with a
+# mutant build that injects the defect the case guards (WILL_FAIL). A case that
+# passes against its own mutant is not evidence.
+add_executable(p2_fuefuki_teki_policy_test tools/p2_fuefuki_teki_policy_test.cpp)
+target_include_directories(p2_fuefuki_teki_policy_test PRIVATE pc_port)
+target_compile_options(p2_fuefuki_teki_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_fuefuki_teki_policy_test COMMAND p2_fuefuki_teki_policy_test)
+foreach(pair IN ITEMS "APPEAR_ZERO:appear_roll" "NO_HIDE:host_outputs" "TOKEN_UNUSED:multi_token"
+                      "NO_PANIC:owner_panic" "RING_IGNORED:ring_filter"
+                      "PRESS_ALWAYS:press_gate" "NO_TARGET_GUARD:target_guard")
+    string(REPLACE ":" ";" parts "${pair}")
+    list(GET parts 0 mutant)
+    list(GET parts 1 testcase)
+    string(TOLOWER "${mutant}" mutant_lower)
+    add_executable(p2_fuefuki_teki_policy_mutant_${mutant_lower} tools/p2_fuefuki_teki_policy_test.cpp)
+    target_include_directories(p2_fuefuki_teki_policy_mutant_${mutant_lower} PRIVATE pc_port)
+    target_compile_options(p2_fuefuki_teki_policy_mutant_${mutant_lower} PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+    target_compile_definitions(p2_fuefuki_teki_policy_mutant_${mutant_lower} PRIVATE P2_FUEFUKI_MUTANT_${mutant}=1)
+    add_test(NAME p2_fuefuki_teki_policy_mutant_${mutant_lower}
+             COMMAND p2_fuefuki_teki_policy_mutant_${mutant_lower} ${testcase})
+    set_tests_properties(p2_fuefuki_teki_policy_mutant_${mutant_lower} PROPERTIES WILL_FAIL TRUE)
+endforeach()
+# Engine-side sidecar compile check (object only; product engine link deps).
+add_library(p2_fuefuki_teki_sidecar OBJECT pc_port/pc_p2_fuefuki_teki.cpp)
+target_include_directories(p2_fuefuki_teki_sidecar PRIVATE pc_port)
+target_compile_options(p2_fuefuki_teki_sidecar PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_dependencies(p2_fuefuki_teki_policy_test p2_fuefuki_teki_sidecar)
 
 # Lane 28 Fuefuki natural-combat real-GL fixture (#245): compile-only isolated
 # target. Its replacement-main executable is produced by

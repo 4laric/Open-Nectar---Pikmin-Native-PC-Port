@@ -4529,7 +4529,9 @@ void pc_gfx_present(void) {
                     for (int x = 0; x < sRenderWidth; ++x) fwrite(row + x * 4, 1, 3, f);
                 }
                 fclose(f);
-                std::printf("FRAME_DUMP frame=%05u\n", dumpFrame);
+                // Log correlation for eye checks: the marker stream around this
+                // line is what the dumped frame shows (env-gated diagnostic).
+                std::printf("FRAME_DUMP frame=%05u %dx%d\n", dumpFrame, sRenderWidth, sRenderHeight);
                 std::fflush(stdout);
             }
         }

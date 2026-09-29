@@ -60,6 +60,10 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     case 27: return 25; // TEKI_Otama: Tadpole (Wogpole) aquatic host
     case 84: return 3; // TEKI_Chappy: Hana (Creeping Chrysanthemum)
     case 93: return 3; // TEKI_Chappy: BombOtakara (Volatile Dweevil)
+    // #245 OWN: Antenna Beetle (Fuefuki) rides a suppressed Chappy ground
+    // vehicle with a LeaveCorpse carcass (pc_p2_fuefuki_teki_setup asserts
+    // TEKI_Chappy); never the Napkid flyer the proxy tier used.
+    case 41: return 3; // TEKI_Chappy: Fuefuki
     case 66: return 4; // TEKI_Swallow: Houdai (Man-at-Legs) proxy vehicle
     case 97: return 0; // TEKI_Frog: FminiHoudai (Gatling Groink pedestal) proxy vehicle
     // #898: Breadbug (PanModoki 38) rides the P1 Breadbug host TEKI_Collec (8)

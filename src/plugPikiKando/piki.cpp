@@ -2924,6 +2924,12 @@ void Piki::doAI()
 		_500.clear();
 		return;
 	}
+	// #245: an Antenna Beetle ActTeki follower walks the beetle's footmark
+	// trail instead of running its P1 action (source Brain ACT_Teki).
+	if (getState() == PIKISTATE_Normal && pc_p2_fuefuki_follower_controls(this)) {
+		_500.clear();
+		return;
+	}
 
 	int state = getState();
 	if (state == PIKISTATE_Unk34) {
@@ -2976,6 +2982,15 @@ void Piki::pcChargeAt(Creature* target)
 void Piki::changeMode(int newMode, Navi* navi)
 {
 	STACK_PAD_VAR(6); // idk
+#if defined(PIKI_PC_PORT)
+	// #245: the whistle path into a party is refused for an Antenna Beetle
+	// ActTeki follower in Navi::callPikis (InteractFue::actPiki). Any other
+	// path (day-end gather, co-op transfer, ...) ends the follow here, and a
+	// Pikmin the beetle released logs its reclaim by a captain.
+	if (newMode == PikiMode::FormationMode) {
+		pc_p2_fuefuki_note_formation(this, navi);
+	}
+#endif
 #if defined(PIKI_PC_PORT)
 	// VS: un Pikmin sin dueño pasa a ser del capitán a cuyo grupo entra
 	// (arrancarlo, silbarlo o tocarlo acaban aquí).
