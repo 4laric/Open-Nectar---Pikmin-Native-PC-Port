@@ -19,6 +19,7 @@
 #include "PikiState.h"
 #include "PikiAI.h"
 #include "Pellet.h"
+#include "PelletState.h"
 #include "MapMgr.h"
 #include "PikiHeadItem.h"
 #include "Pom.h"
@@ -68,10 +69,12 @@ class PurpleCampaignApp : public PlugPikiApp {
     Pellet* cargo = nullptr;
     Piki* controlRed = nullptr;
     Vector3f cargoStart;
-    int carryPhase = 0, carryTicks = 0;
+    int carryPhase = 0, carryTicks = 0, carryStable = 0;
     bool carryStep(Navi* n, Piki* purple) {
         ++carryTicks;
         auto assign = [&](Piki* p) {
+            require(cargo->isAlive() && cargo->isVisible() && cargo->getState() == PELSTATE_Normal,
+                "carry cargo not yet ready");
             p->mActiveAction->abandon(nullptr);
             require(p->isAlive() && p->getState() == PIKISTATE_Normal && !p->isStickTo(), "carry actor not ready");
             p->mActiveAction->mCurrActionIdx = PikiAction::Transport;
@@ -84,7 +87,7 @@ class PurpleCampaignApp : public PlugPikiApp {
             // attach, count strength, lift and transport; approach is excluded.
             p->resetPosition(cargo->getSlotGlobalPos(slot, 0.0f));
             p->mVelocity.set(0,0,0); p->mTargetVelocity.set(0,0,0); p->mVolatileVelocity.set(0,0,0);
-            std::printf("P2_PURPLE_CARRY_ASSIGN purple=%d slot=%d slot_position_staged=1 approach_bypassed=1\n",int(pc_p2_is_purple(p)),slot);
+            std::printf("P2_PURPLE_CARRY_ASSIGN purple=%d slot=%d slot_position_staged=1 approach_bypassed=1 cargo_state=%d visible=%d\n",int(pc_p2_is_purple(p)),slot,cargo->getState(),int(cargo->isVisible()));
         };
         auto release = [&](Piki* p) {
             p->mActiveAction->abandon(nullptr);
@@ -102,11 +105,18 @@ class PurpleCampaignApp : public PlugPikiApp {
             require(cargo && cargo->mConfig->mCarryMinPikis() == 10, "loaded native ten pellet unavailable");
             Vector3f pos = n->mSRT.t + Vector3f(80, 0, 0);
             pos.y = mapMgr->getMinY(pos.x, pos.z, true) + 5;
-            cargo->init(pos); cargo->startAI(0);
+            cargo->init(pos); cargo->startAI(0); cargoStart = pos;
             carryPhase = 1; carryTicks = 0;
             std::puts("P2_PURPLE_CARRY_BEGIN injected_cargo=1 native_weight=10 scripted_assignment=1");
-        } else if (carryPhase == 1 && carryTicks >= 60) {
-            cargoStart = cargo->mSRT.t; assign(controlRed); carryPhase = 2; carryTicks = 0;
+        } else if (carryPhase == 1) {
+            const Vector3f delta = cargo->mSRT.t - cargoStart;
+            carryStable = delta.x*delta.x + delta.y*delta.y + delta.z*delta.z < 0.0001f ? carryStable+1 : 0;
+            cargoStart = cargo->mSRT.t;
+            // Appear is intentionally invisible; Transport correctly rejects
+            // it. Observe native readiness rather than assuming sixty ticks.
+            if (carryStable >= 30 && cargo->isVisible() && cargo->getState() == PELSTATE_Normal) {
+                assign(controlRed); carryPhase = 2; carryTicks = 0;
+            }
         } else if (carryPhase >= 2) {
             require(cargo->isAlive(), "carry cargo disappeared before movement observation");
             const Vector3f d = cargo->mSRT.t - cargoStart;
