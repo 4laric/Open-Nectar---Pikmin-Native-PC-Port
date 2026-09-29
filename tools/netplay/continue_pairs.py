@@ -440,7 +440,8 @@ def scenario_nosave(ctx):
 
 def scenario_quit(ctx):
     a = ctx.a
-    s1 = run_session(ctx, "s1", a.nosave_ticks, close_join_at=a.quit_frame, expect="quit")
+    # The close must land well before the session's own tick limit.
+    s1 = run_session(ctx, "s1", max(a.nosave_ticks, a.quit_frame + 1500), close_join_at=a.quit_frame, expect="quit")
     ctx.check(s1.get("wm_close_windows", 0) >= 1, f"s1: WM_CLOSE reached the joiner's window ({s1.get('wm_close_windows')})")
     ctx.check(any("quit: this game left the session" in ln for ln in s1["join"]["events"]), "s1 join: quit notice sent")
     recovery_ok(ctx, s1, "s1", "join", ["You left the session", "Nothing is saved yet"])

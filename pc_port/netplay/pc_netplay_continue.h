@@ -381,7 +381,7 @@ struct EndInfo {
 	EndKind kind = EndKind::Disconnect;
 	bool host = true;
 	bool launcher = true;      // --netplay-host-ice / --netplay-join-ice (else the low-level switches)
-	uint64_t frame = 0;        // last frame the two games agreed on
+	uint64_t frame = 0;        // Desync: the frame whose checksums differed; else the last frame advanced
 	unsigned long long gen = 0; // newest checkpoint both games agreed on (0 = none)
 	int day = 0;               // the day that checkpoint plays on from (0 = unknown)
 	int dayEnded = 0;          // the day whose end it saved (0 = unknown)
@@ -394,8 +394,8 @@ inline std::string end_headline(const EndInfo& e)
 {
 	switch (e.kind) {
 	case EndKind::Desync:
-		return "DESYNC: the two games stopped agreeing about the game (frame " + std::to_string(e.frame) +
-		       "), so the session stopped.";
+		return "DESYNC: the two games stopped agreeing about the game at frame " + std::to_string(e.frame) +
+		       ", so the session stopped.";
 	case EndKind::SaveDesync:
 		return "DESYNC AT THE DAY-END SAVE: the two games saved different days, so that save does not count.";
 	case EndKind::SaveTimeout:

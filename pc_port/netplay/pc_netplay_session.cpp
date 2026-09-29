@@ -3694,7 +3694,7 @@ std::string exe_file_name()
 }
 
 // The final message on a session end (console, and the banner text), once.
-void print_end_message(pc_netplay_continue::EndKind kind, int code)
+void print_end_message(pc_netplay_continue::EndKind kind, int code, int64_t frame = -1)
 {
 	if (sEndPrinted) return;
 	sEndPrinted = true;
@@ -3702,7 +3702,7 @@ void print_end_message(pc_netplay_continue::EndKind kind, int code)
 	e.kind     = kind;
 	e.host     = sCfg.isHost;
 	e.launcher = sCfg.launcherMode;
-	e.frame    = sLastAdvanceFrame;
+	e.frame    = frame >= 0 ? (uint64_t)frame : sLastAdvanceFrame; // a desync names the frame it found
 	e.gen      = sRecGen;
 	e.day      = sRecDay;
 	e.dayEnded = sRecDayEnded;
@@ -3711,7 +3711,7 @@ void print_end_message(pc_netplay_continue::EndKind kind, int code)
 	const std::vector<std::string> lines = pc_netplay_continue::recovery_lines(e);
 	for (const std::string& l : lines) printf("[netplay] %s\n", l.c_str());
 	fflush(stdout);
-	rec_append(pc_netplay_continue::record_line_end(pc_netplay_continue::end_kind_name(kind), code, sLastAdvanceFrame));
+	rec_append(pc_netplay_continue::record_line_end(pc_netplay_continue::end_kind_name(kind), code, e.frame));
 	// Banner text: the headline, the saved day and the action lines.
 	sBannerTitle = kind == pc_netplay_continue::EndKind::Desync       ? "DESYNC - SESSION STOPPED"
 	             : kind == pc_netplay_continue::EndKind::SaveDesync   ? "DESYNC AT THE DAY-END SAVE"
@@ -4069,7 +4069,7 @@ void handle_session_events()
 			sPhase = kDone;
 			// M5c lane C: the final message, then the end banner (exit 5 when
 			// it closes; at once without a banner, as before).
-			print_end_message(pc_netplay_continue::EndKind::Desync, 5);
+			print_end_message(pc_netplay_continue::EndKind::Desync, 5, frame);
 			fflush(stdout);
 			begin_banner(5);
 			if (!sBannerOn) std::exit(5);

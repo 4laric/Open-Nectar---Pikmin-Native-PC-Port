@@ -153,7 +153,7 @@ int main()
 		e.exe = "nectar.exe";
 		e.extraArgs = "--netplay-input keyboard";
 		std::vector<std::string> l = recovery_lines(e);
-		CHECK(contains(l, "DESYNC") && contains(l, "30012"), "what happened");
+		CHECK(contains(l, "DESYNC") && contains(l, "at frame 30012"), "what happened");
 		CHECK(contains(l, "Last saved day: day 3"), "the last saved day");
 		CHECK(contains(l, "nectar.exe --netplay-host-ice --continue --netplay-input keyboard"), "the exact command");
 		CHECK(contains(l, "host.bat"), "the .bat route");
