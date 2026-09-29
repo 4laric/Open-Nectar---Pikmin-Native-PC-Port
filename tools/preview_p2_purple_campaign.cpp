@@ -67,6 +67,12 @@ class PurpleCampaignApp : public PlugPikiApp {
         ++carryTicks;
         auto assign = [&](Piki* p) {
             p->mActiveAction->abandon(nullptr);
+            require(p->isAlive() && p->getState() == PIKISTATE_Normal && !p->isStickTo(), "carry actor not ready");
+            Vector3f beside = cargo->mSRT.t + Vector3f(-(cargo->getCentreSize() + 15), 0, 0);
+            beside.y = mapMgr->getMinY(beside.x, beside.z, true);
+            p->resetPosition(beside);
+            p->mVelocity.set(0,0,0); p->mTargetVelocity.set(0,0,0); p->mVolatileVelocity.set(0,0,0);
+            std::printf("P2_PURPLE_CARRY_ASSIGN purple=%d carrier_position_staged=1 approach_pathfinding_validated=0\n",int(pc_p2_is_purple(p)));
             p->mActiveAction->mCurrActionIdx = PikiAction::Transport;
             p->mActiveAction->mChildActions[PikiAction::Transport].initialise(cargo);
             p->mMode = PikiMode::TransportMode;
@@ -79,7 +85,7 @@ class PurpleCampaignApp : public PlugPikiApp {
             Iterator bodies(pikiMgr);
             CI_LOOP(bodies) {
                 Piki* p = static_cast<Piki*>(*bodies);
-                if (p->isAlive() && !pc_p2_is_purple(p) && p->getState() == PIKISTATE_Normal
+                if (p->isAlive() && p->mColor == Red && !p->mP2White && !pc_p2_is_purple(p) && p->getState() == PIKISTATE_Normal
                     && p->mMode == PikiMode::FormationMode) { controlRed = p; break; }
             }
             require(controlRed != nullptr, "carry control unavailable");
@@ -111,7 +117,13 @@ class PurpleCampaignApp : public PlugPikiApp {
                     release(purple); cargo->kill(false); return true;
                 }
             }
-            if (carryTicks % 120 == 0) std::printf("P2_PURPLE_CARRY_PROGRESS phase=%d strength=%d distance=%.2f\n", carryPhase,cargo->mCarrierCounter,std::sqrt(distanceSquared));
+            if (carryTicks % 120 == 0) {
+                Piki* carrier = carryPhase == 2 ? controlRed : purple;
+                std::printf("P2_PURPLE_CARRY_PROGRESS phase=%d strength=%d distance=%.2f actor_state=%d mode=%d action=%d attached=%d position=%.1f,%.1f,%.1f cargo_state=%d visible=%d\n",
+                    carryPhase,cargo->mCarrierCounter,std::sqrt(distanceSquared),carrier->getState(),int(carrier->mMode),
+                    carrier->mActiveAction->mCurrActionIdx,int(carrier->getStickObject()==cargo),
+                    carrier->mSRT.t.x,carrier->mSRT.t.y,carrier->mSRT.t.z,cargo->getState(),int(cargo->isVisible()));
+            }
         }
         require(carryTicks < 1800, "native ten-strength carry timeout");
         return false;
