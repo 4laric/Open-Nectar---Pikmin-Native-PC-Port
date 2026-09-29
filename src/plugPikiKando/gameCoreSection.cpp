@@ -3107,6 +3107,22 @@ static void coopRunTestEvents(Navi* p1, Navi* p2)
             // then runs the ordinary time-expiry day end (cleanupDayEnd, the
             // sunset movie and its Fue event) on both peers from this sim tick.
             gameflow.mWorldClock.setTime(gameflow.mParameters->mEndHour());
+            // What the day-end enter paths will see: each captain's stored
+            // Onion (-1 = none) and the Pikmin it owns, in its squad or free.
+            int squad[PC_COOP_CAPTAINS] = {}, loose[PC_COOP_CAPTAINS] = {};
+            Iterator it(pikiMgr);
+            CI_LOOP(it) {
+                Piki* piki = static_cast<Piki*>(*it);
+                if (!piki || !piki->isAlive()) continue;
+                for (int c = 0; c < PC_COOP_CAPTAINS; ++c) {
+                    if (!navis[c] || piki->mNavi != navis[c]) continue;
+                    if (piki->mMode == PikiMode::FormationMode) ++squad[c];
+                    else if (piki->mMode == PikiMode::FreeMode) ++loose[c];
+                }
+            }
+            std::printf("[coop-policy] TEST sunset tick=%u p1goal=%d p2goal=%d squad=%d,%d free=%d,%d\n", sCoopPolicy.tick,
+                (p1 && p1->mGoalItem) ? int(p1->mGoalItem->mOnionColour) : -1,
+                (p2 && p2->mGoalItem) ? int(p2->mGoalItem->mOnionColour) : -1, squad[0], squad[1], loose[0], loose[1]);
             std::fflush(stdout);
             continue;
         }
