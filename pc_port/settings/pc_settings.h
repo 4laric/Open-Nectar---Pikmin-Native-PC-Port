@@ -76,6 +76,8 @@ int pc_settings_get_throw_cancel_b(void);
 int pc_settings_get_quick_grab(void);
 /// Los Pikmin del grupo no tropiezan al correr.
 int pc_settings_get_no_trip(void);
+// Whistling over sprouts plucks them, one every 0.08 s while held. Off by default.
+int pc_settings_get_whistle_pluck(void);
 /// En el menú de la cebolla, Y + arriba/abajo mueve de 10 en 10.
 int pc_settings_get_onion_step10(void);
 /// Los Pikmin silbados se unen al grupo al instante, sin la reacción de LookAt.

@@ -1,6 +1,7 @@
 #include "NaviState.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_coop.h"
+#include "pc_whistle_pluck.h"
 #endif
 #include <cstdlib>
 #include <cstdio>
@@ -1747,6 +1748,9 @@ void NaviGatherState::init(Navi* navi)
 	UtEffectMgr::cast(KandoEffect::NaviFue0, parm);
 #endif
 	mWhistleEffectsStopped = false;
+#if defined(PIKI_PC_PORT)
+	mWhistlePluckCooldown = 0.0f;
+#endif
 	rumbleMgr->start(RUMBLE_Unk3, navi->mNaviID, nullptr);
 }
 
@@ -1806,6 +1810,19 @@ void NaviGatherState::exec(Navi* navi)
 		transit(navi, NAVISTATE_Walk);
 		return;
 	}
+
+#if defined(PIKI_PC_PORT)
+	// Mod "Whistle Pluck": while the whistle is held, pluck the sprout nearest
+	// the cursor inside the current circle, one every PC_WHISTLE_PLUCK_INTERVAL.
+	if (down && !gameflow.mPauseAll && pc_settings_get_whistle_pluck()) {
+		mWhistlePluckCooldown -= gsys->getFrameTime();
+		if (mWhistlePluckCooldown <= 0.0f) {
+			const f32 frac   = navi->mWhistleCircleMode == 1 ? navi->mWhistleTimer / C_NAVI_PARM(navi, mWhistleExpandTime) : navi->mWhistleRadiusFrac;
+			const f32 radius = C_NAVI_PARM(navi, mWhistleMinRadius) + frac * (NAVI_WHISTLE_MAX_RADIUS(navi) - C_NAVI_PARM(navi, mWhistleMinRadius));
+			mWhistlePluckCooldown = pc_whistle_pluck(navi, radius) ? PC_WHISTLE_PLUCK_INTERVAL : 0.0f;
+		}
+	}
+#endif
 
 	if (navi->mWhistleCircleMode == 1 && down) {
 		navi->mWhistleTimer += gsys->getFrameTime();

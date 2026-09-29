@@ -141,6 +141,8 @@ struct PcConfig {
     int throwCancelB = 0;       // B con un Pikmin en la mano lo devuelve al grupo
     int quickGrab = 0;          // el Pikmin elegido aparece en la mano (sin andar hasta ella)
     int noTrip = 0;             // los Pikmin no tropiezan al correr
+    // Whistling over sprouts plucks them one at a time (0=off/faithful, 1=on).
+    int whistlePluck = 0;
     int onionStep10 = 0;        // Y + arriba/abajo en la cebolla mueve de 10 en 10
     int instantWhistle = 0;     // los Pikmin silbados se unen sin la reacción de girarse
     // Cheats.
@@ -244,6 +246,7 @@ struct PcConfig {
         throwCancelB = 0;
         quickGrab = 0;
         noTrip = 0;
+        whistlePluck = 0;
         onionStep10 = 0;
         instantWhistle = 0;
         pikiInvincible = 0;
@@ -1045,6 +1048,7 @@ void saveConfig() {
     out << "throwCancelB = " << sConfig.throwCancelB << "\n";
     out << "quickGrab = " << sConfig.quickGrab << "\n";
     out << "noTrip = " << sConfig.noTrip << "\n";
+    out << "whistlePluck = " << sConfig.whistlePluck << "\n";
     out << "onionStep10 = " << sConfig.onionStep10 << "\n";
     out << "instantWhistle = " << sConfig.instantWhistle << "\n";
     out << "pikiInvincible = " << sConfig.pikiInvincible << "\n";
@@ -1229,6 +1233,9 @@ void loadConfig() {
         }
         else if (key == "noTrip") {
             sConfig.noTrip = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "whistlePluck") {
+            sConfig.whistlePluck = atoi(val.c_str()) ? 1 : 0;
         }
         else if (key == "onionStep10") {
             sConfig.onionStep10 = atoi(val.c_str()) ? 1 : 0;
@@ -2538,6 +2545,9 @@ void modsRowChange(int row, bool left, bool right) {
     }
     else if (row == 25) {
         if (left || right) sPending.instantWhistle = sPending.instantWhistle ? 0 : 1;
+    }
+    else if (row == 34) {
+        if (left || right) sPending.whistlePluck = sPending.whistlePluck ? 0 : 1;
     }
     // Cheats (26-32). Hard los anula, como la vida y el día.
     else if (row >= 26 && row <= 32) {
@@ -5277,6 +5287,10 @@ int pc_settings_get_no_trip(void) {
     return sConfig.noTrip;
 }
 
+int pc_settings_get_whistle_pluck(void) {
+    return sConfig.whistlePluck;
+}
+
 int pc_settings_get_onion_step10(void) {
     return sConfig.onionStep10;
 }
@@ -5516,6 +5530,7 @@ void modsRowValue(int i, char* value, size_t n) {
     case 23: snprintf(value, n, "%s", sPending.noTrip ? "On" : "Off (original)"); break;
     case 24: snprintf(value, n, "%s", sPending.onionStep10 ? "On" : "Off (original)"); break;
     case 25: snprintf(value, n, "%s", sPending.instantWhistle ? "On" : "Off (original)"); break;
+    case 34: snprintf(value, n, "%s", sPending.whistlePluck ? "On" : "Off (original)"); break;
     case 28: speedPctLabel(sPending.carrySpeedPct, value, n); break;
     case 29: speedPctLabel(sPending.naviSpeedPct, value, n); break;
     case 26: case 27: case 30: case 31: case 32: {
@@ -5649,6 +5664,7 @@ const GroupRow kCameraRows[] = {
 
 const GroupRow kGameplayRows[] = {
     { SRC_MODS, 25, "Instant Whistle Response", "Whistled Pikmin join the squad at once, without stopping to turn and look first." },
+    { SRC_MODS, 34, "Whistle Pluck", "Hold the whistle over sprouts to pluck them one after another." },
     { SRC_MODS, 1, "Chain Pikmin Actions", "Pikmin that finish a task go on to the next one nearby." },
     { SRC_MODS, 8, "Better Pathfinding", "Gets Pikmin moving again when they stall on their route." },
     { SRC_MODS, 9, "Blues Only In Water", "Only blue Pikmin walk into water on their own." },

@@ -455,6 +455,9 @@ struct NaviGatherState : public NaviState {
 	// _00-_10 = NaviState
 	u16 mWhistleAnimPhase;       // _10
 	f32 mWhistleCallRadius;      // _14
+#if defined(PIKI_PC_PORT)
+	f32 mWhistlePluckCooldown = 0.0f; // "Whistle Pluck" mod: time until the next pluck
+#endif
 	bool mWhistleEffectsStopped; // _18
 };
 
