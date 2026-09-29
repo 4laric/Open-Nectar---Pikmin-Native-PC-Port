@@ -17,6 +17,10 @@ void pc_p2_boss_arena_rekey(Generator* generator);
 // Host teki type to reserve for a bound arena generator, or -1 when the
 // generator is not a bound P2 boss arena spawn.
 int pc_p2_boss_arena_host(Generator* generator);
+// Extra teki types a bound P2 source draws with beyond its host (the
+// Crawbster 94 rain Rocks/Egg use the Iwagon mesh as a stand-in, #897).
+// Marks them in tekiMgr->mUsingType so startStage loads their shapes.
+void pc_p2_reserve_source_extras(Generator* generator);
 
 // True when this P1 boss generator shares an arena with a bound spawn
 // generator and must stay empty (no P1 boss, no host).

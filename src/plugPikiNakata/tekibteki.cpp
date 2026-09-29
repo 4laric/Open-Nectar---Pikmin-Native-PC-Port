@@ -11,6 +11,7 @@
 #include "pc_p2_hana.h"
 #include "pc_p2_kurage_teki.h"
 #include "pc_p2_groink_teki.h"
+#include "pc_p2_bigtreasure_teki.h"
 #include "pc_p2_teki_lifetime.h"
 #include "pc_p2_onikurage_teki.h"
 #include "pc_p2_bombsarai_teki.h"
@@ -38,7 +39,9 @@
 #include "pc_p2_tamago.h"
 #include "pc_p2_imomushi.h"
 #include "pc_p2_otakara.h"
+#include "pc_held_part.h"
 #include "pc_p2_batch3.h"
+#include "pc_p2_pose_family.h"
 #include "pc_p2_long_legs.h"
 #include "pc_p2_hardlanes.h"
 #include "pc_p2_chappy.h"
@@ -179,7 +182,7 @@ void BTeki::viewDraw(Graphics& gfx, immut Matrix4f& mat)
 	mTekiAnimator->updateContext();
 	mTekiShape->mShape->updateAnim(gfx, mat, nullptr, this);
 #ifdef PIKI_PC_PORT
-    if (!pc_p2_demon_manager_draw_actor(this, gfx, mat, true) && !pc_p2_sarai_manager_draw_actor(this, gfx, mat, true) && !pc_p2_kurage_teki_draw(this, gfx, mat, true) && !pc_p2_groink_teki_draw(this, gfx, mat, true) && !pc_p2_kogane_draw(this, gfx, mat, true) && !pc_p2_mamuta_draw(this, gfx, mat, true) && !pc_p2_frog_draw(this, gfx, mat, true) && !pc_p2_tank_draw(this, gfx, mat, true) && !pc_p2_kabuto_fsm_draw(this, gfx, mat, true) && !pc_p2_qurione_draw(this, gfx, mat, true) && !pc_p2_shijimi_draw(this, gfx, mat, true) && !pc_p2_dwarf_orange_draw(this, gfx, mat, true) && !pc_p2_kochappy_draw(this, gfx, mat, true) && !pc_p2_chappy_draw(this, gfx, mat, true) && !pc_p2_sheargrub_draw(this, gfx, mat, true) && !pc_p2_snow_draw(this, gfx, mat, true) && !pc_p2_batch2_draw(this, gfx, mat, true) && !pc_p2_batch3_draw(this, gfx, mat, true) && !pc_p2_long_legs_draw(this, gfx, mat, true) && !pc_hd_model_draw_skinned(gfx, mTekiShape->mShape, hdModel(), hdTint()))
+    if (!pc_p2_demon_manager_draw_actor(this, gfx, mat, true) && !pc_p2_sarai_manager_draw_actor(this, gfx, mat, true) && !pc_p2_kurage_teki_draw(this, gfx, mat, true) && !pc_p2_groink_teki_draw(this, gfx, mat, true) && !pc_p2_bigtreasure_teki_draw(this, gfx, mat, true) && !pc_p2_kogane_draw(this, gfx, mat, true) && !pc_p2_mamuta_draw(this, gfx, mat, true) && !pc_p2_frog_draw(this, gfx, mat, true) && !pc_p2_tank_draw(this, gfx, mat, true) && !pc_p2_kabuto_fsm_draw(this, gfx, mat, true) && !pc_p2_qurione_draw(this, gfx, mat, true) && !pc_p2_shijimi_draw(this, gfx, mat, true) && !pc_p2_dwarf_orange_draw(this, gfx, mat, true) && !pc_p2_kochappy_draw(this, gfx, mat, true) && !pc_p2_chappy_draw(this, gfx, mat, true) && !pc_p2_sheargrub_draw(this, gfx, mat, true) && !pc_p2_snow_draw(this, gfx, mat, true) && !pc_p2_batch2_draw(this, gfx, mat, true) && !pc_p2_batch3_draw(this, gfx, mat, true) && !pc_p2_long_legs_draw(this, gfx, mat, true) && !pc_hd_model_draw_skinned(gfx, mTekiShape->mShape, hdModel(), hdTint()))
 #endif
 	mTekiShape->mShape->drawshape(gfx, *gfx.mCamera, nullptr);
 }
@@ -356,6 +359,9 @@ void BTeki::reset()
 	setDirection(mPersonality->mFaceDirection);
 	mSize             = getSize();
 	mDeadState        = 0;
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	mPcHeldPartDropped = false;
+#endif
 	mStateID          = 0;
 	mReturnStateID    = 0;
 	mActionStateId    = 0;
@@ -489,7 +495,14 @@ void BTeki::startAI(int)
 	strat->start(*static_cast<Teki*>(this));
 	ID32& id = mPersonality->mID;
 	PRINT_NAKATA("BTeki::reset:%08x:item:%s\n", this, id.mStringID);
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	// #901: a P2-bound holder whose part already exists (collected, cached,
+	// on the ground) is born without it: no radar marker, no drop. A P1
+	// holder always holds (vanilla); pc_held_part_birth only logs it.
+	if (Pellet::isUfoPartsID(id.mId) && pc_held_part_birth(this)) {
+#else
 	if (Pellet::isUfoPartsID(id.mId)) {
+#endif
 		radarInfo->attachParts(this);
 		pelletMgr->addUseList(id.mId);
 	}
@@ -509,6 +522,7 @@ void BTeki::update()
 	pc_p2_otakara_update(this);
 	pc_p2_kurage_teki_tick(this);
 	pc_p2_groink_teki_tick(this);
+	pc_p2_bigtreasure_teki_tick(this);
 	pc_p2_onikurage_teki_tick(this);
 	pc_p2_bombsarai_teki_tick(this);
 	pc_p2_kogane_update(this);
@@ -521,6 +535,9 @@ void BTeki::update()
 	// no-op for every actor not bound as the Queen creature host.
 	pc_p2_queen_teki_tick(this);
     pc_p2_snow_update(this,NSystem::getFrameTime());
+    pc_p2_batch2_update(this,NSystem::getFrameTime());
+    pc_p2_batch3_update(this,NSystem::getFrameTime());
+    pc_p2_pose_family_tick(this,NSystem::getFrameTime());
 	pc_p2_shijimi_update(this);
 	pc_p2_qurione_update(this);
 	pc_p2_elecbug_update(this);
@@ -705,6 +722,9 @@ void BTeki::doAI()
 	if (pc_p2_groink_teki_suppress_ai(this)) {
 		return;
 	}
+	if (pc_p2_bigtreasure_teki_suppress_ai(this)) {
+		return;
+	}
 	if (pc_p2_catfish_suppress_ai(this)) {
 		return;
 	}
@@ -712,6 +732,10 @@ void BTeki::doAI()
 		return;
 	}
 	if (pc_p2_tadpole_suppress_ai(this)) {
+		return;
+	}
+	// #215: Demon-profile anchors run no P1 strategy (Sarai host owns behaviour).
+	if (pc_p2_sarai_suppress_ai(this)) {
 		return;
 	}
 #endif
@@ -772,6 +796,11 @@ void BTeki::die()
             && gameflow.mMoviePlayer && !gameflow.mMoviePlayer->mIsActive);
     }
 
+    // #901: a P2-bound actor's real death drops its held ship part here, so
+    // families that finalize through die() alone (no dieSoon) still drop.
+    // P1 strategies keep their vanilla spawnItems/dieSoon timing.
+    if (!mDeadState && pc_held_part_p2_source(this)) pc_held_part_drop(this, "die");
+
     mDeadState = 1;
     pc_p2_otakara_died(this); // lane-22 host death-seam hook; no-op for unregistered actors
 }
@@ -782,6 +811,13 @@ void BTeki::die()
 void BTeki::dieSoon()
 {
 	PRINT_NAKATA("dieSoon:%08x:\n", this);
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	// #901 generic held ship part: a P2-bound holder's real death (health
+	// spent) reaches here before the corpse branch and detachGenerator,
+	// including NoCorpse families and pcEscapeNow. Latched with spawnItems;
+	// no-op on escape. A P1 holder is vanilla: it drops only in spawnItems.
+	if (pc_held_part_p2_source(this)) pc_held_part_drop(this, "dieSoon");
+#endif
 	clearTekiOption(TEKIOPT_Alive | TEKIOPT_Visible | TEKIOPT_ShadowVisible | TEKIOPT_Atari);
 	if (getParameterI(TPI_CorpseType) == TEKICORPSE_LeaveCorpse) {
 		createSoulEffect();
@@ -1035,7 +1071,11 @@ void BTeki::spawnItems()
 {
 	// spawn item
 	ID32& id = mPersonality->mID;
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	if (!id.match('none') && pc_held_part_claim_spawn_items(this)) {
+#else
 	if (!id.match('none')) {
+#endif
 		PRINT_NAKATA("spawnItems:%08x:spawn item:%s\n", this, id.mStringID);
 		spawnPellets(id.mId, -2, 1);
 		radarInfo->detachParts(this);
@@ -1955,6 +1995,13 @@ bool BTeki::ignoreAtari(Creature* target)
 	if (target->getStickObject() == this) {
 		return true;
 	}
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	// #215: a flying Demon-profile anchor does not shove captains
+	// (P2 flying enemies disable EB_CollisionActive).
+	if (pc_p2_sarai_ignore_atari(this, target)) {
+		return true;
+	}
+#endif
 
 	return false;
 }
@@ -1970,8 +2017,9 @@ void BTeki::bounceCallback()
 /**
  * @todo: Documentation
  */
-void BTeki::wallCallback(immut Plane&, DynCollObject*)
+void BTeki::wallCallback(immut Plane& wallPlane, DynCollObject*)
 {
+	pc_p2_dangomushi_wall(this, wallPlane); // #897: no-op unless a registered Crawbster
 	eventPerformed(TekiEvent(TekiEventType::Wall, static_cast<Teki*>(this)));
 }
 
@@ -1980,6 +2028,26 @@ void BTeki::wallCallback(immut Plane&, DynCollObject*)
  */
 bool BTeki::interact(immut TekiInteractionKey& key)
 {
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	// #246 OWN: a campaign Titan Dweevil owns every Pikmin hit (source
+	// damageCallBack routes it by the hit CollPart of the Titan's own
+	// collision tree to a weapon or, unarmed, the body). The P1 host
+	// strategy (TaiSwallow: lower-body damage scaling, stored damage) must not
+	// see it, so the raw hit is recorded here, before strategy dispatch.
+	// This intercepts EVERY Attack interaction on a bound Titan, not only
+	// Pikmin ones: captain punches and P1 bomb-rock blasts also stop here and
+	// never reach TaiSwallow. The core then ignores them, as the source does
+	// (BigTreasure::damageCallBack only accepts creature->isPiki()).
+	if (key.mInteractionType == TekiInteractType::Attack && pc_p2_bigtreasure_teki_is_bound(this)) {
+		InteractAttack* attack = (InteractAttack*)key.mInteraction;
+		if (getTekiOption(TEKIOPT_Invincible)) {
+			return false;
+		}
+		pc_p2_bigtreasure_attack(this, attack->mOwner, attack->mDamage, attack->mCollPart);
+		setCreaturePointer(1, attack->mOwner);
+		return true;
+	}
+#endif
 	TekiStrategy* strat = getStrategy();
 	return strat->interact(*static_cast<Teki*>(this), key);
 }
@@ -2229,7 +2297,7 @@ void BTeki::drawTekiShape(Graphics& gfx)
 		}
 
 #ifdef PIKI_PC_PORT
-        if (!pc_p2_demon_manager_draw_actor(this, gfx, onCamMtx, false) && !pc_p2_sarai_manager_draw_actor(this, gfx, onCamMtx, false) && !pc_p2_kurage_teki_draw(this, gfx, onCamMtx, false) && !pc_p2_groink_teki_draw(this, gfx, onCamMtx) && !pc_p2_onikurage_teki_draw(this, gfx, onCamMtx, false) && !pc_p2_king_teki_draw(this, gfx, onCamMtx, false) && !pc_p2_queen_teki_draw(this, gfx, onCamMtx, false) && !pc_p2_kogane_draw(this, gfx, onCamMtx, false) && !pc_p2_mamuta_draw(this, gfx, onCamMtx) && !pc_p2_frog_draw(this, gfx, onCamMtx) && !pc_p2_tank_draw(this, gfx, onCamMtx) && !pc_p2_kabuto_fsm_draw(this, gfx, onCamMtx) && !pc_p2_qurione_draw(this, gfx, onCamMtx, false) && !pc_p2_shijimi_draw(this, gfx, onCamMtx, false) && !pc_p2_giant_breadbug_actor_draw(this, gfx, onCamMtx) && !pc_p2_breadbug_actor_draw(this, gfx, onCamMtx) && !pc_p2_dwarf_orange_draw(this, gfx, onCamMtx) && !pc_p2_kochappy_draw(this, gfx, onCamMtx) && !pc_p2_chappy_draw(this, gfx, onCamMtx) && !pc_p2_sheargrub_draw(this, gfx, onCamMtx) && !pc_p2_snow_draw(this, gfx, onCamMtx) && !pc_p2_batch2_draw(this, gfx, onCamMtx) && !pc_p2_batch3_draw(this, gfx, onCamMtx) && !pc_p2_long_legs_draw(this, gfx, onCamMtx) && !pc_hd_model_draw_skinned(gfx, mTekiShape->mShape, hdModel(), hdTint()))
+        if (!pc_p2_demon_manager_draw_actor(this, gfx, onCamMtx, false) && !pc_p2_sarai_manager_draw_actor(this, gfx, onCamMtx, false) && !pc_p2_kurage_teki_draw(this, gfx, onCamMtx, false) && !pc_p2_groink_teki_draw(this, gfx, onCamMtx) && !pc_p2_bigtreasure_teki_draw(this, gfx, onCamMtx) && !pc_p2_onikurage_teki_draw(this, gfx, onCamMtx, false) && !pc_p2_king_teki_draw(this, gfx, onCamMtx, false) && !pc_p2_queen_teki_draw(this, gfx, onCamMtx, false) && !pc_p2_kogane_draw(this, gfx, onCamMtx, false) && !pc_p2_mamuta_draw(this, gfx, onCamMtx) && !pc_p2_frog_draw(this, gfx, onCamMtx) && !pc_p2_tank_draw(this, gfx, onCamMtx) && !pc_p2_kabuto_fsm_draw(this, gfx, onCamMtx) && !pc_p2_qurione_draw(this, gfx, onCamMtx, false) && !pc_p2_shijimi_draw(this, gfx, onCamMtx, false) && !pc_p2_giant_breadbug_actor_draw(this, gfx, onCamMtx) && !pc_p2_breadbug_actor_draw(this, gfx, onCamMtx) && !pc_p2_dwarf_orange_draw(this, gfx, onCamMtx) && !pc_p2_kochappy_draw(this, gfx, onCamMtx) && !pc_p2_chappy_draw(this, gfx, onCamMtx) && !pc_p2_sheargrub_draw(this, gfx, onCamMtx) && !pc_p2_snow_draw(this, gfx, onCamMtx) && !pc_p2_batch2_draw(this, gfx, onCamMtx) && !pc_p2_batch3_draw(this, gfx, onCamMtx) && !pc_p2_long_legs_draw(this, gfx, onCamMtx) && !pc_hd_model_draw_skinned(gfx, mTekiShape->mShape, hdModel(), hdTint()))
 #endif
 		mTekiShape->mShape->drawshape(gfx, *gfx.mCamera, &mAnimatedMaterials);
 		if (lightType == 1) {
