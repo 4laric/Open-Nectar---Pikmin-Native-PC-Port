@@ -125,6 +125,7 @@ void GenObjectBoss::updateUseList(Generator* generator, int count)
 	const int p2Host = pc_p2_boss_arena_host(generator);
 	if (p2Host >= 0) {
 		tekiMgr->mUsingType[p2Host] = true;
+		pc_p2_reserve_source_extras(generator);
 		return;
 	}
 	if (pc_p2_boss_arena_suppressed(generator)) {
