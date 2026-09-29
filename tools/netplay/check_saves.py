@@ -11,7 +11,13 @@ mirror-events.txt must carry the SAVE_RESULT of that checkpoint:
   3. <join-run>/mirror-events.txt contains `FRAME <f> SAVE_RESULT <gen>
      <sha256 of that .sav>`, parsed with the root M4c reference parser
      randomizer/netplay_mirror.py:parse_mirror_line (imported read-only from
-     --root-m4c), and every line of the file parses.
+     --root-m4c), and every line of the file parses;
+  4. (fix round 1, X9) the file also passes the root runner's ingest rules
+     (randomizer/runner.py MirrorRun.poll): ASCII, newline terminated, no
+     blank line, frames never decrease (exact duplicate lines excepted).
+
+--root-m4c is required unless the default root checkout exists; there is no
+silent fallback to another copy of the parser.
 
 Exit 0 when all hold, 1 otherwise. Read-only: it never writes anything.
 
@@ -26,7 +32,6 @@ import sys
 from pathlib import Path
 
 DEFAULT_ROOT_M4C = Path("C:/Users/alari/pikmin-randomizer/output/root-np-m4c")
-FALLBACK_ROOT_M4C = Path("C:/Users/alari/pikmin-randomizer/output/netplay-wave/scratch/m4b2/root-np-m4c")
 SAV = re.compile(r"^\d{20}\.sav$")
 
 
@@ -51,12 +56,44 @@ def card_files(campaign):
 
 
 def load_parser(root):
-    for cand in (root, FALLBACK_ROOT_M4C):
-        if cand is not None and (Path(cand) / "randomizer" / "netplay_mirror.py").is_file():
-            sys.path.insert(0, str(Path(cand)))
-            from randomizer.netplay_mirror import parse_mirror_line  # noqa: E402
-            return parse_mirror_line, Path(cand)
-    raise SystemExit("check_saves: cannot find randomizer/netplay_mirror.py (pass --root-m4c)")
+    if root is None:
+        if not (DEFAULT_ROOT_M4C / "randomizer" / "netplay_mirror.py").is_file():
+            raise SystemExit(f"check_saves: {DEFAULT_ROOT_M4C} has no randomizer/netplay_mirror.py; pass --root-m4c")
+        root = DEFAULT_ROOT_M4C
+    if not (Path(root) / "randomizer" / "netplay_mirror.py").is_file():
+        raise SystemExit(f"check_saves: {root} has no randomizer/netplay_mirror.py")
+    sys.path.insert(0, str(Path(root)))
+    from randomizer.netplay_mirror import parse_mirror_line  # noqa: E402
+    return parse_mirror_line, Path(root)
+
+
+def ingest_rules(raw):
+    """The root runner's stream rules (runner.py MirrorRun.poll) over the whole
+    file; returns a list of violations (empty = ok). Line grammar is checked
+    separately with parse_mirror_line."""
+    bad = []
+    try:
+        text = raw.decode("ascii")
+    except UnicodeDecodeError:
+        return ["mirror event file is not ASCII"]
+    if text and not text.endswith("\n"):
+        bad.append("mirror event batch is not newline terminated")
+    lines = text.split("\n")[:-1] if text.endswith("\n") else text.split("\n")
+    if any(ln == "" for ln in lines):
+        bad.append("invalid mirror event: blank line")
+    running, seen = -1, set()
+    for ln in lines:
+        if ln in seen or not ln.startswith("FRAME "):
+            continue
+        seen.add(ln)
+        try:
+            frame = int(ln.split(" ")[1])
+        except (IndexError, ValueError):
+            continue
+        if frame < running:
+            bad.append(f"mirror frame retracted: {ln}")
+        running = max(running, frame)
+    return bad
 
 
 def main(argv=None):
@@ -64,8 +101,9 @@ def main(argv=None):
     p.add_argument("--host-campaign", type=Path, required=True)
     p.add_argument("--join-campaign", type=Path, required=True)
     p.add_argument("--join-run", type=Path, required=True, help="the client's run dir (mirror-events.txt)")
-    p.add_argument("--root-m4c", type=Path, default=DEFAULT_ROOT_M4C,
-                   help="root checkout (or read-only extraction) holding randomizer/netplay_mirror.py")
+    p.add_argument("--root-m4c", type=Path, default=None,
+                   help="root checkout (or read-only extraction) holding randomizer/netplay_mirror.py "
+                        f"(required unless {DEFAULT_ROOT_M4C} exists)")
     a = p.parse_args(argv)
     ok = True
 
@@ -102,6 +140,12 @@ def main(argv=None):
     except OSError:
         print(f"check_saves: FAIL: no {mirror}")
         return 1
+    violations = ingest_rules(raw)
+    for v in violations:
+        print(f"check_saves: FAIL: root ingest rule: {v}")
+    print(f"check_saves: root ingest rules (ASCII, newline terminated, no blank line, frames never decrease): "
+          f"{'ok' if not violations else 'VIOLATED'}")
+    ok = ok and not violations
     lines = raw.split(b"\n")
     if lines and lines[-1] == b"":
         lines.pop()

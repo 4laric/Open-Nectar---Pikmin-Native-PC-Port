@@ -146,9 +146,11 @@ plugged in later is also picked up). Close both game windows (or press Ctrl+C in
 ## Seeds with P2 enemies
 
 A seed with `ENEMY_P2` (or any `P2_...` word) reads extra per-run files from
-the working directory: the P2 sidecars (`p2-*.txt`, `sarai-*.txt`, next to
+the working directory: the P2 sidecars (`p2-*.txt`, `sarai-*.txt`,
+`demon-*.txt`, `damagumo-*.json` and `p2_bigtreasure_events.txt`, next to
 the seed's `bootstrap.txt`) and a P2 `assets\` overlay (the room models in
-`assets\dataDir\courses\pikmin2room\`, about 35 MB, plus `assets\p2-*.txt`).
+`assets\dataDir\courses\pikmin2room\`, about 35 MB, the stage files in
+`assets\dataDir\stages\`, `assets\config.ini` and `assets\p2-*.txt`).
 For such a seed the launcher:
 
 - makes `<run folder>\play\` the working directory before anything loads,
@@ -158,9 +160,15 @@ For such a seed the launcher:
 - copies the host's sidecars into its `play\`, and sends them to the joiner
   before the session starts (the joiner's `play\` receives them);
 - never sends the overlay: it is game content. Each player brings their own
-  copy, and the handshake compares a digest of both (`handshake refused:
+  copy (a full copy, or one with junctioned folders: only the content
+  counts), and the handshake compares a digest of both (`handshake refused:
   p2assets` when they differ). The sidecars are checked against the host's
   digest too (`handshake refused: sidecars`).
+
+With the low-level switches the joiner's working folder receives the host's
+sidecars the same way; its own sidecar files that differ are moved to
+`sidecar-set-aside-<time>\` (never deleted). The host's P2 receipt ledgers
+(`p2-*-receipts.txt`) are sidecars too, so they travel with the set.
 
 `p2-binding-receipt.json`, the `*-install.json` files and
 `overlay-manifest.json` are not needed at run time and are not sent.
@@ -171,8 +179,13 @@ At the end of a day both games save at the same moment. The host writes the
 real campaign checkpoint (`session\campaign\<generation>.sav`) and the
 card; the joiner writes the same files as a mirror; the two games then agree
 on the host's result before either continues (a `[netplay] save barrier`
-line in both logs). If the joiner has not heard from the host within 10 s,
-the day is abandoned as it would be without netplay (exit 6).
+line in both logs). The joiner's mirror is written as `<generation>.sav.pending`
+and only becomes `<generation>.sav` once the host reports success. If either
+game has not heard from the other within 10 s, the day is abandoned as it
+would be without netplay (exit 6); if the two saves differ, both games stop
+with exit 5 (a desync). Either way the joiner renames its unconfirmed mirror
+to `*.sav.unconfirmed` (never deleted), so the next session sees the last
+day both games agreed on and simply receives the host's checkpoint.
 
 When a session starts, the two games compare their newest checkpoints:
 the same checkpoint on both sides plays on; a joiner that is behind (or has
@@ -186,6 +199,12 @@ The one-command launcher (`--netplay-host-ice`) starts every session in a
 new run folder, so it always starts a new campaign today; resuming across
 evenings runs through the pair tools (`tools/netplay/run_pair.py
 --run-name ... --token ...`), which keep both campaign folders.
+
+Every session needs a new run folder on both sides (the game refuses a run
+folder that was already used), and the joiner's `mirror-events.txt` starts
+again at frame 0 in each one. A runner that ingests the joiner's mirror must
+therefore treat each session as its own run (a new peer token and run
+folder), not append the second evening to the first evening's run.
 
 ## Troubleshooting
 

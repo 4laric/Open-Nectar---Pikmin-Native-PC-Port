@@ -21,6 +21,12 @@ Expectations (--expect):
   refuse      both exit 4 with a '[netplay] handshake refused:' line
   disconnect  joiner is killed mid-session; host exits 0 with a
               '[netplay] disconnected:' line
+  desync      (B2 fix round 1) a day-end save barrier desync: both exit 5,
+              both with a '[netplay] save barrier: ... mismatch' line
+  barrier-timeout  (B2 fix round 1, with --env-host
+              PIKMIN_NETPLAY_TEST_HOST_DIE_AT_BARRIER=1) the host exits 7 at
+              its day-end save; the joiner exits 6 with '[netplay] save
+              barrier timeout' and retracts its pending checkpoint
   --expect-hold N (M4 lane B1) implies sync and additionally requires
               exactly N '[netplay] hold at' / 'held at' / 'resume at'
               triples, identical on both peers (the per-peer held_ms is
@@ -267,6 +273,9 @@ SCRUB_KEYS = (
     "PIKMIN_NETPLAY_TEST_DEATHLINK_AS_ORDINARY",
     "PIKMIN_NETPLAY_TEST_HOST_SAVE_FAIL",
     "PIKMIN_NETPLAY_TEST_TAMPER_SIDECARS",
+    "PIKMIN_NETPLAY_TEST_BARRIER_CORRUPT",
+    "PIKMIN_NETPLAY_TEST_HOST_DIE_AT_BARRIER",
+    "PIKMIN_NETPLAY_TEST_BULK_DROP_SAVE",
     "NECTAR_CARD_DEBUG",
 )
 
@@ -417,7 +426,8 @@ def main(argv=None):
                    help="m8 positive test: join bootstrap differs from the host only in "
                         "SESSION (same FINGERPRINT); the handshake must succeed")
     p.add_argument("--exe-args", nargs="*", default=[])
-    p.add_argument("--expect", choices=("sync", "refuse", "disconnect"), default="sync")
+    p.add_argument("--expect", choices=("sync", "refuse", "disconnect", "desync", "barrier-timeout"),
+                   default="sync")
     p.add_argument("--kill-joiner-after", type=float, default=20.0,
                    help="disconnect test: seconds after start to kill the joiner")
     p.add_argument("--flarlic", type=int, default=10,
@@ -808,7 +818,8 @@ def main(argv=None):
     b2_needles = ("[netplay] checkpoint", "[netplay] transfer", "[netplay] save barrier",
                   "CAMPAIGN_RESUMED", "CAMPAIGN_SAVED", "[netplay] local campaign checkpoint is stale",
                   "[netplay] set aside", "[netplay] local checkpoint:", "reseed day=", "START_STAGE",
-                  "handshake refused")
+                  "handshake refused", "[netplay] bulk impairment", "[netplay] test:", "[netplay] desync",
+                  "[netplay] p2 ", "[netplay] sidecars")
     for who, log, hashes in (("host", host_log, host_hash), ("join", join_log, join_hash)):
         try:
             text = Path(log).read_text(errors="replace").splitlines()
@@ -878,6 +889,24 @@ def main(argv=None):
             ok = False
         if not dis_host:
             print("run_pair: FAIL: expected a disconnected line on the host")
+            ok = False
+    elif a.expect == "desync":
+        # B2 fix round 1 (C1): a barrier desync must end BOTH peers with exit 5.
+        if rc_host != 5 or rc_join != 5:
+            print(f"run_pair: FAIL: expected both exit 5, got {rc_host}/{rc_join}")
+            ok = False
+        for who, log in (("host", host_log), ("join", join_log)):
+            if not [ln for ln in grep(log, "[netplay] save barrier:") if "mismatch" in ln]:
+                print(f"run_pair: FAIL: no save barrier mismatch line on the {who}")
+                ok = False
+    elif a.expect == "barrier-timeout":
+        # B2 fix round 1 (C2): the host dies at its day-end save (test knob,
+        # exit 7); the joiner's barrier times out (exit 6) and retracts.
+        if rc_host != 7 or rc_join != 6:
+            print(f"run_pair: FAIL: expected host exit 7 and joiner exit 6, got {rc_host}/{rc_join}")
+            ok = False
+        if not grep(join_log, "[netplay] save barrier timeout"):
+            print("run_pair: FAIL: no save barrier timeout line on the joiner")
             ok = False
     print(f"run_pair: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
