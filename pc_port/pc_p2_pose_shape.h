@@ -1,5 +1,7 @@
 #pragma once
 #include "pc_p2_pose_blend.h"
+#include "pc_p2_pose_motion.h"
+#include <string>
 #include "Shape.h"
 #include "Joint.h"
 #include "Material.h"
@@ -22,5 +24,39 @@ inline bool apply(Shape& shape,const Pose& a,const Pose& b,float weight,Pose& sc
     for(size_t i=0;i<scratch.normals.size();++i){const auto v=scratch.normals[i];shape.mNormalList[i].set(v.x,v.y,v.z);}
     BoundBox bounds(shape.mVertexList[0],shape.mVertexList[0]);for(int i=1;i<shape.mVertexCount;++i)bounds.expandBound(shape.mVertexList[i]);
     shape.mCourseExtents=bounds;shape.mJointList[0].mBounds=bounds;return true;
+}
+// Write one pose into a private single-joint Shape and refresh its bounds.
+inline bool write(Shape& shape,const Pose& pose){
+    if(shape.mJointCount!=1||shape.mVertexCount<1||shape.mVertexCount!=int(pose.positions.size())||shape.mNormalCount!=int(pose.normals.size()))return false;
+    for(size_t i=0;i<pose.positions.size();++i){const auto v=pose.positions[i];shape.mVertexList[i].set(v.x,v.y,v.z);}
+    for(size_t i=0;i<pose.normals.size();++i){const auto v=pose.normals[i];shape.mNormalList[i].set(v.x,v.y,v.z);}
+    BoundBox bounds(shape.mVertexList[0],shape.mVertexList[0]);for(int i=1;i<shape.mVertexCount;++i)bounds.expandBound(shape.mVertexList[i]);
+    shape.mCourseExtents=bounds;shape.mJointList[0].mBounds=bounds;return true;
+}
+// Per-actor presentation of a decoded pose bank (#895): the engine-free
+// p2motion::Presenter picks the lerped pose (with crossfade on clip change and
+// across a discontinuous loop seam); this writes it into the actor's private
+// Shape. Fade time and staleness advance from the owning module's simulation
+// update through Track::advance.
+struct Track {
+    Shape* shape=nullptr;
+    p2motion::Presenter view;
+    void size(const Pose& base){
+        view.scratch.positions.resize(base.positions.size());view.scratch.normals.resize(base.normals.size());
+        view.mixed.positions.resize(base.positions.size());view.mixed.normals.resize(base.normals.size());
+    }
+    void advance(float seconds){view.advance(seconds);}
+};
+struct Presented { bool ok=false,crossfadeStarted=false,wrapBlend=false; Interval span; };
+template<class PoseAt>
+inline Presented present(Track& track,const std::string& clip,std::size_t count,PoseAt poseAt,const std::vector<int>& frames,
+                         float sourceFrame,const p2motion::Tunables& tune,bool seamOk=true){
+    Presented out;
+    if(!track.shape)return out;
+    const p2motion::Shown shown=track.view.select(clip,count,poseAt,frames,sourceFrame,seamOk,tune);
+    out.span=shown.span;
+    if(!shown.pose||!write(*track.shape,*shown.pose))return out;
+    track.view.commit(*shown.pose);
+    out.crossfadeStarted=shown.crossfadeStarted;out.wrapBlend=shown.wrapBlend;out.ok=true;return out;
 }
 }

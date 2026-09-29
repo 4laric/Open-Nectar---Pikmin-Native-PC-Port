@@ -551,6 +551,11 @@ void pc_p2_armor_setup() {
                         clip.sampled = p2armorevents::makeClip(row);
                         clips[name] = clip;
                     }
+                } else if (token == "frames") {
+                    // P2_BANK_FRAMES_1 trailer (#895): per-pose source frames,
+                    // consumed by the batch draw paths; skip its list token here.
+                    std::string framesList;
+                    bank >> framesList;
                 } else {
                     break;
                 }
