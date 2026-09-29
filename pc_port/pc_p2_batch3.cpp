@@ -16,6 +16,7 @@
 // damage receiver, reward or collision semantics are implemented here; those
 // stay tracked on the family issues and #186.
 #include "pc_p2_batch3.h"
+#include "Pellet.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_setup_failsafe.h"
 #include "pc_randomizer.h"
@@ -851,6 +852,18 @@ bool pc_p2_batch3_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     }
     if (!name) name = firstClip(bank, waitClips, int(sizeof(waitClips) / sizeof(waitClips[0])));
     if (!name) return false;
+    if (corpse && entry->second == "snagret|DangoMushi") {
+        // #897 carry check: the corpse draw matrix must follow the pellet.
+        static unsigned corpseDraws = 0;
+        if (corpseDraws++ % 60u == 0u) {
+            // matrix is the pellet's model-view matrix (its translation is
+            // camera-relative); the pellet's own world position is beside it.
+            const Vector3f at = actor->mPellet ? actor->mPellet->mSRT.t : Vector3f(0.0f, 0.0f, 0.0f);
+            std::printf("P2_DANGOMUSHI_CORPSE_DRAW draws=%u pellet=%d px=%.2f py=%.2f pz=%.2f "
+                        "view_z=%.2f\n", corpseDraws, int(actor->mPellet != nullptr), at.x, at.y, at.z,
+                        matrix.mMtx[2][3]);
+        }
+    }
     const auto& poses = bank.clips.at(name);
     if (poses.empty()) return false;
     const int frames = actor->mTekiAnimator->getFrameCount();

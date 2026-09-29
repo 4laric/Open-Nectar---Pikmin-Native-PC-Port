@@ -58,6 +58,19 @@ int pc_p2_boss_arena_host(Generator* generator)
     return (host >= TEKI_START && host < TEKI_TypeCount) ? host : -1;
 }
 
+void pc_p2_reserve_source_extras(Generator* generator)
+{
+    const unsigned source = boundSource(generator, nullptr);
+    if (source == 94 && tekiMgr && !tekiMgr->mUsingType[TEKI_Iwagon]) {
+        // Without this the rain Rocks/Egg are simulated but never drawn on a
+        // stage whose own generators hold no Iwagon (the impact_goolix arena).
+        tekiMgr->mUsingType[TEKI_Iwagon] = true;
+        std::printf("P2_DANGOMUSHI_RAIN_MESH_RESERVED generator=%u type=%d\n",
+                    pc_randomizer_generator_id(generator), int(TEKI_Iwagon));
+        std::fflush(stdout);
+    }
+}
+
 bool pc_p2_boss_arena_suppressed(Generator* generator)
 {
     if (!generator || !pc_randomizer_p2_bridge()) return false;

@@ -50,6 +50,8 @@
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_kogane.h"
 #include "pc_p2_chappy.h"
+#include "pc_p2_dangomushi.h"
+#include "WorkObject.h"
 #include "pc_randomizer.h"
 #include "Controller.h"
 
@@ -139,6 +141,9 @@ struct Engagement {
     int initialNectar = 0;
     float lastX = 0.0f;
     float lastZ = 0.0f;
+    bool homeValid = false; // #897 roller home (first sighting, still in Stay)
+    float homeX = 0.0f;
+    float homeZ = 0.0f;
     bool lastAlive = false;
     bool carryLatch = false;
     bool deadLatch = false; // generic death observed (any species, gap 5)
@@ -184,6 +189,10 @@ std::vector<std::pair<float, float>> sDetourHist;
 long long sTicks = 0;
 std::chrono::steady_clock::time_point sFpsStart = std::chrono::steady_clock::now();
 bool sFpsLogged = false;
+int sPowerRestocks = 0; // #897 power resupply restocks spent this process
+bool sPowerRestockVisit = false; // #897 one restock per Onion visit
+int sTextTick = 0; // #897 tutorial-text A tap clock
+bool sTextOpen = false; // #897 tutorial text window seen open (edge log)
 bool sPowerLogged = false; // bot-v4: AUTOPLAY_POWER is logged exactly once per process
 bool sPowerStocked = false; // bot-v4b: power-mode Onion stock runs once per process
 float sPowerSeconds = 0.0f; // bot-v6: game-time seconds since the first live power tick
@@ -236,8 +245,15 @@ bool bfsPath(int selfIdx, int tgtIdx, std::vector<std::pair<float, float>>& out)
     return !out.empty();
 }
 
-// bot-v3: k nearest open land waypoints to (x,z), closest first.
-std::vector<int> nearestWpIdx(float x, float z, int k)
+// #897: height of the plan start / goal for nearestWpIdx (NAN = XZ only).
+float sPlanStartY = NAN;
+float sPlanGoalY = NAN;
+
+// bot-v3: k nearest open land waypoints to (x,z), closest first. #897: with
+// a finite y the score adds (3*dy)^2, so a waypoint on the ledge above (the
+// Impact Site upper tier, y=20, 90 u from a captain at y=-30) never beats
+// the reachable one on his own tier (ar3/ar4: 6 STUCK under the ledge).
+std::vector<int> nearestWpIdx(float x, float z, int k, float y = NAN)
 {
     std::vector<int> out;
     if (!routeMgr) return out;
@@ -255,11 +271,37 @@ std::vector<int> nearestWpIdx(float x, float z, int k)
         WayPoint* wp = routeMgr->getWayPoint(handle, i);
         if (!wp || !wp->mIsOpen || wp->inWater()) continue;
         const float dx = wp->mPosition.x - pos.x, dz = wp->mPosition.z - pos.z;
-        scored.push_back({ dx * dx + dz * dz, i });
+        float score = dx * dx + dz * dz;
+        if (std::isfinite(y)) {
+            const float dy = 3.0f * (wp->mPosition.y - y);
+            score += dy * dy;
+        }
+        scored.push_back({ score, i });
     }
     std::sort(scored.begin(), scored.end(), [](const Scored& a, const Scored& b) { return a.d < b.d; });
     for (int i = 0; i < int(scored.size()) && int(out.size()) < k; ++i) out.push_back(scored[i].idx);
     return out;
+}
+
+// #897: reach radius for a detour leg = the route waypoint's own radius
+// (clamped 30..80) when the leg is a waypoint; 80 for sidesteps. The flat 80
+// cut the Impact Site ramp corners (waypoints r=19..23) into the walls.
+float legReachRadius(float x, float z)
+{
+    if (!routeMgr) return 80.0f;
+    const u32 handle = 'test';
+    const int n = routeMgr->getNumWayPoints(handle);
+    for (int i = 0; i < n && i < 4096; ++i) {
+        WayPoint* wp = routeMgr->getWayPoint(handle, i);
+        if (!wp) continue;
+        if (std::fabs(wp->mPosition.x - x) < 1.0f && std::fabs(wp->mPosition.z - z) < 1.0f) {
+            float r = wp->mRadius;
+            if (r < 30.0f) r = 30.0f;
+            if (r > 80.0f) r = 80.0f;
+            return r;
+        }
+    }
+    return 80.0f;
 }
 
 // #901: route ends on the right floor first. A boss arena on a plateau (FoH
@@ -371,7 +413,10 @@ void planDetour(float naviX, float naviY, float naviZ, float tgtX, float tgtZ)
         failReason = "no_routemgr";
     } else {
         const std::vector<int> starts = levelWpIdx(naviX, naviY, naviZ, 3);
-        const std::vector<int> goals = goalWpIdx(tgtX, tgtZ, 3);
+        // #897: a live actor height (sPlanGoalY) picks the goal's floor; else
+        // the map height under the target (#901).
+        const std::vector<int> goals = std::isfinite(sPlanGoalY) ? levelWpIdx(tgtX, sPlanGoalY, tgtZ, 3)
+                                                                  : goalWpIdx(tgtX, tgtZ, 3);
         PathFinder* finder = routeMgr->getPathFinder('test');
         if (starts.empty()) failReason = "no_start_wp";
         else if (goals.empty()) failReason = "no_goal_wp";
@@ -500,6 +545,31 @@ void pc_p2_autoplay_tick(void)
         return;
     }
 
+    // #897: a tutorial / part-discovery text window (createTutorialWindow,
+    // gameflow.mIsTutorialTextActive) freezes the field until A or B is
+    // clicked (ogScrMessageMgr keyClick). The Brain must not count that
+    // time as a stuck approach (a2-impact: tu_tx window at the Goolix
+    // approach -> 6 STUCK -> target_unreachable). Tap A (4 ticks down, 8 up:
+    // keyClick needs the edge) and hold the Brain until it closes. Normal
+    // pad input only.
+    if (gameflow.mIsTutorialTextActive) {
+        if (!sTextOpen) {
+            sTextOpen = true;
+            std::printf("AUTOPLAY_TEXT_DISMISS open=1 navi=(%.0f,%.0f) bot-driven\n",
+                        navi->getPosition().x, navi->getPosition().z);
+            std::fflush(stdout);
+        }
+        const bool down = (sTextTick++ % 12) < 4;
+        pc_p2_input_script_set(1, down ? unsigned(p2autoplay::PadA) : 0u, 0, 0);
+        return;
+    }
+    if (sTextOpen) {
+        sTextOpen = false;
+        sTextTick = 0;
+        std::printf("AUTOPLAY_TEXT_DISMISS open=0 bot-driven\n");
+        std::fflush(stdout);
+    }
+
     const float dt = gsys ? gsys->getFrameTime() : 0.016f;
     const float naviX = navi->getPosition().x;
     const float naviY = navi->getPosition().y;
@@ -619,6 +689,94 @@ void pc_p2_autoplay_tick(void)
             }
             sPowerStocked = true;
         }
+    }
+
+    // #897 power resupply (TEST-ONLY, power mode only): the Brain walked the
+    // captain back to the Onion after a crush (wantsPowerRestock). Top the
+    // start-colour Onion up again through the SAME bookkeeping as the one-time
+    // power stock above and queue it out through the normal exit path, once
+    // per visit, at most powerRestockMax times per process.
+    if (!sBrain.wantsPowerRestock()) sPowerRestockVisit = false;
+    if (powerMode && sPowerStocked && playerState && sBrain.wantsPowerRestock() && !sPowerRestockVisit
+        && sPowerRestocks < p2autoplay::Config().powerRestockMax) {
+        sPowerRestockVisit = true;
+        int stockColor = pc_randomizer_enabled() ? pc_randomizer_start_color() : Red;
+        if (stockColor < PikiMinColor || stockColor > PikiMaxColor) stockColor = Red;
+        GoalItem* stockOnion = itemMgr ? itemMgr->getContainer(stockColor) : nullptr;
+        if (stockOnion) {
+            const int stored = stockOnion->getTotalStorePikis();
+            const int delta = p2autoplay::powerStockDelta(true, stored, alive, int(GameStat::allPikis),
+                                                          pc_settings_get_piki_limit());
+            if (delta > 0) {
+                pikiInfMgr.mPikiCounts[stockColor][Leaf] += delta;
+                stockOnion->mHeldPikis[Leaf] += (u32)delta;
+                GameStat::containerPikis.add(stockColor, delta);
+                playerState->mTotalBornPikiNum += delta;
+                playerState->mLivingPikiNum += delta;
+                playerState->mTotalPluckedPikiCount += delta;
+                GameStat::update();
+            }
+            const int total = stockOnion->getTotalStorePikis();
+            if (total > 0) stockOnion->exitPikis(total);
+            ++sPowerRestocks;
+            std::printf("AUTOPLAY_POWER_RESTOCK n=%d color=%d added=%d exit=%d field=%d bot-driven\n",
+                        sPowerRestocks, stockColor, delta > 0 ? delta : 0, total, alive);
+            std::fflush(stdout);
+        }
+    }
+
+    // #897 one-time map dump (read-only diagnostics): route waypoints with
+    // links/open/water flags and every HinderRock/Bridge work object, so a
+    // STUCK can be read against the real graph and obstacles.
+    static bool sMapDumped = false;
+    static int sHinderFinished = -1; // #897 finished-count at the last work dump
+    if (sMapDumped && workObjectMgr) {
+        int finished = 0;
+        Iterator fit(workObjectMgr);
+        CI_LOOP(fit)
+        {
+            WorkObject* w = static_cast<WorkObject*>(*fit);
+            if (w && w->isHinderRock() && w->isFinished()) ++finished;
+        }
+        if (finished != sHinderFinished) {
+            sHinderFinished = finished;
+            Iterator wit(workObjectMgr);
+            CI_LOOP(wit)
+            {
+                WorkObject* w = static_cast<WorkObject*>(*wit);
+                if (!w || !w->isHinderRock()) continue;
+                std::printf("AUTOPLAY_MAP_WORK kind=hinder x=%.0f y=%.0f z=%.0f finished=%d navi=(%.0f,%.0f,%.0f) bot-driven\n",
+                            w->getPosition().x, w->getPosition().y, w->getPosition().z, w->isFinished() ? 1 : 0,
+                            navi->getPosition().x, navi->getPosition().y, navi->getPosition().z);
+            }
+            std::fflush(stdout);
+        }
+    }
+    if (!sMapDumped && routeMgr && workObjectMgr) {
+        sMapDumped = true;
+        const u32 handle = 'test';
+        const int n = routeMgr->getNumWayPoints(handle);
+        for (int i = 0; i < n && i < 4096; ++i) {
+            WayPoint* wp = routeMgr->getWayPoint(handle, i);
+            if (!wp) continue;
+            char links[96] = {0};
+            int off = 0;
+            for (int k = 0; k < wp->mLinkCount && k < 8 && off < 88; ++k)
+                off += std::snprintf(links + off, sizeof(links) - size_t(off), "%s%d", k ? "," : "", wp->mLinkIndices[k]);
+            std::printf("AUTOPLAY_MAP_WP idx=%d x=%.0f y=%.0f z=%.0f r=%.0f open=%d water=%d links=%s bot-driven\n",
+                        i, wp->mPosition.x, wp->mPosition.y, wp->mPosition.z, wp->mRadius, wp->mIsOpen ? 1 : 0,
+                        wp->inWater() ? 1 : 0, links);
+        }
+        Iterator wit(workObjectMgr);
+        CI_LOOP(wit)
+        {
+            WorkObject* w = static_cast<WorkObject*>(*wit);
+            if (!w) continue;
+            std::printf("AUTOPLAY_MAP_WORK kind=%s x=%.0f y=%.0f z=%.0f finished=%d bot-driven\n",
+                        w->isHinderRock() ? "hinder" : (w->isBridge() ? "bridge" : "other"),
+                        w->getPosition().x, w->getPosition().y, w->getPosition().z, w->isFinished() ? 1 : 0);
+        }
+        std::fflush(stdout);
     }
 
     // --- Nearest stocked Onion (read-only) ---
@@ -983,6 +1141,50 @@ void pc_p2_autoplay_tick(void)
     // low-health guard (read-only).
     senses.naviHpValid = true;
     senses.naviHp = navi->mHealth;
+    senses.powerRestocks = sPowerRestocks;
+    // #897 push obstacle (read-only): nearest unfinished HinderRock within
+    // 400 of the captain and ahead of where the Brain is steering (the
+    // current waypoint leg, else the target).
+    if (workObjectMgr && pick && sBrain.current() == p2autoplay::State::Approach) {
+        float aheadX = pick->x, aheadZ = pick->z;
+        if (!sPath.empty() && sPathIdx < sPath.size()) {
+            aheadX = sPath[sPathIdx].first;
+            aheadZ = sPath[sPathIdx].second;
+        }
+        const float hx = aheadX - naviX, hz = aheadZ - naviZ;
+        const float hl = std::sqrt(hx * hx + hz * hz);
+        float best = 400.0f;
+        Iterator wit(workObjectMgr);
+        CI_LOOP(wit)
+        {
+            WorkObject* w = static_cast<WorkObject*>(*wit);
+            if (!w || !w->isHinderRock() || w->isFinished()) continue;
+            const float ox = w->getPosition().x, oz = w->getPosition().z;
+            const float d = distXZ(naviX, naviZ, ox, oz);
+            if (d >= best) continue;
+            const float dot = hl > 1.0f && d > 1.0f ? ((ox - naviX) * hx + (oz - naviZ) * hz) / (hl * d) : 1.0f;
+            if (dot < 0.2f && d > 200.0f) continue;
+            best = d;
+            senses.pushValid = true;
+            senses.pushX = ox;
+            senses.pushZ = oz;
+            senses.pushDist = d;
+            HinderRock* rock = static_cast<HinderRock*>(w);
+            senses.pushMoving = rock->isMoving();
+            // Near-face aim: extent of the box footprint toward the captain
+            // (max over its four corners) plus a margin.
+            const float ux = d > 1.0f ? (naviX - ox) / d : 0.0f, uz = d > 1.0f ? (naviZ - oz) / d : 1.0f;
+            float ext = 0.0f;
+            for (int v = 0; v < 4; ++v) {
+                const Vector3f c = rock->getVertex(v);
+                const float e = (c.x - ox) * ux + (c.z - oz) * uz;
+                if (e > ext && e < 400.0f) ext = e;
+            }
+            if (ext <= 1.0f) ext = 50.0f;
+            senses.pushAimX = ox + ux * (ext + 22.0f);
+            senses.pushAimZ = oz + uz * (ext + 22.0f);
+        }
+    }
     // Onion receipt for this token (bot-v2 gap 1): durable delivery-ledger
     // query, read-only. carried=1 in RESULT means this was seen.
     senses.receiptSeen = sEngage.token ? pc_randomizer_p2_receipt_seen(sEngage.token) : false;
@@ -1013,6 +1215,29 @@ void pc_p2_autoplay_tick(void)
             const char* kst = nullptr;
             senses.targetAttacking = pc_p2_chappy_probe(pick->actor, &kst, nullptr, nullptr) && kst
                 && std::strcmp(kst, "attack") == 0;
+        }
+        if (!sEngage.homeValid) {
+            sEngage.homeValid = true;
+            sEngage.homeX = pick->x;
+            sEngage.homeZ = pick->z;
+        }
+        senses.homeValid = sEngage.homeValid;
+        senses.homeX = sEngage.homeX;
+        senses.homeZ = sEngage.homeZ;
+        senses.targetDyValid = true;
+        senses.targetDy = pick->actor->getPosition().y - navi->getPosition().y;
+        // #897 roller stance: Crawbster FSM facts (read-only probe).
+        if (p2autoplay::isRollerStance(pick->source)) {
+            const char* dst = nullptr;
+            bool rolling = false, stickable = false;
+            float vx = 0.0f, vz = 0.0f;
+            if (pc_p2_dangomushi_probe(pick->actor, &dst, &rolling, &stickable, &vx, &vz)) {
+                senses.targetDormant = dst && std::strcmp(dst, "stay") == 0;
+                senses.targetRolling = rolling;
+                senses.targetVulnerable = stickable;
+                senses.targetVelX = vx;
+                senses.targetVelZ = vz;
+            }
         }
         // Flyer senses (bot-v2 gap 3): height above ground, grab latch.
         // Kurage's body is on the ground (visual float only), so its XZ body
@@ -1098,6 +1323,11 @@ void pc_p2_autoplay_tick(void)
     // Every STUCK replans (bot-v3: approach must use method=graph, never an
     // identical detour; Done holds near the Onion so it replans there too).
     if (sBrain.replanWanted()) {
+        sPlanStartY = navi->getPosition().y;
+        sPlanGoalY = NAN;
+        if (pick && pick->actor && sBrain.current() != p2autoplay::State::WithdrawSeek
+            && sBrain.current() != p2autoplay::State::Done)
+            sPlanGoalY = pick->actor->getPosition().y;
         if (sBrain.current() == p2autoplay::State::WithdrawSeek && hasOnion) {
             planDetour(naviX, naviY, naviZ, onionX, onionZ);
         } else if (sBrain.current() == p2autoplay::State::Done && hasOnion) {
@@ -1115,7 +1345,7 @@ void pc_p2_autoplay_tick(void)
         sLegTime += dt > 0.0f && dt <= 0.5f ? dt : 0.016f;
         float legX = sPath[sPathIdx].first, legZ = sPath[sPathIdx].second;
         while (sPathIdx < sPath.size()
-               && (distXZ(naviX, naviZ, legX, legZ) < 80.0f || sLegTime > 25.0f)) {
+               && (distXZ(naviX, naviZ, legX, legZ) < legReachRadius(legX, legZ) || sLegTime > 25.0f)) {
             ++sPathIdx;
             sLegTime = 0.0f;
             if (sPathIdx < sPath.size()) {
@@ -1241,7 +1471,7 @@ void pc_p2_autoplay_tick(void)
                                     || st == p2autoplay::State::Aftermath)
                 ? senses.targetDist
                 : onionDist;
-            std::printf("AUTOPLAY_NAVI state=%s navi=(%.0f,%.0f) tgt=(%.0f,%.0f) tdist=%.0f leg=(%.0f,%.0f) move=(%.2f,%.2f) stick=(%d,%d) btn=%u nstate=%d open=%d yaw=%.2f vel=%.1f mstick=%.2f hp=%.2f scat=%d field=%d navi_hp=%.1f cursor=(%.0f,%.0f) king_attack=%d bot-driven\n",
+            std::printf("AUTOPLAY_NAVI state=%s navi=(%.0f,%.0f) tgt=(%.0f,%.0f) tdist=%.0f leg=(%.0f,%.0f) move=(%.2f,%.2f) stick=(%d,%d) btn=%u nstate=%d open=%d yaw=%.2f vel=%.1f mstick=%.2f hp=%.2f scat=%d field=%d navi_hp=%.1f cursor=(%.0f,%.0f) king_attack=%d ny=%.0f bot-driven\n",
                         p2autoplay::stateName(st), naviX, naviZ,
                         (st == p2autoplay::State::Approach || st == p2autoplay::State::Attack
                          || st == p2autoplay::State::Aftermath)
@@ -1254,7 +1484,8 @@ void pc_p2_autoplay_tick(void)
                         showDist, legX, legZ, cmd.moveX, cmd.moveZ, stickX, stickY, buttons,
                         stateId, senses.containerOpen ? 1 : 0, yawDbg, velLen, stickLen,
                         senses.targetHealthFrac, senses.scattered ? 1 : 0, alive,
-                        navi->mHealth, senses.cursorX, senses.cursorZ, senses.targetAttacking ? 1 : 0);
+                        navi->mHealth, senses.cursorX, senses.cursorZ, senses.targetAttacking ? 1 : 0,
+                        navi->getPosition().y);
             std::fflush(stdout);
         }
     }

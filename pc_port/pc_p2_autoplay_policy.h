@@ -274,6 +274,17 @@ inline bool isFlyer(unsigned source) { return source == 23 || source == 57 || so
 // family keeps the unchanged contact steer.
 inline bool isKingStandoff(unsigned source) { return source == 53; }
 
+// #897 bot roll evade: Segmented Crawbster (DangoMushi, 94). The body is
+// invulnerable except inside the Turn stickable window (EB_Invulnerable,
+// DangoMushiState.cpp:530), its StateAttack ball roll presses every grounded
+// Pikmin it touches (PikiPressedState: lethal), and it only wakes from Stay
+// inside fp11 (150). A squad thrown at the ball outside the window therefore
+// only feeds the next roll (r5/r6: 93/93 and 77/77 pressed Pikmin died). The
+// roller stance wakes it, then holds a standoff with no throws, dodges the
+// roll sideways with the squad whistled tight, and throws everything only
+// while the Turn window is open. Only 94 has this stance.
+inline bool isRollerStance(unsigned source) { return source == 94; }
+
 // Numeric filter matches a generator key; otherwise a species name match.
 inline bool matchTarget(unsigned token, unsigned source, const char* species, const std::string& filter)
 {
@@ -379,7 +390,44 @@ struct Config {
     // beyond fp20 (130) and the tongue reach, so the King never attacks the
     // captain; he keeps throwing from there. 0 disables.
     float kingLowHp = 35.0f;
-    float lookStickScale = 0.24f;
+    float lookStickScale = 0.24f; // 0.24*127 = 30 bytes: |stick| 0.41 (look band), no MSTICK bits (> 32)
+    // #897 roller stance (isRollerStance). The standoff band sits around the
+    // source fp20 attack range (300) so the Crawbster keeps coming and rolls;
+    // the dodge starts while the ball is within rollerEvadeRange.
+    bool rollerStance = true;
+    float rollerStandMin = 180.0f; // ar8: a 280..400 band sat outside fp20 (300) and the Crawbster never rolled
+    float rollerStandMax = 270.0f;
+    float rollerWakeDist = 110.0f; // walk inside fp11 (150) to wake it from Stay
+    float rollerEvadeRange = 650.0f;
+    float rollerThrowGap = 0.10f; // Turn window: throw as fast as the pad allows (ar7: ~2/s left 13-15 hits per window)
+    float rollerThrowHold = 0.08f;
+    float rollerAttackTimeout = 900.0f; // a multi-cycle boss fight, not one throw burst
+    float rollerChaseDist = 1100.0f; // the ball rolls away far; only a real loss re-approaches
+    // Tier gate: the Impact arena sits on an upper tier (y=20) above the box
+    // corridor (y=-30). XZ-close across the ledge is not "in range" (ar6: the
+    // bot stood 400 below the ledge for minutes while the Crawbster could not
+    // reach it). Past this |dy| the roller keeps approaching over the route.
+    float rollerTierDy = 40.0f;
+    float rollerSeedStand = 130.0f; // corpse seeding: stop here and aim the cursor onto the corpse
+    float rollerHomeLeash = 200.0f; // back-off blends toward home past this XZ distance from it
+    // #897 power-mode resupply: the power squad is the whole stocked Onion,
+    // so after a crush the Onion is empty and the v4 resupply (needs stock)
+    // never fired (r5 field=1, r6 no resupply). Below this field count power
+    // mode walks back to the Onion, the driver restocks it through the same
+    // power stock path and exits it again (AUTOPLAY_POWER_RESTOCK), then the
+    // Brain re-selects. 0 disables.
+    int powerResupplyField = 25;
+    int powerRestockMax = 12;
+    // #897 push obstacles: a P1 HinderRock (the Impact Site cardboard box)
+    // blocks the only walk to the impact_goolix arena (ar1: 6 STUCK at the
+    // box -> target_unreachable). When the driver reports an unfinished box
+    // in front of the approach, close to obstaclePushDist and throw at it;
+    // thrown Pikmin push it (HinderRock::workable). Stuck windows do not count
+    // while pushing; obstaclePushMax bounds one approach stint.
+    float obstaclePushDist = 150.0f;
+    float obstaclePushGap = 0.35f;
+    float obstaclePushMax = 120.0f;
+    float obstacleRegroupEvery = 6.0f; // after a push: whistle pulse period while scattered
     // #901 part gather: stand in this XZ ring around a dropped ship part and
     // swarm (C-stick) the party onto it; formed Pikmin that touch a pellet
     // with a free slot start carrying it (piki.cpp collisionCallback
@@ -548,6 +596,34 @@ struct Senses {
     bool targetAttacking = false;
     bool naviHpValid = false;
     float naviHp = 0.0f;
+    // #897 roller stance senses (read-only DangoMushi probe; the driver sets
+    // them for source 94 only). Dormant = still in Stay (hidden).
+    bool targetDormant = false;
+    // #897 the roller's home (where it was first seen, in Stay): the arena
+    // floor. Evade/back-off lean toward it so the captain does not walk off
+    // the arena tier (ar7: an evade dropped him off the Impact ledge).
+    bool homeValid = false;
+    float homeX = 0.0f;
+    float homeZ = 0.0f;
+    bool targetDyValid = false; // #897 target height minus captain height is known
+    float targetDy = 0.0f;
+    bool targetRolling = false;
+    bool targetVulnerable = false;
+    float targetVelX = 0.0f;
+    float targetVelZ = 0.0f;
+    // #897 power resupply: restocks the driver has already spent this run.
+    int powerRestocks = 0;
+    // #897 push obstacle: nearest unfinished HinderRock in front of the
+    // approach (driver: within its scan range and ahead of the current leg).
+    bool pushValid = false;
+    float pushX = 0.0f;
+    float pushZ = 0.0f;
+    float pushDist = 1.0e30f;
+    bool pushMoving = false;
+    // Throw aim: a point just outside the face toward the captain (a throw
+    // at the centre lands ON the box and those Pikmin never push; ar2).
+    float pushAimX = 0.0f;
+    float pushAimZ = 0.0f;
 };
 
 // Pad output for one tick. moveX/moveZ is the desired world-space XZ move
@@ -641,6 +717,16 @@ public:
         kingEvading = false;
         kingEvadeTime = 0.0f;
         kingLowHpMode = false;
+        rollerMode = -1;
+        rollerWhistleTime = 0.0f;
+        powerResupplying = false;
+        powerAtOnion = false;
+        pushTime = 0.0f;
+        pushing = false;
+        pushedThisStint = false;
+        regroupClock = 0.0f;
+        legKnown = false;
+        tierReplanAsked = false;
         result = Result{};
         markers.clear();
         lastCommand = Command{};
@@ -650,6 +736,9 @@ public:
     State current() const { return state; }
     Command command() const { return lastCommand; }
     bool replanWanted() const { return wantReplan; }
+    // #897: the Brain is back at the Onion for a power-mode resupply and wants
+    // the driver to restock + exit it (driver: once per visit, bounded).
+    bool wantsPowerRestock() const { return state == State::WithdrawSeek && powerResupplying && powerAtOnion; }
     void clearReplan() { wantReplan = false; }
     std::vector<std::string> takeMarkers()
     {
@@ -738,6 +827,14 @@ private:
         kingEvading = false;
         kingEvadeTime = 0.0f;
         kingLowHpMode = false;
+        rollerMode = -1;
+        rollerWhistleTime = 0.0f;
+        powerAtOnion = false;
+        pushTime = 0.0f;
+        pushing = false;
+        regroupClock = 0.0f;
+        legKnown = false;
+        tierReplanAsked = false;
         emitState(in);
     }
     void holdIdle() { lastCommand = Command{}; }
@@ -778,6 +875,23 @@ private:
     // whistle). Shared by Seed (no grabs yet) and SeedGrow (short crew).
     void seedSteerThrow(const Senses& in)
     {
+        // #897 big corpse (Crawbster): walking onto it pins the captain at its
+        // centre with the cursor ~100 past the far edge, so throws land off
+        // the corpse (ar9: 11/20 carriers, carry_stalled). Inside
+        // rollerSeedStand stop, and slide the cursor onto the corpse with the
+        // look-band stick, then throw.
+        if (cfg.rollerStance && isRollerStance(in.targetSource) && in.targetToken != 0
+            && in.targetDist <= cfg.rollerSeedStand && in.cursorValid) {
+            const float ex = in.tgtX - in.cursorX, ez = in.tgtZ - in.cursorZ;
+            const float el = std::sqrt(ex * ex + ez * ez);
+            if (el > cfg.kingCursorTol) {
+                lastCommand.moveX = ex / el;
+                lastCommand.moveZ = ez / el;
+                lastCommand.stickScale = cfg.lookStickScale;
+            }
+            if (el <= cfg.kingCursorTol * 2.0f) pulseA(in, cfg.throwHold, cfg.throwGap);
+            return;
+        }
         if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
         else if (in.targetToken != 0) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
         if (in.targetDist <= cfg.throwRange && in.targetToken != 0) pulseA(in, cfg.throwHold, cfg.throwGap);
@@ -796,6 +910,10 @@ private:
             if (in.containerOpen) {
                 // v3 guard preserved: never steer while the UI is up.
                 enter(State::WithdrawMenu, in);
+                return;
+            }
+            if (powerResupplying) {
+                tickPowerResupply(dt, in);
                 return;
             }
             if (in.fieldPikmin >= cfg.powerWantSquad) {
@@ -1019,6 +1137,7 @@ private:
             }
             return;
         }
+        if (wantPowerResupply(in, "approach")) return;
         if (in.fieldPikmin < cfg.resupplyThreshold && in.hasOnion && in.onionStored > 0) {
             // bot-v4: squad eaten en route and the Onion still stocks:
             // disengage, walk back, withdraw more, then return.
@@ -1035,19 +1154,48 @@ private:
         observeReceipt(in);
         const float closeEnough = isFlyer(in.targetSource) ? cfg.throwRange : cfg.throwRange * 0.75f;
         const float need = in.targetRevealed ? closeEnough : 120.0f; // walk onto disguised Sokkuri
-        if (in.targetDist <= need) {
+        const bool otherTier = rollerOtherTier(in);
+        if (otherTier && !tierReplanAsked && !in.waypointLeg) {
+            // Straight at it only hits the ledge: ask for a route now.
+            tierReplanAsked = true;
+            wantReplan = true;
+            char buf[200];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_TIER token=%u dy=%.0f dist=%.0f replan=1 bot-driven",
+                          in.targetToken, in.targetDy, in.targetDist);
+            markers.emplace_back(buf);
+        }
+        if (in.targetDist <= need && !otherTier) {
             enter(State::Attack, in);
             return;
         }
+        if (tickObstaclePush(dt, in)) return;
         if (tickObstacle(dt, in)) return;
         // Progress / stuck tracking on straight-line distance, or on the
         // remaining route length while a route is active (#901: a
         // straight-line window threw away every long detour into a far arena).
+        // #897: with a detour leg but no route length, progress is measured
+        // to that leg (a real route may first lead AWAY from the target: the
+        // Impact Site ramp from the box corridor east to the upper tier), and
+        // reaching a new leg is progress in itself.
         const bool onRoute = in.waypointLeg && in.pathRemaining > 0.0f;
-        const float metric = onRoute ? in.pathRemaining : in.targetDist;
+        float metric = onRoute ? in.pathRemaining : in.targetDist;
         if (onRoute != approachOnRoute) {
             approachOnRoute = onRoute;
             stuckWindowDist = 1.0e30f; // re-anchor on the new metric
+        }
+        if (in.waypointLeg && !onRoute) {
+            const float lx = in.wpX - in.naviX, lz = in.wpZ - in.naviZ;
+            metric = std::sqrt(lx * lx + lz * lz);
+            if (!legKnown || std::fabs(in.wpX - legX) > 1.0f || std::fabs(in.wpZ - legZ) > 1.0f) {
+                if (legKnown) approachReplans = 0;
+                legKnown = true;
+                legX = in.wpX;
+                legZ = in.wpZ;
+                stuckWindowDist = 1.0e30f;
+            }
+        } else if (legKnown) {
+            legKnown = false;
+            stuckWindowDist = 1.0e30f;
         }
         if (stuckWindowDist >= 1.0e29f) {
             stuckWindowDist = metric;
@@ -1188,6 +1336,7 @@ private:
             enter(State::Aftermath, in); // whistle back, watch the corpse
             return;
         }
+        if (wantPowerResupply(in, "attack")) return;
         if (in.fieldPikmin < cfg.resupplyThreshold && in.hasOnion && in.onionStored > 0) {
             // bot-v4: squad eaten mid-fight and the Onion still stocks:
             // disengage, walk back, withdraw more, then return.
@@ -1213,7 +1362,9 @@ private:
         }
         const bool sarai = in.targetSource == 23;
         const bool kurage = in.targetSource == 57 || in.targetSource == 72;
-        const float limit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout;
+        const bool roller = cfg.rollerStance && isRollerStance(in.targetSource);
+        const float limit = roller ? cfg.rollerAttackTimeout
+            : (kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout);
         // Whistle first, then re-throw (bot-v4: real players do this):
         // - Sarai holding a Pikmin (targetGrabbing): whistle frees the grab;
         // - grabbed/thrown-off/burning squad (squadDistress: mouth-stuck,
@@ -1247,8 +1398,20 @@ private:
         }
         // bot-undamaged: fled/teleporting ground targets re-enter approach;
         // straight-line attack steer cannot cross the map.
-        if (in.targetDist > cfg.attackChaseDist) {
+        if (in.targetDist > (roller ? cfg.rollerChaseDist : cfg.attackChaseDist)) {
             enter(State::Approach, in);
+            return;
+        }
+        if (roller && rollerOtherTier(in) && !in.targetVulnerable) {
+            char buf[200];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_TIER token=%u dy=%.0f dist=%.0f state=attack bot-driven",
+                          in.targetToken, in.targetDy, in.targetDist);
+            markers.emplace_back(buf);
+            enter(State::Approach, in);
+            return;
+        }
+        if (roller) {
+            tickRollerStance(dt, in, limit);
             return;
         }
         if (whistleCooldown > 0.0f) whistleCooldown -= dt;
@@ -1779,8 +1942,298 @@ private:
                           int(result.carried), int(result.received), result.seconds);
         }
         markers.emplace_back(buf);
+        // The combat latches belong to the finished token. Left set, the next
+        // Select saw "token switch with latched combat scores" against a second
+        // live target of the same species and re-emitted this RESULT every
+        // tick (#897 Groink 78 re-run: 3,700 duplicate RESULT lines).
+        sawDamage = false;
+        sawKill = false;
+        sawReceipt = false;
         // The driver advances to the next target (or Done when none remain).
         enter(State::Select, in);
+    }
+
+    bool rollerOtherTier(const Senses& in) const
+    {
+        return cfg.rollerStance && isRollerStance(in.targetSource) && in.targetDyValid
+            && std::fabs(in.targetDy) > cfg.rollerTierDy;
+    }
+
+    // #897 push obstacle (Approach only). Returns true while it owns the pad.
+    bool tickObstaclePush(float dt, const Senses& in)
+    {
+        const bool want = in.pushValid && pushTime < cfg.obstaclePushMax;
+        if (!want) {
+            if (pushing) {
+                pushing = false;
+                char buf[200];
+                std::snprintf(buf, sizeof(buf), "AUTOPLAY_OBSTACLE phase=%s push_s=%.0f field=%d bot-driven",
+                              in.pushValid ? "budget" : "cleared", pushTime, in.fieldPikmin);
+                markers.emplace_back(buf);
+                stuckWindowDist = 1.0e30f; // fresh progress window after the push
+                approachReplans = 0;
+            }
+            if (pushedThisStint && in.scattered) {
+                // Pushers stay at the box: short whistle pulses on the way.
+                regroupClock += dt;
+                if (std::fmod(regroupClock, cfg.obstacleRegroupEvery) < 1.0f) {
+                    if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+                    else steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+                    lastCommand.buttons = PadB;
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (!pushing) {
+            pushing = true;
+            pushedThisStint = true;
+            char buf[200];
+            std::snprintf(buf, sizeof(buf),
+                          "AUTOPLAY_OBSTACLE phase=push at=(%.0f,%.0f) aim=(%.0f,%.0f) dist=%.0f field=%d bot-driven",
+                          in.pushX, in.pushZ, in.pushAimX, in.pushAimZ, in.pushDist,
+                          in.fieldPikmin);
+            markers.emplace_back(buf);
+        }
+        pushTime += dt;
+        stuckWindowStart = 0.0f; // pushing is progress, not a stuck window
+        steer(in.naviX, in.naviZ, in.pushX, in.pushZ);
+        if (in.pushDist <= cfg.obstaclePushDist) {
+            // In range: look-band stick (the captain stops and faces the
+            // cursor, which slides along the stick) moving the cursor onto the
+            // near-face aim point; throw once it is there.
+            lastCommand.moveX = 0.0f;
+            lastCommand.moveZ = 0.0f;
+            float cx = in.cursorX, cz = in.cursorZ;
+            if (!in.cursorValid) {
+                cx = in.pushAimX;
+                cz = in.pushAimZ;
+            }
+            const float ex = in.pushAimX - cx, ez = in.pushAimZ - cz;
+            const float el = std::sqrt(ex * ex + ez * ez);
+            if (el > cfg.kingCursorTol) {
+                lastCommand.moveX = ex / el;
+                lastCommand.moveZ = ez / el;
+                lastCommand.stickScale = cfg.lookStickScale;
+            }
+            if (el <= cfg.kingCursorTol * 2.0f) pulseA(in, cfg.throwHold, cfg.obstaclePushGap);
+        }
+        return true;
+    }
+
+    // #897 power-mode resupply trigger (Approach/Attack). Returns true when
+    // it switched state.
+    bool wantPowerResupply(const Senses& in, const char* from)
+    {
+        if (!isPowerEnabled() || cfg.powerResupplyField <= 0 || !in.hasOnion) return false;
+        if (in.fieldPikmin >= cfg.powerResupplyField) return false;
+        if (in.onionStored <= 0 && in.powerRestocks >= cfg.powerRestockMax) return false;
+        if (in.targetVulnerable) return false; // finish the open Turn window first
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+                      "AUTOPLAY_RESUPPLY field=%d stored=%d token=%u state=%s power=1 restocks=%d bot-driven",
+                      in.fieldPikmin, in.onionStored, in.targetToken, from, in.powerRestocks);
+        markers.emplace_back(buf);
+        powerResupplying = true;
+        enter(State::WithdrawSeek, in);
+        return true;
+    }
+
+    // #897 power resupply leg: walk back to the Onion (waypoint aware), stand
+    // at it while the driver restocks + exits the squad, whistle the new
+    // Pikmin in, then re-select once the field is back to powerWantSquad.
+    void tickPowerResupply(float dt, const Senses& in)
+    {
+        if (!in.hasOnion) {
+            powerResupplying = false;
+            enter(State::Select, in);
+            return;
+        }
+        const float at = cfg.arriveRadius * 2.0f;
+        if (!powerAtOnion && in.onionDist <= at) powerAtOnion = true;
+        if (!powerAtOnion) {
+            if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+            else steer(in.naviX, in.naviZ, in.onionX, in.onionZ);
+        } else {
+            // Short whistle pulses gather the exiting Pikmin into the party.
+            pressPhase += dt;
+            if (std::fmod(pressPhase, 2.0f) < 0.6f) lastCommand.buttons = PadB;
+        }
+        if (powerAtOnion && in.fieldPikmin >= cfg.powerWantSquad) {
+            powerResupplying = false;
+            enter(State::Select, in);
+            return;
+        }
+        if (powerAtOnion && in.onionStored <= 0 && in.powerRestocks >= cfg.powerRestockMax
+            && in.fieldPikmin > 0 && stateTime > 20.0f) {
+            powerResupplying = false; // restock budget spent: fight with what is out
+            enter(State::Select, in);
+            return;
+        }
+        // Stuck walking back: same replan contract as the normal path.
+        if (!powerAtOnion) {
+            if (stuckWindowDist >= 1.0e29f) {
+                stuckWindowDist = in.onionDist;
+                stuckWindowStart = 0.0f;
+                progressBest = in.onionDist;
+            }
+            if (in.onionDist < progressBest) progressBest = in.onionDist;
+            stuckWindowStart += dt;
+            if (stuckWindowStart >= cfg.stuckWindow) {
+                if (stuckWindowDist - progressBest < cfg.stuckMinProgress) {
+                    char buf[256];
+                    std::snprintf(buf, sizeof(buf),
+                                  "AUTOPLAY_STUCK state=withdraw_seek onion_dist=%.0f navi=(%.0f,%.0f) bot-driven",
+                                  in.onionDist, in.naviX, in.naviZ);
+                    markers.emplace_back(buf);
+                    wantReplan = true;
+                }
+                stuckWindowDist = progressBest;
+                stuckWindowStart = 0.0f;
+            }
+        }
+        if (stateTime >= cfg.withdrawTimeout * 2.0f) {
+            giveUp(in, "resupply_timeout");
+            powerResupplying = false;
+            enter(State::Select, in);
+        }
+    }
+
+    // #897 roller stance (see isRollerStance). Modes:
+    //   wake   - still in Stay: walk inside fp11 so it drops in;
+    //   punish - Turn stickable window open: close in and throw fast;
+    //   evade  - ball rolling within rollerEvadeRange: whistle held (squad
+    //            tight on the captain) and walk off the roll line, on the
+    //            captain's side of it, with a little distance added;
+    //   stand  - otherwise: hold [rollerStandMin, rollerStandMax] with no
+    //            throws (the body rejects damage), whistle pulses to regroup.
+    enum RollerMode { RollerWake = 0, RollerPunish, RollerEvade, RollerStand };
+    static const char* rollerModeName(int m)
+    {
+        switch (m) {
+        case RollerWake: return "wake";
+        case RollerPunish: return "punish";
+        case RollerEvade: return "evade";
+        case RollerStand: return "stand";
+        }
+        return "none";
+    }
+    void tickRollerStance(float dt, const Senses& in, float limit)
+    {
+        if (stateTime >= limit) {
+            giveUp(in, "attack_timeout");
+            finishTarget(in, /*killed*/ false);
+            return;
+        }
+        int mode = RollerStand;
+        if (in.targetVulnerable) mode = RollerPunish;
+        else if (in.targetRolling && in.targetDist < cfg.rollerEvadeRange) mode = RollerEvade;
+        else if (in.targetDormant) mode = RollerWake;
+        if (mode != rollerMode) {
+            rollerMode = mode;
+            char buf[256];
+            std::snprintf(buf, sizeof(buf),
+                          "AUTOPLAY_ROLLER mode=%s token=%u dist=%.0f field=%d hp=%.3f bot-driven",
+                          rollerModeName(mode), in.targetToken, in.targetDist, in.fieldPikmin,
+                          in.targetHealthFrac);
+            markers.emplace_back(buf);
+            rollerWhistleTime = 0.0f;
+            punishClock = 0.0f;
+            punishThrows = 0;
+        }
+        switch (mode) {
+        case RollerPunish: {
+            steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            const bool wasOn = pressOn;
+            if (in.targetDist <= cfg.throwRange) pulseA(in, cfg.rollerThrowHold, cfg.rollerThrowGap);
+            if (pressOn && !wasOn) ++punishThrows;
+            punishClock += dt;
+            if (punishClock >= 1.0f) {
+                punishClock = 0.0f;
+                char buf[200];
+                std::snprintf(buf, sizeof(buf),
+                              "AUTOPLAY_ROLLER_PUNISH dist=%.0f field=%d presses=%d hp=%.3f bot-driven",
+                              in.targetDist, in.fieldPikmin, punishThrows, in.targetHealthFrac);
+                markers.emplace_back(buf);
+            }
+            return;
+        }
+        case RollerWake:
+            if (in.targetDist > cfg.rollerWakeDist) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            return;
+        case RollerEvade: {
+            float vx = in.targetVelX, vz = in.targetVelZ;
+            float vlen = std::sqrt(vx * vx + vz * vz);
+            const float ax = in.naviX - in.tgtX, az = in.naviZ - in.tgtZ;
+            if (vlen < 1.0f) {
+                // No drive velocity yet: assume it rolls straight at us.
+                vx = ax;
+                vz = az;
+                vlen = std::sqrt(vx * vx + vz * vz);
+            }
+            if (vlen < 1.0f) {
+                vx = 1.0f;
+                vz = 0.0f;
+                vlen = 1.0f;
+            }
+            vx /= vlen;
+            vz /= vlen;
+            float px = -vz, pz = vx;
+            if (ax * px + az * pz < 0.0f) {
+                px = -px;
+                pz = -pz;
+            }
+            // Off the roll line either way works; take the side toward the
+            // arena floor (home) when the captain is not already between
+            // the ball and that side by a wide margin.
+            if (in.homeValid) {
+                const float hx = in.homeX - in.naviX, hz = in.homeZ - in.naviZ;
+                const float lateral = std::fabs(ax * px + az * pz);
+                if (hx * px + hz * pz < 0.0f && lateral < 120.0f) {
+                    px = -px;
+                    pz = -pz;
+                }
+            }
+            // Ahead of the ball: sideways plus a little away; behind it (it
+            // is rolling off): just sideways.
+            const float ahead = ax * vx + az * vz;
+            const float away = ahead > 0.0f ? 0.35f : 0.0f;
+            float mx = px + vx * away, mz = pz + vz * away;
+            const float ml = std::sqrt(mx * mx + mz * mz);
+            if (ml > 1.0e-3f) {
+                mx /= ml;
+                mz /= ml;
+            }
+            lastCommand.moveX = mx;
+            lastCommand.moveZ = mz;
+            lastCommand.buttons = PadB;
+            return;
+        }
+        default:
+            break;
+        }
+        if (in.targetDist < cfg.rollerStandMin) {
+            steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            // Back off along the arena floor: blend toward home once the
+            // captain is more than rollerHomeLeash from it.
+            if (in.homeValid) {
+                const float hx = in.homeX - in.naviX, hz = in.homeZ - in.naviZ;
+                const float hl = std::sqrt(hx * hx + hz * hz);
+                if (hl > cfg.rollerHomeLeash) {
+                    float mx = lastCommand.moveX + hx / hl, mz = lastCommand.moveZ + hz / hl;
+                    const float ml = std::sqrt(mx * mx + mz * mz);
+                    if (ml > 1.0e-3f) {
+                        lastCommand.moveX = mx / ml;
+                        lastCommand.moveZ = mz / ml;
+                    }
+                }
+            }
+        } else if (in.targetDist > cfg.rollerStandMax) {
+            steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+        }
+        rollerWhistleTime += dt;
+        if ((in.scattered || in.squadDistress) && std::fmod(rollerWhistleTime, 2.5f) < cfg.whistleHold * 0.5f)
+            lastCommand.buttons = PadB;
     }
 
     // #884 round 4: KingChappy attack stance (see isKingStandoff). Modes:
@@ -2021,6 +2474,20 @@ private:
     bool kingEvading = false; // #884 round 5: leaving the tongue sweep for the current King attack
     float kingEvadeTime = 0.0f; // time spent evading inside kingEvadeClear (sidestep after kingEvadeSideAfter)
     bool kingLowHpMode = false; // last stance used the low-health band (marker field)
+    int rollerMode = -1; // #897 last AUTOPLAY_ROLLER mode (-1 = none this stint)
+    float rollerWhistleTime = 0.0f; // #897 stand-mode whistle pulse clock
+    float punishClock = 0.0f; // #897 punish diagnostics clock
+    int punishThrows = 0; // #897 A presses this punish stint
+    bool powerResupplying = false; // #897 power resupply leg in progress (survives enter())
+    bool powerAtOnion = false; // #897 reached the Onion on this resupply visit
+    float pushTime = 0.0f; // #897 time spent pushing obstacles this approach stint
+    bool pushing = false; // #897 obstacle push active
+    bool pushedThisStint = false; // #897 pushed a box since the last reset (regroup pulses)
+    float regroupClock = 0.0f; // #897 post-push whistle pulse clock
+    bool tierReplanAsked = false; // #897 one immediate replan per approach when the target is on another tier
+    bool legKnown = false; // #897 approach progress is measured to this detour leg
+    float legX = 0.0f;
+    float legZ = 0.0f;
     bool announced = false;
     Result result;
     Command lastCommand;

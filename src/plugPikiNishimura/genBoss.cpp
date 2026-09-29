@@ -126,6 +126,7 @@ void GenObjectBoss::updateUseList(Generator* generator, int count)
 	const int p2Host = pc_p2_boss_arena_host(generator);
 	if (p2Host >= 0) {
 		tekiMgr->mUsingType[p2Host] = true;
+		pc_p2_reserve_source_extras(generator);
 		// #901: the arena boss holds the P1 boss's ship part; load its shape
 		// with the stage like any other part holder.
 		const unsigned heldPart = pc_held_part_for_pellet_config(mPelletConfigIdx);
