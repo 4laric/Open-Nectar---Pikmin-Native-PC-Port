@@ -611,6 +611,13 @@ void ActTransport::doLift()
 				nearestWP = routeMgr->findNearestWayPoint('test', mPiki->mSRT.t, landOnly);
 			}
 
+#if defined(PIKI_PC_PORT)
+			// Better Pathfinding: start from whichever end of the edge makes the
+			// whole carry shortest, not simply the nearer one.
+			if (wpA && wpB && pc_settings_get_better_pathfinding()) {
+				nearestWP = routeMgr->pickRouteStart(mPiki->mSRT.t, wpA, wpB, mGoal->getRouteIndex(), landOnly);
+			}
+#endif
 			int idx       = nearestWP->mIndex;
 			int goalWPIdx = mGoal->getRouteIndex();
 			int maxNumWP  = routeMgr->getNumWayPoints('test') - 1;

@@ -57,6 +57,11 @@ int pc_settings_get_shadows(void);
 // breaks it and then carries the pellet to the Onion. Off by default, so the
 // stock port stays faithful.
 int pc_settings_get_chain_actions(void);
+// Returns 1 while the "Better Pathfinding" mod is on. Retail routes Pikmin with
+// a greedy search, carries along an onion cost table built from its first
+// answers, and gives squad Pikmin no route at all; the mod swaps in shortest
+// paths, lets followers route round walls to their leader, and restarts carry
+// parties that stall. Off by default.
 int pc_settings_get_better_pathfinding(void);
 int pc_settings_get_blues_only_water(void);
 int pc_settings_get_idle_counter(void);
@@ -74,6 +79,8 @@ float pc_settings_get_throw_speed_scale(void);
 int pc_settings_get_throw_cancel_b(void);
 /// Los Pikmin del grupo no tropiezan al correr.
 int pc_settings_get_no_trip(void);
+// Whistling over sprouts plucks them, one every 0.08 s while held. Off by default.
+int pc_settings_get_whistle_pluck(void);
 /// En el menú de la cebolla, Y + arriba/abajo mueve de 10 en 10.
 int pc_settings_get_onion_step10(void);
 /// Los Pikmin silbados se unen al grupo al instante, sin la reacción de LookAt.

@@ -9,6 +9,7 @@
 #include "pc_randomizer.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_whistle.h"
+#include "pc_whistle_pluck.h"
 #include <chrono>
 #endif
 #if defined(PIKI_PC_PORT)
@@ -1785,6 +1786,7 @@ void NaviGatherState::init(Navi* navi)
 	    + navi->mWhistleRadiusFrac * (NAVI_WHISTLE_MAX_RADIUS(navi) - C_NAVI_PARM(navi, mWhistleMinRadius)))
 	    * pc_randomizer_benefit_multiplier(PC_BENEFIT_WHISTLE);
 	if (!gameflow.mPauseAll) navi->callPikis(mWhistleCallRadius, mTapState.recallWorkers);
+	mNextWhistlePluckTime = pc_whistle_pluck(navi, mWhistleCallRadius) ? PC_WHISTLE_PLUCK_INTERVAL : 0.0f;
 #endif
 	rumbleMgr->start(RUMBLE_Unk3, navi->mNaviID, nullptr);
 }
@@ -1839,6 +1841,9 @@ void NaviGatherState::exec(Navi* navi)
 	    * pc_randomizer_benefit_multiplier(PC_BENEFIT_WHISTLE);
 	if (!gameflow.mPauseAll) {
 		navi->callPikis(mWhistleCallRadius, (down && mTapState.recallWorkers) || pc_whistle_recall_workers(navi->mWhistleTimer, down));
+		if (down && navi->mWhistleTimer >= mNextWhistlePluckTime && pc_whistle_pluck(navi, mWhistleCallRadius)) {
+			mNextWhistlePluckTime = navi->mWhistleTimer + PC_WHISTLE_PLUCK_INTERVAL;
+		}
 	} else {
 		navi->callDebugs(mWhistleCallRadius);
 	}
