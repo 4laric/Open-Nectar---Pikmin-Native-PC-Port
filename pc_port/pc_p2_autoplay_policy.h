@@ -611,6 +611,7 @@ public:
         pushing = false;
         pushedThisStint = false;
         regroupClock = 0.0f;
+        legKnown = false;
         result = Result{};
         markers.clear();
         lastCommand = Command{};
@@ -696,6 +697,7 @@ private:
         pushTime = 0.0f;
         pushing = false;
         regroupClock = 0.0f;
+        legKnown = false;
         emitState(in);
     }
     void holdIdle() { lastCommand = Command{}; }
@@ -1003,13 +1005,32 @@ private:
             return;
         }
         if (tickObstaclePush(dt, in)) return;
-        // Progress / stuck tracking on straight-line distance.
-        if (stuckWindowDist >= 1.0e29f) {
-            stuckWindowDist = in.targetDist;
-            stuckWindowStart = 0.0f;
-            progressBest = in.targetDist;
+        // Progress / stuck tracking on straight-line distance. #897: while a
+        // detour leg is active, progress is measured to that leg (a real
+        // route may first lead AWAY from the target: the Impact Site ramp
+        // from the box corridor east to the upper tier), and reaching a new
+        // leg is progress in itself.
+        float metric = in.targetDist;
+        if (in.waypointLeg) {
+            const float lx = in.wpX - in.naviX, lz = in.wpZ - in.naviZ;
+            metric = std::sqrt(lx * lx + lz * lz);
+            if (!legKnown || std::fabs(in.wpX - legX) > 1.0f || std::fabs(in.wpZ - legZ) > 1.0f) {
+                if (legKnown) approachReplans = 0;
+                legKnown = true;
+                legX = in.wpX;
+                legZ = in.wpZ;
+                stuckWindowDist = 1.0e30f;
+            }
+        } else if (legKnown) {
+            legKnown = false;
+            stuckWindowDist = 1.0e30f;
         }
-        if (in.targetDist < progressBest) progressBest = in.targetDist;
+        if (stuckWindowDist >= 1.0e29f) {
+            stuckWindowDist = metric;
+            stuckWindowStart = 0.0f;
+            progressBest = metric;
+        }
+        if (metric < progressBest) progressBest = metric;
         stuckWindowStart += dt;
         if (stuckWindowStart >= cfg.stuckWindow) {
             if (stuckWindowDist - progressBest < cfg.stuckMinProgress) {
@@ -2021,6 +2042,9 @@ private:
     bool pushing = false; // #897 obstacle push active
     bool pushedThisStint = false; // #897 pushed a box since the last reset (regroup pulses)
     float regroupClock = 0.0f; // #897 post-push whistle pulse clock
+    bool legKnown = false; // #897 approach progress is measured to this detour leg
+    float legX = 0.0f;
+    float legZ = 0.0f;
     bool announced = false;
     Result result;
     Command lastCommand;

@@ -225,8 +225,15 @@ bool bfsPath(int selfIdx, int tgtIdx, std::vector<std::pair<float, float>>& out)
     return !out.empty();
 }
 
-// bot-v3: k nearest open land waypoints to (x,z), closest first.
-std::vector<int> nearestWpIdx(float x, float z, int k)
+// #897: height of the plan start / goal for nearestWpIdx (NAN = XZ only).
+float sPlanStartY = NAN;
+float sPlanGoalY = NAN;
+
+// bot-v3: k nearest open land waypoints to (x,z), closest first. #897: with
+// a finite y the score adds (3*dy)^2, so a waypoint on the ledge above (the
+// Impact Site upper tier, y=20, 90 u from a captain at y=-30) never beats
+// the reachable one on his own tier (ar3/ar4: 6 STUCK under the ledge).
+std::vector<int> nearestWpIdx(float x, float z, int k, float y = NAN)
 {
     std::vector<int> out;
     if (!routeMgr) return out;
@@ -244,7 +251,12 @@ std::vector<int> nearestWpIdx(float x, float z, int k)
         WayPoint* wp = routeMgr->getWayPoint(handle, i);
         if (!wp || !wp->mIsOpen || wp->inWater()) continue;
         const float dx = wp->mPosition.x - pos.x, dz = wp->mPosition.z - pos.z;
-        scored.push_back({ dx * dx + dz * dz, i });
+        float score = dx * dx + dz * dz;
+        if (std::isfinite(y)) {
+            const float dy = 3.0f * (wp->mPosition.y - y);
+            score += dy * dy;
+        }
+        scored.push_back({ score, i });
     }
     std::sort(scored.begin(), scored.end(), [](const Scored& a, const Scored& b) { return a.d < b.d; });
     for (int i = 0; i < int(scored.size()) && int(out.size()) < k; ++i) out.push_back(scored[i].idx);
@@ -324,8 +336,8 @@ void planDetour(float naviX, float naviZ, float tgtX, float tgtZ)
     if (!routeMgr) {
         failReason = "no_routemgr";
     } else {
-        const std::vector<int> starts = nearestWpIdx(naviX, naviZ, 3);
-        const std::vector<int> goals = nearestWpIdx(tgtX, tgtZ, 3);
+        const std::vector<int> starts = nearestWpIdx(naviX, naviZ, 3, sPlanStartY);
+        const std::vector<int> goals = nearestWpIdx(tgtX, tgtZ, 3, sPlanGoalY);
         PathFinder* finder = routeMgr->getPathFinder('test');
         if (starts.empty()) failReason = "no_start_wp";
         else if (goals.empty()) failReason = "no_goal_wp";
@@ -601,6 +613,37 @@ void pc_p2_autoplay_tick(void)
                         sPowerRestocks, stockColor, delta > 0 ? delta : 0, total, alive);
             std::fflush(stdout);
         }
+    }
+
+    // #897 one-time map dump (read-only diagnostics): route waypoints with
+    // links/open/water flags and every HinderRock/Bridge work object, so a
+    // STUCK can be read against the real graph and obstacles.
+    static bool sMapDumped = false;
+    if (!sMapDumped && routeMgr && workObjectMgr) {
+        sMapDumped = true;
+        const u32 handle = 'test';
+        const int n = routeMgr->getNumWayPoints(handle);
+        for (int i = 0; i < n && i < 4096; ++i) {
+            WayPoint* wp = routeMgr->getWayPoint(handle, i);
+            if (!wp) continue;
+            char links[96] = {0};
+            int off = 0;
+            for (int k = 0; k < wp->mLinkCount && k < 8 && off < 88; ++k)
+                off += std::snprintf(links + off, sizeof(links) - size_t(off), "%s%d", k ? "," : "", wp->mLinkIndices[k]);
+            std::printf("AUTOPLAY_MAP_WP idx=%d x=%.0f y=%.0f z=%.0f r=%.0f open=%d water=%d links=%s bot-driven\n",
+                        i, wp->mPosition.x, wp->mPosition.y, wp->mPosition.z, wp->mRadius, wp->mIsOpen ? 1 : 0,
+                        wp->inWater() ? 1 : 0, links);
+        }
+        Iterator wit(workObjectMgr);
+        CI_LOOP(wit)
+        {
+            WorkObject* w = static_cast<WorkObject*>(*wit);
+            if (!w) continue;
+            std::printf("AUTOPLAY_MAP_WORK kind=%s x=%.0f y=%.0f z=%.0f finished=%d bot-driven\n",
+                        w->isHinderRock() ? "hinder" : (w->isBridge() ? "bridge" : "other"),
+                        w->getPosition().x, w->getPosition().y, w->getPosition().z, w->isFinished() ? 1 : 0);
+        }
+        std::fflush(stdout);
     }
 
     // --- Nearest stocked Onion (read-only) ---
@@ -985,6 +1028,11 @@ void pc_p2_autoplay_tick(void)
     // Every STUCK replans (bot-v3: approach must use method=graph, never an
     // identical detour; Done holds near the Onion so it replans there too).
     if (sBrain.replanWanted()) {
+        sPlanStartY = navi->getPosition().y;
+        sPlanGoalY = NAN;
+        if (pick && pick->actor && sBrain.current() != p2autoplay::State::WithdrawSeek
+            && sBrain.current() != p2autoplay::State::Done)
+            sPlanGoalY = pick->actor->getPosition().y;
         if (sBrain.current() == p2autoplay::State::WithdrawSeek && hasOnion) {
             planDetour(naviX, naviZ, onionX, onionZ);
         } else if (sBrain.current() == p2autoplay::State::Done && hasOnion) {
