@@ -181,7 +181,9 @@ void pc_p2_preview_setup() {
             pc_p2_tadpole_setup();
             pc_p2_hana_setup();
             pc_p2_bombotakara_setup();
-            pc_p2_long_legs_setup();
+            // pc_p2_long_legs_setup() runs once below with the inst-legs
+            // setups (#173: the second call re-reset every Long Legs brain
+            // and re-bound its delivery source).
             pc_p2_groink_teki_setup();
             pc_p2_batch2_setup();  // P2 models for the Otakara/Sokkuri behaviour hosts
             // inst-bugs lane (#871): campaign-identity behavior hosts. The
