@@ -15,9 +15,12 @@ inline bool accepted(unsigned source, unsigned uid) {
     case 62: return uid == 5465461u || uid == 328297937u || uid == 407876267u || uid == 513430982u || uid == 568677317u || uid == 873045719u || uid == 983680291u || uid == 1254096625u || uid == 1646783045u || uid == 1725053560u || uid == 1787125272u || uid == 1808550463u || uid == 1858120135u || uid == 1866045954u || uid == 1877315663u || uid == 1911597745u || uid == 1945764764u || uid == 2074106479u || uid == 2175753366u || uid == 2506165730u || uid == 2700289662u || uid == 3138990329u || uid == 3640055869u || uid == 3731060235u || uid == 3850487044u || uid == 3886812794u || uid == 3921089765u || uid == 3960948767u || uid == 4063112254u || uid == 4141612035u || uid == 4222852521u || uid == 4224027716u || uid == 4281359481u;
     case 78: return uid == 5465461u || uid == 328297937u || uid == 407876267u || uid == 513430982u || uid == 568677317u || uid == 873045719u || uid == 983680291u || uid == 1254096625u || uid == 1646783045u || uid == 1725053560u || uid == 1787125272u || uid == 1808550463u || uid == 1858120135u || uid == 1866045954u || uid == 1877315663u || uid == 1911597745u || uid == 1945764764u || uid == 2074106479u || uid == 2175753366u || uid == 2506165730u || uid == 2700289662u || uid == 3138990329u || uid == 3640055869u || uid == 3731060235u || uid == 3850487044u || uid == 3886812794u || uid == 3921089765u || uid == 3960948767u || uid == 4063112254u || uid == 4141612035u || uid == 4222852521u || uid == 4224027716u || uid == 4281359481u;
     case 79: return uid == 5465461u || uid == 328297937u || uid == 407876267u || uid == 513430982u || uid == 568677317u || uid == 873045719u || uid == 983680291u || uid == 1254096625u || uid == 1646783045u || uid == 1725053560u || uid == 1787125272u || uid == 1808550463u || uid == 1858120135u || uid == 1866045954u || uid == 1877315663u || uid == 1911597745u || uid == 1945764764u || uid == 2074106479u || uid == 2175753366u || uid == 2506165730u || uid == 2700289662u || uid == 3138990329u || uid == 3640055869u || uid == 3731060235u || uid == 3850487044u || uid == 3886812794u || uid == 3921089765u || uid == 3960948767u || uid == 4063112254u || uid == 4141612035u || uid == 4222852521u || uid == 4224027716u || uid == 4281359481u;
-    // #256 Empress Bulblax: measured boss slots only (P2_BOSS_SLOT_PROBE
-    // clear>=250, dry, no wall; docs/PIKMIN2_ADMITTED_PLACEMENT.json boss_slot).
-    case 30: return uid == 2049888785u || uid == 2506165730u || uid == 2700289662u || uid == 3921089765u;
+    // #256 Empress Bulblax: only the boss slot with a natural bot kill, carry
+    // and onion:p2:30 receipt (spring 3921089765). Forest 2506165730 and navel
+    // 2700289662 passed the static clearance probe but have no kill/carry
+    // evidence; they stay out until a run proves them. Must match
+    // docs/PIKMIN2_ADMITTED_PLACEMENT.json (Queen profile accept list).
+    case 30: return uid == 3921089765u;
     default: return false;
     }
 }

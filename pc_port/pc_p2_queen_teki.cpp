@@ -68,6 +68,15 @@ using namespace p2queenown;
 constexpr float kQueenHostScale = 3.0f;
 constexpr float kLarvaHostScale = 0.35f;
 constexpr float kQueenCorpseRadius = 100.0f;
+// Source body extent along the Queen's facing axis (+Z = nose), in world
+// units: the staged rest pose bulblax_Queen_wait1_00 bounds z = -224..245
+// (the P2 model is drawn at source scale 1). The host has no nose/head/bod1/
+// bod5 parts or body_end joint, so the flick part rule and the larva birth
+// point are taken from this extent instead of the P1 host's centre sphere.
+constexpr float kQueenBodyRear = -224.0f;
+constexpr float kQueenBodyFront = 245.0f;
+constexpr float kQueenFrontCut = kQueenBodyRear + (kQueenBodyFront - kQueenBodyRear) * (2.0f / 3.0f);
+constexpr float kQueenRearCut = kQueenBodyRear + (kQueenBodyFront - kQueenBodyRear) * (1.0f / 3.0f);
 // P1 performance cap on live larvae (source Baby::Mgr pool 50, hysteresis
 // max 50 / min 25). The cap scales the hysteresis to 10 / 5.
 constexpr int kLarvaCap = 10;
@@ -260,16 +269,18 @@ int stuckCount(BTeki* t) {
 }
 
 // Queen::flickPikmin(angle). The P1 host has no nose/head/bod1/bod5 part ids;
-// each stuck Pikmin is classified by its position along the Queen's body axis
-// (front third: nose/head/bod1 -> flick at `angle`; rear third: bod5 -> flick
-// at PI + angle; middle: shake off with 0 knockback/damage, backward).
+// each stuck Pikmin is classified by its position along the Queen's body axis,
+// measured against the source body extent (kQueenBodyRear..kQueenBodyFront):
+// front third (nose/head/bod1) -> flick at `angle`; rear third (bod5) -> flick
+// at PI + angle; middle (bod2/bod3/bod4): shake off with 0 knockback/damage,
+// backward. Thirds of the extent are an approximation of the source parts.
 int flickStuck(BTeki* t, Binding& b, bool face) {
     if (!pikiMgr) return 0;
     const float f = b.fsm.faceDir();
     const float fx = std::sin(f), fz = std::cos(f);
-    const float reach = t->getCentreSize();
     const float angle = face ? f : FLICK_BACKWARDS_ANGLE;
     int flicked = 0, front = 0, rear = 0, middle = 0;
+    float minAlong = 0.0f, maxAlong = 0.0f;
     std::vector<Piki*> stuck;
     Iterator it(pikiMgr);
     CI_LOOP(it) {
@@ -279,11 +290,13 @@ int flickStuck(BTeki* t, Binding& b, bool face) {
     for (Piki* p : stuck) {
         const Vector3f& pp = p->getPosition();
         const float along = (pp.x - t->mSRT.t.x) * fx + (pp.z - t->mSRT.t.z) * fz;
+        if (front + rear + middle == 0 || along < minAlong) minAlong = along;
+        if (front + rear + middle == 0 || along > maxAlong) maxAlong = along;
         bool ok;
-        if (along > reach * 0.33f) {
+        if (along > kQueenFrontCut) {
             ok = p->stimulate(InteractFlick(t, b.fsm.params().shakeKnockback, b.fsm.params().shakeDamage, angle));
             ++front;
-        } else if (along < -reach * 0.33f) {
+        } else if (along < kQueenRearCut) {
             ok = p->stimulate(InteractFlick(t, b.fsm.params().shakeKnockback, b.fsm.params().shakeDamage,
                                             face ? kPi + angle : angle));
             ++rear;
@@ -296,9 +309,10 @@ int flickStuck(BTeki* t, Binding& b, bool face) {
     if (face || flicked) {
         b.flickedPiki += flicked;
         std::printf("P2_QUEEN_FLICK generator=%u source_id=%u mode=%s stuck=%zu flicked=%d front=%d rear=%d middle=%d "
-                    "knockback=%.0f damage=%.1f part_rule=axis_thirds\n",
+                    "knockback=%.0f damage=%.1f part_rule=body_thirds cuts=%.1f/%.1f along=%.1f..%.1f\n",
                     b.generator, b.source, face ? "key2_face" : "rolling_backward", stuck.size(), flicked, front, rear,
-                    middle, b.fsm.params().shakeKnockback, b.fsm.params().shakeDamage);
+                    middle, b.fsm.params().shakeKnockback, b.fsm.params().shakeDamage, kQueenRearCut, kQueenFrontCut,
+                    minAlong, maxAlong);
     }
     return flicked;
 }
@@ -320,16 +334,18 @@ void rollPress(BTeki* t, Binding& b) {
         if (std::fabs(bx * dx + bz * dz) >= P.attackHitAngle) return false;
         return std::fabs(fx * dx + fz * dz) < P.attackRadius;
     };
-    auto log = [&](const char* kind, Creature* c, bool accepted) {
+    // `damage` is the value actually passed to InteractPress (larvae take the
+    // source Baby::pressCallBack instead, logged as their press state).
+    auto log = [&](const char* kind, Creature* c, bool accepted, float damage) {
         const Vector3f& p = c->getPosition();
         std::printf("P2_QUEEN_ROLL_PRESS generator=%u source_id=%u target=%s accepted=%d damage=%.1f x=%.1f z=%.1f\n",
-                    b.generator, b.source, kind, accepted ? 1 : 0, P.attackDamage, p.x, p.z);
+                    b.generator, b.source, kind, accepted ? 1 : 0, damage, p.x, p.z);
     };
     for (Navi* n : pc_p2_navis()) {
         if (!n || !n->isAlive() || !inBox(n->getPosition())) continue;
         const bool ok = n->stimulate(InteractPress(t, P.attackDamage));
         if (ok) { ++b.rollPresses; ++b.rollPressNavi; }
-        log("navi", n, ok);
+        log("navi", n, ok, P.attackDamage);
     }
     if (pikiMgr) {
         Iterator it(pikiMgr);
@@ -342,7 +358,7 @@ void rollPress(BTeki* t, Binding& b) {
             const float crush = p->mHealth > P.attackDamage ? p->mHealth : P.attackDamage;
             const bool ok = p->stimulate(InteractPress(t, crush));
             if (ok) { ++b.rollPresses; ++b.rollPressPiki; }
-            log("piki", p, ok);
+            log("piki", p, ok, crush);
         }
     }
     if (tekiMgr) {
@@ -361,12 +377,12 @@ void rollPress(BTeki* t, Binding& b) {
                     std::printf("P2_QUEEN_LARVA_STATE id=%u queen=%u state=Press cause=roll\n", l->second.id,
                                 l->second.queen);
                 }
-                log("larva", o, ok);
+                log("larva", o, ok, 0.0f);
                 continue;
             }
             if (s.count(o)) continue;
             const bool ok = o->stimulate(InteractPress(t, P.attackDamage));
-            log("teki", o, ok);
+            log("teki", o, ok, P.attackDamage);
         }
     }
 }
@@ -381,8 +397,9 @@ void logState(Binding& b, int from, int to, BTeki* t, int stuck) {
 
 void queueBirth(BTeki* t, Binding& b) {
     // createBabyChappy: position = body_end joint (the Queen's tail; the P1
-    // host has no joint -> the rear of the scaled body), face = PI + faceDir,
-    // velocity = searchDistance * (sin, cos)(face).
+    // host has no joint -> the tail end of the source body extent,
+    // kQueenBodyRear), face = PI + faceDir, velocity = searchDistance *
+    // (sin, cos)(face).
     if (liveLarvae() + int(sSpawns.size()) >= kLarvaCap) {
         ++b.birthRefused;
         std::printf("P2_QUEEN_BIRTH_CAPPED generator=%u source_id=%u live=%d cap=%d\n", b.generator, b.source,
@@ -390,7 +407,7 @@ void queueBirth(BTeki* t, Binding& b) {
         return;
     }
     const float f = b.fsm.faceDir();
-    const float back = t->getCentreSize() * 1.1f;
+    const float back = -kQueenBodyRear;
     SpawnReq r;
     r.queen = b.generator;
     r.type = t->mTekiType;
@@ -697,9 +714,9 @@ bool bindActor(BTeki* t, unsigned token, unsigned source) {
     P.maxBirths = kLarvaCap;
     P.minBirths = kLarvaCap / 2;
     const Vector3f pos = t->getPosition();
-    // The full (story) variant: larvae on, no easy first roll. The Hole of
-    // Beasts variant (no larvae, fp11 health, easy roll) is the documented
-    // fallback: P2_QUEEN_VARIANT=hob in the staged bank switches it.
+    // The full (story) variant only: larvae on, no easy first roll. The Hole
+    // of Beasts variant (no larvae, fp11 health, easy roll) exists in the FSM
+    // init flags, but nothing in the campaign selects it.
     b.fsm.init(P, sBank, true, false, {pos.x, pos.z}, t->getDirection(), (token * 2654435761u) | 1u);
     t->mSRT.s.set(kQueenHostScale, kQueenHostScale, kQueenHostScale);
     t->mHealth = P.health;
