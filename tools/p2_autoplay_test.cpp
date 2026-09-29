@@ -1382,6 +1382,28 @@ void testAftermathCursorAimCorpse()
     }
     CHECK(onThrow, "cursor-aim/throws_on_target");
     CHECK(!walked, "cursor-aim/stands_still_on_target");
+    // Scattered squad (nobody at the captain): whistle once to regroup, then
+    // a throw window with no whistle.
+    s.scattered = true;
+    bool regroupB = false;
+    std::vector<std::string> aimMarkers;
+    for (int i = 0; i < 10; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadB)) regroupB = true;
+        const std::vector<std::string> got = brain.takeMarkers();
+        aimMarkers.insert(aimMarkers.end(), got.begin(), got.end());
+    }
+    CHECK(regroupB, "cursor-aim/scattered_whistles");
+    CHECK(hasMarker(aimMarkers, "AUTOPLAY_AIM_REGROUP token=1945764764"), "cursor-aim/regroup_marker");
+    for (int i = 0; i < 40; ++i) brain.update(0.05f, s); // finish the whistle hold
+    bool windowB = false, windowA = false;
+    for (int i = 0; i < 40; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadB)) windowB = true;
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) windowA = true;
+    }
+    CHECK(!windowB && windowA, "cursor-aim/throw_window_after_regroup");
+    s.scattered = false;
     // Any other species keeps the generic walk-onto seed.
     p2autoplay::Brain other(cfg);
     p2autoplay::Senses o = liveSenses();

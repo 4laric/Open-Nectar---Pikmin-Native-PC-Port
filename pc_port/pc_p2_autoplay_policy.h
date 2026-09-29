@@ -335,6 +335,7 @@ struct Config {
     float corpseAimNear = 40.0f; // #898 cursor-aim corpses: closer than this -> step back (never shove it)
     float corpseAimFar = 70.0f; // #898 cursor-aim corpses: farther than this -> walk in (no throws)
     float corpseCursorTol = 12.0f; // #898 cursor-aim corpses: throw only with the cursor this close
+    float corpseAimWhistleCooldown = 10.0f; // #898 cursor-aim corpses: throw window after a regroup whistle
     bool noDeliver = false; // #898 TEST-ONLY: abandon corpses (also env NO_DELIVER)
     float noDeliverWhistle = 3.0f; // #898 whistle hold before abandoning a corpse
     float saraiLowHeight = 120.0f; // Sarai thrown at only when within this height above ground (or grabbing)
@@ -543,6 +544,8 @@ public:
         whistleTime = 0.0f;
         whistling = false;
         whistleCooldown = 0.0f;
+        aimWhistleLeft = 0.0f;
+        aimWhistleCooldown = 0.0f;
         menuTaps = 0;
         menuHoldTime = 0.0f;
         menuConfirmed = false;
@@ -640,6 +643,8 @@ private:
         whistleTime = 0.0f;
         whistling = false;
         whistleCooldown = 0.0f;
+        aimWhistleLeft = 0.0f;
+        aimWhistleCooldown = 0.0f;
         menuTaps = 0;
         menuHoldTime = 0.0f;
         menuConfirmed = false;
@@ -708,6 +713,27 @@ private:
     void cursorAimThrow(const Senses& in)
     {
         const float d = in.targetDist;
+        // Regroup: throws need Pikmin at the captain. After the presses the
+        // squad is spread over the kill site (y1: 53 on the field, fewer than
+        // 5 near the captain, 2 carriers for 100 s, no throw ever landed).
+        // This path only runs while the crew is short (Seed / SeedGrow), so a
+        // stuck partial crew loses nothing to the whistle. Whistle for
+        // whistleHold, then a throw window of corpseAimWhistleCooldown.
+        if (aimWhistleCooldown > 0.0f) aimWhistleCooldown -= lastDt;
+        if (aimWhistleLeft <= 0.0f && in.scattered && aimWhistleCooldown <= 0.0f && d <= cfg.throwRange) {
+            aimWhistleLeft = cfg.whistleHold;
+            char buf[128];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_AIM_REGROUP token=%u tdist=%.0f bot-driven", in.targetToken, d);
+            markers.emplace_back(buf);
+        }
+        if (aimWhistleLeft > 0.0f) {
+            aimWhistleLeft -= lastDt;
+            if (aimWhistleLeft <= 0.0f) aimWhistleCooldown = cfg.corpseAimWhistleCooldown;
+            lastCommand.buttons = PadB;
+            pressOn = false;
+            pressPhase = 0.0f;
+            return;
+        }
         if (d > cfg.corpseAimFar) {
             steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
             pressOn = false; // no throws while walking: the cursor trails the stick
@@ -1757,6 +1783,8 @@ private:
     float whistleTime = 0.0f;
     bool whistling = false;
     float whistleCooldown = 0.0f;
+    float aimWhistleLeft = 0.0f; // #898 cursor-aim regroup whistle remaining
+    float aimWhistleCooldown = 0.0f; // #898 throw window after a regroup whistle
     int menuTaps = 0;
     float menuHoldTime = 0.0f;
     bool menuConfirmed = false;
