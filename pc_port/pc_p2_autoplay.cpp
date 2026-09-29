@@ -51,6 +51,8 @@
 #include "pc_p2_kogane.h"
 #include "pc_p2_chappy.h"
 #include "pc_p2_bigtreasure_teki.h"
+#include "pc_p2_teki_lifetime.h"
+#include "pc_p2_test_day_cycle.h"
 #include "pc_randomizer.h"
 #include "Controller.h"
 
@@ -365,6 +367,28 @@ bool sHinderLeg = false;
 float sHinderTime = 0.0f;
 constexpr float kHinderBudget = 120.0f;
 
+// TEST-ONLY day cycle (#246): a new scene (next day) invalidates every
+// per-stage pointer and plan. Completed tokens (receipts) are kept.
+void resetStageState()
+{
+    sBrain.reset();
+    sEngage = Engagement{};
+    sPath.clear();
+    sPathIdx = 0;
+    sLegTime = 0.0f;
+    sReplanCount = 0;
+    sReplanToken = 0;
+    sLastDetourValid = false;
+    sDetourHist.clear();
+    sHinder = nullptr;
+    sHinderLeg = false;
+    sHinderTime = 0.0f;
+    sPowerStocked = false;
+    sPowerSeconds = 0.0f;
+    std::printf("AUTOPLAY_STAGE_RESET completed=%zu bot-driven\n", sCompleted.size());
+    std::fflush(stdout);
+}
+
 HinderRock* nearestOpenHinderRock(float x, float z, float maxDist)
 {
     if (!workObjectMgr) return nullptr;
@@ -542,6 +566,22 @@ void pc_p2_autoplay_tick(void)
 {
     if (!p2autoplay::isEnabled()) {
         return; // inert when unset: production input path untouched
+    }
+    // TEST-ONLY day cycle (#246): between the forced sunset and the next
+    // stage only tap A (results, save); a new scene resets per-stage state.
+    if (pc_p2_test_day_cycle_active()) {
+        static unsigned long sScene = 0;
+        static bool sSceneValid = false;
+        static int sAdvanceFrames = 0;
+        const unsigned long scene = pc_p2_scene_generation();
+        if (sSceneValid && scene != sScene) resetStageState();
+        sScene = scene;
+        sSceneValid = true;
+        if (pc_p2_test_day_cycle_advancing()) {
+            pc_p2_input_script_set(1, ((sAdvanceFrames++ / 6) & 1) ? unsigned(p2autoplay::PadA) : 0u, 0, 0);
+            return;
+        }
+        sAdvanceFrames = 0;
     }
     if (!naviMgr || !pikiMgr || !tekiMgr || !itemMgr) {
         return; // boot/menus: no game state yet, emit nothing
