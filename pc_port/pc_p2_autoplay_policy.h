@@ -105,6 +105,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -1387,6 +1388,13 @@ private:
             enter(State::WithdrawMenu, in);
             return;
         }
+        // #898: a matching target that was not listed when Done was entered
+        // (a Snagret still underground, a late spawn) re-engages. A token the
+        // bot already scored or gave up on never does, so this cannot loop.
+        if (in.targetToken != 0 && in.targetAlive && !settledTokens.count(in.targetToken)) {
+            enter(State::Select, in);
+            return;
+        }
         // No more targets: idle near the Onion (bot-v3: enemies may walk to
         // the squad, which is how bc1/bc2 scored its only kills). Pad-only,
         // still gated by update(); neutral when there is no Onion to hold.
@@ -1448,6 +1456,7 @@ private:
         std::snprintf(buf, sizeof(buf), "AUTOPLAY_GIVEUP reason=%s token=%u state=%s bot-driven",
                       reason, in.targetToken, stateName(state));
         markers.emplace_back(buf);
+        if (in.targetToken) settledTokens.insert(in.targetToken);
     }
 
     // bot-v5: aftermath giveup names WHY the delivery failed so the evidence
@@ -1513,6 +1522,7 @@ private:
         }
         markers.emplace_back(buf);
         resultReported = true;
+        if (result.token) settledTokens.insert(result.token);
         // The driver advances to the next target (or Done when none remain).
         enter(State::Select, in);
     }
@@ -1738,6 +1748,7 @@ private:
     float throwSpin = 0.0f; // Kurage throw rotation phase
     bool leadValid = false; // #898 press-only lead estimate
     bool resultReported = false; // #898 RESULT emitted for result.token
+    std::set<unsigned> settledTokens; // #898 tokens already scored or given up (Done never re-engages them)
     float leadX = 0.0f, leadZ = 0.0f, leadVX = 0.0f, leadVZ = 0.0f;
     bool kingBacking = false; // #884 round 4: King standoff backing off (hysteresis)
     bool kingClosing = false; // #884 round 4: King standoff closing in (hysteresis)

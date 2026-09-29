@@ -568,6 +568,27 @@ void testNoDeliverAbandonsCorpse()
           "no-deliver/result_not_carried");
 }
 
+void testDoneReengagesLateTarget()
+{
+    // #898: Done re-engages a matching target that surfaces later (a Snagret
+    // underground at Select), but never a token it already gave up on.
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Done, "late-target/done_when_none_listed");
+    s.targetToken = 3921089765u;
+    s.targetSource = 34;
+    s.targetAlive = true;
+    s.targetDist = 300.0f;
+    s.targetHealthFrac = 1.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Select, "late-target/reengages_from_done");
+}
+
 void testWithdrawRepeat()
 {
     // bot-v2 gap 4: a 5-Pikmin first cycle loops back for another cycle
@@ -2987,6 +3008,7 @@ int main()
     testReceiptWait();
     testGenericDeath();
     testNoDeliverAbandonsCorpse();
+    testDoneReengagesLateTarget();
     testWithdrawRepeat();
     testSaraiFlyer();
     testKurageLongAttack();
