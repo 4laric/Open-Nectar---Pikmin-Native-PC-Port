@@ -621,6 +621,39 @@ void pc_p2_autoplay_tick(void)
         }
     }
 
+    // #901 TEST-ONLY arena teleport (PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT="x,z",
+    // autoplay-gated): once the squad is out, move the captain and every
+    // Pikmin that is not carrying or leaving to the point, so the bot can
+    // fight an arena it cannot route to. Never runs in normal play.
+    {
+        static bool teleported = false;
+        float tx = 0.0f, tz = 0.0f;
+        if (!teleported && mapMgr && alive >= (powerMode ? 80 : 20) && p2autoplay::teleportTarget(tx, tz)) {
+            teleported = true;
+            const float ty = mapMgr->getMinY(tx, tz, true);
+            Vector3f at(tx, ty, tz);
+            navi->resetPosition(at);
+            int moved = 0;
+            Iterator it(pikiMgr);
+            CI_LOOP(it)
+            {
+                Piki* p = static_cast<Piki*>(*it);
+                if (!p || !p->isAlive() || p->mMode == PikiMode::TransportMode) continue;
+                const int st = p->getState();
+                if (st == PIKISTATE_Bury || st == PIKISTATE_Dying || st == PIKISTATE_Dead) continue;
+                const float ang = 0.61803f * 6.2831853f * float(moved);
+                const float rad = 40.0f + 6.0f * float(moved % 12);
+                Vector3f pp(tx + rad * std::cos(ang), ty, tz + rad * std::sin(ang));
+                pp.y = mapMgr->getMinY(pp.x, pp.z, true);
+                p->resetPosition(pp);
+                ++moved;
+            }
+            std::printf("AUTOPLAY_TELEPORT x=%.1f y=%.1f z=%.1f moved=%d TEST-ONLY bot-driven\n", double(tx),
+                        double(ty), double(tz), moved);
+            std::fflush(stdout);
+        }
+    }
+
     // --- Nearest stocked Onion (read-only) ---
     bool hasOnion = false;
     float onionX = 0.0f, onionZ = 0.0f, onionDist = 1.0e30f;

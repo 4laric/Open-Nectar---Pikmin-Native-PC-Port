@@ -191,6 +191,27 @@ inline bool noPartCarry()
     return v && v[0] == '1';
 }
 
+// #901 TEST-ONLY: move the captain and every free Pikmin to a fixed ground
+// point once, after the squad is out, so an arena the bot cannot route to
+// (bomb-wall or pit-rim gated) can still be fought. Format "x,z" in world
+// units. Gated by the autoplay gate; inert in normal play.
+// PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT=-460,3560
+inline bool teleportTarget(float& x, float& z)
+{
+    if (!isEnabled()) return false;
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT");
+    if (!v || !v[0]) return false;
+    char* end = nullptr;
+    const double a = std::strtod(v, &end);
+    if (!end || end == v || *end != ',') return false;
+    char* end2 = nullptr;
+    const double b = std::strtod(end + 1, &end2);
+    if (!end2 || end2 == end + 1 || *end2 != 0) return false;
+    x = float(a);
+    z = float(b);
+    return true;
+}
+
 inline float powerDamageMult()
 {
     if (!isPowerEnabled()) return 1.0f;
