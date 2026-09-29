@@ -3113,6 +3113,17 @@ static void coopRunTestEvents(Navi* p1, Navi* p2)
             std::fflush(stdout);
             continue;
         }
+        // A day end started before the captains leave the stage-start
+        // sequence (the opening movie, NAVISTATE_Starting) never gives them
+        // control: every squad then falls out of formation and is left behind
+        // (fix1 probe), which real play cannot reach. Refuse SUNSET there.
+        const bool stageStart = gameflow.mMoviePlayer->mIsActive || (p1 && p1->getCurrState()->getID() == NAVISTATE_Starting)
+                             || (p2 && p2->getCurrState()->getID() == NAVISTATE_Starting);
+        if (ev.kind == PC_COOP_EVENT_SUNSET && stageStart) {
+            std::printf("[coop-policy] TEST refused tick=%u %s reason=stage-start\n", sCoopPolicy.tick, ev.text);
+            std::fflush(stdout);
+            continue;
+        }
         if (ev.kind == PC_COOP_EVENT_SUNSET) {
             // Gap-fix K (#885): jump to the day's end hour; RunningModeState::update
             // then runs the ordinary time-expiry day end (cleanupDayEnd, the
