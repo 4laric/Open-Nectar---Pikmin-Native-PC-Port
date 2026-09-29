@@ -85,6 +85,9 @@ struct PcConfig {
     // Hold Extract to keep plucking (0=off/faithful, 1=on). Off by default.
     int holdToPluck = 0;
     int whistlePluck = 0;
+    // Pikmin routing: 0 = the original greedy search, 1 = improved (shortest
+    // paths, onion rerouting, followers that route round walls). Off by default.
+    int smartRouting = 0;
     // What the mouse wheel does: 0 = pick the Pikmin colour to throw,
     // 1 = zoom the camera. One setting rather than two toggles, so the two
     // uses cannot both be on or both be off.
@@ -129,6 +132,7 @@ struct PcConfig {
         chainActions = 0;
         holdToPluck = 0;
         whistlePluck = 0;
+        smartRouting = 0;
         mouseWheelAction = 0;
         pikiLimit = 100;
         dayMinutes = 10;
@@ -307,10 +311,10 @@ constexpr int kSaturationStopCount = int(sizeof(kSaturationStops) / sizeof(kSatu
 bool sInModsSubmenu = false;
 int sModsSelection = 0;
 #if PIKI_DEBUG_KEYS
-constexpr int kModsRowCount = 8;
+constexpr int kModsRowCount = 9;
 #else
 // The debug row is the last one, so leaving it off simply shortens the list.
-constexpr int kModsRowCount = 7;
+constexpr int kModsRowCount = 8;
 #endif
 
 // Field-limit stops. 100 is what the original game uses.
@@ -756,6 +760,7 @@ void saveConfig() {
     out << "chainActions = " << sConfig.chainActions << "\n";
     out << "holdToPluck = " << sConfig.holdToPluck << "\n";
     out << "whistlePluck = " << sConfig.whistlePluck << "\n";
+    out << "smartRouting = " << sConfig.smartRouting << "\n";
     out << "mouseWheelAction = " << sConfig.mouseWheelAction << "\n";
     out << "pikiLimit = " << sConfig.pikiLimit << "\n";
     out << "dayMinutes = " << sConfig.dayMinutes << "\n";
@@ -859,6 +864,9 @@ void loadConfig() {
         }
         else if (key == "holdToPluck") {
             sConfig.holdToPluck = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "smartRouting") {
+            sConfig.smartRouting = atoi(val.c_str()) ? 1 : 0;
         }
         else if (key == "mouseWheelAction") {
             sConfig.mouseWheelAction = atoi(val.c_str());
@@ -1543,8 +1551,12 @@ void pollMenuInput() {
         else if (sModsSelection == 6) {
             if (left || right) sPending.whistlePluck = sPending.whistlePluck ? 0 : 1;
         }
-        // Debug shortcuts.
+        // Pikmin routing.
         else if (sModsSelection == 7) {
+            if (left || right) sPending.smartRouting = sPending.smartRouting ? 0 : 1;
+        }
+        // Debug shortcuts.
+        else if (sModsSelection == 8) {
             if (left || right) sPending.debugKeys = sPending.debugKeys ? 0 : 1;
         }
         return;
@@ -2635,6 +2647,7 @@ void pc_settings_draw(void) {
             "Pikmin Limit",
             "Day Length",
             "Whistle Pluck",
+            "Pikmin Routing",
 #if PIKI_DEBUG_KEYS
             "Debug Keys (F5/F6)",
 #endif
@@ -2664,6 +2677,9 @@ void pc_settings_draw(void) {
             } else if (i == 6) {
                 snprintf(value, sizeof(value), "%s", sPending.whistlePluck ? "On" : "Off (original)");
             } else if (i == 7) {
+                snprintf(value, sizeof(value), "%s",
+                         sPending.smartRouting ? "Improved" : "Original");
+            } else if (i == 8) {
                 snprintf(value, sizeof(value), "%s",
                          sPending.debugKeys ? "On" : "Off");
             } else if (i == 5) {
@@ -2715,6 +2731,17 @@ int pc_settings_get_whistle_pluck(void) {
 
 int pc_settings_get_hold_to_pluck(void) {
     return sConfig.holdToPluck;
+}
+
+int pc_settings_get_smart_routing(void) {
+    // NECTAR_SMART_ROUTING=0/1 overrides the menu, for fixtures and bot runs
+    // that start the game directly.
+    static int sEnvOverride = -2;
+    if (sEnvOverride == -2) {
+        const char* env = getenv("NECTAR_SMART_ROUTING");
+        sEnvOverride = (env && env[0]) ? (atoi(env) ? 1 : 0) : -1;
+    }
+    return sEnvOverride >= 0 ? sEnvOverride : sConfig.smartRouting;
 }
 
 int pc_settings_get_mouse_wheel_action(void) {

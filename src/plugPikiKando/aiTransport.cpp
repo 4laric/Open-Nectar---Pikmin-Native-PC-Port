@@ -1,5 +1,6 @@
 #include "pc_p2_purple.h"
 #include "pc_randomizer.h"
+#include "settings/pc_settings.h"
 #include "AIConstant.h"
 #include "AIPerf.h"
 #include "DebugLog.h"
@@ -609,6 +610,13 @@ void ActTransport::doLift()
 				nearestWP = routeMgr->findNearestWayPoint('test', mPiki->mSRT.t, landOnly);
 			}
 
+#if defined(PIKI_PC_PORT)
+			// Improved routing: start from whichever end of the edge makes the
+			// whole carry shortest, not simply the nearer one.
+			if (wpA && wpB && pc_settings_get_smart_routing()) {
+				nearestWP = routeMgr->pickRouteStart(mPiki->mSRT.t, wpA, wpB, mGoal->getRouteIndex(), landOnly);
+			}
+#endif
 			int idx       = nearestWP->mIndex;
 			int goalWPIdx = mGoal->getRouteIndex();
 			int maxNumWP  = routeMgr->getNumWayPoints('test') - 1;

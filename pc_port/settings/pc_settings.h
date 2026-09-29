@@ -54,6 +54,16 @@ int pc_settings_get_hold_to_pluck(void);
 // Optional whistle sprout emergence. Off by default.
 int pc_settings_get_whistle_pluck(void);
 
+// Returns 1 while "Pikmin Routing: Improved" is selected, 0 for the original.
+//
+// Retail routes Pikmin with a greedy search, builds the onion cost table from
+// its first answers, never re-routes carriers to a second-best route, and gives
+// followers no route at all. Improved swaps in shortest paths, turns the second-
+// best reroute on and lets followers route round walls to their leader. The
+// cost table is rebuilt at map load, so switching mid-level fully applies on
+// the next one. Off by default. NECTAR_SMART_ROUTING overrides it.
+int pc_settings_get_smart_routing(void);
+
 /// What the mouse wheel controls: 0 = Pikmin colour to throw, 1 = camera zoom.
 int pc_settings_get_mouse_wheel_action(void);
 
