@@ -370,7 +370,16 @@ struct Config {
     // beyond fp20 (130) and the tongue reach, so the King never attacks the
     // captain; he keeps throwing from there. 0 disables.
     float kingLowHp = 35.0f;
-    float lookStickScale = 0.24f; // 0.24*127 = 30 bytes: |stick| 0.41 (look band), no MSTICK bits (> 32)
+    float lookStickScale = 0.24f;
+    // #901 part gather: stand in this XZ ring around a dropped ship part and
+    // swarm (C-stick) the party onto it; formed Pikmin that touch a pellet
+    // with a free slot start carrying it (piki.cpp collisionCallback
+    // OBJTYPE_Pellet, distCheck true while the C-stick is held).
+    float partRingMin = 80.0f;
+    float partRingMax = 160.0f;
+    float partWhistleCooldown = 5.0f; // gap between gather whistles
+    float partFreeFar = 120.0f; // free-Pikmin centroid this far from the part: whistle there (carriers safe)
+ // 0.24*127 = 30 bytes: |stick| 0.41 (look band), no MSTICK bits (> 32)
 };
 
 // Power-mode effective withdraw targets (bot-v4, bot-v4b): up to ~100 Pikmin.
@@ -414,6 +423,15 @@ inline bool corpseDisplaced(float dx, float dz)
 struct Senses {
     bool enabled = false; // PIKMIN_RANDOMIZER_AUTOPLAY gate
     bool trackingPart = false; // #901: the tracked pellet is a dropped ship part
+    // #901 part gather (TEST-ONLY, read only while trackingPart): the
+    // captain's party (FormationMode Pikmin following him), idle FreeMode
+    // Pikmin near the part and their XZ centroid, and a latch that the part
+    // this engagement tracked has left the field (delivered to the ship).
+    int partyCount = 0;
+    int freeCount = 0;
+    float freeX = 0.0f;
+    float freeZ = 0.0f;
+    bool partGone = false;
     bool naviAlive = false; // controlled captain exists and is alive
     float dt = 0.016f; // logical tick length (seconds)
     // Geometry (world XZ). The Brain steers in world space; the driver
@@ -501,6 +519,10 @@ struct Command {
     // slides along the stick at mCursorMoveSpeed (navi.cpp:2475-2489,
     // 2531-2538). Used only by the King standoff hold.
     float stickScale = 1.0f;
+    // #901: world-space XZ C-stick (swarm) direction; (0,0) = C-stick idle.
+    // The driver converts it through the camera basis like moveX/moveZ.
+    float swarmX = 0.0f;
+    float swarmZ = 0.0f;
 };
 
 struct Result {
@@ -552,6 +574,10 @@ public:
         amHadEnough = false; // bot-v7: the lift was viable (escorted)
         amLastCrew = 0; // bot-v7: high-water crew for SeedGrow progress
         amGrowStill = 0.0f; // bot-v7: time without crew growth in SeedGrow
+        pgWhistle = 0.0f;
+        pgCooldown = 0.0f;
+        pgLogTime = 0.0f;
+        pgSawPart = false;
         withdrawCycles = 0;
         throwSpin = 0.0f;
         kingBacking = false;
@@ -1152,6 +1178,29 @@ private:
         // Pikmin at the navi 36-65 u from the corpse so no carry ever
         // initiates (v4b diagnosis). Deliver with stick + throws only.
         const bool carryActive = in.transportSeen || in.carryCount > 0 || in.pelletCarriers > 0;
+        if (in.trackingPart) pgSawPart = true;
+        if (pgSawPart && in.partGone) {
+            // #901: the tracked ship part left the field (sucked into the
+            // ship: UfoItem::finishSuck -> pc_bbft_check). The CHECK line in
+            // the log is the evidence; the bot just scores and moves on.
+            char buf[160];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_PART_GONE token=%u seconds=%.0f bot-driven",
+                          in.targetToken, stateTime);
+            markers.emplace_back(buf);
+            finishTarget(in, /*killed*/ false);
+            return;
+        }
+        if (in.trackingPart && tickPartGather(dt, in)) {
+            // #901: a short ship-part crew is gathered by whistle + swarm, not
+            // by the corpse throw/re-seed cycle (throws overshoot a big part:
+            // r4 crew 12/20 after three re-seeds). Same window as a corpse.
+            const float waitBase = (sawKill || sawDamage) ? cfg.receiptTimeout : cfg.aftermathTimeout;
+            if (stateTime >= waitBase * 2.0f) {
+                giveUpAftermath(in, "part_short_crew");
+                finishTarget(in, /*killed*/ false);
+            }
+            return;
+        }
         if (sawReceipt) {
             // Onion receipt landed: score it promptly. received=1 comes ONLY
             // from this token's own ledger line; bystander CHECK
@@ -1350,6 +1399,63 @@ private:
             // bot-deliver (#871): killed from sawKill, not claimed (55 fix).
             finishTarget(in, /*killed*/ false);
         }
+    }
+
+    // #901 part gather (TEST-ONLY bot). Returns false once the crew meets the
+    // part's declared minimum, so the normal escort follows the haul to the
+    // ship. Pad-only: stick + B (gather whistle) + C-stick (swarm).
+    bool tickPartGather(float dt, const Senses& in)
+    {
+        const int crew = in.pelletCarriers > 0 ? in.pelletCarriers : in.carryCount;
+        if (in.carryWant > 0 && crew >= in.carryWant) {
+            pgWhistle = 0.0f;
+            return false;
+        }
+        if (pgCooldown > 0.0f) pgCooldown -= dt;
+        const int need = in.carryWant > 0 ? in.carryWant - crew : 10;
+        const float fdx = in.freeX - in.tgtX, fdz = in.freeZ - in.tgtZ;
+        const bool freeFar = fdx * fdx + fdz * fdz > cfg.partFreeFar * cfg.partFreeFar;
+        pgLogTime -= dt;
+        if (pgLogTime <= 0.0f) {
+            pgLogTime = 5.0f;
+            char buf[200];
+            std::snprintf(buf, sizeof(buf),
+                          "AUTOPLAY_PART_GATHER crew=%d want=%d party=%d free=%d free_far=%d tdist=%.0f bot-driven",
+                          crew, in.carryWant, in.partyCount, in.freeCount, freeFar ? 1 : 0, in.targetDist);
+            markers.emplace_back(buf);
+        }
+        if (pgWhistle <= 0.0f && pgCooldown <= 0.0f && in.partyCount < need && in.freeCount >= 3
+            && (freeFar || crew * 2 < in.carryWant || in.carryWant <= 0)) {
+            // Idle Pikmin are not in the party: call them. Whistling over the
+            // part also calls its crew, so that happens only while the crew is
+            // under half the minimum (they rejoin the swarm right away).
+            pgWhistle = cfg.whistleHold;
+            pgCooldown = cfg.partWhistleCooldown + cfg.whistleHold;
+        }
+        if (pgWhistle > 0.0f) {
+            pgWhistle -= dt;
+            // Walk the cursor (ahead of the captain) over the idle Pikmin.
+            steer(in.naviX, in.naviZ, in.freeX, in.freeZ);
+            lastCommand.buttons |= PadB;
+            return true;
+        }
+        // Swarm: hold the ring around the part and push the party into it.
+        if (in.waypointLeg && in.targetDist > cfg.partRingMax) {
+            steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+        } else if (in.targetDist > cfg.partRingMax) {
+            steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+        } else if (in.targetDist < cfg.partRingMin) {
+            steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+        }
+        if (in.targetDist < 2.5f * cfg.partRingMax) {
+            const float dx = in.tgtX - in.naviX, dz = in.tgtZ - in.naviZ;
+            const float len = std::sqrt(dx * dx + dz * dz);
+            if (len > 1.0f) {
+                lastCommand.swarmX = dx / len;
+                lastCommand.swarmZ = dz / len;
+            }
+        }
+        return true;
     }
 
     void tickDone(float dt, const Senses& in)
@@ -1698,6 +1804,10 @@ private:
     bool amHadEnough = false; // bot-v7: the lift escorted (viable) before shrinking
     int amLastCrew = 0; // bot-v7: high-water crew for SeedGrow progress
     float amGrowStill = 0.0f; // bot-v7: time without crew growth in SeedGrow
+    float pgWhistle = 0.0f; // #901: remaining gather-whistle hold
+    float pgCooldown = 0.0f; // #901: time until the next gather whistle may start
+    float pgLogTime = 0.0f; // #901: AUTOPLAY_PART_GATHER rate limit
+    bool pgSawPart = false; // #901: this aftermath tracked a dropped ship part
     float initialHealthFrac = 1.0f;
     bool sawDamage = false;
     bool sawKill = false; // generic death latched (any species)

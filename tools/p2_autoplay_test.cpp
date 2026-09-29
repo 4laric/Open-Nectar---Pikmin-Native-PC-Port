@@ -2932,6 +2932,63 @@ void testKingEvadeLongSim()
     CHECK(low.bitten == 0 && low.presses == 0 && low.hp >= 30.0f, "king_long/low_hp_no_damage");
 }
 
+void testPartGatherSwarm()
+{
+    // #901: a dropped ship part short of its minimum is gathered by a whistle
+    // over idle Pikmin, then a C-stick swarm onto the part (never throws);
+    // a full crew escorts; the part leaving the field scores the target.
+    p2autoplay::Config cfg;
+    cfg.whistleHold = 0.2f;
+    cfg.partWhistleCooldown = 0.5f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 90;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 901001;
+    s.targetSource = 44;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.tgtX = 100.0f;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetHealthFrac = 0.5f;
+    brain.update(0.05f, s);
+    s.targetAlive = false;
+    s.targetDead = true;
+    s.trackingPart = true;
+    s.carryWant = 20;
+    s.pelletCarriers = 2;
+    s.carryCount = 2;
+    s.transportSeen = true;
+    s.partyCount = 5;
+    s.freeCount = 40;
+    s.freeX = 400.0f;
+    s.freeZ = 0.0f;
+    s.targetDist = 100.0f;
+    brain.update(0.05f, s); // attack sees the death -> aftermath
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "part/aftermath");
+    brain.update(0.05f, s);
+    CHECK(brain.command().buttons & unsigned(p2autoplay::PadB), "part/whistles_idle_squad");
+    CHECK(brain.command().moveX > 0.5f, "part/whistle_walks_to_idle");
+    for (int i = 0; i < 6; ++i) brain.update(0.05f, s); // whistle ends
+    s.partyCount = 60;
+    brain.update(0.05f, s);
+    CHECK(!(brain.command().buttons & unsigned(p2autoplay::PadB)), "part/no_whistle_with_party");
+    CHECK(!(brain.command().buttons & unsigned(p2autoplay::PadA)), "part/no_throws");
+    CHECK(brain.command().swarmX > 0.9f, "part/swarms_at_part");
+    s.pelletCarriers = 20;
+    s.carryCount = 20;
+    brain.update(0.05f, s);
+    CHECK(brain.command().swarmX == 0.0f && brain.command().swarmZ == 0.0f, "part/full_crew_no_swarm");
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "part/escorts");
+    s.partGone = true;
+    brain.update(0.05f, s);
+    const std::vector<std::string> got = brain.takeMarkers();
+    CHECK(hasMarker(got, "AUTOPLAY_PART_GONE token=901001"), "part/gone_marker");
+    CHECK(hasMarker(got, "AUTOPLAY_RESULT target=901001"), "part/result");
+}
+
 int main()
 {
     testGate();
@@ -2979,6 +3036,7 @@ int main()
     testKingStandoffOpensGate();
     testKingEvadePolicy();
     testKingEvadeLongSim();
+    testPartGatherSwarm();
     if (failures == 0) {
         std::printf("PASS p2_autoplay\n");
         return 0;

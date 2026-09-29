@@ -155,6 +155,9 @@ struct Engagement {
     // the dead body exists (pellet config lookup key).
     int carryWant = 0;
     int hostType = -1;
+    // #901: the dropped ship part this engagement tracked (config pointers are
+    // static in pelletMgr), latched so its departure (ship suck) is sensed.
+    const PelletConfig* partConfig = nullptr;
 };
 
 p2autoplay::Brain sBrain;
@@ -446,7 +449,9 @@ void pc_p2_autoplay_tick(void)
 
     // --- Pikmin census (read-only, except bot-v4 power-mode flowering) ---
     int alive = 0, nearCount = 0, farCount = 0, transport = 0, distress = 0;
+    int partyCount = 0; // #901: FormationMode Pikmin following this captain
     std::vector<std::pair<float, float>> transportPos;
+    std::vector<std::pair<float, float>> freePos; // #901: idle FreeMode Pikmin
     const bool powerMode = p2autoplay::isPowerEnabled();
     {
         Iterator it(pikiMgr);
@@ -462,6 +467,8 @@ void pc_p2_autoplay_tick(void)
                 ++transport;
                 transportPos.emplace_back(p->getPosition().x, p->getPosition().z);
             }
+            if (p->mMode == PikiMode::FormationMode && p->mNavi == navi) ++partyCount;
+            if (p->mMode == PikiMode::FreeMode) freePos.emplace_back(p->getPosition().x, p->getPosition().z);
             // bot-v4 power mode: flowers through the normal maturity path
             // (virtual ViewPiki::setFlower, the same call the nectar GrowUp,
             // Onion exit, and pluck paths use). No direct mHappa pokes.
@@ -697,8 +704,11 @@ void pc_p2_autoplay_tick(void)
     sEngage.pelletFound = false;
     sEngage.pelletCarriers = 0;
     Pellet* trackedPellet = nullptr; // bot-v7: live corpse pellet for carryWant
-    if (sEngage.token && sEngage.deadLatch && pelletMgr && !sEngage.bodyPresent) {
-        float best2 = 600.0f * 600.0f;
+    if (sEngage.token && sEngage.deadLatch && pelletMgr) {
+        // #901: while the dead host still lingers, only the ship part it
+        // dropped beside it is tracked (the corpse pellet does not exist yet).
+        const bool partsOnly = sEngage.bodyPresent;
+        float best2 = (partsOnly ? 300.0f : 600.0f) * (partsOnly ? 300.0f : 600.0f);
         Pellet* best = nullptr;
         bool bestPart = false;
         Iterator pit(pelletMgr);
@@ -712,6 +722,7 @@ void pc_p2_autoplay_tick(void)
             // #901: a ship part the target dropped outranks its corpse, so the
             // bot escorts the part to the ship (the check under test).
             const bool part = pel->isUfoParts();
+            if (partsOnly && !part) continue;
             if (bestPart && !part) continue;
             if ((part && !bestPart && d2 < 600.0f * 600.0f) || d2 < best2) {
                 best2 = d2;
@@ -725,6 +736,22 @@ void pc_p2_autoplay_tick(void)
             sEngage.lastX = best->getPosition().x;
             sEngage.lastZ = best->getPosition().z;
             trackedPellet = best;
+            if (bestPart) sEngage.partConfig = best->mConfig;
+        }
+    }
+    // #901: the latched part left the field (no live part pellet of that
+    // config remains): it was sucked into the ship.
+    bool partGone = false;
+    if (sEngage.partConfig && pelletMgr) {
+        partGone = true;
+        Iterator git(pelletMgr);
+        CI_LOOP(git)
+        {
+            Pellet* pel = static_cast<Pellet*>(*git);
+            if (pel && pel->isAlive() && pel->mConfig == sEngage.partConfig) {
+                partGone = false;
+                break;
+            }
         }
     }
 
@@ -797,6 +824,22 @@ void pc_p2_autoplay_tick(void)
     senses.pelletCarriers = sEngage.pelletCarriers;
     senses.carryWant = sEngage.carryWant; // bot-v7: declared minimum (0 = unknown)
     senses.trackingPart = trackedPellet && trackedPellet->isUfoParts();
+    senses.partGone = partGone;
+    senses.partyCount = partyCount;
+    if (senses.trackingPart) {
+        // Idle Pikmin within 600 u of the part, and their centroid.
+        float sx = 0.0f, sz = 0.0f;
+        int n = 0;
+        for (const auto& fp : freePos) {
+            if (distXZ(fp.first, fp.second, sEngage.lastX, sEngage.lastZ) > 600.0f) continue;
+            sx += fp.first;
+            sz += fp.second;
+            ++n;
+        }
+        senses.freeCount = n;
+        senses.freeX = n ? sx / float(n) : sEngage.lastX;
+        senses.freeZ = n ? sz / float(n) : sEngage.lastZ;
+    }
     senses.pelletExists = sEngage.bodyPresent || sEngage.pelletFound || !sEngage.deadLatch;
     senses.corpseMoving = corpseMoving;
     senses.corpseMoved = corpseMoved;
@@ -969,7 +1012,26 @@ void pc_p2_autoplay_tick(void)
         if (stickY > 32) buttons |= unsigned(p2autoplay::PadMainUp);
         else if (stickY < -32) buttons |= unsigned(p2autoplay::PadMainDown);
     }
+    // #901: C-stick swarm through the same camera basis (Navi::makeCStick
+    // rotates (subX, -subY) by the camera yaw, like the main stick).
+    int subX = 0, subY = 0;
+    if (cmd.swarmX != 0.0f || cmd.swarmZ != 0.0f) {
+        float yaw = 0.0f;
+        if (navi->mNaviCamera) yaw = std::atan2(navi->mNaviCamera->mViewXAxis.z, navi->mNaviCamera->mViewXAxis.x);
+        const float c = std::cos(yaw), s = std::sin(yaw);
+        const float lx = c * cmd.swarmX + s * cmd.swarmZ;
+        const float lz = -s * cmd.swarmX + c * cmd.swarmZ;
+        const float sx = lx > 1.0f ? 1.0f : (lx < -1.0f ? -1.0f : lx);
+        const float sy = lz > 1.0f ? -1.0f : (lz < -1.0f ? 1.0f : -lz);
+        subX = int(sx * 72.0f);
+        subY = int(sy * 72.0f);
+        if (subX > 32) buttons |= unsigned(p2autoplay::PadCStickRight);
+        else if (subX < -32) buttons |= unsigned(p2autoplay::PadCStickLeft);
+        if (subY > 32) buttons |= unsigned(p2autoplay::PadCStickUp);
+        else if (subY < -32) buttons |= unsigned(p2autoplay::PadCStickDown);
+    }
     pc_p2_input_script_set(1, buttons, stickX, stickY);
+    pc_p2_input_script_set_sub(1, subX, subY);
 
     // --- Withdraw diagnostics (bot-driven): proves the captain closes to
     // the real container trigger instead of stalling at arriveRadius. ---
