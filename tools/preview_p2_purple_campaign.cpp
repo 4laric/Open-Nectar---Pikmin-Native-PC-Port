@@ -1,5 +1,10 @@
-// Isolated actual-engine storage fixture. Purple identity/maturity are injected;
-// this does not certify natural conversion, combat, carry, or player controls.
+// Isolated engine fixture. Each optional mode needs its own runtime evidence.
+// P2_PURPLE_DAYEND=1: after storage tests, drive ordinary sunset/results/save.
+// P2_PURPLE_RESUME=1 + P2_PURPLE_EXPECT_DAY=<emitted expected_day>: verify a
+// fresh-process native campaign restore without injecting population/day/save.
+// The harness MUST additionally require the production CAMPAIGN_SAVED log in
+// the day-end run. This fixture never invokes a checkpoint writer directly.
+// Scripted setup/input and injected maturity do not certify player controls.
 #include <SDL2/SDL.h>
 #include "system.h"
 #include "App.h"
@@ -12,6 +17,9 @@
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "PikiState.h"
+#include "PikiAI.h"
+#include "Pellet.h"
+#include "MapMgr.h"
 #include "PikiHeadItem.h"
 #include "Pom.h"
 #include "Boss.h"
@@ -23,6 +31,10 @@
 #include "pc_p2_ship.h"
 #include "pc_p2_ship_store.h"
 #include "pc_p2_purple.h"
+#include "pc_p2_input_script.h"
+#include "Dolphin/pad.h"
+#include "gameflow.h"
+#include "WorldClock.h"
 #include "pc_window.h"
 #include "pc_gpu_preference.h"
 #include "pc_bbft.h"
@@ -44,8 +56,103 @@ static void require(bool ok, const char* why) {
 class PurpleCampaignApp : public PlugPikiApp {
     int ticks = 0;
     bool captainSeen = false;
-    int phase = 0, phaseTicks = 0, startingField = 0;
+    int phase = 0, phaseTicks = 0, startingField = 0, pluckAttempts = 0;
     Piki* input = nullptr;
+    Piki* acquired = nullptr;
+    Pellet* cargo = nullptr;
+    Piki* controlRed = nullptr;
+    Vector3f cargoStart;
+    int carryPhase = 0, carryTicks = 0;
+    bool carryStep(Navi* n, Piki* purple) {
+        ++carryTicks;
+        auto assign = [&](Piki* p) {
+            p->mActiveAction->abandon(nullptr);
+            p->mActiveAction->mCurrActionIdx = PikiAction::Transport;
+            p->mActiveAction->mChildActions[PikiAction::Transport].initialise(cargo);
+            p->mMode = PikiMode::TransportMode;
+        };
+        auto release = [&](Piki* p) {
+            p->mActiveAction->abandon(nullptr);
+            p->changeMode(PikiMode::FormationMode, n);
+        };
+        if (carryPhase == 0) {
+            Iterator bodies(pikiMgr);
+            CI_LOOP(bodies) {
+                Piki* p = static_cast<Piki*>(*bodies);
+                if (p->isAlive() && !pc_p2_is_purple(p) && p->getState() == PIKISTATE_Normal
+                    && p->mMode == PikiMode::FormationMode) { controlRed = p; break; }
+            }
+            require(controlRed != nullptr, "carry control unavailable");
+            cargo = pelletMgr->newNumberPellet(Red, NUMPEL_TenPellet);
+            require(cargo && cargo->mConfig->mCarryMinPikis() == 10, "loaded native ten pellet unavailable");
+            Vector3f pos = n->mSRT.t + Vector3f(80, 0, 0);
+            pos.y = mapMgr->getMinY(pos.x, pos.z, true) + 5;
+            cargo->init(pos); cargo->startAI(0);
+            carryPhase = 1; carryTicks = 0;
+            std::puts("P2_PURPLE_CARRY_BEGIN injected_cargo=1 native_weight=10 scripted_assignment=1");
+        } else if (carryPhase == 1 && carryTicks >= 60) {
+            cargoStart = cargo->mSRT.t; assign(controlRed); carryPhase = 2; carryTicks = 0;
+        } else if (carryPhase >= 2) {
+            require(cargo->isAlive(), "carry cargo disappeared before movement observation");
+            const Vector3f d = cargo->mSRT.t - cargoStart;
+            const float distanceSquared = d.x*d.x + d.z*d.z;
+            if (carryPhase == 2) {
+                require(distanceSquared < 4, "one ordinary Pikmin moved native ten pellet");
+                if (cargo->mCarrierCounter == 1 && carryTicks >= 120) {
+                    release(controlRed); assign(purple); carryPhase = 3; carryTicks = 0;
+                    std::puts("P2_PURPLE_CARRY_RED_CONTROL_PASS strength=1 displacement_under_2=1");
+                }
+            } else {
+                int attached = 0; Iterator bodies(pikiMgr);
+                CI_LOOP(bodies) if (static_cast<Piki*>(*bodies)->getStickObject() == cargo) ++attached;
+                require(cargo->mCarrierCounter <= 10, "unexpected extra carrier strength");
+                if (cargo->mCarrierCounter == 10 && attached == 1 && distanceSquared > 100) {
+                    std::printf("P2_PURPLE_CARRY_PASS strength=10 attached=1 distance=%.2f native_transport=1 injected_cargo=1 scripted_assignment=1\n",std::sqrt(distanceSquared));
+                    release(purple); cargo->kill(false); return true;
+                }
+            }
+            if (carryTicks % 120 == 0) std::printf("P2_PURPLE_CARRY_PROGRESS phase=%d strength=%d distance=%.2f\n", carryPhase,cargo->mCarrierCounter,std::sqrt(distanceSquared));
+        }
+        require(carryTicks < 1800, "native ten-strength carry timeout");
+        return false;
+    }
+    bool sunsetRequested = false, sunsetSeen = false;
+    int sunsetTicks = 0, sunsetDay = -1, expectedDay = -1, resumeReady = 0;
+    unsigned saveIndexBefore = 0;
+    static bool flowerStockOne() {
+        return p2ship::stock.total() == 1 && p2ship::stock.counts[0][Flower] == 1;
+    }
+    static void finishSuccess(const char* marker) {
+        pc_p2_input_script_clear(1);
+        std::puts(marker); std::fflush(nullptr); std::_Exit(0);
+    }
+    bool advanceSunset() {
+        require(++sunsetTicks < 9000, "ordinary sunset/results/save timeout");
+        require(gameflow.mCurrGameSectionID == SECTION_OnePlayer, "sunset left ordinary one-player section");
+        require(flowCont.mGameEndFlag == GAMEEND_None, "sunset became extinction/captain-down/endgame");
+        if (gameflow.mIsDayEndActive) sunsetSeen = true;
+        require(gameflow.mWorldClock.mCurrentDay <= expectedDay, "unexpected extra day advance");
+        // A fresh native save index is updated AFTER memoryCard.cpp calls the
+        // campaign writer. The external harness must still require its log.
+        if (sunsetSeen && gameflow.mGamePrefs.mMostRecentSaveIndex != saveIndexBefore) {
+            require(gameflow.mGamePrefs.mHasSaveGame, "native save completion flag missing");
+            require(gameflow.mWorldClock.mCurrentDay == expectedDay, "save did not advance expected day");
+            require(flowerStockOne(), "sunset stock/maturity not conserved");
+            std::printf("P2_PURPLE_DAYEND_EVIDENCE day_before=%d expected_day=%d day=%d stock=1 flower=1 native_save_index_before=%u native_save_index_after=%u external_campaign_saved_required=1\n",
+                sunsetDay, expectedDay, gameflow.mWorldClock.mCurrentDay, saveIndexBefore,
+                unsigned(gameflow.mGamePrefs.mMostRecentSaveIndex));
+            finishSuccess("P2_PURPLE_DAYEND_NATIVE_SAVE_OBSERVED external_CAMPAIGN_SAVED_required=1 fresh_process_resume_pending=1");
+        }
+        // Remain input-neutral during the sunset itself. Once the ordinary
+        // sequence advances the day, edge-triggered A drives diary/results/save.
+        const bool confirming = sunsetSeen && gameflow.mWorldClock.mCurrentDay == expectedDay;
+        pc_p2_input_script_set(1, confirming && (sunsetTicks % 20 < 4) ? PAD_BUTTON_A : 0, 0, 0);
+        if (sunsetTicks % 120 == 0)
+            std::printf("P2_PURPLE_DAYEND_PROGRESS ticks=%d active=%d day=%d stock=%d save_index=%u\n",
+                sunsetTicks, int(gameflow.mIsDayEndActive), gameflow.mWorldClock.mCurrentDay,
+                p2ship::stock.total(), unsigned(gameflow.mGamePrefs.mMostRecentSaveIndex));
+        return true;
+    }
     Piki* naturalStep(Navi* n) {
         ++phaseTicks;
         Pom* violet = nullptr; int count = 0;
@@ -83,6 +190,11 @@ class PurpleCampaignApp : public PlugPikiApp {
             CI_LOOP(heads) {
                 PikiHeadItem* h = static_cast<PikiHeadItem*>(*heads);
                 if (h && h->isAlive() && h->mP2Purple && h->canPullout()) {
+                    // Fixture staging bypasses captain approach/pathfinding only.
+                    // The sprout stays where native Violet conversion placed it.
+                    n->resetPosition(h->mSRT.t + Vector3f(-12,0,0));
+                    ++pluckAttempts;
+                    std::printf("P2_PURPLE_PLUCK_ATTEMPT attempt=%d captain_position_staged=1 native_pluck=1 pathfinding_validated=0 player_controls_validated=0\n", pluckAttempts);
                     n->mSproutToPluck=h; n->mPikiToPluck=nullptr;
                     n->mStateMachine->transit(n,NAVISTATE_NukuAdjust);
                     phase=2; phaseTicks=0; input=nullptr;
@@ -102,6 +214,21 @@ class PurpleCampaignApp : public PlugPikiApp {
                 }
             }
         }
+        if (phase == 2 && phaseTicks > 0 && phaseTicks % 180 == 0) {
+            Iterator retryHeads(itemMgr->getPikiHeadMgr());
+            CI_LOOP(retryHeads) {
+                PikiHeadItem* h = static_cast<PikiHeadItem*>(*retryHeads);
+                if (!h || !h->isAlive() || !h->mP2Purple || !h->canPullout()) continue;
+                require(pluckAttempts < 3, "native pluck failed after three staged attempts");
+                n->resetPosition(h->mSRT.t + Vector3f(-12,0,0));
+                ++pluckAttempts;
+                std::printf("P2_PURPLE_PLUCK_ATTEMPT attempt=%d captain_position_staged=1 retry=1 phase_ticks=%d native_pluck=1 pathfinding_validated=0 player_controls_validated=0\n",
+                    pluckAttempts, phaseTicks);
+                n->mSproutToPluck = h; n->mPikiToPluck = nullptr;
+                n->mStateMachine->transit(n, NAVISTATE_NukuAdjust);
+                break;
+            }
+        }
         if(phaseTicks%120==0) std::printf("P2_PURPLE_NATURAL_PROGRESS phase=%d ticks=%d violet_state=%d\n",phase,phaseTicks,violet?violet->getCurrentState():-1);
         require(phaseTicks<1800,"natural acquisition timeout"); return nullptr;
     }
@@ -113,8 +240,23 @@ public:
             captainSeen = true;
             p2_fixture_require_captain(GameStat::orimaDead,
                 n->getCurrState() && n->getCurrState()->getID() == NAVISTATE_Dead, n->mHealth, ticks);
-        } else require(!captainSeen, "captain disappeared");
-        require(++ticks < 6000, "startup timeout");
+        } else {
+            // exitStage clears naviMgr during ordinary one-player teardown.
+            // Only tolerate absence after observing our requested sunset; never
+            // hide a live captain death, including while paused or in a movie.
+            const bool expectedTeardown = sunsetRequested && sunsetSeen
+                && gameflow.mCurrGameSectionID == SECTION_OnePlayer
+                && flowCont.mGameEndFlag == GAMEEND_None
+                && gameflow.mWorldClock.mCurrentDay == expectedDay && flowerStockOne();
+            require(!captainSeen || expectedTeardown, "captain disappeared outside expected sunset teardown");
+        }
+        require(++ticks < (sunsetRequested ? 15000 : 6000), "fixture timeout");
+        if (sunsetRequested) {
+            advanceSunset();
+            if (gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive)
+                gameflow.mMoviePlayer->requestSkip();
+            return result;
+        }
         if (std::getenv("P2_PURPLE_NATURAL") && ticks % 120 == 0)
             std::printf("P2_PURPLE_GATE tick=%d navi=%d pause=%d ui=%d movie=%d phase=%d input_state=%d\n", ticks,
                 n && n->getCurrState() ? n->getCurrState()->getID() : -1,
@@ -130,9 +272,32 @@ public:
         const int naviState = n->getCurrState()->getID();
         // Native idle is healthy and expected after ten seconds without input.
         // Do not stall sprout observation just because the captain stops walking.
-        if (naviState != NAVISTATE_Walk && !(natural && naviState == NAVISTATE_Idle)) return result;
+        if (naviState != NAVISTATE_Walk && !((natural || std::getenv("P2_PURPLE_RESUME")) && naviState == NAVISTATE_Idle)) return result;
+        if (std::getenv("P2_PURPLE_RESUME")) {
+            require(pc_randomizer_resumed(), "resume mode loaded no native campaign checkpoint");
+            const char* expected = std::getenv("P2_PURPLE_EXPECT_DAY");
+            require(expected && *expected, "resume requires P2_PURPLE_EXPECT_DAY from prior evidence");
+            char* end = nullptr; const long day = std::strtol(expected, &end, 10);
+            require(end && !*end && day > 0 && day < 100000, "invalid expected resume day");
+            require(gameflow.mWorldClock.mCurrentDay == day, "native resumed day mismatch");
+            require(flowerStockOne(), "native resumed Purple stock/maturity mismatch");
+            // Reach a healthy, unpaused, post-intro stage for multiple frames.
+            if (++resumeReady >= 60) {
+                Piki* purple = pc_p2_ship_withdraw(n, 3);
+                require(purple && pc_p2_is_purple(purple) && purple->mHappa == Flower,
+                    "resumed stock cannot withdraw as Flower Purple");
+                require(p2ship::stock.total() == 0 && pc_p2_ship_deposit(purple) && flowerStockOne(),
+                    "resumed withdrawal/deposit conservation");
+                std::printf("P2_PURPLE_NATIVE_RESUME_EVIDENCE day=%d stock=1 flower=1 checkpoint_resumed=1 injected_population=0\n", int(day));
+                finishSuccess("P2_PURPLE_NATIVE_RESUME_PASS fresh_process_required=1");
+            }
+            return result;
+        }
         Piki* picked = nullptr;
-        if (natural) picked = naturalStep(n);
+        if (natural) {
+            if (!acquired) acquired = naturalStep(n);
+            picked = acquired;
+        }
         else {
             Iterator it(pikiMgr);
             CI_LOOP(it) {
@@ -141,6 +306,7 @@ public:
             }
         }
         if (!picked) return result;
+        if (std::getenv("P2_PURPLE_CARRY") && !carryStep(n, picked)) return result;
         require(pc_randomizer_purple_campaign() && pc_p2_purples_enabled(), "ordinary opt-in not ready");
         picked->setFlower(Flower); if (!natural) pc_p2_make_purple(picked);
         GameStat::update();
@@ -169,11 +335,39 @@ public:
         sprout->setColor(Red); loaded.doRestore(sprout);
         require(sprout->mP2Purple && sprout->mFlowerStage == Bud, "buried save identity/maturity");
         std::printf("P2_PURPLE_CAMPAIGN_STORAGE_PASS injected_identity=%d injected_maturity=1 live_squad=1 population_conserved=1 red_stock_unchanged=1\n",int(!natural));
+        if (std::getenv("P2_PURPLE_DAYEND")) {
+            require(ship == 0 && flowerStockOne(), "day-end fixture requires fresh empty ship baseline");
+            // This serialization-only test sprout never ran startAI, so it has
+            // no mePikis accounting or emitted effects. Return its pool slot
+            // directly; PikiHeadItem::doKill would invent a pluck work counter.
+            itemMgr->kill(sprout);
+            GameStat::update();
+            require(int(GameStat::mapPikis) == field - 1, "test sprout retirement changed population");
+            restored = pc_p2_ship_withdraw(n, 3);
+            require(restored && restored->mHappa == Flower && pc_p2_is_purple(restored)
+                && restored->mMode == PikiMode::FormationMode && int(GameStat::mapPikis) == field
+                && p2ship::stock.total() == 0, "sunset Purple setup");
+            sunsetDay = gameflow.mWorldClock.mCurrentDay;
+            expectedDay = pc_randomizer_next_day(sunsetDay);
+            require(expectedDay == sunsetDay + 1, "fixture requires ordinary next-day advance");
+            saveIndexBefore = gameflow.mGamePrefs.mMostRecentSaveIndex;
+            require(flowCont.mGameEndFlag == GAMEEND_None, "sunset initial endgame flag");
+            sunsetRequested = true; input = nullptr;
+            pc_p2_input_script_set(1, 0, 0, 0);
+            std::printf("P2_PURPLE_DAYEND_BEGIN day=%d expected_day=%d field=%d stock=0 flower_in_formation=1 injected_maturity=1\n",
+                sunsetDay, expectedDay, field);
+            // Natural PlayingGameModeState end-hour branch starts sunset. Do
+            // not call cleanupDayEnd/exitDayEnd or any save routine directly.
+            gameflow.mWorldClock.setTime(gameflow.mParameters->mEndHour());
+            return result;
+        }
         std::fflush(nullptr); std::_Exit(0);
     }
 };
 int main(int argc, char** argv) {
     if (std::getenv("P2_FIXTURE_FORCE_CAPTAIN_DOWN")) p2_fixture_require_captain(false, false, 0, 0);
+    require(!(std::getenv("P2_PURPLE_DAYEND") && std::getenv("P2_PURPLE_RESUME")), "dayend/resume modes are exclusive");
+    require(!std::getenv("P2_PURPLE_CARRY") || std::getenv("P2_PURPLE_NATURAL"), "carry mode requires natural acquisition");
     setvbuf(stdout, nullptr, _IONBF, 0);
     SDL_SetMainReady(); pc_gpu_preference_apply();
     pc_bbft_init(argc, argv);
