@@ -69,6 +69,7 @@ bool gBarrierLocalOk = false;
 unsigned long long gBarrierGen = 0;
 std::string gBarrierSav;
 std::filesystem::path gCamp;
+std::filesystem::path gRoot;
 
 #define CHECK(cond, what)                                                   \
 	do {                                                                    \
@@ -181,6 +182,8 @@ bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long ge
 		      "after the retraction the newest checkpoint is the last agreed one");
 		std::printf("pc_randomizer_campaign_net_test client-abandon: %s (%d failures)\n",
 		            gFailures == 0 ? "PASS" : "FAIL", gFailures);
+		std::error_code ec;
+		if (gFailures == 0) std::filesystem::remove_all(gRoot, ec); // best effort
 		std::exit(gFailures == 0 ? 0 : 1);
 	}
 	*hostOk = gBarrierHostOk;
@@ -203,8 +206,11 @@ int main(int argc, char** argv)
 	namespace fs = std::filesystem;
 	if (role == "host-stale-foreign" || role == "host-stale-badname") {
 		// Parent: the fatal path must exit 2 with the historical message.
-		const fs::path out = fs::current_path() / ("campaign_net_" + role + "_" + std::to_string(CAMPAIGN_NET_TEST_PID) + ".log");
-		const int rc = run_child(argv[0], role + "-child", out);
+		const std::string tag = std::to_string(CAMPAIGN_NET_TEST_PID);
+		const fs::path out = fs::current_path() / ("campaign_net_" + role + "_" + tag + ".log");
+		// The child uses this process's pid as its folder tag, so the parent
+		// can remove the child's fixture folder afterwards.
+		const int rc = run_child(argv[0], role + "-child " + tag, out);
 		const std::string text = slurp(out);
 		const std::string want = role == "host-stale-foreign"
 		                           ? "[Pikmin Randomizer] campaign checkpoint header/seed mismatch; preserve campaign files for recovery"
@@ -215,12 +221,16 @@ int main(int argc, char** argv)
 		std::printf("child exit %d, output:\n%s", rc, text.c_str());
 		std::error_code ec;
 		fs::remove(out, ec);
+		if (gFailures == 0) fs::remove_all(fs::current_path() / ("campaign_net_" + role + "-child_" + tag), ec);
 		std::printf("pc_randomizer_campaign_net_test %s: %s (%d failures)\n", role.c_str(),
 		            gFailures == 0 ? "PASS" : "FAIL", gFailures);
 		return gFailures == 0 ? 0 : 1;
 	}
 	gHost = role == "host" || role == "host-stale-foreign-child" || role == "host-stale-badname-child";
-	const fs::path root = fs::current_path() / ("campaign_net_" + role + "_" + std::to_string(CAMPAIGN_NET_TEST_PID));
+	// A child role gets its folder tag from the parent (argv[2]).
+	const std::string tag = argc > 2 ? std::string(argv[2]) : std::to_string(CAMPAIGN_NET_TEST_PID);
+	const fs::path root = fs::current_path() / ("campaign_net_" + role + "_" + tag);
+	gRoot = root;
 	std::error_code ec;
 	fs::remove_all(root, ec);
 	if (ec) {
