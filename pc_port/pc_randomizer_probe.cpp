@@ -1,3 +1,4 @@
+#include <filesystem>
 #include "pc_p2_ship_store.h"
 #include "pc_randomizer.h"
 #include "pc_randomizer_catalog.h"
@@ -29,6 +30,12 @@ int main(int argc, char** argv) {
             if (!std::strcmp(argv[i], "--deposit")) {
                 assert(p2ship::stock.add(3, 0)); assert(p2ship::stock.add(3, 1)); assert(p2ship::stock.add(3, 2));
                 ++block[0];
+            }
+            if (!std::strcmp(argv[i], "--fail-write")) {
+                for (int j = 1; j + 1 < argc; ++j) if (!std::strcmp(argv[j], "--randomizer-seed")) {
+                    const auto token = std::filesystem::path(argv[j+1]).parent_path().filename().string();
+                    std::filesystem::create_directory(std::filesystem::path(pc_randomizer_save_root()).parent_path() / (token + ".tmp"));
+                }
             }
             if (!std::strcmp(argv[i], "--commit")) pc_randomizer_save_campaign(block);
         }
