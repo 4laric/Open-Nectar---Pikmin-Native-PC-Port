@@ -614,7 +614,8 @@ void GameCoreSection::enterFreePikmins()
 					if (goal
 					    && qdist2(goal->mSRT.t.x, goal->mSRT.t.z, piki->mSRT.t.x, piki->mSRT.t.z)
 					           <= pikiMgr->mPikiParms->mPikiParms.mSunsetSafetyRange()) {
-						if (state == PIKISTATE_LookAt || state == PIKISTATE_Nukare || state == PIKISTATE_Absorb) {
+						if (pc_p2_ship_special(piki)) { pc_p2_ship_deposit(piki); break; }
+                        if (state == PIKISTATE_LookAt || state == PIKISTATE_Nukare || state == PIKISTATE_Absorb) {
 							piki->mFSM->transit(piki, PIKISTATE_Normal);
 						}
 						piki->mFSM->transit(piki, PIKISTATE_Normal);
@@ -628,7 +629,8 @@ void GameCoreSection::enterFreePikmins()
 					if (ufo) {
 						Vector3f pos = ufo->getGoalPos();
 						if (qdist2(pos.x, pos.z, piki->mSRT.t.x, piki->mSRT.t.z) <= pikiMgr->mPikiParms->mPikiParms.mSunsetSafetyRange()) {
-							if (state == PIKISTATE_LookAt || state == PIKISTATE_Nukare || state == PIKISTATE_Absorb) {
+							if (pc_p2_ship_special(piki)) { pc_p2_ship_deposit(piki); break; }
+                        if (state == PIKISTATE_LookAt || state == PIKISTATE_Nukare || state == PIKISTATE_Absorb) {
 								piki->mFSM->transit(piki, PIKISTATE_Normal);
 							}
 							piki->mFSM->transit(piki, PIKISTATE_Normal);

@@ -1,7 +1,6 @@
 #include "pc_p2_purple.h"
 #include "pc_p2_purple_campaign_policy.h"
 #include "FlowController.h"
-#include "StageInfo.h"
 #include "pc_p2_purple_impact.h"
 #include "pc_p2_purple_direct.h"
 #include "pc_p2_purple_flight.h"
