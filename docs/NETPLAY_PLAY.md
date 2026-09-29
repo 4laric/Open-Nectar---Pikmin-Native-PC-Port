@@ -235,6 +235,12 @@ folder), not append the second evening to the first evening's run.
   (`PIKMIN_NETPLAY_TURN=host:port:user:pass` on both sides).
 - `[netplay] input: gamepad #0 is not connected yet`: the pad was not
   plugged in at start; it is picked up as soon as it connects.
+- `[netplay] disconnected: handle=...`: the other game stopped answering
+  for 15 s (60 s while a stage is loading, from the load until 30 frames
+  later), or it quit or crashed. A slow PC does not cause this by itself:
+  shader compiles and file reads keep the connection alive while they run,
+  and `[netplay] long tick: ...` lines show any tick that blocked for more
+  than 2 s and how often the network was polled during it.
 - Logs: the console output (or your `> file` redirect; `native.log` in the
   local test), plus the run folder `netplay\run-...\` next to the exe.
 
