@@ -305,12 +305,14 @@ void PcamCamera::control(Controller& controller)
 	// only its own captain, so every local drag (mouse, touch, either pad
 	// slot's free-cam stick) turns that captain's camera, and the other
 	// captain's camera (never shown here) takes none. The joiner's mouse used
-	// to turn P1's hidden camera. Outside a session: unchanged.
-	const int dragOwner = pc_netplay_camlead_drag_owner();
+	// to turn P1's hidden camera. Keyed on this peer's own camera manager,
+	// not on the target (fix round 1, review m8). Outside a session, or with
+	// PIKMIN_NETPLAY_JOINER_OWN_CAMERA=0: unchanged.
+	const int dragRoute = pc_netplay_camlead_drag_route(this);
 	float cameraDrag    = 0.0f;
-	if (dragOwner < 0) {
+	if (dragRoute < 0) {
 		cameraDrag = pc_window_take_camera_drag_player(dragPlayer);
-	} else if (dragPlayer == dragOwner) {
+	} else if (dragRoute == 1) {
 		cameraDrag = pc_window_take_camera_drag_player(0) + pc_window_take_camera_drag_player(1);
 		if (cameraDrag < -1.0f) cameraDrag = -1.0f;
 		if (cameraDrag > 1.0f) cameraDrag = 1.0f;

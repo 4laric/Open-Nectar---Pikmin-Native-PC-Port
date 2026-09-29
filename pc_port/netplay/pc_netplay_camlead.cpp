@@ -25,14 +25,17 @@
 #include "Controller.h"
 #include "Dolphin/pad.h"
 #include "Graphics.h"
+#include "MoviePlayer.h"
 #include "Pcam/Camera.h"
 #include "Pcam/CameraManager.h"
 #include "Pcam/CameraParameters.h"
+#include "gameflow.h"
 #include "gl/pc_gfx.h"
 #include "netplay/pc_input_log.h"
 #include "pc_window.h"
 #include "settings/pc_settings.h"
 #include "system.h"
+#include "timing/pc_render_phase.h"
 
 #include <cmath>
 #include <cstdio>
@@ -57,15 +60,18 @@ using namespace pc_netplay_camlead;
 
 bool sArmed      = false; // session running with the lead on
 bool sSession    = false; // session running (lead on or off): trace/stats
+bool sJoinerOwn  = true;  // own-camera yaw and drag (PIKMIN_NETPLAY_JOINER_OWN_CAMERA)
 int sRole        = 0;     // local pad / captain (0 host, 1 joiner)
 bool sTrace      = false; // PIKMIN_NETPLAY_CAMERA_TRACE=1
 uint64_t sFrame  = 0;     // GekkoNet frame of the tick being run
 bool sFrameValid = false;
 InputHistory sHist;
 Correction sCorr;
-PcamCamera* sCorrCam = nullptr; // the sim camera the correction belongs to
-bool sCorrSnapped    = false;   // that camera was snapped since the last view
-bool sPredicting     = false;
+PcamCamera* sCorrCam    = nullptr; // the sim camera the correction belongs to
+bool sCorrSnapped       = false;   // that camera was snapped since the last view
+bool sPredicting        = false;
+bool sStepped           = false;   // the correction has stepped at least once
+uint64_t sLastStepFrame = 0;       // the tick it last stepped for
 
 // The lead camera. Static storage (never the game heaps), referenced only by
 // the presentation pass and the local yaw sampler.
@@ -94,11 +100,33 @@ struct TraceRow {
 	int steps       = -1;  // prediction steps run (-1: no prediction)
 	bool startStop  = false;
 	bool simUpdated = false;
+	bool repeat     = false; // a second presentation of the same tick
 	float simDist = 0.0f, viewDist = 0.0f;
 	float simPitch = 0.0f, viewPitch = 0.0f;
 	float simFov = 0.0f, viewFov = 0.0f;
 };
 TraceRow sRow;
+
+// Game-flow state at a presented frame, read-only, for the trace line and
+// the held-frame breakdown (why the sim camera did not update).
+struct FlowFlags {
+	int overlay  = 0; // gameflow.mIsUIOverlayActive: pause menu, map menu, ship/tutorial text
+	int pauseAll = 0; // gameflow.mPauseAll: Onion menu, cutscene pause
+	int tutorial = 0; // gameflow.mIsTutorialTextActive
+	int dayEnd   = 0; // gameflow.mIsDayEndActive
+	int movie    = 0; // gameflow.mMoviePlayer->mIsActive
+};
+
+FlowFlags flow_flags()
+{
+	FlowFlags f;
+	f.overlay  = gameflow.mIsUIOverlayActive ? 1 : 0;
+	f.pauseAll = gameflow.mPauseAll ? 1 : 0;
+	f.tutorial = gameflow.mIsTutorialTextActive ? 1 : 0;
+	f.dayEnd   = gameflow.mIsDayEndActive ? 1 : 0;
+	f.movie    = (gameflow.mMoviePlayer != nullptr && gameflow.mMoviePlayer->mIsActive) ? 1 : 0;
+	return f;
+}
 
 // Diagnostics: PIKMIN_NETPLAY_CAMERA_SHOT=<dir>:<f1>,<f2>,...
 std::string sShotDir;
@@ -111,17 +139,23 @@ struct TestDrag {
 std::vector<TestDrag> sTestDrags;
 
 struct Stats {
-	uint64_t views       = 0; // det single-view presentations
-	uint64_t leadFrames  = 0; // of which rendered the lead camera
-	uint64_t predictions = 0; // prediction runs
-	uint64_t steps       = 0; // prediction steps in total
-	int maxSteps         = 0;
-	uint64_t startStops  = 0; // windows cut at a pending Start press
-	uint64_t held        = 0; // frames the sim camera did not update (hold)
-	uint64_t snaps       = 0; // corrections dropped for a sim camera snap
-	uint64_t drops       = 0; // corrections dropped (no view, first person...)
-	uint64_t simSawLead  = 0; // ticks that began with gfx.mCamera == lead (must be 0)
-	float maxCorr        = 0.0f;
+	uint64_t views        = 0; // det single-view presentations
+	uint64_t leadFrames   = 0; // of which rendered the lead camera
+	uint64_t predictions  = 0; // prediction runs
+	uint64_t steps        = 0; // prediction steps in total
+	int maxSteps          = 0;
+	uint64_t startStops   = 0; // windows cut at a pending Start press
+	uint64_t held         = 0; // frames the sim camera did not update (hold)
+	uint64_t heldOverlay  = 0; //   of which with a UI overlay up (pause/map menu, text window)
+	uint64_t heldPauseAll = 0; //   of which with gameplay paused (Onion menu, cutscene pause), no overlay
+	uint64_t heldOther    = 0; //   the rest
+	uint64_t snaps        = 0; // corrections dropped for a sim camera snap
+	uint64_t drops        = 0; // corrections dropped (no view, first person...)
+	uint64_t simSawLead   = 0; // ticks that began with gfx.mCamera == lead (must be 0)
+	uint64_t repeats      = 0; // presentations of an already-stepped tick (not stepped again)
+	uint64_t gaps         = 0; // predictions whose pending window had a missing landing frame
+	uint64_t viewInAuth   = 0; // view() reached in the authoritative pass (must be 0)
+	float maxCorr         = 0.0f;
 };
 Stats sStats;
 
@@ -224,6 +258,7 @@ bool predict(PcamCameraManager* mgr, PcamCamera* pc, float dTgt[3], float dPv[3]
 	sRow.steps     = n;
 	sRow.startStop = startStop;
 	if (startStop) ++sStats.startStops;
+	if (sHist.missing_after(sFrame) > 0) ++sStats.gaps;
 	++sStats.predictions;
 	sStats.steps += (uint64_t)n;
 	if (n > sStats.maxSteps) sStats.maxSteps = n;
@@ -287,38 +322,50 @@ void pc_netplay_camlead_session_begin(int localRole)
 	sSession    = true;
 	sRole       = (localRole == 1) ? 1 : 0;
 	sArmed      = env_lead_enabled(std::getenv("PIKMIN_NETPLAY_CAMERA_LEAD"));
+	sJoinerOwn  = env_joiner_own_camera(std::getenv("PIKMIN_NETPLAY_JOINER_OWN_CAMERA"));
 	const char* t = std::getenv("PIKMIN_NETPLAY_CAMERA_TRACE");
 	sTrace      = (t != nullptr && t[0] == '1' && t[1] == '\0');
 	sFrameValid = false;
 	sHist.clear();
 	sCorr.reset();
-	sCorrCam     = nullptr;
-	sCorrSnapped = false;
-	sLeadValid   = false;
-	sLeadSimCam  = nullptr;
-	sPost[0]     = Posture();
-	sPost[1]     = Posture();
-	sStats       = Stats();
+	sCorrCam       = nullptr;
+	sCorrSnapped   = false;
+	sStepped       = false;
+	sLastStepFrame = 0;
+	sLeadValid     = false;
+	sLeadSimCam    = nullptr;
+	sPost[0]       = Posture();
+	sPost[1]       = Posture();
+	sStats         = Stats();
 	parse_shots();
 	parse_test_drags();
-	std::printf("[netplay] camera lead: %s (local captain P%d%s)\n",
-	            sArmed ? "on" : "off, PIKMIN_NETPLAY_CAMERA_LEAD=0", sRole + 1, sTrace ? ", trace on" : "");
+	std::printf("[netplay] camera lead: %s (local captain P%d; own-camera yaw and drag: %s%s)\n",
+	            sArmed ? "on" : "off, PIKMIN_NETPLAY_CAMERA_LEAD=0", sRole + 1,
+	            sJoinerOwn ? "on" : "off, PIKMIN_NETPLAY_JOINER_OWN_CAMERA=0", sTrace ? "; trace on" : "");
 	std::fflush(stdout);
 }
 
 void pc_netplay_camlead_session_end(void)
 {
 	if (!sSession) return;
+	// The round-1 fields keep their order (probe and log greps); fix round
+	// 1 appends the rest after sim_saw_lead.
 	std::printf("[netplay] camera lead summary: %s views=%llu lead_frames=%llu predictions=%llu steps=%llu "
-	            "max_steps=%d start_cuts=%llu held=%llu snaps=%llu drops=%llu max_corr=%.2f sim_saw_lead=%llu\n",
+	            "max_steps=%d start_cuts=%llu held=%llu snaps=%llu drops=%llu max_corr=%.2f sim_saw_lead=%llu "
+	            "held_overlay=%llu held_pauseall=%llu held_other=%llu repeats=%llu gaps=%llu view_in_auth=%llu "
+	            "own_camera=%s\n",
 	            sArmed ? "on" : "off", (unsigned long long)sStats.views, (unsigned long long)sStats.leadFrames,
 	            (unsigned long long)sStats.predictions, (unsigned long long)sStats.steps, sStats.maxSteps,
 	            (unsigned long long)sStats.startStops, (unsigned long long)sStats.held,
 	            (unsigned long long)sStats.snaps, (unsigned long long)sStats.drops, sStats.maxCorr,
-	            (unsigned long long)sStats.simSawLead);
+	            (unsigned long long)sStats.simSawLead, (unsigned long long)sStats.heldOverlay,
+	            (unsigned long long)sStats.heldPauseAll, (unsigned long long)sStats.heldOther,
+	            (unsigned long long)sStats.repeats, (unsigned long long)sStats.gaps,
+	            (unsigned long long)sStats.viewInAuth, sJoinerOwn ? "on" : "off");
 	std::fflush(stdout);
 	sSession    = false;
 	sArmed      = false;
+	sJoinerOwn  = true;
 	sFrameValid = false;
 	sLeadValid  = false;
 	sLeadSimCam = nullptr;
@@ -354,9 +401,13 @@ void pc_netplay_camlead_begin_frame(uint64_t frame)
 			std::fflush(stdout);
 		}
 	}
-	// Evidence for "the sim never reads the lead camera": the tick's sim
-	// (update and the authoritative pass) starts from gfx.mCamera, which
-	// end_presentation put back to the sim camera.
+	// End-state guard: the tick's sim (update and the authoritative pass)
+	// starts from gfx.mCamera, which end_presentation put back to the sim
+	// camera. Weak on its own (review m4): in det co-op postRender's
+	// endViews resets gfx.mCamera to P1's sim camera anyway. The proof that
+	// the sim never reads the lead is structural (sLeadCam is referenced in
+	// this file only; view() counts any authoritative-pass call as
+	// view_in_auth) plus the hash identity with the integration exe.
 	if (gsys != nullptr && gsys->mDGXGfx != nullptr && gsys->mDGXGfx->mCamera == &sLeadCam) {
 		++sStats.simSawLead;
 	}
@@ -374,11 +425,17 @@ bool pc_netplay_camlead_predicting(void)
 	return sPredicting;
 }
 
-int pc_netplay_camlead_drag_owner(void)
+int pc_netplay_camlead_drag_route(const PcamCamera* cam)
 {
 	// Session-wide (also with the lead off): a routing fix for the joiner,
-	// not part of the lead.
-	return sSession ? sRole : -1;
+	// not part of the lead; PIKMIN_NETPLAY_JOINER_OWN_CAMERA=0 restores the
+	// per-slot routing. Keyed on the camera manager, not on the camera's
+	// target: when captain 1 is down, P1's camera can target captain 2, and
+	// the joiner's drag must still turn the joiner's own camera (review m8).
+	if (!sSession || !sJoinerOwn) return -1;
+	PcamCameraManager* own = (sRole == 1) ? cameraMgrP2 : cameraMgrP1;
+	if (own == nullptr || own->mCamera == nullptr) return -1;
+	return own->mCamera == cam ? 1 : 0;
 }
 
 void pc_netplay_camlead_note_snap(PcamCamera* cam)
@@ -405,6 +462,13 @@ void pc_netplay_camlead_note_sim_update(PcamCameraManager* mgr)
 Camera* pc_netplay_camlead_view(int localPlayer, Camera* simView)
 {
 	if (!sSession) return simView;
+	if (pc_render_is_authoritative()) {
+		// Contract guard (review m4): the lead is presentation only. The one
+		// caller (newPikiGame.cpp, det single view) already requires the
+		// presentation pass; count any other path and leave it untouched.
+		++sStats.viewInAuth;
+		return simView;
+	}
 	sViewCalled = true;
 	sLeadValid  = false;
 	sLeadSimCam = nullptr;
@@ -445,15 +509,32 @@ Camera* pc_netplay_camlead_view(int localPlayer, Camera* simView)
 	}
 	const bool simUpdated = postOk && post.frame == sFrame;
 	sRow.simUpdated       = simUpdated;
-	if (simUpdated) {
+	if (simUpdated && sStepped && sLastStepFrame == sFrame) {
+		// A second presentation of a tick the filter already stepped for
+		// (review m3: stall smoothing that re-presents, a soft-reset idle
+		// running as presentation). The correction is one tick of homing per
+		// sim tick, so it is shown as it is, not stepped again.
+		sRow.repeat = true;
+		++sStats.repeats;
+	} else if (simUpdated) {
 		float dTgt[3], dPv[3], dFov = 0.0f;
 		if (predict(mgr, pc, dTgt, dPv, &dFov)) {
 			sCorr.step(dTgt, dPv, dFov, pc->getCurrentHomingSpeed(), pc->getParameterF(PCAMF_FovHomingSpeed));
 		}
+		sStepped       = true;
+		sLastStepFrame = sFrame;
 	} else {
 		// The sim camera did not update this tick (paused, an overlay, a
 		// frozen section): hold the correction as it is.
 		++sStats.held;
+		const FlowFlags ff = flow_flags();
+		if (ff.overlay) {
+			++sStats.heldOverlay;
+		} else if (ff.pauseAll) {
+			++sStats.heldPauseAll;
+		} else {
+			++sStats.heldOther;
+		}
 	}
 	if (sCorr.zero() || !postOk) return simView;
 	const float mag = sCorr.magnitude();
@@ -484,11 +565,17 @@ void pc_netplay_camlead_end_presentation(Graphics& gfx)
 		// pass installs its own camera after the world is drawn).
 		const Camera* simCam  = sViewSimCam;
 		const Camera* viewCam = sLeadValid ? &sLeadCam : sViewSimCam;
+		// Fix round 1 appends the game-flow flags (ov overlay, pa pause-all,
+		// tt tutorial text, de day end, mv movie) after corr=, so the
+		// round-1 parsers still match.
+		const FlowFlags ff = flow_flags();
 		std::printf("[netplay] camlead f=%llu lead=%d upd=%d steps=%d%s sim_yaw=%u view_yaw=%u sim_dist=%.2f "
-		            "view_dist=%.2f sim_pitch=%.3f view_pitch=%.3f sim_fov=%.3f view_fov=%.3f corr=%.3f\n",
+		            "view_dist=%.2f sim_pitch=%.3f view_pitch=%.3f sim_fov=%.3f view_fov=%.3f corr=%.3f "
+		            "ov=%d pa=%d tt=%d de=%d mv=%d%s\n",
 		            (unsigned long long)sFrame, sLeadValid ? 1 : 0, sRow.simUpdated ? 1 : 0, sRow.steps,
 		            sRow.startStop ? " start_cut" : "", yaw_of(simCam), yaw_of(viewCam), sRow.simDist, sRow.viewDist,
-		            sRow.simPitch, sRow.viewPitch, sRow.simFov, sRow.viewFov, sCorr.magnitude());
+		            sRow.simPitch, sRow.viewPitch, sRow.simFov, sRow.viewFov, sCorr.magnitude(), ff.overlay,
+		            ff.pauseAll, ff.tutorial, ff.dayEnd, ff.movie, sRow.repeat ? " repeat" : "");
 		std::fflush(stdout);
 	}
 	if (!sShotDir.empty()) {
@@ -507,7 +594,12 @@ void pc_netplay_camlead_end_presentation(Graphics& gfx)
 Camera* pc_netplay_camlead_control_camera(int pad, Camera* cam)
 {
 	if (!sSession || pad != sRole) return cam;
+	// PIKMIN_NETPLAY_JOINER_OWN_CAMERA=0 (review M1): the joiner samples the
+	// camera the caller names, P1's, as before M5c. Its lead camera shows
+	// its own captain's camera, so it is not sampled either.
+	if (sRole == 1 && !sJoinerOwn) return cam;
 	if (sArmed && sLeadValid) return &sLeadCam;
+	if (!sJoinerOwn) return cam; // the host: the same camera, by the pre-M5c path
 	// This peer's own captain's camera, the one it presents. The second
 	// captain's Navi::mNaviCamera is P1's camera (finalSetup's second-captain
 	// setup copies it), so the joiner used to submit the yaw of P1's camera,

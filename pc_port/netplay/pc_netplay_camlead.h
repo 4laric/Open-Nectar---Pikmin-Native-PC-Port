@@ -18,10 +18,12 @@
 //     calls pc_netplay_camlead_session_begin, which only netplay builds do;
 //   - opt-out: PIKMIN_NETPLAY_CAMERA_LEAD=0 renders the sim camera, exactly
 //     as before, and the yaw sampler reads that sim camera;
-//   - joiner fixes, session-wide (lead on or off): this peer's own pad
-//     samples the camera this peer presents for its own captain (the joiner
-//     used to sample P1's camera), and every local free-camera drag turns
-//     this peer's own captain's camera (the joiner's used to turn P1's).
+//   - joiner fixes, session-wide (lead on or off) unless
+//     PIKMIN_NETPLAY_JOINER_OWN_CAMERA=0: this peer's own pad samples the
+//     camera this peer presents for its own captain (the joiner used to
+//     sample P1's camera), and every local free-camera drag turns this
+//     peer's own captain's camera (the joiner's used to turn P1's). Both
+//     switches at 0 give exactly the pre-M5c live input stream.
 // Diagnostics: PIKMIN_NETPLAY_CAMERA_TRACE=1 logs one `[netplay] camlead`
 // line per presented frame; PIKMIN_NETPLAY_CAMERA_SHOT=<dir>:<f1>,<f2>,...
 // writes the presented frame at those GekkoNet frames as BMP files;
@@ -61,7 +63,8 @@ Camera* pc_netplay_camlead_view(int localPlayer, Camera* simView);
 void pc_netplay_camlead_end_presentation(Graphics& gfx);
 // Local control-yaw sampler (navi.cpp): the camera whose yaw pad `pad`
 // submits. In a session, for this peer's own pad: the lead camera while it is
-// presented, else this peer's own captain's sim camera. Otherwise `cam`.
+// presented, else this peer's own captain's sim camera. Otherwise `cam`
+// (also for the joiner with PIKMIN_NETPLAY_JOINER_OWN_CAMERA=0).
 Camera* pc_netplay_camlead_control_camera(int pad, Camera* cam);
 // PcamCameraManager::update, right after the sim camera's own update and
 // before its vibration events: records the posture the sim camera shows.
@@ -72,8 +75,10 @@ void pc_netplay_camlead_note_snap(PcamCamera* cam);
 // True while the lead runs its prediction on the sim camera: camera sounds
 // are muted (they play when the sim applies the input).
 bool pc_netplay_camlead_predicting(void);
-// Free-camera drag routing (PcamCamera::control): in a lockstep session the
-// captain whose camera takes every local drag (this peer's own), else -1
-// (the drag keeps its per-slot routing).
-int pc_netplay_camlead_drag_owner(void);
+// Free-camera drag routing (PcamCamera::control) for camera `cam`: -1 keeps
+// the per-slot routing (no session, or PIKMIN_NETPLAY_JOINER_OWN_CAMERA=0);
+// 1: `cam` is this peer's own captain's camera (the one its camera manager
+// runs, whatever that camera targets) and takes every local drag; 0: it is
+// the other captain's camera, never shown on this PC, and takes none.
+int pc_netplay_camlead_drag_route(const PcamCamera* cam);
 #endif
