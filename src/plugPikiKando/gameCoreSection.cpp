@@ -617,7 +617,13 @@ void GameCoreSection::enterFreePikmins()
 						}
 						piki->mFSM->transit(piki, PIKISTATE_Normal);
 						navi->mGoalItem = itemMgr->getContainer(piki->mColor);
+#if defined(PIKI_PC_PORT)
+						// Co-op (#885 gap-fix K): the goal is on `navi` (P1), not on
+						// the Pikmin's own captain; changeMode reads it from here.
+						piki->changeMode(PikiMode::EnterMode, navi);
+#else
 						piki->changeMode(PikiMode::EnterMode, nullptr);
+#endif
 						goalSafe++;
 						break;
 					}
@@ -631,7 +637,11 @@ void GameCoreSection::enterFreePikmins()
 							}
 							piki->mFSM->transit(piki, PIKISTATE_Normal);
 							navi->mGoalItem = itemMgr->getContainer(piki->mColor);
+#if defined(PIKI_PC_PORT)
+							piki->changeMode(PikiMode::EnterMode, navi); // #885 gap-fix K, as above
+#else
 							piki->changeMode(PikiMode::EnterMode, nullptr);
+#endif
 							ufoSafe++;
 							break;
 						}
@@ -3240,7 +3250,7 @@ static bool coopDownCaptain(Navi* navi)
     return true;
 }
 
-// PIKMIN_NETPLAY_TEST_COOP_EVENTS=<file>: scripted HP/DOWN events at fixed
+// PIKMIN_NETPLAY_TEST_COOP_EVENTS=<file>: scripted test events (grammar in pc_coop_policy.h) at fixed
 // co-op ticks, inert when unset. It is honoured only by the netplay build in
 // hidden test runs (pc_coop_events_knob_path). It changes sim state, so the
 // session folds the file's FNV-1a into the handshake config hash
@@ -3273,14 +3283,142 @@ static void coopRunTestEvents(Navi* p1, Navi* p2)
     for (int i = 0; i < count; ++i) {
         const PcCoopEvent& ev = events[i];
         if (ev.tick != sCoopPolicy.tick) continue;
-        Navi* navi = navis[ev.captain - 1];
         std::printf("[coop-policy] TEST event tick=%u %s\n", sCoopPolicy.tick, ev.text);
         const char* refused = nullptr;
+        // Gap-fix K fix1 (#885): the day end sets the clock back, which resets
+        // the policy (reason=clock) and re-arms this schedule inside the
+        // day-end sequence. The day-end kinds set that sequence up, so they
+        // must not mutate it: refuse them until the next stage entry.
+        const bool dayEndKind = ev.kind == PC_COOP_EVENT_SQUAD || ev.kind == PC_COOP_EVENT_DISMISS
+                             || ev.kind == PC_COOP_EVENT_HOME || ev.kind == PC_COOP_EVENT_SUNSET;
+        if (dayEndKind && playerState->inDayEnd()) {
+            std::printf("[coop-policy] TEST refused tick=%u %s reason=day-end\n", sCoopPolicy.tick, ev.text);
+            std::fflush(stdout);
+            continue;
+        }
+        // A day end started before the captains leave the stage-start
+        // sequence (the opening movie, NAVISTATE_Starting) never gives them
+        // control: every squad then falls out of formation and is left behind
+        // (fix1 probe), which real play cannot reach. Refuse SUNSET there.
+        const bool stageStart = gameflow.mMoviePlayer->mIsActive || (p1 && p1->getCurrState()->getID() == NAVISTATE_Starting)
+                             || (p2 && p2->getCurrState()->getID() == NAVISTATE_Starting);
+        if (ev.kind == PC_COOP_EVENT_SUNSET && stageStart) {
+            std::printf("[coop-policy] TEST refused tick=%u %s reason=stage-start\n", sCoopPolicy.tick, ev.text);
+            std::fflush(stdout);
+            continue;
+        }
+        if (ev.kind == PC_COOP_EVENT_SUNSET) {
+            // Gap-fix K (#885): jump to the day's end hour; RunningModeState::update
+            // then runs the ordinary time-expiry day end (cleanupDayEnd, the
+            // sunset movie and its Fue event) on both peers from this sim tick.
+            gameflow.mWorldClock.setTime(gameflow.mParameters->mEndHour());
+            // What the day-end enter paths will see: each captain's stored
+            // Onion (-1 = none) and the Pikmin it owns, in its squad or free;
+            // near = free ones within the sunset safety range of an Onion or
+            // the ship, which enterFreePikmins sends in at cleanupDayEnd.
+            int squad[PC_COOP_CAPTAINS] = {}, loose[PC_COOP_CAPTAINS] = {}, near[PC_COOP_CAPTAINS] = {};
+            const f32 range = pikiMgr->mPikiParms->mPikiParms.mSunsetSafetyRange();
+            Iterator it(pikiMgr);
+            CI_LOOP(it) {
+                Piki* piki = static_cast<Piki*>(*it);
+                if (!piki || !piki->isAlive()) continue;
+                for (int c = 0; c < PC_COOP_CAPTAINS; ++c) {
+                    if (!navis[c] || piki->mNavi != navis[c]) continue;
+                    if (piki->mMode == PikiMode::FormationMode) ++squad[c];
+                    else if (piki->mMode == PikiMode::FreeMode) {
+                        ++loose[c];
+                        bool safe = false;
+                        for (int color = 0; color < PikiColorCount && !safe; ++color) {
+                            GoalItem* goal = itemMgr->getContainer(color);
+                            safe = goal && qdist2(goal->mSRT.t.x, goal->mSRT.t.z, piki->mSRT.t.x, piki->mSRT.t.z) <= range;
+                        }
+                        if (!safe && itemMgr->getUfo()) {
+                            const Vector3f pos = itemMgr->getUfo()->getGoalPos();
+                            safe = qdist2(pos.x, pos.z, piki->mSRT.t.x, piki->mSRT.t.z) <= range;
+                        }
+                        if (safe) ++near[c];
+                    }
+                }
+            }
+            std::printf("[coop-policy] TEST sunset tick=%u p1goal=%d p2goal=%d squad=%d,%d free=%d,%d near=%d,%d\n",
+                sCoopPolicy.tick, (p1 && p1->mGoalItem) ? int(p1->mGoalItem->mOnionColour) : -1,
+                (p2 && p2->mGoalItem) ? int(p2->mGoalItem->mOnionColour) : -1, squad[0], squad[1], loose[0], loose[1], near[0],
+                near[1]);
+            std::fflush(stdout);
+            continue;
+        }
+        Navi* navi = navis[ev.captain - 1];
         if (!coopNaviLive(navi)) refused = "not-live";
         else if (ev.kind == PC_COOP_EVENT_HP) {
             const float hp = ev.fraction * C_NAVI_PARM(navi, mHealth);
             if (hp <= 1.0f) refused = "hp-at-most-1";
             else navi->mHealth = hp;
+        } else if (ev.kind == PC_COOP_EVENT_SQUAD) {
+            // Gap-fix K (#885): the first <count> Pikmin (pikiMgr order) in the
+            // other captain's squad join this one; they then follow and belong
+            // to it. Fix1: the squad action is abandoned while mNavi is still
+            // the old captain, so ActCrowd::cleanup decrements that captain's
+            // plate count (it reads mPiki->mNavi) as it releases the slot, the
+            // order pc_p2_captain.cpp live_prepare_capture keeps. Changing
+            // mNavi first left the old plate's count too high and the new
+            // one's at 0 with slots taken, so the new captain's plate walked
+            // nobody (Navi::releasePikis, the Fue enter).
+            Navi* from = navis[2 - ev.captain];
+            int moved = 0;
+            Iterator it(pikiMgr);
+            CI_LOOP(it) {
+                if (moved >= ev.count) break;
+                Piki* piki = static_cast<Piki*>(*it);
+                if (!from || !piki || !piki->isAlive() || piki->mNavi != from || piki->mMode != PikiMode::FormationMode) continue;
+                piki->mActiveAction->abandon(nullptr);
+                piki->mNavi = navi;
+                piki->changeMode(PikiMode::FormationMode, navi);
+                ++moved;
+            }
+            std::printf("[coop-policy] TEST squad tick=%u captain=%d moved=%d\n", sCoopPolicy.tick, ev.captain, moved);
+            if (!moved) refused = "no-squad";
+        } else if (ev.kind == PC_COOP_EVENT_DISMISS) {
+            // The captain's squad goes free where it stands (FreeMode, still
+            // owned by it), through the game's own dismiss (Navi::releasePikis,
+            // which walks the captain's formation plate). released = squad
+            // members owned by it before minus after.
+            auto squadOf = [](Navi* owner) {
+                int n = 0;
+                Iterator it(pikiMgr);
+                CI_LOOP(it) {
+                    Piki* piki = static_cast<Piki*>(*it);
+                    if (piki && piki->isAlive() && piki->mNavi == owner && piki->mMode == PikiMode::FormationMode) ++n;
+                }
+                return n;
+            };
+            const int before = squadOf(navi);
+            navi->releasePikis();
+            const int kept = squadOf(navi);
+            std::printf("[coop-policy] TEST dismiss tick=%u captain=%d released=%d kept=%d\n", sCoopPolicy.tick, ev.captain, before - kept,
+                kept);
+            if (before - kept <= 0) refused = "none-released";
+        } else if (ev.kind == PC_COOP_EVENT_HOME) {
+            // The captain's free Pikmin stand by the Onion of their colour (the
+            // ship when that Onion is absent), 60 units out, well inside the
+            // sunset safety range, so enterFreePikmins picks them up.
+            static const f32 ringX[8] = {60.0f, 0.0f, -60.0f, 0.0f, 42.0f, -42.0f, 42.0f, -42.0f};
+            static const f32 ringZ[8] = {0.0f, 60.0f, 0.0f, -60.0f, 42.0f, 42.0f, -42.0f, -42.0f};
+            int placed = 0;
+            Iterator it(pikiMgr);
+            CI_LOOP(it) {
+                Piki* piki = static_cast<Piki*>(*it);
+                if (!piki || !piki->isAlive() || piki->mNavi != navi || piki->mMode != PikiMode::FreeMode) continue;
+                Vector3f base;
+                if (GoalItem* goal = itemMgr->getContainer(piki->mColor)) base = goal->mSRT.t;
+                else if (itemMgr->getUfo()) base = itemMgr->getUfo()->getGoalPos();
+                else continue;
+                Vector3f pos(base.x + ringX[placed % 8], 0.0f, base.z + ringZ[placed % 8]);
+                pos.y = mapMgr->getMinY(pos.x, pos.z, true);
+                piki->resetPosition(pos);
+                ++placed;
+            }
+            std::printf("[coop-policy] TEST home tick=%u captain=%d placed=%d\n", sCoopPolicy.tick, ev.captain, placed);
+            if (!placed) refused = "none-free";
         } else if (!coopDownCaptain(navi)) refused = "last-standing";
         if (refused) std::printf("[coop-policy] TEST refused tick=%u %s reason=%s\n", sCoopPolicy.tick, ev.text, refused);
         std::fflush(stdout);
@@ -3677,12 +3815,16 @@ static void coopPolicyFixture(Navi* p1, Navi* p2, MapMgr* map, int initialColor)
     } else if (c == "deathlink-p1-down") {
         if (step == 0) {
             // Split the field squad: every other Pikmin in P1's squad moves to P2.
+            // Gap-fix K fix1 (#885): abandon the squad action while mNavi is
+            // still P1, so ActCrowd::cleanup decrements P1's plate count, not
+            // P2's (as the SQUAD test event does).
             int moved = 0, index = 0;
             Iterator it(pikiMgr);
             CI_LOOP(it) {
                 Piki* piki = static_cast<Piki*>(*it);
                 if (!piki || !piki->isAlive() || piki->mNavi != p1 || piki->mMode != PikiMode::FormationMode) continue;
                 if (index++ % 2) continue;
+                piki->mActiveAction->abandon(nullptr);
                 piki->mNavi = p2;
                 piki->changeMode(PikiMode::FormationMode, p2);
                 ++moved;

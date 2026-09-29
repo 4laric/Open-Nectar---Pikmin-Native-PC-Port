@@ -97,10 +97,43 @@ lockstep peers agree. Co-op-only log lines start with `[coop-policy]`.
 ## Test hooks
 
 * `PIKMIN_NETPLAY_TEST_COOP_EVENTS=<file>` (inert when unset): up to 64 lines
-  `<tick> HP <1|2> <fraction>` or `<tick> DOWN <1|2>`, `<tick>` = co-op
-  randomizer `updateAI` calls since the stage started, 1-based (tick 0 is
-  rejected). `DOWN` knocks a captain down like `Navi::finishDamage` and
-  refuses the last one standing.
+  `<tick> HP <1|2> <fraction>`, `<tick> DOWN <1|2>`, `<tick> SQUAD <1|2>
+  <1..200>`, `<tick> DISMISS <1|2>`, `<tick> HOME <1|2>` or `<tick> SUNSET`
+  (`#` starts a comment), `<tick>` = co-op randomizer `updateAI` calls since
+  the stage started, 1-based (tick 0 is rejected). `DOWN` knocks a captain
+  down like `Navi::finishDamage` and refuses the last one standing.
+  * Day-end kinds (gapfix K): `SQUAD` moves up to N Pikmin from the other
+    captain's squad into this one's (the squad action is abandoned before
+    the owner changes, so both formation plates stay legal); `DISMISS` is the
+    captain's own dismiss (`Navi::releasePikis`); `HOME` stands the captain's
+    free Pikmin 60 units from the Onion of their colour (or the ship);
+    `SUNSET` jumps the clock to the day's end hour and logs what the day-end
+    enter paths will see.
+    * `DISMISS` only works once the captain is in control: the dismiss walks
+      the formation plate, which the captain's control update refreshes, and
+      that does not run during the stage-start movie (co-op ticks 1 to ~280
+      on `foh-day2`). It then logs `released=0 kept=N`.
+    * `SUNSET` is refused while any movie runs (on these fixtures, the
+      stage-start one) or a captain is still in `NAVISTATE_Starting`
+      (`reason=stage-start`). A day end started during the stage start never
+      gives the captains control, and every squad is left behind.
+    * The day end sets the clock back and re-arms the schedule, so all four
+      kinds are refused inside the day-end sequence (`reason=day-end`). They
+      fire again on the next stage/day.
+  * Committed fixtures for the day-end halt (REG 4, `karl caught a cold !`).
+    Both are pairs on the netplay exe, with the file passed to both peers:
+    `py -3.12 tools/netplay/run_pair.py --exe <np nectar.exe> --ticks 6000
+    --delay 1 --netplay-seed 0 --host-port <port> --out <private dir> --env
+    PIKMIN_NETPLAY_TEST_COOP_EVENTS=<absolute path to the fixture>`.
+    * `tools/netplay/fixtures/coop_dayend_home.events` covers
+      `enterFreePikmins`: captain 2's free Pikmin stand by the Onions.
+    * `coop_dayend_squad.events` covers `Navi::enterAllPikis`: captain 2
+      still has a squad at the sunset whistle.
+    * Expected: `run_pair: PASS` and no `[PANIC]`. With the default seeds the
+      day-2 end runs to map select and the day-3 reseed (tick 3734 on seed
+      0). The re-armed schedule then runs a second co-op day end on day 3.
+    * A build without the fix halts both peers with `karl caught a cold !`
+      at the first day end, near tick 700 (home) or 900 (squad).
   * Compiled only into the netplay build (`PIKI_NETPLAY_BUILD`) and honoured
     only with `PIKMIN_RANDOMIZER_TEST_BACKGROUND=1`; the default build never
     reads it.

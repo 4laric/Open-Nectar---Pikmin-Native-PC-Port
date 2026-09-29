@@ -349,7 +349,13 @@ void Navi::enterAllPikis()
 		mGoalItem = onyons[pikiList[i]->mColor];
 		if (mGoalItem) {
 			if (pikiList[i]->getState() != PIKISTATE_Nukare) {
+#if defined(PIKI_PC_PORT)
+				// Co-op (#885 gap-fix K): this gathers every captain's squad but
+				// sets the goal on this captain only; changeMode reads it from here.
+				pikiList[i]->changeMode(PikiMode::EnterMode, this);
+#else
 				pikiList[i]->changeMode(PikiMode::EnterMode, nullptr);
+#endif
 			}
 		} else {
 			PRINT("navi accesscontainer = 0\n");

@@ -119,13 +119,37 @@ bool pc_coop_stage_changed(bool started, const PcCoopStageKey& prev, const PcCoo
 // 1-based (the first co-op tick of a stage is tick 1), so tick 0 is
 // rejected. The file is parsed once per process and the tick restarts on
 // every stage entry, so the schedule re-arms each stage/day (logged).
-enum { PC_COOP_EVENTS_MAX = 64, PC_COOP_EVENT_TEXT = 48 };
-enum PcCoopEventKind { PC_COOP_EVENT_HP = 0, PC_COOP_EVENT_DOWN };
+// M4 gap-fix K (#885) adds day-end kinds, so a pair reaches a co-op sunset
+// with captain 2 owning Pikmin in a few hundred ticks instead of ~26,500:
+//   `<tick> SQUAD <1|2> <count 1..200>`  up to <count> Pikmin in the other
+//                                         captain's squad join this one's
+//   `<tick> DISMISS <1|2>`                that captain's squad goes free
+//                                         where it stands (still owned by it)
+//   `<tick> HOME <1|2>`                   that captain's free Pikmin stand by
+//                                         their Onion (or the ship), inside
+//                                         the sunset safety range
+//   `<tick> SUNSET`                       the clock jumps to the day's end
+//                                         hour; the normal day end follows
+// The day end sets the clock back and re-arms the schedule inside the day-end sequence: these four kinds are
+// refused there (reason=day-end) and fire again on the next stage/day, like HP/DOWN. DISMISS is
+// Navi::releasePikis, which walks the plate the captain's control update refreshes, so it releases nobody
+// during the stage-start movie; SUNSET is refused there (reason=stage-start). Committed fixtures:
+// tools/netplay/fixtures/coop_dayend_{home,squad}.events (docs/NETPLAY_COOP_POLICY.md).
+enum { PC_COOP_EVENTS_MAX = 64, PC_COOP_EVENT_TEXT = 48, PC_COOP_EVENT_SQUAD_MAX = 200 };
+enum PcCoopEventKind {
+	PC_COOP_EVENT_HP = 0,
+	PC_COOP_EVENT_DOWN,
+	PC_COOP_EVENT_SQUAD,
+	PC_COOP_EVENT_DISMISS,
+	PC_COOP_EVENT_SUNSET,
+	PC_COOP_EVENT_HOME
+};
 struct PcCoopEvent {
 	unsigned tick;
 	PcCoopEventKind kind;
-	int captain;       // 1 or 2
+	int captain;       // 1 or 2 (0 for SUNSET)
 	float fraction;    // HP only, 0..1 of max HP
+	int count;         // SQUAD only, 1..PC_COOP_EVENT_SQUAD_MAX
 	char text[PC_COOP_EVENT_TEXT]; // canonical form for the log line
 };
 // Parses the whole file text. Returns the event count (0..max), or -1 on a
