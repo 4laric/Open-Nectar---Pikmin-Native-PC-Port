@@ -204,6 +204,9 @@ inline int build_steps(const InputHistory& hist, uint64_t frame, const Step& cur
 			break;
 		}
 	}
+	// m <= n <= kMaxSteps already; the explicit bound keeps GCC's LTO
+	// -Wstringop-overflow from assuming otherwise once this is inlined.
+	if (m > kMaxSteps) m = kMaxSteps;
 	for (int i = 0; i < m; ++i) out[i] = seq[i];
 	return m;
 }
