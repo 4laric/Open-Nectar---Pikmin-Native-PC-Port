@@ -94,6 +94,9 @@ public:
 	void clear()
 	{
 		for (unsigned i = 0; i < kSize; ++i) mSlots[i].valid = false;
+		mAny    = false;
+		mFirst  = 0;
+		mNewest = 0;
 	}
 
 	void note(uint64_t frame, const PcNetplayInput& in)
@@ -102,6 +105,14 @@ public:
 		s.valid = true;
 		s.frame = frame;
 		s.in    = in;
+		if (!mAny) {
+			mAny    = true;
+			mFirst  = frame;
+			mNewest = frame;
+		} else {
+			if (frame < mFirst) mFirst = frame;
+			if (frame > mNewest) mNewest = frame;
+		}
 	}
 
 	bool get(uint64_t frame, PcNetplayInput* out) const
@@ -112,6 +123,24 @@ public:
 		return true;
 	}
 
+	// Frames after `frame`, up to the newest noted one, that the history
+	// does not hold although it should: every frame from the first noted
+	// one on carries a local input, so a hole means a submit path did not
+	// note its landing frame. That silently shortens the prediction window
+	// (the view then leads less, or not at all), so the engine counts it
+	// (`gaps` in the summary line; M5c review M2: every
+	// gekko_add_local_input site must note the frame its input lands on).
+	int missing_after(uint64_t frame) const
+	{
+		if (!mAny) return 0;
+		const uint64_t from = (frame + 1 > mFirst) ? frame + 1 : mFirst;
+		int missing = 0;
+		for (uint64_t f = from; f <= mNewest && f < from + kSize; ++f) {
+			if (!get(f, nullptr)) ++missing;
+		}
+		return missing;
+	}
+
 private:
 	struct Slot {
 		bool valid     = false;
@@ -119,6 +148,9 @@ private:
 		PcNetplayInput in;
 	};
 	Slot mSlots[kSize];
+	bool mAny        = false;
+	uint64_t mFirst  = 0; // first noted landing frame
+	uint64_t mNewest = 0; // newest noted landing frame
 };
 
 // One prediction step: the keys held and newly pressed plus the analog
@@ -248,6 +280,17 @@ inline bool env_lead_enabled(const char* value)
 {
 	if (value == nullptr) return true;
 	return !(value[0] == '0' && value[1] == '\0');
+}
+
+// PIKMIN_NETPLAY_JOINER_OWN_CAMERA: unset or anything but "0" = on (this
+// peer's own pad samples, and its free-camera drags turn, this peer's own
+// captain's camera); "0" = the pre-M5c routing (the pad samples the camera
+// Navi::controlCamera() names, which for the joiner is P1's camera, and each
+// drag goes to its own slot's camera). With PIKMIN_NETPLAY_CAMERA_LEAD=0 as
+// well, a peer submits exactly the input stream the integration exe did.
+inline bool env_joiner_own_camera(const char* value)
+{
+	return env_lead_enabled(value);
 }
 
 } // namespace pc_netplay_camlead

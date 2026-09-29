@@ -1,8 +1,9 @@
 // Netplay M5c lane A (issue #887): host test for the lead camera core
-// (pc_netplay_camlead_core.h). No game code: key mapping, input history,
-// prediction window (gaps, frozen controller, the pause rule), the
-// correction filter (it matches two simulated homing cameras exactly and
-// blends back to exactly zero) and the opt-out switch parsing.
+// (pc_netplay_camlead_core.h). No game code: key mapping, input history
+// (and its missing-landing-frame count), prediction window (gaps, frozen
+// controller, the pause rule), the correction filter (it tracks two
+// simulated homing cameras to float rounding while active, and the
+// correction itself blends back to exactly zero) and the switch parsing.
 
 #include "netplay/pc_netplay_camlead_core.h"
 
@@ -56,6 +57,30 @@ static void test_history()
 	h.note(5 + InputHistory::kSize, input(kPadZ));
 	check(!h.get(5, &out), "overwritten slot misses the old frame");
 	check(h.get(5 + InputHistory::kSize, &out) && out.buttons == kPadZ, "new frame found");
+}
+
+// Review M2: a submit path that does not note its landing frame leaves a
+// hole in the pending window, which the engine counts as `gaps`.
+static void test_history_gaps()
+{
+	InputHistory h;
+	h.clear();
+	check(h.missing_after(0) == 0, "empty history: no gaps");
+	// Session start at delay 4: the first submit lands on 4; frames 1..3
+	// were never submitted locally and are not gaps.
+	for (uint64_t f = 4; f <= 8; ++f) h.note(f, input(0));
+	check(h.missing_after(0) == 0, "frames before the first noted one are not gaps");
+	check(h.missing_after(5) == 0, "contiguous pending window: no gaps");
+	// A catch-up that noted only its own landing frame (not the GekkoNet
+	// repeats) or a delay increase whose extra adds were not noted.
+	h.note(11, input(0));
+	check(h.missing_after(5) == 2, "frames 9 and 10 missing");
+	check(h.missing_after(10) == 0, "consumed frames no longer count");
+	h.note(9, input(0));
+	h.note(10, input(0));
+	check(h.missing_after(5) == 0, "filled");
+	h.clear();
+	check(h.missing_after(5) == 0, "clear resets the range");
 }
 
 static void test_steps()
@@ -187,12 +212,16 @@ static void test_env()
 	check(!env_lead_enabled("0"), "0: off");
 	check(env_lead_enabled("00"), "anything but 0: on");
 	check(env_lead_enabled(""), "empty: on");
+	check(env_joiner_own_camera(nullptr), "joiner own camera: unset on");
+	check(!env_joiner_own_camera("0"), "joiner own camera: 0 off");
+	check(env_joiner_own_camera("1"), "joiner own camera: 1 on");
 }
 
 int main()
 {
 	test_keys();
 	test_history();
+	test_history_gaps();
 	test_steps();
 	test_correction_matches_cameras();
 	test_correction_edges();
