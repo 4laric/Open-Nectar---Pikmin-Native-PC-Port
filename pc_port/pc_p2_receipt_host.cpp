@@ -114,3 +114,13 @@ bool pc_p2_receipt_host_atomic_write(const char* path, const char* data)
 	return std::rename(temporary.c_str(), path) == 0;
 #endif
 }
+
+int pc_p2_receipt_host_has(P2ReceiptHostHandle handle, const char* seed,
+    const char* reward, const char* slotOrActor, const char* encounter)
+{
+    ReceiptHost* host = receiptHostByHandle(handle);
+    if (!host || !seed || !reward || !slotOrActor || !encounter) return -1;
+    try {
+        return host->ledger->has(seed, reward, slotOrActor, encounter) ? 1 : 0;
+    } catch (...) { return -1; }
+}

@@ -35,6 +35,7 @@ struct BudActor {
     int used = 0;
     int refunds = 0;
     int conversions = 0;
+    int pending = 0;
     float x = 0.0f;
     float y = 0.0f;
     float z = 0.0f;
@@ -54,18 +55,19 @@ p2pom::Species speciesForColour(const std::string& colour)
 
 // Ordinary conversion output: one real PikiHeadItem of the bud's colour, then
 // the ordinary pluck (PikiHeadItem::interactBikkuri) turns it into a live Piki.
-void birthAndPluck(BudActor& actor)
+bool birthAndPluck(BudActor& actor)
 {
-    if (!itemMgr) return;
+    if (!itemMgr) return false;
     PikiHeadItem* sprout = static_cast<PikiHeadItem*>(itemMgr->birth(OBJTYPE_Pikihead));
     if (!sprout) {
         std::printf("P2_CAVE_BUD_SPROUT_RETRY slot=%s colour=%s item_capacity=1\n",
                     actor.slot_id.c_str(), actor.colour.c_str());
-        return;
+        return false;
     }
     Vector3f position(actor.x, actor.y + 50.0f, actor.z);
     sprout->init(position);
     sprout->setColor(actor.colour_index);
+    sprout->startAI(0);
     InteractBikkuri pluck(nullptr);
     const bool plucked = sprout->interactBikkuri(pluck);
     std::printf("P2_CAVE_BUD_SPROUT slot=%s colour=%s colour_index=%d plucked=%d natural=1\n",
@@ -74,6 +76,9 @@ void birthAndPluck(BudActor& actor)
         ++actor.conversions;
         ++conversionTotal;
     }
+    // A failed immediate pluck leaves a real sprout for ordinary player plucking.
+    // The output has been born and must not be retried/duplicated.
+    return true;
 }
 }  // namespace
 
@@ -130,6 +135,7 @@ void pc_p2_cave_bud_tick()
 {
     if (actors.empty() || !pikiMgr) return;
     for (BudActor& actor : actors) {
+        while (actor.pending > 0 && birthAndPluck(actor)) --actor.pending;
         if (actor.done) continue;
         const p2pom::Species species = speciesForColour(actor.colour);
         // Collect thrown/airborne Pikmin inside the ordinary slot radius, then
@@ -151,6 +157,8 @@ void pc_p2_cave_bud_tick()
                 ++actor.refunds;
                 std::printf("P2_CAVE_BUD_REFUND slot=%s colour=%s thrown_colour=%d used=%d budget=%d slot_refunded=1\n",
                             actor.slot_id.c_str(), actor.colour.c_str(), thrownColour, actor.used, actor.count);
+                // Same-colour refund must preserve the thrown actor.
+                continue;
             } else {
                 ++actor.used;
                 ++swallowed;
@@ -164,7 +172,8 @@ void pc_p2_cave_bud_tick()
             const int shot = p2pom::shotCount(species, swallowed);
             std::printf("P2_CAVE_BUD_CLOSE slot=%s colour=%s outcome=shot used=%d budget=%d swallowed=%d\n",
                         actor.slot_id.c_str(), actor.colour.c_str(), actor.used, actor.count, swallowed);
-            for (int index = 0; index < shot; ++index) birthAndPluck(actor);
+            actor.pending += shot;
+            while (actor.pending > 0 && birthAndPluck(actor)) --actor.pending;
             if (actor.used >= actor.count) actor.done = true;
         }
         if (!actor.done && actor.conversions > 0 && actor.used >= actor.count) {
@@ -174,4 +183,10 @@ void pc_p2_cave_bud_tick()
         }
     }
     std::fflush(stdout);
+}
+
+bool pc_p2_cave_bud_pending()
+{
+    for (const BudActor& actor : actors) if (actor.pending) return true;
+    return false;
 }

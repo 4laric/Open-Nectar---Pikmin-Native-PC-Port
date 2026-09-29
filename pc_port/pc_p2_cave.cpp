@@ -281,7 +281,7 @@ bool pc_p2_cave_checkpoint(bool confirm){
         return true;
     }
     Navi* n=naviMgr->getNavi();std::vector<Piki*> alive;
-    bool busy=false;
+    bool busy=pc_p2_cave_bud_pending();
     Iterator it(pikiMgr);CI_LOOP(it){
         Piki* p=static_cast<Piki*>(*it);if(!p->isAlive())continue;
         const int state=p->getState();
