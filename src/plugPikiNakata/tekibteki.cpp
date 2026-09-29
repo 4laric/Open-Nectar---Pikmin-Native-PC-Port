@@ -38,6 +38,7 @@
 #include "pc_p2_tamago.h"
 #include "pc_p2_imomushi.h"
 #include "pc_p2_otakara.h"
+#include "pc_held_part.h"
 #include "pc_p2_batch3.h"
 #include "pc_p2_pose_family.h"
 #include "pc_p2_long_legs.h"
@@ -357,6 +358,9 @@ void BTeki::reset()
 	setDirection(mPersonality->mFaceDirection);
 	mSize             = getSize();
 	mDeadState        = 0;
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	mPcHeldPartDropped = false;
+#endif
 	mStateID          = 0;
 	mReturnStateID    = 0;
 	mActionStateId    = 0;
@@ -490,7 +494,14 @@ void BTeki::startAI(int)
 	strat->start(*static_cast<Teki*>(this));
 	ID32& id = mPersonality->mID;
 	PRINT_NAKATA("BTeki::reset:%08x:item:%s\n", this, id.mStringID);
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	// #901: a P2-bound holder whose part already exists (collected, cached,
+	// on the ground) is born without it: no radar marker, no drop. A P1
+	// holder always holds (vanilla); pc_held_part_birth only logs it.
+	if (Pellet::isUfoPartsID(id.mId) && pc_held_part_birth(this)) {
+#else
 	if (Pellet::isUfoPartsID(id.mId)) {
+#endif
 		radarInfo->attachParts(this);
 		pelletMgr->addUseList(id.mId);
 	}
@@ -718,6 +729,10 @@ void BTeki::doAI()
 	if (pc_p2_tadpole_suppress_ai(this)) {
 		return;
 	}
+	// #215: Demon-profile anchors run no P1 strategy (Sarai host owns behaviour).
+	if (pc_p2_sarai_suppress_ai(this)) {
+		return;
+	}
 #endif
 	if (pc_p2_qurione_suppress_ai(this)) {
 		return;
@@ -776,6 +791,11 @@ void BTeki::die()
             && gameflow.mMoviePlayer && !gameflow.mMoviePlayer->mIsActive);
     }
 
+    // #901: a P2-bound actor's real death drops its held ship part here, so
+    // families that finalize through die() alone (no dieSoon) still drop.
+    // P1 strategies keep their vanilla spawnItems/dieSoon timing.
+    if (!mDeadState && pc_held_part_p2_source(this)) pc_held_part_drop(this, "die");
+
     mDeadState = 1;
     pc_p2_otakara_died(this); // lane-22 host death-seam hook; no-op for unregistered actors
 }
@@ -786,6 +806,13 @@ void BTeki::die()
 void BTeki::dieSoon()
 {
 	PRINT_NAKATA("dieSoon:%08x:\n", this);
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	// #901 generic held ship part: a P2-bound holder's real death (health
+	// spent) reaches here before the corpse branch and detachGenerator,
+	// including NoCorpse families and pcEscapeNow. Latched with spawnItems;
+	// no-op on escape. A P1 holder is vanilla: it drops only in spawnItems.
+	if (pc_held_part_p2_source(this)) pc_held_part_drop(this, "dieSoon");
+#endif
 	clearTekiOption(TEKIOPT_Alive | TEKIOPT_Visible | TEKIOPT_ShadowVisible | TEKIOPT_Atari);
 	if (getParameterI(TPI_CorpseType) == TEKICORPSE_LeaveCorpse) {
 		createSoulEffect();
@@ -1039,7 +1066,11 @@ void BTeki::spawnItems()
 {
 	// spawn item
 	ID32& id = mPersonality->mID;
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	if (!id.match('none') && pc_held_part_claim_spawn_items(this)) {
+#else
 	if (!id.match('none')) {
+#endif
 		PRINT_NAKATA("spawnItems:%08x:spawn item:%s\n", this, id.mStringID);
 		spawnPellets(id.mId, -2, 1);
 		radarInfo->detachParts(this);
@@ -1959,6 +1990,13 @@ bool BTeki::ignoreAtari(Creature* target)
 	if (target->getStickObject() == this) {
 		return true;
 	}
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	// #215: a flying Demon-profile anchor does not shove captains
+	// (P2 flying enemies disable EB_CollisionActive).
+	if (pc_p2_sarai_ignore_atari(this, target)) {
+		return true;
+	}
+#endif
 
 	return false;
 }

@@ -247,6 +247,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_demon_bridge.cpp
     pc_port/pc_p2_demon_host.cpp
     pc_port/pc_p2_sarai_host.cpp
+    pc_port/pc_p2_sarai_demon.cpp
     pc_port/pc_p2_sarai_capture_bridge.cpp
     pc_port/pc_p2_sarai_manager.cpp
     pc_port/pc_p2_generated_placement.cpp
@@ -294,6 +295,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_economy.cpp
     pc_port/pc_p2_teki_lifetime.cpp
     pc_port/pc_p2_placement_probe.cpp
+    pc_port/pc_p2_boss_arena.cpp
+    pc_port/pc_held_part.cpp
     pc_port/pc_p2_input_script.cpp
     # TEST-ONLY headless autoplay bot (bot-impl): scripted player driving the
     # normal pad path. Env-gated (PIKMIN_RANDOMIZER_AUTOPLAY), inert otherwise.
@@ -302,6 +305,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_purple_motion.cpp
     pc_port/pc_p2_purple_impact.cpp
     pc_port/pc_p2_purple_direct.cpp
+    pc_port/pc_whistle_pluck.cpp
+    pc_port/pc_route_planner.cpp
     pc_port/pc_p2_purple_flight.cpp
     pc_port/pc_p2_purple_feedback.cpp
     pc_port/pc_p2_kochappy_stun.cpp
@@ -1268,6 +1273,20 @@ target_include_directories(p2_campaign_policy_test PRIVATE pc_port)
 target_compile_options(p2_campaign_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_campaign_policy_test COMMAND p2_campaign_policy_test)
 
+# P2 boss arenas (owner ruling 2026-09-29): engine-free suppress/probe table.
+add_executable(p2_boss_arena_policy_test
+    pc_port/pc_p2_boss_arena_policy_test.cpp)
+target_include_directories(p2_boss_arena_policy_test PRIVATE pc_port)
+target_compile_options(p2_boss_arena_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_boss_arena_policy_test COMMAND p2_boss_arena_policy_test)
+
+# Generic held ship part (#901): engine-free birth/drop contract.
+add_executable(pc_held_part_policy_test
+    pc_port/pc_held_part_policy_test.cpp)
+target_include_directories(pc_held_part_policy_test PRIVATE pc_port)
+target_compile_options(pc_held_part_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_held_part_policy_test COMMAND pc_held_part_policy_test)
+
 # Frog identity policy (inst-frogs #871): engine-free params/FSM/clip contract.
 add_executable(p2_frog_policy_test tools/p2_frog_policy_test.cpp)
 target_include_directories(p2_frog_policy_test PRIVATE pc_port)
@@ -1334,6 +1353,14 @@ add_executable(p2_sarai_captor_lifecycle_test tools/p2_sarai_captor_lifecycle_te
 target_include_directories(p2_sarai_captor_lifecycle_test PRIVATE pc_port)
 target_compile_options(p2_sarai_captor_lifecycle_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_sarai_captor_lifecycle_test COMMAND p2_sarai_captor_lifecycle_test)
+
+# #215 Demon (Bumbling Snitchbug, 32) species-profile policy test. Engine-free:
+# retail parms loader, the Demon 3 s attack timer, Demon::getAttackableTarget
+# geometry, hunt descent, climb/weight decisions and the EnemyBase simulation.
+add_executable(p2_demon_profile_test tools/p2_demon_profile_test.cpp)
+target_include_directories(p2_demon_profile_test PRIVATE pc_port)
+target_compile_options(p2_demon_profile_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_demon_profile_test COMMAND p2_demon_profile_test)
 
 # rd-p2ap-sarai (#439) Sarai seed-bridge campaign test. Engine-free: stub
 # engine headers shadow the real ones (BEFORE pc_port), so the real
@@ -1528,6 +1555,11 @@ if(PIKMIN_BUILD_TESTS)
     target_include_directories(pc_generator_cache_validation_test PRIVATE pc_port/save)
     target_compile_options(pc_generator_cache_validation_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_generator_cache_validation_test COMMAND pc_generator_cache_validation_test)
+
+    # Better Pathfinding planner checked against brute force (not linked into main game)
+    add_executable(pc_route_planner_test pc_port/pc_route_planner_test.cpp pc_port/pc_route_planner.cpp)
+    target_compile_options(pc_route_planner_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_route_planner_test COMMAND pc_route_planner_test)
 
     # Envelope smoke test executable (not linked into main game)
     add_executable(pc_envelope_test pc_port/audio/pc_envelope_test.cpp pc_port/audio/pc_envelope.cpp)

@@ -6,6 +6,7 @@
 #include "pc_p2_sarai_lifecycle.h"
 #include "pc_p2_retail_player.h"
 #include "pc_p2_pose_blend.h"
+#include "pc_p2_demon_profile.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -24,6 +25,20 @@ class Piki;
 // the P2DemonHost visual surface. An opt-in natural route additionally drives the
 // isolated p2sarai::Fsm Wait/Move/Attack/CatchFly/FallMeck states against a live
 // naviMgr captain through the shared mouth-stick captor bridge.
+// Species profile (#215). Sarai (23) keeps the lane-30 Pikmin-first route
+// unchanged; Demon (32) is a Sarai::Obj subclass (pikmin2 Demon.h) and runs the
+// full retail Sarai FSM through enableDemon()/updateDemon() with captain
+// targeting, its own model, clips and parms.
+struct P2SaraiSpecies {
+    unsigned sourceId;     // P2 enemy id: generator-token markers and the Onion receipt
+    const char* marker;    // marker family: P2_<marker>_*
+    const char* species;   // P2 enum name
+    const char* prefix;    // staged file prefix: <prefix>0.mod, <prefix>-*.txt
+    bool demon;            // full retail Demon route (enableDemon)
+};
+extern const P2SaraiSpecies kSaraiSpecies;
+extern const P2SaraiSpecies kDemonSpecies;
+
 class P2SaraiHost final : public Creature {
 public:
     P2SaraiHost();
@@ -132,6 +147,42 @@ public:
     void update() override;
     void doKill() override;
 
+    // --- Demon profile (#215) ------------------------------------------------
+    // Full retail route: p2sarai::Fsm over all eleven states, flight by
+    // setHeightVelocity (fp01/fp02/fp11/fp12), patrol by setRandTarget +
+    // walkToTarget (fp04/fp05, fp08/fp28), the Attack KEY2 lunge and hunt
+    // descent (fp31/fp32), Demon::getAttackableTarget captain targeting behind
+    // the 3 s mAttackTimer, catchTarget into the animated mouth slots, the
+    // FallMeck KEY3 damaging drop (fp24/fp41) and flickStickTarget on
+    // Dead/Fall/Damage entry. The bound anchor stays the health/corpse owner;
+    // the manager suppresses its P1 AI and drains its stored damage.
+    // `motions` must hold all twelve clips; pose banks are
+    // <prefix>-<clipstem>-poses.txt and must be preloaded.
+    bool enableDemon(const p2demon::Parms& parms, const p2retail::Table& motions, const char* prefix,
+                     const Vector3f& home, unsigned seed);
+    bool demonEnabled() const { return mDemonEnabled; }
+    const P2SaraiSpecies& species() const { return *mSpecies; }
+    void setSpecies(const P2SaraiSpecies& species) { mSpecies = &species; }
+    // Retail Dead KEYEVENT_END reached: the manager finalises the anchor corpse.
+    bool demonKillRequested() const { return mDemonKill; }
+    float attackTimer() const { return mAttackTimer.value(); }
+    unsigned demonCaptures() const { return mDemonCaptures; }
+    unsigned demonDrops() const { return mDemonDrops; }
+    // Anchor vehicle seams (engine side, pc_p2_sarai_demon.cpp): set the retail
+    // life (fp00) on the bound anchor, drain its stored Pikmin damage (its P1
+    // strategy is suppressed), keep it on the host, and finalise the engine
+    // corpse (die + dieSoon) once Dead KEYEVENT_END is reached.
+    void demonAnchorInit();
+    void demonAnchorDrain();
+    void demonAnchorFollow();
+    void demonAnchorFinalize();
+    // Carcass visual (startCarcassMotion: type5) with the carried pellet's
+    // model-view matrix.
+    void demonDrawCarcass(Graphics& gfx, const Matrix4f& modelView);
+    float facing() const { return mFacingRadians; }
+    float demonLife() const { return mDemonParms.general.life; }
+    bool demonFlying() const { return mDemonEnabled && mFsm.flags().untargetable; }
+
 private:
     struct PoseSet {
         std::string profile;
@@ -216,4 +267,42 @@ private:
     void updateNatural();
     bool startNaturalMotion(p2sarai::Motion motion);
     void applyNaturalPose();
+
+    // Demon profile state (#215).
+    const P2SaraiSpecies* mSpecies = &kSaraiSpecies;
+    bool mDemonEnabled = false;
+    bool mDemonKill = false;
+    p2demon::Parms mDemonParms;
+    p2demon::AttackTimer mAttackTimer;
+    p2retail::Motion mDemonMotion[12];   // indexed by p2sarai::Motion
+    std::string mDemonBank[12];
+    p2retail::Motion mCarryMotion;
+    std::string mCarryBank;
+    Navi* mDemonTarget = nullptr;        // Attack mTargetCreature
+    Navi* mDemonHeld = nullptr;          // captain in a mouth slot
+    Vector3f mRandTarget;                // setRandTarget() mTargetPos
+    p2demon::Velocity mVel;              // mCurrentVelocity
+    p2demon::Velocity mTargetVel;        // mTargetVelocity
+    bool mHuntStopped = false;           // Attack floor hit (mGeneralTimer = 30)
+    float mCatchMin = 1.0e9f, mCatchDy = 0.0f, mCatchDxz = 0.0f; // catch-window diagnostic
+    unsigned mRng = 1;
+    unsigned mDemonCaptures = 0;
+    unsigned mDemonDrops = 0;
+    float mDemonClock = 0.0f;
+    float mLastDropClock = -1.0f;
+    int mDemonLogTicks = 0;
+    int mLastDemonState = -1;
+    float mCarcassFrame = 0.0f;
+    bool mCarcassLogged = false;
+    float demonRand();
+    unsigned demonGenerator() const;
+    void updateDemon();
+    bool startDemonMotion(p2sarai::Motion motion);
+    Navi* demonAcquire(float dt);
+    void demonSetRandTarget();
+    float demonHeightVelocity(float mapY, int bodyStuck);
+    void demonWalkTo(const Vector3f& target, float speed);
+    void demonTurnTo(const Vector3f& target);
+    void demonCatch();
+    void demonReleaseHeld(const char* why);
 };

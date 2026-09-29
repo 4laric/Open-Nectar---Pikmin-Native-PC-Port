@@ -867,3 +867,22 @@ void GameFlow::addGenNode(immut char* name, CoreNode* node)
 {
 	mFlowManager->add(new GameGenNode((name) ? name : node->mName, node));
 }
+
+/**
+ * @brief Recomputes clock speed from the stage multiplier, day-length setting and
+ * received Progressive Day Length items.
+ */
+void syncWorldClockSpeed()
+{
+	const f32 dayScale    = pc_randomizer_day_length_multiplier();
+	const f32 oldSecsHour = gameflow.mWorldClock.mRealSecsPerGameHour;
+	gameflow.mWorldClock.mRealSecsPerGameDay  = 60.0f * (gameflow.mTimeMultiplier * gameflow.mParameters->mRealMinutesPerGameDay()) * dayScale;
+	gameflow.mWorldClock.mRealSecsPerGameHour = gameflow.mWorldClock.mRealSecsPerGameDay / gameflow.mWorldClock.mHoursInDay;
+	// A Progressive Day Length receipt slows the clock from here on. Rescale the
+	// seconds already spent in this hour so the time of day never moves.
+	static f32 lastDayScale = 1.0f;
+	if (dayScale != lastDayScale && oldSecsHour > 0.0f) {
+		gameflow.mWorldClock.mRealSecsIntoHour *= gameflow.mWorldClock.mRealSecsPerGameHour / oldSecsHour;
+	}
+	lastDayScale = dayScale;
+}
