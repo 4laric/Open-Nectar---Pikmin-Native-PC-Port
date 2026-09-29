@@ -497,6 +497,11 @@ def ptrscan(path, sym, dsym, top=25):
                 continue
             s = dsym.name(src) if kind == "globals_to_off" else site_name(sym, src)
             d = site_name(sym, dst)
+            # With the malloc audit on, an operator-new block is in the table
+            # twice: its malloc block (site piki_pc_alloc, 16 bytes earlier)
+            # and its payload (the real site). Keep the payload entry only.
+            if kind == "off_to_region" and s.startswith("piki_pc_alloc"):
+                continue
             agg[(s, d)] = max(agg.get((s, d), 0), c)
         if not agg:
             continue

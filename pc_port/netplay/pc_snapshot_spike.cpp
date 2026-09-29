@@ -40,7 +40,9 @@
 //   PIKMIN_NETPLAY_SNAPSHOT_SPIKE_AUDIT=N       every N ticks: per-page hash
 //       of every committed region page, compared with the previous audit;
 //       a page that changed without write watch reporting it is a missed
-//       write (MV-3).
+//       write (MV-3). Reading a never-touched demand-zero page is itself
+//       reported as a write, so the first audit dirties every committed
+//       page once: audit runs check coverage, not dirty counts or timing.
 //   PIKMIN_NETPLAY_SNAPSHOT_SPIKE_PTRSCAN=1     with AUDIT: track off-region
 //       blocks and scan region/globals/off-region blocks for cross pointers
 //       at each audit (MV-4).
@@ -739,26 +741,37 @@ void noteSmallSite(uint8_t* hdr, uintptr_t ra)
 	S->smallSite[unit] = ra ? ra : 1;
 }
 
-bool isZeroPage(const uint8_t* p)
-{
-	const uint64_t* w = reinterpret_cast<const uint64_t*>(p);
-	uint64_t acc      = 0;
-	for (size_t i = 0; i < kPage / 8; ++i) acc |= w[i];
-	return acc == 0;
-}
-
-// Zero [p, p + bytes) (page aligned end, p may be mid-page) without writing
-// pages that are already zero: a page write watch never reported is only
-// read, so reuse does not dirty (or physically commit) untouched pages.
+// Zero [p, end) (end page aligned, p may be mid-page) without writing pages
+// that were never written: a page write watch never reported and did not
+// report since the last reset is still the zero page it was committed as.
+// Such pages are not even read: on Windows a first read of a demand-zero
+// page in a MEM_WRITE_WATCH region is reported as a write, so reading every
+// untouched page would dirty (and physically commit) all of them.
 void zeroSpan(uint8_t* p, size_t bytes)
 {
 	uint8_t* end = p + bytes;
+	uint8_t* lo  = reinterpret_cast<uint8_t*>(reinterpret_cast<uintptr_t>(p) & ~uintptr_t(kPage - 1));
+	ULONG_PTR count = 0;
+	bool known      = false;
+	if (S->writeWatch && end > lo) {
+		count      = S->wwCap;
+		DWORD gran = 0;
+		known      = GetWriteWatch(0, lo, size_t(end - lo), S->wwAddrs, &count, &gran) == 0;
+	}
+	ULONG_PTR k = 0;
 	while (p < end) {
 		uint8_t* pageLo = reinterpret_cast<uint8_t*>(reinterpret_cast<uintptr_t>(p) & ~uintptr_t(kPage - 1));
 		uint8_t* pageHi = pageLo + kPage < end ? pageLo + kPage : end;
-		const size_t idx = size_t(pageLo - S->base) / kPage;
-		if (p != pageLo || pageHi != pageLo + kPage) std::memset(p, 0, size_t(pageHi - p));
-		else if (bitGet(S->touched, idx) || !isZeroPage(pageLo)) std::memset(pageLo, 0, kPage);
+		if (p != pageLo || pageHi != pageLo + kPage) {
+			std::memset(p, 0, size_t(pageHi - p));
+		} else {
+			bool written = !known || bitGet(S->touched, size_t(pageLo - S->base) / kPage);
+			if (!written) {
+				while (k < count && static_cast<uint8_t*>(S->wwAddrs[k]) < pageLo) ++k;
+				written = k < count && static_cast<uint8_t*>(S->wwAddrs[k]) == pageLo;
+			}
+			if (written) std::memset(pageLo, 0, kPage);
+		}
 		p = pageHi;
 	}
 }
