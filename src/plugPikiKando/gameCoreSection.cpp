@@ -4842,7 +4842,11 @@ void GameCoreSection::setActiveView(int view)
 
 Camera* GameCoreSection::getViewCamera(int view)
 {
-	if (!pc_settings_get_coop_merge_camera()) {
+	// M5c lane A (issue #887): in det two-pass mode updateDynamicSplit never
+	// builds the merged views (each peer shows its own captain), so a host
+	// with coopMergeCamera on used to present the never-updated mViewCam.
+	// Presentation only: the sim pass never asks for a view camera.
+	if (!pc_settings_get_coop_merge_camera() || pc_netplay_present_two_pass_active()) {
 		return view == 1 ? mGameCamera2 : mNavi->mNaviCamera;
 	}
 	return &mViewCam[view == 1 ? 1 : 0];

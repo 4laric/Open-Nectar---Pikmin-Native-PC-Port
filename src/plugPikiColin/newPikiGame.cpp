@@ -1,6 +1,7 @@
 #include "pc_randomizer.h"
 #include "pc_bbft.h"
 #if defined(PIKI_PC_PORT)
+#include "netplay/pc_netplay_camlead.h"
 #include "netplay/pc_netplay_det.h"
 #include "netplay/pc_netplay_present.h"
 #include "timing/pc_render_phase.h"
@@ -2412,11 +2413,20 @@ public:
 			// M2b fix (review M6): update the camera for the full-screen
 			// aspect / clip, as beginView does per split view.
 			if (detSingleView && !pc_render_is_authoritative() && sGamecoreLive && gamecore) {
-				Camera* localCam = gamecore->getViewCamera(pc_netplay_present_local_player());
+				const int localPlayer = pc_netplay_present_local_player();
+				Camera* localCam      = gamecore->getViewCamera(localPlayer);
 				if (localCam) {
 					localCam->update(f32(gfx.mScreenWidth) / f32(gfx.mScreenHeight), localCam->mFov,
 					                 pc_first_person_active() ? 3.0f : 100.0f, mCameraFarClip);
-					gfx.setCamera(localCam);
+					// M5c lane A (issue #887): in a lockstep session the view
+					// leads with the local camera controls (a separate lead
+					// camera; the sim camera above stays exactly as before).
+					Camera* viewCam = pc_netplay_camlead_view(localPlayer, localCam);
+					if (viewCam != localCam) {
+						viewCam->update(f32(gfx.mScreenWidth) / f32(gfx.mScreenHeight), viewCam->mFov,
+						                pc_first_person_active() ? 3.0f : 100.0f, mCameraFarClip);
+					}
+					gfx.setCamera(viewCam);
 				}
 			}
 #endif

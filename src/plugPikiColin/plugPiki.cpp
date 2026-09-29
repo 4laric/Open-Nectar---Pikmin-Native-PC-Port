@@ -16,6 +16,7 @@
 #include "timing/pc_tick_profiler.h"
 #include "pc_gfx.h"
 #if defined(PIKI_PC_PORT)
+#include "netplay/pc_netplay_camlead.h"
 #include "netplay/pc_netplay_det.h"
 #include "netplay/pc_netplay_present.h"
 #endif
@@ -369,6 +370,9 @@ int PlugPikiApp::idle()
 		pc_gfx_end_capture();
 		pc_netplay_present_restore_all_shapes();
 		pc_netplay_present_end_presentation(*gsys->mDGXGfx);
+		// M5c lane A (issue #887): put gfx.mCamera back to the sim camera
+		// if the lead camera was presented (and log its trace line).
+		pc_netplay_camlead_end_presentation(*gsys->mDGXGfx);
 		// M2b fix (review M3): back to authoritative so doneRender,
 		// parseMessages, hashing and any soft-reset idle run as sim, and the
 		// next presentation starts from a clean save list.

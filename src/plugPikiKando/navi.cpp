@@ -18,6 +18,7 @@
 #include "pc_coop.h"
 #include "pc_window.h"
 #include "pc_gyro.h"
+#include "netplay/pc_netplay_camlead.h"
 #include "netplay/pc_netplay_det.h"
 #include "netplay/pc_input_log.h"
 #include "netplay/pc_netplay_present.h"
@@ -2428,7 +2429,10 @@ static void pcNaviCaptureControlYaw()
 		const int pad = navi->mNaviID;
 		if (pad < 0 || pad > 3) continue;
 		if (pc_input_log_yaw_valid(pad)) continue;
-		Camera* cam = navi->controlCamera();
+		// M5c lane A (issue #887): while this peer presents the lead camera,
+		// its own pad samples the yaw it sees (stick and yaw still travel
+		// together); every other case reads the control camera as before.
+		Camera* cam = pc_netplay_camlead_control_camera(pad, navi->controlCamera());
 		if (cam == nullptr) {
 			if (detMode) pc_input_log_yaw_set(pad, 0, pc_input_log::kFlagsNone);
 			continue;

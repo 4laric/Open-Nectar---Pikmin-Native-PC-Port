@@ -258,6 +258,9 @@ set(PC_PORT_SOURCES
     pc_port/netplay/pc_netplay_policy.cpp
     pc_port/netplay/pc_netplay_present.cpp
     pc_port/netplay/pc_sim_rng.cpp
+    # Netplay M5c lane A (issue #887): the lead (instant) camera. Engine TU in
+    # both builds; inert until a lockstep session arms it (netplay builds).
+    pc_port/netplay/pc_netplay_camlead.cpp
     # Challenge host-mode engine runtime bridge (#722, ported from #710
     # db245877; #186 review before shared-line landing): the per-tick runtime
     # bridge plus the landed host-state module, linked into pikmin_pc so the

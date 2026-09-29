@@ -81,6 +81,7 @@
 
 #include "netplay/pc_netplay_session.h"
 
+#include "netplay/pc_netplay_camlead.h"
 #include "netplay/pc_netplay_det.h"
 #include "netplay/pc_netplay_gekko_input.h"
 #include "netplay/pc_netplay_ice.h"
@@ -2046,6 +2047,7 @@ void loadguard_summary(); // M4 gap-fix lane S, defined with the load guard belo
 void stop_session()
 {
 	loadguard_summary(); // lane S: once per session; no-op unless the session started
+	pc_netplay_camlead_session_end(); // M5c lane A: summary line, then inert
 	sInAdvance = false;
 	if (sGekko != nullptr) {
 		GekkoSession* s = sGekko;
@@ -2233,6 +2235,9 @@ void parse_config()
 	sLocalRole    = sCfg.isHost ? 0 : 1;
 	// Each peer presents its own captain full screen (M2b): host P1, joiner P2.
 	pc_netplay_present_set_local_player_default(sLocalRole);
+	// M5c lane A (issue #887): the lead camera follows this peer's own
+	// captain with its own inputs (PIKMIN_NETPLAY_CAMERA_LEAD=0: off).
+	pc_netplay_camlead_session_begin(sLocalRole);
 	// M4a: cache the external-state stream gate (env default on; =0 is the
 	// negative control that restores legacy file polling on both peers).
 	sRandStream = randstate_env_on();
@@ -3893,6 +3898,7 @@ int handle_game_events(System* sys, BaseApp* app)
 			(void)OSCheckActiveThreads();
 			sys->updateSysClock();
 			pc_netplay_on_tick_begin();
+			pc_netplay_camlead_begin_frame((uint64_t)e->data.adv.frame); // M5c lane A
 			loadguard_tick_begin((uint32_t)e->data.adv.frame, // lane S: keep-alive may pump inside
 			                     e->data.adv.rolling_back || e->data.adv.running_ahead);
 			app->idle();
@@ -4530,6 +4536,9 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 			gekko_add_local_input(sGekko, sLocalHandle, wire);
 			gekko_set_local_delay(sGekko, sLocalHandle, (unsigned char)sCfg.localDelay);
 			sSubmitted = landing + 1;
+			// M5c lane A: frames landing..landing+delay all carry it.
+			for (uint64_t f = landing; f <= landing + sCfg.localDelay; ++f)
+				pc_netplay_camlead_note_local_input(f, local);
 			printf("[netplay] resume: catch-up input for frame=%llu at delay 0, delay %u restored "
 			       "(frames %llu..%llu repeat it)\n",
 			       (unsigned long long)landing, sCfg.localDelay, (unsigned long long)(landing + 1),
@@ -4547,6 +4556,9 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 			pc_netplay_input_encode(local, wire);
 			gekko_add_local_input(sGekko, sLocalHandle, wire);
 			++sSubmitted;
+			// M5c lane A: the lead camera replays this peer's submitted
+			// inputs until the sim applies them (frame = submit + delay).
+			pc_netplay_camlead_note_local_input(sSubmitted - 1 + sCfg.localDelay, local);
 			if (sHolding && sSubmitted - 1 + sCfg.localDelay
 			                    == (uint64_t)sHoldFrame + kHoldLeadFrames - 1) {
 				printf("[netplay] hold: last pre-hold input frame=%llu (submit=%llu delay=%u)\n",
