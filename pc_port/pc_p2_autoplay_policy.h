@@ -382,6 +382,7 @@ struct Config {
     // bot stood 400 below the ledge for minutes while the Crawbster could not
     // reach it). Past this |dy| the roller keeps approaching over the route.
     float rollerTierDy = 40.0f;
+    float rollerSeedStand = 130.0f; // corpse seeding: stop here and aim the cursor onto the corpse
     float rollerHomeLeash = 200.0f; // back-off blends toward home past this XZ distance from it
     // #897 power-mode resupply: the power squad is the whole stocked Onion,
     // so after a crush the Onion is empty and the v4 resupply (needs stock)
@@ -755,6 +756,23 @@ private:
     // whistle). Shared by Seed (no grabs yet) and SeedGrow (short crew).
     void seedSteerThrow(const Senses& in)
     {
+        // #897 big corpse (Crawbster): walking onto it pins the captain at its
+        // centre with the cursor ~100 past the far edge, so throws land off
+        // the corpse (ar9: 11/20 carriers, carry_stalled). Inside
+        // rollerSeedStand stop, and slide the cursor onto the corpse with the
+        // look-band stick, then throw.
+        if (cfg.rollerStance && isRollerStance(in.targetSource) && in.targetToken != 0
+            && in.targetDist <= cfg.rollerSeedStand && in.cursorValid) {
+            const float ex = in.tgtX - in.cursorX, ez = in.tgtZ - in.cursorZ;
+            const float el = std::sqrt(ex * ex + ez * ez);
+            if (el > cfg.kingCursorTol) {
+                lastCommand.moveX = ex / el;
+                lastCommand.moveZ = ez / el;
+                lastCommand.stickScale = cfg.lookStickScale;
+            }
+            if (el <= cfg.kingCursorTol * 2.0f) pulseA(in, cfg.throwHold, cfg.throwGap);
+            return;
+        }
         if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
         else if (in.targetToken != 0) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
         if (in.targetDist <= cfg.throwRange && in.targetToken != 0) pulseA(in, cfg.throwHold, cfg.throwGap);
