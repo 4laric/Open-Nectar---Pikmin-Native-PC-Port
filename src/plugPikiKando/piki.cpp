@@ -2,6 +2,7 @@
 #include "pc_p2_purple_flight.h"
 #include "pc_p2_purple_impact.h"
 #include "pc_p2_white.h"
+#include "pc_p2_breadbug_teki.h"
 #include "pc_p2_species.h"
 #include "pc_p2_purple.h"
 #include "pc_randomizer.h"
@@ -301,6 +302,20 @@ int Piki::findRoute(int sourceWaypointIndex, int destWaypointIndex, bool isRetry
 
 	// Calculate new path
 	int handle;
+#if defined(PIKI_PC_PORT)
+	// Better Pathfinding: one exact search for every destination, onions and the
+	// ship included, instead of the greedy walk or the onion cost table. It is
+	// cheap enough to answer now, so the asynchronous path is not needed.
+	if (pc_settings_get_better_pathfinding()) {
+		mUseAsyncPathfinding = false;
+		handle = routeMgr->getPathFinder('test')->findSyncShortest(mPathBuffers, sourceWaypointIndex, destWaypointIndex, isRetryAttempt);
+		if (!handle) {
+			mRouteDestinationIndex = -1;
+			mRouteSourceIndex      = -1;
+		}
+		return handle;
+	}
+#endif
 	if (destinationType != -1) {
 		handle = routeMgr->getPathFinder('test')->findSyncOnyon(mSRT.t, mPathBuffers, sourceWaypointIndex, destinationType, isRetryAttempt);
 		if (!handle) {
@@ -410,6 +425,11 @@ bool Piki::initRouteTrace(immut Vector3f& targetPos, bool p2)
 	}
 
 	WayPoint* nearestTargetWP = routeMgr->findNearestWayPoint('test', targetPos, false);
+#if defined(PIKI_PC_PORT)
+	if (wp1 && wp2 && nearestTargetWP && pc_settings_get_better_pathfinding()) {
+		nearestPikiWP = routeMgr->pickRouteStart(mSRT.t, wp1, wp2, nearestTargetWP->mIndex, onlyLand);
+	}
+#endif
 	mRouteStartPos            = mSRT.t;
 	mRouteGoalPos             = targetPos;
 
@@ -971,6 +991,12 @@ int Piki::graspSituation(Creature** outTarget)
 		if (roughCull(teki, this, minTestDist + teki->getCentreSize())) {
 			continue;
 		}
+#if defined(PIKI_PC_PORT)
+		// #898: an unbittered OWN Breadbug is not a living thing (retail pikiAI skips it).
+		if (pc_p2_breadbug_teki_untargetable(teki, "piki_grasp_situation")) {
+			continue;
+		}
+#endif
 		if (teki->isVisible() && teki->isAlive() && !teki->isFlying() && teki->isOrganic() && !teki->isStickTo()) {
 			f32 tekiDist = qdist2(this, teki);
 			if (tekiDist <= minTestDist + teki->getCentreSize()) {
@@ -2188,7 +2214,11 @@ void Piki::collisionCallback(immut CollEvent& event)
 	}
 
 	if (AICONST.mDoCStickAttack() && (collider->mObjType == OBJTYPE_Teki || collider->isBoss()) && collider->isOrganic()
-	    && mMode == PikiMode::FormationMode && getState() != PIKISTATE_Pressed) {
+	    && mMode == PikiMode::FormationMode && getState() != PIKISTATE_Pressed
+#if defined(PIKI_PC_PORT)
+	    && !pc_p2_breadbug_teki_untargetable(collider, "piki_formation_contact") // #898 swarm
+#endif
+	) {
 		ActCrowd* crowd = static_cast<ActCrowd*>(mActiveAction->getCurrAction());
 		if (crowd && crowd->mState == ActCrowd::STATE_Formed) {
 			mActiveAction->abandon(nullptr);
@@ -2939,6 +2969,9 @@ void Piki::pcChargeAt(Creature* target)
 {
 	if (!target || playerState->inDayEnd()) {
 		return;
+	}
+	if (pc_p2_breadbug_teki_untargetable(target, "piki_charge")) {
+		return; // #898
 	}
 	mActiveAction->abandon(nullptr);
 	mActiveAction->mCurrActionIdx = PikiAction::Attack;

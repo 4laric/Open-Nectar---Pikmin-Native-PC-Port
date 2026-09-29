@@ -3,6 +3,7 @@
 #include "pc_p2_purple_direct.h"
 #include "pc_p2_purple_flight.h"
 #include "pc_p2_white.h"
+#include "pc_p2_breadbug_teki.h"
 #include "PikiState.h"
 #include "AIConstant.h"
 #include "BombItem.h"
@@ -1018,6 +1019,11 @@ void PikiBulletState::exec(Piki* piki)
 	CI_LOOP(iter)
 	{
 		Creature* teki = *iter;
+#if defined(PIKI_PC_PORT)
+		if (pc_p2_breadbug_teki_untargetable(teki, "piki_bullet")) {
+			continue; // #898
+		}
+#endif
 		if (teki->isAlive() && teki->isVisible() && !teki->isFlying()) {
 			Vector3f dir = teki->mSRT.t - piki->mSRT.t;
 			f32 dist     = dir.length();
@@ -2215,7 +2221,11 @@ void PikiFlyingState::procCollideMsg(Piki* piki, MsgCollide* msg)
 		transit(piki, PIKISTATE_Normal);
 		return;
 	}
-	if (colliderType == OBJTYPE_Teki && collider->isOrganic()) {
+	if (colliderType == OBJTYPE_Teki && collider->isOrganic()
+#if defined(PIKI_PC_PORT)
+	    && !pc_p2_breadbug_teki_untargetable(collider, "piki_thrown_stick") // #898: never sticks
+#endif
+	) {
 		piki->mActiveAction->abandon(nullptr);
 		PRINT_KANDO("FLYING .. collide\n");
 		if (msg->mEvent.mColliderPart->isPlatformType()) {
