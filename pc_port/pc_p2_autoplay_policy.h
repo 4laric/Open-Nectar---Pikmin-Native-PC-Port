@@ -182,6 +182,15 @@ inline bool isPowerEnabled()
     return v && v[0] && std::strcmp(v, "0") != 0;
 }
 
+// #901 TEST-ONLY: leave a dropped ship part on the ground (whistle the squad
+// off it and stop) so a day-end carry-over of an uncarried held part can be
+// observed. PIKMIN_RANDOMIZER_AUTOPLAY_NO_PART_CARRY=1.
+inline bool noPartCarry()
+{
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_NO_PART_CARRY");
+    return v && v[0] == '1';
+}
+
 inline float powerDamageMult()
 {
     if (!isPowerEnabled()) return 1.0f;
@@ -1055,7 +1064,10 @@ private:
                               in.targetToken, in.targetDist, in.naviX, in.naviZ,
                               approachReplans + 1);
                 markers.emplace_back(buf);
-                if (in.targetDist <= cfg.rangedAttackDist && !isFlyer(in.targetSource)) {
+                // #901: replan once first (the route may climb to the
+                // target's own floor level); throw from range only when that
+                // replan also stalls here.
+                if (in.targetDist <= cfg.rangedAttackDist && !isFlyer(in.targetSource) && approachReplans >= 1) {
                     char rbuf[160];
                     std::snprintf(rbuf, sizeof(rbuf), "AUTOPLAY_RANGED token=%u dist=%.0f bot-driven",
                                   in.targetToken, in.targetDist);
@@ -1332,6 +1344,21 @@ private:
         if (in.corpseMoving || in.corpseMoved) sawMove = true;
         observeDeath(in);
         observeReceipt(in);
+        if (in.trackingPart && noPartCarry()) {
+            // #901 TEST-ONLY: hold the whistle a few seconds so every Pikmin
+            // near the part rejoins the party, then stop engaging; the part
+            // stays where it dropped.
+            if (amPhaseTime < 4.0f) {
+                lastCommand.buttons = PadB;
+                return;
+            }
+            char buf[160];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_PART_LEFT token=%u seconds=%.0f bot-driven", in.targetToken,
+                          stateTime);
+            markers.emplace_back(buf);
+            finishTarget(in, /*killed*/ sawKill);
+            return;
+        }
         if ((!in.targetAlive || in.targetDead) && !sawDamage && !sawKill && !sawCarry && !sawReceipt) {
             // Target gone with no combat observed: nothing to wait for.
             finishTarget(in, /*claimedKill*/ false);

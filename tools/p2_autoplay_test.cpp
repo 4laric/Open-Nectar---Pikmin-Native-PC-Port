@@ -3127,6 +3127,15 @@ void testRangedAttackWhenStuckNear()
     }
     CHECK(hasMarker(markers, "AUTOPLAY_RANGED token=901005"), "ranged/marker");
     CHECK(brain.current() == p2autoplay::State::Attack, "ranged/attack");
+    // The first STUCK replans (a route to the target's floor level); only the
+    // second stalled window throws from range.
+    size_t firstStuck = markers.size(), ranged = markers.size();
+    for (size_t i = 0; i < markers.size(); ++i) {
+        if (firstStuck == markers.size() && markers[i].find("AUTOPLAY_STUCK") == 0) firstStuck = i;
+        if (markers[i].find("AUTOPLAY_RANGED") == 0) ranged = i;
+    }
+    CHECK(firstStuck < ranged && markers[firstStuck].find("replan=1") != std::string::npos,
+          "ranged/replans_first");
     bool look = false, threw = false;
     for (int i = 0; i < 40; ++i) {
         brain.update(0.05f, s);

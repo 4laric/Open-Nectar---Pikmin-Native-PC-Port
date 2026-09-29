@@ -70,6 +70,7 @@
 #include "GoalItem.h"
 #include "ItemMgr.h"
 #include "MapMgr.h"
+#include "MapCode.h"
 #include "Route.h"
 #include "Camera.h"
 #include "BuildingItem.h"
@@ -80,6 +81,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <cstdio>
 #include <queue>
@@ -260,6 +262,38 @@ std::vector<int> nearestWpIdx(float x, float z, int k)
     return out;
 }
 
+// #901: route ends on the right floor first. A boss arena on a plateau (FoH
+// part Snagret, y -17) sits above a basin (y -95) whose waypoints are nearer
+// in XZ; a start or goal waypoint on the other level asks the captain to climb
+// a cliff. Waypoints within kLevel of `y` come first (closest first), then the
+// rest, so flat ground is unchanged.
+std::vector<int> levelWpIdx(float x, float y, float z, int k)
+{
+    std::vector<int> near = nearestWpIdx(x, z, 64);
+    if (!routeMgr || near.empty()) {
+        if (int(near.size()) > k) near.resize(size_t(k));
+        return near;
+    }
+    constexpr float kLevel = 40.0f;
+    std::vector<int> level, other;
+    for (int idx : near) {
+        WayPoint* wp = routeMgr->getWayPoint('test', idx);
+        if (wp && std::fabs(wp->mPosition.y - y) <= kLevel) level.push_back(idx);
+        else other.push_back(idx);
+    }
+    std::vector<int> out;
+    for (int idx : level) if (int(out.size()) < k) out.push_back(idx);
+    for (int idx : other) if (int(out.size()) < k) out.push_back(idx);
+    return out;
+}
+
+// Goal waypoints on the target's own ground level.
+std::vector<int> goalWpIdx(float x, float z, int k)
+{
+    if (!mapMgr) return nearestWpIdx(x, z, k);
+    return levelWpIdx(x, mapMgr->getMinY(x, z, true), z, k);
+}
+
 bool detourSeen(float x, float z)
 {
     for (const auto& d : sDetourHist) {
@@ -283,9 +317,11 @@ void recordDetour(float x, float z)
 }
 
 // Engine findSync forward; on empty, the reversed search (goal->start,
-// legs reversed) as the alternate for directed links.
+// legs reversed) as the alternate for directed links. #901: `allowReverse`
+// false keeps the forward search only (a reversed directed link can be a
+// cliff drop walked upwards).
 bool graphLegs(PathFinder* finder, int startIdx, int goalIdx,
-               std::vector<std::pair<float, float>>& out, bool& reversed)
+               std::vector<std::pair<float, float>>& out, bool& reversed, bool allowReverse = true)
 {
     out.clear();
     reversed = false;
@@ -297,6 +333,7 @@ bool graphLegs(PathFinder* finder, int startIdx, int goalIdx,
         out.emplace_back(legs[i]->mPosition.x, legs[i]->mPosition.z);
     }
     if (!out.empty()) return true;
+    if (!allowReverse) return false;
     WayPoint* rlegs[64] = {};
     const int rn = finder->findSync(rlegs, 64, goalIdx, startIdx, false);
     std::vector<std::pair<float, float>> rev;
@@ -310,7 +347,7 @@ bool graphLegs(PathFinder* finder, int startIdx, int goalIdx,
     return !out.empty();
 }
 
-void planDetour(float naviX, float naviZ, float tgtX, float tgtZ)
+void planDetour(float naviX, float naviY, float naviZ, float tgtX, float tgtZ)
 {
     // Per-engagement replan sequencing (token change resets the history so
     // alternates vary within one stuck approach, not across targets).
@@ -333,8 +370,8 @@ void planDetour(float naviX, float naviZ, float tgtX, float tgtZ)
     if (!routeMgr) {
         failReason = "no_routemgr";
     } else {
-        const std::vector<int> starts = nearestWpIdx(naviX, naviZ, 3);
-        const std::vector<int> goals = nearestWpIdx(tgtX, tgtZ, 3);
+        const std::vector<int> starts = levelWpIdx(naviX, naviY, naviZ, 3);
+        const std::vector<int> goals = goalWpIdx(tgtX, tgtZ, 3);
         PathFinder* finder = routeMgr->getPathFinder('test');
         if (starts.empty()) failReason = "no_start_wp";
         else if (goals.empty()) failReason = "no_goal_wp";
@@ -342,7 +379,24 @@ void planDetour(float naviX, float naviZ, float tgtX, float tgtZ)
         else {
             bool anyPath = false;
             const u32 handle = 'test';
+            // #901: a forward route (graph, then BFS over outgoing links) for
+            // any start/goal pair wins over a reversed one.
             for (int si : starts) {
+                for (int gi : goals) {
+                    if (si == gi) continue;
+                    std::vector<std::pair<float, float>> legs;
+                    bool reversed = false;
+                    if (!graphLegs(finder, si, gi, legs, reversed, false)
+                        && !bfsPath(si, gi, legs)) continue;
+                    anyPath = true;
+                    if (!legs.empty() && detourSeen(legs[0].first, legs[0].second)) continue;
+                    sPath = legs;
+                    method = "forward";
+                    break;
+                }
+                if (!sPath.empty()) break;
+            }
+            for (int si : sPath.empty() ? starts : std::vector<int>{}) {
                 for (int gi : goals) {
                     if (si == gi) continue;
                     std::vector<std::pair<float, float>> legs;
@@ -384,7 +438,7 @@ void planDetour(float naviX, float naviZ, float tgtX, float tgtZ)
             }
             // Reverse the accepted multi-leg route on alternate replans when
             // the head leg keeps duplicating (directed-link alternates).
-            if (sPath.size() > 1 && sReplanCount % 3 == 0) {
+            if (sPath.size() > 1 && sReplanCount % 3 == 0 && std::strcmp(method, "forward") != 0) {
                 std::vector<std::pair<float, float>> rev(sPath.rbegin(), sPath.rend());
                 if (!rev.empty() && !detourSeen(rev[0].first, rev[0].second)) {
                     sPath = rev;
@@ -448,6 +502,7 @@ void pc_p2_autoplay_tick(void)
 
     const float dt = gsys ? gsys->getFrameTime() : 0.016f;
     const float naviX = navi->getPosition().x;
+    const float naviY = navi->getPosition().y;
     const float naviZ = navi->getPosition().z;
 
     // --- Pikmin census (read-only, except bot-v4 power-mode flowering) ---
@@ -748,6 +803,15 @@ void pc_p2_autoplay_tick(void)
             sEngage.lastX = best->getPosition().x;
             sEngage.lastZ = best->getPosition().z;
             trackedPellet = best;
+            if (bestPart && sEngage.partConfig != best->mConfig) {
+                // #901: log which ship part the aftermath escorts, and where.
+                const u32 pid = best->mConfig->mModelId.mId;
+                std::printf("AUTOPLAY_PART_TRACK part=%c%c%c%c x=%.0f y=%.0f z=%.0f carriers=%d token=%u bot-driven\n",
+                            char(pid >> 24), char(pid >> 16), char(pid >> 8), char(pid), double(best->getPosition().x),
+                            double(best->getPosition().y), double(best->getPosition().z), int(best->mCarrierCounter),
+                            sEngage.token);
+                std::fflush(stdout);
+            }
             if (bestPart) sEngage.partConfig = best->mConfig;
         }
     }
@@ -978,6 +1042,46 @@ void pc_p2_autoplay_tick(void)
             senses.targetGrabbing = grabbing;
             if (pick->source == 23 && (grabbing || height <= 120.0f)) senses.targetLow = true;
         }
+        // #901 TEST-ONLY diagnostic: dump the ground heights and route
+        // waypoints around the first target once, so an arena approach can be
+        // read offline (PIKMIN_RANDOMIZER_AUTOPLAY_TERRAIN_DUMP=1).
+        {
+            static bool terrainDumped = false;
+            const char* dump = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_TERRAIN_DUMP");
+            if (!terrainDumped && dump && *dump == '1' && mapMgr) {
+                terrainDumped = true;
+                const float cx = pick->x, cz = pick->z;
+                for (int j = -24; j <= 24; ++j) {
+                    std::string row;
+                    char cell[24];
+                    for (int i = -24; i <= 24; ++i) {
+                        const float px = cx + 25.0f * float(i), pz = cz + 25.0f * float(j);
+                        CollTriInfo* tri = mapMgr->getCurrTri(px, pz, true);
+                        if (!tri) std::snprintf(cell, sizeof(cell), i == -24 ? "x" : ",x");
+                        else std::snprintf(cell, sizeof(cell), i == -24 ? "%.0f%s" : ",%.0f%s",
+                                           double(mapMgr->getMinY(px, pz, true)),
+                                           MapCode::getAttribute(tri) == ATTR_Water ? "w" : "");
+                        row += cell;
+                    }
+                    std::printf("AUTOPLAY_TERRAIN cx=%.0f cz=%.0f j=%d z=%.0f row=%s bot-driven\n", double(cx),
+                                double(cz), j, double(cz + 25.0f * float(j)), row.c_str());
+                }
+                if (routeMgr) {
+                    const int n = routeMgr->getNumWayPoints('test');
+                    for (int w = 0; w < n && n <= 4096; ++w) {
+                        WayPoint* wp = routeMgr->getWayPoint('test', w);
+                        if (!wp) continue;
+                        std::string links;
+                        for (int k = 0; k < wp->mLinkCount && k < 8; ++k)
+                            links += (k ? "," : "") + std::to_string(wp->mLinkIndices[k]);
+                        std::printf("AUTOPLAY_WAYPOINT idx=%d x=%.0f y=%.0f z=%.0f open=%d water=%d links=%s bot-driven\n",
+                                    w, double(wp->mPosition.x), double(wp->mPosition.y), double(wp->mPosition.z),
+                                    int(wp->mIsOpen), int(wp->inWater()), links.c_str());
+                    }
+                }
+                std::fflush(stdout);
+            }
+        }
     } else if (sEngage.token) {
         // Engagement target no longer live-listed: report last-known facts;
         // the Brain scores the outcome (kill vs giveup) from damage history.
@@ -995,13 +1099,13 @@ void pc_p2_autoplay_tick(void)
     // identical detour; Done holds near the Onion so it replans there too).
     if (sBrain.replanWanted()) {
         if (sBrain.current() == p2autoplay::State::WithdrawSeek && hasOnion) {
-            planDetour(naviX, naviZ, onionX, onionZ);
+            planDetour(naviX, naviY, naviZ, onionX, onionZ);
         } else if (sBrain.current() == p2autoplay::State::Done && hasOnion) {
-            planDetour(naviX, naviZ, onionX, onionZ);
+            planDetour(naviX, naviY, naviZ, onionX, onionZ);
         } else if (pick) {
-            planDetour(naviX, naviZ, pick->x, pick->z);
+            planDetour(naviX, naviY, naviZ, pick->x, pick->z);
         } else if (sEngage.token) {
-            planDetour(naviX, naviZ, sEngage.lastX, sEngage.lastZ);
+            planDetour(naviX, naviY, naviZ, sEngage.lastX, sEngage.lastZ);
         }
         sBrain.clearReplan();
     }
