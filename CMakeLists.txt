@@ -1821,6 +1821,13 @@ add_executable(p2_chappy_mouth_test tools/p2_chappy_mouth_test.cpp)
 target_include_directories(p2_chappy_mouth_test PRIVATE pc_port)
 target_compile_options(p2_chappy_mouth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_chappy_mouth_test COMMAND p2_chappy_mouth_test)
+# p2-886 (#886): engine-free captor mouth slots (Jigumo/Snagret/UmiMushi/
+# Armor/Uji eatPikmin geometry, Jigumo height check, Snagret facing boxes,
+# held registry + swallow, legacy XZ-nearest/raw-pointer oracle).
+add_executable(p2_captor_mouth_test tools/p2_captor_mouth_test.cpp)
+target_include_directories(p2_captor_mouth_test PRIVATE pc_port)
+target_compile_options(p2_captor_mouth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_captor_mouth_test COMMAND p2_captor_mouth_test)
 # bot-impl (#871): TEST-ONLY headless autoplay bot policy. Engine-free:
 # the header-only Brain (states, timeouts, giveup/result markers, Kogane
 # damage-and-move-on) plus the inert-when-unset gate (registration only).
