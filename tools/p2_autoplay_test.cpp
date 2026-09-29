@@ -3148,6 +3148,41 @@ void testObstaclePush()
     CHECK(brain.command().moveZ < -0.9f && !(brain.command().buttons & unsigned(p2autoplay::PadA)), "obstacle/resumes_approach");
 }
 
+// #897 detour progress: a leg that leads away from the target is progress
+// while the captain closes on the leg (no STUCK); a stalled leg still STUCKs.
+void testDetourLegProgress()
+{
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 940002;
+    s.targetSource = 94;
+    s.targetAlive = true;
+    s.tgtX = -400.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s);
+    brain.takeMarkers();
+    s.waypointLeg = true;
+    s.wpX = 400.0f;
+    s.wpZ = 0.0f;
+    bool stuck = false;
+    for (int i = 0; i < 200; ++i) { // 10 s walking east, away from the target
+        s.naviX = float(i) * 1.8f;
+        s.targetDist = s.naviX + 400.0f;
+        brain.update(0.05f, s);
+        if (hasMarker(brain.takeMarkers(), "AUTOPLAY_STUCK")) stuck = true;
+    }
+    CHECK(!stuck, "detour/away_leg_is_progress");
+    for (int i = 0; i < 200; ++i) { // stalled on the leg: STUCK fires
+        brain.update(0.05f, s);
+        if (hasMarker(brain.takeMarkers(), "AUTOPLAY_STUCK")) stuck = true;
+    }
+    CHECK(stuck, "detour/stalled_leg_stucks");
+}
+
 int main()
 {
     testGate();
@@ -3198,6 +3233,7 @@ int main()
     testRollerStance();
     testPowerResupply();
     testObstaclePush();
+    testDetourLegProgress();
     if (failures == 0) {
         std::printf("PASS p2_autoplay\n");
         return 0;
