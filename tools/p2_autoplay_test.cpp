@@ -3097,6 +3097,49 @@ void testPowerResupply()
     setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
 }
 
+// #897 push obstacle: an unfinished box ahead of the approach is closed on
+// and thrown at (look-band stick in range); stuck windows do not fire while
+// pushing; once it is finished the approach resumes.
+void testObstaclePush()
+{
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 940001;
+    s.targetSource = 94;
+    s.targetAlive = true;
+    s.tgtX = 0.0f;
+    s.tgtZ = -1000.0f;
+    s.targetDist = 1000.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Approach, "obstacle/approach");
+    brain.takeMarkers();
+    s.obstacleValid = true;
+    s.obstacleX = 0.0f;
+    s.obstacleZ = -300.0f;
+    s.obstacleDist = 300.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.command().moveZ < -0.9f && brain.command().stickScale == 1.0f, "obstacle/walks_to_box");
+    CHECK(hasMarker(brain.takeMarkers(), "AUTOPLAY_OBSTACLE phase=push"), "obstacle/push_marker");
+    s.obstacleDist = 120.0f;
+    bool threw = false;
+    for (int i = 0; i < 400; ++i) { // 20 s at the box: no STUCK, no giveup
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) threw = true;
+    }
+    auto m = brain.takeMarkers();
+    CHECK(threw && brain.command().stickScale < 1.0f, "obstacle/throws_look_band");
+    CHECK(!hasMarker(m, "AUTOPLAY_STUCK") && brain.current() == p2autoplay::State::Approach, "obstacle/no_stuck_while_pushing");
+    s.obstacleValid = false;
+    s.scattered = false;
+    brain.update(0.05f, s);
+    CHECK(hasMarker(brain.takeMarkers(), "AUTOPLAY_OBSTACLE phase=cleared"), "obstacle/cleared_marker");
+    CHECK(brain.command().moveZ < -0.9f && !(brain.command().buttons & unsigned(p2autoplay::PadA)), "obstacle/resumes_approach");
+}
+
 int main()
 {
     testGate();
@@ -3146,6 +3189,7 @@ int main()
     testKingEvadeLongSim();
     testRollerStance();
     testPowerResupply();
+    testObstaclePush();
     if (failures == 0) {
         std::printf("PASS p2_autoplay\n");
         return 0;
