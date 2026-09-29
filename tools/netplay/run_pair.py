@@ -54,6 +54,15 @@ plants a valid copy of the host's newest checkpoint re-stamped as the next
 generation, header and hash included). The summary adds both peers'
 checkpoint / transfer / save barrier / CAMPAIGN_RESUMED / reseed lines and
 the distinct tuples after the day-3 reseed tick.
+
+M4 gap-fix lane S (issue #885) long-load tests: pass the
+PIKMIN_NETPLAY_TEST_STALL_* injector (see pc_netplay_loadguard.h) through
+--env. The summary prints both peers' load guard / test stall / long tick /
+load window lines, and a sync run fails when the load windows' open/close
+frames differ between the peers. Dead-peer tests: --expect disconnect with
+--kill-role join|host picks the victim, --kill-on-line TEXT [--kill-delay S]
+kills it once its native.log shows TEXT, the survivor's 'disconnected:'
+latency after the kill is printed, and --max-detect-s bounds it.
 """
 
 import argparse
@@ -434,6 +443,17 @@ def main(argv=None):
                    default="sync")
     p.add_argument("--kill-joiner-after", type=float, default=20.0,
                    help="disconnect test: seconds after start to kill the joiner")
+    p.add_argument("--kill-role", choices=("join", "host"), default="join",
+                   help="M4 gap-fix S: disconnect test victim (default join); the other peer must "
+                        "report the disconnect and exit 0")
+    p.add_argument("--kill-on-line", type=str, default=None, metavar="TEXT",
+                   help="M4 gap-fix S: kill the victim once its native.log contains TEXT (then "
+                        "--kill-delay), instead of --kill-joiner-after seconds from start")
+    p.add_argument("--kill-delay", type=float, default=0.0, metavar="SECONDS",
+                   help="M4 gap-fix S: extra wait after --kill-on-line matched")
+    p.add_argument("--max-detect-s", type=float, default=None, metavar="SECONDS",
+                   help="M4 gap-fix S: disconnect test fails when the survivor's 'disconnected:' "
+                        "line comes later than this after the kill")
     p.add_argument("--flarlic", type=int, default=10,
                    help="STARTING_FLARLIC in both bootstraps (M4a: <10 allows a "
                         "flarlic change in a state script)")
@@ -679,6 +699,7 @@ def main(argv=None):
         t.start()
 
     rc_host, rc_join = 1, 1
+    detect_s = None  # M4 gap-fix S: survivor's disconnect latency after a targeted kill
     host_proc = join_proc = None
     host_out = join_out = None
     start = time.time()
@@ -689,7 +710,52 @@ def main(argv=None):
         time.sleep(1.0)
         join_proc, join_out = launch(join_exe, join_run, join_boot, join_args, join_extra, join_log,
                                      unthrottled=not a.throttled)
-        if a.expect == "disconnect":
+        if a.expect == "disconnect" and (a.kill_role == "host" or a.kill_on_line is not None):
+            # M4 gap-fix S: targeted kill (either role, optionally when the
+            # victim's log shows a line) and the survivor's detection latency.
+            victim, survivor = (host_proc, join_proc) if a.kill_role == "host" else (join_proc, host_proc)
+            victim_log, survivor_log = (host_log, join_log) if a.kill_role == "host" else (join_log, host_log)
+            if a.kill_on_line is None:
+                time.sleep(a.kill_joiner_after)
+            else:
+                t_wait = time.time()
+                seen = False
+                while not seen and victim.poll() is None and time.time() - t_wait < a.timeout:
+                    seen = any(a.kill_on_line in ln for ln in grep(victim_log, a.kill_on_line))
+                    if not seen:
+                        time.sleep(0.05)
+                print(f"run_pair: kill trigger {'seen' if seen else 'NOT seen'}: {a.kill_on_line!r}")
+                if seen and a.kill_delay > 0:
+                    time.sleep(a.kill_delay)
+            t_kill = time.time()
+            if victim.poll() is None:
+                print(f"run_pair: killing {a.kill_role} pid {victim.pid} for disconnect test")
+                victim.kill()
+            else:
+                print(f"run_pair: {a.kill_role} already exited ({victim.poll()}) before the kill")
+            t_detect = None
+            while survivor.poll() is None and time.time() - t_kill < a.timeout:
+                if grep(survivor_log, "disconnected:"):
+                    t_detect = time.time()
+                    break
+                time.sleep(0.05)
+            if t_detect is None and grep(survivor_log, "disconnected:"):
+                t_detect = time.time()  # exited between polls: upper bound
+            detect_s = None if t_detect is None else t_detect - t_kill
+            print("run_pair: survivor 'disconnected:' "
+                  + ("not seen" if detect_s is None else f"{detect_s:.2f}s after the kill")
+                  + f" (survivor={'join' if a.kill_role == 'host' else 'host'})")
+            try:
+                rc_victim = victim.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                rc_victim = 124
+            try:
+                rc_survivor = survivor.wait(timeout=a.timeout)
+            except subprocess.TimeoutExpired:
+                survivor.kill()
+                rc_survivor = 124
+            rc_host, rc_join = (rc_victim, rc_survivor) if a.kill_role == "host" else (rc_survivor, rc_victim)
+        elif a.expect == "disconnect":
             time.sleep(a.kill_joiner_after)
             if join_proc.poll() is None:
                 print(f"run_pair: killing joiner pid {join_proc.pid} for disconnect test")
@@ -839,8 +905,34 @@ def main(argv=None):
                 print(f"run_pair: {who}: distinct tuples after the day-{m.group(1)} reseed tick "
                       f"{m.group(2)}: {after}")
 
+    # M4 gap-fix S: load guard lines (test stall, long ticks, load windows).
+    # The windows open and close at deterministic frames, so their frame
+    # sequence must be identical on both peers (the durations are not).
+    lg_needles = ("[netplay] load guard", "[netplay] test stall", "[netplay] long tick",
+                  "[netplay] load window", "[netplay] test load delay", "[netplay] disconnect timeout")
+    win_frames = {}
+    for who, log in (("host", host_log), ("join", join_log)):
+        try:
+            text = Path(log).read_text(errors="replace").splitlines()
+        except OSError:
+            text = []
+        wins = []
+        for ln in text:
+            if any(n in ln for n in lg_needles):
+                print(f"run_pair: {who}: {ln.strip()}")
+            m = re.search(r"\[netplay\] load window: (open|closed) at frame=(\d+)", ln)
+            if m:
+                wins.append((m.group(1), int(m.group(2))))
+        win_frames[who] = wins
+    win_same = win_frames["host"] == win_frames["join"]
+    print(f"run_pair: load windows host={len(win_frames['host'])} join={len(win_frames['join'])} "
+          f"frames {'identical' if win_same else 'DIFFER'}")
+
     ok = True
     if a.expect == "sync":
+        if not win_same:
+            print("run_pair: FAIL: load window frames differ between peers")
+            ok = False
         if rc_host != 0 or rc_join != 0:
             ok = False
         if cmp_rc != 0:
@@ -888,11 +980,16 @@ def main(argv=None):
             print("run_pair: FAIL: expected refused lines on both peers")
             ok = False
     elif a.expect == "disconnect":
-        if rc_host != 0:
-            print(f"run_pair: FAIL: expected host exit 0, got {rc_host}")
+        s_role = "join" if a.kill_role == "host" else "host"
+        rc_s, dis_s = (rc_join, dis_join) if s_role == "join" else (rc_host, dis_host)
+        if rc_s != 0:
+            print(f"run_pair: FAIL: expected {s_role} exit 0, got {rc_s}")
             ok = False
-        if not dis_host:
-            print("run_pair: FAIL: expected a disconnected line on the host")
+        if not dis_s:
+            print(f"run_pair: FAIL: expected a disconnected line on the {s_role}")
+            ok = False
+        if a.max_detect_s is not None and (detect_s is None or detect_s > a.max_detect_s):
+            print(f"run_pair: FAIL: detection {detect_s} s not within {a.max_detect_s} s of the kill")
             ok = False
     elif a.expect == "desync":
         # B2 fix round 1 (C1): a barrier desync must end BOTH peers with exit 5.
