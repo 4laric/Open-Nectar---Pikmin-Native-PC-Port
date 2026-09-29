@@ -501,8 +501,9 @@ struct Senses {
     // away from the target is not called STUCK and thrown away.
     float pathRemaining = 0.0f;
     // #901 route obstacles (TEST-ONLY bot): the nearest unfinished P1 work
-    // obstacle near the captain (gate, bridge, hinder rock; kind 1/2/3, 0 =
-    // none) and the Pikmin working one now (BreakWall/Bridge/Pushstone).
+    // obstacle near the captain (gate, bridge, hinder rock, climbing stalk;
+    // kind 1/2/3/4, 0 = none) and the Pikmin working one now
+    // (BreakWall/Bridge/Pushstone/Rope).
     int obstacleKind = 0;
     float obstacleX = 0.0f;
     float obstacleZ = 0.0f;

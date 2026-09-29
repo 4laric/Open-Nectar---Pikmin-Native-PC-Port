@@ -472,7 +472,7 @@ void pc_p2_autoplay_tick(void)
             }
             if (p->mMode == PikiMode::FormationMode && p->mNavi == navi) ++partyCount;
             if (p->mMode == PikiMode::BreakwallMode || p->mMode == PikiMode::BridgeMode
-                || p->mMode == PikiMode::PushstoneMode)
+                || p->mMode == PikiMode::PushstoneMode || p->mMode == PikiMode::RopeMode)
                 ++workCount;
             if (p->mMode == PikiMode::FreeMode) freePos.emplace_back(p->getPosition().x, p->getPosition().z);
             // bot-v4 power mode: flowers through the normal maturity path
@@ -833,9 +833,10 @@ void pc_p2_autoplay_tick(void)
     senses.partGone = partGone;
     senses.workCount = workCount;
     {
-        // #901: nearest unfinished route obstacle within 450 u of the captain
-        // (read-only): gates (sluices), bridges, hinder rocks.
-        float bestD = 450.0f;
+        // #901: nearest unfinished route obstacle within 600 u of the captain
+        // (read-only): gates (sluices), bridges, hinder rocks, climbing
+        // stalks (Kusa: formed Pikmin that touch one climb it, RopeMode).
+        float bestD = 600.0f;
         auto consider = [&](Creature* obj, int kind, int stage, int stages) {
             const float d = distXZ(naviX, naviZ, obj->getPosition().x, obj->getPosition().z);
             if (d < bestD) {
@@ -859,6 +860,9 @@ void pc_p2_autoplay_tick(void)
                     && !static_cast<BuildingItem*>(obj)->isCompleted()) {
                     BuildingItem* gate = static_cast<BuildingItem*>(obj);
                     consider(obj, 1, gate->mCurrStage, gate->mNumStages);
+                } else if (obj && obj->mObjType == OBJTYPE_Kusa && obj->mMaxHealth > 0.0f
+                           && obj->mHealth < obj->mMaxHealth) {
+                    consider(obj, 4, 0, 0);
                 }
             }
         }
