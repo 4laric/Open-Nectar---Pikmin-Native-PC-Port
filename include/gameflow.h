@@ -729,6 +729,9 @@ public:
 
 extern GameFlow gameflow;
 
+// Recomputes the world clock speed each tick (stage multiplier, day setting, day-length items).
+void syncWorldClockSpeed();
+
 /**
  * @brief Managing class for anything list-based that needs to update each frame (pikiMgr, naviMgr, etc).
  *
@@ -750,8 +753,7 @@ struct GameGenFlow : public Node {
 	virtual void update() // _10
 	{
 		gameflow.mGenFlowUpdateTickCount++;
-		gameflow.mWorldClock.mRealSecsPerGameDay  = 60.0f * (gameflow.mTimeMultiplier * gameflow.mParameters->mRealMinutesPerGameDay());
-		gameflow.mWorldClock.mRealSecsPerGameHour = gameflow.mWorldClock.mRealSecsPerGameDay / gameflow.mWorldClock.mHoursInDay;
+		syncWorldClockSpeed();
 		Node::update();
 	}
 
