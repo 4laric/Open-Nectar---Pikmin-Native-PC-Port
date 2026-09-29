@@ -486,6 +486,11 @@ struct Senses {
     bool scattered = false; // squad scattered: whistle regroup
     bool squadDistress = false; // grabbed/thrown-off/burning Pikmin: whistle regroup (bot-v4)
     bool waypointLeg = false; // steer the detour waypoint, not the target
+    // #901: XZ length still to walk along the planned route (captain -> active
+    // leg -> remaining legs -> target); 0 = no route. Approach measures
+    // progress on it while a route is active, so a detour that first leads
+    // away from the target is not called STUCK and thrown away.
+    float pathRemaining = 0.0f;
     // #884 round 4: live throw cursor (navi position + Navi::mCursorPosition,
     // world XZ). Only the King standoff hold reads it, to slide the cursor
     // onto the King instead of past it; without it the hold look-steers at
@@ -557,6 +562,7 @@ public:
         wantReplan = false;
         progressBest = 1.0e30f;
         approachReplans = 0;
+        approachOnRoute = false;
         initialHealthFrac = 1.0f;
         sawDamage = false;
         sawKill = false;
@@ -656,6 +662,7 @@ private:
         wantReplan = false;
         progressBest = 1.0e30f;
         approachReplans = 0;
+        approachOnRoute = false;
         kingBacking = false;
         kingClosing = false;
         kingBackTime = 0.0f;
@@ -964,13 +971,21 @@ private:
             enter(State::Attack, in);
             return;
         }
-        // Progress / stuck tracking on straight-line distance.
-        if (stuckWindowDist >= 1.0e29f) {
-            stuckWindowDist = in.targetDist;
-            stuckWindowStart = 0.0f;
-            progressBest = in.targetDist;
+        // Progress / stuck tracking on straight-line distance, or on the
+        // remaining route length while a route is active (#901: a
+        // straight-line window threw away every long detour into a far arena).
+        const bool onRoute = in.waypointLeg && in.pathRemaining > 0.0f;
+        const float metric = onRoute ? in.pathRemaining : in.targetDist;
+        if (onRoute != approachOnRoute) {
+            approachOnRoute = onRoute;
+            stuckWindowDist = 1.0e30f; // re-anchor on the new metric
         }
-        if (in.targetDist < progressBest) progressBest = in.targetDist;
+        if (stuckWindowDist >= 1.0e29f) {
+            stuckWindowDist = metric;
+            stuckWindowStart = 0.0f;
+            progressBest = metric;
+        }
+        if (metric < progressBest) progressBest = metric;
         stuckWindowStart += dt;
         if (stuckWindowStart >= cfg.stuckWindow) {
             if (stuckWindowDist - progressBest < cfg.stuckMinProgress) {
@@ -982,7 +997,7 @@ private:
                 markers.emplace_back(buf);
                 wantReplan = true;
                 ++approachReplans;
-                stuckWindowDist = progressBest;
+                stuckWindowDist = 1.0e30f; // the replan changes the route: re-anchor
                 stuckWindowStart = 0.0f;
                 if (approachReplans >= cfg.maxApproachReplans) {
                     // Target out of reach after N replans: GIVEUP with a
@@ -1787,6 +1802,7 @@ private:
     bool wantReplan = false;
     float progressBest = 1.0e30f;
     int approachReplans = 0; // consecutive STUCK windows in this Approach stint (bot-v3)
+    bool approachOnRoute = false; // #901: approach progress metric is the route length
     // bot-v5 aftermath delivery phases (pad-only; never whistles).
     enum AftermathPhase {
         AftermathSeed = 0, // walk onto the corpse + throw to seed grabs

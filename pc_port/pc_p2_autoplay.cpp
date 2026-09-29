@@ -957,6 +957,12 @@ void pc_p2_autoplay_tick(void)
             senses.waypointLeg = true;
             senses.wpX = legX;
             senses.wpZ = legZ;
+            // #901: remaining route length for the approach progress metric.
+            float rem = distXZ(naviX, naviZ, legX, legZ);
+            for (size_t i = sPathIdx; i + 1 < sPath.size(); ++i)
+                rem += distXZ(sPath[i].first, sPath[i].second, sPath[i + 1].first, sPath[i + 1].second);
+            rem += distXZ(sPath.back().first, sPath.back().second, senses.tgtX, senses.tgtZ);
+            senses.pathRemaining = rem;
         } else {
             sPath.clear();
             sPathIdx = 0;

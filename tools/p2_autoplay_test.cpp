@@ -2989,6 +2989,44 @@ void testPartGatherSwarm()
     CHECK(hasMarker(got, "AUTOPLAY_RESULT target=901001"), "part/result");
 }
 
+void testApproachRouteProgress()
+{
+    // #901: while a route is active, approach progress is the remaining route
+    // length; a detour that leads away from the target is not STUCK.
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 901002;
+    s.targetSource = 44;
+    s.targetAlive = true;
+    s.targetDist = 2000.0f;
+    s.tgtX = 2000.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Approach, "route/approach");
+    s.waypointLeg = true;
+    s.wpX = -500.0f;
+    s.pathRemaining = 4000.0f;
+    std::vector<std::string> markers;
+    for (int i = 0; i < 400; ++i) { // 20 s walking away along the route
+        s.targetDist += 5.0f;
+        s.pathRemaining -= 8.0f;
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(!hasMarker(markers, "AUTOPLAY_STUCK"), "route/no_stuck_on_detour");
+    CHECK(brain.current() == p2autoplay::State::Approach, "route/still_approaching");
+    for (int i = 0; i < 200; ++i) { // route stalls
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(markers, "AUTOPLAY_STUCK state=approach"), "route/stuck_when_route_stalls");
+}
+
 int main()
 {
     testGate();
@@ -3037,6 +3075,7 @@ int main()
     testKingEvadePolicy();
     testKingEvadeLongSim();
     testPartGatherSwarm();
+    testApproachRouteProgress();
     if (failures == 0) {
         std::printf("PASS p2_autoplay\n");
         return 0;
