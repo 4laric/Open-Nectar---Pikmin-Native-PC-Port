@@ -4,9 +4,9 @@
 #include <initializer_list>
 #include <set>
 int main() {
-    const unsigned sources[] = {9,23,34,44,54,56,57,59,60,61,62,63,65,69,70,71,78,79,101,17,18,24,25,15,75,26,27,84,93,66,97};
-    const int hosts[] = {3,3,3,3,24,3,0,3,3,3,3,3,3,3,3,3,0,3,3,0,33,15,15,3,17,30,25,3,3,4,0};
-    for (unsigned i=0;i<31;++i) {
+    const unsigned sources[] = {9,23,34,44,54,56,57,59,60,61,62,63,65,69,70,71,78,79,101,17,18,24,25,15,75,26,27,84,93,66,97,73};
+    const int hosts[] = {3,3,3,3,24,3,0,3,3,3,3,3,3,3,3,3,0,3,3,0,33,15,15,3,17,30,25,3,3,4,0,4};
+    for (unsigned i=0;i<32;++i) {
         for (int original=0;original<34;++original) {
             assert(p2campaign::hostType(sources[i],original,false)==hosts[i]);
             assert(p2campaign::hostType(sources[i],original,true)==original);
@@ -14,7 +14,7 @@ int main() {
     }
     for (unsigned source: {0u,1u,41u,45u,58u,99u,999u})
         assert(p2campaign::hostType(source,17,false)==17);
-    for (unsigned source : {9u,23u,34u,44u,54u,56u,57u,59u,60u,61u,62u,63u,65u,69u,70u,71u,78u,79u,101u,17u,18u,24u,25u,15u,75u,26u,27u,84u,93u,66u,97u})
+    for (unsigned source : {9u,23u,34u,44u,54u,56u,57u,59u,60u,61u,62u,63u,65u,69u,70u,71u,78u,79u,101u,17u,18u,24u,25u,15u,75u,26u,27u,84u,93u,66u,97u,73u})
         assert(p2campaign::hasStaticHost(source));
     // inst-chappy (#871, lane complete): Chappy (2), FireChappy (33),
     // YellowChappy (43) and KingChappy (53) ride TEKI_Swallow (4),

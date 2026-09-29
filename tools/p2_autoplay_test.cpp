@@ -1268,6 +1268,276 @@ void testAftermathEscortExtension()
           "escort/stall_no_carry_claim");
 }
 
+// #246: the Titan lets go of its stuck Pikmin at Dead, so the aftermath can
+// open with an empty squad. Only then (and only for 73) the bot whistles
+// the strays, in bounded episodes; any other target never whistles here.
+void testTitanAftermathRegroup()
+{
+    p2autoplay::Config cfg;
+    cfg.throwHold = 0.1f;
+    cfg.throwGap = 0.2f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 30;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 1945764764u;
+    s.targetSource = 73;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.tgtX = 100.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    s.targetHealthFrac = 0.5f;
+    brain.update(0.05f, s);
+    s.targetAlive = false;
+    s.targetDist = 40.0f;
+    s.tgtX = 40.0f;
+    s.squadPikmin = 0; // everyone let go at Dead
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "titan-regroup/aftermath");
+    int whistleTicks = 0, episodes = 0;
+    bool prev = false;
+    for (int i = 0; i < 400; ++i) {
+        brain.update(0.05f, s);
+        const bool b = (brain.command().buttons & unsigned(p2autoplay::PadB)) != 0;
+        if (b) ++whistleTicks;
+        if (b && !prev) ++episodes;
+        prev = b;
+        if (brain.current() != p2autoplay::State::Aftermath) break;
+    }
+    CHECK(whistleTicks > 0, "titan-regroup/whistles_empty_squad");
+    CHECK(episodes <= cfg.titanAftermathWhistles, "titan-regroup/bounded_episodes");
+    // With a squad back, no whistle: throws only.
+    p2autoplay::Brain b2(cfg);
+    p2autoplay::Senses t = liveSenses();
+    t.fieldPikmin = 30;
+    b2.update(0.05f, t);
+    b2.update(0.05f, t);
+    t.targetToken = 1945764764u;
+    t.targetSource = 73;
+    t.targetAlive = true;
+    t.targetDist = 100.0f;
+    t.tgtX = 100.0f;
+    b2.update(0.05f, t);
+    b2.update(0.05f, t);
+    t.targetHealthFrac = 0.5f;
+    b2.update(0.05f, t);
+    t.targetAlive = false;
+    t.targetDist = 40.0f;
+    t.tgtX = 40.0f;
+    t.squadPikmin = 12;
+    bool whistled = false;
+    for (int i = 0; i < 100; ++i) {
+        b2.update(0.05f, t);
+        if (b2.command().buttons & unsigned(p2autoplay::PadB)) whistled = true;
+        if (b2.current() != p2autoplay::State::Aftermath) break;
+    }
+    CHECK(!whistled, "titan-regroup/no_whistle_with_squad");
+}
+
+void testObstacleWorkAndDetourProgress()
+{
+    // #246/#899: (a) while the driver walks the squad into a HinderRock
+    // (Senses::obstacleWork) the captain stands still by design: no STUCK,
+    // no target_unreachable, no approach_timeout. (b) On a route-graph
+    // detour leg, progress is measured to the leg waypoint: walking away
+    // from the target toward the leg is not a stall.
+    p2autoplay::Config cfg;
+    cfg.approachTimeout = 2.0f;
+    cfg.stuckWindow = 0.2f;
+    cfg.stuckMinProgress = 30.0f;
+    cfg.maxApproachReplans = 3;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 4019261003u;
+    s.targetSource = 73;
+    s.targetAlive = true;
+    s.targetDist = 500.0f;
+    s.tgtX = 500.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    s.obstacleWork = true;
+    s.waypointLeg = true;
+    s.wpX = 0.0f;
+    s.wpZ = 50.0f;
+    std::vector<std::string> markers;
+    for (int i = 0; i < 100; ++i) { // 5 s: 25 stuck windows, 2.5x the approach timeout
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        markers.insert(markers.end(), got.begin(), got.end());
+        if (brain.replanWanted()) brain.clearReplan();
+    }
+    CHECK(!hasMarker(markers, "AUTOPLAY_STUCK"), "obstacle/no_stuck_while_pushing");
+    CHECK(!hasMarker(markers, "AUTOPLAY_GIVEUP"), "obstacle/no_giveup_while_pushing");
+    CHECK(brain.current() == p2autoplay::State::Approach, "obstacle/still_approach");
+    CHECK(brain.command().moveZ > 0.5f, "obstacle/steers_into_box");
+
+    // (b) detour leg: target distance grows while the captain closes on the leg.
+    p2autoplay::Brain b2(cfg);
+    p2autoplay::Senses t = liveSenses();
+    t.fieldPikmin = 20;
+    b2.update(0.05f, t);
+    b2.update(0.05f, t);
+    t.targetToken = 4019261003u;
+    t.targetSource = 73;
+    t.targetAlive = true;
+    t.targetDist = 500.0f;
+    t.tgtX = 500.0f;
+    b2.update(0.05f, t); // -> approach
+    t.waypointLeg = true;
+    t.wpX = -600.0f; // leg lies away from the target
+    t.wpZ = 0.0f;
+    std::vector<std::string> m2;
+    for (int i = 0; i < 30; ++i) {
+        t.naviX -= 10.0f; // closing on the leg at 200 u/s
+        t.targetDist += 10.0f; // ...and so moving away from the target
+        b2.update(0.05f, t);
+        const std::vector<std::string> got = b2.takeMarkers();
+        m2.insert(m2.end(), got.begin(), got.end());
+        if (b2.replanWanted()) b2.clearReplan();
+    }
+    CHECK(!hasMarker(m2, "AUTOPLAY_STUCK"), "detour/leg_progress_not_stuck");
+    // ...but a captain pressed against a wall on the leg is still STUCK.
+    for (int i = 0; i < 12; ++i) {
+        b2.update(0.05f, t);
+        const std::vector<std::string> got = b2.takeMarkers();
+        m2.insert(m2.end(), got.begin(), got.end());
+        if (b2.replanWanted()) b2.clearReplan();
+    }
+    CHECK(hasMarker(m2, "AUTOPLAY_STUCK state=approach"), "detour/leg_stall_is_stuck");
+}
+
+void testTitanRegroupWalksToStrays()
+{
+    // #246 a8/a9: 7 in the squad, 40 idle strays scattered by the fight,
+    // crew 1 of 10. The Titan aftermath walks to the strays' centroid, then
+    // whistles there (bounded episodes); a squad that already covers the
+    // carry minimum never whistles.
+    p2autoplay::Config cfg;
+    cfg.throwHold = 0.1f;
+    cfg.throwGap = 0.2f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 47;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 4019261003u;
+    s.targetSource = 73;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.tgtX = 100.0f;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetHealthFrac = 0.5f;
+    brain.update(0.05f, s);
+    s.targetAlive = false;
+    s.targetDist = 10.0f;
+    s.tgtX = 10.0f;
+    s.squadPikmin = 7;
+    s.carryWant = 10;
+    s.pelletCarriers = 1;
+    s.transportSeen = true;
+    s.strayPikmin = 40;
+    s.strayX = -300.0f;
+    s.strayZ = 0.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "titan-strays/aftermath");
+    brain.update(0.05f, s);
+    CHECK(brain.command().moveX < -0.5f && !(brain.command().buttons & unsigned(p2autoplay::PadB)),
+          "titan-strays/walks_to_strays_first");
+    s.naviX = -290.0f; // arrived at the strays
+    bool whistled = false;
+    for (int i = 0; i < 10; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadB)) whistled = true;
+    }
+    CHECK(whistled, "titan-strays/whistles_at_strays");
+
+    // Squad plus crew already covers the minimum: no whistle.
+    p2autoplay::Brain b2(cfg);
+    p2autoplay::Senses t = liveSenses();
+    t.fieldPikmin = 47;
+    b2.update(0.05f, t);
+    b2.update(0.05f, t);
+    t.targetToken = 4019261003u;
+    t.targetSource = 73;
+    t.targetAlive = true;
+    t.targetDist = 100.0f;
+    t.tgtX = 100.0f;
+    b2.update(0.05f, t);
+    b2.update(0.05f, t);
+    t.targetHealthFrac = 0.5f;
+    b2.update(0.05f, t);
+    t.targetAlive = false;
+    t.targetDist = 10.0f;
+    t.tgtX = 10.0f;
+    t.squadPikmin = 12;
+    t.carryWant = 10;
+    t.pelletCarriers = 1;
+    t.transportSeen = true;
+    t.strayPikmin = 30;
+    t.strayX = -300.0f;
+    bool w2 = false;
+    for (int i = 0; i < 60; ++i) {
+        b2.update(0.05f, t);
+        if (b2.command().buttons & unsigned(p2autoplay::PadB)) w2 = true;
+        if (b2.current() != p2autoplay::State::Aftermath) break;
+    }
+    CHECK(!w2, "titan-strays/no_whistle_when_squad_covers_minimum");
+}
+
+void testTitanSeedStandoff()
+{
+    // #246: seeding the Titan corpse holds a 60-140 u ring and aims the
+    // cursor onto the corpse in the look band instead of standing on it.
+    p2autoplay::Config cfg;
+    cfg.throwHold = 0.1f;
+    cfg.throwGap = 0.2f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 40;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetToken = 4019261003u;
+    s.targetSource = 73;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.tgtX = 100.0f;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s);
+    s.targetHealthFrac = 0.5f;
+    brain.update(0.05f, s);
+    s.targetAlive = false;
+    s.squadPikmin = 30; // squad covers the minimum: no regroup
+    s.carryWant = 10;
+    s.cursorValid = true;
+    s.naviX = 0.0f;
+    s.tgtX = 10.0f; // standing on the corpse
+    s.targetDist = 10.0f;
+    s.cursorX = 95.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "titan-seed/aftermath");
+    brain.update(0.05f, s);
+    CHECK(brain.command().moveX < -0.5f, "titan-seed/backs_off_the_corpse");
+    s.tgtX = 100.0f; // in the ring, cursor 30 u left of the corpse
+    s.targetDist = 100.0f;
+    s.cursorX = 70.0f;
+    bool threw = false;
+    float scale = 1.0f;
+    for (int i = 0; i < 10; ++i) {
+        brain.update(0.05f, s);
+        if (brain.command().buttons & unsigned(p2autoplay::PadA)) threw = true;
+        scale = brain.command().stickScale;
+    }
+    CHECK(threw, "titan-seed/throws_from_ring");
+    CHECK(scale < 0.5f, "titan-seed/look_band_aim");
+}
+
 void testAftermathNoWhistle()
 {
     // bot-v5 (v4b diagnosis): aftermath HOLDS whistle (B) while standing
@@ -3505,6 +3775,10 @@ int main()
     testResupply();
     testAftermathEscortExtension();
     testAftermathNoWhistle();
+    testTitanAftermathRegroup();
+    testObstacleWorkAndDetourProgress();
+    testTitanRegroupWalksToStrays();
+    testTitanSeedStandoff();
     testAftermathSeedBackoffRethrow();
     testAftermathEscortNoThrows();
     testAftermathGiveupReasons();

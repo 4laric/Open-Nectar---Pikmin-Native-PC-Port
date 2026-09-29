@@ -340,6 +340,19 @@ struct Config {
     float corpseOutOfReach = 800.0f; // tdist past this at giveup names corpse_out_of_reach
     float koganeConfirm = 20.0f; // after Kogane damage, watch escapes then move on
     float kurageAttackMultiplier = 2.0f; // Kurage has high HP: longer attack window
+    // #246: the Titan Dweevil (73) soaks 4 x 6000 weapon HP before its 5000
+    // body HP is exposed, and only a Pikmin stuck on a weapon's own part
+    // damages it; the bot keeps throwing for a longer window (bot assistance).
+    float titanAttackMultiplier = 6.0f;
+    // #246: a Titan lets go of every stuck Pikmin at Dead (deathProcedure
+    // setAlive(false)) ~11 s before its corpse forms, so the aftermath can
+    // start with an empty squad and nobody to seed-throw. A player whistles
+    // the strays: bounded episodes, only while the squad is empty.
+    int titanAftermathWhistles = 3;
+    float titanAftermathWhistleHold = 1.5f;
+    float titanRegroupWalk = 12.0f; // #246: max walk to the stray centroid per regroup episode
+    float titanSeedRingMin = 60.0f;  // #246: Titan corpse seeding standoff ring (cursor ~95 u ahead)
+    float titanSeedRingMax = 140.0f;
     float saraiLowHeight = 120.0f; // Sarai thrown at only when within this height above ground (or grabbing)
     float throwRange = 260.0f; // XZ distance at which throws start
     float arriveRadius = 90.0f; // XZ distance considered "at" the Onion
@@ -516,6 +529,12 @@ struct Senses {
     float wpZ = 0.0f;
     // Onion / squad facts for the withdraw phase.
     int fieldPikmin = 0; // live field Pikmin
+    int squadPikmin = 0; // #246: live Pikmin following the captain (FormationMode)
+    // #246: idle field Pikmin (FreeMode, not carrying, not in distress) and
+    // their centroid, so a Titan aftermath can walk to them before whistling.
+    int strayPikmin = 0;
+    float strayX = 0.0f;
+    float strayZ = 0.0f;
     int onionStored = 0; // Pikmin stored in the nearest stocked Onion
     float onionDist = 1.0e30f; // XZ distance to that Onion
     bool containerOpen = false; // Onion container UI is up
@@ -524,6 +543,11 @@ struct Senses {
     unsigned targetSource = 0;
     float tgtX = 0.0f;
     float tgtZ = 0.0f;
+    // #246 bot assistance: a throw aim point other than the actor centre
+    // (the Titan's nearest captured weapon, the only stickable part).
+    bool aimValid = false;
+    float aimX = 0.0f;
+    float aimZ = 0.0f;
     float targetDist = 1.0e30f; // XZ distance navi -> target
     bool targetAlive = false;
     float targetHealthFrac = 1.0f; // 1 == untouched
@@ -557,6 +581,12 @@ struct Senses {
     bool scattered = false; // squad scattered: whistle regroup
     bool squadDistress = false; // grabbed/thrown-off/burning Pikmin: whistle regroup (bot-v4)
     bool waypointLeg = false; // steer the detour waypoint, not the target
+    // #246/#899: the driver is walking the squad into an unfinished P1
+    // HinderRock (pushable box) on the approach route. Pikmin push it by the
+    // normal formation collision (piki.cpp PushstoneMode); the captain stands
+    // still meanwhile, so these windows are not "stuck" and do not age the
+    // approach timeout. The driver caps the total obstacle time.
+    bool obstacleWork = false;
     // #901: XZ length still to walk along the planned route (captain -> active
     // leg -> remaining legs -> target); 0 = no route. Approach measures
     // progress on it while a route is active, so a detour that first leads
@@ -704,6 +734,9 @@ public:
         amHadEnough = false; // bot-v7: the lift was viable (escorted)
         amLastCrew = 0; // bot-v7: high-water crew for SeedGrow progress
         amGrowStill = 0.0f; // bot-v7: time without crew growth in SeedGrow
+        amWhistles = 0;
+        amWhistleTime = 0.0f;
+        amRegroupWalk = 0.0f;
         pgWhistle = 0.0f;
         pgCooldown = 0.0f;
         pgLogTime = 0.0f;
@@ -875,6 +908,21 @@ private:
     // whistle). Shared by Seed (no grabs yet) and SeedGrow (short crew).
     void seedSteerThrow(const Senses& in)
     {
+        // #246 a8-a11: standing ON the Titan corpse put the throw cursor
+        // (~95 u ahead of the captain) past it, so thrown Pikmin landed idle
+        // and the crew never grew past 1-2 of 10. For the Titan, hold a
+        // standoff ring and slide the cursor onto the corpse in the P1 look
+        // band (the King standoff's aim), then throw.
+        if (in.targetSource == 73 && in.targetToken != 0 && !in.waypointLeg && in.cursorValid) {
+            if (in.targetDist < cfg.titanSeedRingMin) {
+                steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            } else if (in.targetDist > cfg.titanSeedRingMax) {
+                steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            } else {
+                kingLookAndThrow(in);
+            }
+            return;
+        }
         // #897 big corpse (Crawbster): walking onto it pins the captain at its
         // centre with the cursor ~100 past the far edge, so throws land off
         // the corpse (ar9: 11/20 carriers, carry_stalled). Inside
@@ -1110,6 +1158,9 @@ private:
         amHadEnough = false;
         amLastCrew = 0;
         amGrowStill = 0.0f;
+        amWhistles = 0;
+        amWhistleTime = 0.0f;
+        amRegroupWalk = 0.0f;
         result = Result{};
         result.token = in.targetToken;
         result.koganeLike = isKoganeLike(in.targetSource);
@@ -1166,6 +1217,15 @@ private:
         }
         if (in.targetDist <= need && !otherTier) {
             enter(State::Attack, in);
+            return;
+        }
+        if (in.obstacleWork) {
+            // Pushing a HinderRock: steer into it, no stuck window, no
+            // approach-timeout ageing (the driver bounds the push time).
+            stateTime -= dt;
+            stuckWindowDist = 1.0e30f;
+            stuckWindowStart = 0.0f;
+            steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
             return;
         }
         if (tickObstaclePush(dt, in)) return;
@@ -1362,9 +1422,11 @@ private:
         }
         const bool sarai = in.targetSource == 23;
         const bool kurage = in.targetSource == 57 || in.targetSource == 72;
+        const bool titan = in.targetSource == 73;
         const bool roller = cfg.rollerStance && isRollerStance(in.targetSource);
         const float limit = roller ? cfg.rollerAttackTimeout
-            : (kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout);
+            : kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier
+            : titan ? cfg.attackTimeout * cfg.titanAttackMultiplier : cfg.attackTimeout;
         // Whistle first, then re-throw (bot-v4: real players do this):
         // - Sarai holding a Pikmin (targetGrabbing): whistle frees the grab;
         // - grabbed/thrown-off/burning squad (squadDistress: mouth-stuck,
@@ -1429,7 +1491,8 @@ private:
             // undamaged's bound + cooldown (forces throw windows) with the
             // kurage-aware limit both lanes used (unkilled limit == wlimit).
             {
-                const float wlimit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout;
+                const float wlimit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier
+                                   : titan  ? cfg.attackTimeout * cfg.titanAttackMultiplier : cfg.attackTimeout;
                 if (stateTime >= wlimit) {
                     giveUp(in, "attack_timeout");
                     finishTarget(in, /*killed*/ false);
@@ -1459,7 +1522,7 @@ private:
         // Kurage: body is on the ground (visual float only) so throw at the
         // body position; high HP means a longer window, and throws rotate to
         // spread Pikmin around the bell.
-        float aimX = in.tgtX, aimZ = in.tgtZ;
+        float aimX = in.aimValid ? in.aimX : in.tgtX, aimZ = in.aimValid ? in.aimZ : in.tgtZ;
         float gap = cfg.throwGap;
         if (kurage) {
             throwSpin += dt * 1.5f;
@@ -1531,6 +1594,37 @@ private:
         // Pikmin at the navi 36-65 u from the corpse so no carry ever
         // initiates (v4b diagnosis). Deliver with stick + throws only.
         const bool carryActive = in.transportSeen || in.carryCount > 0 || in.pelletCarriers > 0;
+        // #246 exception to the no-whistle rule (see titanAftermathWhistles):
+        // Titan only, strays on the field, bounded episodes. It fires when the
+        // squad is empty, or when squad plus crew cannot reach the corpse's
+        // carry minimum while idle strays could (a8/a9: 7 in the squad, 40
+        // idle strays scattered by the fight, crew stuck at 1 of 10). The
+        // captain first walks to the strays' centroid (at most
+        // titanRegroupWalk seconds), then holds the whistle there.
+        const int amCrew = in.pelletCarriers > 0 ? in.pelletCarriers : in.carryCount;
+        const bool amShort = in.squadPikmin == 0
+            || (in.carryWant > 0 && in.squadPikmin + amCrew < in.carryWant && in.strayPikmin > 0);
+        if (in.targetSource == 73
+            && (amWhistleTime > 0.0f || amRegroupWalk > 0.0f
+                || (amShort && in.fieldPikmin > in.pelletCarriers
+                    && amWhistles < cfg.titanAftermathWhistles))) {
+            if (amWhistleTime <= 0.0f && in.strayPikmin > 0 && amRegroupWalk < cfg.titanRegroupWalk) {
+                const float sx = in.strayX - in.naviX, sz = in.strayZ - in.naviZ;
+                if (sx * sx + sz * sz > 60.0f * 60.0f) {
+                    amRegroupWalk += dt;
+                    steer(in.naviX, in.naviZ, in.strayX, in.strayZ);
+                    return;
+                }
+            }
+            if (amWhistleTime <= 0.0f) ++amWhistles;
+            amWhistleTime += dt;
+            lastCommand.buttons = PadB;
+            if (amWhistleTime >= cfg.titanAftermathWhistleHold) {
+                amWhistleTime = 0.0f;
+                amRegroupWalk = 0.0f;
+            }
+            return;
+        }
         if (in.trackingPart) pgSawPart = true;
         if (pgSawPart && in.partGone) {
             // #901: the tracked ship part left the field (sucked into the
@@ -2429,6 +2523,8 @@ private:
     float stuckWindowDist = 1.0e30f;
     bool wantReplan = false;
     float progressBest = 1.0e30f;
+    bool trackingLeg = false; // approach stuck window follows a detour leg (#246/#899)
+    float trackLegX = 0.0f, trackLegZ = 0.0f;
     int approachReplans = 0; // consecutive STUCK windows in this Approach stint (bot-v3)
     bool approachOnRoute = false; // #901: approach progress metric is the route length
     bool obsWork = false; // #901: working a route obstacle in Approach
@@ -2455,6 +2551,9 @@ private:
     bool amHadEnough = false; // bot-v7: the lift escorted (viable) before shrinking
     int amLastCrew = 0; // bot-v7: high-water crew for SeedGrow progress
     float amGrowStill = 0.0f; // bot-v7: time without crew growth in SeedGrow
+    int amWhistles = 0;         // #246 Titan aftermath regroup episodes used
+    float amWhistleTime = 0.0f; // #246 current regroup whistle hold
+    float amRegroupWalk = 0.0f; // #246 time spent walking to the strays this episode
     float pgWhistle = 0.0f; // #901: remaining gather-whistle hold
     float pgCooldown = 0.0f; // #901: time until the next gather whistle may start
     float pgLogTime = 0.0f; // #901: AUTOPLAY_PART_GATHER rate limit
