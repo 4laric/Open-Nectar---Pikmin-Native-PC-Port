@@ -118,9 +118,13 @@ public:
         if (gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive) {
             gameflow.mMoviePlayer->requestSkip(); return result;
         }
-        if (!n || !pikiMgr || !itemMgr || gameflow.mPauseAll || gameflow.mIsUIOverlayActive
-            || !n->getCurrState() || n->getCurrState()->getID() != NAVISTATE_Walk) return result;
         const bool natural = std::getenv("P2_PURPLE_NATURAL") != nullptr;
+        if (!n || !pikiMgr || !itemMgr || gameflow.mPauseAll || gameflow.mIsUIOverlayActive
+            || !n->getCurrState()) return result;
+        const int naviState = n->getCurrState()->getID();
+        // Native idle is healthy and expected after ten seconds without input.
+        // Do not stall sprout observation just because the captain stops walking.
+        if (naviState != NAVISTATE_Walk && !(natural && naviState == NAVISTATE_Idle)) return result;
         Piki* picked = nullptr;
         if (natural) picked = naturalStep(n);
         else {
