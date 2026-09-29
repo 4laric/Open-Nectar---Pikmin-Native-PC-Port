@@ -40,6 +40,20 @@ INFRA_GLOBS = [
 ]
 SIM_GLOBS = ["src/**/*.cpp", "pc_port/*.cpp", "pc_port/netplay/*.cpp", "pc_port/mods/**/*.cpp", "include/**/*.h"]
 
+# M6b (#896): audio facade statics that mirror sim state and must roll back
+# with it (decision R-A / C2-2). SeSystem (sim, in the region) keeps Jac event
+# handles and branches on Jac_CheckFreeEvents(); with the facade's event table
+# preserved, a rollback left the two disagreeing and SeSystem::destroyEvent hit
+# its fatal "free events did not grow" check (M6b runs/g1A-foh-a, tick 7030).
+# These names are never preserved, whatever file defines them.
+SIM_KEEP = {
+    "sEvents", "sFreeEvents", "sEventClock",
+    "sMenuOrPauseActive", "sMenuActive", "sPauseActive", "sDVDPauseActive", "sEventResumeFrames",
+    "sDemoEventPaused", "sCountdownSounds", "sCurrentDemo", "sDemoTimedEvent", "sDemoPartsId",
+    "sDemoOnyonCount", "sDemoPartsCount", "sKeepDemoStreamOnFinish", "sDemoWasSkipped", "sDemoJamActive",
+    "sPartsFindDemoActive", "sTextDemoActive", "sVoiceRandom",
+}
+
 TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
 
 
@@ -115,6 +129,8 @@ def main(argv=None):
         names = syms[addr]
         if any(n.startswith("sArenaMemory") for n in names):
             continue  # the static arena is outside the bracket when the spike runs
+        if any(bn in SIM_KEEP for n in names for bn in base_names(n)):
+            continue
         if any(bn in only_infra for n in names for bn in base_names(n)):
             lines.append((addr - IMAGE_BASE, end - IMAGE_BASE, names[0]))
     uniq = sorted(set(lines))
