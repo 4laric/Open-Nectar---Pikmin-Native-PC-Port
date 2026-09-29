@@ -109,6 +109,12 @@ public:
                 n->getCurrState() && n->getCurrState()->getID() == NAVISTATE_Dead, n->mHealth, ticks);
         } else require(!captainSeen, "captain disappeared");
         require(++ticks < 6000, "startup timeout");
+        if (std::getenv("P2_PURPLE_NATURAL") && ticks % 120 == 0)
+            std::printf("P2_PURPLE_GATE tick=%d navi=%d pause=%d ui=%d movie=%d phase=%d input_state=%d\n", ticks,
+                n && n->getCurrState() ? n->getCurrState()->getID() : -1,
+                int(gameflow.mPauseAll), int(gameflow.mIsUIOverlayActive),
+                gameflow.mMoviePlayer ? int(gameflow.mMoviePlayer->mIsActive) : -1, phase,
+                input && input->isAlive() ? input->getState() : -1);
         if (gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive) {
             gameflow.mMoviePlayer->requestSkip(); return result;
         }
