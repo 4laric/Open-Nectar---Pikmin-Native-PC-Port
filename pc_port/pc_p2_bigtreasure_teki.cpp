@@ -536,6 +536,10 @@ bool buildColl(BTeki* t, Binding& b) {
     }
     oc.host = t->mCollInfo;
     t->mCollInfo = oc.own;
+    // onInit disableEvent(EB_PlatformCollEnabled): the Titan has no platform
+    // collision. The Swallow host's back platforms would otherwise report
+    // contacts whose part our tree cannot resolve (null CollEvent part).
+    t->mPlatMgr.release();
     sHostColl[t] = oc.host;
     setupCollisionCodes(b);
     updateColl(b);
