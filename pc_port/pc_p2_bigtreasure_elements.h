@@ -60,6 +60,16 @@ public:
     bool active() const { return mWeapon >= 0; }
     int activeWeapon() const { return mWeapon; }
 
+    // Read-only policy state for the visual-only attack effects
+    // (pc_p2_bigtreasure_fx.h); nothing here can change a simulation result.
+    const P2BigTreasureFirePolicy& firePolicy() const { return mFire; }
+    const P2BigTreasureGasPolicy& gasPolicy() const { return mGas; }
+    const P2BigTreasureWaterPolicy& waterPolicy() const { return mWater; }
+    const P2BigTreasureElecPolicy& elecPolicy() const { return mElec; }
+    int gasArms() const { return mGasArms; }
+    const P2BigTreasureVec3& origin() const { return mOrigin; }
+    float groundHeight() const { return mGround; }
+
     // One 30 Hz source tick for the running element.
     void tick(float delta, const P2BigTreasureElementHost& host,
               P2BigTreasureElementStats& out);
