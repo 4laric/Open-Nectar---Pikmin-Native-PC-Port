@@ -42,6 +42,11 @@ void pc_netplay_camlead_session_begin(int localRole);
 void pc_netplay_camlead_session_end(void);
 // A local input was submitted for GekkoNet frame `frame` (submit + delay).
 void pc_netplay_camlead_note_local_input(uint64_t frame, const PcNetplayInput& in);
+// The Advance of GekkoNet frame `frame` carries this peer's input `wire`
+// (16 bytes): if a local input was noted for `frame`, it must encode to
+// the same bytes, else `key_mismatch` counts it (integration check that
+// every submit path notes the frame its input lands on). Presentation-only.
+void pc_netplay_camlead_check_applied(uint64_t frame, const uint8_t* wire);
 // The Advance of GekkoNet frame `frame` is about to run its tick.
 void pc_netplay_camlead_begin_frame(uint64_t frame);
 // True while the session has the lead armed (env on).

@@ -192,8 +192,14 @@ def main(argv=None):
                 # m4: view reached in the authoritative pass; review M2: a
                 # missing landing frame in the pending window).
                 counters = dict(re.findall(r"(\w+)=(\d+)(?:\s|$)", summary[-1]))
-                for key in ("sim_saw_lead", "view_in_auth", "gaps"):
-                    if counters.get(key, "0") != "0":
+                # Integration (review N2): a missing counter fails too, so a
+                # renamed or dropped field cannot pass vacuously. I1 adds
+                # key_mismatch: a noted input that differs from the applied one.
+                for key in ("sim_saw_lead", "view_in_auth", "gaps", "key_mismatch"):
+                    if key not in counters:
+                        print(f"camera_lead_probe: delay {delay} {mode} {peer}: {key} missing from the summary")
+                        failures += 1
+                    elif counters[key] != "0":
                         print(f"camera_lead_probe: delay {delay} {mode} {peer}: {key}={counters[key]} (must be 0)")
                         failures += 1
         # Hash logs: lead vs opt-out, per peer (the same inputs); in live-yaw

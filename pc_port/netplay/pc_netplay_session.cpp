@@ -2357,6 +2357,14 @@ void submit_local_inputs(unsigned n)
 		uint8_t wire[16];
 		pc_netplay_input_encode(local, wire);
 		gekko_add_local_input(sGekko, sLocalHandle, wire);
+		// M5c lane A (integration I1): the lead camera replays this peer's
+		// submitted inputs until the sim applies them. Every add is noted
+		// at the frame it lands on (the k extra adds of a growth too); a
+		// shrink skips submits but never a landing frame, so the noted
+		// frames stay contiguous (the camlead `gaps` counter), and the
+		// Advance checks each noted frame against the applied input
+		// (`key_mismatch`), which exposes any wrong key.
+		pc_netplay_camlead_note_local_input(land, local);
 		++sSubmitted;
 		++sNextLand;
 		if (sHolding && land == (uint64_t)sHoldFrame + kHoldLeadFrames - 1) {
@@ -4779,6 +4787,9 @@ int handle_game_events(System* sys, BaseApp* app)
 			(void)OSCheckActiveThreads();
 			sys->updateSysClock();
 			pc_netplay_on_tick_begin();
+			// M5c lane A: the frame's local input must be the one noted for it
+			// (integration I1: counts key_mismatch otherwise).
+			pc_netplay_camlead_check_applied((uint64_t)e->data.adv.frame, e->data.adv.inputs + 16 * sLocalRole);
 			pc_netplay_camlead_begin_frame((uint64_t)e->data.adv.frame); // M5c lane A
 			loadguard_tick_begin((uint32_t)e->data.adv.frame, // lane S: keep-alive may pump inside
 			                     e->data.adv.rolling_back || e->data.adv.running_ahead);

@@ -156,6 +156,8 @@ struct Stats {
 	uint64_t gaps         = 0; // predictions whose pending window had a missing landing frame
 	uint64_t viewInAuth   = 0; // view() reached in the authoritative pass (must be 0)
 	uint64_t dayEndViews  = 0; // gameplay views inside the day-end sequence (no prediction)
+	uint64_t keysChecked  = 0; // Advances whose local input had a noted twin (integration I1)
+	uint64_t keyMismatch  = 0; //   of which the noted input differs from the applied one (must be 0)
 	float maxCorr         = 0.0f;
 };
 Stats sStats;
@@ -354,7 +356,7 @@ void pc_netplay_camlead_session_end(void)
 	std::printf("[netplay] camera lead summary: %s views=%llu lead_frames=%llu predictions=%llu steps=%llu "
 	            "max_steps=%d start_cuts=%llu held=%llu snaps=%llu drops=%llu max_corr=%.2f sim_saw_lead=%llu "
 	            "held_overlay=%llu held_pauseall=%llu held_other=%llu repeats=%llu gaps=%llu view_in_auth=%llu "
-	            "day_end_views=%llu own_camera=%s\n",
+	            "day_end_views=%llu own_camera=%s keys_checked=%llu key_mismatch=%llu\n",
 	            sArmed ? "on" : "off", (unsigned long long)sStats.views, (unsigned long long)sStats.leadFrames,
 	            (unsigned long long)sStats.predictions, (unsigned long long)sStats.steps, sStats.maxSteps,
 	            (unsigned long long)sStats.startStops, (unsigned long long)sStats.held,
@@ -363,7 +365,8 @@ void pc_netplay_camlead_session_end(void)
 	            (unsigned long long)sStats.heldPauseAll, (unsigned long long)sStats.heldOther,
 	            (unsigned long long)sStats.repeats, (unsigned long long)sStats.gaps,
 	            (unsigned long long)sStats.viewInAuth, (unsigned long long)sStats.dayEndViews,
-	            sJoinerOwn ? "on" : "off");
+	            sJoinerOwn ? "on" : "off", (unsigned long long)sStats.keysChecked,
+	            (unsigned long long)sStats.keyMismatch);
 	std::fflush(stdout);
 	sSession    = false;
 	sArmed      = false;
@@ -385,6 +388,24 @@ void pc_netplay_camlead_note_local_input(uint64_t frame, const PcNetplayInput& i
 	}
 	if (!sArmed) return;
 	sHist.note(frame, in);
+}
+
+void pc_netplay_camlead_check_applied(uint64_t frame, const uint8_t* wire)
+{
+	if (!sSession || !sArmed || wire == nullptr) return;
+	PcNetplayInput noted;
+	if (!sHist.get(frame, &noted)) return; // not noted (GekkoNet's start fill); holes count as gaps
+	uint8_t mine[16] = {};
+	pc_netplay_input_encode(noted, mine);
+	++sStats.keysChecked;
+	if (std::memcmp(mine, wire, sizeof(mine)) != 0) {
+		if (sStats.keyMismatch < 5) {
+			std::printf("[netplay] camera lead: noted input for frame=%llu differs from the applied one\n",
+			            (unsigned long long)frame);
+			std::fflush(stdout);
+		}
+		++sStats.keyMismatch;
+	}
 }
 
 void pc_netplay_camlead_begin_frame(uint64_t frame)
