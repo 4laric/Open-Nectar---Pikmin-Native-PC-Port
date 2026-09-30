@@ -173,7 +173,8 @@ bool lateBind(BTeki* actor, unsigned source, unsigned uid, bool rebindAllowed)
     case 41: return pc_p2_fuefuki_teki_bind_dynamic(actor);
     case 78: return pc_p2_groink_teki_bind_dynamic(actor);
     case 38: return pc_p2_breadbug_teki_bind_dynamic(actor);
-    case 32: return pc_p2_sarai_manager_bind_demon(actor, uid, uid);
+    case 32: // Bound at birth when mGenerator was already set; retry otherwise.
+        return pc_p2_sarai_manager_demon_host(actor) != nullptr || pc_p2_sarai_manager_bind_demon(actor, uid, uid);
     case 23:   // Sarai dynamic binder ran at birth (pc_p2_generated_placement_bind).
     case 73:   // BigTreasure binds late spawns on their first tick.
     case 2: case 33: case 35: case 43: case 53: case 67: case 76: // Chappy dynamic binder at birth.
