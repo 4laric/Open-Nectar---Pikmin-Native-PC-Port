@@ -277,7 +277,7 @@ Piki* nearestPikiAngle(const Vector3f& pos, float heading, float radius, float a
 void shot(const Umi& s, const char* what) {
     char key[64];
     std::snprintf(key, sizeof(key), "x|umi%s_%s", s.blind ? "blind" : "", what);
-    pc_gfx_proxy_shot_notify(key);
+    pc_gfx_proxy_shot_notify_after(key, 4); // the moment of the event, not the default 30-frame delay
 }
 
 int stuckToBody(BTeki* a) {
