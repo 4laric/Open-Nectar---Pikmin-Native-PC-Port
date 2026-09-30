@@ -405,8 +405,56 @@ SCRUB_KEYS = (
     # M5c lane B: a stale export must never pin or script the delay.
     "PIKMIN_NETPLAY_ADAPTIVE_DELAY",
     "PIKMIN_NETPLAY_TEST_DELAY_SCHEDULE",
+    # #965 lane H: every remaining getenv("PIKMIN_NETPLAY_*") in pc_port/ and src/
+    # (M5c lanes A and C camera/HUD/desync knobs, lane N's camlead key-skew
+    # knob, the trace/debug switches, the socket/ICE binds and the handshake
+    # test knobs). The prefix rule in scrub_env() below already drops every
+    # PIKMIN_NETPLAY_* name, so this list is the explicit documentation of what
+    # exists today (tools/netplay/selftest.py fails when a new getenv is missing).
+    "PIKMIN_NETPLAY_BANNER_MS",
+    "PIKMIN_NETPLAY_BUILD",
+    "PIKMIN_NETPLAY_CAMERA_LEAD",
+    "PIKMIN_NETPLAY_CAMERA_SHOT",
+    "PIKMIN_NETPLAY_CAMERA_TRACE",
+    "PIKMIN_NETPLAY_HUD",
+    "PIKMIN_NETPLAY_ICE_DEBUG",
+    "PIKMIN_NETPLAY_INPUT_TRACE",
+    "PIKMIN_NETPLAY_JOINER_OWN_CAMERA",
+    "PIKMIN_NETPLAY_LOCAL_PLAYER",
+    "PIKMIN_NETPLAY_PROFILE_LOG",
+    "PIKMIN_NETPLAY_STALL_TRACE",
+    "PIKMIN_NETPLAY_UDP_BIND",
+    "PIKMIN_NETPLAY_TEST_CAMERA_DRAG",
+    "PIKMIN_NETPLAY_TEST_CAMLEAD_KEY_SKEW",  # lane N (#965), may not exist in an older exe
+    "PIKMIN_NETPLAY_TEST_DESYNC_AT_FRAME",
+    "PIKMIN_NETPLAY_TEST_FORCE_AUTH_TEXINIT",
+    "PIKMIN_NETPLAY_TEST_HANDSHAKE_LEN",
+    "PIKMIN_NETPLAY_TEST_HUD_SHOT",
+    "PIKMIN_NETPLAY_TEST_HUD_SHOT_FRAME",
+    "PIKMIN_NETPLAY_TEST_HUD_TOGGLE_FRAME",
+    "PIKMIN_NETPLAY_TEST_PROTOCOL_VERSION",
+    "PIKMIN_NETPLAY_TEST_SCRIPT_LIVE_YAW",
     "NECTAR_CARD_DEBUG",
 )
+
+# #965 lane H: robust scrub. A player-facing doc tells people to set knobs with
+# `$env:...` which stays set for the whole PowerShell window; a harness launched
+# from that window must not inherit them. Every PIKMIN_NETPLAY_* / PIKMIN_INPUT_*
+# name is dropped from the inherited environment (so a knob added tomorrow is
+# covered without touching this file); the harness then sets exactly the
+# variables it needs, and callers pass test knobs through --env/--env-host/
+# --env-join. There is deliberately no allow-list: nothing in tools/netplay
+# relies on inheriting one of these from the parent shell.
+SCRUB_PREFIXES = ("PIKMIN_NETPLAY_", "PIKMIN_INPUT_")
+
+
+def scrub_env(env):
+    """Drop every knob a caller's shell could leak into a peer. Mutates and returns env."""
+    explicit = set(SCRUB_KEYS)
+    for key in list(env):
+        if key.upper() in explicit or key.upper().startswith(SCRUB_PREFIXES):
+            del env[key]
+    return env
 
 # M5c lane B (issue #887): netplay_impair_proxy link profiles.
 NET_PROFILES = {
@@ -419,9 +467,7 @@ NET_PROFILES = {
 
 def launch(exe, run, boot, extra_args, env_extra, stdout_log, unthrottled=True):
     cmd = [str(exe.resolve()), "--randomizer-seed", str(boot)] + list(extra_args)
-    env = dict(os.environ)
-    for key in SCRUB_KEYS:
-        env.pop(key, None)
+    env = scrub_env(dict(os.environ))
     env.update(
         PIKMIN_RANDOMIZER_TEST_BACKGROUND="1",
         SDL_AUDIODRIVER="dummy",

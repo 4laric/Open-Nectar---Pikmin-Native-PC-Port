@@ -392,6 +392,27 @@ def main():
         w = coop_policy_pair.hold_windows(hlog)
         check(len(w) == 1 and len(w[0][3]) == 1, "coop_policy_pair flags a grant between held at and resume")
 
+    # #965 lane H: the harness env scrub covers every knob the native tree reads.
+    import re as _re
+    import launch_pair  # noqa: E402
+    repo = HERE.parent.parent
+    names = set()
+    for sub in ("pc_port", "src", "include"):
+        for f in (repo / sub).rglob("*"):
+            if f.suffix in (".cpp", ".h", ".hpp", ".c") and f.is_file():
+                try:
+                    names.update(_re.findall(r'getenv\("(PIKMIN_NETPLAY_[A-Z0-9_]+)"\)',
+                                             f.read_text(encoding="utf-8", errors="replace")))
+                except OSError:
+                    pass
+    missing = sorted(n for n in names if n not in run_pair.SCRUB_KEYS and n not in launch_pair.SCRUB_KEYS)
+    check(not missing, f"every getenv(PIKMIN_NETPLAY_*) knob is in run_pair.SCRUB_KEYS ({len(names)} scanned; missing {missing})")
+    leaky = {"PIKMIN_NETPLAY_CAMERA_LEAD": "0", "PIKMIN_NETPLAY_FUTURE_KNOB": "1", "PIKMIN_INPUT_RECORD": "x",
+             "pikmin_netplay_hud": "1", "PATH": "keep", "PIKMIN_RANDOMIZER_TEST_BACKGROUND": "keep"}
+    kept = run_pair.scrub_env(dict(leaky))
+    check(set(kept) == {"PATH", "PIKMIN_RANDOMIZER_TEST_BACKGROUND"},
+          f"scrub_env drops every PIKMIN_NETPLAY_*/PIKMIN_INPUT_* name incl. unknown and lower-case ({sorted(kept)})")
+
     if failures:
         print(f"selftest: {failures} failure(s)")
         return 1
