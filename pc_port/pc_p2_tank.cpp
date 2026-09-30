@@ -261,7 +261,13 @@ void pc_p2_tank_setup(){
     Iterator it(tekiMgr);CI_LOOP(it){Teki* teki=static_cast<Teki*>(*it);if(!teki||!teki->mGenerator)continue;
      const unsigned token=bridge?pc_p2_campaign_token(teki):teki->mGenerator->_70;
      auto found=wanted.find(token);if(found==wanted.end())continue;
-     int kind=found->second;if(!seen.insert(found->first).second)std::abort();if(teki->mTekiType!=TEKI_Tank)std::abort();
+     int kind=found->second;
+     if(teki->mTekiType!=TEKI_Tank){ // #948: wrong vehicle: refuse this actor with a reason, never abort a campaign
+      if(!bridge)std::abort();
+      std::printf("P2_TANK_UNBOUND generator=%u source_id=%u type=%d reason=host_type_mismatch\n",token,kind?25u:24u,int(teki->mTekiType));std::fflush(stdout);continue;}
+     if(!seen.insert(found->first).second){
+      if(!bridge)std::abort();
+      std::printf("P2_TANK_UNBOUND generator=%u source_id=%u reason=duplicate_generator\n",token,kind?25u:24u);std::fflush(stdout);continue;}
      actors[static_cast<PelletView*>(teki)]=kind;
      teki->mHealth=p2tank::params(kind).health;
      TankFsm& f=fsms[static_cast<PelletView*>(teki)];
@@ -276,7 +282,7 @@ void pc_p2_tank_setup(){
      std::printf("P2_TANK_STATE species=%s generator=%u state=wait\n",ids[kind],token);
      std::fflush(stdout);
     }
-    if(seen.size()!=wanted.size()){std::printf("P2_TANK_ERROR missing_actor wanted=%zu found=%zu\n",wanted.size(),seen.size());std::abort();}
+    if(seen.size()!=wanted.size()){std::printf("P2_TANK_MISSING wanted=%zu found=%zu\n",wanted.size(),seen.size());std::fflush(stdout);if(!bridge)std::abort();}
     loadAnimation(banks);
     // Breath timing is retail-sourced (attack.bca KEYEVENT_2 at 55 of 95);
     // the staged bank carries no events, so only cross-check it.

@@ -432,7 +432,15 @@ void pc_p2_kurage_teki_setup()
             if (pc_p2_campaign_source(t) != 57) continue;
             gen = pc_p2_campaign_token(t);
         } else if (pc_p2_campaign_token(t) != gen) continue;
-        if (t->mTekiType != type || (!pc_randomizer_p2_bridge() && s.size())) { if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Kurage", "actor_type_mismatch")) return; }
+        if (t->mTekiType != type) {
+            // #948: wrong vehicle for this actor only; keep sweeping the rest.
+            if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Kurage", "actor_type_mismatch")) {
+                std::printf("P2_KURAGE_UNBOUND generator=%u source_id=57 type=%d reason=host_type_mismatch\n", gen, int(t->mTekiType));
+                std::fflush(stdout);
+                continue;
+            }
+        }
+        if (!pc_randomizer_p2_bridge() && s.size()) { if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Kurage", "actor_type_mismatch")) return; }
         // Optional visual poses: the corpse/receipt path must not require the
         // converted kurage_*.mod files. When they are absent the P1 host body
         // draws instead (pc_p2_kurage_visual_draw returns false).

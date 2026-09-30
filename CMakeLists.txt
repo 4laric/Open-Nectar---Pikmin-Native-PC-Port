@@ -1353,6 +1353,13 @@ target_include_directories(p2_campaign_policy_test PRIVATE pc_port)
 target_compile_options(p2_campaign_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_campaign_policy_test COMMAND p2_campaign_policy_test)
 
+# Smoke-seed slot bypass (#944): engine-free env-gated predicate contract.
+add_executable(p2_smoke_any_slot_test
+    pc_port/pc_p2_smoke_any_slot_test.cpp)
+target_include_directories(p2_smoke_any_slot_test PRIVATE pc_port)
+target_compile_options(p2_smoke_any_slot_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_smoke_any_slot_test COMMAND p2_smoke_any_slot_test)
+
 # P2 boss arenas (owner ruling 2026-09-29): engine-free suppress/probe table.
 add_executable(p2_boss_arena_policy_test
     pc_port/pc_p2_boss_arena_policy_test.cpp)

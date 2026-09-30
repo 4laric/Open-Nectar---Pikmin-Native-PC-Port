@@ -163,10 +163,30 @@ void pc_p2_mamuta_setup() {
         Teki* actor=static_cast<Teki*>(*it);
         if (!actor || !actor->mGenerator || !wanted.count(pc_p2_campaign_token(actor))) continue;
         unsigned id=pc_p2_campaign_token(actor);
-        if (actor->mTekiType!=TEKI_Miurin || !found.insert(id).second) fail();
+        if (actor->mTekiType!=TEKI_Miurin) {
+            // #948: wrong vehicle (protected slot, pack generator, proxy
+            // override). Refuse this actor with a reason; never abort a campaign.
+            if (!pc_randomizer_p2_bridge()) fail();
+            std::printf("P2_MAMUTA_UNBOUND generator=%u source_id=54 type=%d reason=host_type_mismatch\n", id, int(actor->mTekiType));
+            std::fflush(stdout);
+            continue;
+        }
+        if (!found.insert(id).second) {
+            if (!pc_randomizer_p2_bridge()) fail();
+            std::printf("P2_MAMUTA_UNBOUND generator=%u source_id=54 reason=duplicate_generator\n", id);
+            std::fflush(stdout);
+            continue;
+        }
         actors.emplace(actor,id);
     }
-    if (found!=wanted) fail();
+    if (found!=wanted) {
+        if (!pc_randomizer_p2_bridge()) fail();
+        // Campaign actors span areas/days; a bound id with no live actor
+        // here is expected. Report it and bind the ones that are present.
+        std::printf("P2_MAMUTA_MISSING source_id=54 wanted=%zu found=%zu\n", wanted.size(), found.size());
+        std::fflush(stdout);
+        if (found.empty()) return;
+    }
     pc_p2_mamuta_rules_setup();
     loadManifest();
     for (int k=0; k<kClips; ++k) loadBank(k);

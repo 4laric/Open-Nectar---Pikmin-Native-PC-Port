@@ -24,6 +24,13 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
         return 3; // TEKI_Chappy: Bulbmin
     case 76:
         return 31; // TEKI_Chappb: Dwarf Bulbear
+    // #948 (#951 U26): Orange Bulborb (42) binds only a TEKI_Chappy vehicle
+    // (pc_p2_bluechappy.cpp bindActor); the Kabuto variants (95 Rkabuto,
+    // 96 Fkabuto) bind only TEKI_Beatle (pc_p2_enemy.cpp
+    // pc_p2_kabuto_bind_dynamic). Without a row they rode whatever the slot
+    // P1 original was and refused on every other slot.
+    case 42: return 3; // TEKI_Chappy: BlueChappy adult host
+    case 95: case 96: return 17; // TEKI_Beatle: Kabuto variant hosts
     // Sarai binds whatever type its anchor carries (pc_p2_sarai_manager.cpp:109,119),
     // so 3 here is the placement vehicle, not a requirement. "Kochappy" is the P2 name
     // for the Dwarf Bulborb; the P1 enum for it is TEKI_Chappy, and there is no
