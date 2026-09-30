@@ -15,9 +15,6 @@ void pc_p2_elecbug_forget(BTeki*);
 void pc_p2_elecbug_update(BTeki*);
 float pc_p2_elecbug_param_f(const BTeki*, int idx, float fallback);
 bool pc_p2_elecbug_clip(const BTeki*, const char*& name, float& phase);
-// Draws the Denki arc between linked beetles while `actor` discharges.
-class Graphics;
-bool pc_p2_elecbug_draw_arc(BTeki*, Graphics&);
 // Read-only FSM state name ("wait"/"charge"/"discharge"/"reverse"/...) for the
 // private runtime fixture; nullptr when the actor is not a registered ElecBug.
 const char* pc_p2_elecbug_state_name(const BTeki*);

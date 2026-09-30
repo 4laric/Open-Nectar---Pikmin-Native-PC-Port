@@ -36,9 +36,8 @@
 #include "pc_p2_species.h"
 #include "pc_p2_hazard_emitter.h"
 #include "teki.h"
-#include "Graphics.h"
-#include "Texture.h"
-#include "gl/pc_gfx.h"
+#include "pc_p2_attack_fx_host.h"
+#include <memory>
 #include "pc_p2_navi_select.h"
 #include "Interactions.h"
 #include "Piki.h"
@@ -125,6 +124,8 @@ struct ElecBug {
     bool hasSearched = false;
     bool shockedThisDischarge = false;
     bool arcLogged = false;
+    std::unique_ptr<p2attackfx::Emitter> fx; // P1 electric spark arc (shared attack fx)
+    unsigned fxTick = 0;
     std::set<const Creature*> arcHit;
     bool immuneLogged = false;
     bool flipped = false;
@@ -246,6 +247,22 @@ void sweepArc(BTeki* actor, ElecBug& s, unsigned generator) {
     const Vector3f a = actor->getPosition();
     const Vector3f b = s.partner->getPosition();
     const p2elecbug::V3 pa{a.x, a.y, a.z}, pb{b.x, b.y, b.z};
+    // Visible arc: P1 electric spark generators along a crackling polyline between
+    // the two beetles (p2attackfx::layoutArc + EFF_Rocket_Biri / sparks).
+    if (!s.fx) s.fx.reset(new p2attackfx::Emitter());
+    {
+        p2attackfx::Point pts[p2attackfx::MAX_ARC_POINTS];
+        unsigned made = 0;
+        for (unsigned strand = 0; strand < 2; ++strand) {
+            const int n = p2attackfx::layoutArc(a.x, a.y + 10.0f, a.z, b.x, b.y + 10.0f, b.z, s.fxTick,
+                                                generator + strand, 7.0f, pts);
+            made += s.fx->emit(p2attackfx::Element::Elec, pts, n, s.fxTick);
+        }
+        ++s.fxTick;
+        if (s.fxTick == 1) {
+            std::printf("P2_ELECBUG_ARC_FX generator=%u generators_first_tick=%u\n", generator, made);
+        }
+    }
     if (pikiMgr) {
         Iterator it(pikiMgr);
         CI_LOOP(it) {
@@ -296,7 +313,12 @@ void enter(ElecBug& s, State state, const char* clip) {
     s.state = state;
     s.stateTime = 0.0f;
     s.arcLogged = false;
+    s.fxTick = 0;
     s.arcHit.clear();
+    if (s.fx && state != ELEC_DISCHARGE) {
+        const unsigned n = s.fx->stopAll();
+        if (n) std::printf("P2_ELECBUG_ARC_STOP generator=%u generators=%u\n", s.self ? genOf(s.self) : 0u, n);
+    }
     if (clip) s.clip = clip;
 }
 void wander(BTeki* a, ElecBug& s) {
@@ -905,59 +927,3 @@ void pc_p2_elecbug_update(BTeki* actor) {
     }
 }
 
-// Visible Denki arc between two linked beetles while the generator discharges.
-// The P1 data carries no electric effect, so the arc is drawn as jagged
-// lightning polylines (core + halo) in the same immediate-mode way the other
-// P2 actors draw their rings. Returns true when an arc was drawn.
-bool pc_p2_elecbug_draw_arc(BTeki* actor, Graphics& gfx) {
-    if (!ready || !gfx.mCamera) return false;
-    ElecBug* s = lookup(actor);
-    if (!s || s->state != ELEC_DISCHARGE || !s->partner || s->stateTime < p2elecbug::kArcStart) return false;
-    Vector3f a = actor->getPosition();
-    Vector3f b = s->partner->getPosition();
-    a.y += 10.0f;
-    b.y += 10.0f;
-    const Colour oldColour = gfx.mPrimaryColour;
-    const Colour oldAux = gfx.mAuxiliaryColour;
-    const int oldBlend = gfx.setCBlending(BLEND_Alpha);
-    Texture* oldTexture = gfx.mActiveTexture[0];
-    const bool oldLight = gfx.setLighting(false, nullptr);
-    const float oldWidth = gfx.setLineWidth(3.0f);
-    gfx.useMaterial(nullptr);
-    gfx.useTexture(nullptr, 0);
-    gfx.useMatrix(gfx.mCamera->mLookAtMtx, 0);
-    const float dx = b.x - a.x, dz = b.z - a.z;
-    const float len = std::sqrt(dx * dx + dz * dz);
-    const float nx = len > 1e-3f ? -dz / len : 0.0f, nz = len > 1e-3f ? dx / len : 1.0f;
-    constexpr int kSeg = 14;
-    const unsigned tick = unsigned(s->stateTime * 30.0f); // re-jitter every frame
-    for (int strand = 0; strand < 3; ++strand) {
-        unsigned seed = tick * 2654435761u + unsigned(strand) * 40503u + genOf(actor);
-        auto rnd = [&seed]() { seed = seed * 1664525u + 1013904223u; return float((seed >> 8) & 0xFFFF) / 65535.0f - 0.5f; };
-        Vector3f prev = a;
-        for (int i = 1; i <= kSeg; ++i) {
-            const float t = float(i) / kSeg;
-            Vector3f p(a.x + dx * t, a.y + (b.y - a.y) * t, a.z + dz * t);
-            if (i < kSeg) {
-                const float amp = 9.0f * (strand == 0 ? 1.0f : 1.6f);
-                p.x += nx * rnd() * 2.0f * amp;
-                p.z += nz * rnd() * 2.0f * amp;
-                p.y += rnd() * 2.0f * amp;
-            }
-            if (strand == 0) gfx.setColour(Colour(255, 255, 255, 255), true);
-            else gfx.setColour(Colour(120, 190, 255, 200), true);
-            gfx.drawLine(prev, p);
-            // Core lines render 1 px on the GL backend regardless of setLineWidth.
-            gfx.drawLine(Vector3f(prev.x, prev.y + 1.0f, prev.z), Vector3f(p.x, p.y + 1.0f, p.z));
-            gfx.drawLine(Vector3f(prev.x, prev.y - 1.0f, prev.z), Vector3f(p.x, p.y - 1.0f, p.z));
-            prev = p;
-        }
-    }
-    gfx.setLineWidth(oldWidth);
-    gfx.setColour(oldColour, true);
-    gfx.mAuxiliaryColour = oldAux;
-    gfx.setLighting(oldLight, nullptr);
-    gfx.useTexture(oldTexture, 0);
-    gfx.setCBlending(oldBlend);
-    return true;
-}
