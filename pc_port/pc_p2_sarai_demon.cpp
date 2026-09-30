@@ -277,6 +277,7 @@ void P2SaraiHost::updateDemon()
     if (!mBoundActor) return;
     mDemonClock += dt;
     const unsigned generator = demonGenerator();
+    demonAnimDiagnostic(dt, stateName(mFsm.state()));
 
     // Held-captain bookkeeping: the captain can leave on its own (escape mash,
     // death, reset); the bridge is the authority.

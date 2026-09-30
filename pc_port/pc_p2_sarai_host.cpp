@@ -23,6 +23,7 @@
 #include "teki.h"
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 struct P2SaraiHost::Smooth {
@@ -506,6 +507,24 @@ void P2SaraiHost::presentSmooth(float frame)
                     set.profile.c_str(), set.poses.size(), shown.span.left, shown.span.right, shown.span.weight,
                     int(tune.lerp));
     }
+}
+
+// Guarded diagnostic (PIKMIN_P2_DEMON_ANIM_LOG=1): clip/phase/fade per state, ~4 Hz.
+void P2SaraiHost::demonAnimDiagnostic(float dt, const char* state)
+{
+    static const bool on = [] { const char* v = std::getenv("PIKMIN_P2_DEMON_ANIM_LOG"); return v && *v && *v != '0'; }();
+    if (!on) return;
+    mAnimLogAccum += dt;
+    if (mAnimLogAccum < 0.25f) return;
+    mAnimLogAccum = 0.0f;
+    const bool smooth = mSmooth != nullptr;
+    std::printf("P2_DEMON_ANIM t=%.2f state=%s clip=%s frame=%.2f fade_active=%d fade_progress=%.2f
+", mDemonClock,
+                state,
+                mActiveSet >= 0 && mActiveSet < int(mPoseSets.size()) ? mPoseSets[std::size_t(mActiveSet)].profile.c_str() : "-",
+                mPlayer.frame(), smooth ? int(mSmooth->track.view.fade.active()) : -1,
+                smooth ? mSmooth->track.view.fade.progress() : -1.0f);
+    std::fflush(stdout);
 }
 
 // Post-drop reacquisition arm (FallMeck::cleanup resetAttackableTimer(0)
