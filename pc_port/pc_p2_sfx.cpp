@@ -3,6 +3,8 @@
 #include "SoundMgr.h"
 #include "jaudio/pikiinter.h"
 #include "teki.h"
+#include "Navi.h"
+#include "NaviMgr.h"
 #include <SDL2/SDL.h>
 #include <cstdio>
 #include <map>
@@ -65,6 +67,22 @@ namespace {
 int play(unsigned sourceId, unsigned token, p2sfx::Event event, const Vector3f& position, BTeki* actor)
 {
     if (!seSystem) return p2sfx::kNone;
+    // P1 culls a far creature's AI (and so its sound keys) by distance; the
+    // P2 FSMs run everywhere, so cull the request itself at the audible
+    // radius (SeConstant p00, 700 units: beyond it the offset normalises to
+    // volume 0 and createEvent would only churn or lose an event slot).
+    // SeSystem keeps its listener protected; the nearest captain is what it
+    // listens from during play (SeSystem::update caller), as in
+    // pc_p2_purple_feedback.
+    if (naviMgr) {
+        if (Navi* navi = naviMgr->getNearestNavi(position)) {
+            const float cutoff = 700.0f; // SeConstant p00 default (SoundMgr.h:44)
+            const float dx = position.x - navi->mSRT.t.x;
+            const float dy = position.y - navi->mSRT.t.y;
+            const float dz = position.z - navi->mSRT.t.z;
+            if (dx * dx + dy * dy + dz * dz > cutoff * cutoff) return p2sfx::kNone;
+        }
+    }
     bool logIt = false;
     const int se = actorFor(sourceId, token).gate.admit(sourceId, event, nowSeconds(), &logIt);
     if (se == p2sfx::kNone) return p2sfx::kNone;
