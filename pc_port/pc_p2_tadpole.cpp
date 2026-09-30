@@ -26,6 +26,7 @@
 #include "pc_p2_tadpole.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_setup_failsafe.h"
+#include "pc_p2_sfx.h"
 #include "teki.h"
 #include "Piki.h"
 #include "PikiMgr.h"
@@ -103,6 +104,8 @@ struct Tadpole {
     std::string clip = "wait1";
     float phase = 0.0f;
     bool deadLogged = false;
+    bool escaped = false;  // host death funnel ran (pcEscapeNow): corpse pellet exists
+    int sfxState = -1;     // last state a P1-approximation SFX was requested for
     float logTimer = 0.0f;
 };
 
@@ -456,6 +459,12 @@ void pc_p2_tadpole_update(BTeki* actor) {
     const bool targetNear = s.state != TADPOLE_DEAD && nearestTargetPos(pos, target);
 
     s.stateTime += dt;
+    // P1-approximation SFX (pc_p2_sfx_policy.h). Output-only: no sim state.
+    if (s.sfxState != int(s.state)) {
+        s.sfxState = int(s.state);
+        if (s.state == TADPOLE_LEAP) pc_p2_sfx(27, generator, p2sfx::Event::Jump, actor);
+        else if (s.state == TADPOLE_DEAD) pc_p2_sfx(27, generator, p2sfx::Event::Dead, actor);
+    }
     switch (s.state) {
     case TADPOLE_WAIT:
         stop(actor);
@@ -543,7 +552,14 @@ void pc_p2_tadpole_update(BTeki* actor) {
     }
     case TADPOLE_DEAD:
         stop(actor);
-        if (s.stateTime >= clipDuration("dead")) actor->die();
+        // The host doAI that normally calls die()+dieSoon() is suppressed, so
+        // die() alone (mDeadState=1, no corpse pellet) left nothing to carry
+        // (wave 3 mechanics probe: killed=1 carried=0). pcEscapeNow() is the
+        // full funnel (Armor/Groink/Breadbug pattern).
+        if (!s.escaped && s.stateTime >= clipDuration("dead")) {
+            s.escaped = true;
+            actor->pcEscapeNow();
+        }
         break;
     default:
         break;

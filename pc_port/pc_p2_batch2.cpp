@@ -573,8 +573,14 @@ static void bindFamilies(bool strict) {
             // as swarms, so repeats are pack members, not a scene mismatch.
             // All other families keep the duplicate-generator abort.
             const std::string famName = family.name;
+            // Dweevils (59-62, 93) are accepted on grub-cohort slots by the root
+            // placement constraints (terrain/footprint only), so a Sheargrub
+            // generator's pack can hold several Chappy hosts under one token;
+            // aborting the scene there crashed seeds that place a Dweevil on
+            // such a slot (wave 3 mechanics probe, seed s3: WaterOtakara on
+            // spring_init_7623). Every member is a Dweevil.
             const bool packTolerant =
-                soft || (bridge && (famName == "uji" || famName == "ground"));
+                soft || (bridge && (famName == "uji" || famName == "ground" || famName == "dweevil"));
             if (p2proxy::tokenAction(packTolerant, !found.insert(generator).second)
                     == p2proxy::TokenAction::Fail) {
                 char msg[256];

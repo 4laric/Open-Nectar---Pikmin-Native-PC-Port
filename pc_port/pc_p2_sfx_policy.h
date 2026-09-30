@@ -75,6 +75,10 @@ enum Source : unsigned {
     kGroink       = 78,
     kGroinkArmored= 97,   // fminihoudai variant, same host module
     kCannonLarva  = 75,
+    kCatfish      = 26,   // Water Dumple (wave 3 mechanics, #964)
+    kTadpole      = 27,   // Wogpole
+    kHana         = 84,   // Creeping Chrysanthemum
+    kBombOtakara  = 93,   // Volatile Dweevil
 };
 
 enum class Event : int {
@@ -212,6 +216,41 @@ inline int seFor(unsigned sourceId, Event e) {
         case Event::Flick: return kKabutoFlip;
         case Event::Damage: return kTankDamage;
         case Event::Dead: return kKabutoDead;
+        default: return kNone;
+        }
+    case kCatfish: // Water Dumple: Fiery Blowhog-style lunge bank, Wollywog splash.
+        switch (e) {
+        case Event::Step: return kFlogLand;
+        case Event::Attack: return kChappySwing;   // bite
+        case Event::Flick: return kTankSwing;
+        case Event::Damage: return kTankDamage;
+        case Event::Dead: return kTankDead1;
+        default: return kNone;
+        }
+    case kTadpole: // Wogpole: tiny hopper (P1 Wollywog hop), harmless.
+        switch (e) {
+        case Event::Jump: return kFlogJump;
+        case Event::Land: return kFlogLand;
+        case Event::Damage: return kMinicAlert;
+        case Event::Dead: return kMinicDie;
+        default: return kNone;
+        }
+    case kHana: // Creeping Chrysanthemum: Dwarf Bulborb host sounds.
+        switch (e) {
+        case Event::Step: return kCollecWalk;
+        case Event::Attack: return kChappySwing;   // bite
+        case Event::Flick: return kChappySwing;
+        case Event::Damage: return kChappyFootDamage;
+        case Event::Dead: return kCollecDead;
+        default: return kNone;
+        }
+    case kBombOtakara: // Volatile Dweevil: Kogane-like scuttle + P1 bomb burst.
+        switch (e) {
+        case Event::Step: return kKoganeWalk;
+        case Event::Burst: return kBomb;
+        case Event::Flick: return kChappySwing;
+        case Event::Damage: return kKoganeDamage;
+        case Event::Dead: return kMinicDie;
         default: return kNone;
         }
     default:

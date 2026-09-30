@@ -34,7 +34,8 @@ using namespace p2sfx;
 
 void table() {
     const unsigned species[] = {kBreadbug, kSnitchbug, kDirigibug, kCrawbster, kAntennaBeetle,
-                                kTitanDweevil, kGroink, kGroinkArmored, kCannonLarva};
+                                kTitanDweevil, kGroink, kGroinkArmored, kCannonLarva,
+                                kCatfish, kTadpole, kHana, kBombOtakara};
     for (unsigned s : species) {
         CHECK(seFor(s, Event::Damage) != kNone);
         CHECK(seFor(s, Event::Dead) != kNone);
@@ -57,6 +58,13 @@ void table() {
     CHECK(seFor(kTitanDweevil, Event::Step) == kSpiderWalk);
     CHECK(seFor(kGroink, Event::Shot) == kKabutoShot);
     CHECK(seFor(kCannonLarva, Event::Shot) == kKabutoShot);
+    // Wave 3 mechanics (#964): aquatics, Chrysanthemum, Volatile Dweevil.
+    CHECK(seFor(kBombOtakara, Event::Burst) == kBomb);
+    CHECK(seFor(kTadpole, Event::Jump) == kFlogJump);
+    CHECK(seFor(kTadpole, Event::Land) == kFlogLand);
+    CHECK(seFor(kCatfish, Event::Attack) == kChappySwing);
+    CHECK(seFor(kHana, Event::Attack) == kChappySwing);
+    CHECK(seFor(kHana, Event::Burst) == kNone);
     // Unknown species: silent.
     CHECK(seFor(1, Event::Damage) == kNone);
     CHECK(seFor(0, Event::Step) == kNone);

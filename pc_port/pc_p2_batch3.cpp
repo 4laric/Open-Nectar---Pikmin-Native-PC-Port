@@ -718,12 +718,13 @@ void pc_p2_batch3_setup() {
                 fail("native type mismatch");
             }
             if (!found.insert(generator).second) {
-                if (bridge) {
-                    std::printf("P2_SETUP_SKIP batch3 %s duplicate_generator generator=%u\n",
-                                family.name, generator);
-                    continue;
-                }
-                fail("duplicate generator in scene");
+                // Water slots are Wogpole/Dumple PACK generators: one campaign
+                // token, several live hosts. The behaviour modules bind every
+                // member; skipping the extra members here left them drawing as
+                // the P1 host model (wave 3 mechanics probe, Catfish/Tadpole
+                // b26/b27). In bridge mode every member is bound and the token
+                // counts once; found.size() below still compares tokens.
+                if (!bridge) fail("duplicate generator in scene");
             }
             actors[teki] = std::string(family.name) + "|" + match->second;
             speciesUsed.insert(match->second);

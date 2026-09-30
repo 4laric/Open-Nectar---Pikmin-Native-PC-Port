@@ -39,6 +39,7 @@
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_setup_failsafe.h"
 #include "pc_p2_white.h"
+#include "pc_p2_sfx.h"
 #include "teki.h"
 #include "Interactions.h"
 #include "Piki.h"
@@ -121,6 +122,8 @@ struct Catfish {
     float phase = 0.0f;
     unsigned rng = 1;
     bool deadLogged = false;
+    bool escaped = false;  // host death funnel ran (pcEscapeNow): corpse pellet exists
+    int sfxState = -1;     // last state a P1-approximation SFX was requested for
     float logTimer = 0.0f;
 };
 
@@ -636,6 +639,14 @@ void pc_p2_catfish_update(BTeki* actor) {
     }
 
     s.stateTime += dt;
+    // P1-approximation SFX (pc_p2_sfx_policy.h). Output-only: no sim state.
+    if (s.sfxState != int(s.state)) {
+        s.sfxState = int(s.state);
+        if (s.state == CATFISH_ATTACK) pc_p2_sfx(26, generator, p2sfx::Event::Attack, actor);
+        else if (s.state == CATFISH_FLICK) pc_p2_sfx(26, generator, p2sfx::Event::Flick, actor);
+        else if (s.state == CATFISH_DEAD) pc_p2_sfx(26, generator, p2sfx::Event::Dead, actor);
+    }
+    if (s.state == CATFISH_WALK || s.state == CATFISH_GOHOME) pc_p2_sfx_stride(26, generator, actor, 60.0f);
     switch (s.state) {
     case CATFISH_WAIT: {
         stop(actor);
@@ -755,7 +766,14 @@ void pc_p2_catfish_update(BTeki* actor) {
     }
     case CATFISH_DEAD:
         stop(actor);
-        if (s.stateTime >= clipDuration("dead")) actor->die();
+        // The host doAI that normally calls die()+dieSoon() is suppressed, so
+        // die() alone (mDeadState=1, no corpse pellet) left nothing to carry
+        // (wave 3 mechanics probe: killed=1 carried=0). pcEscapeNow() is the
+        // full funnel (Armor/Groink/Breadbug pattern).
+        if (!s.escaped && s.stateTime >= clipDuration("dead")) {
+            s.escaped = true;
+            actor->pcEscapeNow();
+        }
         break;
     default:
         break;
