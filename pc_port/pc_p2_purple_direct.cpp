@@ -84,7 +84,7 @@ PcP2PurpleDirectHit pc_p2_purple_direct_begin(Piki* source, Creature* target, Co
     if ((!dwarf && !adult) || teki->mDeadState || !teki->isAlive()
         || teki->getTekiOption(BTeki::TEKI_OPTION_INVINCIBLE)
         || (dwarf && (teki->mStateID < 4 || teki->mStateID == 13 || teki->mStateID == 14
-            || teki->mStateID >= CHAPPYSTATE_P2PurpleImpact))
+            || teki->mStateID > CHAPPYSTATE_P2PurpleImpact))
         || !pc_p2_purple_impact_claim_direct(source)) return result;
     result.handled = true;
     result.family = dwarf ? PcP2PurpleDirectHit::RedDwarf : PcP2PurpleDirectHit::AdultBulborb;
