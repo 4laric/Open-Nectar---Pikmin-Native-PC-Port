@@ -185,6 +185,9 @@ inline Bank defaultBank() {
 //   end
 // Unknown clip names, out-of-range frames, non-increasing pose frames or a
 // missing `end` fail closed (the caller keeps the built-in bank).
+// Dense pose bank bound (#972): pikmin2_animation.DEFAULT_POSE_LIMIT, the same
+// per-clip cap the other P2 pose banks use. Was 16 (the staged bank was 12).
+constexpr int kMaxPosesPerClip = 24;
 inline bool parseBank(std::istream& in, Bank& bank, Params& params, std::string& error) {
     std::stringstream clean;
     std::string line;
@@ -257,7 +260,7 @@ inline bool parseBank(std::istream& in, Bank& bank, Params& params, std::string&
             c.events.push_back(k);
         }
         int nPoses;
-        if (!(clean >> nPoses) || nPoses < 0 || nPoses > 16) { error = "poses:" + name; return false; }
+        if (!(clean >> nPoses) || nPoses < 0 || nPoses > kMaxPosesPerClip) { error = "poses:" + name; return false; }
         for (int p = 0; p < nPoses; ++p) {
             int f;
             if (!(clean >> f) || f < 0 || f >= frames || (p && f <= c.poses.back())) { error = "pose:" + name; return false; }
@@ -650,11 +653,101 @@ struct BabyInput {
 };
 struct BabyOutput {
     std::vector<int> entered;
-    bool attackKey = false; // StateAttack KEYEVENT_2: attackNavi (+ eatPikmin, deferred)
+    bool attackKey = false; // StateAttack KEYEVENT_2: attackNavi + eatPikmin (host resolves the mouth)
+    bool swallowKey = false; // StateAttack KEYEVENT_3: swallowPikmin (kills what the mouth holds)
     bool kill = false;
     Vec2 velocity;
     float faceDir = 0.0f;
 };
+// Stickable body parts (queen/enemycoll.txt: seven 'st__' spheres on the skeleton,
+// Queen.cpp Obj::flickPikmin switches on the stuck part's id). World-axis centres
+// (forward = +Z, height above the actor origin) evaluated from the bind-pose
+// joints of enemy.bmd with the collision file's joint offsets (local +X is the
+// body axis): nose = head + 30, head, bod1 = neck5 - 25, bod2 = neck3 - 10,
+// bod3 = body1, bod4 = body3, bod5 = body5 - 45 (the offset is along the joint's
+// forward axis, so it lands inside the tail). The wait pose is the bind pose.
+enum Part : int { PartNose = 0, PartHead, PartBod1, PartBod2, PartBod3, PartBod4, PartBod5, PartCount };
+struct PartSphere { float z, y, radius; };
+inline const PartSphere& partSphere(int p) {
+    static const PartSphere spheres[PartCount] = {
+        {237.5f, 90.1f, 10.0f}, {207.5f, 89.6f, 25.0f}, {154.6f, 87.0f, 60.0f}, {88.1f, 87.0f, 80.0f},
+        {0.0f, 87.0f, 90.0f},   {-92.0f, 87.0f, 85.0f}, {-155.7f, 87.0f, 75.0f}};
+    return spheres[p];
+}
+// The P1 host cannot say which part a Pikmin latched on, so the part is the
+// sphere whose surface is nearest the Pikmin (smallest centre distance minus
+// radius; a point inside several spheres takes the deepest). along/lateral/height
+// are relative to the actor origin and facing.
+inline int nearestPart(float along, float lateral, float height) {
+    int best = PartBod3;
+    float bestGap = 1e30f;
+    for (int p = 0; p < PartCount; ++p) {
+        const PartSphere& s = partSphere(p);
+        const float dz = along - s.z, dy = height - s.y;
+        const float gap = std::sqrt(dz * dz + lateral * lateral + dy * dy) - s.radius;
+        if (gap < bestGap) { bestGap = gap; best = p; }
+    }
+    return best;
+}
+// Part a Pikmin latched on, from where it came from. The P1 host latches every
+// Pikmin at the one point at its centre (all Pikmin read along~0, lateral~0 in
+// the evidence), so the position at flick time carries no part information.
+// The bearing of the Pikmin's last approach position (actor frame, taken before
+// it stuck) does: P2 Pikmin attack the body part facing them, so the part is
+// the sphere whose footprint circle the ray from the actor origin along that
+// bearing leaves last (height ignored; Pikmin reach over the sphere height).
+inline int exitPart(float along, float lateral) {
+    const float len = std::sqrt(along * along + lateral * lateral);
+    if (len < 1e-3f) return PartBod3;
+    const float da = along / len; // ray direction (along, lateral)
+    int best = PartBod3;
+    float bestT = -1e30f;
+    for (int p = 0; p < PartCount; ++p) {
+        const PartSphere& s = partSphere(p);
+        const float proj = da * s.z; // d . c, the centre lies on the lateral = 0 axis
+        const float disc = proj * proj - s.z * s.z + s.radius * s.radius;
+        if (disc < 0.0f) continue;
+        const float t = proj + std::sqrt(disc);
+        if (t > bestT) { bestT = t; best = p; }
+    }
+    return best;
+}
+// Queen::flickPikmin branches: nose/head/bod1 -> angle, bod5 -> PI + angle,
+// everything else -> no knockback, no damage, FLICK_BACKWARD_ANGLE.
+enum FlickKind : int { FlickFront = 0, FlickRear, FlickNone };
+inline int flickKind(int part) {
+    if (part == PartNose || part == PartHead || part == PartBod1) return FlickFront;
+    if (part == PartBod5) return FlickRear;
+    return FlickNone;
+}
+inline const char* partName(int p) {
+    static const char* names[PartCount] = {"nose", "head", "bod1", "bod2", "bod3", "bod4", "bod5"};
+    return p >= 0 && p < PartCount ? names[p] : "none";
+}
+// View-frustum cull sphere, centred on the actor origin. The P1 vehicle's root
+// collision sphere (what BTeki::drawDefault culls with) is far smaller than the
+// drawn P2 body, so she was dropped while partly on screen. Radii are the
+// largest distance from the actor origin to any corner of the staged pose-bank
+// bounds (Queen 24-pose bank: 385; Baby: 36), plus a small margin.
+constexpr float kQueenCullRadius = 400.0f;
+constexpr float kBabyCullRadius = 40.0f;
+inline float cullRadius(bool larva) { return larva ? kBabyCullRadius : kQueenCullRadius; }
+// Baby mouth slot (Baby::initMouthSlots: one slot on the "kamu" joint, radius
+// 20). The staged larva rest/attack poses span z = -13.6..16.5, so the joint is
+// approximated at the head tip 15 units ahead of the root along the facing; the
+// joint itself is not evaluated on the P1 vehicle. EnemyFunc::eatPikmin takes a
+// Pikmin whose position is within the slot radius of the slot (3D distance; the
+// staged head sits near the ground, so the slot height is the root height).
+constexpr float kBabyMouthRadius = 20.0f;
+constexpr float kBabyMouthForward = 15.0f;
+inline Vec2 babyMouthPoint(Vec2 pos, float faceDir) {
+    return {pos.x + std::sin(faceDir) * kBabyMouthForward, pos.z + std::cos(faceDir) * kBabyMouthForward};
+}
+inline bool babyMouthReaches(Vec2 pos, float faceDir, Vec2 prey, float dy) {
+    const Vec2 m = babyMouthPoint(pos, faceDir);
+    const float dx = prey.x - m.x, dz = prey.z - m.z;
+    return dx * dx + dz * dz + dy * dy < kBabyMouthRadius * kBabyMouthRadius;
+}
 inline float angDist(float target, float cur) {
     float d = target - cur;
     while (d > kPi) d -= 2.0f * kPi;
@@ -675,6 +768,10 @@ public:
     int state() const { return mState; }
     const Animator& animator() const { return mAnim; }
     float faceDir() const { return mFaceDir; }
+    // StateAttack KEYEVENT_2: getSlotPikiNum() == 0 -> startMotion(AttackFail).
+    // The clip has no key events, so it ends at KEYEVENT_END -> StateMove and
+    // KEYEVENT_3 (swallow) never fires. Host calls this after eating nothing.
+    void attackFailed() { if (mState == BabyAttack) start(BabyAnimAttackFail); }
     // Baby::pressCallBack: any press while past Born (state id > 2).
     bool press(BabyOutput& o) {
         if (mState > BabyBorn) { transit(BabyPress, o); return true; }
@@ -714,6 +811,7 @@ public:
             break;
         case BabyAttack:
             if (mAnim.is(Key2)) o.attackKey = true;
+            else if (mAnim.is(Key3)) o.swallowKey = true;
             else if (mAnim.is(KeyEnd)) transit(dead ? BabyDead : BabyMove, o);
             break;
         case BabyDead:

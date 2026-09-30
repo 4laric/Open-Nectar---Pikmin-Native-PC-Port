@@ -26,6 +26,9 @@ int pc_p2_queen_teki_attack(BTeki*, Creature* owner, float damage);
 bool pc_p2_queen_teki_ignore_atari(BTeki*, Creature* target);
 // Larvae leave no carcass (Baby.cpp onInit disables EB_LeaveCarcass).
 int pc_p2_queen_teki_corpse_type(BTeki*, int fallback);
+// Draw-cull sphere (BTeki::drawDefault): the actor origin and the drawn P2
+// body's radius. False when the actor is not a bound Queen/larva.
+bool pc_p2_queen_teki_cull_bounds(const BTeki*, float* radius);
 // Queen carcass grab radius (the host TPF_CorpseSize is Spotty-sized).
 float pc_p2_queen_teki_corpse_radius(BTeki*, float fallback);
 // Read-only FSM probe for the autoplay bot: state id (Queen.h StateID),

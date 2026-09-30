@@ -40,7 +40,7 @@ struct Piki;
 struct TopAction { int mCurrActionIdx=0; int cleanups=0; void abandon(void*){++cleanups;} };
 struct FSM {void transit(Piki*,int){}};
 struct Piki:Creature {
-    Navi* mNavi=nullptr;
+    Navi* mNavi=nullptr; Vector3f mAttachPosition;
     TopAction action; TopAction* mActiveAction=&action;
     int mMode=0;
     bool alive=true,stickable=true;
@@ -83,4 +83,7 @@ inline NaviMgr* naviMgr=nullptr;
 namespace PikiMode {constexpr int FreeMode=0; constexpr int AttackMode=1; constexpr int FormationMode=2;}
 namespace PikiAction {constexpr int NOACTION=0;}
 constexpr int PIKISTATE_Normal=0;
-constexpr int PIKISTATE_Flying=1;
+constexpr int PIKISTATE_Flying=14; // real PikiState.h ids (the suction policy compares them)
+constexpr int PIKISTATE_Push=20;
+constexpr int PIKISTATE_PushPiki=21;
+constexpr int PIKISTATE_Emotion=31;

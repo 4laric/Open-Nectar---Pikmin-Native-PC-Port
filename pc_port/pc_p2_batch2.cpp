@@ -310,8 +310,14 @@ Bank loadBank(const FamilyDef& family, const std::string& species,
             std::vector<int> frames = clock.poses.frames;
             if (frames.empty()) frames = p2batch2clock::uniformFrames(row.poseCount, clock.poses.duration);
             bank.seam[row.name] = p2poseload::seamOf(loaded.baked, frames);
-            bank.hold[row.name] = p2motion::visibleEnd(
+            const p2motion::HoldPick holdPick = p2motion::holdPick(
                 loaded.baked.size(), [&loaded](size_t i) -> const p2pose::Pose& { return loaded.baked[i].pose; });
+            bank.hold[row.name] = holdPick.index;
+            if (holdPick.adjusted)
+                std::printf("P2_POSE_HOLD_ADJUST species=%s clip=%s legacy=%zu held=%zu first_bad=%zu ratio_high=%.2f "
+                            "ratio_low=%.2f poses=%zu\n",
+                            species.c_str(), row.name.c_str(), holdPick.legacy, holdPick.index, holdPick.firstBad,
+                            double(holdPick.worstHigh), double(holdPick.worstLow), loaded.baked.size());
             bank.baked[row.name] = std::move(loaded.baked);
         }
     }
@@ -575,8 +581,14 @@ static void bindFamilies(bool strict) {
             // as swarms, so repeats are pack members, not a scene mismatch.
             // All other families keep the duplicate-generator abort.
             const std::string famName = family.name;
+            // Dweevils (59-62, 93) are accepted on grub-cohort slots by the root
+            // placement constraints (terrain/footprint only), so a Sheargrub
+            // generator's pack can hold several Chappy hosts under one token;
+            // aborting the scene there crashed seeds that place a Dweevil on
+            // such a slot (wave 3 mechanics probe, seed s3: WaterOtakara on
+            // spring_init_7623). Every member is a Dweevil.
             const bool packTolerant =
-                soft || (bridge && (famName == "uji" || famName == "ground"));
+                soft || (bridge && (famName == "uji" || famName == "ground" || famName == "dweevil"));
             if (p2proxy::tokenAction(packTolerant, !found.insert(generator).second)
                     == p2proxy::TokenAction::Fail) {
                 char msg[256];

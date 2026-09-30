@@ -349,6 +349,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_mamuta_rules.cpp
     pc_port/pc_p2_mamuta_fsm.cpp
     pc_port/pc_p2_tank.cpp
+    pc_port/pc_p2_attack_fx.cpp
+    pc_port/pc_p2_gas_cloud.cpp
     pc_port/pc_p2_hiba.cpp
     pc_port/pc_p2_flora_actor.cpp
     pc_port/pc_p2_receipt_host.cpp
@@ -458,11 +460,13 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_kurage_visual.cpp
     pc_port/pc_p2_kurage_teki.cpp
     pc_port/pc_p2_kurage_own_host.cpp
+    pc_port/pc_p2_kurage_fx.cpp
     pc_port/pc_p2_flyer_coll.cpp
     pc_port/pc_p2_body_coll.cpp
     pc_port/pc_p2_onikurage_mouth.cpp
     pc_port/pc_p2_onikurage_teki.cpp
     pc_port/pc_main.cpp
+    pc_port/pc_fatal_log.cpp
     pc_port/pc_window.cpp
     pc_port/pc_gyro.cpp
     pc_port/pc_pad_axis.cpp
@@ -963,6 +967,21 @@ target_compile_definitions(p2_otakara_press_test PRIVATE
     P2_OTAKARA_PRESS_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
 add_test(NAME p2_otakara_press_test COMMAND p2_otakara_press_test)
 
+# Dweevil family fidelity (owner playtest 2026-09-30): collision parts (legs carry none, the
+# partless ground punch is refused), treasure pickup/carry/drop, the elemental attack window and
+# effect lifecycle, and slope speed / stall side-step. All policy is engine-free; the wiring is
+# checked against the source text.
+foreach(dweevil_test IN ITEMS part item attack stall)
+    string(TOUPPER ${dweevil_test} dweevil_test_upper)
+    add_executable(p2_otakara_${dweevil_test}_test
+        tools/p2_otakara_${dweevil_test}_test.cpp)
+    target_include_directories(p2_otakara_${dweevil_test}_test PRIVATE pc_port)
+    target_compile_options(p2_otakara_${dweevil_test}_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+    target_compile_definitions(p2_otakara_${dweevil_test}_test PRIVATE
+        P2_OTAKARA_${dweevil_test_upper}_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME p2_otakara_${dweevil_test}_test COMMAND p2_otakara_${dweevil_test}_test)
+endforeach()
+
 # wf7 dweevil-impl (#871): dead-Dweevil clip choice is engine-free and covers
 # all four species 59-62 (dead forces dead, never attack1).
 add_executable(p2_dweevil_death_clip_test
@@ -1323,6 +1342,16 @@ add_executable(p2_hana_events_test
 target_include_directories(p2_hana_events_test PRIVATE pc_port)
 target_compile_options(p2_hana_events_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_hana_events_test COMMAND p2_hana_events_test)
+add_executable(p2_hana_residual_policy_test
+    tools/p2_hana_residual_policy_test.cpp)
+target_include_directories(p2_hana_residual_policy_test PRIVATE pc_port)
+target_compile_options(p2_hana_residual_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_hana_residual_policy_test COMMAND p2_hana_residual_policy_test)
+add_executable(p2_hana_sleep_policy_test
+    tools/p2_hana_sleep_policy_test.cpp)
+target_include_directories(p2_hana_sleep_policy_test PRIVATE pc_port)
+target_compile_options(p2_hana_sleep_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_hana_sleep_policy_test COMMAND p2_hana_sleep_policy_test)
 
 add_executable(p2_catfish_events_test
     tools/test_p2_catfish_events.cpp)
@@ -1363,6 +1392,13 @@ add_executable(p2_queen_own_test
 target_include_directories(p2_queen_own_test PRIVATE pc_port)
 target_compile_options(p2_queen_own_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_queen_own_test COMMAND p2_queen_own_test)
+
+# Dense Queen/larva pose bank + shared blend (#972): engine-free.
+add_executable(p2_queen_pose_test
+    pc_port/pc_p2_queen_pose_test.cpp)
+target_include_directories(p2_queen_pose_test PRIVATE pc_port)
+target_compile_options(p2_queen_pose_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_queen_pose_test COMMAND p2_queen_pose_test)
 
 add_executable(p2_campaign_policy_test
     pc_port/pc_p2_campaign_policy_test.cpp)
@@ -1420,6 +1456,25 @@ add_executable(p2_tank_stream_test tools/p2_tank_stream_test.cpp)
 target_include_directories(p2_tank_stream_test PRIVATE pc_port)
 target_compile_options(p2_tank_stream_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_tank_stream_test COMMAND p2_tank_stream_test)
+# Shared P2 attack-effect layouts/lifecycle and the Titan Dweevil weapon visuals
+# (engine-free). Laser selection finding for the owner playtest 2026-09-30.
+add_executable(p2_attack_fx_test tools/p2_attack_fx_test.cpp)
+target_include_directories(p2_attack_fx_test PRIVATE pc_port)
+target_compile_options(p2_attack_fx_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_attack_fx_test COMMAND p2_attack_fx_test)
+add_executable(p2_gas_cloud_test tools/p2_gas_cloud_test.cpp)
+target_include_directories(p2_gas_cloud_test PRIVATE pc_port)
+target_compile_options(p2_gas_cloud_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_gas_cloud_test COMMAND p2_gas_cloud_test)
+add_executable(p2_bigtreasure_fx_test
+    tools/p2_bigtreasure_fx_test.cpp
+    pc_port/pc_p2_bigtreasure.cpp
+    pc_port/pc_p2_bigtreasure_attacks.cpp
+    pc_port/pc_p2_bigtreasure_elements.cpp)
+target_include_directories(p2_bigtreasure_fx_test PRIVATE pc_port)
+target_compile_options(p2_bigtreasure_fx_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_bigtreasure_fx_test COMMAND p2_bigtreasure_fx_test)
+
 
 # Kabuto identity policy (inst2-frogs #871).
 add_executable(p2_kabuto_fsm_policy_test tools/p2_kabuto_fsm_policy_test.cpp)
@@ -1544,6 +1599,11 @@ add_executable(p2_kurage_receiver_test tools/test_p2_kurage_receiver.cpp)
 target_include_directories(p2_kurage_receiver_test PRIVATE pc_port tools/kurage_receiver_stubs)
 target_compile_options(p2_kurage_receiver_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_kurage_receiver_test COMMAND p2_kurage_receiver_test)
+
+add_executable(p2_kurage_suction_test tools/test_p2_kurage_suction.cpp)
+target_include_directories(p2_kurage_suction_test PRIVATE pc_port)
+target_compile_options(p2_kurage_suction_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_kurage_suction_test COMMAND p2_kurage_suction_test)
 
 # Lane 12 captain/Kurage real-GL diagnostic (codex/p2-lane12-review
 # tools/p2_captain_kurage_runtime.cpp, adapted to the line epoch API).
@@ -1969,6 +2029,10 @@ add_executable(p2_chappy_fsm_test tools/p2_chappy_fsm_test.cpp)
 target_include_directories(p2_chappy_fsm_test PRIVATE pc_port)
 target_compile_options(p2_chappy_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_chappy_fsm_test COMMAND p2_chappy_fsm_test)
+add_executable(p2_chappy_adult_test tools/p2_chappy_adult_test.cpp)
+target_include_directories(p2_chappy_adult_test PRIVATE pc_port)
+target_compile_options(p2_chappy_adult_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_chappy_adult_test COMMAND p2_chappy_adult_test)
 # p2-884-chappy (#884): engine-free source mouth-slot eating (EnemyFunc::eatPikmin
 # geometry, capacity, eligibility, host-part mapping, King sweep, legacy oracle).
 add_executable(p2_mouth_snapshot_test tools/p2_mouth_snapshot_test.cpp)
@@ -2260,3 +2324,11 @@ add_test(NAME p2_campaign_goal_lifecycle_test COMMAND p2_campaign_goal_lifecycle
 add_library(p2_campaign_goal_lifecycle_runtime_compile OBJECT tools/p2_campaign_goal_lifecycle_runtime.cpp)
 target_include_directories(p2_campaign_goal_lifecycle_runtime_compile PRIVATE pc_port ${SDL2_INCLUDE_DIRS})
 target_compile_options(p2_campaign_goal_lifecycle_runtime_compile PRIVATE ${NATIVE_COMPILE_OPTIONS} -Wno-unused-parameter)
+
+# Demon living-body fade advance regression (#972): engine-free.
+add_executable(p2_demon_fade_test
+    pc_port/pc_p2_demon_fade_test.cpp)
+target_include_directories(p2_demon_fade_test PRIVATE pc_port)
+target_compile_options(p2_demon_fade_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+target_compile_definitions(p2_demon_fade_test PRIVATE DEMON_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/pc_port/pc_p2_sarai_demon.cpp")
+add_test(NAME p2_demon_fade_test COMMAND p2_demon_fade_test)

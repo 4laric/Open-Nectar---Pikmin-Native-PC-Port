@@ -47,6 +47,7 @@ __declspec(dllexport) int           AmdPowerXpressRequestHighPerformance = 1;
 
 #include "pc_window.h"
 #include "pc_bbft.h"
+#include "pc_fatal_log.h"
 #include "pc_gpu_preference.h"
 #include "pc_dev_console.h"
 #include "gl/pc_gfx.h"
@@ -91,6 +92,9 @@ int main(int argc, char* argv[])
 {
     // Disable stdout buffering so we see logs immediately before any crash
     setvbuf(stdout, NULL, _IONBF, 0);
+    // Every death the process can observe leaves a reason in native.log (and an
+    // orderly exit leaves its own marker); see pc_fatal_log.h.
+    pc_fatal_log_install();
 
 #ifdef __ANDROID__
     // Logcat, carpeta del juego y ruta de guardado: antes de que nada abra un
