@@ -1,4 +1,7 @@
-// #940 isolated campaign combat fixture; adult_direct is the only implemented mode.
+// #940 isolated campaign combat fixture: adult_direct and dwarf_quake.
+// Quake acceptance additionally requires matching accepted production QUAKE/
+// IMPACT tokens and no DIRECT event for the tested source/target. Death during
+// stun and direct dwarf crush remain pending; exit zero supplies evidence only.
 // Acceptance additionally requires a production P2_PURPLE_DIRECT stage=hipdrop
 // marker for the printed target/source pointers, family=adult_bulborb and
 // damage_applied=1 and queued_after-queued_before=50, together with the
@@ -32,6 +35,9 @@
 #include "pc_p2_purple_flight.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_chappy.h"
+#include "pc_p2_kochappy.h"
+#include "pc_p2_kochappy_stun.h"
+#include "pc_p2_purple_impact.h"
 #include "pc_window.h"
 #include "pc_gpu_preference.h"
 #include "pc_bbft.h"
@@ -43,6 +49,7 @@
 #include <cstring>
 #include <cerrno>
 #include <climits>
+#include <chrono>
 
 static void p2_fixture_require_captain(bool dead, bool deadState, float hp, int tick) {
     if (!dead && !deadState && std::isfinite(hp) && hp > 1.0f) return;
@@ -63,6 +70,21 @@ class PurpleCombatApp : public PlugPikiApp {
     float initialHealth=0, maxQueued=0, regeneration=0;
     int regenerationFrames=0;
     Vector3f parkPosition;
+    bool dwarfMode() const {
+        const char* mode=std::getenv("P2_PURPLE_COMBAT_MODE");
+        return mode && std::strcmp(mode,"dwarf_quake")==0;
+    }
+    BTeki* dwarf=nullptr;
+    unsigned dwarfUid=0;
+    unsigned long long dwarfLifetime=0;
+    float dwarfHealth=0, retainedFit=0, lastFit=0;
+    int quakeAttempts=0, quakeTick=0, quakeLastPhase=0;
+    bool quakeFlying=false, quakeStaged=false, quakeAccepted=false;
+    bool quakeBounce=false, quakeAirborne=false, quakeRecovery=false;
+    bool quakeFit=false, quakeRepeat=false, quakeRetained=false;
+    bool quakePositionChecked=false;
+    std::chrono::steady_clock::time_point acquisitionTime;
+
     Piki* naturalStep(Navi* n) {
         ++phaseTicks;
         Pom* violet = nullptr; int count = 0;
@@ -292,6 +314,155 @@ class PurpleCombatApp : public PlugPikiApp {
             std::fflush(nullptr); std::_Exit(0);
         }
     }
+
+    bool dwarfPresent() const {
+        Iterator enemies(tekiMgr);
+        CI_LOOP(enemies) {
+            BTeki* actor=static_cast<BTeki*>(*enemies);
+            if(actor==dwarf && pc_p2_campaign_source(actor)==1
+                && pc_randomizer_generator_id(actor->mGenerator)==dwarfUid) return true;
+        }
+        return false;
+    }
+    void quakeStep(Navi* n) {
+        ++quakeTick;
+        require(acquired->isAlive() && pc_p2_is_purple(acquired),"quake acquired Purple lost");
+        if (!dwarf) {
+            require(pc_p2_purple_impact_enabled() && pc_p2_purple_flight_enabled(),"quake/flight profiles disabled");
+            unsigned wanted=0;
+            if (const char* text=std::getenv("P2_PURPLE_COMBAT_UID")) {
+                char* end=nullptr; errno=0; const unsigned long value=std::strtoul(text,&end,10);
+                require(*text && *text!='-' && end && !*end && !errno && value>0 && value<=UINT_MAX,"invalid decimal dwarf UID");
+                wanted=static_cast<unsigned>(value);
+            }
+            Iterator enemies(tekiMgr);
+            CI_LOOP(enemies) {
+                BTeki* actor=static_cast<BTeki*>(*enemies);
+                if (!actor || !actor->isAlive() || pc_p2_campaign_source(actor)!=1 || !pc_p2_kochappy_registered(actor)) continue;
+                const unsigned uid=pc_randomizer_generator_id(actor->mGenerator);
+                if (wanted && wanted!=uid) continue;
+                if (!dwarf || uid<dwarfUid) { dwarf=actor; dwarfUid=uid; }
+            }
+            if (!dwarf) {
+                if(quakeTick%120==0) std::printf("P2_PURPLE_QUAKE_FIXTURE_WAIT requested_uid=%u source=1 reason=no_registered_loaded_actor\n",wanted);
+                return;
+            }
+            const auto sample=pc_p2_kochappy_stun_sample(dwarf);
+            require(sample.registered && sample.phase==0,"dwarf initially stunned/unregistered");
+            dwarfLifetime=sample.lifetime; dwarfHealth=dwarf->mHealth;
+            require(std::isfinite(dwarfHealth) && dwarfHealth>0 && std::fabs(dwarfHealth-dwarf->getMaxLife())<0.01f
+                && dwarf->mStoredDamage==0.f,"quake requires undamaged full-health dwarf");
+            parkPosition=n->mSRT.t;
+            Iterator squad(pikiMgr);
+            CI_LOOP(squad) {
+                Piki* p=static_cast<Piki*>(*squad);
+                if(p && p!=acquired && p->isAlive()) {
+                    require(!p->isStickTo(),"quake other squad member attached");
+                    p->changeMode(PikiMode::FreeMode,n); p->resetPosition(parkPosition);
+                }
+            }
+            std::printf("P2_PURPLE_QUAKE_FIXTURE_TARGET uid=%u source=1 target=%p piki=%p lifetime=%llu health=%.3f generated_actor=1 other_squad_parked=1\n",
+                dwarfUid,static_cast<void*>(dwarf),static_cast<void*>(acquired),dwarfLifetime,dwarfHealth);
+        }
+        require(dwarfPresent() && dwarf->isAlive() && !dwarf->mDeadState,"quake target disappeared/died");
+        const auto stun=pc_p2_kochappy_stun_sample(dwarf);
+        require(stun.registered && stun.lifetime==dwarfLifetime,"quake target registration/lifetime changed");
+        require(std::isfinite(dwarf->mHealth) && std::fabs(dwarf->mHealth-dwarfHealth)<0.01f
+            && dwarf->mStoredDamage==0.f,"quake changed health/queued damage (direct hit or ordinary attack contaminates test)");
+        require(std::isfinite(stun.fitElapsed) && std::isfinite(stun.fitDuration) && std::fabs(stun.fitDuration-10.f)<0.01f,
+            "quake invalid Red Fit duration/timer");
+        const bool eligible=dwarf->mGroundTriangle && !dwarf->isFlying()
+            && !dwarf->getTekiOption(BTeki::TEKI_OPTION_INVINCIBLE)
+            && dwarf->mStateID>=4 && dwarf->mStateID!=13 && dwarf->mStateID!=14 && dwarf->mStateID<=16;
+        const auto flight=pc_p2_purple_flight_sample(acquired);
+        if(quakeTick%60==0 || stun.phase!=quakeLastPhase) {
+            std::printf("P2_PURPLE_QUAKE_FIXTURE_PROGRESS uid=%u source=1 attempt=%d tick=%d state=%d phase=%d previous_phase=%d fit=%.6f duration=%.3f bounce_updates=%u grounded=%d vy=%.3f eligible=%d flight=%d source_state=%d health=%.3f queued=%.3f repeated=%d retained=%d\n",
+                dwarfUid,quakeAttempts,quakeTick,dwarf->mStateID,stun.phase,quakeLastPhase,stun.fitElapsed,stun.fitDuration,
+                stun.bounceUpdates,int(dwarf->mGroundTriangle!=nullptr),dwarf->mVelocity.y,int(eligible),int(flight.phase),acquired->getState(),
+                dwarf->mHealth,dwarf->mStoredDamage,int(quakeRepeat),int(quakeRetained));
+        }
+        if(quakeRepeat && quakeFlying && !quakeAccepted && stun.phase==2)
+            retainedFit=stun.fitElapsed; // Last observed live timer before repeat contact.
+        if(quakeFlying && stun.phase==1) {
+            if(!quakeAccepted) {
+                require(quakeStaged,"quake accepted before disclosed ground-only descent setup");
+                quakeAccepted=true;
+                if(quakeRepeat) {
+                    const float dt=NSystem::getFrameTime();
+                    require(std::isfinite(dt) && dt>0.f && dt<=0.5f && retainedFit>0.f
+                        && stun.fitElapsed>=retainedFit && stun.fitElapsed<=retainedFit+dt+0.01f,
+                        "repeat quake did not preserve observed positive Fit timer");
+                }
+                std::printf("P2_PURPLE_QUAKE_FIXTURE_BOUNCE uid=%u source=1 attempt=%d retained_before=%.6f retained_now=%.6f external_accepted_quake_required=1\n",
+                    dwarfUid,quakeAttempts,retainedFit,stun.fitElapsed);
+            }
+            if(dwarf->mVelocity.y>0.f) quakeBounce=true;
+            if(!dwarf->mGroundTriangle) quakeAirborne=true;
+        }
+        if(stun.phase==2 && quakeAccepted) {
+            require(quakeBounce && quakeAirborne,"Fit without observed physical bounce/airborne interval");
+            quakeFit=true; lastFit=stun.fitElapsed;
+            if(quakeRepeat) {
+                require(stun.fitElapsed>=retainedFit,"repeat return to Fit lost retained elapsed time");
+                quakeRetained=true;
+            }
+        }
+        if(quakeRetained && quakeLastPhase==2 && stun.phase==0) {
+            const float dt=NSystem::getFrameTime();
+            require(std::isfinite(dt) && dt>0 && dt<=0.5f && lastFit+dt>stun.fitDuration-0.01f
+                && dwarf->mStateID!=16,"Fit interrupted before native timed recovery");
+            require(quakeRecovery && quakePositionChecked,"missing natural source ground recovery/landing geometry");
+            std::printf("P2_PURPLE_QUAKE_LIFECYCLE_EVIDENCE uid=%u source=1 target=%p piki=%p attempts=%d health_before=%.3f health_after=%.3f queued=%.3f bounce=1 airborne=1 natural_fit=1 repeated_quake=1 retained_fit=%.6f timed_recovery=1 injected_damage=0 forced_enemy_state=0 forced_rng=0 external_accepted_tokens_required=1 matching_direct_marker_forbidden=1 death_during_stun_pending=1 dwarf_crush_pending=1\n",
+                dwarfUid,static_cast<void*>(dwarf),static_cast<void*>(acquired),quakeAttempts,dwarfHealth,dwarf->mHealth,dwarf->mStoredDamage,retainedFit);
+            std::fflush(nullptr); std::_Exit(0);
+        }
+        if(quakeFlying && !quakeStaged && flight.phase==PcP2PurpleFlightPhase::Descent) {
+            const float radius=dwarf->mCollisionRadius;
+            require(std::isfinite(radius) && radius>=0.f,"invalid dwarf collision radius");
+            const float x=dwarf->mSRT.t.x+radius+40.f, z=dwarf->mSRT.t.z;
+            const float y=mapMgr->getMinY(x,z,true);
+            require(std::isfinite(y),"nonfinite quake landing terrain");
+            acquired->resetPosition(Vector3f(x,y+35.f,z));
+            acquired->mVelocity=Vector3f(0,-100,0); acquired->mTargetVelocity=acquired->mVelocity;
+            quakeStaged=true;
+            std::printf("P2_PURPLE_QUAKE_DESCENT_SETUP uid=%u source=1 attempt=%d offset=%.3f terrain_y=%.3f source_position_staged=1 source_velocity_staged=1 enemy_modified=0 flight_phase_injected=0 collision_injected=0\n",
+                dwarfUid,quakeAttempts,radius+40.f,y);
+        }
+        if(quakeFlying && flight.phase==PcP2PurpleFlightPhase::Recovery && !quakePositionChecked) {
+            const float dx=acquired->mSRT.t.x-dwarf->mSRT.t.x, dz=acquired->mSRT.t.z-dwarf->mSRT.t.z;
+            const float distance=std::sqrt(dx*dx+dz*dz), radius=dwarf->mCollisionRadius;
+            std::printf("P2_PURPLE_QUAKE_LANDING uid=%u source=1 attempt=%d distance_xz=%.3f target_radius=%.3f wave_radius=%.3f source_recovery=1\n",dwarfUid,quakeAttempts,distance,radius,radius+60.f);
+            require(std::isfinite(distance) && distance>radius+10.f && distance<=radius+60.f,"quake landing outside disclosed wave-only annulus");
+            quakePositionChecked=true; quakeRecovery=true;
+        }
+        const bool sourceReady=acquired->getState()==PIKISTATE_Normal && !pc_p2_purple_flight_active(acquired) && !acquired->isStickTo();
+        if(quakeFlying && sourceReady) {
+            require(quakeRecovery && quakePositionChecked,"throw ended without observed ground recovery (possible direct collision)");
+            acquired->changeMode(PikiMode::FreeMode,n); acquired->resetPosition(parkPosition); n->resetPosition(parkPosition);
+            quakeFlying=false;
+        }
+        // Retry a naturally rejected/no-Fit branch only after source recovery.
+        // During Fit, one further throw verifies retained time, then wait out
+        // the native timer without another attack or target manipulation.
+        const bool wantRepeat=quakeFit && !quakeRepeat && stun.phase==2 && stun.fitElapsed>=1.f;
+        const bool wantNew=!quakeFit && stun.phase==0;
+        if(!quakeFlying && sourceReady && eligible && (wantRepeat || wantNew)) {
+            require(quakeAttempts<24,"natural Fit/repeat branch unachieved after 24 completed throws");
+            if(wantRepeat) { quakeRepeat=true; retainedFit=stun.fitElapsed; }
+            const float radius=dwarf->mCollisionRadius;
+            require(std::isfinite(radius) && radius>=0.f,"invalid prethrow dwarf radius");
+            const float x=dwarf->mSRT.t.x+radius+140.f, z=dwarf->mSRT.t.z;
+            n->resetPosition(Vector3f(x,mapMgr->getMinY(x,z,true),z));
+            acquired->changeMode(PikiMode::FreeMode,n); acquired->mFSM->transit(acquired,PIKISTATE_Flying);
+            n->throwPiki(acquired,Vector3f(dwarf->mSRT.t.x+radius+40.f,dwarf->mSRT.t.y,z));
+            require(pc_p2_purple_flight_active(acquired),"quake native throw not armed");
+            ++quakeAttempts; quakeFlying=true; quakeStaged=false; quakeAccepted=false;
+            quakeBounce=false; quakeAirborne=false; quakeRecovery=false; quakePositionChecked=false;
+            std::printf("P2_PURPLE_QUAKE_FIXTURE_THROW uid=%u source=1 target=%p piki=%p attempt=%d repeat_during_fit=%d fit_before=%.6f native_throw=1 captain_position_staged=1 controls_validated=0\n",
+                dwarfUid,static_cast<void*>(dwarf),static_cast<void*>(acquired),quakeAttempts,int(quakeRepeat),retainedFit);
+        }
+        quakeLastPhase=stun.phase;
+    }
 public:
     int idle() override {
         const int result=PlugPikiApp::idle();
@@ -301,24 +472,32 @@ public:
             p2_fixture_require_captain(GameStat::orimaDead,n->getCurrState()&&n->getCurrState()->getID()==NAVISTATE_Dead,n->mHealth,ticks);
         } else require(!captainSeen,"captain disappeared");
         if (++ticks%120==0) diagnostics(n);
-        require(ticks<6000,"global startup/acquisition/combat timeout");
+        if(dwarfMode() && acquired) {
+            const double seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-acquisitionTime).count();
+            if(seconds>=240.0) std::printf("P2_PURPLE_QUAKE_TIMEOUT seconds=%.3f attempts=%d fit=%d repeat=%d retained=%d phase=%d\n",
+                seconds,quakeAttempts,int(quakeFit),int(quakeRepeat),int(quakeRetained),quakeLastPhase);
+            require(seconds<240.0,"quake natural branch/recovery unachieved within 240 seconds after acquisition");
+        } else require(ticks<6000,"global startup/acquisition/combat timeout");
         if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive) { gameflow.mMoviePlayer->requestSkip(); return result; }
         if(!n||!pikiMgr||!itemMgr||!bossMgr||!tekiMgr||!mapMgr||!n->getCurrState()
             ||gameflow.mPauseAll||gameflow.mIsUIOverlayActive) return result;
         if (!acquired) {
             const int state=n->getCurrState()->getID();
-            if(state==NAVISTATE_Walk||state==NAVISTATE_Idle) acquired=naturalStep(n);
+            if(state==NAVISTATE_Walk||state==NAVISTATE_Idle) {
+                acquired=naturalStep(n);
+                if(acquired) acquisitionTime=std::chrono::steady_clock::now();
+            }
             return result;
         }
-        combatStep(n); return result;
+        if(dwarfMode()) quakeStep(n); else combatStep(n); return result;
     }
 };
 int main(int argc,char** argv) {
     if(std::getenv("P2_FIXTURE_FORCE_CAPTAIN_DOWN")) p2_fixture_require_captain(false,false,0,0);
     setvbuf(stdout,nullptr,_IONBF,0);
     const char* mode=std::getenv("P2_PURPLE_COMBAT_MODE");
-    if(mode && std::strcmp(mode,"adult_direct")) {
-        std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=adult_direct dwarf_quake_pending=1 dwarf_crush_pending=1\n",mode); return 2;
+    if(mode && std::strcmp(mode,"adult_direct") && std::strcmp(mode,"dwarf_quake")) {
+        std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=adult_direct,dwarf_quake death_during_stun_pending=1 dwarf_crush_pending=1\n",mode); return 2;
     }
     SDL_SetMainReady(); pc_gpu_preference_apply(); pc_bbft_init(argc,argv);
     require(pc_randomizer_purple_campaign() && pc_randomizer_p2_bridge(),"ordinary Purple seed campaign required");
@@ -330,7 +509,7 @@ int main(int argc,char** argv) {
     SDL_GetWindowSize(window,&w,&h); SDL_GetWindowPosition(window,&x,&y);
     require(w==960&&h==540,"window dimensions");
     std::printf("P2_FIXTURE_WINDOW width=%d height=%d x=%d y=%d\n",w,h,x,y);
-    std::puts("P2_PURPLE_COMBAT_SCOPE mode=adult_direct natural_acquisition=1 player_controls_validated=0 production_collision_marker_required=1");
+    std::printf("P2_PURPLE_COMBAT_SCOPE mode=%s natural_acquisition=1 player_controls_validated=0 production_collision_marker_required=1\n",mode?mode:"adult_direct");
     gsys->Initialise(); pc_settings_p2d_init(); nodeMgr=new NodeMgr();
     gsys->run(new PurpleCombatApp()); return 0;
 }
