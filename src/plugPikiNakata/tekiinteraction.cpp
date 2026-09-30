@@ -46,6 +46,9 @@ bool InteractAttack::actTeki(Teki* teki) immut
 {
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
 	if (pc_p2_hana_rejects_attack(teki)) return true;
+	// Dweevil family (59-62): OtakaraBase::damageCallBack damages only through a collision part
+	// (OtakaraBase.cpp:190-197); the partless ground punch is refused. -1 = not a registered Dweevil.
+	if (pc_p2_otakara_attack_part(teki, mOwner, mCollPart, mDamage) == 0) return false;
 	// #898: PanModoki::damageCallBack applies damage only while bittered.
 	if (pc_p2_breadbug_teki_attack(teki, mOwner, mDamage)) return false;
 	if (pc_p2_elecbug_attacked(teki)) return true;

@@ -4364,6 +4364,8 @@ static bool proxyShotActive() {
     return sProxyShotEnabled;
 }
 
+static unsigned sFrameDumpBurst = 0;
+void pc_gfx_frame_dump_burst(unsigned frames) { sFrameDumpBurst = frames; }
 void pc_gfx_proxy_shot_notify_after(const char* key, int frames) {
     if (!proxyShotActive()) return;
     if (!key || *key == '\0') return;
@@ -4533,7 +4535,15 @@ void pc_gfx_present(void) {
             return v > 0 ? unsigned(v) : ~0u;
         }();
         ++dumpFrame;
-        if (dumpFrame % dumpEvery == 0 && dumpFrame >= dumpFrom && dumpFrame <= dumpTo && sRenderWidth > 0
+        // pc_gfx_frame_dump_burst(): a gameplay marker asks for the next frames (test-only,
+        // effective only while PIKMIN_FRAME_DUMP is set), so an attack effect can be captured
+        // without dumping every frame of the session.
+        bool burstDump = false;
+        if (sFrameDumpBurst > 0) {
+            --sFrameDumpBurst;
+            burstDump = (sFrameDumpBurst % 3u) == 0u;
+        }
+        if ((burstDump || (dumpFrame % dumpEvery == 0 && dumpFrame >= dumpFrom && dumpFrame <= dumpTo)) && sRenderWidth > 0
                 && sRenderHeight > 0) {
             std::vector<unsigned char> rgba(size_t(sRenderWidth) * sRenderHeight * 4);
             glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, sourceFramebuffer);
