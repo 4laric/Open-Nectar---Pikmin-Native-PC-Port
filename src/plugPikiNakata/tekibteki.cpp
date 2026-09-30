@@ -9,6 +9,7 @@
 #include "pc_p2_mar.h"
 #include "pc_p2_tadpole.h"
 #include "pc_p2_hana.h"
+#include "pc_p2_body_coll.h"
 #include "pc_p2_kurage_teki.h"
 #include "pc_p2_groink_teki.h"
 #include "pc_p2_breadbug_teki.h"
@@ -566,6 +567,8 @@ void BTeki::update()
 	pc_p2_kochappy_fsm_update(this);
 	pc_p2_mamuta_fsm_update(this);
 	pc_p2_chappy_update(this);
+	// Shared P2 body collision: fitted spheres on the drawn mesh (after every species tick).
+	pc_p2_body_coll_update(this);
 #endif
 	if (mDeadState == 0) {
 		updateTimers();

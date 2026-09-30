@@ -4366,6 +4366,17 @@ static bool proxyShotActive() {
 
 static unsigned sFrameDumpBurst = 0;
 void pc_gfx_frame_dump_burst(unsigned frames) { sFrameDumpBurst = frames; }
+void pc_gfx_proxy_shot_notify_after(const char* key, int frames) {
+    if (!proxyShotActive()) return;
+    if (!key || *key == '\0') return;
+    const std::string k(key);
+    if (sProxyShotDone.count(k) != 0) return;
+    sProxyShotDone.insert(k);
+    ProxyShotPending pending;
+    pending.key = k;
+    pending.frame = sProxyShotFrame + uint64_t(frames > 1 ? frames : 1);
+    sProxyShotPending.push_back(pending);
+}
 
 void pc_gfx_proxy_shot_notify(const char* key) {
     if (!proxyShotActive()) return;

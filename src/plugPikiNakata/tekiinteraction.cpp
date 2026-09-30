@@ -13,6 +13,7 @@
 #include "pc_p2_snakejoint.h"
 #include "pc_p2_otakara.h"
 #include "pc_p2_chappy.h"
+#include "pc_p2_groink_teki.h"
 #include "pc_p2_breadbug_teki.h"
 #endif
 
@@ -79,6 +80,12 @@ bool InteractAttack::actTeki(Teki* teki) immut
 	// #884: registered Emperor Bulblax, source KingChappy::damageCallBack
 	// (kingChappy.cpp:824-848). A refused hit takes no damage and adds no
 	// flick; a partless hit low under the chin is scaled by 0.2.
+	// #892: registered Gatling Groink: a Pikmin hurts it only through the stickable `body` it is
+	// latched to; the face cover and unlatched ground hits are refused (P2 has no such hit).
+	const f32 groinkRate = pc_p2_groink_teki_damage_rate(teki, mOwner, mCollPart);
+	if (groinkRate == 0.0f) {
+		return false;
+	}
 	const f32 kingRate = pc_p2_chappy_king_damage_rate(teki, mOwner, mCollPart);
 	if (kingRate == 0.0f) {
 		return false;
