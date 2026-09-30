@@ -232,6 +232,9 @@ class PurpleCombatApp : public PlugPikiApp {
                 }
             }
             initialHealth=target->mHealth;
+            std::printf("P2_PURPLE_COMBAT_BASELINE uid=%u target=%p view=%p health=%.3f native_max=%.3f family_max=%.3f regen_rate=%.6f\n",
+                targetUid,static_cast<void*>(target),static_cast<void*>(static_cast<PelletView*>(target)),
+                initialHealth,target->getMaxLife(),pc_p2_chappy_max_health(target,-1.f),target->getParameterF(TPF_LifeRecoverRate));
             require(std::isfinite(target->getMaxLife()) && std::fabs(initialHealth-target->getMaxLife())<0.01f,
                 "adult must start at native maximum health for regeneration accounting");
             std::printf("P2_PURPLE_COMBAT_TARGET uid=%u source=2 target=%p piki=%p health_before=%.3f queued_before=%.3f generated_actor=1 adapter_registered=1 other_squad_parked=1\n",
