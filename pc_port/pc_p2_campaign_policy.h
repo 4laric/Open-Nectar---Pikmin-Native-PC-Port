@@ -39,6 +39,9 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     case 14: return 20; // TEKI_KabekuiC: Tobi Shearwig host
     case 54: return 24; // TEKI_Miurin: Mamuta
     case 57: case 78: return 0; // TEKI_Frog: Jellyfloat/Groink sidecar hosts
+    // #244 OWN: Careening Dirigibug rides the P1 flying vehicle TEKI_Napkid
+    // (11); pc_p2_bombsarai_own_setup binds only this host type.
+    case 58: return 11; // TEKI_Napkid: BombSarai OWN campaign host
     case 17: return 0; // TEKI_Frog: Yellow Wollywog (inst-frogs #871)
     case 18: return 33; // TEKI_Frow: Wollywog (inst-frogs #871)
     case 24: return 15; // TEKI_Tank: Fiery Blowhog (inst2-frogs #871)
@@ -60,8 +63,15 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     case 27: return 25; // TEKI_Otama: Tadpole (Wogpole) aquatic host
     case 84: return 3; // TEKI_Chappy: Hana (Creeping Chrysanthemum)
     case 93: return 3; // TEKI_Chappy: BombOtakara (Volatile Dweevil)
+    // #245 OWN: Antenna Beetle (Fuefuki) rides a suppressed Chappy ground
+    // vehicle with a LeaveCorpse carcass (pc_p2_fuefuki_teki_setup asserts
+    // TEKI_Chappy); never the Napkid flyer the proxy tier used.
+    case 41: return 3; // TEKI_Chappy: Fuefuki
     case 66: return 4; // TEKI_Swallow: Houdai (Man-at-Legs) proxy vehicle
     case 97: return 0; // TEKI_Frog: FminiHoudai (Gatling Groink pedestal) proxy vehicle
+    // #898: Breadbug (PanModoki 38) rides the P1 Breadbug host TEKI_Collec (8)
+    // as a placement vehicle only; pc_p2_breadbug_teki runs the source FSM.
+    case 38: return 8; // TEKI_Collec: Breadbug OWN vehicle
     // #246 OWN: BigTreasure (Titan Dweevil) rides the TEKI_Swallow placement
     // vehicle driven by pc_p2_bigtreasure_teki (source-order core).
     case 73: return 4; // TEKI_Swallow: BigTreasure campaign actor

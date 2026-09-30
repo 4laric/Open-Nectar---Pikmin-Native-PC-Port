@@ -5,6 +5,7 @@
 #include "pc_p2_onikurage_teki.h"
 #include "pc_p2_bombsarai_teki.h"
 #include "pc_p2_groink_teki.h"
+#include "pc_p2_breadbug_teki.h"
 #include "pc_p2_bigtreasure_teki.h"
 #include "pc_p2_king_teki.h"
 #include "pc_p2_queen_teki.h"
@@ -1984,6 +1985,7 @@ void GameCoreSection::finalSetup()
 	pc_p2_onikurage_teki_setup();
 	pc_p2_bombsarai_teki_setup();
 	pc_p2_groink_teki_setup();
+	pc_p2_breadbug_teki_setup();
 	pc_p2_bigtreasure_teki_setup();
 	pc_p2_king_teki_setup();
 	pc_p2_queen_teki_setup();
@@ -2453,6 +2455,7 @@ void GameCoreSection::update()
 	pc_p2_hardlanes_update();
 	pc_p2_projectiles_update();
 	pc_p2_kabuto_fsm_update_stones();
+	pc_p2_bombsarai_teki_update_bombs();
 	pc_p2_long_legs_update_all();
 
 	if (GameStat::allPikis == 0 && GameStat::maxPikis > 0) {
@@ -4292,6 +4295,7 @@ void GameCoreSection::draw(Graphics& gfx)
 	pc_p2_king_draw(gfx);
 	pc_p2_tank_draw_water(gfx);
 	pc_p2_kabuto_fsm_draw_stones(gfx);
+	pc_p2_bombsarai_teki_draw_bombs(gfx);
 	pc_p2_dangomushi_draw_rain(gfx);
 }
 
