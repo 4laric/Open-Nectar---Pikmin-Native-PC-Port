@@ -701,12 +701,16 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
 }
 } // namespace
 
+namespace { bool sLoaded[kVariantCount] = {false, false}; bool sCensusDone = false; } // staged parms/bank loaded for this scene
+
 void pc_p2_breadbug_teki_reset() {
     s.clear();
     sDrawLogged.clear();
     for (auto& variant : sPoses)
         for (auto& poses : variant) poses.clear();
     for (bool& loaded : sPosesLoaded) loaded = false;
+    for (bool& loaded : sLoaded) loaded = false;
+    sCensusDone = false;
 }
 
 void pc_p2_breadbug_teki_forget(BTeki* t) {
@@ -726,73 +730,94 @@ bool pc_p2_breadbug_teki_suppress_ai(const BTeki* t) {
     return b && !b->escaped;
 }
 
+namespace {
+void ensureLoaded(int v) {
+    if (sLoaded[v]) return;
+    sLoaded[v] = true;
+    loadParams(v);
+    loadBank(v);
+    if (sCensusDone) return;
+    sCensusDone = true;
+    // One-shot census of the stage's pellets (read-only diagnosis of
+    // what a wandering Breadbug can find; fp14 search is 500).
+    if (pelletMgr) {
+        Iterator pit(pelletMgr);
+        CI_LOOP(pit) {
+            Pellet* p = static_cast<Pellet*>(*pit);
+            if (!p || !p->isAlive() || !p->mConfig) continue;
+            std::printf("P2_BREADBUG_OWN_PELLET_CENSUS model=%s min=%d max=%d x=%.0f y=%.0f z=%.0f ufo=%d state=%d
+",
+                        p->mConfig->mModelId.mStringID, int(p->mConfig->mCarryMinPikis()),
+                        int(p->mConfig->mCarryMaxPikis()), p->mSRT.t.x, p->mSRT.t.y, p->mSRT.t.z,
+                        p->isUfoParts() ? 1 : 0, p->getState());
+        }
+    }
+}
+
+// Bind one Breadbug-family actor (source 38 Breadbug or 40 Giant Breadbug): setup
+// loop body; also the dev-console late binder (#942).
+bool bindOne(Teki* t) {
+    const unsigned src = pc_p2_campaign_source(t);
+    const int v = variantOf(src);
+    if (v < 0) return false;
+    const unsigned gen = pc_p2_campaign_token(t);
+    if (t->mTekiType != TEKI_Collec) {
+        std::printf("P2_SETUP_SKIP Breadbug host_type_mismatch source_id=%u generator=%u type=%d
+", src, gen, t->mTekiType);
+        return false;
+    }
+    if (t->getParameterI(TPI_CorpseType) != TEKICORPSE_LeaveCorpse) {
+        std::printf("P2_SETUP_SKIP Breadbug no_corpse source_id=%u generator=%u
+", src, gen);
+        return false;
+    }
+    ensureLoaded(v);
+    Binding& b = s[static_cast<BTeki*>(t)];
+    b = Binding{};
+    b.generator = gen;
+    b.source = src;
+    b.variant = v;
+    const Vector3f pos = t->getPosition();
+    b.fsm.init(sParams[v], sBank[v], {pos.x, pos.y, pos.z}, t->getDirection(), (gen * 2654435761u) | 1u, &sRoute);
+    t->mHealth = b.fsm.health();
+    b.taiState = t->mStateID;
+    // Retail PanModoki is not a living thing while unbittered (isLivingThing).
+    // Clearing ORGANIC only stops the organic-gated P1 paths (thrown stick,
+    // formation contact, captain punch entry); it does NOT stop P1 ground
+    // attacks. Every P1 target-selection site asks
+    // pc_p2_breadbug_teki_untargetable() instead (#898 fix).
+    t->clearTekiOption(TEKIOPT_Organic);
+    std::printf("P2_BREADBUG_OWN_BIND generator=%u source_id=%u host_type=%d health=%.1f retail_parms=%d draw=%s "
+                "home=%.1f,%.1f wp=%d state=%s tai_state=%d
+",
+                gen, src, t->mTekiType, t->mHealth, sParams[v].retail ? 1 : 0, sPosesLoaded[v] ? "p2_model" : "host", pos.x,
+                pos.z, sRoute.nearest({pos.x, pos.y, pos.z}), bb::stateName(b.fsm.state()), b.taiState);
+    // Ordinary-delivery bridge: GoalItem::suckMe grants onion:p2:<source> once
+    // for the delivered corpse of THIS generator token.
+    pc_randomizer_p2_bind_source(static_cast<PelletView*>(static_cast<BTeki*>(t)), src, gen);
+    std::printf("P2_BREADBUG_DELIVERY_BIND generator=%u source_id=%u
+", gen, src);
+    std::fflush(stdout);
+    return true;
+}
+} // namespace
+
 void pc_p2_breadbug_teki_setup() {
     pc_p2_breadbug_teki_reset();
     if (!pc_randomizer_p2_bridge() || !tekiMgr) return;
-    bool loaded[kVariantCount] = {false, false};
-    bool census = false;
     Iterator it(tekiMgr);
     CI_LOOP(it) {
         auto* t = static_cast<Teki*>(*it);
-        if (!t || !t->mGenerator) continue;
-        const unsigned src = pc_p2_campaign_source(t);
-        const int v = variantOf(src);
-        if (v < 0) continue;
-        const unsigned gen = pc_p2_campaign_token(t);
-        if (t->mTekiType != TEKI_Collec) {
-            std::printf("P2_SETUP_SKIP Breadbug host_type_mismatch source_id=%u generator=%u type=%d\n", src, gen, t->mTekiType);
-            continue;
-        }
-        if (t->getParameterI(TPI_CorpseType) != TEKICORPSE_LeaveCorpse) {
-            std::printf("P2_SETUP_SKIP Breadbug no_corpse source_id=%u generator=%u\n", src, gen);
-            continue;
-        }
-        if (!loaded[v]) {
-            loaded[v] = true;
-            loadParams(v);
-            loadBank(v);
-        }
-        if (!census) {
-            census = true;
-            // One-shot census of the stage's pellets (read-only diagnosis of
-            // what a wandering Breadbug can find; fp14 search is 500).
-            if (pelletMgr) {
-                Iterator pit(pelletMgr);
-                CI_LOOP(pit) {
-                    Pellet* p = static_cast<Pellet*>(*pit);
-                    if (!p || !p->isAlive() || !p->mConfig) continue;
-                    std::printf("P2_BREADBUG_OWN_PELLET_CENSUS model=%s min=%d max=%d x=%.0f y=%.0f z=%.0f ufo=%d state=%d\n",
-                                p->mConfig->mModelId.mStringID, int(p->mConfig->mCarryMinPikis()),
-                                int(p->mConfig->mCarryMaxPikis()), p->mSRT.t.x, p->mSRT.t.y, p->mSRT.t.z,
-                                p->isUfoParts() ? 1 : 0, p->getState());
-                }
-            }
-        }
-        Binding& b = s[static_cast<BTeki*>(t)];
-        b = Binding{};
-        b.generator = gen;
-        b.source = src;
-        b.variant = v;
-        const Vector3f pos = t->getPosition();
-        b.fsm.init(sParams[v], sBank[v], {pos.x, pos.y, pos.z}, t->getDirection(), (gen * 2654435761u) | 1u, &sRoute);
-        t->mHealth = b.fsm.health();
-        b.taiState = t->mStateID;
-        // Retail PanModoki is not a living thing while unbittered (isLivingThing).
-        // Clearing ORGANIC only stops the organic-gated P1 paths (thrown stick,
-        // formation contact, captain punch entry); it does NOT stop P1 ground
-        // attacks. Every P1 target-selection site asks
-        // pc_p2_breadbug_teki_untargetable() instead (#898 fix).
-        t->clearTekiOption(TEKIOPT_Organic);
-        std::printf("P2_BREADBUG_OWN_BIND generator=%u source_id=%u host_type=%d health=%.1f retail_parms=%d draw=%s "
-                    "home=%.1f,%.1f wp=%d state=%s tai_state=%d\n",
-                    gen, src, t->mTekiType, t->mHealth, sParams[v].retail ? 1 : 0, sPosesLoaded[v] ? "p2_model" : "host", pos.x,
-                    pos.z, sRoute.nearest({pos.x, pos.y, pos.z}), bb::stateName(b.fsm.state()), b.taiState);
-        // Ordinary-delivery bridge: GoalItem::suckMe grants onion:p2:<source> once
-        // for the delivered corpse of THIS generator token.
-        pc_randomizer_p2_bind_source(static_cast<PelletView*>(static_cast<BTeki*>(t)), src, gen);
-        std::printf("P2_BREADBUG_DELIVERY_BIND generator=%u source_id=%u\n", gen, src);
-        std::fflush(stdout);
+        if (!t || !t->mGenerator || variantOf(pc_p2_campaign_source(t)) < 0) continue;
+        bindOne(t);
     }
+}
+
+bool pc_p2_breadbug_teki_bind_dynamic(BTeki* t) {
+    if (!t || !tekiMgr || !t->mGenerator || !pc_randomizer_p2_bridge() || variantOf(pc_p2_campaign_source(t)) < 0)
+        return false;
+    if (s.count(t)) return true;
+    return bindOne(static_cast<Teki*>(t));
 }
 
 void pc_p2_breadbug_teki_tick(BTeki* t) {

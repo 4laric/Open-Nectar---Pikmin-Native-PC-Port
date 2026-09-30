@@ -6,6 +6,7 @@
 #include "pc_window.h"
 #include "pc_bbft.h"
 #include "pc_p2_cave.h"
+#include "pc_dev_console.h"
 #include "pc_gyro.h"
 #include "pc_icon.h"
 #if PIKI_PC_TOUCH
@@ -868,6 +869,9 @@ void pc_window_poll_events(PADStatus* pad) {
 
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        // #942 dev console: swallows its toggle key and, while open, every
+        // key/text event. No-op unless PIKMIN_DEV_CONSOLE=1.
+        if (pc_dev_console_handle_event(event)) continue;
         switch (event.type) {
             case SDL_QUIT:
                 sShouldClose = true;
@@ -1025,6 +1029,9 @@ void pc_window_poll_events(PADStatus* pad) {
     }
 
     const Uint8* state = SDL_GetKeyboardState(NULL);
+    // #942: while the dev console input is open the virtual pad reads no keys.
+    static const Uint8 sNoKeys[SDL_NUM_SCANCODES] = {0};
+    if (pc_dev_console_open()) state = sNoKeys;
     // Bindings may name a mouse button (issue #42); sample the mouse once here.
     const Uint32 boundMouse = SDL_GetMouseState(NULL, NULL);
     auto held = [&](int action) { return pc_window_binding_held(sKeyBindings[action], state, boundMouse); };
