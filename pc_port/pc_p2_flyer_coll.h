@@ -30,6 +30,8 @@ public:
     // Non-destructive detach used from destructors/teardown.
     void detach(BTeki* actor);
     bool bound() const { return mOwn != nullptr; }
+    // The live CollPart of table entry `index` (nullptr when unbound/out of range).
+    CollPart* part(int index) const { return index >= 0 && index < mCount ? mParts[index] : nullptr; }
     bool released() const { return mReleased; }
 
 private:

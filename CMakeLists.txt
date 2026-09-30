@@ -967,6 +967,21 @@ target_compile_definitions(p2_otakara_press_test PRIVATE
     P2_OTAKARA_PRESS_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
 add_test(NAME p2_otakara_press_test COMMAND p2_otakara_press_test)
 
+# Dweevil family fidelity (owner playtest 2026-09-30): collision parts (legs carry none, the
+# partless ground punch is refused), treasure pickup/carry/drop, the elemental attack window and
+# effect lifecycle, and slope speed / stall side-step. All policy is engine-free; the wiring is
+# checked against the source text.
+foreach(dweevil_test IN ITEMS part item attack stall)
+    string(TOUPPER ${dweevil_test} dweevil_test_upper)
+    add_executable(p2_otakara_${dweevil_test}_test
+        tools/p2_otakara_${dweevil_test}_test.cpp)
+    target_include_directories(p2_otakara_${dweevil_test}_test PRIVATE pc_port)
+    target_compile_options(p2_otakara_${dweevil_test}_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+    target_compile_definitions(p2_otakara_${dweevil_test}_test PRIVATE
+        P2_OTAKARA_${dweevil_test_upper}_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME p2_otakara_${dweevil_test}_test COMMAND p2_otakara_${dweevil_test}_test)
+endforeach()
+
 # wf7 dweevil-impl (#871): dead-Dweevil clip choice is engine-free and covers
 # all four species 59-62 (dead forces dead, never attack1).
 add_executable(p2_dweevil_death_clip_test

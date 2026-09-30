@@ -2116,6 +2116,10 @@ bool BTeki::interactDefault(immut TekiInteractionKey& key)
 			return false;
 		}
 
+		// Dweevil carrying a treasure: damageTreasure takes the hit (OtakaraBase.cpp:563-574).
+		if (pc_p2_otakara_divert(this, attack->mOwner, attack->mDamage)) {
+			return true;
+		}
 		_344 = attack->getDamagePortion();
 		mStoredDamage += attack->mDamage;
 		pc_p2_otakara_attack(this, attack->mOwner, "InteractAttack");
