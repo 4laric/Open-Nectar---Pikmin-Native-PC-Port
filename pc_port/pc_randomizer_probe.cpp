@@ -11,9 +11,8 @@
 #include "pc_randomizer_campaign_catalog.h"
 #undef NDEBUG
 #include <cassert>
-// The engine-free probe links pc_randomizer.cpp without the P2 proxy module
-// (which needs engine headers); no proxy tier is staged here.
-int pc_p2_proxy_host(unsigned) { return -1; }
+// (#982) The merged CMake target links the real pc_p2_proxy.cpp (netplay side),
+// so main's pc_p2_proxy_host stub would be a duplicate definition.
 int main(int argc, char** argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     if (!pc_randomizer_init(argc, argv)) {
