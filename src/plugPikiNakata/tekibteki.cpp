@@ -1,6 +1,8 @@
 #include "pc_p2_demon_host.h"
 #ifdef PIKI_PC_PORT
 #include "pc_p2_life_gauge_hooks.h"
+#include "pc_corpse_origin.h"
+#include <cstdio>
 #endif
 #include "pc_p2_sarai_manager.h"
 #include "pc_p2_umimushi.h"
@@ -864,6 +866,18 @@ void BTeki::dieSoon()
 		} else {
 			PRINT_NAKATA("dieSoon:%08x:'carc'\n", this);
 			vec1.set(carcass->mCentre);
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+			// #972: a 'carc' centre never written by refresh (killed before the
+			// first CollInfo::updateInfo) put the corpse at the world origin.
+			NVector3f body(getCentre());
+			if (!pc_corpse_origin::carcassUsable(vec1.x, vec1.y, vec1.z, body.x, body.y, body.z,
+			                                     getTekiCollisionSize())) {
+				std::printf("PC_CORPSE_ORIGIN_FALLBACK teki=%d carc=%.1f,%.1f,%.1f centre=%.1f,%.1f,%.1f\n",
+				            int(mTekiType), vec1.x, vec1.y, vec1.z, body.x, body.y, body.z);
+				std::fflush(stdout);
+				vec1.set(body);
+			}
+#endif
 		}
 
 		becomePellet(typeID, vec1, getDirection());
