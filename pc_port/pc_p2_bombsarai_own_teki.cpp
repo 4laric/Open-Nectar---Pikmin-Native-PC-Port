@@ -984,7 +984,8 @@ bool pc_p2_bombsarai_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, bo
         static std::map<const BTeki*, int> countdown;
         if (++countdown[t] >= 15) {
             countdown[t] = 0;
-            Vector3f sp = t->getPosition();
+            // A carried corpse is the pellet; the escaped host drifts away.
+            Vector3f sp = dead && t->mPellet ? t->mPellet->getPosition() : t->getPosition();
             const float depth = gfx.mCamera->projectWorldPoint(gfx, sp);
             if (depth > 0.0f && gfx.mScreenWidth > 0 && gfx.mScreenHeight > 0)
                 std::printf("P2_BOMBSARAI_SCREEN source_id=58 token=%u u=%.3f v=%.3f depth=%.0f clip=%s frame=%.0f corpse=%d\n",
