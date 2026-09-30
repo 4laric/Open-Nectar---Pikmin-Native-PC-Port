@@ -1716,6 +1716,7 @@ void PikiGoHangState::exec(Piki* piki)
 	// captain means nothing to hang from: back to normal instead of reading
 	// the null captain (0xdd0 access violation, #972 crash follow-up).
 	if (!p2captivenavi::mayHang(piki->mNavi != nullptr)) {
+		p2captivenavi::note("hang_without_captain");
 		transit(piki, PIKISTATE_Normal);
 		return;
 	}
@@ -1791,6 +1792,7 @@ void PikiHangedState::exec(Piki* piki)
 	// captain means nothing to hang from: back to normal instead of reading
 	// the null captain (0xdd0 access violation, #972 crash follow-up).
 	if (!p2captivenavi::mayHang(piki->mNavi != nullptr)) {
+		p2captivenavi::note("hang_without_captain");
 		transit(piki, PIKISTATE_Normal);
 		return;
 	}
@@ -1854,6 +1856,7 @@ void PikiWaterHangedState::exec(Piki* piki)
 	// captain means nothing to hang from: back to normal instead of reading
 	// the null captain (0xdd0 access violation, #972 crash follow-up).
 	if (!p2captivenavi::mayHang(piki->mNavi != nullptr)) {
+		p2captivenavi::note("hang_without_captain");
 		transit(piki, PIKISTATE_Normal);
 		return;
 	}
