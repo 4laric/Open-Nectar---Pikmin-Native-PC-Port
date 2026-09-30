@@ -253,6 +253,6 @@ void pc_p2_body_coll_note_stick(Creature* sticker, Creature* target, CollPart* p
         name += (bar == std::string::npos ? b.key : b.key.substr(bar + 1));
         name += b.bound && !b.released ? "_stick_fit" : "_stick_host";
         name += stuck == 3 ? "3" : "6";
-        pc_gfx_proxy_shot_notify(name.c_str());
+        pc_gfx_proxy_shot_notify_after(name.c_str(), 3);
     }
 }
