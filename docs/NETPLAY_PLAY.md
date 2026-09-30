@@ -138,6 +138,9 @@ delay 2 (67 ms)  stalls 0 / 10 s
   anything worse is *poor*.
 - **ping**: the round trip to the other game (the average of the last 10
   measurements); **jitter**: how much it changes between measurements.
+  The games exchange their inputs once per frame, so the ping includes up
+  to one frame (33 ms) of that rhythm: two games on the same PC or LAN
+  read about 33 ms, not 1 ms.
 - **delay**: the input delay in frames (one frame is 33 ms at 30 Hz). Your
   own captain moves this many frames after you press, so both games can
   apply every input on the same frame.
