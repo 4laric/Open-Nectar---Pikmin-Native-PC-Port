@@ -29,6 +29,7 @@
 //   * View angle is a full hemisphere.
 // No other lane's module is modified; every hook is a no-op for unregistered actors.
 #include "pc_p2_elecbug.h"
+#include "pc_p2_elecbug_fsm.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_setup_failsafe.h"
 #include "pc_randomizer.h"
@@ -88,7 +89,6 @@ const char* stateName(State s) {
 // Source enemyparm.txt values (ground_inverts manifest general/proper).
 constexpr float LIFE = 500.0f;
 constexpr float MOVE_SPEED = 30.0f;
-constexpr float SIGHT = 200.0f;
 constexpr float TERRITORY = 200.0f;
 constexpr float HOME_RADIUS = 100.0f;
 constexpr float FLIP_TIME = 5.0f;         // fp01
@@ -98,7 +98,7 @@ constexpr float CHARGE_TIME = 3.0f;       // source StateCharge mStateTimer > 3.
 constexpr float CHILD_CHARGE_TIME = 1.0f; // source StateChildCharge mStateTimer > 1.0
 constexpr float CHARGE_SEARCH_DELAY = 2.0f; // source mStateTimer > 2.0
 constexpr float PAIR_RADIUS = 300.0f;     // source bugPos.distance(otherPos) < 300
-constexpr float RETURN_TIME = 0.5f;       // port value
+constexpr float TURN_TIME = 0.5f;         // port value (source turns until facing the target)
 constexpr float WANDER_TIME = 1.5f;       // port value
 constexpr float ELEC_RADIUS = 70.0f;      // source sweep radius fp20/22 = 70
 constexpr float TURN_RATE = 2.0f;
@@ -107,6 +107,8 @@ struct Clip {
     std::string name;
     float duration = 1.0f;
     bool loop = false;
+    int frames = 0;
+    p2elecbug::ClipKeys keys;
 };
 
 struct ElecBug {
@@ -123,6 +125,7 @@ struct ElecBug {
     bool deadLogged = false;
     bool escaped = false;
     float lastHealth = LIFE;
+    float inactiveTimer = 0.0f; // source mInactiveTimer (Charge only when > 15)
     std::string clip = "wait";
     float phase = 0.0f;
     float logTimer = 0.0f;
@@ -161,19 +164,6 @@ unsigned genOf(const BTeki* actor) {
 ElecBug* lookup(BTeki* actor) {
     auto it = actors.find(static_cast<PelletView*>(actor));
     return it == actors.end() ? nullptr : &it->second;
-}
-bool targetInSight(const Vector3f& pos) {
-    for (Navi* n : pc_p2_navis()) {
-        if (n->isAlive() && distXZ(n->getPosition(), pos) < SIGHT) return true;
-    }
-    if (pikiMgr) {
-        Iterator it(pikiMgr);
-        CI_LOOP(it) {
-            Piki* p = static_cast<Piki*>(*it);
-            if (p && p->isAlive() && distXZ(p->getPosition(), pos) < SIGHT) return true;
-        }
-    }
-    return false;
 }
 // A Pikmin is shockable exactly when the lane-10 electric receiver would accept
 // it: the lane-11 capability matrix rejects electric-immune species (Yellow,
@@ -241,6 +231,12 @@ bool logElecImmuneInRange(unsigned generator, const Vector3f& pos, float radius)
     std::fflush(stdout);
     return sawYellow || sawBulbmin;
 }
+// Source randWeightFloat(10.0f): the inactivity timer restarts in [0,10).
+float inactiveReset() { return 10.0f * float(std::rand() % 1000) / 1000.0f; }
+int recoverFrames() {
+    auto it = clips.find("recover");
+    return it == clips.end() ? 30 : it->second.frames;
+}
 void enter(ElecBug& s, State state, const char* clip) {
     s.state = state;
     s.stateTime = 0.0f;
@@ -258,6 +254,16 @@ void stop(BTeki* a) {
     a->mVelocity.z = 0.0f;
 }
 void setPhase(ElecBug& s) {
+    if (s.state == ELEC_REVERSE && s.clip == "turn") {
+        auto it = clips.find("turn");
+        if (it != clips.end() && it->second.frames > 0) {
+            const p2elecbug::ReverseClip rc =
+                p2elecbug::reverseClip(it->second.keys, s.stateTime, FLIP_TIME);
+            s.phase = rc.frame / float(it->second.frames);
+            if (s.phase > 1.0f) s.phase = 1.0f;
+            return;
+        }
+    }
     const float duration = clipDuration(s.clip);
     const float len = duration > 0.0f ? duration : 1.0f;
     if (clipLoops(s.clip)) {
@@ -418,7 +424,7 @@ bool pc_p2_elecbug_pressed(BTeki* teki, Creature* presser) {
     }
     if (s->partner) breakLink(teki, *s); // source StateReverse::init finishPartnerAndEffect
     s->flipped = true;
-    enter(*s, ELEC_REVERSE, "recover");
+    enter(*s, ELEC_REVERSE, "turn"); // source StateReverse::init startMotion(ELECBUGANIM_Turn)
     std::printf("P2_ELECBUG_FLIP generator=%u source_id=28\n", genOf(teki));
     std::printf("P2_ELECBUG_STATE generator=%u state=reverse\n", genOf(teki));
     std::fflush(stdout);
@@ -464,13 +470,19 @@ const char* pc_p2_elecbug_state_name(const BTeki* actor) {
 void pc_p2_elecbug_check_landing_press(BTeki* actor) {
     if (!ready || !pikiMgr) return;
     ElecBug* s = lookup(actor);
-    if (!s || s->state == ELEC_DEAD || s->state == ELEC_REVERSE) return;
+    // Source pressCallBack only reacts in Wait..ChildDischarge: not Reverse, not
+    // Return (recover), not Dead. A Pikmin idling on the recovering beetle must
+    // not re-flip it the moment it stands up.
+    if (!s || s->state == ELEC_DEAD || s->state == ELEC_REVERSE || s->state == ELEC_RETURN) return;
     const Vector3f pos = actor->getPosition();
     Iterator it(pikiMgr);
     CI_LOOP(it) {
         Piki* p = static_cast<Piki*>(*it);
         if (!p || !p->isAlive()) continue;
         if (p->mVelocity.y >= -0.01f) continue;  // ascending / grounded
+        // Source trigger is PikiFlyingState landing: only a thrown Pikmin counts,
+        // not one walking past with a stray negative y velocity.
+        if (p->getState() != PIKISTATE_Flying) continue;
         if (distXZ(p->getPosition(), pos) > 30.0f) continue;
         std::printf("P2_ELECBUG_NATURAL_PRESS generator=%u species=%d source_id=28 state=%s\n",
                     genOf(actor), pc_p2_species(p), stateName(s->state));
@@ -502,6 +514,8 @@ void pc_p2_elecbug_setup() {
                         clip.name = name;
                         clip.duration = frames > 0 ? float(frames) / 30.0f : 1.0f;
                         clip.loop = (name == "move" || name == "wait");
+                        clip.frames = int(frames);
+                        clip.keys = p2elecbug::parseKeys(int(frames), events);
                         clips[name] = clip;
                     }
                 } else if (token == "frames") {
@@ -560,7 +574,8 @@ void pc_p2_elecbug_setup() {
         s.home = actor->getPosition();
         s.heading = actor->getDirection();
         actor->mHealth = LIFE;
-        enter(s, ELEC_WAIT, "wait");
+        s.inactiveTimer = inactiveReset(); // source onInit randWeightFloat(10)
+        enter(s, ELEC_TURN, "move");       // source onInit: mFsm->start(ELECBUG_Turn)
         // Ordinary-delivery bridge (lane 06 contract, #585): bind source 28 to
         // this live actor so GoalItem::suckMe can grant onion:p2:28 exactly once
         // through pc_randomizer_p2_corpse_delivered. Rejected (unbindable id)
@@ -632,37 +647,45 @@ void pc_p2_elecbug_update(BTeki* actor) {
     }
 
     s.stateTime += dt;
+    s.inactiveTimer += dt; // source Obj::doUpdate: mInactiveTimer += deltaTime
     switch (s.state) {
     case ELEC_WAIT:
         stop(actor);
-        if (targetInSight(pos)) {
-            std::printf("P2_ELECBUG_STATE generator=%u state=charge\n", generator);
-            s.hasSearched = false;
-            enter(s, ELEC_CHARGE, "charge");
-        } else if (s.stateTime > WAIT_TIME) {
-            std::printf("P2_ELECBUG_STATE generator=%u state=move\n", generator);
-            enter(s, ELEC_MOVE, "move");
+        if (s.stateTime > WAIT_TIME) {
+            // Source StateWait: after WaitTime, StateTurn (move clip).
+            std::printf("P2_ELECBUG_STATE generator=%u state=turn\n", generator);
+            enter(s, ELEC_TURN, "move");
         }
         break;
     case ELEC_TURN:
         stop(actor);
-        if (s.stateTime > RETURN_TIME) {
-            std::printf("P2_ELECBUG_STATE generator=%u state=move\n", generator);
-            enter(s, ELEC_MOVE, "move");
+        if (s.stateTime > TURN_TIME) {
+            // Source StateTurn END: inactive > 15 -> Charge, else Move. Charge is
+            // never entered from player sight (that port trigger caused the
+            // charge -> recover -> charge loop).
+            if (p2elecbug::chargeDue(s.inactiveTimer)) {
+                std::printf("P2_ELECBUG_STATE generator=%u state=charge\n", generator);
+                s.hasSearched = false;
+                enter(s, ELEC_CHARGE, "charge");
+            } else {
+                std::printf("P2_ELECBUG_STATE generator=%u state=move\n", generator);
+                enter(s, ELEC_MOVE, "move");
+            }
         }
         break;
     case ELEC_MOVE:
-        if (targetInSight(pos)) {
-            std::printf("P2_ELECBUG_STATE generator=%u state=charge\n", generator);
-            s.hasSearched = false;
-            enter(s, ELEC_CHARGE, "charge");
-            break;
-        }
         s.heading = wrapPi(s.heading + 0.4f * dt);
         wander(actor, s);
         if (s.stateTime > WANDER_TIME) {
-            std::printf("P2_ELECBUG_STATE generator=%u state=wait\n", generator);
-            enter(s, ELEC_WAIT, "wait");
+            // Source StateMove END: inactive > 15 -> Charge, else Wait.
+            if (p2elecbug::chargeDue(s.inactiveTimer)) {
+                std::printf("P2_ELECBUG_STATE generator=%u state=charge\n", generator);
+                s.hasSearched = false;
+                enter(s, ELEC_CHARGE, "charge");
+            } else {
+                std::printf("P2_ELECBUG_STATE generator=%u state=wait\n", generator);
+                enter(s, ELEC_WAIT, "wait");
+            }
         }
         break;
     case ELEC_CHARGE: {
@@ -684,8 +707,10 @@ void pc_p2_elecbug_update(BTeki* actor) {
                 std::fflush(stdout);
                 enter(s, ELEC_DISCHARGE, "discharge");
             } else {
-                std::printf("P2_ELECBUG_STATE generator=%u state=return\n", generator);
-                enter(s, ELEC_RETURN, "recover");
+                // Source StateCharge/StateChildCharge without a partner -> StateTurn.
+                std::printf("P2_ELECBUG_STATE generator=%u state=turn\n", generator);
+                s.inactiveTimer = inactiveReset();
+                enter(s, ELEC_TURN, "move");
             }
         }
         break;
@@ -703,8 +728,10 @@ void pc_p2_elecbug_update(BTeki* actor) {
                 std::fflush(stdout);
                 enter(s, ELEC_CHILDISCHARGE, "discharge");
             } else {
-                std::printf("P2_ELECBUG_STATE generator=%u state=return\n", generator);
-                enter(s, ELEC_RETURN, "recover");
+                // Source StateCharge/StateChildCharge without a partner -> StateTurn.
+                std::printf("P2_ELECBUG_STATE generator=%u state=turn\n", generator);
+                s.inactiveTimer = inactiveReset();
+                enter(s, ELEC_TURN, "move");
             }
         }
         break;
@@ -712,8 +739,9 @@ void pc_p2_elecbug_update(BTeki* actor) {
     case ELEC_DISCHARGE: {
         stop(actor);
         if (!s.partner) {
-            std::printf("P2_ELECBUG_STATE generator=%u state=return\n", generator);
-            enter(s, ELEC_RETURN, "recover");
+            std::printf("P2_ELECBUG_STATE generator=%u state=turn\n", generator);
+            s.inactiveTimer = inactiveReset();
+            enter(s, ELEC_TURN, "move");
             break;
         }
         if (!s.shockedThisDischarge) {
@@ -744,8 +772,9 @@ void pc_p2_elecbug_update(BTeki* actor) {
         }
         if (s.stateTime >= DISCHARGE_TIME) {
             breakLink(actor, s);
-            std::printf("P2_ELECBUG_STATE generator=%u state=return\n", generator);
-            enter(s, ELEC_RETURN, "recover");
+            std::printf("P2_ELECBUG_STATE generator=%u state=turn\n", generator);
+            s.inactiveTimer = inactiveReset();
+            enter(s, ELEC_TURN, "move");
         }
         break;
     }
@@ -753,32 +782,47 @@ void pc_p2_elecbug_update(BTeki* actor) {
         stop(actor);
         if (!s.partner) {
             std::printf("P2_ELECBUG_STATE generator=%u state=wait\n", generator);
+            s.inactiveTimer = inactiveReset();
             enter(s, ELEC_WAIT, "wait");
             break;
         }
         if (s.stateTime >= DISCHARGE_TIME) {
             breakLink(actor, s);
             std::printf("P2_ELECBUG_STATE generator=%u state=wait\n", generator);
+            s.inactiveTimer = inactiveReset();
             enter(s, ELEC_WAIT, "wait");
         }
         break;
     }
     case ELEC_RETURN:
+        // Source StateReturn plays the recover clip once, then StateTurn. The
+        // converted recover clip has no END key, so the exit is its length
+        // (p2elecbug::recoverDone), not a fixed port timer.
         stop(actor);
-        if (s.stateTime >= RETURN_TIME) {
-            std::printf("P2_ELECBUG_STATE generator=%u state=wait\n", generator);
-            enter(s, ELEC_WAIT, "wait");
+        if (p2elecbug::recoverDone(s.stateTime, recoverFrames())) {
+            std::printf("P2_ELECBUG_RECOVER_DONE generator=%u source_id=28 t=%.2f\n", generator, s.stateTime);
+            std::printf("P2_ELECBUG_STATE generator=%u state=turn\n", generator);
+            std::fflush(stdout);
+            enter(s, ELEC_TURN, "move");
         }
         break;
-    case ELEC_REVERSE:
+    case ELEC_REVERSE: {
+        // Source StateReverse: Turn clip (flip, then belly-up loop); after FlipTime
+        // the clip finishes on its END key, then StateReturn (recover clip).
         stop(actor);
-        if (s.stateTime >= FLIP_TIME) {
+        auto turnIt = clips.find("turn");
+        const bool clipDone = turnIt == clips.end()
+            ? s.stateTime >= FLIP_TIME
+            : p2elecbug::reverseClip(turnIt->second.keys, s.stateTime, FLIP_TIME).finished;
+        if (clipDone) {
             s.flipped = false;
-            std::printf("P2_ELECBUG_RECOVER generator=%u source_id=28\n", generator);
+            std::printf("P2_ELECBUG_RECOVER generator=%u source_id=28 t=%.2f\n", generator, s.stateTime);
+            std::printf("P2_ELECBUG_STATE generator=%u state=return\n", generator);
             std::fflush(stdout);
             enter(s, ELEC_RETURN, "recover");
         }
         break;
+    }
     case ELEC_DEAD:
         stop(actor);
         // dieSoon() only runs inside the suppressed host doAI; finalize the
