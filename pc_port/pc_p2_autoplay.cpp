@@ -821,8 +821,14 @@ void pc_p2_autoplay_tick(void)
             }
         }
     }
-    if (purpleConverted > 0)
-        std::printf("AUTOPLAY_POWER_PURPLE converted=%d field=%d bot-driven\n", purpleConverted, alive);
+    if (purpleConverted > 0) {
+        // Throttled: the whole squad converts one Pikmin per tick as it exits.
+        static int sPurpleTotal = 0;
+        const int before = sPurpleTotal;
+        sPurpleTotal += purpleConverted;
+        if (before == 0 || sPurpleTotal / 25 != before / 25)
+            std::printf("AUTOPLAY_POWER_PURPLE converted_total=%d field=%d bot-driven\n", sPurpleTotal, alive);
+    }
     if (powerMode) sPowerSeconds += (dt > 0.0f && dt <= 0.5f) ? dt : 0.016f;
     if (powerMode && !sPowerLogged && alive >= 80) {
         // bot-v6: the one-step squad is in the field (queued through the
