@@ -4390,6 +4390,14 @@ void pc_gfx_proxy_shot_notify(const char* key) {
     sProxyShotPending.push_back(pending);
 }
 
+void pc_gfx_proxy_shot_now(const char* key) {
+    if (!proxyShotActive() || !key || *key == '\0') return;
+    ProxyShotPending pending;
+    pending.key = key;
+    pending.frame = sProxyShotFrame + 1;
+    sProxyShotPending.push_back(pending);
+}
+
 static void proxyShotWrite(const std::string& key) {
     if (!glBindFramebuffer_ptr || sDrawableWidth <= 0 || sDrawableHeight <= 0) return;
     const int w = sDrawableWidth;

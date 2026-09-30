@@ -828,6 +828,8 @@ bool pc_p2_batch3_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     auto bankIt = banks.find(entry->second);
     if (bankIt == banks.end()) return false;
     const Bank& bank = bankIt->second;
+    // Buried snagret (StateStay sets EB_ModelHidden): draw nothing.
+    if (!corpse && pc_p2_snakejoint_model_hidden(actor)) return true;
     static const char* const deadClips[] = {"dead", "dead1", "pdead1", "kagebozu_dead"};
     static const char* const attackClips[] = {"attack1", "attack", "attack2", "attack_2",
                                               "sattack1", "hit", "hit_near", "hit_far", "charge",

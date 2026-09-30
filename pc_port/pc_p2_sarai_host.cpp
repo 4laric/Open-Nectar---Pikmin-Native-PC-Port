@@ -454,9 +454,20 @@ void P2SaraiHost::applyNaturalPose()
         if (float(pose.frame) <= frame) selected = &pose;
     if (!selected && !samples.empty()) selected = &samples.front();
     if (selected) applyPoseFrame(selected->frame);
-    // #895: lerp between the bracketing samples (crossfade on a profile change
-    // or a discontinuous loop seam) into a private Shape. The mouths keep the
-    // sampled frame above; the nearest mesh stays the fallback.
+    presentSmooth(frame);
+}
+
+// #895: lerp between the bracketing samples of the active set (crossfade on a
+// profile change or a discontinuous loop seam) into a private Shape. The
+// mouths keep the sampled frame applied by the caller; the nearest mesh stays
+// the fallback. Shared by the living body (applyNaturalPose) and the carried
+// Demon corpse (demonDrawCarcass), which used to snap to the nearest pose.
+bool P2SaraiHost::smoothActive() const { return mSmooth && !mSmooth->failed && mSmooth->track.shape; }
+
+void P2SaraiHost::advanceSmooth(float seconds) { if (mSmooth) mSmooth->track.advance(seconds); }
+
+void P2SaraiHost::presentSmooth(float frame)
+{
     if (mActiveSet < 0 || mActiveSet >= int(mPoseSets.size())) return;
     const PoseSet& set = mPoseSets[std::size_t(mActiveSet)];
     if (set.poses.empty() || set.meshes.empty()) return;
