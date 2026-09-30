@@ -1,17 +1,6 @@
-// Lane 12 (#130) live slot-0 captain/squad adapter runtime fixture.
-// Private real-GL display fixture; no production registration or gameplay claims.
-//
-// Drives the LIVE pc_p2_captain adapter (p2_captain::setup_from_navi_mgr is now
-// auto-bound by the GameCoreSection constructor) through the four semantics a
-// captor family needs: target identity, claim/release, interrupted capture and
-// cleanup.
-// A separate --knockout-roster scenario exercises the survivor-gated game-over /
-// NaviMgr::informOrimaDead hook added to NaviDeadState::init.
-// The --survivor-path scenario (with PIKMIN_P2_SECOND_CAPTAIN=1) drives a real
-// second captain, knocks the active captain down through the integrated
-// InteractAttack receiver, and verifies the survivor rebind, observed squad
-// release and final stage end.
-// The --two-captain-ppm scenario draws both captains and saves a PPM.
+// #928 CI-built, bounded local acceptance. Live scripted input drives switching,
+// disband/recruit/hold/release; explicit spatial/unsafe/death injections are
+// labeled and cannot establish natural enemy combat or campaign completion.
 #include <SDL2/SDL.h>
 #include <GL/gl.h>
 #include "App.h"
@@ -19,6 +8,8 @@
 #include "GameCoreSection.h"
 #include "GameStat.h"
 #include "Graphics.h"
+#include "MapMgr.h"
+#include <cmath>
 #include "Interactions.h"
 #include "Navi.h"
 #include "NaviMgr.h"
@@ -52,14 +43,22 @@
 namespace {
 bool sSingle = false;
 bool sCoop = false;
-bool sKnockoutScenario = false;
-bool sSurvivorScenario = false;
-bool sPpmScenario = false;
-bool sMamutaScenario = false;
+bool sPrimaryDown = false;
+bool sForceCaptainDown = false;
 
 void require(bool value, const char* message)
 {
     if (!value) { std::printf("FAIL P2_CAPTAIN_RUNTIME %s\n", message); std::fflush(stdout); std::_Exit(1); }
+}
+
+// Fixture-only equivalent of root scripts/p2_fixture_captain_guard.h. CI is
+// standalone native, so this observer carries the same fail-closed semantics.
+void requireCaptain(Navi* n, int tick) {
+    const float hp=n?n->mHealth:0;
+    const bool dead=!n || naviMgr->isNaviDead(n) || n->getCurrState()->getID()==NAVISTATE_Dead;
+    if(!GameStat::orimaDead && !dead && std::isfinite(hp) && hp>1.0f)return;
+    std::printf("P2_FIXTURE_CAPTAIN_DOWN tick=%d hp=%.3f orima_dead=%d dead_state=%d outcome=BLOCKED\n",tick,hp,int(GameStat::orimaDead),int(dead));
+    std::fflush(nullptr);std::_Exit(86);
 }
 
 // Reusable P6 PPM capture after a real draw (mirrors the other room fixtures).
@@ -101,8 +100,13 @@ class CaptainSwitchApp final : public PlugPikiApp {
     bool screenshot=false;
     void pad(unsigned keys=0,int x=0,int y=0) { pc_p2_input_script_set(1,keys,x,y); }
     int squadFacts(const char* phase) {
-        int owned=0, free=0, near=0; float closest=1.0e9f;
-        for(Piki* p:squad) if(p->isAlive()) {
+        int owned=0, free=0, near=0, index=0; float closest=1.0e9f;
+        for(Piki* p:squad) {
+            const Vector3f delta=p->getPosition()-b->mCursorWorldPos;
+            std::printf("P2_SWITCH_PIKI phase=%s index=%d owner=%d mode=%d state=%d alive=%d callable=%d buried=%d cursor_distance=%.2f pos=%.2f,%.2f,%.2f\n",
+                phase,index++,p->mNavi?p->mNavi->mNaviID:-1,p->mMode,p->getState(),int(p->isAlive()),int(p->mIsCallable),int(p->isBuried()),
+                std::sqrt(delta.x*delta.x+delta.z*delta.z),p->getPosition().x,p->getPosition().y,p->getPosition().z);
+            if(!p->isAlive())continue;
             if(p->mMode==PikiMode::FreeMode)++free;
             if(p->mNavi==b && p->mMode==PikiMode::FormationMode) {
                 ++owned; const float distance=(p->getPosition()-b->getPosition()).length();
@@ -133,7 +137,7 @@ public:
             gameflow.mMoviePlayer->requestSkip(); return result;
         }
         if(!pc_p2_preview_ready() || !naviMgr || !naviMgr->getNavi()) return result;
-        require(!GameStat::orimaDead,"unexpected game over");
+        requireCaptain(naviMgr->getActiveNavi(),tick);
         if(gameflow.mPauseAll || gameflow.mIsUIOverlayActive) return result;
         if(tick<0) {
             a=naviMgr->getNavi(0);
@@ -146,11 +150,13 @@ public:
             }
             require(squad.size()==20,"fresh live squad exactly20");
             std::printf("P2_SWITCH_ADOPTION live=20 active_gameplay=1 extinction=0 captains=%d\n",naviMgr->getNaviCount());
-            tick=0;pad();return result;
+            tick=0;pad();
+            if(sForceCaptainDown) { a->mHealth=0;requireCaptain(a,tick); }
+            return result;
         }
         ++tick;
         Navi* selected=naviMgr->getActiveNavi();
-        require(selected && selected->mHealth>1 && !naviMgr->isNaviDead(selected),"unexpected selected captain down");
+        requireCaptain(selected,tick);
         if(sSingle || sCoop) {
             require(!pc_p2_captain::single_player_switch_enabled(),"single/co-op excluded");
             if(tick==5) pad(KBBTN_DPAD_UP);
@@ -212,7 +218,22 @@ public:
         case 115:pad();squadFacts("disbanding");break;
         case 160:require(a->getCurrState()->getID()==NAVISTATE_Walk,"owner finished disbanding");pad(KBBTN_DPAD_UP);break;
         case 165:active(1);pad();break;
-        case 175:squadFacts("before_whistle");pad(KBBTN_B);break;
+        case 170: {
+            // Clear the stock ship collision volume for this input observation.
+            Vector3f open(-85,0,0);open.y=mapMgr->getMinY(open.x,open.z,true)+1;
+            b->resetPosition(open);a->resetPosition(open+Vector3f(25,0,20));break;
+        }
+        case 175: {
+            int staged=0;
+            for(Piki* p:squad) {
+                require(p->isAlive() && p->mMode==PikiMode::FreeMode,"live disbanded squad before spatial staging");
+                Vector3f pos=b->mCursorWorldPos+Vector3f((staged%5-2)*4,0,(staged/5-2)*4);
+                pos.y=mapMgr->getMinY(pos.x,pos.z,true)+1;p->resetPosition(pos);
+                p->mVelocity=p->mTargetVelocity=Vector3f(0,0,0);++staged;
+            }
+            std::printf("P2_SWITCH_STAGE free_positions_injected=%d captain_positions_injected=2 ownership_injected=0\n",staged);
+            squadFacts("before_whistle");pad(KBBTN_B);break;
+        }
         case 235:pad();break;
         case 245:require(sawGather,"selected captain whistle state");require(squadFacts("after_whistle")>0,"selected captain recruited nearby throwable squad");break;
         case 250:pad(KBBTN_A);break;
@@ -228,11 +249,13 @@ public:
         case 360:pad(KBBTN_DPAD_UP);break;
         case 365:active(1);std::puts("P2_SWITCH_UNSAFE injected_zero_health_rejected=1");break;
         case 370:pad();a->mHealth=100;break;
+        case 375:if(sPrimaryDown)pad(KBBTN_DPAD_UP);break;
+        case 378:if(sPrimaryDown){active(0);pad();}break;
         case 380: {
-            InteractAttack hit(nullptr,nullptr,500.0f,false);hit.actNavi(b);
+            InteractAttack hit(nullptr,nullptr,500.0f,false);hit.actNavi(sPrimaryDown?a:b);
             std::puts("P2_SWITCH_SURVIVOR injected_attack_receiver=1");break;
         }
-        case 390:active(0);require(naviMgr->isNaviDead(b),"down captain recorded");break;
+        case 390:active(sPrimaryDown?1:0);require(naviMgr->isNaviDead(sPrimaryDown?a:b),"down captain recorded");std::printf("P2_SWITCH_SURVIVOR primary_down=%d active=%d\n",int(sPrimaryDown),naviMgr->getActiveNavi()->mNaviID);break;
         case 410:require(screenshot,"render capture");std::puts("PASS P2_CAPTAIN_SWITCH_RUNTIME");std::fflush(nullptr);std::_Exit(0);
         }
         if(tick%10==0) {std::printf("P2_SWITCH_TICK tick=%d active=%d states=%d,%d\n",tick,naviMgr->getActiveNavi()->mNaviID,a->getCurrState()->getID(),b->getCurrState()->getID());std::fflush(stdout);}
@@ -241,7 +264,7 @@ public:
 };
 } // namespace
 int main(int argc,char** argv) {
-    for(int i=1;i<argc;++i){sSingle|=std::string(argv[i])=="--single";sCoop|=std::string(argv[i])=="--coop";}
+    for(int i=1;i<argc;++i){sSingle|=std::string(argv[i])=="--single";sCoop|=std::string(argv[i])=="--coop";sPrimaryDown|=std::string(argv[i])=="--primary-down";sForceCaptainDown|=std::string(argv[i])=="--force-captain-down";}
     _putenv_s("PIKMIN_P2_SECOND_CAPTAIN",sSingle?"0":"1");
     _putenv_s("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1");
     SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetMainReady();pc_gpu_preference_apply();
