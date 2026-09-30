@@ -1,4 +1,5 @@
 #include "pc_p2_kochappy.h"
+#include "pc_p2_campaign_actor.h"
 #include "pc_p2_kochappy_policy.h"
 #include "pc_p2_kochappy_stun.h"
 #include "pc_p2_pose_bank.h"
@@ -43,12 +44,18 @@ void pc_p2_kochappy_setup(){
     if(!profile && !bank && !bindings){if(interpolation)std::abort();return;}
     std::vector<p2animation::Clip> manifest;std::set<std::uint32_t> wanted;
     if(!profile || !bank || !bindings || !tekiMgr || !health.read(profile) || !p2kochappy::bank(bank,manifest) || !p2kochappy::bindings(bindings,wanted))std::abort();
+    if (pc_randomizer_p2_bridge()) {
+        const auto current = pc_p2_campaign_ids(1);
+        for (unsigned uid : current) if (!wanted.count(uid)) std::abort();
+        wanted = current;
+        if (wanted.empty()) return;
+    }
     // Reject identity overlap and unresolved/duplicate generator IDs before loading.
     std::vector<Teki*> selected;std::set<std::uint32_t> seen;
     Iterator it(tekiMgr);CI_LOOP(it){
         Teki* actor=static_cast<Teki*>(*it);
-        if(!actor || !actor->mGenerator || !wanted.count(actor->mGenerator->_70))continue;
-        if(!seen.insert(actor->mGenerator->_70).second || actor->mTekiType!=TEKI_Chappy || pc_p2_enemy_name(actor) || pc_p2_sheargrub_name(actor))std::abort();
+        if(!actor || !actor->mGenerator || !wanted.count(pc_p2_campaign_token(actor)))continue;
+        if(!seen.insert(pc_p2_campaign_token(actor)).second || actor->mTekiType!=TEKI_Chappy || pc_p2_enemy_name(actor) || pc_p2_sheargrub_name(actor))std::abort();
         selected.push_back(actor);
     }
     if(seen!=wanted)std::abort();
@@ -97,7 +104,9 @@ void pc_p2_kochappy_setup(){
         if(!health.bind(static_cast<BTeki*>(actor)))std::abort();actors.insert(actor);actor->mHealth=actor->getParameterF(TPF_Life);
         const auto& pos=actor->getPosition();
         pc_p2_kochappy_stun_register(actor,10.0f);
-        std::printf("P2_ENEMY_READY species=Kochappy source_id=1 native_family=Chappy generator=%u x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=P1 purple_stun=red_earthquake_v1\n",actor->mGenerator->_70,pos.x,pos.y,pos.z,actor->mHealth,actor->getParameterF(TPF_Life));
+        if (pc_randomizer_p2_bridge())
+            pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor),1,pc_p2_campaign_token(actor));
+        std::printf("P2_ENEMY_READY species=Kochappy source_id=1 native_family=Chappy generator=%u x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=P1 purple_stun=red_earthquake_v1\n",pc_p2_campaign_token(actor),pos.x,pos.y,pos.z,actor->mHealth,actor->getParameterF(TPF_Life));
     }
     std::printf("P2_KOCHAPPY_BANK poses=%zu mod_bytes=%zu texture_attach_calls=%d load_seconds=%.3f\n",poses,total,attachments,std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count());
 }
