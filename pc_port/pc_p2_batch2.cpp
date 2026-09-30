@@ -1090,6 +1090,14 @@ bool pc_p2_batch2_any_drawn() {
 
 unsigned long pc_p2_batch2_count() { return (unsigned long)actors.size(); }
 bool pc_p2_batch2_registered(BTeki* actor) { return actors.count(actor) != 0; }
+// Mitite group fellows (#992): a Teki born at run time from a registered host
+// shares the host's visual key. No-op when the host is not registered.
+void pc_p2_batch2_adopt(BTeki* child, BTeki* host) {
+    if (!child || !host) return;
+    auto it = actors.find(host);
+    if (it == actors.end()) return;
+    actors[child] = it->second;
+}
 unsigned long long pc_p2_batch2_event_count() {
     return eventCount;
 }

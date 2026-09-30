@@ -372,6 +372,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_otakara_fx.cpp
     pc_port/pc_p2_elecbug.cpp
     pc_port/pc_p2_tamago.cpp
+    pc_port/pc_p2_astonish.cpp
     pc_port/pc_p2_imomushi.cpp
     pc_port/pc_p2_hana.cpp
     pc_port/pc_p2_tadpole.cpp
@@ -1367,6 +1368,12 @@ add_executable(p2_campaign_policy_test
 target_include_directories(p2_campaign_policy_test PRIVATE pc_port)
 target_compile_options(p2_campaign_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_campaign_policy_test COMMAND p2_campaign_policy_test)
+
+add_executable(p2_tamago_policy_test
+    pc_port/pc_p2_tamago_policy_test.cpp)
+target_include_directories(p2_tamago_policy_test PRIVATE pc_port)
+target_compile_options(p2_tamago_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_tamago_policy_test COMMAND p2_tamago_policy_test)
 
 # Smoke-seed slot bypass (#944): engine-free env-gated predicate contract.
 add_executable(p2_smoke_any_slot_test
