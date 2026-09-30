@@ -817,16 +817,20 @@ Piki* probeFreePiki() {
 }
 void runProbe(BTeki* actor, Umi& s, unsigned generator, float dt) {
     if (!probeEnabled() || s.state == UMI_DEAD) return;
+    static BTeki* probeOwner = nullptr; // the probe drives exactly one Bloyster (the first to tick)
+    if (!probeOwner) probeOwner = actor;
+    if (probeOwner != actor) return;
     s.probeTime += dt;
     const Vector3f ap = actor->getPosition();
     if (s.probeTime >= 0.5f && !s.probeCaptain) {
         // Frame the scene: the camera follows the captain, who starts ~720 units away.
         if (Navi* navi = naviMgr ? naviMgr->getActiveNavi() : nullptr) {
             s.probeCaptain = true;
-            const float a = s.heading + 0.7f;
-            const float cx = ap.x + std::sin(a) * 420.0f, cz = ap.z + std::cos(a) * 420.0f;
+            const float a = s.heading + 2.2f; // behind-left of the Bloyster, so the tail and the front are both in view
+            const float cx = ap.x + std::sin(a) * 330.0f, cz = ap.z + std::cos(a) * 330.0f;
             const float cy = mapMgr ? mapMgr->getMinY(cx, cz, true) : ap.y;
             navi->mSRT.t = Vector3f(cx, cy, cz);
+            navi->mFaceDirection = std::atan2(ap.x - cx, ap.z - cz);
             std::printf("P2_UMIMUSHI_PROBE kind=captain generator=%u x=%.1f y=%.1f z=%.1f\n", generator, double(cx),
                         double(cy), double(cz));
             std::fflush(stdout);
@@ -871,8 +875,7 @@ void logLatched(BTeki* actor, Umi& s, unsigned generator) {
     float nearest = -1.0f;
     for (Creature* c = actor->mStickListHead; c; c = c->mNextSticker) {
         if (!c->isPiki() || c->isStickToMouth()) continue;
-        const char* part = (c->mStickPart && c->mStickPart->mCollInfo) ? c->mStickPart->mCollInfo->mId.mStringID : "?";
-        if (std::strcmp(part, "weak") == 0) ++weak;
+        if (s.coll.node[4] && c->mStickPart == s.coll.node[4]) ++weak;
         else ++other;
         if (s.coll.node[4]) {
             const Vector3f q = c->mSRT.t;
@@ -1347,7 +1350,11 @@ float pc_p2_umimushi_damage_rate(BTeki* actor, Creature* owner, CollPart* part) 
         const unsigned generator = actor->mGenerator ? pc_p2_campaign_token(actor) : 0u;
         const p2umi::Polar pl = owner ? p2umi::polar(p2captorhost::vec(actor->getPosition()), s.heading, a.pos)
                                       : p2umi::Polar{0.0f, 0.0f};
-        const char* partId = (part && part->mCollInfo) ? part->mCollInfo->mId.mStringID : "-";
+        char partId[5] = {'-', 0, 0, 0, 0};
+        if (part && part->mCollInfo) {
+            const char* raw = part->mCollInfo->mId.mStringID; // packed little-endian: 'weak' prints as "kaew"
+            for (int i = 0; i < 4; ++i) partId[i] = raw[3 - i];
+        }
         std::printf("P2_UMIMUSHI_RECV generator=%u source_id=%d result=%s part=%s navi=%d stuck=%d angle_deg=%.1f "
                     "dist_xz=%.1f n=%d rate=%.3f\n", generator, s.sourceId,
                     d == p2umi::DamageStuck ? "stuck" : d == p2umi::DamagePartless ? "partless" : "refused", partId,
