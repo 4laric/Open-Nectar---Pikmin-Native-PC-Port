@@ -165,6 +165,7 @@ struct CkptScan {
     std::filesystem::path latest;
     std::string block;
     unsigned used[7] = {};
+    p2ship::Store ship; // purple campaign only (main)
 };
 CkptScanStatus scanCampaignCheckpoint(CkptScan& s) {
     if (!std::filesystem::exists(campaignDirectory)) return kCkptNone;
