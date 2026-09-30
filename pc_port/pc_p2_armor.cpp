@@ -38,6 +38,10 @@
 #include "pc_p2_armor.h"
 #include "pc_p2_armor_events.h"
 #include "pc_p2_armor_receiver_policy.h"
+#include "pc_p2_armor_policy.h"
+#include "CreatureCollPart.h"
+#include "PikiState.h"
+#include "gl/pc_gfx.h"
 #include "pc_p2_captor_host.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_randomizer.h"
@@ -137,6 +141,21 @@ struct Armor {
     bool weakpointActive = false;
     unsigned weakpointId = 0;
     unsigned token = 0;
+    float scale = 1.0f;
+    int latchLogged = -1;
+    int holdLogs = 0;
+    int holdLoggedFrame = -100;
+    // TEST-ONLY probe (PIKMIN_P2_ARMOR_PROBE), never active in a normal run.
+    float probeTime = 0.0f;
+    bool probeCaptain = false, probeBait = false, probeDecoys = false, probeFreezeInit = false, probeRecv = false,
+         probeDone = false;
+    int probeThrows = 0;
+    float probeNextThrow = 0.0f;
+    Piki* probeThrown[8] = {};
+    float probeThrownAt[8] = {};
+    bool probeLanded[8] = {};
+    Piki* probeUsed[24] = {};
+    int probeUsedN = 0;
 };
 
 std::map<PelletView*, Armor> actors;
@@ -289,6 +308,8 @@ int holding(BTeki* a, Armor& s) {
     bool occupied[p2captor::MaxSlots] = {};
     return p2captorhost::validate(a, s.held, mouthGeometry().slots, occupied);
 }
+float drawFrame(const Armor& s);
+p2armor::Vec3 sourceMouth(BTeki* a, const Armor& s, float frame);
 // One source Obj::attackPikmin pass (default eat condition; the stabbed
 // swallow maps to the P1 receiver's Esa motion).
 int attackPikmin(BTeki* a, Armor& s, unsigned generator, int frame) {
@@ -308,8 +329,14 @@ int attackPikmin(BTeki* a, Armor& s, unsigned generator, int frame) {
                                      p2captor::defaultEligible, [&](int n, int slot) {
         if (!p2captorhost::swallowInto(a, scene, n, slot, s.held, 0, &refused)) return false;
         const p2captor::Vec3 l = p2captor::toLocal(apos, s.heading, scene.prey[n].pos);
-        std::printf("P2_ARMOR_BITE generator=%u frame=%d pikmin=1 slot=%d local_x=%.1f local_y=%.1f local_z=%.1f\n",
-                    generator, frame, slot, l.x, l.y, l.z);
+        const p2armor::Polar pl = p2armor::polar(apos, a->getDirection(), scene.prey[n].pos);
+        const float df = drawFrame(s);
+        const p2armor::Vec3 src = sourceMouth(a, s, df);
+        std::printf("P2_ARMOR_BITE generator=%u frame=%d pikmin=1 slot=%d local_x=%.1f local_y=%.1f local_z=%.1f "
+                    "angle_deg=%.1f dist_xz=%.1f draw_frame=%.1f source_mouth_dist=%.1f heading=%.3f direction=%.3f\n",
+                    generator, frame, slot, l.x, l.y, l.z, double(pl.angleDeg), double(pl.distXZ), double(df),
+                    double(p2chappymouth::distance(src, scene.prey[n].pos)), double(s.heading),
+                    double(a->getDirection()));
         std::fflush(stdout);
         return true;
     });
@@ -364,6 +391,245 @@ void setPhase(Armor& s) {
         if (s.phase > 1.0f) s.phase = 1.0f;
     }
 }
+// ---- Evidence logs and the TEST-ONLY probe (#1014) ---------------------------------------------
+using p2armor::Vec3;
+Vec3 vec3(const Vector3f& v) { return Vec3{v.x, v.y, v.z}; }
+// Source frame of the drawn clip: the same phase * (frames - 1) the pose draw uses.
+float drawFrame(const Armor& s) {
+    const int frames = p2armor::clipFrames(p2armor::clipIndex(s.clip.c_str()));
+    return frames > 1 ? s.phase * float(frames - 1) : 0.0f;
+}
+// World position of the source mouth joint (kamujnt, Armor.cpp:205-213) at a frame of the current clip.
+Vec3 sourceMouth(BTeki* a, const Armor& s, float frame) {
+    float local[3] = {0.0f, 0.0f, 0.0f};
+    p2armor::mouthCentre(p2armor::clipIndex(s.clip.c_str()), frame, local);
+    return p2armor::toWorld(vec3(a->getPosition()), a->getDirection(), s.scale, local);
+}
+// World centre of a retail collision node (0 root, 1 dmg1 head, 2 shell) at a frame of the current clip.
+Vec3 sourceNode(BTeki* a, const Armor& s, float frame, int node) {
+    float local[3] = {0.0f, 0.0f, 0.0f};
+    p2armor::nodeCentre(p2armor::clipIndex(s.clip.c_str()), frame, node, local);
+    return p2armor::toWorld(vec3(a->getPosition()), a->getDirection(), s.scale, local);
+}
+// One line per held Pikmin every 3 source frames while the mouth holds: where it sits relative to the
+// body facing and to the source mouth joint.
+void logHold(BTeki* a, Armor& s, unsigned generator) {
+    if (s.holdLogs >= 80 || (s.state != ARMOR_ATTACK2 && s.state != ARMOR_EAT)) return;
+    const float frame = drawFrame(s);
+    if (int(frame) / 3 == s.holdLoggedFrame) return;
+    const Vec3 apos = vec3(a->getPosition());
+    const Vec3 mouth = sourceMouth(a, s, frame);
+    bool first = true;
+    for (Creature* c = a->mStickListHead; c; c = c->mNextSticker) {
+        if (!c->isPiki() || !c->isStickToMouth()) continue;
+        if (first) { s.holdLoggedFrame = int(frame) / 3; first = false; }
+        const Vec3 q = vec3(c->getPosition());
+        const p2armor::Polar pl = p2armor::polar(apos, a->getDirection(), q);
+        std::printf("P2_ARMOR_HOLD generator=%u state=%s frame=%.1f angle_deg=%.1f dist_xz=%.1f y=%.1f "
+                    "mouth_dist=%.1f\n", generator, stateName(s.state), double(frame), double(pl.angleDeg),
+                    double(pl.distXZ), double(q.y - apos.y), double(p2chappymouth::distance(mouth, q)));
+        ++s.holdLogs;
+    }
+    std::fflush(stdout);
+}
+// Latched-Pikmin census (not the mouth): logs when the count stuck to the body changes.
+void logLatch(BTeki* a, Armor& s, unsigned generator) {
+    int total = 0;
+    for (Creature* c = a->mStickListHead; c; c = c->mNextSticker)
+        if (c->isPiki() && !c->isStickToMouth()) ++total;
+    if (total == s.latchLogged) return;
+    s.latchLogged = total;
+    const float frame = drawFrame(s);
+    const Vec3 apos = vec3(a->getPosition());
+    const Vec3 head = sourceNode(a, s, frame, p2armor::NodeDmg1), shell = sourceNode(a, s, frame, p2armor::NodeShell);
+    std::printf("P2_ARMOR_LATCH generator=%u stuck=%d health=%.1f", generator, total, double(a->mHealth));
+    for (Creature* c = a->mStickListHead; c; c = c->mNextSticker) {
+        if (!c->isPiki() || c->isStickToMouth()) continue;
+        const Vec3 q = vec3(c->getPosition());
+        const p2armor::Polar pl = p2armor::polar(apos, a->getDirection(), q);
+        std::printf(" [part=%s angle_deg=%.1f dist_xz=%.1f to_head=%.1f to_shell=%.1f]",
+                    c->mStickPart ? fourCCString(c->mStickPart->getID().mId).c_str() : "none", double(pl.angleDeg),
+                    double(pl.distXZ), double(p2chappymouth::distance(head, q)), double(p2chappymouth::distance(shell, q)));
+    }
+    std::printf("\n");
+    std::fflush(stdout);
+}
+
+// TEST-ONLY evidence probe (PIKMIN_P2_ARMOR_PROBE=1), never active in a normal run. Headless runs have
+// no player, so the skewer and the latch rules are exercised by moving Pikmin into the scene and
+// throwing them through the REAL Navi::throwPiki / PikiFlyingState path:
+//   * 0.5 s: the captain is stood 300 units "behind" the Armor along the camera forward axis;
+//   * 2 s: one bait Pikmin 65 units straight ahead wakes the Armor and starts attack2; the moment the
+//     bite starts five decoys are placed around the body (beneath the rearing head, both sides,
+//     behind, and far ahead) so the log shows which ones the bite really skewers;
+//   * 14 s: the Armor is forced to its walk pose and held still; four Pikmin are thrown at the shell
+//     from behind and four at the head from the front (aim scaled 1.0 .. 1.3 so the real collision
+//     decides), then a bomb and two captain punches (head reach / tail side) are sent to the receiver.
+BTeki* probeOwner = nullptr;
+bool probeEnabled() {
+    static const bool on = [] {
+        const char* e = std::getenv("PIKMIN_P2_ARMOR_PROBE");
+        return e && *e && *e != '0';
+    }();
+    return on;
+}
+constexpr float PROBE_FREEZE_BEGIN = 14.0f;
+constexpr float PROBE_FREEZE_END = 26.0f;
+bool probeFrozen(const BTeki* a, const Armor& s) {
+    return probeEnabled() && probeOwner == a && s.probeTime >= PROBE_FREEZE_BEGIN && s.probeTime < PROBE_FREEZE_END;
+}
+Piki* probeFreePiki(Armor& s) {
+    if (!pikiMgr) return nullptr;
+    Iterator it(pikiMgr);
+    CI_LOOP(it) {
+        Piki* p = static_cast<Piki*>(*it);
+        if (!p || !p->isAlive() || p->isStickTo() || p->isStickToMouth() || p->isBuried() || !p->isVisible()) continue;
+        bool used = false;
+        for (int i = 0; i < s.probeUsedN; ++i) used = used || s.probeUsed[i] == p;
+        if (used) continue;
+        if (s.probeUsedN < 24) s.probeUsed[s.probeUsedN++] = p;
+        return p;
+    }
+    return nullptr;
+}
+Vector3f probeGround(float x, float y, float z) {
+    return Vector3f(x, mapMgr ? mapMgr->getMinY(x, z, true) : y, z);
+}
+void probePlace(BTeki* a, Armor& s, const char* what, float lx, float lz) {
+    Piki* p = probeFreePiki(s);
+    if (!p) return;
+    const float h = a->getDirection();
+    const Vector3f ap = a->getPosition();
+    const float wx = ap.x + lx * std::cos(h) + lz * std::sin(h), wz = ap.z - lx * std::sin(h) + lz * std::cos(h);
+    p->mSRT.t = probeGround(wx, ap.y, wz);
+    p->mVelocity.set(0.0f, 0.0f, 0.0f);
+    std::printf("P2_ARMOR_PROBE kind=place what=%s local_x=%.1f local_z=%.1f x=%.1f y=%.1f z=%.1f\n", what,
+                double(lx), double(lz), double(p->mSRT.t.x), double(p->mSRT.t.y), double(p->mSRT.t.z));
+    std::fflush(stdout);
+}
+void runProbe(BTeki* actor, Armor& s, unsigned generator, float dt) {
+    if (!probeEnabled() || s.state == ARMOR_DEAD) return;
+    if (!probeOwner) probeOwner = actor;  // the probe drives exactly one Armor (the first to tick)
+    if (probeOwner != actor) return;
+    s.probeTime += dt;
+    const Vector3f ap = actor->getPosition();
+    if (s.probeTime >= 0.5f && !s.probeCaptain) {
+        if (Navi* navi = naviMgr ? naviMgr->getActiveNavi() : nullptr) {
+            s.probeCaptain = true;
+            float fx = 0.0f, fz = 1.0f;
+            if (Camera* cam = navi->controlCamera()) {
+                fx = -cam->mLookAtMtx.mMtx[2][0];
+                fz = -cam->mLookAtMtx.mMtx[2][2];
+                const float len = std::sqrt(fx * fx + fz * fz);
+                if (len > 1.0e-4f) { fx /= len; fz /= len; }
+            }
+            const float cx = ap.x - fx * 300.0f, cz = ap.z - fz * 300.0f;
+            navi->mSRT.t = probeGround(cx, ap.y, cz);
+            navi->mFaceDirection = std::atan2(fx, fz);
+            std::printf("P2_ARMOR_PROBE kind=captain generator=%u x=%.1f y=%.1f z=%.1f\n", generator, double(cx),
+                        double(navi->mSRT.t.y), double(cz));
+            std::fflush(stdout);
+        }
+    }
+    if (!s.probeBait && s.probeTime >= 2.0f) {
+        s.probeBait = true;
+        probePlace(actor, s, "bait_ahead", 0.0f, 65.0f);
+    }
+    // Decoys the moment the bite starts (attack2 just entered).
+    if (s.probeBait && !s.probeDecoys && s.state == ARMOR_ATTACK2 && s.stateTime < 0.2f) {
+        s.probeDecoys = true;
+        probePlace(actor, s, "decoy_under_head", 0.0f, 40.0f);
+        probePlace(actor, s, "decoy_side_right", 50.0f, 5.0f);
+        probePlace(actor, s, "decoy_side_left", -50.0f, 5.0f);
+        probePlace(actor, s, "decoy_behind", 0.0f, -45.0f);
+        probePlace(actor, s, "decoy_far_ahead", 0.0f, 140.0f);
+    }
+    if (s.probeTime >= PROBE_FREEZE_BEGIN && !s.probeFreezeInit) {
+        s.probeFreezeInit = true;
+        p2captorhost::release(actor, s.held);
+        enter(s, ARMOR_MOVE, "move");
+        s.stateTime = 0.3f;  // a mid-walk pose, then held still
+        setPhase(s);
+        std::printf("P2_ARMOR_PROBE kind=freeze generator=%u frame=%.1f\n", generator, double(drawFrame(s)));
+        std::fflush(stdout);
+    }
+    for (int i = 0; i < s.probeThrows; ++i) {
+        if (s.probeLanded[i] || s.probeTime < s.probeThrownAt[i] + 1.8f) continue;
+        s.probeLanded[i] = true;
+        Piki* t = s.probeThrown[i];
+        if (!t) continue;
+        std::printf("P2_ARMOR_PROBE kind=landing n=%d target=%s stuck=%d part=%s alive=%d health=%.1f\n", i,
+                    i < 4 ? "shell" : "head", int(t->isStickTo() && t->getStickObject() == actor),
+                    t->mStickPart ? fourCCString(t->mStickPart->getID().mId).c_str() : "none", int(t->isAlive()),
+                    double(actor->mHealth));
+        std::fflush(stdout);
+    }
+    if (s.probeFreezeInit && s.probeTime >= PROBE_FREEZE_BEGIN + 0.5f && s.probeThrows < 8
+            && s.probeTime >= s.probeNextThrow) {
+        Navi* navi = naviMgr ? naviMgr->getActiveNavi() : nullptr;
+        Piki* p = probeFreePiki(s);
+        if (navi && p) {
+            const bool head = s.probeThrows >= 4;
+            const float frame = drawFrame(s);
+            const Vec3 t = sourceNode(actor, s, frame, head ? p2armor::NodeDmg1 : p2armor::NodeShell);
+            const float h = actor->getDirection();
+            const float dirx = std::sin(h) * (head ? 1.0f : -1.0f), dirz = std::cos(h) * (head ? 1.0f : -1.0f);
+            const float lx = t.x + dirx * 120.0f, lz = t.z + dirz * 120.0f;  // 120 units out on the approach side
+            const Vector3f launch = probeGround(lx, ap.y, lz);
+            static const float scan[4] = {1.0f, 1.1f, 1.2f, 1.3f};
+            const float k = scan[s.probeThrows & 3];
+            const Vector3f aim(launch.x + (t.x - launch.x) * k, t.y, launch.z + (t.z - launch.z) * k);
+            const Vector3f saved = navi->mSRT.t;
+            navi->mSRT.t = launch;
+            p->mFSM->transit(p, 14);  // PIKISTATE_Flying, exactly as NaviThrowState key action 0
+            navi->throwPiki(p, aim);
+            navi->mSRT.t = saved;
+            s.probeThrown[s.probeThrows] = p;
+            s.probeThrownAt[s.probeThrows] = s.probeTime;
+            std::printf("P2_ARMOR_PROBE kind=throw n=%d target=%s k=%.2f launch=(%.1f,%.1f,%.1f) target_pos=(%.1f,%.1f,%.1f)\n",
+                        s.probeThrows, head ? "head" : "shell", double(k), double(launch.x), double(launch.y),
+                        double(launch.z), double(t.x), double(t.y), double(t.z));
+            std::fflush(stdout);
+            ++s.probeThrows;
+            s.probeNextThrow = s.probeTime + 0.6f;
+        }
+    }
+    // Receiver paths: a bomb (no part) and two captain punches (no part): the head side and the tail side.
+    if (s.probeTime >= 22.0f && !s.probeRecv) {
+        s.probeRecv = true;
+        Navi* navi = naviMgr ? naviMgr->getActiveNavi() : nullptr;
+        const float frame = drawFrame(s);
+        const Vec3 head = sourceNode(actor, s, frame, p2armor::NodeDmg1);
+        const float h = actor->getDirection();
+        const float before0 = actor->mHealth;
+        const bool bomb = actor->stimulate(InteractBomb(nullptr, 5.0f, nullptr)) != 0;
+        std::printf("P2_ARMOR_PROBE kind=bomb accepted=%d health_before=%.1f health_after=%.1f\n", int(bomb),
+                    double(before0), double(actor->mHealth));
+        if (navi) {
+            const Vector3f saved = navi->mSRT.t;
+            const float savedFace = navi->mFaceDirection;
+            for (int i = 0; i < 2; ++i) {
+                const float side = i == 0 ? 1.0f : -1.0f;  // in front of the head / behind the shell
+                const float reach = i == 0 ? 30.0f : 60.0f;
+                navi->mSRT.t = probeGround(head.x + std::sin(h) * reach * side, ap.y, head.z + std::cos(h) * reach * side);
+                navi->mFaceDirection = h + (i == 0 ? 3.14159265f : 0.0f);  // facing the body
+                const float hp = actor->mHealth;
+                const bool ok = actor->stimulate(InteractAttack(navi, nullptr, 10.0f, false)) != 0;
+                std::printf("P2_ARMOR_PROBE kind=punch side=%s accepted=%d health_before=%.1f health_after=%.1f\n",
+                            i == 0 ? "head_front" : "tail_behind", int(ok), double(hp), double(actor->mHealth));
+            }
+            navi->mSRT.t = saved;
+            navi->mFaceDirection = savedFace;
+        }
+        std::fflush(stdout);
+    }
+    if (s.probeTime >= 27.0f && !s.probeDone) {
+        s.probeDone = true;
+        std::printf("P2_ARMOR_PROBE kind=done generator=%u health=%.1f\n", generator, double(actor->mHealth));
+        std::fflush(stdout);
+    }
+}
+
 }
 
 void pc_p2_armor_reset() {
@@ -630,6 +896,12 @@ void pc_p2_armor_update(BTeki* actor) {
     Armor& s = it->second;
     const float dt = gsys->getFrameTime();
     if (dt <= 0.0f || dt > 0.5f) return;
+    s.scale = actor->mSRT.s.x > 0.01f && actor->mSRT.s.x < 100.0f ? actor->mSRT.s.x : 1.0f;
+    {
+        const unsigned probeGen = s.token ? s.token : (actor->mGenerator ? pc_p2_campaign_token(actor) : 0u);
+        runProbe(actor, s, probeGen, dt);
+    }
+    const bool probeHold = probeFrozen(actor, s);
     // Port stone analogue: the P1 host has no petrified lifecycle, so the
     // source doStartStoneState flick fires on the rising edge of the host
     // TEKIOPT_Pressed state (see pc_p2_armor.h / P2_ARMOR_RECEIVER.md).
@@ -680,8 +952,8 @@ void pc_p2_armor_update(BTeki* actor) {
         }
     }
 
-    s.stateTime += dt;
-    switch (s.state) {
+    if (probeHold) stop(actor); else s.stateTime += dt;
+    switch (probeHold ? ARMOR_INVALID : s.state) {
     case ARMOR_STAY:
         stop(actor);
         s.clip = "appear";
@@ -836,6 +1108,8 @@ void pc_p2_armor_update(BTeki* actor) {
         break;
     }
     setPhase(s);
+    logHold(actor, s, generator);
+    logLatch(actor, s, generator);
     s.logTimer += dt;
     if (s.logTimer >= 1.0f) {
         s.logTimer = 0.0f;
