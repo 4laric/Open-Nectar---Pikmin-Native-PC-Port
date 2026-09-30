@@ -2184,3 +2184,10 @@ function(pikmin_add_ci_fixture name source)
     set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/fixtures")
     file(APPEND "${CMAKE_BINARY_DIR}/ci-fixtures.txt" "${target}\n")
 endfunction()
+
+# #940 ordinary Purple combat: bounded local runtime only, never run by CI.
+pikmin_add_ci_fixture(purple_combat tools/preview_p2_purple_combat.cpp)
+add_executable(p2_purple_combat_bindings_test tools/test_p2_purple_combat_bindings.cpp)
+target_include_directories(p2_purple_combat_bindings_test PRIVATE pc_port)
+target_compile_options(p2_purple_combat_bindings_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_purple_combat_bindings_test COMMAND p2_purple_combat_bindings_test)
