@@ -1965,6 +1965,11 @@ add_executable(p2_chappy_mouth_test tools/p2_chappy_mouth_test.cpp)
 target_include_directories(p2_chappy_mouth_test PRIVATE pc_port)
 target_compile_options(p2_chappy_mouth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_chappy_mouth_test COMMAND p2_chappy_mouth_test)
+# #996: engine-free Skitter Leaf shake-off / carcass policy (source isStartFlick).
+add_executable(p2_sokkuri_flick_test tools/p2_sokkuri_flick_test.cpp)
+target_include_directories(p2_sokkuri_flick_test PRIVATE pc_port)
+target_compile_options(p2_sokkuri_flick_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_sokkuri_flick_test COMMAND p2_sokkuri_flick_test)
 # wave3 lane 53 (#289): engine-free Emperor Bulblax life-cycle rules (buried spawn,
 # proximity Appear, cross-Emperor request, bomb ingestion + stun clock, tongue tip table).
 add_executable(p2_king_life_test tools/p2_king_life_test.cpp)
