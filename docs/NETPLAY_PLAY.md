@@ -79,7 +79,8 @@ sets the whole session up before anything else loads:
    (Scripts can pass `--netplay-answer-in <file>` instead: the game waits
    for a valid answer in that file.)
 5. Both games print `[netplay] ice completed in ...ms` and start. The input
-   delay is measured automatically.
+   delay is measured automatically, and then follows the connection during
+   the session (see "Input delay and hitches").
 
 ## Joiner steps
 
@@ -234,6 +235,47 @@ again at frame 0 in each one. A runner that ingests the joiner's mirror must
 therefore treat each session as its own run (a new peer token and run
 folder), not append the second evening to the first evening's run.
 
+## Input delay and hitches
+
+Both games run the same frames with the same inputs (lockstep), so each
+press takes effect a few frames after you make it: the **input delay**, 1
+to 8 frames (33 to 267 ms). Each game has its own delay; it gives your
+inputs time to reach the other game.
+
+- It starts at the value the connection test picks when the session starts
+  (`[netplay] auto delay: ... delay=N`).
+- Then it follows the connection. When your inputs reach the other game too
+  late, that game has to wait for them, and in lockstep both games wait: a
+  **hitch** (the picture holds still for a moment). The other game reports
+  its waits to yours four times a second. About a tenth of a second of
+  waiting within 3 s raises your delay by one frame (by two when the waits
+  keep coming), usually within a second or two. After 15 s without waits,
+  if the ping allows, it drops back one frame. A drop that brings the waits
+  back is undone at once, and the next drop waits longer (30 s, then 60 s,
+  up to 2 minutes).
+- Every change prints one line, for example
+  `[netplay] delay change: 2 -> 3 at frame=591 ... (up: peer late 215ms ...)`.
+- It never changes during a pause for a lost Archipelago link, in the 5 s
+  after such a pause, just after a stage load, or in the first 5 s. It
+  never goes more than 2 frames above what the ping needs, and a slow
+  moment on your own PC (a shader being built) does not raise it: a delay
+  only hides network time.
+- Changing the delay never changes the game: both games still apply
+  exactly the same inputs on exactly the same frames. Only the moment your
+  presses take effect changes.
+- A hitch longer than the delay still shows as a short freeze, for example
+  a Wi-Fi hiccup of a few hundred ms. While the game waits for the other
+  game's input it does not draw new frames; the music keeps playing and
+  the window stays responsive (it can be moved, and closing it works).
+
+The console shows a `[netplay] stats:` line every 300 frames (10 s): your
+delay and the other game's, the waits (`stalls=`, `last10s=`), the ping
+(`rtt ... p50 p95`, jitter) and the frame times. At the end of the session
+it shows `[netplay] stats final:`, the `delay timeline:` and a frame-time
+histogram. To keep the delay at its starting value (for a comparison),
+start the game with the environment variable
+`PIKMIN_NETPLAY_ADAPTIVE_DELAY=0`.
+
 ## Troubleshooting
 
 - `[netplay] handshake refused: exe` or `protocol`: the builds differ. Use
@@ -275,6 +317,12 @@ folder), not append the second evening to the first evening's run.
   it. If a stage load freezes one PC just before a pause for a lost
   Archipelago link, a crashed partner is reported after 60 s instead of 15 s
   until the pause ends.
+- Many `[netplay] delay change:` lines, up and down: the connection's
+  timing keeps changing (typically Wi-Fi). A cable, or moving closer to the
+  router, helps; the delay settles after a few failed drops either way.
+- `[netplay] delay hold at N: capped ...`: the other game keeps waiting
+  although your delay is already 2 frames above what the ping needs. The
+  network is not the cause (a slow PC, a busy disk), so the delay stays.
 - `[netplay] save barrier timeout ...` (exit 6): at the end of a day both
   games save and compare the result. The other game disconnected there, or
   it did not reach the save within 60 s while still connected; that day is
@@ -301,6 +349,9 @@ folder), not append the second evening to the first evening's run.
   gauges, item and captain labels) follow the game's camera, not the
   instant one, so while you turn they trail the world by those few frames;
   they catch up when the turn ends.
+- A hitch longer than the input delay (a Wi-Fi hiccup, a slow load on one
+  PC) freezes the picture until the other game's input arrives: frames are
+  not drawn while the game waits (the music keeps playing).
 - Seeds with P2 enemies need each player's own copy of the seed's P2
   assets overlay (see "Seeds with P2 enemies").
 - The low-level switches (`--netplay-host`/`--netplay-join`,

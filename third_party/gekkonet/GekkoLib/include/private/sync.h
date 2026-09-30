@@ -30,6 +30,9 @@ namespace Gekko {
 		bool GetLocalInput(Handle player, std::unique_ptr<u8[]>& input, Frame frame);
 
 		void SetLocalDelay(Handle player, u8 delay);
+
+		// Open Nectar local extension (issue #887): no gap fill on growth.
+		void SetLocalDelayNoFill(Handle player, u8 delay);
 		
 		u8 GetLocalDelay(Handle player);
 

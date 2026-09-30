@@ -76,6 +76,11 @@ void gekko_set_local_delay(GekkoSession* session, int player, unsigned char dela
     session->SetLocalDelay(player, delay);
 }
 
+void gekko_set_local_delay_nofill(GekkoSession* session, int player, unsigned char delay)
+{
+    session->SetLocalDelayNoFill(player, delay);
+}
+
 void gekko_set_runahead(GekkoSession* session, unsigned char runahead)
 {
     session->SetRunahead(runahead);

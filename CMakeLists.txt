@@ -966,6 +966,17 @@ if(PIKMIN_NETPLAY_BUILD AND NOT ANDROID)
     endif()
 endif()
 
+# Netplay M5c lane B (issue #887): loopback UDP impairment proxy for pair
+# tests (latency schedule, jitter, loss, periodic link blocks; model in
+# pc_netplay_impair.h). Exe-independent, so a baseline on an older exe sees
+# the same link. Test tool, netplay builds on Windows only.
+if(PIKMIN_NETPLAY_BUILD AND WIN32 AND NOT ANDROID)
+    add_executable(netplay_impair_proxy tools/netplay/udp_impair_proxy.cpp)
+    target_include_directories(netplay_impair_proxy PRIVATE pc_port)
+    target_compile_options(netplay_impair_proxy PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    target_link_libraries(netplay_impair_proxy PRIVATE ws2_32 winmm)
+endif()
+
 # Host-run accuracy/determinism test for the netplay libm (issue #879).
 # Engine-free: links the libm OBJECT plus the test driver. The driver
 # calls the entry points by their standard names (proving the override
@@ -1023,6 +1034,27 @@ if(PIKMIN_NETPLAY_BUILD AND PIKMIN_BUILD_TESTS AND NOT ANDROID)
         target_link_libraries(pc_netplay_loadguard_test PRIVATE ws2_32)
     endif()
     add_test(NAME pc_netplay_loadguard_test COMMAND pc_netplay_loadguard_test)
+endif()
+
+# Netplay M5c lane B (issue #887): adaptive input delay and session stats
+# (pc_netplay_adaptive.h: controller, frame-time histogram, schedule parsing,
+# transition arithmetic), the impairment model (pc_netplay_impair.h), and
+# delay transitions against the vendored GekkoNet (two in-memory sessions
+# growing and shrinking their delays mid-run with scripted per-frame inputs:
+# both peers see identical inputs, and every frame F carries record F - d0).
+# Netplay builds only (links gekkonet).
+if(PIKMIN_NETPLAY_BUILD AND PIKMIN_BUILD_TESTS AND NOT ANDROID)
+    add_executable(pc_netplay_adaptive_test pc_port/netplay/pc_netplay_adaptive_test.cpp)
+    target_include_directories(pc_netplay_adaptive_test PRIVATE
+        pc_port
+        third_party/gekkonet/GekkoLib/include)
+    target_compile_definitions(pc_netplay_adaptive_test PRIVATE GEKKONET_STATIC GEKKONET_NO_ASIO)
+    target_compile_options(pc_netplay_adaptive_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    target_link_libraries(pc_netplay_adaptive_test PRIVATE gekkonet)
+    if(WIN32)
+        target_link_libraries(pc_netplay_adaptive_test PRIVATE ws2_32)
+    endif()
+    add_test(NAME pc_netplay_adaptive_test COMMAND pc_netplay_adaptive_test)
 endif()
 
 # FP determinism gate (issue #879). Runs objdump over the linked game exe

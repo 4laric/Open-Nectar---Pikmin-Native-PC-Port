@@ -62,6 +62,15 @@ void Gekko::GameSession::SetLocalDelay(i32 player, u8 delay)
     }
 }
 
+void Gekko::GameSession::SetLocalDelayNoFill(i32 player, u8 delay)
+{
+    for (u32 i = 0; i < _msg.locals.size(); i++) {
+        if (_msg.locals[i]->handle == player) {
+            _sync.SetLocalDelayNoFill(player, delay);
+        }
+    }
+}
+
 void Gekko::GameSession::SetNetAdapter(GekkoNetAdapter* adapter)
 {
     _host = adapter;

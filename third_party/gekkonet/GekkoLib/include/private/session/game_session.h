@@ -21,6 +21,8 @@ namespace Gekko {
 
         void SetLocalDelay(i32 player, u8 delay) override;
 
+        void SetLocalDelayNoFill(i32 player, u8 delay) override;
+
         void SetRunahead(u8 runahead) override;
 
         void SetNetAdapter(GekkoNetAdapter* adapter) override;

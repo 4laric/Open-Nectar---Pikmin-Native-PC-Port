@@ -115,6 +115,14 @@ void Gekko::SyncSystem::SetLocalDelay(Handle player, u8 delay)
 	_input_buffers[player].SetDelay(delay);
 }
 
+void Gekko::SyncSystem::SetLocalDelayNoFill(Handle player, u8 delay)
+{
+	if (player >= _num_players || player < 0) {
+		return;
+	}
+	_input_buffers[player].SetDelayNoFill(delay);
+}
+
 u8 Gekko::SyncSystem::GetLocalDelay(Handle player)
 {
 	return _input_buffers[player].GetDelay();

@@ -86,6 +86,22 @@ victim had already exited; and a sync or disconnect run fails when a peer
 armed a test stall that applies to it ('test stall: armed ... this peer
 stalls') but never logged 'test stall: begin'. The stall durations are
 printed.
+
+M5c lane B (issue #887) link profiles and adaptive delay: --net-profile
+clean60|jitter|spikes|ramp (or --proxy-args for a custom one) starts the
+netplay_impair_proxy test tool (--proxy-exe; built in netplay builds) on
+--proxy-port (default host port + 1) and points the joiner at it, so both
+directions of every datagram (handshake, GekkoNet, bulk) cross the same
+impaired link whatever the executable: a baseline on an older exe sees the
+same link as the lane exe. The in-exe lossy knobs stay at 0 in that mode.
+Profiles (one-way ms per direction): clean60 = 30 (RTT 60); jitter = 30 +
+uniform [0,60] (60 +/- 30) with 2% loss; spikes = 30 plus a 250-400 ms link
+block every ~20 s; ramp = 20 ms, rising 30-120 s to 80 ms (RTT 40 -> 160),
+held to 160 s, back to 20 ms by 200 s. The summary prints each peer's
+adaptive-delay line, delay changes, final stats, delay timeline and
+frame-time histogram (lane exe) or the exit stall line (any exe), plus the
+proxy's block lines. PIKMIN_NETPLAY_ADAPTIVE_DELAY and
+PIKMIN_NETPLAY_TEST_DELAY_SCHEDULE pass through --env/--env-host/--env-join.
 """
 
 import argparse
@@ -386,8 +402,19 @@ SCRUB_KEYS = (
     "PIKMIN_NETPLAY_TEST_STALL_AT",
     "PIKMIN_NETPLAY_TEST_STALL_ROLE",
     "PIKMIN_NETPLAY_TEST_STALL_SLICE_MS",
+    # M5c lane B: a stale export must never pin or script the delay.
+    "PIKMIN_NETPLAY_ADAPTIVE_DELAY",
+    "PIKMIN_NETPLAY_TEST_DELAY_SCHEDULE",
     "NECTAR_CARD_DEBUG",
 )
+
+# M5c lane B (issue #887): netplay_impair_proxy link profiles.
+NET_PROFILES = {
+    "clean60": ["--lat", "30"],
+    "jitter": ["--lat", "30", "--jit", "60", "--loss", "2"],
+    "spikes": ["--lat", "30", "--spikes", "20000:250:400"],
+    "ramp": ["--sched", "0:20,30:20,120:80,160:80,200:20"],
+}
 
 
 def launch(exe, run, boot, extra_args, env_extra, stdout_log, unthrottled=True):
@@ -521,6 +548,12 @@ def main(argv=None):
     p.add_argument("--jitter-ms", type=float, default=0.0)
     p.add_argument("--loss-pct", type=float, default=0.0)
     p.add_argument("--impair-seed", type=int, default=7)
+    p.add_argument("--net-profile", choices=sorted(NET_PROFILES), default=None,
+                   help="M5c: impair the link through netplay_impair_proxy (see the docstring)")
+    p.add_argument("--proxy-args", type=str, default=None,
+                   help="M5c: custom netplay_impair_proxy arguments (instead of --net-profile)")
+    p.add_argument("--proxy-exe", type=Path, default=None, help="M5c: netplay_impair_proxy.exe")
+    p.add_argument("--proxy-port", type=int, default=None, help="M5c: proxy listen port (host port + 1)")
     p.add_argument("--timeout", type=float, default=900)
     p.add_argument("--handshake-timeout-ms", type=int, default=30000)
     p.add_argument("--env", nargs="*", default=[], metavar="K=V", help="extra env for both peers")
@@ -761,7 +794,20 @@ def main(argv=None):
 
     join_exe = a.exe_b.resolve() if a.exe_b is not None else a.exe.resolve()
     host_args = ["--netplay-host", str(a.host_port)] + list(a.exe_args)
-    join_args = ["--netplay-join", f"127.0.0.1:{a.host_port}"] + list(a.exe_args)
+    join_port = a.host_port
+    proxy_cmd = None
+    proxy_log = out / f"{tag}impair_proxy.log"
+    if a.net_profile is not None or a.proxy_args is not None:
+        # M5c lane B: the joiner talks to the proxy, the proxy to the host.
+        if a.proxy_exe is None or not a.proxy_exe.exists():
+            raise SystemExit("--net-profile/--proxy-args need --proxy-exe (netplay_impair_proxy.exe)")
+        if a.latency_ms or a.jitter_ms or a.loss_pct:
+            raise SystemExit("--net-profile replaces --latency-ms/--jitter-ms/--loss-pct (leave them 0)")
+        join_port = a.proxy_port if a.proxy_port is not None else a.host_port + 1
+        pargs = NET_PROFILES[a.net_profile] if a.net_profile is not None else a.proxy_args.split()
+        proxy_cmd = [str(a.proxy_exe.resolve()), "--listen", str(join_port), "--upstream", str(a.host_port),
+                     "--seed", str(a.impair_seed), "--run-seconds", str(int(a.timeout) + 120)] + list(pargs)
+    join_args = ["--netplay-join", f"127.0.0.1:{join_port}"] + list(a.exe_args)
 
     stop = threading.Event()
 
@@ -813,7 +859,15 @@ def main(argv=None):
     host_proc = join_proc = None
     host_out = join_out = None
     start = time.time()
+    proxy_proc = None
+    proxy_out = None
     try:
+        if proxy_cmd is not None:
+            proxy_out = open(proxy_log, "w")
+            proxy_proc = subprocess.Popen(proxy_cmd, stdout=proxy_out, stderr=subprocess.STDOUT,
+                                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            print(f"run_pair: impair proxy pid {proxy_proc.pid}: {' '.join(proxy_cmd)}")
+            time.sleep(0.5)
         host_proc, host_out = launch(a.exe, host_run, host_boot, host_args, host_extra, host_log,
                                        unthrottled=not a.throttled)
         # Stagger the joiner slightly so the host's socket is bound first.
@@ -915,10 +969,20 @@ def main(argv=None):
                     f.close()
             except OSError:
                 pass
-        for proc in (host_proc, join_proc):
+        for proc in (host_proc, join_proc, proxy_proc):
             try:
                 if proc is not None and proc.poll() is None:
                     proc.kill()
+            except OSError:
+                pass
+        if proxy_proc is not None:
+            try:
+                proxy_proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+        if proxy_out is not None:
+            try:
+                proxy_out.close()
             except OSError:
                 pass
     secs = time.time() - start
@@ -1060,6 +1124,35 @@ def main(argv=None):
         if armed and not begins:
             stall_fail.append(f"{who} armed a test stall for itself but never stalled "
                               "(no 'test stall: begin' line)")
+
+    # M5c lane B: adaptive delay, stall stats and the link proxy.
+    ad_needles = ("[netplay] adaptive delay:", "[netplay] delay change:", "[netplay] delay hold at",
+                  "[netplay] stats final:", "[netplay] delay timeline:", "[netplay] frame-time histogram",
+                  "[netplay] auto delay:", "[netplay] session started:")
+    for who, log in (("host", host_log), ("join", join_log)):
+        try:
+            text = Path(log).read_text(errors="replace").splitlines()
+        except OSError:
+            text = []
+        changes = [ln for ln in text if "[netplay] delay change:" in ln]
+        many = len(changes) > 40
+        for ln in text:
+            if any(n in ln for n in ad_needles) and not ("[netplay] delay change:" in ln and many):
+                print(f"run_pair: {who}: {ln.strip()}")
+        if many:
+            print(f"run_pair: {who}: {len(changes)} delay changes (first/last shown)")
+            for ln in changes[:5] + changes[-5:]:
+                print(f"run_pair: {who}: {ln.strip()}")
+        exits = [ln for ln in text if "[netplay] wall=" in ln and " stall=" in ln]
+        if exits:
+            print(f"run_pair: {who}: {exits[-1].strip()}")
+    if proxy_cmd is not None:
+        try:
+            for ln in Path(proxy_log).read_text(errors="replace").splitlines():
+                if ln.startswith(("[impair] block", "[impair] done", "[impair] listening")):
+                    print(f"run_pair: proxy: {ln.strip()}")
+        except OSError:
+            print(f"run_pair: proxy log missing: {proxy_log}")
 
     ok = True
     if a.expect in ("sync", "disconnect"):

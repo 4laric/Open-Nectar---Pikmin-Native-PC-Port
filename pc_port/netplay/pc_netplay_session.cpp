@@ -82,6 +82,7 @@
 #include "netplay/pc_netplay_session.h"
 
 #include "netplay/pc_netplay_camlead.h"
+#include "netplay/pc_netplay_adaptive.h"
 #include "netplay/pc_netplay_det.h"
 #include "netplay/pc_netplay_gekko_input.h"
 #include "netplay/pc_netplay_ice.h"
@@ -523,8 +524,16 @@ uint64_t sSaves = 0;
 // only accepted when it targets the session's current frame (InputBuffer
 // drops non-sequential frames), so the driver submits at most one input per
 // Advance (sSubmitted == sAdvances once started) and consumes one script
-// record / pad sample per submit.
+// record / pad sample per submit. M5c lane B: a count of local inputs added
+// (a delay increase adds several in one turn); the gate is sNextLand below.
 uint64_t sSubmitted = 0;
+// M5c lane B (issue #887): the frame the next local input lands on
+// (GekkoNet's local last-received frame + 1; pc_netplay_adaptive.h has the
+// transition arithmetic). A submit is due when sNextLand == sAdvances +
+// sCfg.localDelay, which is exactly the old sSubmitted == sAdvances gate
+// while the delay never changes. The B1 HOLD gate, the RESUME catch-up and
+// the host's hold-frame check read it instead of sSubmitted + localDelay.
+uint64_t sNextLand = 0;
 double sRunStartMs = 0;
 double sNextTurnMs = 0;
 bool sAheadLogged = false;
@@ -720,6 +729,8 @@ void randstate_embed_on_submit(PcNetplayInput& local)
 	++sRandNextFrag;
 }
 
+void adaptive_note_resume(uint64_t frame); // M5c lane B, defined with the adaptive delay below
+
 // Tick-start step (both peers): apply a completed snapshot before the
 // sim runs. Must run before inject_input() / app->idle() for this frame.
 void randstate_apply_before_tick(int frame)
@@ -753,6 +764,7 @@ void randstate_apply_before_tick(int frame)
 		sHeldLogged = false;
 		sResumeHave = false;
 		++sHoldsDone;
+		adaptive_note_resume((uint64_t)frame); // M5c lane B: settle span after the freeze
 	}
 	if (!sRandReasm.has_pending()) return;
 	if (frame < (int)sRandReasm.pending_frame()) return; // not yet (unreachable; defensive)
@@ -826,7 +838,8 @@ void hold_on_advance_begin(const PcNetplayInput& hostInput, int frame)
 	printf("[netplay] hold at frame=%d freeze-after=%u\n", frame, sHoldFrame + kHoldLeadFrames - 1);
 	if (sCfg.isHost) {
 		// Verify the frame arithmetic against GekkoNet: the flagged input
-		// was submit index k with local delay d, so it must be frame k + d.
+		// landed on the frame recorded when it was added (sNextLand; submit
+		// index k plus delay d while the delay never changed).
 		printf("[netplay] hold frame check: host flagged submit frame=%llu, gekko frame=%d (%s)\n",
 		       (unsigned long long)sHoldExpectFrame, frame,
 		       sHoldExpectFrame == (uint64_t)frame ? "match" : "MISMATCH");
@@ -851,10 +864,14 @@ bool hold_frozen() { return sHolding && sAdvances >= (uint64_t)sHoldFrame + kHol
 
 // B1 submit gate: keep submitting while the next local input lands on a
 // frame <= H+11; then stop until the RESUME snapshot is in hand.
+// M5c lane B: "the next local input" is sNextLand, the frame it lands on
+// whatever delay changes came before (the adaptive delay never changes the
+// delay while a hold is in progress, and never above 8, so the kHoldLeadFrames
+// argument above is unchanged).
 bool hold_blocks_submit()
 {
 	if (!sHolding) return false;
-	const uint64_t next = sSubmitted + sCfg.localDelay;
+	const uint64_t next = sNextLand;
 	if (next < (uint64_t)sHoldFrame + kHoldLeadFrames) return false;
 	return !sResumeHave;
 }
@@ -871,11 +888,14 @@ bool hold_blocks_submit()
 // Afterwards the ordinary gate resumes at sAdvances == H+13, whose submit
 // lands on H+13+delay. A peer that got the RESUME snapshot before it
 // stopped (sSubmitted == sAdvances) simply keeps using the ordinary gate.
+// M5c lane B: "sSubmitted + delay" is sNextLand (the frozen peer's next input
+// would land on H+12, the current frame); after the catch-up sNextLand is
+// H+13+delay, so the ordinary gate again opens at sAdvances == H+13.
 bool hold_resume_catchup_due()
 {
 	if (!sHolding || !sResumeHave || sCfg.localDelay == 0) return false;
 	const uint64_t resumeFrame = (uint64_t)sHoldFrame + kHoldLeadFrames;
-	return sAdvances == resumeFrame && sSubmitted + sCfg.localDelay == resumeFrame;
+	return sAdvances == resumeFrame && sNextLand == resumeFrame;
 }
 
 // B1 host: flag exactly one submitted input when the link goes down (or on
@@ -892,7 +912,7 @@ void hold_host_maybe_flag(PcNetplayInput& local)
 	sHoldAtFirstInput = false;
 	local.flags |= pc_netplay_gekko::kFlagsHold;
 	sHoldRequested = true;
-	sHoldExpectFrame = sSubmitted + sCfg.localDelay;
+	sHoldExpectFrame = sNextLand; // M5c lane B: the frame this input lands on
 	printf("[netplay] hold requested: host link down; HOLD flag on submit=%llu (frame %llu)\n",
 	       (unsigned long long)sSubmitted, (unsigned long long)sHoldExpectFrame);
 	fflush(stdout);
@@ -2067,10 +2087,487 @@ void inject_neutral_pad(int pad)
 
 uint32_t fold_hash64(uint64_t v) { return (uint32_t)(v ^ (v >> 32)); }
 
+// ---- M5c lane B: session stats and adaptive input delay (issue #887) ----
+//
+// Policy and arithmetic: pc_netplay_adaptive.h. Wall-clock only: nothing
+// here reads or writes sim state, and the only GekkoNet calls are the local
+// delay setters and gekko_network_stats. Each peer reports its own counted
+// stalls to the other every 250 ms (kHsAdvice on the handshake channel,
+// unreliable, cumulative) and adapts its own delay to the stalls the other
+// reports (the remote waits when this peer's inputs arrive late), less this
+// peer's own slow ticks. A delay change moves which frame this peer's next
+// inputs land on; every frame still gets exactly one local input, built in
+// frame order (one scripted record per frame), and both peers advance a
+// frame only with its confirmed inputs, so both peers run identical inputs
+// and a scripted pair replays a fixed-delay run's per-frame inputs exactly
+// (record F - d0 on frame F).
+//
+//   PIKMIN_NETPLAY_ADAPTIVE_DELAY  unset/1: on in real-time sessions (off in
+//                                  unthrottled test runs, where every turn
+//                                  that finds no input is a "stall");
+//                                  0: off (the delay stays where it started);
+//                                  force: on even when unthrottled (tests)
+//   PIKMIN_NETPLAY_TEST_DELAY_SCHEDULE=<frame>:<delay>[,...]  test only:
+//                                  forced changes at those frames (the
+//                                  controller is off; works unthrottled)
+//   PIKMIN_NETPLAY_STALL_TRACE=1   diagnostic: one line per stall event and
+//                                  per tick of 50 ms or more
+//
+// Freeze rules (no change at all, evidence still gathered): a B1 HOLD in
+// progress or requested (the hold arithmetic keys on the delay), a lane S load
+// window (its stalls are load time), a shrink still in progress, and the
+// settle span: the first kAdaptiveWarmupFrames of the session (the two
+// schedules settle after the first load) and after each B1 RESUME (both
+// schedules restart from the freeze, one peer a one-way trip later, so the
+// first frames wait the way a session start does). A HOLD, a load window
+// and a settle span also pause the controller's clock, and stalls inside a
+// load window or a settle span are never reported. The delay stays in 1..8:
+// B1's kHoldLeadFrames (12) and lane S's load-window close frame both
+// assume a delay of at most 8.
+constexpr uint64_t kAdaptiveWarmupFrames = 150;
+constexpr double kRttSampleMs = 500.0; // GekkoNet's NetworkHealth period
+constexpr double kAdviceMs = 250.0;    // advice period (pc_netplay_adaptive::Policy::reportPeriodMs)
+constexpr uint8_t kHsAdvice = 0x40;    // handshake-channel type: stable header + Advice payload
+pc_netplay_adaptive::SessionStats sStats;
+pc_netplay_adaptive::DelayController sDelayCtl;
+bool sAdaptiveConfigured = false;
+bool sAdaptive = false;         // the controller may change the delay
+const char* sAdaptiveWhy = "";  // why it is on/off (log)
+std::vector<pc_netplay_adaptive::ScheduleStep> sDelaySched;
+size_t sDelaySchedIdx = 0;
+unsigned sDelayStart = 0;       // d0, the session's first delay
+unsigned sDelayLow = 0;
+unsigned sDelayHigh = 0;
+uint64_t sDelayUps = 0;
+uint64_t sDelayDowns = 0;
+std::string sDelayTimeline;     // "+<s>s@<frame>:<delay> ..."
+std::string sPendingWhy;        // reason of a growth submitted this turn
+uint64_t sSettleUntil = 0;      // settle span: frames below this (warm-up, after a B1 RESUME)
+bool sStallOpen = false;
+double sStallStartMs = 0;
+double sStallDurMs = 0;
+bool sStallExcluded = false;
+double sLastFrameEndMs = 0;     // end of the last Advance (its frame was presented)
+double sRttNextMs = 0;
+bool sStatsFinalDone = false;
+// Counted local stalls (what this peer reports) and the advice exchange.
+double sLateMs = 0;
+uint32_t sLateEvents = 0;
+uint32_t sAdviceSeq = 0;
+double sAdviceNextMs = 0;
+pc_netplay_adaptive::AdviceReceiver sAdviceIn;
+double sPeerLateMs = 0; // lateness the peer reported (this peer's inputs late there)
+double sSelfOverrunMs = 0; // own input lateness vs the 30 Hz schedule, outside load windows
+double sNextDueMs = 0;     // when the next session turn is due to start (pacing schedule)
+bool sHaveDue = false;
+bool sPrevTurnStalled = true;
+double sOwnLagPrev = 0;
+float sStallAhead = 0;     // gekko_frames_ahead() when the open stall began (trace)
+int sStallTrace = -1;      // PIKMIN_NETPLAY_STALL_TRACE=1: one line per stall event / slow tick
+
+bool stall_trace()
+{
+	if (sStallTrace < 0) {
+		const char* e = std::getenv("PIKMIN_NETPLAY_STALL_TRACE");
+		sStallTrace = (e != nullptr && e[0] == '1' && e[1] == '\0') ? 1 : 0;
+	}
+	return sStallTrace == 1;
+}
+
+double session_s(double nowMs) { return sSessionStartMs > 0 ? (nowMs - sSessionStartMs) / 1000.0 : 0.0; }
+
+void adaptive_timeline_add(double nowMs, uint64_t frame, unsigned delay)
+{
+	char cell[64];
+	snprintf(cell, sizeof(cell), "%s+%.1fs@%llu:%u", sDelayTimeline.empty() ? "" : " ", session_s(nowMs),
+	         (unsigned long long)frame, delay);
+	sDelayTimeline += cell;
+	if (delay < sDelayLow) sDelayLow = delay;
+	if (delay > sDelayHigh) sDelayHigh = delay;
+}
+
+// Session start (after the delay, including DELAY=auto, is final).
+void adaptive_configure()
+{
+	sAdaptiveConfigured = true;
+	sStats.reset();
+	sDelayStart = sCfg.localDelay;
+	sDelayLow = sDelayHigh = sCfg.localDelay;
+	sDelayUps = sDelayDowns = 0;
+	sDelayTimeline.clear();
+	sStallOpen = false;
+	sLastFrameEndMs = 0;
+	sRttNextMs = 0;
+	sStatsFinalDone = false;
+	sLateMs = 0;
+	sLateEvents = 0;
+	sAdviceSeq = 0;
+	sAdviceNextMs = 0;
+	sAdviceIn.reset();
+	sPeerLateMs = 0;
+	sSelfOverrunMs = 0;
+	sNextDueMs = 0;
+	sHaveDue = false;
+	sPrevTurnStalled = true;
+	sOwnLagPrev = 0;
+	sNextLand = sCfg.localDelay; // the first add fills frames 0..d-1 with GekkoNet's empty input
+	sSettleUntil = kAdaptiveWarmupFrames;
+	pc_netplay_adaptive::Policy pol;
+	sDelayCtl.configure(pol);
+	sDelayCtl.start(now_ms());
+	sDelaySched.clear();
+	sDelaySchedIdx = 0;
+	std::string err;
+	const char* sched = getenv_nonempty("PIKMIN_NETPLAY_TEST_DELAY_SCHEDULE");
+	if (sched != nullptr && !pc_netplay_adaptive::parse_schedule(sched, pol.minDelay, pol.maxDelay, &sDelaySched, &err)) {
+		printf("[netplay] adaptive delay: test schedule ignored (%s)\n", err.c_str());
+		sDelaySched.clear();
+	}
+	const char* mode = getenv_nonempty("PIKMIN_NETPLAY_ADAPTIVE_DELAY");
+	const bool off = mode != nullptr && (std::strcmp(mode, "0") == 0 || std::strcmp(mode, "off") == 0);
+	const bool force = mode != nullptr && std::strcmp(mode, "force") == 0;
+	if (!sDelaySched.empty()) {
+		sAdaptive = false;
+		sAdaptiveWhy = "off (test schedule drives the delay)";
+	} else if (off) {
+		sAdaptive = false;
+		sAdaptiveWhy = "off (PIKMIN_NETPLAY_ADAPTIVE_DELAY=0)";
+	} else if (pc_netplay_unthrottled() && !force) {
+		sAdaptive = false;
+		sAdaptiveWhy = "off (unthrottled test run)";
+	} else {
+		sAdaptive = true;
+		sAdaptiveWhy = force ? "on (forced)" : "on";
+	}
+	printf("[netplay] adaptive delay: %s start=%u range=%u..%u up=%.0fms stall in %.1fs "
+	       "down=%.0fs clean+rtt schedule=%llu steps\n",
+	       sAdaptiveWhy, sCfg.localDelay, pol.minDelay, pol.maxDelay, pol.upStallMs, pol.upWindowMs / 1000.0,
+	       pol.downHoldMs / 1000.0, (unsigned long long)sDelaySched.size());
+	fflush(stdout);
+}
+
+void adaptive_log_change(unsigned from, unsigned to, const std::string& why)
+{
+	const double now = now_ms();
+	if (to > from) ++sDelayUps;
+	else ++sDelayDowns;
+	adaptive_timeline_add(now, sAdvances, to);
+	printf("[netplay] delay change: %u -> %u at frame=%llu next-land=%llu t=%.1fs (%s)\n", from, to,
+	       (unsigned long long)sAdvances, (unsigned long long)sNextLand, session_s(now), why.c_str());
+	fflush(stdout);
+}
+
+// B1 RESUME applied at the tick start of `frame` (both peers): the settle
+// span starts again, as after the first load (see the freeze rules above).
+void adaptive_note_resume(uint64_t frame)
+{
+	if (!sAdaptiveConfigured) return;
+	sSettleUntil = frame + kAdaptiveWarmupFrames;
+	printf("[netplay] adaptive delay: settle after resume until frame=%llu (stalls not reported, no change)\n",
+	       (unsigned long long)sSettleUntil);
+	fflush(stdout);
+}
+
+// Why no change may start now (nullptr: free to change).
+const char* adaptive_frozen()
+{
+	if (sHolding || sHoldRequested) return "hold";
+	if (sLgWindow.is_open()) return "load window";
+	if (!pc_netplay_adaptive::submit_due(sNextLand, sAdvances, sCfg.localDelay)) return "transition";
+	if (sAdvances < sSettleUntil) return "settle";
+	return nullptr;
+}
+
+// Target delay for this submit turn (== the current delay: nothing to do).
+// Called only on a turn whose submit is due.
+unsigned adaptive_target()
+{
+	const unsigned cur = sCfg.localDelay;
+	sPendingWhy.clear();
+	if (!sDelaySched.empty()) {
+		if (sDelaySchedIdx >= sDelaySched.size()) return cur;
+		const pc_netplay_adaptive::ScheduleStep& st = sDelaySched[sDelaySchedIdx];
+		if (sAdvances < st.frame) return cur;
+		// A scheduled step waits out a hold / load window / shrink.
+		if (sHolding || sHoldRequested || sLgWindow.is_open()) return cur;
+		++sDelaySchedIdx;
+		char buf[64];
+		snprintf(buf, sizeof(buf), "test schedule step %llu for frame %llu", (unsigned long long)sDelaySchedIdx,
+		         (unsigned long long)st.frame);
+		sPendingWhy = buf;
+		return st.delay;
+	}
+	if (!sAdaptive) return cur;
+	const char* frozen = adaptive_frozen();
+	pc_netplay_adaptive::Decision d = sDelayCtl.decide(now_ms(), cur, frozen != nullptr);
+	if (!d.changed) {
+		if (!d.reason.empty()) {
+			printf("[netplay] delay hold at %u: %s\n", cur, d.reason.c_str());
+			fflush(stdout);
+		}
+		return cur;
+	}
+	sPendingWhy = d.reason;
+	return d.target;
+}
+
+// A shrink: GekkoNet touches no input; the next (cur - target) turns submit
+// nothing, until sNextLand == sAdvances + target.
+void adaptive_shrink(unsigned target)
+{
+	const unsigned from = sCfg.localDelay;
+	gekko_set_local_delay_nofill(sGekko, sLocalHandle, (unsigned char)target);
+	sCfg.localDelay = target;
+	adaptive_log_change(from, target, sPendingWhy);
+}
+
+// The submit of this turn: n == 1 normally; n == 1 + k grows the delay by k
+// (see pc_netplay_adaptive.h, SubmitGate). Each input lands on sNextLand.
+// Scripted inputs consume one record per frame; a live pad repeats this
+// turn's sample on the k extra frames (a held state, never a release plus a
+// second press).
+void submit_local_inputs(unsigned n)
+{
+	const unsigned from = sCfg.localDelay;
+	PcNetplayInput firstPad;
+	for (unsigned j = 0; j < n; ++j) {
+		if (j > 0) gekko_set_local_delay_nofill(sGekko, sLocalHandle, (unsigned char)(from + j));
+		PcNetplayInput local = (j == 0 || sScriptActive) ? build_local_input() : firstPad;
+		if (j == 0) firstPad = local;
+		const uint64_t land = sNextLand;
+		// M4a: the host embeds the next snapshot fragment here (the
+		// joiner never sets chunk bits). Input-build ownership stays
+		// in this function; pacing/handshake below are untouched.
+		randstate_embed_on_submit(local);
+		// B1: the host flags exactly one input when its link is down.
+		hold_host_maybe_flag(local);
+		uint8_t wire[16];
+		pc_netplay_input_encode(local, wire);
+		gekko_add_local_input(sGekko, sLocalHandle, wire);
+		++sSubmitted;
+		++sNextLand;
+		if (sHolding && land == (uint64_t)sHoldFrame + kHoldLeadFrames - 1) {
+			printf("[netplay] hold: last pre-hold input frame=%llu (submit=%llu delay=%u)\n",
+			       (unsigned long long)land, (unsigned long long)(sSubmitted - 1), from + j);
+			fflush(stdout);
+		}
+	}
+	if (n > 1) {
+		sCfg.localDelay = from + n - 1;
+		adaptive_log_change(from, sCfg.localDelay, sPendingWhy);
+	}
+}
+
+// A completed Advance: one presented frame. `spansHold` drops the interval
+// that contains a frozen B1 hold (held time is reported as held=).
+void adaptive_note_frame(bool spansHold)
+{
+	const double now = now_ms();
+	if (sLastFrameEndMs > 0 && !spansHold) sStats.add_frame(now - sLastFrameEndMs);
+	sLastFrameEndMs = now;
+}
+
+void adaptive_close_stall()
+{
+	if (!sStallOpen) return;
+	sStallOpen = false;
+	pc_netplay_adaptive::StallEvent e;
+	e.startMs = sStallStartMs;
+	e.durMs = sStallDurMs;
+	e.excluded = sStallExcluded;
+	sStats.add_stall(e);
+	// Reported to the peer (its inputs were late here), never fed to this
+	// peer's own controller.
+	const bool counted = pc_netplay_adaptive::stall_counted(e, sDelayCtl.policy().hitchMs);
+	if (counted) {
+		sLateMs += e.durMs;
+		++sLateEvents;
+	}
+	if (stall_trace()) {
+		printf("[netplay] stall-trace: stall frame=%llu t=%.3fs dur=%.1fms excluded=%d counted=%d ahead=%.2f delay=%u\n",
+		       (unsigned long long)sAdvances, session_s(e.startMs), e.durMs, (int)e.excluded, (int)counted,
+		       sStallAhead, sCfg.localDelay);
+		fflush(stdout);
+	}
+}
+
+// Own lateness. This peer produces its next input at the start of each turn,
+// and the 30 Hz schedule says when that turn is due (sNextDueMs, set by the
+// pacing block of the previous advance turn). A turn that starts late
+// because of this peer (a long tick, a late wake-up of a loaded machine)
+// delays its input by that much, and the peer will report the wait. The lag
+// only counts where it grows (a catch-up run of turns after one long tick
+// shrinks it again), never after a stall turn (then the lag is the peer's
+// doing: the baseline resets), and not inside a load window (nobody reports
+// those stalls). The controller subtracts it from the reported lateness.
+void adaptive_note_turn_start(double turnStartMs)
+{
+	if (!sAdaptiveConfigured || !sGekkoStarted || sAdvances == 0 || pc_netplay_unthrottled()) return;
+	const double lag = (sHaveDue && turnStartMs > sNextDueMs) ? turnStartMs - sNextDueMs : 0.0;
+	if (sPrevTurnStalled || !sHaveDue) {
+		sOwnLagPrev = lag;
+		return;
+	}
+	const double grew = lag - sOwnLagPrev;
+	sOwnLagPrev = lag;
+	if (grew <= 0 || sLgWindow.is_open()) return;
+	sSelfOverrunMs += grew;
+	sDelayCtl.add_self_overrun(turnStartMs, grew);
+	if (stall_trace() && grew >= 20.0) {
+		printf("[netplay] stall-trace: own lag frame=%llu t=%.3fs +%.1fms (behind schedule %.1fms)\n",
+		       (unsigned long long)sAdvances, session_s(turnStartMs), grew, lag);
+		fflush(stdout);
+	}
+}
+
+// End of a session turn: the pacing's next due time (advance turns only).
+void adaptive_note_turn_end(bool advanced, bool haveDue, double nextDueMs)
+{
+	sPrevTurnStalled = !advanced;
+	if (advanced && haveDue) {
+		sNextDueMs = nextDueMs;
+		sHaveDue = true;
+	}
+}
+
+// After each Advance's tick (trace only).
+void adaptive_note_tick(double tickMs)
+{
+	const double now = now_ms();
+	if (stall_trace() && tickMs >= 50.0) {
+		printf("[netplay] stall-trace: slow tick frame=%llu t=%.3fs tick=%.1fms window=%d\n",
+		       (unsigned long long)sAdvances, session_s(now), tickMs, (int)sLgWindow.is_open());
+		fflush(stdout);
+	}
+}
+
+void hs_send(const uint8_t* msg, size_t len); // defined with the handshake below
+
+// Every kAdviceMs once GekkoNet started: this peer's cumulative counted
+// stalls, delay and RTT p50 on the handshake channel (unreliable: the totals
+// are cumulative, so a lost datagram loses nothing but time).
+void adaptive_send_advice(double nowMs)
+{
+	if (nowMs < sAdviceNextMs) return;
+	sAdviceNextMs = nowMs + kAdviceMs;
+	pc_netplay_adaptive::Advice a;
+	a.seq = ++sAdviceSeq;
+	a.lateMs = (uint32_t)(sLateMs + 0.5);
+	a.lateEvents = sLateEvents;
+	a.delay = (uint8_t)sCfg.localDelay;
+	const double p50 = sStats.rtt_percentile(50);
+	a.rttP50 = p50 < 0 ? 0xFFFF : (uint16_t)(p50 > 65534 ? 65534 : p50);
+	a.flags = sAdaptive ? 1 : 0;
+	uint8_t msg[kHsHeaderLen + pc_netplay_adaptive::kAdvicePayload];
+	memcpy(msg, pc_netplay_xfer::kHsMagic, 4);
+	msg[4] = kHsAdvice;
+	const uint16_t proto = local_protocol_version();
+	msg[5] = (uint8_t)(proto & 0xFF);
+	msg[6] = (uint8_t)((proto >> 8) & 0xFF);
+	pc_netplay_adaptive::advice_encode(a, msg + kHsHeaderLen);
+	hs_send(msg, sizeof(msg));
+}
+
+// A kHsAdvice datagram from the peer (answer_handshake_in_session).
+void adaptive_on_advice(const uint8_t* payload, size_t len)
+{
+	if (!sAdaptiveConfigured) return;
+	pc_netplay_adaptive::Advice a;
+	if (!pc_netplay_adaptive::advice_decode(payload, len, &a)) return;
+	double delta = 0;
+	uint32_t events = 0;
+	if (!sAdviceIn.take(a, &delta, &events)) return; // stale or duplicate
+	const double now = now_ms();
+	sDelayCtl.add_report(now);
+	if (delta > 0) {
+		sPeerLateMs += delta;
+		sDelayCtl.add_lateness(now, delta, events);
+	}
+}
+
+// A session turn without an Advance (not a frozen hold) that took durMs.
+void adaptive_note_stall_turn(double startMs, double durMs)
+{
+	if (sAdvances == 0) return; // before the first Advance: session start, not a stall
+	if (!sStallOpen) {
+		sStallOpen = true;
+		sStallStartMs = startMs;
+		sStallDurMs = 0;
+		// Never reported: a load window (load time, lane S), and the settle
+		// span, while the two 30 Hz schedules settle after the first load or
+		// after a B1 RESUME.
+		sStallExcluded = sLgWindow.is_open() || sAdvances < sSettleUntil;
+		sStallAhead = sGekko != nullptr ? gekko_frames_ahead(sGekko) : 0.0f;
+	}
+	sStallDurMs += durMs;
+}
+
+// Every session turn: RTT sampling.
+void adaptive_poll(double nowMs)
+{
+	if (sGekko == nullptr || !sGekkoStarted) return;
+	// A B1 HOLD (requested or in progress), a lane S load window or a settle
+	// span pauses the controller's clock: the paused span is no evidence
+	// either way (DelayController::note_pause).
+	if (sHolding || sHoldRequested || sLgWindow.is_open() || sAdvances < sSettleUntil) sDelayCtl.note_pause(nowMs);
+	adaptive_send_advice(nowMs);
+	if (nowMs < sRttNextMs) return;
+	sRttNextMs = nowMs + kRttSampleMs;
+	GekkoNetworkStats st;
+	memset(&st, 0, sizeof(st));
+	gekko_network_stats(sGekko, 1 - sLocalHandle, &st);
+	if (st.avg_ping <= 0.0f && st.last_ping == 0) return; // no sample yet
+	sStats.add_rtt((double)st.last_ping);
+	pc_netplay_adaptive::RttSample s;
+	s.atMs = nowMs;
+	s.rttMs = (double)st.last_ping;
+	sDelayCtl.add_rtt(s);
+}
+
+void adaptive_stats_line(const char* tag)
+{
+	const double now = now_ms();
+	uint64_t n10 = 0;
+	double ms10 = 0;
+	sStats.recent(now, 10000.0, &n10, &ms10);
+	const pc_netplay_adaptive::FrameTimeHist& f = sStats.frames();
+	printf("[netplay] %s: t=%.1fs frame=%llu delay=%u (start %u, range %u..%u, up %llu down %llu) "
+	       "stalls=%llu total=%.0fms max=%.0fms excluded=%llu last10s=%llu/%.0fms reported=%.0fms "
+	       "own-lag=%.0fms peer: delay=%d late=%.0fms reports=%llu "
+	       "rtt last=%.0f p50=%.0f p95=%.0f jitter=%.1f samples=%llu "
+	       "frames=%llu p50=%.1f p95=%.1f p99=%.1f max=%.1f >50ms=%llu >100ms=%llu\n",
+	       tag, session_s(now), (unsigned long long)sAdvances, sCfg.localDelay, sDelayStart, sDelayLow, sDelayHigh,
+	       (unsigned long long)sDelayUps, (unsigned long long)sDelayDowns, (unsigned long long)sStats.stall_count(),
+	       sStats.stall_total_ms(), sStats.stall_max_ms(), (unsigned long long)sStats.stall_excluded(),
+	       (unsigned long long)n10, ms10, sLateMs, sSelfOverrunMs, sAdviceIn.have() ? (int)sAdviceIn.last().delay : -1, sPeerLateMs,
+	       (unsigned long long)sAdviceIn.reports(), sStats.rtt_last(), sStats.rtt_percentile(50), sStats.rtt_percentile(95),
+	       sStats.rtt_jitter(), (unsigned long long)sStats.rtt_samples(), (unsigned long long)f.count(),
+	       f.percentile(50), f.percentile(95), f.percentile(99), f.max_ms(), (unsigned long long)f.at_least(50.0),
+	       (unsigned long long)f.at_least(100.0));
+	fflush(stdout);
+}
+
+// Once per session, from stop_session (exit-after, disconnect, desync,
+// window close): the final figures, the delay timeline and the histogram.
+// "excluded" stalls (load window, first frames) are in every total but never
+// reported to the peer; "reported" is what this peer told the peer.
+void adaptive_final_stats()
+{
+	if (!sAdaptiveConfigured || sStatsFinalDone || sSessionStartMs <= 0) return;
+	sStatsFinalDone = true;
+	adaptive_close_stall();
+	adaptive_stats_line("stats final");
+	printf("[netplay] delay timeline: +0.0s@0:%u%s%s\n", sDelayStart, sDelayTimeline.empty() ? "" : " ",
+	       sDelayTimeline.c_str());
+	printf("[netplay] frame-time histogram (ms): %s\n", sStats.frames().summary().c_str());
+	fflush(stdout);
+}
+
 void loadguard_summary(); // M4 gap-fix lane S, defined with the load guard below
 
 void stop_session()
 {
+	adaptive_final_stats(); // M5c lane B: once per session; no-op unless the session started
 	loadguard_summary(); // lane S: once per session; no-op unless the session started
 	pc_netplay_camlead_session_end(); // M5c lane A: summary line, then inert
 	sInAdvance = false;
@@ -3376,6 +3873,11 @@ void answer_handshake_in_session()
 			continue;
 		// Session already agreed: ignore cross-version strays, never refuse.
 		if (hdrProto != local_protocol_version()) continue;
+		// M5c lane B: the peer's stall advice (adaptive delay).
+		if (hdrType == kHsAdvice) {
+			adaptive_on_advice(g.payload.data() + kHsHeaderLen, g.payload.size() - kHsHeaderLen);
+			continue;
+		}
 		uint8_t type   = 0;
 		uint16_t proto = 0;
 		Hello h;
@@ -3762,6 +4264,9 @@ void start_gekko_session()
 	}
 	printf("[netplay] session started: role=%s localHandle=%d delay=%u seed=%u\n",
 	       sCfg.isHost ? "host/P1" : "joiner/P2", sLocalHandle, sCfg.localDelay, sCfg.seed);
+	// M5c lane B: the delay is final here (numeric or DELAY=auto); the submit
+	// gate starts at it and the stats / controller start fresh.
+	adaptive_configure();
 	printf("[netplay] exe=%s\n", sExeHexStr.c_str());
 	printf("[netplay] config=%s\n", sCfgHexStr.c_str());
 	printf("[netplay] bootstrap=%s\n", sBootHexStr.c_str());
@@ -3897,6 +4402,7 @@ int handle_game_events(System* sys, BaseApp* app)
 			// earliest). Both peers execute the identical sequence.
 			sCurAdvanceFrame = (uint32_t)e->data.adv.frame; // B1: outbox entry frame
 			sCurAdvanceStartMs = now_ms();                  // B2 fix round 1 (C15): barrier I/O log
+			const uint64_t holdsBefore = sHoldsDone;        // M5c lane B: frame-time excludes a frozen hold
 			randstate_apply_before_tick(e->data.adv.frame);
 			// B1: HOLD flag in the host input (after the RESUME apply above).
 			hold_on_advance_begin(p0, e->data.adv.frame);
@@ -3928,6 +4434,7 @@ int handle_game_events(System* sys, BaseApp* app)
 			                     e->data.adv.rolling_back || e->data.adv.running_ahead);
 			app->idle();
 			loadguard_tick_end();
+			adaptive_note_tick(now_ms() - sLgTickStartMs); // M5c lane B: slow-tick trace
 			pc_netplay_det_profile_note_tick();
 			pc_input_log_tick_end();
 			pc_state_hash_tick_end();
@@ -3949,6 +4456,7 @@ int handle_game_events(System* sys, BaseApp* app)
 			++sSessionTicks;
 			++advances;
 			++sAdvances;
+			adaptive_note_frame(sHoldsDone != holdsBefore); // M5c lane B: presented-frame time
 			if (sCfg.exitAfter > 0 && sSessionTicks >= sCfg.exitAfter) {
 				const double nowW = now_ms();
 				// B1: frozen HOLD time is excluded from the stall %, tps and
@@ -4026,6 +4534,7 @@ int handle_game_events(System* sys, BaseApp* app)
 		       gekko_frames_ahead(sGekko), (unsigned long long)sSaves,
 		       (unsigned long long)sSubmitted, sHoldMs);
 		fflush(stdout);
+		adaptive_stats_line("stats"); // M5c lane B
 	}
 	return advances;
 }
@@ -4037,6 +4546,27 @@ int handle_game_events(System* sys, BaseApp* app)
 // so the default build and engine-free harnesses are unaffected.
 bool pc_netplay_randstate_stream_enabled(void) { return sCfg.active && sRandStream; }
 bool pc_netplay_is_host(void) { return sCfg.isHost; }
+
+// M5c lane B (issue #887): live figures for a HUD. Wall-clock state only.
+bool pc_netplay_live_stats(PcNetplayLiveStats* out)
+{
+	if (out == nullptr || sPhase != kSession || !sAdaptiveConfigured) return false;
+	uint64_t n10 = 0;
+	double ms10 = 0;
+	const double now = now_ms();
+	sStats.recent(now, 10000.0, &n10, &ms10);
+	out->delay = sCfg.localDelay;
+	out->adaptive = sAdaptive ? 1 : 0;
+	out->rttLastMs = (float)sStats.rtt_last();
+	out->rttP50Ms = (float)sStats.rtt_percentile(50);
+	out->jitterMs = (float)sStats.rtt_jitter();
+	out->stallsLast10s = (unsigned)n10;
+	out->stallMsLast10s = (float)ms10;
+	out->stallCount = (unsigned long long)sStats.stall_count();
+	out->stallTotalMs = (float)sStats.stall_total_ms();
+	out->stallOpen = sStallOpen ? 1 : 0;
+	return true;
+}
 // Host I/O side publish: encode the snapshot and queue its 16 fragments for
 // the next host submits. A publish that lands mid-transfer waits in a
 // one-deep queue (M1 fix) instead of restarting the cursor; the receiver
@@ -4524,6 +5054,7 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 	// kSession.
 	const bool unthrottled = pc_netplay_unthrottled();
 	const double turnStartMs = now_ms();
+	adaptive_note_turn_start(turnStartMs); // M5c lane B: own input lateness
 	// 1. Sample the local pad (pumps SDL via PADRead).
 	sys->mControllerMgr.update();
 	// 2-3. Build + submit the local input, at most one per Advance (B2).
@@ -4560,7 +5091,9 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 			gekko_set_local_delay(sGekko, sLocalHandle, 0);
 			gekko_add_local_input(sGekko, sLocalHandle, wire);
 			gekko_set_local_delay(sGekko, sLocalHandle, (unsigned char)sCfg.localDelay);
-			sSubmitted = landing + 1;
+			++sSubmitted;
+			// M5c lane B: H+12 plus the delay copies on H+13..H+12+delay.
+			sNextLand = landing + 1 + sCfg.localDelay;
 			// M5c lane A: frames landing..landing+delay all carry it.
 			for (uint64_t f = landing; f <= landing + sCfg.localDelay; ++f)
 				pc_netplay_camlead_note_local_input(f, local);
@@ -4569,28 +5102,21 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 			       (unsigned long long)landing, sCfg.localDelay, (unsigned long long)(landing + 1),
 			       (unsigned long long)(landing + sCfg.localDelay));
 			fflush(stdout);
-		} else if (sGekkoStarted && sSubmitted == sAdvances && !hold_blocks_submit()) {
-			PcNetplayInput local = build_local_input();
-			// M4a: the host embeds the next snapshot fragment here (the
-			// joiner never sets chunk bits). Input-build ownership stays
-			// in this function; pacing/handshake below are untouched.
-			randstate_embed_on_submit(local);
-			// B1: the host flags exactly one input when its link is down.
-			hold_host_maybe_flag(local);
-			uint8_t wire[16];
-			pc_netplay_input_encode(local, wire);
-			gekko_add_local_input(sGekko, sLocalHandle, wire);
-			++sSubmitted;
-			// M5c lane A: the lead camera replays this peer's submitted
-			// inputs until the sim applies them (frame = submit + delay).
-			pc_netplay_camlead_note_local_input(sSubmitted - 1 + sCfg.localDelay, local);
-			if (sHolding && sSubmitted - 1 + sCfg.localDelay
-			                    == (uint64_t)sHoldFrame + kHoldLeadFrames - 1) {
-				printf("[netplay] hold: last pre-hold input frame=%llu (submit=%llu delay=%u)\n",
-				       (unsigned long long)(sSubmitted - 1 + sCfg.localDelay),
-				       (unsigned long long)(sSubmitted - 1), sCfg.localDelay);
-				fflush(stdout);
+		} else if (sGekkoStarted && !hold_blocks_submit()) {
+			// M5c lane B: the submit is due when the next local input lands
+			// on sAdvances + delay (the old sSubmitted == sAdvances gate while
+			// the delay stays put). On a due turn the adaptive delay (or the
+			// test schedule) may shrink the delay, which skips this turn's
+			// submit and the next ones until due again, or grow it, which
+			// adds one input per new frame now (submit_local_inputs).
+			unsigned grow = 0;
+			if (pc_netplay_adaptive::submit_due(sNextLand, sAdvances, sCfg.localDelay)) {
+				const unsigned target = adaptive_target();
+				if (target < sCfg.localDelay) adaptive_shrink(target);
+				else grow = target - sCfg.localDelay;
 			}
+			if (pc_netplay_adaptive::submit_due(sNextLand, sAdvances, sCfg.localDelay))
+				submit_local_inputs(1 + grow);
 		}
 		// 4-5. Advance + per-tick block.
 		advances = handle_game_events(sys, app);
@@ -4616,6 +5142,8 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 	// the schedule itself (M1): sleeping after the deadline only shifts one
 	// turn's phase and never converges, so the ahead peer stretches its own
 	// deadline by a small proportional share instead.
+	double nextDueMs = 0; // M5c lane B: see adaptive_note_turn_start
+	bool haveDue = false;
 	if (!unthrottled) {
 		constexpr double kSlotMs = 1000.0 / 30.0;
 		constexpr double kMaxCatchupSlots = 5.0;
@@ -4637,6 +5165,8 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 			if (effAdv > kMaxAdvanceSlots) effAdv = kMaxAdvanceSlots;
 			double now = now_ms();
 			if (sNextTurnMs == 0) sNextTurnMs = now + kSlotMs;
+			nextDueMs = sNextTurnMs; // M5c lane B: the next turn is due here (a snap moves it to now)
+			haveDue = true;
 			if (now < sNextTurnMs) {
 				// Fix3 R2-3: one call; the timer carries the bulk and
 				// sleep_hires_ms owns the whole spin tail (at most 1 ms per
@@ -4651,6 +5181,7 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 				const double behind = now - sNextTurnMs;
 				if (behind > kMaxCatchupSlots * kSlotMs) {
 					sNextTurnMs = now + kSlotMs;
+					nextDueMs = now;
 				} else {
 					sNextTurnMs += kSlotMs * effAdv + extraMs;
 				}
@@ -4686,9 +5217,15 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 		// turns with no Advance (advance turns own the slot wait, so it is
 		// never charged as stall). The charge runs from turn start to turn
 		// end; report it next to tps and the 1 - tps/30 slot-loss fraction.
-		sStallMs += now_ms() - turnStartMs;
+		const double turnMs = now_ms() - turnStartMs;
+		sStallMs += turnMs;
+		// M5c lane B: consecutive stall turns form one stall event.
+		adaptive_note_stall_turn(turnStartMs, turnMs);
 		// 9. Waiting: no tick. The turn above already pumped the network
 		// (update_session) and window events (PADRead poll).
 	}
+	if (advances > 0) adaptive_close_stall(); // M5c lane B: the stall (if any) ended
+	adaptive_note_turn_end(advances > 0, haveDue, nextDueMs);
+	adaptive_poll(now_ms());                  // M5c lane B: RTT sample every 500 ms
 	return true;
 }
