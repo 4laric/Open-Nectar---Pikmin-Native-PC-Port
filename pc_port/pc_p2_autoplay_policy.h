@@ -466,6 +466,7 @@ struct Config {
     float arriveRadius = 90.0f; // XZ distance considered "at" the Onion
     float throwHold = 0.12f; // A held per throw pulse
     float throwGap = 0.55f; // gap between throw pulses
+    float empressWalkMax = 45.0f; // #256: bound on one regroup walk to the idle strays
     float whistleHold = 1.6f; // B held to regroup / call back
     float whistleCooldown = 3.0f; // bot-undamaged: gap after a whistle before re-latching (forces throw windows)
     float attackChaseDist = 500.0f; // bot-undamaged: target past this in attack re-enters approach (graph chase)
@@ -934,6 +935,12 @@ public:
     // the driver to restock + exit it (driver: once per visit, bounded).
     bool wantsPowerRestock() const { return state == State::WithdrawSeek && powerResupplying && powerAtOnion; }
     void clearReplan() { wantReplan = false; }
+    // #256: the Empress regroup asks the driver to route (waypoint graph) to
+    // the nearest idle stray; a straight steer hits the arena ledge.
+    bool strayRouteWanted() const { return wantStrayRoute; }
+    float strayRouteGoalX() const { return strayRouteX; }
+    float strayRouteGoalZ() const { return strayRouteZ; }
+    void clearStrayRoute() { wantStrayRoute = false; }
     std::vector<std::string> takeMarkers()
     {
         std::vector<std::string> out;
@@ -1731,6 +1738,7 @@ private:
         if ((in.scattered || in.squadDistress || grabWhistle) && !whistling && whistleCooldown <= 0.0f) {
             whistling = true;
             whistleTime = 0.0f;
+            empressWalk = 0.0f;
             if (in.targetSource == 30) {
                 char wbuf[200];
                 std::snprintf(wbuf, sizeof(wbuf),
@@ -1748,10 +1756,21 @@ private:
             // her body; the whistle reaches 100 u). Walk to the nearest stray
             // while whistling and keep the hold running until it is in reach.
             bool empressRegroup = false;
-            if (in.targetSource == 30 && in.strayPikmin >= 5 && in.strayNearDist > 90.0f
-                && in.strayNearDist < 1.0e29f) {
-                steer(in.naviX, in.naviZ, in.strayNearX, in.strayNearZ);
-                empressRegroup = true;
+            if (in.targetSource == 30) {
+                if (strayRouteCooldown > 0.0f) strayRouteCooldown -= dt;
+                if (in.strayPikmin >= 5 && in.strayNearDist > 90.0f && in.strayNearDist < 1.0e29f
+                    && empressWalk < cfg.empressWalkMax) {
+                    empressWalk += dt;
+                    if (!in.waypointLeg && strayRouteCooldown <= 0.0f) {
+                        wantStrayRoute = true;
+                        strayRouteX = in.strayNearX;
+                        strayRouteZ = in.strayNearZ;
+                        strayRouteCooldown = 20.0f;
+                    }
+                    if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+                    else steer(in.naviX, in.naviZ, in.strayNearX, in.strayNearZ);
+                    empressRegroup = true;
+                }
             }
             // bot-v8 merge (#871): whistle timeout keeps ONE version
             // (undamaged's). Both lanes fixed the same whistle-starves-timeout
@@ -2931,6 +2950,11 @@ private:
     float kingBackTime = 0.0f; // continuous backing time (sidestep after kingSidestepAfter)
     int kingMode = -1; // last AUTOPLAY_KING_STANDOFF mode (-1 = none this stint)
     bool queenDodging = false; // #256: stepping off the Empress Bulblax roll line
+    bool wantStrayRoute = false; // #256: driver should route to strayRouteX/Z
+    float strayRouteX = 0.0f;
+    float strayRouteZ = 0.0f;
+    float strayRouteCooldown = 0.0f;
+    float empressWalk = 0.0f; // seconds walked to strays in this whistle episode
     bool kingEvading = false; // #884 round 5: leaving the tongue sweep for the current King attack
     float kingEvadeTime = 0.0f; // time spent evading inside kingEvadeClear (sidestep after kingEvadeSideAfter)
     bool kingLowHpMode = false; // last stance used the low-health band (marker field)

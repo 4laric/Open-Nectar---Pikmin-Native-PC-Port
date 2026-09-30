@@ -1664,6 +1664,15 @@ void pc_p2_autoplay_tick(void)
         }
         sBrain.clearReplan();
     }
+    // #256 Empress regroup: route to the nearest idle stray through the waypoint graph.
+    if (sBrain.strayRouteWanted()) {
+        sPlanStartY = navi->getPosition().y;
+        sPlanGoalY = NAN;
+        planDetour(naviX, naviY, naviZ, sBrain.strayRouteGoalX(), sBrain.strayRouteGoalZ());
+        std::printf("AUTOPLAY_STRAY_ROUTE goal=(%.0f,%.0f) legs=%zu bot-driven\n", double(sBrain.strayRouteGoalX()),
+                    double(sBrain.strayRouteGoalZ()), sPath.size());
+        sBrain.clearStrayRoute();
+    }
     // Waypoint-by-waypoint following: steer each leg until reached (80u) or
     // its 25s budget expires, then advance; the Brain steers the active leg.
     if (sHinderLeg) {

@@ -1272,6 +1272,8 @@ void testEmpressRegroupWalk()
     for (int i = 0; i < 20; ++i) brain.update(0.05f, s);
     CHECK(brain.command().buttons & unsigned(p2autoplay::PadB), "empress_regroup/whistles");
     CHECK(brain.command().moveZ > 0.9f, "empress_regroup/walks_to_strays");
+    CHECK(brain.strayRouteWanted(), "empress_regroup/asks_the_driver_for_a_route");
+    CHECK(brain.strayRouteGoalZ() > 399.0f, "empress_regroup/route_goal_is_the_nearest_stray");
 }
 
 void testResupply()
