@@ -1667,7 +1667,8 @@ private:
         const bool sarai = in.targetSource == 23;
         const bool kurage = in.targetSource == 57 || in.targetSource == 72;
         const bool pressOnly = isPressOnly(in.targetSource);
-        const bool titan = in.targetSource == 73;
+        // #256: the Empress (5000 HP boss) shares the Titan's long attack window.
+        const bool titan = in.targetSource == 73 || in.targetSource == 30;
         const bool roller = cfg.rollerStance && isRollerStance(in.targetSource);
         const float limit = roller ? cfg.rollerAttackTimeout
             : kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier

@@ -1294,6 +1294,18 @@ void pc_p2_autoplay_tick(void)
     senses.onionDist = onionDist;
     senses.containerOpen = navi->getCurrState() && navi->getCurrState()->getID() == NAVISTATE_Container;
     senses.scattered = (farCount >= 3) || (alive >= 10 && nearCount < 5);
+    // #256 TEST-ONLY census marker: why the squad reads as scattered.
+    if (senses.scattered) {
+        static float diagClock = 0.0f;
+        diagClock += (dt > 0.0f && dt <= 0.5f) ? dt : 0.016f;
+        if (diagClock >= 10.0f) {
+            diagClock = 0.0f;
+            std::printf("AUTOPLAY_SCATTER alive=%d near350=%d far550=%d squad=%d strays=%d distress=%d bot-driven
+",
+                        alive, nearCount, farCount, squad, strays, distress);
+            std::fflush(stdout);
+        }
+    }
     senses.squadDistress = distress > 0;
     senses.panicCount = panicCount; // #245 Fuefuki owner-death Panic reclaim
     senses.panicNearest = panicNearest;
