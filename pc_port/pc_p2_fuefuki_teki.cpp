@@ -288,7 +288,7 @@ void setHidden(BTeki* t, Binding& b, bool hide)
         t->clearTekiOption(TEKIOPT_Atari | TEKIOPT_Visible | TEKIOPT_ShadowVisible | TEKIOPT_LifeGaugeVisible);
         t->setTekiOption(TEKIOPT_Invincible);
     } else {
-        t->setTekiOption(TEKIOPT_Atari | TEKIOPT_Visible | TEKIOPT_ShadowVisible);
+        t->setTekiOption(TEKIOPT_Atari | TEKIOPT_Visible | TEKIOPT_ShadowVisible | TEKIOPT_LifeGaugeVisible);
         t->clearTekiOption(TEKIOPT_Invincible);
     }
     std::printf("P2_FUEFUKI_UNTARGETABLE generator=%u source_id=41 on=%d no_atari=%d invincible=%d\n", b.token,

@@ -16,6 +16,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <set>
 
 namespace {
@@ -201,6 +202,50 @@ void turnDeathSection() {
 }
 } // namespace
 
+// CLIP_TABLE: state -> clip (DangoMushiState.cpp anim ids). Pre-fix the crab sat
+// in Stay on a LOOPING fly (entrance) clip: "falling in from above over and over".
+void clipTableSection() {
+    CHECK(std::strcmp(stateClip("stay"), "wait") == 0);
+    CHECK(std::strcmp(stateClip("appear"), "fly") == 0);
+    CHECK(std::strcmp(stateClip("wait"), "wait") == 0);
+    CHECK(std::strcmp(stateClip("move"), "move") == 0);
+    CHECK(std::strcmp(stateClip("attack"), "attack") == 0);
+    CHECK(std::strcmp(stateClip("turn"), "turn") == 0);
+    CHECK(std::strcmp(stateClip("recover"), "recover") == 0);
+    CHECK(std::strcmp(stateClip("flick"), "attack_2") == 0);
+    CHECK(std::strcmp(stateClip("dead"), "dead") == 0);
+    CHECK(stateClip("bogus") == nullptr);
+    CHECK(clipLoops("wait"));
+    CHECK(clipLoops("move"));
+    CHECK(!clipLoops("fly"));
+    CHECK(!clipLoops("attack"));
+    CHECK(!clipLoops("turn"));
+    CHECK(!clipLoops("recover"));
+    CHECK(!clipLoops("attack_2"));
+    CHECK(!clipLoops("dead"));
+    // The only state that may play the entrance clip is Appear.
+    const char* const states[] = {"stay", "wait", "move", "attack", "turn", "recover", "flick", "dead"};
+    for (const char* st : states) CHECK(std::strcmp(stateClip(st), "fly") != 0);
+}
+
+// ROLL_REACH: the roll crush reaches ball radius (60) + the target's own size,
+// not the flat 100 from the body centre that hit captains who were not touching.
+void rollReachSection() {
+    PressCrush crush(60.0f, 0.5f);
+    auto at = [](std::uint64_t token, float dist, float reach) {
+        PressCandidate c;
+        c.token = token;
+        c.dx = dist;
+        c.grounded = true;
+        c.reach = reach;
+        return c;
+    };
+    CHECK(crush.shouldPress(at(1, 65.0f, 10.0f), 0.0f));   // inside 60 + 10
+    CHECK(!crush.shouldPress(at(2, 75.0f, 10.0f), 0.0f));  // outside: the old radius 100 hit this
+    CHECK(!crush.shouldPress(at(3, 99.0f, 10.0f), 0.0f));
+    CHECK(crush.shouldPress(at(4, 69.0f, 10.0f), 0.0f));
+}
+
 int main() {
     section("DANGOMUSHI_WALL", wallSection);
     section("DANGOMUSHI_PRESS", pressSection);
@@ -211,6 +256,8 @@ int main() {
     section("DANGOMUSHI_FLICK_DIR", flickDirSection);
     section("DANGOMUSHI_ROLL_FINISH", rollFinishSection);
     section("DANGOMUSHI_TURN_DEATH", turnDeathSection);
+    section("DANGOMUSHI_CLIP_TABLE", clipTableSection);
+    section("DANGOMUSHI_ROLL_REACH", rollReachSection);
     if (gFailures) {
         std::printf("FAIL DANGOMUSHI_POLICY failures=%d\n", gFailures);
         return 1;

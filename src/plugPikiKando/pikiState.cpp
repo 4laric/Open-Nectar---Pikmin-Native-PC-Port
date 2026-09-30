@@ -1,3 +1,4 @@
+#include "pc_p2_astonish.h"
 #include "pc_p2_purple.h"
 #include "pc_p2_purple_impact.h"
 #include "pc_p2_purple_direct.h"
@@ -2228,6 +2229,10 @@ void PikiFlyingState::procCollideMsg(Piki* piki, MsgCollide* msg)
 	) {
 		piki->mActiveAction->abandon(nullptr);
 		PRINT_KANDO("FLYING .. collide\n");
+#if defined(PIKI_PC_PORT)
+		// #892: observe a thrown Pikmin touching a bound Gatling Groink part (armour cover).
+		pc_p2_groink_teki_piki_contact(static_cast<BTeki*>(static_cast<Teki*>(collider)), piki, msg->mEvent.mColliderPart, "thrown");
+#endif
 		if (msg->mEvent.mColliderPart->isPlatformType()) {
 			if (msg->mEvent.mColliderPart->isStickable()) {
 				PRINT_KANDO("flying ... stick to platform::%s(code %s)\n", msg->mEvent.mColliderPart->mCollInfo->mId.mStringID,
@@ -3362,7 +3367,7 @@ PikiPanicState::PikiPanicState()
  */
 void PikiPanicState::init(Piki* piki)
 {
-	mAstonish = pc_p2_fuefuki_panic_astonish(piki);
+	mAstonish = pc_p2_fuefuki_panic_astonish(piki) || pc_p2_astonish_pending(piki);
 	if (mAstonish) {
 		// Source PikiPanicState::init PIKIPANIC_Panic: no gas flag, no death;
 		// mDramaTimer = 0.3 * randFloat() before the KIZUKU (notice) motion.
@@ -3422,6 +3427,7 @@ void PikiPanicState::exec(Piki* piki)
 		mChangeDirectionTimer -= gsys->getFrameTime();
 		if (mSurvivalTimer < 0.0f) {
 			pc_p2_fuefuki_panic_end(piki, true);
+			pc_p2_astonish_end(piki, true);
 			mAstonish = false;
 			transit(piki, PIKISTATE_Normal);
 			return;
@@ -3458,6 +3464,7 @@ void PikiPanicState::cleanup(Piki* piki)
 	if (mAstonish) {
 		mAstonish = false;
 		pc_p2_fuefuki_panic_end(piki, false);
+		pc_p2_astonish_end(piki, false);
 	}
 	piki->setGasInvincible(0);
 	piki->mIsPanicked = false;
