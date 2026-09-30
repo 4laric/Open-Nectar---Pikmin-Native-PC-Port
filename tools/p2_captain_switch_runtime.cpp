@@ -94,7 +94,8 @@ class CaptainSwitchApp final : public PlugPikiApp {
     Vector3f movementStart;
     float dragStart=0;
     int zoomStart=0;
-    bool sawGather=false,sawHeld=false,sawFlying=false;
+    bool sawGather=false,sawFlying=false;
+    Piki* heldPiki=nullptr;
     std::vector<Piki*> squad;
     std::vector<Navi*> owners;
     bool screenshot=false;
@@ -166,9 +167,14 @@ public:
         }
         int state=selected->getCurrState()->getID();
         if(tick>=175 && tick<245 && state==NAVISTATE_Gather)sawGather=true;
-        if(tick>=250 && tick<275 && (selected->isHolding()||state==NAVISTATE_ThrowWait))sawHeld=true;
         Iterator it(pikiMgr); CI_LOOP(it) {
-            auto* p=static_cast<Piki*>(*it); if(p && p->isAlive() && p->getState()==PIKISTATE_Flying)sawFlying=true;
+            auto* p=static_cast<Piki*>(*it);
+            if(p && p->isAlive() && p->mNavi==b && tick>=250 && tick<290
+                && p->getState()==PIKISTATE_Hanged) {
+                require(!heldPiki || heldPiki==p,"one held Pikmin identity");heldPiki=p;
+            }
+            if(heldPiki && p==heldPiki && tick>290 && p->isAlive()
+                && p->getState()==PIKISTATE_Flying)sawFlying=true;
         }
         switch(tick) {
         case 5:pad(KBBTN_DPAD_UP);break;
@@ -210,24 +216,24 @@ public:
         case 235:pad();break;
         case 245:require(sawGather,"selected captain whistle state");require(squadFacts("after_whistle")>0,"selected captain recruited nearby throwable squad");break;
         case 250:pad(KBBTN_A);break;
-        case 260:squadFacts("hold");require(sawHeld,"selected captain held Pikmin");pad(KBBTN_A|KBBTN_DPAD_UP);break;
-        case 268:active(1);std::puts("P2_SWITCH_UNSAFE held_rejected=1");break;
-        case 270:pad();break;
-        case 305:require(sawFlying,"selected captain threw Pikmin through live input");std::puts("P2_SWITCH_ACTIONS whistle=1 hold=1 throw_flying=1");break;
-        case 310:require(pc_p2_captain::capture_captain(0,928),"inject target captivity");break;
-        case 315:pad(KBBTN_DPAD_UP);break;
-        case 320:active(1);std::puts("P2_SWITCH_UNSAFE injected_captive_rejected=1");break;
-        case 325:pad();require(pc_p2_captain::release_captain(0,928),"release injected captivity");break;
-        case 335:a->mHealth=0;break;
-        case 340:pad(KBBTN_DPAD_UP);break;
-        case 345:active(1);std::puts("P2_SWITCH_UNSAFE injected_zero_health_rejected=1");break;
-        case 350:pad();a->mHealth=100;break;
-        case 360: {
+        case 280:squadFacts("hold");require(heldPiki && heldPiki->isAlive() && heldPiki->getState()==PIKISTATE_Hanged,"selected captain actually holds identified Pikmin");pad(KBBTN_A|KBBTN_DPAD_UP);break;
+        case 288:active(1);require(heldPiki && heldPiki->getState()==PIKISTATE_Hanged,"held Pikmin retained during rejected switch");std::puts("P2_SWITCH_UNSAFE held_rejected=1");break;
+        case 290:pad();break;
+        case 325:require(sawFlying,"selected captain threw Pikmin through live input");std::puts("P2_SWITCH_ACTIONS whistle=1 identified_hanged=1 same_pikmin_flying_after_release=1");break;
+        case 330:require(pc_p2_captain::capture_captain(0,928),"inject target captivity");break;
+        case 335:pad(KBBTN_DPAD_UP);break;
+        case 340:active(1);std::puts("P2_SWITCH_UNSAFE injected_captive_rejected=1");break;
+        case 345:pad();require(pc_p2_captain::release_captain(0,928),"release injected captivity");break;
+        case 355:a->mHealth=0;break;
+        case 360:pad(KBBTN_DPAD_UP);break;
+        case 365:active(1);std::puts("P2_SWITCH_UNSAFE injected_zero_health_rejected=1");break;
+        case 370:pad();a->mHealth=100;break;
+        case 380: {
             InteractAttack hit(nullptr,nullptr,500.0f,false);hit.actNavi(b);
             std::puts("P2_SWITCH_SURVIVOR injected_attack_receiver=1");break;
         }
-        case 370:active(0);require(naviMgr->isNaviDead(b),"down captain recorded");break;
-        case 390:require(screenshot,"render capture");std::puts("PASS P2_CAPTAIN_SWITCH_RUNTIME");std::fflush(nullptr);std::_Exit(0);
+        case 390:active(0);require(naviMgr->isNaviDead(b),"down captain recorded");break;
+        case 410:require(screenshot,"render capture");std::puts("PASS P2_CAPTAIN_SWITCH_RUNTIME");std::fflush(nullptr);std::_Exit(0);
         }
         if(tick%10==0) {std::printf("P2_SWITCH_TICK tick=%d active=%d states=%d,%d\n",tick,naviMgr->getActiveNavi()->mNaviID,a->getCurrState()->getID(),b->getCurrState()->getID());std::fflush(stdout);}
         return result;
