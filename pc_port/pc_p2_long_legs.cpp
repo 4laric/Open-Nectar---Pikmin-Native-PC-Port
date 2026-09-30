@@ -23,6 +23,8 @@
 #include "pc_p2_long_legs_fsm.h"
 #include "pc_p2_houdai_fsm.h"
 #include "pc_p2_long_legs_ik.h"
+#include "pc_p2_long_legs_pose.h"
+#include "pc_p2_pose_family.h"
 #include "MapMgr.h"
 #include "EffectMgr.h"
 #include "UtEffect.h"
@@ -85,6 +87,7 @@ struct ActorState {
     P2LongLegsFsmParms parms;
     P2LongLegsFsm fsm;
     float animSeconds = 0.0f;   // time in the current state (source-key edges)
+    float poseClock = 0.0f;     // presentation-only actor clock (BigFoot pose loops)
     bool key2Fired = false;
     float lastHealth = 0.0f;        // host damage edge for the Houdai shot cooldown
     float lastPositiveHealth = 0.0f; // last still-positive health, for death provenance
@@ -130,6 +133,14 @@ struct ActorState {
     p2ik::Mgr ik;
     int ikStrides = 0, ikLifts = 0, ikPlants = 0;
 };
+
+// BigFoot (69) sampled pose bank (animation smoothing pass, #972). Presentation
+// only: four real clips (wait/landing/flick/dead), 24 baked poses each, lerped
+// and crossfaded by p2posefamily. Absent bank -> the static bind draw.
+p2posefamily::Bank bigfootBank("LONGLEGS");
+p2posefamily::Actors bigfootVis;
+std::map<std::string, p2longlegspose::ClipConfig> bigfootTiming;
+std::map<std::string, std::vector<Shape*>> bigfootShapes;  // nearest-pose fallback
 
 // Rigid skin of the Man-at-Legs bind mesh (longlegs_Houdai_skin_00.txt) and
 // the skin joint index of every IK leg joint (Houdai::setupIKSystem order).
@@ -1168,9 +1179,73 @@ Shape* loadBind(const SpeciesDef& species) {
         if (shape->mTexAttrList[i].mTexture) shape->mTexAttrList[i].mTexture->attach();
     return shape;
 }
+
+// Load the optional BigFoot pose bank through the compact p2posefamily loader.
+// A missing config leaves the static bind draw; a config that does not load
+// (missing/mismatched files, budget) is reported and also keeps the bind draw.
+void bigfootBankSetup(size_t& total) {
+    bigfootBank.reset();
+    bigfootVis.clear();
+    bigfootTiming.clear();
+    bigfootShapes.clear();
+    std::ifstream config("assets/dataDir/courses/pikmin2room/p2-long-legs-animation.txt");
+    if (!config) {
+        std::printf("P2_LONGLEGS_BANK status=absent pose=bind
+");
+        return;
+    }
+    std::vector<p2longlegspose::ClipConfig> clips;
+    if (!p2longlegspose::parse(config, clips)) {
+        std::printf("P2_LONGLEGS_BANK status=invalid_config pose=bind
+");
+        return;
+    }
+    p2poseload::Shared shared;
+    size_t loaded = 0;
+    for (const p2longlegspose::ClipConfig& clip : clips) {
+        std::string error;
+        std::vector<Shape*> poses;
+        if (!p2posefamily::loadFamilyClip(bigfootBank, clip.name, "longlegs_BigFoot_" + clip.name, clip.count,
+                                          clip.duration, clip.frames, shared, loaded, poses, error)) {
+            std::printf("P2_LONGLEGS_BANK status=load_failed clip=%s reason=%s pose=bind
+", clip.name.c_str(),
+                        error.c_str());
+            bigfootBank.reset();
+            bigfootTiming.clear();
+            bigfootShapes.clear();
+            return;
+        }
+        bigfootTiming[clip.name] = clip;
+        bigfootShapes[clip.name] = poses;
+    }
+    total += loaded;
+    std::printf("P2_LONGLEGS_BANK status=ready clips=%zu resident_bytes=%zu gameplay=P1_unchanged
+",
+                bigfootTiming.size(), loaded);
+}
+
+// The shape to draw for a BigFoot this frame, or nullptr for the bind mesh.
+Shape* bigfootPoseShape(BTeki* actor, const ActorState& state, bool corpse) {
+    if (!bigfootBank.ready() || bigfootTiming.size() != 4) return nullptr;
+    const auto dur = [](const char* name) { return bigfootTiming.at(name).duration; };
+    const p2longlegspose::Choice pick = p2longlegspose::choose(
+        state.fsm.state(), state.animSeconds, state.deadSeconds, state.poseClock, corpse, dur("wait"),
+        dur("landing"), dur("flick"), dur("dead"));
+    const unsigned token = state.generator;
+    if (Shape* smooth = bigfootVis.draw(actor, bigfootBank, pick.clip, pick.frame, token)) return smooth;
+    const auto poses = bigfootShapes.find(pick.clip);  // nearest pose (PIKMIN_P2_INTERPOLATION=0 / failure)
+    if (poses == bigfootShapes.end() || poses->second.empty()) return nullptr;
+    const p2longlegspose::ClipConfig& timing = bigfootTiming.at(pick.clip);
+    const size_t index = size_t(p2longlegspose::nearestPose(timing.frames, pick.frame));
+    return index < poses->second.size() ? poses->second[index] : poses->second.back();
+}
 }
 
 void pc_p2_long_legs_reset() {
+    bigfootBank.reset();
+    bigfootVis.clear();
+    bigfootTiming.clear();
+    bigfootShapes.clear();
     for (HoudaiShell& shell : shells) {
         if (shell.stone) { shell.stone->notifyWallContact(); shell.stone->finishDeath(); }
     }
@@ -1185,6 +1260,7 @@ void pc_p2_long_legs_reset() {
 }
 
 void pc_p2_long_legs_forget(BTeki* actor) {
+    bigfootVis.forget(actor);
     killShellsOf(actor);
     houdaiDropShells(actor, "forget");
     // Lane 06 single-use binding: drop the ordinary-delivery source so a
@@ -1324,6 +1400,7 @@ void pc_p2_long_legs_setup() {
         }
         shapes[species] = loadBind(*def);
         if (species == "Houdai") houdaiIkSetup(*def, shapes[species]);
+        if (species == "BigFoot") bigfootBankSetup(bytesTotal);
     }
     for (const auto& entry : actors)
         std::printf("P2_LONG_LEGS_BIND generator=%u species=%s pose=bind visual_only=0 "
@@ -1359,6 +1436,7 @@ void pc_p2_long_legs_update(BTeki* actor) {
     }
     const float dt = gsys ? gsys->getFrameTime() : 0.0f;
     if (!(dt > 0.0f && dt < 0.5f)) return;
+    state.poseClock += dt;  // presentation clock only; never read by gameplay
     if (state.isHoudai) {
         houdaiTick(actor, state, dt);
         return;
@@ -1611,6 +1689,8 @@ bool pc_p2_long_legs_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, b
             return true;
         }
     }
+    if (state.species == "BigFoot")
+        if (Shape* posed = bigfootPoseShape(actor, state, corpse)) shape = posed;
     shape->updateAnim(gfx, matrix, nullptr, actor);
     shape->drawshape(gfx, *gfx.mCamera, nullptr);
     return true;
