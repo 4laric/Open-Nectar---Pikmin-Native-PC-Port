@@ -106,6 +106,7 @@ struct PressCandidate {
     std::uint64_t token = 0;
     float dx = 0.0f, dz = 0.0f;  // offset from the rolling body (XZ)
     bool grounded = false;       // source evt.mCollidingCreature->mFloorTriangle
+    float reach = 0.0f;          // target collision size added to the body radius
     bool alive = true;
 };
 
@@ -120,7 +121,8 @@ public:
     // Returns true when `c` must be pressed this frame.
     bool shouldPress(const PressCandidate& c, float now) {
         if (!c.alive || !c.grounded) return false;
-        if (c.dx * c.dx + c.dz * c.dz > mRadius * mRadius) return false;
+        const float limit = mRadius + c.reach;
+        if (c.dx * c.dx + c.dz * c.dz > limit * limit) return false;
         auto it = mLast.find(c.token);
         if (it != mLast.end() && now - it->second < mCooldown) return false;
         mLast[c.token] = now;

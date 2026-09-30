@@ -156,7 +156,13 @@ constexpr float ATTACK_ANGLE = 0.261799f;    // fp21 15 deg
 constexpr float ATTACK_DAMAGE = 10.0f;       // fp24 attack power
 constexpr float SHAKE_KNOCKBACK = 200.0f;    // fp17 shake knockback
 constexpr float SHAKE_DAMAGE = 1.0f;         // fp18 shake damage
-constexpr float CONTACT_RADIUS = 100.0f;     // fp22 attack hit radius (roll body)
+// Roll crush reach. Source: collisionCallback fires when a real collision part
+// of the rolling body touches the target (enemycoll.txt: ball parts <= 35 radius
+// around the body; the 200 root sphere is only the bounding volume). fp22=100 is
+// the AI attack-hit range, not a contact radius. The ball sits 60 above the floor
+// (Obj::resetMapCollisionSize(true): HeightOffsetFromFloor 60), so the rolling
+// body is a ~60 radius ball; a target is hit when its own size overlaps it.
+constexpr float ROLL_BALL_RADIUS = 60.0f;
 constexpr float WALK_TURN_RATE = 0.05f;      // fp08 rotation speed rate
 constexpr float WALK_MAX_TURN = 0.0872665f;  // fp28 5 deg
 // Source proper-parm retail values (DangoMushi proper block).
@@ -198,7 +204,7 @@ struct Dango {
     bool armSwinging = false;
     // #897 roll crush / wall crash / turn window / flick bookkeeping.
     float driveX = 0.0f, driveZ = 0.0f;     // P2 mRollingVelocity (XZ)
-    p2dango::PressCrush crush{CONTACT_RADIUS, 0.5f};
+    p2dango::PressCrush crush{ROLL_BALL_RADIUS, 0.5f};
     std::set<Creature*> rollTargets;         // distinct targets whose press was accepted
     std::set<Piki*> rollCrushed;             // accepted Pikmin presses this roll
     float attackFinishAt = -1.0f;            // StateAttack finishMotion time (15 s timeout)
@@ -222,6 +228,12 @@ struct Dango {
     float finishAt = -1.0f;
     float rollTimer = 0.0f;                  // StateAttack mStateTimer (advanced only by rollingMove)
     bool wallTouched = false;                // Obj::mWallTriangle seen this frame
+    // StateStay (DangoMushiState.cpp:92-105): EB_ModelHidden. The P1 host hides
+    // through the Mizinko/Hollec option set VISIBLE|ORGANIC|SHAPE_VISIBLE|SHADOW_VISIBLE|ATARI.
+    bool hidden = false;
+    int hiddenOpts = 0;                      // host option bits restored on Appear
+    float shadowScale = 0.0f;                // Obj::mShadowScale; Appear when it reaches 1
+    float stickLogTimer = 0.0f;
     float phase = 0.0f;
     bool deadLogged = false;
     bool escaped = false;
@@ -364,6 +376,31 @@ bool canAttack(const Vector3f& pos, const Dango& s, Creature* target) {
     return std::fabs(wrapPi(std::atan2(t.x - pos.x, t.z - pos.z) - s.heading)) <= ATTACK_ANGLE;
 }
 
+int hideMask() {
+    return BTeki::TEKI_OPTION_VISIBLE | BTeki::TEKI_OPTION_ORGANIC | BTeki::TEKI_OPTION_SHAPE_VISIBLE
+           | BTeki::TEKI_OPTION_SHADOW_VISIBLE | BTeki::TEKI_OPTION_ATARI;
+}
+// Switchable: PIKMIN_P2_DANGO_STAY_VISIBLE=1 keeps the crab on screen (wait clip)
+// during Stay instead of hiding it until the drop-in.
+bool stayHides() {
+    static const bool hides = std::getenv("PIKMIN_P2_DANGO_STAY_VISIBLE") == nullptr;
+    return hides;
+}
+void setHidden(BTeki* a, Dango& s, bool hide) {
+    if (hide == s.hidden) return;
+    if (hide) {
+        s.hiddenOpts = 0;
+        const int bits[] = {BTeki::TEKI_OPTION_VISIBLE, BTeki::TEKI_OPTION_ORGANIC,
+                            BTeki::TEKI_OPTION_SHADOW_VISIBLE, BTeki::TEKI_OPTION_ATARI,
+                            BTeki::TEKI_OPTION_SHAPE_VISIBLE};
+        for (int bit : bits) if (a->getTekiOption(bit)) s.hiddenOpts |= bit;
+        a->clearTekiOption(s.hiddenOpts);
+    } else {
+        a->setTekiOption(s.hiddenOpts);
+    }
+    s.hidden = hide;
+}
+
 void enter(Dango& s, State state, const char* clip) {
     s.state = state;
     s.stateTime = 0.0f;
@@ -401,8 +438,9 @@ void setState(BTeki* a, Dango& s, State state, const char* clip) {
         : (a->mGenerator ? a->mGenerator->_70 : 0u);
     std::printf("P2_DANGOMUSHI_STATE generator=%u state=%s clip=%s\n", generator,
                 stateName(state), s.clip.c_str());
-    std::printf("P2_DANGO_STATE generator=%u state=%s clip=%s loop=%d\n", generator,
-                stateName(state), s.clip.c_str(), p2dango::clipLoops(s.clip.c_str()) ? 1 : 0);
+    std::printf("P2_DANGO_STATE generator=%u state=%s clip=%s loop=%d hidden=%d\n", generator,
+                stateName(state), s.clip.c_str(), p2dango::clipLoops(s.clip.c_str()) ? 1 : 0,
+                int(s.hidden));
     std::fflush(stdout);
     // P1 Cannon Beetle / boulder bank approximation (output-only, #946).
     switch (state) {
@@ -474,7 +512,9 @@ void rollCrush(BTeki* a, Dango& s, const Vector3f& pos, unsigned generator) {
         cand.dz = q.z - pos.z;
         cand.grounded = c->mGroundTriangle != nullptr;
         cand.alive = true;
+        cand.reach = c->getSize(); // the target's own collision size joins the ball radius
         if (!s.crush.shouldPress(cand, s.stateTime)) return;
+        const float hitDist = std::sqrt(cand.dx * cand.dx + cand.dz * cand.dz);
         const float damage = p2dango::pressDamage(piki, c->mHealth);
         const bool took = c->stimulate(InteractPress(a, damage));
         // Only accepted presses count (a Pikmin already pressed, invincible
@@ -484,9 +524,10 @@ void rollCrush(BTeki* a, Dango& s, const Vector3f& pos, unsigned generator) {
             if (piki) s.rollCrushed.insert(static_cast<Piki*>(c));
         }
         std::printf("P2_DANGOMUSHI_PRESS generator=%u target=%s:%llx accepted=%d damage=%.1f "
-                    "lethal=%d roll_targets=%zu\n", generator, kind,
+                    "lethal=%d roll_targets=%zu dist=%.1f ball_radius=%.1f target_size=%.1f reach=%.1f\n", generator, kind,
                     static_cast<unsigned long long>(cand.token), int(took), damage,
-                    int(piki && took), s.rollTargets.size());
+                    int(piki && took), s.rollTargets.size(), hitDist, ROLL_BALL_RADIUS, cand.reach,
+                    ROLL_BALL_RADIUS + cand.reach);
         std::fflush(stdout);
     };
     if (naviMgr) for (Navi* n : pc_p2_navis()) consider(n, "navi", false);
@@ -558,6 +599,47 @@ void shakeStickers(BTeki* a, Dango& s, unsigned generator) {
     std::printf("P2_DANGOMUSHI_SHAKE generator=%u stuck=%zu count=%d purple=%d wither=%d "
                 "frame=%.1f t=%.2f\n", generator, stuck.size(), purple + wither, purple, wither,
                 s.turnClock.frame, s.stateTime);
+    std::fflush(stdout);
+}
+
+// #stick diagnostics: the host CollInfo part tree and the Pikmin around the body
+// while the Turn window is open. The host parts (P1 Swallow) are what Pikmin
+// actually latch to; the drawn P2 crab is a baked-pose model.
+void logPartTree(CollPart* part, const Vector3f& pos, unsigned generator, int depth) {
+    if (!part || depth > 6) return;
+    const u32 id = part->getID().mId;
+    std::printf("P2_DANGOMUSHI_STICK_PART generator=%u id=%c%c%c%c depth=%d radius=%.1f "
+                "dx=%.1f dy=%.1f dz=%.1f stickable=%d type=%d\n", generator,
+                char(id >> 24), char(id >> 16), char(id >> 8), char(id), depth, part->mRadius,
+                part->mCentre.x - pos.x, part->mCentre.y - pos.y, part->mCentre.z - pos.z,
+                int(part->isStickable()), int(part->mPartType));
+    const int n = part->getChildCount();
+    for (int i = 0; i < n; ++i) logPartTree(part->getChildAt(i), pos, generator, depth + 1);
+}
+
+void logStickSurface(BTeki* a, const Vector3f& pos, unsigned generator, bool tree) {
+    if (tree && a->mCollInfo) logPartTree(a->mCollInfo->getBoundingSphere(), pos, generator, 0);
+    const std::vector<Piki*> stuck = stuckPikis(a);
+    int near = 0;
+    float nearest = 1e9f;
+    if (pikiMgr) {
+        Iterator it(pikiMgr);
+        CI_LOOP(it) {
+            Piki* p = static_cast<Piki*>(*it);
+            if (!p || !p->isAlive()) continue;
+            const Vector3f q = p->getPosition();
+            const float d = std::sqrt((q.x - pos.x) * (q.x - pos.x) + (q.z - pos.z) * (q.z - pos.z));
+            if (d < 160.0f) ++near;
+            if (d < nearest) nearest = d;
+        }
+    }
+    std::printf("P2_DANGOMUSHI_STICK generator=%u stuck=%zu pikmin_within_160=%d nearest_pikmin=%.1f\n",
+                generator, stuck.size(), near, nearest);
+    for (Piki* p : stuck) {
+        const Vector3f q = p->getPosition();
+        std::printf("P2_DANGOMUSHI_STICK_PIKI generator=%u dx=%.1f dy=%.1f dz=%.1f\n", generator,
+                    q.x - pos.x, q.y - pos.y, q.z - pos.z);
+    }
     std::fflush(stdout);
 }
 
@@ -1163,6 +1245,7 @@ void pc_p2_dangomushi_setup() {
         s.moveTarget = s.home;
         actor->mHealth = LIFE;
         enter(s, DANGO_STAY, "wait");
+        if (stayHides()) setHidden(actor, s, true);
         // Ordinary-delivery bridge (lane 06 contract): bind source 94 so
         // GoalItem::suckMe grants onion:p2:94 exactly once. Single-use.
         pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor), 94, key);
@@ -1175,8 +1258,8 @@ void pc_p2_dangomushi_setup() {
                     key, pos.x, pos.y, pos.z, actor->mHealth, LIFE);
         std::printf("P2_DANGOMUSHI_STATE generator=%u state=stay clip=%s\n", key,
                     s.clip.c_str());
-        std::printf("P2_DANGO_STATE generator=%u state=stay clip=%s loop=%d\n", key,
-                    s.clip.c_str(), p2dango::clipLoops(s.clip.c_str()) ? 1 : 0);
+        std::printf("P2_DANGO_STATE generator=%u state=stay clip=%s loop=%d hidden=%d\n", key,
+                    s.clip.c_str(), p2dango::clipLoops(s.clip.c_str()) ? 1 : 0, int(s.hidden));
         std::fflush(stdout);
         found.insert(key);
     }
@@ -1459,9 +1542,23 @@ void pc_p2_dangomushi_update(BTeki* actor) {
     switch (s.state) {
     case DANGO_STAY:
         stop(actor);
-        // Source StateStay: wake when a target enters the source private radius.
-        if (nearestTarget(pos, PRIVATE_RADIUS)) {
-            setState(actor, s, DANGO_APPEAR, "fly");
+        // Source StateStay::exec (DangoMushiState.cpp:111-142): once a captain or
+        // Pikmin is inside the private radius the ground shadow starts growing
+        // (mShadowScale += 0.6 dt, Obj::addShadowScale); it keeps growing whether or
+        // not the target stays, and at 1.0 (1.67 s) the crab transits to Appear.
+        if (s.shadowScale <= 0.0f && nearestTarget(pos, PRIVATE_RADIUS)) {
+            s.shadowScale = 0.0001f;
+            std::printf("P2_DANGO_STAY_WAKE generator=%u radius=%.0f hidden=%d\n", generator,
+                        PRIVATE_RADIUS, int(s.hidden));
+            std::fflush(stdout);
+        }
+        if (s.shadowScale > 0.0f) {
+            s.shadowScale += 0.6f * dt;
+            if (s.shadowScale >= 1.0f) {
+                s.shadowScale = 1.0f;
+                setHidden(actor, s, false); // StateAppear::init disableEvent(EB_ModelHidden)
+                setState(actor, s, DANGO_APPEAR, "fly");
+            }
         }
         break;
     case DANGO_APPEAR:
@@ -1616,6 +1713,16 @@ void pc_p2_dangomushi_update(BTeki* actor) {
                         s.stateTime, int(hzo.stickable), int(hzo.invulnerable),
                         int(s.turnClock.looping), int(s.turnClock.tail));
             std::fflush(stdout);
+        }
+        if (s.stickable) {
+            const bool first = s.stickLogTimer <= 0.0f;
+            s.stickLogTimer += dt;
+            if (first || s.stickLogTimer >= 1.0f) {
+                if (!first) s.stickLogTimer = 0.0001f;
+                logStickSurface(actor, pos, generator, first);
+            }
+        } else {
+            s.stickLogTimer = 0.0f;
         }
         s.turnJustEntered = false;
         if (!s.turnClosed && s.turnClock.closed) {
