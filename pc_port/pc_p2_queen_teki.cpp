@@ -449,6 +449,13 @@ void applyOutput(BTeki* t, Binding& b, const TickOutput& o, int& shown, int stuc
     if (o.crash)
         std::printf("P2_QUEEN_CRASH generator=%u source_id=%u dot=%.1f territory=%.1f margin=50\n", b.generator,
                     b.source, o.rollDot, b.fsm.params().territoryRadius);
+    if (o.blockedTurn || o.blockedEnd) {
+        if (o.blockedTurn) pc_p2_sfx(30, b.generator, p2sfx::Event::Crash, t->getPosition());
+        std::printf("P2_QUEEN_ROLL_BLOCKED generator=%u source_id=%u action=%s dot=%.1f x=%.1f z=%.1f "
+                    "port_constraint=p1_map_collision_no_progress
+",
+                    b.generator, b.source, o.blockedTurn ? "turn" : "end_wait", o.rollDot, t->mSRT.t.x, t->mSRT.t.z);
+    }
     if (o.birth) queueBirth(t, b);
     if (o.deadKey)
         std::printf("P2_QUEEN_DEAD_KEY generator=%u source_id=%u frame=%.0f\n", b.generator, b.source,
