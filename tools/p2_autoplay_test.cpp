@@ -104,6 +104,35 @@ void testGate()
     setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
 }
 
+void testTeleportHook()
+{
+    float x = 0.0f, z = 0.0f;
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT", "-460,3560");
+    CHECK(!p2autoplay::teleportTarget(x, z), "teleport/inert_without_gate");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", "1");
+    CHECK(p2autoplay::teleportTarget(x, z) && x == -460.0f && z == 3560.0f, "teleport/parses_x_z");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT", "12");
+    CHECK(!p2autoplay::teleportTarget(x, z), "teleport/rejects_single_number");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT", "1,2,3");
+    CHECK(!p2autoplay::teleportTarget(x, z), "teleport/rejects_trailing_text");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT", nullptr);
+    CHECK(!p2autoplay::teleportTarget(x, z), "teleport/inert_when_unset");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_NEXT_DAY", "1");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
+    CHECK(!p2autoplay::nextDayTap(), "nextday/inert_without_gate");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", "1");
+    CHECK(p2autoplay::nextDayTap(), "nextday/on_with_gate");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_NEXT_DAY", nullptr);
+    CHECK(!p2autoplay::nextDayTap(), "nextday/off_when_unset");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT_TO_PART", "1");
+    CHECK(p2autoplay::teleportToPart(), "teleport_part/on_with_gate");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
+    CHECK(!p2autoplay::teleportToPart(), "teleport_part/inert_without_gate");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT_TO_PART", nullptr);
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
+}
+
 void testInertWhenUnset()
 {
     // Adversarial senses with the gate closed: must stay neutral and silent.
@@ -4081,6 +4110,7 @@ void testRangedAttackWhenStuckNear()
 int main()
 {
     testGate();
+    testTeleportHook();
     testInertWhenUnset();
     testWithdrawFlow();
     testWithdrawKeepsClosing();

@@ -238,7 +238,12 @@ void pc_p2_kabuto_fsm_setup(){
     Iterator it(tekiMgr);CI_LOOP(it){Teki* teki=static_cast<Teki*>(*it);if(!teki||!teki->mGenerator)continue;
         const unsigned token=bridge?pc_p2_campaign_token(teki):teki->mGenerator->_70;
         if(wanted.find(token)==wanted.end())continue;
-        if(!seen.insert(token).second)std::abort();if(teki->mTekiType!=TEKI_Beatle)std::abort();
+        if(teki->mTekiType!=TEKI_Beatle){ // #948: wrong vehicle: refuse with a reason, never abort a campaign
+            if(!bridge)std::abort();
+            std::printf("P2_KABUTO_UNBOUND generator=%u source_id=75 type=%d reason=host_type_mismatch\n",token,int(teki->mTekiType));std::fflush(stdout);continue;}
+        if(!seen.insert(token).second){
+            if(!bridge)std::abort();
+            std::printf("P2_KABUTO_UNBOUND generator=%u source_id=75 reason=duplicate_generator\n",token);std::fflush(stdout);continue;}
         actors[static_cast<PelletView*>(teki)]=true;shooters[tokenOf(teki)]=teki;
         teki->mHealth=p2kabutofsm::params().health;
         KabutoFsm& f=fsms[static_cast<PelletView*>(teki)];
@@ -251,7 +256,7 @@ void pc_p2_kabuto_fsm_setup(){
         std::printf("P2_ENEMY_READY species=Kabuto native_family=Kabuto generator=%u x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=native source_FSM=implemented\n",token,teki->getPosition().x,teki->getPosition().y,teki->getPosition().z,teki->mHealth,p2kabutofsm::params().health);
         std::printf("P2_KABUTO_STATE generator=%u state=wait\n",token);std::fflush(stdout);
     }
-    if(seen.size()!=wanted.size()){std::printf("P2_KABUTO_ERROR missing_actor wanted=%zu found=%zu\n",wanted.size(),seen.size());std::abort();}
+    if(seen.size()!=wanted.size()){std::printf("P2_KABUTO_MISSING wanted=%zu found=%zu\n",wanted.size(),seen.size());std::fflush(stdout);if(!bridge)std::abort();}
     loadAnimation(bank);ready=true;
 }
 void pc_p2_kabuto_fsm_update(BTeki* actor){

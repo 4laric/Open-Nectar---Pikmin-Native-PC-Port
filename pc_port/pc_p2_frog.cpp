@@ -277,7 +277,13 @@ void pc_p2_frog_setup(){
     Iterator it(tekiMgr);CI_LOOP(it){Teki* teki=static_cast<Teki*>(*it);if(!teki||!teki->mGenerator)continue;
         const unsigned token = bridge ? pc_p2_campaign_token(teki) : teki->mGenerator->_70;
         auto found=wanted.find(token);if(found==wanted.end())continue;
-        int kind=found->second;if(!seen.insert(found->first).second)std::abort();if(teki->mTekiType!=(kind?TEKI_Frow:TEKI_Frog))std::abort();
+        int kind=found->second;
+        if(teki->mTekiType!=(kind?TEKI_Frow:TEKI_Frog)){ // #948: wrong vehicle: refuse with a reason, never abort a campaign
+            if(!bridge)std::abort();
+            std::printf("P2_FROG_UNBOUND generator=%u source_id=%u type=%d reason=host_type_mismatch\n",token,kind?18u:17u,int(teki->mTekiType));std::fflush(stdout);continue;}
+        if(!seen.insert(found->first).second){
+            if(!bridge)std::abort();
+            std::printf("P2_FROG_UNBOUND generator=%u source_id=%u reason=duplicate_generator\n",token,kind?18u:17u);std::fflush(stdout);continue;}
         actors[static_cast<PelletView*>(teki)]=kind;
         teki->mHealth=p2frog::params(kind).health;
         FrogFsm& f=fsms[static_cast<PelletView*>(teki)];
@@ -299,8 +305,8 @@ void pc_p2_frog_setup(){
         std::fflush(stdout);
     }
     if(seen.size()!=wanted.size()){
-        std::printf("P2_FROG_ERROR missing_actor wanted=%zu found=%zu\n",wanted.size(),seen.size());
-        std::abort();
+        std::printf("P2_FROG_MISSING wanted=%zu found=%zu\n",wanted.size(),seen.size());std::fflush(stdout);
+        if(!bridge)std::abort();
     }
     loadAnimation(banks);ready=true;
 }
