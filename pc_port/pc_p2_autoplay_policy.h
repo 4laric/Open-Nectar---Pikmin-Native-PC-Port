@@ -1087,7 +1087,10 @@ private:
         // and the crew never grew past 1-2 of 10. For the Titan, hold a
         // standoff ring and slide the cursor onto the corpse in the P1 look
         // band (the King standoff's aim), then throw.
-        if (in.targetSource == 73 && in.targetToken != 0 && !in.waypointLeg && in.cursorValid) {
+        // #256: the Empress carcass (radius 50, a12: 5 carriers of 20 from standing
+        // on it) gets the same standoff ring.
+        if ((in.targetSource == 73 || in.targetSource == 30) && in.targetToken != 0 && !in.waypointLeg
+            && in.cursorValid) {
             if (in.targetDist < cfg.titanSeedRingMin) {
                 steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
             } else if (in.targetDist > cfg.titanSeedRingMax) {
@@ -1950,7 +1953,8 @@ private:
         // titanRegroupWalk seconds), then holds the whistle there.
         const int amCrew = in.pelletCarriers > 0 ? in.pelletCarriers : in.carryCount;
         const bool amShort = in.squadPikmin == 0
-            || (in.carryWant > 0 && in.squadPikmin + amCrew < in.carryWant && in.strayPikmin > 0);
+            || (in.carryWant > 0 && in.squadPikmin + amCrew < in.carryWant && in.strayPikmin > 0)
+            || (in.targetSource == 30 && in.strayPikmin >= 10 && in.squadPikmin < 20);
         // #256: the Empress joins the Titan's regroup (her flick and roll leave
         // ~50 idle strays, a11: 12 carriers of 20), walking to the NEAREST stray
         // over the waypoint graph because the strays ring the arena.
