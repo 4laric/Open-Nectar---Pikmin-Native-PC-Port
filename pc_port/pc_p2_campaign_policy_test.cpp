@@ -21,6 +21,12 @@ int main() {
         assert(p2campaign::hostType(38u,original,true)==original);
     }
     assert(p2campaign::hasStaticHost(38u));
+    // #958: Giant Breadbug (OoPanModoki 40) shares the Breadbug vehicle.
+    for (int original=0;original<34;++original) {
+        assert(p2campaign::hostType(40u,original,false)==8);
+        assert(p2campaign::hostType(40u,original,true)==original);
+    }
+    assert(p2campaign::hasStaticHost(40u));
     for (unsigned source : {9u,23u,34u,44u,54u,56u,57u,59u,60u,61u,62u,63u,65u,69u,70u,71u,78u,79u,101u,17u,18u,24u,25u,15u,75u,26u,27u,84u,93u,66u,97u,73u})
         assert(p2campaign::hasStaticHost(source));
     // #244 OWN: Careening Dirigibug rides TEKI_Napkid (11) statically.

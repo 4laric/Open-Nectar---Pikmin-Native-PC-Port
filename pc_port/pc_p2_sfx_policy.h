@@ -67,6 +67,7 @@ enum Se : int {
 // P2 source ids (pc_p2_species) covered by the table.
 enum Source : unsigned {
     kBreadbug     = 38,
+    kGiantBreadbug= 40,   // OoPanModoki: same TEKI_Collec bank as the Breadbug
     kSnitchbug    = 32,
     kDirigibug    = 58,
     kCrawbster    = 94,
@@ -130,6 +131,7 @@ inline const char* eventName(Event e) {
 inline int seFor(unsigned sourceId, Event e) {
     switch (sourceId) {
     case kBreadbug: // P1 has the Breadbug itself (TEKI_Collec): use its bank.
+    case kGiantBreadbug:
         switch (e) {
         case Event::Step: return kCollecWalk;
         case Event::Pull: return kCollecPull;

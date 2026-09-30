@@ -1,4 +1,5 @@
-// Campaign OWN driver for the Breadbug (PanModoki 38, #898). See the header.
+// Campaign OWN driver for the Breadbug (PanModoki 38, #898) and the Giant
+// Breadbug (OoPanModoki 40, #958). See the header.
 #include "pc_p2_breadbug_teki.h"
 #include "pc_p2_breadbug_fsm.h"
 #include "pc_p2_campaign_actor.h"
@@ -38,10 +39,33 @@
 
 namespace {
 namespace bb = p2breadbugfsm;
-constexpr unsigned kSource = 38;
+// Variants (#958): 38 PanModoki (Breadbug) and 40 OoPanModoki (Giant Breadbug)
+// share this driver and the FSM; they differ in staged inputs, parameters and
+// the OoPanModoki rules applied through bb::applyVariant / the Purple-only press.
+struct Variant {
+    unsigned source;
+    bool giant;
+    const char* parms;      // staged verbatim retail enemyparm.txt
+    const char* bank;       // staged clip/key-event/pose bank
+    const char* posePrefix; // <prefix>_<clip>_<ii>.mod in the private model room
+    const char* model;
+};
+constexpr int kVariantCount = 2;
+constexpr Variant kVariants[kVariantCount] = {
+    {38, false, "p2-breadbug-parms.txt", "p2-breadbug-bank.txt", "breadbug", "p2_panmodoki"},
+    {40, true, "p2-giantbreadbug-parms.txt", "p2-giantbreadbug-bank.txt", "giantbreadbug", "p2_oopanmodoki"},
+};
+int variantOf(unsigned source) {
+    for (int v = 0; v < kVariantCount; ++v)
+        if (kVariants[v].source == source) return v;
+    return -1;
+}
 
 struct Binding {
     unsigned generator = 0;
+    unsigned source = 38;
+    int variant = 0;
+    int pressesRejectedKind = 0; // giant: non-Purple presses (pressCallBack refuses them)
     bb::Fsm fsm;
     P2GroinkSourceClock clock;
     bool escaped = false;       // host death funnel ran (pcEscapeNow)
@@ -74,10 +98,10 @@ struct Binding {
 };
 std::map<BTeki*, Binding> s;
 
-bb::Params sParams;
-bb::Bank sBank = bb::defaultBank();
-std::vector<Shape*> sPoses[bb::AnimCount];
-bool sPosesLoaded = false;
+bb::Params sParams[kVariantCount];
+bb::Bank sBank[kVariantCount] = {bb::defaultBank(), bb::defaultBank()};
+std::vector<Shape*> sPoses[kVariantCount][bb::AnimCount];
+bool sPosesLoaded[kVariantCount] = {false, false};
 std::map<BTeki*, int> sDrawLogged;
 
 // Wall-clock milliseconds, so frame dumps (file mtimes) can be matched to markers.
@@ -139,11 +163,11 @@ void logMotion(Binding& b, const char* phase, Creature* body, float dt, float pe
             }
         }
     }
-    std::printf("P2_BREADBUG_OWN_MOTION generator=%u source_id=38 phase=%s x=%.1f y=%.1f z=%.1f dx=%.1f dz=%.1f "
+    std::printf("P2_BREADBUG_OWN_MOTION generator=%u source_id=%u phase=%s x=%.1f y=%.1f z=%.1f dx=%.1f dz=%.1f "
                 "vel=%.1f,%.1f,%.1f drive=%.1f,%.1f vol=%.1f,%.1f slip=%d attr=%d ny=%.3f ground=%d "
                 "navi_d=%.1f navi=%.0f,%.0f navi_vel=%.0f,%.0f piki_near40=%d piki_d=%.1f piki_state=%d piki_mode=%d "
                 "piki_vel=%.0f,%.0f coll_vel=%d wall=%lld\n",
-                b.generator, phase, p.x, p.y, p.z, dx, dz, body->mVelocity.x, body->mVelocity.y, body->mVelocity.z,
+                b.generator, b.source, phase, p.x, p.y, p.z, dx, dz, body->mVelocity.x, body->mVelocity.y, body->mVelocity.z,
                 body->mTargetVelocity.x, body->mTargetVelocity.z, body->mVolatileVelocity.x, body->mVolatileVelocity.z,
                 slip, attr, ny, body->mGroundTriangle ? 1 : 0, nd, nx, nz, nvx, nvz, near40, pd < 1e8f ? pd : -1.0f,
                 pd_state, pd_mode, pvx, pvz, int(body->mHasCollChangedVelocity), wallMs());
@@ -210,19 +234,24 @@ struct P1Route : bb::Route {
 };
 P1Route sRoute;
 
-void loadParams() {
-    sParams = bb::Params{};
-    std::ifstream in("p2-breadbug-parms.txt");
+void loadParams(int v) {
+    const Variant& var = kVariants[v];
+    sParams[v] = bb::Params{};
+    bb::applyVariant(sParams[v], var.giant);
+    std::ifstream in(var.parms);
     std::string error;
-    if (in && !bb::parseEnemyParm(in, sParams, error)) {
-        std::printf("P2_BREADBUG_PARMS_INVALID reason=%s fallback=source_defaults\n", error.c_str());
-        sParams = bb::Params{};
+    if (in && !bb::parseEnemyParm(in, sParams[v], error)) {
+        std::printf("P2_BREADBUG_PARMS_INVALID source_id=%u reason=%s fallback=source_defaults\n", var.source, error.c_str());
+        sParams[v] = bb::Params{};
+        bb::applyVariant(sParams[v], var.giant);
     }
-    std::printf("P2_BREADBUG_PARMS source_id=38 retail=%d health=%.1f move=%.1f search=%.1f angle=%.1f "
-                "press=%.1f suck=%.1f carry=%.1f hide=%.1f wait=%.1f weight=%d walk_anim=%.2f\n",
-                sParams.retail ? 1 : 0, sParams.health, sParams.moveSpeed, sParams.searchDistance,
-                sParams.searchAngle, sParams.pressDamage, sParams.suckDamage, sParams.carrySpeed,
-                sParams.hideTime, sParams.waitTime, sParams.maxCarryWeight, sParams.walkAnimSpeed);
+    const bb::Params& p = sParams[v];
+    std::printf("P2_BREADBUG_PARMS source_id=%u giant=%d retail=%d health=%.1f move=%.1f search=%.1f angle=%.1f "
+                "press=%.1f suck=%.1f carry=%.1f hide=%.1f wait=%.1f weight=%d walk_anim=%.2f "
+                "carry_size_diff=%.0f slack=%.0f\n",
+                var.source, p.giant ? 1 : 0, p.retail ? 1 : 0, p.health, p.moveSpeed, p.searchDistance,
+                p.searchAngle, p.pressDamage, p.suckDamage, p.carrySpeed,
+                p.hideTime, p.waitTime, p.maxCarryWeight, p.walkAnimSpeed, p.carrySizeDiff, p.waypointSlack);
 }
 
 // Pose bank with shared materials (Groink/tank pattern), bounded bytes.
@@ -261,37 +290,38 @@ Shape* loadShape(const std::string& rel, Shape*& shared, std::size_t& total) {
     return shape;
 }
 
-void loadBank() {
-    sBank = bb::defaultBank();
-    for (auto& v : sPoses) v.clear();
-    sPosesLoaded = false;
-    std::ifstream in("p2-breadbug-bank.txt");
+void loadBank(int v) {
+    const Variant& var = kVariants[v];
+    sBank[v] = bb::defaultBank();
+    for (auto& poses : sPoses[v]) poses.clear();
+    sPosesLoaded[v] = false;
+    std::ifstream in(var.bank);
     std::string error;
-    if (in && !bb::parseBank(in, sBank, error)) {
-        std::printf("P2_BREADBUG_BANK_INVALID reason=%s fallback=builtin_timing draw=host\n", error.c_str());
-        sBank = bb::defaultBank();
+    if (in && !bb::parseBank(in, sBank[v], error)) {
+        std::printf("P2_BREADBUG_BANK_INVALID source_id=%u reason=%s fallback=builtin_timing draw=host\n", var.source, error.c_str());
+        sBank[v] = bb::defaultBank();
     }
     int staged = 0;
-    for (const auto& c : sBank.clip) staged += c.staged ? 1 : 0;
+    for (const auto& c : sBank[v].clip) staged += c.staged ? 1 : 0;
     Shape* shared = nullptr;
     std::size_t total = 0, poses = 0;
     bool ok = staged > 0;
     for (int a = 0; ok && a < bb::AnimCount; ++a) {
-        const auto& clip = sBank.clip[a];
+        const auto& clip = sBank[v].clip[a];
         if (!clip.staged) continue;
         for (std::size_t i = 0; i < clip.poses.size(); ++i) {
             char rel[160];
-            std::snprintf(rel, sizeof(rel), "breadbug_%s_%02u.mod", clip.name.c_str(), unsigned(i));
+            std::snprintf(rel, sizeof(rel), "%s_%s_%02u.mod", var.posePrefix, clip.name.c_str(), unsigned(i));
             Shape* shape = loadShape(rel, shared, total);
             if (!shape) { ok = false; break; }
-            sPoses[a].push_back(shape);
+            sPoses[v][a].push_back(shape);
             ++poses;
         }
     }
-    if (!ok) for (auto& v : sPoses) v.clear();
-    sPosesLoaded = ok && poses > 0;
-    std::printf("P2_BREADBUG_BANK staged_clips=%d poses=%zu bytes=%zu draw=%s\n", staged,
-                sPosesLoaded ? poses : std::size_t(0), total, sPosesLoaded ? "p2_model" : "host");
+    if (!ok) for (auto& list : sPoses[v]) list.clear();
+    sPosesLoaded[v] = ok && poses > 0;
+    std::printf("P2_BREADBUG_BANK source_id=%u staged_clips=%d poses=%zu bytes=%zu draw=%s\n", var.source, staged,
+                sPosesLoaded[v] ? poses : std::size_t(0), total, sPosesLoaded[v] ? "p2_model" : "host");
 }
 
 std::uint64_t idOf(const Pellet* p) { return static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(p)); }
@@ -372,8 +402,8 @@ Pellet* pelletFor(const std::vector<bb::PelletInfo>& infos, const std::vector<Pe
 
 void logState(const Binding& b, bb::State from, bb::State to, BTeki* t) {
     const Vector3f p = t->getPosition();
-    std::printf("P2_BREADBUG_OWN_STATE generator=%u source_id=38 from=%s to=%s x=%.1f z=%.1f health=%.1f wall=%lld\n",
-                b.generator, bb::stateName(from), bb::stateName(to), p.x, p.z, b.fsm.health(), wallMs());
+    std::printf("P2_BREADBUG_OWN_STATE generator=%u source_id=%u from=%s to=%s x=%.1f z=%.1f health=%.1f wall=%lld\n",
+                b.generator, b.source, bb::stateName(from), bb::stateName(to), p.x, p.z, b.fsm.health(), wallMs());
 }
 
 void setHidden(BTeki* t, Binding& b, bool hidden) {
@@ -442,9 +472,9 @@ void consumeCargo(BTeki* t, Binding& b, Pellet* p) {
         b.spared.insert(p);
         ++b.sparedCount;
     }
-    std::printf("P2_BREADBUG_OWN_CONSUME generator=%u source_id=38 cargo_carcass=%d cargo_bound_source=%u "
+    std::printf("P2_BREADBUG_OWN_CONSUME generator=%u source_id=%u cargo_carcass=%d cargo_bound_source=%u "
                 "cargo_generator=%u destroyed=%d spared=%s pikmin_killed=%d pellet_alive_after=%d wall=%lld\n",
-                b.generator, carcass ? 1 : 0, boundSource, boundGen, destroy ? 1 : 0,
+                b.generator, b.source, carcass ? 1 : 0, boundSource, boundGen, destroy ? 1 : 0,
                 destroy ? "no" : (boundSource ? "carcass_check_bound" : "carcass"), killed, p->isAlive() ? 1 : 0, wallMs());
 }
 
@@ -454,8 +484,8 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
     // The P1 Collec TAI must stay frozen (negative evidence).
     if (t->mStateID != b.taiState) {
         ++b.taiChanges;
-        std::printf("P2_BREADBUG_OWN_TAI_TRANSITION generator=%u source_id=38 from=%d to=%d\n",
-                    b.generator, b.taiState, int(t->mStateID));
+        std::printf("P2_BREADBUG_OWN_TAI_TRANSITION generator=%u source_id=%u from=%d to=%d\n",
+                    b.generator, b.source, b.taiState, int(t->mStateID));
         b.taiState = t->mStateID;
     }
     // Stored damage reaches mStoredDamage only through InteractBomb (ordinary
@@ -497,7 +527,7 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         const bb::TickOutput o = b.fsm.tick(in);
         if (!o.valid) break;
         if (in.suckFinished)
-            std::printf("P2_BREADBUG_OWN_SUCKED generator=%u source_id=38 health=%.1f\n", b.generator, hpBefore);
+            std::printf("P2_BREADBUG_OWN_SUCKED generator=%u source_id=%u health=%.1f\n", b.generator, b.source, hpBefore);
         if (k == 0) {
             b.presses += in.presses;
             b.pendingPresses = 0;
@@ -509,60 +539,60 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
             shown = e;
             // P1 approximation of the source PSSE keys (output-only, #946).
             switch (e) {
-            case bb::State::Pulled: pc_p2_sfx(38, b.generator, p2sfx::Event::Pull, t); break;
-            case bb::State::Stick: pc_p2_sfx(38, b.generator, p2sfx::Event::Attack, t); break;
-            case bb::State::Damage: pc_p2_sfx(38, b.generator, p2sfx::Event::Damage, t); break;
-            case bb::State::Dead: pc_p2_sfx(38, b.generator, p2sfx::Event::Dead, t); break;
-            case bb::State::Appear: pc_p2_sfx(38, b.generator, p2sfx::Event::Land, t); break;
+            case bb::State::Pulled: pc_p2_sfx(b.source, b.generator, p2sfx::Event::Pull, t); break;
+            case bb::State::Stick: pc_p2_sfx(b.source, b.generator, p2sfx::Event::Attack, t); break;
+            case bb::State::Damage: pc_p2_sfx(b.source, b.generator, p2sfx::Event::Damage, t); break;
+            case bb::State::Dead: pc_p2_sfx(b.source, b.generator, p2sfx::Event::Dead, t); break;
+            case bb::State::Appear: pc_p2_sfx(b.source, b.generator, p2sfx::Event::Land, t); break;
             default: break;
             }
             if (e == bb::State::Pulled)
-                std::printf("P2_BREADBUG_OWN_PULLED generator=%u source_id=38 carriers=%.1f self=%.1f\n",
-                            b.generator, o.contestPiki, o.contestSelf);
+                std::printf("P2_BREADBUG_OWN_PULLED generator=%u source_id=%u carriers=%.1f self=%.1f\n",
+                            b.generator, b.source, o.contestPiki, o.contestSelf);
             if (e == bb::State::Dead && !b.deadLogged) {
                 b.deadLogged = true;
-                std::printf("P2_BREADBUG_OWN_DEAD generator=%u source_id=38 health=%.1f wall=%lld\n", b.generator, b.fsm.health(), wallMs());
+                std::printf("P2_BREADBUG_OWN_DEAD generator=%u source_id=%u health=%.1f wall=%lld\n", b.generator, b.source, b.fsm.health(), wallMs());
             }
         }
         if (o.damageKind != bb::DamageKind::None) {
             if (o.hpAfter < o.hpBefore && o.hpAfter > 0.0f)
-                pc_p2_sfx(38, b.generator, p2sfx::Event::Damage, t);
+                pc_p2_sfx(b.source, b.generator, p2sfx::Event::Damage, t);
             const char* kind = o.damageKind == bb::DamageKind::Press ? "P2_BREADBUG_OWN_PRESS"
                              : o.damageKind == bb::DamageKind::Suck ? "P2_BREADBUG_OWN_SUCK_DAMAGE"
                                                                      : "P2_BREADBUG_OWN_EXTERNAL_DAMAGE";
-            std::printf("%s generator=%u source_id=38 hp_before=%.1f hp_after=%.1f state_before=%s wall=%lld\n", kind,
-                        b.generator, o.hpBefore, o.hpAfter, bb::stateName(before), wallMs());
+            std::printf("%s generator=%u source_id=%u hp_before=%.1f hp_after=%.1f state_before=%s wall=%lld\n", kind,
+                        b.generator, b.source, o.hpBefore, o.hpAfter, bb::stateName(before), wallMs());
         }
         if (o.pressRejected) {
             ++b.pressesRejected;
-            std::printf("P2_BREADBUG_OWN_PRESS_IGNORED generator=%u source_id=38 state=%s\n", b.generator,
+            std::printf("P2_BREADBUG_OWN_PRESS_IGNORED generator=%u source_id=%u state=%s\n", b.generator, b.source,
                         bb::stateName(b.fsm.state()));
         }
         if (o.backStuckSkip)
-            std::printf("P2_BREADBUG_OWN_BACK_STUCK generator=%u source_id=38 action=skip_node x=%.1f z=%.1f wall=%lld\n",
-                        b.generator, t->getPosition().x, t->getPosition().z, wallMs());
+            std::printf("P2_BREADBUG_OWN_BACK_STUCK generator=%u source_id=%u action=skip_node x=%.1f z=%.1f wall=%lld\n",
+                        b.generator, b.source, t->getPosition().x, t->getPosition().z, wallMs());
         if (o.backStuckRelease) {
             // Never re-pick the cargo it could not haul (no grab/wedge loop).
             if (held) b.spared.insert(held);
-            std::printf("P2_BREADBUG_OWN_BACK_STUCK generator=%u source_id=38 action=release x=%.1f z=%.1f wall=%lld\n",
-                        b.generator, t->getPosition().x, t->getPosition().z, wallMs());
+            std::printf("P2_BREADBUG_OWN_BACK_STUCK generator=%u source_id=%u action=release x=%.1f z=%.1f wall=%lld\n",
+                        b.generator, b.source, t->getPosition().x, t->getPosition().z, wallMs());
         }
         if (o.refilled)
-            std::printf("P2_BREADBUG_OWN_HIDE_REFILL generator=%u source_id=38 health=%.1f\n", b.generator, b.fsm.health());
+            std::printf("P2_BREADBUG_OWN_HIDE_REFILL generator=%u source_id=%u health=%.1f\n", b.generator, b.source, b.fsm.health());
         // Commands.
         if (o.release && held) {
             if (o.releaseReverse) { held->mVelocity.x = -held->mVelocity.x; held->mVelocity.z = -held->mVelocity.z; }
             yieldCargo(held, t);
             held->endStickTeki(t);
-            std::printf("P2_BREADBUG_OWN_RELEASE generator=%u source_id=38 reverse=%d\n", b.generator, o.releaseReverse ? 1 : 0);
+            std::printf("P2_BREADBUG_OWN_RELEASE generator=%u source_id=%u reverse=%d\n", b.generator, b.source, o.releaseReverse ? 1 : 0);
             held = nullptr;
         }
         if (o.stickTo) {
             Pellet* p = pelletFor(infos, who, o.stickTo);
             const bool ok = p && p->startStickTeki(t, 1.0f + t->getTekiCollisionSize());
-            std::printf("P2_BREADBUG_OWN_STICK generator=%u source_id=38 ok=%d carcass=%d carry_min=%d carry_max=%d "
+            std::printf("P2_BREADBUG_OWN_STICK generator=%u source_id=%u ok=%d carcass=%d carry_min=%d carry_max=%d "
                         "strength=%.1f carriers=%.1f\n",
-                        b.generator, ok ? 1 : 0, p && p->mPelletView ? 1 : 0, p ? int(p->mConfig->mCarryMinPikis()) : 0,
+                        b.generator, b.source, ok ? 1 : 0, p && p->mPelletView ? 1 : 0, p ? int(p->mConfig->mCarryMinPikis()) : 0,
                         p ? int(p->mConfig->mCarryMaxPikis()) : 0, b.fsm.carryStrength(), p ? pikiStrength(p) : 0.0f);
             if (ok) held = p;
         }
@@ -574,8 +604,8 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
             if (o.contestPiki != b.lastContestPiki || o.canBack != b.lastCanBack) {
                 b.lastContestPiki = o.contestPiki;
                 b.lastCanBack = o.canBack;
-                std::printf("P2_BREADBUG_OWN_CONTEST generator=%u source_id=38 carriers=%.1f self=%.1f breadbug_wins=%d state=%s\n",
-                            b.generator, o.contestPiki, o.contestSelf, o.canBack ? 1 : 0, bb::stateName(b.fsm.state()));
+                std::printf("P2_BREADBUG_OWN_CONTEST generator=%u source_id=%u carriers=%.1f self=%.1f breadbug_wins=%d state=%s\n",
+                            b.generator, b.source, o.contestPiki, o.contestSelf, o.canBack ? 1 : 0, bb::stateName(b.fsm.state()));
             }
         }
         if (held && o.holdCargo) {
@@ -613,7 +643,7 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
     }
     // Footsteps while walking / hauling (Collec stride, output-only).
     if (b.fsm.state() == bb::State::Walk || b.fsm.state() == bb::State::Back)
-        pc_p2_sfx_stride(38, b.generator, t, 22.0f);
+        pc_p2_sfx_stride(b.source, b.generator, t, 22.0f);
     if (t->mHealth > 0.0f) t->updateLifeGauge();
     if (b.fsm.state() == bb::State::Damage || b.fsm.state() == bb::State::Dead)
         logMotion(b, bb::stateName(b.fsm.state()), t, dt, 0.25f);
@@ -625,20 +655,20 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         if (b.held) {
             // Haul diagnostics (read-only): is the cargo driven, grounded, moving?
             Pellet* c = b.held;
-            std::printf("P2_BREADBUG_OWN_HAUL generator=%u source_id=38 state=%s cargo=%.1f,%.1f,%.1f vel=%.1f,%.1f,%.1f "
+            std::printf("P2_BREADBUG_OWN_HAUL generator=%u source_id=%u state=%s cargo=%.1f,%.1f,%.1f vel=%.1f,%.1f,%.1f "
                         "dir=%.1f,%.1f carrier_self=%d carry_state=%d ground=%d pellet_state=%d pick=%.1f crew=%.1f "
                         "min=%d next=%.1f,%.1f pathfinding=%d path_len=%zu\n",
-                        b.generator, bb::stateName(b.fsm.state()), c->mSRT.t.x, c->mSRT.t.y, c->mSRT.t.z,
+                        b.generator, b.source, bb::stateName(b.fsm.state()), c->mSRT.t.x, c->mSRT.t.y, c->mSRT.t.z,
                         c->mVelocity.x, c->mVelocity.y, c->mVelocity.z, c->mCarryDirection.x, c->mCarryDirection.z,
                         c->mPikiCarrier == t ? 1 : 0, int(c->mCarryState), c->onGround() ? 1 : 0, c->getState(),
                         c->getPickOffset(), pikiStrength(c), int(c->mConfig->mCarryMinPikis()), wp.x, wp.z, b.fsm.pathfinding() ? 1 : 0,
                         b.fsm.pathLength());
         }
-        std::printf("P2_BREADBUG_OWN_POS generator=%u source_id=38 state=%s anim=%d frame=%.0f x=%.1f z=%.1f "
+        std::printf("P2_BREADBUG_OWN_POS generator=%u source_id=%u state=%s anim=%d frame=%.0f x=%.1f z=%.1f "
                     "home=%.1f,%.1f next=%.1f,%.1f health=%.1f target=%d held=%d pellets=%zu tai_changes=%d "
                     "attacks_ignored=%d target_skips=%d consumed=%d spared=%d events_consumed=%d presses=%d fly_rising=%d "
                     "pellets_alive=%d nearest_pellet=%.0f wall=%lld\n",
-                    b.generator, bb::stateName(b.fsm.state()), b.fsm.animator().anim(), b.fsm.animator().frame(),
+                    b.generator, b.source, bb::stateName(b.fsm.state()), b.fsm.animator().anim(), b.fsm.animator().frame(),
                     p.x, p.z, b.fsm.home().x, b.fsm.home().z, wp.x, wp.z, b.fsm.health(), b.fsm.target() ? 1 : 0,
                     b.held ? 1 : 0, infos.size(), b.taiChanges, b.attacksIgnored, b.targetSkips, b.consumed,
                     b.sparedCount, b.eventsConsumed, b.presses,
@@ -658,11 +688,11 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         setHidden(t, b, false);
         t->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
         t->mVelocity.x = t->mVelocity.z = 0.0f;
-        std::printf("P2_BREADBUG_OWN_ESCAPE generator=%u source_id=38 native=host_escape_now tai_changes=%d "
+        std::printf("P2_BREADBUG_OWN_ESCAPE generator=%u source_id=%u native=host_escape_now tai_changes=%d "
                     "attacks_ignored=%d attacks_ignored_piki=%d attacks_ignored_navi=%d target_skips=%d presses=%d "
-                    "presses_rejected=%d consumed=%d spared=%d\n",
-                    b.generator, b.taiChanges, b.attacksIgnored, b.attacksIgnoredPiki, b.attacksIgnoredNavi,
-                    b.targetSkips, b.presses, b.pressesRejected, b.consumed, b.sparedCount);
+                    "presses_rejected=%d presses_rejected_nonpurple=%d consumed=%d spared=%d\n",
+                    b.generator, b.source, b.taiChanges, b.attacksIgnored, b.attacksIgnoredPiki, b.attacksIgnoredNavi,
+                    b.targetSkips, b.presses, b.pressesRejected, b.pressesRejectedKind, b.consumed, b.sparedCount);
         std::fflush(stdout);
         t->pcEscapeNow();
         return true;
@@ -674,15 +704,16 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
 void pc_p2_breadbug_teki_reset() {
     s.clear();
     sDrawLogged.clear();
-    for (auto& poses : sPoses) poses.clear();
-    sPosesLoaded = false;
+    for (auto& variant : sPoses)
+        for (auto& poses : variant) poses.clear();
+    for (bool& loaded : sPosesLoaded) loaded = false;
 }
 
 void pc_p2_breadbug_teki_forget(BTeki* t) {
     if (!t) return;
     auto i = s.find(t);
     if (i == s.end()) return;
-    std::printf("P2_BREADBUG_OWN_FORGET generator=%u source_id=38 dead_state=%d\n", i->second.generator, t->mDeadState);
+    std::printf("P2_BREADBUG_OWN_FORGET generator=%u source_id=%u dead_state=%d\n", i->second.generator, i->second.source, t->mDeadState);
     std::fflush(stdout);
     s.erase(i);
     sDrawLogged.erase(t);
@@ -698,24 +729,31 @@ bool pc_p2_breadbug_teki_suppress_ai(const BTeki* t) {
 void pc_p2_breadbug_teki_setup() {
     pc_p2_breadbug_teki_reset();
     if (!pc_randomizer_p2_bridge() || !tekiMgr) return;
-    bool loaded = false;
+    bool loaded[kVariantCount] = {false, false};
+    bool census = false;
     Iterator it(tekiMgr);
     CI_LOOP(it) {
         auto* t = static_cast<Teki*>(*it);
-        if (!t || !t->mGenerator || pc_p2_campaign_source(t) != kSource) continue;
+        if (!t || !t->mGenerator) continue;
+        const unsigned src = pc_p2_campaign_source(t);
+        const int v = variantOf(src);
+        if (v < 0) continue;
         const unsigned gen = pc_p2_campaign_token(t);
         if (t->mTekiType != TEKI_Collec) {
-            std::printf("P2_SETUP_SKIP Breadbug host_type_mismatch generator=%u type=%d\n", gen, t->mTekiType);
+            std::printf("P2_SETUP_SKIP Breadbug host_type_mismatch source_id=%u generator=%u type=%d\n", src, gen, t->mTekiType);
             continue;
         }
         if (t->getParameterI(TPI_CorpseType) != TEKICORPSE_LeaveCorpse) {
-            std::printf("P2_SETUP_SKIP Breadbug no_corpse generator=%u\n", gen);
+            std::printf("P2_SETUP_SKIP Breadbug no_corpse source_id=%u generator=%u\n", src, gen);
             continue;
         }
-        if (!loaded) {
-            loaded = true;
-            loadParams();
-            loadBank();
+        if (!loaded[v]) {
+            loaded[v] = true;
+            loadParams(v);
+            loadBank(v);
+        }
+        if (!census) {
+            census = true;
             // One-shot census of the stage's pellets (read-only diagnosis of
             // what a wandering Breadbug can find; fp14 search is 500).
             if (pelletMgr) {
@@ -733,8 +771,10 @@ void pc_p2_breadbug_teki_setup() {
         Binding& b = s[static_cast<BTeki*>(t)];
         b = Binding{};
         b.generator = gen;
+        b.source = src;
+        b.variant = v;
         const Vector3f pos = t->getPosition();
-        b.fsm.init(sParams, sBank, {pos.x, pos.y, pos.z}, t->getDirection(), (gen * 2654435761u) | 1u, &sRoute);
+        b.fsm.init(sParams[v], sBank[v], {pos.x, pos.y, pos.z}, t->getDirection(), (gen * 2654435761u) | 1u, &sRoute);
         t->mHealth = b.fsm.health();
         b.taiState = t->mStateID;
         // Retail PanModoki is not a living thing while unbittered (isLivingThing).
@@ -743,14 +783,14 @@ void pc_p2_breadbug_teki_setup() {
         // attacks. Every P1 target-selection site asks
         // pc_p2_breadbug_teki_untargetable() instead (#898 fix).
         t->clearTekiOption(TEKIOPT_Organic);
-        std::printf("P2_BREADBUG_OWN_BIND generator=%u source_id=38 host_type=%d health=%.1f retail_parms=%d draw=%s "
+        std::printf("P2_BREADBUG_OWN_BIND generator=%u source_id=%u host_type=%d health=%.1f retail_parms=%d draw=%s "
                     "home=%.1f,%.1f wp=%d state=%s tai_state=%d\n",
-                    gen, t->mTekiType, t->mHealth, sParams.retail ? 1 : 0, sPosesLoaded ? "p2_model" : "host", pos.x,
+                    gen, src, t->mTekiType, t->mHealth, sParams[v].retail ? 1 : 0, sPosesLoaded[v] ? "p2_model" : "host", pos.x,
                     pos.z, sRoute.nearest({pos.x, pos.y, pos.z}), bb::stateName(b.fsm.state()), b.taiState);
-        // Ordinary-delivery bridge: GoalItem::suckMe grants onion:p2:38 once
+        // Ordinary-delivery bridge: GoalItem::suckMe grants onion:p2:<source> once
         // for the delivered corpse of THIS generator token.
-        pc_randomizer_p2_bind_source(static_cast<PelletView*>(static_cast<BTeki*>(t)), kSource, gen);
-        std::printf("P2_BREADBUG_DELIVERY_BIND generator=%u source_id=38\n", gen);
+        pc_randomizer_p2_bind_source(static_cast<PelletView*>(static_cast<BTeki*>(t)), src, gen);
+        std::printf("P2_BREADBUG_DELIVERY_BIND generator=%u source_id=%u\n", gen, src);
         std::fflush(stdout);
     }
 }
@@ -769,7 +809,7 @@ void pc_p2_breadbug_teki_tick(BTeki* t) {
         // Something outside the FSM called die(): finish the teardown so the
         // corpse pelletizes (dieSoon only runs in the suppressed doAI).
         b.escaped = true;
-        std::printf("P2_BREADBUG_OWN_ESCAPE generator=%u source_id=38 native=host_die_external\n", b.generator);
+        std::printf("P2_BREADBUG_OWN_ESCAPE generator=%u source_id=%u native=host_die_external\n", b.generator, b.source);
         std::fflush(stdout);
         t->pcEscapeNow();
         return;
@@ -779,16 +819,16 @@ void pc_p2_breadbug_teki_tick(BTeki* t) {
         Pellet* c = t->mPellet;
         if (!b.corpseLogged) {
             b.corpseLogged = true;
-            std::printf("P2_BREADBUG_OWN_CORPSE generator=%u source_id=38 x=%.1f z=%.1f carry_min=%d carry_max=%d\n",
-                        b.generator, c->mSRT.t.x, c->mSRT.t.z, int(c->mConfig->mCarryMinPikis()),
+            std::printf("P2_BREADBUG_OWN_CORPSE generator=%u source_id=%u x=%.1f z=%.1f carry_min=%d carry_max=%d\n",
+                        b.generator, b.source, c->mSRT.t.x, c->mSRT.t.z, int(c->mConfig->mCarryMinPikis()),
                         int(c->mConfig->mCarryMaxPikis()));
         }
         logMotion(b, "corpse", c, dt, 1.0f);
         b.corpseTimer += dt;
         if (b.corpseTimer >= 2.0f) {
             b.corpseTimer = 0.0f;
-            std::printf("P2_BREADBUG_OWN_CORPSE_CARRY generator=%u source_id=38 x=%.1f z=%.1f carriers=%.1f state=%d wall=%lld\n",
-                        b.generator, c->mSRT.t.x, c->mSRT.t.z, pikiStrength(c), c->getState(), wallMs());
+            std::printf("P2_BREADBUG_OWN_CORPSE_CARRY generator=%u source_id=%u x=%.1f z=%.1f carriers=%.1f state=%d wall=%lld\n",
+                        b.generator, b.source, c->mSRT.t.x, c->mSRT.t.z, pikiStrength(c), c->getState(), wallMs());
         }
         std::fflush(stdout);
     }
@@ -812,10 +852,22 @@ bool pc_p2_breadbug_teki_event(BTeki* t, const TekiEvent& event) {
             ++b->flyContactsRising;  // rising contact: retail sends no press (vel.y < 0 only)
         }
         if (piki->isAlive() && piki->getState() == PIKISTATE_Flying && piki->mVelocity.y < 0.0f
+            && !b->pressedFlight.count(piki) && b->fsm.params().giant && !pc_p2_is_purple(piki)) {
+            // OoPanModoki::Obj::pressCallBack (panModoki.cpp:1738-1744): a press
+            // by a non-Purple Pikmin returns false before the base class runs,
+            // so no Damage transition and no health change.
+            b->pressedFlight.insert(piki);
+            ++b->pressesRejectedKind;
+            if (b->pressesRejectedKind <= 5 || b->pressesRejectedKind % 50 == 0)
+                std::printf("P2_BREADBUG_OWN_PRESS_REJECTED generator=%u source_id=%u reason=non_purple count=%d state=%s wall=%lld\n",
+                            b->generator, b->source, b->pressesRejectedKind, bb::stateName(b->fsm.state()), wallMs());
+            std::fflush(stdout);
+        }
+        if (piki->isAlive() && piki->getState() == PIKISTATE_Flying && piki->mVelocity.y < 0.0f
             && !b->pressedFlight.count(piki)) {
             b->pressedFlight.insert(piki);
             ++b->pendingPresses;
-            std::printf("P2_BREADBUG_OWN_PRESS_CONTACT generator=%u source_id=38 vy=%.1f state=%s wall=%lld\n", b->generator,
+            std::printf("P2_BREADBUG_OWN_PRESS_CONTACT generator=%u source_id=%u vy=%.1f state=%s wall=%lld\n", b->generator, b->source,
                         piki->mVelocity.y, bb::stateName(b->fsm.state()), wallMs());
             std::fflush(stdout);
         }
@@ -840,9 +892,9 @@ bool pc_p2_breadbug_teki_attack(BTeki* t, const Creature* attacker, float damage
         ++b->attacksIgnoredNavi;
     }
     if (b->attacksIgnored <= 5 || b->attacksIgnored % 50 == 0)
-        std::printf("P2_BREADBUG_OWN_ATTACK_IGNORED generator=%u source_id=38 attacker=%s piki_state=%d piki_action=%d "
+        std::printf("P2_BREADBUG_OWN_ATTACK_IGNORED generator=%u source_id=%u attacker=%s piki_state=%d piki_action=%d "
                     "damage=%.1f health=%.1f count=%d\n",
-                    b->generator, kind, state, action, damage, b->fsm.health(), b->attacksIgnored);
+                    b->generator, b->source, kind, state, action, damage, b->fsm.health(), b->attacksIgnored);
     std::fflush(stdout);
     return true;
 }
@@ -858,8 +910,8 @@ bool pc_p2_breadbug_teki_untargetable(const Creature* c, const char* site) {
     ++b->targetSkips;
     const std::string where = site ? site : "?";
     if (b->skipSitesLogged.insert(where).second) {
-        std::printf("P2_BREADBUG_OWN_TARGET_SKIP generator=%u source_id=38 site=%s living=0 bittered=0 count=%d wall=%lld\n",
-                    b->generator, where.c_str(), b->targetSkips, wallMs());
+        std::printf("P2_BREADBUG_OWN_TARGET_SKIP generator=%u source_id=%u site=%s living=0 bittered=0 count=%d wall=%lld\n",
+                    b->generator, b->source, where.c_str(), b->targetSkips, wallMs());
         std::fflush(stdout);
     }
     return true;
@@ -875,8 +927,12 @@ float pc_p2_breadbug_teki_param_f(const BTeki* t, int idx, float fallback) {
 
 bool pc_p2_breadbug_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, bool corpse) {
     auto i = s.find(t);
-    if (i == s.end() || !sPosesLoaded || !gfx.mCamera) return false;
+    if (i == s.end() || !gfx.mCamera) return false;
     Binding& b = i->second;
+    const int v = b.variant;
+    if (!sPosesLoaded[v]) return false;
+    auto& sPoseList = sPoses[v];
+    const bb::Bank& bank = sBank[v];
     const bool dead = corpse || b.escaped || t->mDeadState != 0;
     int anim = b.fsm.animator().anim();
     float frame = b.fsm.animator().frame();
@@ -884,18 +940,18 @@ bool pc_p2_breadbug_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, boo
         // startCarcassMotion: the carcass clip (type5), loop start pose.
         anim = bb::AnimCarry;
         frame = 10.0f;
-        if (sPoses[anim].empty()) { anim = bb::AnimDead; frame = 1e9f; }
+        if (sPoseList[anim].empty()) { anim = bb::AnimDead; frame = 1e9f; }
     }
-    if (anim < 0 || anim >= bb::AnimCount || sPoses[anim].empty()) {
-        anim = !sPoses[bb::AnimWalk].empty() ? int(bb::AnimWalk) : int(bb::AnimWait);
+    if (anim < 0 || anim >= bb::AnimCount || sPoseList[anim].empty()) {
+        anim = !sPoseList[bb::AnimWalk].empty() ? int(bb::AnimWalk) : int(bb::AnimWait);
         frame = 0.0f;
-        if (sPoses[anim].empty()) return false;
+        if (sPoseList[anim].empty()) return false;
     }
-    const auto& poses = sBank.clip[anim].poses;
+    const auto& poses = bank.clip[anim].poses;
     std::size_t best = 0;
-    for (std::size_t k = 1; k < poses.size() && k < sPoses[anim].size(); ++k)
+    for (std::size_t k = 1; k < poses.size() && k < sPoseList[anim].size(); ++k)
         if (std::fabs(float(poses[k]) - frame) < std::fabs(float(poses[best]) - frame)) best = k;
-    Shape* shape = sPoses[anim][best];
+    Shape* shape = sPoseList[anim][best];
     shape->updateAnim(gfx, view, nullptr, t);
     pc_gfx_specular_family_scope(1);
     shape->drawshape(gfx, *gfx.mCamera, nullptr);
@@ -904,8 +960,8 @@ bool pc_p2_breadbug_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, boo
     const int bit = dead ? 2 : 1;
     if (!(logged & bit)) {
         logged |= bit;
-        std::printf("P2_BREADBUG_OWN_DRAW generator=%u source_id=38 corpse=%d clip=%s pose=%zu model=p2_panmodoki\n",
-                    b.generator, dead ? 1 : 0, sBank.clip[anim].name.c_str(), best);
+        std::printf("P2_BREADBUG_OWN_DRAW generator=%u source_id=%u corpse=%d clip=%s pose=%zu model=%s\n",
+                    b.generator, b.source, dead ? 1 : 0, bank.clip[anim].name.c_str(), best, kVariants[v].model);
         std::fflush(stdout);
     }
     return true;

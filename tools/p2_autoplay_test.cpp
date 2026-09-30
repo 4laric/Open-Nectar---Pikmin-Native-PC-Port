@@ -1074,6 +1074,23 @@ void testPowerGate()
     CHECK(std::fabs(p2autoplay::powerDamageMult() - 7.5f) < 0.001f, "power/numeric_configures_mult");
     setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "0");
     CHECK(!p2autoplay::isPowerEnabled(), "power/zero_is_off");
+    // #958: the Purple squad knob needs the gate, power mode AND its own switch.
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", "1");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "10");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_PURPLE", nullptr);
+    CHECK(!p2autoplay::isPurplePower(), "power/purple_off_by_default");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_PURPLE", "1");
+    CHECK(p2autoplay::isPurplePower(), "power/purple_on_with_power");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", nullptr);
+    CHECK(!p2autoplay::isPurplePower(), "power/purple_inert_without_power");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "10");
+    CHECK(!p2autoplay::isPurplePower(), "power/purple_inert_when_gate_closed");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", "1");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_PURPLE", nullptr);
+    // #958: the Giant Breadbug (40) is press-only like the Breadbug (38).
+    CHECK(p2autoplay::isPressOnly(40) && p2autoplay::isPressOnly(38) && !p2autoplay::isPressOnly(41),
+          "press_only/breadbug_and_giant");
     // Effective squad: ~100 in power mode, cfg.wantSquad otherwise.
     p2autoplay::Config cfg;
     setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "10");
