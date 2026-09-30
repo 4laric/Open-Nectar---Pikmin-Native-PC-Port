@@ -277,6 +277,10 @@ void P2SaraiHost::updateDemon()
     if (!mBoundActor) return;
     mDemonClock += dt;
     const unsigned generator = demonGenerator();
+    // Fade/staleness time must advance from the living Demon simulation too: without it a
+    // clip-change crossfade never left weight 0 and the body froze on the previous clip's pose.
+    advanceSmooth(dt);
+    demonAnimDiagnostic(dt, stateName(mFsm.state()));
 
     // Held-captain bookkeeping: the captain can leave on its own (escape mash,
     // death, reset); the bridge is the authority.
