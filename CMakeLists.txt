@@ -663,8 +663,7 @@ set(PIKMIN_TARGET_SUFFIX "" CACHE STRING "Suffix for the game targets when the t
 set(NECTAR_LEGACY pikmin_legacy${PIKMIN_TARGET_SUFFIX})
 set(NECTAR_GAME pikmin_pc${PIKMIN_TARGET_SUFFIX})
 # Solo en Android: en escritorio el ejecutable PAL sigue saliendo como
-# 
-ectar` en su propio directorio de build y lo renombra el empaquetado.
+# `nectar` en su propio directorio de build y lo renombra el empaquetado.
 if(ANDROID AND PIKMIN_GAME_VERSION STREQUAL "VERSION_GPIP01_00")
     set(NECTAR_OUTPUT_NAME "nectar-pal")
 else()
