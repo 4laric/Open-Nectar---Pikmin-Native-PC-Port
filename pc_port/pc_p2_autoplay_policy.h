@@ -669,6 +669,10 @@ struct Senses {
     // #246: idle field Pikmin (FreeMode, not carrying, not in distress) and
     // their centroid, so a Titan aftermath can walk to them before whistling.
     int strayPikmin = 0;
+    // #256: nearest idle stray (the whistle reaches only 100 u, NaviMgr p01).
+    float strayNearX = 0.0f;
+    float strayNearZ = 0.0f;
+    float strayNearDist = 1.0e30f;
     float strayX = 0.0f;
     float strayZ = 0.0f;
     int onionStored = 0; // Pikmin stored in the nearest stocked Onion
@@ -1732,16 +1736,15 @@ private:
             whistleTime += dt;
             lastCommand.buttons = PadB; // hold whistle to regroup / free grabs
             // #256 Empress: her flick and roll drop the squad into idle
-            // FreeMode strays around the arena (a4: 49 strays 350-600 u away,
-            // whistle held in place reaches none). Walk to the strays'
-            // centroid while whistling and keep the hold running until close.
+            // FreeMode strays around the arena (a4/a5: ~50 strays 350-600 u
+            // away on both sides of her roll line, so their centroid sits at
+            // her body; the whistle reaches 100 u). Walk to the nearest stray
+            // while whistling and keep the hold running until it is in reach.
             bool empressRegroup = false;
-            if (in.targetSource == 30 && in.strayPikmin >= 5) {
-                const float sx = in.strayX - in.naviX, sz = in.strayZ - in.naviZ;
-                if (sx * sx + sz * sz > 120.0f * 120.0f) {
-                    steer(in.naviX, in.naviZ, in.strayX, in.strayZ);
-                    empressRegroup = true;
-                }
+            if (in.targetSource == 30 && in.strayPikmin >= 5 && in.strayNearDist > 90.0f
+                && in.strayNearDist < 1.0e29f) {
+                steer(in.naviX, in.naviZ, in.strayNearX, in.strayNearZ);
+                empressRegroup = true;
             }
             // bot-v8 merge (#871): whistle timeout keeps ONE version
             // (undamaged's). Both lanes fixed the same whistle-starves-timeout

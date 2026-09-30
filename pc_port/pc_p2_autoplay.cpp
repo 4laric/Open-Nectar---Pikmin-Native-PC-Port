@@ -759,6 +759,7 @@ void pc_p2_autoplay_tick(void)
     int alive = 0, nearCount = 0, farCount = 0, transport = 0, distress = 0, squad = 0;
     int strays = 0;
     float strayX = 0.0f, strayZ = 0.0f;
+    float strayNearX = 0.0f, strayNearZ = 0.0f, strayNearDist = 1.0e30f; // #256 nearest idle stray
     int partyCount = 0; // #901: FormationMode Pikmin following this captain
     int workCount = 0; // #901: Pikmin working a gate / bridge / hinder rock
     std::vector<std::pair<float, float>> transportPos;
@@ -780,6 +781,11 @@ void pc_p2_autoplay_tick(void)
                 ++strays;
                 strayX += p->getPosition().x;
                 strayZ += p->getPosition().z;
+                if (d < strayNearDist) {
+                    strayNearDist = d;
+                    strayNearX = p->getPosition().x;
+                    strayNearZ = p->getPosition().z;
+                }
             }
             if (p->mMode == PikiMode::TransportMode) {
                 ++transport;
@@ -1288,6 +1294,9 @@ void pc_p2_autoplay_tick(void)
     senses.fieldPikmin = alive;
     senses.squadPikmin = squad;
     senses.strayPikmin = strays;
+    senses.strayNearX = strayNearX;
+    senses.strayNearZ = strayNearZ;
+    senses.strayNearDist = strayNearDist;
     senses.strayX = strays ? strayX / float(strays) : naviX;
     senses.strayZ = strays ? strayZ / float(strays) : naviZ;
     senses.onionStored = onionStored;

@@ -1263,7 +1263,10 @@ void testEmpressRegroupWalk()
     s.scattered = true;
     s.strayPikmin = 40;
     s.strayX = 0.0f;
-    s.strayZ = 400.0f;
+    s.strayZ = 0.0f; // centroid at the captain: the strays ring the body
+    s.strayNearX = 0.0f;
+    s.strayNearZ = 400.0f;
+    s.strayNearDist = 400.0f;
     // The whistle hold outlasts whistleHold while the captain is still far
     // from the strays, and the pad walks toward them.
     for (int i = 0; i < 20; ++i) brain.update(0.05f, s);
