@@ -703,7 +703,15 @@ void pc_p2_groink_teki_setup() {
             type = t->mTekiType;
             srcForBind = src;
         } else if (pc_p2_campaign_token(t) != gen) continue;
-        if (t->mTekiType != type || (!bridge && s.size())) { if (pc_p2_setup_skip(bridge, "Groink", "actor_type_mismatch")) return; }
+        if (t->mTekiType != type) {
+            // #948: wrong vehicle for this actor only; keep sweeping the rest.
+            if (pc_p2_setup_skip(bridge, "Groink", "actor_type_mismatch")) {
+                std::printf("P2_GROINK_UNBOUND generator=%u source_id=%u type=%d reason=host_type_mismatch\n", gen, srcForBind, int(t->mTekiType));
+                std::fflush(stdout);
+                continue;
+            }
+        }
+        if (!bridge && s.size()) { if (pc_p2_setup_skip(bridge, "Groink", "actor_type_mismatch")) return; }
         // A host that leaves no corpse dies through dieSoon -> kill -> doKill,
         // which runs pc_p2_forget_teki on the death frame and erases this binding
         // before RequestBirth can ever fire (tekibteki.cpp:681-721, 742-749).
