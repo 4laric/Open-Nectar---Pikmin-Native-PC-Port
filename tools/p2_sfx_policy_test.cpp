@@ -54,6 +54,8 @@ void table() {
     CHECK(seFor(kSnitchbug, Event::Hover) == kSaraiHover);
     CHECK(seFor(kSnitchbug, Event::Step) == kNone);
     CHECK(seFor(kDirigibug, Event::Burst) == kBomb);
+    CHECK(seFor(kBombOtakara, Event::Fuse) == kSpiderBomb);   // lit Dweevil bomb crackle
+    CHECK(seFor(kDirigibug, Event::Fuse) == kNone);
     CHECK(seFor(kCrawbster, Event::Roll) == kRockRoll);
     CHECK(seFor(kCrawbster, Event::Crash) == kRockBreak);
     CHECK(seFor(kAntennaBeetle, Event::Whistle) == kMinicAlert);

@@ -2418,6 +2418,7 @@ void BTeki::drawRange(Graphics& gfx, immut Vector3f& centre, f32 range, immut Co
 void BTeki::refresh2d(Graphics& gfx)
 {
 #ifdef PIKI_PC_PORT
+	pc_p2_otakara_bomb_gauge(this, gfx); // Volatile Dweevil carried-bomb countdown wheel
 	const bool gaugeDrawn = mDeadState == 0 && tekiMgr->hasModel(mTekiType) && isVisible() && !isCreatureFlag(CF_UseAICulling)
 	                     && getTekiOption(TEKIOPT_LifeGaugeVisible);
 	pc_p2_life_gauge_audit(this, gaugeDrawn);

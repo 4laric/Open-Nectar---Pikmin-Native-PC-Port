@@ -55,6 +55,14 @@ float pc_p2_otakara_param_f(const BTeki*, int idx, float fallback);
 // normalized [0,1] phase for the current FSM state and returns true. The batch-2
 // draw path consults this before its generic motion/velocity selection.
 bool pc_p2_otakara_clip(const BTeki*, const char*& name, float& phase);
+// Volatile Dweevil (93) carried-Bomb visuals (pc_p2_bomb_telegraph.h), output-only:
+// the P1 bomb-rock shape on the Dweevil's back (flashing while the fuse burns)
+// and the bomb's own countdown wheel gauge. No-ops for other actors.
+class Graphics;
+class Matrix4f;
+void pc_p2_otakara_draw_bomb(BTeki*, Graphics&, const Matrix4f& matrix);
+void pc_p2_otakara_bomb_gauge(BTeki*, Graphics&);
+
 
 // Fixture observability: behavior-neutral, read-only registration queries so the
 // lifecycle fixture can prove pc_p2_otakara_forget() clears a stale binding and

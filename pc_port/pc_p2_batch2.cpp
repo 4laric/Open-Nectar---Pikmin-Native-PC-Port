@@ -1086,6 +1086,8 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
             entry_saved.material->mTevInfo->mTevColRegs[0].mAnimatedColor.a = entry_saved.regA;
         }
     }
+    // Volatile Dweevil carried Bomb on its back (pc_p2_bomb_telegraph.h).
+    if (isDweevil && !corpse) pc_p2_otakara_draw_bomb(actor, gfx, matrix);
     return true;
 }
 
