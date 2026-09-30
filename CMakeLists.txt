@@ -1321,6 +1321,11 @@ add_executable(p2_hana_events_test
 target_include_directories(p2_hana_events_test PRIVATE pc_port)
 target_compile_options(p2_hana_events_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_hana_events_test COMMAND p2_hana_events_test)
+add_executable(p2_hana_residual_policy_test
+    tools/p2_hana_residual_policy_test.cpp)
+target_include_directories(p2_hana_residual_policy_test PRIVATE pc_port)
+target_compile_options(p2_hana_residual_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_hana_residual_policy_test COMMAND p2_hana_residual_policy_test)
 
 add_executable(p2_catfish_events_test
     tools/test_p2_catfish_events.cpp)
