@@ -117,36 +117,101 @@ has focus, and a pad plugged in later is picked up), or
 `--netplay-input auto` (the default behaviour). In a session the debug
 hotkeys (F5, F6, F9) do nothing: they would change one player's game only.
 
-Camera: your camera answers your camera buttons at once, on the next frame,
-although your captain's moves still arrive with the session's input delay
-(the delay both games need to stay in step; typically 2-5 frames, 67-167 ms).
-That covers turning (hold L a little and push the stick sideways),
-recentring behind your captain (L click), zoom (R) and the camera angle (Z).
-The camera still follows your captain where the game actually has them, so
-during a fast turn the view swings round straight away and your captain
-starts walking in the new direction a moment later, the same moment as any
-other move. Your stick always means "the way your camera was facing on your
-screen when you pushed it", for the host and the joiner alike (the joiner's
-stick used to follow the host captain's camera instead, so after either
-player turned a camera the joiner walked off at an angle). With the Free
-Camera mod, the mouse and the right stick turn your own captain's camera on
-both PCs (the joiner's used to do nothing). To go back to the old camera,
-which moves with the same delay as your captain, set
-`PIKMIN_NETPLAY_CAMERA_LEAD=0` before starting the game (either player; it
-only changes that player's own view). That keeps the two joiner fixes; to
-undo those too (the joiner's stick and mouse follow the host captain's
-camera again, as before), also set `PIKMIN_NETPLAY_JOINER_OWN_CAMERA=0`.
-With both at `0` the game sends exactly the inputs it sent before the
-instant camera. In PowerShell, in the console you start the game from:
-`$env:PIKMIN_NETPLAY_CAMERA_LEAD = '0'` (and
-`$env:PIKMIN_NETPLAY_JOINER_OWN_CAMERA = '0'`); in cmd,
-`set PIKMIN_NETPLAY_CAMERA_LEAD=0`. The console says what you have:
-`[netplay] camera lead: on` or `off`, and `own-camera yaw and drag: on` or
-`off` on the same line.
-
 Keep the console open: it shows the codes and the session log. To keep a
 log file, start the game with `> host.log 2>&1` added (the code is still
 copied to the clipboard and written to the run folder).
+
+## Input delay and hitches
+
+Both games run the same frames with the same inputs (lockstep), so each
+press takes effect a few frames after you make it: the **input delay**, 1
+to 8 frames (33 to 267 ms). Each game has its own delay; it gives your
+inputs time to reach the other game.
+
+- It starts at the value the connection test picks when the session starts
+  (`[netplay] auto delay: ... delay=N`).
+- Then it follows the connection. When your inputs reach the other game too
+  late, that game has to wait for them, and in lockstep both games wait: a
+  **hitch** (the picture holds still for a moment). The other game reports
+  its waits to yours four times a second. About a tenth of a second of
+  waiting within 3 s raises your delay by one frame (by two when the waits
+  keep coming), usually within a second or two. After 15 s without waits,
+  if the ping allows, it drops back one frame. A drop that brings the waits
+  back is undone at once, and the next drop waits longer (30 s, then 60 s,
+  up to 2 minutes).
+- Every change prints one line, for example
+  `[netplay] delay change: 2 -> 3 at frame=591 ... (up: peer late 215ms ...)`.
+- It never changes during a pause for a lost Archipelago link, in the 5 s
+  after such a pause, just after a stage load, or in the first 5 s. It
+  never goes more than 2 frames above what the ping needs, and a slow
+  moment on your own PC (a shader being built) does not raise it: a delay
+  only hides network time.
+- Changing the delay never changes the game: both games still apply
+  exactly the same inputs on exactly the same frames. Only the moment your
+  presses take effect changes.
+- A hitch longer than the delay still shows as a short freeze, for example
+  a Wi-Fi hiccup of a few hundred ms. While the game waits for the other
+  game's input it does not draw new frames; the music keeps playing and
+  the window stays responsive (it can be moved, and closing it works).
+
+The console shows a `[netplay] stats:` line every 300 frames (10 s): your
+delay and the other game's, the waits (`stalls=`, `last10s=`), the ping
+(`rtt ... p50 p95`, jitter) and the frame times. At the end of the session
+it shows `[netplay] stats final:`, the `delay timeline:` and a frame-time
+histogram. The HUD (below) shows the same delay and waits on screen.
+
+To keep the delay at its starting value (for a comparison), set
+`PIKMIN_NETPLAY_ADAPTIVE_DELAY` to `0` in the console you start the game
+from. In PowerShell:
+
+```powershell
+$env:PIKMIN_NETPLAY_ADAPTIVE_DELAY = '0'
+.\nectar.exe --netplay-host-ice
+```
+
+(or `.\host.bat` / `.\join.bat` in the playtest folder). In Command
+Prompt: `set PIKMIN_NETPLAY_ADAPTIVE_DELAY=0`, then the same command.
+
+## Camera
+
+Your camera answers your camera buttons at once, on the next frame,
+although your captain's moves still arrive with the session's input delay
+(see "Input delay and hitches"; typically 2-5 frames, 67-167 ms, and it can
+change during the session). That covers turning (hold L a little and push
+the stick sideways), recentring behind your captain (L click), zoom (R) and
+the camera angle (Z). The camera still follows your captain where the game
+actually has them, so during a fast turn the view swings round straight
+away and your captain starts walking in the new direction a moment later,
+the same moment as any other move. When the delay changes, the camera stays
+instant; only that moment moves. Your stick always means "the way your
+camera was facing on your screen when you pushed it", for the host and the
+joiner alike (the joiner's stick used to follow the host captain's camera
+instead, so after either player turned a camera the joiner walked off at an
+angle). With the Free Camera mod, the mouse and the right stick turn your
+own captain's camera on both PCs (the joiner's used to do nothing). When
+the day ends, the view stops leading as the sunset starts, and the sunset
+takes over within a frame.
+
+To go back to the old camera, which moves with the same delay as your
+captain, set `PIKMIN_NETPLAY_CAMERA_LEAD` to `0` before starting the game
+(either player; it only changes that player's own view). That keeps the two
+joiner fixes; to undo those too (the joiner's stick and mouse follow the
+host captain's camera again, as before), also set
+`PIKMIN_NETPLAY_JOINER_OWN_CAMERA` to `0`. With both at `0` the game sends
+exactly the inputs it sent before the instant camera. In PowerShell, in the
+console you start the game from:
+
+```powershell
+$env:PIKMIN_NETPLAY_CAMERA_LEAD = '0'
+$env:PIKMIN_NETPLAY_JOINER_OWN_CAMERA = '0'   # only to undo the joiner fixes too
+.\nectar.exe --netplay-host-ice
+```
+
+(or `.\host.bat` / `.\join.bat` in the playtest folder). In Command
+Prompt: `set PIKMIN_NETPLAY_CAMERA_LEAD=0` and, for the joiner fixes too,
+`set PIKMIN_NETPLAY_JOINER_OWN_CAMERA=0`, then the same command. The console
+says what you have: `[netplay] camera lead: on` or `off`, and `own-camera
+yaw and drag: on` or `off` on the same line.
 
 ## The netplay HUD
 
@@ -171,7 +236,8 @@ delay 2 (67 ms)  stalls 0 / 10 s
   read about 33 ms, not 1 ms.
 - **delay**: the input delay in frames (one frame is 33 ms at 30 Hz). Your
   own captain moves this many frames after you press, so both games can
-  apply every input on the same frame.
+  apply every input on the same frame. It follows the connection, so the
+  number can change during a session (see "Input delay and hitches").
 - **stalls / 10 s**: how often, in the last 10 seconds, this game had to
   wait at least one frame for the other game's input (the picture pauses
   briefly). Stage loads and Archipelago pauses are not counted.
@@ -184,7 +250,8 @@ default; while the host has turned either mode on for the session (or you
 bound another action to a stick button), pressing both sticks does only that
 in the game, not the box, and only F4 toggles it (the log says so once). The box is hidden while the F1 menu is open. It never changes
 the game: the other player's game is not told about it. The same numbers go
-to the log every 30 s (`[netplay] link: ...`).
+to the log every 30 s (`[netplay] link: ...`); the fuller
+`[netplay] stats:` line comes every 10 s (see "Input delay and hitches").
 
 ## When a session ends (desync, lost connection, quit)
 
@@ -403,47 +470,6 @@ again at frame 0 in each one. A runner that ingests the joiner's mirror must
 therefore treat each session as its own run (a new peer token and run
 folder), not append the second evening to the first evening's run.
 
-## Input delay and hitches
-
-Both games run the same frames with the same inputs (lockstep), so each
-press takes effect a few frames after you make it: the **input delay**, 1
-to 8 frames (33 to 267 ms). Each game has its own delay; it gives your
-inputs time to reach the other game.
-
-- It starts at the value the connection test picks when the session starts
-  (`[netplay] auto delay: ... delay=N`).
-- Then it follows the connection. When your inputs reach the other game too
-  late, that game has to wait for them, and in lockstep both games wait: a
-  **hitch** (the picture holds still for a moment). The other game reports
-  its waits to yours four times a second. About a tenth of a second of
-  waiting within 3 s raises your delay by one frame (by two when the waits
-  keep coming), usually within a second or two. After 15 s without waits,
-  if the ping allows, it drops back one frame. A drop that brings the waits
-  back is undone at once, and the next drop waits longer (30 s, then 60 s,
-  up to 2 minutes).
-- Every change prints one line, for example
-  `[netplay] delay change: 2 -> 3 at frame=591 ... (up: peer late 215ms ...)`.
-- It never changes during a pause for a lost Archipelago link, in the 5 s
-  after such a pause, just after a stage load, or in the first 5 s. It
-  never goes more than 2 frames above what the ping needs, and a slow
-  moment on your own PC (a shader being built) does not raise it: a delay
-  only hides network time.
-- Changing the delay never changes the game: both games still apply
-  exactly the same inputs on exactly the same frames. Only the moment your
-  presses take effect changes.
-- A hitch longer than the delay still shows as a short freeze, for example
-  a Wi-Fi hiccup of a few hundred ms. While the game waits for the other
-  game's input it does not draw new frames; the music keeps playing and
-  the window stays responsive (it can be moved, and closing it works).
-
-The console shows a `[netplay] stats:` line every 300 frames (10 s): your
-delay and the other game's, the waits (`stalls=`, `last10s=`), the ping
-(`rtt ... p50 p95`, jitter) and the frame times. At the end of the session
-it shows `[netplay] stats final:`, the `delay timeline:` and a frame-time
-histogram. To keep the delay at its starting value (for a comparison),
-start the game with the environment variable
-`PIKMIN_NETPLAY_ADAPTIVE_DELAY=0`.
-
 ## Troubleshooting
 
 - `[netplay] handshake refused: exe` or `protocol`: the builds differ. Use
@@ -527,10 +553,9 @@ start the game with the environment variable
   they catch up when the turn ends.
 - A hitch longer than the input delay (a Wi-Fi hiccup, a slow load on one
   PC) freezes the picture until the other game's input arrives: frames are
-  not drawn while the game waits (the music keeps playing).
-- The HUD's stall count is this game's own (a wait of at least one frame
-  for the other game's input); it cannot show a stall while it happens,
-  because the picture itself waits.
+  not drawn while the game waits (the music keeps playing). The adaptive
+  delay reduces repeated hitches, not a single long one. The HUD's stall
+  count is this game's own waits, so it shows a stall only after it ends.
 - Seeds with P2 enemies need each player's own copy of the seed's P2
   assets overlay (see "Seeds with P2 enemies").
 - The low-level switches (`--netplay-host`/`--netplay-join`,
