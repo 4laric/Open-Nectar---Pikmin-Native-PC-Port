@@ -15,6 +15,7 @@
 #include "pc_p2_sarai_host.h"
 #include "pc_p2_demon_bridge.h"
 #include "pc_p2_sarai_manager.h"
+#include "pc_p2_sfx.h"
 #include "Collision.h"
 #include "Navi.h"
 #include "NaviMgr.h"
@@ -30,6 +31,7 @@
 #include "Generator.h"
 #include "teki.h"
 #include <cmath>
+#include <map>
 #include <cstdio>
 #include <vector>
 
@@ -326,6 +328,29 @@ void P2SaraiHost::updateDemon()
     in.randomUnit = demonRand();
     const p2sarai::Out out = mFsm.tick(in);
     const p2sarai::State now = mFsm.state();
+    // P1 Sarai bank approximation (output-only, #946): damage cry on a health
+    // drop, state cries on entry, hover pulse while airborne.
+    {
+        const unsigned generator = demonGenerator();
+        static std::map<unsigned, float> sLastHealth;
+        const float hp = mBoundActor->mHealth;
+        auto hit = sLastHealth.find(generator);
+        if (hit != sLastHealth.end() && hp < hit->second && hp > 0.0f)
+            pc_p2_sfx(32, generator, p2sfx::Event::Damage, mSRT.t);
+        sLastHealth[generator] = hp;
+        if (now != before) {
+            switch (now) {
+            case p2sarai::State::Attack: pc_p2_sfx(32, generator, p2sfx::Event::Attack, mSRT.t); break;
+            case p2sarai::State::Flick: pc_p2_sfx(32, generator, p2sfx::Event::Flick, mSRT.t); break;
+            case p2sarai::State::Damage: pc_p2_sfx(32, generator, p2sfx::Event::Damage, mSRT.t); break;
+            case p2sarai::State::Dead: pc_p2_sfx(32, generator, p2sfx::Event::Dead, mSRT.t); break;
+            case p2sarai::State::Fall: pc_p2_sfx(32, generator, p2sfx::Event::Land, mSRT.t); break;
+            default: break;
+            }
+        }
+        if (mFsm.flags().untargetable && now != p2sarai::State::Dead)
+            pc_p2_sfx(32, generator, p2sfx::Event::Hover, mSRT.t);
+    }
 
     if (now != before) {
         // cleanup() of the state being left.

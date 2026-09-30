@@ -25,6 +25,7 @@
 //    pc_randomizer_p2_bind_source, so the ordinary Onion/Pod suck grants
 //    onion:p2:58 for this token. Nothing is teleported or re-configured.
 #include "pc_p2_bombsarai_teki.h"
+#include "pc_p2_sfx.h"
 #include "pc_p2_bombsarai_own.h"
 #include "pc_p2_bombsarai_bomb.h"
 #include "pc_p2_bombsarai_clock.h"
@@ -404,6 +405,8 @@ void applyBlast(const P2BombSaraiBlastEvent& e) {
     }
     for (Creature* c : tekis) if (c->isAlive() && c->stimulate(InteractBomb(owner, e.tekiDamage, nullptr))) ++tekiHits;
     ++sBlastCount;
+    // P1 bomb-rock burst approximation (output-only, #946).
+    pc_p2_sfx(58, unsigned(e.carrierToken), p2sfx::Event::Burst, Vector3f(e.center.x, e.center.y, e.center.z));
     std::printf("P2_BOMBSARAI_OWN_BLAST source_id=58 token=%llu carrier_valid=%d x=%.1f y=%.1f z=%.1f "
                 "navi_hits=%d pikmin_hits=%d pikmin_lethal=%d piki_damage=%.1f navi_damage=%.1f teki_hits=%d "
                 "self_hits=%d n=%d\n",
@@ -461,6 +464,7 @@ bool ownTick(BTeki* t, Own& o, float dt) {
         if (stuck > o.maxStuck) o.maxStuck = stuck;
     }
     if (t->mHealth < before || (t->mHealth < o.lastHealth && t->mHealth >= 0.0f)) {
+        if (t->mHealth > 0.0f) pc_p2_sfx(58, o.token, p2sfx::Event::Damage, t->getPosition());
         std::printf("P2_BOMBSARAI_OWN_DAMAGE source_id=58 token=%u health=%.1f prior=%.1f hits=%d stuck=%d "
                     "nearby_pikmin=%d flying=%d state=%s\n",
                     o.token, t->mHealth, o.lastHealth, o.pendingHits, stuck, t->isFlying() ? 0 : nearbyPikmin(t),
@@ -493,6 +497,16 @@ bool ownTick(BTeki* t, Own& o, float dt) {
         p2bsown::State from = shown;
         for (p2bsown::State e : last.entered) {
             logState(t, o, from, e, stuck);
+            // P1 Sarai/bomb bank approximation (output-only, #946).
+            switch (e) {
+            case p2bsown::State::Release: pc_p2_sfx(58, o.token, p2sfx::Event::Attack, t->getPosition()); break;
+            case p2bsown::State::Flick:
+            case p2bsown::State::BombFlick: pc_p2_sfx(58, o.token, p2sfx::Event::Flick, t->getPosition()); break;
+            case p2bsown::State::Damage: pc_p2_sfx(58, o.token, p2sfx::Event::Damage, t->getPosition()); break;
+            case p2bsown::State::Dead: pc_p2_sfx(58, o.token, p2sfx::Event::Dead, t->getPosition()); break;
+            case p2bsown::State::Fall: pc_p2_sfx(58, o.token, p2sfx::Event::Land, t->getPosition()); break;
+            default: break;
+            }
             if (e == p2bsown::State::Fall) ++o.falls;
             if (e == p2bsown::State::TakeOff1 || e == p2bsown::State::TakeOff2) ++o.takeoffs;
             if (e == p2bsown::State::Dead && !o.deadLogged) {
@@ -539,6 +553,7 @@ bool ownTick(BTeki* t, Own& o, float dt) {
         t->setDirection(last.faceDir);
         if (last.flying) {
             if (!t->isFlying()) t->startFlying();
+            if (o.fsm.state() != p2bsown::State::Dead) pc_p2_sfx(58, o.token, p2sfx::Event::Hover, t->getPosition());
         } else if (t->isFlying()) {
             t->finishFlying();
         }

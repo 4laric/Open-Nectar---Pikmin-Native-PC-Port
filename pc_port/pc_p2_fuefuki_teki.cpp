@@ -2,6 +2,7 @@
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_setup_failsafe.h"
 #include "pc_p2_fuefuki_teki.h"
+#include "pc_p2_sfx.h"
 #include "pc_p2_fuefuki_teki_policy.h"
 #include "pc_p2_animation.h"
 #include "pc_p2_navi_select.h"
@@ -484,6 +485,15 @@ void applyCommands(BTeki* t, Binding& b, const Commands& c)
         if (c.to == P2FuefukiFsmState::Struggle)
             std::printf("P2_FUEFUKI_STRUGGLE generator=%u source_id=41 pressed=%d stuck=%d\n", b.token,
                         c.pressAccepted ? 1 : 0, c.stuck);
+        // P1 Flint Beetle / frog bank approximation (output-only, #946).
+        switch (c.to) {
+        case P2FuefukiFsmState::Jump: pc_p2_sfx(41, b.token, p2sfx::Event::Jump, p); break;
+        case P2FuefukiFsmState::Land: pc_p2_sfx(41, b.token, p2sfx::Event::Land, p); break;
+        case P2FuefukiFsmState::Whisle: pc_p2_sfx(41, b.token, p2sfx::Event::Whistle, p); break;
+        case P2FuefukiFsmState::Struggle: pc_p2_sfx(41, b.token, p2sfx::Event::Flick, p); break;
+        case P2FuefukiFsmState::Dead: pc_p2_sfx(41, b.token, p2sfx::Event::Dead, p); break;
+        default: break;
+        }
         if (c.to == P2FuefukiFsmState::Dead && !b.deadLogged) {
             b.deadLogged = true;
             std::printf("P2_FUEFUKI_DEAD generator=%u source_id=41 health=%.1f prior_health=%.1f followers_panic=%zu\n",
@@ -644,6 +654,7 @@ void ownTick(BTeki* t, Binding& b, float dt)
                              : b.hitsNavi             ? "navi"
                              : b.hitsOther            ? "other"
                                                       : "unattributed";
+        if (t->mHealth > 0.0f) pc_p2_sfx(41, b.token, p2sfx::Event::Damage, t->getPosition());
         std::printf("P2_FUEFUKI_DAMAGE generator=%u source_id=41 health=%.1f prior=%.1f source=%s src_piki=%d "
                     "src_piki_dmg=%.1f src_navi=%d src_navi_dmg=%.1f src_other=%d attackers=%d stuck=%d "
                     "attack_mode_near=%d state=%s\n",
@@ -669,6 +680,8 @@ void ownTick(BTeki* t, Binding& b, float dt)
         last = b.actor.step(w);
         if (!last.valid) break;
         applyCommands(t, b, last);
+        if (b.actor.fsm().getState() == P2FuefukiFsmState::Walk)
+            pc_p2_sfx_stride(41, b.token, t->getPosition(), 12.0f);
         pinDead(t, b);
         holdAirborne(t, b);
         if (last.kill) {

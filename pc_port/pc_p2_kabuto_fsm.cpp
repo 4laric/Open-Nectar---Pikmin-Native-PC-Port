@@ -11,6 +11,7 @@
 // lane and the source Wait/Turn/Move selection (pc_p2_kabuto_aim.h), not the
 // old 180 / 0.5 rad cone.
 #include "pc_p2_kabuto_fsm.h"
+#include "pc_p2_sfx.h"
 #include "pc_p2_kabuto_fsm_policy.h"
 #include "pc_p2_kabuto_stone_fleet.h"
 #include "pc_p2_kabuto_aim.h"
@@ -160,6 +161,7 @@ void logStoneFire(KabutoFsm& s,unsigned gen,const p2kabutostone::AttackStep& ste
         return;
     }
     if(step.action!=p2kabutostone::AttackAction::Fired)return;
+    pc_p2_sfx(75,gen,p2sfx::Event::Shot,Vector3f(step.birth.x,step.birth.y,step.birth.z));
     const int slot=step.slot;
     slotGen[slot]=gen;slotPosTicks[slot]=0;
     const auto at=timing.find("attack");
@@ -192,6 +194,9 @@ void transition(BTeki* a,KabutoFsm& s,KState st,const char* clip,unsigned gen){
     if(st==KB_MOVE)s.moveTimer=0.0f;
     if(st==KB_ATTACK)s.alert=0.0f;
     std::printf("P2_KABUTO_STATE generator=%u state=%s\n",gen,p2kabutofsm::stateName(st));std::fflush(stdout);
+    // P1 Cannon Beetle bank approximation (output-only, #946).
+    if(st==KB_DEAD)pc_p2_sfx(75,gen,p2sfx::Event::Dead,a->getPosition());
+    if(st==KB_FLICK)pc_p2_sfx(75,gen,p2sfx::Event::Flick,a->getPosition());
 }
 void die(BTeki* a,KabutoFsm& s,unsigned gen,float prior){
     if(!s.deadLogged){s.deadLogged=true;std::printf("P2_KABUTO_DEAD generator=%u source_id=75 health=0 prior_health=%.1f\n",gen,prior);std::fflush(stdout);}
@@ -264,6 +269,7 @@ void pc_p2_kabuto_fsm_update(BTeki* actor){
     if(actor->mHealth<=0.0f&&!s.deathPriorSet&&previousHealth>0.0f){s.deathPrior=previousHealth;s.deathPriorSet=true;}
     const float priorForDeath=s.deathPriorSet?s.deathPrior:previousHealth;
     if(actor->mHealth<s.lastHealth&&actor->mHealth>0.0f){
+        pc_p2_sfx(75,gen,p2sfx::Event::Damage,actor->getPosition());
         std::printf("P2_KABUTO_DAMAGE generator=%u source_id=75 health=%.1f\n",gen,actor->mHealth);std::fflush(stdout);}
     s.lastHealth=actor->mHealth;
     if(s.poolFullCooldown>0.0f)s.poolFullCooldown-=dt;
@@ -314,6 +320,7 @@ void pc_p2_kabuto_fsm_update(BTeki* actor){
         break;}
     case KB_MOVE:{
         // StateMove::exec (KabutoState.cpp:203-260) via p2kabutoaim::moveExec.
+        pc_p2_sfx_stride(75,gen,actor->getPosition(),24.0f);
         if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
         if(shouldFlick(actor)){stop(actor);transition(actor,s,KB_FLICK,"flick",gen);break;}
         buildAim(aim);

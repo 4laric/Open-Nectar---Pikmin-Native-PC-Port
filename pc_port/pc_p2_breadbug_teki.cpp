@@ -5,6 +5,7 @@
 #include "pc_p2_groink_clock.h"
 #include "pc_p2_animation.h"
 #include "pc_p2_purple.h"
+#include "pc_p2_sfx.h"
 #include "pc_randomizer.h"
 #include "Interactions.h"
 #include "MapCode.h"
@@ -506,6 +507,15 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         for (bb::State e : o.entered) {
             logState(b, shown, e, t);
             shown = e;
+            // P1 approximation of the source PSSE keys (output-only, #946).
+            switch (e) {
+            case bb::State::Pulled: pc_p2_sfx(38, b.generator, p2sfx::Event::Pull, t->getPosition()); break;
+            case bb::State::Stick: pc_p2_sfx(38, b.generator, p2sfx::Event::Attack, t->getPosition()); break;
+            case bb::State::Damage: pc_p2_sfx(38, b.generator, p2sfx::Event::Damage, t->getPosition()); break;
+            case bb::State::Dead: pc_p2_sfx(38, b.generator, p2sfx::Event::Dead, t->getPosition()); break;
+            case bb::State::Appear: pc_p2_sfx(38, b.generator, p2sfx::Event::Land, t->getPosition()); break;
+            default: break;
+            }
             if (e == bb::State::Pulled)
                 std::printf("P2_BREADBUG_OWN_PULLED generator=%u source_id=38 carriers=%.1f self=%.1f\n",
                             b.generator, o.contestPiki, o.contestSelf);
@@ -515,6 +525,8 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
             }
         }
         if (o.damageKind != bb::DamageKind::None) {
+            if (o.hpAfter < o.hpBefore && o.hpAfter > 0.0f)
+                pc_p2_sfx(38, b.generator, p2sfx::Event::Damage, t->getPosition());
             const char* kind = o.damageKind == bb::DamageKind::Press ? "P2_BREADBUG_OWN_PRESS"
                              : o.damageKind == bb::DamageKind::Suck ? "P2_BREADBUG_OWN_SUCK_DAMAGE"
                                                                      : "P2_BREADBUG_OWN_EXTERNAL_DAMAGE";
@@ -599,6 +611,9 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         t->mHealth = b.fsm.health();
         kill = o.killRequest;
     }
+    // Footsteps while walking / hauling (Collec stride, output-only).
+    if (b.fsm.state() == bb::State::Walk || b.fsm.state() == bb::State::Back)
+        pc_p2_sfx_stride(38, b.generator, t->getPosition(), 22.0f);
     if (t->mHealth > 0.0f) t->updateLifeGauge();
     if (b.fsm.state() == bb::State::Damage || b.fsm.state() == bb::State::Dead)
         logMotion(b, bb::stateName(b.fsm.state()), t, dt, 0.25f);
