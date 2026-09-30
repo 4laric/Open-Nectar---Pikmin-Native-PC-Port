@@ -1,12 +1,15 @@
 #pragma once
 
-// Dev-only smoke-seed bypass of the compiled-in P2 slot approvals (#944).
+// Dev-only smoke-seed switch (#944).
 //
 // Owner ruling (2026-09-29): hand-played smoke seeds must be able to put ANY
-// playable P2 species on ANY ordinary enemy slot, ignoring the committed
-// placement approvals (`pc_p2_campaign_placements.h`, the muse/waterwraith
-// slot constants in `pc_p2_generated_placement.h`). Normal seeds keep full
-// enforcement.
+// playable P2 species on ANY ordinary enemy slot. Since #948 native carries
+// no compiled slot approvals at all (root placement data is the single
+// source of truth and native spawns what the seed binds), so this switch no
+// longer bypasses anything in the placement binder. It is kept as the
+// documented smoke-seed marker: `scripts/p2_smoke_seed.py` sets it, the
+// state is logged once, and the netplay force-off latch below stays as the
+// hook for any future dev-only bypass.
 //
 // Contract:
 // * `PIKMIN_P2_SMOKE_ANY_SLOT=1` (any value other than unset/empty/"0")

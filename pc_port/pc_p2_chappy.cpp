@@ -1177,12 +1177,25 @@ bool pc_p2_chappy_bind_dynamic(BTeki* actor, unsigned generatorId, unsigned sour
     if (actors.count(view)) return true;
     // Only staged species bind: the pose bank arrives with the stage setup,
     // so an unstaged family member refuses here and keeps its P1/proxy path.
-    if (!bankLoaded || !banks.count(spec->enumName)) return false;
-    if (actor->mTekiType != spec->host) return false;
-    if (claimedElsewhere(actor)) return false;
+    // #948: every refusal names its runtime reason; none is silent.
+    const char* reason = nullptr;
+    if (!bankLoaded || !banks.count(spec->enumName)) reason = "unstaged_bank";
+    else if (actor->mTekiType != spec->host) reason = "host_type_mismatch";
+    else if (claimedElsewhere(actor)) reason = "claimed_by_other_family";
+    if (reason) {
+        std::printf("P2_CHAPPY_UNBOUND generator=%u source_id=%u species=%s type=%d reason=%s\n",
+                    generatorId, sourceId, spec->enumName, int(actor->mTekiType), reason);
+        std::fflush(stdout);
+        return false;
+    }
     // The pose bank arrives with the stage setup; the identity binds now so
     // damage/death/delivery track from spawn even before the first draw.
-    if (!health.bind(view, spec->health)) return false;
+    if (!health.bind(view, spec->health)) {
+        std::printf("P2_CHAPPY_UNBOUND generator=%u source_id=%u species=%s reason=health_bind_failed\n",
+                    generatorId, sourceId, spec->enumName);
+        std::fflush(stdout);
+        return false;
+    }
     actors[view] = spec;
     actor->mHealth = spec->health;
     initFsm(view, actor, spec, generatorId);
