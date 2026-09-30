@@ -2229,6 +2229,10 @@ void PikiFlyingState::procCollideMsg(Piki* piki, MsgCollide* msg)
 	) {
 		piki->mActiveAction->abandon(nullptr);
 		PRINT_KANDO("FLYING .. collide\n");
+#if defined(PIKI_PC_PORT)
+		// #892: observe a thrown Pikmin touching a bound Gatling Groink part (armour cover).
+		pc_p2_groink_teki_piki_contact(static_cast<BTeki*>(static_cast<Teki*>(collider)), piki, msg->mEvent.mColliderPart, "thrown");
+#endif
 		if (msg->mEvent.mColliderPart->isPlatformType()) {
 			if (msg->mEvent.mColliderPart->isStickable()) {
 				PRINT_KANDO("flying ... stick to platform::%s(code %s)\n", msg->mEvent.mColliderPart->mCollInfo->mId.mStringID,
