@@ -1,5 +1,6 @@
 #include "pc_p2_kurage_receiver.h"
 #include "pc_p2_kurage_ingestion.h"
+#include "pc_p2_kurage_suction_policy.h"
 #include "pc_p2_captain.h"
 
 #include "Creature.h"
@@ -32,6 +33,12 @@ struct Entry {
 struct OwnerSlot {
     Creature* owner = nullptr;
     CollPart* mouth = nullptr;
+    // Campaign OWN Jellyfloat (#960): the mouth part is the source `suck` part on
+    // the Proom joint, any standing Pikmin under the bell is takeable (source
+    // suckPikmin has no mayIstick gate) and is pulled to the joint, not to the
+    // bottom of a sphere at the body origin.
+    bool own = false;
+    float bodyCentreOffsetY = 0.0f; // log only: body origin to body centre
 };
 constexpr int kMaxOwners = 64; // a saturated smoke seed binds ~25 Jellyfloats
 std::array<OwnerSlot, kMaxOwners> sOwners;
@@ -40,6 +47,42 @@ CollPart* sMouth = nullptr;
 unsigned long long sGeneration = 1;
 // 10 held Pikmin per Jellyfloat (ip11 maxSuckPiki) for up to kMaxOwners bodies.
 std::array<Entry, 10 * kMaxOwners> sEntries;
+
+const OwnerSlot* ownerSlot(const Creature* owner)
+{
+    if (!owner) return nullptr;
+    for (const OwnerSlot& o : sOwners) if (o.owner == owner) return &o;
+    return nullptr;
+}
+
+bool ownerIsOwn(const Creature* owner)
+{
+    const OwnerSlot* o = ownerSlot(owner);
+    return o && o->own;
+}
+
+// Refusal diagnostics: the first few per process, so a run log says why a
+// Pikmin under a hovering body was not taken (#960: the small Jellyfloat
+// "just hovering").
+void refuse(const char* reason)
+{
+    static int logged = 0;
+    if (logged >= 8) return;
+    ++logged;
+    std::printf("P2_KURAGE_RECEIVER_REFUSE reason=%s\n", reason);
+    std::fflush(stdout);
+}
+
+// Pikmin the receiver may take. Campaign OWN owners follow the source
+// (every live Pikmin not stuck to the body, minus unsafe P1 states); the other
+// owners keep the original mayIstick gate.
+bool pikiEligible(const Creature* owner, Piki* piki)
+{
+    if (!piki) return false;
+    if (ownerIsOwn(owner))
+        return p2kuragesuck::pikiSuckable(piki->isAlive(), piki->isStickTo(), piki->getState(), piki->mayIstick());
+    return piki->isAlive() && !piki->isStickTo() && piki->mayIstick() && piki->getState() != PIKISTATE_Flying;
+}
 
 bool ownerRegistered(const Creature* owner, const CollPart* mouth)
 {
@@ -123,13 +166,12 @@ bool controls(const Entry& e)
 
 bool reserve(Piki* piki, Entry::Phase phase, Creature* owner, CollPart* mouth)
 {
-    if (!ownerRegistered(owner, mouth) || !piki || !piki->isAlive() || piki->isStickTo()
-        || !piki->mayIstick()) return false;
+    if (!ownerRegistered(owner, mouth) || !piki) return false;
     // A thrown Pikmin (PikiFlyingState) still reads its captain (mNavi, flower
     // glide) every tick; the captain adapter clears it on capture, so a Pikmin
     // sucked mid-throw crashed the state. Pikmin that are airborne from a
-    // throw land (or latch onto the body) first.
-    if (piki->getState() == PIKISTATE_Flying) return false;
+    // throw land (or latch onto the body) first (pikiEligible refuses them).
+    if (!pikiEligible(owner, piki)) { refuse("piki_not_eligible"); return false; }
     for (const Entry& e : sEntries) if (e.piki == piki) return false;
     if (ownerEntryCount(owner) >= 10) return false; // ip11 per body
     for (Entry& e : sEntries) {
@@ -138,7 +180,7 @@ bool reserve(Piki* piki, Entry::Phase phase, Creature* owner, CollPart* mouth)
         // captain adapter abandons the formation action, then clears squad
         // ownership. A refused capture (already captive, dead actor) refuses
         // admission. Requires the live captain binding (setup_from_navi_mgr).
-        if (!pc_p2_captain::capture_actor(sGeneration, piki)) return false;
+        if (!pc_p2_captain::capture_actor(sGeneration, piki)) { refuse("captain_seam_refused"); return false; }
         if (!e.ingestion.admit(false, false, true)) {
             pc_p2_captain::release_actor(sGeneration, piki, P2CaptainInvalid);
             return false;
@@ -162,11 +204,30 @@ bool reserve(Piki* piki, Entry::Phase phase, Creature* owner, CollPart* mouth)
 bool enterStomach(Entry& e)
 {
     Piki* piki = e.piki;
-    if (!piki || !piki->isAlive() || piki->isStickTo() || !piki->mayIstick()
+    if (!piki || !piki->isAlive() || piki->isStickTo() || !pikiEligible(e.owner, piki)
         || e.generation != sGeneration || !ownerRegistered(e.owner, e.mouth))
         return false;
     const bool stickBefore = piki->isStickTo();
     piki->startStickObject(e.owner, e.mouth, -1, 0.0f);
+    if (ownerIsOwn(e.owner) && piki->getStickObject() == e.owner && piki->getStickPart() == e.mouth) {
+        // Hold the Pikmin inside the stomach sphere instead of on its surface in
+        // the direction it arrived from (below the bell). The mouth part keeps an
+        // identity joint matrix, so the attach position is in world axes relative
+        // to the part centre. A golden-angle ring keeps ten of them apart.
+        int index = 0;
+        for (const Entry& other : sEntries)
+            if (other.piki && &other != &e && other.owner == e.owner && other.phase == Entry::Phase::Stomach) ++index;
+        const p2kuragesuck::HoldOffset hold = p2kuragesuck::holdOffset(index, e.mouth->mRadius);
+        piki->mAttachPosition.set(hold.x, hold.y, hold.z);
+        const OwnerSlot* slot = ownerSlot(e.owner);
+        const float centreY = e.owner->mSRT.t.y + (slot ? slot->bodyCentreOffsetY : 0.0f);
+        const float heldY = e.mouth->mCentre.y + hold.y;
+        std::printf("P2_KURAGE_HOLD kind=pikmin index=%d held_y=%.1f mouth_y=%.1f body_origin_y=%.1f body_centre_y=%.1f "
+                    "held_minus_origin=%.1f held_minus_centre=%.1f\n",
+                    index, heldY, e.mouth->mCentre.y, e.owner->mSRT.t.y, centreY, heldY - e.owner->mSRT.t.y,
+                    heldY - centreY);
+        std::fflush(stdout);
+    }
     const bool linked = piki->getStickObject() == e.owner && piki->getStickPart() == e.mouth;
     if (!linked || !e.ingestion.capture()) {
         if (linked && piki->isAlive()) piki->endStickObject();
@@ -221,6 +282,13 @@ bool pc_p2_kurage_receiver_register(Creature* owner, CollPart* mouth)
     return false; // more than kMaxOwners Jellyfloats: refuse, caller logs the reason
 }
 
+void pc_p2_kurage_receiver_configure_own(Creature* owner, float bodyCentreOffsetY)
+{
+    if (!owner) return;
+    for (OwnerSlot& o : sOwners)
+        if (o.owner == owner) { o.own = true; o.bodyCentreOffsetY = bodyCentreOffsetY; }
+}
+
 bool pc_p2_kurage_receiver_capture(Piki* piki)
 {
     if (!reserve(piki, Entry::Phase::Stomach, sOwner, sMouth)) return false;
@@ -272,7 +340,7 @@ int pc_p2_kurage_receiver_scan_admit_for(Creature* owner, float verticalOffset, 
         Piki* piki = static_cast<Piki*>(manager->getCreature(it));
         // P1's PikiMgr is typed, so every entry is a Pikmin equivalent.  The
         // source's mSticker exclusion maps to its current stick object.
-        if (!piki || !piki->isAlive() || piki->getStickObject() == owner || !piki->mayIstick()) continue;
+        if (!piki || !piki->isAlive() || piki->getStickObject() == owner || !pikiEligible(owner, piki)) continue;
         const Vector3f pos = piki->mSRT.t;
         const float dx = pos.x - ownerPos.x;
         const float dz = pos.z - ownerPos.z;
@@ -298,7 +366,9 @@ void pc_p2_kurage_receiver_update_for(Creature* owner, float delta, bool ownerAl
         Piki* piki = e.piki;
         if (e.phase == Entry::Phase::MouthTravel) {
             Vector3f mouthTarget = e.mouth->mCentre;
-            mouthTarget.y -= e.mouth->mRadius;
+            // Source: toward the `suck` part itself (suckVec = partPos - pikiPos).
+            // Legacy owners keep the bottom of the mouth sphere.
+            if (!ownerIsOwn(e.owner)) mouthTarget.y -= e.mouth->mRadius;
             Vector3f diff = mouthTarget - piki->mSRT.t;
             const float length = std::sqrt(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z);
             if (length < 10.0f) {

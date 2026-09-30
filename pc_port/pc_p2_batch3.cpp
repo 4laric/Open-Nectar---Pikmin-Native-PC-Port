@@ -43,6 +43,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include "pc_p2_body_coll.h"
 #include <fstream>
 #include <map>
 #include <set>
@@ -360,8 +361,14 @@ Bank loadBank(const FamilyDef& family, const std::string& species,
             std::vector<int> frames = timing.frames;
             if (frames.empty()) frames = uniformFramesFor(clip.poseCount, timing.duration);
             bank.seam[clip.name] = p2poseload::seamOf(loaded.baked, frames);
-            bank.hold[clip.name] = p2motion::visibleEnd(
+            const p2motion::HoldPick holdPick = p2motion::holdPick(
                 loaded.baked.size(), [&loaded](size_t i) -> const p2pose::Pose& { return loaded.baked[i].pose; });
+            bank.hold[clip.name] = holdPick.index;
+            if (holdPick.adjusted)
+                std::printf("P2_POSE_HOLD_ADJUST species=%s clip=%s legacy=%zu held=%zu first_bad=%zu ratio_high=%.2f "
+                            "ratio_low=%.2f poses=%zu\n",
+                            species.c_str(), clip.name.c_str(), holdPick.legacy, holdPick.index, holdPick.firstBad,
+                            double(holdPick.worstHigh), double(holdPick.worstLow), loaded.baked.size());
             bank.baked[clip.name] = std::move(loaded.baked);
         }
     }
@@ -373,6 +380,7 @@ static bool ensureBlendState(BTeki* actor, const std::string& key) {
     auto bankIt = banks.find(key);
     if (bankIt == banks.end()) return false;
     const Bank& bank = bankIt->second;
+    pc_p2_body_coll_register_bank(key, bank.baked);  // shared body collision fit (rest pose)
     const std::vector<p2pose::Baked>* baseBaked = nullptr;
     std::string baseClip;
     for (const auto& entry : bank.baked) {
@@ -438,7 +446,10 @@ void pc_p2_batch3_forget(BTeki* actor) {
 }
 
 void pc_p2_batch3_update(BTeki* actor, float seconds) {
-    if (!actor || !actors.count(actor)) return;
+    if (!actor) return;
+    auto boundKey = actors.find(actor);
+    if (boundKey == actors.end()) return;
+    pc_p2_body_coll_assign(actor, boundKey->second);
     const p2motion::Tunables& tune = p2motion::tunables();
     const float speed = actor->mVelocity.x * actor->mVelocity.x + actor->mVelocity.z * actor->mVelocity.z;
     gates[actor].update(speed, seconds, tune);
@@ -718,12 +729,13 @@ void pc_p2_batch3_setup() {
                 fail("native type mismatch");
             }
             if (!found.insert(generator).second) {
-                if (bridge) {
-                    std::printf("P2_SETUP_SKIP batch3 %s duplicate_generator generator=%u\n",
-                                family.name, generator);
-                    continue;
-                }
-                fail("duplicate generator in scene");
+                // Water slots are Wogpole/Dumple PACK generators: one campaign
+                // token, several live hosts. The behaviour modules bind every
+                // member; skipping the extra members here left them drawing as
+                // the P1 host model (wave 3 mechanics probe, Catfish/Tadpole
+                // b26/b27). In bridge mode every member is bound and the token
+                // counts once; found.size() below still compares tokens.
+                if (!bridge) fail("duplicate generator in scene");
             }
             actors[teki] = std::string(family.name) + "|" + match->second;
             speciesUsed.insert(match->second);
