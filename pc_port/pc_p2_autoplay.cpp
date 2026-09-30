@@ -1300,8 +1300,7 @@ void pc_p2_autoplay_tick(void)
         diagClock += (dt > 0.0f && dt <= 0.5f) ? dt : 0.016f;
         if (diagClock >= 10.0f) {
             diagClock = 0.0f;
-            std::printf("AUTOPLAY_SCATTER alive=%d near350=%d far550=%d squad=%d strays=%d distress=%d bot-driven
-",
+            std::printf("AUTOPLAY_SCATTER alive=%d near350=%d far550=%d squad=%d strays=%d distress=%d bot-driven\n",
                         alive, nearCount, farCount, squad, strays, distress);
             std::fflush(stdout);
         }
