@@ -510,6 +510,13 @@ void ActJumpAttack::procCollideMsg(Piki* piki, MsgCollide* msg)
 		return;
 	}
 
+#if defined(PIKI_PC_PORT)
+	// #892: observe a jumping Pikmin touching a bound Gatling Groink part (armour cover).
+	if (msg->mEvent.mCollider && msg->mEvent.mCollider->mObjType == OBJTYPE_Teki) {
+		pc_p2_groink_teki_piki_contact(static_cast<BTeki*>(static_cast<Teki*>(msg->mEvent.mCollider)), piki, msg->mEvent.mColliderPart, "jump");
+	}
+#endif
+
 	if (msg->mEvent.mColliderPart->isPlatformType()) {
 		if (msg->mEvent.mColliderPart->isStickable()) {
 			PRINT_KANDO("stick to platform\n");

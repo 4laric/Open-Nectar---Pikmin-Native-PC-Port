@@ -1,6 +1,10 @@
 #include "pc_p2_chappy.h"
 #include "pc_p2_chappy_policy.h"
 #include "pc_p2_chappy_fsm.h"
+#include "pc_p2_chappy_adult.h"
+#include "EffectMgr.h"
+#include "zen/particle.h"
+#include "TAI/Swallow.h"
 #include "pc_p2_chappy_mouth.h"
 #include "pc_p2_king_life.h"
 #include "pc_p2_sfx.h"
@@ -56,6 +60,8 @@ struct ClipDef {
     int frames = 0;
     int poses = 0;
     std::vector<int> poseFrames;  // optional P2_BANK_FRAMES_1 trailer (#895)
+    p2chappyadult::Loop loop;     // bank key events 0/1 (LOOP_START/LOOP_END), 0/0 when none
+    int key3 = -1;                // bank key event 3 frame (sleep: finishSleepEffect), -1 when none
 };
 struct SpeciesBank {
     unsigned source = 0;
@@ -83,8 +89,9 @@ p2posefamily::Actors poseVis;
 // suppressed (doAI early-return + host param blinding) so this is exclusive.
 constexpr float PI_F = 3.14159265f;
 constexpr float TURN_RATE = 2.5f; // port adaptation (host drive rate)
-constexpr float TERRITORY = 300.0f; // port adaptation (source mTerritoryRadius)
-constexpr float HOME_RADIUS = 50.0f; // port adaptation (source mHomeRadius)
+// Territory / home radius come from the retail parms now (SpeciesParams): the
+// old constants 300 / 50 against source 400 / 15 turned the adults for home
+// mid-chase (owner playtest 2026-09-30).
 constexpr int FLICK_STUCK_MIN = 3; // source shake-off graduation first tier
 constexpr float LOST_REBIRTH_S = 10.0f; // Kuma proper fp12 respawn (adaptation)
 constexpr float KING_TURN_MAX_S = 4.0f; // King Turn safety cap (source turns until fp07; adaptation)
@@ -114,6 +121,21 @@ struct ChappyFsm {
     bool pressed = false; // kumako Press latch
     std::string clip = "wait1";
     float phase = 0.0f;
+    // Owner playtest 2026-09-30 (Fiery Bulblax): clip time in source frames, the
+    // current clip speed, and the finishMotion latch. Looped clips wrap between
+    // their LOOP_START/LOOP_END keys instead of freezing on the last pose.
+    float clipElapsed = 0.0f;
+    float clipSpeed = p2chappyadult::SpeedDefault;
+    bool clipFinish = false;
+    int wakeNext = -1;                 // state to enter when a finished sleep clip ends
+    p2chappyadult::Alert alert;        // StateCautionBase alertTimer
+    bool snoreOn = false;              // host snore bubble currently allowed
+    bool touchWake = false;            // EB_Colliding analogue, this tick
+    // FireChappy TYakiBody: generator handles + the world positions they follow.
+    zen::particleGenerator* fireGen[p2chappyadult::FireEmitters * 3] = {};
+    Vector3f firePos[p2chappyadult::FireEmitters];
+    bool fireOn = false;
+    float fireLogTimer = 0.0f;
     float logTimer = 0.0f;
     float auraTimer = 0.0f;
     float lastHealth = 0.0f;
@@ -271,6 +293,67 @@ Creature* nearestTarget(const Vector3f& pos, float sight)
     return best;
 }
 
+// Source EnemyFunc::getNearestPikminOrNavi(enemy, searchAngle, searchDistance):
+// the nearest captain or Pikmin inside the search distance AND inside the search
+// cone (half-angle, degrees, vs the actor's facing). The port used a full circle,
+// so facing never mattered; the source cone widens to 180 while alerted.
+Creature* nearestTargetCone(const Vector3f& pos, float heading, float sight, float halfAngleDeg)
+{
+    Creature* best = nullptr;
+    float bestSq = sight * sight;
+    auto consider = [&](Creature* c) {
+        const Vector3f p = c->getPosition();
+        const float dx = p.x - pos.x, dz = p.z - pos.z;
+        const float d = dx * dx + dz * dz;
+        if (d >= bestSq) return;
+        const float ang = p2chappyadult::wrapPi(std::atan2(dx, dz) - heading);
+        if (!p2chappyadult::withinAngle(ang, halfAngleDeg)) return;
+        bestSq = d;
+        best = c;
+    };
+    if (naviMgr) {
+        for (Navi* n : pc_p2_navis()) {
+            if (n->isAlive()) consider(n);
+        }
+    }
+    if (pikiMgr) {
+        Iterator it(pikiMgr);
+        CI_LOOP(it)
+        {
+            Piki* p = static_cast<Piki*>(*it);
+            if (p && p->isAlive()) consider(p);
+        }
+    }
+    return best;
+}
+
+// Nearest alive captain/Pikmin XZ distance (no cone); 1e9 when none. Backs
+// EnemyFunc::isPikminOrNaviInRange (cautionProc) and the EB_Colliding analogue.
+float nearestCreatureDist(const Vector3f& pos)
+{
+    float best = 1.0e9f;
+    auto consider = [&](Creature* c) {
+        const Vector3f p = c->getPosition();
+        const float dx = p.x - pos.x, dz = p.z - pos.z;
+        const float d = std::sqrt(dx * dx + dz * dz);
+        if (d < best) best = d;
+    };
+    if (naviMgr) {
+        for (Navi* n : pc_p2_navis()) {
+            if (n->isAlive()) consider(n);
+        }
+    }
+    if (pikiMgr) {
+        Iterator it(pikiMgr);
+        CI_LOOP(it)
+        {
+            Piki* p = static_cast<Piki*>(*it);
+            if (p && p->isAlive()) consider(p);
+        }
+    }
+    return best;
+}
+
 p2chappymouth::Vec3 mouthVec(const Vector3f& v)
 {
     return p2chappymouth::Vec3{v.x, v.y, v.z};
@@ -377,6 +460,22 @@ int clipFrames(const std::string& species, const std::string& clip)
     return c->second.frames > 0 ? c->second.frames : 30;
 }
 
+p2chappyadult::Loop clipLoop(const std::string& species, const std::string& clip)
+{
+    auto b = banks.find(species);
+    if (b == banks.end()) return {};
+    auto c = b->second.clips.find(clip);
+    return c == b->second.clips.end() ? p2chappyadult::Loop{} : c->second.loop;
+}
+
+int clipKey3(const std::string& species, const std::string& clip)
+{
+    auto b = banks.find(species);
+    if (b == banks.end()) return -1;
+    auto c = b->second.clips.find(clip);
+    return c == b->second.clips.end() ? -1 : c->second.key3;
+}
+
 float clipDuration(const std::string& species, const std::string& clip)
 {
     return float(clipFrames(species, clip)) / 30.0f;
@@ -398,7 +497,7 @@ const char* clipForState(const SpeciesBank& bank, p2chappyfsm::Family family, in
             push("move1"); push("move"); push("walk"); push("run1"); break;
         case p2chappy::ADULT_TURN: case p2chappy::ADULT_TURN_TO_HOME:
             push("waitact1"); push("wait1"); break;
-        case p2chappy::ADULT_SLEEP: push("wait2"); push("sleep"); push("wait1"); break;
+        case p2chappy::ADULT_SLEEP: push("wait2"); push("type1"); push("wait1"); break;
         default: push("wait1"); push("wait2"); break;
         }
     } else if (family == p2chappyfsm::FAMILY_KUMA) {
@@ -492,10 +591,36 @@ bool isAttackState(p2chappyfsm::Family family, int state)
     return state == 3; // Kuma / KumaKo
 }
 
+// Source setAnimationSpeed per state (chappyState.cpp:280,929): Turn and Walk
+// run their clip at 40 fps, everything else at 30. GoHome never sets it in the
+// source but the body moves at walk speed, so the port plays it at 40 too.
+// Flick stays at 30 because the port times its shake on 30 fps source frames.
+float stateClipSpeed(p2chappyfsm::Family family, int state)
+{
+    switch (family) {
+    case p2chappyfsm::FAMILY_ADULT:
+        return (state == p2chappy::ADULT_TURN || state == p2chappy::ADULT_WALK || state == p2chappy::ADULT_GO_HOME
+                || state == p2chappy::ADULT_TURN_TO_HOME)
+                   ? p2chappyadult::SpeedMove
+                   : p2chappyadult::SpeedDefault;
+    case p2chappyfsm::FAMILY_KUMA:
+        return (state == 5 || state == 6 || state == 7 || state == 8) ? p2chappyadult::SpeedMove
+                                                                      : p2chappyadult::SpeedDefault;
+    case p2chappyfsm::FAMILY_KUMAKO:
+        return (state == 5 || state == 6) ? p2chappyadult::SpeedMove : p2chappyadult::SpeedDefault;
+    default:
+        return p2chappyadult::SpeedDefault;
+    }
+}
+
 void transition(BTeki* actor, ChappyFsm& s, int next, unsigned gen)
 {
     s.state = next;
     s.stateTime = 0.0f;
+    s.clipElapsed = 0.0f;
+    s.clipFinish = false;
+    s.wakeNext = -1;
+    s.clipSpeed = stateClipSpeed(s.family, next);
     s.attackFired = false;
     s.swallowFired = false;
     s.flickFired = false;
@@ -562,10 +687,12 @@ void setPhase(ChappyFsm& s)
         s.phase = frames > 1 ? std::min(1.0f, f / float(frames - 1)) : 1.0f;
         return;
     }
-    const float dur = clipDuration(s.spec->enumName, s.clip);
-    float ph = dur > 0.0f ? s.stateTime / dur : 1.0f;
-    if (ph > 1.0f) ph = 1.0f;
-    s.phase = ph;
+    // Non-Emperor families: the clip clock honours the bank's LOOP_START/LOOP_END
+    // keys. Before 2026-09-30 every clip clamped at its last pose, so the 50-frame
+    // move1 froze ~1.3 s into a chase and the body glided on a stiff pose.
+    const int frames = clipFrames(s.spec->enumName, s.clip);
+    const float frame = p2chappyadult::clipFrame(clipLoop(s.spec->enumName, s.clip), s.clipElapsed, frames, s.clipFinish);
+    s.phase = frames > 1 ? std::min(1.0f, std::max(0.0f, frame / float(frames - 1))) : 1.0f;
 }
 
 int initialState(p2chappyfsm::Family family)
@@ -603,6 +730,16 @@ void initFsm(PelletView* view, BTeki* actor, const p2chappy::SpeciesParams* spec
         if (const char* c = clipForState(b->second, s.family, s.state)) s.clip = c;
     }
     s.phase = 0.0f;
+    s.clipElapsed = 0.0f;
+    s.clipFinish = false;
+    s.clipSpeed = stateClipSpeed(s.family, s.state);
+    s.alert = p2chappyadult::Alert{};
+    if (s.family == p2chappyfsm::FAMILY_ADULT && b != banks.end() && b->second.clips.count("type1")) {
+        // ChappyBase::onInit starts Sleep with mDoSkipSleepStart: the sleep clip
+        // (type1) from frame 70, not the wait2 lie-down lead-in.
+        s.clip = "type1";
+        s.clipElapsed = 70.0f;
+    }
     s.logTimer = 0.0f;
     s.auraTimer = 0.0f;
 }
@@ -924,9 +1061,92 @@ void doFireAura(BTeki* actor, ChappyFsm& s, unsigned gen)
     }
 }
 
+// FireChappy::startBodyEffect / finishBodyEffect (efx::TYakiBody on the body
+// joint). P2 JPA2 particles do not port to the P1 zen system, so the body fire is
+// the P1 burning-Pikmin pair (EFF_Piki_Fire flames + EFF_Piki_FireSparkles), one
+// pair per body/head/rear anchor, re-anchored to the actor every tick through
+// setEmitPosPtr. Visual only: the burn damage stays with doFireAura.
+constexpr int kFireHandles = p2chappyadult::FireEmitters * 3;
+
+void fireStop(ChappyFsm& s, bool force)
+{
+    for (int i = 0; i < kFireHandles; ++i) {
+        if (s.fireGen[i] && effectMgr) effectMgr->kill(s.fireGen[i], force);
+        s.fireGen[i] = nullptr;
+    }
+    s.fireOn = false;
+}
+
+void fireUpdate(BTeki* actor, ChappyFsm& s, unsigned gen)
+{
+    if (!effectMgr) return;
+    const Vector3f p = actor->getPosition();
+    const float sn = std::sin(s.heading), cs = std::cos(s.heading);
+    for (int i = 0; i < p2chappyadult::FireEmitters; ++i) {
+        const p2chappyadult::Offset o = p2chappyadult::fireOffset(i);
+        s.firePos[i].set(p.x + o.x * cs + o.z * sn, p.y + o.y, p.z - o.x * sn + o.z * cs);
+    }
+    if (!p2chappyadult::fireWanted(actor->isAlive(), false)) {
+        if (s.fireOn) fireStop(s, false);
+        return;
+    }
+    if (!s.fireOn) {
+        s.fireOn = true;
+        int made = 0;
+        for (int i = 0; i < p2chappyadult::FireEmitters; ++i) {
+            zen::particleGenerator* flame =
+                effectMgr->create(EffectMgr::EFF_Piki_Fire, s.firePos[i], nullptr, nullptr);
+            if (flame) {
+                flame->setEmitPosPtr(&s.firePos[i]);
+                flame->setOrientedNormalVector(Vector3f(1.0f, 0.0f, 0.0f));
+                ++made;
+            }
+            s.fireGen[i] = flame;
+            zen::particleGenerator* spark =
+                effectMgr->create(EffectMgr::EFF_Piki_FireSparkles, s.firePos[i], nullptr, nullptr);
+            if (spark) {
+                spark->setEmitPosPtr(&s.firePos[i]);
+                ++made;
+            }
+            s.fireGen[p2chappyadult::FireEmitters + i] = spark;
+            // Third layer: the P1 fire-geyser flame (z_hiba), the only P1 fire big
+            // enough to read on a Bulborb-sized body. Emitted once per anchor.
+            zen::particleGenerator* big =
+                effectMgr->create(EffectMgr::EFF_Hiba_Fire, s.firePos[i], nullptr, nullptr);
+            if (big) {
+                big->setEmitPosPtr(&s.firePos[i]);
+                ++made;
+            }
+            s.fireGen[2 * p2chappyadult::FireEmitters + i] = big;
+        }
+        std::printf("P2_CHAPPY_FIRE_EFFECT generator=%u source_id=%u event=start emitters=%d effect=P1_Piki_Fire\n", gen,
+                    s.spec->source, made);
+        std::fflush(stdout);
+    }
+}
+
+// Host TaiSwallowStrategy::draw shows the P1 snore bubble whenever the host
+// mStateID is Unk15/Unk1 (sleeping). The P2 FSM suppresses the host AI, so that
+// state never left Unk15 and the bubble stayed up while the Bulborb was awake
+// (owner playtest 2026-09-30). The P2 FSM now drives it: sleeping with the bubble
+// window open keeps the sleeping id; everything else parks the host on an awake
+// id and stops the generator (source StateSleep::exec / cleanup finishSleepEffect).
+void snoreUpdate(BTeki* actor, ChappyFsm& s, unsigned gen, bool want)
+{
+    if (s.spec->host != 4) return; // only the Swallow host owns the bubble generator
+    actor->mStateID = want ? SWALLOWSTATE_Unk15 : SWALLOWSTATE_Unk13;
+    if (want != s.snoreOn) {
+        if (!want) actor->stopParticleGenerator(0);
+        std::printf("P2_CHAPPY_SNORE generator=%u source_id=%u event=%s state=%s frame=%.0f\n", gen, s.spec->source,
+                    want ? "start" : "stop", fsmStateName(s.family, s.state), s.clipElapsed);
+        std::fflush(stdout);
+        s.snoreOn = want;
+    }
+}
+
 void setWanderTarget(ChappyFsm& s)
 {
-    const float radius = 0.5f * (TERRITORY - HOME_RADIUS) * rand01(s) + HOME_RADIUS * 0.5f;
+    const float radius = 0.5f * (s.spec->territory - s.spec->homeRadius) * rand01(s) + s.spec->homeRadius * 0.5f;
     const float angle = 2.0f * PI_F * rand01(s);
     s.wander.x = s.home.x + radius * std::sin(angle);
     s.wander.y = s.home.y;
@@ -966,6 +1186,7 @@ bool bindActorAs(BTeki* actor, unsigned generator, unsigned sourceId)
 
 void pc_p2_chappy_reset()
 {
+    for (auto& kv : fsms) fireStop(kv.second, true);
     kingRestoreAllColl(); // stage boundary: hand every Emperor its host collision back before the map drops
     banks.clear();
     shapes.clear();
@@ -996,6 +1217,10 @@ void pc_p2_chappy_forget(BTeki* actor)
         auto known = fsms.find(view);
         if (known != fsms.end() && known->second.family == p2chappyfsm::FAMILY_KING && actor && actor->mGenerator)
             pc_p2_sfx_forget(53, pc_p2_campaign_token(actor));
+    }
+    {
+        auto known = fsms.find(view);
+        if (known != fsms.end()) fireStop(known->second, true);
     }
     fsms.erase(view);
     drawnLive.erase(view);
@@ -1116,7 +1341,15 @@ void pc_p2_chappy_setup()
             if (posesWord != "poses" || status != "converted") std::abort();
             if (!banks.count(species)) std::abort();
             if (frames < 1 || frames > 10000 || poses < 1 || poses > 64) std::abort();
-            if (!banks[species].clips.emplace(name, ClipDef{(int)frames, poses, {}}).second) std::abort();
+            ClipDef def{(int)frames, poses, {}};
+            {
+                const auto evs = p2chappyadult::parseEvents(events);
+                def.loop = p2chappyadult::loopFromEvents(evs);
+                for (const auto& e : evs) {
+                    if (e.second == 3 && def.key3 < 0) def.key3 = e.first;
+                }
+            }
+            if (!banks[species].clips.emplace(name, def).second) std::abort();
             lastSpecies = species;
             lastClipName = name;
         } else if (word == "frames") {
@@ -2040,7 +2273,8 @@ void pc_p2_chappy_update(BTeki* actor)
         if (s.family == p2chappyfsm::FAMILY_KING) pc_p2_sfx(53, generator, p2sfx::Event::Damage, actor);
     }
     s.lastHealth = actor->mHealth;
-    (void)previousHealth;
+    // EB_TakingDamage analogue: health dropped this tick or a Pikmin is latched.
+    const bool tookDamage = (previousHealth > actor->mHealth + 1.0e-3f) || stuckPikminCount(actor) > 0;
 
     // Death takes precedence in every family (source checkDead). The host
     // dieSoon() only runs inside the suppressed doAI, so finalize with
@@ -2069,6 +2303,9 @@ void pc_p2_chappy_update(BTeki* actor)
             std::fflush(stdout);
         }
         s.stateTime += dt;
+        s.clipElapsed += dt * s.clipSpeed;
+        if (s.fireOn) fireStop(s, false);
+        snoreUpdate(actor, s, generator, false);
         setPhase(s);
         const float deadDur = clipDuration(s.spec->enumName, s.clip);
         const float wait = (s.family == p2chappyfsm::FAMILY_KUMAKO && s.state == 1)
@@ -2085,6 +2322,7 @@ void pc_p2_chappy_update(BTeki* actor)
 
     // Fire signature runs while alive (all states).
     if (s.spec->source == 33) {
+        fireUpdate(actor, s, generator);
         s.auraTimer += dt;
         if (s.auraTimer >= 0.5f) {
             s.auraTimer = 0.0f;
@@ -2107,8 +2345,20 @@ void pc_p2_chappy_update(BTeki* actor)
     if (king) p2chappymouth::king::tickDelay(s.walker, dt * 30.0f);
     s.kingSearched = king && p2chappymouth::king::canSearch(s.walker, mouthVec(pos));
     if (king && !s.kingSearched) s.kingCensus = p2chappymouth::king::Census{};
+    const bool adult = s.family == p2chappyfsm::FAMILY_ADULT;
+    float viewAngleNow = s.spec->viewAngle;
+    if (adult) {
+        // StateCautionBase::cautionProc: a captain/Pikmin inside fp11 or life below
+        // fp30 re-arms the alert; while it runs view and search angles are 180.
+        const bool doAlert = nearestCreatureDist(pos) < s.spec->privateRadius || actor->mHealth < s.spec->lifeBeforeAlert;
+        p2chappyadult::alertTick(s.alert, doAlert, s.spec->alertTime, dt);
+        viewAngleNow = p2chappyadult::alerted(s.alert, s.spec->alertTime) ? 180.0f : s.spec->viewAngle;
+    }
     Creature* target = king ? (s.kingSearched ? kingSearchTarget(actor, s) : nullptr)
-                            : nearestTarget(pos, s.spec->sight);
+                            : adult ? nearestTargetCone(pos, s.heading, s.spec->sight,
+                                                        p2chappyadult::searchAngle(s.alert, s.spec->alertTime,
+                                                                                   s.spec->searchAngle))
+                                    : nearestTarget(pos, s.spec->sight);
     if (target) actor->setCreaturePointer(0, target);
     else actor->clearCreaturePointer(0);
     const bool sees = target != nullptr;
@@ -2132,18 +2382,55 @@ void pc_p2_chappy_update(BTeki* actor)
     // The King does not use this: it runs the source checkFlick timer
     // (kingCheckFlick, #884 round 3) in Walk and Turn.
     const bool flickWanted = !inRange && stuckPikminCount(actor) >= FLICK_STUCK_MIN;
-    const bool farHome = distXZ(pos, s.home) > TERRITORY;
-    const bool nearHome = distXZ(pos, s.home) < HOME_RADIUS;
+    const bool farHome = distXZ(pos, s.home) > s.spec->territory;
+    const bool nearHome = distXZ(pos, s.home) < s.spec->homeRadius;
 
     s.stateTime += dt;
+    s.clipElapsed += dt * s.clipSpeed;
 
     if (s.family == p2chappyfsm::FAMILY_ADULT) {
         switch (s.state) {
         case p2chappy::ADULT_SLEEP: {
             stop(actor);
             if (flickWanted) { transition(actor, s, p2chappy::ADULT_FLICK, generator); break; }
-            if (sees || actor->mHealth < s.spec->health) {
-                transition(actor, s, p2chappy::ADULT_TURN, generator);
+            // ChappyBase::isWakeup: damage or body collision wakes; sight does not.
+            // (The port used `sees || hp < max`: anyone within 500 units, and a
+            // Bulborb that had ever been hurt never stayed asleep.)
+            const bool touch = p2chappyadult::touching(nearestCreatureDist(pos));
+            const bool wakeNow = p2chappyadult::sleepWakes(tookDamage, touch);
+            const int frames = clipFrames(s.spec->enumName, s.clip);
+            auto bankIt = banks.find(s.spec->enumName);
+            const bool hasSleepClip = bankIt != banks.end() && bankIt->second.clips.count("type1");
+            if (s.clip == "type1") {
+                if (!s.clipFinish && wakeNow) {
+                    // StateSleep::setNextState: finishMotion at 60 fps, then Turn at END.
+                    const p2chappyadult::Loop loop = clipLoop(s.spec->enumName, s.clip);
+                    s.clipElapsed = p2chappyadult::elapsedAtFinish(loop, s.clipElapsed, frames);
+                    s.clipFinish = true;
+                    s.clipSpeed = p2chappyadult::SpeedFinish;
+                    std::printf("P2_CHAPPY_WAKE generator=%u source_id=%u reason=%s frame=%.0f nearest=%.0f\n", generator,
+                                s.spec->source, tookDamage ? "damage" : "collision", s.clipElapsed,
+                                nearestCreatureDist(pos));
+                    std::fflush(stdout);
+                }
+                if (s.clipFinish && s.clipElapsed >= float(frames - 1)) {
+                    transition(actor, s, p2chappy::ADULT_TURN, generator);
+                }
+            } else if (!hasSleepClip) {
+                if (wakeNow) transition(actor, s, p2chappy::ADULT_TURN, generator);
+            } else if (s.clipElapsed >= float(frames - 1)) {
+                // wait2 lead-in finished (StateSleep::exec): damage goes straight to Turn,
+                // otherwise start the sleep clip.
+                if (tookDamage) {
+                    transition(actor, s, p2chappy::ADULT_TURN, generator);
+                } else {
+                    s.clip = "type1";
+                    s.clipElapsed = 0.0f;
+                    s.clipFinish = false;
+                    std::printf("P2_CHAPPY_STATE generator=%u source_id=%u state=sleep clip=type1\n", generator,
+                                s.spec->source);
+                    std::fflush(stdout);
+                }
             }
             break;
         }
@@ -2172,7 +2459,7 @@ void pc_p2_chappy_update(BTeki* actor)
             if (target) {
                 const Vector3f tp = target->getPosition();
                 const float ang = std::fabs(wrapPi(std::atan2(tp.x - pos.x, tp.z - pos.z) - s.heading));
-                if (ang <= 25.0f * PI_F / 180.0f) walkTo(actor, s, tp, dt, s.spec->moveSpeed);
+                if (p2chappyadult::walkFacing(ang, viewAngleNow)) walkTo(actor, s, tp, dt, s.spec->moveSpeed);
                 else {
                     stop(actor);
                     transition(actor, s, p2chappy::ADULT_TURN, generator);
@@ -2218,6 +2505,9 @@ void pc_p2_chappy_update(BTeki* actor)
         case p2chappy::ADULT_TURN_TO_HOME: {
             stop(actor);
             if (inRange) { transition(actor, s, p2chappy::ADULT_ATTACK, generator); break; }
+            // StateTurnToHome::init/exec: taking damage sends it back to Turn, so a
+            // Bulborb hit from behind does not go straight back to sleep.
+            if (tookDamage) { transition(actor, s, p2chappy::ADULT_TURN, generator); break; }
             if (nearHome) { transition(actor, s, p2chappy::ADULT_SLEEP, generator); break; }
             if (turnTo(actor, s, s.home, dt, 0.1f) || s.stateTime >= TURN_DURATION_S) {
                 transition(actor, s, p2chappy::ADULT_GO_HOME, generator);
@@ -2707,6 +2997,18 @@ void pc_p2_chappy_update(BTeki* actor)
         }
     }
 
+    if (s.family == p2chappyfsm::FAMILY_ADULT) {
+        bool snore = false;
+        if (s.state == p2chappy::ADULT_SLEEP && s.clip == "type1") {
+            const p2chappyadult::Loop loop = clipLoop(s.spec->enumName, s.clip);
+            const int frames = clipFrames(s.spec->enumName, s.clip);
+            const int key3 = clipKey3(s.spec->enumName, s.clip);
+            snore = p2chappyadult::snoreActive(true, true,
+                                               p2chappyadult::clipFrame(loop, s.clipElapsed, frames, s.clipFinish),
+                                               loop.start, key3 > 0 ? key3 : loop.end + 3);
+        }
+        snoreUpdate(actor, s, generator, snore);
+    }
     setPhase(s);
     if (s.family == p2chappyfsm::FAMILY_KING) kingUpdateColl(actor, s);
     s.logTimer += dt;

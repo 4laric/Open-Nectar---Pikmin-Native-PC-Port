@@ -1,3 +1,4 @@
+#include "pc_p2_gas_cloud.h"
 #include "pc_p2_astonish.h"
 #include "pc_p2_purple.h"
 #include "pc_p2_purple_impact.h"
@@ -2229,6 +2230,10 @@ void PikiFlyingState::procCollideMsg(Piki* piki, MsgCollide* msg)
 	) {
 		piki->mActiveAction->abandon(nullptr);
 		PRINT_KANDO("FLYING .. collide\n");
+#if defined(PIKI_PC_PORT)
+		// #892: observe a thrown Pikmin touching a bound Gatling Groink part (armour cover).
+		pc_p2_groink_teki_piki_contact(static_cast<BTeki*>(static_cast<Teki*>(collider)), piki, msg->mEvent.mColliderPart, "thrown");
+#endif
 		if (msg->mEvent.mColliderPart->isPlatformType()) {
 			if (msg->mEvent.mColliderPart->isStickable()) {
 				PRINT_KANDO("flying ... stick to platform::%s(code %s)\n", msg->mEvent.mColliderPart->mCollInfo->mId.mStringID,
@@ -3388,6 +3393,7 @@ void PikiPanicState::init(Piki* piki)
 	mSpeedRatio           = 1.0f;
 	piki->setGasInvincible(1);
 	piki->mIsPanicked = true;
+	pc_p2_gas_cloud_begin(piki);
 }
 
 /**
@@ -3437,6 +3443,7 @@ void PikiPanicState::exec(Piki* piki)
 		return;
 	}
 	piki->setSpeed(mSpeedRatio, mMoveDirection);
+	pc_p2_gas_cloud_update(piki);
 	mSurvivalTimer -= gsys->getFrameTime();
 	mChangeDirectionTimer -= gsys->getFrameTime();
 	if (mSurvivalTimer < 0.0f) {
@@ -3464,6 +3471,7 @@ void PikiPanicState::cleanup(Piki* piki)
 	}
 	piki->setGasInvincible(0);
 	piki->mIsPanicked = false;
+	pc_p2_gas_cloud_end(piki, false);
 }
 
 /**
