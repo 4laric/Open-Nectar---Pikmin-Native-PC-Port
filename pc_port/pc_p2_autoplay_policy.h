@@ -1117,6 +1117,16 @@ private:
             if (el <= cfg.kingCursorTol * 2.0f) pulseA(in, cfg.throwHold, cfg.throwGap);
             return;
         }
+        // #256: the Empress dies against the arena's far wall (a13: carcass
+        // 617 u away over a ledge, carry_no_grab). A straight steer cannot
+        // reach it, so ask the driver for a waypoint route every 15 s.
+        if (in.targetSource == 30 && in.targetToken != 0 && !in.waypointLeg && in.targetDist > 250.0f) {
+            seedRouteCooldown -= in.dt > 0.0f && in.dt <= 0.5f ? in.dt : 0.016f;
+            if (seedRouteCooldown <= 0.0f) {
+                wantReplan = true;
+                seedRouteCooldown = 15.0f;
+            }
+        }
         if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
         else if (in.targetToken != 0) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
         if (in.targetDist <= cfg.throwRange && in.targetToken != 0) pulseA(in, cfg.throwHold, cfg.throwGap);
@@ -2976,6 +2986,7 @@ private:
     float strayRouteX = 0.0f;
     float strayRouteZ = 0.0f;
     float strayRouteCooldown = 0.0f;
+    float seedRouteCooldown = 0.0f; // #256
     float empressWalk = 0.0f; // seconds walked to strays in this whistle episode
     bool kingEvading = false; // #884 round 5: leaving the tongue sweep for the current King attack
     float kingEvadeTime = 0.0f; // time spent evading inside kingEvadeClear (sidestep after kingEvadeSideAfter)

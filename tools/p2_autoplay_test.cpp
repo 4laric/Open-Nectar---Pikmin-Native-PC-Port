@@ -1313,6 +1313,31 @@ void testEmpressAftermathRegroup()
     CHECK(brain.strayRouteWanted(), "empress-regroup/aftermath_asks_for_a_route");
     CHECK(brain.strayRouteGoalZ() > 379.0f, "empress-regroup/aftermath_route_goal_is_the_nearest_stray");
     CHECK(brain.command().moveZ > 0.9f, "empress-regroup/aftermath_walks_to_the_stray");
+    // A carcass far across the arena (a13: 617 u over a ledge): a route is requested.
+    p2autoplay::Brain far(cfg);
+    p2autoplay::Senses f = liveSenses();
+    f.fieldPikmin = 60;
+    far.update(0.05f, f);
+    far.update(0.05f, f);
+    f.targetToken = 300003;
+    f.targetSource = 30;
+    f.targetAlive = true;
+    f.targetDist = 100.0f;
+    f.tgtX = 100.0f;
+    far.update(0.05f, f);
+    far.update(0.05f, f);
+    f.targetHealthFrac = 0.5f;
+    far.update(0.05f, f);
+    f.targetAlive = false;
+    f.targetDist = 617.0f;
+    f.tgtX = 617.0f;
+    f.squadPikmin = 30;
+    bool routed = false;
+    for (int i = 0; i < 20 && !routed; ++i) {
+        far.update(0.05f, f);
+        routed = far.replanWanted();
+    }
+    CHECK(routed, "empress-regroup/far_carcass_requests_a_route");
 }
 
 void testResupply()
