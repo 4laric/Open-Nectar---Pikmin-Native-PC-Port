@@ -96,7 +96,7 @@ jobs:
             | sort -u)
           echo "Building pikmin_pc + ${#p2_targets[@]} p2 test targets"
           ccache -z
-          cmake --build build --target pikmin_pc "${p2_targets[@]}" -j 4
+          cmake --build build --target pikmin_pc p2_captain_switch_runtime "${p2_targets[@]}" -j 4
           ccache -s
 
       - name: Save ccache
@@ -134,5 +134,22 @@ jobs:
         with:
           name: nectar-windows-${{ env.HEAD_SHA }}
           path: nectar-windows-${{ env.HEAD_SHA }}/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Package captain-switch fixture (compile only; no game assets)
+        run: |
+          out="captain-switch-fixture-windows-${HEAD_SHA}"
+          mkdir -p "${out}"
+          cp build/fixtures/captain-switch-fixture.exe "${out}/"
+          cp nectar-windows-${HEAD_SHA}/*.dll "${out}/"
+          printf '%s\n%s\n%s\n' "commit ${HEAD_SHA}" "run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" "TEST FIXTURE ONLY: scripted captain acceptance, not production" > "${out}/BUILD_INFO.txt"
+          (cd "${out}" && sha256sum *.exe *.dll > sha256.txt)
+
+      - name: Upload captain-switch fixture
+        uses: actions/upload-artifact@v4
+        with:
+          name: captain-switch-fixture-windows-${{ env.HEAD_SHA }}
+          path: captain-switch-fixture-windows-${{ env.HEAD_SHA }}/
           if-no-files-found: error
           retention-days: 14
