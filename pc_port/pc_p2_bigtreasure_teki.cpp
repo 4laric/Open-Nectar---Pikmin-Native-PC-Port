@@ -94,6 +94,8 @@ struct Binding {
     std::unique_ptr<p2attackfx::Emitter> fx; // lazily created; owner-kills every generator on destruction
     p2attackfx::Session fxSession;
     p2titanfx::State fxState;
+    int waterShots = 0;
+    std::vector<std::pair<unsigned, int>> waterDump; // probe-only frame dumps: (session tick, shot*10+phase)
     int fxEmits = 0;           // water shots this frame (sum of per-tick emits)
 };
 std::map<BTeki*, Binding> s;
@@ -662,6 +664,39 @@ void updateFx(BTeki* t, Binding& b) {
     if (b.fxSession.begin(element)) {
         std::printf("P2_BIGTREASURE_FX_START generator=%u source_id=73 element=%s visual_only=1\n", b.generator,
                     p2attackfx::elementName(element));
+    }
+    if (b.fxSession.active && b.fxSession.ticks == 0 && element == p2attackfx::Element::WaterBall) {
+        // Monster Pump look: the chosen default, or a TEST-ONLY override to compare candidates
+        // (PIKMIN_P2_TEST_WATER_LOOK=<index> | cycle: one look per water attack).
+        static int sWaterAttacks = 0;
+        const char* pick = std::getenv("PIKMIN_P2_TEST_WATER_LOOK");
+        if (pick && *pick) {
+            p2attackfx::waterVariant() = std::string(pick) == "cycle" ? sWaterAttacks % p2attackfx::WATER_LOOKS : std::atoi(pick);
+        }
+        ++sWaterAttacks;
+        b.waterShots = 0;
+        b.waterDump.clear();
+        std::printf("P2_BIGTREASURE_WATER_LOOK generator=%u variant=%d name=%s\n", b.generator, p2attackfx::waterVariant(),
+                    p2attackfx::waterLook(p2attackfx::waterVariant()).name);
+    }
+    if (element == p2attackfx::Element::WaterBall && stats.emits > 0) {
+        // Frame each shot (probe-only dumps): in flight, then around the burst.
+        ++b.waterShots;
+        if (b.waterShots <= 4) {
+            b.waterDump.push_back({b.fxSession.ticks + 9, b.waterShots * 10 + 1});
+            b.waterDump.push_back({b.fxSession.ticks + 26, b.waterShots * 10 + 2});
+        }
+    }
+    for (std::size_t wd = 0; wd < b.waterDump.size();) {
+        if (b.waterDump[wd].first == b.fxSession.ticks) {
+            char key[64];
+            std::snprintf(key, sizeof(key), "TitanWater_v%d_s%d_%c", p2attackfx::waterVariant(), b.waterDump[wd].second / 10,
+                          b.waterDump[wd].second % 10 == 1 ? 'a' : 'b');
+            pc_gfx_proxy_shot_now(key);
+            b.waterDump.erase(b.waterDump.begin() + long(wd));
+        } else {
+            ++wd;
+        }
     }
     const unsigned tick = b.fxSession.ticks;
     if (!b.fx) b.fx = std::make_unique<p2attackfx::Emitter>();
