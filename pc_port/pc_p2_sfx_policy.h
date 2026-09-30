@@ -60,6 +60,12 @@ enum Se : int {
     kSaraiDamage         = 0x79,
     kSaraiAttack         = 0x7A,
     kSaraiDead           = 0x7B,
+    kKingWalk            = 0x4D,
+    kKingReady           = 0x4E,
+    kKingBero2           = 0x50,
+    kKingCheek           = 0x54,
+    kKingHip             = 0x56,
+    kKingDead1           = 0x57,
     kMarDead1            = 0x84,
     kKurioneWater        = 0x8B,
 };
@@ -75,6 +81,7 @@ enum Source : unsigned {
     kGroink       = 78,
     kGroinkArmored= 97,   // fminihoudai variant, same host module
     kCannonLarva  = 75,
+    kEmpress      = 30,
 };
 
 enum class Event : int {
@@ -212,6 +219,15 @@ inline int seFor(unsigned sourceId, Event e) {
         case Event::Flick: return kKabutoFlip;
         case Event::Damage: return kTankDamage;
         case Event::Dead: return kKabutoDead;
+        default: return kNone;
+        }
+    case kEmpress: // Empress Bulblax: P1's Emperor Bulblax (KingChappy) bank.
+        switch (e) {
+        case Event::Roll: return kKingReady;    // roll wind-up
+        case Event::Crash: return kKingHip;     // territory-edge slam
+        case Event::Flick: return kKingBero2;   // tongue-like shake-off swing
+        case Event::Damage: return kKingCheek;
+        case Event::Dead: return kKingDead1;
         default: return kNone;
         }
     default:

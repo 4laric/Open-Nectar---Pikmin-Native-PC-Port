@@ -26,6 +26,7 @@
 #include "pc_p2_queen_own.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_setup_failsafe.h"
+#include "pc_p2_sfx.h"
 #include "pc_p2_groink_clock.h"
 #include "pc_p2_animation.h"
 #include "pc_p2_specular_layer.h"
@@ -434,12 +435,14 @@ void applyOutput(BTeki* t, Binding& b, const TickOutput& o, int& shown, int stuc
                         b.refusedCaptain);
         }
     }
-    if (o.flickFace) { ++b.flicks; flickStuck(t, b, true); }
+    if (o.flickFace) { ++b.flicks; flickStuck(t, b, true); pc_p2_sfx(30, b.generator, p2sfx::Event::Flick, t->getPosition()); }
     if (o.flickBackward) flickStuck(t, b, false);
+    if (o.rollStart) pc_p2_sfx(30, b.generator, p2sfx::Event::Roll, t->getPosition());
     if (o.rollStart)
         std::printf("P2_QUEEN_ROLL_START generator=%u source_id=%u anim=%s ignore_atari=navi,teki\n", b.generator,
                     b.source, animName(b.fsm.animator().anim()));
     if (o.rollingAttack) rollPress(t, b);
+    if (o.crash) pc_p2_sfx(30, b.generator, p2sfx::Event::Crash, t->getPosition());
     if (o.crash)
         std::printf("P2_QUEEN_CRASH generator=%u source_id=%u dot=%.1f territory=%.1f margin=50\n", b.generator,
                     b.source, o.rollDot, b.fsm.params().territoryRadius);
@@ -496,6 +499,7 @@ void ownTick(BTeki* t, Binding& b, float dt) {
     // The damage seam already applied the source coefficient; drain it the
     // way the suppressed strategy would (makeDamaged), the only health write.
     if (t->mStoredDamage > 0.0f) t->makeDamaged();
+    if (t->mHealth < b.lastHealth && t->mHealth > 0.0f) pc_p2_sfx(30, b.generator, p2sfx::Event::Damage, t->getPosition());
     if (t->mHealth < b.lastHealth)
         std::printf("P2_QUEEN_DAMAGE generator=%u source_id=%u health=%.1f prior=%.1f state=%s hits=%d stuck=%d\n",
                     b.generator, b.source, t->mHealth, b.lastHealth, stateName(b.fsm.state()), b.hits,
