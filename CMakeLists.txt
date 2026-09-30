@@ -713,21 +713,10 @@ add_executable(p2_kurage_runtime ${P2_KURAGE_RUNTIME_SOURCES})
 target_include_directories(p2_kurage_runtime PRIVATE tools)
 target_compile_options(p2_kurage_runtime PRIVATE ${NATIVE_COMPILE_OPTIONS})
 target_link_libraries(p2_kurage_runtime PRIVATE pikmin_legacy)
-# #928 opt-in replacement-main fixture: never run by ctest or the default build.
-set(P2_CAPTAIN_SWITCH_RUNTIME_SOURCES ${PC_PORT_SOURCES})
-list(REMOVE_ITEM P2_CAPTAIN_SWITCH_RUNTIME_SOURCES pc_port/pc_main.cpp)
-list(APPEND P2_CAPTAIN_SWITCH_RUNTIME_SOURCES tools/p2_captain_switch_runtime.cpp)
-add_executable(p2_captain_switch_runtime EXCLUDE_FROM_ALL ${P2_CAPTAIN_SWITCH_RUNTIME_SOURCES})
-target_include_directories(p2_captain_switch_runtime PRIVATE tools)
-target_compile_options(p2_captain_switch_runtime PRIVATE ${NATIVE_COMPILE_OPTIONS})
-target_link_libraries(p2_captain_switch_runtime PRIVATE pikmin_legacy)
-set_target_properties(p2_captain_switch_runtime PROPERTIES
-    OUTPUT_NAME captain-switch-fixture RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/fixtures")
 if(WIN32)
     add_library(bbft_transport STATIC pc_port/bbft/bbft_transport.c)
     target_link_libraries(pikmin_pc PRIVATE bbft_transport ws2_32)
     target_link_libraries(p2_kurage_runtime PRIVATE bbft_transport ws2_32)
-    target_link_libraries(p2_captain_switch_runtime PRIVATE bbft_transport ws2_32)
     add_executable(pc_bbft_test pc_port/pc_bbft_test.cpp pc_port/pc_bbft.cpp pc_port/pc_randomizer.cpp pc_port/pc_p2_delivery_host.cpp)
     add_test(NAME pc_bbft_test COMMAND pc_bbft_test)
     add_test(NAME pc_bbft_background_test COMMAND pc_bbft_test --background)
@@ -752,7 +741,7 @@ endif()
 # performance regression with no visible symptom other than the frame time.
 set(PIKMIN_OPTIMIZED_TARGETS ${NECTAR_GAME} ${NECTAR_LEGACY})
 if (NOT ANDROID)
-    list(APPEND PIKMIN_OPTIMIZED_TARGETS p2_kurage_runtime p2_captain_switch_runtime)
+    list(APPEND PIKMIN_OPTIMIZED_TARGETS p2_kurage_runtime)
 endif()
 
 foreach(target IN LISTS PIKMIN_OPTIMIZED_TARGETS)
@@ -793,7 +782,6 @@ if (WIN32)
     # SDL_main sin definir en todos los ejecutables.
     target_link_libraries(${NECTAR_GAME} PRIVATE ${SDL2_LIBRARIES} opengl32 comdlg32)
     target_link_libraries(p2_kurage_runtime PRIVATE ${SDL2_LIBRARIES} opengl32 comdlg32)
-    target_link_libraries(p2_captain_switch_runtime PRIVATE ${SDL2_LIBRARIES} opengl32 comdlg32)
 elseif (ANDROID)
     # En Android no hay X11 ni OpenGL de escritorio. GLESv3 y EGL vienen del
     # NDK; log y android los necesita la capa de plataforma (logcat, ciclo de
@@ -806,11 +794,9 @@ else()
     if(PIKMIN_GLES)
         target_link_libraries(${NECTAR_GAME} PRIVATE m ${SDL2_LIBRARIES} OpenGL::GLES3 X11)
         target_link_libraries(p2_kurage_runtime PRIVATE m ${SDL2_LIBRARIES} OpenGL::GLES3 X11)
-        target_link_libraries(p2_captain_switch_runtime PRIVATE m ${SDL2_LIBRARIES} OpenGL::GLES3 X11)
     else()
         target_link_libraries(${NECTAR_GAME} PRIVATE m ${SDL2_LIBRARIES} OpenGL::GL X11)
         target_link_libraries(p2_kurage_runtime PRIVATE m ${SDL2_LIBRARIES} OpenGL::GL X11)
-        target_link_libraries(p2_captain_switch_runtime PRIVATE m ${SDL2_LIBRARIES} OpenGL::GL X11)
     endif()
 endif()
 # Export symbol names so the diagnostic backtrace in pc_gfx.cpp prints function
@@ -823,7 +809,6 @@ endif()
 if (NOT WIN32 AND NOT ANDROID)
     target_link_options(${NECTAR_GAME} PRIVATE -rdynamic)
     target_link_options(p2_kurage_runtime PRIVATE -rdynamic)
-    target_link_options(p2_captain_switch_runtime PRIVATE -rdynamic)
 elseif (WIN32)
     # SDL2's CMake package links -mwindows, which hides the console and with it
     # every printf the port uses to report what it is doing. Keep a console on
@@ -831,7 +816,6 @@ elseif (WIN32)
     # stays windowed: it talks through native dialogs.
     target_link_options(${NECTAR_GAME} PRIVATE -mconsole)
     target_link_options(p2_kurage_runtime PRIVATE -mconsole)
-    target_link_options(p2_captain_switch_runtime PRIVATE -mconsole)
 endif()
 
 # Set output name
@@ -2171,3 +2155,31 @@ add_test(NAME p2_campaign_goal_lifecycle_test COMMAND p2_campaign_goal_lifecycle
 add_library(p2_campaign_goal_lifecycle_runtime_compile OBJECT tools/p2_campaign_goal_lifecycle_runtime.cpp)
 target_include_directories(p2_campaign_goal_lifecycle_runtime_compile PRIVATE pc_port ${SDL2_INCLUDE_DIRS})
 target_compile_options(p2_campaign_goal_lifecycle_runtime_compile PRIVATE ${NATIVE_COMPILE_OPTIONS} -Wno-unused-parameter)
+
+# Explicit replacement-main diagnostics: CI compiles/packages but never runs
+# them or receives local game assets. Default production builds stay unchanged.
+file(WRITE "${CMAKE_BINARY_DIR}/ci-fixtures.txt" "")
+function(pikmin_add_ci_fixture name source)
+    if(ANDROID)
+        return()
+    endif()
+    if(NOT name MATCHES "^[a-z0-9_]+$" OR NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${source}")
+        message(FATAL_ERROR "Invalid explicit CI fixture: ${name} ${source}")
+    endif()
+    set(target "pikmin_ci_fixture_${name}")
+    set(sources ${PC_PORT_SOURCES})
+    list(REMOVE_ITEM sources pc_port/pc_main.cpp)
+    list(APPEND sources "${source}")
+    add_executable(${target} EXCLUDE_FROM_ALL ${sources})
+    # Copy final production settings, including platform libraries and IPO.
+    # Inherited directory includes/definitions and source properties also apply.
+    foreach(prop COMPILE_OPTIONS COMPILE_DEFINITIONS INCLUDE_DIRECTORIES LINK_LIBRARIES LINK_OPTIONS INTERPROCEDURAL_OPTIMIZATION)
+        get_target_property(value ${NECTAR_GAME} ${prop})
+        if(NOT value STREQUAL "value-NOTFOUND")
+            set_property(TARGET ${target} PROPERTY ${prop} "${value}")
+        endif()
+    endforeach()
+    target_include_directories(${target} PRIVATE tools)
+    set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/fixtures")
+    file(APPEND "${CMAKE_BINARY_DIR}/ci-fixtures.txt" "${target}\n")
+endfunction()
