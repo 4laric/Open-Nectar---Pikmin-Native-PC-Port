@@ -443,6 +443,7 @@ void pc_p2_tadpole_update(BTeki* actor) {
         if (actor->mHealth > 0.0f) {
             std::printf("P2_TADPOLE_DAMAGE generator=%u source_id=27 health=%.1f\n", generator, actor->mHealth);
             std::fflush(stdout);
+            pc_p2_sfx(27, generator, p2sfx::Event::Damage, actor);
         }
     }
 

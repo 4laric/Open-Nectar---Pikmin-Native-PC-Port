@@ -188,9 +188,18 @@ Piki* nearestPiki(const Vector3f& pos, float radius) {
     }
     return best;
 }
+// Source EnemyFunc::isStartFlick (enemyAction.cpp:1209) keys on Pikmin stuck to
+// the body (first shake-off tier, mStuckPikminCount >= 3), not on a nearby swarm:
+// proximity flicks made Hana flick back-to-back and never settle (wave 3
+// mechanics probe: drifted 1200 units from home while flicking). Same rule as
+// pc_p2_chappy.cpp FLICK_STUCK_MIN.
+constexpr int FLICK_STUCK_MIN = 3;
 bool shouldFlick(BTeki* a) {
-    const Vector3f pos = a->getPosition();
-    return nearestPiki(pos, FLICK_RADIUS) != nullptr;
+    int stuck = 0;
+    for (Creature* c = a->mStickListHead; c; c = c->mNextSticker) {
+        if (c->isPiki() && c->isAlive()) ++stuck;
+    }
+    return stuck >= FLICK_STUCK_MIN;
 }
 void doFlick(BTeki* a, Hana& s) {
     if (!pikiMgr) return;
@@ -517,6 +526,7 @@ void pc_p2_hana_update(BTeki* actor) {
         if (actor->mHealth > 0.0f) {
             std::printf("P2_HANA_DAMAGE generator=%u source_id=84 health=%.1f\n", generator, actor->mHealth);
             std::fflush(stdout);
+            pc_p2_sfx(84, generator, p2sfx::Event::Damage, actor);
         }
     }
 
@@ -649,8 +659,15 @@ void pc_p2_hana_update(BTeki* actor) {
             }
         }
         if (s.stateTime >= clipDuration("flick")) {
-            std::printf("P2_HANA_STATE generator=%u state=walk\n", generator);
-            enter(s, HANA_WALK, "move1");
+            // Source Flick end (ChappyBase): back to the walk/turn-to-home
+            // decision. Outside the territory that is GoHome, not a fresh chase.
+            if (distXZ(pos, s.home) > TERRITORY) {
+                std::printf("P2_HANA_STATE generator=%u state=gohome\n", generator);
+                enter(s, HANA_GOHOME, "move1");
+            } else {
+                std::printf("P2_HANA_STATE generator=%u state=walk\n", generator);
+                enter(s, HANA_WALK, "move1");
+            }
         }
         break;
     }

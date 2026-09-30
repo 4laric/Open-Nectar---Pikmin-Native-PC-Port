@@ -613,6 +613,7 @@ void pc_p2_catfish_update(BTeki* actor) {
         if (actor->mHealth > 0.0f) {
             std::printf("P2_CATFISH_DAMAGE generator=%u source_id=26 health=%.1f\n", generator, actor->mHealth);
             std::fflush(stdout);
+            pc_p2_sfx(26, generator, p2sfx::Event::Damage, actor);
         }
     }
 
