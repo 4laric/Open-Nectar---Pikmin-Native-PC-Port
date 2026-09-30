@@ -50,6 +50,7 @@
 #include "pc_p2_sokkuri.h"
 #include "pc_p2_kogane.h"
 #include "pc_p2_chappy.h"
+#include "pc_p2_fuefuki_teki.h"
 #include "pc_p2_bigtreasure_teki.h"
 #include "pc_p2_teki_lifetime.h"
 #include "pc_p2_test_day_cycle.h"
@@ -127,6 +128,7 @@ const char* sourceDisplayName(unsigned source)
     case 9: return "Kogane";
     case 23: return "Sarai";
     case 57: return "Kurage";
+    case 58: return "BombSarai";
     case 54: return "Miulin";
     case 44: return "BlueKochappy";
     case 59: return "FireOtakara";
@@ -734,6 +736,8 @@ void pc_p2_autoplay_tick(void)
     sNaviY = navi->getPosition().y;
 
     // --- Pikmin census (read-only, except bot-v4 power-mode flowering) ---
+    int panicCount = 0; // #245: Pikmin in PIKISTATE_Panic, nearest XZ to the captain
+    float panicNearest = 1.0e30f;
     int alive = 0, nearCount = 0, farCount = 0, transport = 0, distress = 0, squad = 0;
     int strays = 0;
     float strayX = 0.0f, strayZ = 0.0f;
@@ -785,6 +789,10 @@ void pc_p2_autoplay_tick(void)
                 || pst == PIKISTATE_Swallowed || pst == PIKISTATE_Panic || pst == PIKISTATE_Drown
                 || pst == PIKISTATE_Bubble || p->isFired() || p->isStickToMouth())
                 ++distress;
+            if (pst == PIKISTATE_Panic) {
+                ++panicCount;
+                panicNearest = std::min(panicNearest, d);
+            }
         }
     }
     if (powerMode) sPowerSeconds += (dt > 0.0f && dt <= 0.5f) ? dt : 0.016f;
@@ -1224,6 +1232,8 @@ void pc_p2_autoplay_tick(void)
     senses.containerOpen = navi->getCurrState() && navi->getCurrState()->getID() == NAVISTATE_Container;
     senses.scattered = (farCount >= 3) || (alive >= 10 && nearCount < 5);
     senses.squadDistress = distress > 0;
+    senses.panicCount = panicCount; // #245 Fuefuki owner-death Panic reclaim
+    senses.panicNearest = panicNearest;
     // bot-v5: live per-corpse carry (was a forever latch on ANY transport).
     // receiptSeen stays the per-token ledger query (per-token bystander-proof).
     senses.transportSeen = carryActive;
@@ -1391,6 +1401,10 @@ void pc_p2_autoplay_tick(void)
             senses.targetAttacking = pc_p2_chappy_probe(pick->actor, &kst, nullptr, nullptr) && kst
                 && std::strcmp(kst, "attack") == 0;
         }
+        // #245: the Antenna Beetle's whistle cast (read-only FSM probe). The
+        // Fuefuki stance leaves the growing cast ring while it lasts.
+        if (p2autoplay::isFuefukiStandoff(pick->source))
+            senses.targetAttacking = pc_p2_fuefuki_teki_casting(pick->actor);
         if (!sEngage.homeValid) {
             sEngage.homeValid = true;
             sEngage.homeX = pick->x;

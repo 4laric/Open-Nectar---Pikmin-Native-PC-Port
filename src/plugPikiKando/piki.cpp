@@ -2,6 +2,7 @@
 #include "pc_p2_purple_flight.h"
 #include "pc_p2_purple_impact.h"
 #include "pc_p2_white.h"
+#include "pc_p2_breadbug_teki.h"
 #include "pc_p2_species.h"
 #include "pc_p2_purple.h"
 #include "pc_randomizer.h"
@@ -990,6 +991,12 @@ int Piki::graspSituation(Creature** outTarget)
 		if (roughCull(teki, this, minTestDist + teki->getCentreSize())) {
 			continue;
 		}
+#if defined(PIKI_PC_PORT)
+		// #898: an unbittered OWN Breadbug is not a living thing (retail pikiAI skips it).
+		if (pc_p2_breadbug_teki_untargetable(teki, "piki_grasp_situation")) {
+			continue;
+		}
+#endif
 		if (teki->isVisible() && teki->isAlive() && !teki->isFlying() && teki->isOrganic() && !teki->isStickTo()) {
 			f32 tekiDist = qdist2(this, teki);
 			if (tekiDist <= minTestDist + teki->getCentreSize()) {
@@ -2207,7 +2214,11 @@ void Piki::collisionCallback(immut CollEvent& event)
 	}
 
 	if (AICONST.mDoCStickAttack() && (collider->mObjType == OBJTYPE_Teki || collider->isBoss()) && collider->isOrganic()
-	    && mMode == PikiMode::FormationMode && getState() != PIKISTATE_Pressed) {
+	    && mMode == PikiMode::FormationMode && getState() != PIKISTATE_Pressed
+#if defined(PIKI_PC_PORT)
+	    && !pc_p2_breadbug_teki_untargetable(collider, "piki_formation_contact") // #898 swarm
+#endif
+	) {
 		ActCrowd* crowd = static_cast<ActCrowd*>(mActiveAction->getCurrAction());
 		if (crowd && crowd->mState == ActCrowd::STATE_Formed) {
 			mActiveAction->abandon(nullptr);
@@ -2913,6 +2924,12 @@ void Piki::doAI()
 		_500.clear();
 		return;
 	}
+	// #245: an Antenna Beetle ActTeki follower walks the beetle's footmark
+	// trail instead of running its P1 action (source Brain ACT_Teki).
+	if (getState() == PIKISTATE_Normal && pc_p2_fuefuki_follower_controls(this)) {
+		_500.clear();
+		return;
+	}
 
 	int state = getState();
 	if (state == PIKISTATE_Unk34) {
@@ -2953,6 +2970,9 @@ void Piki::pcChargeAt(Creature* target)
 	if (!target || playerState->inDayEnd()) {
 		return;
 	}
+	if (pc_p2_breadbug_teki_untargetable(target, "piki_charge")) {
+		return; // #898
+	}
 	mActiveAction->abandon(nullptr);
 	mActiveAction->mCurrActionIdx = PikiAction::Attack;
 	mActiveAction->mChildActions[mActiveAction->mCurrActionIdx].initialise(target);
@@ -2962,6 +2982,15 @@ void Piki::pcChargeAt(Creature* target)
 void Piki::changeMode(int newMode, Navi* navi)
 {
 	STACK_PAD_VAR(6); // idk
+#if defined(PIKI_PC_PORT)
+	// #245: the whistle path into a party is refused for an Antenna Beetle
+	// ActTeki follower in Navi::callPikis (InteractFue::actPiki). Any other
+	// path (day-end gather, co-op transfer, ...) ends the follow here, and a
+	// Pikmin the beetle released logs its reclaim by a captain.
+	if (newMode == PikiMode::FormationMode) {
+		pc_p2_fuefuki_note_formation(this, navi);
+	}
+#endif
 #if defined(PIKI_PC_PORT)
 	// VS: un Pikmin sin dueño pasa a ser del capitán a cuyo grupo entra
 	// (arrancarlo, silbarlo o tocarlo acaban aquí).

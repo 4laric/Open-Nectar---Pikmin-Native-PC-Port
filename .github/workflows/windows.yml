@@ -1,0 +1,138 @@
+name: Windows build
+
+# Builds the Windows game executable with the same toolchain agents use locally
+# (MSYS2 MINGW64 gcc/g++ + Ninja + SDL2, see the root AGENTS.md recipe), runs
+# the p2_ host tests and publishes nectar.exe with its runtime DLLs so agents
+# can download a build instead of compiling on the owner's PC.
+#
+# Test scope: `ctest -R p2_` only. The Windows-only `pc_bbft_test`
+# (and its `pc_bbft_background_test` variant) is deliberately NOT built or run:
+# it has a known link failure on MinGW that reproduces at base, independent of
+# any lane's change. Only `pikmin_pc` and the executables behind the p2_ tests
+# are built, so that target never enters the build graph. The full Linux ctest
+# still runs in linux.yml.
+
+on:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Same-repo PRs from claude/** branches are already built by their push run.
+    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'claude/')
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      # For pull_request events github.sha is the synthetic merge commit; name
+      # the artifact after the commit that was actually pushed.
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_MAXSIZE: 3G
+      CCACHE_COMPRESS: 'true'
+    steps:
+      - name: Keep LF line endings
+        shell: pwsh
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-SDL2
+            mingw-w64-x86_64-ccache
+            mingw-w64-x86_64-pkgconf
+
+      - name: Verify repository contains no game data
+        run: |
+          if find . -path './.git' -prune -o -type f \( -iname '*.iso' -o -iname '*.gcm' -o -iname '*.rvz' -o -path './assets/dataDir/*' \) -print -quit | grep -q .; then
+            echo 'Proprietary game data found in repository'
+            exit 1
+          fi
+
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: ccache-windows-mingw64-${{ github.sha }}
+          restore-keys: |
+            ccache-windows-mingw64-
+
+      - name: Configure
+        # Same cache options as the maintained native/build-randomizer tree.
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPIKMIN_NATIVE_JAUDIO=ON \
+            -DPIKMIN_NATIVE_OPTIMIZE=OFF \
+            -DPIKMIN_ENABLE_IPO=ON
+
+      - name: Build pikmin_pc and p2 test targets
+        run: |
+          # Every p2_ test runs an executable of the same name in the build
+          # root, so the test list is the target list.
+          mapfile -t p2_targets < <(grep -E '^add_test\(' build/CTestTestfile.cmake \
+            | sed -E 's/^add_test\(([^ ]+) "([^"]+)".*/\1 \2/' \
+            | awk '$1 ~ /p2_/ { n = $2; sub(/.*\//, "", n); sub(/\.exe$/, "", n); print n }' \
+            | sort -u)
+          echo "Building pikmin_pc + ${#p2_targets[@]} p2 test targets"
+          ccache -z
+          cmake --build build --target pikmin_pc "${p2_targets[@]}" -j 4
+          ccache -s
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ccache-windows-mingw64-${{ github.sha }}
+
+      - name: Run p2 tests
+        run: ctest --test-dir build -R p2_ --output-on-failure -j 4 --timeout 300
+
+      - name: Package nectar.exe with runtime DLLs
+        run: |
+          out="nectar-windows-${HEAD_SHA}"
+          mkdir -p "${out}"
+          cp build/bin/nectar.exe "${out}/"
+          # Copy every non-system DLL the exe resolves from the MINGW64 prefix.
+          ldd build/bin/nectar.exe | awk '{ print $3 }' | grep -i '^/mingw64/' | sort -u | while read -r dll; do
+            cp "${dll}" "${out}/"
+          done
+          if ldd "${out}/nectar.exe" | grep -qi 'not found'; then
+            echo 'Unresolved DLLs'; ldd "${out}/nectar.exe"; exit 1
+          fi
+          for required in nectar.exe SDL2.dll; do
+            test -f "${out}/${required}" || { echo "missing ${required}"; exit 1; }
+          done
+          printf '%s\n%s\n' "commit ${HEAD_SHA}" "run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > "${out}/BUILD_INFO.txt"
+          (cd "${out}" && sha256sum *.exe *.dll > sha256.txt)
+          cat "${out}/sha256.txt"
+          ls -l "${out}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nectar-windows-${{ env.HEAD_SHA }}
+          path: nectar-windows-${{ env.HEAD_SHA }}/
+          if-no-files-found: error
+          retention-days: 14

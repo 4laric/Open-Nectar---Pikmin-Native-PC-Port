@@ -13,6 +13,7 @@
 #include "pc_p2_snakejoint.h"
 #include "pc_p2_otakara.h"
 #include "pc_p2_chappy.h"
+#include "pc_p2_breadbug_teki.h"
 #endif
 
 /**
@@ -44,6 +45,8 @@ bool InteractAttack::actTeki(Teki* teki) immut
 {
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
 	if (pc_p2_hana_rejects_attack(teki)) return true;
+	// #898: PanModoki::damageCallBack applies damage only while bittered.
+	if (pc_p2_breadbug_teki_attack(teki, mOwner, mDamage)) return false;
 	if (pc_p2_elecbug_attacked(teki)) return true;
 	if (pc_p2_kogane_attacked(teki)) {
 		return true; // registered beetles take no attack damage (P2: only flips)
@@ -89,6 +92,9 @@ bool InteractAttack::actTeki(Teki* teki) immut
 	// Lane 28 (#245 gate 3): real engine receiver observation for the bound
 	// Fuefuki vehicle. No-op for every other actor.
 	pc_p2_hardlanes_fuefuki_hit(teki, mOwner, mDamage, damageAccepted);
+	// #245 OWN Antenna Beetle: attribute the hit (Pikmin / captain) for the
+	// DAMAGE marker. Observer only; no-op for every other actor.
+	pc_p2_fuefuki_teki_attacked(teki, mOwner, mDamage, damageAccepted);
 	// #884: Emperor Bulblax flick timer (source addDamage flickSpeed). No-op
 	// for every other actor.
 	pc_p2_chappy_attacked(teki, damageAccepted);
@@ -152,6 +158,7 @@ bool InteractPress::actTeki(Teki* teki) immut
 	if (pc_p2_elecbug_pressed(teki, mOwner)) return true;
 	if (pc_p2_sokkuri_pressed(teki, mOwner)) return true;
 	if (pc_p2_hardlanes_fuefuki_pressed(teki, mOwner)) return true;
+	if (pc_p2_fuefuki_teki_pressed(teki, mOwner)) return true; // #245 OWN pressCallBack
 	if (pc_p2_kogane_pressed(teki, mOwner)) {
 		return true; // registered beetles flip instead of the host pressed state
 	}
