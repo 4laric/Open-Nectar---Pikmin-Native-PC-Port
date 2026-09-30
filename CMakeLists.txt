@@ -967,6 +967,21 @@ target_compile_definitions(p2_otakara_press_test PRIVATE
     P2_OTAKARA_PRESS_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
 add_test(NAME p2_otakara_press_test COMMAND p2_otakara_press_test)
 
+# Dweevil family fidelity (owner playtest 2026-09-30): collision parts (legs carry none, the
+# partless ground punch is refused), treasure pickup/carry/drop, the elemental attack window and
+# effect lifecycle, and slope speed / stall side-step. All policy is engine-free; the wiring is
+# checked against the source text.
+foreach(dweevil_test IN ITEMS part item attack stall)
+    string(TOUPPER ${dweevil_test} dweevil_test_upper)
+    add_executable(p2_otakara_${dweevil_test}_test
+        tools/p2_otakara_${dweevil_test}_test.cpp)
+    target_include_directories(p2_otakara_${dweevil_test}_test PRIVATE pc_port)
+    target_compile_options(p2_otakara_${dweevil_test}_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+    target_compile_definitions(p2_otakara_${dweevil_test}_test PRIVATE
+        P2_OTAKARA_${dweevil_test_upper}_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME p2_otakara_${dweevil_test}_test COMMAND p2_otakara_${dweevil_test}_test)
+endforeach()
+
 # wf7 dweevil-impl (#871): dead-Dweevil clip choice is engine-free and covers
 # all four species 59-62 (dead forces dead, never attack1).
 add_executable(p2_dweevil_death_clip_test
@@ -1960,6 +1975,18 @@ add_executable(p2_elecbug_transport_test tools/p2_elecbug_transport_test.cpp pc_
 target_include_directories(p2_elecbug_transport_test PRIVATE pc_port)
 target_compile_options(p2_elecbug_transport_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_elecbug_transport_test COMMAND p2_elecbug_transport_test)
+add_executable(p2_elecbug_fsm_test tools/p2_elecbug_fsm_test.cpp)
+target_include_directories(p2_elecbug_fsm_test PRIVATE pc_port)
+target_compile_options(p2_elecbug_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_elecbug_fsm_test COMMAND p2_elecbug_fsm_test)
+add_executable(p2_elecbug_fx_test tools/p2_elecbug_fx_test.cpp)
+target_include_directories(p2_elecbug_fx_test PRIVATE pc_port)
+target_compile_options(p2_elecbug_fx_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_elecbug_fx_test COMMAND p2_elecbug_fx_test)
+add_executable(p2_species_unit_test tools/p2_species_unit_test.cpp)
+target_include_directories(p2_species_unit_test PRIVATE pc_port)
+target_compile_options(p2_species_unit_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_species_unit_test COMMAND p2_species_unit_test)
 
 # rd-p2-kurage-transport (#768): Kurage57 corpse -> carried -> exactly one
 # Onion receipt over the real delivery-host bridge (registration only).
@@ -2052,6 +2079,12 @@ add_executable(p2_captor_mouth_test tools/p2_captor_mouth_test.cpp)
 target_include_directories(p2_captor_mouth_test PRIVATE pc_port)
 target_compile_options(p2_captor_mouth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_captor_mouth_test COMMAND p2_captor_mouth_test)
+
+# #995: Bloyster source policy (tail bulb is the only stickable part, damageCallBack, tongue tables).
+add_executable(p2_umimushi_policy_test tools/p2_umimushi_policy_test.cpp)
+target_include_directories(p2_umimushi_policy_test PRIVATE pc_port)
+target_compile_options(p2_umimushi_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_umimushi_policy_test COMMAND p2_umimushi_policy_test)
 # bot-impl (#871): TEST-ONLY headless autoplay bot policy. Engine-free:
 # the header-only Brain (states, timeouts, giveup/result markers, Kogane
 # damage-and-move-on) plus the inert-when-unset gate (registration only).
@@ -2309,3 +2342,15 @@ add_test(NAME p2_campaign_goal_lifecycle_test COMMAND p2_campaign_goal_lifecycle
 add_library(p2_campaign_goal_lifecycle_runtime_compile OBJECT tools/p2_campaign_goal_lifecycle_runtime.cpp)
 target_include_directories(p2_campaign_goal_lifecycle_runtime_compile PRIVATE pc_port ${SDL2_INCLUDE_DIRS})
 target_compile_options(p2_campaign_goal_lifecycle_runtime_compile PRIVATE ${NATIVE_COMPILE_OPTIONS} -Wno-unused-parameter)
+
+add_executable(p2_breadbug_corpse_test tools/p2_breadbug_corpse_test.cpp pc_port/pc_p2_breadbug_fsm.cpp)
+target_include_directories(p2_breadbug_corpse_test PRIVATE pc_port)
+target_compile_options(p2_breadbug_corpse_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_breadbug_corpse_test COMMAND p2_breadbug_corpse_test)
+# Demon living-body fade advance regression (#972): engine-free.
+add_executable(p2_demon_fade_test
+    pc_port/pc_p2_demon_fade_test.cpp)
+target_include_directories(p2_demon_fade_test PRIVATE pc_port)
+target_compile_options(p2_demon_fade_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+target_compile_definitions(p2_demon_fade_test PRIVATE DEMON_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/pc_port/pc_p2_sarai_demon.cpp")
+add_test(NAME p2_demon_fade_test COMMAND p2_demon_fade_test)

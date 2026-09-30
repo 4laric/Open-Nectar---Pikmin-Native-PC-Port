@@ -107,7 +107,7 @@ int main() {
     // Every element has a real look for every kind it emits (mutant: missing effect id = silent no-op).
     {
         bool ok = true;
-        const Element els[4] = {Element::Fire, Element::Water, Element::Gas, Element::Elec};
+        const Element els[5] = {Element::Fire, Element::Water, Element::Gas, Element::Elec, Element::WaterBall};
         const Kind kinds[5] = {Kind::Muzzle, Kind::Body, Kind::Tip, Kind::Node, Kind::Arc};
         for (Element e : els)
             for (Kind k : kinds) {
@@ -115,6 +115,24 @@ int main() {
                 ok &= l.effect > 0 && (!l.burst || l.life > 0);
             }
         CHECK(ok, "every element/kind maps to a P1 effect with a lifetime when bursting");
+    }
+    // Monster Pump water looks: every candidate has a ball, a burst and a shot piece with a positive
+    // scale and lifetime; the default is a valid index; ring may be absent (scale 0 = skipped).
+    {
+        bool ok = DEFAULT_WATER_LOOK >= 0 && DEFAULT_WATER_LOOK < WATER_LOOKS;
+        for (int v = 0; v < WATER_LOOKS; ++v) {
+            const WaterLook& w = waterLook(v);
+            ok &= w.name && w.shot.effect > 0 && w.ball.effect > 0 && w.splash.effect > 0;
+            ok &= w.ball.every > 0 && w.ball.scale > 0 && w.splash.scale > 0 && w.shot.scale > 0;
+        }
+        CHECK(ok, "every water look has shot, ball and splash pieces (trail and ring optional)");
+        waterVariant() = 1;
+        const Look ball = look(Element::WaterBall, Kind::Body), ring = look(Element::WaterBall, Kind::Ring);
+        CHECK(ball.effect == waterLook(1).ball.effect && ring.effect == waterLook(1).ring.effect, "WaterBall looks follow the selected variant");
+        waterVariant() = 0;
+        CHECK(look(Element::WaterBall, Kind::Ring).scale == 0.0f, "a look without a ring draws no ring");
+        waterVariant() = DEFAULT_WATER_LOOK;
+        CHECK(look(Element::Water, Kind::Body).effect == EFF_Frog_Water2, "the Tank stream look is unchanged by the Titan water looks");
     }
     if (gFail) { std::printf("%d failure(s)\n", gFail); return 1; }
     std::puts("p2_attack_fx_test: ok");
