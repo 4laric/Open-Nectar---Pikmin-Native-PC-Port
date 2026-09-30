@@ -188,12 +188,19 @@ int main()
 		e.extraArgs = "--netplay-input keyboard";
 		std::vector<std::string> l = recovery_lines(e);
 		CHECK(contains(l, "DESYNC") && contains(l, "at frame 30012"), "what happened");
-		CHECK(contains(l, "Last save: the campaign continues from the start of day 3 (checkpoint 1)."),
-		      "the last save, day only");
+		CHECK(contains(l, "Last save: the end of day 2; the campaign continues from the start of day 3 (checkpoint 1)."),
+		      "the last save names the day that ended and the day that follows (day known: the day before ended)");
 		e.dayEnded = 2;
 		l = recovery_lines(e);
 		CHECK(contains(l, "Last save: the end of day 2; the campaign continues from the start of day 3 (checkpoint 1)."),
-		      "the last save names the day that ended and the day that follows");
+		      "both known: the same line");
+		{
+			EndInfo d1 = e;
+			d1.day      = 1;
+			d1.dayEnded = 0;
+			CHECK(contains(recovery_lines(d1), "Last save: the campaign continues from the start of day 1 (checkpoint 1)."),
+			      "day 1 (no day before it): the day only");
+		}
 		CHECK(contains(l, "  or: .\\nectar.exe --netplay-host-ice --continue --netplay-input keyboard"),
 		      "the exact command, PowerShell-ready (.\\ prefix)");
 		CHECK(contains(l, "  .\\host.bat --continue"), "the .bat route with --continue");

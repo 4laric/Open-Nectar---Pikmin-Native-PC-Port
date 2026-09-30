@@ -41,13 +41,37 @@ other's campaigns):
   savetimeout the same with the save-barrier timeout (exit 6): the joiner
               stalls in its save tick (PIKMIN_NETPLAY_TEST_STALL_*, still
               connected) past the host's 60 s barrier deadline.
+  saveack     (fix round 1, review MAJOR-1) the host never gets the joiner's
+              SAVE_ACK (PIKMIN_NETPLAY_TEST_BULK_DROP_SAVE on the host) at host
+              delay 8: the joiner agrees, advances S+1..S+8 on the host's real
+              input and stalls; the host exits 6 after its 60 s deadline; the
+              joiner's GekkoNet then invents frame S+9 for the gone host. The
+              joiner must NOT record the save (the pre-fix exe did, at S+9),
+              and S2's `--continue <S1 joiner run>` must start a new campaign.
+  chain       (fix round 1, review MINOR-5) S1 saves gen 1 (day-2 end); S2
+              `--continue` plays through the day-3 end and saves gen 2; S3 bare
+              `--continue` picks gen 2 from S2's run and starts day 4.
+  chaincorrupt  the same, but S2's day-3-end save fails its barrier
+              (BARRIER_CORRUPT=sav, exit 5): S3 bare `--continue` falls back to
+              gen 1 (day 3), never the half-saved gen 2.
+  legacy      (fix round 1, review MAJOR-2) run folders an older build made (no
+              campaign record) and ones with a damaged record, synthesised by
+              copying a real day-2-end host run (--legacy-donor): a bare
+              `--continue` skips the record-less one (and asks before an older
+              campaign) and stops at a damaged one; a named one is used with an
+              UNCONFIRMED warning.
+  hudpair     one throttled (30 Hz) session with HUD captures and link lines
+              (review MINOR-3; --throttled).
 
 Every scenario checks that the continued run folder is unchanged by the
 session that continued it (same files, same bytes: --continue only reads it).
 
 Hidden, private, bounded: PIKMIN_RANDOMIZER_TEST_BACKGROUND=1 and
 SDL_AUDIODRIVER=dummy, loopback binds, hard timeouts, and only the PIDs this
-script started are ever signalled.
+script started are ever signalled. LOCALAPPDATA is a private folder per
+scenario (<out>/<scenario>/localappdata), so the launcher's fallback run base
+(%LOCALAPPDATA%/Nectar/netplay) never sees the tester's real one (fix round 1,
+evidence review MINOR-4).
 """
 
 import argparse
@@ -173,11 +197,15 @@ def run_session(ctx, name, ticks, host_extra=(), host_env=None, join_env=None, e
     hin, jin = out / "host_inputs.pkni", out / "join_inputs.pkni"
     rp.gen_inputs(ticks + 50, a.seed_a, hin)
     rp.gen_inputs(ticks + 50, a.seed_b, jin)
+    lad = ctx.root / "localappdata"
+    lad.mkdir(exist_ok=True)
     common = {
         "PIKMIN_NETPLAY_STUN": "none",
-        "PIKMIN_NETPLAY_UNTHROTTLED": "1",
+        "PIKMIN_NETPLAY_UNTHROTTLED": "0" if a.throttled else "1",
         "PIKMIN_NETPLAY_ICE_TIMEOUT_MS": "120000",
         "PIKMIN_NETPLAY_HANDSHAKE_TIMEOUT_MS": "30000",
+        # Fix round 1: the launcher also scans %LOCALAPPDATA%/Nectar/netplay.
+        "LOCALAPPDATA": str(lad),
     }
     henv = dict(common, PIKMIN_STATE_HASH_LOG=str(host_hash), PIKMIN_NETPLAY_LOCAL_INPUT_FILE=str(hin),
                 PIKMIN_NETPLAY_ICE_PORT_BEGIN=str(a.port_base), PIKMIN_NETPLAY_ICE_PORT_END=str(a.port_base + 9),
@@ -200,6 +228,7 @@ def run_session(ctx, name, ticks, host_extra=(), host_env=None, join_env=None, e
                  "--netplay-test-ticks", str(ticks), "--netplay-input", "gamepad:0"]
     join_args += list(join_extra)
     s = {"name": name, "ticks": ticks, "expect": expect, "exe": str(exe), "exe_sha256": lp.sha256_file(exe),
+         "localappdata": str(lad), "throttled": bool(a.throttled),
          "host_cmd": [str(exe)] + host_args, "join_cmd": [str(exe)] + join_args,
          "host_env": {k: v for k, v in henv.items() if k.startswith("PIKMIN_NETPLAY_TEST") or k.endswith("DELAY")},
          "join_env": {k: v for k, v in jenv.items() if k.startswith("PIKMIN_NETPLAY_TEST") or k.endswith("DELAY")}}
@@ -266,7 +295,8 @@ def run_session(ctx, name, ticks, host_extra=(), host_env=None, join_env=None, e
             "start_stage": lines_with(log, "START_STAGE"),
             "resumed": lines_with(log, "CAMPAIGN_RESUMED"),
             "continue": lines_with(log, "[netplay] launch: --continue", "[netplay] launch: Start a new",
-                                   "[netplay] launch: not starting"),
+                                   "[netplay] launch: Continue the older", "[netplay] launch: not starting"),
+            "record_log": lines_with(log, "[netplay] campaign record:"),
             "checkpoint": lines_with(log, "[netplay] checkpoint", "[netplay] transfer:"),
             "barrier": lines_with(log, "save barrier frame=", "save barrier abandoned", "save barrier timeout",
                                   "CAMPAIGN_SAVED"),
@@ -277,7 +307,7 @@ def run_session(ctx, name, ticks, host_extra=(), host_env=None, join_env=None, e
             "events": lines_with(log, "[netplay] disconnected", "[netplay] desync detected", "[netplay] quit:",
                                  "[netplay] test:"),
             "hud": lines_with(log, "[netplay] hud"),
-            "link": lines_with(log, "[netplay] link:")[-3:],
+            "link": lines_with(log, "[netplay] link:"),
             "p2": lines_with(log, "[netplay] launch: P2", "sidecars received", "[netplay] p2 digests",
                              "[netplay] transfer: sending"),
         }
@@ -295,9 +325,9 @@ def run_session(ctx, name, ticks, host_extra=(), host_env=None, join_env=None, e
     for side in ("host", "join"):
         i = s[side]
         print(f"continue_pairs: [{name}] {side} run {i['run_dir']} {i['stats']}")
-        for key in ("continue", "checkpoint", "resumed", "start_stage", "barrier", "reseed", "delay", "events",
-                    "end", "banner", "hud", "link"):
-            for ln in i[key]:
+        for key in ("continue", "checkpoint", "resumed", "start_stage", "barrier", "record_log", "reseed", "delay",
+                    "events", "end", "banner", "hud", "link"):
+            for ln in (i[key][-3:] if key == "link" else i[key]):
                 print(f"continue_pairs: [{name}] {side} {ln}")
         for ln in i.get("campaign-record.txt") or []:
             if not ln.startswith("#"):
@@ -350,9 +380,16 @@ def continue_ok(ctx, s, name, from_run, gen=1, day=3):
         rec = s[side].get("campaign-record.txt") or []
         ok &= ctx.check(any(r.startswith(f"start gen={gen} ") for r in rec), f"{name} {side}: record 'start gen={gen}'")
     rec = h.get("campaign-record.txt") or []
-    ok &= ctx.check(any(r.startswith(f"carried gen={gen} day={day} from=") for r in rec),
-                    f"{name} host: record 'carried gen={gen} day={day}'")
+    ok &= ctx.check(any(r.startswith(f"carried gen={gen} day={day} day_ended={day - 1} from=") for r in rec),
+                    f"{name} host: record 'carried gen={gen} day={day} day_ended={day - 1}'")
+    ok &= ctx.check(bool(rec) and rec[0].startswith("# netplay campaign record"),
+                    f"{name} host: the record starts with its header (written before the copies)")
     return ok
+
+
+# Fix round 1: the saved-day line names the day that ended and the day the
+# campaign continues from (it used to say "Last saved day: day 3").
+LAST_SAVE_D2 = "Last save: the end of day 2; the campaign continues from the start of day 3 (checkpoint 1)."
 
 
 def recovery_ok(ctx, s, name, side, needles):
@@ -386,7 +423,7 @@ def scenario_dayend(ctx, kind):
         for side in ("host", "join"):
             ctx.check(any("desync detected" in ln for ln in s1[side]["events"]), f"s1 {side}: desync detected")
             # The commands are PowerShell-ready (.\ prefix); cmd accepts them too.
-            recovery_ok(ctx, s1, "s1", side, ["DESYNC", "Last saved day: day 3", ".\\host.bat --continue",
+            recovery_ok(ctx, s1, "s1", side, ["DESYNC", LAST_SAVE_D2, ".\\host.bat --continue",
                                               ".\\nectar.exe --netplay-host-ice --continue"])
             ctx.check(any("closed after" in ln for ln in s1[side]["banner"]), f"s1 {side}: end banner shown and closed")
         ctx.check(any(r.startswith("end kind=desync code=5") for r in s1["host"].get("campaign-record.txt") or []),
@@ -397,7 +434,7 @@ def scenario_dayend(ctx, kind):
     elif kind == "disconnect":
         ctx.check(s1["exit"]["host"] == 0, f"s1: host exit 0 after the lost connection ({s1['exit']})")
         ctx.check(any("disconnected" in ln for ln in s1["host"]["events"]), "s1 host: disconnected")
-        recovery_ok(ctx, s1, "s1", "host", ["CONNECTION LOST", "Last saved day: day 3", "  .\\host.bat --continue",
+        recovery_ok(ctx, s1, "s1", "host", ["CONNECTION LOST", LAST_SAVE_D2, "  .\\host.bat --continue",
                                             "  or: .\\nectar.exe --netplay-host-ice --continue"])
         ctx.check(s1.get("acted_at_join_hash_lines", 0) >= a.event_frame, f"s1: joiner killed on day 3 at hash "
                   f"line {s1.get('acted_at_join_hash_lines')}")
@@ -437,8 +474,20 @@ def scenario_nosave(ctx):
     gameplay_ok(ctx, s1, "s1", a.min_distinct // 2)
     host_run = s1["host"]["run_dir"]
     before = folder_digest(host_run)
+    # Fix round 1 (evidence review MINOR-4): a decoy host run (no session, no
+    # save) under the PRIVATE %LOCALAPPDATA% fallback base proves the scan
+    # reads that base, and that the harness never reads the tester's own.
+    decoy = ctx.root / "localappdata" / "Nectar" / "netplay" / "run-20200101-000000-host-pid1"
+    decoy.mkdir(parents=True)
+    (decoy / "launch.txt").write_text("role host\n")
     s2 = run_session(ctx, "s2", a.nosave_ticks, host_extra=["--continue"])
     ctx.check(folder_digest(host_run) == before, "s2: the old run folder is unchanged")
+    fallback = (ctx.root / "localappdata" / "Nectar" / "netplay").as_posix()
+    ctx.check(any("none of the 2 host run folders" in ln and fallback in ln.replace("\\", "/")
+                  for ln in s2["host"]["continue"]),
+              f"s2 host: both bases scanned, the stage's and the private fallback {fallback} (2 host runs)")
+    ctx.check(any(decoy.as_posix() in ln.replace("\\", "/") for ln in s2["host"]["continue"]),
+              "s2 host: the decoy run under the fallback base is listed")
     ctx.check(any("no saved day yet" in ln for ln in s2["host"]["continue"]), "s2 host: 'no saved day yet'")
     ctx.check(any("starting a new campaign instead" in ln for ln in s2["host"]["continue"]),
               "s2 host: 'starting a new campaign instead'")
@@ -610,6 +659,228 @@ def scenario_halfsave(ctx, kind):
     ctx.check(s3["exit"] == {"host": 0, "join": 0}, f"s3: both exit 0 ({s3['exit']})")
 
 
+def scenario_saveack(ctx):
+    """Review MAJOR-1: the joiner's SAVE_ACK never reaches the host, at host
+    delay 8. The host (PIKMIN_NETPLAY_TEST_BULK_DROP_SAVE: it drops every
+    SAVE_RESULT/SAVE_ACK fragment it receives) waits its 60 s barrier deadline
+    and exits 6 with 'abandoned gen=1'. The joiner got the host's SAVE_RESULT,
+    agreed, and advanced S+1..S+8 on the host's real input (submitted before
+    the host's barrier), then stalled; once the host is gone its GekkoNet
+    invents frame S+9 for it. The pre-fix exe confirmed the save on that frame
+    (S+9 >= S+kSaveConfirmFrames with 9) and a `--continue <joiner run>`
+    resumed the day the host abandoned; this build must record nothing and
+    start a new campaign."""
+    a = ctx.a
+    host_env = {"PIKMIN_NETPLAY_TEST_BULK_DROP_SAVE": "1000000"}
+    s1 = run_session(ctx, "s1", a.dayend_ticks, host_env=host_env, expect="saveack")
+    host_run, join_run = s1["host"]["run_dir"], s1["join"]["run_dir"]
+    ctx.check(s1["exit"]["host"] == 6, f"s1 host: exit 6 (SAVE NOT AGREED) ({s1['exit']})")
+    hrec = s1["host"].get("campaign-record.txt") or []
+    ctx.check(any(r.startswith("abandoned gen=1 exit=6") for r in hrec) and not any(r.startswith("saved ") for r in hrec),
+              "s1 host: record 'abandoned gen=1 exit=6', no 'saved' line")
+    jbar = s1["join"]["barrier"]
+    agreed = [ln for ln in jbar if "save barrier frame=" in ln and "host_ok=1" in ln]
+    ctx.check(bool(agreed), f"s1 join: its barrier agreed on the host's result ({agreed[:1]})")
+    m = re.search(r"save barrier frame=(\d+)", agreed[0]) if agreed else None
+    save_frame = int(m.group(1)) if m else -1
+    jticks = s1["join"]["stats"]["ticks"]
+    # Hash tick = GekkoNet frame + 1: S+8 real frames, then the invented S+9.
+    print(f"continue_pairs: s1 join: save at frame {save_frame}, joiner hash lines {jticks} "
+          f"(= frame {jticks - 1}, S+{jticks - 1 - save_frame})")
+    ctx.check(save_frame > 0 and jticks - 1 >= save_frame + 9,
+              f"s1 join: advanced to frame S+{jticks - 1 - save_frame} >= S+9 (the frame GekkoNet invents for "
+              f"the gone host; the case the review found)")
+    ctx.check(any("disconnected" in ln for ln in s1["join"]["events"]), "s1 join: the host's loss was seen")
+    jrec = s1["join"].get("campaign-record.txt") or []
+    ctx.check(not any(r.startswith("saved ") for r in jrec),
+              f"s1 join: record has NO 'saved' line (the host abandoned that save) {[r for r in jrec if not r.startswith('#')]}")
+    ctx.check(not any("confirmed at frame=" in ln for ln in s1["join"]["record_log"]),
+              "s1 join: the pending save was never confirmed")
+    if not a.old_exe:
+        recovery_ok(ctx, s1, "s1", "join", ["Nothing is saved yet", "may not count"])
+    # S2: continue the JOINER's run (the route NETPLAY_PLAY.md offers).
+    jbefore = folder_digest(join_run)
+    s2 = run_session(ctx, "s2", a.nosave_ticks, host_extra=["--continue", join_run])
+    ctx.check(bool(jbefore) and folder_digest(join_run) == jbefore, "s2: the named joiner run folder is unchanged")
+    ctx.check(any("no saved day yet" in ln for ln in s2["host"]["continue"]) and
+              any("starting a new campaign instead" in ln for ln in s2["host"]["continue"]),
+              "s2 host: --continue <S1 joiner run>: 'no saved day yet', a new campaign")
+    for side in ("host", "join"):
+        ctx.check(any("START_STAGE 1 day=2" in ln for ln in s2[side]["start_stage"]) and not s2[side]["resumed"],
+                  f"s2 {side}: new campaign on day 2, nothing resumed (never the abandoned day)")
+    gameplay_ok(ctx, s2, "s2", a.min_distinct // 2)
+    ctx.check(s2["exit"] == {"host": 0, "join": 0}, f"s2: both exit 0 ({s2['exit']})")
+
+
+def day_saved_ok(ctx, s, name, gen, day_ended):
+    """Both peers agreed the day-end save `gen` and both records confirm it."""
+    ok = True
+    for side in ("host", "join"):
+        b = [ln for ln in s[side]["barrier"] if "save barrier frame=" in ln and f"gen={gen}" in ln and "host_ok=1" in ln]
+        ok &= ctx.check(bool(b), f"{name} {side}: day-end save barrier agreed gen={gen} ({b[:1]})")
+        rec = s[side].get("campaign-record.txt") or []
+        ok &= ctx.check(any(r.startswith(f"saved gen={gen} ") and f"day_ended={day_ended}" in r for r in rec) and
+                        any(r.startswith(f"day gen={gen} day={day_ended + 1}") for r in rec),
+                        f"{name} {side}: record 'saved gen={gen} ... day_ended={day_ended}' and "
+                        f"'day gen={gen} day={day_ended + 1}'")
+    return ok
+
+
+def scenario_chain(ctx, corrupt):
+    """Review MINOR-5: the multi-evening paths.
+      chain         S1 saves gen 1 (day-2 end); S2 bare --continue plays day 3
+                    through its end and saves gen 2; S3 bare --continue picks
+                    gen 2 from S2's run: day 4.
+      chaincorrupt  S2's day-3-end save fails its barrier (BARRIER_CORRUPT=sav on
+                    the host, both exit 5) after the host wrote a valid gen-2
+                    checkpoint; S3 bare --continue picks gen 1 (day 3), never
+                    the half-saved gen 2."""
+    a = ctx.a
+    s1 = run_session(ctx, "s1", a.dayend_ticks)
+    day_end_ok(ctx, s1, "s1")
+    ctx.check(s1["exit"] == {"host": 0, "join": 0}, f"s1: both exit 0 ({s1['exit']})")
+    s1_host = s1["host"]["run_dir"]
+    host_env = {"PIKMIN_NETPLAY_TEST_BARRIER_CORRUPT": "sav"} if corrupt else {}
+    before1 = folder_digest(s1_host)
+    s2 = run_session(ctx, "s2", a.chain_ticks, host_extra=["--continue"], host_env=host_env,
+                     expect="exit5" if corrupt else "sync")
+    ctx.check(folder_digest(s1_host) == before1, "s2: S1's run folder is unchanged")
+    continue_ok(ctx, s2, "s2", s1_host)
+    s2_host = s2["host"]["run_dir"]
+    if corrupt:
+        ctx.check(s2["exit"] == {"host": 5, "join": 5}, f"s2: both exit 5 at the day-3-end save ({s2['exit']})")
+        hrec = s2["host"].get("campaign-record.txt") or []
+        ctx.check(any(r.startswith("abandoned gen=2 exit=5") for r in hrec) and
+                  not any(r.startswith("saved ") for r in hrec),
+                  "s2 host: record 'abandoned gen=2', no 'saved' line")
+        sav2 = Path(s2_host) / "session" / "campaign" / "00000000000000000002.sav"
+        fp = run_fingerprint(s2_host)
+        ctx.check(sav2.is_file() and checkpoint_valid(sav2.read_bytes(), fp, 2),
+                  "s2 host: the unagreed gen-2 checkpoint is on disk and valid (only the record keeps it out)")
+        recovery_ok(ctx, s2, "s2", "host", ["DESYNC AT THE DAY-END SAVE", LAST_SAVE_D2])
+        want_gen, want_day = 1, 3
+    else:
+        day_saved_ok(ctx, s2, "s2", 2, 3)
+        gameplay_ok(ctx, s2, "s2", a.min_distinct)
+        ctx.check(s2["exit"] == {"host": 0, "join": 0}, f"s2: both exit 0 ({s2['exit']})")
+        ctx.check(any("confirmed at frame=" in ln for ln in s2["join"]["record_log"]),
+                  "s2 join: its pending gen-2 save was confirmed (host still connected)")
+        want_gen, want_day = 2, 4
+    before2 = folder_digest(s2_host)
+    s3 = run_session(ctx, "s3", a.nosave_ticks, host_extra=["--continue"])
+    ctx.check(folder_digest(s2_host) == before2, "s3: S2's run folder is unchanged")
+    continue_ok(ctx, s3, "s3", s2_host, gen=want_gen, day=want_day)
+    gameplay_ok(ctx, s3, "s3", a.min_distinct // 2)
+    ctx.check(s3["exit"] == {"host": 0, "join": 0}, f"s3: both exit 0 ({s3['exit']})")
+
+
+def copy_run(src, dst, skip=()):
+    """Copies a run folder (a test fixture; the source is only read)."""
+    src, dst = Path(src), Path(dst)
+    for root, dirs, files in os.walk(src):
+        dirs[:] = [d for d in dirs if not os.path.isjunction(os.path.join(root, d))]
+        rel = Path(root).relative_to(src)
+        (dst / rel).mkdir(parents=True, exist_ok=True)
+        for name in files:
+            if (rel / name).as_posix() in skip:
+                continue
+            (dst / rel / name).write_bytes((Path(root) / name).read_bytes())
+
+
+def scenario_legacy(ctx):
+    """Review MAJOR-2 at runtime. From one real day-2-end host run (gen 1
+    agreed; --legacy-donor: a stage's netplay folder), three folders are made
+    in this scenario's stage (copies; the donor is only read):
+      run-20200102-...  the real run, record intact (gen 1, day 3);
+      run-20200103-...  the same without campaign-record.txt (an older build);
+      run-20200104-...  the same with a NUL-filled record (a crash).
+    L1: with only the first two, a bare --continue skips the record-less run
+        (named in the log), asks before the older campaign and continues
+        run-20200102 (gen 1, day 3).
+    L2: `--continue <record-less run>` uses it, with the UNCONFIRMED warning.
+    L3: on a second stage holding the real run and the damaged one (newest), a
+        bare --continue stops at the damaged record and starts a new campaign;
+        it never falls through to the older, intact run."""
+    a = ctx.a
+    donors = sorted(p for p in Path(a.legacy_donor).glob("run-*-host-*") if (p / "campaign-record.txt").is_file())
+    donor = None
+    for p in donors:
+        rec = (p / "campaign-record.txt").read_text(errors="replace")
+        if "saved gen=1 " in rec and (p / "session" / "campaign" / "00000000000000000001.sav").is_file():
+            donor = p
+    if donor is None:
+        raise SystemExit(f"continue_pairs: legacy: no host run with 'saved gen=1' under {a.legacy_donor}")
+    donor_before = folder_digest(donor)
+    net = ctx.stage / "netplay"
+    real = net / "run-20200102-120000-host-pid11"
+    older = net / "run-20200103-120000-host-pid12"
+    copy_run(donor, real)
+    copy_run(donor, older, skip=("campaign-record.txt",))
+    # launch.txt's started_utc (if any) would reorder the copies; drop it.
+    for d in (real, older):
+        lt = d / "launch.txt"
+        if lt.is_file():
+            lt.write_text("".join(ln for ln in lt.read_text().splitlines(True) if not ln.startswith("started_utc ")))
+    print(f"continue_pairs: [legacy] fixtures from {donor}: {real.name} (record), {older.name} (no record)")
+    ctx.check(True, f"legacy: fixtures {real.name} and {older.name} copied from {donor.name} (test setup)")
+    l1 = run_session(ctx, "l1", a.nosave_ticks, host_extra=["--continue"])
+    c = l1["host"]["continue"]
+    ctx.check(any(older.as_posix() in ln.replace("\\", "/") and "made by an older build" in ln for ln in c),
+              "l1 host: the record-less run is skipped as an older build's")
+    ctx.check(any("Continue the older campaign of" in ln and real.as_posix() in ln.replace("\\", "/") for ln in c),
+              "l1 host: it asks before continuing the older campaign")
+    continue_ok(ctx, l1, "l1", str(real))
+    gameplay_ok(ctx, l1, "l1", a.min_distinct // 2)
+    ctx.check(l1["exit"] == {"host": 0, "join": 0}, f"l1: both exit 0 ({l1['exit']})")
+    l2 = run_session(ctx, "l2", a.nosave_ticks, host_extra=["--continue", str(older)])
+    c = l2["host"]["continue"]
+    ctx.check(any("WARNING" in ln and "older build" in ln for ln in c), "l2 host: the UNCONFIRMED warning")
+    ctx.check(any(f"continuing the campaign of {older.as_posix()}: checkpoint 1 (" in ln.replace("\\", "/") and
+                  "UNCONFIRMED" in ln for ln in c),
+              "l2 host: the named record-less run is continued, marked UNCONFIRMED")
+    for side in ("host", "join"):
+        ctx.check(any("START_STAGE" in ln and "resumed=1 generation=1" in ln for ln in l2[side]["start_stage"]),
+                  f"l2 {side}: resumed generation 1")
+    gameplay_ok(ctx, l2, "l2", a.min_distinct // 2)
+    # L3 on its own stage: L1/L2's own (newer) host runs would be picked first.
+    stage3 = ctx.root / "stage-damaged"
+    net3 = stage3 / "netplay"
+    real3 = net3 / real.name
+    copy_run(real, real3)
+    damaged = net3 / "run-20200104-120000-host-pid13"
+    copy_run(real, damaged, skip=("campaign-record.txt",))
+    (damaged / "campaign-record.txt").write_bytes(b"\0" * 512)
+    print(f"continue_pairs: [legacy] L3 fixtures: {real3} (record), {damaged.name} (NUL-filled record, newest)")
+    l3 = run_session(ctx, "l3", a.nosave_ticks, host_extra=["--continue"], stage=stage3)
+    c = l3["host"]["continue"]
+    ctx.check(any("stopped at" in ln and damaged.as_posix() in ln.replace("\\", "/") and "damaged" in ln for ln in c),
+              "l3 host: the bare scan stops at the damaged record")
+    ctx.check(any("starting a new campaign instead" in ln for ln in c) and not any("continuing the campaign" in ln
+                                                                                  for ln in c),
+              "l3 host: a new campaign, no older run continued")
+    for side in ("host", "join"):
+        ctx.check(any("START_STAGE 1 day=2" in ln for ln in l3[side]["start_stage"]) and not l3[side]["resumed"],
+                  f"l3 {side}: new campaign on day 2")
+    gameplay_ok(ctx, l3, "l3", a.min_distinct // 2)
+    ctx.check(folder_digest(donor) == donor_before, "legacy: the donor run folder is unchanged")
+
+
+def scenario_hudpair(ctx):
+    """Review MINOR-3: one session at the real 30 Hz pace (--throttled), with
+    HUD captures and every link line, for the HUD numbers a player sees."""
+    a = ctx.a
+    s1 = run_session(ctx, "s1", a.continue_ticks)
+    gameplay_ok(ctx, s1, "s1", a.min_distinct // 2)
+    ctx.check(s1["exit"] == {"host": 0, "join": 0}, f"s1: both exit 0 ({s1['exit']})")
+    ticks_per_s = s1["ticks"] / max(1.0, s1["seconds"])
+    print(f"continue_pairs: [hudpair] {s1['ticks']} ticks in {s1['seconds']} s including start-up "
+          f"({ticks_per_s:.1f} ticks/s)")
+    for side in ("host", "join"):
+        ctx.check(bool(s1[side]["link"]), f"s1 {side}: link lines logged ({len(s1[side]['link'])})")
+        for ln in s1[side]["link"]:
+            print(f"continue_pairs: [hudpair] {side} {ln}")
+
+
 def seed_flags_header(boot_text):
     """(magic, used-count) of pc_randomizer.cpp write_campaign_checkpoint for
     a bootstrap: BENEFITS <mode> sets bombDeliveries (bit 0 of mode-1),
@@ -679,7 +950,8 @@ def main(argv=None):
     p.add_argument("--exe", type=Path, required=True, help="netplay build nectar.exe (copied into each stage)")
     p.add_argument("--out", type=Path, required=True, help="evidence root; <out>/<scenario>/ must not exist")
     p.add_argument("--scenario", choices=("clean", "desync", "disconnect", "nosave", "quit", "p2", "savedesync",
-                                          "savetimeout"), required=True)
+                                          "savetimeout", "saveack", "chain", "chaincorrupt", "legacy", "hudpair"),
+                   required=True)
     p.add_argument("--p2-bootstrap", type=Path, default=None, help="p2: the seed's bootstrap.txt (its folder holds assets/)")
     p.add_argument("--p2-assets", type=Path, default=None, help="p2: the joiner's copy of the overlay")
     p.add_argument("--p2-donor-sav", type=Path, default=None,
@@ -707,6 +979,14 @@ def main(argv=None):
                    help="comma list of frames: both peers write HUD captures to <session>/shots-<side>/ "
                         "(and banner.bmp on an end banner)")
     p.add_argument("--skip-s3", action="store_true", help="clean: skip the --continue <joiner run> session")
+    p.add_argument("--chain-ticks", type=int, default=33000,
+                   help="chain/chaincorrupt: S2's ticks, from the start of day 3 through its day-end save")
+    p.add_argument("--legacy-donor", type=Path, default=None,
+                   help="legacy: a stage's netplay folder holding a real day-2-end host run (saved gen=1)")
+    p.add_argument("--throttled", action="store_true",
+                   help="run at the real 30 Hz pace (PIKMIN_NETPLAY_UNTHROTTLED=0); hudpair")
+    p.add_argument("--old-exe", action="store_true",
+                   help="saveack on the pre-fix exe: skip the new message wording check (the bug is expected)")
     p.add_argument("--code-timeout", type=float, default=180)
     a = p.parse_args(argv)
     ctx = Ctx(a, a.scenario)
@@ -722,6 +1002,16 @@ def main(argv=None):
         scenario_p2(ctx)
     elif a.scenario in ("savedesync", "savetimeout"):
         scenario_halfsave(ctx, a.scenario)
+    elif a.scenario == "saveack":
+        scenario_saveack(ctx)
+    elif a.scenario in ("chain", "chaincorrupt"):
+        scenario_chain(ctx, a.scenario == "chaincorrupt")
+    elif a.scenario == "legacy":
+        if a.legacy_donor is None:
+            raise SystemExit("continue_pairs: legacy needs --legacy-donor")
+        scenario_legacy(ctx)
+    elif a.scenario == "hudpair":
+        scenario_hudpair(ctx)
     else:
         scenario_quit(ctx)
     ok = all(c["ok"] for c in ctx.checks)

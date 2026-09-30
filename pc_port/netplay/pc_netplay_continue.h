@@ -485,8 +485,11 @@ inline std::string saved_day_line(const EndInfo& e)
 	if (e.gen == 0)
 		return "Nothing is saved yet: no day of this campaign ended with a save both games agreed on.";
 	const std::string ck = "(checkpoint " + std::to_string(e.gen) + ").";
-	if (e.dayEnded > 0 && e.day > 0)
-		return "Last save: the end of day " + std::to_string(e.dayEnded) + "; the campaign continues from the "
+	// A day-end save of day N always plays on from day N + 1, so either one
+	// names the other (the joiner learns only the day it plays on from).
+	const int ended = e.dayEnded > 0 ? e.dayEnded : (e.day > 1 ? e.day - 1 : 0);
+	if (ended > 0 && e.day > 0)
+		return "Last save: the end of day " + std::to_string(ended) + "; the campaign continues from the "
 		       "start of day " + std::to_string(e.day) + " " + ck;
 	if (e.day > 0)
 		return "Last save: the campaign continues from the start of day " + std::to_string(e.day) + " " + ck;
