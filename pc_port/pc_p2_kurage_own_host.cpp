@@ -491,6 +491,8 @@ void P2KurageOwn::sourceTick(BTeki* actor)
                     mGenerator, mSource, actor->mHealth);
         std::fflush(stdout);
         actor->pcEscapeNow();
+        // The FSM is done: the corpse goes back to the ordinary AI culling rule.
+        actor->resetCreatureFlag(CF_AIAlwaysActive);
     }
 }
 
