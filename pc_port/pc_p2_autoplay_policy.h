@@ -149,6 +149,13 @@ inline bool isEnabled()
 // #901 TEST-ONLY: generator uids (comma list) of vanilla P1 teki the bot may
 // fight (PIKMIN_RANDOMIZER_AUTOPLAY_P1_UID), for the held-part regression run.
 constexpr unsigned kP1TargetSource = 0xFFFFu;
+// A vanilla teki only spawns once the squad is near its generator (after the
+// arena teleport), so the bot waits in Select while a P1 uid filter is set.
+inline bool p1TargetWait()
+{
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_P1_UID");
+    return isEnabled() && v && v[0];
+}
 inline bool isP1TargetUid(unsigned uid)
 {
     const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_P1_UID");
@@ -210,6 +217,24 @@ inline bool teleportTarget(float& x, float& z)
     x = float(a);
     z = float(b);
     return true;
+}
+
+// #901 TEST-ONLY: tap A while no captain exists (day-end movie, result screens)
+// so a run reaches the next day. PIKMIN_RANDOMIZER_AUTOPLAY_NEXT_DAY=1.
+inline bool nextDayTap()
+{
+    if (!isEnabled()) return false;
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_NEXT_DAY");
+    return v && v[0] == '1';
+}
+
+// #901 TEST-ONLY: move the squad beside a dropped ship part whose crew stays
+// short (it fell where the squad cannot walk). PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT_TO_PART=1.
+inline bool teleportToPart()
+{
+    if (!isEnabled()) return false;
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT_TO_PART");
+    return v && v[0] == '1';
 }
 
 inline float powerDamageMult()
@@ -964,6 +989,9 @@ private:
             // it instead of stranding the navi in NAVISTATE_Container.
             enter(State::WithdrawMenu, in);
             return;
+        }
+        if (in.targetToken == 0 && result.token == 0 && p2autoplay::p1TargetWait() && stateTime < 60.0f) {
+            return; // #901: the vanilla holder has not spawned yet
         }
         if (in.targetToken == 0 || !in.targetAlive) {
             // bot-v6: verify the target is still alive before Select. A dead /

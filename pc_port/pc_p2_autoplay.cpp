@@ -490,6 +490,23 @@ void pc_p2_autoplay_tick(void)
     if (!p2autoplay::isEnabled()) {
         return; // inert when unset: production input path untouched
     }
+    // #901 TEST-ONLY (PIKMIN_RANDOMIZER_AUTOPLAY_NEXT_DAY=1): once a stage has run,
+    // tap A whenever there is no live captain (day-end movie, result and save
+    // screens) so a run reaches the next day. Never before the first captain,
+    // so boot menus are untouched.
+    static bool sSawCaptain = false;
+    static long sNoCaptainTicks = 0;
+    {
+        Navi* live = naviMgr ? naviMgr->getNavi() : nullptr;
+        if (live && live->isAlive()) {
+            sSawCaptain = true;
+            sNoCaptainTicks = 0;
+        } else if (sSawCaptain && p2autoplay::nextDayTap()) {
+            ++sNoCaptainTicks;
+            pc_p2_input_script_set(1, (sNoCaptainTicks % 40 < 6) ? unsigned(p2autoplay::PadA) : 0u, 0, 0);
+            return;
+        }
+    }
     if (!naviMgr || !pikiMgr || !tekiMgr || !itemMgr) {
         return; // boot/menus: no game state yet, emit nothing
     }
@@ -945,6 +962,44 @@ void pc_p2_autoplay_tick(void)
     senses.pelletCarriers = sEngage.pelletCarriers;
     senses.carryWant = sEngage.carryWant; // bot-v7: declared minimum (0 = unknown)
     senses.trackingPart = trackedPellet && trackedPellet->isUfoParts();
+    // #901 TEST-ONLY (PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT_TO_PART=1, autoplay-gated):
+    // a dropped ship part whose crew stays short for 20 s (the part fell where the
+    // squad cannot reach it on foot) gets the captain and the free Pikmin moved
+    // beside it once. The carry itself is still done by the Pikmin.
+    {
+        static float partStall = 0.0f;
+        static const Pellet* partMoved = nullptr;
+        if (p2autoplay::teleportToPart() && senses.trackingPart && trackedPellet != partMoved && mapMgr
+            && sEngage.carryWant > 0 && sEngage.pelletCarriers < sEngage.carryWant) {
+            partStall += (dt > 0.0f && dt <= 0.5f) ? dt : 0.016f;
+            if (partStall > 20.0f) {
+                partMoved = trackedPellet;
+                partStall = 0.0f;
+                const float px = trackedPellet->getPosition().x, pz = trackedPellet->getPosition().z;
+                Vector3f at(px + 70.0f, mapMgr->getMinY(px + 70.0f, pz, true), pz);
+                navi->resetPosition(at);
+                int moved = 0;
+                Iterator pit2(pikiMgr);
+                CI_LOOP(pit2)
+                {
+                    Piki* p = static_cast<Piki*>(*pit2);
+                    if (!p || !p->isAlive() || p->mMode == PikiMode::TransportMode) continue;
+                    const int st = p->getState();
+                    if (st == PIKISTATE_Bury || st == PIKISTATE_Dying || st == PIKISTATE_Dead) continue;
+                    const float ang = 0.61803f * 6.2831853f * float(moved);
+                    const float rad = 40.0f + 5.0f * float(moved % 12);
+                    Vector3f pp(px + rad * std::cos(ang), 0.0f, pz + rad * std::sin(ang));
+                    pp.y = mapMgr->getMinY(pp.x, pp.z, true);
+                    p->resetPosition(pp);
+                    ++moved;
+                }
+                std::printf("AUTOPLAY_TELEPORT_TO_PART x=%.1f z=%.1f moved=%d TEST-ONLY bot-driven\n", double(px), double(pz), moved);
+                std::fflush(stdout);
+            }
+        } else if (!senses.trackingPart) {
+            partStall = 0.0f;
+        }
+    }
     senses.partGone = partGone;
     senses.workCount = workCount;
     senses.movieActive = gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive;

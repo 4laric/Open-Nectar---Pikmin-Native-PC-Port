@@ -118,6 +118,18 @@ void testTeleportHook()
     CHECK(!p2autoplay::teleportTarget(x, z), "teleport/rejects_trailing_text");
     setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT", nullptr);
     CHECK(!p2autoplay::teleportTarget(x, z), "teleport/inert_when_unset");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_NEXT_DAY", "1");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
+    CHECK(!p2autoplay::nextDayTap(), "nextday/inert_without_gate");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", "1");
+    CHECK(p2autoplay::nextDayTap(), "nextday/on_with_gate");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_NEXT_DAY", nullptr);
+    CHECK(!p2autoplay::nextDayTap(), "nextday/off_when_unset");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT_TO_PART", "1");
+    CHECK(p2autoplay::teleportToPart(), "teleport_part/on_with_gate");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
+    CHECK(!p2autoplay::teleportToPart(), "teleport_part/inert_without_gate");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT_TO_PART", nullptr);
     setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
 }
 
