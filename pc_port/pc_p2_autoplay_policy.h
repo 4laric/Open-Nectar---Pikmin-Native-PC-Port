@@ -1731,6 +1731,18 @@ private:
         if (whistling) {
             whistleTime += dt;
             lastCommand.buttons = PadB; // hold whistle to regroup / free grabs
+            // #256 Empress: her flick and roll drop the squad into idle
+            // FreeMode strays around the arena (a4: 49 strays 350-600 u away,
+            // whistle held in place reaches none). Walk to the strays'
+            // centroid while whistling and keep the hold running until close.
+            bool empressRegroup = false;
+            if (in.targetSource == 30 && in.strayPikmin >= 5) {
+                const float sx = in.strayX - in.naviX, sz = in.strayZ - in.naviZ;
+                if (sx * sx + sz * sz > 120.0f * 120.0f) {
+                    steer(in.naviX, in.naviZ, in.strayX, in.strayZ);
+                    empressRegroup = true;
+                }
+            }
             // bot-v8 merge (#871): whistle timeout keeps ONE version
             // (undamaged's). Both lanes fixed the same whistle-starves-timeout
             // flaw (undamaged bc5 800 s stalls on 16/30/38/40/42/73/95/96;
@@ -1747,7 +1759,8 @@ private:
                     return;
                 }
             }
-            if (whistleTime >= cfg.whistleHold || (!in.scattered && !in.squadDistress && !grabWhistle)) {
+            if ((whistleTime >= cfg.whistleHold && !empressRegroup)
+                || (!in.scattered && !in.squadDistress && !grabWhistle)) {
                 whistling = false;
                 whistleCooldown = cfg.whistleCooldown; // force a throw window before re-latching
             }

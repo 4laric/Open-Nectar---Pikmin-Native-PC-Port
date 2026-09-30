@@ -1238,6 +1238,39 @@ void testRegroupDistress()
     CHECK(aOn > 0, "regroup/rethrows_after_regroup");
 }
 
+void testEmpressRegroupWalk()
+{
+    // #256: the Empress's flick and roll drop the squad into idle strays; the
+    // bot walks to the strays' centroid while whistling (a held-in-place
+    // whistle reaches none of them) and only then re-throws.
+    p2autoplay::Config cfg;
+    cfg.whistleHold = 0.2f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 60;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 300001;
+    s.targetSource = 30;
+    s.targetAlive = true;
+    s.targetDist = 60.0f;
+    s.targetHealthFrac = 0.6f;
+    s.naviX = 0.0f;
+    s.naviZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    CHECK(brain.current() == p2autoplay::State::Attack, "empress_regroup/attacks");
+    s.scattered = true;
+    s.strayPikmin = 40;
+    s.strayX = 0.0f;
+    s.strayZ = 400.0f;
+    // The whistle hold outlasts whistleHold while the captain is still far
+    // from the strays, and the pad walks toward them.
+    for (int i = 0; i < 20; ++i) brain.update(0.05f, s);
+    CHECK(brain.command().buttons & unsigned(p2autoplay::PadB), "empress_regroup/whistles");
+    CHECK(brain.command().moveZ > 0.9f, "empress_regroup/walks_to_strays");
+}
+
 void testResupply()
 {
     // bot-v4 resupply rule: field below threshold + Onion stock => disengage
@@ -4135,6 +4168,7 @@ int main()
     testDoneIdlesNearOnion();
     testPowerGate();
     testRegroupDistress();
+    testEmpressRegroupWalk();
     testResupply();
     testAftermathEscortExtension();
     testAftermathNoWhistle();
