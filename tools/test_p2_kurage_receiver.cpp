@@ -131,6 +131,37 @@ int main(){
   pc_p2_kurage_receiver_reset();
   assert(pc_p2_kurage_receiver_count()==0 && pc_p2_captain::captive_count()==0);
  }
+ // #960 owner playtest: the campaign OWN Jellyfloat takes a standing Pikmin (the source
+ // suckPikmin has no mayIstick gate), pulls it to the `suck` part itself and holds it
+ // inside the stomach; a legacy owner keeps the old gate; a thrown Pikmin is never taken.
+ {
+  Creature ownO,ownL;CollPart mouthO,mouthL;
+  mouthO.mCentre={0,100,0};mouthO.mRadius=15;ownO.mSRT.t={0,70,0};
+  mouthL.mCentre={0,100,0};mouthL.mRadius=15;
+  for(Piki* q:{&p,&fresh,&control}){q->owner=nullptr;q->part=nullptr;q->alive=true;q->mNavi=navis.getNavi();q->stickable=false;q->mState=PIKISTATE_Normal;q->mSRT.t={0,0,0};q->mAttachPosition={9,9,9};}
+  assert(pc_p2_kurage_receiver_register(&ownO,&mouthO) && pc_p2_kurage_receiver_register(&ownL,&mouthL));
+  pc_p2_kurage_receiver_configure_own(&ownO,24.0f);
+  assert(!pc_p2_kurage_receiver_admit_for(&ownL,&p));            // legacy owner: standing Pikmin refused
+  assert(pc_p2_kurage_receiver_admit_for(&ownO,&p));             // OWN owner: standing Pikmin taken
+  control.mState=PIKISTATE_Flying;
+  assert(!pc_p2_kurage_receiver_admit_for(&ownO,&control));      // mid-throw: never
+  control.mState=PIKISTATE_Normal;
+  // Travel heads for the part itself, not the bottom of its sphere.
+  pc_p2_kurage_receiver_update_for(&ownO,.01f,true,true,false);
+  assert(p.mVelocity.y==600);
+  p.mSRT.t={0,95,0};p.mVelocity={0,0,0};p.mTargetVelocity={0,0,0};
+  pc_p2_kurage_receiver_update_for(&ownO,.01f,true,true,false);
+  assert(pc_p2_kurage_receiver_stomach_count_for(&ownO)==1);
+  // First held Pikmin rests on the part centre, the next ones on a ring inside the sphere.
+  assert(p.mAttachPosition.x==0 && p.mAttachPosition.y==0 && p.mAttachPosition.z==0);
+  fresh.mSRT.t={0,95,0};
+  assert(pc_p2_kurage_receiver_admit_for(&ownO,&fresh));
+  pc_p2_kurage_receiver_update_for(&ownO,.01f,true,true,false);
+  assert(fresh.mAttachPosition.y==0 && std::fabs(fresh.mAttachPosition.x)+std::fabs(fresh.mAttachPosition.z)>1.0f);
+  assert(std::sqrt(fresh.mAttachPosition.x*fresh.mAttachPosition.x+fresh.mAttachPosition.z*fresh.mAttachPosition.z)<mouthO.mRadius);
+  pc_p2_kurage_receiver_reset();
+  assert(pc_p2_kurage_receiver_count()==0 && pc_p2_captain::captive_count()==0);
+ }
  pc_p2_captain::teardown();
  std::puts("PASS receiver authority: inactive, travel/reset, transfer, arrival, shrink/release, invalidation, callback reentry");
 }
