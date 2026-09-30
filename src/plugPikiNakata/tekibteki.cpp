@@ -186,11 +186,7 @@ void BTeki::viewDraw(Graphics& gfx, immut Matrix4f& mat)
 	mTekiAnimator->updateContext();
 	mTekiShape->mShape->updateAnim(gfx, mat, nullptr, this);
 #ifdef PIKI_PC_PORT
-<<<<<<< HEAD
-    if (!pc_p2_demon_manager_draw_actor(this, gfx, mat, true) && !pc_p2_sarai_manager_draw_actor(this, gfx, mat, true) && !pc_p2_kurage_teki_draw(this, gfx, mat, true) && !pc_p2_groink_teki_draw(this, gfx, mat, true) && !pc_p2_bombsarai_teki_draw(this, gfx, mat, true) && !pc_p2_fuefuki_teki_draw(this, gfx, mat, true) && !pc_p2_breadbug_teki_draw(this, gfx, mat, true) && !pc_p2_bigtreasure_teki_draw(this, gfx, mat, true) && !pc_p2_kogane_draw(this, gfx, mat, true) && !pc_p2_mamuta_draw(this, gfx, mat, true) && !pc_p2_frog_draw(this, gfx, mat, true) && !pc_p2_tank_draw(this, gfx, mat, true) && !pc_p2_kabuto_fsm_draw(this, gfx, mat, true) && !pc_p2_qurione_draw(this, gfx, mat, true) && !pc_p2_shijimi_draw(this, gfx, mat, true) && !pc_p2_dwarf_orange_draw(this, gfx, mat, true) && !pc_p2_kochappy_draw(this, gfx, mat, true) && !pc_p2_chappy_draw(this, gfx, mat, true) && !pc_p2_sheargrub_draw(this, gfx, mat, true) && !pc_p2_snow_draw(this, gfx, mat, true) && !pc_p2_batch2_draw(this, gfx, mat, true) && !pc_p2_batch3_draw(this, gfx, mat, true) && !pc_p2_long_legs_draw(this, gfx, mat, true) && !pc_hd_model_draw_skinned(gfx, mTekiShape->mShape, hdModel(), hdTint()))
-=======
-    if (!pc_p2_demon_manager_draw_actor(this, gfx, mat, true) && !pc_p2_sarai_manager_draw_actor(this, gfx, mat, true) && !pc_p2_kurage_teki_draw(this, gfx, mat, true) && !pc_p2_groink_teki_draw(this, gfx, mat, true) && !pc_p2_queen_teki_draw(this, gfx, mat, true) && !pc_p2_kogane_draw(this, gfx, mat, true) && !pc_p2_mamuta_draw(this, gfx, mat, true) && !pc_p2_frog_draw(this, gfx, mat, true) && !pc_p2_tank_draw(this, gfx, mat, true) && !pc_p2_kabuto_fsm_draw(this, gfx, mat, true) && !pc_p2_qurione_draw(this, gfx, mat, true) && !pc_p2_shijimi_draw(this, gfx, mat, true) && !pc_p2_dwarf_orange_draw(this, gfx, mat, true) && !pc_p2_kochappy_draw(this, gfx, mat, true) && !pc_p2_chappy_draw(this, gfx, mat, true) && !pc_p2_sheargrub_draw(this, gfx, mat, true) && !pc_p2_snow_draw(this, gfx, mat, true) && !pc_p2_batch2_draw(this, gfx, mat, true) && !pc_p2_batch3_draw(this, gfx, mat, true) && !pc_p2_long_legs_draw(this, gfx, mat, true) && !pc_hd_model_draw_skinned(gfx, mTekiShape->mShape, hdModel(), hdTint()))
->>>>>>> 7baec391e (Bind Empress Bulblax (30) as an OWN campaign actor with the source FSM (#256))
+    if (!pc_p2_demon_manager_draw_actor(this, gfx, mat, true) && !pc_p2_sarai_manager_draw_actor(this, gfx, mat, true) && !pc_p2_kurage_teki_draw(this, gfx, mat, true) && !pc_p2_groink_teki_draw(this, gfx, mat, true) && !pc_p2_queen_teki_draw(this, gfx, mat, true) && !pc_p2_bombsarai_teki_draw(this, gfx, mat, true) && !pc_p2_fuefuki_teki_draw(this, gfx, mat, true) && !pc_p2_breadbug_teki_draw(this, gfx, mat, true) && !pc_p2_bigtreasure_teki_draw(this, gfx, mat, true) && !pc_p2_kogane_draw(this, gfx, mat, true) && !pc_p2_mamuta_draw(this, gfx, mat, true) && !pc_p2_frog_draw(this, gfx, mat, true) && !pc_p2_tank_draw(this, gfx, mat, true) && !pc_p2_kabuto_fsm_draw(this, gfx, mat, true) && !pc_p2_qurione_draw(this, gfx, mat, true) && !pc_p2_shijimi_draw(this, gfx, mat, true) && !pc_p2_dwarf_orange_draw(this, gfx, mat, true) && !pc_p2_kochappy_draw(this, gfx, mat, true) && !pc_p2_chappy_draw(this, gfx, mat, true) && !pc_p2_sheargrub_draw(this, gfx, mat, true) && !pc_p2_snow_draw(this, gfx, mat, true) && !pc_p2_batch2_draw(this, gfx, mat, true) && !pc_p2_batch3_draw(this, gfx, mat, true) && !pc_p2_long_legs_draw(this, gfx, mat, true) && !pc_hd_model_draw_skinned(gfx, mTekiShape->mShape, hdModel(), hdTint()))
 #endif
 	mTekiShape->mShape->drawshape(gfx, *gfx.mCamera, nullptr);
 }
@@ -733,7 +729,6 @@ void BTeki::doAI()
 	if (pc_p2_groink_teki_suppress_ai(this)) {
 		return;
 	}
-<<<<<<< HEAD
 	if (pc_p2_bombsarai_teki_suppress_ai(this)) {
 		return;
 	}
@@ -744,9 +739,9 @@ void BTeki::doAI()
 		return;
 	}
 	if (pc_p2_bigtreasure_teki_suppress_ai(this)) {
-=======
+		return;
+	}
 	if (pc_p2_queen_teki_suppress_ai(this)) {
->>>>>>> 7baec391e (Bind Empress Bulblax (30) as an OWN campaign actor with the source FSM (#256))
 		return;
 	}
 	if (pc_p2_catfish_suppress_ai(this)) {
@@ -2061,7 +2056,6 @@ void BTeki::wallCallback(immut Plane& wallPlane, DynCollObject*)
 bool BTeki::interact(immut TekiInteractionKey& key)
 {
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
-<<<<<<< HEAD
 	// #246 OWN: a campaign Titan Dweevil owns every Pikmin hit (source
 	// damageCallBack routes it by the hit CollPart of the Titan's own
 	// collision tree to a weapon or, unarmed, the body). The P1 host
@@ -2079,7 +2073,7 @@ bool BTeki::interact(immut TekiInteractionKey& key)
 		pc_p2_bigtreasure_attack(this, attack->mOwner, attack->mDamage, attack->mCollPart);
 		setCreaturePointer(1, attack->mOwner);
 		return true;
-=======
+	}
 	// #256 Empress Bulblax OWN: Queen::damageCallBack / Baby default intake.
 	if (key.mInteractionType == TekiInteractType::Attack && !getTekiOption(TEKIOPT_Invincible)) {
 		InteractAttack* attack = (InteractAttack*)key.mInteraction;
@@ -2091,7 +2085,6 @@ bool BTeki::interact(immut TekiInteractionKey& key)
 			}
 			return queen > 0;
 		}
->>>>>>> 7baec391e (Bind Empress Bulblax (30) as an OWN campaign actor with the source FSM (#256))
 	}
 #endif
 	TekiStrategy* strat = getStrategy();
