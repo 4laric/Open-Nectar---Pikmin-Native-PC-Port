@@ -7,9 +7,11 @@
 // recovery message. Everything here is pure string work.
 //
 // Pieces:
-//   parse_run_name / run_newer   the launcher's run folder names
+//   parse_run_name / run_newer / run_newer_at
+//                                the launcher's run folder names
 //                                (run-YYYYMMDD-HHMMSS-host|join-pid<N>[-k]),
-//                                newest first
+//                                newest first (run_newer_at: by start time,
+//                                immune to local clock changes)
 //   launch_value                 one "key value" line of <run>/launch.txt
 //   bootstrap_fingerprint        the FINGERPRINT a checkpoint must carry
 //   checkpoint_gen_from_name     "<20 digits>.sav" -> generation
@@ -24,12 +26,19 @@
 //                                agreed on: never a half-saved day)
 //   record_line_*                the record's line formats
 //   recovery_lines               the final console message on a session end
+//   banner_lines                 the same lines as the end banner shows them
 //
 // Campaign record (<run>/campaign-record.txt, one event per line, appended;
-// written in launcher mode by both roles; never read by the game itself):
-//   carried gen=G day=D from=<run folder>   --continue copied checkpoint G
-//                                           (day D, 0 = unknown) into this
-//                                           run before the session started
+// written in launcher mode by both roles; never read by the game itself).
+// The launcher writes its two '#' header lines first, before it copies a
+// continued campaign in, so a record without them (or with NUL bytes: a
+// crash) is damaged, never trusted:
+//   carried gen=G day=D day_ended=E from=<run folder>
+//                                           --continue copied checkpoint G
+//                                           (day D, the end of day E; 0 =
+//                                           unknown) into this run before the
+//                                           session started; written only
+//                                           after every copy is on disk
 //   start gen=G                             the session started on checkpoint
 //                                           G (0 = a new campaign), after the
 //                                           handshake agreed it on both sides
@@ -37,7 +46,9 @@
 //                                           on (the host: its save barrier's
 //                                           verdict, which needs the joiner's
 //                                           ACK; the joiner: once the session
-//                                           advanced frame F + 9, when the
+//                                           advanced frame F + 10 AND the
+//                                           turn's session events showed the
+//                                           host still connected, when the
 //                                           host's barrier had surely finished)
 //   day gen=G day=D                         checkpoint G plays on from day D
 //                                           (the first day start after it)
@@ -46,8 +57,10 @@
 //                                           timeout): never continued from
 //   end kind=K code=C frame=F               how the session ended
 // Confirmed generations are the ones named by carried/start/saved. A run
-// folder without a record (an older build) counts every valid checkpoint as
-// confirmed, which is what that build's resume already did.
+// folder without a record (an older build) or with a damaged one confirms
+// nothing: a bare --continue skips it (and stops at a damaged one), and only
+// a --continue that names the folder uses its newest valid checkpoint, with a
+// warning that both games may not have agreed on it.
 
 #include <cstddef>
 #include <cstdint>
@@ -115,6 +128,31 @@ inline bool run_newer(const RunName& a, const RunName& b)
 	if (a.stamp != b.stamp) return a.stamp > b.stamp;
 	if (a.seq != b.seq) return a.seq > b.seq;
 	return a.pid > b.pid;
+}
+
+// The folder stamp is local time, so a clock change (a DST fall-back) can
+// make a newer run's stamp sort as older. The launcher orders by one key per
+// run instead: seconds since the epoch, from launch.txt's `started_utc` (this
+// build writes it) or else the stamp read as local time. Then the retry and
+// the pid, as above. One number per run keeps the order strict and total.
+inline bool run_newer_at(const RunName& a, long long aKey, const RunName& b, long long bKey)
+{
+	if (aKey != bKey) return aKey > bKey;
+	if (a.seq != b.seq) return a.seq > b.seq;
+	return a.pid > b.pid;
+}
+
+// "YYYYMMDD-HHMMSS" -> its fields (false when it is not one).
+inline bool stamp_fields(const std::string& stamp, int f[6])
+{
+	if (stamp.size() != 15 || stamp[8] != '-' || !all_digits(stamp, 0, 8) || !all_digits(stamp, 9, 6)) return false;
+	f[0] = std::stoi(stamp.substr(0, 4));
+	f[1] = std::stoi(stamp.substr(4, 2));
+	f[2] = std::stoi(stamp.substr(6, 2));
+	f[3] = std::stoi(stamp.substr(9, 2));
+	f[4] = std::stoi(stamp.substr(11, 2));
+	f[5] = std::stoi(stamp.substr(13, 2));
+	return true;
 }
 
 // ---- small text readers ----
@@ -244,6 +282,7 @@ inline CkptCheck check_checkpoint(const std::string& bytes, const std::string& f
 
 struct Record {
 	bool present = false;               // the file exists (a record-writing build made the run)
+	bool damaged = false;               // present but not whole: no header line, or NUL bytes (a crash)
 	unsigned long long confirmedMax = 0; // newest agreed generation (carried/start/saved)
 	std::map<unsigned long long, int> dayOf; // generation -> day it plays on from
 	std::map<unsigned long long, int> dayEnded; // generation -> day whose end it saved
@@ -277,10 +316,17 @@ inline bool record_u64(const std::string& line, const std::string& key, unsigned
 	return true;
 }
 
+// The first bytes of every record this build writes (record_header()).
+constexpr const char* kRecordMagic = "# netplay campaign record";
+
 inline Record parse_record(const std::string& text, bool present = true)
 {
 	Record r;
 	r.present = present;
+	if (present) {
+		const std::string magic = kRecordMagic;
+		r.damaged = text.find('\0') != std::string::npos || text.compare(0, magic.size(), magic) != 0;
+	}
 	size_t pos = 0;
 	while (pos < text.size()) {
 		size_t eol = text.find('\n', pos);
@@ -300,7 +346,8 @@ inline Record parse_record(const std::string& text, bool present = true)
 				r.carriedFrom = record_field(line, "from");
 				if (record_u64(line, "day", &day) && day > 0) r.dayOf[gen] = (int)day;
 			}
-			if (kind == "saved" && record_u64(line, "day_ended", &day) && day > 0) r.dayEnded[gen] = (int)day;
+			if ((kind == "saved" || kind == "carried") && record_u64(line, "day_ended", &day) && day > 0)
+				r.dayEnded[gen] = (int)day;
 		} else if (kind == "day") {
 			if (haveGen && record_u64(line, "day", &day) && day > 0) r.dayOf[gen] = (int)day;
 		} else if (kind == "abandoned") {
@@ -313,14 +360,23 @@ inline Record parse_record(const std::string& text, bool present = true)
 	return r;
 }
 
+// Whether a record can say which saves both games agreed on.
+inline bool record_trusted(const Record& rec) { return rec.present && !rec.damaged; }
+
 // The checkpoint a --continue may use: the newest valid generation that the
-// record confirms (every valid one when the run has no record). 0 = none.
-inline unsigned long long pick_generation(const std::vector<unsigned long long>& validGens, const Record& rec)
+// record confirms. 0 = none. A run without a whole record (an older build's,
+// or one a crash damaged) gives nothing unless `unconfirmedOk` (the player
+// named that folder): then its newest valid checkpoint, which both games may
+// not have agreed on (the caller warns).
+inline unsigned long long pick_generation(const std::vector<unsigned long long>& validGens, const Record& rec,
+                                          bool unconfirmedOk = false)
 {
+	const bool trusted = record_trusted(rec);
+	if (!trusted && !unconfirmedOk) return 0;
 	unsigned long long best = 0;
 	for (unsigned long long g : validGens) {
 		if (g == 0) continue;
-		if (rec.present && g > rec.confirmedMax) continue; // never a half-saved day
+		if (trusted && g > rec.confirmedMax) continue; // never a half-saved day
 		if (g > best) best = g;
 	}
 	return best;
@@ -328,12 +384,13 @@ inline unsigned long long pick_generation(const std::vector<unsigned long long>&
 
 inline std::string record_header()
 {
-	return "# netplay campaign record (nectar.exe, issue #887): which day-end saves both games agreed on.\n"
+	return std::string(kRecordMagic) + " (nectar.exe, issue #887): which day-end saves both games agreed on.\n"
 	       "# Read by --netplay-host-ice --continue; never read by the game itself.\n";
 }
-inline std::string record_line_carried(unsigned long long gen, int day, const std::string& from)
+inline std::string record_line_carried(unsigned long long gen, int day, int dayEnded, const std::string& from)
 {
-	return "carried gen=" + std::to_string(gen) + " day=" + std::to_string(day > 0 ? day : 0) + " from=" + from + "\n";
+	return "carried gen=" + std::to_string(gen) + " day=" + std::to_string(day > 0 ? day : 0) +
+	       " day_ended=" + std::to_string(dayEnded > 0 ? dayEnded : 0) + " from=" + from + "\n";
 }
 inline std::string record_line_start(unsigned long long gen, bool host)
 {
@@ -420,27 +477,27 @@ inline std::string end_headline(const EndInfo& e)
 	return "The session ended.";
 }
 
-// The saved-day line.
+// The saved-day line: the save itself is made at the END of a day, and the
+// campaign then continues from the START of the next day. Both are named
+// when known, so "day 3" is never mistaken for the day that was saved.
 inline std::string saved_day_line(const EndInfo& e)
 {
 	if (e.gen == 0)
 		return "Nothing is saved yet: no day of this campaign ended with a save both games agreed on.";
-	std::string s = "Last saved day: ";
-	if (e.day > 0) s += "day " + std::to_string(e.day) + " (the campaign continues from the start of day " +
-		                     std::to_string(e.day) + ")";
-	else if (e.dayEnded > 0) s += "the end of day " + std::to_string(e.dayEnded) + " (the campaign continues "
-		                                                                               "on the next day)";
-	else s += "campaign checkpoint " + std::to_string(e.gen);
-	s += "; checkpoint " + std::to_string(e.gen) + ".";
-	return s;
+	const std::string ck = "(checkpoint " + std::to_string(e.gen) + ").";
+	if (e.dayEnded > 0 && e.day > 0)
+		return "Last save: the end of day " + std::to_string(e.dayEnded) + "; the campaign continues from the "
+		       "start of day " + std::to_string(e.day) + " " + ck;
+	if (e.day > 0)
+		return "Last save: the campaign continues from the start of day " + std::to_string(e.day) + " " + ck;
+	if (e.dayEnded > 0)
+		return "Last save: the end of day " + std::to_string(e.dayEnded) + "; the campaign continues on the next "
+		       "day " + ck;
+	return "Last save: campaign checkpoint " + std::to_string(e.gen) + ".";
 }
 
-// A program in the game's folder, as typed in a console opened there. The
-// ".\" prefix is what PowerShell needs (it does not run programs from the
-// current folder by bare name), and Command Prompt accepts it too. A name
-// with anything but letters, digits, '.', '_' or '-' is quoted for
-// PowerShell with its call operator: & '.\my game.exe'.
-inline std::string local_command(const std::string& file)
+// Whether a file name needs no quoting in either console.
+inline bool plain_file_name(const std::string& file)
 {
 	bool plain = !file.empty();
 	for (char c : file) {
@@ -448,7 +505,20 @@ inline std::string local_command(const std::string& file)
 		                c == '_' || c == '-';
 		if (!ok) plain = false;
 	}
-	if (plain) return ".\\" + file;
+	return plain;
+}
+
+// A program in the game's folder, as typed in a console opened there. The
+// ".\" prefix is what PowerShell needs (it does not run programs from the
+// current folder by bare name), and Command Prompt accepts it too. A name
+// with anything but letters, digits, '.', '_' or '-' needs quoting, and the
+// two consoles differ: PowerShell needs its call operator, & '.\my game.exe'
+// (local_command), which Command Prompt does not take; Command Prompt takes
+// ".\my game.exe" (local_command_cmd), which PowerShell would print as a
+// string instead of running.
+inline std::string local_command(const std::string& file)
+{
+	if (plain_file_name(file)) return ".\\" + file;
 	std::string quoted;
 	for (char c : file) {
 		quoted += c;
@@ -456,22 +526,55 @@ inline std::string local_command(const std::string& file)
 	}
 	return "& '.\\" + quoted + "'";
 }
+inline std::string local_command_cmd(const std::string& file)
+{
+	if (plain_file_name(file)) return ".\\" + file;
+	return "\".\\" + file + "\""; // a Windows file name cannot hold '"'
+}
 
-// One final-message line as the end banner shows it. The banner draws with
-// the game's own font, which has no backslash glyph (0x5C comes out as
-// another letter: ".\host.bat" read ",Ahost.bat" in a capture), so the banner
-// shows each command in its PowerShell form with '/' (./host.bat), which
-// Command Prompt does not take, and says so; the console message keeps the
-// ".\" form that both consoles take.
+// The note the banner adds to its '/' commands (see banner_lines).
+constexpr const char* kBannerBothNote = "(PowerShell; the console window has the Command Prompt form)";
+constexpr const char* kBannerFormNote = " (PowerShell form)";
+
+// One final-message line with every '\' as '/' (the banner's font has none).
 inline std::string banner_line(std::string l)
 {
 	const std::string both = "(PowerShell or Command Prompt)";
 	const size_t at = l.find(both);
-	if (at != std::string::npos) l.replace(at, both.size(), "(PowerShell; the console window has the Command Prompt form)");
+	if (at != std::string::npos) l.replace(at, both.size(), kBannerBothNote);
 	for (char& c : l) {
 		if (c == '\\') c = '/';
 	}
 	return l;
+}
+
+// The end banner's body from the final message's lines after its title. The
+// banner draws with the game's own font, which has no backslash glyph (0x5C
+// comes out as another letter: ".\host.bat" read ",Ahost.bat" in a capture),
+// so it shows each command in PowerShell's '/' form (./host.bat), which
+// Command Prompt does not take. The first line that shows such a command says
+// so, unless an earlier line already did; the Command Prompt-only line is
+// left out (its '/' form would be wrong in both consoles). The console
+// message keeps the ".\" form that both consoles take.
+inline std::vector<std::string> banner_lines(const std::vector<std::string>& body, size_t maxLines)
+{
+	std::vector<std::string> out;
+	bool noted = false;
+	for (const std::string& l : body) {
+		if (out.size() >= maxLines) break;
+		if (l.find("in Command Prompt:") != std::string::npos) continue;
+		const bool hasCommand = l.find('\\') != std::string::npos;
+		std::string b         = banner_line(l);
+		if (b.find(kBannerBothNote) != std::string::npos) noted = true;
+		if (hasCommand && !noted) {
+			// Before a closing full stop: "... in the game's folder (PowerShell form)."
+			if (!b.empty() && b.back() == '.') b.insert(b.size() - 1, kBannerFormNote);
+			else b += kBannerFormNote;
+			noted = true;
+		}
+		out.push_back(b);
+	}
+	return out;
 }
 
 // Every line of the final message, without the "[netplay] " prefix. The
@@ -489,8 +592,12 @@ inline std::vector<std::string> recovery_lines(const EndInfo& e)
 		out.push_back("The day-end save at " + which + " may not count: the session ended before this game saw the "
 		              "host finish it. The host's game decides, and its --continue picks the right day.");
 	}
-	const std::string exe   = local_command(e.exe.empty() ? std::string("nectar.exe") : e.exe);
+	const std::string file  = e.exe.empty() ? std::string("nectar.exe") : e.exe;
+	const bool plain        = plain_file_name(file);
+	const std::string exe   = local_command(file);
 	const std::string extra = e.extraArgs.empty() ? std::string() : " " + e.extraArgs;
+	// "(or X)" for the exe route: a quoted name is PowerShell's form only.
+	const std::string orExe = plain ? "or " + exe : "or, in PowerShell, " + exe;
 	if (!e.launcher) {
 		out.push_back("To carry on, start both games again with the same switches; the host's last saved day is "
 		              "sent to the joiner at the handshake.");
@@ -498,7 +605,7 @@ inline std::vector<std::string> recovery_lines(const EndInfo& e)
 	}
 	if (e.gen == 0 && e.pendingGen == 0) {
 		if (e.host)
-			out.push_back("To play again: run .\\host.bat (or " + exe + " --netplay-host-ice" + extra +
+			out.push_back("To play again: run .\\host.bat (" + orExe + " --netplay-host-ice" + extra +
 			              ") in the game's folder and your partner joins as before; that starts a new campaign.");
 		else
 			out.push_back("To play again: the host runs .\\host.bat and you join as before (.\\join.bat); that "
@@ -506,13 +613,21 @@ inline std::vector<std::string> recovery_lines(const EndInfo& e)
 		return out;
 	}
 	if (e.host) {
-		out.push_back("To carry on from that day, run this in the game's folder (PowerShell or Command Prompt):");
-		out.push_back("  .\\host.bat --continue");
-		out.push_back("  or: " + exe + " --netplay-host-ice --continue" + extra);
+		if (plain) {
+			out.push_back("To carry on from that day, run this in the game's folder (PowerShell or Command Prompt):");
+			out.push_back("  .\\host.bat --continue");
+			out.push_back("  or: " + exe + " --netplay-host-ice --continue" + extra);
+		} else {
+			out.push_back("To carry on from that day, run this in the game's folder (PowerShell or Command Prompt):");
+			out.push_back("  .\\host.bat --continue");
+			out.push_back("  or in PowerShell: " + exe + " --netplay-host-ice --continue" + extra);
+			out.push_back("  or in Command Prompt: " + local_command_cmd(file) + " --netplay-host-ice --continue" +
+			              extra);
+		}
 		out.push_back("Your partner joins as usual (.\\join.bat); your saved day is sent to them automatically.");
 	} else {
 		out.push_back(std::string(e.gen > 0 ? "To carry on from that day" : "To carry on") +
-		              ": the host runs .\\host.bat --continue (or " + exe +
+		              ": the host runs .\\host.bat --continue (" + orExe +
 		              " --netplay-host-ice --continue) in the game's folder.");
 		out.push_back("You join as usual (.\\join.bat); the host's saved day is sent to you automatically.");
 	}

@@ -131,6 +131,9 @@
 #include <windows.h>
 #include <mmsystem.h>
 #include <synchapi.h>
+#include <io.h> // _commit (M5c lane C: the campaign record)
+#else
+#include <unistd.h> // fsync
 #endif
 
 // pc_state_hash additions (M3): capture the last tick's hashes even when no
@@ -330,6 +333,13 @@ enum Phase {
 	kSession,
 	kDone,     // clean end requested: keep owning the loop until the process quits
 };
+
+// The largest local input delay any path may set (the numeric and auto
+// clamps below). Frame bounds that assume host input is at most this many
+// frames ahead of the host's Advances depend on it: kHoldLeadFrames (B1) and
+// kSaveConfirmFrames (M5c lane C) static_assert against it. Lane B's
+// adaptive delay must keep its maximum at or below it (M5c integration).
+constexpr unsigned kMaxLocalDelay = 8;
 
 struct Config {
 	bool isHost = false;
@@ -632,6 +642,7 @@ pc_netplay_bulk::BulkChannel sBulk; // M4a bulk 0x03 endpoint (lane B queues)
 // has submitted at most frame H + delay <= H+8, so no input past H+11 can
 // exist yet on either peer.
 constexpr uint32_t kHoldLeadFrames = 12;
+static_assert(kHoldLeadFrames > kMaxLocalDelay + 1, "no input past H + kHoldLeadFrames - 1 may exist at Advance H");
 bool sHoldAtFirstInput = false; // host: state.txt missing at session start
 bool sHoldRequested = false;    // host: flagged input submitted, Advance H not yet seen
 uint64_t sHoldExpectFrame = 0;  // host: submit index + delay of the flagged input
@@ -2197,7 +2208,7 @@ void parse_config()
 			sCfg.localDelay = 2;
 		} else {
 			sCfg.localDelay = read_unsigned_env("PIKMIN_NETPLAY_DELAY", 2);
-			if (sCfg.localDelay > 8) sCfg.localDelay = 8;
+			if (sCfg.localDelay > kMaxLocalDelay) sCfg.localDelay = kMaxLocalDelay;
 		}
 	} else if (sCfg.launcherMode) {
 		// Launch lane: DELAY=auto is the default (humans never set it).
@@ -3611,19 +3622,33 @@ int sRecDayEnded = 0;                 // the day whose end it saved (0 = unknown
 bool sRecAwaitDay = false;            // the next day start names sRecDay
 unsigned sRecReseeds = 0;             // pc_netplay_det_reseed_count() last seen
 // The joiner's agreed day-end save counts only once this session has advanced
-// frame S + kSaveConfirmFrames (S: the save's frame). The joiner sends its
+// frame S + kSaveConfirmFrames (S: the save's frame) on the host's REAL input,
+// which is checked after the turn's session events. The joiner sends its
 // SAVE_ACK when it reaches its barrier and agrees as soon as the host's
 // SAVE_RESULT matches, but the host may never get that ACK: a joiner that was
 // frozen past the host's 60 s barrier deadline agreed on a result the host had
-// already abandoned (exit 6; the savetimeout pair). The host submits its input
-// for a frame f only after it has advanced f - delay frames (a submit lands on
-// its index plus the local delay; the delay is at most 8, the same bound as
-// kHoldLeadFrames), so host input for frame S + 9 or later exists only after
-// the host's Advance S, and with it its barrier, finished with that ACK.
+// already abandoned (exit 6; the savetimeout pair), and an ACK can be lost
+// with a host that then times out or dies in its barrier. The host submits
+// its input for a frame f only after it has advanced f - delay frames (a
+// submit lands on its index plus the local delay, at most kMaxLocalDelay), so
+// host input for frame S + kMaxLocalDelay + 1 or later exists only after the
+// host's Advance S, and with it its barrier, finished with that ACK.
+// Fix round 1 (review MAJOR-1): GekkoNet also INVENTS host input. Once it
+// marks the host disconnected (idle timeout or quit notice, in the same
+// update's Poll), AddDisconnectedPlayerInputs fills the frame about to
+// advance with neutral input and one Advance runs on it, before
+// handle_session_events sees the disconnect. So rec_after_advance only marks
+// the confirmation due, and rec_confirm_due() writes it after the turn's
+// session events, when the session is still live: a fabricated Advance always
+// arrives with its disconnect event in the same turn, and stops the session
+// first. The margin is one frame more than the bound needs, so it holds
+// without that ordering too.
 // Until then the save is pending: not in the record, not in the final
 // message's "last saved day" (which says it is unconfirmed instead).
-constexpr uint32_t kSaveConfirmFrames = 9;
+constexpr uint32_t kSaveConfirmFrames = kMaxLocalDelay + 2;
+static_assert(kSaveConfirmFrames > kMaxLocalDelay + 1, "host input past S + delay must wait for the host's barrier");
 bool sRecPending = false;
+bool sRecConfirmDue = false;          // the frame bound is met; written after the session events
 unsigned long long sRecPendGen = 0;
 uint32_t sRecPendFrame = 0;
 int sRecPendDayEnded = 0;
@@ -3654,6 +3679,9 @@ double sLastAdvanceWallMs = 0;        // wall time of the last Advance turn
 int64_t sTestDesyncFrame = -1;
 bool sTestDesyncLogged = false;
 
+// Appends one record line and commits it to the disk (fix round 1: a crash
+// must not leave a `saved` line only in the cache). A handful of lines per
+// session, never inside a tick's sim work.
 void rec_append(const std::string& line)
 {
 	if (!sRecOn || line.empty()) return;
@@ -3662,9 +3690,15 @@ void rec_append(const std::string& line)
 		printf("[netplay] campaign record: cannot append to %s\n", sRecPath.c_str());
 		return;
 	}
-	fwrite(line.data(), 1, line.size(), f);
-	fflush(f);
-	fclose(f);
+	bool ok = fwrite(line.data(), 1, line.size(), f) == line.size();
+	ok      = fflush(f) == 0 && ok;
+#ifdef _WIN32
+	ok = _commit(_fileno(f)) == 0 && ok;
+#else
+	ok = fsync(fileno(f)) == 0 && ok;
+#endif
+	ok = fclose(f) == 0 && ok;
+	if (!ok) printf("[netplay] campaign record: writing to %s failed\n", sRecPath.c_str());
 }
 
 // Once, when the GekkoNet session starts: both peers now play from the
@@ -3675,11 +3709,13 @@ void rec_session_start()
 	sRecOn   = launch.active && !launch.runDir.empty();
 	sRecPath = sRecOn ? launch.runDir + "/campaign-record.txt" : std::string();
 	sRecGen  = b2_host_hello().ckptGen;
-	sRecDay  = (launch.continued && launch.continueGen == sRecGen) ? launch.continueDay : 0;
-	sRecDayEnded = 0;
+	const bool carried = launch.continued && launch.continueGen == sRecGen;
+	sRecDay      = carried ? launch.continueDay : 0;
+	sRecDayEnded = carried ? launch.continueDayEnded : 0;
 	sRecAwaitDay = sRecGen > 0;
 	sRecReseeds  = pc_netplay_det_reseed_count();
 	sRecPending  = false;
+	sRecConfirmDue = false;
 	rec_append(pc_netplay_continue::record_line_start(sRecGen, sCfg.isHost));
 	if (const char* e = getenv_nonempty("PIKMIN_NETPLAY_TEST_DESYNC_AT_FRAME")) {
 		const char* bg = getenv_nonempty("PIKMIN_RANDOMIZER_TEST_BACKGROUND");
@@ -3700,9 +3736,9 @@ void rec_confirm_save(unsigned long long gen, uint32_t frame, int dayEnded)
 	rec_append(pc_netplay_continue::record_line_saved(gen, frame, dayEnded));
 }
 
-// After every Advance: a pending joiner save is confirmed once the session
-// advanced kSaveConfirmFrames past it; a day start after a checkpoint names
-// its day.
+// After every Advance: a pending joiner save becomes due once the session
+// advanced kSaveConfirmFrames past it (rec_confirm_due writes it after the
+// turn's session events); a day start after a checkpoint names its day.
 void rec_after_advance()
 {
 	const unsigned n = pc_netplay_det_reseed_count();
@@ -3710,24 +3746,34 @@ void rec_after_advance()
 	sRecReseeds = n;
 	if (sRecPending) {
 		if (reseeded && sRecPendDay == 0) sRecPendDay = pc_netplay_det_last_reseed_day();
-		if (sLastAdvanceFrame < sRecPendFrame + kSaveConfirmFrames) return;
-		sRecPending = false;
-		printf("[netplay] campaign record: day-end save gen=%llu confirmed at frame=%u (the host's barrier had "
-		       "finished)\n",
-		       sRecPendGen, sLastAdvanceFrame);
-		fflush(stdout);
-		rec_confirm_save(sRecPendGen, sRecPendFrame, sRecPendDayEnded);
-		if (sRecPendDay > 0) {
-			sRecAwaitDay = false;
-			sRecDay      = sRecPendDay;
-			rec_append(pc_netplay_continue::record_line_day(sRecGen, sRecDay));
-		}
+		if (sLastAdvanceFrame >= sRecPendFrame + kSaveConfirmFrames) sRecConfirmDue = true;
 		return;
 	}
 	if (!reseeded) return;
 	if (sRecAwaitDay && sRecGen > 0) {
 		sRecAwaitDay = false;
 		sRecDay      = pc_netplay_det_last_reseed_day();
+		rec_append(pc_netplay_continue::record_line_day(sRecGen, sRecDay));
+	}
+}
+
+// Between turns, after handle_session_events and only while the session is
+// still live (review MAJOR-1): the frame bound is met on real host input,
+// since an Advance on GekkoNet's invented input for a disconnected host comes
+// with its disconnect event in the same turn, which ended the session first.
+void rec_confirm_due()
+{
+	if (!sRecPending || !sRecConfirmDue) return;
+	sRecPending    = false;
+	sRecConfirmDue = false;
+	printf("[netplay] campaign record: day-end save gen=%llu confirmed at frame=%u (the host's barrier had "
+	       "finished; the host is still connected)\n",
+	       sRecPendGen, sLastAdvanceFrame);
+	fflush(stdout);
+	rec_confirm_save(sRecPendGen, sRecPendFrame, sRecPendDayEnded);
+	if (sRecPendDay > 0) {
+		sRecAwaitDay = false;
+		sRecDay      = sRecPendDay;
 		rec_append(pc_netplay_continue::record_line_day(sRecGen, sRecDay));
 	}
 }
@@ -3773,8 +3819,8 @@ void print_end_message(pc_netplay_continue::EndKind kind, int code, int64_t fram
 	             : kind == pc_netplay_continue::EndKind::LocalQuit    ? "SESSION ENDED"
 	                                                                  : "CONNECTION LOST";
 	sBannerError = kind != pc_netplay_continue::EndKind::PeerQuit && kind != pc_netplay_continue::EndKind::LocalQuit;
-	sBannerLines.clear();
-	for (size_t i = 1; i < lines.size() && sBannerLines.size() < kBannerMaxLines; ++i) {
+	std::vector<std::string> body;
+	for (size_t i = 1; i < lines.size(); ++i) {
 		std::string l = lines[i];
 		// The title already names what happened: the body keeps the reason.
 		const size_t colon = l.find(": ");
@@ -3782,8 +3828,10 @@ void print_end_message(pc_netplay_continue::EndKind kind, int code, int64_t fram
 			l = l.substr(colon + 2);
 			if (!l.empty() && l[0] >= 'a' && l[0] <= 'z') l[0] = (char)(l[0] - 'a' + 'A');
 		}
-		sBannerLines.push_back(pc_netplay_continue::banner_line(l)); // the game font has no '\'
+		body.push_back(l);
 	}
+	// The game font has no '\': PowerShell's '/' form, labelled once.
+	sBannerLines = pc_netplay_continue::banner_lines(body, kBannerMaxLines);
 }
 
 // Between ticks only (handle_session_events): keep presenting frames with
@@ -3979,7 +4027,7 @@ void start_gekko_session()
 			unsigned d = (unsigned)adj + 1; // ceil(adj) + 1 margin
 			if ((double)(unsigned)adj < adj) ++d; // exact ceil, no <cmath>
 			if (d < 1) d = 1;
-			if (d > 8) d = 8;
+			if (d > kMaxLocalDelay) d = kMaxLocalDelay;
 			autoDelay = d;
 		}
 		sCfg.localDelay = autoDelay;
@@ -4577,7 +4625,7 @@ bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long ge
 	// M5c lane C: an agreed, successful day-end save is the newest checkpoint
 	// --continue may use. The host's verdict came with the joiner's ACK, so
 	// it is final; the joiner's is pending until the host is known to have
-	// finished its barrier too (kSaveConfirmFrames).
+	// finished its barrier too (kSaveConfirmFrames, then rec_confirm_due).
 	if (h.ok != 0) {
 		if (sCfg.isHost) {
 			rec_confirm_save(gen, frame, pc_netplay_det_last_reseed_day());
@@ -4587,8 +4635,8 @@ bool pc_netplay_save_barrier(uint32_t frame, bool localOk, unsigned long long ge
 			sRecPendFrame    = frame;
 			sRecPendDayEnded = pc_netplay_det_last_reseed_day();
 			sRecPendDay      = 0;
-			printf("[netplay] campaign record: day-end save gen=%llu counts once frame=%u advances (the host's "
-			       "barrier has finished then)\n",
+			printf("[netplay] campaign record: day-end save gen=%llu counts once frame=%u advances with the host "
+			       "still connected (the host's barrier has finished then)\n",
 			       gen, frame + kSaveConfirmFrames);
 			fflush(stdout);
 		}
@@ -4969,6 +5017,9 @@ bool pc_netplay_session_drive(System* sys, BaseApp* app)
 		// 8. Session events.
 		handle_session_events();
 		if (sPhase != kSession) return true; // stopped inside the handlers
+		// M5c lane C: a joiner's pending day-end save counts only now, with
+		// this turn's disconnect events seen (review MAJOR-1).
+		rec_confirm_due();
 		if (sF1CycleTick > 0 && !sF1CycleDone && sSessionTicks >= sF1CycleTick) {
 			// Test hook: the F1 open/close save path, between two ticks.
 			sF1CycleDone = true;

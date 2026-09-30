@@ -48,6 +48,7 @@ namespace {
 using namespace pc_netplay_launch_util;
 
 PcNetplayLaunch sSetup;
+long long sRunStartUtc = 0; // M5c lane C: this run's start (launch.txt started_utc)
 // Rewritten argv (original + --randomizer-seed <path>), kept alive for the
 // whole process because every later consumer holds the pointer.
 std::vector<std::string> sArgStore;
@@ -183,6 +184,26 @@ bool write_file(const std::string& path, const std::string& data)
 	if (f == nullptr) return false;
 	bool ok = data.empty() || fwrite(data.data(), 1, data.size(), f) == data.size();
 	ok      = (fclose(f) == 0) && ok;
+	return ok;
+}
+
+// M5c lane C fix round 1: a write that is on the disk when the call returns
+// (fflush, then _commit / fsync), for the campaign record and the files a
+// --continue copies. A crash can zero or cut a file that was only in the
+// cache (this machine did so in a bugcheck), so the record's `carried` line
+// is written only after every copy is on the disk, and is itself committed.
+bool write_file_durable(const std::string& path, const std::string& data, const char* mode = "wb")
+{
+	FILE* f = fopen(path.c_str(), mode);
+	if (f == nullptr) return false;
+	bool ok = data.empty() || fwrite(data.data(), 1, data.size(), f) == data.size();
+	ok      = fflush(f) == 0 && ok;
+#ifdef _WIN32
+	ok = _commit(_fileno(f)) == 0 && ok;
+#else
+	ok = fsync(fileno(f)) == 0 && ok;
+#endif
+	ok = (fclose(f) == 0) && ok;
 	return ok;
 }
 
@@ -578,8 +599,37 @@ struct ContinueCandidate {
 	int day = 0;              // the day it plays on from (0 = unknown)
 	int dayEnded = 0;
 	bool recordPresent = false;
+	bool recordDamaged = false; // present but not whole (no header, NUL bytes)
+	bool unconfirmed = false;   // picked without a whole record (a named folder only)
+	long long startKey = 0;     // run_start_key: newest first by this
 	std::string why;          // why nothing was picked
 };
+
+// The run's start, seconds since the epoch, for newest-first order
+// (run_newer_at): launch.txt's started_utc when this build wrote it, else
+// the folder stamp read as local time (a clock change can misorder those).
+long long run_start_key(const std::string& dir, const RunName& n)
+{
+	std::string launch;
+	if (read_path_bounded(fs::path(dir) / "launch.txt", 1u << 16, &launch)) {
+		const std::string v = launch_value(launch, "started_utc");
+		char* end           = nullptr;
+		const long long t   = std::strtoll(v.c_str(), &end, 10);
+		if (!v.empty() && end != nullptr && *end == '\0' && t > 0) return t;
+	}
+	int f[6];
+	if (!stamp_fields(n.stamp, f)) return 0;
+	struct tm lt = {};
+	lt.tm_year   = f[0] - 1900;
+	lt.tm_mon    = f[1] - 1;
+	lt.tm_mday   = f[2];
+	lt.tm_hour   = f[3];
+	lt.tm_min    = f[4];
+	lt.tm_sec    = f[5];
+	lt.tm_isdst  = -1;
+	const time_t t = mktime(&lt);
+	return t == (time_t)-1 ? 0 : (long long)t;
+}
 
 std::string lower_ascii(std::string s)
 {
@@ -588,8 +638,10 @@ std::string lower_ascii(std::string s)
 }
 
 // Reads one run folder: launch.txt, its bootstrap, the campaign dir, and the
-// record; picks the newest valid checkpoint the record confirms.
-void evaluate_run(ContinueCandidate* c)
+// record; picks the newest valid checkpoint the record confirms. A run
+// without a whole record gives nothing unless `named` (the player named the
+// folder): then its newest valid checkpoint, marked unconfirmed.
+void evaluate_run(ContinueCandidate* c, bool named)
 {
 	std::error_code ec;
 	const fs::path dir(c->dir);
@@ -637,12 +689,28 @@ void evaluate_run(ContinueCandidate* c)
 			       it->path().filename().string().c_str(), ckpt_check_name(chk));
 	}
 	std::string recText;
+	// A record that exists but cannot be read (or is over 1 MiB) is damaged,
+	// not absent: only a missing file means an older build made the run.
+	const bool recExists  = fs::is_regular_file(dir / "campaign-record.txt", ec);
 	const bool recPresent = read_path_bounded(dir / "campaign-record.txt", 1u << 20, &recText);
-	const Record rec = parse_record(recPresent ? recText : std::string(), recPresent);
-	c->recordPresent = recPresent;
-	c->gen = pick_generation(valid, rec);
+	Record rec            = parse_record(recPresent ? recText : std::string(), recPresent);
+	if (recExists && !recPresent) {
+		rec.present = true;
+		rec.damaged = true;
+	}
+	c->recordPresent = rec.present;
+	c->recordDamaged = rec.damaged;
+	c->gen           = pick_generation(valid, rec, named);
+	c->unconfirmed   = c->gen != 0 && !record_trusted(rec);
 	if (c->gen == 0) {
-		c->why = seen == 0 ? "no saved day" : (valid.empty() ? "no valid checkpoint" : "no day-end save both games agreed on");
+		if (!rec.present)
+			c->why = "made by an older build (it has no campaign record, so it cannot tell which day-end saves "
+			         "both games agreed on); to continue it anyway, name it: --continue <that folder>";
+		else if (rec.damaged)
+			c->why = "its campaign record is damaged (a crash while it was written?)";
+		else
+			c->why = seen == 0 ? "no saved day"
+			                   : (valid.empty() ? "no valid checkpoint" : "no day-end save both games agreed on");
 		return;
 	}
 	auto d = rec.dayOf.find(c->gen);
@@ -668,7 +736,15 @@ std::vector<std::string> run_bases()
 // Copies the continued campaign into the new run: the picked checkpoint, the
 // card files, and the campaign's other ledgers (for example
 // p2-delivery-receipts.txt). Never a temporary, pending, unconfirmed or
-// set-aside file, and never a newer checkpoint than the picked one.
+// set-aside file, and never another checkpoint than the picked one. The card
+// and the ledgers are carried as the old run left them, which can be later
+// than the picked checkpoint: the card an abandoned day-end save wrote, or
+// P2 receipts of the day in progress. That is what B2's resume in the same
+// folder does too, and B2 sends both to the joiner at the handshake, so the
+// two games stay in step. A continue from a JOINER's run has no host-only
+// p2-delivery-receipts.txt, so the P2 deliveries it recorded are granted
+// again. Every copy is on the disk (write_file_durable) before the caller
+// records the continue.
 void copy_campaign(const ContinueCandidate& c, const std::string& toDir, size_t* files, uint64_t* bytes)
 {
 	*files = 0;
@@ -682,7 +758,7 @@ void copy_campaign(const ContinueCandidate& c, const std::string& toDir, size_t*
 		if (!read_path_bounded(from, pc_netplay_xfer::kMaxBundleFileBytes, &data))
 			die("--continue: cannot read %s (or it is larger than %u bytes); nothing was changed in %s",
 			    from.string().c_str(), (unsigned)pc_netplay_xfer::kMaxBundleFileBytes, c.dir.c_str());
-		if (!write_file(dst.string(), data)) die("--continue: cannot write %s", dst.string().c_str());
+		if (!write_file_durable(dst.string(), data)) die("--continue: cannot write %s", dst.string().c_str());
 		++*files;
 		*bytes += data.size();
 	};
@@ -782,26 +858,69 @@ bool resolve_continue(const std::string& folderArg, const std::string& fpFilter,
 				cands.push_back(c);
 			}
 		}
-		std::stable_sort(cands.begin(), cands.end(),
-		                 [](const ContinueCandidate& a, const ContinueCandidate& b) { return run_newer(a.name, b.name); });
+		for (ContinueCandidate& c : cands) c.startKey = run_start_key(c.dir, c.name);
+		std::stable_sort(cands.begin(), cands.end(), [](const ContinueCandidate& a, const ContinueCandidate& b) {
+			return run_newer_at(a.name, a.startKey, b.name, b.startKey);
+		});
 		if (where.empty()) where = run_bases()[0];
 	}
+	const bool named = !folderArg.empty();
 	size_t checked = 0;
+	const ContinueCandidate* damaged = nullptr;
 	for (ContinueCandidate& c : cands) {
 		++checked;
-		evaluate_run(&c);
+		evaluate_run(&c, named);
 		if (c.gen != 0 && !fpFilter.empty() && c.fingerprint != fpFilter) {
 			c.gen = 0;
 			c.why = "another seed than --bootstrap";
 		}
 		if (c.gen != 0) {
+			if (c.unconfirmed)
+				printf("[netplay] launch: --continue: WARNING: %s %s, so it cannot tell whether both games agreed "
+				       "on its day-end saves; continuing its newest valid checkpoint because you named the folder. "
+				       "If that save was not agreed (the session ended with SAVE NOT AGREED or a desync at the "
+				       "save), continue an earlier run instead.\n",
+				       c.dir.c_str(),
+				       c.recordDamaged ? "has a damaged campaign record" : "was made by an older build (no campaign "
+				                                                           "record)");
+			if (!named && checked > 1) {
+				// Never slip silently into an older campaign: the newest host
+				// session saved nothing (a new campaign whose first day never
+				// ended, or a run that stopped before its session).
+				char dayText[64] = "day unknown";
+				if (c.day > 0) snprintf(dayText, sizeof(dayText), "day %d", c.day);
+				else if (c.dayEnded > 0) snprintf(dayText, sizeof(dayText), "the day after day %d", c.dayEnded);
+				printf("[netplay] launch: --continue: the newest host session (%s) has no day-end save to continue "
+				       "(%s).\n",
+				       cands[0].dir.c_str(), cands[0].why.c_str());
+				const std::string q = "Continue the older campaign of " + c.dir + " (checkpoint " +
+				                      std::to_string(c.gen) + ", " + dayText + ") instead?";
+				fflush(stdout);
+				if (!ask_yes_default(q.c_str())) {
+					printf("[netplay] launch: --continue: starting a new campaign instead.\n");
+					fflush(stdout);
+					return false;
+				}
+			}
 			*out = c;
 			return true;
 		}
-		if (!folderArg.empty() || checked <= 5)
+		if (named || checked <= 5)
 			printf("[netplay] launch: --continue: %s: %s\n", c.dir.c_str(), c.why.c_str());
+		if (!named && c.recordDamaged) {
+			// Falling through would pick an OLDER campaign than this one
+			// without knowing what this one saved: stop and say so.
+			damaged = &c;
+			break;
+		}
 	}
-	if (folderArg.empty())
+	if (damaged != nullptr)
+		printf("[netplay] launch: --continue: stopped at %s: its campaign record is damaged, so --continue cannot "
+		       "tell which of its day-end saves both games agreed on, and it does not skip past it to an older "
+		       "campaign. To continue it anyway (its newest valid checkpoint, which may not be agreed) or an older "
+		       "run, name the folder: --continue <run folder>.\n",
+		       damaged->dir.c_str());
+	else if (!named)
 		printf("[netplay] launch: --continue: no saved day yet: none of the %llu host run folder%s under %s has a "
 		       "day-end save that both games agreed on%s.\n",
 		       (unsigned long long)checked, checked == 1 ? "" : "s", where.c_str(),
@@ -810,8 +929,9 @@ bool resolve_continue(const std::string& folderArg, const std::string& fpFilter,
 		printf("[netplay] launch: --continue: no saved day yet: %s has no day-end save that both games agreed "
 		       "on%s.\n",
 		       where.c_str(), fpFilter.empty() ? "" : " for the --bootstrap seed");
-	printf("[netplay] launch: --continue: a campaign can be continued once one of its days has ended with the "
-	       "day-end save on both games.\n");
+	if (damaged == nullptr)
+		printf("[netplay] launch: --continue: a campaign can be continued once one of its days has ended with the "
+		       "day-end save on both games.\n");
 	fflush(stdout);
 	if (!ask_yes_default("Start a new campaign instead?")) {
 		printf("[netplay] launch: not starting: there is no saved campaign to continue.\n");
@@ -980,6 +1100,7 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 				sSetup.continueFrom    = cont.dir;
 				sSetup.continueGen     = cont.gen;
 				sSetup.continueDay     = cont.day;
+				sSetup.continueDayEnded = cont.dayEnded;
 				const std::string oldSeed = launch_value(cont.launchText, "seed");
 				char* end                 = nullptr;
 				const unsigned long long v = strtoull(oldSeed.c_str(), &end, 10);
@@ -998,7 +1119,9 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 				else if (cont.dayEnded > 0) snprintf(dayText, sizeof(dayText), "the day after day %d", cont.dayEnded);
 				printf("[netplay] launch: --continue: continuing the campaign of %s: checkpoint %llu (%s)%s\n",
 				       cont.dir.c_str(), cont.gen, dayText,
-				       cont.recordPresent ? "" : " (a run from an older build: its newest valid checkpoint)");
+				       !cont.unconfirmed    ? ""
+				       : cont.recordDamaged ? " (UNCONFIRMED: its campaign record is damaged)"
+				                            : " (UNCONFIRMED: a run from an older build, without a campaign record)");
 				fflush(stdout);
 			}
 		}
@@ -1079,6 +1202,7 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 	}
 	{
 		const time_t now = time(nullptr);
+		sRunStartUtc     = (long long)now;
 		struct tm lt;
 #ifdef _WIN32
 		localtime_s(&lt, &now);
@@ -1109,8 +1233,13 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 	// M5c lane C: the continued campaign's files, copied (never moved) into
 	// this run's campaign dir before the randomizer loads it; the record
 	// names the carried checkpoint as agreed (it was, in the run it came from).
+	// Fix round 1: the record's header goes to the disk FIRST (a record that
+	// confirms nothing), then the copies, then the `carried` line, each
+	// committed. A crash or a die() part-way leaves a run folder whose record
+	// confirms nothing, which a later --continue never picks.
 	{
-		std::string rec = record_header();
+		const std::string recPath = sSetup.runDir + "/campaign-record.txt";
+		if (!write_file_durable(recPath, record_header())) die("cannot write %s", recPath.c_str());
 		if (sSetup.continued) {
 			size_t files   = 0;
 			uint64_t bytes = 0;
@@ -1120,10 +1249,9 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 			       checkpoint_name(cont.gen).c_str(), (unsigned long long)(files - 1), files == 2 ? "" : "s",
 			       (unsigned long long)bytes, cont.dir.c_str());
 			fflush(stdout);
-			rec += record_line_carried(cont.gen, cont.day, cont.dir);
+			if (!write_file_durable(recPath, record_line_carried(cont.gen, cont.day, cont.dayEnded, cont.dir), "ab"))
+				die("cannot append to %s", recPath.c_str());
 		}
-		if (!write_file(sSetup.runDir + "/campaign-record.txt", rec))
-			die("cannot write %s/campaign-record.txt", sSetup.runDir.c_str());
 	}
 
 	// ---- process environment for the engine ----
@@ -1161,7 +1289,11 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 			rec += "continue_from " + sSetup.continueFrom + "\n";
 			rec += "continue_gen " + std::to_string(sSetup.continueGen) + "\n";
 			rec += "continue_day " + std::to_string(sSetup.continueDay) + "\n";
+			rec += "continue_day_ended " + std::to_string(sSetup.continueDayEnded) + "\n";
 		}
+		// Fix round 1: --continue orders runs by this (the folder stamp is
+		// local time, which a clock change can turn back).
+		rec += "started_utc " + std::to_string(sRunStartUtc) + "\n";
 		write_file(sSetup.runDir + "/launch.txt", rec);
 	}
 	// M4 lane B2: a P2 seed runs in <run>/play (after the records above, which

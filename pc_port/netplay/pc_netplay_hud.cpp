@@ -18,7 +18,9 @@
 // Back opens F1, L3 first person, R3 lock-on; Guide belongs to the OS), so
 // the pad toggle is the two-stick chord: first person and lock-on are
 // session-locked sim settings, off unless the host turned them on, so in a
-// default session the chord does nothing else. A keyboard-only peer
+// default session the chord does nothing else. When either is on (or a
+// player bound another action to a stick button) the chord is ignored and
+// only F4 toggles (stick_buttons_in_use). A keyboard-only peer
 // (--netplay-input keyboard) ignores the chord, since pads need no focus and
 // the local two-window test gives the pad to the other window.
 
@@ -93,10 +95,39 @@ void init_once()
 	fflush(stdout);
 }
 
+// Once, when the chord's state first differs from the default: say why only
+// F4 toggles now (first person or lock-on is on, or a stick button is bound).
+bool sChordNoteDone = false;
+void note_chord_state(bool inUse)
+{
+	if (sChordNoteDone || !inUse) return;
+	sChordNoteDone = true;
+	printf("[netplay] hud: L3+R3 does not toggle the HUD in this session (a stick button is in use: first person, "
+	       "lock-on or a binding); F4 does\n");
+	fflush(stdout);
+}
+
 bool f4_bound()
 {
 	for (int a = 0; a < PC_KEY_ACT_COUNT; ++a) {
 		if ((int)pc_window_get_key_binding(a) == (int)SDL_SCANCODE_F4) return true;
+	}
+	return false;
+}
+
+// Fix round 1 (review): whether a stick button (L3 or R3) does something in
+// the game, so the chord would fire it too: any pad action bound to it,
+// except first person and lock-on while those session-locked settings are
+// off (then those actions do nothing). The HUD then ignores the chord (F4
+// still works), as it ignores F4 while F4 is bound.
+bool stick_buttons_in_use()
+{
+	for (int a = 0; a < PC_KEY_ACT_COUNT; ++a) {
+		const int b = pc_window_get_gamepad_binding(a);
+		if (b != SDL_CONTROLLER_BUTTON_LEFTSTICK && b != SDL_CONTROLLER_BUTTON_RIGHTSTICK) continue;
+		if (a == PC_KEY_ACT_FIRSTPERSON && !pc_settings_get_first_person()) continue;
+		if (a == PC_KEY_ACT_LOCKON && !pc_settings_get_lock_on()) continue;
+		return true;
 	}
 	return false;
 }
@@ -113,7 +144,9 @@ void poll_toggle(const PcNetplayHudInfo& info)
 	const Uint8* keys  = SDL_GetKeyboardState(nullptr);
 	const bool keyDown = keys != nullptr && keys[SDL_SCANCODE_F4] != 0 && !f4_bound();
 	bool chord         = false;
-	if (info.inputKind != pc_netplay_input_sel::kInputKeyboard) {
+	const bool sticksInUse = info.inputKind != pc_netplay_input_sel::kInputKeyboard && stick_buttons_in_use();
+	note_chord_state(sticksInUse);
+	if (info.inputKind != pc_netplay_input_sel::kInputKeyboard && !sticksInUse) {
 		SDL_GameController* ctl = pc_window_get_controller();
 		chord = ctl != nullptr && SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_LEFTSTICK) != 0
 		     && SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_RIGHTSTICK) != 0;

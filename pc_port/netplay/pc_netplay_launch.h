@@ -82,6 +82,7 @@ struct PcNetplayLaunch {
 	std::string continueFrom;  // the continued run folder
 	unsigned long long continueGen = 0;
 	int continueDay = 0;       // the day that checkpoint plays on from (0 = unknown)
+	int continueDayEnded = 0;  // the day whose end it saved (0 = unknown)
 	bool testHidden = false;   // --netplay-test-hidden
 	uint64_t testTicks = 0;    // --netplay-test-ticks N
 	// --netplay-input (any netplay mode; parsed here so the gamepad hint is

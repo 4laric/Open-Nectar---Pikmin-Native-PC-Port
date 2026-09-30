@@ -41,9 +41,26 @@ int main()
 		CHECK(w.count(12500.0) == 1, "the 2 s stall has left the 10 s window at 12.5 s");
 		CHECK(w.count(15001.0) == 0, "both have left by 15 s");
 		CHECK(w.total() == 2 && w.total_ms() == 290.0 && w.max_ms() == 250.0, "session totals");
-		for (int i = 0; i < 200; ++i) w.add(20000.0 + i, 50.0);
-		CHECK(w.count(20200.0) == (unsigned)kStallRing, "the ring keeps the newest episodes");
-		CHECK(w.total() == 202, "totals keep counting past the ring");
+		// Fix round 1 (evidence review MINOR-1): the worst real link, one-frame
+		// stalls back to back (34 ms waits, one Advance turn between them),
+		// is counted in full: the ring used to cap the count at 64.
+		StallWindow v;
+		double t = 100000.0;
+		for (int i = 0; i < 600; ++i) {
+			t += 35.0;
+			v.add(t, 34.0);
+		}
+		unsigned want = 0;
+		for (int i = 0; i < 600; ++i) {
+			if (t - (100000.0 + 35.0 * (i + 1)) < kWindowMs) ++want;
+		}
+		CHECK(want == 286 && v.count(t) == want, "back-to-back one-frame stalls: every one in the window counts");
+		CHECK(v.stalled_ms(t) == 34.0 * want, "and all of their time");
+		CHECK(kStallRing >= (int)(kWindowMs / kStallMinMs) + 1, "the ring holds every episode the window can hold");
+		// Physically impossible spacing (1 ms apart): the ring keeps the newest.
+		for (int i = 0; i < 400; ++i) w.add(20000.0 + i, 50.0);
+		CHECK(w.count(20400.0) == (unsigned)kStallRing, "the ring keeps the newest episodes");
+		CHECK(w.total() == 402, "totals keep counting past the ring");
 	}
 
 	// 2. Quality.

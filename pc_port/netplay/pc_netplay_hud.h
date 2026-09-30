@@ -38,7 +38,7 @@ struct PcNetplayHudInfo {
 	double bannerLeftMs = 0;    // until the banner closes by itself
 	char bannerTitle[96] = {};
 	int bannerLines = 0;
-	char bannerLine[kBannerMaxLines][192] = {};
+	char bannerLine[kBannerMaxLines][256] = {};
 };
 
 // Session side (pc_netplay_session.cpp): false when no netplay session exists.

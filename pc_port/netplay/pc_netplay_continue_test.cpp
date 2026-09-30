@@ -75,6 +75,22 @@ int main()
 		std::vector<RunName> v = { a, c, d };
 		std::sort(v.begin(), v.end(), run_newer);
 		CHECK(v[0].stamp == "20260930-000001" && v[1].seq == 1 && v[2].seq == 0, "newest first");
+		// Fix round 1: by start time. After a DST fall-back the later run's
+		// local stamp (01:10) is earlier than the earlier run's (01:40).
+		RunName early, late;
+		CHECK(parse_run_name("run-20261101-014000-host-pid10", &early) &&
+		          parse_run_name("run-20261101-011000-host-pid20", &late),
+		      "two runs across a clock change");
+		CHECK(run_newer(early, late), "by stamp, the earlier run looks newer");
+		CHECK(run_newer_at(late, 1793513400LL, early, 1793511600LL) &&
+		          !run_newer_at(early, 1793511600LL, late, 1793513400LL),
+		      "by start time, the later run is newer");
+		CHECK(run_newer_at(d, 5, a, 5) && !run_newer_at(a, 5, a, 5), "same second: the retry, strict");
+		int f[6];
+		CHECK(stamp_fields("20260929-101502", f) && f[0] == 2026 && f[1] == 9 && f[2] == 29 && f[3] == 10 &&
+		          f[4] == 15 && f[5] == 2,
+		      "stamp fields");
+		CHECK(!stamp_fields("20260929_101502", f) && !stamp_fields("2026092-101502", f), "bad stamps");
 	}
 
 	// 2. launch.txt and the bootstrap fingerprint.
@@ -118,7 +134,7 @@ int main()
 
 	// 4. The campaign record and the pick.
 	{
-		const std::string rec = record_header() + record_line_carried(1, 3, "C:/games/netplay/run-1 x")
+		const std::string rec = record_header() + record_line_carried(1, 3, 2, "C:/games/netplay/run-1 x")
 		                      + record_line_start(1, true) + record_line_day(1, 3)
 		                      + record_line_saved(2, 58000, 3) + record_line_day(2, 4)
 		                      + record_line_abandoned(3, 6) + record_line_end("save-timeout", 6, 90000);
@@ -126,6 +142,8 @@ int main()
 		CHECK(r.present && r.confirmedMax == 2, "confirmed max is the newest agreed save");
 		CHECK(r.dayOf.at(1) == 3 && r.dayOf.at(2) == 4, "days per generation");
 		CHECK(r.dayEnded.at(2) == 3, "day ended by the save");
+		CHECK(r.dayEnded.at(1) == 2, "day ended by the carried save");
+		CHECK(!r.damaged && record_trusted(r), "a whole record");
 		CHECK(r.carriedFrom == "C:/games/netplay/run-1 x", "carried-from path keeps spaces");
 		CHECK(r.abandoned.size() == 1 && r.abandoned[0] == 3, "abandoned save");
 		CHECK(r.endKind == "save-timeout" && r.endCode == 6, "end line");
@@ -135,9 +153,25 @@ int main()
 		const Record fresh = parse_record(record_header() + record_line_start(0, true));
 		CHECK(fresh.present && fresh.confirmedMax == 0, "a new campaign confirms nothing");
 		CHECK(pick_generation({ 1 }, fresh) == 0, "a checkpoint written but never agreed is not continued");
+		// Fix round 1 (review MAJOR-2): a run without a record (an older
+		// build, or a crash before the record) confirms nothing on its own;
+		// only a folder the player names uses its newest valid checkpoint.
 		const Record legacy = parse_record("", false);
-		CHECK(pick_generation({ 1, 4, 2 }, legacy) == 4, "a run without a record: every valid checkpoint counts");
-		const Record junk = parse_record("saved gen=x\nday gen=1\nstart\n# comment gen=9\n");
+		CHECK(!record_trusted(legacy) && pick_generation({ 1, 4, 2 }, legacy) == 0,
+		      "a run without a record: nothing for a bare --continue");
+		CHECK(pick_generation({ 1, 4, 2 }, legacy, true) == 4, "a named run without a record: its newest valid one");
+		// A damaged record (a crash): NUL bytes, or no header line.
+		const Record zeroed = parse_record(std::string(200, '\0'));
+		CHECK(zeroed.present && zeroed.damaged && pick_generation({ 1 }, zeroed) == 0, "a zeroed record is damaged");
+		const Record tail = parse_record(record_header() + record_line_saved(1, 9, 2) + std::string(40, '\0'));
+		CHECK(tail.damaged && pick_generation({ 1 }, tail) == 0, "NUL bytes after good lines: damaged");
+		CHECK(pick_generation({ 1 }, tail, true) == 1, "a named damaged run: its newest valid one");
+		const Record headless = parse_record(record_line_saved(1, 9, 2));
+		CHECK(headless.damaged, "no header line: damaged");
+		const Record headerOnly = parse_record(record_header());
+		CHECK(!headerOnly.damaged && pick_generation({ 1 }, headerOnly) == 0,
+		      "a header only (a continue whose copies never finished): nothing confirmed");
+		const Record junk = parse_record(record_header() + "saved gen=x\nday gen=1\nstart\n# comment gen=9\n");
 		CHECK(junk.confirmedMax == 0 && junk.dayOf.empty(), "malformed lines are ignored");
 		CHECK(record_field("day gen=1 day_ended=5 day=4", "day") == "4", "day= is not day_ended=");
 	}
@@ -154,7 +188,12 @@ int main()
 		e.extraArgs = "--netplay-input keyboard";
 		std::vector<std::string> l = recovery_lines(e);
 		CHECK(contains(l, "DESYNC") && contains(l, "at frame 30012"), "what happened");
-		CHECK(contains(l, "Last saved day: day 3"), "the last saved day");
+		CHECK(contains(l, "Last save: the campaign continues from the start of day 3 (checkpoint 1)."),
+		      "the last save, day only");
+		e.dayEnded = 2;
+		l = recovery_lines(e);
+		CHECK(contains(l, "Last save: the end of day 2; the campaign continues from the start of day 3 (checkpoint 1)."),
+		      "the last save names the day that ended and the day that follows");
 		CHECK(contains(l, "  or: .\\nectar.exe --netplay-host-ice --continue --netplay-input keyboard"),
 		      "the exact command, PowerShell-ready (.\\ prefix)");
 		CHECK(contains(l, "  .\\host.bat --continue"), "the .bat route with --continue");
@@ -178,6 +217,38 @@ int main()
 		CHECK(contains(l, "run .\\host.bat (or .\\nectar.exe --netplay-host-ice --netplay-input keyboard)"),
 		      "host: its own command with its switches");
 		CHECK(local_command("nectar.exe") == ".\\nectar.exe", "plain exe name: .\\ prefix");
+		CHECK(local_command_cmd("nectar.exe") == ".\\nectar.exe", "plain exe name: the same in Command Prompt");
+		CHECK(local_command_cmd("nectar (2).exe") == "\".\\nectar (2).exe\"", "spaces: Command Prompt quotes");
+		// Fix round 1 (reviews): a name that needs quoting gets both forms,
+		// each labelled; the '(PowerShell or Command Prompt)' claim stays only
+		// on the lines that hold for both.
+		{
+			EndInfo q = e;
+			q.kind     = EndKind::Desync;
+			q.host     = true;
+			q.gen      = 1;
+			q.day      = 3;
+			q.dayEnded = 2;
+			q.exe      = "nectar (2).exe";
+			const std::vector<std::string> ql = recovery_lines(q);
+			CHECK(contains(ql, "  or in PowerShell: & '.\\nectar (2).exe' --netplay-host-ice --continue") &&
+			          contains(ql, "  or in Command Prompt: \".\\nectar (2).exe\" --netplay-host-ice --continue"),
+			      "quoted exe: a PowerShell line and a Command Prompt line");
+			CHECK(!contains(ql, "  or: &"), "quoted exe: the call operator is never offered to both consoles");
+			std::vector<std::string> qb(ql.begin() + 1, ql.end());
+			const std::vector<std::string> qbl = banner_lines(qb, 6);
+			CHECK(!contains(qbl, "Command Prompt:") && contains(qbl, "Your partner joins"),
+			      "quoted exe banner: the Command Prompt-only line is left out, the rest fits");
+			q.host = false;
+			CHECK(contains(recovery_lines(q),
+			               "(or, in PowerShell, & '.\\nectar (2).exe' --netplay-host-ice --continue)"),
+			      "quoted exe, joiner: labelled PowerShell");
+			q.gen  = 0;
+			q.host = true;
+			CHECK(contains(recovery_lines(q),
+			               "run .\\host.bat (or, in PowerShell, & '.\\nectar (2).exe' --netplay-host-ice"),
+			      "quoted exe, new campaign: labelled PowerShell");
+		}
 		CHECK(local_command("nectar (2).exe") == "& '.\\nectar (2).exe'", "spaces: PowerShell call operator");
 		CHECK(local_command("it's.exe") == "& '.\\it''s.exe'", "a quote is doubled");
 		// The banner font has no backslash: PowerShell's '/' form, labelled.
@@ -187,6 +258,33 @@ int main()
 		      "banner: says the / form is PowerShell's");
 		for (const std::string& ln : recovery_lines(e)) {
 			CHECK(banner_line(ln).find('\\') == std::string::npos, "banner: no backslash left");
+		}
+		// Fix round 1: banner_lines labels the first '/' command once, for the
+		// joiner too (its lines had no label).
+		{
+			EndInfo jb   = e;
+			jb.kind      = EndKind::Desync;
+			jb.gen       = 1;
+			jb.day       = 3;
+			jb.dayEnded  = 2;
+			jb.host      = false;
+			std::vector<std::string> body = recovery_lines(jb);
+			body.erase(body.begin());
+			const std::vector<std::string> b = banner_lines(body, 6);
+			size_t labelled = 0;
+			for (const std::string& x : b) {
+				if (x.find("(PowerShell form)") != std::string::npos) ++labelled;
+				CHECK(x.find('\\') == std::string::npos, "joiner banner: no backslash");
+			}
+			CHECK(labelled == 1 && contains(b, "./host.bat --continue (or ./nectar.exe"),
+			      "joiner banner: the first command line says it is PowerShell's form, once");
+			EndInfo hb = jb;
+			hb.host    = true;
+			std::vector<std::string> hbody = recovery_lines(hb);
+			hbody.erase(hbody.begin());
+			const std::vector<std::string> h = banner_lines(hbody, 6);
+			CHECK(!contains(h, "(PowerShell form)") && contains(h, "the console window has the Command Prompt form"),
+			      "host banner: the heading line carries the label, no second one");
 		}
 		// A joiner whose agreed day-end save the host may have abandoned
 		// (the savetimeout pair): no saved day claimed, the host decides.

@@ -21,7 +21,12 @@ namespace pc_netplay_hud {
 
 constexpr double kStallMinMs  = 34.0;    // one 30 Hz frame (33.3 ms) shown late
 constexpr double kWindowMs    = 10000.0; // "stalls in the last 10 s"
-constexpr int kStallRing      = 64;      // more than 10 s / 34 ms / 4: plenty
+// Every episode that can end inside the window: episodes are at least
+// kStallMinMs long and do not overlap, so at most kWindowMs / kStallMinMs
+// (294) end in it. Fix round 1: the ring was 64, which saturated the count
+// (and the stalled time) on a bad link (review: a joiner read 64 while about
+// 90 stalls per 10 s happened).
+constexpr int kStallRing = (int)(kWindowMs / kStallMinMs) + 2;
 
 // Ring of recent stall episodes (end time, duration), wall-clock ms.
 class StallWindow {
