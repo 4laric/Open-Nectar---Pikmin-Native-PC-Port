@@ -5,12 +5,12 @@ name: Windows build
 # the p2_ host tests and publishes nectar.exe with its runtime DLLs so agents
 # can download a build instead of compiling on the owner's PC.
 #
-# Test scope: `ctest -R p2_` only. The Windows-only `pc_bbft_test`
-# (and its `pc_bbft_background_test` variant) is deliberately NOT built or run:
-# it has a known link failure on MinGW that reproduces at base, independent of
-# any lane's change. Only `pikmin_pc` and the executables behind the p2_ tests
-# are built, so that target never enters the build graph. The full Linux ctest
-# still runs in linux.yml.
+# Test scope: the p2_ tests plus the Windows-only `pc_bbft_test` (and its
+# `pc_bbft_background_test` variant). Only `pikmin_pc` and the executables
+# behind those tests are built. A manual run with `all_targets` builds every
+# target and requires `ninja -n` to report no work, which is the private
+# build-dir evidence AGENTS.md asks for. The full Linux ctest still runs in
+# linux.yml.
 
 on:
   push:
@@ -19,6 +19,11 @@ on:
       - 'claude/**'
   pull_request:
   workflow_dispatch:
+    inputs:
+      all_targets:
+        description: Build every target and require `ninja -n` to report no work
+        type: boolean
+        default: false
 
 concurrency:
   group: windows-${{ github.event_name }}-${{ github.ref }}
@@ -86,7 +91,8 @@ jobs:
             -DPIKMIN_NATIVE_OPTIMIZE=OFF \
             -DPIKMIN_ENABLE_IPO=ON
 
-      - name: Build pikmin_pc and p2 test targets
+      - name: Build pikmin_pc and p2/bbft test targets
+        if: ${{ !inputs.all_targets }}
         run: |
           # Every p2_ test runs an executable of the same name in the build
           # root, so the test list is the target list.
@@ -94,10 +100,20 @@ jobs:
             | sed -E 's/^add_test\(([^ ]+) "([^"]+)".*/\1 \2/' \
             | awk '$1 ~ /p2_/ { n = $2; sub(/.*\//, "", n); sub(/\.exe$/, "", n); print n }' \
             | sort -u)
-          echo "Building pikmin_pc + ${#p2_targets[@]} p2 test targets"
+          echo "Building pikmin_pc + pc_bbft_test + ${#p2_targets[@]} p2 test targets"
           ccache -z
-          cmake --build build --target pikmin_pc "${p2_targets[@]}" -j 4
+          cmake --build build --target pikmin_pc pc_bbft_test "${p2_targets[@]}" -j 4
           ccache -s
+
+      - name: Build all targets
+        if: ${{ inputs.all_targets }}
+        run: |
+          ccache -z
+          cmake --build build -j 4
+          ccache -s
+          dry_run="$(cmake --build build -- -n)"
+          echo "${dry_run}"
+          test "${dry_run}" = 'ninja: no work to do.'
 
       - name: Save ccache
         if: always()
@@ -106,8 +122,8 @@ jobs:
           path: .ccache
           key: ccache-windows-mingw64-${{ github.sha }}
 
-      - name: Run p2 tests
-        run: ctest --test-dir build -R p2_ --output-on-failure -j 4 --timeout 300
+      - name: Run p2 and bbft tests
+        run: ctest --test-dir build -R 'p2_|pc_bbft_' --output-on-failure -j 4 --timeout 300
 
       - name: Package nectar.exe with runtime DLLs
         run: |
