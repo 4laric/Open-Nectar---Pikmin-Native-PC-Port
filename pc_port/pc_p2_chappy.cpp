@@ -2,6 +2,9 @@
 #include "pc_p2_chappy_policy.h"
 #include "pc_p2_chappy_fsm.h"
 #include "pc_p2_chappy_mouth.h"
+#include "pc_p2_king_life.h"
+#include "pc_p2_sfx.h"
+#include "pc_p2_bombsarai_map_trace.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_enemy.h"
 #include "pc_p2_kochappy.h"
@@ -29,6 +32,10 @@
 #include "NaviMgr.h"
 #include "pc_p2_navi_select.h"
 #include "Stickers.h"
+#include "BombItem.h"
+#include "MapCode.h"
+#include "ItemMgr.h"
+#include "MapMgr.h"
 #include "system.h"
 #include <algorithm>
 #include <fstream>
@@ -148,6 +155,21 @@ struct ChappyFsm {
     int kingHitsStuck = 0;   // collision-part hits from stuck attackers (x1.0)
     int kingHitsLow = 0;     // partless hits low within 40 XZ (x0.2)
     int kingHitsRefused = 0; // refused: no damage, no flick
+    // Emperor life cycle (pc_p2_king_life.h): buried spawn, proximity Appear,
+    // bomb ingestion and the bomb-stun Damage state.
+    bool kingDoCheckAppear = true;   // Obj::mDoCheckAppear
+    int kingGate = -1;               // last applied underground gate: -1 unknown, 0 surfaced, 1 buried
+    int kingGauge = -1;              // life gauge hidden by the burrow states: -1 unknown, 0 shown, 1 hidden
+    bool kingGaugeWas = false;       // host EB_LifegaugeVisible analogue before the first hide
+    int bombsInjected = 0;           // test-only injected bomb rocks (PIKMIN_P2_KING_TEST_BOMBS)
+    float frameAcc = 0.0f;           // fractional source frames carried between ticks
+    bool mouthBombSlot[p2chappymouth::MaxSlots] = {}; // kamuN slots holding an eaten bomb
+    int eatenBombs = 0;              // StateAttack::mEatenBombs
+    bool eatStun = false;            // StateEat::mDoStunAfter
+    int tongueFrame = -1;            // last attack frame whose tongue tip was traced
+    bool tongueHit = false;          // the lick ended on terrain contact
+    p2kinglife::DamageClock dmg;     // StateDamage clock
+    bool cryRequested = false;       // WarCry KEYEVENT_3 manager request done
 };
 std::map<PelletView*, ChappyFsm> fsms;
 
@@ -393,21 +415,18 @@ const char* clipForState(const SpeciesBank& bank, p2chappyfsm::Family family, in
         case 2: default: push("wait1"); push("wait2"); break;
         }
     } else { // KING
+        // KingChappy AnimID -> clip (KingChappy.h:319-333) through
+        // p2kinglife::clipStem; the fallbacks keep an older staged bank drawing.
+        push(p2kinglife::clipStem(state));
         switch (state) {
-        case 2: push("dead"); break;
-        case 1: push("attack"); break;
-        case 3: push("flick"); break;
-        case 0: push("move1"); push("move"); break;
-        case 6: push("waitact1"); push("wait1"); break;
-        case 4: push("cry"); push("waitact2"); push("wait1"); break; // KINGANIM_WarCry = 'cry'
-        case 5: push("waitact1"); push("wait1"); break;
-        case 8: case 9: push("wait2"); push("wait1"); break;
-        case 10: push("waitact1"); push("wait1"); break;
-        case 11: push("waitact2"); push("wait1"); break;
-        case 7: push("attack"); push("waitact2"); break;
-        case 12: push("type1"); push("attack"); push("waitact2"); break; // KINGANIM_Swallow
-        default: push("wait1"); break;
+        case 5: push("waitact1"); break;
+        case 7: push("attack"); break;
+        case 8: push("wait2"); break;
+        case 10: push("waitact1"); break;
+        case 12: push("attack"); break;
+        default: break;
         }
+        push("wait1");
     }
     for (int i = 0; i < n; ++i) {
         if (prefs[i] && bank.clips.count(prefs[i])) return bank.clips.find(prefs[i])->first.c_str();
@@ -498,10 +517,44 @@ void transition(BTeki* actor, ChappyFsm& s, int next, unsigned gen)
     std::printf("P2_CHAPPY_STATE generator=%u source_id=%u state=%s clip=%s\n", gen,
                 s.spec->source, fsmStateName(s.family, next), s.clip.c_str());
     std::fflush(stdout);
+    if (s.family == p2chappyfsm::FAMILY_KING) {
+        // Per-state clocks and flags (each source State::init starts them fresh).
+        s.frameAcc = 0.0f;
+        s.cryRequested = false;
+        s.tongueFrame = -1;
+        s.tongueHit = false;
+        s.dmg = p2kinglife::DamageClock{};
+        if (next == p2king::Attack) {
+            s.eatenBombs = 0;
+            std::fill(s.mouthBombSlot, s.mouthBombSlot + p2chappymouth::MaxSlots, false);
+        }
+        if (next == p2king::Eat) s.eatStun = true; // Attack routes to Eat only with bombs (mDoStunAfter)
+        using E = p2sfx::Event;
+        switch (next) {
+        case p2king::Attack: pc_p2_sfx(53, gen, E::Attack, actor); break;
+        case p2king::WarCry: pc_p2_sfx(53, gen, E::Roar, actor); break;
+        case p2king::Flick: pc_p2_sfx(53, gen, E::Flick, actor); break;
+        case p2king::Damage: pc_p2_sfx(53, gen, E::Damage, actor); break;
+        case p2king::Appear: pc_p2_sfx(53, gen, E::Appear, actor); break;
+        case p2king::Swallow: pc_p2_sfx(53, gen, E::Eat, actor); break;
+        case p2king::Dead: pc_p2_sfx(53, gen, E::Dead, actor); break;
+        default: break;
+        }
+    }
 }
 
 void setPhase(ChappyFsm& s)
 {
+    if (s.family == p2chappyfsm::FAMILY_KING && s.state != p2king::Dead) {
+        // Looping clips (walk, buried idle, turn, stun) wrap between their loop
+        // bounds instead of freezing on the last pose.
+        const int frames = clipFrames(s.spec->enumName, s.clip);
+        const float f = s.state == p2king::Damage
+                            ? float(s.dmg.frame)
+                            : p2kinglife::clipFrame(s.clip.c_str(), s.stateTime * 30.0f, frames, false);
+        s.phase = frames > 1 ? std::min(1.0f, f / float(frames - 1)) : 1.0f;
+        return;
+    }
     const float dur = clipDuration(s.spec->enumName, s.clip);
     float ph = dur > 0.0f ? s.stateTime / dur : 1.0f;
     if (ph > 1.0f) ph = 1.0f;
@@ -512,7 +565,7 @@ int initialState(p2chappyfsm::Family family)
 {
     if (family == p2chappyfsm::FAMILY_KUMA) return 6; // TurnPath
     if (family == p2chappyfsm::FAMILY_KUMAKO) return 2; // Wait
-    if (family == p2chappyfsm::FAMILY_KING) return 0; // Walk
+    if (family == p2chappyfsm::FAMILY_KING) return p2king::HideWait; // onInit: buried (kingChappy.cpp:107)
     return p2chappy::ADULT_SLEEP;
 }
 
@@ -595,7 +648,9 @@ EatStats doEat(BTeki* actor, ChappyFsm& s, unsigned gen, int frame)
     }
     bool occupied[p2chappymouth::MaxSlots] = {};
     for (int i = 0; i < prof->slots; ++i) {
-        if (s.mouth[i] && std::find(inMouth.begin(), inMouth.end(), s.mouth[i]) != inMouth.end()) {
+        if (s.mouthBombSlot[i]) {
+            occupied[i] = true; // an eaten bomb rock (Emperor eatBomb) holds the slot
+        } else if (s.mouth[i] && std::find(inMouth.begin(), inMouth.end(), s.mouth[i]) != inMouth.end()) {
             occupied[i] = true;
         } else {
             s.mouth[i] = nullptr;
@@ -902,6 +957,11 @@ void pc_p2_chappy_forget(BTeki* actor)
     }
     lastClip.erase(view);
     corpseGenerators.erase(view);
+    {
+        auto known = fsms.find(view);
+        if (known != fsms.end() && known->second.family == p2chappyfsm::FAMILY_KING && actor && actor->mGenerator)
+            pc_p2_sfx_forget(53, pc_p2_campaign_token(actor));
+    }
     fsms.erase(view);
     drawnLive.erase(view);
     drawnCorpse.erase(view);
@@ -911,13 +971,16 @@ void pc_p2_chappy_forget(BTeki* actor)
 
 float pc_p2_chappy_max_health(const BTeki* actor, float fallback)
 {
-    return health.life(actor, fallback);
+    // Keyed by the PelletView base subobject (health.bind(view, ..)); a raw BTeki* is a
+    // different address (PelletView is a later base), so the lookup used to miss and the host
+    // life (1100 / 130) clamped the Emperor and Bulbmin below their retail life.
+    return health.life(static_cast<const PelletView*>(actor), fallback);
 }
 
 float pc_p2_chappy_param_f(const BTeki* actor, int idx, float fallback)
 {
     if (!bankLoaded || !actors.count(const_cast<BTeki*>(actor))) return fallback;
-    if (idx == TPF_Life) return health.life(actor, fallback);
+    if (idx == TPF_Life) return health.life(static_cast<const PelletView*>(actor), fallback);
     // Host blinding (catfish pattern): the suppressed P1 strategy must not
     // see/decide on stale P1 radii even if a future path calls it.
     switch (idx) {
@@ -1360,6 +1423,320 @@ void kingApply(BTeki* actor, ChappyFsm& s, unsigned generator, p2chappymouth::ki
         break;
     }
 }
+
+// ---- Emperor life cycle (pc_p2_king_life.h) ---------------------------------
+static_assert(p2kinglife::BombDormantState == BombAI::BOMB_Unk0, "P1 bomb state drift");
+static_assert(p2kinglife::BombLitState == BombAI::BOMB_Set, "P1 bomb state drift");
+
+// Dev/smoke override of the Appear wake radius (fp02 disc 60): the owner's smoke
+// seeds erupt every buried Emperor as soon as the squad is near the landing
+// site. Unset in normal play. Read once; never in netplay sessions.
+float kingWakeOverride()
+{
+    static const float value = [] {
+        const char* e = std::getenv("PIKMIN_P2_KING_WAKE_RANGE");
+        if (!e || !*e) return 0.0f;
+        char* end = nullptr;
+        const float f = std::strtof(e, &end);
+        return (end != e && std::isfinite(f) && f > 0.0f && f <= 5000.0f) ? f : 0.0f;
+    }();
+    return value;
+}
+
+// Test-only labelled injection (PIKMIN_P2_KING_TEST_BOMBS=n, 1..4): n dormant bomb
+// rocks are born ahead of the Emperor each time it leaves Caution, so the bomb
+// ingestion path can be exercised without a yellow-Pikmin bomb supply. Never set
+// in normal play; every use is logged as P2_CHAPPY_KING_TEST_BOMB.
+int kingTestBombCount()
+{
+    static const int value = [] {
+        const char* e = std::getenv("PIKMIN_P2_KING_TEST_BOMBS");
+        if (!e || !*e) return 0;
+        const int n = std::atoi(e);
+        return n >= 1 && n <= 4 ? n : 0;
+    }();
+    return value;
+}
+
+// Source StateHide.init/StateHideWait.init hardConstraintOn .. StateAppear END
+// hardConstraintOff (isUnderground() == isConstrained()): no atari, damage
+// swallowed, life gauge hidden in HideWait and Appear. The suppressed host has
+// no EB_* flags, so the module drives the host collision/authority options
+// itself (hana / uji pattern).
+void kingApplyGate(BTeki* actor, ChappyFsm& s, unsigned generator)
+{
+    const int buried = p2kinglife::underground(s.state) ? 1 : 0;
+    if (s.kingGate != buried) {
+        s.kingGate = buried;
+        if (buried) {
+            actor->clearTekiOption(TEKIOPT_Atari);
+            actor->setTekiOption(TEKIOPT_Invincible);
+        } else {
+            actor->setTekiOption(TEKIOPT_Atari);
+            actor->clearTekiOption(TEKIOPT_Invincible);
+        }
+        std::printf("P2_CHAPPY_KING_UNDERGROUND generator=%u source_id=%u event=%s state=%s no_atari=%d invulnerable=%d\n",
+                    generator, s.spec->source, buried ? "enter" : "exit", fsmStateName(s.family, s.state), buried,
+                    buried);
+        std::fflush(stdout);
+    }
+    const int hideGauge = p2kinglife::lifeGaugeHidden(s.state) ? 1 : 0;
+    if (s.kingGauge != hideGauge) {
+        if (s.kingGauge < 0) s.kingGaugeWas = actor->getTekiOption(TEKIOPT_LifeGaugeVisible);
+        s.kingGauge = hideGauge;
+        if (hideGauge) actor->clearTekiOption(TEKIOPT_LifeGaugeVisible);
+        else if (s.kingGaugeWas) actor->setTekiOption(TEKIOPT_LifeGaugeVisible);
+    }
+}
+
+// StateHideWait.exec proximity test: isThereOlimar(range) || isTherePikmin(range),
+// 3D distance strictly inside fp02 * scale from the Emperor's position.
+p2kinglife::WakeInputs kingWakeInputs(BTeki* actor, const ChappyFsm& s)
+{
+    p2kinglife::WakeInputs in;
+    in.doCheckAppear = s.kingDoCheckAppear;
+    in.framesInState = int(s.stateTime * 30.0f) + 1; // mCanCheckAppearTimer++ precedes the test
+    if (!p2kinglife::wakeCheckRuns(in)) return in;
+    const float radius = p2kinglife::wakeRadius(1.0f, kingWakeOverride());
+    const Vector3f pos = actor->getPosition();
+    for (Navi* n : pc_p2_navis()) {
+        if (!n->isAlive()) continue;
+        const Vector3f q = n->getPosition();
+        if (p2kinglife::within(q.x - pos.x, q.y - pos.y, q.z - pos.z, radius)) { in.naviInRange = true; break; }
+    }
+    if (!in.naviInRange && pikiMgr) {
+        Iterator it(pikiMgr);
+        CI_LOOP(it)
+        {
+            Piki* p = static_cast<Piki*>(*it);
+            if (!p || !p->isAlive() || !p->isVisible() || p->isBuried() || p->isStickToMouth()) continue;
+            const Vector3f q = p->getPosition();
+            if (p2kinglife::within(q.x - pos.x, q.y - pos.y, q.z - pos.z, radius)) { in.pikminInRange = true; break; }
+        }
+    }
+    return in;
+}
+
+// StateAppear KEYEVENT_3: EnemyFunc::flickNearbyPikmin / flickNearbyNavi with
+// fp09 range (100), fp10 power (200) and the general shake damage, 3D strictly
+// inside the range, skipping Pikmin stuck to this Emperor (ConditionPikminNearby).
+void doKingAppearShake(BTeki* actor, unsigned generator, ChappyFsm& s)
+{
+    namespace K = p2chappymouth::king;
+    const Vector3f pos = actor->getPosition();
+    const float range = p2king::AppearShakeOffRange;
+    int flickedPiki = 0, flickedNavi = 0;
+    std::vector<Piki*> nearby;
+    if (pikiMgr) {
+        Iterator it(pikiMgr);
+        CI_LOOP(it)
+        {
+            Piki* p = static_cast<Piki*>(*it);
+            if (!p || !p->isAlive() || p->isStickToMouth() || p->getStickObject() == actor) continue;
+            const Vector3f q = p->getPosition();
+            if (p2kinglife::within(q.x - pos.x, q.y - pos.y, q.z - pos.z, range)) nearby.push_back(p);
+        }
+    }
+    for (Piki* p : nearby)
+        if (p->isAlive() && p->stimulate(InteractFlick(actor, p2king::AppearShakeOffPower, K::ShakeDamage, FLICK_BACKWARDS_ANGLE)))
+            ++flickedPiki;
+    for (Navi* n : pc_p2_navis()) {
+        if (!n->isAlive()) continue;
+        const Vector3f q = n->getPosition();
+        if (!p2kinglife::within(q.x - pos.x, q.y - pos.y, q.z - pos.z, range)) continue;
+        if (n->stimulate(InteractFlick(actor, p2king::AppearShakeOffPower, K::ShakeDamage, FLICK_BACKWARDS_ANGLE)))
+            ++flickedNavi;
+    }
+    std::printf("P2_CHAPPY_KING_APPEAR_SHAKE generator=%u source_id=%u range=%.0f power=%.0f flicked_piki=%d flicked_navi=%d\n",
+                generator, s.spec->source, range, p2king::AppearShakeOffPower, flickedPiki, flickedNavi);
+    std::fflush(stdout);
+}
+
+// Source Mgr::requestState (kingChappyMgr.cpp:53-66) in manager order. The port
+// has no manager array, so the order is ascending campaign token: stable across
+// sessions and identical on every netplay peer. Returns the peer forced into
+// `stateId` (already transitioned) or nullptr.
+BTeki* kingRequestState(BTeki* self, unsigned selfToken, int stateId)
+{
+    struct Entry {
+        unsigned token;
+        BTeki* actor;
+    };
+    std::vector<Entry> order;
+    for (auto& kv : fsms) {
+        if (kv.second.family != p2chappyfsm::FAMILY_KING) continue;
+        BTeki* other = static_cast<BTeki*>(kv.first);
+        order.push_back({other->mGenerator ? pc_p2_campaign_token(other) : 0u, other});
+    }
+    std::sort(order.begin(), order.end(), [](const Entry& a, const Entry& b) { return a.token < b.token; });
+    std::vector<p2kinglife::Peer> peers;
+    int me = -1;
+    for (size_t i = 0; i < order.size(); ++i) {
+        const ChappyFsm& f = fsms[static_cast<PelletView*>(order[i].actor)];
+        p2kinglife::Peer p;
+        p.state = f.state;
+        p.alive = order[i].actor->mHealth > 0.0f && !f.deadLogged;
+        p.flickTimer = f.kingFlickTimer;
+        peers.push_back(p);
+        if (order[i].actor == self) me = int(i);
+    }
+    const int hit = p2kinglife::requestState(peers.data(), int(peers.size()), me, stateId);
+    if (hit < 0) return nullptr;
+    BTeki* other = order[size_t(hit)].actor;
+    ChappyFsm& f = fsms[static_cast<PelletView*>(other)];
+    std::printf("P2_CHAPPY_KING_REQUEST from=%u to=%u state=%s\n", selfToken, order[size_t(hit)].token,
+                fsmStateName(f.family, stateId));
+    std::fflush(stdout);
+    stop(other);
+    transition(other, f, stateId, order[size_t(hit)].token);
+    return other;
+}
+
+// Dormant/lit P1 bomb rocks the tongue can take (canEat), in item-manager order.
+std::vector<BombItem*> kingEatableBombs()
+{
+    std::vector<BombItem*> out;
+    if (!itemMgr) return out;
+    Iterator it(itemMgr);
+    CI_LOOP(it)
+    {
+        Creature* c = *it;
+        if (!c || c->mObjType != OBJTYPE_Bomb) continue;
+        BombItem* bomb = static_cast<BombItem*>(c);
+        if (!bomb->getCurrState()) continue;
+        if (p2kinglife::bombEatable(bomb->getCurrState()->getID(), bomb->isGrabbed())) out.push_back(bomb);
+    }
+    return out;
+}
+
+int kingMouthBombCount(const ChappyFsm& s)
+{
+    int n = 0;
+    for (bool b : s.mouthBombSlot) n += b ? 1 : 0;
+    return n;
+}
+
+// Source KingChappy::Obj::eatBomb (kingChappy.cpp:1009-1043): every eatable bomb
+// within a free kamuN slot's radius sticks to that slot (first free slot in
+// index order, strict <). The P1 bomb rock is removed on capture (no blast; the
+// port has no bomb-in-mouth visual) and the slot stays taken until the Damage
+// state's KEYEVENT_4 empties the mouth. Returns the bombs taken by this call.
+int doEatBombs(BTeki* actor, ChappyFsm& s, unsigned gen, int frame)
+{
+    const p2chappymouth::Profile* prof = p2chappymouth::profileForSource(s.spec->source);
+    if (!prof) return 0;
+    std::vector<BombItem*> bombs = kingEatableBombs();
+    if (bombs.empty()) return 0;
+    // Slots taken by Pikmin this Emperor already holds (same occupancy rule as doEat).
+    bool occupiedByPikmin[p2chappymouth::MaxSlots] = {};
+    {
+        std::vector<Creature*> inMouth;
+        Stickers stickers(actor);
+        Iterator it(&stickers);
+        CI_LOOP(it)
+        {
+            Creature* stuck = *it;
+            if (stuck && stuck->isPiki() && stuck->isStickToMouth()) inMouth.push_back(stuck);
+        }
+        for (int i = 0; i < prof->slots; ++i)
+            occupiedByPikmin[i] = s.mouth[i] && std::find(inMouth.begin(), inMouth.end(), s.mouth[i]) != inMouth.end();
+    }
+    const p2chappymouth::Vec3 apos = mouthVec(actor->getPosition());
+    const float radius = p2chappymouth::effectiveRadius(*prof);
+    int count = 0;
+    for (BombItem* bomb : bombs) {
+        const p2chappymouth::Vec3 bp = mouthVec(bomb->getPosition());
+        for (int i = 0; i < prof->slots; ++i) {
+            if (s.mouthBombSlot[i] || occupiedByPikmin[i]) continue;
+            const p2chappymouth::Vec3 slot = p2chappymouth::slotWorld(*prof, frame, i, apos, s.heading);
+            const float d = p2chappymouth::distance(slot, bp);
+            if (d < radius) {
+                std::printf("P2_CHAPPY_BOMB_EAT generator=%u source_id=%u frame=%d slot=%d dist=%.1f bomb_state=%d "
+                            "x=%.1f y=%.1f z=%.1f\n",
+                            gen, s.spec->source, frame, i, d, bomb->getCurrState()->getID(), bp.x, bp.y, bp.z);
+                std::fflush(stdout);
+                s.mouthBombSlot[i] = true;
+                bomb->kill(false);
+                ++count;
+                break;
+            }
+        }
+    }
+    return count;
+}
+
+// Test-only bomb injection; see kingTestBombCount.
+void kingInjectTestBombs(BTeki* actor, ChappyFsm& s, unsigned gen)
+{
+    const int want = kingTestBombCount();
+    if (!want || !itemMgr || !mapMgr || s.bombsInjected >= 8) return;
+    const Vector3f pos = actor->getPosition();
+    for (int i = 0; i < want; ++i) {
+        // 105 ahead: outside the fp06 invisible range (80), inside the tongue reach.
+        const float side = (float(i) - 0.5f * float(want - 1)) * 18.0f;
+        const float x = pos.x + std::sin(s.heading) * 105.0f + std::cos(s.heading) * side;
+        const float z = pos.z + std::cos(s.heading) * 105.0f - std::sin(s.heading) * side;
+        CollTriInfo* ground = mapMgr->getCurrTri(x, z, true);
+        if (!ground || MapCode::getAttribute(ground) == ATTR_Water) continue;
+        BombItem* bomb = static_cast<BombItem*>(itemMgr->birth(OBJTYPE_Bomb));
+        if (!bomb) break;
+        bomb->init(Vector3f(x, mapMgr->getMinY(x, z, true) + 3.0f, z));
+        bomb->startAI(0);
+        ++s.bombsInjected;
+        std::printf("P2_CHAPPY_KING_TEST_BOMB generator=%u source_id=%u injected=%d x=%.1f z=%.1f label=test_only\n",
+                    gen, s.spec->source, s.bombsInjected, x, z);
+        std::fflush(stdout);
+    }
+}
+
+// Source StateDamage KEYEVENT_4: getPikminInMouth(true) kills every Pikmin in the
+// mouth and counts the other creatures stuck to it (the eaten bombs), then
+// addDamage(count * fp05) and mFlickTimer = 0.
+void kingMouthMeal(BTeki* actor, ChappyFsm& s, unsigned gen)
+{
+    int killed = 0;
+    {
+        Stickers stickers(actor);
+        Iterator it(&stickers);
+        CI_LOOP(it)
+        {
+            Creature* stuck = *it;
+            if (!stuck || !stuck->isPiki() || !stuck->isStickToMouth()) continue;
+            if (stuck->stimulate(InteractKill(actor, 0))) ++killed;
+        }
+    }
+    const int bombs = kingMouthBombCount(s);
+    const float damage = p2kinglife::mouthBombDamage(bombs);
+    const float before = actor->mHealth;
+    if (damage > 0.0f) actor->mStoredDamage += damage;
+    s.kingFlickTimer = 0.0f;
+    std::fill(s.mouthBombSlot, s.mouthBombSlot + p2chappymouth::MaxSlots, false);
+    std::printf("P2_CHAPPY_KING_BOMB_DAMAGE generator=%u source_id=%u bombs=%d damage=%.1f pikmin_killed=%d "
+                "health_before=%.1f\n",
+                gen, s.spec->source, bombs, damage, killed, before);
+    std::fflush(stdout);
+}
+
+// Source StateAttack::exec tongue trace (kingChappyState.cpp:157-172): a radius-5
+// sphere at bero6 + (0,5,0) moved along normalise(bero6 - bero5) for one frame;
+// a floor or wall triangle contact ends the lick. The tip comes from the retail
+// attack.bca (scripts/p2_king_tables.py). Static map only.
+bool kingTongueHits(BTeki* actor, const ChappyFsm& s, int frame, Vector3f& tipOut)
+{
+    if (!mapMgr || !mapMgr->mMapModel) return false;
+    static P2BombSaraiTraceProxy* proxy = new P2BombSaraiTraceProxy();
+    const p2kinglife::Tongue t = p2kinglife::tongueAt(frame);
+    const p2chappymouth::Vec3 apos = mouthVec(actor->getPosition());
+    const p2chappymouth::Vec3 tip =
+        p2chappymouth::localToWorld(apos, s.heading, p2chappymouth::Vec3{t.tip[0], t.tip[1], t.tip[2]});
+    const p2chappymouth::Vec3 dir = p2chappymouth::localToWorld(p2chappymouth::Vec3{0, 0, 0}, s.heading,
+                                                                p2chappymouth::Vec3{t.dir[0], t.dir[1], t.dir[2]});
+    tipOut = Vector3f(tip.x, tip.y, tip.z);
+    proxy->clear();
+    MoveTrace movement(Vector3f(tip.x, tip.y, tip.z), Vector3f(dir.x, dir.y, dir.z), p2kinglife::TongueSphereRadius, true);
+    mapMgr->traceMove(proxy, movement, 1.0f / 30.0f);
+    return proxy->mGroundTriangle != nullptr || proxy->wall;
+}
 } // namespace
 
 // Source KingChappy::Obj::damageCallBack (kingChappy.cpp:824-848) through
@@ -1383,6 +1760,8 @@ float pc_p2_chappy_king_damage_rate(BTeki* actor, Creature* owner, CollPart* par
     if (ft == fsms.end() || ft->second.family != p2chappyfsm::FAMILY_KING) return -1.0f;
     ChappyFsm& s = ft->second;
     if (s.state == 2) return -1.0f; // Dead: host corpse path
+    // Buried (Hide / HideWait / Appear): isUnderground() == isConstrained(); nothing reaches it.
+    if (p2kinglife::underground(s.state)) return 0.0f;
     namespace K = p2chappymouth::king;
     K::DamageAttacker a;
     a.present = owner != nullptr;
@@ -1411,6 +1790,27 @@ float pc_p2_chappy_king_damage_rate(BTeki* actor, Creature* owner, CollPart* par
         std::fflush(stdout);
     }
     return K::damageRate(d);
+}
+
+// Source KingChappy::Obj::bombCallBack (kingChappy.cpp:875-880):
+// EnemyBase::bombCallBack(.., 0.25f * damage) = addDamage(0.25 * damage, 1.0f).
+// Called by InteractBomb::actTeki for every bomb blast that reaches a Teki.
+// Returns true when `teki` is a registered Emperor (the blast is handled here,
+// including the buried case where it does nothing); false leaves the host path.
+bool pc_p2_chappy_king_bomb(BTeki* actor, float damage)
+{
+    if (!actor) return false;
+    auto ft = fsms.find(static_cast<PelletView*>(actor));
+    if (ft == fsms.end() || ft->second.family != p2chappyfsm::FAMILY_KING) return false;
+    ChappyFsm& s = ft->second;
+    if (s.state == 2 || p2kinglife::underground(s.state)) return true;
+    const float taken = p2kinglife::externalBlastDamage(damage);
+    actor->mStoredDamage += taken;
+    s.kingFlickTimer += p2chappymouth::king::FlickPerHit;
+    std::printf("P2_CHAPPY_KING_BLAST source_id=%u damage_in=%.1f damage=%.2f health=%.1f\n", s.spec->source, damage,
+                taken, actor->mHealth);
+    std::fflush(stdout);
+    return true;
 }
 
 // Source EnemyBase::addDamage flickSpeed (enemyBase.cpp:2762-2773) for the
@@ -1453,6 +1853,7 @@ void pc_p2_chappy_update(BTeki* actor)
         std::printf("P2_CHAPPY_DAMAGE generator=%u source_id=%u health=%.1f\n", generator,
                     s.spec->source, actor->mHealth);
         std::fflush(stdout);
+        if (s.family == p2chappyfsm::FAMILY_KING) pc_p2_sfx(53, generator, p2sfx::Event::Damage, actor);
     }
     s.lastHealth = actor->mHealth;
     (void)previousHealth;
@@ -1507,6 +1908,7 @@ void pc_p2_chappy_update(BTeki* actor)
         }
     }
 
+    if (s.family == p2chappyfsm::FAMILY_KING) kingApplyGate(actor, s, generator);
     const Vector3f pos = actor->getPosition();
     // KingChappy uses the source searchTarget / checkAttack gate (#884): no
     // tongue attack on a target inside the invisible range, where no kamu slot
@@ -1867,11 +2269,26 @@ void pc_p2_chappy_update(BTeki* actor)
             in.flickStart = in.walker != K::WalkTurn && kingCheckFlick(actor, s, frames);
             in.shout = in.flickStart && kingShout(actor, s);
             in.inRange = target && !s.walker.targetDropped && K::attackGate(apos, s.heading, tpos);
+            if (!in.inRange) {
+                // checkAttack's bomb branch (kingChappy.cpp:1806-1822, mCanAttackBombs on): an
+                // eatable bomb rock in the attack cone beyond the fp06 invisible range starts the
+                // same Attack.
+                for (BombItem* bomb : kingEatableBombs()) {
+                    if (K::attackGate(apos, s.heading, mouthVec(bomb->getPosition()))) {
+                        in.inRange = true;
+                        std::printf("P2_CHAPPY_KING_BOMB_TARGET generator=%u source_id=%u x=%.1f z=%.1f\n", generator,
+                                    s.spec->source, bomb->getPosition().x, bomb->getPosition().z);
+                        std::fflush(stdout);
+                        break;
+                    }
+                }
+            }
             const K::WalkNext next = K::walkStateStep(in);
             if (next != K::NextWalk) { kingApply(actor, s, generator, next, "walk"); break; }
             const Vector3f drive(std::sin(s.heading) * s.spec->moveSpeed, 0.0f, std::cos(s.heading) * s.spec->moveSpeed);
             actor->inputDrive(drive);
             actor->mVelocity.set(drive);
+            pc_p2_sfx_stride(53, generator, actor, 60.0f); // two footfalls per 80-frame move1 cycle
             break;
         }
         case 4: { // WarCry: source StateWarCry (kingChappyState.cpp:1588-1680),
@@ -1879,6 +2296,13 @@ void pc_p2_chappy_update(BTeki* actor)
                   // Pikmin and nearby captains and resets the flick timer.
             stop(actor);
             const float frames = s.stateTime * 30.0f;
+            if (!s.cryRequested && frames >= float(p2kinglife::WarCryRequestFrame)) {
+                // KEYEVENT_3: requestTransit(Appear) then requestTransit(WarCry): another buried
+                // Emperor erupts, another walking one with a running flick timer roars.
+                s.cryRequested = true;
+                kingRequestState(actor, generator, p2king::Appear);
+                kingRequestState(actor, generator, p2king::WarCry);
+            }
             if (!s.flickFired && frames >= float(p2chappymouth::king::CryShakeFrame)) {
                 s.flickFired = true;
                 doKingShake(actor, s, generator, p2chappymouth::king::CryShakeFrame, false);
@@ -1908,31 +2332,41 @@ void pc_p2_chappy_update(BTeki* actor)
             break;
         }
         case 1: { // Attack
-            // Source StateAttack (kingChappyState.cpp:148-250): from KEYEVENT_3
-            // (frame 40) eatPikmin runs every frame with the tongue's kamu1..9
-            // slots, captains touching a slot are attacked, and KEYEVENT_END
-            // goes to Swallow when Pikmin were eaten, else Walk. Every integer
-            // frame of the window is evaluated (a long tick catches up).
-            // Adaptation: no tongue terrain trace (:162-185); on flat ground the
-            // tongue sphere never reaches the floor, so the window runs to END.
+            // Source StateAttack::exec (kingChappyState.cpp:148-250): from KEYEVENT_3
+            // (frame 40) eatBomb() then eatPikmin() run every frame with the tongue's
+            // kamu1..9 slots; the tongue tip (bero6) is traced against the map every
+            // frame and a floor or wall contact ends the lick at once; captains
+            // touching a slot are attacked; KEYEVENT_END routes by what was eaten
+            // (bombs -> Eat + stun, Pikmin -> Swallow, else Walk). Every integer
+            // frame is evaluated (a long tick catches up).
             stop(actor);
             const float frames = s.stateTime * 30.0f;
             const p2chappymouth::Profile* prof = p2chappymouth::profileForSource(s.spec->source);
             const int endFrame = std::max(clipFrames(s.spec->enumName, "attack"), prof ? prof->lastFrame + 1 : 0);
-            if (prof) {
-                const int upto = std::min(int(frames), prof->lastFrame);
-                for (int f = std::max(prof->firstFrame, s.lastEatFrame + 1); f <= upto; ++f) {
+            const int upto = std::min(int(frames), p2kingtables::kTongueFrames - 1);
+            Vector3f hitTip(0.0f, 0.0f, 0.0f);
+            int hitFrame = -1;
+            for (int f = s.tongueFrame + 1; f <= upto && !s.tongueHit; ++f) {
+                if (prof && f >= prof->firstFrame && f <= prof->lastFrame) {
+                    const int bombs = doEatBombs(actor, s, generator, f);
+                    if (bombs > s.eatenBombs) s.eatenBombs = bombs; // source keeps the max of eatBomb()
                     const EatStats st = doEat(actor, s, generator, f);
                     if (s.winFreeBefore < 0) s.winFreeBefore = st.freeBefore;
                     s.winEligible = std::max(s.winEligible, st.eligible);
                     s.winRefusedNoHost += st.refusedNoHost;
                     s.winNearestBehind = s.winNearestBehind || st.nearestBehind;
                     s.winLegacyBehind = s.winLegacyBehind || st.legacyBehind;
-                    s.winNaviHits += kingNaviContact(actor, s, *prof, f);
                     s.lastEatFrame = f;
                 }
+                s.tongueFrame = f;
+                if (kingTongueHits(actor, s, f, hitTip)) {
+                    s.tongueHit = true;
+                    hitFrame = f;
+                    break; // the source returns before the captain-contact loop and the key events
+                }
+                if (prof && f >= prof->firstFrame && f <= prof->lastFrame) s.winNaviHits += kingNaviContact(actor, s, *prof, f);
             }
-            if (frames >= float(endFrame)) {
+            if (s.tongueHit || frames >= float(endFrame)) {
                 EatStats win;
                 win.eligible = s.winEligible;
                 win.captured = s.eatenThisAttack;
@@ -1940,14 +2374,20 @@ void pc_p2_chappy_update(BTeki* actor)
                 win.refusedNoHost = s.winRefusedNoHost;
                 win.nearestBehind = s.winNearestBehind;
                 win.legacyBehind = s.winLegacyBehind;
-                logBite(actor, s, generator, endFrame, prof ? prof->firstFrame : 0, s.lastEatFrame, win,
+                const int atFrame = s.tongueHit ? hitFrame : endFrame;
+                if (s.tongueHit) {
+                    std::printf("P2_CHAPPY_KING_TONGUE_HIT generator=%u source_id=%u frame=%d x=%.1f y=%.1f z=%.1f\n",
+                                generator, s.spec->source, hitFrame, hitTip.x, hitTip.y, hitTip.z);
+                }
+                logBite(actor, s, generator, atFrame, prof ? prof->firstFrame : 0, s.lastEatFrame, win,
                         prof ? prof->slots : 0);
                 std::printf("P2_CHAPPY_ATTACK generator=%u source_id=%u frame=%d navi=%d piki=0 eaten=%d "
-                            "eaten_count=%d\n",
-                            generator, s.spec->source, endFrame, s.winNaviHits > 0 ? 1 : 0,
-                            s.eatenThisAttack > 0 ? 1 : 0, s.eatenThisAttack);
+                            "eaten_count=%d bombs=%d tongue_abort=%d\n",
+                            generator, s.spec->source, atFrame, s.winNaviHits > 0 ? 1 : 0,
+                            s.eatenThisAttack > 0 ? 1 : 0, s.eatenThisAttack, kingMouthBombCount(s),
+                            s.tongueHit ? 1 : 0);
                 std::fflush(stdout);
-                transition(actor, s, s.eatenThisAttack > 0 ? 12 : 0, generator);
+                transition(actor, s, p2kinglife::attackExit(s.eatenBombs, s.eatenThisAttack), generator);
             }
             break;
         }
@@ -1965,38 +2405,96 @@ void pc_p2_chappy_update(BTeki* actor)
             if (frames >= float(endFrame)) transition(actor, s, 0, generator);
             break;
         }
-        case 5: { // Damage (bomb stun; bombs have no host equivalent)
+        case 5: { // Damage: source StateDamage (kingChappyState.cpp:1706-1775), damage.bca
+            // KEYEVENT_4 (frame 15) kills the mouth contents and applies bombs * fp05, KEYEVENT_6
+            // (frame 60) starts the ip03 stun timer while the clip loops 65..94, END -> Walk/Dead.
             stop(actor);
-            if (s.stateTime >= clipDuration(s.spec->enumName, s.clip)) transition(actor, s, 0, generator);
+            s.frameAcc += dt * 30.0f;
+            while (s.frameAcc >= 1.0f && s.state == 5) {
+                s.frameAcc -= 1.0f;
+                const int ev = p2kinglife::damageStep(s.dmg);
+                if (ev & p2kinglife::DEvKill) kingMouthMeal(actor, s, generator);
+                if (ev & p2kinglife::DEvStun) {
+                    std::printf("P2_CHAPPY_KING_STUN generator=%u source_id=%u stun_frames=%d\n", generator, s.spec->source,
+                                p2king::BombDamageTime);
+                    std::fflush(stdout);
+                }
+                if (ev & p2kinglife::DEvEnd) {
+                    std::printf("P2_CHAPPY_KING_STUN_END generator=%u source_id=%u health=%.1f\n", generator,
+                                s.spec->source, actor->mHealth);
+                    std::fflush(stdout);
+                    transition(actor, s, actor->mHealth <= 0.0f ? 2 : 0, generator);
+                }
+            }
             break;
         }
-        case 8: { // Hide
+        case 7: { // Eat: source StateEat (kingChappyState.cpp:1839-1875), type2; END -> Damage (stun)
             stop(actor);
-            if (s.stateTime >= 1.0f) transition(actor, s, 9, generator);
+            const float frames = s.stateTime * 30.0f;
+            if (frames >= float(clipFrames(s.spec->enumName, s.clip)))
+                transition(actor, s, p2kinglife::eatExit(s.eatStun), generator);
             break;
         }
-        case 9: { // HideWait (burrowed; ip02 adaptation)
+        case 8: { // Hide: source StateHide (kingChappyState.cpp:1881-1945), dive.bca; KEYEVENT_2
+                  // (frame 58) the dive effect + appear sound, END -> HideWait
             stop(actor);
-            if (s.stateTime >= KING_HIDEWAIT_S) transition(actor, s, 10, generator);
+            const float frames = s.stateTime * 30.0f;
+            if (!s.flickFired && frames >= float(p2kinglife::DiveEffectFrame)) {
+                s.flickFired = true;
+                pc_p2_sfx(53, generator, p2sfx::Event::Dive, actor);
+            }
+            if (frames >= float(clipFrames(s.spec->enumName, s.clip))) transition(actor, s, 9, generator);
             break;
         }
-        case 10: { // Appear
+        case 9: { // HideWait: source StateHideWait (kingChappyState.cpp:1954-2015), wait2 loop;
+                  // buried, untargetable; wakes when a captain or Pikmin is within fp02 * scale
             stop(actor);
-            if (s.stateTime >= clipDuration(s.spec->enumName, s.clip)) {
+            const p2kinglife::WakeInputs in = kingWakeInputs(actor, s);
+            if (int(s.stateTime) != int(s.stateTime - dt) && int(s.stateTime) % 10 == 0) {
+                // Heartbeat (every 10 s buried): where the nearest captain / Pikmin is against the wake radius.
+                float nearNavi = -1.0f;
+                for (Navi* n : pc_p2_navis()) {
+                    if (!n->isAlive()) continue;
+                    const Vector3f q = n->getPosition(), pp = actor->getPosition();
+                    const float d = std::sqrt((q.x - pp.x) * (q.x - pp.x) + (q.y - pp.y) * (q.y - pp.y) + (q.z - pp.z) * (q.z - pp.z));
+                    if (nearNavi < 0.0f || d < nearNavi) nearNavi = d;
+                }
+                std::printf("P2_CHAPPY_KING_HIDEWAIT generator=%u source_id=%u buried_s=%.0f radius=%.0f navi_dist=%.0f do_check=%d\n",
+                            generator, s.spec->source, s.stateTime, p2kinglife::wakeRadius(1.0f, kingWakeOverride()), nearNavi,
+                            in.doCheckAppear ? 1 : 0);
+                std::fflush(stdout);
+            }
+            if (p2kinglife::hideWaitWakes(in)) {
+                std::printf("P2_CHAPPY_KING_WAKE generator=%u source_id=%u navi=%d pikmin=%d radius=%.0f do_check=%d\n",
+                            generator, s.spec->source, in.naviInRange ? 1 : 0, in.pikminInRange ? 1 : 0,
+                            p2kinglife::wakeRadius(1.0f, kingWakeOverride()), in.doCheckAppear ? 1 : 0);
+                std::fflush(stdout);
+                transition(actor, s, 10, generator);
+                s.kingDoCheckAppear = false;
+            }
+            break;
+        }
+        case 10: { // Appear: source StateAppear (kingChappyState.cpp:2032-2121), type3.bca;
+                   // KEYEVENT_3 (frame 55) the shake-off (fp09 100 / fp10 200), END -> Caution
+            stop(actor);
+            const float frames = s.stateTime * 30.0f;
+            if (!s.flickFired && frames >= float(p2kinglife::AppearShakeFrame)) {
+                s.flickFired = true;
+                doKingAppearShake(actor, generator, s);
+            }
+            if (frames >= float(clipFrames(s.spec->enumName, s.clip))) {
                 std::printf("P2_CHAPPY_APPEAR generator=%u source_id=53\n", generator);
                 std::fflush(stdout);
                 transition(actor, s, 11, generator);
             }
             break;
         }
-        case 11: { // Caution
+        case 11: { // Caution: waitact2, END -> Walk
             stop(actor);
-            if (s.stateTime >= clipDuration(s.spec->enumName, s.clip)) transition(actor, s, 0, generator);
-            break;
-        }
-        case 7: { // Eat -> Swallow (bomb path has no host equivalent)
-            stop(actor);
-            transition(actor, s, 12, generator);
+            if (s.stateTime >= clipDuration(s.spec->enumName, s.clip)) {
+                transition(actor, s, 0, generator);
+                kingInjectTestBombs(actor, s, generator);
+            }
             break;
         }
         case 12: { // Swallow (source StateSwallow: type1, swallowPikmin at
