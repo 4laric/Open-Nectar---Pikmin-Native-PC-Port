@@ -72,6 +72,7 @@
 #include "pc_p2_dweevil_policy.h"
 #include "pc_p2_bombsarai_blast.h"
 #include "pc_p2_species.h"
+#include "pc_p2_sfx.h"
 #include "pc_p2_hazard_emitter.h"
 #include "teki.h"
 #include "Interactions.h"
@@ -588,6 +589,8 @@ constexpr float kBombNavPikiDamage = 10.0f;
 void applyBombBlast(BTeki* a, Otakara& s, const char* trigger) {
     const Vector3f pos = a->getPosition();
     const unsigned generator = genOf(a);
+    // P1-approximation SFX (pc_p2_sfx_policy.h): the P1 bomb-rock burst, output-only.
+    pc_p2_sfx(93, generator, p2sfx::Event::Burst, pos);
     P2BombSaraiBlastEvent event;
     event.center = P2BombSaraiVec3{pos.x, pos.y, pos.z};
     event.radius = kBombBlastRadius;
@@ -1906,6 +1909,17 @@ void pc_p2_otakara_update(BTeki* actor) {
             applyBombBlast(actor, s, "damage");
         }
     }
+    // Source Otakara::doUpdateCommon (OtakaraBase.cpp:93-108) for BombOtakara:
+    // once the carried Bomb is no longer alive (mTargetCreature dead, or null)
+    // the Dweevil sets mTargetCreature = nullptr and mHealth = 0, i.e. it dies
+    // with its payload. The port has no separate Bomb creature; a detonated
+    // bomb (fuse, damage, flick or death) is the "Bomb no longer alive" case.
+    if (s.species == p2dweevil::BombId && s.bombDetonated && actor->mHealth > 0.0f) {
+        std::printf("P2_BOMBOTAKARA_PAYLOAD_DEAD generator=%u health=%.1f->0 (source OtakaraBase.cpp:93-108)\n",
+                    generator, actor->mHealth);
+        std::fflush(stdout);
+        actor->mHealth = 0.0f;
+    }
     s.prevHealth = actor->mHealth;
 
     if (actor->mHealth <= 0.0f && s.state != OTA_DEAD) {
@@ -1917,6 +1931,7 @@ void pc_p2_otakara_update(BTeki* actor) {
                         s.fxLedger.stops[1]);
             std::fflush(stdout);
             s.deadLogged = true;
+            if (s.species == p2dweevil::BombId) pc_p2_sfx(93, generator, p2sfx::Event::Dead, actor);
         }
         // Source death detonates the carried Bomb (damageCallBack path).
         if (s.species == p2dweevil::BombId && !s.bombDetonated) {

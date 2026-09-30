@@ -4,6 +4,7 @@
 #include "teki.h"
 #include "pc_p2_purple_direct.h"
 #include "pc_p2_white_poison.h"
+#include "pc_p2_gas_cloud.h"
 
 #include "pc_p2_armor.h"
 #include "pc_p2_uji.h"
@@ -146,6 +147,7 @@ void pc_p2_forget_teki(BTeki* actor)
 void pc_p2_reset_all_teki()
 {
 	pc_p2_white_poison_reset();
+	pc_p2_gas_cloud_reset();
 	pc_p2_purple_direct_reset();
 	pc_p2_demon_manager_reset();
 pc_p2_sarai_manager_reset();
