@@ -1,5 +1,6 @@
 #include "pc_p2_kurage_own_host.h"
 
+#include "pc_p2_demon_bridge.h"
 #include "pc_p2_kurage_receiver.h"
 #include "pc_p2_navi_select.h"
 #include "pc_p2_sfx.h"
@@ -89,6 +90,9 @@ void P2KurageOwn::detach(BTeki* actor)
 {
     if (!mActive) return;
     mColl.detach(actor);
+    if (mOwnerToken) pc_demon_owner_lost(mOwnerToken);
+    mCaptain = nullptr;
+    mSlots.reset();
     if (actor && !mEscaped && actor->isFlying()) actor->finishFlying();
     mActive = false;
 }
@@ -102,12 +106,12 @@ void P2KurageOwn::startMotion(p2kurage::Motion m)
     mPendingEnd = false;
 }
 
-// Kurage::getSearchedTarget(offset) + isSuck(offset, target/nullptr).
-Piki* P2KurageOwn::search(BTeki* actor, float altitude, bool& suckTarget, bool& suckAny) const
+// Kurage::getSearchedTarget(offset) + isSuck(offset, target/nullptr). The Greater
+// (OniKurage.cpp:466) also treats captains as first-class targets.
+P2KurageOwn::Target P2KurageOwn::search(BTeki* actor, float altitude, bool& suckTarget, bool& suckAny) const
 {
     suckTarget = false;
     suckAny = false;
-    if (!pikiMgr) return nullptr;
     const auto g = p2kurageown::general(mVariant);
     const Vector3f pos = actor->mSRT.t;
     const float minY = pos.y - altitude - 50.0f;
@@ -115,31 +119,39 @@ Piki* P2KurageOwn::search(BTeki* actor, float altitude, bool& suckTarget, bool& 
     const bool territory = p2kurageown::insideTerritory(pos.x - mHomeX, pos.z - mHomeZ, g);
     const float fov = p2flyer::kPi * (p2flyer::kPi / 180.0f * g.viewAngle);
     float maxDist = g.sightRadius * g.sightRadius;
-    Piki* target = nullptr;
-    Piki* closeHit = nullptr;
-    Iterator it(pikiMgr);
-    CI_LOOP(it) {
-        Piki* p = static_cast<Piki*>(*it);
-        if (!p || !p->isAlive() || p->isBuried() || p->getStickObject() == actor
-            || pc_p2_kurage_receiver_controls(p)) continue;
-        const Vector3f q = p->mSRT.t;
-        if (!(q.y > minY && q.y < pos.y)) continue;
+    Target target, closeHit;
+    auto consider = [&](const Vector3f& q) {
+        if (!(q.y > minY && q.y < pos.y)) return;
         const float dx = q.x - pos.x, dz = q.z - pos.z;
         const float d2 = dx * dx + dz * dz;
         if (d2 < attackRange) {
             suckAny = true;
-            if (territory && !closeHit) closeHit = p; // getSearchedTarget returns the first in range
+            if (territory && !closeHit.found) closeHit = Target{true, q.x, q.y, q.z}; // first in range wins
         }
-        if (territory && !closeHit && d2 < maxDist) {
+        if (territory && !closeHit.found && d2 < maxDist) {
             const float ang = p2flyer::angleDist(mYaw, dx, dz);
-            if (std::fabs(ang) <= fov) { target = p; maxDist = d2; }
+            if (std::fabs(ang) <= fov) { target = Target{true, q.x, q.y, q.z}; maxDist = d2; }
+        }
+    };
+    if (greater() && naviMgr) {
+        for (Navi* n : pc_p2_navis()) {
+            if (!n || !n->isAlive() || n->isStickToMouth() || n->getStickObject() == actor) continue;
+            consider(n->mSRT.t);
         }
     }
-    Piki* found = closeHit ? closeHit : target;
-    if (found) {
-        const Vector3f q = found->mSRT.t;
-        const float dx = q.x - pos.x, dz = q.z - pos.z;
-        suckTarget = q.y > minY && q.y < pos.y && dx * dx + dz * dz < attackRange;
+    if (pikiMgr) {
+        Iterator it(pikiMgr);
+        CI_LOOP(it) {
+            Piki* p = static_cast<Piki*>(*it);
+            if (!p || !p->isAlive() || p->isBuried() || p->getStickObject() == actor
+                || pc_p2_kurage_receiver_controls(p)) continue;
+            consider(p->mSRT.t);
+        }
+    }
+    const Target found = closeHit.found ? closeHit : target;
+    if (found.found) {
+        const float dx = found.x - pos.x, dz = found.z - pos.z;
+        suckTarget = found.y > minY && found.y < pos.y && dx * dx + dz * dz < attackRange;
     }
     return found;
 }
@@ -231,6 +243,111 @@ void P2KurageOwn::flickNearby(BTeki* actor, float radius, float knockback, float
                 navi, piki);
 }
 
+// OniKurage::suckNavi(offset): a live captain under the bell within fp22 enters a free
+// mouth slot (InteractSarai). The physical attachment is the shared demon captain
+// bridge (one captain, the same mechanism the Demon grab uses).
+void P2KurageOwn::suckNavi(BTeki* actor, float mapY)
+{
+    if (!naviMgr || mCaptain) return;
+    const auto g = p2kurageown::general(mVariant);
+    const Vector3f pos = actor->mSRT.t;
+    const float minY = mapY - 50.0f; // currY - offset(altitude) - 50
+    const float range = g.attackRadius * g.attackRadius;
+    for (Navi* n : pc_p2_navis()) {
+        if (!n || !n->isAlive() || n->isStickToMouth() || n->getStickObject() == actor) continue;
+        const Vector3f q = n->mSRT.t;
+        if (!(q.y > minY && q.y < pos.y)) continue;
+        const float dx = q.x - pos.x, dz = q.z - pos.z;
+        if (dx * dx + dz * dz >= range) continue;
+        for (int slot = 0; slot < p2onikurage::kMouthSlotCount; ++slot) {
+            if (mSlots.slots()[slot].occupied) continue;
+            if (!mOwnerToken) mOwnerToken = (std::uint64_t(mGenerator) << 8) | 1u;
+            if (!pc_demon_capture(n, actor, mMouth, mOwnerToken, unsigned(slot))) break;
+            // sep = naviPos - 'suck' part position, in the body frame (yaw only).
+            const float c = std::cos(mYaw), s = std::sin(mYaw);
+            p2onikurage::MouthOffset off;
+            off.x = c * dx - s * dz;
+            off.y = q.y - pos.y;
+            off.z = s * dx + c * dz;
+            mSlots.capture(1, true);
+            mSlots.setOffset(slot, off);
+            mCaptain = n;
+            mCaptainSlot = slot;
+            ++mCaptures;
+            pc_p2_sfx(mSource, mGenerator, p2sfx::Event::Attack, actor);
+            std::printf("P2_ONIKURAGE_CAPTURE generator=%u source_id=%u captain=1 slot=%d navi_health=%.1f captures=%d "
+                        "alt=%.1f\n", mGenerator, mSource, slot, n->mHealth, mCaptures, pos.y - mapY);
+            std::fflush(stdout);
+            return;
+        }
+    }
+}
+
+// Hanging position of the held captain: the mouth part world position plus the slot offset
+// (body frame). pc_demon_follow_mouth (Navi::update) reads the joint translation.
+void P2KurageOwn::placeMouthJoint(BTeki* actor)
+{
+    if (!mCaptain || !mMouth) return;
+    const p2onikurage::MouthOffset& off = mSlots.slots()[mCaptainSlot].offset;
+    const float c = std::cos(mYaw), s = std::sin(mYaw);
+    const Vector3f pos = actor->mSRT.t;
+    mMouth->mJointMatrix.makeIdentity();
+    mMouth->mJointMatrix.mMtx[0][3] = pos.x + c * off.x + s * off.z;
+    mMouth->mJointMatrix.mMtx[1][3] = pos.y + off.y;
+    mMouth->mJointMatrix.mMtx[2][3] = pos.z - s * off.x + c * off.z;
+}
+
+void P2KurageOwn::releaseCaptain(BTeki* actor, const char* why, bool drop)
+{
+    (void)actor;
+    if (!mCaptain) return;
+    Navi* n = mCaptain;
+    mCaptain = nullptr;
+    const float hp = n->mHealth;
+    bool accepted = false;
+    if (drop) {
+        // flickStickNavi(): InteractFlick(0, 0) + InteractBomb(fp24) on the captain; the
+        // demon FallMeck drop state applies the damage and the fall.
+        accepted = pc_demon_forced_release(n, p2kurageown::general(mVariant).attackDamage, 0.0f);
+    } else {
+        pc_demon_release(n);
+    }
+    mSlots.onDeath();
+    std::printf("P2_ONIKURAGE_RELEASE generator=%u source_id=%u reason=%s drop=%d accepted=%d navi_health=%.1f\n",
+                mGenerator, mSource, why, int(drop), int(accepted), hp);
+    std::fflush(stdout);
+}
+
+// Per source tick (Greater): the bridge is the authority on whether the captain is still held
+// (escape mash, death, reset); Attack advances the slot offset toward the rest pose
+// (updateCollPartOffset); Dead (frame > 30) and GroundFlick (frame > 25) run flickStickNavi.
+void P2KurageOwn::updateCaptain(BTeki* actor, const p2kurage::Out& out)
+{
+    if (mCaptain && !pc_demon_owned_by(mCaptain, actor)) {
+        std::printf("P2_ONIKURAGE_CAPTAIN_LEFT generator=%u source_id=%u navi_health=%.1f\n", mGenerator, mSource,
+                    mCaptain->mHealth);
+        std::fflush(stdout);
+        mSlots.onDeath();
+        mCaptain = nullptr;
+    }
+    if (!mCaptain) return;
+    if (out.state == p2kurage::State::Attack && out.isSucking) {
+        if (mSlots.advanceDefaultOffset(mCaptainSlot) == p2onikurage::Event::MouthReady) {
+            std::printf("P2_ONIKURAGE_MOUTH_READY generator=%u source_id=%u slot=%d\n", mGenerator, mSource, mCaptainSlot);
+            std::fflush(stdout);
+        }
+    }
+    const float frame = mPlayer.frame();
+    const bool checkDead = out.state == p2kurage::State::Dead && frame > 30.0f;
+    const bool checkGround = out.state == p2kurage::State::GroundFlick && frame > 25.0f;
+    if (checkDead || checkGround) {
+        const Vector3f q = mCaptain->mSRT.t;
+        const Vector3f p = actor->mSRT.t;
+        const p2onikurage::FlickResult r = mSlots.flick(mCaptainSlot, checkDead, q.x, q.z, p.x, p.z);
+        if (r.applied) releaseCaptain(actor, checkDead ? "dead" : "groundflick", true);
+    }
+}
+
 void P2KurageOwn::sourceTick(BTeki* actor)
 {
     const auto g = p2kurageown::general(mVariant);
@@ -239,7 +356,7 @@ void P2KurageOwn::sourceTick(BTeki* actor)
     const float altitude = pos.y - mapY;
 
     bool suckTarget = false, suckAny = false;
-    Piki* target = search(actor, altitude, suckTarget, suckAny);
+    const Target target = search(actor, altitude, suckTarget, suckAny);
     bool purple = false;
     const int stuck = countStuck(actor, purple);
     if (stuck > mStuckPrev)
@@ -253,7 +370,7 @@ void P2KurageOwn::sourceTick(BTeki* actor)
     in.stuckPikminCount = stuck;
     in.purpleStuck = purple;
     in.isFlying = mUntargetable; // EnemyBase::isFlying() == EB_Untargetable
-    in.targetFound = target != nullptr;
+    in.targetFound = target.found;
     in.suckTarget = suckTarget;
     in.suckAny = suckAny;
     in.mapY = mapY;
@@ -263,6 +380,9 @@ void P2KurageOwn::sourceTick(BTeki* actor)
     in.keyEvent = mPendingKey;
     in.motionFinished = mPendingEnd;
     in.suckFull = mSuckFull;
+    in.naviSucked = mCaptain != nullptr;
+    in.naviSuckFinished = mSlots.isFinishNaviSuck();
+    in.velocityY = actor->mVelocity.y;
     mPendingKey = p2kurage::KeyEvent::None;
     mPendingEnd = false;
 
@@ -311,9 +431,8 @@ void P2KurageOwn::sourceTick(BTeki* actor)
             mYaw = p2flyer::turnStep(mYaw, dx, dz, g.turnSpeed, g.maxTurnAngle);
             p2flyer::walkVelocity(mYaw, g.moveSpeed, tvx, tvz);
         }
-    } else if (out.state == p2kurage::State::Chase && target && !suckTarget && !out.finishing) {
-        const Vector3f q = target->mSRT.t;
-        mYaw = p2flyer::turnStep(mYaw, q.x - pos.x, q.z - pos.z, g.turnSpeed, g.maxTurnAngle);
+    } else if (out.state == p2kurage::State::Chase && target.found && !suckTarget && !out.finishing) {
+        mYaw = p2flyer::turnStep(mYaw, target.x - pos.x, target.z - pos.z, g.turnSpeed, g.maxTurnAngle);
         p2flyer::walkVelocity(mYaw, g.moveSpeed, tvx, tvz);
     }
     mVelX += (tvx - mVelX) * kAccel;
@@ -335,7 +454,13 @@ void P2KurageOwn::sourceTick(BTeki* actor)
     if (flyPhys && !actor->isFlying()) actor->startFlying();
     else if (!flyPhys && actor->isFlying()) actor->finishFlying();
 
-    if (out.isSucking) suckPikmin(actor, mapY);
+    if (out.isSucking) {
+        suckPikmin(actor, mapY);
+        // OniKurage StateAttack::exec: the captain suction runs only while the Pikmin
+        // loop is not full and the motion is not finishing.
+        if (greater() && !mSuckFull && !out.finishing) suckNavi(actor, mapY);
+    }
+    if (greater()) updateCaptain(actor, out);
 
     if (out.flickStick || out.flickNearby) {
         if (out.state == p2kurage::State::Dead) flickStuck(actor, 1.0f, 100.0f, 0.0f);
@@ -358,6 +483,7 @@ void P2KurageOwn::sourceTick(BTeki* actor)
         const Vector3f p = actor->mSRT.t;
         mColl.release(actor, p2flyer::Vec3{p.x, p.y, p.z});
         pc_p2_kurage_receiver_release_all_for(actor);
+        if (mCaptain) releaseCaptain(actor, "kill", false);
         if (actor->isFlying()) actor->finishFlying();
         actor->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
         actor->mVelocity.x = actor->mVelocity.z = 0.0f;
@@ -407,6 +533,7 @@ bool P2KurageOwn::tick(BTeki* actor, float dt)
         mMouth->mCentre = pos;
         mMouth->mJointMatrix.makeIdentity();
     }
+    placeMouthJoint(actor);
     pc_p2_kurage_receiver_update_for(actor, dt, true, actor->mHealth > 0.0f, false);
     if (actor->mHealth > 0.0f) actor->updateLifeGauge();
 

@@ -2016,6 +2016,14 @@ void Piki::startMotion(immut PaniMotionInfo& motion1, immut PaniMotionInfo& moti
 		Creature* target = mLookAtCreature.getPtr();
 		if (!isLooking()) {
 			if (!target) {
+#if defined(PIKI_PC_PORT)
+				// A Pikmin released by a P2 captor (Jellyfloat suction) has no captain until
+				// the whistle reclaims it; &mNavi->mCursorWorldPos on null is a wild pointer
+				// that ViewPiki::refresh dereferences on the next draw.
+				if (!mNavi) {
+					return;
+				}
+#endif
 				int rand = gsys->getRand(1.0f) * 2.0f;
 				if (rand == 0) {
 					startHimaLook(&mNavi->mCursorWorldPos);

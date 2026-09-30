@@ -151,6 +151,21 @@ int main()
         bool fell = false;
         for (int i = 0; i < 5 && !fell; ++i) fell = fsm.tick(in).state == p2kurage::State::Fall;
         require(fell, "Greater: six latched Pikmin force Fall");
+        // OniKurageState passes speedFactor 0 to setHeightVelocity everywhere (rise fp02 = 5),
+        // the Kurage passes 5/2/2/5: the same 20-unit error gives a different climb speed.
+        p2kurage::Fsm lesser(p2kurageown::flightParms(V::Lesser), V::Lesser);
+        lesser.spawn();
+        lesser.forceState(p2kurage::State::Attack);
+        fsm.forceState(p2kurage::State::Attack);
+        p2kurage::In hold;
+        hold.deltaTime = 1.0f / 30.0f;
+        hold.positionY = 0.0f;
+        hold.mapY = 0.0f;
+        hold.motionFrame = 0.0f;
+        const float vLesser = lesser.tick(hold).heightVelocity;
+        const float vGreater = fsm.tick(hold).heightVelocity;
+        require(near(vLesser, (5.0f + 1.0f) * 70.0f, 0.1f), "Lesser Attack: (5 + fp02 1) * flight 70");
+        require(near(vGreater, (0.0f + 5.0f) * 75.0f, 0.1f), "Greater Attack: (0 + fp02 5) * flight 75");
     }
 
     // --- clip table: ANF1 lengths and enemyanimmgr keys ---

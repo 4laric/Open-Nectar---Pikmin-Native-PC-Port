@@ -20,10 +20,12 @@
 #include "pc_p2_groink_clock.h"
 #include "pc_p2_kurage_fsm.h"
 #include "pc_p2_kurage_own.h"
+#include "pc_p2_onikurage_mouth.h"
 #include "pc_p2_retail_player.h"
 
 class BTeki;
 class CollPart;
+class Navi;
 class Piki;
 class Shape;
 
@@ -43,6 +45,7 @@ public:
     p2kurage::State state() const { return mState; }
     bool untargetable() const { return mUntargetable; }
     float life() const { return p2kurageown::general(mVariant).life; }
+    bool captainHeld() const { return mCaptain != nullptr; }
     bool greater() const { return mVariant == p2kurage::Variant::Greater; }
     p2kurage::Variant variant() const { return mVariant; }
 
@@ -50,12 +53,21 @@ private:
     void sourceTick(BTeki* actor);
     void applyOutput(BTeki* actor, const p2kurage::Out& out);
     float rand01();
-    Piki* search(BTeki* actor, float altitude, bool& suckTarget, bool& suckAny) const;
+    struct Target {
+        bool found = false;
+        float x = 0.0f, y = 0.0f, z = 0.0f;
+    };
+    Target search(BTeki* actor, float altitude, bool& suckTarget, bool& suckAny) const;
     int countStuck(BTeki* actor, bool& purple) const;
     void suckPikmin(BTeki* actor, float mapY);
     void flickStuck(BTeki* actor, float chance, float knockback, float damage);
     void flickNearby(BTeki* actor, float radius, float knockback, float damage);
     void startMotion(p2kurage::Motion m);
+    // OniKurage captain mouth (suckNavi / updateCollPartOffset / flickStickNavi).
+    void suckNavi(BTeki* actor, float mapY);
+    void updateCaptain(BTeki* actor, const p2kurage::Out& out);
+    void placeMouthJoint(BTeki* actor);
+    void releaseCaptain(BTeki* actor, const char* why, bool drop);
 
     bool mActive = false;
     bool mEscaped = false;
@@ -87,6 +99,13 @@ private:
     unsigned mRng = 1u;
     int mSucked = 0;
     bool mSuckFull = false;
+
+    // OniKurage captain mouth: one captain through the shared demon captain bridge.
+    p2onikurage::MouthSlots mSlots;
+    Navi* mCaptain = nullptr;
+    int mCaptainSlot = 0;
+    std::uint64_t mOwnerToken = 0;
+    int mCaptures = 0;
 
     float mLastHealth = 0.0f;
     int mTicks = 0;

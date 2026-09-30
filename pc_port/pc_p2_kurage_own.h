@@ -28,6 +28,7 @@ struct General {
     float shakeRange = 25.0f;     // fp19
     float maxAttackRange = 40.0f; // fp20 (isSuck / getSearchedTarget attack range)
     float attackRadius = 40.0f;   // fp22 (suckPikmin radius)
+    float attackDamage = 10.0f;   // fp24 (OniKurage flickStickNavi InteractBomb damage)
 };
 
 inline General general() { return General{}; }
