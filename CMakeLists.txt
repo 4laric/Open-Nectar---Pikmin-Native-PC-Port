@@ -1975,6 +1975,10 @@ add_executable(p2_chappy_fsm_test tools/p2_chappy_fsm_test.cpp)
 target_include_directories(p2_chappy_fsm_test PRIVATE pc_port)
 target_compile_options(p2_chappy_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_chappy_fsm_test COMMAND p2_chappy_fsm_test)
+add_executable(p2_chappy_adult_test tools/p2_chappy_adult_test.cpp)
+target_include_directories(p2_chappy_adult_test PRIVATE pc_port)
+target_compile_options(p2_chappy_adult_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_chappy_adult_test COMMAND p2_chappy_adult_test)
 # p2-884-chappy (#884): engine-free source mouth-slot eating (EnemyFunc::eatPikmin
 # geometry, capacity, eligibility, host-part mapping, King sweep, legacy oracle).
 add_executable(p2_mouth_snapshot_test tools/p2_mouth_snapshot_test.cpp)
