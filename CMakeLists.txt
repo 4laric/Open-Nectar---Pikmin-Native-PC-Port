@@ -349,6 +349,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_mamuta_rules.cpp
     pc_port/pc_p2_mamuta_fsm.cpp
     pc_port/pc_p2_tank.cpp
+    pc_port/pc_p2_attack_fx.cpp
+    pc_port/pc_p2_gas_cloud.cpp
     pc_port/pc_p2_hiba.cpp
     pc_port/pc_p2_flora_actor.cpp
     pc_port/pc_p2_receipt_host.cpp
@@ -1439,6 +1441,25 @@ add_executable(p2_tank_stream_test tools/p2_tank_stream_test.cpp)
 target_include_directories(p2_tank_stream_test PRIVATE pc_port)
 target_compile_options(p2_tank_stream_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_tank_stream_test COMMAND p2_tank_stream_test)
+# Shared P2 attack-effect layouts/lifecycle and the Titan Dweevil weapon visuals
+# (engine-free). Laser selection finding for the owner playtest 2026-09-30.
+add_executable(p2_attack_fx_test tools/p2_attack_fx_test.cpp)
+target_include_directories(p2_attack_fx_test PRIVATE pc_port)
+target_compile_options(p2_attack_fx_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_attack_fx_test COMMAND p2_attack_fx_test)
+add_executable(p2_gas_cloud_test tools/p2_gas_cloud_test.cpp)
+target_include_directories(p2_gas_cloud_test PRIVATE pc_port)
+target_compile_options(p2_gas_cloud_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_gas_cloud_test COMMAND p2_gas_cloud_test)
+add_executable(p2_bigtreasure_fx_test
+    tools/p2_bigtreasure_fx_test.cpp
+    pc_port/pc_p2_bigtreasure.cpp
+    pc_port/pc_p2_bigtreasure_attacks.cpp
+    pc_port/pc_p2_bigtreasure_elements.cpp)
+target_include_directories(p2_bigtreasure_fx_test PRIVATE pc_port)
+target_compile_options(p2_bigtreasure_fx_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_bigtreasure_fx_test COMMAND p2_bigtreasure_fx_test)
+
 
 # Kabuto identity policy (inst2-frogs #871).
 add_executable(p2_kabuto_fsm_policy_test tools/p2_kabuto_fsm_policy_test.cpp)
