@@ -745,8 +745,7 @@ void ensureLoaded(int v) {
         CI_LOOP(pit) {
             Pellet* p = static_cast<Pellet*>(*pit);
             if (!p || !p->isAlive() || !p->mConfig) continue;
-            std::printf("P2_BREADBUG_OWN_PELLET_CENSUS model=%s min=%d max=%d x=%.0f y=%.0f z=%.0f ufo=%d state=%d
-",
+            std::printf("P2_BREADBUG_OWN_PELLET_CENSUS model=%s min=%d max=%d x=%.0f y=%.0f z=%.0f ufo=%d state=%d\n",
                         p->mConfig->mModelId.mStringID, int(p->mConfig->mCarryMinPikis()),
                         int(p->mConfig->mCarryMaxPikis()), p->mSRT.t.x, p->mSRT.t.y, p->mSRT.t.z,
                         p->isUfoParts() ? 1 : 0, p->getState());
@@ -762,13 +761,11 @@ bool bindOne(Teki* t) {
     if (v < 0) return false;
     const unsigned gen = pc_p2_campaign_token(t);
     if (t->mTekiType != TEKI_Collec) {
-        std::printf("P2_SETUP_SKIP Breadbug host_type_mismatch source_id=%u generator=%u type=%d
-", src, gen, t->mTekiType);
+        std::printf("P2_SETUP_SKIP Breadbug host_type_mismatch source_id=%u generator=%u type=%d\n", src, gen, t->mTekiType);
         return false;
     }
     if (t->getParameterI(TPI_CorpseType) != TEKICORPSE_LeaveCorpse) {
-        std::printf("P2_SETUP_SKIP Breadbug no_corpse source_id=%u generator=%u
-", src, gen);
+        std::printf("P2_SETUP_SKIP Breadbug no_corpse source_id=%u generator=%u\n", src, gen);
         return false;
     }
     ensureLoaded(v);
@@ -788,15 +785,13 @@ bool bindOne(Teki* t) {
     // pc_p2_breadbug_teki_untargetable() instead (#898 fix).
     t->clearTekiOption(TEKIOPT_Organic);
     std::printf("P2_BREADBUG_OWN_BIND generator=%u source_id=%u host_type=%d health=%.1f retail_parms=%d draw=%s "
-                "home=%.1f,%.1f wp=%d state=%s tai_state=%d
-",
+                "home=%.1f,%.1f wp=%d state=%s tai_state=%d\n",
                 gen, src, t->mTekiType, t->mHealth, sParams[v].retail ? 1 : 0, sPosesLoaded[v] ? "p2_model" : "host", pos.x,
                 pos.z, sRoute.nearest({pos.x, pos.y, pos.z}), bb::stateName(b.fsm.state()), b.taiState);
     // Ordinary-delivery bridge: GoalItem::suckMe grants onion:p2:<source> once
     // for the delivered corpse of THIS generator token.
     pc_randomizer_p2_bind_source(static_cast<PelletView*>(static_cast<BTeki*>(t)), src, gen);
-    std::printf("P2_BREADBUG_DELIVERY_BIND generator=%u source_id=%u
-", gen, src);
+    std::printf("P2_BREADBUG_DELIVERY_BIND generator=%u source_id=%u\n", gen, src);
     std::fflush(stdout);
     return true;
 }
