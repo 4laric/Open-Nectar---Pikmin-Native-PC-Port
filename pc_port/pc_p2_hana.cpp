@@ -33,9 +33,11 @@
 #include "pc_p2_hana.h"
 #include "pc_p2_hana_events.h"
 #include "pc_p2_hana_residual_policy.h"
+#include "pc_p2_hana_sleep_policy.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_setup_failsafe.h"
 #include "pc_p2_white.h"
+#include "gl/pc_gfx.h"
 #include "pc_p2_sfx.h"
 #include "teki.h"
 #include "Interactions.h"
@@ -103,6 +105,9 @@ constexpr float ATTACK_HIT_ANGLE = 0.261799f; // general fp23 default 15 deg hal
 struct Clip {
     std::string name;
     float duration = 1.0f;
+    int frames = 0;            // source frame count (bank row)
+    float loopBegin = -1.0f;   // LOOP_START event frame (key 0), -1 when absent
+    float loopEnd = -1.0f;     // LOOP_END event frame (key 1), -1 when absent
     bool loop = false;
     p2sampled::Clip sampled;
 };
@@ -125,6 +130,11 @@ struct Hana {
     float logTimer = 0.0f;
     State prevState = HANA_WALK; // state before Flick (source mStateMachine->mPreviousID)
     p2hanapolicy::FlickReturn flickReturn;
+    // Buried idle / emergence timeline over the type1 clip (pc_p2_hana_sleep_policy.h).
+    p2hanasleep::Cursor sleep;
+    bool campaign = false;     // wake radius: source private radius in a seed, sight radius in fixtures
+    bool burstDone = false;    // emergence ground burst (type1 KEYEVENT_4) fired for this wake
+    bool shotBuried = false, shotEmerge = false, shotCorpse = false;  // probe screenshots (PIKMIN_P2_PROXY_SHOT)
 };
 
 std::map<PelletView*, Hana> actors;
@@ -149,9 +159,9 @@ bool clipLoops(const std::string& name) {
     return it != clips.end() && it->second.loop;
 }
 
-Creature* nearestTarget(const Vector3f& pos) {
+Creature* nearestTarget(const Vector3f& pos, float radius = SIGHT) {
     Creature* best = nullptr;
-    float bestSq = SIGHT * SIGHT;
+    float bestSq = radius * radius;
     if (naviMgr) {
         for (Navi* n : pc_p2_navis()) {
             if (!n->isAlive()) continue;
@@ -278,6 +288,15 @@ void enter(Hana& s, State state, const char* clip) {
         s.killed = false;
     }
     if (clip) s.clip = clip;
+    if (state == HANA_SLEEP) {
+        // Buried Sleep: type1 from StateSleep::init (mDoSkipSleepStart = frame 70 inside the
+        // LOOP_START..LOOP_END bump). A GoHome re-entry calls startDive() after this.
+        auto t1 = clips.find("type1");
+        if (t1 != clips.end() && t1->second.frames > 1)
+            s.sleep.configure(float(t1->second.frames), t1->second.loopBegin, t1->second.loopEnd);
+        s.sleep.startSpawn();
+        s.burstDone = false;
+    }
     // Start the sampled clock for the entered clip, or cancel it when the clip
     // has no authored gameplay events. A start() bumps the clock generation,
     // discarding the previous clip's outstanding events.
@@ -309,7 +328,9 @@ void stop(BTeki* a) {
 }
 
 void setPhase(Hana& s) {
-    if (s.state == HANA_SLEEP) { s.phase = 0.0f; return; }
+    // Buried idle and emergence walk the type1 timeline (loop region underground, then the
+    // 60 fps finish-motion rise); pose 0 is the standing body and must not be held.
+    if (s.state == HANA_SLEEP || s.state == HANA_EMERGE) { s.phase = s.sleep.phase01(); return; }
     const float duration = clipDuration(s.clip);
     const float len = duration > 0.0f ? duration : 1.0f;
     if (clipLoops(s.clip)) {
@@ -409,6 +430,7 @@ void pc_p2_hana_setup() {
                         Clip clip;
                         clip.name = name;
                         clip.duration = frames > 0 ? float(frames) / 30.0f : 1.0f;
+                        clip.frames = frames > 0 ? int(frames) : 0;
                         clip.loop = (name == "move1" || name == "wait2");
                         p2hanaevents::Row row;
                         row.name = name;
@@ -425,6 +447,8 @@ void pc_p2_hana_setup() {
                                     const int eventFrame = std::atoi(pair.substr(0, colon).c_str());
                                     const std::string key = pair.substr(colon + 1);
                                     row.events.push_back(p2sampled::Event{eventFrame, key});
+                                    if (name == "type1" && key == "0") clip.loopBegin = float(eventFrame);
+                                    if (name == "type1" && key == "1") clip.loopEnd = float(eventFrame);
                                 }
                                 if (comma == std::string::npos) break;
                                 start = comma + 1;
@@ -480,6 +504,7 @@ void pc_p2_hana_setup() {
         s = Hana();  // reject stale clock/capture state on actor-address reuse
         s.home = actor->getPosition();
         s.heading = actor->getDirection();
+        s.campaign = pc_randomizer_p2_bridge();
         actor->mHealth = LIFE;
         // Bite/swallow/flick timing comes from the authored attack1/flick events
         // via the sampled clock; no per-state frame fields to extract.
@@ -495,6 +520,10 @@ void pc_p2_hana_setup() {
         std::printf("P2_HANA_BIND generator=%u source_id=84 visual_only=0\n",
                     pc_p2_campaign_token(actor));
         std::printf("P2_HANA_STATE generator=%u state=sleep\n", pc_p2_campaign_token(actor));
+        std::printf("P2_HANA_SLEEP generator=%u entry=spawn frame=%.1f loop=%.0f..%.0f wake_radius=%.0f buried_pose=%d\n",
+                    pc_p2_campaign_token(actor), double(s.sleep.frame()), double(s.sleep.loopBegin()),
+                    double(s.sleep.loopEnd()), double(p2hanasleep::wakeRadius(s.campaign)),
+                    s.sleep.buriedPose() ? 1 : 0);
         std::fflush(stdout);
         const Vector3f pos = actor->getPosition();
         std::printf("P2_ENEMY_READY species=Hana native_family=Chappy generator=%u "
@@ -560,23 +589,54 @@ void pc_p2_hana_update(BTeki* actor) {
     }
     if (s.state == HANA_WALK || s.state == HANA_GOHOME) pc_p2_sfx_stride(84, generator, actor, 45.0f);
     switch (s.state) {
-    case HANA_SLEEP:
+    case HANA_SLEEP: {
         stop(actor);
         s.hidden = true;
-        s.clip = "type1"; // buried pose; phase forced to frame 0
-        if (nearestTarget(pos)) {
+        s.clip = "type1"; // buried bump: loop region of the type1 clip
+        s.sleep.advance(dt);
+        // Source isWakeup(): Navi or Pikmin inside the private radius (fp11). Fixture squads
+        // keep the sight radius (see pc_p2_hana_sleep_policy.h).
+        const float wakeR = p2hanasleep::wakeRadius(s.campaign);
+        // Probe screenshot (env-gated, no effect otherwise): a squad close enough to be on screen
+        // while the plant is still buried.
+        if (!s.shotBuried && s.sleep.buriedPose() && nearestTarget(pos, 130.0f)) {
+            s.shotBuried = true;
+            pc_gfx_proxy_shot_notify_after("x|Hana_buried", 2);
+        }
+        Creature* waker = nearestTarget(pos, wakeR);
+        if (waker) {
+            std::printf("P2_HANA_WAKE generator=%u frame=%.1f radius=%.0f distance=%.1f buried_pose=%d\n", generator,
+                        double(s.sleep.frame()), double(wakeR), double(distXZ(waker->getPosition(), pos)),
+                        s.sleep.buriedPose() ? 1 : 0);
             std::printf("P2_HANA_STATE generator=%u state=emerge\n", generator);
+            if (!s.shotEmerge) {
+                s.shotEmerge = true;
+                pc_gfx_proxy_shot_notify_after("x|Hana_emerging", 25);
+            }
+            const p2hanasleep::Cursor keep = s.sleep;
             enter(s, HANA_EMERGE, "type1");
+            s.sleep = keep;  // the wake continues the sleep clip from the current frame
+            s.sleep.wake();
         }
         break;
-    case HANA_EMERGE:
+    }
+    case HANA_EMERGE: {
         stop(actor);
         s.hidden = false;
-        if (s.stateTime >= clipDuration("type1")) {
+        const float before = s.sleep.frame();
+        const bool finished = s.sleep.advance(dt);
+        // type1 KEYEVENT_4 (createSmokeEffect): the ground burst flicks nearby Pikmin.
+        if (!s.burstDone && p2hanasleep::Cursor::crossed(before, s.sleep.frame(), 120.0f)) {
+            s.burstDone = true;
+            std::printf("P2_HANA_EMERGE_BURST generator=%u frame=120\n", generator);
+            doFlick(actor, s);
+        }
+        if (finished) {
             std::printf("P2_HANA_STATE generator=%u state=walk\n", generator);
             enter(s, HANA_WALK, "move1");
         }
         break;
+    }
     case HANA_WALK:
     case HANA_GOHOME: {
         s.hidden = false;
@@ -601,6 +661,7 @@ void pc_p2_hana_update(BTeki* actor) {
         if (s.state == HANA_GOHOME && distXZ(pos, s.home) < HOME_RADIUS) {
             std::printf("P2_HANA_STATE generator=%u state=sleep\n", generator);
             enter(s, HANA_SLEEP, "type1");
+            s.sleep.startDive();  // GoHome re-entry: no skip-start, the body sinks first
             break;
         }
         if (shouldFlick(actor)) {
@@ -688,6 +749,10 @@ void pc_p2_hana_update(BTeki* actor) {
         // full funnel (Armor/Groink/Breadbug pattern).
         if (!s.escaped && s.stateTime >= clipDuration("dead")) {
             s.escaped = true;
+            if (!s.shotCorpse) {
+                s.shotCorpse = true;
+                pc_gfx_proxy_shot_notify_after("x|Hana_corpse", 20);
+            }
             actor->pcEscapeNow();
         }
         break;
@@ -699,8 +764,10 @@ void pc_p2_hana_update(BTeki* actor) {
     s.logTimer += dt;
     if (s.logTimer >= 1.0f) {
         s.logTimer = 0.0f;
-        std::printf("P2_HANA_POS generator=%u state=%s clip=%s phase=%.2f x=%.2f z=%.2f\n",
-                    generator, stateName(s.state), s.clip.c_str(), s.phase, pos.x, pos.z);
+        std::printf("P2_HANA_POS generator=%u state=%s clip=%s phase=%.2f frame=%.1f x=%.2f z=%.2f\n",
+                    generator, stateName(s.state), s.clip.c_str(), s.phase,
+                    (s.state == HANA_SLEEP || s.state == HANA_EMERGE) ? double(s.sleep.frame()) : double(s.phase * 30.0f * clipDuration(s.clip)),
+                    pos.x, pos.z);
         std::fflush(stdout);
     }
 }

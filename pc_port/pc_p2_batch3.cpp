@@ -361,8 +361,14 @@ Bank loadBank(const FamilyDef& family, const std::string& species,
             std::vector<int> frames = timing.frames;
             if (frames.empty()) frames = uniformFramesFor(clip.poseCount, timing.duration);
             bank.seam[clip.name] = p2poseload::seamOf(loaded.baked, frames);
-            bank.hold[clip.name] = p2motion::visibleEnd(
+            const p2motion::HoldPick holdPick = p2motion::holdPick(
                 loaded.baked.size(), [&loaded](size_t i) -> const p2pose::Pose& { return loaded.baked[i].pose; });
+            bank.hold[clip.name] = holdPick.index;
+            if (holdPick.adjusted)
+                std::printf("P2_POSE_HOLD_ADJUST species=%s clip=%s legacy=%zu held=%zu first_bad=%zu ratio_high=%.2f "
+                            "ratio_low=%.2f poses=%zu\n",
+                            species.c_str(), clip.name.c_str(), holdPick.legacy, holdPick.index, holdPick.firstBad,
+                            double(holdPick.worstHigh), double(holdPick.worstLow), loaded.baked.size());
             bank.baked[clip.name] = std::move(loaded.baked);
         }
     }
