@@ -108,6 +108,9 @@ bool InteractAttack::actTeki(Teki* teki) immut
 	// #884: Emperor Bulblax flick timer (source addDamage flickSpeed). No-op
 	// for every other actor.
 	pc_p2_chappy_attacked(teki, damageAccepted);
+	// #996: Skitter Leaf flick timer (source addDamage flickSpeed). No-op for
+	// every other actor.
+	pc_p2_sokkuri_attacked(teki, damageAccepted);
 #endif
 	return damageAccepted;
 }

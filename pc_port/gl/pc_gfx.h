@@ -22,6 +22,8 @@ void pc_gfx_frame_dump_burst(unsigned frames);
 // Same, but the frame is captured `frames` presented frames later (probe evidence that needs the
 // moment of an event rather than the default 30-frame delay).
 void pc_gfx_proxy_shot_notify_after(const char* key, int frames);
+// Probe-only: capture the next presented frame as <PIKMIN_P2_PROXY_SHOT>/<key>.bmp.
+void pc_gfx_proxy_shot_now(const char* key);
 void pc_gfx_perf_scope_begin(const char* name);
 void pc_gfx_perf_scope_end(void);
 
