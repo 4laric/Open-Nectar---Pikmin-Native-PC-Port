@@ -8,6 +8,9 @@
 #include "pc_p2_tank.h"
 #include "pc_p2_tank_policy.h"
 #include "pc_p2_tank_breath.h"
+#include "pc_p2_tank_stream.h"
+#include "EffectMgr.h"
+#include "zen/particle.h"
 #include "pc_p2_species.h"
 #include "pc_p2_species_policy.h"
 #include "pc_p2_tank_phase.h"
@@ -78,7 +81,7 @@ struct TankFsm {
     float blowTimer=0.0f;
     // Breath exposure (#884): emitter growth, KEYEVENT_2 latch and per-breath
     // unique-actor evidence sets (pointer identity; cleared on transition).
-    p2tankbreath::Emit emit;bool discharging=false;p2tankbreath::Stats stats;
+    bool streamLogged=false;p2tankbreath::Emit emit;bool discharging=false;p2tankbreath::Stats stats;
     std::unordered_set<const void*> exposedPiki,acceptedPiki,immunePiki,exposedNavi,acceptedNavi;
 };
 std::map<PelletView*,TankFsm> fsms;
@@ -159,6 +162,29 @@ bool shouldFlick(BTeki* actor){return stuckPikminCount(actor)>=FLICK_STUCK_MIN;}
 // InteractFire, Wtank InteractBubble (Ftank.cpp:121-125, Wtank.cpp:119-123).
 // Immunity is the receiver's decision; p2_species_immune only classifies
 // evidence here and never gates the stimulus.
+// Watery Blowhog stream (visual only; see pc_p2_tank_stream.h). Re-emits short
+// one-shot P1 water particles along the live breath ray each discharge tick, so
+// the jet lasts exactly as long as the attack and grows with its range.
+void emitWaterStream(const p2tankbreath::Frame& f,unsigned gen,unsigned tick,bool& logged){
+    if(!effectMgr)return;
+    // Probe-only frame dump (PIKMIN_P2_PROXY_SHOT directory): one frame per 3 ticks.
+    if(tick%3==0&&tick/3<16){char key[40];std::snprintf(key,sizeof(key),"WtankStream_%02u",tick/3);pc_gfx_proxy_shot_now(key);}
+    if(effectMgr->getLiveGeneratorCount()>unsigned(p2tankstream::MAX_LIVE_GENERATORS))return;
+    p2tankstream::Point pts[p2tankstream::MAX_POINTS];
+    const int n=p2tankstream::layout(f.ox,f.oy,f.oz,f.dx,f.dz,f.range,tick,pts);
+    const Vector3f dir(f.dx,0.0f,f.dz);
+    for(int i=0;i<n;++i){
+        const auto& q=pts[i];
+        EffectMgr::effTypeTable id=EffectMgr::EFF_Frog_Water2;short life=p2tankstream::DROP_LIFETIME;
+        if(q.kind==p2tankstream::Kind::Muzzle){id=EffectMgr::EFF_Frog_Water1;life=p2tankstream::MUZZLE_LIFETIME;}
+        else if(q.kind==p2tankstream::Kind::Tip){id=EffectMgr::EFF_P_Bubbles;life=p2tankstream::MUZZLE_LIFETIME;}
+        zen::particleGenerator* g=effectMgr->create(id,Vector3f(q.x,q.y,q.z),nullptr,nullptr);
+        if(!g)continue;
+        g->setEmitDir(dir);g->setScaleSize(q.scale);g->configureOneShotBurst(1.0f,life);
+    }
+    if(!logged&&n>0){logged=true;
+        std::printf("P2_WTANK_FX kind=stream generator=%u origin=%.1f,%.1f,%.1f dir=%.3f,%.3f range=%.1f points=%d visual_only=1\n",gen,f.ox,f.oy,f.oz,f.dx,f.dz,f.range,n);std::fflush(stdout);}
+}
 int doBreath(BTeki* actor,TankFsm& s,float dt){
     const Vector3f pos=actor->getPosition();
     const p2tank::Params& p=p2tank::params(s.kind);
@@ -182,6 +208,7 @@ int doBreath(BTeki* actor,TankFsm& s,float dt){
     for(Navi* n:navis)s.exposedNavi.insert(n);
     int hit=p2tankbreath::dispatch(pikis,alive,[&](Piki* q){const bool ok=stim(q);if(ok)s.acceptedPiki.insert(q);return ok;});
     hit+=p2tankbreath::dispatch(navis,alive,[&](Navi* n){const bool ok=stim(n);if(ok)s.acceptedNavi.insert(n);return ok;});
+    if(s.kind==1)emitWaterStream(f,s.token,unsigned(s.stats.frames),s.streamLogged);
     ++s.stats.frames;
     if(int(pikis.size())>s.stats.maxExposedPiki)s.stats.maxExposedPiki=int(pikis.size());
     if(int(navis.size())>s.stats.maxExposedNavi)s.stats.maxExposedNavi=int(navis.size());
@@ -219,7 +246,7 @@ void setPhase(int kind,TankFsm& s){
 }
 void transition(BTeki* actor,TankFsm& s,TState st,const char* clip,unsigned gen){
     (void)actor;s.state=st;s.stateTime=0.0f;s.blowing=false;s.breathDone=false;s.flickDone=false;s.blowTimer=0.0f;if(clip)s.clip=clip;
-    s.emit=p2tankbreath::Emit{};s.discharging=false;s.stats=p2tankbreath::Stats{};
+    s.emit=p2tankbreath::Emit{};s.discharging=false;s.stats=p2tankbreath::Stats{};s.streamLogged=false;
     s.exposedPiki.clear();s.acceptedPiki.clear();s.immunePiki.clear();s.exposedNavi.clear();s.acceptedNavi.clear();
     std::printf("P2_TANK_STATE species=%s generator=%u state=%s\n",ids[s.kind],gen,p2tank::stateName(st));
     std::fflush(stdout);
