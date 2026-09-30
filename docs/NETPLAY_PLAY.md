@@ -148,7 +148,10 @@ delay 2 (67 ms)  stalls 0 / 10 s
 **F4** shows or hides the box; on a gamepad press **both sticks in (L3 +
 R3)** together. F4 does nothing while you have bound it to a game action in
 the controls; a keyboard-only game (`--netplay-input keyboard`) ignores the
-pad chord. The box is hidden while the F1 menu is open. It never changes
+pad chord. The stick buttons are first person (L3) and lock-on (R3) by
+default; while the host has turned either mode on for the session (or you
+bound another action to a stick button), pressing both sticks does only that
+in the game, not the box, and only F4 toggles it (the log says so once). The box is hidden while the F1 menu is open. It never changes
 the game: the other player's game is not told about it. The same numbers go
 to the log every 30 s (`[netplay] link: ...`).
 
@@ -162,18 +165,26 @@ the same message in the console, for example:
 ```
 [netplay] ==== netplay session ended ====
 [netplay] CONNECTION LOST: no data from the other game for too long (it may have crashed or lost its network).
-[netplay] Last saved day: day 3 (the campaign continues from the start of day 3); checkpoint 1.
+[netplay] Last save: the end of day 2; the campaign continues from the start of day 3 (checkpoint 1).
 [netplay] To carry on from that day, run this in the game's folder (PowerShell or Command Prompt):
 [netplay]   .\host.bat --continue
 [netplay]   or: .\nectar.exe --netplay-host-ice --continue
 [netplay] Your partner joins as usual (.\join.bat); your saved day is sent to them automatically.
 ```
 
+The save is made at the **end** of a day, so the next session starts at the
+**start** of the following day; the `Last save` line names both.
+
 The `or:` line repeats this game's own `--netplay-input` switch, if it had
 one. The joiner's message names the same commands for the host. The banner
 writes the commands with `/` (`./host.bat --continue`, which PowerShell
 takes but Command Prompt does not), because the game's font has no
-backslash; the console message above has the `.\` form for both.
+backslash, and says so on the first line that holds a command; the console
+message above has the `.\` form for both. If you renamed the exe to a name
+with spaces (for example `nectar (2).exe`), the console gives two lines
+instead of `or:`: `or in PowerShell: & '.\nectar (2).exe' ...` and `or in
+Command Prompt: ".\nectar (2).exe" ...`, because each console quotes it
+differently.
 
 - **DESYNC** (exit code 5): the games disagreed about the game state.
 - **DESYNC AT THE DAY-END SAVE** (exit code 5) / **SAVE NOT AGREED** (exit
@@ -192,7 +203,9 @@ campaign. If the session ends right at a day-end save, the joiner's message
 may say that save `may not count`: the joiner cannot tell whether the host
 finished it (the host counts it only once it has heard back from the
 joiner). The host's message is the one that knows, and the host's
-`--continue` uses exactly that day.
+`--continue` uses exactly that day. A joiner's own run folder counts the
+save only once the joiner has played on 10 frames past it **while the host
+was still connected**; a host that had just left does not count.
 
 ## Local two-window test (one PC, one player)
 
@@ -303,7 +316,23 @@ checkpoint adopted`).
   it) is skipped, and the day before it is used. Each run folder keeps a
   small `campaign-record.txt` for this (which saves both games agreed on;
   the joiner writes a save there only once the session has played on
-  9 frames past it, which proves the host finished that save too).
+  10 frames past it with the host still connected: the host sends its
+  input for those frames only after its own save finished, while a host
+  that dropped out gets neutral input from the network layer, which does
+  not count).
+- A run folder without `campaign-record.txt` (made by an older build) is
+  skipped, because it cannot tell which saves both games agreed on; the log
+  names it. A record that a crash damaged stops the search there, rather
+  than continue an older campaign by mistake. Either can still be continued
+  by naming the folder (below); the game then warns that the save it uses
+  (`UNCONFIRMED`) may not have been agreed.
+- If the newest host session saved nothing (a new campaign whose first day
+  never ended) and an older campaign has a saved day, `--continue` asks
+  `Continue the older campaign of ... (checkpoint 1, day 3) instead? [Y/n]`
+  before it uses the older one (n starts a new campaign).
+- Runs are ordered by when they started (`started_utc` in `launch.txt`),
+  so a clock change (daylight saving) does not make an older run look
+  newer.
 - `--continue <run folder>` continues that run folder instead (for example
   an older campaign, or a run where you were the joiner: its campaign is the
   same, so either player can host the next session). Quote a folder that
@@ -315,7 +344,16 @@ checkpoint adopted`).
   settings are this session's, as always.
 - Nothing is moved or deleted: the saved day, the memory card and the
   campaign's other files are **copied** into the new run folder, and the
-  old run folder stays exactly as it was.
+  old run folder stays exactly as it was. The new run's record names the
+  continued save only after every copy is on the disk, so a crash while
+  copying leaves a folder that a later `--continue` does not pick.
+- The memory card and the campaign's other files (for example the P2
+  receipt ledgers) are carried as the old run left them, which can be a
+  little later than the saved day (a card written by a save that did not
+  count, or P2 receipts of the day in progress). Both games get the same
+  files at the handshake, so they stay in step. A run where you were the
+  joiner has no `p2-delivery-receipts.txt` (the host keeps it), so P2
+  deliveries recorded there are granted again when you continue it.
 - No saved day yet (the first day never ended with a save): `--continue`
   says so (`--continue: no saved day yet ...`) and offers a new campaign
   instead (`Start a new campaign instead? [Y/n]`; without a console it
@@ -384,6 +422,10 @@ folder), not append the second evening to the first evening's run.
   run folders has a day that ended with the day-end save on both games (for
   example the first day never ended). Answer Y (or just press Enter) to
   start a new campaign; `--continue <run folder>` picks a specific run.
+- `--continue: ... made by an older build` / `stopped at ...: its campaign
+  record is damaged`: that run cannot tell which saves both games agreed on.
+  Name the folder you want with `--continue <run folder>`; the game warns
+  (`UNCONFIRMED`) that its newest save may not have been agreed.
 - Logs: the console output (or your `> file` redirect; `native.log` in the
   local test), plus the run folder `netplay\run-...\` next to the exe.
 
