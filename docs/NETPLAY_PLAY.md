@@ -31,7 +31,10 @@ sets the whole session up before anything else loads:
 
 - It creates a **private run folder** for this session and this player:
   `netplay\run-<date>-<time>-<host|join>-pid<id>\` next to the exe (or
-  `%LOCALAPPDATA%\Nectar\netplay\` when the exe folder is read-only). Every
+  `%LOCALAPPDATA%\Nectar\netplay\` when the exe folder is read-only, or when
+  its path is longer than about 105 characters, which the run's files would
+  not fit under Windows' 259-character path limit; the game prints one line
+  saying where it writes, and `--continue` looks in both places). Every
   session gets a new one; it is never reused. Inside it:
   - `session\runs\<token>\bootstrap.txt`: the session's seed file, with this
     player's own `SESSION` line, plus the game's `state.txt`/`hello.txt`;

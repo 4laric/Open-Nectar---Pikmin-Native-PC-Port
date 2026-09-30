@@ -631,12 +631,6 @@ long long run_start_key(const std::string& dir, const RunName& n)
 	return t == (time_t)-1 ? 0 : (long long)t;
 }
 
-std::string lower_ascii(std::string s)
-{
-	for (char& c : s) c = (char)std::tolower((unsigned char)c);
-	return s;
-}
-
 // Reads one run folder: launch.txt, its bootstrap, the campaign dir, and the
 // record; picks the newest valid checkpoint the record confirms. A run
 // without a whole record gives nothing unless `named` (the player named the
@@ -723,13 +717,14 @@ void evaluate_run(ContinueCandidate* c, bool named)
 // fallback %LOCALAPPDATA%/Nectar/netplay.
 std::vector<std::string> run_bases()
 {
+	// One definition of the two roots (pc_netplay_launch_util.h run_roots), shared
+	// with run creation below: a run written to the fallback because the exe
+	// folder path is too long (issue #965 item 1) is found by a bare --continue.
+	const char* local     = getenv_nonempty("LOCALAPPDATA");
+	const RunRoots roots  = run_roots(exe_dir(), local != nullptr ? std::string(local) : std::string());
 	std::vector<std::string> bases;
-	const std::string exe = exe_dir();
-	bases.push_back(exe.empty() ? std::string("netplay") : exe + "/netplay");
-	if (const char* local = getenv_nonempty("LOCALAPPDATA")) {
-		const std::string fb = forward_slashes(local) + "/Nectar/netplay";
-		if (lower_ascii(fb) != lower_ascii(bases[0])) bases.push_back(fb);
-	}
+	bases.push_back(roots.exeBase);
+	if (!roots.fallback.empty()) bases.push_back(roots.fallback);
 	return bases;
 }
 
@@ -1189,30 +1184,58 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 	}
 
 	// ---- this run's private dir (per run and per peer) ----
-	std::string base = exe_dir();
-	base             = base.empty() ? std::string("netplay") : base + "/netplay";
-	if (!make_dirs(base) || !dir_writable(base)) {
-		const char* local = getenv_nonempty("LOCALAPPDATA");
-		const std::string fallback = local != nullptr ? forward_slashes(local) + "/Nectar/netplay" : std::string();
-		if (fallback.empty() || !make_dirs(fallback) || !dir_writable(fallback))
-			die("cannot create a run dir: %s is not writable%s%s", base.c_str(),
-			    fallback.empty() ? "" : " and neither is ", fallback.c_str());
-		printf("[netplay] launch: %s is not writable; run dirs go to %s\n", base.c_str(), fallback.c_str());
-		base = fallback;
+	// Issue #965 item 1: the run root is <exe dir>/netplay unless that folder is
+	// read-only or its path is too long for the deepest file the session
+	// creates (Win32 MAX_PATH), in which case it is the fallback root
+	// %LOCALAPPDATA%/Nectar/netplay that --continue and host.bat also search.
+	// Short, writable exe folders keep exactly the old layout.
+	const time_t now = time(nullptr);
+	sRunStartUtc     = (long long)now;
+	struct tm lt;
+#ifdef _WIN32
+	localtime_s(&lt, &now);
+#else
+	localtime_r(&now, &lt);
+#endif
+	char stamp[128];
+	snprintf(stamp, sizeof(stamp), "run-%04d%02d%02d-%02d%02d%02d-%s-pid%u", lt.tm_year + 1900, lt.tm_mon + 1,
+	         lt.tm_mday, lt.tm_hour, lt.tm_min, lt.tm_sec, sSetup.isHost ? "host" : "join", current_pid());
+	std::string base;
+	{
+		const char* local    = getenv_nonempty("LOCALAPPDATA");
+		const RunRoots roots = run_roots(exe_dir(), local != nullptr ? std::string(local) : std::string());
+		const size_t nameLen = strlen(stamp) + 3; // room for the "-<n>" exclusive-create suffix
+		const size_t allowedBase = kPathBudget - 1 - nameLen - 1 - run_deepest_below(sSetup.token.size());
+		const bool exeWritable = make_dirs(roots.exeBase) && dir_writable(roots.exeBase);
+		const bool exeFits     = run_path_fits(roots.exeBase.size(), nameLen, sSetup.token.size());
+		// The fallback is only probed when the exe root cannot be used (no stray folders otherwise).
+		const bool needFallback = !exeWritable || !exeFits;
+		const bool fbWritable   = needFallback && !roots.fallback.empty() && make_dirs(roots.fallback)
+		                          && dir_writable(roots.fallback);
+		const RunBaseChoice pick = choose_run_base(roots, exeWritable, fbWritable, nameLen, sSetup.token.size());
+		if (pick.useFallback) {
+			base = roots.fallback;
+			if (pick.why == kRunBaseTooLong)
+				printf("[netplay] launch: the game folder path (%u characters) is too long for the run layout "
+				       "(the limit is about %u); run folders are written to %s (--continue looks there too)\n",
+				       (unsigned)(roots.exeBase.size() - 8), (unsigned)(allowedBase - 8), base.c_str());
+			else
+				printf("[netplay] launch: %s is not writable; run folders are written to %s\n",
+				       roots.exeBase.c_str(), base.c_str());
+		} else if (exeWritable) {
+			base = roots.exeBase;
+			if (!exeFits)
+				printf("[netplay] launch: warning: the game folder path (%u characters) may be too long for the run "
+				       "layout and %s is not usable as a fallback; unzip the game to a shorter folder if the run "
+				       "cannot be created\n",
+				       (unsigned)roots.exeBase.size(), roots.fallback.empty() ? "no fallback folder" : roots.fallback.c_str());
+		} else {
+			die("cannot create a run dir: %s is not writable and the fallback %s is not usable",
+			    roots.exeBase.c_str(), roots.fallback.empty() ? "(none: LOCALAPPDATA is not set)" : roots.fallback.c_str());
+		}
+		fflush(stdout);
 	}
 	{
-		const time_t now = time(nullptr);
-		sRunStartUtc     = (long long)now;
-		struct tm lt;
-#ifdef _WIN32
-		localtime_s(&lt, &now);
-#else
-		localtime_r(&now, &lt);
-#endif
-		char stamp[128];
-		snprintf(stamp, sizeof(stamp), "run-%04d%02d%02d-%02d%02d%02d-%s-pid%u", lt.tm_year + 1900,
-		         lt.tm_mon + 1, lt.tm_mday, lt.tm_hour, lt.tm_min, lt.tm_sec, sSetup.isHost ? "host" : "join",
-		         current_pid());
 		// Exclusive create: a run dir is never reused, so no stale hello.txt,
 		// checks.txt or campaign checkpoint can meet a new session.
 		for (int n = 0; n < 100 && sSetup.runDir.empty(); ++n) {
@@ -1228,7 +1251,9 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 	sSetup.campaignDir     = layout.campaignDir;
 	sSetup.saveDir         = layout.saveDir;
 	if (!make_dirs(layout.bootstrapDir) || !make_dirs(layout.saveDir))
-		die("cannot create the run layout under %s", sSetup.runDir.c_str());
+		die("cannot create the run layout under %s (%u characters; Windows stops at 259, so a shorter game folder or "
+		    "LOCALAPPDATA may be needed)",
+		    sSetup.runDir.c_str(), (unsigned)sSetup.runDir.size());
 	if (!write_file(layout.bootstrapPath, stamped)) die("cannot write %s", layout.bootstrapPath.c_str());
 	// M5c lane C: the continued campaign's files, copied (never moved) into
 	// this run's campaign dir before the randomizer loads it; the record

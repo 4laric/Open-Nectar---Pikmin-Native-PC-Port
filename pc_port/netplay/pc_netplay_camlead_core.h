@@ -42,6 +42,7 @@
 //     then bit-for-bit the sim camera again ("blends back").
 // Nothing here is sim state: C and the history live only in presentation.
 
+#include "netplay/pc_netplay_adaptive.h"
 #include "netplay/pc_netplay_gekko_input.h"
 
 #include <cmath>
@@ -69,6 +70,12 @@ constexpr uint16_t kPadStart = 0x1000;
 // Longest prediction: the Kontroller's current input plus up to 15 pending
 // frames (the session clamps the delay to 1..8).
 constexpr int kMaxSteps = 16;
+// The walk needs the current input plus every pending frame the history can
+// hold: frames past the sim frame land at most kMaxLocalDelay ahead, so
+// kMaxLocalDelay + 1 steps at most. If the delay cap ever grows past this
+// table, the prediction would silently truncate.
+static_assert(kMaxSteps > pc_netplay_adaptive::kMaxLocalDelay + 1,
+              "camlead step table must cover the current input plus kMaxLocalDelay pending frames");
 
 // Camera-relevant KeyboardButtons of one input, mapped exactly as
 // ControllerMgr::updateController maps PAD bits (Start included so the

@@ -197,8 +197,11 @@ def run_session(ctx, name, ticks, host_extra=(), host_env=None, join_env=None, e
     hin, jin = out / "host_inputs.pkni", out / "join_inputs.pkni"
     rp.gen_inputs(ticks + 50, a.seed_a, hin)
     rp.gen_inputs(ticks + 50, a.seed_b, jin)
-    lad = ctx.root / "localappdata"
-    lad.mkdir(exist_ok=True)
+    # Issue #965: --lad-base puts the private LOCALAPPDATA at a SHORT folder, so a
+    # test whose stage folder is longer than the run-layout limit (150+ chars)
+    # has a fallback run root that fits (<lad>/Nectar/netplay).
+    lad = (a.lad_base.resolve() / ctx.root.name / "localappdata") if a.lad_base else ctx.root / "localappdata"
+    lad.mkdir(parents=True, exist_ok=True)
     common = {
         "PIKMIN_NETPLAY_STUN": "none",
         "PIKMIN_NETPLAY_UNTHROTTLED": "0" if a.throttled else "1",
@@ -987,6 +990,9 @@ def main(argv=None):
                    help="run at the real 30 Hz pace (PIKMIN_NETPLAY_UNTHROTTLED=0); hudpair")
     p.add_argument("--old-exe", action="store_true",
                    help="saveack on the pre-fix exe: skip the new message wording check (the bug is expected)")
+    p.add_argument("--lad-base", type=Path, default=None,
+                   help="private LOCALAPPDATA root (<lad-base>/<scenario>/localappdata) instead of <out>/<scenario>/; "
+                        "keep it short when --out is a long folder (issue #965: the game then writes its runs there)")
     p.add_argument("--code-timeout", type=float, default=180)
     a = p.parse_args(argv)
     ctx = Ctx(a, a.scenario)

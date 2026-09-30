@@ -180,6 +180,108 @@ inline RunLayout run_layout(const std::string& runDir, const std::string& token)
 	return l;
 }
 
+// ---- Run-layout path budget (issue #965 item 1) ----
+// The run layout nests R/session/runs/<64-hex token>/<file> under the run dir
+// R = <base>/run-<stamp>-<role>-pid<N>[-k], and the base is <exe dir>/netplay.
+// Everything the session opens (the randomizer, the launcher, the campaign
+// code) uses narrow Win32 paths, which stop at MAX_PATH (260 with the NUL),
+// so an exe folder longer than about 119 characters made the launcher die
+// with "cannot create the run layout". The fix keeps the layout as it is and
+// moves the base to the fallback root (%LOCALAPPDATA%/Nectar/netplay, the
+// root --continue and host.bat already search) when the exe-relative base
+// cannot hold the deepest path the session will create. A "\\?\" long-path
+// prefix was not chosen: the randomizer, the save code and the netplay
+// record writers open these files with narrow (ANSI) APIs and their own
+// string handling, which do not take the prefix.
+constexpr size_t kPathBudget        = 254; // MAX_PATH-1 is 259: 5 characters of safety margin
+constexpr size_t kRunStampMax       = 41;  // "run-YYYYMMDD-HHMMSS-join-pid4294967295" (38) + "-99"
+constexpr size_t kTokenDirFileMax   = 20;  // longest name in session/runs/<token>/ (bootstrap.txt is 13; a .tmp twin 17)
+constexpr size_t kOtherBelowRunMax  = 98;  // floor for every other file below R (measured deepest 96 below R; play/assets/... <= 73)
+
+// Characters below the run dir R (without the leading '/') of the deepest
+// path the session creates, for a peer token of tokenLen characters.
+inline size_t run_deepest_below(size_t tokenLen)
+{
+	const size_t viaToken = std::string("session/runs/").size() + tokenLen + 1 + kTokenDirFileMax;
+	return viaToken > kOtherBelowRunMax ? viaToken : kOtherBelowRunMax;
+}
+
+// True when <base>/<run name of runNameLen characters>/<deepest file> stays
+// inside kPathBudget.
+inline bool run_path_fits(size_t baseLen, size_t runNameLen, size_t tokenLen)
+{
+	return baseLen + 1 + runNameLen + 1 + run_deepest_below(tokenLen) <= kPathBudget;
+}
+
+inline std::string ascii_lower(std::string s)
+{
+	for (char& c : s) {
+		if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+	}
+	return s;
+}
+
+// The run roots, in search order: <exe dir>/netplay first, then the fallback
+// %LOCALAPPDATA%/Nectar/netplay (omitted when LOCALAPPDATA is unset or names
+// the same folder). Both '/'-separated. Launcher run creation, --continue and
+// the host.bat lookup all use this one definition.
+struct RunRoots {
+	std::string exeBase;  // never empty ("netplay" when the exe dir is unknown)
+	std::string fallback; // empty when there is none
+};
+
+inline RunRoots run_roots(const std::string& exeDir, const std::string& localAppData)
+{
+	RunRoots r;
+	r.exeBase = exeDir.empty() ? std::string("netplay") : exeDir + "/netplay";
+	if (!localAppData.empty()) {
+		std::string local = localAppData;
+		for (char& c : local) {
+			if (c == '\\') c = '/';
+		}
+		const std::string fb = local + "/Nectar/netplay";
+		if (ascii_lower(fb) != ascii_lower(r.exeBase)) r.fallback = fb;
+	}
+	return r;
+}
+
+enum RunBaseWhy {
+	kRunBaseExe,          // <exe dir>/netplay: the layout is unchanged
+	kRunBaseNotWritable,  // fallback: the exe folder is read-only
+	kRunBaseTooLong,      // fallback: the exe folder path is too long for the layout
+	kRunBaseNone,         // neither root can be used
+};
+
+struct RunBaseChoice {
+	RunBaseWhy why = kRunBaseNone;
+	bool useFallback = false;
+};
+
+// Picks the root a new run folder goes under. The exe-relative root wins
+// whenever it is writable and holds the deepest path (so short paths behave
+// exactly as before); otherwise the fallback, provided it is writable and
+// holds it too.
+inline RunBaseChoice choose_run_base(const RunRoots& roots, bool exeWritable, bool fallbackWritable,
+                                     size_t runNameLen, size_t tokenLen)
+{
+	RunBaseChoice c;
+	const bool exeFits = run_path_fits(roots.exeBase.size(), runNameLen, tokenLen);
+	if (exeWritable && exeFits) {
+		c.why = kRunBaseExe;
+		return c;
+	}
+	const RunBaseWhy reason = exeWritable ? kRunBaseTooLong : kRunBaseNotWritable;
+	if (!roots.fallback.empty() && fallbackWritable && run_path_fits(roots.fallback.size(), runNameLen, tokenLen)) {
+		c.why         = reason;
+		c.useFallback = true;
+		return c;
+	}
+	// No usable fallback: a writable exe root is still tried as before (the
+	// estimate is conservative; the launcher's own error then names the length).
+	if (exeWritable) c.why = kRunBaseExe;
+	return c;
+}
+
 // The randomizer's derivation, restated over '/'-separated strings for the
 // test: parent(parent(dirname(bootstrapPath))) + "/campaign".
 inline std::string derived_campaign_dir(const std::string& bootstrapPath)

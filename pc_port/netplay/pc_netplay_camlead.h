@@ -28,7 +28,11 @@
 // line per presented frame; PIKMIN_NETPLAY_CAMERA_SHOT=<dir>:<f1>,<f2>,...
 // writes the presented frame at those GekkoNet frames as BMP files;
 // PIKMIN_NETPLAY_TEST_CAMERA_DRAG=<frame>:<amount>,... adds a mouse
-// free-camera drag (pc_window_add_camera_drag) before those frames' ticks.
+// free-camera drag (pc_window_add_camera_drag) before those frames' ticks;
+// PIKMIN_NETPLAY_TEST_CAMLEAD_KEY_SKEW=<n> (negative control, issue #965)
+// files every noted local input n frames off its landing frame, so the
+// summary's key_mismatch must go non-zero. Presentation-only (not in the
+// config hash); logged once at session start when set.
 
 #include "netplay/pc_netplay_gekko_input.h"
 

@@ -638,10 +638,14 @@ pc_netplay_bulk::BulkChannel sBulk; // M4a bulk 0x03 endpoint (lane B queues)
 // down makes the host set kFlagsHold on exactly one submitted input. That
 // input's frame H is the hold frame on both peers (p0 is the host input on
 // both). Each peer keeps submitting until its next local input would land
-// on frame H+kHoldLeadFrames (the frame of a submit is its index plus the
-// local delay: GekkoNet InputBuffer::AddLocalInput stores the input of
-// current frame c at c + delay, and the sSubmitted == sAdvances gate makes
-// c == sSubmitted), so both peers advance through H+11 and then produce no
+// on frame H+kHoldLeadFrames (M5c lane B: the landing frame of the next
+// input is sNextLand, not "submit index + delay": after a delay shrink the
+// two differ. GekkoNet InputBuffer::AddLocalInput stores the input of
+// current frame c at c + delay, a submit is due only when sNextLand ==
+// sAdvances + delay, and a delay growth adds its extra inputs at once, so
+// whenever an input is created its landing frame is at most
+// sAdvances + kMaxLocalDelay: the single cap is the bound, not the old
+// sSubmitted == sAdvances gate), so both peers advance through H+11 and then produce no
 // Advance. While held every turn still answers handshakes, pumps bulk,
 // updates GekkoNet (its 500 ms NetworkHealth packets keep both disconnect
 // timers fed) and handles session events. When the link is live again and
@@ -2314,6 +2318,22 @@ unsigned adaptive_target()
 		if (sAdvances < st.frame) return cur;
 		// A scheduled step waits out a hold / load window / shrink.
 		if (sHolding || sHoldRequested || sLgWindow.is_open()) return cur;
+		// Issue #965 (det MINOR-3): a shrink before the first gekko_add_local_input
+		// would skip GekkoNet's start fill of frames 0..d-1 and the submit gate
+		// (nextLand == advances + delay) would never be due again, stalling the
+		// session. The step is deferred to the first due turn after that submit
+		// (it stays pending and applies then), with one log line.
+		if (sSubmitted == 0 && st.delay < cur) {
+			static bool sLoggedFrame0Defer = false;
+			if (!sLoggedFrame0Defer) {
+				sLoggedFrame0Defer = true;
+				printf("[netplay] adaptive delay: test schedule step %llu (frame %llu, delay %u -> %u) lowers the delay "
+				       "before the first input was submitted; deferred until after the first submit\n",
+				       (unsigned long long)(sDelaySchedIdx + 1), (unsigned long long)st.frame, cur, st.delay);
+				fflush(stdout);
+			}
+			return cur;
+		}
 		++sDelaySchedIdx;
 		char buf[64];
 		snprintf(buf, sizeof(buf), "test schedule step %llu for frame %llu", (unsigned long long)sDelaySchedIdx,
@@ -4180,10 +4200,13 @@ unsigned sRecReseeds = 0;             // pc_netplay_det_reseed_count() last seen
 // frozen past the host's 60 s barrier deadline agreed on a result the host had
 // already abandoned (exit 6; the savetimeout pair), and an ACK can be lost
 // with a host that then times out or dies in its barrier. The host submits
-// its input for a frame f only after it has advanced f - delay frames (a
-// submit lands on its index plus the local delay, at most kMaxLocalDelay), so
-// host input for frame S + kMaxLocalDelay + 1 or later exists only after the
-// host's Advance S, and with it its barrier, finished with that ACK.
+// its input for a frame f only after it has advanced f - delay frames (M5c
+// lane B: the frame an input lands on is sNextLand, which can lag the submit
+// index plus the delay after a shrink but never exceeds sAdvances +
+// kMaxLocalDelay when the input is created; every delay path is clamped to
+// that one cap), so host input for frame S + kMaxLocalDelay + 1 or later
+// exists only after the host's Advance S, and with it its barrier, finished
+// with that ACK.
 // Fix round 1 (review MAJOR-1): GekkoNet also INVENTS host input. Once it
 // marks the host disconnected (idle timeout or quit notice, in the same
 // update's Poll), AddDisconnectedPlayerInputs fills the frame about to
