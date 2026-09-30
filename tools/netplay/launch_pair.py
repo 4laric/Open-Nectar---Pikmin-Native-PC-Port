@@ -37,6 +37,13 @@ Variants:
      --env-host / --env-join add test knobs (for example
      PIKMIN_NETPLAY_TEST_TAMPER_SIDECARS=1) and --expect refuse expects both
      peers to exit 4 with a `handshake refused` line.
+     #982: --join-presentation gives the joiner a presentation-only settings
+     file (window size, gamma, brightness, a keybind) so the two-pass
+     presentation diverges while the sim must not; --maturity-ticks T1 T2 ...
+     rewrites the host's state.txt as its hash log passes each tick (MATURITY
+     1 0 0, then 2 0 0, then 2 1 0 ...), so the v3 state stream carries a tier
+     change mid-session (the launcher's static state.txt carries
+     MATURITY 0 0 0 for a seed with progressive maturity).
 
 Gameplay proof (every sync pair): both logs carry `[Pikmin Randomizer]
 initialized` and `START_STAGE`, and the navi/piki/teki/item hash columns are
