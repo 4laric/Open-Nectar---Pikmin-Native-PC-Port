@@ -199,6 +199,7 @@ struct Umi {
     Piki* probeThrown[8] = {};
     float probeThrownAt[8] = {};
     bool probeLanded[8] = {};
+    bool probeMid[8] = {};
 };
 
 std::map<PelletView*, Umi> actors;
@@ -861,6 +862,15 @@ void runProbe(BTeki* actor, Umi& s, unsigned generator, float dt) {
                         double(p->mSRT.t.y), double(p->mSRT.t.z));
             std::fflush(stdout);
         }
+    }
+    for (int i = 0; i < s.probeThrows; ++i) {
+        if (s.probeMid[i] || s.probeTime < s.probeThrownAt[i] + 0.5f || !s.probeThrown[i]) continue;
+        s.probeMid[i] = true;
+        Piki* t = s.probeThrown[i];
+        std::printf("P2_UMIMUSHI_PROBE kind=flight n=%d pos=(%.1f,%.1f,%.1f) vel=(%.1f,%.1f,%.1f) state=%d\n", i,
+                    double(t->mSRT.t.x), double(t->mSRT.t.y), double(t->mSRT.t.z), double(t->mVelocity.x),
+                    double(t->mVelocity.y), double(t->mVelocity.z), int(t->getState()));
+        std::fflush(stdout);
     }
     // Landing census: 1.8 s after each throw, where did the Pikmin end up relative to the bulb?
     for (int i = 0; i < s.probeThrows; ++i) {
