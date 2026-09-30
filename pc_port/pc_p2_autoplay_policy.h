@@ -452,6 +452,10 @@ struct Config {
     // body HP is exposed, and only a Pikmin stuck on a weapon's own part
     // damages it; the bot keeps throwing for a longer window (bot assistance).
     float titanAttackMultiplier = 6.0f;
+    // Wave-3 lane 53: the Emperor Bulblax (53) is a 1300 HP multi-cycle boss whose source
+    // damageCallBack only counts stuck attackers, so the bot keeps fighting for a longer
+    // window than a single throw burst (bot assistance, like the Titan).
+    float kingAttackMultiplier = 5.0f;
     // #246: a Titan lets go of every stuck Pikmin at Dead (deathProcedure
     // setAlive(false)) ~11 s before its corpse forms, so the aftermath can
     // start with an empty squad and nobody to seed-throw. A player whistles
@@ -1641,10 +1645,12 @@ private:
         const bool kurage = in.targetSource == 57 || in.targetSource == 72;
         const bool pressOnly = isPressOnly(in.targetSource);
         const bool titan = in.targetSource == 73;
+        const bool kingBoss = in.targetSource == 53;
         const bool roller = cfg.rollerStance && isRollerStance(in.targetSource);
         const float limit = roller ? cfg.rollerAttackTimeout
             : kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier
             : titan ? cfg.attackTimeout * cfg.titanAttackMultiplier
+            : kingBoss ? cfg.attackTimeout * cfg.kingAttackMultiplier
             : pressOnly ? cfg.attackTimeout * cfg.pressOnlyAttackMultiplier : cfg.attackTimeout;
         // Whistle first, then re-throw (bot-v4: real players do this):
         // - Sarai holding a Pikmin (targetGrabbing): whistle frees the grab;
@@ -1712,6 +1718,7 @@ private:
             {
                 const float wlimit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier
                                    : titan  ? cfg.attackTimeout * cfg.titanAttackMultiplier
+                                   : kingBoss ? cfg.attackTimeout * cfg.kingAttackMultiplier
                                    : pressOnly ? cfg.attackTimeout * cfg.pressOnlyAttackMultiplier : cfg.attackTimeout;
                 if (stateTime >= wlimit) {
                     giveUp(in, "attack_timeout");

@@ -49,6 +49,15 @@ static_assert(p2sfx::kSaraiAttack == SE_SARAI_ATTACK, "SE drift");
 static_assert(p2sfx::kSaraiDead == SE_SARAI_DEAD, "SE drift");
 static_assert(p2sfx::kMarDead1 == SE_MAR_DEAD1, "SE drift");
 static_assert(p2sfx::kKurioneWater == SE_KURIONE_WATER, "SE drift");
+static_assert(p2sfx::kKingWalk == SE_KING_WALK, "SE drift");
+static_assert(p2sfx::kKingReady == SE_KING_READY, "SE drift");
+static_assert(p2sfx::kKingBero1 == SE_KING_BERO1, "SE drift");
+static_assert(p2sfx::kKingEat == SE_KING_EAT, "SE drift");
+static_assert(p2sfx::kKingCheek == SE_KING_CHEEK, "SE drift");
+static_assert(p2sfx::kKingHip == SE_KING_HIP, "SE drift");
+static_assert(p2sfx::kKingDead1 == SE_KING_DEAD1, "SE drift");
+static_assert(p2sfx::kKingAppear == SE_KING_APPEAR, "SE drift");
+static_assert(p2sfx::kKingSink == SE_KING_SINK, "SE drift");
 
 namespace {
 struct Actor {
