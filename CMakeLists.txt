@@ -1996,6 +1996,13 @@ target_include_directories(p2_sarai_lifecycle_test BEFORE PRIVATE
 target_compile_options(p2_sarai_lifecycle_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_sarai_lifecycle_test COMMAND p2_sarai_lifecycle_test)
 
+# #215 latch fix: engine-free fixtures for the Demon anchor collision tree,
+# body offset, CF_IsFlying mirror and Lock-On peak pin (pc_p2_demon_anchor.h).
+add_executable(p2_demon_anchor_test tools/p2_demon_anchor_test.cpp)
+target_include_directories(p2_demon_anchor_test PRIVATE pc_port)
+target_compile_options(p2_demon_anchor_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_demon_anchor_test COMMAND p2_demon_anchor_test)
+
 # Lane 06: engine-free provider unit tests (header-only; previously present but unregistered).
 add_executable(p2_receipt_test tools/p2_receipt_test.cpp)
 target_include_directories(p2_receipt_test PRIVATE pc_port)
