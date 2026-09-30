@@ -286,6 +286,8 @@ inline int seFor(unsigned sourceId, Event e) {
         case Event::Flick: return kChappySwing;
         case Event::Damage: return kKoganeDamage;
         case Event::Dead: return kMinicDie;
+        default: return kNone;
+        }
     case kEmpress: // Empress Bulblax: P1's Emperor Bulblax (KingChappy) bank.
         switch (e) {
         case Event::Roll: return kKingReady;    // roll wind-up

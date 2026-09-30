@@ -124,6 +124,7 @@ struct Hana {
     bool buriedLogged = false;
     float logTimer = 0.0f;
     State prevState = HANA_WALK; // state before Flick (source mStateMachine->mPreviousID)
+    p2hanapolicy::FlickReturn flickReturn;
 };
 
 std::map<PelletView*, Hana> actors;
@@ -192,7 +193,8 @@ Piki* nearestPiki(const Vector3f& pos, float radius) {
 // Source EnemyFunc::isStartFlick (enemyAction.cpp:1209) keys on Pikmin stuck to
 // the body (mStuckPikminCount vs the ShakeOffSticking tiers and mFlickTimer vs
 // ShakeOffBlowA-D; the port keeps only the stuck-count >= 3 test, a port
-// simplification that omits the mFlickTimer gate), not on a nearby swarm:
+// simplification that omits the tiered mFlickTimer gate: it does not follow the
+// source tiers), not on a nearby swarm:
 // proximity flicks made Hana flick back-to-back and never settle (wave 3
 // mechanics probe: drifted 1200 units from home while flicking). Same rule as
 // pc_p2_chappy.cpp FLICK_STUCK_MIN.
@@ -263,6 +265,12 @@ void applyUndergroundGate(BTeki* a, Hana& s, unsigned generator) {
     std::fflush(stdout);
 }
 void enter(Hana& s, State state, const char* clip) {
+    // Source mPreviousID: remember the state Flick is entered from (Walk or
+    // GoHome) before it is overwritten; read back at the Flick end.
+    if (state == HANA_FLICK) {
+        s.prevState = s.state;
+        s.flickReturn.noteEnter(static_cast<int>(s.state));
+    }
     s.state = state;
     s.stateTime = 0.0f;
     if (state == HANA_ATTACK) {
@@ -666,7 +674,7 @@ void pc_p2_hana_update(BTeki* actor) {
             // transit(enemy, mPreviousID), i.e. back to the state Flick was
             // entered from (Walk or GoHome here); the territory check then runs
             // as in any Walk frame.
-            const State back = (s.prevState == HANA_GOHOME) ? HANA_GOHOME : HANA_WALK;
+            const State back = static_cast<State>(s.flickReturn.returnState(HANA_WALK, HANA_GOHOME));
             std::printf("P2_HANA_STATE generator=%u state=%s\n", generator, stateName(back));
             enter(s, back, "move1");
         }
