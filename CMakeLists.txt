@@ -258,6 +258,9 @@ set(PC_PORT_SOURCES
     pc_port/netplay/pc_netplay_policy.cpp
     pc_port/netplay/pc_netplay_present.cpp
     pc_port/netplay/pc_sim_rng.cpp
+    # Netplay M5c lane A (issue #887): the lead (instant) camera. Engine TU in
+    # both builds; inert until a lockstep session arms it (netplay builds).
+    pc_port/netplay/pc_netplay_camlead.cpp
     # Challenge host-mode engine runtime bridge (#722, ported from #710
     # db245877; #186 review before shared-line landing): the per-tick runtime
     # bridge plus the landed host-state module, linked into pikmin_pc so the
@@ -1944,6 +1947,13 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_definitions(pc_netplay_present_test PRIVATE PC_NETPLAY_PRESENT_HOST=1)
     target_compile_options(pc_netplay_present_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_netplay_present_test COMMAND pc_netplay_present_test)
+
+    # Netplay M5c lane A lead camera core (issue #887; header-only, no game):
+    # key mapping, input history, prediction window, correction filter.
+    add_executable(pc_netplay_camlead_test pc_port/netplay/pc_netplay_camlead_test.cpp)
+    target_include_directories(pc_netplay_camlead_test PRIVATE pc_port)
+    target_compile_options(pc_netplay_camlead_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_netplay_camlead_test COMMAND pc_netplay_camlead_test)
 
     add_executable(pc_render_phase_test
         pc_port/timing/pc_render_phase_test.cpp

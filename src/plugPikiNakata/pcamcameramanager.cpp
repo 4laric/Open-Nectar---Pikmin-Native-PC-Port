@@ -7,6 +7,7 @@
 #include "Peve/Event.h"
 #include "sysNew.h"
 #if defined(PIKI_PC_PORT)
+#include "netplay/pc_netplay_camlead.h"
 #include "netplay/pc_netplay_det.h"
 #include <cmath>
 #include <cstdio>
@@ -133,6 +134,10 @@ void PcamCameraManager::update()
 		}
 	}
 	mCamera->update();
+	// Netplay M5c lane A (issue #887): record the posture this sim camera
+	// shows (before the vibration events move it for the next tick). Inert
+	// outside a lockstep session.
+	pc_netplay_camlead_note_sim_update(this);
 	updateVibrationEvent();
 	if (wobActive) {
 		mCamera->mPolarDir.mAzimuth = wobSavedAz;

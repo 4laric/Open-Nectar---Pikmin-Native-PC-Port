@@ -3,6 +3,7 @@
 #if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_det.h"
 #include "netplay/pc_netplay_present.h"
+#include "timing/pc_render_phase.h"
 #endif
 #include "pc_p2_teki_lifetime.h"
 #include "pc_p2_kurage_teki.h"
@@ -4842,7 +4843,15 @@ void GameCoreSection::setActiveView(int view)
 
 Camera* GameCoreSection::getViewCamera(int view)
 {
-	if (!pc_settings_get_coop_merge_camera()) {
+	// M5c lane A (issue #887): in det two-pass mode updateDynamicSplit never
+	// builds the merged views (each peer shows its own captain), so a peer
+	// with coopMergeCamera on used to present the never-updated mViewCam.
+	// The authoritative pass does ask for view cameras (postRender's split
+	// 2D loop: beginView, endViews), so the change is gated on the
+	// presentation pass and the authoritative pass keeps exactly what it
+	// did before M5c (fix round 1, review m1).
+	if (!pc_settings_get_coop_merge_camera()
+	    || (pc_netplay_present_two_pass_active() && !pc_render_is_authoritative())) {
 		return view == 1 ? mGameCamera2 : mNavi->mNaviCamera;
 	}
 	return &mViewCam[view == 1 ? 1 : 0];

@@ -110,6 +110,33 @@ has focus, and a pad plugged in later is picked up), or
 `--netplay-input auto` (the default behaviour). In a session the debug
 hotkeys (F5, F6, F9) do nothing: they would change one player's game only.
 
+Camera: your camera answers your camera buttons at once, on the next frame,
+although your captain's moves still arrive with the session's input delay
+(the delay both games need to stay in step; typically 2-5 frames, 67-167 ms).
+That covers turning (hold L a little and push the stick sideways),
+recentring behind your captain (L click), zoom (R) and the camera angle (Z).
+The camera still follows your captain where the game actually has them, so
+during a fast turn the view swings round straight away and your captain
+starts walking in the new direction a moment later, the same moment as any
+other move. Your stick always means "the way your camera was facing on your
+screen when you pushed it", for the host and the joiner alike (the joiner's
+stick used to follow the host captain's camera instead, so after either
+player turned a camera the joiner walked off at an angle). With the Free
+Camera mod, the mouse and the right stick turn your own captain's camera on
+both PCs (the joiner's used to do nothing). To go back to the old camera,
+which moves with the same delay as your captain, set
+`PIKMIN_NETPLAY_CAMERA_LEAD=0` before starting the game (either player; it
+only changes that player's own view). That keeps the two joiner fixes; to
+undo those too (the joiner's stick and mouse follow the host captain's
+camera again, as before), also set `PIKMIN_NETPLAY_JOINER_OWN_CAMERA=0`.
+With both at `0` the game sends exactly the inputs it sent before the
+instant camera. In PowerShell, in the console you start the game from:
+`$env:PIKMIN_NETPLAY_CAMERA_LEAD = '0'` (and
+`$env:PIKMIN_NETPLAY_JOINER_OWN_CAMERA = '0'`); in cmd,
+`set PIKMIN_NETPLAY_CAMERA_LEAD=0`. The console says what you have:
+`[netplay] camera lead: on` or `off`, and `own-camera yaw and drag: on` or
+`off` on the same line.
+
 Keep the console open: it shows the codes and the session log. To keep a
 log file, start the game with `> host.log 2>&1` added (the code is still
 copied to the clipboard and written to the run folder).
@@ -264,6 +291,16 @@ folder), not append the second evening to the first evening's run.
   a new run folder and a new campaign (resume works through the pair tools,
   see "Two sessions in a row"); quitting ends the session for both players.
 - A desync ends the session (`[netplay] desync detected`).
+- The instant camera covers the gameplay view only: cutscenes, the day-end
+  sequence and the results screens show what both games show, and the
+  first-person view (First Person mod) keeps the delayed camera. The camera's
+  click sound for a zoom or angle change still plays when the input reaches
+  the game, a moment after the view has moved. If you pause (or the other
+  player does) in the middle of a turn, the view stays where it was and
+  settles once play resumes. The markers drawn over the world (enemy health
+  gauges, item and captain labels) follow the game's camera, not the
+  instant one, so while you turn they trail the world by those few frames;
+  they catch up when the turn ends.
 - Seeds with P2 enemies need each player's own copy of the seed's P2
   assets overlay (see "Seeds with P2 enemies").
 - The low-level switches (`--netplay-host`/`--netplay-join`,

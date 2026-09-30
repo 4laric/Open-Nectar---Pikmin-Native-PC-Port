@@ -18,6 +18,7 @@
 #include "pc_coop.h"
 #include "pc_window.h"
 #include "pc_gyro.h"
+#include "netplay/pc_netplay_camlead.h"
 #include "netplay/pc_netplay_det.h"
 #include "netplay/pc_input_log.h"
 #include "netplay/pc_netplay_present.h"
@@ -2428,7 +2429,13 @@ static void pcNaviCaptureControlYaw()
 		const int pad = navi->mNaviID;
 		if (pad < 0 || pad > 3) continue;
 		if (pc_input_log_yaw_valid(pad)) continue;
-		Camera* cam = navi->controlCamera();
+		// M5c lane A (issue #887): in a lockstep session this peer's own pad
+		// samples the camera it presents for its captain (the lead camera
+		// while it is shown), so stick and yaw travel together relative to
+		// the view the player saw; the joiner used to sample P1's camera.
+		// Every other pad, and every non-session case, reads the control
+		// camera as before.
+		Camera* cam = pc_netplay_camlead_control_camera(pad, navi->controlCamera());
 		if (cam == nullptr) {
 			if (detMode) pc_input_log_yaw_set(pad, 0, pc_input_log::kFlagsNone);
 			continue;
