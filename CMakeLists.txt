@@ -2050,6 +2050,9 @@ add_executable(p2_body_fit_test tools/p2_body_fit_test.cpp)
 target_include_directories(p2_body_fit_test PRIVATE pc_port)
 target_compile_options(p2_body_fit_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_body_fit_test COMMAND p2_body_fit_test)
+# Dev audit: fit every species rest pose in a content tree (tools/p2_body_fit_audit.cpp).
+add_executable(p2_body_fit_audit EXCLUDE_FROM_ALL tools/p2_body_fit_audit.cpp)
+target_include_directories(p2_body_fit_audit PRIVATE pc_port)
 
 # Lane 06: engine-free provider unit tests (header-only; previously present but unregistered).
 add_executable(p2_receipt_test tools/p2_receipt_test.cpp)

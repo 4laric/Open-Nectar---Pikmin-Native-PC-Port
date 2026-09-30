@@ -53,18 +53,33 @@ bool enabled()
 // host collision part, and that are not airborne (flyers own their tree,
 // pc_p2_flyer_coll.h). The Chappy family keeps the host tree: its mouth slot
 // lives there. Proxies keep the P1 host AI and so the host tree.
+std::set<std::string>& extraKeys()
+{
+    static std::set<std::string> keys;
+    return keys;
+}
+
+// The Snagret snakes (SnakeCrow/SnakeWhole) are jointed multi-segment bodies: a rest-pose fit
+// is poor (max gap 65 on a 145-long neck), so they stay on the host tree until a lane adds them
+// through pc_p2_body_coll_manage() with its own verification.
 bool managedKey(const std::string& key)
 {
     static const std::set<std::string> keys = {
         "ground|Hana",        "ground|Sokkuri",        "ground|Armor",     "ground|ElecBug",
         "ground|TamagoMushi", "ground|Imomushi",       "aquatic|Catfish",  "aquatic|Tadpole",
-        "aquatic|UmiMushi",   "aquatic|UmiMushiBlind", "aquatic|Jigumo",   "snagret|SnakeCrow",
-        "snagret|SnakeWhole", "snagret|DangoMushi",    "bulblax|Queen",
+        "aquatic|UmiMushi",   "aquatic|UmiMushiBlind", "aquatic|Jigumo",   "snagret|DangoMushi",
+        "bulblax|Queen",
     };
-    return keys.count(key) != 0;
+    return keys.count(key) != 0 || extraKeys().count(key) != 0;
 }
 
-bool unscaledKey(const std::string& key) { return key == "bulblax|Queen"; }
+std::set<std::string>& unscaledExtra()
+{
+    static std::set<std::string> keys;
+    return keys;
+}
+
+bool unscaledKey(const std::string& key) { return key == "bulblax|Queen" || unscaledExtra().count(key) != 0; }
 
 bool loadStem(const std::string& stem, p2pose::Baked& out)
 {
@@ -122,6 +137,12 @@ const Species* speciesFor(const std::string& key)
 p2flyer::Vec3 pos(const Vector3f& v) { return p2flyer::Vec3{v.x, v.y, v.z}; }
 
 }  // namespace
+
+void pc_p2_body_coll_manage(const std::string& key, bool drawUnscaled)
+{
+    extraKeys().insert(key);
+    if (drawUnscaled) unscaledExtra().insert(key);
+}
 
 void pc_p2_body_coll_reset()
 {
