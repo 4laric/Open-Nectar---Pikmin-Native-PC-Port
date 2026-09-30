@@ -138,7 +138,11 @@ int main() {
         check(r.markers >= 3 && r.markers <= 3 * (1 + live / P2GroinkShellFx::kMarkerInterval),
               "floor marker at creation, then every kMarkerInterval ticks");
         check(r.glows > 3 && r.markers > 3, "a shell in flight keeps its glow and marker");
-        check(r.markers < r.glows && r.markers < r.trails, "marker cadence is the sparsest");
+        // Readability (#892): glow and marker follow the shell every tick (short-lived
+        // one-shots on the host), the trail puff stays sparser.
+        check(P2GroinkShellFx::kGlowInterval == 1 && P2GroinkShellFx::kMarkerInterval == 1,
+              "glow and floor marker are emitted every tick so they track the shell");
+        check(r.markers == r.glows && r.trails < r.glows, "marker and glow per tick, trail sparser");
         bool aboveGround = !r.markerPos.empty();
         for (const auto& p : r.markerPos) aboveGround = aboveGround && p.y >= 0.0f;
         check(aboveGround, "marker commands carry the live shell position (host projects to the floor)");
