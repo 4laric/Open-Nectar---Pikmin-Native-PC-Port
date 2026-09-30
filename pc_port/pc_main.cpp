@@ -48,6 +48,7 @@ __declspec(dllexport) int           AmdPowerXpressRequestHighPerformance = 1;
 #include "pc_window.h"
 #include "pc_bbft.h"
 #include "pc_gpu_preference.h"
+#include "pc_dev_console.h"
 #include "gl/pc_gfx.h"
 #include "gl/pc_texpack.h"
 #ifdef __ANDROID__
@@ -118,6 +119,8 @@ int main(int argc, char* argv[])
         return pc_jaudio_integration_test();
 #endif
     pc_bbft_init(argc, argv);
+    // #942 dev console: inert unless PIKMIN_DEV_CONSOLE=1; refuses under netplay.
+    pc_dev_console_init(argc, argv);
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--dump-texture-names") == 0)
             pc_gfx_set_dump_texture_names(1);
