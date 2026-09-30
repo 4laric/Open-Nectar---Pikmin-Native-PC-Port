@@ -91,6 +91,8 @@ class CaptainSwitchApp final : public PlugPikiApp {
     int frames=0, tick=-1;
     Navi *a=nullptr,*b=nullptr;
     Vector3f movementStart;
+    float dragStart=0;
+    int zoomStart=0;
     bool sawGather=false,sawHeld=false,sawFlying=false;
     std::vector<Piki*> squad;
     std::vector<Navi*> owners;
@@ -157,12 +159,23 @@ public:
         case 5:pad(KBBTN_DPAD_UP);break;
         case 10:active(1);break;
         case 15:active(1);pad();break;
+        case 16:
+            dragStart=cameraMgr->mCamera->mPolarDir.mAzimuth;
+            pc_window_add_camera_drag_player(0,0.1f);break;
+        case 17:
+            require(pc_window_take_camera_drag_player(0)==0,"selected camera consumed physical player0 drag");
+            require(std::abs(cameraMgr->mCamera->mPolarDir.mAzimuth-dragStart)>0.2f,"selected camera rotated from queued drag");
+            std::puts("P2_SWITCH_CAMERA drag_queue_player=0 consumed=1 rotated=1");break;
         case 25:movementStart=b->getPosition();pad(0,60,0);break;
         case 40: {
             Vector3f delta=b->getPosition()-movementStart;
             require(delta.length()>1,"selected captain walked");
             std::printf("P2_SWITCH_MOVE distance=%.3f inactive_input=0 ownership_preserved=1\n",delta.length());pad();break;
         }
+        case 45:zoomStart=cameraMgr->mCamera->mZoomLevel;pad(KBBTN_R);break;
+        case 50:
+            require(cameraMgr->mCamera->mZoomLevel!=zoomStart,"selected captain camera zoom through live pad");
+            std::puts("P2_SWITCH_CAMERA pad_zoom=1");pad();break;
         case 55:pad(KBBTN_DPAD_UP);break;
         case 60:active(0);break;
         case 65:pad();break;
