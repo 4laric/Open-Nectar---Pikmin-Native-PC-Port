@@ -2071,6 +2071,10 @@ add_executable(p2_umimushi_policy_test tools/p2_umimushi_policy_test.cpp)
 target_include_directories(p2_umimushi_policy_test PRIVATE pc_port)
 target_compile_options(p2_umimushi_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_umimushi_policy_test COMMAND p2_umimushi_policy_test)
+add_executable(p2_skewer_test tools/p2_skewer_test.cpp)
+target_include_directories(p2_skewer_test PRIVATE pc_port)
+target_compile_options(p2_skewer_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_skewer_test COMMAND p2_skewer_test)
 # bot-impl (#871): TEST-ONLY headless autoplay bot policy. Engine-free:
 # the header-only Brain (states, timeouts, giveup/result markers, Kogane
 # damage-and-move-on) plus the inert-when-unset gate (registration only).
