@@ -2,6 +2,7 @@
 #include "SoundID.h"
 #include "SoundMgr.h"
 #include "jaudio/pikiinter.h"
+#include "teki.h"
 #include <SDL2/SDL.h>
 #include <cstdio>
 #include <map>
@@ -60,28 +61,62 @@ Actor& actorFor(unsigned sourceId, unsigned token) { return gActors[std::make_pa
 float nowSeconds() { return float(SDL_GetTicks()) * 0.001f; }
 } // namespace
 
-int pc_p2_sfx(unsigned sourceId, unsigned token, p2sfx::Event event, const Vector3f& position)
+namespace {
+int play(unsigned sourceId, unsigned token, p2sfx::Event event, const Vector3f& position, BTeki* actor)
 {
     if (!seSystem) return p2sfx::kNone;
     bool logIt = false;
     const int se = actorFor(sourceId, token).gate.admit(sourceId, event, nowSeconds(), &logIt);
     if (se == p2sfx::kNone) return p2sfx::kNone;
-    // playSoundDirect reuses the nearest same-type context within 200 units
-    // (or the next system context), so a burst of P2 events never exhausts
-    // the 16 Jac event slots on its own.
-    seSystem->playSoundDirect(JACEVENT_Battle, se, position);
+    if (actor && actor->mSeContext) {
+        // One Jac event per actor, created on first play and evicted by
+        // listener distance like any P1 creature's (SeSystem::createEvent).
+        actor->playSound(se);
+    } else {
+        // Actor-less one-shot: a system context (playSoundDirect reuses the
+        // nearest same-type context within 200 units, else round-robin).
+        seSystem->playSoundDirect(JACEVENT_Battle, se, position);
+    }
     if (logIt) {
         char line[128];
         p2sfx::formatMarker(line, sizeof line, sourceId, token, event, se);
-        std::printf("%s x=%.1f y=%.1f z=%.1f\n", line, position.x, position.y, position.z);
+        std::printf("%s x=%.1f y=%.1f z=%.1f ctx=%s\n", line, position.x, position.y, position.z,
+                    actor && actor->mSeContext ? "actor" : "direct");
     }
     return se;
+}
+} // namespace
+
+int pc_p2_sfx(unsigned sourceId, unsigned token, p2sfx::Event event, const Vector3f& position)
+{
+    return play(sourceId, token, event, position, nullptr);
+}
+
+int pc_p2_sfx(unsigned sourceId, unsigned token, p2sfx::Event event, BTeki* actor)
+{
+    if (!actor) return p2sfx::kNone;
+    return play(sourceId, token, event, actor->getPosition(), actor);
+}
+
+void pc_p2_sfx_stop(unsigned sourceId, p2sfx::Event event, BTeki* actor)
+{
+    const int se = p2sfx::seFor(sourceId, event);
+    if (se == p2sfx::kNone || !actor || !actor->mSeContext) return;
+    actor->stopSound(se);
 }
 
 void pc_p2_sfx_stride(unsigned sourceId, unsigned token, const Vector3f& position, float strideLength)
 {
     Actor& a = actorFor(sourceId, token);
     if (a.stride.advance(position.x, position.z, strideLength)) pc_p2_sfx(sourceId, token, p2sfx::Event::Step, position);
+}
+
+void pc_p2_sfx_stride(unsigned sourceId, unsigned token, BTeki* actor, float strideLength)
+{
+    if (!actor) return;
+    Actor& a = actorFor(sourceId, token);
+    const Vector3f position = actor->getPosition();
+    if (a.stride.advance(position.x, position.z, strideLength)) play(sourceId, token, p2sfx::Event::Step, position, actor);
 }
 
 void pc_p2_sfx_forget(unsigned sourceId, unsigned token)

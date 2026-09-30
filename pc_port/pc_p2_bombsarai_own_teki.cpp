@@ -464,7 +464,7 @@ bool ownTick(BTeki* t, Own& o, float dt) {
         if (stuck > o.maxStuck) o.maxStuck = stuck;
     }
     if (t->mHealth < before || (t->mHealth < o.lastHealth && t->mHealth >= 0.0f)) {
-        if (t->mHealth > 0.0f) pc_p2_sfx(58, o.token, p2sfx::Event::Damage, t->getPosition());
+        if (t->mHealth > 0.0f) pc_p2_sfx(58, o.token, p2sfx::Event::Damage, t);
         std::printf("P2_BOMBSARAI_OWN_DAMAGE source_id=58 token=%u health=%.1f prior=%.1f hits=%d stuck=%d "
                     "nearby_pikmin=%d flying=%d state=%s\n",
                     o.token, t->mHealth, o.lastHealth, o.pendingHits, stuck, t->isFlying() ? 0 : nearbyPikmin(t),
@@ -499,12 +499,15 @@ bool ownTick(BTeki* t, Own& o, float dt) {
             logState(t, o, from, e, stuck);
             // P1 Sarai/bomb bank approximation (output-only, #946).
             switch (e) {
-            case p2bsown::State::Release: pc_p2_sfx(58, o.token, p2sfx::Event::Attack, t->getPosition()); break;
+            case p2bsown::State::Release: pc_p2_sfx(58, o.token, p2sfx::Event::Attack, t); break;
             case p2bsown::State::Flick:
-            case p2bsown::State::BombFlick: pc_p2_sfx(58, o.token, p2sfx::Event::Flick, t->getPosition()); break;
-            case p2bsown::State::Damage: pc_p2_sfx(58, o.token, p2sfx::Event::Damage, t->getPosition()); break;
-            case p2bsown::State::Dead: pc_p2_sfx(58, o.token, p2sfx::Event::Dead, t->getPosition()); break;
-            case p2bsown::State::Fall: pc_p2_sfx(58, o.token, p2sfx::Event::Land, t->getPosition()); break;
+            case p2bsown::State::BombFlick: pc_p2_sfx(58, o.token, p2sfx::Event::Flick, t); break;
+            case p2bsown::State::Damage: pc_p2_sfx(58, o.token, p2sfx::Event::Damage, t); break;
+            case p2bsown::State::Dead:
+                pc_p2_sfx_stop(58, p2sfx::Event::Hover, t);
+                pc_p2_sfx(58, o.token, p2sfx::Event::Dead, t);
+                break;
+            case p2bsown::State::Fall: pc_p2_sfx(58, o.token, p2sfx::Event::Land, t); break;
             default: break;
             }
             if (e == p2bsown::State::Fall) ++o.falls;
@@ -553,9 +556,10 @@ bool ownTick(BTeki* t, Own& o, float dt) {
         t->setDirection(last.faceDir);
         if (last.flying) {
             if (!t->isFlying()) t->startFlying();
-            if (o.fsm.state() != p2bsown::State::Dead) pc_p2_sfx(58, o.token, p2sfx::Event::Hover, t->getPosition());
+            if (o.fsm.state() != p2bsown::State::Dead) pc_p2_sfx(58, o.token, p2sfx::Event::Hover, t);
         } else if (t->isFlying()) {
             t->finishFlying();
+            pc_p2_sfx_stop(58, p2sfx::Event::Hover, t);
         }
         const Vector3f drive(last.velocity.x, last.flying ? last.velocity.y : 0.0f, last.velocity.z);
         t->inputDrive(drive);

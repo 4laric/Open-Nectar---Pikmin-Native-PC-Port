@@ -336,20 +336,23 @@ void P2SaraiHost::updateDemon()
         const float hp = mBoundActor->mHealth;
         auto hit = sLastHealth.find(generator);
         if (hit != sLastHealth.end() && hp < hit->second && hp > 0.0f)
-            pc_p2_sfx(32, generator, p2sfx::Event::Damage, mSRT.t);
+            pc_p2_sfx(32, generator, p2sfx::Event::Damage, mBoundActor);
         sLastHealth[generator] = hp;
         if (now != before) {
             switch (now) {
-            case p2sarai::State::Attack: pc_p2_sfx(32, generator, p2sfx::Event::Attack, mSRT.t); break;
-            case p2sarai::State::Flick: pc_p2_sfx(32, generator, p2sfx::Event::Flick, mSRT.t); break;
-            case p2sarai::State::Damage: pc_p2_sfx(32, generator, p2sfx::Event::Damage, mSRT.t); break;
-            case p2sarai::State::Dead: pc_p2_sfx(32, generator, p2sfx::Event::Dead, mSRT.t); break;
-            case p2sarai::State::Fall: pc_p2_sfx(32, generator, p2sfx::Event::Land, mSRT.t); break;
+            case p2sarai::State::Attack: pc_p2_sfx(32, generator, p2sfx::Event::Attack, mBoundActor); break;
+            case p2sarai::State::Flick: pc_p2_sfx(32, generator, p2sfx::Event::Flick, mBoundActor); break;
+            case p2sarai::State::Damage: pc_p2_sfx(32, generator, p2sfx::Event::Damage, mBoundActor); break;
+            case p2sarai::State::Dead:
+                pc_p2_sfx_stop(32, p2sfx::Event::Hover, mBoundActor);
+                pc_p2_sfx(32, generator, p2sfx::Event::Dead, mBoundActor);
+                break;
+            case p2sarai::State::Fall: pc_p2_sfx(32, generator, p2sfx::Event::Land, mBoundActor); break;
             default: break;
             }
         }
         if (mFsm.flags().untargetable && now != p2sarai::State::Dead)
-            pc_p2_sfx(32, generator, p2sfx::Event::Hover, mSRT.t);
+            pc_p2_sfx(32, generator, p2sfx::Event::Hover, mBoundActor);
     }
 
     if (now != before) {

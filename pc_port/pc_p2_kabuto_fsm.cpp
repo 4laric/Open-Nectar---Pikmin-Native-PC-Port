@@ -195,8 +195,8 @@ void transition(BTeki* a,KabutoFsm& s,KState st,const char* clip,unsigned gen){
     if(st==KB_ATTACK)s.alert=0.0f;
     std::printf("P2_KABUTO_STATE generator=%u state=%s\n",gen,p2kabutofsm::stateName(st));std::fflush(stdout);
     // P1 Cannon Beetle bank approximation (output-only, #946).
-    if(st==KB_DEAD)pc_p2_sfx(75,gen,p2sfx::Event::Dead,a->getPosition());
-    if(st==KB_FLICK)pc_p2_sfx(75,gen,p2sfx::Event::Flick,a->getPosition());
+    if(st==KB_DEAD)pc_p2_sfx(75,gen,p2sfx::Event::Dead,a);
+    if(st==KB_FLICK)pc_p2_sfx(75,gen,p2sfx::Event::Flick,a);
 }
 void die(BTeki* a,KabutoFsm& s,unsigned gen,float prior){
     if(!s.deadLogged){s.deadLogged=true;std::printf("P2_KABUTO_DEAD generator=%u source_id=75 health=0 prior_health=%.1f\n",gen,prior);std::fflush(stdout);}
@@ -269,7 +269,7 @@ void pc_p2_kabuto_fsm_update(BTeki* actor){
     if(actor->mHealth<=0.0f&&!s.deathPriorSet&&previousHealth>0.0f){s.deathPrior=previousHealth;s.deathPriorSet=true;}
     const float priorForDeath=s.deathPriorSet?s.deathPrior:previousHealth;
     if(actor->mHealth<s.lastHealth&&actor->mHealth>0.0f){
-        pc_p2_sfx(75,gen,p2sfx::Event::Damage,actor->getPosition());
+        pc_p2_sfx(75,gen,p2sfx::Event::Damage,actor);
         std::printf("P2_KABUTO_DAMAGE generator=%u source_id=75 health=%.1f\n",gen,actor->mHealth);std::fflush(stdout);}
     s.lastHealth=actor->mHealth;
     if(s.poolFullCooldown>0.0f)s.poolFullCooldown-=dt;
@@ -320,7 +320,7 @@ void pc_p2_kabuto_fsm_update(BTeki* actor){
         break;}
     case KB_MOVE:{
         // StateMove::exec (KabutoState.cpp:203-260) via p2kabutoaim::moveExec.
-        pc_p2_sfx_stride(75,gen,actor->getPosition(),24.0f);
+        pc_p2_sfx_stride(75,gen,actor,24.0f);
         if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
         if(shouldFlick(actor)){stop(actor);transition(actor,s,KB_FLICK,"flick",gen);break;}
         buildAim(aim);

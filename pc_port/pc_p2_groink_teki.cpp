@@ -387,8 +387,8 @@ void applyOutput(BTeki* t, Binding& b, const Snapshot& snap, const p2groinkfsm::
         logState(b, shown, e, t);
         shown = e;
         // P1 Blowhog / Cannon Beetle bank approximation (output-only, #946).
-        if (e == p2groinkfsm::State::Dead) pc_p2_sfx(sourceOf(b), b.generator, p2sfx::Event::Dead, t->getPosition());
-        if (e == p2groinkfsm::State::Flick) pc_p2_sfx(sourceOf(b), b.generator, p2sfx::Event::Flick, t->getPosition());
+        if (e == p2groinkfsm::State::Dead) pc_p2_sfx(sourceOf(b), b.generator, p2sfx::Event::Dead, t);
+        if (e == p2groinkfsm::State::Flick) pc_p2_sfx(sourceOf(b), b.generator, p2sfx::Event::Flick, t);
         if (e == p2groinkfsm::State::Dead && !b.deadLogged) {
             b.deadLogged = true;
             std::printf("P2_GROINK_DEAD generator=%u source_id=%u health=%.1f prior_health=%.1f\n", b.generator,
@@ -412,7 +412,7 @@ void applyOutput(BTeki* t, Binding& b, const Snapshot& snap, const p2groinkfsm::
     }
     if (o.volley) {
         ++b.volleys;
-        pc_p2_sfx(sourceOf(b), b.generator, p2sfx::Event::Shot, t->getPosition());
+        pc_p2_sfx(sourceOf(b), b.generator, p2sfx::Event::Shot, t);
         b.haveAim = true;
         b.aim = Vector3f(o.volleyTarget.x, o.volleyTarget.y, o.volleyTarget.z);
         std::printf("P2_GROINK_VOLLEY generator=%u source_id=%u shells=%d speed=%.1f angle=%.3f target=%.1f,%.1f,%.1f n=%d\n",
@@ -491,7 +491,7 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
     if (t->mDamageCount < b.lastDamageCount) b.lastDamageCount = t->mDamageCount;
     b.pendingHits += int(t->mDamageCount - b.lastDamageCount);
     b.lastDamageCount = t->mDamageCount;
-    if (t->mHealth < b.lastHealth && t->mHealth > 0.0f) pc_p2_sfx(sourceOf(b), b.generator, p2sfx::Event::Damage, t->getPosition());
+    if (t->mHealth < b.lastHealth && t->mHealth > 0.0f) pc_p2_sfx(sourceOf(b), b.generator, p2sfx::Event::Damage, t);
     if (t->mHealth < b.lastHealth && t->mHealth > 0.0f)
         std::printf("P2_GROINK_DAMAGE generator=%u source_id=%u health=%.1f prior=%.1f hits=%d\n", b.generator,
                     sourceOf(b), t->mHealth, b.lastHealth, b.pendingHits);
@@ -533,7 +533,7 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         t->mVelocity.z = drive.z;
         if (shown == p2groinkfsm::State::Walk || shown == p2groinkfsm::State::WalkHome
             || shown == p2groinkfsm::State::WalkPath)
-            pc_p2_sfx_stride(sourceOf(b), b.generator, t->getPosition(), 28.0f);
+            pc_p2_sfx_stride(sourceOf(b), b.generator, t, 28.0f);
     }
     if (t->mHealth > 0.0f) t->updateLifeGauge();
     b.logTimer += dt;

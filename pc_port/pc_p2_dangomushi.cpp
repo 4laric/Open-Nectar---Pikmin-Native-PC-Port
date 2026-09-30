@@ -380,10 +380,10 @@ void setState(BTeki* a, Dango& s, State state, const char* clip) {
     std::fflush(stdout);
     // P1 Cannon Beetle / boulder bank approximation (output-only, #946).
     switch (state) {
-    case DANGO_TURN: pc_p2_sfx(94, generator, p2sfx::Event::Expose, a->getPosition()); break;
-    case DANGO_FLICK: pc_p2_sfx(94, generator, p2sfx::Event::Flick, a->getPosition()); break;
-    case DANGO_RECOVER: pc_p2_sfx(94, generator, p2sfx::Event::Attack, a->getPosition()); break;
-    case DANGO_DEAD: pc_p2_sfx(94, generator, p2sfx::Event::Dead, a->getPosition()); break;
+    case DANGO_TURN: pc_p2_sfx(94, generator, p2sfx::Event::Expose, a); break;
+    case DANGO_FLICK: pc_p2_sfx(94, generator, p2sfx::Event::Flick, a); break;
+    case DANGO_RECOVER: pc_p2_sfx(94, generator, p2sfx::Event::Attack, a); break;
+    case DANGO_DEAD: pc_p2_sfx(94, generator, p2sfx::Event::Dead, a); break;
     default: break;
     }
 }
@@ -1248,7 +1248,7 @@ void pc_p2_dangomushi_wall(BTeki* actor, const Plane& plane) {
                 n.z, s.stateTime, s.rollTargets.size(), pos.x, pos.z);
     std::fflush(stdout);
     logCrushTally(s, generator, "wall_crash");
-    pc_p2_sfx(94, generator, p2sfx::Event::Crash, pos);
+    pc_p2_sfx(94, generator, p2sfx::Event::Crash, actor);
     // mFsm->transit(this, DANGOMUSHI_Turn) straight from the wall callback.
     stop(actor);
     setState(actor, s, DANGO_TURN, "turn");
@@ -1384,7 +1384,7 @@ void pc_p2_dangomushi_update(BTeki* actor) {
         const float before = actor->mHealth;
         actor->makeDamaged();
         if (actor->mHealth < before && actor->mHealth > 0.0f)
-            pc_p2_sfx(94, generator, p2sfx::Event::Damage, pos);
+            pc_p2_sfx(94, generator, p2sfx::Event::Damage, actor);
         if (actor->mHealth != before && (s.healthLogTimer <= 0.0f || actor->mHealth <= 0.0f)) {
             s.healthLogTimer = 0.5f;
             std::printf("P2_DANGOMUSHI_HEALTH generator=%u health=%.1f before=%.1f state=%s "
@@ -1475,7 +1475,7 @@ void pc_p2_dangomushi_update(BTeki* actor) {
             std::printf("P2_DANGOMUSHI_ROLL generator=%u frame=%.1f x=%.1f z=%.1f\n",
                         generator, float(rollStartFrame), pos.x, pos.z);
             std::fflush(stdout);
-            pc_p2_sfx(94, generator, p2sfx::Event::Roll, pos);
+            pc_p2_sfx(94, generator, p2sfx::Event::Roll, actor);
         }
         if (s.rolling && clock.tail) {
             // KEYEVENT_LOOP_END after finishMotion: mIsRolling/mIsBall clear.
@@ -1624,7 +1624,7 @@ void pc_p2_dangomushi_update(BTeki* actor) {
     }
     if (s.state != DANGO_TURN && s.state != DANGO_DEAD) unstickOutsideWindow(actor, s, generator);
     if (s.state == DANGO_MOVE || (s.state == DANGO_ATTACK && !s.rolling))
-        pc_p2_sfx_stride(94, generator, pos, 30.0f);
+        pc_p2_sfx_stride(94, generator, actor, 30.0f);
     setPhase(s);
     s.logTimer += dt;
     if (s.logTimer >= 1.0f) {

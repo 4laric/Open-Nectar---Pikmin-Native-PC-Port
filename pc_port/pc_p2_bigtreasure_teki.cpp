@@ -376,9 +376,9 @@ void applyOutput(BTeki* t, Binding& b, const Snapshot& snap, const TickOutput& o
     for (const Transition& tr : o.entered) {
         logState(b, tr, t);
         // P1 Beady Long Legs bank approximation (output-only, #946).
-        if (tr.to == State::Dead) pc_p2_sfx(73, b.generator, p2sfx::Event::Dead, t->getPosition());
-        if (tr.to == State::Flick) pc_p2_sfx(73, b.generator, p2sfx::Event::Flick, t->getPosition());
-        if (tr.to == State::Land) pc_p2_sfx(73, b.generator, p2sfx::Event::Step, t->getPosition());
+        if (tr.to == State::Dead) pc_p2_sfx(73, b.generator, p2sfx::Event::Dead, t);
+        if (tr.to == State::Flick) pc_p2_sfx(73, b.generator, p2sfx::Event::Flick, t);
+        if (tr.to == State::Land) pc_p2_sfx(73, b.generator, p2sfx::Event::Step, t);
         if (tr.to == State::Dead && !b.deadLogged) {
             b.deadLogged = true;
             // StateDead::init -> deathProcedure -> setAlive(false): stuck
@@ -394,7 +394,7 @@ void applyOutput(BTeki* t, Binding& b, const Snapshot& snap, const TickOutput& o
     for (int w = 0; w < P2BTWEAPON_Count; ++w) {
         if (!o.weaponHits[w]) continue;
         pc_p2_test_day_cycle_note("hurt");
-        pc_p2_sfx(73, b.generator, p2sfx::Event::Damage, t->getPosition());
+        pc_p2_sfx(73, b.generator, p2sfx::Event::Damage, t);
         std::printf("P2_BIGTREASURE_DAMAGE generator=%u source_id=73 part=%s hits=%d damage=%.1f hp=%.1f state=%s%s\n",
                     b.generator, weaponName(w), o.weaponHits[w], o.weaponDamage[w], b.fsm.ownership().weaponHealth(w),
                     stateName(b.fsm.state()), o.pinchSmoke[w] ? " pinch=1" : "");
@@ -421,7 +421,7 @@ void applyOutput(BTeki* t, Binding& b, const Snapshot& snap, const TickOutput& o
             if (o.attackStarted == P2BTWEAPON_Fire) ev = p2sfx::Event::Fire;
             else if (o.attackStarted == P2BTWEAPON_Water) ev = p2sfx::Event::Water;
             else if (o.attackStarted == P2BTWEAPON_Gas) ev = p2sfx::Event::Gas;
-            pc_p2_sfx(73, b.generator, ev, t->getPosition());
+            pc_p2_sfx(73, b.generator, ev, t);
         }
         b.recvCount.clear();
         std::printf("P2_BIGTREASURE_ATTACK_START generator=%u source_id=73 weapon=%s variant=%d hp=%.1f n=%d\n",
@@ -655,7 +655,7 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         if (o.bodyDamage > 0.0f) {
             t->mStoredDamage = o.bodyDamage;
             t->makeDamaged();
-            if (t->mHealth > 0.0f) pc_p2_sfx(73, b.generator, p2sfx::Event::Damage, t->getPosition());
+            if (t->mHealth > 0.0f) pc_p2_sfx(73, b.generator, p2sfx::Event::Damage, t);
             std::printf("P2_BIGTREASURE_BODY_DAMAGE generator=%u source_id=73 health=%.1f prior=%.1f hits=%d weapons=%d\n",
                         b.generator, t->mHealth, before, o.bodyHits, b.fsm.ownership().weaponCount());
         }
@@ -674,7 +674,7 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
     // One footstep per gait step (BigTreasure.cpp PSSE_EN_BIGTAKARA_WALK per foot).
     if (b.fsm.gait().steps() != b.sfxSteps) {
         b.sfxSteps = b.fsm.gait().steps();
-        pc_p2_sfx(73, b.generator, p2sfx::Event::Step, t->getPosition());
+        pc_p2_sfx(73, b.generator, p2sfx::Event::Step, t);
     }
     if (t->mHealth > 0.0f) t->updateLifeGauge();
     b.logTimer += dt;
