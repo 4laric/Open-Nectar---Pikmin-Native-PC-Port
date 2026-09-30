@@ -2159,6 +2159,14 @@ void Piki::collisionCallback(immut CollEvent& event)
 #endif
 
 	bool distCheck = true;
+#if defined(PIKI_PC_PORT)
+	// A Pikmin held by a P2 captor (Jellyfloat suction, pc_p2_kurage_receiver)
+	// is released from its captain (mNavi == nullptr) yet still collides with
+	// the crowd around it; vanilla Pikmin always have a captain here.
+	if (!mNavi) {
+		distCheck = false;
+	} else
+#endif
 	if (!mNavi->mForcePikiDistCheck && mNavi->mCStick.length() < 0.1f) {
 		distCheck = false;
 	}

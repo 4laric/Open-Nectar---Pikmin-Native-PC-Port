@@ -34,7 +34,7 @@ using namespace p2sfx;
 
 void table() {
     const unsigned species[] = {kBreadbug, kSnitchbug, kDirigibug, kCrawbster, kAntennaBeetle,
-                                kTitanDweevil, kGroink, kGroinkArmored, kCannonLarva};
+                                kTitanDweevil, kGroink, kGroinkArmored, kCannonLarva, kKurage, kOniKurage};
     for (unsigned s : species) {
         CHECK(seFor(s, Event::Damage) != kNone);
         CHECK(seFor(s, Event::Dead) != kNone);
@@ -57,6 +57,10 @@ void table() {
     CHECK(seFor(kTitanDweevil, Event::Step) == kSpiderWalk);
     CHECK(seFor(kGroink, Event::Shot) == kKabutoShot);
     CHECK(seFor(kCannonLarva, Event::Shot) == kKabutoShot);
+    CHECK(seFor(kKurage, Event::Hover) == kSaraiHover);
+    CHECK(seFor(kKurage, Event::Attack) == kSaraiAttack);
+    CHECK(seFor(kOniKurage, Event::Dead) == kSaraiDead);
+    CHECK(seFor(kKurage, Event::Step) == kNone);
     // Unknown species: silent.
     CHECK(seFor(1, Event::Damage) == kNone);
     CHECK(seFor(0, Event::Step) == kNone);

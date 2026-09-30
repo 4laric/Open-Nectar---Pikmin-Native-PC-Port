@@ -6,6 +6,8 @@
 #include "pc_p2_kurage_receiver.h"
 #include "pc_p2_kurage_teki_policy.h"
 #include "pc_p2_kurage_visual.h"
+#include "pc_p2_kurage_own_host.h"
+#include "pc_p2_kurage_own.h"
 #include "pc_p2_retail_player.h"
 #include "pc_bbft.h"
 #include "Camera.h"
@@ -51,6 +53,8 @@ struct Binding {
     bool hasPatrol = false;
     unsigned patrolState = 0x9e3779b9u;
     float lastDistToGoal = 1e9f;
+    // Wave 3 flyers (#960): campaign OWN source FSM host (inactive elsewhere).
+    P2KurageOwn own;
 };
 std::map<BTeki*, Binding> s;
 // Naturally dead Kurage bodies: kept until the central forget/reset seam so the
@@ -119,6 +123,7 @@ void revoke(BTeki* t)
 {
     auto i = s.find(t);
     if (i == s.end()) return;
+    i->second.own.detach(t);
     pc_p2_kurage_receiver_owner_invalidated(t);
     s.erase(i);
 }
@@ -450,7 +455,15 @@ void pc_p2_kurage_teki_setup()
         Binding& b = inserted.first->second;
         b.spawnPos = t->mSRT.t;
         refresh(t, b);
-        if (!pc_p2_kurage_receiver_setup(t, &b.mouth)) { if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Kurage", "receiver_setup_failed")) return; }
+        // Campaign (seed bridge, no room preview): every Jellyfloat registers
+        // its own mouth part and runs the source FSM (wave 3 flyers, #960);
+        // fixtures keep the single-owner receiver.
+        const bool ownMode = kurageCampaignMode();
+        const bool receiverOk = ownMode ? pc_p2_kurage_receiver_register(t, &b.mouth)
+                                        : pc_p2_kurage_receiver_setup(t, &b.mouth);
+        if (!receiverOk) { if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Kurage", "receiver_setup_failed")) return; }
+        if (ownMode && !b.own.init(t, gen, 57, &b.mouth, pc_p2_kurage_visual_shape("wait")))
+            if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Kurage", "own_init_failed")) return;
         std::printf("P2_KURAGE_TEKI_READY generator=%u type=%d binding=private_adapter\n", gen, type);
         std::printf("P2_KURAGE_CORPSE_READY generator=%u drop=BDT_Normal ledger=onion receipt=corpse:kurage:%u\n", gen, gen);
         // bot-deliver (#871): lane-06 ordinary-delivery source bind so
@@ -509,6 +522,12 @@ void pc_p2_kurage_teki_tick(BTeki* t)
     }
     Binding& b = i->second;
     const float dt = gsys->getFrameTime();
+    if (b.own.active()) {
+        // Campaign OWN: the source FSM drives movement, flight, suction, flick and
+        // death; a true return means the host teardown ran this frame.
+        b.own.tick(t, dt);
+        return;
+    }
     if (!b.fsmEnabled) {
         if (kurageCampaignMode()) {
             // Campaign hover: the P1 Frog host keeps its natural locomotion
@@ -669,6 +688,17 @@ bool pc_p2_kurage_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& matrix, boo
     }
     auto i = s.find(t);
     if (i == s.end()) return false;
+    if (i->second.own.active()) {
+        // Sampled pose for the current source motion, drawn at the actor's own
+        // position (the actor really flies now; no visual-only hover offset).
+        Shape* shape = pc_p2_kurage_visual_shape(p2kurageown::poseFor(i->second.own.motion()));
+        if (!shape) shape = pc_p2_kurage_visual_shape("wait");
+        if (shape) {
+            shape->updateAnim(gfx, matrix, nullptr, t);
+            shape->drawshape(gfx, *gfx.mCamera, nullptr);
+            return true;
+        }
+    }
     if (i->second.fsmEnabled) {
         Shape* shape = pc_p2_kurage_visual_shape(
             pc_p2_kurage_visual_motion_for_state((int)i->second.fsm.state()));
@@ -740,4 +770,25 @@ bool pc_p2_kurage_receipt(PelletView* view, unsigned& generator)
 int pc_p2_kurage_bound_count()
 {
     return int(s.size() + corpses.size());
+}
+
+bool pc_p2_kurage_teki_suppress_ai(const BTeki* t)
+{
+    auto i = s.find(const_cast<BTeki*>(t));
+    return i != s.end() && i->second.own.active() && !i->second.own.escaped();
+}
+
+bool pc_p2_kurage_teki_own(const BTeki* t)
+{
+    auto i = s.find(const_cast<BTeki*>(t));
+    return i != s.end() && i->second.own.active();
+}
+
+float pc_p2_kurage_teki_param_f(const BTeki* t, int idx, float fallback)
+{
+    auto i = s.find(const_cast<BTeki*>(t));
+    if (i == s.end() || !i->second.own.active()) return fallback;
+    if (idx == TPF_Life) return i->second.own.life();
+    if (idx == TPF_LifeRecoverRate) return 0.0f;
+    return fallback;
 }

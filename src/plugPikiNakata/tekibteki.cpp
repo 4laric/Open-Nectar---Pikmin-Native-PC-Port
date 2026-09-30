@@ -726,6 +726,10 @@ void BTeki::doAI()
 	if (pc_p2_groink_teki_suppress_ai(this)) {
 		return;
 	}
+	// Wave 3 flyers (#960): campaign OWN Jellyfloat runs its source FSM.
+	if (pc_p2_kurage_teki_suppress_ai(this)) {
+		return;
+	}
 	if (pc_p2_bombsarai_teki_suppress_ai(this)) {
 		return;
 	}

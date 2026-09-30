@@ -456,6 +456,8 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_kurage_arena.cpp
     pc_port/pc_p2_kurage_visual.cpp
     pc_port/pc_p2_kurage_teki.cpp
+    pc_port/pc_p2_kurage_own_host.cpp
+    pc_port/pc_p2_flyer_coll.cpp
     pc_port/pc_p2_onikurage_mouth.cpp
     pc_port/pc_p2_onikurage_teki.cpp
     pc_port/pc_main.cpp
@@ -2003,6 +2005,13 @@ add_executable(p2_demon_anchor_test tools/p2_demon_anchor_test.cpp)
 target_include_directories(p2_demon_anchor_test PRIVATE pc_port)
 target_compile_options(p2_demon_anchor_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_demon_anchor_test COMMAND p2_demon_anchor_test)
+
+# Wave 3 flyers (#960): CF_IsFlying mirror rule, retail Kurage collision tree,
+# walk/turn maths and the source clip clock driving the Kurage FSM.
+add_executable(p2_flyer_test tools/p2_flyer_test.cpp)
+target_include_directories(p2_flyer_test PRIVATE pc_port)
+target_compile_options(p2_flyer_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_flyer_test COMMAND p2_flyer_test)
 
 # Lane 06: engine-free provider unit tests (header-only; previously present but unregistered).
 add_executable(p2_receipt_test tools/p2_receipt_test.cpp)

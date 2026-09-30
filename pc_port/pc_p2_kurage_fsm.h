@@ -61,6 +61,10 @@ struct In {
     bool naviSucked = false;       // isNaviSucked(): >=1 captain held in a mouth slot
     bool naviSuckFinished = true;  // isFinishNaviSuck(): occupied slots at rest offsets
     float velocityY = 0.0f;        // getVelocity().y for the StateDrop ground test
+    // suckPikmin() result: mSuckedPiki >= ip11 while the suction window is open
+    // finishes the Attack motion (StateAttack::exec). Default false keeps every
+    // existing host unchanged.
+    bool suckFull = false;
 };
 
 struct Out {
@@ -161,6 +165,7 @@ public:
             }
             out.heightVelocity = heightVelocity(mParms, attackPitchOffset(in.motionFrame, mVariant), 5.0f, in.mapY, in.positionY);
             out.altitude = altitude(in.mapY, in.positionY);
+            if (mIsSucking && in.suckFull) mFinishing = true; // suckPikmin() -> finishMotion()
             if (in.keyEvent == KeyEvent::Key2) { out.suckStart = true; mIsSucking = true; }
             if (in.keyEvent == KeyEvent::Key1 && mFinishing) { out.suckStop = true; mIsSucking = false; }
             mStateTimer += in.deltaTime;

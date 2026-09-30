@@ -77,13 +77,15 @@ const char* pc_p2_kurage_visual_motion_for_state(int state)
     case 2: return "move1";
     case 3: return "move1";
     case 4: return "attack";
-    case 5: return "type1";
-    case 6: return "type2";
+    // Kurage.h AnimID: Land = move2, TakeOff = type1, Fall = type2 (wave 3
+    // flyers corrected the Fall/Land/TakeOff pose mapping, #960).
+    case 5: return "type2";
+    case 6: return "move2";
     case 7: return "wait";
-    case 8: return "type2";
+    case 8: return "type1";
     case 9: return "flick1";
     case 10: return "flick2";
-    case 11: return "type1";
+    case 11: return "type2";
     default: return nullptr;
     }
 }
