@@ -814,6 +814,19 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
             forcedClip = forced;
         }
     }
+    // Skitter Leaf carcass (#996): source startCarcassMotion plays the looping
+    // Carry clip 'type5' (distinctive upright leaf) instead of holding dead1.
+    bool carcassLoop = false;
+    if (corpse && entry->second == "ground|Sokkuri") {
+        const char* forced = nullptr;
+        float phase = 0.0f;
+        if (pc_p2_sokkuri_carcass_clip(actor, forced, phase) && bank.clips.count(forced)) {
+            name = forced;
+            forcedPhase = phase;
+            forcedClip = forced;
+            carcassLoop = true;
+        }
+    }
     // Dweevil death-clip guarantee (wf7 dweevil-impl, #871): a dead dweevil
     // plays its death clip then holds the dead pose, never attack1. While
     // alive the visual follows the Otakara FSM only, so the generic P1-motion
@@ -844,7 +857,7 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
             name = nullptr;
         }
     }
-    if (corpse) {
+    if (corpse && !carcassLoop) {
         if (!isDweevil) name = firstClip(bank, deadClips, int(sizeof(deadClips) / sizeof(deadClips[0])));
         else if (!name) name = firstClip(bank, deadClips, int(sizeof(deadClips) / sizeof(deadClips[0])));
     } else if (!name && !isDweevil && (motion == TekiMotion::Damage || motion >= TekiMotion::Type1)) {
@@ -884,7 +897,7 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
                         static_cast<unsigned long long>(event.cycle), token);
         }
     }
-    const bool holdLast = corpse || (isDweevil && dead);
+    const bool holdLast = (corpse && !carcassLoop) || (isDweevil && dead);
     // Death clips stop at their last visible pose (#895, p2motion::isDeathClip).
     auto holdIt = bank.hold.find(name);
     const size_t holdIndex = holdIt != bank.hold.end() && holdIt->second < poses.size() ? holdIt->second : poses.size() - 1;
