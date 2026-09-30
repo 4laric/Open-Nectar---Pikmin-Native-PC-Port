@@ -893,7 +893,8 @@ void runProbe(BTeki* actor, Umi& s, unsigned generator, float dt) {
     const CollPart* weak = s.coll.node[4];
     const float bx = std::sin(s.heading), bz = std::cos(s.heading);
     const Vector3f bulb(weak->mCentre.x, weak->mCentre.y, weak->mCentre.z);
-    const Vector3f launch(bulb.x - bx * 170.0f, ap.y, bulb.z - bz * 170.0f);
+    const float lx = bulb.x - bx * 120.0f, lz = bulb.z - bz * 120.0f; // a captain 120 units behind the bulb, on the ground there
+    const Vector3f launch(lx, mapMgr ? mapMgr->getMinY(lx, lz, true) : ap.y, lz);
     // Throw height of a quick tap (hold time 0) and the lock-on pin the game would use for it.
     const float quickHeight = C_NAVI_PARM(navi, mThrowMinHeight);
     const float lockK = p2umi::pinScale(bulb.y - ap.y, quickHeight, 550.0f, 0.5f);
