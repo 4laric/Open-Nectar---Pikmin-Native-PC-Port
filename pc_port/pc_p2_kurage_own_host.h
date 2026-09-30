@@ -19,6 +19,7 @@
 #include "pc_p2_flyer_coll.h"
 #include "pc_p2_groink_clock.h"
 #include "pc_p2_kurage_fsm.h"
+#include "pc_p2_kurage_fx.h"
 #include "pc_p2_kurage_own.h"
 #include "pc_p2_onikurage_mouth.h"
 #include "pc_p2_retail_player.h"
@@ -28,6 +29,7 @@ class CollPart;
 class Navi;
 class Piki;
 class Shape;
+class Vector3f;
 
 class P2KurageOwn {
 public:
@@ -67,6 +69,8 @@ private:
     void suckNavi(BTeki* actor, float mapY);
     void updateCaptain(BTeki* actor, const p2kurage::Out& out);
     void placeMouthJoint(BTeki* actor);
+    void logCaptainHold(BTeki* actor) const;
+    Vector3f stomachAnchor(BTeki* actor) const;
     void releaseCaptain(BTeki* actor, const char* why, bool drop);
 
     bool mActive = false;
@@ -99,6 +103,9 @@ private:
     unsigned mRng = 1u;
     int mSucked = 0;
     bool mSuckFull = false;
+    p2kuragefx::State mFx;
+    int mWinRolled = 0;   // log: in-range Pikmin that won the fp12 roll this suction window
+    int mWinAdmitted = 0; // log: of those, taken into the suction
 
     // OniKurage captain mouth: one captain through the shared demon captain bridge.
     p2onikurage::MouthSlots mSlots;

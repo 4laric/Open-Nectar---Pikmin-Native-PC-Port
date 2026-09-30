@@ -457,6 +457,7 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_kurage_visual.cpp
     pc_port/pc_p2_kurage_teki.cpp
     pc_port/pc_p2_kurage_own_host.cpp
+    pc_port/pc_p2_kurage_fx.cpp
     pc_port/pc_p2_flyer_coll.cpp
     pc_port/pc_p2_onikurage_mouth.cpp
     pc_port/pc_p2_onikurage_teki.cpp
@@ -1530,6 +1531,11 @@ add_executable(p2_kurage_receiver_test tools/test_p2_kurage_receiver.cpp)
 target_include_directories(p2_kurage_receiver_test PRIVATE pc_port tools/kurage_receiver_stubs)
 target_compile_options(p2_kurage_receiver_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_kurage_receiver_test COMMAND p2_kurage_receiver_test)
+
+add_executable(p2_kurage_suction_test tools/test_p2_kurage_suction.cpp)
+target_include_directories(p2_kurage_suction_test PRIVATE pc_port)
+target_compile_options(p2_kurage_suction_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_kurage_suction_test COMMAND p2_kurage_suction_test)
 
 # Lane 12 captain/Kurage real-GL diagnostic (codex/p2-lane12-review
 # tools/p2_captain_kurage_runtime.cpp, adapted to the line epoch API).
