@@ -60,3 +60,13 @@ unsigned long pc_p2_long_legs_corpse_count();
 // movement/targeting/attacks each tick in bridge campaign.
 bool pc_p2_long_legs_suppress_ai(const BTeki*);
 float pc_p2_long_legs_param_f(const BTeki*, int idx, float fallback);
+// Raging Long Legs (69) #1018. Bomb receiver (EnemyBase::bombCallBack, full
+// damage): -1 for anything that is not a registered BigFoot.
+float pc_p2_long_legs_bomb_rate(Teki*);
+// Observer: a thrown/jumping Pikmin touched (site thrown/jump) or latched onto
+// (site stick) a part of a registered BigFoot's retail collision tree.
+class Piki; class CollPart;
+void pc_p2_long_legs_piki_contact(BTeki*, Piki*, CollPart*, const char* site);
+// Cull on the P2 LOD sphere (fp32 225 around the body) instead of the P1 host
+// sphere at the feet. False for anything that is not a registered BigFoot.
+bool pc_p2_long_legs_cull_bounds(BTeki*, float centre[3], float* radius);
