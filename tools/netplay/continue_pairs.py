@@ -506,15 +506,20 @@ def scenario_halfsave(ctx, kind):
       savedesync   PIKMIN_NETPLAY_TEST_BARRIER_CORRUPT=sav on the host: the
                    checkpoint digests differ, both peers exit 5 at the save.
       savetimeout  the joiner stalls (PIKMIN_NETPLAY_TEST_STALL_*, keep-alive
-                   on, so it stays connected) in its save tick for longer than
-                   the host's barrier deadline: the host exits 6.
+                   on, so it stays connected) just before its save tick for
+                   longer than the host's barrier deadline: the host exits 6.
+                   The joiner never reaches its save: when its stall ends the
+                   host is gone, so it reports the lost connection (exit 0,
+                   CONNECTION LOST) with nothing saved. (Were it to reach its
+                   barrier first, that barrier would fail with exit 6; either
+                   is accepted, a 'saved' record line or checkpoint is not.)
     S2's --continue must skip the host's valid-but-unagreed checkpoint, say
     there is no saved day, and start a new campaign in sync."""
     a = ctx.a
     host_env, join_env = {}, {}
     if kind == "savedesync":
         host_env["PIKMIN_NETPLAY_TEST_BARRIER_CORRUPT"] = "sav"
-        codes = {"host": 5, "join": 5}
+        codes = {"host": [5], "join": [5]}
         needle = "DESYNC AT THE DAY-END SAVE"
     else:
         stall = {"PIKMIN_NETPLAY_TEST_STALL_MS": str(a.barrier_stall_ms),
@@ -522,17 +527,29 @@ def scenario_halfsave(ctx, kind):
                  "PIKMIN_NETPLAY_TEST_STALL_ROLE": "join"}
         host_env.update(stall)
         join_env.update(stall)
-        codes = {"host": 6, "join": 6}
+        codes = {"host": [6], "join": [6, 0]}
         needle = "SAVE NOT AGREED"
     s1 = run_session(ctx, "s1", a.dayend_ticks, host_env=host_env, join_env=join_env, expect=kind)
-    ctx.check(s1["exit"] == codes, f"s1: exit codes {s1['exit']} (want {codes})")
+    ctx.check(all(s1["exit"][side] in codes[side] for side in ("host", "join")),
+              f"s1: exit codes {s1['exit']} (want host in {codes['host']}, join in {codes['join']})")
     host_run = s1["host"]["run_dir"]
     for side in ("host", "join"):
-        ab = [ln for ln in s1[side]["barrier"] if "save barrier abandoned" in ln or "save barrier timeout" in ln]
-        ctx.check(bool(ab), f"s1 {side}: the day-end save barrier failed ({ab[:1]})")
+        rec = s1[side].get("campaign-record.txt") or []
         ctx.check(not any("save barrier frame=" in ln for ln in s1[side]["barrier"]),
                   f"s1 {side}: no agreed save barrier")
-        rec = s1[side].get("campaign-record.txt") or []
+        if side == "join" and s1["exit"]["join"] == 0:
+            # The joiner never reached its save: the host was gone when its
+            # stall ended.
+            ctx.check(any("disconnected" in ln for ln in s1["join"]["events"]),
+                      "s1 join: disconnected (the host had left when its stall ended)")
+            ctx.check(not s1["join"]["barrier"], "s1 join: never reached the day-end save barrier")
+            ctx.check(not any(r.startswith("saved ") or r.startswith("abandoned ") for r in rec) and
+                      any(r.startswith("end kind=disconnect ") for r in rec),
+                      "s1 join: record has no 'saved' line and ends 'end kind=disconnect'")
+            recovery_ok(ctx, s1, "s1", "join", ["CONNECTION LOST"])
+            continue
+        ab = [ln for ln in s1[side]["barrier"] if "save barrier abandoned" in ln or "save barrier timeout" in ln]
+        ctx.check(bool(ab), f"s1 {side}: the day-end save barrier failed ({ab[:1]})")
         ctx.check(any(r.startswith("abandoned gen=1 exit=") for r in rec) and
                   not any(r.startswith("saved ") for r in rec),
                   f"s1 {side}: record has 'abandoned gen=1' and no 'saved' line")
@@ -647,8 +664,9 @@ def main(argv=None):
     p.add_argument("--event-frame", type=int, default=30000, help="day-3 frame of the desync / joiner kill")
     p.add_argument("--quit-frame", type=int, default=1500)
     p.add_argument("--barrier-frame", type=int, default=28457,
-                   help="savetimeout: the day-2-end save barrier frame of these inputs and delays (the joiner's "
-                        "test stall lands in that save tick)")
+                   help="savetimeout: the day-2-end save barrier frame of these inputs and delays; the joiner's "
+                        "test stall runs in hash tick <frame> (GekkoNet frame <frame>-1), the tick just before its "
+                        "save")
     p.add_argument("--barrier-stall-ms", type=int, default=75000,
                    help="savetimeout: the joiner's stall, longer than the host's 60 s barrier deadline")
     p.add_argument("--continue-ticks", type=int, default=3000)
