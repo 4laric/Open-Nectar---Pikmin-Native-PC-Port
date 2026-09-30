@@ -48,6 +48,8 @@
 #include "Shape.h"
 #include "pc_p2_fb_smooth.h"
 #include "pc_p2_pose_family.h"
+#include "pc_p2_billboard_groups.h"
+#include "LifeGauge.h"
 #include <algorithm>
 #include "Texture.h"
 #include "gameflow.h"
@@ -105,6 +107,18 @@ bool sPosesLoaded = false;
 p2posefamily::Bank sPoseBank("BOMBSARAI"), sBombPoseBank("BOMBSARAI_BOMB");
 p2posefamily::Actors sPoseVis, sBombVis;
 std::size_t sDiskBytes = 0;
+// #1027: balloon billboard vertex groups (p2-bombsarai-billboard.txt, staged
+// from the extraction); empty = balloons keep their baked orientation.
+std::vector<p2billboardgroups::Range> sBillboards;
+bool sBillboardLogged = false;
+// #1027: one P1 life-gauge wheel per bomb slot, the same widget and setup the
+// Volatile Dweevil bomb uses (P2 shows the Bomb enemy's ordinary life gauge,
+// mHealth / mMaxHealth at fp27 above it, hidden while full).
+constexpr int kBombGaugeSlots = 16;
+constexpr float kBombGaugeHeight = 35.0f;  // Bomb enemyparm fp27 (retail)
+LifeGauge sBombGauge[kBombGaugeSlots];
+bool sBombGaugeInit[kBombGaugeSlots] = {};
+bool sBombGaugeLogged = false;
 // A clip is bank-loadable when its staged files are numbered 0..N-1 (the
 // extractor names poses by sample index; an old dead1 tree skipped some).
 bool contiguousFiles(const std::vector<int>& files) {
@@ -329,6 +343,14 @@ void loadAssets() {
                 ++bombPoses;
             }
         }
+    }
+    sBillboards.clear();
+    sBillboardLogged = false;
+    {
+        std::ifstream in("p2-bombsarai-billboard.txt");
+        std::string error;
+        if (in && !p2billboardgroups::parse(in, "P2_BOMBSARAI_BILLBOARD_1", sBillboards, error))
+            std::printf("P2_BOMBSARAI_BILLBOARD_INVALID reason=%s fallback=baked_orientation\n", error.c_str());
     }
     std::printf("P2_BOMBSARAI_OWN_BANK staged_clips=%d poses=%zu bomb_poses=%zu bytes=%zu disk_bytes=%zu "
                 "interpolation=%d bomb_interpolation=%d draw=%s arm_loop=%d\n",
@@ -822,6 +844,7 @@ void pc_p2_bombsarai_own_reset() {
     sBombVis.clear();
     sPoseBank.reset();
     sBombPoseBank.reset();
+    for (bool& init : sBombGaugeInit) init = false;
     sPool = P2BombSaraiBombPool(16);
     for (auto& v : sPoses) v.clear();
     for (auto& v : sBombPoses) v.clear();
@@ -935,6 +958,47 @@ void pc_p2_bombsarai_teki_draw_bombs(Graphics& gfx) {
     }
 }
 
+// #1027: the bomb's own life gauge, drawn in the 2D pass (GameCoreSection::draw1D).
+// P2 shows the Bomb enemy's ordinary life gauge (EnemyBase::doGetLifeGaugeParam:
+// mHealth / mMaxHealth at mPosition.y + fp27) and hides it while the ratio is 1
+// (LifeGaugeMgr::update), so it appears once the fuse starts draining after the
+// bomb lands (ArmedLoop) and stays through the burn.
+void pc_p2_bombsarai_teki_draw_bomb_gauges(Graphics& gfx) {
+    if (!gfx.mCamera) return;
+    int drawn = 0;
+    for (int s = 0; s < sPool.slotCount() && s < kBombGaugeSlots; ++s) {
+        const P2BombSaraiBomb* b = sPool.slotLive(s) ? sPool.bombAt(s) : nullptr;
+        const bool burning = b && (b->phase() == P2BombSaraiBombPhase::ArmedLoop
+                                   || b->phase() == P2BombSaraiBombPhase::Burning);
+        if (!burning || !(b->fuseMax() > 0.0f) || !(b->fuseRemaining() < b->fuseMax())) {
+            sBombGaugeInit[s] = false;
+            continue;
+        }
+        LifeGauge& gauge = sBombGauge[s];
+        if (!sBombGaugeInit[s]) {
+            gauge = LifeGauge();
+            gauge.mSnapToTargetHealth = true;
+            gauge.mRenderStyle = LifeGauge::Wheel;
+            sBombGaugeInit[s] = true;
+        }
+        const P2BombSaraiVec3& p = b->position();
+        gauge.updValue(std::max(0.0f, b->fuseRemaining()), b->fuseMax());
+        gauge.mPosition.set(p.x, p.y, p.z);
+        gauge.mOffset.set(0.0f, kBombGaugeHeight - 15.0f, 0.0f);
+        gauge.mScale = 5000.0f / gfx.mCamera->mNear;
+        gauge.refresh(gfx);
+        ++drawn;
+        if (!sBombGaugeLogged) {
+            sBombGaugeLogged = true;
+            std::printf("P2_BOMBSARAI_BOMB_GAUGE token=%llu ratio=%.3f fuse=%.2f/%.2f style=wheel height=%.0f\n",
+                        (unsigned long long)b->carrierToken(), b->fuseRemaining() / b->fuseMax(),
+                        b->fuseRemaining(), b->fuseMax(), kBombGaugeHeight);
+            std::fflush(stdout);
+        }
+    }
+    (void)drawn;
+}
+
 bool pc_p2_bombsarai_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, bool corpse) {
     auto i = sOwn.find(t);
     if (i == sOwn.end() || !sPosesLoaded || !gfx.mCamera) return false;
@@ -963,8 +1027,25 @@ bool pc_p2_bombsarai_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, bo
         // change). The carried corpse loops carry (type5) between its source loop
         // markers; a death clip stops on its last visible pose (Actors::draw).
         const float sourceFrame = dead && o.escaped ? p2fbsmooth::carryLoopFrame(o.carcassTime, 10, 29) : frame;
-        if (Shape* smooth = sPoseVis.draw(t, sPoseBank, sBank.clip[anim].name, std::max(0.0f, sourceFrame), o.token))
+        if (Shape* smooth = sPoseVis.draw(t, sPoseBank, sBank.clip[anim].name, std::max(0.0f, sourceFrame), o.token)) {
             shape = smooth;
+            // #1027: the balloons are J3D billboards; turn them to the camera on this
+            // actor's private geometry (the shared nearest-pose Shapes stay baked).
+            if (!sBillboards.empty()) {
+                static_assert(sizeof(Vector3f) == 3 * sizeof(float), "packed Vector3f");
+                float rot[3][3];
+                for (int r = 0; r < 3; ++r)
+                    for (int c = 0; c < 3; ++c) rot[r][c] = view.mMtx[r][c];
+                const bool turned = p2billboardgroups::faceCamera(
+                    sBillboards, rot, reinterpret_cast<float*>(shape->mVertexList), shape->mVertexCount,
+                    reinterpret_cast<float*>(shape->mNormalList), shape->mNormalCount);
+                if (!sBillboardLogged) {
+                    sBillboardLogged = true;
+                    std::printf("P2_BOMBSARAI_BILLBOARD_READY token=%u groups=%zu applied=%d vertices=%d normals=%d\n",
+                                o.token, sBillboards.size(), turned ? 1 : 0, shape->mVertexCount, shape->mNormalCount);
+                }
+            }
+        }
     }
     shape->updateAnim(gfx, view, nullptr, t);
     pc_gfx_specular_family_scope(1);
@@ -988,9 +1069,13 @@ bool pc_p2_bombsarai_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, bo
             Vector3f sp = dead && t->mPellet ? t->mPellet->getPosition() : t->getPosition();
             const float depth = gfx.mCamera->projectWorldPoint(gfx, sp);
             if (depth > 0.0f && gfx.mScreenWidth > 0 && gfx.mScreenHeight > 0)
-                std::printf("P2_BOMBSARAI_SCREEN source_id=58 token=%u u=%.3f v=%.3f depth=%.0f clip=%s frame=%.0f corpse=%d\n",
+                // view_yaw: the actor's model +Z (its front) in view space, 0 = facing the
+                // camera, +-180 = seen from behind, +-90 = side on.
+                std::printf("P2_BOMBSARAI_SCREEN source_id=58 token=%u u=%.3f v=%.3f depth=%.0f clip=%s frame=%.0f corpse=%d "
+                            "view_yaw=%.0f\n",
                             o.token, sp.x / float(gfx.mScreenWidth), sp.y / float(gfx.mScreenHeight), depth,
-                            sBank.clip[anim].name.c_str(), frame, dead ? 1 : 0);
+                            sBank.clip[anim].name.c_str(), frame, dead ? 1 : 0,
+                            std::atan2(view.mMtx[0][2], view.mMtx[2][2]) * 57.29578f);
         }
     }
     return true;
