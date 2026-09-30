@@ -1370,6 +1370,12 @@ target_include_directories(p2_campaign_policy_test PRIVATE pc_port)
 target_compile_options(p2_campaign_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_campaign_policy_test COMMAND p2_campaign_policy_test)
 
+add_executable(p2_kurage_bank_test
+    pc_port/pc_p2_kurage_bank_test.cpp)
+target_include_directories(p2_kurage_bank_test PRIVATE pc_port)
+target_compile_options(p2_kurage_bank_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_kurage_bank_test COMMAND p2_kurage_bank_test)
+
 add_executable(p2_tamago_policy_test
     pc_port/pc_p2_tamago_policy_test.cpp)
 target_include_directories(p2_tamago_policy_test PRIVATE pc_port)

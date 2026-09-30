@@ -1,4 +1,6 @@
 #include "pc_p2_kurage_visual.h"
+#include "pc_p2_kurage_bank.h"
+#include "pc_p2_pose_family.h"
 #include "Graphics.h"
 #include "Shape.h"
 #include "Texture.h"
@@ -7,7 +9,9 @@
 #include "teki.h"
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <map>
+#include <set>
 #include <string>
 namespace {
 Shape* sWait = nullptr;
@@ -20,6 +24,24 @@ std::map<std::string, Shape*> sShapes;
 // Greater Spotted Jellyfloat (OniKurage, 72) poses, same names.
 std::map<std::string, Shape*> sShapesGreater;
 bool sReadyGreater = false;
+
+// #972: sampled pose bank per variant (the static shapes above stay the
+// fallback when no bank is staged or it fails to load).
+struct Family {
+    explicit Family(const char* tag) : bank(tag) {}
+    p2posefamily::Bank bank;
+    p2posefamily::Actors actors;
+    p2kuragebank::Profile profile;
+    std::set<const void*> measured; // actors whose private-Shape heap cost was logged
+    bool attempted = false;
+    void reset() { bank.reset(); actors.clear(); profile = p2kuragebank::Profile(); attempted = false; measured.clear(); }
+};
+Family& family(bool greater)
+{
+    static Family lesser("KURAGE");
+    static Family big("ONIKURAGE");
+    return greater ? big : lesser;
+}
 Shape* load(const char* path)
 {
     if (!std::filesystem::exists(std::filesystem::path("assets/dataDir") / path)) return nullptr;
@@ -30,6 +52,51 @@ Shape* load(const char* path)
             if (shape->mTexAttrList[i].mTexture) shape->mTexAttrList[i].mTexture->attach();
     gsys->setHeap(heap);
     return shape;
+}
+
+// Loads the staged pose bank once per setup. Silent when none is staged (a
+// content cache extracted before #972); a bad bank is reported and dropped so
+// the static shapes keep drawing.
+void loadBank(bool greater)
+{
+    Family& f = family(greater);
+    if (f.attempted) return;
+    f.attempted = true;
+    const char* tag = greater ? "ONIKURAGE" : "KURAGE";
+    std::ifstream in(greater ? "p2-onikurage-animation.txt" : "p2-kurage-animation.txt");
+    if (!in) return;
+    if (!p2kuragebank::parse(in, f.profile)) {
+        f.profile = p2kuragebank::Profile();
+        std::printf("P2_%s_ANIMATION_INVALID reason=profile fallback=static\n", tag);
+        std::fflush(stdout);
+        return;
+    }
+    const std::string prefix = greater ? "onikurage_" : "kurage_";
+    p2poseload::Shared shared;
+    std::size_t resident = 0;
+    int poses = 0;
+    const int heap = gsys->setHeap(SYSHEAP_App);
+    const unsigned freeBefore = gsys->getHeap(SYSHEAP_App)->getFree();
+    for (const p2kuragebank::Clip& clip : f.profile.clips) {
+        std::vector<Shape*> shapes;
+        std::string error;
+        if (!p2posefamily::loadFamilyClip(f.bank, clip.name, prefix + clip.name, int(clip.frames.size()),
+                                          clip.duration, clip.frames, shared, resident, shapes, error)) {
+            gsys->setHeap(heap);
+            std::printf("P2_%s_ANIMATION_INVALID clip=%s reason=%s fallback=static\n", tag, clip.name.c_str(),
+                        error.c_str());
+            std::fflush(stdout);
+            f.reset();
+            f.attempted = true;
+            return;
+        }
+        poses += int(clip.frames.size());
+    }
+    const unsigned freeAfter = gsys->getHeap(SYSHEAP_App)->getFree();
+    gsys->setHeap(heap);
+    std::printf("P2_%s_ANIMATION_READY heap_bytes=%d clips=%zu poses=%d resident_bytes=%zu gameplay=unchanged\n", tag,
+                int(freeBefore) - int(freeAfter), f.profile.clips.size(), poses, resident);
+    std::fflush(stdout);
 }
 }
 bool pc_p2_kurage_visual_setup()
@@ -57,6 +124,8 @@ bool pc_p2_kurage_visual_setup()
 }
 void pc_p2_kurage_visual_reset()
 {
+    family(false).reset();
+    family(true).reset();
     sShapesGreater.clear();
     sReadyGreater = false;
     sWait = nullptr;
@@ -129,4 +198,54 @@ Shape* pc_p2_kurage_visual_shape_greater(const char* motionBase)
     if (!motionBase || !*motionBase) return nullptr;
     auto it = sShapesGreater.find(motionBase);
     return it == sShapesGreater.end() ? nullptr : it->second;
+}
+
+// #972 pose bank -------------------------------------------------------------
+Shape* pc_p2_kurage_visual_pose(BTeki* actor, bool greater, const char* clip, float sourceFrame, unsigned token)
+{
+    if (!actor || !clip || !*clip) return nullptr;
+    Family& f = family(greater);
+    const p2kuragebank::Clip* entry = f.profile.find(clip);
+    if (!entry || !f.bank.ready()) return nullptr;
+    const float last = float(entry->duration - 1);
+    if (!(sourceFrame > 0.0f)) sourceFrame = 0.0f;
+    if (sourceFrame > last) sourceFrame = last;
+    // The first draw of an actor creates its private Shape: log what that cost
+    // in the application heap (#972 evidence; one line per actor).
+    const bool first = f.measured.insert(actor).second;
+    const unsigned before = first ? gsys->getHeap(SYSHEAP_App)->getFree() : 0u;
+    Shape* shape = f.actors.draw(actor, f.bank, clip, sourceFrame, token);
+    if (first) {
+        const unsigned after = gsys->getHeap(SYSHEAP_App)->getFree();
+        std::printf("P2_%s_PRIVATE_SHAPE token=%u heap_free_before=%u heap_free_after=%u bytes=%d created=%d\n",
+                    greater ? "ONIKURAGE" : "KURAGE", token, before, after, int(before) - int(after),
+                    int(shape != nullptr));
+        std::fflush(stdout);
+    }
+    return shape;
+}
+bool pc_p2_kurage_visual_proom(bool greater, const char* clip, float sourceFrame, float out[3])
+{
+    if (!clip || !out) return false;
+    Family& f = family(greater);
+    const p2kuragebank::Clip* entry = f.bank.ready() ? f.profile.find(clip) : nullptr;
+    if (!entry) return false;
+    const auto v = p2kuragebank::proomAt(*entry, sourceFrame);
+    out[0] = v[0];
+    out[1] = v[1];
+    out[2] = v[2];
+    return true;
+}
+float pc_p2_kurage_visual_last_frame(bool greater, const char* clip)
+{
+    Family& f = family(greater);
+    const p2kuragebank::Clip* entry = clip && f.bank.ready() ? f.profile.find(clip) : nullptr;
+    return entry ? float(entry->duration - 1) : -1.0f;
+}
+void pc_p2_kurage_visual_forget(BTeki* actor)
+{
+    family(false).actors.forget(actor);
+    family(true).actors.forget(actor);
+    family(false).measured.erase(actor);
+    family(true).measured.erase(actor);
 }
