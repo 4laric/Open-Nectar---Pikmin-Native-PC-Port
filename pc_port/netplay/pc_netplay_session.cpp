@@ -339,9 +339,12 @@ enum Phase {
 // The largest local input delay any path may set (the numeric and auto
 // clamps below). Frame bounds that assume host input is at most this many
 // frames ahead of the host's Advances depend on it: kHoldLeadFrames (B1) and
-// kSaveConfirmFrames (M5c lane C) static_assert against it. Lane B's
-// adaptive delay must keep its maximum at or below it (M5c integration).
-constexpr unsigned kMaxLocalDelay = 8;
+// kSaveConfirmFrames (M5c lane C) static_assert against it. M5c integration
+// I2: it is lane B's pc_netplay_adaptive::kMaxLocalDelay, the adaptive
+// Policy's maxDelay default and the test schedule's upper bound, so the
+// adaptive delay can never exceed it.
+constexpr unsigned kMaxLocalDelay = pc_netplay_adaptive::kMaxLocalDelay;
+static_assert(kMaxLocalDelay >= 1, "delay 1 must be allowed");
 
 struct Config {
 	bool isHost = false;
@@ -653,6 +656,11 @@ pc_netplay_bulk::BulkChannel sBulk; // M4a bulk 0x03 endpoint (lane B queues)
 // exist yet on either peer.
 constexpr uint32_t kHoldLeadFrames = 12;
 static_assert(kHoldLeadFrames > kMaxLocalDelay + 1, "no input past H + kHoldLeadFrames - 1 may exist at Advance H");
+// Lane S: a peer's input for frame F + kLoadWindowFrames is made after its
+// Advance of F + kLoadWindowFrames - delay - 1, which must lie past the load
+// frame F (pc_netplay_loadguard.h) at every delay up to the cap.
+static_assert(pc_netplay_loadguard::kLoadWindowFrames > kMaxLocalDelay + 1,
+              "the load window must outlast the largest delay");
 bool sHoldAtFirstInput = false; // host: state.txt missing at session start
 bool sHoldRequested = false;    // host: flagged input submitted, Advance H not yet seen
 uint64_t sHoldExpectFrame = 0;  // host: submit index + delay of the flagged input
@@ -2226,6 +2234,9 @@ void adaptive_configure()
 	sNextLand = sCfg.localDelay; // the first add fills frames 0..d-1 with GekkoNet's empty input
 	sSettleUntil = kAdaptiveWarmupFrames;
 	pc_netplay_adaptive::Policy pol;
+	// M5c integration I2: the adaptive range ends at the session's one cap
+	// (no Policy field is read from the environment; this keeps it so).
+	if (pol.maxDelay > kMaxLocalDelay) pol.maxDelay = kMaxLocalDelay;
 	sDelayCtl.configure(pol);
 	sDelayCtl.start(now_ms());
 	sDelaySched.clear();

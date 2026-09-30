@@ -96,6 +96,19 @@ void test_schedule_parse()
 	CHECK(!parse_schedule("300:0", 1, 8, &s, &err), "delay 0 refused");
 	CHECK(!parse_schedule("600:2,300:4", 1, 8, &s, &err), "decreasing frames refused");
 	CHECK(!parse_schedule("300-4", 1, 8, &s, &err), "garbage refused");
+	// M5c integration I2: the session parses the schedule with the Policy's
+	// range, which ends at the one cap (kMaxLocalDelay == 8), so the forced
+	// schedules (1..8) still fit and 9 is still refused.
+	Policy pol;
+	CHECK(pol.minDelay == 1 && pol.maxDelay == kMaxLocalDelay && kMaxLocalDelay == 8, "policy range is 1..cap");
+	CHECK(parse_schedule("300:1,600:8", pol.minDelay, pol.maxDelay, &s, &err), "schedule 1..8 fits the policy");
+	CHECK(!parse_schedule("300:9", pol.minDelay, pol.maxDelay, &s, &err), "above the cap refused");
+	Advice big;
+	big.delay = (uint8_t)(kMaxLocalDelay + 1);
+	uint8_t wire[kAdvicePayload];
+	advice_encode(big, wire);
+	Advice back;
+	CHECK(!advice_decode(wire, sizeof(wire), &back), "advice past the cap refused");
 }
 
 // Synthetic clock helpers: RTT samples every 500 ms.

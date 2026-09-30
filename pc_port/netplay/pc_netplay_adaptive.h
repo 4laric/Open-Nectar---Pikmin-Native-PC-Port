@@ -92,6 +92,13 @@ namespace pc_netplay_adaptive {
 
 constexpr double kSlotMs = 1000.0 / 30.0;
 
+// The one local input delay cap (M5c integration I2). pc_netplay_session.cpp's
+// kMaxLocalDelay is this constant: its numeric and auto clamps, B1's
+// kHoldLeadFrames, lane S's load window and lane C's kSaveConfirmFrames
+// static_assert against it, and the adaptive range, the test schedule and the
+// advice decode below use it as their maximum.
+constexpr unsigned kMaxLocalDelay = 8;
+
 // The handshake auto-delay formula (pc_netplay_session.cpp,
 // start_gekko_session): ceil((rtt/2)/slot - 0.05) + 1, clamped.
 inline unsigned delay_for_rtt(double rttMs, unsigned lo, unsigned hi)
@@ -256,7 +263,7 @@ inline bool advice_decode(const uint8_t* p, size_t len, Advice* a)
 	a->delay = p[12];
 	a->rttP50 = (uint16_t)(p[13] | ((uint16_t)p[14] << 8));
 	a->flags = p[15];
-	return a->delay <= 8;
+	return a->delay <= kMaxLocalDelay;
 }
 
 // Receiver side: turns the cumulative reports into lateness deltas. Returns
@@ -310,7 +317,7 @@ struct RttSample {
 // ---- the controller ----
 struct Policy {
 	unsigned minDelay = 1;
-	unsigned maxDelay = 8; // B1 kHoldLeadFrames (12) and lane S (<= 8) need <= 8
+	unsigned maxDelay = kMaxLocalDelay; // the session's one cap (B1, lane S and lane C bounds)
 	double upWindowMs = 3000;
 	double upStallMs = 100;
 	double upCooldownMs = 1000;
