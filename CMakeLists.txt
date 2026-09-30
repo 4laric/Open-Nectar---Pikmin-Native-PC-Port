@@ -462,6 +462,7 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_onikurage_mouth.cpp
     pc_port/pc_p2_onikurage_teki.cpp
     pc_port/pc_main.cpp
+    pc_port/pc_fatal_log.cpp
     pc_port/pc_window.cpp
     pc_port/pc_gyro.cpp
     pc_port/pc_pad_axis.cpp
