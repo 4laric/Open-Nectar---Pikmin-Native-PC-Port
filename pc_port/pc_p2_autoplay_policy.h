@@ -150,6 +150,13 @@ inline bool isEnabled()
 // #901 TEST-ONLY: generator uids (comma list) of vanilla P1 teki the bot may
 // fight (PIKMIN_RANDOMIZER_AUTOPLAY_P1_UID), for the held-part regression run.
 constexpr unsigned kP1TargetSource = 0xFFFFu;
+// A vanilla teki only spawns once the squad is near its generator (after the
+// arena teleport), so the bot waits in Select while a P1 uid filter is set.
+inline bool p1TargetWait()
+{
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_P1_UID");
+    return isEnabled() && v && v[0];
+}
 inline bool isP1TargetUid(unsigned uid)
 {
     const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_P1_UID");
@@ -218,6 +225,45 @@ inline bool noDeliverEnabled()
 inline bool noPartCarry()
 {
     const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_NO_PART_CARRY");
+    return v && v[0] == '1';
+}
+
+// #901 TEST-ONLY: move the captain and every free Pikmin to a fixed ground
+// point once, after the squad is out, so an arena the bot cannot route to
+// (bomb-wall or pit-rim gated) can still be fought. Format "x,z" in world
+// units. Gated by the autoplay gate; inert in normal play.
+// PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT=-460,3560
+inline bool teleportTarget(float& x, float& z)
+{
+    if (!isEnabled()) return false;
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT");
+    if (!v || !v[0]) return false;
+    char* end = nullptr;
+    const double a = std::strtod(v, &end);
+    if (!end || end == v || *end != ',') return false;
+    char* end2 = nullptr;
+    const double b = std::strtod(end + 1, &end2);
+    if (!end2 || end2 == end + 1 || *end2 != 0) return false;
+    x = float(a);
+    z = float(b);
+    return true;
+}
+
+// #901 TEST-ONLY: tap A while no captain exists (day-end movie, result screens)
+// so a run reaches the next day. PIKMIN_RANDOMIZER_AUTOPLAY_NEXT_DAY=1.
+inline bool nextDayTap()
+{
+    if (!isEnabled()) return false;
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_NEXT_DAY");
+    return v && v[0] == '1';
+}
+
+// #901 TEST-ONLY: move the squad beside a dropped ship part whose crew stays
+// short (it fell where the squad cannot walk). PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT_TO_PART=1.
+inline bool teleportToPart()
+{
+    if (!isEnabled()) return false;
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT_TO_PART");
     return v && v[0] == '1';
 }
 
@@ -838,6 +884,8 @@ public:
         pgCooldown = 0.0f;
         pgLogTime = 0.0f;
         pgSawPart = false;
+        pgCrewBest = 0;
+        pgStall = 0.0f;
         withdrawCycles = 0;
         throwSpin = 0.0f;
         leadValid = false;
@@ -1266,6 +1314,9 @@ private:
             // it instead of stranding the navi in NAVISTATE_Container.
             enter(State::WithdrawMenu, in);
             return;
+        }
+        if (in.targetToken == 0 && result.token == 0 && p2autoplay::p1TargetWait() && stateTime < 60.0f) {
+            return; // #901: the vanilla holder has not spawned yet
         }
         if (in.targetToken == 0 || !in.targetAlive) {
             // bot-v6: verify the target is still alive before Select. A dead /
@@ -2085,6 +2136,12 @@ private:
             return false;
         }
         if (pgCooldown > 0.0f) pgCooldown -= dt;
+        if (crew > pgCrewBest) {
+            pgCrewBest = crew;
+            pgStall = 0.0f;
+        } else {
+            pgStall += dt;
+        }
         const int need = in.carryWant > 0 ? in.carryWant - crew : 10;
         const float fdx = in.freeX - in.tgtX, fdz = in.freeZ - in.tgtZ;
         const bool freeFar = fdx * fdx + fdz * fdz > cfg.partFreeFar * cfg.partFreeFar;
@@ -2112,8 +2169,12 @@ private:
             lastCommand.buttons |= PadB;
             return true;
         }
-        // Swarm: hold the ring around the part and push the party into it.
-        if (in.waypointLeg && in.targetDist > cfg.partRingMax) {
+        // Swarm: hold the ring around the part and push the party into it. A crew
+        // that stopped growing (the swarm did not reach the part from the ring)
+        // walks the captain in close so the party touches the pellet.
+        if (pgStall > 8.0f) {
+            if (in.targetDist > 45.0f) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+        } else if (in.waypointLeg && in.targetDist > cfg.partRingMax) {
             steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
         } else if (in.targetDist > cfg.partRingMax) {
             steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
@@ -2800,6 +2861,8 @@ private:
     float pgCooldown = 0.0f; // #901: time until the next gather whistle may start
     float pgLogTime = 0.0f; // #901: AUTOPLAY_PART_GATHER rate limit
     bool pgSawPart = false; // #901: this aftermath tracked a dropped ship part
+    int pgCrewBest = 0; // #901: best crew seen; a crew that stops growing closes the ring
+    float pgStall = 0.0f;
     float initialHealthFrac = 1.0f;
     bool sawDamage = false;
     bool sawKill = false; // generic death latched (any species)
