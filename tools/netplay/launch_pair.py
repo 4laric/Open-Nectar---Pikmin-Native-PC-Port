@@ -44,6 +44,10 @@ Variants:
      1 0 0, then 2 0 0, then 2 1 0 ...), so the v3 state stream carries a tier
      change mid-session (the launcher's static state.txt carries
      MATURITY 0 0 0 for a seed with progressive maturity).
+     #982 refresh: --input-host / --input-join PKNI replace the seeded random
+     walk with a scripted input file per peer (gen_directed.py writes one that
+     walks the captain to a target and fights there), so a pair can reach a
+     boss 700+ units from the start.
 
 Gameplay proof (every sync pair): both logs carry `[Pikmin Randomizer]
 initialized` and `START_STAGE`, and the navi/piki/teki/item hash columns are
@@ -287,6 +291,11 @@ def main(argv=None):
                    help="#982: after the host's hash log passes each TICK, rewrite the host run dir's state.txt "
                         "so the MATURITY section steps up (1 0 0, then 2 0 0, then 2 1 0 ...), exercising the "
                         "v3 state stream mid-session (needs a bootstrap with MATURITY)")
+    p.add_argument("--input-host", type=Path, default=None, metavar="PKNI",
+                   help="#982: the host's scripted input file instead of the seeded random walk "
+                        "(tools/netplay/gen_directed.py writes a directed one); needs >= --ticks records")
+    p.add_argument("--input-join", type=Path, default=None, metavar="PKNI",
+                   help="#982: the joiner's scripted input file instead of the seeded random walk")
     p.add_argument("--timeout", type=float, default=1200)
     p.add_argument("--code-timeout", type=float, default=180)
     p.add_argument("--min-distinct", type=int, default=100,
@@ -318,8 +327,11 @@ def main(argv=None):
     host_hash, join_hash = host_cwd / "hashes.txt", join_cwd / "hashes.txt"
     host_log, join_log = out / "host.log", out / "join.log"
     host_inputs, join_inputs = out / "host_inputs.pkni", out / "join_inputs.pkni"
-    rp.gen_inputs(a.ticks + 50, a.seed_a, host_inputs)
-    rp.gen_inputs(a.ticks + 50, a.seed_b, join_inputs)
+    for given, dst, seed in ((a.input_host, host_inputs, a.seed_a), (a.input_join, join_inputs, a.seed_b)):
+        if given is not None:
+            shutil.copyfile(str(given), str(dst))
+        else:
+            rp.gen_inputs(a.ticks + 50, seed, dst)
 
     common = {
         "PIKMIN_NETPLAY_STUN": "none",          # loopback: host candidates only
