@@ -300,6 +300,61 @@ void testWithdrawMenuHoldThenConfirm()
     CHECK(hasMarker(brain.takeMarkers(), "AUTOPLAY_WITHDRAW cycle=1"), "withdraw-menu/cycle_logged");
 }
 
+// #958: a thrown Pikmin lands idle beside a press-only target (Giant Breadbug 40)
+// and does not return to the party. With the party nearly used up and idle strays
+// lying about, the bot whistles (PadB) instead of only punching; a full party
+// throws, and a non-press-only target is unaffected.
+void testPressOnlyRegroup()
+{
+    p2autoplay::Config cfg;
+    cfg.throwHold = 0.1f;
+    cfg.throwGap = 0.2f;
+    for (unsigned source : {40u, 38u, 79u}) {
+        p2autoplay::Brain brain(cfg);
+        p2autoplay::Senses s = liveSenses();
+        s.fieldPikmin = 60;
+        s.squadPikmin = 60;
+        brain.update(0.05f, s);
+        brain.update(0.05f, s); // -> select
+        s.targetToken = 295337326u;
+        s.targetSource = source;
+        s.targetAlive = true;
+        s.targetRevealed = true;
+        s.naviX = 0.0f;
+        s.naviZ = 0.0f;
+        s.tgtX = 60.0f;
+        s.tgtZ = 0.0f;
+        s.targetDist = 60.0f;
+        s.targetHealthFrac = 1.0f;
+        brain.update(0.05f, s); // -> approach
+        brain.update(0.05f, s); // -> attack
+        CHECK(brain.current() == p2autoplay::State::Attack, "press-regroup/attacks");
+        // Party used up, 50 idle strays near the captain (scattered stays false).
+        s.squadPikmin = 2;
+        s.strayPikmin = 50;
+        s.scattered = false;
+        bool whistled = false;
+        for (int i = 0; i < 20 && !whistled; ++i) {
+            brain.update(0.05f, s);
+            whistled = (brain.command().buttons & unsigned(p2autoplay::PadB)) != 0;
+        }
+        const bool pressOnly = p2autoplay::isPressOnly(source);
+        CHECK(whistled == pressOnly, pressOnly ? "press-regroup/whistles_for_press_only"
+                                               : "press-regroup/no_whistle_for_other_targets");
+        // Party refilled: back to throwing, no whistle.
+        s.squadPikmin = 60;
+        s.strayPikmin = 0;
+        int aOn = 0, bOn = 0;
+        for (int i = 0; i < 80; ++i) {
+            brain.update(0.05f, s);
+            if (brain.command().buttons & unsigned(p2autoplay::PadA)) ++aOn;
+            if (brain.command().buttons & unsigned(p2autoplay::PadB)) ++bOn;
+        }
+        CHECK(aOn > 0, "press-regroup/throws_with_full_party");
+        (void)bOn;
+    }
+}
+
 void testCombatFlow()
 {
     p2autoplay::Config cfg;
@@ -4133,6 +4188,7 @@ int main()
     testWithdrawKeepsClosing();
     testWithdrawMenuHoldThenConfirm();
     testCombatFlow();
+    testPressOnlyRegroup();
     testKoganeMovesOn();
     testTimeoutsAndStuck();
     testTargetMatching();

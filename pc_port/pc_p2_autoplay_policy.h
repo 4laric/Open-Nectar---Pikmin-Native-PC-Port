@@ -479,6 +479,8 @@ struct Config {
     float throwHold = 0.12f; // A held per throw pulse
     float throwGap = 0.55f; // gap between throw pulses
     float whistleHold = 1.6f; // B held to regroup / call back
+    int pressRegroupBelow = 10;  // #958 press-only target: whistle when the party is below this ...
+    int pressRegroupStrays = 10; // ... and at least this many idle strays lie about
     float whistleCooldown = 3.0f; // bot-undamaged: gap after a whistle before re-latching (forces throw windows)
     float attackChaseDist = 500.0f; // bot-undamaged: target past this in attack re-enters approach (graph chase)
     float stuckWindow = 4.0f; // no-progress window before STUCK + replan
@@ -1708,7 +1710,15 @@ private:
             return;
         }
         if (whistleCooldown > 0.0f) whistleCooldown -= dt;
-        if ((in.scattered || in.squadDistress || grabWhistle) && !whistling && whistleCooldown <= 0.0f) {
+        // #958: a press-only target (Breadbug 38, Giant 40) is only hurt by thrown
+        // Pikmin, and a thrown Pikmin lands idle beside it instead of returning to
+        // the party. Once the party is nearly used up while idle strays lie about,
+        // whistle them back (the scattered sense stays false because the strays
+        // are close to the captain), otherwise A only punches and the fight stalls
+        // after about one throw per Pikmin (bot runs r6/r8, arena Giant).
+        const bool pressRegroup = pressOnly && in.squadPikmin < cfg.pressRegroupBelow
+            && in.strayPikmin >= cfg.pressRegroupStrays;
+        if ((in.scattered || in.squadDistress || grabWhistle || pressRegroup) && !whistling && whistleCooldown <= 0.0f) {
             whistling = true;
             whistleTime = 0.0f;
         }
@@ -1731,7 +1741,7 @@ private:
                     return;
                 }
             }
-            if (whistleTime >= cfg.whistleHold || (!in.scattered && !in.squadDistress && !grabWhistle)) {
+            if (whistleTime >= cfg.whistleHold || (!in.scattered && !in.squadDistress && !grabWhistle && !pressRegroup)) {
                 whistling = false;
                 whistleCooldown = cfg.whistleCooldown; // force a throw window before re-latching
             }
