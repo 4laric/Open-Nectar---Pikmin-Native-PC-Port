@@ -3,6 +3,7 @@
 #include "pc_dev_console_parser.h"
 #include "pc_randomizer.h"
 #include "pc_p2_generated_placement.h"
+#include "pc_p2_smoke_any_slot.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_kabuto_host.h"
 #include "pc_p2_sarai_manager.h"
@@ -498,12 +499,12 @@ void pc_dev_console_init(int argc, char** argv)
     if (!sEnabled) return;
     if (argvHasNetplay(argc, argv) || envSet("PIKMIN_NETPLAY_HOST") || envSet("PIKMIN_NETPLAY_JOIN")) {
         sEnabled = false;
+        pc_p2_smoke_any_slot_force_off("netplay");
         std::printf("DEV_CONSOLE refused reason=netplay_session (runtime spawns would desync lockstep)\n");
         std::fflush(stdout);
         return;
     }
     if (const char* script = std::getenv("PIKMIN_DEV_CONSOLE_SCRIPT")) sScriptPath = script;
-    pc_p2_generated_placement_set_dev_slot_bypass(true);
     std::printf("DEV_CONSOLE enabled key=backquote script=%s\n", sScriptPath.empty() ? "none" : sScriptPath.c_str());
     std::fflush(stdout);
 }

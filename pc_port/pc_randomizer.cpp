@@ -131,6 +131,12 @@ void loadCampaignCheckpoint() {
     p2ship::stock = restoredShip;
     campaignResumed = true;
 }
+// Upper bound on ENEMY_P2 bindings per seed. Bindings live in a std::map, so
+// this is a parser sanity limit, not a table size; it must cover every
+// ordinary campaign generator (72), the holder slots and the boss arenas the
+// root placement document can bind (#948). Root mirrors it in
+// experimental/pikmin2_seed_bridge.py (P2_MAX_BINDINGS).
+static const unsigned kP2MaxBindings = 256;
 bool hex64(const std::string& s) {
     return s.size() == 64 && s.find_first_not_of("0123456789abcdef") == std::string::npos;
 }
@@ -288,7 +294,7 @@ bool pc_randomizer_init(int argc, char** argv) {
         if (schema != 9 || enemyMask || slotEnemies || campaignEnemies || groupEnemies)
             fail("P2 enemy bridge cannot mix other enemy layouts");
         if (!(input >> protocol >> revision >> count) || protocol != 1
-            || revision != randomizerP2RosterRevision || count == 0 || count > 64)
+            || revision != randomizerP2RosterRevision || count == 0 || count > kP2MaxBindings)
             fail("incompatible P2 enemy roster or protocol version");
         for (unsigned i = 0; i < count; ++i) {
             std::string target; unsigned sourceId;
@@ -743,7 +749,7 @@ bool pc_randomizer_p2_room_bootstrap(const char* path) {
         if (word != "ENEMY_P2") continue;
         unsigned protocol, count; std::string revision;
         if (!(input >> protocol >> revision >> count) || protocol != 1
-            || revision != randomizerP2RosterRevision || count == 0 || count > 64)
+            || revision != randomizerP2RosterRevision || count == 0 || count > kP2MaxBindings)
             fail("incompatible P2 enemy roster or protocol version");
         for (unsigned i = 0; i < count; ++i) {
             std::string target; unsigned sourceId;

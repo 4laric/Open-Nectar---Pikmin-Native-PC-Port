@@ -15,6 +15,8 @@
 #include "pc_p2_sarai_host.h"
 #include "pc_p2_demon_bridge.h"
 #include "pc_p2_sarai_manager.h"
+#include "pc_p2_sfx.h"
+#include "pc_p2_demon_anchor.h"
 #include "Collision.h"
 #include "Navi.h"
 #include "NaviMgr.h"
@@ -30,6 +32,7 @@
 #include "Generator.h"
 #include "teki.h"
 #include <cmath>
+#include <map>
 #include <cstdio>
 #include <vector>
 
@@ -128,6 +131,21 @@ bool P2SaraiHost::enableDemon(const p2demon::Parms& parms, const p2retail::Table
     mLastDemonState = -1;
     mPlayer.cancel();
     mNaturalMotionStarted = false;
+    // Anchor latch fix (#215): body joint offset for the retail collision
+    // spheres, measured from the loaded rest-pose mesh (pc_p2_demon_anchor.h).
+    {
+        p2demonanchor::Vec3 body = p2demonanchor::defaultBodyOffset();
+        bool measured = false;
+        if (mShape && mShape->mVertexList && mShape->mVertexCount > 0) {
+            const Vector3f* verts = mShape->mVertexList;
+            measured = p2demonanchor::bodyOffsetFromMesh(std::size_t(mShape->mVertexCount),
+                [verts](std::size_t i) { return p2demonanchor::Vec3{verts[i].x, verts[i].y, verts[i].z}; }, body);
+        }
+        mDemonBodyOffset.set(body.x, body.y, body.z);
+        std::printf("P2_DEMON_BODY_OFFSET source_id=32 measured=%d x=%.1f y=%.1f z=%.1f stick_bottom=%.1f\n",
+                    int(measured), body.x, body.y, body.z, p2demonanchor::stickableBottom(body));
+    }
+    mDemonAirborne = true; // Move: EB_Untargetable
     // Sarai::onInit: mFsm->start(this, SARAI_Move) (Move init sets a patrol target).
     mFsm.forceState(p2sarai::State::Move, demonRand());
     demonSetRandTarget();
@@ -326,6 +344,32 @@ void P2SaraiHost::updateDemon()
     in.randomUnit = demonRand();
     const p2sarai::Out out = mFsm.tick(in);
     const p2sarai::State now = mFsm.state();
+    // P1 Sarai bank approximation (output-only, #946): damage cry on a health
+    // drop, state cries on entry, hover pulse while airborne.
+    {
+        const unsigned generator = demonGenerator();
+        static std::map<unsigned, float> sLastHealth;
+        const float hp = mBoundActor->mHealth;
+        auto hit = sLastHealth.find(generator);
+        if (hit != sLastHealth.end() && hp < hit->second && hp > 0.0f)
+            pc_p2_sfx(32, generator, p2sfx::Event::Damage, mBoundActor);
+        sLastHealth[generator] = hp;
+        if (now != before) {
+            switch (now) {
+            case p2sarai::State::Attack: pc_p2_sfx(32, generator, p2sfx::Event::Attack, mBoundActor); break;
+            case p2sarai::State::Flick: pc_p2_sfx(32, generator, p2sfx::Event::Flick, mBoundActor); break;
+            case p2sarai::State::Damage: pc_p2_sfx(32, generator, p2sfx::Event::Damage, mBoundActor); break;
+            case p2sarai::State::Dead:
+                pc_p2_sfx_stop(32, p2sfx::Event::Hover, mBoundActor);
+                pc_p2_sfx(32, generator, p2sfx::Event::Dead, mBoundActor);
+                break;
+            case p2sarai::State::Fall: pc_p2_sfx(32, generator, p2sfx::Event::Land, mBoundActor); break;
+            default: break;
+            }
+        }
+        if (mFsm.flags().untargetable && now != p2sarai::State::Dead)
+            pc_p2_sfx(32, generator, p2sfx::Event::Hover, mBoundActor);
+    }
 
     if (now != before) {
         // cleanup() of the state being left.
@@ -487,6 +531,9 @@ void P2SaraiHost::updateDemon()
         std::fflush(stdout);
     }
 
+    // The anchor mirrors this as CF_IsFlying (demonAnchorFollow, #215 latch fix).
+    mDemonAirborne = flying;
+
     // EnemyBase::collisionMapAndPlat simulation + integrate; floor clamp.
     mVel = p2demon::simulate(mVel, mTargetVel, flying, dt, kAccel, kGravity);
     mSRT.t.x += mVel.x * dt;
@@ -519,6 +566,66 @@ void P2SaraiHost::demonAnchorInit()
     mBoundActor->mMaxHealth = mDemonParms.general.life;
     mBoundActor->mStoredDamage = 0.0f;
     mBoundActor->mSRT.t = mSRT.t;
+    demonAnchorBuildColl();
+    demonAnchorFollow();
+}
+
+// Anchor latch fix (#215): replace the anchor's vehicle CollInfo (Dwarf
+// Bulborb joint spheres sampled in its own draw) with the retail Demon tree
+// (pc_p2_demon_anchor.h). Parts are update-inactive: demonAnchorFollow owns
+// centre/radius every sim tick from host state (BigTreasure #246 pattern), so
+// the collision is deterministic and never depends on the anchor being drawn.
+// Anchor latch fix (#215): four-character part ids/codes, '_' padded.
+static u32 demonFourcc(const char* id)
+{
+    u32 v = 0;
+    bool ended = false;
+    for (int i = 0; i < 4; ++i) {
+        char c = '_';
+        if (!ended) {
+            if (id[i]) c = id[i];
+            else ended = true;
+        }
+        v = (v << 8) | u32(static_cast<unsigned char>(c));
+    }
+    return v;
+}
+extern Matrix4f invCamMat; // collInfo.cpp: camera inverse used by CollPart::getMatrix
+
+void P2SaraiHost::demonAnchorBuildColl()
+{
+    if (!mBoundActor || mAnchorOwnColl || !mBoundActor->mCollInfo) return;
+    ObjCollInfo* nodes[p2demonanchor::kSphereCount] = {};
+    for (int i = 0; i < p2demonanchor::kSphereCount; ++i) {
+        const p2demonanchor::CollSphere& s = p2demonanchor::spheres()[i];
+        auto* node = new ObjCollInfo();
+        node->mId.setID(demonFourcc(s.id));
+        node->mCode.setID(demonFourcc(s.code));
+        node->mRadius = s.radius;
+        node->mCentrePosition.set(s.offset.x, s.offset.y, s.offset.z);
+        node->mJointIndex = -1;
+        nodes[i] = node;
+    }
+    for (int i = 0; i < p2demonanchor::kSphereCount; ++i) {
+        const int parent = p2demonanchor::spheres()[i].parent;
+        if (parent >= 0) nodes[parent]->add(nodes[i]);
+    }
+    mAnchorOwnColl = new CollInfo(32); // >= any vehicle tree
+    mAnchorOwnColl->initInfoTree(nodes[0]);
+    for (int i = 0; i < p2demonanchor::kSphereCount; ++i) {
+        CollPart* part = mAnchorOwnColl->getSphere(demonFourcc(p2demonanchor::spheres()[i].id));
+        if (part) {
+            part->mIsUpdateActive = false;
+            part->mJointMatrix = Matrix4f::ident;
+        }
+        mAnchorParts[i] = part;
+    }
+    mAnchorVehicleColl = mBoundActor->mCollInfo;
+    mBoundActor->mCollInfo = mAnchorOwnColl;
+    std::printf("P2_DEMON_COLL_BIND source_id=32 generator=%u parts=%d vehicle_replaced=1 body=(%.1f,%.1f,%.1f)\n",
+                demonGenerator(), p2demonanchor::kSphereCount, mDemonBodyOffset.x, mDemonBodyOffset.y,
+                mDemonBodyOffset.z);
+    std::fflush(stdout);
 }
 
 void P2SaraiHost::demonAnchorDrain()
@@ -538,6 +645,45 @@ void P2SaraiHost::demonAnchorFollow()
     mBoundActor->mFaceDirection = mFacingRadians;
     mBoundActor->mVelocity.set(0.0f, 0.0f, 0.0f);
     mBoundActor->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
+    // #215 latch fix: EB_Untargetable while hovering -> CF_IsFlying on the
+    // anchor (ground Pikmin stop chasing a body they cannot reach; thrown and
+    // stuck Pikmin are unaffected). Fall/Damage/Dead clear it so the landed
+    // Demon is attackable by the whole squad (Bombsarai precedent).
+    if (mDemonAirborne) {
+        if (!mBoundActor->isFlying()) mBoundActor->startFlying();
+    } else if (mBoundActor->isFlying()) {
+        mBoundActor->finishFlying();
+    }
+    // Retail Demon collision spheres on the drawn body (pc_p2_demon_anchor.h).
+    // CollPart::getMatrix() = invCamMat * mJointMatrix (+ centre): give every
+    // part R(invCamMat)^T * yaw so stuck Pikmin follow the body yaw whether
+    // or not the anchor was drawn this frame (BigTreasure #246 pattern).
+    if (mAnchorOwnColl) {
+        Matrix4f yaw, camRot, camYaw;
+        yaw.makeSRT(Vector3f(1.0f, 1.0f, 1.0f), Vector3f(0.0f, mFacingRadians, 0.0f), Vector3f(0.0f, 0.0f, 0.0f));
+        camRot.makeIdentity();
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 3; ++c) camRot.mMtx[r][c] = invCamMat.mMtx[c][r];
+        camRot.multiplyTo(yaw, camYaw);
+        const p2demonanchor::Vec3 root{mSRT.t.x, mSRT.t.y, mSRT.t.z};
+        const p2demonanchor::Vec3 body{mDemonBodyOffset.x, mDemonBodyOffset.y, mDemonBodyOffset.z};
+        for (int i = 0; i < p2demonanchor::kSphereCount; ++i) {
+            CollPart* part = mAnchorParts[i];
+            if (!part) continue;
+            const p2demonanchor::Vec3 c = p2demonanchor::sphereCentre(i, root, mFacingRadians, body);
+            part->mCentre.set(c.x, c.y, c.z);
+            part->mRadius = p2demonanchor::spheres()[i].radius * mSRT.s.y;
+            part->mJointMatrix = camYaw;
+        }
+        if (!mAnchorCollLogged) {
+            mAnchorCollLogged = true;
+            const float floorY = mapMinY(mSRT.t.x, mSRT.t.z, mSRT.t.y);
+            std::printf("P2_DEMON_COLL_FOLLOW source_id=32 generator=%u flying=%d alt=%.1f stick_bottom_alt=%.1f\n",
+                        demonGenerator(), int(mBoundActor->isFlying()), mSRT.t.y - floorY,
+                        mSRT.t.y + p2demonanchor::stickableBottom(body) - floorY);
+            std::fflush(stdout);
+        }
+    }
 }
 
 void P2SaraiHost::demonAnchorFinalize()
@@ -545,6 +691,25 @@ void P2SaraiHost::demonAnchorFinalize()
     if (!mBoundActor) return;
     const unsigned generator = demonGenerator();
     demonReleaseHeld("dead");
+    // #215 latch fix: the corpse is grounded and wears the vehicle CollInfo
+    // again (the own tree is never freed: stuck Pikmin may still hold its
+    // CollPart pointers, and a pooled actor re-inits whatever it holds).
+    if (mBoundActor->isFlying()) mBoundActor->finishFlying();
+    if (mAnchorVehicleColl) {
+        mBoundActor->mCollInfo = mAnchorVehicleColl;
+        mAnchorVehicleColl = nullptr;
+        // The vehicle parts were last sampled before the swap (spawn pose):
+        // dieSoon births the corpse pellet at the 'carc' sphere (or the
+        // bounding sphere via getCentre), so seat both on the dead body now.
+        const p2demonanchor::Vec3 body{mDemonBodyOffset.x, mDemonBodyOffset.y, mDemonBodyOffset.z};
+        const p2demonanchor::Vec3 c = p2demonanchor::sphereCentre(
+            0, p2demonanchor::Vec3{mSRT.t.x, mSRT.t.y, mSRT.t.z}, mFacingRadians, body);
+        if (CollPart* carcass = mBoundActor->mCollInfo->getSphere('carc')) carcass->mCentre.set(c.x, c.y, c.z);
+        if (mBoundActor->mCollInfo->hasInfo()) {
+            if (CollPart* bound = mBoundActor->mCollInfo->getBoundingSphere()) bound->mCentre.set(c.x, c.y, c.z);
+            if (CollPart* cent = mBoundActor->mCollInfo->getSphere('cent')) cent->mCentre.set(c.x, c.y, c.z);
+        }
+    }
     // StateDead::exec kill() -> engine corpse (dieSoon runs inside the
     // suppressed doAI, so finalise it here: frog/elecbug pcEscapeNow pattern).
     mBoundActor->mHealth = 0.0f;

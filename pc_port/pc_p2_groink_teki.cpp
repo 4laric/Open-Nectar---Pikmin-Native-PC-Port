@@ -1,4 +1,5 @@
 #include "pc_p2_pose_family.h"
+#include "pc_p2_sfx.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_setup_failsafe.h"
 #include "pc_p2_groink_teki.h"
@@ -385,6 +386,9 @@ void applyOutput(BTeki* t, Binding& b, const Snapshot& snap, const p2groinkfsm::
     for (p2groinkfsm::State e : o.entered) {
         logState(b, shown, e, t);
         shown = e;
+        // P1 Blowhog / Cannon Beetle bank approximation (output-only, #946).
+        if (e == p2groinkfsm::State::Dead) pc_p2_sfx(sourceOf(b), b.generator, p2sfx::Event::Dead, t);
+        if (e == p2groinkfsm::State::Flick) pc_p2_sfx(sourceOf(b), b.generator, p2sfx::Event::Flick, t);
         if (e == p2groinkfsm::State::Dead && !b.deadLogged) {
             b.deadLogged = true;
             std::printf("P2_GROINK_DEAD generator=%u source_id=%u health=%.1f prior_health=%.1f\n", b.generator,
@@ -408,6 +412,7 @@ void applyOutput(BTeki* t, Binding& b, const Snapshot& snap, const p2groinkfsm::
     }
     if (o.volley) {
         ++b.volleys;
+        pc_p2_sfx(sourceOf(b), b.generator, p2sfx::Event::Shot, t);
         b.haveAim = true;
         b.aim = Vector3f(o.volleyTarget.x, o.volleyTarget.y, o.volleyTarget.z);
         std::printf("P2_GROINK_VOLLEY generator=%u source_id=%u shells=%d speed=%.1f angle=%.3f target=%.1f,%.1f,%.1f n=%d\n",
@@ -486,6 +491,7 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
     if (t->mDamageCount < b.lastDamageCount) b.lastDamageCount = t->mDamageCount;
     b.pendingHits += int(t->mDamageCount - b.lastDamageCount);
     b.lastDamageCount = t->mDamageCount;
+    if (t->mHealth < b.lastHealth && t->mHealth > 0.0f) pc_p2_sfx(sourceOf(b), b.generator, p2sfx::Event::Damage, t);
     if (t->mHealth < b.lastHealth && t->mHealth > 0.0f)
         std::printf("P2_GROINK_DAMAGE generator=%u source_id=%u health=%.1f prior=%.1f hits=%d\n", b.generator,
                     sourceOf(b), t->mHealth, b.lastHealth, b.pendingHits);
@@ -525,6 +531,9 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         t->inputDrive(drive);
         t->mVelocity.x = drive.x;
         t->mVelocity.z = drive.z;
+        if (shown == p2groinkfsm::State::Walk || shown == p2groinkfsm::State::WalkHome
+            || shown == p2groinkfsm::State::WalkPath)
+            pc_p2_sfx_stride(sourceOf(b), b.generator, t, 28.0f);
     }
     if (t->mHealth > 0.0f) t->updateLifeGauge();
     b.logTimer += dt;
@@ -665,64 +674,6 @@ bool pc_p2_groink_teki_suppress_ai(const BTeki* teki) {
     return b && b->own && !b->began && !b->terminal;
 }
 
-namespace {
-// Bind one host actor (setup loop body; also the dev-console late binder, #942).
-bool bindOne(Teki* t, unsigned gen, int type, unsigned srcForBind, bool bridge, const p2groink::Binding& cfg) {
-    // A host that leaves no corpse dies through dieSoon -> kill -> doKill,
-    // which runs pc_p2_forget_teki on the death frame and erases this binding
-    // before RequestBirth can ever fire (tekibteki.cpp:681-721, 742-749).
-    // Only a LeaveCorpse host survives death as a revivable carcass pellet.
-    if (t->getParameterI(TPI_CorpseType) != TEKICORPSE_LeaveCorpse) {
-        std::printf("P2_GROINK_CARCASS_UNBOUND generator=%u type=%d reason=no_corpse\n", gen, type);
-        return false;
-    }
-    Binding bind;
-    bind.generator = gen;
-    bind.type = type;
-    bind.source = srcForBind;
-    bind.config = cfg.carcass;
-    // The lane-21 transport tail (teleports the captain, re-rings the
-    // squad, forces carry_min=1) is a room-preview fixture recipe. It can
-    // never run in a campaign session, whatever the sidecar says.
-    bind.transport = cfg.transport && !bridge && pc_pikipelago_room_preview();
-    bind.own = bridge;
-    auto placed = s.emplace(static_cast<BTeki*>(t), bind);
-    Binding& b = placed.first->second;
-    if (b.own) {
-        const bool fixed = srcForBind == 97;
-        const p2groinkfsm::Params& parms = sParams[fixed ? 1 : 0];
-        // Campaign carcass timeline uses the source parms (fp11/fp12).
-        b.config.gaugeDelay = parms.healthGaugeTimer;
-        b.config.recoverySeconds = parms.respawnRate;
-        b.config.maxHealth = parms.health;
-        const Vector3f pos = t->getPosition();
-        b.fsm.init(parms, sBank, fixed, {pos.x, pos.y, pos.z}, t->getDirection(), (gen * 2654435761u) | 1u, &sRoute);
-        t->mHealth = parms.health;
-        b.lastHealth = b.lastPositiveHealth = t->mHealth;
-        t->setTekiOption(TEKIOPT_DamageCountable);
-        b.lastDamageCount = t->mDamageCount;
-        std::printf("P2_GROINK_OWN_BIND generator=%u source_id=%u variant=%s health=%.1f retail_parms=%d "
-                    "staged_clips=%d draw=%s route=%d state=%s\n",
-                    gen, srcForBind, fixed ? "FixMiniHoudai" : "NormMiniHoudai", t->mHealth, parms.retail ? 1 : 0,
-                    [] { int n = 0; for (const auto& c : sBank.clip) n += c.staged ? 1 : 0; return n; }(),
-                    sPosesLoaded ? "p2_model" : "host", b.fsm.nearestWayPoint(),
-                    p2groinkfsm::stateName(b.fsm.state()));
-    }
-    sGeneratorObj = t->mGenerator; // (#198 gate 6 rebirth probe)
-    std::printf("P2_GROINK_CARCASS_READY generator=%u type=%d source=%u gauge_delay=%.3f recovery=%.3f max_health=%.3f\n",
-                gen, type, srcForBind, b.config.gaugeDelay, b.config.recoverySeconds, b.config.maxHealth);
-    if (bridge) {
-        // Ordinary-delivery bridge (lane 06 contract, mirrors Catfish 26):
-        // bind the seed source so GoalItem::suckMe grants onion:p2:78 or
-        // onion:p2:97 exactly once for the delivered corpse.
-        pc_randomizer_p2_bind_source(static_cast<PelletView*>(t), srcForBind, gen);
-        std::printf("P2_GROINK_DELIVERY_BIND generator=%u source_id=%u\n", gen, srcForBind);
-    }
-    std::fflush(stdout);
-    return true;
-}
-} // namespace
-
 void pc_p2_groink_teki_setup() {
     pc_p2_groink_teki_reset();
     const bool bridge = pc_randomizer_p2_bridge();
@@ -761,28 +712,67 @@ void pc_p2_groink_teki_setup() {
             type = t->mTekiType;
             srcForBind = src;
         } else if (pc_p2_campaign_token(t) != gen) continue;
-        if (t->mTekiType != type || (!bridge && s.size())) { if (pc_p2_setup_skip(bridge, "Groink", "actor_type_mismatch")) return; }
-        bindOne(t, gen, type, srcForBind, bridge, cfg);
+        if (t->mTekiType != type) {
+            // #948: wrong vehicle for this actor only; keep sweeping the rest.
+            if (pc_p2_setup_skip(bridge, "Groink", "actor_type_mismatch")) {
+                std::printf("P2_GROINK_UNBOUND generator=%u source_id=%u type=%d reason=host_type_mismatch\n", gen, srcForBind, int(t->mTekiType));
+                std::fflush(stdout);
+                continue;
+            }
+        }
+        if (!bridge && s.size()) { if (pc_p2_setup_skip(bridge, "Groink", "actor_type_mismatch")) return; }
+        // A host that leaves no corpse dies through dieSoon -> kill -> doKill,
+        // which runs pc_p2_forget_teki on the death frame and erases this binding
+        // before RequestBirth can ever fire (tekibteki.cpp:681-721, 742-749).
+        // Only a LeaveCorpse host survives death as a revivable carcass pellet.
+        if (t->getParameterI(TPI_CorpseType) != TEKICORPSE_LeaveCorpse) {
+            std::printf("P2_GROINK_CARCASS_UNBOUND generator=%u type=%d reason=no_corpse\n", gen, type);
+            continue;
+        }
+        Binding bind;
+        bind.generator = gen;
+        bind.type = type;
+        bind.source = srcForBind;
+        bind.config = cfg.carcass;
+        // The lane-21 transport tail (teleports the captain, re-rings the
+        // squad, forces carry_min=1) is a room-preview fixture recipe. It can
+        // never run in a campaign session, whatever the sidecar says.
+        bind.transport = cfg.transport && !bridge && pc_pikipelago_room_preview();
+        bind.own = bridge;
+        auto placed = s.emplace(static_cast<BTeki*>(t), bind);
+        Binding& b = placed.first->second;
+        if (b.own) {
+            const bool fixed = srcForBind == 97;
+            const p2groinkfsm::Params& parms = sParams[fixed ? 1 : 0];
+            // Campaign carcass timeline uses the source parms (fp11/fp12).
+            b.config.gaugeDelay = parms.healthGaugeTimer;
+            b.config.recoverySeconds = parms.respawnRate;
+            b.config.maxHealth = parms.health;
+            const Vector3f pos = t->getPosition();
+            b.fsm.init(parms, sBank, fixed, {pos.x, pos.y, pos.z}, t->getDirection(), (gen * 2654435761u) | 1u, &sRoute);
+            t->mHealth = parms.health;
+            b.lastHealth = b.lastPositiveHealth = t->mHealth;
+            t->setTekiOption(TEKIOPT_DamageCountable);
+            b.lastDamageCount = t->mDamageCount;
+            std::printf("P2_GROINK_OWN_BIND generator=%u source_id=%u variant=%s health=%.1f retail_parms=%d "
+                        "staged_clips=%d draw=%s route=%d state=%s\n",
+                        gen, srcForBind, fixed ? "FixMiniHoudai" : "NormMiniHoudai", t->mHealth, parms.retail ? 1 : 0,
+                        [] { int n = 0; for (const auto& c : sBank.clip) n += c.staged ? 1 : 0; return n; }(),
+                        sPosesLoaded ? "p2_model" : "host", b.fsm.nearestWayPoint(),
+                        p2groinkfsm::stateName(b.fsm.state()));
+        }
+        sGeneratorObj = t->mGenerator; // (#198 gate 6 rebirth probe)
+        std::printf("P2_GROINK_CARCASS_READY generator=%u type=%d source=%u gauge_delay=%.3f recovery=%.3f max_health=%.3f\n",
+                    gen, type, srcForBind, b.config.gaugeDelay, b.config.recoverySeconds, b.config.maxHealth);
+        if (bridge) {
+            // Ordinary-delivery bridge (lane 06 contract, mirrors Catfish 26):
+            // bind the seed source so GoalItem::suckMe grants onion:p2:78 or
+            // onion:p2:97 exactly once for the delivered corpse.
+            pc_randomizer_p2_bind_source(static_cast<PelletView*>(t), srcForBind, gen);
+            std::printf("P2_GROINK_DELIVERY_BIND generator=%u source_id=%u\n", gen, srcForBind);
+        }
+        std::fflush(stdout);
     }
-}
-
-bool pc_p2_groink_teki_bind_dynamic(BTeki* t) {
-    if (!t || !tekiMgr || !t->mGenerator || !pc_randomizer_p2_bridge()) return false;
-    const unsigned src = pc_p2_campaign_source(t);
-    if (src != 78 && src != 97) return false;
-    if (s.count(t)) return true;
-    if (!sPosesLoaded) {
-        // Setup did not run in this scene (or the bank failed): load the
-        // staged source parms/bank now, exactly as the campaign setup does.
-        loadParams();
-        loadBank();
-        if (!sTrace) sTrace = new P2GroinkMapTrace;
-        sTrace->reset(mapMgr);
-    }
-    const p2groink::Binding cfg{};
-    const bool ok = bindOne(static_cast<Teki*>(t), pc_p2_campaign_token(t), t->mTekiType, src, true, cfg);
-    std::fflush(stdout);
-    return ok;
 }
 
 void pc_p2_groink_teki_tick(BTeki* t) {

@@ -312,6 +312,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_route_planner.cpp
     pc_port/pc_p2_purple_flight.cpp
     pc_port/pc_p2_purple_feedback.cpp
+    pc_port/pc_p2_sfx.cpp
     pc_port/pc_p2_kochappy_stun.cpp
     pc_port/pc_p2_species.cpp
     pc_port/pc_p2_bulbmin.cpp
@@ -909,6 +910,11 @@ add_executable(p2_dangomushi_hazard_test
 target_include_directories(p2_dangomushi_hazard_test PRIVATE pc_port)
 target_compile_options(p2_dangomushi_hazard_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_dangomushi_hazard_test COMMAND p2_dangomushi_hazard_test)
+add_executable(p2_sfx_policy_test
+    tools/p2_sfx_policy_test.cpp)
+target_include_directories(p2_sfx_policy_test PRIVATE pc_port)
+target_compile_options(p2_sfx_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_sfx_policy_test COMMAND p2_sfx_policy_test)
 add_executable(p2_dangomushi_policy_test
     tools/p2_dangomushi_policy_test.cpp)
 target_include_directories(p2_dangomushi_policy_test PRIVATE pc_port)
@@ -1353,6 +1359,13 @@ add_executable(p2_campaign_policy_test
 target_include_directories(p2_campaign_policy_test PRIVATE pc_port)
 target_compile_options(p2_campaign_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_campaign_policy_test COMMAND p2_campaign_policy_test)
+
+# Smoke-seed slot bypass (#944): engine-free env-gated predicate contract.
+add_executable(p2_smoke_any_slot_test
+    pc_port/pc_p2_smoke_any_slot_test.cpp)
+target_include_directories(p2_smoke_any_slot_test PRIVATE pc_port)
+target_compile_options(p2_smoke_any_slot_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_smoke_any_slot_test COMMAND p2_smoke_any_slot_test)
 
 # P2 boss arenas (owner ruling 2026-09-29): engine-free suppress/probe table.
 add_executable(p2_boss_arena_policy_test
@@ -1983,6 +1996,13 @@ target_include_directories(p2_sarai_lifecycle_test BEFORE PRIVATE
     tools/p2_sarai_lifecycle_stubs pc_port)
 target_compile_options(p2_sarai_lifecycle_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_sarai_lifecycle_test COMMAND p2_sarai_lifecycle_test)
+
+# #215 latch fix: engine-free fixtures for the Demon anchor collision tree,
+# body offset, CF_IsFlying mirror and Lock-On peak pin (pc_p2_demon_anchor.h).
+add_executable(p2_demon_anchor_test tools/p2_demon_anchor_test.cpp)
+target_include_directories(p2_demon_anchor_test PRIVATE pc_port)
+target_compile_options(p2_demon_anchor_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_demon_anchor_test COMMAND p2_demon_anchor_test)
 
 # Lane 06: engine-free provider unit tests (header-only; previously present but unregistered).
 add_executable(p2_receipt_test tools/p2_receipt_test.cpp)

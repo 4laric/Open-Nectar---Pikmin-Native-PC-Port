@@ -173,6 +173,14 @@ Creature* GenObjectTeki::birth(BirthInfo& info)
         if (source) {
             std::printf("P2_SEED_RESOLVE source_id=%u target=%u original_type=%d x=%.1f z=%.1f\n",
                         source, uid, int(mTekiType), info.mPosition.x, info.mPosition.z);
+            if (protectedSpawn) {
+                // #948: the generator carries a non-transferable protected drop
+                // (Parameter0 holder or a non-part personality), so the P1
+                // type was born. Say so rather than failing every family bind
+                // silently downstream.
+                std::printf("P2_GENERATED_PLACEMENT source_id=%u target=%u generator=%u bound=0 reason=protected-drop\n",
+                            source, uid, uid);
+            }
             // Generated placement (lane 03/04): claim the spawned actor for its
             // seeded P2 identity module instead of leaving it as a P1 stand-in.
             // wf7 dweevil-impl (#871): pass the seed uid as the generator id.

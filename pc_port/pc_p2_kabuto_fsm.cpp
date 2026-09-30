@@ -11,6 +11,7 @@
 // lane and the source Wait/Turn/Move selection (pc_p2_kabuto_aim.h), not the
 // old 180 / 0.5 rad cone.
 #include "pc_p2_kabuto_fsm.h"
+#include "pc_p2_sfx.h"
 #include "pc_p2_kabuto_fsm_policy.h"
 #include "pc_p2_kabuto_stone_fleet.h"
 #include "pc_p2_kabuto_aim.h"
@@ -160,6 +161,7 @@ void logStoneFire(KabutoFsm& s,unsigned gen,const p2kabutostone::AttackStep& ste
         return;
     }
     if(step.action!=p2kabutostone::AttackAction::Fired)return;
+    pc_p2_sfx(75,gen,p2sfx::Event::Shot,Vector3f(step.birth.x,step.birth.y,step.birth.z));
     const int slot=step.slot;
     slotGen[slot]=gen;slotPosTicks[slot]=0;
     const auto at=timing.find("attack");
@@ -192,6 +194,9 @@ void transition(BTeki* a,KabutoFsm& s,KState st,const char* clip,unsigned gen){
     if(st==KB_MOVE)s.moveTimer=0.0f;
     if(st==KB_ATTACK)s.alert=0.0f;
     std::printf("P2_KABUTO_STATE generator=%u state=%s\n",gen,p2kabutofsm::stateName(st));std::fflush(stdout);
+    // P1 Cannon Beetle bank approximation (output-only, #946).
+    if(st==KB_DEAD)pc_p2_sfx(75,gen,p2sfx::Event::Dead,a);
+    if(st==KB_FLICK)pc_p2_sfx(75,gen,p2sfx::Event::Flick,a);
 }
 void die(BTeki* a,KabutoFsm& s,unsigned gen,float prior){
     if(!s.deadLogged){s.deadLogged=true;std::printf("P2_KABUTO_DEAD generator=%u source_id=75 health=0 prior_health=%.1f\n",gen,prior);std::fflush(stdout);}
@@ -233,7 +238,12 @@ void pc_p2_kabuto_fsm_setup(){
     Iterator it(tekiMgr);CI_LOOP(it){Teki* teki=static_cast<Teki*>(*it);if(!teki||!teki->mGenerator)continue;
         const unsigned token=bridge?pc_p2_campaign_token(teki):teki->mGenerator->_70;
         if(wanted.find(token)==wanted.end())continue;
-        if(!seen.insert(token).second)std::abort();if(teki->mTekiType!=TEKI_Beatle)std::abort();
+        if(teki->mTekiType!=TEKI_Beatle){ // #948: wrong vehicle: refuse with a reason, never abort a campaign
+            if(!bridge)std::abort();
+            std::printf("P2_KABUTO_UNBOUND generator=%u source_id=75 type=%d reason=host_type_mismatch\n",token,int(teki->mTekiType));std::fflush(stdout);continue;}
+        if(!seen.insert(token).second){
+            if(!bridge)std::abort();
+            std::printf("P2_KABUTO_UNBOUND generator=%u source_id=75 reason=duplicate_generator\n",token);std::fflush(stdout);continue;}
         actors[static_cast<PelletView*>(teki)]=true;shooters[tokenOf(teki)]=teki;
         teki->mHealth=p2kabutofsm::params().health;
         KabutoFsm& f=fsms[static_cast<PelletView*>(teki)];
@@ -246,7 +256,7 @@ void pc_p2_kabuto_fsm_setup(){
         std::printf("P2_ENEMY_READY species=Kabuto native_family=Kabuto generator=%u x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=native source_FSM=implemented\n",token,teki->getPosition().x,teki->getPosition().y,teki->getPosition().z,teki->mHealth,p2kabutofsm::params().health);
         std::printf("P2_KABUTO_STATE generator=%u state=wait\n",token);std::fflush(stdout);
     }
-    if(seen.size()!=wanted.size()){std::printf("P2_KABUTO_ERROR missing_actor wanted=%zu found=%zu\n",wanted.size(),seen.size());std::abort();}
+    if(seen.size()!=wanted.size()){std::printf("P2_KABUTO_MISSING wanted=%zu found=%zu\n",wanted.size(),seen.size());std::fflush(stdout);if(!bridge)std::abort();}
     loadAnimation(bank);ready=true;
 }
 void pc_p2_kabuto_fsm_update(BTeki* actor){
@@ -264,6 +274,7 @@ void pc_p2_kabuto_fsm_update(BTeki* actor){
     if(actor->mHealth<=0.0f&&!s.deathPriorSet&&previousHealth>0.0f){s.deathPrior=previousHealth;s.deathPriorSet=true;}
     const float priorForDeath=s.deathPriorSet?s.deathPrior:previousHealth;
     if(actor->mHealth<s.lastHealth&&actor->mHealth>0.0f){
+        pc_p2_sfx(75,gen,p2sfx::Event::Damage,actor);
         std::printf("P2_KABUTO_DAMAGE generator=%u source_id=75 health=%.1f\n",gen,actor->mHealth);std::fflush(stdout);}
     s.lastHealth=actor->mHealth;
     if(s.poolFullCooldown>0.0f)s.poolFullCooldown-=dt;
@@ -314,6 +325,7 @@ void pc_p2_kabuto_fsm_update(BTeki* actor){
         break;}
     case KB_MOVE:{
         // StateMove::exec (KabutoState.cpp:203-260) via p2kabutoaim::moveExec.
+        pc_p2_sfx_stride(75,gen,actor,24.0f);
         if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
         if(shouldFlick(actor)){stop(actor);transition(actor,s,KB_FLICK,"flick",gen);break;}
         buildAim(aim);

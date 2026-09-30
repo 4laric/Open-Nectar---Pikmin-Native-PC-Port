@@ -8,6 +8,8 @@
 #include "Graphics.h"
 #include "Camera.h"
 #include "gameflow.h"
+#include "pc_randomizer.h"
+#include "pc_p2_campaign_actor.h"
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "PikiState.h"
@@ -146,7 +148,18 @@ bool pc_p2_queen_teki_is_bound(const BTeki* t) { return t && s.count(const_cast<
 
 void pc_p2_queen_teki_setup() {
 	pc_p2_queen_teki_reset();
-	if (!pc_pikipelago_room_preview()) return;
+	if (!pc_pikipelago_room_preview()) {
+		// Empress Bulblax (30) is owner-parked (#899) and has only a room-preview
+		// module. A seed that binds it anyway gets a logged refusal per id
+		// instead of a bare P1 actor with no marker (#948).
+		if (pc_randomizer_p2_bridge()) {
+			for (unsigned id : pc_p2_campaign_ids(30)) {
+				std::printf("P2_QUEEN_UNBOUND generator=%u source_id=30 reason=unstaged_campaign_module\n", id);
+			}
+			std::fflush(stdout);
+		}
+		return;
+	}
 	std::ifstream in("p2-queen-teki.txt");
 	if (!in) return;
 	p2queenteki::Binding cfg{};
