@@ -16,6 +16,8 @@ static_assert(int(EffectMgr::EFF_Spider_DeadBombSparks) == EFF_Spider_DeadBombSp
 static_assert(int(EffectMgr::EFF_Rocket_Biri) == EFF_Rocket_Biri, "EFF_Rocket_Biri id");
 static_assert(int(EffectMgr::EFF_RippleWhite) == EFF_RippleWhite, "EFF_RippleWhite id");
 static_assert(int(EffectMgr::EFF_Piki_Bubble) == EFF_Piki_Bubble, "EFF_Piki_Bubble id");
+static_assert(int(EffectMgr::EFF_Piki_BubbleRecover) == EFF_Piki_BubbleRecover, "EFF_Piki_BubbleRecover id");
+static_assert(int(EffectMgr::EFF_King_SalivaDroplet) == EFF_King_SalivaDroplet, "EFF_King_SalivaDroplet id");
 static_assert(int(EffectMgr::EFF_RippleWhite2) == EFF_RippleWhite2, "EFF_RippleWhite2 id");
 static_assert(int(EffectMgr::EFF_Frog_BubbleRingL) == EFF_Frog_BubbleRingL, "EFF_Frog_BubbleRingL id");
 static_assert(int(EffectMgr::EFF_Frog_Bubble2) == EFF_Frog_Bubble2, "EFF_Frog_Bubble2 id");
@@ -50,7 +52,7 @@ unsigned Emitter::emit(Element e, const Point* pts, int n, unsigned tick) {
         const Point& q = pts[i];
         const Look l = look(e, q.kind);
         if (l.scale <= 0.0f) continue;
-        if (!l.burst && (tick % AUTHORED_REFRESH_TICKS) != 0) continue;
+        if (!l.burst && (tick % (l.every ? l.every : 1u)) != 0) continue;
         zen::particleGenerator* g = effectMgr->create(static_cast<EffectMgr::effTypeTable>(l.effect),
                                                       Vector3f(q.x, q.y, q.z), static_cast<Owner*>(owner_), nullptr);
         if (!g) continue;

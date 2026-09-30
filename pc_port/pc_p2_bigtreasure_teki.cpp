@@ -626,9 +626,49 @@ void stopFx(Binding& b, p2attackfx::EndReason why) {
     std::fflush(stdout);
 }
 
+// TEST-ONLY effect gallery (PIKMIN_P2_TEST_FX_GALLERY=<id,id,...>): spawns each P1 effect id by
+// the captain at scale 1 and 3 with its authored emission, dumps one frame, then kills it, so the
+// Monster Pump look can be chosen from what each candidate really draws. Unset in every normal run.
+void galleryTick() {
+    static const char* env = std::getenv("PIKMIN_P2_TEST_FX_GALLERY");
+    if (!env || !*env || !effectMgr) return;
+    static std::vector<int> ids;
+    static std::size_t at = 0;
+    static unsigned frame = 0;
+    static p2attackfx::Emitter fx;
+    if (ids.empty() && frame == 0) {
+        std::string text(env), word;
+        for (std::size_t i = 0; i <= text.size(); ++i) {
+            if (i == text.size() || text[i] == ',') { if (!word.empty()) ids.push_back(std::atoi(word.c_str())); word.clear(); }
+            else word += text[i];
+        }
+    }
+    ++frame;
+    Navi* navi0 = nullptr;
+    for (Navi* n : pc_p2_navis()) { navi0 = n; break; }
+    if (frame < 240 || at >= ids.size() || !navi0) return;
+    const unsigned phase = (frame - 240) % 60;
+    const Vector3f np = navi0->getPosition();
+    if (phase == 0) {
+        p2attackfx::Point pts[2] = {{p2attackfx::Kind::Body, np.x - 12.0f, np.y + 6.0f, np.z + 30.0f, 1.0f, 0.0f, 1.0f},
+                                    {p2attackfx::Kind::Body, np.x + 22.0f, np.y + 6.0f, np.z + 30.0f, 1.0f, 0.0f, 1.0f}};
+        fx.emitLook(p2attackfx::Look{ids[at], 0, false, 0, 1.0f}, pts, 1);
+        fx.emitLook(p2attackfx::Look{ids[at], 0, false, 0, 3.0f}, pts + 1, 1);
+    } else if (phase == 14) {
+        char key[40];
+        std::snprintf(key, sizeof(key), "Gal_%03d", ids[at]);
+        pc_gfx_proxy_shot_now(key);
+        std::printf("P2_FX_GALLERY id=%d\n", ids[at]);
+    } else if (phase == 45) {
+        fx.stopAll();
+        ++at;
+    }
+}
+
 // Emit this frame's weapon effects, or stop them. Reads the element runtime
 // only; never writes simulation state (visual only).
 void updateFx(BTeki* t, Binding& b) {
+    galleryTick();
     const P2BigTreasureElementRuntime& rt = b.fsm.elements();
     if (!rt.active() || t->mHealth <= 0.0f) {
         if (b.fxSession.active) {
@@ -700,7 +740,11 @@ void updateFx(BTeki* t, Binding& b) {
     }
     const unsigned tick = b.fxSession.ticks;
     if (!b.fx) b.fx = std::make_unique<p2attackfx::Emitter>();
+    const unsigned live = effectMgr ? effectMgr->getLiveGeneratorCount() : 0u;
     const unsigned made = b.fx->emit(element, pts, n, tick);
+    if (tick == 30 || tick == 90)
+        std::printf("P2_BIGTREASURE_FX_POOL generator=%u element=%s tick=%u live_before=%u points=%d made=%u cap=%d\n",
+                    b.generator, p2attackfx::elementName(element), tick, live, n, made, p2attackfx::MAX_LIVE_GENERATORS);
     b.fxSession.note(unsigned(n), made);
     if (n > 0 && b.fxSession.generators == made && made > 0) {
         std::printf("P2_BIGTREASURE_FX generator=%u source_id=73 element=%s points=%d generators=%u first=%.1f,%.1f,%.1f "
