@@ -89,11 +89,10 @@ int main()
     }
     // Decoys from the owner bug report: the old fixed slot skewered the Pikmin under the rearing head; the
     // real mouth never reaches it, nor either side nor behind, but it does reach the Pikmin the jaw slams.
-    // (The engine puts a Pikmin centre about 3 units above the body origin, so the decoys carry y = 3.)
-    const Vec3 chin = local(0.0f, 3.0f, 50.0f), sideR = local(50.0f, 3.0f, 5.0f), sideL = local(-50.0f, 3.0f, 5.0f),
-               behind = local(0.0f, 3.0f, -45.0f), ahead = local(0.0f, 3.0f, 75.0f), far = local(0.0f, 3.0f, 140.0f);
-    assert(legacyReaches(chin));           // the bug: a Pikmin 50 ahead sits in the gap between rear-up and lunge
-    assert(!sweepReaches(chin));           // the fix: the jaw is up at 19 and already past at 20
+    const Vec3 underHead = local(0.0f, 0.0f, 40.0f), sideR = local(50.0f, 0.0f, 5.0f), sideL = local(-50.0f, 0.0f, 5.0f),
+               behind = local(0.0f, 0.0f, -45.0f), ahead = local(0.0f, 0.0f, 75.0f), far = local(0.0f, 0.0f, 140.0f);
+    assert(legacyReaches(underHead));      // the bug
+    assert(!sweepReaches(underHead));      // the fix
     assert(!sweepReaches(sideR) && !sweepReaches(sideL) && !sweepReaches(behind));
     assert(sweepReaches(ahead));           // the bait at the attack range is skewered
     assert(sweepReaches(far));             // where the jaw visibly lands

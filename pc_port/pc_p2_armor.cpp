@@ -664,7 +664,7 @@ void logLatch(BTeki* a, Armor& s, unsigned generator) {
 // no player, so the skewer and the latch rules are exercised by moving Pikmin into the scene and
 // throwing them through the REAL Navi::throwPiki / PikiFlyingState path:
 //   * 0.5 s: the captain is stood 230 units "behind" the Armor along the camera forward axis;
-//   * 2 s: Pikmin pinned around the body start two bite cycles: in the gap the jaw skips (50 ahead), both sides and
+//   * 2 s: Pikmin pinned around the body start two bite cycles: beneath the rearing head, both sides and
 //     behind (cycle 1), then 70 units straight ahead (cycle 2), so the log shows which ones the bite
 //     really skewers;
 //   * 16 s: the Armor is forced to its walk pose and held still (health restored); a bomb and two captain
@@ -718,24 +718,6 @@ Piki* probePlace(BTeki* a, Armor& s, const char* what, float lx, float lz) {
     std::fflush(stdout);
     return p;
 }
-// Parks every free Pikmin that is not part of the test far behind the body (their AI would walk them into the
-// bite and fill the single mouth slot before the pinned one is reached).
-void probePark(BTeki* a, const Armor& s) {
-    if (!pikiMgr) return;
-    const float h = a->getDirection();
-    const Vector3f ap = a->getPosition();
-    int n = 0;
-    Iterator it(pikiMgr);
-    CI_LOOP(it) {
-        Piki* p = static_cast<Piki*>(*it);
-        if (!p || !p->isAlive() || p->isStickTo() || p->isStickToMouth() || p->isBuried() || !p->isVisible()) continue;
-        bool pinned = false;
-        for (int i = 0; i < s.probePinN; ++i) pinned = pinned || s.probePin[i] == p;
-        if (pinned) continue;
-        p->mSRT.t = probeGround(ap.x - std::sin(h) * 500.0f + float(n++) * 6.0f, ap.y, ap.z - std::cos(h) * 500.0f);
-        p->mVelocity.set(0.0f, 0.0f, 0.0f);
-    }
-}
 void probeHeal(BTeki* a, Armor& s) {
     a->mHealth = LIFE;
     s.lastHealth = LIFE;
@@ -764,14 +746,13 @@ void runProbe(BTeki* actor, Armor& s, unsigned generator, float dt) {
             std::fflush(stdout);
         }
     }
-    // Two bite cycles with Pikmin pinned in place (their AI would walk them away; every other free Pikmin is
-    // parked far behind). Cycle 1: a bait 50 ahead, in the gap between the rearing jaw and the lunge (the old
-    // fixed slot at 37.5 skewered it), plus one on each side and one behind. Cycle 2: a bait 70 units straight
-    // ahead, where the jaw visibly lands. The log lists which ones the real bite skewers.
+    // Two bite cycles with Pikmin pinned in place (their AI would walk them away). Cycle 1: a bait beneath the
+    // rearing head (the old fixed slot skewered it) plus one on each side and one behind. Cycle 2: a bait 70
+    // units straight ahead, where the jaw visibly lands. The log lists which ones the real bite skewers.
     if (s.probeCycle == 0 && s.probeTime >= 2.0f) {
         s.probeCycle = 1;
         struct Spec { const char* name; float x, z; };
-        static const Spec spec[4] = {{"under_chin_50", 0.0f, 50.0f}, {"side_right", 50.0f, 5.0f}, {"side_left", -50.0f, 5.0f},
+        static const Spec spec[4] = {{"under_head", 0.0f, 40.0f}, {"side_right", 50.0f, 5.0f}, {"side_left", -50.0f, 5.0f},
                                      {"behind", 0.0f, -45.0f}};
         for (int i = 0; i < 4; ++i) {
             s.probePin[i] = probePlace(actor, s, spec[i].name, spec[i].x, spec[i].z);
@@ -815,7 +796,6 @@ void runProbe(BTeki* actor, Armor& s, unsigned generator, float dt) {
                 p->mSRT.t = s.probePinPos[i];
                 p->mVelocity.set(0.0f, 0.0f, 0.0f);
             }
-            probePark(actor, s);
         }
     }
     if (s.probeTime >= PROBE_FREEZE_BEGIN && !s.probeFreezeInit) {
