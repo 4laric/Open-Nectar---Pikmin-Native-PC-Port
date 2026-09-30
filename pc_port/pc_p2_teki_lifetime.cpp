@@ -19,6 +19,7 @@
 #include "pc_p2_mar.h"
 #include "pc_p2_tadpole.h"
 #include "pc_p2_hana.h"
+#include "pc_p2_body_coll.h"
 #include "pc_p2_imomushi.h"
 #include "pc_p2_batch2.h"
 #include "pc_p2_batch3.h"
@@ -111,6 +112,7 @@ void pc_p2_forget_teki(BTeki* actor)
 	pc_p2_bombsarai_teki_forget(actor);
 	pc_p2_king_teki_forget(actor);
 	pc_p2_queen_teki_forget(actor);
+	pc_p2_body_coll_forget(actor);
 	pc_p2_batch2_forget(actor);
 	pc_p2_projectiles_forget(actor);
 	pc_p2_sokkuri_forget(actor);
@@ -188,6 +190,7 @@ pc_p2_sarai_manager_reset();
 	pc_p2_king_teki_reset();
 	pc_p2_queen_teki_reset();
 	pc_p2_batch2_reset();
+	pc_p2_body_coll_reset();
 	pc_p2_projectiles_reset();
 	pc_p2_sokkuri_reset();
 	pc_p2_armor_reset();

@@ -273,6 +273,9 @@ private:
     void updateNatural();
     bool startNaturalMotion(p2sarai::Motion motion);
     void applyNaturalPose();
+    bool smoothActive() const;
+    void advanceSmooth(float seconds); // carcass draw: the host clock is stopped, so advance the crossfade here
+    void presentSmooth(float frame); // interpolated present of the active pose set at a source frame
 
     // Demon profile state (#215).
     const P2SaraiSpecies* mSpecies = &kSaraiSpecies;

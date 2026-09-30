@@ -13,6 +13,7 @@
 #include "pc_p2_snakejoint.h"
 #include "pc_p2_otakara.h"
 #include "pc_p2_chappy.h"
+#include "pc_p2_groink_teki.h"
 #include "pc_p2_breadbug_teki.h"
 #endif
 
@@ -45,6 +46,9 @@ bool InteractAttack::actTeki(Teki* teki) immut
 {
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
 	if (pc_p2_hana_rejects_attack(teki)) return true;
+	// Dweevil family (59-62): OtakaraBase::damageCallBack damages only through a collision part
+	// (OtakaraBase.cpp:190-197); the partless ground punch is refused. -1 = not a registered Dweevil.
+	if (pc_p2_otakara_attack_part(teki, mOwner, mCollPart, mDamage) == 0) return false;
 	// #898: PanModoki::damageCallBack applies damage only while bittered.
 	if (pc_p2_breadbug_teki_attack(teki, mOwner, mDamage)) return false;
 	if (pc_p2_elecbug_attacked(teki)) return true;
@@ -76,6 +80,12 @@ bool InteractAttack::actTeki(Teki* teki) immut
 	// #884: registered Emperor Bulblax, source KingChappy::damageCallBack
 	// (kingChappy.cpp:824-848). A refused hit takes no damage and adds no
 	// flick; a partless hit low under the chin is scaled by 0.2.
+	// #892: registered Gatling Groink: a Pikmin hurts it only through the stickable `body` it is
+	// latched to; the face cover and unlatched ground hits are refused (P2 has no such hit).
+	const f32 groinkRate = pc_p2_groink_teki_damage_rate(teki, mOwner, mCollPart);
+	if (groinkRate == 0.0f) {
+		return false;
+	}
 	const f32 kingRate = pc_p2_chappy_king_damage_rate(teki, mOwner, mCollPart);
 	if (kingRate == 0.0f) {
 		return false;
@@ -98,6 +108,9 @@ bool InteractAttack::actTeki(Teki* teki) immut
 	// #884: Emperor Bulblax flick timer (source addDamage flickSpeed). No-op
 	// for every other actor.
 	pc_p2_chappy_attacked(teki, damageAccepted);
+	// #996: Skitter Leaf flick timer (source addDamage flickSpeed). No-op for
+	// every other actor.
+	pc_p2_sokkuri_attacked(teki, damageAccepted);
 #endif
 	return damageAccepted;
 }

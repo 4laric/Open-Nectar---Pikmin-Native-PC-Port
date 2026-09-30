@@ -1,4 +1,7 @@
 #include "pc_p2_demon_host.h"
+#ifdef PIKI_PC_PORT
+#include "pc_p2_life_gauge_hooks.h"
+#endif
 #include "pc_p2_sarai_manager.h"
 #include "pc_p2_umimushi.h"
 #include "pc_p2_jigumo.h"
@@ -9,6 +12,7 @@
 #include "pc_p2_mar.h"
 #include "pc_p2_tadpole.h"
 #include "pc_p2_hana.h"
+#include "pc_p2_body_coll.h"
 #include "pc_p2_kurage_teki.h"
 #include "pc_p2_groink_teki.h"
 #include "pc_p2_breadbug_teki.h"
@@ -566,6 +570,8 @@ void BTeki::update()
 	pc_p2_kochappy_fsm_update(this);
 	pc_p2_mamuta_fsm_update(this);
 	pc_p2_chappy_update(this);
+	// Shared P2 body collision: fitted spheres on the drawn mesh (after every species tick).
+	pc_p2_body_coll_update(this);
 #endif
 	if (mDeadState == 0) {
 		updateTimers();
@@ -579,6 +585,9 @@ void BTeki::update()
 			}
 		}
 	}
+#ifdef PIKI_PC_PORT
+	pc_p2_life_gauge_update(this);
+#endif
 }
 
 /**
@@ -2107,6 +2116,10 @@ bool BTeki::interactDefault(immut TekiInteractionKey& key)
 			return false;
 		}
 
+		// Dweevil carrying a treasure: damageTreasure takes the hit (OtakaraBase.cpp:563-574).
+		if (pc_p2_otakara_divert(this, attack->mOwner, attack->mDamage)) {
+			return true;
+		}
 		_344 = attack->getDamagePortion();
 		mStoredDamage += attack->mDamage;
 		pc_p2_otakara_attack(this, attack->mOwner, "InteractAttack");
@@ -2270,7 +2283,18 @@ void BTeki::drawDefault(Graphics& gfx)
 	clearTekiOption(TEKIOPT_Drawed);
 
 	f32 rad = getBoundingSphereRadius();
+#ifdef PIKI_PC_PORT
+	// Bound Empress/larva: cull on the drawn P2 body, not the small P1 host sphere.
+	Vector3f cullCentre = getBoundingSphereCentre();
+	float p2Radius;
+	if (pc_p2_queen_teki_cull_bounds(this, &p2Radius)) {
+		cullCentre = mSRT.t;
+		rad        = p2Radius;
+	}
+	if (!gfx.mCamera->isPointVisible(cullCentre, rad)) {
+#else
 	if (!gfx.mCamera->isPointVisible(getBoundingSphereCentre(), rad)) {
+#endif
 		enableAICulling();
 	} else {
 		disableAICulling();
@@ -2397,14 +2421,23 @@ void BTeki::drawRange(Graphics& gfx, immut Vector3f& centre, f32 range, immut Co
  */
 void BTeki::refresh2d(Graphics& gfx)
 {
+#ifdef PIKI_PC_PORT
+	const bool gaugeDrawn = mDeadState == 0 && tekiMgr->hasModel(mTekiType) && isVisible() && !isCreatureFlag(CF_UseAICulling)
+	                     && getTekiOption(TEKIOPT_LifeGaugeVisible);
+	pc_p2_life_gauge_audit(this, gaugeDrawn);
+#endif
 	if (mDeadState != 0 || !tekiMgr->hasModel(mTekiType) || !isVisible() || isCreatureFlag(CF_UseAICulling)) {
 		return;
 	}
 
 	if (getTekiOption(TEKIOPT_LifeGaugeVisible)) {
-		immut Vector3f& pos = getCentre();
+		Vector3f pos = getCentre();
+		f32 gaugeOffsetY = getParameterF(TPF_LifeGaugeOffset);
+#ifdef PIKI_PC_PORT
+		pc_p2_life_gauge_place(this, pos, gaugeOffsetY);
+#endif
 		mLifeGauge.mPosition.input(pos);
-		mLifeGauge.mOffset.y = getParameterF(TPF_LifeGaugeOffset);
+		mLifeGauge.mOffset.y = gaugeOffsetY;
 		mLifeGauge.mScale    = 5000.0f / gfx.mCamera->mNear;
 		mLifeGauge.refresh(gfx);
 	}

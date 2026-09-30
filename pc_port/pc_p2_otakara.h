@@ -22,6 +22,7 @@ class PelletView;
 // BombOtakara (93) IS bound here (inst3-misc OWN): the carrier FSM drives
 // locomotion/targeting and detonates the carried Bomb via the shared blast
 // primitive on its own BTeki tick. The lane-20 sidecar remains preview-only.
+class CollPart;
 void pc_p2_otakara_setup();
 // Generated-placement bridge (lane 03/04): register the randomizer-claimed
 // actor for its seeded elemental-dweevil source (59-62) by generator ID.
@@ -72,3 +73,16 @@ bool pc_p2_otakara_registered(BTeki*);
 //                          Piki Entity contact, before the host smash transit.
 bool pc_p2_otakara_pressed(BTeki*, Creature* presser);
 bool pc_p2_otakara_smashed(BTeki*, Creature* presser);
+
+// Dweevil family fidelity hooks (pc_p2_otakara_part.h / pc_p2_otakara_item.h).
+//
+// pc_p2_otakara_attack_part (InteractAttack::actTeki): -1 = not a registered 59-62 Dweevil or
+// not a Pikmin/Navi hit (caller continues unchanged), 1 = accepted (a collision part came with the
+// hit), 0 = refused (partless ground punch: source OtakaraBase::damageCallBack returns false
+// without a part, OtakaraBase.cpp:190-197). Logs P2_OTAKARA_PART.
+int pc_p2_otakara_attack_part(BTeki*, Creature* owner, CollPart* part, float damage);
+
+// pc_p2_otakara_divert (BTeki::interactDefault Attack branch): true when the registered Dweevil
+// is carrying a treasure and the damage was absorbed by the treasure's health instead
+// (damageTreasure, OtakaraBase.cpp:563-574); the caller then skips mStoredDamage.
+bool pc_p2_otakara_divert(BTeki*, Creature* owner, float damage);

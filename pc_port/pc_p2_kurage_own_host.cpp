@@ -1,7 +1,10 @@
 #include "pc_p2_kurage_own_host.h"
 
 #include "pc_p2_demon_bridge.h"
+#include "pc_p2_kurage_fx.h"
+#include "pc_p2_kurage_proom.h"
 #include "pc_p2_kurage_receiver.h"
+#include "pc_p2_kurage_suction_policy.h"
 #include "pc_p2_navi_select.h"
 #include "pc_p2_sfx.h"
 #include "Collision.h"
@@ -11,6 +14,7 @@
 #include "NaviMgr.h"
 #include "Piki.h"
 #include "PikiMgr.h"
+#include "PikiState.h"
 #include "Shape.h"
 #include "system.h"
 #include "teki.h"
@@ -24,6 +28,12 @@ constexpr float kFlickBackwardAngle = -1000.0f;
 // Creature Property accel (enemyparm s003): fraction of the velocity error
 // closed per source tick.
 constexpr float kAccel = 0.1f;
+// pc_p2_kurage_suction_policy.h mirrors these ids without the engine header.
+static_assert(p2kuragesuck::kStateNormal == PIKISTATE_Normal, "PikiState Normal");
+static_assert(p2kuragesuck::kStateFlying == PIKISTATE_Flying, "PikiState Flying");
+static_assert(p2kuragesuck::kStatePush == PIKISTATE_Push, "PikiState Push");
+static_assert(p2kuragesuck::kStatePushPiki == PIKISTATE_PushPiki, "PikiState PushPiki");
+static_assert(p2kuragesuck::kStateEmotion == PIKISTATE_Emotion, "PikiState Emotion");
 } // namespace
 
 float P2KurageOwn::rand01()
@@ -64,6 +74,7 @@ bool P2KurageOwn::init(BTeki* actor, unsigned generator, unsigned source, CollPa
     mSuckFull = false;
     actor->mHealth = p2kurageown::general(mVariant).life;
     mLastHealth = actor->mHealth;
+    mFx = p2kuragefx::State{};
 
     // Body joint offset: centroid of the rest mesh when loaded (the model root
     // sits at the bell underside), else the measured fallback.
@@ -74,6 +85,9 @@ bool P2KurageOwn::init(BTeki* actor, unsigned generator, unsigned source, CollPa
         measured = p2flyer::bodyOffsetFromMesh(std::size_t(restShape->mVertexCount),
             [verts](std::size_t i) { return p2flyer::Vec3{verts[i].x, verts[i].y, verts[i].z}; }, mBody);
     }
+    // The receiver's mouth part is the source `suck` part (Proom joint): standing
+    // Pikmin are takeable and are held inside the bell (owner playtest 2026-09-30).
+    pc_p2_kurage_receiver_configure_own(actor, mBody.y * actor->mSRT.s.y);
     const bool collBound = mColl.bind(actor, p2kurageown::spheres(mVariant), p2kurageown::kSphereCount);
     if (collBound) mColl.follow(actor, p2flyer::Vec3{pos.x, pos.y, pos.z}, mYaw, mBody, actor->mSRT.s.y);
     actor->startFlying();
@@ -174,6 +188,17 @@ int P2KurageOwn::countStuck(BTeki* actor, bool& purple) const
     return n;
 }
 
+// World position of the `suck` part (Proom joint) in the pose drawn this frame.
+Vector3f P2KurageOwn::stomachAnchor(BTeki* actor) const
+{
+    const Vector3f pos = actor->mSRT.t;
+    const float scale = actor->mSRT.s.y;
+    const char* pose = p2kurageown::poseFor(mMotion);
+    const p2kurageown::ProomOffset o = p2kurageown::proomOffset(mVariant, pose ? pose : "wait");
+    const float c = std::cos(mYaw), s = std::sin(mYaw);
+    return Vector3f(pos.x + (c * o.x + s * o.z) * scale, pos.y + o.y * scale, pos.z + (-s * o.x + c * o.z) * scale);
+}
+
 // Kurage::suckPikmin(offset): per source tick, every eligible Pikmin under the
 // bell rolls fp12 and enters the suction. Returns via mSuckFull (>= ip11).
 void P2KurageOwn::suckPikmin(BTeki* actor, float mapY)
@@ -193,8 +218,10 @@ void P2KurageOwn::suckPikmin(BTeki* actor, float mapY)
         if (!(q.y > minY && q.y < pos.y)) continue;
         const float dx = q.x - pos.x, dz = q.z - pos.z;
         if (dx * dx + dz * dz >= range) continue;
+        ++mWinRolled;
         if (pc_p2_kurage_receiver_admit_for(actor, p)) {
             ++mSucked;
+            ++mWinAdmitted;
             pc_p2_sfx(mSource, mGenerator, p2sfx::Event::Attack, actor);
         }
     }
@@ -251,6 +278,7 @@ void P2KurageOwn::suckNavi(BTeki* actor, float mapY)
     if (!naviMgr || mCaptain) return;
     const auto g = p2kurageown::general(mVariant);
     const Vector3f pos = actor->mSRT.t;
+    const Vector3f anchor = stomachAnchor(actor);
     const float minY = mapY - 50.0f; // currY - offset(altitude) - 50
     const float range = g.attackRadius * g.attackRadius;
     for (Navi* n : pc_p2_navis()) {
@@ -264,11 +292,13 @@ void P2KurageOwn::suckNavi(BTeki* actor, float mapY)
             if (!mOwnerToken) mOwnerToken = (std::uint64_t(mGenerator) << 8) | 1u;
             if (!pc_demon_capture(n, actor, mMouth, mOwnerToken, unsigned(slot))) break;
             // sep = naviPos - 'suck' part position, in the body frame (yaw only).
+            // The part is the Proom joint of the drawn pose (stomachAnchor).
             const float c = std::cos(mYaw), s = std::sin(mYaw);
+            const float sx = q.x - anchor.x, sz = q.z - anchor.z;
             p2onikurage::MouthOffset off;
-            off.x = c * dx - s * dz;
-            off.y = q.y - pos.y;
-            off.z = s * dx + c * dz;
+            off.x = c * sx - s * sz;
+            off.y = q.y - anchor.y;
+            off.z = s * sx + c * sz;
             mSlots.capture(1, true);
             mSlots.setOffset(slot, off);
             mCaptain = n;
@@ -278,23 +308,41 @@ void P2KurageOwn::suckNavi(BTeki* actor, float mapY)
             std::printf("P2_ONIKURAGE_CAPTURE generator=%u source_id=%u captain=1 slot=%d navi_health=%.1f captures=%d "
                         "alt=%.1f\n", mGenerator, mSource, slot, n->mHealth, mCaptures, pos.y - mapY);
             std::fflush(stdout);
+            placeMouthJoint(actor);
+            logCaptainHold(actor);
             return;
         }
     }
 }
 
-// Hanging position of the held captain: the mouth part world position plus the slot offset
-// (body frame). pc_demon_follow_mouth (Navi::update) reads the joint translation.
+// Hanging position of the held captain: the `suck` part (Proom joint) world position plus the slot
+// offset (body frame), lifted by kCaptainHoldLift (static drawn pose, see pc_p2_kurage_proom.h).
+// pc_demon_follow_mouth (Navi::update) reads the joint translation.
 void P2KurageOwn::placeMouthJoint(BTeki* actor)
 {
     if (!mCaptain || !mMouth) return;
     const p2onikurage::MouthOffset& off = mSlots.slots()[mCaptainSlot].offset;
     const float c = std::cos(mYaw), s = std::sin(mYaw);
-    const Vector3f pos = actor->mSRT.t;
+    const Vector3f anchor = stomachAnchor(actor);
+    const float scale = actor->mSRT.s.y;
     mMouth->mJointMatrix.makeIdentity();
-    mMouth->mJointMatrix.mMtx[0][3] = pos.x + c * off.x + s * off.z;
-    mMouth->mJointMatrix.mMtx[1][3] = pos.y + off.y;
-    mMouth->mJointMatrix.mMtx[2][3] = pos.z - s * off.x + c * off.z;
+    mMouth->mJointMatrix.mMtx[0][3] = anchor.x + c * off.x + s * off.z;
+    mMouth->mJointMatrix.mMtx[1][3] = anchor.y + off.y + p2kurageown::kCaptainHoldLift * scale;
+    mMouth->mJointMatrix.mMtx[2][3] = anchor.z - s * off.x + c * off.z;
+}
+
+// Owner playtest 2026-09-30: log the held captain against the body centre.
+void P2KurageOwn::logCaptainHold(BTeki* actor) const
+{
+    if (!mCaptain || !mMouth) return;
+    const Vector3f pos = actor->mSRT.t;
+    const float heldY = mMouth->mJointMatrix.mMtx[1][3];
+    const float centreY = pos.y + mBody.y * actor->mSRT.s.y;
+    const float anchorY = stomachAnchor(actor).y;
+    std::printf("P2_KURAGE_HOLD kind=captain generator=%u source_id=%u held_y=%.1f proom_y=%.1f body_origin_y=%.1f "
+                "body_centre_y=%.1f held_minus_origin=%.1f held_minus_centre=%.1f\n",
+                mGenerator, mSource, heldY, anchorY, pos.y, centreY, heldY - pos.y, heldY - centreY);
+    std::fflush(stdout);
 }
 
 void P2KurageOwn::releaseCaptain(BTeki* actor, const char* why, bool drop)
@@ -334,6 +382,7 @@ void P2KurageOwn::updateCaptain(BTeki* actor, const p2kurage::Out& out)
     if (out.state == p2kurage::State::Attack && out.isSucking) {
         if (mSlots.advanceDefaultOffset(mCaptainSlot) == p2onikurage::Event::MouthReady) {
             std::printf("P2_ONIKURAGE_MOUTH_READY generator=%u source_id=%u slot=%d\n", mGenerator, mSource, mCaptainSlot);
+            logCaptainHold(actor);
             std::fflush(stdout);
         }
     }
@@ -454,6 +503,28 @@ void P2KurageOwn::sourceTick(BTeki* actor)
     if (flyPhys && !actor->isFlying()) actor->startFlying();
     else if (!flyPhys && actor->isFlying()) actor->finishFlying();
 
+    // Suction wind (visual only): from KEYEVENT_2 to KEYEVENT_1, upward from the ground
+    // under the body into the bell (owner playtest 2026-09-30).
+    {
+        const p2kuragefx::Command fx = p2kuragefx::suctionTick(mFx, out.isSucking, pos.x, pos.y, pos.z, mapY);
+        if (fx.kind != p2kuragefx::Kind::None) {
+            pc_p2_kurage_fx_emit(fx);
+            if (fx.windowStart) {
+                mWinRolled = mWinAdmitted = 0;
+                std::printf("P2_KURAGE_FX kind=suction phase=start generator=%u source_id=%u x=%.1f y=%.1f z=%.1f top_y=%.1f\n",
+                            mGenerator, mSource, fx.x, fx.y, fx.z, fx.topY);
+                std::fflush(stdout);
+            }
+        }
+        if (fx.windowEnd) {
+            std::printf("P2_KURAGE_FX kind=suction phase=end generator=%u source_id=%u emitted=%d\n", mGenerator,
+                        mSource, fx.emittedInWindow);
+            std::printf("P2_KURAGE_SUCK_WINDOW generator=%u source_id=%u in_range_rolls=%d admitted=%d held=%d max=%d\n",
+                        mGenerator, mSource, mWinRolled, mWinAdmitted, pc_p2_kurage_receiver_count_for(actor),
+                        p2kurageown::flightParms(mVariant).maxSuckPiki);
+            std::fflush(stdout);
+        }
+    }
     if (out.isSucking) {
         suckPikmin(actor, mapY);
         // OniKurage StateAttack::exec: the captain suction runs only while the Pikmin
@@ -540,7 +611,7 @@ bool P2KurageOwn::tick(BTeki* actor, float dt)
     if (mMouth) {
         mMouth->mPartType = PART_BoundSphere;
         mMouth->mRadius = p2kurageown::mouthRadius(mVariant);
-        mMouth->mCentre = pos;
+        mMouth->mCentre = stomachAnchor(actor);
         mMouth->mJointMatrix.makeIdentity();
     }
     placeMouthJoint(actor);

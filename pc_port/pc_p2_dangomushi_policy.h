@@ -33,9 +33,37 @@
 //                       50:3,57:2,65:3).
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <map>
 
 namespace p2dango {
+
+// ------------------------------------------------------------ clip per state
+// Source AnimID (DangoMushi.h:210-220) each state starts:
+//   StateStay    startBlendAnimation(Fly) then stopMotion() with the model
+//                hidden (DangoMushiState.cpp:92-105): the fall clip is FROZEN,
+//                never looped. The port has no hidden-model step, so Stay shows
+//                the idle Wait clip instead of the entrance.
+//   StateAppear  Fly, played once to KEYEVENT_END (:153-168, :192).
+//   StateWait    Wait   StateMove Move   StateAttack Attack   StateTurn Turn
+//   StateRecover Recover  StateFlick Attack2 (attack_2.bca)  StateDead Dead
+// Carry (DANGOANIM_Carry, Obj::startCarcassMotion) is the carcass clip.
+inline const char* stateClip(const char* state) {
+    static const char* const table[][2] = {
+        {"stay", "wait"},   {"appear", "fly"},    {"wait", "wait"},
+        {"move", "move"},   {"attack", "attack"}, {"turn", "turn"},
+        {"recover", "recover"}, {"flick", "attack_2"}, {"dead", "dead"},
+    };
+    for (const auto& row : table)
+        if (state && std::strcmp(row[0], state) == 0) return row[1];
+    return nullptr;
+}
+// Only Wait and Move are free-running loops. Fly (entrance), attack, turn,
+// recover, attack_2 and dead are one-shot or state-clocked. Looping Fly made a
+// Stay Crawbster fall in from above forever.
+inline bool clipLoops(const char* clip) {
+    return clip && (std::strcmp(clip, "wait") == 0 || std::strcmp(clip, "move") == 0);
+}
 
 constexpr float kWallCrashSpeed = 100.0f;   // DangoMushi.cpp:266
 constexpr float kWallCrashDot = -0.5f;      // DangoMushi.cpp:266
@@ -78,6 +106,7 @@ struct PressCandidate {
     std::uint64_t token = 0;
     float dx = 0.0f, dz = 0.0f;  // offset from the rolling body (XZ)
     bool grounded = false;       // source evt.mCollidingCreature->mFloorTriangle
+    float reach = 0.0f;          // target collision size added to the body radius
     bool alive = true;
 };
 
@@ -92,7 +121,8 @@ public:
     // Returns true when `c` must be pressed this frame.
     bool shouldPress(const PressCandidate& c, float now) {
         if (!c.alive || !c.grounded) return false;
-        if (c.dx * c.dx + c.dz * c.dz > mRadius * mRadius) return false;
+        const float limit = mRadius + c.reach;
+        if (c.dx * c.dx + c.dz * c.dz > limit * limit) return false;
         auto it = mLast.find(c.token);
         if (it != mLast.end() && now - it->second < mCooldown) return false;
         mLast[c.token] = now;
