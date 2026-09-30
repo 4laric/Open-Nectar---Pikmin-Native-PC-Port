@@ -119,6 +119,7 @@ bool pc_p2_kurage_visual_setup()
     }
     std::printf("P2_KURAGE_VISUAL_POSES optional_loaded=%d/%d\n", loaded, 8);
     std::fflush(stdout);
+    loadBank(false);
     sReady = true;
     return true;
 }
@@ -190,6 +191,7 @@ bool pc_p2_kurage_visual_setup_greater()
     }
     std::printf("P2_ONIKURAGE_VISUAL_POSES optional_loaded=%d/%d\n", loaded, 8);
     std::fflush(stdout);
+    loadBank(true);
     sReadyGreater = true;
     return true;
 }
