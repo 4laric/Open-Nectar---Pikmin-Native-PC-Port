@@ -1,5 +1,6 @@
 #include "pc_p2_frog.h"
 #include "pc_p2_frog_policy.h"
+#include "pc_p2_frog_flight.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_randomizer.h"
 #include "Material.h"
@@ -11,10 +12,12 @@
 #include "Graphics.h"
 #include "Camera.h"
 #include "gameflow.h"
+#include "pc_p2_pose_family.h"
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Interactions.h"
 #include "MapMgr.h"
 #include <fstream>
@@ -27,6 +30,8 @@ namespace {
 std::map<PelletView*,int> actors;
 const char* ids[]={"Frog","MaroFrog"};
 std::map<std::string,std::vector<Shape*>> animated[2];
+p2posefamily::Bank poseBank[2]{p2posefamily::Bank("FROG"),p2posefamily::Bank("FROG")}; // #895 interpolated draw
+p2posefamily::Actors poseVis;
 std::map<std::string,p2animation::Clip> timing[2];
 std::set<PelletView*> pressing,bitteredFrogs,drawn,drawnCorpse;
 
@@ -45,7 +50,6 @@ constexpr int FLEE_STUCK_MIN = 3;          // source mShakeOffSticking1 first ti
 constexpr float JUMP_LAUNCH_S = 8.0f / 30.0f; // type1 key event 2 (frame 8)
 constexpr float FLICK_KNOCKBACK = 0.0f;
 constexpr float FLICK_DAMAGE = 0.0f;
-constexpr float APEX_GRAVITY = 2000.0f;    // port: apex = jumpSpeed^2/2g
 
 struct FrogFsm {
     int kind = 0;
@@ -55,11 +59,8 @@ struct FrogFsm {
     Vector3f home;
     Vector3f targetPos;
     bool targetValid = false;
-    float airTimer = 0.0f;
     float groundY = 0.0f;
-    float hopApex = 0.0f;
-    float hopDist = 0.0f;
-    float hopDirX = 0.0f, hopDirZ = 0.0f;
+    p2frog::Flight flight;
     bool launched = false;
     bool escaped = false;
     bool pressDone = false;
@@ -93,36 +94,18 @@ bool logPress(BTeki* actor,int kind){
 }
 bool isBittered(PelletView* view){return bitteredFrogs.count(view)!=0;}
 void loadAnimation(std::vector<p2animation::Clip> (&banks)[2]){
+    // #895: every clip goes through the compact loader (a few Shapes per clip
+    // plus decoded vectors), so dense banks fit the resident budget; the
+    // Shapes stay the nearest-pose fallback. Fail-closed as before.
     size_t total=0;
-    for(int kind=0;kind<2;++kind){std::vector<unsigned char> reference;
-        for(const auto& clip:banks[kind]){size_t clipBytes=0;
-            for(int i=0;i<clip.count;++i){char path[192];std::snprintf(path,sizeof(path),"assets/dataDir/courses/pikmin2room/frog_%s_%s_%02d.mod",ids[kind],clip.name.c_str(),i);
-                std::ifstream file(path,std::ios::binary|std::ios::ate);if(!file)std::abort();auto size=file.tellg();
-                if(size<=0||size>512*1024)std::abort();clipBytes+=size_t(size);total+=size_t(size);
-                if(clipBytes>512*1024||total>10*1024*1024)std::abort();file.seekg(0);
-                std::vector<unsigned char> bytes(size_t(size),0),resources;
-                if(!file.read(reinterpret_cast<char*>(bytes.data()),size)||!p2animation::resources(bytes,resources))std::abort();
-                if(!reference.empty()&&reference!=resources)std::abort();reference=resources;
-            }
-        }
-    }
-    for(int kind=0;kind<2;++kind){Shape* shared=nullptr;
+    for(int kind=0;kind<2;++kind){p2poseload::Shared shared;
         for(const auto& clip:banks[kind]){timing[kind][clip.name]=clip;
-            for(int i=0;i<clip.count;++i){char path[160];std::snprintf(path,sizeof(path),"courses/pikmin2room/frog_%s_%s_%02d.mod",ids[kind],clip.name.c_str(),i);
-                Shape* shape=gameflow.loadShape(path,true);if(!shape)std::abort();
-                if(!shared){shared=shape;for(int t=0;t<shape->mTexAttrCount;++t)if(shape->mTexAttrList[t].mTexture)shape->mTexAttrList[t].mTexture->attach();}
-                else{
-                    if(shape->mMaterialCount!=shared->mMaterialCount||shape->mTexAttrCount!=shared->mTexAttrCount||shape->mTevInfoCount!=shared->mTevInfoCount)std::abort();
-                    for(int j=0;j<shape->mTotalMatpolyCount;++j){auto* poly=shape->mMatpolyList[j];if(!poly||!poly->mMaterial)continue;int material=-1;
-                        for(int m=0;m<shape->mMaterialCount;++m)if(poly->mMaterial==&shape->mMaterialList[m])material=m;
-                        if(material<0)std::abort();poly->mMaterial=&shared->mMaterialList[material];}
-                    shape->mMaterialList=shared->mMaterialList;shape->mTexAttrList=shared->mTexAttrList;shape->mTevInfoList=shared->mTevInfoList;
-                }
-                animated[kind][clip.name].push_back(shape);
-            }
+            std::string error;
+            if(!p2posefamily::loadFamilyClip(poseBank[kind],clip.name,std::string("frog_")+ids[kind]+"_"+clip.name,clip.count,clip.duration,clip.frames,shared,total,animated[kind][clip.name],error)){
+                std::printf("P2_FROG_BANK_INVALID species=%s clip=%s reason=%s\n",ids[kind],clip.name.c_str(),error.c_str());std::fflush(stdout);std::abort();}
         }
     }
-    std::printf("P2_FROG_BANK_READY mod_bytes=%zu gameplay=P1_unchanged\n",total);
+    std::printf("P2_FROG_BANK_READY mod_bytes=%zu resident=1 gameplay=P1_unchanged\n",total);
 }
 
 void stop(BTeki* a){a->inputDrive(Vector3f(0.0f,0.0f,0.0f));a->mVelocity.x=0.0f;a->mVelocity.y=0.0f;a->mVelocity.z=0.0f;}
@@ -148,7 +131,7 @@ void turnTo(BTeki* a,FrogFsm& s,const Vector3f& target,float dt){
 }
 Creature* nearestTarget(const Vector3f& pos,float sight){
     Creature* best=nullptr;float bestSq=sight*sight;
-    if(naviMgr){Navi* n=naviMgr->getNavi();if(n&&n->isAlive()){const Vector3f p=n->getPosition();
+    for(Navi* n:pc_p2_navis()){if(n->isAlive()){const Vector3f p=n->getPosition();
         const float dx=p.x-pos.x,dz=p.z-pos.z,d=dx*dx+dz*dz;if(d<bestSq){bestSq=d;best=n;}}}
     if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(!p||!p->isAlive())continue;
         const Vector3f q=p->getPosition();const float dx=q.x-pos.x,dz=q.z-pos.z,d=dx*dx+dz*dz;if(d<bestSq){bestSq=d;best=p;}}}
@@ -181,14 +164,14 @@ bool shouldFlick(BTeki* actor){return stuckPikminCount(actor)>=FLEE_STUCK_MIN;}
 // MaroFrog attackNaviPosition: an in-range living captain overrides the jump
 // landing point (the source captain retarget).
 void retargetNavi(BTeki* actor,FrogFsm& s){
-    // Source attackNaviPosition iterates every captain (P2 two-captain); the P1
-    // host exposes one active Navi, so this matches nearestTarget and uses
-    // getNavi() rather than an all-Navi iterator.
+    // Source attackNaviPosition iterates every captain with no break
+    // (MaroFrog.cpp:21-34): the last alive in-range captain in index order wins.
     if(s.kind!=1||!naviMgr)return;
-    Navi* n=naviMgr->getNavi();
-    if(!n||!n->isAlive())return;
-    const Vector3f np=n->getPosition();
-    if(distXZ(actor->getPosition(),np)<p2frog::params(s.kind).attackRange){s.targetPos=np;s.targetValid=true;}
+    for(Navi* n:pc_p2_navis()){
+        if(!n->isAlive())continue;
+        const Vector3f np=n->getPosition();
+        if(distXZ(actor->getPosition(),np)<p2frog::params(s.kind).attackRange){s.targetPos=np;s.targetValid=true;}
+    }
 }
 // Source StateJump KEYEVENT_2: flickNearbyNavi + flickNearbyPikmin (non-damaging
 // adjacent shake; the P2 water branch is absent on the dry P1 host).
@@ -198,7 +181,7 @@ void doJumpFlick(BTeki* actor,FrogFsm& s){
     int hit=0;
     if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){Piki* q=static_cast<Piki*>(*it);if(!q||!q->isAlive())continue;
         if(distXZ(q->getPosition(),pos)<range){if(q->stimulate(InteractFlick(actor,FLICK_KNOCKBACK,FLICK_DAMAGE,FLICK_BACKWARDS_ANGLE)))++hit;}}}
-    if(naviMgr){Navi* n=naviMgr->getNavi();if(n&&n->isAlive()&&distXZ(n->getPosition(),pos)<range)
+    for(Navi* n:pc_p2_navis()){if(n->isAlive()&&distXZ(n->getPosition(),pos)<range)
         if(n->stimulate(InteractFlick(actor,FLICK_KNOCKBACK,FLICK_DAMAGE,FLICK_BACKWARDS_ANGLE)))++hit;}
     std::printf("P2_FROG_JUMP_FLICK species=%s hit=%d\n",ids[s.kind],hit);std::fflush(stdout);
 }
@@ -244,29 +227,21 @@ void launchHop(BTeki* actor,FrogFsm& s){
     const Vector3f pos=actor->getPosition();
     const p2frog::Params& p=p2frog::params(s.kind);
     s.groundY=probeFloorY(pos,s.groundY);
-    s.hopApex=(p.jumpSpeed*p.jumpSpeed)/APEX_GRAVITY;
     const float dx=s.targetPos.x-pos.x,dz=s.targetPos.z-pos.z;
     const float len=std::sqrt(dx*dx+dz*dz);
-    s.hopDist=len;
-    if(len>0.0001f){s.hopDirX=dx/len;s.hopDirZ=dz/len;}else{s.hopDirX=0.0f;s.hopDirZ=0.0f;}
-    s.airTimer=0.0f;
+    s.flight=p2frog::launchFlight(pos.x,s.groundY,pos.z,s.targetPos.x,s.targetPos.z,p.airTime,p.jumpSpeed);
     if(len>0.0001f)s.heading=std::atan2(dx,dz);
     actor->setDirection(s.heading);
 }
 void advanceHop(BTeki* actor,FrogFsm& s,float dt){
     const p2frog::Params& p=p2frog::params(s.kind);
-    s.airTimer+=dt;
-    const float half=p.airTime*0.5f;
-    Vector3f& pos=actor->getPosition();
-    if(s.hopDist>0.0001f){const float speed=s.hopDist/p.airTime;
-        pos.x+=s.hopDirX*speed*dt;pos.z+=s.hopDirZ*speed*dt;}
-    if(s.airTimer<half){const float u=s.airTimer/half;pos.y=s.groundY+s.hopApex*std::sin(0.5f*PI_F*u);}
-    else if(s.airTimer<p.airTime){const float u=(s.airTimer-half)/half;pos.y=s.groundY+s.hopApex*std::cos(0.5f*PI_F*u);}
-    else{pos.y=s.groundY;}
+    // Own the complete airborne position: host physics ran before this update.
+    p2frog::advanceFlying(s.flight,s.targetPos.x,s.targetPos.z,p.airTime,dt);
+    actor->getPosition().set(s.flight.x,s.flight.y,s.flight.z);
 }
 }
-void pc_p2_frog_reset(){actors.clear();fsms.clear();pressing.clear();bitteredFrogs.clear();drawn.clear();drawnCorpse.clear();for(auto& b:animated)b.clear();for(auto& b:timing)b.clear();ready=false;}
-void pc_p2_frog_forget(BTeki* actor){auto* v=static_cast<PelletView*>(actor);pc_randomizer_p2_forget_source(v);actors.erase(v);fsms.erase(v);pressing.erase(v);bitteredFrogs.erase(v);drawn.erase(v);drawnCorpse.erase(v);}
+void pc_p2_frog_reset(){for(auto& b:poseBank)b.reset();poseVis.clear();actors.clear();fsms.clear();pressing.clear();bitteredFrogs.clear();drawn.clear();drawnCorpse.clear();for(auto& b:animated)b.clear();for(auto& b:timing)b.clear();ready=false;}
+void pc_p2_frog_forget(BTeki* actor){poseVis.forget(actor);auto* v=static_cast<PelletView*>(actor);pc_randomizer_p2_forget_source(v);actors.erase(v);fsms.erase(v);pressing.erase(v);bitteredFrogs.erase(v);drawn.erase(v);drawnCorpse.erase(v);}
 void pc_p2_frog_set_bittered(BTeki* actor,bool bittered){auto* view=static_cast<PelletView*>(actor);if(!actors.count(view))return;if(bittered)bitteredFrogs.insert(view);else bitteredFrogs.erase(view);}
 const char* pc_p2_frog_name(PelletView* view){auto i=actors.find(view);return i==actors.end()?nullptr:ids[i->second];}
 float pc_p2_frog_param_f(const BTeki* actor,int idx,float fallback){
@@ -302,7 +277,13 @@ void pc_p2_frog_setup(){
     Iterator it(tekiMgr);CI_LOOP(it){Teki* teki=static_cast<Teki*>(*it);if(!teki||!teki->mGenerator)continue;
         const unsigned token = bridge ? pc_p2_campaign_token(teki) : teki->mGenerator->_70;
         auto found=wanted.find(token);if(found==wanted.end())continue;
-        int kind=found->second;if(!seen.insert(found->first).second)std::abort();if(teki->mTekiType!=(kind?TEKI_Frow:TEKI_Frog))std::abort();
+        int kind=found->second;
+        if(teki->mTekiType!=(kind?TEKI_Frow:TEKI_Frog)){ // #948: wrong vehicle: refuse with a reason, never abort a campaign
+            if(!bridge)std::abort();
+            std::printf("P2_FROG_UNBOUND generator=%u source_id=%u type=%d reason=host_type_mismatch\n",token,kind?18u:17u,int(teki->mTekiType));std::fflush(stdout);continue;}
+        if(!seen.insert(found->first).second){
+            if(!bridge)std::abort();
+            std::printf("P2_FROG_UNBOUND generator=%u source_id=%u reason=duplicate_generator\n",token,kind?18u:17u);std::fflush(stdout);continue;}
         actors[static_cast<PelletView*>(teki)]=kind;
         teki->mHealth=p2frog::params(kind).health;
         FrogFsm& f=fsms[static_cast<PelletView*>(teki)];
@@ -324,8 +305,8 @@ void pc_p2_frog_setup(){
         std::fflush(stdout);
     }
     if(seen.size()!=wanted.size()){
-        std::printf("P2_FROG_ERROR missing_actor wanted=%zu found=%zu\n",wanted.size(),seen.size());
-        std::abort();
+        std::printf("P2_FROG_MISSING wanted=%zu found=%zu\n",wanted.size(),seen.size());std::fflush(stdout);
+        if(!bridge)std::abort();
     }
     loadAnimation(banks);ready=true;
 }
@@ -404,7 +385,7 @@ void pc_p2_frog_update(BTeki* actor){
     }
     case FRG_JUMP:{
         stop(actor);
-        actor->getPosition().y=s.groundY;
+        if(!s.launched)actor->getPosition().y=s.groundY;
         if(!s.jumpEntryChecked){
             s.jumpEntryChecked=true;
             if(stuckPikminCount(actor)>0&&rand01(s)<p.jumpFail){transition(actor,s,FRG_FAIL,"damage",gen);break;}
@@ -412,21 +393,32 @@ void pc_p2_frog_update(BTeki* actor){
         if(!s.launched&&s.stateTime>=JUMP_LAUNCH_S){
             s.launched=true;launchHop(actor,s);doJumpFlick(actor,s);
         }
+        if(s.launched)advanceHop(actor,s,dt);
         if(s.stateTime>=clipSeconds(s.kind,"type1"))transition(actor,s,FRG_JUMPWAIT,"wait2",gen);
         break;
     }
     case FRG_JUMPWAIT:{
+        stop(actor);
         advanceHop(actor,s,dt);
-        if(s.airTimer>=p.airTime*0.5f||s.stateTime>=clipSeconds(s.kind,"wait2"))transition(actor,s,FRG_FALL,"type2",gen);
+        // Retail wait2 loops frames 18..19 until mAirTime expires, then plays
+        // the remaining tail before Fall applies its separate downward speed.
+        if(p2frog::readyToFall(s.flight.elapsed,s.stateTime,p.airTime,clipSeconds(s.kind,"wait2"))){
+            p2frog::startFall(s.flight,p.fallSpeed);
+            transition(actor,s,FRG_FALL,"type2",gen);
+        }
         break;
     }
     case FRG_FALL:{
-        advanceHop(actor,s,dt);
+        stop(actor);
         // Source StateFall::exec lands on floor-triangle contact (FrogState.cpp:341),
         // not on a timer: transit once the probed floor reaches the falling frog.
-        // The airTimer bound stays as a fallback for a hop with no floor below.
-        const float floorY=probeFloorY(actor->getPosition(),s.groundY);
-        if(floorY>=actor->getPosition().y||s.airTimer>=p.airTime){
+        // Sample the destination, not the takeoff ground height.
+        const Vector3f landing(s.flight.x,s.flight.y,s.flight.z);
+        const float floorY=probeFloorY(landing,s.groundY);
+        const bool landed=p2frog::advanceFalling(s.flight,floorY,dt);
+        actor->getPosition().set(s.flight.x,s.flight.y,s.flight.z);
+        if(landed){
+            s.groundY=floorY;
             actor->getPosition().y=s.groundY;transition(actor,s,FRG_ATTACK,"attack",gen);
         }
         break;
@@ -521,6 +513,10 @@ bool pc_p2_frog_draw(BTeki* actor,Graphics& gfx,const Matrix4f& matrix,bool corp
     if(name){
         float phase=corpse?1.0f:(ft!=fsms.end()?ft->second.phase:0.0f);
         shape=animated[kind].at(name).at(timing[kind].at(name).index(phase,corpse));
+        // #895: lerp + crossfade into a private Shape; nearest pose stays the fallback.
+        const p2animation::Clip& clipTiming=timing[kind].at(name);
+        const float sourceFrame=corpse?float(clipTiming.duration-1):std::max(0.f,std::min(1.f,phase))*float(clipTiming.duration-1);
+        if(Shape* smooth=poseVis.draw(actor,poseBank[kind],name,sourceFrame,actor->mGenerator?pc_p2_campaign_token(actor):0u))shape=smooth;
     }
     shape->updateAnim(gfx,matrix,nullptr,actor);
     // lane09 specular-instrumentation hook: bracket the family's own draw so the

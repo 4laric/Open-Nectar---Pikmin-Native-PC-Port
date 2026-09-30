@@ -6,6 +6,9 @@
 #include "TekiConditions.h"
 #include "sysNew.h"
 #include "teki.h"
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+#include "pc_p2_otakara.h"
+#endif
 
 /**
  * @todo: Documentation
@@ -252,6 +255,13 @@ bool TaiSmashedAction::actByEvent(immut TekiEvent& event)
 		Creature* other = event.mOther;
 		if (other->mObjType == OBJTYPE_Piki && static_cast<Piki*>(other)->getState() == PIKISTATE_Flying) {
 			PRINT_NAKATA("TaiSmashedAction::actByEvent:FLYING:%08x\n", &teki);
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+			// #884: a thrown Pikmin landing on a registered Dweevil is the source
+			// press (no pressCallBack override): no smash transit, the Pikmin latches.
+			if (pc_p2_otakara_smashed(teki, other)) {
+				return false;
+			}
+#endif
 			return true;
 		}
 	}

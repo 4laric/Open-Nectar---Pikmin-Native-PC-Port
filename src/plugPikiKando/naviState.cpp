@@ -5,6 +5,7 @@
 #endif
 #include "pc_p2_purple.h"
 #include "pc_p2_white.h"
+#include "pc_p2_breadbug_teki.h"
 #include "NaviState.h"
 #if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_det.h"
@@ -12,6 +13,7 @@
 #include "pc_randomizer.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_whistle.h"
+#include "pc_whistle_pluck.h"
 #include <chrono>
 #endif
 #if defined(PIKI_PC_PORT)
@@ -844,7 +846,11 @@ void NaviWalkState::exec(Navi* navi)
 			{
 				Creature* teki = *tekiIter;
 				if (!roughCull(teki, navi, teki->getCentreSize() + navi->getCentreSize() + 10.0f) && teki->isAlive() && teki->isVisible()
-				    && !teki->isFlying() && teki->isOrganic()) {
+				    && !teki->isFlying() && teki->isOrganic()
+#if defined(PIKI_PC_PORT)
+				    && !pc_p2_breadbug_teki_untargetable(teki, "navi_attack_entry") // #898
+#endif
+				) {
 					Vector3f diff = teki->mSRT.t - navi->mSRT.t;
 					f32 unused    = atan2f(diff.x, diff.z);
 					if (diff.length() <= teki->getCentreSize() + navi->getCentreSize() + 10.0f) {
@@ -1793,6 +1799,7 @@ void NaviGatherState::init(Navi* navi)
 	    + navi->mWhistleRadiusFrac * (NAVI_WHISTLE_MAX_RADIUS(navi) - C_NAVI_PARM(navi, mWhistleMinRadius)))
 	    * pc_randomizer_benefit_multiplier(PC_BENEFIT_WHISTLE);
 	if (!gameflow.mPauseAll) navi->callPikis(mWhistleCallRadius, mTapState.recallWorkers);
+	mNextWhistlePluckTime = pc_whistle_pluck(navi, mWhistleCallRadius) ? PC_WHISTLE_PLUCK_INTERVAL : 0.0f;
 #endif
 	rumbleMgr->start(RUMBLE_Unk3, navi->mNaviID, nullptr);
 }
@@ -1847,6 +1854,9 @@ void NaviGatherState::exec(Navi* navi)
 	    * pc_randomizer_benefit_multiplier(PC_BENEFIT_WHISTLE);
 	if (!gameflow.mPauseAll) {
 		navi->callPikis(mWhistleCallRadius, (down && mTapState.recallWorkers) || pc_whistle_recall_workers(navi->mWhistleTimer, down));
+		if (down && navi->mWhistleTimer >= mNextWhistlePluckTime && pc_whistle_pluck(navi, mWhistleCallRadius)) {
+			mNextWhistlePluckTime = navi->mWhistleTimer + PC_WHISTLE_PLUCK_INTERVAL;
+		}
 	} else {
 		navi->callDebugs(mWhistleCallRadius);
 	}
@@ -3236,6 +3246,11 @@ void NaviAttackState::exec(Navi* navi)
 	CI_LOOP(it)
 	{
 		Creature* teki = *it;
+#if defined(PIKI_PC_PORT)
+		if (pc_p2_breadbug_teki_untargetable(teki, "navi_punch")) {
+			continue; // #898
+		}
+#endif
 		if (teki->isAlive() && teki->isVisible() && !teki->isFlying()) {
 			Vector3f diff = teki->mSRT.t - navi->mSRT.t;
 			f32 angle     = atan2f(diff.x, diff.z);

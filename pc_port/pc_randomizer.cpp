@@ -1,3 +1,4 @@
+#include "pc_p2_ship_store.h"
 #include "pc_p2_campaign_policy.h"
 #include "pc_p2_proxy.h"
 #include "pc_randomizer.h"
@@ -118,6 +119,12 @@ int baseColorStats[3][4] = {{100, 100, 100, 1}, {100, 100, 100, 1}, {100, 100, 1
 unsigned statUpgrades[3][4] = {};
 bool benefitItems = false, bombDeliveries = false, combinedCaptain = false, bombTraps = false, proggTraps = false, prereleaseTraps = false;
 unsigned benefits[9] = {}, consumedBenefits[7] = {};
+// Level-style rewards: never consumed, only raised by newer state.
+bool maturityItems = false;
+unsigned maturity[3] = {};
+unsigned dayLengthItems = 0, dayLengthStep = 0, dayLength = 0;
+// Whistle Pluck item: the seed carries it, and once received it stays on.
+bool whistlePluckItem = false, whistlePluck = false;
 // DeathLink: the first state value read is the baseline, so links received while
 // the game was closed never replay. Pending links are bounded; each applies once.
 unsigned deathLinkUnit = 0, deathLinksSeen = 0, deathLinksPending = 0, deathsReported = 0;
@@ -128,6 +135,7 @@ std::filesystem::path benefitJournal, campaignDirectory;
 std::string campaignBlock;
 unsigned long long campaignGeneration = 0;
 bool campaignResumed = false;
+bool purpleCampaign = false;
 int colorStats[3][4] = {{100, 100, 100, 1}, {100, 100, 100, 1}, {100, 100, 100, 1}};
 std::set<unsigned> checks;
 std::string token, fingerprint, saveRoot;
@@ -176,7 +184,9 @@ CkptScanStatus scanCampaignCheckpoint(CkptScan& s) {
     unsigned long long generation; uint64_t hash;
     bool valid = bool(meta >> magic >> savedFingerprint >> generation);
     for (int i = 0; i < (prereleaseTraps ? 7 : proggTraps ? 6 : bombTraps ? 5 : bombDeliveries ? 4 : 3); ++i) valid = valid && bool(meta >> s.used[i]) && s.used[i] <= checkCount;
-    if (!valid || !(meta >> hash) || magic != (prereleaseTraps ? "PIKMIN_CAMPAIGN_5" : proggTraps ? "PIKMIN_CAMPAIGN_4" : bombTraps ? "PIKMIN_CAMPAIGN_3" : bombDeliveries ? "PIKMIN_CAMPAIGN_2" : "PIKMIN_CAMPAIGN_1")
+    if (purpleCampaign) valid = valid && s.ship.read(meta) && s.ship.counts[1][0] == 0
+        && s.ship.counts[1][1] == 0 && s.ship.counts[1][2] == 0;
+    if (!valid || !(meta >> hash) || magic != (purpleCampaign ? "PIKMIN_CAMPAIGN_PURPLE_1" : prereleaseTraps ? "PIKMIN_CAMPAIGN_5" : proggTraps ? "PIKMIN_CAMPAIGN_4" : bombTraps ? "PIKMIN_CAMPAIGN_3" : bombDeliveries ? "PIKMIN_CAMPAIGN_2" : "PIKMIN_CAMPAIGN_1")
         || savedFingerprint != fingerprint || generation != s.generation || (meta >> extra))
         return kCkptMismatch;
     s.block.resize(32768);
@@ -200,6 +210,7 @@ void loadCampaignCheckpoint() {
     if (st != kCkptOk) fail(ckptScanReason(st));
     campaignBlock = s.block;
     for (int i=0; i<7; ++i) consumedBenefits[i] = s.used[i];
+    p2ship::stock = s.ship;
     campaignResumed = true;
 }
 // B2: a netplay session is configured (the session parses argv/env lazily;
@@ -243,6 +254,12 @@ void set_aside_stale_checkpoint() {
     }
     std::fflush(stdout);
 }
+// Upper bound on ENEMY_P2 bindings per seed. Bindings live in a std::map, so
+// this is a parser sanity limit, not a table size; it must cover every
+// ordinary campaign generator (72), the holder slots and the boss arenas the
+// root placement document can bind (#948). Root mirrors it in
+// experimental/pikmin2_seed_bridge.py (P2_MAX_BINDINGS).
+static const unsigned kP2MaxBindings = 256;
 bool hex64(const std::string& s) {
     return s.size() == 64 && s.find_first_not_of("0123456789abcdef") == std::string::npos;
 }
@@ -274,6 +291,10 @@ struct ParsedRand {
     unsigned stats[3][4] = {};
     unsigned benefits[9] = {};
     unsigned emperor = 0, deathLinks = 0;
+    // (#982) main's Progressive Maturity / Day Length / Whistle Pluck items ride the
+    // same snapshot so both peers apply them at the same tick.
+    unsigned maturity[3] = {};
+    unsigned dayLength = 0, whistlePluck = 0;
 };
 // Netplay publish generation. The first published snapshot is gen 1; gen 0
 // never goes on the wire (the reassembler drops it as stale).
@@ -390,6 +411,25 @@ void parse_state_stream(std::istream& input, ParsedRand& out) {
                 fail("invalid or retracted benefit receipt");
         parsed = bool(input >> end);
     }
+    unsigned newMaturity[3] = {};
+    if (maturityItems) {
+        if (!parsed || end != "MATURITY") fail("missing maturity state");
+        for (int c = 0; c < 3; ++c)
+            if (!(input >> newMaturity[c]) || newMaturity[c] > 2 || newMaturity[c] < maturity[c]) fail("invalid or retracted maturity");
+        parsed = bool(input >> end);
+    }
+    unsigned newDayLength = 0;
+    if (dayLengthItems) {
+        if (!parsed || end != "DAYLENGTH" || !(input >> newDayLength) || newDayLength > dayLengthItems || newDayLength < dayLength)
+            fail("invalid or retracted day length");
+        parsed = bool(input >> end);
+    }
+    unsigned newWhistlePluck = 0;
+    if (whistlePluckItem) {
+        if (!parsed || end != "WHISTLEPLUCK" || !(input >> newWhistlePluck) || newWhistlePluck > 1 || (whistlePluck && !newWhistlePluck))
+            fail("invalid or retracted whistle pluck");
+        parsed = bool(input >> end);
+    }
     unsigned newEmperor = 0;
     if (emperorGoal) {
         if (!parsed || end != "EMPEROR" || !(input >> newEmperor) || newEmperor > 1 || (newEmperor && newRepairs < 25)) fail("invalid Emperor state");
@@ -414,6 +454,9 @@ void parse_state_stream(std::istream& input, ParsedRand& out) {
     out.checks = newChecks;
     for (int c = 0; c < 3; ++c) for (int stat = 0; stat < 4; ++stat) out.stats[c][stat] = newStats[c][stat];
     for (int kind = 0; kind < 9; ++kind) out.benefits[kind] = newBenefits[kind];
+    for (int c = 0; c < 3; ++c) out.maturity[c] = newMaturity[c];
+    out.dayLength = newDayLength;
+    out.whistlePluck = newWhistlePluck;
     out.emperor = newEmperor;
     out.deathLinks = newDeathLinks;
 }
@@ -425,6 +468,14 @@ void apply_parsed(const ParsedRand& p) {
         colorStats[c][stat] = baseColorStats[c][stat] + (stat == 3 ? p.stats[c][stat] : 25 * p.stats[c][stat]);
     }
     for (int kind = 0; kind < 9; ++kind) benefits[kind] = p.benefits[kind];
+    for (int c = 0; c < 3; ++c) {
+        if (maturity[c] != p.maturity[c]) std::printf("[Pikmin Randomizer] MATURITY color=%d tier=%u\n", c, p.maturity[c]);
+        maturity[c] = p.maturity[c];
+    }
+    if (dayLength != p.dayLength) std::printf("[Pikmin Randomizer] DAY_LENGTH count=%u percent=%u\n", p.dayLength, 100 + dayLengthStep * p.dayLength);
+    dayLength = p.dayLength;
+    if (!whistlePluck && p.whistlePluck) std::printf("[Pikmin Randomizer] WHISTLE_PLUCK received\n");
+    whistlePluck = p.whistlePluck != 0;
     // B1: in outbox mode a streamed latch or DeathLink rise also becomes a
     // client mirror event (EMPEROR / DEATHLINK). Sim state is untouched.
     const bool outbox = outbox_active();
@@ -477,6 +528,8 @@ void net_from_parsed(const ParsedRand& p, uint32_t gen, pc_randstate::PcRandStat
     // instead of a silent truncation divergence.
     if (p.deathLinks > 0xFFFFu) fail("netplay state stream DeathLink count exceeds u16");
     if (checkCount > 255u) fail("netplay state stream benefit range exceeds u8");
+    for (int c = 0; c < 3; ++c) if (p.maturity[c] > 2) fail("netplay state stream maturity tier exceeds 2 bits");
+    if (p.dayLength > 10 || p.whistlePluck > 1) fail("netplay state stream day length / whistle pluck out of range");
     if (checkCount > pc_randstate::kCheckSlots) fail("netplay state stream catalog exceeds wire bitset");
     st.ver = pc_randstate::kVersion;
     st.ready = (uint8_t)(p.ready != 0 ? 1 : 0);
@@ -494,7 +547,9 @@ void net_from_parsed(const ParsedRand& p, uint32_t gen, pc_randstate::PcRandStat
     }
     for (int c = 0; c < 3; ++c) for (int s = 0; s < 4; ++s) st.stats[c * 4 + s] = (uint8_t)p.stats[c][s];
     for (int kind = 0; kind < 9; ++kind) st.benefits[kind] = (uint8_t)p.benefits[kind];
-    st.rsv[0] = st.rsv[1] = st.rsv[2] = 0;
+    st.maturity = (uint8_t)(p.maturity[0] | (p.maturity[1] << 2) | (p.maturity[2] << 4));
+    st.dayLength = (uint8_t)p.dayLength;
+    st.whistlePluck = (uint8_t)(p.whistlePluck != 0 ? 1 : 0);
     st.gen = gen; // stamped by the publisher (0 = unstamped)
     st.crc = 0;   // computed by encode()
 }
@@ -608,6 +663,23 @@ bool pc_randomizer_init(int argc, char** argv) {
         prereleaseTraps = ((mode - 1) & 16) != 0;
         input >> end;
     }
+    if (end == "MATURITY") {
+        unsigned version;
+        if (!benefitItems || !(input >> version) || version != 1) fail("invalid maturity mode");
+        maturityItems = true;
+        input >> end;
+    }
+    if (end == "DAY_LENGTH") {
+        if (!benefitItems || !(input >> dayLengthItems >> dayLengthStep) || dayLengthItems < 1 || dayLengthItems > 10
+            || dayLengthStep < 10 || dayLengthStep > 100 || dayLengthStep % 5) fail("invalid day length mode");
+        input >> end;
+    }
+    if (end == "WHISTLE_PLUCK") {
+        unsigned version;
+        if (!benefitItems || !(input >> version) || version != 1) fail("invalid whistle pluck mode");
+        whistlePluckItem = true;
+        input >> end;
+    }
     if (end == "DEATHLINK") {
         if (schema != 9 || !(input >> deathLinkUnit) || deathLinkUnit < 1 || deathLinkUnit > 100) fail("invalid DeathLink unit");
         input >> end;
@@ -617,7 +689,7 @@ bool pc_randomizer_init(int argc, char** argv) {
         if (schema != 9 || enemyMask || slotEnemies || campaignEnemies || groupEnemies)
             fail("P2 enemy bridge cannot mix other enemy layouts");
         if (!(input >> protocol >> revision >> count) || protocol != 1
-            || revision != randomizerP2RosterRevision || count == 0 || count > 64)
+            || revision != randomizerP2RosterRevision || count == 0 || count > kP2MaxBindings)
             fail("incompatible P2 enemy roster or protocol version");
         for (unsigned i = 0; i < count; ++i) {
             std::string target; unsigned sourceId;
@@ -634,7 +706,7 @@ bool pc_randomizer_init(int argc, char** argv) {
             p2ProxyTier = true;
             input >> end;
         }
-        if (end != "END") fail("P2 enemy bridge cannot mix other enemy layouts");
+        if (end != "END" && end != "PURPLE") fail("P2 enemy bridge cannot mix other enemy layouts");
     }
     if (end == "ENEMY_CAMPAIGN") {
         unsigned version, count, miniboss; std::string catalog;
@@ -691,6 +763,12 @@ bool pc_randomizer_init(int argc, char** argv) {
             groupAssignments[i] = species;
         }
         groupEnemies = true;
+        input >> end;
+    }
+    if (end == "PURPLE") {
+        unsigned version;
+        if (!p2EnemyBridge || !(input >> version) || version != 1) fail("Purple requires P2 campaign bridge version 1");
+        purpleCampaign = true;
         input >> end;
     }
     if (end != "END") fail("unsupported or malformed bootstrap");
@@ -768,6 +846,9 @@ bool pc_randomizer_init(int argc, char** argv) {
     if (bombTraps) hello << " bomb-ambush-v1";
     if (proggTraps) hello << " progg-ambush-v1";
     if (prereleaseTraps) hello << " prerelease-trap-v1";
+    if (maturityItems) hello << " progressive-maturity-v1";
+    if (dayLengthItems) hello << " progressive-day-length-v1";
+    if (whistlePluckItem) hello << " whistle-pluck-item-v1";
     if (slotEnemies) hello << " enemy-slots-v1";
     if (groupEnemies) hello << " enemy-groups-v1";
     if (campaignEnemies) hello << " enemy-campaign-v1";
@@ -1081,6 +1162,14 @@ bool pc_randomizer_apply_net_state(const pc_randstate::PcRandState& st) {
             || ((kind < 3 || kind >= 5) && st.benefits[kind] < consumedBenefits[consumedIndex(static_cast<PcBenefit>(kind))]))
             fail("invalid or retracted net benefit receipt");
     }
+    unsigned netMaturity[3] = {(unsigned)(st.maturity & 3), (unsigned)((st.maturity >> 2) & 3), (unsigned)((st.maturity >> 4) & 3)};
+    for (int c = 0; c < 3; ++c)
+        if (netMaturity[c] > 2 || (netMaturity[c] != 0 && !maturityItems) || netMaturity[c] < maturity[c])
+            fail("invalid or retracted net maturity");
+    if ((st.maturity & 0xC0) != 0) fail("invalid net maturity bits");
+    if (st.dayLength > dayLengthItems || st.dayLength < dayLength) fail("invalid or retracted net day length");
+    if (st.whistlePluck > 1 || (st.whistlePluck && !whistlePluckItem) || (whistlePluck && !st.whistlePluck))
+        fail("invalid or retracted net whistle pluck");
     if (emperorGoal && st.emperor && st.repairs < 25)
         fail("invalid net Emperor state");
     if (st.repairs < repairs || ((unsigned)st.unlocks & unlocks) != unlocks || st.flarlic < flarlic)
@@ -1097,6 +1186,9 @@ bool pc_randomizer_apply_net_state(const pc_randstate::PcRandState& st) {
         }
     for (int c = 0; c < 3; ++c) for (int s = 0; s < 4; ++s) parsed.stats[c][s] = st.stats[c * 4 + s];
     for (int kind = 0; kind < 9; ++kind) parsed.benefits[kind] = st.benefits[kind];
+    for (int c = 0; c < 3; ++c) parsed.maturity[c] = netMaturity[c];
+    parsed.dayLength = st.dayLength;
+    parsed.whistlePluck = st.whistlePluck;
     parsed.emperor = st.emperor;
     parsed.deathLinks = st.deathLinks;
     if (deathLinkUnit) {
@@ -1125,6 +1217,9 @@ bool pc_randomizer_get_net_state(pc_randstate::PcRandState* out) {
     }
     for (int c = 0; c < 3; ++c) for (int s = 0; s < 4; ++s) st.stats[c * 4 + s] = (uint8_t)statUpgrades[c][s];
     for (int kind = 0; kind < 9; ++kind) st.benefits[kind] = (uint8_t)benefits[kind];
+    st.maturity = (uint8_t)(maturity[0] | (maturity[1] << 2) | (maturity[2] << 4));
+    st.dayLength = (uint8_t)dayLength;
+    st.whistlePluck = whistlePluck ? 1 : 0;
     st.gen = 0; // stamped by the publisher
     st.crc = 0; // computed by encode()
     *out = st;
@@ -1145,10 +1240,25 @@ uint64_t pc_randomizer_hash() {
     for (unsigned slot : checks) mix(slot);
     for (int c = 0; c < 3; ++c) for (int s = 0; s < 4; ++s) mix(statUpgrades[c][s]);
     for (int kind = 0; kind < 9; ++kind) mix(((uint64_t)benefits[kind] << 32) | consumedBenefits[consumedIndex(static_cast<PcBenefit>(kind))]);
+    // (#982) Progressive Maturity / Day Length / Whistle Pluck are sim inputs;
+    // mixed only when set so seeds without them keep their historical hash.
+    if (maturity[0] | maturity[1] | maturity[2] | dayLength | (whistlePluck ? 1u : 0u))
+        mix(((uint64_t)maturity[0]) | ((uint64_t)maturity[1] << 8) | ((uint64_t)maturity[2] << 16)
+            | ((uint64_t)dayLength << 24) | ((uint64_t)(whistlePluck ? 1 : 0) << 32));
     return h;
 }
 
 bool pc_randomizer_prerelease_traps() { return enabled && prereleaseTraps; }
+int pc_randomizer_maturity(int color) {
+    return enabled && maturityItems && color >= 0 && color < 3 ? int(maturity[color]) : 0;
+}
+int pc_randomizer_whistle_pluck() {
+    if (!enabled || !whistlePluckItem) return -1;
+    return whistlePluck ? 1 : 0;
+}
+float pc_randomizer_day_length_multiplier() {
+    return enabled && dayLengthItems ? 1.0f + 0.01f * float(dayLengthStep * dayLength) : 1.0f;
+}
 bool pc_randomizer_progg_traps() { return enabled && proggTraps; }
 bool pc_randomizer_benefit_pending(PcBenefit kind) {
     return enabled && benefitItems && ready && ((kind >= 0 && kind < 3) || (kind == PC_BENEFIT_BOMBS && bombDeliveries) || (kind == PC_BENEFIT_BOMB_TRAP && bombTraps) || (kind == PC_BENEFIT_PROGG && proggTraps) || (kind == PC_BENEFIT_PRERELEASE && prereleaseTraps)) && benefits[kind] > consumedBenefits[consumedIndex(kind)];
@@ -1328,6 +1438,10 @@ void pc_randomizer_set_generator_id(const void* generator, unsigned uid) {
     }
     fail("unknown saved generator ID");
 }
+void pc_randomizer_dev_set_generator_id(const void* generator, unsigned uid) {
+    if (!generator || !uid) return;
+    generatorIds[generator] = uid;
+}
 unsigned pc_randomizer_placement_slot_uid(unsigned sourceId70) {
     // Lane-04 catalog join: generator _70 -> placement slot uid (crc32), read
     // from the staged p2-placement-slots.txt sidecar. Only consulted under the
@@ -1372,7 +1486,7 @@ bool pc_randomizer_p2_room_bootstrap(const char* path) {
         if (word != "ENEMY_P2") continue;
         unsigned protocol, count; std::string revision;
         if (!(input >> protocol >> revision >> count) || protocol != 1
-            || revision != randomizerP2RosterRevision || count == 0 || count > 64)
+            || revision != randomizerP2RosterRevision || count == 0 || count > kP2MaxBindings)
             fail("incompatible P2 enemy roster or protocol version");
         for (unsigned i = 0; i < count; ++i) {
             std::string target; unsigned sourceId;
@@ -1732,6 +1846,7 @@ void pc_randomizer_observe_obstacle(int stage, int kind, float x, float z, bool 
 }
 
 // Immutable generations keep the last committed day intact if a write is interrupted.
+bool pc_randomizer_purple_campaign() { return enabled && purpleCampaign; }
 bool pc_randomizer_resumed() { return enabled && campaignResumed; }
 bool pc_randomizer_load_campaign(void* destination) {
     if (!pc_randomizer_resumed()) return false;
@@ -1755,8 +1870,9 @@ bool write_campaign_checkpoint(const void* source, unsigned long long generation
         if (ec) return false;
     }
     std::ostringstream meta;
-    meta << (prereleaseTraps ? "PIKMIN_CAMPAIGN_5 " : proggTraps ? "PIKMIN_CAMPAIGN_4 " : bombTraps ? "PIKMIN_CAMPAIGN_3 " : bombDeliveries ? "PIKMIN_CAMPAIGN_2 " : "PIKMIN_CAMPAIGN_1 ") << fingerprint << ' ' << generation;
+    meta << (purpleCampaign ? "PIKMIN_CAMPAIGN_PURPLE_1 " : prereleaseTraps ? "PIKMIN_CAMPAIGN_5 " : proggTraps ? "PIKMIN_CAMPAIGN_4 " : bombTraps ? "PIKMIN_CAMPAIGN_3 " : bombDeliveries ? "PIKMIN_CAMPAIGN_2 " : "PIKMIN_CAMPAIGN_1 ") << fingerprint << ' ' << generation;
     for (int i = 0; i < (prereleaseTraps ? 7 : proggTraps ? 6 : bombTraps ? 5 : bombDeliveries ? 4 : 3); ++i) meta << ' ' << consumedBenefits[i];
+    if (purpleCampaign) p2ship::stock.write(meta);
     std::string block(static_cast<const char*>(source), 32768);
     const auto hash = checkpointHash(meta.str() + "\n" + block);
     std::string bytes = meta.str() + " " + std::to_string(hash) + "\n" + block;

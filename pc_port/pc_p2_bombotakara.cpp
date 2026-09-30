@@ -18,6 +18,7 @@
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include <SDL.h>
 #include <cmath>
 #include <cstdio>
@@ -124,8 +125,8 @@ int applyBlast(Unit& unit) {
         Iterator it(pikiMgr);
         CI_LOOP(it) { addReceiver(static_cast<Creature*>(static_cast<Piki*>(*it)), P2BombSaraiReceiverKind::Piki); }
     }
-    if (naviMgr && naviMgr->getNavi()) {
-        addReceiver(static_cast<Creature*>(naviMgr->getNavi()), P2BombSaraiReceiverKind::Navi);
+    for (Navi* navi : pc_p2_navis()) {
+        addReceiver(static_cast<Creature*>(navi), P2BombSaraiReceiverKind::Navi);
     }
     if (receivers.empty()) {
         std::printf("P2_BOMBOTAKARA_BLAST generator=%u payload=%u center=%.3f,%.3f,%.3f radius=%.1f "

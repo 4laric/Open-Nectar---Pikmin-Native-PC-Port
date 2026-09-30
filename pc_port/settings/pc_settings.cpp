@@ -140,7 +140,9 @@ struct PcConfig {
     // normal play and only preview/fixture runs (pc_pikipelago_room_preview())
     // auto-dismiss it.
     int disableTutorials = 1;
-    // Mod: unstick Pikmin that stop making progress along a route (0=off, 1=on).
+    // Mod: better Pikmin routing (0=off/faithful, 1=on). Shortest routes in
+    // place of the greedy search, followers that route round walls to their
+    // leader, and carry parties that restart when they stall.
     int betterPathfinding = 0;
     // Mod: a non-blue Pikmin that wanders into water on its own is pushed back
     // to dry land instead of drowning. Being thrown in still drowns it.
@@ -161,6 +163,8 @@ struct PcConfig {
     int throwSpeedPct = 100;    // velocidad de las animaciones de coger y lanzar
     int throwCancelB = 0;       // B con un Pikmin en la mano lo devuelve al grupo
     int noTrip = 0;             // los Pikmin no tropiezan al correr
+    // Whistling over sprouts plucks them one at a time (0=off/faithful, 1=on).
+    int whistlePluck = 0;
     int onionStep10 = 0;        // Y + arriba/abajo en la cebolla mueve de 10 en 10
     int instantWhistle = 0;     // los Pikmin silbados se unen sin la reacción de girarse
     // Cheats.
@@ -264,6 +268,7 @@ struct PcConfig {
         throwSpeedPct = 100;
         throwCancelB = 0;
         noTrip = 0;
+        whistlePluck = 0;
         onionStep10 = 0;
         instantWhistle = 0;
         pikiInvincible = 0;
@@ -1103,6 +1108,7 @@ std::string renderConfig(const PcConfig& c) {
     out << "throwSpeedPct = " << c.throwSpeedPct << "\n";
     out << "throwCancelB = " << c.throwCancelB << "\n";
     out << "noTrip = " << c.noTrip << "\n";
+    out << "whistlePluck = " << c.whistlePluck << "\n";
     out << "onionStep10 = " << c.onionStep10 << "\n";
     out << "instantWhistle = " << c.instantWhistle << "\n";
     out << "pikiInvincible = " << c.pikiInvincible << "\n";
@@ -1311,6 +1317,9 @@ void loadConfig() {
         }
         else if (key == "noTrip") {
             sConfig.noTrip = atoi(val.c_str()) ? 1 : 0;
+        }
+        else if (key == "whistlePluck") {
+            sConfig.whistlePluck = atoi(val.c_str()) ? 1 : 0;
         }
         else if (key == "onionStep10") {
             sConfig.onionStep10 = atoi(val.c_str()) ? 1 : 0;
@@ -2607,6 +2616,12 @@ void modsRowChange(int row, bool left, bool right) {
     }
     else if (row == 25) {
         if (left || right) sPending.instantWhistle = sPending.instantWhistle ? 0 : 1;
+    }
+    else if (row == 33) {
+        if (left || right) sPending.whistlePluck = sPending.whistlePluck ? 0 : 1;
+    }
+    else if (row == 34) {
+        if (left || right) sPending.disableTutorials = sPending.disableTutorials ? 0 : 1;
     }
     // Cheats (26-32). Hard los anula, como la vida y el día.
     else if (row >= 26 && row <= 32) {
@@ -5219,6 +5234,10 @@ int pc_settings_get_no_trip(void) {
     return sConfig.noTrip;
 }
 
+int pc_settings_get_whistle_pluck(void) {
+    return sConfig.whistlePluck;
+}
+
 int pc_settings_get_onion_step10(void) {
     return sConfig.onionStep10;
 }
@@ -5380,6 +5399,7 @@ namespace {
     X(naviHealthPct, "naviHealthPct") X(tekiHealthPct, "tekiHealthPct")                               \
     X(betterPathfinding, "betterPathfinding") X(bluesOnlyWater, "bluesOnlyWater")                     \
     X(throwSpeedPct, "throwSpeedPct") X(throwCancelB, "throwCancelB") X(noTrip, "noTrip")             \
+    X(whistlePluck, "whistlePluck")                                                                   \
     X(onionStep10, "onionStep10") X(lockOn, "lockOn") X(charge, "charge")                             \
     X(throwWhileMoving, "throwWhileMoving") X(firstPerson, "firstPerson")                             \
     X(freeCamera, "freeCamera") X(idleCounter, "idleCounter") X(debugKeys, "debugKeys")               \
@@ -5481,6 +5501,7 @@ void applySessionBlock(const char* text) {
         else if (key == "bluesOnlyWater") set01(sConfig.bluesOnlyWater, num);
         else if (key == "throwCancelB") set01(sConfig.throwCancelB, num);
         else if (key == "noTrip") set01(sConfig.noTrip, num);
+        else if (key == "whistlePluck") set01(sConfig.whistlePluck, num);
         else if (key == "onionStep10") set01(sConfig.onionStep10, num);
         else if (key == "lockOn") set01(sConfig.lockOn, num);
         else if (key == "charge") set01(sConfig.charge, num);
@@ -5587,14 +5608,14 @@ const SelftestCase kSelftestCases[] = {
       "pikiLimit = 300\ndayLength = 10\ninfiniteDay = 1\nnoDayAdvance = 1\nunlockZones = 1\n"
       "allOnions = 1\npikiInvincible = 1\nallFlowers = 1\ncarrySpeedPct = 150\nnaviSpeedPct = 200\n"
       "naviHealthPct = -1\ntekiHealthPct = 25\nbetterPathfinding = 1\nbluesOnlyWater = 1\n"
-      "throwSpeedPct = 175\nthrowCancelB = 1\nnoTrip = 1\nonionStep10 = 1\nlockOn = 1\ncharge = 1\n"
+      "throwSpeedPct = 175\nthrowCancelB = 1\nnoTrip = 1\nwhistlePluck = 1\nonionStep10 = 1\nlockOn = 1\ncharge = 1\n"
       "throwWhileMoving = 1\nfirstPerson = 1\nfreeCamera = 1\nidleCounter = 1\ndebugKeys = 1\n"
       "gyroEnabled = 1\ndisableTutorials = 0\ncoopSplit = 1\ncoopMergeCamera = 1\n",
       "fpsMode = 2\nchainActions = 0\nholdToPluck = 0\ninstantWhistle = 0\nwhistleRadiusPct = 50\n"
       "pikiLimit = 999\ndayLength = 20\ninfiniteDay = 0\nnoDayAdvance = 0\nunlockZones = 0\n"
       "allOnions = 0\npikiInvincible = 0\nallFlowers = 0\ncarrySpeedPct = 500\nnaviSpeedPct = 100\n"
       "naviHealthPct = 500\ntekiHealthPct = 300\nbetterPathfinding = 0\nbluesOnlyWater = 0\n"
-      "throwSpeedPct = 50\nthrowCancelB = 0\nnoTrip = 0\nonionStep10 = 0\nlockOn = 0\ncharge = 0\n"
+      "throwSpeedPct = 50\nthrowCancelB = 0\nnoTrip = 0\nwhistlePluck = 0\nonionStep10 = 0\nlockOn = 0\ncharge = 0\n"
       "throwWhileMoving = 0\nfirstPerson = 0\nfreeCamera = 0\nidleCounter = 0\ndebugKeys = 0\n"
       "gyroEnabled = 0\ndisableTutorials = 1\ncoopSplit = 0\ncoopMergeCamera = 0\n"
       "windowWidth = 800\nwindowHeight = 600\ngamma = 1.5\n",
@@ -5604,14 +5625,14 @@ const SelftestCase kSelftestCases[] = {
       "pikiLimit = 50\ndayLength = 120\ninfiniteDay = 0\nnoDayAdvance = 1\nunlockZones = 0\n"
       "allOnions = 1\npikiInvincible = 0\nallFlowers = 1\ncarrySpeedPct = 500\nnaviSpeedPct = 400\n"
       "naviHealthPct = 25\ntekiHealthPct = -1\nbetterPathfinding = 0\nbluesOnlyWater = 1\n"
-      "throwSpeedPct = 50\nthrowCancelB = 0\nnoTrip = 1\nonionStep10 = 0\nlockOn = 0\ncharge = 1\n"
+      "throwSpeedPct = 50\nthrowCancelB = 0\nnoTrip = 1\nwhistlePluck = 1\nonionStep10 = 0\nlockOn = 0\ncharge = 1\n"
       "throwWhileMoving = 0\nfirstPerson = 1\nfreeCamera = 0\nidleCounter = 1\ndebugKeys = 0\n"
       "gyroEnabled = 1\ndisableTutorials = 1\ncoopSplit = 0\ncoopMergeCamera = 1\n",
       "fpsMode = 0\nchainActions = 1\nholdToPluck = 0\ninstantWhistle = 1\nwhistleRadiusPct = 50\n"
       "pikiLimit = 999\ndayLength = 10\ninfiniteDay = 1\nnoDayAdvance = 0\nunlockZones = 1\n"
       "allOnions = 0\npikiInvincible = 1\nallFlowers = 0\ncarrySpeedPct = 100\nnaviSpeedPct = 100\n"
       "naviHealthPct = -1\ntekiHealthPct = 25\nbetterPathfinding = 1\nbluesOnlyWater = 0\n"
-      "throwSpeedPct = 200\nthrowCancelB = 1\nnoTrip = 0\nonionStep10 = 1\nlockOn = 1\ncharge = 0\n"
+      "throwSpeedPct = 200\nthrowCancelB = 1\nnoTrip = 0\nwhistlePluck = 0\nonionStep10 = 1\nlockOn = 1\ncharge = 0\n"
       "throwWhileMoving = 1\nfirstPerson = 0\nfreeCamera = 1\nidleCounter = 0\ndebugKeys = 1\n"
       "gyroEnabled = 0\ndisableTutorials = 0\ncoopSplit = 1\ncoopMergeCamera = 0\n",
       { 4, 0 }, { 1, 2 } },
@@ -5620,14 +5641,14 @@ const SelftestCase kSelftestCases[] = {
       "pikiLimit = 999\ndayLength = 0\ninfiniteDay = 1\nnoDayAdvance = 0\nunlockZones = 1\n"
       "allOnions = 0\npikiInvincible = 1\nallFlowers = 0\ncarrySpeedPct = 250\nnaviSpeedPct = 150\n"
       "naviHealthPct = 150\ntekiHealthPct = 500\nbetterPathfinding = 1\nbluesOnlyWater = 0\n"
-      "throwSpeedPct = 125\nthrowCancelB = 1\nnoTrip = 0\nonionStep10 = 1\nlockOn = 1\ncharge = 0\n"
+      "throwSpeedPct = 125\nthrowCancelB = 1\nnoTrip = 0\nwhistlePluck = 0\nonionStep10 = 1\nlockOn = 1\ncharge = 0\n"
       "throwWhileMoving = 1\nfirstPerson = 0\nfreeCamera = 1\nidleCounter = 0\ndebugKeys = 1\n"
       "gyroEnabled = 0\ndisableTutorials = 0\ncoopSplit = 1\ncoopMergeCamera = 0\n",
       "fpsMode = 1\nchainActions = 0\nholdToPluck = 1\ninstantWhistle = 0\nwhistleRadiusPct = 250\n"
       "pikiLimit = 50\ndayLength = 7\ninfiniteDay = 0\nnoDayAdvance = 1\nunlockZones = 0\n"
       "allOnions = 1\npikiInvincible = 0\nallFlowers = 1\ncarrySpeedPct = 300\nnaviSpeedPct = 500\n"
       "naviHealthPct = 75\ntekiHealthPct = 50\nbetterPathfinding = 0\nbluesOnlyWater = 1\n"
-      "throwSpeedPct = 150\nthrowCancelB = 0\nnoTrip = 1\nonionStep10 = 0\nlockOn = 0\ncharge = 1\n"
+      "throwSpeedPct = 150\nthrowCancelB = 0\nnoTrip = 1\nwhistlePluck = 1\nonionStep10 = 0\nlockOn = 0\ncharge = 1\n"
       "throwWhileMoving = 0\nfirstPerson = 1\nfreeCamera = 0\nidleCounter = 1\ndebugKeys = 0\n"
       "gyroEnabled = 1\ndisableTutorials = 1\ncoopSplit = 0\ncoopMergeCamera = 1\n",
       { 1, 4 }, { 3, 2 } },
@@ -5895,6 +5916,8 @@ void modsRowValue(int i, char* value, size_t n) {
     case 23: snprintf(value, n, "%s", sPending.noTrip ? "On" : "Off (original)"); break;
     case 24: snprintf(value, n, "%s", sPending.onionStep10 ? "On" : "Off (original)"); break;
     case 25: snprintf(value, n, "%s", sPending.instantWhistle ? "On" : "Off (original)"); break;
+    case 33: snprintf(value, n, "%s", sPending.whistlePluck ? "On" : "Off (original)"); break;
+    case 34: snprintf(value, n, "%s", sPending.disableTutorials ? "On" : "Off (original)"); break;
     case 28: speedPctLabel(sPending.carrySpeedPct, value, n); break;
     case 29: speedPctLabel(sPending.naviSpeedPct, value, n); break;
     case 26: case 27: case 30: case 31: case 32: {
@@ -6029,8 +6052,10 @@ const GroupRow kCameraRows[] = {
 
 const GroupRow kGameplayRows[] = {
     { SRC_MODS, 25, "Instant Whistle Response", "Whistled Pikmin join the squad at once, without stopping to turn and look first." },
+    { SRC_MODS, 33, "Whistle Pluck", "Hold the whistle over sprouts to pluck them one after another." },
+    { SRC_MODS, 34, "Disable Tutorials", "Skips the informational hint popups. Story, part and ending text still show." },
     { SRC_MODS, 1, "Chain Pikmin Actions", "Pikmin that finish a task go on to the next one nearby." },
-    { SRC_MODS, 8, "Better Pathfinding", "Gets Pikmin moving again when they stall on their route." },
+    { SRC_MODS, 8, "Better Pathfinding", "Shortest carry routes, squad Pikmin find a way round walls, stalled carriers restart." },
     { SRC_MODS, 9, "Blues Only In Water", "Only blue Pikmin walk into water on their own." },
     { SRC_MODS, 10, "Idle Pikmin Counter", "Shows how many Pikmin are standing idle." },
     { SRC_MODS, 23, "No Tripping", "Pikmin running in the squad never trip and fall behind." },

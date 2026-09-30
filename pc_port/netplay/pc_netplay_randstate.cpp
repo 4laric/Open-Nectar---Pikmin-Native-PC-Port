@@ -46,9 +46,9 @@ size_t encode(const PcRandState& st, uint8_t out[kStateBytes])
 	for (size_t i = 0; i < kCheckBytes; ++i) out[8 + i] = st.checks[i];
 	for (int i = 0; i < 12; ++i) out[32 + i] = st.stats[i];
 	for (int i = 0; i < 9; ++i) out[44 + i] = st.benefits[i];
-	out[53] = st.rsv[0];
-	out[54] = st.rsv[1];
-	out[55] = st.rsv[2];
+	out[53] = st.maturity;
+	out[54] = st.dayLength;
+	out[55] = st.whistlePluck;
 	out[kGenOff] = (uint8_t)(st.gen & 0xFF);
 	out[kGenOff + 1] = (uint8_t)((st.gen >> 8) & 0xFF);
 	out[kGenOff + 2] = (uint8_t)((st.gen >> 16) & 0xFF);
@@ -65,7 +65,11 @@ bool decode(const uint8_t* data, size_t avail, PcRandState& out)
 {
 	if (data == nullptr || avail < kStateBytes) return false;
 	if (data[0] != kVersion) return false;
-	if (data[53] != 0 || data[54] != 0 || data[55] != 0) return false;
+	// v3 (#982): maturity is 3 x 2-bit tiers 0..2 with bits 6-7 zero; dayLength
+	// is 0..10; whistlePluck is 0/1. Anything else is a malformed snapshot.
+	if ((data[53] & 0xC0) != 0 || (data[53] & 0x03) == 3 || ((data[53] >> 2) & 0x03) == 3
+	    || ((data[53] >> 4) & 0x03) == 3 || data[54] > 10 || data[55] > 1)
+		return false;
 	const uint32_t want =
 	    (uint32_t)data[kCrcOff] | ((uint32_t)data[kCrcOff + 1] << 8)
 	    | ((uint32_t)data[kCrcOff + 2] << 16) | ((uint32_t)data[kCrcOff + 3] << 24);
@@ -81,7 +85,9 @@ bool decode(const uint8_t* data, size_t avail, PcRandState& out)
 	for (size_t i = 0; i < kCheckBytes; ++i) st.checks[i] = data[8 + i];
 	for (int i = 0; i < 12; ++i) st.stats[i] = data[32 + i];
 	for (int i = 0; i < 9; ++i) st.benefits[i] = data[44 + i];
-	st.rsv[0] = st.rsv[1] = st.rsv[2] = 0;
+	st.maturity = data[53];
+	st.dayLength = data[54];
+	st.whistlePluck = data[55];
 	st.gen = (uint32_t)data[kGenOff] | ((uint32_t)data[kGenOff + 1] << 8)
 	    | ((uint32_t)data[kGenOff + 2] << 16) | ((uint32_t)data[kGenOff + 3] << 24);
 	st.crc = want;
@@ -93,7 +99,8 @@ bool payload_equal(const PcRandState& a, const PcRandState& b)
 {
 	if (a.ver != b.ver || a.ready != b.ready || a.repairs != b.repairs
 	    || a.unlocks != b.unlocks || a.flarlic != b.flarlic || a.emperor != b.emperor
-	    || a.deathLinks != b.deathLinks)
+	    || a.deathLinks != b.deathLinks || a.maturity != b.maturity || a.dayLength != b.dayLength
+	    || a.whistlePluck != b.whistlePluck)
 		return false;
 	for (size_t i = 0; i < kCheckBytes; ++i) {
 		if (a.checks[i] != b.checks[i]) return false;

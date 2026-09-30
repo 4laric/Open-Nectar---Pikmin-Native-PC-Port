@@ -2,11 +2,13 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_demon_drop_state.h"
 #include "pc_p2_demon_bridge.h"
+#include "pc_p2_demon_anchor.h"
 #endif
 #include "pc_p2_purple.h"
 #include "pc_p2_purple_impact.h"
 #include "pc_p2_purple_flight.h"
 #include "pc_p2_white.h"
+#include "pc_p2_breadbug_teki.h"
 #include "pc_p2_species.h"
 #include "pc_p2_bulbmin.h"
 #include "Navi.h"
@@ -1235,6 +1237,9 @@ void Navi::pcUpdateLockOn()
 				if (!teki->isTeki() || !teki->isAlive() || !teki->isVisible()) {
 					continue;
 				}
+				if (pc_p2_breadbug_teki_untargetable(teki, "navi_lock_on")) {
+					continue; // #898
+				}
 				Vector3f sep = teki->mSRT.t - mCursorWorldPos;
 				f32 dist     = speedy_sqrtf(sep.x * sep.x + sep.z * sep.z);
 				f32 reach    = teki->getSize() + 12.0f;
@@ -1295,6 +1300,11 @@ void Navi::pcPinCursorToLock()
 	}
 	Vector3f offset = mPcLockTarget->mSRT.t - mSRT.t;
 	offset.y        = 0.0f;
+	// Objetivo en vuelo (#215, snitchbug): el lanzamiento alcanza su cúspide a
+	// mitad de camino del cursor y pasa por el XZ del cursor ya de bajada, así
+	// que clavado sobre el bicho el Pikmin le pasa por debajo. Con el cursor al
+	// doble de distancia la cúspide cae sobre el objetivo (pc_p2_demon_anchor.h).
+	offset = offset * p2demonanchor::lockPinScale(mPcLockTarget->isFlying() != 0);
 	mCursorPosition       = offset;
 	mCursorTargetPosition = offset;
 	mCursorNaviDist       = offset.length();
@@ -1607,6 +1617,9 @@ void Navi::callPikis(f32 radius, bool recallWorkers)
 		bool callable = piki->mNavi == this || piki->mNavi == nullptr || piki->mMode != PikiMode::FormationMode;
 		// VS: solo se silban los propios y los que aún no tienen dueño.
 		if (pc_vs_active() && piki->mPlayerId >= 0 && piki->mPlayerId != mNaviID) callable = false;
+		// #245: an Antenna Beetle ActTeki follower ignores the whistle while its
+		// beetle lives (InteractFue::actPiki returns false unless Panic).
+		if (pc_p2_fuefuki_follower_blocks_recruit(piki)) callable = false;
 #else
 		const bool callable = piki->mNavi == this || piki->mNavi == nullptr;
 #endif
@@ -1637,6 +1650,7 @@ void Navi::callPikis(f32 radius, bool recallWorkers)
 				// Mod "Instant Whistle Response": lo que hacen el inicio y el
 				// final de LookAt (aviso, soltarse, pasar a formación) sin la
 				// espera aleatoria ni la animación de girarse a mirar.
+				pc_p2_fuefuki_note_whistle(piki, this);
 				if (pc_settings_get_instant_whistle()) {
 					SeSystem::playPlayerSe(SE_PIKI_CALLED);
 					seSystem->playPikiSound(SEF_PIKI_CALLED, piki->mSRT.t);

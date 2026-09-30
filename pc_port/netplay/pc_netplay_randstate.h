@@ -1,14 +1,14 @@
 #pragma once
 // Netplay M4 lane A: versioned randomizer external-state snapshot (issue #885).
 //
-// Canonical 64-byte little-endian POD (v2, fix round 1). The host packs the
+// Canonical 64-byte little-endian POD (v3; v2 was fix round 1). The host packs the
 // sim-visible subset of state.txt into this struct, bumps `gen`, and streams
 // it to both peers in frame-tagged input fragments (16 fragments of 4
 // payload bytes). Both peers apply it through
 // pc_randomizer_apply_net_state() at the start of the same tick.
 //
 // Layout (offsets are exact, all multi-byte fields little-endian):
-//   0   ver         u8  =2
+//   0   ver         u8  =3
 //   1   ready       u8  0/1
 //   2   repairs     u8  0..25
 //   3   unlocks     u8  bitmask
@@ -18,9 +18,11 @@
 //   8   checks[24]  u8  bitset, slot i in byte[i/8] bit (i%8), slots 0..191
 //   32  stats[12]   u8  [3][4] tiers
 //   44  benefits[9] u8  receipt counters
-//   53  _rsv        u8  zero
-//   54  _rsv2       u8  zero
-//   55  _rsv3       u8  zero
+//   53  maturity    u8  Progressive Maturity tiers, 2 bits per colour
+//                       (bits 0-1 colour 0, 2-3 colour 1, 4-5 colour 2; tier 0..2;
+//                       bits 6-7 zero)            [v3, #982; was _rsv]
+//   54  dayLength   u8  Progressive Day Length count 0..10   [v3, #982]
+//   55  whistlePluck u8 0/1 Whistle Pluck item received      [v3, #982]
 //   56  gen         u32 host snapshot generation, monotonic
 //   60  crc         u32 CRC32 (IEEE) of bytes 0..59
 //
@@ -45,7 +47,7 @@ constexpr size_t kCheckBytes = 24; // check bitset width; 192 slots
 constexpr size_t kCheckSlots = kCheckBytes * 8;
 constexpr size_t kStateBytes = 64;
 constexpr size_t kPayloadBytes = 60; // bytes covered by the CRC
-constexpr uint8_t kVersion = 2;
+constexpr uint8_t kVersion = 3;
 constexpr size_t kFragCount = 16; // 64 bytes at 4 payload bytes per fragment
 constexpr size_t kFragBytes = 4;
 // M4 lane B1 (lane A recheck item 5): the first snapshot (nothing applied
@@ -75,7 +77,9 @@ struct PcRandState {
 	uint8_t checks[kCheckBytes] = {};
 	uint8_t stats[12] = {};
 	uint8_t benefits[9] = {};
-	uint8_t rsv[3] = {};
+	uint8_t maturity = 0;     // 3 x 2-bit tiers (see the layout above)
+	uint8_t dayLength = 0;    // 0..10
+	uint8_t whistlePluck = 0; // 0/1
 	uint32_t gen = 0;
 	uint32_t crc = 0;
 };
@@ -86,8 +90,8 @@ uint32_t crc32(const uint8_t* data, size_t len);
 // Encodes exactly 64 bytes (computes and stores the CRC). Returns 64.
 size_t encode(const PcRandState& st, uint8_t out[kStateBytes]);
 
-// Decodes from the first 64 bytes. Validates ver == 2, reserved bytes zero,
-// and the CRC. The check bitset is accepted verbatim; slot-vs-catalog range
+// Decodes from the first 64 bytes. Validates ver == 3, the maturity/dayLength/
+// whistlePluck ranges (unused maturity bits zero), and the CRC. The check bitset is accepted verbatim; slot-vs-catalog range
 // checks belong to apply_net_state (which knows checkCount). Returns false
 // (leaving `out` untouched) when avail < 64 or any check fails.
 bool decode(const uint8_t* data, size_t avail, PcRandState& out);

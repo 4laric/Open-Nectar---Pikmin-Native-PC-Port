@@ -13,12 +13,16 @@
 // experimental/pikmin2_aquatic_assets.py (GPVE01 rev 0, UmiMushi DISC_PARMS).
 //
 // Port adaptations (recorded, not retail-faithful):
-//   * The P2 seven-slot tongue (kamu_joint1..7, radius 30) is not representable
-//     on the P1 host. The swallow is resolved as an explicit nearest-Pikmin
-//     capture inside the source fp22=170 attack hit radius at the banked attack
-//     bite event (attack1 frame 39, event 3), then exactly one InteractKill at
-//     the banked Eat swallow (eat1 animation end). Exactly-once per bite;
-//     mirrors the Catfish/Armor port.
+//   * Tongue (#886): the source seven-slot tongue (kamu_joint1..7, r=30,
+//     Blind 25) eats through pc_p2_captor_mouth.h every tick from attack key
+//     event 3 until key event 6 (EnemyFunc::eatPikmin, umiMushiState.cpp:
+//     510-514); a caught Pikmin is stuck to the P1 host 'slot' part
+//     (pc_p2_captor_host.h) so it cannot be whistled away. Eat swallows at
+//     the eat1 end only Pikmin still held (swallowPikmin, white poison proper
+//     fp11 = 200). The slot positions are a documented port approximation
+//     (seven points on the facing axis out to fp22 = 170, halved for Blind).
+//     Death and teardown release the tongue; the port's own flick sweeps
+//     spare held Pikmin (a source flick refuses a swallowed Pikmin).
 //   * No P2 water box (mWaterBox, Hamon sea height, dive/splash) is present on
 //     the host; the source outMove/dry fallback and water presentation are
 //     bounded gaps.
@@ -37,6 +41,7 @@
 // Every hook is a no-op for unregistered actors; no other lane's module is
 // modified.
 #include "pc_p2_umimushi.h"
+#include "pc_p2_captor_host.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_setup_failsafe.h"
 #include "pc_randomizer.h"
@@ -46,6 +51,7 @@
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Generator.h"
 #include "gameflow.h"
 #include <cmath>
@@ -145,8 +151,10 @@ struct Umi {
     Vector3f home;
     Vector3f goal;
     Navi* targetNavi = nullptr;
-    Piki* captured = nullptr;
+    p2captor::Held<Piki> held; // Pikmin on the tongue slots (validated against the host stick)
+    bool tongueActive = false; // source StateAttack mIsTongueActive
     bool tongueHasPiki = false;
+    bool mouthLogged = false;
     std::set<int> firedEvents;
     std::string clip = "run1";
     float phase = 0.0f;
@@ -187,9 +195,16 @@ bool clipLoops(const std::string& name) {
     return it != clips.end() && it->second.loop;
 }
 
-Navi* activeNavi() {
+// Source isChangeNavi (umiMushi.cpp:849-853): getActiveNavi, or the nearest
+// captain in two-player mode. Searches and area effects walk every captain.
+Navi* activeNavi(const Vector3f& pos) {
     if (!naviMgr) return nullptr;
-    Navi* n = naviMgr->getNavi();
+    Navi* n = pc_p2_source_active_navi(pos);
+    return (n && n->isAlive()) ? n : nullptr;
+}
+Navi* nearestNavi(const Vector3f& pos) {
+    if (!naviMgr) return nullptr;
+    Navi* n = pc_p2_nearest_navi(pos);
     return (n && n->isAlive()) ? n : nullptr;
 }
 Piki* nearestPiki(const Vector3f& pos, float radius) {
@@ -199,7 +214,8 @@ Piki* nearestPiki(const Vector3f& pos, float radius) {
         Iterator it(pikiMgr);
         CI_LOOP(it) {
             Piki* p = static_cast<Piki*>(*it);
-            if (!p || !p->isAlive()) continue;
+            // A Pikmin held on a tongue is neither a target nor a flick trigger (#886).
+            if (!p || !p->isAlive() || p->isStickToMouth()) continue;
             const Vector3f q = p->getPosition();
             const float dx = q.x - pos.x, dz = q.z - pos.z;
             const float d = dx * dx + dz * dz;
@@ -228,8 +244,9 @@ Piki* nearestPikiAngle(const Vector3f& pos, float heading, float radius, float a
 }
 bool isStartFlick(const Vector3f& pos) {
     if (nearestPiki(pos, SHAKE_RANGE)) return true;
-    Navi* n = activeNavi();
-    return n && distXZ(n->getPosition(), pos) < SHAKE_RANGE;
+    for (Navi* n : pc_p2_navis())
+        if (n->isAlive() && distXZ(n->getPosition(), pos) < SHAKE_RANGE) return true;
+    return false;
 }
 int flickNearby(BTeki* a) {
     const Vector3f pos = a->getPosition();
@@ -238,7 +255,7 @@ int flickNearby(BTeki* a) {
         Iterator it(pikiMgr);
         CI_LOOP(it) {
             Piki* p = static_cast<Piki*>(*it);
-            if (!p || !p->isAlive()) continue;
+            if (!p || !p->isAlive() || p2captorhost::heldBy(a, p)) continue;
             const Vector3f q = p->getPosition();
             if (distXZ(q, pos) >= SHAKE_RANGE) continue;
             const float angle = std::atan2(q.x - pos.x, q.z - pos.z);
@@ -246,8 +263,8 @@ int flickNearby(BTeki* a) {
             ++hit;
         }
     }
-    Navi* n = activeNavi();
-    if (n && distXZ(n->getPosition(), pos) < SHAKE_RANGE) {
+    for (Navi* n : pc_p2_navis()) {
+        if (!n->isAlive() || distXZ(n->getPosition(), pos) >= SHAKE_RANGE) continue;
         const Vector3f q = n->getPosition();
         const float angle = std::atan2(q.x - pos.x, q.z - pos.z);
         n->stimulate(InteractFlick(a, SHAKE_KNOCKBACK, SHAKE_DAMAGE, angle));
@@ -256,10 +273,11 @@ int flickNearby(BTeki* a) {
     return hit;
 }
 void attackNearbyNavi(BTeki* a) {
-    Navi* n = activeNavi();
-    if (!n) return;
-    if (distXZ(n->getPosition(), a->getPosition()) < ATTACK_HIT) {
-        n->stimulate(InteractAttack(a, nullptr, ATTACK_DAMAGE, false));
+    for (Navi* n : pc_p2_navis()) {
+        if (!n->isAlive()) continue;
+        if (distXZ(n->getPosition(), a->getPosition()) < ATTACK_HIT) {
+            n->stimulate(InteractAttack(a, nullptr, ATTACK_DAMAGE, false));
+        }
     }
 }
 void stop(BTeki* a) {
@@ -331,9 +349,9 @@ void outMove(BTeki* a, Umi& s) {
 bool isChangeNavi(BTeki* a, Umi& s) {
     // Source umiMushi.cpp:843: Blind never retargets a Navi (returns false).
     if (s.blind) return false;
-    Navi* navi = activeNavi();
-    if (!navi) return false;
     const Vector3f pos = a->getPosition();
+    Navi* navi = activeNavi(pos);
+    if (!navi) return false;
     float dist = SEARCH_DISTANCE;
     if (s.targetNavi) dist *= 1.2f;
     dist *= dist;
@@ -362,7 +380,7 @@ bool isFindTarget(BTeki* a, Umi& s) {
             return true;
         }
     }
-    Navi* navi = activeNavi();
+    Navi* navi = nearestNavi(pos); // source getNearestNavi (umiMushi.cpp:916)
     if (navi && distXZ(navi->getPosition(), pos) < SEARCH_DISTANCE) {
         s.goal = navi->getPosition();
         return true;
@@ -454,28 +472,65 @@ void setState(BTeki* a, Umi& s, State state, const char* clip) {
     std::fflush(stdout);
 }
 
+const p2captor::Geometry& mouthGeometry(const Umi& s) {
+    return *p2captor::geometryFor(s.blind ? 101u : 71u);
+}
+// One source EnemyFunc::eatPikmin pass over the seven tongue slots.
+int tongueEat(BTeki* actor, Umi& s, unsigned generator, int frame) {
+    const p2captor::Geometry& g = mouthGeometry(s);
+    if (!s.mouthLogged) {
+        s.mouthLogged = true;
+        std::printf("P2_UMIMUSHI_MOUTH generator=%u source_id=%d slots=%d radius=%.1f local_z=%.1f..%.1f "
+                    "host_slots=%d\n", generator, s.sourceId, g.slots, g.radius, g.local[0][2],
+                    g.local[g.slots - 1][2], p2captorhost::hostSlotCount(actor));
+        std::fflush(stdout);
+    }
+    bool occupied[p2captor::MaxSlots] = {};
+    p2captorhost::validate(actor, s.held, g.slots, occupied);
+    p2captorhost::Scene scene = p2captorhost::snapshot(actor);
+    const p2captor::Vec3 apos = p2captorhost::vec(actor->getPosition());
+    int refused = 0;
+    const int caught = p2captor::eat(g, apos, s.heading, scene.prey.data(), (int)scene.prey.size(), occupied,
+                                     p2captor::defaultEligible, [&](int n, int slot) {
+        if (!p2captorhost::swallowInto(actor, scene, n, slot, s.held, 0, &refused)) return false;
+        const p2captor::Vec3 l = p2captor::toLocal(apos, s.heading, scene.prey[n].pos);
+        std::printf("P2_UMIMUSHI_BITE generator=%u frame=%d pikmin=1 slot=%d local_x=%.1f local_y=%.1f "
+                    "local_z=%.1f\n", generator, frame, slot, l.x, l.y, l.z);
+        std::fflush(stdout);
+        return true;
+    });
+    if (refused > 0) {
+        std::printf("P2_UMIMUSHI_EAT_REFUSED generator=%u reason=no_host_slot count=%d\n", generator, refused);
+        std::fflush(stdout);
+    }
+    return caught;
+}
+void releaseTongue(BTeki* actor, Umi& s, unsigned generator, const char* why) {
+    const int freed = p2captorhost::release(actor, s.held);
+    s.tongueActive = false;
+    s.tongueHasPiki = false;
+    if (freed > 0) {
+        std::printf("P2_UMIMUSHI_RELEASE generator=%u reason=%s pikmin=%d\n", generator, why, freed);
+        std::fflush(stdout);
+    }
+}
+
 void fireAttackEvents(BTeki* actor, Umi& s, unsigned generator) {
     auto it = clips.find("attack1");
     if (it == clips.end()) return;
-    const Vector3f pos = actor->getPosition();
     const float frame = s.stateTime * 30.0f;
+    // Source StateAttack::exec: eatPikmin runs first while the tongue is active.
+    if (s.tongueActive && tongueEat(actor, s, generator, int(frame)) > 0) s.tongueHasPiki = true;
     for (const auto& event : it->second.events) {
         if (s.firedEvents.count(event.first)) continue;
         if (frame < event.first) continue;
         s.firedEvents.insert(event.first);
         if (event.second == 3) {
-            Piki* piki = nearestPikiAngle(pos, s.heading, ATTACK_HIT, ATTACK_HIT_ANGLE);
-            if (!piki) piki = nearestPiki(pos, ATTACK_HIT);
-            if (piki) {
-                s.captured = piki;
-                s.tongueHasPiki = true;
-                std::printf("P2_UMIMUSHI_BITE generator=%u frame=%d pikmin=1\n",
-                            generator, event.first);
-                std::fflush(stdout);
-            }
+            s.tongueActive = true; // source KEYEVENT_3: the tongue starts eating
         } else if (event.second == 5) {
             attackNearbyNavi(actor);
         } else if (event.second == 6) {
+            s.tongueActive = false; // source KEYEVENT_6 closes the tongue
             const int hit = flickNearby(actor);
             if (hit > 0) {
                 std::printf("P2_UMIMUSHI_FLICK generator=%u frame=%d pikmin=%d\n",
@@ -522,8 +577,14 @@ void pc_p2_umimushi_reset() {
     ready = false;
 }
 
+void pc_p2_umimushi_forget_piki(Piki* piki) {
+    for (auto& entry : actors) entry.second.held.forget(piki);
+}
+
 void pc_p2_umimushi_forget(BTeki* actor) {
     pc_randomizer_p2_forget_source(static_cast<PelletView*>(actor));
+    auto it = actors.find(static_cast<PelletView*>(actor));
+    if (it != actors.end()) p2captorhost::release(actor, it->second.held); // teardown frees the tongue
     actors.erase(static_cast<PelletView*>(actor));
     corpses.erase(static_cast<PelletView*>(actor));
 }
@@ -601,6 +662,11 @@ void pc_p2_umimushi_setup() {
                         }
                         clips[name] = clip;
                     }
+                } else if (token == "frames") {
+                    // P2_BANK_FRAMES_1 trailer (#895): per-pose source frames,
+                    // consumed by the batch draw paths; skip its list token here.
+                    std::string framesList;
+                    bank >> framesList;
                 } else {
                     break;
                 }
@@ -724,6 +790,7 @@ void pc_p2_umimushi_update(BTeki* actor) {
         // Keep the generator for Pod receipt after the engine tears down
         // the host into a carriable pellet.
         if (generator) corpses[static_cast<PelletView*>(actor)] = generator;
+        releaseTongue(actor, s, generator, "death");
         setState(actor, s, UMI_DEAD, "dead1");
     }
 
@@ -765,8 +832,7 @@ void pc_p2_umimushi_update(BTeki* actor) {
             setState(actor, s, UMI_FLICK, "flick1");
             s.nextState = UMI_WALK;
         } else if (isAttackStart(actor, s)) {
-            s.captured = nullptr;
-            s.tongueHasPiki = false;
+            releaseTongue(actor, s, generator, "attack_start");
             setState(actor, s, UMI_ATTACK, "attack1");
         } else if (isChangeNavi(actor, s)) {
             setState(actor, s, UMI_FIND, "fsearch1");
@@ -782,8 +848,7 @@ void pc_p2_umimushi_update(BTeki* actor) {
         } else if (isChangeNavi(actor, s)) {
             setState(actor, s, UMI_FIND, "fsearch1");
         } else if (isAttackStart(actor, s)) {
-            s.captured = nullptr;
-            s.tongueHasPiki = false;
+            releaseTongue(actor, s, generator, "attack_start");
             setState(actor, s, UMI_ATTACK, "attack1");
         } else if (s.targetNavi) {
             if (isNeedTurn(actor, s)) setState(actor, s, UMI_TURN, "sturn1");
@@ -814,8 +879,7 @@ void pc_p2_umimushi_update(BTeki* actor) {
         } else if (isChangeNavi(actor, s)) {
             setState(actor, s, UMI_FIND, "fsearch1");
         } else if (isAttackStart(actor, s)) {
-            s.captured = nullptr;
-            s.tongueHasPiki = false;
+            releaseTongue(actor, s, generator, "attack_start");
             setState(actor, s, UMI_ATTACK, "attack1");
         } else if (isNeedTurn(actor, s)) {
             setState(actor, s, UMI_TURN, "sturn1");
@@ -831,8 +895,7 @@ void pc_p2_umimushi_update(BTeki* actor) {
             setState(actor, s, UMI_FIND, "fsearch1");
         } else if (residual < TURN_END_ANGLE) {
             if (isAttackStart(actor, s)) {
-                s.captured = nullptr;
-                s.tongueHasPiki = false;
+                releaseTongue(actor, s, generator, "attack_start");
                 setState(actor, s, UMI_ATTACK, "attack1");
             } else {
                 setState(actor, s, UMI_SEARCH, "srun1");
@@ -853,7 +916,8 @@ void pc_p2_umimushi_update(BTeki* actor) {
         stop(actor);
         fireAttackEvents(actor, s, generator);
         if (s.stateTime >= clipDuration("attack1")) {
-            if (s.tongueHasPiki && s.captured) {
+            s.tongueActive = false;
+            if (s.tongueHasPiki) {
                 setState(actor, s, UMI_EAT, "eat1");
             } else {
                 setState(actor, s, UMI_WAIT, "srun1");
@@ -863,13 +927,13 @@ void pc_p2_umimushi_update(BTeki* actor) {
     case UMI_EAT:
         stop(actor);
         if (s.stateTime >= clipDuration("eat1")) {
-            if (s.captured && s.captured->isAlive()) {
-                s.captured->stimulate(InteractKill(actor, 0));
-                std::printf("P2_UMIMUSHI_EAT generator=%u pikmin=1\n", generator);
-                std::fflush(stdout);
-            }
-            s.captured = nullptr;
-            s.tongueHasPiki = false;
+            // Source StateEat END: swallowPikmin on the Pikmin still held.
+            int white = 0;
+            const int killed = p2captorhost::swallow(actor, s.held, mouthGeometry(s).slots,
+                                                     mouthGeometry(s).poison, &white);
+            std::printf("P2_UMIMUSHI_EAT generator=%u pikmin=%d white=%d\n", generator, killed, white);
+            std::fflush(stdout);
+            releaseTongue(actor, s, generator, "eat_end");
             setState(actor, s, UMI_WAIT, "srun1");
         }
         break;

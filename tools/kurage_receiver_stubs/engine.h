@@ -44,6 +44,8 @@ struct Piki:Creature {
     TopAction action; TopAction* mActiveAction=&action;
     int mMode=0;
     bool alive=true,stickable=true;
+    int mState=0; // PIKISTATE_*
+    int getState()const{return mState;}
     Creature* owner=nullptr; CollPart* part=nullptr;
     Vector3f mVelocity,mTargetVelocity; FSM fsm; FSM* mFSM=&fsm;
     int kills=0,changes=0;
@@ -81,3 +83,4 @@ inline NaviMgr* naviMgr=nullptr;
 namespace PikiMode {constexpr int FreeMode=0; constexpr int AttackMode=1; constexpr int FormationMode=2;}
 namespace PikiAction {constexpr int NOACTION=0;}
 constexpr int PIKISTATE_Normal=0;
+constexpr int PIKISTATE_Flying=1;

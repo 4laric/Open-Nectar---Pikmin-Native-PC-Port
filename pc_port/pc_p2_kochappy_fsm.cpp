@@ -19,13 +19,19 @@
 //     itself so real Pikmin hits still reach mHealth (no damage is injected).
 //   * EnemyFunc::isStartFlick (a Pikmin actually stuck to the body) is
 //     approximated by a contact-radius test; attack posture takes precedence.
-//   * Attack applies one InteractAttack at source frame 8 (attack hit radius
-//     fp22 = 35, damage fp24 = 10) as the bite, then the source
-//     EnemyFunc::eatPikmin (frame 8, KEYEVENT_2) sticks one free Pikmin within
-//     the mouth-slot radius (fp default eat_range 15, joint "kamu") to a free
-//     mouth slot via InteractSwallow, and EnemyFunc::swallowPikmin (frame 88,
-//     KEYEVENT_3) kills the mouth-stuck Pikmin via InteractKill; a White Pikmin
-//     applies proper-fp02 poison (eatWhitePikminCallBack -> mStoredDamage).
+//   * Attack at source frame 8 (KEYEVENT_2, kochappyState.cpp:1403-1414):
+//     EnemyFunc::attackNavi bites the captain only (attack hit radius fp22 = 35,
+//     damage fp24 = 10; Pikmin are never damaged by the bite), then the source
+//     EnemyFunc::eatPikmin (enemyAction.cpp:1107-1142) runs through
+//     pc_p2_chappy_mouth.h (#884): a Pikmin is swallowed only within r=15 of
+//     the "kamu" mouth joint (KochappyBase.cpp:175-183) sampled at attack frame
+//     8 from the retail model (about 30 units in front of the feet), so a
+//     Pikmin beside or behind the actor is never eaten. The P2 slot sticks to
+//     the P1 host 'slot' child; with no host mouth part the capture is refused
+//     (never InteractSwallow with a null part, which would kill outright).
+//     EnemyFunc::swallowPikmin (frame 88, KEYEVENT_3) kills the mouth-stuck
+//     Pikmin via InteractKill; a White Pikmin applies proper-fp02 poison
+//     (eatWhitePikminCallBack -> mStoredDamage).
 //     flickStickPikmin (frame 8) remains approximated by the standalone Flick
 //     contact-radius test / not modelled in the attack posture.
 //   * `isTargetOutOfRange` is approximated by distance > sight fp12 = 95.
@@ -41,6 +47,7 @@
 // bridge mode, for the default-OFF path (no config file).
 #include "pc_p2_kochappy_fsm.h"
 #include "pc_p2_kochappy_fsm_policy.h"
+#include "pc_p2_chappy_mouth.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_dwarf_orange.h"
 #include "pc_p2_white.h"
@@ -51,9 +58,11 @@
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Generator.h"
 #include "Stickers.h"
 #include "system.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -93,6 +102,9 @@ struct FsmActor {
 	bool died             = false;
 	bool healthAsserted   = false;
 	float logTimer        = 0.0f;
+	// #884: the Pikmin stuck into each source mouth slot; compared against the
+	// live mouth-sticker set only, never dereferenced.
+	Creature* mouth[p2chappymouth::MaxSlots] = {};
 };
 
 std::map<PelletView*, FsmActor> actors;
@@ -117,8 +129,8 @@ Creature* nearestCreature(const Vector3f& pos, float radius)
 	Creature* best = nullptr;
 	float bestSq   = radius * radius;
 	if (naviMgr) {
-		Navi* navi = naviMgr->getNavi();
-		if (navi && navi->isAlive()) {
+		for (Navi* navi : pc_p2_navis()) {
+			if (!navi->isAlive()) continue;
 			const Vector3f p = navi->getPosition();
 			const float dx = p.x - pos.x, dz = p.z - pos.z;
 			const float d  = dx * dx + dz * dz;
@@ -151,28 +163,6 @@ Piki* nearestPiki(const Vector3f& pos, float radius)
 			const Vector3f q = piki->getPosition();
 			const float dx = q.x - pos.x, dz = q.z - pos.z;
 			const float d  = dx * dx + dz * dz;
-			if (d < bestSq) { bestSq = d; best = piki; }
-		}
-	}
-	return best;
-}
-
-// Source EnemyFunc::eatPikmin (enemyAction.cpp:1107-1142): stick one free,
-// not-already-stuck Pikmin within `radius` of `center` to a free mouth slot.
-// 3D distance matches the source slotPos.distance(pikiPos) check.
-Piki* nearestEdiblePiki(const Vector3f& center, float radius)
-{
-	Piki* best   = nullptr;
-	float bestSq = radius * radius;
-	if (pikiMgr) {
-		Iterator it(pikiMgr);
-		CI_LOOP(it) {
-			Piki* piki = static_cast<Piki*>(*it);
-			if (!piki || !piki->isAlive()) continue;
-			if (piki->isStickToMouth() || piki->isStickTo()) continue;
-			const Vector3f q = piki->getPosition();
-			const float dx = q.x - center.x, dy = q.y - center.y, dz = q.z - center.z;
-			const float d  = dx * dx + dy * dy + dz * dz;
 			if (d < bestSq) { bestSq = d; best = piki; }
 		}
 	}
@@ -237,31 +227,112 @@ void doFlick(BTeki* actor)
 			}
 		}
 	}
-	if (naviMgr) {
-		Navi* navi = naviMgr->getNavi();
-		if (navi && navi->isAlive() && distXZ(navi->getPosition(), pos) < SHAKE_RANGE) {
+	for (Navi* navi : pc_p2_navis()) {
+		if (navi->isAlive() && distXZ(navi->getPosition(), pos) < SHAKE_RANGE) {
 			navi->stimulate(InteractFlick(actor, SHAKE_KNOCKBACK, 0.0f, actor->getDirection()));
 		}
 	}
 }
 
-// Source EnemyFunc::eatPikmin (KEYEVENT_2, frame 8): stick one free Pikmin
-// within the mouth-slot radius to a free mouth slot. The P1 Chappy vehicle
-// exposes its mouth slots via getFreeSlot() but no reliable mouth-joint world
-// position, so the bite reach is measured from the actor centre at eatRange
-// (fp22 = 35) and the target is stuck to a free slot (p3=0 selects the eat/Esa
-// motion). With no free slot the host one-shot eat path kills the Pikmin.
-bool doEat(BTeki* actor, bool& slotAvailable)
+struct EatStats {
+	int captured       = 0;
+	int freeBefore     = 0;
+	int refusedNoHost  = 0;
+	int hostSlots      = 0;
+	bool nearestBehind = false;
+	p2chappymouth::WindowDiag diag; // #884 geometry fields on P2_KOCHAPPY_EAT
+	float headingDeg = 0.0f;
+	float drawYawDeg = 0.0f;
+};
+
+p2chappymouth::Vec3 mouthVec(const Vector3f& v)
 {
-	slotAvailable = false;
-	if (!pikiMgr) return false;
-	const Vector3f center = actor->getPosition();
-	Piki* prey = nearestEdiblePiki(center, params.eatRange);
-	CollPart* slot = actor->mCollInfo ? actor->getFreeSlot() : nullptr;
-	slotAvailable = slot != nullptr;
-	if (!prey) return false;
-	if (slot) return prey->stimulate(InteractSwallow(actor, slot, 0));
-	return prey->stimulate(InteractSwallow(actor, nullptr, 0));
+	return p2chappymouth::Vec3{v.x, v.y, v.z};
+}
+
+// Source EnemyFunc::eatPikmin (KEYEVENT_2, frame 8; enemyAction.cpp:1107-1142)
+// through pc_p2_chappy_mouth.h: an eligible Pikmin (EatPikminDefaultCondition)
+// within r=15 of the empty "kamu" slot at the retail attack frame 8 is stuck
+// to the P1 host 'slot' child (p3=0 selects the eat/Esa motion). No reachable
+// empty slot, or no host mouth part, means no capture: InteractSwallow is never
+// sent with a null part and BTeki::getFreeSlot (unguarded getSphere) is unused.
+EatStats doEat(BTeki* actor, FsmActor& state, unsigned generator)
+{
+	EatStats st;
+	const p2chappymouth::Profile* prof = p2chappymouth::profileForSource(44);
+	if (!prof || !pikiMgr) return st;
+	CollPart* mouthPart = actor->mCollInfo ? actor->mCollInfo->getSphere('slot') : nullptr;
+	const int hostCount = mouthPart ? mouthPart->getChildCount() : 0;
+	st.hostSlots = hostCount;
+	std::vector<Creature*> inMouth;
+	{
+		Stickers stickers(actor);
+		Iterator it(&stickers);
+		CI_LOOP(it) {
+			Creature* stuck = *it;
+			if (stuck && stuck->isPiki() && stuck->isStickToMouth()) inMouth.push_back(stuck);
+		}
+	}
+	bool occupied[p2chappymouth::MaxSlots] = {};
+	for (int i = 0; i < prof->slots; ++i) {
+		if (state.mouth[i] && std::find(inMouth.begin(), inMouth.end(), state.mouth[i]) != inMouth.end()) {
+			occupied[i] = true;
+		} else {
+			state.mouth[i] = nullptr;
+			++st.freeBefore;
+		}
+	}
+	// Snapshot the prey before any stimulate (receivers change stick state).
+	std::vector<Piki*> pikis;
+	std::vector<p2chappymouth::Prey> prey;
+	{
+		Iterator it(pikiMgr);
+		CI_LOOP(it) {
+			Piki* piki = static_cast<Piki*>(*it);
+			if (!piki) continue;
+			p2chappymouth::Prey q{};
+			q.pos             = mouthVec(piki->getPosition());
+			q.alive           = piki->isAlive();
+			q.visible         = piki->isVisible();
+			q.buried          = piki->isBuried();
+			q.stuckToAnyMouth = piki->isStickToMouth() != 0;
+			q.stuckToSelf     = piki->getStickObject() == actor && !q.stuckToAnyMouth;
+			q.stuckToAny      = piki->isStickTo();
+			pikis.push_back(piki);
+			prey.push_back(q);
+		}
+	}
+	const p2chappymouth::Vec3 apos = mouthVec(actor->getPosition());
+	const int count = (int)prey.size();
+	const int nearest = p2chappymouth::nearestIndex(prey.data(), count, apos, params.attackHitRange,
+	                                                [](const p2chappymouth::Prey& q) { return p2chappymouth::eligible(q); });
+	st.nearestBehind = nearest >= 0 && p2chappymouth::toLocal(apos, state.heading, prey[nearest].pos).z <= 0.0f;
+	const int frame    = prof->firstFrame;
+	const float radius = p2chappymouth::effectiveRadius(*prof);
+	st.headingDeg      = wrapPi(state.heading) * 180.0f / PI;
+	st.drawYawDeg      = wrapPi(actor->getDirection()) * 180.0f / PI;
+	p2chappymouth::observe(st.diag, *prof, frame, apos, state.heading, prey.data(), count, occupied);
+	st.captured = p2chappymouth::eat(*prof, frame, apos, state.heading, prey.data(), count, occupied, [&](int n, int slot) {
+		const int idx  = p2chappymouth::hostPartIndex(slot, hostCount);
+		CollPart* part = idx >= 0 ? mouthPart->getChildAt(idx) : nullptr;
+		if (!part) {
+			++st.refusedNoHost;
+			return false;
+		}
+		Piki* piki       = pikis[n];
+		const bool white = pc_p2_is_white(piki);
+		if (!piki->stimulate(InteractSwallow(actor, part, 0))) return false;
+		state.mouth[slot] = piki;
+		const p2chappymouth::Vec3 local = p2chappymouth::toLocal(apos, state.heading, prey[n].pos);
+		const float dist = p2chappymouth::distance(p2chappymouth::slotWorld(*prof, frame, slot, apos, state.heading), prey[n].pos);
+		std::printf("P2_KOCHAPPY_EAT_PREY generator=%u source_id=44 frame=%d slot=%d prey_angle_deg=%.1f prey_dist=%.1f "
+		            "slot_radius=%.1f local_x=%.1f local_y=%.1f local_z=%.1f white=%d\n",
+		            generator, frame, slot, std::atan2(local.x, local.z) * 180.0f / PI, dist, radius, local.x,
+		            local.y, local.z, white ? 1 : 0);
+		std::fflush(stdout);
+		return true;
+	});
+	return st;
 }
 
 // Source EnemyFunc::swallowPikmin (KEYEVENT_3, frame 88): kill every Pikmin
@@ -397,6 +468,8 @@ void pc_p2_kochappy_fsm_setup()
 		state.home      = actor->getPosition();
 		state.heading   = actor->getDirection();
 		state.logTimer  = 0.0f;
+		// #884: eat geometry is at P2 model scale 1; the draw uses mSRT.s.
+		actor->mSRT.s.set(1.0f, 1.0f, 1.0f);
 		actor->mHealth  = params.health;
 		const Vector3f pos = actor->getPosition();
 		const unsigned generator = pc_p2_campaign_token(actor);
@@ -581,18 +654,37 @@ void pc_p2_kochappy_fsm_update(BTeki* actor)
 		stop(actor);
 		if (!state.attackFired && state.stateTime * 30.0f >= ATTACK_EVENT_FRAME) {
 			state.attackFired = true;
-			Creature* hit     = nearestCreature(pos, params.attackHitRange);
-			if (hit) {
-				hit->stimulate(InteractAttack(actor, nullptr, params.attackDamage, false));
-				std::printf("P2_KOCHAPPY_ATTACK generator=%u frame=%.0f damage=%.0f\n", generator,
-				            ATTACK_EVENT_FRAME, params.attackDamage);
-				std::fflush(stdout);
+			// Source attackNavi (kochappyState.cpp:1403-1406) bites the captain
+			// only; Pikmin are eaten by the mouth slot, never damaged here.
+			for (Navi* navi : pc_p2_navis()) {
+				if (navi->isAlive() && distXZ(navi->getPosition(), pos) < params.attackHitRange) {
+					navi->stimulate(InteractAttack(actor, nullptr, params.attackDamage, false));
+					std::printf("P2_KOCHAPPY_ATTACK generator=%u frame=%.0f damage=%.0f\n", generator,
+					            ATTACK_EVENT_FRAME, params.attackDamage);
+					std::fflush(stdout);
+				}
 			}
-			// Source eatPikmin (KEYEVENT_2): stick one free Pikmin to the mouth.
-			bool slotAvailable = false;
-			const bool eaten = doEat(actor, slotAvailable);
-			std::printf("P2_KOCHAPPY_EAT generator=%u frame=%.0f eaten=%d slot=%d\n", generator,
-			            ATTACK_EVENT_FRAME, eaten ? 1 : 0, slotAvailable ? 1 : 0);
+			// Source eatPikmin (KEYEVENT_2): mouth-slot eat (pc_p2_chappy_mouth.h).
+			const EatStats eat = doEat(actor, state, generator);
+			// #884 geometry fields: see pc_p2_chappy.cpp printDiag (same meanings).
+			const p2chappymouth::Profile* prof = p2chappymouth::profileForSource(44);
+			const float tdist = target ? distXZ(target->getPosition(), pos) : -1.0f;
+			const float tang  = target ? wrapPi(std::atan2(target->getPosition().x - pos.x, target->getPosition().z - pos.z)
+			                                    - state.heading) * 180.0f / PI
+			                           : 0.0f;
+			std::printf("P2_KOCHAPPY_EAT generator=%u frame=%.0f eaten=%d slot=%d captured=%d nearest_behind=%d "
+			            "refused_no_host=%d host_slots=%d closest=%.1f closest_local=%.1f,%.1f,%.1f "
+			            "slot_radius=%.1f reach=%.1f front=%d stuck_self=%d eligible_min=%d heading_deg=%.1f "
+			            "draw_yaw_deg=%.1f scale=%.2f target_kind=%c target_dist=%.1f closest_frame=%d closest_slot=%d "
+			            "target_ang_deg=%.1f\n",
+			            generator, ATTACK_EVENT_FRAME, eat.captured > 0 ? 1 : 0, eat.freeBefore > 0 ? 1 : 0,
+			            eat.captured, eat.nearestBehind ? 1 : 0, eat.refusedNoHost, eat.hostSlots, eat.diag.closest,
+			            eat.diag.closestLocal.x, eat.diag.closestLocal.y, eat.diag.closestLocal.z,
+			            prof ? p2chappymouth::effectiveRadius(*prof) : 0.0f, prof ? p2chappymouth::maxReach(*prof) : 0.0f,
+			            eat.diag.front, eat.diag.stuckSelf, eat.diag.eligibleMin, eat.headingDeg, eat.drawYawDeg,
+			            actor->mSRT.s.x,
+			            !target ? '-' : (!target->isPiki() ? 'n' : (target->getStickObject() == actor ? 's' : 'p')),
+			            tdist, eat.diag.closestFrame, eat.diag.closestSlot, tang);
 			std::fflush(stdout);
 		}
 		if (!state.swallowFired && state.stateTime * 30.0f >= SWALLOW_EVENT_FRAME) {

@@ -3,6 +3,7 @@
 #include "netplay/pc_netplay_policy.h"
 #include "netplay/pc_netplay_present.h"
 #include "timing/pc_render_phase.h"
+#include "pc_p2_dangomushi.h"
 #else
 #define pc_netplay_sim_visible(x) (x)
 #endif
@@ -179,13 +180,21 @@ void DualCreature::refresh(Graphics& gfx)
 #if defined(VERSION_PIKIDEMO) || defined(VERSION_GPIJ01_01)
 	// I don't enjoy splitting this difference in two, but syntax highlighting really hates extra opening braces.
 #else
+#if defined(PIKI_PC_PORT)
 	// M2a netplay culling policy (issue #879): in deterministic mode the sim
 	// sees always-visible, which also pins the dynamics mode below to real
 	// dynamics (the vanilla on-screen behaviour: nearby pellets/bridges that
 	// gameplay touches use real dynamics; off-screen simple dynamics is a
 	// physics optimisation whose integration differs).
-	bool isPointVisible
-	    = pc_netplay_sim_visible(gfx.mCamera->isPointVisible(mSRT.t, 2.0f * getBoundingSphereRadius()));
+	f32 cullRadius = 2.0f * getBoundingSphereRadius();
+	const f32 p2CullRadius = pc_p2_dangomushi_cull_radius(this);
+	if (p2CullRadius > cullRadius) {
+		cullRadius = p2CullRadius;
+	}
+	bool isPointVisible = pc_netplay_sim_visible(gfx.mCamera->isPointVisible(mSRT.t, cullRadius));
+#else
+	bool isPointVisible = gfx.mCamera->isPointVisible(mSRT.t, 2.0f * getBoundingSphereRadius());
+#endif
 
 	if (isPointVisible) {
 		disableAICulling();

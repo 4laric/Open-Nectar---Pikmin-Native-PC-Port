@@ -7,6 +7,9 @@
 // (p2-tank-visual.txt) is retained when no identity bank is staged.
 #include "pc_p2_tank.h"
 #include "pc_p2_tank_policy.h"
+#include "pc_p2_tank_breath.h"
+#include "pc_p2_species.h"
+#include "pc_p2_species_policy.h"
 #include "pc_p2_tank_phase.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_randomizer.h"
@@ -19,16 +22,19 @@
 #include "Graphics.h"
 #include "Camera.h"
 #include "gameflow.h"
+#include "pc_p2_pose_family.h"
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Interactions.h"
 #include "MapMgr.h"
 #include "gl/pc_gfx.h"
 #include <vector>
 #include <map>
 #include <set>
+#include <unordered_set>
 #include <fstream>
 #include <cmath>
 #include <cstdlib>
@@ -50,6 +56,8 @@ int vmotion(int native){switch(native){case TekiMotion::Move1:return 1;case Teki
 std::map<PelletView*,int> actors;
 const char* ids[]={"Tank","Wtank"};
 std::map<std::string,std::vector<Shape*>> animated[2];
+p2posefamily::Bank poseBank[2]{p2posefamily::Bank("TANK"),p2posefamily::Bank("TANK")}; // #895 interpolated draw
+p2posefamily::Actors poseVis;
 std::map<std::string,p2animation::Clip> timing[2];
 std::set<PelletView*> drawn,drawnCorpse;
 enum TState { TNK_DEAD=0,TNK_WAIT=1,TNK_MOVE=2,TNK_MOVETURN=3,TNK_CHASETURN=4,TNK_ATTACK=5,TNK_FLICK=6 };
@@ -58,7 +66,6 @@ constexpr float HOME_RADIUS=15.0f;
 constexpr float TERRITORY=250.0f;
 constexpr float TURN_RATE=2.0f;
 constexpr float CHASE_TURN_RATE=3.5f;
-constexpr float ATTACK_ANGLE=0.6f;
 constexpr float FACE_OK_ANGLE=0.174533f;
 constexpr int FLICK_STUCK_MIN=3;
 constexpr float BREATH_TICK_S=1.0f/30.0f;
@@ -69,6 +76,10 @@ struct TankFsm {
     unsigned rng=1;unsigned token=0;bool deadLogged=false;float deathPrior=0.0f;bool deathPriorSet=false;
     std::string clip="waitact1";float phase=0.0f;float logTimer=0.0f;float lastHealth=0.0f;
     float blowTimer=0.0f;
+    // Breath exposure (#884): emitter growth, KEYEVENT_2 latch and per-breath
+    // unique-actor evidence sets (pointer identity; cleared on transition).
+    p2tankbreath::Emit emit;bool discharging=false;p2tankbreath::Stats stats;
+    std::unordered_set<const void*> exposedPiki,acceptedPiki,immunePiki,exposedNavi,acceptedNavi;
 };
 std::map<PelletView*,TankFsm> fsms;
 bool ready=false;
@@ -77,36 +88,17 @@ float wrapPi(float a){while(a>PI_F)a-=2.0f*PI_F;while(a<-PI_F)a+=2.0f*PI_F;retur
 float distXZ(const Vector3f& a,const Vector3f& b){const float dx=a.x-b.x,dz=a.z-b.z;return std::sqrt(dx*dx+dz*dz);}
 float clipSeconds(int kind,const std::string& name){auto it=timing[kind].find(name);return it==timing[kind].end()?1.0f:it->second.duration/30.0f;}
 void loadAnimation(std::vector<p2animation::Clip> (&banks)[2]){
+    // #895: compact loader (few Shapes + decoded vectors per clip); the Shapes
+    // stay the nearest-pose fallback. Fail-closed as before.
     size_t total=0;
-    for(int kind=0;kind<2;++kind){std::vector<unsigned char> reference;
-        for(const auto& clip:banks[kind]){size_t clipBytes=0;
-            for(int i=0;i<clip.count;++i){char path[192];std::snprintf(path,sizeof(path),"assets/dataDir/courses/pikmin2room/tank_%s_%s_%02d.mod",ids[kind],clip.name.c_str(),i);
-                std::ifstream file(path,std::ios::binary|std::ios::ate);if(!file)std::abort();auto size=file.tellg();
-                if(size<=0||size>512*1024)std::abort();clipBytes+=size_t(size);total+=size_t(size);
-                if(clipBytes>512*1024||total>10*1024*1024)std::abort();file.seekg(0);
-                std::vector<unsigned char> bytes(size_t(size),0),resources;
-                if(!file.read(reinterpret_cast<char*>(bytes.data()),size)||!p2animation::resources(bytes,resources))std::abort();
-                if(!reference.empty()&&reference!=resources)std::abort();reference=resources;
-            }
-        }
-    }
-    for(int kind=0;kind<2;++kind){Shape* shared=nullptr;
+    for(int kind=0;kind<2;++kind){p2poseload::Shared shared;
         for(const auto& clip:banks[kind]){timing[kind][clip.name]=clip;
-            for(int i=0;i<clip.count;++i){char path[160];std::snprintf(path,sizeof(path),"courses/pikmin2room/tank_%s_%s_%02d.mod",ids[kind],clip.name.c_str(),i);
-                Shape* shape=gameflow.loadShape(path,true);if(!shape)std::abort();
-                if(!shared){shared=shape;for(int t=0;t<shape->mTexAttrCount;++t)if(shape->mTexAttrList[t].mTexture)shape->mTexAttrList[t].mTexture->attach();}
-                else{
-                    if(shape->mMaterialCount!=shared->mMaterialCount||shape->mTexAttrCount!=shared->mTexAttrCount||shape->mTevInfoCount!=shared->mTevInfoCount)std::abort();
-                    for(int j=0;j<shape->mTotalMatpolyCount;++j){auto* poly=shape->mMatpolyList[j];if(!poly||!poly->mMaterial)continue;int material=-1;
-                        for(int m=0;m<shape->mMaterialCount;++m)if(poly->mMaterial==&shape->mMaterialList[m])material=m;
-                        if(material<0)std::abort();poly->mMaterial=&shared->mMaterialList[material];}
-                    shape->mMaterialList=shared->mMaterialList;shape->mTexAttrList=shared->mTexAttrList;shape->mTevInfoList=shared->mTevInfoList;
-                }
-                animated[kind][clip.name].push_back(shape);
-            }
+            std::string error;
+            if(!p2posefamily::loadFamilyClip(poseBank[kind],clip.name,std::string("tank_")+ids[kind]+"_"+clip.name,clip.count,clip.duration,clip.frames,shared,total,animated[kind][clip.name],error)){
+                std::printf("P2_TANK_BANK_INVALID species=%s clip=%s reason=%s\n",ids[kind],clip.name.c_str(),error.c_str());std::fflush(stdout);std::abort();}
         }
     }
-    std::printf("P2_TANK_BANK_READY mod_bytes=%zu gameplay=P1_unchanged\n",total);
+    std::printf("P2_TANK_BANK_READY mod_bytes=%zu resident=1 gameplay=P1_unchanged\n",total);
 }
 void stop(BTeki* a){a->inputDrive(Vector3f(0.0f,0.0f,0.0f));a->mVelocity.x=0.0f;a->mVelocity.y=0.0f;a->mVelocity.z=0.0f;}
 void walkTo(BTeki* a,TankFsm& s,const Vector3f& target,float speed,float dt){
@@ -131,7 +123,7 @@ void turnTo(BTeki* a,TankFsm& s,const Vector3f& target,float dt,float rate){
 }
 Creature* nearestTarget(const Vector3f& pos,float sight){
     Creature* best=nullptr;float bestSq=sight*sight;
-    if(naviMgr){Navi* n=naviMgr->getNavi();if(n&&n->isAlive()){const Vector3f p=n->getPosition();
+    for(Navi* n:pc_p2_navis()){if(n->isAlive()){const Vector3f p=n->getPosition();
         const float dx=p.x-pos.x,dz=p.z-pos.z,d=dx*dx+dz*dz;if(d<bestSq){bestSq=d;best=n;}}}
     if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(!p||!p->isAlive())continue;
         const Vector3f q=p->getPosition();const float dx=q.x-pos.x,dz=q.z-pos.z,d=dx*dx+dz*dz;if(d<bestSq){bestSq=d;best=p;}}}
@@ -145,43 +137,65 @@ int stuckPikminCount(Creature* creature){
     }
     return n;
 }
-bool attackable(const TankFsm& s,const Vector3f& pos,const Creature* target,float range){
-    if(!target)return false;const Vector3f tp=target->getPosition();
-    if(distXZ(pos,tp)>=range)return false;
-    const float ang=std::fabs(wrapPi(std::atan2(tp.x-pos.x,tp.z-pos.z)-s.heading));
-    return ang<ATTACK_ANGLE;
+// Source isAttackable(false) (Tank.cpp:266-319): every TANK_Attack entry
+// (TankState.cpp:91,184,724,811) requires some alive Pikmin/Navi inside the
+// full-range emitter box, the same box the breath discharges into. Returns the
+// first such actor (source mTargetCreature, :309-310) or nullptr. nearestTarget
+// only steers turn/chase; it never commits the Blowhog to a breath.
+Creature* attackable(const Vector3f& pos,const TankFsm& s){
+    const p2tank::Params& p=p2tank::params(s.kind);
+    const p2tankbreath::Frame f=p2tankbreath::triggerFrame(pos.x,pos.y,pos.z,s.heading,p.attackRange,p.attackRadius);
+    auto where=[](Creature* c,float& x,float& y,float& z){const Vector3f q=c->getPosition();x=q.x;y=q.y;z=q.z;};
+    auto alive=[](Creature* c){return c->isAlive();};
+    static std::vector<Creature*> population;population.clear();
+    if(naviMgr){Iterator it(naviMgr);CI_LOOP(it)population.push_back(static_cast<Navi*>(*it));}
+    if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it)population.push_back(static_cast<Piki*>(*it));}
+    return p2tankbreath::firstExposed(f,population,where,alive);
 }
 bool shouldFlick(BTeki* actor){return stuckPikminCount(actor)>=FLICK_STUCK_MIN;}
-// Source StateAttack: while mIsBlowing, isAttackable(true) + discharge per tick.
-// Hoppe-emitter cone: face-dir cone of attackRange/attackRadius; Tank uses
-// InteractFire, Wtank uses InteractBubble (Ftank.cpp/Wtank.cpp interactCreature).
-int doBreath(BTeki* actor,TankFsm& s){
+// Source StateAttack: while mIsBlowing, isAttackable(true) discharges every
+// frame (TankState.cpp:870-873). Tank.cpp:292-315 stimulates every alive
+// Pikmin/Navi in the hoppe-emitter box with no receiver cap; Tank uses
+// InteractFire, Wtank InteractBubble (Ftank.cpp:121-125, Wtank.cpp:119-123).
+// Immunity is the receiver's decision; p2_species_immune only classifies
+// evidence here and never gates the stimulus.
+int doBreath(BTeki* actor,TankFsm& s,float dt){
     const Vector3f pos=actor->getPosition();
     const p2tank::Params& p=p2tank::params(s.kind);
-    int hit=0;
-    auto inCone=[&](const Vector3f& q){
-        const float dx=q.x-pos.x,dz=q.z-pos.z;
-        const float d=std::sqrt(dx*dx+dz*dz);
-        if(d>=p.attackRange+p.attackRadius)return false;
-        const float ang=std::fabs(wrapPi(std::atan2(dx,dz)-s.heading));
-        return ang<ATTACK_ANGLE||d<p.attackRadius;
+    const float range=p2tankbreath::advance(s.emit,p.attackRange,dt);
+    const p2tankbreath::Frame f=p2tankbreath::frame(pos.x,pos.y,pos.z,s.heading,range,p.attackRadius);
+    const int hazard=s.kind?P2HazardWater:P2HazardFire;
+    auto where=[](Creature* c,float& x,float& y,float& z){const Vector3f q=c->getPosition();x=q.x;y=q.y;z=q.z;};
+    auto alive=[](Creature* c){return c->isAlive();};
+    auto stim=[&](Creature* c){
+        if(s.kind==0)return c->stimulate(InteractFire(actor,p.attackDamage));
+        return c->stimulate(InteractBubble(actor,p.attackDamage));
     };
-    // Snapshot targets first: InteractBubble can kill (remove from pikiMgr)
-    // during stimulate, invalidating the live iterator (crash in Wtank runs).
-    std::vector<Piki*> pikis;std::vector<Navi*> navis;
-    if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it){Piki* q=static_cast<Piki*>(*it);if(!q||!q->isAlive())continue;
-        if(inCone(q->getPosition()))pikis.push_back(q);if(pikis.size()>=6)break;}}
-    if(naviMgr){Iterator it(naviMgr);CI_LOOP(it){Navi* n=static_cast<Navi*>(*it);if(!n||!n->isAlive())continue;
-        if(inCone(n->getPosition()))navis.push_back(n);}}
-    for(Piki* q:pikis){if(!q||!q->isAlive())continue;bool ok=false;
-        if(s.kind==0)ok=q->stimulate(InteractFire(actor,p.attackDamage));
-        else ok=q->stimulate(InteractBubble(actor,p.attackDamage));
-        if(ok)++hit;}
-    for(Navi* n:navis){if(!n||!n->isAlive())continue;bool ok=false;
-        if(s.kind==0)ok=n->stimulate(InteractFire(actor,p.attackDamage));
-        else ok=n->stimulate(InteractBubble(actor,p.attackDamage));
-        if(ok)++hit;}
+    // Snapshot the full manager contents before any stimulus: a receiver can
+    // kill/remove actors, invalidating a live manager iterator.
+    std::vector<Piki*> allPiki,pikis;std::vector<Navi*> allNavi,navis;
+    if(pikiMgr){Iterator it(pikiMgr);CI_LOOP(it)allPiki.push_back(static_cast<Piki*>(*it));}
+    if(naviMgr){Iterator it(naviMgr);CI_LOOP(it)allNavi.push_back(static_cast<Navi*>(*it));}
+    p2tankbreath::collect(f,allPiki,where,alive,pikis);
+    p2tankbreath::collect(f,allNavi,where,alive,navis);
+    for(Piki* q:pikis){s.exposedPiki.insert(q);if(p2_species_immune(pc_p2_species(q),hazard))s.immunePiki.insert(q);}
+    for(Navi* n:navis)s.exposedNavi.insert(n);
+    int hit=p2tankbreath::dispatch(pikis,alive,[&](Piki* q){const bool ok=stim(q);if(ok)s.acceptedPiki.insert(q);return ok;});
+    hit+=p2tankbreath::dispatch(navis,alive,[&](Navi* n){const bool ok=stim(n);if(ok)s.acceptedNavi.insert(n);return ok;});
+    ++s.stats.frames;
+    if(int(pikis.size())>s.stats.maxExposedPiki)s.stats.maxExposedPiki=int(pikis.size());
+    if(int(navis.size())>s.stats.maxExposedNavi)s.stats.maxExposedNavi=int(navis.size());
+    if(range>s.stats.maxRange)s.stats.maxRange=range;
     return hit;
+}
+// One summary per attack (clip end or early death exit), printed before
+// transition() clears the breath state.
+void breathSummary(const TankFsm& s,unsigned gen,unsigned sourceId,const char* reason){
+    if(!s.blowing)return;
+    std::printf("P2_TANK_BREATH_SUMMARY species=%s generator=%u source_id=%u reason=%s frames=%d range_max=%.1f element=%s cap=none exposed_piki=%zu accepted_piki=%zu immune_exposed=%zu max_exposed_frame=%d exposed_navi=%zu accepted_navi=%zu\n",
+        ids[s.kind],gen,sourceId,reason,s.stats.frames,s.stats.maxRange,s.kind?"water":"fire",
+        s.exposedPiki.size(),s.acceptedPiki.size(),s.immunePiki.size(),s.stats.maxExposedPiki,s.exposedNavi.size(),s.acceptedNavi.size());
+    std::fflush(stdout);
 }
 // Source StateFlick: flickNearbyNavi + flickNearbyPikmin + flickStickPikmin.
 int doFlick(BTeki* actor,TankFsm& s){
@@ -193,7 +207,7 @@ int doFlick(BTeki* actor,TankFsm& s){
         if(distXZ(q->getPosition(),pos)<p.flickRange)pikis.push_back(q);}}
     for(Piki* q:pikis){if(!q||!q->isAlive())continue;
         if(q->stimulate(InteractFlick(actor,300.0f,0.0f,FLICK_BACKWARDS_ANGLE)))++hit;}
-    if(naviMgr){Navi* n=naviMgr->getNavi();if(n&&n->isAlive()&&distXZ(n->getPosition(),pos)<p.flickRange)
+    for(Navi* n:pc_p2_navis()){if(n->isAlive()&&distXZ(n->getPosition(),pos)<p.flickRange)
         if(n->stimulate(InteractFlick(actor,300.0f,0.0f,FLICK_BACKWARDS_ANGLE)))++hit;}
     return hit;
 }
@@ -205,6 +219,8 @@ void setPhase(int kind,TankFsm& s){
 }
 void transition(BTeki* actor,TankFsm& s,TState st,const char* clip,unsigned gen){
     (void)actor;s.state=st;s.stateTime=0.0f;s.blowing=false;s.breathDone=false;s.flickDone=false;s.blowTimer=0.0f;if(clip)s.clip=clip;
+    s.emit=p2tankbreath::Emit{};s.discharging=false;s.stats=p2tankbreath::Stats{};
+    s.exposedPiki.clear();s.acceptedPiki.clear();s.immunePiki.clear();s.exposedNavi.clear();s.acceptedNavi.clear();
     std::printf("P2_TANK_STATE species=%s generator=%u state=%s\n",ids[s.kind],gen,p2tank::stateName(st));
     std::fflush(stdout);
 }
@@ -213,8 +229,8 @@ void die(BTeki* actor,TankFsm& s,unsigned gen,float priorHealth){
     transition(actor,s,TNK_DEAD,"dead",gen);
 }
 }
-void pc_p2_tank_reset(){vactors.clear();vlogged.clear();for(auto& c:vclips)c=VClip{};water=nullptr;waterLogged=false;vbytesTotal=0;actors.clear();fsms.clear();drawn.clear();drawnCorpse.clear();for(auto& b:animated)b.clear();for(auto& b:timing)b.clear();ready=false;}
-void pc_p2_tank_forget(BTeki* actor){vactors.erase(actor);vlogged.erase(actor);auto* v=static_cast<PelletView*>(actor);pc_randomizer_p2_forget_source(v);actors.erase(v);fsms.erase(v);drawn.erase(v);drawnCorpse.erase(v);}
+void pc_p2_tank_reset(){for(auto& b:poseBank)b.reset();poseVis.clear();vactors.clear();vlogged.clear();for(auto& c:vclips)c=VClip{};water=nullptr;waterLogged=false;vbytesTotal=0;actors.clear();fsms.clear();drawn.clear();drawnCorpse.clear();for(auto& b:animated)b.clear();for(auto& b:timing)b.clear();ready=false;}
+void pc_p2_tank_forget(BTeki* actor){poseVis.forget(actor);vactors.erase(actor);vlogged.erase(actor);auto* v=static_cast<PelletView*>(actor);pc_randomizer_p2_forget_source(v);actors.erase(v);fsms.erase(v);drawn.erase(v);drawnCorpse.erase(v);}
 float pc_p2_tank_param_f(const BTeki* actor,int idx,float fallback){
     auto i=actors.find(static_cast<PelletView*>(const_cast<BTeki*>(actor)));if(i==actors.end())return fallback;
     const p2tank::Params& p=p2tank::params(i->second);
@@ -245,7 +261,13 @@ void pc_p2_tank_setup(){
     Iterator it(tekiMgr);CI_LOOP(it){Teki* teki=static_cast<Teki*>(*it);if(!teki||!teki->mGenerator)continue;
      const unsigned token=bridge?pc_p2_campaign_token(teki):teki->mGenerator->_70;
      auto found=wanted.find(token);if(found==wanted.end())continue;
-     int kind=found->second;if(!seen.insert(found->first).second)std::abort();if(teki->mTekiType!=TEKI_Tank)std::abort();
+     int kind=found->second;
+     if(teki->mTekiType!=TEKI_Tank){ // #948: wrong vehicle: refuse this actor with a reason, never abort a campaign
+      if(!bridge)std::abort();
+      std::printf("P2_TANK_UNBOUND generator=%u source_id=%u type=%d reason=host_type_mismatch\n",token,kind?25u:24u,int(teki->mTekiType));std::fflush(stdout);continue;}
+     if(!seen.insert(found->first).second){
+      if(!bridge)std::abort();
+      std::printf("P2_TANK_UNBOUND generator=%u source_id=%u reason=duplicate_generator\n",token,kind?25u:24u);std::fflush(stdout);continue;}
      actors[static_cast<PelletView*>(teki)]=kind;
      teki->mHealth=p2tank::params(kind).health;
      TankFsm& f=fsms[static_cast<PelletView*>(teki)];
@@ -260,8 +282,18 @@ void pc_p2_tank_setup(){
      std::printf("P2_TANK_STATE species=%s generator=%u state=wait\n",ids[kind],token);
      std::fflush(stdout);
     }
-    if(seen.size()!=wanted.size()){std::printf("P2_TANK_ERROR missing_actor wanted=%zu found=%zu\n",wanted.size(),seen.size());std::abort();}
-    loadAnimation(banks);ready=true;return;
+    if(seen.size()!=wanted.size()){std::printf("P2_TANK_MISSING wanted=%zu found=%zu\n",wanted.size(),seen.size());std::fflush(stdout);if(!bridge)std::abort();}
+    loadAnimation(banks);
+    // Breath timing is retail-sourced (attack.bca KEYEVENT_2 at 55 of 95);
+    // the staged bank carries no events, so only cross-check it.
+    for(int kind=0;kind<2;++kind){auto at=timing[kind].find("attack");
+        const int frames=at==timing[kind].end()?0:at->second.duration;bool key=false;
+        if(at!=timing[kind].end())for(int fr:at->second.frames)if(fr==p2tankbreath::KEYEVENT2_FRAME)key=true;
+        const bool verified=frames==p2tankbreath::ATTACK_CLIP_FRAMES&&key;
+        std::printf("P2_TANK_BREATH_TIMING species=%s source_id=%u attack_frames=%d keyevent_frame=%d keyevent_s=%.3f staged_keyframe=%d verified=%d\n",
+            ids[kind],kind?25u:24u,frames,p2tankbreath::KEYEVENT2_FRAME,p2tankbreath::keyEventSeconds(),int(key),int(verified));}
+    std::fflush(stdout);
+    ready=true;return;
    }
   }
  }
@@ -307,10 +339,11 @@ void pc_p2_tank_update(BTeki* actor){
         if(shouldFlick(actor)){s.targetPos=pos;s.targetValid=true;transition(actor,s,TNK_FLICK,"flick",gen);break;}
         if(s.stateTime>=clipSeconds(s.kind,s.clip)){
             s.stateTime=0.0f;
+            // TankState.cpp:91: attack only on an emitter-box hit, independent of sight.
+            if(Creature* a=attackable(pos,s)){s.targetPos=a->getPosition();s.targetValid=true;transition(actor,s,TNK_ATTACK,"attack",gen);break;}
             Creature* t=nearestTarget(pos,p.sight);
             if(t){s.targetPos=t->getPosition();s.targetValid=true;
-                if(attackable(s,pos,t,p.attackRange))transition(actor,s,TNK_ATTACK,"attack",gen);
-                else if(std::fabs(wrapPi(std::atan2(s.targetPos.x-pos.x,s.targetPos.z-pos.z)-s.heading))>FACE_OK_ANGLE)
+                if(std::fabs(wrapPi(std::atan2(s.targetPos.x-pos.x,s.targetPos.z-pos.z)-s.heading))>FACE_OK_ANGLE)
                     transition(actor,s,TNK_MOVETURN,"waitact1",gen);
             }
         }
@@ -321,9 +354,11 @@ void pc_p2_tank_update(BTeki* actor){
         if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
         if(shouldFlick(actor)){transition(actor,s,TNK_FLICK,"flick",gen);break;}
         Creature* t=nearestTarget(pos,p.sight);
-        if(t){turnTo(actor,s,t->getPosition(),dt,TURN_RATE);
-            if(attackable(s,pos,t,p.attackRange)){s.targetPos=t->getPosition();s.targetValid=true;transition(actor,s,TNK_ATTACK,"attack",gen);}
-            else if(std::fabs(wrapPi(std::atan2(t->getPosition().x-pos.x,t->getPosition().z-pos.z)-s.heading))<=FACE_OK_ANGLE)transition(actor,s,TNK_MOVE,"move1",gen);
+        if(t)turnTo(actor,s,t->getPosition(),dt,TURN_RATE);
+        // TankState.cpp:724: box hit first; otherwise keep turning toward t.
+        if(Creature* a=attackable(pos,s)){s.targetPos=a->getPosition();s.targetValid=true;transition(actor,s,TNK_ATTACK,"attack",gen);}
+        else if(t){
+            if(std::fabs(wrapPi(std::atan2(t->getPosition().x-pos.x,t->getPosition().z-pos.z)-s.heading))<=FACE_OK_ANGLE)transition(actor,s,TNK_MOVE,"move1",gen);
             else if(s.stateTime>=clipSeconds(s.kind,"waitact1"))transition(actor,s,TNK_MOVE,"move1",gen);
         } else transition(actor,s,TNK_WAIT,"waitact1",gen);
         break;
@@ -331,9 +366,10 @@ void pc_p2_tank_update(BTeki* actor){
     case TNK_MOVE:{
         if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
         if(shouldFlick(actor)){transition(actor,s,TNK_FLICK,"flick",gen);break;}
+        // TankState.cpp:184: box hit first; otherwise chase the nearest target.
+        if(Creature* a=attackable(pos,s)){s.targetPos=a->getPosition();s.targetValid=true;transition(actor,s,TNK_ATTACK,"attack",gen);break;}
         Creature* t=nearestTarget(pos,p.sight);
         if(t){s.targetPos=t->getPosition();s.targetValid=true;
-            if(attackable(s,pos,t,p.attackRange)){transition(actor,s,TNK_ATTACK,"attack",gen);break;}
             walkTo(actor,s,s.targetPos,p.moveSpeed,dt);
             if(distXZ(pos,s.home)>TERRITORY)transition(actor,s,TNK_CHASETURN,"waitact1",gen);
         } else {
@@ -347,22 +383,30 @@ void pc_p2_tank_update(BTeki* actor){
         if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
         if(shouldFlick(actor)){transition(actor,s,TNK_FLICK,"flick",gen);break;}
         Creature* t=nearestTarget(pos,p.sight);
-        if(t){turnTo(actor,s,t->getPosition(),dt,CHASE_TURN_RATE);
-            if(attackable(s,pos,t,p.attackRange)){s.targetPos=t->getPosition();s.targetValid=true;transition(actor,s,TNK_ATTACK,"attack",gen);}
-            else if(std::fabs(wrapPi(std::atan2(t->getPosition().x-pos.x,t->getPosition().z-pos.z)-s.heading))<=FACE_OK_ANGLE||s.stateTime>=clipSeconds(s.kind,"waitact1"))
+        if(t)turnTo(actor,s,t->getPosition(),dt,CHASE_TURN_RATE);
+        // TankState.cpp:811: box hit first; otherwise keep turning toward t.
+        if(Creature* a=attackable(pos,s)){s.targetPos=a->getPosition();s.targetValid=true;transition(actor,s,TNK_ATTACK,"attack",gen);}
+        else if(t){
+            if(std::fabs(wrapPi(std::atan2(t->getPosition().x-pos.x,t->getPosition().z-pos.z)-s.heading))<=FACE_OK_ANGLE||s.stateTime>=clipSeconds(s.kind,"waitact1"))
                 transition(actor,s,TNK_MOVE,"move1",gen);
         } else transition(actor,s,TNK_MOVE,"move1",gen);
         break;
     }
     case TNK_ATTACK:{
         stop(actor);
+        // TankState.cpp:866-869: dead check every exec, before any discharge.
+        if(actor->mHealth<=0.0f){breathSummary(s,gen,sourceId,"dead");die(actor,s,gen,priorForDeath);break;}
         if(!s.blowing){s.blowing=true;s.blowTimer=0.0f;std::printf("P2_TANK_BREATH species=%s generator=%u source_id=%u start=1\n",ids[s.kind],gen,sourceId);std::fflush(stdout);}
         s.blowTimer+=dt;
-        {
-            int hit=doBreath(actor,s);
-            if(hit>0)std::printf("P2_TANK_BREATH_HIT species=%s generator=%u source_id=%u hit=%d\n",ids[s.kind],gen,sourceId,hit),std::fflush(stdout);
+        // TankState.cpp:870-880: discharge while blowing, then latch on
+        // KEYEVENT_2, so the first discharge lands on the following frame.
+        if(s.discharging)doBreath(actor,s,dt);
+        if(!s.discharging&&s.stateTime>=p2tankbreath::keyEventSeconds()){
+            s.discharging=true;s.emit=p2tankbreath::Emit{};
+            std::printf("P2_TANK_BREATH_DISCHARGE species=%s generator=%u source_id=%u t=%.3f frame=%d\n",ids[s.kind],gen,sourceId,s.stateTime,int(std::lround(s.stateTime*p2tankbreath::ANIM_FPS)));std::fflush(stdout);
         }
         if(s.stateTime>=clipSeconds(s.kind,"attack")){
+            breathSummary(s,gen,sourceId,"clip");
             std::printf("P2_TANK_BREATH species=%s generator=%u source_id=%u start=0\n",ids[s.kind],gen,sourceId);std::fflush(stdout);
             if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
             if(shouldFlick(actor))transition(actor,s,TNK_FLICK,"flick",gen);
@@ -376,8 +420,7 @@ void pc_p2_tank_update(BTeki* actor){
         if(!s.flickDone){s.flickDone=true;int hit=doFlick(actor,s);std::printf("P2_TANK_FLICK species=%s generator=%u source_id=%u hit=%d\n",ids[s.kind],gen,sourceId,hit);std::fflush(stdout);}
         if(s.stateTime>=clipSeconds(s.kind,"flick")){
             if(actor->mHealth<=0.0f){die(actor,s,gen,priorForDeath);break;}
-            Creature* t=nearestTarget(pos,p.sight);
-            if(t&&attackable(s,pos,t,p.attackRange)){s.targetPos=t->getPosition();s.targetValid=true;transition(actor,s,TNK_ATTACK,"attack",gen);}
+            if(Creature* a=attackable(pos,s)){s.targetPos=a->getPosition();s.targetValid=true;transition(actor,s,TNK_ATTACK,"attack",gen);}
             else transition(actor,s,TNK_WAIT,"waitact1",gen);
         }
         break;
@@ -429,6 +472,10 @@ bool pc_p2_tank_draw(BTeki* actor,Graphics& gfx,const Matrix4f& view,bool corpse
    if(name){
        float phase=corpse?1.0f:(ft!=fsms.end()?ft->second.phase:0.0f);
        shape=animated[kind].at(name).at(timing[kind].at(name).index(phase,corpse));
+       // #895: lerp + crossfade into a private Shape; nearest pose stays the fallback.
+       const p2animation::Clip& clipTiming=timing[kind].at(name);
+       const float sourceFrame=corpse?float(clipTiming.duration-1):std::max(0.f,std::min(1.f,phase))*float(clipTiming.duration-1);
+       if(Shape* smooth=poseVis.draw(actor,poseBank[kind],name,sourceFrame,actor->mGenerator?pc_p2_campaign_token(actor):0u))shape=smooth;
    }
    shape->updateAnim(gfx,view,nullptr,actor);
    pc_gfx_specular_family_scope(1);

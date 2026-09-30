@@ -20,6 +20,7 @@
 #include "PikiState.h"
 #include "PikiAI.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Navi.h"
 #include "Interactions.h"
 #include "MapMgr.h"
@@ -193,8 +194,8 @@ float nearestTargetDistance(King& k) {
 			if (d < best) best = d;
 		}
 	}
-	if (naviMgr && naviMgr->getNavi()) {
-		const Vector3f& pos = naviMgr->getNavi()->getPosition();
+	for (Navi* n : pc_p2_navis()) {
+		const Vector3f& pos = n->getPosition();
 		const float dx = pos.x - k.x, dz = pos.z - k.z;
 		const float d = std::sqrt(dx * dx + dz * dz);
 		if (d < best) best = d;
@@ -314,8 +315,7 @@ void trampleScan(King& k) {
 			++pressedPikmin;
 		}
 	}
-	if (naviMgr && naviMgr->getNavi()) {
-		Navi* n = naviMgr->getNavi();
+	for (Navi* n : pc_p2_navis()) {
 		const Vector3f& pos = n->getPosition();
 		const float dx = pos.x - fx, dz = pos.z - fz;
 		if (dx * dx + dz * dz <= range * range && std::fabs(pos.y - k.y) <= p2king::TrampleHeightBand) {
@@ -327,8 +327,8 @@ void trampleScan(King& k) {
 	const p2king::FlickStep step = p2king::flickStep(pressedPikmin, pressedCaptains);
 	std::printf("P2_KING_TRAMPLE id=%u pressed_pikmin=%d pressed_captains=%d flick_captains=%d range=%.1f band=30\n",
 	            k.cfg.id, step.pressedPikmin, step.pressedCaptains, int(step.flickCaptains), range);
-	if (step.flickCaptains && naviMgr && naviMgr->getNavi()) {
-		Navi* n = naviMgr->getNavi();
+	for (Navi* n : pc_p2_navis()) {
+		if (!step.flickCaptains) break;
 		const Vector3f& pos = n->getPosition();
 		const float dx = pos.x - k.x, dz = pos.z - k.z;
 		if (dx * dx + dz * dz <= p2king::ShakeRange * p2king::ShakeRange) {
@@ -456,8 +456,10 @@ void eatScan(King& k) {
 		}
 	}
 	// Captains in any mouth slot take mAttackDamage (5 disc), once per lick.
-	if (k.attackArmed && !k.captainHitDone && naviMgr && naviMgr->getNavi()) {
-		Navi* n = naviMgr->getNavi();
+	// Every captain in a mouth slot this frame is hit; the latch closes the lick.
+	const bool lickOpen = k.attackArmed && !k.captainHitDone;
+	for (Navi* n : pc_p2_navis()) {
+		if (!lickOpen) break;
 		const Vector3f& pos = n->getPosition();
 		if (slotDistance(pos.x, pos.z) <= slotRadius) {
 			k.captainHitDone = true;
@@ -611,10 +613,11 @@ void tickKing(King& k) {
 					}
 				}
 			}
-			if (naviMgr && naviMgr->getNavi()) {
-				const Vector3f& pos = naviMgr->getNavi()->getPosition();
+			for (Navi* n : pc_p2_navis()) {
+				const Vector3f& pos = n->getPosition();
 				const float dx = pos.x - k.x, dz = pos.z - k.z;
 				if (dx * dx + dz * dz < best) {
+					best = dx * dx + dz * dz;
 					goalX = pos.x;
 					goalZ = pos.z;
 				}

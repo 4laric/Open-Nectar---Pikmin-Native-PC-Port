@@ -1,6 +1,8 @@
 #pragma once
 #include <string>
 class BTeki;
+class Creature;
+class CollPart;
 class PelletView;
 class Graphics;
 struct Matrix4f;
@@ -34,6 +36,22 @@ bool pc_p2_chappy_probe(const BTeki*, const char** state, const char** clip, flo
 // P1-vehicle press callback is wired to this P2 actor, so this stays a
 // bounded manual trigger for completeness; hp<=0 still reaches Dead.
 void pc_p2_chappy_press(BTeki* actor);
+// #884: source KingChappy::damageCallBack acceptance for the Emperor Bulblax
+// (kingChappy.cpp:824-848), evaluated by InteractAttack::actTeki on the hit's
+// owner and collision part before the host sees it. Returns < 0 for any actor
+// that is not a live registered King (no change), 0 when the source refuses
+// the hit (no damage, no flick), else the source damage rate (1.0 stuck
+// attacker with a part, 0.2 partless attacker low within 40 XZ).
+float pc_p2_chappy_king_damage_rate(BTeki* actor, Creature* owner, CollPart* part);
+// #884 round 3: source EnemyBase::addDamage flickSpeed for the Emperor
+// Bulblax. Called by InteractAttack::actTeki with its accept result, only for
+// hits pc_p2_chappy_king_damage_rate passed; adds 1.0 to the King's flick
+// timer per accepted hit. No-op for every other actor.
+void pc_p2_chappy_attacked(BTeki* actor, bool accepted);
+// Emperor Bulblax bombCallBack (kingChappy.cpp:875-880): a bomb blast that reaches a Teki.
+// Returns true when `actor` is a registered Emperor (0.25 x damage, flick +1.0; nothing
+// while buried or dead); false leaves the host path unchanged.
+bool pc_p2_chappy_king_bomb(BTeki* actor, float damage);
 const char* pc_p2_chappy_name(PelletView*);
 bool pc_p2_chappy_registered(const BTeki*);
 bool pc_p2_chappy_draw(BTeki*, Graphics&, const Matrix4f&, bool corpse = false);

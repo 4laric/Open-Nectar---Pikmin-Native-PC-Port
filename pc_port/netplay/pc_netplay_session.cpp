@@ -1543,7 +1543,7 @@ bool sha_file(const char* path, uint8_t out[32])
 //   pikiLimit, dayMinutes, infiniteDay, noDayAdvance, unlockZones, allOnions,
 //   pikiInvincible, allFlowers, carrySpeedScale(bits), naviSpeedScale(bits),
 //   naviHealthPct, tekiHealthPct, betterPathfinding, bluesOnlyWater,
-//   throwSpeedScale(bits), throwCancelB, noTrip, onionStep10, lockOn, charge,
+//   throwSpeedScale(bits), throwCancelB, noTrip, whistlePluck, onionStep10, lockOn, charge,
 //   throwWhileMoving, firstPerson, freeCamera, idleCounter, debugKeys,
 //   gyroEnabled, disableTutorials,
 //   coopPending(forced 1 in netplay), captainP1, captainP2, coopSplit,
@@ -1598,6 +1598,9 @@ std::string build_config_string()
 	addf("throwSpeedScale", pc_settings_get_throw_speed_scale());
 	addi("throwCancelB", pc_settings_get_throw_cancel_b());
 	addi("noTrip", pc_settings_get_no_trip());
+	// (#982) whistlePluck spawns Pikmin from the sim (pc_whistle_pluck.cpp), so it
+	// is session-locked and hashed like the other sim knobs.
+	addi("whistlePluck", pc_settings_get_whistle_pluck());
 	addi("onionStep10", pc_settings_get_onion_step10());
 	addi("lockOn", pc_settings_get_lock_on());
 	addi("charge", pc_settings_get_charge());
@@ -1608,9 +1611,8 @@ std::string build_config_string()
 	addi("debugKeys", pc_settings_get_debug_keys());
 	addi("gyroEnabled", pc_settings_get_gyro_enabled());
 	// m5: disableTutorials gates room-preview flow (newPikiGame.cpp), so it
-	// is sim-relevant and hashed. (The brief's `whistlePluck` name does not
-	// exist in this tree; the covered whistle knobs are holdToPluck,
-	// instantWhistle and whistleRadiusPct.)
+	// is sim-relevant and hashed. (whistlePluck, added by the #982 merge, is
+	// hashed above next to noTrip.)
 	addi("disableTutorials", pc_settings_get_disable_tutorials());
 	addi("coopPending", 1);
 	addi("captainP1", pc_coop_captain(0));

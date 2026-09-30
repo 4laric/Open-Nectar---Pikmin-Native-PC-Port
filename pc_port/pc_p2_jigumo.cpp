@@ -16,12 +16,17 @@
 //     point. Appear/Hide are animation-only (the source nest constraint and
 //     revisionAnimPos nest-follow motion are not representable), so the host
 //     stays at home while hidden and only the animation plays.
-//   * The source mouth slot (JIGUMO_MOUTH_JOINT 0, MouthSlots) and the
-//     Eat/S Attack swallowPikmin mouth matrix are not representable on the P1
-//     host. The bite is resolved as an explicit capture inside the source
-//     attack radius at the banked bite event frame, then exactly one
-//     InteractKill at the banked swallow event frame; mirrors the Catfish and
-//     Armor ports. Exactly-once per bite.
+//   * Mouth slot (#886): the source kamu_joint1 slot (r=25) eats through
+//     pc_p2_captor_mouth.h: Attack runs EnemyFunc::eatPikmin with the source
+//     ConditionHeightCheckPiki every tick from key event 2 (frame 26) until a
+//     catch, SAttack every tick from frame 13 to key event 3. A caught Pikmin
+//     is stuck to the P1 host 'slot' part (pc_p2_captor_host.h), so it cannot
+//     be whistled away; Eat (dive1 key event 8) and SAttack (key event 10)
+//     swallow only Pikmin still held (swallowPikmin, white poison 500). The
+//     joint position is a documented port approximation (see the header).
+//     Death, teardown and non-carry transitions release the mouth; the
+//     port's own flick sweep spares the held Pikmin (source flicks refuse a
+//     swallowed Pikmin: PikiSwallowedState::dead(), interactPiki.cpp).
 //   * The source view/search angle is a full hemisphere (the Jigumo general
 //     block does not override the angle), so target selection ignores facing.
 //     Turn rate, flick radius and shake values are P1-host values.
@@ -30,6 +35,7 @@
 // Every hook is a no-op for unregistered actors; no other lane's module is
 // modified.
 #include "pc_p2_jigumo.h"
+#include "pc_p2_captor_host.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_setup_failsafe.h"
 #include "pc_randomizer.h"
@@ -42,6 +48,7 @@
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Generator.h"
 #include "gameflow.h"
 #include <cmath>
@@ -96,7 +103,12 @@ constexpr float MOVE_SPEED = 300.0f;        // general fp06
 constexpr float TERRITORY = 400.0f;         // general fp09
 constexpr float HOME_RADIUS = 25.0f;        // general fp10
 constexpr float SIGHT = 400.0f;             // general fp12
-constexpr float ATTACK_RANGE = 200.0f;      // general fp20
+// Source StateSearch picks SAttack when the goal is inside general fp22
+// mAttackRadius * scale (jigumoState.cpp:747-758); the retail Jigumo block
+// does not override fp22, so the EnemyParmsBase default 70 applies. (The
+// pre-#886 port gated on fp20 = 200, so an SAttack began far outside the
+// mouth; harmless while capture ignored the mouth, a guaranteed miss now.)
+constexpr float SATTACK_RADIUS = 70.0f;     // general fp22 (header default)
 constexpr float ATTACK_ANGLE = 3.14159265f; // port adaptation (hemisphere)
 constexpr float CARRY_SPEED = 75.0f;        // proper fp01
 constexpr float RETURN_SPEED = 30.0f;       // proper fp02
@@ -123,12 +135,14 @@ struct Jigumo {
     Vector3f goal;
     bool appearArmed = false;
     bool attackActive = false;
-    Piki* captured = nullptr;
+    p2captor::Held<Piki> held; // Pikmin in the kamu_joint1 slot (validated against the host stick)
+    bool mouthLogged = false;
     State nextState = JIGUMO_INVALID;
     const char* nextClip = nullptr;
     std::set<int> firedEvents;
     std::string clip = "appear1";
     float phase = 0.0f;
+    bool sattackDone = false; // SAttack key event 3 closed the bite window
     bool deadLogged = false;
     bool deadEscapeDone = false; // OWN death: pcEscapeNow fired once after dead1
     float logTimer = 0.0f;
@@ -156,8 +170,8 @@ Creature* nearestTarget(const Vector3f& pos, float radius) {
     Creature* best = nullptr;
     float bestSq = radius * radius;
     if (naviMgr) {
-        Navi* n = naviMgr->getNavi();
-        if (n && n->isAlive()) {
+        for (Navi* n : pc_p2_navis()) {
+            if (!n->isAlive()) continue;
             const Vector3f p = n->getPosition();
             const float dx = p.x - pos.x, dz = p.z - pos.z;
             const float d = dx * dx + dz * dz;
@@ -177,6 +191,8 @@ Creature* nearestTarget(const Vector3f& pos, float radius) {
     }
     return best;
 }
+// Flick-trigger proxy only. A Pikmin held in a mouth is not a shake-off
+// trigger (#886: it now physically sits at the host mouth part).
 Piki* nearestPiki(const Vector3f& pos, float radius) {
     Piki* best = nullptr;
     float bestSq = radius * radius;
@@ -184,7 +200,7 @@ Piki* nearestPiki(const Vector3f& pos, float radius) {
         Iterator it(pikiMgr);
         CI_LOOP(it) {
             Piki* p = static_cast<Piki*>(*it);
-            if (!p || !p->isAlive()) continue;
+            if (!p || !p->isAlive() || p->isStickToMouth()) continue;
             const Vector3f q = p->getPosition();
             const float dx = q.x - pos.x, dz = q.z - pos.z;
             const float d = dx * dx + dz * dz;
@@ -202,7 +218,8 @@ void doFlick(BTeki* a) {
     Iterator it(pikiMgr);
     CI_LOOP(it) {
         Piki* p = static_cast<Piki*>(*it);
-        if (p && p->isAlive() && distXZ(p->getPosition(), pos) < SHAKE_RANGE) {
+        if (p && p->isAlive() && distXZ(p->getPosition(), pos) < SHAKE_RANGE
+                && !p2captorhost::heldBy(a, p)) {
             p->stimulate(InteractFlick(a, SHAKE_KNOCKBACK, 0.0f, a->getDirection()));
         }
     }
@@ -235,14 +252,26 @@ void setPhase(Jigumo& s) {
     s.phase = s.stateTime / len;
     if (s.phase > 1.0f) s.phase = 1.0f;
 }
+const p2captor::Geometry& mouthGeometry() { return *p2captor::geometryFor(63); }
+int holding(BTeki* a, Jigumo& s) {
+    bool occupied[p2captor::MaxSlots] = {};
+    return p2captorhost::validate(a, s.held, mouthGeometry().slots, occupied);
+}
+void releaseMouth(BTeki* a, Jigumo& s, unsigned generator, const char* why) {
+    const int freed = p2captorhost::release(a, s.held);
+    if (freed > 0) {
+        std::printf("P2_JIGUMO_RELEASE generator=%u reason=%s pikmin=%d\n", generator, why, freed);
+        std::fflush(stdout);
+    }
+}
 void transition(BTeki* actor, Jigumo& s, State state, const char* clip,
                 unsigned generator, bool keepCaptured = false) {
-    (void)actor;
     s.state = state;
     s.stateTime = 0.0f;
     s.firedEvents.clear();
     s.attackActive = false;
-    if (!keepCaptured) s.captured = nullptr;
+    s.sattackDone = false;
+    if (!keepCaptured) releaseMouth(actor, s, generator, "transition");
     if (clip) s.clip = clip;
     std::printf("P2_JIGUMO_STATE generator=%u state=%s\n", generator, stateName(state));
     std::fflush(stdout);
@@ -262,23 +291,53 @@ bool dueEvent(Jigumo& s, const char* clipName, int code, int& frameOut) {
     }
     return false;
 }
-void emitBite(unsigned generator, int frame) {
-    std::printf("P2_JIGUMO_BITE generator=%u frame=%d pikmin=1\n", generator, frame);
-    std::fflush(stdout);
-}
-void emitEat(unsigned generator) {
-    std::printf("P2_JIGUMO_EAT generator=%u pikmin=1\n", generator);
-    std::fflush(stdout);
-}
-bool resolveKill(BTeki* actor, Jigumo& s, unsigned generator) {
-    if (s.captured && s.captured->isAlive()) {
-        s.captured->stimulate(InteractKill(actor, 0));
-        emitEat(generator);
-        s.captured = nullptr;
-        return true;
+// Source EnemyFunc::eatPikmin through the kamu_joint1 slot (one pass).
+// `heightCheck` selects the Attack ConditionHeightCheckPiki; SAttack uses
+// the default condition. Returns the number caught this pass.
+int eatPass(BTeki* actor, Jigumo& s, unsigned generator, int frame, bool heightCheck) {
+    const p2captor::Geometry& g = mouthGeometry();
+    if (!s.mouthLogged) {
+        s.mouthLogged = true;
+        std::printf("P2_JIGUMO_MOUTH generator=%u slots=%d radius=%.1f local_z=%.1f host_slots=%d\n",
+                    generator, g.slots, g.radius, g.local[0][2], p2captorhost::hostSlotCount(actor));
+        std::fflush(stdout);
     }
-    s.captured = nullptr;
-    return false;
+    bool occupied[p2captor::MaxSlots] = {};
+    p2captorhost::validate(actor, s.held, g.slots, occupied);
+    p2captorhost::Scene scene = p2captorhost::snapshot(actor);
+    const p2captor::Vec3 apos = p2captorhost::vec(actor->getPosition());
+    int refused = 0;
+    auto stimulate = [&](int n, int slot) {
+        if (!p2captorhost::swallowInto(actor, scene, n, slot, s.held, 0, &refused)) return false;
+        const p2captor::Vec3 l = p2captor::toLocal(apos, s.heading, scene.prey[n].pos);
+        std::printf("P2_JIGUMO_BITE generator=%u frame=%d pikmin=1 slot=%d local_x=%.1f local_y=%.1f "
+                    "local_z=%.1f\n", generator, frame, slot, l.x, l.y, l.z);
+        std::fflush(stdout);
+        return true;
+    };
+    const int count = (int)scene.prey.size();
+    int caught = 0;
+    if (heightCheck) {
+        caught = p2captor::eat(g, apos, s.heading, scene.prey.data(), count, occupied,
+                               p2captor::JigumoHeightCheck{apos.y}, stimulate);
+    } else {
+        caught = p2captor::eat(g, apos, s.heading, scene.prey.data(), count, occupied,
+                               p2captor::defaultEligible, stimulate);
+    }
+    if (refused > 0) {
+        std::printf("P2_JIGUMO_EAT_REFUSED generator=%u reason=no_host_slot count=%d\n", generator, refused);
+        std::fflush(stdout);
+    }
+    return caught;
+}
+// Source swallowPikmin(enemy, 300) with the Jigumo poison override (fp05):
+// only Pikmin still held in the mouth die.
+bool resolveKill(BTeki* actor, Jigumo& s, unsigned generator) {
+    int white = 0;
+    const int killed = p2captorhost::swallow(actor, s.held, mouthGeometry().slots, mouthGeometry().poison, &white);
+    std::printf("P2_JIGUMO_EAT generator=%u pikmin=%d white=%d\n", generator, killed, white);
+    std::fflush(stdout);
+    return killed > 0;
 }
 }
 
@@ -290,7 +349,13 @@ void pc_p2_jigumo_reset() {
 
 void pc_p2_jigumo_forget(BTeki* actor) {
     pc_randomizer_p2_forget_source(static_cast<PelletView*>(actor));
+    auto it = actors.find(static_cast<PelletView*>(actor));
+    if (it != actors.end()) p2captorhost::release(actor, it->second.held); // teardown frees the mouth
     actors.erase(static_cast<PelletView*>(actor));
+}
+
+void pc_p2_jigumo_forget_piki(Piki* piki) {
+    for (auto& entry : actors) entry.second.held.forget(piki);
 }
 
 bool pc_p2_jigumo_suppress_ai(const BTeki* actor) {
@@ -372,6 +437,11 @@ void pc_p2_jigumo_setup() {
                         }
                         clips[name] = clip;
                     }
+                } else if (token == "frames") {
+                    // P2_BANK_FRAMES_1 trailer (#895): per-pose source frames,
+                    // consumed by the batch draw paths; skip its list token here.
+                    std::string framesList;
+                    bank >> framesList;
                 } else {
                     break;
                 }
@@ -518,11 +588,11 @@ void pc_p2_jigumo_update(BTeki* actor) {
             std::fflush(stdout);
             s.deadLogged = true;
         }
-        // Release any captured Pikmin without killing it: a Jigumo that dies
-        // while ferrying a Pikmin to the nest must not take it down (the
-        // corpse would otherwise form while holding a live Pikmin, which the
-        // carry latch rejects). Mirrors the flick-release (captured=nullptr).
-        s.captured = nullptr;
+        // Release any held Pikmin without killing it: a Jigumo that dies
+        // while ferrying a Pikmin to the nest must not take it down (source
+        // deathProcedure setAlive(false); the P1 swallowed state frees a
+        // Pikmin whose holder is gone).
+        releaseMouth(actor, s, generator, "death");
         transition(actor, s, JIGUMO_DEAD, "dead1", generator);
     }
 
@@ -570,7 +640,8 @@ void pc_p2_jigumo_update(BTeki* actor) {
         s.goal = target->getPosition();
         const float residual = turnTo(actor, s, s.goal, dt);
         if (std::fabs(residual) < 0.02f || s.stateTime >= clipDuration("turn1")) {
-            if (distXZ(pos, s.goal) < ATTACK_RANGE) {
+            const float gx = s.goal.x - pos.x, gy = s.goal.y - pos.y, gz = s.goal.z - pos.z;
+            if (gx * gx + gy * gy + gz * gz < SATTACK_RADIUS * SATTACK_RADIUS) {
                 transition(actor, s, JIGUMO_SATTACK, "sattack1", generator);
             } else {
                 transition(actor, s, JIGUMO_ATTACK, "attack1", generator);
@@ -587,21 +658,23 @@ void pc_p2_jigumo_update(BTeki* actor) {
             stop(actor);
             if (target) turnTo(actor, s, target->getPosition(), dt);
         } else {
-            if (dueEvent(s, "attack1", 2, frame) && !s.captured) {
-                Piki* piki = nearestPiki(pos, ATTACK_RANGE);
-                if (piki) {
-                    s.captured = piki;
-                    emitBite(generator, frame);
-                }
+            // Source StateAttack: key event 2 arms the bite; while armed, the
+            // lunge walks and eatPikmin (height check) runs every frame until
+            // a catch or the goal is reached (jigumoState.cpp:327-371).
+            if (dueEvent(s, "attack1", 2, frame)) s.attackActive = true;
+            if (s.attackActive && holding(actor, s) == 0
+                    && eatPass(actor, s, generator, int(s.stateTime * 30.0f), true) > 0) {
+                s.attackActive = false;
             }
-            if (s.captured || distXZ(pos, s.goal) > ARRIVE_DIST) {
+            if (s.attackActive && distXZ(pos, s.goal) < 10.0f) s.attackActive = false;
+            if (s.attackActive) {
                 walkTo(actor, s, s.goal, MOVE_SPEED, dt);
             } else {
                 stop(actor);
             }
         }
         if (s.stateTime >= clipDuration("attack1")) {
-            if (s.captured) {
+            if (holding(actor, s) > 0) {
                 transition(actor, s, JIGUMO_CARRY, "backrun1", generator, true);
             } else {
                 transition(actor, s, JIGUMO_MISS, "to_runaway1", generator);
@@ -676,19 +749,16 @@ void pc_p2_jigumo_update(BTeki* actor) {
         if (target) turnTo(actor, s, target->getPosition(), dt);
         // Source StateSAttack activates at mSAttackActiveFrame (13) and runs
         // eatPikmin continuously until the key event 3 miss check (frame 26).
-        if (!s.attackActive && s.stateTime * 30.0f >= SATTACK_ACTIVE_FRAME) {
+        if (!s.attackActive && !s.sattackDone && s.stateTime * 30.0f >= SATTACK_ACTIVE_FRAME) {
             s.attackActive = true;
-            if (!s.captured) {
-                Piki* piki = nearestPiki(pos, ATTACK_RANGE);
-                if (piki) {
-                    s.captured = piki;
-                    emitBite(generator, int(SATTACK_ACTIVE_FRAME));
-                }
-            }
+        }
+        if (s.attackActive) {
+            eatPass(actor, s, generator, int(s.stateTime * 30.0f), false);
         }
         if (dueEvent(s, "sattack1", 3, frame)) {
             s.attackActive = false;
-            if (!s.captured) {
+            s.sattackDone = true;
+            if (holding(actor, s) == 0) {
                 transition(actor, s, JIGUMO_SMISS, "smiss1", generator);
                 break;
             }

@@ -44,6 +44,9 @@ pc_randstate::PcRandState sample_state(uint32_t gen)
 	st.checks[150 / 8] |= (uint8_t)(1u << (150 % 8)); // growth headroom
 	for (int i = 0; i < 12; ++i) st.stats[i] = (uint8_t)(i % 3);
 	for (int i = 0; i < 9; ++i) st.benefits[i] = (uint8_t)(i + 1);
+	st.maturity = (uint8_t)(1u | (2u << 2)); // tiers 1, 2, 0 (#982)
+	st.dayLength = 4;
+	st.whistlePluck = 1;
 	st.gen = gen;
 	return st;
 }
@@ -74,7 +77,8 @@ int main()
 		uint8_t wire[kStateBytes];
 		CHECK(encode(st, wire) == kStateBytes, "encode 64 bytes");
 		CHECK(kStateBytes == 64 && kFragCount == 16, "v2 sizes");
-		CHECK(wire[0] == 2, "ver at 0");
+		CHECK(wire[0] == 3, "ver at 0");
+		CHECK(wire[53] == 0x09 && wire[54] == 4 && wire[55] == 1, "maturity/dayLength/whistlePluck at 53..55 (#982)");
 		CHECK(wire[1] == 1 && wire[2] == 7 && wire[3] == 0xA5 && wire[4] == 3
 		          && wire[5] == 1,
 		      "ready/repairs/unlocks/flarlic/emperor");
@@ -89,6 +93,8 @@ int main()
 		          && out.flarlic == 3 && out.emperor == 1 && out.deathLinks == 258
 		          && out.gen == 0x01020304u,
 		      "decoded fields");
+		CHECK(out.maturity == 0x09 && out.dayLength == 4 && out.whistlePluck == 1,
+		      "decoded maturity/dayLength/whistlePluck");
 		CHECK(has_slot(out, 0) && has_slot(out, 2) && has_slot(out, 57)
 		          && has_slot(out, 118) && has_slot(out, 150),
 		      "decoded high check slots");
@@ -120,7 +126,36 @@ int main()
 		CHECK(!decode(bad, sizeof(bad), out), "old version rejected");
 		memcpy(bad, wire, sizeof(bad));
 		bad[53] = 1;
-		CHECK(!decode(bad, sizeof(bad), out), "nonzero reserved rejected");
+		CHECK(!decode(bad, sizeof(bad), out), "changed maturity without re-CRC rejected");
+		// (#982) range checks with a valid CRC: tier 3, stray high bits,
+		// dayLength 11, whistlePluck 2 are all malformed.
+		auto recrc = [](uint8_t* w) {
+			const uint32_t c = crc32(w, kPayloadBytes);
+			w[60] = (uint8_t)(c & 0xFF);
+			w[61] = (uint8_t)((c >> 8) & 0xFF);
+			w[62] = (uint8_t)((c >> 16) & 0xFF);
+			w[63] = (uint8_t)((c >> 24) & 0xFF);
+		};
+		memcpy(bad, wire, sizeof(bad));
+		bad[53] = 0x03;
+		recrc(bad);
+		CHECK(!decode(bad, sizeof(bad), out), "maturity tier 3 rejected");
+		memcpy(bad, wire, sizeof(bad));
+		bad[53] = 0x40;
+		recrc(bad);
+		CHECK(!decode(bad, sizeof(bad), out), "maturity high bits rejected");
+		memcpy(bad, wire, sizeof(bad));
+		bad[54] = 11;
+		recrc(bad);
+		CHECK(!decode(bad, sizeof(bad), out), "dayLength 11 rejected");
+		memcpy(bad, wire, sizeof(bad));
+		bad[55] = 2;
+		recrc(bad);
+		CHECK(!decode(bad, sizeof(bad), out), "whistlePluck 2 rejected");
+		memcpy(bad, wire, sizeof(bad));
+		bad[53] = 0x2A; // tiers 2,2,2 is valid
+		recrc(bad);
+		CHECK(decode(bad, sizeof(bad), out) && out.maturity == 0x2A, "maturity 2,2,2 accepted");
 		memcpy(bad, wire, sizeof(bad));
 		bad[40] ^= 0xFF; // corrupt a stats byte: CRC must fail
 		CHECK(!decode(bad, sizeof(bad), out), "corrupt payload rejected");
@@ -152,6 +187,15 @@ int main()
 		b = sample_state(4);
 		b.checks[118 / 8] ^= (uint8_t)(1u << (118 % 8));
 		CHECK(!payload_equal(a, b), "different high check bit");
+		b = sample_state(5);
+		b.maturity = 0;
+		CHECK(!payload_equal(a, b), "different maturity (#982)");
+		b = sample_state(6);
+		b.dayLength = 5;
+		CHECK(!payload_equal(a, b), "different dayLength (#982)");
+		b = sample_state(7);
+		b.whistlePluck = 0;
+		CHECK(!payload_equal(a, b), "different whistlePluck (#982)");
 	}
 	// 4. Fragment sequence byte: stream 0 in the high nibble, idx low.
 	{

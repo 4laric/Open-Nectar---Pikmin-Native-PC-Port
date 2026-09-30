@@ -35,6 +35,7 @@
 #include <chrono>
 
 #include "settings/pc_settings.h"
+#include "settings/pc_tutorial_policy.h"
 #include "pc_vs.h"
 #include "gl/pc_gfx.h"
 #include "jaudio/piki_scene.h"
@@ -61,6 +62,7 @@
 #include "timing/pc_render_phase.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_permadeath.h"
+#include "pc_p2_test_day_cycle.h"
 #endif
 #endif
 
@@ -1176,6 +1178,16 @@ ModeState* RunningModeState::update(u32& result)
 		gameflow.mIsUIOverlayActive = mIsOverlayCached;
 		seSystem->playSysSe(SYSSE_UNPAUSE);
 	}
+
+#if defined(PIKI_PC_PORT)
+	// TEST-ONLY (#246, inert unless PIKMIN_P2_TEST_DAY_CYCLE is set): end the
+	// day through the same calls as the pause menu's "go to sunset" above.
+	if (pc_p2_test_day_cycle_due(gsys->getFrameTime()) && !gameflow.mIsDayEndTriggered) {
+		gamecore->forceDayEnd();
+		gameflow.mIsPauseAllowed    = FALSE;
+		gameflow.mIsDayEndTriggered = TRUE;
+	}
+#endif
 
 	return this;
 }
@@ -3011,6 +3023,17 @@ void GameMovieInterface::parse(GameMovieInterface::SimpleMessage& msg)
 	switch (cmd) {
 	case MOVIECMD_TextDemo:
 	{
+#if defined(PIKI_PC_PORT)
+		// Mod "Disable Tutorials": drop the six informational hints before a
+		// window is allocated. Story, recovery, part and ending text still open.
+		if (pc_should_skip_tutorial(pc_settings_get_disable_tutorials(), data)) {
+			// Match normal text dismissal: release an associated movie wait too.
+			if (gameflow.mMoviePlayer->mIsActive) {
+				gameflow.mMoviePlayer->skipScene(SCENESKIP_Skip);
+			}
+			break;
+		}
+#endif
 		// open a text window - data here should use the zen::ogScrTutorialMgr::EnumTutorial enum (text ID)
 		PRINT("***** START TUTORIAL WINDOW\n");
 		int ufoPartID = -1;

@@ -2,6 +2,8 @@
 class BTeki;
 class PelletView;
 class Generator;
+class Graphics;
+class Matrix4f;
 // Family sidecar binding the parked P2GroinkCarcass policy to a live generated
 // Groink host actor (MiniHoudai 78 / FminiHoudai 97).  Binding is read from
 // p2-groink-teki.txt at finalSetup; the carcass lifecycle is then driven once
@@ -9,6 +11,9 @@ class Generator;
 // ActivateGauge / DeactivateGauge host commands act on the real pellet and
 // life gauge.  All emissions are logged as P2_GROINK_CARCASS_* markers.
 void pc_p2_groink_teki_setup();
+// Dev console (#942): bind one late-spawned seed-78/97 actor in bridge mode
+// (loads the staged parms/bank on first use). True when bound (or already bound).
+bool pc_p2_groink_teki_bind_dynamic(BTeki*);
 void pc_p2_groink_teki_reset();
 void pc_p2_groink_teki_forget(BTeki*);
 void pc_p2_groink_teki_tick(BTeki*);
@@ -44,6 +49,10 @@ bool pc_p2_groink_receipt(PelletView* view, unsigned& generator);
 // parameter or unbound actor. For 97 live (inst3 OWN) it also blinds sight/
 // attack ranges so the P2 pedestal FSM has last word.
 float pc_p2_groink_teki_param_f(const BTeki* teki, int idx, float fallback);
-// Host suppression (inst3-misc OWN): true for a bound 97 pedestal live actor,
-// disabling the P1 Frog TAI so the P2 gun FSM decides each tick.
+// Host suppression (#888 OWN): true for a campaign-bound 78/97 while alive
+// or dying, disabling the P1 Frog TAI so the source FSM decides each tick.
 bool pc_p2_groink_teki_suppress_ai(const BTeki* teki);
+// Draw hook (#888 WP5): a campaign-bound 78/97 draws the staged P2
+// MiniHoudai pose bank driven by the source FSM animation (corpse: carcass
+// clip). False (host model draws) when no bank is staged or unbound.
+bool pc_p2_groink_teki_draw(BTeki* teki, Graphics& gfx, const Matrix4f& view, bool corpse = false);

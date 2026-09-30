@@ -24,12 +24,19 @@
 //     six driven joints) is a P2 model/skeleton feature that is not
 //     representable on the P1 host; the module drives a flat translation-only
 //     body and does not rebuild the spinal matrices or the joint callback.
-//   * The source 5-way directional bite (`mAttackAnimIdx` 0=near/1=normal/
-//     2=far/3=right/4=left selected by Obj::getAttackPiki, SnakeCrow.cpp:488)
-//     is approximated as the single nearest Piki/Navi inside the source attack
-//     sweep; the port always plays the normal `hit` stem and captures at the
-//     banked `hit` KEYEVENT_3 bite frame. The `setAttackPosition` 5-point array
-//     (SnakeCrow.cpp:324-340, SnakeWhole.cpp:740-756) is not rebuilt.
+//   * Bite (#886): the source five facing boxes of Obj::getAttackPiki /
+//     getAttackNavi (SnakeCrow.cpp:348-450, SnakeWhole.cpp:404-510) and
+//     the setAttackPosition floor heights are ported exactly in
+//     pc_p2_captor_mouth.h. The attack starts only when a Pikmin or captain
+//     is inside a box (animIdx 5 query, which also picks mAttackAnimIdx); at
+//     the KEYEVENT_3 bite only that box is searched and the Pikmin is
+//     InteractSwallow'd into the first free of the three kamujnt slots
+//     (getSwallowSlot), physically stuck to the P1 host 'slot' part
+//     (pc_p2_captor_host.h) so it cannot be whistled away. Eat (waitact1
+//     KEYEVENT_2) swallows only Pikmin still held (white poison proper fp21).
+//     With all three slots full the bite is refused (the source asserts on a
+//     null slot). Port adaptation kept: the drawn stem is always the normal
+//     `hit` clip, whatever box was chosen.
 //   * Target detection is a full hemisphere (the source fp13 view-angle gate is
 //     not applied to the P1 host), matching the Catfish/Armor ports.
 //   * The source `appearNearByTarget` 120-unit reposition (SnakeCrow.cpp:297,
@@ -48,6 +55,8 @@
 // No other lane's module is modified; every hook is a no-op for unregistered
 // actors.
 #include "pc_p2_snakejoint.h"
+#include "pc_p2_captor_host.h"
+#include "MapMgr.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_setup_failsafe.h"
 #include "pc_randomizer.h"
@@ -57,6 +66,7 @@
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Generator.h"
 #include "gameflow.h"
 #include <cmath>
@@ -128,9 +138,9 @@ const SpeciesParms SNAKE_WHOLE = {
     "SnakeWhole", 70, 5000.0f, 1000.0f, 380.0f, 100.0f, 100.0f, 400.0f,
     0.1f, DEG10, 0.5f, 2.5f, 0.6f};
 
-// Source Obj::getAttackPiki sweep reaches 220 units ahead (SnakeCrow.cpp:502,
-// SnakeWhole.cpp attack arrays); port activation/capture radius.
-constexpr float ATTACK_RANGE = 220.0f;
+// Attack start and bite use the source getAttackPiki/getAttackNavi facing
+// boxes (pc_p2_captor_mouth.h SnakeZones), which replaced the pre-#886
+// 220-unit omnidirectional ATTACK_RANGE.
 // Port walk/leap clamp: the source SnakeWhole fp06=1000 leap is a 22-frame
 // jump (SnakeWhole.cpp:263) not representable on the flat P1 host.
 constexpr float LEAP_SPEED = 220.0f;
@@ -161,7 +171,9 @@ struct Snake {
     float heading = 0.0f;
     Vector3f home;
     Vector3f moveTarget;
-    Piki* captured = nullptr;
+    p2captor::Held<Piki> held; // Pikmin in the kamujnt1..3 slots (validated against the host stick)
+    int attackZone = p2captor::SnakeAnyZone; // source mAttackAnimIdx
+    bool mouthLogged = false;
     bool biteFired = false;
     bool swallowFired = false;
     bool flickFired = false;
@@ -223,8 +235,8 @@ Creature* nearestTarget(const Vector3f& pos, float radius) {
     Creature* best = nullptr;
     float bestSq = radius * radius;
     if (naviMgr) {
-        Navi* n = naviMgr->getNavi();
-        if (n && n->isAlive()) {
+        for (Navi* n : pc_p2_navis()) {
+            if (!n->isAlive()) continue;
             const Vector3f p = n->getPosition();
             const float dx = p.x - pos.x, dz = p.z - pos.z;
             const float d = dx * dx + dz * dz;
@@ -244,6 +256,7 @@ Creature* nearestTarget(const Vector3f& pos, float radius) {
     }
     return best;
 }
+// Flick-trigger proxy only; a Pikmin held in a mouth is not a trigger (#886).
 Piki* nearestPiki(const Vector3f& pos, float radius) {
     Piki* best = nullptr;
     float bestSq = radius * radius;
@@ -251,7 +264,7 @@ Piki* nearestPiki(const Vector3f& pos, float radius) {
         Iterator it(pikiMgr);
         CI_LOOP(it) {
             Piki* p = static_cast<Piki*>(*it);
-            if (!p || !p->isAlive()) continue;
+            if (!p || !p->isAlive() || p->isStickToMouth()) continue;
             const Vector3f q = p->getPosition();
             const float dx = q.x - pos.x, dz = q.z - pos.z;
             const float d = dx * dx + dz * dz;
@@ -268,6 +281,21 @@ void stop(BTeki* a) {
     a->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
     a->mVelocity.x = 0.0f;
     a->mVelocity.z = 0.0f;
+}
+
+// Source SnakeCrow::Obj::onInit calls hardConstraintOn(): a Burrowing Snagret
+// is never displaced by collision. The P1 Chappy host has no hard constraint,
+// so creature-vs-creature separation let a captain walking into it shove the
+// burrow hundreds of units (#920: the bot drove it ~1000 units off its slot,
+// out of its own swarm's reach, and the corpse landed where it could not be
+// grabbed). Pin a living SnakeCrow to its burrow; SnakeWhole walks, and the
+// corpse must stay free so it can be carried.
+void holdBurrow(BTeki* a, const Snake& s) {
+    if (s.parms->sourceId != 34 || s.state == SNAKE_DEAD) return;
+    const Vector3f pos = a->getPosition();
+    a->mVelocity.x = a->mVelocity.z = 0.0f;
+    a->mVolatileVelocity.x = a->mVolatileVelocity.z = 0.0f;
+    if (pos.x != s.home.x || pos.z != s.home.z) a->resetPosition(Vector3f(s.home.x, pos.y, s.home.z));
 }
 
 // Source Obj::turnToTarget: proportional turn clamped to the source max turn.
@@ -295,6 +323,7 @@ void doFlick(BTeki* a, unsigned generator) {
     CI_LOOP(it) {
         Piki* p = static_cast<Piki*>(*it);
         if (!p || !p->isAlive() || distXZ(p->getPosition(), pos) >= SHAKE_RANGE) continue;
+        if (p2captorhost::heldBy(a, p)) continue; // a swallowed Pikmin is never flicked
         const float angle = std::atan2(p->getPosition().x - pos.x,
                                        p->getPosition().z - pos.z);
         p->stimulate(InteractFlick(a, SHAKE_KNOCKBACK, 0.0f, angle));
@@ -313,13 +342,102 @@ void enter(Snake& s, State state, const char* clip) {
     s.biteFired = false;
     s.swallowFired = false;
     s.flickFired = false;
-    if (state != SNAKE_EAT) s.captured = nullptr;
 }
 void setState(BTeki* a, Snake& s, State state, const char* clip) {
-    enter(s, state, clip);
     const unsigned generator = a->mGenerator ? a->mGenerator->_70 : 0u;
+    // Only Attack -> Eat carries the mouth; every other transition (and
+    // death) frees it without harm.
+    if (state != SNAKE_EAT) {
+        const int freed = p2captorhost::release(a, s.held);
+        if (freed > 0) {
+            std::printf("P2_SNAKEJOINT_RELEASE generator=%u reason=%s pikmin=%d\n", generator,
+                        state == SNAKE_DEAD ? "death" : "transition", freed);
+            std::fflush(stdout);
+        }
+    }
+    enter(s, state, clip);
     std::printf("P2_SNAKEJOINT_STATE generator=%u state=%s\n", generator, stateName(state));
     std::fflush(stdout);
+}
+
+const p2captor::Geometry& mouthGeometry(const Snake& s) {
+    return *p2captor::geometryFor(unsigned(s.parms->sourceId));
+}
+// mAttackPositions[i].y: the floor under each setAttackPosition point.
+void attackFloors(BTeki* a, const Snake& s, float* floorY) {
+    const p2captor::SnakeZones& z = p2captor::snakeZonesFor(unsigned(s.parms->sourceId));
+    const p2captor::Vec3 apos = p2captorhost::vec(a->getPosition());
+    for (int i = 0; i < 5; ++i) {
+        const p2captor::Vec3 q = p2captor::snakeAttackPosition(z, i, apos, s.heading);
+        float y = mapMgr ? mapMgr->getMinY(q.x, q.z, true) : apos.y;
+        if (!std::isfinite(y)) y = apos.y;
+        floorY[i] = y;
+    }
+}
+// Source getAttackPiki(animIdx) || getAttackNavi(animIdx): true when a
+// Pikmin (manager order) or captain is inside the facing box(es); sets
+// s.attackZone (mAttackAnimIdx) to that box.
+bool findAttack(BTeki* a, Snake& s, int animIdx) {
+    const p2captor::SnakeZones& z = p2captor::snakeZonesFor(unsigned(s.parms->sourceId));
+    float floorY[5];
+    attackFloors(a, s, floorY);
+    const p2captor::Vec3 apos = p2captorhost::vec(a->getPosition());
+    p2captorhost::Scene scene = p2captorhost::snapshot(a);
+    int zone = -1;
+    if (p2captor::snakeAttackPiki(z, animIdx, apos, s.heading, floorY, scene.prey.data(), (int)scene.prey.size(),
+                                  &zone) >= 0) {
+        s.attackZone = zone;
+        return true;
+    }
+    for (Navi* n : pc_p2_navis()) {
+        if (!n->isAlive()) continue;
+        zone = p2captor::snakeZoneOf(z, animIdx, apos, s.heading, floorY, p2captorhost::vec(n->getPosition()));
+        if (zone >= 0) {
+            std::printf("P2_SNAKEJOINT_ATTACK_TRIGGER target=navi zone=%d\n", zone);
+            s.attackZone = zone;
+            return true;
+        }
+    }
+    return false;
+}
+// Source StateAttack KEYEVENT_3: getAttackPiki(mAttackAnimIdx), then
+// InteractSwallow into getSwallowSlot(). Returns true when a Pikmin is held.
+bool biteZone(BTeki* a, Snake& s, unsigned generator, int frame) {
+    const p2captor::Geometry& g = mouthGeometry(s);
+    const p2captor::SnakeZones& z = p2captor::snakeZonesFor(unsigned(s.parms->sourceId));
+    if (!s.mouthLogged) {
+        s.mouthLogged = true;
+        std::printf("P2_SNAKEJOINT_MOUTH generator=%u source_id=%d slots=%d rule=facing_boxes host_slots=%d\n",
+                    generator, s.parms->sourceId, g.slots, p2captorhost::hostSlotCount(a));
+        std::fflush(stdout);
+    }
+    float floorY[5];
+    attackFloors(a, s, floorY);
+    const p2captor::Vec3 apos = p2captorhost::vec(a->getPosition());
+    p2captorhost::Scene scene = p2captorhost::snapshot(a);
+    int zone = -1;
+    const int n = p2captor::snakeAttackPiki(z, s.attackZone, apos, s.heading, floorY, scene.prey.data(),
+                                            (int)scene.prey.size(), &zone);
+    if (n < 0) return false;
+    bool occupied[p2captor::MaxSlots] = {};
+    p2captorhost::validate(a, s.held, g.slots, occupied);
+    const int slot = p2captor::firstFreeSlot(occupied, g.slots);
+    int refused = 0;
+    if (slot < 0 || !p2captorhost::swallowInto(a, scene, n, slot, s.held, 0, &refused)) {
+        std::printf("P2_SNAKEJOINT_EAT_REFUSED generator=%u reason=%s zone=%d\n", generator,
+                    slot < 0 ? "slots_full" : (refused ? "no_host_slot" : "receiver"), zone);
+        std::fflush(stdout);
+        return false;
+    }
+    const p2captor::Vec3 l = p2captor::toLocal(apos, s.heading, scene.prey[n].pos);
+    std::printf("P2_SNAKEJOINT_BITE generator=%u frame=%d pikmin=1 zone=%d slot=%d local_x=%.1f local_y=%.1f "
+                "local_z=%.1f\n", generator, frame, zone, slot, l.x, l.y, l.z);
+    std::fflush(stdout);
+    return true;
+}
+int holding(BTeki* a, Snake& s) {
+    bool occupied[p2captor::MaxSlots] = {};
+    return p2captorhost::validate(a, s.held, mouthGeometry(s).slots, occupied);
 }
 
 void setPhase(Snake& s) {
@@ -367,6 +485,7 @@ void pc_p2_snakejoint_forget(BTeki* actor) {
     pc_randomizer_p2_forget_source(static_cast<PelletView*>(actor));
     auto it = actors.find(static_cast<PelletView*>(actor));
     if (it != actors.end()) {
+        p2captorhost::release(actor, it->second.held); // teardown frees the mouth
         std::printf("P2_SNAKEJOINT_FORGET generator=%u source_id=%d\n",
                     actor->mGenerator ? pc_p2_campaign_token(actor) : 0u,
                     it->second.parms->sourceId);
@@ -374,6 +493,10 @@ void pc_p2_snakejoint_forget(BTeki* actor) {
     }
     actors.erase(static_cast<PelletView*>(actor));
     corpses.erase(static_cast<PelletView*>(actor));
+}
+
+void pc_p2_snakejoint_forget_piki(Piki* piki) {
+    for (auto& entry : actors) entry.second.held.forget(piki);
 }
 
 bool pc_p2_snakejoint_suppress_ai(const BTeki* actor) {
@@ -486,6 +609,11 @@ void pc_p2_snakejoint_setup() {
                         }
                     }
                     clipBank[species][name] = clip;
+                } else if (token == "frames") {
+                    // P2_BANK_FRAMES_1 trailer (#895): per-pose source frames,
+                    // consumed by the batch draw paths; skip its list token here.
+                    std::string framesList;
+                    bank >> framesList;
                 } else {
                     break;
                 }
@@ -582,6 +710,7 @@ void pc_p2_snakejoint_update(BTeki* actor) {
     if (actor->mStoredDamage > 0.0f) actor->makeDamaged();
     const float dt = gsys->getFrameTime();
     if (dt <= 0.0f || dt > 0.5f) return;
+    holdBurrow(actor, s);
     const Vector3f pos = actor->getPosition();
     const unsigned generator = actor->mGenerator ? pc_p2_campaign_token(actor) : 0u;
 
@@ -623,7 +752,7 @@ void pc_p2_snakejoint_update(BTeki* actor) {
         const char* clip = s.state == SNAKE_APPEAR1 ? "appear1" : "appear2";
         if (s.stateTime >= clipDuration(parms.name, clip)) {
             Creature* target = nearestTarget(pos, parms.sight);
-            if (nearestPiki(pos, ATTACK_RANGE) || nearestTarget(pos, ATTACK_RANGE)) {
+            if (findAttack(actor, s, p2captor::SnakeAnyZone)) {
                 setState(actor, s, SNAKE_ATTACK, "hit");
             } else if (parms.sourceId == 70 && target) {
                 setState(actor, s, SNAKE_WALK, "run1");
@@ -641,7 +770,7 @@ void pc_p2_snakejoint_update(BTeki* actor) {
             setState(actor, s, SNAKE_DISAPPEAR, "dive");
             break;
         }
-        if (nearestPiki(pos, ATTACK_RANGE) || nearestTarget(pos, ATTACK_RANGE)) {
+        if (findAttack(actor, s, p2captor::SnakeAnyZone)) {
             setState(actor, s, SNAKE_ATTACK, "hit");
             break;
         }
@@ -663,7 +792,7 @@ void pc_p2_snakejoint_update(BTeki* actor) {
     }
     case SNAKE_WALK: {
         Creature* target = nearestTarget(pos, parms.sight);
-        if (nearestPiki(pos, ATTACK_RANGE) || nearestTarget(pos, ATTACK_RANGE)) {
+        if (findAttack(actor, s, p2captor::SnakeAnyZone)) {
             setState(actor, s, SNAKE_ATTACK, "hit");
             break;
         }
@@ -694,19 +823,12 @@ void pc_p2_snakejoint_update(BTeki* actor) {
         const float frame = s.stateTime * 30.0f;
         if (!s.biteFired && frame >= float(bite)) {
             s.biteFired = true;
-            Piki* piki = nearestPiki(pos, ATTACK_RANGE);
-            if (piki) {
-                s.captured = piki;
-                std::printf("P2_SNAKEJOINT_BITE generator=%u frame=%d pikmin=1\n",
-                            generator, bite);
-                std::fflush(stdout);
-            }
+            biteZone(actor, s, generator, bite);
         }
         if (s.stateTime >= clipDuration(parms.name, s.clip)) {
-            if (s.captured && s.captured->isAlive()) {
+            if (holding(actor, s) > 0) { // source isSwallowPikmin
                 setState(actor, s, SNAKE_EAT, "waitact1");
             } else {
-                s.captured = nullptr;
                 attackFollowUp(actor, s, pos);
             }
         }
@@ -719,15 +841,13 @@ void pc_p2_snakejoint_update(BTeki* actor) {
         if (swallow < 0) swallow = SWALLOW_FALLBACK;
         if (!s.swallowFired && s.stateTime * 30.0f >= float(swallow)) {
             s.swallowFired = true;
-            if (s.captured && s.captured->isAlive()) {
-                s.captured->stimulate(InteractKill(actor, 0));
-                std::printf("P2_SNAKEJOINT_EAT generator=%u pikmin=1\n", generator);
-                std::fflush(stdout);
-            }
-            s.captured = nullptr;
+            int white = 0;
+            const int killed = p2captorhost::swallow(actor, s.held, mouthGeometry(s).slots,
+                                                     mouthGeometry(s).poison, &white);
+            std::printf("P2_SNAKEJOINT_EAT generator=%u pikmin=%d white=%d\n", generator, killed, white);
+            std::fflush(stdout);
         }
         if (s.stateTime >= clipDuration(parms.name, "waitact1")) {
-            s.captured = nullptr;
             attackFollowUp(actor, s, pos);
         }
         break;
@@ -735,7 +855,7 @@ void pc_p2_snakejoint_update(BTeki* actor) {
     case SNAKE_STRUGGLE:
         stop(actor);
         if (s.stateTime > STRUGGLE_TIME) {
-            if (nearestPiki(pos, ATTACK_RANGE) || nearestTarget(pos, ATTACK_RANGE)) {
+            if (findAttack(actor, s, p2captor::SnakeAnyZone)) {
                 setState(actor, s, SNAKE_ATTACK, "hit");
             } else {
                 setState(actor, s, SNAKE_WAIT, "wait1");
@@ -772,8 +892,11 @@ void pc_p2_snakejoint_update(BTeki* actor) {
     s.logTimer += dt;
     if (s.logTimer >= 1.0f) {
         s.logTimer = 0.0f;
-        std::printf("P2_SNAKEJOINT_POS generator=%u state=%s clip=%s phase=%.2f x=%.2f z=%.2f\n",
-                    generator, stateName(s.state), s.clip.c_str(), s.phase, pos.x, pos.z);
+        std::printf("P2_SNAKEJOINT_POS generator=%u state=%s clip=%s phase=%.2f x=%.2f z=%.2f "
+                    "stickers=%d mouth=%d health=%.1f\n",
+                    generator, stateName(s.state), s.clip.c_str(), s.phase, pos.x, pos.z,
+                    p2captorhost::pikiStickerCount(actor), p2captorhost::mouthStickerCount(actor),
+                    actor->mHealth);
         std::fflush(stdout);
     }
 }

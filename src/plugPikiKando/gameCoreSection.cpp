@@ -1,3 +1,8 @@
+#include "pc_p2_ship.h"
+#include "pc_dev_console.h"
+#include "pc_p2_ship_store.h"
+#include "pc_p2_purple.h"
+#include "pc_p2_purple_motion.h"
 #include "pc_p2_purple_flight.h"
 #include "pc_p2_kurage_visual.h"
 #if defined(PIKI_PC_PORT)
@@ -10,6 +15,8 @@
 #include "pc_p2_onikurage_teki.h"
 #include "pc_p2_bombsarai_teki.h"
 #include "pc_p2_groink_teki.h"
+#include "pc_p2_breadbug_teki.h"
+#include "pc_p2_bigtreasure_teki.h"
 #include "pc_p2_king_teki.h"
 #include "pc_p2_queen_teki.h"
 #if defined(PIKI_PC_PORT)
@@ -52,6 +59,8 @@
 #include "pc_p2_tamago.h"
 #include "pc_p2_hardlanes.h"
 #include "pc_p2_projectiles.h"
+#include "pc_p2_kabuto_fsm.h"
+#include "pc_p2_dangomushi.h"
 #include "pc_p2_long_legs.h"
 #include "pc_randomizer.h"
 #include "MapCode.h"
@@ -514,6 +523,7 @@ void GameCoreSection::exitDayEnd()
 	{
 		Piki* piki = (Piki*)*it;
 		if (piki->isAlive()) {
+            if (pc_p2_ship_special(piki)) { if (pc_p2_ship_deposit(piki)) ++entered; continue; }
 			GoalItem* item = itemMgr->getContainer(piki->mColor);
 			if (item) {
 				item->enterGoal(piki);
@@ -613,7 +623,8 @@ void GameCoreSection::enterFreePikmins()
 					if (goal
 					    && qdist2(goal->mSRT.t.x, goal->mSRT.t.z, piki->mSRT.t.x, piki->mSRT.t.z)
 					           <= pikiMgr->mPikiParms->mPikiParms.mSunsetSafetyRange()) {
-						if (state == PIKISTATE_LookAt || state == PIKISTATE_Nukare || state == PIKISTATE_Absorb) {
+						if (pc_p2_ship_special(piki)) { pc_p2_ship_deposit(piki); break; }
+                        if (state == PIKISTATE_LookAt || state == PIKISTATE_Nukare || state == PIKISTATE_Absorb) {
 							piki->mFSM->transit(piki, PIKISTATE_Normal);
 						}
 						piki->mFSM->transit(piki, PIKISTATE_Normal);
@@ -633,7 +644,8 @@ void GameCoreSection::enterFreePikmins()
 					if (ufo) {
 						Vector3f pos = ufo->getGoalPos();
 						if (qdist2(pos.x, pos.z, piki->mSRT.t.x, piki->mSRT.t.z) <= pikiMgr->mPikiParms->mPikiParms.mSunsetSafetyRange()) {
-							if (state == PIKISTATE_LookAt || state == PIKISTATE_Nukare || state == PIKISTATE_Absorb) {
+							if (pc_p2_ship_special(piki)) { pc_p2_ship_deposit(piki); break; }
+                        if (state == PIKISTATE_LookAt || state == PIKISTATE_Nukare || state == PIKISTATE_Absorb) {
 								piki->mFSM->transit(piki, PIKISTATE_Normal);
 							}
 							piki->mFSM->transit(piki, PIKISTATE_Normal);
@@ -854,6 +866,15 @@ void GameCoreSection::cleanupDayEnd()
 			playerState->mResultFlags.setOn(zen::RESFLAG_PikminLeftBehind);
 		}
 	}
+    // The vanilla sunset safety pass above decides survivors. Store specials
+    // before the Onion-only movie routing; they need no Red Onion actor.
+    if (pc_randomizer_purple_campaign()) {
+        Iterator survivors(pikiMgr);
+        CI_LOOP(survivors) {
+            Piki* piki = static_cast<Piki*>(*survivors);
+            if (pc_p2_ship_special(piki) && piki->isAlive()) pc_p2_ship_deposit(piki);
+        }
+    }
 	PRINT("++++++ %d PIKIS KILLED\n", killed);
 	tekiMgr->killAll();
 	bossMgr->killAll();
@@ -1707,6 +1728,8 @@ void GameCoreSection::initStage()
 	memStat->start("teki");
 	int oldT = gsys->setHeap(SYSHEAP_Teki);
 	if (pc_randomizer_progg_traps()) tekiMgr->mUsingType[TEKI_Dororo] = true;
+	// #942 dev console: load the P1 host vehicles of every dev-bound species.
+	pc_dev_console_reserve_host_types();
 	tekiMgr->startStage();
 	gsys->setHeap(oldT);
 	memStat->end("teki");
@@ -1820,6 +1843,8 @@ void GameCoreSection::initStage()
 				item->mSRT.t.y = mMapMgr->getMinY(item->mSRT.t.x, item->mSRT.t.z, true);
 				item->init(item->mSRT.t);
 				item->setColor(item->mSeedColor);
+                // init/setColor clear experimental identity; restore it afterward.
+                if (pc_randomizer_purple_campaign()) a->doRestore(item);
 				item->startAI(0);
 				C_SAI(item)->start(item, PikiHeadAI::PIKIHEAD_Wait);
 				PRINT(" NEW PIKIHEAD ****\n");
@@ -1998,11 +2023,19 @@ void GameCoreSection::finalSetup()
 	pc_p2_onikurage_teki_setup();
 	pc_p2_bombsarai_teki_setup();
 	pc_p2_groink_teki_setup();
+	pc_p2_breadbug_teki_setup();
+	pc_p2_bigtreasure_teki_setup();
 	pc_p2_king_teki_setup();
 	pc_p2_queen_teki_setup();
 	pc_p2_demon_manager_setup();
 	pc_p2_sarai_manager_setup();
 	pc_p2_preview_setup();
+    if (pc_randomizer_purple_campaign()) {
+        pc_p2_purple_setup();
+        pc_p2_purple_motion_setup();
+        pc_p2_purple_flight_setup();
+        std::printf("P2_SHIP_READY stored=%d controls=F10_withdraw_ShiftF10_deposit near_ship=180\n", p2ship::stock.total());
+    }
 	pc_p2_snow_campaign_setup();
 	// Actor-lifetime (#397): mark the new scene ready for lifecycle fixtures.
 	pc_p2_scene_begin();
@@ -2479,6 +2512,10 @@ void GameCoreSection::update()
 	pcDebugKeys();
 	pcVsMarkKey();
 #endif
+#if defined(PIKI_PC_PORT)
+	// #942 dev console: runs queued/script commands on the gameplay thread.
+	pc_dev_console_update();
+#endif
 	if (!gameflow.mMoviePlayer->mIsActive && !mDoneSundownWarn && gameflow.mWorldClock.mTimeOfDay >= gameflow.mParameters->mNightWarning()
 	    && (flowCont.mGameEndFlag != GAMEEND_PikminExtinction || flowCont.mGameEndFlag != GAMEEND_NaviDown)) {
 		if (playerState->inDayEnd()) {
@@ -2502,9 +2539,12 @@ void GameCoreSection::update()
 	}
 	pc_p2_hardlanes_update();
 	pc_p2_projectiles_update();
+	pc_p2_queen_teki_frame();
+	pc_p2_kabuto_fsm_update_stones();
+	pc_p2_bombsarai_teki_update_bombs();
 	pc_p2_long_legs_update_all();
 
-	if (GameStat::allPikis == 0 && GameStat::maxPikis > 0) {
+	if (GameStat::allPikis == 0 && (!pc_randomizer_purple_campaign() || p2ship::stock.total() == 0) && GameStat::maxPikis > 0) {
 #if defined(PIKI_PC_PORT)
 		// Cooperativo: la secuencia de extinción la hace un Olimar vivo, no
 		// un cuerpo caído. Si el vivo ya está en ella, no se repite.
@@ -3113,9 +3153,22 @@ static void randomizerObserveWorld()
 {
     const int field = int(GameStat::formationPikis) + int(GameStat::freePikis) + int(GameStat::workPikis);
     pc_randomizer_observe_population(field, true);
-    pc_randomizer_observe_total_population(int(GameStat::allPikis), true);
+    pc_randomizer_observe_total_population(int(GameStat::allPikis) + (pc_randomizer_purple_campaign() ? p2ship::stock.total() : 0), true);
+    int specialAliases[3] = {};
+    if (pc_randomizer_purple_campaign()) {
+        Iterator live(pikiMgr);
+        CI_LOOP(live) {
+            Piki* p = static_cast<Piki*>(*live);
+            if (p && p->isAlive() && (p->mP2Purple || p->mP2White)) ++specialAliases[p->mColor];
+        }
+        Iterator sprouts(itemMgr->getPikiHeadMgr());
+        CI_LOOP(sprouts) {
+            PikiHeadItem* p = static_cast<PikiHeadItem*>(*sprouts);
+            if (p && (p->mP2Purple || p->mP2White)) ++specialAliases[p->mSeedColor];
+        }
+    }
     for (int color = PikiMinColor; color < PikiColorCount; ++color)
-        pc_randomizer_observe_color_population(color, GameStat::allPikis[color], true);
+        pc_randomizer_observe_color_population(color, std::max(0, GameStat::allPikis[color] - specialAliases[color]), true);
     if (flowCont.mCurrentStage) {
         auto observe = [](Creature* obj, int kind, bool complete) {
             if (!obj || !obj->mGenerator) return;
@@ -3152,6 +3205,56 @@ static void randomizerObserveExploration(Navi* navi)
     }
 }
 
+// (#982) Progressive Maturity (main): a level, not a consumable. Shared by the
+// single-captain (randomizerApplyBenefits) and co-op (randomizerApplyBenefitsCoop)
+// branches so it runs exactly once per active tick in either. The sweep timer is
+// sim state: namespace scope, reset on a co-op stage change and folded into the
+// co-op state hash like the co-op cooldowns.
+namespace {
+float sMaturitySweep = 0.0f;
+}
+
+static void randomizerMaturitySweep()
+{
+    // Progressive maturity is a level, not a consumable: keep every Pikmin of a
+    // color at or above its received tier. Field Pikmin grow only in ordinary
+    // states (never mid-pluck, eaten, dying or mushroomed) and are caught on a
+    // later sweep; Onion stock moves up in both counters the withdrawal uses.
+    sMaturitySweep = std::max(0.0f, sMaturitySweep - gsys->getFrameTime());
+    if (sMaturitySweep == 0.0f) {
+        sMaturitySweep = 0.25f;
+        int grown = 0;
+        Iterator it(pikiMgr);
+        CI_LOOP(it) {
+            Piki* piki = static_cast<Piki*>(*it);
+            if (!piki || !piki->isAlive() || piki->mColor < 0 || piki->mColor > 2) continue;
+            const int tier = pc_randomizer_maturity(piki->mColor);
+            if (piki->mHappa >= tier || !piki->getCurrState()) continue;
+            const int state = piki->getCurrState()->getID();
+            if (state != PIKISTATE_Normal && state != PIKISTATE_LookAt && state != PIKISTATE_Emotion) continue;
+            piki->setFlower(tier);
+            if (grown++ == 0) seSystem->playPikiSound(SEF_PIKI_GROW4, piki->mSRT.t);
+        }
+        for (int color = 0; color < 3; ++color) {
+            const int tier = pc_randomizer_maturity(color);
+            GoalItem* onion = itemMgr->getContainer(color);
+            for (int happa = Leaf; happa < tier; ++happa) {
+                grown += pikiInfMgr.mPikiCounts[color][happa];
+                pikiInfMgr.mPikiCounts[color][tier] += pikiInfMgr.mPikiCounts[color][happa];
+                pikiInfMgr.mPikiCounts[color][happa] = 0;
+                if (onion) {
+                    onion->mHeldPikis[tier] += onion->mHeldPikis[happa];
+                    onion->mHeldPikis[happa] = 0;
+                }
+            }
+        }
+        if (grown) {
+            std::printf("[Pikmin Randomizer] MATURITY_APPLIED count=%d\n", grown);
+            std::fflush(stdout);
+        }
+    }
+}
+
 static void randomizerApplyBenefits(Navi* navi, MapMgr* map)
 {
     if (!pc_randomizer_ready() || !navi || !navi->isAlive() || !itemMgr || !pikiMgr) return;
@@ -3171,6 +3274,7 @@ static void randomizerApplyBenefits(Navi* navi, MapMgr* map)
     nectarCooldown = std::max(0.0f, nectarCooldown - gsys->getFrameTime());
     if (map && nectarCooldown == 0.0f && pc_randomizer_benefit_pending(PC_BENEFIT_FLOWERS))
         randomizerFlowersAt(navi, map, nectarCooldown);
+    randomizerMaturitySweep();
     if (navi->mHealth < C_NAVI_PARM(navi, mHealth) && pc_randomizer_consume_benefit(PC_BENEFIT_HEAL))
         navi->mHealth = C_NAVI_PARM(navi, mHealth);
 }
@@ -3544,6 +3648,7 @@ static void randomizerApplyBenefitsCoop(Navi* p1, Navi* p2, MapMgr* map)
     sCoopNectarCooldown = std::max(0.0f, sCoopNectarCooldown - gsys->getFrameTime());
     if (map && sCoopNectarCooldown == 0.0f && pc_randomizer_benefit_pending(PC_BENEFIT_FLOWERS))
         coopAnchored(PC_COOP_ANCHOR_FLOWERS, navis, live, [&](Navi* navi) { return randomizerFlowersAt(navi, map, sCoopNectarCooldown); });
+    randomizerMaturitySweep();
     coopApplyHeal(p1, p2);
 }
 
@@ -3580,6 +3685,7 @@ static void randomizerUpdateCoop(Navi* p1, Navi* p2, MapMgr* map)
         // "clock" covers a repeated day 29 on the same stage and a same-day
         // reload, where stage and day do not change.
         sCoopPolicy = CoopPolicyState();
+        sMaturitySweep = 0.0f;
         pc_coop_cursors_reset(sCoopPolicy.cursors);
         sCoopPolicy.started = true;
         std::printf("[coop-policy] RESET stage=%d day=%d reason=%s\n", key.stage, key.day, resetReason);
@@ -3623,6 +3729,7 @@ bool pc_coop_policy_state_hash(uint64_t* out)
     state.cooldown[0] = sCoopBombTrapCooldown;
     state.cooldown[1] = sCoopProggCooldown;
     state.cooldown[2] = sCoopNectarCooldown;
+    state.cooldown[3] = sMaturitySweep;
     *out = pc_coop_state_hash(state);
     return true;
 }
@@ -3881,6 +3988,9 @@ void GameCoreSection::updateAI()
     pc_p2_cave_tick();
     pc_p2_giant_breadbug_actor_tick();
     pc_p2_breadbug_actor_tick();
+    const bool shipActive = !gameflow.mMoviePlayer->mIsActive && !gameflow.mPauseAll
+        && !gameflow.mIsUIOverlayActive && !playerState->mInDayEnd && mNavi && mNavi->mHealth > 0.0f;
+    pc_p2_ship_tick(naviMgr ? naviMgr->getActiveNavi() : nullptr, shipActive);
     if (pc_randomizer_expanded()) {
         AICONST.mMaxPikisOnField(pc_randomizer_field_capacity());
         if (pc_coop_active() && mNavi && mNavi2) {
@@ -5226,6 +5336,9 @@ void GameCoreSection::draw(Graphics& gfx)
 	pc_p2_queen_draw(gfx);
 	pc_p2_king_draw(gfx);
 	pc_p2_tank_draw_water(gfx);
+	pc_p2_kabuto_fsm_draw_stones(gfx);
+	pc_p2_bombsarai_teki_draw_bombs(gfx);
+	pc_p2_dangomushi_draw_rain(gfx);
 }
 
 /**

@@ -34,6 +34,7 @@
 #include "MapMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "Pellet.h"
@@ -400,9 +401,8 @@ void stepCarrier(BTeki* t, Binding& b, float delta)
             const float d2 = dx * dx + dz * dz;
             if (d2 < best) { best = d2; bestDx = dx; bestDz = dz; }
         };
-        if (naviMgr && naviMgr->getNavi() && naviMgr->getNavi()->isAlive()) {
-            const Vector3f& p = naviMgr->getNavi()->mSRT.t;
-            probe(p.x, p.z);
+        for (Navi* navi : pc_p2_navis()) {
+            if (navi->isAlive()) probe(navi->mSRT.t.x, navi->mSRT.t.z);
         }
         if (pikiMgr) {
             Iterator it(pikiMgr);
@@ -523,8 +523,8 @@ void applyBlast(BTeki* t, Binding& b, const P2BombSaraiBlastEvent& event)
     // Pikmin from pikiMgr, which would invalidate a live CI_LOOP iterator and
     // crash the game right after a big blast (hits>=20).
     std::vector<std::pair<Creature*, bool>> targets;
-    if (naviMgr && naviMgr->getNavi()) {
-        targets.emplace_back(static_cast<Creature*>(naviMgr->getNavi()), false);
+    for (Navi* navi : pc_p2_navis()) {
+        targets.emplace_back(static_cast<Creature*>(navi), false);
     }
     if (pikiMgr) {
         Iterator it(pikiMgr);
@@ -578,6 +578,9 @@ void applyBlast(BTeki* t, Binding& b, const P2BombSaraiBlastEvent& event)
 void pc_p2_bombsarai_teki_setup()
 {
     pc_p2_bombsarai_teki_reset();
+    // Campaign (bridge) sessions bind every source-58 actor through the OWN
+    // port; the single-carrier sidecar below is the room-preview fixture only.
+    if (pc_p2_bombsarai_own_setup()) return;
     if (!pc_pikipelago_room_preview()) return;
     std::ifstream in("p2-bombsarai-teki.txt");
     if (!in) return; // inert without the sidecar
@@ -652,6 +655,7 @@ void maybeReentry(BTeki* t)
 
 void pc_p2_bombsarai_teki_tick(BTeki* t)
 {
+    if (pc_p2_bombsarai_own_tick(t)) return;
     maybeReentry(t);
     // Once the Pod receipt has credited the carcass, stop the free roam so the
     // survivors do not pick up leftover number pellets (dead-Pikmin `pr01`
@@ -818,6 +822,7 @@ void pc_p2_bombsarai_teki_tick(BTeki* t)
 void pc_p2_bombsarai_teki_forget(BTeki* t)
 {
     if (!t) return;
+    pc_p2_bombsarai_own_forget(t);
     const int boundBefore = (int)sBound.size();
     const int corpseBefore = (int)sCorpses.size();
     unsigned generator = 0;
@@ -840,6 +845,7 @@ void pc_p2_bombsarai_teki_reset()
 {
     const int boundBefore = (int)sBound.size();
     const int corpseBefore = (int)sCorpses.size();
+    pc_p2_bombsarai_own_reset();
     restoreCarryConfig();
     sBound.clear();
     sCorpses.clear();

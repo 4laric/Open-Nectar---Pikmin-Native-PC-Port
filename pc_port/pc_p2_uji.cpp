@@ -19,15 +19,27 @@
 //   * View-angle detection is a full hemisphere (no fp13 view cone in the
 //     general block); sight radius is the source fp12 default 200.
 //   * Turn rate is fixed (~2 rad/s); source uses the fp turn class.
-//   * UjiB Attack2/Eat does not attach Pikmin to the mandibles; damage is
-//     applied through the host bite receiver window and Eat is a timed carry
-//     pause. Tobi Fly keeps the host grounded drive (no altitude physics).
+//   * Attack semantics (#886 defect 5, see pc_p2_uji_policy.h): UjiA never
+//     harms a creature (its Attack1 is the bridge gnaw, and no P2 bridge
+//     target exists on P1 maps). UjiB/Tobi enter Attack2 on a target inside
+//     the source fp20/fp21 cone; its KEYEVENT_4 (frame 14) fires ONCE:
+//     attackNavi(fp22, fp23, fp24) on every captain in the cone plus
+//     eatPikmin through the kamujnt slot (pc_p2_captor_mouth.h, r=15, a
+//     documented port approximation of the joint), physically sticking the
+//     Pikmin to the P1 Kabekui host 'slot' part (pc_p2_captor_host.h, the
+//     same InteractSwallow the P1 TAIAbiteForKabekui uses). Attack2 END goes
+//     to Eat only with stuck Pikmin; Eat KEYEVENT_2 (frame 53) swallows only
+//     Pikmin still held (poison proper default 300). Death and teardown
+//     release the mouth. Tobi Fly keeps the host grounded drive (no
+//     altitude physics).
 //   * Appear/attack/dive/eat/fly durations are port values (source ends on
-//     motion end); bridge damage uses the retail fp01=25.
+//     motion end). The general fp20-fp24 values are the EnemyParmsBase
+//     header defaults (no retail Uji general block is extracted here).
 // No other lane's module is modified; every hook is a no-op for unregistered
 // actors.
 #include "pc_p2_uji.h"
 #include "pc_p2_uji_policy.h"
+#include "pc_p2_captor_host.h"
 #include "pc_randomizer.h"
 #include "teki.h"
 #include "Interactions.h"
@@ -35,6 +47,7 @@
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
 #include "Generator.h"
 #include "gameflow.h"
 #include <cmath>
@@ -76,6 +89,7 @@ struct Clip {
     std::string name;
     float duration = 1.0f;
     bool loop = false;
+    std::vector<std::pair<int, int>> events; // source frame -> key event type
 };
 
 struct Uji {
@@ -89,7 +103,8 @@ struct Uji {
     float lastHealth = 100.0f;
     bool deadLogged = false;
     bool hitLogged = false;
-    bool attackHit = false;
+    p2captor::Held<Piki> held; // Pikmin in the kamujnt slot (validated against the host stick)
+    bool mouthLogged = false;
     bool escaped = false;
     bool atariOn = false;
     bool gateInit = false;
@@ -133,9 +148,8 @@ bool clipLoops(Uji& s, const std::string& name) {
     return c && c->loop;
 }
 bool targetInSight(const Vector3f& pos, float sight) {
-    if (naviMgr) {
-        Navi* n = naviMgr->getNavi();
-        if (n && n->isAlive() && distXZ(n->getPosition(), pos) < sight) return true;
+    for (Navi* n : pc_p2_navis()) {
+        if (n->isAlive() && distXZ(n->getPosition(), pos) < sight) return true;
     }
     if (pikiMgr) {
         Iterator it(pikiMgr);
@@ -146,24 +160,8 @@ bool targetInSight(const Vector3f& pos, float sight) {
     }
     return false;
 }
-bool targetInRange(const Vector3f& pos, float range) {
-    if (naviMgr) {
-        Navi* n = naviMgr->getNavi();
-        if (n && n->isAlive() && distXZ(n->getPosition(), pos) < range) return true;
-    }
-    if (pikiMgr) {
-        Iterator it(pikiMgr);
-        CI_LOOP(it) {
-            Piki* p = static_cast<Piki*>(*it);
-            if (p && p->isAlive() && distXZ(p->getPosition(), pos) < range) return true;
-        }
-    }
-    return false;
-}
 void enter(Uji& s, State state) {
-    s.fsm.state = state;
-    s.fsm.stateTime = 0.0f;
-    s.attackHit = false;
+    s.fsm.enter(state);
     s.clip = Fsm::clipFor(state, s.kind);
 }
 const char* stateName(State s);
@@ -228,8 +226,8 @@ Creature* nearestFoe(const Vector3f& pos, float range) {
     Creature* best = nullptr;
     float bestSq = range * range;
     if (naviMgr) {
-        Navi* n = naviMgr->getNavi();
-        if (n && n->isAlive()) {
+        for (Navi* n : pc_p2_navis()) {
+            if (!n->isAlive()) continue;
             const float dx = n->getPosition().x - pos.x, dz = n->getPosition().z - pos.z;
             const float d = dx * dx + dz * dz;
             if (d < bestSq) { bestSq = d; best = n; }
@@ -239,7 +237,7 @@ Creature* nearestFoe(const Vector3f& pos, float range) {
         Iterator it(pikiMgr);
         CI_LOOP(it) {
             Piki* p = static_cast<Piki*>(*it);
-            if (!p || !p->isAlive()) continue;
+            if (!p || !p->isAlive() || p->isStickToMouth()) continue; // a held Pikmin is not a target
             const float dx = p->getPosition().x - pos.x, dz = p->getPosition().z - pos.z;
             const float d = dx * dx + dz * dz;
             if (d < bestSq) { bestSq = d; best = p; }
@@ -247,19 +245,71 @@ Creature* nearestFoe(const Vector3f& pos, float range) {
     }
     return best;
 }
-// OWN attack (replaces the host Kabekui bite): the P2 FSM deals the retail
-// fp01 bridge-bite damage once per attack entry to the nearest victim in
-// reach. Logged P2_UJI_ATTACK so evidence attributes the kill to the P2 FSM.
+// Source isTargetAttackable / getNearestPikminOrNavi(fp21, fp20): a live
+// captain or searchable Pikmin inside the facing cone.
+bool targetAttackable(const Vector3f& pos, const Uji& s) {
+    const Parms& p = s.parms;
+    for (Navi* n : pc_p2_navis()) {
+        if (!n->isAlive()) continue;
+        const Vector3f q = n->getPosition();
+        if (p2uji_policy::inCone(q.x - pos.x, q.y - pos.y, q.z - pos.z, s.heading, p.attackRange, p.attackAngle))
+            return true;
+    }
+    if (pikiMgr) {
+        Iterator it(pikiMgr);
+        CI_LOOP(it) {
+            Piki* pk = static_cast<Piki*>(*it);
+            if (!pk || !pk->isAlive() || pk->isStickToMouth()) continue;
+            const Vector3f q = pk->getPosition();
+            if (p2uji_policy::inCone(q.x - pos.x, q.y - pos.y, q.z - pos.z, s.heading, p.attackRange, p.attackAngle))
+                return true;
+        }
+    }
+    return false;
+}
+const p2captor::Geometry& mouthGeometry(const Uji& s) {
+    return *p2captor::geometryFor(unsigned(s.sourceId));
+}
+// Source Attack2 KEYEVENT_4 (UjiB/Tobi only, once per Attack2): attackNavi
+// on every captain in the fp22/fp23 cone, then eatPikmin through kamujnt.
 void ujiStrike(BTeki* a, Uji& s, unsigned generator) {
-    if (s.attackHit) return;
-    s.attackHit = true;
-    Creature* victim = nearestFoe(a->getPosition(), s.parms.attackRange);
-    if (!victim) return;
-    const bool navi = naviMgr && victim == naviMgr->getNavi();
-    victim->stimulate(InteractAttack(a, nullptr, s.parms.bridgeDamage, false));
-    std::printf("P2_UJI_ATTACK generator=%u source_id=%d target=%s damage=%.1f state=%s\n",
-                generator, s.sourceId, navi ? "navi" : "pikmin",
-                s.parms.bridgeDamage, stateName(s.fsm.state));
+    if (!p2uji_policy::attacksCreatures(s.kind)) return;
+    const Vector3f pos = a->getPosition();
+    int navis = 0;
+    for (Navi* n : pc_p2_navis()) {
+        if (!n->isAlive()) continue;
+        const Vector3f q = n->getPosition();
+        if (!p2uji_policy::inCone(q.x - pos.x, q.y - pos.y, q.z - pos.z, s.heading, s.parms.attackRadius,
+                                  s.parms.hitAngle, true)) continue;
+        if (n->stimulate(InteractAttack(a, nullptr, s.parms.attackDamage, false))) ++navis;
+    }
+    const p2captor::Geometry& g = mouthGeometry(s);
+    if (!s.mouthLogged) {
+        s.mouthLogged = true;
+        std::printf("P2_UJI_MOUTH generator=%u source_id=%d slots=%d radius=%.1f local_z=%.1f host_slots=%d\n",
+                    generator, s.sourceId, g.slots, g.radius, g.local[0][2], p2captorhost::hostSlotCount(a));
+        std::fflush(stdout);
+    }
+    bool occupied[p2captor::MaxSlots] = {};
+    p2captorhost::validate(a, s.held, g.slots, occupied);
+    p2captorhost::Scene scene = p2captorhost::snapshot(a);
+    const p2captor::Vec3 apos = p2captorhost::vec(pos);
+    int refused = 0;
+    const int eaten = p2captor::eat(g, apos, s.heading, scene.prey.data(), (int)scene.prey.size(), occupied,
+                                    p2captor::defaultEligible, [&](int n, int slot) {
+        return p2captorhost::swallowInto(a, scene, n, slot, s.held, 1, &refused);
+    });
+    std::printf("P2_UJI_ATTACK generator=%u source_id=%d frame=%d navi=%d eaten=%d refused_no_host=%d "
+                "navi_damage=%.1f\n", generator, s.sourceId, s.parms.strikeFrame, navis, eaten, refused,
+                s.parms.attackDamage);
+    std::fflush(stdout);
+}
+// Source Eat KEYEVENT_2: swallowPikmin(proper poison) on Pikmin still held.
+void ujiSwallow(BTeki* a, Uji& s, unsigned generator) {
+    int white = 0;
+    const int killed = p2captorhost::swallow(a, s.held, mouthGeometry(s).slots, s.parms.poisonDamage, &white);
+    std::printf("P2_UJI_EAT generator=%u source_id=%d frame=%d pikmin=%d white=%d\n", generator, s.sourceId,
+                s.parms.swallowFrame, killed, white);
     std::fflush(stdout);
 }
 void wander(BTeki* a, Uji& s, float speed) {
@@ -318,7 +368,12 @@ void pc_p2_uji_forget(BTeki* actor) {
     // as an onion:p2 grant. The central pc_p2_forget_teki seam also clears
     // it; this is idempotent.
     pc_randomizer_p2_forget_source(static_cast<PelletView*>(actor));
+    auto it = actors.find(static_cast<PelletView*>(actor));
+    if (it != actors.end()) p2captorhost::release(actor, it->second.held); // teardown frees the mouth
     actors.erase(static_cast<PelletView*>(actor));
+}
+void pc_p2_uji_forget_piki(Piki* piki) {
+    for (auto& entry : actors) entry.second.held.forget(piki);
 }
 
 float pc_p2_uji_param_f(const BTeki* actor, int idx, float fallback) {
@@ -395,8 +450,27 @@ void pc_p2_uji_setup() {
                         clip.name = name;
                         clip.duration = frames > 0 ? float(frames) / 30.0f : 1.0f;
                         clip.loop = (name == "move" || name == "fly");
+                        if (events != "-") {
+                            size_t start = 0;
+                            while (start < events.size()) {
+                                const size_t comma = events.find(',', start);
+                                const std::string pair = events.substr(start, comma - start);
+                                const size_t colon = pair.find(':');
+                                if (colon != std::string::npos) {
+                                    clip.events.emplace_back(std::atoi(pair.substr(0, colon).c_str()),
+                                                             std::atoi(pair.substr(colon + 1).c_str()));
+                                }
+                                if (comma == std::string::npos) break;
+                                start = comma + 1;
+                            }
+                        }
                         bankClips[species][name] = clip;
                     }
+                } else if (token == "frames") {
+                    // P2_BANK_FRAMES_1 trailer (#895): per-pose source frames,
+                    // consumed by the batch draw paths; skip its list token here.
+                    std::string framesList;
+                    bank >> framesList;
                 } else {
                     break;
                 }
@@ -453,6 +527,13 @@ void pc_p2_uji_setup() {
         s.kind = kind;
         s.sourceId = p2uji_policy::sourceIdFor(kind);
         s.parms = p2uji_policy::parmsFor(kind);
+        // Retail key-event frames from the installed bank when present.
+        if (Clip* c = clipFor(s, "attack2")) {
+            for (const auto& e : c->events) if (e.second == 4) s.parms.strikeFrame = e.first;
+        }
+        if (Clip* c = clipFor(s, "eat")) {
+            for (const auto& e : c->events) if (e.second == 2) s.parms.swallowFrame = e.first;
+        }
         s.self = actor;
         s.home = actor->getPosition();
         s.heading = actor->getDirection();
@@ -511,6 +592,11 @@ void pc_p2_uji_update(BTeki* actor) {
             std::fflush(stdout);
             s.deadLogged = true;
         }
+        const int freed = p2captorhost::release(actor, s.held);
+        if (freed > 0) {
+            std::printf("P2_UJI_RELEASE generator=%u reason=death pikmin=%d\n", generator, freed);
+            std::fflush(stdout);
+        }
         enter(s, UJI_DEAD);
         applyBurrowGate(actor, s, generator);
         setPhase(s, dt);
@@ -531,7 +617,8 @@ void pc_p2_uji_update(BTeki* actor) {
     In in;
     in.health = actor->mHealth;
     in.targetInSight = targetInSight(pos, s.parms.sight);
-    in.targetInRange = targetInRange(pos, s.parms.attackRange);
+    in.targetAttackable = targetAttackable(pos, s);
+    in.stuckPikmin = p2captorhost::pikiStickerCount(actor) > 0;
     in.farFromHome = distXZ(pos, s.home) > s.parms.territory;
     Out out;
     // Fixed-step policy tick (30 Hz retail clock): accumulate real dt into
@@ -541,10 +628,23 @@ void pc_p2_uji_update(BTeki* actor) {
     while (s.tickAccum >= 1.0f / 30.0f) {
         s.tickAccum -= 1.0f / 30.0f;
         const State before = s.fsm.state;
-        if (s.fsm.tick(in, s.parms, s.kind, out) && s.fsm.state != before) {
+        const bool changed = s.fsm.tick(in, s.parms, s.kind, out);
+        if (out.strike) {
+            ujiStrike(actor, s, generator);
+            in.stuckPikmin = p2captorhost::pikiStickerCount(actor) > 0;
+        }
+        if (out.swallow) ujiSwallow(actor, s, generator);
+        if (changed && s.fsm.state != UJI_EAT) {
+            // Only Attack2 -> Eat carries the mouth.
+            const int freed = p2captorhost::release(actor, s.held);
+            if (freed > 0) {
+                std::printf("P2_UJI_RELEASE generator=%u reason=transition pikmin=%d\n", generator, freed);
+                std::fflush(stdout);
+            }
+        }
+        if (changed && s.fsm.state != before) {
             s.clip = Fsm::clipFor(s.fsm.state, s.kind);
             s.phase = 0.0f;
-            s.attackHit = false;
             std::printf("P2_UJI_STATE generator=%u state=%s\n", generator, stateName(s.fsm.state));
             std::fflush(stdout);
             moved = true;
@@ -581,8 +681,7 @@ void pc_p2_uji_update(BTeki* actor) {
     }
     case UJI_ATTACK1:
     case UJI_ATTACK2:
-        stop(actor);
-        ujiStrike(actor, s, generator);
+        stop(actor); // the one Attack2 strike fires from the FSM key event above
         break;
     case UJI_EAT:
         stop(actor);

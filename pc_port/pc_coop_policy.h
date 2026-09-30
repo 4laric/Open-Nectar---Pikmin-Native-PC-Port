@@ -185,7 +185,7 @@ uint64_t pc_coop_events_config_hash();
 // (reset key, tick, cursors, the HP samples of rule 1) and the three co-op
 // cooldowns (bomb trap, Progg, nectar), which persist across stages. The
 // fixture read-back fields and log-only text are not sim state.
-enum { PC_COOP_COOLDOWNS = 3 };
+enum { PC_COOP_COOLDOWNS = 4 };
 struct PcCoopHashState {
 	bool started;
 	PcCoopStageKey key;
@@ -193,7 +193,7 @@ struct PcCoopHashState {
 	PcCoopCursors cursors;
 	float prevHp[PC_COOP_CAPTAINS];
 	bool prevValid[PC_COOP_CAPTAINS];
-	float cooldown[PC_COOP_COOLDOWNS]; // bomb trap, Progg, nectar
+	float cooldown[PC_COOP_COOLDOWNS]; // bomb trap, Progg, nectar, maturity sweep (#982)
 };
 // FNV-1a 64 over every field in declaration order, little-endian, floats
 // by their bit patterns. Never 0.

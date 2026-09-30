@@ -61,3 +61,14 @@ bool pc_p2_otakara_clip(const BTeki*, const char*& name, float& phase);
 // that a bound actor is damageable. Additive; no runtime behavior changes.
 unsigned long pc_p2_otakara_count();
 bool pc_p2_otakara_registered(BTeki*);
+
+// Press/landing hooks (#884, pc_p2_otakara_press_policy.h). Both return true only
+// for a registered Dweevil (59-62, 93), meaning "consumed: skip the P1 host squash".
+// Source OtakaraBase has no pressCallBack/flyCollisionCallBack override, so a press
+// or a thrown Pikmin landing does no damage and the Pikmin latches on (P2
+// pikiState.cpp:2321-2342). Each logs P2_OTAKARA_PRESS once per press.
+//   pc_p2_otakara_pressed: InteractPress::actTeki, before the host Pressed event.
+//   pc_p2_otakara_smashed: TaiSmashedAction::actByEvent, for a PIKISTATE_Flying
+//                          Piki Entity contact, before the host smash transit.
+bool pc_p2_otakara_pressed(BTeki*, Creature* presser);
+bool pc_p2_otakara_smashed(BTeki*, Creature* presser);

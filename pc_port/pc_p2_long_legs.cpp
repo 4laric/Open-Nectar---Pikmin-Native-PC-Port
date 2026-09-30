@@ -21,6 +21,11 @@
 // THdamaShell; the in-flight pool mirrors the source pool of 10.
 #include "pc_p2_long_legs.h"
 #include "pc_p2_long_legs_fsm.h"
+#include "pc_p2_houdai_fsm.h"
+#include "pc_p2_long_legs_ik.h"
+#include "MapMgr.h"
+#include "EffectMgr.h"
+#include "UtEffect.h"
 #include "pc_p2_cannon_stone.h"
 #include "pc_p2_animation.h"
 #include "pc_p2_campaign_actor.h"
@@ -32,6 +37,9 @@
 #include "Interactions.h"
 #include "Generator.h"
 #include "Shape.h"
+#include "Joint.h"
+#include "Material.h"
+#include "system.h"
 #include "Texture.h"
 #include "Graphics.h"
 #include "Camera.h"
@@ -40,6 +48,12 @@
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_p2_navi_select.h"
+#include "PikiState.h"
+#include "PlayerState.h"
+#include "SoundMgr.h"
+#include "settings/pc_settings.h"
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -89,7 +103,40 @@ struct ActorState {
     bool homeRecorded = false;
     bool deadEscapeDone = false;  // OWN death: pcEscapeNow fired once after Dead
     float deadSeconds = 0.0f;     // time in Dead before the escape finalizes
+    // Man-at-Legs (66) own brain (#173): the source Houdai FSM replaces the
+    // shared P2LongLegsFsm schedule for Houdai only; 56/69 keep the shared path.
+    bool isHoudai = false;
+    P2HoudaiFsm houdai;
+    float srcAccum = 0.0f;          // 30 Hz source-tick accumulator
+    float lastDamageCount = 0.0f;   // BTeki::mDamageCount at the last tick
+    int pendingHits = 0;            // accepted hits since the last source tick
+    bool pendingTook = false;       // accepted damage since the last source tick
+    bool damageAttempt = false;     // stuck-Pikmin hit refused while dormant (wakes Stay)
+    float landDrop = 0.0f;          // Land drop-in draw offset (1 = up high)
+    bool drawHidden = false;        // Stay: dormant, not drawn
+    int shellsFired = 0;
+    int shellHits[3] = {0, 0, 0};   // piki, navi, teki
+    int flicks = 0;
+    int receiverAccepted = 0, receiverRejected = 0;
+    bool scaleLogged = false;       // per-actor P2_HOUDAI_SCALE line
+    bool stayIntangible = false;    // Stay: host collision/shadow/gauge off
+    // #173 walk animation: source IKSystemMgr legs over the rigid skin
+    // sidecar, drawn through a private copy of the bind mesh. Draw-only: it
+    // reads the brain's strides and the map floor, draws no RNG and never
+    // moves the host body, so gameplay and lockstep state are unchanged.
+    Shape* ikShape = nullptr;
+    bool ikStarted = false;
+    bool ikDrawLogged = false;
+    p2ik::Mgr ik;
+    int ikStrides = 0, ikLifts = 0, ikPlants = 0;
 };
+
+// Rigid skin of the Man-at-Legs bind mesh (longlegs_Houdai_skin_00.txt) and
+// the skin joint index of every IK leg joint (Houdai::setupIKSystem order).
+p2ik::Skin houdaiSkin;
+bool houdaiSkinReady = false;
+int houdaiLegJoint[p2ik::kLegCount][3];
+float houdaiSkinBindError = 0.0f;
 
 std::map<BTeki*, ActorState> actors;      // actor -> species + policy state
 // Naturally dead Long Legs proxy corpses, keyed on the corpse Pellet* the engine
@@ -176,8 +223,8 @@ Creature* nearestTarget(const Vector3f& pos, float radius) {
     Creature* best = nullptr;
     float bestSq = radius * radius;
     if (naviMgr) {
-        Navi* n = naviMgr->getNavi();
-        if (n && n->isAlive()) {
+        for (Navi* n : pc_p2_navis()) {
+            if (!n->isAlive()) continue;
             const Vector3f p = n->getPosition();
             const float dx = p.x - pos.x, dz = p.z - pos.z;
             const float d = dx * dx + dz * dz;
@@ -402,6 +449,683 @@ void applyFlickShake(BTeki* actor, const Vector3f& pos, const std::string& speci
     std::fflush(stdout);
 }
 
+// ---------------------------------------------------------------------------
+// Man-at-Legs (Houdai, 66) own-behaviour host (#173). The engine-free brain
+// P2HoudaiFsm owns every transition; this host senses the world, applies the
+// requested effects and flies the source straight shells.
+
+// HoudaiShotGunNode (HoudaiShotGun.cpp:95): straight shell, no gravity, radius
+// 10 map sphere, capsule sweep of mAttackRadius against every creature, expires
+// on map contact or 1500 units (1000 in y) from its Houdai. Pool of 10 per boss.
+struct HoudaiStraightShell {
+    BTeki* owner = nullptr;
+    unsigned generator = 0;
+    int id = 0;
+    Vector3f pos;
+    Vector3f vel;
+    float flight = 0.0f;
+};
+std::vector<HoudaiStraightShell> houdaiShells;
+constexpr int kHoudaiShellPool = 10;
+
+// Shell visuals: the source THdamaShell/THdamaHit particle sets do not exist in
+// P1, so the shells reuse the P1 effects the Groink shells use (#892): the
+// Beatle rock-shoot halo at the muzzle, a BombLight fire-glow puff along the
+// flight each tick, and the Kando BombLight burst on map impact.
+void houdaiFx(int effect, const Vector3f& pos, const Vector3f* dir) {
+    if (!effectMgr) return;
+    zen::particleGenerator* gen =
+        effectMgr->create(static_cast<EffectMgr::effTypeTable>(effect), pos, nullptr, nullptr);
+    if (gen && dir) {
+        gen->setEmitDir(*dir);
+        gen->setOrientedNormalVector(Vector3f(0.0f, 1.0f, 0.0f));
+    }
+}
+void houdaiImpactFx(const Vector3f& pos) {
+    if (!utEffectMgr) return;
+    EffectParm parm(pos);
+    utEffectMgr->cast(KandoEffect::BombLight, parm);
+}
+
+int houdaiShellCount(BTeki* owner) {
+    int n = 0;
+    for (const HoudaiStraightShell& s : houdaiShells) n += s.owner == owner;
+    return n;
+}
+
+void houdaiDropShells(BTeki* owner, const char* why) {
+    for (auto it = houdaiShells.begin(); it != houdaiShells.end();) {
+        if (it->owner == owner) {
+            std::printf("P2_HOUDAI_SHELL_END generator=%u shell=%d reason=%s flight=%.2f\n",
+                        it->generator, it->id, why, it->flight);
+            it = houdaiShells.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+// Capsule test of HoudaiShotGunNode::update against one creature.
+bool houdaiCapsuleHit(const Vector3f& start, const Vector3f& end, float radius, const Vector3f& at) {
+    const float lx = end.x - start.x, ly = end.y - start.y, lz = end.z - start.z;
+    const float dist = std::sqrt(lx * lx + ly * ly + lz * lz);
+    if (!(dist > 0.0f)) return false;
+    const float searchRadius = dist + radius;
+    const Vector3f v1(lx / dist, ly / dist, lz / dist);
+    // v2 = cross(yAxis, v1), v3 = cross(v1, v2)
+    Vector3f v2(v1.z, 0.0f, -v1.x);
+    float n2 = std::sqrt(v2.x * v2.x + v2.z * v2.z);
+    if (n2 < 1.0e-6f) { v2 = Vector3f(1.0f, 0.0f, 0.0f); n2 = 1.0f; }
+    v2.x /= n2; v2.z /= n2;
+    Vector3f v3(v1.y * v2.z - v1.z * v2.y, v1.z * v2.x - v1.x * v2.z, v1.x * v2.y - v1.y * v2.x);
+    const float n3 = std::sqrt(v3.x * v3.x + v3.y * v3.y + v3.z * v3.z);
+    if (n3 > 1.0e-6f) { v3.x /= n3; v3.y /= n3; v3.z /= n3; }
+    const Vector3f sep(at.x - start.x, at.y - start.y, at.z - start.z);
+    const float d2 = v2.x * sep.x + v2.y * sep.y + v2.z * sep.z;
+    if (!(std::fabs(d2) < radius)) return false;
+    const float d3 = v3.x * sep.x + v3.y * sep.y + v3.z * sep.z;
+    if (!(std::fabs(d3) < radius)) return false;
+    const float d1 = v1.x * sep.x + v1.y * sep.y + v1.z * sep.z;
+    return d1 > -radius && d1 < searchRadius;
+}
+
+// HoudaiShotGunNode::update (HoudaiShotGun.cpp:218-229) blasts a hit Pikmin or
+// captain with InteractBomb(owner, attackDamage, &blastDir), where blastDir is
+// the sideways offset from the shell line (dot2 * vec2, flattened, normalised
+// to 100) plus y 100 for Pikmin. P1's InteractBomb has no direction and flicks
+// away from the owner's position, so a Pikmin under the gun flew away from the
+// boss body instead of sideways off the shell line. This receiver keeps every
+// P1 bomb gate and side effect (interactBattle.cpp InteractBomb::actPiki) and
+// only aims the flick along the source blast direction.
+struct HoudaiShellBlast : public InteractBomb {
+    HoudaiShellBlast(Creature* owner, f32 damage, const Vector3f& blast)
+        : InteractBomb(owner, damage, nullptr), mBlast(blast) {}
+    // PikiFlickState flies at -strength * (sin, cos)(mRotationAngle), so the
+    // angle that sends the Pikmin along +blast is atan2(-x, -z).
+    bool actPiki(Piki* piki) immut override {
+        if (pc_settings_get_piki_invincible()) return false;
+        if (!piki->isAlive()) return false;
+        const int st = piki->getState();
+        if (st == PIKISTATE_Drown || st == PIKISTATE_Dead || st == PIKISTATE_Dying || st == PIKISTATE_Flick)
+            return false;
+        if (piki->aiCullable() && !playerState->mDemoFlags.isFlag(DEMOFLAG_FirstBombDeath))
+            playerState->mDemoFlags.setFlagOnly(DEMOFLAG_FirstBombDeath);
+        playerState->mResultFlags.setOn(zen::RESFLAG_PikminBombDeath);
+        piki->playEventSound(mOwner, SE_PIKI_DAMAGED);
+        piki->mHealth -= mDamage;
+        piki->mLifeGauge.updValue(piki->mHealth, C_PIKI_PARM(piki, mPikiMaxHealth));
+        if (mBlast.x != 0.0f || mBlast.z != 0.0f) {
+            piki->mRotationAngle = std::atan2(-mBlast.x, -mBlast.z);
+        } else {
+            Vector3f diff = mOwner->mSRT.t - piki->mSRT.t;
+            diff.normalise();
+            piki->mRotationAngle = atan2f(diff.x, diff.z);
+        }
+        piki->mFlickIntensity = 180.0f;
+        piki->mFSM->transit(piki, PIKISTATE_Flick);
+        return true;
+    }
+    Vector3f mBlast;
+};
+
+// Source blastDir for a creature at `at` hit by the shell segment start->end.
+Vector3f houdaiBlastDir(const Vector3f& start, const Vector3f& end, const Vector3f& at, bool piki) {
+    const float lx = end.x - start.x, lz = end.z - start.z;
+    // vec2 = cross(yAxis, vec1) flattened: (v1.z, 0, -v1.x)
+    float v2x = lz, v2z = -lx;
+    const float n2 = std::sqrt(v2x * v2x + v2z * v2z);
+    if (n2 < 1.0e-6f) { v2x = 1.0f; v2z = 0.0f; } else { v2x /= n2; v2z /= n2; }
+    const float d2 = v2x * (at.x - start.x) + v2z * (at.z - start.z);
+    float bx = d2 * v2x, bz = d2 * v2z;
+    const float nb = std::sqrt(bx * bx + bz * bz);
+    if (nb > 1.0e-6f) { bx /= nb; bz /= nb; } else { bx = 0.0f; bz = 0.0f; }
+    return Vector3f(bx * 100.0f, piki ? 100.0f : 0.0f, bz * 100.0f);
+}
+
+void houdaiStepShells(BTeki* owner, ActorState& state, float dt) {
+    const Vector3f home = owner->getPosition();
+    const float radius = state.houdai.parms().attackRadius;
+    const float damage = state.houdai.parms().attackDamage;
+    for (auto it = houdaiShells.begin(); it != houdaiShells.end();) {
+        HoudaiStraightShell& s = *it;
+        if (s.owner != owner) { ++it; continue; }
+        const Vector3f start = s.pos;
+        Vector3f next(start.x + s.vel.x * dt, start.y + s.vel.y * dt, start.z + s.vel.z * dt);
+        bool expire = false;
+        const char* reason = "";
+        const float ground = mapMgr ? mapMgr->getMinY(next.x, next.z, true) : -1.0e9f;
+        if (next.y - 10.0f <= ground) {
+            // Map sphere (radius 10) touched the floor, or a wall face whose
+            // floor height rises above the shell (the port has no shell trace).
+            if (next.y - ground < 20.0f) next.y = ground + 10.0f;
+            expire = true;
+            reason = "map";
+        } else if (std::fabs(home.x - next.x) > 1500.0f || std::fabs(home.y - next.y) > 1000.0f
+                   || std::fabs(home.z - next.z) > 1500.0f) {
+            expire = true;
+            reason = "range";
+        }
+        s.pos = next;
+        s.flight += dt;
+        houdaiFx(26, next, nullptr); // EFF_BombLight_FireGlow trail puff
+        const Vector3f a(start.x, start.y - 10.0f, start.z);
+        const Vector3f b(next.x, next.y - 10.0f, next.z);
+        auto report = [&](Creature* c, const char* kind, float dmg, bool accepted, const Vector3f& blast) {
+            const Vector3f p = c->getPosition();
+            std::printf("P2_HOUDAI_SHELL_HIT generator=%u shell=%d kind=%s damage=%.1f accepted=%d "
+                        "at=%.1f,%.1f,%.1f flight=%.2f blast=%.0f,%.0f,%.0f\n",
+                        s.generator, s.id, kind, dmg, int(accepted), p.x, p.y, p.z, s.flight,
+                        blast.x, blast.y, blast.z);
+        };
+        if (pikiMgr) {
+            Iterator pit(pikiMgr);
+            CI_LOOP(pit) {
+                Piki* p = static_cast<Piki*>(*pit);
+                if (!p || !p->isAlive() || !houdaiCapsuleHit(a, b, radius, p->getPosition())) continue;
+                const Vector3f blast = houdaiBlastDir(a, b, p->getPosition(), true);
+                const bool ok = p->stimulate(HoudaiShellBlast(owner, damage, blast));
+                if (ok) ++state.shellHits[0];
+                report(p, "piki", damage, ok, blast);
+            }
+        }
+        for (Navi* n : pc_p2_navis()) {
+            if (!n || !n->isAlive() || !houdaiCapsuleHit(a, b, radius, n->getPosition())) continue;
+            // NaviFlickState flies back along -mFaceDirection: face against
+            // the source blast so the captain is thrown along it; restore the
+            // facing when the bomb is refused (invincible / PikiZero).
+            const Vector3f blast = houdaiBlastDir(a, b, n->getPosition(), false);
+            const float face = n->mFaceDirection;
+            if (blast.x != 0.0f || blast.z != 0.0f) n->mFaceDirection = std::atan2(-blast.x, -blast.z);
+            const bool ok = n->stimulate(InteractBomb(owner, damage, nullptr));
+            if (!ok) n->mFaceDirection = face;
+            if (ok) ++state.shellHits[1];
+            report(n, "navi", damage, ok, blast);
+        }
+        if (tekiMgr) {
+            Iterator tit(tekiMgr);
+            CI_LOOP(tit) {
+                Teki* t = static_cast<Teki*>(*tit);
+                if (!t || t == owner || !t->isAlive() || !houdaiCapsuleHit(a, b, radius, t->getPosition())) continue;
+                const bool ok = t->stimulate(InteractBomb(owner, 500.0f, nullptr));
+                if (ok) ++state.shellHits[2];
+                report(t, "teki", 500.0f, ok, Vector3f(0.0f, 0.0f, 0.0f));
+            }
+        }
+        if (expire && reason[0] == 'm') houdaiImpactFx(next);
+        if (expire) {
+            std::printf("P2_HOUDAI_SHELL_END generator=%u shell=%d reason=%s flight=%.2f at=%.1f,%.1f,%.1f\n",
+                        s.generator, s.id, reason, s.flight, next.x, next.y, next.z);
+            it = houdaiShells.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+float angleTo(const Vector3f& from, const Vector3f& to) {
+    return std::atan2(to.x - from.x, to.z - from.z);
+}
+
+float angleDiff(float a, float b) {
+    float d = a - b;
+    while (d > 3.14159265f) d -= 6.28318531f;
+    while (d < -3.14159265f) d += 6.28318531f;
+    return d;
+}
+
+// Stuck Pikmin (source Stickers of the enemy): walk the sticker list.
+int houdaiStuckCount(BTeki* actor) {
+    int n = 0;
+    for (Creature* s = actor->mStickListHead; s; s = s->mNextSticker)
+        if (s->isPiki() && s->isAlive()) ++n;
+    return n;
+}
+
+// EnemyFunc::flickStickPikmin(enemy, chance, knockback, damage, FLICK_BACKWARD_ANGLE).
+int houdaiFlickStuck(BTeki* actor, float chance, float knockback, float damage, int& stuck) {
+    std::vector<Creature*> stickers;
+    for (Creature* s = actor->mStickListHead; s; s = s->mNextSticker)
+        if (s->isPiki() && s->isAlive()) stickers.push_back(s);
+    stuck = int(stickers.size());
+    int hit = 0;
+    for (Creature* c : stickers) {
+        if (!(chance > (gsys ? gsys->getRand(1.0f) : 0.0f))) continue;
+        if (c->stimulate(InteractFlick(actor, knockback, damage, FLICK_BACKWARDS_ANGLE))) ++hit;
+    }
+    return hit;
+}
+
+// Nearest non-stuck Pikmin (and optionally captain) within `range` and the
+// half-angle `viewDeg` of `face` (EnemyFunc::getNearestPikmin[OrNavi] with
+// ConditionNotStickClient).
+Creature* houdaiNearest(BTeki* actor, const Vector3f& pos, float face, float viewDeg, float range, bool navis) {
+    Creature* best = nullptr;
+    float bestSq = range * range;
+    const float view = viewDeg * 3.14159265f / 180.0f;
+    auto consider = [&](Creature* c) {
+        const Vector3f q = c->getPosition();
+        const float dx = q.x - pos.x, dz = q.z - pos.z;
+        const float d = dx * dx + dz * dz;
+        if (d >= bestSq) return;
+        if (viewDeg < 180.0f && std::fabs(angleDiff(std::atan2(dx, dz), face)) > view) return;
+        bestSq = d;
+        best = c;
+    };
+    if (pikiMgr) {
+        Iterator it(pikiMgr);
+        CI_LOOP(it) {
+            Piki* p = static_cast<Piki*>(*it);
+            if (!p || !p->isAlive() || p->getStickObject() == actor) continue;
+            consider(p);
+        }
+    }
+    if (navis)
+        for (Navi* n : pc_p2_navis())
+            if (n && n->isAlive()) consider(n);
+    return best;
+}
+
+bool houdaiWake(BTeki* actor, const Vector3f& pos, float radius) {
+    // EnemyFunc::isThereOlimar || isTherePikmin within mPrivateRadius.
+    for (Navi* n : pc_p2_navis()) {
+        if (!n || !n->isAlive()) continue;
+        const Vector3f q = n->getPosition();
+        if ((q.x - pos.x) * (q.x - pos.x) + (q.z - pos.z) * (q.z - pos.z) < radius * radius) return true;
+    }
+    return houdaiNearest(actor, pos, 0.0f, 180.0f, radius, false) != nullptr;
+}
+
+P2HoudaiVec hv(const Vector3f& v) { return P2HoudaiVec{v.x, v.y, v.z}; }
+
+// Wall-clock ms (system clock, epoch) so frame-dump file times can be matched
+// to state markers during the eye check.
+long long houdaiWallMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+void houdaiLogState(const ActorState& st, P2LongLegsState from, P2LongLegsState to, BTeki* actor) {
+    const Vector3f p = actor->getPosition();
+    std::printf("P2_LONG_LEGS_STATE species=Houdai generator=%u from=%s state=%s x=%.1f z=%.1f health=%.1f "
+                "flick_timer=%.0f burst_timer=%.1f wall_ms=%lld\n",
+                st.generator, P2LongLegsFsm::stateName(from), P2LongLegsFsm::stateName(to), p.x, p.z,
+                actor->mHealth, st.houdai.flickTimer(), st.houdai.burstTimer(), houdaiWallMs());
+}
+
+// Source Stay keeps the boss up in the dormant drop-in pose, out of reach, so
+// nothing can stick to it. The port hides the bind mesh in Stay; without this
+// the host Swallow collision stayed live at ground level and Pikmin could
+// latch onto an invisible body. Clear Atari (creatureCollision.cpp:34 skips
+// non-Atari pairs), shadow and life gauge while dormant; restore on Land.
+void houdaiSetIntangible(BTeki* actor, ActorState& state, bool on) {
+    if (on == state.stayIntangible) return;
+    state.stayIntangible = on;
+    constexpr int kOpts = TEKIOPT_Atari | TEKIOPT_ShadowVisible | TEKIOPT_LifeGaugeVisible;
+    Teki* teki = static_cast<Teki*>(actor);
+    if (on) teki->clearTekiOption(kOpts);
+    else teki->setTekiOption(kOpts);
+    std::printf("P2_HOUDAI_INTANGIBLE generator=%u on=%d atari=%d\n", state.generator, int(on),
+                int(teki->isAtari()));
+}
+
+// ---- #173 IK legs ---------------------------------------------------------
+
+const p2ik::Parms& houdaiIkParms() {
+    static const p2ik::Parms parms = p2ik::houdaiParms();
+    return parms;
+}
+
+// Source mapMgr->getMinY for the leg IK (foot landing height).
+float houdaiGround(void*, float x, float z) {
+    return mapMgr ? mapMgr->getMinY(x, z, true) : 0.0f;
+}
+
+p2ik::M34 houdaiM34(const Matrix4f& m) {
+    p2ik::M34 r;
+    for (int row = 0; row < 3; ++row)
+        for (int col = 0; col < 4; ++col) r.m[row][col] = m.mMtx[row][col];
+    return r;
+}
+
+// Body world matrix at tick time: T(pos) * RotY(face) * S(scale), the same
+// SRT BTeki::refresh builds mWorldMtx from (P1 facing: forward = sin, cos).
+p2ik::M34 houdaiBodyMatrix(BTeki* actor) {
+    const Vector3f p = actor->getPosition();
+    const float face = static_cast<Teki*>(actor)->getDirection();
+    const float s = (actor->mSRT.s.y > 0.05f && actor->mSRT.s.y < 20.0f) ? actor->mSRT.s.y : 1.0f;
+    const float c = std::cos(face), n = std::sin(face);
+    p2ik::M34 m;
+    m.m[0][0] = c * s;  m.m[0][1] = 0.0f; m.m[0][2] = n * s; m.m[0][3] = p.x;
+    m.m[1][0] = 0.0f;   m.m[1][1] = s;    m.m[1][2] = 0.0f;  m.m[1][3] = p.y;
+    m.m[2][0] = -n * s; m.m[2][1] = 0.0f; m.m[2][2] = c * s; m.m[2][3] = p.z;
+    return m;
+}
+
+void houdaiLegJoints(const p2ik::M34& world, p2ik::M34 out[p2ik::kLegCount][3]) {
+    for (int l = 0; l < p2ik::kLegCount; ++l)
+        for (int j = 0; j < 3; ++j) out[l][j] = p2ik::mul(world, houdaiSkin.bind[size_t(houdaiLegJoint[l][j])]);
+}
+
+// Houdai::updateIKSystem, driven by the brain's stride choice: capture the
+// planted bind feet once the boss has landed, start one leg cycle per brain
+// stride, and advance the legs one source frame.
+void houdaiIkStep(BTeki* actor, ActorState& state, const P2HoudaiOutput& out) {
+    if (!state.ikShape) return;
+    const P2LongLegsState now = state.houdai.state();
+    if (!state.ikStarted) {
+        if (out.drawHidden || out.landDrop > 0.0f || now == P2LongLegsState::Stay
+                || now == P2LongLegsState::Land)
+            return;
+        p2ik::M34 legs[p2ik::kLegCount][3];
+        houdaiLegJoints(houdaiBodyMatrix(actor), legs);
+        const Vector3f p = actor->getPosition();
+        const float face = static_cast<Teki*>(actor)->getDirection();
+        state.ik.init(p2ik::V3(p.x, p.y, p.z), face);
+        state.ik.startProgramedIK(legs, p2ik::V3(p.x, p.y, p.z), face);
+        state.ikStarted = true;
+        std::printf("P2_HOUDAI_IK_START generator=%u state=%s foot_radius=%.1f leg_angles=%.2f,%.2f,%.2f,%.2f "
+                    "thigh=%.1f shin=%.1f\n",
+                    state.generator, P2LongLegsFsm::stateName(now), state.ik.distanceOffset(),
+                    state.ik.legAngle(0), state.ik.legAngle(1), state.ik.legAngle(2), state.ik.legAngle(3),
+                    state.ik.leg(0).topToMiddle, state.ik.leg(0).middleToBottom);
+    }
+    if (out.strideStart) {
+        state.ik.startCycleTo(p2ik::V3(out.strideTo.x, 0.0f, out.strideTo.z), out.strideFace, houdaiIkParms(),
+                              houdaiGround, nullptr);
+        ++state.ikStrides;
+        ++state.ikLifts;
+        std::printf("P2_HOUDAI_IK_STRIDE generator=%u n=%d to=%.1f,%.1f face=%.3f lifts=%d plants=%d\n",
+                    state.generator, state.ikStrides, out.strideTo.x, out.strideTo.z, out.strideFace,
+                    state.ikLifts, state.ikPlants);
+    }
+    p2ik::M34 legs[p2ik::kLegCount][3];
+    houdaiLegJoints(houdaiBodyMatrix(actor), legs);
+    state.ik.update(houdaiIkParms(), P2HoudaiFsm::kDelta, houdaiGround, nullptr, legs);
+    for (int l = 0; l < p2ik::kLegCount; ++l) {
+        if (state.ik.liftedMask() & (1 << l)) ++state.ikLifts;
+        if (state.ik.plantedMask() & (1 << l)) ++state.ikPlants;
+    }
+}
+
+// Pose the private mesh: every non-leg joint keeps its bind matrix, the twelve
+// leg joints take the IK result (IKSystemMgr::makeMatrix on the world joints
+// under the drawn body) mapped back to model space.
+bool houdaiIkPose(BTeki* actor, ActorState& state) {
+    if (!state.ikShape || !state.ikStarted || !houdaiSkinReady) return false;
+    const p2ik::M34 world = houdaiM34(actor->mWorldMtx);
+    p2ik::M34 inv;
+    if (!p2ik::inverse(world, inv)) return false;
+    static std::vector<p2ik::M34> joints;
+    static std::vector<p2ik::V3> pos, nrm;
+    joints = houdaiSkin.bind;
+    p2ik::M34 legs[p2ik::kLegCount][3];
+    houdaiLegJoints(world, legs);
+    state.ik.makeMatrix(legs, houdaiIkParms());
+    for (int l = 0; l < p2ik::kLegCount; ++l)
+        for (int j = 0; j < 3; ++j) joints[size_t(houdaiLegJoint[l][j])] = p2ik::mul(inv, legs[l][j]);
+    houdaiSkin.evaluate(joints, pos, nrm);
+    Shape* shape = state.ikShape;
+    for (size_t i = 0; i < pos.size(); ++i) shape->mVertexList[i].set(pos[i].x, pos[i].y, pos[i].z);
+    for (size_t i = 0; i < nrm.size(); ++i) shape->mNormalList[i].set(nrm[i].x, nrm[i].y, nrm[i].z);
+    BoundBox bounds(shape->mVertexList[0], shape->mVertexList[0]);
+    for (int i = 1; i < shape->mVertexCount; ++i) bounds.expandBound(shape->mVertexList[i]);
+    shape->mCourseExtents = bounds;
+    shape->mJointList[0].mBounds = bounds;
+    if (!state.ikDrawLogged) {
+        state.ikDrawLogged = true;
+        std::printf("P2_HOUDAI_IK_DRAW generator=%u positions=%zu normals=%zu private_geometry=1\n",
+                    state.generator, pos.size(), nrm.size());
+    }
+    return true;
+}
+
+// Private copy of the bind mesh for one Man-at-Legs (materials and textures
+// shared with the species shape, like p2pose::privateShape).
+Shape* houdaiPrivateShape(const char* rel, Shape& shared) {
+    const int previousHeap = gsys->setHeap(SYSHEAP_App);
+    Shape* model = gsys->getShape(rel, rel, nullptr, true);
+    gsys->setHeap(previousHeap);
+    if (!model || model->mJointCount != 1 || model->mVertexCount != int(houdaiSkin.posLocal.size())
+            || model->mNormalCount != int(houdaiSkin.nrmLocal.size())
+            || model->mMaterialCount != shared.mMaterialCount || model->mTexAttrCount != shared.mTexAttrCount
+            || model->mTevInfoCount != shared.mTevInfoCount || model->mVertexList == shared.mVertexList)
+        return nullptr;
+    for (int j = 0; j < model->mTotalMatpolyCount; ++j) {
+        auto* poly = model->mMatpolyList[j];
+        if (!poly || !poly->mMaterial) continue;
+        int material = -1;
+        for (int m = 0; m < model->mMaterialCount; ++m)
+            if (poly->mMaterial == &model->mMaterialList[m]) material = m;
+        if (material < 0) return nullptr;
+        poly->mMaterial = &shared.mMaterialList[material];
+    }
+    model->mMaterialList = shared.mMaterialList;
+    model->mTexAttrList = shared.mTexAttrList;
+    model->mTevInfoList = shared.mTevInfoList;
+    return model;
+}
+
+// Load the skin sidecar and give every Houdai its private posable mesh. Any
+// missing or mismatched input leaves the actor on the static bind draw.
+void houdaiIkSetup(const SpeciesDef& def, Shape* shared) {
+    houdaiSkinReady = false;
+    std::ifstream file("assets/dataDir/courses/pikmin2room/longlegs_Houdai_skin_00.txt", std::ios::binary);
+    if (!file || !shared) {
+        std::printf("P2_HOUDAI_IK_SKIN status=absent pose=bind\n");
+        return;
+    }
+    const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    std::string error;
+    if (!houdaiSkin.parse(text, &error)) {
+        std::printf("P2_HOUDAI_IK_SKIN status=invalid error=%s pose=bind\n", error.c_str());
+        return;
+    }
+    for (int l = 0; l < p2ik::kLegCount; ++l)
+        for (int j = 0; j < 3; ++j) {
+            houdaiLegJoint[l][j] = houdaiSkin.joint(p2ik::kHoudaiLegJoints[l][j]);
+            if (houdaiLegJoint[l][j] < 0) {
+                std::printf("P2_HOUDAI_IK_SKIN status=missing_joint joint=%s pose=bind\n",
+                            p2ik::kHoudaiLegJoints[l][j]);
+                return;
+            }
+        }
+    if (shared->mVertexCount != int(houdaiSkin.posLocal.size())
+            || shared->mNormalCount != int(houdaiSkin.nrmLocal.size())) {
+        std::printf("P2_HOUDAI_IK_SKIN status=count_mismatch mod=%d/%d skin=%zu/%zu pose=bind\n",
+                    shared->mVertexCount, shared->mNormalCount, houdaiSkin.posLocal.size(),
+                    houdaiSkin.nrmLocal.size());
+        return;
+    }
+    // The bind matrices must reproduce the installed bind mesh.
+    std::vector<p2ik::V3> pos, nrm;
+    houdaiSkin.evaluate(houdaiSkin.bind, pos, nrm);
+    float worst = 0.0f;
+    for (size_t i = 0; i < pos.size(); ++i) {
+        const Vector3f& v = shared->mVertexList[i];
+        worst = std::fmax(worst, std::fabs(v.x - pos[i].x) + std::fabs(v.y - pos[i].y) + std::fabs(v.z - pos[i].z));
+    }
+    houdaiSkinBindError = worst;
+    if (!(worst < 0.05f)) {
+        std::printf("P2_HOUDAI_IK_SKIN status=bind_mismatch max_error=%.4f pose=bind\n", worst);
+        return;
+    }
+    houdaiSkinReady = true;
+    const std::string rel = std::string("courses/pikmin2room/") + def.mod;
+    for (auto& entry : actors) {
+        ActorState& state = entry.second;
+        if (!state.isHoudai) continue;
+        state.ikShape = houdaiPrivateShape(rel.c_str(), *shared);
+        std::printf("P2_HOUDAI_IK_READY generator=%u joints=%zu positions=%zu normals=%zu bind_error=%.5f "
+                    "private_geometry=%d rng=0 body=brain\n",
+                    state.generator, houdaiSkin.bind.size(), houdaiSkin.posLocal.size(),
+                    houdaiSkin.nrmLocal.size(), worst, int(state.ikShape != nullptr));
+    }
+}
+
+// One host frame for a registered Houdai. Returns after the escape.
+void houdaiTick(BTeki* actor, ActorState& state, float dt) {
+    if (actor->mStoredDamage > 0.0f) actor->makeDamaged();
+    // Hit counter (source addDamage flickSpeed 1.0 per accepted attack):
+    // TEKIOPT_DamageCountable bumps mDamageCount in interactDefault.
+    if (actor->mDamageCount < state.lastDamageCount) state.lastDamageCount = actor->mDamageCount;
+    const int newHits = int(actor->mDamageCount - state.lastDamageCount);
+    state.lastDamageCount = actor->mDamageCount;
+    if (newHits > 0) state.pendingHits += newHits;
+    if (actor->mHealth < state.lastHealth) {
+        state.pendingTook = true;
+        if (actor->mHealth > 0.0f)
+            std::printf("P2_LONG_LEGS_DAMAGE species=Houdai generator=%u health=%.2f prior=%.2f hits=%d state=%s\n",
+                        state.generator, actor->mHealth, state.lastHealth, newHits,
+                        P2LongLegsFsm::stateName(state.houdai.state()));
+    }
+    state.lastHealth = actor->mHealth;
+    if (actor->mHealth > 0.0f) state.lastPositiveHealth = actor->mHealth;
+    if (state.deadEscapeDone) return;
+
+    state.srcAccum += dt;
+    int steps = 0;
+    while (state.srcAccum >= P2HoudaiFsm::kDelta && steps < 4) {
+        state.srcAccum -= P2HoudaiFsm::kDelta;
+        ++steps;
+        const Vector3f pos = actor->getPosition();
+        const P2HoudaiParms& parms = state.houdai.parms();
+        P2HoudaiInput in;
+        in.health = actor->mHealth;
+        in.pos = hv(pos);
+        in.faceDir = static_cast<Teki*>(actor)->getDirection();
+        in.stuck = houdaiStuckCount(actor);
+        in.wake = houdaiWake(actor, pos, parms.privateRadius);
+        in.damageAttempt = state.damageAttempt;
+        state.damageAttempt = false;
+        in.hits = state.pendingHits;
+        in.tookDamage = state.pendingTook;
+        state.pendingHits = 0;
+        state.pendingTook = false;
+        if (Creature* w = houdaiNearest(actor, pos, in.faceDir, parms.viewAngleDeg, parms.sightRadius, false)) {
+            in.walkPikiFound = true;
+            in.walkPiki = hv(w->getPosition());
+        }
+        if (Creature* g = houdaiNearest(actor, pos, in.faceDir, 180.0f, parms.searchDistance, true)) {
+            in.gunTargetFound = true;
+            in.gunTarget = hv(g->getPosition());
+        }
+        for (float& r : in.roll) r = gsys ? gsys->getRand(1.0f) : 0.5f;
+        {
+            // The bind mesh is drawn through the host mWorldMtx (host scale),
+            // so the gun joint height follows the drawn scale.
+            const Matrix4f& w = actor->mWorldMtx;
+            const float sy = std::sqrt(w.mMtx[0][1] * w.mMtx[0][1] + w.mMtx[1][1] * w.mMtx[1][1]
+                                       + w.mMtx[2][1] * w.mMtx[2][1]);
+            in.modelScale = (sy > 0.05f && sy < 20.0f) ? sy : 1.0f;
+            if (!state.scaleLogged) {
+                state.scaleLogged = true;
+                std::printf("P2_HOUDAI_SCALE generator=%u draw_scale=%.3f gun_height=%.1f\n", state.generator,
+                            in.modelScale, parms.gunHeight * in.modelScale);
+            }
+        }
+
+        const P2LongLegsState before = state.houdai.state();
+        P2HoudaiOutput out;
+        state.houdai.update(in, out);
+        const P2LongLegsState after = state.houdai.state();
+
+        if (out.entered) {
+            if (before == P2LongLegsState::Walk && state.hasWalkTarget) {
+                std::printf("P2_LONG_LEGS_WALK_END species=Houdai generator=%u distance=%.1f seconds=%.2f "
+                            "start=%.1f,%.1f end=%.1f,%.1f next=%s\n",
+                            state.generator, state.walkDistance, state.walkSeconds, state.walkStart.x,
+                            state.walkStart.z, pos.x, pos.z, P2LongLegsFsm::stateName(after));
+                state.hasWalkTarget = false;
+            }
+            houdaiLogState(state, before, after, actor);
+            if (after == P2LongLegsState::Walk) {
+                state.walkStart = pos;
+                state.walkDistance = 0.0f;
+                state.walkSeconds = 0.0f;
+                state.hasWalkTarget = true;
+                std::printf("P2_LONG_LEGS_WALK species=Houdai generator=%u from=%.1f,%.1f to=%.1f,%.1f "
+                            "duration=%.2f piki_target=%d\n",
+                            state.generator, pos.x, pos.z, out.walkTarget.x, out.walkTarget.z,
+                            out.chosenSeconds, int(in.walkPikiFound));
+            }
+            if (after == P2LongLegsState::Dead) {
+                std::printf("P2_LONG_LEGS_DEAD species=Houdai generator=%u health=%.2f prior_health=%.2f "
+                            "shells=%d shell_hits=%d/%d/%d flicks=%d\n",
+                            state.generator, actor->mHealth, state.lastPositiveHealth, state.shellsFired,
+                            state.shellHits[0], state.shellHits[1], state.shellHits[2], state.flicks);
+            }
+        }
+        if (out.flickStuck) {
+            int stuck = 0;
+            const int hit = houdaiFlickStuck(actor, out.flickChance, out.flickKnockback, out.flickDamage, stuck);
+            ++state.flicks;
+            if (stuck > 0 || std::string(out.flickCause) == "flick")
+                std::printf("P2_LONG_LEGS_FLICK species=Houdai generator=%u cause=%s stuck=%d hit=%d "
+                            "knockback=%.0f damage=%.0f\n",
+                            state.generator, out.flickCause, stuck, hit, out.flickKnockback, out.flickDamage);
+        }
+        if (out.aimStart || out.burstOn || out.burstOff || out.aimEnd)
+            std::printf("P2_HOUDAI_GUN generator=%u event=%s yaw=%.2f tilt=%.2f\n", state.generator,
+                        out.aimStart ? "aim_start" : out.burstOn ? "burst_on" : out.burstOff ? "burst_off" : "aim_end",
+                        state.houdai.gunYaw(), state.houdai.gunTilt());
+        if (out.fireShell) {
+            if (houdaiShellCount(actor) < kHoudaiShellPool) {
+                HoudaiStraightShell s;
+                s.owner = actor;
+                s.generator = state.generator;
+                s.id = ++state.shellsFired;
+                s.pos = Vector3f(out.shellPos.x, out.shellPos.y, out.shellPos.z);
+                s.vel = Vector3f(out.shellVel.x, out.shellVel.y, out.shellVel.z);
+                houdaiShells.push_back(s);
+                const Vector3f dir(s.vel.x / 600.0f, s.vel.y / 600.0f, s.vel.z / 600.0f);
+                houdaiFx(137, s.pos, &dir); // EFF_Beatle_ShootRockHalo
+                houdaiFx(138, s.pos, &dir); // EFF_Beatle_ShootRockSpecks
+                std::printf("P2_HOUDAI_SHELL_FIRE generator=%u shell=%d pos=%.1f,%.1f,%.1f vel=%.1f,%.1f,%.1f "
+                            "target_found=%d\n",
+                            state.generator, s.id, s.pos.x, s.pos.y, s.pos.z, s.vel.x, s.vel.y, s.vel.z,
+                            int(in.gunTargetFound));
+            }
+        }
+        // Body: Walk strides translate; every state holds the host still.
+        actor->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
+        if (out.moving) {
+            Vector3f next(out.bodyPos.x, pos.y, out.bodyPos.z);
+            if (mapMgr) next.y = mapMgr->getMinY(next.x, next.z, true);
+            const float dx = next.x - pos.x, dz = next.z - pos.z;
+            const float step = std::sqrt(dx * dx + dz * dz);
+            actor->resetPosition(next);
+            state.walkDistance += step;
+            state.walkSeconds += P2HoudaiFsm::kDelta;
+            actor->mVelocity.set(dx / P2HoudaiFsm::kDelta, 0.0f, dz / P2HoudaiFsm::kDelta);
+        } else {
+            actor->mVelocity.x = 0.0f;
+            actor->mVelocity.z = 0.0f;
+        }
+        static_cast<Teki*>(actor)->setDirection(out.bodyFace);
+        houdaiStepShells(actor, state, P2HoudaiFsm::kDelta);
+        state.drawHidden = out.drawHidden;
+        houdaiSetIntangible(actor, state, out.drawHidden);
+        state.landDrop = out.landDrop;
+        houdaiIkStep(actor, state, out);
+        state.damageable = out.damageRate > 0.0f;
+        state.bitterImmune = after == P2LongLegsState::Stay || after == P2LongLegsState::Land;
+        if (out.deadEnd && !state.deadEscapeDone) {
+            // Source StateDead END: throwupItem + dead bomb + kill. The port
+            // keeps the accepted 56/69 precedent: the host teardown births the
+            // carriable corpse (owner decision pending, #173).
+            state.deadEscapeDone = true;
+            houdaiDropShells(actor, "owner_dead");
+            std::printf("P2_LONG_LEGS_ESCAPE species=Houdai generator=%u native=host_escape_now "
+                        "dead_clip_frames=%d\n",
+                        state.generator, P2HoudaiFsm::kDeadFrames);
+            std::fflush(stdout);
+            actor->pcEscapeNow();
+            return;
+        }
+    }
+    std::fflush(stdout);
+}
+
 bool parseActors(const std::string& path, std::map<unsigned, std::string>& out) {
     std::ifstream in(path);
     if (!in) return false;  // absent config -> P1 fallback
@@ -454,12 +1178,15 @@ void pc_p2_long_legs_reset() {
     corpses.clear();
     shapes.clear();
     shells.clear();
+    houdaiShells.clear();
     bytesTotal = 0;
     logged[0] = logged[1] = false;
+    houdaiSkinReady = false;
 }
 
 void pc_p2_long_legs_forget(BTeki* actor) {
     killShellsOf(actor);
+    houdaiDropShells(actor, "forget");
     // Lane 06 single-use binding: drop the ordinary-delivery source so a
     // recycled actor address can never inherit it (mirrors Sokkuri/ElecBug).
     pc_randomizer_p2_forget_source(static_cast<PelletView*>(actor));
@@ -540,6 +1267,22 @@ void pc_p2_long_legs_setup() {
         teki->mHealth = state.parms.maxHealth > 0.0f ? state.parms.maxHealth : teki->mHealth;
         state.lastHealth = teki->mHealth;
         state.lastPositiveHealth = teki->mHealth;
+        if (match->second == "Houdai") {
+            // #173 own brain: source Houdai FSM (disc parms), hit counter via
+            // TEKIOPT_DamageCountable (interactDefault bumps mDamageCount).
+            state.isHoudai = true;
+            state.houdai.reset(P2HoudaiParms(), P2HoudaiVec{state.homePos.x, state.homePos.y, state.homePos.z},
+                               teki->getDirection());
+            teki->setTekiOption(TEKIOPT_DamageCountable);
+            state.lastDamageCount = teki->mDamageCount;
+            state.drawHidden = true;
+            houdaiSetIntangible(teki, state, true);
+            std::printf("P2_HOUDAI_OWN_BIND generator=%u health=%.0f home=%.1f,%.1f,%.1f brain=P2HoudaiFsm "
+                        "parms=disc private=%.0f territory=%.0f search_height=%.0f search_angle=%.0f\n",
+                        generator, teki->mHealth, state.homePos.x, state.homePos.y, state.homePos.z,
+                        state.houdai.parms().privateRadius, state.houdai.parms().territoryRadius,
+                        state.houdai.parms().burstCooldown, state.houdai.parms().maxAimSeconds);
+        }
         speciesUsed.insert(match->second);
         // Ordinary-delivery bridge (lane 06 contract): bind the source so
         // GoalItem::suckMe grants onion:p2:<id> exactly once through
@@ -580,6 +1323,7 @@ void pc_p2_long_legs_setup() {
             }
         }
         shapes[species] = loadBind(*def);
+        if (species == "Houdai") houdaiIkSetup(*def, shapes[species]);
     }
     for (const auto& entry : actors)
         std::printf("P2_LONG_LEGS_BIND generator=%u species=%s pose=bind visual_only=0 "
@@ -615,6 +1359,10 @@ void pc_p2_long_legs_update(BTeki* actor) {
     }
     const float dt = gsys ? gsys->getFrameTime() : 0.0f;
     if (!(dt > 0.0f && dt < 0.5f)) return;
+    if (state.isHoudai) {
+        houdaiTick(actor, state, dt);
+        return;
+    }
 
     // OWN death (mirrors frog/kochappy): doAI is suppressed, so dieSoon() never
     // runs there. The P2 Dead state finalizes the host teardown itself via
@@ -843,6 +1591,26 @@ bool pc_p2_long_legs_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, b
                     int(corpse), state.species.c_str(), state.generator);
         logged[corpse ? 1 : 0] = true;
     }
+    if (state.isHoudai && !corpse) {
+        // Source Stay keeps the dormant boss out of view until Land drops it
+        // in; the port has no landing clip playback, so Land lowers the bind
+        // mesh from kHoudaiDropHeight to the ground by landing key 4 (frame 100).
+        if (state.drawHidden) return true;
+        if (state.landDrop > 0.0f) {
+            constexpr float kHoudaiDropHeight = 300.0f;
+            Matrix4f dropped = matrix;
+            const float dy = state.landDrop * kHoudaiDropHeight;
+            for (int r = 0; r < 3; ++r) dropped.mMtx[r][3] += dropped.mMtx[r][1] * dy;
+            shape->updateAnim(gfx, dropped, nullptr, actor);
+            shape->drawshape(gfx, *gfx.mCamera, nullptr);
+            return true;
+        }
+        if (houdaiIkPose(actor, state)) {
+            state.ikShape->updateAnim(gfx, matrix, nullptr, actor);
+            state.ikShape->drawshape(gfx, *gfx.mCamera, nullptr);
+            return true;
+        }
+    }
     shape->updateAnim(gfx, matrix, nullptr, actor);
     shape->drawshape(gfx, *gfx.mCamera, nullptr);
     return true;
@@ -880,6 +1648,13 @@ float pc_p2_long_legs_param_f(const BTeki* actor, int idx, float fallback) {
         return 0.0f;
     case TPF_LifeRecoverRate:
         return 0.0f;
+    case TPF_Life: {
+        // #173: BTeki::update clamps mHealth to getMaxLife() every frame, so
+        // the host Swallow life (1100) silently capped the source 2800 set at
+        // bind. Houdai reports its disc max life; 56/69 keep the old path.
+        const ActorState& st = actors.find(const_cast<BTeki*>(actor))->second;
+        return st.isHoudai ? st.houdai.parms().maxHealth : fallback;
+    }
     default:
         return fallback;
     }
@@ -903,7 +1678,37 @@ bool pc_p2_long_legs_receiver_rejects(Teki* teki, const InteractAttack* /*attack
     // (Wait/Flick/Walk/Shot) the P1 proxy accepts ordinary Pikmin attack damage.
     // Unregistered actors are never rejected, keeping the shared hook a no-op.
     if (!actors.count(teki)) return false;
+    if (actors[teki].isHoudai) return false; // Houdai: pc_p2_long_legs_damage_rate
     return !actors[teki].damageable;
+}
+
+float pc_p2_long_legs_damage_rate(Teki* teki, Creature* attacker) {
+    // Source Houdai::damageCallBack (Houdai.cpp:223-236, US build): only a
+    // Pikmin stuck to the boss damages it (captains, bombs and loose Pikmin do
+    // nothing); Land takes 0.25x. A stuck hit while dormant wakes Stay into
+    // Land (StateStay::exec EB_TakingDamage) but is refused here.
+    auto it = actors.find(teki);
+    if (it == actors.end() || !it->second.isHoudai) return -1.0f;
+    ActorState& st = it->second;
+    const bool stuckPiki = attacker && attacker->isPiki() && attacker->getStickObject() == teki;
+    const P2LongLegsState s = st.houdai.state();
+    float rate = 0.0f;
+    if (stuckPiki) {
+        // US damageCallBack applies the hit in Stay too; StateStay::exec then
+        // sees EB_TakingDamage and transits to Land.
+        rate = P2HoudaiFsm::damageRateFor(s);
+        if (s == P2LongLegsState::Stay) st.damageAttempt = true;
+    }
+    if (rate > 0.0f) ++st.receiverAccepted;
+    else ++st.receiverRejected;
+    const int total = st.receiverAccepted + st.receiverRejected;
+    if (total == 1 || total % 200 == 0) {
+        std::printf("P2_HOUDAI_RECEIVER generator=%u accepted=%d rejected=%d last_rate=%.2f stuck_piki=%d state=%s\n",
+                    st.generator, st.receiverAccepted, st.receiverRejected, rate, int(stuckPiki),
+                    P2LongLegsFsm::stateName(s));
+        std::fflush(stdout);
+    }
+    return rate;
 }
 
 bool pc_p2_long_legs_receipt(Pellet* pellet, unsigned& generator) {
@@ -937,7 +1742,19 @@ void pc_p2_long_legs_update_all() {
     // Sweeping is done from the guarded per-actor tick (pc_p2_long_legs_update),
     // not here: an unconditional per-frame sweep stalled the stage-2 FSM.
     if (actors.empty()) return;
-    for (const auto& entry : actors) pc_p2_long_legs_update(entry.first);
+    // Tick in generator-token order, not pointer order (std::map<BTeki*> sorts
+    // by address, which differs between netplay peers and would reorder the
+    // per-actor gsys->getRand draws). Snapshot first: a tick can reach the
+    // host teardown, and forget() erases from `actors`.
+    std::vector<std::pair<unsigned, BTeki*>> order;
+    order.reserve(actors.size());
+    for (const auto& entry : actors) order.emplace_back(entry.second.generator, entry.first);
+    std::sort(order.begin(), order.end(),
+              [](const std::pair<unsigned, BTeki*>& x, const std::pair<unsigned, BTeki*>& y) {
+                  return x.first < y.first;
+              });
+    for (const auto& entry : order)
+        if (actors.count(entry.second)) pc_p2_long_legs_update(entry.second);
 }
 
 unsigned long pc_p2_long_legs_corpse_count() {
