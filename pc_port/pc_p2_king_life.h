@@ -248,4 +248,57 @@ inline int attackExit(int eatenBombs, int eatenPikmin) { return p2king::attackEn
 // StateEat.exec at END: stun after a bomb meal, else Swallow.
 inline int eatExit(bool doStunAfter) { return doStunAfter ? int(Damage) : int(Swallow); }
 
+// ---- boss-scale collision -----------------------------------------------------
+// The retail kingchappy/enemycoll.txt tree posed through each clip
+// (scripts/p2_king_tables.py): root 'none' r80 plus back/ketu/asiL/asiR (touch),
+// head/hana/kuti (stickable). Only the stickable parts take Pikmin: damageCallBack
+// wants a stuck attacker with a collision part (kingChappy.cpp:824-848).
+constexpr int CollNodeCount = p2kingtables::kCollNodeCount;
+constexpr int CollSamples = p2kingtables::kCollSamples;
+
+inline int collClipIndex(const char* stem)
+{
+    for (int i = 0; i < p2kingtables::kCollClipCount; ++i)
+        if (!std::strcmp(p2kingtables::kCollClips[i].stem, stem)) return i;
+    return -1;
+}
+
+// Sample position along a clip: samples sit at i * (frames - 1) / (CollSamples - 1).
+inline void collLocate(int clip, float frame, int& i0, float& f)
+{
+    const float last = float(p2kingtables::kCollClips[clip].frames > 1 ? p2kingtables::kCollClips[clip].frames - 1 : 1);
+    float u = frame <= 0.0f ? 0.0f : (frame >= last ? 1.0f : frame / last);
+    const float t = u * float(CollSamples - 1);
+    i0 = int(t);
+    if (i0 >= CollSamples - 1) i0 = CollSamples - 2;
+    f = t - float(i0);
+}
+
+// Model-space centre of collision node `node` (retail node order) at clip frame `frame`.
+inline bool collCentre(int clip, float frame, int node, float out[3])
+{
+    if (clip < 0 || clip >= p2kingtables::kCollClipCount || node < 0 || node >= CollNodeCount) return false;
+    int i0 = 0;
+    float f = 0.0f;
+    collLocate(clip, frame, i0, f);
+    const float* a = p2kingtables::kCollClips[clip].centre[i0][node];
+    const float* b = p2kingtables::kCollClips[clip].centre[i0 + 1][node];
+    for (int k = 0; k < 3; ++k) out[k] = a[k] + (b[k] - a[k]) * f;
+    return true;
+}
+
+// Model-space kuti joint (the mouth) at clip frame `frame`: where the swallow slots sit outside
+// the attack window (inside it the exact kamu1..9 rows of pc_p2_chappy_mouth.h apply).
+inline bool collMouth(int clip, float frame, float out[3])
+{
+    if (clip < 0 || clip >= p2kingtables::kCollClipCount) return false;
+    int i0 = 0;
+    float f = 0.0f;
+    collLocate(clip, frame, i0, f);
+    const float* a = p2kingtables::kCollClips[clip].mouth[i0];
+    const float* b = p2kingtables::kCollClips[clip].mouth[i0 + 1];
+    for (int k = 0; k < 3; ++k) out[k] = a[k] + (b[k] - a[k]) * f;
+    return true;
+}
+
 } // namespace p2kinglife

@@ -213,6 +213,51 @@ void tongue()
     CHECK(near(TongueSphereRadius, 5.0f) && near(TongueSphereLift, 5.0f));
 }
 
+void collision()
+{
+    using namespace p2kingtables;
+    // Retail tree: root 'none' r80 and seven children; only head/hana/kuti are stickable.
+    CHECK(kCollNodeCount == 8);
+    CHECK(!std::strcmp(kCollNodes[0].id, "none") && near(kCollNodes[0].radius, 80.0f) && kCollNodes[0].parent == -1);
+    int stickable = 0;
+    for (int i = 1; i < kCollNodeCount; ++i) {
+        CHECK(kCollNodes[i].parent == 0);
+        if (!std::strcmp(kCollNodes[i].code, "st__")) {
+            ++stickable;
+            CHECK(!std::strcmp(kCollNodes[i].id, "head") || !std::strcmp(kCollNodes[i].id, "hana") ||
+                  !std::strcmp(kCollNodes[i].id, "kuti"));
+        }
+    }
+    CHECK(stickable == 3);
+    CHECK(near(kCollNodes[5].radius, 30.0f) && near(kCollNodes[6].radius, 18.0f) && near(kCollNodes[7].radius, 22.0f));
+    // Clip lookup and interpolation.
+    CHECK(collClipIndex("move1") >= 0 && collClipIndex("dive") >= 0 && collClipIndex("wait2") >= 0);
+    CHECK(collClipIndex("carry") == -1 && collClipIndex("nope") == -1);
+    const int move = collClipIndex("move1");
+    float a[3], b[3], m[3];
+    CHECK(collCentre(move, 0.0f, 5, a));
+    for (int k = 0; k < 3; ++k) CHECK(near(a[k], kCollClips[move].centre[0][5][k], 1e-4f));
+    CHECK(collCentre(move, 1000.0f, 5, b));   // clamped to the last sample
+    for (int k = 0; k < 3; ++k) CHECK(near(b[k], kCollClips[move].centre[kCollSamples - 1][5][k], 1e-4f));
+    // Halfway between samples 0 and 1 is their mean.
+    const float step = float(kCollClips[move].frames - 1) / float(kCollSamples - 1);
+    CHECK(collCentre(move, 0.5f * step, 5, m));
+    for (int k = 0; k < 3; ++k)
+        CHECK(near(m[k], 0.5f * (kCollClips[move].centre[0][5][k] + kCollClips[move].centre[1][5][k]), 1e-3f));
+    CHECK(!collCentre(-1, 0.0f, 0, m) && !collCentre(move, 0.0f, 8, m) && !collCentre(move, 0.0f, -1, m));
+    // The head rides above the feet plane while walking (retail height), the mouth sits ahead of the root.
+    CHECK(a[1] > 20.0f);
+    float mouth[3];
+    CHECK(collMouth(move, 0.0f, mouth) && mouth[2] > 10.0f);
+    CHECK(!collMouth(99, 0.0f, mouth));
+    // The buried idle keeps the stickable parts under the floor plane's reach of the stone-cold pose: the
+    // dive ends with the head below its walking height.
+    const int dive = collClipIndex("dive");
+    float headStart[3], headEnd[3];
+    CHECK(collCentre(dive, 0.0f, 5, headStart) && collCentre(dive, 1000.0f, 5, headEnd));
+    CHECK(headEnd[1] < headStart[1]);
+}
+
 void exits()
 {
     CHECK(attackExit(0, 0) == Walk);
@@ -237,6 +282,7 @@ int main()
     section("BOMBS", bombs);
     section("STUN", stun);
     section("TONGUE", tongue);
+    section("COLLISION", collision);
     section("EXITS", exits);
     std::printf("%s p2_king_life_test failures=%d\n", gFailures ? "FAIL" : "PASS", gFailures);
     return gFailures ? 1 : 0;
