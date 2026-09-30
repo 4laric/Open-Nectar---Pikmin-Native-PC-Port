@@ -163,6 +163,9 @@ Vector3f BTeki::viewGetScale()
  */
 f32 BTeki::viewGetBottomRadius()
 {
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	return pc_p2_queen_teki_corpse_radius(this, mTekiParams->getF(TPF_CorpseSize));
+#endif
 	return mTekiParams->getF(TPF_CorpseSize);
 }
 
@@ -183,7 +186,7 @@ void BTeki::viewDraw(Graphics& gfx, immut Matrix4f& mat)
 	mTekiAnimator->updateContext();
 	mTekiShape->mShape->updateAnim(gfx, mat, nullptr, this);
 #ifdef PIKI_PC_PORT
-    if (!pc_p2_demon_manager_draw_actor(this, gfx, mat, true) && !pc_p2_sarai_manager_draw_actor(this, gfx, mat, true) && !pc_p2_kurage_teki_draw(this, gfx, mat, true) && !pc_p2_groink_teki_draw(this, gfx, mat, true) && !pc_p2_bombsarai_teki_draw(this, gfx, mat, true) && !pc_p2_fuefuki_teki_draw(this, gfx, mat, true) && !pc_p2_breadbug_teki_draw(this, gfx, mat, true) && !pc_p2_bigtreasure_teki_draw(this, gfx, mat, true) && !pc_p2_kogane_draw(this, gfx, mat, true) && !pc_p2_mamuta_draw(this, gfx, mat, true) && !pc_p2_frog_draw(this, gfx, mat, true) && !pc_p2_tank_draw(this, gfx, mat, true) && !pc_p2_kabuto_fsm_draw(this, gfx, mat, true) && !pc_p2_qurione_draw(this, gfx, mat, true) && !pc_p2_shijimi_draw(this, gfx, mat, true) && !pc_p2_dwarf_orange_draw(this, gfx, mat, true) && !pc_p2_kochappy_draw(this, gfx, mat, true) && !pc_p2_chappy_draw(this, gfx, mat, true) && !pc_p2_sheargrub_draw(this, gfx, mat, true) && !pc_p2_snow_draw(this, gfx, mat, true) && !pc_p2_batch2_draw(this, gfx, mat, true) && !pc_p2_batch3_draw(this, gfx, mat, true) && !pc_p2_long_legs_draw(this, gfx, mat, true) && !pc_hd_model_draw_skinned(gfx, mTekiShape->mShape, hdModel(), hdTint()))
+    if (!pc_p2_demon_manager_draw_actor(this, gfx, mat, true) && !pc_p2_sarai_manager_draw_actor(this, gfx, mat, true) && !pc_p2_kurage_teki_draw(this, gfx, mat, true) && !pc_p2_groink_teki_draw(this, gfx, mat, true) && !pc_p2_queen_teki_draw(this, gfx, mat, true) && !pc_p2_bombsarai_teki_draw(this, gfx, mat, true) && !pc_p2_fuefuki_teki_draw(this, gfx, mat, true) && !pc_p2_breadbug_teki_draw(this, gfx, mat, true) && !pc_p2_bigtreasure_teki_draw(this, gfx, mat, true) && !pc_p2_kogane_draw(this, gfx, mat, true) && !pc_p2_mamuta_draw(this, gfx, mat, true) && !pc_p2_frog_draw(this, gfx, mat, true) && !pc_p2_tank_draw(this, gfx, mat, true) && !pc_p2_kabuto_fsm_draw(this, gfx, mat, true) && !pc_p2_qurione_draw(this, gfx, mat, true) && !pc_p2_shijimi_draw(this, gfx, mat, true) && !pc_p2_dwarf_orange_draw(this, gfx, mat, true) && !pc_p2_kochappy_draw(this, gfx, mat, true) && !pc_p2_chappy_draw(this, gfx, mat, true) && !pc_p2_sheargrub_draw(this, gfx, mat, true) && !pc_p2_snow_draw(this, gfx, mat, true) && !pc_p2_batch2_draw(this, gfx, mat, true) && !pc_p2_batch3_draw(this, gfx, mat, true) && !pc_p2_long_legs_draw(this, gfx, mat, true) && !pc_hd_model_draw_skinned(gfx, mTekiShape->mShape, hdModel(), hdTint()))
 #endif
 	mTekiShape->mShape->drawshape(gfx, *gfx.mCamera, nullptr);
 }
@@ -736,6 +739,9 @@ void BTeki::doAI()
 		return;
 	}
 	if (pc_p2_bigtreasure_teki_suppress_ai(this)) {
+		return;
+	}
+	if (pc_p2_queen_teki_suppress_ai(this)) {
 		return;
 	}
 	if (pc_p2_catfish_suppress_ai(this)) {
@@ -2008,6 +2014,11 @@ void BTeki::collisionCallback(immut CollEvent& event)
  */
 bool BTeki::ignoreAtari(Creature* target)
 {
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	if (pc_p2_queen_teki_ignore_atari(this, target)) {
+		return true;
+	}
+#endif
 	if (target->getStickObject() == this) {
 		return true;
 	}
@@ -2062,6 +2073,18 @@ bool BTeki::interact(immut TekiInteractionKey& key)
 		pc_p2_bigtreasure_attack(this, attack->mOwner, attack->mDamage, attack->mCollPart);
 		setCreaturePointer(1, attack->mOwner);
 		return true;
+	}
+	// #256 Empress Bulblax OWN: Queen::damageCallBack / Baby default intake.
+	if (key.mInteractionType == TekiInteractType::Attack && !getTekiOption(TEKIOPT_Invincible)) {
+		InteractAttack* attack = (InteractAttack*)key.mInteraction;
+		const int queen = pc_p2_queen_teki_attack(this, attack->mOwner, attack->mDamage);
+		if (queen >= 0) {
+			if (queen > 0) {
+				_344 = attack->getDamagePortion();
+				setCreaturePointer(1, attack->mOwner);
+			}
+			return queen > 0;
+		}
 	}
 #endif
 	TekiStrategy* strat = getStrategy();
