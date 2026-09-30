@@ -279,6 +279,9 @@ public:
 	// alone only arms mDeadState, but dieSoon() runs inside doAI's !mDeadState
 	// block, so a die() issued outside doAI would never finalize.
 	void pcEscapeNow() { die(); dieSoon(); }
+	// #256 larva teardown: arm the death state and finalize without die()'s
+	// P1 enemy-defeat report (a spawned larva is not a P1 enemy kill).
+	void pcTeardownSilently() { mDeadState = 1; dieSoon(); }
 #endif
 	virtual void updateTimers();                               // _17C
 	virtual void gravitate(f32);                               // _180
@@ -481,7 +484,7 @@ public:
 	int getParameterI(int idx) {
 		const int value=mTekiParams->getI(idx);
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
-		if(idx==TPI_CorpseType)return pc_p2_tamago_corpse_type(this,pc_p2_kogane_corpse_type(this,value));
+		if(idx==TPI_CorpseType)return pc_p2_queen_teki_corpse_type(this,pc_p2_tamago_corpse_type(this,pc_p2_kogane_corpse_type(this,value)));
 #endif
 		return value;
 	} // see TekiIntParams enum

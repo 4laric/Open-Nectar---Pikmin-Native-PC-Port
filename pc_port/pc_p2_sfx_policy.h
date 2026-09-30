@@ -62,6 +62,18 @@ enum Se : int {
     kSaraiDead           = 0x7B,
     kMarDead1            = 0x84,
     kKurioneWater        = 0x8B,
+    // The P1 Emperor Bulblax boss bank (SE_KING_*): the closest existing sounds
+    // for the P2 Emperor (53).
+    kKingWalk            = 0x4D,
+    kKingReady           = 0x4E,
+    kKingBero1           = 0x4F,
+    kKingBero2           = 0x50,   // Empress (30) shake-off swing
+    kKingEat             = 0x53,
+    kKingCheek           = 0x54,
+    kKingHip             = 0x56,
+    kKingDead1           = 0x57,
+    kKingAppear          = 0x59,
+    kKingSink            = 0x5A,
 };
 
 // P2 source ids (pc_p2_species) covered by the table.
@@ -77,6 +89,8 @@ enum Source : unsigned {
     kCannonLarva  = 75,
     kKurage       = 57,   // Lesser Spotted Jellyfloat (wave 3 flyers, #960)
     kOniKurage    = 72,   // Greater Spotted Jellyfloat
+    kEmpress      = 30,
+    kEmperor      = 53,   // KingChappy, Emperor Bulblax
 };
 
 enum class Event : int {
@@ -99,6 +113,10 @@ enum class Event : int {
     Gas,          // Titan Dweevil gas weapon
     Elec,         // Titan Dweevil electric weapon
     Shot,         // Groink volley / Cannon Larva stone
+    Appear,       // Emperor erupts from the ground
+    Dive,         // Emperor burrows again
+    Roar,         // Emperor war cry
+    Eat,          // Emperor swallows what its tongue caught
     Count
 };
 
@@ -123,6 +141,10 @@ inline const char* eventName(Event e) {
     case Event::Gas: return "gas";
     case Event::Elec: return "elec";
     case Event::Shot: return "shot";
+    case Event::Appear: return "appear";
+    case Event::Dive: return "dive";
+    case Event::Roar: return "roar";
+    case Event::Eat: return "eat";
     default: return "?";
     }
 }
@@ -227,6 +249,28 @@ inline int seFor(unsigned sourceId, Event e) {
         case Event::Dead: return kKabutoDead;
         default: return kNone;
         }
+    case kEmpress: // Empress Bulblax: P1's Emperor Bulblax (KingChappy) bank.
+        switch (e) {
+        case Event::Roll: return kKingReady;    // roll wind-up
+        case Event::Crash: return kKingHip;     // territory-edge slam
+        case Event::Flick: return kKingBero2;   // tongue-like shake-off swing
+        case Event::Damage: return kKingCheek;
+        case Event::Dead: return kKingDead1;
+        default: return kNone;
+        }
+    case kEmperor: // Emperor Bulblax: the P1 Emperor Bulblax boss bank.
+        switch (e) {
+        case Event::Step: return kKingWalk;
+        case Event::Appear: return kKingAppear;
+        case Event::Dive: return kKingSink;
+        case Event::Roar: return kKingReady;
+        case Event::Attack: return kKingBero1;     // tongue lash
+        case Event::Eat: return kKingEat;
+        case Event::Flick: return kKingHip;        // trample / shake-off
+        case Event::Damage: return kKingCheek;
+        case Event::Dead: return kKingDead1;
+        default: return kNone;
+        }
     default:
         return kNone;
     }
@@ -248,6 +292,8 @@ inline float minInterval(Event e) {
     case Event::Expose: return 1.0f;
     case Event::Fire: case Event::Water: case Event::Gas: case Event::Elec: return 0.5f;
     case Event::Shot: return 0.15f;
+    case Event::Appear: case Event::Dive: case Event::Roar: return 1.0f;
+    case Event::Eat: return 0.5f;
     default: return 0.25f;
     }
 }

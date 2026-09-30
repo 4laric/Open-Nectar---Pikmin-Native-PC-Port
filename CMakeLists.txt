@@ -1356,6 +1356,12 @@ target_compile_options(p2_proxy_table_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_proxy_table_test COMMAND p2_proxy_table_test)
 
 # Campaign host policy (#871): engine-free hostType/hasStaticHost contract.
+add_executable(p2_queen_own_test
+    pc_port/pc_p2_queen_own_test.cpp)
+target_include_directories(p2_queen_own_test PRIVATE pc_port)
+target_compile_options(p2_queen_own_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_queen_own_test COMMAND p2_queen_own_test)
+
 add_executable(p2_campaign_policy_test
     pc_port/pc_p2_campaign_policy_test.cpp)
 target_include_directories(p2_campaign_policy_test PRIVATE pc_port)
@@ -1950,6 +1956,12 @@ add_executable(p2_chappy_mouth_test tools/p2_chappy_mouth_test.cpp)
 target_include_directories(p2_chappy_mouth_test PRIVATE pc_port)
 target_compile_options(p2_chappy_mouth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_chappy_mouth_test COMMAND p2_chappy_mouth_test)
+# wave3 lane 53 (#289): engine-free Emperor Bulblax life-cycle rules (buried spawn,
+# proximity Appear, cross-Emperor request, bomb ingestion + stun clock, tongue tip table).
+add_executable(p2_king_life_test tools/p2_king_life_test.cpp)
+target_include_directories(p2_king_life_test PRIVATE pc_port)
+target_compile_options(p2_king_life_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_king_life_test COMMAND p2_king_life_test)
 # p2-886 (#886): engine-free captor mouth slots (Jigumo/Snagret/UmiMushi/
 # Armor/Uji eatPikmin geometry, Jigumo height check, Snagret facing boxes,
 # held registry + swallow, legacy XZ-nearest/raw-pointer oracle).

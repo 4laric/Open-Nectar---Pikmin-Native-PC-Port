@@ -82,6 +82,7 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     // #246 OWN: BigTreasure (Titan Dweevil) rides the TEKI_Swallow placement
     // vehicle driven by pc_p2_bigtreasure_teki (source-order core).
     case 73: return 4; // TEKI_Swallow: BigTreasure campaign actor
+    case 30: return 4; // TEKI_Swallow: Empress Bulblax OWN vehicle (#256, pc_p2_queen_teki)
     default: return original;
     }
 }

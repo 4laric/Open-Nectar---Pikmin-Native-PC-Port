@@ -454,6 +454,10 @@ struct Config {
     // body HP is exposed, and only a Pikmin stuck on a weapon's own part
     // damages it; the bot keeps throwing for a longer window (bot assistance).
     float titanAttackMultiplier = 6.0f;
+    // Wave-3 lane 53: the Emperor Bulblax (53) is a 1300 HP multi-cycle boss whose source
+    // damageCallBack only counts stuck attackers, so the bot keeps fighting for a longer
+    // window than a single throw burst (bot assistance, like the Titan).
+    float kingAttackMultiplier = 5.0f;
     // #246: a Titan lets go of every stuck Pikmin at Dead (deathProcedure
     // setAlive(false)) ~11 s before its corpse forms, so the aftermath can
     // start with an empty squad and nobody to seed-throw. A player whistles
@@ -468,6 +472,7 @@ struct Config {
     float arriveRadius = 90.0f; // XZ distance considered "at" the Onion
     float throwHold = 0.12f; // A held per throw pulse
     float throwGap = 0.55f; // gap between throw pulses
+    float empressWalkMax = 45.0f; // #256: bound on one regroup walk to the idle strays
     float whistleHold = 1.6f; // B held to regroup / call back
     float whistleCooldown = 3.0f; // bot-undamaged: gap after a whistle before re-latching (forces throw windows)
     float attackChaseDist = 500.0f; // bot-undamaged: target past this in attack re-enters approach (graph chase)
@@ -671,6 +676,15 @@ struct Senses {
     // #246: idle field Pikmin (FreeMode, not carrying, not in distress) and
     // their centroid, so a Titan aftermath can walk to them before whistling.
     int strayPikmin = 0;
+    // #256: "lost" Pikmin = idle strays or Formation followers left 350-1000 u
+    // behind (a14: 33 followers + 36 strays sat at the arena ledge foot); the
+    // nearest one, and how many Pikmin are within 350 u. The whistle reaches
+    // only 100 u (NaviMgr p01).
+    int lostPikmin = 0;
+    int nearPikmin = 0;
+    float strayNearX = 0.0f;
+    float strayNearZ = 0.0f;
+    float strayNearDist = 1.0e30f;
     float strayX = 0.0f;
     float strayZ = 0.0f;
     int onionStored = 0; // Pikmin stored in the nearest stocked Onion
@@ -797,6 +811,12 @@ struct Senses {
     // at the centre lands ON the box and those Pikmin never push; ar2).
     float pushAimX = 0.0f;
     float pushAimZ = 0.0f;
+    // #256 Empress Bulblax: she is charging (Flick) or rolling (read-only
+    // via pc_p2_queen_teki_probe). A player recalls the squad and steps off
+    // the roll line along her body axis; dodgeX/Z is that safe point.
+    bool queenDanger = false;
+    float dodgeX = 0.0f;
+    float dodgeZ = 0.0f;
 };
 
 // Pad output for one tick. moveX/moveZ is the desired world-space XZ move
@@ -926,6 +946,12 @@ public:
     // the driver to restock + exit it (driver: once per visit, bounded).
     bool wantsPowerRestock() const { return state == State::WithdrawSeek && powerResupplying && powerAtOnion; }
     void clearReplan() { wantReplan = false; }
+    // #256: the Empress regroup asks the driver to route (waypoint graph) to
+    // the nearest idle stray; a straight steer hits the arena ledge.
+    bool strayRouteWanted() const { return wantStrayRoute; }
+    float strayRouteGoalX() const { return strayRouteX; }
+    float strayRouteGoalZ() const { return strayRouteZ; }
+    void clearStrayRoute() { wantStrayRoute = false; }
     std::vector<std::string> takeMarkers()
     {
         std::vector<std::string> out;
@@ -1063,6 +1089,20 @@ private:
     // whistle). Shared by Seed (no grabs yet) and SeedGrow (short crew).
     void seedSteerThrow(const Senses& in)
     {
+        // #256: the Empress dies against the arena's far wall (a13/a15: carcass
+        // 617 u away over a ledge, the captain pushed at the wall for minutes,
+        // carry_no_grab). A straight steer cannot reach it, so ask the driver
+        // for a waypoint route every 15 s and follow its legs while far.
+        if (in.targetSource == 30 && in.targetToken != 0 && in.targetDist > 250.0f) {
+            seedRouteCooldown -= in.dt > 0.0f && in.dt <= 0.5f ? in.dt : 0.016f;
+            if (!in.waypointLeg && seedRouteCooldown <= 0.0f) {
+                wantReplan = true;
+                seedRouteCooldown = 15.0f;
+            }
+            if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+            else steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            return;
+        }
         if (!in.waypointLeg && in.targetToken != 0 && in.cursorValid && aimsCorpseWithCursor(in.targetSource)) {
             cursorAimThrow(in);
             return;
@@ -1072,7 +1112,10 @@ private:
         // and the crew never grew past 1-2 of 10. For the Titan, hold a
         // standoff ring and slide the cursor onto the corpse in the P1 look
         // band (the King standoff's aim), then throw.
-        if (in.targetSource == 73 && in.targetToken != 0 && !in.waypointLeg && in.cursorValid) {
+        // #256: the Empress carcass (radius 50, a12: 5 carriers of 20 from standing
+        // on it) gets the same standoff ring.
+        if ((in.targetSource == 73 || in.targetSource == 30) && in.targetToken != 0 && !in.waypointLeg
+            && in.cursorValid) {
             if (in.targetDist < cfg.titanSeedRingMin) {
                 steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
             } else if (in.targetDist > cfg.titanSeedRingMax) {
@@ -1630,6 +1673,27 @@ private:
         observeDamage(in);
         observeDeath(in);
         observeReceipt(in);
+        // #256 Empress Bulblax roll dodge (pad-only player tactic): while she
+        // charges or rolls, hold the whistle and walk to the safe point off
+        // her roll line; resume throwing once she is back in a held state.
+        if (in.queenDanger) {
+            if (!queenDodging) {
+                queenDodging = true;
+                char buf[200];
+                std::snprintf(buf, sizeof(buf), "AUTOPLAY_QUEEN_DODGE start=1 token=%u dodge=(%.0f,%.0f) bot-driven",
+                              in.targetToken, in.dodgeX, in.dodgeZ);
+                markers.emplace_back(buf);
+            }
+            lastCommand.buttons = PadB;
+            steer(in.naviX, in.naviZ, in.dodgeX, in.dodgeZ);
+            return;
+        }
+        if (queenDodging) {
+            queenDodging = false;
+            char buf[160];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_QUEEN_DODGE start=0 token=%u bot-driven", in.targetToken);
+            markers.emplace_back(buf);
+        }
         // Kogane never dies: damage observed -> confirm, then move on. Both
         // the engagement-time flag and the live senses must agree it is
         // Kogane-like, so a mid-fight source switch can never score a stale
@@ -1642,11 +1706,14 @@ private:
         const bool sarai = in.targetSource == 23;
         const bool kurage = in.targetSource == 57 || in.targetSource == 72;
         const bool pressOnly = isPressOnly(in.targetSource);
-        const bool titan = in.targetSource == 73;
+        // #256: the Empress (5000 HP boss) shares the Titan's long attack window.
+        const bool titan = in.targetSource == 73 || in.targetSource == 30;
+        const bool kingBoss = in.targetSource == 53;
         const bool roller = cfg.rollerStance && isRollerStance(in.targetSource);
         const float limit = roller ? cfg.rollerAttackTimeout
             : kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier * (in.targetSource == 72 ? cfg.greaterKurageAttackMultiplier : 1.0f)
             : titan ? cfg.attackTimeout * cfg.titanAttackMultiplier
+            : kingBoss ? cfg.attackTimeout * cfg.kingAttackMultiplier
             : pressOnly ? cfg.attackTimeout * cfg.pressOnlyAttackMultiplier : cfg.attackTimeout;
         // Whistle first, then re-throw (bot-v4: real players do this):
         // - Sarai holding a Pikmin (targetGrabbing): whistle frees the grab;
@@ -1701,10 +1768,40 @@ private:
         if ((in.scattered || in.squadDistress || grabWhistle) && !whistling && whistleCooldown <= 0.0f) {
             whistling = true;
             whistleTime = 0.0f;
+            empressWalk = 0.0f;
+            if (in.targetSource == 30) {
+                char wbuf[200];
+                std::snprintf(wbuf, sizeof(wbuf),
+                              "AUTOPLAY_WHISTLE start token=%u strays=%d near=%.0f navi=(%.0f,%.0f) bot-driven",
+                              in.targetToken, in.lostPikmin, in.strayNearDist, in.naviX, in.naviZ);
+                markers.emplace_back(wbuf);
+            }
         }
         if (whistling) {
             whistleTime += dt;
             lastCommand.buttons = PadB; // hold whistle to regroup / free grabs
+            // #256 Empress: her flick and roll drop the squad into idle
+            // FreeMode strays around the arena (a4/a5: ~50 strays 350-600 u
+            // away on both sides of her roll line, so their centroid sits at
+            // her body; the whistle reaches 100 u). Walk to the nearest stray
+            // while whistling and keep the hold running until it is in reach.
+            bool empressRegroup = false;
+            if (in.targetSource == 30) {
+                if (strayRouteCooldown > 0.0f) strayRouteCooldown -= dt;
+                if (in.lostPikmin >= 5 && in.strayNearDist > 90.0f && in.strayNearDist < 1.0e29f
+                    && empressWalk < cfg.empressWalkMax) {
+                    empressWalk += dt;
+                    if (!in.waypointLeg && strayRouteCooldown <= 0.0f) {
+                        wantStrayRoute = true;
+                        strayRouteX = in.strayNearX;
+                        strayRouteZ = in.strayNearZ;
+                        strayRouteCooldown = 20.0f;
+                    }
+                    if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+                    else steer(in.naviX, in.naviZ, in.strayNearX, in.strayNearZ);
+                    empressRegroup = true;
+                }
+            }
             // bot-v8 merge (#871): whistle timeout keeps ONE version
             // (undamaged's). Both lanes fixed the same whistle-starves-timeout
             // flaw (undamaged bc5 800 s stalls on 16/30/38/40/42/73/95/96;
@@ -1714,6 +1811,7 @@ private:
             {
                 const float wlimit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier * (in.targetSource == 72 ? cfg.greaterKurageAttackMultiplier : 1.0f)
                                    : titan  ? cfg.attackTimeout * cfg.titanAttackMultiplier
+                                   : kingBoss ? cfg.attackTimeout * cfg.kingAttackMultiplier
                                    : pressOnly ? cfg.attackTimeout * cfg.pressOnlyAttackMultiplier : cfg.attackTimeout;
                 if (stateTime >= wlimit) {
                     giveUp(in, "attack_timeout");
@@ -1721,7 +1819,8 @@ private:
                     return;
                 }
             }
-            if (whistleTime >= cfg.whistleHold || (!in.scattered && !in.squadDistress && !grabWhistle)) {
+            if ((whistleTime >= cfg.whistleHold && !empressRegroup)
+                || (!in.scattered && !in.squadDistress && !grabWhistle)) {
                 whistling = false;
                 whistleCooldown = cfg.whistleCooldown; // force a throw window before re-latching
             }
@@ -1882,16 +1981,35 @@ private:
         // titanRegroupWalk seconds), then holds the whistle there.
         const int amCrew = in.pelletCarriers > 0 ? in.pelletCarriers : in.carryCount;
         const bool amShort = in.squadPikmin == 0
-            || (in.carryWant > 0 && in.squadPikmin + amCrew < in.carryWant && in.strayPikmin > 0);
-        if (in.targetSource == 73
+            || (in.carryWant > 0 && in.squadPikmin + amCrew < in.carryWant && in.strayPikmin > 0)
+            || (in.targetSource == 30 && in.lostPikmin >= 10 && in.nearPikmin < 20);
+        // #256: the Empress joins the Titan's regroup (her flick and roll leave
+        // ~50 idle strays, a11: 12 carriers of 20), walking to the NEAREST stray
+        // over the waypoint graph because the strays ring the arena.
+        const bool amEmpress = in.targetSource == 30;
+        if ((in.targetSource == 73 || amEmpress)
             && (amWhistleTime > 0.0f || amRegroupWalk > 0.0f
                 || (amShort && in.fieldPikmin > in.pelletCarriers
                     && amWhistles < cfg.titanAftermathWhistles))) {
-            if (amWhistleTime <= 0.0f && in.strayPikmin > 0 && amRegroupWalk < cfg.titanRegroupWalk) {
-                const float sx = in.strayX - in.naviX, sz = in.strayZ - in.naviZ;
-                if (sx * sx + sz * sz > 60.0f * 60.0f) {
+            if (amWhistleTime <= 0.0f && (amEmpress ? in.lostPikmin : in.strayPikmin) > 0
+                && amRegroupWalk < (amEmpress ? cfg.empressWalkMax : cfg.titanRegroupWalk)) {
+                const bool nearest = amEmpress && in.strayNearDist < 1.0e29f;
+                const float gx = nearest ? in.strayNearX : in.strayX;
+                const float gz = nearest ? in.strayNearZ : in.strayZ;
+                const float sx = gx - in.naviX, sz = gz - in.naviZ;
+                if (sx * sx + sz * sz > (amEmpress ? 90.0f * 90.0f : 60.0f * 60.0f)) {
                     amRegroupWalk += dt;
-                    steer(in.naviX, in.naviZ, in.strayX, in.strayZ);
+                    if (amEmpress) {
+                        if (strayRouteCooldown > 0.0f) strayRouteCooldown -= dt;
+                        if (!in.waypointLeg && strayRouteCooldown <= 0.0f) {
+                            wantStrayRoute = true;
+                            strayRouteX = gx;
+                            strayRouteZ = gz;
+                            strayRouteCooldown = 20.0f;
+                        }
+                    }
+                    if (amEmpress && in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+                    else steer(in.naviX, in.naviZ, gx, gz);
                     return;
                 }
             }
@@ -1920,7 +2038,8 @@ private:
             // #901: a short ship-part crew is gathered by whistle + swarm, not
             // by the corpse throw/re-seed cycle (throws overshoot a big part:
             // r4 crew 12/20 after three re-seeds). Same window as a corpse.
-            const float waitBase = (sawKill || sawDamage) ? cfg.receiptTimeout : cfg.aftermathTimeout;
+            const float waitBase = ((sawKill || sawDamage) ? cfg.receiptTimeout : cfg.aftermathTimeout)
+            * (in.targetSource == 30 ? 2.0f : 1.0f); // #256: regroup walk + route + carry
             if (stateTime >= waitBase * 2.0f) {
                 giveUpAftermath(in, "part_short_crew");
                 finishTarget(in, /*killed*/ false);
@@ -2116,7 +2235,8 @@ private:
                 }
             }
         }
-        const float waitBase = (sawKill || sawDamage) ? cfg.receiptTimeout : cfg.aftermathTimeout;
+        const float waitBase = ((sawKill || sawDamage) ? cfg.receiptTimeout : cfg.aftermathTimeout)
+            * (in.targetSource == 30 ? 2.0f : 1.0f); // #256: regroup walk + route + carry
         // bot-v5: extend ONLY while carriers > 0 AND the corpse is moving
         // (live, not latched). A latched-but-stalled lift times out bounded.
         const float wait = (carryActive && in.corpseMoving) ? cfg.receiptTimeout * 2.0f : waitBase;
@@ -2881,6 +3001,13 @@ private:
     bool kingClosing = false; // #884 round 4: King standoff closing in (hysteresis)
     float kingBackTime = 0.0f; // continuous backing time (sidestep after kingSidestepAfter)
     int kingMode = -1; // last AUTOPLAY_KING_STANDOFF mode (-1 = none this stint)
+    bool queenDodging = false; // #256: stepping off the Empress Bulblax roll line
+    bool wantStrayRoute = false; // #256: driver should route to strayRouteX/Z
+    float strayRouteX = 0.0f;
+    float strayRouteZ = 0.0f;
+    float strayRouteCooldown = 0.0f;
+    float seedRouteCooldown = 0.0f; // #256
+    float empressWalk = 0.0f; // seconds walked to strays in this whistle episode
     bool kingEvading = false; // #884 round 5: leaving the tongue sweep for the current King attack
     float kingEvadeTime = 0.0f; // time spent evading inside kingEvadeClear (sidestep after kingEvadeSideAfter)
     bool kingLowHpMode = false; // last stance used the low-health band (marker field)
