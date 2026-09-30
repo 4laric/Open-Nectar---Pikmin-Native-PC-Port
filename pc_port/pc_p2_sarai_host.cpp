@@ -57,6 +57,14 @@ P2SaraiHost::~P2SaraiHost()
     // and without this the Pikmin mouth bridge would keep a mouth link (and
     // claim) against a freed owner. sceneExit() is idempotent.
     sceneExit();
+    // #215 latch fix: a still-bound anchor gets its vehicle CollInfo back
+    // (the own tree is never freed, see demonAnchorBuildColl). A pooled
+    // re-init of the own tree is also safe (capacity >= the vehicle's 22).
+    if (mBoundActor && mAnchorVehicleColl && mBoundActor->mCollInfo == mAnchorOwnColl) {
+        mBoundActor->mCollInfo = mAnchorVehicleColl;
+        if (mBoundActor->isFlying()) mBoundActor->finishFlying();
+    }
+    mAnchorVehicleColl = nullptr;
     // The private host owns its two mouth parts and never registers them with
     // the engine, so teardown deletes them explicitly.
     delete mMouths[0];

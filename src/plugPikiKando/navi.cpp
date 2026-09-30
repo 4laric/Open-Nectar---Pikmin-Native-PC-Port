@@ -2,6 +2,7 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_p2_demon_drop_state.h"
 #include "pc_p2_demon_bridge.h"
+#include "pc_p2_demon_anchor.h"
 #endif
 #include "pc_p2_purple.h"
 #include "pc_p2_purple_impact.h"
@@ -1218,6 +1219,11 @@ void Navi::pcPinCursorToLock()
 	}
 	Vector3f offset = mPcLockTarget->mSRT.t - mSRT.t;
 	offset.y        = 0.0f;
+	// Objetivo en vuelo (#215, snitchbug): el lanzamiento alcanza su cúspide a
+	// mitad de camino del cursor y pasa por el XZ del cursor ya de bajada, así
+	// que clavado sobre el bicho el Pikmin le pasa por debajo. Con el cursor al
+	// doble de distancia la cúspide cae sobre el objetivo (pc_p2_demon_anchor.h).
+	offset = offset * p2demonanchor::lockPinScale(mPcLockTarget->isFlying() != 0);
 	mCursorPosition       = offset;
 	mCursorTargetPosition = offset;
 	mCursorNaviDist       = offset.length();
