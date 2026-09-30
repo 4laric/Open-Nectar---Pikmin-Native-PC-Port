@@ -655,6 +655,10 @@ bool pc_window_init(const char* title, int width, int height) {
     };
     applyGlAttrs();
 
+    const bool testBackground = pc_randomizer_enabled() && pc_bbft_test_background();
+    const bool testVisible = pc_randomizer_enabled() && pc_bbft_test_visible();
+    // Visible agent runs must not steal focus from whatever the owner is using.
+    if (testVisible) SDL_SetHint(SDL_HINT_WINDOW_NO_ACTIVATION_WHEN_SHOWN, "1");
     bool retriedGpu = false;
     for (;;) {
         sWindow = SDL_CreateWindow(
@@ -663,8 +667,7 @@ bool pc_window_init(const char* title, int width, int height) {
             SDL_WINDOWPOS_CENTERED,
             sWindowWidth,
             sWindowHeight,
-            SDL_WINDOW_OPENGL | ((pc_randomizer_enabled() && std::getenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND")
-                && !std::strcmp(std::getenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND"), "1")) ? SDL_WINDOW_HIDDEN : SDL_WINDOW_SHOWN) | SDL_WINDOW_RESIZABLE
+            SDL_WINDOW_OPENGL | ((testBackground && !testVisible) ? SDL_WINDOW_HIDDEN : SDL_WINDOW_SHOWN) | SDL_WINDOW_RESIZABLE
 #ifdef __ANDROID__
                 // Modo inmersivo: SDLActivity oculta la barra de estado y los
                 // botones de navegación solo si la ventana es FULLSCREEN.

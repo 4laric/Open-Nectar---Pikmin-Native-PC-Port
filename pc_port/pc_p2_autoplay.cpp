@@ -44,6 +44,7 @@
 // throws + whistle, Kurage body-position throws).
 
 #include "pc_p2_autoplay_policy.h"
+#include "pc_p2_queen_teki.h"
 
 #include "pc_p2_input_script.h"
 #include "pc_p2_campaign_actor.h"
@@ -128,6 +129,7 @@ const char* sourceDisplayName(unsigned source)
     case 9: return "Kogane";
     case 23: return "Sarai";
     case 57: return "Kurage";
+    case 72: return "OniKurage";
     case 58: return "BombSarai";
     case 54: return "Miulin";
     case 44: return "BlueKochappy";
@@ -758,6 +760,8 @@ void pc_p2_autoplay_tick(void)
     int alive = 0, nearCount = 0, farCount = 0, transport = 0, distress = 0, squad = 0;
     int strays = 0;
     float strayX = 0.0f, strayZ = 0.0f;
+    float strayNearX = 0.0f, strayNearZ = 0.0f, strayNearDist = 1.0e30f; // #256 nearest lost Pikmin
+    int lostCount = 0;
     int partyCount = 0; // #901: FormationMode Pikmin following this captain
     int workCount = 0; // #901: Pikmin working a gate / bridge / hinder rock
     std::vector<std::pair<float, float>> transportPos;
@@ -779,6 +783,15 @@ void pc_p2_autoplay_tick(void)
                 ++strays;
                 strayX += p->getPosition().x;
                 strayZ += p->getPosition().z;
+            }
+            // #256 lost Pikmin: idle or Formation, left 350-1000 u behind.
+            if ((p->mMode == PikiMode::FreeMode || p->mMode == PikiMode::FormationMode) && d > 350.0f && d < 1000.0f) {
+                ++lostCount;
+                if (d < strayNearDist) {
+                    strayNearDist = d;
+                    strayNearX = p->getPosition().x;
+                    strayNearZ = p->getPosition().z;
+                }
             }
             if (p->mMode == PikiMode::TransportMode) {
                 ++transport;
@@ -1287,12 +1300,29 @@ void pc_p2_autoplay_tick(void)
     senses.fieldPikmin = alive;
     senses.squadPikmin = squad;
     senses.strayPikmin = strays;
+    senses.lostPikmin = lostCount;
+    senses.nearPikmin = nearCount;
+    senses.strayNearX = strayNearX;
+    senses.strayNearZ = strayNearZ;
+    senses.strayNearDist = strayNearDist;
     senses.strayX = strays ? strayX / float(strays) : naviX;
     senses.strayZ = strays ? strayZ / float(strays) : naviZ;
     senses.onionStored = onionStored;
     senses.onionDist = onionDist;
     senses.containerOpen = navi->getCurrState() && navi->getCurrState()->getID() == NAVISTATE_Container;
     senses.scattered = (farCount >= 3) || (alive >= 10 && nearCount < 5);
+    // #256 TEST-ONLY census marker: why the squad reads as scattered.
+    if (senses.scattered) {
+        static float diagClock = 0.0f;
+        diagClock += (dt > 0.0f && dt <= 0.5f) ? dt : 0.016f;
+        if (diagClock >= 10.0f) {
+            diagClock = 0.0f;
+            std::printf("AUTOPLAY_SCATTER alive=%d near350=%d far550=%d squad=%d party=%d strays=%d lost=%d stray_near=%.0f@(%.0f,%.0f) navi=(%.0f,%.0f) bot-driven\n",
+                        alive, nearCount, farCount, squad, partyCount, strays, lostCount, double(strayNearDist), double(strayNearX),
+                        double(strayNearZ), double(naviX), double(naviZ));
+            std::fflush(stdout);
+        }
+    }
     senses.squadDistress = distress > 0;
     senses.panicCount = panicCount; // #245 Fuefuki owner-death Panic reclaim
     senses.panicNearest = panicNearest;
@@ -1528,6 +1558,18 @@ void pc_p2_autoplay_tick(void)
                 senses.targetVelZ = vz;
             }
         }
+        // #256 Empress Bulblax roll dodge senses (read-only FSM probe).
+        if (pick->source == 30) {
+            int qst = -1;
+            float qface = 0.0f, qhx = 0.0f, qhz = 0.0f;
+            if (pc_p2_queen_teki_probe(pick->actor, &qst, &qface, &qhx, &qhz)) {
+                senses.queenDanger = qst == 4 || qst == 5; // Flick / Rolling (Queen.h StateID)
+                const float fx = std::sin(qface), fz = std::cos(qface);
+                const float side = ((naviX - qhx) * fx + (naviZ - qhz) * fz) >= 0.0f ? 1.0f : -1.0f;
+                senses.dodgeX = qhx + fx * side * 320.0f;
+                senses.dodgeZ = qhz + fz * side * 320.0f;
+            }
+        }
         // Flyer senses (bot-v2 gap 3): height above ground, grab latch.
         // Kurage's body is on the ground (visual float only), so its XZ body
         // position above is already the throw aim; Sarai throws only when low
@@ -1629,6 +1671,15 @@ void pc_p2_autoplay_tick(void)
             planDetour(naviX, naviY, naviZ, sEngage.lastX, sEngage.lastZ);
         }
         sBrain.clearReplan();
+    }
+    // #256 Empress regroup: route to the nearest idle stray through the waypoint graph.
+    if (sBrain.strayRouteWanted()) {
+        sPlanStartY = navi->getPosition().y;
+        sPlanGoalY = NAN;
+        planDetour(naviX, naviY, naviZ, sBrain.strayRouteGoalX(), sBrain.strayRouteGoalZ());
+        std::printf("AUTOPLAY_STRAY_ROUTE goal=(%.0f,%.0f) legs=%zu bot-driven\n", double(sBrain.strayRouteGoalX()),
+                    double(sBrain.strayRouteGoalZ()), sPath.size());
+        sBrain.clearStrayRoute();
     }
     // Waypoint-by-waypoint following: steer each leg until reached (80u) or
     // its 25s budget expires, then advance; the Brain steers the active leg.

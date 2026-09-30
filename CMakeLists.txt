@@ -456,6 +456,8 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_kurage_arena.cpp
     pc_port/pc_p2_kurage_visual.cpp
     pc_port/pc_p2_kurage_teki.cpp
+    pc_port/pc_p2_kurage_own_host.cpp
+    pc_port/pc_p2_flyer_coll.cpp
     pc_port/pc_p2_onikurage_mouth.cpp
     pc_port/pc_p2_onikurage_teki.cpp
     pc_port/pc_main.cpp
@@ -1354,6 +1356,12 @@ target_compile_options(p2_proxy_table_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_proxy_table_test COMMAND p2_proxy_table_test)
 
 # Campaign host policy (#871): engine-free hostType/hasStaticHost contract.
+add_executable(p2_queen_own_test
+    pc_port/pc_p2_queen_own_test.cpp)
+target_include_directories(p2_queen_own_test PRIVATE pc_port)
+target_compile_options(p2_queen_own_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_queen_own_test COMMAND p2_queen_own_test)
+
 add_executable(p2_campaign_policy_test
     pc_port/pc_p2_campaign_policy_test.cpp)
 target_include_directories(p2_campaign_policy_test PRIVATE pc_port)
@@ -1774,6 +1782,11 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_tev_shader_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_tev_shader_test COMMAND pc_tev_shader_test)
 
+    add_executable(pc_tev_order_test pc_port/gl/pc_tev_order_test.cpp)
+    target_include_directories(pc_tev_order_test PRIVATE pc_port/gl)
+    target_compile_options(pc_tev_order_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_tev_order_test COMMAND pc_tev_order_test)
+
     # Post-process shader generation (no GL context needed)
     add_executable(pc_postprocess_test
         pc_port/gl/pc_postprocess_test.cpp
@@ -1948,6 +1961,12 @@ add_executable(p2_chappy_mouth_test tools/p2_chappy_mouth_test.cpp)
 target_include_directories(p2_chappy_mouth_test PRIVATE pc_port)
 target_compile_options(p2_chappy_mouth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_chappy_mouth_test COMMAND p2_chappy_mouth_test)
+# wave3 lane 53 (#289): engine-free Emperor Bulblax life-cycle rules (buried spawn,
+# proximity Appear, cross-Emperor request, bomb ingestion + stun clock, tongue tip table).
+add_executable(p2_king_life_test tools/p2_king_life_test.cpp)
+target_include_directories(p2_king_life_test PRIVATE pc_port)
+target_compile_options(p2_king_life_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_king_life_test COMMAND p2_king_life_test)
 # p2-886 (#886): engine-free captor mouth slots (Jigumo/Snagret/UmiMushi/
 # Armor/Uji eatPikmin geometry, Jigumo height check, Snagret facing boxes,
 # held registry + swallow, legacy XZ-nearest/raw-pointer oracle).
@@ -2003,6 +2022,13 @@ add_executable(p2_demon_anchor_test tools/p2_demon_anchor_test.cpp)
 target_include_directories(p2_demon_anchor_test PRIVATE pc_port)
 target_compile_options(p2_demon_anchor_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_demon_anchor_test COMMAND p2_demon_anchor_test)
+
+# Wave 3 flyers (#960): CF_IsFlying mirror rule, retail Kurage collision tree,
+# walk/turn maths and the source clip clock driving the Kurage FSM.
+add_executable(p2_flyer_test tools/p2_flyer_test.cpp)
+target_include_directories(p2_flyer_test PRIVATE pc_port)
+target_compile_options(p2_flyer_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_flyer_test COMMAND p2_flyer_test)
 
 # Lane 06: engine-free provider unit tests (header-only; previously present but unregistered).
 add_executable(p2_receipt_test tools/p2_receipt_test.cpp)

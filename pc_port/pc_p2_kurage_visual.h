@@ -14,3 +14,7 @@ Shape* pc_p2_kurage_visual_shape(const char* motionBase);
 // Converted pose base name for a p2kurage::State value (see pc_p2_kurage_fsm.h).
 const char* pc_p2_kurage_visual_motion_for_state(int state);
 bool pc_p2_kurage_visual_draw(BTeki*, Graphics&, const Matrix4f&, bool corpse = false);
+// Greater Spotted Jellyfloat (OniKurage, 72) poses: onikurage_<motion>.mod, same
+// clip set as the Kurage. Setup fails (and the host body draws) without wait/attack.
+bool pc_p2_kurage_visual_setup_greater();
+Shape* pc_p2_kurage_visual_shape_greater(const char* motionBase);

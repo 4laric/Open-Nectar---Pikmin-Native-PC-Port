@@ -129,6 +129,9 @@ bool InteractBomb::actTeki(Teki* teki) immut
 	if (pc_p2_long_legs_damage_rate(teki, mOwner) == 0.0f) {
 		return false; // #173: Man-at-Legs takes no bomb damage (stuck Pikmin only)
 	}
+	if (pc_p2_chappy_king_bomb(teki, mDamage * bombFactor)) {
+		return true; // registered Emperor Bulblax: source bombCallBack (0.25 x damage)
+	}
 	return teki->interact(
 	    TekiInteractionKey(TekiInteractType::Attack, stack_new(InteractAttack)(mOwner, nullptr, mDamage * bombFactor, false)));
 }

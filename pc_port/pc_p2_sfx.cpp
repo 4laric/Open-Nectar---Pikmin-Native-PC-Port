@@ -12,6 +12,12 @@
 
 // The policy header mirrors SoundID.h so it can stay engine-free; a drift in
 // either enum must fail the build rather than play the wrong sound.
+static_assert(p2sfx::kKingWalk == SE_KING_WALK, "SE drift");
+static_assert(p2sfx::kKingReady == SE_KING_READY, "SE drift");
+static_assert(p2sfx::kKingBero2 == SE_KING_BERO2, "SE drift");
+static_assert(p2sfx::kKingCheek == SE_KING_CHEEK, "SE drift");
+static_assert(p2sfx::kKingHip == SE_KING_HIP, "SE drift");
+static_assert(p2sfx::kKingDead1 == SE_KING_DEAD1, "SE drift");
 static_assert(p2sfx::kChappySwing == SE_CHAPPY_SWING, "SE drift");
 static_assert(p2sfx::kChappyFootDamage == SE_CHAPPY_FOOTDAMAGE, "SE drift");
 static_assert(p2sfx::kFlogJump == SE_FLOG_JUMP, "SE drift");
@@ -49,6 +55,15 @@ static_assert(p2sfx::kSaraiAttack == SE_SARAI_ATTACK, "SE drift");
 static_assert(p2sfx::kSaraiDead == SE_SARAI_DEAD, "SE drift");
 static_assert(p2sfx::kMarDead1 == SE_MAR_DEAD1, "SE drift");
 static_assert(p2sfx::kKurioneWater == SE_KURIONE_WATER, "SE drift");
+static_assert(p2sfx::kKingWalk == SE_KING_WALK, "SE drift");
+static_assert(p2sfx::kKingReady == SE_KING_READY, "SE drift");
+static_assert(p2sfx::kKingBero1 == SE_KING_BERO1, "SE drift");
+static_assert(p2sfx::kKingEat == SE_KING_EAT, "SE drift");
+static_assert(p2sfx::kKingCheek == SE_KING_CHEEK, "SE drift");
+static_assert(p2sfx::kKingHip == SE_KING_HIP, "SE drift");
+static_assert(p2sfx::kKingDead1 == SE_KING_DEAD1, "SE drift");
+static_assert(p2sfx::kKingAppear == SE_KING_APPEAR, "SE drift");
+static_assert(p2sfx::kKingSink == SE_KING_SINK, "SE drift");
 
 namespace {
 struct Actor {
