@@ -1,3 +1,4 @@
+#include "pc_p2_astonish.h"
 #include "pc_p2_purple.h"
 #include "pc_p2_purple_impact.h"
 #include "pc_p2_purple_direct.h"
@@ -3362,7 +3363,7 @@ PikiPanicState::PikiPanicState()
  */
 void PikiPanicState::init(Piki* piki)
 {
-	mAstonish = pc_p2_fuefuki_panic_astonish(piki);
+	mAstonish = pc_p2_fuefuki_panic_astonish(piki) || pc_p2_astonish_pending(piki);
 	if (mAstonish) {
 		// Source PikiPanicState::init PIKIPANIC_Panic: no gas flag, no death;
 		// mDramaTimer = 0.3 * randFloat() before the KIZUKU (notice) motion.
@@ -3422,6 +3423,7 @@ void PikiPanicState::exec(Piki* piki)
 		mChangeDirectionTimer -= gsys->getFrameTime();
 		if (mSurvivalTimer < 0.0f) {
 			pc_p2_fuefuki_panic_end(piki, true);
+			pc_p2_astonish_end(piki, true);
 			mAstonish = false;
 			transit(piki, PIKISTATE_Normal);
 			return;
@@ -3458,6 +3460,7 @@ void PikiPanicState::cleanup(Piki* piki)
 	if (mAstonish) {
 		mAstonish = false;
 		pc_p2_fuefuki_panic_end(piki, false);
+		pc_p2_astonish_end(piki, false);
 	}
 	piki->setGasInvincible(0);
 	piki->mIsPanicked = false;
