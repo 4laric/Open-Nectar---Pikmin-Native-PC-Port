@@ -48,6 +48,7 @@
 #include "pc_p2_batch2.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_setup_failsafe.h"
+#include "netplay/pc_netplay_det.h"
 #include "pc_randomizer.h"
 #include "teki.h"
 #include "Interactions.h"
@@ -372,6 +373,14 @@ void pc_p2_tamago_forget(BTeki* actor) {
                     && entry.second.leaderActor == actor) {
                 children.push_back(static_cast<BTeki*>(entry.first));
             }
+        }
+        // (#982) netplay-safe: `actors` is keyed by pointer, so the children come out in
+        // per-process heap order; the kill drain below would then run in that order.
+        // Under a deterministic session order them by the stable member index.
+        if (pc_netplay_deterministic()) {
+            std::sort(children.begin(), children.end(), [](BTeki* x, BTeki* y) {
+                return actors[static_cast<PelletView*>(x)].member < actors[static_cast<PelletView*>(y)].member;
+            });
         }
         int queued = 0;
         for (BTeki* child : children) {
