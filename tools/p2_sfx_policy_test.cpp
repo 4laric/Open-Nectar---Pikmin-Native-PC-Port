@@ -35,7 +35,8 @@ using namespace p2sfx;
 void table() {
     const unsigned species[] = {kBreadbug, kGiantBreadbug, kSnitchbug, kDirigibug, kCrawbster, kAntennaBeetle,
                                 kTitanDweevil, kGroink, kGroinkArmored, kCannonLarva, kEmpress,
-                                kEmperor, kKurage, kOniKurage};
+                                kEmperor, kKurage, kOniKurage,
+                                kCatfish, kTadpole, kHana, kBombOtakara};
     for (unsigned s : species) {
         CHECK(seFor(s, Event::Damage) != kNone);
         CHECK(seFor(s, Event::Dead) != kNone);
@@ -79,6 +80,13 @@ void table() {
     CHECK(seFor(kEmperor, Event::Hover) == kNone);
     CHECK(seFor(kBreadbug, Event::Appear) == kNone);   // new events stay silent elsewhere
     CHECK(std::strcmp(eventName(Event::Roar), "roar") == 0);
+    // Wave 3 mechanics (#964): aquatics, Chrysanthemum, Volatile Dweevil.
+    CHECK(seFor(kBombOtakara, Event::Burst) == kBomb);
+    CHECK(seFor(kTadpole, Event::Jump) == kFlogJump);
+    CHECK(seFor(kTadpole, Event::Land) == kFlogLand);
+    CHECK(seFor(kCatfish, Event::Attack) == kChappySwing);
+    CHECK(seFor(kHana, Event::Attack) == kChappySwing);
+    CHECK(seFor(kHana, Event::Burst) == kNone);
     // Unknown species: silent.
     CHECK(seFor(1, Event::Damage) == kNone);
     CHECK(seFor(0, Event::Step) == kNone);

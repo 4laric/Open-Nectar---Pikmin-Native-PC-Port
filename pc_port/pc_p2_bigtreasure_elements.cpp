@@ -1,6 +1,24 @@
 #include "pc_p2_bigtreasure_elements.h"
 
 namespace {
+// Deterministic per-attack scatter for the elec nodes. The source draws
+// startAngle = rand(TAU), per node angle = base + rand(0.2) - 0.1, speedXZ =
+// baseH + rand(jitterH), yVel = baseV + rand(jitterV) (BigTreasureAttack.cpp
+// startElecAttack :2356-2373). The runtime has no RNG of its own, so the host's
+// two random inputs are hashed into the same ranges (splitmix-style), which keeps
+// every attack distinct and reproducible from the logged inputs.
+float scatter01(float a, float b, unsigned index, unsigned channel) {
+    unsigned ia, ib;
+    static_assert(sizeof(ia) == sizeof(a), "float is 32-bit");
+    __builtin_memcpy(&ia, &a, sizeof(ia));
+    __builtin_memcpy(&ib, &b, sizeof(ib));
+    unsigned long long x = 0x9E3779B97F4A7C15ULL ^ ((unsigned long long)ia << 32 | ib);
+    x += (unsigned long long)(index * 4u + channel + 1u) * 0xBF58476D1CE4E5B9ULL;
+    x ^= x >> 30; x *= 0xBF58476D1CE4E5B9ULL;
+    x ^= x >> 27; x *= 0x94D049BB133111EBULL;
+    x ^= x >> 31;
+    return float(double(x >> 40) / double(1ULL << 24));
+}
 constexpr float kElecJointRaise = 100.0f;
 constexpr float kWaterEmitRaise = 100.0f;
 constexpr float kWaterTargetRange = 200.0f;
@@ -19,7 +37,6 @@ bool P2BigTreasureElementRuntime::start(int weapon, const P2BigTreasureVec3& ori
     mWeapon = weapon;
     mGround = groundHeight;
     mOrigin = origin;
-    const float zero[P2BigTreasureElecPolicy::kCapacity] = {};
     switch (weapon) {
     case P2BTWEAPON_Fire:
         return mFire.start(p2_bigtreasure_fire_params(weaponHealth));
@@ -31,8 +48,17 @@ bool P2BigTreasureElementRuntime::start(int weapon, const P2BigTreasureVec3& ori
     case P2BTWEAPON_Elec: {
         P2BigTreasureVec3 joint{ origin.x, origin.y + kElecJointRaise, origin.z };
         if (mAim.set) joint = mAim.emit;
-        return mElec.start(p2_bigtreasure_elec_params(weaponHealth, pick01), joint, 0.0f,
-                           zero, zero, zero);
+        const P2BigTreasureElecParams params = p2_bigtreasure_elec_params(weaponHealth, pick01);
+        float angleJitter[P2BigTreasureElecPolicy::kCapacity] = {};
+        float speedH[P2BigTreasureElecPolicy::kCapacity] = {};
+        float speedV[P2BigTreasureElecPolicy::kCapacity] = {};
+        for (unsigned i = 0; i < unsigned(P2BigTreasureElecPolicy::kCapacity); ++i) {
+            angleJitter[i] = scatter01(damagedPick, pick01, i, 0) * 0.2f - 0.1f;
+            speedH[i] = scatter01(damagedPick, pick01, i, 1) * params.jitterHSpeed;
+            speedV[i] = scatter01(damagedPick, pick01, i, 2) * params.jitterVSpeed;
+        }
+        const float startAngle = scatter01(damagedPick, pick01, 99u, 3) * 6.2831853f;
+        return mElec.start(params, joint, startAngle, angleJitter, speedH, speedV);
     }
     default:
         break;
