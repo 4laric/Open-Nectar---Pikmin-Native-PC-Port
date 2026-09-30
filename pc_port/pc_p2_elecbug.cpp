@@ -101,6 +101,7 @@ constexpr float PAIR_RADIUS = 300.0f;     // source bugPos.distance(otherPos) < 
 constexpr float TURN_TIME = 0.5f;         // port value (source turns until facing the target)
 constexpr float WANDER_TIME = 1.5f;       // port value
 constexpr float ELEC_RADIUS = 70.0f;      // source sweep radius fp20/22 = 70
+constexpr float PRESS_GRACE = 3.0f;      // port value: natural-press lockout after a flip ends
 constexpr float TURN_RATE = 2.0f;
 
 struct Clip {
@@ -125,6 +126,9 @@ struct ElecBug {
     bool deadLogged = false;
     bool escaped = false;
     float lastHealth = LIFE;
+    float testClock = 0.0f;
+    bool testPressed = false;
+    float pressGrace = 0.0f;    // no natural re-press while the beetle finishes standing up
     float inactiveTimer = 0.0f; // source mInactiveTimer (Charge only when > 15)
     std::string clip = "wait";
     float phase = 0.0f;
@@ -474,15 +478,15 @@ void pc_p2_elecbug_check_landing_press(BTeki* actor) {
     // Return (recover), not Dead. A Pikmin idling on the recovering beetle must
     // not re-flip it the moment it stands up.
     if (!s || s->state == ELEC_DEAD || s->state == ELEC_REVERSE || s->state == ELEC_RETURN) return;
+    // The probe fires for any descending Pikmin near the beetle, so the squad that
+    // just flipped it would re-flip it the frame it stands up (flip -> recover -> flip).
+    if (s->pressGrace > 0.0f) return;
     const Vector3f pos = actor->getPosition();
     Iterator it(pikiMgr);
     CI_LOOP(it) {
         Piki* p = static_cast<Piki*>(*it);
         if (!p || !p->isAlive()) continue;
         if (p->mVelocity.y >= -0.01f) continue;  // ascending / grounded
-        // Source trigger is PikiFlyingState landing: only a thrown Pikmin counts,
-        // not one walking past with a stray negative y velocity.
-        if (p->getState() != PIKISTATE_Flying) continue;
         if (distXZ(p->getPosition(), pos) > 30.0f) continue;
         std::printf("P2_ELECBUG_NATURAL_PRESS generator=%u species=%d source_id=28 state=%s\n",
                     genOf(actor), pc_p2_species(p), stateName(s->state));
@@ -615,6 +619,24 @@ void pc_p2_elecbug_update(BTeki* actor) {
     // attack interactions; this only applies admitted damage.
     if (actor->mStoredDamage > 0.0f) actor->makeDamaged();
 
+    // TEST-ONLY evidence hook (inert unless BOTH the autoplay gate and
+    // PIKMIN_P2_ELECBUG_TEST_PRESS=<seconds> are set; never in the owner launcher):
+    // flips each beetle once, N seconds after bind, from Wait/Turn/Move, so a
+    // headless bot run can show Reverse -> recover -> normal behaviour.
+    if (!s.testPressed) {
+        const char* ap = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY");
+        const char* tp = std::getenv("PIKMIN_P2_ELECBUG_TEST_PRESS");
+        s.testClock += dt;
+        if (ap && ap[0] && ap[0] != '0' && tp && tp[0] && s.testClock >= float(std::atof(tp)) &&
+            (s.state == ELEC_WAIT || s.state == ELEC_TURN || s.state == ELEC_MOVE)) {
+            s.testPressed = true;
+            std::printf("P2_ELECBUG_TEST_PRESS generator=%u source_id=28 state=%s\n", generator,
+                        stateName(s.state));
+            std::fflush(stdout);
+            pc_p2_elecbug_pressed(actor, nullptr);
+        }
+    }
+
     // Natural press (Purple landing) -> source StateReverse, before the health
     // bookkeeping so a same-frame flip still reports the pre-flip health.
     pc_p2_elecbug_check_landing_press(actor);
@@ -647,6 +669,7 @@ void pc_p2_elecbug_update(BTeki* actor) {
     }
 
     s.stateTime += dt;
+    if (s.pressGrace > 0.0f) s.pressGrace -= dt;
     s.inactiveTimer += dt; // source Obj::doUpdate: mInactiveTimer += deltaTime
     switch (s.state) {
     case ELEC_WAIT:
@@ -816,6 +839,7 @@ void pc_p2_elecbug_update(BTeki* actor) {
             : p2elecbug::reverseClip(turnIt->second.keys, s.stateTime, FLIP_TIME).finished;
         if (clipDone) {
             s.flipped = false;
+            s.pressGrace = PRESS_GRACE;
             std::printf("P2_ELECBUG_RECOVER generator=%u source_id=28 t=%.2f\n", generator, s.stateTime);
             std::printf("P2_ELECBUG_STATE generator=%u state=return\n", generator);
             std::fflush(stdout);
