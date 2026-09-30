@@ -29,7 +29,7 @@ inline bool keepThrowPick(bool pickHasCaptain) { return pickHasCaptain; }
 inline bool mayHang(bool hasCaptain) { return hasCaptain; }
 
 // One log line per guard kind per process (evidence that a guard fired).
-void note(const char* kind);
+inline void note(const char* kind);
 
 } // namespace p2captivenavi
 
