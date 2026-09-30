@@ -1,3 +1,6 @@
+#if defined(PIKI_PC_PORT)
+#include "pc_p2_captive_navi_policy.h"
+#endif
 #include "pc_p2_gas_cloud.h"
 #include "pc_p2_astonish.h"
 #include "pc_p2_purple.h"
@@ -1707,6 +1710,16 @@ void PikiGoHangState::init(Piki* piki)
  */
 void PikiGoHangState::exec(Piki* piki)
 {
+#if defined(PIKI_PC_PORT)
+	// A P2 captor (Jellyfloat suction, Sarai, ...) clears Piki::mNavi when it
+	// captures a Pikmin; a captain's grab can still land on it afterwards. No
+	// captain means nothing to hang from: back to normal instead of reading
+	// the null captain (0xdd0 access violation, #972 crash follow-up).
+	if (!p2captivenavi::mayHang(piki->mNavi != nullptr)) {
+		transit(piki, PIKISTATE_Normal);
+		return;
+	}
+#endif
 	CollPart* naviHand = piki->mNavi->mCollInfo->getSphere('rhnd');
 	Vector3f dir       = naviHand->mCentre - piki->mSRT.t;
 	f32 dist           = dir.normalise();
@@ -1772,6 +1785,16 @@ void PikiHangedState::init(Piki* piki)
  */
 void PikiHangedState::exec(Piki* piki)
 {
+#if defined(PIKI_PC_PORT)
+	// A P2 captor (Jellyfloat suction, Sarai, ...) clears Piki::mNavi when it
+	// captures a Pikmin; a captain's grab can still land on it afterwards. No
+	// captain means nothing to hang from: back to normal instead of reading
+	// the null captain (0xdd0 access violation, #972 crash follow-up).
+	if (!p2captivenavi::mayHang(piki->mNavi != nullptr)) {
+		transit(piki, PIKISTATE_Normal);
+		return;
+	}
+#endif
 	if (piki->mNavi->getCurrState()->getID() != NAVISTATE_ThrowWait) {
 		transit(piki, PIKISTATE_Normal);
 	}
@@ -1825,6 +1848,16 @@ void PikiWaterHangedState::init(Piki* piki)
  */
 void PikiWaterHangedState::exec(Piki* piki)
 {
+#if defined(PIKI_PC_PORT)
+	// A P2 captor (Jellyfloat suction, Sarai, ...) clears Piki::mNavi when it
+	// captures a Pikmin; a captain's grab can still land on it afterwards. No
+	// captain means nothing to hang from: back to normal instead of reading
+	// the null captain (0xdd0 access violation, #972 crash follow-up).
+	if (!p2captivenavi::mayHang(piki->mNavi != nullptr)) {
+		transit(piki, PIKISTATE_Normal);
+		return;
+	}
+#endif
 	if (piki->mNavi->getCurrState()->getID() != NAVISTATE_ThrowWait) {
 		PRINT("???\n");
 		transit(piki, PIKISTATE_Normal);

@@ -1,3 +1,6 @@
+#if defined(PIKI_PC_PORT)
+#include "pc_p2_captive_navi_policy.h"
+#endif
 #include "pc_p2_purple.h"
 #include "pc_p2_purple_flight.h"
 #include "pc_p2_purple_impact.h"
@@ -2998,6 +3001,17 @@ void Piki::pcChargeAt(Creature* target)
 void Piki::changeMode(int newMode, Navi* navi)
 {
 	STACK_PAD_VAR(6); // idk
+#if defined(PIKI_PC_PORT)
+	// A Pikmin a P2 captor released (pc_p2_captain release_captive_free) has
+	// no captain until a whistle reclaims it (Navi::callPikis sets mNavi
+	// before changeMode). Every FormationMode entry initialises ActCrowd with
+	// mNavi, which read navi->mObjType of null (0x9c access violation, #972
+	// crash follow-up). No captain means no party: free mode, the same ruling
+	// as the ActAction post-work guard (#960).
+	static_assert(p2captivenavi::kFreeMode == PikiMode::FreeMode && p2captivenavi::kFormationMode == PikiMode::FormationMode,
+	              "PikiMode ids");
+	newMode = p2captivenavi::modeFor(newMode, mNavi != nullptr);
+#endif
 #if defined(PIKI_PC_PORT)
 	// #245: the whistle path into a party is refused for an Antenna Beetle
 	// ActTeki follower in Navi::callPikis (InteractFue::actPiki). Any other
