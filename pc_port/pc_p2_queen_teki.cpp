@@ -123,6 +123,9 @@ struct Larva {
     float lastHealth = 0.0f;
     int bites = 0;
     int hits = 0;
+    Piki* mouth = nullptr; // Pikmin taken by eatPikmin at attack KEYEVENT_2 (mouth slot 0)
+    int eaten = 0;
+    int nearTicks = 0;
 };
 std::map<BTeki*, Larva> sLarvae;
 unsigned sLarvaSerial = 0;
@@ -311,6 +314,16 @@ int flickStuck(BTeki* t, Binding& b, bool face) {
             ++middle;
         }
         if (ok) ++flicked;
+        {
+            const float lateral = (pp.x - t->mSRT.t.x) * fz - (pp.z - t->mSRT.t.z) * fx;
+            CollPart* sp = p->getStickPart();
+            ID32 spId;
+            if (sp) spId = sp->getID();
+            std::printf("P2_QUEEN_FLICK_PIKI generator=%u along=%.1f lateral=%.1f y_above=%.1f stick_part=%s accepted=%d "
+                        "detached=%d\n",
+                        b.generator, along, lateral, pp.y - t->mSRT.t.y, sp ? spId.mStringID : "none", ok ? 1 : 0,
+                        p->getStickObject() == t ? 0 : 1);
+        }
     }
     if (face || flicked) {
         b.flickedPiki += flicked;
@@ -607,6 +620,41 @@ BabyTarget babyTarget(BTeki* t, const Larva& l) {
     return best;
 }
 
+// EnemyFunc::eatPikmin for the larva's single mouth slot (radius 20 at the
+// "kamu" joint, approximated 15 ahead of the root: p2queenown::babyMouthReaches).
+// Default condition: a Pikmin not already stuck to this larva and not already
+// in a mouth. The first Pikmin in reach fills the slot (getMax() == 1).
+void larvaEat(BTeki* t, Larva& l) {
+    l.mouth = nullptr;
+    if (!pikiMgr) return;
+    const Vector3f me = t->getPosition();
+    const p2queenown::Vec2 pos{me.x, me.z};
+    Iterator it(pikiMgr);
+    CI_LOOP(it) {
+        Piki* p = static_cast<Piki*>(*it);
+        if (!p || !p->isAlive() || p->getStickObject() == t || p->isStickToMouth()) continue;
+        const Vector3f& pp = p->getPosition();
+        if (!p2queenown::babyMouthReaches(pos, l.fsm.faceDir(), {pp.x, pp.z}, pp.y - me.y)) continue;
+        l.mouth = p;
+        std::printf("P2_QUEEN_LARVA_EAT id=%u queen=%u piki_x=%.1f piki_z=%.1f larva_x=%.1f larva_z=%.1f slot_radius=%.0f\n",
+                    l.id, l.queen, pp.x, pp.z, me.x, me.z, p2queenown::kBabyMouthRadius);
+        return;
+    }
+    std::printf("P2_QUEEN_LARVA_EAT_NONE id=%u queen=%u larva_x=%.1f larva_z=%.1f\n", l.id, l.queen, me.x, me.z);
+}
+
+// Baby StateAttack KEYEVENT_3: swallowPikmin -> InteractKill on what the mouth
+// holds. The held Pikmin is a snapshot taken at KEYEVENT_2 (like the Emperor
+// eat fix); it is killed wherever it now is, if still alive.
+void larvaSwallow(BTeki* t, Larva& l) {
+    Piki* p = l.mouth;
+    l.mouth = nullptr;
+    if (!p) return;
+    const bool killed = p->isAlive() && p->stimulate(InteractKill(t, 0));
+    if (killed) ++l.eaten;
+    std::printf("P2_QUEEN_LARVA_SWALLOW id=%u queen=%u killed=%d total_eaten=%d\n", l.id, l.queen, killed ? 1 : 0, l.eaten);
+}
+
 void larvaTick(BTeki* t, Larva& l, float dt) {
     if (t->mStoredDamage > 0.0f) t->makeDamaged();
     if (t->mHealth < l.lastHealth)
@@ -622,6 +670,11 @@ void larvaTick(BTeki* t, Larva& l, float dt) {
         in.pos = {t->mSRT.t.x, t->mSRT.t.z};
         in.target = babyTarget(t, l);
         const BabyOutput o = l.fsm.tick(in);
+        if (in.target.valid && in.target.navi && in.target.dist < 80.0f && (l.nearTicks++ % 15) == 0)
+            std::printf("P2_QUEEN_LARVA_NEAR id=%u queen=%u state=%s captain_dist=%.1f angle_deg=%.1f\n", l.id, l.queen,
+                        babyStateName(l.fsm.state()), in.target.dist,
+                        p2queenown::angDist(std::atan2(in.target.pos.x - in.pos.x, in.target.pos.z - in.pos.z),
+                                            l.fsm.faceDir()) * 180.0f / kPi);
         for (int e : o.entered) {
             std::printf("P2_QUEEN_LARVA_STATE id=%u queen=%u state=%s health=%.1f x=%.1f z=%.1f\n", l.id, l.queen,
                         babyStateName(e), t->mHealth, t->mSRT.t.x, t->mSRT.t.z);
@@ -632,9 +685,8 @@ void larvaTick(BTeki* t, Larva& l, float dt) {
             }
         }
         if (o.attackKey) {
-            // EnemyFunc::attackNavi(attackRadius, attackHitAngle, attackDamage).
-            // eatPikmin/swallowPikmin (key 3) are deferred: the P1 vehicle at
-            // larva scale has no usable mouth slot (documented limitation).
+            // Baby StateAttack KEYEVENT_2: attackNavi(attackRadius, hitAngle,
+            // attackDamage), then eatPikmin, then AttackFail if the slot is empty.
             const Vector3f me = t->getPosition();
             for (Navi* n : pc_p2_navis()) {
                 if (!n || !n->isAlive()) continue;
@@ -651,7 +703,10 @@ void larvaTick(BTeki* t, Larva& l, float dt) {
                             "captain_after=%.1f\n",
                             l.id, l.queen, ok ? 1 : 0, sParams.babyAttackDamage, before, n->mHealth);
             }
+            larvaEat(t, l);
+            if (!l.mouth) l.fsm.attackFailed();
         }
+        if (o.swallowKey) larvaSwallow(t, l);
         t->mSRT.t.x += o.velocity.x * kSourceDelta;
         t->mSRT.t.z += o.velocity.z * kSourceDelta;
         t->setDirection(o.faceDir);

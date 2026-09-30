@@ -145,6 +145,33 @@ int main() {
     bool attacked = false;
     for (int i = 0; i < 300 && !attacked; ++i) attacked = baby.tick(bi).attackKey;
     assert(attacked);
+    // KEYEVENT_3 (frame 30) fires after KEYEVENT_2 unless the host reports an empty mouth.
+    {
+        Baby b2b;
+        b2b.init(p, bank, 0.0f, {0.0f, 50.0f});
+        bool k2 = false, k3 = false;
+        for (int i = 0; i < 600 && !k3; ++i) {
+            const BabyOutput t2 = b2b.tick(bi);
+            k2 = k2 || t2.attackKey;
+            k3 = k3 || t2.swallowKey;
+        }
+        assert(k2 && k3);
+        Baby b3;
+        b3.init(p, bank, 0.0f, {0.0f, 50.0f});
+        bool missed = false, swallowed = false;
+        int after = 0;
+        for (int i = 0; i < 600 && after < 40; ++i) {
+            const BabyOutput t3 = b3.tick(bi);
+            if (missed) ++after;
+            if (t3.attackKey && !missed) { b3.attackFailed(); missed = true; }
+            swallowed = swallowed || t3.swallowKey;
+        }
+        assert(missed && !swallowed);
+    }
+    // Mouth slot: radius 20 around a point 15 ahead of the root.
+    assert(babyMouthReaches({0.0f, 0.0f}, 0.0f, {0.0f, 30.0f}, 0.0f));
+    assert(!babyMouthReaches({0.0f, 0.0f}, 0.0f, {0.0f, -10.0f}, 0.0f));
+    assert(!babyMouthReaches({0.0f, 0.0f}, 0.0f, {0.0f, 40.0f}, 0.0f));
     BabyOutput po;
     assert(baby.press(po) && baby.state() == BabyPress);
     std::puts("p2_queen_own_test OK");

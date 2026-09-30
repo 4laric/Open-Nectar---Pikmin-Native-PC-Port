@@ -650,11 +650,28 @@ struct BabyInput {
 };
 struct BabyOutput {
     std::vector<int> entered;
-    bool attackKey = false; // StateAttack KEYEVENT_2: attackNavi (+ eatPikmin, deferred)
+    bool attackKey = false; // StateAttack KEYEVENT_2: attackNavi + eatPikmin (host resolves the mouth)
+    bool swallowKey = false; // StateAttack KEYEVENT_3: swallowPikmin (kills what the mouth holds)
     bool kill = false;
     Vec2 velocity;
     float faceDir = 0.0f;
 };
+// Baby mouth slot (Baby::initMouthSlots: one slot on the "kamu" joint, radius
+// 20). The staged larva rest/attack poses span z = -13.6..16.5, so the joint is
+// approximated at the head tip 15 units ahead of the root along the facing; the
+// joint itself is not evaluated on the P1 vehicle. EnemyFunc::eatPikmin takes a
+// Pikmin whose position is within the slot radius of the slot (3D distance; the
+// staged head sits near the ground, so the slot height is the root height).
+constexpr float kBabyMouthRadius = 20.0f;
+constexpr float kBabyMouthForward = 15.0f;
+inline Vec2 babyMouthPoint(Vec2 pos, float faceDir) {
+    return {pos.x + std::sin(faceDir) * kBabyMouthForward, pos.z + std::cos(faceDir) * kBabyMouthForward};
+}
+inline bool babyMouthReaches(Vec2 pos, float faceDir, Vec2 prey, float dy) {
+    const Vec2 m = babyMouthPoint(pos, faceDir);
+    const float dx = prey.x - m.x, dz = prey.z - m.z;
+    return dx * dx + dz * dz + dy * dy < kBabyMouthRadius * kBabyMouthRadius;
+}
 inline float angDist(float target, float cur) {
     float d = target - cur;
     while (d > kPi) d -= 2.0f * kPi;
@@ -675,6 +692,10 @@ public:
     int state() const { return mState; }
     const Animator& animator() const { return mAnim; }
     float faceDir() const { return mFaceDir; }
+    // StateAttack KEYEVENT_2: getSlotPikiNum() == 0 -> startMotion(AttackFail).
+    // The clip has no key events, so it ends at KEYEVENT_END -> StateMove and
+    // KEYEVENT_3 (swallow) never fires. Host calls this after eating nothing.
+    void attackFailed() { if (mState == BabyAttack) start(BabyAnimAttackFail); }
     // Baby::pressCallBack: any press while past Born (state id > 2).
     bool press(BabyOutput& o) {
         if (mState > BabyBorn) { transit(BabyPress, o); return true; }
@@ -714,6 +735,7 @@ public:
             break;
         case BabyAttack:
             if (mAnim.is(Key2)) o.attackKey = true;
+            else if (mAnim.is(Key3)) o.swallowKey = true;
             else if (mAnim.is(KeyEnd)) transit(dead ? BabyDead : BabyMove, o);
             break;
         case BabyDead:
