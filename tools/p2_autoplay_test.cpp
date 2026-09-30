@@ -1262,6 +1262,8 @@ void testEmpressRegroupWalk()
     CHECK(brain.current() == p2autoplay::State::Attack, "empress_regroup/attacks");
     s.scattered = true;
     s.strayPikmin = 40;
+    s.lostPikmin = 40;
+    s.nearPikmin = 3;
     s.strayX = 0.0f;
     s.strayZ = 0.0f; // centroid at the captain: the strays ring the body
     s.strayNearX = 0.0f;
@@ -1302,6 +1304,8 @@ void testEmpressAftermathRegroup()
     s.tgtX = 40.0f;
     s.squadPikmin = 0;
     s.strayPikmin = 40;
+    s.lostPikmin = 40;
+    s.nearPikmin = 3;
     s.strayX = 0.0f; // centroid at the corpse: the strays ring it
     s.strayZ = 0.0f;
     s.strayNearX = 0.0f;

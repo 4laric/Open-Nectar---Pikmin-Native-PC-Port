@@ -670,7 +670,12 @@ struct Senses {
     // #246: idle field Pikmin (FreeMode, not carrying, not in distress) and
     // their centroid, so a Titan aftermath can walk to them before whistling.
     int strayPikmin = 0;
-    // #256: nearest idle stray (the whistle reaches only 100 u, NaviMgr p01).
+    // #256: "lost" Pikmin = idle strays or Formation followers left 350-1000 u
+    // behind (a14: 33 followers + 36 strays sat at the arena ledge foot); the
+    // nearest one, and how many Pikmin are within 350 u. The whistle reaches
+    // only 100 u (NaviMgr p01).
+    int lostPikmin = 0;
+    int nearPikmin = 0;
     float strayNearX = 0.0f;
     float strayNearZ = 0.0f;
     float strayNearDist = 1.0e30f;
@@ -1756,7 +1761,7 @@ private:
                 char wbuf[200];
                 std::snprintf(wbuf, sizeof(wbuf),
                               "AUTOPLAY_WHISTLE start token=%u strays=%d near=%.0f navi=(%.0f,%.0f) bot-driven",
-                              in.targetToken, in.strayPikmin, in.strayNearDist, in.naviX, in.naviZ);
+                              in.targetToken, in.lostPikmin, in.strayNearDist, in.naviX, in.naviZ);
                 markers.emplace_back(wbuf);
             }
         }
@@ -1771,7 +1776,7 @@ private:
             bool empressRegroup = false;
             if (in.targetSource == 30) {
                 if (strayRouteCooldown > 0.0f) strayRouteCooldown -= dt;
-                if (in.strayPikmin >= 5 && in.strayNearDist > 90.0f && in.strayNearDist < 1.0e29f
+                if (in.lostPikmin >= 5 && in.strayNearDist > 90.0f && in.strayNearDist < 1.0e29f
                     && empressWalk < cfg.empressWalkMax) {
                     empressWalk += dt;
                     if (!in.waypointLeg && strayRouteCooldown <= 0.0f) {
@@ -1964,7 +1969,7 @@ private:
         const int amCrew = in.pelletCarriers > 0 ? in.pelletCarriers : in.carryCount;
         const bool amShort = in.squadPikmin == 0
             || (in.carryWant > 0 && in.squadPikmin + amCrew < in.carryWant && in.strayPikmin > 0)
-            || (in.targetSource == 30 && in.strayPikmin >= 10 && in.squadPikmin < 20);
+            || (in.targetSource == 30 && in.lostPikmin >= 10 && in.nearPikmin < 20);
         // #256: the Empress joins the Titan's regroup (her flick and roll leave
         // ~50 idle strays, a11: 12 carriers of 20), walking to the NEAREST stray
         // over the waypoint graph because the strays ring the arena.
@@ -1973,7 +1978,7 @@ private:
             && (amWhistleTime > 0.0f || amRegroupWalk > 0.0f
                 || (amShort && in.fieldPikmin > in.pelletCarriers
                     && amWhistles < cfg.titanAftermathWhistles))) {
-            if (amWhistleTime <= 0.0f && in.strayPikmin > 0
+            if (amWhistleTime <= 0.0f && (amEmpress ? in.lostPikmin : in.strayPikmin) > 0
                 && amRegroupWalk < (amEmpress ? cfg.empressWalkMax : cfg.titanRegroupWalk)) {
                 const bool nearest = amEmpress && in.strayNearDist < 1.0e29f;
                 const float gx = nearest ? in.strayNearX : in.strayX;

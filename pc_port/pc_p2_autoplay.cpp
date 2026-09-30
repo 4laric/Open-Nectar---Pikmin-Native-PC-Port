@@ -759,7 +759,8 @@ void pc_p2_autoplay_tick(void)
     int alive = 0, nearCount = 0, farCount = 0, transport = 0, distress = 0, squad = 0;
     int strays = 0;
     float strayX = 0.0f, strayZ = 0.0f;
-    float strayNearX = 0.0f, strayNearZ = 0.0f, strayNearDist = 1.0e30f; // #256 nearest idle stray
+    float strayNearX = 0.0f, strayNearZ = 0.0f, strayNearDist = 1.0e30f; // #256 nearest lost Pikmin
+    int lostCount = 0;
     int partyCount = 0; // #901: FormationMode Pikmin following this captain
     int workCount = 0; // #901: Pikmin working a gate / bridge / hinder rock
     std::vector<std::pair<float, float>> transportPos;
@@ -781,6 +782,10 @@ void pc_p2_autoplay_tick(void)
                 ++strays;
                 strayX += p->getPosition().x;
                 strayZ += p->getPosition().z;
+            }
+            // #256 lost Pikmin: idle or Formation, left 350-1000 u behind.
+            if ((p->mMode == PikiMode::FreeMode || p->mMode == PikiMode::FormationMode) && d > 350.0f && d < 1000.0f) {
+                ++lostCount;
                 if (d < strayNearDist) {
                     strayNearDist = d;
                     strayNearX = p->getPosition().x;
@@ -1294,6 +1299,8 @@ void pc_p2_autoplay_tick(void)
     senses.fieldPikmin = alive;
     senses.squadPikmin = squad;
     senses.strayPikmin = strays;
+    senses.lostPikmin = lostCount;
+    senses.nearPikmin = nearCount;
     senses.strayNearX = strayNearX;
     senses.strayNearZ = strayNearZ;
     senses.strayNearDist = strayNearDist;
@@ -1309,8 +1316,8 @@ void pc_p2_autoplay_tick(void)
         diagClock += (dt > 0.0f && dt <= 0.5f) ? dt : 0.016f;
         if (diagClock >= 10.0f) {
             diagClock = 0.0f;
-            std::printf("AUTOPLAY_SCATTER alive=%d near350=%d far550=%d squad=%d party=%d strays=%d stray_near=%.0f@(%.0f,%.0f) navi=(%.0f,%.0f) bot-driven\n",
-                        alive, nearCount, farCount, squad, partyCount, strays, double(strayNearDist), double(strayNearX),
+            std::printf("AUTOPLAY_SCATTER alive=%d near350=%d far550=%d squad=%d party=%d strays=%d lost=%d stray_near=%.0f@(%.0f,%.0f) navi=(%.0f,%.0f) bot-driven\n",
+                        alive, nearCount, farCount, squad, partyCount, strays, lostCount, double(strayNearDist), double(strayNearX),
                         double(strayNearZ), double(naviX), double(naviZ));
             std::fflush(stdout);
         }
