@@ -123,6 +123,36 @@ int main()
         require(near(p2kurageown::general().life, 2500.0f), "retail life");
     }
 
+    // --- Greater Spotted Jellyfloat (OniKurage 72): retail entry differs ---
+    {
+        using V = p2kurage::Variant;
+        const p2kurageown::General g = p2kurageown::general(V::Greater);
+        require(near(g.life, 4500.0f) && near(g.moveSpeed, 75.0f) && near(g.territoryRadius, 500.0f)
+                    && near(g.sightRadius, 500.0f) && near(g.maxAttackRange, 60.0f) && near(g.attackRadius, 60.0f),
+                "OniKurage general parms (life 4500, speed 75, territory/sight 500, attack 60)");
+        require(near(p2kurageown::general(V::Lesser).life, 2500.0f), "Lesser parms unchanged");
+        const p2kurage::Parms p = p2kurageown::flightParms(V::Greater);
+        require(near(p.flightHeight, 75.0f) && near(p.riseFactor, 5.0f) && p.maxSuckPiki == 20 && p.minFallPiki == 6
+                    && near(p.suckTime, 2.0f) && near(p.shakeTime, 1.0f),
+                "OniKurage proper parms (flight 75, rise 5, max suck 20)");
+        const p2flyer::Sphere* t = p2kurageown::spheres(V::Greater);
+        require(near(t[0].radius, 55.0f) && near(t[0].offset.x, 20.0f) && near(t[1].radius, 40.0f) && near(t[1].offset.x, -10.0f)
+                    && near(t[2].radius, 25.0f) && std::strcmp(t[1].code, "st__") == 0 && std::strcmp(t[2].code, "st__") == 0,
+                "OniKurage retail collision tree");
+        require(near(p2kurageown::mouthRadius(V::Greater), 25.0f) && near(p2kurageown::mouthRadius(V::Lesser), 15.0f), "mouth radius");
+        require(std::strcmp(p2kurageown::posePrefix(V::Greater), "onikurage_") == 0, "onikurage pose prefix");
+        // The Greater FSM runs the same lifecycle: six latched Pikmin drop it to Land.
+        p2kurage::Fsm fsm(p, V::Greater);
+        fsm.spawn();
+        p2kurage::In in;
+        in.deltaTime = 1.0f / 30.0f;
+        in.positionY = 75.0f;
+        in.stuckPikminCount = 6;
+        bool fell = false;
+        for (int i = 0; i < 5 && !fell; ++i) fell = fsm.tick(in).state == p2kurage::State::Fall;
+        require(fell, "Greater: six latched Pikmin force Fall");
+    }
+
     // --- clip table: ANF1 lengths and enemyanimmgr keys ---
     {
         using M = p2kurage::Motion;

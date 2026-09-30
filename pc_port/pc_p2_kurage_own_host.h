@@ -42,7 +42,9 @@ public:
     p2kurage::Motion motion() const { return mMotion; }
     p2kurage::State state() const { return mState; }
     bool untargetable() const { return mUntargetable; }
-    float life() const { return p2kurageown::general().life; }
+    float life() const { return p2kurageown::general(mVariant).life; }
+    bool greater() const { return mVariant == p2kurage::Variant::Greater; }
+    p2kurage::Variant variant() const { return mVariant; }
 
 private:
     void sourceTick(BTeki* actor);
@@ -59,6 +61,7 @@ private:
     bool mEscaped = false;
     unsigned mGenerator = 0;
     unsigned mSource = 57;
+    p2kurage::Variant mVariant = p2kurage::Variant::Lesser;
     CollPart* mMouth = nullptr;
 
     p2kurage::Fsm mFsm;

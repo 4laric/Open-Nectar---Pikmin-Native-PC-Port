@@ -17,6 +17,9 @@ bool sReady = false;
 // by the current FSM state so the drawn pose follows the source motion rather
 // than only wait/attack.
 std::map<std::string, Shape*> sShapes;
+// Greater Spotted Jellyfloat (OniKurage, 72) poses, same names.
+std::map<std::string, Shape*> sShapesGreater;
+bool sReadyGreater = false;
 Shape* load(const char* path)
 {
     if (!std::filesystem::exists(std::filesystem::path("assets/dataDir") / path)) return nullptr;
@@ -54,6 +57,8 @@ bool pc_p2_kurage_visual_setup()
 }
 void pc_p2_kurage_visual_reset()
 {
+    sShapesGreater.clear();
+    sReadyGreater = false;
     sWait = nullptr;
     sAttack = nullptr;
     sReady = false;
@@ -97,4 +102,31 @@ bool pc_p2_kurage_visual_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matri
     shape->updateAnim(gfx, matrix, nullptr, actor);
     shape->drawshape(gfx, *gfx.mCamera, nullptr);
     return true;
+}
+
+bool pc_p2_kurage_visual_setup_greater()
+{
+    if (sReadyGreater) return true;
+    Shape* wait = load("courses/pikmin2room/onikurage_wait.mod");
+    Shape* attack = load("courses/pikmin2room/onikurage_attack.mod");
+    if (!wait || !attack) return false;
+    sShapesGreater["wait"] = wait;
+    sShapesGreater["attack"] = attack;
+    static const char* const optional[] = { "move1", "move2", "type1", "type2",
+        "flick1", "flick2", "dead1", "dead2" };
+    int loaded = 0;
+    for (const char* name : optional) {
+        std::string path = std::string("courses/pikmin2room/onikurage_") + name + ".mod";
+        if (Shape* shape = load(path.c_str())) { sShapesGreater[name] = shape; ++loaded; }
+    }
+    std::printf("P2_ONIKURAGE_VISUAL_POSES optional_loaded=%d/%d\n", loaded, 8);
+    std::fflush(stdout);
+    sReadyGreater = true;
+    return true;
+}
+Shape* pc_p2_kurage_visual_shape_greater(const char* motionBase)
+{
+    if (!motionBase || !*motionBase) return nullptr;
+    auto it = sShapesGreater.find(motionBase);
+    return it == sShapesGreater.end() ? nullptr : it->second;
 }

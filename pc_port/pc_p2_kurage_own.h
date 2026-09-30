@@ -32,6 +32,25 @@ struct General {
 
 inline General general() { return General{}; }
 
+// Greater Spotted Jellyfloat (OniKurage, ID 72): the retail enemyParms.szs
+// onikurage/ entry. Same FSM shape (Variant::Greater), bigger and tougher.
+inline General generalGreater()
+{
+    General g;
+    g.life = 4500.0f;
+    g.moveSpeed = 75.0f;
+    g.territoryRadius = 500.0f;
+    g.homeRadius = 100.0f;
+    g.sightRadius = 500.0f;
+    g.maxAttackRange = 60.0f;
+    g.attackRadius = 60.0f;
+    return g;
+}
+inline General general(p2kurage::Variant v)
+{
+    return v == p2kurage::Variant::Greater ? generalGreater() : general();
+}
+
 // Kurage::ProperParms of the retail entry (Kurage.h defaults differ: 90 / 3 /
 // 5 / 0.025 / 3 / 10).
 inline p2kurage::Parms flightParms()
@@ -46,6 +65,21 @@ inline p2kurage::Parms flightParms()
     p.minFallPiki = 6;      // ip01
     p.maxSuckPiki = 10;     // ip11
     return p;
+}
+
+// OniKurage ProperParms of the retail entry: flight 75, rise factor 5.0 (the
+// Lesser is 1.0), ground 0.5, suck 2.0 @ 0.1, shake 1.0, min fall 6, max suck 20.
+inline p2kurage::Parms flightParmsGreater()
+{
+    p2kurage::Parms p = flightParms();
+    p.flightHeight = 75.0f; // fp01
+    p.riseFactor = 5.0f;    // fp02
+    p.maxSuckPiki = 20;     // ip11
+    return p;
+}
+inline p2kurage::Parms flightParms(p2kurage::Variant v)
+{
+    return v == p2kurage::Variant::Greater ? flightParmsGreater() : flightParms();
 }
 
 // enemy/data/Kurage enemycoll.txt (pre-order). The retail tree is a radius-40
@@ -64,9 +98,34 @@ inline const p2flyer::Sphere* spheres()
     return kSpheres;
 }
 
+// enemy/data/OniKurage enemycoll.txt: radius-55 bounding sphere @ (20,0,0), two
+// stickable bodies (40 @ (-10,0,0) on joint 6, 25 on joint 3) and the radius-25
+// 'suck' mouth part (receiver mouth here).
+inline const p2flyer::Sphere* spheresGreater()
+{
+    static const p2flyer::Sphere kSpheres[kSphereCount] = {
+        {"root", "____", 55.0f, {20.0f, 0.0f, 0.0f}, -1},
+        {"bod1", "st__", 40.0f, {-10.0f, 0.0f, 0.0f}, 0},
+        {"bod2", "st__", 25.0f, {0.0f, 0.0f, 0.0f}, 0},
+    };
+    return kSpheres;
+}
+inline const p2flyer::Sphere* spheres(p2kurage::Variant v)
+{
+    return v == p2kurage::Variant::Greater ? spheresGreater() : spheres();
+}
+// The mouth ('suck') collision part radius: 15 (Kurage), 25 (OniKurage).
+inline float mouthRadius(p2kurage::Variant v) { return v == p2kurage::Variant::Greater ? 25.0f : 15.0f; }
+// Native pose-file prefix under assets/dataDir/courses/pikmin2room/.
+inline const char* posePrefix(p2kurage::Variant v) { return v == p2kurage::Variant::Greater ? "onikurage_" : "kurage_"; }
+
 // Fallback body offset (root -> body joint). Root sits at the bell underside
 // (model bounds y -1.5..50.9), the body joints near the middle of the bell.
 inline p2flyer::Vec3 defaultBodyOffset() { return p2flyer::Vec3{0.0f, 22.0f, 0.0f}; }
+inline p2flyer::Vec3 defaultBodyOffset(p2kurage::Variant v)
+{
+    return v == p2kurage::Variant::Greater ? p2flyer::Vec3{0.0f, 30.0f, 0.0f} : defaultBodyOffset();
+}
 
 // Converted clip name for a source motion (KurageAnimID comments in Kurage.h:
 // Land = move2, TakeOff = type1, Fall = type2).

@@ -38,8 +38,9 @@ bool P2KurageOwn::init(BTeki* actor, unsigned generator, unsigned source, CollPa
     mEscaped = false;
     mGenerator = generator;
     mSource = source;
+    mVariant = source == 72 ? p2kurage::Variant::Greater : p2kurage::Variant::Lesser;
     mMouth = mouth;
-    mFsm = p2kurage::Fsm(p2kurageown::flightParms(), p2kurage::Variant::Lesser);
+    mFsm = p2kurage::Fsm(p2kurageown::flightParms(mVariant), mVariant);
     mFsm.spawn();
     mLast = p2kurage::Out{};
     mState = p2kurage::State::Wait;
@@ -60,26 +61,26 @@ bool P2KurageOwn::init(BTeki* actor, unsigned generator, unsigned source, CollPa
     mVelX = mVelY = mVelZ = 0.0f;
     mSucked = 0;
     mSuckFull = false;
-    actor->mHealth = p2kurageown::general().life;
+    actor->mHealth = p2kurageown::general(mVariant).life;
     mLastHealth = actor->mHealth;
 
     // Body joint offset: centroid of the rest mesh when loaded (the model root
     // sits at the bell underside), else the measured fallback.
-    mBody = p2kurageown::defaultBodyOffset();
+    mBody = p2kurageown::defaultBodyOffset(mVariant);
     bool measured = false;
     if (restShape && restShape->mVertexList && restShape->mVertexCount > 0) {
         const Vector3f* verts = restShape->mVertexList;
         measured = p2flyer::bodyOffsetFromMesh(std::size_t(restShape->mVertexCount),
             [verts](std::size_t i) { return p2flyer::Vec3{verts[i].x, verts[i].y, verts[i].z}; }, mBody);
     }
-    const bool collBound = mColl.bind(actor, p2kurageown::spheres(), p2kurageown::kSphereCount);
+    const bool collBound = mColl.bind(actor, p2kurageown::spheres(mVariant), p2kurageown::kSphereCount);
     if (collBound) mColl.follow(actor, p2flyer::Vec3{pos.x, pos.y, pos.z}, mYaw, mBody, actor->mSRT.s.y);
     actor->startFlying();
     std::printf("P2_KURAGE_OWN_BIND generator=%u source_id=%u health=%.1f retail_parms=1 coll=%d "
                 "body=%.1f,%.1f,%.1f measured=%d stick_bottom=%.1f flight_height=%.1f territory=%.1f\n",
                 generator, source, actor->mHealth, int(collBound), mBody.x, mBody.y, mBody.z, int(measured),
-                p2flyer::stickableBottom(p2kurageown::spheres(), p2kurageown::kSphereCount, mBody),
-                p2kurageown::flightParms().flightHeight, p2kurageown::general().territoryRadius);
+                p2flyer::stickableBottom(p2kurageown::spheres(mVariant), p2kurageown::kSphereCount, mBody),
+                p2kurageown::flightParms(mVariant).flightHeight, p2kurageown::general(mVariant).territoryRadius);
     std::fflush(stdout);
     return true;
 }
@@ -107,7 +108,7 @@ Piki* P2KurageOwn::search(BTeki* actor, float altitude, bool& suckTarget, bool& 
     suckTarget = false;
     suckAny = false;
     if (!pikiMgr) return nullptr;
-    const auto g = p2kurageown::general();
+    const auto g = p2kurageown::general(mVariant);
     const Vector3f pos = actor->mSRT.t;
     const float minY = pos.y - altitude - 50.0f;
     const float attackRange = g.maxAttackRange * g.maxAttackRange;
@@ -166,8 +167,8 @@ int P2KurageOwn::countStuck(BTeki* actor, bool& purple) const
 void P2KurageOwn::suckPikmin(BTeki* actor, float mapY)
 {
     if (!pikiMgr) return;
-    const auto g = p2kurageown::general();
-    const p2kurage::Parms parms = p2kurageown::flightParms();
+    const auto g = p2kurageown::general(mVariant);
+    const p2kurage::Parms parms = p2kurageown::flightParms(mVariant);
     const Vector3f pos = actor->mSRT.t;
     const float minY = mapY - 50.0f; // currY - offset(altitude) - 50
     const float range = g.attackRadius * g.attackRadius;
@@ -232,7 +233,7 @@ void P2KurageOwn::flickNearby(BTeki* actor, float radius, float knockback, float
 
 void P2KurageOwn::sourceTick(BTeki* actor)
 {
-    const auto g = p2kurageown::general();
+    const auto g = p2kurageown::general(mVariant);
     const Vector3f pos = actor->mSRT.t;
     const float mapY = mapMgr ? mapMgr->getMinY(pos.x, pos.z, false) : 0.0f;
     const float altitude = pos.y - mapY;
@@ -402,7 +403,7 @@ bool P2KurageOwn::tick(BTeki* actor, float dt)
         mColl.follow(actor, p2flyer::Vec3{pos.x, pos.y, pos.z}, mYaw, mBody, actor->mSRT.s.y);
     if (mMouth) {
         mMouth->mPartType = PART_BoundSphere;
-        mMouth->mRadius = 15.0f;
+        mMouth->mRadius = p2kurageown::mouthRadius(mVariant);
         mMouth->mCentre = pos;
         mMouth->mJointMatrix.makeIdentity();
     }

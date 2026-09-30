@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <map>
+#include <set>
 namespace {
 struct Binding {
     unsigned generator;
@@ -55,12 +56,15 @@ struct Binding {
     float lastDistToGoal = 1e9f;
     // Wave 3 flyers (#960): campaign OWN source FSM host (inactive elsewhere).
     P2KurageOwn own;
+    unsigned source = 57; // 57 Kurage or 72 OniKurage (Greater Spotted Jellyfloat)
 };
 std::map<BTeki*, Binding> s;
 // Naturally dead Kurage bodies: kept until the central forget/reset seam so the
 // Pod delivery receipt can still resolve the corpse after the live binding is
 // revoked (mirrors the mamuta pattern; BTeki::update keeps ticking dead bodies).
 std::map<BTeki*, unsigned> corpses;
+// Corpses of Greater Spotted Jellyfloats (72): drawn with the onikurage poses.
+std::set<BTeki*> corpsesGreater;
 int gTickCalls = 0;
 // Lane-local production showcase (env `PIKMIN_P2_KURAGE_SHOWCASE`). Opt-in so the
 // default binding path is byte-identical: the bound generated actor runs the
@@ -379,6 +383,7 @@ void pc_p2_kurage_teki_reset()
     const int corpseBefore = int(corpses.size());
     s.clear();
     corpses.clear();
+    corpsesGreater.clear();
     sCorpseTeki = nullptr;
     sCorpsePellet = nullptr;
     sCorpseProbeTick = 0;
@@ -402,6 +407,7 @@ void pc_p2_kurage_teki_forget(BTeki* t)
     const bool wasCorpse = corpses.count(t) != 0;
     revoke(t);
     corpses.erase(t);
+    corpsesGreater.erase(t);
     if (t == sCorpseTeki) {
         // The forget seam recycles the slot: stop the tail so the probe line
         // cannot outlive the corpse (delivered already stops the same way).
@@ -434,7 +440,8 @@ void pc_p2_kurage_teki_setup()
         auto* t = static_cast<Teki*>(*it);
         if (!t || !t->mGenerator) continue;
         if (pc_randomizer_p2_bridge()) {
-            if (pc_p2_campaign_source(t) != 57) continue;
+            const unsigned bound = pc_p2_campaign_source(t);
+            if (bound != 57 && bound != 72) continue;
             gen = pc_p2_campaign_token(t);
         } else if (pc_p2_campaign_token(t) != gen) continue;
         if (t->mTekiType != type) {
@@ -449,10 +456,12 @@ void pc_p2_kurage_teki_setup()
         // Optional visual poses: the corpse/receipt path must not require the
         // converted kurage_*.mod files. When they are absent the P1 host body
         // draws instead (pc_p2_kurage_visual_draw returns false).
-        if (!pc_p2_kurage_visual_setup())
-            std::printf("P2_KURAGE_VISUAL_MISSING generator=%u (host body draw)\n", gen);
+        const unsigned src = pc_randomizer_p2_bridge() ? pc_p2_campaign_source(t) : 57u;
+        if (!(src == 72 ? pc_p2_kurage_visual_setup_greater() : pc_p2_kurage_visual_setup()))
+            std::printf("P2_KURAGE_VISUAL_MISSING generator=%u source_id=%u (host body draw)\n", gen, src);
         auto inserted = s.emplace(static_cast<BTeki*>(t), Binding{ gen, type, {} });
         Binding& b = inserted.first->second;
+        b.source = src;
         b.spawnPos = t->mSRT.t;
         refresh(t, b);
         // Campaign (seed bridge, no room preview): every Jellyfloat registers
@@ -462,7 +471,7 @@ void pc_p2_kurage_teki_setup()
         const bool receiverOk = ownMode ? pc_p2_kurage_receiver_register(t, &b.mouth)
                                         : pc_p2_kurage_receiver_setup(t, &b.mouth);
         if (!receiverOk) { if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Kurage", "receiver_setup_failed")) return; }
-        if (ownMode && !b.own.init(t, gen, 57, &b.mouth, pc_p2_kurage_visual_shape("wait")))
+        if (ownMode && !b.own.init(t, gen, src, &b.mouth, src == 72 ? pc_p2_kurage_visual_shape_greater("wait") : pc_p2_kurage_visual_shape("wait")))
             if (pc_p2_setup_skip(pc_randomizer_p2_bridge(), "Kurage", "own_init_failed")) return;
         std::printf("P2_KURAGE_TEKI_READY generator=%u type=%d binding=private_adapter\n", gen, type);
         std::printf("P2_KURAGE_CORPSE_READY generator=%u drop=BDT_Normal ledger=onion receipt=corpse:kurage:%u\n", gen, gen);
@@ -471,8 +480,8 @@ void pc_p2_kurage_teki_setup()
         // CHECK (Yellow Wollywog). Mirrors Sokkuri/Sarai/ElecBug and proxy
         // batch2. Single-use: consumed on delivery, cleared on forget.
         // Additive: hover/draw/corpseTail campaign gates untouched.
-        pc_randomizer_p2_bind_source(static_cast<PelletView*>(t), 57, gen);
-        std::printf("P2_KURAGE_DELIVERY_BIND generator=%u source_id=57\n", gen);
+        pc_randomizer_p2_bind_source(static_cast<PelletView*>(t), src, gen);
+        std::printf("P2_KURAGE_DELIVERY_BIND generator=%u source_id=%u\n", gen, src);
         std::fflush(stdout);
         if (std::getenv("PIKMIN_P2_KURAGE_SHOWCASE")) {
             b.fsmEnabled = true;
@@ -496,6 +505,7 @@ void pc_p2_kurage_teki_tick(BTeki* t)
     if (i == s.end()) return;
     if (!t->isAlive()) {
         corpses[t] = i->second.generator;
+        if (i->second.source == 72) corpsesGreater.insert(t);
         sCorpseTeki = t;
         sCorpsePellet = nullptr;
         // Death-drop-to-ground (flyer): an FSM-driven Kurage can die at
@@ -673,9 +683,13 @@ bool pc_p2_kurage_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& matrix, boo
         // The corpse Pellet itself stays naturally carriable (grasp -> carry
         // to Onion -> pc_p2_kurage_receipt); only the drawn model changes.
         if (corpses.count(t) == 0) return false;
-        Shape* dead = pc_p2_kurage_visual_shape("dead1");
+        const bool greater = corpsesGreater.count(t) != 0;
+        auto shapeOf = [greater](const char* name) {
+            return greater ? pc_p2_kurage_visual_shape_greater(name) : pc_p2_kurage_visual_shape(name);
+        };
+        Shape* dead = shapeOf("dead1");
         const char* pose = "dead1";
-        if (!dead) { dead = pc_p2_kurage_visual_shape("dead2"); pose = "dead2"; }
+        if (!dead) { dead = shapeOf("dead2"); pose = "dead2"; }
         if (!dead) return pc_p2_kurage_visual_draw(t, gfx, matrix, true);
         dead->updateAnim(gfx, matrix, nullptr, t);
         dead->drawshape(gfx, *gfx.mCamera, nullptr);
@@ -691,8 +705,12 @@ bool pc_p2_kurage_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& matrix, boo
     if (i->second.own.active()) {
         // Sampled pose for the current source motion, drawn at the actor's own
         // position (the actor really flies now; no visual-only hover offset).
-        Shape* shape = pc_p2_kurage_visual_shape(p2kurageown::poseFor(i->second.own.motion()));
-        if (!shape) shape = pc_p2_kurage_visual_shape("wait");
+        const bool greater = i->second.own.greater();
+        auto shapeOf = [greater](const char* name) {
+            return greater ? pc_p2_kurage_visual_shape_greater(name) : pc_p2_kurage_visual_shape(name);
+        };
+        Shape* shape = shapeOf(p2kurageown::poseFor(i->second.own.motion()));
+        if (!shape) shape = shapeOf("wait");
         if (shape) {
             shape->updateAnim(gfx, matrix, nullptr, t);
             shape->drawshape(gfx, *gfx.mCamera, nullptr);
