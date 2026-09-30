@@ -441,6 +441,11 @@ void Navi::startDamageEffect()
 		gameflow.mGameInterface->message(MOVIECMD_TextDemo, zen::ogScrTutorialMgr::TUT_APunchUFO);
 	}
 
+	// P2 FallMeck: the feedback already fired on the ground-impact frame.
+	if (pc_demon_drop_silent_damage()) {
+		return;
+	}
+
 	zen::particleGenerator* ptclGenA = effectMgr->create(EffectMgr::EFF_Navi_DamageA, part->mCentre, nullptr, nullptr);
 	zen::particleGenerator* ptclGenB = effectMgr->create(EffectMgr::EFF_Navi_DamageB, part->mCentre, nullptr, nullptr);
 	if (ptclGenB) {
@@ -3346,8 +3351,10 @@ bool InteractAttack::actNavi(Navi* navi) immut
 		return false;
 	}
 
-	rumbleMgr->start(RUMBLE_Unk1, navi->mNaviID, nullptr);
-	SeSystem::playPlayerSe(SE_DAMAGED);
+	if (!pc_demon_drop_silent_damage()) {
+		rumbleMgr->start(RUMBLE_Unk1, navi->mNaviID, nullptr);
+		SeSystem::playPlayerSe(SE_DAMAGED);
+	}
 	navi->mHealth -= pcNaviHurt(mDamage);
 	navi->mLifeGauge.updValue(navi->mHealth, C_NAVI_PARM(navi, mHealth));
 	if (navi->mHealth <= 1.0f) {
