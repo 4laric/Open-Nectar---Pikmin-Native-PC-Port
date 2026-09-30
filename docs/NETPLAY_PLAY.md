@@ -188,7 +188,11 @@ backslash; the console message above has the `.\` form for both.
 Nothing is lost except the day in progress: the campaign continues from the
 last day that ended with the day-end save on both games (see below). If no
 day has ended yet, the message says so, and the next session starts a new
-campaign.
+campaign. If the session ends right at a day-end save, the joiner's message
+may say that save `may not count`: the joiner cannot tell whether the host
+finished it (the host counts it only once it has heard back from the
+joiner). The host's message is the one that knows, and the host's
+`--continue` uses exactly that day.
 
 ## Local two-window test (one PC, one player)
 
@@ -297,7 +301,9 @@ checkpoint adopted`).
 - It never continues a half-saved day: a day-end save that did not finish
   on both games (exit 5 or 6 at the save, or a game that crashed during
   it) is skipped, and the day before it is used. Each run folder keeps a
-  small `campaign-record.txt` for this (which saves both games agreed on).
+  small `campaign-record.txt` for this (which saves both games agreed on;
+  the joiner writes a save there only once the session has played on
+  9 frames past it, which proves the host finished that save too).
 - `--continue <run folder>` continues that run folder instead (for example
   an older campaign, or a run where you were the joiner: its campaign is the
   same, so either player can host the next session). Quote a folder that

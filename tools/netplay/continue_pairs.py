@@ -506,15 +506,22 @@ def scenario_halfsave(ctx, kind):
       savedesync   PIKMIN_NETPLAY_TEST_BARRIER_CORRUPT=sav on the host: the
                    checkpoint digests differ, both peers exit 5 at the save.
       savetimeout  the joiner stalls (PIKMIN_NETPLAY_TEST_STALL_*, keep-alive
-                   on, so it stays connected) just before its save tick for
-                   longer than the host's barrier deadline: the host exits 6.
-                   The joiner never reaches its save: when its stall ends the
-                   host is gone, so it reports the lost connection (exit 0,
-                   CONNECTION LOST) with nothing saved. (Were it to reach its
-                   barrier first, that barrier would fail with exit 6; either
-                   is accepted, a 'saved' record line or checkpoint is not.)
+                   on, so it stays connected) in the tick just before its save
+                   for longer than the host's barrier deadline: the host exits
+                   6 (SAVE NOT AGREED). When the joiner's stall ends the host
+                   is gone, and one of these follows (timing decides):
+                   (a) the lost connection is seen first: exit 0, no barrier;
+                   (b) the host's buffered SAVE_RESULT is seen first: the
+                       joiner's barrier agrees and B2 publishes its mirror,
+                       then the lost connection: exit 0. Its save stays
+                       PENDING (never confirmed: the host was never seen past
+                       its barrier), so the record has no 'saved' line and the
+                       message says the save may not count;
+                   (c) its own barrier fails: exit 6.
+                   In every case the joiner's record has no 'saved' line.
     S2's --continue must skip the host's valid-but-unagreed checkpoint, say
-    there is no saved day, and start a new campaign in sync."""
+    there is no saved day, and start a new campaign in sync; S3's
+    `--continue <S1 joiner run>` must do the same with the joiner's campaign."""
     a = ctx.a
     host_env, join_env = {}, {}
     if kind == "savedesync":
@@ -532,37 +539,47 @@ def scenario_halfsave(ctx, kind):
     s1 = run_session(ctx, "s1", a.dayend_ticks, host_env=host_env, join_env=join_env, expect=kind)
     ctx.check(all(s1["exit"][side] in codes[side] for side in ("host", "join")),
               f"s1: exit codes {s1['exit']} (want host in {codes['host']}, join in {codes['join']})")
-    host_run = s1["host"]["run_dir"]
-    for side in ("host", "join"):
-        rec = s1[side].get("campaign-record.txt") or []
-        ctx.check(not any("save barrier frame=" in ln for ln in s1[side]["barrier"]),
-                  f"s1 {side}: no agreed save barrier")
-        if side == "join" and s1["exit"]["join"] == 0:
-            # The joiner never reached its save: the host was gone when its
-            # stall ended.
-            ctx.check(any("disconnected" in ln for ln in s1["join"]["events"]),
-                      "s1 join: disconnected (the host had left when its stall ended)")
-            ctx.check(not s1["join"]["barrier"], "s1 join: never reached the day-end save barrier")
-            ctx.check(not any(r.startswith("saved ") or r.startswith("abandoned ") for r in rec) and
-                      any(r.startswith("end kind=disconnect ") for r in rec),
-                      "s1 join: record has no 'saved' line and ends 'end kind=disconnect'")
-            recovery_ok(ctx, s1, "s1", "join", ["CONNECTION LOST"])
-            continue
-        ab = [ln for ln in s1[side]["barrier"] if "save barrier abandoned" in ln or "save barrier timeout" in ln]
-        ctx.check(bool(ab), f"s1 {side}: the day-end save barrier failed ({ab[:1]})")
-        ctx.check(any(r.startswith("abandoned gen=1 exit=") for r in rec) and
-                  not any(r.startswith("saved ") for r in rec),
-                  f"s1 {side}: record has 'abandoned gen=1' and no 'saved' line")
+    host_run, join_run = s1["host"]["run_dir"], s1["join"]["run_dir"]
+    # Host: its barrier failed, and its record says so.
+    hrec = s1["host"].get("campaign-record.txt") or []
+    ab = [ln for ln in s1["host"]["barrier"] if "save barrier abandoned" in ln or "save barrier timeout" in ln]
+    ctx.check(bool(ab), f"s1 host: the day-end save barrier failed ({ab[:1]})")
+    ctx.check(not any("save barrier frame=" in ln for ln in s1["host"]["barrier"]), "s1 host: no agreed save barrier")
+    ctx.check(any(r.startswith("abandoned gen=1 exit=") for r in hrec) and not any(r.startswith("saved ") for r in hrec),
+              "s1 host: record has 'abandoned gen=1' and no 'saved' line")
     recovery_ok(ctx, s1, "s1", "host", [needle, "Nothing is saved yet", "starts a new campaign"])
+    # Joiner: whatever it saw, it never records the day as saved.
+    jrec = s1["join"].get("campaign-record.txt") or []
+    jbar = s1["join"]["barrier"]
+    agreed = any("save barrier frame=" in ln for ln in jbar)
+    failed = any("save barrier abandoned" in ln or "save barrier timeout" in ln for ln in jbar)
+    outcome = "c (its barrier failed)" if failed else ("b (agreed, then lost)" if agreed else "a (never reached it)")
+    print(f"continue_pairs: s1 join outcome {outcome}")
+    ctx.check(not any(r.startswith("saved ") for r in jrec), f"s1 join [{outcome}]: record has no 'saved' line")
     recovery_ok(ctx, s1, "s1", "join", ["Nothing is saved yet"])
+    if kind == "savedesync" or failed:
+        ctx.check(failed and any(r.startswith("abandoned gen=1 exit=") for r in jrec),
+                  f"s1 join [{outcome}]: the barrier failed and the record has 'abandoned gen=1'")
+    elif agreed:
+        ctx.check(any("campaign record: day-end save gen=1 counts once" in ln for ln in lp.grep(
+                      ctx.root / "s1" / "join.log", "campaign record:")),
+                  f"s1 join [{outcome}]: the agreed save was held pending")
+        recovery_ok(ctx, s1, "s1", "join", ["may not count", "--continue"])
+    else:
+        ctx.check(any("disconnected" in ln for ln in s1["join"]["events"]),
+                  f"s1 join [{outcome}]: disconnected (the host had left when its stall ended)")
     # The half-saved day: the host's unagreed checkpoint is on disk and valid.
     sav = Path(host_run) / "session" / "campaign" / "00000000000000000001.sav"
     fp = run_fingerprint(host_run)
     ctx.check(sav.is_file() and checkpoint_valid(sav.read_bytes(), fp, 1),
               f"s1 host: the unagreed day-end checkpoint {sav.name} is on disk and valid (fingerprint {fp[:16]}...), "
               f"so only the record keeps --continue off it")
-    jsav = Path(s1["join"]["run_dir"]) / "session" / "campaign" / "00000000000000000001.sav"
-    ctx.check(not jsav.exists(), "s1 join: no published gen-1 checkpoint (its mirror stayed pending or was retracted)")
+    jsav = Path(join_run) / "session" / "campaign" / "00000000000000000001.sav"
+    if kind == "savedesync":
+        ctx.check(not jsav.exists(), "s1 join: no published gen-1 checkpoint (its mirror was retracted)")
+    else:
+        print(f"continue_pairs: s1 join: published gen-1 checkpoint on disk: {jsav.exists()} (S3 checks it is not "
+              f"continued)")
     before = folder_digest(host_run)
     s2 = run_session(ctx, "s2", a.continue_ticks, host_extra=["--continue"])
     ctx.check(folder_digest(host_run) == before, f"s2: the old run folder is unchanged ({len(before)} files)")
@@ -578,6 +595,19 @@ def scenario_halfsave(ctx, kind):
         ctx.check(not s2[side]["resumed"], f"s2 {side}: nothing resumed")
     gameplay_ok(ctx, s2, "s2", a.min_distinct)
     ctx.check(s2["exit"] == {"host": 0, "join": 0}, f"s2: both exit 0 ({s2['exit']})")
+    # S3: the joiner's campaign of S1 (whatever B2 left on its disk) is not
+    # continued either.
+    jbefore = folder_digest(join_run)
+    s3 = run_session(ctx, "s3", a.nosave_ticks, host_extra=["--continue", join_run])
+    ctx.check(bool(jbefore) and folder_digest(join_run) == jbefore, "s3: the named joiner run folder is unchanged")
+    ctx.check(any("no saved day yet" in ln for ln in s3["host"]["continue"]) and
+              any("starting a new campaign instead" in ln for ln in s3["host"]["continue"]),
+              "s3 host: --continue <S1 joiner run>: 'no saved day yet', a new campaign")
+    for side in ("host", "join"):
+        ctx.check(any("START_STAGE 1 day=2" in ln for ln in s3[side]["start_stage"]) and not s3[side]["resumed"],
+                  f"s3 {side}: new campaign on day 2, nothing resumed")
+    gameplay_ok(ctx, s3, "s3", a.min_distinct // 2)
+    ctx.check(s3["exit"] == {"host": 0, "join": 0}, f"s3: both exit 0 ({s3['exit']})")
 
 
 def seed_flags_header(boot_text):

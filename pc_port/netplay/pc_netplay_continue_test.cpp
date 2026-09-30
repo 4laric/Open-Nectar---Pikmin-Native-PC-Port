@@ -188,6 +188,27 @@ int main()
 		for (const std::string& ln : recovery_lines(e)) {
 			CHECK(banner_line(ln).find('\\') == std::string::npos, "banner: no backslash left");
 		}
+		// A joiner whose agreed day-end save the host may have abandoned
+		// (the savetimeout pair): no saved day claimed, the host decides.
+		{
+			EndInfo j;
+			j.kind            = EndKind::PeerQuit;
+			j.host            = false;
+			j.gen             = 0;
+			j.pendingGen      = 1;
+			j.pendingDayEnded = 2;
+			const std::vector<std::string> pl = recovery_lines(j);
+			CHECK(contains(pl, "Nothing is saved yet") && contains(pl, "The day-end save at the end of day 2 may not count"),
+			      "pending: not claimed, said so");
+			CHECK(contains(pl, "To carry on: the host runs .\\host.bat --continue") && !contains(pl, "new campaign"),
+			      "pending: the host's --continue decides");
+			CHECK(pl.size() - 1 <= 6, "pending: fits the banner");
+			j.gen = 1;
+			j.day = 3;
+			j.pendingGen = 2;
+			j.pendingDayEnded = 3;
+			CHECK(contains(recovery_lines(j), "To carry on from that day: the host runs"), "pending over a saved day");
+		}
 		e.kind = EndKind::PeerQuit;
 		e.gen = 2;
 		e.day = 0;

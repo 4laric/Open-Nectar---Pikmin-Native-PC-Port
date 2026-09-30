@@ -34,7 +34,11 @@
 //                                           G (0 = a new campaign), after the
 //                                           handshake agreed it on both sides
 //   saved gen=G frame=F day_ended=D         a day-end save both games agreed
-//                                           on (the save barrier's verdict)
+//                                           on (the host: its save barrier's
+//                                           verdict, which needs the joiner's
+//                                           ACK; the joiner: once the session
+//                                           advanced frame F + 9, when the
+//                                           host's barrier had surely finished)
 //   day gen=G day=D                         checkpoint G plays on from day D
 //                                           (the first day start after it)
 //   abandoned gen=G exit=C                  a day-end save that was NOT
@@ -385,6 +389,10 @@ struct EndInfo {
 	unsigned long long gen = 0; // newest checkpoint both games agreed on (0 = none)
 	int day = 0;               // the day that checkpoint plays on from (0 = unknown)
 	int dayEnded = 0;          // the day whose end it saved (0 = unknown)
+	// Joiner only: a day-end save this game agreed on that the host may not
+	// have (the session ended before the host was seen past its barrier).
+	unsigned long long pendingGen = 0;
+	int pendingDayEnded = 0;
 	std::string exe;           // this exe's file name, for the command line
 	std::string extraArgs;     // switches to repeat (for example "--netplay-input keyboard")
 };
@@ -475,6 +483,12 @@ inline std::vector<std::string> recovery_lines(const EndInfo& e)
 	out.push_back("==== netplay session ended ====");
 	out.push_back(end_headline(e));
 	out.push_back(saved_day_line(e));
+	if (e.pendingGen != 0) {
+		const std::string which = e.pendingDayEnded > 0 ? "the end of day " + std::to_string(e.pendingDayEnded)
+		                                                : "checkpoint " + std::to_string(e.pendingGen);
+		out.push_back("The day-end save at " + which + " may not count: the session ended before this game saw the "
+		              "host finish it. The host's game decides, and its --continue picks the right day.");
+	}
 	const std::string exe   = local_command(e.exe.empty() ? std::string("nectar.exe") : e.exe);
 	const std::string extra = e.extraArgs.empty() ? std::string() : " " + e.extraArgs;
 	if (!e.launcher) {
@@ -482,7 +496,7 @@ inline std::vector<std::string> recovery_lines(const EndInfo& e)
 		              "sent to the joiner at the handshake.");
 		return out;
 	}
-	if (e.gen == 0) {
+	if (e.gen == 0 && e.pendingGen == 0) {
 		if (e.host)
 			out.push_back("To play again: run .\\host.bat (or " + exe + " --netplay-host-ice" + extra +
 			              ") in the game's folder and your partner joins as before; that starts a new campaign.");
@@ -497,7 +511,8 @@ inline std::vector<std::string> recovery_lines(const EndInfo& e)
 		out.push_back("  or: " + exe + " --netplay-host-ice --continue" + extra);
 		out.push_back("Your partner joins as usual (.\\join.bat); your saved day is sent to them automatically.");
 	} else {
-		out.push_back("To carry on from that day: the host runs .\\host.bat --continue (or " + exe +
+		out.push_back(std::string(e.gen > 0 ? "To carry on from that day" : "To carry on") +
+		              ": the host runs .\\host.bat --continue (or " + exe +
 		              " --netplay-host-ice --continue) in the game's folder.");
 		out.push_back("You join as usual (.\\join.bat); the host's saved day is sent to you automatically.");
 	}
