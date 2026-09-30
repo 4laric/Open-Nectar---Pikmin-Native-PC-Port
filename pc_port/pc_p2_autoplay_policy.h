@@ -1083,6 +1083,20 @@ private:
     // whistle). Shared by Seed (no grabs yet) and SeedGrow (short crew).
     void seedSteerThrow(const Senses& in)
     {
+        // #256: the Empress dies against the arena's far wall (a13/a15: carcass
+        // 617 u away over a ledge, the captain pushed at the wall for minutes,
+        // carry_no_grab). A straight steer cannot reach it, so ask the driver
+        // for a waypoint route every 15 s and follow its legs while far.
+        if (in.targetSource == 30 && in.targetToken != 0 && in.targetDist > 250.0f) {
+            seedRouteCooldown -= in.dt > 0.0f && in.dt <= 0.5f ? in.dt : 0.016f;
+            if (!in.waypointLeg && seedRouteCooldown <= 0.0f) {
+                wantReplan = true;
+                seedRouteCooldown = 15.0f;
+            }
+            if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+            else steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            return;
+        }
         if (!in.waypointLeg && in.targetToken != 0 && in.cursorValid && aimsCorpseWithCursor(in.targetSource)) {
             cursorAimThrow(in);
             return;
@@ -1121,16 +1135,6 @@ private:
             }
             if (el <= cfg.kingCursorTol * 2.0f) pulseA(in, cfg.throwHold, cfg.throwGap);
             return;
-        }
-        // #256: the Empress dies against the arena's far wall (a13: carcass
-        // 617 u away over a ledge, carry_no_grab). A straight steer cannot
-        // reach it, so ask the driver for a waypoint route every 15 s.
-        if (in.targetSource == 30 && in.targetToken != 0 && !in.waypointLeg && in.targetDist > 250.0f) {
-            seedRouteCooldown -= in.dt > 0.0f && in.dt <= 0.5f ? in.dt : 0.016f;
-            if (seedRouteCooldown <= 0.0f) {
-                wantReplan = true;
-                seedRouteCooldown = 15.0f;
-            }
         }
         if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
         else if (in.targetToken != 0) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
@@ -2025,7 +2029,8 @@ private:
             // #901: a short ship-part crew is gathered by whistle + swarm, not
             // by the corpse throw/re-seed cycle (throws overshoot a big part:
             // r4 crew 12/20 after three re-seeds). Same window as a corpse.
-            const float waitBase = (sawKill || sawDamage) ? cfg.receiptTimeout : cfg.aftermathTimeout;
+            const float waitBase = ((sawKill || sawDamage) ? cfg.receiptTimeout : cfg.aftermathTimeout)
+            * (in.targetSource == 30 ? 2.0f : 1.0f); // #256: regroup walk + route + carry
             if (stateTime >= waitBase * 2.0f) {
                 giveUpAftermath(in, "part_short_crew");
                 finishTarget(in, /*killed*/ false);
@@ -2221,7 +2226,8 @@ private:
                 }
             }
         }
-        const float waitBase = (sawKill || sawDamage) ? cfg.receiptTimeout : cfg.aftermathTimeout;
+        const float waitBase = ((sawKill || sawDamage) ? cfg.receiptTimeout : cfg.aftermathTimeout)
+            * (in.targetSource == 30 ? 2.0f : 1.0f); // #256: regroup walk + route + carry
         // bot-v5: extend ONLY while carriers > 0 AND the corpse is moving
         // (live, not latched). A latched-but-stalled lift times out bounded.
         const float wait = (carryActive && in.corpseMoving) ? cfg.receiptTimeout * 2.0f : waitBase;
