@@ -326,7 +326,9 @@ void killNearest(bool all)
     CI_LOOP(it) {
         BTeki* t = static_cast<BTeki*>(*it);
         if (!t || !t->isAlive() || t->mDeadState != 0 || t->mHealth <= 0.0f) continue;
-        const float d = distXZ(t->getPosition(), navi->getPosition());
+        if (t->mTekiType == TEKI_Palm) continue; // Pellet Posy is not an enemy
+        // P2-bound actors (the ones under test) outrank plain P1 tekis.
+        const float d = distXZ(t->getPosition(), navi->getPosition()) + (pc_p2_campaign_source(t) ? 0.0f : 100000.0f);
         if (all) {
             // Health 0 + die() arms the natural death: the P1 strategy, the
             // family tick (external-die escape) or a health-watching host
