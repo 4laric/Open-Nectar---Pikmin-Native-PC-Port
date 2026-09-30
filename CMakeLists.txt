@@ -1973,6 +1973,14 @@ add_executable(p2_elecbug_fsm_test tools/p2_elecbug_fsm_test.cpp)
 target_include_directories(p2_elecbug_fsm_test PRIVATE pc_port)
 target_compile_options(p2_elecbug_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_elecbug_fsm_test COMMAND p2_elecbug_fsm_test)
+add_executable(p2_elecbug_fx_test tools/p2_elecbug_fx_test.cpp)
+target_include_directories(p2_elecbug_fx_test PRIVATE pc_port)
+target_compile_options(p2_elecbug_fx_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_elecbug_fx_test COMMAND p2_elecbug_fx_test)
+add_executable(p2_species_unit_test tools/p2_species_unit_test.cpp)
+target_include_directories(p2_species_unit_test PRIVATE pc_port)
+target_compile_options(p2_species_unit_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_species_unit_test COMMAND p2_species_unit_test)
 
 # rd-p2-kurage-transport (#768): Kurage57 corpse -> carried -> exactly one
 # Onion receipt over the real delivery-host bridge (registration only).

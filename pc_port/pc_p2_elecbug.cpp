@@ -30,6 +30,7 @@
 // No other lane's module is modified; every hook is a no-op for unregistered actors.
 #include "pc_p2_elecbug.h"
 #include "pc_p2_elecbug_fsm.h"
+#include "pc_p2_elecbug_fx.h"
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_setup_failsafe.h"
 #include "pc_randomizer.h"
@@ -124,6 +125,7 @@ struct ElecBug {
     bool hasSearched = false;
     bool shockedThisDischarge = false;
     bool arcLogged = false;
+    bool arcFxLogged = false;
     std::unique_ptr<p2attackfx::Emitter> fx; // P1 electric spark arc (shared attack fx)
     unsigned fxTick = 0;
     std::set<const Creature*> arcHit;
@@ -133,6 +135,7 @@ struct ElecBug {
     bool escaped = false;
     float lastHealth = LIFE;
     float testClock = 0.0f;
+    float testChargeClock = 0.0f;
     bool testPressed = false;
     float inactiveTimer = 0.0f; // source mInactiveTimer (Charge only when > 15)
     std::string clip = "wait";
@@ -247,22 +250,6 @@ void sweepArc(BTeki* actor, ElecBug& s, unsigned generator) {
     const Vector3f a = actor->getPosition();
     const Vector3f b = s.partner->getPosition();
     const p2elecbug::V3 pa{a.x, a.y, a.z}, pb{b.x, b.y, b.z};
-    // Visible arc: P1 electric spark generators along a crackling polyline between
-    // the two beetles (p2attackfx::layoutArc + EFF_Rocket_Biri / sparks).
-    if (!s.fx) s.fx.reset(new p2attackfx::Emitter());
-    {
-        p2attackfx::Point pts[p2attackfx::MAX_ARC_POINTS];
-        unsigned made = 0;
-        for (unsigned strand = 0; strand < 2; ++strand) {
-            const int n = p2attackfx::layoutArc(a.x, a.y + 10.0f, a.z, b.x, b.y + 10.0f, b.z, s.fxTick,
-                                                generator + strand, 7.0f, pts);
-            made += s.fx->emit(p2attackfx::Element::Elec, pts, n, s.fxTick);
-        }
-        ++s.fxTick;
-        if (s.fxTick == 1) {
-            std::printf("P2_ELECBUG_ARC_FX generator=%u generators_first_tick=%u\n", generator, made);
-        }
-    }
     if (pikiMgr) {
         Iterator it(pikiMgr);
         CI_LOOP(it) {
@@ -307,15 +294,78 @@ int recoverFrames() {
     auto it = clips.find("recover");
     return it == clips.end() ? 30 : it->second.frames;
 }
+// Stand-ins for efx::TDnkmsEffect (see pc_p2_elecbug_fx.h): HoudenB charge sparks on
+// the beetle from the charge start, HoudenA glow on both beetles plus the
+// ThunderA/B zap between them from the discharge event, all gone on fade().
+void fxUpdate(BTeki* actor, ElecBug& s, unsigned generator) {
+    const int st = int(s.state);
+    if (!p2elecbugfx::effectsLive(st)) return;
+    if (!s.fx) s.fx.reset(new p2attackfx::Emitter());
+    const unsigned tick = s.fxTick++;
+    const Vector3f a = actor->getPosition();
+    unsigned made = 0;
+    if (tick % p2elecbugfx::kHaloEvery == 0) {
+        // HoudenB: charge sparks chasing the beetle (Electric Dweevil charge plan: 268 + 189/190 at 2.5x).
+        p2attackfx::Point ring[4];
+        for (int k = 0; k < 4; ++k) {
+            const float ang = float(k) * 1.5707963f + float(tick) * 0.35f;
+            ring[k] = {p2attackfx::Kind::Node, a.x + std::cos(ang) * 12.0f, a.y + 10.0f, a.z + std::sin(ang) * 12.0f,
+                       p2elecbugfx::kHaloScale, std::cos(ang), std::sin(ang)};
+        }
+        made += s.fx->emit(p2attackfx::Element::Elec, ring, 4, tick);
+        p2attackfx::Point core{p2attackfx::Kind::Arc, a.x, a.y + 10.0f, a.z, p2elecbugfx::kHaloScale, 0.0f, 1.0f};
+        made += s.fx->emit(p2attackfx::Element::Elec, &core, 1, tick);
+    }
+    if (p2elecbugfx::arcLive(st, s.partner != nullptr, s.stateTime)) {
+        const Vector3f b = s.partner->getPosition();
+        const float dx = b.x - a.x, dz = b.z - a.z;
+        const float len = std::sqrt(dx * dx + dz * dz);
+        const int pieces = p2elecbugfx::arcPieces(len);
+        // HoudenA glow at both beetles.
+        p2attackfx::Point ends[2] = {
+            {p2attackfx::Kind::Arc, a.x, a.y + 10.0f, a.z, p2elecbugfx::kArcScale, 0.0f, 1.0f},
+            {p2attackfx::Kind::Arc, b.x, b.y + 10.0f, b.z, p2elecbugfx::kArcScale, 0.0f, 1.0f}};
+        made += s.fx->emit(p2attackfx::Element::Elec, ends, 2, tick);
+        // ThunderA / ThunderB: two jagged strands end to end, each split in pieces so
+        // long links keep a dense, continuous bolt.
+        for (unsigned strand = 0; strand < 2; ++strand) {
+            for (int piece = 0; piece < pieces; ++piece) {
+                const float t0 = float(piece) / float(pieces), t1 = float(piece + 1) / float(pieces);
+                p2attackfx::Point pts[p2attackfx::MAX_ARC_POINTS];
+                const int n = p2attackfx::layoutArc(a.x + dx * t0, a.y + 10.0f + (b.y - a.y) * t0, a.z + dz * t0,
+                                                    a.x + dx * t1, a.y + 10.0f + (b.y - a.y) * t1, a.z + dz * t1,
+                                                    tick, generator + strand * 101u + unsigned(piece) * 13u,
+                                                    p2elecbugfx::kArcJitter, pts);
+                // Bolt body in pale lightning yellow (tinted EFF_Rocket_Biri); the two end nodes keep
+                // the authored EFF_Spider_DeadBombSparks so the contact points flash.
+                p2attackfx::Point body[p2attackfx::MAX_ARC_POINTS];
+                int nb = 0;
+                for (int k = 0; k < n; ++k) {
+                    pts[k].scale = p2elecbugfx::kArcScale;
+                    if (pts[k].kind == p2attackfx::Kind::Arc) body[nb++] = pts[k];
+                }
+                made += s.fx->emitLook({p2attackfx::EFF_Rocket_Biri, 5, true, p2elecbugfx::kBoltRgb}, body, nb);
+                made += s.fx->emit(p2attackfx::Element::Elec, pts, n, tick);
+            }
+        }
+        if (!s.arcFxLogged) {
+            s.arcFxLogged = true;
+            std::printf("P2_ELECBUG_ARC_FX generator=%u pieces=%d length=%.1f generators_first_tick=%u\n",
+                        generator, pieces, len, made);
+            std::fflush(stdout);
+        }
+    }
+}
 void enter(ElecBug& s, State state, const char* clip) {
     std::printf("P2_ELECBUG_CLIP generator=%u state=%s clip=%s\n", s.self ? genOf(s.self) : 0u,
                 stateName(state), clip ? clip : s.clip.c_str());
     s.state = state;
     s.stateTime = 0.0f;
     s.arcLogged = false;
-    s.fxTick = 0;
     s.arcHit.clear();
-    if (s.fx && state != ELEC_DISCHARGE) {
+    if (s.fx && !p2elecbugfx::effectsLive(int(state))) {
+        s.fxTick = 0;
+        s.arcFxLogged = false;
         const unsigned n = s.fx->stopAll();
         if (n) std::printf("P2_ELECBUG_ARC_STOP generator=%u generators=%u\n", s.self ? genOf(s.self) : 0u, n);
     }
@@ -710,6 +760,22 @@ void pc_p2_elecbug_update(BTeki* actor) {
         }
     }
 
+    // TEST-ONLY (autoplay gate + PIKMIN_P2_ELECBUG_TEST_CHARGE=<seconds>): every N seconds
+    // the inactivity timer is pushed past the source's 15 s charge threshold, so pairs
+    // charge, link and discharge within a bot run. The FSM itself is untouched.
+    {
+        const char* ap = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY");
+        const char* tc = std::getenv("PIKMIN_P2_ELECBUG_TEST_CHARGE");
+        if (ap && ap[0] && ap[0] != '0' && tc && tc[0]) {
+            s.testChargeClock += dt;
+            // staggered per beetle so one of a pair is still wandering when the other charges (source partner rule)
+            if (s.testChargeClock >= float(std::atof(tc)) * (1.0f + float(generator % 7) * 0.45f)) {
+                s.testChargeClock = 0.0f;
+                if (s.inactiveTimer < 16.0f) s.inactiveTimer = 16.0f;
+            }
+        }
+    }
+
     // Natural press (Purple landing) -> source StateReverse, before the health
     // bookkeeping so a same-frame flip still reports the pre-flip health.
     pc_p2_elecbug_check_landing_press(actor);
@@ -917,6 +983,7 @@ void pc_p2_elecbug_update(BTeki* actor) {
     default:
         break;
     }
+    fxUpdate(actor, s, generator);
     setPhase(s);
     s.logTimer += dt;
     if (s.logTimer >= 1.0f) {
