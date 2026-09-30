@@ -7,6 +7,9 @@
 #include "pc_p2_navi_select.h"
 #include "pc_p2_species.h"
 #include "pc_p2_animation.h"
+#include "pc_p2_pose_family.h"
+#include "pc_p2_attack_fx_host.h"
+#include "pc_p2_bigtreasure_fx.h"
 #include "pc_p2_test_day_cycle.h"
 #include "pc_bbft.h"
 #include "Collision.h"
@@ -25,6 +28,7 @@
 #include "gl/pc_gfx.h"
 #include "system.h"
 #include "teki.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -83,6 +87,12 @@ struct Binding {
     int ignored = 0;
     std::vector<DroppedWeapon> dropped;
     std::map<const void*, int> recvCount;
+    // Visual-only weapon effects (pc_p2_bigtreasure_fx.h): owner-killed on
+    // attack end, state change, death, forget and reset.
+    p2attackfx::Emitter fx;
+    p2attackfx::Session fxSession;
+    p2titanfx::State fxState;
+    int fxEmits = 0;           // water shots this frame (sum of per-tick emits)
 };
 std::map<BTeki*, Binding> s;
 
@@ -92,6 +102,17 @@ p2btown::Animator sAnimator;
 bool sReady = false;
 P2BigTreasureMapTrace* sTrace = nullptr;
 std::vector<Shape*> sPoses[AnimCount];
+// #246/#972 (owner 2026-09-30 "needs way more poses"): the dense bank (up to 48
+// poses per clip) loads through the compact pose loader and draws through the
+// shared #895 pose path (bracket + lerp into a private Shape per actor,
+// crossfade on clip change). sPoses keeps the nearest-pose fallback.
+p2posefamily::Bank sPoseBank("BIGTREASURE");
+p2posefamily::Actors sPoseVis;
+// Resident budget for the dense Titan bank. Measured on the retail extract
+// (48 poses/clip, 1181 poses): largest clip 1.64 MiB, whole bank 41.4 MiB
+// resident (4 full Shapes + 24 B per vertex-pair per other pose), so the
+// shared 1 MiB per-clip default is raised to 2 MiB; the 48 MiB total stands.
+constexpr std::size_t kTitanClipBytes = 2u * 1024u * 1024u;
 Shape* sPellet[P2BTWEAPON_Count] = {};
 bool sPosesLoaded = false;
 std::map<BTeki*, int> sDrawLogged;
@@ -122,42 +143,6 @@ int partOf(const Binding& b, const CollPart* part) {
 Binding* find(const BTeki* t) {
     auto i = s.find(const_cast<BTeki*>(t));
     return i == s.end() ? nullptr : &i->second;
-}
-
-// Pose bank (Groink/tank pattern): shared materials, bounded bytes.
-Shape* loadShape(const std::string& rel, Shape*& shared, std::size_t& total) {
-    const std::string path = "assets/dataDir/courses/pikmin2room/" + rel;
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file) return nullptr;
-    const auto size = file.tellg();
-    if (size <= 0 || size > 2 * 1024 * 1024 || total + std::size_t(size) > 40u * 1024 * 1024) return nullptr;
-    total += std::size_t(size);
-    file.seekg(0);
-    std::vector<unsigned char> bytes(std::size_t(size), 0), resources;
-    if (!file.read(reinterpret_cast<char*>(bytes.data()), size) || !p2animation::resources(bytes, resources)) return nullptr;
-    Shape* shape = gameflow.loadShape(("courses/pikmin2room/" + rel).c_str(), true);
-    if (!shape) return nullptr;
-    if (!shared) {
-        shared = shape;
-        for (int t = 0; t < shape->mTexAttrCount; ++t)
-            if (shape->mTexAttrList[t].mTexture) shape->mTexAttrList[t].mTexture->attach();
-        return shape;
-    }
-    if (shape->mMaterialCount != shared->mMaterialCount || shape->mTexAttrCount != shared->mTexAttrCount
-        || shape->mTevInfoCount != shared->mTevInfoCount) return nullptr;
-    for (int j = 0; j < shape->mTotalMatpolyCount; ++j) {
-        auto* poly = shape->mMatpolyList[j];
-        if (!poly || !poly->mMaterial) continue;
-        int material = -1;
-        for (int m = 0; m < shape->mMaterialCount; ++m)
-            if (poly->mMaterial == &shape->mMaterialList[m]) material = m;
-        if (material < 0) return nullptr;
-        poly->mMaterial = &shared->mMaterialList[material];
-    }
-    shape->mMaterialList = shared->mMaterialList;
-    shape->mTexAttrList = shared->mTexAttrList;
-    shape->mTevInfoList = shared->mTevInfoList;
-    return shape;
 }
 
 Shape* loadPellet(const std::string& rel) {
@@ -234,24 +219,46 @@ bool loadInputs(bool bridge) {
     for (auto& v : sPoses) v.clear();
     for (Shape*& p : sPellet) p = nullptr;
     sPosesLoaded = false;
-    Shape* shared = nullptr;
-    std::size_t total = 0, poses = 0;
+    sPoseBank.reset();
+    sPoseVis.clear();
+    p2poseload::Shared shared;
+    std::size_t total = 0, poses = 0, minPoses = 0, maxPoses = 0;
+    p2poseload::Limits limits = p2poseload::defaultLimits();
+    limits.clipBytes = kTitanClipBytes;
     bool ok = sBank.staged;
     for (int a = 0; ok && a < AnimCount; ++a) {
         if (a == AnimWait2_2) continue;
         const ClipBank& clip = sBank.clip[a];
-        for (std::size_t i = 0; i < clip.poses.size(); ++i) {
-            char rel[160];
-            std::snprintf(rel, sizeof(rel), "bigtreasure_%s_%02u.mod", clip.name.c_str(), unsigned(i));
-            Shape* shape = loadShape(rel, shared, total);
-            if (!shape) { ok = false; break; }
-            sPoses[a].push_back(shape);
-            ++poses;
+        if (clip.poses.empty()) continue;
+        std::vector<int> frames;
+        for (const auto& pose : clip.poses) frames.push_back(pose.frame);
+        // A clip whose last converted pose is before its final source frame
+        // (dead: the body scales to nothing at the end, Singular animation
+        // scale) is bank-valid over the converted span.
+        const int duration = frames.back() + 1 < clip.frames ? frames.back() + 1 : clip.frames;
+        std::string why;
+        if (!p2posefamily::loadFamilyClip(sPoseBank, clip.name, std::string("bigtreasure_") + clip.name,
+                                          int(clip.poses.size()), duration, frames, shared, total, sPoses[a], why, limits)) {
+            std::printf("P2_BIGTREASURE_POSE_MISSING clip=%s reason=%s
+", clip.name.c_str(), why.c_str());
+            ok = false;
+            break;
         }
+        poses += clip.poses.size();
+        minPoses = minPoses ? std::min(minPoses, clip.poses.size()) : clip.poses.size();
+        maxPoses = std::max(maxPoses, clip.poses.size());
     }
     if (ok) sPoses[AnimWait2_2] = sPoses[AnimWait2];
     if (!ok) for (auto& v : sPoses) v.clear();
     sPosesLoaded = ok && poses > 0;
+    if (sPosesLoaded) {
+        const p2motion::Tunables& tune = p2motion::tunables();
+        std::printf("P2_BIGTREASURE_INTERPOLATION_READY interpolation=%d clips=%zu poses=%zu poses_per_clip=%zu..%zu "
+                    "resident_bytes=%zu clip_limit=%zu total_limit=%zu crossfade_ms=%d gameplay_clock=P1
+",
+                    int(tune.lerp && sPoseBank.ready()), sPoseBank.clipCount(), poses, minPoses, maxPoses, total,
+                    limits.clipBytes, limits.totalBytes, int(tune.crossfadeSeconds * 1000.f + .5f));
+    }
     int pellets = 0;
     for (int w = 0; w < P2BTWEAPON_Count && sPosesLoaded; ++w) {
         char rel[96];
@@ -602,6 +609,83 @@ void stepDropped(Binding& b, float dt) {
     }
 }
 
+const char* fxEndName(p2attackfx::EndReason r) { return p2attackfx::endReasonName(r); }
+
+void stopFx(Binding& b, p2attackfx::EndReason why) {
+    const p2attackfx::Element element = b.fxSession.element;
+    const unsigned ticks = b.fxSession.ticks, points = b.fxSession.points;
+    if (!b.fxSession.end()) return;
+    const unsigned created = b.fx.stopAll();
+    b.fxState.reset();
+    std::printf("P2_BIGTREASURE_FX_STOP generator=%u source_id=73 element=%s reason=%s ticks=%u points=%u generators=%u "
+                "outstanding=%u
+",
+                b.generator, p2attackfx::elementName(element), fxEndName(why), ticks, points, created,
+                b.fxSession.outstanding());
+    std::fflush(stdout);
+}
+
+// Emit this frame's weapon effects, or stop them. Reads the element runtime
+// only; never writes simulation state (visual only).
+void updateFx(BTeki* t, Binding& b) {
+    const P2BigTreasureElementRuntime& rt = b.fsm.elements();
+    if (!rt.active() || t->mHealth <= 0.0f) {
+        if (b.fxSession.active) {
+            const State st = b.fsm.state();
+            stopFx(b, (t->mHealth <= 0.0f || st == State::Dead) ? p2attackfx::EndReason::Death
+                                                                 : st == State::PutItem ? p2attackfx::EndReason::AttackEnd
+                                                                                        : p2attackfx::EndReason::StateChange);
+        }
+        b.fxEmits = 0;
+        return;
+    }
+    p2titanfx::Legs legs;
+    if (b.fsm.gait().active()) {
+        legs.set = true;
+        const Vec3 hip = b.fsm.jointPoint(JointKosi, {0.0f, -20.0f, 0.0f});
+        for (int l = 0; l < 4; ++l) {
+            const Vec3& f = b.fsm.gait().foot(l);
+            legs.hip[l][0] = hip.x; legs.hip[l][1] = hip.y; legs.hip[l][2] = hip.z;
+            legs.foot[l][0] = f.x; legs.foot[l][1] = t->mSRT.t.y + 12.0f; legs.foot[l][2] = f.z;
+        }
+    }
+    P2BigTreasureElementStats stats;
+    stats.emits = b.fxEmits;
+    b.fxEmits = 0;
+    p2attackfx::Element element = p2attackfx::Element::Fire;
+    // A different weapon starting without the previous one ending is a state change.
+    if (b.fxSession.active) {
+        p2attackfx::Element now = b.fxSession.element;
+        if (p2titanfx::elementFor(rt.activeWeapon(), now) && now != b.fxSession.element) stopFx(b, p2attackfx::EndReason::StateChange);
+    }
+    p2attackfx::Point pts[p2titanfx::MAX_POINTS];
+    const int n = p2titanfx::layout(rt, stats, legs, b.fxState, element, pts);
+    if (b.fxSession.begin(element)) {
+        std::printf("P2_BIGTREASURE_FX_START generator=%u source_id=73 element=%s visual_only=1
+", b.generator,
+                    p2attackfx::elementName(element));
+    }
+    const unsigned tick = b.fxSession.ticks;
+    const unsigned made = b.fx.emit(element, pts, n, tick);
+    b.fxSession.note(unsigned(n), made);
+    if (n > 0 && b.fxSession.generators == made && made > 0) {
+        std::printf("P2_BIGTREASURE_FX generator=%u source_id=73 element=%s points=%d generators=%u first=%.1f,%.1f,%.1f "
+                    "dir=%.3f,%.3f visual_only=1
+",
+                    b.generator, p2attackfx::elementName(element), n, made, pts[0].x, pts[0].y, pts[0].z, pts[0].dx,
+                    pts[0].dz);
+    }
+    // Probe-only frame dumps (PIKMIN_P2_PROXY_SHOT directory): a fixed set of session ticks.
+    static const unsigned kShots[] = {4, 10, 18, 28, 44, 64, 90, 120};
+    for (unsigned k : kShots)
+        if (b.fxSession.ticks == k) {
+            char key[56];
+            std::snprintf(key, sizeof(key), "TitanFx_%s_%03u", p2attackfx::elementName(element), k);
+            pc_gfx_proxy_shot_now(key);
+        }
+    std::fflush(stdout);
+}
+
 // Live tick. Returns true once the host teardown ran.
 bool ownTick(BTeki* t, Binding& b, float dt) {
     // hardConstraintOn: the source Titan is never pushed. Weight 0 stops P1
@@ -660,6 +744,7 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
                         b.generator, t->mHealth, before, o.bodyHits, b.fsm.ownership().weaponCount());
         }
         applyOutput(t, b, snap, o);
+        b.fxEmits += o.attackEmits;
         // Movement/facing are the gait's; the P1 host integrates them.
         t->setDirection(o.faceDir);
         const Vector3f drive(o.velocity.x, 0.0f, o.velocity.z);
@@ -670,6 +755,7 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         if (!o.drops.empty()) setupCollisionCodes(b);
     }
     updateColl(t, b);
+    updateFx(t, b);
     stepDropped(b, dt);
     // One footstep per gait step (BigTreasure.cpp PSSE_EN_BIGTAKARA_WALK per foot).
     if (b.fsm.gait().steps() != b.sfxSteps) {
@@ -731,10 +817,13 @@ void pc_p2_bigtreasure_teki_reset() {
         }
     }
     sHostColl.clear();
+    for (auto& e : s) stopFx(e.second, p2attackfx::EndReason::Reset);
     s.clear();
     sDrawLogged.clear();
     sConsidered.clear();
     sSetupDone = false;
+    sPoseVis.clear();
+    sPoseBank.reset();
     for (auto& v : sPoses) v.clear();
     for (Shape*& p : sPellet) p = nullptr;
     sPosesLoaded = false;
@@ -750,6 +839,10 @@ void pc_p2_bigtreasure_teki_forget(BTeki* t) {
     restoreHostColl(t);
     sConsidered.erase(t);
     {
+        auto fxIt = s.find(t);
+        if (fxIt != s.end()) stopFx(fxIt->second, p2attackfx::EndReason::Forget);
+    }
+    {
         auto it = s.find(t);
         if (it != s.end() && it->second.began) pc_p2_test_day_cycle_note("delivered");
     }
@@ -758,6 +851,7 @@ void pc_p2_bigtreasure_teki_forget(BTeki* t) {
         std::fflush(stdout);
     }
     sDrawLogged.erase(t);
+    sPoseVis.forget(t);
 }
 
 bool pc_p2_bigtreasure_teki_is_bound(const BTeki* t) { return t && find(t) != nullptr; }
@@ -980,6 +1074,13 @@ bool pc_p2_bigtreasure_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, 
         for (std::size_t k = 1; k < poses.size() && k < sPoses[anim].size(); ++k)
             if (std::fabs(float(poses[k].frame) - frame) < std::fabs(float(poses[best].frame) - frame)) best = k;
     Shape* shape = sPoses[anim][best];
+    {   // #972: lerp + crossfade into a private Shape; the nearest pose stays the fallback.
+        const auto& clipBank = sBank.clip[anim];
+        const float duration = float(clipBank.frames > 1 ? clipBank.frames : 2);
+        const float drawFrame = last ? duration - 1.0f
+                                     : (std::isfinite(frame) ? std::max(0.0f, std::min(duration - 1.0f, frame)) : 0.0f);
+        if (Shape* smooth = sPoseVis.draw(t, sPoseBank, clipBank.name, drawFrame, b.generator)) shape = smooth;
+    }
     shape->updateAnim(gfx, bodyView, nullptr, t);
     pc_gfx_specular_family_scope(1);
     shape->drawshape(gfx, *gfx.mCamera, nullptr);

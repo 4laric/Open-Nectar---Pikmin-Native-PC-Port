@@ -242,12 +242,12 @@ bool parseBank(std::istream& in, Bank& bank, std::string& error) {
             int anim = -1, frames = 0, poses = 0;
             std::string name;
             if (!(in >> anim >> name >> frames >> poses) || anim < 0 || anim >= AnimCount
-                || frames < 1 || frames > 10000 || poses < 0 || poses > 32 || name.size() > 32) { error = "bad clip"; return false; }
+                || frames < 1 || frames > 10000 || poses < 0 || poses > 64 || name.size() > 32) { error = "bad clip"; return false; }
             if (name != kAnimNames[anim]) { error = "clip name/anim mismatch " + name; return false; }
             b.clip[anim].frames = frames;
             b.clip[anim].poses.assign(std::size_t(poses), PoseJoints{});
             poseTotal += poses;
-            if (poseTotal > 512) { error = "too many poses"; return false; }
+            if (poseTotal > 1536) { error = "too many poses"; return false; }
         } else if (word == "pose") {
             int anim = -1, index = -1, frame = -1;
             if (!(in >> anim >> index >> frame) || anim < 0 || anim >= AnimCount || index < 0
@@ -532,8 +532,25 @@ const Mat34& Fsm::jointModel(int joint) const {
     if (anim >= 0 && anim < AnimCount) {
         const ClipBank& c = mBank.clip[anim];
         if (!c.poses.empty()) {
-            std::size_t best = 0;
+            // #972: bracket the live frame between the two staged poses and lerp the
+            // joint matrix, so weapons and emit joints follow the interpolated body
+            // mesh instead of snapping between poses (48 poses/clip).
             const float f = mAnim.frame();
+            std::size_t hi = 0;
+            while (hi < c.poses.size() && float(c.poses[hi].frame) < f) ++hi;
+            std::size_t lo = hi > 0 ? hi - 1 : 0;
+            if (hi >= c.poses.size()) hi = c.poses.size() - 1;
+            const PoseJoints& a = c.poses[lo];
+            const PoseJoints& b = c.poses[hi];
+            if (a.have[joint] && b.have[joint]) {
+                const float span = float(b.frame - a.frame);
+                const float w = span > 0.0f ? std::max(0.0f, std::min(1.0f, (f - float(a.frame)) / span)) : 0.0f;
+                Mat34& out = mJointCache[joint];
+                for (int r = 0; r < 3; ++r)
+                    for (int k = 0; k < 4; ++k) out.m[r][k] = a.joint[joint].m[r][k] + (b.joint[joint].m[r][k] - a.joint[joint].m[r][k]) * w;
+                return out;
+            }
+            std::size_t best = 0;
             for (std::size_t k = 1; k < c.poses.size(); ++k)
                 if (std::fabs(float(c.poses[k].frame) - f) < std::fabs(float(c.poses[best].frame) - f)) best = k;
             if (c.poses[best].have[joint]) return c.poses[best].joint[joint];

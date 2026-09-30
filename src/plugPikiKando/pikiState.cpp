@@ -1,3 +1,4 @@
+#include "pc_p2_gas_cloud.h"
 #include "pc_p2_purple.h"
 #include "pc_p2_purple_impact.h"
 #include "pc_p2_purple_direct.h"
@@ -871,6 +872,7 @@ void PikiBubbleState::init(Piki* piki)
 void PikiBubbleState::exec(Piki* piki)
 {
 	piki->setSpeed(mSpeedRatio, mMoveDirection);
+	pc_p2_gas_cloud_update(piki);
 	mSurvivalTimer -= gsys->getFrameTime();
 	mChangeDirectionTimer -= gsys->getFrameTime();
 	if (mSurvivalTimer < 0.0f) {
@@ -3387,6 +3389,7 @@ void PikiPanicState::init(Piki* piki)
 	mSpeedRatio           = 1.0f;
 	piki->setGasInvincible(1);
 	piki->mIsPanicked = true;
+	pc_p2_gas_cloud_begin(piki);
 }
 
 /**
@@ -3461,6 +3464,7 @@ void PikiPanicState::cleanup(Piki* piki)
 	}
 	piki->setGasInvincible(0);
 	piki->mIsPanicked = false;
+	pc_p2_gas_cloud_end(piki, false);
 }
 
 /**

@@ -414,6 +414,9 @@ public:
     float randWeightFloat(float range);
 
 private:
+    // Per-joint interpolated pose matrix (jointModel): distinct storage per joint so
+    // callers may hold several joints at once.
+    mutable Mat34 mJointCache[JointCount];
     void transit(State next, TickOutput& out);
     void cleanup(State state, TickOutput& out);
     void initState(State state, TickOutput& out);
