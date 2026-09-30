@@ -734,6 +734,10 @@ void P2SaraiHost::demonDrawCarcass(Graphics& gfx, const Matrix4f& modelView)
     for (const auto& pose : samples)
         if (float(pose.frame) <= mCarcassFrame) selected = &pose;
     if (selected) applyPoseFrame(selected->frame);
+    // Smoothness: lerp between the bracketing type5 samples (the same private
+    // geometry the living body uses) instead of drawing the nearest pose.
+    advanceSmooth(dt);
+    presentSmooth(mCarcassFrame);
     if (!mShape) return;
     gfx.setPerspective(gfx.mCamera->mPerspectiveMatrix.mMtx, gfx.mCamera->mFov,
         gfx.mCamera->mAspectRatio, gfx.mCamera->mNear, gfx.mCamera->mFar, 1.0f);
@@ -744,8 +748,10 @@ void P2SaraiHost::demonDrawCarcass(Graphics& gfx, const Matrix4f& modelView)
     mShape->drawshape(gfx, *gfx.mCamera, nullptr);
     if (!mCarcassLogged) {
         mCarcassLogged = true;
-        std::printf("P2_DEMON_DRAW corpse=1 source_id=32 generator=%u pose=type5 frame=%d\n",
-                    demonGenerator(), selected ? selected->frame : -1);
+        std::printf("P2_DEMON_DRAW corpse=1 source_id=32 generator=%u pose=type5 frame=%d interpolation=%d\n",
+                    demonGenerator(), selected ? selected->frame : -1, int(smoothActive()));
+        std::printf("P2_DEMON_INTERPOLATION_READY corpse=1 interpolation=%d poses=%zu gameplay_clock=P2_source\n",
+                    int(smoothActive()), mPoseBank.samples().size());
         std::fflush(stdout);
     }
 }

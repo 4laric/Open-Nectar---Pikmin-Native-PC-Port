@@ -361,6 +361,29 @@ void killNearest(bool all)
         TekiMgr::getTypeName(best->mTekiType), best->mTekiType, source, token, bestDist);
 }
 
+// hurt: damage every live campaign P2 actor to (1 - fraction) of its max health
+// without killing it, so the life gauge (P1 wheel) can be inspected.
+void hurtAll(float fraction, bool stored)
+{
+    if (!tekiMgr) {
+        say("hurt refused: not in gameplay");
+        return;
+    }
+    int n = 0;
+    Iterator it(tekiMgr);
+    CI_LOOP(it) {
+        BTeki* t = static_cast<BTeki*>(*it);
+        if (!t || !t->isAlive() || t->mDeadState != 0 || t->mHealth <= 0.0f || !pc_p2_campaign_source(t)) continue;
+        // `stored` queues the damage the way a Pikmin hit does (mStoredDamage); the
+        // families that own their health (Dwarf Orange, Breadbug) drain it, whereas
+        // a direct mHealth write is overwritten by their FSM.
+        if (stored) t->mStoredDamage += t->getMaxLife() * fraction;
+        else t->mHealth = t->getMaxLife() * (1.0f - fraction);
+        ++n;
+    }
+    say("hurt: %d P2 actors set to %.0f%% health", n, (1.0f - fraction) * 100.0f);
+}
+
 void addPikmin(int colour, int count)
 {
     Navi* navi = captain();
@@ -437,6 +460,7 @@ void runCommand(const Command& c, const char* line)
         break;
     case Cmd::Kill: killNearest(false); break;
     case Cmd::KillAll: killNearest(true); break;
+    case Cmd::Hurt: hurtAll(c.time, c.stored); break;
     case Cmd::Pikmin: addPikmin(c.colour, c.count); break;
     case Cmd::Day:
         gameflow.mWorldClock.mCurrentDay = c.day;

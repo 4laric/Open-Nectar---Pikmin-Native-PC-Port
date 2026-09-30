@@ -374,6 +374,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_otakara_fx.cpp
     pc_port/pc_p2_elecbug.cpp
     pc_port/pc_p2_tamago.cpp
+    pc_port/pc_p2_astonish.cpp
     pc_port/pc_p2_imomushi.cpp
     pc_port/pc_p2_hana.cpp
     pc_port/pc_p2_tadpole.cpp
@@ -1364,11 +1365,24 @@ target_include_directories(p2_queen_own_test PRIVATE pc_port)
 target_compile_options(p2_queen_own_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_queen_own_test COMMAND p2_queen_own_test)
 
+# Dense Queen/larva pose bank + shared blend (#972): engine-free.
+add_executable(p2_queen_pose_test
+    pc_port/pc_p2_queen_pose_test.cpp)
+target_include_directories(p2_queen_pose_test PRIVATE pc_port)
+target_compile_options(p2_queen_pose_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_queen_pose_test COMMAND p2_queen_pose_test)
+
 add_executable(p2_campaign_policy_test
     pc_port/pc_p2_campaign_policy_test.cpp)
 target_include_directories(p2_campaign_policy_test PRIVATE pc_port)
 target_compile_options(p2_campaign_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_campaign_policy_test COMMAND p2_campaign_policy_test)
+
+add_executable(p2_tamago_policy_test
+    pc_port/pc_p2_tamago_policy_test.cpp)
+target_include_directories(p2_tamago_policy_test PRIVATE pc_port)
+target_compile_options(p2_tamago_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_tamago_policy_test COMMAND p2_tamago_policy_test)
 
 # Smoke-seed slot bypass (#944): engine-free env-gated predicate contract.
 add_executable(p2_smoke_any_slot_test
@@ -1992,6 +2006,11 @@ add_executable(p2_chappy_mouth_test tools/p2_chappy_mouth_test.cpp)
 target_include_directories(p2_chappy_mouth_test PRIVATE pc_port)
 target_compile_options(p2_chappy_mouth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_chappy_mouth_test COMMAND p2_chappy_mouth_test)
+# #996: engine-free Skitter Leaf shake-off / carcass policy (source isStartFlick).
+add_executable(p2_sokkuri_flick_test tools/p2_sokkuri_flick_test.cpp)
+target_include_directories(p2_sokkuri_flick_test PRIVATE pc_port)
+target_compile_options(p2_sokkuri_flick_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_sokkuri_flick_test COMMAND p2_sokkuri_flick_test)
 # wave3 lane 53 (#289): engine-free Emperor Bulblax life-cycle rules (buried spawn,
 # proximity Appear, cross-Emperor request, bomb ingestion + stun clock, tongue tip table).
 add_executable(p2_king_life_test tools/p2_king_life_test.cpp)
@@ -2145,6 +2164,16 @@ add_executable(p2_groink_volley_test tools/p2_groink_volley_test.cpp pc_port/pc_
 target_include_directories(p2_groink_volley_test PRIVATE pc_port)
 target_compile_options(p2_groink_volley_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_groink_volley_test COMMAND p2_groink_volley_test)
+# #892: three-shell burst policy (one emit key, same tick, +-0.1 jitter) and the retail
+# armour-cover collision policy (only `body` is stickable).
+add_executable(p2_groink_burst_test tools/p2_groink_burst_test.cpp pc_port/pc_p2_groink_volley.cpp pc_port/pc_p2_groink.cpp)
+target_include_directories(p2_groink_burst_test PRIVATE pc_port)
+target_compile_options(p2_groink_burst_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_groink_burst_test COMMAND p2_groink_burst_test)
+add_executable(p2_groink_coll_test tools/p2_groink_coll_test.cpp)
+target_include_directories(p2_groink_coll_test PRIVATE pc_port)
+target_compile_options(p2_groink_coll_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_groink_coll_test COMMAND p2_groink_coll_test)
 # #888 WP5: engine-free NormMiniHoudai/FixMiniHoudai source FSM (states,
 # animation key events, gun aim, 3-shell volleys, shake-off, death).
 # #898 Breadbug (PanModoki 38) engine-free source FSM.
@@ -2218,6 +2247,10 @@ add_executable(pc_dev_console_parser_test pc_port/pc_dev_console_parser_test.cpp
 target_include_directories(pc_dev_console_parser_test PRIVATE pc_port)
 target_compile_options(pc_dev_console_parser_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_dev_console_parser_test COMMAND pc_dev_console_parser_test)
+add_executable(pc_p2_life_gauge_test pc_port/pc_p2_life_gauge_test.cpp)
+target_include_directories(pc_p2_life_gauge_test PRIVATE pc_port)
+target_compile_options(pc_p2_life_gauge_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_life_gauge_test COMMAND pc_p2_life_gauge_test)
 
 # #440 campaign setup failsafe: in bridge mode a species setup that cannot stage
 # its files logs P2_SETUP_SKIP and leaves the P1 stand-ins instead of aborting;
