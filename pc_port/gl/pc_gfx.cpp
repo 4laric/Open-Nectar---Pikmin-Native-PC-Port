@@ -4948,7 +4948,9 @@ void pc_gfx_set_tev_order(GXTevStageID stage, GXTexCoordID coord, GXTexMapID map
     state_touched();
     if (stage >= GX_TEVSTAGE0 && stage < GX_MAXTEVSTAGE) {
         sTevStages[stage].texMap = map;
-        sTevStages[stage].texCoord = coord;
+        // GXSetTevOrder writes GX_TEXCOORD_NULL as TEXCOORD0 and keeps the texture
+        // enabled when the map is valid; the raw 0xFF used to be clamped to coordinate 3.
+        sTevStages[stage].texCoord = (coord >= GX_MAX_TEXCOORD) ? GX_TEXCOORD0 : coord;
         sTevStages[stage].textureEnabled = map >= GX_TEXMAP0 && map < GX_MAX_TEXMAP;
         if (chan == GX_COLOR_NULL || chan == GX_COLOR_ZERO) sTevStages[stage].rasChannel = -1;
         else if (chan == GX_COLOR1 || chan == GX_ALPHA1 || chan == GX_COLOR1A1) sTevStages[stage].rasChannel = 1;
