@@ -108,6 +108,64 @@ def run_cmp(a, b):
     return subprocess.run([PY, str(CMP), str(a), str(b)], capture_output=True, text=True)
 
 
+def synth_probe_run(root, d0, mode, events, schedule, late=0, summary_edit=None, frames=420):
+    """Write a synthetic host+joiner run dir pair for camera_lead_probe.
+
+    schedule: {frame: new_delay}: a growth adds k extra records that frame, a
+    shrink skips k submit frames. events: [(kind, record)] (same on both peers).
+    late: the lead run's view responds this many frames after its submit frame.
+    summary_edit: callable(text) -> text, applied to the lead summary."""
+    import os
+    # 1. submit frames per record, mirroring the session's growth/shrink turns.
+    recs = []  # (landing, submit frame)
+    delay, skip, nxt = d0, 0, 0
+    for f in range(1, frames + 1):
+        target = schedule.get(f, delay)
+        if target < delay:
+            skip = delay - target
+            delay = target
+        if skip > 0:
+            skip -= 1
+            continue
+        n = 1 + (target - delay if target > delay else 0)
+        for _j in range(n):
+            recs.append((nxt + d0, f))
+            nxt += 1
+        delay = max(delay, target)
+    sub_at = {}
+    for landing, f in recs:
+        sub_at.setdefault(f, []).append(landing)
+    ev = [(recs[r][1] + late, recs[r][0] + 1) for _k, r in events]  # (view frame, sim frame)
+    base = 1000
+    lines = ["[Pikmin Randomizer] START_STAGE day=2 color=1"]
+    lead_frames = 0
+    for f in range(1, frames + 1):
+        for landing in sub_at.get(f, []):
+            lines.append(f"[netplay] camlead submit f={landing} yaw=0")
+        sim = base + 50 * sum(1 for _v, s in ev if s <= f)
+        if mode == "lead":
+            view = base + 50 * sum(1 for v, _s in ev if v <= f)
+            lead = 1 if any(v <= f < s for v, s in ev) else 0
+        else:
+            view, lead = sim, 0
+        lead_frames += lead
+        lines.append(f"[netplay] camlead f={f} lead={lead} upd=1 steps=1 sim_yaw={sim} view_yaw={view} "
+                     f"sim_dist=5.00 view_dist=5.00 sim_pitch=1.000 view_pitch=1.000 sim_fov=0.500 "
+                     f"view_fov=0.500 corr=0.00")
+    checked = len(recs) - 3 if mode == "lead" else 0
+    text = (f"[netplay] camera lead summary: {'on' if mode == 'lead' else 'off'} views={frames} "
+            f"lead_frames={lead_frames} sim_saw_lead=0 view_in_auth=0 gaps=0 keys_checked={checked} key_mismatch=0")
+    if mode == "lead" and summary_edit is not None:
+        text = summary_edit(text)
+    lines.append(text)
+    hashes = "".join(" ".join(f"{(i * 7 + c * 13):016x}" for c in range(8)).join([f"{i} ", "\n"]) for i in range(1, frames + 1))
+    for rel in ("host/run", "join/peer/run"):
+        d = root / f"d{d0}-{mode}" / rel
+        os.makedirs(d, exist_ok=True)
+        (d / "native.log").write_text("\n".join(lines) + "\n")
+        (d / "hashes.txt").write_text(hashes)
+
+
 def main():
     failures = 0
 
@@ -391,6 +449,68 @@ def main():
         hlog.write_text(body.format(during="[coop-policy] HEAL captain=2 reason=lowest hp=50.0->100.0\n"))
         w = coop_policy_pair.hold_windows(hlog)
         check(len(w) == 1 and len(w[0][3]) == 1, "coop_policy_pair flags a grant between held at and resume")
+
+    # #965 lane H: the harness env scrub covers every knob the native tree reads.
+    import re as _re
+    import launch_pair  # noqa: E402
+    repo = HERE.parent.parent
+    names = set()
+    for sub in ("pc_port", "src", "include"):
+        for f in (repo / sub).rglob("*"):
+            if f.suffix in (".cpp", ".h", ".hpp", ".c") and f.is_file():
+                try:
+                    names.update(_re.findall(r'getenv\("(PIKMIN_NETPLAY_[A-Z0-9_]+)"\)',
+                                             f.read_text(encoding="utf-8", errors="replace")))
+                except OSError:
+                    pass
+    missing = sorted(n for n in names if n not in run_pair.SCRUB_KEYS and n not in launch_pair.SCRUB_KEYS)
+    check(not missing, f"every getenv(PIKMIN_NETPLAY_*) knob is in run_pair.SCRUB_KEYS ({len(names)} scanned; missing {missing})")
+    leaky = {"PIKMIN_NETPLAY_CAMERA_LEAD": "0", "PIKMIN_NETPLAY_FUTURE_KNOB": "1", "PIKMIN_INPUT_RECORD": "x",
+             "pikmin_netplay_hud": "1", "PATH": "keep", "PIKMIN_RANDOMIZER_TEST_BACKGROUND": "keep"}
+    kept = run_pair.scrub_env(dict(leaky))
+    check(set(kept) == {"PATH", "PIKMIN_RANDOMIZER_TEST_BACKGROUND"},
+          f"scrub_env drops every PIKMIN_NETPLAY_*/PIKMIN_INPUT_* name incl. unknown and lower-case ({sorted(kept)})")
+
+
+    # #965 lane H: camera_lead_probe judges latency on the submit frame (moving delay),
+    # requires keys_checked > 0 in lead mode and fails a missing or non-zero counter.
+    import contextlib
+    import io
+    import camera_lead_probe as clp
+    d0 = 3
+    sched = {100: 7, 200: 4}  # growth 3 -> 7 at frame 100, shrink 7 -> 4 at frame 200
+    evs = [("turn", 60), ("zoom", 110), ("angle", 160), ("attention", 250), ("turn", 300)]
+
+    def probe_case(name, **kw):
+        root = tmp / f"probe-{name}"
+        for mode in ("lead", "optout"):
+            synth_probe_run(root, d0, mode, evs, sched, **(kw if mode == "lead" else {}))
+        with contextlib.redirect_stdout(io.StringIO()):
+            problems, _table = clp.check_pair({m: root / f"d{d0}-{m}" for m in ("lead", "optout")}, d0,
+                                              {"host": evs, "join": evs}, {}, f"d{d0}")
+        return problems
+
+    with tempfile.TemporaryDirectory() as tmp2:
+        tmp = Path(tmp2)
+        base = probe_case("ok")
+        check(base == [], f"probe: a moving delay (3 -> 7 -> 4) passes when the camera is right ({base[:2]})")
+        # The same trace judged by record index (the old rule) would be wrong: the events sit on
+        # submit frames that differ from their record index once the delay has moved.
+        root = tmp / "probe-ok"
+        subs = clp.submit_frames(clp.peer_log(root / "d3-lead", "host"))
+        check(any(a != r for r, (_l, a, _p) in enumerate(subs)),
+              "probe: the synthetic run really moves the delay (submit frame != record index)")
+        check(probe_case("late", late=1) != [], "probe: a lead camera one frame late fails")
+        check(any("key_mismatch=2" in x for x in probe_case("km", summary_edit=lambda t: t.replace("key_mismatch=0", "key_mismatch=2"))),
+              "probe: key_mismatch > 0 fails")
+        check(any("keys_checked=0" in x for x in probe_case("kc0", summary_edit=lambda t: __import__("re").sub(r"keys_checked=\d+", "keys_checked=0", t))),
+              "probe: keys_checked=0 in the lead run fails (M4)")
+        check(any("key_mismatch missing" in x for x in probe_case("miss", summary_edit=lambda t: t.replace(" key_mismatch=0", ""))),
+              "probe: a missing counter fails (N2)")
+        check(any("keys_checked missing" in x for x in probe_case("miss2", summary_edit=lambda t: __import__("re").sub(r" keys_checked=\d+", "", t))),
+              "probe: a missing keys_checked fails")
+        check(any("does not say `on`" in x for x in probe_case("off", summary_edit=lambda t: t.replace("summary: on", "summary: off"))),
+              "probe: a lead run whose summary says off fails")
 
     if failures:
         print(f"selftest: {failures} failure(s)")

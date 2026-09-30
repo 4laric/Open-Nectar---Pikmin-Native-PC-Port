@@ -148,8 +148,8 @@ def stage_exe(exe, stage):
 
 
 def launch(exe, cwd, args, env_extra, log_path):
-    env = dict(os.environ)
-    for key in SCRUB_KEYS:
+    env = rp.scrub_env(dict(os.environ))
+    for key in SCRUB_KEYS:  # launch_pair-only extras (NECTAR_SAVE_DIR, PIKMIN_RANDOMIZER_AUTOPLAY, BBFT_PORT)
         env.pop(key, None)
     env.update(PIKMIN_RANDOMIZER_TEST_BACKGROUND="1", SDL_AUDIODRIVER="dummy")
     # Loopback-only sockets: test peers never touch a real adapter, so

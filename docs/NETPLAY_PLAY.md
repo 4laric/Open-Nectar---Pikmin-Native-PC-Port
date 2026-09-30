@@ -144,8 +144,8 @@ inputs time to reach the other game.
   up to 2 minutes).
 - Every change prints one line, for example
   `[netplay] delay change: 2 -> 3 at frame=591 ... (up: peer late 215ms ...)`.
-- It never changes during a pause for a lost Archipelago link, in the 5 s
-  after such a pause, just after a stage load, or in the first 5 s. It
+- It never changes while a stage is loading, for a moment after a stage
+  load, or in the first 5 s (150 frames). It
   never goes more than 2 frames above what the ping needs, and a slow
   moment on your own PC (a shader being built) does not raise it: a delay
   only hides network time.
@@ -161,19 +161,45 @@ The console shows a `[netplay] stats:` line every 300 frames (10 s): your
 delay and the other game's, the waits (`stalls=`, `last10s=`), the ping
 (`rtt ... p50 p95`, jitter) and the frame times. At the end of the session
 it shows `[netplay] stats final:`, the `delay timeline:` and a frame-time
-histogram. The HUD (below) shows the same delay and waits on screen.
+histogram. The HUD (below) shows the same delay, but its waits are a
+different count: `stalls=` counts every wait of any length, including
+waits during a stage load and the first 5 s (they are also listed as
+`excluded=`) and long hitches, and `last10s=` counts the waits that
+*began* in the last 10 s; the HUD counts a wait only after it ends, only if
+it lasted at least one frame (34 ms), and never during a stage load. The
+`[netplay] link:` line (every 30 s) uses the HUD's count. So after the
+same hitch the two can disagree; see "The netplay HUD".
 
 To keep the delay at its starting value (for a comparison), set
 `PIKMIN_NETPLAY_ADAPTIVE_DELAY` to `0` in the console you start the game
-from. In PowerShell:
+from, then start the game as usual. In PowerShell, the host runs:
 
 ```powershell
 $env:PIKMIN_NETPLAY_ADAPTIVE_DELAY = '0'
 .\nectar.exe --netplay-host-ice
 ```
 
+and the joiner runs (with the host's offer code on the clipboard):
+
+```powershell
+$env:PIKMIN_NETPLAY_ADAPTIVE_DELAY = '0'
+.\nectar.exe --netplay-join-ice "@clipboard"
+```
+
 (or `.\host.bat` / `.\join.bat` in the playtest folder). In Command
 Prompt: `set PIKMIN_NETPLAY_ADAPTIVE_DELAY=0`, then the same command.
+
+**Undo it.** `$env:` stays set for the whole PowerShell window, so every
+later session started from that window keeps the delay fixed until you
+either close the window or run:
+
+```powershell
+Remove-Item Env:PIKMIN_NETPLAY_ADAPTIVE_DELAY
+```
+
+In Command Prompt: `set PIKMIN_NETPLAY_ADAPTIVE_DELAY=` (or close the
+window). The game says which you have: `[netplay] adaptive delay: ...`
+in the console at the start of the session.
 
 ## Camera
 
@@ -185,8 +211,14 @@ the stick sideways), recentring behind your captain (L click), zoom (R) and
 the camera angle (Z). The camera still follows your captain where the game
 actually has them, so during a fast turn the view swings round straight
 away and your captain starts walking in the new direction a moment later,
-the same moment as any other move. When the delay changes, the camera stays
-instant; only that moment moves. Your stick always means "the way your
+the same moment as any other move. When the delay changes (see "Input
+delay and hitches"), the camera still answers on the next frame, but a turn
+in progress can show one small jump or hold: when the delay grows by k
+frames, that frame's camera input is applied k extra times in one frame
+(the extra frames repeat it), and when it shrinks by k frames, the k
+skipped frames sample no camera input, so a turn holds still for them.
+Adaptive changes are 1 to 2 frames, so this is small, and it has not been
+judged in a human playtest yet. Your stick always means "the way your
 camera was facing on your screen when you pushed it", for the host and the
 joiner alike (the joiner's stick used to follow the host captain's camera
 instead, so after either player turned a camera the joiner walked off at an
@@ -200,9 +232,8 @@ captain, set `PIKMIN_NETPLAY_CAMERA_LEAD` to `0` before starting the game
 (either player; it only changes that player's own view). That keeps the two
 joiner fixes; to undo those too (the joiner's stick and mouse follow the
 host captain's camera again, as before), also set
-`PIKMIN_NETPLAY_JOINER_OWN_CAMERA` to `0`. With both at `0` the game sends
-exactly the inputs it sent before the instant camera. In PowerShell, in the
-console you start the game from:
+`PIKMIN_NETPLAY_JOINER_OWN_CAMERA` to `0`. In PowerShell, in the console
+you start the game from, the host runs:
 
 ```powershell
 $env:PIKMIN_NETPLAY_CAMERA_LEAD = '0'
@@ -210,11 +241,40 @@ $env:PIKMIN_NETPLAY_JOINER_OWN_CAMERA = '0'   # only to undo the joiner fixes to
 .\nectar.exe --netplay-host-ice
 ```
 
+and the joiner runs (with the host's offer code on the clipboard):
+
+```powershell
+$env:PIKMIN_NETPLAY_CAMERA_LEAD = '0'
+$env:PIKMIN_NETPLAY_JOINER_OWN_CAMERA = '0'   # only to undo the joiner fixes too
+.\nectar.exe --netplay-join-ice "@clipboard"
+```
+
 (or `.\host.bat` / `.\join.bat` in the playtest folder). In Command
 Prompt: `set PIKMIN_NETPLAY_CAMERA_LEAD=0` and, for the joiner fixes too,
 `set PIKMIN_NETPLAY_JOINER_OWN_CAMERA=0`, then the same command. The console
 says what you have: `[netplay] camera lead: on` or `off`, and `own-camera
 yaw and drag: on` or `off` on the same line.
+
+**Undo it.** `$env:` stays set for the whole PowerShell window, so every
+later session started from that window keeps the old camera until you
+close the window or run:
+
+```powershell
+Remove-Item Env:PIKMIN_NETPLAY_CAMERA_LEAD
+Remove-Item Env:PIKMIN_NETPLAY_JOINER_OWN_CAMERA
+```
+
+In Command Prompt: `set PIKMIN_NETPLAY_CAMERA_LEAD=` and
+`set PIKMIN_NETPLAY_JOINER_OWN_CAMERA=` (or close the window).
+
+The old *camera* is not the old *input stream*. Even with both switches at
+`0`, the game only sends exactly the inputs the build before the instant
+camera sent if the adaptive delay is off as well
+(`PIKMIN_NETPLAY_ADAPTIVE_DELAY=0`, see "Input delay and hitches"): with
+the adaptive delay on, a gamepad's sample is repeated on the extra frames
+when the delay grows and the taps of skipped frames merge into one when it
+shrinks. Set all three to compare the feel of that older build or to chase
+a desync against it.
 
 ## The netplay HUD
 
@@ -242,8 +302,15 @@ delay 2 (67 ms)  stalls 0 / 10 s
   apply every input on the same frame. It follows the connection, so the
   number can change during a session (see "Input delay and hitches").
 - **stalls / 10 s**: how often, in the last 10 seconds, this game had to
-  wait at least one frame for the other game's input (the picture pauses
-  briefly). Stage loads and Archipelago pauses are not counted.
+  wait at least one frame (34 ms) for the other game's input (the picture
+  pauses briefly). A wait is counted when it ends, and by when it ended.
+  Waits during a stage load are not counted; long hitches are. This is not
+  the count of the `[netplay] stats:` line: that one counts every wait of
+  any length (also the ones during a stage load and the first 5 s, which it
+  lists under `excluded=`), and its `last10s=` counts the waits that began
+  in the last 10 s. The `[netplay] link:` line uses the HUD's count. The
+  `[netplay] tick=...` line's `stalls=` counts single loop turns without a
+  frame, not waits.
 
 **F4** shows or hides the box; on a gamepad press **both sticks in (L3 +
 R3)** together. F4 does nothing while you have bound it to a game action in
@@ -412,6 +479,12 @@ checkpoint adopted`).
   `[netplay] launch: --continue: continuing the campaign of ...\run-...:
   checkpoint 1 (day 3)`. Both games then start that day from its
   beginning.
+<!-- #965-lane-N:begin (merge agent: keep this bullet only if lane N lands the run-root fallback) -->
+- When the exe's folder path is too long for the run folder to fit under
+  it (about 119 characters), the game makes the run folder under
+  `%LOCALAPPDATA%\Nectar\netplay\` instead, and `--continue` looks in both
+  places.
+<!-- #965-lane-N:end -->
 - It never continues a half-saved day: a day-end save that did not finish
   on both games (exit 5 or 6 at the save, or a game that crashed during
   it) is skipped, and the day before it is used. Each run folder keeps a
@@ -511,9 +584,7 @@ folder), not append the second evening to the first evening's run.
   load (for example one very slow disk write, or a driver hang) freezes the
   game for more than 15 s. `[netplay] long tick: ...` lines show any tick
   that blocked for more than 2 s and how often the network was polled during
-  it. If a stage load freezes one PC just before a pause for a lost
-  Archipelago link, a crashed partner is reported after 60 s instead of 15 s
-  until the pause ends.
+  it.
 - Many `[netplay] delay change:` lines, up and down: the connection's
   timing keeps changing (typically Wi-Fi). A cable, or moving closer to the
   router, helps; the delay settles after a few failed drops either way.
@@ -558,7 +629,9 @@ folder), not append the second evening to the first evening's run.
   PC) freezes the picture until the other game's input arrives: frames are
   not drawn while the game waits (the music keeps playing). The adaptive
   delay reduces repeated hitches, not a single long one. The HUD's stall
-  count is this game's own waits, so it shows a stall only after it ends.
+  count is this game's own waits, so it shows a stall only after it ends
+  (and it counts differently from the `[netplay] stats:` line; see "The
+  netplay HUD").
 - Seeds with P2 enemies need each player's own copy of the seed's P2
   assets overlay (see "Seeds with P2 enemies").
 - The low-level switches (`--netplay-host`/`--netplay-join`,

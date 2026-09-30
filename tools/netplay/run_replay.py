@@ -151,6 +151,11 @@ def main(argv=None):
         "PIKMIN_NETPLAY_DEBUG_NAVI_POS",
     ):
         env.pop(key, None)
+    # #965 lane H: also drop every other PIKMIN_NETPLAY_* / PIKMIN_INPUT_* name
+    # (a `$env:` knob left set in the caller's PowerShell window); the run sets
+    # what it needs below and takes test knobs through --env.
+    for key in [k for k in env if k.upper().startswith(("PIKMIN_NETPLAY_", "PIKMIN_INPUT_"))]:
+        del env[key]
     env.update(
         PIKMIN_RANDOMIZER_TEST_BACKGROUND="1",
         SDL_AUDIODRIVER="dummy",
