@@ -302,6 +302,7 @@ set(PC_PORT_SOURCES
     # normal pad path. Env-gated (PIKMIN_RANDOMIZER_AUTOPLAY), inert otherwise.
     pc_port/pc_p2_autoplay.cpp
     pc_port/pc_p2_test_day_cycle.cpp
+    pc_port/pc_p2_ship.cpp
     pc_port/pc_p2_purple.cpp
     pc_port/pc_p2_purple_motion.cpp
     pc_port/pc_p2_purple_impact.cpp
