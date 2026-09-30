@@ -146,7 +146,8 @@ public:
     // True while the clip clock is running, so a draw frame between two source ticks may blend toward
     // the next frame (presentation only).
     bool poseAdvancing() const;
-    bool gunLockedOn() const { return mRotation && mLockOn && !mGunFinished; }
+    // Sight effect runs while the source rotation is searching (doUpdate: not yet finished).
+    bool gunAiming() const { return mRotation && !mGunFinished; }
     // Gun barrel (local X) direction in the world, from the brain's yaw and tilt-from-down.
     P2HoudaiVec gunDirection() const;
     bool isStartFlick(int stuck) const;

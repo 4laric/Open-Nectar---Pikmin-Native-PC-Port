@@ -210,7 +210,7 @@ bool Rig::parse(const std::string& text, std::string* error)
         if (clip.frames.front() != 0 || clip.frames.back() != clip.duration - 1) return fail(error, "frame range");
         for (int k = 0; k < samples; ++k) {
             if (!(in >> word) || word != "s") return fail(error, "missing sample");
-            std::vector<M34> joints(size_t(count));
+            std::vector<M34> joints; joints.resize(size_t(count));
             for (int j = 0; j < count; ++j)
                 for (int r = 0; r < 3; ++r)
                     for (int c = 0; c < 4; ++c) {
@@ -218,7 +218,7 @@ bool Rig::parse(const std::string& text, std::string* error)
                         if (!(in >> v) || !finite(v)) return fail(error, "bad sample value");
                         joints[size_t(j)].m[r][c] = v;
                     }
-            std::vector<Decomposed> dec(size_t(count));
+            std::vector<Decomposed> dec; dec.resize(size_t(count));
             for (int j = 0; j < count; ++j) dec[size_t(j)] = decompose(joints[size_t(j)]);
             clip.raw.push_back(std::move(joints));
             clip.decomp.push_back(std::move(dec));

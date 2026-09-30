@@ -139,9 +139,10 @@ bool InteractBomb::actTeki(Teki* teki) immut
 	if (pc_p2_long_legs_receiver_rejects(teki, &attack)) {
 		return false; // registered Long Legs is bitter-immune to bombs too
 	}
-	if (pc_p2_long_legs_damage_rate(teki, mOwner) == 0.0f) {
-		return false; // #173: Man-at-Legs takes no bomb damage (stuck Pikmin only)
-	}
+	// #1012: no Man-at-Legs refusal here. Houdai overrides only damageCallBack (Houdai.h virtuals), so a
+	// bomb reaches EnemyBase::bombCallBack, which adds the full damage in every state (addDamage is
+	// gated only by EB_Invulnerable, and bitter immunity covers only the dope spray). The earlier
+	// "stuck Pikmin only" refusal applied damageCallBack's rule to a path it does not cover.
 	if (pc_p2_chappy_king_bomb(teki, mDamage * bombFactor)) {
 		return true; // registered Emperor Bulblax: source bombCallBack (0.25 x damage)
 	}
