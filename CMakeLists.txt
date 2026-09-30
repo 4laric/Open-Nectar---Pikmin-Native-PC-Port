@@ -663,7 +663,8 @@ set(PIKMIN_TARGET_SUFFIX "" CACHE STRING "Suffix for the game targets when the t
 set(NECTAR_LEGACY pikmin_legacy${PIKMIN_TARGET_SUFFIX})
 set(NECTAR_GAME pikmin_pc${PIKMIN_TARGET_SUFFIX})
 # Solo en Android: en escritorio el ejecutable PAL sigue saliendo como
-# `nectar` en su propio directorio de build y lo renombra el empaquetado.
+# 
+ectar` en su propio directorio de build y lo renombra el empaquetado.
 if(ANDROID AND PIKMIN_GAME_VERSION STREQUAL "VERSION_GPIP01_00")
     set(NECTAR_OUTPUT_NAME "nectar-pal")
 else()
@@ -2183,3 +2184,6 @@ function(pikmin_add_ci_fixture name source)
     set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/fixtures")
     file(APPEND "${CMAKE_BINARY_DIR}/ci-fixtures.txt" "${target}\n")
 endfunction()
+
+# #928 opt-in captain switching acceptance (requires local assets to run).
+pikmin_add_ci_fixture(captain_switch tools/p2_captain_switch_runtime.cpp)
