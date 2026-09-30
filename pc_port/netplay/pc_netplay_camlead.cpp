@@ -131,6 +131,15 @@ FlowFlags flow_flags()
 // Diagnostics: PIKMIN_NETPLAY_CAMERA_SHOT=<dir>:<f1>,<f2>,...
 std::string sShotDir;
 std::vector<uint64_t> sShotFrames;
+// Negative-control knob (issue #965): PIKMIN_NETPLAY_TEST_CAMLEAD_KEY_SKEW=<n>
+// offsets the landing-frame key note_local_input files each submitted input
+// under by n (any sign), so the history holds input(F) at F+n. The applied
+// check (`key_mismatch`) then compares the wrong frame's input and must go
+// non-zero as soon as consecutive local inputs differ; the prediction reads
+// shifted inputs too (`gaps` may move). Presentation-only: it changes the
+// lead camera's history and the counters, never what is submitted, so it is
+// not part of the config hash and cannot change the sim or the wire.
+long sKeySkew = 0;
 // Test hook: PIKMIN_NETPLAY_TEST_CAMERA_DRAG=<frame>:<amount>,...
 struct TestDrag {
 	uint64_t frame;
@@ -328,6 +337,17 @@ void pc_netplay_camlead_session_begin(int localRole)
 	sJoinerOwn  = env_joiner_own_camera(std::getenv("PIKMIN_NETPLAY_JOINER_OWN_CAMERA"));
 	const char* t = std::getenv("PIKMIN_NETPLAY_CAMERA_TRACE");
 	sTrace      = (t != nullptr && t[0] == '1' && t[1] == '\0');
+	sKeySkew    = 0;
+	if (const char* skew = std::getenv("PIKMIN_NETPLAY_TEST_CAMLEAD_KEY_SKEW")) {
+		char* end    = nullptr;
+		const long v = std::strtol(skew, &end, 10);
+		if (end != skew && end != nullptr && *end == '\0' && v >= -64 && v <= 64) {
+			sKeySkew = v;
+		} else {
+			std::printf("[netplay] camera lead: PIKMIN_NETPLAY_TEST_CAMLEAD_KEY_SKEW=%s ignored (an integer -64..64)\n",
+			            skew);
+		}
+	}
 	sFrameValid = false;
 	sHist.clear();
 	sCorr.reset();
@@ -345,6 +365,11 @@ void pc_netplay_camlead_session_begin(int localRole)
 	std::printf("[netplay] camera lead: %s (local captain P%d; own-camera yaw and drag: %s%s)\n",
 	            sArmed ? "on" : "off, PIKMIN_NETPLAY_CAMERA_LEAD=0", sRole + 1,
 	            sJoinerOwn ? "on" : "off, PIKMIN_NETPLAY_JOINER_OWN_CAMERA=0", sTrace ? "; trace on" : "");
+	if (sKeySkew != 0) {
+		std::printf("[netplay] camera lead: TEST KEY SKEW %ld active (PIKMIN_NETPLAY_TEST_CAMLEAD_KEY_SKEW): the "
+		            "noted landing-frame keys are wrong on purpose; key_mismatch must go non-zero (negative control)\n",
+		            sKeySkew);
+	}
 	std::fflush(stdout);
 }
 
@@ -387,6 +412,13 @@ void pc_netplay_camlead_note_local_input(uint64_t frame, const PcNetplayInput& i
 		std::printf("[netplay] camlead submit f=%llu yaw=%u\n", (unsigned long long)frame, (unsigned)in.controlYaw);
 	}
 	if (!sArmed) return;
+	if (sKeySkew != 0) {
+		// Negative control (see sKeySkew): a deliberately wrong key.
+		const int64_t skewed = (int64_t)frame + sKeySkew;
+		if (skewed < 0) return;
+		sHist.note((uint64_t)skewed, in);
+		return;
+	}
 	sHist.note(frame, in);
 }
 

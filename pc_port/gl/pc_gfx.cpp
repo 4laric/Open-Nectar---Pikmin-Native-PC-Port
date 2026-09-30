@@ -4692,8 +4692,25 @@ static void proxyShotWrite(const std::string& key) {
 // works for a hidden window). Two requests in one frame get the same image.
 static std::vector<std::string> sFrameShotPaths;
 
+// Bounded (issue #965 N9): a run whose present never comes (null GX, a stuck
+// window) would otherwise grow the queue for as long as the diagnostics keep
+// asking. The oldest requests are the ones dropped (with one notice), so the
+// newest capture still gets served.
+static constexpr size_t kFrameShotQueueMax = 32;
+
 void pc_gfx_request_frame_shot(const char* path) {
-    if (path != nullptr && path[0] != '\0') sFrameShotPaths.push_back(path);
+    if (path == nullptr || path[0] == '\0') return;
+    if (sFrameShotPaths.size() >= kFrameShotQueueMax) {
+        static bool sWarned = false;
+        if (!sWarned) {
+            sWarned = true;
+            std::printf("[netplay] frame shot: queue full (%u pending), dropping the oldest requests\n",
+                        unsigned(kFrameShotQueueMax));
+            std::fflush(stdout);
+        }
+        sFrameShotPaths.erase(sFrameShotPaths.begin());
+    }
+    sFrameShotPaths.push_back(path);
 }
 
 static void frameShotWrite(GLuint sourceFramebuffer) {

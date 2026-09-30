@@ -148,6 +148,66 @@ int main()
 		CHECK(classify_code("npix2-abc") == kCodeGarbage, "prefix is case-sensitive");
 	}
 
+	// 5. Run-layout path budget and run roots (issue #965 item 1).
+	{
+		const size_t nameLen = std::string("run-20260929-235959-join-pid4294967295").size() + 3;
+		CHECK(nameLen <= kRunStampMax, "the run name constant covers the longest stamp plus the -<n> suffix");
+		// The layout the launcher really builds: no file under it is deeper than the model says.
+		const std::string runName = "run-20260929-235959-join-pid4294967295-99";
+		const RunLayout deep      = run_layout("B/" + runName, kTok);
+		CHECK(deep.bootstrapPath.size() - (std::string("B/") + runName).size() - 1 <= run_deepest_below(kTok.size()),
+		      "bootstrap.txt is inside the modelled depth");
+		CHECK(run_deepest_below(64) == 13 + 64 + 1 + kTokenDirFileMax || run_deepest_below(64) == kOtherBelowRunMax,
+		      "depth model = token dir path + longest file, or the other-files bound");
+		CHECK(run_deepest_below(64) >= 96, "at least the measured deepest file (96 below the run folder)");
+		CHECK(run_deepest_below(128) > run_deepest_below(64), "a longer token deepens the layout");
+
+		// A short exe folder: the layout is unchanged (exe root chosen, no fallback).
+		const RunRoots shortR = run_roots("C:/Users/me/Downloads/pikmin-netplay", "C:\\Users\\me\\AppData\\Local");
+		CHECK(shortR.exeBase == "C:/Users/me/Downloads/pikmin-netplay/netplay", "exe root is <exe dir>/netplay");
+		CHECK(shortR.fallback == "C:/Users/me/AppData/Local/Nectar/netplay", "fallback root is %LOCALAPPDATA%/Nectar/netplay");
+		const RunBaseChoice shortC = choose_run_base(shortR, true, true, nameLen, kTok.size());
+		CHECK(!shortC.useFallback && shortC.why == kRunBaseExe, "short writable exe folder keeps the exe root");
+
+		// Boundary: the largest exe folder that fits, and one more character.
+		size_t maxExe = 0;
+		for (size_t len = 1; len < 200; ++len) {
+			if (run_path_fits(len + 8, nameLen, kTok.size())) maxExe = len;
+		}
+		CHECK(maxExe >= 82 && maxExe <= 119, "the exe-folder limit sits between the measured-good 82 and the measured-bad 119+");
+		const RunRoots atLimit = run_roots(std::string(maxExe, 'x'), "C:/L");
+		const RunRoots pastLimit = run_roots(std::string(maxExe + 1, 'x'), "C:/L");
+		CHECK(!choose_run_base(atLimit, true, true, nameLen, kTok.size()).useFallback, "exactly at the limit stays on the exe root");
+		const RunBaseChoice past = choose_run_base(pastLimit, true, true, nameLen, kTok.size());
+		CHECK(past.useFallback && past.why == kRunBaseTooLong, "one character past the limit goes to the fallback");
+		// The measured cases from the packaging run: 100 and 82 worked, 133 failed.
+		CHECK(!choose_run_base(run_roots(std::string(82, 'x'), "C:/L"), true, true, nameLen, 64).useFallback, "82 characters: exe root");
+		CHECK(choose_run_base(run_roots(std::string(133, 'x'), "C:/L"), true, true, nameLen, 64).useFallback, "133 characters: fallback");
+		CHECK(choose_run_base(run_roots(std::string(150, 'x'), "C:/L"), true, true, nameLen, 64).useFallback, "150 characters: fallback");
+		// Read-only exe folder: fallback with its own reason (the old behaviour, now with a fit check).
+		const RunBaseChoice ro = choose_run_base(shortR, false, true, nameLen, kTok.size());
+		CHECK(ro.useFallback && ro.why == kRunBaseNotWritable, "read-only exe folder uses the fallback");
+		// Nothing usable.
+		CHECK(!choose_run_base(shortR, false, false, nameLen, kTok.size()).useFallback
+		          && choose_run_base(shortR, false, false, nameLen, kTok.size()).why == kRunBaseNone,
+		      "neither root writable: none");
+		CHECK(choose_run_base(run_roots(std::string(150, 'x'), ""), true, false, nameLen, 64).why == kRunBaseExe,
+		      "too long with no fallback: the exe root is still tried (old behaviour)");
+		// A fallback that is itself too long is not chosen either.
+		CHECK(!choose_run_base(run_roots(std::string(150, 'x'), std::string(150, 'y')), true, true, nameLen, 64).useFallback,
+		      "a too-long fallback is refused");
+		// Same folder as the exe root: no duplicate fallback.
+		CHECK(run_roots("C:/Users/me/AppData/Local/Nectar", "C:\\Users\\me\\AppData\\Local").fallback.empty(),
+		      "fallback equal to the exe root (any case) is dropped");
+		CHECK(run_roots("C:/Users/ME/AppData/Local/Nectar", "c:\\users\\me\\appdata\\local").fallback.empty(),
+		      "case-insensitive equality");
+		CHECK(run_roots("", "").exeBase == "netplay" && run_roots("", "").fallback.empty(),
+		      "unknown exe dir and no LOCALAPPDATA: relative netplay, no fallback");
+		// The fallback root is what --continue searches: a run created there is inside run_roots().fallback.
+		const std::string fbRun = shortR.fallback + "/" + runName;
+		CHECK(fbRun.compare(0, shortR.fallback.size(), shortR.fallback) == 0, "runs in the fallback live under the searched root");
+	}
+
 	std::printf("pc_netplay_launch_test: %s (%d checks, %d failures)\n", sFailures == 0 ? "PASS" : "FAIL",
 	            sChecks, sFailures);
 	return sFailures == 0 ? 0 : 1;
