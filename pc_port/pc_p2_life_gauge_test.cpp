@@ -20,12 +20,15 @@ int main()
     assert(!p2lifegauge::shouldShow(1500.0f, 1500.0f, false));
     assert(!p2lifegauge::shouldShow(0.0f, 1500.0f, false));
     assert(!p2lifegauge::shouldShow(900.0f, 1500.0f, true));
+    assert(p2lifegauge::gaugeFollowsTargetable(12) && p2lifegauge::gaugeFollowsTargetable(14) && !p2lifegauge::gaugeFollowsTargetable(32));
     // Console: hurt [fraction].
     {
         devconsole::Command c = devconsole::parse("hurt");
         assert(c.kind == devconsole::Cmd::Hurt && !c.error[0] && c.time > 0.39f && c.time < 0.41f);
         c = devconsole::parse("hurt 0.75");
         assert(c.kind == devconsole::Cmd::Hurt && !c.error[0] && c.time == 0.75f);
+        c = devconsole::parse("hurt 0.5 stored");
+        assert(c.kind == devconsole::Cmd::Hurt && !c.error[0] && c.stored && c.time == 0.5f);
         c = devconsole::parse("hurt 2");
         assert(c.kind == devconsole::Cmd::Hurt && c.error[0]);
     }

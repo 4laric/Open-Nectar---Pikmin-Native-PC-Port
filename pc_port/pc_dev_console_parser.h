@@ -163,6 +163,7 @@ struct Command {
     char token[48] = {0};     // spawn species token / tp arena id / raw word
     const Species* species = nullptr; // resolved P2 species, or null for a P1 name
     int count = 1;
+    bool stored = false;      // hurt: queue the damage in mStoredDamage (families that own health drain it)
     bool rebind = true;       // spawn: rerun the family setup when no dynamic binder exists
     int colour = -1;
     int day = 0;
@@ -236,6 +237,7 @@ inline Command parse(const char* line)
     if (ieq(w, "hurt")) {
         c.kind = Cmd::Hurt;
         c.time = 0.4f;
+        if (n >= 3 && ieq(words[2], "stored")) c.stored = true;
         if (n >= 2 && (!parseFloat(words[1], c.time) || c.time <= 0.0f || c.time >= 1.0f))
             std::snprintf(c.error, sizeof(c.error), "usage: hurt [fraction 0..1, default 0.4]");
         return c;
@@ -304,7 +306,7 @@ inline Command parse(const char* line)
 
 inline const char* helpText()
 {
-    return "spawn <id|Enum|Common_Name|p1 teki name> [count] [norebind] | kill [all] | killall | hurt [fraction] | "
+    return "spawn <id|Enum|Common_Name|p1 teki name> [count] [norebind] | kill [all] | killall | hurt [fraction [stored]] | "
            "pikmin <red|yellow|blue> [n] | day <n> | time <hours|0..1> | tp <x> <z> | tp <arena> | pos | list | rebind | help";
 }
 

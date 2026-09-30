@@ -36,7 +36,12 @@ inline void pc_p2_life_gauge_audit(BTeki* t, bool drawn)
 inline void pc_p2_life_gauge_update(BTeki* t)
 {
     if (t->mDeadState != 0 || t->mHealth <= 0.0f) return;
-    if (!pc_p2_campaign_source(t)) return;
+    const unsigned source = pc_p2_campaign_source(t);
+    if (!source) return;
+    if (p2lifegauge::gaugeFollowsTargetable(source)) {
+        if (t->isAtari()) t->setTekiOption(TEKIOPT_LifeGaugeVisible);
+        else t->clearTekiOption(TEKIOPT_LifeGaugeVisible);
+    }
     t->updateLifeGauge();
 }
 

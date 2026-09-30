@@ -83,6 +83,15 @@ inline float lifeMeterHeight(unsigned sourceId, float fallback)
     return fallback;
 }
 
+// Species whose P1 host vehicle keeps TEKIOPT_LifeGaugeVisible cleared (audit:
+// UjiA/UjiB/Tobi ride the Sheargrub host, whose option is off), so the wheel is
+// driven from the targetable state instead: shown while the actor is Atari,
+// hidden while it is underground (P2 UjiA hides with EB_Untargetable).
+inline bool gaugeFollowsTargetable(unsigned sourceId)
+{
+    return sourceId == 12 || sourceId == 13 || sourceId == 14;
+}
+
 inline bool hasHeight(unsigned sourceId)
 {
     for (const Row& r : kRows)
