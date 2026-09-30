@@ -13,6 +13,7 @@
 #include "pc_p2_snakejoint.h"
 #include "pc_p2_otakara.h"
 #include "pc_p2_chappy.h"
+#include "pc_p2_umimushi.h"
 #include "pc_p2_breadbug_teki.h"
 #endif
 
@@ -86,6 +87,20 @@ bool InteractAttack::actTeki(Teki* teki) immut
 		pc_p2_chappy_attacked(teki, scaledAccepted);
 		return scaledAccepted;
 	}
+	// #995: registered Bloyster (71/101), source UmiMushi::Obj::damageCallBack
+	// (umiMushi.cpp:467-492): a hit that carries a part needs a stuck attacker (only the tail
+	// bulb is stickable), a partless low hit is scaled by proper fp01 (0.03). -1 leaves every
+	// other actor untouched.
+	const f32 umiRate = pc_p2_umimushi_damage_rate(teki, mOwner, mCollPart);
+	if (umiRate == 0.0f) {
+		return false;
+	}
+	if (umiRate > 0.0f && umiRate != 1.0f) {
+		InteractAttack scaledUmi(mOwner, mCollPart, mDamage * umiRate, _10);
+		const bool umiAccepted = teki->interact(TekiInteractionKey(TekiInteractType::Attack, &scaledUmi));
+		pc_p2_umimushi_attacked(teki, umiAccepted);
+		return umiAccepted;
+	}
 #endif
 	const bool damageAccepted = teki->interact(TekiInteractionKey(TekiInteractType::Attack, this));
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
@@ -98,6 +113,8 @@ bool InteractAttack::actTeki(Teki* teki) immut
 	// #884: Emperor Bulblax flick timer (source addDamage flickSpeed). No-op
 	// for every other actor.
 	pc_p2_chappy_attacked(teki, damageAccepted);
+	// #995: Bloyster flick timer (source addDamage flickSpeed). No-op for every other actor.
+	pc_p2_umimushi_attacked(teki, damageAccepted);
 #endif
 	return damageAccepted;
 }
@@ -132,8 +149,14 @@ bool InteractBomb::actTeki(Teki* teki) immut
 	if (pc_p2_chappy_king_bomb(teki, mDamage * bombFactor)) {
 		return true; // registered Emperor Bulblax: source bombCallBack (0.25 x damage)
 	}
-	return teki->interact(
+	const bool bombAccepted = teki->interact(
 	    TekiInteractionKey(TekiInteractType::Attack, stack_new(InteractAttack)(mOwner, nullptr, mDamage * bombFactor, false)));
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	// #995: source EnemyBase::bombCallBack -> addDamage(damage, flickSpeed 1.0); the Bloyster overrides
+	// only damage/press/hipdrop/earthquake, so a bomb takes the base path at full damage.
+	pc_p2_umimushi_attacked(teki, bombAccepted);
+#endif
+	return bombAccepted;
 }
 
 /**

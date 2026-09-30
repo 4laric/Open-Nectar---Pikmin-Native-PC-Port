@@ -1978,6 +1978,12 @@ add_executable(p2_captor_mouth_test tools/p2_captor_mouth_test.cpp)
 target_include_directories(p2_captor_mouth_test PRIVATE pc_port)
 target_compile_options(p2_captor_mouth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_captor_mouth_test COMMAND p2_captor_mouth_test)
+
+# #995: Bloyster source policy (tail bulb is the only stickable part, damageCallBack, tongue tables).
+add_executable(p2_umimushi_policy_test tools/p2_umimushi_policy_test.cpp)
+target_include_directories(p2_umimushi_policy_test PRIVATE pc_port)
+target_compile_options(p2_umimushi_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_umimushi_policy_test COMMAND p2_umimushi_policy_test)
 # bot-impl (#871): TEST-ONLY headless autoplay bot policy. Engine-free:
 # the header-only Brain (states, timeouts, giveup/result markers, Kogane
 # damage-and-move-on) plus the inert-when-unset gate (registration only).

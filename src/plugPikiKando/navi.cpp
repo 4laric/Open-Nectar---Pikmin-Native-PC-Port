@@ -11,6 +11,7 @@
 #include "pc_p2_breadbug_teki.h"
 #include "pc_p2_species.h"
 #include "pc_p2_bulbmin.h"
+#include "pc_p2_umimushi.h"
 #include "Navi.h"
 #include "pc_randomizer.h"
 #include <cstdlib>
@@ -1219,6 +1220,20 @@ void Navi::pcPinCursorToLock()
 	}
 	Vector3f offset = mPcLockTarget->mSRT.t - mSRT.t;
 	offset.y        = 0.0f;
+	// #995: a Bloyster's only stickable part is the raised tail bulb, so the lock-on aims the arc there
+	// instead of at the feet (no-op for every other target).
+	{
+		f32 lockX, lockZ;
+		const f32 throwHeight = NAVI_PARM(mThrowMinHeight)
+		                      + (mThrowHoldTime / NAVI_PARM(mThrowHoldMaxTime)) * (NAVI_PARM(mThrowMaxHeight) - NAVI_PARM(mThrowMinHeight));
+		if (pc_p2_umimushi_lock_aim(mPcLockTarget, mSRT.t.x, mSRT.t.z, throwHeight, AICONST.mGravity(),
+		                            0.5f * NAVI_PARM(mThrowFlightTime), lockX, lockZ)) {
+			mCursorPosition       = Vector3f(lockX, 0.0f, lockZ);
+			mCursorTargetPosition = mCursorPosition;
+			mCursorNaviDist       = mCursorPosition.length();
+			return;
+		}
+	}
 	// Objetivo en vuelo (#215, snitchbug): el lanzamiento alcanza su cúspide a
 	// mitad de camino del cursor y pasa por el XZ del cursor ya de bajada, así
 	// que clavado sobre el bicho el Pikmin le pasa por debajo. Con el cursor al
