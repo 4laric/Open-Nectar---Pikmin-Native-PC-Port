@@ -22,6 +22,14 @@ void pc_gfx_proxy_shot_notify(const char* key);
 // as a 24-bit BMP. Only the lead-camera diagnostics call it (env-gated
 // there); nothing else changes.
 void pc_gfx_request_frame_shot(const char* path);
+#if PIKI_NETPLAY_BUILD
+// Netplay M5c lane C (issue #887), test evidence only: the next present
+// writes the finished frame (the native framebuffer, overlays included, before
+// the window blit, so hidden windows capture too) as a 24-bit BMP at `path`.
+// Nothing happens unless a caller asks; the netplay HUD asks only under its
+// hidden-test knobs.
+void pc_gfx_capture_next_present(const char* path);
+#endif
 void pc_gfx_perf_scope_begin(const char* name);
 void pc_gfx_perf_scope_end(void);
 

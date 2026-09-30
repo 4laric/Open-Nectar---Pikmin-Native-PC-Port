@@ -36,6 +36,10 @@ float pc_netplay_fixed_dt(int frameClamp);
 // deterministic mode is on. The seed is FNV-1a over PIKMIN_NETPLAY_SEED (u32
 // env var, defaults to 0), the day index and the stage id; see the .cpp.
 void pc_netplay_det_reseed_for_new_day(int dayIndex, int stageId);
+// M5c lane C (issue #887): the day index of the last reseed (0 = none yet)
+// and how many reseeds ran. Log/record only; the simulation never reads them.
+int pc_netplay_det_last_reseed_day(void);
+unsigned pc_netplay_det_reseed_count(void);
 
 // PIKMIN_NETPLAY_PROFILE_LOG value, or nullptr when unset/empty. Cached.
 const char* pc_netplay_det_profile_path(void);

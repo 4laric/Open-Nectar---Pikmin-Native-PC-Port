@@ -36,6 +36,11 @@ namespace {
 bool sDeterministic = false;
 bool sUnthrottled   = false;
 unsigned sTick      = 0;
+// M5c lane C (issue #887): the last reseeded day and a reseed counter, read
+// by the netplay session's campaign record (which day a checkpoint plays on
+// from). Written only here, never read by the simulation.
+int sLastReseedDay      = 0;
+unsigned sReseedCount   = 0;
 
 bool envIsOne(const char* name)
 {
@@ -176,7 +181,12 @@ void pc_netplay_det_reseed_for_new_day(int dayIndex, int stageId)
 	std::fflush(stdout);
 	// B2 fix round 1: log-only, after the reseed (RNG and timing untouched).
 	if (pc_randomizer_netplay_stage_start != nullptr) pc_randomizer_netplay_stage_start(dayIndex, stageId);
+	sLastReseedDay = dayIndex;
+	++sReseedCount;
 }
+
+int pc_netplay_det_last_reseed_day(void) { return sLastReseedDay; }
+unsigned pc_netplay_det_reseed_count(void) { return sReseedCount; }
 
 const char* pc_netplay_det_profile_path(void)
 {

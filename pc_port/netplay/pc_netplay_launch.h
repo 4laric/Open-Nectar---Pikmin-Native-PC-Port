@@ -15,6 +15,10 @@
 //        SDL is not up yet) and decodes the v2 session bundle;
 //      - P2 seeds (M4 lane B2): the joiner needs --netplay-p2-assets DIR;
 //        the run gets a play/ working directory (see PcNetplayLaunch::p2);
+//      - host --continue [run folder] (M5c lane C): the bootstrap, netplay
+//        seed and newest agreed checkpoint come from the newest host run
+//        folder with a day-end save both games agreed on; they are copied
+//        into the new run folder below (no saved day: a new campaign);
 //      - creates this run's private dir (per run AND per peer) and writes
 //        the bootstrap two levels inside it, re-stamped with this peer's
 //        SESSION token, so the randomizer's derived campaign dir is private;
@@ -69,6 +73,16 @@ struct PcNetplayLaunch {
 	int captainP2 = 1;
 	std::string codeOut;       // --netplay-code-out <file>
 	std::string answerIn;      // --netplay-answer-in <file> (host)
+	// M5c lane C (issue #887): --continue [run folder] (host). The continued
+	// run's bootstrap, netplay seed and newest agreed checkpoint (plus card and
+	// ledgers, copied into this run's campaign dir) start this session; the
+	// old run folder is only read. <runDir>/campaign-record.txt names the
+	// day-end saves both games agreed on (pc_netplay_continue.h).
+	bool continued = false;
+	std::string continueFrom;  // the continued run folder
+	unsigned long long continueGen = 0;
+	int continueDay = 0;       // the day that checkpoint plays on from (0 = unknown)
+	int continueDayEnded = 0;  // the day whose end it saved (0 = unknown)
 	bool testHidden = false;   // --netplay-test-hidden
 	uint64_t testTicks = 0;    // --netplay-test-ticks N
 	// --netplay-input (any netplay mode; parsed here so the gamepad hint is

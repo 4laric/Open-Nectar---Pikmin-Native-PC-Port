@@ -62,11 +62,14 @@ sets the whole session up before anything else loads:
 
 ## Host steps
 
-1. Open a console (Command Prompt or PowerShell) in your game folder and
+1. Open a console (PowerShell or Command Prompt) in your game folder and
    run:
-   `nectar.exe --netplay-host-ice`
+   `.\nectar.exe --netplay-host-ice`
+   (PowerShell needs the `.\`: it does not run a program from the current
+   folder by its bare name; Command Prompt accepts it too. Every command
+   on this page is written so that it works in both.)
    - To play a randomizer seed, add its bootstrap file:
-     `nectar.exe --netplay-host-ice --bootstrap C:\path\to\bootstrap.txt`.
+     `.\nectar.exe --netplay-host-ice --bootstrap C:\path\to\bootstrap.txt`.
      Seeds with P2 enemies (`ENEMY_P2` in the file) work too: host from the
      seed's own folder (the one holding the seed's `assets\` overlay and its
      `p2-*.txt` / `sarai-*.txt` files); see "Seeds with P2 enemies".
@@ -86,13 +89,16 @@ sets the whole session up before anything else loads:
 
 1. Copy the host's whole offer code, open a console in your game folder,
    and run one of:
-   - `nectar.exe --netplay-join-ice @clipboard` (reads the clipboard: the
-     easiest, and it has no length limit),
-   - `nectar.exe --netplay-join-ice @C:\path\to\offer.txt` (a file holding
-     the code),
-   - `nectar.exe --netplay-join-ice NPIX2-...` (the code itself; a big
+   - `.\nectar.exe --netplay-join-ice "@clipboard"` (reads the clipboard:
+     the easiest, and it has no length limit),
+   - `.\nectar.exe --netplay-join-ice "@C:\path\to\offer.txt"` (a file
+     holding the code),
+   - `.\nectar.exe --netplay-join-ice NPIX2-...` (the code itself; a big
      offer can exceed the console's command-line limit, 8,191 characters in
      Command Prompt, so prefer `@clipboard` or `@file` for large seeds).
+   Keep the double quotes around `"@..."`: in PowerShell a bare `@clipboard`
+   is its splatting syntax and silently passes nothing, so the game would
+   get no offer code. Command Prompt removes the quotes as usual.
    You need no file from the host: the offer carries the seed file, the
    netplay seed and the host's sim settings.
 2. The game prints a one-line **answer code** and copies it to the
@@ -141,6 +147,96 @@ instant camera. In PowerShell, in the console you start the game from:
 Keep the console open: it shows the codes and the session log. To keep a
 log file, start the game with `> host.log 2>&1` added (the code is still
 copied to the clipboard and written to the run folder).
+
+## The netplay HUD
+
+During a session a small box on the right, just below the day counter,
+shows how the connection is doing:
+
+```
+NETPLAY  good
+ping 42 ms  jitter 3 ms
+delay 2 (67 ms)  stalls 0 / 10 s
+```
+
+- **NETPLAY good / fair / poor** (green / yellow / red; `measuring` in grey
+  until the first ping): *good* is a ping of at most 100 ms, jitter of at
+  most 15 ms and no stall in the last 10 s; *fair* is a ping of at most
+  200 ms, jitter of at most 40 ms and at most 3 stalls in the last 10 s;
+  anything worse is *poor*.
+- **ping**: the round trip to the other game (the average of the last 10
+  measurements); **jitter**: how much it changes between measurements.
+  The games exchange their inputs once per frame, so the ping includes up
+  to one frame (33 ms) of that rhythm: two games on the same PC or LAN
+  read about 33 ms, not 1 ms.
+- **delay**: the input delay in frames (one frame is 33 ms at 30 Hz). Your
+  own captain moves this many frames after you press, so both games can
+  apply every input on the same frame.
+- **stalls / 10 s**: how often, in the last 10 seconds, this game had to
+  wait at least one frame for the other game's input (the picture pauses
+  briefly). Stage loads and Archipelago pauses are not counted.
+
+**F4** shows or hides the box; on a gamepad press **both sticks in (L3 +
+R3)** together. F4 does nothing while you have bound it to a game action in
+the controls; a keyboard-only game (`--netplay-input keyboard`) ignores the
+pad chord. The stick buttons are first person (L3) and lock-on (R3) by
+default; while the host has turned either mode on for the session (or you
+bound another action to a stick button), pressing both sticks does only that
+in the game, not the box, and only F4 toggles it (the log says so once). The box is hidden while the F1 menu is open. It never changes
+the game: the other player's game is not told about it. The same numbers go
+to the log every 30 s (`[netplay] link: ...`).
+
+## When a session ends (desync, lost connection, quit)
+
+If the two games stop agreeing (a desync), the connection is lost, or the
+other player closes their game, the session ends. The game then shows a
+banner for up to 10 seconds (any key or button closes it early) and prints
+the same message in the console, for example:
+
+```
+[netplay] ==== netplay session ended ====
+[netplay] CONNECTION LOST: no data from the other game for too long (it may have crashed or lost its network).
+[netplay] Last save: the end of day 2; the campaign continues from the start of day 3 (checkpoint 1).
+[netplay] To carry on from that day, run this in the game's folder (PowerShell or Command Prompt):
+[netplay]   .\host.bat --continue
+[netplay]   or: .\nectar.exe --netplay-host-ice --continue
+[netplay] Your partner joins as usual (.\join.bat); your saved day is sent to them automatically.
+```
+
+The save is made at the **end** of a day, so the next session starts at the
+**start** of the following day; the `Last save` line names both.
+
+The `or:` line repeats this game's own `--netplay-input` switch, if it had
+one. The joiner's message names the same commands for the host. The banner
+writes the commands with `/` (`./host.bat --continue`, which PowerShell
+takes but Command Prompt does not), because the game's font has no
+backslash, and says so on the first line that holds a command; the console
+message above has the `.\` form for both. If you renamed the exe to a name
+with spaces (for example `nectar (2).exe`), the console gives two lines
+instead of `or:`: `or in PowerShell: & '.\nectar (2).exe' ...` and `or in
+Command Prompt: ".\nectar (2).exe" ...`, because each console quotes it
+differently.
+
+- **DESYNC** (exit code 5): the games disagreed about the game state.
+- **DESYNC AT THE DAY-END SAVE** (exit code 5) / **SAVE NOT AGREED** (exit
+  code 6): the day-end save did not finish the same way on both games, so
+  that day does not count; the campaign continues from the day before.
+- **CONNECTION LOST**: no data from the other game for 15 s (60 s during a
+  stage load).
+- **THE OTHER PLAYER LEFT**: the other game was closed. A game that is
+  closed mid-session tells the other one at once, so it no longer waits
+  15 s.
+
+Nothing is lost except the day in progress: the campaign continues from the
+last day that ended with the day-end save on both games (see below). If no
+day has ended yet, the message says so, and the next session starts a new
+campaign. If the session ends right at a day-end save, the joiner's message
+may say that save `may not count`: the joiner cannot tell whether the host
+finished it (the host counts it only once it has heard back from the
+joiner). The host's message is the one that knows, and the host's
+`--continue` uses exactly that day. A joiner's own run folder counts the
+save only once the joiner has played on 10 frames past it **while the host
+was still connected**; a host that had just left does not count.
 
 ## Local two-window test (one PC, one player)
 
@@ -224,10 +320,82 @@ a different checkpoint of the same day, refuses (`handshake refused:
 checkpoint`). A joiner checkpoint from another seed or a damaged one is set
 aside (renamed `*.sav.stale-<time>`, never deleted) and replaced.
 
-The one-command launcher (`--netplay-host-ice`) starts every session in a
-new run folder, so it always starts a new campaign today; resuming across
-evenings runs through the pair tools (`tools/netplay/run_pair.py
---run-name ... --token ...`), which keep both campaign folders.
+### Continue the campaign (`--continue`)
+
+The one-command launcher starts every session in a new run folder. Without
+`--continue` that is a new campaign. To carry on with the last campaign,
+the **host** adds `--continue`:
+
+```
+.\nectar.exe --netplay-host-ice --continue
+```
+
+or, in the playtest folder, `.\host.bat --continue` (host.bat passes its
+switches on; a host.bat that asks `Continue last campaign? [Y/n]` adds it
+for you). The joiner does nothing different: it joins with the usual offer
+code, and the host's saved day reaches it at the handshake (`[netplay]
+checkpoint adopted`).
+
+- `--continue` picks the newest host run folder (under `netplay\` next to
+  the exe, or `%LOCALAPPDATA%\Nectar\netplay\`) whose campaign has a
+  day-end save **both** games agreed on, and says which:
+  `[netplay] launch: --continue: continuing the campaign of ...\run-...:
+  checkpoint 1 (day 3)`. Both games then start that day from its
+  beginning.
+- It never continues a half-saved day: a day-end save that did not finish
+  on both games (exit 5 or 6 at the save, or a game that crashed during
+  it) is skipped, and the day before it is used. Each run folder keeps a
+  small `campaign-record.txt` for this (which saves both games agreed on;
+  the joiner writes a save there only once the session has played on
+  10 frames past it with the host still connected: the host sends its
+  input for those frames only after its own save finished, while a host
+  that dropped out gets neutral input from the network layer, which does
+  not count).
+- A run folder without `campaign-record.txt` (made by an older build) is
+  skipped, because it cannot tell which saves both games agreed on; the log
+  names it. A record that a crash damaged stops the search there, rather
+  than continue an older campaign by mistake. Either can still be continued
+  by naming the folder (below); the game then warns that the save it uses
+  (`UNCONFIRMED`) may not have been agreed.
+- If the newest host session saved nothing (a new campaign whose first day
+  never ended) and an older campaign has a saved day, `--continue` asks
+  `Continue the older campaign of ... (checkpoint 1, day 3) instead? [Y/n]`
+  before it uses the older one (n starts a new campaign).
+- Runs are ordered by when they started (`started_utc` in `launch.txt`),
+  so a clock change (daylight saving) does not make an older run look
+  newer.
+- `--continue <run folder>` continues that run folder instead (for example
+  an older campaign, or a run where you were the joiner: its campaign is the
+  same, so either player can host the next session). Quote a folder that
+  holds spaces:
+  `.\nectar.exe --netplay-host-ice --continue "C:\My Games\netplay\run-20260929-140000-join-pid1234"`.
+- `--continue` with `--bootstrap <seed file>` continues the newest campaign
+  **of that seed**.
+- The seed file and the netplay seed come from the continued run; the
+  settings are this session's, as always.
+- Nothing is moved or deleted: the saved day, the memory card and the
+  campaign's other files are **copied** into the new run folder, and the
+  old run folder stays exactly as it was. The new run's record names the
+  continued save only after every copy is on the disk, so a crash while
+  copying leaves a folder that a later `--continue` does not pick.
+- The memory card and the campaign's other files (for example the P2
+  receipt ledgers) are carried as the old run left them, which can be a
+  little later than the saved day (a card written by a save that did not
+  count, or P2 receipts of the day in progress). Both games get the same
+  files at the handshake, so they stay in step. A run where you were the
+  joiner has no `p2-delivery-receipts.txt` (the host keeps it), so P2
+  deliveries recorded there are granted again when you continue it.
+- No saved day yet (the first day never ended with a save): `--continue`
+  says so (`--continue: no saved day yet ...`) and offers a new campaign
+  instead (`Start a new campaign instead? [Y/n]`; without a console it
+  starts one).
+
+Seeds with P2 enemies continue too: the continued run's `play\` folder
+(its sidecars and P2 receipt ledgers) and its P2 assets overlay are used
+again; if that overlay was moved, pass `--netplay-p2-assets <folder>`.
+
+Resuming through the pair tools (`tools/netplay/run_pair.py --run-name ...
+--token ...`, which keep both campaign folders) keeps working as before.
 
 Every session needs a new run folder on both sides (the game refuses a run
 folder that was already used), and the joiner's `mirror-events.txt` starts
@@ -328,6 +496,14 @@ start the game with the environment variable
   it did not reach the save within 60 s while still connected; that day is
   not saved, and the next session continues from the last day both games
   saved.
+- `[netplay] launch: --continue: no saved day yet ...`: none of the host's
+  run folders has a day that ended with the day-end save on both games (for
+  example the first day never ended). Answer Y (or just press Enter) to
+  start a new campaign; `--continue <run folder>` picks a specific run.
+- `--continue: ... made by an older build` / `stopped at ...: its campaign
+  record is damaged`: that run cannot tell which saves both games agreed on.
+  Name the folder you want with `--continue <run folder>`; the game warns
+  (`UNCONFIRMED`) that its newest save may not have been agreed.
 - Logs: the console output (or your `> file` redirect; `native.log` in the
   local test), plus the run folder `netplay\run-...\` next to the exe.
 
@@ -335,10 +511,10 @@ start the game with the environment variable
 
 - No Archipelago: a netplay session plays a seed offline with a fixed
   ready state; nothing is sent or received.
-- No resume through the one-command launcher: each launcher session starts
-  a new run folder and a new campaign (resume works through the pair tools,
-  see "Two sessions in a row"); quitting ends the session for both players.
-- A desync ends the session (`[netplay] desync detected`).
+- A desync, a lost connection or a quit ends the session for both players;
+  nothing carries over but the last day both games saved, which the host
+  continues with `--continue` (see "Continue the campaign"). There is no
+  mid-session reconnect.
 - The instant camera covers the gameplay view only: cutscenes, the day-end
   sequence and the results screens show what both games show, and the
   first-person view (First Person mod) keeps the delayed camera. The camera's
@@ -352,6 +528,9 @@ start the game with the environment variable
 - A hitch longer than the input delay (a Wi-Fi hiccup, a slow load on one
   PC) freezes the picture until the other game's input arrives: frames are
   not drawn while the game waits (the music keeps playing).
+- The HUD's stall count is this game's own (a wait of at least one frame
+  for the other game's input); it cannot show a stall while it happens,
+  because the picture itself waits.
 - Seeds with P2 enemies need each player's own copy of the seed's P2
   assets overlay (see "Seeds with P2 enemies").
 - The low-level switches (`--netplay-host`/`--netplay-join`,
