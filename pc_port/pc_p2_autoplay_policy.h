@@ -190,6 +190,18 @@ inline bool isPowerEnabled()
     return v && v[0] && std::strcmp(v, "0") != 0;
 }
 
+// #958 test tooling: PIKMIN_RANDOMIZER_AUTOPLAY_PURPLE=1 makes the power-mode
+// squad Purple (through the ordinary pc_p2_make_purple, like the power-mode
+// flowering above) so a bot run can press the Giant Breadbug (OoPanModoki
+// pressCallBack accepts Purple presses only). Inert unless power mode is on
+// and the session opted in to the Purple campaign banks.
+inline bool isPurplePower()
+{
+    if (!isPowerEnabled()) return false;
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_PURPLE");
+    return v && v[0] && std::strcmp(v, "0") != 0;
+}
+
 // #244 test tooling: PIKMIN_RANDOMIZER_AUTOPLAY_BOMBSARAI_HOLD=<seconds>
 // overrides Config::bombsaraiHold (the "stand under the carrier" hold) so a
 // run can throw while the carrier still holds its bomb. Inert unless the
@@ -341,7 +353,7 @@ inline bool isFlyer(unsigned source) { return source == 23 || source == 57 || so
 // bitter-only): only a thrown Pikmin landing on it while falling hurts it
 // (press). The bot leads its throws onto the walking body and keeps a
 // longer attack window; it is still pad input only.
-inline bool isPressOnly(unsigned source) { return source == 38; }
+inline bool isPressOnly(unsigned source) { return source == 38 || source == 40; }
 // #898 aftermath: the Breadbug corpse is small. Walking onto it (the generic
 // seed) shoves it ahead of the captain (pellet collision, navi at ~20 u) and
 // the walking cursor sits ~78 u ahead, so thrown Pikmin fly over it and land
@@ -349,7 +361,7 @@ inline bool isPressOnly(unsigned source) { return source == 38; }
 // these corpses the bot stands off, slides the cursor onto the corpse with
 // the P1 look band (the captain stands still) and throws only when the
 // cursor is on it. Pad input only, like every other bot stance.
-inline bool aimsCorpseWithCursor(unsigned source) { return source == 38; }
+inline bool aimsCorpseWithCursor(unsigned source) { return source == 38 || source == 40; }
 
 // #884 round 4: KingChappy (53) keeps the captain OUT of the source
 // invisible range while attacking. Source searchTarget prefers a captain in
@@ -474,6 +486,8 @@ struct Config {
     float throwGap = 0.55f; // gap between throw pulses
     float empressWalkMax = 45.0f; // #256: bound on one regroup walk to the idle strays
     float whistleHold = 1.6f; // B held to regroup / call back
+    int pressRegroupBelow = 10;  // #958 press-only target: whistle when the party is below this ...
+    int pressRegroupStrays = 10; // ... and at least this many idle strays lie about
     float whistleCooldown = 3.0f; // bot-undamaged: gap after a whistle before re-latching (forces throw windows)
     float attackChaseDist = 500.0f; // bot-undamaged: target past this in attack re-enters approach (graph chase)
     float stuckWindow = 4.0f; // no-progress window before STUCK + replan
@@ -1765,7 +1779,15 @@ private:
             return;
         }
         if (whistleCooldown > 0.0f) whistleCooldown -= dt;
-        if ((in.scattered || in.squadDistress || grabWhistle) && !whistling && whistleCooldown <= 0.0f) {
+        // #958: a press-only target (Breadbug 38, Giant 40) is only hurt by thrown
+        // Pikmin, and a thrown Pikmin lands idle beside it instead of returning to
+        // the party. Once the party is nearly used up while idle strays lie about,
+        // whistle them back (the scattered sense stays false because the strays
+        // are close to the captain), otherwise A only punches and the fight stalls
+        // after about one throw per Pikmin (bot runs r6/r8, arena Giant).
+        const bool pressRegroup = pressOnly && in.squadPikmin < cfg.pressRegroupBelow
+            && in.strayPikmin >= cfg.pressRegroupStrays;
+        if ((in.scattered || in.squadDistress || grabWhistle || pressRegroup) && !whistling && whistleCooldown <= 0.0f) {
             whistling = true;
             whistleTime = 0.0f;
             empressWalk = 0.0f;
@@ -1820,7 +1842,7 @@ private:
                 }
             }
             if ((whistleTime >= cfg.whistleHold && !empressRegroup)
-                || (!in.scattered && !in.squadDistress && !grabWhistle)) {
+                || (!in.scattered && !in.squadDistress && !grabWhistle && !pressRegroup)) {
                 whistling = false;
                 whistleCooldown = cfg.whistleCooldown; // force a throw window before re-latching
             }
