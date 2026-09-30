@@ -1005,6 +1005,17 @@ void pc_p2_otakara_update(BTeki* actor) {
             applyBombBlast(actor, s, "damage");
         }
     }
+    // Source Otakara::doUpdateCommon (OtakaraBase.cpp:93-108) for BombOtakara:
+    // once the carried Bomb is no longer alive (mTargetCreature dead, or null)
+    // the Dweevil sets mTargetCreature = nullptr and mHealth = 0, i.e. it dies
+    // with its payload. The port has no separate Bomb creature; a detonated
+    // bomb (fuse, damage, flick or death) is the "Bomb no longer alive" case.
+    if (s.species == p2dweevil::BombId && s.bombDetonated && actor->mHealth > 0.0f) {
+        std::printf("P2_BOMBOTAKARA_PAYLOAD_DEAD generator=%u health=%.1f->0 (source OtakaraBase.cpp:93-108)\n",
+                    generator, actor->mHealth);
+        std::fflush(stdout);
+        actor->mHealth = 0.0f;
+    }
     s.prevHealth = actor->mHealth;
 
     if (actor->mHealth <= 0.0f && s.state != OTA_DEAD) {

@@ -123,6 +123,7 @@ struct Hana {
     int sfxState = -1;     // last state a P1-approximation SFX was requested for
     bool buriedLogged = false;
     float logTimer = 0.0f;
+    State prevState = HANA_WALK; // state before Flick (source mStateMachine->mPreviousID)
 };
 
 std::map<PelletView*, Hana> actors;
@@ -189,7 +190,9 @@ Piki* nearestPiki(const Vector3f& pos, float radius) {
     return best;
 }
 // Source EnemyFunc::isStartFlick (enemyAction.cpp:1209) keys on Pikmin stuck to
-// the body (first shake-off tier, mStuckPikminCount >= 3), not on a nearby swarm:
+// the body (mStuckPikminCount vs the ShakeOffSticking tiers and mFlickTimer vs
+// ShakeOffBlowA-D; the port keeps only the stuck-count >= 3 test, a port
+// simplification that omits the mFlickTimer gate), not on a nearby swarm:
 // proximity flicks made Hana flick back-to-back and never settle (wave 3
 // mechanics probe: drifted 1200 units from home while flicking). Same rule as
 // pc_p2_chappy.cpp FLICK_STUCK_MIN.
@@ -659,15 +662,13 @@ void pc_p2_hana_update(BTeki* actor) {
             }
         }
         if (s.stateTime >= clipDuration("flick")) {
-            // Source Flick end (ChappyBase): back to the walk/turn-to-home
-            // decision. Outside the territory that is GoHome, not a fresh chase.
-            if (distXZ(pos, s.home) > TERRITORY) {
-                std::printf("P2_HANA_STATE generator=%u state=gohome\n", generator);
-                enter(s, HANA_GOHOME, "move1");
-            } else {
-                std::printf("P2_HANA_STATE generator=%u state=walk\n", generator);
-                enter(s, HANA_WALK, "move1");
-            }
+            // Source StateFlick::exec KEYEVENT_END (chappyState.cpp:2206-2207):
+            // transit(enemy, mPreviousID), i.e. back to the state Flick was
+            // entered from (Walk or GoHome here); the territory check then runs
+            // as in any Walk frame.
+            const State back = (s.prevState == HANA_GOHOME) ? HANA_GOHOME : HANA_WALK;
+            std::printf("P2_HANA_STATE generator=%u state=%s\n", generator, stateName(back));
+            enter(s, back, "move1");
         }
         break;
     }
