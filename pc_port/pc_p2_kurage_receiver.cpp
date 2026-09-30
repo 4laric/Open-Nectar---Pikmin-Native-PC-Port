@@ -33,7 +33,7 @@ struct OwnerSlot {
     Creature* owner = nullptr;
     CollPart* mouth = nullptr;
 };
-constexpr int kMaxOwners = 16;
+constexpr int kMaxOwners = 64; // a saturated smoke seed binds ~25 Jellyfloats
 std::array<OwnerSlot, kMaxOwners> sOwners;
 Creature* sOwner = nullptr;
 CollPart* sMouth = nullptr;
