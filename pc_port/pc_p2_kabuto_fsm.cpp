@@ -26,6 +26,7 @@
 #include "Graphics.h"
 #include "Camera.h"
 #include "gameflow.h"
+#include "pc_p2_pose_family.h"
 #include "Piki.h"
 #include "PikiState.h"
 #include "PikiMgr.h"
@@ -84,34 +85,18 @@ std::uint64_t tokenOf(Creature* c){return static_cast<std::uint64_t>(reinterpret
 float wrapPi(float a){while(a>PI_F)a-=2.0f*PI_F;while(a<-PI_F)a+=2.0f*PI_F;return a;}
 float distXZ(const Vector3f& a,const Vector3f& b){const float dx=a.x-b.x,dz=a.z-b.z;return std::sqrt(dx*dx+dz*dz);}
 float clipSeconds(const std::string& name){auto it=timing.find(name);return it==timing.end()?1.0f:it->second.duration/30.0f;}
+p2posefamily::Bank poseBank("KABUTO"); // #895 interpolated draw
+p2posefamily::Actors poseVis;
 void loadAnimation(const std::vector<p2animation::Clip>& bank){
-    size_t total=0;std::vector<unsigned char> reference;
-    for(const auto& clip:bank){size_t clipBytes=0;
-        for(int i=0;i<clip.count;++i){char path[192];std::snprintf(path,sizeof(path),"assets/dataDir/courses/pikmin2room/kabuto_Kabuto_%s_%02d.mod",clip.name.c_str(),i);
-            std::ifstream file(path,std::ios::binary|std::ios::ate);if(!file)std::abort();auto size=file.tellg();
-            if(size<=0||size>512*1024)std::abort();clipBytes+=size_t(size);total+=size_t(size);
-            if(clipBytes>512*1024||total>10*1024*1024)std::abort();file.seekg(0);
-            std::vector<unsigned char> bytes(size_t(size),0),resources;
-            if(!file.read(reinterpret_cast<char*>(bytes.data()),size)||!p2animation::resources(bytes,resources))std::abort();
-            if(!reference.empty()&&reference!=resources)std::abort();reference=resources;
-        }
-    }
-    Shape* shared=nullptr;
+    // #895: compact loader (few Shapes + decoded vectors per clip); the Shapes
+    // stay the nearest-pose fallback. Fail-closed as before.
+    size_t total=0;p2poseload::Shared shared;
     for(const auto& clip:bank){timing[clip.name]=clip;
-        for(int i=0;i<clip.count;++i){char path[160];std::snprintf(path,sizeof(path),"courses/pikmin2room/kabuto_Kabuto_%s_%02d.mod",clip.name.c_str(),i);
-            Shape* shape=gameflow.loadShape(path,true);if(!shape)std::abort();
-            if(!shared){shared=shape;for(int t=0;t<shape->mTexAttrCount;++t)if(shape->mTexAttrList[t].mTexture)shape->mTexAttrList[t].mTexture->attach();}
-            else{
-                if(shape->mMaterialCount!=shared->mMaterialCount||shape->mTexAttrCount!=shared->mTexAttrCount||shape->mTevInfoCount!=shared->mTevInfoCount)std::abort();
-                for(int j=0;j<shape->mTotalMatpolyCount;++j){auto* poly=shape->mMatpolyList[j];if(!poly||!poly->mMaterial)continue;int material=-1;
-                    for(int m=0;m<shape->mMaterialCount;++m)if(poly->mMaterial==&shape->mMaterialList[m])material=m;
-                    if(material<0)std::abort();poly->mMaterial=&shared->mMaterialList[material];}
-                shape->mMaterialList=shared->mMaterialList;shape->mTexAttrList=shared->mTexAttrList;shape->mTevInfoList=shared->mTevInfoList;
-            }
-            animated[clip.name].push_back(shape);
-        }
+        std::string error;
+        if(!p2posefamily::loadFamilyClip(poseBank,clip.name,"kabuto_Kabuto_"+clip.name,clip.count,clip.duration,clip.frames,shared,total,animated[clip.name],error)){
+            std::printf("P2_KABUTO_BANK_INVALID clip=%s reason=%s\n",clip.name.c_str(),error.c_str());std::fflush(stdout);std::abort();}
     }
-    std::printf("P2_KABUTO_BANK_READY mod_bytes=%zu gameplay=P1_unchanged\n",total);
+    std::printf("P2_KABUTO_BANK_READY mod_bytes=%zu resident=1 gameplay=P1_unchanged\n",total);
 }
 void stop(BTeki* a){a->inputDrive(Vector3f(0.0f,0.0f,0.0f));a->mVelocity.x=0.0f;a->mVelocity.y=0.0f;a->mVelocity.z=0.0f;}
 // Facing (EnemyBase::updateFaceDir) and StateMove setTargetSpeed along it.
@@ -213,12 +198,12 @@ void die(BTeki* a,KabutoFsm& s,unsigned gen,float prior){
     transition(a,s,KB_DEAD,"dead",gen);
 }
 }
-void pc_p2_kabuto_fsm_reset(){
+void pc_p2_kabuto_fsm_reset(){poseBank.reset();poseVis.clear();
     if(fleet.active()>0){std::printf("P2_KABUTO_STONE_RESET active=%d\n",fleet.active());std::fflush(stdout);}
     fleet.reset();stoneDebt=0.0;stoneMap.proxy.clear();stoneDrawLogged=false;shooters.clear();
     for(int i=0;i<p2kabutostone::kFleetCapacity;++i){slotGen[i]=0;slotPosTicks[i]=0;}
     actors.clear();fsms.clear();drawn.clear();drawnCorpse.clear();animated.clear();timing.clear();ready=false;}
-void pc_p2_kabuto_fsm_forget(BTeki* a){auto* v=static_cast<PelletView*>(a);
+void pc_p2_kabuto_fsm_forget(BTeki* a){poseVis.forget(a);auto* v=static_cast<PelletView*>(a);
     // The shooter is gone; its stones keep flying and Press is no longer
     // attributed to it (no dangling actor pointer is kept).
     const std::uint64_t tok=tokenOf(a);const int orphaned=fleet.forgetOwner(tok);shooters.erase(tok);
@@ -396,7 +381,11 @@ bool pc_p2_kabuto_fsm_draw(BTeki* actor,Graphics& gfx,const Matrix4f& matrix,boo
     auto ft=fsms.find(static_cast<PelletView*>(actor));
     const char* name=corpse?"dead":(ft!=fsms.end()?ft->second.clip.c_str():p2kabutofsm::motionClip(actor->mTekiAnimator->getCurrentMotionIndex()));
     Shape* shape=animated.at("wait").front();
-    if(name){float phase=corpse?1.0f:(ft!=fsms.end()?ft->second.phase:0.0f);shape=animated.at(name).at(timing.at(name).index(phase,corpse));}
+    if(name){float phase=corpse?1.0f:(ft!=fsms.end()?ft->second.phase:0.0f);shape=animated.at(name).at(timing.at(name).index(phase,corpse));
+        // #895: lerp + crossfade into a private Shape; nearest pose stays the fallback.
+        const p2animation::Clip& clipTiming=timing.at(name);
+        const float sourceFrame=corpse?float(clipTiming.duration-1):std::max(0.f,std::min(1.f,phase))*float(clipTiming.duration-1);
+        if(Shape* smooth=poseVis.draw(actor,poseBank,name,sourceFrame,actor->mGenerator?pc_p2_campaign_token(actor):0u))shape=smooth;}
     shape->updateAnim(gfx,matrix,nullptr,actor);
     pc_gfx_specular_family_scope(1);
     shape->drawshape(gfx,*gfx.mCamera,nullptr);

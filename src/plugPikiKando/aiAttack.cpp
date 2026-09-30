@@ -1,4 +1,7 @@
 #include "AIConstant.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_p2_breadbug_teki.h"
+#endif
 #include "AIPerf.h"
 #include "CourseDebug.h"
 #include "DebugLog.h"
@@ -93,6 +96,15 @@ void ActAttack::init(Creature* creature)
 		target            = creature;
 		mTargetIsPlayer   = false;
 	}
+
+#if defined(PIKI_PC_PORT)
+	// #898 backstop: whatever path chose it, an unbittered OWN Breadbug is not
+	// a living thing and never becomes an attack target.
+	if (target && pc_p2_breadbug_teki_untargetable(target, "act_attack_init")) {
+		target = nullptr;
+		mOther.clear();
+	}
+#endif
 
 	if (target) {
 		mOther.set(target);
@@ -549,7 +561,11 @@ void ActJumpAttack::procCollideMsg(Piki* piki, MsgCollide* msg)
 int ActJumpAttack::exec()
 {
 	Creature* target = mTarget.getPtr();
-	if (!target || !target->isVisible() || !target->isAlive()) {
+	if (!target || !target->isVisible() || !target->isAlive()
+#if defined(PIKI_PC_PORT)
+	    || pc_p2_breadbug_teki_untargetable(target, "act_jump_attack") // #898 backstop
+#endif
+	) {
 		if (mPiki->isStickTo()) {
 			mPiki->endStickObject();
 		}

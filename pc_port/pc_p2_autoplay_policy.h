@@ -105,6 +105,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -186,6 +187,35 @@ inline bool isPowerEnabled()
 {
     if (!isEnabled()) return false;
     const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER");
+    return v && v[0] && std::strcmp(v, "0") != 0;
+}
+
+// #244 test tooling: PIKMIN_RANDOMIZER_AUTOPLAY_BOMBSARAI_HOLD=<seconds>
+// overrides Config::bombsaraiHold (the "stand under the carrier" hold) so a
+// run can throw while the carrier still holds its bomb. Inert unless the
+// autoplay gate is on; a missing or unparsable value keeps the default.
+inline float bombsaraiHoldSeconds(float fallback)
+{
+    if (!isEnabled()) return fallback;
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_BOMBSARAI_HOLD");
+    if (v && v[0]) {
+        char* end = nullptr;
+        const double d = std::strtod(v, &end);
+        if (end && end != v && *end == 0 && d >= 0.0 && d < 600.0) return float(d);
+    }
+    return fallback;
+}
+
+// #898 TEST-ONLY observation knob: PIKMIN_RANDOMIZER_AUTOPLAY_NO_DELIVER.
+// After a kill the bot does NOT deliver the corpse: it holds the whistle for
+// noDeliverWhistle seconds (calls the squad off the corpse) and reports, then
+// Done walks back to the Onion and idles. Used to watch what the world does
+// with an abandoned carcass (a Breadbug dragging it home) - pad input only,
+// nothing is forced. Inert unless the autoplay gate is on.
+inline bool noDeliverEnabled()
+{
+    if (!isEnabled()) return false;
+    const char* v = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_NO_DELIVER");
     return v && v[0] && std::strcmp(v, "0") != 0;
 }
 
@@ -305,7 +335,21 @@ inline unsigned sourceForSpeciesName(const char* name)
 }
 
 inline bool isKoganeLike(unsigned source) { return source == 9; }
-inline bool isFlyer(unsigned source) { return source == 23 || source == 57 || source == 32 || source == 72; }
+// #244: 58 BombSarai hovers at fp01 and is engaged by throwing Pikmin onto it.
+inline bool isFlyer(unsigned source) { return source == 23 || source == 57 || source == 58 || source == 32 || source == 72; }
+// #898: the Breadbug (38) takes no attack damage (source damageCallBack is
+// bitter-only): only a thrown Pikmin landing on it while falling hurts it
+// (press). The bot leads its throws onto the walking body and keeps a
+// longer attack window; it is still pad input only.
+inline bool isPressOnly(unsigned source) { return source == 38; }
+// #898 aftermath: the Breadbug corpse is small. Walking onto it (the generic
+// seed) shoves it ahead of the captain (pellet collision, navi at ~20 u) and
+// the walking cursor sits ~78 u ahead, so thrown Pikmin fly over it and land
+// past it (v2c: carriers=0 for 60 s, cursor 78 u beyond the corpse). For
+// these corpses the bot stands off, slides the cursor onto the corpse with
+// the P1 look band (the captain stands still) and throws only when the
+// cursor is on it. Pad input only, like every other bot stance.
+inline bool aimsCorpseWithCursor(unsigned source) { return source == 38; }
 
 // #884 round 4: KingChappy (53) keeps the captain OUT of the source
 // invisible range while attacking. Source searchTarget prefers a captain in
@@ -319,6 +363,27 @@ inline bool isFlyer(unsigned source) { return source == 23 || source == 57 || so
 // while being stomped every flick. Only the King has this gate; every other
 // family keeps the unchanged contact steer.
 inline bool isKingStandoff(unsigned source) { return source == 53; }
+
+// #245 Antenna Beetle (Fuefuki) stance. The beetle's whistle claims every
+// Pikmin inside attackRadius (fp22 = 130, FuefukiState.cpp updateWhisle), so
+// a captain in contact loses his whole squad each cast (d4: 76 held at
+// death) and never throws. A player fights it from range: stand outside the
+// cast ring and lob Pikmin onto its back, which is also the only way to
+// reach the source pressCallBack (a thrown Pikmin landing while mCanStruggle
+// flips it into Struggle, Fuefuki.cpp:163-168). The stance reuses the King
+// back/close/hold machinery with its own band (Config::fuefuki*); the King's
+// tongue evade and low-health band do not apply. Pad input only.
+inline bool isFuefukiStandoff(unsigned source) { return source == 41; }
+// #897 bot roll evade: Segmented Crawbster (DangoMushi, 94). The body is
+// invulnerable except inside the Turn stickable window (EB_Invulnerable,
+// DangoMushiState.cpp:530), its StateAttack ball roll presses every grounded
+// Pikmin it touches (PikiPressedState: lethal), and it only wakes from Stay
+// inside fp11 (150). A squad thrown at the ball outside the window therefore
+// only feeds the next roll (r5/r6: 93/93 and 77/77 pressed Pikmin died). The
+// roller stance wakes it, then holds a standoff with no throws, dodges the
+// roll sideways with the squad whistled tight, and throws everything only
+// while the Turn window is open. Only 94 has this stance.
+inline bool isRollerStance(unsigned source) { return source == 94; }
 
 // Numeric filter matches a generator key; otherwise a species name match.
 inline bool matchTarget(unsigned token, unsigned source, const char* species, const std::string& filter)
@@ -375,6 +440,27 @@ struct Config {
     float corpseOutOfReach = 800.0f; // tdist past this at giveup names corpse_out_of_reach
     float koganeConfirm = 20.0f; // after Kogane damage, watch escapes then move on
     float kurageAttackMultiplier = 2.0f; // Kurage has high HP: longer attack window
+    float pressOnlyAttackMultiplier = 5.0f; // #898 press-only targets: one press per landed throw
+    float pressLeadSeconds = 0.6f; // #898 aim ahead of a walking press-only target
+    float corpseAimNear = 40.0f; // #898 cursor-aim corpses: closer than this -> step back (never shove it)
+    float corpseAimFar = 70.0f; // #898 cursor-aim corpses: farther than this -> walk in (no throws)
+    float corpseCursorTol = 12.0f; // #898 cursor-aim corpses: throw only with the cursor this close
+    float corpseAimWhistleCooldown = 10.0f; // #898 cursor-aim corpses: throw window after a regroup whistle
+    bool noDeliver = false; // #898 TEST-ONLY: abandon corpses (also env NO_DELIVER)
+    float noDeliverWhistle = 3.0f; // #898 whistle hold before abandoning a corpse
+    // #246: the Titan Dweevil (73) soaks 4 x 6000 weapon HP before its 5000
+    // body HP is exposed, and only a Pikmin stuck on a weapon's own part
+    // damages it; the bot keeps throwing for a longer window (bot assistance).
+    float titanAttackMultiplier = 6.0f;
+    // #246: a Titan lets go of every stuck Pikmin at Dead (deathProcedure
+    // setAlive(false)) ~11 s before its corpse forms, so the aftermath can
+    // start with an empty squad and nobody to seed-throw. A player whistles
+    // the strays: bounded episodes, only while the squad is empty.
+    int titanAftermathWhistles = 3;
+    float titanAftermathWhistleHold = 1.5f;
+    float titanRegroupWalk = 12.0f; // #246: max walk to the stray centroid per regroup episode
+    float titanSeedRingMin = 60.0f;  // #246: Titan corpse seeding standoff ring (cursor ~95 u ahead)
+    float titanSeedRingMax = 140.0f;
     float saraiLowHeight = 120.0f; // Sarai thrown at only when within this height above ground (or grabbing)
     float throwRange = 260.0f; // XZ distance at which throws start
     float arriveRadius = 90.0f; // XZ distance considered "at" the Onion
@@ -398,6 +484,10 @@ struct Config {
     // standing with him (source attack path; eating needs a target outside
     // fp06). Hysteresis: back off below Min until Resume; close in above Max
     // until CloseStop; hold (look + throw) in between.
+    // #244 BombSarai 58: on each fresh engagement the squad first stands under
+    // the carrier (no throws) for this long, the way a player waits out the
+    // bomb drop; the carrier's own source Release decides whether it drops.
+    float bombsaraiHold = 6.0f;
     bool kingStandoff = true;
     float kingStandoffMin = 95.0f;
     float kingStandoffResume = 110.0f;
@@ -425,7 +515,68 @@ struct Config {
     // beyond fp20 (130) and the tongue reach, so the King never attacks the
     // captain; he keeps throwing from there. 0 disables.
     float kingLowHp = 35.0f;
-    float lookStickScale = 0.24f;
+    // #245 Fuefuki stance band (XZ). d5 showed a band outside the cast ring
+    // (150-195) never lands a throw: the cursor trails the backing stick and
+    // P1 throws land at the cursor, so no thrown Pikmin ever reached the
+    // beetle (presses=0). The stance now holds a throwing band inside the
+    // ring while the beetle is not casting and leaves the ring
+    // (fuefukiEvadeClear) for the whole whistle cast (Senses::targetAttacking,
+    // source StateWhisle; the ring grows to fp22 = 130 over 1 s, so the
+    // captain at <= 95 walks out ahead of it).
+    bool fuefukiStandoff = true;
+    float fuefukiStandoffMin = 55.0f;
+    float fuefukiStandoffResume = 65.0f;
+    float fuefukiStandoffMax = 95.0f;
+    float fuefukiStandoffCloseStop = 85.0f;
+    float fuefukiEvadeClear = 165.0f;
+    // #245 owner-death Panic reclaim (Aftermath, Fuefuki targets only): the
+    // beetle's followers go into an astonish Panic when it dies
+    // (FuefukiState.cpp StateDead -> releasing the whistle hold). A player
+    // whistles them back before carrying; the bot does the same when a
+    // panicking Pikmin is inside panicReclaimRadius (under the 100 u whistle
+    // max radius, NaviMgr.h:27), for whistleHold, at most panicReclaimMax
+    // times per engagement, with whistleCooldown between.
+    bool panicReclaim = true;
+    float panicReclaimRadius = 90.0f;
+    int panicReclaimMax = 4;
+    float lookStickScale = 0.24f; // 0.24*127 = 30 bytes: |stick| 0.41 (look band), no MSTICK bits (> 32)
+    // #897 roller stance (isRollerStance). The standoff band sits around the
+    // source fp20 attack range (300) so the Crawbster keeps coming and rolls;
+    // the dodge starts while the ball is within rollerEvadeRange.
+    bool rollerStance = true;
+    float rollerStandMin = 180.0f; // ar8: a 280..400 band sat outside fp20 (300) and the Crawbster never rolled
+    float rollerStandMax = 270.0f;
+    float rollerWakeDist = 110.0f; // walk inside fp11 (150) to wake it from Stay
+    float rollerEvadeRange = 650.0f;
+    float rollerThrowGap = 0.10f; // Turn window: throw as fast as the pad allows (ar7: ~2/s left 13-15 hits per window)
+    float rollerThrowHold = 0.08f;
+    float rollerAttackTimeout = 900.0f; // a multi-cycle boss fight, not one throw burst
+    float rollerChaseDist = 1100.0f; // the ball rolls away far; only a real loss re-approaches
+    // Tier gate: the Impact arena sits on an upper tier (y=20) above the box
+    // corridor (y=-30). XZ-close across the ledge is not "in range" (ar6: the
+    // bot stood 400 below the ledge for minutes while the Crawbster could not
+    // reach it). Past this |dy| the roller keeps approaching over the route.
+    float rollerTierDy = 40.0f;
+    float rollerSeedStand = 130.0f; // corpse seeding: stop here and aim the cursor onto the corpse
+    float rollerHomeLeash = 200.0f; // back-off blends toward home past this XZ distance from it
+    // #897 power-mode resupply: the power squad is the whole stocked Onion,
+    // so after a crush the Onion is empty and the v4 resupply (needs stock)
+    // never fired (r5 field=1, r6 no resupply). Below this field count power
+    // mode walks back to the Onion, the driver restocks it through the same
+    // power stock path and exits it again (AUTOPLAY_POWER_RESTOCK), then the
+    // Brain re-selects. 0 disables.
+    int powerResupplyField = 25;
+    int powerRestockMax = 12;
+    // #897 push obstacles: a P1 HinderRock (the Impact Site cardboard box)
+    // blocks the only walk to the impact_goolix arena (ar1: 6 STUCK at the
+    // box -> target_unreachable). When the driver reports an unfinished box
+    // in front of the approach, close to obstaclePushDist and throw at it;
+    // thrown Pikmin push it (HinderRock::workable). Stuck windows do not count
+    // while pushing; obstaclePushMax bounds one approach stint.
+    float obstaclePushDist = 150.0f;
+    float obstaclePushGap = 0.35f;
+    float obstaclePushMax = 120.0f;
+    float obstacleRegroupEvery = 6.0f; // after a push: whistle pulse period while scattered
     // #901 part gather: stand in this XZ ring around a dropped ship part and
     // swarm (C-stick) the party onto it; formed Pikmin that touch a pellet
     // with a free slot start carrying it (piki.cpp collisionCallback
@@ -514,6 +665,12 @@ struct Senses {
     float wpZ = 0.0f;
     // Onion / squad facts for the withdraw phase.
     int fieldPikmin = 0; // live field Pikmin
+    int squadPikmin = 0; // #246: live Pikmin following the captain (FormationMode)
+    // #246: idle field Pikmin (FreeMode, not carrying, not in distress) and
+    // their centroid, so a Titan aftermath can walk to them before whistling.
+    int strayPikmin = 0;
+    float strayX = 0.0f;
+    float strayZ = 0.0f;
     int onionStored = 0; // Pikmin stored in the nearest stocked Onion
     float onionDist = 1.0e30f; // XZ distance to that Onion
     bool containerOpen = false; // Onion container UI is up
@@ -522,6 +679,11 @@ struct Senses {
     unsigned targetSource = 0;
     float tgtX = 0.0f;
     float tgtZ = 0.0f;
+    // #246 bot assistance: a throw aim point other than the actor centre
+    // (the Titan's nearest captured weapon, the only stickable part).
+    bool aimValid = false;
+    float aimX = 0.0f;
+    float aimZ = 0.0f;
     float targetDist = 1.0e30f; // XZ distance navi -> target
     bool targetAlive = false;
     float targetHealthFrac = 1.0f; // 1 == untouched
@@ -555,6 +717,12 @@ struct Senses {
     bool scattered = false; // squad scattered: whistle regroup
     bool squadDistress = false; // grabbed/thrown-off/burning Pikmin: whistle regroup (bot-v4)
     bool waypointLeg = false; // steer the detour waypoint, not the target
+    // #246/#899: the driver is walking the squad into an unfinished P1
+    // HinderRock (pushable box) on the approach route. Pikmin push it by the
+    // normal formation collision (piki.cpp PushstoneMode); the captain stands
+    // still meanwhile, so these windows are not "stuck" and do not age the
+    // approach timeout. The driver caps the total obstacle time.
+    bool obstacleWork = false;
     // #901: XZ length still to walk along the planned route (captain -> active
     // leg -> remaining legs -> target); 0 = no route. Approach measures
     // progress on it while a route is active, so a detour that first leads
@@ -594,6 +762,39 @@ struct Senses {
     bool targetAttacking = false;
     bool naviHpValid = false;
     float naviHp = 0.0f;
+    // #245: Pikmin in PIKISTATE_Panic (any cause) and the XZ distance from
+    // the captain to the nearest one (1e30 when none). Only the Fuefuki
+    // Aftermath panic reclaim reads them.
+    int panicCount = 0;
+    float panicNearest = 1.0e30f;
+    // #897 roller stance senses (read-only DangoMushi probe; the driver sets
+    // them for source 94 only). Dormant = still in Stay (hidden).
+    bool targetDormant = false;
+    // #897 the roller's home (where it was first seen, in Stay): the arena
+    // floor. Evade/back-off lean toward it so the captain does not walk off
+    // the arena tier (ar7: an evade dropped him off the Impact ledge).
+    bool homeValid = false;
+    float homeX = 0.0f;
+    float homeZ = 0.0f;
+    bool targetDyValid = false; // #897 target height minus captain height is known
+    float targetDy = 0.0f;
+    bool targetRolling = false;
+    bool targetVulnerable = false;
+    float targetVelX = 0.0f;
+    float targetVelZ = 0.0f;
+    // #897 power resupply: restocks the driver has already spent this run.
+    int powerRestocks = 0;
+    // #897 push obstacle: nearest unfinished HinderRock in front of the
+    // approach (driver: within its scan range and ahead of the current leg).
+    bool pushValid = false;
+    float pushX = 0.0f;
+    float pushZ = 0.0f;
+    float pushDist = 1.0e30f;
+    bool pushMoving = false;
+    // Throw aim: a point just outside the face toward the captain (a throw
+    // at the centre lands ON the box and those Pikmin never push; ar2).
+    float pushAimX = 0.0f;
+    float pushAimZ = 0.0f;
 };
 
 // Pad output for one tick. moveX/moveZ is the desired world-space XZ move
@@ -643,6 +844,8 @@ public:
         whistleTime = 0.0f;
         whistling = false;
         whistleCooldown = 0.0f;
+        aimWhistleLeft = 0.0f;
+        aimWhistleCooldown = 0.0f;
         menuTaps = 0;
         menuHoldTime = 0.0f;
         menuConfirmed = false;
@@ -674,6 +877,9 @@ public:
         amHadEnough = false; // bot-v7: the lift was viable (escorted)
         amLastCrew = 0; // bot-v7: high-water crew for SeedGrow progress
         amGrowStill = 0.0f; // bot-v7: time without crew growth in SeedGrow
+        amWhistles = 0;
+        amWhistleTime = 0.0f;
+        amRegroupWalk = 0.0f;
         pgWhistle = 0.0f;
         pgCooldown = 0.0f;
         pgLogTime = 0.0f;
@@ -682,6 +888,8 @@ public:
         pgStall = 0.0f;
         withdrawCycles = 0;
         throwSpin = 0.0f;
+        leadValid = false;
+        leadVX = leadVZ = 0.0f;
         kingBacking = false;
         kingClosing = false;
         kingBackTime = 0.0f;
@@ -689,6 +897,20 @@ public:
         kingEvading = false;
         kingEvadeTime = 0.0f;
         kingLowHpMode = false;
+        amPanicWhistles = 0;
+        amPanicWhistle = false;
+        amPanicTime = 0.0f;
+        amPanicCooldown = 0.0f;
+        rollerMode = -1;
+        rollerWhistleTime = 0.0f;
+        powerResupplying = false;
+        powerAtOnion = false;
+        pushTime = 0.0f;
+        pushing = false;
+        pushedThisStint = false;
+        regroupClock = 0.0f;
+        legKnown = false;
+        tierReplanAsked = false;
         result = Result{};
         markers.clear();
         lastCommand = Command{};
@@ -698,6 +920,9 @@ public:
     State current() const { return state; }
     Command command() const { return lastCommand; }
     bool replanWanted() const { return wantReplan; }
+    // #897: the Brain is back at the Onion for a power-mode resupply and wants
+    // the driver to restock + exit it (driver: once per visit, bounded).
+    bool wantsPowerRestock() const { return state == State::WithdrawSeek && powerResupplying && powerAtOnion; }
     void clearReplan() { wantReplan = false; }
     std::vector<std::string> takeMarkers()
     {
@@ -765,6 +990,8 @@ private:
         whistleTime = 0.0f;
         whistling = false;
         whistleCooldown = 0.0f;
+        aimWhistleLeft = 0.0f;
+        aimWhistleCooldown = 0.0f;
         menuTaps = 0;
         menuHoldTime = 0.0f;
         menuConfirmed = false;
@@ -786,6 +1013,14 @@ private:
         kingEvading = false;
         kingEvadeTime = 0.0f;
         kingLowHpMode = false;
+        rollerMode = -1;
+        rollerWhistleTime = 0.0f;
+        powerAtOnion = false;
+        pushTime = 0.0f;
+        pushing = false;
+        regroupClock = 0.0f;
+        legKnown = false;
+        tierReplanAsked = false;
         emitState(in);
     }
     void holdIdle() { lastCommand = Command{}; }
@@ -826,9 +1061,95 @@ private:
     // whistle). Shared by Seed (no grabs yet) and SeedGrow (short crew).
     void seedSteerThrow(const Senses& in)
     {
+        if (!in.waypointLeg && in.targetToken != 0 && in.cursorValid && aimsCorpseWithCursor(in.targetSource)) {
+            cursorAimThrow(in);
+            return;
+        }
+        // #246 a8-a11: standing ON the Titan corpse put the throw cursor
+        // (~95 u ahead of the captain) past it, so thrown Pikmin landed idle
+        // and the crew never grew past 1-2 of 10. For the Titan, hold a
+        // standoff ring and slide the cursor onto the corpse in the P1 look
+        // band (the King standoff's aim), then throw.
+        if (in.targetSource == 73 && in.targetToken != 0 && !in.waypointLeg && in.cursorValid) {
+            if (in.targetDist < cfg.titanSeedRingMin) {
+                steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            } else if (in.targetDist > cfg.titanSeedRingMax) {
+                steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            } else {
+                kingLookAndThrow(in);
+            }
+            return;
+        }
+        // #897 big corpse (Crawbster): walking onto it pins the captain at its
+        // centre with the cursor ~100 past the far edge, so throws land off
+        // the corpse (ar9: 11/20 carriers, carry_stalled). Inside
+        // rollerSeedStand stop, and slide the cursor onto the corpse with the
+        // look-band stick, then throw.
+        if (cfg.rollerStance && isRollerStance(in.targetSource) && in.targetToken != 0
+            && in.targetDist <= cfg.rollerSeedStand && in.cursorValid) {
+            const float ex = in.tgtX - in.cursorX, ez = in.tgtZ - in.cursorZ;
+            const float el = std::sqrt(ex * ex + ez * ez);
+            if (el > cfg.kingCursorTol) {
+                lastCommand.moveX = ex / el;
+                lastCommand.moveZ = ez / el;
+                lastCommand.stickScale = cfg.lookStickScale;
+            }
+            if (el <= cfg.kingCursorTol * 2.0f) pulseA(in, cfg.throwHold, cfg.throwGap);
+            return;
+        }
         if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
         else if (in.targetToken != 0) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
         if (in.targetDist <= cfg.throwRange && in.targetToken != 0) pulseA(in, cfg.throwHold, cfg.throwGap);
+    }
+
+    // #898: stand off the corpse, slide the cursor onto it, throw on it.
+    void cursorAimThrow(const Senses& in)
+    {
+        const float d = in.targetDist;
+        // Regroup: throws need Pikmin at the captain. After the presses the
+        // squad is spread over the kill site (y1: 53 on the field, fewer than
+        // 5 near the captain, 2 carriers for 100 s, no throw ever landed).
+        // This path only runs while the crew is short (Seed / SeedGrow), so a
+        // stuck partial crew loses nothing to the whistle. Whistle for
+        // whistleHold, then a throw window of corpseAimWhistleCooldown.
+        if (aimWhistleCooldown > 0.0f) aimWhistleCooldown -= lastDt;
+        if (aimWhistleLeft <= 0.0f && in.scattered && aimWhistleCooldown <= 0.0f && d <= cfg.throwRange) {
+            aimWhistleLeft = cfg.whistleHold;
+            char buf[128];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_AIM_REGROUP token=%u tdist=%.0f bot-driven", in.targetToken, d);
+            markers.emplace_back(buf);
+        }
+        if (aimWhistleLeft > 0.0f) {
+            aimWhistleLeft -= lastDt;
+            if (aimWhistleLeft <= 0.0f) aimWhistleCooldown = cfg.corpseAimWhistleCooldown;
+            lastCommand.buttons = PadB;
+            pressOn = false;
+            pressPhase = 0.0f;
+            return;
+        }
+        if (d > cfg.corpseAimFar) {
+            steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            pressOn = false; // no throws while walking: the cursor trails the stick
+            pressPhase = 0.0f;
+            return;
+        }
+        if (d < cfg.corpseAimNear) {
+            steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            pressOn = false;
+            pressPhase = 0.0f;
+            return;
+        }
+        const float dx = in.tgtX - in.cursorX, dz = in.tgtZ - in.cursorZ;
+        const float len = std::sqrt(dx * dx + dz * dz);
+        if (len > cfg.corpseCursorTol && len > 1.0f) {
+            lastCommand.moveX = dx / len;
+            lastCommand.moveZ = dz / len;
+            lastCommand.stickScale = cfg.lookStickScale;
+            // Keep holding a Pikmin already in hand; release only on target.
+            if (pressOn) lastCommand.buttons |= PadA;
+            return;
+        }
+        pulseA(in, cfg.throwHold, cfg.throwGap);
     }
 
     void tickWithdrawSeek(float dt, const Senses& in)
@@ -844,6 +1165,10 @@ private:
             if (in.containerOpen) {
                 // v3 guard preserved: never steer while the UI is up.
                 enter(State::WithdrawMenu, in);
+                return;
+            }
+            if (powerResupplying) {
+                tickPowerResupply(dt, in);
                 return;
             }
             if (in.fieldPikmin >= cfg.powerWantSquad) {
@@ -1001,7 +1326,7 @@ private:
             // for THIS token returns to Aftermath to finish v5 delivery;
             // anything else is GIVEUP reason=target_gone with the token/state
             // as evidence. token==0 (no targets at all) still idles silently.
-            if (result.token != 0 && result.token == in.targetToken && (sawDamage || sawKill)) {
+            if (!resultReported && result.token != 0 && result.token == in.targetToken && (sawDamage || sawKill)) {
                 enter(State::Aftermath, in);
                 return;
             }
@@ -1018,7 +1343,9 @@ private:
         // rule), kogane-likes excluded, return so the next tick engages the new
         // target. Same-token bounces still resume Aftermath above; only a true
         // token switch with latched combat scores here (no spurious RESULTs).
-        if (result.token != 0 && in.targetToken != 0 && result.token != in.targetToken
+        // #898: a RESULT already reported for result.token must not be
+        // re-reported on every Select tick (multi-target sweep loop).
+        if (!resultReported && result.token != 0 && in.targetToken != 0 && result.token != in.targetToken
             && (sawKill || sawDamage) && !result.koganeLike) {
             finishTarget(in, /*claimedKill*/ false);
             return;
@@ -1043,7 +1370,15 @@ private:
         amHadEnough = false;
         amLastCrew = 0;
         amGrowStill = 0.0f;
+        amPanicWhistles = 0;
+        amPanicWhistle = false;
+        amPanicTime = 0.0f;
+        amPanicCooldown = 0.0f;
+        amWhistles = 0;
+        amWhistleTime = 0.0f;
+        amRegroupWalk = 0.0f;
         result = Result{};
+        resultReported = false;
         result.token = in.targetToken;
         result.koganeLike = isKoganeLike(in.targetSource);
         enter(State::Approach, in);
@@ -1070,6 +1405,7 @@ private:
             }
             return;
         }
+        if (wantPowerResupply(in, "approach")) return;
         if (in.fieldPikmin < cfg.resupplyThreshold && in.hasOnion && in.onionStored > 0) {
             // bot-v4: squad eaten en route and the Onion still stocks:
             // disengage, walk back, withdraw more, then return.
@@ -1086,19 +1422,57 @@ private:
         observeReceipt(in);
         const float closeEnough = isFlyer(in.targetSource) ? cfg.throwRange : cfg.throwRange * 0.75f;
         const float need = in.targetRevealed ? closeEnough : 120.0f; // walk onto disguised Sokkuri
-        if (in.targetDist <= need) {
+        const bool otherTier = rollerOtherTier(in);
+        if (otherTier && !tierReplanAsked && !in.waypointLeg) {
+            // Straight at it only hits the ledge: ask for a route now.
+            tierReplanAsked = true;
+            wantReplan = true;
+            char buf[200];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_TIER token=%u dy=%.0f dist=%.0f replan=1 bot-driven",
+                          in.targetToken, in.targetDy, in.targetDist);
+            markers.emplace_back(buf);
+        }
+        if (in.targetDist <= need && !otherTier) {
             enter(State::Attack, in);
             return;
         }
+        if (in.obstacleWork) {
+            // Pushing a HinderRock: steer into it, no stuck window, no
+            // approach-timeout ageing (the driver bounds the push time).
+            stateTime -= dt;
+            stuckWindowDist = 1.0e30f;
+            stuckWindowStart = 0.0f;
+            steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+            return;
+        }
+        if (tickObstaclePush(dt, in)) return;
         if (tickObstacle(dt, in)) return;
         // Progress / stuck tracking on straight-line distance, or on the
         // remaining route length while a route is active (#901: a
         // straight-line window threw away every long detour into a far arena).
+        // #897: with a detour leg but no route length, progress is measured
+        // to that leg (a real route may first lead AWAY from the target: the
+        // Impact Site ramp from the box corridor east to the upper tier), and
+        // reaching a new leg is progress in itself.
         const bool onRoute = in.waypointLeg && in.pathRemaining > 0.0f;
-        const float metric = onRoute ? in.pathRemaining : in.targetDist;
+        float metric = onRoute ? in.pathRemaining : in.targetDist;
         if (onRoute != approachOnRoute) {
             approachOnRoute = onRoute;
             stuckWindowDist = 1.0e30f; // re-anchor on the new metric
+        }
+        if (in.waypointLeg && !onRoute) {
+            const float lx = in.wpX - in.naviX, lz = in.wpZ - in.naviZ;
+            metric = std::sqrt(lx * lx + lz * lz);
+            if (!legKnown || std::fabs(in.wpX - legX) > 1.0f || std::fabs(in.wpZ - legZ) > 1.0f) {
+                if (legKnown) approachReplans = 0;
+                legKnown = true;
+                legX = in.wpX;
+                legZ = in.wpZ;
+                stuckWindowDist = 1.0e30f;
+            }
+        } else if (legKnown) {
+            legKnown = false;
+            stuckWindowDist = 1.0e30f;
         }
         if (stuckWindowDist >= 1.0e29f) {
             stuckWindowDist = metric;
@@ -1239,6 +1613,7 @@ private:
             enter(State::Aftermath, in); // whistle back, watch the corpse
             return;
         }
+        if (wantPowerResupply(in, "attack")) return;
         if (in.fieldPikmin < cfg.resupplyThreshold && in.hasOnion && in.onionStored > 0) {
             // bot-v4: squad eaten mid-fight and the Onion still stocks:
             // disengage, walk back, withdraw more, then return.
@@ -1264,7 +1639,13 @@ private:
         }
         const bool sarai = in.targetSource == 23;
         const bool kurage = in.targetSource == 57 || in.targetSource == 72;
-        const float limit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout;
+        const bool pressOnly = isPressOnly(in.targetSource);
+        const bool titan = in.targetSource == 73;
+        const bool roller = cfg.rollerStance && isRollerStance(in.targetSource);
+        const float limit = roller ? cfg.rollerAttackTimeout
+            : kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier
+            : titan ? cfg.attackTimeout * cfg.titanAttackMultiplier
+            : pressOnly ? cfg.attackTimeout * cfg.pressOnlyAttackMultiplier : cfg.attackTimeout;
         // Whistle first, then re-throw (bot-v4: real players do this):
         // - Sarai holding a Pikmin (targetGrabbing): whistle frees the grab;
         // - grabbed/thrown-off/burning squad (squadDistress: mouth-stuck,
@@ -1298,8 +1679,20 @@ private:
         }
         // bot-undamaged: fled/teleporting ground targets re-enter approach;
         // straight-line attack steer cannot cross the map.
-        if (in.targetDist > cfg.attackChaseDist) {
+        if (in.targetDist > (roller ? cfg.rollerChaseDist : cfg.attackChaseDist)) {
             enter(State::Approach, in);
+            return;
+        }
+        if (roller && rollerOtherTier(in) && !in.targetVulnerable) {
+            char buf[200];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_TIER token=%u dy=%.0f dist=%.0f state=attack bot-driven",
+                          in.targetToken, in.targetDy, in.targetDist);
+            markers.emplace_back(buf);
+            enter(State::Approach, in);
+            return;
+        }
+        if (roller) {
+            tickRollerStance(dt, in, limit);
             return;
         }
         if (whistleCooldown > 0.0f) whistleCooldown -= dt;
@@ -1317,7 +1710,9 @@ private:
             // undamaged's bound + cooldown (forces throw windows) with the
             // kurage-aware limit both lanes used (unkilled limit == wlimit).
             {
-                const float wlimit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier : cfg.attackTimeout;
+                const float wlimit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier
+                                   : titan  ? cfg.attackTimeout * cfg.titanAttackMultiplier
+                                   : pressOnly ? cfg.attackTimeout * cfg.pressOnlyAttackMultiplier : cfg.attackTimeout;
                 if (stateTime >= wlimit) {
                     giveUp(in, "attack_timeout");
                     finishTarget(in, /*killed*/ false);
@@ -1340,15 +1735,33 @@ private:
             }
             return;
         }
-        if (cfg.kingStandoff && isKingStandoff(in.targetSource)) {
+        if (in.targetSource == 58 && stateTime < bombsaraiHoldSeconds(cfg.bombsaraiHold)) {
+            steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            return;
+        }
+        if ((cfg.kingStandoff && isKingStandoff(in.targetSource))
+            || (cfg.fuefukiStandoff && isFuefukiStandoff(in.targetSource))) {
             tickKingStandoff(dt, in, limit);
             return;
         }
         // Kurage: body is on the ground (visual float only) so throw at the
         // body position; high HP means a longer window, and throws rotate to
         // spread Pikmin around the bell.
-        float aimX = in.tgtX, aimZ = in.tgtZ;
+        float aimX = in.aimValid ? in.aimX : in.tgtX, aimZ = in.aimValid ? in.aimZ : in.tgtZ;
         float gap = cfg.throwGap;
+        if (pressOnly) {
+            // Lead the throw by the target's observed ground velocity.
+            if (leadValid && dt > 0.0f) {
+                const float vx = (in.tgtX - leadX) / dt, vz = (in.tgtZ - leadZ) / dt;
+                leadVX += (vx - leadVX) * 0.2f;
+                leadVZ += (vz - leadVZ) * 0.2f;
+            }
+            leadX = in.tgtX;
+            leadZ = in.tgtZ;
+            leadValid = true;
+            aimX += leadVX * cfg.pressLeadSeconds;
+            aimZ += leadVZ * cfg.pressLeadSeconds;
+        }
         if (kurage) {
             throwSpin += dt * 1.5f;
             const float dx = in.tgtX - in.naviX, dz = in.tgtZ - in.naviZ;
@@ -1415,10 +1828,80 @@ private:
             finishTarget(in, /*claimedKill*/ false);
             return;
         }
+        if (sawKill && !sawReceipt && (cfg.noDeliver || noDeliverEnabled())) {
+            // #898 TEST-ONLY: abandon the corpse (whistle the squad off it).
+            if (stateTime < cfg.noDeliverWhistle) {
+                lastCommand.buttons = PadB;
+                return;
+            }
+            char buf[160];
+            std::snprintf(buf, sizeof(buf), "AUTOPLAY_NO_DELIVER token=%u corpse_left=1 bot-driven", in.targetToken);
+            markers.emplace_back(buf);
+            finishTarget(in, /*killed*/ true);
+            return;
+        }
         // bot-v5: NEVER whistle here (no PadB). Holding whistle gathers
         // Pikmin at the navi 36-65 u from the corpse so no carry ever
         // initiates (v4b diagnosis). Deliver with stick + throws only.
         const bool carryActive = in.transportSeen || in.carryCount > 0 || in.pelletCarriers > 0;
+        // #245 owner-death Panic reclaim (Fuefuki only; see Config). The one
+        // exception to "never whistle here": a short, bounded whistle while a
+        // panicking follower of the dead beetle is in range, so the squad it
+        // stole can crew the carry. Carry sensing and seeding resume after.
+        if (amPanicCooldown > 0.0f) amPanicCooldown -= dt;
+        if (cfg.panicReclaim && isFuefukiStandoff(in.targetSource) && !sawReceipt) {
+            if (!amPanicWhistle && in.panicCount > 0 && in.panicNearest <= cfg.panicReclaimRadius
+                && amPanicWhistles < cfg.panicReclaimMax && amPanicCooldown <= 0.0f) {
+                amPanicWhistle = true;
+                amPanicTime = 0.0f;
+                ++amPanicWhistles;
+                char buf[256];
+                std::snprintf(buf, sizeof(buf),
+                              "AUTOPLAY_PANIC_RECLAIM token=%u panic=%d nearest=%.0f whistle=%d/%d bot-driven",
+                              in.targetToken, in.panicCount, in.panicNearest, amPanicWhistles, cfg.panicReclaimMax);
+                markers.emplace_back(buf);
+            }
+            if (amPanicWhistle) {
+                amPanicTime += dt;
+                lastCommand.buttons = PadB;
+                if (amPanicTime >= cfg.whistleHold) {
+                    amPanicWhistle = false;
+                    amPanicCooldown = cfg.whistleCooldown;
+                }
+                return;
+            }
+        }
+        // #246 exception to the no-whistle rule (see titanAftermathWhistles):
+        // Titan only, strays on the field, bounded episodes. It fires when the
+        // squad is empty, or when squad plus crew cannot reach the corpse's
+        // carry minimum while idle strays could (a8/a9: 7 in the squad, 40
+        // idle strays scattered by the fight, crew stuck at 1 of 10). The
+        // captain first walks to the strays' centroid (at most
+        // titanRegroupWalk seconds), then holds the whistle there.
+        const int amCrew = in.pelletCarriers > 0 ? in.pelletCarriers : in.carryCount;
+        const bool amShort = in.squadPikmin == 0
+            || (in.carryWant > 0 && in.squadPikmin + amCrew < in.carryWant && in.strayPikmin > 0);
+        if (in.targetSource == 73
+            && (amWhistleTime > 0.0f || amRegroupWalk > 0.0f
+                || (amShort && in.fieldPikmin > in.pelletCarriers
+                    && amWhistles < cfg.titanAftermathWhistles))) {
+            if (amWhistleTime <= 0.0f && in.strayPikmin > 0 && amRegroupWalk < cfg.titanRegroupWalk) {
+                const float sx = in.strayX - in.naviX, sz = in.strayZ - in.naviZ;
+                if (sx * sx + sz * sz > 60.0f * 60.0f) {
+                    amRegroupWalk += dt;
+                    steer(in.naviX, in.naviZ, in.strayX, in.strayZ);
+                    return;
+                }
+            }
+            if (amWhistleTime <= 0.0f) ++amWhistles;
+            amWhistleTime += dt;
+            lastCommand.buttons = PadB;
+            if (amWhistleTime >= cfg.titanAftermathWhistleHold) {
+                amWhistleTime = 0.0f;
+                amRegroupWalk = 0.0f;
+            }
+            return;
+        }
         if (in.trackingPart) pgSawPart = true;
         if (pgSawPart && in.partGone) {
             // #901: the tracked ship part left the field (sucked into the
@@ -1715,6 +2198,13 @@ private:
             enter(State::WithdrawMenu, in);
             return;
         }
+        // #898: a matching target that was not listed when Done was entered
+        // (a Snagret still underground, a late spawn) re-engages. A token the
+        // bot already scored or gave up on never does, so this cannot loop.
+        if (in.targetToken != 0 && in.targetAlive && !settledTokens.count(in.targetToken)) {
+            enter(State::Select, in);
+            return;
+        }
         // No more targets: idle near the Onion (bot-v3: enemies may walk to
         // the squad, which is how bc1/bc2 scored its only kills). Pad-only,
         // still gated by update(); neutral when there is no Onion to hold.
@@ -1776,6 +2266,7 @@ private:
         std::snprintf(buf, sizeof(buf), "AUTOPLAY_GIVEUP reason=%s token=%u state=%s bot-driven",
                       reason, in.targetToken, stateName(state));
         markers.emplace_back(buf);
+        if (in.targetToken) settledTokens.insert(in.targetToken);
     }
 
     // bot-v5: aftermath giveup names WHY the delivery failed so the evidence
@@ -1840,8 +2331,300 @@ private:
                           int(result.carried), int(result.received), result.seconds);
         }
         markers.emplace_back(buf);
+        resultReported = true;
+        if (result.token) settledTokens.insert(result.token);
+        // The combat latches belong to the finished token. Left set, the next
+        // Select saw "token switch with latched combat scores" against a second
+        // live target of the same species and re-emitted this RESULT every
+        // tick (#897 Groink 78 re-run: 3,700 duplicate RESULT lines).
+        sawDamage = false;
+        sawKill = false;
+        sawReceipt = false;
         // The driver advances to the next target (or Done when none remain).
         enter(State::Select, in);
+    }
+
+    bool rollerOtherTier(const Senses& in) const
+    {
+        return cfg.rollerStance && isRollerStance(in.targetSource) && in.targetDyValid
+            && std::fabs(in.targetDy) > cfg.rollerTierDy;
+    }
+
+    // #897 push obstacle (Approach only). Returns true while it owns the pad.
+    bool tickObstaclePush(float dt, const Senses& in)
+    {
+        const bool want = in.pushValid && pushTime < cfg.obstaclePushMax;
+        if (!want) {
+            if (pushing) {
+                pushing = false;
+                char buf[200];
+                std::snprintf(buf, sizeof(buf), "AUTOPLAY_OBSTACLE phase=%s push_s=%.0f field=%d bot-driven",
+                              in.pushValid ? "budget" : "cleared", pushTime, in.fieldPikmin);
+                markers.emplace_back(buf);
+                stuckWindowDist = 1.0e30f; // fresh progress window after the push
+                approachReplans = 0;
+            }
+            if (pushedThisStint && in.scattered) {
+                // Pushers stay at the box: short whistle pulses on the way.
+                regroupClock += dt;
+                if (std::fmod(regroupClock, cfg.obstacleRegroupEvery) < 1.0f) {
+                    if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+                    else steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+                    lastCommand.buttons = PadB;
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (!pushing) {
+            pushing = true;
+            pushedThisStint = true;
+            char buf[200];
+            std::snprintf(buf, sizeof(buf),
+                          "AUTOPLAY_OBSTACLE phase=push at=(%.0f,%.0f) aim=(%.0f,%.0f) dist=%.0f field=%d bot-driven",
+                          in.pushX, in.pushZ, in.pushAimX, in.pushAimZ, in.pushDist,
+                          in.fieldPikmin);
+            markers.emplace_back(buf);
+        }
+        pushTime += dt;
+        stuckWindowStart = 0.0f; // pushing is progress, not a stuck window
+        steer(in.naviX, in.naviZ, in.pushX, in.pushZ);
+        if (in.pushDist <= cfg.obstaclePushDist) {
+            // In range: look-band stick (the captain stops and faces the
+            // cursor, which slides along the stick) moving the cursor onto the
+            // near-face aim point; throw once it is there.
+            lastCommand.moveX = 0.0f;
+            lastCommand.moveZ = 0.0f;
+            float cx = in.cursorX, cz = in.cursorZ;
+            if (!in.cursorValid) {
+                cx = in.pushAimX;
+                cz = in.pushAimZ;
+            }
+            const float ex = in.pushAimX - cx, ez = in.pushAimZ - cz;
+            const float el = std::sqrt(ex * ex + ez * ez);
+            if (el > cfg.kingCursorTol) {
+                lastCommand.moveX = ex / el;
+                lastCommand.moveZ = ez / el;
+                lastCommand.stickScale = cfg.lookStickScale;
+            }
+            if (el <= cfg.kingCursorTol * 2.0f) pulseA(in, cfg.throwHold, cfg.obstaclePushGap);
+        }
+        return true;
+    }
+
+    // #897 power-mode resupply trigger (Approach/Attack). Returns true when
+    // it switched state.
+    bool wantPowerResupply(const Senses& in, const char* from)
+    {
+        if (!isPowerEnabled() || cfg.powerResupplyField <= 0 || !in.hasOnion) return false;
+        if (in.fieldPikmin >= cfg.powerResupplyField) return false;
+        if (in.onionStored <= 0 && in.powerRestocks >= cfg.powerRestockMax) return false;
+        if (in.targetVulnerable) return false; // finish the open Turn window first
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+                      "AUTOPLAY_RESUPPLY field=%d stored=%d token=%u state=%s power=1 restocks=%d bot-driven",
+                      in.fieldPikmin, in.onionStored, in.targetToken, from, in.powerRestocks);
+        markers.emplace_back(buf);
+        powerResupplying = true;
+        enter(State::WithdrawSeek, in);
+        return true;
+    }
+
+    // #897 power resupply leg: walk back to the Onion (waypoint aware), stand
+    // at it while the driver restocks + exits the squad, whistle the new
+    // Pikmin in, then re-select once the field is back to powerWantSquad.
+    void tickPowerResupply(float dt, const Senses& in)
+    {
+        if (!in.hasOnion) {
+            powerResupplying = false;
+            enter(State::Select, in);
+            return;
+        }
+        const float at = cfg.arriveRadius * 2.0f;
+        if (!powerAtOnion && in.onionDist <= at) powerAtOnion = true;
+        if (!powerAtOnion) {
+            if (in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+            else steer(in.naviX, in.naviZ, in.onionX, in.onionZ);
+        } else {
+            // Short whistle pulses gather the exiting Pikmin into the party.
+            pressPhase += dt;
+            if (std::fmod(pressPhase, 2.0f) < 0.6f) lastCommand.buttons = PadB;
+        }
+        if (powerAtOnion && in.fieldPikmin >= cfg.powerWantSquad) {
+            powerResupplying = false;
+            enter(State::Select, in);
+            return;
+        }
+        if (powerAtOnion && in.onionStored <= 0 && in.powerRestocks >= cfg.powerRestockMax
+            && in.fieldPikmin > 0 && stateTime > 20.0f) {
+            powerResupplying = false; // restock budget spent: fight with what is out
+            enter(State::Select, in);
+            return;
+        }
+        // Stuck walking back: same replan contract as the normal path.
+        if (!powerAtOnion) {
+            if (stuckWindowDist >= 1.0e29f) {
+                stuckWindowDist = in.onionDist;
+                stuckWindowStart = 0.0f;
+                progressBest = in.onionDist;
+            }
+            if (in.onionDist < progressBest) progressBest = in.onionDist;
+            stuckWindowStart += dt;
+            if (stuckWindowStart >= cfg.stuckWindow) {
+                if (stuckWindowDist - progressBest < cfg.stuckMinProgress) {
+                    char buf[256];
+                    std::snprintf(buf, sizeof(buf),
+                                  "AUTOPLAY_STUCK state=withdraw_seek onion_dist=%.0f navi=(%.0f,%.0f) bot-driven",
+                                  in.onionDist, in.naviX, in.naviZ);
+                    markers.emplace_back(buf);
+                    wantReplan = true;
+                }
+                stuckWindowDist = progressBest;
+                stuckWindowStart = 0.0f;
+            }
+        }
+        if (stateTime >= cfg.withdrawTimeout * 2.0f) {
+            giveUp(in, "resupply_timeout");
+            powerResupplying = false;
+            enter(State::Select, in);
+        }
+    }
+
+    // #897 roller stance (see isRollerStance). Modes:
+    //   wake   - still in Stay: walk inside fp11 so it drops in;
+    //   punish - Turn stickable window open: close in and throw fast;
+    //   evade  - ball rolling within rollerEvadeRange: whistle held (squad
+    //            tight on the captain) and walk off the roll line, on the
+    //            captain's side of it, with a little distance added;
+    //   stand  - otherwise: hold [rollerStandMin, rollerStandMax] with no
+    //            throws (the body rejects damage), whistle pulses to regroup.
+    enum RollerMode { RollerWake = 0, RollerPunish, RollerEvade, RollerStand };
+    static const char* rollerModeName(int m)
+    {
+        switch (m) {
+        case RollerWake: return "wake";
+        case RollerPunish: return "punish";
+        case RollerEvade: return "evade";
+        case RollerStand: return "stand";
+        }
+        return "none";
+    }
+    void tickRollerStance(float dt, const Senses& in, float limit)
+    {
+        if (stateTime >= limit) {
+            giveUp(in, "attack_timeout");
+            finishTarget(in, /*killed*/ false);
+            return;
+        }
+        int mode = RollerStand;
+        if (in.targetVulnerable) mode = RollerPunish;
+        else if (in.targetRolling && in.targetDist < cfg.rollerEvadeRange) mode = RollerEvade;
+        else if (in.targetDormant) mode = RollerWake;
+        if (mode != rollerMode) {
+            rollerMode = mode;
+            char buf[256];
+            std::snprintf(buf, sizeof(buf),
+                          "AUTOPLAY_ROLLER mode=%s token=%u dist=%.0f field=%d hp=%.3f bot-driven",
+                          rollerModeName(mode), in.targetToken, in.targetDist, in.fieldPikmin,
+                          in.targetHealthFrac);
+            markers.emplace_back(buf);
+            rollerWhistleTime = 0.0f;
+            punishClock = 0.0f;
+            punishThrows = 0;
+        }
+        switch (mode) {
+        case RollerPunish: {
+            steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            const bool wasOn = pressOn;
+            if (in.targetDist <= cfg.throwRange) pulseA(in, cfg.rollerThrowHold, cfg.rollerThrowGap);
+            if (pressOn && !wasOn) ++punishThrows;
+            punishClock += dt;
+            if (punishClock >= 1.0f) {
+                punishClock = 0.0f;
+                char buf[200];
+                std::snprintf(buf, sizeof(buf),
+                              "AUTOPLAY_ROLLER_PUNISH dist=%.0f field=%d presses=%d hp=%.3f bot-driven",
+                              in.targetDist, in.fieldPikmin, punishThrows, in.targetHealthFrac);
+                markers.emplace_back(buf);
+            }
+            return;
+        }
+        case RollerWake:
+            if (in.targetDist > cfg.rollerWakeDist) steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            return;
+        case RollerEvade: {
+            float vx = in.targetVelX, vz = in.targetVelZ;
+            float vlen = std::sqrt(vx * vx + vz * vz);
+            const float ax = in.naviX - in.tgtX, az = in.naviZ - in.tgtZ;
+            if (vlen < 1.0f) {
+                // No drive velocity yet: assume it rolls straight at us.
+                vx = ax;
+                vz = az;
+                vlen = std::sqrt(vx * vx + vz * vz);
+            }
+            if (vlen < 1.0f) {
+                vx = 1.0f;
+                vz = 0.0f;
+                vlen = 1.0f;
+            }
+            vx /= vlen;
+            vz /= vlen;
+            float px = -vz, pz = vx;
+            if (ax * px + az * pz < 0.0f) {
+                px = -px;
+                pz = -pz;
+            }
+            // Off the roll line either way works; take the side toward the
+            // arena floor (home) when the captain is not already between
+            // the ball and that side by a wide margin.
+            if (in.homeValid) {
+                const float hx = in.homeX - in.naviX, hz = in.homeZ - in.naviZ;
+                const float lateral = std::fabs(ax * px + az * pz);
+                if (hx * px + hz * pz < 0.0f && lateral < 120.0f) {
+                    px = -px;
+                    pz = -pz;
+                }
+            }
+            // Ahead of the ball: sideways plus a little away; behind it (it
+            // is rolling off): just sideways.
+            const float ahead = ax * vx + az * vz;
+            const float away = ahead > 0.0f ? 0.35f : 0.0f;
+            float mx = px + vx * away, mz = pz + vz * away;
+            const float ml = std::sqrt(mx * mx + mz * mz);
+            if (ml > 1.0e-3f) {
+                mx /= ml;
+                mz /= ml;
+            }
+            lastCommand.moveX = mx;
+            lastCommand.moveZ = mz;
+            lastCommand.buttons = PadB;
+            return;
+        }
+        default:
+            break;
+        }
+        if (in.targetDist < cfg.rollerStandMin) {
+            steerAway(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+            // Back off along the arena floor: blend toward home once the
+            // captain is more than rollerHomeLeash from it.
+            if (in.homeValid) {
+                const float hx = in.homeX - in.naviX, hz = in.homeZ - in.naviZ;
+                const float hl = std::sqrt(hx * hx + hz * hz);
+                if (hl > cfg.rollerHomeLeash) {
+                    float mx = lastCommand.moveX + hx / hl, mz = lastCommand.moveZ + hz / hl;
+                    const float ml = std::sqrt(mx * mx + mz * mz);
+                    if (ml > 1.0e-3f) {
+                        lastCommand.moveX = mx / ml;
+                        lastCommand.moveZ = mz / ml;
+                    }
+                }
+            }
+        } else if (in.targetDist > cfg.rollerStandMax) {
+            steer(in.naviX, in.naviZ, in.tgtX, in.tgtZ);
+        }
+        rollerWhistleTime += dt;
+        if ((in.scattered || in.squadDistress) && std::fmod(rollerWhistleTime, 2.5f) < cfg.whistleHold * 0.5f)
+            lastCommand.buttons = PadB;
     }
 
     // #884 round 4: KingChappy attack stance (see isKingStandoff). Modes:
@@ -1918,12 +2701,16 @@ private:
     void tickKingStandoff(float dt, const Senses& in, float limit)
     {
         const float d = in.targetDist;
-        const bool lowHp = cfg.kingLowHp > 0.0f && in.naviHpValid && in.naviHp <= cfg.kingLowHp;
-        const float bandMin = lowHp ? cfg.kingEvadeClear : cfg.kingStandoffMin;
-        const float bandResume = lowHp ? cfg.kingEvadeClear + 15.0f : cfg.kingStandoffResume;
-        const float bandMax = lowHp ? cfg.kingEvadeClear + 30.0f : cfg.kingStandoffMax;
-        const float bandCloseStop = lowHp ? cfg.kingEvadeClear + 20.0f : cfg.kingStandoffCloseStop;
-        const bool attacking = cfg.kingEvade && in.targetAttacking;
+        const bool fue = isFuefukiStandoff(in.targetSource);
+        const bool lowHp = !fue && cfg.kingLowHp > 0.0f && in.naviHpValid && in.naviHp <= cfg.kingLowHp;
+        const float bandMin = fue ? cfg.fuefukiStandoffMin : lowHp ? cfg.kingEvadeClear : cfg.kingStandoffMin;
+        const float bandResume = fue ? cfg.fuefukiStandoffResume
+                                 : lowHp ? cfg.kingEvadeClear + 15.0f : cfg.kingStandoffResume;
+        const float bandMax = fue ? cfg.fuefukiStandoffMax : lowHp ? cfg.kingEvadeClear + 30.0f : cfg.kingStandoffMax;
+        const float bandCloseStop = fue ? cfg.fuefukiStandoffCloseStop
+                                    : lowHp ? cfg.kingEvadeClear + 20.0f : cfg.kingStandoffCloseStop;
+        const bool attacking = fue ? in.targetAttacking : cfg.kingEvade && in.targetAttacking;
+        const float evadeClear = fue ? cfg.fuefukiEvadeClear : cfg.kingEvadeClear;
         if (attacking && !kingEvading) kingEvadeTime = 0.0f;
         kingEvading = attacking;
         int mode;
@@ -1933,7 +2720,7 @@ private:
             kingBacking = false;
             kingClosing = false;
             kingBackTime = 0.0f;
-            if (d < cfg.kingEvadeClear) {
+            if (d < evadeClear) {
                 kingEvadeTime += dt;
                 float ax, az;
                 awayFrom(in, ax, az);
@@ -1989,9 +2776,9 @@ private:
             kingLowHpMode = lowHp;
             char buf[256];
             std::snprintf(buf, sizeof(buf),
-                          "AUTOPLAY_KING_STANDOFF mode=%s token=%u dist=%.0f back_time=%.1f king_attack=%d "
+                          "%s mode=%s token=%u dist=%.0f back_time=%.1f king_attack=%d "
                           "navi_hp=%.0f low_hp=%d bot-driven",
-                          kingModeName(mode), in.targetToken, d, kingBacking ? kingBackTime : 0.0f,
+                          fue ? "AUTOPLAY_FUEFUKI_STANDOFF" : "AUTOPLAY_KING_STANDOFF", kingModeName(mode), in.targetToken, d, kingBacking ? kingBackTime : 0.0f,
                           in.targetAttacking ? 1 : 0, in.naviHpValid ? in.naviHp : -1.0f, lowHp ? 1 : 0);
             markers.emplace_back(buf);
         }
@@ -2030,6 +2817,8 @@ private:
     float whistleTime = 0.0f;
     bool whistling = false;
     float whistleCooldown = 0.0f;
+    float aimWhistleLeft = 0.0f; // #898 cursor-aim regroup whistle remaining
+    float aimWhistleCooldown = 0.0f; // #898 throw window after a regroup whistle
     int menuTaps = 0;
     float menuHoldTime = 0.0f;
     bool menuConfirmed = false;
@@ -2037,6 +2826,8 @@ private:
     float stuckWindowDist = 1.0e30f;
     bool wantReplan = false;
     float progressBest = 1.0e30f;
+    bool trackingLeg = false; // approach stuck window follows a detour leg (#246/#899)
+    float trackLegX = 0.0f, trackLegZ = 0.0f;
     int approachReplans = 0; // consecutive STUCK windows in this Approach stint (bot-v3)
     bool approachOnRoute = false; // #901: approach progress metric is the route length
     bool obsWork = false; // #901: working a route obstacle in Approach
@@ -2063,6 +2854,9 @@ private:
     bool amHadEnough = false; // bot-v7: the lift escorted (viable) before shrinking
     int amLastCrew = 0; // bot-v7: high-water crew for SeedGrow progress
     float amGrowStill = 0.0f; // bot-v7: time without crew growth in SeedGrow
+    int amWhistles = 0;         // #246 Titan aftermath regroup episodes used
+    float amWhistleTime = 0.0f; // #246 current regroup whistle hold
+    float amRegroupWalk = 0.0f; // #246 time spent walking to the strays this episode
     float pgWhistle = 0.0f; // #901: remaining gather-whistle hold
     float pgCooldown = 0.0f; // #901: time until the next gather whistle may start
     float pgLogTime = 0.0f; // #901: AUTOPLAY_PART_GATHER rate limit
@@ -2077,6 +2871,10 @@ private:
     bool sawReceipt = false; // Onion receipt latched (authoritative for carried)
     int withdrawCycles = 0; // withdraw-menu repeat count this run
     float throwSpin = 0.0f; // Kurage throw rotation phase
+    bool leadValid = false; // #898 press-only lead estimate
+    bool resultReported = false; // #898 RESULT emitted for result.token
+    std::set<unsigned> settledTokens; // #898 tokens already scored or given up (Done never re-engages them)
+    float leadX = 0.0f, leadZ = 0.0f, leadVX = 0.0f, leadVZ = 0.0f;
     bool kingBacking = false; // #884 round 4: King standoff backing off (hysteresis)
     bool kingClosing = false; // #884 round 4: King standoff closing in (hysteresis)
     float kingBackTime = 0.0f; // continuous backing time (sidestep after kingSidestepAfter)
@@ -2084,6 +2882,24 @@ private:
     bool kingEvading = false; // #884 round 5: leaving the tongue sweep for the current King attack
     float kingEvadeTime = 0.0f; // time spent evading inside kingEvadeClear (sidestep after kingEvadeSideAfter)
     bool kingLowHpMode = false; // last stance used the low-health band (marker field)
+    int amPanicWhistles = 0; // #245: panic reclaim whistles used this engagement
+    bool amPanicWhistle = false; // #245: holding a panic reclaim whistle
+    float amPanicTime = 0.0f;
+    float amPanicCooldown = 0.0f;
+    int rollerMode = -1; // #897 last AUTOPLAY_ROLLER mode (-1 = none this stint)
+    float rollerWhistleTime = 0.0f; // #897 stand-mode whistle pulse clock
+    float punishClock = 0.0f; // #897 punish diagnostics clock
+    int punishThrows = 0; // #897 A presses this punish stint
+    bool powerResupplying = false; // #897 power resupply leg in progress (survives enter())
+    bool powerAtOnion = false; // #897 reached the Onion on this resupply visit
+    float pushTime = 0.0f; // #897 time spent pushing obstacles this approach stint
+    bool pushing = false; // #897 obstacle push active
+    bool pushedThisStint = false; // #897 pushed a box since the last reset (regroup pulses)
+    float regroupClock = 0.0f; // #897 post-push whistle pulse clock
+    bool tierReplanAsked = false; // #897 one immediate replan per approach when the target is on another tier
+    bool legKnown = false; // #897 approach progress is measured to this detour leg
+    float legX = 0.0f;
+    float legZ = 0.0f;
     bool announced = false;
     Result result;
     Command lastCommand;

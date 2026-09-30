@@ -4491,14 +4491,37 @@ void pc_gfx_present(void) {
     shadow_frame_reset();
     // PIKMIN_FRAME_DUMP=<dir>: the finished frame as PPM every 15 frames, for
     // looking at a scene where no screenshot tool reaches (Wayland, adb-less).
+    // PIKMIN_FRAME_DUMP_EVERY=<n> changes the interval (1 = every frame, for
+    // motion evidence such as #895 pose interpolation); PIKMIN_FRAME_DUMP_FROM
+    // and PIKMIN_FRAME_DUMP_TO bound the dumped frame numbers.
     if (const char* dumpDir = std::getenv("PIKMIN_FRAME_DUMP")) {
         static unsigned dumpFrame = 0;
-        if (++dumpFrame % 15 == 0 && sRenderWidth > 0 && sRenderHeight > 0) {
+        static const unsigned dumpEvery = [] {
+            const char* raw = std::getenv("PIKMIN_FRAME_DUMP_EVERY");
+            const long v = raw ? std::strtol(raw, nullptr, 10) : 15;
+            return unsigned(v >= 1 && v <= 3600 ? v : 15);
+        }();
+        static const unsigned dumpFrom = [] {
+            const char* raw = std::getenv("PIKMIN_FRAME_DUMP_FROM");
+            const long v = raw ? std::strtol(raw, nullptr, 10) : 0;
+            return unsigned(v > 0 ? v : 0);
+        }();
+        static const unsigned dumpTo = [] {
+            const char* raw = std::getenv("PIKMIN_FRAME_DUMP_TO");
+            const long v = raw ? std::strtol(raw, nullptr, 10) : 0;
+            return v > 0 ? unsigned(v) : ~0u;
+        }();
+        ++dumpFrame;
+        if (dumpFrame % dumpEvery == 0 && dumpFrame >= dumpFrom && dumpFrame <= dumpTo && sRenderWidth > 0
+                && sRenderHeight > 0) {
             std::vector<unsigned char> rgba(size_t(sRenderWidth) * sRenderHeight * 4);
             glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, sourceFramebuffer);
             glReadPixels(0, 0, sRenderWidth, sRenderHeight, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
             char path[512];
             snprintf(path, sizeof path, "%s/frame_%05u.ppm", dumpDir, dumpFrame);
+            // Marks the dump in the log stream so evidence tooling can pair a
+            // frame with the gameplay lines around it (e.g. target distance).
+            if (dumpEvery < 15) std::printf("PIKMIN_FRAME_DUMP frame=%u\n", dumpFrame);
             if (FILE* f = fopen(path, "wb")) {
                 fprintf(f, "P6\n%d %d\n255\n", sRenderWidth, sRenderHeight);
                 for (int y = sRenderHeight - 1; y >= 0; --y) {
@@ -4506,6 +4529,10 @@ void pc_gfx_present(void) {
                     for (int x = 0; x < sRenderWidth; ++x) fwrite(row + x * 4, 1, 3, f);
                 }
                 fclose(f);
+                // Log correlation for eye checks: the marker stream around this
+                // line is what the dumped frame shows (env-gated diagnostic).
+                std::printf("FRAME_DUMP frame=%05u %dx%d\n", dumpFrame, sRenderWidth, sRenderHeight);
+                std::fflush(stdout);
             }
         }
     }
@@ -8447,8 +8474,11 @@ static void mesh_arena_reset() {
     }
 }
 
+static std::vector<std::pair<uintptr_t, uintptr_t>> sDynamicVertexRanges;
+
 void pc_gfx_invalidate_resident_meshes(void) {
     if (!sResidentMeshes.empty()) mesh_arena_reset();
+    sDynamicVertexRanges.clear(); // heap reset: the blend shapes die with it
 }
 
 void pc_gfx_invalidate_cpu_range(const void* addr, size_t bytes) {
@@ -8461,6 +8491,29 @@ void pc_gfx_invalidate_cpu_range(const void* addr, size_t bytes) {
         else ++it;
     }
     // Arena space of dropped meshes is only reclaimed by a full reset.
+}
+
+// CPU-rewritten vertex storage (P2 pose blending rewrites a private shape's
+// vertex/normal arrays every frame). A mesh reading any of these ranges is
+// never made resident: caching it would freeze the first blended pose, and
+// rebuilding it every frame would exhaust the arena. Cleared with the arena.
+
+void pc_gfx_mark_dynamic_vertex_range(const void* addr, size_t bytes) {
+    if (!addr || bytes == 0) return;
+    const uintptr_t lo = uintptr_t(addr), hi = lo + bytes;
+    for (const auto& r : sDynamicVertexRanges)
+        if (r.first == lo && r.second == hi) {
+            pc_gfx_invalidate_cpu_range(addr, bytes);
+            return;
+        }
+    sDynamicVertexRanges.emplace_back(lo, hi);
+    pc_gfx_invalidate_cpu_range(addr, bytes);
+}
+
+static bool mesh_reads_dynamic_range(uintptr_t lo, uintptr_t hi) {
+    for (const auto& r : sDynamicVertexRanges)
+        if (r.first < hi && lo < r.second) return true;
+    return false;
 }
 
 // Copies the built vertices into the arena and registers the mesh. Returns
@@ -8968,6 +9021,8 @@ static void pc_gfx_call_display_list_impl(const void* list, u32 nbytes) {
         }
     }
     flushPendingStrip();
+    if (building && !sMeshBuild.empty() && mesh_reads_dynamic_range(mesh.lo, mesh.hi))
+        building = false;
     if (building && !sMeshBuild.empty()) {
         mesh.paletteSlots = meshMaxSlot + 1;
         const double uploadT0 = submit_clock_ms();

@@ -3,6 +3,7 @@
 #include "pc_p2_campaign_placements.h"
 #include "pc_p2_generated_placement.h"
 #include "pc_p2_sarai_manager.h"
+#include "pc_p2_smoke_any_slot.h"
 #include "pc_p2_otakara.h"
 #include "pc_p2_bluechappy.h"
 #include "pc_p2_chappy.h"
@@ -97,7 +98,7 @@ bool pc_p2_generated_placement_sweep_sarai()
 }
 
 static bool recordBind(BTeki* actor, unsigned accepted, unsigned sourceId,
-                       unsigned seedTargetUid, unsigned generatorId)
+                       unsigned seedTargetUid, unsigned generatorId, bool bypass = false)
 {
     if (!actor || !sourceId || !seedTargetUid || !accepted) {
         std::printf("P2_GENERATED_PLACEMENT source_id=%u target=%u generator=%u bound=0 reason=bad-request\n",
@@ -117,8 +118,15 @@ static bool recordBind(BTeki* actor, unsigned accepted, unsigned sourceId,
         std::fflush(stdout);
         return false;
     }
-    std::printf("P2_GENERATED_PLACEMENT source_id=%u target=%u generator=%u bound=1\n",
-                sourceId, seedTargetUid, generatorId);
+    if (bypass) {
+        // #944 smoke-seed bypass: the slot was NOT on the compiled approval
+        // list; PIKMIN_P2_SMOKE_ANY_SLOT let the seed's binding through.
+        std::printf("P2_GENERATED_PLACEMENT source_id=%u target=%u generator=%u bound=1 bypass=1\n",
+                    sourceId, seedTargetUid, generatorId);
+    } else {
+        std::printf("P2_GENERATED_PLACEMENT source_id=%u target=%u generator=%u bound=1\n",
+                    sourceId, seedTargetUid, generatorId);
+    }
     std::fflush(stdout);
     // Placement accepted, but no P2 behavior module has taken the actor: the
     // family sidecar path still owns behavior. Callers must not read bound=1
@@ -126,18 +134,39 @@ static bool recordBind(BTeki* actor, unsigned accepted, unsigned sourceId,
     return false;
 }
 
+// #944: with PIKMIN_P2_SMOKE_ANY_SLOT the seed's own binding is the accepted
+// slot for any bindable source the bridge resolved to this target. The bridge
+// resolution itself (seed says source X at target Y) is still required; only
+// the compiled approval list / slot constant is skipped.
+static bool smokeAccepts(unsigned sourceId, unsigned seedTargetUid)
+{
+    return pc_p2_smoke_any_slot() && pc_randomizer_p2_bridge()
+        && pc_randomizer_p2_source_for_id(seedTargetUid) == sourceId;
+}
+
 static bool museBind(BTeki* actor, unsigned sourceId, unsigned seedTargetUid, unsigned generatorId)
 {
     const bool campaign = pc_randomizer_p2_bridge()
         && pc_randomizer_p2_source_for_id(seedTargetUid) == sourceId
         && p2campaign::accepted(sourceId, seedTargetUid);
-    return recordBind(actor, campaign ? seedTargetUid : pc_p2_generated_placement_muse_slot(sourceId),
-                      sourceId, seedTargetUid, generatorId);
+    unsigned accepted = campaign ? seedTargetUid : pc_p2_generated_placement_muse_slot(sourceId);
+    bool bypass = false;
+    if (accepted != seedTargetUid && smokeAccepts(sourceId, seedTargetUid)) {
+        accepted = seedTargetUid;
+        bypass = true;
+    }
+    return recordBind(actor, accepted, sourceId, seedTargetUid, generatorId, bypass);
 }
 
 static bool waterwraithBind(BTeki* actor, unsigned sourceId, unsigned seedTargetUid, unsigned generatorId)
 {
-    return recordBind(actor, pc_p2_generated_placement_waterwraith_slot(sourceId), sourceId, seedTargetUid, generatorId);
+    unsigned accepted = pc_p2_generated_placement_waterwraith_slot(sourceId);
+    bool bypass = false;
+    if (accepted != seedTargetUid && smokeAccepts(sourceId, seedTargetUid)) {
+        accepted = seedTargetUid;
+        bypass = true;
+    }
+    return recordBind(actor, accepted, sourceId, seedTargetUid, generatorId, bypass);
 }
 
 bool pc_p2_generated_placement_bind(BTeki* actor, unsigned sourceId, unsigned seedTargetUid, unsigned generatorId)
@@ -197,7 +226,16 @@ bool pc_p2_generated_placement_bind(BTeki* actor, unsigned sourceId, unsigned se
             return true;
         }
         return false;
-    case 41: // Antenna Beetle (Fuefuki); muse observer lane 57.
+    case 41: // Antenna Beetle (Fuefuki); #245 OWN campaign module.
+        // pc_p2_fuefuki_teki_setup binds the seed actor to the source FSM
+        // (hostType 41 -> TEKI_Chappy, suppressed host AI) at finalSetup.
+        if (pc_randomizer_p2_bridge() && pc_randomizer_p2_source_for_id(seedTargetUid) == 41) {
+            std::printf("P2_GENERATED_PLACEMENT source_id=41 target=%u generator=%u bound=1 module=fuefuki_teki\n",
+                        seedTargetUid, generatorId);
+            std::fflush(stdout);
+            return true;
+        }
+        return museBind(actor, sourceId, seedTargetUid, generatorId);
     case 57: // Lesser Spotted Jellyfloat (Kurage); muse observer lane 58.
     case 58: // Careening Dirigibug (BombSarai); muse observer lane 59.
     case 78: // Gatling Groink (MiniHoudai); muse observer lane 60.
