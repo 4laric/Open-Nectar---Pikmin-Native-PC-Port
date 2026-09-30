@@ -113,6 +113,9 @@ struct Binding {
     // Approach position (actor frame: along, lateral) of each Pikmin last seen
     // near her and not stuck; decides which body part it latches on (exitPart).
     std::map<Piki*, p2queenown::Vec2> approach;
+    // Flicked Pikmin and where they were, to log how far the knockback carried them.
+    std::vector<std::pair<Piki*, Vector3f>> flung;
+    float flungTimer = 0.0f;
 };
 std::map<BTeki*, Binding> s;
 
@@ -331,7 +334,11 @@ int flickStuck(BTeki* t, Binding& b, bool face) {
         if (kind == p2queenown::FlickFront) ++front;
         else if (kind == p2queenown::FlickRear) ++rear;
         else ++none;
-        if (ok) ++flicked;
+        if (ok) {
+            ++flicked;
+            b.flung.emplace_back(p, pp);
+            b.flungTimer = 0.6f;
+        }
         std::printf("P2_QUEEN_FLICK_PIKI generator=%u part=%s from=%s along=%.1f lateral=%.1f height=%.1f knockback=%.0f "
                     "dir_deg=%.0f accepted=%d detached=%d\n",
                     b.generator, p2queenown::partName(part), known != b.approach.end() ? "approach" : "position", along,
@@ -540,6 +547,15 @@ void ownTick(BTeki* t, Binding& b, float dt) {
                     stuckCount(t));
     b.lastHealth = t->mHealth;
     trackApproach(t, b);
+    if (b.flungTimer > 0.0f && (b.flungTimer -= dt) <= 0.0f) {
+        for (const auto& f : b.flung) {
+            const Vector3f& now = f.first->getPosition();
+            std::printf("P2_QUEEN_FLICK_LAND generator=%u moved_xz=%.1f alive=%d still_stuck=%d\n", b.generator,
+                        std::sqrt((now.x - f.second.x) * (now.x - f.second.x) + (now.z - f.second.z) * (now.z - f.second.z)),
+                        f.first->isAlive() ? 1 : 0, f.first->getStickObject() == t ? 1 : 0);
+        }
+        b.flung.clear();
+    }
     const int ticks = b.clock.step(double(dt), true);
     if (ticks <= 0) return;
     const int stuck = stuckCount(t);
