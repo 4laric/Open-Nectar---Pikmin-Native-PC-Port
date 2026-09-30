@@ -17,6 +17,12 @@ class BTeki;
 class Creature;
 class CollPart;
 
+// Opts a species key (for example "snagret|Bloyster") into the shared body collision. The
+// key must match the draw family's actor key that calls pc_p2_body_coll_assign(). The
+// species' rest pose is registered with pc_p2_body_coll_register_pose() or
+// pc_p2_body_coll_register_bank() when its bank loads. `drawUnscaled` is true when the
+// species draw normalises the host scale away (pc_p2_queen_teki.cpp sourceScale).
+void pc_p2_body_coll_manage(const std::string& key, bool drawUnscaled = false);
 void pc_p2_body_coll_reset();
 void pc_p2_body_coll_forget(BTeki* actor);
 // Fits and stores the species rest pose (mesh units). Returns true when a fit
