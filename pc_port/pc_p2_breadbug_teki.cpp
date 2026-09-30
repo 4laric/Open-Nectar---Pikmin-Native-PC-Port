@@ -6,6 +6,8 @@
 #include "pc_p2_groink_clock.h"
 #include "pc_p2_animation.h"
 #include "pc_p2_purple.h"
+#include "pc_p2_pose_family.h"
+#include "pc_p2_breadbug_corpse.h"
 #include "pc_p2_sfx.h"
 #include "pc_randomizer.h"
 #include "Interactions.h"
@@ -70,6 +72,8 @@ struct Binding {
     P2GroinkSourceClock clock;
     bool escaped = false;       // host death funnel ran (pcEscapeNow)
     bool corpseLogged = false;
+    bb::Animator corpseAnim;    // presentation-only carried-corpse clock (type5 loop); never read by gameplay
+    bool corpseAnimStarted = false;
     bool deadLogged = false;
     int pendingPresses = 0;
     bool pendingBounce = false;
@@ -103,6 +107,9 @@ bb::Bank sBank[kVariantCount] = {bb::defaultBank(), bb::defaultBank()};
 std::vector<Shape*> sPoses[kVariantCount][bb::AnimCount];
 bool sPosesLoaded[kVariantCount] = {false, false};
 std::map<BTeki*, int> sDrawLogged;
+// #972 interpolated presentation: one bank + per-actor private Shapes per variant.
+p2posefamily::Bank sFamilyBank[kVariantCount] = {p2posefamily::Bank("BREADBUG"), p2posefamily::Bank("GIANT_BREADBUG")};
+p2posefamily::Actors sFamilyVis[kVariantCount];
 
 // Wall-clock milliseconds, so frame dumps (file mtimes) can be matched to markers.
 long long wallMs() {
@@ -295,6 +302,8 @@ void loadBank(int v) {
     sBank[v] = bb::defaultBank();
     for (auto& poses : sPoses[v]) poses.clear();
     sPosesLoaded[v] = false;
+    sFamilyBank[v].reset();
+    sFamilyVis[v].clear();
     std::ifstream in(var.bank);
     std::string error;
     if (in && !bb::parseBank(in, sBank[v], error)) {
@@ -303,25 +312,36 @@ void loadBank(int v) {
     }
     int staged = 0;
     for (const auto& c : sBank[v].clip) staged += c.staged ? 1 : 0;
-    Shape* shared = nullptr;
-    std::size_t total = 0, poses = 0;
+    // #972: the shared compact loader (few Shapes per clip = nearest-pose
+    // fallback, decoded vectors for every pose = lerp + crossfade).
+    p2poseload::Shared shared;
+    std::size_t total = 0, poses = 0, slots = 0;
     bool ok = staged > 0;
     for (int a = 0; ok && a < bb::AnimCount; ++a) {
         const auto& clip = sBank[v].clip[a];
         if (!clip.staged) continue;
-        for (std::size_t i = 0; i < clip.poses.size(); ++i) {
-            char rel[160];
-            std::snprintf(rel, sizeof(rel), "%s_%s_%02u.mod", var.posePrefix, clip.name.c_str(), unsigned(i));
-            Shape* shape = loadShape(rel, shared, total);
-            if (!shape) { ok = false; break; }
-            sPoses[v][a].push_back(shape);
-            ++poses;
+        std::string loadError;
+        if (!p2posefamily::loadFamilyClip(sFamilyBank[v], clip.name, std::string(var.posePrefix) + "_" + clip.name,
+                                          int(clip.poses.size()), clip.frames, clip.poses, shared, total,
+                                          sPoses[v][a], loadError)) {
+            std::printf("P2_BREADBUG_BANK_INVALID source_id=%u clip=%s reason=%s fallback=host\n", var.source,
+                        clip.name.c_str(), loadError.c_str());
+            ok = false;
+            break;
         }
+        poses += clip.poses.size();
+        std::set<Shape*> distinct(sPoses[v][a].begin(), sPoses[v][a].end());
+        slots += distinct.size();
     }
-    if (!ok) for (auto& list : sPoses[v]) list.clear();
+    if (!ok) {
+        for (auto& list : sPoses[v]) list.clear();
+        sFamilyBank[v].reset();
+    }
     sPosesLoaded[v] = ok && poses > 0;
-    std::printf("P2_BREADBUG_BANK source_id=%u staged_clips=%d poses=%zu bytes=%zu draw=%s\n", var.source, staged,
-                sPosesLoaded[v] ? poses : std::size_t(0), total, sPosesLoaded[v] ? "p2_model" : "host");
+    std::printf("P2_BREADBUG_BANK source_id=%u staged_clips=%d poses=%zu shape_slots=%zu resident_bytes=%zu "
+                "interpolation_clips=%zu draw=%s\n", var.source, staged, sPosesLoaded[v] ? poses : std::size_t(0),
+                sPosesLoaded[v] ? slots : std::size_t(0), total, sFamilyBank[v].clipCount(),
+                sPosesLoaded[v] ? "p2_model" : "host");
 }
 
 std::uint64_t idOf(const Pellet* p) { return static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(p)); }
@@ -706,6 +726,7 @@ namespace { bool sLoaded[kVariantCount] = {false, false}; bool sCensusDone = fal
 void pc_p2_breadbug_teki_reset() {
     s.clear();
     sDrawLogged.clear();
+    for (int v = 0; v < kVariantCount; ++v) { sFamilyBank[v].reset(); sFamilyVis[v].clear(); }
     for (auto& variant : sPoses)
         for (auto& poses : variant) poses.clear();
     for (bool& loaded : sPosesLoaded) loaded = false;
@@ -721,6 +742,7 @@ void pc_p2_breadbug_teki_forget(BTeki* t) {
     std::fflush(stdout);
     s.erase(i);
     sDrawLogged.erase(t);
+    for (auto& vis : sFamilyVis) vis.forget(t);
 }
 
 bool pc_p2_breadbug_teki_is_bound(const BTeki* t) { return t && find(t); }
@@ -844,6 +866,15 @@ void pc_p2_breadbug_teki_tick(BTeki* t) {
                         int(c->mConfig->mCarryMaxPikis()));
         }
         logMotion(b, "corpse", c, dt, 1.0f);
+        if (dt > 0.0f && dt < 0.5f) {  // presentation clock only (type5 loop)
+            const bb::Clip& carry = sBank[b.variant].clip[bb::AnimCarry];
+            if (!b.corpseAnimStarted && carry.staged) {
+                b.corpseAnim.start(&carry, bb::AnimCarry);
+                b.corpseAnim.setFrame(p2breadbugcorpse::kHoldFrame);
+                b.corpseAnimStarted = true;
+            }
+            if (b.corpseAnimStarted) b.corpseAnim.animate(dt);
+        }
         b.corpseTimer += dt;
         if (b.corpseTimer >= 2.0f) {
             b.corpseTimer = 0.0f;
@@ -972,6 +1003,13 @@ bool pc_p2_breadbug_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, boo
     for (std::size_t k = 1; k < poses.size() && k < sPoseList[anim].size(); ++k)
         if (std::fabs(float(poses[k]) - frame) < std::fabs(float(poses[best]) - frame)) best = k;
     Shape* shape = sPoseList[anim][best];
+    {   // #972: lerped pose + 150 ms crossfade through a private Shape; nearest pose stays the fallback.
+        float sourceFrame = frame;
+        if (dead && anim == bb::AnimCarry && b.corpseAnimStarted) sourceFrame = b.corpseAnim.frame();
+        sourceFrame = p2breadbugcorpse::clampFrame(sourceFrame, bank.clip[anim].frames);
+        if (Shape* smooth = sFamilyVis[v].draw(t, sFamilyBank[v], bank.clip[anim].name, sourceFrame, b.generator))
+            shape = smooth;
+    }
     shape->updateAnim(gfx, view, nullptr, t);
     pc_gfx_specular_family_scope(1);
     shape->drawshape(gfx, *gfx.mCamera, nullptr);

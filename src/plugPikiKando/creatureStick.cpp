@@ -370,6 +370,7 @@ bool Creature::startStick(Creature* stickTarget, CollPart* stickPart)
 	// #892: report a Pikmin latching onto a bound Gatling Groink part.
 	if (mObjType == OBJTYPE_Piki && stickTarget->mObjType == OBJTYPE_Teki) {
 		pc_p2_groink_teki_piki_contact(static_cast<BTeki*>(static_cast<Teki*>(stickTarget)), static_cast<Piki*>(this), stickPart, "stick");
+		pc_p2_long_legs_piki_contact(static_cast<BTeki*>(static_cast<Teki*>(stickTarget)), static_cast<Piki*>(this), stickPart, "stick");
 	}
 #endif
 
