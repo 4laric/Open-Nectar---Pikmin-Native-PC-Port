@@ -1363,6 +1363,13 @@ target_include_directories(p2_queen_own_test PRIVATE pc_port)
 target_compile_options(p2_queen_own_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_queen_own_test COMMAND p2_queen_own_test)
 
+# Dense Queen/larva pose bank + shared blend (#972): engine-free.
+add_executable(p2_queen_pose_test
+    pc_port/pc_p2_queen_pose_test.cpp)
+target_include_directories(p2_queen_pose_test PRIVATE pc_port)
+target_compile_options(p2_queen_pose_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_queen_pose_test COMMAND p2_queen_pose_test)
+
 add_executable(p2_campaign_policy_test
     pc_port/pc_p2_campaign_policy_test.cpp)
 target_include_directories(p2_campaign_policy_test PRIVATE pc_port)
