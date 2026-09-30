@@ -1276,6 +1276,45 @@ void testEmpressRegroupWalk()
     CHECK(brain.strayRouteGoalZ() > 399.0f, "empress_regroup/route_goal_is_the_nearest_stray");
 }
 
+void testEmpressAftermathRegroup()
+{
+    // #256: after the Empress dies with an empty squad and idle strays ringing
+    // the arena, the bot asks the driver for a route to the NEAREST stray and
+    // walks there before it whistles (the whistle reaches only 100 u).
+    p2autoplay::Config cfg;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 60;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 300002;
+    s.targetSource = 30;
+    s.targetAlive = true;
+    s.targetDist = 100.0f;
+    s.tgtX = 100.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    s.targetHealthFrac = 0.5f;
+    brain.update(0.05f, s);
+    s.targetAlive = false;
+    s.targetDist = 40.0f;
+    s.tgtX = 40.0f;
+    s.squadPikmin = 0;
+    s.strayPikmin = 40;
+    s.strayX = 0.0f; // centroid at the corpse: the strays ring it
+    s.strayZ = 0.0f;
+    s.strayNearX = 0.0f;
+    s.strayNearZ = 380.0f;
+    s.strayNearDist = 380.0f;
+    brain.update(0.05f, s);
+    CHECK(brain.current() == p2autoplay::State::Aftermath, "empress-regroup/aftermath");
+    for (int i = 0; i < 4; ++i) brain.update(0.05f, s);
+    CHECK(brain.strayRouteWanted(), "empress-regroup/aftermath_asks_for_a_route");
+    CHECK(brain.strayRouteGoalZ() > 379.0f, "empress-regroup/aftermath_route_goal_is_the_nearest_stray");
+    CHECK(brain.command().moveZ > 0.9f, "empress-regroup/aftermath_walks_to_the_stray");
+}
+
 void testResupply()
 {
     // bot-v4 resupply rule: field below threshold + Onion stock => disengage
@@ -4174,6 +4213,7 @@ int main()
     testPowerGate();
     testRegroupDistress();
     testEmpressRegroupWalk();
+    testEmpressAftermathRegroup();
     testResupply();
     testAftermathEscortExtension();
     testAftermathNoWhistle();

@@ -1951,15 +1951,33 @@ private:
         const int amCrew = in.pelletCarriers > 0 ? in.pelletCarriers : in.carryCount;
         const bool amShort = in.squadPikmin == 0
             || (in.carryWant > 0 && in.squadPikmin + amCrew < in.carryWant && in.strayPikmin > 0);
-        if (in.targetSource == 73
+        // #256: the Empress joins the Titan's regroup (her flick and roll leave
+        // ~50 idle strays, a11: 12 carriers of 20), walking to the NEAREST stray
+        // over the waypoint graph because the strays ring the arena.
+        const bool amEmpress = in.targetSource == 30;
+        if ((in.targetSource == 73 || amEmpress)
             && (amWhistleTime > 0.0f || amRegroupWalk > 0.0f
                 || (amShort && in.fieldPikmin > in.pelletCarriers
                     && amWhistles < cfg.titanAftermathWhistles))) {
-            if (amWhistleTime <= 0.0f && in.strayPikmin > 0 && amRegroupWalk < cfg.titanRegroupWalk) {
-                const float sx = in.strayX - in.naviX, sz = in.strayZ - in.naviZ;
-                if (sx * sx + sz * sz > 60.0f * 60.0f) {
+            if (amWhistleTime <= 0.0f && in.strayPikmin > 0
+                && amRegroupWalk < (amEmpress ? cfg.empressWalkMax : cfg.titanRegroupWalk)) {
+                const bool nearest = amEmpress && in.strayNearDist < 1.0e29f;
+                const float gx = nearest ? in.strayNearX : in.strayX;
+                const float gz = nearest ? in.strayNearZ : in.strayZ;
+                const float sx = gx - in.naviX, sz = gz - in.naviZ;
+                if (sx * sx + sz * sz > (amEmpress ? 90.0f * 90.0f : 60.0f * 60.0f)) {
                     amRegroupWalk += dt;
-                    steer(in.naviX, in.naviZ, in.strayX, in.strayZ);
+                    if (amEmpress) {
+                        if (strayRouteCooldown > 0.0f) strayRouteCooldown -= dt;
+                        if (!in.waypointLeg && strayRouteCooldown <= 0.0f) {
+                            wantStrayRoute = true;
+                            strayRouteX = gx;
+                            strayRouteZ = gz;
+                            strayRouteCooldown = 20.0f;
+                        }
+                    }
+                    if (amEmpress && in.waypointLeg) steer(in.naviX, in.naviZ, in.wpX, in.wpZ);
+                    else steer(in.naviX, in.naviZ, gx, gz);
                     return;
                 }
             }
