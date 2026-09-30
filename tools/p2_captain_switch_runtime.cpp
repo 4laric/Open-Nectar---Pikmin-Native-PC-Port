@@ -32,6 +32,7 @@
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "PikiState.h"
+#include "PikiAI.h"
 #include "MoviePlayer.h"
 #include "pc_bbft.h"
 #include "pc_gfx.h"
@@ -98,6 +99,20 @@ class CaptainSwitchApp final : public PlugPikiApp {
     std::vector<Navi*> owners;
     bool screenshot=false;
     void pad(unsigned keys=0,int x=0,int y=0) { pc_p2_input_script_set(1,keys,x,y); }
+    int squadFacts(const char* phase) {
+        int owned=0, free=0, near=0; float closest=1.0e9f;
+        for(Piki* p:squad) if(p->isAlive()) {
+            if(p->mMode==PikiMode::FreeMode)++free;
+            if(p->mNavi==b && p->mMode==PikiMode::FormationMode) {
+                ++owned; const float distance=(p->getPosition()-b->getPosition()).length();
+                if(distance<closest)closest=distance;
+                if(distance<80 && p->getState()==PIKISTATE_Normal && p->isThrowable())++near;
+            }
+        }
+        std::printf("P2_SWITCH_SQUAD phase=%s tick=%d owned1=%d free=%d nearby_throwable=%d closest=%.2f cursor=%.2f,%.2f captain=%.2f,%.2f\n",
+            phase,tick,owned,free,near,closest,b->mCursorWorldPos.x,b->mCursorWorldPos.z,b->getPosition().x,b->getPosition().z);
+        return near;
+    }
     void active(int slot) {
         require(naviMgr->getActiveNavi()->mNaviID==slot,"selected captain");
         Navi* n=slot?b:a;
@@ -150,8 +165,8 @@ public:
             require(a->mKontroller->mCurrentInput==0 && a->mKontroller->mMainStickX==0,"inactive neutral controls");
         }
         int state=selected->getCurrState()->getID();
-        if(tick>=95 && tick<115 && state==NAVISTATE_Gather)sawGather=true;
-        if(tick>=120 && tick<145 && (selected->isHolding()||state==NAVISTATE_ThrowWait))sawHeld=true;
+        if(tick>=175 && tick<245 && state==NAVISTATE_Gather)sawGather=true;
+        if(tick>=250 && tick<275 && (selected->isHolding()||state==NAVISTATE_ThrowWait))sawHeld=true;
         Iterator it(pikiMgr); CI_LOOP(it) {
             auto* p=static_cast<Piki*>(*it); if(p && p->isAlive() && p->getState()==PIKISTATE_Flying)sawFlying=true;
         }
@@ -182,28 +197,37 @@ public:
         case 75:pad(KBBTN_DPAD_UP);break;
         case 80:active(1);break;
         case 85:pad();break;
-        case 95:pad(KBBTN_B);break;
-        case 105:pad();break;
-        case 115:require(sawGather,"selected captain whistle state");break;
-        case 120:pad(KBBTN_A);break;
-        case 130:require(sawHeld,"selected captain held Pikmin");pad(KBBTN_A|KBBTN_DPAD_UP);break;
-        case 138:active(1);std::puts("P2_SWITCH_UNSAFE held_rejected=1");break;
-        case 140:pad();break;
-        case 175:require(sawFlying,"selected captain threw Pikmin through live input");std::puts("P2_SWITCH_ACTIONS whistle=1 hold=1 throw_flying=1");break;
-        case 180:require(pc_p2_captain::capture_captain(0,928),"inject target captivity");break;
-        case 185:pad(KBBTN_DPAD_UP);break;
-        case 190:active(1);std::puts("P2_SWITCH_UNSAFE injected_captive_rejected=1");break;
-        case 195:pad();require(pc_p2_captain::release_captain(0,928),"release injected captivity");break;
-        case 205:a->mHealth=0;break;
-        case 210:pad(KBBTN_DPAD_UP);break;
-        case 215:active(1);std::puts("P2_SWITCH_UNSAFE injected_zero_health_rejected=1");break;
-        case 220:pad();a->mHealth=100;break;
-        case 230: {
+        // The other captain's formation cannot be stolen by a whistle.
+        // Disband it through its owner's real input only AFTER preservation
+        // assertions, then recruit through the selected captain's whistle.
+        case 95:pad(KBBTN_DPAD_UP);break;
+        case 100:active(0);pad();break;
+        case 110:pad(KBBTN_X);break;
+        case 115:pad();squadFacts("disbanding");break;
+        case 160:require(a->getCurrState()->getID()==NAVISTATE_Walk,"owner finished disbanding");pad(KBBTN_DPAD_UP);break;
+        case 165:active(1);pad();break;
+        case 175:squadFacts("before_whistle");pad(KBBTN_B);break;
+        case 235:pad();break;
+        case 245:require(sawGather,"selected captain whistle state");require(squadFacts("after_whistle")>0,"selected captain recruited nearby throwable squad");break;
+        case 250:pad(KBBTN_A);break;
+        case 260:squadFacts("hold");require(sawHeld,"selected captain held Pikmin");pad(KBBTN_A|KBBTN_DPAD_UP);break;
+        case 268:active(1);std::puts("P2_SWITCH_UNSAFE held_rejected=1");break;
+        case 270:pad();break;
+        case 305:require(sawFlying,"selected captain threw Pikmin through live input");std::puts("P2_SWITCH_ACTIONS whistle=1 hold=1 throw_flying=1");break;
+        case 310:require(pc_p2_captain::capture_captain(0,928),"inject target captivity");break;
+        case 315:pad(KBBTN_DPAD_UP);break;
+        case 320:active(1);std::puts("P2_SWITCH_UNSAFE injected_captive_rejected=1");break;
+        case 325:pad();require(pc_p2_captain::release_captain(0,928),"release injected captivity");break;
+        case 335:a->mHealth=0;break;
+        case 340:pad(KBBTN_DPAD_UP);break;
+        case 345:active(1);std::puts("P2_SWITCH_UNSAFE injected_zero_health_rejected=1");break;
+        case 350:pad();a->mHealth=100;break;
+        case 360: {
             InteractAttack hit(nullptr,nullptr,500.0f,false);hit.actNavi(b);
             std::puts("P2_SWITCH_SURVIVOR injected_attack_receiver=1");break;
         }
-        case 240:active(0);require(naviMgr->isNaviDead(b),"down captain recorded");break;
-        case 260:require(screenshot,"render capture");std::puts("PASS P2_CAPTAIN_SWITCH_RUNTIME");std::fflush(nullptr);std::_Exit(0);
+        case 370:active(0);require(naviMgr->isNaviDead(b),"down captain recorded");break;
+        case 390:require(screenshot,"render capture");std::puts("PASS P2_CAPTAIN_SWITCH_RUNTIME");std::fflush(nullptr);std::_Exit(0);
         }
         if(tick%10==0) {std::printf("P2_SWITCH_TICK tick=%d active=%d states=%d,%d\n",tick,naviMgr->getActiveNavi()->mNaviID,a->getCurrState()->getID(),b->getCurrState()->getID());std::fflush(stdout);}
         return result;
