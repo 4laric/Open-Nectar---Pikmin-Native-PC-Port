@@ -15,10 +15,10 @@
 //             discharge EFF_Hiba_Fire (227 z_hiba.pcr, the flame-thrower column TAIhibaA drives)
 //                       in a ring of 5 at radius 35 + EFF_Bomb_FireBang (34 bi_hiba1.pcr) at the
 //                       centre
-//   60 Water  charge    EFF_Mizu_IdleBubbles (193 kk_choro.pcr) + EFF_Mizu_IdleMist (194
-//                       kk_yuge.pcr): the water-geyser bubbles/mist, on the body
-//             discharge EFF_Mizu_JetStream (195 kk_fk_a.pcr) in a ring of 5 at radius 35 +
-//                       EFF_P_Bubbles (15 p_shibuki.pcr) at the centre
+//   60 Water  charge    EFF_Piki_Bubble (36 pk_slime.pcr) + EFF_P_Bubbles (15 p_shibuki.pcr), scaled
+//                       2x, on the body (the Mizu geyser set was tried and is near-invisible)
+//             discharge EFF_Piki_Bubble in a ring of 5 at radius 35 (3x) + EFF_P_Bubbles 3x at the
+//                       centre
 //   61 Gas    charge    EFF_Kinoko_ChargeSpores (150 n_k_cg.pcr): the Puffstool charge spores
 //             discharge EFF_Kinoko_AttackSpores (154) + EFF_Kinoko_AttackCloud (152) at the
 //                       centre, EFF_Kinoko_PostAttackCloud (153) in a ring of 4 at radius 35
@@ -36,6 +36,7 @@ struct Emit {
     int copies;   // 1 = at the anchor; >1 = ring of `copies` around it
     float radius; // ring radius
     float y;      // height above the anchor
+    float scale;  // zen::particleGenerator::setScaleSize multiplier (1 = the effect's own size)
 };
 
 constexpr int kMaxEmits = 4;
@@ -55,10 +56,10 @@ inline int generators(const Plan& p) {
 // Anchor: the body joint (follows the body every tick).
 inline Plan charge(int species) {
     switch (species) {
-    case 59: return {{{43, 1, 0.0f, 0.0f}, {44, 1, 0.0f, 0.0f}}, 2};
-    case 60: return {{{193, 1, 0.0f, 0.0f}, {194, 1, 0.0f, 0.0f}}, 2};
-    case 61: return {{{150, 1, 0.0f, 0.0f}}, 1};
-    case 62: return {{{268, 1, 0.0f, 0.0f}, {325, 1, 0.0f, 0.0f}}, 2};
+    case 59: return {{{43, 3, 10.0f, 4.0f, 2.5f}, {44, 1, 0.0f, 0.0f, 2.5f}}, 2};
+    case 60: return {{{36, 1, 0.0f, 0.0f, 2.0f}, {15, 1, 0.0f, 0.0f, 2.0f}}, 2};
+    case 61: return {{{150, 1, 0.0f, 0.0f, 1.0f}}, 1};
+    case 62: return {{{268, 1, 0.0f, 0.0f, 2.5f}, {325, 1, 0.0f, 0.0f, 3.0f}, {190, 3, 10.0f, 0.0f, 2.0f}}, 3};
     default: return {{}, 0};
     }
 }
@@ -66,10 +67,10 @@ inline Plan charge(int species) {
 // Anchor: the Dweevil's position (mPosition at the discharge event), fixed for the window.
 inline Plan discharge(int species) {
     switch (species) {
-    case 59: return {{{227, 5, 35.0f, 0.0f}, {34, 1, 0.0f, 8.0f}}, 2};
-    case 60: return {{{195, 5, 35.0f, 0.0f}, {15, 1, 0.0f, 8.0f}}, 2};
-    case 61: return {{{154, 1, 0.0f, 8.0f}, {152, 1, 0.0f, 8.0f}, {153, 4, 35.0f, 8.0f}}, 3};
-    case 62: return {{{190, 5, 35.0f, 6.0f}, {268, 1, 0.0f, 8.0f}}, 2};
+    case 59: return {{{227, 5, 35.0f, 0.0f, 1.0f}, {34, 1, 0.0f, 8.0f, 1.0f}}, 2};
+    case 60: return {{{36, 5, 35.0f, 6.0f, 3.0f}, {15, 1, 0.0f, 8.0f, 3.0f}}, 2};
+    case 61: return {{{154, 1, 0.0f, 8.0f, 1.0f}, {152, 1, 0.0f, 8.0f, 1.0f}, {153, 4, 35.0f, 8.0f, 1.0f}}, 3};
+    case 62: return {{{190, 5, 35.0f, 6.0f, 1.5f}, {268, 1, 0.0f, 8.0f, 2.5f}, {189, 1, 0.0f, 8.0f, 2.0f}}, 3};
     default: return {{}, 0};
     }
 }
@@ -78,6 +79,8 @@ inline const char* effectName(int id) {
     switch (id) {
     case 15: return "EFF_P_Bubbles";
     case 34: return "EFF_Bomb_FireBang";
+    case 36: return "EFF_Piki_Bubble";
+    case 189: return "EFF_Spider_DeadBombSparks";
     case 43: return "EFF_Piki_Fire";
     case 44: return "EFF_Piki_FireSparkles";
     case 150: return "EFF_Kinoko_ChargeSpores";

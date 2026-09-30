@@ -669,6 +669,11 @@ struct FxLab {
 };
 FxLab sLab;
 
+std::vector<float>& labScales() {
+    static std::vector<float> scales;
+    return scales;
+}
+
 const std::vector<int>& labIds() {
     static std::vector<int> ids;
     static bool parsed = false;
@@ -680,7 +685,11 @@ const std::vector<int>& labIds() {
             while (at < text.size()) {
                 const size_t comma = text.find(',', at);
                 const std::string tok = text.substr(at, comma == std::string::npos ? std::string::npos : comma - at);
-                if (!tok.empty()) ids.push_back(std::atoi(tok.c_str()));
+                if (!tok.empty()) {
+                    ids.push_back(std::atoi(tok.c_str()));
+                    const size_t colon = tok.find(':');
+                    labScales().push_back(colon == std::string::npos ? 1.0f : float(std::atof(tok.c_str() + colon + 1)));
+                }
                 if (comma == std::string::npos) break;
                 at = comma + 1;
             }
@@ -716,7 +725,11 @@ void labTick(Otakara& s, float dt) {
             const float ahead = 110.0f + float(row) * 40.0f;
             sLab.pos[i].set(cp.x + fx * ahead + rx * lateral, cp.y + 2.0f, cp.z + fz * ahead + rz * lateral);
             sLab.gens[i] = effectMgr->create(static_cast<EffectMgr::effTypeTable>(ids[i]), sLab.pos[i], nullptr, nullptr);
-            if (sLab.gens[i]) sLab.gens[i]->setEmitDir(Vector3f(0.0f, 1.0f, 0.0f));
+            if (sLab.gens[i]) {
+                sLab.gens[i]->setEmitDir(Vector3f(0.0f, 1.0f, 0.0f));
+                const float sc = i < labScales().size() ? labScales()[i] : 1.0f;
+                if (sc != 1.0f) sLab.gens[i]->setScaleSize(sLab.gens[i]->getScaleSize() * sc);
+            }
             std::printf("P2_OTAKARA_FXLAB cell=%zu row=%d col=%d effect=%d created=%d x=%.0f z=%.0f\n", i, row, col, ids[i],
                         sLab.gens[i] ? 1 : 0, sLab.pos[i].x, sLab.pos[i].z);
         }
@@ -776,6 +789,7 @@ void fxSpawnPlan(FxSet& set, const p2otakarafx::Plan& plan, const Vector3f& anch
             g.gen = effectMgr->create(static_cast<EffectMgr::effTypeTable>(e.effect), g.pos, nullptr, nullptr);
             if (!g.gen) continue;
             if (directionalEffect(e.effect)) g.gen->setEmitDir(Vector3f(0.0f, 1.0f, 0.0f));
+            if (e.scale != 1.0f) g.gen->setScaleSize(g.gen->getScaleSize() * e.scale);
             if (follow) g.gen->setEmitPosPtr(&g.pos);
             ++set.count;
         }

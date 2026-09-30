@@ -157,7 +157,7 @@ void checkPlans() {
         CHECK(p2otakarafx::generators(d) >= 1 && p2otakarafx::generators(d) <= p2otakarafx::kMaxGenerators);
         for (int i = 0; i < c.count; ++i) {
             CHECK(std::string(p2otakarafx::effectName(c.emit[i].effect)) != "EFF_UNKNOWN");
-            CHECK(c.emit[i].copies == 1); // the charge follows the body: one emitter each, no ring
+            CHECK(c.emit[i].copies >= 1 && c.emit[i].scale >= 1.0f); // followed by the body; rings keep their offsets
         }
         for (int i = 0; i < d.count; ++i) CHECK(std::string(p2otakarafx::effectName(d.emit[i].effect)) != "EFF_UNKNOWN");
     }
