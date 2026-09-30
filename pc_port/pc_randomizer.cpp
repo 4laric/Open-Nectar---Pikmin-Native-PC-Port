@@ -814,6 +814,12 @@ bool pc_randomizer_init(int argc, char** argv) {
             const int kinds = prereleaseTraps ? 9 : proggTraps ? 8 : bombTraps ? 7 : bombDeliveries ? 6 : 5;
             for (int i = 0; i < kinds; ++i) line << " 0";
         }
+        // Same section order as parse_state_stream: BENEFITS, MATURITY,
+        // DAYLENGTH, WHISTLEPLUCK, EMPEROR, DEATHLINK. Every root-main seed
+        // carries progressive maturity, so the launcher must emit it (#982).
+        if (maturityItems) line << " MATURITY 0 0 0";
+        if (dayLengthItems) line << " DAYLENGTH 0";
+        if (whistlePluckItem) line << " WHISTLEPLUCK 0";
         if (emperorGoal) line << " EMPEROR 0";
         if (deathLinkUnit) line << " DEATHLINK 0";
         line << " END\n";

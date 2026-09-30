@@ -56,6 +56,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -224,6 +225,34 @@ def tree(path):
     return out
 
 
+MATURITY_STEPS = ("1 0 0", "2 0 0", "2 1 0", "2 2 0", "2 2 1", "2 2 2")
+
+
+def maturity_driver(host_log, host_hash, ticks, stop, record):
+    """Rewrites the host's state.txt as the host's hash log passes each tick."""
+    step = 0
+    while not stop.is_set() and step < len(ticks):
+        rd = run_dir_of(host_log)
+        try:
+            n = sum(1 for _ in open(host_hash, "rb")) if Path(host_hash).exists() else 0
+        except OSError:
+            n = 0
+        if rd is not None and n >= ticks[step]:
+            states = sorted(Path(rd).glob("session/runs/*/state.txt"))
+            if states:
+                st = states[0]
+                text = st.read_text()
+                new = re.sub(r"MATURITY \d \d \d", "MATURITY " + MATURITY_STEPS[step], text)
+                tmp = st.with_name("state.tmp")
+                tmp.write_text(new)
+                os.replace(str(tmp), str(st))
+                record.append({"hash_lines": n, "target_tick": ticks[step], "maturity": MATURITY_STEPS[step],
+                               "state": new.strip()})
+                print(f"launch_pair: host state.txt rewritten at hash line {n}: MATURITY {MATURITY_STEPS[step]}")
+                step += 1
+        stop.wait(0.5)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--exe", type=Path, required=True, help="netplay build nectar.exe (copied into --stage)")
@@ -243,6 +272,14 @@ def main(argv=None):
     p.add_argument("--env-join", nargs="*", default=[], metavar="K=V", help="M4 B2: extra env for the joiner")
     p.add_argument("--f1-cycle-tick", type=int, default=0,
                    help="joiner: open/close F1 after this tick (settings save path); variant c defaults to 1500")
+    p.add_argument("--join-presentation", action="store_true",
+                   help="#982: the joiner runs a settings file that differs in presentation keys only "
+                        "(window size, gamma, brightness, a keybind), whatever the variant; "
+                        "the sim must not notice (variant d)")
+    p.add_argument("--maturity-ticks", type=int, nargs="*", default=[], metavar="TICK",
+                   help="#982: after the host's hash log passes each TICK, rewrite the host run dir's state.txt "
+                        "so the MATURITY section steps up (1 0 0, then 2 0 0, then 2 1 0 ...), exercising the "
+                        "v3 state stream mid-session (needs a bootstrap with MATURITY)")
     p.add_argument("--timeout", type=float, default=1200)
     p.add_argument("--code-timeout", type=float, default=180)
     p.add_argument("--min-distinct", type=int, default=100,
@@ -263,7 +300,7 @@ def main(argv=None):
                     for d in ("save", "campaign")}
 
     host_conf, join_conf = host_cwd / "pikmin_settings.conf", join_cwd / "pikmin_settings.conf"
-    if a.variant == "b":
+    if a.variant == "b" or (a.join_presentation and a.variant == "d"):
         write_settings(join_conf, JOIN_SETTINGS_B)
     elif a.variant == "c":
         write_settings(host_conf, HOST_SETTINGS_C)
@@ -312,6 +349,8 @@ def main(argv=None):
                "host_cmd": [str(exe)] + host_args, "join_cmd": [str(exe)] + join_args}
     rc_host = rc_join = None
     host_proc = join_proc = None
+    drv_stop = threading.Event()
+    summary["maturity_writes"] = []
     files = []
     start = time.time()
     try:
@@ -346,6 +385,11 @@ def main(argv=None):
             answer = wait_code(answer_file, a.code_timeout, "joiner answer", [host_proc, join_proc])
             summary["answer_chars"] = len(answer)
             deadline = start + a.timeout
+            if a.maturity_ticks:
+                drv = threading.Thread(target=maturity_driver,
+                                       args=(host_log, host_hash, a.maturity_ticks, drv_stop, summary["maturity_writes"]),
+                                       daemon=True)
+                drv.start()
             for proc in (host_proc, join_proc):
                 proc.wait(timeout=max(1.0, deadline - time.time()))
             rc_host, rc_join = host_proc.returncode, join_proc.returncode
@@ -353,6 +397,7 @@ def main(argv=None):
         summary["error"] = str(e)
         print(f"launch_pair: {e}")
     finally:
+        drv_stop.set()
         for proc in (host_proc, join_proc):
             if proc is not None and proc.poll() is None:
                 print(f"launch_pair: killing pid {proc.pid}")
