@@ -2234,3 +2234,8 @@ add_test(NAME p2_campaign_goal_lifecycle_test COMMAND p2_campaign_goal_lifecycle
 add_library(p2_campaign_goal_lifecycle_runtime_compile OBJECT tools/p2_campaign_goal_lifecycle_runtime.cpp)
 target_include_directories(p2_campaign_goal_lifecycle_runtime_compile PRIVATE pc_port ${SDL2_INCLUDE_DIRS})
 target_compile_options(p2_campaign_goal_lifecycle_runtime_compile PRIVATE ${NATIVE_COMPILE_OPTIONS} -Wno-unused-parameter)
+
+add_executable(p2_breadbug_corpse_test tools/p2_breadbug_corpse_test.cpp pc_port/pc_p2_breadbug_fsm.cpp)
+target_include_directories(p2_breadbug_corpse_test PRIVATE pc_port)
+target_compile_options(p2_breadbug_corpse_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_breadbug_corpse_test COMMAND p2_breadbug_corpse_test)
