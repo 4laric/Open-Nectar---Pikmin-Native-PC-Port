@@ -29,6 +29,7 @@
 #include "pc_p2_sfx.h"
 #include "pc_p2_groink_clock.h"
 #include "pc_p2_animation.h"
+#include "pc_p2_pose_family.h"
 #include "pc_p2_specular_layer.h"
 #include "pc_p2_navi_select.h"
 #include "pc_bbft.h"
@@ -51,6 +52,7 @@
 #include "teki.h"
 #include "Generator.h"
 #include "system.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -81,8 +83,6 @@ constexpr float kQueenCorpseRadius = 50.0f;
 // point are taken from this extent instead of the P1 host's centre sphere.
 constexpr float kQueenBodyRear = -224.0f;
 constexpr float kQueenBodyFront = 245.0f;
-constexpr float kQueenFrontCut = kQueenBodyRear + (kQueenBodyFront - kQueenBodyRear) * (2.0f / 3.0f);
-constexpr float kQueenRearCut = kQueenBodyRear + (kQueenBodyFront - kQueenBodyRear) * (1.0f / 3.0f);
 // P1 performance cap on live larvae (source Baby::Mgr pool 50, hysteresis
 // max 50 / min 25). The cap scales the hysteresis to 10 / 5.
 constexpr int kLarvaCap = 10;
@@ -110,6 +110,12 @@ struct Binding {
     int flicks = 0, flickedPiki = 0;
     int births = 0, birthRefused = 0;
     int maxStuck = 0;
+    // Approach position (actor frame: along, lateral) of each Pikmin last seen
+    // near her and not stuck; decides which body part it latches on (exitPart).
+    std::map<Piki*, p2queenown::Vec2> approach;
+    // Flicked Pikmin and where they were, to log how far the knockback carried them.
+    std::vector<std::pair<Piki*, Vector3f>> flung;
+    float flungTimer = 0.0f;
 };
 std::map<BTeki*, Binding> s;
 
@@ -123,6 +129,9 @@ struct Larva {
     float lastHealth = 0.0f;
     int bites = 0;
     int hits = 0;
+    Piki* mouth = nullptr; // Pikmin taken by eatPikmin at attack KEYEVENT_2 (mouth slot 0)
+    int eaten = 0;
+    int nearTicks = 0;
 };
 std::map<BTeki*, Larva> sLarvae;
 unsigned sLarvaSerial = 0;
@@ -145,47 +154,19 @@ p2material::Bank sMaterial;
 bool sMaterialEnabled = false;
 float sMaterialFrame = 0.0f;
 std::map<BTeki*, int> sDrawLogged;
+// #972: dense (24/clip) poses are presented through the shared #895 pose path:
+// bracket + lerp into a private Shape per actor, crossfade on clip change. The
+// Queen and the larva are different meshes, so each has its own bank/tracks.
+// Visual only: the FSM clocks and every gameplay input are untouched.
+p2posefamily::Bank sQueenPoseBank("QUEEN"), sBabyPoseBank("QUEEN_LARVA");
+p2posefamily::Actors sQueenVis, sBabyVis;
 std::vector<PelletConfig*> sConfigs;
 
 float groundY(float x, float z, float fallback) { return mapMgr ? mapMgr->getMinY(x, z, true) : fallback; }
 
-Shape* loadShape(const std::string& rel, Shape*& shared, std::size_t& total) {
-    const std::string path = "assets/dataDir/courses/pikmin2room/" + rel;
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file) return nullptr;
-    const auto size = file.tellg();
-    if (size <= 0 || size > 2 * 1024 * 1024 || total + std::size_t(size) > 40u * 1024 * 1024) return nullptr;
-    total += std::size_t(size);
-    file.seekg(0);
-    std::vector<unsigned char> bytes(std::size_t(size), 0), resources;
-    if (!file.read(reinterpret_cast<char*>(bytes.data()), size) || !p2animation::resources(bytes, resources)) return nullptr;
-    Shape* shape = gameflow.loadShape(("courses/pikmin2room/" + rel).c_str(), true);
-    if (!shape) return nullptr;
-    if (!shared) {
-        shared = shape;
-        for (int t = 0; t < shape->mTexAttrCount; ++t)
-            if (shape->mTexAttrList[t].mTexture) shape->mTexAttrList[t].mTexture->attach();
-    } else {
-        if (shape->mMaterialCount != shared->mMaterialCount || shape->mTexAttrCount != shared->mTexAttrCount
-            || shape->mTevInfoCount != shared->mTevInfoCount) return nullptr;
-        for (int j = 0; j < shape->mTotalMatpolyCount; ++j) {
-            auto* poly = shape->mMatpolyList[j];
-            if (!poly || !poly->mMaterial) continue;
-            int material = -1;
-            for (int m = 0; m < shape->mMaterialCount; ++m)
-                if (poly->mMaterial == &shape->mMaterialList[m]) material = m;
-            if (material < 0) return nullptr;
-            poly->mMaterial = &shared->mMaterialList[material];
-        }
-        shape->mMaterialList = shared->mMaterialList;
-        shape->mTexAttrList = shared->mTexAttrList;
-        shape->mTevInfoList = shared->mTevInfoList;
-    }
-    return shape;
-}
-
 // Staged bank + poses: bulblax_<Queen|Baby>_<clip>_<ii>.mod, one per staged
-// pose frame (pikmin2_bulblax_assets pose naming).
+// pose frame (pikmin2_bulblax_assets pose naming), loaded through the shared
+// compact pose loader (p2poseload::loadStem).
 void loadBank(bool bridge) {
     sBank = defaultBank();
     sParams = Params{};
@@ -201,35 +182,49 @@ void loadBank(bool bridge) {
         sBank = defaultBank();
         sParams = Params{};
     }
+    // Compact pose loader (#895/#972): a few full Shapes per clip (the nearest-pose
+    // fallback and the material owner) plus decoded vectors for every pose, so a
+    // dense 24-pose bank stays ~0.5 MiB resident per Queen clip.
+    sQueenPoseBank.reset();
+    sBabyPoseBank.reset();
+    sQueenVis.clear();
+    sBabyVis.clear();
     std::size_t total = 0, poses = 0;
-    Shape* shared = nullptr;
+    std::size_t minQueen = 0, maxQueen = 0, minBaby = 0, maxBaby = 0;
+    p2poseload::Shared shared;
     bool ok = true;
     for (int a = 0; ok && a < AnimCount; ++a) {
         const Clip& c = sBank.clip[a];
-        for (std::size_t i = 0; i < c.poses.size(); ++i) {
-            char rel[160];
-            std::snprintf(rel, sizeof(rel), "bulblax_Queen_%s_%02u.mod", c.name.c_str(), unsigned(i));
-            Shape* shape = loadShape(rel, shared, total);
-            if (!shape) { ok = false; std::printf("P2_QUEEN_POSE_MISSING file=%s\n", rel); break; }
-            sPoses[a].push_back(shape);
-            ++poses;
+        if (c.poses.empty()) continue;
+        std::string why;
+        if (!p2posefamily::loadFamilyClip(sQueenPoseBank, c.name, "bulblax_Queen_" + c.name, int(c.poses.size()),
+                                          c.frames, c.poses, shared, total, sPoses[a], why)) {
+            ok = false;
+            std::printf("P2_QUEEN_POSE_MISSING clip=%s reason=%s\n", c.name.c_str(), why.c_str());
+            break;
         }
+        poses += c.poses.size();
+        minQueen = minQueen ? std::min(minQueen, c.poses.size()) : c.poses.size();
+        maxQueen = std::max(maxQueen, c.poses.size());
     }
     sPosesLoaded = ok && !sPoses[AnimWait].empty() && !sPoses[AnimDead].empty();
     if (!sPosesLoaded) for (auto& v : sPoses) v.clear();
     std::size_t babyPoses = 0;
-    Shape* babyShared = nullptr;
+    p2poseload::Shared babyShared;
     ok = true;
     for (int a = 0; ok && a < BabyAnimCount; ++a) {
         const Clip& c = sBank.baby[a];
-        for (std::size_t i = 0; i < c.poses.size(); ++i) {
-            char rel[160];
-            std::snprintf(rel, sizeof(rel), "bulblax_Baby_%s_%02u.mod", c.name.c_str(), unsigned(i));
-            Shape* shape = loadShape(rel, babyShared, total);
-            if (!shape) { ok = false; break; }
-            sBabyPoses[a].push_back(shape);
-            ++babyPoses;
+        if (c.poses.empty()) continue;
+        std::string why;
+        if (!p2posefamily::loadFamilyClip(sBabyPoseBank, c.name, "bulblax_Baby_" + c.name, int(c.poses.size()),
+                                          c.frames, c.poses, babyShared, total, sBabyPoses[a], why)) {
+            ok = false;
+            std::printf("P2_QUEEN_LARVA_POSE_MISSING clip=%s reason=%s\n", c.name.c_str(), why.c_str());
+            break;
         }
+        babyPoses += c.poses.size();
+        minBaby = minBaby ? std::min(minBaby, c.poses.size()) : c.poses.size();
+        maxBaby = std::max(maxBaby, c.poses.size());
     }
     sBabyPosesLoaded = ok && !sBabyPoses[BabyAnimMove].empty();
     if (!sBabyPosesLoaded) for (auto& v : sBabyPoses) v.clear();
@@ -253,6 +248,16 @@ void loadBank(bool bridge) {
                 sBabyPosesLoaded ? babyPoses : std::size_t(0), total, sPosesLoaded ? "p2_model" : "host",
                 sMaterialEnabled ? 1 : 0, bridge ? 1 : 0, sParams.health, sParams.rollingTime, sParams.birthInterval,
                 sParams.territoryRadius);
+    if (sPosesLoaded) {
+        // #972: one line per setup naming the pose density and whether the draw
+        // interpolates (PIKMIN_P2_INTERPOLATION=0 -> nearest pose, same bank).
+        const p2motion::Tunables& tune = p2motion::tunables();
+        const bool queenReady = sQueenPoseBank.ready(), larvaReady = sBabyPoseBank.ready();
+        std::printf("P2_QUEEN_INTERPOLATION_READY interpolation=%d poses_per_clip=%zu..%zu larva_poses_per_clip=%zu..%zu "
+                    "queen_vectors=%d larva_vectors=%d crossfade_ms=%d gameplay_clock=P1\n",
+                    int(tune.lerp && queenReady), minQueen, maxQueen, minBaby, maxBaby, int(queenReady),
+                    int(larvaReady), int(tune.crossfadeSeconds * 1000.f + .5f));
+    }
     std::fflush(stdout);
 }
 
@@ -261,6 +266,25 @@ int liveLarvae() {
     for (const auto& kv : sLarvae)
         if (!kv.second.escaped && kv.second.fsm.state() >= BabyBorn && kv.first->mHealth > 0.0f) ++n;
     return n;
+}
+
+void trackApproach(BTeki* t, Binding& b) {
+    if (!pikiMgr) return;
+    const float f = b.fsm.faceDir();
+    const float fx = std::sin(f), fz = std::cos(f);
+    Iterator it(pikiMgr);
+    CI_LOOP(it) {
+        Piki* p = static_cast<Piki*>(*it);
+        if (!p) continue;
+        if (!p->isAlive()) { b.approach.erase(p); continue; }
+        if (p->getStickObject() == t) continue; // latched: keep the recorded approach
+        const Vector3f& pp = p->getPosition();
+        const float dx = pp.x - t->mSRT.t.x, dz = pp.z - t->mSRT.t.z;
+        if (dx * dx + dz * dz > 400.0f * 400.0f) { b.approach.erase(p); continue; }
+        // Inside her footprint the host piles Pikmin round its centre at arbitrary bearings; only the approach from outside (>= 100) says which side they came from.
+        if (dx * dx + dz * dz < 100.0f * 100.0f) continue;
+        b.approach[p] = {dx * fx + dz * fz, dx * fz - dz * fx};
+    }
 }
 
 int stuckCount(BTeki* t) {
@@ -274,20 +298,20 @@ int stuckCount(BTeki* t) {
     return n;
 }
 
-// Queen::flickPikmin(angle). The P1 host has no nose/head/bod1/bod5 part ids;
-// each stuck Pikmin is classified by its position along the Queen's body axis,
-// measured against the source body extent (kQueenBodyRear..kQueenBodyFront):
-// front third (nose/head/bod1) -> flick at `angle`; rear third (bod5) -> flick
-// at PI + angle; middle (bod2/bod3/bod4): shake off with 0 knockback/damage,
-// backward. Thirds of the extent are an approximation of the source parts.
+// Queen::flickPikmin(angle). The P1 host has no nose/head/bod1/bod5 part ids, so
+// each stuck Pikmin is given the source body sphere nearest its position
+// (p2queenown::nearestPart, sphere centres from the model's joints):
+// nose/head/bod1 -> flick at `angle`; bod5 -> flick at PI + angle; bod2/bod3/bod4
+// -> shake off with 0 knockback, backward. The P2 InteractFlick::actPiki
+// receiver ignores the damage argument, so none is passed to the P1 receiver
+// (which would subtract it from Pikmin health); the source value is logged.
 int flickStuck(BTeki* t, Binding& b, bool face) {
     if (!pikiMgr) return 0;
     const float f = b.fsm.faceDir();
     const float fx = std::sin(f), fz = std::cos(f);
     const float angle = face ? f : FLICK_BACKWARDS_ANGLE;
-    int flicked = 0, front = 0, rear = 0, middle = 0;
-    float minAlong = 0.0f, maxAlong = 0.0f;
-    std::vector<Piki*> stuck;
+    int flicked = 0, front = 0, rear = 0, none = 0;
+    std::vector<Piki*> stuck; // snapshot: the flick detaches them from the live list
     Iterator it(pikiMgr);
     CI_LOOP(it) {
         Piki* p = static_cast<Piki*>(*it);
@@ -295,30 +319,38 @@ int flickStuck(BTeki* t, Binding& b, bool face) {
     }
     for (Piki* p : stuck) {
         const Vector3f& pp = p->getPosition();
-        const float along = (pp.x - t->mSRT.t.x) * fx + (pp.z - t->mSRT.t.z) * fz;
-        if (front + rear + middle == 0 || along < minAlong) minAlong = along;
-        if (front + rear + middle == 0 || along > maxAlong) maxAlong = along;
-        bool ok;
-        if (along > kQueenFrontCut) {
-            ok = p->stimulate(InteractFlick(t, b.fsm.params().shakeKnockback, b.fsm.params().shakeDamage, angle));
-            ++front;
-        } else if (along < kQueenRearCut) {
-            ok = p->stimulate(InteractFlick(t, b.fsm.params().shakeKnockback, b.fsm.params().shakeDamage,
-                                            face ? kPi + angle : angle));
-            ++rear;
-        } else {
-            ok = p->stimulate(InteractFlick(t, 0.0f, 0.0f, FLICK_BACKWARDS_ANGLE));
-            ++middle;
+        const float dx = pp.x - t->mSRT.t.x, dz = pp.z - t->mSRT.t.z;
+        const float along = dx * fx + dz * fz;
+        const float lateral = dx * fz - dz * fx;
+        const float height = pp.y - t->mSRT.t.y;
+        const auto known = b.approach.find(p);
+        const int part = known != b.approach.end() ? p2queenown::exitPart(known->second.x, known->second.z)
+                                                   : p2queenown::nearestPart(along, lateral, height);
+        const int kind = p2queenown::flickKind(part);
+        const float knock = kind == p2queenown::FlickNone ? 0.0f : b.fsm.params().shakeKnockback;
+        const float dir = kind == p2queenown::FlickRear && face ? kPi + angle
+                          : kind == p2queenown::FlickNone ? FLICK_BACKWARDS_ANGLE : angle;
+        const bool ok = p->stimulate(InteractFlick(t, knock, 0.0f, dir));
+        if (kind == p2queenown::FlickFront) ++front;
+        else if (kind == p2queenown::FlickRear) ++rear;
+        else ++none;
+        if (ok) {
+            ++flicked;
+            b.flung.emplace_back(p, pp);
+            b.flungTimer = 0.6f;
         }
-        if (ok) ++flicked;
+        std::printf("P2_QUEEN_FLICK_PIKI generator=%u part=%s from=%s along=%.1f lateral=%.1f height=%.1f knockback=%.0f "
+                    "dir_deg=%.0f accepted=%d detached=%d\n",
+                    b.generator, p2queenown::partName(part), known != b.approach.end() ? "approach" : "position", along,
+                    lateral, height, knock,
+                    dir < -10.0f ? -1.0f : dir * 180.0f / kPi, ok ? 1 : 0, p->getStickObject() == t ? 0 : 1);
     }
     if (face || flicked) {
         b.flickedPiki += flicked;
-        std::printf("P2_QUEEN_FLICK generator=%u source_id=%u mode=%s stuck=%zu flicked=%d front=%d rear=%d middle=%d "
-                    "knockback=%.0f damage=%.1f part_rule=body_thirds cuts=%.1f/%.1f along=%.1f..%.1f\n",
+        std::printf("P2_QUEEN_FLICK generator=%u source_id=%u mode=%s stuck=%zu flicked=%d front=%d rear=%d none=%d "
+                    "knockback=%.0f source_damage=%.1f part_rule=body_spheres\n",
                     b.generator, b.source, face ? "key2_face" : "rolling_backward", stuck.size(), flicked, front, rear,
-                    middle, b.fsm.params().shakeKnockback, b.fsm.params().shakeDamage, kQueenRearCut, kQueenFrontCut,
-                    minAlong, maxAlong);
+                    none, b.fsm.params().shakeKnockback, b.fsm.params().shakeDamage);
     }
     return flicked;
 }
@@ -514,6 +546,16 @@ void ownTick(BTeki* t, Binding& b, float dt) {
                     b.generator, b.source, t->mHealth, b.lastHealth, stateName(b.fsm.state()), b.hits,
                     stuckCount(t));
     b.lastHealth = t->mHealth;
+    trackApproach(t, b);
+    if (b.flungTimer > 0.0f && (b.flungTimer -= dt) <= 0.0f) {
+        for (const auto& f : b.flung) {
+            const Vector3f& now = f.first->getPosition();
+            std::printf("P2_QUEEN_FLICK_LAND generator=%u moved_xz=%.1f alive=%d still_stuck=%d\n", b.generator,
+                        std::sqrt((now.x - f.second.x) * (now.x - f.second.x) + (now.z - f.second.z) * (now.z - f.second.z)),
+                        f.first->isAlive() ? 1 : 0, f.first->getStickObject() == t ? 1 : 0);
+        }
+        b.flung.clear();
+    }
     const int ticks = b.clock.step(double(dt), true);
     if (ticks <= 0) return;
     const int stuck = stuckCount(t);
@@ -607,6 +649,41 @@ BabyTarget babyTarget(BTeki* t, const Larva& l) {
     return best;
 }
 
+// EnemyFunc::eatPikmin for the larva's single mouth slot (radius 20 at the
+// "kamu" joint, approximated 15 ahead of the root: p2queenown::babyMouthReaches).
+// Default condition: a Pikmin not already stuck to this larva and not already
+// in a mouth. The first Pikmin in reach fills the slot (getMax() == 1).
+void larvaEat(BTeki* t, Larva& l) {
+    l.mouth = nullptr;
+    if (!pikiMgr) return;
+    const Vector3f me = t->getPosition();
+    const p2queenown::Vec2 pos{me.x, me.z};
+    Iterator it(pikiMgr);
+    CI_LOOP(it) {
+        Piki* p = static_cast<Piki*>(*it);
+        if (!p || !p->isAlive() || p->getStickObject() == t || p->isStickToMouth()) continue;
+        const Vector3f& pp = p->getPosition();
+        if (!p2queenown::babyMouthReaches(pos, l.fsm.faceDir(), {pp.x, pp.z}, pp.y - me.y)) continue;
+        l.mouth = p;
+        std::printf("P2_QUEEN_LARVA_EAT id=%u queen=%u piki_x=%.1f piki_z=%.1f larva_x=%.1f larva_z=%.1f slot_radius=%.0f\n",
+                    l.id, l.queen, pp.x, pp.z, me.x, me.z, p2queenown::kBabyMouthRadius);
+        return;
+    }
+    std::printf("P2_QUEEN_LARVA_EAT_NONE id=%u queen=%u larva_x=%.1f larva_z=%.1f\n", l.id, l.queen, me.x, me.z);
+}
+
+// Baby StateAttack KEYEVENT_3: swallowPikmin -> InteractKill on what the mouth
+// holds. The held Pikmin is a snapshot taken at KEYEVENT_2 (like the Emperor
+// eat fix); it is killed wherever it now is, if still alive.
+void larvaSwallow(BTeki* t, Larva& l) {
+    Piki* p = l.mouth;
+    l.mouth = nullptr;
+    if (!p) return;
+    const bool killed = p->isAlive() && p->stimulate(InteractKill(t, 0));
+    if (killed) ++l.eaten;
+    std::printf("P2_QUEEN_LARVA_SWALLOW id=%u queen=%u killed=%d total_eaten=%d\n", l.id, l.queen, killed ? 1 : 0, l.eaten);
+}
+
 void larvaTick(BTeki* t, Larva& l, float dt) {
     if (t->mStoredDamage > 0.0f) t->makeDamaged();
     if (t->mHealth < l.lastHealth)
@@ -622,6 +699,11 @@ void larvaTick(BTeki* t, Larva& l, float dt) {
         in.pos = {t->mSRT.t.x, t->mSRT.t.z};
         in.target = babyTarget(t, l);
         const BabyOutput o = l.fsm.tick(in);
+        if (in.target.valid && in.target.navi && in.target.dist < 80.0f && (l.nearTicks++ % 15) == 0)
+            std::printf("P2_QUEEN_LARVA_NEAR id=%u queen=%u state=%s captain_dist=%.1f angle_deg=%.1f\n", l.id, l.queen,
+                        babyStateName(l.fsm.state()), in.target.dist,
+                        p2queenown::angDist(std::atan2(in.target.pos.x - in.pos.x, in.target.pos.z - in.pos.z),
+                                            l.fsm.faceDir()) * 180.0f / kPi);
         for (int e : o.entered) {
             std::printf("P2_QUEEN_LARVA_STATE id=%u queen=%u state=%s health=%.1f x=%.1f z=%.1f\n", l.id, l.queen,
                         babyStateName(e), t->mHealth, t->mSRT.t.x, t->mSRT.t.z);
@@ -632,9 +714,8 @@ void larvaTick(BTeki* t, Larva& l, float dt) {
             }
         }
         if (o.attackKey) {
-            // EnemyFunc::attackNavi(attackRadius, attackHitAngle, attackDamage).
-            // eatPikmin/swallowPikmin (key 3) are deferred: the P1 vehicle at
-            // larva scale has no usable mouth slot (documented limitation).
+            // Baby StateAttack KEYEVENT_2: attackNavi(attackRadius, hitAngle,
+            // attackDamage), then eatPikmin, then AttackFail if the slot is empty.
             const Vector3f me = t->getPosition();
             for (Navi* n : pc_p2_navis()) {
                 if (!n || !n->isAlive()) continue;
@@ -651,7 +732,10 @@ void larvaTick(BTeki* t, Larva& l, float dt) {
                             "captain_after=%.1f\n",
                             l.id, l.queen, ok ? 1 : 0, sParams.babyAttackDamage, before, n->mHealth);
             }
+            larvaEat(t, l);
+            if (!l.mouth) l.fsm.attackFailed();
         }
+        if (o.swallowKey) larvaSwallow(t, l);
         t->mSRT.t.x += o.velocity.x * kSourceDelta;
         t->mSRT.t.z += o.velocity.z * kSourceDelta;
         t->setDirection(o.faceDir);
@@ -758,6 +842,10 @@ void pc_p2_queen_teki_reset() {
     sLarvae.clear();
     sSpawns.clear();
     sDrawLogged.clear();
+    sQueenVis.clear();
+    sBabyVis.clear();
+    sQueenPoseBank.reset();
+    sBabyPoseBank.reset();
     for (auto& v : sPoses) v.clear();
     for (auto& v : sBabyPoses) v.clear();
     sPosesLoaded = sBabyPosesLoaded = false;
@@ -782,11 +870,28 @@ void pc_p2_queen_teki_forget(BTeki* t) {
         sLarvae.erase(l);
     }
     sDrawLogged.erase(t);
+    sQueenVis.forget(t);
+    sBabyVis.forget(t);
     std::fflush(stdout);
 }
 
 bool pc_p2_queen_teki_is_bound(const BTeki* t) {
     return t && (s.count(const_cast<BTeki*>(t)) || sLarvae.count(const_cast<BTeki*>(t)));
+}
+
+bool pc_p2_queen_teki_cull_bounds(const BTeki* t, float* radius) {
+    if (!t || !radius) return false;
+    BTeki* key = const_cast<BTeki*>(t);
+    const bool larva = sLarvae.count(key) != 0;
+    if (!larva && !s.count(key)) return false;
+    *radius = p2queenown::cullRadius(larva);
+    static std::set<const BTeki*> logged;
+    if (logged.insert(t).second) {
+        std::printf("P2_QUEEN_CULL kind=%s cull_radius=%.0f host_radius=%.1f\n", larva ? "larva" : "queen", *radius,
+                    key->getBoundingSphereRadius());
+        std::fflush(stdout);
+    }
+    return true;
 }
 
 void pc_p2_queen_teki_setup() {
@@ -957,6 +1062,12 @@ bool pc_p2_queen_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& matrix, bool
         Matrix4f view;
         sourceScale(matrix, view);
         Shape* shape = sBabyPoses[anim][best];
+        {   // #972: lerp + crossfade into a private Shape; nearest pose stays the fallback.
+            const auto& clip = sBank.baby[anim];
+            const float duration = float(clip.frames > 1 ? clip.frames : 2);
+            const float drawFrame = std::isfinite(frame) ? std::max(0.0f, std::min(duration - 1.0f, frame)) : 0.0f;
+            if (Shape* smooth = sBabyVis.draw(t, sBabyPoseBank, clip.name, drawFrame, l->second.id)) shape = smooth;
+        }
         shape->updateAnim(gfx, view, nullptr, t);
         shape->drawshape(gfx, *gfx.mCamera, nullptr);
         int& logged = sDrawLogged[t];
@@ -1001,6 +1112,15 @@ bool pc_p2_queen_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& matrix, bool
     Matrix4f view;
     sourceScale(matrix, view);
     Shape* shape = sPoses[anim][best];
+    // #972: lerp + crossfade into a private Shape; nearest pose stays the fallback.
+    // The fixed carcass pose (degenerate carry) is a deliberate single pose: no blend.
+    if (!(dead && sParams.carcassCarryDegenerate && sParams.carcassDeadPose >= 0)) {
+        const auto& clip = sBank.clip[anim];
+        const float duration = float(clip.frames > 1 ? clip.frames : 2);
+        const float drawFrame = last ? duration - 1.0f
+                                     : (std::isfinite(frame) ? std::max(0.0f, std::min(duration - 1.0f, frame)) : 0.0f);
+        if (Shape* smooth = sQueenVis.draw(t, sQueenPoseBank, clip.name, drawFrame, b.generator)) shape = smooth;
+    }
     shape->updateAnim(gfx, view, nullptr, t);
     bool drawn = false;
     if (sMaterialEnabled && !dead) {
