@@ -2227,6 +2227,7 @@ void NaviThrowWaitState::procAnimMsg(Navi* navi, MsgAnim* msg)
 #if defined(PIKI_PC_PORT)
 		// Captured by a P2 captor since the grab began (see exec).
 		if (!mHeldThrowPiki || !p2captivenavi::keepThrowPick(mHeldThrowPiki->mNavi != nullptr)) {
+			p2captivenavi::note("grab_key_lost_captain");
 			break;
 		}
 #endif
@@ -2308,6 +2309,7 @@ void NaviThrowWaitState::exec(Navi* navi)
 	// follow-up).
 	if ((mHeldThrowPiki && !p2captivenavi::keepThrowPick(mHeldThrowPiki->mNavi != nullptr))
 	    || (mPendingThrowPiki && !p2captivenavi::keepThrowPick(mPendingThrowPiki->mNavi != nullptr))) {
+		p2captivenavi::note("throw_pick_lost_captain");
 		mHeldThrowPiki       = nullptr;
 		mPendingThrowPiki    = nullptr;
 		mIsHoldingThrowPiki  = false;

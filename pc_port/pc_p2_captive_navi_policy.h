@@ -28,4 +28,18 @@ inline bool keepThrowPick(bool pickHasCaptain) { return pickHasCaptain; }
 // Whether a Pikmin in a hang state (GoHang/Hanged/WaterHanged) may stay in it.
 inline bool mayHang(bool hasCaptain) { return hasCaptain; }
 
+// One log line per guard kind per process (evidence that a guard fired).
+void note(const char* kind);
+
 } // namespace p2captivenavi
+
+#include <cstdio>
+inline void p2captivenavi::note(const char* kind)
+{
+    static int logged = 0;
+    if (logged >= 16) return;
+    ++logged;
+    std::printf("P2_CAPTIVE_NAVI_GUARD kind=%s
+", kind);
+    std::fflush(stdout);
+}

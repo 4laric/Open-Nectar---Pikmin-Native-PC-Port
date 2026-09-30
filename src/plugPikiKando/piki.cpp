@@ -3010,7 +3010,10 @@ void Piki::changeMode(int newMode, Navi* navi)
 	// as the ActAction post-work guard (#960).
 	static_assert(p2captivenavi::kFreeMode == PikiMode::FreeMode && p2captivenavi::kFormationMode == PikiMode::FormationMode,
 	              "PikiMode ids");
-	newMode = p2captivenavi::modeFor(newMode, mNavi != nullptr);
+	if (p2captivenavi::modeFor(newMode, mNavi != nullptr) != newMode) {
+		p2captivenavi::note("formation_without_captain");
+		newMode = p2captivenavi::modeFor(newMode, false);
+	}
 #endif
 #if defined(PIKI_PC_PORT)
 	// #245: the whistle path into a party is refused for an Antenna Beetle
