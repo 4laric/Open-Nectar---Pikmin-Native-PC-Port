@@ -978,6 +978,20 @@ bool pc_p2_bombsarai_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, bo
                     o.token, dead ? 1 : 0, sBank.clip[anim].name.c_str(), best);
         std::fflush(stdout);
     }
+    if (std::getenv("PIKMIN_FRAME_DUMP")) {
+        // Eye-check aid (frame-dump runs only): where this actor sits on screen, so a
+        // dumped frame can be cropped around it.
+        static std::map<const BTeki*, int> countdown;
+        if (++countdown[t] >= 15) {
+            countdown[t] = 0;
+            Vector3f sp = t->getPosition();
+            const float depth = gfx.mCamera->projectWorldPoint(gfx, sp);
+            if (depth > 0.0f && gfx.mScreenWidth > 0 && gfx.mScreenHeight > 0)
+                std::printf("P2_BOMBSARAI_SCREEN source_id=58 token=%u u=%.3f v=%.3f depth=%.0f clip=%s frame=%.0f corpse=%d\n",
+                            o.token, sp.x / float(gfx.mScreenWidth), sp.y / float(gfx.mScreenHeight), depth,
+                            sBank.clip[anim].name.c_str(), frame, dead ? 1 : 0);
+        }
+    }
     return true;
 }
 
