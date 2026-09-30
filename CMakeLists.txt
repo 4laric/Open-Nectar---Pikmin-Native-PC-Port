@@ -1774,6 +1774,11 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_tev_shader_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_tev_shader_test COMMAND pc_tev_shader_test)
 
+    add_executable(pc_tev_order_test pc_port/gl/pc_tev_order_test.cpp)
+    target_include_directories(pc_tev_order_test PRIVATE pc_port/gl)
+    target_compile_options(pc_tev_order_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_tev_order_test COMMAND pc_tev_order_test)
+
     # Post-process shader generation (no GL context needed)
     add_executable(pc_postprocess_test
         pc_port/gl/pc_postprocess_test.cpp
