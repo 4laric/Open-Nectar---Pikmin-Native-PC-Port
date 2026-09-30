@@ -89,6 +89,7 @@ PcP2PurpleDirectHit pc_p2_purple_direct_begin(Piki* source, Creature* target, Co
     result.handled = true;
     result.family = dwarf ? PcP2PurpleDirectHit::RedDwarf : PcP2PurpleDirectHit::AdultBulborb;
     const float health = teki->mHealth;
+    const float queued = teki->mStoredDamage;
     const int state = teki->mStateID;
     if (dwarf) {
         InteractPress press(source, 20.0f);
@@ -98,10 +99,11 @@ PcP2PurpleDirectHit pc_p2_purple_direct_begin(Piki* source, Creature* target, Co
         InteractAttack damage(source, part, p2purpledirect::AdultHipdropDamage, false);
         result.damageApplied = target->stimulate(damage);
     }
-    std::printf("P2_PURPLE_DIRECT stage=hipdrop family=%s source=%p target=%p accepted=%d damage_applied=%d pre_health=%.1f post_health=%.1f pre_state=%d post_state=%d part=%p\n",
+    std::printf("P2_PURPLE_DIRECT stage=hipdrop family=%s source=%p target=%p accepted=%d damage_applied=%d pre_health=%.1f post_health=%.1f pre_state=%d post_state=%d part=%p seed_uid=%u source_id=%u queued_before=%.3f queued_after=%.3f hipdrop_payload=%.1f\n",
         dwarf ? "red_dwarf" : "adult_bulborb", static_cast<void*>(source), static_cast<void*>(target),
         result.accepted ? 1 : 0, result.damageApplied ? 1 : 0, health, teki->mHealth,
-        state, teki->mStateID, static_cast<void*>(part));
+        state, teki->mStateID, static_cast<void*>(part), pc_p2_campaign_token(teki), pc_p2_campaign_source(teki),
+        queued, teki->mStoredDamage, dwarf ? 20.0f : p2purpledirect::AdultHipdropDamage);
     return result;
 }
 
