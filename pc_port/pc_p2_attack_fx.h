@@ -54,7 +54,11 @@ struct Look {
     int effect;
     short life;   // generator frames (0 = keep the authored emission)
     bool burst;   // true: configureOneShotBurst(1, life); false: authored emission
+    unsigned rgb = 0; // 0xRRGGBB tint (brightness-preserving zen::particleGenerator::setTint); 0 = authored colour
 };
+
+// Poison purple: the P1 Puffstool cloud is pale pink; P2 gas reads as purple.
+constexpr unsigned PURPLE = 0xB03CFF;
 
 inline Look look(Element e, Kind k) {
     switch (e) {
@@ -63,13 +67,13 @@ inline Look look(Element e, Kind k) {
         if (k == Kind::Body) return {EFF_Tank_Fire, 0, false};
         return {EFF_Tank_Fire, 0, false};
     case Element::Water:
-        if (k == Kind::Muzzle) return {EFF_Frog_Water1, 8, true};
+        if (k == Kind::Muzzle) return {EFF_P_Bubbles, 8, true};
         if (k == Kind::Tip) return {EFF_P_Bubbles, 8, true};
         return {EFF_Frog_Water2, 7, true};
     case Element::Gas:
-        if (k == Kind::Muzzle) return {EFF_Kinoko_AttackSpores, 8, true};
-        if (k == Kind::Tip) return {EFF_Kinoko_PostAttackCloud, 10, true};
-        return {EFF_Kinoko_AttackCloud, 9, true};
+        if (k == Kind::Muzzle) return {EFF_Kinoko_AttackCloud, 10, true, PURPLE};
+        if (k == Kind::Tip) return {EFF_Kinoko_PostAttackCloud, 10, true, PURPLE};
+        return {EFF_Kinoko_AttackCloud, 9, true, PURPLE};
     case Element::Elec:
         if (k == Kind::Node) return {EFF_Spider_DeadBombSparks, 6, true};
         return {EFF_Rocket_Biri, 5, true};
@@ -91,6 +95,7 @@ constexpr float MIN_RANGE = 12.0f;
 constexpr int MAX_STREAM_POINTS = 12;
 constexpr int MAX_ARC_POINTS = 6;
 constexpr int MAX_LIVE_GENERATORS = 220; // skip a tick rather than flood the manager
+constexpr int MAX_LIVE_CLOUD_GENERATORS = 320; // poison clouds keep priority over streams
 
 // Stream presets. `drops` interior points; `sag` world units per range^2 (the jet
 // arcs a little); `emitKinds` decides whether a muzzle and a tip splash are added.
@@ -103,7 +108,7 @@ struct StreamPreset {
 inline StreamPreset preset(Element e) {
     switch (e) {
     case Element::Water: return {6, 0.0012f, 0.9f, 0.4f, true, true};  // PR #51 constants
-    case Element::Gas:   return {5, 0.0f, 1.0f, 1.6f, true, false};    // puffs widen with distance
+    case Element::Gas:   return {4, 0.0f, 2.4f, 2.4f, true, false};    // puffs widen with distance
     case Element::Fire:  return {0, 0.0f, 1.0f, 0.0f, true, false};    // one authored jet from the muzzle
     case Element::Elec:  return {0, 0.0f, 1.0f, 0.0f, false, false};
     }
@@ -154,7 +159,7 @@ inline int layoutArc(float ax, float ay, float az, float bx, float by, float bz,
         const float j = jitter * edge * hashSigned(tick * 131u + salt * 17u + unsigned(i) * 7919u);
         const float jy = jitter * 0.5f * edge * hashSigned(tick * 197u + salt * 29u + unsigned(i) * 104729u);
         out[n++] = {i == 0 || i == pieces ? Kind::Node : Kind::Arc, ax + sx * t + px * j, ay + sy * t + jy,
-                    az + sz * t + pz * j, 1.0f, px, pz};
+                    az + sz * t + pz * j, 1.8f, px, pz};
     }
     return n;
 }

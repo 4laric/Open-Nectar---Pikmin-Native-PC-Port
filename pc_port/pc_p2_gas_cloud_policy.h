@@ -23,9 +23,9 @@ constexpr float HEAD_HEIGHT = 16.0f;   // world units above the Pikmin position
 constexpr float PUFF_RADIUS = 5.0f;    // scatter around the head
 constexpr unsigned PUFF_EVERY = 3;     // update ticks between puffs
 constexpr int PUFFS = 2;               // puffs per emission
-constexpr short PUFF_LIFE = 18;        // generator frames: a short tail, so a missed stop cannot linger
-constexpr float PUFF_SCALE = 0.9f;
-constexpr int EFFECT = p2attackfx::EFF_Kinoko_PostAttackCloud;
+constexpr short PUFF_LIFE = 24;        // generator frames: a short tail, so a missed stop cannot linger
+constexpr float PUFF_SCALE = 1.4f;
+constexpr int EFFECT = p2attackfx::EFF_Kinoko_AttackCloud;
 
 enum class Why { Cured, Death, Reset };
 inline const char* whyName(Why w) {

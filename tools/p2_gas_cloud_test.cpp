@@ -50,7 +50,7 @@ int main() {
     {
         CHECK(emitsOn(0) && !emitsOn(1) && !emitsOn(2) && emitsOn(3), "puffs every third update, starting at once");
         CHECK(PUFF_LIFE > 0 && PUFF_LIFE <= 30, "puffs are short-lived (under a second)");
-        CHECK(EFFECT == p2attackfx::EFF_Kinoko_PostAttackCloud, "the cloud is the P1 Puffstool poison cloud");
+        CHECK(EFFECT == p2attackfx::EFF_Kinoko_AttackCloud, "the cloud is the P1 Puffstool poison cloud");
     }
     // Lifecycle: one cloud per gas panic, stopped once on cure or death, nothing outstanding.
     {

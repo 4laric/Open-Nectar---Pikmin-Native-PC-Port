@@ -43,6 +43,7 @@ unsigned Emitter::emit(Element e, const Point* pts, int n, unsigned tick) {
         if (!g) continue;
         g->setEmitDir(Vector3f(q.dx, 0.0f, q.dz));
         g->setScaleSize(q.scale);
+        if (l.rgb) g->setTint(Colour(u8((l.rgb >> 16) & 255), u8((l.rgb >> 8) & 255), u8(l.rgb & 255), 255));
         if (l.burst) g->configureOneShotBurst(1.0f, l.life);
         ++made;
     }
@@ -54,13 +55,14 @@ unsigned Emitter::emitLook(const Look& l, const Point* pts, int n) {
     if (!effectMgr || !pts || n <= 0) return 0;
     unsigned made = 0;
     for (int i = 0; i < n; ++i) {
-        if (effectMgr->getLiveGeneratorCount() > unsigned(MAX_LIVE_GENERATORS)) break;
+        if (effectMgr->getLiveGeneratorCount() > unsigned(MAX_LIVE_CLOUD_GENERATORS)) break;
         const Point& q = pts[i];
         zen::particleGenerator* g = effectMgr->create(static_cast<EffectMgr::effTypeTable>(l.effect),
                                                       Vector3f(q.x, q.y, q.z), static_cast<Owner*>(owner_), nullptr);
         if (!g) continue;
         g->setEmitDir(Vector3f(q.dx, 0.0f, q.dz));
         g->setScaleSize(q.scale);
+        if (l.rgb) g->setTint(Colour(u8((l.rgb >> 16) & 255), u8((l.rgb >> 8) & 255), u8(l.rgb & 255), 255));
         if (l.burst) g->configureOneShotBurst(1.0f, l.life);
         ++made;
     }

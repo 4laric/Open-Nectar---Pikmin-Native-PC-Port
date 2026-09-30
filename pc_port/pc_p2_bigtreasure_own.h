@@ -391,6 +391,14 @@ public:
     const P2BigTreasureOwnership& ownership() const { return mOwn; }
     const Params& params() const { return mParams; }
     int attackIndex() const { return mAttackIndex; }
+    // TEST-ONLY seam (evidence runs, PIKMIN_P2_TEST_BIGTREASURE_WEAPONS): cycle the attack
+    // weapon through `order` (skipping detached weapons) instead of the health-weighted pick.
+    // The pick still consumes its random number, so a run stays reproducible.
+    void setForcedWeaponOrder(const int* order, int count) {
+        mForcedCount = count < 0 ? 0 : (count > 8 ? 8 : count);
+        for (int i = 0; i < mForcedCount; ++i) mForced[i] = order[i];
+        mForcedAt = 0;
+    }
     float stateTimer() const { return mStateTimer; }
     float flickTimer() const { return mFlickTimer; }
     float attackLimitTimer() const { return mAttackLimitTimer; }
@@ -457,6 +465,9 @@ private:
     float mFlickTimer = 0.0f;
     float mAttackLimitTimer = 0.0f;
     int mAttackIndex = -1;
+    int mForced[8] = {};
+    int mForcedCount = 0;
+    int mForcedAt = 0;
     int mFireVariant = 0;
     bool mLouie = true;
     Vec3 mPos, mHome, mTarget;

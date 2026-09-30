@@ -872,7 +872,6 @@ void PikiBubbleState::init(Piki* piki)
 void PikiBubbleState::exec(Piki* piki)
 {
 	piki->setSpeed(mSpeedRatio, mMoveDirection);
-	pc_p2_gas_cloud_update(piki);
 	mSurvivalTimer -= gsys->getFrameTime();
 	mChangeDirectionTimer -= gsys->getFrameTime();
 	if (mSurvivalTimer < 0.0f) {
@@ -3438,6 +3437,7 @@ void PikiPanicState::exec(Piki* piki)
 		return;
 	}
 	piki->setSpeed(mSpeedRatio, mMoveDirection);
+	pc_p2_gas_cloud_update(piki);
 	mSurvivalTimer -= gsys->getFrameTime();
 	mChangeDirectionTimer -= gsys->getFrameTime();
 	if (mSurvivalTimer < 0.0f) {

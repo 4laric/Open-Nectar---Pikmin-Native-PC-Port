@@ -111,19 +111,23 @@ inline int layout(const P2BigTreasureElementRuntime& rt, const P2BigTreasureElem
     }
     case P2BTWEAPON_Water: {
         const P2BigTreasureWaterPolicy& w = rt.waterPolicy();
-        if (stats.emits > 0) out[n++] = {Kind::Muzzle, emit.x, emit.y, emit.z, 1.0f, 0.0f, 1.0f};
+        if (stats.emits > 0) out[n++] = {Kind::Muzzle, emit.x, emit.y, emit.z, 2.0f, 0.0f, 1.0f};
         for (int i = 0; i < P2BigTreasureWaterPolicy::kCapacity && n < MAX_POINTS - 2; ++i) {
             const P2BigTreasureWaterNode& node = w.node(i);
             if (node.active) {
                 float dx, dz;
                 unit2(node.velocity.x, node.velocity.z, dx, dz);
-                out[n++] = {Kind::Body, node.position.x, node.position.y, node.position.z, 1.0f, dx, dz};
+                // Bubble plus a short two-point trail so the jet reads as a stream (TOootaWbomb).
+                for (int k = 0; k < 3 && n < MAX_POINTS - 2; ++k)
+                    out[n++] = {Kind::Body, node.position.x - node.velocity.x * (1.0f / 30.0f) * float(k),
+                                node.position.y - node.velocity.y * (1.0f / 30.0f) * float(k),
+                                node.position.z - node.velocity.z * (1.0f / 30.0f) * float(k), 1.6f, dx, dz};
                 st.waterLast[i][0] = node.position.x;
                 st.waterLast[i][1] = node.position.y;
                 st.waterLast[i][2] = node.position.z;
             } else if (st.waterWasActive[i]) {
                 // Landed: TOootaWbHit at the last flight position.
-                out[n++] = {Kind::Tip, st.waterLast[i][0], st.waterLast[i][1], st.waterLast[i][2], 1.2f, 0.0f, 1.0f};
+                out[n++] = {Kind::Tip, st.waterLast[i][0], st.waterLast[i][1], st.waterLast[i][2], 2.4f, 0.0f, 1.0f};
             }
             st.waterWasActive[i] = node.active;
         }

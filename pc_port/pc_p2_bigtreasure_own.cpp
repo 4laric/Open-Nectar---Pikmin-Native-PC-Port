@@ -759,6 +759,10 @@ void Fsm::setTreasureAttack(TickOutput& out) {
     for (int w = 0; w < P2BTWEAPON_Count; ++w)
         if (mOwn.isWeaponAttached(w)) total += P2BigTreasureOwnership::kPickWeightBase - mOwn.weaponHealth(w);
     mAttackIndex = total > 0.0f ? mOwn.pickWeapon(randWeightFloat(total)) : -1;
+    for (int tries = 0; mForcedCount > 0 && tries < mForcedCount; ++tries) {
+        const int w = mForced[(mForcedAt++) % mForcedCount];
+        if (mOwn.isWeaponAttached(w)) { mAttackIndex = w; break; }
+    }
     out.pickedWeapon = mAttackIndex;
 }
 

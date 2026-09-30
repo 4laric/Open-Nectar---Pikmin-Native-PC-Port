@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <map>
 #include <memory>
@@ -926,6 +927,24 @@ bool bindActor(BTeki* t, const char* when) {
     const Vector3f pos = t->getPosition();
     b.hold = pos;
     b.fsm.init(sParams, sBank, sAnimator, {pos.x, pos.y, pos.z}, t->getDirection(), (gen * 2654435761u) | 1u);
+    {   // TEST-ONLY weapon order for evidence runs; unset in every normal run.
+        const char* order = std::getenv("PIKMIN_P2_TEST_BIGTREASURE_WEAPONS");
+        if (order && *order) {
+            int seq[8], n = 0;
+            std::string text(order), word;
+            for (std::size_t i = 0; i <= text.size() && n < 8; ++i) {
+                if (i == text.size() || text[i] == ',') {
+                    if (word == "elec") seq[n++] = P2BTWEAPON_Elec;
+                    else if (word == "fire") seq[n++] = P2BTWEAPON_Fire;
+                    else if (word == "gas") seq[n++] = P2BTWEAPON_Gas;
+                    else if (word == "water") seq[n++] = P2BTWEAPON_Water;
+                    word.clear();
+                } else word += text[i];
+            }
+            b.fsm.setForcedWeaponOrder(seq, n);
+            std::printf("P2_BIGTREASURE_TEST_WEAPON_ORDER generator=%u order=%s TEST-ONLY\n", gen, order);
+        }
+    }
     t->mHealth = sParams.health;
     b.lastHealth = t->mHealth;
     if (!buildColl(t, b)) {
