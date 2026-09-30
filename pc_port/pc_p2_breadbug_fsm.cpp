@@ -28,6 +28,14 @@ float angDist(float first, float second) {
     return distance >= kPi ? distance - kTau : distance;
 }
 
+void applyVariant(Params& params, bool giant) {
+    // PanModokiBase::Obj() defaults vs OoPanModoki::Obj() (panModoki.cpp:133,1709)
+    // and walkFunc (panModoki.cpp:926-929).
+    params.giant = giant;
+    params.carrySizeDiff = giant ? kGiantCarrySizeDiff : kCarrySizeDiff;
+    params.waypointSlack = giant ? kGiantWaypointSlack : kWaypointSlack;
+}
+
 const char* stateName(State state) {
     switch (state) {
     case State::Dead: return "dead";
@@ -329,6 +337,13 @@ bool Fsm::isTargetable(const PelletInfo& p) const {
     return p.pikiStrength <= 0.0f || s > p.pikiStrength;
 }
 
+// canTarget(pelMinWeight, weightLimit): PanModoki.h:16 strictly lighter than the
+// limit (weightLimit > pelMinWeight), OoPanModoki.h:16 at or above it
+// (weightLimit <= pelMinWeight); the limit is proper ip01.
+bool Fsm::canTarget(int pelMinWeight) const {
+    return mParams.giant ? (mParams.maxCarryWeight <= pelMinWeight) : (mParams.maxCarryWeight > pelMinWeight);
+}
+
 // findNearestPellet (panModoki.cpp:1047-1088).
 const PelletInfo* Fsm::findNearestPellet() const {
     const PelletInfo* best = nullptr;
@@ -337,7 +352,7 @@ const PelletInfo* Fsm::findNearestPellet() const {
     for (std::size_t i = 0; i < mIn->count; ++i) {
         const PelletInfo& p = mIn->pellets[i];
         if (!p.pickable || !p.alive || p.captured || !isTargetable(p)) continue;
-        if (!(mParams.maxCarryWeight > p.carryMin)) continue;  // PanModoki::canTarget
+        if (!canTarget(p.carryMin)) continue;
         if (std::fabs(p.bottomY - mPos.y) > 10.0f) continue;
         if (std::fabs(angDistTo(p.pos)) > maxAngle) continue;
         const float d = sqr2D(mPos, p.pos);
@@ -432,7 +447,8 @@ void Fsm::walkFunc() {
     float moveSpeed = mParams.moveSpeed;
     float rotSpeed = mParams.maxTurnAngle;
     float rotAccel = mParams.turnSpeed;
-    if (std::fabs(mNextWp.x - mPos.x) < 100.0f && std::fabs(mNextWp.z - mPos.z) < 100.0f) {
+    // panModoki.cpp:926-929: the slack box is 100 (PanModoki), 150 (OoPanModoki).
+    if (std::fabs(mNextWp.x - mPos.x) < mParams.waypointSlack && std::fabs(mNextWp.z - mPos.z) < mParams.waypointSlack) {
         ++mMoveSpeedTimer;
         if (mMoveSpeedTimer > 100) moveSpeed *= 0.5f;
         if (mMoveSpeedTimer > 200) mMoveSpeedTimer = 0;
@@ -744,7 +760,7 @@ void Fsm::execState() {
         break;
     case State::Walk: {
         if (mHealth <= 0.0f) { transit(State::Dead); return; }
-        if (isReachToGoal(kCarrySizeDiff)) findNextRoutePoint(false);
+        if (isReachToGoal(mParams.carrySizeDiff)) findNextRoutePoint(false);
         if (mState != State::Walk) return;  // isReachToGoal -> Stick
         if (mNext == State::Null) walkFunc();
         if (mAnim.is(KeyEnd)) transit(mNext == State::Null ? State::Walk : mNext);
@@ -899,7 +915,7 @@ void Fsm::execState() {
         if (mHealth <= 0.0f) { transit(State::Dead); return; }
         if (!p) { transit(State::Walk); return; }
         const float dist = sqr2D(p->pos, mPos);
-        float stickR = p->radius + 1.2f * kCarrySizeDiff;
+        float stickR = p->radius + 1.2f * mParams.carrySizeDiff;
         stickR *= stickR;
         if (dist < stickR) {
             if (isTargetable(*p) && p->slotFree) {
@@ -914,7 +930,7 @@ void Fsm::execState() {
         } else {
             walkToTarget(p->pos, 0.5f * mParams.moveSpeed, mParams.fastTurnSpeed, mParams.maxFastTurnAngle);
             turnToTarget(p->pos, mParams.fastTurnSpeed, mParams.maxFastTurnAngle);
-            const float rad = 2.5f * kCarrySizeDiff;
+            const float rad = 2.5f * mParams.carrySizeDiff;
             if (++mStateTimer > 200 || dist > rad * rad || !isTargetable(*p)) transit(mNext);
         }
         break;

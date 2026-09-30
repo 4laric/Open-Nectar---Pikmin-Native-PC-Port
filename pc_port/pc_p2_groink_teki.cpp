@@ -8,10 +8,13 @@
 #include "pc_p2_groink_clock.h"
 #include "pc_p2_groink_fsm.h"
 #include "pc_p2_groink_fx.h"
+#include "pc_p2_groink_coll.h"
+#include "pc_p2_groink_burst.h"
 #include "pc_p2_groink_map_trace.h"
 #include "pc_p2_animation.h"
 #include "pc_p2_preview.h"
 #include "pc_bbft.h"
+#include "EffectMgr.h"
 #include "Generator.h"
 #include "MapCode.h"
 #include "MapMgr.h"
@@ -25,6 +28,8 @@
 #include "Shape.h"
 #include "Texture.h"
 #include "Graphics.h"
+#include "Collision.h"
+#include "ID32.h"
 #include "gameflow.h"
 #include "gl/pc_gfx.h"
 #include "Interactions.h"
@@ -33,13 +38,23 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <cstring>
 #include <cstdlib>
 #include <fstream>
 #include <map>
 #include <string>
 #include <vector>
 
+extern Matrix4f invCamMat; // collInfo.cpp: camera inverse used by CollPart::getMatrix
+
 namespace {
+// #892: retail collision tree swapped in for the P1 Frog host's (host-swap pattern of the
+// Emperor Bulblax / Titan Dweevil). Only `body` is stickable; cov1..cov3 are the face cover.
+struct OwnColl {
+    CollInfo* own = nullptr;
+    CollInfo* host = nullptr;
+    CollPart* parts[p2groinkcoll::kCollNodeCount] = {};
+};
 struct Binding {
     unsigned generator;
     int type;
@@ -74,6 +89,13 @@ struct Binding {
     bool haveAim = false;       // last volley target, for the draw-facing diagnostic
     Vector3f aim;
     int faceLogTick = 0;
+    OwnColl coll;
+    int armorBlocks = 0;        // #892 Pikmin contacts refused by the touch-only parts
+    int armorHits = 0;          // #892 Pikmin latches on the stickable body
+    int armorDamage = 0;        // #892 stuck-attack hits accepted
+    int armorMelee = 0;         // #892 unlatched/cover Pikmin hits refused
+    long sourceTicks = 0;       // #892 30 Hz source ticks driven so far
+    long lastVolleyTick = -1;   // #892 tick of the previous burst (gap marker)
 };
 std::map<BTeki*, Binding> s;
 
@@ -419,6 +441,14 @@ void applyOutput(BTeki* t, Binding& b, const Snapshot& snap, const p2groinkfsm::
         std::printf("P2_GROINK_VOLLEY generator=%u source_id=%u shells=%d speed=%.1f angle=%.3f target=%.1f,%.1f,%.1f n=%d\n",
                     b.generator, sourceOf(b), o.volley, o.volleySpeed, o.volleyAngle, o.volleyTarget.x,
                     o.volleyTarget.y, o.volleyTarget.z, b.volleys);
+        // #892 burst evidence: one emitShotGun call spawns three shells in the same source
+        // tick (MiniHoudaiShotGun.cpp:1345-1384); interval is the source-tick stagger (0).
+        const long gap = b.lastVolleyTick < 0 ? -1L : b.sourceTicks - b.lastVolleyTick;
+        b.lastVolleyTick = b.sourceTicks;
+        std::printf("P2_GROINK_BURST generator=%u source_id=%u shots=%d interval=%d same_tick=%d spread_deg=%.1f "
+                    "primary_first=%d gap_ticks=%ld n=%d\n",
+                    b.generator, sourceOf(b), o.burst.shots, o.burst.intervalTicks, o.burst.sameTick ? 1 : 0,
+                    double(o.burst.maxSpreadDeg), o.burst.primaryFirst ? 1 : 0, gap, b.volleys);
     }
     // Shell receivers (MiniHoudaiShotGun.cpp:201-245): InteractBomb with the
     // source damage for captains/Pikmin (100 for other enemies), InteractWind
@@ -461,7 +491,62 @@ const char* fxName(P2GroinkFxKind k) {
     return "?";
 }
 
+
+// #892 TEST-ONLY visual harness (PIKMIN_P2_GROINK_FX_DEMO=1): a Groink shell
+// volley cannot be waited for under the autoplay bot on a smoke seed, so the
+// first bound Groink also throws a synthetic four-shell volley around the
+// captain every 150 source ticks. It only feeds the same fx spawn path with the
+// same per-tick cadence the live policy uses (trail every kTrailInterval,
+// glow/marker every tick, Hit at landing); no sim state is touched.
+struct DemoShell { float x, y, z, vx, vy, vz; int age; bool live; };
+void fxDemoTick(unsigned generator) {
+    static const bool enabled = [] { const char* v = std::getenv("PIKMIN_P2_GROINK_FX_DEMO"); return v && v[0] == '1'; }();
+    static unsigned owner = 0;
+    static int tick = 0;
+    static DemoShell shells[4];
+    if (!enabled || !naviMgr || !naviMgr->getNavi() || !mapMgr) return;
+    if (!owner) owner = generator;
+    if (generator != owner) return;
+    const Vector3f c = naviMgr->getNavi()->getPosition();
+    if (tick % 150 == 30) {
+        for (int i = 0; i < 4; ++i) {
+            const float a = 1.5707963f * float(i) + 0.4f;
+            const float r0 = 260.0f, r1 = 70.0f + 25.0f * float(i);
+            DemoShell& d = shells[i];
+            d.x = c.x + std::cos(a) * r0; d.z = c.z + std::sin(a) * r0; d.y = c.y + 45.0f;
+            const float tx = c.x + std::cos(a + 0.5f) * r1, tz = c.z + std::sin(a + 0.5f) * r1;
+            const float flight = 48.0f;
+            d.vx = (tx - d.x) / flight; d.vz = (tz - d.z) / flight;
+            d.vy = 0.0f; d.age = 0; d.live = true;
+        }
+    }
+    unsigned liveCount = 0;
+    for (DemoShell& d : shells) {
+        if (!d.live) continue;
+        ++liveCount;
+        d.x += d.vx; d.z += d.vz; d.vy -= 0.9f; d.y += d.vy;
+        const float floorY = mapMgr->getMinY(d.x, d.z, true);
+        P2GroinkFxCommand cmd;
+        cmd.pos = {d.x, d.y, d.z};
+        if (d.y <= floorY + 10.0f || d.age > 120) {
+            d.live = false;
+            cmd.pos.y = floorY;
+            cmd.kind = P2GroinkFxKind::Hit;
+            pc_p2_groink_fx_spawn(cmd);
+            continue;
+        }
+        if (d.age % P2GroinkShellFx::kTrailInterval == 0) { cmd.kind = P2GroinkFxKind::Trail; pc_p2_groink_fx_spawn(cmd); }
+        if (d.age % P2GroinkShellFx::kGlowInterval == 0) { cmd.kind = P2GroinkFxKind::Glow; pc_p2_groink_fx_spawn(cmd); }
+        if (d.age % P2GroinkShellFx::kMarkerInterval == 0) { cmd.kind = P2GroinkFxKind::Marker; pc_p2_groink_fx_spawn(cmd); }
+        ++d.age;
+    }
+    if (tick % 30 == 0 && effectMgr)
+        std::printf("P2_GROINK_FX_DEMO tick=%d live_shells=%u gens=%u\n", tick, liveCount, unsigned(effectMgr->getLiveGeneratorCount()));
+    ++tick;
+}
+
 void applyEffects(Binding& b, const p2groinkfsm::TickOutput& o) {
+    fxDemoTick(b.generator);
     P2GroinkFxTick tick;
     tick.volley = o.shotFired;
     tick.volleyMuzzle = o.volleyMuzzle;
@@ -469,6 +554,21 @@ void applyEffects(Binding& b, const p2groinkfsm::TickOutput& o) {
     tick.deadMuzzle = o.deadMuzzle;
     tick.terminals = o.terminals;
     tick.shells = &b.fsm.shells();
+    // #892 leak check: live particle generators over time; after the last shell
+    // lands this must fall back to the level before the volley.
+    if (effectMgr) {
+        static int sampleTick = 0;
+        static unsigned lastLive = ~0u;
+        if (++sampleTick % 6 == 0) {
+            const unsigned live = effectMgr->getLiveGeneratorCount();
+            if (live != lastLive) {
+                lastLive = live;
+                int liveShells = 0;
+                for (std::size_t s = 0; s < P2GroinkVolley::kCapacity; ++s) liveShells += b.fx.live(s) ? 1 : 0;
+                std::printf("P2_GROINK_FX_LIVE generator=%u gens=%u shells=%d\n", b.generator, live, liveShells);
+            }
+        }
+    }
     for (const P2GroinkFxCommand& c : b.fx.onTick(tick, waterAt, nullptr)) {
         pc_p2_groink_fx_spawn(c);
         if (c.kind == P2GroinkFxKind::Trail) {
@@ -489,9 +589,91 @@ void applyEffects(Binding& b, const p2groinkfsm::TickOutput& o) {
     }
 }
 
+// ---- #892 retail collision tree (front armour cover) ----------------------------------
+unsigned fourcc(const char* id) {
+    unsigned v = 0;
+    for (int i = 0; i < 4; ++i) v = (v << 8) | unsigned(static_cast<unsigned char>(id[i] ? id[i] : '_'));
+    return v;
+}
+
+void buildColl(BTeki* t, Binding& b) {
+    if (b.coll.own || b.began || !t->mCollInfo) return;
+    namespace C = p2groinkcoll;
+    std::vector<ObjCollInfo*> nodes;
+    for (int i = 0; i < C::kCollNodeCount; ++i) {
+        auto* n = new ObjCollInfo();
+        n->mId.setID(fourcc(C::kCollNodes[i].id));
+        n->mCode.setID(fourcc(C::kCollNodes[i].code));
+        n->mRadius = C::kCollNodes[i].radius;
+        n->mCentrePosition.set(0.0f, 0.0f, 0.0f);
+        n->mJointIndex = 0;
+        nodes.push_back(n);
+    }
+    for (int i = 1; i < C::kCollNodeCount; ++i) nodes[size_t(C::kCollNodes[i].parent)]->add(nodes[size_t(i)]);
+    b.coll.own = new CollInfo(int(nodes.size()) + 14);
+    b.coll.own->initInfoTree(nodes[0]);
+    int found = 0;
+    for (int i = 0; i < C::kCollNodeCount; ++i) {
+        b.coll.parts[i] = b.coll.own->getSphere(fourcc(C::kCollNodes[i].id));
+        if (b.coll.parts[i]) {
+            ++found;
+            b.coll.parts[i]->mIsUpdateActive = false; // no parent shape: updateColl owns centre/radius
+            b.coll.parts[i]->mJointMatrix = Matrix4f::ident;
+        }
+    }
+    b.coll.host = t->mCollInfo;
+    t->mCollInfo = b.coll.own;
+    // The host's platforms would report contacts whose part this tree cannot resolve.
+    t->mPlatMgr.release();
+    int stick = 0;
+    for (int i = 0; i < C::kCollNodeCount; ++i) stick += C::stickable(i) ? 1 : 0;
+    std::printf("P2_GROINK_COLL_BIND generator=%u source_id=%u nodes=%zu parts_found=%d stickable=%d cover=cov1,cov2,cov3 "
+                "host_parts_replaced=1\n",
+                b.generator, sourceOf(b), nodes.size(), found, stick);
+    std::fflush(stdout);
+}
+
+// Pose every part through the FSM's current clip frame at the actor's position and heading.
+void updateColl(BTeki* t, Binding& b) {
+    if (!b.coll.own || t->mCollInfo != b.coll.own) return;
+    namespace C = p2groinkcoll;
+    Matrix4f yaw, camRot, camYaw;
+    yaw.makeSRT(Vector3f(1.0f, 1.0f, 1.0f), Vector3f(0.0f, t->getDirection(), 0.0f), Vector3f(0.0f, 0.0f, 0.0f));
+    camRot.makeIdentity();
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 3; ++c) camRot.mMtx[r][c] = invCamMat.mMtx[c][r];
+    camRot.multiplyTo(yaw, camYaw);
+    const int clip = C::clipForAnim(b.fsm.animator().anim());
+    const float frame = b.fsm.animator().frame();
+    const Vector3f p = t->getPosition();
+    const float pos[3] = {p.x, p.y, p.z};
+    for (int i = 0; i < C::kCollNodeCount; ++i) {
+        CollPart* part = b.coll.parts[i];
+        if (!part) continue;
+        float local[3] = {0.0f, 36.0f, 0.0f}, w[3];
+        C::centre(clip, frame, i, local);
+        C::toWorld(pos, t->getDirection(), local, w);
+        part->mCentre.set(w[0], w[1], w[2]);
+        part->mRadius = C::kCollNodes[i].radius;
+        part->mJointMatrix = camYaw;
+    }
+}
+
+// Hand the host its own tree back (death funnel / stage teardown / forget). The own tree
+// is never freed: a stuck Pikmin may still hold CollPart pointers into it.
+void restoreColl(BTeki* t, Binding& b) {
+    if (!b.coll.own) return;
+    if (b.coll.host && t && t->mCollInfo == b.coll.own) t->mCollInfo = b.coll.host;
+    b.coll.own = nullptr;
+    b.coll.host = nullptr;
+    for (auto& part : b.coll.parts) part = nullptr;
+}
+
 // Live tick for an OWN-bound Groink. Returns true once the host teardown ran
 // (pcEscapeNow); the caller must not touch the binding again that frame.
 bool ownTick(BTeki* t, Binding& b, float dt) {
+    buildColl(t, b);
+    updateColl(t, b);
     // The suppressed P1 strategy normally applies stored damage through its
     // damage reaction; drain it here so Pikmin hits reach mHealth (natural
     // death). Every InteractAttack also bumps mDamageCount
@@ -526,6 +708,7 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         in.route = &sRoute;
         in.trace = sTrace ? &P2GroinkMapTrace::trace : nullptr;
         in.traceContext = sTrace;
+        ++b.sourceTicks;
         last = b.fsm.tick(in);
         if (!last.valid) break;
         applyOutput(t, b, snap, last, shown);
@@ -564,6 +747,7 @@ bool ownTick(BTeki* t, Binding& b, float dt) {
         // carcass/receipt path below owns. dieSoon only runs inside the
         // suppressed doAI, hence pcEscapeNow (long-legs/chappy pattern).
         b.escaped = true;
+        restoreColl(t, b);
         b.fsm.forceFinishShotGun();
         b.fx.reset(); // source onKill fades every TChibiShell; one-shot puffs need no stop
         t->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
@@ -588,6 +772,7 @@ float screenDeg(const Matrix4f& look, float dx, float dz) {
 void pc_p2_groink_teki_reset()
 {
     const int boundBefore = int(s.size());
+    for (auto& e : s) restoreColl(e.first, e.second);
     s.clear();
     sTail = CarcassTail{};
     sGeneratorObj = nullptr;
@@ -608,6 +793,7 @@ void pc_p2_groink_teki_reset()
 void pc_p2_groink_teki_forget(BTeki* t)
 {
     if (!t) return;
+    { auto known = s.find(t); if (known != s.end()) restoreColl(t, known->second); }
     const bool wasBound = s.erase(t) > 0;
     sDrawLogged.erase(t);
     sPoseVis.forget(t);
@@ -831,6 +1017,7 @@ void pc_p2_groink_teki_tick(BTeki* t) {
         // only runs in the suppressed doAI, so finish the teardown here or the
         // corpse would never pelletize (the Tamago carry_no_grab lesson).
         b.escaped = true;
+        restoreColl(t, b);
         b.fsm.forceFinishShotGun();
         std::printf("P2_GROINK_ESCAPE generator=%u source_id=%u native=host_die_external\n", b.generator, sourceOf(b));
         std::fflush(stdout);
@@ -1001,4 +1188,95 @@ bool pc_p2_groink_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, bool 
         std::fflush(stdout);
     }
     return true;
+}
+
+// #892 armour cover observer (declared in pc_p2_groink_teki.h). The engine's own
+// CollPart::isStickable decides the latch; this reports the verdict and cross-checks it
+// against the retail table (only `body` may take a Pikmin).
+void pc_p2_groink_teki_piki_contact(BTeki* t, Piki* piki, CollPart* part, const char* site) {
+    auto i = s.find(t);
+    if (i == s.end() || !piki) return;
+    Binding& b = i->second;
+    static int diag = 0;
+    if (!part || !b.own || !b.coll.own || t->mCollInfo != b.coll.own) {
+        if (diag++ < 6)
+            std::printf("P2_GROINK_ARMOR_SKIP site=%s part=%d own=%d coll=%d swapped=%d\n", site, part ? 1 : 0, b.own ? 1 : 0,
+                        b.coll.own ? 1 : 0, (b.coll.own && t->mCollInfo == b.coll.own) ? 1 : 0);
+        return;
+    }
+    namespace C = p2groinkcoll;
+    // ID32::mStringID is the raw bytes of mId (little-endian: reversed), so resolve the part
+    // by identity against the tree built in buildColl, never by string.
+    int node = -1;
+    for (int k = 0; k < C::kCollNodeCount; ++k)
+        if (b.coll.parts[k] == part) node = k;
+    if (node < 0) {
+        if (diag++ < 6) std::printf("P2_GROINK_ARMOR_UNRESOLVED site=%s part=%s\n", site, part->getID().mStringID);
+        return;
+    }
+    struct { const char* mStringID; } id = {C::kCollNodes[node].id};
+    const bool engineLatch = part->isStickable();
+    // Latches are reported from Creature::startStick (site "stick"); the thrown/jump sites only
+    // report refusals, so a latch is never counted twice.
+    const bool fromStick = !std::strcmp(site, "stick");
+    if (engineLatch != fromStick) return;
+    const bool policyLatch = C::contact(node) == C::Contact::Latch;
+    const bool cover = C::frontCover(node);
+    int& counter = engineLatch ? b.armorHits : b.armorBlocks;
+    ++counter;
+    const bool log = counter <= 12 || counter % 25 == 0;
+    if (engineLatch != policyLatch)
+        std::printf("P2_GROINK_ARMOR_MISMATCH generator=%u source_id=%u part=%s engine_latch=%d policy_latch=%d\n",
+                    b.generator, sourceOf(b), id.mStringID, engineLatch ? 1 : 0, policyLatch ? 1 : 0);
+    if (log)
+        std::printf("P2_GROINK_ARMOR_%s generator=%u source_id=%u part=%s cover=%d site=%s damage=%s health=%.1f "
+                    "blocks=%d hits=%d\n",
+                    engineLatch ? "HIT" : "BLOCK", b.generator, sourceOf(b), id.mStringID, cover ? 1 : 0, site,
+                    engineLatch ? "accepted" : "refused", t->mHealth, b.armorBlocks, b.armorHits);
+    std::fflush(stdout);
+}
+
+void pc_p2_groink_teki_armor_counts(const BTeki* t, int& blocks, int& hits) {
+    const Binding* b = find(t);
+    blocks = b ? b->armorBlocks : 0;
+    hits = b ? b->armorHits : 0;
+}
+
+// #892 armour cover, damage side (declared in pc_p2_groink_teki.h; hooked from
+// InteractAttack::actTeki). P2's only Pikmin-origin InteractAttack is ActStickAttack, which
+// sends the part the Pikmin is stuck to (aiPrimitives.cpp:3920); Pikmin never hit without
+// latching. P1 also has a ground melee that sends no part (aiAttack.cpp:695), which P2 does
+// not have, so it is refused for a bound Groink. Only `body` is stickable, so the face cover
+// can never pass a Pikmin hit. The captain's punch always carries the touched part in the
+// source (naviState.cpp:1626) and is full damage. Returns -1 for an unregistered actor or
+// an attacker this rule does not cover.
+float pc_p2_groink_teki_damage_rate(BTeki* t, Creature* owner, CollPart* part) {
+    auto i = s.find(t);
+    if (i == s.end() || !owner) return -1.0f;
+    Binding& b = i->second;
+    if (!b.own || b.began || !b.coll.own || t->mCollInfo != b.coll.own) return -1.0f;
+    if (owner->mObjType == OBJTYPE_Navi) return 1.0f;
+    if (!owner->isPiki()) return -1.0f;
+    namespace C = p2groinkcoll;
+    const bool stuck = owner->getStickObject() == static_cast<Creature*>(t);
+    CollPart* stickPart = stuck ? owner->getStickPart() : nullptr;
+    int node = -1;
+    for (int k = 0; k < C::kCollNodeCount; ++k)
+        if (b.coll.parts[k] == stickPart) node = k;
+    const bool accept = C::pikminHit(stuck, node) == C::PikminHit::Accept;
+    int& counter = accept ? b.armorDamage : b.armorMelee;
+    ++counter;
+    if (counter <= 12 || counter % 25 == 0) {
+        if (accept)
+            std::printf("P2_GROINK_ARMOR_DAMAGE generator=%u source_id=%u part=%s site=stuck_attack damage=accepted health=%.1f "
+                        "accepted=%d\n", b.generator, sourceOf(b), C::kCollNodes[node].id, t->mHealth, b.armorDamage);
+        else
+            std::printf("P2_GROINK_ARMOR_BLOCK generator=%u source_id=%u part=%s cover=%d site=melee damage=refused "
+                        "reason=%s health=%.1f refused=%d\n", b.generator, sourceOf(b),
+                        node >= 0 ? C::kCollNodes[node].id : "none", (node >= 0 && C::frontCover(node)) ? 1 : 0,
+                        stuck ? "not_stickable_part" : "not_latched", t->mHealth, b.armorMelee);
+        std::fflush(stdout);
+    }
+    (void)part;
+    return accept ? C::damageScale(true) : 0.0f;
 }

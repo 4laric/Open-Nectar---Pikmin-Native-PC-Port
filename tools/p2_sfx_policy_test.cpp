@@ -33,7 +33,7 @@ void section(const char* name, void (*fn)()) {
 using namespace p2sfx;
 
 void table() {
-    const unsigned species[] = {kBreadbug, kSnitchbug, kDirigibug, kCrawbster, kAntennaBeetle,
+    const unsigned species[] = {kBreadbug, kGiantBreadbug, kSnitchbug, kDirigibug, kCrawbster, kAntennaBeetle,
                                 kTitanDweevil, kGroink, kGroinkArmored, kCannonLarva, kEmpress,
                                 kEmperor, kKurage, kOniKurage};
     for (unsigned s : species) {
@@ -48,6 +48,8 @@ void table() {
     // Signature events land on the intended species only.
     CHECK(seFor(kBreadbug, Event::Step) == kCollecWalk);
     CHECK(seFor(kBreadbug, Event::Pull) == kCollecPull);
+    CHECK(seFor(kGiantBreadbug, Event::Pull) == kCollecPull);   // #958: same TEKI_Collec bank
+    CHECK(seFor(kGiantBreadbug, Event::Dead) == kCollecDead);
     CHECK(seFor(kSnitchbug, Event::Hover) == kSaraiHover);
     CHECK(seFor(kSnitchbug, Event::Step) == kNone);
     CHECK(seFor(kDirigibug, Event::Burst) == kBomb);

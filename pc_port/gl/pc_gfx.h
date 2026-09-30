@@ -24,6 +24,8 @@ void pc_gfx_proxy_shot_notify(const char* key);
 // knobs call it (the lead-camera diagnostics and the netplay HUD's test
 // captures); nothing happens unless a caller asks.
 void pc_gfx_request_frame_shot(const char* path);
+// Probe-only: capture the next presented frame as <PIKMIN_P2_PROXY_SHOT>/<key>.bmp.
+void pc_gfx_proxy_shot_now(const char* key);
 void pc_gfx_perf_scope_begin(const char* name);
 void pc_gfx_perf_scope_end(void);
 

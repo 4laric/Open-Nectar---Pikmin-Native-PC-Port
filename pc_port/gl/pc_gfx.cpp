@@ -4614,6 +4614,14 @@ void pc_gfx_proxy_shot_notify(const char* key) {
     sProxyShotPending.push_back(pending);
 }
 
+void pc_gfx_proxy_shot_now(const char* key) {
+    if (!proxyShotActive() || !key || *key == '\0') return;
+    ProxyShotPending pending;
+    pending.key = key;
+    pending.frame = sProxyShotFrame + 1;
+    sProxyShotPending.push_back(pending);
+}
+
 // Writes bottom-up tightly packed RGB rows as an uncompressed 24-bit BMP.
 static bool shotWriteBmp(const std::string& path, int w, int h, const std::vector<unsigned char>& rgb) {
     FILE* out = std::fopen(path.c_str(), "wb");

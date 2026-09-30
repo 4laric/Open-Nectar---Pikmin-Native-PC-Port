@@ -1,4 +1,7 @@
 #include "pc_p2_demon_host.h"
+#ifdef PIKI_PC_PORT
+#include "pc_p2_life_gauge_hooks.h"
+#endif
 #include "pc_p2_sarai_manager.h"
 #include "pc_p2_umimushi.h"
 #include "pc_p2_jigumo.h"
@@ -584,6 +587,9 @@ void BTeki::update()
 			}
 		}
 	}
+#ifdef PIKI_PC_PORT
+	pc_p2_life_gauge_update(this);
+#endif
 }
 
 /**
@@ -2418,14 +2424,23 @@ void BTeki::drawRange(Graphics& gfx, immut Vector3f& centre, f32 range, immut Co
  */
 void BTeki::refresh2d(Graphics& gfx)
 {
+#ifdef PIKI_PC_PORT
+	const bool gaugeDrawn = mDeadState == 0 && tekiMgr->hasModel(mTekiType) && isVisible() && !isCreatureFlag(CF_UseAICulling)
+	                     && getTekiOption(TEKIOPT_LifeGaugeVisible);
+	pc_p2_life_gauge_audit(this, gaugeDrawn);
+#endif
 	if (mDeadState != 0 || !tekiMgr->hasModel(mTekiType) || !isVisible() || isCreatureFlag(CF_UseAICulling)) {
 		return;
 	}
 
 	if (getTekiOption(TEKIOPT_LifeGaugeVisible)) {
-		immut Vector3f& pos = getCentre();
+		Vector3f pos = getCentre();
+		f32 gaugeOffsetY = getParameterF(TPF_LifeGaugeOffset);
+#ifdef PIKI_PC_PORT
+		pc_p2_life_gauge_place(this, pos, gaugeOffsetY);
+#endif
 		mLifeGauge.mPosition.input(pos);
-		mLifeGauge.mOffset.y = getParameterF(TPF_LifeGaugeOffset);
+		mLifeGauge.mOffset.y = gaugeOffsetY;
 		mLifeGauge.mScale    = 5000.0f / gfx.mCamera->mNear;
 		mLifeGauge.refresh(gfx);
 	}
