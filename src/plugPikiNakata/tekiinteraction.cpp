@@ -136,11 +136,18 @@ bool InteractBomb::actTeki(Teki* teki) immut
 	if (pc_p2_snakejoint_invulnerable(teki)) {
 		return true; // registered Snagret is invulnerable while buried (Stay)
 	}
-	if (pc_p2_long_legs_receiver_rejects(teki, &attack)) {
-		return false; // registered Long Legs is bitter-immune to bombs too
+	// #1018: registered Raging Long Legs, EnemyBase::bombCallBack (full damage).
+	const f32 legsBomb = pc_p2_long_legs_bomb_rate(teki);
+	if (legsBomb == 0.0f) {
+		return false;
 	}
-	if (pc_p2_long_legs_damage_rate(teki, mOwner) == 0.0f) {
-		return false; // #173: Man-at-Legs takes no bomb damage (stuck Pikmin only)
+	if (legsBomb < 0.0f) {
+		if (pc_p2_long_legs_receiver_rejects(teki, &attack)) {
+			return false; // registered Long Legs is bitter-immune to bombs too
+		}
+		if (pc_p2_long_legs_damage_rate(teki, mOwner) == 0.0f) {
+			return false; // #173: Man-at-Legs takes no bomb damage (stuck Pikmin only)
+		}
 	}
 	if (pc_p2_chappy_king_bomb(teki, mDamage * bombFactor)) {
 		return true; // registered Emperor Bulblax: source bombCallBack (0.25 x damage)
