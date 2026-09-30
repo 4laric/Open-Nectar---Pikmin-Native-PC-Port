@@ -17,6 +17,8 @@ void pc_gfx_present(void);
 // first live draw. Env-gated inside pc_gfx.cpp (PIKMIN_P2_PROXY_SHOT); without
 // the env var this is a single disabled branch and zero behaviour change.
 void pc_gfx_proxy_shot_notify(const char* key);
+// Test-only: dump every third presented frame for the next `frames` frames (needs PIKMIN_FRAME_DUMP).
+void pc_gfx_frame_dump_burst(unsigned frames);
 void pc_gfx_perf_scope_begin(const char* name);
 void pc_gfx_perf_scope_end(void);
 
