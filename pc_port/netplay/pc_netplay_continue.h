@@ -449,6 +449,23 @@ inline std::string local_command(const std::string& file)
 	return "& '.\\" + quoted + "'";
 }
 
+// One final-message line as the end banner shows it. The banner draws with
+// the game's own font, which has no backslash glyph (0x5C comes out as
+// another letter: ".\host.bat" read ",Ahost.bat" in a capture), so the banner
+// shows each command in its PowerShell form with '/' (./host.bat), which
+// Command Prompt does not take, and says so; the console message keeps the
+// ".\" form that both consoles take.
+inline std::string banner_line(std::string l)
+{
+	const std::string both = "(PowerShell or Command Prompt)";
+	const size_t at = l.find(both);
+	if (at != std::string::npos) l.replace(at, both.size(), "(PowerShell; the console window has the Command Prompt form)");
+	for (char& c : l) {
+		if (c == '\\') c = '/';
+	}
+	return l;
+}
+
 // Every line of the final message, without the "[netplay] " prefix. The
 // commands are typed in a console opened in the game's folder (PowerShell
 // or Command Prompt: see local_command).

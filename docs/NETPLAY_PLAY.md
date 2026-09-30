@@ -170,7 +170,10 @@ the same message in the console, for example:
 ```
 
 The `or:` line repeats this game's own `--netplay-input` switch, if it had
-one. The joiner's message names the same commands for the host.
+one. The joiner's message names the same commands for the host. The banner
+writes the commands with `/` (`./host.bat --continue`, which PowerShell
+takes but Command Prompt does not), because the game's font has no
+backslash; the console message above has the `.\` form for both.
 
 - **DESYNC** (exit code 5): the games disagreed about the game state.
 - **DESYNC AT THE DAY-END SAVE** (exit code 5) / **SAVE NOT AGREED** (exit

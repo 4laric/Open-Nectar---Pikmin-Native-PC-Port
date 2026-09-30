@@ -3729,7 +3729,7 @@ void print_end_message(pc_netplay_continue::EndKind kind, int code, int64_t fram
 			l = l.substr(colon + 2);
 			if (!l.empty() && l[0] >= 'a' && l[0] <= 'z') l[0] = (char)(l[0] - 'a' + 'A');
 		}
-		sBannerLines.push_back(l);
+		sBannerLines.push_back(pc_netplay_continue::banner_line(l)); // the game font has no '\'
 	}
 }
 

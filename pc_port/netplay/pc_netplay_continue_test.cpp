@@ -180,6 +180,14 @@ int main()
 		CHECK(local_command("nectar.exe") == ".\\nectar.exe", "plain exe name: .\\ prefix");
 		CHECK(local_command("nectar (2).exe") == "& '.\\nectar (2).exe'", "spaces: PowerShell call operator");
 		CHECK(local_command("it's.exe") == "& '.\\it''s.exe'", "a quote is doubled");
+		// The banner font has no backslash: PowerShell's '/' form, labelled.
+		CHECK(banner_line("  .\\host.bat --continue") == "  ./host.bat --continue", "banner: ./ form");
+		CHECK(banner_line("run this in the game's folder (PowerShell or Command Prompt):") ==
+		          "run this in the game's folder (PowerShell; the console window has the Command Prompt form):",
+		      "banner: says the / form is PowerShell's");
+		for (const std::string& ln : recovery_lines(e)) {
+			CHECK(banner_line(ln).find('\\') == std::string::npos, "banner: no backslash left");
+		}
 		e.kind = EndKind::PeerQuit;
 		e.gen = 2;
 		e.day = 0;
