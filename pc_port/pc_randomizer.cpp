@@ -701,6 +701,10 @@ void pc_randomizer_set_generator_id(const void* generator, unsigned uid) {
     }
     fail("unknown saved generator ID");
 }
+void pc_randomizer_dev_set_generator_id(const void* generator, unsigned uid) {
+    if (!generator || !uid) return;
+    generatorIds[generator] = uid;
+}
 unsigned pc_randomizer_placement_slot_uid(unsigned sourceId70) {
     // Lane-04 catalog join: generator _70 -> placement slot uid (crc32), read
     // from the staged p2-placement-slots.txt sidecar. Only consulted under the

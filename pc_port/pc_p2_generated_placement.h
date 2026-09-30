@@ -63,3 +63,4 @@ int pc_p2_generated_placement_bound_count();
 // Death-funnel / slot-reuse forget and stage-boundary reset.
 void pc_p2_generated_placement_forget(const BTeki* actor);
 void pc_p2_generated_placement_reset();
+

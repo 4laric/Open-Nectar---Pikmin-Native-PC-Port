@@ -11,6 +11,9 @@ class Matrix4f;
 // ActivateGauge / DeactivateGauge host commands act on the real pellet and
 // life gauge.  All emissions are logged as P2_GROINK_CARCASS_* markers.
 void pc_p2_groink_teki_setup();
+// Dev console (#942): bind one late-spawned seed-78/97 actor in bridge mode
+// (loads the staged parms/bank on first use). True when bound (or already bound).
+bool pc_p2_groink_teki_bind_dynamic(BTeki*);
 void pc_p2_groink_teki_reset();
 void pc_p2_groink_teki_forget(BTeki*);
 void pc_p2_groink_teki_tick(BTeki*);

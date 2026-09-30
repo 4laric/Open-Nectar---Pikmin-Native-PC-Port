@@ -983,72 +983,99 @@ void pc_p2_fuefuki_teki_attacked(BTeki* t, Creature* owner, float damage, bool a
     }
 }
 
+namespace {
+// Staged parms/motions/poses, loaded once per scene (setup or first late bind).
+bool ensureLoaded()
+{
+    if (sReady) return true;
+    if (!loadParms()) { pc_p2_setup_skip(true, "Fuefuki", "parms_missing"); return false; }
+    if (!loadMotions()) { pc_p2_setup_skip(true, "Fuefuki", "motion_table_missing"); return false; }
+    loadPoses();
+    sReady = true;
+    return true;
+}
+
+// Bind one seed-41 actor: the setup loop body, also the dev-console late binder (#942).
+bool bindOne(BTeki* t)
+{
+    const unsigned token = pc_p2_campaign_token(t);
+    if (t->mTekiType != TEKI_Chappy) {
+        std::printf("P2_FUEFUKI_UNBOUND generator=%u type=%d reason=host_type\n", token, t->mTekiType);
+        pc_p2_setup_skip(true, "Fuefuki", "actor_type_mismatch");
+        return false;
+    }
+    if (t->getParameterI(TPI_CorpseType) != TEKICORPSE_LeaveCorpse) {
+        std::printf("P2_FUEFUKI_UNBOUND generator=%u type=%d reason=no_corpse\n", token, t->mTekiType);
+        return false;
+    }
+    Binding& b = sBound[t];
+    b = Binding{};
+    b.token = token;
+    const Vector3f pos = t->getPosition();
+    // Target guard reference: home ground height and route waypoint.
+    b.homeY = mapMgr ? mapMgr->getMinY(pos.x, pos.z, true) : pos.y;
+    if (!std::isfinite(b.homeY)) b.homeY = pos.y;
+    {
+        float d = -1.0f;
+        const int wp = nearestWp(pos.x, b.homeY, pos.z, d);
+        b.homeWp = wp >= 0 && d <= kTargetRouteRadius ? wp : -1;
+        std::printf("P2_FUEFUKI_GUARD_HOME generator=%u source_id=41 home_y=%.1f home_wp=%d wp_dist=%.1f "
+                    "max_dy=%.0f route_radius=%.0f\n",
+                    token, b.homeY, b.homeWp, d, kTargetMaxDy, kTargetRouteRadius);
+    }
+    Binding* bp = &b;
+    b.actor.setTargetProbe([bp](float x, float z) { return targetOk(*bp, x, z); });
+    if (!b.actor.bind(sRetail, sMotions, sTable, ++sEpoch, token, pos.x, pos.y, pos.z, t->getDirection())) {
+        sBound.erase(t);
+        std::printf("P2_FUEFUKI_UNBOUND generator=%u reason=bind_rejected\n", token);
+        return false;
+    }
+    t->mHealth = sRetail.life;
+    b.lastHealth = b.lastPositiveHealth = t->mHealth;
+    const float hostScale = t->mSRT.s.x;
+    t->mSRT.s.set(1.0f, 1.0f, 1.0f);
+    const Commands spawn = b.actor.takeSpawnCommands();
+    std::printf("P2_FUEFUKI_OWN_BIND generator=%u source_id=41 host=TEKI_Chappy host_ai=suppressed fsm=p2_source "
+                "health=%.1f retail_parms=%d motion_clips=%d draw=%s host_scale=%.2f epoch=%llu state=%s\n",
+                token, t->mHealth, sRetail.retail ? 1 : 0, p2fuefuki::AnimCount,
+                sPosesLoaded ? "p2_model" : "host", hostScale, (unsigned long long)sEpoch,
+                p2fuefuki::stateName(b.actor.fsm().getState()));
+    applyCommands(t, b, spawn);
+    // Ordinary-delivery bridge: the carried carcass grants onion:p2:41 once.
+    pc_randomizer_p2_bind_source(static_cast<PelletView*>(t), 41, token);
+    std::printf("P2_FUEFUKI_DELIVERY_BIND generator=%u source_id=41\n", token);
+    std::printf("P2_ENEMY_READY species=Fuefuki native_family=Chappy generator=%u x=%.3f y=%.3f z=%.3f "
+                "health=%.1f max_health=%.1f behavior=native source_FSM=implemented attack=whistle_theft\n",
+                token, pos.x, pos.y, pos.z, t->mHealth, sRetail.life);
+    return true;
+}
+} // namespace
+
 void pc_p2_fuefuki_teki_setup()
 {
     pc_p2_fuefuki_teki_reset();
     if (!pc_randomizer_p2_bridge() || !tekiMgr) return;
     const std::set<unsigned> wanted = pc_p2_campaign_ids(41);
     if (wanted.empty()) return;
-    if (!loadParms()) { pc_p2_setup_skip(true, "Fuefuki", "parms_missing"); return; }
-    if (!loadMotions()) { pc_p2_setup_skip(true, "Fuefuki", "motion_table_missing"); return; }
-    loadPoses();
-    sReady = true;
+    if (!ensureLoaded()) return;
     Iterator it(tekiMgr);
     CI_LOOP(it) {
         BTeki* t = static_cast<BTeki*>(*it);
         if (!t || pc_p2_campaign_source(t) != 41) continue;
-        const unsigned token = pc_p2_campaign_token(t);
-        if (t->mTekiType != TEKI_Chappy) {
-            std::printf("P2_FUEFUKI_UNBOUND generator=%u type=%d reason=host_type\n", token, t->mTekiType);
-            pc_p2_setup_skip(true, "Fuefuki", "actor_type_mismatch");
-            continue;
-        }
-        if (t->getParameterI(TPI_CorpseType) != TEKICORPSE_LeaveCorpse) {
-            std::printf("P2_FUEFUKI_UNBOUND generator=%u type=%d reason=no_corpse\n", token, t->mTekiType);
-            continue;
-        }
-        Binding& b = sBound[t];
-        b = Binding{};
-        b.token = token;
-        const Vector3f pos = t->getPosition();
-        // Target guard reference: home ground height and route waypoint.
-        b.homeY = mapMgr ? mapMgr->getMinY(pos.x, pos.z, true) : pos.y;
-        if (!std::isfinite(b.homeY)) b.homeY = pos.y;
-        {
-            float d = -1.0f;
-            const int wp = nearestWp(pos.x, b.homeY, pos.z, d);
-            b.homeWp = wp >= 0 && d <= kTargetRouteRadius ? wp : -1;
-            std::printf("P2_FUEFUKI_GUARD_HOME generator=%u source_id=41 home_y=%.1f home_wp=%d wp_dist=%.1f "
-                        "max_dy=%.0f route_radius=%.0f\n",
-                        token, b.homeY, b.homeWp, d, kTargetMaxDy, kTargetRouteRadius);
-        }
-        Binding* bp = &b;
-        b.actor.setTargetProbe([bp](float x, float z) { return targetOk(*bp, x, z); });
-        if (!b.actor.bind(sRetail, sMotions, sTable, ++sEpoch, token, pos.x, pos.y, pos.z, t->getDirection())) {
-            sBound.erase(t);
-            std::printf("P2_FUEFUKI_UNBOUND generator=%u reason=bind_rejected\n", token);
-            continue;
-        }
-        t->mHealth = sRetail.life;
-        b.lastHealth = b.lastPositiveHealth = t->mHealth;
-        const float hostScale = t->mSRT.s.x;
-        t->mSRT.s.set(1.0f, 1.0f, 1.0f);
-        const Commands spawn = b.actor.takeSpawnCommands();
-        std::printf("P2_FUEFUKI_OWN_BIND generator=%u source_id=41 host=TEKI_Chappy host_ai=suppressed fsm=p2_source "
-                    "health=%.1f retail_parms=%d motion_clips=%d draw=%s host_scale=%.2f epoch=%llu state=%s\n",
-                    token, t->mHealth, sRetail.retail ? 1 : 0, p2fuefuki::AnimCount,
-                    sPosesLoaded ? "p2_model" : "host", hostScale, (unsigned long long)sEpoch,
-                    p2fuefuki::stateName(b.actor.fsm().getState()));
-        applyCommands(t, b, spawn);
-        // Ordinary-delivery bridge: the carried carcass grants onion:p2:41 once.
-        pc_randomizer_p2_bind_source(static_cast<PelletView*>(t), 41, token);
-        std::printf("P2_FUEFUKI_DELIVERY_BIND generator=%u source_id=41\n", token);
-        std::printf("P2_ENEMY_READY species=Fuefuki native_family=Chappy generator=%u x=%.3f y=%.3f z=%.3f "
-                    "health=%.1f max_health=%.1f behavior=native source_FSM=implemented attack=whistle_theft\n",
-                    token, pos.x, pos.y, pos.z, t->mHealth, sRetail.life);
+        bindOne(t);
     }
     std::printf("P2_FUEFUKI_SETUP wanted=%zu bound=%zu\n", wanted.size(), sBound.size());
     std::fflush(stdout);
+}
+
+bool pc_p2_fuefuki_teki_bind_dynamic(BTeki* t)
+{
+    if (!t || !tekiMgr || !pc_randomizer_p2_bridge() || pc_p2_campaign_source(t) != 41) return false;
+    if (sBound.count(t)) return true;
+    if (!ensureLoaded()) return false;
+    const bool ok = bindOne(t);
+    std::fflush(stdout);
+    return ok;
 }
 
 void pc_p2_fuefuki_teki_tick(BTeki* t)
