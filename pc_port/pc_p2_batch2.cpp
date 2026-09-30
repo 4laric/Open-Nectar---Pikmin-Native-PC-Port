@@ -788,6 +788,7 @@ bool pc_p2_batch2_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, bool
     auto bankIt = banks.find(entry->second);
     if (bankIt == banks.end()) return proxySkip(entry->second, "no_bank", -1, corpse);
     const Bank& bank = bankIt->second;
+    if (!corpse) pc_p2_elecbug_draw_arc(actor, gfx);
     static const char* const deadClips[] = {"dead", "dead1", "pdead1", "kagebozu_dead"};
     static const char* const attackClips[] = {"attack1", "attack", "attack2", "charge",
                                               "hit_start", "kagebozu_flick", "kagebozu_flick2"};

@@ -36,6 +36,10 @@
 #include "pc_p2_species.h"
 #include "pc_p2_hazard_emitter.h"
 #include "teki.h"
+#include "Graphics.h"
+#include "Texture.h"
+#include "gl/pc_gfx.h"
+#include "pc_p2_navi_select.h"
 #include "Interactions.h"
 #include "Piki.h"
 #include "PikiState.h"
@@ -101,7 +105,6 @@ constexpr float PAIR_RADIUS = 300.0f;     // source bugPos.distance(otherPos) < 
 constexpr float TURN_TIME = 0.5f;         // port value (source turns until facing the target)
 constexpr float WANDER_TIME = 1.5f;       // port value
 constexpr float ELEC_RADIUS = 70.0f;      // source sweep radius fp20/22 = 70
-constexpr float PRESS_GRACE = 3.0f;      // port value: natural-press lockout after a flip ends
 constexpr float TURN_RATE = 2.0f;
 
 struct Clip {
@@ -121,6 +124,8 @@ struct ElecBug {
     BTeki* partner = nullptr;
     bool hasSearched = false;
     bool shockedThisDischarge = false;
+    bool arcLogged = false;
+    std::set<const Creature*> arcHit;
     bool immuneLogged = false;
     bool flipped = false;
     bool deadLogged = false;
@@ -128,7 +133,6 @@ struct ElecBug {
     float lastHealth = LIFE;
     float testClock = 0.0f;
     bool testPressed = false;
-    float pressGrace = 0.0f;    // no natural re-press while the beetle finishes standing up
     float inactiveTimer = 0.0f; // source mInactiveTimer (Charge only when > 15)
     std::string clip = "wait";
     float phase = 0.0f;
@@ -235,6 +239,51 @@ bool logElecImmuneInRange(unsigned generator, const Vector3f& pos, float radius)
     std::fflush(stdout);
     return sawYellow || sawBulbmin;
 }
+// Source Obj::checkInteract (ElecBug.cpp:411): the Denki band between the two
+// beetles. Pikmin and Navis inside it take InteractDenki every frame.
+void sweepArc(BTeki* actor, ElecBug& s, unsigned generator) {
+    if (!s.partner) return;
+    const Vector3f a = actor->getPosition();
+    const Vector3f b = s.partner->getPosition();
+    const p2elecbug::V3 pa{a.x, a.y, a.z}, pb{b.x, b.y, b.z};
+    if (pikiMgr) {
+        Iterator it(pikiMgr);
+        CI_LOOP(it) {
+            Piki* p = static_cast<Piki*>(*it);
+            if (!p || !p->isAlive()) continue;
+            const Vector3f c = p->getPosition();
+            if (!p2elecbug::inArcBand(pa, pb, p2elecbug::V3{c.x, c.y, c.z})) continue;
+            const int species = pc_p2_species(p);
+            if (p2_species_immune(species, P2HazardElectric)) {
+                if (s.arcHit.insert(p).second) {
+                    std::printf("P2_ELECBUG_ARC_IMMUNE generator=%u species=%d\n", generator, species);
+                }
+                continue;
+            }
+            if (p->getState() == PIKISTATE_DenkiDying) continue;
+            Vector3f dir(b.x - a.x, 0.0f, b.z - a.z);
+            const bool accepted = p->stimulate(InteractDenki(actor, 1.0f, &dir));
+            if (s.arcHit.insert(p).second) {
+                std::printf("P2_ELECBUG_DENKI generator=%u source_id=28 emitter=arc target=%d accepted=%d "
+                            "target_state=%d(%s)\n", generator, species, int(accepted), p->getState(),
+                            p->getState() == PIKISTATE_DenkiDying ? "DenkiDying" : "other");
+                std::printf("P2_ELECBUG_SHOCK generator=%u pikmin=1 color=%s\n", generator,
+                            colorName(p->mColor));
+            }
+        }
+    }
+    for (Navi* n : pc_p2_navis()) {
+        if (!n || !n->isAlive()) continue;
+        const Vector3f c = n->getPosition();
+        if (!p2elecbug::inArcBand(pa, pb, p2elecbug::V3{c.x, c.y, c.z})) continue;
+        Vector3f dir(b.x - a.x, 0.0f, b.z - a.z);
+        n->stimulate(InteractDenki(actor, 1.0f, &dir));
+        if (s.arcHit.insert(n).second) {
+            std::printf("P2_ELECBUG_DENKI generator=%u source_id=28 emitter=arc target=navi\n", generator);
+        }
+    }
+    std::fflush(stdout);
+}
 // Source randWeightFloat(10.0f): the inactivity timer restarts in [0,10).
 float inactiveReset() { return 10.0f * float(std::rand() % 1000) / 1000.0f; }
 int recoverFrames() {
@@ -242,8 +291,12 @@ int recoverFrames() {
     return it == clips.end() ? 30 : it->second.frames;
 }
 void enter(ElecBug& s, State state, const char* clip) {
+    std::printf("P2_ELECBUG_CLIP generator=%u state=%s clip=%s\n", s.self ? genOf(s.self) : 0u,
+                stateName(state), clip ? clip : s.clip.c_str());
     s.state = state;
     s.stateTime = 0.0f;
+    s.arcLogged = false;
+    s.arcHit.clear();
     if (clip) s.clip = clip;
 }
 void wander(BTeki* a, ElecBug& s) {
@@ -478,9 +531,7 @@ void pc_p2_elecbug_check_landing_press(BTeki* actor) {
     // Return (recover), not Dead. A Pikmin idling on the recovering beetle must
     // not re-flip it the moment it stands up.
     if (!s || s->state == ELEC_DEAD || s->state == ELEC_REVERSE || s->state == ELEC_RETURN) return;
-    // The probe fires for any descending Pikmin near the beetle, so the squad that
-    // just flipped it would re-flip it the frame it stands up (flip -> recover -> flip).
-    if (s->pressGrace > 0.0f) return;
+
     const Vector3f pos = actor->getPosition();
     Iterator it(pikiMgr);
     CI_LOOP(it) {
@@ -669,7 +720,6 @@ void pc_p2_elecbug_update(BTeki* actor) {
     }
 
     s.stateTime += dt;
-    if (s.pressGrace > 0.0f) s.pressGrace -= dt;
     s.inactiveTimer += dt; // source Obj::doUpdate: mInactiveTimer += deltaTime
     switch (s.state) {
     case ELEC_WAIT:
@@ -767,31 +817,18 @@ void pc_p2_elecbug_update(BTeki* actor) {
             enter(s, ELEC_TURN, "move");
             break;
         }
-        if (!s.shockedThisDischarge) {
-            Piki* piki = nearestShockablePair(pos, s.partner, ELEC_RADIUS);
-            if (piki) {
-                s.shockedThisDischarge = true;
-                const Vector3f target = piki->getPosition();
-                Vector3f dir(target.x - pos.x, 0.0f, target.z - pos.z);
-                const bool accepted = piki->stimulate(InteractDenki(actor, 1.0f, &dir));
-                const int targetState = piki->getState();
-                std::printf("P2_ELECBUG_DENKI generator=%u source_id=28 emitter=sweep target=%d "
-                            "accepted=%d target_state=%d(%s)\n",
-                            generator, pc_p2_species(piki), int(accepted), targetState,
-                            targetState == PIKISTATE_DenkiDying ? "DenkiDying" : "other");
-                std::printf("P2_ELECBUG_SHOCK generator=%u pikmin=1 color=%s\n", generator,
-                            colorName(piki->mColor));
+        // Source StateDischarge: checkInteract(partner) every frame (the arc is lit
+        // from the KEYEVENT_2 at frame 8). Every live Pikmin/Navi inside the band
+        // between the two beetles gets InteractDenki; Yellow/Bulbmin are rejected
+        // by the receiver. Each creature is logged once per discharge.
+        if (s.stateTime >= p2elecbug::kArcStart) {
+            if (!s.arcLogged) {
+                s.arcLogged = true;
+                std::printf("P2_ELECBUG_ARC generator=%u partner=%u length=%.1f\n", generator,
+                            genOf(s.partner), distXZ(pos, s.partner->getPosition()));
                 std::fflush(stdout);
             }
-        }
-        // Emit one immunity marker per immune species inside the sweep that the
-        // source Yellow/Bulbmin gate deliberately rejected.
-        if (!s.immuneLogged) {
-            bool found = logElecImmuneInRange(generator, pos, ELEC_RADIUS);
-            if (!found && s.partner) {
-                found = logElecImmuneInRange(generator, s.partner->getPosition(), ELEC_RADIUS);
-            }
-            if (found) s.immuneLogged = true;
+            sweepArc(actor, s, generator);
         }
         if (s.stateTime >= DISCHARGE_TIME) {
             breakLink(actor, s);
@@ -839,7 +876,6 @@ void pc_p2_elecbug_update(BTeki* actor) {
             : p2elecbug::reverseClip(turnIt->second.keys, s.stateTime, FLIP_TIME).finished;
         if (clipDone) {
             s.flipped = false;
-            s.pressGrace = PRESS_GRACE;
             std::printf("P2_ELECBUG_RECOVER generator=%u source_id=28 t=%.2f\n", generator, s.stateTime);
             std::printf("P2_ELECBUG_STATE generator=%u state=return\n", generator);
             std::fflush(stdout);
@@ -867,4 +903,61 @@ void pc_p2_elecbug_update(BTeki* actor) {
                     generator, stateName(s.state), s.clip.c_str(), s.phase, pos.x, pos.z);
         std::fflush(stdout);
     }
+}
+
+// Visible Denki arc between two linked beetles while the generator discharges.
+// The P1 data carries no electric effect, so the arc is drawn as jagged
+// lightning polylines (core + halo) in the same immediate-mode way the other
+// P2 actors draw their rings. Returns true when an arc was drawn.
+bool pc_p2_elecbug_draw_arc(BTeki* actor, Graphics& gfx) {
+    if (!ready || !gfx.mCamera) return false;
+    ElecBug* s = lookup(actor);
+    if (!s || s->state != ELEC_DISCHARGE || !s->partner || s->stateTime < p2elecbug::kArcStart) return false;
+    Vector3f a = actor->getPosition();
+    Vector3f b = s->partner->getPosition();
+    a.y += 10.0f;
+    b.y += 10.0f;
+    const Colour oldColour = gfx.mPrimaryColour;
+    const Colour oldAux = gfx.mAuxiliaryColour;
+    const int oldBlend = gfx.setCBlending(BLEND_Alpha);
+    Texture* oldTexture = gfx.mActiveTexture[0];
+    const bool oldLight = gfx.setLighting(false, nullptr);
+    const float oldWidth = gfx.setLineWidth(3.0f);
+    gfx.useMaterial(nullptr);
+    gfx.useTexture(nullptr, 0);
+    gfx.useMatrix(gfx.mCamera->mLookAtMtx, 0);
+    const float dx = b.x - a.x, dz = b.z - a.z;
+    const float len = std::sqrt(dx * dx + dz * dz);
+    const float nx = len > 1e-3f ? -dz / len : 0.0f, nz = len > 1e-3f ? dx / len : 1.0f;
+    constexpr int kSeg = 14;
+    const unsigned tick = unsigned(s->stateTime * 30.0f); // re-jitter every frame
+    for (int strand = 0; strand < 3; ++strand) {
+        unsigned seed = tick * 2654435761u + unsigned(strand) * 40503u + genOf(actor);
+        auto rnd = [&seed]() { seed = seed * 1664525u + 1013904223u; return float((seed >> 8) & 0xFFFF) / 65535.0f - 0.5f; };
+        Vector3f prev = a;
+        for (int i = 1; i <= kSeg; ++i) {
+            const float t = float(i) / kSeg;
+            Vector3f p(a.x + dx * t, a.y + (b.y - a.y) * t, a.z + dz * t);
+            if (i < kSeg) {
+                const float amp = 9.0f * (strand == 0 ? 1.0f : 1.6f);
+                p.x += nx * rnd() * 2.0f * amp;
+                p.z += nz * rnd() * 2.0f * amp;
+                p.y += rnd() * 2.0f * amp;
+            }
+            if (strand == 0) gfx.setColour(Colour(255, 255, 255, 255), true);
+            else gfx.setColour(Colour(120, 190, 255, 200), true);
+            gfx.drawLine(prev, p);
+            // Core lines render 1 px on the GL backend regardless of setLineWidth.
+            gfx.drawLine(Vector3f(prev.x, prev.y + 1.0f, prev.z), Vector3f(p.x, p.y + 1.0f, p.z));
+            gfx.drawLine(Vector3f(prev.x, prev.y - 1.0f, prev.z), Vector3f(p.x, p.y - 1.0f, p.z));
+            prev = p;
+        }
+    }
+    gfx.setLineWidth(oldWidth);
+    gfx.setColour(oldColour, true);
+    gfx.mAuxiliaryColour = oldAux;
+    gfx.setLighting(oldLight, nullptr);
+    gfx.useTexture(oldTexture, 0);
+    gfx.setCBlending(oldBlend);
+    return true;
 }

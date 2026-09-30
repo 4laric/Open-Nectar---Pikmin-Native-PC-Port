@@ -89,6 +89,29 @@ inline bool recoverDone(float stateTime, int clipFrames) {
     return stateTime >= len;
 }
 
+// Source ElecBug::checkInteract geometry (ElecBug.cpp:411-479). `a` is the
+// discharging beetle, `b` its partner, `c` a Pikmin/Navi. The band is a
+// segment a->b, |lateral| < 10, |vertical| < 15 (perpendicular axis).
+struct V3 { float x, y, z; };
+constexpr float kArcStart = 8.0f / kFps; // KEYEVENT_2 at frame 8 lights the arc
+inline bool inArcBand(const V3& a, const V3& b, const V3& c) {
+    auto sub = [](V3 p, V3 q) { return V3{p.x - q.x, p.y - q.y, p.z - q.z}; };
+    auto dot = [](V3 p, V3 q) { return p.x * q.x + p.y * q.y + p.z * q.z; };
+    auto cross = [](V3 p, V3 q) { return V3{p.y * q.z - p.z * q.y, p.z * q.x - p.x * q.z, p.x * q.y - p.y * q.x}; };
+    auto norm = [&](V3 p) { const float l = std::sqrt(dot(p, p)); return l > 1e-6f ? V3{p.x / l, p.y / l, p.z / l} : p; };
+    const V3 d = sub(b, a);
+    const float dist = std::sqrt(dot(d, d));
+    if (dist < 1e-3f) return false;
+    const V3 sep = norm(d);
+    const V3 lateral = norm(cross(V3{0.0f, 1.0f, 0.0f}, sep));
+    const V3 perp = norm(cross(sep, lateral));
+    const V3 r = sub(c, a);
+    if (!(std::fabs(dot(lateral, r)) < 10.0f)) return false;
+    const float along = dot(sep, r);
+    if (!(along < dist && along > 0.0f)) return false;
+    return std::fabs(dot(perp, r)) < 15.0f;
+}
+
 // Turn/Move end: charge only once the inactivity timer passed the source limit.
 inline bool chargeDue(float inactiveTimer) { return inactiveTimer > kChargeInactiveLimit; }
 

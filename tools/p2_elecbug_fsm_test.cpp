@@ -39,6 +39,15 @@ int main() {
 
     // Charge is driven by the inactivity timer, not by sight.
     assert(!chargeDue(0.0f) && !chargeDue(15.0f) && chargeDue(15.01f));
+    // Source checkInteract band: beetles 200 apart on X, segment a->b.
+    const V3 a{0, 0, 0}, b{200, 0, 0};
+    assert(inArcBand(a, b, V3{100, 0, 0}));    // on the arc
+    assert(inArcBand(a, b, V3{100, 10, 9}));   // inside |vertical|<15, |lateral|<10
+    assert(!inArcBand(a, b, V3{100, 0, 12}));  // outside lateral 10
+    assert(!inArcBand(a, b, V3{100, 20, 0}));  // outside vertical 15
+    assert(!inArcBand(a, b, V3{-5, 0, 0}));    // behind the discharger
+    assert(!inArcBand(a, b, V3{205, 0, 0}));   // beyond the partner
+    assert(kArcStart > 0.26f && kArcStart < 0.27f); // frame 8 at 30 fps
     std::puts("p2_elecbug_fsm_test PASS");
     return 0;
 }
