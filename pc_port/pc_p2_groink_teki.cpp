@@ -70,6 +70,7 @@ struct Binding {
     int volleys = 0;
     P2GroinkShellFx fx;         // #892 shell visuals (one-shot P1 effects, no retained handles)
     int fxTrails = 0;
+    int fxGlowMarkers = 0;
     bool haveAim = false;       // last volley target, for the draw-facing diagnostic
     Vector3f aim;
     int faceLogTick = 0;
@@ -454,6 +455,8 @@ const char* fxName(P2GroinkFxKind k) {
     case P2GroinkFxKind::Trail: return "trail";
     case P2GroinkFxKind::Hit: return "hit";
     case P2GroinkFxKind::WaterHit: return "water";
+    case P2GroinkFxKind::Glow: return "glow";
+    case P2GroinkFxKind::Marker: return "marker";
     }
     return "?";
 }
@@ -470,6 +473,13 @@ void applyEffects(Binding& b, const p2groinkfsm::TickOutput& o) {
         pc_p2_groink_fx_spawn(c);
         if (c.kind == P2GroinkFxKind::Trail) {
             ++b.fxTrails;
+            continue;
+        }
+        if (c.kind == P2GroinkFxKind::Glow || c.kind == P2GroinkFxKind::Marker) {
+            // Per-shell cadence effects (#892): log only the first of each kind.
+            if (++b.fxGlowMarkers <= 2)
+                std::printf("P2_GROINK_FX generator=%u source_id=%u kind=%s slot=%zu pos=%.1f,%.1f,%.1f\n",
+                            b.generator, sourceOf(b), fxName(c.kind), c.slot, c.pos.x, c.pos.y, c.pos.z);
             continue;
         }
         std::printf("P2_GROINK_FX generator=%u source_id=%u kind=%s slot=%zu pos=%.1f,%.1f,%.1f dir=%.2f,%.2f,%.2f "
