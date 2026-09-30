@@ -33,6 +33,7 @@
 #include <cstdio>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -89,7 +90,7 @@ struct Binding {
     std::map<const void*, int> recvCount;
     // Visual-only weapon effects (pc_p2_bigtreasure_fx.h): owner-killed on
     // attack end, state change, death, forget and reset.
-    p2attackfx::Emitter fx;
+    std::unique_ptr<p2attackfx::Emitter> fx; // lazily created; owner-kills every generator on destruction
     p2attackfx::Session fxSession;
     p2titanfx::State fxState;
     int fxEmits = 0;           // water shots this frame (sum of per-tick emits)
@@ -239,8 +240,7 @@ bool loadInputs(bool bridge) {
         std::string why;
         if (!p2posefamily::loadFamilyClip(sPoseBank, clip.name, std::string("bigtreasure_") + clip.name,
                                           int(clip.poses.size()), duration, frames, shared, total, sPoses[a], why, limits)) {
-            std::printf("P2_BIGTREASURE_POSE_MISSING clip=%s reason=%s
-", clip.name.c_str(), why.c_str());
+            std::printf("P2_BIGTREASURE_POSE_MISSING clip=%s reason=%s\n", clip.name.c_str(), why.c_str());
             ok = false;
             break;
         }
@@ -254,8 +254,7 @@ bool loadInputs(bool bridge) {
     if (sPosesLoaded) {
         const p2motion::Tunables& tune = p2motion::tunables();
         std::printf("P2_BIGTREASURE_INTERPOLATION_READY interpolation=%d clips=%zu poses=%zu poses_per_clip=%zu..%zu "
-                    "resident_bytes=%zu clip_limit=%zu total_limit=%zu crossfade_ms=%d gameplay_clock=P1
-",
+                    "resident_bytes=%zu clip_limit=%zu total_limit=%zu crossfade_ms=%d gameplay_clock=P1\n",
                     int(tune.lerp && sPoseBank.ready()), sPoseBank.clipCount(), poses, minPoses, maxPoses, total,
                     limits.clipBytes, limits.totalBytes, int(tune.crossfadeSeconds * 1000.f + .5f));
     }
@@ -615,11 +614,10 @@ void stopFx(Binding& b, p2attackfx::EndReason why) {
     const p2attackfx::Element element = b.fxSession.element;
     const unsigned ticks = b.fxSession.ticks, points = b.fxSession.points;
     if (!b.fxSession.end()) return;
-    const unsigned created = b.fx.stopAll();
+    const unsigned created = b.fx ? b.fx->stopAll() : 0u;
     b.fxState.reset();
     std::printf("P2_BIGTREASURE_FX_STOP generator=%u source_id=73 element=%s reason=%s ticks=%u points=%u generators=%u "
-                "outstanding=%u
-",
+                "outstanding=%u\n",
                 b.generator, p2attackfx::elementName(element), fxEndName(why), ticks, points, created,
                 b.fxSession.outstanding());
     std::fflush(stdout);
@@ -661,17 +659,16 @@ void updateFx(BTeki* t, Binding& b) {
     p2attackfx::Point pts[p2titanfx::MAX_POINTS];
     const int n = p2titanfx::layout(rt, stats, legs, b.fxState, element, pts);
     if (b.fxSession.begin(element)) {
-        std::printf("P2_BIGTREASURE_FX_START generator=%u source_id=73 element=%s visual_only=1
-", b.generator,
+        std::printf("P2_BIGTREASURE_FX_START generator=%u source_id=73 element=%s visual_only=1\n", b.generator,
                     p2attackfx::elementName(element));
     }
     const unsigned tick = b.fxSession.ticks;
-    const unsigned made = b.fx.emit(element, pts, n, tick);
+    if (!b.fx) b.fx = std::make_unique<p2attackfx::Emitter>();
+    const unsigned made = b.fx->emit(element, pts, n, tick);
     b.fxSession.note(unsigned(n), made);
     if (n > 0 && b.fxSession.generators == made && made > 0) {
         std::printf("P2_BIGTREASURE_FX generator=%u source_id=73 element=%s points=%d generators=%u first=%.1f,%.1f,%.1f "
-                    "dir=%.3f,%.3f visual_only=1
-",
+                    "dir=%.3f,%.3f visual_only=1\n",
                     b.generator, p2attackfx::elementName(element), n, made, pts[0].x, pts[0].y, pts[0].z, pts[0].dx,
                     pts[0].dz);
     }

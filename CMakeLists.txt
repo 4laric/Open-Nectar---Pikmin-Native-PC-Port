@@ -1420,6 +1420,10 @@ add_executable(p2_attack_fx_test tools/p2_attack_fx_test.cpp)
 target_include_directories(p2_attack_fx_test PRIVATE pc_port)
 target_compile_options(p2_attack_fx_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_attack_fx_test COMMAND p2_attack_fx_test)
+add_executable(p2_gas_cloud_test tools/p2_gas_cloud_test.cpp)
+target_include_directories(p2_gas_cloud_test PRIVATE pc_port)
+target_compile_options(p2_gas_cloud_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_gas_cloud_test COMMAND p2_gas_cloud_test)
 add_executable(p2_bigtreasure_fx_test
     tools/p2_bigtreasure_fx_test.cpp
     pc_port/pc_p2_bigtreasure.cpp

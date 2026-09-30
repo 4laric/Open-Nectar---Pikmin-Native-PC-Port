@@ -3,6 +3,7 @@
 #include "Piki.h"
 #include "pc_p2_attack_fx_host.h"
 #include "pc_p2_gas_cloud_policy.h"
+#include "gl/pc_gfx.h"
 
 #include <cstdio>
 #include <map>
@@ -52,6 +53,13 @@ void pc_p2_gas_cloud_update(Piki* piki) {
     const p2attackfx::Look look{p2gascloud::EFFECT, p2gascloud::PUFF_LIFE, true};
     const unsigned made = e.fx.emitLook(look, pts, n);
     e.cloud.points += unsigned(n);
+    // Probe-only frame dump (PIKMIN_P2_PROXY_SHOT directory): the first few clouds of the run.
+    static unsigned sDumps = 0;
+    if ((tick == 12 || tick == 36) && sDumps < 6) {
+        char key[40];
+        std::snprintf(key, sizeof(key), "GasCloud_%02u", sDumps++);
+        pc_gfx_proxy_shot_now(key);
+    }
     if (tick == 0 && made > 0) {
         std::printf("P2_GAS_CLOUD piki=%p head=%.1f,%.1f,%.1f puffs=%d generators=%u effect=EFF_Kinoko_PostAttackCloud\n",
                     static_cast<void*>(piki), pts[0].x, pts[0].y, pts[0].z, n, made);

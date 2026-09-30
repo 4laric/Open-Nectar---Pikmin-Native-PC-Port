@@ -9,6 +9,7 @@
 #include "pc_p2_tank_policy.h"
 #include "pc_p2_tank_breath.h"
 #include "pc_p2_tank_stream.h"
+#include "pc_p2_attack_fx_host.h"
 #include "EffectMgr.h"
 #include "zen/particle.h"
 #include "pc_p2_species.h"
