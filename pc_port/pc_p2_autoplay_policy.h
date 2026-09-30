@@ -440,6 +440,8 @@ struct Config {
     float corpseOutOfReach = 800.0f; // tdist past this at giveup names corpse_out_of_reach
     float koganeConfirm = 20.0f; // after Kogane damage, watch escapes then move on
     float kurageAttackMultiplier = 2.0f; // Kurage has high HP: longer attack window
+    // OniKurage (72) has 4500 HP against the Kurage 2500 (retail fp00): scale its window.
+    float greaterKurageAttackMultiplier = 1.8f;
     float pressOnlyAttackMultiplier = 5.0f; // #898 press-only targets: one press per landed throw
     float pressLeadSeconds = 0.6f; // #898 aim ahead of a walking press-only target
     float corpseAimNear = 40.0f; // #898 cursor-aim corpses: closer than this -> step back (never shove it)
@@ -1709,7 +1711,7 @@ private:
         const bool kingBoss = in.targetSource == 53;
         const bool roller = cfg.rollerStance && isRollerStance(in.targetSource);
         const float limit = roller ? cfg.rollerAttackTimeout
-            : kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier
+            : kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier * (in.targetSource == 72 ? cfg.greaterKurageAttackMultiplier : 1.0f)
             : titan ? cfg.attackTimeout * cfg.titanAttackMultiplier
             : kingBoss ? cfg.attackTimeout * cfg.kingAttackMultiplier
             : pressOnly ? cfg.attackTimeout * cfg.pressOnlyAttackMultiplier : cfg.attackTimeout;
@@ -1807,7 +1809,7 @@ private:
             // undamaged's bound + cooldown (forces throw windows) with the
             // kurage-aware limit both lanes used (unkilled limit == wlimit).
             {
-                const float wlimit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier
+                const float wlimit = kurage ? cfg.attackTimeout * cfg.kurageAttackMultiplier * (in.targetSource == 72 ? cfg.greaterKurageAttackMultiplier : 1.0f)
                                    : titan  ? cfg.attackTimeout * cfg.titanAttackMultiplier
                                    : kingBoss ? cfg.attackTimeout * cfg.kingAttackMultiplier
                                    : pressOnly ? cfg.attackTimeout * cfg.pressOnlyAttackMultiplier : cfg.attackTimeout;

@@ -20,6 +20,12 @@ int main() {
         assert(p2campaign::hostType(38u,original,true)==original);
     }
     assert(p2campaign::hasStaticHost(38u));
+    // #960: the Greater Spotted Jellyfloat (OniKurage 72) rides TEKI_Frog (0) like the Kurage.
+    for (int original=0;original<34;++original) {
+        assert(p2campaign::hostType(72u,original,false)==0);
+        assert(p2campaign::hostType(72u,original,true)==original);
+    }
+    assert(p2campaign::hasStaticHost(72u));
     for (unsigned source : {9u,23u,34u,44u,54u,56u,57u,59u,60u,61u,62u,63u,65u,69u,70u,71u,78u,79u,101u,17u,18u,24u,25u,15u,75u,26u,27u,84u,93u,66u,97u,73u,30u})
         assert(p2campaign::hasStaticHost(source));
     // #244 OWN: Careening Dirigibug rides TEKI_Napkid (11) statically.

@@ -203,6 +203,7 @@ bool pc_p2_generated_placement_bind(BTeki* actor, unsigned sourceId, unsigned se
         std::fflush(stdout);
         return false;
     case 57: // Lesser Spotted Jellyfloat (Kurage); muse observer lane 58.
+    case 72: // Greater Spotted Jellyfloat (OniKurage); #960 rides the Kurage OWN module.
     case 58: // Careening Dirigibug (BombSarai); muse observer lane 59.
     case 78: // Gatling Groink (MiniHoudai); muse observer lane 60.
     case 99: // Waterwraith (BlackMan); provider #575, consumer lane 572.

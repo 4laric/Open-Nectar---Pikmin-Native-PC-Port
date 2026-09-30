@@ -87,6 +87,8 @@ enum Source : unsigned {
     kGroink       = 78,
     kGroinkArmored= 97,   // fminihoudai variant, same host module
     kCannonLarva  = 75,
+    kKurage       = 57,   // Lesser Spotted Jellyfloat (wave 3 flyers, #960)
+    kOniKurage    = 72,   // Greater Spotted Jellyfloat
     kEmpress      = 30,
     kEmperor      = 53,   // KingChappy, Emperor Bulblax
 };
@@ -165,6 +167,17 @@ inline int seFor(unsigned sourceId, Event e) {
         switch (e) {
         case Event::Hover: return kSaraiHover;
         case Event::Attack: return kSaraiAttack;
+        case Event::Damage: return kSaraiDamage;
+        case Event::Dead: return kSaraiDead;
+        case Event::Flick: return kChappySwing;
+        case Event::Land: return kFlogLand;
+        default: return kNone;
+        }
+    case kKurage:
+    case kOniKurage: // Jellyfloat: P1 has no floater; the Snitchbug flyer bank approximates it.
+        switch (e) {
+        case Event::Hover: return kSaraiHover;
+        case Event::Attack: return kSaraiAttack;   // suction pull-in
         case Event::Damage: return kSaraiDamage;
         case Event::Dead: return kSaraiDead;
         case Event::Flick: return kChappySwing;
