@@ -497,6 +497,14 @@ void P2KurageOwn::sourceTick(BTeki* actor)
 bool P2KurageOwn::tick(BTeki* actor, float dt)
 {
     if (!mActive || mEscaped || !actor) return false;
+    // Source onInit calls doAnimationCullingOff(): a Jellyfloat is never AI/LOD
+    // culled. On the P1 host that is CF_AIAlwaysActive; without it Creature::update
+    // early-returns for an actor outside the AI grid (creature.cpp:678), so the
+    // moveNew pass that integrates the FSM's velocity never runs and the body sits
+    // on the ground while this tick keeps advancing the FSM (owner smoke run s3:
+    // 13 of 16 bodies never rose). Creature::init clears the flag, so re-apply it
+    // every frame (Qurione precedent, pc_p2_qurione.cpp).
+    actor->setInsideView();
     // The suppressed P1 strategy normally applies stored damage through its
     // damage reaction; drain it so Pikmin hits reach mHealth (natural death).
     if (actor->mStoredDamage > 0.0f) actor->makeDamaged();
