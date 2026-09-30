@@ -46,6 +46,8 @@ namespace p2queenown {
 constexpr float kPi = 3.14159265358979323846f;
 constexpr float kHalfPi = kPi * 0.5f;
 constexpr float kSourceDelta = 1.0f / 30.0f;
+constexpr float kBlockWindow = 0.5f;    // port: no-progress window (s)
+constexpr float kBlockFraction = 0.25f; // port: blocked below this fraction of commanded travel
 
 // Queen.h:26-34.
 enum State : int { Null = -1, Dead = 0, Sleep = 1, Wait = 2, Damage = 3, Flick = 4, Rolling = 5, Born = 6 };
@@ -367,6 +369,12 @@ struct TickOutput {
     bool birth = false;             // StateBorn KEYEVENT_2: createBabyChappy()
     bool crash = false;             // Rolling key 2 past territory-50 while rolling
     bool rollStart = false;         // Rolling loop-start: mIsRolling = true
+    // PORT CONSTRAINT (no P2 counterpart): the P1 host map collision can hold a
+    // rolling Queen against geometry the P2 arena never had. Key 2 with a
+    // no-progress window either turns the roll like a territory-edge crash, or,
+    // once rollingTime has elapsed, ends it to Wait. Guarantees termination.
+    bool blockedTurn = false;       // blocked before rollingTime: turned like a crash
+    bool blockedEnd = false;        // blocked after rollingTime: roll ended to Wait
     bool deadKey = false;           // Dead KEYEVENT_2 (vibration/rumble)
     bool wakeUp = false;            // Sleep KEYEVENT_2
     bool kill = false;              // Dead KEYEVENT_END: kill()
@@ -389,6 +397,7 @@ public:
         mNextState = Null;
         mIsRolling = false;
         mWaitTimer = 0.0f;
+        resetRollProgress();
         mIsRoomForLarva = false;
         mBirthTimer = 0.0f;
         mPrevHitNum = 0.0f;
@@ -451,8 +460,32 @@ private:
         default: break;
         }
     }
+    void resetRollProgress() {
+        mHavePrev = false;
+        mRollBlocked = false;
+        mRollProgress = mRollExpected = 0.0f;
+    }
+    // Port-only no-progress detector: compares the host's actual displacement
+    // along last tick's commanded velocity over a kBlockWindow window.
+    void trackRollProgress(const Vec2& pos) {
+        const float speed = std::sqrt(mVelocity.x * mVelocity.x + mVelocity.z * mVelocity.z);
+        if (mHavePrev && speed > 0.0f) {
+            const float progress = ((pos.x - mPrevPos.x) * mVelocity.x + (pos.z - mPrevPos.z) * mVelocity.z) / speed;
+            mRollProgress += progress;
+            mRollExpected += speed * kSourceDelta;
+            if (mRollExpected >= speed * kBlockWindow) {
+                mRollBlocked = mRollProgress < kBlockFraction * mRollExpected;
+                mRollProgress = mRollExpected = 0.0f;
+            }
+        } else {
+            mRollProgress = mRollExpected = 0.0f;
+        }
+        mPrevPos = pos;
+        mHavePrev = true;
+    }
     void transit(int next, bool left, TickOutput& o) {
         if (next == Null) next = mState; // defensive: restart current state
+        resetRollProgress();
         if (mState != Null) cleanup(mState);
         mState = next;
         o.entered.push_back(next);
@@ -521,6 +554,7 @@ private:
             break;
         case Rolling: {
             if (mIsRolling) {
+                trackRollProgress(in.pos);
                 const Vec2 dir = rollDir();
                 const float sx = in.pos.x - mHome.x, sz = in.pos.z - mHome.z;
                 const float dot = sx * dir.x + sz * dir.z;
@@ -539,6 +573,7 @@ private:
                 mWaitTimer += kSourceDelta;
             } else {
                 mVelocity = {};
+                resetRollProgress();
             }
             if (dead) { mNextState = Dead; mIsRolling = false; mVelocity = {}; mAnim.finish(); }
             if (mAnim.is(Key2)) {
@@ -556,6 +591,12 @@ private:
                     mIsRolling = false;
                     mNextState = Wait;
                     mAnim.finish();
+                } else if (mIsRolling && mRollBlocked) {
+                    // Port constraint, see TickOutput::blockedTurn.
+                    mIsRolling = false;
+                    mAnim.finish();
+                    if (mWaitTimer > mParams.rollingTime) { mNextState = Wait; o.blockedEnd = true; }
+                    else { mNextState = Rolling; o.blockedTurn = true; }
                 }
             } else if (mAnim.is(KeyLoopStart)) {
                 if (!mIsRolling) { mIsRolling = true; o.rollStart = true; }
@@ -586,7 +627,9 @@ private:
     float mWaitTimer = 0.0f, mBirthTimer = 0.0f, mPrevHitNum = 0.0f, mFlickTimer = 0.0f;
     float mHealth = 0.0f, mFaceDir = 0.0f;
     int mStuck = 0;
-    Vec2 mHome, mVelocity;
+    Vec2 mHome, mVelocity, mPrevPos;
+    bool mHavePrev = false, mRollBlocked = false;
+    float mRollProgress = 0.0f, mRollExpected = 0.0f;
     std::uint32_t mRng = 1u;
 };
 

@@ -458,6 +458,7 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_kurage_teki.cpp
     pc_port/pc_p2_kurage_own_host.cpp
     pc_port/pc_p2_flyer_coll.cpp
+    pc_port/pc_p2_body_coll.cpp
     pc_port/pc_p2_onikurage_mouth.cpp
     pc_port/pc_p2_onikurage_teki.cpp
     pc_port/pc_main.cpp
@@ -1326,6 +1327,11 @@ add_executable(p2_hana_residual_policy_test
 target_include_directories(p2_hana_residual_policy_test PRIVATE pc_port)
 target_compile_options(p2_hana_residual_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_hana_residual_policy_test COMMAND p2_hana_residual_policy_test)
+add_executable(p2_hana_sleep_policy_test
+    tools/p2_hana_sleep_policy_test.cpp)
+target_include_directories(p2_hana_sleep_policy_test PRIVATE pc_port)
+target_compile_options(p2_hana_sleep_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_hana_sleep_policy_test COMMAND p2_hana_sleep_policy_test)
 
 add_executable(p2_catfish_events_test
     tools/test_p2_catfish_events.cpp)
@@ -1962,6 +1968,10 @@ target_compile_options(p2_chappy_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UND
 add_test(NAME p2_chappy_fsm_test COMMAND p2_chappy_fsm_test)
 # p2-884-chappy (#884): engine-free source mouth-slot eating (EnemyFunc::eatPikmin
 # geometry, capacity, eligibility, host-part mapping, King sweep, legacy oracle).
+add_executable(p2_mouth_snapshot_test tools/p2_mouth_snapshot_test.cpp)
+target_include_directories(p2_mouth_snapshot_test PRIVATE pc_port)
+target_compile_options(p2_mouth_snapshot_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_mouth_snapshot_test COMMAND p2_mouth_snapshot_test)
 add_executable(p2_chappy_mouth_test tools/p2_chappy_mouth_test.cpp)
 target_include_directories(p2_chappy_mouth_test PRIVATE pc_port)
 target_compile_options(p2_chappy_mouth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
@@ -2034,6 +2044,15 @@ add_executable(p2_flyer_test tools/p2_flyer_test.cpp)
 target_include_directories(p2_flyer_test PRIVATE pc_port)
 target_compile_options(p2_flyer_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_flyer_test COMMAND p2_flyer_test)
+
+# Shared P2 body-collision fit (stuck Pikmin sit on the drawn surface).
+add_executable(p2_body_fit_test tools/p2_body_fit_test.cpp)
+target_include_directories(p2_body_fit_test PRIVATE pc_port)
+target_compile_options(p2_body_fit_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_body_fit_test COMMAND p2_body_fit_test)
+# Dev audit: fit every species rest pose in a content tree (tools/p2_body_fit_audit.cpp).
+add_executable(p2_body_fit_audit EXCLUDE_FROM_ALL tools/p2_body_fit_audit.cpp)
+target_include_directories(p2_body_fit_audit PRIVATE pc_port)
 
 # Lane 06: engine-free provider unit tests (header-only; previously present but unregistered).
 add_executable(p2_receipt_test tools/p2_receipt_test.cpp)
@@ -2119,6 +2138,16 @@ add_executable(p2_groink_volley_test tools/p2_groink_volley_test.cpp pc_port/pc_
 target_include_directories(p2_groink_volley_test PRIVATE pc_port)
 target_compile_options(p2_groink_volley_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_groink_volley_test COMMAND p2_groink_volley_test)
+# #892: three-shell burst policy (one emit key, same tick, +-0.1 jitter) and the retail
+# armour-cover collision policy (only `body` is stickable).
+add_executable(p2_groink_burst_test tools/p2_groink_burst_test.cpp pc_port/pc_p2_groink_volley.cpp pc_port/pc_p2_groink.cpp)
+target_include_directories(p2_groink_burst_test PRIVATE pc_port)
+target_compile_options(p2_groink_burst_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_groink_burst_test COMMAND p2_groink_burst_test)
+add_executable(p2_groink_coll_test tools/p2_groink_coll_test.cpp)
+target_include_directories(p2_groink_coll_test PRIVATE pc_port)
+target_compile_options(p2_groink_coll_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_groink_coll_test COMMAND p2_groink_coll_test)
 # #888 WP5: engine-free NormMiniHoudai/FixMiniHoudai source FSM (states,
 # animation key events, gun aim, 3-shell volleys, shake-off, death).
 # #898 Breadbug (PanModoki 38) engine-free source FSM.

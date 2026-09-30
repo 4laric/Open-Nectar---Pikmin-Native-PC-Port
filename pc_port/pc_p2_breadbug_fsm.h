@@ -58,6 +58,9 @@ constexpr float kTau = 6.28318530717958647692f;
 constexpr float kSourceDelta = 1.0f / 30.0f;
 constexpr float kDefaultAnimSpeed = 30.0f;  // EnemyAnimatorBase::defaultAnimSpeed
 constexpr float kCarrySizeDiff = 20.0f;     // PanModokiBase::Obj() mCarrySizeDiff (small Breadbug)
+constexpr float kGiantCarrySizeDiff = 40.0f; // OoPanModoki::Obj() mCarrySizeDiff (panModoki.cpp:1709)
+constexpr float kWaypointSlack = 100.0f;    // walkFunc slack box (panModoki.cpp:926)
+constexpr float kGiantWaypointSlack = 150.0f; // OoPanModoki (panModoki.cpp:927-929)
 constexpr int kMaxHeldTreasures = 15;       // PANMODOKI_MaxHeldTreasures
 constexpr int kBackStuckRelease = 8;       // #898 port watchdog: 8 x 60 ticks (16 s) wedged in Back -> release
 
@@ -104,7 +107,15 @@ struct Params {
     float hideTime = 50.0f;        // proper fp15 (updates)
     int maxCarryWeight = 5;        // proper ip01 (canTarget weight limit)
     bool retail = false;           // true once a retail enemyparm.txt was parsed
+    // Variant (#958): false = PanModoki 38, true = OoPanModoki 40 (Giant
+    // Breadbug). Set with applyVariant() BEFORE parseEnemyParm/init.
+    bool giant = false;
+    float carrySizeDiff = 20.0f;   // mCarrySizeDiff (stick radius, reach-to-goal)
+    float waypointSlack = 100.0f;  // walkFunc slack box before the speed timer
 };
+// PanModoki vs OoPanModoki constants (canTarget, mCarrySizeDiff, walkFunc
+// slack). parseEnemyParm keeps these fields.
+void applyVariant(Params& params, bool giant);
 // Retail `panmodoki/enemyparm.txt`: blocks ended by {_eof}; `{tag} <kind>
 // <value>` rows; '#' comments. The CreatureProps block (s003), the general
 // block (fp00 + fp27) and the proper block (the later block with fp16 and
@@ -296,6 +307,7 @@ private:
     bool canBack() const;
     bool isCarryHomeDirect() const;
     bool isTargetable(const PelletInfo& p) const;
+    bool canTarget(int pelMinWeight) const;
     const PelletInfo* findNearestPellet() const;
     void releaseCarryTarget();
     void checkNearHomeGraphIndex();
