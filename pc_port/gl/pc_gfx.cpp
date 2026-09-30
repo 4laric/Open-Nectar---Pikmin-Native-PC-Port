@@ -32,6 +32,7 @@
 
 #include "../timing/pc_render_packet.h"
 #include "pc_tev_shader.h"
+#include "pc_tev_order.h"
 #include "pc_gx_lighting_glsl.h"
 #include "pc_postprocess.h"
 #include "pc_texpack.h"
@@ -5113,7 +5114,9 @@ void pc_gfx_set_tev_order(GXTevStageID stage, GXTexCoordID coord, GXTexMapID map
     state_touched();
     if (stage >= GX_TEVSTAGE0 && stage < GX_MAXTEVSTAGE) {
         sTevStages[stage].texMap = map;
-        sTevStages[stage].texCoord = coord;
+        // GXSetTevOrder turns GX_TEXCOORD_NULL into TEXCOORD0 and keeps the texture
+        // enabled for a valid map (see pc_tev_order.h); the raw 0xFF used to be clamped to 3.
+        sTevStages[stage].texCoord = GXTexCoordID(pc_tev_order_texcoord(int(coord)));
         sTevStages[stage].textureEnabled = map >= GX_TEXMAP0 && map < GX_MAX_TEXMAP;
         if (chan == GX_COLOR_NULL || chan == GX_COLOR_ZERO) sTevStages[stage].rasChannel = -1;
         else if (chan == GX_COLOR1 || chan == GX_ALPHA1 || chan == GX_COLOR1A1) sTevStages[stage].rasChannel = 1;
