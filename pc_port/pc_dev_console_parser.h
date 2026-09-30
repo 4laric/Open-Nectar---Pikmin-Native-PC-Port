@@ -145,6 +145,7 @@ enum class Cmd {
     Spawn,    // spawn <species|p1 teki name> [count] [norebind]
     Kill,     // kill [all]
     KillAll,
+    Hurt,     // hurt [fraction] : damage every live campaign P2 actor by a fraction of its max health
     Pikmin,   // pikmin <red|yellow|blue> <n>
     Day,      // day <n>
     Time,     // time <hours 0..24 | 0..1 fraction>
@@ -232,6 +233,13 @@ inline Command parse(const char* line)
     if (ieq(w, "list") || ieq(w, "ls")) { c.kind = Cmd::List; return c; }
     if (ieq(w, "pos") || ieq(w, "where")) { c.kind = Cmd::Pos; return c; }
     if (ieq(w, "rebind")) { c.kind = Cmd::Rebind; return c; }
+    if (ieq(w, "hurt")) {
+        c.kind = Cmd::Hurt;
+        c.time = 0.4f;
+        if (n >= 2 && (!parseFloat(words[1], c.time) || c.time <= 0.0f || c.time >= 1.0f))
+            std::snprintf(c.error, sizeof(c.error), "usage: hurt [fraction 0..1, default 0.4]");
+        return c;
+    }
     if (ieq(w, "killall")) { c.kind = Cmd::KillAll; return c; }
     if (ieq(w, "kill")) {
         c.kind = (n >= 2 && ieq(words[1], "all")) ? Cmd::KillAll : Cmd::Kill;
@@ -296,7 +304,7 @@ inline Command parse(const char* line)
 
 inline const char* helpText()
 {
-    return "spawn <id|Enum|Common_Name|p1 teki name> [count] [norebind] | kill [all] | killall | "
+    return "spawn <id|Enum|Common_Name|p1 teki name> [count] [norebind] | kill [all] | killall | hurt [fraction] | "
            "pikmin <red|yellow|blue> [n] | day <n> | time <hours|0..1> | tp <x> <z> | tp <arena> | pos | list | rebind | help";
 }
 

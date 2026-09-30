@@ -2191,6 +2191,10 @@ add_executable(pc_dev_console_parser_test pc_port/pc_dev_console_parser_test.cpp
 target_include_directories(pc_dev_console_parser_test PRIVATE pc_port)
 target_compile_options(pc_dev_console_parser_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_dev_console_parser_test COMMAND pc_dev_console_parser_test)
+add_executable(pc_p2_life_gauge_test pc_port/pc_p2_life_gauge_test.cpp)
+target_include_directories(pc_p2_life_gauge_test PRIVATE pc_port)
+target_compile_options(pc_p2_life_gauge_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_life_gauge_test COMMAND pc_p2_life_gauge_test)
 
 # #440 campaign setup failsafe: in bridge mode a species setup that cannot stage
 # its files logs P2_SETUP_SKIP and leaves the P1 stand-ins instead of aborting;
