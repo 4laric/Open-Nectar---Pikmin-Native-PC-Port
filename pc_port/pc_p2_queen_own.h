@@ -185,6 +185,9 @@ inline Bank defaultBank() {
 //   end
 // Unknown clip names, out-of-range frames, non-increasing pose frames or a
 // missing `end` fail closed (the caller keeps the built-in bank).
+// Dense pose bank bound (#972): pikmin2_animation.DEFAULT_POSE_LIMIT, the same
+// per-clip cap the other P2 pose banks use. Was 16 (the staged bank was 12).
+constexpr int kMaxPosesPerClip = 24;
 inline bool parseBank(std::istream& in, Bank& bank, Params& params, std::string& error) {
     std::stringstream clean;
     std::string line;
@@ -257,7 +260,7 @@ inline bool parseBank(std::istream& in, Bank& bank, Params& params, std::string&
             c.events.push_back(k);
         }
         int nPoses;
-        if (!(clean >> nPoses) || nPoses < 0 || nPoses > 16) { error = "poses:" + name; return false; }
+        if (!(clean >> nPoses) || nPoses < 0 || nPoses > kMaxPosesPerClip) { error = "poses:" + name; return false; }
         for (int p = 0; p < nPoses; ++p) {
             int f;
             if (!(clean >> f) || f < 0 || f >= frames || (p && f <= c.poses.back())) { error = "pose:" + name; return false; }
