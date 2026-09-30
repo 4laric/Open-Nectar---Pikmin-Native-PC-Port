@@ -142,14 +142,14 @@ void pc_p2_body_coll_forget(BTeki* actor)
 
 bool pc_p2_body_coll_register_pose(const std::string& key, const p2pose::Pose& rest)
 {
-    if (!enabled() || !managedKey(key)) return false;
+    if (!managedKey(key)) return false;
     if (species.count(key)) return true;
     return fitPose(key, rest);
 }
 
 void pc_p2_body_coll_assign(BTeki* actor, const std::string& key)
 {
-    if (!actor || !enabled() || !managedKey(key)) return;
+    if (!actor || !managedKey(key)) return;
     if (actors.count(actor)) return;
     Bound b;
     b.key = key;
@@ -164,7 +164,7 @@ bool pc_p2_body_coll_bound(const BTeki* actor)
 
 void pc_p2_body_coll_update(BTeki* actor)
 {
-    if (!enabled() || !actor) return;
+    if (!actor) return;
     auto it = actors.find(actor);
     if (it == actors.end()) {
         // Queen: the actor is identified by its campaign source (the Queen draw
@@ -179,7 +179,8 @@ void pc_p2_body_coll_update(BTeki* actor)
     if (b.released) return;
     const bool dead = actor->mHealth <= 0.0f || actor->mDeadState != 0;
     if (!b.bound) {
-        const Species* sp = dead ? nullptr : speciesFor(b.key);
+        // PIKMIN_P2_BODY_COLL=0 keeps the host tree (the actor stays registered for the stick log).
+        const Species* sp = dead || !enabled() ? nullptr : speciesFor(b.key);
         if (!sp || !actor->mCollInfo) return;
         b.table = sp->table;
         b.scale = sp->drawUnscaled ? 1.0f : actor->mSRT.s.x;
