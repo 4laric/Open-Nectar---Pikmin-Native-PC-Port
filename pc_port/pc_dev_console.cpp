@@ -327,9 +327,11 @@ void killNearest(bool all)
         if (!t || !t->isAlive() || t->mDeadState != 0 || t->mHealth <= 0.0f) continue;
         const float d = distXZ(t->getPosition(), navi->getPosition());
         if (all) {
-            // die() arms the natural death: the P1 strategy (or the family
-            // tick for a bound P2 actor) finalises it through dieSoon(), so the
-            // corpse pelletises and can be carried.
+            // Health 0 + die() arms the natural death: the P1 strategy, the
+            // family tick (external-die escape) or a health-watching host
+            // (Sarai/Demon) finalises it through dieSoon(), so the corpse
+            // pelletises and can be carried.
+            t->mHealth = 0.0f;
             t->die();
             ++killed;
             continue;
@@ -349,6 +351,7 @@ void killNearest(bool all)
     }
     const unsigned token = pc_p2_campaign_token(best);
     const unsigned source = pc_p2_campaign_source(best);
+    best->mHealth = 0.0f;
     best->die();
     say("kill: %s(%d) source=%u uid=%u dist=%.0f (natural die(); corpse follows the family/P1 path)",
         TekiMgr::getTypeName(best->mTekiType), best->mTekiType, source, token, bestDist);
