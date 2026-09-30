@@ -1,7 +1,8 @@
-// #940 isolated campaign combat fixture: adult_direct and dwarf_quake.
+// #940 isolated campaign combat fixture: adult_direct, dwarf_quake, dwarf_crush_stunned.
 // Quake acceptance additionally requires matching accepted production QUAKE/
-// IMPACT tokens and no DIRECT event for the tested source/target. Death during
-// stun and direct dwarf crush remain pending; exit zero supplies evidence only.
+// IMPACT tokens and no DIRECT event for the tested source/target. Stunned crush
+// instead requires exactly one direct native 16-to-2 transition for its sole
+// crush throw. Exit zero supplies evidence; reward delivery is not exercised.
 // Acceptance additionally requires a production P2_PURPLE_DIRECT stage=hipdrop
 // marker for the printed target/source pointers, family=adult_bulborb and
 // damage_applied=1 and queued_after-queued_before=50, together with the
@@ -22,6 +23,7 @@
 #include "PikiMgr.h"
 #include "PikiState.h"
 #include "PikiHeadItem.h"
+#include "Pellet.h"
 #include "Pom.h"
 #include "Boss.h"
 #include "ItemMgr.h"
@@ -50,6 +52,7 @@
 #include <cerrno>
 #include <climits>
 #include <chrono>
+#include <set>
 
 static void p2_fixture_require_captain(bool dead, bool deadState, float hp, int tick) {
     if (!dead && !deadState && std::isfinite(hp) && hp > 1.0f) return;
@@ -70,9 +73,13 @@ class PurpleCombatApp : public PlugPikiApp {
     float initialHealth=0, maxQueued=0, regeneration=0;
     int regenerationFrames=0;
     Vector3f parkPosition;
+    bool crushMode() const {
+        const char* mode=std::getenv("P2_PURPLE_COMBAT_MODE");
+        return mode && std::strcmp(mode,"dwarf_crush_stunned")==0;
+    }
     bool dwarfMode() const {
         const char* mode=std::getenv("P2_PURPLE_COMBAT_MODE");
-        return mode && std::strcmp(mode,"dwarf_quake")==0;
+        return mode && (std::strcmp(mode,"dwarf_quake")==0 || crushMode());
     }
     BTeki* dwarf=nullptr;
     unsigned dwarfUid=0;
@@ -83,6 +90,11 @@ class PurpleCombatApp : public PlugPikiApp {
     bool quakeBounce=false, quakeAirborne=false, quakeRecovery=false;
     bool quakeFit=false, quakeRepeat=false, quakeRetained=false;
     bool quakePositionChecked=false;
+    bool crushStarted=false, crushThrown=false, crushStaged=false, crushPressed=false, crushDead=false;
+    bool crushIsolated=false, crushCancelled=false;
+    int crushTicks=0, crushPressEntries=0, crushPreviousState=16, crushCorpseTicks=0, crushKillsBefore=0;
+    PelletView* crushView=nullptr;
+    std::set<Pellet*> crushCorpses;
     std::chrono::steady_clock::time_point acquisitionTime;
 
     Piki* naturalStep(Navi* n) {
@@ -327,6 +339,91 @@ class PurpleCombatApp : public PlugPikiApp {
         }
         return false;
     }
+
+    void crushStep(Navi* n) {
+        require(++crushTicks<1800,"stunned crush press/death/corpse path timed out");
+        require(acquired->isAlive() && pc_p2_is_purple(acquired),"crush acquired Purple lost");
+        // Once native death detaches the generator, pointer/lifetime observation
+        // replaces the now-unavailable live seed lookup. Never dereference an
+        // actor absent from the manager; corpse linkage is compared as a value.
+        bool present=false;
+        Iterator enemies(tekiMgr);
+        CI_LOOP(enemies) if(static_cast<BTeki*>(*enemies)==dwarf) { present=true; break; }
+        const auto stun=pc_p2_kochappy_stun_sample(dwarf);
+        int state=-1; float hp=-1, queue=-1;
+        if(present) {
+            state=dwarf->mStateID; hp=dwarf->mHealth; queue=dwarf->mStoredDamage;
+            if(dwarf->mGenerator) require(pc_p2_campaign_source(dwarf)==1
+                && pc_randomizer_generator_id(dwarf->mGenerator)==dwarfUid,"crush actor identity changed");
+            if(stun.registered) require(stun.lifetime==dwarfLifetime,"crush actor lifetime reused");
+            if(state==2 && crushPreviousState!=2) {
+                ++crushPressEntries;
+                require(crushThrown && crushPressEntries==1 && crushPreviousState==16,
+                    "expected exactly one observed native Fit16-to-Pressed2 transition");
+                require(stun.phase==0,"native press did not cancel quake lifecycle");
+                crushPressed=true; crushCancelled=true;
+                std::printf("P2_PURPLE_CRUSH_PRESSED_EVIDENCE uid=%u source=1 target=%p piki=%p pre_state=16 post_state=2 entries=%d stun_phase=%d health=%.3f queued=%.3f external_direct_marker_required=1\n",
+                    dwarfUid,static_cast<void*>(dwarf),static_cast<void*>(acquired),crushPressEntries,stun.phase,hp,queue);
+            }
+            if(crushPressed && (dwarf->mDeadState || !dwarf->isAlive())) crushDead=true;
+            crushPreviousState=state;
+        }
+        if(crushTicks%30==0 || crushTicks==1) std::printf("P2_PURPLE_CRUSH_PROGRESS uid=%u source=1 tick=%d present=%d state=%d stun_phase=%d fit=%.6f health=%.3f queued=%.3f pressed=%d dead=%d corpse_count=%zu kill_delta=%d\n",
+            dwarfUid,crushTicks,int(present),state,stun.phase,stun.fitElapsed,hp,queue,int(crushPressed),int(crushDead),crushCorpses.size(),int(GameStat::killTekis)-crushKillsBefore);
+        if(!crushThrown) {
+            require(present && dwarfPresent() && state==16 && stun.registered && stun.phase==2 && stun.fitElapsed>0.f
+                && stun.fitElapsed<7.f && dwarf->isAlive() && hp==dwarfHealth && queue==0.f,
+                "stunned crush needs untouched naturally rolled Fit with enough throw time");
+            crushView=static_cast<PelletView*>(dwarf); crushKillsBefore=GameStat::killTekis;
+            require(pelletMgr!=nullptr,"crush missing pellet manager");
+            Iterator pellets(pelletMgr);
+            CI_LOOP(pellets) require(static_cast<Pellet*>(*pellets)->mPelletView!=crushView,"crush target already owns a corpse");
+            const Vector3f pos=dwarf->mSRT.t;
+            n->resetPosition(Vector3f(pos.x-100.f,mapMgr->getMinY(pos.x-100.f,pos.z,true),pos.z));
+            acquired->changeMode(PikiMode::FreeMode,n); acquired->mFSM->transit(acquired,PIKISTATE_Flying);
+            n->throwPiki(acquired,Vector3f(pos.x+42.f,pos.y,pos.z));
+            require(pc_p2_purple_flight_active(acquired),"stunned crush native throw not armed");
+            crushThrown=true;
+            std::printf("P2_PURPLE_CRUSH_THROW uid=%u source=1 target=%p piki=%p target_state=16 stun_phase=2 fit=%.6f health_before=%.3f native_throw=1 throw_count=1 captain_position_staged=1 enemy_modified=0 controls_validated=0\n",
+                dwarfUid,static_cast<void*>(dwarf),static_cast<void*>(acquired),stun.fitElapsed,hp);
+            return;
+        }
+        if(!crushPressed) {
+            require(present && state==16 && stun.phase==2 && dwarf->isAlive(),"crush target left native Fit before direct press");
+            require(hp==dwarfHealth && queue==0.f,"pre-press health changed; direct/ordinary damage contaminates crush");
+            if(!crushStaged && pc_p2_purple_flight_sample(acquired).phase==PcP2PurpleFlightPhase::Descent) {
+                acquired->resetPosition(dwarf->mSRT.t+Vector3f(0,45.f,0));
+                acquired->mVelocity=Vector3f(0,-100,0); acquired->mTargetVelocity=acquired->mVelocity;
+                crushStaged=true;
+                std::printf("P2_PURPLE_CRUSH_DESCENT_SETUP uid=%u source=1 pre_state=%d fit=%.6f source_position_staged=1 source_velocity_staged=1 enemy_modified=0 forced_rng=0 flight_phase_injected=0\n",dwarfUid,state,stun.fitElapsed);
+            }
+        }
+        if(crushPressed && !crushIsolated) {
+            if(acquired->isStickTo()) acquired->endStickObject();
+            acquired->changeMode(PikiMode::FreeMode,n); acquired->resetPosition(parkPosition); n->resetPosition(parkPosition);
+            crushIsolated=true;
+        }
+        require(present || crushPressed,"crush target disappeared before press evidence");
+        if(crushPressed) require(stun.phase==0,"quake lifecycle reactivated after lethal press");
+        int liveCorpses=0;
+        Iterator pellets(pelletMgr);
+        CI_LOOP(pellets) {
+            Pellet* corpse=static_cast<Pellet*>(*pellets);
+            if(corpse && corpse->isAlive() && corpse->mPelletView==crushView) { ++liveCorpses; crushCorpses.insert(corpse); }
+        }
+        require(liveCorpses<=1 && crushCorpses.size()<=1,"duplicate native corpse observed");
+        const int kills=int(GameStat::killTekis)-crushKillsBefore;
+        require(kills>=0 && kills<=1,"kill counter changed more than once during crush observation");
+        if(liveCorpses==1) {
+            require(crushPressed && crushCancelled && crushDead && crushPressEntries==1,"corpse without complete native press/death evidence");
+            if(++crushCorpseTicks>=60) {
+                require(kills==1,"native corpse did not produce exactly one kill count");
+                std::printf("P2_PURPLE_CRUSH_STUNNED_EVIDENCE uid=%u source=1 target=%p piki=%p natural_fit=1 native_throw_count=1 observed_press_entries=1 stun_cancelled=1 native_death=1 unique_corpse=1 corpse_observed_frames=%d kill_delta=1 health_before=%.3f health_after=%.3f injected_damage=0 forced_enemy_state=0 forced_rng=0 external_direct_16_to_2_exactly_once_required=1 delivery_rewards_validated=0 death_animation_fidelity_validated=0\n",
+                    dwarfUid,static_cast<void*>(dwarf),static_cast<void*>(acquired),crushCorpseTicks,dwarfHealth,hp);
+                std::fflush(nullptr); std::_Exit(0);
+            }
+        } else require(crushCorpseTicks==0,"native corpse disappeared before duplicate-observation window completed");
+    }
     void quakeStep(Navi* n) {
         ++quakeTick;
         require(acquired->isAlive() && pc_p2_is_purple(acquired),"quake acquired Purple lost");
@@ -444,10 +541,14 @@ class PurpleCombatApp : public PlugPikiApp {
             acquired->changeMode(PikiMode::FreeMode,n); acquired->resetPosition(parkPosition); n->resetPosition(parkPosition);
             quakeFlying=false;
         }
+        if(crushMode() && quakeFit && !quakeFlying && sourceReady && eligible && stun.phase==2 && stun.fitElapsed>=1.f) {
+            require(quakeRecovery && quakePositionChecked,"crush missing preceding quake ground recovery");
+            crushStarted=true; crushStep(n); return;
+        }
         // Retry a naturally rejected/no-Fit branch only after source recovery.
         // During Fit, one further throw verifies retained time, then wait out
         // the native timer without another attack or target manipulation.
-        const bool wantRepeat=quakeFit && !quakeRepeat && stun.phase==2 && stun.fitElapsed>=1.f;
+        const bool wantRepeat=!crushMode() && quakeFit && !quakeRepeat && stun.phase==2 && stun.fitElapsed>=1.f;
         const bool wantNew=!quakeFit && stun.phase==0;
         if(!quakeFlying && sourceReady && eligible && (wantRepeat || wantNew)) {
             require(quakeAttempts<24,"natural Fit/repeat branch unachieved after 24 completed throws");
@@ -477,9 +578,10 @@ public:
         if (++ticks%120==0) diagnostics(n);
         if(dwarfMode() && acquired) {
             const double seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-acquisitionTime).count();
-            if(seconds>=240.0) std::printf("P2_PURPLE_QUAKE_TIMEOUT seconds=%.3f attempts=%d fit=%d repeat=%d retained=%d phase=%d\n",
+            const double limit=crushMode()?300.0:240.0;
+            if(seconds>=limit) std::printf("P2_PURPLE_QUAKE_TIMEOUT seconds=%.3f attempts=%d fit=%d repeat=%d retained=%d phase=%d\n",
                 seconds,quakeAttempts,int(quakeFit),int(quakeRepeat),int(quakeRetained),quakeLastPhase);
-            require(seconds<240.0,"quake natural branch/recovery unachieved within 240 seconds after acquisition");
+            require(seconds<limit,"dwarf natural branch/death/recovery unachieved within mode wall-clock bound");
         } else require(ticks<6000,"global startup/acquisition/combat timeout");
         if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive) { gameflow.mMoviePlayer->requestSkip(); return result; }
         if(!n||!pikiMgr||!itemMgr||!bossMgr||!tekiMgr||!mapMgr||!n->getCurrState()
@@ -492,15 +594,15 @@ public:
             }
             return result;
         }
-        if(dwarfMode()) quakeStep(n); else combatStep(n); return result;
+        if(crushStarted) crushStep(n); else if(dwarfMode()) quakeStep(n); else combatStep(n); return result;
     }
 };
 int main(int argc,char** argv) {
     if(std::getenv("P2_FIXTURE_FORCE_CAPTAIN_DOWN")) p2_fixture_require_captain(false,false,0,0);
     setvbuf(stdout,nullptr,_IONBF,0);
     const char* mode=std::getenv("P2_PURPLE_COMBAT_MODE");
-    if(mode && std::strcmp(mode,"adult_direct") && std::strcmp(mode,"dwarf_quake")) {
-        std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=adult_direct,dwarf_quake death_during_stun_pending=1 dwarf_crush_pending=1\n",mode); return 2;
+    if(mode && std::strcmp(mode,"adult_direct") && std::strcmp(mode,"dwarf_quake") && std::strcmp(mode,"dwarf_crush_stunned")) {
+        std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=adult_direct,dwarf_quake,dwarf_crush_stunned\n",mode); return 2;
     }
     SDL_SetMainReady(); pc_gpu_preference_apply(); pc_bbft_init(argc,argv);
     require(pc_randomizer_purple_campaign() && pc_randomizer_p2_bridge(),"ordinary Purple seed campaign required");
