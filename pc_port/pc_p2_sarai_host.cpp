@@ -518,8 +518,7 @@ void P2SaraiHost::demonAnimDiagnostic(float dt, const char* state)
     if (mAnimLogAccum < 0.25f) return;
     mAnimLogAccum = 0.0f;
     const bool smooth = mSmooth != nullptr;
-    std::printf("P2_DEMON_ANIM t=%.2f state=%s clip=%s frame=%.2f fade_active=%d fade_progress=%.2f
-", mDemonClock,
+    std::printf("P2_DEMON_ANIM t=%.2f state=%s clip=%s frame=%.2f fade_active=%d fade_progress=%.2f\n", mDemonClock,
                 state,
                 mActiveSet >= 0 && mActiveSet < int(mPoseSets.size()) ? mPoseSets[std::size_t(mActiveSet)].profile.c_str() : "-",
                 mPlayer.frame(), smooth ? int(mSmooth->track.view.fade.active()) : -1,
