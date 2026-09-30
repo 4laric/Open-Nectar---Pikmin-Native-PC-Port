@@ -1190,14 +1190,12 @@ void bigfootBankSetup(size_t& total) {
     bigfootShapes.clear();
     std::ifstream config("assets/dataDir/courses/pikmin2room/p2-long-legs-animation.txt");
     if (!config) {
-        std::printf("P2_LONGLEGS_BANK status=absent pose=bind
-");
+        std::printf("P2_LONGLEGS_BANK status=absent pose=bind\n");
         return;
     }
     std::vector<p2longlegspose::ClipConfig> clips;
     if (!p2longlegspose::parse(config, clips)) {
-        std::printf("P2_LONGLEGS_BANK status=invalid_config pose=bind
-");
+        std::printf("P2_LONGLEGS_BANK status=invalid_config pose=bind\n");
         return;
     }
     p2poseload::Shared shared;
@@ -1207,8 +1205,7 @@ void bigfootBankSetup(size_t& total) {
         std::vector<Shape*> poses;
         if (!p2posefamily::loadFamilyClip(bigfootBank, clip.name, "longlegs_BigFoot_" + clip.name, clip.count,
                                           clip.duration, clip.frames, shared, loaded, poses, error)) {
-            std::printf("P2_LONGLEGS_BANK status=load_failed clip=%s reason=%s pose=bind
-", clip.name.c_str(),
+            std::printf("P2_LONGLEGS_BANK status=load_failed clip=%s reason=%s pose=bind\n", clip.name.c_str(),
                         error.c_str());
             bigfootBank.reset();
             bigfootTiming.clear();
@@ -1219,8 +1216,7 @@ void bigfootBankSetup(size_t& total) {
         bigfootShapes[clip.name] = poses;
     }
     total += loaded;
-    std::printf("P2_LONGLEGS_BANK status=ready clips=%zu resident_bytes=%zu gameplay=P1_unchanged
-",
+    std::printf("P2_LONGLEGS_BANK status=ready clips=%zu resident_bytes=%zu gameplay=P1_unchanged\n",
                 bigfootTiming.size(), loaded);
 }
 
