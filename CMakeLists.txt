@@ -459,6 +459,7 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_kurage_teki.cpp
     pc_port/pc_p2_kurage_own_host.cpp
     pc_port/pc_p2_flyer_coll.cpp
+    pc_port/pc_p2_body_coll.cpp
     pc_port/pc_p2_onikurage_mouth.cpp
     pc_port/pc_p2_onikurage_teki.cpp
     pc_port/pc_main.cpp
@@ -1323,6 +1324,16 @@ add_executable(p2_hana_events_test
 target_include_directories(p2_hana_events_test PRIVATE pc_port)
 target_compile_options(p2_hana_events_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_hana_events_test COMMAND p2_hana_events_test)
+add_executable(p2_hana_residual_policy_test
+    tools/p2_hana_residual_policy_test.cpp)
+target_include_directories(p2_hana_residual_policy_test PRIVATE pc_port)
+target_compile_options(p2_hana_residual_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_hana_residual_policy_test COMMAND p2_hana_residual_policy_test)
+add_executable(p2_hana_sleep_policy_test
+    tools/p2_hana_sleep_policy_test.cpp)
+target_include_directories(p2_hana_sleep_policy_test PRIVATE pc_port)
+target_compile_options(p2_hana_sleep_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_hana_sleep_policy_test COMMAND p2_hana_sleep_policy_test)
 
 add_executable(p2_catfish_events_test
     tools/test_p2_catfish_events.cpp)
@@ -2063,6 +2074,15 @@ add_executable(p2_flyer_test tools/p2_flyer_test.cpp)
 target_include_directories(p2_flyer_test PRIVATE pc_port)
 target_compile_options(p2_flyer_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_flyer_test COMMAND p2_flyer_test)
+
+# Shared P2 body-collision fit (stuck Pikmin sit on the drawn surface).
+add_executable(p2_body_fit_test tools/p2_body_fit_test.cpp)
+target_include_directories(p2_body_fit_test PRIVATE pc_port)
+target_compile_options(p2_body_fit_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_body_fit_test COMMAND p2_body_fit_test)
+# Dev audit: fit every species rest pose in a content tree (tools/p2_body_fit_audit.cpp).
+add_executable(p2_body_fit_audit EXCLUDE_FROM_ALL tools/p2_body_fit_audit.cpp)
+target_include_directories(p2_body_fit_audit PRIVATE pc_port)
 
 # Lane 06: engine-free provider unit tests (header-only; previously present but unregistered).
 add_executable(p2_receipt_test tools/p2_receipt_test.cpp)
