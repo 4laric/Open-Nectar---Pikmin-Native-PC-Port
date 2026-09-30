@@ -317,6 +317,8 @@ private:
     float demonRand();
     unsigned demonGenerator() const;
     void updateDemon();
+    void demonAnimDiagnostic(float dt, const char* state);
+    float mAnimLogAccum = 0.0f;
     bool startDemonMotion(p2sarai::Motion motion);
     Navi* demonAcquire(float dt);
     void demonSetRandTarget();

@@ -2318,3 +2318,11 @@ add_test(NAME p2_campaign_goal_lifecycle_test COMMAND p2_campaign_goal_lifecycle
 add_library(p2_campaign_goal_lifecycle_runtime_compile OBJECT tools/p2_campaign_goal_lifecycle_runtime.cpp)
 target_include_directories(p2_campaign_goal_lifecycle_runtime_compile PRIVATE pc_port ${SDL2_INCLUDE_DIRS})
 target_compile_options(p2_campaign_goal_lifecycle_runtime_compile PRIVATE ${NATIVE_COMPILE_OPTIONS} -Wno-unused-parameter)
+
+# Demon living-body fade advance regression (#972): engine-free.
+add_executable(p2_demon_fade_test
+    pc_port/pc_p2_demon_fade_test.cpp)
+target_include_directories(p2_demon_fade_test PRIVATE pc_port)
+target_compile_options(p2_demon_fade_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+target_compile_definitions(p2_demon_fade_test PRIVATE DEMON_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/pc_port/pc_p2_sarai_demon.cpp")
+add_test(NAME p2_demon_fade_test COMMAND p2_demon_fade_test)
