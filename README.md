@@ -469,6 +469,8 @@ disc. It takes effect the next time you start the game.
 - **Mouse sensitivity**: 0.1x to 5.0x
 - **Stick dead zone**: 0-127
 - **Invert sticks**: Options for main stick and C-stick
+- **Hold to Pluck / Whistle Pluck**: keep the button held, or hold the whistle
+  over sprouts, to pluck them one after another (both optional)
 
 ### Control modes
 
@@ -499,6 +501,7 @@ The port supports any SDL2-compatible controller:
 - **60 and 120 FPS**: The original ran gameplay at 30
 - **Mouse control**: Precision impossible on GameCube, including wheel shortcuts
 - **Improved Pikmin AI**: Chain tasks automatically (optional)
+- **Faster plucking**: hold the button or the whistle over sprouts (optional)
 - **Superior performance**: TEV specialization generates optimal shaders per material
 - **No emulation**: Native x86-64 code, no Dolphin overhead
 - **Instant saves**: Save files are accessible on disk
@@ -516,7 +519,13 @@ around 600 MB.
 **Laptops with switchable graphics**: the game asks for the dedicated GPU on
 both platforms, and only where that hardware is present. The log line
 `[PC Port] GPU:` reports which one it got. `NECTAR_NO_PRIME=1` turns the request
-off.
+off. Desktops with only an NVIDIA card are left alone: there is nothing to
+offload to.
+
+**`GPU: ... llvmpipe`** means OpenGL is running in software. On Linux with
+NVIDIA this is almost always the system, not the game: after a driver update
+the kernel module and the libraries no longer match until you **reboot**.
+`glxinfo -B` failing or also showing llvmpipe confirms it.
 
 ## Debug and environment variables
 
