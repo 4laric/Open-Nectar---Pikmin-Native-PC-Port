@@ -219,6 +219,26 @@ void P2HoudaiFsm::startStride(const P2HoudaiVec& pos, float face)
     mFaceTo = face + angDist;
 }
 
+P2HoudaiVec P2HoudaiFsm::gunOrigin(const P2HoudaiInput& in) const
+{
+    if (in.gunPosValid) return in.gunPos;
+    return P2HoudaiVec{in.pos.x, in.pos.y + mParms.gunHeight * in.modelScale, in.pos.z};
+}
+
+P2HoudaiVec P2HoudaiFsm::gunDirection() const
+{
+    return P2HoudaiVec{std::sin(mTilt) * std::sin(mYaw), -std::cos(mTilt), std::sin(mTilt) * std::cos(mYaw)};
+}
+
+bool P2HoudaiFsm::poseAdvancing() const
+{
+    if (mStopped || mState == P2LongLegsState::Stay || mState == P2LongLegsState::Walk) return false;
+    if (mState == P2LongLegsState::Dead && mFrame >= kDeadFrames) return false;
+    const int le = loopEnd(mState);
+    if (le >= 0 && mFrame >= le) return false;  // the loop seam is not continuous
+    return true;
+}
+
 void P2HoudaiFsm::gunUpdate(const P2HoudaiInput& in)
 {
     // HoudaiShotGunMgr::doUpdate: search rotation (always "locks on") or the
@@ -233,7 +253,7 @@ void P2HoudaiFsm::gunUpdate(const P2HoudaiInput& in)
         }
         return;
     }
-    const P2HoudaiVec gun{in.pos.x, in.pos.y + mParms.gunHeight * in.modelScale, in.pos.z};
+    const P2HoudaiVec gun = gunOrigin(in);
     const float sx = mGunAim.x - gun.x, sy = mGunAim.y - gun.y, sz = mGunAim.z - gun.z;
     const float yawTarget = std::atan2(sx, sz);
     const float tiltTarget = std::atan2(std::sqrt(sx * sx + sz * sz), -sy); // from straight down
@@ -256,9 +276,9 @@ void P2HoudaiFsm::emit(const P2HoudaiInput& in, P2HoudaiOutput& out)
     const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
     if (len > 1.0e-6f) { dx /= len; dy /= len; dz /= len; }
     out.fireShell = true;
-    out.shellPos = P2HoudaiVec{in.pos.x + dx * mParms.gunMuzzle,
-                               in.pos.y + mParms.gunHeight * in.modelScale + dy * mParms.gunMuzzle,
-                               in.pos.z + dz * mParms.gunMuzzle};
+    const P2HoudaiVec gun = gunOrigin(in);
+    out.shellPos = P2HoudaiVec{gun.x + dx * mParms.gunMuzzle, gun.y + dy * mParms.gunMuzzle,
+                               gun.z + dz * mParms.gunMuzzle};
     out.shellVel = P2HoudaiVec{dx * mParms.shellSpeed, dy * mParms.shellSpeed, dz * mParms.shellSpeed};
 }
 
@@ -445,6 +465,23 @@ void P2HoudaiFsm::update(const P2HoudaiInput& in, P2HoudaiOutput& out)
         }
     }
 
+    // Body pose for the rig draw: the clip the current state plays, else hold the last one (Walk).
+    {
+        int clip = -1, last = 0;
+        switch (mState) {
+        case P2LongLegsState::Stay:
+        case P2LongLegsState::Land: clip = kPoseLanding; last = kLandingFrames - 1; break;
+        case P2LongLegsState::Wait: clip = kPoseWait; last = kWaitFrames - 1; break;
+        case P2LongLegsState::Flick: clip = kPoseFlick; last = kFlickFrames - 1; break;
+        case P2LongLegsState::Shot: clip = kPoseAttack; last = kAttackFrames - 1; break;
+        case P2LongLegsState::Dead: clip = kPoseDead; last = kDeadFrames - 1; break;
+        default: break;
+        }
+        if (clip >= 0) {
+            mPoseClip = clip;
+            mPoseFrame = mState == P2LongLegsState::Stay ? 0 : (mFrame < last ? mFrame : last);
+        }
+    }
     out.state = mState;
     out.drawHidden = mState == P2LongLegsState::Stay;
     out.landDrop = mState == P2LongLegsState::Land ? 1.0f - clamp01(mFrame / 100.0f) : 0.0f;
