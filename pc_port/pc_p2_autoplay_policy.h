@@ -1731,6 +1731,13 @@ private:
         if ((in.scattered || in.squadDistress || grabWhistle) && !whistling && whistleCooldown <= 0.0f) {
             whistling = true;
             whistleTime = 0.0f;
+            if (in.targetSource == 30) {
+                char wbuf[200];
+                std::snprintf(wbuf, sizeof(wbuf),
+                              "AUTOPLAY_WHISTLE start token=%u strays=%d near=%.0f navi=(%.0f,%.0f) bot-driven",
+                              in.targetToken, in.strayPikmin, in.strayNearDist, in.naviX, in.naviZ);
+                markers.emplace_back(wbuf);
+            }
         }
         if (whistling) {
             whistleTime += dt;
