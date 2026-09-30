@@ -461,7 +461,8 @@ def main(argv=None):
                         "lead and opt-out then submit different yaws, so their hash logs differ by design and only "
                         "host vs joiner is compared (fixed delay only)")
     p.add_argument("--analyse-only", action="store_true",
-                   help="offline: re-judge the d<delay>-{lead,optout} run dirs already under --out")
+                   help="offline: re-judge the d<delay>-{lead,optout} run dirs already under --out "
+                        "(add --live-yaw for runs made with it)")
     p.add_argument("--lead-dir", type=Path, help="offline: a lead-run dir (with --optout-dir --d0)")
     p.add_argument("--optout-dir", type=Path)
     p.add_argument("--d0", type=int, help="offline: the run's start delay")
@@ -486,10 +487,13 @@ def main(argv=None):
         if a.out is None:
             p.error("--analyse-only needs --out")
         problems, table = [], []
-        events, drags = split_events(*stock_events(a.host_base))
+        ev_host, ev_join = stock_events(a.host_base)
+        events, drags = split_events(ev_host, ev_join)
+        turns = {"host": ev_host["turn"], "join": ev_join["turn"]}
         for delay in [int(x) for x in a.delays.split(",") if x]:
             runs = {m: a.out / f"d{delay}-{m}" for m in ("lead", "optout")}
-            pr, tb = check_pair(runs, delay, events, drags, f"d{delay}")
+            pr, tb = check_pair(runs, delay, events, drags, f"d{delay}",
+                                live_yaw_turns=turns if a.live_yaw else None)
             problems += pr
             table += tb
         return finish(problems, table)
