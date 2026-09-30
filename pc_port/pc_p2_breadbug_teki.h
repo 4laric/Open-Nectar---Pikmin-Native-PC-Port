@@ -16,6 +16,9 @@ class TekiEvent;
 // drops it for container damage (fp04); bombs hurt. Room preview actors keep
 // the old visual proxy (pc_p2_breadbug_actor).
 void pc_p2_breadbug_teki_setup();
+// Dev console (#942): bind one late-spawned seed-38 actor (loads the staged
+// parms/bank on first use). True when bound (or already bound).
+bool pc_p2_breadbug_teki_bind_dynamic(BTeki*);
 void pc_p2_breadbug_teki_reset();
 void pc_p2_breadbug_teki_forget(BTeki*);
 void pc_p2_breadbug_teki_tick(BTeki*);

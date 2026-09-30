@@ -2,6 +2,7 @@
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_campaign_placements.h"
 #include "pc_p2_generated_placement.h"
+#include "pc_dev_console_parser.h"
 #include "pc_p2_sarai_manager.h"
 #include "pc_p2_otakara.h"
 #include "pc_p2_bluechappy.h"
@@ -19,6 +20,7 @@ struct MuseBinding {
 };
 MuseBinding g_museBindings[64];
 int g_museBound = 0;
+bool g_devSlotBypass = false;
 
 bool museRecord(const BTeki* actor, unsigned source, unsigned target, unsigned generator)
 {
@@ -71,6 +73,11 @@ void pc_p2_generated_placement_reset()
     g_museBound = 0;
 }
 
+void pc_p2_generated_placement_set_dev_slot_bypass(bool enabled)
+{
+    g_devSlotBypass = enabled;
+}
+
 bool pc_p2_generated_placement_sweep_sarai()
 {
     if (!pc_randomizer_p2_bridge() || !tekiMgr) return false;
@@ -105,7 +112,7 @@ static bool recordBind(BTeki* actor, unsigned accepted, unsigned sourceId,
         std::fflush(stdout);
         return false;
     }
-    if (seedTargetUid != accepted) {
+    if (seedTargetUid != accepted && !(g_devSlotBypass && devconsole::isDevTargetUid(seedTargetUid))) {
         std::printf("P2_GENERATED_PLACEMENT source_id=%u target=%u generator=%u bound=0 reason=slot-rejected\n",
                     sourceId, seedTargetUid, generatorId);
         std::fflush(stdout);

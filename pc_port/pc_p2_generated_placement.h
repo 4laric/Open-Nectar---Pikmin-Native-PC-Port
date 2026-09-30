@@ -89,3 +89,8 @@ int pc_p2_generated_placement_bound_count();
 // Death-funnel / slot-reuse forget and stage-boundary reset.
 void pc_p2_generated_placement_forget(const BTeki* actor);
 void pc_p2_generated_placement_reset();
+// Dev console (#942): when set, a dev target uid (pc_dev_console_parser.h
+// devTargetUid) passes the accepted-slot check in recordBind so a runtime
+// spawn binds through the same path as a seed placement. Off by default;
+// only pc_dev_console_init turns it on.
+void pc_p2_generated_placement_set_dev_slot_bypass(bool enabled);

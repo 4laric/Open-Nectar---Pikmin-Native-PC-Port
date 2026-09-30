@@ -298,6 +298,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_boss_arena.cpp
     pc_port/pc_held_part.cpp
     pc_port/pc_p2_input_script.cpp
+    pc_port/pc_dev_console.cpp
     # TEST-ONLY headless autoplay bot (bot-impl): scripted player driving the
     # normal pad path. Env-gated (PIKMIN_RANDOMIZER_AUTOPLAY), inert otherwise.
     pc_port/pc_p2_autoplay.cpp
@@ -2134,6 +2135,12 @@ add_executable(p2_purple_flight_actual_test tools/test_p2_purple_flight_actual.c
 target_include_directories(p2_purple_flight_actual_test BEFORE PRIVATE tools/p2_purple_flight_stubs pc_port)
 target_compile_options(p2_purple_flight_actual_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_purple_flight_actual_test COMMAND p2_purple_flight_actual_test)
+
+# Dev console grammar (#942): engine-free parser/species table contract.
+add_executable(pc_dev_console_parser_test pc_port/pc_dev_console_parser_test.cpp)
+target_include_directories(pc_dev_console_parser_test PRIVATE pc_port)
+target_compile_options(pc_dev_console_parser_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_dev_console_parser_test COMMAND pc_dev_console_parser_test)
 
 # #440 campaign setup failsafe: in bridge mode a species setup that cannot stage
 # its files logs P2_SETUP_SKIP and leaves the P1 stand-ins instead of aborting;
