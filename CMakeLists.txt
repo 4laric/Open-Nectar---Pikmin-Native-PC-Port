@@ -2128,6 +2128,16 @@ add_executable(p2_groink_volley_test tools/p2_groink_volley_test.cpp pc_port/pc_
 target_include_directories(p2_groink_volley_test PRIVATE pc_port)
 target_compile_options(p2_groink_volley_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_groink_volley_test COMMAND p2_groink_volley_test)
+# #892: three-shell burst policy (one emit key, same tick, +-0.1 jitter) and the retail
+# armour-cover collision policy (only `body` is stickable).
+add_executable(p2_groink_burst_test tools/p2_groink_burst_test.cpp pc_port/pc_p2_groink_volley.cpp pc_port/pc_p2_groink.cpp)
+target_include_directories(p2_groink_burst_test PRIVATE pc_port)
+target_compile_options(p2_groink_burst_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_groink_burst_test COMMAND p2_groink_burst_test)
+add_executable(p2_groink_coll_test tools/p2_groink_coll_test.cpp)
+target_include_directories(p2_groink_coll_test PRIVATE pc_port)
+target_compile_options(p2_groink_coll_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_groink_coll_test COMMAND p2_groink_coll_test)
 # #888 WP5: engine-free NormMiniHoudai/FixMiniHoudai source FSM (states,
 # animation key events, gun aim, 3-shell volleys, shake-off, death).
 # #898 Breadbug (PanModoki 38) engine-free source FSM.
