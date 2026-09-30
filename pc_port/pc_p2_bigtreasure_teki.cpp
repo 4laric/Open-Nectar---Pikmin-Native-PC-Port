@@ -23,8 +23,10 @@
 #include "Texture.h"
 #include "gameflow.h"
 #include "gl/pc_gfx.h"
+#include "netplay/pc_netplay_present.h"
 #include "system.h"
 #include "teki.h"
+#include "timing/pc_render_phase.h"
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -940,7 +942,12 @@ bool pc_p2_bigtreasure_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, 
     auto i = s.find(t);
     if (i == s.end() || !sPosesLoaded || !gfx.mCamera) return false;
     Binding& b = i->second;
-    if (b.coll.own && gfx.mCamera) {
+    // (#982) netplay-safe: invCamMat and the parts' mJointMatrix are read by the
+    // tick-side updateColl, so under two-pass presentation only the authoritative
+    // pass (the canonical camera) may write them; the local-camera presentation
+    // pass must not leave per-peer float noise for the next sim tick.
+    const bool simWritable = !pc_netplay_present_two_pass_active() || pc_render_is_authoritative();
+    if (b.coll.own && gfx.mCamera && simWritable) {
         // CollPart::getMatrix() = invCamMat * mJointMatrix with the centre as
         // translation: give our parts the Titan yaw in the same camera frame.
         invCamMat = gfx.mCamera->mInverseLookAtMtx;

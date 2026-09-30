@@ -2,6 +2,7 @@
 #include "pc_p2_ship_store.h"
 #include "pc_p2_purple.h"
 #include "pc_randomizer.h"
+#include "netplay/pc_netplay_det.h"
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "PikiState.h"
@@ -53,6 +54,10 @@ Piki* pc_p2_ship_withdraw(Navi* navi, int species) {
     return p;
 }
 void pc_p2_ship_tick(Navi* navi, bool active) {
+    // (#982) netplay-safe: the F10 deposit/withdraw reads the local keyboard from
+    // inside the sim tick, which is outside lockstep; a deterministic session
+    // (the purple campaign is not a netplay mode) never runs it.
+    if (pc_netplay_deterministic()) return;
     const Uint8* keys = SDL_GetKeyboardState(nullptr);
     const bool down = keys && keys[SDL_SCANCODE_F10];
     static bool previous = false;
