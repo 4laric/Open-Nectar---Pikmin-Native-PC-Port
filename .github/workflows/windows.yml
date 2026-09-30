@@ -105,6 +105,8 @@ jobs:
           ccache -z
           cmake --build build --target pikmin_pc "${p2_targets[@]}" "${fixture_targets[@]}" -j 4
           ccache -s
+          cmake --build build --target pikmin_pc "${p2_targets[@]}" "${fixture_targets[@]}" -- -n | tee build/build-dry-run.txt
+          grep -Fx "ninja: no work to do." build/build-dry-run.txt
 
       - name: Save ccache
         if: always()
@@ -148,7 +150,7 @@ jobs:
         run: |
           out="pikmin-fixtures-windows-${HEAD_SHA}"
           mkdir -p "${out}"
-          cp build/ci-fixtures.txt "${out}/"
+          cp build/ci-fixtures.txt build/build-dry-run.txt "${out}/"
           while read -r target; do
             [[ "$target" =~ ^pikmin_ci_fixture_[a-z0-9_]+$ ]] || {
               printf 'Rejected fixture target: %q\n' "$target"; exit 1;
