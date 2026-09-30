@@ -20,6 +20,12 @@ int main() {
         assert(p2campaign::hostType(38u,original,true)==original);
     }
     assert(p2campaign::hasStaticHost(38u));
+    // #958: Giant Breadbug (OoPanModoki 40) shares the Breadbug vehicle.
+    for (int original=0;original<34;++original) {
+        assert(p2campaign::hostType(40u,original,false)==8);
+        assert(p2campaign::hostType(40u,original,true)==original);
+    }
+    assert(p2campaign::hasStaticHost(40u));
     // #960: the Greater Spotted Jellyfloat (OniKurage 72) rides TEKI_Frog (0) like the Kurage.
     for (int original=0;original<34;++original) {
         assert(p2campaign::hostType(72u,original,false)==0);

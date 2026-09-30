@@ -27,6 +27,7 @@
 #include "PaniAnimator.h"
 #include "Interactions.h"
 #include "Piki.h"
+#include "pc_p2_mouth_snapshot.h"
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
@@ -786,17 +787,42 @@ int kingNaviContact(BTeki* actor, const ChappyFsm& s, const p2chappymouth::Profi
     return hits;
 }
 
+// Pikmin currently stuck to one of this actor's mouth slots, collected before
+// any of them is killed (see pc_p2_mouth_snapshot.h).
+static std::vector<Piki*> mouthPikis(BTeki* actor)
+{
+    std::vector<Creature*> stuck = p2mouth::snapshotLinked(
+        actor->mStickListHead, [](Creature* c) { return c->mNextSticker; },
+        [](Creature* c) { return c->isPiki() && c->isStickToMouth(); });
+    std::vector<Piki*> out;
+    out.reserve(stuck.size());
+    for (Creature* c : stuck) out.push_back(static_cast<Piki*>(c));
+    return out;
+}
+
+// Alive Pikmin in the field (GameStat::workPikis follows the same kill funnel).
+static int fieldPikiCount()
+{
+    int n = 0;
+    if (!pikiMgr) return 0;
+    Iterator it(pikiMgr);
+    CI_LOOP(it)
+    {
+        Piki* p = static_cast<Piki*>(*it);
+        if (p && p->isAlive()) ++n;
+    }
+    return n;
+}
+
 int doSwallow(BTeki* actor, const ChappyFsm& s, unsigned gen, int& whitePoisoned)
 {
     whitePoisoned = 0;
     int count = 0;
-    Stickers stickers(actor);
-    Iterator it(&stickers);
-    CI_LOOP(it)
-    {
-        Creature* stuck = *it;
-        if (!stuck || !stuck->isPiki() || !stuck->isStickToMouth()) continue;
-        Piki* piki = static_cast<Piki*>(stuck);
+    // Snapshot first: killing a Pikmin unlinks it from the sticker list and the
+    // index-based Stickers traversal would skip its neighbour (7 eaten, 4 killed).
+    const std::vector<Piki*> inMouth = mouthPikis(actor);
+    const int before = fieldPikiCount();
+    for (Piki* piki : inMouth) {
         const bool white = pc_p2_is_white(piki);
         if (piki->stimulate(InteractKill(actor, 0))) {
             ++count;
@@ -807,8 +833,9 @@ int doSwallow(BTeki* actor, const ChappyFsm& s, unsigned gen, int& whitePoisoned
         }
     }
     if (count > 0 || whitePoisoned) {
-        std::printf("P2_CHAPPY_SWALLOW generator=%u source_id=%u swallowed=%d white=%d\n", gen,
-                    s.spec->source, count, whitePoisoned);
+        std::printf("P2_CHAPPY_SWALLOW generator=%u source_id=%u swallowed=%d white=%d in_mouth=%d "
+                    "field_before=%d field_after=%d\n", gen,
+                    s.spec->source, count, whitePoisoned, (int)inMouth.size(), before, fieldPikiCount());
         std::fflush(stdout);
     }
     return count;
@@ -1703,15 +1730,8 @@ void kingInjectTestBombs(BTeki* actor, ChappyFsm& s, unsigned gen)
 void kingMouthMeal(BTeki* actor, ChappyFsm& s, unsigned gen)
 {
     int killed = 0;
-    {
-        Stickers stickers(actor);
-        Iterator it(&stickers);
-        CI_LOOP(it)
-        {
-            Creature* stuck = *it;
-            if (!stuck || !stuck->isPiki() || !stuck->isStickToMouth()) continue;
-            if (stuck->stimulate(InteractKill(actor, 0))) ++killed;
-        }
+    for (Piki* piki : mouthPikis(actor)) {
+        if (piki->stimulate(InteractKill(actor, 0))) ++killed;
     }
     const int bombs = kingMouthBombCount(s);
     const float damage = p2kinglife::mouthBombDamage(bombs);

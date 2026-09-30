@@ -300,6 +300,61 @@ void testWithdrawMenuHoldThenConfirm()
     CHECK(hasMarker(brain.takeMarkers(), "AUTOPLAY_WITHDRAW cycle=1"), "withdraw-menu/cycle_logged");
 }
 
+// #958: a thrown Pikmin lands idle beside a press-only target (Giant Breadbug 40)
+// and does not return to the party. With the party nearly used up and idle strays
+// lying about, the bot whistles (PadB) instead of only punching; a full party
+// throws, and a non-press-only target is unaffected.
+void testPressOnlyRegroup()
+{
+    p2autoplay::Config cfg;
+    cfg.throwHold = 0.1f;
+    cfg.throwGap = 0.2f;
+    for (unsigned source : {40u, 38u, 79u}) {
+        p2autoplay::Brain brain(cfg);
+        p2autoplay::Senses s = liveSenses();
+        s.fieldPikmin = 60;
+        s.squadPikmin = 60;
+        brain.update(0.05f, s);
+        brain.update(0.05f, s); // -> select
+        s.targetToken = 295337326u;
+        s.targetSource = source;
+        s.targetAlive = true;
+        s.targetRevealed = true;
+        s.naviX = 0.0f;
+        s.naviZ = 0.0f;
+        s.tgtX = 60.0f;
+        s.tgtZ = 0.0f;
+        s.targetDist = 60.0f;
+        s.targetHealthFrac = 1.0f;
+        brain.update(0.05f, s); // -> approach
+        brain.update(0.05f, s); // -> attack
+        CHECK(brain.current() == p2autoplay::State::Attack, "press-regroup/attacks");
+        // Party used up, 50 idle strays near the captain (scattered stays false).
+        s.squadPikmin = 2;
+        s.strayPikmin = 50;
+        s.scattered = false;
+        bool whistled = false;
+        for (int i = 0; i < 20 && !whistled; ++i) {
+            brain.update(0.05f, s);
+            whistled = (brain.command().buttons & unsigned(p2autoplay::PadB)) != 0;
+        }
+        const bool pressOnly = p2autoplay::isPressOnly(source);
+        CHECK(whistled == pressOnly, pressOnly ? "press-regroup/whistles_for_press_only"
+                                               : "press-regroup/no_whistle_for_other_targets");
+        // Party refilled: back to throwing, no whistle.
+        s.squadPikmin = 60;
+        s.strayPikmin = 0;
+        int aOn = 0, bOn = 0;
+        for (int i = 0; i < 80; ++i) {
+            brain.update(0.05f, s);
+            if (brain.command().buttons & unsigned(p2autoplay::PadA)) ++aOn;
+            if (brain.command().buttons & unsigned(p2autoplay::PadB)) ++bOn;
+        }
+        CHECK(aOn > 0, "press-regroup/throws_with_full_party");
+        (void)bOn;
+    }
+}
+
 void testCombatFlow()
 {
     p2autoplay::Config cfg;
@@ -1124,6 +1179,23 @@ void testPowerGate()
     CHECK(std::fabs(p2autoplay::powerDamageMult() - 7.5f) < 0.001f, "power/numeric_configures_mult");
     setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "0");
     CHECK(!p2autoplay::isPowerEnabled(), "power/zero_is_off");
+    // #958: the Purple squad knob needs the gate, power mode AND its own switch.
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", "1");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "10");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_PURPLE", nullptr);
+    CHECK(!p2autoplay::isPurplePower(), "power/purple_off_by_default");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_PURPLE", "1");
+    CHECK(p2autoplay::isPurplePower(), "power/purple_on_with_power");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", nullptr);
+    CHECK(!p2autoplay::isPurplePower(), "power/purple_inert_without_power");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", nullptr);
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "10");
+    CHECK(!p2autoplay::isPurplePower(), "power/purple_inert_when_gate_closed");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY", "1");
+    setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_PURPLE", nullptr);
+    // #958: the Giant Breadbug (40) is press-only like the Breadbug (38).
+    CHECK(p2autoplay::isPressOnly(40) && p2autoplay::isPressOnly(38) && !p2autoplay::isPressOnly(41),
+          "press_only/breadbug_and_giant");
     // Effective squad: ~100 in power mode, cfg.wantSquad otherwise.
     p2autoplay::Config cfg;
     setEnv("PIKMIN_RANDOMIZER_AUTOPLAY_POWER", "10");
@@ -4272,6 +4344,7 @@ int main()
     testWithdrawKeepsClosing();
     testWithdrawMenuHoldThenConfirm();
     testCombatFlow();
+    testPressOnlyRegroup();
     testKoganeMovesOn();
     testTimeoutsAndStuck();
     testTargetMatching();

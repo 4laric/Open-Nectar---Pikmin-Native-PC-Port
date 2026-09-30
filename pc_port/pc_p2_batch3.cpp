@@ -43,6 +43,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include "pc_p2_body_coll.h"
 #include <fstream>
 #include <map>
 #include <set>
@@ -373,6 +374,7 @@ static bool ensureBlendState(BTeki* actor, const std::string& key) {
     auto bankIt = banks.find(key);
     if (bankIt == banks.end()) return false;
     const Bank& bank = bankIt->second;
+    pc_p2_body_coll_register_bank(key, bank.baked);  // shared body collision fit (rest pose)
     const std::vector<p2pose::Baked>* baseBaked = nullptr;
     std::string baseClip;
     for (const auto& entry : bank.baked) {
@@ -438,7 +440,10 @@ void pc_p2_batch3_forget(BTeki* actor) {
 }
 
 void pc_p2_batch3_update(BTeki* actor, float seconds) {
-    if (!actor || !actors.count(actor)) return;
+    if (!actor) return;
+    auto boundKey = actors.find(actor);
+    if (boundKey == actors.end()) return;
+    pc_p2_body_coll_assign(actor, boundKey->second);
     const p2motion::Tunables& tune = p2motion::tunables();
     const float speed = actor->mVelocity.x * actor->mVelocity.x + actor->mVelocity.z * actor->mVelocity.z;
     gates[actor].update(speed, seconds, tune);

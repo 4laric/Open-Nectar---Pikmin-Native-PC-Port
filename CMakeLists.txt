@@ -458,6 +458,7 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_kurage_teki.cpp
     pc_port/pc_p2_kurage_own_host.cpp
     pc_port/pc_p2_flyer_coll.cpp
+    pc_port/pc_p2_body_coll.cpp
     pc_port/pc_p2_onikurage_mouth.cpp
     pc_port/pc_p2_onikurage_teki.cpp
     pc_port/pc_main.cpp
@@ -1962,6 +1963,10 @@ target_compile_options(p2_chappy_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UND
 add_test(NAME p2_chappy_fsm_test COMMAND p2_chappy_fsm_test)
 # p2-884-chappy (#884): engine-free source mouth-slot eating (EnemyFunc::eatPikmin
 # geometry, capacity, eligibility, host-part mapping, King sweep, legacy oracle).
+add_executable(p2_mouth_snapshot_test tools/p2_mouth_snapshot_test.cpp)
+target_include_directories(p2_mouth_snapshot_test PRIVATE pc_port)
+target_compile_options(p2_mouth_snapshot_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_mouth_snapshot_test COMMAND p2_mouth_snapshot_test)
 add_executable(p2_chappy_mouth_test tools/p2_chappy_mouth_test.cpp)
 target_include_directories(p2_chappy_mouth_test PRIVATE pc_port)
 target_compile_options(p2_chappy_mouth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
@@ -2034,6 +2039,12 @@ add_executable(p2_flyer_test tools/p2_flyer_test.cpp)
 target_include_directories(p2_flyer_test PRIVATE pc_port)
 target_compile_options(p2_flyer_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_flyer_test COMMAND p2_flyer_test)
+
+# Shared P2 body-collision fit (stuck Pikmin sit on the drawn surface).
+add_executable(p2_body_fit_test tools/p2_body_fit_test.cpp)
+target_include_directories(p2_body_fit_test PRIVATE pc_port)
+target_compile_options(p2_body_fit_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_body_fit_test COMMAND p2_body_fit_test)
 
 # Lane 06: engine-free provider unit tests (header-only; previously present but unregistered).
 add_executable(p2_receipt_test tools/p2_receipt_test.cpp)

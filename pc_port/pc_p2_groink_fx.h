@@ -47,6 +47,15 @@
 //             shell every kMarkerInterval ticks: a red ring on the ground that
 //             shows where the shell is heading (a ground marker, not a P2
 //             effect). The host projects the shell to the floor.
+// Readability fix (owner smoke 2026-09-30, #892): the first cut spawned Glow
+// every 3rd and Marker every 6th tick with the effect files' own long
+// lifetimes. Those detached sprites outlived the shell by seconds, so a volley
+// left dozens of world-fixed orange blobs and floor rings along its path that
+// did not read as belonging to any shell. Now every cadence effect is a
+// short-lived one-shot (a few frames) emitted every tick, so the glow, the
+// floor shadow and the tether puffs between them are visible only where the
+// shell is right now, shrink/fade at once when it lands or expires, and the
+// floor shadow tracks the shell (scaled down as it climbs).
 // Charge/smoke body effects (TChibiCharge, TChibiSmokeS/L, TChibiDeadLight,
 // TChibiDeadMouth/Se) and shell sounds are out of scope here.
 //
@@ -78,8 +87,8 @@ using P2GroinkWaterFn = bool (*)(void* context, const P2GroinkVec3& at);
 class P2GroinkShellFx {
 public:
     static constexpr int kTrailInterval = 2;  // source ticks between trail puffs (15 Hz)
-    static constexpr int kGlowInterval = 3;   // big glow (10 Hz)
-    static constexpr int kMarkerInterval = 6; // floor marker ring (5 Hz)
+    static constexpr int kGlowInterval = 1;   // glow every tick (30 Hz), each puff short-lived, so the shell reads as one glowing body
+    static constexpr int kMarkerInterval = 1; // floor shadow/ring under the shell every tick, plus a vertical tether
 
     void reset() {
         mLive.fill(false);

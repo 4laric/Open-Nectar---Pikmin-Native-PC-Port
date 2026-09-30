@@ -56,6 +56,7 @@
 #include "pc_p2_teki_lifetime.h"
 #include "pc_p2_test_day_cycle.h"
 #include "pc_p2_dangomushi.h"
+#include "pc_p2_purple.h"
 #include "pc_randomizer.h"
 #include "Controller.h"
 
@@ -767,6 +768,8 @@ void pc_p2_autoplay_tick(void)
     std::vector<std::pair<float, float>> transportPos;
     std::vector<std::pair<float, float>> freePos; // #901: idle FreeMode Pikmin
     const bool powerMode = p2autoplay::isPowerEnabled();
+    const bool purplePower = p2autoplay::isPurplePower() && pc_p2_purples_enabled();
+    int purpleConverted = 0;
     {
         Iterator it(pikiMgr);
         CI_LOOP(it)
@@ -811,6 +814,12 @@ void pc_p2_autoplay_tick(void)
             // (virtual ViewPiki::setFlower, the same call the nectar GrowUp,
             // Onion exit, and pluck paths use). No direct mHappa pokes.
             if (powerMode && p->mHappa != Flower) p->setFlower(Flower);
+            // #958 power mode + PIKMIN_RANDOMIZER_AUTOPLAY_PURPLE: Purple squad
+            // (only the Giant Breadbug press needs it; TEST-ONLY).
+            if (purplePower && !pc_p2_is_purple(p)) {
+                pc_p2_make_purple(p);
+                ++purpleConverted;
+            }
             // bot-v4 regroup sense: grabbed (mouth-stuck / swallowed),
             // thrown off (flick/flown/fall/wave/pressed), burning/panicking.
             const int pst = p->getState();
@@ -824,6 +833,14 @@ void pc_p2_autoplay_tick(void)
                 panicNearest = std::min(panicNearest, d);
             }
         }
+    }
+    if (purpleConverted > 0) {
+        // Throttled: the whole squad converts one Pikmin per tick as it exits.
+        static int sPurpleTotal = 0;
+        const int before = sPurpleTotal;
+        sPurpleTotal += purpleConverted;
+        if (before == 0 || sPurpleTotal / 25 != before / 25)
+            std::printf("AUTOPLAY_POWER_PURPLE converted_total=%d field=%d bot-driven\n", sPurpleTotal, alive);
     }
     if (powerMode) sPowerSeconds += (dt > 0.0f && dt <= 0.5f) ? dt : 0.016f;
     if (powerMode && !sPowerLogged && alive >= 80) {

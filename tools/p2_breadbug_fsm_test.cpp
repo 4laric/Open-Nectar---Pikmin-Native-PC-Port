@@ -33,6 +33,30 @@ const char* kRetailParm =
     "{\n{fp00} 4 1.0\n{fp16} 4 2.0\n{fp02} 4 0.2\n{fp05} 4 5.0\n{fp03} 4 35.0\n{fp04} 4 1000.0\n"
     "{fp06} 4 200.0\n{fp14} 4 0.0\n{fp15} 4 150.0\n{ip01} 4 11\n{_eof}\n}\n";
 
+// Retail GPVE01 oopanmodoki/enemyparm.txt (Giant Breadbug, source 40), comments
+// stripped. Same block layout as PanModoki; different values (#958).
+const char* kGiantParm =
+    "{\n{s000} 4 0.5\n{s001} 4 0.5\n{s002} 4 0.25\n{s003} 4 0.1\n{s004} 4 0.3\n{_eof}\n}\n"
+    "{\n{fp00} 4 2000.0\n{fp27} 4 45.0\n{fp31} 4 0.0\n{fp30} 4 30.0\n{fp01} 4 40.0\n{fp33} 4 60.0\n"
+    "{fp34} 4 20.0\n{fp32} 4 50.0\n{fp02} 4 0.5\n{fp03} 4 0.5\n{fp04} 4 0.35\n{fp05} 4 0.1\n"
+    "{fp06} 4 85.0\n{fp08} 4 0.1\n{fp28} 4 2.0\n{fp09} 4 200.0\n{fp10} 4 30.0\n{fp11} 4 70.0\n"
+    "{fp12} 4 300.0\n{fp25} 4 50.0\n{fp13} 4 90.0\n{fp14} 4 300.0\n{fp26} 4 50.0\n{fp15} 4 120.0\n"
+    "{fp17} 4 200.0\n{fp18} 4 1.0\n{fp19} 4 30.0\n{fp16} 4 1.0\n{fp20} 4 80.0\n{fp21} 4 50.0\n"
+    "{fp22} 4 80.0\n{fp23} 4 50.0\n{fp24} 4 10.0\n{fp29} 4 15.0\n{fp35} 4 1.0\n{fp36} 4 50.0\n"
+    "{fp37} 4 0.0\n{fp38} 4 0.0\n{ip01} 4 6\n{ip02} 4 5\n{ip03} 4 12\n{ip04} 4 10\n{ip05} 4 17\n"
+    "{ip06} 4 20\n{ip07} 4 22\n{_eof}\n}\n"
+    "{\n{fp00} 4 2.0\n{fp16} 4 1.0\n{fp02} 4 0.2\n{fp05} 4 5.0\n{fp03} 4 45.0\n{fp04} 4 1000.0\n"
+    "{fp06} 4 100.0\n{fp14} 4 0.0\n{fp15} 4 150.0\n{ip01} 4 1\n{_eof}\n}\n";
+
+Params giantRetail() {
+    Params p;
+    applyVariant(p, true);
+    std::istringstream in(kGiantParm);
+    std::string error;
+    if (!parseEnemyParm(in, p, error)) std::fprintf(stderr, "giant parse: %s\n", error.c_str());
+    return p;
+}
+
 Params retail() {
     Params p;
     std::istringstream in(kRetailParm);
@@ -363,6 +387,58 @@ void testLivingAndConsumePolicy() {
           "a carcass is spared at the nest (its delivery check is never forfeited)");
     check(consumeOutcome(false) == ConsumeOutcome::Destroy, "a pellet is eaten (retail endCarry)");
 }
+// Giant Breadbug (OoPanModoki 40, #958): the variant differences from the decomp.
+void testGiantVariant() {
+    const Params g = giantRetail();
+    check(g.retail && g.giant, "giant retail parms parse with the giant flag kept");
+    check(near(g.health, 2000.0f) && near(g.moveSpeed, 85.0f) && near(g.maxTurnAngle, 2.0f), "giant general fp00/fp06/fp28");
+    check(near(g.searchDistance, 300.0f) && near(g.homeRadius, 30.0f), "giant general search/home");
+    check(near(g.pressDamage, 100.0f) && near(g.suckDamage, 1000.0f), "giant proper fp06 press 100 / fp04 container 1000");
+    check(near(g.carrySpeed, 45.0f) && near(g.walkAnimSpeed, 1.0f) && near(g.nestScale, 2.0f), "giant proper fp03/fp16/fp00");
+    check(near(g.hideTime, 150.0f) && g.maxCarryWeight == 1, "giant proper fp15/ip01");
+    check(near(g.carrySizeDiff, kGiantCarrySizeDiff) && near(kGiantCarrySizeDiff, 40.0f), "OoPanModoki mCarrySizeDiff 40");
+    check(near(g.waypointSlack, 150.0f), "OoPanModoki walkFunc slack 150");
+    Params small = retail();
+    check(!small.giant && near(small.carrySizeDiff, 20.0f) && near(small.waypointSlack, 100.0f), "PanModoki defaults untouched");
+    Params applied;
+    applyVariant(applied, false);
+    check(!applied.giant && near(applied.carrySizeDiff, 20.0f), "applyVariant(false) is the Breadbug");
+
+    // canTarget: PanModoki takes strictly lighter cargo (ip01 11 > min), the
+    // Giant takes at-or-above (ip01 1 <= min): a min-10 pellet is a Breadbug
+    // target and a Giant target, a min-11 pellet only the Giant's.
+    auto grabs = [](const Params& params, int carryMin) {
+        Host h;
+        h.pos = {0.0f, 0.0f, 0.0f};
+        h.fsm.init(params, defaultBank(), h.pos, 0.0f, 12345u, &h.route);
+        h.until(State::Walk, 80);
+        h.pellets.push_back(pellet(7, 0.0f, 180.0f, carryMin, carryMin + 1));
+        return h.until(State::Back, 400) >= 0 && h.held == 7;
+    };
+    check(grabs(retail(), 10), "Breadbug grabs a min-10 pellet (11 > 10)");
+    check(!grabs(retail(), 11), "Breadbug refuses a min-11 pellet (11 > 11 is false)");
+    check(grabs(giantRetail(), 1), "Giant grabs a min-1 pellet (1 <= 1)");
+    check(grabs(giantRetail(), 11), "Giant grabs a min-11 pellet (1 <= 11)");
+    // Same table, opposite rule: the Giant with the small Breadbug's ip01 (11)
+    // refuses a min-10 pellet, the Breadbug with the Giant's ip01 (1) refuses min 1.
+    Params giantBig = giantRetail();
+    giantBig.maxCarryWeight = 11;
+    check(!grabs(giantBig, 10), "Giant with limit 11 refuses a min-10 pellet (11 <= 10 is false)");
+    Params smallOne = retail();
+    smallOne.maxCarryWeight = 1;
+    check(!grabs(smallOne, 1), "Breadbug with limit 1 refuses a min-1 pellet (1 > 1 is false)");
+
+    // Health, press and container damage come from the giant parms.
+    Host h;
+    h.pos = {0.0f, 0.0f, 0.0f};
+    h.fsm.init(giantRetail(), defaultBank(), h.pos, 0.0f, 12345u, &h.route);
+    check(near(h.fsm.health(), 2000.0f), "giant starts at fp00 2000");
+    h.until(State::Walk, 80);
+    h.presses = 1;
+    h.step();
+    check(h.fsm.state() == State::Damage && h.last.damageKind == DamageKind::Press
+              && near(h.last.hpBefore, 2000.0f) && near(h.last.hpAfter, 1900.0f), "giant press damage is 100");
+}
 } // namespace
 
 int main() {
@@ -377,6 +453,7 @@ int main() {
     testLivingAndConsumePolicy();
     testBackWatchdog();
     testNoRouteHaulsHome();
+    testGiantVariant();
     if (failures) {
         std::fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

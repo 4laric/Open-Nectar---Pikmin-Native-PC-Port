@@ -74,6 +74,49 @@ int main() {
     TickOutput f3;
     assert(runUntil(d, in, Wait, 3000, &entered, &f3) >= 0);
     assert(f3.rollingAttack);
+    // Port constraint: a roll the host cannot advance (P1 map collision holds
+    // the Queen against a wall) must still terminate. Host position frozen.
+    for (bool left : {false, true}) {
+        Queen r;
+        r.init(p, bank, false, left, {0, 0}, 0.0f, 11u);
+        TickInput bi2;
+        bi2.health = 5000.0f;
+        bi2.hits = 40;
+        bi2.pos = {100.0f, 0.0f}; // dot +-100: outside the home band, inside the territory
+        int turns = 0, ends = 0, rollStarts = 0;
+        bool sawRolling = false, reachedWait = false;
+        for (int i = 0; i < 6000 && !reachedWait; ++i) {
+            TickOutput o = r.tick(bi2); // pos never changes: fully blocked
+            bi2.hits = 0;
+            turns += o.blockedTurn;
+            ends += o.blockedEnd;
+            rollStarts += o.rollStart;
+            if (r.state() == Rolling) sawRolling = true;
+            else if (sawRolling && r.state() == Wait) reachedWait = true;
+        }
+        assert(sawRolling && reachedWait);
+        assert(ends == 1 && rollStarts >= 1);
+        assert(turns <= 3); // bounded: turns only until rollingTime elapses
+    }
+    // An unblocked roll never trips the guard.
+    {
+        Queen r;
+        r.init(p, bank, false, false, {0, 0}, 0.0f, 13u);
+        TickInput ri;
+        ri.health = 5000.0f;
+        ri.hits = 40;
+        bool sawRolling = false, reachedWait = false, guard = false;
+        for (int i = 0; i < 6000 && !reachedWait; ++i) {
+            TickOutput o = r.tick(ri);
+            ri.hits = 0;
+            guard |= o.blockedTurn || o.blockedEnd;
+            ri.pos.x += o.velocity.x * kSourceDelta;
+            ri.pos.z += o.velocity.z * kSourceDelta;
+            if (r.state() == Rolling) sawRolling = true;
+            else if (sawRolling && r.state() == Wait) reachedWait = true;
+        }
+        assert(reachedWait && !guard);
+    }
     // Death -> Dead -> KEYEVENT_END kill.
     in.health = 0.0f;
     TickOutput f4;

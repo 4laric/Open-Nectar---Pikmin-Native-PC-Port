@@ -12,6 +12,7 @@
 #include "pc_p2_animation.h"
 #include "pc_p2_preview.h"
 #include "pc_bbft.h"
+#include "EffectMgr.h"
 #include "Generator.h"
 #include "MapCode.h"
 #include "MapMgr.h"
@@ -461,7 +462,62 @@ const char* fxName(P2GroinkFxKind k) {
     return "?";
 }
 
+
+// #892 TEST-ONLY visual harness (PIKMIN_P2_GROINK_FX_DEMO=1): a Groink shell
+// volley cannot be waited for under the autoplay bot on a smoke seed, so the
+// first bound Groink also throws a synthetic four-shell volley around the
+// captain every 150 source ticks. It only feeds the same fx spawn path with the
+// same per-tick cadence the live policy uses (trail every kTrailInterval,
+// glow/marker every tick, Hit at landing); no sim state is touched.
+struct DemoShell { float x, y, z, vx, vy, vz; int age; bool live; };
+void fxDemoTick(unsigned generator) {
+    static const bool enabled = [] { const char* v = std::getenv("PIKMIN_P2_GROINK_FX_DEMO"); return v && v[0] == '1'; }();
+    static unsigned owner = 0;
+    static int tick = 0;
+    static DemoShell shells[4];
+    if (!enabled || !naviMgr || !naviMgr->getNavi() || !mapMgr) return;
+    if (!owner) owner = generator;
+    if (generator != owner) return;
+    const Vector3f c = naviMgr->getNavi()->getPosition();
+    if (tick % 150 == 30) {
+        for (int i = 0; i < 4; ++i) {
+            const float a = 1.5707963f * float(i) + 0.4f;
+            const float r0 = 260.0f, r1 = 70.0f + 25.0f * float(i);
+            DemoShell& d = shells[i];
+            d.x = c.x + std::cos(a) * r0; d.z = c.z + std::sin(a) * r0; d.y = c.y + 45.0f;
+            const float tx = c.x + std::cos(a + 0.5f) * r1, tz = c.z + std::sin(a + 0.5f) * r1;
+            const float flight = 48.0f;
+            d.vx = (tx - d.x) / flight; d.vz = (tz - d.z) / flight;
+            d.vy = 0.0f; d.age = 0; d.live = true;
+        }
+    }
+    unsigned liveCount = 0;
+    for (DemoShell& d : shells) {
+        if (!d.live) continue;
+        ++liveCount;
+        d.x += d.vx; d.z += d.vz; d.vy -= 0.9f; d.y += d.vy;
+        const float floorY = mapMgr->getMinY(d.x, d.z, true);
+        P2GroinkFxCommand cmd;
+        cmd.pos = {d.x, d.y, d.z};
+        if (d.y <= floorY + 10.0f || d.age > 120) {
+            d.live = false;
+            cmd.pos.y = floorY;
+            cmd.kind = P2GroinkFxKind::Hit;
+            pc_p2_groink_fx_spawn(cmd);
+            continue;
+        }
+        if (d.age % P2GroinkShellFx::kTrailInterval == 0) { cmd.kind = P2GroinkFxKind::Trail; pc_p2_groink_fx_spawn(cmd); }
+        if (d.age % P2GroinkShellFx::kGlowInterval == 0) { cmd.kind = P2GroinkFxKind::Glow; pc_p2_groink_fx_spawn(cmd); }
+        if (d.age % P2GroinkShellFx::kMarkerInterval == 0) { cmd.kind = P2GroinkFxKind::Marker; pc_p2_groink_fx_spawn(cmd); }
+        ++d.age;
+    }
+    if (tick % 30 == 0 && effectMgr)
+        std::printf("P2_GROINK_FX_DEMO tick=%d live_shells=%u gens=%u\n", tick, liveCount, unsigned(effectMgr->getLiveGeneratorCount()));
+    ++tick;
+}
+
 void applyEffects(Binding& b, const p2groinkfsm::TickOutput& o) {
+    fxDemoTick(b.generator);
     P2GroinkFxTick tick;
     tick.volley = o.shotFired;
     tick.volleyMuzzle = o.volleyMuzzle;
@@ -469,6 +525,21 @@ void applyEffects(Binding& b, const p2groinkfsm::TickOutput& o) {
     tick.deadMuzzle = o.deadMuzzle;
     tick.terminals = o.terminals;
     tick.shells = &b.fsm.shells();
+    // #892 leak check: live particle generators over time; after the last shell
+    // lands this must fall back to the level before the volley.
+    if (effectMgr) {
+        static int sampleTick = 0;
+        static unsigned lastLive = ~0u;
+        if (++sampleTick % 6 == 0) {
+            const unsigned live = effectMgr->getLiveGeneratorCount();
+            if (live != lastLive) {
+                lastLive = live;
+                int liveShells = 0;
+                for (std::size_t s = 0; s < P2GroinkVolley::kCapacity; ++s) liveShells += b.fx.live(s) ? 1 : 0;
+                std::printf("P2_GROINK_FX_LIVE generator=%u gens=%u shells=%d\n", b.generator, live, liveShells);
+            }
+        }
+    }
     for (const P2GroinkFxCommand& c : b.fx.onTick(tick, waterAt, nullptr)) {
         pc_p2_groink_fx_spawn(c);
         if (c.kind == P2GroinkFxKind::Trail) {
