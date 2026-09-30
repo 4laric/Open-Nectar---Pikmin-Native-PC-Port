@@ -17,19 +17,13 @@ void pc_gfx_present(void);
 // first live draw. Env-gated inside pc_gfx.cpp (PIKMIN_P2_PROXY_SHOT); without
 // the env var this is a single disabled branch and zero behaviour change.
 void pc_gfx_proxy_shot_notify(const char* key);
-// Netplay M5c lane A (issue #887, test-only): the next pc_gfx_present writes
-// the finished frame (render resolution, before the window blit) to `path`
-// as a 24-bit BMP. Only the lead-camera diagnostics call it (env-gated
-// there); nothing else changes.
+// Netplay M5c (issue #887, test-only): the next pc_gfx_present writes the
+// finished frame (render resolution, overlays included, before the window
+// blit, so hidden windows capture too) to `path` as a 24-bit BMP. Several
+// requests before one present all get that frame. Only env-gated test
+// knobs call it (the lead-camera diagnostics and the netplay HUD's test
+// captures); nothing happens unless a caller asks.
 void pc_gfx_request_frame_shot(const char* path);
-#if PIKI_NETPLAY_BUILD
-// Netplay M5c lane C (issue #887), test evidence only: the next present
-// writes the finished frame (the native framebuffer, overlays included, before
-// the window blit, so hidden windows capture too) as a 24-bit BMP at `path`.
-// Nothing happens unless a caller asks; the netplay HUD asks only under its
-// hidden-test knobs.
-void pc_gfx_capture_next_present(const char* path);
-#endif
 void pc_gfx_perf_scope_begin(const char* name);
 void pc_gfx_perf_scope_end(void);
 

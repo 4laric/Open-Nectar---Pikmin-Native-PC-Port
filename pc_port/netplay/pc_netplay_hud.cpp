@@ -59,7 +59,7 @@ pc_netplay_hud::Toggle sPadEdge;
 // PIKMIN_NETPLAY_TEST_HUD_SHOT=<dir> writes <dir>/hud-f<frame>.bmp at
 // PIKMIN_NETPLAY_TEST_HUD_SHOT_FRAME (a comma list; default 900) and
 // <dir>/banner.bmp on the banner's 10th frame, through
-// pc_gfx_capture_next_present.
+// pc_gfx_request_frame_shot (the one frame-capture writer, M5c integration).
 long long sTestToggleFrame = -1;
 bool sTestToggled          = false;
 std::string sShotDir;
@@ -273,10 +273,10 @@ void pc_netplay_hud_draw(void)
 		++sShotNext;
 		char path[1024];
 		snprintf(path, sizeof path, "%s/hud-f%llu.bmp", sShotDir.c_str(), (unsigned long long)info.frame);
-		pc_gfx_capture_next_present(path);
+		pc_gfx_request_frame_shot(path);
 	}
 	if (info.banner && !sShotBannerDone && ++sBannerFrames >= 10) {
 		sShotBannerDone = true;
-		pc_gfx_capture_next_present((sShotDir + "/banner.bmp").c_str());
+		pc_gfx_request_frame_shot((sShotDir + "/banner.bmp").c_str());
 	}
 }

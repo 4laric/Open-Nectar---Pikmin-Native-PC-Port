@@ -4684,19 +4684,21 @@ static void proxyShotWrite(const std::string& key) {
     std::fflush(stdout);
 }
 
-// Netplay M5c lane A (issue #887, test-only): one-shot frame capture for the
-// lead-camera diagnostics. The request is armed by pc_netplay_camlead and
-// served by the next present from the finished frame's framebuffer (the
-// same source PIKMIN_FRAME_DUMP reads, so it works for a hidden window).
-static std::string sFrameShotPath;
+// Netplay M5c (issue #887, test-only): the one one-shot frame capture. Lane
+// A's lead-camera diagnostics (pc_netplay_camlead) and lane C's HUD test
+// captures (pc_netplay_hud) arm it; the next present serves every pending
+// request from the finished frame's framebuffer (the same source
+// PIKMIN_FRAME_DUMP reads, overlays included, before the window blit, so it
+// works for a hidden window). Two requests in one frame get the same image.
+static std::vector<std::string> sFrameShotPaths;
 
 void pc_gfx_request_frame_shot(const char* path) {
-    sFrameShotPath = (path != nullptr) ? path : "";
+    if (path != nullptr && path[0] != '\0') sFrameShotPaths.push_back(path);
 }
 
 static void frameShotWrite(GLuint sourceFramebuffer) {
-    const std::string path = sFrameShotPath;
-    sFrameShotPath.clear();
+    const std::vector<std::string> paths = sFrameShotPaths;
+    sFrameShotPaths.clear();
     if (!glBindFramebuffer_ptr || sRenderWidth <= 0 || sRenderHeight <= 0) return;
     const int w = sRenderWidth;
     const int h = sRenderHeight;
@@ -4707,8 +4709,10 @@ static void frameShotWrite(GLuint sourceFramebuffer) {
     std::vector<unsigned char> rgb(size_t(w) * size_t(h) * 3, 0);
     glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, rgb.data());
     glPixelStorei(GL_PACK_ALIGNMENT, packAlign);
-    const bool ok = shotWriteBmp(path, w, h, rgb);
-    std::printf("[netplay] camlead shot: %s %s (%dx%d)\n", ok ? "wrote" : "FAILED", path.c_str(), w, h);
+    for (const std::string& path : paths) {
+        const bool ok = shotWriteBmp(path, w, h, rgb);
+        std::printf("[netplay] frame shot: %s %s (%dx%d)\n", ok ? "wrote" : "FAILED", path.c_str(), w, h);
+    }
     std::fflush(stdout);
 }
 
@@ -4724,60 +4728,6 @@ static void proxyShotOnPresent() {
         }
     }
 }
-
-#if PIKI_NETPLAY_BUILD
-// Netplay M5c lane C (issue #887): one-shot frame capture for the HUD's test
-// evidence (see pc_gfx.h). Presentation only; nothing reads it back.
-static std::string sNetplayCapturePath;
-void pc_gfx_capture_next_present(const char* path) { sNetplayCapturePath = path != nullptr ? path : ""; }
-static void netplayCaptureWrite(GLuint source) {
-    const std::string path = sNetplayCapturePath;
-    sNetplayCapturePath.clear();
-    if (path.empty() || sRenderWidth <= 0 || sRenderHeight <= 0 || !glBindFramebuffer_ptr) return;
-    const int w = sRenderWidth;
-    const int h = sRenderHeight;
-    glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, source);
-    GLint packAlign = 4;
-    glGetIntegerv(GL_PACK_ALIGNMENT, &packAlign);
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    std::vector<unsigned char> rgb(size_t(w) * size_t(h) * 3, 0);
-    glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, rgb.data());
-    glPixelStorei(GL_PACK_ALIGNMENT, packAlign);
-    FILE* out = std::fopen(path.c_str(), "wb");
-    if (!out) return;
-    const int rowStride = (w * 3 + 3) & ~3;
-    const uint32_t imageSize = uint32_t(rowStride) * uint32_t(h);
-    const uint32_t fileSize = 54 + imageSize;
-    unsigned char hdr[54] = {0};
-    auto put32 = [&](int at, uint32_t v) {
-        for (int i = 0; i < 4; ++i) hdr[at + i] = static_cast<unsigned char>((v >> (8 * i)) & 0xff);
-    };
-    hdr[0] = 'B';
-    hdr[1] = 'M';
-    put32(2, fileSize);
-    hdr[10] = 54;
-    hdr[14] = 40;
-    put32(18, uint32_t(w));
-    put32(22, uint32_t(h));
-    hdr[26] = 1;
-    hdr[28] = 24;
-    put32(34, imageSize);
-    bool ok = std::fwrite(hdr, 1, sizeof(hdr), out) == sizeof(hdr);
-    std::vector<unsigned char> row(size_t(rowStride), 0);
-    for (int y = 0; ok && y < h; ++y) {
-        const unsigned char* src = &rgb[size_t(y) * size_t(w) * 3];
-        for (int x = 0; x < w; ++x) {
-            row[size_t(x) * 3 + 0] = src[size_t(x) * 3 + 2];
-            row[size_t(x) * 3 + 1] = src[size_t(x) * 3 + 1];
-            row[size_t(x) * 3 + 2] = src[size_t(x) * 3 + 0];
-        }
-        ok = std::fwrite(row.data(), 1, size_t(rowStride), out) == size_t(rowStride);
-    }
-    std::fclose(out);
-    std::printf("[netplay] hud capture: %s %dx%d %s\n", path.c_str(), w, h, ok ? "written" : "write failed");
-    std::fflush(stdout);
-}
-#endif
 
 void pc_gfx_present(void) {
     // M2b null GX (issue #879): authoritative pass issues no GL, no present.
@@ -4826,11 +4776,8 @@ void pc_gfx_present(void) {
     }
     sPostRanThisFrame = false;
     shadow_frame_reset();
-    // Netplay M5c lane A (test-only): a pending lead-camera frame capture.
-    if (!sFrameShotPath.empty()) frameShotWrite(sourceFramebuffer);
-#if PIKI_NETPLAY_BUILD
-    if (!sNetplayCapturePath.empty()) netplayCaptureWrite(sourceFramebuffer);
-#endif
+    // Netplay M5c (test-only): pending frame captures (lead camera, HUD).
+    if (!sFrameShotPaths.empty()) frameShotWrite(sourceFramebuffer);
     // PIKMIN_FRAME_DUMP=<dir>: the finished frame as PPM every 15 frames, for
     // looking at a scene where no screenshot tool reaches (Wayland, adb-less).
     if (const char* dumpDir = std::getenv("PIKMIN_FRAME_DUMP")) {
