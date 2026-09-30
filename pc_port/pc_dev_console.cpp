@@ -34,6 +34,7 @@
 #include "PikiMgr.h"
 #include "GameStat.h"
 #include "gameflow.h"
+#include "MoviePlayer.h"
 #include "FlowController.h"
 #include <SDL.h>
 #include <cmath>
@@ -565,6 +566,10 @@ void pc_dev_console_update()
     if (!sEnabled) return;
     if ((++sFrame % 20u) == 0u) pollScript();
     if (sQueue.empty()) return;
+    // Hold commands through the day-start cutscene/landing: creatures do not
+    // tick while the movie player owns the frame, so a spawn/kill issued then
+    // would only settle (at the wrong position) once gameplay starts.
+    if (gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive) return;
     std::vector<std::string> pending;
     pending.swap(sQueue);
     for (const std::string& line : pending) pc_dev_console_execute(line.c_str());
