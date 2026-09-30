@@ -4427,6 +4427,11 @@ void hud_refresh_net(double now)
 	sHudHaveNet = true;
 }
 
+// GekkoNet's kb_sent/kb_received are KiB/s (bytes per second / 1024,
+// net.cpp); the link line prints kbit/s (bits per second / 1000). M5c
+// integration I4 (review n3): the old x8 printed Kibit/s under a kbps label.
+constexpr float kKiBpsToKbps = 1024.0f * 8.0f / 1000.0f;
+
 // Every 900 Advances (30 s): the numbers the HUD shows, for logs.
 void hud_link_log()
 {
@@ -4438,7 +4443,7 @@ void hud_link_log()
 	       "session=%llu (%.0f ms, max %.0f ms) kbps in=%.1f out=%.1f hud=%s\n",
 	       sHudNet.avg_ping, (unsigned)sHudNet.last_ping, sHudNet.jitter, sCfg.localDelay, sHudStalls.count(now),
 	       sHudStalls.stalled_ms(now), (unsigned long long)sHudStalls.total(), sHudStalls.total_ms(),
-	       sHudStalls.max_ms(), sHudNet.kb_received * 8.0f, sHudNet.kb_sent * 8.0f,
+	       sHudStalls.max_ms(), sHudNet.kb_received * kKiBpsToKbps, sHudNet.kb_sent * kKiBpsToKbps,
 	       pc_netplay_hud_visible() ? "on" : "off");
 	fflush(stdout);
 }

@@ -547,8 +547,11 @@ Camera* pc_netplay_camlead_view(int localPlayer, Camera* simView)
 		// frames between its cinematics. A prediction there would replay the
 		// demo's own camera motion a few ticks early (a one-frame pop; fix
 		// round 1, evidence review E1). So no prediction: the correction
-		// only decays with the camera's own homing (targets equal), and the
-		// view settles onto the sim camera without a jump.
+		// only decays with the camera's own homing (targets equal). The view
+		// stops leading when the sunset starts, still slightly off the sim
+		// camera on that first frame, and the sunset cinematic takes over
+		// within a frame (a small pop remains only if the cinematic pans
+		// from the gameplay camera; recheck N1, human playtest item).
 		const float none[3] = { 0.0f, 0.0f, 0.0f };
 		sCorr.step(none, none, 0.0f, pc->getCurrentHomingSpeed(), pc->getParameterF(PCAMF_FovHomingSpeed));
 		sStepped       = true;
