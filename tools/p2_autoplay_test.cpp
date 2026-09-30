@@ -795,6 +795,56 @@ void testSaraiFlyer()
     CHECK(aOn > 0, "sarai/throws_when_low");
 }
 
+void testKingLongAttack()
+{
+    // Wave-3 lane 53: the Emperor Bulblax (53) is a 1300 HP multi-cycle boss; the attack window is
+    // multiplied so the bot keeps fighting past a single throw burst, like the Titan.
+    p2autoplay::Config cfg;
+    cfg.attackTimeout = 1.0f;
+    cfg.kingAttackMultiplier = 3.0f;
+    p2autoplay::Brain brain(cfg);
+    p2autoplay::Senses s = liveSenses();
+    s.fieldPikmin = 20;
+    brain.update(0.05f, s);
+    brain.update(0.05f, s); // -> select
+    s.targetToken = 1945764764u;
+    s.targetSource = 53;
+    s.targetAlive = true;
+    s.targetDist = 150.0f;
+    s.naviX = 0.0f;
+    s.naviZ = 0.0f;
+    s.tgtX = 150.0f;
+    s.tgtZ = 0.0f;
+    brain.update(0.05f, s); // -> approach
+    brain.update(0.05f, s); // -> attack
+    for (int i = 0; i < 30; ++i) brain.update(0.05f, s); // 1.5s > base 1.0s
+    CHECK(brain.current() == p2autoplay::State::Attack, "king/outlasts_base_timeout");
+    // Control: a plain target times out at the base window.
+    p2autoplay::Brain plain(cfg);
+    plain.update(0.05f, s);
+    plain.update(0.05f, s);
+    p2autoplay::Senses s2 = s;
+    s2.targetToken = 999002;
+    s2.targetSource = 44;
+    plain.update(0.05f, s2);
+    plain.update(0.05f, s2);
+    std::vector<std::string> plainMarkers;
+    for (int i = 0; i < 40; ++i) {
+        plain.update(0.05f, s2);
+        const std::vector<std::string> got = plain.takeMarkers();
+        plainMarkers.insert(plainMarkers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(plainMarkers, "AUTOPLAY_GIVEUP reason=attack_timeout"), "king/control_times_out_at_base");
+    // The extended window still ends: 3.0s x multiplier 3 = 3.0s total.
+    std::vector<std::string> kingMarkers;
+    for (int i = 0; i < 60; ++i) {
+        brain.update(0.05f, s);
+        const std::vector<std::string> got = brain.takeMarkers();
+        kingMarkers.insert(kingMarkers.end(), got.begin(), got.end());
+    }
+    CHECK(hasMarker(kingMarkers, "AUTOPLAY_GIVEUP reason=attack_timeout"), "king/window_still_ends");
+}
+
 void testKurageLongAttack()
 {
     // bot-v2 gap 3 (Kurage 57): high HP -> attack window is multiplied, and
@@ -4201,6 +4251,7 @@ int main()
     testWithdrawRepeat();
     testSaraiFlyer();
     testKurageLongAttack();
+    testKingLongAttack();
     testReplanRepeats();
     testStuckCarriesNaviPos();
     testUnreachableGiveup();

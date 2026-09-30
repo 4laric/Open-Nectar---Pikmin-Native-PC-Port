@@ -34,7 +34,7 @@ using namespace p2sfx;
 
 void table() {
     const unsigned species[] = {kBreadbug, kGiantBreadbug, kSnitchbug, kDirigibug, kCrawbster, kAntennaBeetle,
-                                kTitanDweevil, kGroink, kGroinkArmored, kCannonLarva};
+                                kTitanDweevil, kGroink, kGroinkArmored, kCannonLarva, kEmperor};
     for (unsigned s : species) {
         CHECK(seFor(s, Event::Damage) != kNone);
         CHECK(seFor(s, Event::Dead) != kNone);
@@ -59,6 +59,19 @@ void table() {
     CHECK(seFor(kTitanDweevil, Event::Step) == kSpiderWalk);
     CHECK(seFor(kGroink, Event::Shot) == kKabutoShot);
     CHECK(seFor(kCannonLarva, Event::Shot) == kKabutoShot);
+    // Emperor Bulblax (53) borrows the P1 Emperor boss bank.
+    CHECK(seFor(kEmperor, Event::Step) == kKingWalk);
+    CHECK(seFor(kEmperor, Event::Appear) == kKingAppear);
+    CHECK(seFor(kEmperor, Event::Dive) == kKingSink);
+    CHECK(seFor(kEmperor, Event::Roar) == kKingReady);
+    CHECK(seFor(kEmperor, Event::Attack) == kKingBero1);
+    CHECK(seFor(kEmperor, Event::Eat) == kKingEat);
+    CHECK(seFor(kEmperor, Event::Flick) == kKingHip);
+    CHECK(seFor(kEmperor, Event::Damage) == kKingCheek);
+    CHECK(seFor(kEmperor, Event::Dead) == kKingDead1);
+    CHECK(seFor(kEmperor, Event::Hover) == kNone);
+    CHECK(seFor(kBreadbug, Event::Appear) == kNone);   // new events stay silent elsewhere
+    CHECK(std::strcmp(eventName(Event::Roar), "roar") == 0);
     // Unknown species: silent.
     CHECK(seFor(1, Event::Damage) == kNone);
     CHECK(seFor(0, Event::Step) == kNone);
@@ -76,6 +89,15 @@ void ids() {
     CHECK(kKabutoShot == 0x5E);
     CHECK(kSpiderWalk == 0x29);
     CHECK(kRockRoll == 0x64);
+    CHECK(kKingWalk == 0x4D);
+    CHECK(kKingReady == 0x4E);
+    CHECK(kKingBero1 == 0x4F);
+    CHECK(kKingEat == 0x53);
+    CHECK(kKingCheek == 0x54);
+    CHECK(kKingHip == 0x56);
+    CHECK(kKingDead1 == 0x57);
+    CHECK(kKingAppear == 0x59);
+    CHECK(kKingSink == 0x5A);
 }
 
 void gate() {
