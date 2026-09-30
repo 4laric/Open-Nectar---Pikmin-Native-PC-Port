@@ -659,6 +659,79 @@ struct BabyOutput {
     Vec2 velocity;
     float faceDir = 0.0f;
 };
+// Stickable body parts (queen/enemycoll.txt: seven 'st__' spheres on the skeleton,
+// Queen.cpp Obj::flickPikmin switches on the stuck part's id). World-axis centres
+// (forward = +Z, height above the actor origin) evaluated from the bind-pose
+// joints of enemy.bmd with the collision file's joint offsets (local +X is the
+// body axis): nose = head + 30, head, bod1 = neck5 - 25, bod2 = neck3 - 10,
+// bod3 = body1, bod4 = body3, bod5 = body5 - 45 (the offset is along the joint's
+// forward axis, so it lands inside the tail). The wait pose is the bind pose.
+enum Part : int { PartNose = 0, PartHead, PartBod1, PartBod2, PartBod3, PartBod4, PartBod5, PartCount };
+struct PartSphere { float z, y, radius; };
+inline const PartSphere& partSphere(int p) {
+    static const PartSphere spheres[PartCount] = {
+        {237.5f, 90.1f, 10.0f}, {207.5f, 89.6f, 25.0f}, {154.6f, 87.0f, 60.0f}, {88.1f, 87.0f, 80.0f},
+        {0.0f, 87.0f, 90.0f},   {-92.0f, 87.0f, 85.0f}, {-155.7f, 87.0f, 75.0f}};
+    return spheres[p];
+}
+// The P1 host cannot say which part a Pikmin latched on, so the part is the
+// sphere whose surface is nearest the Pikmin (smallest centre distance minus
+// radius; a point inside several spheres takes the deepest). along/lateral/height
+// are relative to the actor origin and facing.
+inline int nearestPart(float along, float lateral, float height) {
+    int best = PartBod3;
+    float bestGap = 1e30f;
+    for (int p = 0; p < PartCount; ++p) {
+        const PartSphere& s = partSphere(p);
+        const float dz = along - s.z, dy = height - s.y;
+        const float gap = std::sqrt(dz * dz + lateral * lateral + dy * dy) - s.radius;
+        if (gap < bestGap) { bestGap = gap; best = p; }
+    }
+    return best;
+}
+// Part a Pikmin latched on, from where it came from. The P1 host latches every
+// Pikmin at the one point at its centre (all Pikmin read along~0, lateral~0 in
+// the evidence), so the position at flick time carries no part information.
+// The bearing of the Pikmin's last approach position (actor frame, taken before
+// it stuck) does: P2 Pikmin attack the body part facing them, so the part is
+// the sphere whose footprint circle the ray from the actor origin along that
+// bearing leaves last (height ignored; Pikmin reach over the sphere height).
+inline int exitPart(float along, float lateral) {
+    const float len = std::sqrt(along * along + lateral * lateral);
+    if (len < 1e-3f) return PartBod3;
+    const float da = along / len; // ray direction (along, lateral)
+    int best = PartBod3;
+    float bestT = -1e30f;
+    for (int p = 0; p < PartCount; ++p) {
+        const PartSphere& s = partSphere(p);
+        const float proj = da * s.z; // d . c, the centre lies on the lateral = 0 axis
+        const float disc = proj * proj - s.z * s.z + s.radius * s.radius;
+        if (disc < 0.0f) continue;
+        const float t = proj + std::sqrt(disc);
+        if (t > bestT) { bestT = t; best = p; }
+    }
+    return best;
+}
+// Queen::flickPikmin branches: nose/head/bod1 -> angle, bod5 -> PI + angle,
+// everything else -> no knockback, no damage, FLICK_BACKWARD_ANGLE.
+enum FlickKind : int { FlickFront = 0, FlickRear, FlickNone };
+inline int flickKind(int part) {
+    if (part == PartNose || part == PartHead || part == PartBod1) return FlickFront;
+    if (part == PartBod5) return FlickRear;
+    return FlickNone;
+}
+inline const char* partName(int p) {
+    static const char* names[PartCount] = {"nose", "head", "bod1", "bod2", "bod3", "bod4", "bod5"};
+    return p >= 0 && p < PartCount ? names[p] : "none";
+}
+// View-frustum cull sphere, centred on the actor origin. The P1 vehicle's root
+// collision sphere (what BTeki::drawDefault culls with) is far smaller than the
+// drawn P2 body, so she was dropped while partly on screen. Radii are the
+// largest distance from the actor origin to any corner of the staged pose-bank
+// bounds (Queen 24-pose bank: 385; Baby: 36), plus a small margin.
+constexpr float kQueenCullRadius = 400.0f;
+constexpr float kBabyCullRadius = 40.0f;
+inline float cullRadius(bool larva) { return larva ? kBabyCullRadius : kQueenCullRadius; }
 // Baby mouth slot (Baby::initMouthSlots: one slot on the "kamu" joint, radius
 // 20). The staged larva rest/attack poses span z = -13.6..16.5, so the joint is
 // approximated at the head tip 15 units ahead of the root along the facing; the

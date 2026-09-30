@@ -83,8 +83,6 @@ constexpr float kQueenCorpseRadius = 50.0f;
 // point are taken from this extent instead of the P1 host's centre sphere.
 constexpr float kQueenBodyRear = -224.0f;
 constexpr float kQueenBodyFront = 245.0f;
-constexpr float kQueenFrontCut = kQueenBodyRear + (kQueenBodyFront - kQueenBodyRear) * (2.0f / 3.0f);
-constexpr float kQueenRearCut = kQueenBodyRear + (kQueenBodyFront - kQueenBodyRear) * (1.0f / 3.0f);
 // P1 performance cap on live larvae (source Baby::Mgr pool 50, hysteresis
 // max 50 / min 25). The cap scales the hysteresis to 10 / 5.
 constexpr int kLarvaCap = 10;
@@ -112,6 +110,9 @@ struct Binding {
     int flicks = 0, flickedPiki = 0;
     int births = 0, birthRefused = 0;
     int maxStuck = 0;
+    // Approach position (actor frame: along, lateral) of each Pikmin last seen
+    // near her and not stuck; decides which body part it latches on (exitPart).
+    std::map<Piki*, p2queenown::Vec2> approach;
 };
 std::map<BTeki*, Binding> s;
 
@@ -264,6 +265,25 @@ int liveLarvae() {
     return n;
 }
 
+void trackApproach(BTeki* t, Binding& b) {
+    if (!pikiMgr) return;
+    const float f = b.fsm.faceDir();
+    const float fx = std::sin(f), fz = std::cos(f);
+    Iterator it(pikiMgr);
+    CI_LOOP(it) {
+        Piki* p = static_cast<Piki*>(*it);
+        if (!p) continue;
+        if (!p->isAlive()) { b.approach.erase(p); continue; }
+        if (p->getStickObject() == t) continue; // latched: keep the recorded approach
+        const Vector3f& pp = p->getPosition();
+        const float dx = pp.x - t->mSRT.t.x, dz = pp.z - t->mSRT.t.z;
+        if (dx * dx + dz * dz > 400.0f * 400.0f) { b.approach.erase(p); continue; }
+        // Inside her footprint the host piles Pikmin round its centre at arbitrary bearings; only the approach from outside (>= 100) says which side they came from.
+        if (dx * dx + dz * dz < 100.0f * 100.0f) continue;
+        b.approach[p] = {dx * fx + dz * fz, dx * fz - dz * fx};
+    }
+}
+
 int stuckCount(BTeki* t) {
     int n = 0;
     if (!pikiMgr) return 0;
@@ -275,20 +295,20 @@ int stuckCount(BTeki* t) {
     return n;
 }
 
-// Queen::flickPikmin(angle). The P1 host has no nose/head/bod1/bod5 part ids;
-// each stuck Pikmin is classified by its position along the Queen's body axis,
-// measured against the source body extent (kQueenBodyRear..kQueenBodyFront):
-// front third (nose/head/bod1) -> flick at `angle`; rear third (bod5) -> flick
-// at PI + angle; middle (bod2/bod3/bod4): shake off with 0 knockback/damage,
-// backward. Thirds of the extent are an approximation of the source parts.
+// Queen::flickPikmin(angle). The P1 host has no nose/head/bod1/bod5 part ids, so
+// each stuck Pikmin is given the source body sphere nearest its position
+// (p2queenown::nearestPart, sphere centres from the model's joints):
+// nose/head/bod1 -> flick at `angle`; bod5 -> flick at PI + angle; bod2/bod3/bod4
+// -> shake off with 0 knockback, backward. The P2 InteractFlick::actPiki
+// receiver ignores the damage argument, so none is passed to the P1 receiver
+// (which would subtract it from Pikmin health); the source value is logged.
 int flickStuck(BTeki* t, Binding& b, bool face) {
     if (!pikiMgr) return 0;
     const float f = b.fsm.faceDir();
     const float fx = std::sin(f), fz = std::cos(f);
     const float angle = face ? f : FLICK_BACKWARDS_ANGLE;
-    int flicked = 0, front = 0, rear = 0, middle = 0;
-    float minAlong = 0.0f, maxAlong = 0.0f;
-    std::vector<Piki*> stuck;
+    int flicked = 0, front = 0, rear = 0, none = 0;
+    std::vector<Piki*> stuck; // snapshot: the flick detaches them from the live list
     Iterator it(pikiMgr);
     CI_LOOP(it) {
         Piki* p = static_cast<Piki*>(*it);
@@ -296,40 +316,34 @@ int flickStuck(BTeki* t, Binding& b, bool face) {
     }
     for (Piki* p : stuck) {
         const Vector3f& pp = p->getPosition();
-        const float along = (pp.x - t->mSRT.t.x) * fx + (pp.z - t->mSRT.t.z) * fz;
-        if (front + rear + middle == 0 || along < minAlong) minAlong = along;
-        if (front + rear + middle == 0 || along > maxAlong) maxAlong = along;
-        bool ok;
-        if (along > kQueenFrontCut) {
-            ok = p->stimulate(InteractFlick(t, b.fsm.params().shakeKnockback, b.fsm.params().shakeDamage, angle));
-            ++front;
-        } else if (along < kQueenRearCut) {
-            ok = p->stimulate(InteractFlick(t, b.fsm.params().shakeKnockback, b.fsm.params().shakeDamage,
-                                            face ? kPi + angle : angle));
-            ++rear;
-        } else {
-            ok = p->stimulate(InteractFlick(t, 0.0f, 0.0f, FLICK_BACKWARDS_ANGLE));
-            ++middle;
-        }
+        const float dx = pp.x - t->mSRT.t.x, dz = pp.z - t->mSRT.t.z;
+        const float along = dx * fx + dz * fz;
+        const float lateral = dx * fz - dz * fx;
+        const float height = pp.y - t->mSRT.t.y;
+        const auto known = b.approach.find(p);
+        const int part = known != b.approach.end() ? p2queenown::exitPart(known->second.x, known->second.z)
+                                                   : p2queenown::nearestPart(along, lateral, height);
+        const int kind = p2queenown::flickKind(part);
+        const float knock = kind == p2queenown::FlickNone ? 0.0f : b.fsm.params().shakeKnockback;
+        const float dir = kind == p2queenown::FlickRear && face ? kPi + angle
+                          : kind == p2queenown::FlickNone ? FLICK_BACKWARDS_ANGLE : angle;
+        const bool ok = p->stimulate(InteractFlick(t, knock, 0.0f, dir));
+        if (kind == p2queenown::FlickFront) ++front;
+        else if (kind == p2queenown::FlickRear) ++rear;
+        else ++none;
         if (ok) ++flicked;
-        {
-            const float lateral = (pp.x - t->mSRT.t.x) * fz - (pp.z - t->mSRT.t.z) * fx;
-            CollPart* sp = p->getStickPart();
-            ID32 spId;
-            if (sp) spId = sp->getID();
-            std::printf("P2_QUEEN_FLICK_PIKI generator=%u along=%.1f lateral=%.1f y_above=%.1f stick_part=%s accepted=%d "
-                        "detached=%d\n",
-                        b.generator, along, lateral, pp.y - t->mSRT.t.y, sp ? spId.mStringID : "none", ok ? 1 : 0,
-                        p->getStickObject() == t ? 0 : 1);
-        }
+        std::printf("P2_QUEEN_FLICK_PIKI generator=%u part=%s from=%s along=%.1f lateral=%.1f height=%.1f knockback=%.0f "
+                    "dir_deg=%.0f accepted=%d detached=%d\n",
+                    b.generator, p2queenown::partName(part), known != b.approach.end() ? "approach" : "position", along,
+                    lateral, height, knock,
+                    dir < -10.0f ? -1.0f : dir * 180.0f / kPi, ok ? 1 : 0, p->getStickObject() == t ? 0 : 1);
     }
     if (face || flicked) {
         b.flickedPiki += flicked;
-        std::printf("P2_QUEEN_FLICK generator=%u source_id=%u mode=%s stuck=%zu flicked=%d front=%d rear=%d middle=%d "
-                    "knockback=%.0f damage=%.1f part_rule=body_thirds cuts=%.1f/%.1f along=%.1f..%.1f\n",
+        std::printf("P2_QUEEN_FLICK generator=%u source_id=%u mode=%s stuck=%zu flicked=%d front=%d rear=%d none=%d "
+                    "knockback=%.0f source_damage=%.1f part_rule=body_spheres\n",
                     b.generator, b.source, face ? "key2_face" : "rolling_backward", stuck.size(), flicked, front, rear,
-                    middle, b.fsm.params().shakeKnockback, b.fsm.params().shakeDamage, kQueenRearCut, kQueenFrontCut,
-                    minAlong, maxAlong);
+                    none, b.fsm.params().shakeKnockback, b.fsm.params().shakeDamage);
     }
     return flicked;
 }
@@ -525,6 +539,7 @@ void ownTick(BTeki* t, Binding& b, float dt) {
                     b.generator, b.source, t->mHealth, b.lastHealth, stateName(b.fsm.state()), b.hits,
                     stuckCount(t));
     b.lastHealth = t->mHealth;
+    trackApproach(t, b);
     const int ticks = b.clock.step(double(dt), true);
     if (ticks <= 0) return;
     const int stuck = stuckCount(t);
@@ -846,6 +861,21 @@ void pc_p2_queen_teki_forget(BTeki* t) {
 
 bool pc_p2_queen_teki_is_bound(const BTeki* t) {
     return t && (s.count(const_cast<BTeki*>(t)) || sLarvae.count(const_cast<BTeki*>(t)));
+}
+
+bool pc_p2_queen_teki_cull_bounds(const BTeki* t, float* radius) {
+    if (!t || !radius) return false;
+    BTeki* key = const_cast<BTeki*>(t);
+    const bool larva = sLarvae.count(key) != 0;
+    if (!larva && !s.count(key)) return false;
+    *radius = p2queenown::cullRadius(larva);
+    static std::set<const BTeki*> logged;
+    if (logged.insert(t).second) {
+        std::printf("P2_QUEEN_CULL kind=%s cull_radius=%.0f host_radius=%.1f\n", larva ? "larva" : "queen", *radius,
+                    key->getBoundingSphereRadius());
+        std::fflush(stdout);
+    }
+    return true;
 }
 
 void pc_p2_queen_teki_setup() {

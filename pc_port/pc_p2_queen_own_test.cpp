@@ -168,6 +168,22 @@ int main() {
         }
         assert(missed && !swallowed);
     }
+    // Approach bearing -> part (footprint circles, height ignored).
+    assert(exitPart(1.0f, 0.0f) == PartNose);   // straight at the nose
+    assert(exitPart(-1.0f, 0.0f) == PartBod5);  // straight at the tail
+    assert(exitPart(0.0f, 1.0f) == PartBod3);   // from the side
+    assert(exitPart(0.0f, -1.0f) == PartBod3);
+    assert(exitPart(0.7f, 0.7f) == PartBod1 || exitPart(0.7f, 0.7f) == PartBod2);
+    // Flick part rule (Queen::flickPikmin): only nose/head/bod1 and bod5 get knockback.
+    assert(nearestPart(235.0f, 0.0f, 90.0f) == PartNose && flickKind(PartNose) == FlickFront);
+    assert(nearestPart(205.0f, 0.0f, 90.0f) == PartHead);
+    assert(nearestPart(160.0f, 40.0f, 87.0f) == PartBod1 && flickKind(PartBod1) == FlickFront);
+    assert(flickKind(nearestPart(90.0f, 60.0f, 87.0f)) == FlickNone);   // bod2
+    assert(flickKind(nearestPart(0.0f, 50.0f, 87.0f)) == FlickNone);    // bod3
+    assert(flickKind(nearestPart(-95.0f, 50.0f, 87.0f)) == FlickNone);  // bod4
+    assert(nearestPart(-200.0f, 40.0f, 87.0f) == PartBod5 && flickKind(PartBod5) == FlickRear);
+    // Cull spheres cover the staged pose-bank extents (Queen 385, Baby 36 from the origin).
+    assert(cullRadius(false) > 385.0f && cullRadius(true) > 36.0f);
     // Mouth slot: radius 20 around a point 15 ahead of the root.
     assert(babyMouthReaches({0.0f, 0.0f}, 0.0f, {0.0f, 30.0f}, 0.0f));
     assert(!babyMouthReaches({0.0f, 0.0f}, 0.0f, {0.0f, -10.0f}, 0.0f));
