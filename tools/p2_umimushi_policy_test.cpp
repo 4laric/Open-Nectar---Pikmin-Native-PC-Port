@@ -154,6 +154,37 @@ int main()
         require(std::fabs(y - 75.0f) < 1.0f, "the crossing height equals the bulb height");
     }
 
+    // ---- before / after: the rear hitbox (#995) ----
+    // Verbatim transcription of the pre-#995 port rules, run on the same scene. The scene is a captain and a
+    // Pikmin directly BEHIND the body (angle 180 deg, 100 units); the new rules must not reach them.
+    {
+        const Vec3 actor{0.0f, 0.0f, 0.0f};
+        const Vec3 behind{0.0f, 0.0f, -100.0f};
+        const Vec3 ahead{0.0f, 0.0f, 100.0f};
+        // pre-#995 isAttackStart fallback: any Pikmin inside the fp22 = 170 radius, any angle
+        auto oldAttackStart = [&](const Vec3& q) { return std::hypot(q.x - actor.x, q.z - actor.z) < 170.0f; };
+        // pre-#995 attackNearbyNavi (attack key 5): every captain inside 170 units, any angle
+        auto oldNaviAttack = [&](const Vec3& q) { return std::hypot(q.x - actor.x, q.z - actor.z) < 170.0f; };
+        require(oldAttackStart(behind), "old rule: a Pikmin behind the body starts the attack (the bug)");
+        require(oldNaviAttack(behind), "old rule: a captain behind the body is hit (the bug)");
+        const float cone = AttackHitAngleDeg * Pi / 180.0f;
+        require(!withinCone(actor, 0.0f, behind, 170.0f, cone), "new rule: a Pikmin behind does not start the attack");
+        require(withinCone(actor, 0.0f, ahead, 170.0f, cone), "new rule: a Pikmin ahead inside the cone starts it");
+        require(!withinCone(actor, 0.0f, Vec3{100.0f, 0.0f, 20.0f}, 170.0f, cone), "new rule: a Pikmin at 79 deg does not");
+        require(!withinCone(actor, 0.0f, Vec3{0.0f, 0.0f, 200.0f}, 170.0f, cone), "new rule: outside fp22 radius does not");
+        // every tongue slot of every attack frame is ahead of the feet plane, so no slot can reach the rear
+        const int attack = clipIndex("attack1");
+        bool anyBehind = false;
+        for (int f = 0; f < 80; ++f)
+            for (int slot = 0; slot < T::kKamuCount; ++slot) {
+                float c[3];
+                kamuCentre(attack, float(f), slot, c);
+                if (c[2] < 0.0f) anyBehind = true;
+            }
+        require(!anyBehind, "no tongue slot is ever behind the feet plane in attack1");
+        require(!naviHitBySlot(Vec3{0.0f, 0.0f, 100.0f}, behind, SlotRadius), "new rule: the captain behind is not hit");
+    }
+
     // ---- hit polar: straight ahead 0, directly behind 180 ----
     {
         const Vec3 actor{0.0f, 0.0f, 0.0f};

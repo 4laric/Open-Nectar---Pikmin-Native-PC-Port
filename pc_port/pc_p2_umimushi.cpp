@@ -196,6 +196,9 @@ struct Umi {
     bool probeCaptain = false;
     int probeThrows = 0;
     float probeNextThrow = 0.0f;
+    Piki* probeThrown[8] = {};
+    float probeThrownAt[8] = {};
+    bool probeLanded[8] = {};
 };
 
 std::map<PelletView*, Umi> actors;
@@ -263,7 +266,7 @@ Piki* nearestPikiAngle(const Vector3f& pos, float heading, float radius, float a
             const float dx = q.x - pos.x, dz = q.z - pos.z;
             const float d = dx * dx + dz * dz;
             if (d >= bestSq) continue;
-            if (std::fabs(wrapPi(std::atan2(dx, dz) - heading)) > angle) continue;
+            if (!p2umi::withinCone(p2captorhost::vec(pos), heading, p2captorhost::vec(q), radius, angle)) continue;
             bestSq = d; best = p;
         }
     }
@@ -798,12 +801,18 @@ void restoreColl(BTeki* actor, Umi& s, bool dead) {
 //     bulb XZ scaled by 0.9, 1.0 .. 1.6 (the descending arc crosses the raised bulb earlier than the
 //     cursor point), so the real collision decides which ones latch.
 // Nothing here changes a normal run; the env var is read once and unset by default.
+BTeki* probeOwner = nullptr;
 bool probeEnabled() {
     static const bool on = [] {
         const char* e = std::getenv("PIKMIN_P2_UMIMUSHI_PROBE");
         return e && *e && *e != '0';
     }();
     return on;
+}
+// While the eight probe throws are in the air the Bloyster is held still (no AI tick), so the bulb the
+// Pikmin aim at is where the physics finds it. Before 9.5 s and after the window it runs normally.
+bool probeFrozen(const BTeki* actor, const Umi& s) {
+    return probeEnabled() && probeOwner == actor && s.probeTime >= 9.5f && s.probeTime < 18.0f;
 }
 Piki* probeFreePiki() {
     if (!pikiMgr) return nullptr;
@@ -817,8 +826,7 @@ Piki* probeFreePiki() {
 }
 void runProbe(BTeki* actor, Umi& s, unsigned generator, float dt) {
     if (!probeEnabled() || s.state == UMI_DEAD) return;
-    static BTeki* probeOwner = nullptr; // the probe drives exactly one Bloyster (the first to tick)
-    if (!probeOwner) probeOwner = actor;
+    if (!probeOwner) probeOwner = actor; // the probe drives exactly one Bloyster (the first to tick)
     if (probeOwner != actor) return;
     s.probeTime += dt;
     const Vector3f ap = actor->getPosition();
@@ -826,11 +834,19 @@ void runProbe(BTeki* actor, Umi& s, unsigned generator, float dt) {
         // Frame the scene: the camera follows the captain, who starts ~720 units away.
         if (Navi* navi = naviMgr ? naviMgr->getActiveNavi() : nullptr) {
             s.probeCaptain = true;
-            const float a = s.heading + 2.2f; // behind-left of the Bloyster, so the tail and the front are both in view
-            const float cx = ap.x + std::sin(a) * 330.0f, cz = ap.z + std::cos(a) * 330.0f;
+            // Stand the captain 300 units "behind" the Bloyster along the camera's own forward axis, so the
+            // Bloyster is in front of the lens (the camera yaw follows the captain, not the other way round).
+            float fx = 0.0f, fz = 1.0f;
+            if (Camera* cam = navi->controlCamera()) {
+                fx = -cam->mLookAtMtx.mMtx[2][0];
+                fz = -cam->mLookAtMtx.mMtx[2][2];
+                const float len = std::sqrt(fx * fx + fz * fz);
+                if (len > 1.0e-4f) { fx /= len; fz /= len; }
+            }
+            const float cx = ap.x - fx * 300.0f, cz = ap.z - fz * 300.0f;
             const float cy = mapMgr ? mapMgr->getMinY(cx, cz, true) : ap.y;
             navi->mSRT.t = Vector3f(cx, cy, cz);
-            navi->mFaceDirection = std::atan2(ap.x - cx, ap.z - cz);
+            navi->mFaceDirection = std::atan2(fx, fz);
             std::printf("P2_UMIMUSHI_PROBE kind=captain generator=%u x=%.1f y=%.1f z=%.1f\n", generator, double(cx),
                         double(cy), double(cz));
             std::fflush(stdout);
@@ -846,6 +862,20 @@ void runProbe(BTeki* actor, Umi& s, unsigned generator, float dt) {
             std::fflush(stdout);
         }
     }
+    // Landing census: 1.8 s after each throw, where did the Pikmin end up relative to the bulb?
+    for (int i = 0; i < s.probeThrows; ++i) {
+        if (s.probeLanded[i] || s.probeTime < s.probeThrownAt[i] + 1.8f || !s.coll.node[4]) continue;
+        s.probeLanded[i] = true;
+        Piki* t = s.probeThrown[i];
+        if (!t) continue;
+        const CollPart* w = s.coll.node[4];
+        const Vector3f q = t->mSRT.t;
+        const float dx = q.x - w->mCentre.x, dy = q.y - w->mCentre.y, dz = q.z - w->mCentre.z;
+        std::printf("P2_UMIMUSHI_PROBE kind=landing generator=%u n=%d dist_to_bulb=%.1f stuck_to_weak=%d stuck=%d alive=%d\n",
+                    generator, i, double(std::sqrt(dx * dx + dy * dy + dz * dz)),
+                    int(t->mStickPart == s.coll.node[4]), int(t->isStickTo()), int(t->isAlive()));
+        std::fflush(stdout);
+    }
     if (s.probeTime < 10.0f || s.probeThrows >= 8 || s.probeTime < s.probeNextThrow || !s.coll.node[4]) return;
     Navi* navi = naviMgr ? naviMgr->getActiveNavi() : nullptr;
     Piki* p = probeFreePiki();
@@ -854,13 +884,19 @@ void runProbe(BTeki* actor, Umi& s, unsigned generator, float dt) {
     const float bx = std::sin(s.heading), bz = std::cos(s.heading);
     const Vector3f bulb(weak->mCentre.x, weak->mCentre.y, weak->mCentre.z);
     const Vector3f launch(bulb.x - bx * 170.0f, ap.y, bulb.z - bz * 170.0f);
-    const float k = 0.9f + 0.1f * float(s.probeThrows);
+    // Throw height of a quick tap (hold time 0) and the lock-on pin the game would use for it.
+    const float quickHeight = C_NAVI_PARM(navi, mThrowMinHeight);
+    const float lockK = p2umi::pinScale(bulb.y - ap.y, quickHeight, 550.0f, 0.5f);
+    const float scan[8] = {1.0f, 1.1f, 1.2f, lockK, 1.3f, 1.35f, 1.4f, 1.5f};
+    const float k = scan[s.probeThrows];
     const Vector3f aim(launch.x + (bulb.x - launch.x) * k, bulb.y, launch.z + (bulb.z - launch.z) * k);
     const Vector3f saved = navi->mSRT.t;
     navi->mSRT.t = launch;
     p->mFSM->transit(p, 14); // PIKISTATE_Flying, exactly as NaviThrowState key action 0
     navi->throwPiki(p, aim);
     navi->mSRT.t = saved;
+    s.probeThrown[s.probeThrows] = p;
+    s.probeThrownAt[s.probeThrows] = s.probeTime;
     std::printf("P2_UMIMUSHI_PROBE kind=throw generator=%u n=%d k=%.2f launch=(%.1f,%.1f,%.1f) bulb=(%.1f,%.1f,%.1f) "
                 "aim=(%.1f,%.1f,%.1f)\n", generator, s.probeThrows, double(k), double(launch.x), double(launch.y),
                 double(launch.z), double(bulb.x), double(bulb.y), double(bulb.z), double(aim.x), double(aim.y),
@@ -1137,7 +1173,8 @@ void pc_p2_umimushi_update(BTeki* actor) {
     }
 
     s.stateTime += dt;
-    switch (s.state) {
+    if (probeFrozen(actor, s)) stop(actor);
+    else switch (s.state) {
     case UMI_WALK: {
         if (distXZ(pos, s.goal) < 50.0f) {
             if (isOutOfTerritory(s, pos, 1.0f) || !isFindTarget(actor, s)) setNextGoal(s);

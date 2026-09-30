@@ -181,6 +181,20 @@ inline bool naviHitBySlot(const Vec3& slot, const Vec3& navi, float radius)
     return dx * dx + dy * dy + dz * dz < radius;
 }
 
+// ---- Attack start (umiMushi.cpp:1233 isAttackStart) ----------------------------------------------------
+// A Pikmin starts the attack only inside the fp23 cone ahead (half-angle, radians) and the fp22 radius;
+// the old port also started it on a bare radius test, so Pikmin beside or behind the body triggered a
+// tongue that can never reach them.
+inline bool withinCone(const Vec3& actor, float heading, const Vec3& q, float radius, float halfAngle)
+{
+    const float dx = q.x - actor.x, dz = q.z - actor.z;
+    if (dx * dx + dz * dz >= radius * radius) return false;
+    float a = std::atan2(dx, dz) - heading;
+    while (a > Pi) a -= 2.0f * Pi;
+    while (a < -Pi) a += 2.0f * Pi;
+    return std::fabs(a) <= halfAngle;
+}
+
 // ---- Lock-on aim at the tail bulb ---------------------------------------------------------------
 // The lock-on mod pins the throw cursor on the target's feet, but the only stickable part is the raised
 // tail bulb (~75 units up, ~130 behind). A thrown Pikmin flies a parabola that ends at the cursor (flight
