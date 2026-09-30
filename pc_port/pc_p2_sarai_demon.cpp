@@ -670,6 +670,17 @@ void P2SaraiHost::demonAnchorFinalize()
     if (mAnchorVehicleColl) {
         mBoundActor->mCollInfo = mAnchorVehicleColl;
         mAnchorVehicleColl = nullptr;
+        // The vehicle parts were last sampled before the swap (spawn pose):
+        // dieSoon births the corpse pellet at the 'carc' sphere (or the
+        // bounding sphere via getCentre), so seat both on the dead body now.
+        const p2demonanchor::Vec3 body{mDemonBodyOffset.x, mDemonBodyOffset.y, mDemonBodyOffset.z};
+        const p2demonanchor::Vec3 c = p2demonanchor::sphereCentre(
+            0, p2demonanchor::Vec3{mSRT.t.x, mSRT.t.y, mSRT.t.z}, mFacingRadians, body);
+        if (CollPart* carcass = mBoundActor->mCollInfo->getSphere('carc')) carcass->mCentre.set(c.x, c.y, c.z);
+        if (mBoundActor->mCollInfo->hasInfo()) {
+            if (CollPart* bound = mBoundActor->mCollInfo->getBoundingSphere()) bound->mCentre.set(c.x, c.y, c.z);
+            if (CollPart* cent = mBoundActor->mCollInfo->getSphere('cent')) cent->mCentre.set(c.x, c.y, c.z);
+        }
     }
     // StateDead::exec kill() -> engine corpse (dieSoon runs inside the
     // suppressed doAI, so finalise it here: frog/elecbug pcEscapeNow pattern).
