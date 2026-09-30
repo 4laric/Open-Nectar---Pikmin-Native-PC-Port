@@ -1163,7 +1163,16 @@ void BuildingItem::refresh(Graphics& gfx)
 		gfx.mCamera->mLookAtMtx.multiplyTo(mWorldMtx, mtx);
 		mItemAnimator.updateContext();
 		mItemShapeObject->mShape->updateAnim(gfx, mtx, nullptr, this);
-		if (!isOffCamera) {
+#if defined(PIKI_PC_PORT)
+		// Una pared destruida no desaparece: se queda hundida bajo el suelo en
+		// la última pose de su animación. En color no se ve, pero su profundidad
+		// sí, y la sombra y la oclusión ambiental (que la leen) la dibujaban a
+		// través del agua. Terminada de hundirse, ya no se dibuja.
+		const bool sunk = isCompleted() && mMotionSpeed == 0.0f;
+#else
+		const bool sunk = false;
+#endif
+		if (!isOffCamera && !sunk) {
 			gfx.useMatrix(Matrix4f::ident, 0);
 			mItemShapeObject->mShape->drawshape(gfx, *gfx.mCamera, &mAnimatedMaterials);
 		}

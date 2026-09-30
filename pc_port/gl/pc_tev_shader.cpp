@@ -177,9 +177,12 @@ void emit_stage(std::string& out, const PcTevShaderKey& key, int index)
 	out += line;
 
 	// ── colour ──
-	const char* ca = color_arg_expr(stage.colorIn[0]);
-	const char* cb = color_arg_expr(stage.colorIn[1]);
-	const char* cc = color_arg_expr(stage.colorIn[2]);
+	const std::string caW = std::string("tevU8(") + color_arg_expr(stage.colorIn[0]) + ")";
+	const std::string cbW = std::string("tevU8(") + color_arg_expr(stage.colorIn[1]) + ")";
+	const std::string ccW = std::string("tevU8(") + color_arg_expr(stage.colorIn[2]) + ")";
+	const char* ca = caW.c_str();
+	const char* cb = cbW.c_str();
+	const char* cc = ccW.c_str();
 	const char* cd = color_arg_expr(stage.colorIn[3]);
 
 	if (stage.colorOp >= 8) {
@@ -235,9 +238,12 @@ void emit_stage(std::string& out, const PcTevShaderKey& key, int index)
 	out += line;
 
 	// ── alpha ──
-	const char* aa = alpha_arg_expr(stage.alphaIn[0]);
-	const char* ab = alpha_arg_expr(stage.alphaIn[1]);
-	const char* ac = alpha_arg_expr(stage.alphaIn[2]);
+	const std::string aaW = std::string("tevU8(") + alpha_arg_expr(stage.alphaIn[0]) + ")";
+	const std::string abW = std::string("tevU8(") + alpha_arg_expr(stage.alphaIn[1]) + ")";
+	const std::string acW = std::string("tevU8(") + alpha_arg_expr(stage.alphaIn[2]) + ")";
+	const char* aa = aaW.c_str();
+	const char* ab = abW.c_str();
+	const char* ac = acW.c_str();
 	const char* ad = alpha_arg_expr(stage.alphaIn[3]);
 
 	if (stage.alphaOp >= 14) {
@@ -387,6 +393,7 @@ std::string pc_tev_build_fragment_source(const PcTevShaderKey& key)
 	out += line;
 	out += "\tvec3 lit0 = gxPixelLit0(vLit0);\n";
 	out += "\tvec4 rast0 = (lit0.x < -0.5) ? base0 : vec4(clamp(base0.rgb * lit0, 0.0, 1.0), base0.a);\n";
+	out += "\trast0.a = gxLitAlpha0(rast0.a);\n";
 	if (usesChannel1) {
 		snprintf(line, sizeof(line), "\tvec4 base1 = vec4(%s, base0.a);\n",
 		         key.useMaterialRgb1 ? "uMaterialColor1.rgb" : "vColor.rgb");

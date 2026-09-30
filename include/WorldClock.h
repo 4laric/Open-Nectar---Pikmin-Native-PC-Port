@@ -41,4 +41,17 @@ struct WorldClock {
 	int mCurrentGameMinute;   ///< _28, current in-game minute (rounded down).
 };
 
+#if defined(PIKI_PC_PORT)
+/**
+ * Minute counter for Pikmin work (walls, bridges). It follows the world clock,
+ * and keeps running at the clock's pace while the "Infinite Day" mod holds the
+ * clock -- otherwise that work never makes progress (issue #54).
+ */
+extern int gPcWorkMinute;
+void pcWorkClockUpdate(WorldClock& clock, bool clockHeld);
+#define PC_WORK_MINUTE() (gPcWorkMinute)
+#else
+#define PC_WORK_MINUTE() (gameflow.mWorldClock.mCurrentGameMinute)
+#endif
+
 #endif

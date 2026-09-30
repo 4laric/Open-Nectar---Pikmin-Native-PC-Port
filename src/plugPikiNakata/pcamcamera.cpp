@@ -4,6 +4,7 @@
 #include "pc_gyro.h"
 #include "settings/pc_settings.h"
 #include "pc_coop.h"
+#include "Navi.h"
 #endif
 #include "Creature.h"
 #include "DebugLog.h"
@@ -206,6 +207,16 @@ void PcamCamera::parameterUpdated()
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+// Coop/VS: la primera persona es de cada jugador; la de esta cámara es la del
+// capitán al que sigue.
+static bool pcFirstPersonFor(Creature* target)
+{
+	const int player = target && target->mObjType == OBJTYPE_Navi ? static_cast<Navi*>(target)->mNaviID : 0;
+	return pc_first_person_active_for(player) != 0;
+}
+#endif
+
 void PcamCamera::control(Controller& controller)
 {
 	STACK_PAD_VAR(2);
@@ -246,7 +257,7 @@ void PcamCamera::control(Controller& controller)
 #if defined(PIKI_PC_PORT)
 	// En primera persona los gatillos dejan de rotar y de alternar zoom para
 	// hacer zoom continuo: R acerca, L aleja. Fuera del modo no cambia nada.
-	if (pc_first_person_active()) {
+	if (pcFirstPersonFor(mTargetCreature)) {
 		const f32 fTime = NSystem::getFrameTime();
 		if (controller.mTriggerR > 40) {
 			mPcFovZoom -= 40.0f * fTime;
@@ -266,13 +277,13 @@ void PcamCamera::control(Controller& controller)
 		if (pc_gyro_take_recenter_view()) {
 			mPcPitch = -0.15f; // cabeceo neutro, el mismo del arranque
 		}
-		if (pc_first_person_active()) {
+		if (pcFirstPersonFor(mTargetCreature)) {
 			mPcPitch += pitchDrag * 3.2f;
 			if (mPcPitch < -1.2f) mPcPitch = -1.2f;
 			if (mPcPitch > 1.0f) mPcPitch = 1.0f;
 		}
 	}
-	bool doRotate = !pc_first_person_active()
+	bool doRotate = !pcFirstPersonFor(mTargetCreature)
 	             && controller.mTriggerL / 170.0f >= getParameterF(PCAMF_RotationButtonThreshold);
 #else
 	bool doRotate = controller.mTriggerL / 170.0f >= getParameterF(PCAMF_RotationButtonThreshold);
@@ -447,7 +458,7 @@ void PcamCamera::makePosture()
 	// (polar, target), así que en vez de rehacer la trigonometría se toma esa
 	// dirección y se mueve el ojo a la cabeza del capitán. Así la cámara libre,
 	// la atención y el homing siguen funcionando igual que en tercera persona.
-	const bool pcFirstPerson = pc_first_person_active() && mTargetCreature != nullptr;
+	const bool pcFirstPerson = pcFirstPersonFor(mTargetCreature) && mTargetCreature != nullptr;
 	if (pcFirstPerson) {
 		NVector3f NRef eye = NVector3f();
 		eye.set(mTargetCreature->mSRT.t.x, mTargetCreature->mSRT.t.y + 22.0f, mTargetCreature->mSRT.t.z);

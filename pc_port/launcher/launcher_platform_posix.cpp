@@ -132,14 +132,14 @@ void showMessage(const std::string& title, const std::string& message, bool erro
     std::cerr << title << ": " << message << '\n';
 }
 
-fs::path askForInstallDirectory()
+fs::path askForInstallDirectory(const std::string& title)
 {
     if (commandExists("zenity")) {
         std::string initial;
         if (const char* home = std::getenv("HOME")) initial = fs::path(home).string() + "/";
         const std::string selected = runDialog("zenity", {
             "--file-selection", "--directory",
-            "--title=Open Nectar - Choose the install folder",
+            "--title=Open Nectar - " + title,
             "--filename=" + initial
         });
         if (!selected.empty()) return selected;
@@ -147,7 +147,7 @@ fs::path askForInstallDirectory()
         const std::string initial = std::getenv("HOME") ? std::getenv("HOME") : ".";
         const std::string selected = runDialog("kdialog", {
             "--getexistingdirectory", initial,
-            "--title", "Open Nectar - Choose the install folder"
+            "--title", "Open Nectar - " + title
         });
         if (!selected.empty()) return selected;
     }
@@ -173,36 +173,16 @@ fs::path askForImage()
     return {};
 }
 
-int askForLanguage(const std::vector<std::string>& names)
+fs::path askForFile(const std::string& title, const std::string& filterName, const std::string& patterns)
 {
-    if (names.size() < 2) return 0;
-
     if (commandExists("zenity")) {
-        std::vector<std::string> args {
-            "--list", "--title=Open Nectar - Language",
-            "--text=This disc carries several languages. Which one do you want to play in?",
-            "--column=Language", "--height=320"
-        };
-        for (const std::string& name : names) args.push_back(name);
-        const std::string chosen = runDialog("zenity", args);
-        for (std::size_t i = 0; i < names.size(); ++i) {
-            if (chosen == names[i]) return static_cast<int>(i);
-        }
-        return -1;
+        return runDialog("zenity", { "--file-selection", "--title=Open Nectar - " + title,
+                                     "--file-filter=" + filterName + " | " + patterns, "--file-filter=All files | *" });
     }
-
     if (commandExists("kdialog")) {
-        std::vector<std::string> args { "--menu", "Which language do you want to play in?" };
-        for (std::size_t i = 0; i < names.size(); ++i) {
-            args.push_back(std::to_string(i));
-            args.push_back(names[i]);
-        }
-        const std::string chosen = runDialog("kdialog", args);
-        if (chosen.empty()) return -1;
-        return std::atoi(chosen.c_str());
+        return runDialog("kdialog", { "--getopenfilename", ".", patterns + "|" + filterName });
     }
-
-    return -1;
+    return {};
 }
 
 fs::path findConverter()
@@ -231,6 +211,48 @@ fs::path askForConverter()
     if (commandExists("kdialog"))
         return runDialog("kdialog", { "--getopenfilename", ".", "dolphin-tool", "--title", "Choose dolphin-tool" });
     return {};
+}
+
+fs::path cacheDirectory()
+{
+    fs::path dir;
+    if (const char* xdg = std::getenv("XDG_CACHE_HOME"); xdg && *xdg) dir = fs::path(xdg) / "open-nectar";
+    else if (const char* home = std::getenv("HOME")) dir = fs::path(home) / ".cache/open-nectar";
+    else dir = fs::temp_directory_path() / "open-nectar-cache";
+    std::error_code ignored;
+    fs::create_directories(dir, ignored);
+    return dir;
+}
+
+bool downloadFile(const std::string& url, const fs::path& destination, std::string& error)
+{
+    const fs::path partial = destination.string() + ".part";
+    const pid_t child = fork();
+    if (child < 0) {
+        error = std::strerror(errno);
+        return false;
+    }
+    if (child == 0) {
+        // Sin salida: el launcher no tiene dónde mostrarla.
+        const int null = open("/dev/null", O_WRONLY);
+        if (null >= 0) { dup2(null, STDOUT_FILENO); dup2(null, STDERR_FILENO); }
+        execlp("curl", "curl", "-fsSL", "--max-time", "30", "-o", partial.c_str(), url.c_str(), static_cast<char*>(nullptr));
+        _exit(127);
+    }
+    int status = 0;
+    while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+    std::error_code ec;
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        fs::remove(partial, ec);
+        error = WIFEXITED(status) && WEXITSTATUS(status) == 127 ? "curl is not installed" : "download failed";
+        return false;
+    }
+    fs::rename(partial, destination, ec);
+    if (ec) {
+        error = ec.message();
+        return false;
+    }
+    return true;
 }
 
 bool convertImage(const fs::path& converter, const fs::path& source,
@@ -289,6 +311,66 @@ bool respawnInTerminal()
         }
     }
     return false;
+}
+
+bool runAndCapture(const fs::path& program, const std::vector<std::string>& arguments,
+                   const fs::path& workingDirectory, std::string& output, std::string& error)
+{
+    int pipeFds[2];
+    if (pipe(pipeFds) != 0) {
+        error = std::strerror(errno);
+        return false;
+    }
+    const pid_t child = fork();
+    if (child < 0) {
+        error = std::strerror(errno);
+        close(pipeFds[0]);
+        close(pipeFds[1]);
+        return false;
+    }
+    if (child == 0) {
+        dup2(pipeFds[1], STDOUT_FILENO);
+        const int null = open("/dev/null", O_WRONLY);
+        if (null >= 0) dup2(null, STDERR_FILENO);
+        close(pipeFds[0]);
+        close(pipeFds[1]);
+        if (chdir(workingDirectory.c_str()) != 0) _exit(126);
+        std::vector<std::string> storage;
+        storage.push_back(program.string());
+        storage.insert(storage.end(), arguments.begin(), arguments.end());
+        std::vector<char*> argv;
+        for (std::string& argument : storage) argv.push_back(argument.data());
+        argv.push_back(nullptr);
+        execvp(program.c_str(), argv.data()); // con ruta, igual que execv; sin ella, busca en PATH (tar)
+        _exit(127);
+    }
+    close(pipeFds[1]);
+    output.clear();
+    char buffer[4096];
+    for (;;) {
+        const ssize_t got = read(pipeFds[0], buffer, sizeof(buffer));
+        if (got > 0) output.append(buffer, size_t(got));
+        else if (got == 0 || errno != EINTR) break;
+    }
+    close(pipeFds[0]);
+    int status = 0;
+    while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        error = "exit status " + std::to_string(WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+        return false;
+    }
+    return true;
+}
+
+void relaunch(const fs::path& program, const std::vector<std::string>& arguments)
+{
+    std::vector<std::string> storage;
+    storage.push_back(program.string());
+    storage.insert(storage.end(), arguments.begin(), arguments.end());
+    std::vector<char*> argv;
+    for (std::string& argument : storage) argv.push_back(argument.data());
+    argv.push_back(nullptr);
+    execv(program.c_str(), argv.data());
 }
 
 [[noreturn]] void launchGame(const fs::path& dataRoot, const fs::path& gameBinary)

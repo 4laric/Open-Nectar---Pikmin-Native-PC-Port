@@ -1,205 +1,161 @@
-NECTAR — NATIVE PIKMIN PORT FOR LINUX (x86-64)
+OPEN NECTAR — NATIVE PIKMIN PORT FOR LINUX (x86-64)
 
-Self-contained package: includes glibc, SDL2, PulseAudio, ALSA and codecs.
-You don't need to install dependencies for most of the program.
+A native Linux build of Pikmin: no emulator. It runs the game's original
+JAudio sound engine, so music, sound effects and cinematic audio all play.
 
-This build runs the game's original JAudio sound engine: music, sound
-effects and cinematic audio all play.
-
-New in 0.6: HD texture packs. Dolphin-format packs (DDS in BC7/BC1/BC3,
-or PNG) load from Load/Textures/<GameID>/ next to pikmin_settings.conf;
-enable them under F1 > Graphics > Texture packs, and they apply on the
-next start. The renderer keeps static geometry resident on the GPU and
-skins it in the vertex shader, and caches compiled shader binaries next
-to your saves, so frames are cheaper and the first-sight stutter happens
-once per machine. The same code now runs on Android; that package is
-separate (open_nectar_<version>.apk).
-
-From 0.5: a Hard mode alongside Permadeath (tougher enemies, shorter days,
-80 Pikmin on the field), glossy surfaces on Olimar, the ship and the
-Onions, compressed disc images (RVZ/WIA/GCZ) through a Dolphin converter
-you already have, language selection from F1 on the European disc, the
-F1 menu from the pad's Select/View button, and fixes for PAL saves not
-being recognised. Saves now live in the game's own folder; an older card
-is copied there on first launch.
-
-System requirements:
-  - Linux x86-64 with kernel 3.2 or higher.
-  - OpenGL driver with libglvnd (present in any distro since 2017).
-  - X11 or Wayland session.
-  - Your legal copy of Pikmin USA Rev. 1 (GPIE01) or Pikmin Europe (GPIP01),
-    in ISO or GCM format. RVZ/WIA/GCZ work too if dolphin-tool from a
-    Dolphin installation is on PATH or beside the launcher (about 1.4 GB
-    of temporary space is needed for the conversion).
-
-The ROM and any Nintendo proprietary resources are not included.
-The ROM is not copied or modified during installation.
+The ROM and any Nintendo proprietary resources are not included. Your disc
+image is read to extract the game data; it is never copied or modified.
 
 
 -------------------------------------------------------------------
-1. EXTRACTION
+WHAT YOU NEED
 -------------------------------------------------------------------
 
-Use the .tar.gz. A ZIP loses execute permissions and the package
-would fail before starting.
+  - Linux x86-64 with glibc 2.29 or newer. That is any current distro:
+    Ubuntu 20.04+, Linux Mint 20+, Pop!_OS, Debian 11+, Fedora 30+,
+    openSUSE Leap 15.3+ and Tumbleweed, Arch, Manjaro, EndeavourOS,
+    SteamOS (Steam Deck desktop mode).
+  - A graphics driver with OpenGL 3.3 (every Intel, AMD and NVIDIA driver),
+    in an X11 or Wayland session.
+  - zenity or kdialog, for the file and folder pickers. GNOME, KDE and most
+    desktops already have one. If not:
+        Debian/Ubuntu/Mint:  sudo apt install zenity
+        Fedora:              sudo dnf install zenity
+        Arch/Manjaro:        sudo pacman -S zenity
+        openSUSE:            sudo zypper install zenity
+  - Your own copy of Pikmin USA Rev. 1 (GPIE01) or Pikmin Europe (GPIP01),
+    as ISO or GCM. RVZ/WIA/GCZ also work if dolphin-tool from a Dolphin
+    installation is on PATH or next to the launcher.
+  - About 1 GB of free space.
 
-  tar -xzf nectar-linux.tar.gz
-  cd nectar-linux
-
-With tar.gz no chmod is needed. If you received it in ZIP format,
-restore permissions with:
-
-  chmod +x nectar nectar-launcher nectar.real nectar-launcher.real \
-           lib/ld-linux-x86-64.so.2
-
-Optional desktop shortcut with the Open Nectar icon: edit
-open-nectar.desktop (replace /ruta/a/nectar-linux with this folder's
-path) and copy it to ~/.local/share/applications/.
-
-
--------------------------------------------------------------------
-2. INSTALL MISSING DEPENDENCIES
--------------------------------------------------------------------
-
-Only two things from the system are needed: OpenGL libraries and, if
-you want the graphical installer, zenity.
-
-Debian, Ubuntu, Linux Mint, Pop!_OS:
-
-  sudo apt update
-  sudo apt install zenity libopengl0 libglvnd0 libgbm1 libdrm2 \
-                   libgl1-mesa-dri
-
-Arch, Manjaro, EndeavourOS:
-
-  sudo pacman -S --needed zenity libglvnd mesa
-
-Fedora, Nobara:
-
-  sudo dnf install zenity libglvnd libglvnd-glx libglvnd-egl \
-                   mesa-dri-drivers
-
-openSUSE:
-
-  sudo zypper install zenity libglvnd Mesa-dri
-
-If you use KDE and prefer kdialog, substitute zenity with kdialog in
-any of the above commands. Either works.
-
-zenity is OPTIONAL: without it, the installer works the same in text
-mode from the terminal, or using the commands in section 4.
+Everything else (SDL2, the C++ runtime) is built into the executables.
 
 
 -------------------------------------------------------------------
-3. VERIFY NOTHING IS MISSING
+TWO DOWNLOADS, SAME CONTENT
 -------------------------------------------------------------------
 
-Before installing, verify that the system resolves everything:
+Open_Nectar-x86_64.AppImage
+    One file. Make it executable (right click > Properties > "Allow
+    executing as program", or: chmod +x Open_Nectar-x86_64.AppImage) and
+    open it.
 
-  ./lib/ld-linux-x86-64.so.2 --library-path ./lib --list ./nectar.real \
-    | grep -i "not found"
+nectar-linux.tar.gz
+    A folder. Extract it (tar -xzf nectar-linux.tar.gz) and open
+    nectar-launcher inside. It holds nectar (USA), nectar-pal (Europe) and
+    nectar-launcher.
 
-If it prints nothing, everything is correct. If any library appears,
-install the package from section 2 that contains it.
+Either one opens the Open Nectar launcher, which installs and updates the
+game. You only need it once: after installing, the launcher that stays in
+the game's folder takes over.
 
 
 -------------------------------------------------------------------
-4. COMMAND-LINE INSTALLATION (NO WINDOWS)
+INSTALLING
 -------------------------------------------------------------------
 
-This is the most reliable method and doesn't need zenity, kdialog or
-graphical environment to install. Indicate the ROM and destination folder:
+1. Open the AppImage or nectar-launcher.
+2. Press Install under the Pikmin cover.
+3. Choose your disc image and the folder to install to.
+4. The disc is checked and the game data extracted (a few minutes).
+5. Press "Play now".
+
+The folder you chose ends up with the game data (assets), your saves and
+settings, and two programs: nectar (the game, for your disc's region) and
+nectar-launcher.
+
+To play later, open nectar-launcher in that folder and click the cover.
+
+
+-------------------------------------------------------------------
+THE LAUNCHER
+-------------------------------------------------------------------
+
+Games        Click the cover to play. The button underneath updates it.
+Settings     Every option of the in-game F1 menu, plus texture packs, HD
+             models and language. Changes are saved at once and apply the
+             next time the game starts.
+Move Install Moves the whole installation (saves and settings included)
+             to another folder or disk.
+
+When a new version is published, the launcher says so ("Open Nectar X is
+available") and the Update button downloads and installs it by itself.
+
+
+-------------------------------------------------------------------
+UPDATING
+-------------------------------------------------------------------
+
+From the installed launcher: press Update. It downloads the latest release
+from GitHub, installs it and restarts. Your saves, settings, texture packs
+and the extracted game data are not touched.
+
+From a new download: open the new AppImage or nectar-launcher, press
+Update and choose the folder where the game is installed. The disc image is
+not needed.
+
+Installations from older versions (the ones with nectar.real and a lib
+folder) are converted to the new layout when updated.
+
+
+-------------------------------------------------------------------
+COMMAND LINE
+-------------------------------------------------------------------
+
+Install without any window (works over SSH, and without zenity/kdialog):
 
   ./nectar-launcher --rom /path/to/pikmin.iso --install-dir ~/Games/OpenNectar
 
-This extracts resources, installs executables and libraries in that
-folder, and launches the game when finished.
-
-To install WITHOUT the game starting afterwards:
-
-  ./nectar-launcher --rom /path/to/pikmin.iso \
-                    --install-dir ~/Games/OpenNectar \
-                    --extract-only
-
-To play later, from the installation folder:
-
-  cd ~/Games/OpenNectar
-  ./nectar-launcher
-
-Available options:
-
-  --rom FILE         Pikmin USA Rev. 1 ISO or GCM image.
-  --install-dir DIR  Folder to install to (created if it doesn't exist).
-  --extract-only     Install and exit, without launching the game.
-  --skip-verify      Skip integrity checks (see below).
+Options:
+  --rom FILE         Disc image: Pikmin USA Rev. 1 or Europe, ISO or GCM.
+  --install-dir DIR  Folder to install to (created if needed).
+  --extract-only     Install and exit, without starting the game.
+  --skip-verify      Skip the disc checks (see below).
+  --dolphin-tool P   dolphin-tool to convert RVZ/WIA/GCZ.
   --help             Show help.
 
-
--------------------------------------------------------------------
-4b. INTEGRITY CHECKS
--------------------------------------------------------------------
-
-The installer checks two things on its own:
-
-1. Before extracting, verifies that the image matches an intact dump
-   of Pikmin USA Rev. 1. Detects copies damaged during transfer,
-   which are the most common cause of the game installing correctly
-   but then failing with incomprehensible errors.
-
-2. When extracting, re-reads each written file and compares it with
-   what came from the image. Detects faulty disks and USB drives,
-   which produce files of correct size with wrong content.
-
-This adds about a minute to installation. If you prefer to skip it,
-use --skip-verify; but if the game fails afterwards, the first thing
-you'll be asked is to install without that flag.
-
-Note: when passing --install-dir the installer doesn't try to open
-any window, so this method works via SSH and on machines without
-zenity or kdialog.
+The installer checks the image against a known-good dump before extracting
+and re-reads every file it writes. That catches damaged copies and failing
+drives, the usual reason a game installs fine and then fails strangely. It
+adds about a minute; --skip-verify skips it.
 
 
 -------------------------------------------------------------------
-5. GRAPHICAL INSTALLATION
+IF SOMETHING GOES WRONG
 -------------------------------------------------------------------
 
-If you have installed zenity or kdialog:
+The AppImage does not open
+    Your system has no FUSE. Run it once from a terminal as:
+      ./Open_Nectar-x86_64.AppImage --appimage-extract-and-run
+    or use nectar-linux.tar.gz instead.
 
-  ./nectar-launcher
+"libGL.so.1: cannot open shared object file"
+    No OpenGL driver is installed:
+      Debian/Ubuntu: sudo apt install libgl1
+      Fedora:        sudo dnf install mesa-libGL
+      Arch:          sudo pacman -S libglvnd
+      openSUSE:      sudo zypper install Mesa-libGL1
 
-It will ask for the ROM and destination folder with dialogs. If you
-double-click without a terminal, it automatically reopens in one.
+"GLIBC_2.29 not found" (or similar)
+    The distro is older than the minimum (for example Debian 10, Ubuntu
+    18.04, RHEL/Rocky/Alma 8). Upgrade, or use a newer distro.
 
-From a terminal without zenity or kdialog, the same command uses the
-text-mode installer, which asks via keyboard.
+Browse does nothing
+    Neither zenity nor kdialog is installed (see WHAT YOU NEED), or use the
+    command line.
+
+The disc image is rejected
+    It must be Pikmin USA Rev. 1 (GPIE01) or Europe (GPIP01). Convert
+    RVZ/WIA/GCZ with: dolphin-tool convert -f iso -i game.rvz -o game.iso
+
+Not enough space
+    The extracted data takes about 650 MB. Leave 1 GB free.
 
 
 -------------------------------------------------------------------
-6. COMMON ISSUES DURING INSTALLATION
+IN GAME
 -------------------------------------------------------------------
 
-"Zenity or KDialog is required for the graphical installer."
-    You launched it with double-click on a system without those
-    programs and without a terminal. Install zenity (section 2) or
-    use the commands in section 4.
-
-"The installer accepts ISO/GCM. Convert RVZ/WIA/GCZ to ISO..."
-    Your image is compressed. Convert it:
-      dolphin-tool convert -f iso -i game.rvz -o game.iso
-
-"The existing lib directory does not belong to Nectar."
-    You chose as destination a folder that already contained a
-    different lib. The installer refuses to delete it for safety.
-    Choose an empty or new folder.
-
-"Permission denied" when running
-    Permissions were lost during extraction. Apply the chmod from
-    section 1, or extract again from the .tar.gz.
-
-ROM is rejected
-    It must be Pikmin USA Rev. 1 (GPIE01, revision 1), uncompressed.
-    Other regions or revisions are not supported.
-
-Insufficient space
-    Extracted resources take about 650 MB, plus 30 MB of executables
-    and libraries. Leave at least 1 GB free at the destination.
+F1 (or Select/View on a pad) opens the settings menu at any time. The
+European disc starts in English; change the language in the launcher's
+Settings, in F1 > Display, or in the game's own options.

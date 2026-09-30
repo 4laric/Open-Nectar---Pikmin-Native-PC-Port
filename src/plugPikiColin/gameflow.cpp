@@ -221,6 +221,25 @@ void WorldClock::update(f32 playRate)
 	mPrevTimeOfDay = mTimeOfDay;
 }
 
+#if defined(PIKI_PC_PORT)
+int gPcWorkMinute = 0;
+static f32 sPcWorkSecsIntoHour = 0.0f;
+
+void pcWorkClockUpdate(WorldClock& clock, bool clockHeld)
+{
+	if (!clockHeld) {
+		sPcWorkSecsIntoHour = clock.mRealSecsIntoHour;
+		gPcWorkMinute       = clock.mCurrentGameMinute;
+		return;
+	}
+	sPcWorkSecsIntoHour += gsys->getFrameTime();
+	if (sPcWorkSecsIntoHour >= clock.mRealSecsPerGameHour) {
+		sPcWorkSecsIntoHour -= clock.mRealSecsPerGameHour;
+	}
+	gPcWorkMinute = int(60.0f / clock.mRealSecsPerGameHour * sPcWorkSecsIntoHour);
+}
+#endif
+
 /**
  * @brief Toggles the debug timer display and updates the debug menu text.
  *

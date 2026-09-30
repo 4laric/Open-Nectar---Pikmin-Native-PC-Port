@@ -77,6 +77,13 @@ int main(int argc, char* argv[])
     // it to set up the instance handle and command line.
     SDL_SetMainReady();
 
+    // El launcher lee y cambia los ajustes del F1 a través del juego, sin
+    // abrir ventana ni arrancar nada más.
+    {
+        const int settingsResult = pc_settings_cli(argc, argv);
+        if (settingsResult >= 0) return settingsResult;
+    }
+
     // Before SDL_Init, and before anything can touch GL: on Linux the vendor
     // is selected by libglvnd the first time it is asked, and by the time a
     // context exists the choice has already been made. No-op elsewhere.

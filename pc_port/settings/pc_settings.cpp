@@ -141,6 +141,8 @@ struct PcConfig {
     int throwCancelB = 0;       // B con un Pikmin en la mano lo devuelve al grupo
     int quickGrab = 0;          // el Pikmin elegido aparece en la mano (sin andar hasta ella)
     int noTrip = 0;             // los Pikmin no tropiezan al correr
+    // Whistling over sprouts plucks them one at a time (0=off/faithful, 1=on).
+    int whistlePluck = 0;
     int onionStep10 = 0;        // Y + arriba/abajo en la cebolla mueve de 10 en 10
     int instantWhistle = 0;     // los Pikmin silbados se unen sin la reacción de girarse
     // Cheats.
@@ -152,10 +154,10 @@ struct PcConfig {
     int noDayAdvance = 0;       // el contador de días no avanza
     int allOnions = 0;          // cebollas roja, amarilla y azul (se graba en la partida)
     // Reglas del modo VS (índices de las opciones del menú previo).
-    int vsDuration = 1;  // 5 / 10 / 15 min
+    int vsDuration = 2;  // 5 / 10 / 15 / 25 / 30 min
     int vsRocketWin = 1; // cohete asediable y destruirlo gana
     int vsRocketHp = 1;  // baja / normal / alta
-    int vsBigPiece = 1;  // minuto 3 / minuto 5 / desde el inicio / sin gorda
+    int vsBigPiece = 1;  // minuto 3 / minuto 7 / desde el inicio / sin gorda
     int vsPikiLimit = 2; // 25 / 40 / 50 por jugador
     int vsPellets = 1;   // cada 30 / 45 / 60 s / sin pastillas
     // Mods de Pikmin 3: fijar objetivo, y mandar el escuadrón contra él.
@@ -211,6 +213,10 @@ struct PcConfig {
     // índice del pack se construye una sola vez, en pc_texpack_init.
     std::string texturePack;
     int texturePackEnabled = 0;
+    // Modelos HD (Load/Models) apagados, un bit por fila de su selector
+    // (Olimar, Louie, Louie HD, Pikmin, Bulborb, Dwarf Bulborb). Apagado =
+    // se dibuja el original aunque esté instalado. Se aplica reiniciando.
+    int hdModelsDisabled = 0;
 
     void applyDefaults() {
         windowWidth = 1280;
@@ -244,6 +250,7 @@ struct PcConfig {
         throwCancelB = 0;
         quickGrab = 0;
         noTrip = 0;
+        whistlePluck = 0;
         onionStep10 = 0;
         instantWhistle = 0;
         pikiInvincible = 0;
@@ -253,7 +260,7 @@ struct PcConfig {
         unlockZones = 0;
         noDayAdvance = 0;
         allOnions = 0;
-        vsDuration = 1;
+        vsDuration = 2;
         vsRocketWin = 1;
         vsRocketHp = 1;
         vsBigPiece = 1;
@@ -288,6 +295,7 @@ struct PcConfig {
         debugKeys = 0;
         texturePack.clear();
         texturePackEnabled = 0;
+        hdModelsDisabled = 0;
         for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
             keyboardBindings[i] = kDefaultKeyBindings[i];
             gamepadBindings[i] = -1; // -1 = not remapped (use default)
@@ -480,6 +488,9 @@ int sF1Scroll = 0;
 // Mientras se sondean las opciones de una fila (columna derecha) los cambios
 // solo tocan sPending: nada se aplica al vídeo ni al render.
 bool sProbing = false;
+// Modo sin ventana (--settings-*, lo usa el launcher): como el sondeo, los
+// cambios solo tocan sPending y nunca la ventana ni el render.
+bool sHeadless = false;
 const char* rowSection(int group, int row);
 bool rowProbeable(int group, int row);
 bool rowIsResolution(int group, int row);
@@ -728,7 +739,7 @@ bool isVideoSettingChanged() {
 }
 
 void applyVideo() {
-    if (sProbing) return;
+    if (sProbing || sHeadless) return;
     pc_window_set_display_mode(sPending.displayMode);
     pc_window_set_window_size(sPending.windowWidth, sPending.windowHeight);
     double rate = sPending.refreshRate;
@@ -742,7 +753,7 @@ void applyVideo() {
 // Pushes the grading settings down to the renderer. The pass decides for
 // itself whether it is worth running, so this can be called freely.
 void applyGraphics(const PcConfig& config) {
-    if (sProbing) return;
+    if (sProbing || sHeadless) return;
     PcPostEffects fx;
     pc_gfx_set_fog_allowed(config.fog);
     pc_gfx_set_anisotropy(config.anisotropy);
@@ -826,7 +837,7 @@ void applyControls(const PcConfig& config) {
 }
 
 void startVideoConfirm() {
-    if (sProbing) return;
+    if (sProbing || sHeadless) return;
     sVideoConfirmStartMs = SDL_GetTicks();
     sVideoConfirmActive = true;
 }
@@ -1045,6 +1056,7 @@ void saveConfig() {
     out << "throwCancelB = " << sConfig.throwCancelB << "\n";
     out << "quickGrab = " << sConfig.quickGrab << "\n";
     out << "noTrip = " << sConfig.noTrip << "\n";
+    out << "whistlePluck = " << sConfig.whistlePluck << "\n";
     out << "onionStep10 = " << sConfig.onionStep10 << "\n";
     out << "instantWhistle = " << sConfig.instantWhistle << "\n";
     out << "pikiInvincible = " << sConfig.pikiInvincible << "\n";
@@ -1085,6 +1097,7 @@ void saveConfig() {
     out << "debugKeys = " << sConfig.debugKeys << "\n";
     out << "texturePack = " << sConfig.texturePack << "\n";
     out << "texturePackEnabled = " << sConfig.texturePackEnabled << "\n";
+    out << "hdModelsDisabled = " << sConfig.hdModelsDisabled << "\n";
     out << "controlMode = " << sConfig.controlMode << "\n";
     out << "mouseSensitivity = " << sConfig.mouseSensitivity << "\n";
     out << "gyroEnabled = " << sConfig.gyroEnabled << "\n";
@@ -1230,6 +1243,9 @@ void loadConfig() {
         else if (key == "noTrip") {
             sConfig.noTrip = atoi(val.c_str()) ? 1 : 0;
         }
+        else if (key == "whistlePluck") {
+            sConfig.whistlePluck = atoi(val.c_str()) ? 1 : 0;
+        }
         else if (key == "onionStep10") {
             sConfig.onionStep10 = atoi(val.c_str()) ? 1 : 0;
         }
@@ -1243,7 +1259,7 @@ void loadConfig() {
         else if (key == "unlockZones") sConfig.unlockZones = atoi(val.c_str()) ? 1 : 0;
         else if (key == "noDayAdvance") sConfig.noDayAdvance = atoi(val.c_str()) ? 1 : 0;
         else if (key == "allOnions") sConfig.allOnions = atoi(val.c_str()) ? 1 : 0;
-        else if (key == "vsDuration") sConfig.vsDuration = std::clamp(atoi(val.c_str()), 0, 2);
+        else if (key == "vsDuration") sConfig.vsDuration = std::clamp(atoi(val.c_str()), 0, 4);
         else if (key == "vsRocketWin") sConfig.vsRocketWin = atoi(val.c_str()) ? 1 : 0;
         else if (key == "vsRocketHp") sConfig.vsRocketHp = std::clamp(atoi(val.c_str()), 0, 2);
         else if (key == "vsBigPiece") sConfig.vsBigPiece = std::clamp(atoi(val.c_str()), 0, 3);
@@ -1340,6 +1356,9 @@ void loadConfig() {
                 && val.find('\\') == std::string::npos
                 && val.find("..") == std::string::npos;
             sConfig.texturePack = safe ? val : std::string();
+        }
+        else if (key == "hdModelsDisabled") {
+            sConfig.hdModelsDisabled = atoi(val.c_str()) & 0x3F;
         }
         else if (key == "texturePackEnabled") {
             sConfig.texturePackEnabled = atoi(val.c_str()) ? 1 : 0;
@@ -1525,6 +1544,7 @@ void f1ProbeOptions(int group, int row) {
     if (!rowProbeable(group, row) || !pc_settings_row_enabled(group, row)) return;
     const PcConfig saved = sPending;
     const int savedRes = sResolutionIdx;
+    const unsigned char savedLanguage = pc_settings_get_language();
     sProbing = true;
     char cur[128], prev[128], v[128];
     pc_settings_row_value(group, row, cur, sizeof(cur));
@@ -1542,6 +1562,7 @@ void f1ProbeOptions(int group, int row) {
     }
     sPending = saved;
     sResolutionIdx = savedRes;
+    pc_settings_set_language(savedLanguage);
     if (!cyclic) {
         snprintf(prev, sizeof(prev), "%s", cur);
         for (int i = 0; i < kF1MaxOptions; i++) {
@@ -1553,6 +1574,7 @@ void f1ProbeOptions(int group, int row) {
         }
         sPending = saved;
         sResolutionIdx = savedRes;
+        pc_settings_set_language(savedLanguage);
     }
     sProbing = false;
     if (cyclic) {
@@ -2539,6 +2561,9 @@ void modsRowChange(int row, bool left, bool right) {
     else if (row == 25) {
         if (left || right) sPending.instantWhistle = sPending.instantWhistle ? 0 : 1;
     }
+    else if (row == 34) {
+        if (left || right) sPending.whistlePluck = sPending.whistlePluck ? 0 : 1;
+    }
     // Cheats (26-32). Hard los anula, como la vida y el día.
     else if (row >= 26 && row <= 32) {
         if (pc_hardmode_active() || !(left || right))
@@ -2695,7 +2720,7 @@ void mainRowValue(int row, char* out, size_t n) {
                                               "Espanol", "Italiano", "Nederlands" };
         const unsigned char language = pc_settings_get_language();
         snprintf(valueBuf[ROW_LANGUAGE], sizeof(valueBuf[0]), "%s%s", kNames[language],
-                 language == pc_settings_startup_language() ? "" : "  (on restart)");
+                 (sHeadless || language == pc_settings_startup_language()) ? "" : "  (on restart)");
     }
 #endif
 
@@ -2740,7 +2765,7 @@ void mainRowChange(int row, bool left, bool right, bool ok) {
         if (left) sPending.aspectRatioMode = (sPending.aspectRatioMode + 5 - 1) % 5;
         else if (right) sPending.aspectRatioMode = (sPending.aspectRatioMode + 1) % 5;
         if (left || right) {
-            if (!sProbing) pc_gfx_set_aspect_ratio_mode(sPending.aspectRatioMode);
+            if (!sProbing && !sHeadless) pc_gfx_set_aspect_ratio_mode(sPending.aspectRatioMode);
             applyVideo();
             startVideoConfirm();
         }
@@ -4278,9 +4303,9 @@ void pc_settings_draw_idle_counter(void) {
 
 // ─── Modo VS: reglas, menú previo, marcador, cuenta atrás y pantalla final ──
 namespace {
-const f32 kVsDurations[3]  = { 300.0f, 600.0f, 900.0f };
+const f32 kVsDurations[5]  = { 300.0f, 600.0f, 900.0f, 1500.0f, 1800.0f };
 const f32 kVsRocketHps[3]  = { 60.0f, 100.0f, 150.0f };
-const f32 kVsBigPiece[4]   = { 180.0f, 300.0f, 0.0f, -1.0f };
+const f32 kVsBigPiece[4]   = { 180.0f, 420.0f, 0.0f, -1.0f };
 const int kVsPikiLimits[3] = { 25, 40, 50 };
 const f32 kVsPellets[4]    = { 30.0f, 45.0f, 60.0f, 0.0f };
 constexpr int kVsRuleRows  = 6;
@@ -4300,7 +4325,7 @@ int* vsRuleField(int row)
 }
 int vsRuleCount(int row)
 {
-    static const int counts[kVsRuleRows] = { 3, 2, 3, 4, 3, 4 };
+    static const int counts[kVsRuleRows] = { 5, 2, 3, 4, 3, 4 };
     return counts[row];
 }
 void vsRuleText(int row, const char** label, char* value, size_t n)
@@ -4324,8 +4349,8 @@ void vsRuleText(int row, const char** label, char* value, size_t n)
         break;
     }
     case 3: {
-        static const char* es4[4] = { "Minuto 3", "Minuto 5", "Desde el inicio", "Sin pieza gorda" };
-        static const char* en4[4] = { "Minute 3", "Minute 5", "From the start", "No big part" };
+        static const char* es4[4] = { "Minuto 3", "Minuto 7", "Desde el inicio", "Sin pieza gorda" };
+        static const char* en4[4] = { "Minute 3", "Minute 7", "From the start", "No big part" };
         *label = es ? "Pieza gorda" : "Big part";
         snprintf(value, n, "%s", es ? es4[v] : en4[v]);
         break;
@@ -4425,11 +4450,11 @@ void pcVsEndScreenInput()
 
 void pc_settings_apply_vs_rules(void) {
     PcVsRules r;
-    r.matchSeconds    = kVsDurations[std::clamp(sConfig.vsDuration, 0, 2)];
+    r.matchSeconds    = kVsDurations[std::clamp(sConfig.vsDuration, 0, 4)];
     r.rocketWin       = sConfig.vsRocketWin != 0;
     r.rocketHp        = kVsRocketHps[std::clamp(sConfig.vsRocketHp, 0, 2)];
     r.bigPieceSeconds = kVsBigPiece[std::clamp(sConfig.vsBigPiece, 0, 3)];
-    // Que la gorda salga antes del final (5 min con "a los 5 min" no saldría nunca).
+    // Que la gorda salga antes del final (5 min con "a los 7 min" no saldría nunca).
     if (r.bigPieceSeconds >= r.matchSeconds) r.bigPieceSeconds = r.matchSeconds * 0.5f;
     // Entre los dos no pueden pasar del límite general del campo.
     r.fieldLimit    = std::min(kVsPikiLimits[std::clamp(sConfig.vsPikiLimit, 0, 2)], pc_settings_get_piki_limit() / 2);
@@ -5277,6 +5302,10 @@ int pc_settings_get_no_trip(void) {
     return sConfig.noTrip;
 }
 
+int pc_settings_get_whistle_pluck(void) {
+    return sConfig.whistlePluck;
+}
+
 int pc_settings_get_onion_step10(void) {
     return sConfig.onionStep10;
 }
@@ -5331,17 +5360,22 @@ int pc_settings_get_first_person(void) {
 
 // La fila de Mods habilita el modo; la tecla entra y sale de él en marcha. Se
 // apaga sola al desactivar el mod, para no dejar la cámara dentro de Olimar.
-static int sFirstPersonActive = 0;
+// Coop/VS: cada jugador tiene la suya.
+static int sFirstPersonActive[2] = { 0, 0 };
 
-int pc_first_person_active(void) {
-    if (!sConfig.firstPerson) sFirstPersonActive = 0;
-    return sFirstPersonActive;
+int pc_first_person_active_for(int player) {
+    if (!sConfig.firstPerson) sFirstPersonActive[0] = sFirstPersonActive[1] = 0;
+    return player == 1 ? sFirstPersonActive[1] : sFirstPersonActive[0];
 }
 
-void pc_first_person_toggle(void) {
+void pc_first_person_toggle_for(int player) {
     if (!sConfig.firstPerson) return;
-    sFirstPersonActive = !sFirstPersonActive;
+    int& fp = sFirstPersonActive[player == 1 ? 1 : 0];
+    fp = !fp;
 }
+
+int pc_first_person_active(void) { return pc_first_person_active_for(0); }
+void pc_first_person_toggle(void) { pc_first_person_toggle_for(0); }
 
 int pc_settings_get_charge(void) {
     // El charge no significa nada sin un objetivo fijado.
@@ -5381,6 +5415,26 @@ int pc_settings_get_coop_merge_camera(void) {
     // VS: pantalla siempre partida; cada uno ve solo su lado.
     if (pc_vs_active()) return 0;
     return sConfig.coopMergeCamera;
+}
+
+int pcGameLanguageFromOs(unsigned char osLanguage) {
+    static const int kGame[] = { 0, 2, 1, 3, 4 }; // en de fr es it -> en fr de es it
+    return osLanguage < 5 ? kGame[osLanguage] : 0;
+}
+
+unsigned char pcOsLanguageFromGame(int gameLanguage) {
+    static const unsigned char kOs[] = { 0, 2, 1, 3, 4 }; // en fr de es it -> en de fr es it
+    return gameLanguage >= 0 && gameLanguage < 5 ? kOs[gameLanguage] : 0;
+}
+
+void pc_settings_store_language(unsigned char osLanguage) {
+    if (osLanguage == pc_settings_get_language()) return;
+    pc_settings_set_language(osLanguage);
+    saveConfig();
+}
+
+int pc_settings_get_hd_model_enabled(int row) {
+    return row < 0 || row >= 6 || !(sConfig.hdModelsDisabled & (1 << row));
 }
 
 int pc_settings_get_debug_keys(void) {
@@ -5516,6 +5570,7 @@ void modsRowValue(int i, char* value, size_t n) {
     case 23: snprintf(value, n, "%s", sPending.noTrip ? "On" : "Off (original)"); break;
     case 24: snprintf(value, n, "%s", sPending.onionStep10 ? "On" : "Off (original)"); break;
     case 25: snprintf(value, n, "%s", sPending.instantWhistle ? "On" : "Off (original)"); break;
+    case 34: snprintf(value, n, "%s", sPending.whistlePluck ? "On" : "Off (original)"); break;
     case 28: speedPctLabel(sPending.carrySpeedPct, value, n); break;
     case 29: speedPctLabel(sPending.naviSpeedPct, value, n); break;
     case 26: case 27: case 30: case 31: case 32: {
@@ -5624,6 +5679,7 @@ const GroupRow kControlsRows[] = {
     { SRC_ADV, 0, "Mouse Sensitivity", "How far the cursor moves for each movement of the mouse." },
     { SRC_MODS, 3, "Mouse Wheel", "What the wheel does: change the Pikmin colour to throw, or zoom the camera." },
     { SRC_MODS, 2, "Hold to Pluck", "Keep the button held to pluck sprouts one after another." },
+    { SRC_MODS, 34, "Whistle Pluck", "Hold the whistle over sprouts to pluck them one after another." },
     { SRC_MODS, 17, "Throw While Moving", "Throw Pikmin while running, instead of Olimar stopping first." },
     { SRC_MODS, 22, "Cancel Throw With B", "While holding a Pikmin with A, press B to put it back in the squad." },
     { SRC_MODS, 33, "Quick Grab", "The Pikmin to throw appears in Olimar's hand at once, so throwing is just as fast with the squad behind him." },
@@ -5803,7 +5859,13 @@ bool rowProbeable(int group, int row) {
     switch (r->src) {
     case SRC_MAIN:
         return r->idx == ROW_DISPLAY_MODE || r->idx == ROW_ASPECT_RATIO || r->idx == ROW_RENDER_SCALE
-            || r->idx == ROW_REFRESH_RATE || r->idx == ROW_VSYNC || r->idx == ROW_FPS_MODE;
+            || r->idx == ROW_REFRESH_RATE || r->idx == ROW_VSYNC || r->idx == ROW_FPS_MODE
+#if defined(VERSION_GPIP01)
+            // El idioma se guarda aparte de sPending (sLanguage): el sondeo lo
+            // restaura por su cuenta. Solo sin ventana, para el launcher.
+            || (sHeadless && r->idx == ROW_LANGUAGE)
+#endif
+            ;
     case SRC_ADV: return r->idx != 7;
     case SRC_GFX: return r->idx != 10 && r->idx != 11;
     case SRC_MODS: return true;
@@ -6207,3 +6269,174 @@ PcNavEdges pc_settings_read_nav_edges(void) {
 }
 
 void pc_settings_touch_drag(float dy) { sTouchDragY += dy; }
+
+// ─── Ajustes sin ventana, para el launcher ───────────────────────────────────
+// El launcher no enlaza el juego: le pide las filas del F1 a este ejecutable y
+// le manda los cambios. Así la lógica de cada ajuste existe una sola vez.
+//   --settings-dump                 grupos y filas en JSON por stdout
+//   --settings-set G R I [G R I..]  elige la opción I de la fila R del grupo G,
+//                                   guarda pikmin_settings.conf y vuelca el JSON
+//   --settings-reset                valores por defecto, guarda y vuelca
+//   --texpack-install ZIP           instala un pack de texturas desde su zip
+//   --texpack-activate NOMBRE       activa ese pack ("" = ninguno)
+//   --hdmodel-install FILA ZIP      convierte e instala un modelo HD
+//   --hdmodel-enable FILA 0|1       usar o no ese modelo HD instalado
+// Trabaja sobre pikmin_settings.conf del directorio actual, como el juego.
+namespace {
+
+void jsonString(std::string& out, const char* text) {
+    out += '"';
+    for (const char* c = text ? text : ""; *c; ++c) {
+        const unsigned char ch = (unsigned char)*c;
+        if (ch == '"' || ch == '\\') { out += '\\'; out += (char)ch; }
+        else if (ch == '\n') out += "\\n";
+        else if (ch < 0x20) { char esc[8]; snprintf(esc, sizeof(esc), "\\u%04x", ch); out += esc; }
+        else out += (char)ch;
+    }
+    out += '"';
+}
+
+void headlessDump(const std::string& message = std::string(), bool messageIsError = false) {
+    std::string out = "{\"groups\":[";
+    bool firstGroup = true;
+    for (int g = 0; g < PC_SET_GROUP_COUNT; g++) {
+        // Logros: solo lectura y dependen de la partida. Datos: acciones con
+        // diálogos del juego (el reset tiene su propia orden).
+        if (g == PC_SET_GROUP_ACHIEVEMENTS || g == PC_SET_GROUP_DATA) continue;
+        if (!firstGroup) out += ',';
+        firstGroup = false;
+        out += "{\"id\":" + std::to_string(g) + ",\"name\":";
+        jsonString(out, pc_settings_group_name(g));
+        out += ",\"rows\":[";
+        const int rows = pc_settings_rows_count(g);
+        for (int r = 0; r < rows; r++) {
+            if (r) out += ',';
+            char value[256];
+            pc_settings_row_value(g, r, value, sizeof(value));
+            out += "{\"row\":" + std::to_string(r) + ",\"label\":";
+            jsonString(out, pc_settings_row_label(g, r));
+            out += ",\"help\":";
+            jsonString(out, pc_settings_row_help(g, r));
+            out += ",\"section\":";
+            if (const char* section = pc_settings_row_section(g, r)) jsonString(out, section);
+            else out += "null";
+            out += ",\"enabled\":";
+            out += pc_settings_row_enabled(g, r) ? "true" : "false";
+            out += ",\"action\":";
+            out += pc_settings_row_is_action(g, r) ? "true" : "false";
+            out += ",\"picker\":" + std::to_string(pc_settings_row_opens_picker(g, r));
+            out += ",\"value\":";
+            jsonString(out, value);
+            int current = -1;
+            const int count = pc_settings_row_options(g, r, &current);
+            out += ",\"current\":" + std::to_string(count > 0 ? current : -1) + ",\"options\":[";
+            for (int k = 0; k < count; k++) {
+                if (k) out += ',';
+                jsonString(out, pc_settings_row_option(k));
+            }
+            out += "]}";
+        }
+        out += "]}";
+    }
+    out += "]";
+
+    // Packs de texturas instalados (Load/Textures) y el activo.
+    out += ",\"texturePacks\":{\"active\":";
+    jsonString(out, sConfig.texturePackEnabled ? sConfig.texturePack.c_str() : "");
+    out += ",\"installed\":[";
+    const std::vector<std::string> packs = pc_texpack_list_packs();
+    for (size_t i = 0; i < packs.size(); i++) {
+        if (i) out += ',';
+        jsonString(out, packs[i].c_str());
+    }
+    out += "]}";
+
+    // Modelos HD: una fila por modelo, como en su selector del F1.
+    out += ",\"hdModels\":[";
+    const int models = pc_settings_rows_count(PC_SET_PICKER_HDMODELS);
+    for (int m = 0; m < models; m++) {
+        if (m) out += ',';
+        out += "{\"row\":" + std::to_string(m) + ",\"name\":";
+        jsonString(out, pc_settings_row_label(PC_SET_PICKER_HDMODELS, m));
+        out += ",\"installed\":";
+        out += hdModelInstalled(m) ? "true" : "false";
+        out += ",\"enabled\":";
+        out += pc_settings_get_hd_model_enabled(m) ? "true" : "false";
+        out += '}';
+    }
+    out += "]";
+
+    out += ",\"message\":";
+    jsonString(out, message.c_str());
+    out += ",\"messageError\":";
+    out += messageIsError ? "true" : "false";
+    out += "}\n";
+    fwrite(out.data(), 1, out.size(), stdout);
+    fflush(stdout);
+}
+
+} // namespace
+
+int pc_settings_cli(int argc, char** argv) {
+    int at = -1;
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--settings-dump") || !strcmp(argv[i], "--settings-set") || !strcmp(argv[i], "--settings-reset")
+            || !strcmp(argv[i], "--texpack-install") || !strcmp(argv[i], "--texpack-activate")
+            || !strcmp(argv[i], "--hdmodel-install") || !strcmp(argv[i], "--hdmodel-enable")) {
+            at = i;
+            break;
+        }
+    }
+    if (at < 0) return -1;
+
+    // Solo vídeo, para la lista de resoluciones; sin pantalla sigue valiendo.
+    SDL_InitSubSystem(SDL_INIT_VIDEO);
+    sHeadless = true;
+    loadConfig();
+    sPending = sConfig;
+    rebuildResolutionList();
+    int idx = sHadConfigFile ? resolutionIndexFor(sPending.windowWidth, sPending.windowHeight) : -1;
+    if (idx < 0) idx = defaultResolutionIndex();
+    sResolutionIdx = idx;
+
+    int result = 0;
+    std::string message;
+    bool messageIsError = false;
+    if (!strcmp(argv[at], "--texpack-install") && at + 1 < argc) {
+        char msg[192] = {};
+        const int written = pc_texpack_install_zip(argv[at + 1], msg, sizeof(msg));
+        message = msg;
+        messageIsError = written <= 0;
+    } else if (!strcmp(argv[at], "--texpack-activate") && at + 1 < argc) {
+        sConfig.texturePack = argv[at + 1];
+        sConfig.texturePackEnabled = sConfig.texturePack.empty() ? 0 : 1;
+        sPending = sConfig;
+        saveConfig();
+    } else if (!strcmp(argv[at], "--hdmodel-enable") && at + 2 < argc) {
+        const int row = atoi(argv[at + 1]);
+        if (row >= 0 && row < 6) {
+            if (atoi(argv[at + 2])) sConfig.hdModelsDisabled &= ~(1 << row);
+            else sConfig.hdModelsDisabled |= 1 << row;
+        }
+        sPending = sConfig;
+        saveConfig();
+    } else if (!strcmp(argv[at], "--hdmodel-install") && at + 2 < argc) {
+        char msg[192] = {};
+        const int written = pc_hd_models_convert_file(argv[at + 2], atoi(argv[at + 1]), msg, sizeof(msg));
+        message = msg;
+        messageIsError = written <= 0;
+    } else if (!strcmp(argv[at], "--settings-set")) {
+        for (int i = at + 1; i + 2 < argc; i += 3) {
+            pc_settings_row_pick_option(atoi(argv[i]), atoi(argv[i + 1]), atoi(argv[i + 2]));
+        }
+        sConfig = sPending;
+        saveConfig();
+    } else if (!strcmp(argv[at], "--settings-reset")) {
+        sConfig.applyDefaults();
+        sPending = sConfig;
+        saveConfig();
+    }
+    headlessDump(message, messageIsError);
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    return result;
+}

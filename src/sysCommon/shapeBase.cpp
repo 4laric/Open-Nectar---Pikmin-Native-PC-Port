@@ -936,6 +936,33 @@ void SceneData::getAnimInfo(CmdStream* stream)
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
+/**
+ * DCA tracks are baked at one sample per 30 Hz frame. Sampling int(time) held
+ * each pose for two ticks in 60/120 FPS mode, so skeletal animation stepped at
+ * 30 FPS however fast the game ran. Blend towards the next sample instead;
+ * rotations take the short way round so a +-PI wrap does not spin the joint.
+ */
+static inline f32 pcSampleDca(const f32* data, const AnimParam& param, f32 time, bool isAngle)
+{
+	const int last = param.mEntryNum - 1;
+	const int i0   = int(time);
+	if (i0 >= last) {
+		return data[param.mDataOffset + last];
+	}
+	const f32 a = data[param.mDataOffset + i0];
+	f32 d       = data[param.mDataOffset + i0 + 1] - a;
+	if (isAngle) {
+		if (d > PI) {
+			d -= 2.0f * PI;
+		} else if (d < -PI) {
+			d += 2.0f * PI;
+		}
+	}
+	return a + d * (time - f32(i0));
+}
+#endif
+
 void AnimData::extractSRT(SRT& srt, int, AnimDataInfo* info, f32 time)
 {
 	if (!(info->mFlags & AnimDataFlags::MatrixCalculated)) {
@@ -948,8 +975,12 @@ void AnimData::extractSRT(SRT& srt, int, AnimDataInfo* info, f32 time)
 			for (int i = 0; i < 3; i++) {
 				AnimParam& param = info->mScale[i];
 
+#if defined(PIKI_PC_PORT)
+				*scale++ = pcSampleDca(mScaleDataBlock->mData, param, time, false);
+#else
 				int offset = (int(time) < param.mEntryNum) ? param.mDataOffset + int(time) : param.mDataOffset + (param.mEntryNum - 1);
 				*scale++   = mScaleDataBlock->mData[offset]; // YOU HAVE THE LOOP VARIABLE.  WHY?
+#endif
 			}
 
 			if ((info->mFlags & AnimDataFlags::AllIndividualScaleStatic) == AnimDataFlags::AllIndividualScaleStatic) {
@@ -965,8 +996,12 @@ void AnimData::extractSRT(SRT& srt, int, AnimDataInfo* info, f32 time)
 			for (int i = 0; i < 3; i++) {
 				AnimParam& param = info->mRotation[i];
 
+#if defined(PIKI_PC_PORT)
+				*rotation++ = pcSampleDca(mRotateDataBlock->mData, param, time, true);
+#else
 				int offset  = (int(time) < param.mEntryNum) ? param.mDataOffset + int(time) : param.mDataOffset + (param.mEntryNum - 1);
 				*rotation++ = mRotateDataBlock->mData[offset]; // YOU HAVE THE LOOP VARIABLE.  WHY?
+#endif
 			}
 
 			if ((info->mFlags & AnimDataFlags::AllIndividualRotationStatic) == AnimDataFlags::AllIndividualRotationStatic) {
@@ -982,8 +1017,12 @@ void AnimData::extractSRT(SRT& srt, int, AnimDataInfo* info, f32 time)
 			for (int i = 0; i < 3; i++) {
 				AnimParam& param = info->mTranslation[i];
 
+#if defined(PIKI_PC_PORT)
+				*translation++ = pcSampleDca(mTranslationDataBlock->mData, param, time, false);
+#else
 				int offset     = (int(time) < param.mEntryNum) ? param.mDataOffset + int(time) : param.mDataOffset + (param.mEntryNum - 1);
 				*translation++ = mTranslationDataBlock->mData[offset]; // YOU HAVE THE LOOP VARIABLE.  WHY?
+#endif
 			}
 
 			if ((info->mFlags & AnimDataFlags::AllIndividualTranslationStatic) == AnimDataFlags::AllIndividualTranslationStatic) {
@@ -1007,7 +1046,14 @@ void AnimData::makeAnimSRT(int boneId, immut Matrix4f* parent, Matrix4f* output,
 	Matrix4f* boneTransform;
 
 	bool check = true;
-	if ((info->mFlags & AnimDataFlags::AllComponentsStatic) != AnimDataFlags::AllComponentsStatic
+#if defined(PIKI_PC_PORT)
+	// The cache holds one matrix per whole frame; an interpolated pose between
+	// two frames must neither be read from it nor written into it.
+	const bool onWholeFrame = pos == f32(frameNum);
+#else
+	const bool onWholeFrame = true;
+#endif
+	if ((info->mFlags & AnimDataFlags::AllComponentsStatic) != AnimDataFlags::AllComponentsStatic && onWholeFrame
 	    && mAnimInfoList[frameNum].mCachedMtxBlock) {
 		FrameCacher* cache = static_cast<FrameCacher*>(mAnimInfoList[frameNum].mCachedMtxBlock);
 		if (cache->mBoneMtxList[boneId]) {

@@ -1060,8 +1060,8 @@ static void pcVsUpdate(MapMgr* map)
 	}
 	if (pc_vs_take_pellet_event()) {
 		// Solo si el sitio está libre, para que no se amontonen.
-		PcVsPelletSpot spots[8];
-		const int n = pc_vs_arena_pellet_spots(spots, 8);
+		PcVsPelletSpot spots[16];
+		const int n = pc_vs_arena_pellet_spots(spots, 16);
 		for (int i = 0; i < n; i++) {
 			bool busy = false;
 			Iterator it(pelletMgr);
@@ -1230,8 +1230,8 @@ static void pcVsSetupBases(MapMgr* map)
 	}
 	GameStat::update();
 
-	PcVsPelletSpot spots[8];
-	const int n = pc_vs_arena_pellet_spots(spots, 8);
+	PcVsPelletSpot spots[16];
+	const int n = pc_vs_arena_pellet_spots(spots, 16);
 	for (int i = 0; i < n; i++) {
 		Pellet* pellet = pelletMgr->newPellet(spots[i].pelletId, nullptr);
 		if (!pellet) continue;
@@ -1540,8 +1540,8 @@ void GameCoreSection::initStage()
 	if (pc_vs_active()) {
 		pc_settings_apply_vs_rules(); // reglas del menú previo
 		pc_vs_match_reset();
-		PcVsPelletSpot spots[8];
-		const int n = pc_vs_arena_pellet_spots(spots, 8);
+		PcVsPelletSpot spots[16];
+		const int n = pc_vs_arena_pellet_spots(spots, 16);
 		for (int i = 0; i < n; i++) pelletMgr->addUseList(spots[i].pelletId);
 		pcVsChoosePieces();
 		for (u32 id : sVsPieceIds) {
@@ -2948,7 +2948,7 @@ void GameCoreSection::beginView(Graphics& gfx, int view, f32 farClip)
 	const f32 shift       = 0.5f * mSplitBlend * (viewSide(view) == 0 ? 1.0f : -1.0f);
 	pc_gfx_set_proj_offset(horizontal ? 0.0f : -shift, horizontal ? shift : 0.0f);
 	gfx.setCamera(cam);
-	cam->update(pc_gfx_get_window_aspect_ratio(), cam->mFov, pc_first_person_active() ? 3.0f : 100.0f, farClip);
+	cam->update(pc_gfx_get_window_aspect_ratio(), cam->mFov, pc_first_person_active_for(view) ? 3.0f : 100.0f, farClip);
 	gfx.setViewport(AREA_FULL_SCREEN(gfx));
 	gfx.setScissor(currentViewRect(gfx));
 	// initRender() vacía luces y shapes cacheadas una vez por frame; cada

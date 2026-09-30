@@ -218,6 +218,30 @@ else()
     endif()
 endif()
 
+# Paquetes de release: SDL2 y el runtime de C/C++ dentro de cada ejecutable,
+# para que la carpeta instalada sea solo el juego y el launcher. En Windows
+# evita SDL2.dll y libwinpthread-1.dll; en Linux se compila así dentro del
+# contenedor de packaging/linux (glibc antigua), junto a -static-libstdc++.
+if (WIN32)
+    set(_pikmin_static_default ON)
+else()
+    set(_pikmin_static_default OFF)
+endif()
+option(PIKMIN_STATIC_RUNTIME "Link SDL2 and the C/C++ runtime into the executables" ${_pikmin_static_default})
+if (PIKMIN_STATIC_RUNTIME AND NOT ANDROID)
+    if (TARGET SDL2::SDL2-static)
+        set(SDL2_LIBRARIES SDL2::SDL2-static)
+    endif()
+    if (WIN32)
+        add_link_options(-static)
+    else()
+        # --exclude-libs: el libstdc++/SDL2 estáticos no se exportan. Si no,
+        # pisan al libstdc++ del sistema en los drivers que lo usan (NVIDIA
+        # egl-wayland2) y el contexto cae a llvmpipe.
+        add_link_options(-static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL)
+    endif()
+endif()
+
 # SDL2main supplies a WinMain that forwards to SDL_main. This project declares
 # SDL_MAIN_HANDLED and defines its own main, so linking it leaves SDL_main
 # undefined in every executable. Drop it wherever the SDL2 package offers it.
@@ -240,6 +264,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_photo_mode.cpp
     pc_port/pc_permadeath.cpp
     pc_port/pc_coop.cpp
+    pc_port/pc_whistle_pluck.cpp
     pc_port/pc_art.cpp
     pc_port/pc_icon.cpp
     pc_port/settings/pc_glass_menu.cpp
@@ -611,11 +636,60 @@ if(PIKMIN_BUILD_LAUNCHER)
     endif()
 
     find_package(Threads REQUIRED)
+
+    # Dear ImGui (third_party/imgui, MIT) para la interfaz del launcher. Va en
+    # su propia biblioteca: es código de terceros y no pasa los avisos
+    # estrictos de NATIVE_COMPILE_OPTIONS.
+    add_library(launcher_imgui STATIC
+        third_party/imgui/imgui.cpp
+        third_party/imgui/imgui_draw.cpp
+        third_party/imgui/imgui_tables.cpp
+        third_party/imgui/imgui_widgets.cpp
+        third_party/imgui/backends/imgui_impl_sdl2.cpp
+        third_party/imgui/backends/imgui_impl_opengl3.cpp)
+    # Sin las rutas globales del juego: include/Dolphin trae su propio float.h
+    # y tapa el del sistema.
+    set_property(TARGET launcher_imgui PROPERTY INCLUDE_DIRECTORIES "")
+    target_include_directories(launcher_imgui PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui
+        ${SDL2_INCLUDE_DIRS})
+    target_link_libraries(launcher_imgui PUBLIC ${SDL2_LIBRARIES} ${CMAKE_DL_LIBS})
+    if (WIN32)
+        target_link_libraries(launcher_imgui PUBLIC opengl32)
+    else()
+        target_link_libraries(launcher_imgui PUBLIC OpenGL::GL)
+    endif()
+
+    # Logo y fuente van dentro del ejecutable. Las portadas no: se descargan de
+    # GameTDB al abrir el launcher, como hace Dolphin.
+    include(cmake/EmbedFile.cmake)
+    set(LAUNCHER_EMBED_DIR "${CMAKE_CURRENT_BINARY_DIR}/launcher_embedded")
+    file(MAKE_DIRECTORY "${LAUNCHER_EMBED_DIR}")
+    embed_file("${CMAKE_CURRENT_SOURCE_DIR}/pc_port/launcher/assets/logo.png" "${LAUNCHER_EMBED_DIR}/logo_open_nectar.h" kLogoOpenNectar)
+    embed_file("${CMAKE_CURRENT_SOURCE_DIR}/pc_port/launcher/assets/Fredoka.ttf" "${LAUNCHER_EMBED_DIR}/font_fredoka.h" kFontFredoka)
+
     add_executable(pikmin_launcher
         pc_port/launcher/launcher_main.cpp
+        pc_port/launcher/launcher_gui.cpp
+        pc_port/launcher/bti_decode.cpp
+        pc_port/launcher/settings_model.cpp
+        pc_port/launcher/release_update.cpp
         pc_port/launcher/installer_ui.cpp
         pc_port/pc_icon.cpp
-        ${LAUNCHER_PLATFORM_SOURCE})
+        ${LAUNCHER_PLATFORM_SOURCE}
+        "${LAUNCHER_EMBED_DIR}/logo_open_nectar.h"
+        "${LAUNCHER_EMBED_DIR}/font_fredoka.h")
+    # El launcher no usa cabeceras del juego (ver launcher_imgui).
+    set_property(TARGET pikmin_launcher PROPERTY INCLUDE_DIRECTORIES "")
+    target_include_directories(pikmin_launcher PRIVATE
+        ${PC_PORT_DIR}
+        "${LAUNCHER_EMBED_DIR}"
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
+    target_link_libraries(pikmin_launcher PRIVATE launcher_imgui)
+    # Versión que el launcher compara con el último release de GitHub para
+    # avisar y actualizarse. Súbela en cada release (la etiqueta de GitHub).
+    set(OPEN_NECTAR_VERSION "0.9.1" CACHE STRING "Open Nectar version of this build (GitHub release tag)")
+    target_compile_definitions(pikmin_launcher PRIVATE OPEN_NECTAR_VERSION="${OPEN_NECTAR_VERSION}")
     if (WIN32)
         target_sources(pikmin_launcher PRIVATE packaging/windows/nectar.rc)
     endif()

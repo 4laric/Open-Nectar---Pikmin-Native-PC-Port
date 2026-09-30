@@ -324,7 +324,7 @@ void ActBridge::doWork(int mins)
 {
 	InteractBuild build(mPiki, mStageID, mins / 60.0f);
 	mBridge->stimulate(build);
-	mStartWorkTime = gameflow.mWorldClock.mCurrentGameMinute;
+	mStartWorkTime = PC_WORK_MINUTE();
 	mIsAttackReady = FALSE;
 }
 
@@ -519,7 +519,7 @@ int ActBridge::newExeGo()
 void ActBridge::newInitWork()
 {
 	mState          = STATE_Work;
-	mStartWorkTime  = gameflow.mWorldClock.mCurrentGameMinute;
+	mStartWorkTime  = PC_WORK_MINUTE();
 	mIsAttackReady  = FALSE;
 	mCollisionCount = 0;
 	_2A             = 0;
@@ -580,7 +580,7 @@ int ActBridge::newExeWork()
 		return ACTOUT_Continue;
 	}
 
-	int timeSinceLastWork = (gameflow.mWorldClock.mCurrentGameMinute - mStartWorkTime + 60) % 60;
+	int timeSinceLastWork = (PC_WORK_MINUTE() - mStartWorkTime + 60) % 60;
 	if (timeSinceLastWork > 0 && mIsAttackReady) {
 		doWork(timeSinceLastWork);
 	}

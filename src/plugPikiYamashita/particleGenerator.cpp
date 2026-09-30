@@ -4,6 +4,7 @@
 #include "zen/particle.h"
 #if defined(PIKI_PC_PORT)
 #include "timing/pc_render_phase.h"
+#include <cmath>
 #include "pc_gfx.h"
 #endif
 
@@ -230,6 +231,16 @@ void zen::particleGenerator::init(u8* data, Texture* tex1, Texture* tex2, immut 
 	}
 }
 
+#if defined(PIKI_PC_PORT)
+// Paso de la actualización en curso, en fotogramas de 30 Hz (1 en la
+// GameCube, 0.5 a 60 FPS, 0.25 a 120). Los datos de los efectos están en
+// "por fotograma a 30 Hz" (partículas emitidas, velocidad, giro), pero el
+// juego los aplicaba en cada actualización: a 60/120 FPS los efectos iban el
+// doble o el cuádruple de rápido. SetPtclsLife y pmCalcAccel no reciben el
+// paso, así que se deja aquí.
+static f32 sPcStep = 1.0f;
+#endif
+
 /**
  * @todo: Documentation
  */
@@ -239,6 +250,7 @@ bool zen::particleGenerator::update(f32 timeStep)
 	if (!pc_render_is_authoritative()) {
 		return false;
 	}
+	sPcStep = timeStep;
 #endif
 
 	bool res = false;
@@ -506,7 +518,15 @@ void zen::particleGenerator::SetPtclsLife()
 	}
 
 	int i = 0;
+#if defined(PIKI_PC_PORT)
+	// La vida y el movimiento de las partículas ya van por tiempo; la emisión
+	// iba por actualización, así que a 60/120 FPS salían el doble o el
+	// cuádruple. Los anillos del haz de la cebolla se juntaban y los huecos
+	// entre ellos desaparecían (un cono continuo en vez de tramos).
+	mPartialParticleCount += (a + RandShift(a * mEmissionRateJitter)) * sPcStep;
+#else
 	mPartialParticleCount += a + RandShift(a * mEmissionRateJitter);
+#endif
 	int max               = mPartialParticleCount;
 	mPartialParticleCount = mPartialParticleCount - max;
 
@@ -850,9 +870,15 @@ void zen::particleGenerator::pmCalcAccel(zen::particleMdl* ptcl)
 	}
 
 	if (mParticleFlags & PTCLFLAG_UseAirField) {
+#if defined(PIKI_PC_PORT)
+		ptcl->mLocalPosition.x += mAirFieldVelocity.x * sPcStep;
+		ptcl->mLocalPosition.y += mAirFieldVelocity.y * sPcStep;
+		ptcl->mLocalPosition.z += mAirFieldVelocity.z * sPcStep;
+#else
 		ptcl->mLocalPosition.x += mAirFieldVelocity.x;
 		ptcl->mLocalPosition.y += mAirFieldVelocity.y;
 		ptcl->mLocalPosition.z += mAirFieldVelocity.z;
+#endif
 	}
 }
 
@@ -876,6 +902,17 @@ void zen::particleGenerator::UpdatePtclsStatus(f32 timeStep)
 				pmCalcAccel(ptcl);
 			}
 
+#if defined(PIKI_PC_PORT)
+			// Rozamiento, aceleración y avance por tiempo (ver sPcStep).
+			const f32 stepDrag = powf(dragFactor, timeStep);
+			ptcl->mVelocity.x *= stepDrag;
+			ptcl->mVelocity.y *= stepDrag;
+			ptcl->mVelocity.z *= stepDrag;
+
+			ptcl->mVelocity.x += ptcl->mAcceleration.x * timeStep;
+			ptcl->mVelocity.y += ptcl->mAcceleration.y * timeStep;
+			ptcl->mVelocity.z += ptcl->mAcceleration.z * timeStep;
+#else
 			ptcl->mVelocity.x *= dragFactor;
 			ptcl->mVelocity.y *= dragFactor;
 			ptcl->mVelocity.z *= dragFactor;
@@ -883,6 +920,7 @@ void zen::particleGenerator::UpdatePtclsStatus(f32 timeStep)
 			ptcl->mVelocity.x += ptcl->mAcceleration.x;
 			ptcl->mVelocity.y += ptcl->mAcceleration.y;
 			ptcl->mVelocity.z += ptcl->mAcceleration.z;
+#endif
 
 			if (mParticleFlags & PTCLFLAG_ClampVelocity) {
 				f32 speed
@@ -895,9 +933,15 @@ void zen::particleGenerator::UpdatePtclsStatus(f32 timeStep)
 				}
 			}
 
+#if defined(PIKI_PC_PORT)
+			ptcl->mLocalPosition.x += ptcl->mVelocity.x * timeStep;
+			ptcl->mLocalPosition.y += ptcl->mVelocity.y * timeStep;
+			ptcl->mLocalPosition.z += ptcl->mVelocity.z * timeStep;
+#else
 			ptcl->mLocalPosition.x += ptcl->mVelocity.x;
 			ptcl->mLocalPosition.y += ptcl->mVelocity.y;
 			ptcl->mLocalPosition.z += ptcl->mVelocity.z;
+#endif
 
 			f32 normalisedAge = f32(ptcl->mAge) / f32(ptcl->mLifeTime);
 			if (normalisedAge < mScaleThreshold1) {
@@ -917,11 +961,24 @@ void zen::particleGenerator::UpdatePtclsStatus(f32 timeStep)
 			}
 
 			ptcl->mAlphaFactor *= (1.0f - Rand(mAlphaJitter));
+#if defined(PIKI_PC_PORT)
+			// Giro e hijas por tiempo, no por actualización: a 60/120 FPS las
+			// partículas giraban el doble o el cuádruple de rápido, y la edad
+			// redondeada se repetía en varias actualizaciones seguidas, así que
+			// cada hija salía dos o cuatro veces.
+			ptcl->mRotAngle = u16(int(ptcl->mRotAngle) + int(lroundf(f32(ptcl->mRotSpeed) * timeStep)));
+			const int previousAge = ptcl->mAge;
+			ptcl->mAgeTimer += timeStep;
+			ptcl->mAge = RoundOff(ptcl->mAgeTimer);
+			const bool newAge = ptcl->mAge != previousAge;
+#else
 			ptcl->mRotAngle += ptcl->mRotSpeed;
 			ptcl->mAgeTimer += timeStep;
 			ptcl->mAge = RoundOff(ptcl->mAgeTimer);
+			const bool newAge = true;
+#endif
 
-			if (mParticleFlags & PTCLFLAG_EnableChildParticles && ((ptcl->mAge + 1) % mChildSpawnInterval) == 0) {
+			if (newAge && mParticleFlags & PTCLFLAG_EnableChildParticles && ((ptcl->mAge + 1) % mChildSpawnInterval) == 0) {
 				particleChildMdl* child = pmGetParticleChild();
 				if (child) {
 					child->mGlobalPosition  = ptcl->mGlobalPosition;

@@ -2072,9 +2072,19 @@ void BTeki::drawRange(Graphics& gfx, immut Vector3f& centre, f32 range, immut Co
  */
 void BTeki::refresh2d(Graphics& gfx)
 {
+#if defined(PIKI_PC_PORT)
+	// Pantalla partida: CF_UseAICulling solo lo calcula la vista de J1, así que
+	// en la de J2 el círculo de vida desaparecía cuando J1 no miraba al
+	// enemigo. Se comprueba con la cámara de la vista que se dibuja.
+	if (mDeadState != 0 || !tekiMgr->hasModel(mTekiType) || !isVisible()
+	    || !gfx.mCamera->isPointVisible(getBoundingSphereCentre(), getBoundingSphereRadius())) {
+		return;
+	}
+#else
 	if (mDeadState != 0 || !tekiMgr->hasModel(mTekiType) || !isVisible() || isCreatureFlag(CF_UseAICulling)) {
 		return;
 	}
+#endif
 
 	if (getTekiOption(TEKIOPT_LifeGaugeVisible)) {
 		immut Vector3f& pos = getCentre();

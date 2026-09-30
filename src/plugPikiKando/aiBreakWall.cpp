@@ -160,7 +160,7 @@ void ActBreakWall::initBreakWall()
 	mWorkTimer = (4.0f * gsys->getRand(1.0f));
 	startWorkMotion();
 	mState           = STATE_BreakWall;
-	mStartAttackTime = gameflow.mWorldClock.mCurrentGameMinute;
+	mStartAttackTime = PC_WORK_MINUTE();
 }
 
 /**
@@ -194,7 +194,7 @@ int ActBreakWall::breakWall()
 		return ACTOUT_Continue;
 	}
 
-	int timeSinceLastAttack = (gameflow.mWorldClock.mCurrentGameMinute - mStartAttackTime + 60) % 60;
+	int timeSinceLastAttack = (PC_WORK_MINUTE() - mStartAttackTime + 60) % 60;
 	if (flowCont.mCurrentStage->mStageID == STAGE_Practice) {
 		timeSinceLastAttack = 1;
 	}
@@ -214,7 +214,7 @@ int ActBreakWall::breakWall()
 			}
 		}
 
-		mStartAttackTime = gameflow.mWorldClock.mCurrentGameMinute;
+		mStartAttackTime = PC_WORK_MINUTE();
 	}
 
 	mPiki->mVelocity.set(0.0f, 0.0f, 0.0f);

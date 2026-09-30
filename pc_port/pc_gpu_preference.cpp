@@ -5,6 +5,7 @@
 #include <cstring>
 
 #ifdef __linux__
+#include <dirent.h>
 #include <sys/stat.h>
 #endif
 
@@ -24,6 +25,10 @@ PcGpuDecision pc_gpu_preference_decide(PcGpuEvidence evidence)
     }
     if (!evidence.nvidiaKernelModuleLoaded) {
         decision.reason = "no NVIDIA kernel module; nothing to offload to";
+        return decision;
+    }
+    if (evidence.nvidiaOnly) {
+        decision.reason = "NVIDIA is the only GPU; no PRIME offload needed";
         return decision;
     }
 
@@ -61,6 +66,7 @@ void pc_gpu_preference_apply(void)
                                          || getenv("DRI_PRIME") != nullptr);
     evidence.optedOut                 = (getenv("NECTAR_NO_PRIME") != nullptr);
     evidence.forceEglRoute            = (getenv("NECTAR_PRIME_EGL") != nullptr);
+    evidence.nvidiaOnly               = pc_gpu_preference_nvidia_only();
 
     PcGpuDecision decision = pc_gpu_preference_decide(evidence);
 
@@ -116,6 +122,36 @@ void pc_gpu_preference_clear(void)
     unsetenv("__NV_PRIME_RENDER_OFFLOAD");
     unsetenv("__GLX_VENDOR_LIBRARY_NAME");
     unsetenv("__EGL_VENDOR_LIBRARY_FILENAMES");
+#endif
+}
+
+// Every GPU the kernel knows about shows up as /sys/class/drm/cardN with the
+// PCI vendor in device/vendor. Any vendor other than NVIDIA (0x10de) means a
+// hybrid machine; none means a desktop with only the NVIDIA card. If sysfs
+// cannot be read, assume hybrid, which is what the port always did.
+int pc_gpu_preference_nvidia_only(void)
+{
+#ifdef __linux__
+    DIR* dir = opendir("/sys/class/drm");
+    if (!dir) return 0;
+    int nvidia = 0, other = 0;
+    while (struct dirent* ent = readdir(dir)) {
+        if (std::strncmp(ent->d_name, "card", 4) != 0 || std::strchr(ent->d_name, '-') != nullptr) continue;
+        char path[512];
+        std::snprintf(path, sizeof(path), "/sys/class/drm/%s/device/vendor", ent->d_name);
+        FILE* f = std::fopen(path, "r");
+        if (!f) continue;
+        unsigned vendor = 0;
+        if (std::fscanf(f, "%x", &vendor) == 1) {
+            if (vendor == 0x10de) nvidia = 1;
+            else other = 1;
+        }
+        std::fclose(f);
+    }
+    closedir(dir);
+    return nvidia && !other;
+#else
+    return 0;
 #endif
 }
 

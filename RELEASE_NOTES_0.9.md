@@ -89,6 +89,13 @@ fixes. Saves and settings carry over.
   instead of Player 1.
 - **Co-op/VS geysers:** a geyser only launches the captain standing on it;
   the other captain was being flung into the sky and landing on it.
+- **Co-op split screen:** enemy health circles no longer vanish in Player
+  2's view when Player 1 isn't looking at that enemy.
+- **Controller reconnect:** a controller that disconnects and reconnects goes
+  back to the same player (it stopped responding, or swapped players).
+- **First person per player:** in Co-op/VS each player toggles their own
+  first-person view (keyboard owner with V, or each controller's bound
+  button, Left Stick click by default) instead of both switching at once.
 - **VS:** Pikmin attacking a rocket can be killed again by the rival's
   Pikmin; after the first hit they became invulnerable.
 - **Captain picker art** is now built into the game, so the pixel-art

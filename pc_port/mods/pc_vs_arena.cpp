@@ -805,12 +805,19 @@ void pc_vs_arena_onion(int player, int color, Vector3f& pos)
 
 int pc_vs_arena_pellet_spots(PcVsPelletSpot* out, int max)
 {
-	// Una junto a cada base (detrás) y dos junto al cráter.
+	// Simetría de giro 180° (x, z) -> (-x, -z): cada jugador tiene lo mismo.
+	//  - Base: una roja y una azul pequeñas, para arrancar cualquier color.
+	//  - Carril sur de J1 / norte de J2: una roja de 5, en el lado opuesto al
+	//    Bulborb, para que el camino fácil también tenga premio.
+	//  - Charca: una azul de 5 en el agua junto al islote; solo los azules
+	//    llegan a ella.
+	//  - Cráter: dos amarillas de 5, compartidas.
 	const PcVsPelletSpot spots[] = {
-		{ -1300.0f, -700.0f, 'pr01' },
-		{ 1300.0f, 700.0f, 'pr01' },
-		{ 0.0f, -330.0f, 'py05' },
-		{ 0.0f, 330.0f, 'py05' },
+		{ -1300.0f, -700.0f, 'pr01' }, { 1300.0f, 700.0f, 'pr01' },
+		{ -1300.0f, 650.0f, 'pb01' },  { 1300.0f, -650.0f, 'pb01' },
+		{ -500.0f, 600.0f, 'pr05' },   { 500.0f, -600.0f, 'pr05' },
+		{ 180.0f, -640.0f, 'pb05' },   { -180.0f, 640.0f, 'pb05' },
+		{ 0.0f, -330.0f, 'py05' },     { 0.0f, 330.0f, 'py05' },
 	};
 	int n = 0;
 	for (const PcVsPelletSpot& s : spots) {
@@ -831,7 +838,7 @@ int pc_vs_arena_piece_spots(PcVsPieceSpot* out, int max)
 	// J1; el gemelo de J2 es el mismo con x y z negadas.
 	const PcVsPieceSpot j1[] = {
 		{ -1000.0f, -720.0f, PC_VS_PIECE_SMALL_A },
-		{ -1000.0f, 720.0f, PC_VS_PIECE_SMALL_B },
+		{ -760.0f, 380.0f, PC_VS_PIECE_SMALL_B }, // tras el pilar sur: emboscada
 		{ -880.0f, 0.0f, PC_VS_PIECE_SMALL_C },
 		{ -440.0f, -360.0f, PC_VS_PIECE_GUARDED },
 		{ 0.0f, -640.0f, PC_VS_PIECE_POND },

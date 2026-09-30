@@ -720,6 +720,8 @@ struct ProgramLocations {
 	GLint lightK[4] = {};
 	GLint ambColor = -1;
 	GLint chan0En = -1;
+	GLint chan0AlphaEn = -1;
+	GLint chan0AlphaDiff = -1;
 	GLint chan1En = -1;
 	GLint chan0AttnFn = -1;
 	GLint chan1AttnFn = -1;
@@ -1095,6 +1097,20 @@ static void resolve_tev_konst(u8 stage, float out[4]) {
 }
 
 // Map of GXTexObj pointers to OpenGL Texture IDs
+// Modo de repetición de GX en OpenGL. GX_MIRROR se trataba como CLAMP: el
+// haz de la cebolla repite en espejo su textura de franjas a lo largo del
+// cono, y sin espejo se veía una sola franja estirada (un cono continuo).
+#ifndef GL_MIRRORED_REPEAT
+#define GL_MIRRORED_REPEAT 0x8370
+#endif
+static GLint gxWrapToGl(GXTexWrapMode wrap) {
+    switch (wrap) {
+    case GX_REPEAT: return GL_REPEAT;
+    case GX_MIRROR: return GL_MIRRORED_REPEAT;
+    default: return GL_CLAMP_TO_EDGE;
+    }
+}
+
 static std::unordered_map<uintptr_t, GLuint> sTextureCache;
 // What the cache is costing. Every GX texture is expanded to RGBA8 -- the
 // console's formats are 4 and 8 bits per pixel, so this is four to eight times
@@ -2144,6 +2160,7 @@ static const char* fShaderTail =
     "    } else {\n"
     "        rast0 = vec4(clamp(base0.rgb * lit0, 0.0, 1.0), base0.a);\n"
     "    }\n"
+    "    rast0.a = gxLitAlpha0(rast0.a);\n"
     "    vec4 base1 = vec4(uUseMaterialRgb1 ? uMaterialColor1.rgb : vColor.rgb, base0.a);\n"
     "    vec3 lit1 = gxPixelLit1(vLit1);\n"
     "    vec4 rast1 = lit1.x < -0.5\n"
@@ -2179,9 +2196,9 @@ static const char* fShaderTail =
     "        tex = applySwap(rawTex, uTevSwapSel[i].y);\n"
     "        vec4 rawRast = (uTevChan[i].x < 0) ? vec4(0.0) : (uTevChan[i].x == 1) ? rast1 : rast0;\n"
     "        vec4 rast = applySwap(rawRast, uTevSwapSel[i].x);\n"
-    "        vec4 a = resolveC(uTevCSel[i].x, prev, c0, c1, c2, konst, tex, rast, i);\n"
-    "        vec4 b = resolveC(uTevCSel[i].y, prev, c0, c1, c2, konst, tex, rast, i);\n"
-    "        vec4 cc = resolveC(uTevCSel[i].z, prev, c0, c1, c2, konst, tex, rast, i);\n"
+    "        vec4 a = tevU8(resolveC(uTevCSel[i].x, prev, c0, c1, c2, konst, tex, rast, i));\n"
+    "        vec4 b = tevU8(resolveC(uTevCSel[i].y, prev, c0, c1, c2, konst, tex, rast, i));\n"
+    "        vec4 cc = tevU8(resolveC(uTevCSel[i].z, prev, c0, c1, c2, konst, tex, rast, i));\n"
     "        vec4 d = resolveC(uTevCSel[i].w, prev, c0, c1, c2, konst, tex, rast, i);\n"
     "        float bias = (uTevCOps[i].y == 1) ? 0.5 : (uTevCOps[i].y == 2) ? -0.5 : 0.0;\n"
     "        float scl = (uTevCOps[i].z == 1) ? 2.0 : (uTevCOps[i].z == 2) ? 4.0 : (uTevCOps[i].z == 3) ? 0.5 : 1.0;\n"
@@ -2193,9 +2210,9 @@ static const char* fShaderTail =
     "        else cResult = d.rgb - cMix;\n"
     "        if (colorOp < 8) cResult = (cResult + bias) * scl;\n"
     "        cResult = ((uTevCOps[i].x & 0x100) != 0) ? clamp(cResult, 0.0, 1.0) : clamp(cResult, -4.0, 4.0);\n"
-    "        float al = resolveA(uTevASel[i].x, prev, c0, c1, c2, konst, tex, rast, i);\n"
-    "        float bl = resolveA(uTevASel[i].y, prev, c0, c1, c2, konst, tex, rast, i);\n"
-    "        float ac = resolveA(uTevASel[i].z, prev, c0, c1, c2, konst, tex, rast, i);\n"
+    "        float al = tevU8(resolveA(uTevASel[i].x, prev, c0, c1, c2, konst, tex, rast, i));\n"
+    "        float bl = tevU8(resolveA(uTevASel[i].y, prev, c0, c1, c2, konst, tex, rast, i));\n"
+    "        float ac = tevU8(resolveA(uTevASel[i].z, prev, c0, c1, c2, konst, tex, rast, i));\n"
     "        float dl = resolveA(uTevASel[i].w, prev, c0, c1, c2, konst, tex, rast, i);\n"
     "        float abias = (uTevAOps[i].y == 1) ? 0.5 : (uTevAOps[i].y == 2) ? -0.5 : 0.0;\n"
     "        float ascl = (uTevAOps[i].z == 1) ? 2.0 : (uTevAOps[i].z == 2) ? 4.0 : (uTevAOps[i].z == 3) ? 0.5 : 1.0;\n"
@@ -2489,6 +2506,8 @@ static void query_program_locations(GLuint program, ProgramLocations& out) {
     out.numLights = glGetUniformLocation_ptr(program, "uNumLights");
     out.ambColor = glGetUniformLocation_ptr(program, "uAmbColor");
     out.chan0En = glGetUniformLocation_ptr(program, "uChan0En");
+    out.chan0AlphaEn = glGetUniformLocation_ptr(program, "uChan0AlphaEn");
+    out.chan0AlphaDiff = glGetUniformLocation_ptr(program, "uChan0AlphaDiff");
     out.chan1En = glGetUniformLocation_ptr(program, "uChan1En");
     out.chan0AttnFn = glGetUniformLocation_ptr(program, "uChan0AttnFn");
     out.chan1AttnFn = glGetUniformLocation_ptr(program, "uChan1AttnFn");
@@ -3938,7 +3957,10 @@ static bool ao_build()
         // The bias discards the shallow self-occlusion that the faceted
         // derivative normal produces on flat ground.
         glUniform4f_ptr(glGetUniformLocation_ptr(sSsaoProgram, "uAOParams"),
-                        sPostEffects.ssaoRadius, sPostEffects.ssaoIntensity, 0.02f, 0.0f);
+                        // Bias (z): samples within ~6 degrees of the surface
+                        // plane are not occluders. At 0.02 the small normal
+                        // error from stepped depth still counted, in bands.
+                        sPostEffects.ssaoRadius, sPostEffects.ssaoIntensity, 0.1f, 0.0f);
     }
     if (glUniform2f_ptr) {
         // The neighbour taps that build the normal step one pixel of this
@@ -4948,7 +4970,9 @@ void pc_gfx_set_tev_order(GXTevStageID stage, GXTexCoordID coord, GXTexMapID map
     state_touched();
     if (stage >= GX_TEVSTAGE0 && stage < GX_MAXTEVSTAGE) {
         sTevStages[stage].texMap = map;
-        sTevStages[stage].texCoord = coord;
+        // GXSetTevOrder writes GX_TEXCOORD_NULL as TEXCOORD0 and keeps the texture
+        // enabled when the map is valid; the raw 0xFF used to be clamped to coordinate 3.
+        sTevStages[stage].texCoord = (coord >= GX_MAX_TEXCOORD) ? GX_TEXCOORD0 : coord;
         sTevStages[stage].textureEnabled = map >= GX_TEXMAP0 && map < GX_MAX_TEXMAP;
         if (chan == GX_COLOR_NULL || chan == GX_COLOR_ZERO) sTevStages[stage].rasChannel = -1;
         else if (chan == GX_COLOR1 || chan == GX_ALPHA1 || chan == GX_COLOR1A1) sTevStages[stage].rasChannel = 1;
@@ -5304,8 +5328,8 @@ void pc_gfx_init_tex_obj_rgba(GXTexObj* obj, void* rgba, u16 width, u16 height, 
     glActiveTexture_ptr(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texId);
     sBoundTextures[0] = texId;
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrapS == GX_REPEAT ? GL_REPEAT : GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrapT == GX_REPEAT ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, gxWrapToGl(wrapS));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, gxWrapToGl(wrapT));
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
@@ -5346,8 +5370,8 @@ void pc_gfx_init_tex_obj(GXTexObj* obj, void* imagePtr, u16 width, u16 height, G
     glActiveTexture_ptr(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texId);
     sBoundTextures[0] = texId;
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrapS == GX_REPEAT ? GL_REPEAT : GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrapT == GX_REPEAT ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, gxWrapToGl(wrapS));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, gxWrapToGl(wrapT));
     // Un texId que ya llevó una HD del pack (o un id que GL reutiliza tras
     // borrarlo) conserva la marca y el tope de niveles: limpiarlos antes de
     // decidir de nuevo, o la textura original se quedaría sin mipmaps.
@@ -5620,8 +5644,8 @@ static bool upload_ci_texture(GXTexObj* obj, const PcCiTexture& ci) {
     glActiveTexture_ptr(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texId);
     sBoundTextures[0] = texId;
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, ci.wrapS == GX_REPEAT ? GL_REPEAT : GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, ci.wrapT == GX_REPEAT ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, gxWrapToGl(ci.wrapS));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, gxWrapToGl(ci.wrapT));
     if (sExternalMipChain.erase(texId))
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 1000);
     if (pc_texpack_enabled()) {
@@ -7577,7 +7601,12 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
     int numLights = 0;
     float ambR = 1.0f, ambG = 1.0f, ambB = 1.0f, ambA = 1.0f;
     if (sShadowProjPerspective && !sPostRanThisFrame) sun_capture_from_channel0();
-    if (sChannels[0].enabled) {
+    // Iluminación del canal GX_ALPHA0: desactivada. Se probó para el agua y
+    // el casco, pero volvía semitransparente a Olimar (sus materiales se
+    // mezclan con alfa y la luz del port no da el alfa que da la consola).
+    // El agua la arregló el recorte a 8 bits de las entradas TEV (tevU8).
+    const bool alphaLit0 = false;
+    if (sChannels[0].enabled || alphaLit0) {
         // Only lit channels contribute lighting; a disabled channel must pass
         // rasterized colors through untouched (matches GX hardware behavior).
         ambR = sChannels[0].ambColor[0];
@@ -7601,6 +7630,8 @@ static void apply_draw_state(bool profilingSubmit, double stateT0) {
     if (sLoc.numLights >= 0) glUniform1i_ptr(sLoc.numLights, numLights);
     if (sLoc.ambColor >= 0) glUniform4f_ptr(sLoc.ambColor, ambR, ambG, ambB, ambA);
     if (sLoc.chan0En >= 0) glUniform1i_ptr(sLoc.chan0En, sChannels[0].enabled ? 1 : 0);
+    if (sLoc.chan0AlphaEn >= 0) glUniform1i_ptr(sLoc.chan0AlphaEn, alphaLit0 ? 1 : 0);
+    if (sLoc.chan0AlphaDiff >= 0) glUniform1i_ptr(sLoc.chan0AlphaDiff, (int)sChannels[0].alphaDiffFn);
     if (sLoc.chan0AttnFn >= 0) glUniform1i_ptr(sLoc.chan0AttnFn, (int)sChannels[0].attnFn);
 
     // Channel 1 (typically specular) feeds stages whose TEV order selects it.

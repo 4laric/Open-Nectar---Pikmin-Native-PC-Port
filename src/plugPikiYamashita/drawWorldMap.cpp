@@ -1326,7 +1326,12 @@ protected:
 	void init(statusFlag status)
 	{
 		mStatus = status;
+#if defined(PIKI_PC_PORT)
+		// Aparcado fuera de pantalla: en panorámico 640 queda a la vista (issue #57).
+		mConfirmScreen->getScreenPtr()->move(640 + pc_gfx_menu_shift_right(), 0);
+#else
 		mConfirmScreen->getScreenPtr()->move(640, 0);
+#endif
 		mConfirmScreen->getScreenPtr()->setScale(1.0f);
 		mConfirmScreen->getScreenPtr()->show();
 		mAnimTimer        = 0.0f;

@@ -2476,6 +2476,7 @@ public:
 						gameflow.mWorldClock.update(1.0f);
 						f32 tod2 = gameflow.mWorldClock.mTimeOfDay;
 					}
+					pcWorkClockUpdate(gameflow.mWorldClock, pcClockHeld);
 					// update any children in our list (this will make gamecore update)
 					Node::update();
 				}

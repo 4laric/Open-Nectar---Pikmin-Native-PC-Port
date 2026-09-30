@@ -6,6 +6,9 @@
 #include "RumbleMgr.h"
 #include "jaudio/interface.h"
 #include "system.h"
+#if defined(PIKI_PC_PORT)
+#include "settings/pc_settings.h"
+#endif
 
 /**
  * @note UNUSED Size: 00009C
@@ -180,6 +183,13 @@ void GamePrefs::setChildMode(int lang)
 		OSReport("trying to set invalid language mode (%d)!!\n", lang);
 		lang = LANG_English;
 	}
+
+#if defined(PIKI_PC_PORT) && defined(VERSION_GPIP01)
+	// Cambiado en las opciones del juego: también al ajuste del port, que es
+	// el que muestran el launcher y F1. No durante la inicialización estática
+	// (gsys aún no existe y el .conf no se puede escribir todavía).
+	if (gsys) pc_settings_store_language(pcOsLanguageFromGame(lang));
+#endif
 
 	STACK_PAD_VAR(1);
 
@@ -409,6 +419,13 @@ void GamePrefs::read(RandomAccessStream& input)
 #if defined(VERSION_GPIP01)
 	STACK_PAD_VAR(2);
 	LanguageID lang = (LanguageID)(UNPACK_LANG_FLAG(mFlags));
+#if defined(PIKI_PC_PORT)
+	// El idioma de la tarjeta pisaba siempre al elegido en el launcher o en
+	// F1. Manda el del port; las opciones del juego lo mantienen al día
+	// (setChildMode), así que coinciden salvo que se cambie fuera del juego.
+	lang = (LanguageID)pcGameLanguageFromOs(pc_settings_get_language());
+	mFlags = PACK_LANG_FLAG(mFlags, lang);
+#endif
 	if (lang < LANG_English || lang > LANG_Italian) {
 		// invalid language choice
 		lang = LANG_English;

@@ -1155,7 +1155,7 @@ void Navi::pcPinCursorToLock()
  */
 void Navi::pcPinCursorFirstPerson()
 {
-	if (!pc_first_person_active()) {
+	if (!pc_first_person_active_for(mNaviID)) {
 		return;
 	}
 	Camera* cam = controlCamera();
@@ -2827,7 +2827,7 @@ void Navi::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 	// controla el jugador; en cooperativo el otro se sigue viendo. Se salta
 	// solo el dibujado: la animación y updateInfo siguen corriendo, y de ahí
 	// salen las esferas de colisión (sin ellas no se abre la cebolla).
-	bool drawn = mNaviID == 0 && pc_first_person_active();
+	bool drawn = pc_first_person_active_for(mNaviID);
 	if (drawn) {
 	} else if (pcDrawAsPikmin(gfx)) {
 		drawn = true;
@@ -2855,7 +2855,7 @@ void Navi::demoDraw(Graphics& gfx, immut Matrix4f* mtx)
 	}
 #if defined(PIKI_PC_PORT)
 	// Capitán Pikmin: la luz sale de la punta de la hoja, no de la antena.
-	if (pc_captain_piki_color(pcCaptain()) >= 0 && !(mNaviID == 0 && pc_first_person_active())) {
+	if (pc_captain_piki_color(pcCaptain()) >= 0 && !(pc_first_person_active_for(mNaviID))) {
 		mNaviLightPosition = mPcPikiLeafTip;
 	}
 #endif

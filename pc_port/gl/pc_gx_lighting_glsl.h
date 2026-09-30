@@ -16,6 +16,8 @@ static const char* kGxLightingGlsl =
     "uniform int uChan0En;\n"
     "uniform int uChan1En;\n"
     "uniform int uChan0AttnFn;\n"  // GXAttnFn: 0=SPEC, 1=SPOT, 2=NONE
+    "uniform int uChan0AlphaEn;\n"   // GX_ALPHA0 lighting on
+    "uniform int uChan0AlphaDiff;\n" // GXDiffuseFn of GX_ALPHA0: 0=NONE, 1=SIGN, 2=CLAMP
     "uniform int uChan1AttnFn;\n"
     "uniform int uNumLights1;\n"
     "uniform vec4 uLightPos1[4];\n"
@@ -37,6 +39,26 @@ static const char* kGxLightingGlsl =
     "        sum += diff * lc[i].rgb;\n"
     "    }\n"
     "    return sum;\n"
+    "}\n"
+    // Alfa del canal 0 (GX_ALPHA0): misma ecuación con el alfa de las luces
+    // y del ambiente. Sin ella, el agua y el casco de Olimar salían con el
+    // alfa del material tal cual, más opacos que en GameCube.
+    "float gxLitA0(vec3 N, vec4 wp) {\n"
+    "    float sum = uAmbColor.a;\n"
+    "    for (int i = 0; i < uNumLights; i++) {\n"
+    "        vec3 Ld = uLightPos[i].xyz - wp.xyz;\n"
+    "        float dist = length(Ld);\n"
+    "        float diff = 1.0;\n"
+    "        if (uChan0AlphaDiff != 0) {\n"
+    "            diff = dot(N, Ld / max(dist, 0.001));\n"
+    "            if (uChan0AlphaDiff == 2) diff = max(diff, 0.0);\n"
+    "        }\n"
+    "        if (uLightK[i].w > 0.5) {\n"
+    "            diff *= clamp(uLightK[i].x + uLightK[i].y * dist + uLightK[i].z * dist * dist, 0.0, 1.0);\n"
+    "        }\n"
+    "        sum += diff * uLightColor[i].a;\n"
+    "    }\n"
+    "    return clamp(sum, 0.0, 1.0);\n"
     "}\n"
     // Canal 0: ambiente + difusa. vec3(-1) = canal apagado (el fragmento usa
     // el color base tal cual).
@@ -67,7 +89,14 @@ static const char* kGxLightingFragGlsl =
     "in vec3 vWorldPos;\n"
     "in vec3 vNormal;\n"
     "uniform int uPerPixel;\n"
+    // Entradas a/b/c del TEV: el hardware sólo usa los 8 bits bajos de un
+    // registro S10 (Dolphin hace lo mismo). El agua trae alfa 345 -> 89; sin
+    // esto saturaba a 1.0 y salía opaca.
+    "float tevU8(float v) { return mod(floor(v * 255.0 + 0.5), 256.0) / 255.0; }\n"
+    "vec3 tevU8(vec3 v) { return mod(floor(v * 255.0 + 0.5), vec3(256.0)) / 255.0; }\n"
+    "vec4 tevU8(vec4 v) { return vec4(tevU8(v.rgb), v.a); }\n"
     "vec3 gxPixelLit0(vec3 lit) { return (uPerPixel != 0 && lit.x >= -0.5) ? gxLit0(normalize(vNormal), vec4(vWorldPos, 1.0)) : lit; }\n"
+    "float gxLitAlpha0(float a) { return uChan0AlphaEn != 0 ? a * gxLitA0(normalize(vNormal), vec4(vWorldPos, 1.0)) : a; }\n"
     "vec3 gxPixelLit1(vec3 lit) { return (uPerPixel != 0 && lit.x >= -0.5) ? gxLit1(normalize(vNormal), vec4(vWorldPos, 1.0)) : lit; }\n";
 
 #endif

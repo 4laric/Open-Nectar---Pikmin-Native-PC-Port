@@ -5,6 +5,7 @@
 #include "Joint.h"
 #include "Shape.h"
 #include "gl/pc_gfx.h"
+#include "settings/pc_settings.h"
 
 #include <cmath>
 #include <cstdio>
@@ -256,9 +257,25 @@ void drawPart(const Model& model, const Entry& entry, const Part& part, const st
 	pc_gfx_end();
 }
 
+// Fila del selector de modelos HD (y bit de su interruptor) de cada modelo.
+// Las hojas, capullos y flores van con los Pikmin.
+int settingsRow(PcHdModelId id)
+{
+	switch (id) {
+	case PC_HD_MODEL_OLIMAR: return 0;
+	case PC_HD_MODEL_LOUIE: return 1;
+	case PC_HD_MODEL_LOUIE_HD: return 2;
+	case PC_HD_MODEL_BULBORB: return 4;
+	case PC_HD_MODEL_BULBORB_DWARF: return 5;
+	default: return 3;
+	}
+}
+
 Model* prepare(PcHdModelId id)
 {
 	if (id < 0 || id >= PC_HD_MODEL_COUNT) return nullptr;
+	// Apagado desde el launcher o el .conf: se dibuja el original.
+	if (!pc_settings_get_hd_model_enabled(settingsRow(id))) return nullptr;
 	// First use: build packs from any Pikmin 3 rip (zip or folder) dropped
 	// into Load/Models, so the user never needs an external tool.
 	static bool sConverted = false;

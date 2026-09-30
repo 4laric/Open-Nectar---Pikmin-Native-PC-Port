@@ -47,6 +47,13 @@ struct PcPlayerDevice {
 };
 static PcPlayerDevice sPlayerDevice[2] = { { PC_INPUT_DEV_NONE, -1 }, { PC_INPUT_DEV_NONE, -1 } };
 static bool sPlayerDeviceExplicit = false;
+// Sin asignación explícita: mando de cada jugador por id (-1 = libre). Así, si
+// se desconecta el de J1, el de J2 no pasa a J1 y el mando que se reconecta
+// vuelve al hueco que dejó.
+static SDL_JoystickID sAutoPadId[2] = { -1, -1 };
+// Con asignación explícita: el jugador perdió su mando por desconexión; el
+// próximo mando que se conecte es suyo.
+static bool sPlayerPadLost[2] = { false, false };
 static int  sKeyboardOwner = 0; // jugador que recibe teclado (0 salvo asignación)
 
 // Última pulsación vista en el bucle de eventos, para el menú "pulsa un botón".
@@ -88,9 +95,36 @@ static void resolvePlayerPads()
 	sControllers[1] = nullptr;
 	sKeyboardOwner  = 0;
 	if (!sPlayerDeviceExplicit) {
-		if (sOpenPads.size() > 0) sControllers[0] = sOpenPads[0].ctl;
-		if (sOpenPads.size() > 1) sControllers[1] = sOpenPads[1].ctl;
+		for (int p = 0; p < 2; p++)
+			if (sAutoPadId[p] >= 0 && !pc_find_open_pad(sAutoPadId[p])) sAutoPadId[p] = -1;
+		// Mandos abiertos sin hueco: al primer jugador libre, en orden.
+		for (const PcOpenPad& pad : sOpenPads) {
+			if (pad.id == sAutoPadId[0] || pad.id == sAutoPadId[1]) continue;
+			for (int p = 0; p < 2; p++) {
+				if (sAutoPadId[p] < 0) {
+					sAutoPadId[p] = pad.id;
+					break;
+				}
+			}
+		}
+		for (int p = 0; p < 2; p++)
+			if (sAutoPadId[p] >= 0) sControllers[p] = pc_find_open_pad(sAutoPadId[p]);
 		return;
+	}
+	// Reconexión: el mando nuevo (sin dueño) vuelve al jugador que lo perdió.
+	for (int p = 0; p < 2; p++) {
+		if (!sPlayerPadLost[p]) continue;
+		for (const PcOpenPad& pad : sOpenPads) {
+			bool owned = false;
+			for (int q = 0; q < 2; q++)
+				if (sPlayerDevice[q].kind == PC_INPUT_DEV_GAMEPAD && sPlayerDevice[q].id == pad.id) owned = true;
+			if (owned) continue;
+			sPlayerDevice[p].kind = PC_INPUT_DEV_GAMEPAD;
+			sPlayerDevice[p].id   = pad.id;
+			sPlayerPadLost[p]     = false;
+			printf("[PC Port] Controller (id %d) reassigned to P%d\n", (int)pad.id, p + 1);
+			break;
+		}
 	}
 	for (int p = 0; p < 2; p++) {
 		if (sPlayerDevice[p].kind == PC_INPUT_DEV_GAMEPAD)
@@ -132,6 +166,7 @@ static void pc_controller_close_instance(SDL_JoystickID which)
 			if (sPlayerDevice[p].kind == PC_INPUT_DEV_GAMEPAD && sPlayerDevice[p].id == which) {
 				sPlayerDevice[p].kind = PC_INPUT_DEV_NONE;
 				sPlayerDevice[p].id   = -1;
+				sPlayerPadLost[p]     = true;
 			}
 		}
 		if (sOpenPads.empty())
@@ -854,6 +889,14 @@ static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& sti
     if (boundButtonPressed(PC_KEY_ACT_CSTICK_UP)) substickY = 127;
     if (boundButtonPressed(PC_KEY_ACT_CSTICK_DOWN)) substickY = -127;
     if (boundButtonPressed(PC_KEY_ACT_SWARM)) swarmHeld = true;
+    {
+        // Primera persona con el mando: cada jugador la suya.
+        static bool sFpPadWasDown[2] = { false, false };
+        const int pi = player == 1 ? 1 : 0;
+        const bool fpDown = boundButtonPressed(PC_KEY_ACT_FIRSTPERSON);
+        if (fpDown && !sFpPadWasDown[pi]) pc_first_person_toggle_for(pi);
+        sFpPadWasDown[pi] = fpDown;
+    }
 
     const int noticeZone = axisDeadZone < 16384 ? 16384 : axisDeadZone;
     return boundButtonPressed(PC_KEY_ACT_A) || boundButtonPressed(PC_KEY_ACT_B)
@@ -933,6 +976,18 @@ void pc_window_poll_events(PADStatus* pad) {
                     SDL_GetWindowSize(sWindow, &ww, &wh);
                     if (ww > 0 && wh > 0) pc_settings_touch_tap(event.button.x / float(ww), event.button.y / float(wh));
                 }
+                // Issue #52: Escape (or the OS) can drop the mouse out of
+                // relative mode, which froze the cursor until the option was
+                // toggled. A click in the window takes it back.
+                if (!sSettingsMenuOpen && sControlMode == PC_CONTROL_MOUSE_CURSOR && !sMouseRelativeMode
+                    && event.button.which != SDL_TOUCH_MOUSEID) {
+                    sMouseRelativeMode = true;
+                    SDL_SetRelativeMouseMode(SDL_TRUE);
+                    int dummyX, dummyY;
+                    SDL_GetRelativeMouseState(&dummyX, &dummyY);
+                    sMouseCursorDeltaX = 0.0f;
+                    sMouseCursorDeltaY = 0.0f;
+                }
                 break;
             case SDL_MOUSEWHEEL: {
                 // SDL reports natural-scroll flipping through the direction
@@ -956,6 +1011,11 @@ void pc_window_poll_events(PADStatus* pad) {
                     event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) {
                     sMouseCursorDeltaX = 0.0f;
                     sMouseCursorDeltaY = 0.0f;
+                }
+                // Some platforms release the relative-mode grab while the
+                // window is unfocused; put it back on return (issue #52).
+                if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED && !sSettingsMenuOpen) {
+                    SDL_SetRelativeMouseMode(sMouseRelativeMode ? SDL_TRUE : SDL_FALSE);
                 }
                 break;
             case SDL_CONTROLLERDEVICEADDED:
@@ -1105,7 +1165,7 @@ void pc_window_poll_events(PADStatus* pad) {
         sSwarmWasDown = sSwarmHeld;
         // Este no se encola: entra y sale de la vista en el acto.
         const bool fpDown = held(PC_KEY_ACT_FIRSTPERSON);
-        if (fpDown && !sFirstPersonWasDown) pc_first_person_toggle();
+        if (fpDown && !sFirstPersonWasDown) pc_first_person_toggle_for(sKeyboardOwner);
         sFirstPersonWasDown = fpDown;
     }
 
@@ -1153,7 +1213,16 @@ void pc_window_poll_events(PADStatus* pad) {
         int mouseX, mouseY;
         Uint32 mouseState = 0;
         bool isRelative = sMouseRelativeMode;
-        
+
+        // Issue #52: if SDL let go of relative mode behind our back (long
+        // idle in a menu, screen lock), the cursor stopped until the option
+        // was toggled. Re-assert it while the window has focus.
+        if (isRelative && !SDL_GetRelativeMouseMode() && (SDL_GetWindowFlags(sWindow) & SDL_WINDOW_INPUT_FOCUS)) {
+            SDL_SetRelativeMouseMode(SDL_TRUE);
+            int dummyX, dummyY;
+            SDL_GetRelativeMouseState(&dummyX, &dummyY);
+        }
+
         if (isRelative) {
             mouseState = SDL_GetRelativeMouseState(&mouseX, &mouseY);
 
@@ -1163,7 +1232,7 @@ void pc_window_poll_events(PADStatus* pad) {
             // stays where it was, so aiming resumes from the same spot.
             // Mod "First Person": the mouse always looks around (yaw and
             // pitch); the cursor is pinned in front of the view by Navi.
-            const bool firstPerson = pc_first_person_active() != 0;
+            const bool firstPerson = pc_first_person_active_for(sKeyboardOwner) != 0;
             if (freeCamHeld || firstPerson) {
                 int winW = sWindowWidth;
                 int winH = sWindowHeight;
@@ -1476,6 +1545,7 @@ void pc_window_input_reset_assignment(void) {
     for (int p = 0; p < 2; p++) {
         sPlayerDevice[p].kind = PC_INPUT_DEV_NONE;
         sPlayerDevice[p].id   = -1;
+        sPlayerPadLost[p]     = false;
     }
     resolvePlayerPads();
 }
@@ -1485,6 +1555,7 @@ void pc_window_input_assign(int player, int kind, int gamepadId) {
     sPlayerDeviceExplicit = true;
     sPlayerDevice[player].kind = kind;
     sPlayerDevice[player].id   = kind == PC_INPUT_DEV_GAMEPAD ? gamepadId : -1;
+    sPlayerPadLost[player]     = false;
     resolvePlayerPads();
 }
 

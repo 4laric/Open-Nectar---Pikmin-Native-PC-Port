@@ -2,10 +2,13 @@
 #include "asset_finalize.h"
 #include "prepared_image.h"
 #include "installer_ui.h"
+#include "launcher_gui.h"
 #include "launcher_platform.h"
 
 #include <cerrno>
+#include <chrono>
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -16,6 +19,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -67,58 +71,6 @@ bool respawnInTerminal() { return platform::respawnInTerminal(); }
 
 fs::path askForInstallDirectory() { return platform::askForInstallDirectory(); }
 fs::path askForImage() { return platform::askForImage(); }
-int askForLanguage(const std::vector<std::string>& names) { return platform::askForLanguage(names); }
-
-// Writes one key into the game's settings file without disturbing the rest.
-//
-// The file belongs to the game, which rewrites it whole every time it saves,
-// so the key has to be one the game knows -- it is; see
-// pc_settings_startup_language. This only sets the initial value.
-bool writeSettingKey(const fs::path& dataRoot, const std::string& key, const std::string& value)
-{
-    const fs::path path = dataRoot / "pikmin_settings.conf";
-    std::vector<std::string> lines;
-    bool replaced = false;
-    {
-        std::ifstream in(path);
-        std::string line;
-        while (std::getline(in, line)) {
-            const std::size_t equals = line.find('=');
-            if (equals != std::string::npos && trim(line.substr(0, equals)) == key) {
-                lines.push_back(key + " = " + value);
-                replaced = true;
-            } else {
-                lines.push_back(line);
-            }
-        }
-    }
-    if (!replaced) {
-        if (lines.empty()) lines.push_back("# Open Nectar settings (F1 in-game to change)");
-        lines.push_back(key + " = " + value);
-    }
-    std::ofstream out(path, std::ios::trunc);
-    if (!out) return false;
-    for (const std::string& line : lines) out << line << '\n';
-    return true;
-}
-
-// The languages a disc carries, with names to show and the codes the settings
-// file uses.
-struct LanguageChoice {
-    const char* code;
-    const char* name;
-};
-const LanguageChoice* languageChoice(const std::string& code)
-{
-    static const LanguageChoice kChoices[] = {
-        { "en", "English" }, { "de", "Deutsch" }, { "fr", "Français" },
-        { "es", "Español" }, { "it", "Italiano" }, { "nl", "Nederlands" },
-    };
-    for (const LanguageChoice& choice : kChoices) {
-        if (code == choice.code) return &choice;
-    }
-    return nullptr;
-}
 
 fs::path askForImageConsole()
 {
@@ -282,6 +234,11 @@ std::string installedGameBuild(const fs::path& dataRoot)
         name = buildStem(name);
         if (!name.empty()) return name;
     }
+    // Instalaciones de versiones antiguas no dejaban el marcador. La región se
+    // ve en los datos: el disco europeo trae una carpeta de texturas por
+    // idioma (ger_tex, fre_tex...), el americano no.
+    std::error_code ec;
+    if (fs::is_directory(dataRoot / "assets" / "dataDir" / "screen" / "ger_tex", ec)) return "nectar-pal";
     return defaultBuildStem();
 }
 
@@ -311,9 +268,33 @@ std::string missingGameBuildMessage(const std::string& build, const std::string&
          + ", but the package does not include it. Use a complete Open Nectar package.";
 }
 
+#ifndef _WIN32
+// Copia sustituyendo el destino aunque esté en marcha. Sobrescribir un
+// ejecutable abierto falla en Linux ("Text file busy"): pasaba al reinstalar o
+// actualizar con el launcher o el juego de esa carpeta abiertos. Copiar a un
+// temporal y renombrarlo encima sí funciona; el proceso abierto sigue con la
+// versión vieja hasta que se cierra.
+void replaceFile(const fs::path& source, const fs::path& destination, std::error_code& ec)
+{
+    const fs::path staged = destination.string() + ".new";
+    fs::copy_file(source, staged, fs::copy_options::overwrite_existing, ec);
+    if (ec) return;
+    fs::rename(staged, destination, ec);
+    if (ec) {
+        std::error_code ignored;
+        fs::remove(staged, ignored);
+    }
+}
+#endif
+
 bool installExecutables(const fs::path& sourceDirectory, const fs::path& installDirectory,
                         std::string& failure)
 {
+    // Abierto desde la propia instalación (para jugar): ya está todo en su
+    // sitio, y dentro de ella el ejecutable PAL se llama nectar, no nectar-pal.
+    std::error_code sameEc;
+    if (fs::equivalent(sourceDirectory, installDirectory, sameEc)) return true;
+
     const std::string build = installedGameBuild(installDirectory);
 #ifdef _WIN32
     // En Windows el paquete no lleva cargador ni envoltorios: junto a los .exe
@@ -338,6 +319,16 @@ bool installExecutables(const fs::path& sourceDirectory, const fs::path& install
         }
         const fs::path destination = installDirectory / name;
         if (sameFile(source, destination)) continue;
+        // Un .exe abierto no se puede sobrescribir, pero sí renombrar: se
+        // aparta como .old (se borra al arrancar el launcher la próxima vez)
+        // y se copia el nuevo en su sitio.
+        if (fs::exists(destination)) {
+            std::error_code moveEc;
+            fs::path aside = destination;
+            aside += ".old";
+            fs::remove(aside, moveEc);
+            fs::rename(destination, aside, moveEc);
+        }
         fs::copy_file(source, destination, fs::copy_options::overwrite_existing, winEc);
         if (winEc) {
             failure = "Could not install " + std::string(name) + ": " + winEc.message();
@@ -356,6 +347,13 @@ bool installExecutables(const fs::path& sourceDirectory, const fs::path& install
             failure = "Could not copy " + entry.path().filename().string() + ": " + winEc.message();
             return false;
         }
+    }
+    // Los paquetes antiguos llevaban SDL2 y winpthread como DLL; los nuevos
+    // las llevan dentro de cada .exe. Si el paquete ya no las trae, las que
+    // quedaron de una instalación anterior sobran.
+    for (const char* dll : { "SDL2.dll", "libwinpthread-1.dll" }) {
+        std::error_code dllEc;
+        if (!fs::exists(sourceDirectory / dll, dllEc)) fs::remove(installDirectory / dll, dllEc);
     }
     return true;
 #else
@@ -397,7 +395,7 @@ bool installExecutables(const fs::path& sourceDirectory, const fs::path& install
                                 / (isGame ? std::string(kGameExecutable) + ".real"
                                           : entry.filename().string());
             if (!sameFile(entry, dest)) {
-                fs::copy_file(entry, dest, fs::copy_options::overwrite_existing, ec);
+                replaceFile(entry, dest, ec);
                 if (ec) {
                     failure = "Could not install " + entry.filename().string() + ": " + ec.message();
                     return false;
@@ -439,7 +437,11 @@ bool installExecutables(const fs::path& sourceDirectory, const fs::path& install
         auto makeWrapper = [&installDirectory](const char* name) -> bool {
             const fs::path wrapper = installDirectory / name;
             const std::string realName = std::string(name) + ".real";
-            std::ofstream out(wrapper, std::ios::trunc);
+            // Se escribe aparte y se renombra encima: el destino puede ser el
+            // launcher que está actualizando, y abrir para escribir un
+            // ejecutable en marcha falla ("Text file busy").
+            const fs::path staged = wrapper.string() + ".new";
+            std::ofstream out(staged, std::ios::trunc);
             if (!out) return false;
             // Resuelve el directorio real aunque se invoque mediante PATH o un
             // enlace simbólico; el paquete puede moverse de sitio libremente.
@@ -453,8 +455,10 @@ bool installExecutables(const fs::path& sourceDirectory, const fs::path& install
             out.close();
             if (!out) return false;
             std::error_code permEc;
-            fs::permissions(wrapper, fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec,
+            fs::permissions(staged, fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec,
                             fs::perm_options::add, permEc);
+            if (permEc) return false;
+            fs::rename(staged, wrapper, permEc);
             return !permEc;
         };
         if (!makeWrapper(kGameExecutable) || !makeWrapper(kLauncherExecutable)) {
@@ -469,7 +473,7 @@ bool installExecutables(const fs::path& sourceDirectory, const fs::path& install
         const fs::path source = isGame ? sourceGame : sourceDirectory / name;
         const fs::path destination = installDirectory / name;
         if (!sameFile(source, destination)) {
-            fs::copy_file(source, destination, fs::copy_options::overwrite_existing, ec);
+            replaceFile(source, destination, ec);
             if (ec) {
                 failure = "Could not install " + std::string(name) + ": " + ec.message();
                 return false;
@@ -483,6 +487,18 @@ bool installExecutables(const fs::path& sourceDirectory, const fs::path& install
             return false;
         }
     }
+    // Una instalación de un paquete antiguo tenía envoltorios, binarios .real
+    // y su propia glibc en lib/. Con ejecutables normales ya no pintan nada:
+    // los envoltorios los acaba de sustituir la copia, y el resto se retira.
+    // lib/ solo si es la nuestra (lleva el cargador de glibc).
+    std::error_code cleanup;
+    for (const std::string& real : { std::string(kGameExecutable) + ".real", std::string(kGameExecutable) + "-pal.real",
+                                    std::string(kLauncherExecutable) + ".real" }) {
+        fs::remove(installDirectory / real, cleanup);
+    }
+    if (fs::is_regular_file(installDirectory / "lib" / "ld-linux-x86-64.so.2", cleanup)) {
+        fs::remove_all(installDirectory / "lib", cleanup);
+    }
     return true;
 #endif
 }
@@ -490,6 +506,155 @@ bool installExecutables(const fs::path& sourceDirectory, const fs::path& install
 [[noreturn]] void launchGame(const fs::path& dataRoot, const fs::path& gameBinary)
 {
     platform::launchGame(dataRoot, gameBinary);
+}
+
+// Update: sustituye el juego y el launcher de una instalación por los de un
+// paquete, sin la ISO y sin tocar datos, partidas, ajustes ni packs.
+//  - Desde el launcher del paquete: se elige la carpeta instalada.
+//  - Desde el launcher instalado: se elige la carpeta del paquete nuevo, y al
+//    terminar se reinicia con el launcher nuevo.
+enum class UpdateOutcome { BackHome, Quit, Play };
+
+// Trabajo largo (descargar, comprobar) en un hilo mientras la ventana sigue
+// pintándose con la fase en curso.
+template <typename Work>
+bool runWhilePainting(pikmin::launcher::HubWindow& hub, const std::string& phase, Work work)
+{
+    std::atomic<bool> done { false };
+    bool ok = false;
+    std::thread worker([&] {
+        ok = work();
+        done = true;
+    });
+    while (!done) hub.updateProgress(101, "", phase);
+    worker.join();
+    return ok;
+}
+
+UpdateOutcome runUpdate(pikmin::launcher::HubWindow& hub, const fs::path& sourceDirectory, bool fromInsideInstall,
+                        fs::path& playDirectory)
+{
+    using pikmin::launcher::ReleaseInfo;
+    const auto answer = [](int choice) {
+        return choice < 0 ? UpdateOutcome::Quit : UpdateOutcome::BackHome;
+    };
+
+    // Sustituye juego y launcher de `install` por los de `package` y termina:
+    // el launcher instalado se reinicia con el nuevo; el del paquete ofrece
+    // jugar. `retry` = el usuario quiere volver a intentarlo.
+    const auto apply = [&](const fs::path& package, const fs::path& install, bool& retry) {
+        retry = false;
+        std::error_code ec;
+        // Deja el marcador de región escrito, por si la instalación era de una
+        // versión que no lo creaba.
+        const fs::path marker = install / "assets" / ".pikmin-build";
+        if (!fs::exists(marker, ec)) {
+            std::ofstream out(marker);
+            out << installedGameBuild(install) << '\n';
+        }
+        std::string failure;
+        hub.updateProgress(101, "", "Installing the update");
+        if (!installExecutables(package, install, failure)) {
+            const int choice = hub.ask("Update did not finish", failure, "Try again", "Cancel", true);
+            retry = choice == 0;
+            return answer(choice);
+        }
+        if (fromInsideInstall) {
+            if (hub.ask("Open Nectar updated", "The new version is installed. The launcher restarts now to use it.",
+                        "Restart") < 0) return UpdateOutcome::Quit;
+            platform::relaunch(install / kLauncherExecutable, {});
+            return UpdateOutcome::BackHome; // no se pudo reiniciar: seguir con este
+        }
+        const int choice = hub.ask("Open Nectar updated",
+                                   "The game in " + install.string() + " is up to date.\n"
+                                   "Your saves, settings and packs are untouched.",
+                                   "Play now", "Close");
+        if (choice == 0) {
+            playDirectory = install;
+            return UpdateOutcome::Play;
+        }
+        return answer(choice);
+    };
+
+    // Launcher instalado: el último release de GitHub, sin descargar nada a mano.
+    if (fromInsideInstall) {
+        ReleaseInfo release;
+        std::string error;
+        bool newer = hub.newerRelease(release);
+        if (!newer) {
+            // La comprobación en segundo plano no encontró nada o no terminó:
+            // se pregunta ahora.
+            const bool reached = runWhilePainting(hub, "Checking for updates", [&] {
+                return pikmin::launcher::fetchLatestRelease(release, error);
+            });
+            newer = reached && pikmin::launcher::isNewerVersion(release.version, pikmin::launcher::currentVersion());
+        }
+        const std::string current = pikmin::launcher::currentVersion();
+        if (newer) {
+            int choice = hub.ask("Update available",
+                                 "Open Nectar " + release.version + (release.title.empty() ? "" : " - " + release.title)
+                                     + "\nYou have " + current + ". The update downloads and installs by itself;"
+                                       " your saves, settings and packs stay as they are.",
+                                 "Update now", "Not now");
+            if (choice != 0) return answer(choice);
+            for (;;) {
+                fs::path package;
+                const bool downloaded = runWhilePainting(hub, "Downloading Open Nectar " + release.version, [&] {
+                    return pikmin::launcher::downloadRelease(release, kLauncherExecutable, package, error);
+                });
+                if (downloaded) {
+                    bool retry = false;
+                    const UpdateOutcome outcome = apply(package, sourceDirectory, retry);
+                    if (!retry) return outcome;
+                    continue;
+                }
+                choice = hub.ask("Download failed", "Could not get the update: " + error + ".", "Try again",
+                                 "Use a downloaded folder", true);
+                if (choice < 0) return UpdateOutcome::Quit;
+                if (choice == 1) break; // a la vía manual
+            }
+        } else {
+            const int choice = error.empty()
+                ? hub.ask("Open Nectar is up to date", "You have the latest version (" + current + ").", "Close",
+                          "Update from a folder")
+                : hub.ask("Could not check for updates",
+                          "GitHub could not be reached: " + error + ".\nCheck your connection, or update from a "
+                          "folder where you extracted a new version.",
+                          "Close", "Update from a folder", true);
+            if (choice != 1) return answer(choice);
+        }
+    }
+
+    // Vía manual: el paquete de una carpeta (o la instalación, desde el paquete).
+    for (;;) {
+        const fs::path chosen = platform::askForInstallDirectory(
+            fromInsideInstall ? "Choose the folder of the new Open Nectar download" : "Choose your Open Nectar folder");
+        if (chosen.empty()) return UpdateOutcome::BackHome;
+        const fs::path package = fromInsideInstall ? chosen : sourceDirectory;
+        const fs::path install = fromInsideInstall ? sourceDirectory : chosen;
+
+        std::string problem;
+        std::error_code ec;
+        const bool packageHasLauncher = fs::is_regular_file(package / kLauncherExecutable, ec)
+                                     || fs::is_regular_file(package / (std::string(kLauncherExecutable) + ".real"), ec);
+        if (fs::equivalent(package, install, ec)) {
+            problem = fromInsideInstall ? "That is this installation. Choose the folder where you extracted the new version."
+                                        : "That is the folder of this download. Choose the folder where the game is installed.";
+        } else if (!assetsReady(install)) {
+            problem = "That folder has no Open Nectar installation. Choose the folder where you installed the game: "
+                      "it has an \"assets\" folder inside.";
+        } else if (!packageHasLauncher) {
+            problem = "That folder has no Open Nectar download in it. Choose the folder where you extracted the new version.";
+        }
+        if (!problem.empty()) {
+            const int choice = hub.ask("Choose another folder", problem, "Choose again", "Cancel", true);
+            if (choice != 0) return answer(choice);
+            continue;
+        }
+        bool retry = false;
+        const UpdateOutcome outcome = apply(package, install, retry);
+        if (!retry) return outcome;
+    }
 }
 
 void usage(const char* argv0)
@@ -513,9 +678,11 @@ int main(int argc, char** argv)
     bool skipVerify = false;
     fs::path converter;
     bool directoryWasSpecified = false;
+    fs::path movedFrom;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
-        if (arg == "--rom" && i + 1 < argc) image = argv[++i];
+        if (arg == "--moved-from" && i + 1 < argc) movedFrom = argv[++i];
+        else if (arg == "--rom" && i + 1 < argc) image = argv[++i];
         else if ((arg == "--install-dir" || arg == "--data-dir") && i + 1 < argc) {
             dataRoot = argv[++i];
             directoryWasSpecified = true;
@@ -534,25 +701,94 @@ int main(int argc, char** argv)
        && fs::is_directory(sourceDirectory / "lib");
     const bool installedBesideLauncher = assetsReady(sourceDirectory)
                                       && (fs::is_regular_file(sourceDirectory / kGameExecutable) || hasStandaloneFiles);
-    const bool graphicalInstall = !directoryWasSpecified && !installedBesideLauncher;
-    std::unique_ptr<pikmin::launcher::InstallerWindow> installerWindow;
+    // Sin argumentos se abre primero la ventana principal (portadas, Jugar,
+    // Instalar). La línea de órdenes conserva el comportamiento de siempre.
+    // Tras mover la instalación a otro disco, el launcher nuevo borra la
+    // carpeta vieja. Solo si de verdad es una instalación de Open Nectar y no
+    // es esta misma. En Windows el launcher viejo puede tardar un momento en
+    // soltar sus ficheros: se reintenta unas veces.
+    if (!movedFrom.empty()) {
+        std::error_code ec;
+        const bool isInstall = fs::is_regular_file(movedFrom / "assets/.pikmin-assets", ec);
+        const bool isHere = fs::equivalent(movedFrom, sourceDirectory, ec);
+        for (int attempt = 0; isInstall && !isHere && attempt < 10 && fs::exists(movedFrom, ec); ++attempt) {
+            fs::remove_all(movedFrom, ec);
+            if (ec) std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        }
+    }
+    const bool openWindow = argc == 1 || (argc == 3 && !movedFrom.empty());
+#ifdef _WIN32
+    for (const char* name : { kGameExecutable, kLauncherExecutable }) {
+        std::error_code ignored;
+        fs::remove(sourceDirectory / (std::string(name) + ".old"), ignored);
+    }
+#endif
+
+    bool forceInstall = false;
+    // La ventana principal sigue abierta durante la instalación y hace de
+    // instalador (modales con la misma estética); hub apunta a ella.
+    std::unique_ptr<pikmin::launcher::InstallerUi> installerWindow;
+    pikmin::launcher::HubWindow* hub = nullptr;
+    if (openWindow) {
+        pikmin::launcher::HubState hubState;
+        hubState.launcherName = kLauncherExecutable;
+        hubState.games[0].installed = installedBesideLauncher;
+        hubState.installerOnly = !installedBesideLauncher;
+        if (installedBesideLauncher) {
+            hubState.games[0].directory = sourceDirectory.string();
+            hubState.games[0].executable = (sourceDirectory / kGameExecutable).string();
+        }
+        // Datos del juego para decorar la ventana: la instalación de al lado,
+        // la de la carpeta por defecto, o la que indique NECTAR_GAME_DIR.
+        fs::path artRoot = installedBesideLauncher ? sourceDirectory : defaultDataRoot();
+        if (const char* forced = std::getenv("NECTAR_GAME_DIR"); forced && *forced) artRoot = forced;
+        if (fs::is_directory(artRoot / "assets/dataDir")) {
+            hubState.gameDataDirectory = (artRoot / "assets/dataDir").string();
+            hubState.games[0].discId = installedGameBuild(artRoot) == "nectar-pal" ? "GPIP01" : "GPIE01";
+        }
+        auto window = std::make_unique<pikmin::launcher::HubWindow>();
+        std::string hubError;
+        if (window->open(hubState, hubError)) {
+            pikmin::launcher::HubResult choice;
+            for (;;) {
+                choice = window->runHome();
+                if (choice.action == pikmin::launcher::HubAction::Quit) return 0;
+                if (choice.action != pikmin::launcher::HubAction::Update) break;
+                fs::path playDirectory;
+                const UpdateOutcome outcome = runUpdate(*window, sourceDirectory, installedBesideLauncher, playDirectory);
+                if (outcome == UpdateOutcome::Quit) return 0;
+                if (outcome == UpdateOutcome::Play) {
+                    window.reset(); // cerrar la ventana antes de dar paso al juego
+                    launchGame(playDirectory, playDirectory / kGameExecutable);
+                }
+            }
+            forceInstall = choice.action == pikmin::launcher::HubAction::Install;
+            hub = window.get();
+            installerWindow = std::move(window);
+        } else {
+            std::cerr << "Could not open the launcher window (" << hubError << "); using the installer.\n";
+        }
+    }
+    const bool installedHere = installedBesideLauncher && !forceInstall;
+    const bool graphicalInstall = !directoryWasSpecified && !installedHere;
     const auto reportError = [&installerWindow](const std::string& error) {
         if (installerWindow) return installerWindow->offerRetry(error);
         std::cerr << "Installation error: " << error << '\n';
         return false;
     };
     for (;;) {
-        if (installedBesideLauncher) {
+        if (installedHere) {
             dataRoot = sourceDirectory;
         } else if (graphicalInstall) {
             if (hasGraphicalDialogs()) {
                 if (!installerWindow) {
-                    installerWindow = std::make_unique<pikmin::launcher::InstallerWindow>();
+                    auto fallback = std::make_unique<pikmin::launcher::InstallerWindow>();
                     std::string error;
-                    if (!installerWindow->open(error)) {
+                    if (!fallback->open(error)) {
                         std::cerr << "Could not open the installer: " << error << '\n';
                         return 1;
                     }
+                    installerWindow = std::move(fallback);
                 }
                 std::string selectedRom;
                 std::string selectedInstallDirectory;
@@ -560,6 +796,11 @@ int main(int argc, char** argv)
                         [] { return askForImage().string(); },
                         [] { return askForInstallDirectory().string(); },
                         selectedRom, selectedInstallDirectory)) {
+                    // Canceló y pulsó la portada de un juego ya instalado.
+                    if (hub && hub->playRequested() && installedBesideLauncher) {
+                        installerWindow.reset();
+                        launchGame(sourceDirectory, sourceDirectory / kGameExecutable);
+                    }
                     return 0;
                 }
                 image = selectedRom;
@@ -653,44 +894,9 @@ int main(int argc, char** argv)
             }
             installedAssetsNow = true;
 
-            // Which language to play in. Only the European disc carries more than
-            // one, and all of them are installed either way -- about 6 MB each out
-            // of 648 MB, so leaving some out saves nothing and would mean
-            // reinstalling to change your mind.
-            pikmin::launcher::DiscIdentity identity;
-            std::string ignored;
-            const pikmin::launcher::KnownDisc* disc
-                = pikmin::launcher::inspectGameCubeImage(image, identity, ignored)
-                      ? pikmin::launcher::findKnownDisc(identity)
-                      : nullptr;
-            if (disc != nullptr && disc->languageCount > 1) {
-                std::vector<std::string> names;
-                for (int i = 0; i < disc->languageCount; ++i) {
-                    const LanguageChoice* choice = languageChoice(disc->languages[i]);
-                    names.push_back(choice ? choice->name : disc->languages[i]);
-                }
-
-                int selected = -1;
-                if (stdinIsTerminal()) {
-                    std::cout << "\nThis disc carries " << disc->languageCount << " languages:\n";
-                    for (std::size_t i = 0; i < names.size(); ++i) {
-                        std::cout << "  " << (i + 1) << ") " << names[i] << '\n';
-                    }
-                    const std::string answer = promptLine("Which one do you want to play in? [1]: ");
-                    const int number = answer.empty() ? 1 : std::atoi(answer.c_str());
-                    if (number >= 1 && number <= disc->languageCount) selected = number - 1;
-                } else {
-                    selected = askForLanguage(names);
-                }
-
-                // No way to ask, or nothing chosen: English, and say where to
-                // change it rather than leaving it a mystery.
-                const int language = (selected >= 0) ? selected : 0;
-                if (writeSettingKey(dataRoot, "language", disc->languages[language])) {
-                    std::cout << "Language: " << names[language]
-                              << "  (change it in pikmin_settings.conf, key 'language')\n";
-                }
-            }
+            // El idioma no se pregunta al instalar: el disco europeo trae los
+            // cinco y se instalan todos; el juego empieza en inglés y se cambia
+            // en el menú F1 (Display > Language).
         }
 
         std::string failure;

@@ -39,16 +39,6 @@ bool hasGraphicalDialogs();
 // sentido usar el instalador en modo texto.
 bool stdinIsTerminal();
 
-// Pregunta al usuario en qué idioma quiere jugar, entre los que trae el disco.
-// Devuelve el índice elegido, o -1 si no hay forma de preguntar o el usuario
-// cancela; quien llama decide qué hacer entonces.
-//
-// Solo el disco europeo trae más de un idioma, y los cinco quedan instalados
-// pase lo que pase: son unos 6 MB cada uno sobre 648 MB, así que no se gana
-// nada dejando fuera los que no se eligen, y dejarlos permite cambiar de idea
-// sin reinstalar.
-int askForLanguage(const std::vector<std::string>& names);
-
 // Identificador del proceso actual. Solo se usa para dar un nombre único a la
 // carpeta temporal de extracción, de modo que dos instalaciones simultáneas no
 // se pisen.
@@ -66,8 +56,23 @@ bool convertImage(const std::filesystem::path& converter,
                   const std::filesystem::path& destination,
                   const std::function<void()>& pump, std::string& error);
 
+// Carpeta de caché del launcher (portadas descargadas). Se crea si no existe.
+// Linux: $XDG_CACHE_HOME/open-nectar, o ~/.cache/open-nectar.
+// Windows: %LOCALAPPDATA%\Open Nectar\cache.
+std::filesystem::path cacheDirectory();
+
+// Descarga `url` a `destination` con curl (incluido en Windows 10+ y en casi
+// cualquier Linux). Bloquea hasta terminar: llamarla desde un hilo aparte.
+// Escribe primero a un temporal, así que un corte nunca deja un fichero a medias.
+bool downloadFile(const std::string& url, const std::filesystem::path& destination, std::string& error);
+
+// Diálogo para elegir un fichero. `patterns` en formato de shell, separados
+// por espacios ("*.zip *.ZIP"). Ruta vacía si se cancela.
+std::filesystem::path askForFile(const std::string& title, const std::string& filterName, const std::string& patterns);
+
 // Diálogo de selección de la carpeta de instalación. Vacía si se cancela.
-std::filesystem::path askForInstallDirectory();
+// `title` va tras "Open Nectar - " en la barra del diálogo.
+std::filesystem::path askForInstallDirectory(const std::string& title = "Choose the install folder");
 
 // Aviso al usuario. Si no hay diálogos disponibles, escribe por stderr.
 void showMessage(const std::string& title, const std::string& message, bool error);
@@ -77,6 +82,17 @@ void showMessage(const std::string& title, const std::string& message, bool erro
 // devolviendo true si lo consiguió. En Windows la consola se reserva en el
 // propio proceso, así que no hace falta relanzar nada y devuelve false.
 bool respawnInTerminal();
+
+// Ejecuta `program` con `arguments` dentro de `workingDirectory`, sin ventana,
+// y devuelve en `output` lo que escribe por su salida estándar. Bloquea hasta
+// que termina: llamarla desde un hilo aparte. false si no arranca o sale con
+// un código distinto de cero.
+bool runAndCapture(const std::filesystem::path& program, const std::vector<std::string>& arguments,
+                   const std::filesystem::path& workingDirectory, std::string& output, std::string& error);
+
+// Sustituye el launcher actual por otro ejecutable (el mismo launcher en su
+// nueva carpeta tras mover la instalación). No retorna si lo consigue.
+void relaunch(const std::filesystem::path& program, const std::vector<std::string>& arguments);
 
 // Entra en dataRoot y sustituye el proceso actual por el juego. No retorna
 // si tiene éxito; si falla, escribe el motivo y termina el proceso.

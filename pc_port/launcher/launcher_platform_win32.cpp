@@ -136,7 +136,28 @@ fs::path askForImage()
     return fs::path(selected.data());
 }
 
-fs::path askForInstallDirectory()
+fs::path askForFile(const std::string& title, const std::string& filterName, const std::string& patterns)
+{
+    // Filtro de Windows: "Nombre\0*.a;*.b\0Todos\0*.*\0\0".
+    std::string winPatterns;
+    for (char c : patterns) winPatterns += (c == ' ') ? ';' : c;
+    const std::wstring filter = fs::path(filterName).wstring() + L'\0' + fs::path(winPatterns).wstring()
+                              + L'\0' + L"All files" + L'\0' + L"*.*" + L'\0' + L'\0';
+    const std::wstring caption = L"Open Nectar - " + fs::path(title).wstring();
+    std::vector<wchar_t> selected(32768);
+    selected[0] = L'\0';
+    OPENFILENAMEW dialog {};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.lpstrFilter = filter.c_str();
+    dialog.lpstrFile = selected.data();
+    dialog.nMaxFile = static_cast<DWORD>(selected.size());
+    dialog.lpstrTitle = caption.c_str();
+    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER;
+    if (!GetOpenFileNameW(&dialog)) return {};
+    return fs::path(selected.data());
+}
+
+fs::path askForInstallDirectory(const std::string& title)
 {
     // IFileOpenDialog en modo carpeta es el selector moderno del shell; da la
     // misma experiencia que cualquier aplicación nativa y admite rutas largas.
@@ -156,7 +177,8 @@ fs::path askForInstallDirectory()
             dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_PATHMUSTEXIST
                                        | FOS_FORCEFILESYSTEM);
         }
-        dialog->SetTitle(L"Open Nectar - Choose the install folder");
+        const std::wstring caption = L"Open Nectar - " + fs::path(title).wstring();
+        dialog->SetTitle(caption.c_str());
 
         if (SUCCEEDED(dialog->Show(nullptr))) {
             IShellItem* item = nullptr;
@@ -174,15 +196,6 @@ fs::path askForInstallDirectory()
 
     if (weInitialised) CoUninitialize();
     return result;
-}
-
-int askForLanguage(const std::vector<std::string>& names)
-{
-    // The shell offers no list dialog worth the code it would take here, and
-    // the installer's own window is a fixed flow. The console path asks; the
-    // graphical one falls back to the default and says where to change it.
-    (void)names;
-    return -1;
 }
 
 fs::path findConverter()
@@ -225,6 +238,49 @@ fs::path askForConverter()
     return GetOpenFileNameW(&dialog) ? fs::path(selected.data()) : fs::path();
 }
 
+fs::path cacheDirectory()
+{
+    fs::path dir;
+    if (const wchar_t* local = _wgetenv(L"LOCALAPPDATA"); local && *local) dir = fs::path(local) / L"Open Nectar" / L"cache";
+    else dir = fs::temp_directory_path() / L"Open Nectar cache";
+    std::error_code ignored;
+    fs::create_directories(dir, ignored);
+    return dir;
+}
+
+bool downloadFile(const std::string& url, const fs::path& destination, std::string& error)
+{
+    // curl.exe viene con Windows 10 1803 y posteriores, en System32.
+    const fs::path partial = destination.wstring() + L".part";
+    const std::wstring wideUrl(url.begin(), url.end()); // las URL son ASCII
+    std::wstring command = L"curl.exe -fsSL --max-time 30 -o \"" + partial.wstring() + L"\" \"" + wideUrl + L"\"";
+    STARTUPINFOW startup {};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process {};
+    if (!CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr,
+                        &startup, &process)) {
+        error = "curl.exe is not available";
+        return false;
+    }
+    CloseHandle(process.hThread);
+    WaitForSingleObject(process.hProcess, INFINITE);
+    DWORD code = 1;
+    GetExitCodeProcess(process.hProcess, &code);
+    CloseHandle(process.hProcess);
+    std::error_code ec;
+    if (code != 0) {
+        fs::remove(partial, ec);
+        error = "download failed";
+        return false;
+    }
+    fs::rename(partial, destination, ec);
+    if (ec) {
+        error = ec.message();
+        return false;
+    }
+    return true;
+}
+
 bool convertImage(const fs::path& converter, const fs::path& source,
                   const fs::path& destination, const std::function<void()>& pump, std::string& error)
 {
@@ -260,6 +316,76 @@ bool respawnInTerminal()
     // doble clic Windows ya le adjunta una ventana donde se ven los mensajes y
     // funciona el instalador en modo texto. No hay nada que relanzar.
     return false;
+}
+
+namespace {
+std::wstring quotedCommand(const fs::path& program, const std::vector<std::string>& arguments)
+{
+    // Los argumentos que usa el launcher son números y rutas: Windows no
+    // permite comillas en los nombres, así que basta con rodearlos de ellas.
+    std::wstring command = L"\"" + program.wstring() + L"\"";
+    for (const std::string& argument : arguments) command += L" \"" + fs::path(argument).wstring() + L"\"";
+    return command;
+}
+} // namespace
+
+bool runAndCapture(const fs::path& program, const std::vector<std::string>& arguments,
+                   const fs::path& workingDirectory, std::string& output, std::string& error)
+{
+    SECURITY_ATTRIBUTES inherit { sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE };
+    HANDLE readEnd = nullptr, writeEnd = nullptr;
+    if (!CreatePipe(&readEnd, &writeEnd, &inherit, 0)) {
+        error = "CreatePipe failed";
+        return false;
+    }
+    SetHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0);
+    STARTUPINFOW startup {};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdOutput = writeEnd;
+    startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    PROCESS_INFORMATION process {};
+    std::wstring command = quotedCommand(program, arguments);
+    const BOOL started = CreateProcessW(program.c_str(), command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
+                                        nullptr, workingDirectory.c_str(), &startup, &process);
+    CloseHandle(writeEnd);
+    if (!started) {
+        CloseHandle(readEnd);
+        error = "could not start " + program.string();
+        return false;
+    }
+    output.clear();
+    char buffer[4096];
+    DWORD got = 0;
+    while (ReadFile(readEnd, buffer, sizeof(buffer), &got, nullptr) && got > 0) output.append(buffer, got);
+    CloseHandle(readEnd);
+    WaitForSingleObject(process.hProcess, INFINITE);
+    DWORD code = 1;
+    GetExitCodeProcess(process.hProcess, &code);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    if (code != 0) {
+        error = "exit status " + std::to_string(code);
+        return false;
+    }
+    return true;
+}
+
+void relaunch(const fs::path& program, const std::vector<std::string>& arguments)
+{
+    // Sin exec(): se arranca el nuevo y este termina.
+    std::wstring command = quotedCommand(program, arguments);
+    STARTUPINFOW startup {};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process {};
+    if (!CreateProcessW(program.c_str(), command.data(), nullptr, nullptr, FALSE, 0, nullptr,
+                        program.parent_path().c_str(), &startup, &process)) {
+        return;
+    }
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    std::exit(0);
 }
 
 [[noreturn]] void launchGame(const fs::path& dataRoot, const fs::path& gameBinary)

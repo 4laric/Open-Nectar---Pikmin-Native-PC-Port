@@ -17,6 +17,10 @@ extern "C" {
 // Called once from pc_main after the window exists. Loads persisted settings.
 void pc_settings_init(void);
 
+// Órdenes --settings-dump / --settings-set / --settings-reset para el launcher:
+// trabajan sin ventana y devuelven el código de salida, o -1 si no hay ninguna.
+int pc_settings_cli(int argc, char** argv);
+
 // Polled every frame from pc_window_poll_events (after SDL events are read).
 // Handles the F1 toggle and navigation. If the menu is open it consumes the
 // pad (returns true) so the game does not react to the same input.
@@ -76,6 +80,8 @@ int pc_settings_get_throw_cancel_b(void);
 int pc_settings_get_quick_grab(void);
 /// Los Pikmin del grupo no tropiezan al correr.
 int pc_settings_get_no_trip(void);
+// Whistling over sprouts plucks them, one every 0.08 s while held. Off by default.
+int pc_settings_get_whistle_pluck(void);
 /// En el menú de la cebolla, Y + arriba/abajo mueve de 10 en 10.
 int pc_settings_get_onion_step10(void);
 /// Los Pikmin silbados se unen al grupo al instante, sin la reacción de LookAt.
@@ -102,6 +108,9 @@ int pc_settings_get_first_person(void);
 /// habilita; la tecla bindeable entra y sale de ella).
 int pc_first_person_active(void);
 void pc_first_person_toggle(void);
+/// Coop/VS: primera persona de cada jugador (las de arriba son las de J1).
+int pc_first_person_active_for(int player);
+void pc_first_person_toggle_for(int player);
 /// Daño a un enemigo, ya escalado por "Enemy Health".
 float pc_mods_teki_damage(float damage);
 /// Contador de Pikmin ociosos sobre el juego. Lo llama vi_stubs en el retrace,
@@ -195,6 +204,16 @@ int  pc_devassign_prompt_result(void);
 
 /// Debug shortcuts F5 and F6, off by default.
 int pc_settings_get_debug_keys(void);
+/// Modelo HD de esa fila del selector (0 Olimar, 1 Louie, 2 Louie HD,
+/// 3 Pikmin, 4 Bulborb, 5 Dwarf Bulborb): 0 = apagado, se usa el original.
+int pc_settings_get_hd_model_enabled(int row);
+
+/// Idioma elegido en las opciones del juego (PAL): lo guarda como ajuste del
+/// port, en el orden del sistema (0 en, 1 de, 2 fr, 3 es, 4 it).
+void pc_settings_store_language(unsigned char osLanguage);
+/// El orden del juego PAL es otro (0 en, 1 fr, 2 de, 3 es, 4 it).
+int pcGameLanguageFromOs(unsigned char osLanguage);
+unsigned char pcOsLanguageFromGame(int gameLanguage);
 
 /// Pantalla partida cooperativa: 0 = vertical (izq/der), 1 = horizontal.
 int pc_settings_get_coop_split(void);

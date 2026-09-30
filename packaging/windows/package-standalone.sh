@@ -8,10 +8,15 @@
 #     nectar.exe
 #     nectar-pal.exe
 #     nectar-launcher.exe
-#     SDL2.dll
 #     README.txt
 #
-# El instalador copia nectar.exe o nectar-pal.exe a nectar.exe según el disco.
+# y lo comprime en packaging/windows/out/nectar-windows.zip, el nombre que
+# busca el auto-update del launcher en el release de GitHub.
+#
+# SDL2 y el runtime de C/C++ van dentro de cada .exe (PIKMIN_STATIC_RUNTIME):
+# no hay DLL que acompañar. El instalador copia nectar.exe o nectar-pal.exe a
+# nectar.exe según el disco, así que la carpeta instalada queda en dos
+# archivos: nectar.exe y nectar-launcher.exe.
 # Sin nectar-pal.exe un ISO europeo "instala bien" y el juego no arranca.
 
 set -euo pipefail
@@ -43,7 +48,7 @@ if [[ ! -f "${toolchain}" ]]; then
     printf 'No está el toolchain MinGW: %s\n' "${toolchain}" >&2
     exit 1
 fi
-if [[ ! -f "${sdl2_root}/lib/libSDL2.dll.a" ]]; then
+if [[ ! -f "${sdl2_root}/lib/libSDL2.a" ]]; then
     printf 'Falta SDL2 para MinGW en %s\n' "${sdl2_root}" >&2
     printf 'Descarga SDL2-devel-*-mingw.tar.gz y extrae x86_64-w64-mingw32 ahí.\n' >&2
     exit 1
@@ -61,6 +66,8 @@ cmake_common=(
     -DCMAKE_TOOLCHAIN_FILE="${toolchain}"
     -DCMAKE_BUILD_TYPE=Release
     -DPIKMIN_NATIVE_JAUDIO=ON
+    -DPIKMIN_STATIC_RUNTIME=ON
+    -DOPEN_NECTAR_VERSION="${OPEN_NECTAR_VERSION:-$(sed -n 's/.*set(OPEN_NECTAR_VERSION "\([^"]*\)".*/\1/p' "${repo_root}/CMakeLists.txt")}"
 )
 
 printf '%s\n' '[1/4] Configurando y compilando USA (Windows)...'
@@ -91,39 +98,23 @@ cp "${usa_exe}" "${output_dir}/nectar.exe"
 cp "${pal_exe}" "${output_dir}/nectar-pal.exe"
 cp "${launcher_exe}" "${output_dir}/nectar-launcher.exe"
 cp "${script_dir}/README.txt" "${output_dir}/README.txt"
+# Sin símbolos de depuración: con SDL2 y el runtime dentro, cada .exe pasa de
+# ~20 MB a una fracción.
+x86_64-w64-mingw32-strip "${output_dir}/nectar.exe" "${output_dir}/nectar-pal.exe" "${output_dir}/nectar-launcher.exe"
 
-copy_dll() {
-    local src="$1"
-    if [[ -f "${src}" ]]; then
-        cp -f "${src}" "${output_dir}/$(basename "${src}")"
-        return 0
-    fi
-    return 1
-}
-
-sdl2_copied=0
-for candidate in \
-    "${sdl2_root}/bin/SDL2.dll" \
-    "${build_dir}/bin/SDL2.dll"
-do
-    if copy_dll "${candidate}"; then
-        sdl2_copied=1
-        break
-    fi
+# Nada de DLL propias: cada .exe debe pedir solo DLL del sistema.
+system_dlls='^(advapi32|comdlg32|gdi32|imm32|kernel32|msvcrt|ole32|oleaut32|opengl32|setupapi|shell32|user32|version|winmm|shlwapi|uuid|dwmapi|dinput8|xinput1_4|hid|cfgmgr32)\.dll$'
+for exe in nectar.exe nectar-pal.exe nectar-launcher.exe; do
+    while read -r dll; do
+        if ! printf '%s\n' "${dll,,}" | grep -Eq "${system_dlls}"; then
+            printf '%s necesita %s, que no viene con Windows. Revisa PIKMIN_STATIC_RUNTIME.\n' "${exe}" "${dll}" >&2
+            exit 1
+        fi
+    done < <(x86_64-w64-mingw32-objdump -p "${output_dir}/${exe}" | sed -n 's/.*DLL Name: //p')
 done
-if ((sdl2_copied == 0)); then
-    printf 'No se encontró SDL2.dll (esperado en %s/bin).\n' "${sdl2_root}" >&2
-    exit 1
-fi
-
-# libgcc/libstdc++ van estáticos en el toolchain; winpthread a veces no.
-while IFS= read -r -d '' match; do
-    copy_dll "${match}" || true
-done < <(find /usr/x86_64-w64-mingw32 /usr/lib/gcc/x86_64-w64-mingw32 \
-    -name 'libwinpthread-1.dll' -type f -print0 2>/dev/null || true)
 
 printf '%s\n' '[4/4] Comprobando que el paquete lleva las dos builds...'
-for required in nectar.exe nectar-pal.exe nectar-launcher.exe SDL2.dll README.txt; do
+for required in nectar.exe nectar-pal.exe nectar-launcher.exe README.txt; do
     if [[ ! -f "${output_dir}/${required}" ]]; then
         printf 'El paquete está incompleto: falta %s\n' "${required}" >&2
         exit 1
@@ -135,5 +126,17 @@ if cmp -s "${output_dir}/nectar.exe" "${output_dir}/nectar-pal.exe"; then
     exit 1
 fi
 
-printf '\nPaquete Windows creado en:\n  %s\n' "${output_dir}"
-printf '%s\n' 'Comprime esa carpeta como nectar-windows.zip.'
+zip_path="${script_dir}/out/nectar-windows.zip"
+rm -f "${zip_path}"
+python3 - "${output_dir}" "${zip_path}" <<'PY'
+import os, sys, zipfile
+src, dst = sys.argv[1], sys.argv[2]
+base = os.path.dirname(src)
+with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+    for root, _, files in os.walk(src):
+        for name in sorted(files):
+            path = os.path.join(root, name)
+            z.write(path, os.path.relpath(path, base))
+PY
+
+printf '\nPaquete Windows creado:\n  %s\n  %s\n' "${output_dir}" "${zip_path}"

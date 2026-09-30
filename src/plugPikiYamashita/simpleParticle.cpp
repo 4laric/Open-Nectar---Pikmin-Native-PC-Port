@@ -3,6 +3,7 @@
 #include "zen/particle.h"
 #if defined(PIKI_PC_PORT)
 #include "timing/pc_render_phase.h"
+#include <cmath>
 #endif
 
 /**
@@ -69,10 +70,22 @@ void zen::simplePtclManager::update(f32 timeStep)
 		if (ptcl->mPtclCallBack) {
 			ptcl->mPtclCallBack->invoke(ptcl);
 		} else {
+#if defined(PIKI_PC_PORT)
+			// Por tiempo, no por actualización (ver sPcStep en particleGenerator.cpp).
+			ptcl->mVelocity.x += ptcl->mAcceleration.x * timeStep;
+			ptcl->mVelocity.y += ptcl->mAcceleration.y * timeStep;
+			ptcl->mVelocity.z += ptcl->mAcceleration.z * timeStep;
+			ptcl->mLocalPosition.x += ptcl->mVelocity.x * timeStep;
+			ptcl->mLocalPosition.y += ptcl->mVelocity.y * timeStep;
+			ptcl->mLocalPosition.z += ptcl->mVelocity.z * timeStep;
+			ptcl->mAlphaFactor = 1.0f - f32(ptcl->mAge) / f32(ptcl->mLifeTime);
+			ptcl->mRotAngle    = u16(int(ptcl->mRotAngle) + int(lroundf(f32(ptcl->mRotSpeed) * timeStep)));
+#else
 			ptcl->mVelocity.add(ptcl->mAcceleration);
 			ptcl->mLocalPosition.add(ptcl->mVelocity);
 			ptcl->mAlphaFactor = 1.0f - f32(ptcl->mAge) / f32(ptcl->mLifeTime);
 			ptcl->mRotAngle += ptcl->mRotSpeed;
+#endif
 		}
 
 		ptcl->mAgeTimer += timeStep;
