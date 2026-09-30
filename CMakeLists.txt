@@ -1407,6 +1407,12 @@ target_include_directories(p2_tank_breath_test PRIVATE pc_port)
 target_compile_options(p2_tank_breath_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_tank_breath_test COMMAND p2_tank_breath_test)
 
+# Watery Blowhog breath stream layout (visual only).
+add_executable(p2_tank_stream_test tools/p2_tank_stream_test.cpp)
+target_include_directories(p2_tank_stream_test PRIVATE pc_port)
+target_compile_options(p2_tank_stream_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_tank_stream_test COMMAND p2_tank_stream_test)
+
 # Kabuto identity policy (inst2-frogs #871).
 add_executable(p2_kabuto_fsm_policy_test tools/p2_kabuto_fsm_policy_test.cpp)
 target_include_directories(p2_kabuto_fsm_policy_test PRIVATE pc_port)
