@@ -136,6 +136,8 @@ struct ChappyFsm {
     Vector3f firePos[p2chappyadult::FireEmitters];
     bool fireOn = false;
     float fireLogTimer = 0.0f;
+    Vector3f lastLogPos;
+    bool lastLogValid = false;
     float logTimer = 0.0f;
     float auraTimer = 0.0f;
     float lastHealth = 0.0f;
@@ -1061,6 +1063,7 @@ void doFireAura(BTeki* actor, ChappyFsm& s, unsigned gen)
     }
 }
 
+// Water: FireChappy::updateFireState (FireChappy.cpp:191-215) puts the fire out while mWaterBox and relights it on dry ground.
 // FireChappy::startBodyEffect / finishBodyEffect (efx::TYakiBody on the body
 // joint). P2 JPA2 particles do not port to the P1 zen system, so the body fire is
 // the P1 burning-Pikmin pair (EFF_Piki_Fire flames + EFF_Piki_FireSparkles), one
@@ -1086,7 +1089,7 @@ void fireUpdate(BTeki* actor, ChappyFsm& s, unsigned gen)
         const p2chappyadult::Offset o = p2chappyadult::fireOffset(i);
         s.firePos[i].set(p.x + o.x * cs + o.z * sn, p.y + o.y, p.z - o.x * sn + o.z * cs);
     }
-    if (!p2chappyadult::fireWanted(actor->isAlive(), false)) {
+    if (!p2chappyadult::fireWanted(actor->isAlive(), actor->getPositionMapCode() == ATTR_Water)) {
         if (s.fireOn) fireStop(s, false);
         return;
     }
@@ -2255,6 +2258,19 @@ void pc_p2_chappy_update(BTeki* actor)
     auto ft = fsms.find(view);
     if (ft == fsms.end()) return;
     ChappyFsm& s = ft->second;
+    // Owner playtest 2026-09-30 (Fiery, water lure): once the Bulborb left the P1 AI
+    // grid (off camera, far from the captain) Creature::update early-returned
+    // (creature.cpp:678) and moveNew never ran: mVelocity stayed set, the position
+    // froze, and the FSM kept flipping Walk/TurnToHome/GoHome in place. P2 enemies
+    // keep moving off screen (culling only skips animation), so pin the actor active
+    // like Qurione/Kurage do. Re-applied every tick because Creature::init resets it.
+    // The Emperor keeps its own path.
+    // Policy and reasons: p2chappy::keepUpdatingOffGrid (pc_p2_chappy_policy.h).
+    if (p2chappy::keepUpdatingOffGrid(int(s.family), actor->isAlive(), s.family == p2chappyfsm::FAMILY_ADULT && s.state == p2chappy::ADULT_SLEEP)) {
+        actor->setInsideView();
+    } else if (s.family != p2chappyfsm::FAMILY_KING) {
+        actor->setOutsideView();
+    }
     const float dt = gsys->getFrameTime();
     if (dt <= 0.0f || dt > 0.5f) return;
     const unsigned generator = actor->mGenerator ? pc_p2_campaign_token(actor) : 0;
@@ -3015,6 +3031,18 @@ void pc_p2_chappy_update(BTeki* actor)
     if (s.logTimer >= 1.0f) {
         s.logTimer = 0.0f;
         const Vector3f now = actor->getPosition();
+        {
+            // Stall diagnostic (owner playtest: froze at a water edge): commanded walk with no progress.
+            const float moved = distXZ(now, s.lastLogPos);
+            const bool moving = s.state == p2chappy::ADULT_WALK || s.state == p2chappy::ADULT_GO_HOME;
+            if (s.family == p2chappyfsm::FAMILY_ADULT && moving && s.lastLogValid && moved < 0.25f * s.spec->moveSpeed) {
+                std::printf("P2_CHAPPY_STALL generator=%u source_id=%u state=%s moved=%.1f cmd=%.1f attr=%d vel=%.1f,%.1f tgt=%c dist=%.0f home=%.0f aiCulling=%d aiCullable=%d alwaysActive=%d\n", generator, s.spec->source,
+                            fsmStateName(s.family, s.state), moved, s.spec->moveSpeed, actor->getPositionMapCode(), actor->mVelocity.x,
+                            actor->mVelocity.z, s.tickTargetKind, s.tickTargetDist, distXZ(now, s.home), int(actor->mGrid.aiCulling()), int(actor->aiCullable()), int(actor->insideView()));
+            }
+            s.lastLogPos = now;
+            s.lastLogValid = true;
+        }
         std::printf("P2_CHAPPY_FSM_POS generator=%u source_id=%u state=%s x=%.2f y=%.2f z=%.2f health=%.1f opts=0x%x "
                     "vel=%.1f,%.1f tvel=%.1f,%.1f\n",
                     generator, s.spec->source, fsmStateName(s.family, s.state), now.x, now.y, now.z,
