@@ -34,7 +34,8 @@ using namespace p2sfx;
 
 void table() {
     const unsigned species[] = {kBreadbug, kGiantBreadbug, kSnitchbug, kDirigibug, kCrawbster, kAntennaBeetle,
-                                kTitanDweevil, kGroink, kGroinkArmored, kCannonLarva, kEmperor};
+                                kTitanDweevil, kGroink, kGroinkArmored, kCannonLarva, kEmpress,
+                                kEmperor, kKurage, kOniKurage};
     for (unsigned s : species) {
         CHECK(seFor(s, Event::Damage) != kNone);
         CHECK(seFor(s, Event::Dead) != kNone);
@@ -59,6 +60,12 @@ void table() {
     CHECK(seFor(kTitanDweevil, Event::Step) == kSpiderWalk);
     CHECK(seFor(kGroink, Event::Shot) == kKabutoShot);
     CHECK(seFor(kCannonLarva, Event::Shot) == kKabutoShot);
+    CHECK(seFor(kKurage, Event::Hover) == kSaraiHover);
+    CHECK(seFor(kKurage, Event::Attack) == kSaraiAttack);
+    CHECK(seFor(kOniKurage, Event::Dead) == kSaraiDead);
+    CHECK(seFor(kKurage, Event::Step) == kNone);
+    CHECK(seFor(kEmpress, Event::Roll) == kKingReady);
+    CHECK(seFor(kEmpress, Event::Dead) == kKingDead1);
     // Emperor Bulblax (53) borrows the P1 Emperor boss bank.
     CHECK(seFor(kEmperor, Event::Step) == kKingWalk);
     CHECK(seFor(kEmperor, Event::Appear) == kKingAppear);

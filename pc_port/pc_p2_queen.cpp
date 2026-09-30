@@ -515,21 +515,16 @@ void tickQueen(Queen& q) {
 		std::printf("P2_QUEEN_STATE id=%u from=%d to=0 health=0\n", q.cfg.id, q.state);
 		enter(q, p2queen::Dead);
 	}
-	// Queen death releases/cleans every live larva exactly once: free the slots
-	// so they stop ticking and drawing (larvae leave no corpse). The shared
-	// forget seam is elsewhere; this is the family-local larva-pool cleanup.
+	// Source StateDead leaves the Baby::Mgr larvae alive (QueenState.cpp
+	// StateDead only kills the Queen); they keep ticking after her death.
 	if (q.state == p2queen::Dead && !q.deathReleased) {
 		q.deathReleased = true;
-		int released = 0;
-		for (auto& l : q.larvae)
-			if (l.active) {
-				l.active = false;
-				++released;
-			}
-		std::printf("P2_QUEEN_DEATH_LARVA_RELEASE id=%u released=%d\n", q.cfg.id, released);
+		int alive = 0;
+		for (const auto& l : q.larvae) alive += l.active ? 1 : 0;
+		std::printf("P2_QUEEN_DEATH_LARVAE_PERSIST id=%u alive=%d\n", q.cfg.id, alive);
 	}
 	for (auto& l : q.larvae)
-		if (l.active) tickLarva(q, l); // released above on Queen death; no larvae outlive the Queen
+		if (l.active) tickLarva(q, l); // larvae outlive the Queen (source)
 }
 } // namespace
 

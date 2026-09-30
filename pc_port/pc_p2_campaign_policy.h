@@ -45,7 +45,7 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     case 13: return 19; // TEKI_KabekuiB: UjiB Male Sheargrub host
     case 14: return 20; // TEKI_KabekuiC: Tobi Shearwig host
     case 54: return 24; // TEKI_Miurin: Mamuta
-    case 57: case 78: return 0; // TEKI_Frog: Jellyfloat/Groink sidecar hosts
+    case 57: case 72: case 78: return 0; // TEKI_Frog: Jellyfloat (Kurage/OniKurage)/Groink sidecar hosts
     // #244 OWN: Careening Dirigibug rides the P1 flying vehicle TEKI_Napkid
     // (11); pc_p2_bombsarai_own_setup binds only this host type.
     case 58: return 11; // TEKI_Napkid: BombSarai OWN campaign host
@@ -84,6 +84,7 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     // #246 OWN: BigTreasure (Titan Dweevil) rides the TEKI_Swallow placement
     // vehicle driven by pc_p2_bigtreasure_teki (source-order core).
     case 73: return 4; // TEKI_Swallow: BigTreasure campaign actor
+    case 30: return 4; // TEKI_Swallow: Empress Bulblax OWN vehicle (#256, pc_p2_queen_teki)
     default: return original;
     }
 }

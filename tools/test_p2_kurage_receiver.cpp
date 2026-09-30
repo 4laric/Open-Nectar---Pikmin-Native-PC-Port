@@ -104,6 +104,33 @@ int main(){
  assert(p.alive && p.kills==0 && pc_p2_kurage_receiver_controls(&p));
  p.detached={};pc_p2_kurage_receiver_reset();
  assert(pc_p2_captain::captive_count()==0 && control.mNavi==navis.getNavi());
+ // Wave 3 flyers (#960): several Jellyfloats hold Pikmin independently, and a
+ // Pikmin that is mid-throw (PikiFlyingState reads mNavi every tick) is never
+ // captured.
+ {
+  Creature ownerB;CollPart mouthB;mouthB.mCentre={0,100,0};
+  p.owner=nullptr;p.part=nullptr;p.alive=true;p.mNavi=navis.getNavi();
+  fresh.owner=nullptr;fresh.part=nullptr;fresh.alive=true;fresh.mNavi=navis.getNavi();
+  assert(pc_p2_kurage_receiver_register(&owner,&mouth) && pc_p2_kurage_receiver_register(&ownerB,&mouthB));
+  assert(pc_p2_kurage_receiver_admit_for(&owner,&p) && pc_p2_kurage_receiver_admit_for(&ownerB,&fresh));
+  assert(pc_p2_kurage_receiver_count_for(&owner)==1 && pc_p2_kurage_receiver_count_for(&ownerB)==1);
+  assert(pc_p2_kurage_receiver_controls(&p) && pc_p2_kurage_receiver_controls(&fresh));
+  // Each owner's update drives only its own Pikmin.
+  p.mSRT.t={0,0,0};fresh.mSRT.t={0,0,0};
+  p.mVelocity={0,0,0};p.mTargetVelocity={0,0,0};fresh.mVelocity={0,0,0};fresh.mTargetVelocity={0,0,0};
+  pc_p2_kurage_receiver_update_for(&owner,.01f,true,true,false);
+  assert(p.mVelocity.y==600 && fresh.mVelocity.y!=600);
+  // One Jellyfloat dying releases its Pikmin and leaves the other's untouched.
+  pc_p2_kurage_receiver_owner_invalidated(&owner);
+  assert(!pc_p2_kurage_receiver_controls(&p) && pc_p2_kurage_receiver_controls(&fresh));
+  assert(pc_p2_kurage_receiver_count_for(&ownerB)==1);
+  // Thrown Pikmin keep their captain: the flying state still needs it.
+  control.mState=PIKISTATE_Flying;
+  assert(!pc_p2_kurage_receiver_admit_for(&ownerB,&control) && control.mNavi==navis.getNavi());
+  control.mState=PIKISTATE_Normal;
+  pc_p2_kurage_receiver_reset();
+  assert(pc_p2_kurage_receiver_count()==0 && pc_p2_captain::captive_count()==0);
+ }
  pc_p2_captain::teardown();
  std::puts("PASS receiver authority: inactive, travel/reset, transfer, arrival, shrink/release, invalidation, callback reentry");
 }
