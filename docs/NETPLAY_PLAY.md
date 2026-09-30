@@ -479,12 +479,10 @@ checkpoint adopted`).
   `[netplay] launch: --continue: continuing the campaign of ...\run-...:
   checkpoint 1 (day 3)`. Both games then start that day from its
   beginning.
-<!-- #965-lane-N:begin (merge agent: keep this bullet only if lane N lands the run-root fallback) -->
 - When the exe's folder path is too long for the run folder to fit under
-  it (about 119 characters), the game makes the run folder under
+  it (about 105 characters), the game makes the run folder under
   `%LOCALAPPDATA%\Nectar\netplay\` instead, and `--continue` looks in both
   places.
-<!-- #965-lane-N:end -->
 - It never continues a half-saved day: a day-end save that did not finish
   on both games (exit 5 or 6 at the save, or a game that crashed during
   it) is skipped, and the day before it is used. Each run folder keeps a
