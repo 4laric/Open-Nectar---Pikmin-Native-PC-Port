@@ -70,7 +70,10 @@ using namespace p2queenown;
 // host scale). Larvae ride the same vehicle at larva scale (baby root 25).
 constexpr float kQueenHostScale = 3.0f;
 constexpr float kLarvaHostScale = 0.35f;
-constexpr float kQueenCorpseRadius = 100.0f;
+// Carry radius of the carcass pellet. 100 wedged in the Impact arena exit at
+// (-391,712) with 31 carriers pulling (wave-3 a10, moving=0); the P2 Queen
+// leaves no carcass in source, so this is an approximation sized to pass it.
+constexpr float kQueenCorpseRadius = 50.0f;
 // Source body extent along the Queen's facing axis (+Z = nose), in world
 // units: the staged rest pose bulblax_Queen_wait1_00 bounds z = -224..245
 // (the P2 model is drawn at source scale 1). The host has no nose/head/bod1/
