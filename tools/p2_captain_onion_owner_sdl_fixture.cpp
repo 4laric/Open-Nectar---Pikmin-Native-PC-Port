@@ -252,6 +252,7 @@ public:
                 if(a->getCurrState()->getID()!=NAVISTATE_Walk || b->getCurrState()->getID()!=NAVISTATE_Walk)return result;
                 if(!resumePhase && live<20)return result;
                 require(resumePhase?live==0:live==20,"actual initial field count");
+                require(a->mPlateMgr && b->mPlateMgr,"initialized captain formation plates");
                 if(!resumePhase && (formation(a)!=20 || a->mPlateMgr->mUsedSlotCount!=20))return result;
                 startDay=gameflow.mWorldClock.mCurrentDay;
                 withdrawnFromTotal=live+storedCount();require(withdrawnFromTotal==20,"actual total20 baseline");
