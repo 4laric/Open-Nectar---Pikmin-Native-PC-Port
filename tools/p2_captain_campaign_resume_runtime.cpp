@@ -103,7 +103,7 @@ int cards(){int n=0;const auto d=std::filesystem::path("../../campaign");if(std:
 class CaptainSaveApp final:public PlugPikiApp {
     int frames=0,tick=-1,startDay=-1,initialCards=0;
     const std::chrono::steady_clock::time_point started=std::chrono::steady_clock::now();
-    bool dayAdvanced=false;
+    bool dayAdvanced=false,resumeMenuLogged=false;
     int diaryFrames=0;
     void elapsed(const char* phase){std::printf("P2_SAVE_TIME phase=%s elapsed_ms=%lld\n",phase,(long long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-started).count());}
     bool saving=false,shot=false,sawWhistle=false,initialized[2]={false,false},retired=false;
@@ -147,6 +147,11 @@ public:
         const int result=PlugPikiApp::idle();require(++frames<7200,"frame bound");
         guardLiveState(); // never bypass initialized actors for movie/readiness/pause
 
+        if(resumePhase&&tick<0){
+            const bool menu=!naviMgr||gameflow.mIsUIOverlayActive;
+            if(menu&&!resumeMenuLogged){resumeMenuLogged=true;std::puts("P2_SAVE_RESUME_MENU ordinary_A_input=1 area_day_injected=0");}
+            pad(menu&&frames%20<4?KBBTN_A:0);
+        }
         if(saving){
             // Ordinary held A speeds diary text through ogMessage.cpp; release
             // two frames per cycle preserves edges for results/card prompts.
