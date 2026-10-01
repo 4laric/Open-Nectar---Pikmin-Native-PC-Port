@@ -293,7 +293,7 @@ class PurpleCombatApp : public PlugPikiApp {
                 haulStart=haul->mSRT.t;
                 if(manual) {
                     approachStart=acquired->mSRT.t;pc_p2_input_script_clear(1);
-                    std::puts("P2_PURPLE_MANUAL_READY field=20 purple=1 reds=19 starting_species_injected=1 native_acquisition=0 scripted_transport_assignment=0 actor_position_injected=0 cargo_spawned_once=1 reset=F6_or_Reset_cmd");
+                    std::puts("P2_PURPLE_MANUAL_READY field=20 purple=1 reds=19 starting_species_injected=1 native_acquisition=0 scripted_transport_assignment=0 actor_position_injected=0 cargo_spawned_once=1 reset=F7_or_Reset_cmd");
                     if(std::getenv("P2_PURPLE_MANUAL_BOOT_ONLY")) { std::fflush(nullptr);std::_Exit(0); }
                 } else assignHaul(positiveOnly?acquired:haulRed);
                 haulPhase=positiveOnly?3:2;haulTicks=0;haulStable=0;
@@ -608,7 +608,7 @@ public:
             require(!captainSeen || expectedTeardown,"captain disappeared outside expected sunset teardown");
         }
         if (++ticks%120==0) diagnostics(n);
-        if(mode("transport_manual") && (SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F6] || std::ifstream("manual-reset.request").good())) {
+        if(mode("transport_manual") && (SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F7] || std::ifstream("manual-reset.request").good())) {
             std::puts("P2_PURPLE_MANUAL_RESET_REQUEST fresh_session_required=1");std::fflush(nullptr);std::_Exit(90);
         }
         require(ticks<(sunsetRequested?15000:6000),"global fixture timeout");
@@ -633,15 +633,28 @@ public:
             const int state=n->getCurrState()->getID();
             if(state==NAVISTATE_Walk||state==NAVISTATE_Idle) {
                 if(mode("transport_red_control") || mode("transport_staged") || mode("transport_manual")) {
+                    const bool stagedStart=mode("transport_staged") || mode("transport_manual");
+                    int aliveCount=0,normalCount=0,redCount=0,formationCount=0;
                     Iterator squad(pikiMgr);CI_LOOP(squad) {
                         Piki* p=static_cast<Piki*>(*squad);
+                        if(p && p->isAlive()) {
+                            ++aliveCount;
+                            if(p->getState()==PIKISTATE_Normal) ++normalCount;
+                            if(p->mColor==Red && !pc_p2_is_purple(p) && !p->mP2White) ++redCount;
+                            if(p->mMode==PikiMode::FormationMode) ++formationCount;
+                        }
                         if(p && p->isAlive() && p->mColor==Red && !pc_p2_is_purple(p) && !p->mP2White
-                            && p->getState()==PIKISTATE_Normal && p->mMode==PikiMode::FormationMode) { acquired=p;break; }
+                            && p->getState()==PIKISTATE_Normal && !p->isStickTo()
+                            && (p->mMode==PikiMode::FormationMode || stagedStart)) { acquired=p;break; }
                     }
+                    if(!acquired && ticks%120==0) std::printf("P2_PURPLE_START_WAIT alive=%d normal=%d ordinary_red=%d formation=%d\n",aliveCount,normalCount,redCount,formationCount);
                     if(acquired) {
                         GameStat::update();require(int(GameStat::mapPikis)==20,"ordinary Red control starting squad");
                         if(mode("transport_red_control")) std::puts("P2_PURPLE_HAUL_RED_START field=20 native_red=1 source_identity_injected=0");
                         else {
+                            const int previousMode=acquired->mMode;
+                            acquired->changeMode(PikiMode::FormationMode,n);
+                            std::printf("P2_PURPLE_STAGED_GATHER previous_mode=%d scripted_gather=1 actor_position_injected=0\n",previousMode);
                             pc_p2_make_purple(acquired);
                             require(pc_p2_is_purple(acquired) && pc_piki_carry_strength(acquired)==10,"staged Purple identity/strength");
                             int purpleCount=0,redCount=0;Iterator counted(pikiMgr);CI_LOOP(counted) {
@@ -671,7 +684,7 @@ int main(int argc,char** argv) {
     }
     SDL_SetMainReady(); pc_gpu_preference_apply(); pc_bbft_init(argc,argv);
     require(pc_randomizer_purple_campaign() && pc_randomizer_p2_bridge(),"ordinary Purple seed campaign required");
-    if(!pc_window_init(mode && !std::strcmp(mode,"transport_manual")?"Purple carry smoke - staged Purple - F6 resets":"Purple campaign combat fixture",960,540)) return 3;
+    if(!pc_window_init(mode && !std::strcmp(mode,"transport_manual")?"Purple carry smoke - staged Purple - F7 resets":"Purple campaign combat fixture",960,540)) return 3;
     pc_settings_init(); pc_window_set_display_mode(PC_WINDOW_FULLSCREEN_WINDOWED);
     pc_window_set_window_size(960,540); pc_window_center();
     std::puts("Experimental preview window set to 960x540 windowed and centered");
