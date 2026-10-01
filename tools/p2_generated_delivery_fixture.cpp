@@ -1,5 +1,5 @@
 // #1096 generated source44 -> ordinary native combat/carry -> durable AP check.
-// Initial20 field Reds are staged. No creature/health/attachment/check writes.
+// Existing production TEST_BACKGROUND withdraws20. No creature/health/check writes.
 #include <SDL2/SDL.h>
 #include <cmath>
 #include <cstdio>
