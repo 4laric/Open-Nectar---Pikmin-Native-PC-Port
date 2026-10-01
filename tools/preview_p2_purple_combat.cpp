@@ -645,6 +645,12 @@ public:
                 }
                 if(mode("transport_red_control") || mode("transport_staged") || mode("transport_manual")) {
                     const bool stagedStart=mode("transport_staged") || mode("transport_manual");
+                    if(stagedStart) {
+                        GameStat::update();
+                        // Native withdrawal creates actors over successive ticks.
+                        // Do not stage the first exit while the rest are stored.
+                        if(int(GameStat::mapPikis)!=20) return result;
+                    }
                     int aliveCount=0,normalCount=0,redCount=0,formationCount=0;
                     Iterator squad(pikiMgr);CI_LOOP(squad) {
                         Piki* p=static_cast<Piki*>(*squad);
