@@ -22,6 +22,7 @@
 #include "ItemMgr.h"
 #include "KeyConfig.h"
 #include "Kontroller.h"
+#include "CPlate.h"
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "PikiState.h"
@@ -115,7 +116,11 @@ class DeliveryApp:public PlugPikiApp {
   }
   if(observed%60==0){std::printf("P2_GENERATED_SQUAD_INPUT followers=%d free_camera=%d right_SDL=%d,%d right_native=%.4f,%.4f whistle_bind=%u throw_bind=%u\n",n->getPlatePikis(),pc_settings_get_free_camera(),int(SDL_JoystickGetAxis(pad,SDL_CONTROLLER_AXIS_RIGHTX)),int(SDL_JoystickGetAxis(pad,SDL_CONTROLLER_AXIS_RIGHTY)),n->mKontroller->getSubStickX(),n->mKontroller->getSubStickY(),KeyConfig::_instance->mSetCursorKey.mBind,KeyConfig::_instance->mThrowKey.mBind);int assigned=-1;int kind=pc_window_input_get_assignment(0,&assigned);const Vector3f& axis=n->controlCamera()->mViewXAxis;std::printf("P2_GENERATED_INPUT_OBS request=%d,%d SDL=%d,%d native=%d,%d frozen=%d port=%d assigned_kind=%d assigned_id=%d camera_axis=%.3f,%.3f,%.3f\n",requestedX,requestedY,int(SDL_JoystickGetAxis(pad,SDL_CONTROLLER_AXIS_LEFTX)),int(SDL_JoystickGetAxis(pad,SDL_CONTROLLER_AXIS_LEFTY)),int(n->mKontroller->mMainStickX),int(n->mKontroller->mMainStickY),int(n->mKontroller->mIsControllerFrozen),n->mKontroller->mPlayerNum,kind,assigned,axis.x,axis.y,axis.z);std::printf("P2_GENERATED_PROGRESS frame=%d phase=%d alive=%d enemy_alive=%d hp=%.3f navi=%.3f,%.3f enemy=%.3f,%.3f\n",frames,phase,alive,int(enemy->isAlive()),n->mHealth,n->mSRT.t.x,n->mSRT.t.z,enemy->mSRT.t.x,enemy->mSRT.t.z);std::fflush(nullptr);}
   if(pc_randomizer_checked(Check)){std::puts("PASS P2_GENERATED_DELIVERY actual_native_check=1 direct_event_writes=0 scripted_virtual_P1=1");std::fflush(nullptr);std::_Exit(0);}
-  if(phase==1){input(KeyConfig::_instance->mSetCursorKey.mBind);if(observed-phaseStart>100){phase=2;phaseStart=observed;routeLeg=0;route=approachRoute(n->mSRT.t,enemy->mSRT.t);}return result;}
+  if(phase==1){
+   require(alive==20,"gather squad conservation");
+   if(n->getPlatePikis()<20){std::vector<Creature*> joined;Iterator formation(n->mPlateMgr);CI_LOOP(formation){joined.push_back(*formation);}Piki* target=nullptr;float closest=1e30f;Iterator all(pikiMgr);CI_LOOP(all){Piki* p=static_cast<Piki*>(*all);if(!p->isAlive())continue;bool follows=false;for(auto c:joined)if(c==p)follows=true;if(follows)continue;float px=p->mSRT.t.x-n->mSRT.t.x,pz=p->mSRT.t.z-n->mSRT.t.z;float distance=px*px+pz*pz;if(distance<closest){closest=distance;target=p;}}require(target,"unjoined live Pikmin missing");if(observed%30==0){std::printf("P2_GENERATED_GATHER following=%d target=%.3f,%.3f,%.3f state=%d distance=%.3f direct_join_writes=0\n",n->getPlatePikis(),target->mSRT.t.x,target->mSRT.t.y,target->mSRT.t.z,target->getCurrState()?target->getCurrState()->getID():-1,std::sqrt(closest));std::fflush(nullptr);}point(n,target->mSRT.t,closest>150*150,KeyConfig::_instance->mSetCursorKey.mBind);return result;}
+   std::printf("P2_GENERATED_GATHER_COMPLETE following=%d alive=%d ordinary_whistle=1\n",n->getPlatePikis(),alive);phase=2;phaseStart=observed;routeLeg=0;route=approachRoute(n->mSRT.t,enemy->mSRT.t);return result;}
+
   float dx=enemy->mSRT.t.x-n->mSRT.t.x,dz=enemy->mSRT.t.z-n->mSRT.t.z;
   if(phase==2){
    while(routeLeg<route.size()){float rx=route[routeLeg].x-n->mSRT.t.x,rz=route[routeLeg].z-n->mSRT.t.z;if(rx*rx+rz*rz>25*25)break;std::printf("P2_GENERATED_ROUTE_REACHED leg=%d navi=%.3f,%.3f\n",int(routeLeg),n->mSRT.t.x,n->mSRT.t.z);++routeLeg;}
