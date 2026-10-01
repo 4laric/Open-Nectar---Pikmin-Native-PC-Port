@@ -9,8 +9,7 @@ int failures = 0;
 void check(bool ok, const char* what)
 {
 	if (!ok) {
-		std::printf("FAIL: %s
-", what);
+		std::printf("FAIL: %s\n", what);
 		failures++;
 	}
 }
@@ -37,8 +36,7 @@ int main()
 	// Pair: captain 1 on it, captain 2 far.
 	check(shouldLaunch(2, 5, 5, 0, 0) && !shouldLaunch(2, 400, 0, 0, 0), "pair: only captain 1 launched");
 	if (failures == 0) {
-		std::printf("pc_geyser_gate_test: all passed
-");
+		std::printf("pc_geyser_gate_test: all passed\n");
 	}
 	return failures == 0 ? 0 : 1;
 }
