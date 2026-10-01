@@ -456,7 +456,7 @@ void GoalItem::exitPikis(int pikis, int requesterNaviId)
     if (!pc_bbft_color_access(mOnionColour)) return;
 #if defined(PIKI_PC_PORT)
 	// Co-op only: with one captain the default captain is always the right one, so single-player is untouched.
-	if (requesterNaviId >= 0 && requesterNaviId < 2 && naviMgr->getNaviCount() > 1) {
+	if (requesterNaviId >= 0 && requesterNaviId < PC_COOP_CAPTAINS && naviMgr->getNaviCount() > 1) {
 		mPcExitFor[requesterNaviId] += pikis;
 	}
 #endif
@@ -480,6 +480,11 @@ Piki* GoalItem::exitPiki()
 	Piki* piki                 = (Piki*)pikiMgr->birth();
 	pikiMgr->containerExitMode = false;
 	if (!piki) {
+#if defined(PIKI_PC_PORT)
+		// Co-op: the exit that failed is still counted off by GoalItem::update (mPikisToExit--), so forfeit one
+		// owed exit too; otherwise the debt outlives the queue and the next day-start exit goes to captain 2.
+		(void)pc_coop_onion_exit_next(mPcExitFor);
+#endif
 #if defined(VERSION_GPIJ01) || defined(VERSION_DPIJ01_PIKIDEMO)
 #else
 		ERROR("*** PIKI BIRTH FAILED !!!\n");
@@ -490,8 +495,15 @@ Piki* GoalItem::exitPiki()
 	Navi* navi = naviMgr->getNavi();
 #if defined(PIKI_PC_PORT)
 	// Co-op: the Pikmin join the captain who took them out of the Onion, not always captain 1.
-	const int requesterId = pc_coop_onion_exit_next(mPcExitFor);
+	int requesterId = pc_coop_onion_exit_next(mPcExitFor);
 	if (requesterId >= 0) {
+		// A requester downed while the Onion was dispensing cannot lead a squad: hand the Pikmin to the other captain.
+		bool live[PC_COOP_CAPTAINS] = {};
+		for (int id = 0; id < PC_COOP_CAPTAINS; id++) {
+			Navi* c = naviMgr->getNavi(id);
+			live[id] = c && c->mHealth > 1.0f && c->getCurrState() && c->getCurrState()->getID() != NAVISTATE_Dead;
+		}
+		requesterId = pc_coop_onion_exit_target(requesterId, live);
 		if (Navi* requester = naviMgr->getNavi(requesterId)) {
 			navi = requester;
 			fprintf(stderr, "[coop] onion exit piki joins navi=%d\n", requesterId);

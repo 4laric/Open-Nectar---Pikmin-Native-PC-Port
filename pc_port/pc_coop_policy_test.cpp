@@ -455,6 +455,24 @@ void testOnionExit()
 	check(pc_coop_onion_exit_next(owed) == 0, "onion exit: both owed, lowest id first");
 	check(pc_coop_onion_exit_next(owed) == 1, "onion exit: then the other captain");
 	check(owed[0] == 0 && owed[1] == 0, "onion exit: debts fully repaid");
+
+	// A failed birth forfeits one owed exit (the engine calls _next and drops the result),
+	// so the debt cannot outlive the dispense queue.
+	owed[0] = 0;
+	owed[1] = 2;
+	(void)pc_coop_onion_exit_next(owed);
+	check(owed[1] == 1, "onion exit: failed birth forfeits one owed exit");
+
+	// Downed requester: fall back to the live captain.
+	const bool bothLive[PC_COOP_CAPTAINS] = { true, true };
+	const bool p2Down[PC_COOP_CAPTAINS]   = { true, false };
+	const bool p1Down[PC_COOP_CAPTAINS]   = { false, true };
+	const bool noneLive[PC_COOP_CAPTAINS] = { false, false };
+	check(pc_coop_onion_exit_target(1, bothLive) == 1, "onion target: live requester keeps their Pikmin");
+	check(pc_coop_onion_exit_target(1, p2Down) == 0, "onion target: downed captain 2 -> captain 1");
+	check(pc_coop_onion_exit_target(0, p1Down) == 1, "onion target: downed captain 1 -> captain 2");
+	check(pc_coop_onion_exit_target(1, noneLive) == 1, "onion target: nobody alive -> requester");
+	check(pc_coop_onion_exit_target(-1, p2Down) == -1, "onion target: no requester stays -1");
 }
 
 } // namespace

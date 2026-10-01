@@ -226,4 +226,21 @@ inline int pc_coop_onion_exit_next(int owed[PC_COOP_CAPTAINS])
 	return -1;
 }
 
+// Issue #1028 review minor: the captain who asked may have been downed while
+// the Onion was still dispensing. A downed captain cannot lead a squad, so the
+// Pikmin join the other captain if that one is alive; if neither is alive the
+// requester keeps them. live[] is indexed by navi id (0 / 1).
+inline int pc_coop_onion_exit_target(int requesterId, const bool live[PC_COOP_CAPTAINS])
+{
+	if (requesterId < 0 || requesterId >= PC_COOP_CAPTAINS || live[requesterId]) {
+		return requesterId;
+	}
+	for (int id = 0; id < PC_COOP_CAPTAINS; id++) {
+		if (id != requesterId && live[id]) {
+			return id;
+		}
+	}
+	return requesterId;
+}
+
 #endif // PC_COOP_POLICY_H
