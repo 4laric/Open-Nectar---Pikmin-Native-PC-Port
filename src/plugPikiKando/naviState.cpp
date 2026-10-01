@@ -1,4 +1,7 @@
 #if defined(PIKI_PC_PORT)
+#include "pc_p2_captive_navi_policy.h"
+#endif
+#if defined(PIKI_PC_PORT)
 #include "pc_p2_demon_drop_state.h"
 #include "pc_p2_demon_escape_state.h"
 #include "pc_p2_demon_bridge.h"
@@ -2221,6 +2224,13 @@ void NaviThrowWaitState::procAnimMsg(Navi* navi, MsgAnim* msg)
 	switch (msg->mKeyEvent->mEventType) {
 	case KEY_Action0:
 	{
+#if defined(PIKI_PC_PORT)
+		// Captured by a P2 captor since the grab began (see exec).
+		if (!mHeldThrowPiki || !p2captivenavi::keepThrowPick(mHeldThrowPiki->mNavi != nullptr)) {
+			p2captivenavi::note("grab_key_lost_captain");
+			break;
+		}
+#endif
 		mIsHoldingThrowPiki = true;
 		mHeldThrowPiki->mFSM->transit(mHeldThrowPiki, PIKISTATE_Hanged);
 		break;
@@ -2290,6 +2300,24 @@ void NaviThrowWaitState::exec(Navi* navi)
 		return;
 	}
 	navi->makeVelocity(false);
+
+#if defined(PIKI_PC_PORT)
+	// A P2 captor (Jellyfloat suction, ...) may take the Pikmin this captain
+	// picked to throw while the grab is still pending: the capture clears
+	// Piki::mNavi. It is no longer this captain's to hang or throw; drop it and
+	// walk on (the grab transit to Hanged read the null captain, #972 crash
+	// follow-up).
+	if ((mHeldThrowPiki && !p2captivenavi::keepThrowPick(mHeldThrowPiki->mNavi != nullptr))
+	    || (mPendingThrowPiki && !p2captivenavi::keepThrowPick(mPendingThrowPiki->mNavi != nullptr))) {
+		p2captivenavi::note("throw_pick_lost_captain");
+		mHeldThrowPiki       = nullptr;
+		mPendingThrowPiki    = nullptr;
+		mIsHoldingThrowPiki  = false;
+		navi->mNextThrowPiki = nullptr;
+		transit(navi, NAVISTATE_Walk);
+		return;
+	}
+#endif
 
 #if defined(PIKI_PC_PORT)
 	// Swap only once the original grab has completed. Preserve the captain's
