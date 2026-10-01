@@ -75,6 +75,7 @@ public:
             std::fflush(nullptr);std::_Exit(86);
         }
         ++tick; if(!humanSmoke())require(tick<2400,"frame timeout");
+        if(initialized && tick%60==0){std::printf("P2_SURFACE_WATER_READY_FRAME tick=%d phase=%d state=%d navi=%.3f,%.3f,%.3f wet=%d box=%d ground=%.3f\n",tick,phase,n->getCurrState()->getID(),n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,int(n->mIsInWater),pc_p2_surface_water_box(n->mSRT.t,n->mCollisionRadius),mapMgr?mapMgr->getMinY(n->mSRT.t.x,n->mSRT.t.z,true):0.f);std::fflush(stdout);}
         if(gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
         if(!naviMgr || !pikiMgr || !mapMgr)return result;
         if(!initialized)return result;
@@ -89,6 +90,7 @@ public:
         if(gameflow.mPauseAll||gameflow.mIsUIOverlayActive)return result;
         if(phase==0){
             require(pc_p2_surface_water_active() && pc_p2_surface_water_count()==3,"source water not active");
+            std::printf("P2_SURFACE_WATER_START navi=%.3f,%.3f,%.3f wet=%d box=%d ground=%.3f\n",n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,int(n->mIsInWater),pc_p2_surface_water_box(n->mSRT.t,n->mCollisionRadius),mapMgr->getMinY(n->mSRT.t.x,n->mSRT.t.z,true));std::fflush(stdout);
             require(!n->mIsInWater,"dry shoreline start");
             require(std::fabs(n->mSRT.t.x-220)<5 && std::fabs(n->mSRT.t.z-1000)<5,"actual shoreline generator entry");
             std::printf("P2_SURFACE_WATER_SETTINGS blues_only_water=%d piki_invincible=%d species_probe=%d\n",pc_settings_get_blues_only_water(),pc_settings_get_piki_invincible(),int(speciesProbe()));
