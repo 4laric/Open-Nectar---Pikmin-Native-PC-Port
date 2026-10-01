@@ -40,6 +40,7 @@
 #include "settings/pc_settings_p2d.h"
 #include "system.h"
 #include "teki.h"
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -101,6 +102,9 @@ int storedCount(){int n=0;for(int c=0;c<3;++c)for(int m=0;m<3;++m)n+=pikiInfMgr.
 int cards(){int n=0;const auto d=std::filesystem::path("../../campaign");if(std::filesystem::exists(d))for(auto& f:std::filesystem::directory_iterator(d))if(f.path().extension()==".sav")++n;return n;}
 class CaptainSaveApp final:public PlugPikiApp {
     int frames=0,tick=-1,startDay=-1,initialCards=0;
+    const std::chrono::steady_clock::time_point started=std::chrono::steady_clock::now();
+    bool dayAdvanced=false;
+    void elapsed(const char* phase){std::printf("P2_SAVE_TIME phase=%s elapsed_ms=%lld\n",phase,(long long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-started).count());}
     bool saving=false,shot=false,sawWhistle=false,initialized[2]={false,false},retired=false;
     int teardownGapFrames=0;
     Vector3f movementStart,inactiveStart;
@@ -143,8 +147,13 @@ public:
         guardLiveState(); // never bypass initialized actors for movie/readiness/pause
 
         if(saving){
-            pad(frames%20==0?KBBTN_A:0);
+            // Ordinary held A speeds diary text through ogMessage.cpp; release
+            // two frames per cycle preserves edges for results/card prompts.
+            const bool confirming=gameflow.mWorldClock.mCurrentDay==startDay+1;
+            if(confirming&&!dayAdvanced){dayAdvanced=true;elapsed("day_advanced");}
+            pad(confirming&&frames%20<18?KBBTN_A:0);
             if(cards()==initialCards+1 && gameflow.mWorldClock.mCurrentDay==startDay+1){
+                elapsed("native_commit_observed");
                 std::printf("PASS P2_CAPTAIN_CAMPAIGN_SAVE day_before=%d day_after=%d native_card_generation_count=%d scripted_sunset=1 scripted_results_input=1 saved_bytes_injected=0\n",startDay,gameflow.mWorldClock.mCurrentDay,cards());std::fflush(nullptr);std::_Exit(0);
             }
             require(cards()<=initialCards+1,"unexpected extra checkpoint");
@@ -160,7 +169,7 @@ public:
             int live=0;Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p&&p->isAlive())++live;}
             require(resumePhase?(live+storedCount()>=20):live==20,"campaign field/stock baseline");
             require(pc_p2_captain::adapter()&&pc_p2_captain::captive_count()==0,"fresh live binding");
-            selected(0);tick=0;
+            selected(0);tick=0;elapsed("scene_ready");
             std::printf("P2_SAVE_SCENE phase=%s resumed=%d day=%d live=%d stored=%d health0=%.3f health1=%.3f active_reset=0 ownership_restoration_not_assumed=1\n",resumePhase?"resume":"save",int(pc_randomizer_resumed()),startDay,live,storedCount(),a->mHealth,b->mHealth);
             if(sForceCaptainDown||sForceInactiveDown||forceNullState||forceMissingManager){
                 pendingNegative=true;gameflow.mPauseAll=TRUE;return result;
@@ -181,7 +190,7 @@ public:
         case 100:
             require(shot,"render capture");
             if(resumePhase){require(cards()==initialCards,"resume did not commit another generation");std::printf("PASS P2_CAPTAIN_CAMPAIGN_RESUME day=%d generations=%d controls=1 camera=1 movement=1 whistle=1 stored=%d saved_bytes_injected=0\n",startDay,cards(),storedCount());std::fflush(nullptr);std::_Exit(0);}
-            {auto* core=findCore(gameflow.mGameSection);require(core,"live campaign core");pad();core->forceDayEnd();gameflow.mIsDayEndTriggered=TRUE;saving=true;std::puts("P2_SAVE_SUNSET ordinary_forceDayEnd=1 injected_day=0 injected_population=0");}
+            {auto* core=findCore(gameflow.mGameSection);require(core,"live campaign core");pad();core->forceDayEnd();gameflow.mIsDayEndTriggered=TRUE;saving=true;elapsed("ordinary_sunset_requested");std::puts("P2_SAVE_SUNSET ordinary_forceDayEnd=1 injected_day=0 injected_population=0");}
             break;
         }
         std::fflush(stdout);return result;
