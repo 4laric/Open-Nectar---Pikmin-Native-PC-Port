@@ -343,12 +343,14 @@ int main()
     // Regression: verbose desync diagnostics/pending saves used to push the
     // restart actions beyond the renderer's 14-row cap. Bound every combination
     // conservatively with 11 pixels per glyph and 568 pixels of content width.
+    // DGXGraphics uses a 640-wide logical render mode (dgxGraphics.cpp),
+    // independent of the desktop window dimensions.
     for (int kind = 0; kind < 6; ++kind) for (bool host : {false, true})
-    for (bool launcher : {false, true}) for (int saved = 0; saved < 4; ++saved)
+    for (bool launcher : {false, true}) for (int saved = 0; saved < 5; ++saved)
     for (bool pending : {false, true}) {
         EndInfo e;
         e.kind = static_cast<EndKind>(kind); e.host = host; e.launcher = launcher;
-        e.gen = saved; e.day = saved == 1 ? 3 : 0; e.dayEnded = saved == 2 ? 9 : 0;
+        e.gen = saved; e.day = saved == 1 ? 3 : (saved == 4 ? 1 : 0); e.dayEnded = saved == 2 ? 9 : 0;
         e.pendingGen = pending ? 99 : 0;
         e.exe = std::string(220, 'x'); e.extraArgs = std::string(400, 'x');
         e.forensicsDir = std::string(240, 'x');
@@ -374,6 +376,7 @@ int main()
         CHECK(rows <= 14, "all player actions survive wrapped row cap");
         CHECK(recovery_lines(e) == before, "player formatting leaves console unchanged");
         CHECK(contains(lines, "Details and launch commands"), "console alternative always visible");
+        CHECK(saved != 4 || !contains(lines, "Day 1 saved"), "unknown ended day is never invented");
         CHECK(!pending || contains(lines, "unconfirmed"), "pending save is explicitly unconfirmed");
         CHECK(saved || pending || contains(lines, "new campaign"), "unsaved restart explained");
         if (launcher) CHECK(contains(lines, "new offer code") && contains(lines, "answer code"), "fresh exchange required");

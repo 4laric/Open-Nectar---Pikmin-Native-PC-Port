@@ -653,8 +653,8 @@ inline std::vector<std::string> recovery_banner_lines(const EndInfo& e)
     std::vector<std::string> out;
     const int ended = e.dayEnded > 0 ? e.dayEnded : (e.day > 1 ? e.day - 1 : 0);
     if (e.gen == 0) out.push_back("No day saved yet. Playing again starts a new campaign.");
-    else if (e.day > 0) out.push_back("Last saved day: " + std::to_string(ended > 0 ? ended : e.day) +
-        (ended > 0 ? ". Resume at the start of day " + std::to_string(e.day) + "." : ". Resume from that save."));
+    else if (e.day > 0) out.push_back((ended > 0 ? "Day " + std::to_string(ended) + " saved. " : "Saved progress. ") +
+        "Resume at the start of day " + std::to_string(e.day) + ".");
     else if (ended > 0) out.push_back("Day " + std::to_string(ended) + " saved. Resume at the start of the next day.");
     else out.push_back("A saved day is available. Resume from that save.");
     if (e.pendingGen != 0) {
@@ -662,7 +662,8 @@ inline std::vector<std::string> recovery_banner_lines(const EndInfo& e)
         if (e.gen == 0) out[0] = "No confirmed saved day yet.";
         out.push_back("The latest save is unconfirmed. The host checks it on restart.");
     }
-    out.push_back("Progress since the last saved day will be lost.");
+    out.push_back(e.pendingGen != 0 ? "Resume uses the last day confirmed by the host."
+                                  : "Progress since the last saved day will be lost.");
     if (!e.launcher) {
         out.push_back("Both players: restart with the same launch options.");
         out.push_back("The host sends the saved day to the other player.");
