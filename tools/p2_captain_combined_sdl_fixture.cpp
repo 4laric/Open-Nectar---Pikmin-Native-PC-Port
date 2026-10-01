@@ -42,7 +42,16 @@
 #include "settings/pc_settings_p2d.h"
 #include "system.h"
 #include "teki.h"
+// Legacy inline UI helpers omit unused switch cases. Keep fixture warnings
+// strict while allowing this unchanged production header's existing warnings.
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wswitch"
+#endif
 #include "zen/DrawContainer.h"
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
