@@ -1506,6 +1506,12 @@ add_test(NAME p2_bigtreasure_fx_test COMMAND p2_bigtreasure_fx_test)
 
 
 # Kabuto identity policy (inst2-frogs #871).
+# Camera-facing billboard vertex groups (#1027, Dirigibug balloons): engine-free.
+add_executable(p2_billboard_groups_test tools/p2_billboard_groups_test.cpp)
+target_include_directories(p2_billboard_groups_test PRIVATE pc_port)
+target_compile_options(p2_billboard_groups_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_billboard_groups_test COMMAND p2_billboard_groups_test)
+
 # Antenna Beetle / Dirigibug smoothing helpers (#972): engine-free.
 add_executable(p2_fuefuki_bombsarai_smooth_test tools/p2_fuefuki_bombsarai_smooth_test.cpp)
 target_include_directories(p2_fuefuki_bombsarai_smooth_test PRIVATE pc_port)

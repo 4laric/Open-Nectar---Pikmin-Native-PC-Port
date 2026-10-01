@@ -550,7 +550,14 @@ void applyBlast(BTeki* t, Binding& b, const P2BombSaraiBlastEvent& event)
         const float hpBefore = receiver->mHealth;
         const int stateBefore = isPiki ? static_cast<Piki*>(receiver)->getState() : -1;
         const bool aliveBefore = receiver->isAlive();
-        InteractBomb bomb(owner, event.naviPikiDamage, nullptr);
+        // P2 InteractBomb::actPiki (interactPiki.cpp:304-326) blows every Pikmin
+        // into a lethal PIKISTATE_Blow; the P1 equivalent is its own bomb-rock
+        // Pikmin damage (PikiMgr mBombDamagePiki, retail 765 > Pikmin health),
+        // as in the OWN path. Captains keep fp24 (naviPikiDamage).
+        const float pikiDamage = (pikiMgr && pikiMgr->mPikiParms)
+                                     ? pikiMgr->mPikiParms->mPikiParms.mBombDamagePiki()
+                                     : 765.0f;
+        InteractBomb bomb(owner, isPiki ? pikiDamage : event.naviPikiDamage, nullptr);
         const bool applied = receiver->stimulate(bomb);
         const float hpAfter = receiver->mHealth;
         const int stateAfter = isPiki ? static_cast<Piki*>(receiver)->getState() : -1;
