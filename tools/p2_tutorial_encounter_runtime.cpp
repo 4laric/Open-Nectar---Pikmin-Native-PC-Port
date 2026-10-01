@@ -103,7 +103,10 @@ public:
    require(enemy&&pc_p2_kochappy_registered(enemy)&&pc_p2_kochappy_fsm_suppress_ai(enemy),"Red1 explicit native bank and own source FSM");
    require(enemy->mTekiType==TEKI_Chappy&&std::fabs(enemy->mHealth-200)<.01f,"source Red200 health");
    require(std::fabs(enemy->mGenerator->mGenPosition.x+1153.361206f)<.01f&&std::fabs(enemy->mGenerator->mGenPosition.z-2231.686035f)<.01f,"original enemy generator coordinates");
-   require(std::fabs(enemy->mSRT.t.x+1153.361206f)<.1f&&std::fabs(enemy->mSRT.t.z-2231.686035f)<.1f,"fixed original source center");
+   // GenObjectTeki::birth retains BirthInfo's position in this personality.
+   // Live mSRT may move naturally on sloped terrain before Walk readiness.
+   require(enemy->mPersonality&&std::fabs(enemy->mPersonality->mPosition.x+1153.361206f)<.01f&&std::fabs(enemy->mPersonality->mPosition.y-47.871529f)<.01f&&std::fabs(enemy->mPersonality->mPosition.z-2231.686035f)<.01f,"original source birth coordinates");
+   std::printf("P2_TUTORIAL_SOURCE_BIRTH generator=%u born=%.7f,%.7f,%.7f live=%.7f,%.7f,%.7f terrain_drift=%.3f\n",Target,enemy->mPersonality->mPosition.x,enemy->mPersonality->mPosition.y,enemy->mPersonality->mPosition.z,enemy->mSRT.t.x,enemy->mSRT.t.y,enemy->mSRT.t.z,distance(enemy->mSRT.t,enemy->mPersonality->mPosition));
    require(enemy->mPersonality&&enemy->mPersonality->mPelletColor==-1&&enemy->mPersonality->mPelletKind==0,"source random one-pellet payload mapping");
    require(enemy->getPersonalityI(TekiPersonality::INT_PelletMinCount)==1&&enemy->getPersonalityI(TekiPersonality::INT_PelletMaxCount)==2&&std::fabs(enemy->getPersonalityF(TekiPersonality::FLT_PelletAppearChance)-.4f)<.001f,"source pellet counts/chance");
    onion=itemMgr->getContainer(Red);require(onion&&onion->mGenerator&&onion->mGenerator->_70==OnionTarget,"original Red Onion binding");
