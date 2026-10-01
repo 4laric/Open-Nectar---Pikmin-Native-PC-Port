@@ -2502,3 +2502,7 @@ pikmin_add_ci_fixture(tutorial_encounter tools/p2_tutorial_encounter_runtime.cpp
 if(TARGET pikmin_ci_fixture_tutorial_encounter)
     target_include_directories(pikmin_ci_fixture_tutorial_encounter PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
 endif()
+pikmin_add_ci_fixture(purple_kochappy tools/p2_purple_kochappy_runtime.cpp)
+if(TARGET pikmin_ci_fixture_purple_kochappy)
+    target_include_directories(pikmin_ci_fixture_purple_kochappy PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
+endif()
