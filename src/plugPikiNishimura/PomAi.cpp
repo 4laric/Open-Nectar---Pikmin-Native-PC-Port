@@ -180,7 +180,7 @@ void PomAi::keyFinished()
 		effectMgr->create(EffectMgr::EFF_Teki_DeathWaveS, mPom->mSRT.t, nullptr, nullptr);
 
 		playSound(0);
-		if(!pc_p2_violet(mPom))mPom->createPellet(mPom->mSRT.t, 150.0f, true);
+		if(!pc_p2_violet(mPom) && !pc_p2_ivory(mPom))mPom->createPellet(mPom->mSRT.t, 150.0f, true);
 	}
 
 	mPom->setMotionFinish(1);

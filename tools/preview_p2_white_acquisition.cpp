@@ -72,7 +72,8 @@ public:
   else if(initialized){std::puts("P2_FIXTURE_CAPTAIN_DOWN missing_captain outcome=BLOCKED");std::fflush(nullptr);std::_Exit(86);}
   require(++frames<5000,"frame timeout");
   if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
-  if(!pc_p2_preview_ready()||!n||!n->getCurrState()||gameflow.mPauseAll||gameflow.mIsUIOverlayActive||frames<90)return result;
+  if(!pc_p2_preview_ready()||!n||!n->getCurrState()||frames<90)return result;
+  if(gameflow.mPauseAll||gameflow.mIsUIOverlayActive){if(frames%60==0){std::printf("P2_WHITE_INPUT_GATE frame=%d phase=%d paused=%d overlay=%d nstate=%d\n",frames,phase,int(gameflow.mPauseAll),int(gameflow.mIsUIOverlayActive),n->getCurrState()->getID());std::fflush(stdout);}return result;}
   ++ticks;
   for(int f=0;f<DEMOFLAG_COUNT;++f)playerState->mDemoFlags.setFlagOnly(f);
   if(phase==0 && n->getCurrState()->getID()==NAVISTATE_Starting)return result;
@@ -86,7 +87,7 @@ public:
    n->mKontroller=new AcquisitionController();phase=1;ticks=0;
   }
   if(phase==1&&ticks>=100){goal=flower->mSRT.t;phase=2;ticks=0;}
-  if(phase==2&&ticks>=5){phase=3;ticks=0;}
+  if(phase==2){float dx=flower->mSRT.t.x-n->mCursorWorldPos.x,dz=flower->mSRT.t.z-n->mCursorWorldPos.z;float bx=flower->mSRT.t.x-n->mSRT.t.x,bz=flower->mSRT.t.z-n->mSRT.t.z;if(dx*dx+dz*dz<900 && bx*bx+bz*bz>2500){phase=3;ticks=0;}}
   int red=0,white=0,heads=0,captured=0,flying=0;PikiHeadItem* head=nullptr;
   Iterator actors(pikiMgr);CI_LOOP(actors){Piki* p=static_cast<Piki*>(*actors);if(!p->isAlive())continue;if(pc_p2_is_white(p))++white;else ++red;if(p->getStickObject()==flower)++captured;if(p->getState()==PIKISTATE_Flying)++flying;}
   Iterator sprouts(itemMgr->getPikiHeadMgr());CI_LOOP(sprouts){PikiHeadItem* p=static_cast<PikiHeadItem*>(*sprouts);if(p->isAlive()){++heads;require(pc_p2_species(p)==P2SpeciesWhite,"non-White sprout");if(!head&&p->canPullout())head=p;}}
