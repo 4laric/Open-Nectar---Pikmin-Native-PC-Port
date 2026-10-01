@@ -424,7 +424,14 @@ public:
         if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive) { gameflow.mMoviePlayer->requestSkip(); return result; }
         if(!n||!pikiMgr||!itemMgr||!bossMgr||!tekiMgr||!mapMgr||!n->getCurrState()
             ||gameflow.mPauseAll||gameflow.mIsUIOverlayActive) return result;
-        if(mode("persistence_resume")) { resumePersistence(n); return result; }
+        if(mode("persistence_resume")) {
+            // The restored captain exists during ship/map entry before the
+            // playable stage actors are ready. Match the ordinary fixture's
+            // active walk/idle gate before checking live combat bindings.
+            const int state=n->getCurrState()->getID();
+            if(state==NAVISTATE_Walk || state==NAVISTATE_Idle) resumePersistence(n);
+            return result;
+        }
         if (!acquired) {
             const int state=n->getCurrState()->getID();
             if(state==NAVISTATE_Walk||state==NAVISTATE_Idle) {
