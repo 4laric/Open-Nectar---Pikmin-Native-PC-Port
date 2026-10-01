@@ -459,17 +459,34 @@ def main():
         for f in (repo / sub).rglob("*"):
             if f.suffix in (".cpp", ".h", ".hpp", ".c") and f.is_file():
                 try:
-                    names.update(_re.findall(r'getenv\("(PIKMIN_NETPLAY_[A-Z0-9_]+)"\)',
+                    names.update(_re.findall(r'getenv\("(PIKMIN_(?:NETPLAY|TEST)_[A-Z0-9_]+)"\)',
                                              f.read_text(encoding="utf-8", errors="replace")))
                 except OSError:
                     pass
-    missing = sorted(n for n in names if n not in run_pair.SCRUB_KEYS and n not in launch_pair.SCRUB_KEYS)
-    check(not missing, f"every getenv(PIKMIN_NETPLAY_*) knob is in run_pair.SCRUB_KEYS ({len(names)} scanned; missing {missing})")
+    missing = sorted(n for n in names if n not in run_pair.SCRUB_KEYS and n not in launch_pair.SCRUB_KEYS
+                     and not n.startswith(run_pair.SCRUB_PREFIXES))
+    check(not missing, f"every getenv(PIKMIN_NETPLAY_*/PIKMIN_TEST_*) knob is in run_pair.SCRUB_KEYS ({len(names)} scanned; missing {missing})")
     leaky = {"PIKMIN_NETPLAY_CAMERA_LEAD": "0", "PIKMIN_NETPLAY_FUTURE_KNOB": "1", "PIKMIN_INPUT_RECORD": "x",
              "pikmin_netplay_hud": "1", "PATH": "keep", "PIKMIN_RANDOMIZER_TEST_BACKGROUND": "keep"}
     kept = run_pair.scrub_env(dict(leaky))
     check(set(kept) == {"PATH", "PIKMIN_RANDOMIZER_TEST_BACKGROUND"},
           f"scrub_env drops every PIKMIN_NETPLAY_*/PIKMIN_INPUT_* name incl. unknown and lower-case ({sorted(kept)})")
+    kept = run_pair.scrub_env({"PIKMIN_TEST_CLOCK_TOD": "1", "PIKMIN_TEST_ONLY_PELLET_BONUS": "1",
+                               "PIKMIN_TEST_ONLY_FUTURE_KNOB": "1", "PATH": "keep"})
+    check(set(kept) == {"PATH"}, f"scrub_env drops PIKMIN_TEST_CLOCK_TOD and every PIKMIN_TEST_ONLY_* name ({sorted(kept)})")
+
+    # #1028 review minor: run_pair refuses a scripted input file shorter than --ticks + 50 records.
+    with tempfile.TemporaryDirectory() as tmp3:
+        short = Path(tmp3) / "short.pkni"
+        run_gen(100, 1, short)
+        recs = (short.stat().st_size - 10) // 56
+        check(run_pair.check_script_length(short, "host", recs - 50) == recs,
+              "check_script_length accepts exactly ticks + 50 records")
+        try:
+            run_pair.check_script_length(short, "host", recs - 49)
+            check(False, "check_script_length refuses a file one record short")
+        except SystemExit as e:
+            check("needs at least" in str(e), "check_script_length refuses a file one record short")
 
 
     # #965 lane H: camera_lead_probe judges latency on the submit frame (moving delay),

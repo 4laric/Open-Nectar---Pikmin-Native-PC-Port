@@ -335,6 +335,24 @@ def gen_inputs(ticks, seed, out):
 PKNI_HEADER = 10  # magic(4) + version/pad count/record size (3 x u16 LE)
 
 
+def check_script_length(path, who, ticks):
+    """#1028 review minor: a scripted --input-host/--input-join file shorter than
+    --ticks + 50 records runs out mid-pair and the peer then plays hands-off (or
+    the run silently tests less than asked). Refuse it up front."""
+    data = Path(path).read_bytes()
+    if data[:4] != b"PKNI":
+        raise SystemExit(f"run_pair: {who} input {path} is not a PKNI file")
+    version, pads, size = struct.unpack_from("<HHH", data, 4)
+    if version != 2 or pads != 4 or size != 56:
+        raise SystemExit(f"run_pair: {who} input {path}: unsupported PKNI v{version} pads={pads} size={size}")
+    records = (len(data) - PKNI_HEADER) // size
+    need = ticks + 50
+    if records < need:
+        raise SystemExit(f"run_pair: {who} input {path} has {records} records but --ticks {ticks} needs at "
+                         f"least {need} (--ticks + 50); regenerate it longer")
+    return records
+
+
 def neutralize_after(path, keep):
     """M4 B1 fix round 1: keep the first `keep` records of a v2 .pkni as
     generated and make pad 0 hands-off afterwards (buttons, both sticks,
@@ -428,6 +446,7 @@ SCRUB_KEYS = (
     "PIKMIN_NETPLAY_LOCAL_PROMPT_LABELS",  # #1029 test escape hatch
     "PIKMIN_TEST_PROMPT_GAMEPAD",          # #1029 test knobs (not PIKMIN_NETPLAY_*)
     "PIKMIN_TEST_RAW_START",
+    "PIKMIN_TEST_CLOCK_TOD",               # #1029 forced time-of-day clock (a stale export changes the sim)
     "PIKMIN_NETPLAY_PROFILE_LOG",
     "PIKMIN_NETPLAY_STALL_TRACE",
     "PIKMIN_NETPLAY_UDP_BIND",
@@ -453,7 +472,9 @@ SCRUB_KEYS = (
 # variables it needs, and callers pass test knobs through --env/--env-host/
 # --env-join. There is deliberately no allow-list: nothing in tools/netplay
 # relies on inheriting one of these from the parent shell.
-SCRUB_PREFIXES = ("PIKMIN_NETPLAY_", "PIKMIN_INPUT_")
+# PIKMIN_TEST_ONLY_* are the sim-changing TEST_ONLY knobs (#1034 and later): a
+# prefix rule, so one added tomorrow is covered too.
+SCRUB_PREFIXES = ("PIKMIN_NETPLAY_", "PIKMIN_INPUT_", "PIKMIN_TEST_ONLY_")
 
 
 def scrub_env(env):
@@ -810,6 +831,7 @@ def main(argv=None):
     join_inputs = out / f"{tag}join_inputs.pkni"
     for given, dst, seed in ((a.input_host, host_inputs, a.seed_a), (a.input_join, join_inputs, a.seed_b)):
         if given is not None:
+            check_script_length(given, "host" if dst is host_inputs else "join", a.ticks)
             shutil.copyfile(str(given), str(dst))  # coop fix: a scripted file (gen_coop_input.py)
         else:
             gen_inputs(a.ticks + 50, seed, dst)
