@@ -391,6 +391,7 @@ SCRUB_KEYS = (
     "PIKMIN_NETPLAY_TEST_HOST_DIE_AT_BARRIER",
     "PIKMIN_NETPLAY_TEST_BULK_DROP_SAVE",
     "PIKMIN_NETPLAY_TEST_COOP_EVENTS",
+    "PIKMIN_NETPLAY_TEST_NAVI_TO_BOSS",
     "PIKMIN_NETPLAY_TEST_COOP_PERTURB",
     # M4 gap-fix lane S (fix round 1, MN1): a stale export must never turn the
     # load guard off or inject a stall into a regression pair.
