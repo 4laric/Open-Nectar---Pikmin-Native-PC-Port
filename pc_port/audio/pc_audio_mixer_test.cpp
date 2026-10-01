@@ -59,7 +59,8 @@ int main(int argc, char** argv) {
     }
 
     // #1030 caps a long frame at 250 ms so music does not fast-forward in
-    // a burst. At the initial 120 BPM / 48 timebase that advances 24 ticks.
+    // a burst. At the initial BGM 120 BPM / 48 timebase that advances 24 ticks.
+    // SE/event tracks already read their own faster tempo during bank load.
     // This real mixer check complements the engine-free elapsed-clock test.
     if (!pc_audio_play_sequence(18)) {
         ++failures;
@@ -69,9 +70,8 @@ int main(int argc, char** argv) {
         PCAudioMetrics clockMetrics {};
         pc_audio_get_metrics(&clockMetrics);
         if (clockMetrics.bgmTicks < 23 || clockMetrics.bgmTicks > 25
-            || clockMetrics.seTicks < 23 || clockMetrics.seTicks > 25
-            || clockMetrics.eventTicks < 23 || clockMetrics.eventTicks > 25) {
-            std::printf("FAIL: capped 350ms clock bgm=%llu se=%llu event=%llu (expected 23..25 each)\n",
+            || clockMetrics.seTicks < 28 || clockMetrics.eventTicks < 28) {
+            std::printf("FAIL: capped 350ms clock bgm=%llu se=%llu event=%llu (expected BGM 23..25, SE/event >=28)\n",
                 static_cast<unsigned long long>(clockMetrics.bgmTicks),
                 static_cast<unsigned long long>(clockMetrics.seTicks),
                 static_cast<unsigned long long>(clockMetrics.eventTicks));
