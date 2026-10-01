@@ -13,6 +13,14 @@
 #include "pc_p2_cave_rooms_engine.h"
 #include "pc_p2_pom_policy.h"
 #include "pc_p2_receipt_host.h"
+#include "pc_p2_cave.h"
+#include "pc_p2_cave_transfer.h"
+#include "pc_p2_teki_lifetime.h"
+#include "Pom.h"
+#include "Generator.h"
+#include "Stickers.h"
+#include <cmath>
+#include <set>
 #include <fstream>
 #include <filesystem>
 #include <sstream>
@@ -45,10 +53,103 @@ struct BudActor {
     float y = 0.0f;
     float z = 0.0f;
     bool done = false;
+    unsigned generator = 0;
+    Pom* body = nullptr;
 };
 
 std::vector<BudActor> actors;
 int conversionTotal = 0;
+bool bodyReady = false;
+bool bodyPrepared = false;
+unsigned long bodyScene = 0;
+std::string bodyToken;
+std::set<std::string> activatedBodyTokens;
+
+[[noreturn]] void invalidBody(const char* reason)
+{
+    std::fprintf(stderr,"Invalid P2 cave Pom profile: %s\n",reason);
+    std::abort();
+}
+
+BudActor* boundBody(const Pom* pom)
+{
+    if (!bodyReady || !pom || bodyScene != pc_p2_scene_generation()) return nullptr;
+    const auto* layout = pc_p2_cave_rooms_layout();
+    if (!layout || !pc_p2_cave_body_profile_context(layout->seed, layout->cave.c_str(),
+            layout->floor, bodyToken.c_str())) return nullptr;
+    for (auto& actor : actors)
+        if (actor.body == pom && pom->mGenerator && pom->mGenerator->_70 == actor.generator)
+            return &actor;
+    return nullptr;
+}
+
+void setupBodies(const P2CaveRoomLayout& layout)
+{
+    std::ifstream in("p2-cave-route-pom.txt");
+    std::string magic, key, profile, cave, token, extra;
+    unsigned long long seed = 0; int floor = 0, count = 0;
+    bool valid = bool(in >> magic >> key >> profile) && magic == "P2_CAVE_ROUTE_POM_1"
+        && key == "profile" && profile == "wfg-pw-acquisition-v1";
+    valid = valid && bool(in >> key >> seed) && key == "seed";
+    valid = valid && bool(in >> key >> cave) && key == "cave";
+    valid = valid && bool(in >> key >> floor) && key == "floor";
+    valid = valid && bool(in >> key >> token) && key == "token";
+    valid = valid && bool(in >> key >> count) && key == "buds" && count == 2;
+    if (!valid || cave != "forest_2" || floor != 1 || seed != layout.seed
+        || cave != layout.cave || floor != layout.floor || token.size() != 32
+        || token.find_first_not_of("0123456789abcdef") != std::string::npos)
+        invalidBody("identity/context");
+    std::ifstream entryFile("p2-cave-entry.txt");
+    std::ostringstream entryText; entryText << entryFile.rdbuf();
+    P2CaveEntry entry; std::string entryError;
+    if (!entryFile || entryFile.bad() || !p2_cave_parse_entry(entryText.str(),entry,entryError)
+        || entry.schema != 2 || entry.floor != floor || entry.token != token)
+        invalidBody("full staged ENTRY2 identity");
+    if (activatedBodyTokens.count(token)) invalidBody("reused scene token");
+    std::set<unsigned> ids;
+    int layoutBuds = 0;
+    for (const auto& unit : layout.units) if (unit.kind == "bud") ++layoutBuds;
+    if (layoutBuds != 2) invalidBody("layout bud count");
+    for (int i = 0; i < 2; ++i) {
+        BudActor actor; unsigned long long generator;
+        if (!(in >> actor.slot_id >> generator >> actor.colour_index >> actor.x >> actor.y >> actor.z >> actor.count)
+            || generator > 0xffffffffULL || !ids.insert(static_cast<unsigned>(generator)).second
+            || actor.slot_id != "forest_2:f1:bud:" + std::to_string(i)
+            || actor.colour_index != 3+i || actor.count != 5
+            || !std::isfinite(actor.x) || !std::isfinite(actor.y) || !std::isfinite(actor.z))
+            invalidBody("row");
+        actor.generator = static_cast<unsigned>(generator);
+        actor.colour = i == 0 ? "purple" : "white";
+        const auto* unit = p2CaveRoomsFind(layout,actor.slot_id);
+        const float ground = mapMgr ? mapMgr->getMinY(actor.x,actor.z,true) : NAN;
+        if (!unit || unit->kind != "bud" || actor.x != p2CaveRoomsWorldX(layout,*unit)
+            || actor.z != p2CaveRoomsWorldZ(layout,*unit) || !mapMgr
+            || !std::isfinite(ground) || std::fabs(actor.y-ground) > 1.0f)
+            invalidBody("layout/body position");
+        actor.segment = unit->segment_index;
+        actors.push_back(actor);
+    }
+    if ((in >> extra) || !in.eof() || !bossMgr) invalidBody("trailing data or absent manager");
+    int bodies = 0;
+    Iterator it(bossMgr);
+    CI_LOOP(it) {
+        Creature* creature = *it;
+        if (!creature || creature->mObjType != OBJTYPE_Pom) continue;
+        ++bodies;
+        auto* pom = static_cast<Pom*>(creature);
+        BudActor* match = nullptr;
+        for (auto& actor : actors) if (pom->mGenerator && actor.generator == pom->mGenerator->_70) match = &actor;
+        if (!match || match->body || !std::isfinite(pom->mSRT.t.x)
+            || !std::isfinite(pom->mSRT.t.y) || !std::isfinite(pom->mSRT.t.z)
+            || std::fabs(pom->mSRT.t.x-match->x)>1.0f
+            || std::fabs(pom->mSRT.t.y-match->y)>1.0f || std::fabs(pom->mSRT.t.z-match->z)>1.0f)
+            invalidBody("actual generator/body set");
+        match->body = pom;
+    }
+    if (bodies != 2 || !actors[0].body || !actors[1].body) invalidBody("missing body");
+    bodyToken = token;
+    bodyPrepared = true;
+}
 
 p2pom::Species speciesForColour(const std::string& colour)
 {
@@ -89,6 +190,37 @@ bool birthAndPluck(BudActor& actor)
 
 bool pc_p2_cave_bud_active() { return !actors.empty(); }
 
+bool pc_p2_cave_bud_body_profile()
+{
+    std::error_code error;
+    const bool exists = std::filesystem::exists("p2-cave-route-pom.txt",error);
+    if (error) invalidBody("unreadable profile path");
+    return exists || bodyReady || bodyPrepared;
+}
+
+int pc_p2_cave_bud_body_species(const Pom* pom)
+{
+    const auto* actor = boundBody(pom);
+    return actor ? actor->colour_index : -1;
+}
+
+int pc_p2_cave_bud_body_remaining(const Pom* pom)
+{
+    const auto* actor = boundBody(pom);
+    return actor ? actor->count-actor->used : 0;
+}
+
+void pc_p2_cave_bud_body_output(const Pom* pom, bool sameSpecies)
+{
+    auto* actor = boundBody(pom);
+    if (!actor || actor->used >= actor->count) invalidBody("unauthorized output");
+    if (sameSpecies) ++actor->refunds; else ++actor->used;
+    ++actor->conversions; ++conversionTotal;
+    actor->done = actor->used == actor->count;
+    std::printf("P2_CAVE_POM_OUTPUT slot=%s species=%d refund=%d used=%d budget=5 ordinary_pluck_pending=1\n",
+        actor->slot_id.c_str(),actor->colour_index,int(sameSpecies),actor->used);
+}
+
 int pc_p2_cave_bud_count() { return static_cast<int>(actors.size()); }
 
 int pc_p2_cave_bud_conversions() { return conversionTotal; }
@@ -107,18 +239,29 @@ bool pc_p2_cave_bud_position(const char* colour, Vector3f& out)
 
 void pc_p2_cave_bud_shutdown()
 {
+    bodyReady = false;
+    bodyPrepared = false;
+    bodyToken.clear();
     actors.clear();
     conversionTotal = 0;
 }
 
 void pc_p2_cave_bud_setup()
 {
+    bodyReady = false;
+    bodyPrepared = false;
     actors.clear();
     conversionTotal = 0;
     const P2CaveRoomLayout* layout = pc_p2_cave_rooms_layout();
-    if (!layout) return;
+    if (!layout) {
+        if (pc_p2_cave_bud_body_profile()) invalidBody("missing layout");
+        return;
+    }
+    const bool bodyProfile = pc_p2_cave_bud_body_profile();
+    if (bodyProfile) setupBodies(*layout);
     const std::vector<p2cavebud48::BudPlan> plans = p2cavebud48::planBuds(*layout, p2pom::IpTtlBudget);
     for (const p2cavebud48::BudPlan& plan : plans) {
+        if (bodyProfile) break;
         BudActor actor;
         actor.slot_id = plan.slot_id;
         actor.colour = plan.colour;
@@ -158,6 +301,34 @@ void pc_p2_cave_bud_setup()
 
 void pc_p2_cave_bud_tick()
 {
+    if (pc_p2_cave_bud_body_profile()) {
+        if (!bodyReady) {
+            const auto* layout = pc_p2_cave_rooms_layout();
+            if (!bodyPrepared || !layout || !pc_p2_cave_body_profile_context(layout->seed,
+                layout->cave,layout->floor,bodyToken)) invalidBody("unready runtime context");
+            if (activatedBodyTokens.count(bodyToken)) invalidBody("reused runtime token");
+            if (!bossMgr) invalidBody("missing runtime body manager");
+            int currentBodies = 0;
+            Iterator bodyIt(bossMgr);
+            CI_LOOP(bodyIt) {
+                Creature* c = *bodyIt;
+                if (!c || c->mObjType != OBJTYPE_Pom) continue;
+                ++currentBodies;
+                bool found = false;
+                for (const auto& actor : actors) if (actor.body == c && c->mGenerator
+                    && c->mGenerator->_70 == actor.generator) found = true;
+                if (!found) invalidBody("changed runtime body inventory");
+            }
+            if (currentBodies != 2) invalidBody("missing runtime bodies");
+            bodyScene = pc_p2_scene_generation();
+            activatedBodyTokens.insert(bodyToken);
+            bodyReady = true;
+            // Recheck actual identities before arming the native AI.
+            for (const auto& actor : actors) if (!boundBody(actor.body)) invalidBody("stale body");
+            std::printf("P2_CAVE_POM_PROFILE cave=forest_2 floor=1 bodies=2 scene=%lu ordinary_pluck=1\n",bodyScene);
+        }
+        return; // Real Pom AI owns capture/output; no proxy or auto-pluck.
+    }
     if (actors.empty() || !pikiMgr) return;
     for (BudActor& actor : actors) {
         while (actor.pending > 0 && birthAndPluck(actor)) --actor.pending;
@@ -212,6 +383,17 @@ void pc_p2_cave_bud_tick()
 
 bool pc_p2_cave_bud_pending()
 {
+    if (pc_p2_cave_bud_body_profile()) {
+        if (!bodyReady || bodyScene != pc_p2_scene_generation()) return true;
+        for (const auto& actor : actors) {
+            if (!boundBody(actor.body)) return true;
+            Stickers stickers(actor.body); Iterator it(&stickers);
+            CI_LOOP(it) { Creature* c = *it; if (c && c->isAlive() && c->isPiki()) return true; }
+        }
+        if (!itemMgr) return true;
+        Iterator it(itemMgr);
+        CI_LOOP(it) { Creature* c = *it; if (c && c->mObjType == OBJTYPE_Pikihead && c->isAlive()) return true; }
+    }
     for (const BudActor& actor : actors) if (actor.pending) return true;
     return false;
 }

@@ -4,6 +4,7 @@
 #include "pc_p2_species.h"
 #include "pc_p2_preview.h"
 #include "pc_p2_cave.h"
+#include "pc_p2_cave_bud_actor.h"
 #include "pc_bbft.h"
 #include "Piki.h"
 #include "PikiHeadItem.h"
@@ -93,19 +94,24 @@ bool pc_p2_draw_white(Piki* piki,Graphics& gfx){
 }
 
 bool pc_p2_ivory(const Pom* pom){
+    if(pc_p2_cave_bud_body_profile())return pom && pc_p2_whites_enabled() && pc_p2_cave_bud_body_species(pom)==P2SpeciesWhite;
     return pom && pc_p2_whites_enabled() && pom->mGenerator && ivoryGenerators.count(pom->mGenerator->_70);
 }
 
 int pc_p2_convert_ivory(Pom* pom,int remaining){
     if(!pc_p2_ivory(pom))return -1;
+    const bool body=pc_p2_cave_bud_body_profile();
+    if(body)remaining=pc_p2_cave_bud_body_remaining(pom);
     Stickers stickers(pom);Iterator it(&stickers);P2IvoryBudget budget{remaining};
     CI_LOOP(it){Creature* creature=*it;if(!creature||!creature->isAlive()||!creature->isPiki())continue;Piki* p=static_cast<Piki*>(creature);
         const bool alreadyWhite=pc_p2_is_white(p);
-        if(!budget.accepts(alreadyWhite)){p->endStickObject();p->mFSM->transit(p,PIKISTATE_Normal);p->changeMode(PikiMode::FreeMode,naviMgr->getNavi());it.dec();continue;}
+        if((body && budget.slots>=remaining) || !budget.accepts(alreadyWhite)){p->endStickObject();p->mFSM->transit(p,PIKISTATE_Normal);p->changeMode(PikiMode::FreeMode,naviMgr->getNavi());it.dec();continue;}
         PikiHeadItem* sprout=static_cast<PikiHeadItem*>(itemMgr->birth(OBJTYPE_Pikihead));
         if(!sprout){p->endStickObject();p->mFSM->transit(p,PIKISTATE_Normal);p->changeMode(PikiMode::FreeMode,naviMgr->getNavi());it.dec();continue;}
         Vector3f position=pom->mSRT.t;position.y+=50;sprout->init(position);pc_p2_set_species(sprout,P2SpeciesWhite);
-        float angle=budget.births*1.256637f;sprout->mVelocity.set(120*std::sin(angle),500,120*std::cos(angle));sprout->startAI(0);C_SAI(sprout)->start(sprout,PikiHeadAI::PIKIHEAD_Flying);
-        p->setEraseKill();p->kill(false);it.dec();budget.completed(alreadyWhite);}
+        float angle=budget.births*1.256637f;const float horizontal=body?110.f:120.f,vertical=body?750.f:500.f;
+        sprout->mVelocity.set(horizontal*std::sin(angle),vertical,horizontal*std::cos(angle));sprout->startAI(0);C_SAI(sprout)->start(sprout,PikiHeadAI::PIKIHEAD_Flying);
+        p->setEraseKill();p->kill(false);it.dec();budget.completed(alreadyWhite);
+        if(body)pc_p2_cave_bud_body_output(pom,alreadyWhite);}
     std::printf("P2_IVORY_CONVERT count=%d slots=%d\n",budget.births,budget.slots);return budget.slots;
 }

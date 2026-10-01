@@ -16,6 +16,8 @@
 #include "pc_p2_cave_transfer.h"
 #include "pc_p2_cave_route_policy.h"
 #include "pc_p2_teki_lifetime.h"
+#include "pc_randomizer.h"
+#include "pc_p2_ship_store.h"
 #include "pc_p2_bulbmin.h"
 #include "pc_p2_cave_generator.h"  // lane 41 (#480) runtime generator hook
 #include "pc_p2_cave_rooms_engine.h"  // lane 44 (#482) proxy room/unit instantiation
@@ -70,6 +72,8 @@ bool surfaceRouteLoaded=false;
 unsigned long surfaceContextScene=0;
 unsigned routeSpeciesMask=0;
 std::set<std::string> activatedSurfaceTokens;
+bool bodyContextReady=false;
+unsigned long bodyContextScene=0;
 void resetRouteSpecies(){routeSpeciesMask=0;}
 bool online(){return pc_netplay_session_active && pc_netplay_session_active();}
 bool tutorialSurfaceStage(){
@@ -237,6 +241,18 @@ bool pc_p2_cave_route_species_requested(int species){
         || pc_p2_scene_generation()!=surfaceContextScene){resetRouteSpecies();return false;}
     return (species==P2SpeciesPurple || species==P2SpeciesWhite) && (routeSpeciesMask&(1u<<species));
 }
+bool pc_p2_cave_body_profile_context(unsigned long long seed,const std::string& cave,
+        int floor,const std::string& boundaryToken){
+    if(!bodyContextReady || completed || online() || pc_p2_scene_generation()!=bodyContextScene
+        || !pc_pikipelago_room_preview() || !flowCont.mCurrentStage || !flowCont.mCurrentStage->mFileName
+        || std::string(flowCont.mCurrentStage->mFileName)!="stages/chal0.ini"
+        || pc_randomizer_enabled() || pc_randomizer_purple_campaign() || p2ship::stock.total()!=0)return false;
+    const auto* layout=pc_p2_cave_rooms_layout();
+    return layout && cave=="forest_2" && layout->cave==cave && layout->seed==seed
+        && layout->floor==floor && floorId==floor && floor==1 && checkpointSchema==2
+        && token==boundaryToken && !beasts && !tutorialEntry
+        && pc_p2_purples_enabled() && pc_p2_whites_enabled();
+}
 bool pc_p2_cave_is_beasts(){return beasts;}
 std::string pc_p2_cave_boundary_token(){return token;}
 std::string pc_p2_cave_receipt_prefix(){return floorId?"floor"+std::to_string(floorId)+":":"";}
@@ -267,6 +283,7 @@ bool pc_p2_tutorial2_entry_check(const char* path, int* floorOut){
     return ok!=0;
 }
 void pc_p2_cave_setup(){
+    bodyContextReady=false;bodyContextScene=0;
     resetRouteSpecies();surfaceContextScene=pc_p2_scene_generation();
     surfaceRoute=P2CaveSurfaceRoute{};surfaceRouteLoaded=false;
     const char* opt=std::getenv("PIKMIN_CAVE_NAV_DIAGNOSTICS");
@@ -342,6 +359,26 @@ void pc_p2_cave_setup(){
     if(in>>extra || !in.eof())invalid("trailing data");
     std::vector<Piki*> spawned;Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(p->isAlive())spawned.push_back(p);}
     if(spawned.size()!=squad.size())invalid("spawn count differs from checkpoint");
+    const bool bodyProfile=pc_p2_cave_bud_body_profile();
+    if(bodyProfile){
+        if(!checkpointLayout || checkpointLayout->cave!="forest_2" || checkpointLayout->floor!=floor
+            || floor!=1 || checkpointSchema!=2 || beasts || tutorialEntry || online()
+            || !flowCont.mCurrentStage || !flowCont.mCurrentStage->mFileName
+            || std::string(flowCont.mCurrentStage->mFileName)!="stages/chal0.ini"
+            || pc_randomizer_enabled() || pc_randomizer_purple_campaign() || p2ship::stock.total()!=0
+            || !pc_p2_purples_enabled() || !pc_p2_whites_enabled())invalid("WFG body context");
+        // This bounded standalone profile does not impersonate campaign stock
+        // or first-meeting flags. With empty real ship storage, staying below
+        // either source species cap admits both met/unmet WFG branches.
+        int purple=0,white=0;
+        for(const auto& survivor:squad){purple+=survivor.species==3;white+=survivor.species==4;}
+        if(purple>=20 || white>=20)invalid("WFG source species cap");
+    }
+    for(const auto& survivor:squad){
+        if(survivor.species==3 && !pc_p2_purples_enabled())invalid("Purple assets unavailable");
+        if(survivor.species==4 && !pc_p2_whites_enabled())invalid("White assets unavailable");
+    }
+    Navi* n=naviMgr->getNavi();if(!n || C_NAVI_PARM(n,mHealth)<=0)invalid("captain unavailable");
     for(size_t i=0;i<squad.size();++i){
         Piki* p=spawned[i];p->mHappa=squad[i].maturity;
         if(squad[i].species==3 && !pc_p2_purples_enabled())invalid("Purple assets unavailable");
@@ -352,7 +389,6 @@ void pc_p2_cave_setup(){
         if(squad[i].species==5)pc_p2_make_bulbmin(p);
         std::printf("P2_CAVE_RESTORE species=%d maturity=%d\n",squad[i].species,squad[i].maturity);
     }
-    Navi* n=naviMgr->getNavi();if(!n || C_NAVI_PARM(n,mHealth)<=0)invalid("captain unavailable");
     n->mHealth=C_NAVI_PARM(n,mHealth)*health;
     floorId=floor;
     if(!beasts && tutorialEntry){
@@ -389,6 +425,11 @@ void pc_p2_cave_setup(){
         std::printf("P2_CAVE_VISUAL_READY kind=%s vertices=%d\n",kind.c_str(),transitionShape->mVertexCount);
     }
     std::printf("P2_CAVE_READY floor=%d survivors=%d health=%.9g\n",floor,count,health);std::fflush(stdout);
+    if(bodyProfile){
+        // GameCoreSection finalSetup advances the scene after preview/cave setup.
+        // Bodies arm on their first ordinary tick, never in bootstrap callbacks.
+        bodyContextScene=pc_p2_scene_generation()+1;bodyContextReady=true;
+    }
     pc_p2_cave_generate_run(); // lane cave-generate-provider (#129): opt-in manifest sidecar only; reviewed hook, pending #186
     if(beasts && floor>=3){std::printf("P2_BEASTS_ENTRY_READY floor=%d token=%s descent=disabled\n",floor,token.c_str());std::fflush(stdout);}
 }

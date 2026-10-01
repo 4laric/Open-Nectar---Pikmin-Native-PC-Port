@@ -20,3 +20,6 @@ bool pc_p2_cave_surface_route_active();
 // Narrow, asset-validated ordinary surface checkpoint context; never a global
 // species switch. Invalidated by scene generation/profile change or completion.
 bool pc_p2_cave_route_species_requested(int species);
+// Runtime-only WFG body context after entry restoration and scene final setup.
+bool pc_p2_cave_body_profile_context(unsigned long long seed,const std::string& cave,
+    int floor,const std::string& boundaryToken);
