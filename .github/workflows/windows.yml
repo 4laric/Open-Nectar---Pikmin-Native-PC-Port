@@ -42,6 +42,7 @@ jobs:
       # For pull_request events github.sha is the synthetic merge commit; name
       # the artifact after the commit that was actually pushed.
       HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      P2_CHALLENGE_GUARD_INCLUDE_DIR: ${{ github.workspace }}/.ci-root/scripts
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_MAXSIZE: 3G
@@ -64,6 +65,19 @@ jobs:
             mingw-w64-x86_64-SDL2
             mingw-w64-x86_64-ccache
             mingw-w64-x86_64-pkgconf
+
+      - name: Checkout pinned canonical fixture guard
+        uses: actions/checkout@v4
+        with:
+          repository: 4laric/pikmin-randomizer
+          ref: 09e504322b60d5ab796f3b42f19ab8009c946806
+          path: .ci-root
+          sparse-checkout: scripts/p2_fixture_captain_guard.h
+          sparse-checkout-cone-mode: false
+
+      - name: Verify canonical fixture guard bytes
+        run: |
+          printf '%s  %s\n' ee2bfeaba96020f4f0ae310f9cf98dfabbd824353d20de6fb78fec17001f3ff9 "$P2_CHALLENGE_GUARD_INCLUDE_DIR/p2_fixture_captain_guard.h" | sha256sum --check --strict
 
       - name: Verify repository contains no game data
         run: |
@@ -89,7 +103,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DPIKMIN_NATIVE_JAUDIO=ON \
             -DPIKMIN_NATIVE_OPTIMIZE=OFF \
-            -DPIKMIN_ENABLE_IPO=ON
+            -DPIKMIN_ENABLE_IPO=ON \
+            -DP2_CHALLENGE_GUARD_INCLUDE_DIR="$P2_CHALLENGE_GUARD_INCLUDE_DIR"
 
       - name: Build pikmin_pc and p2/bbft test targets
         if: ${{ !inputs.all_targets }}
