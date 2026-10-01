@@ -1,5 +1,6 @@
 #include "ItemAI.h"
 #include <cstdio>
+#include <cstdlib>
 #if defined(PIKI_PC_PORT)
 #include "pc_coop.h"
 #include "netplay/pc_sim_rng.h"
@@ -878,6 +879,11 @@ void GoalAI::EmitPiki::act(AICreature* item)
 #else
 		PikiHeadItem* seed = static_cast<PikiHeadItem*>(itemMgr->birth(OBJTYPE_Pikihead));
 #endif
+		{
+			// TEST_ONLY (issue #1034): tally of seeds actually emitted, only under the pellet-bonus knob.
+			static const bool tally = std::getenv("PIKMIN_TEST_ONLY_PELLET_BONUS") != nullptr;
+			if (tally) std::printf("[pellet-emit] onion=%d sprout=%d remaining=%d\n", int(obj->mOnionColour), int(seed != nullptr), int(obj->mSAICtx.mCurrAnimId) - 1);
+		}
 		GameStat::bornPikis.inc(obj->mOnionColour);
 		if (seed) {
 			Vector3f pos = obj->mSRT.t;
