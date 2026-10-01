@@ -198,6 +198,7 @@ inline int seFor(unsigned sourceId, Event e) {
         case Event::Hover: return kSaraiHover;
         case Event::Attack: return kSaraiAttack;   // bomb release / throw
         case Event::Burst: return kBomb;
+        case Event::Fuse: return kSpiderBomb;      // lit-bomb tick, as the Volatile Dweevil bomb (#1066)
         case Event::Damage: return kSaraiDamage;
         case Event::Dead: return kMarDead1;
         case Event::Flick: return kChappySwing;

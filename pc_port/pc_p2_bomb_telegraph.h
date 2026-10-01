@@ -108,6 +108,28 @@ struct Burn {
     }
 };
 
+// The flash/tick clock alone, for a bomb whose fuse is simulated elsewhere
+// (the Careening Dirigibug bombs, pc_p2_bombsarai_bomb.h): same ramp as
+// Burn (flashPeriod of the gauge ratio), same lit-half-of-each-phase rule, a
+// pulse on the first step and on every new phase.
+struct Pulse {
+    float phase = 0.0f;
+    int pulses = 0;
+    // Advances by dt at the given gauge ratio; true when a new flash starts.
+    bool step(float dt, float ratio) {
+        if (!(dt > 0.0f)) return false;
+        const float before = phase;
+        phase += dt / flashPeriod(ratio);
+        if (pulses == 0 || std::floor(phase) > std::floor(before)) {
+            ++pulses;
+            return true;
+        }
+        return false;
+    }
+    bool on() const { return pulses > 0 && (phase - std::floor(phase)) < 0.5f; }
+    void reset() { phase = 0.0f; pulses = 0; }
+};
+
 // Bomb placement on the Dweevil's back, in the actor's local frame (model
 // units of the baked Dweevil poses, body about 41 high): the source carries
 // the Bomb on the `otakara` joint (OtakaraBase.cpp:665).
