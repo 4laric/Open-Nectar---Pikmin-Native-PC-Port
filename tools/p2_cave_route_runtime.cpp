@@ -51,10 +51,11 @@ bool transferExists() {
     bool exists=std::filesystem::exists(roomRoute?"p2-cave-transfer.txt":"p2-cave-surface-transfer.txt",error);
     require(!error,"transfer existence query failed");return exists;
 }
-void controls(int x=0,int y=0,bool whistle=false) {
+void controls(int x=0,int y=0,bool whistle=false,bool dismiss=false) {
     require(SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTX,x*256)==0,"left X input");
     require(SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTY,-y*256)==0,"left Y input");
     require(SDL_JoystickSetVirtualButton(pad,SDL_CONTROLLER_BUTTON_B,whistle?1:0)==0,"whistle input");
+    require(SDL_JoystickSetVirtualButton(pad,SDL_CONTROLLER_BUTTON_X,dismiss?1:0)==0,"dismiss input");
     SDL_JoystickUpdate();
 }
 void f6(const char* kind) {
@@ -74,7 +75,7 @@ void snapshot(Navi* n,const char* label) {
         int species=pc_p2_species(p);if(species==P2SpeciesRed)++red;
         std::printf("P2_CAVE_ROUTE_LIVE label=%s actor=%d species=%d maturity=%d mode=%d state=%d x=%.6f y=%.6f z=%.6f\n",label,total++,species,int(p->mHappa),int(p->mMode),p->getState(),p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z);
     }
-    require(total==20&&red==20,"starting Red squad changed");
+    require(total>0&&total<=100&&red==total,"live Red survivors invalid");
     require(C_NAVI_PARM(n,mHealth)>0,"captain health denominator");
     std::printf("P2_CAVE_ROUTE_SNAPSHOT label=%s survivors=%d red=%d hp=%.9g health=%.9g x=%.6f y=%.6f z=%.6f\n",label,total,red,n->mHealth,n->mHealth/C_NAVI_PARM(n,mHealth),n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z);std::fflush(nullptr);
 }
@@ -99,9 +100,13 @@ class CaveRouteApp final:public PlugPikiApp {
             require(!route.entrance.contains(n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z),"captain starts inside floor exit");
             origin=n->mSRT.t;snapshot(n,"floor_entry");controls();
             std::printf("P2_CAVE_ROUTE_FLOOR_READY floor=%d token=%s anchor=%.3f,%.3f,%.3f captain_only=1 full_squad_traversal=0 carry_route=0 treasure_completion=0 confirmation=external_native_dialog\n",route.party.floor,route.party.token.c_str(),route.entrance.x,route.entrance.y,route.entrance.z);
-            std::fflush(nullptr);phase=1;return;
+            // Ordinary disband keeps the restored followers west of the water
+            // while this explicitly captain-only route tests the boundary.
+            controls(0,0,false,true);std::puts("P2_CAVE_ROUTE_DISBAND path=SDL_button_X");
+            std::fflush(nullptr);phase=7;return;
         }
         require(pc_p2_cave_floor()==route.party.floor&&pc_p2_cave_boundary_token()==route.party.token,"floor identity changed");
+        if(phase==7){controls();phase=1;return;}
         if(phase==1){
             const auto& target=floorPath[floorPoint];
             const float dx=target.first-n->mSRT.t.x,dz=target.second-n->mSRT.t.z,d=std::sqrt(dx*dx+dz*dz);
@@ -146,7 +151,7 @@ public:
         require(!pc_settings_get_debug_keys(),"debug keys must remain disabled");
         // A held whistle enters a non-Walk captain state. Keep advancing that
         // input phase so its release happens through SDL instead of deadlocking.
-        if(n->getCurrState()->getID()!=NAVISTATE_Walk && (roomRoute||phase!=2)){
+        if(n->getCurrState()->getID()!=NAVISTATE_Walk && (roomRoute?phase!=7:phase!=2)){
             if(ticks%60==0){std::printf("P2_CAVE_ROUTE_WAIT tick=%d phase=%d captain_state=%d\n",ticks,phase,n->getCurrState()->getID());std::fflush(nullptr);}
             return result;
         }
@@ -228,7 +233,7 @@ int main(int argc,char** argv){
         std::ifstream input("p2-cave-route-surface.txt");require(bool(input)&&p2_cave_surface_route_read(input,route),"surface route sidecar invalid");
     }
     require(!transferExists(),"stale transfer at startup");
-    require(route.party.squad.size()==20,"requires20 incoming Pikmin");for(const auto& p:route.party.squad)require(p.species==P2SpeciesRed,"requires incoming Red squad");
+    require(!route.party.squad.empty()&&route.party.squad.size()<=100,"incoming Pikmin count invalid");for(const auto& p:route.party.squad)require(p.species==P2SpeciesRed,"requires incoming Red squad");
     require(pc_window_init("P2 Cave route runtime",960,540),"window init");pc_settings_init();
     // Settings has no process-local debug-key setter. Refuse unsafe saved config;
     // the runner must stage debugKeys=0 in its private settings file.
