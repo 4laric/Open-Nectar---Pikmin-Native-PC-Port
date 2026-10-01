@@ -377,6 +377,37 @@ void testSettingsRoundTrip()
 	expect(kb2[PC_KEY_ACT_B], PC_BIND_UNBOUND, "a cleared key binding stays cleared");
 }
 
+// The fork keeps one pad binding set: no P2 table. The file then carries no
+// gp2_N lines, and gp2_N lines from another build are ignored.
+void testSingleTableSettings()
+{
+	int kb[PC_KEY_ACT_COUNT], gp[PC_KEY_ACT_COUNT];
+	for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
+		kb[i] = kKeyBase + i;
+		gp[i] = PC_GP_DEFAULT;
+	}
+	gp[PC_KEY_ACT_L] = PC_GP_UNBOUND;
+	std::ostringstream out;
+	pc_pad_bindings_write(out, kb, gp, nullptr);
+	expect(out.str().find("gp2_") == std::string::npos, 1, "no P2 table: no gp2_N lines written");
+	expect(out.str().find("gp_6 = -2") != std::string::npos, 1, "a cleared pad binding is written as -2");
+
+	int kb2[PC_KEY_ACT_COUNT], gp2[PC_KEY_ACT_COUNT];
+	for (int i = 0; i < PC_KEY_ACT_COUNT; i++) {
+		kb2[i] = kKeyBase + i;
+		gp2[i] = PC_GP_DEFAULT;
+	}
+	std::istringstream in(out.str());
+	std::string line;
+	while (std::getline(in, line)) {
+		const size_t eq = line.find(" = ");
+		pc_pad_bindings_parse(line.substr(0, eq), line.substr(eq + 3), kb2, gp2, nullptr);
+	}
+	expect(gp2[PC_KEY_ACT_L], PC_GP_UNBOUND, "single table: cleared binding round-trips");
+	expect(pc_pad_bindings_parse("gp2_1", "5", kb2, gp2, nullptr), 1, "a gp2_N line is still recognised as a binding key");
+	expect(gp2[PC_KEY_ACT_B], PC_GP_DEFAULT, "a gp2_N line is ignored when there is no P2 table");
+}
+
 void testOldFilesStillLoad()
 {
 	auto fresh = [](int* kb, int* gp, int* gp2) {
@@ -441,6 +472,7 @@ int main()
 	testColourCycleIsUntouched();
 	testSticks();
 	testSettingsRoundTrip();
+	testSingleTableSettings();
 	testOldFilesStillLoad();
 
 	if (sFailures == 0) {

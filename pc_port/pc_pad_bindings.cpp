@@ -181,8 +181,10 @@ void pc_pad_bindings_write(std::ostream& out, const int* keyboard, const int* pa
 		out << "key_" << i << " = " << keyboard[i] << "\n";
 	for (int i = 0; i < PC_KEY_ACT_COUNT; i++)
 		out << "gp_" << i << " = " << pad[i] << "\n";
-	for (int i = 0; i < PC_KEY_ACT_COUNT; i++)
-		out << "gp2_" << i << " = " << padP2[i] << "\n";
+	if (padP2) {
+		for (int i = 0; i < PC_KEY_ACT_COUNT; i++)
+			out << "gp2_" << i << " = " << padP2[i] << "\n";
+	}
 }
 
 bool pc_pad_bindings_parse(const std::string& key, const std::string& val, int* keyboard, int* pad, int* padP2)
