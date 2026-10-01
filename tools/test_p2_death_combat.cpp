@@ -8,6 +8,19 @@
 #include <cstdio>
 #include <cstdlib>
 
+class FixturePiki : public Piki {
+public:
+    FixturePiki() : Piki(nullptr) {}
+    void refresh(Graphics&) override {}
+    bool isKinoko() override { return false; }
+};
+class FixtureAttachment : public Creature {
+public:
+    FixtureAttachment() : Creature(nullptr) {}
+    void refresh(Graphics&) override {}
+    void doKill() override {}
+};
+
 static void require(bool ok, const char* reason, unsigned source) {
     if (!ok) { std::printf("P2_DEATH_COMBAT_FAIL source=%u reason=%s\n", source, reason); std::exit(1); }
 }
@@ -28,8 +41,8 @@ int main(int argc, char** argv) {
         require(pc_randomizer_p2_source_for(static_cast<PelletView*>(&actor)) == source, "binding", source);
         require(actor.isAlive() && actor.isHostAlive(), "living actor", source);
 
-        Piki first(nullptr), second(nullptr), late(nullptr);
-        Creature attachment(nullptr);
+        FixturePiki first, second, late;
+        FixtureAttachment attachment;
         attachment.mObjType = OBJTYPE_Pellet;
         require(first.startStick(&actor, nullptr), "first latch", source);
         require(attachment.startStick(&actor, nullptr), "non Pikmin attachment", source);
