@@ -138,8 +138,8 @@ public:
   if(phase<7)require(pellets==baselinePellets,"Ivory created legacy reward pellet");
   if(phase==3 && heads==1 && captured==0){require(red==19&&heads==1,"ordinary acquisition output");goal=flower->mSRT.t;phase=13;ticks=0;std::puts("P2_WHITE_INGESTION_SPROUT ordinary_birth=1 spent=1");}
   if(phase==13 && ticks>=30){int follows=0;Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(p->isAlive()&&p->mMode==PikiMode::FormationMode)++follows;}if(ticks%30==0){std::printf("P2_WHITE_INGESTION_DISBAND ticks=%d follows=%d state=%d bind=%u down=%u\n",ticks,follows,n->getCurrState()->getID(),unsigned(KeyConfig::_instance->mDisbandKey.mBind),unsigned(n->mKontroller->keyDown(KeyConfig::_instance->mDisbandKey.mBind)));std::fflush(nullptr);}require(ticks<240,"ordinary Red disband timeout");if(follows==0&&n->getCurrState()->getID()==NAVISTATE_Walk){phase=4;ticks=0;std::puts("P2_WHITE_INGESTION_REDS_DISMISSED");}}
-  if(phase==4 && head){goal=head->mSRT.t;float dx=goal.x-n->mSRT.t.x,dz=goal.z-n->mSRT.t.z;if(dx*dx+dz*dz<400){phase=5;ticks=0;}}
-  if(phase==5 && head){float dx=head->mSRT.t.x-n->mSRT.t.x,dz=head->mSRT.t.z-n->mSRT.t.z;if(dx*dx+dz*dz>400 && n->getCurrState()->getID()==NAVISTATE_Walk){goal=head->mSRT.t;phase=4;ticks=0;}}
+  if(phase==4 && head){goal=head->mSRT.t;float dx=goal.x-n->mSRT.t.x,dz=goal.z-n->mSRT.t.z;if(dx*dx+dz*dz<225){phase=5;ticks=0;}}
+  if(phase==5 && head){if(ticks%60==0){std::printf("P2_WHITE_INGESTION_PLUCK_APPROACH captain=%.3f,%.3f head=%.3f,%.3f state=%d\n",n->mSRT.t.x,n->mSRT.t.z,head->mSRT.t.x,head->mSRT.t.z,n->getCurrState()->getID());std::fflush(nullptr);}float dx=head->mSRT.t.x-n->mSRT.t.x,dz=head->mSRT.t.z-n->mSRT.t.z;if(dx*dx+dz*dz>400 && n->getCurrState()->getID()==NAVISTATE_Walk){goal=head->mSRT.t;phase=4;ticks=0;}}
   if(phase==5 && white==1 && heads==0 && n->getCurrState()->getID()==NAVISTATE_Walk){
    require(red==19&&captured==0&&flower->mPomAi->mReleasedSeedCount==1,"ordinary White pluck counts/budget");
    goal=predator->mSRT.t;phase=7;ticks=0;
