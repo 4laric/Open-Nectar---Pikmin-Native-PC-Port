@@ -172,7 +172,7 @@ struct Armor {
     int holdLoggedFrame = -100;
     // TEST-ONLY probe (PIKMIN_P2_ARMOR_PROBE), never active in a normal run.
     float probeTime = 0.0f;
-    bool probeCaptain = false, probeFreezeInit = false, probeDone = false, probeSawAttack = false;
+    bool probeCaptain = false, probeFreezeInit = false, probeDone = false, probeSawAttack = false, probeIdleDone = false;
     int probeCycle = 0, probePinN = 0;
     float probeCycleAt = 0.0f;
     Piki* probePin[4] = {};
@@ -906,6 +906,27 @@ void runProbe(BTeki* actor, Armor& s, unsigned generator, float dt) {
             if (s.probeThrows == 0) shot("shell_throw", 40);
             ++s.probeThrows;
             s.probeNextThrow = s.probeTime + 0.6f;
+        }
+    }
+    // TEST-ONLY idle phase (PIKMIN_P2_ARMOR_PROBE_IDLE=1, #1063): once the bite cycles are over, every Pikmin and the
+    // captain are moved 900 units away so the Armor is truly idle and the source Move -> GoHome -> Dive -> Stay
+    // sequence can be logged.
+    {
+        const char* idle = std::getenv("PIKMIN_P2_ARMOR_PROBE_IDLE");
+        if (idle && *idle && *idle != '0' && s.probeTime >= 32.0f && !s.probeIdleDone) {
+            s.probeIdleDone = true;
+            const Vector3f far(ap.x + 900.0f, ap.y, ap.z);
+            if (pikiMgr) {
+                Iterator it(pikiMgr);
+                CI_LOOP(it) {
+                    Piki* p = static_cast<Piki*>(*it);
+                    if (p && p->isAlive() && !p->isStickTo()) p->mSRT.t = far;
+                }
+            }
+            for (Navi* n : pc_p2_navis()) n->mSRT.t = far;
+            std::printf("P2_ARMOR_PROBE kind=idle generator=%u t=%.1f
+", generator, double(s.probeTime));
+            std::fflush(stdout);
         }
     }
     if (s.probeTime >= 29.0f && !s.probeDone) {
