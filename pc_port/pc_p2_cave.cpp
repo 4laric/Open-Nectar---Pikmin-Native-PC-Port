@@ -76,6 +76,10 @@ bool surfaceSafe(){
 void loadSurfaceRoute(){
     if(surfaceRouteLoaded || !pc_pikipelago_surface_course() || online() || !naviMgr || !pikiMgr)return;
     Navi* n=naviMgr->getNavi();if(!n || !n->getCurrState())return;
+    // Restoring a staged checkpoint must never revive an already dead captain.
+    if(n->getCurrState()->getID()!=NAVISTATE_Walk || !std::isfinite(n->mHealth)
+        || n->mHealth<=1 || naviMgr->isNaviDead(n) || gameflow.mPauseAll
+        || gameflow.mIsUIOverlayActive || (gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive))return;
     std::ifstream in("p2-cave-route-surface.txt");if(!in)return;
     P2CaveSurfaceRoute route;if(!p2_cave_surface_route_read(in,route))invalid("surface route");
     std::vector<Piki*> actors;Iterator it(pikiMgr);
@@ -114,6 +118,7 @@ bool enterSurfaceCave(){
     const SDL_MessageBoxButtonData buttons[]={{SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT,0,"Stay"},{SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT,1,"Enter cave"}};
     SDL_MessageBoxData data={SDL_MESSAGEBOX_INFORMATION,SDL_GL_GetCurrentWindow(),"Emergence Cave",message.c_str(),2,buttons,nullptr};int choice=0;
     if(SDL_ShowMessageBox(&data,&choice)!=0 || choice!=1)return false;
+    if(!surfaceSafe())return false;
     FILE* f=std::fopen("p2-cave-surface-transfer.tmp","wb");if(!f)return false;
     bool ok=std::fwrite(text.data(),1,text.size(),f)==text.size() && std::fflush(f)==0;
     if(std::fclose(f)!=0)ok=false;
