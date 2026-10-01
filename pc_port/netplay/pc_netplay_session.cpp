@@ -4675,7 +4675,11 @@ void replay_finish()
 	pc_state_hash_flush();
 	stop_session();
 	sPhase = kDone;
-	std::exit(sReplay.mismatches == 0 ? 0 : 8);
+	// Leave without running static destructors: this is called from inside the per-tick sim loop with the
+	// audio/loader threads still alive, and std::exit's teardown access-violated (0xC0000005) in roughly 1 of 15
+	// replays even though every hash had reproduced. All output is flushed above.
+	std::fflush(nullptr);
+	std::_Exit(sReplay.mismatches == 0 ? 0 : 8);
 }
 
 void replay_verify(const pc_netplay_inlog::Frame& f, uint64_t total, const uint64_t subs[7])
