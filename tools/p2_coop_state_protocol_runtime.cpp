@@ -24,7 +24,16 @@
 #include "ItemMgr.h"
 #include "CPlate.h"
 #include "AIConstant.h"
+// Unchanged legacy inline UI helpers omit unused enum cases. Suppress that
+// header's existing switch warnings only; all fixture/global flags stay strict.
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wswitch"
+#endif
 #include "zen/DrawContainer.h"
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 #include "pc_window.h"
 #include "netplay/pc_netplay_launch.h"
 #include "pc_randomizer.h"
@@ -34,6 +43,9 @@ extern std::uint32_t pc_netplay_current_frame(void);
 namespace {
 // Read-only protected-member access via a correctly typed base member pointer.
 // No layout casts, fake derived object, callback, or menu/world write is used.
+struct PlateObserver : CPlate {
+    static unsigned count(const CPlate& plate) { return plate.*(&PlateObserver::mPlatePikiCount); }
+};
 struct ContainerObserver : zen::DrawContainer {
     static int stored(const zen::DrawContainer& win) { return win.*(&ContainerObserver::mInitialContainerCount); }
     static int squad(const zen::DrawContainer& win) { return win.*(&ContainerObserver::mInitialSquadCount); }
@@ -184,7 +196,7 @@ public:
                 menu->getContainerPikiDisp(), menu->getMyPikiDisp(), ContainerObserver::stored(*menu),
                 ContainerObserver::squad(*menu), ContainerObserver::field(*menu), ContainerObserver::limit(*menu),
                 ContainerObserver::delta(*menu), ContainerObserver::displayedDelta(*menu),
-                n->mPlateMgr ? unsigned(n->mPlateMgr->mPlatePikiCount) : 0u,
+                n->mPlateMgr ? PlateObserver::count(*n->mPlateMgr) : 0u,
                 onion ? int(onion->mOnionColour) : -1,
                 onion ? onion->mSRT.t.x : 0.f, onion ? onion->mSRT.t.y : 0.f, onion ? onion->mSRT.t.z : 0.f);
             std::fflush(nullptr);
