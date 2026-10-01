@@ -4378,6 +4378,7 @@ void GameCoreSection::draw1D(Graphics& gfx)
 		}
 		if (tekiMgr && !hideTeki()) {
 			tekiMgr->refresh2d(gfx);
+			pc_p2_bombsarai_teki_draw_bomb_gauges(gfx); // #1027 Dirigibug bomb life gauges
 		}
 	}
 	naviMgr->refresh2d(gfx);

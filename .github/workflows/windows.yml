@@ -163,6 +163,7 @@ jobs:
           retention-days: 14
 
       - name: Package opt-in fixtures (compile only; no game assets)
+        if: ${{ !inputs.all_targets }}
         run: |
           out="pikmin-fixtures-windows-${HEAD_SHA}"
           mkdir -p "${out}"
@@ -183,6 +184,7 @@ jobs:
           (cd "${out}" && find . -maxdepth 1 -type f \( -name '*.exe' -o -name '*.dll' \) -print0 | sort -z | xargs -0 -r sha256sum > sha256.txt)
 
       - name: Upload opt-in fixtures
+        if: ${{ !inputs.all_targets }}
         uses: actions/upload-artifact@v4
         with:
           name: pikmin-fixtures-windows-${{ env.HEAD_SHA }}

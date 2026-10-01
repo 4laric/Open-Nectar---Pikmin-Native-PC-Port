@@ -44,6 +44,11 @@ public:
     // Detach from a dying/forgotten actor (restores the vehicle collision).
     void detach(BTeki* actor);
     p2kurage::Motion motion() const { return mMotion; }
+    // #972: clip + source frame of the pose drawn this frame. The source clip
+    // steps at 30 Hz; the fraction of the next tick already elapsed is added so
+    // the pose bank is sampled at the real frame rate.
+    const char* drawClip() const;
+    float drawFrame() const;
     p2kurage::State state() const { return mState; }
     bool untargetable() const { return mUntargetable; }
     float life() const { return p2kurageown::general(mVariant).life; }

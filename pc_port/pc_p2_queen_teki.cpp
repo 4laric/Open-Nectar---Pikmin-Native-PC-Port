@@ -86,6 +86,20 @@ constexpr float kQueenBodyFront = 245.0f;
 // P1 performance cap on live larvae (source Baby::Mgr pool 50, hysteresis
 // max 50 / min 25). The cap scales the hysteresis to 10 / 5.
 constexpr int kLarvaCap = 10;
+// Standalone larva carcass (#1042). The source Baby has none (Baby.cpp:40
+// disables EB_LeaveCarcass, BabyState.cpp:41/80 kill() at the clip end), so the
+// randomizer check needs an accommodation like the Titan 73 / Demon 32 corpse
+// (owner ruling 2026-09-29 #1: a carryable corpse is acceptable). Sized for
+// the larva: any one Pikmin carries it (min 1, max 2) and the grab radius
+// matches the staged larva extent (rest pose z -13.6..16.5).
+constexpr int kLarvaCarryMin = 1;
+constexpr int kLarvaCarryMax = 2;
+constexpr float kLarvaCorpseRadius = 15.0f;
+// Onion seeds the corpse yields. The host Swallow carcass config pays 12/12 (a Spotty Bulborb);
+// a 5-health larva that dies to one Pikmin pays the minimum (one seed either way). Flagged for
+// the owner as an accommodation, not a source value (the source larva leaves no carcass).
+constexpr int kLarvaSeedsMatching = 1;
+constexpr int kLarvaSeedsOther = 1;
 // Source carcass_config.txt Queen entry (pikmin2_bulblax_assets.CARCASS).
 constexpr int kCarcassPokos = 15;
 constexpr int kCarcassCarryMin = 20;
@@ -122,6 +136,14 @@ std::map<BTeki*, Binding> s;
 struct Larva {
     unsigned id = 0;
     unsigned queen = 0; // parent token (for logs; the larva outlives her)
+    // Standalone larva (#1042): a seeded campaign slot bound to source id 31.
+    // It owns its generator token, leaves a carryable corpse (see
+    // kLarvaCarry*) and delivers the Onion receipt; Queen-born larvae keep
+    // the source behaviour of no carcass.
+    bool standalone = false;
+    unsigned generator = 0;
+    unsigned source = 0;
+    bool corpse = false;   // carcass config applied
     Baby fsm;
     P2GroinkSourceClock clock;
     bool escaped = false;
@@ -493,7 +515,7 @@ void applyOutput(BTeki* t, Binding& b, const TickOutput& o, int& shown, int stuc
                     b.fsm.animator().frame());
 }
 
-PelletConfig* carcassConfig(PelletConfig* source) {
+PelletConfig* carcassConfig(PelletConfig* source, int carryMin = kCarcassCarryMin, int carryMax = kCarcassCarryMax) {
     PelletConfig* result = new PelletConfig;
 #define COPY_VALUE(name) result->name.mValue = source->name.mValue
     COPY_VALUE(mPelletName);
@@ -514,8 +536,8 @@ PelletConfig* carcassConfig(PelletConfig* source) {
     result->mPelletId = source->mPelletId;
     result->mUnusedId = source->mUnusedId;
     result->mRepairAnimJointIndex = source->mRepairAnimJointIndex;
-    result->mCarryMinPikis.mValue = kCarcassCarryMin;
-    result->mCarryMaxPikis.mValue = kCarcassCarryMax;
+    result->mCarryMinPikis.mValue = carryMin;
+    result->mCarryMaxPikis.mValue = carryMax;
     sConfigs.push_back(result);
     return result;
 }
@@ -533,6 +555,25 @@ void becomeCarcass(BTeki* t, Binding& b) {
                 pellet->mConfig ? pellet->mConfig->mMatchingOnyonSeeds.mValue : -1,
                 pellet->mConfig ? pellet->mConfig->mNonMatchingOnyonSeeds.mValue : -1,
                 sParams.carcassCarryDegenerate ? "dead_pose_fallback" : (sPoses[AnimCarry].empty() ? "dead_last" : "carry"));
+    std::fflush(stdout);
+}
+
+void becomeLarvaCarcass(BTeki* t, Larva& l) {
+    if (l.corpse || !t->mPellet) return;
+    l.corpse = true;
+    Pellet* pellet = t->mPellet;
+    if (pellet->mConfig) {
+        pellet->mConfig = carcassConfig(pellet->mConfig, kLarvaCarryMin, kLarvaCarryMax);
+        pellet->mConfig->mMatchingOnyonSeeds.mValue = kLarvaSeedsMatching;
+        pellet->mConfig->mNonMatchingOnyonSeeds.mValue = kLarvaSeedsOther;
+    }
+    const Vector3f& p = pellet->mSRT.t;
+    std::printf("P2_LARVA_CARCASS generator=%u source_id=%u carry_min=%d carry_max=%d x=%.1f z=%.1f seeds_match=%d "
+                "seeds_other=%d source_carcass=none accommodation=carryable_corpse\n",
+                l.generator, l.source, pellet->mConfig ? pellet->mConfig->mCarryMinPikis.mValue : -1,
+                pellet->mConfig ? pellet->mConfig->mCarryMaxPikis.mValue : -1, p.x, p.z,
+                pellet->mConfig ? pellet->mConfig->mMatchingOnyonSeeds.mValue : -1,
+                pellet->mConfig ? pellet->mConfig->mNonMatchingOnyonSeeds.mValue : -1);
     std::fflush(stdout);
 }
 
@@ -709,8 +750,8 @@ void larvaTick(BTeki* t, Larva& l, float dt) {
                         babyStateName(e), t->mHealth, t->mSRT.t.x, t->mSRT.t.z);
             if ((e == BabyDead || e == BabyPress) && !l.deadLogged) {
                 l.deadLogged = true;
-                std::printf("P2_QUEEN_LARVA_DEAD id=%u queen=%u cause=%s hits=%d no_corpse=1\n", l.id, l.queen,
-                            e == BabyPress ? "press" : "attack", l.hits);
+                std::printf("P2_QUEEN_LARVA_DEAD id=%u queen=%u cause=%s hits=%d no_corpse=%d\n", l.id, l.queen,
+                            e == BabyPress ? "press" : "attack", l.hits, l.standalone ? 0 : 1);
             }
         }
         if (o.attackKey) {
@@ -746,6 +787,18 @@ void larvaTick(BTeki* t, Larva& l, float dt) {
     t->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
     t->mSRT.s.set(kLarvaHostScale, kLarvaHostScale, kLarvaHostScale);
     std::fflush(stdout);
+    if (kill && !l.escaped && l.standalone) {
+        // Standalone larva (#1042): StateDead/StatePress KEYEVENT_END -> kill()
+        // (BabyState.cpp:41/80). The source leaves nothing; the randomizer
+        // check needs a delivery, so run the host death funnel (die + dieSoon,
+        // pcEscapeNow, the Queen pattern) and leave a carryable corpse.
+        l.escaped = true;
+        std::printf("P2_LARVA_ESCAPE generator=%u source_id=%u id=%u native=host_escape_now\n", l.generator, l.source, l.id);
+        std::fflush(stdout);
+        t->pcEscapeNow();
+        becomeLarvaCarcass(t, l);
+        return;
+    }
     if (kill && !l.escaped) {
         // StateDead/StatePress KEYEVENT_END -> kill(). No carcass (TPI
         // CorpseType override) and no P1 enemy-defeat report: arm the death
@@ -796,6 +849,38 @@ void spawnLarvae() {
                     std::sqrt(r.vx * r.vx + r.vz * r.vz), teki->mHealth, liveLarvae(), kLarvaCap, r.type);
     }
     std::fflush(stdout);
+}
+
+// Standalone Bulborb Larva (Baby, 31): a seeded slot rides the Swallow vehicle
+// at larva scale and runs the same source Baby FSM as the Queen-born larvae
+// (Baby.cpp onInit starts in Born; StateMove has no idle wander outside the
+// Piklopedia, Baby.cpp:262-279).
+bool bindLarva(BTeki* t, unsigned token, unsigned source) {
+    if (t->getParameterI(TPI_CorpseType) != TEKICORPSE_LeaveCorpse) {
+        std::printf("P2_LARVA_UNBOUND generator=%u reason=no_corpse type=%d\n", token, t->mTekiType);
+        return false;
+    }
+    if (s.count(t)) return false;
+    Larva l;
+    l.id = ++sLarvaSerial;
+    l.standalone = true;
+    l.generator = token;
+    l.source = source;
+    l.fsm.init(sParams, sBank, t->getDirection(), {0.0f, 0.0f});
+    auto placed = sLarvae.emplace(t, l).first;
+    t->mSRT.s.set(kLarvaHostScale, kLarvaHostScale, kLarvaHostScale);
+    t->mHealth = sParams.babyHealth;
+    placed->second.lastHealth = t->mHealth;
+    t->setTekiOption(TEKIOPT_DamageCountable);
+    t->setPersonalityF(TekiPersonality::FLT_PelletAppearChance, 0.0f);
+    std::printf("P2_LARVA_OWN_BIND generator=%u source_id=%u id=%u host_type=%d health=%.1f retail_parms=%d draw=%s "
+                "host_scale=%.2f state=%s\n",
+                token, source, l.id, t->mTekiType, t->mHealth, sParams.retail ? 1 : 0,
+                sBabyPosesLoaded ? "p2_baby" : "host", kLarvaHostScale, babyStateName(placed->second.fsm.state()));
+    pc_randomizer_p2_bind_source(static_cast<PelletView*>(t), source, token);
+    std::printf("P2_LARVA_DELIVERY_BIND generator=%u source_id=%u\n", token, source);
+    std::fflush(stdout);
+    return true;
 }
 
 bool bindActor(BTeki* t, unsigned token, unsigned source) {
@@ -900,18 +985,23 @@ void pc_p2_queen_teki_setup() {
     const bool bridge = pc_randomizer_p2_bridge();
     if (bridge) {
         const std::set<unsigned> wanted = pc_p2_campaign_ids(30);
-        if (wanted.empty()) return;
+        const std::set<unsigned> wantedLarva = pc_p2_campaign_ids(31);
+        if (wanted.empty() && wantedLarva.empty()) return;
         loadBank(true);
-        int bound = 0;
+        int bound = 0, boundLarva = 0;
         Iterator it(tekiMgr);
         CI_LOOP(it) {
             BTeki* t = static_cast<BTeki*>(*it);
-            if (!t || !t->mGenerator || pc_p2_campaign_source(t) != 30) continue;
+            if (!t || !t->mGenerator) continue;
+            const unsigned source = pc_p2_campaign_source(t);
+            if (source != 30 && source != 31) continue;
             const unsigned token = pc_p2_campaign_token(t);
-            if (s.count(t)) continue;
-            if (bindActor(t, token, 30)) ++bound;
+            if (s.count(t) || sLarvae.count(t)) continue;
+            if (source == 30 && bindActor(t, token, 30)) ++bound;
+            if (source == 31 && bindLarva(t, token, 31)) ++boundLarva;
         }
-        if (!bound) pc_p2_setup_skip(true, "Queen", "no_bindable_actor");
+        if (!wanted.empty() && !bound) pc_p2_setup_skip(true, "Queen", "no_bindable_actor");
+        if (!wantedLarva.empty() && !boundLarva) pc_p2_setup_skip(true, "Baby", "no_bindable_actor");
         return;
     }
     // Room-preview fixture path (never admission evidence).
@@ -942,9 +1032,22 @@ void pc_p2_queen_teki_tick(BTeki* t) {
     const float dt = gsys ? gsys->getFrameTime() : 0.0f;
     auto l = sLarvae.find(t);
     if (l != sLarvae.end()) {
-        if (l->second.escaped || t->mDeadState != 0) return;
+        Larva& lv = l->second;
+        if (lv.standalone && lv.escaped) { becomeLarvaCarcass(t, lv); return; }
+        if (lv.standalone && !lv.escaped && t->mDeadState != 0) {
+            // Something outside the FSM called die() (a host hazard): finish
+            // the teardown here or the corpse would never pelletize.
+            lv.escaped = true;
+            std::printf("P2_LARVA_ESCAPE generator=%u source_id=%u id=%u native=host_die_external\n", lv.generator,
+                        lv.source, lv.id);
+            std::fflush(stdout);
+            t->pcEscapeNow();
+            becomeLarvaCarcass(t, lv);
+            return;
+        }
+        if (lv.escaped || t->mDeadState != 0) return;
         if (!(dt > 0.0f && dt < 0.5f)) return;
-        larvaTick(t, l->second, dt); // may run the host teardown; never touch l after it
+        larvaTick(t, lv, dt); // may run the host teardown; never touch l after it
         return;
     }
     auto i = s.find(t);
@@ -1023,12 +1126,18 @@ bool pc_p2_queen_teki_ignore_atari(BTeki* t, Creature* target) {
 }
 
 int pc_p2_queen_teki_corpse_type(BTeki* t, int fallback) {
-    return sLarvae.count(t) ? int(TEKICORPSE_NoCorpse) : fallback;
+    // Queen-born larvae leave nothing (source); a standalone larva keeps the
+    // host's LeaveCorpse for the carryable-corpse accommodation (#1042).
+    auto l = sLarvae.find(t);
+    return l != sLarvae.end() && !l->second.standalone ? int(TEKICORPSE_NoCorpse) : fallback;
 }
 
 float pc_p2_queen_teki_corpse_radius(BTeki* t, float fallback) {
     // Pellet::getSize multiplies this by the view scale (the vehicle scale).
-    return s.count(t) ? kQueenCorpseRadius / kQueenHostScale : fallback;
+    if (s.count(t)) return kQueenCorpseRadius / kQueenHostScale;
+    auto l = sLarvae.find(t);
+    if (l != sLarvae.end() && l->second.standalone) return kLarvaCorpseRadius / kLarvaHostScale;
+    return fallback;
 }
 
 // The live draw matrix carries the vehicle scale (mSRT.s) and the carcass

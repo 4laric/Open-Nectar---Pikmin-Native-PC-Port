@@ -3,6 +3,7 @@
 #include "pc_p2_demon_bridge.h"
 #include "pc_p2_kurage_fx.h"
 #include "pc_p2_kurage_proom.h"
+#include "pc_p2_kurage_visual.h"
 #include "pc_p2_kurage_receiver.h"
 #include "pc_p2_kurage_suction_policy.h"
 #include "pc_p2_navi_select.h"
@@ -188,13 +189,30 @@ int P2KurageOwn::countStuck(BTeki* actor, bool& purple) const
     return n;
 }
 
+const char* P2KurageOwn::drawClip() const
+{
+    const char* pose = p2kurageown::poseFor(mMotion);
+    return pose ? pose : "wait";
+}
+float P2KurageOwn::drawFrame() const
+{
+    if (mMotion == p2kurage::Motion::None) return 0.0f;
+    const float last = float(p2kurageown::clipFor(mMotion).duration - 1);
+    const float frame = mPlayer.frame() + mClock.fraction();
+    return frame < last ? frame : last;
+}
+
 // World position of the `suck` part (Proom joint) in the pose drawn this frame.
 Vector3f P2KurageOwn::stomachAnchor(BTeki* actor) const
 {
     const Vector3f pos = actor->mSRT.t;
     const float scale = actor->mSRT.s.y;
-    const char* pose = p2kurageown::poseFor(mMotion);
-    const p2kurageown::ProomOffset o = p2kurageown::proomOffset(mVariant, pose ? pose : "wait");
+    // #972: follow the pose bank when one is loaded (the joint of the pose that
+    // is on screen); otherwise the tabulated per-clip row of the static mesh.
+    p2kurageown::ProomOffset o;
+    float banked[3];
+    if (pc_p2_kurage_visual_proom(greater(), drawClip(), drawFrame(), banked)) o = {banked[0], banked[1], banked[2]};
+    else o = p2kurageown::proomOffset(mVariant, drawClip());
     const float c = std::cos(mYaw), s = std::sin(mYaw);
     return Vector3f(pos.x + (c * o.x + s * o.z) * scale, pos.y + o.y * scale, pos.z + (-s * o.x + c * o.z) * scale);
 }

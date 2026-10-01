@@ -18,3 +18,15 @@ bool pc_p2_kurage_visual_draw(BTeki*, Graphics&, const Matrix4f&, bool corpse = 
 // clip set as the Kurage. Setup fails (and the host body draws) without wait/attack.
 bool pc_p2_kurage_visual_setup_greater();
 Shape* pc_p2_kurage_visual_shape_greater(const char* motionBase);
+
+// #972 sampled pose bank (p2-kurage-animation.txt / p2-onikurage-animation.txt).
+// Private per-actor Shape showing `clip` at `sourceFrame` (vertex lerp + 150 ms
+// crossfade on a clip change); nullptr when no bank is loaded, so callers keep
+// the static shapes above. PIKMIN_P2_INTERPOLATION=0 selects the nearest pose.
+Shape* pc_p2_kurage_visual_pose(BTeki* actor, bool greater, const char* clip, float sourceFrame, unsigned token);
+// World translation (model units, origin = actor, yaw 0, scale 1) of the `suck`
+// part (Proom joint) in the pose pc_p2_kurage_visual_pose shows at that frame.
+bool pc_p2_kurage_visual_proom(bool greater, const char* clip, float sourceFrame, float out[3]);
+// Last source frame of a banked clip, or -1 when the clip has no bank.
+float pc_p2_kurage_visual_last_frame(bool greater, const char* clip);
+void pc_p2_kurage_visual_forget(BTeki* actor);
