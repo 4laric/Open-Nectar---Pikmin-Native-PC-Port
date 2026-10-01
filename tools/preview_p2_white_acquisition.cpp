@@ -58,9 +58,14 @@ public:
   u32 keys=0;mMainStickX=0;mMainStickY=0;mSubStickX=0;mSubStickY=0;
   Navi* n=naviMgr?naviMgr->getNavi():nullptr;
   if(phase==1)keys=KeyConfig::_instance->mSetCursorKey.mBind;
-  if(phase==2 || phase==4){
-   if(n && n->mNaviCamera){float dx=goal.x-(phase==2?n->mCursorWorldPos.x:n->mSRT.t.x),dz=goal.z-(phase==2?n->mCursorWorldPos.z:n->mSRT.t.z),d=std::sqrt(dx*dx+dz*dz);
-    if(d>(phase==2?3.f:15.f)){const Vector3f& axis=n->mNaviCamera->mViewXAxis;float strength=phase==2?22.f:65.f;float bx=goal.x-n->mSRT.t.x,bz=goal.z-n->mSRT.t.z;if(phase==2 && bx*bx+bz*bz>10000.f){dx=bx;dz=bz;d=std::sqrt(dx*dx+dz*dz);strength=65.f;}keys=KBBTN_MSTICK_RIGHT;mMainStickX=s8(strength*(dx*axis.x+dz*axis.z)/d);mMainStickY=s8(strength*(dx*axis.z-dz*axis.x)/d);}
+  if((phase==2 || phase==4) && n && n->mNaviCamera){
+   float bx=goal.x-n->mSRT.t.x,bz=goal.z-n->mSRT.t.z;
+   bool walk=phase==4 || bx*bx+bz*bz>10000.f;
+   // Cursor updates arrive through native polling. Pulse low-stick corrections
+   // and let neutral input settle instead of continually circling the mouth.
+   if(walk || ticks%10==0){
+    float dx=walk?bx:goal.x-n->mCursorWorldPos.x,dz=walk?bz:goal.z-n->mCursorWorldPos.z,d=std::sqrt(dx*dx+dz*dz);
+    if(d>(walk?15.f:3.f)){const Vector3f& axis=n->mNaviCamera->mViewXAxis;float strength=walk?65.f:22.f;keys=KBBTN_MSTICK_RIGHT;mMainStickX=s8(strength*(dx*axis.x+dz*axis.z)/d);mMainStickY=s8(strength*(dx*axis.z-dz*axis.x)/d);}
    }
   }
   if((phase==3 && ticks%60<15)||(phase==5 && ticks%60<50))keys=KeyConfig::_instance->mThrowKey.mBind;
@@ -108,8 +113,8 @@ public:
    phase=1;ticks=0;
   }
   if(phase==1&&ticks>=100){goal=flower->mSRT.t;phase=2;ticks=0;}
-  if(phase==2){float dx=flower->mSRT.t.x-n->mCursorWorldPos.x,dz=flower->mSRT.t.z-n->mCursorWorldPos.z;float bx=flower->mSRT.t.x-n->mSRT.t.x,bz=flower->mSRT.t.z-n->mSRT.t.z;if(dx*dx+dz*dz<25 && bx*bx+bz*bz>625){phase=6;ticks=0;}}
-  if(phase==6&&ticks>=20){float dx=flower->mSRT.t.x-n->mCursorWorldPos.x,dz=flower->mSRT.t.z-n->mCursorWorldPos.z;phase=(dx*dx+dz*dz<25)?3:2;ticks=0;}
+  if(phase==2){float dx=flower->mSRT.t.x-n->mCursorWorldPos.x,dz=flower->mSRT.t.z-n->mCursorWorldPos.z;float bx=flower->mSRT.t.x-n->mSRT.t.x,bz=flower->mSRT.t.z-n->mSRT.t.z;if(dx*dx+dz*dz<64 && bx*bx+bz*bz>625){phase=6;ticks=0;}}
+  if(phase==6&&ticks>=20){float dx=flower->mSRT.t.x-n->mCursorWorldPos.x,dz=flower->mSRT.t.z-n->mCursorWorldPos.z;phase=(dx*dx+dz*dz<64)?3:2;ticks=0;}
   int red=0,white=0,heads=0,captured=0,flying=0;PikiHeadItem* head=nullptr;
   Iterator actors(pikiMgr);CI_LOOP(actors){Piki* p=static_cast<Piki*>(*actors);if(!p->isAlive())continue;if(pc_p2_is_white(p))++white;else ++red;if(p->getStickObject()==flower)++captured;if(p->getState()==PIKISTATE_Flying)++flying;}
   Iterator sprouts(itemMgr->getPikiHeadMgr());CI_LOOP(sprouts){PikiHeadItem* p=static_cast<PikiHeadItem*>(*sprouts);if(p->isAlive()){++heads;require(pc_p2_species(p)==P2SpeciesWhite,"non-White sprout");if(!head&&p->canPullout())head=p;}}
