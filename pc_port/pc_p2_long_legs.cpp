@@ -72,6 +72,8 @@
 #include <vector>
 
 extern Matrix4f invCamMat; // collInfo.cpp: camera inverse used by CollPart::getMatrix
+// pc_port/gl/pc_gfx.cpp: never re-cache resident meshes whose vertex storage the CPU rewrites.
+extern "C" void pc_gfx_mark_dynamic_vertex_range(const void* addr, size_t bytes);
 
 namespace {
 struct SpeciesDef {
@@ -146,6 +148,7 @@ struct ActorState {
     CollInfo* collHost = nullptr;
     std::vector<CollPart*> collParts;
     int collLogged = 0;
+    unsigned poseDiag = 0;
     bool ikDrawLogged = false;
     p2ik::Mgr ik;
     int ikStrides = 0, ikLifts = 0, ikPlants = 0;
@@ -795,7 +798,9 @@ bool houdaiWake(BTeki* actor, const Vector3f& pos, float radius) {
     for (Navi* n : pc_p2_navis()) {
         if (!n || !n->isAlive()) continue;
         const Vector3f q = n->getPosition();
-        if ((q.x - pos.x) * (q.x - pos.x) + (q.z - pos.z) * (q.z - pos.z) < radius * radius) return true;
+        // EnemyFunc::isThereOlimar (enemyAction.cpp:1525): 3D squared distance below the radius.
+        if ((q.x - pos.x) * (q.x - pos.x) + (q.y - pos.y) * (q.y - pos.y) + (q.z - pos.z) * (q.z - pos.z) < radius * radius)
+            return true;
     }
     return houdaiNearest(actor, pos, 0.0f, 180.0f, radius, false) != nullptr;
 }
@@ -977,12 +982,27 @@ bool houdaiIkPose(BTeki* actor, ActorState& state, bool corpse) {
         alpha = std::fmin(0.999f, std::fmax(0.0f, state.srcAccum / P2HoudaiFsm::kDelta));
     // A carried corpse moves away from the spot its legs were planted on: no IK for it (the dead clip's own legs).
     houdaiPose(actor, state, world, alpha, !corpse, joints);
+    if ((++state.poseDiag % 90) == 1) {
+        const p2ik::V3 k = joints[0].col(3), g = joints[size_t(houdaiGunJoint)].col(3);
+        std::printf("P2_HOUDAI_POSE_DIAG generator=%u state=%s clip=%s frame=%d alpha=%.2f ik=%d kosi_model_y=%.1f gun_model_y=%.1f "
+                    "world_y=%.1f actor_y=%.1f world_scale_y=%.2f corpse=%d tama_y=%.1f\n",
+                    state.generator, P2LongLegsFsm::stateName(state.houdai.state()),
+                    p2houdairig::Rig::clipName(state.houdai.poseClip()), state.houdai.poseFrame(), alpha,
+                    int(state.ikStarted), k.y, g.y, world.m[1][3], actor->getPosition().y, world.m[1][1], int(corpse),
+                    (state.collParts.size() > 1 && state.collParts[1]) ? state.collParts[1]->mCentre.y : -9999.0f);
+        std::fflush(stdout);
+    }
     houdaiSkin.evaluate(joints, pos, nrm);
     Shape* shape = state.ikShape;
     for (size_t i = 0; i < pos.size(); ++i) shape->mVertexList[i].set(pos[i].x, pos[i].y, pos[i].z);
     for (size_t i = 0; i < nrm.size(); ++i) shape->mNormalList[i].set(nrm[i].x, nrm[i].y, nrm[i].z);
     BoundBox bounds(shape->mVertexList[0], shape->mVertexList[0]);
     for (int i = 1; i < shape->mVertexCount; ++i) bounds.expandBound(shape->mVertexList[i]);
+    // The resident-mesh cache keys on the display list: without this the first pose drawn (Stay, landing frame
+    // 0, the crouch) stays on screen for the life of the level, whatever the vertices say (owner playtest
+    // 2026-09-30: the boss never stood up). Same rule as p2pose::write (#897).
+    pc_gfx_mark_dynamic_vertex_range(shape->mVertexList, size_t(shape->mVertexCount) * sizeof(shape->mVertexList[0]));
+    pc_gfx_mark_dynamic_vertex_range(shape->mNormalList, size_t(shape->mNormalCount) * sizeof(shape->mNormalList[0]));
     shape->mCourseExtents = bounds;
     shape->mJointList[0].mBounds = bounds;
     if (!state.ikDrawLogged) {
