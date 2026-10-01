@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <map>
+#include <set>
 #include "system.h"
 #include "App.h"
 #include "Node.h"
@@ -16,6 +18,7 @@
 #include "NaviState.h"
 #include "Camera.h"
 #include "Piki.h"
+#include "PikiState.h"
 #include "PikiMgr.h"
 #include "Generator.h"
 #include "teki.h"
@@ -67,6 +70,12 @@ class ContactApp:public PlugPikiApp {
     int frame=0,age=0,ready=0,throwTicks=0;
     bool captainSeen=false,started=false,offContactSeen=false,reverseSeen=false;
     int contactSamples=0,offContactSamples=0;
+    // Fixture observation only: held, released, rising, descending, off-contact.
+    std::map<Piki*,int> flight;
+    bool aHeld=false;
+    void witness(Piki* p,const char* phase){
+        std::printf("P2_ELECBUG_THROW frame=%d piki=%p phase=%s\n",frame,static_cast<void*>(p),phase);
+    }
 public:
     int idle() override {
         const int result=PlugPikiApp::idle();
@@ -104,18 +113,42 @@ public:
         const char* state=pc_p2_elecbug_state_name(enemy);
         require(state,"registered state exists");
         if(!std::strcmp(state,"reverse"))reverseSeen=true;
+        std::set<Piki*> living;
         Iterator candidates(pikiMgr);CI_LOOP(candidates){
             Piki* p=static_cast<Piki*>(*candidates);
-            if(!p||!p->isAlive()||p->mVelocity.y>=-.01f)continue;
+            if(!p||!p->isAlive())continue;
+            if(!p->getCurrState()){
+                auto previous=flight.find(p);
+                if(previous!=flight.end()){witness(p,"invalidated");flight.erase(previous);}
+                continue;
+            }
+            living.insert(p);
+            int& phase=flight[p];
+            const int pstate=p->getState();
+            if(aHeld&&p->mNavi==n&&pstate==PIKISTATE_Hanged&&phase!=1){phase=1;witness(p,"held");}
+            if(phase==2&&pstate==PIKISTATE_Flying&&p->mVelocity.y>.01f){phase=3;witness(p,"rising");}
+            if(phase==3&&pstate==PIKISTATE_Flying&&p->mVelocity.y<-.01f){phase=4;witness(p,"descending");}
+            if(((phase==3||phase==4)&&pstate!=PIKISTATE_Flying)||
+               (phase==5&&!reverseSeen&&pstate!=PIKISTATE_Flying)){
+                phase=0;witness(p,"invalidated");
+            }
+            if(p->mVelocity.y>=-.01f)continue;
             const float xz=distance(p->getPosition(),enemy->getPosition());
             if(xz>30.f)continue;
             Vector3f ignored;
             const bool contact=enemy->mCollInfo&&enemy->mCollInfo->hasInfo()&&enemy->mCollInfo->checkCollision(p,ignored);
             const float dy=p->getPosition().y-enemy->getPosition().y;
             if(contact)++contactSamples;
-            else if(dy>30.f&&!reverseSeen){offContactSeen=true;++offContactSamples;}
+            else if(dy>30.f&&!reverseSeen&&phase==4&&pstate==PIKISTATE_Flying){
+                offContactSeen=true;++offContactSamples;phase=5;
+                std::printf("P2_ELECBUG_OFF_CONTACT frame=%d generator=%u piki=%p contact=0\n",frame,Target,static_cast<void*>(p));
+            }
             std::printf("P2_ELECBUG_CONTACT_SAMPLE age=%d dy=%.3f xz=%.3f vy=%.3f contact=%d state=%s piki=%p\n",
                 age,dy,xz,p->mVelocity.y,int(contact),state,static_cast<void*>(p));
+        }
+        for(auto it=flight.begin();it!=flight.end();){
+            if(!living.count(it->first)){witness(it->first,"invalidated");it=flight.erase(it);}
+            else ++it;
         }
         if(age%30==0){
             std::printf("P2_ELECBUG_CONTACT_PROGRESS age=%d live=%d target_distance=%.2f state=%s throw_ticks=%d off_contact=%d contacts=%d\n",
@@ -123,15 +156,26 @@ public:
             std::fflush(nullptr);
         }
         if(offContactSeen&&reverseSeen){
-            std::printf("PASS P2_ELECBUG_CONTACT ordinary_SDL=1 off_contact_samples=%d contact_samples=%d observed_reverse=1 writes_to_creatures=0\n",offContactSamples,contactSamples);
+            for(const auto& entry:flight)if(entry.second==5){
+                // Exit supplies a candidate only. The launcher must correlate
+                // production contact-dispatch evidence to this exact Pikmin.
+                std::printf("P2_ELECBUG_CONTACT_CANDIDATE frame=%d generator=%u piki=%p observed_reverse=1\n",frame,Target,static_cast<void*>(entry.first));
+            }
             std::fflush(nullptr);std::_Exit(0);
         }
         // Only virtual-pad input. Gather, approach, aim during A hold, release.
         if(age<90){input(KBBTN_B);return result;}
-        if(distance(n->mSRT.t,enemy->mSRT.t)>140.f){point(n,enemy->mSRT.t,true);return result;}
+        if(distance(n->mSRT.t,enemy->mSRT.t)>140.f){
+            if(aHeld){for(const auto& entry:flight)witness(entry.first,"invalidated");flight.clear();aHeld=false;}
+            point(n,enemy->mSRT.t,true);return result;
+        }
         const int cycle=throwTicks++%45;
-        if(cycle<22)point(n,enemy->mSRT.t,false,KBBTN_A);
-        else input();
+        if(cycle<22){aHeld=true;point(n,enemy->mSRT.t,false,KBBTN_A);}
+        else {
+            input();
+            if(aHeld)for(auto& entry:flight)if(entry.second==1){entry.second=2;witness(entry.first,"released");}
+            aHeld=false;
+        }
         return result;
     }
 };

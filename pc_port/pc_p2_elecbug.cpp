@@ -609,7 +609,17 @@ void pc_p2_elecbug_check_landing_press(BTeki* actor) {
         std::printf("P2_ELECBUG_NATURAL_PRESS generator=%u species=%d source_id=28 state=%s\n",
                     genOf(actor), pc_p2_species(p), stateName(s->state));
         std::fflush(stdout);
+        // Read-only dispatch evidence for the ordinary-throw fixture (#1164).
+        // Snapshot before the receiver, which may electrocute the presser.
+        const char* enemyBefore = stateName(s->state);
+        const int presserSpecies = pc_p2_species(p);
+        const float presserVelocityY = p->mVelocity.y;
         pc_p2_elecbug_pressed(actor, p);
+        std::printf("P2_ELECBUG_CONTACT_DISPATCH generator=%u piki=%p species=%d vy=%.6f "
+                    "contact=1 enemy_before=%s enemy_after=%s\n",
+                    genOf(actor), static_cast<void*>(p), presserSpecies, presserVelocityY,
+                    enemyBefore, stateName(s->state));
+        std::fflush(stdout);
         break;
     }
 }
