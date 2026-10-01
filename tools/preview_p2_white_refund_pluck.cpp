@@ -69,8 +69,8 @@ public:
     if(d>(walk?15.f:3.f)){const Vector3f& axis=n->mNaviCamera->mViewXAxis;float strength=walk?65.f:22.f;keys=KBBTN_MSTICK_RIGHT;mMainStickX=s8(strength*(dx*axis.x+dz*axis.z)/d);mMainStickY=s8(strength*(dx*axis.z-dz*axis.x)/d);}
    }
   }
-  if((phase==3 && (whiteBodies<targetBodies || (refundMode&&refundThrown&&!refundObserved)) && ticks%60<15)||(phase==5 && ticks%60<50))keys=KeyConfig::_instance->mThrowKey.mBind;
-  if(phase==9 && ticks==1)keys=KeyConfig::_instance->mDisbandKey.mBind;
+  if((phase==3 && (whiteBodies<targetBodies || (refundMode&&refundThrown&&!refundObserved)) && ticks%(refundMode?60:20)<15)||(phase==5 && ticks%60<50))keys=KeyConfig::_instance->mThrowKey.mBind;
+  if(phase==9 && n && n->getCurrState() && n->getCurrState()->getID()==NAVISTATE_Walk && ticks%30<15)keys=KeyConfig::_instance->mDisbandKey.mBind;
   if(gameflow.mIsUIOverlayActive)keys=(inputFrame%30<15)?KBBTN_A:0;
   SDL_JoystickSetVirtualButton(virtualPad,SDL_CONTROLLER_BUTTON_A,int((keys&KBBTN_A)!=0));
   SDL_JoystickSetVirtualButton(virtualPad,SDL_CONTROLLER_BUTTON_B,int((keys&KBBTN_B)!=0));
@@ -102,14 +102,14 @@ public:
    int count=0;Iterator actors(pikiMgr);CI_LOOP(actors){Piki* p=static_cast<Piki*>(*actors);if(p->isAlive()){++count;require(pc_p2_species(p)==P2SpeciesRed,"starting squad not Red");}}
    Iterator bosses(bossMgr);CI_LOOP(bosses){Boss* b=static_cast<Boss*>(*bosses);if(b->isAlive()&&b->mObjType==OBJTYPE_Pom&&pc_p2_ivory(static_cast<Pom*>(b))){require(!flower,"multiple Ivory buds");flower=static_cast<Pom*>(b);}}
    std::printf("P2_WHITE_BASELINE_COUNTS frame=%d red=%d bodies=%d bound_ivory=%d nstate=%d\n",frames,count,population(),int(flower!=nullptr),n->getCurrState()->getID());require(count==20&&population()==20&&flower,"fresh baseline requires twenty Reds and one Ivory");
-   int w,h,x,y;SDL_Window* window=SDL_GL_GetCurrentWindow();SDL_GetWindowSize(window,&w,&h);SDL_GetWindowPosition(window,&x,&y);require(w==960&&h==540,"window dimensions");
+   int w,h,x,y;SDL_Window* window=SDL_GL_GetCurrentWindow();SDL_GetWindowSize(window,&w,&h);SDL_GetWindowPosition(window,&x,&y);SDL_Rect bounds{};SDL_GetDisplayBounds(SDL_GetWindowDisplayIndex(window),&bounds);bool centered=std::abs(x-(bounds.x+(bounds.w-w)/2))<=2&&std::abs(y-(bounds.y+(bounds.h-h)/2))<=2;require(w==960&&h==540&&centered,"window dimensions/centering");std::printf("P2_WHITE_REFUND_WINDOW width=%d height=%d centered=%d\n",w,h,int(centered));
    std::printf("P2_WHITE_ACQUISITION_BASELINE squad=20 window=%dx%d position=%d,%d hp=%.3f navi=%.2f,%.2f face=%.2f bud=%.2f,%.2f kill_same=%d capacity=%d cycles=%d..%d\n",w,h,x,y,n->mHealth,n->mSRT.t.x,n->mSRT.t.z,n->mFaceDirection,flower->mSRT.t.x,flower->mSRT.t.z,int(C_POM_PARM(flower,mDoKillSameColorPiki)),int(C_POM_PARM(flower,mMaxPikiPerCycle)),int(C_POM_PARM(flower,mMinCycles)),int(C_POM_PARM(flower,mMaxCycles)));
    Iterator pellets(pelletMgr);CI_LOOP(pellets){if(static_cast<Pellet*>(*pellets)->isAlive())++baselinePellets;}
    require(flower->mPomAi->mReleasedSeedCount==0,"Ivory starts with nonzero spent budget");
    std::printf("P2_WHITE_REFUND_PLUCK_START natural_inputs_only=1 spent=0 pellets=%d\n",baselinePellets);
    phase=1;ticks=0;
   }
-  if(phase==1&&ticks>=60){goal=flower->mSRT.t;phase=2;ticks=0;}
+  if(phase==1&&ticks>=30){goal=flower->mSRT.t;phase=2;ticks=0;}
   if(phase==2){float dx=flower->mSRT.t.x-n->mCursorWorldPos.x,dz=flower->mSRT.t.z-n->mCursorWorldPos.z;float bx=flower->mSRT.t.x-n->mSRT.t.x,bz=flower->mSRT.t.z-n->mSRT.t.z;if(dx*dx+dz*dz<64 && bx*bx+bz*bz>625){phase=6;ticks=0;}}
   if(phase==6&&ticks>=20){float dx=flower->mSRT.t.x-n->mCursorWorldPos.x,dz=flower->mSRT.t.z-n->mCursorWorldPos.z;phase=(dx*dx+dz*dz<64)?aimDestination:2;ticks=0;}
   int red=0,white=0,heads=0,captured=0,flying=0;PikiHeadItem* head=nullptr;
@@ -147,9 +147,11 @@ public:
    require(red==19&&white==0&&spent==1,"initial White birth");phase=9;ticks=0;
    std::puts("P2_WHITE_REFUND_INITIAL_BIRTH red=19 sprouts=1 spent=1");
   }
-  if(phase==9 && ticks>=40){
-   Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(p->isAlive())require(p->mMode!=PikiMode::FormationMode,"Red disband incomplete");}
-   phase=4;ticks=0;
+  if(phase==9){
+   int follows=0;Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(p->isAlive()&&p->mMode==PikiMode::FormationMode)++follows;}
+   if(ticks%30==0){std::printf("P2_WHITE_DISBAND_WAIT ticks=%d following=%d nstate=%d bind=%u held=%u\n",ticks,follows,n->getCurrState()->getID(),unsigned(KeyConfig::_instance->mDisbandKey.mBind),unsigned(n->mKontroller->keyDown(KeyConfig::_instance->mDisbandKey.mBind)));std::fflush(nullptr);}
+   require(ticks<240,"ordinary Red disband animation/input timeout");
+   if(follows==0 && n->getCurrState()->getID()==NAVISTATE_Walk){phase=4;ticks=0;std::puts("P2_WHITE_DISBAND_OBSERVED following=0 actual_animation=1");}
   }
   if(phase==4 && head){goal=head->mSRT.t;float dx=goal.x-n->mSRT.t.x,dz=goal.z-n->mSRT.t.z;if(dx*dx+dz*dz<225){phase=5;ticks=0;}}
   if(phase==5 && head){float dx=head->mSRT.t.x-n->mSRT.t.x,dz=head->mSRT.t.z-n->mSRT.t.z;if(dx*dx+dz*dz>400 && n->getCurrState()->getID()==NAVISTATE_Walk){goal=head->mSRT.t;phase=4;ticks=0;}}
