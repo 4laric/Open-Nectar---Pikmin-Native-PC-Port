@@ -49,7 +49,7 @@
 #include "pc_p2_fb_smooth.h"
 #include "pc_p2_pose_family.h"
 #include "pc_p2_billboard_groups.h"
-#include "LifeGauge.h"
+#include "pc_p2_bomb_visual.h"
 #include <algorithm>
 #include "Texture.h"
 #include "gameflow.h"
@@ -111,13 +111,11 @@ std::size_t sDiskBytes = 0;
 // from the extraction); empty = balloons keep their baked orientation.
 std::vector<p2billboardgroups::Range> sBillboards;
 bool sBillboardLogged = false;
-// #1027: one P1 life-gauge wheel per bomb slot, the same widget and setup the
-// Volatile Dweevil bomb uses (P2 shows the Bomb enemy's ordinary life gauge,
-// mHealth / mMaxHealth at fp27 above it, hidden while full).
+// #1027: one shared Bomb countdown gauge (pc_p2_bomb_visual.h, the Volatile
+// Dweevil's P2BombGauge) per bomb slot. P2 shows the Bomb enemy's ordinary life
+// gauge, mHealth / mMaxHealth at fp27 above it, hidden while full.
 constexpr int kBombGaugeSlots = 16;
-constexpr float kBombGaugeHeight = 35.0f;  // Bomb enemyparm fp27 (retail)
-LifeGauge sBombGauge[kBombGaugeSlots];
-bool sBombGaugeInit[kBombGaugeSlots] = {};
+P2BombGauge sBombGauge[kBombGaugeSlots];
 bool sBombGaugeLogged = false;
 // A clip is bank-loadable when its staged files are numbered 0..N-1 (the
 // extractor names poses by sample index; an old dead1 tree skipped some).
@@ -844,7 +842,7 @@ void pc_p2_bombsarai_own_reset() {
     sBombVis.clear();
     sPoseBank.reset();
     sBombPoseBank.reset();
-    for (bool& init : sBombGaugeInit) init = false;
+    for (auto& gauge : sBombGauge) gauge = P2BombGauge();
     sPool = P2BombSaraiBombPool(16);
     for (auto& v : sPoses) v.clear();
     for (auto& v : sBombPoses) v.clear();
@@ -971,28 +969,17 @@ void pc_p2_bombsarai_teki_draw_bomb_gauges(Graphics& gfx) {
         const bool burning = b && (b->phase() == P2BombSaraiBombPhase::ArmedLoop
                                    || b->phase() == P2BombSaraiBombPhase::Burning);
         if (!burning || !(b->fuseMax() > 0.0f) || !(b->fuseRemaining() < b->fuseMax())) {
-            sBombGaugeInit[s] = false;
+            sBombGauge[s] = P2BombGauge();
             continue;
         }
-        LifeGauge& gauge = sBombGauge[s];
-        if (!sBombGaugeInit[s]) {
-            gauge = LifeGauge();
-            gauge.mSnapToTargetHealth = true;
-            gauge.mRenderStyle = LifeGauge::Wheel;
-            sBombGaugeInit[s] = true;
-        }
         const P2BombSaraiVec3& p = b->position();
-        gauge.updValue(std::max(0.0f, b->fuseRemaining()), b->fuseMax());
-        gauge.mPosition.set(p.x, p.y, p.z);
-        gauge.mOffset.set(0.0f, kBombGaugeHeight - 15.0f, 0.0f);
-        gauge.mScale = 5000.0f / gfx.mCamera->mNear;
-        gauge.refresh(gfx);
+        sBombGauge[s].draw(gfx, Vector3f(p.x, p.y, p.z), std::max(0.0f, b->fuseRemaining()), b->fuseMax());
         ++drawn;
         if (!sBombGaugeLogged) {
             sBombGaugeLogged = true;
-            std::printf("P2_BOMBSARAI_BOMB_GAUGE token=%llu ratio=%.3f fuse=%.2f/%.2f style=wheel height=%.0f\n",
+            std::printf("P2_BOMBSARAI_BOMB_GAUGE token=%llu ratio=%.3f fuse=%.2f/%.2f gauge=P2BombGauge\n",
                         (unsigned long long)b->carrierToken(), b->fuseRemaining() / b->fuseMax(),
-                        b->fuseRemaining(), b->fuseMax(), kBombGaugeHeight);
+                        b->fuseRemaining(), b->fuseMax());
             std::fflush(stdout);
         }
     }
