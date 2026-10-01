@@ -394,6 +394,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_long_legs_fsm.cpp
     pc_port/pc_p2_houdai_fsm.cpp
     pc_port/pc_p2_long_legs_ik.cpp
+    pc_port/pc_p2_bigfoot_fsm.cpp
     pc_port/pc_p2_long_legs.cpp
     pc_port/pc_p2_cannon_stone.cpp
     pc_port/pc_p2_egg_hazard.cpp
@@ -1054,6 +1055,12 @@ target_include_directories(p2_long_legs_fsm_test PRIVATE pc_port)
 target_compile_options(p2_long_legs_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_long_legs_fsm_test COMMAND p2_long_legs_fsm_test)
 
+add_executable(p2_long_legs_pose_test
+    tools/p2_long_legs_pose_test.cpp)
+target_include_directories(p2_long_legs_pose_test PRIVATE pc_port)
+target_compile_options(p2_long_legs_pose_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_long_legs_pose_test COMMAND p2_long_legs_pose_test)
+
 add_executable(p2_houdai_fsm_test
     tools/p2_houdai_fsm_test.cpp
     pc_port/pc_p2_houdai_fsm.cpp
@@ -1068,6 +1075,15 @@ add_executable(p2_long_legs_ik_test
 target_include_directories(p2_long_legs_ik_test PRIVATE pc_port)
 target_compile_options(p2_long_legs_ik_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_long_legs_ik_test COMMAND p2_long_legs_ik_test)
+
+add_executable(p2_bigfoot_fsm_test
+    tools/p2_bigfoot_fsm_test.cpp
+    pc_port/pc_p2_bigfoot_fsm.cpp
+    pc_port/pc_p2_long_legs_ik.cpp
+    pc_port/pc_p2_long_legs_fsm.cpp)
+target_include_directories(p2_bigfoot_fsm_test PRIVATE pc_port)
+target_compile_options(p2_bigfoot_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_bigfoot_fsm_test COMMAND p2_bigfoot_fsm_test)
 
 add_executable(p2_inst_legs_policy_test
     tools/p2_inst_legs_policy_test.cpp
@@ -1477,6 +1493,12 @@ add_test(NAME p2_bigtreasure_fx_test COMMAND p2_bigtreasure_fx_test)
 
 
 # Kabuto identity policy (inst2-frogs #871).
+# Antenna Beetle / Dirigibug smoothing helpers (#972): engine-free.
+add_executable(p2_fuefuki_bombsarai_smooth_test tools/p2_fuefuki_bombsarai_smooth_test.cpp)
+target_include_directories(p2_fuefuki_bombsarai_smooth_test PRIVATE pc_port)
+target_compile_options(p2_fuefuki_bombsarai_smooth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_fuefuki_bombsarai_smooth_test COMMAND p2_fuefuki_bombsarai_smooth_test)
+
 add_executable(p2_kabuto_fsm_policy_test tools/p2_kabuto_fsm_policy_test.cpp)
 target_include_directories(p2_kabuto_fsm_policy_test PRIVATE pc_port)
 target_compile_options(p2_kabuto_fsm_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
@@ -1973,6 +1995,14 @@ add_executable(p2_elecbug_fsm_test tools/p2_elecbug_fsm_test.cpp)
 target_include_directories(p2_elecbug_fsm_test PRIVATE pc_port)
 target_compile_options(p2_elecbug_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_elecbug_fsm_test COMMAND p2_elecbug_fsm_test)
+add_executable(p2_elecbug_fx_test tools/p2_elecbug_fx_test.cpp)
+target_include_directories(p2_elecbug_fx_test PRIVATE pc_port)
+target_compile_options(p2_elecbug_fx_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_elecbug_fx_test COMMAND p2_elecbug_fx_test)
+add_executable(p2_species_unit_test tools/p2_species_unit_test.cpp)
+target_include_directories(p2_species_unit_test PRIVATE pc_port)
+target_compile_options(p2_species_unit_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_species_unit_test COMMAND p2_species_unit_test)
 
 # rd-p2-kurage-transport (#768): Kurage57 corpse -> carried -> exactly one
 # Onion receipt over the real delivery-host bridge (registration only).
