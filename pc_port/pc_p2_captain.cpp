@@ -82,7 +82,24 @@ void live_set_owner_slot(void* context, void* actor, int slot)
     (void)context;
     if (!actor || !naviMgr) return;
     Piki* piki = static_cast<Piki*>(actor);
-    piki->mNavi = P2CaptainOwnershipTable::isCaptain(slot) ? naviMgr->getNavi(slot) : nullptr;
+    Navi* next = P2CaptainOwnershipTable::isCaptain(slot) ? naviMgr->getNavi(slot) : nullptr;
+    Navi* previous = piki->mNavi;
+    if (previous == next) return;
+    const bool formation = piki->mMode == PikiMode::FormationMode && piki->mActiveAction
+        && piki->mActiveAction->mCurrActionIdx == PikiAction::Crowd;
+    if (formation) {
+        const auto identity = actor_id_for(actor);
+        // Crowd cleanup releases the OLD captain's plate. CaptureActor has
+        // already abandoned its action and must not run this callback twice.
+        piki->mActiveAction->abandon(nullptr);
+        const auto current = g_actorIds.find(actor);
+        auto* adapter = pc_p2_captain::adapter();
+        if (current == g_actorIds.end() || current->second != identity || !piki->isAlive()
+            || piki->mNavi != previous || !adapter || adapter->policy().isCaptive(identity)
+            || adapter->ownerOfActor(identity) != slot) return;
+    }
+    piki->mNavi = next;
+    if (formation) piki->changeMode(next ? PikiMode::FormationMode : PikiMode::FreeMode, next);
 }
 
 // Abandon the squad action while Piki::mNavi is still valid, so
