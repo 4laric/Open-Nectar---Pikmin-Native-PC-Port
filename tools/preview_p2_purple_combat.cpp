@@ -102,7 +102,7 @@ static void ordinaryCapture(const char* path) {
     std::fclose(file);
     std::printf("P2_PURPLE_ORDINARY_CAPTURE path=%s width=%d height=%d read_only=1\n",path,width,height);
 }
-static void ordinaryInput(unsigned buttons=0,int y=0,int x=0) {
+static void ordinaryInput(unsigned buttons=0,int y=0,int x=0,bool nativeAxisUnits=false) {
     require(ordinaryPad!=nullptr,"ordinary SDL controller missing");
     require(std::abs(x)<=74 && std::abs(y)<=74,"ordinary SDL axes out of range");
     const int instance=SDL_JoystickInstanceID(ordinaryPad);int assigned=-1;
@@ -112,8 +112,10 @@ static void ordinaryInput(unsigned buttons=0,int y=0,int x=0) {
     SDL_JoystickSetVirtualButton(ordinaryPad,SDL_CONTROLLER_BUTTON_A,(buttons&KBBTN_A)!=0);
     SDL_JoystickSetVirtualButton(ordinaryPad,SDL_CONTROLLER_BUTTON_B,(buttons&KBBTN_B)!=0);
     SDL_JoystickSetVirtualButton(ordinaryPad,SDL_CONTROLLER_BUTTON_START,(buttons&KBBTN_START)!=0);
-    SDL_JoystickSetVirtualAxis(ordinaryPad,SDL_CONTROLLER_AXIS_LEFTX,Sint16(x*32767/74));
-    SDL_JoystickSetVirtualAxis(ordinaryPad,SDL_CONTROLLER_AXIS_LEFTY,Sint16(-y*32767/74));
+    // Native pad conversion divides SDL axes by 256. Preserve acquisition's
+    // native stick units; keep the already observed save-menu deflection intact.
+    SDL_JoystickSetVirtualAxis(ordinaryPad,SDL_CONTROLLER_AXIS_LEFTX,Sint16(nativeAxisUnits?x*256:x*32767/74));
+    SDL_JoystickSetVirtualAxis(ordinaryPad,SDL_CONTROLLER_AXIS_LEFTY,Sint16(nativeAxisUnits?-y*256:-y*32767/74));
     SDL_JoystickUpdate();
 }
 static void ordinaryController() {
@@ -679,7 +681,7 @@ class PurpleCombatApp : public PlugPikiApp {
     }
 
     void acquisitionInput(unsigned buttons=0,int x=0,int y=0) {
-        if(mode("sdl_acquire")) ordinaryInput(buttons,y,x);
+        if(mode("sdl_acquire")) ordinaryInput(buttons,y,x,true);
         else pc_p2_input_script_set(1,buttons,x,y);
     }
     bool approachAndPluck(Navi* n,PikiHeadItem* head,Pom* violet) {
@@ -751,7 +753,7 @@ class PurpleCombatApp : public PlugPikiApp {
         require(distance>.01f,"SDL direction missing");
         const Vector3f& axis=n->controlCamera()->mViewXAxis;
         ordinaryInput(0,int(std::lround(power*(dx*axis.z-dz*axis.x)/distance)),
-            int(std::lround(power*(dx*axis.x+dz*axis.z)/distance)));
+            int(std::lround(power*(dx*axis.x+dz*axis.z)/distance)),true);
     }
     Piki* sdlStep(Navi* n) {
         require(pc_window_get_control_mode()==PC_CONTROL_CLASSIC,"SDL classic cursor controls required");
