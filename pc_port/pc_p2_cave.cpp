@@ -54,6 +54,7 @@ int checkpointSchema=1;
 std::string token;
 bool requested=false;
 bool tutorialEntry=false;
+bool boundedForestCheckpoint=false;
 bool completed=false;
 float titleTimer=0;
 P2CaveAnchor anchor;
@@ -214,7 +215,7 @@ void pc_p2_cave_setup(){
     pc_p2_cave_items_shutdown();  // lane 46 (#484)
     pc_p2_cave_bud_shutdown();  // lane 48 (#486)
     pc_p2_cave_carry_shutdown();  // lane 50 (#488)
-    floorId=0;checkpointSchema=1;beasts=false;cargoTerminal=false;token.clear();requested=false;tutorialEntry=false;completed=false;titleTimer=0;anchor=P2CaveAnchor{};transitionShape=nullptr;
+    floorId=0;checkpointSchema=1;beasts=false;cargoTerminal=false;token.clear();requested=false;tutorialEntry=false;boundedForestCheckpoint=false;completed=false;titleTimer=0;anchor=P2CaveAnchor{};transitionShape=nullptr;
     // Lane 41 (#480) runtime generator hook: opt-in only, so a normal cave entry
     // is unchanged. Reads a host-written canonical floor table and writes the
     // engine-generated observed layout for lane 40's checker.
@@ -268,6 +269,14 @@ void pc_p2_cave_setup(){
     if(admitted==P2CaveEntryProfile::Invalid || !std::isfinite(health) || health<=0 || health>1 || count<1 || count>100)
         invalid("header");
     tutorialEntry=(profile==P2CaveEntryProfile::Invalid && admitted!=P2CaveEntryProfile::Invalid);
+    // The versioned entry profile is shared by legacy caves. Only the actual
+    // bounded forest_1 bud checkpoint may opt into a natural White upgrade.
+    if(!beasts && !tutorialEntry && (floor==1 || floor==2)){
+        std::ifstream buds("p2-cave-bud-entry.txt");std::string header,cave;
+        unsigned long long seed=0;int sourceFloor=0,budCount=0;
+        boundedForestCheckpoint=bool(buds>>header>>seed>>cave>>sourceFloor>>budCount)
+            && header=="P2_CAVE_BUD_STATE_1" && cave=="forest_1" && sourceFloor==floor && budCount>=0;
+    }
     std::vector<Survivor> squad;
     checkpointSchema=version=="P2_CAVE_ENTRY_3"?3:(version=="P2_CAVE_ENTRY_2"?2:1);
     for(int i=0;i<count;++i){Survivor s;if(!(in>>s.species>>s.maturity) || !p2_schema_supports(checkpointSchema,s.species) || s.maturity<0 || s.maturity>2)invalid("Pikmin");squad.push_back(s);}
@@ -359,7 +368,7 @@ bool pc_p2_cave_checkpoint(bool confirm){
             || (p->getStickObject() && p->getStickObject()->mObjType!=OBJTYPE_Pellet))busy=true;
         const int species=pc_p2_species(p);
         if(species<0 || !p2_cave_bounded_live_species_supported(checkpointSchema,species,
-                !beasts && !tutorialEntry && floorId>=1 && floorId<=2,pc_p2_whites_enabled()))invalid("runtime Pikmin species");
+                boundedForestCheckpoint,pc_p2_whites_enabled()))invalid("runtime Pikmin species");
         alive.push_back(p);
     }
     Iterator heads(itemMgr->getPikiHeadMgr());CI_LOOP(heads){if(static_cast<PikiHeadItem*>(*heads)->isAlive())busy=true;}
