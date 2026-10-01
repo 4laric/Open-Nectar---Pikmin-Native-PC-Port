@@ -5,9 +5,8 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
-// The engine-free test links pc_randomizer.cpp without the P2 proxy module
-// (which needs engine headers); no proxy tier is staged here.
-int pc_p2_proxy_host(unsigned) { return -1; }
+// CMake links the real P2 proxy implementation. Without a proxy-tier
+// handshake it returns -1; a local strong stub would duplicate its symbol.
 static int ready, held, foreground = 1, access, warps, updates, checks, regions, pikminAccess, skipTutorial, progression, blue, yellow, shared, tunic, bombs;
 extern "C" {
 void bbft_transport_init(const char* game, void (*)(void), void (*)(char*)) { assert(!std::strcmp(game, "pikmin")); }
