@@ -101,6 +101,38 @@ void pc_audio_start_dma(u32 start_addr, u32 length);
 void pc_audio_stop_dma(void);
 u32  pc_audio_get_dma_bytes_left(void);
 
+
+// Netplay audio trace (issue #1030). Env-gated by PIKMIN_NETPLAY_AUDIO_TRACE=1;
+// every call is a no-op (one cached flag test) when it is off, and nothing in
+// here is read by the simulation. Counters feed a once-a-second summary line
+// ("[audio-trace] sec ...") that compares sequencer / mixer / stream advance
+// against wall time; events are logged immediately.
+enum PCAudioTraceCounter {
+    PCAT_GSYNC = 0,        // Jac_Gsync (once per sim tick / loop turn)
+    PCAT_MOVIE_FRAME,      // Jac_DemoFrame (movie sound frame)
+    PCAT_SE_UPDATE,        // SeSystem::update (listener update)
+    PCAT_SE_UPDATE_AUTH,   // ... of which in the authoritative sim pass
+    PCAT_FORMATION_CALL,   // Jac_Orima_Formation calls (per captain per tick)
+    PCAT_FORMATION_START,  // gaya/charge sound start edges
+    PCAT_FORMATION_STOP,   // gaya/charge sound stop edges
+    PCAT_ORIMA_SE,         // Jac_PlayOrimaSe calls
+    PCAT_ORIMA_SE_DROPPED, // ... suppressed (not the local captain's)
+    PCAT_POLL,             // pc_window_poll_events audio pumps
+    PCAT_EVENT_PLAY,       // Jac_PlayEventAction calls (positional gameplay sounds)
+    PCAT_EVENT_FAIL,       // ... with no active event
+    PCAT_SYSTEM_SE,        // Jac_PlaySystemSe calls
+    PCAT_SE_CLOSED,        // SeSystem::update returns early (system closed)
+    PCAT_SEJAM_NOTE,       // note-ons of the persistent SE sequence that got a voice
+    PCAT_SEJAM_NOVOICE,    // ... that did not
+    PCAT_COUNT
+};
+bool pc_audio_trace_enabled(void);
+void pc_audio_trace_count(int counter);
+void pc_audio_trace_event(const char* fmt, ...);
+void pc_audio_trace_state(int demo, int flags, int scene);
+void pc_audio_trace_listener(int authoritativePass, int localPlayer, float lx, float ly, float lz,
+                             float cx, float cy, float cz);
+
 // Audio Tick (Simulates AI Hardware Interrupts)
 void pc_audio_tick(void);
 

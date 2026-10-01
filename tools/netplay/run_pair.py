@@ -411,6 +411,8 @@ SCRUB_KEYS = (
     # test knobs). The prefix rule in scrub_env() below already drops every
     # PIKMIN_NETPLAY_* name, so this list is the explicit documentation of what
     # exists today (tools/netplay/selftest.py fails when a new getenv is missing).
+    "PIKMIN_NETPLAY_AUDIO_LEGACY",  # #1030: captain-owned sounds, old behaviour
+    "PIKMIN_NETPLAY_AUDIO_TRACE",   # #1030: [audio-trace] lines
     "PIKMIN_NETPLAY_BANNER_MS",
     "PIKMIN_NETPLAY_BUILD",
     "PIKMIN_NETPLAY_CAMERA_LEAD",

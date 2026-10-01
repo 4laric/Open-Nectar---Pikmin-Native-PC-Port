@@ -1958,6 +1958,18 @@ if(PIKMIN_BUILD_TESTS)
         set_tests_properties(pc_audio_mixer_test PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
     endif()
 
+    # Netplay audio ownership gate (issue #1030). Host-run, header-only.
+    add_executable(pc_audio_source_test pc_port/audio/pc_audio_source_test.cpp)
+    target_include_directories(pc_audio_source_test PRIVATE pc_port)
+    target_compile_options(pc_audio_source_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_audio_source_test COMMAND pc_audio_source_test)
+
+    # Sequencer clock guard (issue #1030). Host-run, header-only.
+    add_executable(pc_audio_clock_test pc_port/audio/pc_audio_clock_test.cpp)
+    target_include_directories(pc_audio_clock_test PRIVATE pc_port)
+    target_compile_options(pc_audio_clock_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_audio_clock_test COMMAND pc_audio_clock_test)
+
     add_executable(pc_frame_scheduler_test
         pc_port/timing/pc_frame_scheduler_test.cpp
         pc_port/timing/pc_frame_scheduler.cpp)

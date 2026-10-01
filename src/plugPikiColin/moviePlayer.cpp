@@ -1,5 +1,8 @@
 #include "MoviePlayer.h"
 #include "pc_bbft.h"
+#if defined(PIKI_PC_PORT)
+#include "audio/pc_audio.h"
+#endif
 #include <cstdio>
 #include "DebugLog.h"
 #include "EffectMgr.h"
@@ -570,6 +573,9 @@ void MoviePlayer::sndStartMovie(MovieInfo* info)
 #endif
 	bool old             = gsys->mPrevAllocType;
 	gsys->mPrevAllocType = FALSE;
+#if defined(PIKI_PC_PORT)
+	pc_audio_trace_event("movie START index=%d name=%s", info->mMovieIndex, info->mName);
+#endif
 	Jac_StartDemo(info->mMovieIndex);
 	gsys->mPrevAllocType = old;
 }
@@ -618,6 +624,9 @@ void MoviePlayer::initMovieFlags(MovieInfo* info)
  */
 void MoviePlayer::sndFrameMovie(MovieInfo*)
 {
+#if defined(PIKI_PC_PORT)
+	pc_audio_trace_count(PCAT_MOVIE_FRAME); // issue #1030 (env-gated trace)
+#endif
 	Jac_DemoFrame(mCurrentFrame);
 }
 
@@ -626,6 +635,9 @@ void MoviePlayer::sndFrameMovie(MovieInfo*)
  */
 void MoviePlayer::sndStopMovie(MovieInfo* info)
 {
+#if defined(PIKI_PC_PORT)
+	pc_audio_trace_event("movie STOP index=%d", info ? info->mMovieIndex : -1);
+#endif
 	Jac_FinishDemo();
 	effectMgr->cullingOn();
 	if (gameflow.mGameInterface) {

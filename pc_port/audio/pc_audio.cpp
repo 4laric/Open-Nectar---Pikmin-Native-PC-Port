@@ -5,6 +5,7 @@
 #include "audio/pc_jam.h"
 #include "audio/pc_wave_bank.h"
 #include "audio/pc_sequence_archive.h"
+#include "audio/pc_audio_clock.h"
 #include <SDL2/SDL.h>
 #include <atomic>
 #include <cstdio>
@@ -1678,18 +1679,173 @@ u32 pc_audio_get_dma_bytes_left(void) {
     return sDMABytesLeft.load(std::memory_order_relaxed);
 }
 
+
+// ---- Netplay audio trace (issue #1030) -------------------------------------
+#include <cstdarg>
+#include <chrono>
+#include <thread>
+#include <functional>
+namespace {
+std::atomic<u64> sTraceCounters[PCAT_COUNT];
+std::atomic<int> sTraceDemo { -1 }, sTraceFlags { 0 }, sTraceScene { -1 };
+struct TraceListener {
+    std::atomic<int> auth { 0 };
+    float v[8] = {};
+    u64 calls = 0;
+} sTraceListener;
+double trace_now_ms() {
+    using namespace std::chrono;
+    static const auto t0 = steady_clock::now();
+    return duration<double, std::milli>(steady_clock::now() - t0).count();
+}
+}
+
+// Largest sequencer backlog seen at a tick (in sequencer ticks; 2048 are
+// replayed at once per pc_audio_tick) and the longest gap between audio pumps,
+// per trace second. A backlog means music fast-forwards when the pump resumes.
+static double sTracePending[4] = {};
+// Wall-clock seconds the sequencers did not replay after a main-thread stall
+// (pc_audio_clock.h); counted always, printed by the trace.
+static double sTraceDroppedSeconds = 0.0;
+static double sTraceMaxGapMs = 0.0;
+static void trace_note_pending(int which, double pending) {
+    if (!pc_audio_trace_enabled()) return;
+    if (pending > sTracePending[which]) sTracePending[which] = pending;
+}
+static std::set<size_t> sTraceTickThreads;
+static std::mutex sTraceThreadsMutex;
+static void trace_note_gap() {
+    if (!pc_audio_trace_enabled()) return;
+    {
+        std::lock_guard<std::mutex> lock(sTraceThreadsMutex);
+        sTraceTickThreads.insert(std::hash<std::thread::id>()(std::this_thread::get_id()));
+    }
+    static double last = -1.0;
+    const double now = trace_now_ms();
+    if (last >= 0.0 && now - last > sTraceMaxGapMs) sTraceMaxGapMs = now - last;
+    last = now;
+}
+
+bool pc_audio_trace_enabled(void) {
+    static const bool on = [] {
+        const char* v = getenv("PIKMIN_NETPLAY_AUDIO_TRACE");
+        return v != nullptr && v[0] != '\0' && v[0] != '0';
+    }();
+    return on;
+}
+
+void pc_audio_trace_state(int demo, int flags, int scene) {
+    if (!pc_audio_trace_enabled()) return;
+    sTraceDemo.store(demo, std::memory_order_relaxed);
+    sTraceFlags.store(flags, std::memory_order_relaxed);
+    sTraceScene.store(scene, std::memory_order_relaxed);
+}
+
+void pc_audio_trace_count(int counter) {
+    if (!pc_audio_trace_enabled() || counter < 0 || counter >= PCAT_COUNT) return;
+    sTraceCounters[counter].fetch_add(1, std::memory_order_relaxed);
+}
+
+void pc_audio_trace_event(const char* fmt, ...) {
+    if (!pc_audio_trace_enabled()) return;
+    char buf[512];
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    std::printf("[audio-trace] t=%.3f %s\n", trace_now_ms() / 1000.0, buf);
+    std::fflush(stdout);
+}
+
+void pc_audio_trace_listener(int authoritativePass, int localPlayer, float lx, float ly, float lz,
+                             float cx, float cy, float cz) {
+    if (!pc_audio_trace_enabled()) return;
+    pc_audio_trace_count(PCAT_SE_UPDATE);
+    if (authoritativePass) pc_audio_trace_count(PCAT_SE_UPDATE_AUTH);
+    sTraceListener.auth.store(authoritativePass, std::memory_order_relaxed);
+    sTraceListener.v[0] = static_cast<float>(localPlayer);
+    sTraceListener.v[1] = lx; sTraceListener.v[2] = ly; sTraceListener.v[3] = lz;
+    sTraceListener.v[4] = cx; sTraceListener.v[5] = cy; sTraceListener.v[6] = cz;
+    if (++sTraceListener.calls <= 3)
+        pc_audio_trace_event("listener call#%llu pass=%s local=%d listener=(%.1f,%.1f,%.1f) lookAt.t=(%.1f,%.1f,%.1f)",
+                             (unsigned long long)sTraceListener.calls, authoritativePass ? "auth" : "pres",
+                             localPlayer, lx, ly, lz, cx, cy, cz);
+}
+
+// Once a second of wall time: how far each audio clock advanced.
+static void pc_audio_trace_second(void) {
+    if (!pc_audio_trace_enabled()) return;
+    static double lastMs = -1.0;
+    static u64 last[PCAT_COUNT] = {};
+    static PCAudioMetrics lastM = {};
+    static size_t lastCursor = 0;
+    const double now = trace_now_ms();
+    if (lastMs < 0.0) { lastMs = now; return; }
+    if (now - lastMs < 1000.0) return;
+    PCAudioMetrics m = {};
+    pc_audio_get_metrics(&m);
+    u64 d[PCAT_COUNT];
+    for (int i = 0; i < PCAT_COUNT; ++i) {
+        const u64 v = sTraceCounters[i].load(std::memory_order_relaxed);
+        d[i] = v - last[i];
+        last[i] = v;
+    }
+    const double dt = now - lastMs;
+    const size_t cursor = sStreamVoice.cursor;
+    const long long streamDelta = static_cast<long long>(cursor) - static_cast<long long>(lastCursor);
+    const double bgmTempo = sJamPlayer.result() == PCJamResult::Ok ? double(sJamPlayer.tempo()) : 0.0;
+    const double bgmTb = sJamPlayer.result() == PCJamResult::Ok ? double(sJamPlayer.timeBase()) : 0.0;
+    const double bgmTicks = double(m.bgmTicks - lastM.bgmTicks);
+    // Expected JAM ticks per wall second = tempo * timeBase / 60; ratio 1.00 is real time.
+    const double ratio = bgmTempo > 0.0 ? bgmTicks / (dt / 1000.0 * bgmTempo * bgmTb / 60.0) : 0.0;
+    const double mixHz = double(m.mixedFrames - lastM.mixedFrames) / (dt / 1000.0);
+    std::printf("[audio-trace] sec t=%.3f dt=%.0fms poll=%llu gsync=%llu movie=%llu seupd=%llu(auth %llu) "
+                "bgm_seq=%u bgm_ticks=%.0f(tempo %.0f tb %.0f ratio %.3f) se_ticks=%llu ev_ticks=%llu "
+                "mix=%.0fHz(dev %uHz) stream_active=%d stream_samples=%lld(%.0f/s) "
+                "formation call=%llu start=%llu stop=%llu orima_se=%llu dropped=%llu "
+                "evplay=%llu evfail=%llu sysse=%llu seclosed=%llu sejam_notes=%llu(novoice %llu) state(demo=%d flags=0x%x scene=%d) "
+                "seqdrop=%.0fms maxgap=%.0fms tick_threads=%zu pending(bgm/boss/se/ev)=%.0f/%.0f/%.0f/%.0f "
+                "listener(auth=%d local=%.0f pos=%.0f,%.0f,%.0f cam=%.0f,%.0f,%.0f)\n",
+                now / 1000.0, dt, (unsigned long long)d[PCAT_POLL], (unsigned long long)d[PCAT_GSYNC],
+                (unsigned long long)d[PCAT_MOVIE_FRAME], (unsigned long long)d[PCAT_SE_UPDATE],
+                (unsigned long long)d[PCAT_SE_UPDATE_AUTH], sJamSequence, bgmTicks, bgmTempo, bgmTb, ratio,
+                (unsigned long long)(m.seTicks - lastM.seTicks), (unsigned long long)(m.eventTicks - lastM.eventTicks),
+                mixHz, m.sampleRate, sStreamVoice.active ? 1 : 0, streamDelta,
+                double(streamDelta) / (dt / 1000.0), (unsigned long long)d[PCAT_FORMATION_CALL],
+                (unsigned long long)d[PCAT_FORMATION_START], (unsigned long long)d[PCAT_FORMATION_STOP],
+                (unsigned long long)d[PCAT_ORIMA_SE], (unsigned long long)d[PCAT_ORIMA_SE_DROPPED],
+                (unsigned long long)d[PCAT_EVENT_PLAY], (unsigned long long)d[PCAT_EVENT_FAIL],
+                (unsigned long long)d[PCAT_SYSTEM_SE], (unsigned long long)d[PCAT_SE_CLOSED],
+                (unsigned long long)d[PCAT_SEJAM_NOTE], (unsigned long long)d[PCAT_SEJAM_NOVOICE],
+                sTraceDemo.load(), sTraceFlags.load(), sTraceScene.load(),
+                sTraceDroppedSeconds * 1000.0, sTraceMaxGapMs, sTraceTickThreads.size(), sTracePending[0], sTracePending[1], sTracePending[2], sTracePending[3],
+                sTraceListener.auth.load(), sTraceListener.v[0], sTraceListener.v[1], sTraceListener.v[2],
+                sTraceListener.v[3], sTraceListener.v[4], sTraceListener.v[5], sTraceListener.v[6]);
+    std::fflush(stdout);
+    lastMs = now;
+    sTraceMaxGapMs = 0.0;
+    sTraceDroppedSeconds = 0.0;
+    for (double& p : sTracePending) p = 0.0;
+    lastM = m;
+    lastCursor = cursor;
+}
+
 void pc_audio_tick(void) {
+    pc_audio_trace_count(PCAT_POLL);
+    trace_note_gap();
+    pc_audio_trace_second();
 
     advance_bgm_mix();
     if (sJamPlayer.result() == PCJamResult::Ok) {
         const u64 now = SDL_GetPerformanceCounter();
         const u64 frequency = SDL_GetPerformanceFrequency();
         if (sJamLastCounter != 0 && frequency != 0) {
-            const double elapsed = static_cast<double>(now - sJamLastCounter) / frequency;
+            const double elapsed = pc_audio_seq_elapsed(now, sJamLastCounter, frequency, &sTraceDroppedSeconds);
             sJamTickAccumulator += elapsed * sJamPlayer.tempo()
                                  * sJamPlayer.timeBase() / 60.0;
         }
         sJamLastCounter = now;
+        trace_note_pending(0, sJamTickAccumulator);
         size_t ticks = 0;
         while (sJamTickAccumulator >= 1.0 && ticks++ < 2048) {
             sJamTickAccumulator -= 1.0;
@@ -1740,11 +1896,12 @@ void pc_audio_tick(void) {
         const u64 now = SDL_GetPerformanceCounter();
         const u64 frequency = SDL_GetPerformanceFrequency();
         if (sBossJamLastCounter != 0 && frequency != 0) {
-            const double elapsed = static_cast<double>(now - sBossJamLastCounter) / frequency;
+            const double elapsed = pc_audio_seq_elapsed(now, sBossJamLastCounter, frequency, &sTraceDroppedSeconds);
             sBossJamTickAccumulator += elapsed * sBossJamPlayer.tempo()
                                      * sBossJamPlayer.timeBase() / 60.0;
         }
         sBossJamLastCounter = now;
+        trace_note_pending(1, sBossJamTickAccumulator);
         size_t ticks = 0;
         while (sBossJamTickAccumulator >= 1.0 && ticks++ < 2048) {
             sBossJamTickAccumulator -= 1.0;
@@ -1794,11 +1951,12 @@ void pc_audio_tick(void) {
         const u64 now = SDL_GetPerformanceCounter();
         const u64 frequency = SDL_GetPerformanceFrequency();
         if (sSEJamLastCounter != 0 && frequency != 0) {
-            const double elapsed = static_cast<double>(now - sSEJamLastCounter) / frequency;
+            const double elapsed = pc_audio_seq_elapsed(now, sSEJamLastCounter, frequency, &sTraceDroppedSeconds);
             sSEJamTickAccumulator += elapsed * sSEJamPlayer.tempo()
                                    * sSEJamPlayer.timeBase() / 60.0;
         }
         sSEJamLastCounter = now;
+        trace_note_pending(2, sSEJamTickAccumulator);
         size_t ticks = 0;
         while (sSEJamTickAccumulator >= 1.0 && ticks++ < 2048) {
             sSEJamTickAccumulator -= 1.0;
@@ -1814,6 +1972,11 @@ void pc_audio_tick(void) {
                         0, event.volume, event.pan, PC_AUDIO_BUS_SE, 96,
                         event.pitch, event.cutoff, event.fxMix, event.dolby,
                         event.envelope);
+                    pc_audio_trace_count(handle >= 0 ? PCAT_SEJAM_NOTE : PCAT_SEJAM_NOVOICE);
+                    if (event.track == 15)
+                        pc_audio_trace_event("se jam track 15 note bank=%u program=%u key=%u vel=%u vol=%.2f -> %s",
+                                             event.bank, event.program, event.key, event.velocity, event.volume,
+                                             handle >= 0 ? "voice" : "NO VOICE");
                     if (handle >= 0) tag_jam_voice(handle, 1, event.source);
                 } else if (event.type == PCJamEventType::NoteOff && handle >= 0) {
                     const u32 releaseFrames = event.release == 0 ? 0
@@ -1867,11 +2030,12 @@ void pc_audio_tick(void) {
         const u64 now = SDL_GetPerformanceCounter();
         const u64 frequency = SDL_GetPerformanceFrequency();
         if (sEventJamLastCounter != 0 && frequency != 0) {
-            const double elapsed = static_cast<double>(now - sEventJamLastCounter) / frequency;
+            const double elapsed = pc_audio_seq_elapsed(now, sEventJamLastCounter, frequency, &sTraceDroppedSeconds);
             sEventJamTickAccumulator += elapsed * sEventJamPlayer.tempo()
                                       * sEventJamPlayer.timeBase() / 60.0;
         }
         sEventJamLastCounter = now;
+        trace_note_pending(3, sEventJamTickAccumulator);
         size_t ticks = 0;
         while (sEventJamTickAccumulator >= 1.0 && ticks++ < 2048) {
             sEventJamTickAccumulator -= 1.0;
