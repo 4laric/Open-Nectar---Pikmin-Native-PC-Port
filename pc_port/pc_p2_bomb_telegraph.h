@@ -112,14 +112,16 @@ struct Burn {
 // units of the baked Dweevil poses, body about 41 high): the source carries
 // the Bomb on the `otakara` joint (OtakaraBase.cpp:665).
 struct Offset { float x, y, z; };
-inline constexpr Offset kBackOffset = {0.0f, 36.0f, -6.0f};
-inline constexpr float kBombScale = 1.0f;
+inline constexpr Offset kBackOffset = {0.0f, 40.0f, -4.0f};
+inline constexpr float kBombScale = 1.8f;
+// The bomb swells a little on each lit flash so the pulse reads at a glance.
+inline constexpr float kFlashSwell = 1.2f;
 
 // Flash colour multiplier for the bomb materials. Unlit frames stay dim and
 // lit frames go bright red-orange so the pulse is unmistakable.
 struct Tint { unsigned char r, g, b; };
 inline Tint flashTint(bool on, float ratio) {
-    if (!on) return Tint{90, 90, 90};
+    if (!on) return Tint{110, 100, 100};
     // Brighten and redden as the gauge empties.
     const float t = 1.0f - (ratio < 0.0f ? 0.0f : (ratio > 1.0f ? 1.0f : ratio));
     return Tint{255, (unsigned char)(200.0f - 120.0f * t), (unsigned char)(170.0f - 120.0f * t)};

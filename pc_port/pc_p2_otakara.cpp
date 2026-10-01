@@ -72,6 +72,7 @@
 #include "pc_p2_dweevil_policy.h"
 #include "pc_p2_bombsarai_blast.h"
 #include "pc_p2_bomb_telegraph.h"
+#include "pc_p2_bomb_visual.h"
 #include "pc_p2_species.h"
 #include "pc_p2_sfx.h"
 #include "pc_p2_hazard_emitter.h"
@@ -247,8 +248,7 @@ struct Otakara {
     p2bombtelegraph::Burn burn;
     const char* burnTrigger = "fuse";
     float heldHealth = 0.0f; // carrier takes no damage while its bomb burns
-    LifeGauge gauge;         // the bomb's own life gauge (Wheel, snap to target)
-    bool gaugeInit = false;
+    P2BombGauge gauge;       // the bomb's own countdown wheel (pc_p2_bomb_visual.h)
     int gaugeLogTick = 0;
     // P2_OTAKARA_PRESS once-per-press gate (pc_p2_otakara_press_policy.h).
     const void* lastPresser = nullptr;
@@ -971,15 +971,11 @@ void igniteBomb(BTeki* a, Otakara& s, const char* trigger, float carrierHealth) 
     s.burn.ignite();
     s.burnTrigger = trigger;
     s.heldHealth = carrierHealth;
-    if (!s.gaugeInit) {
-        s.gauge.mSnapToTargetHealth = true; // bombItem.cpp:82
-        s.gauge.mRenderStyle = LifeGauge::Wheel;
-        s.gaugeInit = true;
-    }
     std::printf("P2_BOMBOTAKARA_FUSE_START generator=%u payload=93 trigger=%s life=%.2f blast_in=%.3f "
                 "source=bombState.cpp:97-122\n",
                 genOf(a), trigger, p2bombtelegraph::kBombLife, p2bombtelegraph::kTotalSeconds);
     std::fflush(stdout);
+    shotRequest(s, "bomb_fuse", 330); // test-only frame burst (PIKMIN_P2_DWEEVIL_SHOT + PIKMIN_FRAME_DUMP)
 }
 
 // One burn frame: drain (addDamage(dt,1)), flash pulse -> spark + tick, the
@@ -990,7 +986,7 @@ void bombBurnTick(BTeki* a, Otakara& s, float dt) {
     const p2bombtelegraph::Step step = s.burn.step(dt);
     const Vector3f wp = bombWorldPos(a);
     if (step.pulse) {
-        pc_p2_otakara_fx_engine_spawn(190, wp.x, wp.y + 6.0f, wp.z); // EFF_Spider_SmallSparks
+        pc_p2_otakara_fx_engine_spawn(44, wp.x, wp.y + 4.0f, wp.z); // EFF_Piki_FireSparkles (pkf2.pcr)
         pc_p2_sfx(93, generator, p2sfx::Event::Fuse, a);
         std::printf("P2_BOMBOTAKARA_FUSE_TICK generator=%u payload=93 n=%d t=%.2f ratio=%.3f period=%.3f\n",
                     generator, s.burn.pulses, s.burn.elapsed(), s.burn.ratio(),
@@ -2214,67 +2210,19 @@ void pc_p2_otakara_draw_bomb(BTeki* actor, Graphics& gfx, const Matrix4f& matrix
     if (it == actors.end()) return;
     Otakara& s = it->second;
     if (s.species != p2dweevil::BombId || s.bombDetonated || actor->mHealth <= 0.0f) return;
-    if (!itemMgr || !itemMgr->mItemShapes || !itemMgr->mItemShapes[2]) return;
-    Shape* shape = itemMgr->mItemShapes[2]->mShape;
-    if (!shape) return;
-
     Matrix4f local, view;
     const p2bombtelegraph::Offset o = p2bombtelegraph::kBackOffset;
-    const float k = p2bombtelegraph::kBombScale;
+    const float k = p2bombtelegraph::kBombScale * (s.burn.flashOn() ? p2bombtelegraph::kFlashSwell : 1.0f);
     local.makeSRT(Vector3f(k, k, k), Vector3f(0.0f, 0.0f, 0.0f), Vector3f(o.x, o.y, o.z));
     matrix.multiplyTo(local, view);
 
-    // Flash: multiply a tint over the bomb materials for this draw only and
-    // restore them after (the shape is shared with real P1 bomb rocks).
-    const bool flashing = s.burn.burning;
-    const p2bombtelegraph::Tint tint = p2bombtelegraph::flashTint(s.burn.flashOn(), s.burn.ratio());
-    struct Saved {
-        Material* material;
-        Colour poly, konst;
-        int r, g, b;
-        bool hasTev;
-    };
-    std::vector<Saved> saved;
-    auto mul = [](unsigned char base, unsigned char t) { return (unsigned char)((unsigned)base * t / 255u); };
-    if (flashing && shape->mMaterialList && shape->mMaterialCount > 0) {
-        for (int m = 0; m < shape->mMaterialCount; ++m) {
-            Material& material = shape->mMaterialList[m];
-            Saved sv;
-            sv.material = &material;
-            sv.poly = material.mColourInfo.mColour;
-            sv.hasTev = material.mTevInfo != nullptr;
-            if (sv.hasTev) {
-                sv.konst = material.mTevInfo->mKonstColors[0];
-                sv.r = material.mTevInfo->mTevColRegs[0].mAnimatedColor.r;
-                sv.g = material.mTevInfo->mTevColRegs[0].mAnimatedColor.g;
-                sv.b = material.mTevInfo->mTevColRegs[0].mAnimatedColor.b;
-                material.mTevInfo->mKonstColors[0].set(mul(sv.konst.r, tint.r), mul(sv.konst.g, tint.g),
-                                                       mul(sv.konst.b, tint.b), sv.konst.a);
-                material.mTevInfo->mTevColRegs[0].mAnimatedColor.r = sv.r * tint.r / 255;
-                material.mTevInfo->mTevColRegs[0].mAnimatedColor.g = sv.g * tint.g / 255;
-                material.mTevInfo->mTevColRegs[0].mAnimatedColor.b = sv.b * tint.b / 255;
-            }
-            material.mColourInfo.mColour.set(mul(sv.poly.r, tint.r), mul(sv.poly.g, tint.g),
-                                             mul(sv.poly.b, tint.b), sv.poly.a);
-            saved.push_back(sv);
-        }
-    }
-    shape->updateAnim(gfx, view, nullptr, nullptr);
-    shape->drawshape(gfx, *gfx.mCamera, nullptr);
-    for (const Saved& sv : saved) {
-        sv.material->mColourInfo.mColour = sv.poly;
-        if (sv.hasTev) {
-            sv.material->mTevInfo->mKonstColors[0] = sv.konst;
-            sv.material->mTevInfo->mTevColRegs[0].mAnimatedColor.r = sv.r;
-            sv.material->mTevInfo->mTevColRegs[0].mAnimatedColor.g = sv.g;
-            sv.material->mTevInfo->mTevColRegs[0].mAnimatedColor.b = sv.b;
-        }
-    }
+    // Shared shape draw (pc_p2_bomb_visual.h): tints the bomb materials while the fuse burns.
+    pc_p2_bomb_draw_shape(gfx, view, s.burn.burning, s.burn.flashOn(), s.burn.ratio());
     static std::set<unsigned> logged;
     if (logged.insert(genOf(actor)).second) {
         std::printf("P2_BOMBOTAKARA_BOMB_DRAW generator=%u model=objects/bomb/bomb.mod offset=%.1f,%.1f,%.1f "
-                    "scale=%.2f materials=%d\n",
-                    genOf(actor), o.x, o.y, o.z, k, shape->mMaterialCount);
+                    "scale=%.2f\n",
+                    genOf(actor), o.x, o.y, o.z, k);
         std::fflush(stdout);
     }
 }
@@ -2282,16 +2230,15 @@ void pc_p2_otakara_draw_bomb(BTeki* actor, Graphics& gfx, const Matrix4f& matrix
 // The bomb's own countdown gauge: the P1 life-gauge wheel, drained from full
 // to empty over the burn (EnemyBase::getLifeGaugeParam ratio = mHealth /
 // mMaxHealth, bombItem.cpp:167-178 for the P1 wheel style).
-void pc_p2_otakara_bomb_gauge(BTeki* actor, Graphics& gfx) {
-    if (!ready || !actor || !gfx.mCamera) return;
+bool pc_p2_otakara_bomb_gauge(BTeki* actor, Graphics& gfx) {
+    if (!ready || !actor || !gfx.mCamera) return false;
     auto it = actors.find(static_cast<PelletView*>(actor));
-    if (it == actors.end()) return;
+    if (it == actors.end()) return false;
     Otakara& s = it->second;
-    if (s.species != p2dweevil::BombId || !s.burn.burning || s.bombDetonated || !s.gaugeInit) return;
-    const Vector3f wp = bombWorldPos(actor);
-    s.gauge.updValue(s.burn.health, p2bombtelegraph::kBombLife);
-    s.gauge.mPosition.input(wp);
-    s.gauge.mOffset.set(0.0f, p2bombtelegraph::kGaugeHeight - 15.0f, 0.0f);
-    s.gauge.mScale = 5000.0f / gfx.mCamera->mNear;
-    s.gauge.refresh(gfx);
+    if (s.species != p2dweevil::BombId) return false;
+    // The Dweevil never takes damage itself (BombOtakara.cpp:42-55 routes it to the Bomb), so
+    // it shows no life gauge of its own: only the bomb's countdown wheel.
+    if (!s.burn.burning || s.bombDetonated) return true;
+    s.gauge.draw(gfx, bombWorldPos(actor), s.burn.health, p2bombtelegraph::kBombLife);
+    return true;
 }

@@ -62,7 +62,8 @@ bool pc_p2_otakara_clip(const BTeki*, const char*& name, float& phase);
 class Graphics;
 class Matrix4f;
 void pc_p2_otakara_draw_bomb(BTeki*, Graphics&, const Matrix4f& matrix);
-void pc_p2_otakara_bomb_gauge(BTeki*, Graphics&);
+// Returns true for a Volatile Dweevil: the caller then skips the carrier's own gauge.
+bool pc_p2_otakara_bomb_gauge(BTeki*, Graphics&);
 
 
 // Fixture observability: behavior-neutral, read-only registration queries so the

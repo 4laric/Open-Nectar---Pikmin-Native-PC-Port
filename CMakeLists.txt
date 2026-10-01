@@ -372,6 +372,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_armor.cpp
     pc_port/pc_p2_otakara.cpp
     pc_port/pc_p2_otakara_fx.cpp
+    pc_port/pc_p2_bomb_visual.cpp
     pc_port/pc_p2_elecbug.cpp
     pc_port/pc_p2_tamago.cpp
     pc_port/pc_p2_astonish.cpp
