@@ -26,6 +26,7 @@
 #include "ItemObject.h"
 #include "MoviePlayer.h"
 #include "NaviMgr.h"
+#include "NaviState.h"
 #include "Pellet.h"
 #include "Piki.h"
 #include "PikiMgr.h"
