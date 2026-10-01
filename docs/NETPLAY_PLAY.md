@@ -279,6 +279,30 @@ when the delay grows and the taps of skipped frames merge into one when it
 shrinks. Set all three to compare the feel of that older build or to chase
 a desync against it.
 
+## Sound
+
+Both PCs simulate both captains, so each PC would otherwise play every
+captain-owned sound twice over: the whistle, the footsteps, the captain and
+Pikmin voices and the C-stick (swarm) sound of the *other* player's captain
+as well as your own. In a session each PC plays those sounds for its own
+captain only (the host's is Olimar, the joiner's Louie). Positional sounds
+(enemies, Pikmin, the ship, items) are unchanged and heard from where the
+other captain really is, from your own point of view: the listener follows
+your captain and your own camera, never the other player's. Music, the
+day clock signals, the cinematic sound (including the day-end march and the
+take-off) and the "captain down" cue and music change are shared and play on
+both PCs. A deterministic replay of a recorded input log (no host or join
+switch) mutes nothing: one person watches both captains.
+
+Audio is local output and never part of the simulation, so none of this can
+change a state hash or desynchronise a session. To compare with the older
+behaviour set `PIKMIN_NETPLAY_AUDIO_LEGACY=1` on a PC. To log what the audio
+side does (the sequencer, mixer and stream clocks against wall time, the
+listener, cinematic sound events, the C-stick sound's starts and stops, each
+cinematic's sound-frame requests, and the BGM, demo-sequence and effect
+sequencers' ticks against their tempo), set `PIKMIN_NETPLAY_AUDIO_TRACE=1`;
+the `[audio-trace]` lines go to the game's console output.
+
 ## The netplay HUD
 
 During a session a small box on the right, just below the day counter,

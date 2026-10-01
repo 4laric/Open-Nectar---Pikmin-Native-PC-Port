@@ -10,6 +10,9 @@
 #include "pc_p2_species.h"
 #include "pc_p2_bulbmin.h"
 #include "Navi.h"
+#if defined(PIKI_PC_PORT)
+#include "audio/pc_audio_source.h"
+#endif
 #include "pc_randomizer.h"
 #include "pc_crowd_handover.h"
 #include "pc_crowd_slot_diag.h"
@@ -428,6 +431,9 @@ bool Navi::isRopable()
  */
 bool Navi::startDamage()
 {
+#if defined(PIKI_PC_PORT)
+	PcAudioSource audioSource(mNaviID); // issue #1030: whose sounds these are (the hurt state starts here)
+#endif
 	int stateID      = mStateMachine->getCurrID(this);
 	NaviState* state = mStateMachine->getNaviState(this);
 	if (state->invincible(this)) {
@@ -445,6 +451,9 @@ bool Navi::startDamage()
  */
 void Navi::startDamageEffect()
 {
+#if defined(PIKI_PC_PORT)
+	PcAudioSource audioSource(mNaviID); // issue #1030: whose sounds these are
+#endif
 	CollPart* part = mCollInfo->getSphere('cent');
 	if (!part) {
 		return;
@@ -528,6 +537,9 @@ void Navi::pauseForDownIfLast()
  */
 void Navi::finishDamage()
 {
+#if defined(PIKI_PC_PORT)
+	PcAudioSource audioSource(mNaviID); // issue #1030: whose sounds these are
+#endif
 	resetStateDamaged();
 	mStateMachine->restart(this);
 
@@ -1365,6 +1377,9 @@ void Navi::pcPinCursorFirstPerson()
 void Navi::update()
 {
 #if defined(PIKI_PC_PORT)
+	PcAudioSource audioSource(mNaviID); // issue #1030: whose sounds these are
+#endif
+#if defined(PIKI_PC_PORT)
 	pcUpdateLockOn();
 #endif
 	if (!mGroundTriangle) {
@@ -1514,6 +1529,9 @@ void Navi::update()
  */
 void Navi::animationKeyUpdated(immut PaniAnimKeyEvent& event)
 {
+#if defined(PIKI_PC_PORT)
+	PcAudioSource audioSource(mNaviID); // issue #1030: whose sounds these are
+#endif
 	// sure kando.
 	int lowerMotionID = mNaviAnimMgr.getLowerAnimator().getCurrentMotionIndex();
 	int upperMotionID = mNaviAnimMgr.getUpperAnimator().getCurrentMotionIndex();
@@ -1934,6 +1952,9 @@ void Navi::releasePikis()
  */
 void Navi::doAI()
 {
+#if defined(PIKI_PC_PORT)
+	PcAudioSource audioSource(mNaviID); // issue #1030: whose sounds these are
+#endif
 	if (pc_demon_bound(this)) {
 		// P2 Sarai samples a directional down edge once per state update. The
 		// existing Kontroller click edge supplies that cadence; the bridge only
@@ -2263,6 +2284,9 @@ void Navi::letPikiWork()
  */
 void Navi::collisionCallback(immut CollEvent& event)
 {
+#if defined(PIKI_PC_PORT)
+	PcAudioSource audioSource(mNaviID); // issue #1030: whose sounds these are
+#endif
 	Creature* collider = event.mCollider;
 	if (collider != mCollidedWorkObj) {
 		switch (collider->mObjType) {
@@ -3433,6 +3457,11 @@ void Navi::procDamage(f32)
  */
 bool Navi::stimulate(immut Interaction& interaction)
 {
+#if defined(PIKI_PC_PORT)
+	// Issue #1030: the hurt and fired sounds of Interact*::actNavi (SE_DAMAGED, SE_FIRED) belong to the navi that is
+	// hit, not to the enemy code that raised them: only the PC that plays that captain should hear them.
+	PcAudioSource audioSource(mNaviID);
+#endif
 	if (interaction.actCommon(this)) {
 		return interaction.actNavi(this);
 	}

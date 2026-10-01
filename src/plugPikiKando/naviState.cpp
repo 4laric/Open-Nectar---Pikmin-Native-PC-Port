@@ -16,6 +16,7 @@
 #endif
 #if defined(PIKI_PC_PORT)
 #include "pc_coop.h"
+#include "audio/pc_audio_source.h"
 #endif
 #include <cstdlib>
 #include <cstdio>
@@ -3478,6 +3479,12 @@ void NaviDeadState::init(Navi* navi)
 		// SE_PLAYER_DOWN es un evento de escena (corta la música): con el
 		// otro vivo la música sigue; se avisa con el sonido de daño.
 		seSystem->playPlayerSe(SE_DAMAGED);
+		{
+			// issue #1030: makeCStick skips a downed captain, so release its C-stick (charge) slot here; otherwise
+			// a captain downed while charging keeps the swarm sound playing for as long as the partner lives.
+			PcAudioSource audioSource(navi->mNaviID);
+			seMgr->playNaviSound(0, 0);
+		}
 		navi->mVelocity.set(0.0f, 0.0f, 0.0f);
 		navi->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
 		// Only upstream co-op has a per-captain camera. The P2 opt-in second

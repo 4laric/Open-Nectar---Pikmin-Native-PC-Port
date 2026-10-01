@@ -1,6 +1,9 @@
 #include "MoviePlayer.h"
 #include "pc_bbft.h"
 #include "netplay/pc_netplay_det.h"
+#if defined(PIKI_PC_PORT)
+#include "audio/pc_audio.h"
+#endif
 #include <cstdio>
 #include "DebugLog.h"
 #include "EffectMgr.h"
@@ -476,6 +479,9 @@ void MoviePlayer::startMovie(int movieIdx, int, Creature* target, immut Vector3f
 	info->del();
 	info->initCore(movie->mCinFileName);
 	info->mMovieIndex   = translatedIdx;
+#if defined(PIKI_PC_PORT)
+	info->mSndOwner = false;
+#endif
 	info->mActorVisMask = actorVisMask;
 	if (translatedIdx == DEMOID_PikminInOnyonPractice || translatedIdx == DEMOID_PikminInOnyonForest) {
 		gsys->startLoading(nullptr, false, 0);
@@ -575,6 +581,20 @@ void MoviePlayer::sndStartMovie(MovieInfo* info)
 #endif
 	bool old             = gsys->mPrevAllocType;
 	gsys->mPrevAllocType = FALSE;
+#if defined(PIKI_PC_PORT)
+	pc_audio_trace_event("movie START index=%d name=%s", info->mMovieIndex, info->mName);
+#endif
+#if defined(PIKI_PC_PORT)
+	{
+		bool ownerPlaying = false;
+		for (MovieInfo* other = static_cast<MovieInfo*>(mPlayInfoList.mChild); other; other = static_cast<MovieInfo*>(other->mNext)) {
+			if (other != info && other->mSndOwner) {
+				ownerPlaying = true;
+			}
+		}
+		info->mSndOwner = !ownerPlaying;
+	}
+#endif
 	Jac_StartDemo(info->mMovieIndex);
 	gsys->mPrevAllocType = old;
 }
@@ -621,8 +641,15 @@ void MoviePlayer::initMovieFlags(MovieInfo* info)
  * @todo: Documentation
  * @note UNUSED Size: 000024 (Matching by size)
  */
-void MoviePlayer::sndFrameMovie(MovieInfo*)
+void MoviePlayer::sndFrameMovie(MovieInfo* info)
 {
+#if defined(PIKI_PC_PORT)
+	// Issue #1030: one cue cursor per demo, advanced only by the movie that owns it (see MovieInfo::mSndOwner).
+	pc_audio_trace_movie_frame(info ? static_cast<int>(info->mMovieIndex) : -1, static_cast<int>(mCurrentFrame), info && info->mSndOwner);
+	if (info && !info->mSndOwner) {
+		return;
+	}
+#endif
 	Jac_DemoFrame(mCurrentFrame);
 }
 
@@ -631,7 +658,21 @@ void MoviePlayer::sndFrameMovie(MovieInfo*)
  */
 void MoviePlayer::sndStopMovie(MovieInfo* info)
 {
+#if defined(PIKI_PC_PORT)
+	pc_audio_trace_event("movie STOP index=%d", info ? info->mMovieIndex : -1);
+#endif
+#if defined(PIKI_PC_PORT)
+	// A movie that only ran alongside the demo ending (the take-off's second movie) must not finish the demo's
+	// sound while its owner still plays.
+	if (!info || info->mSndOwner || mPlayInfoList.getChildCount() <= 1) {
+		Jac_FinishDemo();
+	}
+	if (info) {
+		info->mSndOwner = false;
+	}
+#else
 	Jac_FinishDemo();
+#endif
 	effectMgr->cullingOn();
 	if (gameflow.mGameInterface) {
 #if defined(VERSION_PIKIDEMO)
