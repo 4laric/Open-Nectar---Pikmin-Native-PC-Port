@@ -673,7 +673,10 @@ void pc_randomizer_observe_pikmin_death(const void* piki) {
 }
 int pc_randomizer_repairs() { return (int)repairs; }
 const char* pc_randomizer_save_root() { return saveRoot.c_str(); }
-int pc_randomizer_next_day(int day) { return enabled && day >= 28 ? 29 : day + 1; }
+int pc_randomizer_next_day(int day) {
+    if (pc_randomizer_thelynk()) return day >= 29 ? 2 : day + 1;
+    return enabled && day >= 28 ? 29 : day + 1;
+}
 bool pc_randomizer_has(const char* name) {
     if (!enabled || !name) return false;
     if (thelynk) {

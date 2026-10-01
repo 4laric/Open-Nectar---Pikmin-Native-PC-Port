@@ -303,6 +303,9 @@ void PlayerState::reconcileBbftParts()
 {
     if (pc_randomizer_thelynk()) {
         static const int stages[30] = {3,3,2,1,0,1,3,2,3,1,1,1,2,2,2,3,1,2,3,1,2,3,1,3,2,3,4,0,2,3};
+        // TheLynk's normal day-cycle mode normalizes day 1 and >29 to day 2.
+        if (gameflow.mWorldClock.mCurrentDay == 1 || gameflow.mWorldClock.mCurrentDay > 29)
+            gameflow.mWorldClock.mCurrentDay = 2;
         mCurrParts = pc_randomizer_repairs();
         mRequiredUfoPartCount = 0;
         mShipEffectPartFlag = 0;
