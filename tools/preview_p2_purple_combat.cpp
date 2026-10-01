@@ -203,6 +203,17 @@ class PurpleCombatApp : public PlugPikiApp {
                     && p->getState()==PIKISTATE_Normal && p->mMode==PikiMode::FormationMode) { haulRed=p; break; }
             }
             require(haulRed,"ordinary Red control missing");
+            // Plucking may leave nearby non-test Pikmin idle/free. Explicitly
+            // gather them before introducing cargo so they cannot invalidate
+            // the single-carrier control. No actor position is changed.
+            Iterator nonTest(pikiMgr); CI_LOOP(nonTest) {
+                Piki* p=static_cast<Piki*>(*nonTest);
+                if(p && p->isAlive() && p!=haulRed && p!=acquired) {
+                    p->mActiveAction->abandon(nullptr);
+                    p->changeMode(PikiMode::FormationMode,n);
+                }
+            }
+            std::puts("P2_PURPLE_HAUL_ISOLATION non_test_squad_formation=1 actor_position_injected=0");
             haul=pelletMgr->newNumberPellet(Red,NUMPEL_TenPellet);
             require(haul && haul->mConfig->mCarryMinPikis()==10,"standard weight10 pellet missing");
             expectedReward=haul->mConfig->mMatchingOnyonSeeds();require(expectedReward>0,"positive matching Onion yield required");
