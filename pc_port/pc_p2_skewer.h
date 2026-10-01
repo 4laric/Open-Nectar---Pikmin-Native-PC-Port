@@ -57,4 +57,20 @@ inline void tangent(const float (*p)[3], int n, int i, float out[3])
     for (int k = 0; k < 3; ++k) out[k] = p[c][k] - p[a][k];
 }
 
+// Writes the part joint matrix (camRot * world basis) for a Pikmin skewered along `dir`.
+// camRot is the transpose of the camera rotation, exactly as the captors build their yaw matrix.
+template <class Mtx>
+inline void jointMatrix(Mtx& out, const Mtx& camRot, const float dir[3], float fallbackYaw)
+{
+    const Basis b = along(dir, fallbackYaw);
+    Mtx world;
+    world.makeIdentity();
+    for (int r = 0; r < 3; ++r) {
+        world.mMtx[r][0] = b.x[r];
+        world.mMtx[r][1] = b.y[r];
+        world.mMtx[r][2] = b.z[r];
+    }
+    camRot.multiplyTo(world, out);
+}
+
 } // namespace p2skewer

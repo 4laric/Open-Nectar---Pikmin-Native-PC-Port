@@ -782,16 +782,7 @@ void updateColl(BTeki* actor, Umi& s) {
         part->mRadius = s.blind ? p2umi::SlotRadiusBlind : p2umi::SlotRadius;
         float dir[3];
         p2skewer::tangent(slotW, T::kKamuCount, i, dir);
-        const p2skewer::Basis b = p2skewer::along(dir, actor->getDirection());
-        Matrix4f world, view;
-        world.makeIdentity();
-        for (int r = 0; r < 3; ++r) {
-            world.mMtx[r][0] = b.x[r];
-            world.mMtx[r][1] = b.y[r];
-            world.mMtx[r][2] = b.z[r];
-        }
-        camRot.multiplyTo(world, view);
-        part->mJointMatrix = view;
+        p2skewer::jointMatrix(part->mJointMatrix, camRot, dir, actor->getDirection());
     }
 }
 // Gives the actor its host CollInfo back (the own tree is never freed: stuck Pikmin may still
