@@ -334,6 +334,11 @@ const char* _standType[] = { "GROUND", "TEKIPLAT", "PLAT", "AIR" };
  */
 bool Creature::startStick(Creature* stickTarget, CollPart* stickPart)
 {
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	// Protect every attachment entrypoint, including direct thrown-Pikmin calls.
+	if (isPiki() && stickTarget && stickTarget->isTeki()
+	    && static_cast<BTeki*>(stickTarget)->isP2Dying()) return false;
+#endif
 	mStickPart = nullptr;
 	resetCreatureFlag(CF_StuckToObject);
 	if (mStickTarget) {
