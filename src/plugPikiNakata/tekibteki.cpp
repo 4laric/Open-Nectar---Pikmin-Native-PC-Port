@@ -2291,6 +2291,11 @@ void BTeki::drawDefault(Graphics& gfx)
 		cullCentre = mSRT.t;
 		rad        = p2Radius;
 	}
+	float legsCentre[3];
+	if (pc_p2_long_legs_cull_bounds(this, legsCentre, &p2Radius)) { // #1018 P2 LOD sphere
+		cullCentre.set(legsCentre[0], legsCentre[1], legsCentre[2]);
+		rad = p2Radius;
+	}
 	if (!gfx.mCamera->isPointVisible(cullCentre, rad)) {
 #else
 	if (!gfx.mCamera->isPointVisible(getBoundingSphereCentre(), rad)) {
