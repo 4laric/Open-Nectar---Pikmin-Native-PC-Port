@@ -49,3 +49,5 @@ float pc_p2_breadbug_teki_param_f(const BTeki*, int idx, float fallback);
 // Draw hook: staged PanModoki pose bank keyed on the FSM clip/frame; the
 // corpse draws the carcass clip (startCarcassMotion -> type5).
 bool pc_p2_breadbug_teki_draw(BTeki*, Graphics&, const Matrix4f&, bool corpse = false);
+// #1022 lair visual: every living bound Breadbug's PanHouse nest (world pass).
+void pc_p2_breadbug_teki_draw_nests(Graphics&);

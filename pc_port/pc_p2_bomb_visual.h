@@ -16,6 +16,24 @@ class Graphics;
 class Matrix4f;
 class Vector3f;
 
+// Short-lived spark effects for a lit bomb. Every spawned generator is tracked,
+// force-killed once older than maxAge, and all are killed at the blast (and on
+// destruction), so no ember outlives the bomb. Engine-side (EffectMgr).
+struct P2BombSparks {
+    struct Live { void* gen; float age; };
+    Live live[32];
+    int count = 0;
+    P2BombSparks() = default;
+    P2BombSparks(const P2BombSparks&) { count = 0; } // copies never own generators
+    P2BombSparks& operator=(const P2BombSparks&) { return *this; }
+    ~P2BombSparks() { killAll(); }
+    void spawn(int effect, float x, float y, float z);
+    void update(float dt, float maxAge);
+    void killAll();
+};
+// Engine-wide live particle generator count (for the "nothing left" log).
+unsigned pc_p2_bomb_live_generators();
+
 // One countdown wheel. Keep one per bomb; call draw() from a 2D pass
 // (BTeki::refresh2d for a Teki carrier).
 struct P2BombGauge {

@@ -2102,6 +2102,12 @@ add_executable(p2_captor_mouth_test tools/p2_captor_mouth_test.cpp)
 target_include_directories(p2_captor_mouth_test PRIVATE pc_port)
 target_compile_options(p2_captor_mouth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_captor_mouth_test COMMAND p2_captor_mouth_test)
+# Cloaking Burrow-nit (Armor 15, #1014): retail collision tree (only dmg1 stickable), attack cone,
+# kamujnt bite sweep, captain hit and damage predicates. Engine-free.
+add_executable(p2_armor_policy_test tools/p2_armor_policy_test.cpp)
+target_include_directories(p2_armor_policy_test PRIVATE pc_port)
+target_compile_options(p2_armor_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_armor_policy_test COMMAND p2_armor_policy_test)
 
 # #995: Bloyster source policy (tail bulb is the only stickable part, damageCallBack, tongue tables).
 add_executable(p2_umimushi_policy_test tools/p2_umimushi_policy_test.cpp)
@@ -2366,6 +2372,10 @@ add_library(p2_campaign_goal_lifecycle_runtime_compile OBJECT tools/p2_campaign_
 target_include_directories(p2_campaign_goal_lifecycle_runtime_compile PRIVATE pc_port ${SDL2_INCLUDE_DIRS})
 target_compile_options(p2_campaign_goal_lifecycle_runtime_compile PRIVATE ${NATIVE_COMPILE_OPTIONS} -Wno-unused-parameter)
 
+add_executable(p2_bomb_telegraph_test tools/p2_bomb_telegraph_test.cpp)
+target_include_directories(p2_bomb_telegraph_test PRIVATE pc_port)
+target_compile_options(p2_bomb_telegraph_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_bomb_telegraph_test COMMAND p2_bomb_telegraph_test)
 add_executable(p2_breadbug_corpse_test tools/p2_breadbug_corpse_test.cpp pc_port/pc_p2_breadbug_fsm.cpp)
 target_include_directories(p2_breadbug_corpse_test PRIVATE pc_port)
 target_compile_options(p2_breadbug_corpse_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
@@ -2377,7 +2387,13 @@ target_include_directories(p2_demon_fade_test PRIVATE pc_port)
 target_compile_options(p2_demon_fade_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 target_compile_definitions(p2_demon_fade_test PRIVATE DEMON_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/pc_port/pc_p2_sarai_demon.cpp")
 add_test(NAME p2_demon_fade_test COMMAND p2_demon_fade_test)
-add_executable(p2_bomb_telegraph_test tools/p2_bomb_telegraph_test.cpp)
-target_include_directories(p2_bomb_telegraph_test PRIVATE pc_port)
-target_compile_options(p2_bomb_telegraph_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
-add_test(NAME p2_bomb_telegraph_test COMMAND p2_bomb_telegraph_test)
+
+add_executable(pc_corpse_origin_test tools/pc_corpse_origin_test.cpp)
+target_include_directories(pc_corpse_origin_test PRIVATE pc_port)
+target_compile_options(pc_corpse_origin_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_corpse_origin_test COMMAND pc_corpse_origin_test)
+
+add_executable(p2_breadbug_nest_test tools/p2_breadbug_nest_test.cpp)
+target_include_directories(p2_breadbug_nest_test PRIVATE pc_port)
+target_compile_options(p2_breadbug_nest_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_breadbug_nest_test COMMAND p2_breadbug_nest_test)

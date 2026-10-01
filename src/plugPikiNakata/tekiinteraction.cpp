@@ -141,12 +141,10 @@ bool InteractBomb::actTeki(Teki* teki) immut
 		return true; // registered Hana is buried: bomb swallowed, no damage
 	}
 	f32 bombFactor = teki->getParameterF(TPF_BombDamageRate);
-	// A bomb carries no collision part; a registered Armor rejects it unless
-	// bittered, matching the same source predicate as InteractAttack.
 	InteractAttack attack(mOwner, nullptr, mDamage * bombFactor, false);
-	if (pc_p2_armor_receiver_rejects(teki, &attack)) {
-		return false;
-	}
+	// #1014: the Armor does not override bombCallBack, so EnemyBase::bombCallBack applies the damage on any
+	// part (no dmg1 rule, unlike damageCallBack for Pikmin and punches). Observer only.
+	pc_p2_armor_bombed(teki, mDamage * bombFactor);
 	if (pc_p2_dangomushi_invulnerable(teki)) {
 		return true; // registered Crawbster is invulnerable outside the flip window
 	}

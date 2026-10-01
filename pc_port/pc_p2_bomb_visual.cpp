@@ -1,5 +1,6 @@
 #include "pc_p2_bomb_visual.h"
 #include "Graphics.h"
+#include "EffectMgr.h"
 #include "ItemMgr.h"
 #include "Shape.h"
 #include "Vector.h"
@@ -68,3 +69,32 @@ bool pc_p2_bomb_draw_shape(Graphics& gfx, const Matrix4f& view, bool flashing, b
     }
     return true;
 }
+
+void P2BombSparks::spawn(int effect, float x, float y, float z) {
+    if (!effectMgr || count >= 32) return;
+    Vector3f pos(x, y, z);
+    zen::particleGenerator* gen =
+        effectMgr->create(static_cast<EffectMgr::effTypeTable>(effect), pos, nullptr, nullptr);
+    if (gen) live[count++] = Live{static_cast<void*>(gen), 0.0f};
+}
+
+void P2BombSparks::update(float dt, float maxAge) {
+    int kept = 0;
+    for (int i = 0; i < count; ++i) {
+        live[i].age += dt;
+        if (live[i].age > maxAge) {
+            if (effectMgr) effectMgr->kill(static_cast<zen::particleGenerator*>(live[i].gen), true);
+        } else {
+            live[kept++] = live[i];
+        }
+    }
+    count = kept;
+}
+
+void P2BombSparks::killAll() {
+    if (effectMgr)
+        for (int i = 0; i < count; ++i) effectMgr->kill(static_cast<zen::particleGenerator*>(live[i].gen), true);
+    count = 0;
+}
+
+unsigned pc_p2_bomb_live_generators() { return effectMgr ? effectMgr->getLiveGeneratorCount() : 0u; }
