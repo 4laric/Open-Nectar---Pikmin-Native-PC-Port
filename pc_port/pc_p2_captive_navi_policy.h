@@ -39,7 +39,6 @@ inline void p2captivenavi::note(const char* kind)
     static int logged = 0;
     if (logged >= 16) return;
     ++logged;
-    std::printf("P2_CAPTIVE_NAVI_GUARD kind=%s
-", kind);
+    std::printf("P2_CAPTIVE_NAVI_GUARD kind=%s\n", kind);
     std::fflush(stdout);
 }
