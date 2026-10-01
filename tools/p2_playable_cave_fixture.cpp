@@ -37,6 +37,8 @@
 #include "Section.h"
 #include "NaviMgr.h"
 #include "Navi.h"
+#include "NaviState.h"
+#include "Pellet.h"
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "PikiState.h"
@@ -118,7 +120,7 @@ int guardSelfTest() {
 
 class CaveGuardedBootApp final : public PlugPikiApp {
     int frames = 0, observed = 0;
-    bool entrySeen = false;
+    bool entrySeen = false, captainSeen = false, carryPicked = false;
     int throws = 0, lastThrow = -1000, initialBlocked = 0;
     bool positioned = false, exitPositioned = false;
     const std::string scenario = std::getenv("P2_CAVE_TEST_SCENARIO") ? std::getenv("P2_CAVE_TEST_SCENARIO") : "boot";
@@ -132,6 +134,26 @@ class CaveGuardedBootApp final : public PlugPikiApp {
         if (!positioned && scenario != "restore") require(alivePikis()==20,"fresh starting squad is not20");
         if (scenario=="boot") { require(pc_p2_cave_bud_count()==2,"two buds missing"); require(pc_p2_cave_items_spawned()==2,"two treasure actors missing"); pass("PASS CAVE_PLAYABLE_BOOT"); }
         if (scenario=="restore") { require(blues()>0,"blue squad not restored"); require(alivePikis()==20,"restored squad count"); pass("PASS CAVE_PLAYABLE_RESTORE"); }
+        if (scenario=="carry_denial") {
+            Pellet* treasure=pc_p2_cave_items_pellet_for("treasure_elec");require(treasure!=nullptr,"electric treasure missing");
+            if(!positioned) {
+                Vector3f anchor=treasure->getPosition();Vector3f captain(anchor.x+20,anchor.y,anchor.z-20);
+                n->resetPosition(captain);n->mVelocity.set(0,0,0);n->mTargetVelocity.set(0,0,0);
+                int i=0;Iterator it(pikiMgr);CI_LOOP(it) {Piki* p=static_cast<Piki*>(*it);if(!p||!p->isAlive())continue;
+                    Vector3f pos(anchor.x-20+8*i,anchor.y,anchor.z+10);p->resetPosition(pos);p->mVelocity.set(0,0,0);p->mTargetVelocity.set(0,0,0);
+                    p->changeMode(PikiMode::FreeMode,n);if(++i==6)break;
+                }
+                require(i==6,"six free actors unavailable");positioned=true;initialBlocked=pc_p2_cave_carry_carriers_dropped();
+                std::puts("P2_CAVE_SCRIPTED_CARRY_SETUP actors=6 intervention=position_and_free_mode attachments=ordinary_search");std::fflush(nullptr);
+            }
+            Iterator it(pikiMgr);CI_LOOP(it) {Piki* p=static_cast<Piki*>(*it);if(p&&p->isAlive()&&p->getStickObject()==treasure) {
+                if(!carryPicked) {carryPicked=true;std::puts("P2_CAVE_ORDINARY_PICKUP_OBSERVED item=treasure_elec");std::fflush(nullptr);}break;
+            }}
+            if(carryPicked && pc_p2_cave_carry_carriers_dropped()>initialBlocked) {
+                require(pc_p2_cave_items_delivered()==0,"blocked treasure was credited");pass("PASS CAVE_PLAYABLE_CARRY_DENIAL");
+            }
+            return;
+        }
         if (scenario=="barrier") {
             if(!positioned) {
                 const auto* plan=pc_p2_cave_carry_plan();require(plan!=nullptr,"carry plan missing");
@@ -180,35 +202,21 @@ class CaveGuardedBootApp final : public PlugPikiApp {
 public:
     int idle() override {
         int result = PlugPikiApp::idle();
+        // Captain safety precedes every readiness or pause wait.
+        Navi* n=naviMgr?naviMgr->getNavi():nullptr;
+        if(n && n->getCurrState()) {
+            captainSeen=true;
+            p2_fixture_require_captain(GameStat::orimaDead,
+                n->getCurrState()->getID()==NAVISTATE_Dead,n->mHealth,observed);
+            if(sForceCaptainDown)p2_fixture_require_captain(true,true,0,observed);
+        } else if(captainSeen || entrySeen) p2_fixture_require_captain(true,true,0,observed);
         if (++frames > 30000) {
             std::printf("FAIL CAVE_GUARDED_BOOT timeout entry_seen=%d observed=%d\n",
                         int(entrySeen), observed);
             std::fflush(stdout);
             std::_Exit(2);
         }
-        if (!naviMgr || !tekiMgr || !pikiMgr) {
-            if (frames % 600 == 0) {
-                std::printf("P2_CAVE_GUARDED_BOOT_WAIT frames=%d navi_mgr=%d teki_mgr=%d piki_mgr=%d\n",
-                            frames, int(naviMgr != nullptr), int(tekiMgr != nullptr),
-                            int(pikiMgr != nullptr));
-                std::fflush(stdout);
-            }
-            return result;
-        }
-        Navi* n = naviMgr->getNavi();
-        if (!n) {
-            if (frames % 600 == 0) {
-                std::printf("P2_CAVE_GUARDED_BOOT_WAIT frames=%d navi=0 floor=%d\n",
-                            frames, pc_p2_cave_floor());
-                std::fflush(stdout);
-            }
-            return result;
-        }
-        // Guard FIRST: immediately after engine idle, before any readiness/PASS.
-        if (sForceCaptainDown)
-            p2_fixture_require_captain(true, true, 0.0f, observed);
-        else
-            p2_fixture_require_captain(GameStat::orimaDead, !n->isAlive(), n->mHealth, observed);
+        if (!n || !n->getCurrState() || !tekiMgr || !pikiMgr) return result;
         if (gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive) {
             gameflow.mMoviePlayer->requestSkip();
             return result;
@@ -279,8 +287,12 @@ int main(int argc, char** argv) {
     pc_settings_init();
     gsys->Initialise();
     pc_settings_p2d_init();
+    pc_window_set_display_mode(PC_WINDOW_FULLSCREEN_WINDOWED);
     pc_window_set_window_size(960,540);
     pc_window_center();
+    { SDL_Window* window=SDL_GL_GetCurrentWindow();int w=0,h=0;SDL_GetWindowSize(window,&w,&h);
+      std::printf("P2_CAVE_FINAL_WINDOW width=%d height=%d mode=%d\n",w,h,pc_window_get_display_mode());std::fflush(nullptr);
+      if(w!=960 || h!=540 || pc_window_get_display_mode()!=PC_WINDOW_FULLSCREEN_WINDOWED)return 3; }
     nodeMgr = new NodeMgr();
     gsys->run(new CaveGuardedBootApp());
     return 0;
