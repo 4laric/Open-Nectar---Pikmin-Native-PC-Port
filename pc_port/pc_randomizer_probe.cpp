@@ -22,7 +22,7 @@ int main(int argc, char** argv) {
     }
     for (int arg = 1; arg < argc; ++arg) if (!std::strcmp(argv[arg], "--enemy-checks-probe")) {
         assert(pc_randomizer_resolved_checks());
-        pc_randomizer_poll();
+        pc_randomizer_update();
         int actor;
         for (int i = 1; i < argc; ++i) {
             if (!std::strcmp(argv[i], "--deliver-p2") && i + 3 < argc) {
