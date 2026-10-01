@@ -179,7 +179,7 @@ class PurpleCombatApp : public PlugPikiApp {
     GoalItem* haulGoal=nullptr;
     Piki* haulRed=nullptr;
     Vector3f haulStart, approachStart;
-    int haulPhase=0, haulTicks=0, haulStable=0, rewardBefore=0, expectedReward=0, haulMaturity=-1;
+    int haulPhase=0, haulTicks=0, haulStable=0, rewardBefore=0, expectedReward=0, haulMaturity=-1, haulPopulationBefore=0;
     bool haulMoved=false, haulGoalSeen=false, haulGone=false;
     void assignHaul(Piki* p) {
         require(p && p->isAlive() && p->getState()==PIKISTATE_Normal && !p->isStickTo(),"carrier not ready for native approach");
@@ -220,6 +220,7 @@ class PurpleCombatApp : public PlugPikiApp {
             Vector3f pos=haulGoal->mSRT.t+Vector3f(180,0,80);pos.y=mapMgr->getMinY(pos.x,pos.z,true)+5;
             require(std::isfinite(pos.y),"cargo placement terrain invalid");
             haul->init(pos);haul->startAI(TRUE);haulStart=pos;
+            GameStat::update();haulPopulationBefore=GameStat::allPikis[Red];
             rewardBefore=GameStat::bornPikis[Red];haulMaturity=acquired->mHappa;haulPhase=1;haulTicks=0;
             std::printf("P2_PURPLE_HAUL_BEGIN injected_cargo=1 weight=10 expected_reward=%d maturity=%d source_identity_injected=0 cargo_position_staged_once=1\n",expectedReward,haulMaturity);
             return;
@@ -266,6 +267,9 @@ class PurpleCombatApp : public PlugPikiApp {
             }
             if(haulGone && reward==expectedReward && acquired->getStickObject()!=haul && acquired->getState()==PIKISTATE_Normal) {
                 if(++haulStable>=90) {
+                    GameStat::update();
+                    require(GameStat::allPikis[Red]-haulPopulationBefore==expectedReward,"reward counter/population mismatch");
+                    std::printf("P2_PURPLE_HAUL_POPULATION before=%d after=%d expected_delta=%d\n",haulPopulationBefore,GameStat::allPikis[Red],expectedReward);
                     std::printf("P2_PURPLE_HAUL_DELIVERY_PASS reward=%d expected_reward=%d purple_alive=1 maturity=%d released=1 stable_ticks=%d duplicate_reward=0 injected_cargo=1 scripted_action_assignment=1 controls_validated=0\n",reward,expectedReward,haulMaturity,haulStable);
                     std::fflush(nullptr);std::_Exit(0);
                 }
