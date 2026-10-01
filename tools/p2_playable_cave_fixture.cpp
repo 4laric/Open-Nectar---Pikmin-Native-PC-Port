@@ -145,6 +145,23 @@ class CaveGuardedBootApp final : public PlugPikiApp {
         pc_p2_input_script_set(1,buttons,sx,sy);
         return false;
     }
+    int following() {
+        int count=0;Iterator it(pikiMgr);CI_LOOP(it) {Piki* p=static_cast<Piki*>(*it);if(p&&p->isAlive()&&p->mMode==PikiMode::FormationMode)++count;}return count;
+    }
+    void gatherAtCursor(Navi* n) {
+        float x=0,z=0;int count=0;Iterator it(pikiMgr);CI_LOOP(it) {Piki* p=static_cast<Piki*>(*it);
+            if(p&&p->isAlive()) {x+=p->mSRT.t.x;z+=p->mSRT.t.z;++count;}}
+        require(count>0,"no squad for whistle");
+        float dx=x/count-n->mCursorWorldPos.x,dz=z/count-n->mCursorWorldPos.z;
+        float distance=std::sqrt(dx*dx+dz*dz);int sx=0,sy=0;
+        if(distance>8) {
+            const Vector3f& axis=n->controlCamera()->mViewXAxis;
+            // Deliberately use the classic aim-only band while holding whistle.
+            sx=int(std::lround(30*(dx*axis.x+dz*axis.z)/distance));
+            sy=int(std::lround(30*(dx*axis.z-dz*axis.x)/distance));
+        }
+        pc_p2_input_script_set(1,KeyConfig::_instance->mSetCursorKey.mBind,sx,sy);
+    }
     void deliveryRoute(Navi* n) {
         if(!positioned) {
             require(blues()==20,"transport fixture requires disclosed 20 Blue entry");
@@ -153,18 +170,30 @@ class CaveGuardedBootApp final : public PlugPikiApp {
         }
         if(observed%120==0) {
             Pellet* p=pc_p2_cave_items_pellet_for("treasure_water");
-            std::printf("P2_CAVE_ROUTE_PROGRESS phase=%d point=%d navi=%.2f,%.2f alive=%d delivered=%d treasure=%.2f,%.2f\n",
-                routePhase,routePoint,n->mSRT.t.x,n->mSRT.t.z,alivePikis(),pc_p2_cave_items_delivered(),p?p->mSRT.t.x:0,p?p->mSRT.t.z:0);std::fflush(nullptr);
+            std::printf("P2_CAVE_ROUTE_PROGRESS phase=%d point=%d navi=%.2f,%.2f alive=%d following=%d delivered=%d treasure=%.2f,%.2f cursor=%.2f,%.2f\n",
+                routePhase,routePoint,n->mSRT.t.x,n->mSRT.t.z,alivePikis(),following(),pc_p2_cave_items_delivered(),p?p->mSRT.t.x:0,p?p->mSRT.t.z:0,n->mCursorWorldPos.x,n->mCursorWorldPos.z);
+            Iterator it(pikiMgr);int i=0;CI_LOOP(it) {Piki* actor=static_cast<Piki*>(*it);if(actor&&actor->isAlive())std::printf("P2_CAVE_ROUTE_SQUAD i=%d x=%.2f z=%.2f mode=%d state=%d\n",i++,actor->mSRT.t.x,actor->mSRT.t.z,int(actor->mMode),actor->getState());}
+            std::fflush(nullptr);
         }
-        if(routePhase==0 || routePhase==4) {
-            pc_p2_input_script_set(1,observed-phaseTick<60?KeyConfig::_instance->mSetCursorKey.mBind:0);
-            if(observed-phaseTick>=75) {++routePhase;routePoint=0;}
+        if(routePhase==0) {
+            static const float gatherRoute[][2]={{0,-100},{100,-100},{100,100},{0,100}};
+            if(routePoint<4) {
+                if(walkTo(n,gatherRoute[routePoint][0],gatherRoute[routePoint][1])) {++routePoint;phaseTick=observed;}
+                return;
+            }
+            if(observed-phaseTick<90) {gatherAtCursor(n);return;}
+            pc_p2_input_script_set(1,0);
+            if(observed-phaseTick>=105) {require(following()>0,"scripted whistle gathered no followers");routePhase=1;routePoint=0;}
+            return;
+        }
+        if(routePhase==4) {
+            pc_p2_input_script_set(1,0);routePhase=5;routePoint=0;
             return;
         }
         if(routePhase==1 || routePhase==5) {
-            static const float outward[][2]={{0,-100},{0,-200},{0,-300},{0,-400},{0,-480}};
-            static const float exitRoute[][2]={{0,-400},{0,-300},{0,-200},{0,-100},{0,0},{100,0},{200,0},{300,0},{400,0},{500,0},{600,0},{700,0},{800,0},{800,100}};
-            const auto* path=routePhase==1?outward:exitRoute;const int count=routePhase==1?5:14;
+            static const float outward[][2]={{100,100},{100,-100},{0,-100},{0,-200},{0,-300},{0,-400},{0,-480}};
+            static const float exitRoute[][2]={{0,-400},{0,-300},{0,-200},{0,-100},{100,-100},{100,0},{200,0},{300,0},{400,0},{500,0},{600,0},{700,0},{800,0},{800,100}};
+            const auto* path=routePhase==1?outward:exitRoute;const int count=routePhase==1?7:14;
             if(walkTo(n,path[routePoint][0],path[routePoint][1])) {
                 std::printf("P2_CAVE_ROUTE_WAYPOINT phase=%d point=%d x=%.2f z=%.2f\n",routePhase,routePoint,n->mSRT.t.x,n->mSRT.t.z);std::fflush(nullptr);
                 if(++routePoint==count) {++routePhase;phaseTick=observed;}
