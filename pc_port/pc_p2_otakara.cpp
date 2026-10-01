@@ -657,9 +657,20 @@ void applyBombBlast(BTeki* a, Otakara& s, const char* trigger) {
     for (int i = 0; i < routed; ++i) {
         const P2BombSaraiRoutedHit& hit = hits[i];
         if (hit.receiverId >= actorsList.size() || !actorsList[hit.receiverId]) continue;
-        InteractBomb bomb(&sBlastOwner, hit.damage, nullptr);
-        actorsList[hit.receiverId]->stimulate(bomb);
-        if (hit.kind == P2BombSaraiReceiverKind::Piki) ++pikminHits;
+        // P2 Bomb blast: Pikmin are lethal (InteractBomb::actPiki, BlowStateArg mIsLethal=true,
+        // interactPiki.cpp:304-326); captains take the attack damage (interactNavi.cpp:45-55).
+        // The shared primitive's 10 is the captain value, so Pikmin get the P1 bomb damage (p77, 765).
+        const bool isPiki = hit.kind == P2BombSaraiReceiverKind::Piki;
+        const float dmg = isPiki && pikiMgr && pikiMgr->mPikiParms ? pikiMgr->mPikiParms->mPikiParms.mBombDamagePiki()
+                                                                    : hit.damage;
+        Creature* victim = actorsList[hit.receiverId];
+        const float before = victim->mHealth;
+        InteractBomb bomb(&sBlastOwner, dmg, nullptr);
+        const bool accepted = victim->stimulate(bomb);
+        std::printf("P2_BOMBOTAKARA_BLAST_HIT generator=%u kind=%s damage=%.1f health=%.1f->%.1f alive=%d accepted=%d\n",
+                    generator, isPiki ? "piki" : "navi", dmg, before, victim->mHealth, int(victim->isAlive()),
+                    int(accepted));
+        if (isPiki) ++pikminHits;
     }
     std::printf("P2_BOMBOTAKARA_BLAST generator=%u payload=93 center=%.3f,%.3f,%.3f radius=%.1f receivers=%d "
                 "hits=%d pikmin_hits=%d teki_damage=%.1f navi_piki_damage=%.1f shared_primitive=1 carrier_tick=1 "
