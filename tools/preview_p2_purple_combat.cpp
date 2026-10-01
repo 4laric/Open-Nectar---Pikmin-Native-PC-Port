@@ -181,6 +181,26 @@ class PurpleCombatApp : public PlugPikiApp {
     Vector3f haulStart, approachStart;
     int haulPhase=0, haulTicks=0, haulStable=0, rewardBefore=0, expectedReward=0, haulMaturity=-1, haulPopulationBefore=0;
     bool haulMoved=false, haulGoalSeen=false, haulGone=false;
+    int haulRecalls=0;
+    void keepHaulSquad(Navi* n) {
+        // Formation can itself auto-assign transport on pellet contact. Keep
+        // non-test squad members gathered throughout the run, including the
+        // retired Red control. Never detach an actual helper to hide a failure.
+        Iterator squad(pikiMgr); CI_LOOP(squad) {
+            Piki* p=static_cast<Piki*>(*squad);
+            if(!p || !p->isAlive() || p==acquired || (p==haulRed && haulPhase<=2)) continue;
+            if(p->getStickObject()==haul) {
+                std::printf("P2_PURPLE_HAUL_EXTRA_CARRIER purple=%d mode=%d state=%d strength=%d\n",
+                    int(pc_p2_is_purple(p)),p->mMode,p->getState(),int(haul->mCarrierCounter));
+                require(false,"non-test Pikmin attached before fixture recall");
+            }
+            if(p->getState()==PIKISTATE_Normal && p->mMode!=PikiMode::FormationMode) {
+                require(p->mNavi==n,"non-test squad captain changed");
+                p->changeMode(PikiMode::FormationMode,n);
+                ++haulRecalls;
+            }
+        }
+    }
     void assignHaul(Piki* p) {
         require(p && p->isAlive() && p->getState()==PIKISTATE_Normal && !p->isStickTo(),"carrier not ready for native approach");
         p->mActiveAction->abandon(nullptr);
@@ -226,6 +246,7 @@ class PurpleCombatApp : public PlugPikiApp {
             return;
         }
         require(acquired->mHappa==haulMaturity,"carrier maturity changed");
+        keepHaulSquad(n);
         bool present=false;Iterator pellets(pelletMgr);CI_LOOP(pellets) if(static_cast<Pellet*>(*pellets)==haul){present=true;break;}
         const bool alive=present && haul->isAlive();
         const int reward=GameStat::bornPikis[Red]-rewardBefore;
@@ -270,7 +291,7 @@ class PurpleCombatApp : public PlugPikiApp {
                     GameStat::update();
                     require(GameStat::allPikis[Red]-haulPopulationBefore==expectedReward,"reward counter/population mismatch");
                     std::printf("P2_PURPLE_HAUL_POPULATION before=%d after=%d expected_delta=%d\n",haulPopulationBefore,GameStat::allPikis[Red],expectedReward);
-                    std::printf("P2_PURPLE_HAUL_DELIVERY_PASS reward=%d expected_reward=%d purple_alive=1 maturity=%d released=1 stable_ticks=%d duplicate_reward=0 injected_cargo=1 scripted_action_assignment=1 controls_validated=0\n",reward,expectedReward,haulMaturity,haulStable);
+                    std::printf("P2_PURPLE_HAUL_DELIVERY_PASS reward=%d expected_reward=%d purple_alive=1 maturity=%d released=1 stable_ticks=%d duplicate_reward=0 injected_cargo=1 scripted_action_assignment=1 controls_validated=0 scripted_non_test_recalls=%d\n",reward,expectedReward,haulMaturity,haulStable,haulRecalls);
                     std::fflush(nullptr);std::_Exit(0);
                 }
             } else haulStable=0;
