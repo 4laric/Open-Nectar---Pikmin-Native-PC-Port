@@ -96,23 +96,52 @@ GameCoreSection* findCore(CoreNode* node,int depth=0){
     for(auto* c=node->Child();c;c=c->Next())if(auto* found=findCore(c,depth+1))return found;
     return nullptr;
 }
-bool resumePhase=false;
+bool resumePhase=false,forceNullState=false,forceMissingManager=false;
 int storedCount(){int n=0;for(int c=0;c<3;++c)for(int m=0;m<3;++m)n+=pikiInfMgr.mPikiCounts[c][m];return n;}
 int cards(){int n=0;const auto d=std::filesystem::path("../../campaign");if(std::filesystem::exists(d))for(auto& f:std::filesystem::directory_iterator(d))if(f.path().extension()==".sav")++n;return n;}
 class CaptainSaveApp final:public PlugPikiApp {
     int frames=0,tick=-1,startDay=-1,initialCards=0;
-    bool saving=false,shot=false,sawWhistle=false;
-    Vector3f movementStart;
+    bool saving=false,shot=false,sawWhistle=false,initialized[2]={false,false},retired=false;
+    int teardownGapFrames=0;
+    Vector3f movementStart,inactiveStart;
+    bool pendingNegative=false;
+    void guardLiveState(){
+        if(retired){require(!naviMgr && !pc_p2_captain::adapter(),"unexpected captain rebirth during bounded map gap");require(++teardownGapFrames<180,"bounded expected map transition gap");return;}
+        if(!naviMgr && (initialized[0]||initialized[1])){
+            // Only the actual quitter path may retire initialized captains:
+            // exitStage unbinds the adapter and nulls NaviMgr, then queues map
+            // selection and softReset after the native day advances.
+            const bool actualExit=saving && !pc_p2_captain::adapter() && gsys->resetPending()
+                && gameflow.mNextOnePlayerSectionID==ONEPLAYER_MapSelect
+                && gameflow.mWorldClock.mCurrentDay==startDay+1;
+            if(!actualExit)requireCaptain(nullptr,tick);
+            retired=true;teardownGapFrames=0;
+            std::puts("P2_SAVE_TEARDOWN actual_quitter_map_soft_reset=1 bounded_gap=180");return;
+        }
+        if(naviMgr)for(int i=0;i<2;++i){auto* n=naviMgr->getNavi(i);
+            if(n&&n->getCurrState())initialized[i]=true;
+            if(initialized[i])requireCaptain(n,tick);
+        }
+    }
     void pad(unsigned keys=0,int x=0,int y=0){pc_p2_input_script_set(1,keys,x,y);}
     void selected(int slot){auto* n=naviMgr->getNavi(slot);require(naviMgr->getActiveNavi()==n,"selected captain");require(cameraMgr->mController==n->mKontroller && cameraMgr->mCamera->mTargetCreature==n,"camera binding");std::printf("P2_SAVE_SELECTED phase=%s slot=%d camera=1\n",resumePhase?"resume":"save",slot);}
 public:
     CaptainSaveApp(){initialCards=cards();require(resumePhase?initialCards==1:initialCards==0,"expected committed generation before phase");}
     void draw(Graphics& gfx)override{PlugPikiApp::draw(gfx);if(tick>30&&!shot)shot=capture("captain-campaign.ppm");}
     int idle()override{
+        if(pendingNegative){
+            // Queue mutation until the next ordinary pre-engine guard. This
+            // avoids rendering a deliberately null state before that guard.
+            auto* a=naviMgr->getNavi(0);auto* b=naviMgr->getNavi(1);
+            if(forceNullState)b->mCurrState=nullptr;
+            else if(forceMissingManager)naviMgr=nullptr;
+            else (sForceInactiveDown?b:a)->mHealth=0;
+            pendingNegative=false;
+        }
+        guardLiveState(); // also protects the engine from negative null-state setup
         const int result=PlugPikiApp::idle();require(++frames<7200,"frame bound");
-        // Guard initialized captains even during scripted results/sunset.
-        if(naviMgr)for(int i=0;i<2;++i){auto* n=naviMgr->getNavi(i);if(n&&n->getCurrState())requireCaptain(n,tick);}
-        if(tick>=0&&!saving)require(naviMgr && naviMgr->getNavi(0)&&naviMgr->getNavi(1),"unexpected live manager disappearance");
+        guardLiveState(); // never bypass initialized actors for movie/readiness/pause
+
         if(saving){
             pad(frames%20==0?KBBTN_A:0);
             if(cards()==initialCards+1 && gameflow.mWorldClock.mCurrentDay==startDay+1){
@@ -133,16 +162,18 @@ public:
             require(pc_p2_captain::adapter()&&pc_p2_captain::captive_count()==0,"fresh live binding");
             selected(0);tick=0;
             std::printf("P2_SAVE_SCENE phase=%s resumed=%d day=%d live=%d stored=%d health0=%.3f health1=%.3f active_reset=0 ownership_restoration_not_assumed=1\n",resumePhase?"resume":"save",int(pc_randomizer_resumed()),startDay,live,storedCount(),a->mHealth,b->mHealth);
-            if(sForceCaptainDown||sForceInactiveDown){(sForceInactiveDown?b:a)->mHealth=0;gameflow.mPauseAll=TRUE;return result;}
+            if(sForceCaptainDown||sForceInactiveDown||forceNullState||forceMissingManager){
+                pendingNegative=true;gameflow.mPauseAll=TRUE;return result;
+            }
         }
         if(b->getCurrState()->getID()==NAVISTATE_Gather)sawWhistle=true;
         ++tick;
         switch(tick){
         case 5:pad(KBBTN_DPAD_UP);break;
         case 15:selected(1);break;
-        case 20:pad();movementStart=b->getPosition();break;
+        case 20:pad();movementStart=b->getPosition();inactiveStart=a->getPosition();break;
         case 25:pad(0,60,0);break;
-        case 45:{const float d=(b->getPosition()-movementStart).length();require(d>1,"selected walks");std::printf("P2_SAVE_MOVE distance=%.3f\n",d);pad();break;}
+        case 45:{const float d=(b->getPosition()-movementStart).length();require(d>1,"selected walks");const Vector3f delta=a->getPosition()-inactiveStart;const float inactive=std::sqrt(delta.x*delta.x+delta.z*delta.z);require(inactive<2.0f,"inactive captain horizontal position stable during selected input");std::printf("P2_SAVE_MOVE distance=%.3f inactive_xz=%.3f\n",d,inactive);pad();break;}
         case 50:pad(KBBTN_B);break;
         case 65:require(sawWhistle,"selected whistle input");pad();break;
         case 75:pad(KBBTN_DPAD_UP);break;
@@ -158,7 +189,7 @@ public:
 };
 } // namespace
 int main(int argc,char** argv){
-    for(int i=1;i<argc;++i){resumePhase|=std::string(argv[i])=="--resume-phase";sForceCaptainDown|=std::string(argv[i])=="--force-captain-down";sForceInactiveDown|=std::string(argv[i])=="--force-inactive-down";}
+    for(int i=1;i<argc;++i){resumePhase|=std::string(argv[i])=="--resume-phase";sForceCaptainDown|=std::string(argv[i])=="--force-captain-down";sForceInactiveDown|=std::string(argv[i])=="--force-inactive-down";forceNullState|=std::string(argv[i])=="--force-null-state";forceMissingManager|=std::string(argv[i])=="--force-missing-manager";}
     _putenv_s("PIKMIN_P2_SECOND_CAPTAIN","1");_putenv_s("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1");SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetMainReady();pc_gpu_preference_apply();pc_bbft_init(argc,argv);
     require(pc_randomizer_enabled()&&!pc_pikipelago_room_preview(),"ordinary randomizer campaign required");
     if(!pc_window_init("Captain native campaign save/resume",960,540))return 3;
