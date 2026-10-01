@@ -174,6 +174,12 @@ public:
             // ordinary B reveals it; never repeat B in results/card dialogs.
             if(!confirming){
                 ++menuFrames;
+                if(menuFrames<=3||menuFrames==45||menuFrames==50||menuFrames==65||menuFrames==95||menuFrames%120==0){
+                    auto* core=findCore(gameflow.mGameSection);auto* ui=core?core->mController:nullptr;
+                    std::printf("P2_SAVE_UI_OBSERVER frame=%d allowed=%d overlay=%d paused=%d movie=%d player_day=%d ui_present=%d held=%08x pressed=%08x frozen=%d axis_y=%.3f\n",menuFrames,int(gameflow.mIsPauseAllowed),int(gameflow.mIsUIOverlayActive),int(gameflow.mPauseAll),int(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive),playerState->getCurrDay(),int(ui!=nullptr),ui?unsigned(ui->mCurrentInput):0,ui?unsigned(ui->mInputPressed):0,ui?int(ui->mIsControllerFrozen):-1,ui?ui->mMainStickY:0.0f);
+                    std::fflush(stdout);
+                }
+                if(menuFrames==2)pad(); // Release START after its ordinary input edge.
                 if(menuFrames==45)pad(0,0,-65); // Continue -> Go to Sunset.
                 else if(menuFrames==50)pad();
                 else if(menuFrames==65||menuFrames==95)pad(KBBTN_A); // Sunset, then Yes.
