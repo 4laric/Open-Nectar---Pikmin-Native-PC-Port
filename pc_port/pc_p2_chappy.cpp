@@ -128,6 +128,8 @@ struct ChappyFsm {
     float clipSpeed = p2chappyadult::SpeedDefault;
     bool clipFinish = false;
     int wakeNext = -1;                 // state to enter when a finished sleep clip ends
+    int pendingNext = -1;              // #994: finishMotion-requested state, entered at the clip END
+    float pendingAt = 0.0f;            // clip frame of that END
     p2chappyadult::Alert alert;        // StateCautionBase alertTimer
     bool snoreOn = false;              // host snore bubble currently allowed
     bool touchWake = false;            // EB_Colliding analogue, this tick
@@ -615,6 +617,14 @@ float stateClipSpeed(p2chappyfsm::Family family, int state)
     }
 }
 
+// StateX::exec mNextState + finishMotion(): remember the state, enter it when the
+// current clip completes (p2chappyadult::cycleEndFrame).
+void requestAtClipEnd(ChappyFsm& s, int next)
+{
+    if (s.pendingNext < 0) s.pendingAt = p2chappyadult::cycleEndFrame(s.clipElapsed, clipFrames(s.spec->enumName, s.clip));
+    s.pendingNext = next;
+}
+
 void transition(BTeki* actor, ChappyFsm& s, int next, unsigned gen)
 {
     s.state = next;
@@ -622,6 +632,7 @@ void transition(BTeki* actor, ChappyFsm& s, int next, unsigned gen)
     s.clipElapsed = 0.0f;
     s.clipFinish = false;
     s.wakeNext = -1;
+    s.pendingNext = -1;
     s.clipSpeed = stateClipSpeed(s.family, next);
     s.attackFired = false;
     s.swallowFired = false;
@@ -2464,12 +2475,18 @@ void pc_p2_chappy_update(BTeki* actor)
             break;
         }
         case p2chappy::ADULT_WALK: {
+            // StateWalk::exec after finishMotion(): stand still until the clip END, then enter mNextState.
+            if (s.pendingNext >= 0) {
+                stop(actor);
+                if (p2chappyadult::cycleEnded(s.clipElapsed, s.pendingAt)) transition(actor, s, s.pendingNext, generator);
+                break;
+            }
             if (inRange) { transition(actor, s, p2chappy::ADULT_ATTACK, generator); break; }
-            if (!sees) { transition(actor, s, p2chappy::ADULT_TURN_TO_HOME, generator); break; }
+            if (!sees) { stop(actor); requestAtClipEnd(s, p2chappy::ADULT_TURN_TO_HOME); break; }
             if (flickWanted) { transition(actor, s, p2chappy::ADULT_FLICK, generator); break; }
             if (farHome) {
                 stop(actor);
-                transition(actor, s, p2chappy::ADULT_TURN_TO_HOME, generator);
+                requestAtClipEnd(s, p2chappy::ADULT_TURN_TO_HOME);
                 break;
             }
             if (target) {
@@ -2480,9 +2497,6 @@ void pc_p2_chappy_update(BTeki* actor)
                     stop(actor);
                     transition(actor, s, p2chappy::ADULT_TURN, generator);
                 }
-            } else {
-                stop(actor);
-                transition(actor, s, p2chappy::ADULT_TURN_TO_HOME, generator);
             }
             break;
         }
@@ -2531,14 +2545,19 @@ void pc_p2_chappy_update(BTeki* actor)
             break;
         }
         case p2chappy::ADULT_GO_HOME: {
+            // StateGoHome::exec: walkToTarget(home) runs every frame; a sighted target only sets
+            // mNextState (Attack if attackable, else Walk) and finishMotion(), entered at the clip END.
             if (nearHome) {
                 stop(actor);
                 transition(actor, s, p2chappy::ADULT_SLEEP, generator);
                 break;
             }
-            if (inRange) { transition(actor, s, p2chappy::ADULT_ATTACK, generator); break; }
-            if (sees) { transition(actor, s, p2chappy::ADULT_WALK, generator); break; }
+            if (inRange) requestAtClipEnd(s, p2chappy::ADULT_ATTACK);
+            else if (sees) requestAtClipEnd(s, p2chappy::ADULT_WALK);
             walkTo(actor, s, s.home, dt, s.spec->moveSpeed);
+            if (s.pendingNext >= 0 && p2chappyadult::cycleEnded(s.clipElapsed, s.pendingAt)) {
+                transition(actor, s, s.pendingNext, generator);
+            }
             break;
         }
         default:

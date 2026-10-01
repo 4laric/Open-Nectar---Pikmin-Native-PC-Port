@@ -86,6 +86,28 @@ int main()
     assert(fireWanted(true, false) && !fireWanted(false, false) && !fireWanted(true, true));
     assert(near(fireOffset(1).z, 34.0f) && near(fireOffset(2).z, -30.0f));
 
+    // #994 leash: state changes wait for the clip END (finishMotion), never the same frame.
+    {
+        assert(near(cycleEndFrame(0.0f, 41), 40.0f));
+        assert(near(cycleEndFrame(12.5f, 41), 40.0f));
+        assert(near(cycleEndFrame(40.0f, 41), 80.0f));
+        assert(!cycleEnded(39.9f, 40.0f) && cycleEnded(40.0f, 40.0f));
+        assert(cycleEndFrame(3.0f, 1) > 3.0f); // degenerate clip still advances
+        // Leash loop: territory 400, GoHome still sights the target. Walk stands one cycle, GoHome walks
+        // one full cycle toward home, so the net travel per loop is positive (the port used to make 0).
+        const float speed = 110.0f, fps = 40.0f; // fp06 move speed; SpeedMove clip rate
+        const int frames = 81;                    // a move1-sized clip
+        const float cycleSec = float(frames - 1) / fps;
+        float t = 0.0f, pos = 405.0f;             // 405 from home: just past the 400 territory
+        // Walk: request at elapsed 0 -> stands for one cycle.
+        float walkEnd = cycleEndFrame(0.0f, frames);
+        t += walkEnd / fps;
+        // GoHome: sighted target only requests Walk; it keeps walking until its own clip END.
+        float goEnd = cycleEndFrame(0.0f, frames);
+        pos -= speed * (goEnd / fps);
+        assert(pos < 400.0f - 100.0f && t > 0.0f && cycleSec > 1.0f);
+    }
+
     std::puts("p2_chappy_adult_test PASS");
     return 0;
 }
