@@ -100,11 +100,14 @@ jobs:
             | sed -E 's/^add_test\(([^ ]+) "([^"]+)".*/\1 \2/' \
             | awk '$1 ~ /p2_/ { n = $2; sub(/.*\//, "", n); sub(/\.exe$/, "", n); print n }' \
             | sort -u)
-          echo "Building pikmin_pc + pc_bbft_test + ${#p2_targets[@]} p2 test targets"
+          # Admit only explicitly registered opt-in fixture targets.
           mapfile -t fixture_targets < <(tr -d '\r' < build/ci-fixtures.txt)
           for target in "${fixture_targets[@]}"; do
-            [[ "$target" =~ ^pikmin_ci_fixture_[a-z0-9_]+$ ]] || exit 1
+            [[ "$target" =~ ^pikmin_ci_fixture_[a-z0-9_]+$ ]] || {
+              printf 'Rejected fixture target: %q\n' "$target"; exit 1;
+            }
           done
+          echo "Building pikmin_pc + ${#p2_targets[@]} p2 tests + ${#fixture_targets[@]} fixtures"
           ccache -z
           cmake --build build --target pikmin_pc pc_bbft_test "${p2_targets[@]}" "${fixture_targets[@]}" -j 4
           ccache -s

@@ -2398,32 +2398,6 @@ add_library(p2_campaign_goal_lifecycle_runtime_compile OBJECT tools/p2_campaign_
 target_include_directories(p2_campaign_goal_lifecycle_runtime_compile PRIVATE pc_port ${SDL2_INCLUDE_DIRS})
 target_compile_options(p2_campaign_goal_lifecycle_runtime_compile PRIVATE ${NATIVE_COMPILE_OPTIONS} -Wno-unused-parameter)
 
-add_executable(p2_bomb_telegraph_test tools/p2_bomb_telegraph_test.cpp)
-target_include_directories(p2_bomb_telegraph_test PRIVATE pc_port)
-target_compile_options(p2_bomb_telegraph_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
-add_test(NAME p2_bomb_telegraph_test COMMAND p2_bomb_telegraph_test)
-add_executable(p2_breadbug_corpse_test tools/p2_breadbug_corpse_test.cpp pc_port/pc_p2_breadbug_fsm.cpp)
-target_include_directories(p2_breadbug_corpse_test PRIVATE pc_port)
-target_compile_options(p2_breadbug_corpse_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
-add_test(NAME p2_breadbug_corpse_test COMMAND p2_breadbug_corpse_test)
-# Demon living-body fade advance regression (#972): engine-free.
-add_executable(p2_demon_fade_test
-    pc_port/pc_p2_demon_fade_test.cpp)
-target_include_directories(p2_demon_fade_test PRIVATE pc_port)
-target_compile_options(p2_demon_fade_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
-target_compile_definitions(p2_demon_fade_test PRIVATE DEMON_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/pc_port/pc_p2_sarai_demon.cpp")
-add_test(NAME p2_demon_fade_test COMMAND p2_demon_fade_test)
-
-add_executable(pc_corpse_origin_test tools/pc_corpse_origin_test.cpp)
-target_include_directories(pc_corpse_origin_test PRIVATE pc_port)
-target_compile_options(pc_corpse_origin_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
-add_test(NAME pc_corpse_origin_test COMMAND pc_corpse_origin_test)
-
-add_executable(p2_breadbug_nest_test tools/p2_breadbug_nest_test.cpp)
-target_include_directories(p2_breadbug_nest_test PRIVATE pc_port)
-target_compile_options(p2_breadbug_nest_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
-add_test(NAME p2_breadbug_nest_test COMMAND p2_breadbug_nest_test)
-
 # Explicit replacement-main diagnostics: CI compiles/packages but never runs
 # them or receives local game assets. Default production builds stay unchanged.
 file(WRITE "${CMAKE_BINARY_DIR}/ci-fixtures.txt" "")
@@ -2451,6 +2425,40 @@ function(pikmin_add_ci_fixture name source)
     set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/fixtures")
     file(APPEND "${CMAKE_BINARY_DIR}/ci-fixtures.txt" "${target}\n")
 endfunction()
+
+# #928 opt-in captain switching acceptance (requires local assets to run).
+pikmin_add_ci_fixture(captain_switch tools/p2_captain_switch_runtime.cpp)
+add_executable(p2_bomb_telegraph_test tools/p2_bomb_telegraph_test.cpp)
+target_include_directories(p2_bomb_telegraph_test PRIVATE pc_port)
+target_compile_options(p2_bomb_telegraph_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_bomb_telegraph_test COMMAND p2_bomb_telegraph_test)
+add_executable(p2_breadbug_corpse_test tools/p2_breadbug_corpse_test.cpp pc_port/pc_p2_breadbug_fsm.cpp)
+target_include_directories(p2_breadbug_corpse_test PRIVATE pc_port)
+target_compile_options(p2_breadbug_corpse_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_breadbug_corpse_test COMMAND p2_breadbug_corpse_test)
+# Demon living-body fade advance regression (#972): engine-free.
+add_executable(p2_demon_fade_test
+    pc_port/pc_p2_demon_fade_test.cpp)
+target_include_directories(p2_demon_fade_test PRIVATE pc_port)
+target_compile_options(p2_demon_fade_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+target_compile_definitions(p2_demon_fade_test PRIVATE DEMON_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/pc_port/pc_p2_sarai_demon.cpp")
+add_test(NAME p2_demon_fade_test COMMAND p2_demon_fade_test)
+
+add_executable(pc_corpse_origin_test tools/pc_corpse_origin_test.cpp)
+target_include_directories(pc_corpse_origin_test PRIVATE pc_port)
+target_compile_options(pc_corpse_origin_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_corpse_origin_test COMMAND pc_corpse_origin_test)
+
+add_executable(p2_breadbug_nest_test tools/p2_breadbug_nest_test.cpp)
+target_include_directories(p2_breadbug_nest_test PRIVATE pc_port)
+target_compile_options(p2_breadbug_nest_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_breadbug_nest_test COMMAND p2_breadbug_nest_test)
+
+# #1052 live squad reconciliation (engine-free, assertions enabled in Release).
+add_executable(p2_captain_reconciliation_test tools/test_p2_captain_reconciliation.cpp)
+target_include_directories(p2_captain_reconciliation_test PRIVATE pc_port)
+target_compile_options(p2_captain_reconciliation_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_captain_reconciliation_test COMMAND p2_captain_reconciliation_test)
 
 # #940 ordinary Purple combat: bounded local runtime only, never run by CI.
 pikmin_add_ci_fixture(purple_combat tools/preview_p2_purple_combat.cpp)
