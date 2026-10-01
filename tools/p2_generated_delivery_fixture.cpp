@@ -42,7 +42,7 @@
 
 namespace {
 constexpr unsigned Target=3921089765;
-const char* Check="Bestiary: Deliver P2 Dwarf Orange Bulborb";
+const char* Check="P2:44"; // Native resolved key; AP human label is resolved by NativeRun.
 SDL_Joystick* pad=nullptr;int requestedX=0,requestedY=0;
 void require(bool yes,const char* reason){if(!yes){std::printf("FAIL P2_GENERATED_DELIVERY %s\n",reason);std::fflush(nullptr);std::_Exit(1);}}
 void input(unsigned keys=0,int x=0,int y=0,int cx=0,int cy=0){
