@@ -154,7 +154,7 @@ public:
 	u32 mHeldPikis[3];                    // _42C, contains counts for leaf/bud/flower
 #if defined(PIKI_PC_PORT)
 	int mPcOwner = -1; ///< VS: jugador dueño de esta cebolla (-1 fuera de VS)
-	int mPcExitFor[PC_COOP_CAPTAINS] = { 0, 0 }; ///< co-op: queued exits owed to captain 0 / 1 (the one who took them out)
+	int mPcExitFor[PC_COOP_CAPTAINS] = {}; ///< co-op: queued exits owed to captain 0 / 1 (the one who took them out)
 #endif
 	ItemShapeObject* _438[3];             // _438
 	// The GameCube layout stored three (fulcrum, rope) pairs in six adjacent

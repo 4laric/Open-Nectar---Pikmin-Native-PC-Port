@@ -780,7 +780,7 @@ void GoalItem::startAI(int)
 	mPikisToExit       = 0;
 	mPikiSpawnTimer    = 0.0f;
 #if defined(PIKI_PC_PORT)
-	mPcExitFor[0] = mPcExitFor[1] = 0;
+	for (int i = 0; i < PC_COOP_CAPTAINS; i++) mPcExitFor[i] = 0;
 #endif
 }
 
@@ -879,6 +879,11 @@ void GoalItem::update()
 			mPikisToExit--;
 			if (mPikisToExit <= 0) {
 				mIsDispensingPikis = false;
+#if defined(PIKI_PC_PORT)
+				// Co-op: the dispense is over, so no exit is owed to anyone any more. This also drops debt left by an
+				// exitPiki() that returned early (pc_bbft_color_access) before consuming it.
+				for (int i = 0; i < PC_COOP_CAPTAINS; i++) mPcExitFor[i] = 0;
+#endif
 			}
 
 			mPikiSpawnTimer = gsys->getRand(1.0f) * 0.1f + 0.2f;
