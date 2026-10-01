@@ -25,9 +25,7 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_bbft.h"
 #include "pc_p2_surface_topology.h"
-#if defined(PIKI_PC_PORT)
 #include "pc_p2_surface_water.h"
-#endif
 #include "pc_p2_cargo_ground.h"
 #endif
 

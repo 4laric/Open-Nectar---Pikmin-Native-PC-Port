@@ -43,4 +43,8 @@ inline bool read(std::istream& in, std::vector<Box>& result) {
     if (!in.eof()) return false;
     result.swap(candidate); return true;
 }
+inline bool readTutorial(std::istream& in, std::vector<Box>& result) {
+    if (!read(in,result) || result.size()!=3) {result.clear();return false;}
+    return true;
+}
 }

@@ -32,4 +32,11 @@ int main() {
     }
     std::istringstream empty("P2_SURFACE_WATER_1 tutorial 0\n");
     assert(p2water::read(empty,result) && result.empty());
+    std::istringstream absentVolumes("P2_SURFACE_WATER_1 tutorial 0\n");
+    assert(!p2water::readTutorial(absentVolumes,result) && result.empty());
+    std::istringstream oneVolume(std::string("P2_SURFACE_WATER_1 tutorial 1 ")+row);
+    assert(!p2water::readTutorial(oneVolume,result) && result.empty());
+    std::istringstream allVolumes(std::string("P2_SURFACE_WATER_1 tutorial 3 ")+row+
+        " 1 -1210 -30 -650 -410 70 150 70 0 2 -140 -60 1250 960 40 2150 40 0");
+    assert(p2water::readTutorial(allVolumes,result) && result.size()==3);
 }

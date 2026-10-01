@@ -28,7 +28,7 @@ void pc_p2_surface_water_init(BaseShape* model) {
     const bool exists=std::filesystem::exists(path,error);
     if (!exists && !error) {std::puts("P2_SURFACE_WATER_ABSENT consumer=0 legacy_dry_stage=1");return;}
     std::ifstream input(path);
-    if (error || !input || !model || !model->mTriList || model->mTriCount<=0 || !p2water::read(input,boxes)) {
+    if (error || !input || !model || !model->mTriList || model->mTriCount<=0 || !p2water::readTutorial(input,boxes)) {
         std::puts("P2_SURFACE_WATER_REFUSED malformed_static_sidecar=1");std::fflush(nullptr);std::abort();
     }
     owner=model;

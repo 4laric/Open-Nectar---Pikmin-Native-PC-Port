@@ -11,6 +11,7 @@
 #include "Camera.h"
 #include <string>
 #include "Piki.h"
+#include "PikiState.h"
 #include "PikiMgr.h"
 #include "MapMgr.h"
 #include "Collision.h"
@@ -39,6 +40,10 @@ static SDL_Joystick* pad=nullptr;
 static int phase=0;
 static Vector3f goal(340,30,1000);
 static bool entered=false,exited=false;
+static bool speciesProbe(){return std::getenv("P2_SURFACE_WATER_SPECIES_PROBE")!=nullptr;}
+static Piki* probeRed=nullptr;
+static Piki* probeBlue=nullptr;
+static bool redDrown=false,blueWet=false;
 class WaterSurfaceApp: public PlugPikiApp {
     int tick=0, ready=0, settle=0;
     Vector3f origin;
@@ -49,7 +54,7 @@ public:
             Navi* before=naviMgr?naviMgr->getNavi():nullptr;
             int sx=0,sy=0;
             if((phase==2 || phase==3)&&before&&before->mNaviCamera){float dx=goal.x-before->mSRT.t.x,dz=goal.z-before->mSRT.t.z,d=std::sqrt(dx*dx+dz*dz);if(d>10){const Vector3f& axis=before->mNaviCamera->mViewXAxis;sx=int(65*(dx*axis.x+dz*axis.z)/d);sy=int(65*(dx*axis.z-dz*axis.x)/d);}}
-            SDL_JoystickSetVirtualButton(pad,SDL_CONTROLLER_BUTTON_B,phase==1);
+            SDL_JoystickSetVirtualButton(pad,SDL_CONTROLLER_BUTTON_B,phase==1 || (speciesProbe() && phase==3));
             SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTX,Sint16(sx*32767/74));
             SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTY,Sint16(-sy*32767/74));SDL_JoystickUpdate();
         }
@@ -85,6 +90,13 @@ public:
         if(phase==0){
             require(pc_p2_surface_water_active() && pc_p2_surface_water_count()==3,"source water not active");
             require(!n->mIsInWater,"dry shoreline start");
+            require(std::fabs(n->mSRT.t.x-220)<5 && std::fabs(n->mSRT.t.z-1000)<5,"actual shoreline generator entry");
+            std::printf("P2_SURFACE_WATER_SETTINGS blues_only_water=%d piki_invincible=%d species_probe=%d\n",pc_settings_get_blues_only_water(),pc_settings_get_piki_invincible(),int(speciesProbe()));
+            if(speciesProbe()){
+                require(!pc_settings_get_blues_only_water() && !pc_settings_get_piki_invincible(),"hazard mod changes baseline");
+                int blues=0;Iterator roster(pikiMgr);CI_LOOP(roster){Piki* p=static_cast<Piki*>(*roster);if(p->mColor==Blue){probeBlue=p;++blues;}else if(p->mColor==Red && std::fabs(p->mSRT.t.x-220)<10)probeRed=p;}
+                require(blues==1 && probeRed && probeBlue,"disclosed species probe roster");
+            }
             require(std::fabs(mapMgr->getMinY(220,1000,true)-56.0442f)<0.1f,"retail shoreline starting floor");
             require(pc_p2_surface_water_box(Vector3f(0,148.63f,1000),0)==-1,"upper bridge incorrectly wet");
             require(pc_p2_surface_water_box(Vector3f(0,15,1000),0)==0,"lower pool probe missing");
@@ -101,12 +113,20 @@ public:
         else if(phase==2){
             if(n->mIsInWater && pc_p2_surface_water_box(n->mSRT.t,n->mCollisionRadius)==0)entered=true;
             float dx=goal.x-n->mSRT.t.x,dz=goal.z-n->mSRT.t.z;
-            if(dx*dx+dz*dz<144){require(entered,"ordinary controller never entered water");phase=3;goal=origin;}
+            if(dx*dx+dz*dz<144){require(entered,"ordinary controller never entered water");phase=speciesProbe()?6:3;settle=0;goal=origin;}
+        } else if(phase==6){
+            require(probeRed->isAlive() && probeBlue->isAlive(),"species probe died before observation");
+            if(probeRed->mInWaterTimer>0 && probeRed->getState()==PIKISTATE_Drown)redDrown=true;
+            if(probeBlue->mInWaterTimer>0){require(probeBlue->getState()!=PIKISTATE_Drown,"Blue entered drown state");blueWet=true;}
+            if(tick%30==0)std::printf("P2_SURFACE_WATER_SPECIES red_timer=%d red_state=%d blue_timer=%d blue_state=%d red=%.2f,%.2f,%.2f blue=%.2f,%.2f,%.2f\n",probeRed->mInWaterTimer,probeRed->getState(),probeBlue->mInWaterTimer,probeBlue->getState(),probeRed->mSRT.t.x,probeRed->mSRT.t.y,probeRed->mSRT.t.z,probeBlue->mSRT.t.x,probeBlue->mSRT.t.y,probeBlue->mSRT.t.z);
+            if(redDrown && blueWet){phase=3;settle=0;}
+            else require(++settle<180,"ordinary followers failed Red drown and Blue wet immunity observation");
         } else if(phase==3){
             float dx=goal.x-n->mSRT.t.x,dz=goal.z-n->mSRT.t.z;
             if(dx*dx+dz*dz<144 && !n->mIsInWater){exited=true;phase=5;settle=0;}
         } else if(phase==5 && ++settle>=60){
             require(entered&&exited,"ordinary water entry/exit absent");
+            if(speciesProbe()){require(redDrown&&blueWet,"species water observations absent");require(probeRed->mInWaterTimer==0 && probeRed->getState()!=PIKISTATE_Drown,"ordinary whistle did not recover Red to dry shore");std::puts("P2_SURFACE_WATER_SPECIES_PASS red_drown=1 blue_wet_not_drown=1 red_dry_timer_reset=1 ordinary_whistle=1 staged_species=1 natural_acquisition=0");}
             require(std::isfinite(n->mSRT.t.y)&&n->mSRT.t.y>45,"captain failed dry return");
             std::printf("PASS P2_SURFACE_WATER_RUNTIME faces=5332 boxes=3 live=%d native_controller=1 entered=1 exited=1 x=%.3f y=%.3f z=%.3f body_convention=P1 complete_gameplay=0\n",count,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z);
             std::fflush(nullptr);std::_Exit(0);
