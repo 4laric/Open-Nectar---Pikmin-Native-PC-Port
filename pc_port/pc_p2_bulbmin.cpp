@@ -8,6 +8,7 @@
 #include "PikiMgr.h"
 #include "Navi.h"
 #include "NaviMgr.h"
+#include "pc_crowd_handover.h"
 #include "MapMgr.h"
 #include "teki.h"
 #include "Generator.h"
@@ -139,7 +140,11 @@ bool pc_p2_bulbmin_whistle(Piki* bulbmin) {
     if (!command.accepted) return false;
     bulbmin->mLeaderCreature = nullptr;
     if (naviMgr) {
-        if (Navi* navi = naviMgr->getNavi()) bulbmin->mNavi = navi;
+        if (Navi* navi = naviMgr->getNavi()) {
+            // #1033: release any squad slot on the old captain's plate before the owner changes.
+            pc_crowd_handover::abandonSquadBeforeHandover(bulbmin, navi);
+            bulbmin->mNavi = navi;
+        }
     }
     return true;
 }
