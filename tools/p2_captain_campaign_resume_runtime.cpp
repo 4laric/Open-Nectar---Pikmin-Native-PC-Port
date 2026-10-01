@@ -104,6 +104,7 @@ class CaptainSaveApp final:public PlugPikiApp {
     int frames=0,tick=-1,startDay=-1,initialCards=0;
     const std::chrono::steady_clock::time_point started=std::chrono::steady_clock::now();
     bool dayAdvanced=false;
+    int diaryFrames=0;
     void elapsed(const char* phase){std::printf("P2_SAVE_TIME phase=%s elapsed_ms=%lld\n",phase,(long long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-started).count());}
     bool saving=false,shot=false,sawWhistle=false,initialized[2]={false,false},retired=false;
     int teardownGapFrames=0;
@@ -151,7 +152,12 @@ public:
             // two frames per cycle preserves edges for results/card prompts.
             const bool confirming=gameflow.mWorldClock.mCurrentDay==startDay+1;
             if(confirming&&!dayAdvanced){dayAdvanced=true;elapsed("day_advanced");}
-            pad(confirming&&frames%20<18?KBBTN_A:0);
+            // With neutral input the diary cannot leave its first page. One
+            // ordinary B reveals it; never repeat B in results/card dialogs.
+            if(confirming)++diaryFrames;
+            if(diaryFrames==60){pad(KBBTN_B);elapsed("single_diary_B");}
+            else if(diaryFrames>61)pad(frames%20<18?KBBTN_A:0);
+            else pad();
             if(cards()==initialCards+1 && gameflow.mWorldClock.mCurrentDay==startDay+1){
                 elapsed("native_commit_observed");
                 std::printf("PASS P2_CAPTAIN_CAMPAIGN_SAVE day_before=%d day_after=%d native_card_generation_count=%d scripted_sunset=1 scripted_results_input=1 saved_bytes_injected=0\n",startDay,gameflow.mWorldClock.mCurrentDay,cards());std::fflush(nullptr);std::_Exit(0);
