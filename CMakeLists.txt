@@ -395,6 +395,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_long_legs_fsm.cpp
     pc_port/pc_p2_houdai_fsm.cpp
     pc_port/pc_p2_long_legs_ik.cpp
+    pc_port/pc_p2_bigfoot_fsm.cpp
     pc_port/pc_p2_long_legs.cpp
     pc_port/pc_p2_cannon_stone.cpp
     pc_port/pc_p2_egg_hazard.cpp
@@ -1055,6 +1056,12 @@ target_include_directories(p2_long_legs_fsm_test PRIVATE pc_port)
 target_compile_options(p2_long_legs_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_long_legs_fsm_test COMMAND p2_long_legs_fsm_test)
 
+add_executable(p2_long_legs_pose_test
+    tools/p2_long_legs_pose_test.cpp)
+target_include_directories(p2_long_legs_pose_test PRIVATE pc_port)
+target_compile_options(p2_long_legs_pose_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_long_legs_pose_test COMMAND p2_long_legs_pose_test)
+
 add_executable(p2_houdai_fsm_test
     tools/p2_houdai_fsm_test.cpp
     pc_port/pc_p2_houdai_fsm.cpp
@@ -1069,6 +1076,15 @@ add_executable(p2_long_legs_ik_test
 target_include_directories(p2_long_legs_ik_test PRIVATE pc_port)
 target_compile_options(p2_long_legs_ik_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_long_legs_ik_test COMMAND p2_long_legs_ik_test)
+
+add_executable(p2_bigfoot_fsm_test
+    tools/p2_bigfoot_fsm_test.cpp
+    pc_port/pc_p2_bigfoot_fsm.cpp
+    pc_port/pc_p2_long_legs_ik.cpp
+    pc_port/pc_p2_long_legs_fsm.cpp)
+target_include_directories(p2_bigfoot_fsm_test PRIVATE pc_port)
+target_compile_options(p2_bigfoot_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_bigfoot_fsm_test COMMAND p2_bigfoot_fsm_test)
 
 add_executable(p2_inst_legs_policy_test
     tools/p2_inst_legs_policy_test.cpp
@@ -1478,6 +1494,12 @@ add_test(NAME p2_bigtreasure_fx_test COMMAND p2_bigtreasure_fx_test)
 
 
 # Kabuto identity policy (inst2-frogs #871).
+# Antenna Beetle / Dirigibug smoothing helpers (#972): engine-free.
+add_executable(p2_fuefuki_bombsarai_smooth_test tools/p2_fuefuki_bombsarai_smooth_test.cpp)
+target_include_directories(p2_fuefuki_bombsarai_smooth_test PRIVATE pc_port)
+target_compile_options(p2_fuefuki_bombsarai_smooth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_fuefuki_bombsarai_smooth_test COMMAND p2_fuefuki_bombsarai_smooth_test)
+
 add_executable(p2_kabuto_fsm_policy_test tools/p2_kabuto_fsm_policy_test.cpp)
 target_include_directories(p2_kabuto_fsm_policy_test PRIVATE pc_port)
 target_compile_options(p2_kabuto_fsm_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
@@ -1970,6 +1992,18 @@ add_executable(p2_elecbug_transport_test tools/p2_elecbug_transport_test.cpp pc_
 target_include_directories(p2_elecbug_transport_test PRIVATE pc_port)
 target_compile_options(p2_elecbug_transport_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_elecbug_transport_test COMMAND p2_elecbug_transport_test)
+add_executable(p2_elecbug_fsm_test tools/p2_elecbug_fsm_test.cpp)
+target_include_directories(p2_elecbug_fsm_test PRIVATE pc_port)
+target_compile_options(p2_elecbug_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_elecbug_fsm_test COMMAND p2_elecbug_fsm_test)
+add_executable(p2_elecbug_fx_test tools/p2_elecbug_fx_test.cpp)
+target_include_directories(p2_elecbug_fx_test PRIVATE pc_port)
+target_compile_options(p2_elecbug_fx_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_elecbug_fx_test COMMAND p2_elecbug_fx_test)
+add_executable(p2_species_unit_test tools/p2_species_unit_test.cpp)
+target_include_directories(p2_species_unit_test PRIVATE pc_port)
+target_compile_options(p2_species_unit_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_species_unit_test COMMAND p2_species_unit_test)
 
 # rd-p2-kurage-transport (#768): Kurage57 corpse -> carried -> exactly one
 # Onion receipt over the real delivery-host bridge (registration only).
@@ -2062,6 +2096,18 @@ add_executable(p2_captor_mouth_test tools/p2_captor_mouth_test.cpp)
 target_include_directories(p2_captor_mouth_test PRIVATE pc_port)
 target_compile_options(p2_captor_mouth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_captor_mouth_test COMMAND p2_captor_mouth_test)
+# Cloaking Burrow-nit (Armor 15, #1014): retail collision tree (only dmg1 stickable), attack cone,
+# kamujnt bite sweep, captain hit and damage predicates. Engine-free.
+add_executable(p2_armor_policy_test tools/p2_armor_policy_test.cpp)
+target_include_directories(p2_armor_policy_test PRIVATE pc_port)
+target_compile_options(p2_armor_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_armor_policy_test COMMAND p2_armor_policy_test)
+
+# #995: Bloyster source policy (tail bulb is the only stickable part, damageCallBack, tongue tables).
+add_executable(p2_umimushi_policy_test tools/p2_umimushi_policy_test.cpp)
+target_include_directories(p2_umimushi_policy_test PRIVATE pc_port)
+target_compile_options(p2_umimushi_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_umimushi_policy_test COMMAND p2_umimushi_policy_test)
 # bot-impl (#871): TEST-ONLY headless autoplay bot policy. Engine-free:
 # the header-only Brain (states, timeouts, giveup/result markers, Kogane
 # damage-and-move-on) plus the inert-when-unset gate (registration only).
@@ -2324,3 +2370,14 @@ add_executable(p2_bomb_telegraph_test tools/p2_bomb_telegraph_test.cpp)
 target_include_directories(p2_bomb_telegraph_test PRIVATE pc_port)
 target_compile_options(p2_bomb_telegraph_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_bomb_telegraph_test COMMAND p2_bomb_telegraph_test)
+add_executable(p2_breadbug_corpse_test tools/p2_breadbug_corpse_test.cpp pc_port/pc_p2_breadbug_fsm.cpp)
+target_include_directories(p2_breadbug_corpse_test PRIVATE pc_port)
+target_compile_options(p2_breadbug_corpse_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_breadbug_corpse_test COMMAND p2_breadbug_corpse_test)
+# Demon living-body fade advance regression (#972): engine-free.
+add_executable(p2_demon_fade_test
+    pc_port/pc_p2_demon_fade_test.cpp)
+target_include_directories(p2_demon_fade_test PRIVATE pc_port)
+target_compile_options(p2_demon_fade_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+target_compile_definitions(p2_demon_fade_test PRIVATE DEMON_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/pc_port/pc_p2_sarai_demon.cpp")
+add_test(NAME p2_demon_fade_test COMMAND p2_demon_fade_test)

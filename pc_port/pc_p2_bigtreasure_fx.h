@@ -52,7 +52,7 @@ inline bool elementFor(int weapon, Element& out) {
     switch (weapon) {
     case P2BTWEAPON_Fire: out = Element::Fire; return true;
     case P2BTWEAPON_Gas: out = Element::Gas; return true;
-    case P2BTWEAPON_Water: out = Element::Water; return true;
+    case P2BTWEAPON_Water: out = Element::WaterBall; return true;
     case P2BTWEAPON_Elec: out = Element::Elec; return true;
     default: return false;
     }
@@ -110,24 +110,28 @@ inline int layout(const P2BigTreasureElementRuntime& rt, const P2BigTreasureElem
         break;
     }
     case P2BTWEAPON_Water: {
+        // Monster Pump: TOootaWbShot at the mouth per shot, TOootaWbomb on each lobbed ball, TOootaWbHit
+        // (splash + ground ring) where it bursts. One ball point per live node, a trail behind it along
+        // the flight path, and the burst at the last flight position clamped to the ground.
         const P2BigTreasureWaterPolicy& w = rt.waterPolicy();
-        if (stats.emits > 0) out[n++] = {Kind::Muzzle, emit.x, emit.y, emit.z, 2.0f, 0.0f, 1.0f};
-        for (int i = 0; i < P2BigTreasureWaterPolicy::kCapacity && n < MAX_POINTS - 2; ++i) {
+        if (stats.emits > 0) out[n++] = {Kind::Muzzle, emit.x, emit.y, emit.z, 1.0f, 0.0f, 1.0f};
+        for (int i = 0; i < P2BigTreasureWaterPolicy::kCapacity && n < MAX_POINTS - 6; ++i) {
             const P2BigTreasureWaterNode& node = w.node(i);
             if (node.active) {
                 float dx, dz;
                 unit2(node.velocity.x, node.velocity.z, dx, dz);
-                // Bubble plus a short two-point trail so the jet reads as a stream (TOootaWbomb).
-                for (int k = 0; k < 3 && n < MAX_POINTS - 2; ++k)
-                    out[n++] = {Kind::Body, node.position.x - node.velocity.x * (1.0f / 30.0f) * float(k),
-                                node.position.y - node.velocity.y * (1.0f / 30.0f) * float(k),
-                                node.position.z - node.velocity.z * (1.0f / 30.0f) * float(k), 1.6f, dx, dz};
+                out[n++] = {Kind::Body, node.position.x, node.position.y, node.position.z, 1.0f, dx, dz};
+                for (int k = 1; k <= 2; ++k)
+                    out[n++] = {Kind::Trail, node.position.x - node.velocity.x * (1.0f / 30.0f) * float(k) * 1.5f,
+                                node.position.y - node.velocity.y * (1.0f / 30.0f) * float(k) * 1.5f,
+                                node.position.z - node.velocity.z * (1.0f / 30.0f) * float(k) * 1.5f, 1.0f, dx, dz};
                 st.waterLast[i][0] = node.position.x;
                 st.waterLast[i][1] = node.position.y;
                 st.waterLast[i][2] = node.position.z;
             } else if (st.waterWasActive[i]) {
-                // Landed: TOootaWbHit at the last flight position.
-                out[n++] = {Kind::Tip, st.waterLast[i][0], st.waterLast[i][1], st.waterLast[i][2], 2.4f, 0.0f, 1.0f};
+                const float gyHit = st.waterLast[i][1] < gy + 4.0f ? st.waterLast[i][1] : gy + 4.0f;
+                out[n++] = {Kind::Tip, st.waterLast[i][0], gyHit, st.waterLast[i][2], 1.0f, 0.0f, 1.0f};
+                out[n++] = {Kind::Ring, st.waterLast[i][0], gy + 1.0f, st.waterLast[i][2], 1.0f, 0.0f, 1.0f};
             }
             st.waterWasActive[i] = node.active;
         }

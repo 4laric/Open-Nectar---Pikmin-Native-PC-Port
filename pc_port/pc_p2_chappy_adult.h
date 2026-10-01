@@ -168,4 +168,20 @@ inline Offset fireOffset(int i)
 
 inline bool fireWanted(bool alive, bool inWater) { return alive && !inWater; }
 
+// ---- finishMotion / KEYEVENT_END deferral (#994 leash) -------------------------
+// chappyState.cpp StateWalk/StateGoHome/StateTurnToHome set mNextState and call
+// finishMotion(); the state only changes when the current clip reaches its END
+// event (transit at KEYEVENT_END). StateGoHome keeps calling walkToTarget every
+// frame meanwhile (chappyState.cpp:2842-2845), so a leashed Bulborb that sights a
+// target still walks home for the rest of the move1 cycle, while StateWalk stands
+// still for the rest of its cycle after the territory check (chappyState.cpp:981-990).
+// Changing state on the very frame the condition appears gave the Walk <-> TurnToHome
+// <-> GoHome loop with zero travel that froze a leashed Fiery at the territory edge.
+inline float cycleEndFrame(float elapsedFrames, int clipFrames)
+{
+    const float len = clipFrames > 2 ? float(clipFrames - 1) : 1.0f;
+    return (std::floor(elapsedFrames / len) + 1.0f) * len;
+}
+inline bool cycleEnded(float elapsedFrames, float endFrame) { return elapsedFrames >= endFrame; }
+
 } // namespace p2chappyadult
