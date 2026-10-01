@@ -5,12 +5,12 @@
 // That centre is world space and only written by CollInfo::updateInfo, which
 // runs in BTeki::refresh (and is skipped while rendering is not authoritative).
 // A teki killed before its first refresh (e.g. spawned and killed in the same
-// frame, or a pooled teki reused) still carries a never-written (0,0,0) or a
-// previous life's centre, and the corpse appeared at the world origin
-// (#972 breadbug: dev-console "spawn 38" + "kill" in one frame). When the
-// sphere centre is implausibly far from the body it belongs to, fall back to
-// getCentre(), the same point dieSoon already uses when there is no 'carc'
-// sphere. A valid centre (inside the body) is kept unchanged.
+// frame) still carries a never-written (0,0,0) centre ('carc', and 'cent'
+// behind getCentre()), and the corpse appeared at the world origin (#972
+// breadbug: dev-console "spawn 38" + "kill" in one frame; reproduced 3/3 on
+// fork/main f38e70599). When the centre is implausibly far from the teki's
+// position (mSRT.t, always valid), fall back to that position. A valid centre
+// (inside the body) is kept unchanged.
 namespace pc_corpse_origin {
 constexpr float kMinSlack = 150.0f;  // world units; well above any carc offset
 constexpr float kSizeFactor = 4.0f;  // times the teki collision size

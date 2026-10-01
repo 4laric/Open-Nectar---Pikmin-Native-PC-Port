@@ -866,19 +866,24 @@ void BTeki::dieSoon()
 		} else {
 			PRINT_NAKATA("dieSoon:%08x:'carc'\n", this);
 			vec1.set(carcass->mCentre);
+		}
 #if defined(PIKI_PC_PORT) && PIKI_PC_PORT
-			// #972: a 'carc' centre never written by refresh (killed before the
-			// first CollInfo::updateInfo) put the corpse at the world origin.
-			NVector3f body(getCentre());
+		// #972/#1022: the 'carc' and 'cent' sphere centres are only written by
+		// CollInfo::updateInfo in refresh. A teki killed before its first refresh
+		// still has (0,0,0) there, so the corpse spawned at the world origin.
+		// Checked against mSRT.t (always valid): an implausible centre falls back
+		// to the teki position; a valid one is kept (vanilla placement).
+		{
+			const Vector3f body = mSRT.t;
 			if (!pc_corpse_origin::carcassUsable(vec1.x, vec1.y, vec1.z, body.x, body.y, body.z,
 			                                     getTekiCollisionSize())) {
-				std::printf("PC_CORPSE_ORIGIN_FALLBACK teki=%d carc=%.1f,%.1f,%.1f centre=%.1f,%.1f,%.1f\n",
-				            int(mTekiType), vec1.x, vec1.y, vec1.z, body.x, body.y, body.z);
+				std::printf("PC_CORPSE_ORIGIN_FALLBACK teki=%d part=%s centre=%.1f,%.1f,%.1f pos=%.1f,%.1f,%.1f\n",
+				            int(mTekiType), carcass ? "carc" : "cent", vec1.x, vec1.y, vec1.z, body.x, body.y, body.z);
 				std::fflush(stdout);
 				vec1.set(body);
 			}
-#endif
 		}
+#endif
 
 		becomePellet(typeID, vec1, getDirection());
 		PRINT_NAKATA("dieSoon:%08x:pellet:%08x\n", this, mPellet);
