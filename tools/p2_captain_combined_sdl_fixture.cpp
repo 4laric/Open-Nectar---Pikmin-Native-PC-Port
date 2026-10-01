@@ -178,6 +178,7 @@ public:
                 else if(menuFrames==50)pad();
                 else if(menuFrames==65||menuFrames==95)pad(KBBTN_A); // Sunset, then Yes.
                 else if(menuFrames==66||menuFrames==96)pad();
+                if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive)gameflow.mMoviePlayer->requestSkip();
                 return result;
             }
             if(confirming)++diaryFrames;
