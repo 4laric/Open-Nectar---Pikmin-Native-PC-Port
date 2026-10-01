@@ -81,6 +81,11 @@ struct P2HoudaiInput {
     P2HoudaiVec gunTarget;
     float roll[4] = {0.0f, 0.0f, 0.0f, 0.0f}; // host uniform [0,1)
     float modelScale = 1.0f;    // host draw scale of the bind mesh (gun joint height follows it)
+    // World position of the posed gun joint (#1012): the pivot does not move when the head turns
+    // or the gun pitches, so the host reads it from the clip pose (rig draw). Without a rig
+    // (gunPosValid false) the brain falls back to the bind-pose joint height above the body.
+    bool gunPosValid = false;
+    P2HoudaiVec gunPos;
 };
 
 struct P2HoudaiOutput {
@@ -106,8 +111,8 @@ struct P2HoudaiOutput {
     // Shot bookkeeping edges (diagnostics)
     bool aimStart = false, burstOn = false, burstOff = false, aimEnd = false;
     bool deadEnd = false;       // dead clip END: throwupItem + explode + kill
-    bool drawHidden = false;    // Stay: dormant, model not yet dropped in
-    float landDrop = 0.0f;      // Land: 1 = still up high, 0 = landed
+    bool drawHidden = false;    // Stay (bind-pose host only: the rig draw shows landing frame 0 instead)
+    float landDrop = 0.0f;      // Land drop-in offset for the bind-pose host (the rig draw plays the landing clip)
     float damageRate = 0.0f;    // receiver multiplier this state (0 = reject)
 };
 
@@ -132,6 +137,19 @@ public:
     float gunYaw() const { return mYaw; }
     float gunTilt() const { return mTilt; }
     const P2HoudaiParms& parms() const { return mParms; }
+    // Clip the body pose is showing (disc clip order, = p2houdairig::Rig::Clip): landing 0, wait 1,
+    // flick 2, attack 3, dead 4. Walk has no clip in the source (IK only), so the pose holds the
+    // last frame of the clip that was playing (Houdai::startIKMotion does not start an animation).
+    static constexpr int kPoseLanding = 0, kPoseWait = 1, kPoseFlick = 2, kPoseAttack = 3, kPoseDead = 4;
+    int poseClip() const { return mPoseClip; }
+    int poseFrame() const { return mPoseFrame; }
+    // True while the clip clock is running, so a draw frame between two source ticks may blend toward
+    // the next frame (presentation only).
+    bool poseAdvancing() const;
+    // Sight effect runs while the source rotation is searching (doUpdate: not yet finished).
+    bool gunAiming() const { return mRotation && !mGunFinished; }
+    // Gun barrel (local X) direction in the world, from the brain's yaw and tilt-from-down.
+    P2HoudaiVec gunDirection() const;
     bool isStartFlick(int stuck) const;
     static bool isStartFlickFor(const P2HoudaiParms& p, int stuck, float flickTimer);
     // Source Houdai::damageCallBack (Houdai.cpp:223-236, US build) multiplier
@@ -146,6 +164,7 @@ private:
     void walkTargetRule(const P2HoudaiInput& in);
     void startStride(const P2HoudaiVec& pos, float face);
     void gunUpdate(const P2HoudaiInput& in);
+    P2HoudaiVec gunOrigin(const P2HoudaiInput& in) const;
     void emit(const P2HoudaiInput& in, P2HoudaiOutput& out);
 
     P2HoudaiParms mParms;
@@ -173,4 +192,6 @@ private:
     P2HoudaiVec mStrideFrom, mStrideTo;
     float mFaceFrom = 0.0f, mFaceTo = 0.0f;
     float mFace = 0.0f;
+    int mPoseClip = 0;
+    int mPoseFrame = 0;
 };

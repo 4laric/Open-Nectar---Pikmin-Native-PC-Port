@@ -49,6 +49,7 @@ static const Row kRows[] = {
     {56, 75.0f}, // Damagumo
     {63, 20.0f}, // Jigumo
     {69, 75.0f}, // BigFoot
+    {66, 115.0f}, // Houdai (Man-at-Legs): enemyparm fp27 115, fp00 2800 (#1012)
     {34, 50.0f}, // SnakeCrow
     {70, 50.0f}, // SnakeWhole
     {65, 50.0f}, // Imomushi
