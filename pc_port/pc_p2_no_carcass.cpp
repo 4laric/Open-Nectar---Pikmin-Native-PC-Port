@@ -10,11 +10,11 @@
 
 int pc_p2_no_carcass_corpse_type(BTeki* actor, int value)
 {
-    if (!actor || value != TEKICORPSE_LeaveCorpse) return value;
+    if (!actor || (value != TEKICORPSE_LeaveCorpse && value != TEKICORPSE_NoCorpse)) return value;
     unsigned source = pc_randomizer_p2_source_for(static_cast<PelletView*>(actor));
     if (!source) source = pc_p2_campaign_source(actor);
     const int type = p2nocarcass::corpseType(source, value);
-    if (type != value) {
+    if (p2nocarcass::leavesNoCarcass(source)) {
         static int logged = 0;
         if (logged < 16) {
             ++logged;
