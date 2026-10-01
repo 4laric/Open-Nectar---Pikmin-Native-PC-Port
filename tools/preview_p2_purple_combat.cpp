@@ -441,9 +441,13 @@ class PurpleCombatApp : public PlugPikiApp {
         if(!confirming) {
             ++ordinaryMenuFrames;
             if(ordinaryMenuFrames==2) ordinaryInput();
-            else if(ordinaryMenuFrames==45) ordinaryInput(0,-65);
-            else if(ordinaryMenuFrames==50 || ordinaryMenuFrames==66 || ordinaryMenuFrames==126) ordinaryInput();
-            else if(ordinaryMenuFrames==65 || ordinaryMenuFrames==125) ordinaryInput(KBBTN_A);
+            // At native30Hz,20 frames exceed pause/menu0.5s fade plus0.1s
+            // activation delay. Keep20 frames between selection and confirm,
+            // then45 for main exit0.5s + submenu entry0.5s + active0.1s.
+            // These are ordinary input edges; no fade/UI clock is modified.
+            else if(ordinaryMenuFrames==20) ordinaryInput(0,-65);
+            else if(ordinaryMenuFrames==25 || ordinaryMenuFrames==41 || ordinaryMenuFrames==86) ordinaryInput();
+            else if(ordinaryMenuFrames==40 || ordinaryMenuFrames==85) ordinaryInput(KBBTN_A);
         } else {
             ++ordinaryDiaryFrames;
             if(ordinaryDiaryFrames==1) milestone("ordinary_day_advanced",ticks);
