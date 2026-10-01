@@ -145,7 +145,7 @@ class CaptainSaveApp final:public PlugPikiApp {
     void selected(int slot){auto* n=naviMgr->getNavi(slot);require(naviMgr->getActiveNavi()==n,"selected captain");require(cameraMgr->mController==n->mKontroller && cameraMgr->mCamera->mTargetCreature==n,"camera binding");std::printf("P2_SAVE_SELECTED phase=%s slot=%d camera=1\n",resumePhase?"resume":"save",slot);}
 public:
     CaptainSaveApp(){initialCards=cards();require(resumePhase?initialCards==1:initialCards==0,"expected committed generation before phase");}
-    void draw(Graphics& gfx)override{PlugPikiApp::draw(gfx);if(tick>30&&!shot)shot=capture("captain-campaign.ppm");}
+    void draw(Graphics& gfx)override{PlugPikiApp::draw(gfx);if(tick>30&&!shot)shot=capture("captain-campaign.ppm");if(saving&&menuFrames==120)require(capture("pause-menu.ppm"),"ordinary pause menu capture");}
     int idle()override{
         if(pendingNegative){
             // Queue mutation until the next ordinary pre-engine guard. This
@@ -174,7 +174,7 @@ public:
             // ordinary B reveals it; never repeat B in results/card dialogs.
             if(!confirming){
                 ++menuFrames;
-                if(menuFrames<=3||menuFrames==45||menuFrames==50||menuFrames==65||menuFrames==95||menuFrames%120==0){
+                if(menuFrames<=3||menuFrames==45||menuFrames==50||menuFrames==65||menuFrames==66||menuFrames==125||menuFrames==126||menuFrames%120==0){
                     auto* core=findCore(gameflow.mGameSection);auto* ui=core?core->mController:nullptr;
                     std::printf("P2_SAVE_UI_OBSERVER frame=%d allowed=%d overlay=%d paused=%d movie=%d player_day=%d ui_present=%d held=%08x pressed=%08x frozen=%d axis_y=%.3f\n",menuFrames,int(gameflow.mIsPauseAllowed),int(gameflow.mIsUIOverlayActive),int(gameflow.mPauseAll),int(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive),playerState->getCurrDay(),int(ui!=nullptr),ui?unsigned(ui->mCurrentInput):0,ui?unsigned(ui->mInputPressed):0,ui?int(ui->mIsControllerFrozen):-1,ui?ui->mMainStickY:0.0f);
                     std::fflush(stdout);
@@ -182,8 +182,10 @@ public:
                 if(menuFrames==2)pad(); // Release START after its ordinary input edge.
                 if(menuFrames==45)pad(0,0,-65); // Continue -> Go to Sunset.
                 else if(menuFrames==50)pad();
-                else if(menuFrames==65||menuFrames==95)pad(KBBTN_A); // Sunset, then Yes.
-                else if(menuFrames==66||menuFrames==96)pad();
+                // Main-menu exit and submenu entry each take0.5s, followed
+                // by the submenu's0.1s active delay. Wait beyond both fades.
+                else if(menuFrames==65||menuFrames==125)pad(KBBTN_A); // Sunset, then Yes.
+                else if(menuFrames==66||menuFrames==126)pad();
                 if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive)gameflow.mMoviePlayer->requestSkip();
                 return result;
             }
