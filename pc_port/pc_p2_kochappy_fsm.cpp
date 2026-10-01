@@ -51,6 +51,7 @@
 #include "pc_p2_campaign_actor.h"
 #include "pc_p2_dwarf_orange.h"
 #include "pc_p2_kochappy.h"
+#include "Pellet.h"
 #include "pc_p2_white.h"
 #include "pc_bbft.h"
 #include "teki.h"
@@ -113,6 +114,42 @@ struct FsmActor {
 
 std::map<PelletView*, FsmActor> actors;
 bool ready = false;
+PelletConfig* redCorpseConfig = nullptr;
+
+// Actual US carcass_config.txt Kochappy: min3/max6, pikicountmin/max4.
+// Construct a fresh Parameter/CoreNode chain; never copy intrusive links or
+// edit the shared P1/Orange host config. This immutable Red-only config lives
+// on the scene App heap, like the carcass; reset drops only the borrowed handle.
+void adoptRedCorpse(BTeki* actor)
+{
+ if (!actor->mPellet || !actor->mPellet->mConfig) {
+  std::fprintf(stderr, "P2 Red source corpse missing native pellet/config\n");
+  std::abort();
+ }
+ if (!redCorpseConfig) {
+  PelletConfig* source = actor->mPellet->mConfig;
+  const int heap = gsys->setHeap(SYSHEAP_App);
+  redCorpseConfig = new PelletConfig;
+#define COPY_VALUE(name) redCorpseConfig->name.mValue = source->name.mValue
+  COPY_VALUE(mPelletName); COPY_VALUE(mPelletType); COPY_VALUE(mPelletColor);
+  COPY_VALUE(mUseDynamicMotion); COPY_VALUE(_A0); COPY_VALUE(_B0); COPY_VALUE(_C0);
+  COPY_VALUE(mPelletScale); COPY_VALUE(mCarryInfoHeight);
+  COPY_VALUE(mAnimSoundID); COPY_VALUE(mBounceSoundID);
+#undef COPY_VALUE
+  redCorpseConfig->mModelId = source->mModelId;
+  redCorpseConfig->mPelletId = source->mPelletId;
+  redCorpseConfig->mUnusedId = source->mUnusedId;
+  redCorpseConfig->mRepairAnimJointIndex = source->mRepairAnimJointIndex;
+  redCorpseConfig->mCarryMinPikis.mValue = 3;
+  redCorpseConfig->mCarryMaxPikis.mValue = 6;
+  redCorpseConfig->mMatchingOnyonSeeds.mValue = 4;
+  redCorpseConfig->mNonMatchingOnyonSeeds.mValue = 4;
+  gsys->setHeap(heap);
+ }
+ actor->mPellet->mConfig = redCorpseConfig;
+ std::printf("P2_KOCHAPPY_SOURCE_CARCASS source_id=1 min=3 max=6 seeds=4 private_config=1\n");
+ std::fflush(stdout);
+}
 
 float wrapPi(float angle)
 {
@@ -422,6 +459,7 @@ void enter(BTeki* actor, FsmActor& state, State next)
 
 void pc_p2_kochappy_fsm_reset()
 {
+	redCorpseConfig = nullptr;
 	actors.clear();
 	ready = false;
 }
@@ -595,7 +633,7 @@ void pc_p2_kochappy_fsm_update(BTeki* actor)
 			enter(actor, state, p2kochappyfsm::STATE_FLICK);
 			break;
 		}
-		if (turnTo(actor, state, target->getPosition(), dt, attackAngleRadians())
+		if (turnTo(actor, state, target->getPosition(), dt, attackAngleRadians(state))
 		    || state.stateTime >= TURN_DURATION) {
 			enter(actor, state, p2kochappyfsm::STATE_WALK);
 		}
@@ -637,7 +675,7 @@ void pc_p2_kochappy_fsm_update(BTeki* actor)
 			enter(actor, state, p2kochappyfsm::STATE_FLICK);
 			break;
 		}
-		if (turnTo(actor, state, state.home, dt, attackAngleRadians())
+		if (turnTo(actor, state, state.home, dt, attackAngleRadians(state))
 		    || state.stateTime >= TURN_DURATION) {
 			enter(actor, state, p2kochappyfsm::STATE_GO_HOME);
 		}
@@ -756,7 +794,12 @@ void pc_p2_kochappy_fsm_update(BTeki* actor)
 			// die() alone only arms mDeadState; dieSoon() normally runs inside
 			// doAI, which this module suppresses. pcEscapeNow() finalizes the
 			// death (carcass birth) outside doAI (teki.h family-lane helper #219).
-			actor->pcEscapeNow();
+            const bool red = state.sourceId == 1;
+            actor->pcEscapeNow();
+            if (red) {
+                adoptRedCorpse(actor);
+                return; // native teardown may have forgotten the FSM entry.
+            }
 		}
 		break;
 	}
