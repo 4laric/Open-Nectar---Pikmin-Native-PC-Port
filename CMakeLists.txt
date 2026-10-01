@@ -747,6 +747,9 @@ target_compile_options(${NECTAR_GAME} PRIVATE ${NATIVE_COMPILE_OPTIONS})
 target_link_libraries(${NECTAR_GAME} PRIVATE ${NECTAR_LEGACY})
 # P2 fork targets (desktop only; the Android build is a shared library).
 if (NOT ANDROID)
+add_executable(pc_diary_observer_test tools/test_pc_diary_observer.cpp)
+target_include_directories(pc_diary_observer_test PRIVATE pc_port)
+add_test(NAME pc_diary_observer_test COMMAND pc_diary_observer_test)
 # Lane 29 replacement-main runtime fixture (#243). Built as an ordinary target so
 # the lane wrapper (`build_lane.py l29 --target p2_kurage_runtime`) produces it
 # under the normal build semaphore; it runs the same engine as pikmin_pc with the
