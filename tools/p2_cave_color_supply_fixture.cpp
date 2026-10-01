@@ -138,7 +138,8 @@ class CaveColorSupplyApp final : public PlugPikiApp {
         const float dx=x-n->mCursorWorldPos.x,dz=z-n->mCursorWorldPos.z,d=std::sqrt(dx*dx+dz*dz);
         int sx=0,sy=0;require(n->controlCamera()!=nullptr,"aim camera missing");
         if(d>6){const Vector3f& a=n->controlCamera()->mViewXAxis;sx=int(std::lround(30*(dx*a.x+dz*a.z)/d));sy=int(std::lround(30*(dx*a.z-dz*a.x)/d));}
-        fixturePad(buttons,sx,sy);return d<=8;
+        // Input alignment only; the real bud still owns its 30-unit capture test.
+        fixturePad(buttons,sx,sy);return d<=20;
     }
     bool walkTo(Navi* n,float x,float z) {
         float dx=x-n->mSRT.t.x,dz=z-n->mSRT.t.z;
@@ -186,7 +187,7 @@ class CaveColorSupplyApp final : public PlugPikiApp {
             std::puts("P2_CAVE_COLOR_SETUP starting=20_red_staged input=SDL_virtual_gamepad position_writes=0 velocity_writes=0 species_writes=0 state_writes=0 bud_auto_pluck=production confirmation=bypassed");}
         Vector3f bud;require(pc_p2_cave_bud_position("blue",bud),"blue bud missing");
         if(observed%120==0){std::printf("P2_CAVE_COLOR_PROGRESS phase=%d point=%d red=%d blue=%d alive=%d following=%d conversions=%d pending=%d navi=%.2f,%.2f cursor=%.2f,%.2f\n",phase,point,colour(2),colour(0),alivePikis(),following(),pc_p2_cave_bud_conversions(),int(pc_p2_cave_bud_pending()),n->mSRT.t.x,n->mSRT.t.z,n->mCursorWorldPos.x,n->mCursorWorldPos.z);std::fflush(nullptr);}
-        if(phase==0){static const float path[][2]={{0,-100},{-100,-100},{-100,0}};
+        if(phase==0){static const float path[][2]={{0,-100},{-100,-100},{-100,20}};
             if(walkTo(n,path[point][0],path[point][1])){if(point==2&&following()!=20){gatherAtCursor(n);return;}if(++point==3){phase=1;phaseTick=observed;point=0;}}return;}
         if(phase==1){
             if(colour(0)==5&&pc_p2_cave_bud_conversions()==5&&!pc_p2_cave_bud_pending()){
