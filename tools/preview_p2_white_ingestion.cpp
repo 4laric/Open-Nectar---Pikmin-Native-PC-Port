@@ -65,7 +65,7 @@ public:
   if(phase==13 && n && n->getCurrState() && n->getCurrState()->getID()==NAVISTATE_Walk && ticks%30<15)keys=KeyConfig::_instance->mDisbandKey.mBind;
   if(phase==8)keys=KeyConfig::_instance->mThrowKey.mBind;
   if(phase==1)keys=KeyConfig::_instance->mSetCursorKey.mBind;
-  if((phase==2 || phase==4 || phase==9 || phase==9) && n && n->mNaviCamera){
+  if((phase==2 || phase==4 || phase==7 || phase==9) && n && n->mNaviCamera){
    float bx=goal.x-n->mSRT.t.x,bz=goal.z-n->mSRT.t.z;
    bool walk=phase==4 || phase==9 || bx*bx+bz*bz>10000.f;
    // Cursor updates arrive through native polling. Pulse low-stick corrections
