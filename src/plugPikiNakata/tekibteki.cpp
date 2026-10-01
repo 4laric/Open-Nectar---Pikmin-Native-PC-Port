@@ -1,6 +1,8 @@
 #include "pc_p2_demon_host.h"
 #ifdef PIKI_PC_PORT
 #include "pc_p2_life_gauge_hooks.h"
+#include "pc_corpse_origin.h"
+#include <cstdio>
 #endif
 #include "pc_p2_sarai_manager.h"
 #include "pc_p2_umimushi.h"
@@ -865,6 +867,23 @@ void BTeki::dieSoon()
 			PRINT_NAKATA("dieSoon:%08x:'carc'\n", this);
 			vec1.set(carcass->mCentre);
 		}
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+		// #972/#1022: the 'carc' and 'cent' sphere centres are only written by
+		// CollInfo::updateInfo in refresh. A teki killed before its first refresh
+		// still has (0,0,0) there, so the corpse spawned at the world origin.
+		// Checked against mSRT.t (always valid): an implausible centre falls back
+		// to the teki position; a valid one is kept (vanilla placement).
+		{
+			const Vector3f body = mSRT.t;
+			if (!pc_corpse_origin::carcassUsable(vec1.x, vec1.y, vec1.z, body.x, body.y, body.z,
+			                                     getTekiCollisionSize())) {
+				std::printf("PC_CORPSE_ORIGIN_FALLBACK teki=%d part=%s centre=%.1f,%.1f,%.1f pos=%.1f,%.1f,%.1f\n",
+				            int(mTekiType), carcass ? "carc" : "cent", vec1.x, vec1.y, vec1.z, body.x, body.y, body.z);
+				std::fflush(stdout);
+				vec1.set(body);
+			}
+		}
+#endif
 
 		becomePellet(typeID, vec1, getDirection());
 		PRINT_NAKATA("dieSoon:%08x:pellet:%08x\n", this, mPellet);
@@ -2435,6 +2454,12 @@ void BTeki::refresh2d(Graphics& gfx)
 		return;
 	}
 
+#ifdef PIKI_PC_PORT
+	// Volatile Dweevil: draw the carried bomb's countdown wheel instead of a gauge of its own.
+	if (pc_p2_otakara_bomb_gauge(this, gfx)) {
+		return;
+	}
+#endif
 	if (getTekiOption(TEKIOPT_LifeGaugeVisible)) {
 		Vector3f pos = getCentre();
 		f32 gaugeOffsetY = getParameterF(TPF_LifeGaugeOffset);

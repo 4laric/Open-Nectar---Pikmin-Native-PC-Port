@@ -185,6 +185,18 @@ int main()
         require(!naviHitBySlot(Vec3{0.0f, 0.0f, 100.0f}, behind, SlotRadius), "new rule: the captain behind is not hit");
     }
 
+    // ---- Toady shove reach (#1020): the flick radius follows the body scale, the Ranging Bloyster keeps 90 ----
+    require(near(shakeRange(1.0f), 90.0f), "Ranging Bloyster keeps the source reach 90");
+    require(near(shakeRange(0.5f), 45.0f), "Toady Bloyster reach is 45 (half-size body)");
+    require(near(shakeRange(0.0f), 90.0f), "a missing scale keeps the source reach");
+    {
+        // the evidence scene: a Pikmin 70 units behind the Toady was flung by the old unscaled 90
+        const Vec3 actor{0.0f, 0.0f, 0.0f};
+        const Vec3 behind{0.0f, 0.0f, -70.0f};
+        require(std::hypot(behind.x - actor.x, behind.z - actor.z) < 90.0f, "old reach reaches it");
+        require(!(std::hypot(behind.x - actor.x, behind.z - actor.z) < shakeRange(0.5f)), "new Toady reach does not");
+    }
+
     // ---- hit polar: straight ahead 0, directly behind 180 ----
     {
         const Vec3 actor{0.0f, 0.0f, 0.0f};

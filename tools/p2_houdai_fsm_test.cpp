@@ -188,6 +188,82 @@ int main()
         assert(ends == 1);
     }
 
+    // Rig draw contract (#1012): the body pose clip follows the state, Stay shows landing frame 0, Walk
+    // holds the last frame of the clip that was playing, and the muzzle starts at the posed gun pivot the
+    // host passes in (not the bind-pose height).
+    {
+        P2HoudaiFsm fsm;
+        fsm.reset(parms, P2HoudaiVec{}, 0.0f);
+        P2HoudaiInput in = base();
+        P2HoudaiOutput out;
+        fsm.update(in, out);
+        assert(fsm.state() == S::Stay && fsm.poseClip() == P2HoudaiFsm::kPoseLanding && fsm.poseFrame() == 0);
+        assert(!fsm.poseAdvancing());
+        in.wake = true;
+        fsm.update(in, out);
+        assert(fsm.state() == S::Land && fsm.poseAdvancing());
+        in.wake = false;
+        int lastFrame = 0;
+        while (fsm.state() == S::Land) {
+            fsm.update(in, out);
+            if (fsm.state() != S::Land) break;  // the Wait entry restarts the pose clock at wait frame 0
+            assert(fsm.poseFrame() >= lastFrame && fsm.poseFrame() <= P2HoudaiFsm::kLandingFrames - 1);
+            lastFrame = fsm.poseFrame();
+        }
+        assert(fsm.state() == S::Wait && fsm.poseClip() == P2HoudaiFsm::kPoseWait && fsm.poseFrame() == 0);
+        assert(lastFrame >= 228);
+        // Wait loops frames 0..39 of the 40-frame clip; Walk then holds the last wait frame.
+        in.walkPikiFound = true;
+        in.walkPiki = P2HoudaiVec{0.0f, 0.0f, 500.0f};
+        int maxWait = 0;
+        while (fsm.state() == S::Wait) {
+            fsm.update(in, out);
+            if (fsm.state() == S::Wait) maxWait = fsm.poseFrame() > maxWait ? fsm.poseFrame() : maxWait;
+        }
+        assert(fsm.state() == S::Walk && maxWait <= P2HoudaiFsm::kWaitFrames - 1);
+        const int heldClip = fsm.poseClip(), heldFrame = fsm.poseFrame();
+        for (int i = 0; i < 40; ++i) fsm.update(in, out);
+        assert(fsm.state() == S::Walk && fsm.poseClip() == heldClip && fsm.poseFrame() == heldFrame);
+        assert(!fsm.poseAdvancing());
+        assert(heldClip == P2HoudaiFsm::kPoseWait);
+    }
+    {
+        P2HoudaiFsm fsm;
+        fsm.reset(parms, P2HoudaiVec{}, 0.0f);
+        P2HoudaiInput in = base();
+        in.wake = true;
+        assert(runUntil(fsm, in, S::Wait, 400) > 0);
+        in.wake = false;
+        in.hits = 12;
+        in.stuck = 5;
+        in.tookDamage = true;
+        P2HoudaiOutput out;
+        fsm.update(in, out);
+        in.hits = 0;
+        in.tookDamage = false;
+        assert(runUntil(fsm, in, S::Flick, 60) > 0 && fsm.poseClip() == P2HoudaiFsm::kPoseFlick);
+        assert(runUntil(fsm, in, S::Shot, 200) > 0 && fsm.poseClip() == P2HoudaiFsm::kPoseAttack);
+        in.gunPosValid = true;
+        in.gunPos = P2HoudaiVec{10.0f, 90.0f, -5.0f};  // deployed gun pivot (attack clip frame 39: y 90)
+        in.gunTargetFound = true;
+        in.gunTarget = P2HoudaiVec{400.0f, 0.0f, -5.0f};
+        bool fired = false, aimed = false;
+        for (int i = 0; i < 30 * 15 && !fired; ++i) {
+            fsm.update(in, out);
+            aimed = aimed || fsm.gunAiming();
+            if (out.fireShell) {
+                fired = true;
+                // Muzzle = pivot + 45 along the barrel (jitter 0.004): barrel is aimed at the target.
+                const P2HoudaiVec d = fsm.gunDirection();
+                assert(std::fabs(out.shellPos.x - (10.0f + d.x * 45.0f)) < 1.0f);
+                assert(std::fabs(out.shellPos.y - (90.0f + d.y * 45.0f)) < 1.0f);
+                assert(std::fabs(out.shellPos.z - (-5.0f + d.z * 45.0f)) < 1.0f);
+                assert(d.x > 0.8f && d.y < 0.0f);
+            }
+        }
+        assert(fired && aimed);
+    }
+
     std::printf("p2_houdai_fsm_test: all passed\n");
     return 0;
 }

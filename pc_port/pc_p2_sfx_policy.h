@@ -34,6 +34,7 @@ enum Se : int {
     kMinicAlert          = 0x27,
     kSpiderWalk          = 0x29,
     kSpiderSwing         = 0x2B,
+    kSpiderBomb          = 0x2D,
     kSpiderDead          = 0x2C,
     kTankFire            = 0x3C,
     kTankBreath          = 0x3D,
@@ -122,6 +123,7 @@ enum class Event : int {
     Dive,         // Emperor burrows again
     Roar,         // Emperor war cry
     Eat,          // Emperor swallows what its tongue caught
+    Fuse,         // Volatile Dweevil lit-bomb tick/crackle (P1 spider spark SE)
     Count
 };
 
@@ -150,6 +152,7 @@ inline const char* eventName(Event e) {
     case Event::Dive: return "dive";
     case Event::Roar: return "roar";
     case Event::Eat: return "eat";
+    case Event::Fuse: return "fuse";
     default: return "?";
     }
 }
@@ -285,6 +288,7 @@ inline int seFor(unsigned sourceId, Event e) {
         switch (e) {
         case Event::Step: return kKoganeWalk;
         case Event::Burst: return kBomb;
+        case Event::Fuse: return kSpiderBomb;
         case Event::Flick: return kChappySwing;
         case Event::Damage: return kKoganeDamage;
         case Event::Dead: return kMinicDie;
@@ -335,6 +339,7 @@ inline float minInterval(Event e) {
     case Event::Shot: return 0.15f;
     case Event::Appear: case Event::Dive: case Event::Roar: return 1.0f;
     case Event::Eat: return 0.5f;
+    case Event::Fuse: return 0.05f;     // paced by the telegraph (<= 0.07 s at the end)
     default: return 0.25f;
     }
 }

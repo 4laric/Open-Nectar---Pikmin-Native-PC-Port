@@ -62,13 +62,16 @@ std::set<std::string>& extraKeys()
 // The Snagret snakes (SnakeCrow/SnakeWhole) are jointed multi-segment bodies: a rest-pose fit
 // is poor (max gap 65 on a 145-long neck), so they stay on the host tree until a lane adds them
 // through pc_p2_body_coll_manage() with its own verification.
+// ground|Armor is NOT here (#1014): the Armor wears the exact retail armor/enemycoll.txt tree (only the
+// head sphere `dmg1` is stickable and damageable; the shell is neither), which a whole-body fit cannot
+// express; pc_p2_armor.cpp owns that tree.
 // aquatic|UmiMushi and aquatic|UmiMushiBlind are NOT here (#995): the Bloyster wears the exact retail
 // umimushi/enemycoll.txt tree (only the tail bulb `weak` is stickable, plus the tongue mouth slots),
 // which a whole-body fit cannot express; pc_p2_umimushi.cpp owns that tree.
 bool managedKey(const std::string& key)
 {
     static const std::set<std::string> keys = {
-        "ground|Hana",        "ground|Sokkuri",        "ground|Armor",     "ground|ElecBug",
+        "ground|Hana",        "ground|Sokkuri",        "ground|ElecBug",
         "ground|TamagoMushi", "ground|Imomushi",       "aquatic|Catfish",  "aquatic|Tadpole",
         "aquatic|Jigumo",   "snagret|DangoMushi",
         "bulblax|Queen",

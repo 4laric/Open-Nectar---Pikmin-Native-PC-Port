@@ -65,6 +65,8 @@ std::map<BTeki*, Binding> s;
 std::map<BTeki*, unsigned> corpses;
 // Corpses of Greater Spotted Jellyfloats (72): drawn with the onikurage poses.
 std::set<BTeki*> corpsesGreater;
+// Corpses whose Jellyfloat died on the ground (dead2 clip; the airborne death is dead1).
+std::set<BTeki*> corpsesGround;
 int gTickCalls = 0;
 // Lane-local production showcase (env `PIKMIN_P2_KURAGE_SHOWCASE`). Opt-in so the
 // default binding path is byte-identical: the bound generated actor runs the
@@ -381,9 +383,12 @@ void pc_p2_kurage_teki_reset()
     for (auto& x : s) pc_p2_kurage_receiver_owner_invalidated(x.first);
     const int boundBefore = int(s.size());
     const int corpseBefore = int(corpses.size());
+    for (auto& x : s) pc_p2_kurage_visual_forget(x.first);
+    for (auto& x : corpses) pc_p2_kurage_visual_forget(x.first);
     s.clear();
     corpses.clear();
     corpsesGreater.clear();
+    corpsesGround.clear();
     sCorpseTeki = nullptr;
     sCorpsePellet = nullptr;
     sCorpseProbeTick = 0;
@@ -408,6 +413,8 @@ void pc_p2_kurage_teki_forget(BTeki* t)
     revoke(t);
     corpses.erase(t);
     corpsesGreater.erase(t);
+    corpsesGround.erase(t);
+    pc_p2_kurage_visual_forget(t);
     if (t == sCorpseTeki) {
         // The forget seam recycles the slot: stop the tail so the probe line
         // cannot outlive the corpse (delivered already stops the same way).
@@ -506,6 +513,7 @@ void pc_p2_kurage_teki_tick(BTeki* t)
     if (!t->isAlive()) {
         corpses[t] = i->second.generator;
         if (i->second.source == 72) corpsesGreater.insert(t);
+        if (i->second.own.motion() == p2kurage::Motion::DeadGround) corpsesGround.insert(t);
         sCorpseTeki = t;
         sCorpsePellet = nullptr;
         // Death-drop-to-ground (flyer): an FSM-driven Kurage can die at
@@ -687,6 +695,23 @@ bool pc_p2_kurage_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& matrix, boo
         auto shapeOf = [greater](const char* name) {
             return greater ? pc_p2_kurage_visual_shape_greater(name) : pc_p2_kurage_visual_shape(name);
         };
+        // #972: the corpse holds the last visible pose of the death clip it
+        // died in (the live body played it to the end), instead of snapping
+        // back to the clip's first frame.
+        const char* deathClip = corpsesGround.count(t) ? "dead2" : "dead1";
+        const float lastFrame = pc_p2_kurage_visual_last_frame(greater, deathClip);
+        if (lastFrame >= 0.0f) {
+            if (Shape* banked = pc_p2_kurage_visual_pose(t, greater, deathClip, lastFrame, corpses[t])) {
+                banked->updateAnim(gfx, matrix, nullptr, t);
+                banked->drawshape(gfx, *gfx.mCamera, nullptr);
+                if (!sCorpseDrawLogged) {
+                    sCorpseDrawLogged = true;
+                    std::printf("P2_KURAGE_CORPSE_DRAW corpse=1 pose=%s banked=1\n", deathClip);
+                    std::fflush(stdout);
+                }
+                return true;
+            }
+        }
         Shape* dead = shapeOf("dead1");
         const char* pose = "dead1";
         if (!dead) { dead = shapeOf("dead2"); pose = "dead2"; }
@@ -709,7 +734,11 @@ bool pc_p2_kurage_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& matrix, boo
         auto shapeOf = [greater](const char* name) {
             return greater ? pc_p2_kurage_visual_shape_greater(name) : pc_p2_kurage_visual_shape(name);
         };
-        Shape* shape = shapeOf(p2kurageown::poseFor(i->second.own.motion()));
+        // #972: sampled pose bank (lerp + crossfade); the static shape below is
+        // the fallback when no bank is staged.
+        Shape* shape = pc_p2_kurage_visual_pose(t, greater, i->second.own.drawClip(), i->second.own.drawFrame(),
+                                                i->second.generator);
+        if (!shape) shape = shapeOf(p2kurageown::poseFor(i->second.own.motion()));
         if (!shape) shape = shapeOf("wait");
         if (shape) {
             shape->updateAnim(gfx, matrix, nullptr, t);

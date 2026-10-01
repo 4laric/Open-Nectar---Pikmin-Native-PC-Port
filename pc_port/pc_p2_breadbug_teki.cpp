@@ -8,6 +8,7 @@
 #include "pc_p2_purple.h"
 #include "pc_p2_pose_family.h"
 #include "pc_p2_breadbug_corpse.h"
+#include "pc_p2_breadbug_nest.h"
 #include "pc_p2_sfx.h"
 #include "pc_randomizer.h"
 #include "Interactions.h"
@@ -74,6 +75,8 @@ struct Binding {
     bool corpseLogged = false;
     bb::Animator corpseAnim;    // presentation-only carried-corpse clock (type5 loop); never read by gameplay
     bool corpseAnimStarted = false;
+    float nestY = 0.0f;         // #1022 lair height (birth position y)
+    float nestYaw = 0.0f;       // #1022 lair facing (birth faceDir)
     bool deadLogged = false;
     int pendingPresses = 0;
     bool pendingBounce = false;
@@ -110,6 +113,9 @@ std::map<BTeki*, int> sDrawLogged;
 // #972 interpolated presentation: one bank + per-actor private Shapes per variant.
 p2posefamily::Bank sFamilyBank[kVariantCount] = {p2posefamily::Bank("BREADBUG"), p2posefamily::Bank("GIANT_BREADBUG")};
 p2posefamily::Actors sFamilyVis[kVariantCount];
+// #1022 lair model (PanHouse enemy.bmd), static; null when not staged.
+Shape* sNest[kVariantCount] = {nullptr, nullptr};
+bool sNestLogged[kVariantCount] = {false, false};
 
 // Wall-clock milliseconds, so frame dumps (file mtimes) can be matched to markers.
 long long wallMs() {
@@ -338,6 +344,14 @@ void loadBank(int v) {
         sFamilyBank[v].reset();
     }
     sPosesLoaded[v] = ok && poses > 0;
+    {   // #1022: the lair model staged next to the poses (optional).
+        Shape* nestShared = nullptr;
+        std::size_t nestBytes = 0;
+        sNest[v] = loadShape(std::string(var.posePrefix) + "_nest.mod", nestShared, nestBytes);
+        std::printf("P2_BREADBUG_NEST source_id=%u model=%s bytes=%zu scale=%.2f\n", var.source,
+                    sNest[v] ? "panhouse" : "none", sNest[v] ? nestBytes : std::size_t(0),
+                    p2breadbugnest::scale(sParams[v].nestScale));
+    }
     std::printf("P2_BREADBUG_BANK source_id=%u staged_clips=%d poses=%zu shape_slots=%zu resident_bytes=%zu "
                 "interpolation_clips=%zu draw=%s\n", var.source, staged, sPosesLoaded[v] ? poses : std::size_t(0),
                 sPosesLoaded[v] ? slots : std::size_t(0), total, sFamilyBank[v].clipCount(),
@@ -726,7 +740,12 @@ namespace { bool sLoaded[kVariantCount] = {false, false}; bool sCensusDone = fal
 void pc_p2_breadbug_teki_reset() {
     s.clear();
     sDrawLogged.clear();
-    for (int v = 0; v < kVariantCount; ++v) { sFamilyBank[v].reset(); sFamilyVis[v].clear(); }
+    for (int v = 0; v < kVariantCount; ++v) {
+        sFamilyBank[v].reset();
+        sFamilyVis[v].clear();
+        sNest[v] = nullptr;
+        sNestLogged[v] = false;
+    }
     for (auto& variant : sPoses)
         for (auto& poses : variant) poses.clear();
     for (bool& loaded : sPosesLoaded) loaded = false;
@@ -798,6 +817,8 @@ bool bindOne(Teki* t) {
     b.variant = v;
     const Vector3f pos = t->getPosition();
     b.fsm.init(sParams[v], sBank[v], {pos.x, pos.y, pos.z}, t->getDirection(), (gen * 2654435761u) | 1u, &sRoute);
+    b.nestY = pos.y;
+    b.nestYaw = t->getDirection();
     t->mHealth = b.fsm.health();
     b.taiState = t->mStateID;
     // Retail PanModoki is not a living thing while unbittered (isLivingThing).
@@ -1023,4 +1044,40 @@ bool pc_p2_breadbug_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, boo
         std::fflush(stdout);
     }
     return true;
+}
+
+// #1022: the Breadbug's lair, drawn once per frame for every living bound
+// Breadbug at its birth position (= FSM home) whether or not the Breadbug
+// itself is on screen. Presentation only: no collision, no actor.
+void pc_p2_breadbug_teki_draw_nests(Graphics& gfx) {
+    if (!gfx.mCamera || s.empty()) return;
+    bool prepared = false;
+    for (auto& entry : s) {
+        BTeki* t = entry.first;
+        const Binding& b = entry.second;
+        const int v = b.variant;
+        if (!p2breadbugnest::visible(true, b.escaped, t ? t->mDeadState : 1, sNest[v] != nullptr)) continue;
+        if (!prepared) {
+            gfx.setPerspective(gfx.mCamera->mPerspectiveMatrix.mMtx, gfx.mCamera->mFov, gfx.mCamera->mAspectRatio,
+                               gfx.mCamera->mNear, gfx.mCamera->mFar, 1.f);
+            gfx.useMaterial(nullptr);
+            gfx.setDepth(true);
+            prepared = true;
+        }
+        const float k = p2breadbugnest::scale(sParams[v].nestScale);
+        const auto home = b.fsm.home();
+        Matrix4f world, view;
+        world.makeSRT(Vector3f(k, k, k), Vector3f(0.0f, b.nestYaw, 0.0f), Vector3f(home.x, b.nestY, home.z));
+        gfx.mCamera->mLookAtMtx.multiplyTo(world, view);
+        sNest[v]->updateAnim(gfx, view, nullptr, nullptr);
+        pc_gfx_specular_family_scope(1);
+        sNest[v]->drawshape(gfx, *gfx.mCamera, nullptr);
+        pc_gfx_specular_family_scope(0);
+        if (!sNestLogged[v]) {
+            sNestLogged[v] = true;
+            std::printf("P2_BREADBUG_NEST_DRAW generator=%u source_id=%u x=%.1f y=%.1f z=%.1f scale=%.2f "
+                        "behavior=visual_only\n", b.generator, b.source, home.x, b.nestY, home.z, k);
+            std::fflush(stdout);
+        }
+    }
 }

@@ -28,6 +28,7 @@ static_assert(p2sfx::kMinicAlert == SE_MINIC_ALERT, "SE drift");
 static_assert(p2sfx::kSpiderWalk == SE_SPIDER_WALK, "SE drift");
 static_assert(p2sfx::kSpiderSwing == SE_SPIDER_SWING, "SE drift");
 static_assert(p2sfx::kSpiderDead == SE_SPIDER_DEAD, "SE drift");
+static_assert(p2sfx::kSpiderBomb == SE_SPIDER_BOMB, "SE drift");
 static_assert(p2sfx::kTankFire == SE_TANK_FIRE, "SE drift");
 static_assert(p2sfx::kTankBreath == SE_TANK_BREATH, "SE drift");
 static_assert(p2sfx::kTankWalk == SE_TANK_WALK, "SE drift");

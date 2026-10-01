@@ -192,4 +192,21 @@ public:
     }
 };
 
+// ---- P1 AI-grid culling (#994) ----------------------------------------------
+// Creature::update (creature.cpp:678) skips a whole teki update, including
+// moveNew, while no captain or Pikmin is in the actor's AI-grid neighbourhood. P2
+// enemies are never culled out of motion (culling only skips animation), so an
+// awake Bulborb that outpaces the captain (across a pond, say) must keep
+// integrating its commanded walk. Owner playtest: the Fiery froze mid-chase with
+// velocity set and the FSM flipping Walk/TurnToHome/GoHome in place. The pin is
+// CF_AIAlwaysActive (Creature::setInsideView). A sleeping actor is not pinned:
+// it only wakes on a touch (ChappyBase::isWakeup), which lights its own grid cell.
+// The Emperor keeps its own burrow/appear path and is never pinned here.
+enum PinFamily { PinAdult = 0, PinKuma = 1, PinKumako = 2, PinKing = 3 };
+inline bool keepUpdatingOffGrid(int family, bool alive, bool asleep)
+{
+    if (family == PinKing) return false;
+    return alive && !asleep;
+}
+
 } // namespace p2chappy

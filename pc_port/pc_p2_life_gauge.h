@@ -49,6 +49,7 @@ static const Row kRows[] = {
     {56, 75.0f}, // Damagumo
     {63, 20.0f}, // Jigumo
     {69, 75.0f}, // BigFoot
+    {66, 115.0f}, // Houdai (Man-at-Legs): enemyparm fp27 115, fp00 2800 (#1012)
     {34, 50.0f}, // SnakeCrow
     {70, 50.0f}, // SnakeWhole
     {65, 50.0f}, // Imomushi
@@ -66,6 +67,7 @@ static const Row kRows[] = {
     {57, 70.0f}, // Kurage
     {72, 10.0f}, // OniKurage
     {30, 50.0f}, // Queen
+    {31, 50.0f}, // Baby (Bulborb Larva), fp27 from baby/enemyparm.txt (#1042)
     // Wave-3 mechanics species (claude/p2-wave3-mechanics, not yet in the pool).
     {26, 50.0f}, // Catfish
     {27, 50.0f}, // Tadpole (Wogpole)

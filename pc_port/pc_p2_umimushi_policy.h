@@ -50,6 +50,15 @@ constexpr float Pi = 3.14159265f;
 // exceed the tier of the current stuck-Pikmin count.
 constexpr int BlowA = 10, Sticking1 = 3, BlowB = 13, Sticking2 = 6, BlowC = 16, Sticking3 = 9, BlowD = 20;
 
+// Reach of the flick / shake (general fp19 = 90, retail). The source applies it unscaled to both sizes, which
+// throws Pikmin around a Toady Bloyster from well outside its half-size body; owner ruling 2026-09-30 (#1020)
+// treats that as a bug, so the reach follows the body scale (Toady setParameters scale 0.5, umiMushi.cpp:52).
+// The Ranging Bloyster (scale 1) keeps the source 90.
+inline float shakeRange(float bodyScale)
+{
+    return ShakeRange * (bodyScale > 0.0f ? bodyScale : 1.0f);
+}
+
 inline int flickThreshold(int stuck)
 {
     if (stuck < Sticking1) return BlowA;

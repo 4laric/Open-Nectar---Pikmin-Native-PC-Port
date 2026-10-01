@@ -80,6 +80,46 @@ LONG WINAPI unhandledFilter(EXCEPTION_POINTERS* info)
                      : info->ExceptionRecord->ExceptionInformation[0] == 1 ? "write to" : "execute at",
                      reinterpret_cast<void*>(info->ExceptionRecord->ExceptionInformation[1]));
     std::fprintf(stderr, "\n");
+    // Module-relative addresses survive ASLR: resolve with
+    // `addr2line -f -C -e nectar.exe <ImageBase + rva>` or nm on the same exe.
+    if (info && info->ContextRecord) {
+        CONTEXT ctx = *info->ContextRecord;
+        for (int frame = 0; frame < 16; ++frame) {
+#if defined(_M_X64) || defined(__x86_64__)
+            const DWORD64 pc = ctx.Rip;
+#else
+            const DWORD64 pc = 0;
+#endif
+            if (!pc) break;
+            HMODULE module = nullptr;
+            char name[MAX_PATH] = "?";
+            if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                   reinterpret_cast<LPCSTR>(pc), &module) && module) {
+                char path[MAX_PATH];
+                if (GetModuleFileNameA(module, path, MAX_PATH)) {
+                    const char* base = path;
+                    for (const char* p = path; *p; ++p) if (*p == '\\' || *p == '/') base = p + 1;
+                    std::snprintf(name, sizeof name, "%s", base);
+                }
+            }
+            std::fprintf(stderr, "[PC Port Fatal] frame %d %s+0x%llx\n", frame, name,
+                         static_cast<unsigned long long>(pc - reinterpret_cast<DWORD64>(module)));
+#if defined(_M_X64) || defined(__x86_64__)
+            DWORD64 imageBase = 0;
+            PRUNTIME_FUNCTION fn = RtlLookupFunctionEntry(pc, &imageBase, nullptr);
+            if (!fn) { // leaf function: return address is at [rsp]
+                ctx.Rip = *reinterpret_cast<DWORD64*>(ctx.Rsp);
+                ctx.Rsp += 8;
+            } else {
+                PVOID handlerData = nullptr;
+                DWORD64 establisher = 0;
+                RtlVirtualUnwind(UNW_FLAG_NHANDLER, imageBase, pc, fn, &ctx, &handlerData, &establisher, nullptr);
+            }
+#else
+            break;
+#endif
+        }
+    }
     std::fflush(stderr);
     return EXCEPTION_CONTINUE_SEARCH; // let Windows Error Reporting record it too
 }

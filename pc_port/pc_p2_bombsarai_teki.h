@@ -27,6 +27,8 @@ bool pc_p2_bombsarai_teki_draw(BTeki*, Graphics&, const Matrix4f& view, bool cor
 // source clock and draw with the staged Bomb model.
 void pc_p2_bombsarai_teki_update_bombs();
 void pc_p2_bombsarai_teki_draw_bombs(Graphics&);
+// GameCoreSection::draw1D (2D pass): each burning bomb's life-gauge wheel (#1027).
+void pc_p2_bombsarai_teki_draw_bomb_gauges(Graphics&);
 
 // Generated Careening Dirigibug (BombSarai, EnemyID 58) carrier binding (#244).
 //
