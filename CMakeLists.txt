@@ -386,6 +386,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_snakejoint.cpp
     pc_port/pc_p2_jigumo.cpp
     pc_port/pc_p2_umimushi.cpp
+    pc_port/pc_p2_skewer_cam.cpp
     pc_port/pc_p2_batch2.cpp
     pc_port/pc_p2_proxy.cpp
     pc_port/pc_p2_batch3.cpp

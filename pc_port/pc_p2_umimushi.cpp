@@ -43,6 +43,7 @@
 #include "pc_p2_umimushi.h"
 #include "pc_p2_umimushi_policy.h"
 #include "pc_p2_skewer.h"
+#include "pc_p2_skewer_cam.h"
 #include "pc_p2_captor_host.h"
 #include "Collision.h"
 #include "CreatureCollPart.h"
@@ -1370,6 +1371,7 @@ void pc_p2_umimushi_update(BTeki* actor) {
     setPhase(s);
     buildColl(actor, s, generator);
     updateColl(actor, s);
+    pc_p2_skewer_cam_follow(actor, actor->getDirection(), s.blind ? "umiblind" : "umi");
     runProbe(actor, s, generator, dt);
     logLatched(actor, s, generator);
     s.logTimer += dt;

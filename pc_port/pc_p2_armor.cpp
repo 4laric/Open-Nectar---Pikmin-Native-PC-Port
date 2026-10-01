@@ -50,6 +50,7 @@
 #include "pc_p2_armor_receiver_policy.h"
 #include "pc_p2_armor_policy.h"
 #include "pc_p2_skewer.h"
+#include "pc_p2_skewer_cam.h"
 #include "CreatureCollPart.h"
 #include "PikiState.h"
 #include "gl/pc_gfx.h"
@@ -1440,6 +1441,7 @@ void pc_p2_armor_update(BTeki* actor) {
     }
     setPhase(s);
     updateColl(actor, s);
+    pc_p2_skewer_cam_follow(actor, actor->getDirection(), "armor");
     logHold(actor, s, generator);
     logLatch(actor, s, generator);
     s.logTimer += dt;
