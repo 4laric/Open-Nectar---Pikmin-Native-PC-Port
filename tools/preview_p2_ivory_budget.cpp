@@ -22,6 +22,7 @@
 #include "PlayerState.h"
 #include "Demo.h"
 #include "GameStat.h"
+#include "Generator.h"
 #include "pc_p2_white.h"
 #include "pc_p2_species.h"
 #include "pc_p2_preview.h"
@@ -60,7 +61,10 @@ public:
         if(!pc_p2_preview_ready()||!n||!n->getCurrState()||gameflow.mPauseAll||gameflow.mIsUIOverlayActive||frames<90)return result;
         for(int f=0;f<DEMOFLAG_COUNT;++f)playerState->mDemoFlags.setFlagOnly(f);
         std::vector<Piki*> inputs;Iterator actors(pikiMgr);CI_LOOP(actors){Piki* p=static_cast<Piki*>(*actors);if(p->isAlive())inputs.push_back(p);}
-        Pom* flower=nullptr;Iterator bosses(bossMgr);CI_LOOP(bosses){Boss* b=static_cast<Boss*>(*bosses);if(b->isAlive()&&b->mObjType==OBJTYPE_Pom&&pc_p2_ivory(static_cast<Pom*>(b))){require(!flower,"multiple Ivory buds");flower=static_cast<Pom*>(b);}}
+        Pom* flower=nullptr;int bossCount=0;Iterator bosses(bossMgr);CI_LOOP(bosses){Boss* b=static_cast<Boss*>(*bosses);++bossCount;
+            std::printf("P2_IVORY_ACTOR type=%d alive=%d uid=%u ivory=%d\n",b->mObjType,int(b->isAlive()),b->mGenerator?b->mGenerator->_70:0,b->mObjType==OBJTYPE_Pom?int(pc_p2_ivory(static_cast<Pom*>(b))):0);
+            if(b->isAlive()&&b->mObjType==OBJTYPE_Pom&&pc_p2_ivory(static_cast<Pom*>(b))){require(!flower,"multiple Ivory buds");flower=static_cast<Pom*>(b);}}
+        std::printf("P2_IVORY_COUNTS pikis=%zu total=%d bosses=%d bound_flower=%d\n",inputs.size(),population(),bossCount,int(flower!=nullptr));
         require(inputs.size()==20&&population()==20&&flower,"requires twenty initial Pikmin and one Ivory");
         for(Piki* p:inputs)require(pc_p2_species(p)==P2SpeciesRed,"initial squad must be red");
         int w,h,x,y;SDL_Window* window=SDL_GL_GetCurrentWindow();SDL_GetWindowSize(window,&w,&h);SDL_GetWindowPosition(window,&x,&y);
