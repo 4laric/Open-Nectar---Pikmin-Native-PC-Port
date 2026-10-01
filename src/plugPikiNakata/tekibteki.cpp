@@ -2454,6 +2454,12 @@ void BTeki::refresh2d(Graphics& gfx)
 		return;
 	}
 
+#ifdef PIKI_PC_PORT
+	// Volatile Dweevil: draw the carried bomb's countdown wheel instead of a gauge of its own.
+	if (pc_p2_otakara_bomb_gauge(this, gfx)) {
+		return;
+	}
+#endif
 	if (getTekiOption(TEKIOPT_LifeGaugeVisible)) {
 		Vector3f pos = getCentre();
 		f32 gaugeOffsetY = getParameterF(TPF_LifeGaugeOffset);
