@@ -29,16 +29,29 @@ static void require(bool value,const char* text) {
 }
 class SurfaceBootApp: public PlugPikiApp {
     int tick=0, ready=0;
+    bool captainInitialized=false;
 public:
     int idle() override {
-        int result=PlugPikiApp::idle();require(++tick<2400,"frame timeout");
+        int result=PlugPikiApp::idle();
+        // Canonical guard boundary: inspect immediately after engine idle,
+        // including movie/pause/startup frames, before any readiness return.
+        Navi* n=naviMgr?naviMgr->getNavi():nullptr;
+        const bool initialized=n && n->getCurrState();
+        if(initialized)captainInitialized=true;
+        const bool forced=std::getenv("P2_SURFACE_FORCE_CAPTAIN_DOWN") != nullptr;
+        const bool pauseNegative=std::getenv("P2_SURFACE_FORCE_PAUSED_CAPTAIN_DOWN") != nullptr;
+        if(initialized && pauseNegative)gameflow.mPauseAll=true; // negative observer only
+        if((captainInitialized && !initialized) || (initialized &&
+            (GameStat::orimaDead || naviMgr->isNaviDead(n) || n->getCurrState()->getID()==NAVISTATE_Dead
+             || !std::isfinite(n->mHealth) || n->mHealth<=1.0f || forced || pauseNegative))) {
+            std::printf("P2_FIXTURE_CAPTAIN_DOWN tick=%d hp=%.3f initialized=%d movie=%d pause=%d outcome=BLOCKED\n",
+                tick,n?n->mHealth:0.0f,int(initialized),int(gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive),int(gameflow.mPauseAll));
+            std::fflush(nullptr);std::_Exit(86);
+        }
+        require(++tick<2400,"frame timeout");
         if(gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
         if(!naviMgr || !pikiMgr || !mapMgr)return result;
-        Navi* n=naviMgr->getNavi();if(!n || !n->getCurrState())return result;
-        const bool forced=std::getenv("P2_SURFACE_FORCE_CAPTAIN_DOWN") != nullptr;
-        if(GameStat::orimaDead || n->getCurrState()->getID()==NAVISTATE_Dead || !std::isfinite(n->mHealth) || n->mHealth<=1 || forced) {
-            std::printf("P2_FIXTURE_CAPTAIN_DOWN tick=%d hp=%.3f outcome=BLOCKED\n",tick,n->mHealth);std::fflush(nullptr);std::_Exit(86);
-        }
+        if(!initialized)return result;
         if(n->getCurrState()->getID()!=NAVISTATE_Walk || ++ready<45)return result;
         require(flowCont.mCurrentStage && !std::strcmp(flowCont.mCurrentStage->mFileName,"stages/p2_tutorial.ini"),"wrong loaded stage");
         require(!gameflow.mIsChallengeMode && !pc_pikipelago_room_preview(),"wrong lifecycle");
