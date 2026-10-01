@@ -38,7 +38,7 @@
 #include "C:/Users/alari/pikmin-randomizer/scripts/p2_fixture_captain_guard.h"
 
 namespace {
-constexpr unsigned Target=1849273021;
+constexpr unsigned Target=4222852521;
 const char* Check="Bestiary: Deliver P2 Dwarf Orange Bulborb";
 SDL_Joystick* pad=nullptr;int requestedX=0,requestedY=0;
 void require(bool yes,const char* reason){if(!yes){std::printf("FAIL P2_GENERATED_DELIVERY %s\n",reason);std::fflush(nullptr);std::_Exit(1);}}
@@ -75,7 +75,8 @@ std::vector<Vector3f> approachRoute(const Vector3f& from,const Vector3f& goal){
  require(start>=0 && end>=0,"open land route endpoints missing");std::vector<int> parent(count,-1);std::queue<int> pending;parent[start]=start;pending.push(start);
  while(!pending.empty() && parent[end]<0){int here=pending.front();pending.pop();WayPoint* w=routeMgr->getWayPoint(handle,here);
   for(int i=0;i<int(w->mLinkCount) && i<8;++i){int next=w->mLinkIndices[i];if(next<0 || next>=count || parent[next]>=0)continue;WayPoint* candidate=routeMgr->getWayPoint(handle,next);if(!candidate || !candidate->mIsOpen || candidate->inWater())continue;parent[next]=here;pending.push(next);}}
- require(parent[end]>=0,"original slot needs closed gate or unreachable land route");std::vector<int> reversed;for(int i=end;;i=parent[i]){reversed.push_back(i);if(i==start)break;require(reversed.size()<=size_t(count),"route cycle");}
+ for(int i=0;i<count;++i){WayPoint* w=routeMgr->getWayPoint(handle,i);if(w)std::printf("P2_GENERATED_ROUTE_NODE index=%d xyz=%.3f,%.3f,%.3f open=%d water=%d reached=%d links=%d\n",i,w->mPosition.x,w->mPosition.y,w->mPosition.z,int(w->mIsOpen),int(w->inWater()),int(parent[i]>=0),w->mLinkCount);}
+ std::printf("P2_GENERATED_ROUTE_ENDPOINT start=%d end=%d count=%d\n",start,end,count);std::fflush(nullptr);require(parent[end]>=0,"original slot needs closed gate or unreachable land route");std::vector<int> reversed;for(int i=end;;i=parent[i]){reversed.push_back(i);if(i==start)break;require(reversed.size()<=size_t(count),"route cycle");}
  std::vector<Vector3f> route;for(auto i=reversed.rbegin();i!=reversed.rend();++i){WayPoint* w=routeMgr->getWayPoint(handle,*i);route.push_back(w->mPosition);std::printf("P2_GENERATED_ROUTE_LEG index=%d waypoint=%d xyz=%.3f,%.3f,%.3f open_land=1 world_writes=0\n",int(route.size()-1),*i,w->mPosition.x,w->mPosition.y,w->mPosition.z);}
  std::fflush(nullptr);return route;
 }
