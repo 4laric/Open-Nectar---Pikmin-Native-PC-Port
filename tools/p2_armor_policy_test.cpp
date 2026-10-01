@@ -158,6 +158,26 @@ int main()
         assert(!punchReachesHead(local(0.0f, 0.0f, 40.0f), 0.0f, head, 17.5f, 20.0f));     // facing away
     }
 
+    {
+        // Idle homing and burrowing (#1063, ArmorState.cpp:220-274 and 461-500).
+        // Nothing in view: Move goes GoHome (the bug: the port kept walking circles around home in Move).
+        assert(moveNext(false, false, false, 5.0f, 400.0f) == ToGoHome);
+        assert(moveNext(false, false, false, 0.0f, 400.0f) == ToGoHome);
+        // A target: attack when attackable, go home beyond the territory, otherwise keep chasing.
+        assert(moveNext(true, true, false, 10.0f, 400.0f) == ToAttack2);
+        assert(moveNext(true, false, false, 450.0f, 400.0f) == ToGoHome);
+        assert(moveNext(true, false, true, 100.0f, 400.0f) == ToAttack2);
+        assert(moveNext(true, false, false, 100.0f, 400.0f) == KeepMoving);
+        // GoHome: attack in range, dive inside the home radius (fp10 30), otherwise keep walking.
+        assert(goHomeNext(true, 200.0f, 30.0f) == ToAttack2);
+        assert(goHomeNext(false, 29.0f, 30.0f) == ToDive);
+        assert(goHomeNext(false, 30.0f, 30.0f) == KeepMoving);
+        assert(goHomeNext(false, 200.0f, 30.0f) == KeepMoving);
+        // The old rule (verbatim): Move only went home past the territory radius, so an idle Armor at 100 never did.
+        const bool oldIdleGoesHome = 100.0f > 400.0f;
+        assert(!oldIdleGoesHome && moveNext(false, false, false, 100.0f, 400.0f) == ToGoHome);
+    }
+
     std::puts("p2_armor_policy_test PASS");
     return 0;
 }
