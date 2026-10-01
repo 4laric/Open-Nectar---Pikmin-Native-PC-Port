@@ -442,10 +442,26 @@ void testStateHash()
 	differs([](PcCoopHashState& s) { std::swap(s.prevHp[0], s.prevHp[1]); }, "state hash: captain order");
 }
 
+void testOnionExit()
+{
+	int owed[PC_COOP_CAPTAINS] = { 0, 0 };
+	check(pc_coop_onion_exit_next(owed) == -1, "onion exit: nobody asked -> default captain");
+	owed[1] = 2;
+	check(pc_coop_onion_exit_next(owed) == 1, "onion exit: captain 2 asked -> captain 2 (1st)");
+	check(pc_coop_onion_exit_next(owed) == 1, "onion exit: captain 2 asked -> captain 2 (2nd)");
+	check(pc_coop_onion_exit_next(owed) == -1, "onion exit: queue empty again");
+	owed[0] = 1;
+	owed[1] = 1;
+	check(pc_coop_onion_exit_next(owed) == 0, "onion exit: both owed, lowest id first");
+	check(pc_coop_onion_exit_next(owed) == 1, "onion exit: then the other captain");
+	check(owed[0] == 0 && owed[1] == 0, "onion exit: debts fully repaid");
+}
+
 } // namespace
 
 int main()
 {
+	testOnionExit();
 	testAnyLive();
 	testHeal();
 	testAnchors();

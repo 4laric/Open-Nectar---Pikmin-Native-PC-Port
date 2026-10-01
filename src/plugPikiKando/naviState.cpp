@@ -65,6 +65,21 @@ static bool pcOnyonBusyByOther(Navi* navi, GoalItem* onyon);
 #include "jaudio/pikidemo.h"
 #if defined(PIKI_PC_PORT)
 #include "settings/pc_settings.h"
+
+// Co-op log helper (issue #1028): how many live Pikmin follow this captain in formation.
+static int pcCoopFormationCount(Navi* navi)
+{
+	int count = 0;
+	Iterator it(pikiMgr);
+	CI_LOOP(it)
+	{
+		Piki* piki = static_cast<Piki*>(*it);
+		if (piki->isAlive() && piki->mMode == PikiMode::FormationMode && piki->mNavi == navi) {
+			count++;
+		}
+	}
+	return count;
+}
 #endif
 
 /**
@@ -1236,7 +1251,12 @@ void NaviContainerState::enterPikis(Navi* navi, int countToEnter)
  */
 void NaviContainerState::exitPikis(Navi* navi, int countToExit)
 {
-	navi->mGoalItem->exitPikis(countToExit);
+#if defined(PIKI_PC_PORT)
+	if (naviMgr->getNaviCount() > 1) {
+		fprintf(stderr, "[coop] onion exit request navi=%d count=%d tick=%d\n", navi->mNaviID, countToExit, (int)pc_netplay_tick());
+	}
+#endif
+	navi->mGoalItem->exitPikis(countToExit, navi->mNaviID);
 }
 
 /**
@@ -1765,6 +1785,11 @@ void NaviGatherState::init(Navi* navi)
 	navi->_AC4               = 0.0f;
 	navi->mWhistleCircleMode = 1;
 	mWhistleAnimPhase        = 0;
+#if defined(PIKI_PC_PORT)
+	if (naviMgr->getNaviCount() > 1) {
+		fprintf(stderr, "[coop] gather navi=%d tick=%d\n", navi->mNaviID, (int)pc_netplay_tick());
+	}
+#endif
 	SeSystem::playPlayerSe(SE_GATHER);
 
 	int kEffID = (navi->mNaviID == 0) ? KandoEffect::NaviWhistle0 : KandoEffect::NaviWhistle1;
@@ -1983,6 +2008,13 @@ void NaviGatherState::procAnimMsg(Navi* navi, MsgAnim* msg)
 void NaviGatherState::cleanup(Navi* navi)
 {
 	rumbleMgr->stop(3, navi->mNaviID);
+#if defined(PIKI_PC_PORT)
+	if (naviMgr->getNaviCount() > 1) {
+		fprintf(stderr, "[coop] gather end navi=%d formation=%d (navi0=%d navi1=%d) tick=%d\n", navi->mNaviID,
+		        pcCoopFormationCount(navi), pcCoopFormationCount(naviMgr->getNavi(0)), pcCoopFormationCount(naviMgr->getNavi(1)),
+		        (int)pc_netplay_tick());
+	}
+#endif
 	int id = (navi->mNaviID == 0) ? 1 : 2;
 	seSystem->stopPlayerSe(SE_GATHER);
 	utEffectMgr->kill(id);

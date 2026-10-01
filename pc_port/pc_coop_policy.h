@@ -208,4 +208,22 @@ uint64_t pc_coop_state_hash(const PcCoopHashState& state);
 // knob; 0 when unset, not honoured or not a positive decimal.
 unsigned pc_coop_perturb_knob_tick();
 
+// Onion exit routing (issue #1028). GoalItem::exitPiki used to hand every
+// Pikmin to captain 1, so what captain 2 took out of the Onion joined the
+// wrong squad. Each Onion keeps how many exits are still owed to each captain
+// (navi id 0 / 1, the captain whose Onion menu asked); the next Pikmin goes to
+// the lowest-id captain that is owed one, and that debt shrinks. Returns -1
+// when nobody is owed one (a start-of-day or scripted exit: the default
+// captain, as before). Pure and RNG-free, so both lockstep peers agree.
+inline int pc_coop_onion_exit_next(int owed[PC_COOP_CAPTAINS])
+{
+	for (int id = 0; id < PC_COOP_CAPTAINS; id++) {
+		if (owed[id] > 0) {
+			owed[id]--;
+			return id;
+		}
+	}
+	return -1;
+}
+
 #endif // PC_COOP_POLICY_H

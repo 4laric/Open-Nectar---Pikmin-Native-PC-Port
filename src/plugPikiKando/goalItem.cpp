@@ -5,6 +5,8 @@
 #if defined(PIKI_PC_PORT)
 #include "netplay/pc_netplay_policy.h"
 #include "netplay/pc_netplay_present.h"
+#include "pc_coop_policy.h"
+#include <cstdio>
 #include "timing/pc_render_phase.h"
 #else
 #define pc_netplay_sim_visible(x) (x)
@@ -436,7 +438,7 @@ void GoalItem::enterGoal(Piki* piki)
 /**
  * @todo: Documentation
  */
-void GoalItem::exitPikis(int pikis)
+void GoalItem::exitPikis(int pikis, int requesterNaviId)
 {
     if (pc_randomizer_expanded()) {
         int available = pc_randomizer_field_capacity() - int(GameStat::mapPikis) - itemMgr->getContainerExitCount();
@@ -445,6 +447,12 @@ void GoalItem::exitPikis(int pikis)
     }
 
     if (!pc_bbft_color_access(mOnionColour)) return;
+#if defined(PIKI_PC_PORT)
+	// Co-op only: with one captain the default captain is always the right one, so single-player is untouched.
+	if (requesterNaviId >= 0 && requesterNaviId < 2 && naviMgr->getNaviCount() > 1) {
+		mPcExitFor[requesterNaviId] += pikis;
+	}
+#endif
 	mIsDispensingPikis = true;
 	mPikisToExit += pikis;
 	mPikiSpawnTimer = 0.0f;
@@ -474,6 +482,14 @@ Piki* GoalItem::exitPiki()
 
 	Navi* navi = naviMgr->getNavi();
 #if defined(PIKI_PC_PORT)
+	// Co-op: the Pikmin join the captain who took them out of the Onion, not always captain 1.
+	const int requesterId = pc_coop_onion_exit_next(mPcExitFor);
+	if (requesterId >= 0) {
+		if (Navi* requester = naviMgr->getNavi(requesterId)) {
+			navi = requester;
+			fprintf(stderr, "[coop] onion exit piki joins navi=%d\n", requesterId);
+		}
+	}
 	// VS: salen hacia el capitán dueño de la cebolla.
 	if (pc_vs_active() && mPcOwner >= 0 && naviMgr->getNavi(mPcOwner)) navi = naviMgr->getNavi(mPcOwner);
 #endif
@@ -743,6 +759,9 @@ void GoalItem::startAI(int)
 	mIsDispensingPikis = false;
 	mPikisToExit       = 0;
 	mPikiSpawnTimer    = 0.0f;
+#if defined(PIKI_PC_PORT)
+	mPcExitFor[0] = mPcExitFor[1] = 0;
+#endif
 }
 
 /**

@@ -1962,6 +1962,10 @@ void GameCoreSection::finalSetup()
 			secondNavi->mSRT.r = firstNavi->mSRT.r;
 			secondNavi->mFaceDirection = firstNavi->mFaceDirection;
 			secondNavi->reset();
+			// reset() clears the cursor flag, which initStage() had already set TRUE for both
+			// captains. Without it the second captain has no cursor and its whistle (Walk state
+			// needs mIsCursorVisible) does nothing.
+			secondNavi->mIsCursorVisible = TRUE;
 			secondNavi->mNaviCamera = mNavi->mNaviCamera;
 			secondNavi->mStateMachine->transit(secondNavi, NAVISTATE_Starting);
 			// Lane 12 (#130): NaviStartingState::init re-centres the Navi on the
