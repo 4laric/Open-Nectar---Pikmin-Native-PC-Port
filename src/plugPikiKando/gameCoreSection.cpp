@@ -3028,14 +3028,12 @@ static void randomizerApplyBenefits(Navi* navi, MapMgr* map)
 void GameCoreSection::updateAI()
 {
     pc_p2_cave_tick();
-<<<<<<< ours
     pc_p2_giant_breadbug_actor_tick();
     pc_p2_breadbug_actor_tick();
     Navi* shipNavi = naviMgr ? naviMgr->getActiveNavi() : nullptr;
     const bool shipActive = !gameflow.mMoviePlayer->mIsActive && !gameflow.mPauseAll
         && !gameflow.mIsUIOverlayActive && !playerState->mInDayEnd && shipNavi && shipNavi->mHealth > 1.0f;
     pc_p2_ship_tick(shipNavi, shipActive);
-=======
     if (pc_randomizer_thelynk()) {
         // These are current followers, excluding Onion stock, sprouts and workers.
         const bool active = pc_randomizer_ready() && mNavi && mNavi->isAlive() && !playerState->mInDayEnd
@@ -3065,7 +3063,6 @@ void GameCoreSection::updateAI()
             }
         }
     }
->>>>>>> theirs
     if (pc_randomizer_expanded()) {
         AICONST.mMaxPikisOnField(pc_randomizer_field_capacity());
         const bool active = !gameflow.mMoviePlayer->mIsActive && !gameflow.mPauseAll

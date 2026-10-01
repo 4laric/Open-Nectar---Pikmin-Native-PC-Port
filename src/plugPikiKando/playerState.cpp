@@ -435,7 +435,11 @@ static void pcCheatGiveOnions(PlayerState* ps)
 
 bool PlayerState::courseOpen(int courseID)
 {
-<<<<<<< ours
+    if (pc_randomizer_thelynk()) {
+        const char* areas[] = {"Pikmin: Impact Site Access", "Pikmin: Forest of Hope Access", "Pikmin: Forest Navel Access",
+                               "Pikmin: Distant Spring Access", "Pikmin: Final Trial Access"};
+        return courseID >= 0 && courseID < 5 && pc_randomizer_has(areas[courseID]);
+    }
 #if defined(PIKI_PC_PORT)
 	if (pc_unlock_all_stages() && courseID >= STAGE_START && courseID <= STAGE_TESTMAP) return true;
 	pcCheatGiveOnions(this);
@@ -443,13 +447,6 @@ bool PlayerState::courseOpen(int courseID)
 		SET_STAGE_OPEN(gameflow.mPlayState.mCourseOpenFlags, courseID);
 	}
 #endif
-=======
-    if (pc_randomizer_thelynk()) {
-        const char* areas[] = {"Pikmin: Impact Site Access", "Pikmin: Forest of Hope Access", "Pikmin: Forest Navel Access",
-                               "Pikmin: Distant Spring Access", "Pikmin: Final Trial Access"};
-        return courseID >= 0 && courseID < 5 && pc_randomizer_has(areas[courseID]);
-    }
->>>>>>> theirs
     if (pc_bbft_skip_tutorial() && courseID == STAGE_Practice)
         return pc_randomizer_enabled() && pc_randomizer_has("Pikmin: Impact Site Access");
     if (pc_bbft_progression()) {
