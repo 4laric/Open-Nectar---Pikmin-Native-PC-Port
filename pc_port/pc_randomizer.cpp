@@ -699,7 +699,21 @@ bool pc_randomizer_p2_receipt_seen(unsigned generatorUid)
     return generatorUid != 0 && p2ReceiptGenerators.count(generatorUid) != 0;
 }
 bool pc_randomizer_resolved_checks() { return !resolvedCheckNames.empty(); }
+namespace {
+// Shared body of the corpse delivery and the kill receipt (#1088). `encounter`
+// is the durable ledger tag ("corpse" or "kill"); `marker` the log line name.
+bool p2SourceReceipt(const void* tekiview, int type, int stage, bool gameplay, const char* encounter,
+                     const char* marker);
+}
 bool pc_randomizer_p2_corpse_delivered(const void* tekiview, int type, int stage, bool gameplay) {
+    return p2SourceReceipt(tekiview, type, stage, gameplay, "corpse", "P2_ORDINARY_P2_RECEIPT");
+}
+bool pc_randomizer_p2_killed(const void* tekiview, int type, int stage, bool gameplay) {
+    return p2SourceReceipt(tekiview, type, stage, gameplay, "kill", "P2_KILL_P2_RECEIPT");
+}
+namespace {
+bool p2SourceReceipt(const void* tekiview, int type, int stage, bool gameplay, const char* encounter,
+                     const char* marker) {
     if (!enabled || !ready || !gameplay || !tekiview) return false;
     const unsigned sourceId = pc_randomizer_p2_source_for(tekiview);
     if (!sourceId) return false;
@@ -732,8 +746,8 @@ bool pc_randomizer_p2_corpse_delivered(const void* tekiview, int type, int stage
     // `fingerprint` is the seed-manifest-level identity, stable across process
     // restarts of the same seed; `token` is the run-instance identity fallback.
     const std::string& seed = fingerprint.empty() ? token : fingerprint;
-    const P2DeliveryHostResult result = pc_p2_delivery_host_deliver(p2DeliveryHost, seed.c_str(), sourceId, type, stage, generatorUid, "corpse");
-    std::printf("[Pikmin Randomizer] P2_ORDINARY_P2_RECEIPT seed=%s id=onion:p2:%u:%d generator=%u new=%d\n",
+    const P2DeliveryHostResult result = pc_p2_delivery_host_deliver(p2DeliveryHost, seed.c_str(), sourceId, type, stage, generatorUid, encounter);
+    std::printf("[Pikmin Randomizer] %s seed=%s id=onion:p2:%u:%d generator=%u new=%d\n", marker,
         seed.c_str(), sourceId, stage, generatorUid, int(result == P2DeliveryHostResult::Granted));
     if (result == P2DeliveryHostResult::Granted || result == P2DeliveryHostResult::Duplicate) {
         p2ReceiptGenerators.insert(generatorUid);
@@ -741,6 +755,7 @@ bool pc_randomizer_p2_corpse_delivered(const void* tekiview, int type, int stage
     // Single-use: consume the binding so the address can be safely recycled.
     pc_randomizer_p2_forget_source(tekiview);
     return true;
+}
 }
 unsigned pc_randomizer_p2_source_for_id(unsigned long generator_id) {
     if (!p2EnemyBridge || !generator_id) return 0;
