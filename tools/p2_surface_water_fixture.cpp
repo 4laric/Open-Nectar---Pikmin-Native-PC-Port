@@ -113,6 +113,7 @@ public:
             std::puts("P2_SURFACE_RETAIL_POLICY_PASS unique320_to4296=1 ambiguous551_to727_or4915=1 duplicate_slip_preserved=1");
             origin=n->mSRT.t;phase=humanSmoke()?4:1;ready=0;
             if(humanSmoke()){std::puts("READY P2_SURFACE_WATER_HUMAN_SMOKE faces=5332 live=20 native_input=1 mechanic=static_water_shoreline complete_gameplay=0");std::fflush(stdout);}
+            if(humanSmoke() && std::getenv("P2_SURFACE_WATER_HUMAN_AUTO_STARTUP")){std::puts("PASS P2_SURFACE_WATER_HUMAN_AUTO_STARTUP live=20 manual_judgment=0");std::fflush(nullptr);std::_Exit(0);}
         } else if(phase==1&&++settle>=60){phase=2;settle=0;}
         else if(phase==2){
             if(n->mIsInWater && pc_p2_surface_water_box(n->mSRT.t,n->mCollisionRadius)==0)entered=true;
@@ -146,6 +147,9 @@ int main(int argc,char** argv) {
     pc_settings_init();pc_window_set_display_mode(0);pc_window_set_window_size(960,540);pc_window_center();
     SDL_Window* window=SDL_GL_GetCurrentWindow();int w,h,x,y;SDL_GetWindowSize(window,&w,&h);SDL_GetWindowPosition(window,&x,&y);
     SDL_Rect bounds{};SDL_GetDisplayBounds(SDL_GetWindowDisplayIndex(window),&bounds);
+    const bool automaticHuman=std::getenv("P2_SURFACE_WATER_HUMAN_AUTO_STARTUP")!=nullptr;
+    if(!humanSmoke() || automaticHuman)SDL_HideWindow(window);else SDL_ShowWindow(window);
+    std::printf("P2_SURFACE_WATER_WINDOW_VISIBILITY hidden=%d human=%d automatic_human_startup=%d\n",int((SDL_GetWindowFlags(window)&SDL_WINDOW_HIDDEN)!=0),int(humanSmoke()),int(automaticHuman));
     bool centered=std::abs(x-(bounds.x+(bounds.w-w)/2))<=2 && std::abs(y-(bounds.y+(bounds.h-h)/2))<=2;
     require(w==960 && h==540 && centered,"window baseline");
     std::printf("P2_SURFACE_WINDOW size=%dx%d centered=%d after_settings=1\n",w,h,int(centered));
