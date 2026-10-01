@@ -924,8 +924,7 @@ void runProbe(BTeki* actor, Armor& s, unsigned generator, float dt) {
                 }
             }
             for (Navi* n : pc_p2_navis()) n->mSRT.t = far;
-            std::printf("P2_ARMOR_PROBE kind=idle generator=%u t=%.1f
-", generator, double(s.probeTime));
+            std::printf("P2_ARMOR_PROBE kind=idle generator=%u t=%.1f\n", generator, double(s.probeTime));
             std::fflush(stdout);
         }
     }
