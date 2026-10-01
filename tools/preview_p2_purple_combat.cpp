@@ -172,17 +172,18 @@ class PurpleCombatApp : public PlugPikiApp {
         require(depth<32,"pluck collision tree depth");
         require(!part->isCylinderType() && !part->isTubeType(),"Violet approach needs explicit non-sphere collision support");
         if(part->isCollisionType()) {
-            float radius=0;
             for(CollPart* captain:captainParts) {
                 // Creature::collisionCheck uses CollInfo pairs, not the ground
-                // collision radius. Bound all captain sphere offsets under yaw;
-                // allow the same five-unit terrain variation checked below.
-                const float sum=part->mRadius+captain->mRadius;
-                const float dy=std::max(0.f,std::fabs(part->mCentre.y-captain->mCentre.y)-5.f);
-                if(dy<sum) radius=std::max(radius,std::sqrt(sum*sum-dy*dy)
-                    +planarDistance(captain->mCentre,n->mSRT.t)+1.f);
+                // collision radius. Translate each sphere's actual offset into
+                // a forbidden captain-origin circle. An all-yaw radius falsely
+                // excluded reachable pluck positions in round05. Refresh every
+                // frame as pose/yaw changes; admit only flat sampled terrain.
+                const Vector3f offset=captain->mCentre-n->mSRT.t;
+                const float sum=part->mRadius+captain->mRadius+1.f;
+                const float dy=std::max(0.f,std::fabs(part->mCentre.y-captain->mCentre.y)-.1f);
+                if(dy<sum) pluckObstacles.push_back({Vector3f(part->mCentre.x-offset.x,n->mSRT.t.y,part->mCentre.z-offset.z),
+                    std::sqrt(sum*sum-dy*dy)});
             }
-            if(radius>0) pluckObstacles.push_back({part->mCentre,radius});
         }
         for(int i=0;i<part->getChildCount();++i) collectPluckObstacles(part->getChildAt(i),n,captainParts,depth+1);
     }
@@ -239,7 +240,7 @@ class PurpleCombatApp : public PlugPikiApp {
                 const float t=float(j)/samples,x=previous.x+(next.x-previous.x)*t,z=previous.z+(next.z-previous.z)*t;
                 CollTriInfo* tri=mapMgr->getCurrTri(x,z,true);const float y=mapMgr->getMinY(x,z,true);
                 require(tri && MapCode::getAttribute(tri)!=ATTR_Water && MapCode::getAttribute(tri)!=ATTR_Hole
-                    && std::isfinite(y) && std::fabs(y-head->mSRT.t.y)<5.f,"pluck approach terrain requires separate route");
+                    && std::isfinite(y) && std::fabs(y-n->mSRT.t.y)<.1f,"pluck approach needs flat terrain for live sphere projection");
             }
             next.y=mapMgr->getMinY(next.x,next.z,true);
             std::printf("P2_PURPLE_PLUCK_WAYPOINT index=%u xyz=%.3f,%.3f,%.3f actor_position_injected=0\n",unsigned(i),next.x,next.y,next.z);
