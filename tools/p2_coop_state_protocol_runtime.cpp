@@ -22,7 +22,7 @@
 #include "GameStat.h"
 #include "GoalItem.h"
 #include "Collision.h"
-#include "playerState.h"
+#include "PlayerState.h"
 #include "ItemMgr.h"
 #include "CPlate.h"
 #include "AIConstant.h"
