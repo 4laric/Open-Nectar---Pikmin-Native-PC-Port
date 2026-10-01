@@ -1,6 +1,5 @@
-// #1074 CI-built, bounded local acceptance. Live scripted input drives switching,
-// disband/recruit/hold/release; explicit spatial/unsafe/death injections are
-// labeled and cannot establish natural enemy combat or campaign completion.
+// #1074 bounded two-captain scene reentry with scripted switching, movement
+// and transient captures. Real exitStage/softReset; no native save-resume claim.
 #include <SDL2/SDL.h>
 #include <GL/gl.h>
 #include "App.h"
@@ -42,10 +41,8 @@
 #include <vector>
 
 namespace {
-bool sSingle = false;
-bool sCoop = false;
-bool sPrimaryDown = false;
 bool sForceCaptainDown = false;
+bool sForceInactiveDown = false;
 
 void require(bool value, const char* message)
 {
@@ -56,7 +53,7 @@ void require(bool value, const char* message)
 // standalone native, so this observer carries the same fail-closed semantics.
 void requireCaptain(Navi* n, int tick) {
     const float hp=n?n->mHealth:0;
-    const bool dead=!n || naviMgr->isNaviDead(n) || n->getCurrState()->getID()==NAVISTATE_Dead;
+    const bool dead=!n || !naviMgr || !n->getCurrState() || naviMgr->isNaviDead(n) || n->getCurrState()->getID()==NAVISTATE_Dead;
     if(!GameStat::orimaDead && !dead && std::isfinite(hp) && hp>1.0f)return;
     std::printf("P2_FIXTURE_CAPTAIN_DOWN tick=%d hp=%.3f orima_dead=%d dead_state=%d outcome=BLOCKED\n",tick,hp,int(GameStat::orimaDead),int(dead));
     std::fflush(nullptr);std::_Exit(86);
@@ -99,7 +96,7 @@ class CaptainReentryApp final:public PlugPikiApp {
     Navi *a=nullptr,*b=nullptr;
     Piki* target=nullptr;
     Vector3f movementStart;
-    bool shot=false;
+    bool shot=false,transition=false;
     void pad(unsigned keys=0,int x=0,int y=0){pc_p2_input_script_set(1,keys,x,y);}
     void selected(int slot){
         auto* n=naviMgr->getNavi(slot);
@@ -115,6 +112,20 @@ public:
     }
     int idle() override {
         const int result=PlugPikiApp::idle();require(++frames<3600,"frame bound");
+        // Guard every initialized live scene before movie/pause/preview returns.
+        // Only our explicit exit/reconstruction gap permits missing managers.
+        if(tick>=0){
+            require(!transition && naviMgr && naviMgr->getActiveNavi(),"live scene manager unexpectedly disappeared");
+            requireCaptain(naviMgr->getNavi(0),tick);requireCaptain(naviMgr->getNavi(1),tick);
+        }else {
+            if(scene>0)require(transition,"unexplained scene gap");
+            // A newly initialized captain is guarded even before the Walk-ready
+            // observation; absent/uninitialized objects during loading are not death.
+            if(naviMgr)for(int slot=0;slot<2;++slot){
+                auto* n=naviMgr->getNavi(slot);
+                if(n && n->getCurrState())requireCaptain(n,tick);
+            }
+        }
         if(gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
         if(!pc_p2_preview_ready() || !naviMgr || !naviMgr->getActiveNavi())return result;
         requireCaptain(naviMgr->getActiveNavi(),tick);
@@ -127,9 +138,14 @@ public:
             require(scene==0 || resets>exitResets,"actual section reconstruction");
             int live=0;Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p && p->isAlive()){++live;if(!target)target=p;}}
             require(live==20 && target,"fresh generator squad exactly20");
-            selected(0);tick=0;
+            selected(0);tick=0;transition=false;
             std::printf("P2_REENTRY_SCENE scene=%d resets=%d live=%d active=0 transient_captures=0\n",scene,resets,live);
-            if(sForceCaptainDown){a->mHealth=0;requireCaptain(a,tick);}
+            if(sForceCaptainDown || sForceInactiveDown){
+                (sForceInactiveDown?b:a)->mHealth=0;
+                // Next frame must fail the ordinary early guard, not a special
+                // direct assertion; this also exercises inactive-captain coverage.
+                gameflow.mPauseAll=TRUE;return result;
+            }
         }
         ++tick;
         switch(tick){
@@ -156,7 +172,7 @@ public:
             auto* core=findCore(gameflow.mGameSection);require(core,"active game core");
             core->exitStage();
             require(pc_p2_captain::adapter()==nullptr && pc_p2_captain::captive_count()==0 && naviMgr==nullptr,"actual exit clears adapter and manager");
-            a=nullptr;b=nullptr;target=nullptr;tick=-1;shot=false;++scene;exitResets=resets;pad();
+            a=nullptr;b=nullptr;target=nullptr;tick=-1;shot=false;transition=true;++scene;exitResets=resets;pad();
             gameflow.mNextOnePlayerSectionID=ONEPLAYER_NewPikiGame;gsys->softReset();
             std::printf("P2_REENTRY_EXIT next_scene=%d adapter_unbound=1 manager_null=1 scripted_soft_reset=1\n",scene);break;
         }}
@@ -165,7 +181,7 @@ public:
 };
 } // namespace
 int main(int argc,char** argv) {
-    for(int i=1;i<argc;++i){sSingle|=std::string(argv[i])=="--single";sCoop|=std::string(argv[i])=="--coop";sPrimaryDown|=std::string(argv[i])=="--primary-down";sForceCaptainDown|=std::string(argv[i])=="--force-captain-down";}
+    for(int i=1;i<argc;++i){sForceCaptainDown|=std::string(argv[i])=="--force-captain-down";sForceInactiveDown|=std::string(argv[i])=="--force-inactive-down";}
     _putenv_s("PIKMIN_P2_SECOND_CAPTAIN","1");
     _putenv_s("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1");
     SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetMainReady();pc_gpu_preference_apply();
