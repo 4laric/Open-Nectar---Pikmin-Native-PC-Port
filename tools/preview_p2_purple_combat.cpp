@@ -7,6 +7,9 @@
 // ordinary combat acceptance. Natural transport and natural_dayend/resume modes
 // remain separate, with no actor relocation or direct stock-helper injection.
 #include <SDL2/SDL.h>
+#include <GL/gl.h>
+#include "Graphics.h"
+#include "pc_gfx.h"
 #include "system.h"
 #include "App.h"
 #include "Node.h"
@@ -82,6 +85,22 @@ static void require(bool ok, const char* why) {
     if (!ok) { std::printf("P2_PURPLE_COMBAT_FAIL reason=%s\n",why); std::fflush(nullptr); std::_Exit(1); }
 }
 static SDL_Joystick* ordinaryPad=nullptr;
+static void ordinaryCapture(const char* path) {
+    pc_gfx_flush_batch();
+    auto bind=reinterpret_cast<PFNGLBINDFRAMEBUFFERPROC>(SDL_GL_GetProcAddress("glBindFramebuffer"));
+    require(bind!=nullptr,"ordinary capture framebuffer entry point");
+    GLint previous=0;glGetIntegerv(GL_FRAMEBUFFER_BINDING,&previous);bind(GL_FRAMEBUFFER,0);
+    int width=0,height=0;SDL_GL_GetDrawableSize(SDL_GL_GetCurrentWindow(),&width,&height);
+    require(width>0 && height>0,"ordinary capture dimensions");
+    std::vector<unsigned char> pixels(size_t(width)*size_t(height)*3);
+    glReadBuffer(GL_BACK);glPixelStorei(GL_PACK_ALIGNMENT,1);
+    glReadPixels(0,0,width,height,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());bind(GL_FRAMEBUFFER,previous);
+    FILE* file=std::fopen(path,"wb");require(file!=nullptr,"ordinary capture file");
+    std::fprintf(file,"P6\n%d %d\n255\n",width,height);
+    for(int y=height-1;y>=0;--y) std::fwrite(pixels.data()+size_t(y)*width*3,1,size_t(width)*3,file);
+    std::fclose(file);
+    std::printf("P2_PURPLE_ORDINARY_CAPTURE path=%s width=%d height=%d read_only=1\n",path,width,height);
+}
 static void ordinaryInput(unsigned buttons=0,int y=0) {
     require(ordinaryPad!=nullptr,"ordinary SDL controller missing");
     const int instance=SDL_JoystickInstanceID(ordinaryPad);int assigned=-1;
@@ -426,8 +445,11 @@ class PurpleCombatApp : public PlugPikiApp {
             ++ordinaryDiaryFrames;
             if(ordinaryDiaryFrames==1) milestone("ordinary_day_advanced",ticks);
             if(ordinaryDiaryFrames==60) ordinaryInput(KBBTN_B);
-            else if(ordinaryDiaryFrames>61) ordinaryInput(ticks%20<18?KBBTN_A:0);
-            else ordinaryInput();
+            // Ordinary held A accelerates diary text; release periodically for
+            // results/card edges. Do not waste the initial two seconds neutral.
+            // Keep the single B reveal; repeated B could cancel a card prompt.
+            else if(ordinaryDiaryFrames==61) ordinaryInput();
+            else ordinaryInput(ordinaryDiaryFrames%6<5?KBBTN_A:0);
         }
         const int cards=ordinaryCards();require(cards<=1,"ordinary save extra checkpoint generation");
         if(cards==1) {
@@ -953,6 +975,14 @@ class PurpleCombatApp : public PlugPikiApp {
 
 
 public:
+    void draw(Graphics& gfx) override {
+        PlugPikiApp::draw(gfx);
+        if(mode("natural_dayend") && (ordinaryDiaryFrames==30 || ordinaryDiaryFrames==90
+            || ordinaryDiaryFrames==180 || ordinaryDiaryFrames==240)) {
+            const std::string path="ordinary-diary-"+std::to_string(ordinaryDiaryFrames)+".ppm";
+            ordinaryCapture(path.c_str());
+        }
+    }
     int idle() override {
         const int result=PlugPikiApp::idle();
         Navi* n=naviMgr?naviMgr->getNavi():nullptr;
