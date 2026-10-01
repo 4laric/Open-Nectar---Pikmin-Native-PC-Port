@@ -253,6 +253,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_generated_placement.cpp
     pc_port/pc_p2_campaign_goal_probe.cpp
     pc_port/pc_bbft.cpp
+    pc_port/pc_p2_surface_topology.cpp
     # Challenge host-mode engine runtime bridge (#722, ported from #710
     # db245877; #186 review before shared-line landing): the per-tick runtime
     # bridge plus the landed host-state module, linked into pikmin_pc so the
