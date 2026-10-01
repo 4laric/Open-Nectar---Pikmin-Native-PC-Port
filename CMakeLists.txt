@@ -2466,5 +2466,6 @@ add_executable(p2_purple_combat_bindings_test tools/test_p2_purple_combat_bindin
 target_include_directories(p2_purple_combat_bindings_test PRIVATE pc_port)
 target_compile_options(p2_purple_combat_bindings_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_purple_combat_bindings_test COMMAND p2_purple_combat_bindings_test)
-`n# Issue1074 bounded local scene reentry; CI builds only.
+
+# Issue1074 bounded local scene reentry; CI builds only.
 pikmin_add_ci_fixture(captain_reentry tools/p2_captain_reentry_runtime.cpp)
