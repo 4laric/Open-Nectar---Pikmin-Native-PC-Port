@@ -57,9 +57,15 @@
 #include <set>
 #include <fstream>
 
-static void p2_fixture_require_captain(bool dead, bool deadState, float hp, int tick) {
-    if (!dead && !deadState && std::isfinite(hp) && hp > 1.0f) return;
-    std::printf("P2_FIXTURE_CAPTAIN_DOWN tick=%d hp=%.3f orima_dead=%d dead_state=%d outcome=BLOCKED\n", tick,hp,int(dead),int(deadState));
+static const auto fixtureStarted=std::chrono::steady_clock::now();
+static void milestone(const char* name,int tick) {
+    const double seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-fixtureStarted).count();
+    std::printf("P2_PURPLE_TIMING milestone=%s tick=%d wall_seconds=%.3f\n",name,tick,seconds);
+}
+static void p2_fixture_require_captain(bool present,bool dead,bool managerDead,bool deadState,float hp,int tick,bool missingAllowed) {
+    if (!present && missingAllowed && !dead && !managerDead) return;
+    if (present && !dead && !managerDead && !deadState && std::isfinite(hp) && hp > 1.0f) return;
+    std::printf("P2_FIXTURE_CAPTAIN_DOWN tick=%d hp=%.3f present=%d orima_dead=%d manager_dead=%d dead_state=%d outcome=BLOCKED\n",tick,hp,int(present),int(dead),int(managerDead),int(deadState));
     std::fflush(nullptr); std::_Exit(86);
 }
 static void require(bool ok, const char* why) {
@@ -92,6 +98,7 @@ class PurpleCombatApp : public PlugPikiApp {
     int ticks=0, phase=0, phaseTicks=0, startingField=0, pluckAttempts=0;
     int combatTicks=0, observedTicks=0, throwAttempts=0, throwTick=0;
     bool captainSeen=false, thrown=false, descentStaged=false, isolated=false;
+    bool activeSeen=false,guardInjected=false,haulAttached=false;
     Piki* input=nullptr;
     Piki* acquired=nullptr;
     bool manualWithdrawRequested=false;
@@ -106,6 +113,28 @@ class PurpleCombatApp : public PlugPikiApp {
     bool mode(const char* name) const {
         const char* value=std::getenv("P2_PURPLE_COMBAT_MODE");
         return value && std::strcmp(value,name)==0;
+    }
+    void injectInitializedGuard(Navi* n) {
+        const char* test=std::getenv("P2_PURPLE_GUARD_CASE");
+        if(!test && std::getenv("P2_FIXTURE_FORCE_CAPTAIN_DOWN")) test="health";
+        if(!test || guardInjected || !n || !n->getCurrState() || !mapMgr || !pikiMgr) return;
+        const int state=n->getCurrState()->getID();
+        if(state!=NAVISTATE_Walk && state!=NAVISTATE_Idle) return;
+        guardInjected=true;captainSeen=true;
+        GameStat::update();
+        std::printf("P2_PURPLE_GUARD_ARMED case=%s initialized=1 tick=%d health_before=%.3f field=%d state=%d\n",test,ticks,n->mHealth,int(GameStat::mapPikis),state);
+        milestone("initialized_guard_injection",ticks);
+        if(!std::strcmp(test,"health_pause")) gameflow.mPauseAll=true;
+        if(!std::strcmp(test,"missing_movie")) {
+            require(gameflow.mMoviePlayer!=nullptr,"initialized movie guard requires movie player");
+            gameflow.mMoviePlayer->mIsActive=true;
+        }
+        if(!std::strcmp(test,"missing") || !std::strcmp(test,"missing_movie")) naviMgr=nullptr;
+        else if(!std::strcmp(test,"manager")) naviMgr->informOrimaDead(n);
+        else if(!std::strcmp(test,"global")) GameStat::orimaDead=true;
+        else if(!std::strcmp(test,"dead_state")) n->mStateMachine->transit(n,NAVISTATE_Dead);
+        else n->mHealth=0;
+        std::printf("P2_PURPLE_GUARD_INJECTED case=%s pause=%d movie=%d manager_present=%d\n",test,int(gameflow.mPauseAll),int(gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive),int(naviMgr!=nullptr));
     }
     bool stockOne() const {
         return savedMaturity>=0 && savedMaturity<3 && p2ship::stock.total()==1
@@ -234,6 +263,7 @@ class PurpleCombatApp : public PlugPikiApp {
         p->mActiveAction->mChildActions[PikiAction::Transport].initialise(haul);
         p->mMode=PikiMode::TransportMode;
         approachStart=p->mSRT.t;
+        haulAttached=false;milestone("carrier_assignment",ticks);
         std::printf("P2_PURPLE_HAUL_ASSIGN purple=%d native_approach=1 slot_teleport=0 forced_attachment=0 x=%.2f z=%.2f\n",
             int(pc_p2_is_purple(p)),p->mSRT.t.x,p->mSRT.t.z);
     }
@@ -277,6 +307,7 @@ class PurpleCombatApp : public PlugPikiApp {
             require(std::isfinite(pos.y),"cargo placement terrain invalid");
             std::printf("P2_PURPLE_HAUL_ORIGIN route=%s xyz=%.2f,%.2f,%.2f distance_xz=196.98 violet_unchanged=1\n",west?"west197":"east197",pos.x,pos.y,pos.z);
             haul->init(pos);haul->startAI(TRUE);haulStart=pos;
+            milestone("cargo_spawn",ticks);
             GameStat::update();haulPopulationBefore=GameStat::allPikis[Red];
             rewardBefore=GameStat::bornPikis[Red];haulMaturity=acquired->mHappa;haulPhase=1;haulTicks=0;
             std::printf("P2_PURPLE_HAUL_BEGIN injected_cargo=1 weight=10 expected_reward=%d maturity=%d source_identity_injected=%d cargo_position_staged_once=1\n",expectedReward,haulMaturity,int(staged));
@@ -324,16 +355,18 @@ class PurpleCombatApp : public PlugPikiApp {
             if(alive) {
                 int attached=0;Iterator bodies(pikiMgr);CI_LOOP(bodies) if(static_cast<Piki*>(*bodies)->getStickObject()==haul) ++attached;
                 require(attached<=1 && haul->mCarrierCounter<=10,"extra carrier invalidates single-Purple haul");
+                if(!haulAttached && attached==1 && haul->mCarrierCounter==10) {haulAttached=true;milestone("carrier_attached",ticks);}
                 const Vector3f d=haul->mSRT.t-haulStart;
                 if(!haulMoved && attached==1 && haul->mCarrierCounter==10 && d.x*d.x+d.z*d.z>100) {
                     const Vector3f approach=acquired->mSRT.t-approachStart;
                     require(approach.x*approach.x+approach.z*approach.z>25,"native approach not observed");
                     haulMoved=true;
+                    milestone("cargo_moved_ten",ticks);
                     std::printf("P2_PURPLE_HAUL_MOVEMENT_PASS strength=10 attached=1 distance=%.2f native_approach=1 forced_attachment=0 cargo_teleport_after_spawn=0\n",std::sqrt(d.x*d.x+d.z*d.z));
                 }
                 if(haul->getState()==PELSTATE_Goal) {
                     require(haulMoved && haul->mTargetGoal==static_cast<Suckable*>(haulGoal),"wrong destination or missing native transport");
-                    if(!haulGoalSeen) std::puts("P2_PURPLE_HAUL_ONION_UPTAKE target=red_onion native_goal_state=1");
+                    if(!haulGoalSeen) {milestone("onion_uptake",ticks);std::puts("P2_PURPLE_HAUL_ONION_UPTAKE target=red_onion native_goal_state=1");}
                     haulGoalSeen=true;
                 }
             } else {
@@ -343,6 +376,7 @@ class PurpleCombatApp : public PlugPikiApp {
                 if(++haulStable>=90) {
                     GameStat::update();
                     require(GameStat::allPikis[Red]-haulPopulationBefore==expectedReward,"reward counter/population mismatch");
+                    milestone("delivery_verified",ticks);
                     std::printf("P2_PURPLE_HAUL_POPULATION before=%d after=%d expected_delta=%d\n",haulPopulationBefore,GameStat::allPikis[Red],expectedReward);
                     std::printf("P2_PURPLE_HAUL_DELIVERY_PASS reward=%d expected_reward=%d purple_alive=1 maturity=%d released=1 stable_ticks=%d duplicate_reward=0 injected_cargo=1 scripted_action_assignment=%d controls_validated=0 scripted_non_test_recalls=%d starting_species_injected=%d\n",reward,expectedReward,haulMaturity,haulStable,int(!manual),haulRecalls,int(staged));
                     std::fflush(nullptr);std::_Exit(0);
@@ -388,6 +422,7 @@ class PurpleCombatApp : public PlugPikiApp {
             if (!input) return nullptr;
             GameStat::update(); startingField = GameStat::mapPikis;
             phase = 1; phaseTicks = 0;
+            milestone("natural_input_selected",ticks);
             std::printf("P2_PURPLE_NATURAL_START field=%d violet=%.1f,%.1f,%.1f\n", startingField, violet->mSRT.t.x, violet->mSRT.t.y, violet->mSRT.t.z);
         }
         if (phase == 1) {
@@ -400,6 +435,7 @@ class PurpleCombatApp : public PlugPikiApp {
                 const float aimScale = fixedAim ? std::atof(fixedAim) : 0.8f + 0.1f * ((phaseTicks / 60) % 9);
                 Vector3f aim = n->mSRT.t + (violet->mSRT.t - n->mSRT.t) * aimScale;
                 n->throwPiki(input,aim);
+                milestone("native_throw",ticks);
                 std::printf("P2_PURPLE_SCRIPTED_THROW real_collision=1 aim_scale=%.2f captain=%.1f,%.1f,%.1f velocity=%.1f,%.1f,%.1f\n",
                     aimScale,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,input->mVelocity.x,input->mVelocity.y,input->mVelocity.z);
             }
@@ -414,6 +450,7 @@ class PurpleCombatApp : public PlugPikiApp {
                     std::printf("P2_PURPLE_PLUCK_ATTEMPT attempt=%d captain_position_staged=1 native_pluck=1 pathfinding_validated=0 player_controls_validated=0\n", pluckAttempts);
                     n->mSproutToPluck=h; n->mPikiToPluck=nullptr;
                     n->mStateMachine->transit(n,NAVISTATE_NukuAdjust);
+                    milestone("native_sprout_pluck_started",ticks);
                     phase=2; phaseTicks=0; input=nullptr;
                     std::puts("P2_VIOLET_REAL_SPROUT captain_pluck_started=1"); break;
                 }
@@ -426,6 +463,7 @@ class PurpleCombatApp : public PlugPikiApp {
                 if (p->isAlive() && pc_p2_is_purple(p) && p->getState()==PIKISTATE_Normal && p->mMode==PikiMode::FormationMode) {
                     GameStat::update(); require(int(GameStat::mapPikis)==startingField,"conversion/pluck population");
                     require(pc_throw_selection_class(p)==4 && pc_piki_carry_strength(p)==10,"selection/strength");
+                    milestone("native_acquisition_verified",ticks);
                     std::puts("P2_PURPLE_ACQUISITION_PASS scripted_throw=1 native_conversion=1 captain_pluck=1 selection=4 strength=10");
                     return p;
                 }
@@ -603,14 +641,19 @@ public:
     int idle() override {
         const int result=PlugPikiApp::idle();
         Navi* n=naviMgr?naviMgr->getNavi():nullptr;
+        // Injection modifies the initialized runtime, never an engine-free stand-in.
+        // The real guard then executes before diagnostics, pause/movie or any other return.
+        injectInitializedGuard(n);
+        n=naviMgr?naviMgr->getNavi():nullptr;
+        const bool expectedTeardown=sunsetRequested && sunsetSeen
+            && gameflow.mCurrGameSectionID==SECTION_OnePlayer && flowCont.mGameEndFlag==GAMEEND_None
+            && gameflow.mWorldClock.mCurrentDay==expectedDay && stockOne();
+        const bool missingAllowed=!captainSeen || expectedTeardown;
+        p2_fixture_require_captain(n!=nullptr,GameStat::orimaDead,naviMgr && n && naviMgr->isNaviDead(n),
+            n && n->getCurrState() && n->getCurrState()->getID()==NAVISTATE_Dead,n?n->mHealth:-1.f,ticks,missingAllowed);
         if(n) {
+            if(!captainSeen) milestone("initialized_captain_seen",ticks);
             captainSeen=true;
-            p2_fixture_require_captain(GameStat::orimaDead,n->getCurrState()&&n->getCurrState()->getID()==NAVISTATE_Dead,n->mHealth,ticks);
-        } else {
-            const bool expectedTeardown=sunsetRequested && sunsetSeen
-                && gameflow.mCurrGameSectionID==SECTION_OnePlayer && flowCont.mGameEndFlag==GAMEEND_None
-                && gameflow.mWorldClock.mCurrentDay==expectedDay && stockOne();
-            require(!captainSeen || expectedTeardown,"captain disappeared outside expected sunset teardown");
         }
         if (++ticks%120==0) diagnostics(n);
         if(mode("transport_manual") && (SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F7] || std::ifstream("manual-reset.request").good())) {
@@ -626,6 +669,9 @@ public:
         if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive) { gameflow.mMoviePlayer->requestSkip(); return result; }
         if(!n||!pikiMgr||!itemMgr||!bossMgr||!tekiMgr||!mapMgr||!n->getCurrState()
             ||gameflow.mPauseAll||gameflow.mIsUIOverlayActive) return result;
+        if(!activeSeen && (n->getCurrState()->getID()==NAVISTATE_Walk || n->getCurrState()->getID()==NAVISTATE_Idle)) {
+            activeSeen=true;milestone("active_gameplay",ticks);
+        }
         if(mode("persistence_resume")) {
             // The restored captain exists during ship/map entry before the
             // playable stage actors are ready. Match the ordinary fixture's
@@ -697,8 +743,11 @@ public:
     }
 };
 int main(int argc,char** argv) {
-    if(std::getenv("P2_FIXTURE_FORCE_CAPTAIN_DOWN")) p2_fixture_require_captain(false,false,0,0);
     setvbuf(stdout,nullptr,_IONBF,0);
+    const char* guardCase=std::getenv("P2_PURPLE_GUARD_CASE");
+    require(!guardCase || !std::strcmp(guardCase,"health") || !std::strcmp(guardCase,"manager")
+        || !std::strcmp(guardCase,"global") || !std::strcmp(guardCase,"dead_state") || !std::strcmp(guardCase,"missing")
+        || !std::strcmp(guardCase,"health_pause") || !std::strcmp(guardCase,"missing_movie"),"unknown initialized guard case");
     const char* mode=std::getenv("P2_PURPLE_COMBAT_MODE");
     if(mode && std::strcmp(mode,"adult_direct") && std::strcmp(mode,"persistence_dayend") && std::strcmp(mode,"persistence_resume") && std::strcmp(mode,"transport_delivery") && std::strcmp(mode,"transport_positive") && std::strcmp(mode,"transport_red_control") && std::strcmp(mode,"transport_staged") && std::strcmp(mode,"transport_manual")) {
         std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=adult_direct,persistence_dayend,persistence_resume,transport_delivery,transport_positive,transport_red_control,transport_staged,transport_manual\n",mode); return 2;
@@ -713,6 +762,7 @@ int main(int argc,char** argv) {
     SDL_GetWindowSize(window,&w,&h); SDL_GetWindowPosition(window,&x,&y);
     require(w==960&&h==540,"window dimensions");
     std::printf("P2_FIXTURE_WINDOW width=%d height=%d x=%d y=%d\n",w,h,x,y);
+    milestone("window_ready",0);
     std::printf("P2_PURPLE_COMBAT_SCOPE mode=%s natural_acquisition=%d player_controls_validated=0 production_collision_marker_required=1\n",
         mode?mode:"adult_direct",int(!mode || (std::strcmp(mode,"transport_red_control") && std::strcmp(mode,"transport_staged") && std::strcmp(mode,"transport_manual"))));
     gsys->Initialise(); pc_settings_p2d_init(); nodeMgr=new NodeMgr();
