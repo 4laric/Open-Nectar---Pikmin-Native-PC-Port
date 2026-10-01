@@ -643,6 +643,29 @@ folder), not append the second evening to the first evening's run.
 - Logs: the console output (or your `> file` redirect; `native.log` in the
   local test), plus the run folder `netplay\run-...\` next to the exe.
 
+## What differs from the original game
+
+These are deliberate changes, in a session and (for the pellet one) in single
+player too:
+
+- **Pellet seeds never get stranded in an Onion.** In the original game, seeds
+  a pellet credited while the Onion was still in its start-up animation, or
+  that were left over when the Onion dropped back to waiting mid-emission
+  (in co-op one captain can take the last Pikmin out of an Onion while it is
+  still sprouting a pellet's seeds), only came out with the next pellet, or
+  were lost at day end. The Onion now re-posts the "pellet in" event once when
+  it is waiting with seeds still pending, so the sprouts come out at once. The
+  pellet-in sound and effect play once more at that moment (cosmetic). Which
+  Onion a pellet goes to is unchanged: it is the colour most of its carriers
+  are, not the pellet's own colour, so a red squad carrying a blue pellet gets
+  the non-matching seed count at the red Onion (issue #1034). Each lift and
+  each delivery logs a `[pellet]` line with the carrier colours, the Onion,
+  the seeds and whether the colour matched.
+- **A geyser throws only the captain standing on it, when there are two
+  captains.** A captain more than 80 units from the geyser is left where it
+  is (issue #1035; the same rule as Open Nectar 0.9). With one captain nothing
+  changes.
+
 ## Current limits
 
 - No Archipelago: a netplay session plays a seed offline with a fixed
@@ -673,3 +696,29 @@ folder), not append the second evening to the first evening's run.
 - The low-level switches (`--netplay-host`/`--netplay-join`,
   `--netplay-ice-host`/`--netplay-ice-join`) and their environment
   variables keep working; they are the test surface.
+
+## Test knobs (harness only)
+
+These change the simulation or start a scripted situation; they are for the
+hidden test pairs (`tools/netplay/run_pair.py` scrubs them from the inherited
+environment, so pass them with `--env`), not for play. When a knob changes
+the sim, give it to both peers.
+
+- `PIKMIN_NETPLAY_TEST_NAVI_TO_BOSS=<BossID>,<tick>[,<dx>,<dz>]` (issue
+  #1036): once the session tick (in single player, the sim update count)
+  reaches `<tick>`, captain 1 (and captain 2 in co-op, 40 units further
+  along z) is placed `dx`,`dz` (default 100, 0) from the first active boss of
+  that id, so its appear trigger fires and both cameras see it without a
+  scripted walk. Ids: 0 Beady Long Legs, 1 Burrowing Snagret, 3 Emperor
+  Bulblax. Inert when unset. It prints `[netplay-test] navis pulled to boss`.
+- `PIKMIN_TEST_ONLY_PELLET_BONUS=1` (or `carry`) (issue #1034): spawns a
+  matching and a non-matching number pellet of every size around each Onion
+  and logs the seeds credited (`tools/netplay/pellet_bonus_check.py` checks
+  the log). `carry` uses real carriers.
+- `PIKMIN_TEST_CLOCK_TOD=<hour>` (issue #1031): jumps the world clock to
+  that hour once, on the first gameplay tick, so a short run sits in the
+  end-of-day countdown window (18.5 to 19.5).
+- `PIKMIN_TEST_RAW_START=<t1,t2,...>` and `PIKMIN_TEST_PROMPT_GAMEPAD=1`
+  (issue #1029): model a physical local Start press on a peer (which the
+  session must ignore) and make a peer's text-window labels read as a
+  gamepad player's.

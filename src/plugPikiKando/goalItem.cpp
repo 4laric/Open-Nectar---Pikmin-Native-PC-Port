@@ -841,7 +841,9 @@ void GoalItem::update()
 	// right after a randomizer Onion grant) are never emitted: the state machine returns to Wait with
 	// mCurrAnimId/mCounter still pending and nothing re-posts the user event, so the sprouts only appear
 	// when the next pellet arrives (issue #1034). Wait with seeds pending is otherwise unreachable, so
-	// re-post the event once here; vanilla timing is untouched.
+	// re-post the event once here. This is an intended behaviour change (docs/NETPLAY_PLAY.md, "What differs from
+	// the original game"): the stranded seeds now come out, and the pellet-in sound and effect play once more.
+	// Every other Onion timing is untouched.
 	if (getCurrState() && getCurrState()->getID() == GoalAI::GOAL_Wait && !isCreatureFlag(CF_IsAiDisabled)
 	    && (mSAICtx.mCurrAnimId > 0 || mSAICtx.mCounter > 0)) {
 		MsgUser msg(0);
