@@ -269,14 +269,12 @@ void pc_p2_cave_setup(){
     if(admitted==P2CaveEntryProfile::Invalid || !std::isfinite(health) || health<=0 || health>1 || count<1 || count>100)
         invalid("header");
     tutorialEntry=(profile==P2CaveEntryProfile::Invalid && admitted!=P2CaveEntryProfile::Invalid);
-    // The versioned entry profile is shared by legacy caves. Only the actual
-    // bounded forest_1 bud checkpoint may opt into a natural White upgrade.
-    if(!beasts && !tutorialEntry && (floor==1 || floor==2)){
-        std::ifstream buds("p2-cave-bud-entry.txt");std::string header,cave;
-        unsigned long long seed=0;int sourceFloor=0,budCount=0;
-        boundedForestCheckpoint=bool(buds>>header>>seed>>cave>>sourceFloor>>budCount)
-            && header=="P2_CAVE_BUD_STATE_1" && cave=="forest_1" && sourceFloor==floor && budCount>=0;
-    }
+    // Bud setup above validates its checkpoint against the live room layout.
+    // A stray bud sidecar cannot identify an otherwise unrelated legacy cave.
+    const P2CaveRoomLayout* checkpointLayout=pc_p2_cave_rooms_layout();
+    boundedForestCheckpoint=!beasts && !tutorialEntry && (floor==1 || floor==2)
+        && checkpointLayout && checkpointLayout->cave=="forest_1"
+        && checkpointLayout->floor==floor;
     std::vector<Survivor> squad;
     checkpointSchema=version=="P2_CAVE_ENTRY_3"?3:(version=="P2_CAVE_ENTRY_2"?2:1);
     for(int i=0;i<count;++i){Survivor s;if(!(in>>s.species>>s.maturity) || !p2_schema_supports(checkpointSchema,s.species) || s.maturity<0 || s.maturity>2)invalid("Pikmin");squad.push_back(s);}
