@@ -23,6 +23,7 @@
 #include "teki.h"
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 struct P2SaraiHost::Smooth {
@@ -57,6 +58,14 @@ P2SaraiHost::~P2SaraiHost()
     // and without this the Pikmin mouth bridge would keep a mouth link (and
     // claim) against a freed owner. sceneExit() is idempotent.
     sceneExit();
+    // #215 latch fix: a still-bound anchor gets its vehicle CollInfo back
+    // (the own tree is never freed, see demonAnchorBuildColl). A pooled
+    // re-init of the own tree is also safe (capacity >= the vehicle's 22).
+    if (mBoundActor && mAnchorVehicleColl && mBoundActor->mCollInfo == mAnchorOwnColl) {
+        mBoundActor->mCollInfo = mAnchorVehicleColl;
+        if (mBoundActor->isFlying()) mBoundActor->finishFlying();
+    }
+    mAnchorVehicleColl = nullptr;
     // The private host owns its two mouth parts and never registers them with
     // the engine, so teardown deletes them explicitly.
     delete mMouths[0];
@@ -446,9 +455,20 @@ void P2SaraiHost::applyNaturalPose()
         if (float(pose.frame) <= frame) selected = &pose;
     if (!selected && !samples.empty()) selected = &samples.front();
     if (selected) applyPoseFrame(selected->frame);
-    // #895: lerp between the bracketing samples (crossfade on a profile change
-    // or a discontinuous loop seam) into a private Shape. The mouths keep the
-    // sampled frame above; the nearest mesh stays the fallback.
+    presentSmooth(frame);
+}
+
+// #895: lerp between the bracketing samples of the active set (crossfade on a
+// profile change or a discontinuous loop seam) into a private Shape. The
+// mouths keep the sampled frame applied by the caller; the nearest mesh stays
+// the fallback. Shared by the living body (applyNaturalPose) and the carried
+// Demon corpse (demonDrawCarcass), which used to snap to the nearest pose.
+bool P2SaraiHost::smoothActive() const { return mSmooth && !mSmooth->failed && mSmooth->track.shape; }
+
+void P2SaraiHost::advanceSmooth(float seconds) { if (mSmooth) mSmooth->track.advance(seconds); }
+
+void P2SaraiHost::presentSmooth(float frame)
+{
     if (mActiveSet < 0 || mActiveSet >= int(mPoseSets.size())) return;
     const PoseSet& set = mPoseSets[std::size_t(mActiveSet)];
     if (set.poses.empty() || set.meshes.empty()) return;
@@ -487,6 +507,23 @@ void P2SaraiHost::applyNaturalPose()
                     set.profile.c_str(), set.poses.size(), shown.span.left, shown.span.right, shown.span.weight,
                     int(tune.lerp));
     }
+}
+
+// Guarded diagnostic (PIKMIN_P2_DEMON_ANIM_LOG=1): clip/phase/fade per state, ~4 Hz.
+void P2SaraiHost::demonAnimDiagnostic(float dt, const char* state)
+{
+    static const bool on = [] { const char* v = std::getenv("PIKMIN_P2_DEMON_ANIM_LOG"); return v && *v && *v != '0'; }();
+    if (!on) return;
+    mAnimLogAccum += dt;
+    if (mAnimLogAccum < 0.25f) return;
+    mAnimLogAccum = 0.0f;
+    const bool smooth = mSmooth != nullptr;
+    std::printf("P2_DEMON_ANIM t=%.2f state=%s clip=%s frame=%.2f fade_active=%d fade_progress=%.2f\n", mDemonClock,
+                state,
+                mActiveSet >= 0 && mActiveSet < int(mPoseSets.size()) ? mPoseSets[std::size_t(mActiveSet)].profile.c_str() : "-",
+                mPlayer.frame(), smooth ? int(mSmooth->track.view.fade.active()) : -1,
+                smooth ? mSmooth->track.view.fade.progress() : -1.0f);
+    std::fflush(stdout);
 }
 
 // Post-drop reacquisition arm (FallMeck::cleanup resetAttackableTimer(0)

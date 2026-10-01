@@ -14,6 +14,7 @@
 class Graphics;
 class Shape;
 class CollPart;
+class CollInfo;
 class Navi;
 class BTeki;
 class Piki;
@@ -182,6 +183,11 @@ public:
     float facing() const { return mFacingRadians; }
     float demonLife() const { return mDemonParms.general.life; }
     bool demonFlying() const { return mDemonEnabled && mFsm.flags().untargetable; }
+    // CF_IsFlying mirror for the anchor (#215 latch fix, pc_p2_demon_anchor.h):
+    // untargetable except while Fall/Damage/Dead run ground physics.
+    bool demonAirborne() const { return mDemonEnabled && mDemonAirborne; }
+    // Root -> body joint offset used for the anchor's retail collision spheres.
+    Vector3f demonBodyOffset() const { return mDemonBodyOffset; }
 
 private:
     struct PoseSet {
@@ -267,6 +273,9 @@ private:
     void updateNatural();
     bool startNaturalMotion(p2sarai::Motion motion);
     void applyNaturalPose();
+    bool smoothActive() const;
+    void advanceSmooth(float seconds); // carcass draw: the host clock is stopped, so advance the crossfade here
+    void presentSmooth(float frame); // interpolated present of the active pose set at a source frame
 
     // Demon profile state (#215).
     const P2SaraiSpecies* mSpecies = &kSaraiSpecies;
@@ -294,9 +303,22 @@ private:
     int mLastDemonState = -1;
     float mCarcassFrame = 0.0f;
     bool mCarcassLogged = false;
+    // Anchor latch fix (#215): the anchor wears an own CollInfo built from the
+    // retail Demon enemycoll tree while bound; the vehicle CollInfo is kept
+    // and restored on finalise (stuck Pikmin may still hold part pointers
+    // into the own tree, so it is never freed).
+    bool mDemonAirborne = false;
+    Vector3f mDemonBodyOffset;
+    CollInfo* mAnchorVehicleColl = nullptr;
+    CollInfo* mAnchorOwnColl = nullptr;
+    CollPart* mAnchorParts[3] = {nullptr, nullptr, nullptr};
+    bool mAnchorCollLogged = false;
+    void demonAnchorBuildColl();
     float demonRand();
     unsigned demonGenerator() const;
     void updateDemon();
+    void demonAnimDiagnostic(float dt, const char* state);
+    float mAnimLogAccum = 0.0f;
     bool startDemonMotion(p2sarai::Motion motion);
     Navi* demonAcquire(float dt);
     void demonSetRandTarget();

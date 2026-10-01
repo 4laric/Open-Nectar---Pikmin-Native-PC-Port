@@ -16,6 +16,9 @@ class TekiEvent;
 // drops it for container damage (fp04); bombs hurt. Room preview actors keep
 // the old visual proxy (pc_p2_breadbug_actor).
 void pc_p2_breadbug_teki_setup();
+// Dev console (#942): bind one late-spawned seed-38 actor (loads the staged
+// parms/bank on first use). True when bound (or already bound).
+bool pc_p2_breadbug_teki_bind_dynamic(BTeki*);
 void pc_p2_breadbug_teki_reset();
 void pc_p2_breadbug_teki_forget(BTeki*);
 void pc_p2_breadbug_teki_tick(BTeki*);
@@ -46,3 +49,5 @@ float pc_p2_breadbug_teki_param_f(const BTeki*, int idx, float fallback);
 // Draw hook: staged PanModoki pose bank keyed on the FSM clip/frame; the
 // corpse draws the carcass clip (startCarcassMotion -> type5).
 bool pc_p2_breadbug_teki_draw(BTeki*, Graphics&, const Matrix4f&, bool corpse = false);
+// #1022 lair visual: every living bound Breadbug's PanHouse nest (world pass).
+void pc_p2_breadbug_teki_draw_nests(Graphics&);

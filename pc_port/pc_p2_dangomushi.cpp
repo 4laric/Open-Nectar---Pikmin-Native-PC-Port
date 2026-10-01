@@ -62,9 +62,13 @@
 //   * Carcass: the P2 retail carcass_config.txt DangoMushi row (min 20, max
 //     30 carriers, 30 seeds) is applied to the corpse pellet through a private
 //     PelletConfig, replacing the Swallow host carcass.
-// Remaining adaptations: the Attack activation keeps the fp20=300 range
-// without the fp21 15-degree view cone; Stay keeps the model visible (no
-// ModelHidden / Appear drop-in); the dangomushi.brk material loop is not
+// Clip per state (#crawbster-idle): Stay and Wait show the looping wait clip,
+// Appear plays fly once, never looped (the old fly loop made the crab fall in
+// from above forever). Wait/Move run their clip out before the queued
+// transit (finishMotion), Attack needs the fp21 15-degree cone (Move turns to
+// it), and the roll timeout runs 3x/5x while against a wall.
+// Remaining adaptations: Stay keeps the model visible (no
+// ModelHidden; the source hides it until Appear); the dangomushi.brk material loop is not
 // reproduced; walk uses fp08/fp28 and the roll fp01/fp02/fp03. When the
 // installed p2-snagret-bank.txt is absent the audited retail event frames
 // and 117-frame turn clip are used.
@@ -76,6 +80,7 @@
 #include "pc_randomizer.h"
 #include "pc_p2_dangomushi_hazard.h"
 #include "pc_p2_dangomushi_policy.h"
+#include "pc_p2_sfx.h"
 #include "pc_p2_egg_hazard.h"
 #include "pc_p2_rock_hazard.h"
 #include "pc_p2_rock_host.h"
@@ -151,7 +156,13 @@ constexpr float ATTACK_ANGLE = 0.261799f;    // fp21 15 deg
 constexpr float ATTACK_DAMAGE = 10.0f;       // fp24 attack power
 constexpr float SHAKE_KNOCKBACK = 200.0f;    // fp17 shake knockback
 constexpr float SHAKE_DAMAGE = 1.0f;         // fp18 shake damage
-constexpr float CONTACT_RADIUS = 100.0f;     // fp22 attack hit radius (roll body)
+// Roll crush reach. Source: collisionCallback fires when a real collision part
+// of the rolling body touches the target (enemycoll.txt: ball parts <= 35 radius
+// around the body; the 200 root sphere is only the bounding volume). fp22=100 is
+// the AI attack-hit range, not a contact radius. The ball sits 60 above the floor
+// (Obj::resetMapCollisionSize(true): HeightOffsetFromFloor 60), so the rolling
+// body is a ~60 radius ball; a target is hit when its own size overlaps it.
+constexpr float ROLL_BALL_RADIUS = 60.0f;
 constexpr float WALK_TURN_RATE = 0.05f;      // fp08 rotation speed rate
 constexpr float WALK_MAX_TURN = 0.0872665f;  // fp28 5 deg
 // Source proper-parm retail values (DangoMushi proper block).
@@ -193,7 +204,7 @@ struct Dango {
     bool armSwinging = false;
     // #897 roll crush / wall crash / turn window / flick bookkeeping.
     float driveX = 0.0f, driveZ = 0.0f;     // P2 mRollingVelocity (XZ)
-    p2dango::PressCrush crush{CONTACT_RADIUS, 0.5f};
+    p2dango::PressCrush crush{ROLL_BALL_RADIUS, 0.5f};
     std::set<Creature*> rollTargets;         // distinct targets whose press was accepted
     std::set<Piki*> rollCrushed;             // accepted Pikmin presses this roll
     float attackFinishAt = -1.0f;            // StateAttack finishMotion time (15 s timeout)
@@ -210,7 +221,19 @@ struct Dango {
     int rockDrawTurn = -1;
     std::string drawnClip;
     std::set<int> firedEvents;
-    std::string clip = "fly";
+    std::string clip = "wait";
+    // StateWait/StateMove: finishMotion() queues nextState; the transit runs
+    // when the current clip pass reaches KEYEVENT_END (finishAt, in state time).
+    State nextState = DANGO_WAIT;
+    float finishAt = -1.0f;
+    float rollTimer = 0.0f;                  // StateAttack mStateTimer (advanced only by rollingMove)
+    bool wallTouched = false;                // Obj::mWallTriangle seen this frame
+    // StateStay (DangoMushiState.cpp:92-105): EB_ModelHidden. The P1 host hides
+    // through the Mizinko/Hollec option set VISIBLE|ORGANIC|SHAPE_VISIBLE|SHADOW_VISIBLE|ATARI.
+    bool hidden = false;
+    int hiddenOpts = 0;                      // host option bits restored on Appear
+    float shadowScale = 0.0f;                // Obj::mShadowScale; Appear when it reaches 1
+    float stickLogTimer = 0.0f;
     float phase = 0.0f;
     bool deadLogged = false;
     bool escaped = false;
@@ -310,7 +333,7 @@ void stop(BTeki* a) {
 
 // Source Obj::turnByAngle: clamp(angleDist * turnSpeed, maxTurnAngle).
 void turnAndMove(BTeki* a, Dango& s, const Vector3f& target,
-                 float speed, float turnSpeed, float maxTurn) {
+                 float speed, float turnSpeed, float maxTurn, bool move = true) {
     const Vector3f pos = a->getPosition();
     const float desired = std::atan2(target.x - pos.x, target.z - pos.z);
     float delta = wrapPi(desired - s.heading) * turnSpeed;
@@ -318,6 +341,13 @@ void turnAndMove(BTeki* a, Dango& s, const Vector3f& target,
     if (delta < -maxTurn) delta = -maxTurn;
     s.heading = wrapPi(s.heading + delta);
     a->setDirection(s.heading);
+    if (!move) { // source: mTargetVelocity = 0 while the crab is not lined up yet
+        s.driveX = s.driveZ = 0.0f;
+        a->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
+        a->mVelocity.x = 0.0f;
+        a->mVelocity.z = 0.0f;
+        return;
+    }
     const Vector3f drive(std::sin(s.heading) * speed, 0.0f,
                          std::cos(s.heading) * speed);
     s.driveX = drive.x;
@@ -338,13 +368,37 @@ void setRandTarget(Dango& s) {
 }
 
 bool canAttack(const Vector3f& pos, const Dango& s, Creature* target) {
-    // Port adaptation: the source attackable check also gates on a narrow
-    // fp21=15 deg cone, but the P1 host has no wall-route roll and wandering
-    // rarely aligns the cone. Activation uses the source fp20=300 range only;
-    // the roll then steers toward the target via rollingMove.
-    (void)s;
+    // Source isTargetAttackable(target, viewAngle, fp20 range, fp21 cone):
+    // within 300 AND within 15 deg of the crab's facing. Move turns toward the
+    // target until aligned, so the cone is reachable.
     const Vector3f t = target->getPosition();
-    return distXZ(t, pos) <= ATTACK_RANGE;
+    if (distXZ(t, pos) > ATTACK_RANGE) return false;
+    return std::fabs(wrapPi(std::atan2(t.x - pos.x, t.z - pos.z) - s.heading)) <= ATTACK_ANGLE;
+}
+
+int hideMask() {
+    return BTeki::TEKI_OPTION_VISIBLE | BTeki::TEKI_OPTION_ORGANIC | BTeki::TEKI_OPTION_SHAPE_VISIBLE
+           | BTeki::TEKI_OPTION_SHADOW_VISIBLE | BTeki::TEKI_OPTION_ATARI;
+}
+// Switchable: PIKMIN_P2_DANGO_STAY_VISIBLE=1 keeps the crab on screen (wait clip)
+// during Stay instead of hiding it until the drop-in.
+bool stayHides() {
+    static const bool hides = std::getenv("PIKMIN_P2_DANGO_STAY_VISIBLE") == nullptr;
+    return hides;
+}
+void setHidden(BTeki* a, Dango& s, bool hide) {
+    if (hide == s.hidden) return;
+    if (hide) {
+        s.hiddenOpts = 0;
+        const int bits[] = {BTeki::TEKI_OPTION_VISIBLE, BTeki::TEKI_OPTION_ORGANIC,
+                            BTeki::TEKI_OPTION_SHADOW_VISIBLE, BTeki::TEKI_OPTION_ATARI,
+                            BTeki::TEKI_OPTION_SHAPE_VISIBLE};
+        for (int bit : bits) if (a->getTekiOption(bit)) s.hiddenOpts |= bit;
+        a->clearTekiOption(s.hiddenOpts);
+    } else {
+        a->setTekiOption(s.hiddenOpts);
+    }
+    s.hidden = hide;
 }
 
 void enter(Dango& s, State state, const char* clip) {
@@ -364,10 +418,17 @@ void enter(Dango& s, State state, const char* clip) {
     s.turnClosed = false;
     s.flickHit.clear();
     s.flickWindow = -1;
+    s.finishAt = -1.0f;
+    s.rollTimer = 0.0f;
+    s.wallTouched = false;
     // Leave the body invulnerable on every transition; the Turn window reopens
     // it while stickable. attackRejectedLogged is per-window, not per-state.
     s.stickable = false;
-    if (clip) s.clip = clip;
+    // Clip per state comes from the policy table (DangoMushiState.cpp anim ids);
+    // the literal passed by the caller is only a fallback.
+    const char* mapped = p2dango::stateClip(stateName(state));
+    if (mapped) s.clip = mapped;
+    else if (clip) s.clip = clip;
 }
 void setState(BTeki* a, Dango& s, State state, const char* clip) {
     enter(s, state, clip);
@@ -375,8 +436,36 @@ void setState(BTeki* a, Dango& s, State state, const char* clip) {
     // stable own-token for evidence. Fixes generator=0 STATE attribution.
     const unsigned generator = pc_p2_campaign_token(a) ? pc_p2_campaign_token(a)
         : (a->mGenerator ? a->mGenerator->_70 : 0u);
-    std::printf("P2_DANGOMUSHI_STATE generator=%u state=%s\n", generator, stateName(state));
+    std::printf("P2_DANGOMUSHI_STATE generator=%u state=%s clip=%s\n", generator,
+                stateName(state), s.clip.c_str());
+    std::printf("P2_DANGO_STATE generator=%u state=%s clip=%s loop=%d hidden=%d\n", generator,
+                stateName(state), s.clip.c_str(), p2dango::clipLoops(s.clip.c_str()) ? 1 : 0,
+                int(s.hidden));
     std::fflush(stdout);
+    // P1 Cannon Beetle / boulder bank approximation (output-only, #946).
+    switch (state) {
+    case DANGO_TURN: pc_p2_sfx(94, generator, p2sfx::Event::Expose, a); break;
+    case DANGO_FLICK: pc_p2_sfx(94, generator, p2sfx::Event::Flick, a); break;
+    case DANGO_RECOVER: pc_p2_sfx(94, generator, p2sfx::Event::Attack, a); break;
+    case DANGO_DEAD: pc_p2_sfx(94, generator, p2sfx::Event::Dead, a); break;
+    default: break;
+    }
+}
+
+// Source finishMotion() + KEYEVENT_END transit (StateWait/StateMove): the
+// queued state starts only when the current clip pass ends, so the crab
+// finishes its wait/walk cycle before rolling or walking again.
+bool advanceFinish(BTeki* a, Dango& s, State next) {
+    s.nextState = next;
+    if (s.finishAt < 0.0f) {
+        const float len = clipDuration(s.clip) > 0.0f ? clipDuration(s.clip) : 1.0f;
+        s.finishAt = (std::floor(s.stateTime / len) + 1.0f) * len;
+    }
+    if (s.stateTime < s.finishAt) return false;
+    const char* clip = next == DANGO_ATTACK ? "attack" : next == DANGO_MOVE ? "move" : "wait";
+    if (next == DANGO_MOVE && s.state == DANGO_WAIT) setRandTarget(s);
+    setState(a, s, next, clip);
+    return true;
 }
 
 // Source Obj::rollingMove: steer toward the active Navi (else the nearest
@@ -423,7 +512,9 @@ void rollCrush(BTeki* a, Dango& s, const Vector3f& pos, unsigned generator) {
         cand.dz = q.z - pos.z;
         cand.grounded = c->mGroundTriangle != nullptr;
         cand.alive = true;
+        cand.reach = c->getSize(); // the target's own collision size joins the ball radius
         if (!s.crush.shouldPress(cand, s.stateTime)) return;
+        const float hitDist = std::sqrt(cand.dx * cand.dx + cand.dz * cand.dz);
         const float damage = p2dango::pressDamage(piki, c->mHealth);
         const bool took = c->stimulate(InteractPress(a, damage));
         // Only accepted presses count (a Pikmin already pressed, invincible
@@ -433,9 +524,10 @@ void rollCrush(BTeki* a, Dango& s, const Vector3f& pos, unsigned generator) {
             if (piki) s.rollCrushed.insert(static_cast<Piki*>(c));
         }
         std::printf("P2_DANGOMUSHI_PRESS generator=%u target=%s:%llx accepted=%d damage=%.1f "
-                    "lethal=%d roll_targets=%zu\n", generator, kind,
+                    "lethal=%d roll_targets=%zu dist=%.1f ball_radius=%.1f target_size=%.1f reach=%.1f\n", generator, kind,
                     static_cast<unsigned long long>(cand.token), int(took), damage,
-                    int(piki && took), s.rollTargets.size());
+                    int(piki && took), s.rollTargets.size(), hitDist, ROLL_BALL_RADIUS, cand.reach,
+                    ROLL_BALL_RADIUS + cand.reach);
         std::fflush(stdout);
     };
     if (naviMgr) for (Navi* n : pc_p2_navis()) consider(n, "navi", false);
@@ -507,6 +599,47 @@ void shakeStickers(BTeki* a, Dango& s, unsigned generator) {
     std::printf("P2_DANGOMUSHI_SHAKE generator=%u stuck=%zu count=%d purple=%d wither=%d "
                 "frame=%.1f t=%.2f\n", generator, stuck.size(), purple + wither, purple, wither,
                 s.turnClock.frame, s.stateTime);
+    std::fflush(stdout);
+}
+
+// #stick diagnostics: the host CollInfo part tree and the Pikmin around the body
+// while the Turn window is open. The host parts (P1 Swallow) are what Pikmin
+// actually latch to; the drawn P2 crab is a baked-pose model.
+void logPartTree(CollPart* part, const Vector3f& pos, unsigned generator, int depth) {
+    if (!part || depth > 6) return;
+    const u32 id = part->getID().mId;
+    std::printf("P2_DANGOMUSHI_STICK_PART generator=%u id=%c%c%c%c depth=%d radius=%.1f "
+                "dx=%.1f dy=%.1f dz=%.1f stickable=%d type=%d\n", generator,
+                char(id >> 24), char(id >> 16), char(id >> 8), char(id), depth, part->mRadius,
+                part->mCentre.x - pos.x, part->mCentre.y - pos.y, part->mCentre.z - pos.z,
+                int(part->isStickable()), int(part->mPartType));
+    const int n = part->getChildCount();
+    for (int i = 0; i < n; ++i) logPartTree(part->getChildAt(i), pos, generator, depth + 1);
+}
+
+void logStickSurface(BTeki* a, const Vector3f& pos, unsigned generator, bool tree) {
+    if (tree && a->mCollInfo) logPartTree(a->mCollInfo->getBoundingSphere(), pos, generator, 0);
+    const std::vector<Piki*> stuck = stuckPikis(a);
+    int near = 0;
+    float nearest = 1e9f;
+    if (pikiMgr) {
+        Iterator it(pikiMgr);
+        CI_LOOP(it) {
+            Piki* p = static_cast<Piki*>(*it);
+            if (!p || !p->isAlive()) continue;
+            const Vector3f q = p->getPosition();
+            const float d = std::sqrt((q.x - pos.x) * (q.x - pos.x) + (q.z - pos.z) * (q.z - pos.z));
+            if (d < 160.0f) ++near;
+            if (d < nearest) nearest = d;
+        }
+    }
+    std::printf("P2_DANGOMUSHI_STICK generator=%u stuck=%zu pikmin_within_160=%d nearest_pikmin=%.1f\n",
+                generator, stuck.size(), near, nearest);
+    for (Piki* p : stuck) {
+        const Vector3f q = p->getPosition();
+        std::printf("P2_DANGOMUSHI_STICK_PIKI generator=%u dx=%.1f dy=%.1f dz=%.1f\n", generator,
+                    q.x - pos.x, q.y - pos.y, q.z - pos.z);
+    }
     std::fflush(stdout);
 }
 
@@ -1030,7 +1163,7 @@ void pc_p2_dangomushi_setup() {
                         Clip clip;
                         clip.name = name;
                         clip.duration = frames > 0 ? float(frames) / 30.0f : 1.0f;
-                        clip.loop = (name == "fly" || name == "wait" || name == "move");
+                        clip.loop = p2dango::clipLoops(name.c_str());
                         if (events != "-") {
                             size_t start = 0;
                             while (start < events.size()) {
@@ -1111,7 +1244,8 @@ void pc_p2_dangomushi_setup() {
         s.heading = actor->getDirection();
         s.moveTarget = s.home;
         actor->mHealth = LIFE;
-        enter(s, DANGO_STAY, "fly");
+        enter(s, DANGO_STAY, "wait");
+        if (stayHides()) setHidden(actor, s, true);
         // Ordinary-delivery bridge (lane 06 contract): bind source 94 so
         // GoalItem::suckMe grants onion:p2:94 exactly once. Single-use.
         pc_randomizer_p2_bind_source(static_cast<PelletView*>(actor), 94, key);
@@ -1122,7 +1256,10 @@ void pc_p2_dangomushi_setup() {
                     "x=%.7f y=%.7f z=%.7f health=%.1f max_health=%.1f behavior=native "
                     "source_FSM=implemented attack=interactpress_roll\n",
                     key, pos.x, pos.y, pos.z, actor->mHealth, LIFE);
-        std::printf("P2_DANGOMUSHI_STATE generator=%u state=stay\n", key);
+        std::printf("P2_DANGOMUSHI_STATE generator=%u state=stay clip=%s\n", key,
+                    s.clip.c_str());
+        std::printf("P2_DANGO_STATE generator=%u state=stay clip=%s loop=%d hidden=%d\n", key,
+                    s.clip.c_str(), p2dango::clipLoops(s.clip.c_str()) ? 1 : 0, int(s.hidden));
         std::fflush(stdout);
         found.insert(key);
     }
@@ -1228,6 +1365,7 @@ void pc_p2_dangomushi_wall(BTeki* actor, const Plane& plane) {
     if (it == actors.end()) return;
     Dango& s = it->second;
     if (s.state != DANGO_ATTACK || !s.rolling) return;
+    s.wallTouched = true;
     const Vector3f& n = plane.mNormal;
     if (!p2dango::wallCrash(true, s.driveX, 0.0f, s.driveZ, n.x, n.y, n.z)) return;
     const unsigned generator = tokenOf(actor);
@@ -1239,6 +1377,7 @@ void pc_p2_dangomushi_wall(BTeki* actor, const Plane& plane) {
                 n.z, s.stateTime, s.rollTargets.size(), pos.x, pos.z);
     std::fflush(stdout);
     logCrushTally(s, generator, "wall_crash");
+    pc_p2_sfx(94, generator, p2sfx::Event::Crash, actor);
     // mFsm->transit(this, DANGOMUSHI_Turn) straight from the wall callback.
     stop(actor);
     setState(actor, s, DANGO_TURN, "turn");
@@ -1373,6 +1512,8 @@ void pc_p2_dangomushi_update(BTeki* actor) {
     if (actor->mStoredDamage > 0.0f) {
         const float before = actor->mHealth;
         actor->makeDamaged();
+        if (actor->mHealth < before && actor->mHealth > 0.0f)
+            pc_p2_sfx(94, generator, p2sfx::Event::Damage, actor);
         if (actor->mHealth != before && (s.healthLogTimer <= 0.0f || actor->mHealth <= 0.0f)) {
             s.healthLogTimer = 0.5f;
             std::printf("P2_DANGOMUSHI_HEALTH generator=%u health=%.1f before=%.1f state=%s "
@@ -1401,16 +1542,32 @@ void pc_p2_dangomushi_update(BTeki* actor) {
     switch (s.state) {
     case DANGO_STAY:
         stop(actor);
-        // Source StateStay: wake when a target enters the source private radius.
-        if (nearestTarget(pos, PRIVATE_RADIUS)) {
-            setState(actor, s, DANGO_APPEAR, "fly");
+        // Source StateStay::exec (DangoMushiState.cpp:111-142): once a captain or
+        // Pikmin is inside the private radius the ground shadow starts growing
+        // (mShadowScale += 0.6 dt, Obj::addShadowScale); it keeps growing whether or
+        // not the target stays, and at 1.0 (1.67 s) the crab transits to Appear.
+        if (s.shadowScale <= 0.0f && nearestTarget(pos, PRIVATE_RADIUS)) {
+            s.shadowScale = 0.0001f;
+            std::printf("P2_DANGO_STAY_WAKE generator=%u radius=%.0f hidden=%d\n", generator,
+                        PRIVATE_RADIUS, int(s.hidden));
+            std::fflush(stdout);
+        }
+        if (s.shadowScale > 0.0f) {
+            s.shadowScale += 0.6f * dt;
+            if (s.shadowScale >= 1.0f) {
+                s.shadowScale = 1.0f;
+                setHidden(actor, s, false); // StateAppear::init disableEvent(EB_ModelHidden)
+                setState(actor, s, DANGO_APPEAR, "fly");
+            }
         }
         break;
     case DANGO_APPEAR:
         stop(actor);
         if (s.stateTime >= clipDuration("fly")) {
             Creature* target = nearestTarget(pos, SIGHT);
-            if (target) {
+            if (target && canAttack(pos, s, target)) {
+                setState(actor, s, DANGO_ATTACK, "attack");
+            } else if (target) {
                 setRandTarget(s);
                 setState(actor, s, DANGO_MOVE, "move");
             } else {
@@ -1420,34 +1577,38 @@ void pc_p2_dangomushi_update(BTeki* actor) {
         break;
     case DANGO_WAIT: {
         stop(actor);
+        // StateWait::exec: pick Attack/Move, finishMotion(); the wait clip plays
+        // out to END before the transit (DangoMushiState.cpp:250-284).
         Creature* target = nearestTarget(pos, SIGHT);
         if (target) {
-            if (canAttack(pos, s, target)) {
-                setState(actor, s, DANGO_ATTACK, "attack");
-            } else {
-                setRandTarget(s);
-                setState(actor, s, DANGO_MOVE, "move");
-            }
+            advanceFinish(actor, s, canAttack(pos, s, target) ? DANGO_ATTACK : DANGO_MOVE);
         } else if (s.stateTime > WAIT_TIME) {
-            setRandTarget(s);
-            setState(actor, s, DANGO_MOVE, "move");
+            advanceFinish(actor, s, DANGO_MOVE);
         }
         break;
     }
     case DANGO_MOVE: {
+        // StateMove::exec (DangoMushiState.cpp:311-372).
         Creature* target = nearestTarget(pos, SIGHT);
         if (target) {
             if (canAttack(pos, s, target)) {
-                setState(actor, s, DANGO_ATTACK, "attack");
-                break;
+                advanceFinish(actor, s, DANGO_ATTACK);
+            } else {
+                // Turn toward the target; walk only once within the fp21 cone.
+                const Vector3f tp = target->getPosition();
+                const bool lined = std::fabs(wrapPi(std::atan2(tp.x - pos.x, tp.z - pos.z)
+                                                    - s.heading)) <= ATTACK_ANGLE;
+                turnAndMove(actor, s, tp, MOVE_SPEED, WALK_TURN_RATE, WALK_MAX_TURN, lined);
             }
-            turnAndMove(actor, s, target->getPosition(), MOVE_SPEED,
-                        WALK_TURN_RATE, WALK_MAX_TURN);
         } else if (distXZ(pos, s.moveTarget) < MOVE_ARRIVE || s.stateTime > MOVE_TIMEOUT) {
-            setState(actor, s, DANGO_WAIT, "wait");
+            advanceFinish(actor, s, DANGO_WAIT);
         } else {
-            turnAndMove(actor, s, s.moveTarget, MOVE_SPEED, WALK_TURN_RATE, WALK_MAX_TURN);
+            const bool lined = std::fabs(wrapPi(std::atan2(s.moveTarget.x - pos.x,
+                                                           s.moveTarget.z - pos.z) - s.heading))
+                               <= 30.0f * PI / 180.0f;
+            turnAndMove(actor, s, s.moveTarget, MOVE_SPEED, WALK_TURN_RATE, WALK_MAX_TURN, lined);
         }
+        if (s.finishAt >= 0.0f) stop(actor); // isFinishMotion -> velocity 0
         break;
     }
     case DANGO_ATTACK: {
@@ -1463,6 +1624,7 @@ void pc_p2_dangomushi_update(BTeki* actor) {
             std::printf("P2_DANGOMUSHI_ROLL generator=%u frame=%.1f x=%.1f z=%.1f\n",
                         generator, float(rollStartFrame), pos.x, pos.z);
             std::fflush(stdout);
+            pc_p2_sfx(94, generator, p2sfx::Event::Roll, actor);
         }
         if (s.rolling && clock.tail) {
             // KEYEVENT_LOOP_END after finishMotion: mIsRolling/mIsBall clear.
@@ -1474,10 +1636,18 @@ void pc_p2_dangomushi_update(BTeki* actor) {
         }
         if (s.rolling) {
             rollingMove(actor, s, pos);
+            // Source rollingMove advances mStateTimer 1x, or 3x/5x (slow) while
+            // the body is against a wall (DangoMushi.cpp:428-437).
+            {
+                const float spd = std::sqrt(actor->mVelocity.x * actor->mVelocity.x
+                                            + actor->mVelocity.z * actor->mVelocity.z);
+                s.rollTimer += dt * (s.wallTouched ? (spd < 100.0f ? 5.0f : 3.0f) : 1.0f);
+                s.wallTouched = false;
+            }
             rollCrush(actor, s, pos, generator);
             // Turn only comes from pc_p2_dangomushi_wall (Obj::wallCallback).
             if (s.attackFinishAt < 0.0f
-                    && p2dango::rollExit(s.stateTime, false, distXZ(pos, s.home))
+                    && p2dango::rollExit(s.rollTimer, false, distXZ(pos, s.home))
                     == p2dango::RollExit::Wait) {
                 // StateAttack::exec 15 s: finishMotion, the loop runs out.
                 s.attackFinishAt = s.stateTime;
@@ -1543,6 +1713,16 @@ void pc_p2_dangomushi_update(BTeki* actor) {
                         s.stateTime, int(hzo.stickable), int(hzo.invulnerable),
                         int(s.turnClock.looping), int(s.turnClock.tail));
             std::fflush(stdout);
+        }
+        if (s.stickable) {
+            const bool first = s.stickLogTimer <= 0.0f;
+            s.stickLogTimer += dt;
+            if (first || s.stickLogTimer >= 1.0f) {
+                if (!first) s.stickLogTimer = 0.0001f;
+                logStickSurface(actor, pos, generator, first);
+            }
+        } else {
+            s.stickLogTimer = 0.0f;
         }
         s.turnJustEntered = false;
         if (!s.turnClosed && s.turnClock.closed) {
@@ -1610,6 +1790,8 @@ void pc_p2_dangomushi_update(BTeki* actor) {
         break;
     }
     if (s.state != DANGO_TURN && s.state != DANGO_DEAD) unstickOutsideWindow(actor, s, generator);
+    if (s.state == DANGO_MOVE || (s.state == DANGO_ATTACK && !s.rolling))
+        pc_p2_sfx_stride(94, generator, actor, 30.0f);
     setPhase(s);
     s.logTimer += dt;
     if (s.logTimer >= 1.0f) {

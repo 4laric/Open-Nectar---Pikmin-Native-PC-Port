@@ -39,6 +39,10 @@ bool pc_randomizer_p2_bound(unsigned source_id);
 unsigned pc_randomizer_p2_source_for_id(unsigned long generator_id);
 unsigned pc_randomizer_generator_id(const void* generator);
 void pc_randomizer_set_generator_id(const void* generator, unsigned uid);
+// Dev console (#942): register a runtime generator under a synthetic dev
+// target uid that is not in the spawn-slot catalogue. Only the dev console
+// calls this; the seed's ENEMY_P2 line must already bind the uid.
+void pc_randomizer_dev_set_generator_id(const void* generator, unsigned uid);
 // `sourceId70` is the generator's on-file id (Generator::_70); it is consulted
 // only for the P2 enemy bridge when the (stage,file,offset) spawn-slot catalogue
 // misses, via lane 04's p2-placement-slots.txt sidecar.

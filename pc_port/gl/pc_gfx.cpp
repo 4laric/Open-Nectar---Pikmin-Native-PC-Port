@@ -32,6 +32,7 @@
 
 #include "../timing/pc_render_packet.h"
 #include "pc_tev_shader.h"
+#include "pc_tev_order.h"
 #include "pc_gx_lighting_glsl.h"
 #include "pc_postprocess.h"
 #include "pc_texpack.h"
@@ -4363,6 +4364,20 @@ static bool proxyShotActive() {
     return sProxyShotEnabled;
 }
 
+static unsigned sFrameDumpBurst = 0;
+void pc_gfx_frame_dump_burst(unsigned frames) { sFrameDumpBurst = frames; }
+void pc_gfx_proxy_shot_notify_after(const char* key, int frames) {
+    if (!proxyShotActive()) return;
+    if (!key || *key == '\0') return;
+    const std::string k(key);
+    if (sProxyShotDone.count(k) != 0) return;
+    sProxyShotDone.insert(k);
+    ProxyShotPending pending;
+    pending.key = k;
+    pending.frame = sProxyShotFrame + uint64_t(frames > 1 ? frames : 1);
+    sProxyShotPending.push_back(pending);
+}
+
 void pc_gfx_proxy_shot_notify(const char* key) {
     if (!proxyShotActive()) return;
     if (!key || *key == '\0') return;
@@ -4374,6 +4389,14 @@ void pc_gfx_proxy_shot_notify(const char* key) {
     ProxyShotPending pending;
     pending.key = k;
     pending.frame = sProxyShotFrame + 30;
+    sProxyShotPending.push_back(pending);
+}
+
+void pc_gfx_proxy_shot_now(const char* key) {
+    if (!proxyShotActive() || !key || *key == '\0') return;
+    ProxyShotPending pending;
+    pending.key = key;
+    pending.frame = sProxyShotFrame + 1;
     sProxyShotPending.push_back(pending);
 }
 
@@ -4512,7 +4535,15 @@ void pc_gfx_present(void) {
             return v > 0 ? unsigned(v) : ~0u;
         }();
         ++dumpFrame;
-        if (dumpFrame % dumpEvery == 0 && dumpFrame >= dumpFrom && dumpFrame <= dumpTo && sRenderWidth > 0
+        // pc_gfx_frame_dump_burst(): a gameplay marker asks for the next frames (test-only,
+        // effective only while PIKMIN_FRAME_DUMP is set), so an attack effect can be captured
+        // without dumping every frame of the session.
+        bool burstDump = false;
+        if (sFrameDumpBurst > 0) {
+            --sFrameDumpBurst;
+            burstDump = (sFrameDumpBurst % 3u) == 0u;
+        }
+        if ((burstDump || (dumpFrame % dumpEvery == 0 && dumpFrame >= dumpFrom && dumpFrame <= dumpTo)) && sRenderWidth > 0
                 && sRenderHeight > 0) {
             std::vector<unsigned char> rgba(size_t(sRenderWidth) * sRenderHeight * 4);
             glBindFramebuffer_ptr(GL_READ_FRAMEBUFFER, sourceFramebuffer);
@@ -5113,7 +5144,9 @@ void pc_gfx_set_tev_order(GXTevStageID stage, GXTexCoordID coord, GXTexMapID map
     state_touched();
     if (stage >= GX_TEVSTAGE0 && stage < GX_MAXTEVSTAGE) {
         sTevStages[stage].texMap = map;
-        sTevStages[stage].texCoord = coord;
+        // GXSetTevOrder turns GX_TEXCOORD_NULL into TEXCOORD0 and keeps the texture
+        // enabled for a valid map (see pc_tev_order.h); the raw 0xFF used to be clamped to 3.
+        sTevStages[stage].texCoord = GXTexCoordID(pc_tev_order_texcoord(int(coord)));
         sTevStages[stage].textureEnabled = map >= GX_TEXMAP0 && map < GX_MAX_TEXMAP;
         if (chan == GX_COLOR_NULL || chan == GX_COLOR_ZERO) sTevStages[stage].rasChannel = -1;
         else if (chan == GX_COLOR1 || chan == GX_ALPHA1 || chan == GX_COLOR1A1) sTevStages[stage].rasChannel = 1;

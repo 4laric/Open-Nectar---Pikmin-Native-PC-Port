@@ -298,6 +298,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_boss_arena.cpp
     pc_port/pc_held_part.cpp
     pc_port/pc_p2_input_script.cpp
+    pc_port/pc_dev_console.cpp
     # TEST-ONLY headless autoplay bot (bot-impl): scripted player driving the
     # normal pad path. Env-gated (PIKMIN_RANDOMIZER_AUTOPLAY), inert otherwise.
     pc_port/pc_p2_autoplay.cpp
@@ -311,6 +312,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_route_planner.cpp
     pc_port/pc_p2_purple_flight.cpp
     pc_port/pc_p2_purple_feedback.cpp
+    pc_port/pc_p2_sfx.cpp
     pc_port/pc_p2_kochappy_stun.cpp
     pc_port/pc_p2_species.cpp
     pc_port/pc_p2_bulbmin.cpp
@@ -347,6 +349,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_mamuta_rules.cpp
     pc_port/pc_p2_mamuta_fsm.cpp
     pc_port/pc_p2_tank.cpp
+    pc_port/pc_p2_attack_fx.cpp
+    pc_port/pc_p2_gas_cloud.cpp
     pc_port/pc_p2_hiba.cpp
     pc_port/pc_p2_flora_actor.cpp
     pc_port/pc_p2_receipt_host.cpp
@@ -368,8 +372,10 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_armor.cpp
     pc_port/pc_p2_otakara.cpp
     pc_port/pc_p2_otakara_fx.cpp
+    pc_port/pc_p2_bomb_visual.cpp
     pc_port/pc_p2_elecbug.cpp
     pc_port/pc_p2_tamago.cpp
+    pc_port/pc_p2_astonish.cpp
     pc_port/pc_p2_imomushi.cpp
     pc_port/pc_p2_hana.cpp
     pc_port/pc_p2_tadpole.cpp
@@ -389,6 +395,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_long_legs_fsm.cpp
     pc_port/pc_p2_houdai_fsm.cpp
     pc_port/pc_p2_long_legs_ik.cpp
+    pc_port/pc_p2_bigfoot_fsm.cpp
     pc_port/pc_p2_long_legs.cpp
     pc_port/pc_p2_cannon_stone.cpp
     pc_port/pc_p2_egg_hazard.cpp
@@ -454,9 +461,14 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_p2_kurage_arena.cpp
     pc_port/pc_p2_kurage_visual.cpp
     pc_port/pc_p2_kurage_teki.cpp
+    pc_port/pc_p2_kurage_own_host.cpp
+    pc_port/pc_p2_kurage_fx.cpp
+    pc_port/pc_p2_flyer_coll.cpp
+    pc_port/pc_p2_body_coll.cpp
     pc_port/pc_p2_onikurage_mouth.cpp
     pc_port/pc_p2_onikurage_teki.cpp
     pc_port/pc_main.cpp
+    pc_port/pc_fatal_log.cpp
     pc_port/pc_window.cpp
     pc_port/pc_gyro.cpp
     pc_port/pc_pad_axis.cpp
@@ -908,6 +920,11 @@ add_executable(p2_dangomushi_hazard_test
 target_include_directories(p2_dangomushi_hazard_test PRIVATE pc_port)
 target_compile_options(p2_dangomushi_hazard_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_dangomushi_hazard_test COMMAND p2_dangomushi_hazard_test)
+add_executable(p2_sfx_policy_test
+    tools/p2_sfx_policy_test.cpp)
+target_include_directories(p2_sfx_policy_test PRIVATE pc_port)
+target_compile_options(p2_sfx_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_sfx_policy_test COMMAND p2_sfx_policy_test)
 add_executable(p2_dangomushi_policy_test
     tools/p2_dangomushi_policy_test.cpp)
 target_include_directories(p2_dangomushi_policy_test PRIVATE pc_port)
@@ -951,6 +968,21 @@ target_compile_options(p2_otakara_press_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -
 target_compile_definitions(p2_otakara_press_test PRIVATE
     P2_OTAKARA_PRESS_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
 add_test(NAME p2_otakara_press_test COMMAND p2_otakara_press_test)
+
+# Dweevil family fidelity (owner playtest 2026-09-30): collision parts (legs carry none, the
+# partless ground punch is refused), treasure pickup/carry/drop, the elemental attack window and
+# effect lifecycle, and slope speed / stall side-step. All policy is engine-free; the wiring is
+# checked against the source text.
+foreach(dweevil_test IN ITEMS part item attack stall)
+    string(TOUPPER ${dweevil_test} dweevil_test_upper)
+    add_executable(p2_otakara_${dweevil_test}_test
+        tools/p2_otakara_${dweevil_test}_test.cpp)
+    target_include_directories(p2_otakara_${dweevil_test}_test PRIVATE pc_port)
+    target_compile_options(p2_otakara_${dweevil_test}_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+    target_compile_definitions(p2_otakara_${dweevil_test}_test PRIVATE
+        P2_OTAKARA_${dweevil_test_upper}_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME p2_otakara_${dweevil_test}_test COMMAND p2_otakara_${dweevil_test}_test)
+endforeach()
 
 # wf7 dweevil-impl (#871): dead-Dweevil clip choice is engine-free and covers
 # all four species 59-62 (dead forces dead, never attack1).
@@ -1024,6 +1056,12 @@ target_include_directories(p2_long_legs_fsm_test PRIVATE pc_port)
 target_compile_options(p2_long_legs_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_long_legs_fsm_test COMMAND p2_long_legs_fsm_test)
 
+add_executable(p2_long_legs_pose_test
+    tools/p2_long_legs_pose_test.cpp)
+target_include_directories(p2_long_legs_pose_test PRIVATE pc_port)
+target_compile_options(p2_long_legs_pose_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_long_legs_pose_test COMMAND p2_long_legs_pose_test)
+
 add_executable(p2_houdai_fsm_test
     tools/p2_houdai_fsm_test.cpp
     pc_port/pc_p2_houdai_fsm.cpp
@@ -1038,6 +1076,15 @@ add_executable(p2_long_legs_ik_test
 target_include_directories(p2_long_legs_ik_test PRIVATE pc_port)
 target_compile_options(p2_long_legs_ik_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_long_legs_ik_test COMMAND p2_long_legs_ik_test)
+
+add_executable(p2_bigfoot_fsm_test
+    tools/p2_bigfoot_fsm_test.cpp
+    pc_port/pc_p2_bigfoot_fsm.cpp
+    pc_port/pc_p2_long_legs_ik.cpp
+    pc_port/pc_p2_long_legs_fsm.cpp)
+target_include_directories(p2_bigfoot_fsm_test PRIVATE pc_port)
+target_compile_options(p2_bigfoot_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_bigfoot_fsm_test COMMAND p2_bigfoot_fsm_test)
 
 add_executable(p2_inst_legs_policy_test
     tools/p2_inst_legs_policy_test.cpp
@@ -1312,6 +1359,16 @@ add_executable(p2_hana_events_test
 target_include_directories(p2_hana_events_test PRIVATE pc_port)
 target_compile_options(p2_hana_events_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_hana_events_test COMMAND p2_hana_events_test)
+add_executable(p2_hana_residual_policy_test
+    tools/p2_hana_residual_policy_test.cpp)
+target_include_directories(p2_hana_residual_policy_test PRIVATE pc_port)
+target_compile_options(p2_hana_residual_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_hana_residual_policy_test COMMAND p2_hana_residual_policy_test)
+add_executable(p2_hana_sleep_policy_test
+    tools/p2_hana_sleep_policy_test.cpp)
+target_include_directories(p2_hana_sleep_policy_test PRIVATE pc_port)
+target_compile_options(p2_hana_sleep_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_hana_sleep_policy_test COMMAND p2_hana_sleep_policy_test)
 
 add_executable(p2_catfish_events_test
     tools/test_p2_catfish_events.cpp)
@@ -1347,11 +1404,37 @@ target_compile_options(p2_proxy_table_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_proxy_table_test COMMAND p2_proxy_table_test)
 
 # Campaign host policy (#871): engine-free hostType/hasStaticHost contract.
+add_executable(p2_queen_own_test
+    pc_port/pc_p2_queen_own_test.cpp)
+target_include_directories(p2_queen_own_test PRIVATE pc_port)
+target_compile_options(p2_queen_own_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_queen_own_test COMMAND p2_queen_own_test)
+
+# Dense Queen/larva pose bank + shared blend (#972): engine-free.
+add_executable(p2_queen_pose_test
+    pc_port/pc_p2_queen_pose_test.cpp)
+target_include_directories(p2_queen_pose_test PRIVATE pc_port)
+target_compile_options(p2_queen_pose_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_queen_pose_test COMMAND p2_queen_pose_test)
+
 add_executable(p2_campaign_policy_test
     pc_port/pc_p2_campaign_policy_test.cpp)
 target_include_directories(p2_campaign_policy_test PRIVATE pc_port)
 target_compile_options(p2_campaign_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_campaign_policy_test COMMAND p2_campaign_policy_test)
+
+add_executable(p2_tamago_policy_test
+    pc_port/pc_p2_tamago_policy_test.cpp)
+target_include_directories(p2_tamago_policy_test PRIVATE pc_port)
+target_compile_options(p2_tamago_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_tamago_policy_test COMMAND p2_tamago_policy_test)
+
+# Smoke-seed slot bypass (#944): engine-free env-gated predicate contract.
+add_executable(p2_smoke_any_slot_test
+    pc_port/pc_p2_smoke_any_slot_test.cpp)
+target_include_directories(p2_smoke_any_slot_test PRIVATE pc_port)
+target_compile_options(p2_smoke_any_slot_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_smoke_any_slot_test COMMAND p2_smoke_any_slot_test)
 
 # P2 boss arenas (owner ruling 2026-09-29): engine-free suppress/probe table.
 add_executable(p2_boss_arena_policy_test
@@ -1385,7 +1468,38 @@ target_include_directories(p2_tank_breath_test PRIVATE pc_port)
 target_compile_options(p2_tank_breath_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_tank_breath_test COMMAND p2_tank_breath_test)
 
+# Watery Blowhog breath stream layout (visual only).
+add_executable(p2_tank_stream_test tools/p2_tank_stream_test.cpp)
+target_include_directories(p2_tank_stream_test PRIVATE pc_port)
+target_compile_options(p2_tank_stream_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_tank_stream_test COMMAND p2_tank_stream_test)
+# Shared P2 attack-effect layouts/lifecycle and the Titan Dweevil weapon visuals
+# (engine-free). Laser selection finding for the owner playtest 2026-09-30.
+add_executable(p2_attack_fx_test tools/p2_attack_fx_test.cpp)
+target_include_directories(p2_attack_fx_test PRIVATE pc_port)
+target_compile_options(p2_attack_fx_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_attack_fx_test COMMAND p2_attack_fx_test)
+add_executable(p2_gas_cloud_test tools/p2_gas_cloud_test.cpp)
+target_include_directories(p2_gas_cloud_test PRIVATE pc_port)
+target_compile_options(p2_gas_cloud_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_gas_cloud_test COMMAND p2_gas_cloud_test)
+add_executable(p2_bigtreasure_fx_test
+    tools/p2_bigtreasure_fx_test.cpp
+    pc_port/pc_p2_bigtreasure.cpp
+    pc_port/pc_p2_bigtreasure_attacks.cpp
+    pc_port/pc_p2_bigtreasure_elements.cpp)
+target_include_directories(p2_bigtreasure_fx_test PRIVATE pc_port)
+target_compile_options(p2_bigtreasure_fx_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_bigtreasure_fx_test COMMAND p2_bigtreasure_fx_test)
+
+
 # Kabuto identity policy (inst2-frogs #871).
+# Antenna Beetle / Dirigibug smoothing helpers (#972): engine-free.
+add_executable(p2_fuefuki_bombsarai_smooth_test tools/p2_fuefuki_bombsarai_smooth_test.cpp)
+target_include_directories(p2_fuefuki_bombsarai_smooth_test PRIVATE pc_port)
+target_compile_options(p2_fuefuki_bombsarai_smooth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_fuefuki_bombsarai_smooth_test COMMAND p2_fuefuki_bombsarai_smooth_test)
+
 add_executable(p2_kabuto_fsm_policy_test tools/p2_kabuto_fsm_policy_test.cpp)
 target_include_directories(p2_kabuto_fsm_policy_test PRIVATE pc_port)
 target_compile_options(p2_kabuto_fsm_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
@@ -1508,6 +1622,11 @@ add_executable(p2_kurage_receiver_test tools/test_p2_kurage_receiver.cpp)
 target_include_directories(p2_kurage_receiver_test PRIVATE pc_port tools/kurage_receiver_stubs)
 target_compile_options(p2_kurage_receiver_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_kurage_receiver_test COMMAND p2_kurage_receiver_test)
+
+add_executable(p2_kurage_suction_test tools/test_p2_kurage_suction.cpp)
+target_include_directories(p2_kurage_suction_test PRIVATE pc_port)
+target_compile_options(p2_kurage_suction_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_kurage_suction_test COMMAND p2_kurage_suction_test)
 
 # Lane 12 captain/Kurage real-GL diagnostic (codex/p2-lane12-review
 # tools/p2_captain_kurage_runtime.cpp, adapted to the line epoch API).
@@ -1760,6 +1879,11 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_tev_shader_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_tev_shader_test COMMAND pc_tev_shader_test)
 
+    add_executable(pc_tev_order_test pc_port/gl/pc_tev_order_test.cpp)
+    target_include_directories(pc_tev_order_test PRIVATE pc_port/gl)
+    target_compile_options(pc_tev_order_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_tev_order_test COMMAND pc_tev_order_test)
+
     # Post-process shader generation (no GL context needed)
     add_executable(pc_postprocess_test
         pc_port/gl/pc_postprocess_test.cpp
@@ -1868,6 +1992,18 @@ add_executable(p2_elecbug_transport_test tools/p2_elecbug_transport_test.cpp pc_
 target_include_directories(p2_elecbug_transport_test PRIVATE pc_port)
 target_compile_options(p2_elecbug_transport_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_elecbug_transport_test COMMAND p2_elecbug_transport_test)
+add_executable(p2_elecbug_fsm_test tools/p2_elecbug_fsm_test.cpp)
+target_include_directories(p2_elecbug_fsm_test PRIVATE pc_port)
+target_compile_options(p2_elecbug_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_elecbug_fsm_test COMMAND p2_elecbug_fsm_test)
+add_executable(p2_elecbug_fx_test tools/p2_elecbug_fx_test.cpp)
+target_include_directories(p2_elecbug_fx_test PRIVATE pc_port)
+target_compile_options(p2_elecbug_fx_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_elecbug_fx_test COMMAND p2_elecbug_fx_test)
+add_executable(p2_species_unit_test tools/p2_species_unit_test.cpp)
+target_include_directories(p2_species_unit_test PRIVATE pc_port)
+target_compile_options(p2_species_unit_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_species_unit_test COMMAND p2_species_unit_test)
 
 # rd-p2-kurage-transport (#768): Kurage57 corpse -> carried -> exactly one
 # Onion receipt over the real delivery-host bridge (registration only).
@@ -1928,12 +2064,31 @@ add_executable(p2_chappy_fsm_test tools/p2_chappy_fsm_test.cpp)
 target_include_directories(p2_chappy_fsm_test PRIVATE pc_port)
 target_compile_options(p2_chappy_fsm_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_chappy_fsm_test COMMAND p2_chappy_fsm_test)
+add_executable(p2_chappy_adult_test tools/p2_chappy_adult_test.cpp)
+target_include_directories(p2_chappy_adult_test PRIVATE pc_port)
+target_compile_options(p2_chappy_adult_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_chappy_adult_test COMMAND p2_chappy_adult_test)
 # p2-884-chappy (#884): engine-free source mouth-slot eating (EnemyFunc::eatPikmin
 # geometry, capacity, eligibility, host-part mapping, King sweep, legacy oracle).
+add_executable(p2_mouth_snapshot_test tools/p2_mouth_snapshot_test.cpp)
+target_include_directories(p2_mouth_snapshot_test PRIVATE pc_port)
+target_compile_options(p2_mouth_snapshot_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_mouth_snapshot_test COMMAND p2_mouth_snapshot_test)
 add_executable(p2_chappy_mouth_test tools/p2_chappy_mouth_test.cpp)
 target_include_directories(p2_chappy_mouth_test PRIVATE pc_port)
 target_compile_options(p2_chappy_mouth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_chappy_mouth_test COMMAND p2_chappy_mouth_test)
+# #996: engine-free Skitter Leaf shake-off / carcass policy (source isStartFlick).
+add_executable(p2_sokkuri_flick_test tools/p2_sokkuri_flick_test.cpp)
+target_include_directories(p2_sokkuri_flick_test PRIVATE pc_port)
+target_compile_options(p2_sokkuri_flick_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_sokkuri_flick_test COMMAND p2_sokkuri_flick_test)
+# wave3 lane 53 (#289): engine-free Emperor Bulblax life-cycle rules (buried spawn,
+# proximity Appear, cross-Emperor request, bomb ingestion + stun clock, tongue tip table).
+add_executable(p2_king_life_test tools/p2_king_life_test.cpp)
+target_include_directories(p2_king_life_test PRIVATE pc_port)
+target_compile_options(p2_king_life_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_king_life_test COMMAND p2_king_life_test)
 # p2-886 (#886): engine-free captor mouth slots (Jigumo/Snagret/UmiMushi/
 # Armor/Uji eatPikmin geometry, Jigumo height check, Snagret facing boxes,
 # held registry + swallow, legacy XZ-nearest/raw-pointer oracle).
@@ -1941,6 +2096,18 @@ add_executable(p2_captor_mouth_test tools/p2_captor_mouth_test.cpp)
 target_include_directories(p2_captor_mouth_test PRIVATE pc_port)
 target_compile_options(p2_captor_mouth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_captor_mouth_test COMMAND p2_captor_mouth_test)
+# Cloaking Burrow-nit (Armor 15, #1014): retail collision tree (only dmg1 stickable), attack cone,
+# kamujnt bite sweep, captain hit and damage predicates. Engine-free.
+add_executable(p2_armor_policy_test tools/p2_armor_policy_test.cpp)
+target_include_directories(p2_armor_policy_test PRIVATE pc_port)
+target_compile_options(p2_armor_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_armor_policy_test COMMAND p2_armor_policy_test)
+
+# #995: Bloyster source policy (tail bulb is the only stickable part, damageCallBack, tongue tables).
+add_executable(p2_umimushi_policy_test tools/p2_umimushi_policy_test.cpp)
+target_include_directories(p2_umimushi_policy_test PRIVATE pc_port)
+target_compile_options(p2_umimushi_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_umimushi_policy_test COMMAND p2_umimushi_policy_test)
 # bot-impl (#871): TEST-ONLY headless autoplay bot policy. Engine-free:
 # the header-only Brain (states, timeouts, giveup/result markers, Kogane
 # damage-and-move-on) plus the inert-when-unset gate (registration only).
@@ -1982,6 +2149,29 @@ target_include_directories(p2_sarai_lifecycle_test BEFORE PRIVATE
     tools/p2_sarai_lifecycle_stubs pc_port)
 target_compile_options(p2_sarai_lifecycle_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_sarai_lifecycle_test COMMAND p2_sarai_lifecycle_test)
+
+# #215 latch fix: engine-free fixtures for the Demon anchor collision tree,
+# body offset, CF_IsFlying mirror and Lock-On peak pin (pc_p2_demon_anchor.h).
+add_executable(p2_demon_anchor_test tools/p2_demon_anchor_test.cpp)
+target_include_directories(p2_demon_anchor_test PRIVATE pc_port)
+target_compile_options(p2_demon_anchor_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_demon_anchor_test COMMAND p2_demon_anchor_test)
+
+# Wave 3 flyers (#960): CF_IsFlying mirror rule, retail Kurage collision tree,
+# walk/turn maths and the source clip clock driving the Kurage FSM.
+add_executable(p2_flyer_test tools/p2_flyer_test.cpp)
+target_include_directories(p2_flyer_test PRIVATE pc_port)
+target_compile_options(p2_flyer_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_flyer_test COMMAND p2_flyer_test)
+
+# Shared P2 body-collision fit (stuck Pikmin sit on the drawn surface).
+add_executable(p2_body_fit_test tools/p2_body_fit_test.cpp)
+target_include_directories(p2_body_fit_test PRIVATE pc_port)
+target_compile_options(p2_body_fit_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_body_fit_test COMMAND p2_body_fit_test)
+# Dev audit: fit every species rest pose in a content tree (tools/p2_body_fit_audit.cpp).
+add_executable(p2_body_fit_audit EXCLUDE_FROM_ALL tools/p2_body_fit_audit.cpp)
+target_include_directories(p2_body_fit_audit PRIVATE pc_port)
 
 # Lane 06: engine-free provider unit tests (header-only; previously present but unregistered).
 add_executable(p2_receipt_test tools/p2_receipt_test.cpp)
@@ -2067,6 +2257,16 @@ add_executable(p2_groink_volley_test tools/p2_groink_volley_test.cpp pc_port/pc_
 target_include_directories(p2_groink_volley_test PRIVATE pc_port)
 target_compile_options(p2_groink_volley_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_groink_volley_test COMMAND p2_groink_volley_test)
+# #892: three-shell burst policy (one emit key, same tick, +-0.1 jitter) and the retail
+# armour-cover collision policy (only `body` is stickable).
+add_executable(p2_groink_burst_test tools/p2_groink_burst_test.cpp pc_port/pc_p2_groink_volley.cpp pc_port/pc_p2_groink.cpp)
+target_include_directories(p2_groink_burst_test PRIVATE pc_port)
+target_compile_options(p2_groink_burst_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_groink_burst_test COMMAND p2_groink_burst_test)
+add_executable(p2_groink_coll_test tools/p2_groink_coll_test.cpp)
+target_include_directories(p2_groink_coll_test PRIVATE pc_port)
+target_compile_options(p2_groink_coll_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_groink_coll_test COMMAND p2_groink_coll_test)
 # #888 WP5: engine-free NormMiniHoudai/FixMiniHoudai source FSM (states,
 # animation key events, gun aim, 3-shell volleys, shake-off, death).
 # #898 Breadbug (PanModoki 38) engine-free source FSM.
@@ -2135,6 +2335,16 @@ target_include_directories(p2_purple_flight_actual_test BEFORE PRIVATE tools/p2_
 target_compile_options(p2_purple_flight_actual_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_purple_flight_actual_test COMMAND p2_purple_flight_actual_test)
 
+# Dev console grammar (#942): engine-free parser/species table contract.
+add_executable(pc_dev_console_parser_test pc_port/pc_dev_console_parser_test.cpp)
+target_include_directories(pc_dev_console_parser_test PRIVATE pc_port)
+target_compile_options(pc_dev_console_parser_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_dev_console_parser_test COMMAND pc_dev_console_parser_test)
+add_executable(pc_p2_life_gauge_test pc_port/pc_p2_life_gauge_test.cpp)
+target_include_directories(pc_p2_life_gauge_test PRIVATE pc_port)
+target_compile_options(pc_p2_life_gauge_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_p2_life_gauge_test COMMAND pc_p2_life_gauge_test)
+
 # #440 campaign setup failsafe: in bridge mode a species setup that cannot stage
 # its files logs P2_SETUP_SKIP and leaves the P1 stand-ins instead of aborting;
 # fixture mode stays fail-closed. Engine-free guard test.
@@ -2186,3 +2396,34 @@ endfunction()
 
 # #928 opt-in captain switching acceptance (requires local assets to run).
 pikmin_add_ci_fixture(captain_switch tools/p2_captain_switch_runtime.cpp)
+add_executable(p2_bomb_telegraph_test tools/p2_bomb_telegraph_test.cpp)
+target_include_directories(p2_bomb_telegraph_test PRIVATE pc_port)
+target_compile_options(p2_bomb_telegraph_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_bomb_telegraph_test COMMAND p2_bomb_telegraph_test)
+add_executable(p2_breadbug_corpse_test tools/p2_breadbug_corpse_test.cpp pc_port/pc_p2_breadbug_fsm.cpp)
+target_include_directories(p2_breadbug_corpse_test PRIVATE pc_port)
+target_compile_options(p2_breadbug_corpse_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_breadbug_corpse_test COMMAND p2_breadbug_corpse_test)
+# Demon living-body fade advance regression (#972): engine-free.
+add_executable(p2_demon_fade_test
+    pc_port/pc_p2_demon_fade_test.cpp)
+target_include_directories(p2_demon_fade_test PRIVATE pc_port)
+target_compile_options(p2_demon_fade_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+target_compile_definitions(p2_demon_fade_test PRIVATE DEMON_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/pc_port/pc_p2_sarai_demon.cpp")
+add_test(NAME p2_demon_fade_test COMMAND p2_demon_fade_test)
+
+add_executable(pc_corpse_origin_test tools/pc_corpse_origin_test.cpp)
+target_include_directories(pc_corpse_origin_test PRIVATE pc_port)
+target_compile_options(pc_corpse_origin_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_corpse_origin_test COMMAND pc_corpse_origin_test)
+
+add_executable(p2_breadbug_nest_test tools/p2_breadbug_nest_test.cpp)
+target_include_directories(p2_breadbug_nest_test PRIVATE pc_port)
+target_compile_options(p2_breadbug_nest_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_breadbug_nest_test COMMAND p2_breadbug_nest_test)
+
+# #1052 live squad reconciliation (engine-free, assertions enabled in Release).
+add_executable(p2_captain_reconciliation_test tools/test_p2_captain_reconciliation.cpp)
+target_include_directories(p2_captain_reconciliation_test PRIVATE pc_port)
+target_compile_options(p2_captain_reconciliation_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_captain_reconciliation_test COMMAND p2_captain_reconciliation_test)

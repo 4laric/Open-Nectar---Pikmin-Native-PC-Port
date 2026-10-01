@@ -6,6 +6,7 @@
 #include "pc_window.h"
 #include "pc_bbft.h"
 #include "pc_p2_cave.h"
+#include "pc_dev_console.h"
 #include "pc_gyro.h"
 #include "pc_icon.h"
 #if PIKI_PC_TOUCH
@@ -654,6 +655,10 @@ bool pc_window_init(const char* title, int width, int height) {
     };
     applyGlAttrs();
 
+    const bool testBackground = pc_randomizer_enabled() && pc_bbft_test_background();
+    const bool testVisible = pc_randomizer_enabled() && pc_bbft_test_visible();
+    // Visible agent runs must not steal focus from whatever the owner is using.
+    if (testVisible) SDL_SetHint(SDL_HINT_WINDOW_NO_ACTIVATION_WHEN_SHOWN, "1");
     bool retriedGpu = false;
     for (;;) {
         sWindow = SDL_CreateWindow(
@@ -662,8 +667,7 @@ bool pc_window_init(const char* title, int width, int height) {
             SDL_WINDOWPOS_CENTERED,
             sWindowWidth,
             sWindowHeight,
-            SDL_WINDOW_OPENGL | ((pc_randomizer_enabled() && std::getenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND")
-                && !std::strcmp(std::getenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND"), "1")) ? SDL_WINDOW_HIDDEN : SDL_WINDOW_SHOWN) | SDL_WINDOW_RESIZABLE
+            SDL_WINDOW_OPENGL | ((testBackground && !testVisible) ? SDL_WINDOW_HIDDEN : SDL_WINDOW_SHOWN) | SDL_WINDOW_RESIZABLE
 #ifdef __ANDROID__
                 // Modo inmersivo: SDLActivity oculta la barra de estado y los
                 // botones de navegación solo si la ventana es FULLSCREEN.
@@ -868,6 +872,9 @@ void pc_window_poll_events(PADStatus* pad) {
 
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        // #942 dev console: swallows its toggle key and, while open, every
+        // key/text event. No-op unless PIKMIN_DEV_CONSOLE=1.
+        if (pc_dev_console_handle_event(event)) continue;
         switch (event.type) {
             case SDL_QUIT:
                 sShouldClose = true;
@@ -1025,6 +1032,9 @@ void pc_window_poll_events(PADStatus* pad) {
     }
 
     const Uint8* state = SDL_GetKeyboardState(NULL);
+    // #942: while the dev console input is open the virtual pad reads no keys.
+    static const Uint8 sNoKeys[SDL_NUM_SCANCODES] = {0};
+    if (pc_dev_console_open()) state = sNoKeys;
     // Bindings may name a mouse button (issue #42); sample the mouse once here.
     const Uint32 boundMouse = SDL_GetMouseState(NULL, NULL);
     auto held = [&](int action) { return pc_window_binding_held(sKeyBindings[action], state, boundMouse); };

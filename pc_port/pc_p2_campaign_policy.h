@@ -24,6 +24,13 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
         return 3; // TEKI_Chappy: Bulbmin
     case 76:
         return 31; // TEKI_Chappb: Dwarf Bulbear
+    // #948 (#951 U26): Orange Bulborb (42) binds only a TEKI_Chappy vehicle
+    // (pc_p2_bluechappy.cpp bindActor); the Kabuto variants (95 Rkabuto,
+    // 96 Fkabuto) bind only TEKI_Beatle (pc_p2_enemy.cpp
+    // pc_p2_kabuto_bind_dynamic). Without a row they rode whatever the slot
+    // P1 original was and refused on every other slot.
+    case 42: return 3; // TEKI_Chappy: BlueChappy adult host
+    case 95: case 96: return 17; // TEKI_Beatle: Kabuto variant hosts
     // Sarai binds whatever type its anchor carries (pc_p2_sarai_manager.cpp:109,119),
     // so 3 here is the placement vehicle, not a requirement. "Kochappy" is the P2 name
     // for the Dwarf Bulborb; the P1 enum for it is TEKI_Chappy, and there is no
@@ -38,7 +45,7 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     case 13: return 19; // TEKI_KabekuiB: UjiB Male Sheargrub host
     case 14: return 20; // TEKI_KabekuiC: Tobi Shearwig host
     case 54: return 24; // TEKI_Miurin: Mamuta
-    case 57: case 78: return 0; // TEKI_Frog: Jellyfloat/Groink sidecar hosts
+    case 57: case 72: case 78: return 0; // TEKI_Frog: Jellyfloat (Kurage/OniKurage)/Groink sidecar hosts
     // #244 OWN: Careening Dirigibug rides the P1 flying vehicle TEKI_Napkid
     // (11); pc_p2_bombsarai_own_setup binds only this host type.
     case 58: return 11; // TEKI_Napkid: BombSarai OWN campaign host
@@ -72,9 +79,12 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     // #898: Breadbug (PanModoki 38) rides the P1 Breadbug host TEKI_Collec (8)
     // as a placement vehicle only; pc_p2_breadbug_teki runs the source FSM.
     case 38: return 8; // TEKI_Collec: Breadbug OWN vehicle
+    // #958: Giant Breadbug (OoPanModoki 40) runs the same OWN driver on the same vehicle.
+    case 40: return 8; // TEKI_Collec: Giant Breadbug OWN vehicle
     // #246 OWN: BigTreasure (Titan Dweevil) rides the TEKI_Swallow placement
     // vehicle driven by pc_p2_bigtreasure_teki (source-order core).
     case 73: return 4; // TEKI_Swallow: BigTreasure campaign actor
+    case 30: return 4; // TEKI_Swallow: Empress Bulblax OWN vehicle (#256, pc_p2_queen_teki)
     default: return original;
     }
 }

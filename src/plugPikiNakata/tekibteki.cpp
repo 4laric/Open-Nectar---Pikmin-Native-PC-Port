@@ -1,4 +1,9 @@
 #include "pc_p2_demon_host.h"
+#ifdef PIKI_PC_PORT
+#include "pc_p2_life_gauge_hooks.h"
+#include "pc_corpse_origin.h"
+#include <cstdio>
+#endif
 #include "pc_p2_sarai_manager.h"
 #include "pc_p2_umimushi.h"
 #include "pc_p2_jigumo.h"
@@ -9,6 +14,7 @@
 #include "pc_p2_mar.h"
 #include "pc_p2_tadpole.h"
 #include "pc_p2_hana.h"
+#include "pc_p2_body_coll.h"
 #include "pc_p2_kurage_teki.h"
 #include "pc_p2_groink_teki.h"
 #include "pc_p2_breadbug_teki.h"
@@ -163,6 +169,9 @@ Vector3f BTeki::viewGetScale()
  */
 f32 BTeki::viewGetBottomRadius()
 {
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	return pc_p2_queen_teki_corpse_radius(this, mTekiParams->getF(TPF_CorpseSize));
+#endif
 	return mTekiParams->getF(TPF_CorpseSize);
 }
 
@@ -183,7 +192,7 @@ void BTeki::viewDraw(Graphics& gfx, immut Matrix4f& mat)
 	mTekiAnimator->updateContext();
 	mTekiShape->mShape->updateAnim(gfx, mat, nullptr, this);
 #ifdef PIKI_PC_PORT
-    if (!pc_p2_demon_manager_draw_actor(this, gfx, mat, true) && !pc_p2_sarai_manager_draw_actor(this, gfx, mat, true) && !pc_p2_kurage_teki_draw(this, gfx, mat, true) && !pc_p2_groink_teki_draw(this, gfx, mat, true) && !pc_p2_bombsarai_teki_draw(this, gfx, mat, true) && !pc_p2_fuefuki_teki_draw(this, gfx, mat, true) && !pc_p2_breadbug_teki_draw(this, gfx, mat, true) && !pc_p2_bigtreasure_teki_draw(this, gfx, mat, true) && !pc_p2_kogane_draw(this, gfx, mat, true) && !pc_p2_mamuta_draw(this, gfx, mat, true) && !pc_p2_frog_draw(this, gfx, mat, true) && !pc_p2_tank_draw(this, gfx, mat, true) && !pc_p2_kabuto_fsm_draw(this, gfx, mat, true) && !pc_p2_qurione_draw(this, gfx, mat, true) && !pc_p2_shijimi_draw(this, gfx, mat, true) && !pc_p2_dwarf_orange_draw(this, gfx, mat, true) && !pc_p2_kochappy_draw(this, gfx, mat, true) && !pc_p2_chappy_draw(this, gfx, mat, true) && !pc_p2_sheargrub_draw(this, gfx, mat, true) && !pc_p2_snow_draw(this, gfx, mat, true) && !pc_p2_batch2_draw(this, gfx, mat, true) && !pc_p2_batch3_draw(this, gfx, mat, true) && !pc_p2_long_legs_draw(this, gfx, mat, true) && !pc_hd_model_draw_skinned(gfx, mTekiShape->mShape, hdModel(), hdTint()))
+    if (!pc_p2_demon_manager_draw_actor(this, gfx, mat, true) && !pc_p2_sarai_manager_draw_actor(this, gfx, mat, true) && !pc_p2_kurage_teki_draw(this, gfx, mat, true) && !pc_p2_groink_teki_draw(this, gfx, mat, true) && !pc_p2_queen_teki_draw(this, gfx, mat, true) && !pc_p2_bombsarai_teki_draw(this, gfx, mat, true) && !pc_p2_fuefuki_teki_draw(this, gfx, mat, true) && !pc_p2_breadbug_teki_draw(this, gfx, mat, true) && !pc_p2_bigtreasure_teki_draw(this, gfx, mat, true) && !pc_p2_kogane_draw(this, gfx, mat, true) && !pc_p2_mamuta_draw(this, gfx, mat, true) && !pc_p2_frog_draw(this, gfx, mat, true) && !pc_p2_tank_draw(this, gfx, mat, true) && !pc_p2_kabuto_fsm_draw(this, gfx, mat, true) && !pc_p2_qurione_draw(this, gfx, mat, true) && !pc_p2_shijimi_draw(this, gfx, mat, true) && !pc_p2_dwarf_orange_draw(this, gfx, mat, true) && !pc_p2_kochappy_draw(this, gfx, mat, true) && !pc_p2_chappy_draw(this, gfx, mat, true) && !pc_p2_sheargrub_draw(this, gfx, mat, true) && !pc_p2_snow_draw(this, gfx, mat, true) && !pc_p2_batch2_draw(this, gfx, mat, true) && !pc_p2_batch3_draw(this, gfx, mat, true) && !pc_p2_long_legs_draw(this, gfx, mat, true) && !pc_hd_model_draw_skinned(gfx, mTekiShape->mShape, hdModel(), hdTint()))
 #endif
 	mTekiShape->mShape->drawshape(gfx, *gfx.mCamera, nullptr);
 }
@@ -563,6 +572,8 @@ void BTeki::update()
 	pc_p2_kochappy_fsm_update(this);
 	pc_p2_mamuta_fsm_update(this);
 	pc_p2_chappy_update(this);
+	// Shared P2 body collision: fitted spheres on the drawn mesh (after every species tick).
+	pc_p2_body_coll_update(this);
 #endif
 	if (mDeadState == 0) {
 		updateTimers();
@@ -576,6 +587,9 @@ void BTeki::update()
 			}
 		}
 	}
+#ifdef PIKI_PC_PORT
+	pc_p2_life_gauge_update(this);
+#endif
 }
 
 /**
@@ -726,6 +740,10 @@ void BTeki::doAI()
 	if (pc_p2_groink_teki_suppress_ai(this)) {
 		return;
 	}
+	// Wave 3 flyers (#960): campaign OWN Jellyfloat runs its source FSM.
+	if (pc_p2_kurage_teki_suppress_ai(this)) {
+		return;
+	}
 	if (pc_p2_bombsarai_teki_suppress_ai(this)) {
 		return;
 	}
@@ -736,6 +754,9 @@ void BTeki::doAI()
 		return;
 	}
 	if (pc_p2_bigtreasure_teki_suppress_ai(this)) {
+		return;
+	}
+	if (pc_p2_queen_teki_suppress_ai(this)) {
 		return;
 	}
 	if (pc_p2_catfish_suppress_ai(this)) {
@@ -846,6 +867,23 @@ void BTeki::dieSoon()
 			PRINT_NAKATA("dieSoon:%08x:'carc'\n", this);
 			vec1.set(carcass->mCentre);
 		}
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+		// #972/#1022: the 'carc' and 'cent' sphere centres are only written by
+		// CollInfo::updateInfo in refresh. A teki killed before its first refresh
+		// still has (0,0,0) there, so the corpse spawned at the world origin.
+		// Checked against mSRT.t (always valid): an implausible centre falls back
+		// to the teki position; a valid one is kept (vanilla placement).
+		{
+			const Vector3f body = mSRT.t;
+			if (!pc_corpse_origin::carcassUsable(vec1.x, vec1.y, vec1.z, body.x, body.y, body.z,
+			                                     getTekiCollisionSize())) {
+				std::printf("PC_CORPSE_ORIGIN_FALLBACK teki=%d part=%s centre=%.1f,%.1f,%.1f pos=%.1f,%.1f,%.1f\n",
+				            int(mTekiType), carcass ? "carc" : "cent", vec1.x, vec1.y, vec1.z, body.x, body.y, body.z);
+				std::fflush(stdout);
+				vec1.set(body);
+			}
+		}
+#endif
 
 		becomePellet(typeID, vec1, getDirection());
 		PRINT_NAKATA("dieSoon:%08x:pellet:%08x\n", this, mPellet);
@@ -2008,6 +2046,11 @@ void BTeki::collisionCallback(immut CollEvent& event)
  */
 bool BTeki::ignoreAtari(Creature* target)
 {
+#if defined(PIKI_PC_PORT) && PIKI_PC_PORT
+	if (pc_p2_queen_teki_ignore_atari(this, target)) {
+		return true;
+	}
+#endif
 	if (target->getStickObject() == this) {
 		return true;
 	}
@@ -2063,6 +2106,18 @@ bool BTeki::interact(immut TekiInteractionKey& key)
 		setCreaturePointer(1, attack->mOwner);
 		return true;
 	}
+	// #256 Empress Bulblax OWN: Queen::damageCallBack / Baby default intake.
+	if (key.mInteractionType == TekiInteractType::Attack && !getTekiOption(TEKIOPT_Invincible)) {
+		InteractAttack* attack = (InteractAttack*)key.mInteraction;
+		const int queen = pc_p2_queen_teki_attack(this, attack->mOwner, attack->mDamage);
+		if (queen >= 0) {
+			if (queen > 0) {
+				_344 = attack->getDamagePortion();
+				setCreaturePointer(1, attack->mOwner);
+			}
+			return queen > 0;
+		}
+	}
 #endif
 	TekiStrategy* strat = getStrategy();
 	return strat->interact(*static_cast<Teki*>(this), key);
@@ -2080,6 +2135,10 @@ bool BTeki::interactDefault(immut TekiInteractionKey& key)
 			return false;
 		}
 
+		// Dweevil carrying a treasure: damageTreasure takes the hit (OtakaraBase.cpp:563-574).
+		if (pc_p2_otakara_divert(this, attack->mOwner, attack->mDamage)) {
+			return true;
+		}
 		_344 = attack->getDamagePortion();
 		mStoredDamage += attack->mDamage;
 		pc_p2_otakara_attack(this, attack->mOwner, "InteractAttack");
@@ -2243,7 +2302,23 @@ void BTeki::drawDefault(Graphics& gfx)
 	clearTekiOption(TEKIOPT_Drawed);
 
 	f32 rad = getBoundingSphereRadius();
+#ifdef PIKI_PC_PORT
+	// Bound Empress/larva: cull on the drawn P2 body, not the small P1 host sphere.
+	Vector3f cullCentre = getBoundingSphereCentre();
+	float p2Radius;
+	if (pc_p2_queen_teki_cull_bounds(this, &p2Radius)) {
+		cullCentre = mSRT.t;
+		rad        = p2Radius;
+	}
+	float legsCentre[3];
+	if (pc_p2_long_legs_cull_bounds(this, legsCentre, &p2Radius)) { // #1018 P2 LOD sphere
+		cullCentre.set(legsCentre[0], legsCentre[1], legsCentre[2]);
+		rad = p2Radius;
+	}
+	if (!gfx.mCamera->isPointVisible(cullCentre, rad)) {
+#else
 	if (!gfx.mCamera->isPointVisible(getBoundingSphereCentre(), rad)) {
+#endif
 		enableAICulling();
 	} else {
 		disableAICulling();
@@ -2370,14 +2445,29 @@ void BTeki::drawRange(Graphics& gfx, immut Vector3f& centre, f32 range, immut Co
  */
 void BTeki::refresh2d(Graphics& gfx)
 {
+#ifdef PIKI_PC_PORT
+	const bool gaugeDrawn = mDeadState == 0 && tekiMgr->hasModel(mTekiType) && isVisible() && !isCreatureFlag(CF_UseAICulling)
+	                     && getTekiOption(TEKIOPT_LifeGaugeVisible);
+	pc_p2_life_gauge_audit(this, gaugeDrawn);
+#endif
 	if (mDeadState != 0 || !tekiMgr->hasModel(mTekiType) || !isVisible() || isCreatureFlag(CF_UseAICulling)) {
 		return;
 	}
 
+#ifdef PIKI_PC_PORT
+	// Volatile Dweevil: draw the carried bomb's countdown wheel instead of a gauge of its own.
+	if (pc_p2_otakara_bomb_gauge(this, gfx)) {
+		return;
+	}
+#endif
 	if (getTekiOption(TEKIOPT_LifeGaugeVisible)) {
-		immut Vector3f& pos = getCentre();
+		Vector3f pos = getCentre();
+		f32 gaugeOffsetY = getParameterF(TPF_LifeGaugeOffset);
+#ifdef PIKI_PC_PORT
+		pc_p2_life_gauge_place(this, pos, gaugeOffsetY);
+#endif
 		mLifeGauge.mPosition.input(pos);
-		mLifeGauge.mOffset.y = getParameterF(TPF_LifeGaugeOffset);
+		mLifeGauge.mOffset.y = gaugeOffsetY;
 		mLifeGauge.mScale    = 5000.0f / gfx.mCamera->mNear;
 		mLifeGauge.refresh(gfx);
 	}

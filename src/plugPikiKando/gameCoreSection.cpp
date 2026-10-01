@@ -1,4 +1,5 @@
 #include "pc_p2_ship.h"
+#include "pc_dev_console.h"
 #include "pc_p2_ship_store.h"
 #include "pc_p2_purple.h"
 #include "pc_p2_purple_motion.h"
@@ -1710,6 +1711,8 @@ void GameCoreSection::initStage()
 	memStat->start("teki");
 	int oldT = gsys->setHeap(SYSHEAP_Teki);
 	if (pc_randomizer_progg_traps()) tekiMgr->mUsingType[TEKI_Dororo] = true;
+	// #942 dev console: load the P1 host vehicles of every dev-bound species.
+	pc_dev_console_reserve_host_types();
 	tekiMgr->startStage();
 	gsys->setHeap(oldT);
 	memStat->end("teki");
@@ -2455,6 +2458,10 @@ void GameCoreSection::update()
 	pcDebugKeys();
 	pcVsMarkKey();
 #endif
+#if defined(PIKI_PC_PORT)
+	// #942 dev console: runs queued/script commands on the gameplay thread.
+	pc_dev_console_update();
+#endif
 	if (!gameflow.mMoviePlayer->mIsActive && !mDoneSundownWarn && gameflow.mWorldClock.mTimeOfDay >= gameflow.mParameters->mNightWarning()
 	    && (flowCont.mGameEndFlag != GAMEEND_PikminExtinction || flowCont.mGameEndFlag != GAMEEND_NaviDown)) {
 		if (playerState->inDayEnd()) {
@@ -2478,6 +2485,7 @@ void GameCoreSection::update()
 	}
 	pc_p2_hardlanes_update();
 	pc_p2_projectiles_update();
+	pc_p2_queen_teki_frame();
 	pc_p2_kabuto_fsm_update_stones();
 	pc_p2_bombsarai_teki_update_bombs();
 	pc_p2_long_legs_update_all();
@@ -4330,6 +4338,7 @@ void GameCoreSection::draw(Graphics& gfx)
 	}
 	pc_p2_cave_draw_transition(gfx);
 	pc_p2_breadbug_visual_draw(gfx);
+	pc_p2_breadbug_teki_draw_nests(gfx);
 	pc_p2_giant_breadbug_visual_draw(gfx);
 	pc_p2_bulblax_visual_draw(gfx);
 	pc_p2_queen_draw(gfx);

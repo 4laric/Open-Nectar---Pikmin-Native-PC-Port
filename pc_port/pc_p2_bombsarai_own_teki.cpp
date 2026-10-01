@@ -25,6 +25,7 @@
 //    pc_randomizer_p2_bind_source, so the ordinary Onion/Pod suck grants
 //    onion:p2:58 for this token. Nothing is teleported or re-configured.
 #include "pc_p2_bombsarai_teki.h"
+#include "pc_p2_sfx.h"
 #include "pc_p2_bombsarai_own.h"
 #include "pc_p2_bombsarai_bomb.h"
 #include "pc_p2_bombsarai_clock.h"
@@ -45,6 +46,9 @@
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "Shape.h"
+#include "pc_p2_fb_smooth.h"
+#include "pc_p2_pose_family.h"
+#include <algorithm>
 #include "Texture.h"
 #include "gameflow.h"
 #include "gl/pc_gfx.h"
@@ -95,6 +99,19 @@ p2bsown::Bank sBank = p2bsown::defaultBank();
 std::vector<Shape*> sPoses[p2bsown::AnimCount];   // parallel to sBank.clip[a].poses
 std::vector<Shape*> sBombPoses[2];
 bool sPosesLoaded = false;
+// #972: lerp + 150 ms crossfade over the shared pose bank for the Dirigibug and
+// its bomb (the nearest Shapes above stay the fallback; PIKMIN_P2_INTERPOLATION=0
+// keeps them). Presentation only.
+p2posefamily::Bank sPoseBank("BOMBSARAI"), sBombPoseBank("BOMBSARAI_BOMB");
+p2posefamily::Actors sPoseVis, sBombVis;
+std::size_t sDiskBytes = 0;
+// A clip is bank-loadable when its staged files are numbered 0..N-1 (the
+// extractor names poses by sample index; an old dead1 tree skipped some).
+bool contiguousFiles(const std::vector<int>& files) {
+    for (std::size_t k = 0; k < files.size(); ++k)
+        if (files[k] != int(k)) return false;
+    return true;
+}
 
 P2BombSaraiBombPool sPool(16);
 P2BombSaraiBombConfig sBombConfig;
@@ -217,9 +234,77 @@ void loadAssets() {
     for (int b = 0; b < sBank.bombClipCount; ++b)
         if (sBank.bombClip[b].name == "hit_loop") sBombConfig.armLoopTicks = sBank.bombClip[b].frames;
     Shape* shared = nullptr;
-    std::size_t total = 0, poses = 0;
+    std::size_t total = 0, poses = 0, bombPoses = 0;
+    sPoseBank.reset();
+    sBombPoseBank.reset();
+    sPoseVis.clear();
+    sBombVis.clear();
+    sDiskBytes = 0;
     bool ok = staged > 0;
-    for (int a = 0; ok && a < p2bsown::AnimCount; ++a) {
+    // Preferred: compact pose-bank loader (every pose decoded, a few nearest
+    // Shapes). A bank whose files are not numbered 0..N-1 keeps the legacy
+    // one-Shape-per-pose load, without interpolation (reported).
+    bool dense = ok;
+    for (int a = 0; a < p2bsown::AnimCount; ++a) {
+        std::vector<int> files;
+        for (const auto& pose : sBank.clip[a].poses) files.push_back(pose.file);
+        if (!contiguousFiles(files)) dense = false;
+    }
+    for (int b = 0; b < sBank.bombClipCount && b < 2; ++b)
+        if (!contiguousFiles(sBank.bombClip[b].poseFiles)) dense = false;
+    if (ok && !dense)
+        std::printf("P2_BOMBSARAI_INTERPOLATION_DISABLED reason=noncontiguous_pose_files fallback=nearest\n");
+    auto diskBytes = [](const std::string& stem, int count) {
+        std::size_t bytes = 0;
+        for (int k = 0; k < count; ++k) {
+            std::ifstream f(p2poseload::stemPath(true, stem, k), std::ios::binary | std::ios::ate);
+            if (f) bytes += std::size_t(f.tellg());
+        }
+        return bytes;
+    };
+    if (dense) {
+        p2poseload::Shared famShared, bombShared;
+        for (int a = 0; ok && a < p2bsown::AnimCount; ++a) {
+            const auto& clip = sBank.clip[a];
+            if (clip.poses.empty()) continue;
+            std::vector<int> frames;
+            for (const auto& pose : clip.poses) frames.push_back(pose.frame);
+            const std::string stem = "bombsarai_BombSarai_" + clip.name;
+            std::string error;
+            if (!p2posefamily::loadFamilyClip(sPoseBank, clip.name, stem, int(frames.size()),
+                                              p2fbsmooth::bankDuration(frames, clip.frames), frames, famShared, total,
+                                              sPoses[a], error)) {
+                std::printf("P2_BOMBSARAI_OWN_BANK_INVALID reason=%s clip=%s fallback=builtin_timing draw=host\n",
+                            error.c_str(), clip.name.c_str());
+                ok = false;
+                break;
+            }
+            sDiskBytes += diskBytes(stem, int(frames.size()));
+            poses += frames.size();
+        }
+        if (!ok) {
+            for (auto& v : sPoses) v.clear();
+            sPoseBank.reset();
+        }
+        sPosesLoaded = ok && poses > 0;
+        if (sPosesLoaded) {
+            for (int b = 0; b < sBank.bombClipCount && b < 2; ++b) {
+                const auto& clip = sBank.bombClip[b];
+                if (clip.poseFiles.empty()) continue;
+                const std::string stem = "bombsarai_Bomb_" + clip.name;
+                std::string error;
+                if (!p2posefamily::loadFamilyClip(sBombPoseBank, clip.name, stem, int(clip.poseFrames.size()),
+                                                  p2fbsmooth::bankDuration(clip.poseFrames, clip.frames),
+                                                  clip.poseFrames, bombShared, total, sBombPoses[b], error)) {
+                    sBombPoses[b].clear();
+                    break;
+                }
+                sDiskBytes += diskBytes(stem, int(clip.poseFrames.size()));
+                bombPoses += clip.poseFiles.size();
+            }
+        }
+    }
+    for (int a = 0; !dense && ok && a < p2bsown::AnimCount; ++a) {
         const auto& clip = sBank.clip[a];
         for (const auto& pose : clip.poses) {
             char rel[160];
@@ -230,10 +315,9 @@ void loadAssets() {
             ++poses;
         }
     }
-    if (!ok) for (auto& v : sPoses) v.clear();
-    sPosesLoaded = ok && poses > 0;
-    std::size_t bombPoses = 0;
-    if (sPosesLoaded) {
+    if (!dense && !ok) for (auto& v : sPoses) v.clear();
+    if (!dense) sPosesLoaded = ok && poses > 0;
+    if (!dense && sPosesLoaded) {
         Shape* bombShared = nullptr;
         for (int b = 0; b < sBank.bombClipCount && b < 2; ++b) {
             for (int file : sBank.bombClip[b].poseFiles) {
@@ -246,8 +330,10 @@ void loadAssets() {
             }
         }
     }
-    std::printf("P2_BOMBSARAI_OWN_BANK staged_clips=%d poses=%zu bomb_poses=%zu bytes=%zu draw=%s arm_loop=%d\n",
-                staged, sPosesLoaded ? poses : std::size_t(0), bombPoses, total,
+    std::printf("P2_BOMBSARAI_OWN_BANK staged_clips=%d poses=%zu bomb_poses=%zu bytes=%zu disk_bytes=%zu "
+                "interpolation=%d bomb_interpolation=%d draw=%s arm_loop=%d\n",
+                staged, sPosesLoaded ? poses : std::size_t(0), bombPoses, total, sDiskBytes,
+                sPoseBank.ready() ? 1 : 0, sBombPoseBank.ready() ? 1 : 0,
                 sPosesLoaded ? "p2_model" : "host", sBombConfig.armLoopTicks);
 }
 
@@ -404,6 +490,8 @@ void applyBlast(const P2BombSaraiBlastEvent& e) {
     }
     for (Creature* c : tekis) if (c->isAlive() && c->stimulate(InteractBomb(owner, e.tekiDamage, nullptr))) ++tekiHits;
     ++sBlastCount;
+    // P1 bomb-rock burst approximation (output-only, #946).
+    pc_p2_sfx(58, unsigned(e.carrierToken), p2sfx::Event::Burst, Vector3f(e.center.x, e.center.y, e.center.z));
     std::printf("P2_BOMBSARAI_OWN_BLAST source_id=58 token=%llu carrier_valid=%d x=%.1f y=%.1f z=%.1f "
                 "navi_hits=%d pikmin_hits=%d pikmin_lethal=%d piki_damage=%.1f navi_damage=%.1f teki_hits=%d "
                 "self_hits=%d n=%d\n",
@@ -461,6 +549,7 @@ bool ownTick(BTeki* t, Own& o, float dt) {
         if (stuck > o.maxStuck) o.maxStuck = stuck;
     }
     if (t->mHealth < before || (t->mHealth < o.lastHealth && t->mHealth >= 0.0f)) {
+        if (t->mHealth > 0.0f) pc_p2_sfx(58, o.token, p2sfx::Event::Damage, t);
         std::printf("P2_BOMBSARAI_OWN_DAMAGE source_id=58 token=%u health=%.1f prior=%.1f hits=%d stuck=%d "
                     "nearby_pikmin=%d flying=%d state=%s\n",
                     o.token, t->mHealth, o.lastHealth, o.pendingHits, stuck, t->isFlying() ? 0 : nearbyPikmin(t),
@@ -493,6 +582,19 @@ bool ownTick(BTeki* t, Own& o, float dt) {
         p2bsown::State from = shown;
         for (p2bsown::State e : last.entered) {
             logState(t, o, from, e, stuck);
+            // P1 Sarai/bomb bank approximation (output-only, #946).
+            switch (e) {
+            case p2bsown::State::Release: pc_p2_sfx(58, o.token, p2sfx::Event::Attack, t); break;
+            case p2bsown::State::Flick:
+            case p2bsown::State::BombFlick: pc_p2_sfx(58, o.token, p2sfx::Event::Flick, t); break;
+            case p2bsown::State::Damage: pc_p2_sfx(58, o.token, p2sfx::Event::Damage, t); break;
+            case p2bsown::State::Dead:
+                pc_p2_sfx_stop(58, p2sfx::Event::Hover, t);
+                pc_p2_sfx(58, o.token, p2sfx::Event::Dead, t);
+                break;
+            case p2bsown::State::Fall: pc_p2_sfx(58, o.token, p2sfx::Event::Land, t); break;
+            default: break;
+            }
             if (e == p2bsown::State::Fall) ++o.falls;
             if (e == p2bsown::State::TakeOff1 || e == p2bsown::State::TakeOff2) ++o.takeoffs;
             if (e == p2bsown::State::Dead && !o.deadLogged) {
@@ -539,8 +641,10 @@ bool ownTick(BTeki* t, Own& o, float dt) {
         t->setDirection(last.faceDir);
         if (last.flying) {
             if (!t->isFlying()) t->startFlying();
+            if (o.fsm.state() != p2bsown::State::Dead) pc_p2_sfx(58, o.token, p2sfx::Event::Hover, t);
         } else if (t->isFlying()) {
             t->finishFlying();
+            pc_p2_sfx_stop(58, p2sfx::Event::Hover, t);
         }
         const Vector3f drive(last.velocity.x, last.flying ? last.velocity.y : 0.0f, last.velocity.z);
         t->inputDrive(drive);
@@ -707,12 +811,17 @@ void pc_p2_bombsarai_own_forget(BTeki* t) {
     std::fflush(stdout);
     sOwn.erase(i);
     sDrawLogged.erase(t);
+    sPoseVis.forget(t);
 }
 
 void pc_p2_bombsarai_own_reset() {
     const int before = int(sOwn.size());
     sOwn.clear();
     sDrawLogged.clear();
+    sPoseVis.clear();
+    sBombVis.clear();
+    sPoseBank.reset();
+    sBombPoseBank.reset();
     sPool = P2BombSaraiBombPool(16);
     for (auto& v : sPoses) v.clear();
     for (auto& v : sBombPoses) v.clear();
@@ -740,9 +849,14 @@ float pc_p2_bombsarai_teki_param_f(const BTeki* t, int idx, float fallback) {
 void pc_p2_bombsarai_teki_update_bombs() {
     if (!sAdapter || sPool.activeCount() == 0) {
         sBombClock.reset();
+        for (int s = 0; s < sPool.slotCount(); ++s) sBombVis.forget(sPool.bombAt(s));
         return;
     }
     const float dt = gsys ? gsys->getFrameTime() : 0.0f;
+    for (int s = 0; s < sPool.slotCount(); ++s) {
+        if (sPool.slotLive(s)) sBombVis.advance(sPool.bombAt(s), p2fbsmooth::fadeStep(dt));
+        else sBombVis.forget(sPool.bombAt(s));
+    }
     const int ticks = sBombClock.step(double(dt), true);
     for (int k = 0; k < ticks; ++k) {
         for (int s = 0; s < sPool.slotCount(); ++s) {
@@ -796,6 +910,19 @@ void pc_p2_bombsarai_teki_draw_bombs(Graphics& gfx) {
         if (armed && haveLoop) shape = sBombPoses[1][std::size_t(pulse / 4) % sBombPoses[1].size()];
         else if (haveIdle) shape = sBombPoses[0][0];
         else shape = sBombPoses[1][0];
+        {
+            // #972: hit_start frame 0 while carried/falling, hit_loop at a continuous
+            // frame once armed; the private Shape lerps and crossfades the change.
+            const bool loop = armed && haveLoop;
+            const int use = loop ? 1 : (haveIdle ? 0 : 1);
+            if (use < sBank.bombClipCount) {
+                const int loopFrames = std::max(1, sBank.bombClip[use].frames);
+                if (Shape* smooth = sBombVis.draw(b, sBombPoseBank, sBank.bombClip[use].name,
+                                                  loop ? p2fbsmooth::bombLoopFrame(pulse, loopFrames) : 0.0f,
+                                                  unsigned(b->carrierToken())))
+                    shape = smooth;
+            }
+        }
         const P2BombSaraiVec3& p = b->position();
         drawShapeAt(gfx, shape, Vector3f(p.x, p.y, p.z), 0.0f);
         ++drawn;
@@ -831,6 +958,14 @@ bool pc_p2_bombsarai_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, bo
     for (std::size_t k = 1; k < poses.size() && k < sPoses[anim].size(); ++k)
         if (std::fabs(float(poses[k].frame) - frame) < std::fabs(float(poses[best].frame) - frame)) best = k;
     Shape* shape = sPoses[anim][best];
+    {
+        // #972: lerped pose via the per-actor private Shape (150 ms crossfade on clip
+        // change). The carried corpse loops carry (type5) between its source loop
+        // markers; a death clip stops on its last visible pose (Actors::draw).
+        const float sourceFrame = dead && o.escaped ? p2fbsmooth::carryLoopFrame(o.carcassTime, 10, 29) : frame;
+        if (Shape* smooth = sPoseVis.draw(t, sPoseBank, sBank.clip[anim].name, std::max(0.0f, sourceFrame), o.token))
+            shape = smooth;
+    }
     shape->updateAnim(gfx, view, nullptr, t);
     pc_gfx_specular_family_scope(1);
     shape->drawshape(gfx, *gfx.mCamera, nullptr);
@@ -842,6 +977,21 @@ bool pc_p2_bombsarai_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, bo
         std::printf("P2_BOMBSARAI_OWN_DRAW source_id=58 token=%u corpse=%d clip=%s pose=%zu model=p2_bombsarai\n",
                     o.token, dead ? 1 : 0, sBank.clip[anim].name.c_str(), best);
         std::fflush(stdout);
+    }
+    if (std::getenv("PIKMIN_FRAME_DUMP")) {
+        // Eye-check aid (frame-dump runs only): where this actor sits on screen, so a
+        // dumped frame can be cropped around it.
+        static std::map<const BTeki*, int> countdown;
+        if (++countdown[t] >= 15) {
+            countdown[t] = 0;
+            // A carried corpse is the pellet; the escaped host drifts away.
+            Vector3f sp = dead && t->mPellet ? t->mPellet->getPosition() : t->getPosition();
+            const float depth = gfx.mCamera->projectWorldPoint(gfx, sp);
+            if (depth > 0.0f && gfx.mScreenWidth > 0 && gfx.mScreenHeight > 0)
+                std::printf("P2_BOMBSARAI_SCREEN source_id=58 token=%u u=%.3f v=%.3f depth=%.0f clip=%s frame=%.0f corpse=%d\n",
+                            o.token, sp.x / float(gfx.mScreenWidth), sp.y / float(gfx.mScreenHeight), depth,
+                            sBank.clip[anim].name.c_str(), frame, dead ? 1 : 0);
+        }
     }
     return true;
 }

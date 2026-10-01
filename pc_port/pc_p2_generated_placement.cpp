@@ -1,8 +1,8 @@
 #include "pc_randomizer.h"
 #include "pc_p2_campaign_actor.h"
-#include "pc_p2_campaign_placements.h"
 #include "pc_p2_generated_placement.h"
 #include "pc_p2_sarai_manager.h"
+#include "pc_p2_campaign_policy.h"
 #include "pc_p2_otakara.h"
 #include "pc_p2_bluechappy.h"
 #include "pc_p2_chappy.h"
@@ -17,7 +17,10 @@ struct MuseBinding {
     unsigned target;
     unsigned generator;
 };
-MuseBinding g_museBindings[64];
+// Sized for every ordinary generator a seed can bind to a sidecar-recorded
+// family in one stage (#948); `registry-full` is logged past it.
+static const int kMaxRecords = 128;
+MuseBinding g_museBindings[kMaxRecords];
 int g_museBound = 0;
 
 bool museRecord(const BTeki* actor, unsigned source, unsigned target, unsigned generator)
@@ -30,7 +33,7 @@ bool museRecord(const BTeki* actor, unsigned source, unsigned target, unsigned g
             return true;
         }
     }
-    if (g_museBound >= 64) return false;
+    if (g_museBound >= kMaxRecords) return false;
     g_museBindings[g_museBound].actor = actor;
     g_museBindings[g_museBound].source = source;
     g_museBindings[g_museBound].target = target;
@@ -96,17 +99,20 @@ bool pc_p2_generated_placement_sweep_sarai()
     return bound;
 }
 
-static bool recordBind(BTeki* actor, unsigned accepted, unsigned sourceId,
-                       unsigned seedTargetUid, unsigned generatorId)
+// Record a seed-resolved sidecar bind (57/58/78/99). The only checks are
+// runtime ones (#948): the seed must actually bind this source at this
+// target, and the per-stage registry must have room. Slot ids are never
+// compared against a compiled list.
+static bool recordBind(BTeki* actor, unsigned sourceId, unsigned seedTargetUid, unsigned generatorId)
 {
-    if (!actor || !sourceId || !seedTargetUid || !accepted) {
+    if (!actor || !sourceId || !seedTargetUid) {
         std::printf("P2_GENERATED_PLACEMENT source_id=%u target=%u generator=%u bound=0 reason=bad-request\n",
                     sourceId, seedTargetUid, generatorId);
         std::fflush(stdout);
         return false;
     }
-    if (seedTargetUid != accepted) {
-        std::printf("P2_GENERATED_PLACEMENT source_id=%u target=%u generator=%u bound=0 reason=slot-rejected\n",
+    if (!pc_randomizer_p2_bridge() || pc_randomizer_p2_source_for_id(seedTargetUid) != sourceId) {
+        std::printf("P2_GENERATED_PLACEMENT source_id=%u target=%u generator=%u bound=0 reason=seed-target-mismatch\n",
                     sourceId, seedTargetUid, generatorId);
         std::fflush(stdout);
         return false;
@@ -124,20 +130,6 @@ static bool recordBind(BTeki* actor, unsigned accepted, unsigned sourceId,
     // family sidecar path still owns behavior. Callers must not read bound=1
     // as a family FSM claim.
     return false;
-}
-
-static bool museBind(BTeki* actor, unsigned sourceId, unsigned seedTargetUid, unsigned generatorId)
-{
-    const bool campaign = pc_randomizer_p2_bridge()
-        && pc_randomizer_p2_source_for_id(seedTargetUid) == sourceId
-        && p2campaign::accepted(sourceId, seedTargetUid);
-    return recordBind(actor, campaign ? seedTargetUid : pc_p2_generated_placement_muse_slot(sourceId),
-                      sourceId, seedTargetUid, generatorId);
-}
-
-static bool waterwraithBind(BTeki* actor, unsigned sourceId, unsigned seedTargetUid, unsigned generatorId)
-{
-    return recordBind(actor, pc_p2_generated_placement_waterwraith_slot(sourceId), sourceId, seedTargetUid, generatorId);
 }
 
 bool pc_p2_generated_placement_bind(BTeki* actor, unsigned sourceId, unsigned seedTargetUid, unsigned generatorId)
@@ -206,14 +198,28 @@ bool pc_p2_generated_placement_bind(BTeki* actor, unsigned sourceId, unsigned se
             std::fflush(stdout);
             return true;
         }
-        return museBind(actor, sourceId, seedTargetUid, generatorId);
+        std::printf("P2_GENERATED_PLACEMENT source_id=41 target=%u generator=%u bound=0 reason=seed-target-mismatch\n",
+                    seedTargetUid, generatorId);
+        std::fflush(stdout);
+        return false;
     case 57: // Lesser Spotted Jellyfloat (Kurage); muse observer lane 58.
+    case 72: // Greater Spotted Jellyfloat (OniKurage); #960 rides the Kurage OWN module.
     case 58: // Careening Dirigibug (BombSarai); muse observer lane 59.
     case 78: // Gatling Groink (MiniHoudai); muse observer lane 60.
-        return museBind(actor, sourceId, seedTargetUid, generatorId);
     case 99: // Waterwraith (BlackMan); provider #575, consumer lane 572.
-        return waterwraithBind(actor, sourceId, seedTargetUid, generatorId);
+        return recordBind(actor, sourceId, seedTargetUid, generatorId);
     default:
+        // Every other campaign id binds in its family setup sweep (keyed by
+        // pc_p2_campaign_ids), which needs the vehicle from
+        // p2campaign::hostType. A seed-bound id with no static host has no
+        // campaign-keyed module; say so instead of birthing a bare P1 actor
+        // silently (#948, #951 U25). A proxy-tier row may still claim it.
+        if (pc_randomizer_p2_bridge() && pc_randomizer_p2_source_for_id(seedTargetUid) == sourceId
+            && !p2campaign::hasStaticHost(sourceId)) {
+            std::printf("P2_GENERATED_PLACEMENT source_id=%u target=%u generator=%u bound=0 reason=no-campaign-module\n",
+                        sourceId, seedTargetUid, generatorId);
+            std::fflush(stdout);
+        }
         return false;
     }
 }

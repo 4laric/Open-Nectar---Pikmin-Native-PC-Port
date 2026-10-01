@@ -25,6 +25,9 @@ class Graphics;
 class Matrix4f;
 
 void pc_p2_fuefuki_teki_setup();
+// Dev console (#942): bind one late-spawned seed-41 actor (loads the staged
+// parms/motions/poses on first use). True when bound (or already bound).
+bool pc_p2_fuefuki_teki_bind_dynamic(BTeki*);
 void pc_p2_fuefuki_teki_reset();
 void pc_p2_fuefuki_teki_forget(BTeki*);
 void pc_p2_fuefuki_teki_tick(BTeki*);

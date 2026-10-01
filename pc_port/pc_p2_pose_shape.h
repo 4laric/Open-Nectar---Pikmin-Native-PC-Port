@@ -7,6 +7,7 @@
 #include "Material.h"
 #include "system.h"
 #include <cstddef>
+#include <cstdio>
 
 // pc_port/gl/pc_gfx.cpp: drop and never re-cache resident meshes built from
 // vertex storage the CPU rewrites (the GameCube code DCFlushRange()s it).
@@ -56,7 +57,10 @@ inline bool write(Shape& shape,const Pose& pose){
 struct Track {
     Shape* shape=nullptr;
     p2motion::Presenter view;
+    float refExtent=0.f;       // rest-pose bounding-box diagonal, for the draw guard (#964)
+    unsigned refusals=0;
     void size(const Pose& base){
+        refExtent=p2motion::extent(base);
         view.scratch.positions.resize(base.positions.size());view.scratch.normals.resize(base.normals.size());
         view.mixed.positions.resize(base.positions.size());view.mixed.normals.resize(base.normals.size());
     }
@@ -70,7 +74,19 @@ inline Presented present(Track& track,const std::string& clip,std::size_t count,
     if(!track.shape)return out;
     const p2motion::Shown shown=track.view.select(clip,count,poseAt,frames,sourceFrame,seamOk,tune);
     out.span=shown.span;
-    if(!shown.pose||!write(*track.shape,*shown.pose))return out;
+    if(!shown.pose)return out;
+    // #964 guard: never write a pose with non-finite or exploded vertices into the
+    // draw Shape; the caller keeps its pre-loaded pose Shape and this says why.
+    const p2motion::GuardVerdict verdict=p2motion::guardPose(*shown.pose,track.refExtent);
+    if(!verdict.ok){
+        if(++track.refusals<=8)
+            std::printf("P2_POSE_GUARD_REFUSED clip=%s reason=%s vertex=%zu value=%.1f limit=%.1f left=%zu right=%zu weight=%.3f poses=%zu\n",
+                        clip.c_str(),verdict.reason,verdict.index,double(verdict.value),double(verdict.limit),shown.span.left,shown.span.right,
+                        double(shown.span.weight),count);
+        std::fflush(stdout);
+        return out;
+    }
+    if(!write(*track.shape,*shown.pose))return out;
     track.view.commit(*shown.pose);
     out.crossfadeStarted=shown.crossfadeStarted;out.wrapBlend=shown.wrapBlend;out.ok=true;return out;
 }

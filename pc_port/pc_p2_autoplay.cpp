@@ -44,6 +44,7 @@
 // throws + whistle, Kurage body-position throws).
 
 #include "pc_p2_autoplay_policy.h"
+#include "pc_p2_queen_teki.h"
 
 #include "pc_p2_input_script.h"
 #include "pc_p2_campaign_actor.h"
@@ -55,6 +56,7 @@
 #include "pc_p2_teki_lifetime.h"
 #include "pc_p2_test_day_cycle.h"
 #include "pc_p2_dangomushi.h"
+#include "pc_p2_purple.h"
 #include "pc_randomizer.h"
 #include "Controller.h"
 
@@ -128,6 +130,7 @@ const char* sourceDisplayName(unsigned source)
     case 9: return "Kogane";
     case 23: return "Sarai";
     case 57: return "Kurage";
+    case 72: return "OniKurage";
     case 58: return "BombSarai";
     case 54: return "Miulin";
     case 44: return "BlueKochappy";
@@ -678,6 +681,23 @@ void pc_p2_autoplay_tick(void)
     if (!p2autoplay::isEnabled()) {
         return; // inert when unset: production input path untouched
     }
+    // #901 TEST-ONLY (PIKMIN_RANDOMIZER_AUTOPLAY_NEXT_DAY=1): once a stage has run,
+    // tap A whenever there is no live captain (day-end movie, result and save
+    // screens) so a run reaches the next day. Never before the first captain,
+    // so boot menus are untouched.
+    static bool sSawCaptain = false;
+    static long sNoCaptainTicks = 0;
+    {
+        Navi* live = naviMgr ? naviMgr->getNavi() : nullptr;
+        if (live && live->isAlive()) {
+            sSawCaptain = true;
+            sNoCaptainTicks = 0;
+        } else if (sSawCaptain && p2autoplay::nextDayTap()) {
+            ++sNoCaptainTicks;
+            pc_p2_input_script_set(1, (sNoCaptainTicks % 40 < 6) ? unsigned(p2autoplay::PadA) : 0u, 0, 0);
+            return;
+        }
+    }
     // TEST-ONLY day cycle (#246): between the forced sunset and the next
     // stage only tap A (results, save); a new scene resets per-stage state.
     if (pc_p2_test_day_cycle_active()) {
@@ -741,11 +761,15 @@ void pc_p2_autoplay_tick(void)
     int alive = 0, nearCount = 0, farCount = 0, transport = 0, distress = 0, squad = 0;
     int strays = 0;
     float strayX = 0.0f, strayZ = 0.0f;
+    float strayNearX = 0.0f, strayNearZ = 0.0f, strayNearDist = 1.0e30f; // #256 nearest lost Pikmin
+    int lostCount = 0;
     int partyCount = 0; // #901: FormationMode Pikmin following this captain
     int workCount = 0; // #901: Pikmin working a gate / bridge / hinder rock
     std::vector<std::pair<float, float>> transportPos;
     std::vector<std::pair<float, float>> freePos; // #901: idle FreeMode Pikmin
     const bool powerMode = p2autoplay::isPowerEnabled();
+    const bool purplePower = p2autoplay::isPurplePower() && pc_p2_purples_enabled();
+    int purpleConverted = 0;
     {
         Iterator it(pikiMgr);
         CI_LOOP(it)
@@ -762,6 +786,15 @@ void pc_p2_autoplay_tick(void)
                 ++strays;
                 strayX += p->getPosition().x;
                 strayZ += p->getPosition().z;
+            }
+            // #256 lost Pikmin: idle or Formation, left 350-1000 u behind.
+            if ((p->mMode == PikiMode::FreeMode || p->mMode == PikiMode::FormationMode) && d > 350.0f && d < 1000.0f) {
+                ++lostCount;
+                if (d < strayNearDist) {
+                    strayNearDist = d;
+                    strayNearX = p->getPosition().x;
+                    strayNearZ = p->getPosition().z;
+                }
             }
             if (p->mMode == PikiMode::TransportMode) {
                 ++transport;
@@ -781,6 +814,12 @@ void pc_p2_autoplay_tick(void)
             // (virtual ViewPiki::setFlower, the same call the nectar GrowUp,
             // Onion exit, and pluck paths use). No direct mHappa pokes.
             if (powerMode && p->mHappa != Flower) p->setFlower(Flower);
+            // #958 power mode + PIKMIN_RANDOMIZER_AUTOPLAY_PURPLE: Purple squad
+            // (only the Giant Breadbug press needs it; TEST-ONLY).
+            if (purplePower && !pc_p2_is_purple(p)) {
+                pc_p2_make_purple(p);
+                ++purpleConverted;
+            }
             // bot-v4 regroup sense: grabbed (mouth-stuck / swallowed),
             // thrown off (flick/flown/fall/wave/pressed), burning/panicking.
             const int pst = p->getState();
@@ -794,6 +833,14 @@ void pc_p2_autoplay_tick(void)
                 panicNearest = std::min(panicNearest, d);
             }
         }
+    }
+    if (purpleConverted > 0) {
+        // Throttled: the whole squad converts one Pikmin per tick as it exits.
+        static int sPurpleTotal = 0;
+        const int before = sPurpleTotal;
+        sPurpleTotal += purpleConverted;
+        if (before == 0 || sPurpleTotal / 25 != before / 25)
+            std::printf("AUTOPLAY_POWER_PURPLE converted_total=%d field=%d bot-driven\n", sPurpleTotal, alive);
     }
     if (powerMode) sPowerSeconds += (dt > 0.0f && dt <= 0.5f) ? dt : 0.016f;
     if (powerMode && !sPowerLogged && alive >= 80) {
@@ -863,6 +910,45 @@ void pc_p2_autoplay_tick(void)
                 if (total > 0) stockOnion->exitPikis(total);
             }
             sPowerStocked = true;
+        }
+    }
+
+    // #901 TEST-ONLY arena teleport (PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT="x,z",
+    // autoplay-gated): once the squad is out, move the captain and every
+    // Pikmin that is not carrying or leaving to the point, so the bot can
+    // fight an arena it cannot route to. Never runs in normal play.
+    {
+        static bool teleported = false;
+        static int settleTicks = 0;
+        float tx = 0.0f, tz = 0.0f;
+        // Wait for the whole Onion queue (up to ~15 s after the squad first reaches
+        // the threshold) so the last births are not left at the Onion.
+        const int need = powerMode ? 80 : 20;
+        if (!teleported && alive >= need) ++settleTicks;
+        if (!teleported && mapMgr && alive >= need && (alive >= 98 || settleTicks > 450)
+            && p2autoplay::teleportTarget(tx, tz)) {
+            teleported = true;
+            const float ty = mapMgr->getMinY(tx, tz, true);
+            Vector3f at(tx, ty, tz);
+            navi->resetPosition(at);
+            int moved = 0;
+            Iterator it(pikiMgr);
+            CI_LOOP(it)
+            {
+                Piki* p = static_cast<Piki*>(*it);
+                if (!p || !p->isAlive() || p->mMode == PikiMode::TransportMode) continue;
+                const int st = p->getState();
+                if (st == PIKISTATE_Bury || st == PIKISTATE_Dying || st == PIKISTATE_Dead) continue;
+                const float ang = 0.61803f * 6.2831853f * float(moved);
+                const float rad = 40.0f + 6.0f * float(moved % 12);
+                Vector3f pp(tx + rad * std::cos(ang), ty, tz + rad * std::sin(ang));
+                pp.y = mapMgr->getMinY(pp.x, pp.z, true);
+                p->resetPosition(pp);
+                ++moved;
+            }
+            std::printf("AUTOPLAY_TELEPORT x=%.1f y=%.1f z=%.1f moved=%d TEST-ONLY bot-driven\n", double(tx),
+                        double(ty), double(tz), moved);
+            std::fflush(stdout);
         }
     }
 
@@ -1124,6 +1210,12 @@ void pc_p2_autoplay_tick(void)
             // #901: a ship part the target dropped outranks its corpse, so the
             // bot escorts the part to the ship (the check under test).
             const bool part = pel->isUfoParts();
+            // #901: until a part is adopted, only a part that appeared near the death
+            // spot counts (a level's own parts elsewhere are not the held part).
+            if (part && !sEngage.partConfig && sEngage.deathRecorded) {
+                const float px = pel->getPosition().x - sEngage.deathX, pz = pel->getPosition().z - sEngage.deathZ;
+                if (px * px + pz * pz > 250.0f * 250.0f) continue;
+            }
             if (partsOnly && !part) continue;
             if (bestPart && !part) continue;
             if ((part && !bestPart && d2 < 600.0f * 600.0f) || d2 < best2) {
@@ -1225,12 +1317,29 @@ void pc_p2_autoplay_tick(void)
     senses.fieldPikmin = alive;
     senses.squadPikmin = squad;
     senses.strayPikmin = strays;
+    senses.lostPikmin = lostCount;
+    senses.nearPikmin = nearCount;
+    senses.strayNearX = strayNearX;
+    senses.strayNearZ = strayNearZ;
+    senses.strayNearDist = strayNearDist;
     senses.strayX = strays ? strayX / float(strays) : naviX;
     senses.strayZ = strays ? strayZ / float(strays) : naviZ;
     senses.onionStored = onionStored;
     senses.onionDist = onionDist;
     senses.containerOpen = navi->getCurrState() && navi->getCurrState()->getID() == NAVISTATE_Container;
     senses.scattered = (farCount >= 3) || (alive >= 10 && nearCount < 5);
+    // #256 TEST-ONLY census marker: why the squad reads as scattered.
+    if (senses.scattered) {
+        static float diagClock = 0.0f;
+        diagClock += (dt > 0.0f && dt <= 0.5f) ? dt : 0.016f;
+        if (diagClock >= 10.0f) {
+            diagClock = 0.0f;
+            std::printf("AUTOPLAY_SCATTER alive=%d near350=%d far550=%d squad=%d party=%d strays=%d lost=%d stray_near=%.0f@(%.0f,%.0f) navi=(%.0f,%.0f) bot-driven\n",
+                        alive, nearCount, farCount, squad, partyCount, strays, lostCount, double(strayNearDist), double(strayNearX),
+                        double(strayNearZ), double(naviX), double(naviZ));
+            std::fflush(stdout);
+        }
+    }
     senses.squadDistress = distress > 0;
     senses.panicCount = panicCount; // #245 Fuefuki owner-death Panic reclaim
     senses.panicNearest = panicNearest;
@@ -1241,6 +1350,44 @@ void pc_p2_autoplay_tick(void)
     senses.pelletCarriers = sEngage.pelletCarriers;
     senses.carryWant = sEngage.carryWant; // bot-v7: declared minimum (0 = unknown)
     senses.trackingPart = trackedPellet && trackedPellet->isUfoParts();
+    // #901 TEST-ONLY (PIKMIN_RANDOMIZER_AUTOPLAY_TELEPORT_TO_PART=1, autoplay-gated):
+    // a dropped ship part whose crew stays short for 20 s (the part fell where the
+    // squad cannot reach it on foot) gets the captain and the free Pikmin moved
+    // beside it once. The carry itself is still done by the Pikmin.
+    {
+        static float partStall = 0.0f;
+        static const Pellet* partMoved = nullptr;
+        if (p2autoplay::teleportToPart() && senses.trackingPart && trackedPellet != partMoved && mapMgr
+            && sEngage.carryWant > 0 && sEngage.pelletCarriers < sEngage.carryWant) {
+            partStall += (dt > 0.0f && dt <= 0.5f) ? dt : 0.016f;
+            if (partStall > 20.0f) {
+                partMoved = trackedPellet;
+                partStall = 0.0f;
+                const float px = trackedPellet->getPosition().x, pz = trackedPellet->getPosition().z;
+                Vector3f at(px + 70.0f, mapMgr->getMinY(px + 70.0f, pz, true), pz);
+                navi->resetPosition(at);
+                int moved = 0;
+                Iterator pit2(pikiMgr);
+                CI_LOOP(pit2)
+                {
+                    Piki* p = static_cast<Piki*>(*pit2);
+                    if (!p || !p->isAlive() || p->mMode == PikiMode::TransportMode) continue;
+                    const int st = p->getState();
+                    if (st == PIKISTATE_Bury || st == PIKISTATE_Dying || st == PIKISTATE_Dead) continue;
+                    const float ang = 0.61803f * 6.2831853f * float(moved);
+                    const float rad = 40.0f + 5.0f * float(moved % 12);
+                    Vector3f pp(px + rad * std::cos(ang), 0.0f, pz + rad * std::sin(ang));
+                    pp.y = mapMgr->getMinY(pp.x, pp.z, true);
+                    p->resetPosition(pp);
+                    ++moved;
+                }
+                std::printf("AUTOPLAY_TELEPORT_TO_PART x=%.1f z=%.1f moved=%d TEST-ONLY bot-driven\n", double(px), double(pz), moved);
+                std::fflush(stdout);
+            }
+        } else if (!senses.trackingPart) {
+            partStall = 0.0f;
+        }
+    }
     senses.partGone = partGone;
     senses.workCount = workCount;
     senses.movieActive = gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive;
@@ -1428,6 +1575,18 @@ void pc_p2_autoplay_tick(void)
                 senses.targetVelZ = vz;
             }
         }
+        // #256 Empress Bulblax roll dodge senses (read-only FSM probe).
+        if (pick->source == 30) {
+            int qst = -1;
+            float qface = 0.0f, qhx = 0.0f, qhz = 0.0f;
+            if (pc_p2_queen_teki_probe(pick->actor, &qst, &qface, &qhx, &qhz)) {
+                senses.queenDanger = qst == 4 || qst == 5; // Flick / Rolling (Queen.h StateID)
+                const float fx = std::sin(qface), fz = std::cos(qface);
+                const float side = ((naviX - qhx) * fx + (naviZ - qhz) * fz) >= 0.0f ? 1.0f : -1.0f;
+                senses.dodgeX = qhx + fx * side * 320.0f;
+                senses.dodgeZ = qhz + fz * side * 320.0f;
+            }
+        }
         // Flyer senses (bot-v2 gap 3): height above ground, grab latch.
         // Kurage's body is on the ground (visual float only), so its XZ body
         // position above is already the throw aim; Sarai throws only when low
@@ -1529,6 +1688,15 @@ void pc_p2_autoplay_tick(void)
             planDetour(naviX, naviY, naviZ, sEngage.lastX, sEngage.lastZ);
         }
         sBrain.clearReplan();
+    }
+    // #256 Empress regroup: route to the nearest idle stray through the waypoint graph.
+    if (sBrain.strayRouteWanted()) {
+        sPlanStartY = navi->getPosition().y;
+        sPlanGoalY = NAN;
+        planDetour(naviX, naviY, naviZ, sBrain.strayRouteGoalX(), sBrain.strayRouteGoalZ());
+        std::printf("AUTOPLAY_STRAY_ROUTE goal=(%.0f,%.0f) legs=%zu bot-driven\n", double(sBrain.strayRouteGoalX()),
+                    double(sBrain.strayRouteGoalZ()), sPath.size());
+        sBrain.clearStrayRoute();
     }
     // Waypoint-by-waypoint following: steer each leg until reached (80u) or
     // its 25s budget expires, then advance; the Brain steers the active leg.
@@ -1645,7 +1813,80 @@ void pc_p2_autoplay_tick(void)
     std::fflush(stdout);
 
     // --- Pad synthesis through the live camera basis ---
-    const p2autoplay::Command cmd = sBrain.command();
+    p2autoplay::Command cmd = sBrain.command();
+    // TEST-ONLY coarse water map (PIKMIN_RANDOMIZER_AUTOPLAY_WATER_MAP=1): one dump of
+    // ground (.), water (W) and no-ground (x) on a 50 u grid so a lure path can be planned.
+    {
+        static bool waterMapped = false;
+        const char* wm = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_WATER_MAP");
+        if (!waterMapped && wm && *wm == '1' && mapMgr) {
+            waterMapped = true;
+            for (int j = 0; j <= 90; ++j) {
+                const float pz = 50.0f * float(j);
+                std::string row;
+                for (int i = -50; i <= 40; ++i) {
+                    const float px = 50.0f * float(i);
+                    CollTriInfo* tri = mapMgr->getCurrTri(px, pz, true);
+                    row += !tri ? 'x' : (MapCode::getAttribute(tri) == ATTR_Water ? 'W' : '.');
+                }
+                std::printf("AUTOPLAY_WATERMAP z=%.0f x0=-2500 step=50 row=%s TEST-ONLY bot-driven\n", double(pz), row.c_str());
+            }
+            std::fflush(stdout);
+        }
+    }
+    // TEST-ONLY lure path (PIKMIN_RANDOMIZER_AUTOPLAY_LURE): replace the Brain
+    // command with a walk along the waypoint list, then hold still.
+    {
+        static const std::vector<std::pair<float, float>> lure = p2autoplay::lurePath();
+        static size_t lureIdx = 0;
+        static int lureWarm = 0;
+        if (!lure.empty()) {
+            cmd = p2autoplay::Command{};
+            if (lureWarm == 300) {
+                const char* lt = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_LURE_TELEPORT");
+                if (lt && *lt == '1' && mapMgr) {
+                    // Start the lure at its first waypoint (the walk from the Onion is not what is under test).
+                    const float ty = mapMgr->getMinY(lure[0].first, lure[0].second, true);
+                    Vector3f at(lure[0].first, ty, lure[0].second);
+                    navi->resetPosition(at);
+                    std::printf("AUTOPLAY_LURE_TELEPORT x=%.0f z=%.0f TEST-ONLY bot-driven\n", double(at.x), double(at.z));
+                    std::fflush(stdout);
+                    lureIdx = 1;
+                }
+            }
+            if (lureWarm % 120 == 0) {
+                std::printf("AUTOPLAY_LURE_POS idx=%zu navi=(%.0f,%.0f) attr=%d TEST-ONLY bot-driven\n", lureIdx, double(naviX), double(naviZ),
+                            navi->mGroundTriangle ? MapCode::getAttribute(navi->mGroundTriangle) : -1);
+                // Every campaign teki within 1200 u: where it is and whether the engine is still updating it.
+                Iterator lit(tekiMgr);
+                CI_LOOP(lit)
+                {
+                    Teki* lt = static_cast<Teki*>(*lit);
+                    if (!lt || !lt->mGenerator) continue;
+                    BTeki* lb = static_cast<BTeki*>(lt);
+                    const float d = distXZ(naviX, naviZ, lb->getPosition().x, lb->getPosition().z);
+                    if (d > 1200.0f) continue;
+                    std::printf("AUTOPLAY_LURE_TEKI type=%d pos=(%.0f,%.0f) dist=%.0f vel=(%.1f,%.1f) aiCulling=%d aiCullable=%d alwaysActive=%d attr=%d TEST-ONLY bot-driven\n",
+                                int(lb->mTekiType), double(lb->getPosition().x), double(lb->getPosition().z), double(d), double(lb->mVelocity.x),
+                                double(lb->mVelocity.z), int(lb->mGrid.aiCulling()), int(lb->aiCullable()), int(lb->insideView()),
+                                lb->getPositionMapCode());
+                }
+                std::fflush(stdout);
+            }
+            if (++lureWarm > 300 && lureIdx < lure.size()) {
+                const float dx = lure[lureIdx].first - naviX, dz = lure[lureIdx].second - naviZ;
+                const float len = std::sqrt(dx * dx + dz * dz);
+                if (len < 30.0f) {
+                    std::printf("AUTOPLAY_LURE reached=%zu navi=(%.0f,%.0f) TEST-ONLY bot-driven\n", lureIdx, double(naviX), double(naviZ));
+                    std::fflush(stdout);
+                    ++lureIdx;
+                } else {
+                    cmd.moveX = dx / len;
+                    cmd.moveZ = dz / len;
+                }
+            }
+        }
+    }
     unsigned buttons = cmd.buttons;
     int stickX = 0, stickY = 0;
     float yawDbg = 0.0f;
