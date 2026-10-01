@@ -8,15 +8,24 @@
 #include <cstdio>
 #include <cstdlib>
 
+static void initializeLinks(Creature& creature) {
+    // Scene Creature::init normally initializes these intrusive attachment fields.
+    creature.mStickTarget = nullptr;
+    creature.mStickPart = nullptr;
+    creature.mStickListHead = nullptr;
+    creature.mPrevSticker = nullptr;
+    creature.mNextSticker = nullptr;
+    creature.mPelletStickSlot = -1;
+}
 class FixturePiki : public Piki {
 public:
-    FixturePiki() : Piki(nullptr) {}
+    FixturePiki() : Piki(nullptr) { initializeLinks(*this); }
     void refresh(Graphics&) override {}
     bool isKinoko() override { return false; }
 };
 class FixtureAttachment : public Creature {
 public:
-    FixtureAttachment() : Creature(nullptr) {}
+    FixtureAttachment() : Creature(nullptr) { initializeLinks(*this); }
     void refresh(Graphics&) override {}
     void doKill() override {}
 };
@@ -31,6 +40,7 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const unsigned source = static_cast<unsigned>(std::strtoul(argv[i], nullptr, 10));
         Teki actor;
+        initializeLinks(actor);
         actor.clearTekiOptions();
         actor.setTekiOption(BTeki::TEKI_OPTION_ALIVE);
         actor.mHealth = 10.0f;
@@ -46,7 +56,8 @@ int main(int argc, char** argv) {
         attachment.mObjType = OBJTYPE_Pellet;
         require(first.startStick(&actor, nullptr), "first latch", source);
         require(attachment.startStick(&actor, nullptr), "non Pikmin attachment", source);
-        require(second.startStick(&actor, nullptr), "second latch", source);
+        second.startStickMouth(&actor, nullptr);
+        require(second.getStickObject() == &actor && second.isStickToMouth(), "mouth attachment", source);
 
         actor.mHealth = 0.0f;
         require(!actor.isAlive() && actor.isHostAlive(), "combat ends while animation host lives", source);
@@ -57,6 +68,7 @@ int main(int argc, char** argv) {
         require(actor.mHealth == 0.0f && actor.mStoredDamage == 0.0f, "no post death damage", source);
         actor.releaseP2DeathStickers();
         require(!first.getStickObject() && !second.getStickObject(), "release both Pikmin", source);
+        require(!second.isStickToMouth(), "clear mouth attachment flag", source);
         require(attachment.getStickObject() == &actor && actor.mStickListHead == &attachment, "preserve non Pikmin attachment", source);
         actor.releaseP2DeathStickers();
         require(actor.mStickListHead == &attachment, "idempotent release", source);

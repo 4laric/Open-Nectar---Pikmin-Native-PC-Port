@@ -616,7 +616,10 @@ void BTeki::releaseP2DeathStickers()
 	// each Pikmin; leave held pellets and other non-Pikmin attachments alone.
 	for (Creature* sticker = mStickListHead; sticker;) {
 		Creature* next = sticker->mNextSticker;
-		if (sticker->isPiki()) sticker->endStickObject();
+		if (sticker->isPiki()) {
+			if (sticker->isStickToMouth()) sticker->endStickMouth();
+			else sticker->endStickObject();
+		}
 		sticker = next;
 	}
 }
