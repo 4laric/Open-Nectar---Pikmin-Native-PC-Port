@@ -3,9 +3,9 @@
 // damage_applied=1 and queued_after-queued_before=50, together with the
 // regeneration-compensated 50 HP delta below. Adult accepted=0
 // is expected (that flag describes dwarf press). Health alone is NOT acceptance.
-// Natural Violet conversion/native pluck precede the test. Captain positioning,
-// a single descending-source placement, and post-contact source isolation are
-// fixture setup, not player controls, throw accuracy, or pathfinding coverage.
+// The historical adult_direct mode stages captain/source positions and is not
+// ordinary combat acceptance. Natural transport and natural_dayend/resume modes
+// remain separate, with no actor relocation or direct stock-helper injection.
 #include <SDL2/SDL.h>
 #include "system.h"
 #include "App.h"
@@ -64,6 +64,8 @@
 #include <chrono>
 #include <set>
 #include <fstream>
+#include <filesystem>
+#include <string>
 
 static const auto fixtureStarted=std::chrono::steady_clock::now();
 static void milestone(const char* name,int tick) {
@@ -78,6 +80,37 @@ static void p2_fixture_require_captain(bool present,bool dead,bool managerDead,b
 }
 static void require(bool ok, const char* why) {
     if (!ok) { std::printf("P2_PURPLE_COMBAT_FAIL reason=%s\n",why); std::fflush(nullptr); std::_Exit(1); }
+}
+static SDL_Joystick* ordinaryPad=nullptr;
+static void ordinaryInput(unsigned buttons=0,int y=0) {
+    require(ordinaryPad!=nullptr,"ordinary SDL controller missing");
+    const int instance=SDL_JoystickInstanceID(ordinaryPad);int assigned=-1;
+    if(pc_window_input_get_assignment(0,&assigned)!=PC_INPUT_DEV_GAMEPAD || assigned!=instance) {
+        pc_window_input_assign(0,PC_INPUT_DEV_GAMEPAD,instance);pc_window_input_assign(1,PC_INPUT_DEV_NONE,-1);
+    }
+    SDL_JoystickSetVirtualButton(ordinaryPad,SDL_CONTROLLER_BUTTON_A,(buttons&KBBTN_A)!=0);
+    SDL_JoystickSetVirtualButton(ordinaryPad,SDL_CONTROLLER_BUTTON_B,(buttons&KBBTN_B)!=0);
+    SDL_JoystickSetVirtualButton(ordinaryPad,SDL_CONTROLLER_BUTTON_START,(buttons&KBBTN_START)!=0);
+    SDL_JoystickSetVirtualAxis(ordinaryPad,SDL_CONTROLLER_AXIS_LEFTX,0);
+    SDL_JoystickSetVirtualAxis(ordinaryPad,SDL_CONTROLLER_AXIS_LEFTY,Sint16(-y*32767/74));
+    SDL_JoystickUpdate();
+}
+static void ordinaryController() {
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");
+    const int device=SDL_JoystickAttachVirtual(SDL_JOYSTICK_TYPE_GAMECONTROLLER,SDL_CONTROLLER_AXIS_MAX,SDL_CONTROLLER_BUTTON_MAX,0);
+    require(device>=0,"attach ordinary SDL controller");
+    char guid[64];SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(device),guid,sizeof(guid));
+    const std::string mapping=std::string(guid)+",Purple ordinary save pad,a:b0,b:b1,x:b2,y:b3,back:b4,guide:b5,start:b6,leftstick:b7,rightstick:b8,leftshoulder:b9,rightshoulder:b10,dpup:b11,dpdown:b12,dpleft:b13,dpright:b14,leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:a4,righttrigger:a5,";
+    require(SDL_GameControllerAddMapping(mapping.c_str())>=0 && SDL_IsGameController(device),"map ordinary SDL controller");
+    ordinaryPad=SDL_JoystickOpen(device);require(ordinaryPad && SDL_JoystickIsVirtual(device),"open actual virtual P1");
+    ordinaryInput();
+    std::printf("P2_PURPLE_ORDINARY_CONTROLLER instance=%d SDL_virtual=1 menu_input_script=0\n",int(SDL_JoystickInstanceID(ordinaryPad)));
+}
+static int ordinaryCards() {
+    int count=0;const std::filesystem::path directory("../../campaign");
+    if(std::filesystem::exists(directory)) for(const auto& file:std::filesystem::directory_iterator(directory))
+        if(file.path().extension()==".sav") ++count;
+    return count;
 }
 static void auditTerrain(const char* owner,const Vector3f& centre,float radius) {
     if(!mapMgr || !std::isfinite(radius) || radius<0) return;
@@ -264,6 +297,7 @@ class PurpleCombatApp : public PlugPikiApp {
     Vector3f parkPosition;
     bool sunsetRequested=false, sunsetSeen=false;
     int sunsetTicks=0, sunsetDay=-1, expectedDay=-1, savedMaturity=-1, resumeReady=0;
+    int ordinaryMenuFrames=0,ordinaryDiaryFrames=0;
     unsigned saveIndexBefore=0;
     bool mode(const char* name) const {
         const char* value=std::getenv("P2_PURPLE_COMBAT_MODE");
@@ -361,6 +395,50 @@ class PurpleCombatApp : public PlugPikiApp {
         std::printf("P2_PURPLE_PERSIST_BEGIN day=%d expected_day=%d maturity=%d field=%d stock=0 identity_injected=0 maturity_injected=0 clock_advanced=1 menu_input_scripted=1\n",
             sunsetDay,expectedDay,savedMaturity,field);
         gameflow.mWorldClock.setTime(gameflow.mParameters->mEndHour());
+    }
+    void beginOrdinarySave(Navi* n) {
+        require(acquired && acquired->isAlive() && pc_p2_is_purple(acquired)
+            && acquired->mMode==PikiMode::FormationMode && acquired->mNavi==n,"ordinary save requires acquired formation Purple");
+        require(!pc_randomizer_resumed() && ordinaryCards()==0 && p2ship::stock.total()==0,"ordinary save fresh checkpoint/stock baseline");
+        GameStat::update();require(int(GameStat::mapPikis)==20,"ordinary save acquisition conserves20");
+        boundAdult();savedMaturity=acquired->mHappa;
+        require(savedMaturity>=0 && savedMaturity<3,"ordinary save maturity");
+        sunsetDay=gameflow.mWorldClock.mCurrentDay;expectedDay=pc_randomizer_next_day(sunsetDay);
+        require(expectedDay==sunsetDay+1 && flowCont.mGameEndFlag==GAMEEND_None,"ordinary next day");
+        sunsetRequested=true;pc_p2_input_script_clear(1);ordinaryInput(KBBTN_START);
+        milestone("ordinary_sunset_menu_requested",ticks);
+        std::printf("P2_PURPLE_ORDINARY_SAVE_BEGIN day=%d expected_day=%d maturity=%d field=20 stock=0 direct_stock_helpers=0 clock_advanced=0 SDL_menu_input=1\n",
+            sunsetDay,expectedDay,savedMaturity);
+    }
+    void ordinarySunsetStep() {
+        require(++sunsetTicks<9000,"ordinary SDL day-save timeout");
+        require(gameflow.mCurrGameSectionID==SECTION_OnePlayer && flowCont.mGameEndFlag==GAMEEND_None,"ordinary save left healthy campaign");
+        if(gameflow.mIsDayEndActive) sunsetSeen=true;
+        require(gameflow.mWorldClock.mCurrentDay<=expectedDay,"ordinary save extra day advance");
+        const bool confirming=gameflow.mWorldClock.mCurrentDay==expectedDay;
+        if(!confirming) {
+            ++ordinaryMenuFrames;
+            if(ordinaryMenuFrames==2) ordinaryInput();
+            else if(ordinaryMenuFrames==45) ordinaryInput(0,-65);
+            else if(ordinaryMenuFrames==50 || ordinaryMenuFrames==66 || ordinaryMenuFrames==126) ordinaryInput();
+            else if(ordinaryMenuFrames==65 || ordinaryMenuFrames==125) ordinaryInput(KBBTN_A);
+        } else {
+            ++ordinaryDiaryFrames;
+            if(ordinaryDiaryFrames==1) milestone("ordinary_day_advanced",ticks);
+            if(ordinaryDiaryFrames==60) ordinaryInput(KBBTN_B);
+            else if(ordinaryDiaryFrames>61) ordinaryInput(ticks%20<18?KBBTN_A:0);
+            else ordinaryInput();
+        }
+        const int cards=ordinaryCards();require(cards<=1,"ordinary save extra checkpoint generation");
+        if(cards==1) {
+            require(confirming && sunsetSeen && stockOne(),"ordinary card/day/Purple stock mismatch");
+            ordinaryInput();milestone("ordinary_checkpoint_committed",ticks);
+            std::printf("P2_PURPLE_ORDINARY_SAVE_PASS day_before=%d day=%d maturity=%d stock=1 generations=1 direct_stock_helpers=0 clock_advanced=0 external_checkpoint_validation_required=1\n",
+                sunsetDay,expectedDay,savedMaturity);
+            std::fflush(nullptr);std::_Exit(0);
+        }
+        if(sunsetTicks%120==0) std::printf("P2_PURPLE_ORDINARY_SAVE_PROGRESS menu_frames=%d diary_frames=%d day=%d sunset_seen=%d pause=%d overlay=%d stock=%d cards=%d\n",
+            ordinaryMenuFrames,ordinaryDiaryFrames,gameflow.mWorldClock.mCurrentDay,int(sunsetSeen),int(gameflow.mPauseAll),int(gameflow.mIsUIOverlayActive),p2ship::stock.total(),cards);
     }
     static int expectedNumber(const char* name,int minimum,int maximum) {
         const char* text=std::getenv(name); require(text && *text,"missing restart expectation");
@@ -567,11 +645,17 @@ class PurpleCombatApp : public PlugPikiApp {
         const float distance=std::sqrt(dx*dx+dz*dz);
         const float pluckRange=C_NAVI_PARM(n,mPluckDistanceOutsideOnyon);
         require(std::isfinite(pluckRange) && pluckRange>1.f,"invalid native pluck range");
+        const float cursorBand=C_NAVI_PARM(n,mCursorMoveStickThreshold);
+        require(std::isfinite(cursorBand) && cursorBand>=0 && cursorBand<.9f,"invalid native cursor-only stick band");
+        require(std::fabs(pc_settings_get_navi_speed_scale()-1.f)<.001f,"default captain speed required");
         if(ticks%60==0) std::printf("P2_PURPLE_PLUCK_APPROACH distance=%.3f captain=%.3f,%.3f,%.3f sprout=%.3f,%.3f,%.3f state=%d port=%u observed_stick=%d,%d frozen=%d\n",
             distance,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,head->mSRT.t.x,head->mSRT.t.y,head->mSRT.t.z,
             n->getCurrState()->getID(),n->mKontroller?n->mKontroller->mPlayerNum:0,
             n->mKontroller?int(n->mKontroller->mMainStickX):0,n->mKontroller?int(n->mKontroller->mMainStickY):0,
             int(n->mKontroller && n->mKontroller->mIsControllerFrozen));
+        if(ticks%60==0) std::printf("P2_PURPLE_PLUCK_CONTROL cursor_only_threshold=%.3f normalized_stick=%.3f,%.3f velocity=%.3f,%.3f target_velocity=%.3f,%.3f native_speed_scale=1\n",
+            cursorBand,n->mKontroller?n->mKontroller->getMainStickX():0,n->mKontroller?n->mKontroller->getMainStickY():0,
+            n->mVelocity.x,n->mVelocity.z,n->mTargetVelocity.x,n->mTargetVelocity.z);
         if(distance>=pluckRange-.25f) {
             refreshPluckObstacles(n,violet);
             if(routedHead!=head || pluckRoute.empty() || planarDistance(routedHeadPosition,head->mSRT.t)>2.f
@@ -584,7 +668,11 @@ class PurpleCombatApp : public PlugPikiApp {
             require(d>.05f,"controller reached approach point outside native pluck range");
             require(n->controlCamera()!=nullptr,"natural approach camera missing");
             const Vector3f& axis=n->controlCamera()->mViewXAxis;
-            const float power=std::max(18.f,std::min(65.f,d*2.f));
+            // Classic native controls use small deflections for cursor-only
+            // aiming and explicitly zero walking velocity. Keep ordinary pad
+            // input above that loaded band; do not change movement parameters.
+            const float minimum=std::ceil(74.f*(cursorBand+.05f));
+            const float power=std::max(minimum,std::min(65.f,d*2.f));
             pc_p2_input_script_set(1,0,int(std::lround(power*(tx*axis.x+tz*axis.z)/d)),
                 int(std::lround(power*(tx*axis.z-tz*axis.x)/d)));
             return false;
@@ -595,6 +683,23 @@ class PurpleCombatApp : public PlugPikiApp {
         milestone("native_sprout_pluck_requested",ticks);
         std::printf("P2_PURPLE_PLUCK_ATTEMPT attempt=%d captain_position_staged=0 native_input=1 forced_pluck_state=0 distance=%.3f player_controls_validated=0\n",pluckAttempts,distance);
         return true;
+    }
+    void ordinaryResume(Navi*) {
+        savedMaturity=expectedNumber("P2_PURPLE_EXPECT_MATURITY",0,2);
+        expectedDay=expectedNumber("P2_PURPLE_EXPECT_DAY",1,99999);
+        require(pc_randomizer_resumed() && gameflow.mWorldClock.mCurrentDay==expectedDay && stockOne() && ordinaryCards()==1,
+            "ordinary restored checkpoint/day/stock/maturity mismatch");
+        if(++resumeReady<60) return;
+        boundAdult(false);GameStat::update();
+        Iterator bodies(pikiMgr);CI_LOOP(bodies) {
+            Piki* p=static_cast<Piki*>(*bodies);
+            require(!p || !p->isAlive() || !pc_p2_is_purple(p),"ordinary restore duplicate field Purple");
+        }
+        require(int(GameStat::allPikis)+p2ship::stock.total()==20,"ordinary saved starting population conservation");
+        ordinaryInput();milestone("ordinary_checkpoint_restored",ticks);
+        std::printf("P2_PURPLE_ORDINARY_RESUME_PASS day=%d maturity=%d stock=1 field=%d native_population=20 generations=1 checkpoint_resumed=1 direct_stock_helpers=0 withdrawal_ui_validated=0 saved_bytes_injected=0\n",
+            expectedDay,savedMaturity,int(GameStat::mapPikis));
+        std::fflush(nullptr);std::_Exit(0);
     }
     Piki* naturalStep(Navi* n) {
         ++phaseTicks;
@@ -871,8 +976,9 @@ public:
         }
         require(ticks<(sunsetRequested?15000:6000),"global fixture timeout");
         if(mode("persistence_resume")) pc_p2_input_script_set(1,(!n || gameflow.mIsUIOverlayActive) && ticks%20<4?KBBTN_A:0,0,0);
+        if(mode("natural_resume")) ordinaryInput((!n || gameflow.mIsUIOverlayActive) && ticks%20<4?KBBTN_A:0);
         if(sunsetRequested) {
-            sunsetStep();
+            if(mode("natural_dayend")) ordinarySunsetStep();else sunsetStep();
             if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive) gameflow.mMoviePlayer->requestSkip();
             return result;
         }
@@ -882,12 +988,14 @@ public:
         if(!activeSeen && (n->getCurrState()->getID()==NAVISTATE_Walk || n->getCurrState()->getID()==NAVISTATE_Idle)) {
             activeSeen=true;milestone("active_gameplay",ticks);
         }
-        if(mode("persistence_resume")) {
+        if(mode("persistence_resume") || mode("natural_resume")) {
             // The restored captain exists during ship/map entry before the
             // playable stage actors are ready. Match the ordinary fixture's
             // active walk/idle gate before checking live combat bindings.
             const int state=n->getCurrState()->getID();
-            if(state==NAVISTATE_Walk || state==NAVISTATE_Idle) resumePersistence(n);
+            if(state==NAVISTATE_Walk || state==NAVISTATE_Idle) {
+                if(mode("natural_resume")) ordinaryResume(n);else resumePersistence(n);
+            }
             return result;
         }
         if (!acquired) {
@@ -946,7 +1054,8 @@ public:
             }
             return result;
         }
-        if(mode("persistence_dayend")) beginPersistence(n);
+        if(mode("natural_dayend")) beginOrdinarySave(n);
+        else if(mode("persistence_dayend")) beginPersistence(n);
         else if(mode("transport_delivery") || mode("transport_positive") || mode("transport_red_control") || mode("transport_staged") || mode("transport_manual")) transportStep(n);
         else combatStep(n);
         return result;
@@ -959,13 +1068,14 @@ int main(int argc,char** argv) {
         || !std::strcmp(guardCase,"global") || !std::strcmp(guardCase,"dead_state") || !std::strcmp(guardCase,"missing")
         || !std::strcmp(guardCase,"health_pause") || !std::strcmp(guardCase,"missing_movie"),"unknown initialized guard case");
     const char* mode=std::getenv("P2_PURPLE_COMBAT_MODE");
-    if(mode && std::strcmp(mode,"adult_direct") && std::strcmp(mode,"persistence_dayend") && std::strcmp(mode,"persistence_resume") && std::strcmp(mode,"transport_delivery") && std::strcmp(mode,"transport_positive") && std::strcmp(mode,"transport_red_control") && std::strcmp(mode,"transport_staged") && std::strcmp(mode,"transport_manual")) {
-        std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=adult_direct,persistence_dayend,persistence_resume,transport_delivery,transport_positive,transport_red_control,transport_staged,transport_manual\n",mode); return 2;
+    if(mode && std::strcmp(mode,"natural_dayend") && std::strcmp(mode,"natural_resume") && std::strcmp(mode,"adult_direct") && std::strcmp(mode,"persistence_dayend") && std::strcmp(mode,"persistence_resume") && std::strcmp(mode,"transport_delivery") && std::strcmp(mode,"transport_positive") && std::strcmp(mode,"transport_red_control") && std::strcmp(mode,"transport_staged") && std::strcmp(mode,"transport_manual")) {
+        std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=adult_direct,persistence_dayend,persistence_resume,natural_dayend,natural_resume,transport_delivery,transport_positive,transport_red_control,transport_staged,transport_manual\n",mode); return 2;
     }
     SDL_SetMainReady(); pc_gpu_preference_apply(); pc_bbft_init(argc,argv);
     require(pc_randomizer_purple_campaign() && pc_randomizer_p2_bridge(),"ordinary Purple seed campaign required");
     if(!pc_window_init(mode && !std::strcmp(mode,"transport_manual")?"Purple carry smoke - staged Purple - F7 resets":"Purple campaign combat fixture",960,540)) return 3;
     pc_settings_init(); pc_window_set_display_mode(PC_WINDOW_FULLSCREEN_WINDOWED);
+    if(mode && (!std::strcmp(mode,"natural_dayend") || !std::strcmp(mode,"natural_resume"))) ordinaryController();
     pc_window_set_window_size(960,540); pc_window_center();
     std::puts("Experimental preview window set to 960x540 windowed and centered");
     int w=0,h=0,x=0,y=0; SDL_Window* window=SDL_GL_GetCurrentWindow();
@@ -974,7 +1084,7 @@ int main(int argc,char** argv) {
     std::printf("P2_FIXTURE_WINDOW width=%d height=%d x=%d y=%d\n",w,h,x,y);
     milestone("window_ready",0);
     std::printf("P2_PURPLE_COMBAT_SCOPE mode=%s natural_acquisition=%d player_controls_validated=0 production_collision_marker_required=1\n",
-        mode?mode:"adult_direct",int(!mode || (std::strcmp(mode,"transport_red_control") && std::strcmp(mode,"transport_staged") && std::strcmp(mode,"transport_manual"))));
+        mode?mode:"adult_direct",int(!mode || (std::strcmp(mode,"natural_resume") && std::strcmp(mode,"persistence_resume") && std::strcmp(mode,"transport_red_control") && std::strcmp(mode,"transport_staged") && std::strcmp(mode,"transport_manual"))));
     gsys->Initialise(); pc_settings_p2d_init(); nodeMgr=new NodeMgr();
     gsys->run(new PurpleCombatApp()); return 0;
 }
