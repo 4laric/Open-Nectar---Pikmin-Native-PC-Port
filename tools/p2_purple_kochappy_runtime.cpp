@@ -13,6 +13,7 @@
 #include "FlowController.h"
 #include "MoviePlayer.h"
 #include "Navi.h"
+#include "Kontroller.h"
 #include "NaviMgr.h"
 #include "NaviState.h"
 #include "Camera.h"
@@ -118,6 +119,11 @@ public:
    const float radius=C_NAVI_PARM(n,mCursorMaxRadius);
    require(std::isfinite(radius)&&radius>20,"loaded cursor radius permits ordinary approach");
    const float approach=std::min(65.f,radius*.5f);
+   if(age%30==0){
+    std::printf("P2_PURPLE_KOCHAPPY_APPROACH_OBSERVE age=%d state=%d actual_pad_b=%d actual_mainstick=%.4f,%.4f loaded_radius=%.4f loaded_neutral=%.4f loaded_move_threshold=%.4f distance=%.4f approach=%.4f captain=%.4f,%.4f,%.4f velocity=%.4f,%.4f,%.4f violet=%.4f,%.4f,%.4f terrain_mid=%.4f terrain_bud=%.4f followers=%d\n",
+     age,n->getCurrState()->getID(),int(SDL_JoystickGetButton(pad,SDL_CONTROLLER_BUTTON_B)),n->mKontroller->getMainStickX(),n->mKontroller->getMainStickY(),radius,C_NAVI_PARM(n,mNeutralStickThreshold),C_NAVI_PARM(n,mCursorMoveStickThreshold),distance(n->mSRT.t,violet->mSRT.t),approach,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,n->mVelocity.x,n->mVelocity.y,n->mVelocity.z,violet->mSRT.t.x,violet->mSRT.t.y,violet->mSRT.t.z,mapMgr->getMinY((n->mSRT.t.x+violet->mSRT.t.x)*.5f,(n->mSRT.t.z+violet->mSRT.t.z)*.5f,true),mapMgr->getMinY(violet->mSRT.t.x,violet->mSRT.t.z,true),n->getPlatePikis());
+    std::fflush(nullptr);
+   }
    if(n->getPlatePikis()==20&&age-start>30){
     if(distance(n->mSRT.t,violet->mSRT.t)>approach){point(n,violet->mSRT.t,true,KeyConfig::_instance->mSetCursorKey.mBind);return result;}
     std::printf("P2_PURPLE_KOCHAPPY_APPROACH loaded_cursor_radius=%.4f captain_bud_xz=%.4f target_distance=%.4f SDL_walk=1\n",radius,distance(n->mSRT.t,violet->mSRT.t),approach);
