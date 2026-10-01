@@ -75,7 +75,12 @@ struct PcPadRoute {
 };
 
 /// `stored` is the PC_KEY_ACT_COUNT stored values of one player's pad.
-void pc_pad_route_build(const int* stored, PcPadRoute* route);
+/// `stickInvert` / `cstickInvert` are the invert options (bit 0 = X, bit 1 = Y)
+/// so a binding to a physical stick direction is matched to the right direction.
+/// A default L / R trigger or stick direction yields to another action that is
+/// explicitly bound to the same physical input; stock bindings claim nothing,
+/// so they route exactly as before.
+void pc_pad_route_build(const int* stored, PcPadRoute* route, int stickInvert = 0, int cstickInvert = 0);
 
 /// Feeds the L and R actions: digital bindings, then the analog triggers. Same
 /// order and scaling the port always used, so stock bindings are unchanged.

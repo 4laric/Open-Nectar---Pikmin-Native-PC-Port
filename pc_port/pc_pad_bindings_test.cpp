@@ -226,6 +226,66 @@ void testUnbound()
 	expect(pc_pad_raw_bind_held(held, PC_GP_UNBOUND), 0, "the sentinel is never held");
 }
 
+void testDefaultYieldsToExplicitBinding()
+{
+	// L at its default, another action explicitly on the left trigger: the
+	// trigger is that action's now, and no longer also the analog L the camera
+	// reads.
+	Stored a;
+	a.v[PC_KEY_ACT_A] = axisBind(SDL_CONTROLLER_AXIS_TRIGGERLEFT, 1);
+	PcPadRoute route;
+	pc_pad_route_build(a.v, &route);
+	PcPadRaw raw = rawState(16000, 0);
+	expect(pc_pad_raw_bind_held(raw, route.bind[PC_KEY_ACT_A]), 1, "A on left trigger, L default: a pull presses A");
+	expect(route.triggerAxis[0], -1, "A on left trigger, L default: the trigger stops feeding L");
+	expect(run(a, raw).tl, 0, "A on left trigger, L default: a half pull gives no analog L");
+	expect(run(a, rawState(32767, 0)).button, 0, "A on left trigger, L default: a full pull does not press L");
+	expect(route.triggerAxis[1], SDL_CONTROLLER_AXIS_TRIGGERRIGHT, "A on left trigger: R keeps its own trigger");
+	// L's own digital default (the left shoulder) is unaffected.
+	raw = rawState(0, 0);
+	raw.button[SDL_CONTROLLER_BUTTON_LEFTSHOULDER] = true;
+	expect(run(a, raw).tl, 255, "A on left trigger: the left shoulder is still L");
+
+	// Same for R, and when the claimant is the other trigger action.
+	Stored z;
+	z.v[PC_KEY_ACT_Z] = axisBind(SDL_CONTROLLER_AXIS_TRIGGERRIGHT, 1);
+	expect(run(z, rawState(0, 16000)).tr, 0, "Z on right trigger, R default: a half pull gives no analog R");
+	Stored lr;
+	lr.v[PC_KEY_ACT_L] = axisBind(SDL_CONTROLLER_AXIS_TRIGGERRIGHT, 1);
+	const Result r = run(lr, rawState(0, 16000));
+	expect(r.tl, 125, "L on right trigger: it feeds L");
+	expect(r.tr, 0, "L on right trigger, R default: it no longer also feeds R");
+
+	// A stick direction at its default yields to an explicit binding on the
+	// same physical direction. Physical left stick right = axis LEFTX positive.
+	Stored st;
+	st.v[PC_KEY_ACT_SWARM] = axisBind(SDL_CONTROLLER_AXIS_LEFTX, 1);
+	pc_pad_route_build(st.v, &route);
+	expect(route.stick[PC_PAD_DIR_RIGHT], 0, "Swarm on stick right: the stick no longer also pushes right");
+	expect(route.stick[PC_PAD_DIR_LEFT], 1, "Swarm on stick right: left untouched");
+	expect(route.cstick[PC_PAD_DIR_RIGHT], 1, "Swarm on stick right: the C-stick is untouched");
+	// With the X invert option the pad's "right" is the physical negative side.
+	pc_pad_route_build(st.v, &route, 1, 0);
+	expect(route.stick[PC_PAD_DIR_RIGHT], 1, "inverted X: physical right is the pad's left");
+	expect(route.stick[PC_PAD_DIR_LEFT], 0, "inverted X: Swarm on physical right takes the pad's left");
+	// Vertical: physical up is axis LEFTY negative, and the invert option flips it.
+	Stored up;
+	up.v[PC_KEY_ACT_Y] = axisBind(SDL_CONTROLLER_AXIS_RIGHTY, 0);
+	pc_pad_route_build(up.v, &route);
+	expect(route.cstick[PC_PAD_DIR_UP], 0, "Y on C-stick up: the C-stick no longer also pushes up");
+	expect(route.cstick[PC_PAD_DIR_DOWN], 1, "Y on C-stick up: down untouched");
+	pc_pad_route_build(up.v, &route, 0, 2);
+	expect(route.cstick[PC_PAD_DIR_DOWN], 0, "inverted Y: physical up is the pad's down");
+	expect(route.cstick[PC_PAD_DIR_UP], 1, "inverted Y: the pad's up is free");
+
+	// A stick direction explicitly rebound keeps its analog source (an addition).
+	Stored add;
+	add.v[PC_KEY_ACT_STICK_UP] = SDL_CONTROLLER_BUTTON_DPAD_UP;
+	add.v[PC_KEY_ACT_B]        = axisBind(SDL_CONTROLLER_AXIS_LEFTY, 0);
+	pc_pad_route_build(add.v, &route);
+	expect(route.stick[PC_PAD_DIR_UP], 1, "explicit stick direction: the stick stays an addition");
+}
+
 void testColourCycleIsUntouched()
 {
 	// Pikmin colour cycling is D-pad left/right (the game reads the pad's D-pad
@@ -377,6 +437,7 @@ int main()
 	testTriggerRemappedAway();
 	testTriggerBoundToTheAction();
 	testUnbound();
+	testDefaultYieldsToExplicitBinding();
 	testColourCycleIsUntouched();
 	testSticks();
 	testSettingsRoundTrip();
