@@ -61,15 +61,18 @@ SeMgr::SeMgr()
 /**
  * @todo: Documentation
  */
+#if defined(PIKI_PC_PORT)
 void SeMgr::playNaviSound(int naviID, s32 stickX, s32 stickY)
 {
-#if defined(PIKI_PC_PORT)
 	PcFormationStick stick = sFormationArbiter.submit(naviID, stickX, stickY, gameflow.mGenFlowUpdateTickCount);
 	Jac_Orima_Formation(stick.x, stick.y);
-#else
-	Jac_Orima_Formation(stickX, stickY);
-#endif
 }
+#else
+void SeMgr::playNaviSound(s32 stickX, s32 stickY)
+{
+	Jac_Orima_Formation(stickX, stickY);
+}
+#endif
 
 /**
  * @todo: Documentation

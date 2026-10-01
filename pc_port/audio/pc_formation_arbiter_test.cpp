@@ -221,8 +221,9 @@ void test_a_captain_that_stops_calling_goes_stale() {
     CHECK(eng.active);
     // Captain 1 keeps calling (0, 0). The held stick must not outlive the
     // staleness window.
-    for (unsigned f = 41; f <= 41 + PC_FORMATION_STALE_FRAMES; ++f) navi_call(arb, eng, 1, 0, 0, f);
-    for (unsigned f = 41 + PC_FORMATION_STALE_FRAMES + 1; f <= 200; ++f) navi_call(arb, eng, 1, 0, 0, f);
+    for (unsigned f = 41; f <= 40 + PC_FORMATION_STALE_FRAMES; ++f) navi_call(arb, eng, 1, 0, 0, f);
+    CHECK(eng.active); // still held inside the window
+    for (unsigned f = 41 + PC_FORMATION_STALE_FRAMES; f <= 200; ++f) navi_call(arb, eng, 1, 0, 0, f);
     CHECK(!eng.active);
     CHECK(eng.starts == 1 && eng.stops == 1);
 
