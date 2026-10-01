@@ -132,9 +132,9 @@ class DeliveryApp:public PlugPikiApp {
    if(!enemy->isAlive()){phase=4;phaseStart=observed;std::puts("P2_GENERATED_NATURAL_DEATH observed=1 health_writes=0");}
    return result;
   }
-  // Approach the actual corpse and swarm to assign carry through normal input.
-  if(phase==4){point(n,enemy->mSRT.t,true);if(dx*dx+dz*dz<65*65){phase=5;phaseStart=observed;input();}return result;}
-  if(phase==5){const Vector3f& axis=n->controlCamera()->mViewXAxis;float d=std::sqrt(dx*dx+dz*dz);int x=0,y=0;if(d>1){x=int(65*(dx*axis.x+dz*axis.z)/d);y=int(65*(dx*axis.z-dz*axis.x)/d);}input(0,0,0,x,y);return result;}
+  // Observe the actual production corpse; never attach carriers or emit receipts.
+  if(phase==4 || phase==5){Pellet* body=nullptr;Iterator pellets(pelletMgr);CI_LOOP(pellets){Pellet* p=static_cast<Pellet*>(*pellets);unsigned source=p->mPelletView?pc_randomizer_p2_source_for(p->mPelletView):0;unsigned uid=p->mPelletView?pc_randomizer_p2_generator_for(p->mPelletView):0;if(observed%60==0 && p->mPelletView)std::printf("P2_GENERATED_PELLET source=%u uid=%u xyz=%.3f,%.3f,%.3f carriers=%u strength=%u min=%d state=%u\n",source,uid,p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z,p->mCarrierCount,p->mCarrierCounter,p->mConfig?p->mConfig->mCarryMinPikis():-1,p->mCarryState);if(source==44 && uid==Target){require(!body,"duplicate bound corpse");body=p;}}if(!body){input();return result;}dx=body->mSRT.t.x-n->mSRT.t.x;dz=body->mSRT.t.z-n->mSRT.t.z;float d=std::sqrt(dx*dx+dz*dz);require(body->mConfig,"corpse config missing");if(body->mCarrierCount>=body->mConfig->mCarryMinPikis()){input();return result;}const Vector3f& axis=n->controlCamera()->mViewXAxis;int sx=d>1?int(65*(dx*axis.x+dz*axis.z)/d):0,sy=d>1?int(65*(dx*axis.z-dz*axis.x)/d):0;input(0,d>60?sx:0,d>60?sy:0,sx,sy);phase=5;return result;}
+
   return result;
  }
 };
