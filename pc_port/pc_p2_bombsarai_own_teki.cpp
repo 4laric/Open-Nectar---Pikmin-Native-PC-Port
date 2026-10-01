@@ -502,9 +502,25 @@ void applyBlast(const P2BombSaraiBlastEvent& e) {
                                  ? pikiMgr->mPikiParms->mPikiParms.mBombDamagePiki()
                                  : 765.0f;
     int naviHits = 0, pikiHits = 0, tekiHits = 0, pikiLethal = 0;
-    for (Creature* c : navis) if (c->isAlive() && c->stimulate(InteractBomb(owner, e.naviPikiDamage, nullptr))) ++naviHits;
+    // Per-hit evidence (#1027, same fields as P2_BOMBOTAKARA_BLAST_HIT): a lethal
+    // Pikmin hit reads health <= 0 here and dies when its flick lands.
+    auto logHit = [&](const char* kind, float damage, float before, float after, bool alive, bool accepted) {
+        std::printf("P2_BOMBSARAI_BLAST_HIT token=%llu kind=%s damage=%.1f health=%.1f->%.1f alive=%d accepted=%d\n",
+                    (unsigned long long)e.carrierToken, kind, damage, before, after, alive ? 1 : 0, accepted ? 1 : 0);
+    };
+    for (Creature* c : navis) {
+        if (!c->isAlive()) continue;
+        const float before = c->mHealth;
+        const bool accepted = c->stimulate(InteractBomb(owner, e.naviPikiDamage, nullptr));
+        naviHits += accepted ? 1 : 0;
+        logHit("navi", e.naviPikiDamage, before, c->mHealth, c->isAlive(), accepted);
+    }
     for (Creature* c : pikis) {
-        if (!c->isAlive() || !c->stimulate(InteractBomb(owner, pikiDamage, nullptr))) continue;
+        if (!c->isAlive()) continue;
+        const float before = c->mHealth;
+        const bool accepted = c->stimulate(InteractBomb(owner, pikiDamage, nullptr));
+        logHit("piki", pikiDamage, before, c->mHealth, c->isAlive(), accepted);
+        if (!accepted) continue;
         ++pikiHits;
         if (static_cast<Piki*>(c)->mHealth <= 0.0f) ++pikiLethal;
     }
