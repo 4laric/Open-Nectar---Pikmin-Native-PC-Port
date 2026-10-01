@@ -22,6 +22,7 @@
 #include "PelletState.h"
 #include "PikiAI.h"
 #include "GoalItem.h"
+#include "Route.h"
 #include "Pom.h"
 #include "Boss.h"
 #include "ItemMgr.h"
@@ -54,6 +55,7 @@
 #include <climits>
 #include <chrono>
 #include <set>
+#include <fstream>
 
 static void p2_fixture_require_captain(bool dead, bool deadState, float hp, int tick) {
     if (!dead && !deadState && std::isfinite(hp) && hp > 1.0f) return;
@@ -63,6 +65,29 @@ static void p2_fixture_require_captain(bool dead, bool deadState, float hp, int 
 static void require(bool ok, const char* why) {
     if (!ok) { std::printf("P2_PURPLE_COMBAT_FAIL reason=%s\n",why); std::fflush(nullptr); std::_Exit(1); }
 }
+// Read-only fixture telemetry. Form inherited member pointers in a derived
+// scope, then apply them to the actual ActTransport; no layout casts/mutations.
+struct PurpleTransportTrace : ActTransport {
+    static void emit(ActTransport* action, Piki* piki) {
+        const int state=action->*(&PurpleTransportTrace::mState);
+        if(state!=STATE_Move && state!=STATE_Guru && state!=STATE_Goal) {
+            std::printf("P2_PURPLE_HAUL_ACTION state=%d route_not_started=1\n",state);return;
+        }
+        const int count=action->*(&PurpleTransportTrace::mNumRoutePoints);
+        const int index=action->*(&PurpleTransportTrace::mPathIndex);
+        const int next=action->*(&PurpleTransportTrace::mNextPathIndex);
+        std::printf("P2_PURPLE_HAUL_ACTION state=%d route_count=%d path_index=%d next_index=%d path_type=%d slot=%d can_carry=%d stall_timer=%.3f better_pathfinding=%d\n",
+            state,count,index,next,
+            int(action->*(&PurpleTransportTrace::mPathType)),action->*(&PurpleTransportTrace::mSlotIndex),
+            int(action->*(&PurpleTransportTrace::mCanCarry)),action->*(&PurpleTransportTrace::mPcStallTimer),int(pc_settings_get_better_pathfinding()));
+        if(routeMgr && index>=0 && index<count) {
+            const int id=piki->mPathBuffers[index].mWayPointIdx;
+            WayPoint* wp=routeMgr->getWayPoint('test',id);
+            if(wp) std::printf("P2_PURPLE_HAUL_WAYPOINT id=%d xyz=%.2f,%.2f,%.2f open=%d flags=%u\n",
+                id,wp->mPosition.x,wp->mPosition.y,wp->mPosition.z,int(wp->mIsOpen),unsigned(wp->mFlags));
+        }
+    }
+};
 class PurpleCombatApp : public PlugPikiApp {
     int ticks=0, phase=0, phaseTicks=0, startingField=0, pluckAttempts=0;
     int combatTicks=0, observedTicks=0, throwAttempts=0, throwTick=0;
@@ -213,7 +238,9 @@ class PurpleCombatApp : public PlugPikiApp {
     }
     void transportStep(Navi* n) {
         const bool redOnly=mode("transport_red_control");
-        const bool positiveOnly=mode("transport_positive");
+        const bool manual=mode("transport_manual");
+        const bool staged=mode("transport_staged") || manual;
+        const bool positiveOnly=mode("transport_positive") || staged;
         require(++haulTicks<7200,"native transport/delivery timeout");
         require(acquired && acquired->isAlive() && !acquired->mP2White
             && (redOnly ? !pc_p2_is_purple(acquired) && acquired->mColor==Red : pc_p2_is_purple(acquired)),"test carrier identity lost");
@@ -247,7 +274,7 @@ class PurpleCombatApp : public PlugPikiApp {
             haul->init(pos);haul->startAI(TRUE);haulStart=pos;
             GameStat::update();haulPopulationBefore=GameStat::allPikis[Red];
             rewardBefore=GameStat::bornPikis[Red];haulMaturity=acquired->mHappa;haulPhase=1;haulTicks=0;
-            std::printf("P2_PURPLE_HAUL_BEGIN injected_cargo=1 weight=10 expected_reward=%d maturity=%d source_identity_injected=0 cargo_position_staged_once=1\n",expectedReward,haulMaturity);
+            std::printf("P2_PURPLE_HAUL_BEGIN injected_cargo=1 weight=10 expected_reward=%d maturity=%d source_identity_injected=%d cargo_position_staged_once=1\n",expectedReward,haulMaturity,int(staged));
             return;
         }
         require(acquired->mHappa==haulMaturity,"carrier maturity changed");
@@ -263,7 +290,12 @@ class PurpleCombatApp : public PlugPikiApp {
                 || drift>=0.25f || !haul->onGround() || std::fabs(haul->mVelocity.y)>0.1f;
             if(settling){haulStart=haul->mSRT.t;haulStable=0;}else ++haulStable;
             if(haulStable>=30 && haul->isVisible() && haul->getState()==PELSTATE_Normal){
-                haulStart=haul->mSRT.t;assignHaul(positiveOnly?acquired:haulRed);
+                haulStart=haul->mSRT.t;
+                if(manual) {
+                    approachStart=acquired->mSRT.t;pc_p2_input_script_clear(1);
+                    std::puts("P2_PURPLE_MANUAL_READY field=20 purple=1 reds=19 starting_species_injected=1 native_acquisition=0 scripted_transport_assignment=0 actor_position_injected=0 cargo_spawned_once=1 reset=F6_or_Reset_cmd");
+                    if(std::getenv("P2_PURPLE_MANUAL_BOOT_ONLY")) { std::fflush(nullptr);std::_Exit(0); }
+                } else assignHaul(positiveOnly?acquired:haulRed);
                 haulPhase=positiveOnly?3:2;haulTicks=0;haulStable=0;
             }
         } else if(haulPhase==2) {
@@ -307,7 +339,7 @@ class PurpleCombatApp : public PlugPikiApp {
                     GameStat::update();
                     require(GameStat::allPikis[Red]-haulPopulationBefore==expectedReward,"reward counter/population mismatch");
                     std::printf("P2_PURPLE_HAUL_POPULATION before=%d after=%d expected_delta=%d\n",haulPopulationBefore,GameStat::allPikis[Red],expectedReward);
-                    std::printf("P2_PURPLE_HAUL_DELIVERY_PASS reward=%d expected_reward=%d purple_alive=1 maturity=%d released=1 stable_ticks=%d duplicate_reward=0 injected_cargo=1 scripted_action_assignment=1 controls_validated=0 scripted_non_test_recalls=%d\n",reward,expectedReward,haulMaturity,haulStable,haulRecalls);
+                    std::printf("P2_PURPLE_HAUL_DELIVERY_PASS reward=%d expected_reward=%d purple_alive=1 maturity=%d released=1 stable_ticks=%d duplicate_reward=0 injected_cargo=1 scripted_action_assignment=%d controls_validated=0 scripted_non_test_recalls=%d starting_species_injected=%d\n",reward,expectedReward,haulMaturity,haulStable,int(!manual),haulRecalls,int(staged));
                     std::fflush(nullptr);std::_Exit(0);
                 }
             } else haulStable=0;
@@ -321,6 +353,9 @@ class PurpleCombatApp : public PlugPikiApp {
                     haul->mSRT.t.x,haul->mSRT.t.y,haul->mSRT.t.z,haul->mVelocity.x,haul->mVelocity.y,haul->mVelocity.z,
                     goal.x,goal.y,goal.z,int(haul->mTargetGoal==static_cast<Suckable*>(haulGoal)),
                     int(haul->mTargetGoal!=nullptr),haulGoal->getRouteIndex(),pc_p2_transport_speed(haul,0));
+                Piki* carrier=redOnly?haulRed:acquired;
+                if(carrier->mMode==PikiMode::TransportMode && carrier->mActiveAction->getCurrAction())
+                    PurpleTransportTrace::emit(static_cast<ActTransport*>(carrier->mActiveAction->getCurrAction()),carrier);
             }
         }
     }
@@ -573,6 +608,9 @@ public:
             require(!captainSeen || expectedTeardown,"captain disappeared outside expected sunset teardown");
         }
         if (++ticks%120==0) diagnostics(n);
+        if(mode("transport_manual") && (SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F6] || std::ifstream("manual-reset.request").good())) {
+            std::puts("P2_PURPLE_MANUAL_RESET_REQUEST fresh_session_required=1");std::fflush(nullptr);std::_Exit(90);
+        }
         require(ticks<(sunsetRequested?15000:6000),"global fixture timeout");
         if(mode("persistence_resume")) pc_p2_input_script_set(1,(!n || gameflow.mIsUIOverlayActive) && ticks%20<4?KBBTN_A:0,0,0);
         if(sunsetRequested) {
@@ -594,7 +632,7 @@ public:
         if (!acquired) {
             const int state=n->getCurrState()->getID();
             if(state==NAVISTATE_Walk||state==NAVISTATE_Idle) {
-                if(mode("transport_red_control")) {
+                if(mode("transport_red_control") || mode("transport_staged") || mode("transport_manual")) {
                     Iterator squad(pikiMgr);CI_LOOP(squad) {
                         Piki* p=static_cast<Piki*>(*squad);
                         if(p && p->isAlive() && p->mColor==Red && !pc_p2_is_purple(p) && !p->mP2White
@@ -602,14 +640,24 @@ public:
                     }
                     if(acquired) {
                         GameStat::update();require(int(GameStat::mapPikis)==20,"ordinary Red control starting squad");
-                        std::puts("P2_PURPLE_HAUL_RED_START field=20 native_red=1 source_identity_injected=0");
+                        if(mode("transport_red_control")) std::puts("P2_PURPLE_HAUL_RED_START field=20 native_red=1 source_identity_injected=0");
+                        else {
+                            pc_p2_make_purple(acquired);
+                            require(pc_p2_is_purple(acquired) && pc_piki_carry_strength(acquired)==10,"staged Purple identity/strength");
+                            int purpleCount=0,redCount=0;Iterator counted(pikiMgr);CI_LOOP(counted) {
+                                Piki* p=static_cast<Piki*>(*counted);if(!p || !p->isAlive()) continue;
+                                if(pc_p2_is_purple(p)) ++purpleCount;else if(p->mColor==Red && !p->mP2White) ++redCount;
+                            }
+                            require(purpleCount==1 && redCount==19,"staged squad identity counts");
+                            std::puts("P2_PURPLE_HAUL_STAGED_START field=20 starting_species_injected=1 native_acquisition=0 actor_position_injected=0");
+                        }
                     }
                 } else acquired=naturalStep(n);
             }
             return result;
         }
         if(mode("persistence_dayend")) beginPersistence(n);
-        else if(mode("transport_delivery") || mode("transport_positive") || mode("transport_red_control")) transportStep(n);
+        else if(mode("transport_delivery") || mode("transport_positive") || mode("transport_red_control") || mode("transport_staged") || mode("transport_manual")) transportStep(n);
         else combatStep(n);
         return result;
     }
@@ -618,12 +666,12 @@ int main(int argc,char** argv) {
     if(std::getenv("P2_FIXTURE_FORCE_CAPTAIN_DOWN")) p2_fixture_require_captain(false,false,0,0);
     setvbuf(stdout,nullptr,_IONBF,0);
     const char* mode=std::getenv("P2_PURPLE_COMBAT_MODE");
-    if(mode && std::strcmp(mode,"adult_direct") && std::strcmp(mode,"persistence_dayend") && std::strcmp(mode,"persistence_resume") && std::strcmp(mode,"transport_delivery") && std::strcmp(mode,"transport_positive") && std::strcmp(mode,"transport_red_control")) {
-        std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=adult_direct,persistence_dayend,persistence_resume,transport_delivery,transport_positive,transport_red_control\n",mode); return 2;
+    if(mode && std::strcmp(mode,"adult_direct") && std::strcmp(mode,"persistence_dayend") && std::strcmp(mode,"persistence_resume") && std::strcmp(mode,"transport_delivery") && std::strcmp(mode,"transport_positive") && std::strcmp(mode,"transport_red_control") && std::strcmp(mode,"transport_staged") && std::strcmp(mode,"transport_manual")) {
+        std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=adult_direct,persistence_dayend,persistence_resume,transport_delivery,transport_positive,transport_red_control,transport_staged,transport_manual\n",mode); return 2;
     }
     SDL_SetMainReady(); pc_gpu_preference_apply(); pc_bbft_init(argc,argv);
     require(pc_randomizer_purple_campaign() && pc_randomizer_p2_bridge(),"ordinary Purple seed campaign required");
-    if(!pc_window_init("Purple campaign combat fixture",960,540)) return 3;
+    if(!pc_window_init(mode && !std::strcmp(mode,"transport_manual")?"Purple carry smoke - staged Purple - F6 resets":"Purple campaign combat fixture",960,540)) return 3;
     pc_settings_init(); pc_window_set_display_mode(PC_WINDOW_FULLSCREEN_WINDOWED);
     pc_window_set_window_size(960,540); pc_window_center();
     std::puts("Experimental preview window set to 960x540 windowed and centered");
@@ -632,7 +680,7 @@ int main(int argc,char** argv) {
     require(w==960&&h==540,"window dimensions");
     std::printf("P2_FIXTURE_WINDOW width=%d height=%d x=%d y=%d\n",w,h,x,y);
     std::printf("P2_PURPLE_COMBAT_SCOPE mode=%s natural_acquisition=%d player_controls_validated=0 production_collision_marker_required=1\n",
-        mode?mode:"adult_direct",int(!mode || std::strcmp(mode,"transport_red_control")));
+        mode?mode:"adult_direct",int(!mode || (std::strcmp(mode,"transport_red_control") && std::strcmp(mode,"transport_staged") && std::strcmp(mode,"transport_manual"))));
     gsys->Initialise(); pc_settings_p2d_init(); nodeMgr=new NodeMgr();
     gsys->run(new PurpleCombatApp()); return 0;
 }
