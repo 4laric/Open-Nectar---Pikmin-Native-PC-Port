@@ -11,6 +11,8 @@
 // already does for the yaw (see pc_p2_umimushi.cpp updateColl).
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
+#include "pc_p2_skewer_axes.h"
 
 namespace p2skewer {
 
@@ -58,6 +60,67 @@ inline void tangent(const float (*p)[3], int n, int i, float out[3])
     for (int k = 0; k < 3; ++k) out[k] = p[c][k] - p[a][k];
 }
 
+// The slot joint's own orientation, as P2 uses it: `r` is the model-space rotation (row-major 3x3, from
+// pc_p2_skewer_axes.h), turned by the actor yaw into world space. The Pikmin then gets exactly the pose P2 gives
+// it: joint matrix times a +90 degree Z turn (viewPiki.cpp:671-682 here, Creature::updateStick in P2).
+inline Basis fromRotation(const float r[9], float yaw)
+{
+    const float c = std::cos(yaw), s = std::sin(yaw);
+    Basis b;
+    float* cols[3] = {b.x, b.y, b.z};
+    for (int k = 0; k < 3; ++k) {
+        const float mx = r[0 * 3 + k], my = r[1 * 3 + k], mz = r[2 * 3 + k]; // column k in model space
+        cols[k][0] = c * mx + s * mz;
+        cols[k][1] = my;
+        cols[k][2] = -s * mx + c * mz;
+    }
+    return b;
+}
+
+// Rotation of the Armor kamujnt at `frame` of clip `stem`; false when the clip is not tabled.
+inline bool armorRotation(const char* stem, float frame, float out[9])
+{
+    for (int i = 0; i < p2skeweraxes::kArmorClipCount; ++i) {
+        const p2skeweraxes::Clip& c = p2skeweraxes::kArmorClips[i];
+        if (std::strcmp(c.stem, stem) != 0) continue;
+        int f = int(frame + 0.5f);
+        if (f < 0) f = 0;
+        if (f >= c.frames) f = c.frames - 1;
+        for (int k = 0; k < 9; ++k) out[k] = p2skeweraxes::kArmor[c.offset + f * 9 + k];
+        return true;
+    }
+    return false;
+}
+
+// Rotation of UmiMushi kamu_joint(slot+1) at `frame` of attack1/eat1.
+inline bool umiRotation(const char* stem, float frame, int slot, float out[9])
+{
+    for (int i = 0; i < p2skeweraxes::kUmiClipCount; ++i) {
+        const p2skeweraxes::Clip& c = p2skeweraxes::kUmiClips[i];
+        if (std::strcmp(c.stem, stem) != 0 || slot < 0 || slot >= p2skeweraxes::kUmiJoints) continue;
+        int f = int(frame + 0.5f);
+        if (f < 0) f = 0;
+        if (f >= c.frames) f = c.frames - 1;
+        for (int k = 0; k < 9; ++k) out[k] = p2skeweraxes::kUmi[c.offset + (f * p2skeweraxes::kUmiJoints + slot) * 9 + k];
+        return true;
+    }
+    return false;
+}
+
+// Part joint matrix for an explicit basis (camRot * world basis).
+template <class Mtx>
+inline void jointMatrixBasis(Mtx& out, const Mtx& camRot, const Basis& b)
+{
+    Mtx world;
+    world.makeIdentity();
+    for (int r = 0; r < 3; ++r) {
+        world.mMtx[r][0] = b.x[r];
+        world.mMtx[r][1] = b.y[r];
+        world.mMtx[r][2] = b.z[r];
+    }
+    camRot.multiplyTo(world, out);
+}
+
 // Writes the part joint matrix (camRot * world basis) for a Pikmin skewered along `dir`.
 // camRot is the transpose of the camera rotation, exactly as the captors build their yaw matrix.
 template <class Mtx>
@@ -74,15 +137,13 @@ inline void jointMatrix(Mtx& out, const Mtx& camRot, const float dir[3], float f
     camRot.multiplyTo(world, out);
 }
 
-// How far back along the spear the held Pikmin is seated, in model units at scale 1. The Pikmin model's origin is
-// at its feet and its body extends along its up axis (= the spear direction, see along()), so seating the origin
-// ON the joint leaves the whole body beyond the tip (floating in front of it, #1020 evidence). Seating it this
-// far back brings the tip through the middle of the body. PIKMIN_P2_SKEWER_DEPTH overrides it for tuning.
+// Optional extra seating back along the spear (model units at scale 1), default 0: P2 seats the Pikmin ON the slot
+// joint (creatureStick.cpp:221-247). PIKMIN_P2_SKEWER_DEPTH overrides it for tuning only.
 inline float depth()
 {
     static const float d = [] {
         const char* e = std::getenv("PIKMIN_P2_SKEWER_DEPTH");
-        return e && *e ? float(std::atof(e)) : 18.0f;
+        return e && *e ? float(std::atof(e)) : 0.0f;
     }();
     return d;
 }

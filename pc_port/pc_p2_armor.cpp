@@ -566,7 +566,13 @@ void updateColl(BTeki* actor, Armor& s) {
         float seated[3] = {mw.x, mw.y, mw.z};
         p2skewer::seat(seated, nose, s.scale);
         s.coll.kam->mCentre.set(seated[0], seated[1], seated[2]);
-        p2skewer::jointMatrix(s.coll.kam->mJointMatrix, camRot, nose, actor->getDirection());
+        // P2 poses the held Pikmin with the kamujnt matrix itself (Creature::updateStick); use the real joint
+        // rotation, falling back to the nose direction for an untabled clip.
+        float rot[9];
+        if (p2skewer::armorRotation(s.clip.c_str(), frame, rot))
+            p2skewer::jointMatrixBasis(s.coll.kam->mJointMatrix, camRot, p2skewer::fromRotation(rot, actor->getDirection()));
+        else
+            p2skewer::jointMatrix(s.coll.kam->mJointMatrix, camRot, nose, actor->getDirection());
     }
 }
 // Gives the actor its host CollInfo back (the own tree is never freed: stuck Pikmin may still hold its

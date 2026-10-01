@@ -42,6 +42,18 @@ int main()
     require(near(t[0], 30.0f), "inner tangent");
     tangent(p, 4, 3, t);
     require(near(t[0], 30.0f), "end tangent");
+    // joint rotation tables (P2 poses the Pikmin with the slot joint's own matrix)
+    const float ident[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    const Basis i0 = fromRotation(ident, 0.0f);
+    require(near(i0.x[0], 1.0f) && near(i0.y[1], 1.0f) && near(i0.z[2], 1.0f), "identity rotation, yaw 0");
+    const Basis i90 = fromRotation(ident, 1.5707963f);
+    require(near(i90.x[0], 0.0f) && near(i90.x[2], -1.0f) && near(i90.z[0], 1.0f), "yaw 90 turns model +x to world -z");
+    float rot[9];
+    require(armorRotation("attack2", 22.0f, rot), "armor attack2 tabled");
+    require(near(rot[0] * rot[0] + rot[3] * rot[3] + rot[6] * rot[6], 1.0f), "armor column is normalised");
+    require(!armorRotation("nope", 0.0f, rot), "unknown clip refused");
+    require(umiRotation("attack1", 40.0f, 3, rot) && umiRotation("eat1", 10.0f, 6, rot), "umi attack1/eat1 tabled");
+    require(!umiRotation("run1", 0.0f, 0, rot) && !umiRotation("attack1", 0.0f, 7, rot), "umi other clips/slots refused");
     std::printf("p2_skewer_test OK (%d checks)\n", gChecks);
     return 0;
 }
