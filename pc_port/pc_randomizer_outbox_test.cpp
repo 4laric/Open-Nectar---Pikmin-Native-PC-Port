@@ -133,6 +133,8 @@ int main()
 		CHECK(mirror_deaths(17, 1000000) == "FRAME 17 DEATHS 1000000", "DEATHS max");
 		CHECK(mirror_deaths(17, 1000001).empty(), "DEATHS over range rejected");
 		CHECK(mirror_deathlink(32, 3) == "FRAME 32 DEATHLINK 3", "DEATHLINK line");
+		CHECK(mirror_deathlink(32, UINT32_MAX) == "FRAME 32 DEATHLINK 4294967295", "DEATHLINK uint32 maximum");
+		CHECK(mirror_deathlink(32, 0x01020304) == "FRAME 32 DEATHLINK 16909060", "expanded DeathLink inventory reaches mirror");
 		CHECK(mirror_emperor(99) == "FRAME 99 EMPEROR", "EMPEROR line");
 		CHECK(mirror_received(40, 0, 8) == "FRAME 40 RECEIVED 0 8", "RECEIVED line");
 		CHECK(mirror_received(40, 10000000, 2147483647u) == "FRAME 40 RECEIVED 10000000 2147483647",

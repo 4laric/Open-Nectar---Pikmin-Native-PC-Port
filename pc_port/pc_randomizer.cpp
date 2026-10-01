@@ -638,7 +638,7 @@ void apply_parsed(const ParsedRand& p) {
                 std::printf("[Pikmin Randomizer] DEATHLINK_TOTAL %u\n", p.deathLinks);
                 pc_rand_outbox::Entry e; e.kind = pc_rand_outbox::Kind::DeathLink; e.total = p.deathLinks; outbox_push(e);
             }
-            deathLinksPending = std::min(3u, deathLinksPending + (p.deathLinks - deathLinksSeen));
+            deathLinksPending = std::min(3u, deathLinksPending + std::min(3u, p.deathLinks - deathLinksSeen));
             deathLinksSeen = p.deathLinks;
         }
     }
@@ -1344,7 +1344,7 @@ void pc_randomizer_update() {
         if (!deathLinkBaseline) { deathLinksSeen = newDeathLinks; deathLinkBaseline = true; }
         else if (newDeathLinks < deathLinksSeen) fail("state retracted received DeathLinks");
         else {
-            deathLinksPending = std::min(3u, deathLinksPending + (newDeathLinks - deathLinksSeen));
+            deathLinksPending = std::min(3u, deathLinksPending + std::min(3u, newDeathLinks - deathLinksSeen));
             deathLinksSeen = newDeathLinks;
         }
     }

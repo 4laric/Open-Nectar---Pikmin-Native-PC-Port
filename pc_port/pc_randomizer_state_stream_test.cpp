@@ -13,9 +13,12 @@
 #define TEST_PID _getpid()
 #else
 #include <unistd.h>
+#include <sys/wait.h>
 #define TEST_PID getpid()
 #endif
-namespace {pc_randstate::PcRandState published;bool have=false;int failures=0;}
+namespace {pc_randstate::PcRandState published;bool have=false;int failures=0;uint64_t invalidBefore=0;
+void invalid_exit() {std::printf("INVALID_ATOMIC_%s\n",pc_randomizer_hash()==invalidBefore?"UNCHANGED":"MUTATED");}
+}
 #define CHECK(x) do{if(!(x)){std::printf("FAIL %d %s\n",__LINE__,#x);++failures;}}while(0)
 bool pc_netplay_session_active(){return true;}
 bool pc_netplay_is_host(){return true;}
@@ -27,8 +30,30 @@ int main(int argc,char**argv){
  namespace fs=std::filesystem;
  const bool tl=argc>1&&!std::strcmp(argv[1],"thelynk");
  const auto root=fs::temp_directory_path()/("coop-state-consumer-"+std::to_string(TEST_PID));
- const auto run=root/"runs"/"abcdef1234567890";fs::create_directories(run);
- const char* token="abcdef1234567890";const std::string fingerprint(64,'a');
+ const std::string sessionToken(64,'b');
+ const auto run=root/"runs"/sessionToken;fs::create_directories(run);
+ const char* token=sessionToken.c_str();const std::string fingerprint(64,'a');
+ if(argc==3) {
+  const std::string fault=argv[2];const auto log=root/"negative.log";
+  const std::string command="\"\""+std::string(argv[0])+"\" "+(tl?"thelynk":"p1")+" "+fault+" child > \""+log.string()+"\" 2>&1\"";
+#ifdef _WIN32
+  const int result=std::system(command.c_str());
+#else
+  const int raw=std::system(command.substr(1,command.size()-2).c_str());
+  const int result=WIFEXITED(raw)?WEXITSTATUS(raw):-1;
+#endif
+  std::ifstream input(log);std::string text((std::istreambuf_iterator<char>(input)),{});input.close();
+  CHECK(result==2);
+  std::string expected="noncanonical net randomizer state";
+  if(fault=="bad-mode")expected="net randomizer state differs from authenticated bootstrap";
+  if(fault=="bad-unknown")expected=tl?"unsupported or malformed bootstrap":"invalid state: identity, version or range mismatch";
+  if(fault=="bad-trailing")expected=tl?"trailing TheLynk state":"invalid state: identity, version or range mismatch";
+  if(fault=="bad-progression")expected=tl?"invalid/retracted TheLynk inventory":"state attempted to retract received progression";
+  CHECK(text.find(expected)!=std::string::npos);
+  CHECK(text.find("INVALID_ATOMIC_UNCHANGED")!=std::string::npos);
+  CHECK(text.find("INVALID_ATOMIC_MUTATED")==std::string::npos);
+  std::printf("negative exit%d: %s",result,text.c_str());fs::remove_all(root);return failures?1:0;
+ }
  std::ostringstream bootstrap,state;
  if(tl){
   bootstrap<<"PIKMIN_THELYNK 1\nSESSION "<<token<<"\nFINGERPRINT "<<fingerprint<<"\nCHECKS 330";
@@ -49,11 +74,24 @@ int main(int argc,char**argv){
  CHECK(pc_randomizer_repairs()==0);
  uint8_t wire[pc_randstate::kStateBytes];pc_randstate::encode(published,wire);pc_randstate::PcRandState decoded;
  CHECK(pc_randstate::decode(wire,sizeof(wire),decoded));
- if(argc>2&&!std::strcmp(argv[2],"bad-mode")){decoded.mode=tl?1:2;pc_randomizer_apply_net_state(decoded);return 0; /* WILL_FAIL must fail if invalid inventory was accepted. */}
- if(argc>2&&!std::strcmp(argv[2],"bad-disabled")){if(tl)decoded.maturity[0]=1;else decoded.thelynkBonuses[17]=1;pc_randomizer_apply_net_state(decoded);return 0; /* WILL_FAIL must fail if invalid inventory was accepted. */}
  CHECK(pc_randomizer_apply_net_state(decoded));
  pc_randstate::PcRandState actual;CHECK(pc_randomizer_get_net_state(&actual));CHECK(pc_randstate::payload_equal(decoded,actual));
  CHECK(pc_randomizer_repairs()==(tl?30:25));
+ if(argc>3) {
+  invalidBefore=pc_randomizer_hash();std::atexit(invalid_exit);
+  const std::string fault=argv[2];
+  if(fault=="bad-unknown"||fault=="bad-trailing") {
+   std::string malformed=state.str();
+   if(fault=="bad-unknown")malformed.insert(malformed.rfind("END"),"UNKNOWN 1 ");
+   else malformed+="UNKNOWN\n";
+   {std::ofstream output(run/"state.txt");output<<malformed;}
+   pc_randomizer_force_net_publish();return 0;
+  }
+  if(fault=="bad-progression"){if(tl)decoded.thelynkParts=0;else decoded.repairs=0;}
+  else if(fault=="bad-mode")decoded.mode=tl?1:2;
+  else if(tl)decoded.maturity[0]=1;else decoded.thelynkBonuses[17]=1;
+  pc_randomizer_apply_net_state(decoded);return 0; // Parent requires exit2 and precise refusal/atomicity markers.
+ }
  if(tl){CHECK(actual.checkCount==330);CHECK(actual.thelynkBonuses[17]==1);CHECK(actual.checks[329/8]&(1u<<(329%8)));}
  else{CHECK(pc_randomizer_maturity(0)==1&&pc_randomizer_maturity(1)==2);CHECK(pc_randomizer_whistle_pluck()==1);CHECK(pc_randomizer_day_length_multiplier()==1.75f);}
  const auto h=pc_randomizer_hash();CHECK(pc_randomizer_apply_net_state(decoded));CHECK(pc_randomizer_hash()==h);
@@ -61,5 +99,11 @@ int main(int argc,char**argv){
  if(tl){CHECK(pc_randomizer_thelynk_bonus(17)>0);pc_randomizer_thelynk_consume(17);}
  else CHECK(pc_randomizer_consume_benefit(static_cast<PcBenefit>(0)));
  CHECK(pc_randomizer_hash()!=h);
+ if(!tl) {
+  decoded.deathLinks=UINT32_MAX;CHECK(pc_randomizer_apply_net_state(decoded));
+  for(int i=0;i<3;++i){CHECK(pc_randomizer_deathlink_casualties()==1);pc_randomizer_deathlink_consume(1);}
+  CHECK(pc_randomizer_deathlink_casualties()==0);
+  CHECK(pc_randomizer_apply_net_state(decoded));CHECK(pc_randomizer_deathlink_casualties()==0);
+ }
  fs::remove_all(root);std::printf("STATE_CONSUMER_PASS failures=%d\n",failures);return failures?1:0;
 }

@@ -80,7 +80,7 @@ std::string mirror_deaths(uint32_t frame, uint32_t total)
 
 std::string mirror_deathlink(uint32_t frame, uint32_t total)
 {
-	if (total > kMaxTotal) return std::string();
+	// Full uint32 DeathLink inventory; ordinary DEATHS retains kMaxTotal.
 	char buf[48];
 	std::snprintf(buf, sizeof(buf), "DEATHLINK %lu", (unsigned long)total);
 	return finish(frame_prefix(frame) + buf);

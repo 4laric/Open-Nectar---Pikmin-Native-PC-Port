@@ -133,6 +133,7 @@ int main()
                   "old and current protocol identifiable before full body parsing");
             CHECK((proto != kProtocolV4) == (remote == kProtocolV3), "version3 cannot enter version4 session");
         }
+        encode_hello(kHsAck, kProtocolV3, h, kFieldSidecars, wire); // Restore the legacy vector after protocol4 checks.
 		CHECK(!decode_hello(wire, kHsLenV2, &type, &proto, &g, &refuse), "a v2-length frame is not a v3 Hello");
 		CHECK(!decode_hello(wire, kHsLenV1, &type, &proto, &g, &refuse), "a v1-length frame is not a v3 Hello");
 		CHECK(!decode_hello(wire, kHsLenV3 + 1, &type, &proto, &g, &refuse), "an over-long frame is refused");
