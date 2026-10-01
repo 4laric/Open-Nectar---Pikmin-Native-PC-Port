@@ -102,6 +102,7 @@ struct FsmActor {
 	bool swallowFired     = false;
 	bool flickFired       = false;
 	bool deadLogged       = false;
+	bool itemsSpawned     = false;
 	bool died             = false;
 	bool healthAsserted   = false;
 	float logTimer        = 0.0f;
@@ -403,6 +404,14 @@ void enter(BTeki* actor, FsmActor& state, State next)
 	state.attackFired  = false;
 	state.swallowFired = false;
 	state.flickFired   = false;
+ // Retail StateDead::init calls deathProcedure/throwupItem before its
+ // death motion. The suppressed P1 strategy cannot emit generator pellets;
+ // Red1's mapped personality owns this exactly-once ordinary drop boundary.
+ // Orange44 remains unchanged until its separately-owned payload audit.
+ if (next == p2kochappyfsm::STATE_DEAD && state.sourceId == 1 && !state.itemsSpawned) {
+  state.itemsSpawned = true;
+  actor->spawnItems();
+ }
 	actor->startMotion(motionFor(next));
 	const unsigned generator = pc_p2_campaign_token(actor);
 	std::printf("P2_KOCHAPPY_STATE generator=%u state=%s\n", generator,
