@@ -49,8 +49,8 @@ int main(int argc,char**argv){
  CHECK(pc_randomizer_repairs()==0);
  uint8_t wire[pc_randstate::kStateBytes];pc_randstate::encode(published,wire);pc_randstate::PcRandState decoded;
  CHECK(pc_randstate::decode(wire,sizeof(wire),decoded));
- if(argc>2&&!std::strcmp(argv[2],"bad-mode")){decoded.mode=tl?1:2;pc_randomizer_apply_net_state(decoded);return 99;}
- if(argc>2&&!std::strcmp(argv[2],"bad-disabled")){if(tl)decoded.maturity[0]=1;else decoded.thelynkBonuses[17]=1;pc_randomizer_apply_net_state(decoded);return 99;}
+ if(argc>2&&!std::strcmp(argv[2],"bad-mode")){decoded.mode=tl?1:2;pc_randomizer_apply_net_state(decoded);return 0; /* WILL_FAIL must fail if invalid inventory was accepted. */}
+ if(argc>2&&!std::strcmp(argv[2],"bad-disabled")){if(tl)decoded.maturity[0]=1;else decoded.thelynkBonuses[17]=1;pc_randomizer_apply_net_state(decoded);return 0; /* WILL_FAIL must fail if invalid inventory was accepted. */}
  CHECK(pc_randomizer_apply_net_state(decoded));
  pc_randstate::PcRandState actual;CHECK(pc_randomizer_get_net_state(&actual));CHECK(pc_randstate::payload_equal(decoded,actual));
  CHECK(pc_randomizer_repairs()==(tl?30:25));

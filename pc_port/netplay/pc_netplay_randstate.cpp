@@ -130,6 +130,9 @@ void Reassembler::feed(bool hasChunk, uint8_t seq, const uint8_t payload[kFragBy
 	memset(mSlots, 0, sizeof(mSlots));
 	mMask = 0;
 	if (st.gen <= mAppliedGen) return; // stale or replayed generation: no-op
+	// An unconsumed newer snapshot is also an ordering watermark. Replaying
+	// it cannot postpone its apply frame, and older snapshots cannot replace it.
+	if (mHasPending && st.gen <= mPendingGen) return;
 	// A newer generation replaces an unconsumed pending one only when it
 	// completes later; both peers see the same stream, so the pending slot
 	// stays identical.
