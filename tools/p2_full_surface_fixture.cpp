@@ -70,7 +70,7 @@ public:
         if(gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
         if(!naviMgr || !pikiMgr || !mapMgr)return result;
         if(!initialized)return result;
-        if(n->getCurrState()->getID()!=NAVISTATE_Walk || ++ready<45)return result;
+        if(phase==0 && (n->getCurrState()->getID()!=NAVISTATE_Walk || ++ready<45))return result;
         require(flowCont.mCurrentStage && !std::strcmp(flowCont.mCurrentStage->mFileName,"stages/p2_tutorial.ini"),"wrong loaded stage");
         require(!gameflow.mIsChallengeMode && !pc_pikipelago_room_preview(),"wrong lifecycle");
         int count=0;Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(p->isAlive())++count;}
