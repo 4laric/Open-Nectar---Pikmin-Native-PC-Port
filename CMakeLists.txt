@@ -2989,6 +2989,14 @@ pikmin_add_ci_fixture(captain_combined_sdl tools/p2_captain_combined_sdl_fixture
 if(TARGET pikmin_ci_fixture_captain_combined_sdl)
     target_include_directories(pikmin_ci_fixture_captain_combined_sdl PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
 endif()
+# #1148 ordinary paired SDL/AP acceptance. Explicit compile-only target; the
+# NETPLAY=OFF profile cannot substitute for its deterministic consumer linkage.
+if(PIKMIN_NETPLAY_BUILD)
+    pikmin_add_ci_fixture(coop_state_protocol tools/p2_coop_state_protocol_runtime.cpp)
+    if(TARGET pikmin_ci_fixture_coop_state_protocol)
+        target_include_directories(pikmin_ci_fixture_coop_state_protocol PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
+    endif()
+endif()
 add_executable(p2_bomb_telegraph_test tools/p2_bomb_telegraph_test.cpp)
 target_include_directories(p2_bomb_telegraph_test PRIVATE pc_port)
 target_compile_options(p2_bomb_telegraph_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
