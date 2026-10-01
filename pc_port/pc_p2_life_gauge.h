@@ -66,6 +66,7 @@ static const Row kRows[] = {
     {57, 70.0f}, // Kurage
     {72, 10.0f}, // OniKurage
     {30, 50.0f}, // Queen
+    {31, 50.0f}, // Baby (Bulborb Larva), fp27 from baby/enemyparm.txt (#1042)
     // Wave-3 mechanics species (claude/p2-wave3-mechanics, not yet in the pool).
     {26, 50.0f}, // Catfish
     {27, 50.0f}, // Tadpole (Wogpole)

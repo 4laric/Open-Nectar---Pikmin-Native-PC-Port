@@ -85,6 +85,9 @@ inline int hostType(unsigned source, int original, bool protectedSpawn) {
     // vehicle driven by pc_p2_bigtreasure_teki (source-order core).
     case 73: return 4; // TEKI_Swallow: BigTreasure campaign actor
     case 30: return 4; // TEKI_Swallow: Empress Bulblax OWN vehicle (#256, pc_p2_queen_teki)
+    // #1042: the standalone Bulborb Larva (Baby) rides the same vehicle at larva scale
+    // (the Queen-born larvae already do); pc_p2_queen_teki binds it.
+    case 31: return 4; // TEKI_Swallow: Bulborb Larva OWN vehicle
     default: return original;
     }
 }

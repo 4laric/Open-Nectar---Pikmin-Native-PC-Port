@@ -14,6 +14,7 @@ int main()
     assert(p2lifegauge::lifeMeterHeight(2, -1.0f) == 90.0f);   // Chappy
     assert(p2lifegauge::lifeMeterHeight(33, -1.0f) == 110.0f); // FireChappy
     assert(p2lifegauge::lifeMeterHeight(63, -1.0f) == 20.0f);  // Jigumo
+    assert(p2lifegauge::lifeMeterHeight(31, -1.0f) == 50.0f);  // Baby (Bulborb Larva)
     assert(p2lifegauge::lifeMeterHeight(9999, 7.0f) == 7.0f);  // unknown -> fallback
     // Gauge shows only for a live, damaged enemy.
     assert(p2lifegauge::shouldShow(900.0f, 1500.0f, false));
