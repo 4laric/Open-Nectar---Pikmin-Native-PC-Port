@@ -72,6 +72,7 @@ class ContactApp:public PlugPikiApp {
     int contactSamples=0,offContactSamples=0;
     // Fixture observation only: held, released, rising, descending, off-contact.
     std::map<Piki*,int> flight;
+    std::map<Piki*,int> releasedAt;
     bool aHeld=false;
     void witness(Piki* p,const char* phase){
         std::printf("P2_ELECBUG_THROW frame=%d piki=%p phase=%s\n",frame,static_cast<void*>(p),phase);
@@ -126,7 +127,13 @@ public:
             int& phase=flight[p];
             const int pstate=p->getState();
             if(aHeld&&p->mNavi==n&&pstate==PIKISTATE_Hanged&&phase!=1){phase=1;witness(p,"held");}
-            if(phase==2&&pstate==PIKISTATE_Flying&&p->mVelocity.y>.01f){phase=3;witness(p,"rising");}
+            if(phase==2){
+                if(pstate==PIKISTATE_Flying&&p->mVelocity.y>.01f){phase=3;witness(p,"rising");}
+                else if(pstate!=PIKISTATE_Hanged||p->mNavi!=n||
+                        n->getCurrState()->getID()!=NAVISTATE_Throw||frame-releasedAt[p]>60){
+                    phase=0;witness(p,"invalidated");
+                }
+            }
             if(phase==3&&pstate==PIKISTATE_Flying&&p->mVelocity.y<-.01f){phase=4;witness(p,"descending");}
             if(((phase==3||phase==4)&&pstate!=PIKISTATE_Flying)||
                (phase==5&&!reverseSeen&&pstate!=PIKISTATE_Flying)){
@@ -173,7 +180,7 @@ public:
         if(cycle<22){aHeld=true;point(n,enemy->mSRT.t,false,KBBTN_A);}
         else {
             input();
-            if(aHeld)for(auto& entry:flight)if(entry.second==1){entry.second=2;witness(entry.first,"released");}
+            if(aHeld)for(auto& entry:flight)if(entry.second==1){entry.second=2;releasedAt[entry.first]=frame;witness(entry.first,"released");}
             aHeld=false;
         }
         return result;
