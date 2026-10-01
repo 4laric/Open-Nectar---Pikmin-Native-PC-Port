@@ -1081,6 +1081,28 @@ static zen::DrawContainer* pcContainerWindowFor(Navi* navi)
 {
 	return (navi->mNaviID == 1 && containerWindow2) ? containerWindow2 : containerWindow;
 }
+
+static void pcRefreshContainerCounts(Navi* navi, zen::DrawContainer* win)
+{
+	int eligible = 0;
+	Iterator squad(navi->mPlateMgr);
+	CI_LOOP(squad)
+	{
+		Piki* piki = static_cast<Piki*>(*squad);
+		const int state = piki->getState();
+		if (!piki->isAlive() || state == PIKISTATE_FallMeck || state == PIKISTATE_Bury || state == PIKISTATE_Drown
+		    || state == PIKISTATE_Dead || state == PIKISTATE_Dying || state == PIKISTATE_Absorb) continue;
+		if (piki->mColor == navi->mGoalItem->mOnionColour) ++eligible;
+	}
+	// GameStat counters change as the unpaused world runs. Pending exits reserve
+	// space immediately, including an earlier captain confirmation this same tick.
+	GameStat::update();
+	const int used = pc_vs_active() ? pcVsFieldPikis(navi->mNaviID)
+	    : int(GameStat::mapPikis) + itemMgr->getContainerExitCount();
+	const int limit = pc_vs_active() ? pcVsFieldLimit() : int(AICONST.mMaxPikisOnField());
+	win->refreshCounts(navi->mGoalItem->getTotalStorePikis() - navi->mGoalItem->mPikisToExit,
+	    10000, eligible, limit, used, limit);
+}
 #endif
 
 NaviContainerState::NaviContainerState()
@@ -1132,6 +1154,7 @@ void NaviContainerState::init(Navi* navi)
 	const int fieldMax = pc_vs_active() ? pcVsFieldLimit() : int(AICONST.mMaxPikisOnField());
 	win->start((zen::DrawContainer::containerType)navi->mGoalItem->mOnionColour, storedPikisAvailable, 10000,
 	           numOnionColoredPikis, fieldMax, fieldNow, fieldMax);
+	if (coop) pcRefreshContainerCounts(navi, win);
 	if (!coop) gameflow.mPauseAll = TRUE;
 #else
 	gameflow.mGameInterface->message(MOVIECMD_HideHUD, 0);
@@ -1183,9 +1206,15 @@ void NaviContainerState::onCloseWindow()
  */
 void NaviContainerState::exec(Navi* navi)
 {
-	int signedPikiCount;
+	int signedPikiCount = 0;
 #if defined(PIKI_PC_PORT)
-	if (pcContainerWindowFor(navi)->update(signedPikiCount)) {
+	zen::DrawContainer* win = pcContainerWindowFor(navi);
+	if (containerWindow2) pcRefreshContainerCounts(navi, win);
+	if (win->update(signedPikiCount)) {
+		if (containerWindow2) {
+			pcRefreshContainerCounts(navi, win);
+			signedPikiCount = win->revalidateTransfer(signedPikiCount);
+		}
 		if (!containerWindow2) gameflow.mGameInterface->message(MOVIECMD_ShowHUD, 0);
 #else
 	if (containerWindow->update(signedPikiCount)) {
