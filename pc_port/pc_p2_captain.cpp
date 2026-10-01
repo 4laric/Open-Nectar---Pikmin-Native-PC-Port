@@ -176,7 +176,7 @@ bool safe_to_switch(Navi* navi)
 {
     if (!navi) return false;
     const int state = navi->getCurrState() ? navi->getCurrState()->getID() : NAVISTATE_NULL;
-    return p2_captain_switch_safe(true, navi->isAlive() && navi->mHealth > 1.0f,
+    return p2_captain_switch_safe(true, navi->isAlive() && std::isfinite(navi->mHealth) && navi->mHealth > 1.0f,
         naviMgr->isNaviDead(navi), navi->isGrabbed(), navi->isHolding(),
         state == NAVISTATE_Walk || state == NAVISTATE_Idle);
 }
@@ -242,6 +242,28 @@ void update_player_switch()
         && current->mKontroller->keyDown(KBBTN_DPAD_UP);
     const bool pressed = g_switchPress.update(enabled, down);
     if (!enabled) return;
+    // The normal death animation owns dead flags, health normalization and
+    // releasePikis. A lethal selected captain must stop owning input before
+    // that animation finishes, while a safe living partner is available.
+    if (current && p2_captain_needs_survivor_takeover(current->mHealth)
+        && !(gameflow.mDemoFlags & CinePlayerFlags::NaviNoAI)) {
+        Navi* survivor = naviMgr->getOtherNavi(current);
+        P2CaptainAdapter* live = adapter();
+        if (current->mKontroller && survivor && survivor->mKontroller
+            && safe_to_switch(survivor) && cameraMgr && live
+            && live->policy().controllable(survivor->getNaviIndex())
+            && switch_active(survivor->getNaviIndex())) {
+            p2_captain_neutral_input(*current->mKontroller);
+            p2_captain_neutral_input(*survivor->mKontroller);
+            current->mTargetVelocity.set(0.0f, 0.0f, 0.0f);
+            current->mIsCursorVisible = false;
+            p2_captain_bind_camera(*cameraMgr, *survivor);
+            // Keep the press latch held until the physical key is released.
+            std::printf("P2_CAPTAIN_SURVIVOR from=%d to=%d health=%.3f death_animation_unchanged=1\n",
+                        current->getNaviIndex(), survivor->getNaviIndex(), current->mHealth);
+            return;
+        }
+    }
     // Death/capture can change the roster independently of this key binding.
     // The camera manager holds its own controller pointer as well as a target.
     // Reconcile both before processing a new switch (also covers survivor-down).

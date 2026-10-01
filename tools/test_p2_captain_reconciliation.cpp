@@ -2,6 +2,7 @@
 #undef NDEBUG
 #endif
 #include "pc_p2_captain.h"
+#include "pc_p2_captain_switch_policy.h"
 #include <cassert>
 #include <cstdio>
 #include <vector>
@@ -31,6 +32,11 @@ static P2CaptainHostOps ops(Scene& s) {
     o.setOwnerSlot=setOwner; o.prepareCapture=prepare; o.enumerate=enumerate; return o;
 }
 int main() {
+    assert(p2_captain_needs_survivor_takeover(1.0f));
+    assert(p2_captain_needs_survivor_takeover(-400.0f));
+    assert(!p2_captain_needs_survivor_takeover(1.001f));
+    assert(!p2_captain_needs_survivor_takeover(NAN));
+    assert(!p2_captain_needs_survivor_takeover(INFINITY));
     // A late birth and a changed whistle owner must be read before a capture.
     {
         Actor a{1,0}, late{2,1}, unrelated{3,-1}; Scene s; s.actors={&a};

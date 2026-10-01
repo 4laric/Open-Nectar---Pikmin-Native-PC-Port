@@ -1,4 +1,11 @@
 #pragma once
+#include <cmath>
+
+// The engine finishes the damage animation before entering NaviDeadState.
+// Control can hand off sooner, without marking dead or changing health.
+inline bool p2_captain_needs_survivor_takeover(float health) {
+    return std::isfinite(health) && health <= 1.0f;
+}
 
 // Single-player switching runs once after both Navis update. Keep the edge
 // latch outside either Kontroller: changing captain while Up is held must not

@@ -95,6 +95,8 @@ class CaptainSwitchApp final : public PlugPikiApp {
     int zoomStart=0;
     bool sawGather=false,sawFlying=false;
     Piki* heldPiki=nullptr;
+    int deathTransitions=0, firstDeadTick=-1, damagedFormation=0;
+    bool previousDead=false;
     std::vector<Piki*> squad;
     std::vector<Navi*> owners;
     bool screenshot=false;
@@ -182,6 +184,22 @@ public:
             if(heldPiki && p==heldPiki && tick>290 && p->isAlive()
                 && p->getState()==PIKISTATE_Flying)sawFlying=true;
         }
+        if(tick>380) {
+            Navi* downed=sPrimaryDown?a:b;
+            require(selected==(sPrimaryDown?b:a),"survivor remains selected on repeated frames and held Up");
+            require(cameraMgr->mController==selected->mKontroller && cameraMgr->mCamera->mTargetCreature==selected,"survivor camera remains bound");
+            const bool dead=naviMgr->isNaviDead(downed);
+            if(dead && !previousDead) { ++deathTransitions;firstDeadTick=tick; }
+            require(!previousDead || dead,"native death roster remains recorded");previousDead=dead;
+            if(dead) {
+                int formation=0,live=0;Iterator liveIt(pikiMgr);CI_LOOP(liveIt) {
+                    auto* p=static_cast<Piki*>(*liveIt);if(!p || !p->isAlive())continue;++live;
+                    if(p->mNavi==downed && p->mMode==PikiMode::FormationMode)++formation;
+                }
+                require(formation==0,"native death released original formation");
+                require(live==20,"survivor retains fresh live Pikmin population");
+            }
+        }
         switch(tick) {
         case 5:pad(KBBTN_DPAD_UP);break;
         case 10:active(1);break;
@@ -254,11 +272,21 @@ public:
         case 375:if(sPrimaryDown)pad(KBBTN_DPAD_UP);break;
         case 378:if(sPrimaryDown){active(0);pad();}break;
         case 380: {
-            InteractAttack hit(nullptr,nullptr,500.0f,false);hit.actNavi(sPrimaryDown?a:b);
+            Navi* downed=sPrimaryDown?a:b;Iterator before(pikiMgr);CI_LOOP(before) {
+                auto* p=static_cast<Piki*>(*before);if(p && p->isAlive() && p->mNavi==downed && p->mMode==PikiMode::FormationMode)++damagedFormation;
+            }
+            // Keep Up physically held across lethal damage; this must not become
+            // a fresh switch edge or bounce control back during death animation.
+            pad(KBBTN_DPAD_UP);
+            InteractAttack hit(nullptr,nullptr,500.0f,false);hit.actNavi(downed);
             std::puts("P2_SWITCH_SURVIVOR injected_attack_receiver=1");break;
         }
-        case 390:active(sPrimaryDown?1:0);require(naviMgr->isNaviDead(sPrimaryDown?a:b),"down captain recorded");std::printf("P2_SWITCH_SURVIVOR primary_down=%d active=%d\n",int(sPrimaryDown),naviMgr->getActiveNavi()->mNaviID);break;
-        case 410:require(screenshot,"render capture");std::puts("PASS P2_CAPTAIN_SWITCH_RUNTIME");std::fflush(nullptr);std::_Exit(0);
+        case 390:active(sPrimaryDown?1:0);break;
+        case 420:pad();break;
+        case 550:
+            require(deathTransitions==1 && firstDeadTick>380,"one native death roster transition after attack");
+            std::printf("P2_SWITCH_SURVIVOR primary_down=%d active=%d death_transitions=%d first_dead_tick=%d formation_before=%d formation_after=0 repeated_frames=170 held_up_no_bounce=1\n",int(sPrimaryDown),naviMgr->getActiveNavi()->mNaviID,deathTransitions,firstDeadTick,damagedFormation);
+            require(screenshot,"render capture");std::puts("PASS P2_CAPTAIN_SWITCH_RUNTIME");std::fflush(nullptr);std::_Exit(0);
         }
         if(tick%10==0) {std::printf("P2_SWITCH_TICK tick=%d active=%d states=%d,%d\n",tick,naviMgr->getActiveNavi()->mNaviID,a->getCurrState()->getID(),b->getCurrState()->getID());std::fflush(stdout);}
         return result;
