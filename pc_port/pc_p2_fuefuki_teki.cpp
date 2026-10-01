@@ -19,6 +19,9 @@
 #include "PikiState.h"
 #include "PaniPikiAnimator.h"
 #include "Shape.h"
+#include <algorithm>
+#include "pc_p2_fb_smooth.h"
+#include "pc_p2_pose_family.h"
 #include "Texture.h"
 #include "Graphics.h"
 #include "gameflow.h"
@@ -71,6 +74,7 @@ struct Binding {
     int casts = 0;
     int screenLogCountdown = 0;
     int stayDrawCalls = 0;   // draw hook calls while Stay (drawn nothing)
+    float carcassTime = 0.0f; // seconds since the corpse was carried (carry clip clock)
     int stayFrames = 0;      // engine ticks spent in Stay this airborne spell
     int stayVisibleTicks = 0; // Stay ticks with TEKIOPT_Visible still set (want 0)
     // P1 target guard (policy kTargetTries): home ground height / waypoint and
@@ -117,7 +121,11 @@ struct PoseClip {
 };
 PoseClip sPoses[p2fuefuki::AnimCount];
 bool sPosesLoaded = false;
-std::size_t sPoseCount = 0, sPoseBytes = 0;
+std::size_t sPoseCount = 0, sPoseBytes = 0, sPoseDiskBytes = 0;
+// #972: lerp + 150 ms crossfade over the shared pose bank (nearest Shapes in
+// sPoses stay the fallback). Presentation only; PIKMIN_P2_INTERPOLATION=0 -> nearest.
+p2posefamily::Bank sPoseBank("FUEFUKI");
+p2posefamily::Actors sPoseVis;
 
 std::uint32_t pikiId(const Piki* p)
 {
@@ -216,7 +224,9 @@ void loadPoses()
 {
     for (auto& c : sPoses) c = PoseClip{};
     sPosesLoaded = false;
-    sPoseCount = sPoseBytes = 0;
+    sPoseCount = sPoseBytes = sPoseDiskBytes = 0;
+    sPoseBank.reset();
+    sPoseVis.clear();
     std::ifstream in("p2-fuefuki-bank.txt");
     std::string header;
     int count = 0;
@@ -224,7 +234,7 @@ void loadPoses()
         std::printf("P2_FUEFUKI_BANK_INVALID reason=header draw=host\n");
         return;
     }
-    Shape* shared = nullptr;
+    p2poseload::Shared shared;
     bool ok = true;
     for (int i = 0; ok && i < count; ++i) {
         std::string word, name;
@@ -237,17 +247,21 @@ void loadPoses()
         for (int& f : fr)
             if (!(in >> f)) ok = false;
         if (!ok || anim < 0) { ok = false; break; }
+        // Compact loader: a few nearest-pose Shapes + decoded vectors for every pose.
+        std::vector<Shape*> shapes;
+        std::string error;
+        const std::string stem = "fuefuki_Fuefuki_" + name;
+        if (!p2posefamily::loadFamilyClip(sPoseBank, name, stem, poses, p2fbsmooth::bankDuration(fr, frames), fr, shared,
+                                          sPoseBytes, shapes, error)) {
+            std::printf("P2_FUEFUKI_BANK_INVALID reason=%s clip=%s draw=host\n", error.c_str(), name.c_str());
+            ok = false;
+            break;
+        }
         for (int k = 0; k < poses; ++k) {
-            char rel[160];
-            std::snprintf(rel, sizeof(rel), "fuefuki_Fuefuki_%s_%02d.mod", name.c_str(), k);
-            Shape* shape = loadShape(rel, shared, sPoseBytes);
-            if (!shape) {
-                std::printf("P2_FUEFUKI_BANK_INVALID reason=pose_missing file=%s draw=host\n", rel);
-                ok = false;
-                break;
-            }
+            std::ifstream size(p2poseload::stemPath(true, stem, k), std::ios::binary | std::ios::ate);
+            if (size) sPoseDiskBytes += std::size_t(size.tellg());
             sPoses[anim].frames.push_back(fr[std::size_t(k)]);
-            sPoses[anim].shapes.push_back(shape);
+            sPoses[anim].shapes.push_back(shapes[std::size_t(k)]);
             ++sPoseCount;
         }
     }
@@ -256,12 +270,15 @@ void loadPoses()
     if (!ok) {
         for (auto& c : sPoses) c = PoseClip{};
         sPoseCount = 0;
+        sPoseBank.reset();
     }
     sPosesLoaded = ok && sPoseCount > 0;
     int clips = 0;
     for (const auto& c : sPoses) clips += c.shapes.empty() ? 0 : 1;
-    std::printf("P2_FUEFUKI_BANK staged_clips=%d poses=%zu bytes=%zu draw=%s landing=%zu landfail=%zu carry=%zu\n",
-                clips, sPoseCount, sPoseBytes, sPosesLoaded ? "p2_model" : "host",
+    std::printf("P2_FUEFUKI_BANK staged_clips=%d poses=%zu bytes=%zu disk_bytes=%zu interpolation=%d draw=%s "
+                "landing=%zu landfail=%zu carry=%zu\n",
+                clips, sPoseCount, sPoseBytes, sPoseDiskBytes, sPoseBank.ready() ? 1 : 0,
+                sPosesLoaded ? "p2_model" : "host",
                 sPoses[p2fuefuki::AnimLanding].shapes.size(), sPoses[p2fuefuki::AnimLandFail].shapes.size(),
                 sPoses[p2fuefuki::AnimCarry].shapes.size());
 }
@@ -855,6 +872,8 @@ void pc_p2_fuefuki_teki_reset()
     sIdPiki.clear();
     for (auto& c : sPoses) c = PoseClip{};
     sPosesLoaded = false;
+    sPoseBank.reset();
+    sPoseVis.clear();
     sReady = false;
     if (before > 0) {
         std::printf("P2_FUEFUKI_OWN_RESET bound_before=%d\n", before);
@@ -872,6 +891,7 @@ void pc_p2_fuefuki_teki_forget(BTeki* t)
         f = f->second == t ? sFollowerOwner.erase(f) : std::next(f);
     std::printf("P2_FUEFUKI_OWN_FORGET generator=%u source_id=41 remaining=%d\n", b.token, int(sBound.size()) - 1);
     std::fflush(stdout);
+    sPoseVis.forget(t);
     sBound.erase(it);
 }
 
@@ -1103,6 +1123,7 @@ void pc_p2_fuefuki_teki_tick(BTeki* t)
         t->pcEscapeNow();
         return;
     }
+    b.carcassTime += p2fbsmooth::fadeStep(dt);
     carcassTick(t, b);
 }
 
@@ -1140,6 +1161,25 @@ bool pc_p2_fuefuki_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& view, bool
         for (std::size_t k = 1; k < clip.frames.size() && k < clip.shapes.size(); ++k)
             if (std::fabs(float(clip.frames[k]) - frame) < std::fabs(float(clip.frames[best]) - frame)) best = k;
     Shape* shape = clip.shapes[best];
+    {
+        // #972: lerped pose through the per-actor private Shape (150 ms crossfade on
+        // clip change). The carried corpse loops its carry clip between the source
+        // LOOP_START/LOOP_END markers (whole clip when absent); a corpse showing the
+        // dead clip holds its last visible pose.
+        float sourceFrame = std::max(0.0f, frame);
+        if (dead && anim == p2fuefuki::AnimCarry) {
+            const p2retail::Motion& motion = sMotions.clip[anim];
+            int loopStart = 0, loopEnd = std::max(1, int(motion.duration));
+            for (const auto& event : motion.events) {
+                if (event.type == 0) loopStart = event.frame;
+                if (event.type == 1 && event.frame > loopStart) loopEnd = event.frame;
+            }
+            sourceFrame = p2fbsmooth::carryLoopFrame(b->carcassTime, loopStart, loopEnd);
+        } else if (lastPose) {
+            sourceFrame = 1.0e6f;
+        }
+        if (Shape* smooth = sPoseVis.draw(t, sPoseBank, p2fuefuki::animName(anim), sourceFrame, b->token)) shape = smooth;
+    }
     shape->updateAnim(gfx, view, nullptr, t);
     pc_gfx_specular_family_scope(1);
     shape->drawshape(gfx, *gfx.mCamera, nullptr);

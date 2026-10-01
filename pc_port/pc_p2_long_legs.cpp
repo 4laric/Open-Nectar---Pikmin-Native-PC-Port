@@ -27,6 +27,12 @@
 #include "pc_p2_attack_fx_host.h"
 #include "pc_p2_groink_fx.h"
 #include "pc_p2_groink_map_trace.h"
+#include "pc_p2_long_legs_pose.h"
+#include "pc_p2_pose_family.h"
+#include "pc_p2_bigfoot_fsm.h"
+#include "pc_p2_bigfoot_coll.h"
+#include "pc_p2_bigfoot_skin.h"
+#include "pc_p2_bigfoot_tables.h"
 #include "Collision.h"
 #include "ID32.h"
 #include "MapMgr.h"
@@ -63,6 +69,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -95,6 +102,7 @@ struct ActorState {
     P2LongLegsFsmParms parms;
     P2LongLegsFsm fsm;
     float animSeconds = 0.0f;   // time in the current state (source-key edges)
+    float poseClock = 0.0f;     // presentation-only actor clock (BigFoot pose loops)
     bool key2Fired = false;
     float lastHealth = 0.0f;        // host damage edge for the Houdai shot cooldown
     float lastPositiveHealth = 0.0f; // last still-positive health, for death provenance
@@ -152,7 +160,38 @@ struct ActorState {
     bool ikDrawLogged = false;
     p2ik::Mgr ik;
     int ikStrides = 0, ikLifts = 0, ikPlants = 0;
+    // Raging Long Legs (69) own brain (#1018): source BigFoot FSM + source IK
+    // legs, the retail enemycoll tree swapped onto the host, foot press, and
+    // the stuck-Pikmin-only hurtbox. Replaces the shared P2LongLegsFsm path.
+    bool isBigFoot = false;
+    P2BigFootFsm bigfoot;
+    CollInfo* bfOwnColl = nullptr;
+    CollInfo* bfHostColl = nullptr;
+    CollPart* bfParts[p2bigfoot::kCollNodeCount] = {};
+    bool bfHidden = false;
+    int bfHiddenOpts = 0;
+    std::set<Creature*> bfPressed[p2ik::kLegCount]; // press once per leg descent per creature
+    int bfStompPiki = 0, bfStompNavi = 0, bfStompTeki = 0;
+    int bfAccepted = 0, bfRefused = 0, bfLatched = 0, bfBounced = 0;
+    int bfBombs = 0;
+    float bfHostLife = 0.0f;         // host vehicle health at bind (the old cap)
+    Shape* bfSkinShape = nullptr;    // private posable mesh (IK legs)
+    bool bfSkinLogged = false;
+    bool bfSkinFailed = false;
+    // TEST-ONLY evidence probe (PIKMIN_P2_LONGLEGS_PROBE=1).
+    float probeTime = 0.0f;
+    float probeNext = 0.0f;
+    int probeThrows = 0;
+    int probeStage = 0;
 };
+
+// BigFoot (69) sampled pose bank (animation smoothing pass, #972). Presentation
+// only: four real clips (wait/landing/flick/dead), 24 baked poses each, lerped
+// and crossfaded by p2posefamily. Absent bank -> the static bind draw.
+p2posefamily::Bank bigfootBank("LONGLEGS");
+p2posefamily::Actors bigfootVis;
+std::map<std::string, p2longlegspose::ClipConfig> bigfootTiming;
+std::map<std::string, std::vector<Shape*>> bigfootShapes;  // nearest-pose fallback
 
 // Rigid skin of the Man-at-Legs bind mesh (longlegs_Houdai_skin_00.txt) and
 // the skin joint index of every IK leg joint (Houdai::setupIKSystem order).
@@ -985,11 +1024,12 @@ bool houdaiIkPose(BTeki* actor, ActorState& state, bool corpse) {
     if ((++state.poseDiag % 90) == 1) {
         const p2ik::V3 k = joints[0].col(3), g = joints[size_t(houdaiGunJoint)].col(3);
         std::printf("P2_HOUDAI_POSE_DIAG generator=%u state=%s clip=%s frame=%d alpha=%.2f ik=%d kosi_model_y=%.1f gun_model_y=%.1f "
-                    "world_y=%.1f actor_y=%.1f world_scale_y=%.2f corpse=%d tama_y=%.1f\n",
+                    "world_y=%.1f actor_y=%.1f world_scale_y=%.2f corpse=%d tama_y=%.1f damage_count=%.0f flick_timer=%.0f stuck=%d\n",
                     state.generator, P2LongLegsFsm::stateName(state.houdai.state()),
                     p2houdairig::Rig::clipName(state.houdai.poseClip()), state.houdai.poseFrame(), alpha,
                     int(state.ikStarted), k.y, g.y, world.m[1][3], actor->getPosition().y, world.m[1][1], int(corpse),
-                    (state.collParts.size() > 1 && state.collParts[1]) ? state.collParts[1]->mCentre.y : -9999.0f);
+                    (state.collParts.size() > 1 && state.collParts[1]) ? state.collParts[1]->mCentre.y : -9999.0f,
+                    actor->mDamageCount, state.houdai.flickTimer(), houdaiStuckCount(actor));
         std::fflush(stdout);
     }
     houdaiSkin.evaluate(joints, pos, nrm);
@@ -1555,6 +1595,450 @@ void houdaiTick(BTeki* actor, ActorState& state, float dt) {
     std::fflush(stdout);
 }
 
+// ---------------------------------------------------------------------------
+// Raging Long Legs (BigFoot, 69) own-behaviour host (#1018). The engine-free
+// brain P2BigFootFsm (pc_p2_bigfoot_fsm.cpp) owns every transition, the clip
+// clocks, the flick counter and the source IK legs; this host senses the world,
+// wears the retail collision tree, applies the foot press / flick / death and
+// draws the posed mesh.
+
+p2bigfootskin::Skin bigfootSkin;
+bool bigfootSkinReady = false;
+float bigfootSkinError = -1.0f;
+
+unsigned bfFourcc(const char* id) {
+    unsigned v = 0;
+    for (int i = 0; i < 4; ++i) v = (v << 8) | unsigned(static_cast<unsigned char>(id[i] ? id[i] : '_'));
+    return v;
+}
+
+p2ik::V3 bv(const Vector3f& v) { return p2ik::V3(v.x, v.y, v.z); }
+
+const char* bigfootClipName(int clip) {
+    switch (clip) {
+    case P2BigFootFsm::ClipDead: return "dead";
+    case P2BigFootFsm::ClipLanding: return "landing";
+    case P2BigFootFsm::ClipFlick: return "flick";
+    default: return "wait";
+    }
+}
+
+// StateStay (BigFootState.cpp:80-92) enables EB_ModelHidden; StateLand::init
+// disables it. The P1 host hides with the Crawbster/Mizinko set (#984) plus the
+// life gauge: nothing draws, nothing collides, Pikmin do not target it.
+void bigfootSetHidden(BTeki* actor, ActorState& state, bool hide) {
+    if (hide == state.bfHidden) return;
+    Teki* teki = static_cast<Teki*>(actor);
+    static const int bits[] = {TEKIOPT_Visible, TEKIOPT_Organic, TEKIOPT_ShapeVisible, TEKIOPT_ShadowVisible,
+                               TEKIOPT_Atari, TEKIOPT_LifeGaugeVisible};
+    if (hide) {
+        state.bfHiddenOpts = 0;
+        for (int bit : bits)
+            if (teki->getTekiOption(bit)) state.bfHiddenOpts |= bit;
+        teki->clearTekiOption(state.bfHiddenOpts);
+    } else {
+        teki->setTekiOption(state.bfHiddenOpts);
+    }
+    state.bfHidden = hide;
+    std::printf("P2_BIGFOOT_HIDDEN generator=%u hidden=%d atari=%d visible=%d\n", state.generator, int(hide),
+                int(teki->isAtari()), int(teki->isVisible()));
+}
+
+// Swap the host tree for the retail bigfoot/enemycoll.txt tree (#1018), the
+// same host-swap pattern as the Groink/Bloyster lanes (#892/#995).
+void bigfootBuildColl(BTeki* actor, ActorState& st) {
+    if (st.bfOwnColl || !actor->mCollInfo) return;
+    namespace T = p2bigfoot;
+    const float scale = st.bigfoot.parms().scale;
+    std::vector<ObjCollInfo*> nodes;
+    for (int i = 0; i < T::kCollNodeCount; ++i) {
+        auto* n = new ObjCollInfo();
+        n->mId.setID(bfFourcc(T::kColl[i].id));
+        n->mCode.setID(bfFourcc(T::kColl[i].code));
+        n->mRadius = T::kColl[i].radius * scale;
+        n->mCentrePosition.set(0.0f, 0.0f, 0.0f);
+        n->mJointIndex = 0;
+        nodes.push_back(n);
+    }
+    for (int i = 1; i < T::kCollNodeCount; ++i) nodes[size_t(T::kColl[i].parent)]->add(nodes[size_t(i)]);
+    CollInfo* own = new CollInfo(int(nodes.size()) + 14);
+    own->initInfoTree(nodes[0]);
+    int found = 0;
+    for (int i = 0; i < T::kCollNodeCount; ++i) {
+        st.bfParts[i] = own->getSphere(bfFourcc(T::kColl[i].id));
+        if (!st.bfParts[i]) continue;
+        ++found;
+        st.bfParts[i]->mIsUpdateActive = false; // no parent shape: bigfootUpdateColl owns centre/radius
+        st.bfParts[i]->mJointMatrix = Matrix4f::ident;
+    }
+    // Obj::setupCollision (BigFoot.cpp:647-656): makeTubeTree on the four leg
+    // chains, i.e. x1..x3 are tubes to their child and x4 stays a sphere.
+    int tubes = 0;
+    for (const char* leg : {"lft1", "lht1", "rft1", "rht1"}) {
+        if (own->getSphere(bfFourcc(leg))) {
+            own->makeTubesChild(bfFourcc(leg), 3);
+            tubes += 3;
+        }
+    }
+    st.bfHostColl = actor->mCollInfo;
+    actor->mCollInfo = own;
+    st.bfOwnColl = own;
+    // The host's model platforms would report contacts whose part this tree cannot resolve.
+    actor->mPlatMgr.release();
+    std::printf("P2_BIGFOOT_COLL_BIND generator=%u nodes=%d parts_found=%d stickable=%d (tama,lht1) tubes=%d "
+                "root_radius=%.0f body_radius=%.0f host_parts_replaced=1\n",
+                st.generator, T::kCollNodeCount, found, p2bigfootcoll::stickableCount(), tubes,
+                double(T::kColl[0].radius * scale), double(T::kColl[p2bigfootcoll::nodeIndex("tama")].radius * scale));
+}
+
+// Pose every part from the brain's skeleton (clip body, IK legs).
+void bigfootUpdateColl(BTeki* actor, ActorState& st) {
+    if (!st.bfOwnColl || actor->mCollInfo != st.bfOwnColl) return;
+    Matrix4f yaw, camRot, camYaw;
+    yaw.makeSRT(Vector3f(1.0f, 1.0f, 1.0f), Vector3f(0.0f, st.bigfoot.face(), 0.0f), Vector3f(0.0f, 0.0f, 0.0f));
+    camRot.makeIdentity();
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 3; ++c) camRot.mMtx[r][c] = invCamMat.mMtx[c][r];
+    camRot.multiplyTo(yaw, camYaw);
+    const float scale = st.bigfoot.parms().scale;
+    for (int i = 0; i < p2bigfoot::kCollNodeCount; ++i) {
+        CollPart* part = st.bfParts[i];
+        if (!part) continue;
+        const p2ik::V3 c = st.bigfoot.collCentre(i);
+        part->mCentre.set(c.x, c.y, c.z);
+        part->mRadius = p2bigfoot::kColl[i].radius * scale;
+        part->mJointMatrix = camYaw;
+    }
+}
+
+// Hand the host its own tree back (death / forget). The own tree is never
+// freed: a stuck Pikmin may still hold CollPart pointers into it.
+void bigfootRestoreColl(BTeki* actor, ActorState& st) {
+    if (!st.bfOwnColl) return;
+    if (st.bfHostColl && actor && actor->mCollInfo == st.bfOwnColl) actor->mCollInfo = st.bfHostColl;
+    st.bfOwnColl = nullptr;
+    st.bfHostColl = nullptr;
+    for (auto& part : st.bfParts) part = nullptr;
+}
+
+int bigfootNodeOf(const ActorState& st, const CollPart* part) {
+    if (!part) return -1;
+    for (int i = 0; i < p2bigfoot::kCollNodeCount; ++i)
+        if (st.bfParts[i] == part) return i;
+    return -1;
+}
+
+// Obj::collisionCallback (BigFoot.cpp:220-238): a Navi or Piki standing on the
+// floor that collides with a foot sphere whose leg is lifting/descending with a
+// move ratio above 1 (IKSystemMgr::isCollisionCheck) is pressed with
+// mAttackDamage; another teki takes InteractAttack 500. The host test is the
+// sphere contact itself; each creature is pressed once per leg descent.
+void bigfootStomp(BTeki* actor, ActorState& st, const P2BigFootOutput& out) {
+    const float damage = st.bigfoot.parms().attackDamage;
+    const float scale = st.bigfoot.parms().scale;
+    for (int leg = 0; leg < p2ik::kLegCount; ++leg) {
+        if ((out.lifted >> leg) & 1) st.bfPressed[leg].clear();
+        if (!st.bigfoot.footPressing(leg)) continue;
+        const int node = p2bigfootcoll::nodeIndex(P2BigFootFsm::kFootNode[leg]);
+        const p2ik::V3 c = st.bigfoot.collCentre(node);
+        const float radius = p2bigfoot::kColl[node].radius * scale;
+        int piki = 0, navi = 0, teki = 0;
+        auto touching = [&](Creature* cr) {
+            const Vector3f q = cr->getCentre();
+            const float dx = q.x - c.x, dy = q.y - c.y, dz = q.z - c.z;
+            const float r = radius + cr->getCentreSize();
+            return dx * dx + dy * dy + dz * dz < r * r;
+        };
+        if (pikiMgr) {
+            Iterator it(pikiMgr);
+            CI_LOOP(it) {
+                Piki* p = static_cast<Piki*>(*it);
+                if (!p || !p->isAlive() || !p->mGroundTriangle || p->isStickTo() || !touching(p)) continue;
+                if (!st.bfPressed[leg].insert(p).second) continue;
+                p->stimulate(InteractPress(actor, damage));
+                ++piki;
+            }
+        }
+        for (Navi* n : pc_p2_navis()) {
+            if (!n || !n->isAlive() || !n->mGroundTriangle || !touching(n)) continue;
+            if (!st.bfPressed[leg].insert(n).second) continue;
+            n->stimulate(InteractPress(actor, damage));
+            ++navi;
+        }
+        if (tekiMgr) {
+            Iterator it(tekiMgr);
+            CI_LOOP(it) {
+                Creature* t = static_cast<Creature*>(*it);
+                if (!t || t == actor || !t->isAlive() || !t->mGroundTriangle || !touching(t)) continue;
+                if (!st.bfPressed[leg].insert(t).second) continue;
+                t->stimulate(InteractAttack(actor, nullptr, 500.0f, false));
+                ++teki;
+            }
+        }
+        if (piki || navi || teki) {
+            st.bfStompPiki += piki;
+            st.bfStompNavi += navi;
+            st.bfStompTeki += teki;
+            std::printf("P2_BIGFOOT_STOMP generator=%u leg=%d foot=%s state=%s enraged=%d piki=%d navi=%d teki=%d "
+                        "damage=%.0f move_ratio=%.2f at=%.1f,%.1f,%.1f totals=%d/%d/%d\n",
+                        st.generator, leg, P2BigFootFsm::kFootNode[leg], P2LongLegsFsm::stateName(st.bigfoot.state()),
+                        int(st.bigfoot.enraged()), piki, navi, teki, damage, st.bigfoot.ik().leg(leg).moveRatio, c.x, c.y,
+                        c.z, st.bfStompPiki, st.bfStompNavi, st.bfStompTeki);
+        }
+    }
+}
+
+// ---- TEST-ONLY evidence probe (PIKMIN_P2_LONGLEGS_PROBE=1) -----------------
+// Headless runs have no player. The probe (1) walks the captain under the
+// dormant boss so StateStay's own wake radius drops it in, (2) steps the
+// captain back out, and (3) throws free Pikmin at the body through the REAL
+// Navi::throwPiki + PikiFlyingState path every 0.5 s, so the real collision
+// decides what latches, the stuck Pikmin do the damage and the real flick
+// counter fills. It never touches the brain, health or any timer.
+bool bigfootProbeEnabled() {
+    static const bool on = [] {
+        const char* e = std::getenv("PIKMIN_P2_LONGLEGS_PROBE");
+        return e && *e && *e != '0';
+    }();
+    return on;
+}
+
+Piki* bigfootProbePiki() {
+    if (!pikiMgr) return nullptr;
+    Iterator it(pikiMgr);
+    CI_LOOP(it) {
+        Piki* p = static_cast<Piki*>(*it);
+        if (!p || !p->isAlive() || p->isStickTo() || p->isBuried() || !p->isVisible() || !p->mGroundTriangle) continue;
+        if (p->getState() == PIKISTATE_Flying) continue;
+        return p;
+    }
+    return nullptr;
+}
+
+void bigfootProbe(BTeki* actor, ActorState& st, float dt) {
+    if (!bigfootProbeEnabled()) return;
+    static BTeki* owner = nullptr;
+    if (!owner) owner = actor;
+    if (owner != actor) return;
+    st.probeTime += dt;
+    Navi* navi = naviMgr ? naviMgr->getActiveNavi() : nullptr;
+    if (!navi) return;
+    const Vector3f ap = actor->getPosition();
+    const P2LongLegsState s = st.bigfoot.state();
+    if (st.probeStage == 0 && st.probeTime >= 1.0f) {
+        // Walk the captain to 40 units from the dormant centre (private radius 70).
+        const float cx = ap.x + 40.0f, cz = ap.z;
+        navi->mSRT.t = Vector3f(cx, mapMgr ? mapMgr->getMinY(cx, cz, true) : ap.y, cz);
+        st.probeStage = 1;
+        std::printf("P2_BIGFOOT_PROBE kind=captain_wake generator=%u x=%.1f z=%.1f\n", st.generator, cx, cz);
+    } else if (st.probeStage == 1 && s != P2LongLegsState::Stay && s != P2LongLegsState::Land) {
+        // Landed: step the captain back out, 400 units "behind" the boss along
+        // the camera's own forward axis so the whole body is in front of the lens.
+        float fx = 0.0f, fz = 1.0f;
+        if (Camera* cam = navi->controlCamera()) {
+            fx = -cam->mLookAtMtx.mMtx[2][0];
+            fz = -cam->mLookAtMtx.mMtx[2][2];
+            const float len = std::sqrt(fx * fx + fz * fz);
+            if (len > 1.0e-4f) { fx /= len; fz /= len; } else { fx = 0.0f; fz = 1.0f; }
+        }
+        const float cx = ap.x - fx * 400.0f, cz = ap.z - fz * 400.0f;
+        navi->mSRT.t = Vector3f(cx, mapMgr ? mapMgr->getMinY(cx, cz, true) : ap.y, cz);
+        navi->mFaceDirection = std::atan2(fx, fz);
+        st.probeStage = 2;
+        st.probeNext = st.probeTime + 1.0f;
+        std::printf("P2_BIGFOOT_PROBE kind=captain_back generator=%u x=%.1f z=%.1f\n", st.generator, cx, cz);
+    }
+    if (st.probeStage < 2 || s == P2LongLegsState::Dead || st.probeTime < st.probeNext || st.probeThrows >= 400) return;
+    Piki* p = bigfootProbePiki();
+    const int tama = p2bigfootcoll::nodeIndex("tama");
+    if (!p || tama < 0) return;
+    const p2ik::V3 body = st.bigfoot.collCentre(tama);
+    // A captain 150 units out from the body, on the ground there.
+    const Vector3f np = navi->mSRT.t;
+    float dx = np.x - body.x, dz = np.z - body.z;
+    const float len = std::sqrt(dx * dx + dz * dz);
+    if (len > 1.0e-3f) { dx /= len; dz /= len; } else { dx = 1.0f; dz = 0.0f; }
+    const float lx = body.x + dx * 150.0f, lz = body.z + dz * 150.0f;
+    const Vector3f launch(lx, mapMgr ? mapMgr->getMinY(lx, lz, true) : ap.y, lz);
+    const Vector3f aim(body.x, body.y, body.z);
+    const Vector3f saved = navi->mSRT.t;
+    navi->mSRT.t = launch;
+    p->mFSM->transit(p, PIKISTATE_Flying); // exactly as NaviThrowState key action 0
+    navi->throwPiki(p, aim);
+    navi->mSRT.t = saved;
+    ++st.probeThrows;
+    st.probeNext = st.probeTime + 0.5f;
+    if (st.probeThrows <= 5 || st.probeThrows % 20 == 0)
+        std::printf("P2_BIGFOOT_PROBE kind=throw generator=%u n=%d state=%s launch=%.1f,%.1f,%.1f body=%.1f,%.1f,%.1f\n",
+                    st.generator, st.probeThrows, P2LongLegsFsm::stateName(s), launch.x, launch.y, launch.z, body.x,
+                    body.y, body.z);
+}
+
+// One host frame for a registered BigFoot. Returns after the escape.
+void bigfootTick(BTeki* actor, ActorState& state, float dt) {
+    if (actor->mStoredDamage > 0.0f) actor->makeDamaged();
+    // Hit counter (source addDamage flickSpeed 1.0 per accepted attack or bomb):
+    // TEKIOPT_DamageCountable bumps mDamageCount in interactDefault.
+    if (actor->mDamageCount < state.lastDamageCount) state.lastDamageCount = actor->mDamageCount;
+    const int newHits = int(actor->mDamageCount - state.lastDamageCount);
+    state.lastDamageCount = actor->mDamageCount;
+    if (newHits > 0) state.pendingHits += newHits;
+    if (actor->mHealth < state.lastHealth && actor->mHealth > 0.0f) {
+        static int damageLogs = 0;
+        if (++damageLogs <= 40 || damageLogs % 50 == 0)
+            std::printf("P2_LONG_LEGS_DAMAGE species=BigFoot generator=%u health=%.2f prior=%.2f hits=%d state=%s "
+                        "flick_timer=%.0f\n",
+                        state.generator, actor->mHealth, state.lastHealth, newHits,
+                        P2LongLegsFsm::stateName(state.bigfoot.state()), state.bigfoot.flickTimer());
+    }
+    state.lastHealth = actor->mHealth;
+    if (actor->mHealth > 0.0f) state.lastPositiveHealth = actor->mHealth;
+    if (state.deadEscapeDone) return;
+    bigfootBuildColl(actor, state);
+    bigfootProbe(actor, state, dt);
+
+    state.srcAccum += dt;
+    int steps = 0;
+    while (state.srcAccum >= P2BigFootFsm::kDelta && steps < 4) {
+        state.srcAccum -= P2BigFootFsm::kDelta;
+        ++steps;
+        const P2BigFootParms& parms = state.bigfoot.parms();
+        const Vector3f pos = actor->getPosition();
+        P2BigFootInput in;
+        in.health = actor->mHealth;
+        in.hits = state.pendingHits;
+        state.pendingHits = 0;
+        in.stuck = houdaiStuckCount(actor);
+        in.wake = houdaiWake(actor, pos, parms.privateRadius);
+        if (Creature* w = houdaiNearest(actor, pos, state.bigfoot.face(), parms.viewAngleDeg, parms.sightRadius, false)) {
+            in.walkPikiFound = true;
+            in.walkPiki = bv(w->getPosition());
+        }
+        for (float& r : in.roll) r = gsys ? gsys->getRand(1.0f) : 0.5f;
+        in.ground = houdaiGround;
+
+        const P2LongLegsState before = state.bigfoot.state();
+        P2BigFootOutput out;
+        state.bigfoot.update(in, out);
+        const P2LongLegsState after = state.bigfoot.state();
+
+        if (out.entered) {
+            const p2ik::V3 c = state.bigfoot.position();
+            if (before == P2LongLegsState::Walk && state.hasWalkTarget) {
+                std::printf("P2_LONG_LEGS_WALK_END species=BigFoot generator=%u distance=%.1f seconds=%.2f "
+                            "start=%.1f,%.1f end=%.1f,%.1f next=%s cycles=%d\n",
+                            state.generator, state.walkDistance, state.walkSeconds, state.walkStart.x,
+                            state.walkStart.z, c.x, c.z, P2LongLegsFsm::stateName(after), state.bigfoot.ik().cycles());
+                state.hasWalkTarget = false;
+            }
+            std::printf("P2_LONG_LEGS_STATE species=BigFoot generator=%u from=%s state=%s x=%.1f z=%.1f health=%.1f "
+                        "flick_timer=%.0f stuck=%d enraged=%d walk_max=%.2f wall_ms=%lld\n",
+                        state.generator, P2LongLegsFsm::stateName(out.from), P2LongLegsFsm::stateName(after), c.x, c.z,
+                        actor->mHealth, state.bigfoot.flickTimer(), in.stuck, int(state.bigfoot.enraged()),
+                        state.bigfoot.walkTimeMax(), houdaiWallMs());
+            if (after == P2LongLegsState::Walk) {
+                state.walkStart = Vector3f(c.x, c.y, c.z);
+                state.walkDistance = 0.0f;
+                state.walkSeconds = 0.0f;
+                state.hasWalkTarget = true;
+                const p2ik::V3 t = state.bigfoot.target();
+                std::printf("P2_LONG_LEGS_WALK species=BigFoot generator=%u from=%.1f,%.1f to=%.1f,%.1f duration=%.2f "
+                            "enraged=%d piki_target=%d\n",
+                            state.generator, c.x, c.z, t.x, t.z, out.chosenSeconds, int(out.enraged),
+                            int(in.walkPikiFound));
+            }
+            if (after == P2LongLegsState::Dead)
+                std::printf("P2_LONG_LEGS_DEAD species=BigFoot generator=%u health=%.2f prior_health=%.2f "
+                            "stomps=%d/%d/%d accepted=%d refused=%d\n",
+                            state.generator, actor->mHealth, state.lastPositiveHealth, state.bfStompPiki,
+                            state.bfStompNavi, state.bfStompTeki, state.bfAccepted, state.bfRefused);
+        }
+        if (out.hidden != state.bfHidden) bigfootSetHidden(actor, state, out.hidden);
+        if (out.landKey2)
+            std::printf("P2_BIGFOOT_LAND generator=%u key=2 bitter_immune=0 feet=4\n", state.generator);
+        if (out.flickStuck) {
+            int stuck = 0;
+            const int hit = houdaiFlickStuck(actor, out.flickChance, out.flickKnockback, out.flickDamage, stuck);
+            ++state.flicks;
+            std::printf("P2_LONG_LEGS_FLICK species=BigFoot generator=%u cause=flick stuck=%d hit=%d knockback=%.0f "
+                        "damage=%.0f health=%.1f\n",
+                        state.generator, stuck, hit, out.flickKnockback, out.flickDamage, actor->mHealth);
+        }
+        // Body: mPosition is the IK centre (Obj::updateIKSystem).
+        const p2ik::V3 c = state.bigfoot.position();
+        Vector3f next(c.x, c.y, c.z);
+        const float mx = next.x - pos.x, mz = next.z - pos.z;
+        const float step = std::sqrt(mx * mx + mz * mz);
+        actor->inputDrive(Vector3f(0.0f, 0.0f, 0.0f));
+        actor->resetPosition(next);
+        actor->mVelocity.set(mx / P2BigFootFsm::kDelta, 0.0f, mz / P2BigFootFsm::kDelta);
+        static_cast<Teki*>(actor)->setDirection(state.bigfoot.face());
+        if (after == P2LongLegsState::Walk) {
+            state.walkDistance += step;
+            state.walkSeconds += P2BigFootFsm::kDelta;
+        }
+        bigfootStomp(actor, state, out);
+        state.damageable = after != P2LongLegsState::Stay && after != P2LongLegsState::Dead;
+        state.bitterImmune = out.bitterImmune;
+        if (out.deadKey2) {
+            // StateDead key 2: throwupItem + createItemAndEnemy (30 Mitites when
+            // no treasure). Children are lane objects: logged, not spawned.
+            std::printf("P2_LONG_LEGS_BIRTH species=BigFoot generator=%u count=30\n", state.generator);
+        }
+        if (out.deadEnd && !state.deadEscapeDone) {
+            // StateDead END: kill. The port keeps the accepted 56/69 precedent: the
+            // host teardown births the carriable corpse for the ordinary delivery.
+            state.deadEscapeDone = true;
+            bigfootRestoreColl(actor, state);
+            std::printf("P2_LONG_LEGS_ESCAPE species=BigFoot generator=%u native=host_escape_now dead_clip_frames=%d\n",
+                        state.generator, P2BigFootFsm::clipFrames(P2BigFootFsm::ClipDead));
+            std::fflush(stdout);
+            actor->pcEscapeNow();
+            return;
+        }
+    }
+    bigfootUpdateColl(actor, state);
+    std::fflush(stdout);
+}
+
+// Private posable copy of the bank mesh for one BigFoot; the skin writes the
+// clip body with the IK legs into it (the source joint callback's result).
+Shape* bigfootSkinShape(BTeki* actor, ActorState& st) {
+    if (!bigfootSkinReady || st.bfSkinFailed || !bigfootBank.ready()) return nullptr;
+    if (!st.bfSkinShape) {
+        const p2pose::Pose* base = bigfootBank.basePose();
+        if (!base || !bigfootBank.owner()) { st.bfSkinFailed = true; return nullptr; }
+        const int previousHeap = gsys->setHeap(SYSHEAP_App);
+        st.bfSkinShape = p2pose::privateShape(bigfootBank.basePath().c_str(), *bigfootBank.owner(), *base);
+        gsys->setHeap(previousHeap);
+        if (!st.bfSkinShape) {
+            st.bfSkinFailed = true;
+            std::printf("P2_BIGFOOT_SKIN_DRAW generator=%u status=private_shape_failed pose=bank\n", st.generator);
+            return nullptr;
+        }
+    }
+    p2ik::M34 joints[P2BigFootFsm::kJoints];
+    st.bigfoot.jointsModel(joints);
+    static std::vector<p2ik::V3> pos, nrm;
+    bigfootSkin.evaluate(joints, pos, nrm);
+    static p2pose::Pose pose;
+    pose.positions.resize(pos.size());
+    pose.normals.resize(nrm.size());
+    for (size_t i = 0; i < pos.size(); ++i) pose.positions[i] = p2pose::Vec{pos[i].x, pos[i].y, pos[i].z};
+    for (size_t i = 0; i < nrm.size(); ++i) pose.normals[i] = p2pose::Vec{nrm[i].x, nrm[i].y, nrm[i].z};
+    if (!p2pose::write(*st.bfSkinShape, pose)) {
+        st.bfSkinFailed = true;
+        return nullptr;
+    }
+    if (!st.bfSkinLogged) {
+        st.bfSkinLogged = true;
+        std::printf("P2_BIGFOOT_SKIN_DRAW generator=%u status=ready positions=%zu normals=%zu ik_legs=%d "
+                    "private_geometry=1 gameplay_clock=P1\n",
+                    st.generator, pos.size(), nrm.size(), int(st.bigfoot.ikActive()));
+    }
+    return st.bfSkinShape;
+}
+
 bool parseActors(const std::string& path, std::map<unsigned, std::string>& out) {
     std::ifstream in(path);
     if (!in) return false;  // absent config -> P1 fallback
@@ -1597,9 +2081,120 @@ Shape* loadBind(const SpeciesDef& species) {
         if (shape->mTexAttrList[i].mTexture) shape->mTexAttrList[i].mTexture->attach();
     return shape;
 }
+
+// Load the optional BigFoot pose bank through the compact p2posefamily loader.
+// A missing config leaves the static bind draw; a config that does not load
+// (missing/mismatched files, budget) is reported and also keeps the bind draw.
+void bigfootBankSetup(size_t& total) {
+    bigfootBank.reset();
+    bigfootVis.clear();
+    bigfootTiming.clear();
+    bigfootShapes.clear();
+    std::ifstream config("assets/dataDir/courses/pikmin2room/p2-long-legs-animation.txt");
+    if (!config) {
+        std::printf("P2_LONGLEGS_BANK status=absent pose=bind\n");
+        return;
+    }
+    std::vector<p2longlegspose::ClipConfig> clips;
+    if (!p2longlegspose::parse(config, clips)) {
+        std::printf("P2_LONGLEGS_BANK status=invalid_config pose=bind\n");
+        return;
+    }
+    p2poseload::Shared shared;
+    size_t loaded = 0;
+    for (const p2longlegspose::ClipConfig& clip : clips) {
+        std::string error;
+        std::vector<Shape*> poses;
+        if (!p2posefamily::loadFamilyClip(bigfootBank, clip.name, "longlegs_BigFoot_" + clip.name, clip.count,
+                                          clip.duration, clip.frames, shared, loaded, poses, error)) {
+            std::printf("P2_LONGLEGS_BANK status=load_failed clip=%s reason=%s pose=bind\n", clip.name.c_str(),
+                        error.c_str());
+            bigfootBank.reset();
+            bigfootTiming.clear();
+            bigfootShapes.clear();
+            return;
+        }
+        bigfootTiming[clip.name] = clip;
+        bigfootShapes[clip.name] = poses;
+    }
+    total += loaded;
+    std::printf("P2_LONGLEGS_BANK status=ready clips=%zu resident_bytes=%zu gameplay=P1_unchanged\n",
+                bigfootTiming.size(), loaded);
+    // #1018: the J3D skin of the same vertex order lets the draw pose the legs
+    // from the source IK. It must reproduce the baked wait pose 0 from the
+    // tables' wait frame 0; otherwise the pose-bank draw stays.
+    bigfootSkinReady = false;
+    bigfootSkinError = -1.0f;
+    std::ifstream skinFile("assets/dataDir/courses/pikmin2room/longlegs_BigFoot_skin_00.txt", std::ios::binary);
+    if (!skinFile) {
+        std::printf("P2_BIGFOOT_SKIN status=absent draw=pose_bank\n");
+        return;
+    }
+    const std::string text((std::istreambuf_iterator<char>(skinFile)), std::istreambuf_iterator<char>());
+    std::string error;
+    if (!bigfootSkin.parse(text, &error) || bigfootSkin.jointCount != P2BigFootFsm::kJoints) {
+        std::printf("P2_BIGFOOT_SKIN status=invalid error=%s draw=pose_bank\n", error.c_str());
+        return;
+    }
+    const p2posefamily::Clip* wait = bigfootBank.clip("wait");
+    if (!wait || wait->poses.empty() || wait->frames.empty() || wait->frames.front() != 0) {
+        std::printf("P2_BIGFOOT_SKIN status=no_wait_pose draw=pose_bank\n");
+        return;
+    }
+    p2ik::M34 joints[P2BigFootFsm::kJoints];
+    P2BigFootFsm::clipJoints(P2BigFootFsm::ClipWait, 0.0f, joints);
+    std::vector<p2ik::V3> pos, nrm;
+    bigfootSkin.evaluate(joints, pos, nrm);
+    const p2pose::Pose& ref = wait->poses.front();
+    if (pos.size() != ref.positions.size() || nrm.size() != ref.normals.size()) {
+        std::printf("P2_BIGFOOT_SKIN status=count_mismatch skin=%zu/%zu bank=%zu/%zu draw=pose_bank\n", pos.size(),
+                    nrm.size(), ref.positions.size(), ref.normals.size());
+        return;
+    }
+    float worst = 0.0f;
+    for (size_t i = 0; i < pos.size(); ++i)
+        worst = std::fmax(worst, std::fabs(pos[i].x - ref.positions[i].x) + std::fabs(pos[i].y - ref.positions[i].y)
+                                     + std::fabs(pos[i].z - ref.positions[i].z));
+    bigfootSkinError = worst;
+    bigfootSkinReady = worst < 0.5f;
+    std::printf("P2_BIGFOOT_SKIN status=%s positions=%zu normals=%zu draws=%zu max_error=%.4f draw=%s\n",
+                bigfootSkinReady ? "ready" : "mismatch", pos.size(), nrm.size(), bigfootSkin.draws.size(), worst,
+                bigfootSkinReady ? "skin_ik" : "pose_bank");
+}
+
+// The shape to draw for a BigFoot this frame, or nullptr for the bind mesh.
+Shape* bigfootPoseShape(BTeki* actor, const ActorState& state, bool corpse) {
+    if (!bigfootBank.ready() || bigfootTiming.size() != 4) return nullptr;
+    const auto dur = [](const char* name) { return bigfootTiming.at(name).duration; };
+    p2longlegspose::Choice pick;
+    if (state.isBigFoot) {
+        // #1018 own brain: the clip and source frame the brain is playing.
+        pick.clip = bigfootClipName(corpse ? P2BigFootFsm::ClipDead : state.bigfoot.clip());
+        const int frames = dur(pick.clip);
+        const int f = corpse ? frames - 1 : state.bigfoot.frame();
+        pick.frame = float(f < 0 ? 0 : (f >= frames ? frames - 1 : f));
+    } else {
+        pick = p2longlegspose::choose(state.fsm.state(), state.animSeconds, state.deadSeconds, state.poseClock, corpse,
+                                      dur("wait"), dur("landing"), dur("flick"), dur("dead"));
+    }
+    const unsigned token = state.generator;
+    if (Shape* smooth = bigfootVis.draw(actor, bigfootBank, pick.clip, pick.frame, token)) return smooth;
+    const auto poses = bigfootShapes.find(pick.clip);  // nearest pose (PIKMIN_P2_INTERPOLATION=0 / failure)
+    if (poses == bigfootShapes.end() || poses->second.empty()) return nullptr;
+    const p2longlegspose::ClipConfig& timing = bigfootTiming.at(pick.clip);
+    const size_t index = size_t(p2longlegspose::nearestPose(timing.frames, pick.frame));
+    return index < poses->second.size() ? poses->second[index] : poses->second.back();
+}
 }
 
 void pc_p2_long_legs_reset() {
+    bigfootBank.reset();
+    bigfootVis.clear();
+    bigfootTiming.clear();
+    bigfootShapes.clear();
+    bigfootSkinReady = false;
+    for (auto& entry : actors)
+        if (entry.second.isBigFoot) bigfootRestoreColl(entry.first, entry.second); // stage boundary / rebind
     for (HoudaiShell& shell : shells) {
         if (shell.stone) { shell.stone->notifyWallContact(); shell.stone->finishDeath(); }
     }
@@ -1616,6 +2211,11 @@ void pc_p2_long_legs_reset() {
 }
 
 void pc_p2_long_legs_forget(BTeki* actor) {
+    bigfootVis.forget(actor);
+    {
+        auto it = actors.find(actor);
+        if (it != actors.end() && it->second.isBigFoot) bigfootRestoreColl(actor, it->second);
+    }
     killShellsOf(actor);
     houdaiDropShells(actor, "forget");
     {
@@ -1702,6 +2302,7 @@ void pc_p2_long_legs_setup() {
         // Source health per identity (audit: Damagumo 1300 disc; BigFoot/Houdai
         // from the FSM parms retail). The host vehicle spawns with P1 health,
         // so take the source value here like Jigumo/Sokkuri do.
+        const float hostHealth = teki->mHealth;
         teki->mHealth = state.parms.maxHealth > 0.0f ? state.parms.maxHealth : teki->mHealth;
         state.lastHealth = teki->mHealth;
         state.lastPositiveHealth = teki->mHealth;
@@ -1720,6 +2321,28 @@ void pc_p2_long_legs_setup() {
                         generator, teki->mHealth, state.homePos.x, state.homePos.y, state.homePos.z,
                         state.houdai.parms().privateRadius, state.houdai.parms().territoryRadius,
                         state.houdai.parms().burstCooldown, state.houdai.parms().maxAimSeconds);
+        }
+        if (match->second == "BigFoot") {
+            // #1018 own brain: source BigFoot FSM + IK (disc parms), hit counter
+            // via TEKIOPT_DamageCountable, retail collision tree on first tick,
+            // hidden until the drop-in (StateStay EB_ModelHidden).
+            state.isBigFoot = true;
+            P2BigFootParms bp;
+            state.bigfoot.reset(bp, p2ik::V3(state.homePos.x, state.homePos.y, state.homePos.z), teki->getDirection());
+            teki->mHealth = bp.maxHealth;
+            state.lastHealth = teki->mHealth;
+            state.lastPositiveHealth = teki->mHealth;
+            state.bfHostLife = hostHealth;
+            teki->setTekiOption(TEKIOPT_DamageCountable);
+            state.lastDamageCount = teki->mDamageCount;
+            bigfootSetHidden(teki, state, true);
+            std::printf("P2_BIGFOOT_OWN_BIND generator=%u health=%.0f host_health=%.0f max_life=%.0f "
+                        "home=%.1f,%.1f,%.1f brain=P2BigFootFsm parms=disc private=%.0f territory=%.0f sight=%.0f "
+                        "flick_tiers=%d/%d,%d/%d,%d/%d,%d host_scale=%.3f draw_scale=%.3f\n",
+                        generator, teki->mHealth, hostHealth, bp.maxHealth, state.homePos.x, state.homePos.y,
+                        state.homePos.z, bp.privateRadius, bp.territoryRadius, bp.sightRadius, bp.shakeOffBlowA,
+                        bp.shakeOffSticking1, bp.shakeOffBlowB, bp.shakeOffSticking2, bp.shakeOffBlowC,
+                        bp.shakeOffSticking3, bp.shakeOffBlowD, teki->mSRT.s.y, bp.scale);
         }
         speciesUsed.insert(match->second);
         // Ordinary-delivery bridge (lane 06 contract): bind the source so
@@ -1762,6 +2385,7 @@ void pc_p2_long_legs_setup() {
         }
         shapes[species] = loadBind(*def);
         if (species == "Houdai") houdaiIkSetup(*def, shapes[species]);
+        if (species == "BigFoot") bigfootBankSetup(bytesTotal);
     }
     for (const auto& entry : actors)
         std::printf("P2_LONG_LEGS_BIND generator=%u species=%s pose=bind visual_only=0 "
@@ -1797,8 +2421,13 @@ void pc_p2_long_legs_update(BTeki* actor) {
     }
     const float dt = gsys ? gsys->getFrameTime() : 0.0f;
     if (!(dt > 0.0f && dt < 0.5f)) return;
+    state.poseClock += dt;  // presentation clock only; never read by gameplay
     if (state.isHoudai) {
         houdaiTick(actor, state, dt);
+        return;
+    }
+    if (state.isBigFoot) {
+        bigfootTick(actor, state, dt);
         return;
     }
 
@@ -2060,6 +2689,35 @@ bool pc_p2_long_legs_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, b
             return true;
         }
     }
+    if (state.isBigFoot) {
+        // #1018: hidden until the drop-in; the live body is drawn where the
+        // brain puts it (T(trace) * RotY(face) * S(P2 scale 1), the source base
+        // matrix), with the legs from the source IK once it has landed.
+        if (!corpse && state.bfHidden) return true;
+        Matrix4f onCam = matrix;
+        if (!corpse) {
+            const p2ik::M34 body = state.bigfoot.bodyMatrix();
+            Matrix4f world;
+            world.makeIdentity();
+            for (int r = 0; r < 3; ++r)
+                for (int c = 0; c < 4; ++c) world.mMtx[r][c] = body.m[r][c];
+            gfx.mCamera->mLookAtMtx.multiplyTo(world, onCam);
+            const P2LongLegsState s = state.bigfoot.state();
+            if (s == P2LongLegsState::Wait || s == P2LongLegsState::Flick || s == P2LongLegsState::Walk) {
+                if (Shape* skinned = bigfootSkinShape(actor, state)) {
+                    skinned->updateAnim(gfx, onCam, nullptr, actor);
+                    skinned->drawshape(gfx, *gfx.mCamera, nullptr);
+                    return true;
+                }
+            }
+        }
+        if (Shape* posed = bigfootPoseShape(actor, state, corpse)) shape = posed;
+        shape->updateAnim(gfx, onCam, nullptr, actor);
+        shape->drawshape(gfx, *gfx.mCamera, nullptr);
+        return true;
+    }
+    if (state.species == "BigFoot")
+        if (Shape* posed = bigfootPoseShape(actor, state, corpse)) shape = posed;
     shape->updateAnim(gfx, matrix, nullptr, actor);
     shape->drawshape(gfx, *gfx.mCamera, nullptr);
     return true;
@@ -2098,11 +2756,22 @@ float pc_p2_long_legs_param_f(const BTeki* actor, int idx, float fallback) {
     case TPF_LifeRecoverRate:
         return 0.0f;
     case TPF_Life: {
-        // #173: BTeki::update clamps mHealth to getMaxLife() every frame, so
-        // the host Swallow life (1100) silently capped the source 2800 set at
-        // bind. Houdai reports its disc max life; 56/69 keep the old path.
+        // #173/#1018: BTeki::update clamps mHealth to getMaxLife() every frame,
+        // so the host vehicle life (Chappy 130, Swallow 1100) silently capped
+        // the source value set at bind. Every Long Legs reports its disc max
+        // life: Houdai 2800 (own brain), BigFoot 10000 (own brain, fp00),
+        // Damagumo 1300 (P2LongLegsFsmParms). This is native PR #7's fix,
+        // which was merged into claude/p2-port-66-houdai and never reached main.
         const ActorState& st = actors.find(const_cast<BTeki*>(actor))->second;
-        return st.isHoudai ? st.houdai.parms().maxHealth : fallback;
+        const float srcMax = st.isHoudai ? st.houdai.parms().maxHealth
+            : st.isBigFoot ? st.bigfoot.parms().maxHealth : st.parms.maxHealth;
+        return srcMax > 0.0f ? srcMax : fallback;
+    }
+    case TPF_BombDamageRate: {
+        // EnemyBase::bombCallBack (enemyBase.cpp:2908-2912) adds the bomb's
+        // damage unscaled; BigFoot does not override it.
+        const ActorState& st = actors.find(const_cast<BTeki*>(actor))->second;
+        return st.isBigFoot ? 1.0f : fallback;
     }
     default:
         return fallback;
@@ -2118,6 +2787,8 @@ bool pc_p2_long_legs_damageable(const BTeki* actor) {
 const char* pc_p2_long_legs_state_name(const BTeki* actor) {
     auto entry = actors.find(const_cast<BTeki*>(actor));
     if (entry == actors.end()) return "unregistered";
+    if (entry->second.isBigFoot) return P2LongLegsFsm::stateName(entry->second.bigfoot.state());
+    if (entry->second.isHoudai) return P2LongLegsFsm::stateName(entry->second.houdai.state());
     return P2LongLegsFsm::stateName(entry->second.fsm.state());
 }
 
@@ -2128,6 +2799,7 @@ bool pc_p2_long_legs_receiver_rejects(Teki* teki, const InteractAttack* /*attack
     // Unregistered actors are never rejected, keeping the shared hook a no-op.
     if (!actors.count(teki)) return false;
     if (actors[teki].isHoudai) return false; // Houdai: pc_p2_long_legs_damage_rate
+    if (actors[teki].isBigFoot) return false; // BigFoot: pc_p2_long_legs_damage_rate / _bomb_rate
     return !actors[teki].damageable;
 }
 
@@ -2138,6 +2810,29 @@ float pc_p2_long_legs_damage_rate(Teki* teki, Creature* attacker) {
     // they use EnemyBase::bombCallBack (full damage, any state, #1012). A stuck hit while dormant wakes Stay into
     // Land (StateStay::exec EB_TakingDamage) but is refused here.
     auto it = actors.find(teki);
+    if (it != actors.end() && it->second.isBigFoot) {
+        // #1018 Raging Long Legs, BigFoot::damageCallBack (BigFoot.cpp:202-214,
+        // US): only a Pikmin stuck to the boss, through the part it is stuck to.
+        // The retail tree makes that the body sphere `tama` (plus the retail
+        // `st__` lht1 thigh tube); feet and legs are touch-only, so a thrown
+        // Pikmin bounces off them, and the captain punch and P1's partless
+        // ground melee take nothing (P2 has no such hit).
+        ActorState& st = it->second;
+        const bool fromPiki = attacker && attacker->isPiki();
+        const bool stuck = fromPiki && attacker->getStickObject() == static_cast<Creature*>(teki);
+        const int node = stuck ? bigfootNodeOf(st, attacker->getStickPart()) : -1;
+        const float rate = p2bigfootcoll::attackRate(fromPiki, stuck, node);
+        int& counter = rate > 0.0f ? st.bfAccepted : st.bfRefused;
+        ++counter;
+        if (counter <= 12 || counter % 100 == 0)
+            std::printf("P2_BIGFOOT_HURTBOX generator=%u verdict=%s attacker=%s stuck=%d part=%s health=%.1f "
+                        "accepted=%d refused=%d state=%s\n",
+                        st.generator, rate > 0.0f ? "accept" : "refuse",
+                        fromPiki ? "piki" : (attacker && attacker->mObjType == OBJTYPE_Navi ? "navi" : "other"),
+                        int(stuck), node >= 0 ? p2bigfoot::kColl[node].id : "none", teki->mHealth, st.bfAccepted,
+                        st.bfRefused, P2LongLegsFsm::stateName(st.bigfoot.state()));
+        return rate;
+    }
     if (it == actors.end() || !it->second.isHoudai) return -1.0f;
     ActorState& st = it->second;
     const bool stuckPiki = attacker && attacker->isPiki() && attacker->getStickObject() == teki;
@@ -2169,6 +2864,56 @@ float pc_p2_long_legs_damage_rate(Teki* teki, Creature* attacker) {
         std::fflush(stdout);
     }
     return rate;
+}
+
+float pc_p2_long_legs_bomb_rate(Teki* teki) {
+    // #1018: InteractBomb -> EnemyBase::bombCallBack for a registered BigFoot
+    // (full damage, BigFoot.h has no override). -1 leaves every other actor on
+    // its existing bomb rule.
+    auto it = actors.find(teki);
+    // #1012: Man-at-Legs also takes the base bombCallBack (Houdai.h overrides only damageCallBack): full
+    // damage in every state, so no refusal rule applies to it.
+    if (it != actors.end() && it->second.isHoudai) return 1.0f;
+    if (it == actors.end() || !it->second.isBigFoot) return -1.0f;
+    ActorState& st = it->second;
+    ++st.bfBombs;
+    std::printf("P2_BIGFOOT_BOMB generator=%u rate=%.1f health=%.1f bombs=%d state=%s\n", st.generator,
+                p2bigfootcoll::bombRate(), teki->mHealth, st.bfBombs, P2LongLegsFsm::stateName(st.bigfoot.state()));
+    return p2bigfootcoll::bombRate();
+}
+
+void pc_p2_long_legs_piki_contact(BTeki* teki, Piki* piki, CollPart* part, const char* site) {
+    // #1018 observer: where a thrown/jumping Pikmin touched the retail tree and
+    // whether it latched (the engine's CollPart::isStickable decides).
+    auto it = actors.find(teki);
+    if (it == actors.end() || !it->second.isBigFoot || !piki) return;
+    ActorState& st = it->second;
+    const int node = bigfootNodeOf(st, part);
+    if (node < 0) return;
+    const bool fromStick = !std::strcmp(site, "stick");
+    const bool latch = part->isStickable();
+    if (latch != fromStick) return; // latches are reported once, from Creature::startStick
+    int& counter = latch ? st.bfLatched : st.bfBounced;
+    ++counter;
+    if (counter <= 20 || counter % 50 == 0)
+        std::printf("P2_BIGFOOT_CONTACT generator=%u site=%s part=%s latch=%d body=%d policy_stickable=%d "
+                    "latched=%d bounced=%d state=%s\n",
+                    st.generator, site, p2bigfoot::kColl[node].id, int(latch), int(p2bigfootcoll::body(node)),
+                    int(p2bigfootcoll::stickable(node)), st.bfLatched, st.bfBounced,
+                    P2LongLegsFsm::stateName(st.bigfoot.state()));
+}
+
+bool pc_p2_long_legs_cull_bounds(BTeki* actor, float centre[3], float* radius) {
+    // #1018: P2 culls BigFoot by its LOD radius (enemyparm fp32 225) around the
+    // body, not by the small P1 host sphere at the feet.
+    auto it = actors.find(actor);
+    if (it == actors.end() || !it->second.isBigFoot) return false;
+    const p2ik::V3 t = it->second.bigfoot.trace();
+    centre[0] = t.x;
+    centre[1] = t.y + 100.0f; // root sphere offset (enemycoll `none` -100 under kosi ~180)
+    centre[2] = t.z;
+    *radius = 225.0f;
+    return true;
 }
 
 bool pc_p2_long_legs_receipt(Pellet* pellet, unsigned& generator) {

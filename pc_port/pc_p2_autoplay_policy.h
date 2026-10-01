@@ -261,6 +261,36 @@ inline bool teleportTarget(float& x, float& z)
     return true;
 }
 
+// TEST-ONLY lure path (#994, Fiery Bulblax water stall): the captain walks this
+// waypoint list in order through the normal stick path, then stands still, so a
+// chasing enemy can be led across ground or water. "x,z;x,z;..." in world units.
+// Gated by the autoplay gate; inert in normal play.
+// PIKMIN_RANDOMIZER_AUTOPLAY_LURE=-316,2022;-100,1500
+inline std::vector<std::pair<float, float>> parseLure(const char* v)
+{
+    std::vector<std::pair<float, float>> out;
+    if (!v) return out;
+    while (*v) {
+        char* e1 = nullptr;
+        const double a = std::strtod(v, &e1);
+        if (!e1 || e1 == v || *e1 != ',') return {};
+        char* e2 = nullptr;
+        const double b = std::strtod(e1 + 1, &e2);
+        if (!e2 || e2 == e1 + 1) return {};
+        out.emplace_back(float(a), float(b));
+        if (*e2 == 0) break;
+        if (*e2 != ';') return {};
+        v = e2 + 1;
+    }
+    return out;
+}
+
+inline std::vector<std::pair<float, float>> lurePath()
+{
+    if (!isEnabled()) return {};
+    return parseLure(std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_LURE"));
+}
+
 // #901 TEST-ONLY: tap A while no captain exists (day-end movie, result screens)
 // so a run reaches the next day. PIKMIN_RANDOMIZER_AUTOPLAY_NEXT_DAY=1.
 inline bool nextDayTap()

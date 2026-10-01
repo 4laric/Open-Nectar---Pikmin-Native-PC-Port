@@ -29,8 +29,8 @@
 //                    Session reports outstanding == 0.
 namespace p2attackfx {
 
-enum class Element { Fire = 0, Water = 1, Gas = 2, Elec = 3 };
-enum class Kind { Muzzle, Body, Tip, Node, Arc };
+enum class Element { Fire = 0, Water = 1, Gas = 2, Elec = 3, WaterBall = 4 };
+enum class Kind { Muzzle, Body, Tip, Node, Arc, Trail, Ring };
 
 struct Point {
     Kind kind;
@@ -41,6 +41,20 @@ struct Point {
 
 // EffectMgr::effTypeTable values (static_asserted in pc_p2_attack_fx.cpp).
 constexpr int EFF_P_Bubbles = 15;
+constexpr int EFF_RippleWhite = 14;
+constexpr int EFF_Piki_Bubble = 36;
+constexpr int EFF_Piki_BubbleRecover = 37;
+constexpr int EFF_King_SalivaDroplet = 119;
+constexpr int EFF_RippleWhite2 = 52;
+constexpr int EFF_Frog_BubbleRingL = 81;
+constexpr int EFF_Frog_Bubble2 = 82;
+constexpr int EFF_Frog_BubbleRingS = 85;
+constexpr int EFF_Mizu_IdleBubbles = 193;
+constexpr int EFF_Mizu_JetPuff = 196;
+constexpr int EFF_Mizu_JetMist = 197;
+constexpr int EFF_Onyon_BubblesSmall = 236;
+constexpr int EFF_Onyon_Bubbles = 237;
+constexpr int EFF_Onyon_Ripples1 = 238;
 constexpr int EFF_Frog_Water1 = 83;
 constexpr int EFF_Frog_Water2 = 84;
 constexpr int EFF_Tank_Fire = 100;
@@ -55,13 +69,53 @@ struct Look {
     short life;   // generator frames (0 = keep the authored emission)
     bool burst;   // true: configureOneShotBurst(1, life); false: authored emission
     unsigned rgb = 0; // 0xRRGGBB tint (brightness-preserving zen::particleGenerator::setTint); 0 = authored colour
+    float scale = 1.0f; // multiplies Point::scale
+    unsigned every = 8; // authored looks (burst == false): create one every N session ticks
 };
+
+// Monster Pump water (Titan Dweevil): P2 lobs water balls in arcs (efx::TOootaWbShot at the
+// mouth on each shot, TOootaWbomb on the ball, TOootaWbHit where it bursts on landing;
+// BigTreasureAttack.cpp:1808, 256-276, 2177-2180). Candidate P1 looks for those four pieces,
+// compared side by side in frame dumps (owner 2026-09-30: "water attack still looks pretty bad").
+// life == 0: the effect's authored emission (burst off), created every `every` ticks; life > 0: a one-particle burst each tick.
+struct WaterPiece { int effect; short life; float scale; unsigned every = 1; };
+struct WaterLook { const char* name; WaterPiece shot, ball, trail, splash, ring; };
+constexpr int WATER_LOOKS = 8;
+inline const WaterLook& waterLook(int v) {
+    static const WaterLook looks[WATER_LOOKS] = {
+        {"spray",   {EFF_P_Bubbles, 8, 2.0f},         {EFF_Frog_Water2, 7, 1.6f},      {EFF_Frog_Water2, 7, 1.6f},   {EFF_P_Bubbles, 8, 2.4f},      {0, 0, 0}},
+        {"slime",   {EFF_Frog_Water1, 8, 2.0f},       {EFF_Piki_Bubble, 4, 1.5f},      {EFF_Frog_Water2, 6, 1.0f},   {EFF_Frog_Water1, 10, 2.5f},   {EFF_RippleWhite2, 12, 2.0f}},
+        {"frogball", {EFF_Frog_Water1, 8, 2.0f},      {EFF_Frog_Bubble2, 5, 2.0f},     {EFF_P_Bubbles, 6, 1.2f},     {EFF_P_Bubbles, 9, 3.0f},      {EFF_Frog_BubbleRingL, 10, 1.5f}},
+        {"splash",  {EFF_Frog_Water1, 8, 3.0f},       {EFF_Frog_Water1, 5, 2.5f},      {EFF_Frog_Water2, 6, 2.0f},   {EFF_Frog_Water2, 10, 4.0f},   {EFF_Frog_BubbleRingS, 10, 2.0f}},
+        {"onion",   {EFF_Onyon_Bubbles, 8, 1.5f},     {EFF_Onyon_Bubbles, 6, 1.5f},    {EFF_Onyon_BubblesSmall, 6, 1.5f}, {EFF_Onyon_Bubbles, 10, 3.0f}, {EFF_Onyon_Ripples1, 12, 1.5f}},
+        {"jet",     {EFF_Mizu_JetPuff, 8, 1.0f},      {EFF_Mizu_JetPuff, 5, 1.0f},     {EFF_Mizu_IdleBubbles, 6, 1.5f}, {EFF_Mizu_JetMist, 10, 1.5f}, {EFF_RippleWhite, 12, 2.0f}},
+        // Chosen from the effect gallery (frame dumps of every P1 water candidate at scale 1 and 3): the drowned-Pikmin
+        // bubble (pk_slime) is a clear blue water balloon, p_shibuki a white splash, and the King's saliva droplet a
+        // ground ripple ring.
+        {"bubble",  {EFF_P_Bubbles, 0, 1.5f},         {EFF_Piki_Bubble, 0, 1.6f, 3},   {0, 0, 0},                    {EFF_P_Bubbles, 0, 3.0f},      {EFF_King_SalivaDroplet, 0, 2.0f}},
+        {"bigbubble", {EFF_P_Bubbles, 0, 2.0f},       {EFF_Piki_BubbleRecover, 0, 1.0f, 4}, {0, 0, 0},                {EFF_P_Bubbles, 0, 3.5f},      {EFF_King_SalivaDroplet, 0, 2.5f}},
+    };
+    return looks[v < 0 || v >= WATER_LOOKS ? 0 : v];
+}
+constexpr int DEFAULT_WATER_LOOK = 7;
+inline int& waterVariant() {
+    static int v = DEFAULT_WATER_LOOK;
+    return v;
+}
+inline Look waterBallLook(Kind k) {
+    const WaterLook& w = waterLook(waterVariant());
+    const WaterPiece& p = k == Kind::Muzzle ? w.shot : k == Kind::Tip ? w.splash : k == Kind::Ring ? w.ring
+                          : k == Kind::Trail ? w.trail : w.ball;
+    if (p.effect == 0) return {EFF_P_Bubbles, 1, true, 0, 0.0f}; // scale 0: nothing visible
+    return {p.effect, p.life, p.life > 0, 0, p.scale, p.every};
+}
 
 // Poison purple: the P1 Puffstool cloud is pale pink; P2 gas reads as purple.
 constexpr unsigned PURPLE = 0xB03CFF;
 
 inline Look look(Element e, Kind k) {
     switch (e) {
+    case Element::WaterBall: return waterBallLook(k);
     case Element::Fire:
         if (k == Kind::Muzzle) return {EFF_Tank_Fire, 0, false};
         if (k == Kind::Body) return {EFF_Tank_Fire, 0, false};
@@ -87,6 +141,7 @@ inline const char* elementName(Element e) {
     case Element::Water: return "water";
     case Element::Gas: return "gas";
     case Element::Elec: return "elec";
+    case Element::WaterBall: return "water";
     }
     return "?";
 }
@@ -94,8 +149,8 @@ inline const char* elementName(Element e) {
 constexpr float MIN_RANGE = 12.0f;
 constexpr int MAX_STREAM_POINTS = 12;
 constexpr int MAX_ARC_POINTS = 6;
-constexpr int MAX_LIVE_GENERATORS = 220; // skip a tick rather than flood the manager
-constexpr int MAX_LIVE_CLOUD_GENERATORS = 320; // poison clouds keep priority over streams
+constexpr int MAX_LIVE_GENERATORS = 360; // skip a tick rather than flood the manager (pool is 512; a Titan fight idles at ~210 live, measured FX_POOL)
+constexpr int MAX_LIVE_CLOUD_GENERATORS = 440; // poison clouds keep priority over streams
 
 // Stream presets. `drops` interior points; `sag` world units per range^2 (the jet
 // arcs a little); `emitKinds` decides whether a muzzle and a tip splash are added.
@@ -111,6 +166,7 @@ inline StreamPreset preset(Element e) {
     case Element::Gas:   return {4, 0.0f, 2.4f, 2.4f, true, false};    // puffs widen with distance
     case Element::Fire:  return {0, 0.0f, 1.0f, 0.0f, true, false};    // one authored jet from the muzzle
     case Element::Elec:  return {0, 0.0f, 1.0f, 0.0f, false, false};
+    case Element::WaterBall: return {0, 0.0f, 1.0f, 0.0f, false, false};
     }
     return {0, 0.0f, 1.0f, 0.0f, false, false};
 }
