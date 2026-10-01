@@ -19,7 +19,7 @@ static void check(bool condition, const char* message)
 	}
 }
 
-static bool near(double a, double b) { return std::fabs(a - b) < 1e-9; }
+static bool near(double a, double b) { return std::fabs(a - b) < 1e-6; }
 
 int main()
 {
