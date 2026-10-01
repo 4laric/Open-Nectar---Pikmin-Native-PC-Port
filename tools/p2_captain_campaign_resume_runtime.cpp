@@ -6,6 +6,8 @@
 #include "CPlate.h"
 #include "GameCoreSection.h"
 #include "GameStat.h"
+#include "GoalItem.h"
+#include "ItemMgr.h"
 #include "Section.h"
 #include "BaseInf.h"
 #include "PlayerState.h"
@@ -103,7 +105,8 @@ int cards(){int n=0;const auto d=std::filesystem::path("../../campaign");if(std:
 class CaptainSaveApp final:public PlugPikiApp {
     int frames=0,tick=-1,startDay=-1,initialCards=0;
     const std::chrono::steady_clock::time_point started=std::chrono::steady_clock::now();
-    bool dayAdvanced=false,resumeMenuLogged=false;
+    bool dayAdvanced=false,resumeMenuLogged=false,withdrawQueued=false;
+    int withdrawnFromTotal=-1;
     int diaryFrames=0;
     void elapsed(const char* phase){std::printf("P2_SAVE_TIME phase=%s elapsed_ms=%lld\n",phase,(long long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-started).count());}
     bool saving=false,shot=false,sawWhistle=false,initialized[2]={false,false},retired=false;
@@ -178,7 +181,22 @@ public:
             require(pc_randomizer_resumed()==resumePhase,"actual production campaign load state");
             startDay=gameflow.mWorldClock.mCurrentDay;
             int live=0;Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p&&p->isAlive())++live;}
-            require(resumePhase?(live+storedCount()>=20):live==20,"campaign field/stock baseline");
+            if(resumePhase){
+                if(!withdrawQueued){
+                    require(live==0 && storedCount()>=20,"restored stock before ordinary withdrawal");
+                    GoalItem* onion=itemMgr?itemMgr->getContainer(pc_randomizer_start_color()):nullptr;
+                    require(onion&&onion->getTotalStorePikis()>=20,"restored starting-color Onion stock");
+                    withdrawnFromTotal=live+storedCount();withdrawQueued=true;onion->exitPikis(20);
+                    std::printf("P2_SAVE_WITHDRAW queued=20 actual_exitPikis=1 total_before=%d injected_population=0\n",withdrawnFromTotal);
+                    return result;
+                }
+                require(live<=20,"ordinary withdrawal exceeded20live");
+                if(live<20)return result;
+                require(live+storedCount()==withdrawnFromTotal,"ordinary withdrawal population conservation");
+            }
+            require(live<=20,"campaign field exceeds20live");
+            if(live<20)return result; // fresh production TEST_BACKGROUND withdrawal
+            require(live==20,"campaign20live baseline");
             require(pc_p2_captain::adapter()&&pc_p2_captain::captive_count()==0,"fresh live binding");
             selected(0);tick=0;elapsed("scene_ready");
             std::printf("P2_SAVE_SCENE phase=%s resumed=%d day=%d live=%d stored=%d health0=%.3f health1=%.3f active_reset=0 ownership_restoration_not_assumed=1\n",resumePhase?"resume":"save",int(pc_randomizer_resumed()),startDay,live,storedCount(),a->mHealth,b->mHealth);
