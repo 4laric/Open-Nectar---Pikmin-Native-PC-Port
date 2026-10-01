@@ -71,7 +71,10 @@ class DeliveryApp:public PlugPikiApp {
   if(gameflow.mIsUIOverlayActive){input(frames%30<15?KBBTN_A:0);return result;}
   if(gameflow.mPauseAll || !pc_randomizer_ready() || !n || !n->getCurrState() || !tekiMgr || !pikiMgr || !n->controlCamera())return result;
   ++observed;
-  if(phase==0 && n->getCurrState()->getID()==NAVISTATE_Starting)return result;
+  if(phase==0 && n->getCurrState()->getID()==NAVISTATE_Starting){
+   if(frames%10==0){NaviStartingState* start=static_cast<NaviStartingState*>(n->getCurrState());int count=0;Iterator ps(pikiMgr);CI_LOOP(ps){if(static_cast<Piki*>(*ps)->isAlive())++count;}std::printf("P2_GENERATED_START frame=%d phase=%d timer=%.4f anim_complete=%d dt=%.5f alive=%d navi=%.3f,%.3f target=%.3f,%.3f\n",frames,int(start->mStartPhase),start->mStartDelayTimer,int(start->mIsStartAnimComplete),gsys->getFrameTime(),count,n->mSRT.t.x,n->mSRT.t.z,start->mWalkTargetPos.x,start->mWalkTargetPos.z);std::fflush(nullptr);}
+   return result;
+  }
   int alive=0;Iterator pikis(pikiMgr);CI_LOOP(pikis){if(static_cast<Piki*>(*pikis)->isAlive())++alive;}
   if(!enemy){Iterator it(tekiMgr);CI_LOOP(it){Teki* t=static_cast<Teki*>(*it);if(pc_randomizer_p2_source_for(static_cast<PelletView*>(t))==44 && pc_randomizer_p2_generator_for(static_cast<PelletView*>(t))==Target){require(!enemy,"duplicate singleton source");enemy=t;}}}
   if(phase==0){
