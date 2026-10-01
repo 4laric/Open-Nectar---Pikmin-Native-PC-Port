@@ -16,6 +16,7 @@
 #include "Camera.h"
 #include "KeyConfig.h"
 #include <cmath>
+#include <string>
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "PikiState.h"
@@ -49,7 +50,7 @@ static int population() {
     return count;
 }
 
-static int phase=0,ticks=0;static Vector3f goal;
+static int phase=0,ticks=0,inputFrame=0;static Vector3f goal;static SDL_Joystick* virtualPad=nullptr;
 class AcquisitionController:public Kontroller {
 public:
  AcquisitionController():Kontroller(1){}
@@ -63,13 +64,20 @@ public:
    }
   }
   if((phase==3 && ticks%60<15)||(phase==5 && ticks%60<50))keys=KeyConfig::_instance->mThrowKey.mBind;
-  updateCont(keys);
+  if(gameflow.mIsUIOverlayActive)keys=(inputFrame%30<15)?KBBTN_A:0;
+  SDL_JoystickSetVirtualButton(virtualPad,SDL_CONTROLLER_BUTTON_A,int((keys&KBBTN_A)!=0));
+  SDL_JoystickSetVirtualButton(virtualPad,SDL_CONTROLLER_BUTTON_B,int((keys&KBBTN_B)!=0));
+  SDL_JoystickSetVirtualAxis(virtualPad,SDL_CONTROLLER_AXIS_LEFTX,Sint16(int(mMainStickX)*32767/74));
+  SDL_JoystickSetVirtualAxis(virtualPad,SDL_CONTROLLER_AXIS_LEFTY,Sint16(-int(mMainStickY)*32767/74));
+  SDL_JoystickUpdate();
  }
 };
+static AcquisitionController* scriptedInput=nullptr;
 class AcquisitionApp:public PlugPikiApp {
  int frames=0;bool initialized=false;Pom* flower=nullptr;
 public:
  int idle()override{
+  inputFrame=frames;if(scriptedInput)scriptedInput->update();
   int result=PlugPikiApp::idle();Navi* n=naviMgr?naviMgr->getNavi():nullptr;
   if(n){initialized=true;p2_fixture_require_captain(GameStat::orimaDead,n->getCurrState()&&n->getCurrState()->getID()==NAVISTATE_Dead,std::getenv("P2_WHITE_FORCE_CAPTAIN_DOWN")?0.f:n->mHealth,frames);}
   else if(initialized){std::puts("P2_FIXTURE_CAPTAIN_DOWN missing_captain outcome=BLOCKED");std::fflush(nullptr);std::_Exit(86);}
@@ -97,7 +105,7 @@ public:
    ai->mReleasedSeedCount=4;require(!ai->deadTransit(),"Ivory died before five spent slots");ai->mReleasedSeedCount=5;require(ai->deadTransit(),"Ivory survived five spent slots");
    ai->mPrevStickPikiCount=prev;ai->mReleasedSeedCount=used;flower->setWalkTimer(timer);
    std::puts("P2_IVORY_STATE_POLICY_PASS bound_runtime_queries=1 restored_before_idle=1 capacity=5 close_seconds=1 lifetime_slots=5 ordinary_capacity_preserved=1");
-   n->mKontroller=new AcquisitionController();phase=1;ticks=0;
+   phase=1;ticks=0;
   }
   if(phase==1&&ticks>=100){goal=flower->mSRT.t;phase=2;ticks=0;}
   if(phase==2){float dx=flower->mSRT.t.x-n->mCursorWorldPos.x,dz=flower->mSRT.t.z-n->mCursorWorldPos.z;float bx=flower->mSRT.t.x-n->mSRT.t.x,bz=flower->mSRT.t.z-n->mSRT.t.z;if(dx*dx+dz*dz<900 && bx*bx+bz*bz>2500){phase=3;ticks=0;}}
@@ -120,5 +128,9 @@ int main(int argc,char**argv){
     if(!pc_window_init("White acquisition acceptance",960,540))return 3;
     pc_settings_init();pc_window_set_control_mode(PC_CONTROL_CLASSIC);pc_window_set_display_mode(PC_WINDOW_FULLSCREEN_WINDOWED);pc_window_set_window_size(960,540);pc_window_center();
     std::puts("Experimental preview window set to 960x540 windowed and centered");
+    int device=SDL_JoystickAttachVirtual(SDL_JOYSTICK_TYPE_GAMECONTROLLER,SDL_CONTROLLER_AXIS_MAX,SDL_CONTROLLER_BUTTON_MAX,0);require(device>=0,"virtual gamepad attach failed");
+    char guid[64];SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(device),guid,sizeof(guid));std::string mapping=std::string(guid)+",White acceptance virtual pad,a:b0,b:b1,x:b2,y:b3,back:b4,guide:b5,start:b6,leftstick:b7,rightstick:b8,leftshoulder:b9,rightshoulder:b10,dpup:b11,dpdown:b12,dpleft:b13,dpright:b14,leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:a4,righttrigger:a5,";require(SDL_GameControllerAddMapping(mapping.c_str())>=0,"virtual gamepad mapping failed");
+    virtualPad=SDL_JoystickOpen(device);require(virtualPad!=nullptr,"virtual gamepad open failed");pc_window_set_gamepad_binding(PC_KEY_ACT_A,SDL_CONTROLLER_BUTTON_A);pc_window_set_gamepad_binding(PC_KEY_ACT_B,SDL_CONTROLLER_BUTTON_B);scriptedInput=new AcquisitionController();
+    std::puts("P2_WHITE_INPUT_METHOD SDL_virtual_gamepad native_controller_and_UI_polling=1");
     gsys->Initialise();pc_settings_p2d_init();nodeMgr=new NodeMgr();gsys->run(new AcquisitionApp());return 0;
 }
