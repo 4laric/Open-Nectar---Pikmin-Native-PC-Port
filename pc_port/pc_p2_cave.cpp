@@ -14,6 +14,7 @@
 #include "pc_p2_species.h"
 #include "pc_p2_species_schema.h"
 #include "pc_p2_cave_transfer.h"
+#include "pc_p2_cave_route_policy.h"
 #include "pc_p2_bulbmin.h"
 #include "pc_p2_cave_generator.h"  // lane 41 (#480) runtime generator hook
 #include "pc_p2_cave_rooms_engine.h"  // lane 44 (#482) proxy room/unit instantiation
@@ -43,6 +44,8 @@
 #include <sstream>
 #include <vector>
 
+__attribute__((weak)) bool pc_netplay_session_active(void);
+
 namespace {
 int floorId=0;
 bool beasts=false;
@@ -58,8 +61,66 @@ Shape* transitionShape=nullptr;
 P2CaveNavRate navRate;
 unsigned navDrawCalls=0;
 bool navMarkerLogged=false;
+P2CaveSurfaceRoute surfaceRoute;
+bool surfaceRouteLoaded=false;
+bool online(){return pc_netplay_session_active && pc_netplay_session_active();}
 using Survivor = P2CaveSurvivor;
 void invalid(const char* reason){std::fprintf(stderr,"Invalid P2 cave entry: %s\n",reason);std::abort();}
+bool surfaceSafe(){
+    Navi* n=naviMgr?naviMgr->getNavi():nullptr;
+    return surfaceRouteLoaded && !completed && n && n->getCurrState() && playerState
+        && p2_cave_surface_route_eligible(surfaceRoute.entrance,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,
+            n->getCurrState()->getID()==NAVISTATE_Walk,gameflow.mPauseAll,gameflow.mIsUIOverlayActive,
+            gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive,playerState->mInDayEnd,online(),n->mHealth);
+}
+void loadSurfaceRoute(){
+    if(surfaceRouteLoaded || !pc_pikipelago_surface_course() || online() || !naviMgr || !pikiMgr)return;
+    Navi* n=naviMgr->getNavi();if(!n || !n->getCurrState())return;
+    std::ifstream in("p2-cave-route-surface.txt");if(!in)return;
+    P2CaveSurfaceRoute route;if(!p2_cave_surface_route_read(in,route))invalid("surface route");
+    std::vector<Piki*> actors;Iterator it(pikiMgr);
+    CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(p->isAlive())actors.push_back(p);}
+    if(actors.size()!=route.party.squad.size())invalid("surface roster differs from staged actors");
+    if(C_NAVI_PARM(n,mHealth)<=0)invalid("surface captain unavailable");
+    for(size_t i=0;i<actors.size();++i){
+        const auto& saved=route.party.squad[i];Piki* p=actors[i];
+        if((saved.species==3 && !pc_p2_purples_enabled()) || (saved.species==4 && !pc_p2_whites_enabled()))invalid("surface species assets unavailable");
+        if(!pc_p2_set_species(p,saved.species))invalid("surface species");
+        p->mHappa=saved.maturity;
+        if(saved.species==3)pc_p2_make_purple(p);
+        if(saved.species==4)pc_p2_make_white(p);
+    }
+    n->mHealth=C_NAVI_PARM(n,mHealth)*route.party.health;
+    surfaceRoute=route;surfaceRouteLoaded=true;anchor=route.entrance;
+    std::printf("P2_CAVE_SURFACE_READY token=%s survivors=%zu health=%.9g x=%.3f y=%.3f z=%.3f radius=%.3f\n",
+        route.party.token.c_str(),actors.size(),route.party.health,anchor.x,anchor.y,anchor.z,anchor.radius);std::fflush(stdout);
+}
+bool enterSurfaceCave(){
+    if(!surfaceSafe() || pc_p2_cave_bud_pending())return false;
+    P2CaveEntry party=surfaceRoute.party;party.squad.clear();
+    Iterator it(pikiMgr);CI_LOOP(it){
+        Piki* p=static_cast<Piki*>(*it);if(!p->isAlive())continue;
+        const int state=p->getState(),species=pc_p2_species(p);
+        if(state==PIKISTATE_Dying || state==PIKISTATE_Dead || state==PIKISTATE_Swallowed
+            || state==PIKISTATE_Bury || state==PIKISTATE_Grow || p->getStickObject()
+            || species<0 || species>4)return false;
+        party.squad.push_back({species,p->mHappa});
+    }
+    Iterator heads(itemMgr->getPikiHeadMgr());CI_LOOP(heads){if(static_cast<PikiHeadItem*>(*heads)->isAlive())return false;}
+    Navi* n=naviMgr->getNavi();party.health=n->mHealth/C_NAVI_PARM(n,mHealth);
+    const std::string text=p2_cave_surface_route_transfer(party,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z);
+    if(text.empty())return false;
+    const std::string message="Enter Emergence Cave with all "+std::to_string(party.squad.size())+" surviving Pikmin?";
+    const SDL_MessageBoxButtonData buttons[]={{SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT,0,"Stay"},{SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT,1,"Enter cave"}};
+    SDL_MessageBoxData data={SDL_MESSAGEBOX_INFORMATION,SDL_GL_GetCurrentWindow(),"Emergence Cave",message.c_str(),2,buttons,nullptr};int choice=0;
+    if(SDL_ShowMessageBox(&data,&choice)!=0 || choice!=1)return false;
+    FILE* f=std::fopen("p2-cave-surface-transfer.tmp","wb");if(!f)return false;
+    bool ok=std::fwrite(text.data(),1,text.size(),f)==text.size() && std::fflush(f)==0;
+    if(std::fclose(f)!=0)ok=false;
+    if(!ok || std::rename("p2-cave-surface-transfer.tmp","p2-cave-surface-transfer.txt")!=0)return false;
+    completed=true;std::printf("P2_CAVE_SURFACE_TRANSFER token=%s survivors=%zu health=%.9g\n",party.token.c_str(),party.squad.size(),party.health);
+    std::fflush(nullptr);std::_Exit(42);
+}
 // Tutorial later-floors entry admission (lanes tutorial2-descend-policy-native
 // #757 + tutorial2-floor9-descend #807; consumer #747). NEW version admission
 // (not a port): the shared header pc_p2_cave_entry_policy.h knows no
@@ -82,7 +143,7 @@ P2CaveEntryProfile p2_tutorial2_entry_profile(const std::string& version, int fl
 bool p2_tutorial_descends(int floor){return floor>=1 && floor<=8;}
 bool active(){return floorId && !completed && p2CavePreviewReady(beasts,floorId,pc_p2_preview_cargo_free_ready(),pc_p2_preview_ready(),pc_p2_preview_goal()!=nullptr,pc_p2_preview_cargo_count(),pc_p2_preview_pokos(),cargoTerminal) && naviMgr && naviMgr->getNavi() && naviMgr->getNavi()->getCurrState();}
 bool safeTime(){return active() && !gameflow.mPauseAll && !gameflow.mIsUIOverlayActive
-    && (!gameflow.mMoviePlayer || !gameflow.mMoviePlayer->mIsActive) && !playerState->mInDayEnd;}
+    && (!gameflow.mMoviePlayer || !gameflow.mMoviePlayer->mIsActive) && !playerState->mInDayEnd && !online();}
 
 void navigationDiagnostic(){
     if(!floorId || !navRate.due(SDL_GetTicks()))return;
@@ -109,6 +170,7 @@ bool writeTransfer(const std::string& text){
 }
 }
 int pc_p2_cave_floor(){return floorId;}
+bool pc_p2_cave_surface_route_active(){return surfaceRouteLoaded;}
 bool pc_p2_cave_is_beasts(){return beasts;}
 std::string pc_p2_cave_boundary_token(){return token;}
 std::string pc_p2_cave_receipt_prefix(){return floorId?"floor"+std::to_string(floorId)+":":"";}
@@ -139,6 +201,7 @@ bool pc_p2_tutorial2_entry_check(const char* path, int* floorOut){
     return ok!=0;
 }
 void pc_p2_cave_setup(){
+    surfaceRoute=P2CaveSurfaceRoute{};surfaceRouteLoaded=false;
     const char* opt=std::getenv("PIKMIN_CAVE_NAV_DIAGNOSTICS");
     navRate.reset(opt && opt[0]==49 && opt[1]==0);navDrawCalls=0;navMarkerLogged=false;
     pc_p2_cave_rooms_shutdown();
@@ -256,7 +319,7 @@ void pc_p2_cave_setup(){
     pc_p2_cave_generate_run(); // lane cave-generate-provider (#129): opt-in manifest sidecar only; reviewed hook, pending #186
     if(beasts && floor>=3){std::printf("P2_BEASTS_ENTRY_READY floor=%d token=%s descent=disabled\n",floor,token.c_str());std::fflush(stdout);}
 }
-void pc_p2_cave_request(){if(active() && !(beasts && floorId>=3))requested=true;}
+void pc_p2_cave_request(){if(!online() && ((surfaceRouteLoaded && !completed) || (active() && !(beasts && floorId>=3))))requested=true;}
 bool pc_p2_cave_interact(float x,float y,float z){
     if(beasts && floorId>=3)return false;
     if(!safeTime() || !anchor.contains(x,y,z))return false;
@@ -351,6 +414,12 @@ bool pc_p2_cave_exit_after_checkpoint(){
     std::fflush(nullptr);std::_Exit(42);
 }
 void pc_p2_cave_tick(){
+    loadSurfaceRoute();
+    if(surfaceRouteLoaded){
+        const bool attempt=requested;requested=false;
+        if(attempt)enterSurfaceCave();
+        return;
+    }
     pc_p2_cave_carry_tick();  // lane 50 (#488) carry blocking at hazards
     pc_p2_cave_geometry_tick();  // lane 45 (#483) live electric-gate actor
     pc_p2_cave_bud_tick();  // lane 48 (#486) ordinary bud conversion path
@@ -379,7 +448,7 @@ void pc_p2_cave_tick(){
 void pc_p2_cave_draw_transition(Graphics& gfx){
     if(gfx.mCamera && pc_p2_cave_rooms_active())pc_p2_cave_rooms_draw(gfx);
     if(gfx.mCamera && pc_p2_cave_geometry_active())pc_p2_cave_geometry_draw(gfx);  // lane 45 (#483)
-    if(!active() || !anchor.enabled || !gfx.mCamera)return;
+    if((!active() && !surfaceRouteLoaded) || !anchor.enabled || !gfx.mCamera)return;
     if(navRate.enabled)++navDrawCalls;
     if(!navMarkerLogged){std::puts("P2_CAVE_MARKER_DRAW");navMarkerLogged=true;}
     // Map post-effects may leave an orthographic projection/material active.

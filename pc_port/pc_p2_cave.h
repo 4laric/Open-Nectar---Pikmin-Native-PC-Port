@@ -15,3 +15,5 @@ std::string pc_p2_cave_receipt_prefix();
 void pc_p2_cave_draw_transition(Graphics& gfx);
 // Future hole/geyser actor interactions use the same guarded handoff as F6.
 bool pc_p2_cave_interact(float x, float y, float z);
+// True only for a pinned surface route; this does not make a surface a cave floor.
+bool pc_p2_cave_surface_route_active();
