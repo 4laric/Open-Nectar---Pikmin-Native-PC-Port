@@ -11,6 +11,7 @@
 #include "pc_p2_bulbmin.h"
 #include "Navi.h"
 #include "pc_randomizer.h"
+#include "pc_crowd_slot_diag.h"
 #include <cstdlib>
 #if defined(PIKI_PC_PORT)
 #include "GameStat.h"
@@ -2864,6 +2865,7 @@ void Navi::makeCStick(bool isSunset)
 			strength = 0.6f * (strength / 0.9f);
 		}
 
+		pc_crowd_slot_diag::refreshShrink(unsigned(gsys->mTotalFrames), mNaviID, getPlatePikis(), mPlateMgr->mTotalSlotCount, mPlateMgr->mUsedSlotCount);
 		mPlateMgr->refresh(getPlatePikis(), strength);
 
 		mPlateMgr->setPos(mSRT.t, targetYaw, mVelocity);
@@ -2882,6 +2884,7 @@ void Navi::makeCStick(bool isSunset)
 			mPlateDirLocked = true;
 		}
 
+		pc_crowd_slot_diag::refreshShrink(unsigned(gsys->mTotalFrames), mNaviID, getPlatePikis(), mPlateMgr->mTotalSlotCount, mPlateMgr->mUsedSlotCount);
 		mPlateMgr->refresh(getPlatePikis(), 0.0f);
 		Iterator iter(mPlateMgr);
 		f32 nearestPikiDist = 12800.0f;

@@ -12,10 +12,52 @@
 #include "gameflow.h"
 #include <stdlib.h>
 #if defined(PIKI_PC_PORT)
+#include "pc_crowd_slot_diag.h"
 #include "settings/pc_settings.h"
 #endif
 
 static bool newVer = true;
+
+#if defined(PIKI_PC_PORT)
+// Netplay co-op issue #1033: the plate a Pikmin's ActCrowd joined must stay its
+// current captain's plate. Logs once per Pikmin and call site (and at most a
+// couple of dozen lines per process) when it does not, with the data needed to
+// find which write moved mNavi or replaced the plate.
+#define PC_CROWD_SLOT_CHECK(WHERE) \
+do { \
+	if (mPlateMgr && (!mPiki->mNavi || mPiki->mNavi->mPlateMgr != mPlateMgr)) { \
+		int owner_ = -1; \
+		for (int ni_ = 0; naviMgr && ni_ < naviMgr->getNaviCount(); ni_++) { \
+			Navi* n_ = naviMgr->getNavi(ni_); \
+			if (n_ && n_->mPlateMgr == mPlateMgr) { \
+				owner_ = n_->mNaviID; \
+			} \
+		} \
+		pc_crowd_slot_diag::Info info_ = { \
+			WHERE, \
+			unsigned(gsys->mTotalFrames), \
+			mPiki, \
+			int(mPiki->mColor), \
+			int(mPiki->mHappa), \
+			mPiki->mSRT.t.x, \
+			mPiki->mSRT.t.z, \
+			mPiki->mNavi ? mPiki->mNavi->mNaviID : -1, \
+			owner_, \
+			mCPlateSlotID, \
+			mPlateMgr->mUsedSlotCount, \
+			mPlateMgr->mTotalSlotCount, \
+			mPlateMgr->mPlatePikiCount, \
+			int(mPiki->mMode), \
+			mPiki->getState(), \
+			int(mMode), \
+			int(mState), \
+		}; \
+		pc_crowd_slot_diag::ownerMismatch(info_); \
+	} \
+} while (0)
+#else
+#define PC_CROWD_SLOT_CHECK(WHERE) do { } while (0)
+#endif
 
 /**
  * @todo: Documentation
@@ -73,6 +115,16 @@ void ActCrowd::init(Creature* target)
 	}
 
 	Navi* navi    = static_cast<Navi*>(target);
+#if defined(PIKI_PC_PORT)
+	if (mPlateMgr) {
+		int owner_ = -1;
+		for (int ni_ = 0; naviMgr && ni_ < naviMgr->getNaviCount(); ni_++) {
+			Navi* n_ = naviMgr->getNavi(ni_);
+			if (n_ && n_->mPlateMgr == mPlateMgr) owner_ = n_->mNaviID;
+		}
+		pc_crowd_slot_diag::reinit(unsigned(gsys->mTotalFrames), mPiki, owner_, navi->mNaviID, mCPlateSlotID);
+	}
+#endif
 	mPlateMgr     = navi->mPlateMgr;
 	mCPlateSlotID = mPlateMgr->getSlot(mPiki, this);
 	if (mCPlateSlotID == -1) {
@@ -214,6 +266,7 @@ void ActCrowd::procAnimMsg(Piki* piki, MsgAnim* msg)
  */
 void ActCrowd::cleanup()
 {
+	PC_CROWD_SLOT_CHECK("cleanup");
 	if (mPiki->mRouteHandle) {
 		routeMgr->getPathFinder('test')->releaseHandle(mPiki->mRouteHandle);
 	}
@@ -238,6 +291,7 @@ void ActCrowd::cleanup()
  */
 int ActCrowd::exec()
 {
+	PC_CROWD_SLOT_CHECK("exec");
 	mPrevMode = mMode;
 	mMode = 5;
 	if (mHasRoute) {
