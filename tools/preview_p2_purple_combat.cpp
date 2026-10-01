@@ -160,16 +160,48 @@ class PurpleCombatApp : public PlugPikiApp {
         }
         return true;
     }
-    void collectPluckObstacles(CollPart* part,float captainRadius,int depth=0) {
+    void collectCaptainParts(CollPart* part,std::vector<CollPart*>& parts,int depth=0) {
+        if(!part) return;
+        require(depth<32,"captain collision tree depth");
+        require(!part->isCylinderType() && !part->isTubeType(),"captain approach needs explicit non-sphere collision support");
+        if(part->isCollisionType()) parts.push_back(part);
+        for(int i=0;i<part->getChildCount();++i) collectCaptainParts(part->getChildAt(i),parts,depth+1);
+    }
+    void collectPluckObstacles(CollPart* part,Navi* n,const std::vector<CollPart*>& captainParts,int depth=0) {
         if(!part) return;
         require(depth<32,"pluck collision tree depth");
-        if(part->isCollisionType()) pluckObstacles.push_back({part->mCentre,part->mRadius+captainRadius+1.f});
-        for(int i=0;i<part->getChildCount();++i) collectPluckObstacles(part->getChildAt(i),captainRadius,depth+1);
+        require(!part->isCylinderType() && !part->isTubeType(),"Violet approach needs explicit non-sphere collision support");
+        if(part->isCollisionType()) {
+            float radius=0;
+            for(CollPart* captain:captainParts) {
+                // Creature::collisionCheck uses CollInfo pairs, not the ground
+                // collision radius. Bound all captain sphere offsets under yaw;
+                // allow the same five-unit terrain variation checked below.
+                const float sum=part->mRadius+captain->mRadius;
+                const float dy=std::max(0.f,std::fabs(part->mCentre.y-captain->mCentre.y)-5.f);
+                if(dy<sum) radius=std::max(radius,std::sqrt(sum*sum-dy*dy)
+                    +planarDistance(captain->mCentre,n->mSRT.t)+1.f);
+            }
+            if(radius>0) pluckObstacles.push_back({part->mCentre,radius});
+        }
+        for(int i=0;i<part->getChildCount();++i) collectPluckObstacles(part->getChildAt(i),n,captainParts,depth+1);
+    }
+    void refreshPluckObstacles(Navi* n,Pom* violet) {
+        require(n->mCollInfo && n->mCollInfo->hasInfo(),"live captain collision parts required");
+        require(violet && violet->mCollInfo && violet->mCollInfo->hasInfo(),"live Violet collision parts required");
+        std::vector<CollPart*> captainParts;
+        collectCaptainParts(n->mCollInfo->getBoundingSphere(),captainParts);
+        require(!captainParts.empty(),"captain collision parts absent");
+        pluckObstacles.clear();
+        collectPluckObstacles(violet->mCollInfo->getBoundingSphere(),n,captainParts);
     }
     void planPluckRoute(Navi* n,PikiHeadItem* head,Pom* violet,float pluckRange) {
         require(violet && violet->mCollInfo && violet->mCollInfo->hasInfo(),"Violet collision data required for ordinary approach");
         pluckObstacles.clear();pluckRoute.clear();pluckRouteIndex=0;
-        collectPluckObstacles(violet->mCollInfo->getBoundingSphere(),n->mCollisionRadius);
+        refreshPluckObstacles(n,violet);
+        auditBody("captain_route",n);
+        for(const auto& obstacle:pluckObstacles) std::printf("P2_PURPLE_PLUCK_OBSTACLE xyz=%.3f,%.3f,%.3f radius=%.3f live_part_pairs=1\n",
+            obstacle.centre.x,obstacle.centre.y,obstacle.centre.z,obstacle.radius);
         std::vector<Vector3f> nodes{n->mSRT.t};std::vector<bool> goal{false};
         auto addNode=[&](Vector3f p,bool isGoal) {
             if(pluckSegmentClear(p,p)) {nodes.push_back(p);goal.push_back(isGoal);}
@@ -214,7 +246,7 @@ class PurpleCombatApp : public PlugPikiApp {
             previous=next;
         }
         routedHead=head;routedHeadPosition=head->mSRT.t;
-        std::printf("P2_PURPLE_PLUCK_ROUTE length=%.3f waypoints=%u collision_parts=%u loaded_range=%.3f captain_radius=%.3f scripted_controller_only=1\n",
+        std::printf("P2_PURPLE_PLUCK_ROUTE length=%.3f waypoints=%u collision_parts=%u loaded_range=%.3f ground_collision_radius=%.3f live_part_pairs=1 scripted_controller_only=1\n",
             cost[end],unsigned(pluckRoute.size()),unsigned(pluckObstacles.size()),pluckRange,n->mCollisionRadius);
     }
     int ticks=0, phase=0, phaseTicks=0, startingField=0, pluckAttempts=0;
@@ -540,7 +572,9 @@ class PurpleCombatApp : public PlugPikiApp {
             n->mKontroller?int(n->mKontroller->mMainStickX):0,n->mKontroller?int(n->mKontroller->mMainStickY):0,
             int(n->mKontroller && n->mKontroller->mIsControllerFrozen));
         if(distance>=pluckRange-.25f) {
-            if(routedHead!=head || pluckRoute.empty() || planarDistance(routedHeadPosition,head->mSRT.t)>2.f)
+            refreshPluckObstacles(n,violet);
+            if(routedHead!=head || pluckRoute.empty() || planarDistance(routedHeadPosition,head->mSRT.t)>2.f
+                || !pluckSegmentClear(n->mSRT.t,pluckRoute[pluckRouteIndex]))
                 planPluckRoute(n,head,violet,pluckRange);
             while(pluckRouteIndex+1<pluckRoute.size() && planarDistance(n->mSRT.t,pluckRoute[pluckRouteIndex])<4.f
                 && pluckSegmentClear(n->mSRT.t,pluckRoute[pluckRouteIndex+1])) ++pluckRouteIndex;
@@ -652,6 +686,7 @@ class PurpleCombatApp : public PlugPikiApp {
         return false;
     }
     void diagnostics(Navi* n) {
+        if(n && n->mCollInfo && n->mCollInfo->hasInfo()) auditBody("captain",n);
         if(itemMgr && itemMgr->getPikiHeadMgr()) { Iterator heads(itemMgr->getPikiHeadMgr()); CI_LOOP(heads) {
             PikiHeadItem* head=static_cast<PikiHeadItem*>(*heads);
             if(head && head->isAlive() && head->mP2Purple) std::printf("P2_PURPLE_SPROUT_OBSERVATION xyz=%.3f,%.3f,%.3f pullable=%d\n",
@@ -659,7 +694,16 @@ class PurpleCombatApp : public PlugPikiApp {
         } }
         if(bossMgr) { Iterator flowers(bossMgr); CI_LOOP(flowers) {
             Boss* b=static_cast<Boss*>(*flowers);
-            if(b && b->isAlive() && b->mObjType==OBJTYPE_Pom && pc_p2_violet(static_cast<Pom*>(b))) auditBody("violet",b);
+            if(b && b->isAlive() && b->mObjType==OBJTYPE_Pom && pc_p2_violet(static_cast<Pom*>(b))) {
+                auditBody("violet",b);
+                if(n && n->mCollInfo && b->mCollInfo && n->mCollInfo->hasInfo() && b->mCollInfo->hasInfo()) {
+                    CollPart* captainPart=nullptr;CollPart* violetPart=nullptr;Vector3f push;
+                    const bool contact=n->mCollInfo->checkCollision(b->mCollInfo,&captainPart,&violetPart,push);
+                    std::printf("P2_PURPLE_PLUCK_CONTACT contact=%d captain_part=%u violet_part=%u push=%.3f,%.3f,%.3f read_only=1\n",
+                        int(contact),captainPart?unsigned(captainPart->getID().mId):0,violetPart?unsigned(violetPart->getID().mId):0,
+                        contact?push.x:0,contact?push.y:0,contact?push.z:0);
+                }
+            }
         } }
         if(haul && pelletMgr) { Iterator bodies(pelletMgr); CI_LOOP(bodies) {
             if(static_cast<Pellet*>(*bodies)==haul) {auditBody("cargo",haul);break;}
