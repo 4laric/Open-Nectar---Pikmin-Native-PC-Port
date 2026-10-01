@@ -2456,9 +2456,9 @@ void Navi::makeCStick(bool isSunset)
 	if (mPlateMgr) {
 		if (getCurrState()->getID() != NAVISTATE_DemoSunset && getCurrState()->getID() != NAVISTATE_Dead) {
 			if (mPlateMgr->mTotalSlotCount > 0) {
-				seMgr->playNaviSound(74.0f * cStickInput.x, 74.0f * cStickInput.z);
+				seMgr->playNaviSound(mNaviID, 74.0f * cStickInput.x, 74.0f * cStickInput.z);
 			} else {
-				seMgr->playNaviSound(0, 0);
+				seMgr->playNaviSound(mNaviID, 0, 0);
 			}
 		}
 	}

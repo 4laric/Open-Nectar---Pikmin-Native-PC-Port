@@ -7,6 +7,10 @@
 #include "sysNew.h"
 #include "system.h"
 #include "zen/Math.h"
+#if defined(PIKI_PC_PORT)
+#include "audio/pc_formation_arbiter.h"
+#include "gameflow.h"
+#endif
 
 /**
  * @todo: Documentation
@@ -23,11 +27,19 @@ DEFINE_PRINT("seMgr");
 /// Global sound effect manager object.
 SeMgr* seMgr;
 
+#if defined(PIKI_PC_PORT)
+/// Picks which captain's c-stick drives the (single) formation sound.
+static PcFormationArbiter sFormationArbiter;
+#endif
+
 /**
  * @todo: Documentation
  */
 SeMgr::SeMgr()
 {
+#if defined(PIKI_PC_PORT)
+	sFormationArbiter.reset();
+#endif
 	mBattleCount = 0;
 	mSENum       = 0;
 	mMaxInfos    = MAX_SOUND_EFFECTS;
@@ -49,9 +61,14 @@ SeMgr::SeMgr()
 /**
  * @todo: Documentation
  */
-void SeMgr::playNaviSound(s32 stickX, s32 stickY)
+void SeMgr::playNaviSound(int naviID, s32 stickX, s32 stickY)
 {
+#if defined(PIKI_PC_PORT)
+	PcFormationStick stick = sFormationArbiter.submit(naviID, stickX, stickY, gameflow.mGenFlowUpdateTickCount);
+	Jac_Orima_Formation(stick.x, stick.y);
+#else
 	Jac_Orima_Formation(stickX, stickY);
+#endif
 }
 
 /**

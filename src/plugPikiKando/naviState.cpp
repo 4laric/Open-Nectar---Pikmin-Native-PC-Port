@@ -132,7 +132,7 @@ void NaviPelletState::init(Navi* navi)
 	navi->becomePellet('navi', navi->mSRT.t, navi->mFaceDirection);
 	navi->mIsPellet = true;
 	mIsFinished     = false;
-	seMgr->playNaviSound(0, 0);
+	seMgr->playNaviSound(navi->mNaviID, 0, 0);
 }
 
 /**
