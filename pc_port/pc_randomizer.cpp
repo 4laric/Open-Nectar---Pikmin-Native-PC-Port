@@ -396,6 +396,8 @@ struct ParsedRand {
     unsigned stats[3][4] = {};
     unsigned benefits[9] = {};
     unsigned emperor = 0, deathLinks = 0;
+    unsigned maturity[3] = {}, dayLength = 0, whistlePluck = 0;
+    unsigned thelynkParts = 0, thelynkBonuses[18] = {};
 };
 // Netplay publish generation. The first published snapshot is gen 1; gen 0
 // never goes on the wire (the reassembler drops it as stale).
@@ -474,16 +476,46 @@ void outbox_push(const pc_rand_outbox::Entry& e) {
     outboxUsed = true;
     if (!outbox_io().queue.push(stamped)) fail("netplay outbox overflow");
 }
-// The accepted solo protocols include fields absent from PcRandState v2.
-// Refuse those streamed combinations rather than parse or apply a partial state.
+// Metadata binds every received state to the already authenticated bootstrap.
+uint16_t net_features() {
+    return (maturityItems ? 1 : 0) | (dayLengthItems ? 2 : 0) | (whistlePluckItem ? 4 : 0)
+        | (p2EnemyBridge ? 8 : 0) | (purpleCampaign ? 16 : 0) | (secondCaptain ? 32 : 0)
+        | (progressiveStats ? 64 : 0) | (benefitItems ? 128 : 0) | (deathLinkUnit ? 256 : 0)
+        | (emperorGoal ? 512 : 0);
+}
 void require_net_state_schema() {
-    if (thelynk || maturityItems || dayLengthItems || whistlePluckItem)
-        fail("netplay randomizer stream does not support TheLynk, maturity, day length or whistle pluck");
-    if (checkCount > pc_randstate::kCheckSlots || checkCount > 255u)
-        fail("netplay randomizer stream catalog exceeds wire capacity");
+    if (checkCount > pc_randstate::kCheckSlots) fail("netplay randomizer catalog exceeds wire capacity");
 }
 void parse_state_stream(std::istream& input, ParsedRand& out) {
     require_net_state_schema();
+    if (thelynk) {
+        expect(input, "THELYNK_STATE"); expect(input, "1");
+        std::string session; unsigned active, parts;
+        if (!(input >> session >> active >> parts) || session != token || active > 1 || parts >= (1u << 30)
+            || (parts & thelynkParts) != thelynkParts) fail("invalid/retracted TheLynk inventory");
+        expect(input, "CHECKS"); unsigned count;
+        if (!(input >> count) || count > thelynkEnabled.size()) fail("invalid TheLynk checked count");
+        for (unsigned i = 0; i < count; ++i) {
+            unsigned id; if (!(input >> id)) fail("invalid TheLynk checked ID");
+            int slot = thelynkIndex(id);
+            if (slot < 0 || !thelynkEnabled.count(unsigned(slot)) || !out.checks.insert(unsigned(slot)).second)
+                fail("unknown or duplicate TheLynk checked ID");
+        }
+        expect(input, "BONUSES"); unsigned receipts = 0;
+        for (unsigned i = 0; i < 30; ++i) if (parts & (1u << i)) ++out.repairs;
+        receipts = out.repairs;
+        for (int i = 0; i < 18; ++i) {
+            unsigned& n = out.thelynkBonuses[i];
+            if (!(input >> n) || n > thelynkEnabled.size() || n < thelynkBonuses[i] || n < thelynkUsed[i])
+                fail("invalid/retracted TheLynk bonus");
+            receipts += n;
+        }
+        if (receipts > thelynkEnabled.size()) fail("too many TheLynk receipts");
+        expect(input, "END"); std::string extra;
+        if (input >> extra) fail("trailing TheLynk state");
+        out.thelynkParts = parts; out.ready = active;
+        return;
+    }
     std::string magic, session, end, extra;
     unsigned version, newReady, newRepairs, newUnlocks, newFlarlic = 0;
     std::set<unsigned> newChecks;
@@ -521,6 +553,25 @@ void parse_state_stream(std::istream& input, ParsedRand& out) {
                 fail("invalid or retracted benefit receipt");
         parsed = bool(input >> end);
     }
+    unsigned newMaturity[3] = {};
+    if (maturityItems) {
+        if (!parsed || end != "MATURITY") fail("missing maturity state");
+        for (int c = 0; c < 3; ++c)
+            if (!(input >> newMaturity[c]) || newMaturity[c] > 2 || newMaturity[c] < maturity[c]) fail("invalid or retracted maturity");
+        parsed = bool(input >> end);
+    }
+    unsigned newDayLength = 0;
+    if (dayLengthItems) {
+        if (!parsed || end != "DAYLENGTH" || !(input >> newDayLength) || newDayLength > dayLengthItems || newDayLength < dayLength)
+            fail("invalid or retracted day length");
+        parsed = bool(input >> end);
+    }
+    unsigned newWhistlePluck = 0;
+    if (whistlePluckItem) {
+        if (!parsed || end != "WHISTLEPLUCK" || !(input >> newWhistlePluck) || newWhistlePluck > 1 || (whistlePluck && !newWhistlePluck))
+            fail("invalid or retracted whistle pluck");
+        parsed = bool(input >> end);
+    }
     unsigned newEmperor = 0;
     if (emperorGoal) {
         if (!parsed || end != "EMPEROR" || !(input >> newEmperor) || newEmperor > 1 || (newEmperor && newRepairs < 25)) fail("invalid Emperor state");
@@ -538,6 +589,7 @@ void parse_state_stream(std::istream& input, ParsedRand& out) {
     // Inventory is monotonic within this authenticated run.
     if (newRepairs < repairs || (newUnlocks & unlocks) != unlocks || newFlarlic < flarlic)
         fail("state attempted to retract received progression");
+    if (deathLinkBaseline && newDeathLinks < deathLinksSeen) fail("retracted DeathLinks");
     out.ready = newReady;
     out.repairs = newRepairs;
     out.unlocks = newUnlocks;
@@ -545,10 +597,19 @@ void parse_state_stream(std::istream& input, ParsedRand& out) {
     out.checks = newChecks;
     for (int c = 0; c < 3; ++c) for (int stat = 0; stat < 4; ++stat) out.stats[c][stat] = newStats[c][stat];
     for (int kind = 0; kind < 9; ++kind) out.benefits[kind] = newBenefits[kind];
+    for (int c = 0; c < 3; ++c) out.maturity[c] = newMaturity[c];
+    out.dayLength = newDayLength; out.whistlePluck = newWhistlePluck;
     out.emperor = newEmperor;
     out.deathLinks = newDeathLinks;
 }
 void apply_parsed(const ParsedRand& p) {
+    // All parsing and monotonic validation finished before any sim-side write.
+    if (thelynk) {
+        thelynkParts = p.thelynkParts;
+        for (int i = 0; i < 18; ++i) thelynkBonuses[i] = p.thelynkBonuses[i];
+    }
+    for (int c = 0; c < 3; ++c) maturity[c] = p.maturity[c];
+    dayLength = p.dayLength; whistlePluck = p.whistlePluck != 0;
     if (progressiveStats) for (int c = 0; c < 3; ++c) for (int stat = 0; stat < 4; ++stat) {
         if (statUpgrades[c][stat] != p.stats[c][stat])
             std::printf("[Pikmin Randomizer] STAT_UPGRADE color=%d stat=%d tier=%u\n", c, stat, p.stats[c][stat]);
@@ -604,28 +665,30 @@ void apply_parsed(const ParsedRand& p) {
     }
 }
 void net_from_parsed(const ParsedRand& p, uint32_t gen, pc_randstate::PcRandState& st) {
-    // u8/u16 field widths are fail-closed here so a range breach is loud
-    // instead of a silent truncation divergence.
-    if (p.deathLinks > 0xFFFFu) fail("netplay state stream DeathLink count exceeds u16");
-    if (checkCount > 255u) fail("netplay state stream benefit range exceeds u8");
-    if (checkCount > pc_randstate::kCheckSlots) fail("netplay state stream catalog exceeds wire bitset");
-    st.ver = pc_randstate::kVersion;
+    require_net_state_schema();
+    st = pc_randstate::PcRandState();
+    st.mode = thelynk ? 2 : 1;
+    st.features = net_features(); st.checkCount = uint16_t(checkCount);
+    st.schema = thelynk ? 1 : uint8_t(schema);
+    st.dayLength = uint8_t(p.dayLength); st.whistlePluck = uint8_t(p.whistlePluck);
+    for (int c = 0; c < 3; ++c) st.maturity[c] = uint8_t(p.maturity[c]);
+    st.thelynkParts = p.thelynkParts;
+    for (int i = 0; i < 18; ++i) st.thelynkBonuses[i] = uint16_t(p.thelynkBonuses[i]);
     st.ready = (uint8_t)(p.ready != 0 ? 1 : 0);
     st.repairs = (uint8_t)p.repairs;
     st.unlocks = (uint8_t)p.unlocks;
     st.flarlic = (uint8_t)p.flarlic;
     st.emperor = (uint8_t)(p.emperor != 0 ? 1 : 0);
-    st.deathLinks = (uint16_t)p.deathLinks;
+    st.deathLinks = p.deathLinks;
     for (size_t i = 0; i < pc_randstate::kCheckBytes; ++i) st.checks[i] = 0;
     for (unsigned slot : p.checks) {
         // Single shared width (pc_randstate::kCheckBytes): encoder and
-        // decoder agree, and every catalog up to 192 slots fits.
+        // decoder agree, and every current catalog fits the 512-slot bound.
         if (slot >= pc_randstate::kCheckSlots) fail("netplay state stream check slot exceeds wire bitset");
         st.checks[slot / 8] |= (uint8_t)(1u << (slot % 8));
     }
     for (int c = 0; c < 3; ++c) for (int s = 0; s < 4; ++s) st.stats[c * 4 + s] = (uint8_t)p.stats[c][s];
-    for (int kind = 0; kind < 9; ++kind) st.benefits[kind] = (uint8_t)p.benefits[kind];
-    st.rsv[0] = st.rsv[1] = st.rsv[2] = 0;
+    for (int kind = 0; kind < 9; ++kind) st.benefits[kind] = (uint16_t)p.benefits[kind];
     st.gen = gen; // stamped by the publisher (0 = unstamped)
     st.crc = 0;   // computed by encode()
 }
@@ -1380,47 +1443,54 @@ bool pc_randomizer_resume_snapshot(pc_randstate::PcRandState* out) {
 bool pc_randomizer_apply_net_state(const pc_randstate::PcRandState& st) {
     if (!enabled) return false;
     require_net_state_schema();
-    // Validate like the file path, then apply exactly what the file path
-    // would have applied. Fail-closed on anything out of range or retracted.
-    const unsigned maxUnlocks = schema >= 5 ? 255u : schema == 4 ? 127u : schema == 3 ? 63u : 31u;
-    if (st.ver != pc_randstate::kVersion || st.ready > 1 || st.repairs > 25
-        || st.unlocks > maxUnlocks || st.flarlic > 10 - startingFlarlic || st.emperor > 1)
-        fail("invalid net randomizer state: version or range mismatch");
-    const unsigned tierUnit = doubledStats ? 2u : 1u;
-    for (int c = 0; c < 3; ++c) for (int s = 0; s < 4; ++s) {
-        const unsigned tierMax = (s == 0 || s == 3 ? 2u : 1u) * tierUnit;
-        if (st.stats[c * 4 + s] > tierMax || st.stats[c * 4 + s] < statUpgrades[c][s])
-            fail("invalid or retracted net stat upgrade");
+    if (st.ver != pc_randstate::kVersion || st.mode != (thelynk ? 2 : 1)
+        || st.schema != (thelynk ? 1 : schema) || st.features != net_features() || st.checkCount != checkCount)
+        fail("net randomizer state differs from authenticated bootstrap");
+    // Render the authenticated wire inventory through the same complete parser
+    // used by the host. This validates all monotonic/range/consumption rules
+    // without a second, weaker client parser. No state is mutated until complete.
+    std::ostringstream text;
+    if (thelynk) text << "THELYNK_STATE 1 " << token << ' ' << unsigned(st.ready) << ' ' << st.thelynkParts;
+    else {
+        text << "PIKMIN_STATE " << schema << ' ' << token << ' ' << unsigned(st.ready) << ' '
+             << unsigned(st.repairs) << ' ' << unsigned(st.unlocks);
+        if (schema >= 2) text << ' ' << unsigned(st.flarlic);
     }
-    const int kindCount = prereleaseTraps ? 9 : proggTraps ? 8 : bombTraps ? 7 : bombDeliveries ? 6 : 5;
-    for (int kind = 0; kind < 9; ++kind) {
-        const unsigned receiptMax = kind < kindCount ? (kind < 3 || kind >= 5 ? checkCount : 2u) : 0u;
-        if (st.benefits[kind] > receiptMax || st.benefits[kind] < benefits[kind]
-            || ((kind < 3 || kind >= 5) && st.benefits[kind] < consumedBenefits[consumedIndex(static_cast<PcBenefit>(kind))]))
-            fail("invalid or retracted net benefit receipt");
-    }
-    if (emperorGoal && st.emperor && st.repairs < 25)
-        fail("invalid net Emperor state");
-    if (st.repairs < repairs || ((unsigned)st.unlocks & unlocks) != unlocks || st.flarlic < flarlic)
-        fail("net state attempted to retract received progression");
-    ParsedRand parsed;
-    parsed.ready = st.ready;
-    parsed.repairs = st.repairs;
-    parsed.unlocks = st.unlocks;
-    parsed.flarlic = st.flarlic;
+    std::set<unsigned> incoming;
     for (unsigned slot = 0; slot < pc_randstate::kCheckSlots; ++slot)
-        if (st.checks[slot / 8] & (uint8_t)(1u << (slot % 8))) {
+        if (st.checks[slot / 8] & (1u << (slot % 8))) {
             if (slot >= checkCount) fail("invalid net check index");
-            parsed.checks.insert(slot);
+            incoming.insert(slot);
         }
-    for (int c = 0; c < 3; ++c) for (int s = 0; s < 4; ++s) parsed.stats[c][s] = st.stats[c * 4 + s];
-    for (int kind = 0; kind < 9; ++kind) parsed.benefits[kind] = st.benefits[kind];
-    parsed.emperor = st.emperor;
-    parsed.deathLinks = st.deathLinks;
-    if (deathLinkUnit) {
-        if (deathLinkBaseline && parsed.deathLinks < deathLinksSeen)
-            fail("net state retracted received DeathLinks");
+    if (thelynk || schema >= 8) {
+        text << " CHECKS " << incoming.size();
+        for (unsigned slot : incoming) text << ' ' << (thelynk ? thelynkId(slot) : slot);
+    } else {
+        uint64_t mask = 0; for (unsigned slot : incoming) mask |= uint64_t(1) << slot;
+        text << ' ' << mask;
     }
+    if (thelynk) {
+        text << " BONUSES";
+        for (unsigned n : st.thelynkBonuses) text << ' ' << n;
+    } else {
+        if (progressiveStats) { text << " UPGRADES"; for (unsigned n : st.stats) text << ' ' << n; }
+        if (benefitItems) {
+            text << " BENEFITS";
+            int count = prereleaseTraps ? 9 : proggTraps ? 8 : bombTraps ? 7 : bombDeliveries ? 6 : 5;
+            for (int i = 0; i < count; ++i) text << ' ' << st.benefits[i];
+        }
+        if (maturityItems) { text << " MATURITY"; for (unsigned n : st.maturity) text << ' ' << n; }
+        if (dayLengthItems) text << " DAYLENGTH " << unsigned(st.dayLength);
+        if (whistlePluckItem) text << " WHISTLEPLUCK " << unsigned(st.whistlePluck);
+        if (emperorGoal) text << " EMPEROR " << unsigned(st.emperor);
+        if (deathLinkUnit) text << " DEATHLINK " << st.deathLinks;
+    }
+    text << " END";
+    std::istringstream input(text.str()); ParsedRand parsed;
+    parse_state_stream(input, parsed);
+    pc_randstate::PcRandState canonical; net_from_parsed(parsed, st.gen, canonical);
+    // Reject values in disabled/reserved mode fields, rather than ignoring them.
+    if (!pc_randstate::payload_equal(st, canonical)) fail("noncanonical net randomizer state");
     apply_parsed(parsed);
     lastFresh = std::chrono::steady_clock::now();
     return true;
@@ -1428,25 +1498,17 @@ bool pc_randomizer_apply_net_state(const pc_randstate::PcRandState& st) {
 
 bool pc_randomizer_get_net_state(pc_randstate::PcRandState* out) {
     if (!enabled || out == nullptr) return false;
-    require_net_state_schema();
-    pc_randstate::PcRandState st;
-    st.ver = pc_randstate::kVersion;
-    st.ready = ready ? 1 : 0;
-    st.repairs = (uint8_t)repairs;
-    st.unlocks = (uint8_t)unlocks;
-    st.flarlic = (uint8_t)flarlic;
-    st.emperor = emperorDefeated ? 1 : 0;
-    st.deathLinks = (uint16_t)deathLinksSeen;
-    for (size_t i = 0; i < pc_randstate::kCheckBytes; ++i) st.checks[i] = 0;
-    for (unsigned slot : checks) {
-        if (slot >= pc_randstate::kCheckSlots) fail("netplay state stream check slot exceeds wire bitset");
-        st.checks[slot / 8] |= (uint8_t)(1u << (slot % 8));
+    ParsedRand p;
+    p.ready = ready; p.repairs = repairs; p.unlocks = unlocks; p.flarlic = flarlic;
+    p.emperor = emperorDefeated; p.deathLinks = deathLinksSeen; p.checks = checks;
+    p.dayLength = dayLength; p.whistlePluck = whistlePluck; p.thelynkParts = thelynkParts;
+    for (int c = 0; c < 3; ++c) {
+        p.maturity[c] = maturity[c];
+        for (int i = 0; i < 4; ++i) p.stats[c][i] = statUpgrades[c][i];
     }
-    for (int c = 0; c < 3; ++c) for (int s = 0; s < 4; ++s) st.stats[c * 4 + s] = (uint8_t)statUpgrades[c][s];
-    for (int kind = 0; kind < 9; ++kind) st.benefits[kind] = (uint8_t)benefits[kind];
-    st.gen = 0; // stamped by the publisher
-    st.crc = 0; // computed by encode()
-    *out = st;
+    for (int i = 0; i < 9; ++i) p.benefits[i] = benefits[i];
+    for (int i = 0; i < 18; ++i) p.thelynkBonuses[i] = thelynkBonuses[i];
+    net_from_parsed(p, 0, *out); // publisher stamps a positive generation
     return true;
 }
 
@@ -1456,14 +1518,22 @@ uint64_t pc_randomizer_hash() {
     const auto mix = [&](uint64_t v) {
         for (int i = 0; i < 8; ++i) { h ^= (uint8_t)((v >> (i * 8)) & 0xFF); h *= 1099511628211ULL; }
     };
-    uint64_t head = (ready ? 1ULL : 0ULL) | ((uint64_t)repairs << 8) | ((uint64_t)unlocks << 16)
-        | ((uint64_t)flarlic << 24) | ((uint64_t)(emperorDefeated ? 1 : 0) << 32)
-        | ((uint64_t)deathLinksSeen << 40) | ((uint64_t)deathLinksPending << 48);
-    mix(head);
-    mix(deathsReported);
-    for (unsigned slot : checks) mix(slot);
-    for (int c = 0; c < 3; ++c) for (int s = 0; s < 4; ++s) mix(statUpgrades[c][s]);
-    for (int kind = 0; kind < 9; ++kind) mix(((uint64_t)benefits[kind] << 32) | consumedBenefits[consumedIndex(static_cast<PcBenefit>(kind))]);
+    mix(thelynk ? 2 : 1); mix(thelynk ? 1 : schema); mix(net_features()); mix(checkCount);
+    mix(ready); mix(repairs); mix(unlocks); mix(flarlic); mix(emperorDefeated);
+    mix(deathLinksSeen); mix(deathLinksPending); mix(deathsReported);
+    mix(checks.size()); for (unsigned slot : checks) mix(slot);
+    for (int c = 0; c < 3; ++c) {
+        mix(maturity[c]);
+        for (int i = 0; i < 4; ++i) mix(statUpgrades[c][i]);
+    }
+    mix(dayLength); mix(whistlePluck); mix(thelynkParts);
+    for (unsigned n : benefits) mix(n);
+    for (unsigned n : consumedBenefits) mix(n);
+    for (int i = 0; i < 18; ++i) { mix(thelynkBonuses[i]); mix(thelynkUsed[i]); }
+    mix(thelynkEnabled.size()); for (unsigned slot : thelynkEnabled) mix(slot);
+    for (int color = 0; color < 2; ++color) for (int stage = 0; stage < 3; ++stage)
+        mix(p2ship::stock.counts[color][stage]);
+    mix(campaignGeneration); mix(campaignResumed);
     return h;
 }
 
@@ -2498,7 +2568,7 @@ void outbox_flush_host(const std::vector<pc_rand_outbox::Entry>& entries) {
             if (!outbox_io().checksJournaled.insert(e.slot).second) break;
             FILE* file = std::fopen((directory / "checks.txt").string().c_str(), "a");
             if (!file) fail("cannot persist native collection");
-            bool ok = std::fprintf(file, "%d\n", int(e.slot)) > 0 && std::fflush(file) == 0;
+            bool ok = std::fprintf(file, "%u\n", thelynk ? thelynkId(unsigned(e.slot)) : unsigned(e.slot)) > 0 && std::fflush(file) == 0;
 #ifdef _WIN32
             ok = ok && _commit(_fileno(file)) == 0;
 #else

@@ -17,8 +17,8 @@ uint32_t crc_table_entry(unsigned i)
 	return c;
 }
 
-constexpr size_t kGenOff = 56; // gen u32 offset in the v2 wire layout
-constexpr size_t kCrcOff = 60; // crc u32 offset in the v2 wire layout
+constexpr size_t kGenOff = 160; // gen u32 offset in the v3 wire layout
+constexpr size_t kCrcOff = 164; // crc u32 offset in the v3 wire layout
 
 } // namespace
 
@@ -32,79 +32,46 @@ uint32_t crc32(const uint8_t* data, size_t len)
 	return crc ^ 0xFFFFFFFFu;
 }
 
-size_t encode(const PcRandState& st, uint8_t out[kStateBytes])
-{
-	if (out == nullptr) return 0;
-	out[0] = st.ver;
-	out[1] = st.ready;
-	out[2] = st.repairs;
-	out[3] = st.unlocks;
-	out[4] = st.flarlic;
-	out[5] = st.emperor;
-	out[6] = (uint8_t)(st.deathLinks & 0xFF);
-	out[7] = (uint8_t)((st.deathLinks >> 8) & 0xFF);
-	for (size_t i = 0; i < kCheckBytes; ++i) out[8 + i] = st.checks[i];
-	for (int i = 0; i < 12; ++i) out[32 + i] = st.stats[i];
-	for (int i = 0; i < 9; ++i) out[44 + i] = st.benefits[i];
-	out[53] = st.rsv[0];
-	out[54] = st.rsv[1];
-	out[55] = st.rsv[2];
-	out[kGenOff] = (uint8_t)(st.gen & 0xFF);
-	out[kGenOff + 1] = (uint8_t)((st.gen >> 8) & 0xFF);
-	out[kGenOff + 2] = (uint8_t)((st.gen >> 16) & 0xFF);
-	out[kGenOff + 3] = (uint8_t)((st.gen >> 24) & 0xFF);
-	const uint32_t crc = crc32(out, kPayloadBytes);
-	out[kCrcOff] = (uint8_t)(crc & 0xFF);
-	out[kCrcOff + 1] = (uint8_t)((crc >> 8) & 0xFF);
-	out[kCrcOff + 2] = (uint8_t)((crc >> 16) & 0xFF);
-	out[kCrcOff + 3] = (uint8_t)((crc >> 24) & 0xFF);
-	return kStateBytes;
+namespace {
+void put16(uint8_t* p, uint16_t x) { p[0]=uint8_t(x); p[1]=uint8_t(x>>8); }
+void put32(uint8_t* p, uint32_t x) { for (int i=0;i<4;++i) p[i]=uint8_t(x>>(8*i)); }
+uint16_t get16(const uint8_t* p) { return uint16_t(p[0]) | uint16_t(p[1])<<8; }
+uint32_t get32(const uint8_t* p) { uint32_t x=0;for(int i=0;i<4;++i)x|=uint32_t(p[i])<<(8*i);return x; }
 }
-
-bool decode(const uint8_t* data, size_t avail, PcRandState& out)
-{
-	if (data == nullptr || avail < kStateBytes) return false;
-	if (data[0] != kVersion) return false;
-	if (data[53] != 0 || data[54] != 0 || data[55] != 0) return false;
-	const uint32_t want =
-	    (uint32_t)data[kCrcOff] | ((uint32_t)data[kCrcOff + 1] << 8)
-	    | ((uint32_t)data[kCrcOff + 2] << 16) | ((uint32_t)data[kCrcOff + 3] << 24);
-	if (crc32(data, kPayloadBytes) != want) return false;
-	PcRandState st;
-	st.ver = data[0];
-	st.ready = data[1];
-	st.repairs = data[2];
-	st.unlocks = data[3];
-	st.flarlic = data[4];
-	st.emperor = data[5];
-	st.deathLinks = (uint16_t)(data[6] | ((uint16_t)data[7] << 8));
-	for (size_t i = 0; i < kCheckBytes; ++i) st.checks[i] = data[8 + i];
-	for (int i = 0; i < 12; ++i) st.stats[i] = data[32 + i];
-	for (int i = 0; i < 9; ++i) st.benefits[i] = data[44 + i];
-	st.rsv[0] = st.rsv[1] = st.rsv[2] = 0;
-	st.gen = (uint32_t)data[kGenOff] | ((uint32_t)data[kGenOff + 1] << 8)
-	    | ((uint32_t)data[kGenOff + 2] << 16) | ((uint32_t)data[kGenOff + 3] << 24);
-	st.crc = want;
-	out = st;
-	return true;
+size_t encode(const PcRandState& st, uint8_t out[kStateBytes]) {
+    if (!out) return 0;
+    std::memset(out,0,kStateBytes);
+    out[0]=st.ver;out[1]=st.mode;put16(out+2,st.features);put16(out+4,st.checkCount);out[6]=st.schema;
+    out[8]=st.ready;out[9]=st.repairs;out[10]=st.unlocks;out[11]=st.flarlic;
+    out[12]=st.emperor;out[13]=st.dayLength;out[14]=st.whistlePluck;
+    put32(out+16,st.deathLinks);put32(out+20,st.thelynkParts);
+    std::memcpy(out+24,st.checks,kCheckBytes);std::memcpy(out+88,st.stats,12);std::memcpy(out+100,st.maturity,3);
+    for(int i=0;i<9;++i)put16(out+104+2*i,st.benefits[i]);
+    for(int i=0;i<18;++i)put16(out+122+2*i,st.thelynkBonuses[i]);
+    put32(out+kGenOff,st.gen);put32(out+kCrcOff,crc32(out,kPayloadBytes));return kStateBytes;
 }
-
-bool payload_equal(const PcRandState& a, const PcRandState& b)
-{
-	if (a.ver != b.ver || a.ready != b.ready || a.repairs != b.repairs
-	    || a.unlocks != b.unlocks || a.flarlic != b.flarlic || a.emperor != b.emperor
-	    || a.deathLinks != b.deathLinks)
-		return false;
-	for (size_t i = 0; i < kCheckBytes; ++i) {
-		if (a.checks[i] != b.checks[i]) return false;
-	}
-	for (int i = 0; i < 12; ++i) {
-		if (a.stats[i] != b.stats[i]) return false;
-	}
-	for (int i = 0; i < 9; ++i) {
-		if (a.benefits[i] != b.benefits[i]) return false;
-	}
-	return true;
+bool decode(const uint8_t* data, size_t avail, PcRandState& out) {
+    if(!data || avail!=kStateBytes || data[0]!=kVersion || data[1]<1 || data[1]>2) return false;
+    if(data[7]||data[15]||data[103]||data[158]||data[159])return false;
+    if((get16(data+2)&~kFeatureMask)!=0 || !get16(data+4)||get16(data+4)>kCheckSlots)return false;
+    if((data[1]==1 && (data[6]<1||data[6]>9)) || (data[1]==2 && data[6]!=1))return false;
+    if(data[8]>1||data[12]>1||data[14]>1||data[9]>(data[1]==2?30:25))return false;
+    const uint32_t want=get32(data+kCrcOff);if(crc32(data,kPayloadBytes)!=want)return false;
+    PcRandState st;st.ver=data[0];st.mode=data[1];st.features=get16(data+2);st.checkCount=get16(data+4);st.schema=data[6];
+    st.ready=data[8];st.repairs=data[9];st.unlocks=data[10];st.flarlic=data[11];
+    st.emperor=data[12];st.dayLength=data[13];st.whistlePluck=data[14];
+    st.deathLinks=get32(data+16);st.thelynkParts=get32(data+20);
+    if(st.thelynkParts>>30)return false;
+    std::memcpy(st.checks,data+24,kCheckBytes);std::memcpy(st.stats,data+88,12);std::memcpy(st.maturity,data+100,3);
+    for(unsigned i=st.checkCount;i<kCheckSlots;++i)if(st.checks[i/8]&(1u<<(i%8)))return false;
+    for(int i=0;i<9;++i)st.benefits[i]=get16(data+104+2*i);
+    for(int i=0;i<18;++i)st.thelynkBonuses[i]=get16(data+122+2*i);
+    st.gen=get32(data+kGenOff);st.crc=want;if(!st.gen)return false;
+    out=st;return true;
+}
+bool payload_equal(const PcRandState& a, const PcRandState& b) {
+    uint8_t x[kStateBytes],y[kStateBytes];encode(a,x);encode(b,y);
+    return std::memcmp(x,y,kGenOff)==0;
 }
 
 Reassembler::Reassembler() { reset(); }
@@ -123,7 +90,7 @@ void Reassembler::reset()
 void Reassembler::feed(bool hasChunk, uint8_t seq, const uint8_t payload[kFragBytes], bool last,
                        uint32_t frame)
 {
-	// `last` is advisory: completion is mask-driven (all 16 present), so a
+	// `last` is advisory: completion is mask-driven (all42 present), so a
 	// lost CHUNK_LAST bit cannot stall the stream. A last flag on a
 	// non-final index is ignored rather than acted on.
 	(void)last;
@@ -142,10 +109,10 @@ void Reassembler::feed(bool hasChunk, uint8_t seq, const uint8_t payload[kFragBy
 		memset(mSlots, 0, sizeof(mSlots));
 		mMask = 0;
 	}
-	if (mMask & (1u << idx)) return; // duplicate fragment: no-op
+	if (mMask & (uint64_t(1) << idx)) return; // duplicate fragment: no-op
 	for (size_t i = 0; i < kFragBytes; ++i) mSlots[idx * kFragBytes + i] = payload[i];
-	mMask |= (1u << idx);
-	if (mMask != (kFragCount >= 32 ? 0xFFFFFFFFu : ((1u << kFragCount) - 1))) return; // incomplete: wait
+	mMask |= (uint64_t(1) << idx);
+	if (mMask != ((uint64_t(1) << kFragCount) - 1)) return; // incomplete: wait
 	PcRandState st;
 	if (!decode(mSlots, sizeof(mSlots), st)) {
 		// Corrupt transfer: drop it identically on both peers rather than

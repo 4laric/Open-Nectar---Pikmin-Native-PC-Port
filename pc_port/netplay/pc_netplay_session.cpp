@@ -390,7 +390,7 @@ bool sInitialised = false;
 // the codec and the refuse fields live in pc_netplay_transfer.h. The refuse
 // field stays at offset 107, so v1/v2 peers still refuse `protocol` fast.
 using pc_netplay_xfer::kHsMagic;
-constexpr uint16_t kProtocolVersion = pc_netplay_xfer::kProtocolV3;
+constexpr uint16_t kProtocolVersion = pc_netplay_xfer::kProtocolV4;
 constexpr size_t kHsHeaderLen = pc_netplay_xfer::kHsHeaderLen; // 7, stable across versions
 constexpr size_t kHsLenV1 = pc_netplay_xfer::kHsLenV1;         // 108
 constexpr size_t kHsLenV2 = pc_netplay_xfer::kHsLenV2;         // 116
@@ -710,7 +710,7 @@ pc_netplay_bulk::BulkChannel sBulk; // M4a bulk 0x03 endpoint (lane B queues)
 // updates GekkoNet (its 500 ms NetworkHealth packets keep both disconnect
 // timers fed) and handles session events. When the link is live again and
 // the freeze point is reached, the host sends bulk kBulkRandFull
-// {u32 resumeFrame = H+12, 64-byte snapshot with a fresh gen} and resumes
+// {u32 resumeFrame = H+12, 168-byte snapshot with a fresh gen} and resumes
 // submitting; the client resumes submitting only once it holds that
 // snapshot, so frame H+12 cannot advance anywhere before it. Both apply it
 // at the tick start of H+12 (before inject_input), drop any pending
@@ -990,7 +990,7 @@ bool hold_resume_catchup_due()
 // only; never in launcher sessions (their static state is always live).
 void hold_host_maybe_flag(PcNetplayInput& local)
 {
-	if (!randstate_stream_on() || !sCfg.isHost || sCfg.launcherMode) return;
+	if (!randstate_stream_on() || !sCfg.isHost || (sCfg.launcherMode && pc_netplay_launch_wants_local_state())) return;
 	if (sHolding || sHoldRequested) return;
 	if (pc_randomizer_enabled == nullptr || !pc_randomizer_enabled()) return;
 	bool down = sHoldAtFirstInput;
@@ -1688,6 +1688,11 @@ std::string build_config_string()
 	// the protocol version are. (Previously the numeric delay was hashed,
 	// which refused asymmetric pairs on config.)
 	addi("protocolVersion", (long long)kProtocolVersion);
+    addi("externalState", pc_netplay_launch_setup().externalState ? 1 : 0);
+    addi("randCodec", pc_randstate::kVersion);
+    addi("randBytes", pc_randstate::kStateBytes);
+    addi("randCheckSlots", pc_randstate::kCheckSlots);
+    addi("randFirstApply", pc_randstate::kFirstApplyFrame);
 	// M4 fix round 1 (m1): the external-state stream gate is per-peer config
 	// that changes the sim (stream vs legacy file polling). A pair with the
 	// gate set differently on each side would desync silently; hashing it
@@ -2819,7 +2824,7 @@ void parse_config()
 	// the synced pads inside updateController, silently defeating lockstep.
 	// Refuse to start a session with it set instead of desyncing mid-run.
 	// (The in-process p2 script hook has no env gate; fixtures must not
-	// enable it in netplay — documented in the handoff.)
+	// enable it in netplay â€” documented in the handoff.)
 	if (const char* ap = getenv_nonempty("PIKMIN_RANDOMIZER_AUTOPLAY")) {
 		if (!(ap[0] == '0' && ap[1] == '\0')) {
 			printf("[netplay] PIKMIN_RANDOMIZER_AUTOPLAY is set: refusing netplay session\n");
@@ -5364,7 +5369,7 @@ void start_gekko_session()
 	// read at session start HOLDs from its first input instead of running
 	// the neutral gate indefinitely without a word. The RESUME snapshot is
 	// then gen 1 and the neutral gate stays up until it applies.
-	if (!hostState && randstate_stream_on() && sCfg.isHost && !sCfg.launcherMode
+	if (!hostState && randstate_stream_on() && sCfg.isHost && (!sCfg.launcherMode || !pc_netplay_launch_wants_local_state())
 	    && pc_randomizer_enabled != nullptr && pc_randomizer_enabled()) {
 		printf("[netplay] hold: host state.txt missing at session start\n");
 		fflush(stdout);

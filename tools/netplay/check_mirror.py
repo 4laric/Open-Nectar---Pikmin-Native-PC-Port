@@ -128,7 +128,10 @@ def verify(host_run, join_run, parse_line, session=None):
     clines = [ln.strip() for ln in (ctext or "").splitlines() if ln.strip()]
     if len(clines) != len(set(clines)):
         errors.append(f"host checks.txt has duplicate lines: {clines}")
-    slots = sorted(str(s) for s, _ in checks)
+    bootstrap = read_text(host_run / "bootstrap.txt") or ""
+    thelynk = bootstrap.startswith("PIKMIN_THELYNK 1")
+    slots = sorted(str(71400 + slot if slot < 30 else 71500 + slot - 30)
+                   if thelynk else str(slot) for slot, _ in checks)
     if sorted(clines) != slots:
         errors.append(f"host checks.txt {sorted(clines)} != CHECK log slots {slots}")
 

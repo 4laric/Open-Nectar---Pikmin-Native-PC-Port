@@ -942,7 +942,7 @@ bool resolve_continue(const std::string& folderArg, const std::string& fpFilter,
 
 const PcNetplayLaunch& pc_netplay_launch_setup(void) { return sSetup; }
 
-bool pc_netplay_launch_wants_local_state(void) { return sSetup.active; }
+bool pc_netplay_launch_wants_local_state(void) { return sSetup.active && !sSetup.externalState; }
 
 void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 {
@@ -974,7 +974,7 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 	const bool joinIce   = argv_present(argc, argv, "--netplay-join-ice");
 	const char* launcherOnly[] = { "--bootstrap", "--netplay-code-out", "--netplay-answer-in",
 		                           "--netplay-test-hidden", "--netplay-test-ticks",
-		                           "--netplay-p2-assets", "--continue" };
+		                           "--netplay-p2-assets", "--continue", "--netplay-external-state", "--netplay-run-root" };
 	if (!hostIce && !joinIce) {
 		for (const char* flag : launcherOnly) {
 			if (argv_present(argc, argv, flag))
@@ -1017,6 +1017,11 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 
 	sSetup.active = true;
 	sSetup.isHost = hostIce;
+    sSetup.externalState = argv_present(argc, argv, "--netplay-external-state");
+    if (const char* path = argv_value(argc, argv, "--netplay-run-root")) {
+        if (!*path) die("--netplay-run-root requires a nonempty private directory");
+        sSetup.requestedRunRoot = fs::absolute(path).lexically_normal().generic_string();
+    }
 	if (!hostIce) {
 		if (argv_present(argc, argv, "--bootstrap"))
 			die("--bootstrap is host-only: the joiner gets the bootstrap from the offer code");
@@ -1201,7 +1206,12 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 	snprintf(stamp, sizeof(stamp), "run-%04d%02d%02d-%02d%02d%02d-%s-pid%u", lt.tm_year + 1900, lt.tm_mon + 1,
 	         lt.tm_mday, lt.tm_hour, lt.tm_min, lt.tm_sec, sSetup.isHost ? "host" : "join", current_pid());
 	std::string base;
-	{
+    if (!sSetup.requestedRunRoot.empty()) {
+        base = sSetup.requestedRunRoot;
+        if (!run_path_fits(base.size(), strlen(stamp) + 3, sSetup.token.size())
+            || !make_dirs(base) || !dir_writable(base))
+            die("--netplay-run-root is unwritable or exceeds the existing run path budget");
+    } else 	{
 		const char* local    = getenv_nonempty("LOCALAPPDATA");
 		const RunRoots roots = run_roots(exe_dir(), local != nullptr ? std::string(local) : std::string());
 		const size_t nameLen = strlen(stamp) + 3; // room for the "-<n>" exclusive-create suffix
@@ -1302,6 +1312,7 @@ void pc_netplay_launch_preinit(int* argcp, char*** argvp)
 		std::string rec;
 		rec += std::string("role ") + (sSetup.isHost ? "host" : "join") + "\n";
 		rec += "token " + sSetup.token + "\n";
+        rec += std::string("state_authority ") + (sSetup.externalState ? "external" : "local") + "\n";
 		rec += "bootstrap " + layout.bootstrapPath + "\n";
 		rec += "bootstrap_source " + sSetup.bootstrapSource + "\n";
 		rec += "campaign " + layout.campaignDir + "\n";

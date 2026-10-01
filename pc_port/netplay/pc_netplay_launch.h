@@ -49,6 +49,8 @@
 struct PcNetplayLaunch {
 	bool active = false;       // --netplay-host-ice or --netplay-join-ice
 	bool isHost = false;
+	bool externalState = false; // explicit AP/Python authority; defaults remain local
+	std::string requestedRunRoot; // explicit private base; never a reused run
 	std::string runDir;        // absolute; private to this run and this peer
 	std::string bootstrapPath; // absolute: <runDir>/session/runs/<token>/bootstrap.txt
 	std::string campaignDir;   // absolute: <runDir>/session/campaign (derived)
@@ -103,7 +105,7 @@ const PcNetplayLaunch& pc_netplay_launch_setup(void);
 // Joiner: re-applies the host's captains after the session's co-op switch
 // (which resets them) ran. No-op for the host and outside launcher mode.
 void pc_netplay_launch_apply_captains(void);
-// True in launcher mode: the randomizer writes a static ready state.txt
+// True only in local-authority launcher mode: writes a static ready state.txt
 // (no Archipelago) next to the run bootstrap. Referenced weakly by
 // pc_randomizer.cpp.
 bool pc_netplay_launch_wants_local_state(void);

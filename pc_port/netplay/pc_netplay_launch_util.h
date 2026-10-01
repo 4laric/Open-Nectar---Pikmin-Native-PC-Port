@@ -131,8 +131,12 @@ inline bool validate_bootstrap(const std::string& text, std::string* err, bool* 
 	if (text.size() > kMaxBootstrapBytes)
 		return fail("bootstrap is larger than " + std::to_string(kMaxBootstrapBytes) + " bytes");
 	if (text.find('\0') != std::string::npos) return fail("bootstrap contains NUL bytes");
-	if (text.compare(0, 18, "PIKMIN_RANDOMIZER ") != 0)
-		return fail("not a randomizer bootstrap (missing PIKMIN_RANDOMIZER header)");
+    const size_t firstEnd = text.find('\n');
+    std::string header = text.substr(0, firstEnd);
+    if (!header.empty() && header.back() == '\r') header.pop_back();
+    const bool thelynk = header == "PIKMIN_THELYNK 1";
+    if (!thelynk && text.compare(0, 18, "PIKMIN_RANDOMIZER ") != 0)
+        return fail("not a supported randomizer bootstrap (PIKMIN_RANDOMIZER or PIKMIN_THELYNK 1 required)");
 	size_t sessions = 0;
 	size_t pos      = 0;
 	while (pos < text.size()) {
@@ -144,7 +148,7 @@ inline bool validate_bootstrap(const std::string& text, std::string* err, bool* 
 		pos = eol + 1;
 	}
 	if (sessions != 1) return fail("bootstrap has no single SESSION line");
-	if (p2 != nullptr) *p2 = bootstrap_needs_p2(text);
+	if (p2 != nullptr) *p2 = !thelynk && bootstrap_needs_p2(text);
 	return true;
 }
 

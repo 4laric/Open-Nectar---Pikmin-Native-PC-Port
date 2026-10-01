@@ -118,7 +118,11 @@ P2ReceiptHostHandle pc_p2_receipt_host_open(const char* path)
 	const std::string key(path);
     std::error_code readError;
     const bool present = std::filesystem::exists(key, readError);
-    if (readError || (present && !std::ifstream(key).good())) return nullptr;
+    // A client reopen uses the agreed in-memory ledger even if its original
+    // file becomes inaccessible. Cold opens and every authoritative host open
+    // retain the existing fail-closed file checks.
+    const bool cachedClient = netplayRole() == 2 && clientLedgers().count(key) != 0;
+    if (!cachedClient && (readError || (present && !std::ifstream(key).good()))) return nullptr;
 	const auto existing = receiptHosts.find(key);
 	if (existing != receiptHosts.end()) {
 		return existing->second.get();

@@ -1,333 +1,43 @@
-// Netplay M4 lane A randstate unit test (issue #885, fix round 1).
-//
-// Covers the 64-byte v2 PcRandState encoder/decoder (explicit LE layout,
-// CRC, version/reserved rejection), payload_equal, the fragment sequence
-// byte, and the Reassembler (in-order completion at frame F arming F+1,
-// duplicate/stale/incomplete no-ops, fragment-0 generation-boundary reset
-// for a mid-transfer publish). Engine-free: links pc_netplay_randstate.cpp
-// only (no game, no SDL, no sockets).
-
-#include "netplay/pc_netplay_gekko_input.h"
+// Codec3 independent golden/layout/reassembly checks (#1148); oracle remains active with NDEBUG.
 #include "netplay/pc_netplay_randstate.h"
-
-#include <cstdint>
+#include "netplay/pc_netplay_gekko_input.h"
 #include <cstdio>
 #include <cstring>
-
-namespace {
-
-int sFailures = 0;
-
-void check(bool ok, const char* what, int line)
-{
-	if (!ok) {
-		++sFailures;
-		std::printf("FAIL line %d: %s\n", line, what);
-	}
-}
-#define CHECK(ok, what) check((ok), (what), __LINE__)
-
-pc_randstate::PcRandState sample_state(uint32_t gen)
-{
-	pc_randstate::PcRandState st;
-	st.ver = pc_randstate::kVersion;
-	st.ready = 1;
-	st.repairs = 7;
-	st.unlocks = 0xA5;
-	st.flarlic = 3;
-	st.emperor = 1;
-	st.deathLinks = 258;
-	memset(st.checks, 0, sizeof(st.checks));
-	st.checks[0] = 0x05; // slots 0 and 2
-	st.checks[57 / 8] |= (uint8_t)(1u << (57 % 8));   // high slot, schema-5 max
-	st.checks[118 / 8] |= (uint8_t)(1u << (118 % 8)); // schema-8+ range
-	st.checks[150 / 8] |= (uint8_t)(1u << (150 % 8)); // growth headroom
-	for (int i = 0; i < 12; ++i) st.stats[i] = (uint8_t)(i % 3);
-	for (int i = 0; i < 9; ++i) st.benefits[i] = (uint8_t)(i + 1);
-	st.gen = gen;
-	return st;
-}
-
-bool has_slot(const pc_randstate::PcRandState& st, unsigned slot)
-{
-	return (st.checks[slot / 8] & (uint8_t)(1u << (slot % 8))) != 0;
-}
-
-void feed_wire(pc_randstate::Reassembler& r, const uint8_t wire[64], uint32_t frame)
-{
-	for (uint8_t idx = 0; idx < pc_randstate::kFragCount; ++idx) {
-		uint8_t payload[4];
-		for (int i = 0; i < 4; ++i) payload[i] = wire[idx * 4 + i];
-		r.feed(true, pc_randstate::frag_seq_make(idx), payload,
-		       idx + 1 == pc_randstate::kFragCount, frame);
-	}
-}
-
-} // namespace
-
-int main()
-{
-	using namespace pc_randstate;
-	// 1. Encode layout: 64 bytes, explicit LE fields.
-	{
-		PcRandState st = sample_state(0x01020304u);
-		uint8_t wire[kStateBytes];
-		CHECK(encode(st, wire) == kStateBytes, "encode 64 bytes");
-		CHECK(kStateBytes == 64 && kFragCount == 16, "v2 sizes");
-		CHECK(wire[0] == 2, "ver at 0");
-		CHECK(wire[1] == 1 && wire[2] == 7 && wire[3] == 0xA5 && wire[4] == 3
-		          && wire[5] == 1,
-		      "ready/repairs/unlocks/flarlic/emperor");
-		CHECK(wire[6] == 0x02 && wire[7] == 0x01, "deathLinks LE");
-		CHECK(wire[8] == 0x05, "checks byte 0");
-		CHECK(wire[56] == 0x04 && wire[57] == 0x03 && wire[58] == 0x02
-		          && wire[59] == 0x01,
-		      "gen LE at 56");
-		PcRandState out;
-		CHECK(decode(wire, sizeof(wire), out), "decode ok");
-		CHECK(out.ready == 1 && out.repairs == 7 && out.unlocks == 0xA5
-		          && out.flarlic == 3 && out.emperor == 1 && out.deathLinks == 258
-		          && out.gen == 0x01020304u,
-		      "decoded fields");
-		CHECK(has_slot(out, 0) && has_slot(out, 2) && has_slot(out, 57)
-		          && has_slot(out, 118) && has_slot(out, 150),
-		      "decoded high check slots");
-		CHECK(!has_slot(out, 1) && !has_slot(out, 58) && !has_slot(out, 191),
-		      "unset slots stay zero");
-		for (int i = 0; i < 12; ++i) {
-			if (out.stats[i] != (uint8_t)(i % 3)) {
-				CHECK(false, "decoded stats");
-				break;
-			}
-		}
-		for (int i = 0; i < 9; ++i) {
-			if (out.benefits[i] != (uint8_t)(i + 1)) {
-				CHECK(false, "decoded benefits");
-				break;
-			}
-		}
-	}
-	// 2. Decode rejects garbage (bitset itself is verbatim: no hi-bits ban).
-	{
-		PcRandState st = sample_state(9);
-		uint8_t wire[kStateBytes];
-		encode(st, wire);
-		PcRandState out;
-		CHECK(!decode(wire, kStateBytes - 1, out), "short buffer rejected");
-		uint8_t bad[kStateBytes];
-		memcpy(bad, wire, sizeof(bad));
-		bad[0] = 1; // v1 version
-		CHECK(!decode(bad, sizeof(bad), out), "old version rejected");
-		memcpy(bad, wire, sizeof(bad));
-		bad[53] = 1;
-		CHECK(!decode(bad, sizeof(bad), out), "nonzero reserved rejected");
-		memcpy(bad, wire, sizeof(bad));
-		bad[40] ^= 0xFF; // corrupt a stats byte: CRC must fail
-		CHECK(!decode(bad, sizeof(bad), out), "corrupt payload rejected");
-		memcpy(bad, wire, sizeof(bad));
-		bad[63] ^= 0x01; // corrupt the CRC itself
-		CHECK(!decode(bad, sizeof(bad), out), "corrupt crc rejected");
-		// All-ones bitset still decodes (catalog validation is apply-side).
-		memcpy(bad, wire, sizeof(bad));
-		for (size_t i = 0; i < kCheckBytes; ++i) bad[8 + i] = 0xFF;
-		{
-			uint32_t crc = crc32(bad, kPayloadBytes);
-			bad[60] = (uint8_t)(crc & 0xFF);
-			bad[61] = (uint8_t)((crc >> 8) & 0xFF);
-			bad[62] = (uint8_t)((crc >> 16) & 0xFF);
-			bad[63] = (uint8_t)((crc >> 24) & 0xFF);
-		}
-		CHECK(decode(bad, sizeof(bad), out), "full bitset decodes");
-		CHECK(has_slot(out, 191), "top slot survives");
-	}
-	// 3. payload_equal ignores gen/crc.
-	{
-		PcRandState a = sample_state(1), b = sample_state(2);
-		CHECK(payload_equal(a, b), "equal payloads, different gens");
-		b.repairs = 8;
-		CHECK(!payload_equal(a, b), "different repairs");
-		b = sample_state(3);
-		b.benefits[8] = 0;
-		CHECK(!payload_equal(a, b), "different benefits");
-		b = sample_state(4);
-		b.checks[118 / 8] ^= (uint8_t)(1u << (118 % 8));
-		CHECK(!payload_equal(a, b), "different high check bit");
-	}
-	// 4. Fragment sequence byte: stream 0 in the high nibble, idx low.
-	{
-		for (uint8_t i = 0; i < kFragCount; ++i) {
-			const uint8_t s = frag_seq_make(i);
-			CHECK(frag_seq_stream(s) == kStreamId && frag_seq_index(s) == i, "seq split");
-		}
-		CHECK(frag_seq_index(0xFF) == 0x0F, "nibble split");
-	}
-	// 5. Reassembler: 16 in-order fragments complete at frame F, arming F+1.
-	{
-		PcRandState st = sample_state(1);
-		uint8_t wire[kStateBytes];
-		encode(st, wire);
-		Reassembler r;
-		CHECK(!r.has_pending(), "nothing pending initially");
-		feed_wire(r, wire, 100);
-		CHECK(r.has_pending(), "complete transfer pends");
-		CHECK(r.pending_gen() == 1 && r.pending_frame() == 101, "gen 1 arms frame 101");
-		PcRandState got;
-		CHECK(r.take_pending(got), "take pending");
-		CHECK(got.gen == 1 && payload_equal(got, st), "pending content");
-		CHECK(!r.has_pending(), "consumed");
-		r.mark_applied(1);
-		CHECK(r.applied_gen() == 1, "applied gen recorded");
-		// Replaying the same generation is a stale no-op.
-		feed_wire(r, wire, 200);
-		CHECK(!r.has_pending(), "stale gen replay is a no-op");
-	}
-	// 6. Reassembler: duplicate / incomplete / uninterested fragments.
-	{
-		PcRandState st = sample_state(2);
-		uint8_t wire[kStateBytes];
-		encode(st, wire);
-		Reassembler r;
-		uint8_t payload[4] = { wire[0], wire[1], wire[2], wire[3] };
-		r.feed(true, frag_seq_make(0), payload, false, 50);
-		r.feed(true, frag_seq_make(0), payload, false, 50); // duplicate
-		for (uint8_t idx = 1; idx < kFragCount - 1; ++idx) {
-			for (int i = 0; i < 4; ++i) payload[i] = wire[idx * 4 + i];
-			r.feed(true, frag_seq_make(idx), payload, false, 50);
-		}
-		CHECK(!r.has_pending(), "15 of 16 fragments: incomplete, no pending");
-		// Wrong stream id and HAS_CHUNK=0 are ignored.
-		for (int i = 0; i < 4; ++i) payload[i] = wire[60 + i];
-		r.feed(true, 0x10, payload, true, 50); // stream 1, idx 0
-		CHECK(!r.has_pending(), "foreign stream ignored");
-		r.feed(false, frag_seq_make(15), payload, true, 50); // no chunk
-		CHECK(!r.has_pending(), "chunkless input ignored");
-		// A new generation's fragment 0 mid-transfer is a boundary reset.
-		for (int i = 0; i < 4; ++i) payload[i] = wire[i];
-		r.feed(true, frag_seq_make(0), payload, false, 50);
-		// The reset dropped the partial transfer; nothing is pending.
-		CHECK(!r.has_pending(), "frag 0 reset drops the partial");
-		// Re-feed the whole generation after the reset: completes normally.
-		feed_wire(r, wire, 51);
-		CHECK(r.has_pending() && r.pending_gen() == 2 && r.pending_frame() == 52,
-		      "retransmit after reset completes");
-	}
-	// 7. Newer generation after an applied one completes normally.
-	{
-		Reassembler r;
-		PcRandState a = sample_state(5), b = sample_state(6);
-		uint8_t wa[kStateBytes], wb[kStateBytes];
-		encode(a, wa);
-		encode(b, wb);
-		feed_wire(r, wa, 300);
-		PcRandState got;
-		CHECK(r.take_pending(got) && got.gen == 5, "gen 5 taken");
-		r.mark_applied(5);
-		feed_wire(r, wb, 400);
-		CHECK(r.has_pending() && r.pending_gen() == 6 && r.pending_frame() == 401,
-		      "gen 6 completes after gen 5 applied");
-	}
-	// 8. M1: a publish mid-transfer no longer mixes generations. Feed 5
-	// frags of gen 1, then all 16 of gen 2 (fragment 0 opens the new
-	// generation and resets the partial). Gen 2 must still apply, with gen
-	// 1's prefix discarded identically on both peers.
-	{
-		Reassembler r;
-		PcRandState a = sample_state(1), b = sample_state(2);
-		b.repairs = 9;
-		uint8_t wa[kStateBytes], wb[kStateBytes];
-		encode(a, wa);
-		encode(b, wb);
-		for (uint8_t idx = 0; idx < 5; ++idx) {
-			uint8_t p[4];
-			for (int i = 0; i < 4; ++i) p[i] = wa[idx * 4 + i];
-			r.feed(true, frag_seq_make(idx), p, false, 500);
-		}
-		CHECK(!r.has_pending(), "interrupted gen 1 does not complete");
-		feed_wire(r, wb, 500);
-		CHECK(r.has_pending() && r.pending_gen() == 2, "gen 2 applies after interruption");
-		PcRandState got;
-		CHECK(r.take_pending(got) && got.gen == 2 && got.repairs == 9, "gen 2 content");
-		CHECK(payload_equal(got, b), "gen 2 payload intact");
-	}
-	// 9. Input codec carries the fragment bytes; idle inputs stay zero-pad.
-	{
-		PcNetplayInput in;
-		in.buttons = 0x1234;
-		in.flags = pc_netplay_gekko::kFlagsRandChunk | pc_netplay_gekko::kFlagsRandLast;
-		in.fragSeq = frag_seq_make(15);
-		in.fragData[0] = 0xDE;
-		in.fragData[1] = 0xAD;
-		in.fragData[2] = 0xBE;
-		in.fragData[3] = 0xEF;
-		uint8_t wire[16];
-		CHECK(pc_netplay_input_encode(in, wire) == 16, "input encode 16");
-		CHECK(wire[10] == 0x03 && wire[11] == 0x0F && wire[12] == 0xDE
-		          && wire[15] == 0xEF,
-		      "flags/seq/payload on the wire");
-		PcNetplayInput out;
-		CHECK(pc_netplay_input_decode(wire, 16, out), "input decode");
-		CHECK(out.buttons == 0x1234 && out.flags == 0x03 && out.fragSeq == 0x0F
-		          && out.fragData[0] == 0xDE && out.fragData[3] == 0xEF,
-		      "input frag round trip");
-		PcNetplayInput idle;
-		uint8_t wi[16];
-		pc_netplay_input_encode(idle, wi);
-		bool padZero = true;
-		for (int i = 10; i < 16; ++i) padZero = padZero && wi[i] == 0;
-		CHECK(padZero, "idle input wire unchanged (flags+pad zero)");
-	}
-	// 10. M4 lane B1 first-apply rule: the first snapshot (nothing applied
-	// yet) applies at max(kFirstApplyFrame, completion + 1), whatever the
-	// delay; later generations keep completion + 1.
-	{
-		for (uint32_t delay = 1; delay <= 8; ++delay) {
-			Reassembler r;
-			PcRandState st = sample_state(1);
-			uint8_t wire[kStateBytes];
-			encode(st, wire);
-			// Host submits 0..15 land on frames delay..delay+15.
-			for (uint8_t idx = 0; idx < kFragCount; ++idx) {
-				uint8_t p[4];
-				for (int i = 0; i < 4; ++i) p[i] = wire[idx * 4 + i];
-				r.feed(true, frag_seq_make(idx), p, idx + 1 == kFragCount, delay + idx);
-			}
-			CHECK(r.has_pending() && r.pending_frame() == kFirstApplyFrame,
-			      "first snapshot applies at frame 32 at every delay 1..8");
-			PcRandState got;
-			CHECK(r.take_pending(got), "first snapshot taken");
-			r.mark_applied(got.gen);
-			PcRandState st2 = sample_state(2);
-			uint8_t wire2[kStateBytes];
-			encode(st2, wire2);
-			feed_wire(r, wire2, 40);
-			CHECK(r.has_pending() && r.pending_frame() == 41, "later gens keep completion + 1");
-		}
-		// discard_pending_upto: the RESUME snapshot supersedes pending gens.
-		Reassembler r;
-		PcRandState a = sample_state(3);
-		uint8_t wa[kStateBytes];
-		encode(a, wa);
-		feed_wire(r, wa, 10);
-		CHECK(r.has_pending() && r.pending_gen() == 3, "gen 3 pending");
-		CHECK(!r.discard_pending_upto(2), "pending gen 3 survives a gen 2 resume");
-		CHECK(r.has_pending(), "still pending");
-		CHECK(r.discard_pending_upto(3), "gen 3 dropped by a gen 3 resume");
-		CHECK(!r.has_pending(), "nothing pending after discard");
-		r.mark_applied(4);
-		feed_wire(r, wa, 20);
-		CHECK(!r.has_pending(), "stale gen after resume is a no-op");
-		// The HOLD flag bit round-trips next to the chunk bits.
-		PcNetplayInput in;
-		in.flags = pc_netplay_gekko::kFlagsHold | pc_netplay_gekko::kFlagsRandChunk;
-		uint8_t w[16];
-		pc_netplay_input_encode(in, w);
-		PcNetplayInput out;
-		CHECK(pc_netplay_input_decode(w, 16, out) && w[10] == 0x05
-		          && (out.flags & pc_netplay_gekko::kFlagsHold) != 0,
-		      "HOLD flag bit 2 on the wire");
-	}
-
-	if (sFailures == 0) std::printf("pc_netplay_randstate_test: PASS\n");
-	else std::printf("pc_netplay_randstate_test: %d FAILURES\n", sFailures);
-	return sFailures == 0 ? 0 : 1;
+#include <initializer_list>
+using namespace pc_randstate;
+int failures=0;
+#define CHECK(x) do {if(!(x)){std::printf("FAIL %d: %s\n",__LINE__,#x);++failures;}} while(0)
+const uint8_t golden[kStateBytes]={0x03,0x01,0xff,0x03,0x00,0x02,0x09,0x00,0x01,0x19,0xa5,0x03,0x01,0x07,0x01,0x00,0x40,0x30,0x20,0x10,0x00,0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x80,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x80,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x80,0x00,0x01,0x02,0x00,0x01,0x02,0x00,0x01,0x02,0x00,0x01,0x02,0x01,0x02,0x00,0x00,0x00,0x01,0x01,0x01,0x02,0x01,0x03,0x01,0x04,0x01,0x05,0x01,0x06,0x01,0x07,0x01,0x08,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x09,0x00,0x00,0x00,0x05,0x26,0xa5,0x45}; // independently packed by Python struct + zlib
+void repair(uint8_t* p){uint32_t crc=crc32(p,kPayloadBytes);for(int i=0;i<4;++i)p[164+i]=uint8_t(crc>>(8*i));}
+void feed(Reassembler& r,const uint8_t* wire,uint32_t start){for(uint8_t i=0;i<kFragCount;++i)r.feed(true,frag_seq_make(i),wire+4*i,i+1==kFragCount,start+i);}
+int main(){
+ CHECK(kStateBytes==168 && kFragCount==42 && pc_netplay_gekko::kInputBytes==16);
+ PcRandState st;CHECK(decode(golden,sizeof(golden),st));CHECK(st.deathLinks==0x10203040 && st.benefits[8]==264);
+ for(unsigned i : {191u,192u,255u,256u,329u,511u})CHECK(st.checks[i/8]&(1u<<(i%8)));
+ uint8_t wire[kStateBytes];CHECK(encode(st,wire)==168);CHECK(!std::memcmp(wire,golden,168));
+ PcRandState changed=st;changed.gen=55;CHECK(payload_equal(st,changed));changed.maturity[2]=1;CHECK(!payload_equal(st,changed));
+ for(unsigned off : {0u,1u,2u,4u,6u,7u,8u,15u,103u,158u,159u,160u}){
+  uint8_t bad[168];std::memcpy(bad,golden,168);
+  if(off==0)bad[off]=2;else if(off==1)bad[off]=0;else if(off==2)bad[3]|=128;
+  else if(off==4){bad[4]=1;bad[5]=2;}else if(off==6)bad[off]=10;else if(off==8)bad[off]=2;
+  else if(off==160)std::memset(bad+160,0,4);else bad[off]=1;
+  repair(bad);PcRandState sentinel;sentinel.gen=123;CHECK(!decode(bad,168,sentinel));CHECK(sentinel.gen==123);
+ }
+ PcRandState sentinel;sentinel.gen=123;CHECK(!decode(wire,167,sentinel));CHECK(!decode(wire,169,sentinel));
+ wire[24]^=1;CHECK(!decode(wire,168,sentinel));std::memcpy(wire,golden,168);
+ for(uint8_t i=0;i<42;++i)CHECK(frag_seq_index(frag_seq_make(i))==i && frag_seq_stream(frag_seq_make(i))==0);
+ for(unsigned delay=1;delay<=8;++delay){
+  Reassembler a,b;feed(a,wire,delay);feed(b,wire,delay);
+  CHECK(a.has_pending()&&b.has_pending()&&a.pending_frame()==64&&b.pending_frame()==64);
+  PcRandState x,y;CHECK(a.take_pending(x)&&b.take_pending(y)&&payload_equal(x,y));a.mark_applied(9);b.mark_applied(9);
+  feed(a,wire,100);CHECK(!a.has_pending());
+ }
+ Reassembler r;r.feed(true,42,wire,false,1);r.feed(true,64,wire,false,1);CHECK(!r.has_pending());
+ for(uint8_t i=0;i<41;++i){r.feed(true,i,wire+4*i,false,i);r.feed(true,i,wire+4*i,false,i);}CHECK(!r.has_pending());
+ r.feed(true,41,wire+164,true,41);CHECK(r.has_pending());CHECK(!r.discard_pending_upto(8));CHECK(r.discard_pending_upto(9));CHECK(!r.has_pending());
+ PcRandState tl;tl.mode=2;tl.schema=1;tl.checkCount=330;tl.gen=1;tl.repairs=30;tl.thelynkParts=(1u<<30)-1;tl.thelynkBonuses[17]=330;
+ encode(tl,wire);CHECK(decode(wire,168,st));CHECK(st.thelynkBonuses[17]==330&&st.repairs==30);
+ tl.checks[329/8]|=1u<<(329%8);encode(tl,wire);CHECK(decode(wire,168,st));
+ tl.checks[330/8]|=1u<<(330%8);encode(tl,wire);CHECK(!decode(wire,168,st));
+ std::printf("codec3 failures=%d\n",failures);return failures?1:0;
 }

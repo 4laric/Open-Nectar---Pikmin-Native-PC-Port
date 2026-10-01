@@ -79,6 +79,7 @@ const char* kPrint = "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433
 pc_randstate::PcRandState state(uint16_t deathLinks, std::initializer_list<unsigned> checkSlots)
 {
 	pc_randstate::PcRandState st;
+    CHECK(pc_randomizer_get_net_state(&st), "authenticated bootstrap metadata");
 	st.ver = pc_randstate::kVersion;
 	st.ready = 1;
 	st.repairs = 25;

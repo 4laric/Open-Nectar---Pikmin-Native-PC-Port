@@ -3024,3 +3024,15 @@ pikmin_add_ci_fixture(captain_reentry tools/p2_captain_reentry_runtime.cpp)
 
 # #1079 local native card save/resume acceptance, built only on CI.
 pikmin_add_ci_fixture(captain_campaign_resume tools/p2_captain_campaign_resume_runtime.cpp)
+
+# #1148 complete codec consumer against real randomizer and proxy implementations.
+add_executable(pc_randomizer_state_stream_test pc_port/pc_randomizer_state_stream_test.cpp pc_port/pc_randomizer.cpp pc_port/netplay/pc_netplay_randstate.cpp pc_port/pc_randomizer_outbox.cpp pc_port/pc_p2_delivery_host.cpp pc_port/pc_p2_proxy.cpp)
+target_include_directories(pc_randomizer_state_stream_test PRIVATE pc_port)
+target_compile_options(pc_randomizer_state_stream_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+foreach(mode p1 thelynk)
+    add_test(NAME pc_randomizer_state_stream_${mode} COMMAND pc_randomizer_state_stream_test ${mode})
+    foreach(fault bad-mode bad-disabled)
+        add_test(NAME pc_randomizer_state_stream_${mode}_${fault} COMMAND pc_randomizer_state_stream_test ${mode} ${fault})
+        set_tests_properties(pc_randomizer_state_stream_${mode}_${fault} PROPERTIES WILL_FAIL TRUE)
+    endforeach()
+endforeach()

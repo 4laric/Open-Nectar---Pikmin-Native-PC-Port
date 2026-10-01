@@ -31,7 +31,6 @@ import re
 import sys
 from pathlib import Path
 
-DEFAULT_ROOT_M4C = Path("C:/Users/alari/pikmin-randomizer/output/root-np-m4c")
 SAV = re.compile(r"^\d{20}\.sav$")
 
 
@@ -57,9 +56,7 @@ def card_files(campaign):
 
 def load_parser(root):
     if root is None:
-        if not (DEFAULT_ROOT_M4C / "randomizer" / "netplay_mirror.py").is_file():
-            raise SystemExit(f"check_saves: {DEFAULT_ROOT_M4C} has no randomizer/netplay_mirror.py; pass --root-m4c")
-        root = DEFAULT_ROOT_M4C
+        raise SystemExit("check_saves: pass --root-m4c with the actual pinned consumer checkout")
     if not (Path(root) / "randomizer" / "netplay_mirror.py").is_file():
         raise SystemExit(f"check_saves: {root} has no randomizer/netplay_mirror.py")
     sys.path.insert(0, str(Path(root)))
@@ -101,9 +98,8 @@ def main(argv=None):
     p.add_argument("--host-campaign", type=Path, required=True)
     p.add_argument("--join-campaign", type=Path, required=True)
     p.add_argument("--join-run", type=Path, required=True, help="the client's run dir (mirror-events.txt)")
-    p.add_argument("--root-m4c", type=Path, default=None,
-                   help="root checkout (or read-only extraction) holding randomizer/netplay_mirror.py "
-                        f"(required unless {DEFAULT_ROOT_M4C} exists)")
+    p.add_argument("--root-m4c", type=Path, required=True,
+                   help="Actual pinned root checkout holding randomizer/netplay_mirror.py")
     a = p.parse_args(argv)
     ok = True
 

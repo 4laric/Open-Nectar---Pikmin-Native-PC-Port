@@ -124,6 +124,15 @@ int main()
 		          && std::memcmp(g.cardSha, h.cardSha, 32) == 0 && std::memcmp(g.sidecarSha, h.sidecarSha, 32) == 0
 		          && std::memcmp(g.p2AssetsSha, h.p2AssetsSha, 32) == 0,
 		      "v3 round trip");
+        encode_hello(kHsAck, kProtocolV4, h, 0, wire);
+        CHECK(decode_hello(wire, sizeof(wire), &type, &proto, &g, &refuse) && proto == 4,
+              "codec3 uses protocol4 without changing the stable header/layout");
+        for (uint16_t remote : {kProtocolV3, kProtocolV4}) {
+            encode_hello(kHsHello, remote, h, 0, wire);
+            CHECK(decode_hello_header(wire, sizeof(wire), &type, &proto) && proto == remote,
+                  "old and current protocol identifiable before full body parsing");
+            CHECK((proto != kProtocolV4) == (remote == kProtocolV3), "version3 cannot enter version4 session");
+        }
 		CHECK(!decode_hello(wire, kHsLenV2, &type, &proto, &g, &refuse), "a v2-length frame is not a v3 Hello");
 		CHECK(!decode_hello(wire, kHsLenV1, &type, &proto, &g, &refuse), "a v1-length frame is not a v3 Hello");
 		CHECK(!decode_hello(wire, kHsLenV3 + 1, &type, &proto, &g, &refuse), "an over-long frame is refused");

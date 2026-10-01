@@ -63,7 +63,8 @@ namespace pc_netplay_xfer {
 
 // ---- handshake ----
 constexpr char kHsMagic[4]       = { 'N', 'P', 'H', '3' };
-constexpr uint16_t kProtocolV3   = 3;
+constexpr uint16_t kProtocolV3   = 3; // historical peers
+constexpr uint16_t kProtocolV4   = 4; // complete codec3
 constexpr size_t kHsHeaderLen    = 7;   // magic + type + proto, every version
 constexpr size_t kHsLenV1        = 108; // v1: no nonce
 constexpr size_t kHsLenV2        = 116; // v2: + nonce

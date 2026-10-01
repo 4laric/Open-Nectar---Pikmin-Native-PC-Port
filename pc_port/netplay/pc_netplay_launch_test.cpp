@@ -82,6 +82,11 @@ int main()
 		std::string err;
 		bool p2 = false;
 		CHECK(validate_bootstrap(boot("SESSION " + kTok + "\n"), &err, &p2) && !p2, "stock bootstrap accepted");
+        CHECK(validate_bootstrap("PIKMIN_THELYNK 1\nSESSION " + kTok + "\nFINGERPRINT abc\nCHECKS 1 71400\nEND\n", &err, &p2) && !p2, "TheLynk1 header accepted without P2 overlay");
+        CHECK(!validate_bootstrap("PIKMIN_THELYNK 2\nSESSION " + kTok + "\nEND\n", &err, &p2), "unsupported TheLynk version refused");
+        CHECK(!validate_bootstrap("PIKMIN_THELYNK 1x\nSESSION " + kTok + "\nEND\n", &err, &p2), "ambiguous TheLynk header refused");
+        CHECK(!validate_bootstrap("PIKMIN_THELYNK 1\nEND\n", &err, &p2), "TheLynk missing session refused");
+
 		CHECK(!validate_bootstrap("", &err, &p2), "empty refused");
 		CHECK(!validate_bootstrap("hello\nSESSION " + kTok + "\n", &err, &p2), "missing header refused");
 		CHECK(!validate_bootstrap(boot(""), &err, &p2), "no SESSION refused");
