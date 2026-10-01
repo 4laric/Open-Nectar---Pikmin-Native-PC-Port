@@ -26,6 +26,7 @@
 #include "Pcam/CameraManager.h"
 #include "KeyConfig.h"
 #include "pc_coop.h"
+#include "pc_diary_observer.h"
 #include "Node.h"
 #include "Piki.h"
 #include "PikiMgr.h"
@@ -122,7 +123,10 @@ class CaptainSaveApp final:public PlugPikiApp {
     OwnerStage ownerStage=Boot;
     int ownerFrames=0, switchFrames=0;
     bool menuSeen=false, menuConfirm=false;
-    int diaryFrames=0, menuFrames=0;
+    int menuFrames=0, diaryActions=0;
+    bool releaseDiaryInput=false;
+    bool diaryRevealObserved=false, diaryAdvanceObserved=false;
+    PcDiaryAction lastDiaryAction=PcDiaryAction::Unavailable;
     void elapsed(const char* phase){std::printf("P2_SAVE_TIME phase=%s elapsed_ms=%lld\n",phase,(long long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-started).count());}
     bool saving=false,shot=false,sawWhistle=false,initialized[2]={false,false},retired=false;
     int teardownGapFrames=0;
@@ -207,12 +211,10 @@ public:
             pad(menu&&frames%20<4?KBBTN_A:0);
         }
         if(saving){
-            // Ordinary held A speeds diary text through ogMessage.cpp; release
-            // two frames per cycle preserves edges for results/card prompts.
+            // Observe actual diary eligibility; ordinary A remains the fallback
+            // for results/card prompts. B is never emitted outside eligibility.
             const bool confirming=gameflow.mWorldClock.mCurrentDay==startDay+1;
             if(confirming&&!dayAdvanced){dayAdvanced=true;elapsed("day_advanced");}
-            // With neutral input the diary cannot leave its first page. One
-            // ordinary B reveals it; never repeat B in results/card dialogs.
             if(!confirming){
                 ++menuFrames;
                 if(menuFrames<=3||menuFrames==45||menuFrames==50||menuFrames==65||menuFrames==66||menuFrames==125||menuFrames==126||menuFrames%120==0){
@@ -230,11 +232,21 @@ public:
                 if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive)gameflow.mMoviePlayer->requestSkip();
                 return result;
             }
-            if(confirming)++diaryFrames;
-            if(diaryFrames==60){pad(KBBTN_B);elapsed("single_diary_B");}
-            else if(diaryFrames>61)pad(frames%20<18?KBBTN_A:0);
-            else pad();
+            const PcDiaryAction diary=pc_diary_observe();
+            if(diary!=lastDiaryAction){
+                std::printf("P2_ONION_DIARY observed=%d elapsed_stage=diary_eligibility\n",int(diary));
+                elapsed("diary_eligibility_changed");lastDiaryAction=diary;
+            }
+            if(releaseDiaryInput){pad();releaseDiaryInput=false;}
+            else if(diary==PcDiaryAction::RevealPage || diary==PcDiaryAction::AdvancePage){
+                require(++diaryActions<240,"bounded ordinary diary actions");
+                const bool reveal=diary==PcDiaryAction::RevealPage;
+                diaryRevealObserved|=reveal;diaryAdvanceObserved|=!reveal;
+                pad(reveal?KBBTN_B:KBBTN_A);releaseDiaryInput=true;
+                std::printf("P2_ONION_DIARY input=%s observed=%d action=%d ordinary_SDL=1\n",reveal?"B":"A",int(diary),diaryActions);
+            }else pad(frames%20<18?KBBTN_A:0); // Ordinary A during fades and results/card; never B.
             if(cards()==initialCards+1 && gameflow.mWorldClock.mCurrentDay==startDay+1){
+                require(diaryRevealObserved&&diaryAdvanceObserved,"observed actual diary reveal and advance inputs");
                 elapsed("native_commit_observed");
                 std::printf("PASS P2_CAPTAIN_ONION_OWNER_SAVE day_before=%d day_after=%d native_card_generation_count=%d scripted_sunset=1 scripted_results_input=1 saved_bytes_injected=0\n",startDay,gameflow.mWorldClock.mCurrentDay,cards());std::fflush(nullptr);std::_Exit(0);
             }
