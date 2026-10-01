@@ -583,6 +583,11 @@ def main(argv=None):
     p.add_argument("--host-port", type=int, default=5077)
     p.add_argument("--seed-a", type=int, default=101, help="host local-input gen seed")
     p.add_argument("--seed-b", type=int, default=202, help="joiner local-input gen seed")
+    p.add_argument("--input-host", type=Path, default=None, metavar="PKNI",
+                   help="the host's scripted input file instead of the seeded random walk "
+                        "(tools/netplay/gen_coop_input.py); needs >= --ticks + 50 records")
+    p.add_argument("--input-join", type=Path, default=None, metavar="PKNI",
+                   help="the joiner's scripted input file instead of the seeded random walk")
     p.add_argument("--netplay-seed", type=int, default=1, help="PIKMIN_NETPLAY_SEED for both")
     p.add_argument("--delay", type=str, default="2",
                    help="PIKMIN_NETPLAY_DELAY for both (frames, or 'auto')")
@@ -795,8 +800,11 @@ def main(argv=None):
     tag = "" if a.run_name == "run" else a.run_name + "_"
     host_inputs = out / f"{tag}host_inputs.pkni"
     join_inputs = out / f"{tag}join_inputs.pkni"
-    gen_inputs(a.ticks + 50, a.seed_a, host_inputs)
-    gen_inputs(a.ticks + 50, a.seed_b, join_inputs)
+    for given, dst, seed in ((a.input_host, host_inputs, a.seed_a), (a.input_join, join_inputs, a.seed_b)):
+        if given is not None:
+            shutil.copyfile(str(given), str(dst))  # coop fix: a scripted file (gen_coop_input.py)
+        else:
+            gen_inputs(a.ticks + 50, seed, dst)
     for who, keep, path in (("host", a.host_script_ticks, host_inputs),
                             ("join", a.join_script_ticks, join_inputs)):
         if keep is not None:
