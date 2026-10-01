@@ -16,6 +16,7 @@
 #include "NaviState.h"
 #include "Camera.h"
 #include "KeyConfig.h"
+#include "Kontroller.h"
 #include "Piki.h"
 #include "PikiMgr.h"
 #include "PikiState.h"
