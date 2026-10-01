@@ -172,7 +172,9 @@ struct Armor {
     int holdLoggedFrame = -100;
     // TEST-ONLY probe (PIKMIN_P2_ARMOR_PROBE), never active in a normal run.
     float probeTime = 0.0f;
-    bool probeCaptain = false, probeFreezeInit = false, probeDone = false, probeSawAttack = false, probeIdleDone = false;
+    bool probeCaptain = false, probeFreezeInit = false, probeDone = false, probeSawAttack = false;
+    float idleT = 0.0f;
+    int idleStage = 0;
     int probeCycle = 0, probePinN = 0;
     float probeCycleAt = 0.0f;
     Piki* probePin[4] = {};
@@ -739,6 +741,45 @@ void probeHeal(BTeki* a, Armor& s) {
     a->mHealth = LIFE;
     s.lastHealth = LIFE;
 }
+// TEST-ONLY idle probe (PIKMIN_P2_ARMOR_PROBE_IDLE=1, #1063), independent of the bite probe: at 2 s a Pikmin is put 120
+// units ahead so the Armor surfaces and chases it; at 12 s every Pikmin and the captain are moved 900 units away, so the
+// Armor is truly idle and the source Move -> GoHome -> Dive -> Stay sequence shows in the P2_ARMOR_STATE log; at 50 s a
+// Pikmin is put back 150 units ahead to show it resurfaces.
+void runIdleProbe(BTeki* actor, Armor& s, unsigned generator, float dt) {
+    static const bool on = [] {
+        const char* e = std::getenv("PIKMIN_P2_ARMOR_PROBE_IDLE");
+        return e && *e && *e != '0';
+    }();
+    if (!on || s.state == ARMOR_DEAD) return;
+    static BTeki* owner = nullptr;
+    if (!owner) owner = actor;
+    if (owner != actor) return;
+    s.idleT += dt;
+    const Vector3f ap = actor->getPosition();
+    if (s.idleStage == 0 && s.idleT >= 2.0f) {
+        s.idleStage = 1;
+        probePlace(actor, s, "idle_wake", 0.0f, 120.0f);
+    } else if (s.idleStage == 1 && s.idleT >= 12.0f) {
+        s.idleStage = 2;
+        const Vector3f far(ap.x + 900.0f, ap.y, ap.z);
+        if (pikiMgr) {
+            Iterator it(pikiMgr);
+            CI_LOOP(it) {
+                Piki* p = static_cast<Piki*>(*it);
+                if (p && p->isAlive() && !p->isStickToMouth()) p->mSRT.t = far;
+            }
+        }
+        for (Navi* n : pc_p2_navis()) n->mSRT.t = far;
+        std::printf("P2_ARMOR_PROBE kind=idle generator=%u t=%.1f state=%s\n", generator, double(s.idleT), stateName(s.state));
+        std::fflush(stdout);
+    } else if (s.idleStage == 2 && s.idleT >= 50.0f) {
+        s.idleStage = 3;
+        std::printf("P2_ARMOR_PROBE kind=resurface_bait generator=%u t=%.1f state=%s\n", generator, double(s.idleT),
+                    stateName(s.state));
+        std::fflush(stdout);
+        probePlace(actor, s, "resurface_bait", 0.0f, 150.0f);
+    }
+}
 void runProbe(BTeki* actor, Armor& s, unsigned generator, float dt) {
     if (!probeEnabled() || s.state == ARMOR_DEAD) return;
     if (!probeOwner) probeOwner = actor;  // the probe drives exactly one Armor (the first to tick)
@@ -906,26 +947,6 @@ void runProbe(BTeki* actor, Armor& s, unsigned generator, float dt) {
             if (s.probeThrows == 0) shot("shell_throw", 40);
             ++s.probeThrows;
             s.probeNextThrow = s.probeTime + 0.6f;
-        }
-    }
-    // TEST-ONLY idle phase (PIKMIN_P2_ARMOR_PROBE_IDLE=1, #1063): once the bite cycles are over, every Pikmin and the
-    // captain are moved 900 units away so the Armor is truly idle and the source Move -> GoHome -> Dive -> Stay
-    // sequence can be logged.
-    {
-        const char* idle = std::getenv("PIKMIN_P2_ARMOR_PROBE_IDLE");
-        if (idle && *idle && *idle != '0' && s.probeTime >= 32.0f && !s.probeIdleDone) {
-            s.probeIdleDone = true;
-            const Vector3f far(ap.x + 900.0f, ap.y, ap.z);
-            if (pikiMgr) {
-                Iterator it(pikiMgr);
-                CI_LOOP(it) {
-                    Piki* p = static_cast<Piki*>(*it);
-                    if (p && p->isAlive() && !p->isStickTo()) p->mSRT.t = far;
-                }
-            }
-            for (Navi* n : pc_p2_navis()) n->mSRT.t = far;
-            std::printf("P2_ARMOR_PROBE kind=idle generator=%u t=%.1f\n", generator, double(s.probeTime));
-            std::fflush(stdout);
         }
     }
     if (s.probeTime >= 29.0f && !s.probeDone) {
@@ -1256,6 +1277,7 @@ void pc_p2_armor_update(BTeki* actor) {
         const unsigned probeGen = s.token ? s.token : (actor->mGenerator ? pc_p2_campaign_token(actor) : 0u);
         if (actor->mHealth > 0.0f && s.state != ARMOR_DEAD) buildColl(actor, s, probeGen);
         runProbe(actor, s, probeGen, dt);
+        runIdleProbe(actor, s, probeGen, dt);
     }
     const bool probeHold = probeFrozen(actor, s);
     // Port stone analogue: the P1 host has no petrified lifecycle, so the
