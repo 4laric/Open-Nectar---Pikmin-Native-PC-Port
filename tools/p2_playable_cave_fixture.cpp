@@ -134,10 +134,15 @@ class CaveGuardedBootApp final : public PlugPikiApp {
         if(distance<10) {pc_p2_input_script_set(1,0);return true;}
         require(n->controlCamera()!=nullptr,"navigation camera missing");
         const Vector3f& axis=n->controlCamera()->mViewXAxis;
-        float speed=distance<30?40.0f:65.0f;
-        pc_p2_input_script_set(1,KBBTN_MSTICK_RIGHT,
-            int(std::lround(speed*(dx*axis.x+dz*axis.z)/distance)),
-            int(std::lround(speed*(dx*axis.z-dz*axis.x)/distance)));
+        // Classic controls reserve small stick magnitudes for aiming only.
+        // Stay above that band until the waypoint tolerance, then release.
+        const float speed=65.0f;
+        const int sx=int(std::lround(speed*(dx*axis.x+dz*axis.z)/distance));
+        const int sy=int(std::lround(speed*(dx*axis.z-dz*axis.x)/distance));
+        unsigned buttons=0;
+        if(sx>32)buttons|=KBBTN_MSTICK_RIGHT;else if(sx< -32)buttons|=KBBTN_MSTICK_LEFT;
+        if(sy>32)buttons|=KBBTN_MSTICK_UP;else if(sy< -32)buttons|=KBBTN_MSTICK_DOWN;
+        pc_p2_input_script_set(1,buttons,sx,sy);
         return false;
     }
     void deliveryRoute(Navi* n) {
