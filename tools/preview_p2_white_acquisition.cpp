@@ -22,7 +22,10 @@
 #include "PikiHeadItem.h"
 #include "ItemMgr.h"
 #include "Boss.h"
+// Fixture-only access for restored state-query checks; no production headers change.
+#define private public
 #include "Pom.h"
+#undef private
 #include "PlayerState.h"
 #include "Demo.h"
 #include "GameStat.h"
