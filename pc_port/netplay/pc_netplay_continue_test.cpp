@@ -342,7 +342,7 @@ int main()
 
     // Regression: verbose desync diagnostics/pending saves used to push the
     // restart actions beyond the renderer's 14-row cap. Bound every combination
-    // conservatively with 11 pixels per glyph and 568 pixels of content width.
+    // conservatively with 13 pixels per glyph and 568 pixels of content width.
     // DGXGraphics uses a 640-wide logical render mode (dgxGraphics.cpp),
     // independent of the desktop window dimensions.
     for (int kind = 0; kind < 6; ++kind) for (bool host : {false, true})
@@ -364,10 +364,10 @@ int main()
             while (at < line.size()) {
                 const size_t end = line.find(' ', at);
                 const size_t stop = end == std::string::npos ? line.size() : end;
-                const int word = int(stop - at) * 11;
+                const int word = int(stop - at) * 13;
                 CHECK(word <= 568, "player words fit minimum content width");
-                if (width && width + 11 + word > 568) { ++rows; width = word; }
-                else width += (width ? 11 : 0) + word;
+                if (width && width + 13 + word > 568) { ++rows; width = word; }
+                else width += (width ? 13 : 0) + word;
                 at = stop + 1;
             }
             CHECK(line.find("checkpoint") == std::string::npos && line.find("frame") == std::string::npos &&
