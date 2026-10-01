@@ -17,7 +17,7 @@
 #include "PikiState.h"
 #include "PikiHeadItem.h"
 #include "ItemMgr.h"
-#include "BossMgr.h"
+#include "Boss.h"
 #include "Pom.h"
 #include "PlayerState.h"
 #include "Demo.h"
