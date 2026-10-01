@@ -12,7 +12,7 @@ both peers, and this script checks what the new desync forensics left behind:
   * both run folders hold desync-report.txt, desync-subs.txt,
     desync-objects.txt, desync-peer-objects.txt and the session input log;
   * diff_desync.py on the two desync-objects.txt names the nudged object at
-    the first differing tick, and ONLY that object there;
+    the first differing tick (a neighbour reacting to it in that tick is allowed and listed);
   * the end message tells the players to send the run folder (a launcher run;
     a loopback pair reports the line in its log only when a run folder exists).
 
@@ -100,7 +100,15 @@ def main(argv=None):
     print("\n".join("    " + ln for ln in lines))
     at_first = sorted(k for t, k in differing if t == want_tick)
     check(first == want_tick, f"the dumps first differ at tick {want_tick} (got {first})")
-    check(at_first == [(a.kind, a.ord)], f"at tick {want_tick} exactly {kind_ord} differs (got {at_first})")
+    # The nudged object must be named at the first differing tick. Another object standing next to it may react to
+    # the displaced one in that very tick (a Pikmin turning to face it, a collision push), so neighbours are listed
+    # but allowed: how crowded the nudged object is depends on the scenario, not on the forensics.
+    check((a.kind, a.ord) in at_first, f"at tick {want_tick} {kind_ord} differs (got {at_first})")
+    nudged_cols = [ln for ln in lines if ln.strip().startswith(f"{kind_ord}:")]
+    check(any("pos" in ln for ln in nudged_cols), f"the dump diff shows {kind_ord} with a position column difference")
+    others = [k for k in at_first if k != (a.kind, a.ord)]
+    if others:
+        print(f"  note neighbours reacting to {kind_ord} in the same tick: {others}")
     print("check_desync_forensics: " + ("PASS" if not fails else f"FAIL ({len(fails)})"))
     return 0 if not fails else 1
 
