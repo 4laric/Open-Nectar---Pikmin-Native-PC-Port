@@ -427,6 +427,14 @@ SCRUB_KEYS = (
     "PIKMIN_NETPLAY_TEST_CAMERA_DRAG",
     "PIKMIN_NETPLAY_TEST_CAMLEAD_KEY_SKEW",  # lane N (#965), may not exist in an older exe
     "PIKMIN_NETPLAY_TEST_DESYNC_AT_FRAME",
+    # #1037 desync forensics: the session input log, the offline replay, the
+    # forensics switch / output folder and the one-object sim nudge (TEST ONLY).
+    "PIKMIN_NETPLAY_INPUT_LOG",
+    "PIKMIN_NETPLAY_REPLAY_LOG",
+    "PIKMIN_NETPLAY_REPLAY_DUMP_TICKS",
+    "PIKMIN_NETPLAY_FORENSICS",
+    "PIKMIN_NETPLAY_FORENSICS_DIR",
+    "PIKMIN_NETPLAY_TEST_DESYNC_NUDGE",
     "PIKMIN_NETPLAY_TEST_FORCE_AUTH_TEXINIT",
     "PIKMIN_NETPLAY_TEST_HANDSHAKE_LEN",
     "PIKMIN_NETPLAY_TEST_HUD_SHOT",
@@ -618,6 +626,9 @@ def main(argv=None):
     p.add_argument("--session-only-difference", action="store_true",
                    help="m8 positive test: join bootstrap differs from the host only in "
                         "SESSION (same FINGERPRINT); the handshake must succeed")
+    p.add_argument("--input-log", action="store_true",
+                   help="#1037: both peers write their session input log (PKNL) to "
+                        "<run>/session-inputs.pknl; tools/netplay/replay_session.py replays it")
     p.add_argument("--exe-args", nargs="*", default=[])
     p.add_argument("--expect", choices=("sync", "refuse", "disconnect", "desync", "barrier-timeout",
                                         "hash-desync"),
@@ -830,12 +841,16 @@ def main(argv=None):
     host_extra["PIKMIN_NETPLAY_LOCAL_INPUT_FILE"] = str(host_inputs.resolve())
     if a.delay_host is not None:
         host_extra["PIKMIN_NETPLAY_DELAY"] = str(a.delay_host)
+    if a.input_log:
+        host_extra["PIKMIN_NETPLAY_INPUT_LOG"] = str((host_run / "session-inputs.pknl").resolve())
     host_extra.update(parse_kv(a.env_host, "env-host"))
     join_extra = dict(base_extra)
     join_extra["PIKMIN_STATE_HASH_LOG"] = str(join_hash)
     join_extra["PIKMIN_NETPLAY_LOCAL_INPUT_FILE"] = str(join_inputs.resolve())
     if a.delay_join is not None:
         join_extra["PIKMIN_NETPLAY_DELAY"] = str(a.delay_join)
+    if a.input_log:
+        join_extra["PIKMIN_NETPLAY_INPUT_LOG"] = str((join_run / "session-inputs.pknl").resolve())
     join_extra.update(parse_kv(a.env_join, "env-join"))
 
     join_exe = a.exe_b.resolve() if a.exe_b is not None else a.exe.resolve()

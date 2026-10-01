@@ -452,6 +452,9 @@ struct EndInfo {
 	int pendingDayEnded = 0;
 	std::string exe;           // this exe's file name, for the command line
 	std::string extraArgs;     // switches to repeat (for example "--netplay-input keyboard")
+	// Desync only (issue #1037): this game's run folder, which holds the
+	// desync report and the replayable input log; empty = do not mention it.
+	std::string forensicsDir;
 };
 
 // What happened, in one line, per kind.
@@ -583,11 +586,17 @@ inline std::vector<std::string> banner_lines(const std::vector<std::string>& bod
 // Every line of the final message, without the "[netplay] " prefix. The
 // commands are typed in a console opened in the game's folder (PowerShell
 // or Command Prompt: see local_command).
-inline std::vector<std::string> recovery_lines(const EndInfo& e)
+inline std::vector<std::string> recovery_lines_core(const EndInfo& e)
 {
 	std::vector<std::string> out;
 	out.push_back("==== netplay session ended ====");
 	out.push_back(end_headline(e));
+	if (e.kind == EndKind::Desync && !e.forensicsDir.empty()) {
+		// #1037: one short line (it is also an end-banner line); the folder's path follows the commands.
+		out.push_back("Please send your whole netplay run folder (zip it) to the developer: it holds "
+		              "desync-report.txt and session-inputs.pknl, the replayable input log. Ask the other player to "
+		              "send theirs too.");
+	}
 	out.push_back(saved_day_line(e));
 	if (e.pendingGen != 0) {
 		const std::string which = e.pendingDayEnded > 0 ? "the end of day " + std::to_string(e.pendingDayEnded)
@@ -634,6 +643,15 @@ inline std::vector<std::string> recovery_lines(const EndInfo& e)
 		              " --netplay-host-ice --continue) in the game's folder.");
 		out.push_back("You join as usual (.\\join.bat); the host's saved day is sent to you automatically.");
 	}
+	return out;
+}
+
+// The final message: recovery_lines_core, then (after a desync) where the run
+// folder is, as the last line so the banner keeps the commands.
+inline std::vector<std::string> recovery_lines(const EndInfo& e)
+{
+	std::vector<std::string> out = recovery_lines_core(e);
+	if (e.kind == EndKind::Desync && !e.forensicsDir.empty()) out.push_back("The run folder: " + e.forensicsDir);
 	return out;
 }
 

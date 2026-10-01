@@ -859,6 +859,12 @@ if(PIKMIN_NETPLAY_BUILD AND NOT ANDROID)
     target_sources(${NECTAR_GAME} PRIVATE
         pc_port/netplay/pc_netplay_session.cpp
         pc_port/netplay/pc_netplay_udp.cpp)
+    # Desync forensics (issue #1037): the session input log, the desync
+    # exchange data model and the per-object state dump ring. Netplay exe only.
+    target_sources(${NECTAR_GAME} PRIVATE
+        pc_port/netplay/pc_netplay_inlog.cpp
+        pc_port/netplay/pc_netplay_forensics.cpp
+        pc_port/netplay/pc_state_dump.cpp)
     # M4 gap-fix lane K (issue #885): failure-path diagnostics for the
     # netplay exe only (they log, then the game halts as before).
     target_sources(${NECTAR_GAME} PRIVATE
@@ -1846,6 +1852,16 @@ if(PIKMIN_BUILD_TESTS)
     target_include_directories(pc_input_log_test PRIVATE pc_port include)
     target_compile_options(pc_input_log_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_input_log_test COMMAND pc_input_log_test)
+
+    # Netplay desync forensics (#1037, host-only, no game needed): session input
+    # log format and the desync exchange data model.
+    add_executable(pc_netplay_forensics_test
+        pc_port/netplay/pc_netplay_forensics_test.cpp
+        pc_port/netplay/pc_netplay_inlog.cpp
+        pc_port/netplay/pc_netplay_forensics.cpp)
+    target_include_directories(pc_netplay_forensics_test PRIVATE pc_port)
+    target_compile_options(pc_netplay_forensics_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_netplay_forensics_test COMMAND pc_netplay_forensics_test)
 
     # Netplay replay tool self test (#878, tool logic only, launches no game)
     # Portable interpreter: py -3.12 on Windows (tree convention), python3
