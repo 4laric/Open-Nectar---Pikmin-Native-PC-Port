@@ -168,6 +168,14 @@ class CaveGuardedBootApp final : public PlugPikiApp {
             positioned=true;phaseTick=observed;
             std::puts("P2_CAVE_ROUTE_SETUP starting_species=20_blue_staged input=scripted_controller position_writes=0 velocity_writes=0 checkpoint_confirmation=bypassed");
         }
+        if(routePhase>=2 && !carryPicked) {
+            Pellet* treasure=pc_p2_cave_items_pellet_for("treasure_water");
+            Iterator it(pikiMgr);CI_LOOP(it) {Piki* p=static_cast<Piki*>(*it);
+                if(treasure&&p&&p->isAlive()&&p->getStickObject()==treasure) {
+                    carryPicked=true;std::puts("P2_CAVE_ROUTE_PICKUP item=treasure_water attachment=ordinary");std::fflush(nullptr);break;
+                }
+            }
+        }
         if(observed%120==0) {
             Pellet* p=pc_p2_cave_items_pellet_for("treasure_water");
             std::printf("P2_CAVE_ROUTE_PROGRESS phase=%d point=%d navi=%.2f,%.2f alive=%d following=%d delivered=%d treasure=%.2f,%.2f cursor=%.2f,%.2f\n",
@@ -201,8 +209,20 @@ class CaveGuardedBootApp final : public PlugPikiApp {
             return;
         }
         if(routePhase==2) {
-            pc_p2_input_script_set(1,observed-phaseTick==1?KeyConfig::_instance->mDisbandKey.mBind:0);
-            if(observed-phaseTick>=30) {routePhase=3;phaseTick=observed;}
+            const int elapsed=observed-phaseTick;
+            pc_p2_input_script_set(1,elapsed==241?KeyConfig::_instance->mDisbandKey.mBind:0);
+            int sx=0,sy=0;
+            if(elapsed>=60 && elapsed<240) {
+                Pellet* treasure=pc_p2_cave_items_pellet_for("treasure_water");
+                if(treasure&&!carryPicked) {
+                    const float dx=treasure->mSRT.t.x-n->mSRT.t.x,dz=treasure->mSRT.t.z-n->mSRT.t.z;
+                    const float distance=std::sqrt(dx*dx+dz*dz);
+                    const Vector3f& axis=n->controlCamera()->mViewXAxis;
+                    if(distance>1) {sx=int(std::lround(65*(dx*axis.x+dz*axis.z)/distance));sy=int(std::lround(65*(dx*axis.z-dz*axis.x)/distance));}
+                }
+            }
+            pc_p2_input_script_set_sub(1,sx,sy);
+            if(elapsed>=270) {routePhase=3;phaseTick=observed;}
             return;
         }
         if(routePhase==3) {
