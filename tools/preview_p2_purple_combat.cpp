@@ -31,6 +31,7 @@
 #include "Collision.h"
 #include "Camera.h"
 #include "Controller.h"
+#include "Kontroller.h"
 #include "nlib/System.h"
 #include "gameflow.h"
 #include "pc_randomizer.h"
