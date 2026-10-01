@@ -30,6 +30,7 @@
 #include "MapMgr.h"
 #include "Collision.h"
 #include "Camera.h"
+#include "Controller.h"
 #include "nlib/System.h"
 #include "gameflow.h"
 #include "pc_randomizer.h"
@@ -99,7 +100,7 @@ static void auditBody(const char* owner,Creature* creature) {
     const float radius=creature->getBoundingSphereRadius();
     std::printf("P2_PURPLE_BODY owner=%s xyz=%.3f,%.3f,%.3f bound=%.3f,%.3f,%.3f radius=%.3f collision_radius=%.3f\n",
         owner,creature->mSRT.t.x,creature->mSRT.t.y,creature->mSRT.t.z,centre.x,centre.y,centre.z,radius,creature->mCollisionRadius);
-    if(creature->mCollInfo) auditPart(owner,creature->mCollInfo->getBoundingSphere());
+    if(creature->mCollInfo && creature->mCollInfo->hasInfo()) auditPart(owner,creature->mCollInfo->getBoundingSphere());
     auditTerrain(owner,centre,radius);
 }
 // Read-only fixture telemetry. Form inherited member pointers in a derived
@@ -451,6 +452,11 @@ class PurpleCombatApp : public PlugPikiApp {
         // sprout, or force a plucking state to satisfy natural acceptance.
         const float dx=head->mSRT.t.x-n->mSRT.t.x,dz=head->mSRT.t.z-n->mSRT.t.z;
         const float distance=std::sqrt(dx*dx+dz*dz);
+        if(ticks%60==0) std::printf("P2_PURPLE_PLUCK_APPROACH distance=%.3f captain=%.3f,%.3f,%.3f sprout=%.3f,%.3f,%.3f state=%d port=%u observed_stick=%d,%d frozen=%d\n",
+            distance,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,head->mSRT.t.x,head->mSRT.t.y,head->mSRT.t.z,
+            n->getCurrState()->getID(),n->mKontroller?n->mKontroller->mPlayerNum:0,
+            n->mKontroller?int(n->mKontroller->mMainStickX):0,n->mKontroller?int(n->mKontroller->mMainStickY):0,
+            int(n->mKontroller && n->mKontroller->mIsControllerFrozen));
         if(distance>20.f) {
             require(n->controlCamera()!=nullptr,"natural approach camera missing");
             const Vector3f& axis=n->controlCamera()->mViewXAxis;
@@ -555,6 +561,11 @@ class PurpleCombatApp : public PlugPikiApp {
         return false;
     }
     void diagnostics(Navi* n) {
+        if(itemMgr && itemMgr->getPikiHeadMgr()) { Iterator heads(itemMgr->getPikiHeadMgr()); CI_LOOP(heads) {
+            PikiHeadItem* head=static_cast<PikiHeadItem*>(*heads);
+            if(head && head->isAlive() && head->mP2Purple) std::printf("P2_PURPLE_SPROUT_OBSERVATION xyz=%.3f,%.3f,%.3f pullable=%d\n",
+                head->mSRT.t.x,head->mSRT.t.y,head->mSRT.t.z,int(head->canPullout()));
+        } }
         if(bossMgr) { Iterator flowers(bossMgr); CI_LOOP(flowers) {
             Boss* b=static_cast<Boss*>(*flowers);
             if(b && b->isAlive() && b->mObjType==OBJTYPE_Pom && pc_p2_violet(static_cast<Pom*>(b))) auditBody("violet",b);
