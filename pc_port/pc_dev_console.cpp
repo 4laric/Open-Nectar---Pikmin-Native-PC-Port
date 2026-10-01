@@ -33,6 +33,8 @@
 #include "NaviMgr.h"
 #include "Piki.h"
 #include "PikiMgr.h"
+#include "BombItem.h"
+#include "ItemMgr.h"
 #include "GameStat.h"
 #include "gameflow.h"
 #include "MoviePlayer.h"
@@ -384,6 +386,29 @@ void hurtAll(float fraction, bool stored)
     say("hurt: %d P2 actors set to %.0f%% health", n, (1.0f - fraction) * 100.0f);
 }
 
+// Lit P1 bomb rocks (BombAI::BOMB_Set, the state a Pikmin's set-down starts,
+// aiPut.cpp) 60 units to the captain's side: a reference for P2 bomb visuals.
+void litBombs(int count)
+{
+    Navi* navi = captain();
+    if (!navi || !itemMgr || !mapMgr) { say("bomb: not in gameplay"); return; }
+    int made = 0;
+    for (int i = 0; i < count; ++i) {
+        const float angle = navi->mFaceDirection + 1.5707963f + (i - (count - 1) * 0.5f) * 0.35f; // to the side, clear of the captain
+        Vector3f pos = navi->mSRT.t + Vector3f(60.0f * sinf(angle), 0.0f, 60.0f * cosf(angle));
+        pos.y = mapMgr->getMinY(pos.x, pos.z, true) + 3.0f;
+        BombItem* bomb = static_cast<BombItem*>(itemMgr->birth(OBJTYPE_Bomb));
+        if (!bomb) break;
+        bomb->init(pos);
+        bomb->startAI(0);
+        C_SAI(bomb)->start(bomb, BombAI::BOMB_Set);
+        std::printf("DEV_CONSOLE_P1_BOMB n=%d x=%.1f y=%.1f z=%.1f fuse=%.2f state=set\n", made, pos.x, pos.y, pos.z,
+                    bomb->mSAICtx.mCurrentItemHealth);
+        ++made;
+    }
+    say("bomb: %d lit P1 bomb rock(s)", made);
+}
+
 void addPikmin(int colour, int count)
 {
     Navi* navi = captain();
@@ -481,6 +506,7 @@ void runCommand(const Command& c, const char* line)
         break;
     }
     case Cmd::Rebind: fullRebind("command"); break;
+    case Cmd::Bomb: litBombs(c.count); break;
     case Cmd::Unknown:
     case Cmd::None:
         break;

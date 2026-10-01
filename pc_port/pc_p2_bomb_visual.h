@@ -54,3 +54,7 @@ struct P2BombGauge {
 // after, because the shape is shared with real P1 bomb rocks. Returns false when
 // the shape is not loaded.
 bool pc_p2_bomb_draw_shape(Graphics& gfx, const Matrix4f& view, bool flashing, bool flashOn, float ratio);
+class Shape;
+// The same lit-fuse flash for any bomb Shape (e.g. a Dirigibug bomb's private
+// pose Shape): its materials are tinted for this draw only and restored after.
+bool pc_p2_bomb_draw_tinted(Graphics& gfx, Shape& shape, const Matrix4f& view, bool flashing, bool flashOn, float ratio);
