@@ -107,12 +107,12 @@ bool enterSurfaceCave(){
         const int state=p->getState(),species=pc_p2_species(p);
         if(state==PIKISTATE_Dying || state==PIKISTATE_Dead || state==PIKISTATE_Swallowed
             || state==PIKISTATE_Bury || state==PIKISTATE_Grow || p->getStickObject()
-            || species<0 || species>2)return false;
+            || species<0 || species>(surfaceRoute.wireVersion==2?P2SpeciesWhite:P2SpeciesYellow))return false;
         party.squad.push_back({species,p->mHappa});
     }
     Iterator heads(itemMgr->getPikiHeadMgr());CI_LOOP(heads){if(static_cast<PikiHeadItem*>(*heads)->isAlive())return false;}
     Navi* n=naviMgr->getNavi();party.health=n->mHealth/C_NAVI_PARM(n,mHealth);
-    const std::string text=p2_cave_surface_route_transfer(party,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z);
+    const std::string text=p2_cave_surface_route_transfer(party,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,surfaceRoute.wireVersion);
     if(text.empty())return false;
     const std::string message="Enter Emergence Cave with all "+std::to_string(party.squad.size())+" surviving Pikmin?";
     const SDL_MessageBoxButtonData buttons[]={{SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT,0,"Stay"},{SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT,1,"Enter cave"}};
@@ -357,7 +357,9 @@ bool pc_p2_cave_checkpoint(bool confirm){
         // Do not preserve an actor half-swallowed, converting or becoming a sprout.
         if(state==PIKISTATE_Swallowed || state==PIKISTATE_Bury || state==PIKISTATE_Grow
             || (p->getStickObject() && p->getStickObject()->mObjType!=OBJTYPE_Pellet))busy=true;
-        const int species=pc_p2_species(p);if(species<0 || !p2_schema_supports(checkpointSchema,species))invalid("runtime Pikmin species");
+        const int species=pc_p2_species(p);
+        if(species<0 || !p2_cave_bounded_live_species_supported(checkpointSchema,species,
+                !beasts && !tutorialEntry && floorId>=1 && floorId<=2,pc_p2_whites_enabled()))invalid("runtime Pikmin species");
         alive.push_back(p);
     }
     Iterator heads(itemMgr->getPikiHeadMgr());CI_LOOP(heads){if(static_cast<PikiHeadItem*>(*heads)->isAlive())busy=true;}
