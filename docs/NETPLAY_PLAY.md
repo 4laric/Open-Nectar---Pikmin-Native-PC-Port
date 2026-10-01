@@ -355,7 +355,8 @@ to the log every 30 s (`[netplay] link: ...`); the fuller
 If the two games stop agreeing (a desync), the connection is lost, or the
 other player closes their game, the session ends. The game then shows a
 banner for up to 10 seconds (any key or button closes it early) and prints
-the same message in the console, for example:
+a short recovery screen with save status and fresh host/join steps. The console
+keeps the full diagnostics and launch commands, for example:
 
 ```
 [netplay] ==== netplay session ended ====
@@ -371,11 +372,7 @@ The save is made at the **end** of a day, so the next session starts at the
 **start** of the following day; the `Last save` line names both.
 
 The `or:` line repeats this game's own `--netplay-input` switch, if it had
-one. The joiner's message names the same commands for the host. The banner
-writes the commands with `/` (`./host.bat --continue`, which PowerShell
-takes but Command Prompt does not), because the game's font has no
-backslash, and says so on the first line that holds a command; the console
-message above has the `.\` form for both. If you renamed the exe to a name
+one. The joiner's console message names the same commands for the host. If you renamed the exe to a name
 with spaces (for example `nectar (2).exe`), the console gives two lines
 instead of `or:`: `or in PowerShell: & '.\nectar (2).exe' ...` and `or in
 Command Prompt: ".\nectar (2).exe" ...`, because each console quotes it

@@ -646,6 +646,37 @@ inline std::vector<std::string> recovery_lines_core(const EndInfo& e)
 	return out;
 }
 
+// Player recovery stays independent of console diagnostics. Six short lines
+// leave room for wrapping in the end screen, including a pending save.
+inline std::vector<std::string> recovery_banner_lines(const EndInfo& e)
+{
+    std::vector<std::string> out;
+    const int ended = e.dayEnded > 0 ? e.dayEnded : (e.day > 1 ? e.day - 1 : 0);
+    if (e.gen == 0) out.push_back("No day saved yet. Playing again starts a new campaign.");
+    else if (e.day > 0) out.push_back("Last saved day: " + std::to_string(ended > 0 ? ended : e.day) +
+        (ended > 0 ? ". Resume at the start of day " + std::to_string(e.day) + "." : ". Resume from that save."));
+    else if (ended > 0) out.push_back("Day " + std::to_string(ended) + " saved. Resume at the start of the next day.");
+    else out.push_back("A saved day is available. Resume from that save.");
+    if (e.pendingGen != 0) {
+        // A joiner may have a local save the host did not finish agreeing on.
+        if (e.gen == 0) out[0] = "No confirmed saved day yet.";
+        out.push_back("The latest save is unconfirmed. The host checks it on restart.");
+    }
+    out.push_back("Progress since the last saved day will be lost.");
+    if (!e.launcher) {
+        out.push_back("Both players: restart with the same launch options.");
+        out.push_back("The host sends the saved day to the other player.");
+    } else {
+        const bool resume = e.gen != 0 || e.pendingGen != 0;
+        out.push_back(e.host ? (resume ? "Host: open host.bat and choose Continue." : "Host: open host.bat to start again.")
+                            : (resume ? "Ask the host to open host.bat and choose Continue." : "Ask the host to open host.bat to start again."));
+        out.push_back(e.host ? "Send the new offer code. Wait for your partner's answer code."
+                            : "Copy the new offer code, open join.bat, then send your answer code.");
+    }
+    out.push_back("Details and launch commands are in the console.");
+    return out;
+}
+
 // The final message: recovery_lines_core, then (after a desync) where the run
 // folder is, as the last line so the banner keeps the commands.
 inline std::vector<std::string> recovery_lines(const EndInfo& e)
