@@ -36,9 +36,10 @@
 namespace {
 constexpr unsigned Target=1849273021;
 const char* Check="Bestiary: Deliver P2 Dwarf Orange Bulborb";
-SDL_Joystick* pad=nullptr;
+SDL_Joystick* pad=nullptr;int requestedX=0,requestedY=0;
 void require(bool yes,const char* reason){if(!yes){std::printf("FAIL P2_GENERATED_DELIVERY %s\n",reason);std::fflush(nullptr);std::_Exit(1);}}
 void input(unsigned keys=0,int x=0,int y=0,int cx=0,int cy=0){
+ requestedX=x;requestedY=y;
  // Campaign card selection resets device routing; keep the disclosed virtual P1.
  int id=-1;int kind=pc_window_input_get_assignment(0,&id);
  if(kind!=PC_INPUT_DEV_GAMEPAD || id!=SDL_JoystickInstanceID(pad)){std::printf("P2_GENERATED_ROUTE_RESTORE previous_kind=%d previous_id=%d virtual_id=%d\n",kind,id,int(SDL_JoystickInstanceID(pad)));std::fflush(nullptr);pc_window_input_assign(0,PC_INPUT_DEV_GAMEPAD,SDL_JoystickInstanceID(pad));pc_window_input_assign(1,PC_INPUT_DEV_NONE,-1);}
@@ -90,7 +91,7 @@ class DeliveryApp:public PlugPikiApp {
    for(int f=0;f<DEMOFLAG_COUNT;++f)playerState->mDemoFlags.setFlagOnly(f); // Disclosed tutorial instrumentation.
    phase=1;phaseStart=observed;
   }
-  if(observed%60==0){std::printf("P2_GENERATED_PROGRESS frame=%d phase=%d alive=%d enemy_alive=%d hp=%.3f navi=%.3f,%.3f enemy=%.3f,%.3f\n",frames,phase,alive,int(enemy->isAlive()),n->mHealth,n->mSRT.t.x,n->mSRT.t.z,enemy->mSRT.t.x,enemy->mSRT.t.z);std::fflush(nullptr);}
+  if(observed%60==0){int assigned=-1;int kind=pc_window_input_get_assignment(0,&assigned);const Vector3f& axis=n->controlCamera()->mViewXAxis;std::printf("P2_GENERATED_INPUT_OBS request=%d,%d SDL=%d,%d native=%d,%d frozen=%d port=%d assigned_kind=%d assigned_id=%d camera_axis=%.3f,%.3f,%.3f\n",requestedX,requestedY,int(SDL_JoystickGetAxis(pad,SDL_CONTROLLER_AXIS_LEFTX)),int(SDL_JoystickGetAxis(pad,SDL_CONTROLLER_AXIS_LEFTY)),int(n->mKontroller->mMainStickX),int(n->mKontroller->mMainStickY),int(n->mKontroller->mIsControllerFrozen),n->mKontroller->mPlayerNum,kind,assigned,axis.x,axis.y,axis.z);std::printf("P2_GENERATED_PROGRESS frame=%d phase=%d alive=%d enemy_alive=%d hp=%.3f navi=%.3f,%.3f enemy=%.3f,%.3f\n",frames,phase,alive,int(enemy->isAlive()),n->mHealth,n->mSRT.t.x,n->mSRT.t.z,enemy->mSRT.t.x,enemy->mSRT.t.z);std::fflush(nullptr);}
   if(pc_randomizer_checked(Check)){std::puts("PASS P2_GENERATED_DELIVERY actual_native_check=1 direct_event_writes=0 scripted_virtual_P1=1");std::fflush(nullptr);std::_Exit(0);}
   if(phase==1){input(KeyConfig::_instance->mSetCursorKey.mBind);if(observed-phaseStart>100){phase=2;phaseStart=observed;}return result;}
   float dx=enemy->mSRT.t.x-n->mSRT.t.x,dz=enemy->mSRT.t.z-n->mSRT.t.z;
