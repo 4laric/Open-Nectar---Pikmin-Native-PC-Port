@@ -38,7 +38,6 @@
 #include "pc_p2_cave.h"
 #include "Suckable.h"
 #include "teki.h"
-#include "TekiMgr.h"
 #include "pc_p2_white_poison.h"
 #include "pc_window.h"
 #include "pc_bbft.h"
