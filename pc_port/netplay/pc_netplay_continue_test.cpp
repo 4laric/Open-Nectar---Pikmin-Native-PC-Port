@@ -192,12 +192,12 @@ int main()
 		{
 			// #1037: a desync with a run folder asks the players to send it.
 			EndInfo f = e;
-			f.forensicsDir = "C:\game\netplay\run-1";
+			f.forensicsDir = "C:\\game\\netplay\\run-1";
 			const std::vector<std::string> fl = recovery_lines(f);
-			CHECK(contains(fl, "send your whole netplay run folder") && contains(fl, "The run folder: C:\game\netplay\run-1"),
+			CHECK(contains(fl, "send your whole netplay run folder") && contains(fl, "The run folder: C:\\game\\netplay\\run-1"),
 			      "desync names the run folder to send");
 			CHECK(contains(fl, "desync-report.txt") && contains(fl, "session-inputs.pknl"), "and what it holds");
-			CHECK(fl.back() == "The run folder: C:\game\netplay\run-1", "the folder path is the last line");
+			CHECK(fl.back() == "The run folder: C:\\game\\netplay\\run-1", "the folder path is the last line");
 			f.kind = EndKind::Disconnect;
 			CHECK(!contains(recovery_lines(f), "netplay run folder"), "only a desync asks for it");
 		}
@@ -339,6 +339,50 @@ int main()
 		CHECK(contains(l, "same switches") && !contains(l, "host.bat"), "low-level switches");
 		CHECK(std::string(end_kind_name(EndKind::Disconnect)) == "disconnect", "kind names");
 	}
+
+    // Regression: verbose desync diagnostics/pending saves used to push the
+    // restart actions beyond the renderer's 14-row cap. Bound every combination
+    // conservatively with 13 pixels per glyph and 568 pixels of content width.
+    // DGXGraphics uses a 640-wide logical render mode (dgxGraphics.cpp),
+    // independent of the desktop window dimensions.
+    for (int kind = 0; kind < 6; ++kind) for (bool host : {false, true})
+    for (bool launcher : {false, true}) for (int saved = 0; saved < 5; ++saved)
+    for (bool pending : {false, true}) {
+        EndInfo e;
+        e.kind = static_cast<EndKind>(kind); e.host = host; e.launcher = launcher;
+        e.gen = saved; e.day = saved == 1 ? 3 : (saved == 4 ? 1 : 0); e.dayEnded = saved == 2 ? 9 : 0;
+        e.pendingGen = pending ? 99 : 0;
+        e.exe = std::string(220, 'x'); e.extraArgs = std::string(400, 'x');
+        e.forensicsDir = std::string(240, 'x');
+        const auto before = recovery_lines(e);
+        const auto lines = recovery_banner_lines(e);
+        CHECK(lines.size() <= 6, "player banner fits feed line cap");
+        int rows = 0;
+        for (const auto& line : lines) {
+            int width = 0; ++rows;
+            size_t at = 0;
+            while (at < line.size()) {
+                const size_t end = line.find(' ', at);
+                const size_t stop = end == std::string::npos ? line.size() : end;
+                const int word = int(stop - at) * 13;
+                CHECK(word <= 568, "player words fit minimum content width");
+                if (width && width + 13 + word > 568) { ++rows; width = word; }
+                else width += (width ? 13 : 0) + word;
+                at = stop + 1;
+            }
+            CHECK(line.find("checkpoint") == std::string::npos && line.find("frame") == std::string::npos &&
+                line.find("--") == std::string::npos, "player banner omits implementation detail");
+        }
+        CHECK(rows <= 14, "all player actions survive wrapped row cap");
+        CHECK(recovery_lines(e) == before, "player formatting leaves console unchanged");
+        CHECK(contains(lines, "Details and launch commands"), "console alternative always visible");
+        CHECK(saved != 4 || !contains(lines, "Day 1 saved"), "unknown ended day is never invented");
+        CHECK(!pending || contains(lines, "unconfirmed"), "pending save is explicitly unconfirmed");
+        CHECK(saved || pending || contains(lines, "new campaign"), "unsaved restart explained");
+        if (launcher) CHECK(contains(lines, "new offer code") && contains(lines, "answer code"), "fresh exchange required");
+        else CHECK(!contains(lines, "host.bat") && contains(lines, "same launch options") &&
+            contains(lines, "sets up the campaign") && !contains(lines, "sends the saved day"), "low-level path accurate");
+    }
 
 	std::printf("pc_netplay_continue_test: %s (%d checks, %d failures)\n", sFailures == 0 ? "PASS" : "FAIL",
 	            sChecks, sFailures);

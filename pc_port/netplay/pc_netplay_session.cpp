@@ -5114,19 +5114,8 @@ void print_end_message(pc_netplay_continue::EndKind kind, int code, int64_t fram
 	             : kind == pc_netplay_continue::EndKind::LocalQuit    ? "SESSION ENDED"
 	                                                                  : "CONNECTION LOST";
 	sBannerError = kind != pc_netplay_continue::EndKind::PeerQuit && kind != pc_netplay_continue::EndKind::LocalQuit;
-	std::vector<std::string> body;
-	for (size_t i = 1; i < lines.size(); ++i) {
-		std::string l = lines[i];
-		// The title already names what happened: the body keeps the reason.
-		const size_t colon = l.find(": ");
-		if (i == 1 && colon != std::string::npos && colon < 40) {
-			l = l.substr(colon + 2);
-			if (!l.empty() && l[0] >= 'a' && l[0] <= 'z') l[0] = (char)(l[0] - 'a' + 'A');
-		}
-		body.push_back(l);
-	}
-	// The game font has no '\': PowerShell's '/' form, labelled once.
-	sBannerLines = pc_netplay_continue::banner_lines(body, kBannerMaxLines);
+	// Keep the player actions visible; verbose diagnostics stay in the console.
+	sBannerLines = pc_netplay_continue::recovery_banner_lines(e);
 }
 
 // Between ticks only (handle_session_events): keep presenting frames with
