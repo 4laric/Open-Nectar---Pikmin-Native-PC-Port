@@ -82,8 +82,12 @@ class PurpleCombatApp : public PlugPikiApp {
         return savedMaturity>=0 && savedMaturity<3 && p2ship::stock.total()==1
             && p2ship::stock.counts[0][savedMaturity]==1;
     }
-    void boundAdult() {
+    void boundAdult(bool liveRequired=true) {
         require(pc_p2_purple_direct_enabled(),"combat profile missing after save/restart");
+        // Restart confirms the map's default Impact Site, where this Hope
+        // generator is absent. The saved seed mapping must still be exact;
+        // never manufacture an actor merely to validate an absent-stage row.
+        require(pc_randomizer_p2_source_for_id(3640055869u)==2,"persisted seed combat mapping mismatch");
         bool found=false;
         Iterator it(tekiMgr);
         CI_LOOP(it) {
@@ -94,7 +98,9 @@ class PurpleCombatApp : public PlugPikiApp {
                 found=true; break;
             }
         }
-        require(found,"no exact live adult combat binding in persistence fixture");
+        std::printf("P2_PURPLE_PERSIST_CATALOG uid=3640055869 source=2 profile_enabled=1 live_registered=%d live_required=%d stage=%d\n",
+            int(found),int(liveRequired),gameflow.mCurrentStageID);
+        require(!liveRequired || found,"no exact live adult combat binding in persistence fixture");
     }
     void sunsetStep() {
         require(++sunsetTicks<9000,"ordinary day-save timeout");
@@ -148,7 +154,7 @@ class PurpleCombatApp : public PlugPikiApp {
         require(pc_randomizer_resumed() && gameflow.mWorldClock.mCurrentDay==expectedDay && stockOne(),
             "native restart checkpoint/day/stock/maturity mismatch");
         if(++resumeReady<60) return;
-        boundAdult(); GameStat::update(); const int field=GameStat::mapPikis;
+        boundAdult(false); GameStat::update(); const int field=GameStat::mapPikis;
         Iterator bodies(pikiMgr); CI_LOOP(bodies) {
             Piki* p=static_cast<Piki*>(*bodies);
             require(!p || !p->isAlive() || !pc_p2_is_purple(p),"duplicate field Purple before withdrawal");
