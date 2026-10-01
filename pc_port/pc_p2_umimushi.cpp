@@ -42,6 +42,8 @@
 // modified.
 #include "pc_p2_umimushi.h"
 #include "pc_p2_umimushi_policy.h"
+#include "pc_p2_skewer.h"
+#include "pc_p2_skewer_cam.h"
 #include "pc_p2_captor_host.h"
 #include "Collision.h"
 #include "CreatureCollPart.h"
@@ -307,7 +309,7 @@ int doFlick(BTeki* a, Umi& s, unsigned generator, int frame, const char* event, 
             Piki* p = static_cast<Piki*>(*it);
             if (!p || !p->isAlive() || p->isStickToMouth()) continue; // a mouth-held Pikmin is never flicked
             if (p->getStickObject() == a) stuck.push_back(p);
-            else if (p2chappymouth::distance(p2captorhost::vec(p->getPosition()), apos) < p2umi::ShakeRange)
+            else if (p2chappymouth::distance(p2captorhost::vec(p->getPosition()), apos) < p2umi::shakeRange(s.scale))
                 nearby.push_back(p);
         }
     }
@@ -329,7 +331,7 @@ int doFlick(BTeki* a, Umi& s, unsigned generator, int frame, const char* event, 
     }
     for (Navi* n : pc_p2_navis()) {
         if (!n->isAlive()) continue;
-        if (p2chappymouth::distance(p2captorhost::vec(n->getPosition()), apos) >= p2umi::ShakeRange) continue;
+        if (p2chappymouth::distance(p2captorhost::vec(n->getPosition()), apos) >= p2umi::shakeRange(s.scale)) continue;
         if (n->stimulate(InteractFlick(a, p2umi::ShakeKnockback, p2umi::ShakeDamage, FLICK_BACKWARDS_ANGLE))) {
             ++naviHit;
             logHit(a, s, generator, "flick_navi", n->getPosition(), -1);
@@ -764,15 +766,30 @@ void updateColl(BTeki* actor, Umi& s) {
         s.coll.slot->mRadius = 1.0f;
         s.coll.slot->mJointMatrix = camYaw;
     }
+    // World position of every slot first: a held Pikmin is laid along the local tangent of the tongue (#1020).
+    float slotW[T::kKamuCount][3];
     for (int i = 0; i < T::kKamuCount; ++i) {
-        CollPart* part = s.coll.kam[i];
-        if (!part) continue;
         float local[3] = {mouth[0], mouth[1], mouth[2]};
         p2umi::kamuCentre(clip, frame, i, local);
         const p2chappymouth::Vec3 w = p2umi::toWorld(apos, actor->getDirection(), s.scale, local);
-        part->mCentre.set(w.x, w.y, w.z);
+        slotW[i][0] = w.x;
+        slotW[i][1] = w.y;
+        slotW[i][2] = w.z;
+    }
+    for (int i = 0; i < T::kKamuCount; ++i) {
+        CollPart* part = s.coll.kam[i];
+        if (!part) continue;
+        float dir[3];
+        p2skewer::tangent(slotW, T::kKamuCount, i, dir);
+        float seated[3] = {slotW[i][0], slotW[i][1], slotW[i][2]};
+        p2skewer::seat(seated, dir, s.scale);
+        part->mCentre.set(seated[0], seated[1], seated[2]);
         part->mRadius = s.blind ? p2umi::SlotRadiusBlind : p2umi::SlotRadius;
-        part->mJointMatrix = camYaw;
+        float rot[9];
+        if (p2skewer::umiRotation(s.clip.c_str(), frame, i, rot))
+            p2skewer::jointMatrixBasis(part->mJointMatrix, camRot, p2skewer::fromRotation(rot, actor->getDirection()));
+        else
+            p2skewer::jointMatrix(part->mJointMatrix, camRot, dir, actor->getDirection());
     }
 }
 // Gives the actor its host CollInfo back (the own tree is never freed: stuck Pikmin may still
@@ -1360,6 +1377,7 @@ void pc_p2_umimushi_update(BTeki* actor) {
     setPhase(s);
     buildColl(actor, s, generator);
     updateColl(actor, s);
+    pc_p2_skewer_cam_follow(actor, actor->getDirection(), s.blind ? "umiblind" : "umi");
     runProbe(actor, s, generator, dt);
     logLatched(actor, s, generator);
     s.logTimer += dt;

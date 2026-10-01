@@ -71,6 +71,7 @@
 #include "settings/pc_settings.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_photo_mode.h"
+#include "pc_p2_skewer_cam.h"
 #include "pc_coop.h"
 #include "mods/pc_vs_arena.h"
 #include "pc_vs.h"
@@ -3029,9 +3030,10 @@ void GameCoreSection::updateAI()
     pc_p2_cave_tick();
     pc_p2_giant_breadbug_actor_tick();
     pc_p2_breadbug_actor_tick();
+    Navi* shipNavi = naviMgr ? naviMgr->getActiveNavi() : nullptr;
     const bool shipActive = !gameflow.mMoviePlayer->mIsActive && !gameflow.mPauseAll
-        && !gameflow.mIsUIOverlayActive && !playerState->mInDayEnd && mNavi && mNavi->mHealth > 0.0f;
-    pc_p2_ship_tick(naviMgr ? naviMgr->getActiveNavi() : nullptr, shipActive);
+        && !gameflow.mIsUIOverlayActive && !playerState->mInDayEnd && shipNavi && shipNavi->mHealth > 1.0f;
+    pc_p2_ship_tick(shipNavi, shipActive);
     if (pc_randomizer_expanded()) {
         AICONST.mMaxPikisOnField(pc_randomizer_field_capacity());
         const bool active = !gameflow.mMoviePlayer->mIsActive && !gameflow.mPauseAll
@@ -3720,6 +3722,23 @@ void GameCoreSection::updateAI()
 		}
 	}
 
+	// TEST-ONLY (PIKMIN_P2_SKEWER_CAM, #1020): frame a held Pikmin up close for photo evidence.
+	static f32 sSkewerFocus = 0.0f;
+	bool skewerCam          = false;
+	{
+		f32 e[3], l[3];
+		PcamCamera* pcam = cameraMgr ? cameraMgr->mCamera : nullptr;
+		if (pcam && pc_p2_skewer_cam_pose(e, l, &sSkewerFocus)) {
+			Vector3f eye(e[0], e[1], e[2]);
+			Vector3f look(l[0], l[1], l[2]);
+			pcam->inputViewpoint(eye);
+			pcam->inputWatchpoint(look);
+			pcam->makeMatrix();
+			pcam->makeCamera();
+			skewerCam = true;
+		}
+	}
+
 	// Where depth of field focuses: on the captain, every frame.
 	//
 	// The distance handed over is measured along the camera's forward axis,
@@ -3756,7 +3775,7 @@ void GameCoreSection::updateAI()
 		// A captain behind the camera gives a negative projection, which is not
 		// a focus distance at all. Zero stands the effect down for the frame
 		// rather than blurring the whole screen around a nonsense plane.
-		pc_gfx_set_dof_focus(focus > 0.0f ? focus : 0.0f);
+		pc_gfx_set_dof_focus(skewerCam ? sSkewerFocus : (focus > 0.0f ? focus : 0.0f));
 	}
 #endif
 
