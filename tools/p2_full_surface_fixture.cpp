@@ -33,6 +33,7 @@
 static void require(bool value,const char* text) {
     if (!value) {std::printf("FAIL P2_SURFACE_BOOT %s\n",text);std::fflush(nullptr);std::_Exit(1);}
 }
+static bool humanSmoke(){return std::getenv("P2_FULL_SURFACE_HUMAN_SMOKE")!=nullptr;}
 static SDL_Joystick* pad=nullptr;
 static int phase=0;
 static Vector3f goal(-190,80,1000);
@@ -66,7 +67,7 @@ public:
                 tick,n?n->mHealth:0.0f,int(initialized),int(gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive),int(gameflow.mPauseAll));
             std::fflush(nullptr);std::_Exit(86);
         }
-        require(++tick<2400,"frame timeout");
+        ++tick; if(!humanSmoke())require(tick<2400,"frame timeout");
         if(gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
         if(!naviMgr || !pikiMgr || !mapMgr)return result;
         if(!initialized)return result;
@@ -88,7 +89,8 @@ public:
             require(unique.kind==p2surface::Kind::Unique&&unique.face==4296,"retail unique crossing");
             require(ambiguous.kind==p2surface::Kind::Ambiguous&&ambiguous.face==-1,"retail slip ambiguity invented neighbor");
             std::puts("P2_SURFACE_RETAIL_POLICY_PASS unique320_to4296=1 ambiguous551_to727_or4915=1 duplicate_slip_preserved=1");
-            origin=n->mSRT.t;phase=1;ready=0;
+            origin=n->mSRT.t;phase=humanSmoke()?4:1;ready=0;
+            if(humanSmoke()){std::puts("READY P2_FULL_SURFACE_HUMAN_SMOKE faces=5332 live=20 native_input=1 mechanic=dry_terrain_traversal complete_gameplay=0");std::fflush(stdout);}
         } else if(phase==1&&++settle>=60){phase=2;settle=0;}
         else if(phase==2){float dx=goal.x-n->mSRT.t.x,dz=goal.z-n->mSRT.t.z;if(dx*dx+dz*dz<144){phase=3;settle=0;}}
         else if(phase==3&&++settle>=90){
@@ -113,11 +115,17 @@ int main(int argc,char** argv) {
     require(w==960 && h==540 && centered,"window baseline");
     std::printf("P2_SURFACE_WINDOW size=%dx%d centered=%d after_settings=1\n",w,h,int(centered));
     pc_window_set_control_mode(PC_CONTROL_CLASSIC);
+    if(!humanSmoke()){
     int device=SDL_JoystickAttachVirtual(SDL_JOYSTICK_TYPE_GAMECONTROLLER,SDL_CONTROLLER_AXIS_MAX,SDL_CONTROLLER_BUTTON_MAX,0);require(device>=0,"virtual controller attach");
     char guid[64];SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(device),guid,sizeof(guid));
     std::string mapping=std::string(guid)+",Surface travel virtual pad,a:b0,b:b1,x:b2,y:b3,back:b4,guide:b5,start:b6,leftstick:b7,rightstick:b8,leftshoulder:b9,rightshoulder:b10,dpup:b11,dpdown:b12,dpleft:b13,dpright:b14,leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:a4,righttrigger:a5,";
     require(SDL_GameControllerAddMapping(mapping.c_str())>=0,"virtual controller mapping");pad=SDL_JoystickOpen(device);require(pad!=nullptr,"virtual controller open");
     pc_window_input_assign(0,PC_INPUT_DEV_GAMEPAD,SDL_JoystickInstanceID(pad));pc_window_input_assign(1,PC_INPUT_DEV_NONE,-1);
+    } else {
+        int device=-1;for(int i=0;i<SDL_NumJoysticks();++i)if(SDL_IsGameController(i)){device=i;break;}
+        pc_window_input_assign(0,device>=0?PC_INPUT_DEV_GAMEPAD:PC_INPUT_DEV_KEYBOARD,device>=0?SDL_JoystickGetDeviceInstanceID(device):-1);
+        pc_window_input_assign(1,PC_INPUT_DEV_NONE,-1);
+    }
     pc_window_set_stick_invert(0);pc_window_set_cstick_invert(0);pc_window_set_gamepad_binding(PC_KEY_ACT_B,SDL_CONTROLLER_BUTTON_B);
     gsys->Initialise();pc_settings_p2d_init();nodeMgr=new NodeMgr();gsys->run(new FullSurfaceApp());return 0;
 }
