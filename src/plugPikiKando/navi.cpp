@@ -11,6 +11,7 @@
 #include "pc_p2_bulbmin.h"
 #include "Navi.h"
 #include "pc_randomizer.h"
+#include "pc_crowd_handover.h"
 #include "pc_crowd_slot_diag.h"
 #include <cstdlib>
 #if defined(PIKI_PC_PORT)
@@ -1620,6 +1621,7 @@ void Navi::callPikis(f32 radius, bool recallWorkers)
 					piki->endFire();
 				}
 
+				pc_crowd_handover::abandonSquadBeforeHandover(piki, this);
 				piki->mNavi = this;
 				if (state == PIKISTATE_Emotion) {
 					static_cast<PikiEmotionState*>(piki->getCurrState())->mCheerCount = 0;
@@ -1652,6 +1654,7 @@ void Navi::callPikis(f32 radius, bool recallWorkers)
 #endif
 				piki->mFSM->transit(piki, PIKISTATE_LookAt);
 			} else {
+				pc_crowd_handover::abandonSquadBeforeHandover(piki, this);
 				piki->mNavi             = this;
 				piki->mIsWhistlePending = true;
 			}
@@ -1662,6 +1665,7 @@ void Navi::callPikis(f32 radius, bool recallWorkers)
 
 		if (AICONST.mDoPluckWithCursor() && (mNaviID == piki->mPlayerId || piki->mPlayerId == -1) && piki->isBuried()
 		    && piki->getState() == PIKISTATE_Bury && dist < radius) {
+			pc_crowd_handover::abandonSquadBeforeHandover(piki, this);
 			piki->mNavi = this;
 			piki->mFSM->transit(piki, PIKISTATE_AutoNuki);
 			// Why would you put an `ERROR` here?  Just don't enable it??

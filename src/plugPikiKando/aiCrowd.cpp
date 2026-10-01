@@ -130,7 +130,13 @@ void ActCrowd::init(Creature* target)
 	if (mCPlateSlotID == -1) {
 		PRINT("slot id is -1\n");
 	} else {
+#if defined(PIKI_PC_PORT)
+		// Same plate as the slot just taken (navi->mPlateMgr == mPlateMgr here); named
+		// through the plate so it pairs with the decrement in cleanup() (#1033).
+		mPlateMgr->mPlatePikiCount++;
+#else
 		navi->incPlatePiki();
+#endif
 	}
 
 	if (!mPiki->isHolding()) {
@@ -272,7 +278,17 @@ void ActCrowd::cleanup()
 	}
 	if (mCPlateSlotID != -1) {
 		int count = mPiki->getCnt();
+#if defined(PIKI_PC_PORT)
+		// Netplay co-op #1033: the count follows the plate whose slot is released
+		// below (the one init() joined), not the Pikmin's current captain. With one
+		// captain these are the same plate; with two, a Pikmin whose mNavi changed
+		// under a live action left its old plate's count too high and the new one's
+		// too low, so Navi::refresh() later shrank mUsedSlotCount below the real
+		// occupancy and the next exec() hit "invalid slotId!".
+		mPlateMgr->mPlatePikiCount--;
+#else
 		mPiki->mNavi->decPlatePiki();
+#endif
 		mPlateMgr->releaseSlot(mPiki, mCPlateSlotID);
 		if (count > 0 && count == mPiki->getCnt()) {
 			ERROR("smart ptr err %d\n", mPiki->getCnt());
@@ -292,6 +308,17 @@ void ActCrowd::cleanup()
 int ActCrowd::exec()
 {
 	PC_CROWD_SLOT_CHECK("exec");
+#if defined(PIKI_PC_PORT)
+	// Netplay co-op #1033, defensive only (the ownership writes now abandon the squad
+	// action first and cleanup() keeps each plate's count): if the captain this Pikmin
+	// follows no longer owns the plate its action joined, rejoin the owner's plate.
+	// changeMode abandons this action (releasing the old slot and count on the plate it
+	// holds) and starts a fresh one on mNavi's plate. Logged once above.
+	if (mPlateMgr && mPiki->mNavi && mPiki->mNavi->mPlateMgr != mPlateMgr) {
+		mPiki->changeMode(PikiMode::FormationMode, mPiki->mNavi);
+		return ACTOUT_Continue;
+	}
+#endif
 	mPrevMode = mMode;
 	mMode = 5;
 	if (mHasRoute) {
