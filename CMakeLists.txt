@@ -2495,3 +2495,6 @@ pikmin_add_ci_fixture(captain_campaign_resume tools/p2_captain_campaign_resume_r
 
 # #1150 compile-only original tutorial encounter/carry diagnostic.
 pikmin_add_ci_fixture(tutorial_encounter tools/p2_tutorial_encounter_runtime.cpp)
+if(TARGET pikmin_ci_fixture_tutorial_encounter)
+    target_include_directories(pikmin_ci_fixture_tutorial_encounter PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
+endif()
