@@ -221,7 +221,12 @@ public:
         auto* a=naviMgr->getNavi(0);auto* b=naviMgr->getNavi(1);require(a&&b,"two campaign captains");
         if(!a->getCurrState()||!b->getCurrState())return result; // Initial startup readiness; initialized guards above fail closed.
         if(tick<0){
-            if((a->getCurrState()->getID()!=NAVISTATE_Walk && !(resumePhase&&withdrawQueued&&a->getCurrState()->getID()==NAVISTATE_Container))||b->getCurrState()->getID()!=NAVISTATE_Walk)return result;
+            // After established resume readiness the inactive captain may
+            // naturally idle while ordinary Onion UI input runs. The live
+            // initialized captain guard remains mandatory before this check.
+            const bool inactiveReady=b->getCurrState()->getID()==NAVISTATE_Walk
+                ||(resumePhase&&withdrawQueued&&b->getCurrState()->getID()==NAVISTATE_Idle);
+            if((a->getCurrState()->getID()!=NAVISTATE_Walk && !(resumePhase&&withdrawQueued&&a->getCurrState()->getID()==NAVISTATE_Container))||!inactiveReady)return result;
             require(pc_randomizer_resumed()==resumePhase,"actual production campaign load state");
             startDay=gameflow.mWorldClock.mCurrentDay;
             int live=0;Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p&&p->isAlive())++live;}
