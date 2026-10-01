@@ -17,6 +17,7 @@
 #include "Collision.h"
 #include "PlayerState.h"
 #include "GameStat.h"
+#include "Generator.h"
 #include "pc_window.h"
 #include "pc_bbft.h"
 #include "pc_p2_surface_topology.h"
@@ -96,8 +97,10 @@ public:
             std::printf("P2_SURFACE_WATER_SETTINGS blues_only_water=%d piki_invincible=%d species_probe=%d\n",pc_settings_get_blues_only_water(),pc_settings_get_piki_invincible(),int(speciesProbe()));
             if(speciesProbe()){
                 require(!pc_settings_get_blues_only_water() && !pc_settings_get_piki_invincible(),"hazard mod changes baseline");
-                int blues=0;Iterator roster(pikiMgr);CI_LOOP(roster){Piki* p=static_cast<Piki*>(*roster);if(p->mColor==Blue){probeBlue=p;++blues;}else if(p->mColor==Red && std::fabs(p->mSRT.t.x-220)<10)probeRed=p;}
-                require(blues==1 && probeRed && probeBlue,"disclosed species probe roster");
+                int blues=0, shorelineReds=0;Iterator roster(pikiMgr);CI_LOOP(roster){Piki* p=static_cast<Piki*>(*roster);if(p->mColor==Blue){probeBlue=p;++blues;}else if(p->mColor==Red && p->mGenerator && std::fabs(p->mGenerator->mGenPosition.x-220)<0.01f){probeRed=p;++shorelineReds;}}
+                std::printf("P2_SURFACE_WATER_PROBE_ROSTER blues=%d shoreline_reds=%d\n",blues,shorelineReds);std::fflush(stdout);
+                require(blues==1 && shorelineReds==1 && probeRed && probeBlue,"disclosed species probe roster");
+                std::printf("P2_SURFACE_WATER_PROBE_IDENTITIES red_generator=%u red_source=%.2f,%.2f,%.2f red_current=%.2f,%.2f,%.2f blue_generator=%u blue_current=%.2f,%.2f,%.2f\n",probeRed->getGeneratorID(),probeRed->mGenerator->mGenPosition.x,probeRed->mGenerator->mGenPosition.y,probeRed->mGenerator->mGenPosition.z,probeRed->mSRT.t.x,probeRed->mSRT.t.y,probeRed->mSRT.t.z,probeBlue->getGeneratorID(),probeBlue->mSRT.t.x,probeBlue->mSRT.t.y,probeBlue->mSRT.t.z);std::fflush(stdout);
             }
             require(std::fabs(mapMgr->getMinY(220,1000,true)-56.0442f)<0.1f,"retail shoreline starting floor");
             require(pc_p2_surface_water_box(Vector3f(0,148.63f,1000),0)==-1,"upper bridge incorrectly wet");
