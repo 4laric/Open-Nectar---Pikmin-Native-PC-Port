@@ -74,6 +74,7 @@ public:
   if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
   if(!pc_p2_preview_ready()||!n||!n->getCurrState()||gameflow.mPauseAll||gameflow.mIsUIOverlayActive||frames<90)return result;
   ++ticks;
+  for(int f=0;f<DEMOFLAG_COUNT;++f)playerState->mDemoFlags.setFlagOnly(f);
   if(phase==0 && n->getCurrState()->getID()==NAVISTATE_Starting)return result;
   if(phase==0){
    for(int f=0;f<DEMOFLAG_COUNT;++f)playerState->mDemoFlags.setFlagOnly(f);
