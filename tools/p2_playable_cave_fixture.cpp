@@ -38,6 +38,10 @@
 #include "NaviMgr.h"
 #include "Navi.h"
 #include "NaviState.h"
+#include "Camera.h"
+#include "Controller.h"
+#include "KeyConfig.h"
+#include "pc_p2_input_script.h"
 #include "Pellet.h"
 #include "Piki.h"
 #include "PikiMgr.h"
@@ -123,6 +127,74 @@ class CaveGuardedBootApp final : public PlugPikiApp {
     bool entrySeen = false, captainSeen = false, carryPicked = false;
     int throws = 0, lastThrow = -1000, initialBlocked = 0;
     bool positioned = false, exitPositioned = false;
+    int routePhase=0, routePoint=0, phaseTick=0;
+    bool walkTo(Navi* n,float x,float z) {
+        float dx=x-n->mSRT.t.x,dz=z-n->mSRT.t.z;
+        float distance=std::sqrt(dx*dx+dz*dz);
+        if(distance<10) {pc_p2_input_script_set(1,0);return true;}
+        require(n->controlCamera()!=nullptr,"navigation camera missing");
+        const Vector3f& axis=n->controlCamera()->mViewXAxis;
+        float speed=distance<30?40.0f:65.0f;
+        pc_p2_input_script_set(1,KBBTN_MSTICK_RIGHT,
+            int(std::lround(speed*(dx*axis.x+dz*axis.z)/distance)),
+            int(std::lround(speed*(dx*axis.z-dz*axis.x)/distance)));
+        return false;
+    }
+    void deliveryRoute(Navi* n) {
+        if(!positioned) {
+            require(blues()==20,"transport fixture requires disclosed 20 Blue entry");
+            positioned=true;phaseTick=observed;
+            std::puts("P2_CAVE_ROUTE_SETUP starting_species=20_blue_staged input=scripted_controller position_writes=0 velocity_writes=0 checkpoint_confirmation=bypassed");
+        }
+        if(observed%120==0) {
+            Pellet* p=pc_p2_cave_items_pellet_for("treasure_water");
+            std::printf("P2_CAVE_ROUTE_PROGRESS phase=%d point=%d navi=%.2f,%.2f alive=%d delivered=%d treasure=%.2f,%.2f\n",
+                routePhase,routePoint,n->mSRT.t.x,n->mSRT.t.z,alivePikis(),pc_p2_cave_items_delivered(),p?p->mSRT.t.x:0,p?p->mSRT.t.z:0);std::fflush(nullptr);
+        }
+        if(routePhase==0 || routePhase==4) {
+            pc_p2_input_script_set(1,observed-phaseTick<60?KeyConfig::_instance->mSetCursorKey.mBind:0);
+            if(observed-phaseTick>=75) {++routePhase;routePoint=0;}
+            return;
+        }
+        if(routePhase==1 || routePhase==5) {
+            static const float outward[][2]={{0,-100},{0,-200},{0,-300},{0,-400},{0,-480}};
+            static const float exitRoute[][2]={{0,-400},{0,-300},{0,-200},{0,-100},{0,0},{100,0},{200,0},{300,0},{400,0},{500,0},{600,0},{700,0},{800,0},{800,100}};
+            const auto* path=routePhase==1?outward:exitRoute;const int count=routePhase==1?5:14;
+            if(walkTo(n,path[routePoint][0],path[routePoint][1])) {
+                std::printf("P2_CAVE_ROUTE_WAYPOINT phase=%d point=%d x=%.2f z=%.2f\n",routePhase,routePoint,n->mSRT.t.x,n->mSRT.t.z);std::fflush(nullptr);
+                if(++routePoint==count) {++routePhase;phaseTick=observed;}
+            }
+            return;
+        }
+        if(routePhase==2) {
+            pc_p2_input_script_set(1,observed-phaseTick==1?KeyConfig::_instance->mDisbandKey.mBind:0);
+            if(observed-phaseTick>=30) {routePhase=3;phaseTick=observed;}
+            return;
+        }
+        if(routePhase==3) {
+            pc_p2_input_script_set(1,0);
+            Pellet* treasure=pc_p2_cave_items_pellet_for("treasure_water");
+            Iterator it(pikiMgr);CI_LOOP(it) {Piki* p=static_cast<Piki*>(*it);
+                if(treasure&&p&&p->isAlive()&&p->getStickObject()==treasure&&!carryPicked) {
+                    carryPicked=true;std::puts("P2_CAVE_ROUTE_PICKUP item=treasure_water attachment=ordinary");std::fflush(nullptr);
+                }
+            }
+            if(pc_p2_cave_items_delivered()==1) {
+                require(carryPicked,"delivery without observed pickup");
+                std::puts("P2_CAVE_ROUTE_DELIVERED count=1 source=native_pod");std::fflush(nullptr);
+                routePhase=4;phaseTick=observed;
+            }
+            return;
+        }
+        if(routePhase==6) {
+            pc_p2_input_script_set(1,0);
+            require(pc_p2_cave_items_delivered()==1,"delivery count changed");
+            if(pc_p2_cave_checkpoint(false)) {
+                std::printf("P2_CAVE_ROUTE_CHECKPOINT survivors=%d controller_traversal=1\n",alivePikis());std::fflush(nullptr);
+                require(pc_p2_cave_exit_after_checkpoint(),"native exit unavailable");
+            }
+        }
+    }
     const std::string scenario = std::getenv("P2_CAVE_TEST_SCENARIO") ? std::getenv("P2_CAVE_TEST_SCENARIO") : "boot";
     void require(bool yes, const char* why) { if (!yes) { std::printf("FAIL CAVE_PLAYABLE %s\n",why); std::fflush(nullptr); std::_Exit(1); } }
     int blues() {
@@ -132,6 +204,7 @@ class CaveGuardedBootApp final : public PlugPikiApp {
     void scenarioTick(Navi* n) {
         if (observed < 60) return;
         if (!positioned && scenario != "restore") require(alivePikis()==20,"fresh starting squad is not20");
+        if(scenario=="delivery_route") {deliveryRoute(n);return;}
         if (scenario=="boot") { require(pc_p2_cave_bud_count()==2,"two buds missing"); require(pc_p2_cave_items_spawned()==2,"two treasure actors missing"); pass("PASS CAVE_PLAYABLE_BOOT"); }
         if (scenario=="restore") { require(blues()>0,"blue squad not restored"); require(alivePikis()==20,"restored squad count"); pass("PASS CAVE_PLAYABLE_RESTORE"); }
         if (scenario=="carry_denial") {
@@ -158,7 +231,7 @@ class CaveGuardedBootApp final : public PlugPikiApp {
             if(!positioned) {
                 const auto* plan=pc_p2_cave_carry_plan();require(plan!=nullptr,"carry plan missing");
                 float x=0,z=0; bool found=false;
-                for(const auto& door:plan->doors) if(p2CaveCarryHazardFor(door.carry_block)=="elec" && pc_p2_cave_carry_door_pos(door.id.c_str(),&x,&z)) {found=true;break;}
+                for(const auto& door:plan->doors) if(door.carry_block=="elec" && pc_p2_cave_carry_door_pos(door.id.c_str(),&x,&z)) {found=true;break;}
                 require(found,"electric door missing");
                 initialBlocked=pc_p2_cave_carry_blocked(); int i=0;
                 Iterator it(pikiMgr); CI_LOOP(it) { Piki* p=static_cast<Piki*>(*it); if(!p||!p->isAlive())continue;
@@ -287,6 +360,7 @@ int main(int argc, char** argv) {
     pc_settings_init();
     gsys->Initialise();
     pc_settings_p2d_init();
+    pc_window_set_control_mode(PC_CONTROL_CLASSIC);
     pc_window_set_display_mode(PC_WINDOW_FULLSCREEN_WINDOWED);
     pc_window_set_window_size(960,540);
     pc_window_center();
