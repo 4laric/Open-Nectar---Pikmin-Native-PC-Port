@@ -1,4 +1,4 @@
-// #1154: ordinary imported-surface movement and the production F6 dialog.
+// #1154: ordinary surface/floor captain movement and production F6 dialogs.
 // The supervisor owns OS-dialog confirmation and a <=60 second child deadline.
 // No actor writes, direct cave requests, checkpoint calls or transfer writes.
 #include <SDL2/SDL.h>
@@ -34,17 +34,21 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <thread>
+#include <utility>
 
 namespace {
 SDL_Joystick* pad=nullptr;
 P2CaveSurfaceRoute route;
+bool roomRoute=false;
+std::vector<std::pair<float,float>> floorPath;
 void require(bool value,const char* why) {
     if(!value){std::printf("FAIL P2_CAVE_ROUTE_RUNTIME %s\n",why);std::fflush(nullptr);std::_Exit(1);}
 }
 bool transferExists() {
     std::error_code error;
-    bool exists=std::filesystem::exists("p2-cave-surface-transfer.txt",error);
+    bool exists=std::filesystem::exists(roomRoute?"p2-cave-transfer.txt":"p2-cave-surface-transfer.txt",error);
     require(!error,"transfer existence query failed");return exists;
 }
 void controls(int x=0,int y=0,bool whistle=false) {
@@ -74,8 +78,51 @@ void snapshot(Navi* n,const char* label) {
     require(C_NAVI_PARM(n,mHealth)>0,"captain health denominator");
     std::printf("P2_CAVE_ROUTE_SNAPSHOT label=%s survivors=%d red=%d hp=%.9g health=%.9g x=%.6f y=%.6f z=%.6f\n",label,total,red,n->mHealth,n->mHealth/C_NAVI_PARM(n,mHealth),n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z);std::fflush(nullptr);
 }
+void verifyIncoming(Navi* n) {
+    require(pc_p2_cave_floor()==route.party.floor,"native floor differs from entry");
+    require(pc_p2_cave_boundary_token()==route.party.token,"native token differs from entry");
+    require(C_NAVI_PARM(n,mHealth)>0,"captain health denominator");
+    const float health=n->mHealth/C_NAVI_PARM(n,mHealth);
+    require(std::isfinite(health)&&std::fabs(health-route.party.health)<=0.00001f,"restored captain health differs from entry");
+    std::map<std::pair<int,int>,int> expected,actual;
+    for(const auto& p:route.party.squad)++expected[{p.species,p.maturity}];
+    Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(p&&p->isAlive())++actual[{pc_p2_species(p),int(p->mHappa)}];}
+    require(actual==expected,"restored live roster differs from actual entry");
+}
 class CaveRouteApp final:public PlugPikiApp {
     bool captainSeen=false;int ticks=0,ready=0,phase=0,wait=0;Vector3f origin;
+    size_t floorPoint=0;
+    void floorTick(Navi* n) {
+        if(phase==0){
+            if(pc_p2_cave_floor()==0||++ready<30)return;
+            verifyIncoming(n);require(!transferExists(),"stale floor transfer exists");
+            require(!route.entrance.contains(n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z),"captain starts inside floor exit");
+            origin=n->mSRT.t;snapshot(n,"floor_entry");controls();
+            std::printf("P2_CAVE_ROUTE_FLOOR_READY floor=%d token=%s anchor=%.3f,%.3f,%.3f captain_only=1 full_squad_traversal=0 carry_route=0 treasure_completion=0 confirmation=external_native_dialog\n",route.party.floor,route.party.token.c_str(),route.entrance.x,route.entrance.y,route.entrance.z);
+            std::fflush(nullptr);phase=1;return;
+        }
+        require(pc_p2_cave_floor()==route.party.floor&&pc_p2_cave_boundary_token()==route.party.token,"floor identity changed");
+        if(phase==1){
+            const auto& target=floorPath[floorPoint];
+            const float dx=target.first-n->mSRT.t.x,dz=target.second-n->mSRT.t.z,d=std::sqrt(dx*dx+dz*dz);
+            if(d<10){
+                controls();std::printf("P2_CAVE_ROUTE_FLOOR_WAYPOINT floor=%d point=%zu x=%.6f y=%.6f z=%.6f\n",route.party.floor,floorPoint,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z);std::fflush(nullptr);
+                if(++floorPoint==floorPath.size()){phase=3;wait=0;}
+            }else{
+                require(n->controlCamera()!=nullptr,"floor movement camera missing");const Vector3f& a=n->controlCamera()->mViewXAxis;
+                controls(int(std::lround(65*(dx*a.x+dz*a.z)/d)),int(std::lround(65*(dx*a.z-dz*a.x)/d)));
+            }
+        }else if(phase==3){
+            controls();if(++wait<30)return;
+            require(route.entrance.contains(n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z),"captain outside floor exit");
+            require(!transferExists(),"floor transfer preceded F6");snapshot(n,"floor_before_F6");
+            const float dx=n->mSRT.t.x-origin.x,dz=n->mSRT.t.z-origin.z;
+            require(dx*dx+dz*dz>120*120,"insufficient ordinary floor movement");
+            std::printf("P2_CAVE_ROUTE_DIALOG_READY floor=%d distance=%.6f captain_only=1 full_squad_traversal=0 carry_route=0 treasure_completion=0 actor_writes=0 direct_checkpoint=0\n",route.party.floor,std::sqrt(dx*dx+dz*dz));std::fflush(nullptr);
+            f6("floor_exit");phase=5;wait=0;
+        }else if(phase==5){controls();require(++wait<120,"floor F6 cancelled or refused");}
+        if(ticks%60==0){std::printf("P2_CAVE_ROUTE_FLOOR_FRAME floor=%d tick=%d phase=%d point=%zu x=%.3f y=%.3f z=%.3f hp=%.3f\n",route.party.floor,ticks,phase,floorPoint,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,n->mHealth);std::fflush(nullptr);}
+    }
 public:
     int idle() override {
         int result=PlugPikiApp::idle();
@@ -87,7 +134,10 @@ public:
         if(initialized){
             p2_fixture_require_captain(GameStat::orimaDead,
                 naviMgr->isNaviDead(n)||n->getCurrState()->getID()==NAVISTATE_Dead,n->mHealth,ticks);
-            if(forced)p2_fixture_require_captain(true,true,0,ticks);
+            if(forced){
+                std::printf("P2_CAVE_ROUTE_NEGATIVE_INITIALIZED tick=%d state=%d actual_hp=%.9g after_engine_idle=1 actor_writes=0\n",ticks,n->getCurrState()->getID(),n->mHealth);std::fflush(nullptr);
+                p2_fixture_require_captain(true,true,0,ticks);
+            }
         }
         ++ticks;
         // No demo-flag writes and no automatic movie skip: original lifecycle.
@@ -96,19 +146,34 @@ public:
         require(!pc_settings_get_debug_keys(),"debug keys must remain disabled");
         // A held whistle enters a non-Walk captain state. Keep advancing that
         // input phase so its release happens through SDL instead of deadlocking.
-        if(n->getCurrState()->getID()!=NAVISTATE_Walk && phase!=2){
+        if(n->getCurrState()->getID()!=NAVISTATE_Walk && (roomRoute||phase!=2)){
             if(ticks%60==0){std::printf("P2_CAVE_ROUTE_WAIT tick=%d phase=%d captain_state=%d\n",ticks,phase,n->getCurrState()->getID());std::fflush(nullptr);}
             return result;
         }
         require(std::isfinite(n->mSRT.t.x)&&std::isfinite(n->mSRT.t.y)&&std::isfinite(n->mSRT.t.z),"nonfinite captain position");
+        if(roomRoute){floorTick(n);return result;}
         if(phase==0){
             if(!pc_p2_cave_surface_route_active()||++ready<30)return result;
             require(flowCont.mCurrentStage&&!std::strcmp(flowCont.mCurrentStage->mFileName,"stages/p2_tutorial.ini"),"wrong surface stage");
             require(!gameflow.mIsChallengeMode&&!pc_pikipelago_room_preview(),"wrong lifecycle");
             require(mapMgr->mMapModel&&mapMgr->mMapModel->mTriCount==5332,"imported face count changed");
             require(mapMgr->mMapModel->mTriList[673].mMapCode!=mapMgr->mMapModel->mTriList[4914].mMapCode,"duplicate slip overlay collapsed");
-            require(!route.entrance.contains(n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z),"starting captain already inside entrance");
+            if(route.entrance.contains(n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z)){
+                require(!transferExists(),"stale reentry transfer exists");snapshot(n,"surface_return");
+                controls();phase=6;return result;
+            }
             require(!transferExists(),"stale transfer exists");origin=n->mSRT.t;snapshot(n,"outside");controls();f6("outside");phase=1;wait=0;
+        }else if(phase==6){
+            // A returned checkpoint starts at the entrance. Walk out through
+            // ordinary SDL input before repeating the distant refusal/reentry.
+            const float dx=route.entrance.x-n->mSRT.t.x,dz=1350-n->mSRT.t.z,d=std::sqrt(dx*dx+dz*dz);
+            if(d<10){
+                require(!route.entrance.contains(n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z),"reentry approach still inside entrance");
+                controls();origin=n->mSRT.t;snapshot(n,"outside_reentry");f6("outside_reentry");phase=1;wait=0;
+            }else{
+                require(n->controlCamera()!=nullptr,"reentry movement camera missing");const Vector3f& a=n->controlCamera()->mViewXAxis;
+                controls(int(std::lround(65*(dx*a.x+dz*a.z)/d)),int(std::lround(65*(dx*a.z-dz*a.x)/d)));
+            }
         }else if(phase==1){
             require(!transferExists(),"distant F6 wrote transfer");
             if(++wait>=30){std::puts("P2_CAVE_ROUTE_DISTANT_REFUSED observed_ticks=30 transfer=absent");phase=2;wait=0;}
@@ -144,12 +209,26 @@ int main(int argc,char** argv){
     // Backstop remains live while SDL_ShowMessageBox blocks the engine thread.
     // The external supervisor still owns child-only termination and run records.
     std::thread([]{std::this_thread::sleep_for(std::chrono::seconds(60));std::puts("FAIL P2_CAVE_ROUTE_RUNTIME wall_timeout60");std::fflush(nullptr);std::_Exit(2);}).detach();
-    require(!transferExists(),"stale transfer at startup");
-    std::ifstream input("p2-cave-route-surface.txt");require(bool(input)&&p2_cave_surface_route_read(input,route),"surface route sidecar invalid");
-    require(route.party.squad.size()==20,"requires20 staged Pikmin");for(const auto& p:route.party.squad)require(p.species==P2SpeciesRed,"requires staged Red squad");
     SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");SDL_SetMainReady();pc_gpu_preference_apply();
     _putenv_s("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1");_putenv_s("PIKMIN_DEBUG_KEYS","0");pc_bbft_init(argc,argv);
-    require(pc_pikipelago_surface_course()!=nullptr,"ordinary surface option required");
+    roomRoute=pc_pikipelago_room_preview();
+    if(roomRoute){
+        std::ifstream input("p2-cave-entry.txt");require(bool(input),"floor entry unreadable");std::ostringstream text;text<<input.rdbuf();require(!input.bad(),"floor entry read failed");std::string error;
+        require(p2_cave_parse(text.str(),"P2_CAVE_ENTRY",route.party,error),"floor entry invalid");
+        std::ifstream transition("p2-cave-transition.txt");require(bool(transition)&&p2_cave_read_anchor(transition,route.party.floor,route.entrance),"floor transition invalid");
+        // Engineered floor centerline, with length/exit obtained from the real
+        // sidecar (floor2 salt1 is longer than floor1). No terrain changes.
+        require(route.entrance.x>=0,"floor centerline expects east exit");
+        // Avoid the real Pod at the origin without moving it or its geometry.
+        floorPath.push_back({0,-100});floorPath.push_back({100,-100});floorPath.push_back({100,0});
+        for(float x=200;x<route.entrance.x;x+=100)floorPath.push_back({x,0});
+        floorPath.push_back({route.entrance.x,0});floorPath.push_back({route.entrance.x,route.entrance.z});
+    }else{
+        require(pc_pikipelago_surface_course()!=nullptr,"ordinary surface or room option required");
+        std::ifstream input("p2-cave-route-surface.txt");require(bool(input)&&p2_cave_surface_route_read(input,route),"surface route sidecar invalid");
+    }
+    require(!transferExists(),"stale transfer at startup");
+    require(route.party.squad.size()==20,"requires20 incoming Pikmin");for(const auto& p:route.party.squad)require(p.species==P2SpeciesRed,"requires incoming Red squad");
     require(pc_window_init("P2 Cave route runtime",960,540),"window init");pc_settings_init();
     // Settings has no process-local debug-key setter. Refuse unsafe saved config;
     // the runner must stage debugKeys=0 in its private settings file.
