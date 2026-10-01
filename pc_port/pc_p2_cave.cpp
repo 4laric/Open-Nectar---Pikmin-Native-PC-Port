@@ -103,7 +103,7 @@ bool enterSurfaceCave(){
         const int state=p->getState(),species=pc_p2_species(p);
         if(state==PIKISTATE_Dying || state==PIKISTATE_Dead || state==PIKISTATE_Swallowed
             || state==PIKISTATE_Bury || state==PIKISTATE_Grow || p->getStickObject()
-            || species<0 || species>4)return false;
+            || species<0 || species>2)return false;
         party.squad.push_back({species,p->mHappa});
     }
     Iterator heads(itemMgr->getPikiHeadMgr());CI_LOOP(heads){if(static_cast<PikiHeadItem*>(*heads)->isAlive())return false;}

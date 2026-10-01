@@ -25,7 +25,7 @@ inline bool p2_cave_surface_route_read(std::istream& in, P2CaveSurfaceRoute& out
         || std::fabs(a.x)>100000 || std::fabs(a.y)>100000 || std::fabs(a.z)>100000) return false;
     for(int i=0;i<count;++i) {
         P2CaveSurvivor p;
-        if (!(in>>p.species>>p.maturity) || p.species<0 || p.species>4
+        if (!(in>>p.species>>p.maturity) || p.species<0 || p.species>2
             || p.maturity<0 || p.maturity>2) return false;
         value.party.squad.push_back(p);
     }
@@ -52,7 +52,7 @@ inline std::string p2_cave_surface_route_transfer(const P2CaveEntry& party,
     out<<std::setprecision(9)<<"P2_CAVE_ROUTE_TRANSFER_1\n"<<party.token<<'\n'
        <<x<<' '<<y<<' '<<z<<' '<<party.health<<' '<<party.squad.size()<<'\n';
     for(const auto& p:party.squad) {
-        if(p.species<0 || p.species>4 || p.maturity<0 || p.maturity>2)return {};
+        if(p.species<0 || p.species>2 || p.maturity<0 || p.maturity>2)return {};
         out<<p.species<<' '<<p.maturity<<'\n';
     }
     return out.str();
