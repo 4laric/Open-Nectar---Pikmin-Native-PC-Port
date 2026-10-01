@@ -4355,6 +4355,7 @@ void GameCoreSection::draw(Graphics& gfx)
 	}
 	pc_p2_cave_draw_transition(gfx);
 	pc_p2_breadbug_visual_draw(gfx);
+	pc_p2_breadbug_teki_draw_nests(gfx);
 	pc_p2_giant_breadbug_visual_draw(gfx);
 	pc_p2_bulblax_visual_draw(gfx);
 	pc_p2_queen_draw(gfx);

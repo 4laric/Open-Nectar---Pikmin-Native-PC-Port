@@ -372,6 +372,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_armor.cpp
     pc_port/pc_p2_otakara.cpp
     pc_port/pc_p2_otakara_fx.cpp
+    pc_port/pc_p2_bomb_visual.cpp
     pc_port/pc_p2_elecbug.cpp
     pc_port/pc_p2_tamago.cpp
     pc_port/pc_p2_astonish.cpp
@@ -2370,6 +2371,10 @@ add_library(p2_campaign_goal_lifecycle_runtime_compile OBJECT tools/p2_campaign_
 target_include_directories(p2_campaign_goal_lifecycle_runtime_compile PRIVATE pc_port ${SDL2_INCLUDE_DIRS})
 target_compile_options(p2_campaign_goal_lifecycle_runtime_compile PRIVATE ${NATIVE_COMPILE_OPTIONS} -Wno-unused-parameter)
 
+add_executable(p2_bomb_telegraph_test tools/p2_bomb_telegraph_test.cpp)
+target_include_directories(p2_bomb_telegraph_test PRIVATE pc_port)
+target_compile_options(p2_bomb_telegraph_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_bomb_telegraph_test COMMAND p2_bomb_telegraph_test)
 add_executable(p2_breadbug_corpse_test tools/p2_breadbug_corpse_test.cpp pc_port/pc_p2_breadbug_fsm.cpp)
 target_include_directories(p2_breadbug_corpse_test PRIVATE pc_port)
 target_compile_options(p2_breadbug_corpse_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
@@ -2381,3 +2386,13 @@ target_include_directories(p2_demon_fade_test PRIVATE pc_port)
 target_compile_options(p2_demon_fade_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 target_compile_definitions(p2_demon_fade_test PRIVATE DEMON_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/pc_port/pc_p2_sarai_demon.cpp")
 add_test(NAME p2_demon_fade_test COMMAND p2_demon_fade_test)
+
+add_executable(pc_corpse_origin_test tools/pc_corpse_origin_test.cpp)
+target_include_directories(pc_corpse_origin_test PRIVATE pc_port)
+target_compile_options(pc_corpse_origin_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_corpse_origin_test COMMAND pc_corpse_origin_test)
+
+add_executable(p2_breadbug_nest_test tools/p2_breadbug_nest_test.cpp)
+target_include_directories(p2_breadbug_nest_test PRIVATE pc_port)
+target_compile_options(p2_breadbug_nest_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_breadbug_nest_test COMMAND p2_breadbug_nest_test)
