@@ -1,5 +1,6 @@
 #include "pc_p2_ship.h"
 #include "pc_randomizer.h"
+#include "pc_p2_campaign_actor.h"
 #include "pc_p2_preview.h"
 #include "pc_bbft.h"
 #include "GoalItem.h"
@@ -377,7 +378,10 @@ void GoalItem::suckMe(Pellet* item)
                     // host CHECK (e.g. Deliver Dwarf Bulborb) with zero P2
                     // deaths. Bound P2 corpses already returned true above;
                     // unbound P2-actor corpses grant nothing here.
-                    if (pc_randomizer_p2_bridge() && item->mPelletView) {
+                    const bool sourceBound = item->mPelletView
+                        && pc_p2_campaign_source(static_cast<BTeki*>(item->mPelletView)) != 0;
+                    if (pc_randomizer_p2_bridge() && item->mPelletView
+                        && (!pc_randomizer_resolved_checks() || sourceBound)) {
                         std::printf("[Pikmin Randomizer] P2_P1_CHECK_SUPPRESSED host_type=%d stage=%d\n",
                             type, flowCont.mCurrentStage->mStageID);
                     } else {
