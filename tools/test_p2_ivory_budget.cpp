@@ -1,4 +1,7 @@
 #include "pc_p2_ivory_budget.h"
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <cassert>
 
 int main() {
