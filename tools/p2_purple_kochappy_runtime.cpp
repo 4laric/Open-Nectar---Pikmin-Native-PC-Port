@@ -114,13 +114,23 @@ public:
   }
   if(human())return result;
   if(age%60==0){std::printf("P2_PURPLE_KOCHAPPY_PROGRESS phase=%d age=%d hp=%.2f live=%d red=%d purple=%d followers=%d\n",phase,age,n->mHealth,live,red,purples,n->getPlatePikis());std::fflush(nullptr);}
-  if(phase==1){input(KeyConfig::_instance->mSetCursorKey.mBind);if(n->getPlatePikis()==20&&age-start>30){phase=2;start=age;}return result;}
+  if(phase==1){
+   const float radius=C_NAVI_PARM(n,mCursorMaxRadius);
+   require(std::isfinite(radius)&&radius>20,"loaded cursor radius permits ordinary approach");
+   const float approach=std::min(65.f,radius*.5f);
+   if(n->getPlatePikis()==20&&age-start>30){
+    if(distance(n->mSRT.t,violet->mSRT.t)>approach){point(n,violet->mSRT.t,true,KeyConfig::_instance->mSetCursorKey.mBind);return result;}
+    std::printf("P2_PURPLE_KOCHAPPY_APPROACH loaded_cursor_radius=%.4f captain_bud_xz=%.4f target_distance=%.4f SDL_walk=1\n",radius,distance(n->mSRT.t,violet->mSRT.t),approach);
+    phase=2;start=age;
+   }
+   input(KeyConfig::_instance->mSetCursorKey.mBind);return result;
+  }
   if(phase==2){
    PikiHeadItem* head=nullptr;Iterator hs(itemMgr->getPikiHeadMgr());CI_LOOP(hs){PikiHeadItem* h=static_cast<PikiHeadItem*>(*hs);if(h->isAlive()&&h->mP2Purple){require(!head,"more than one convertedPurple");head=h;}}
    if(head){input();phase=3;start=age;return result;}
    // Hold/release the ordinary A throw. Never call throwPiki or transit actors.
-   int cycle=(age-start)%120;point(n,violet->mSRT.t,false,cycle<18?KeyConfig::_instance->mThrowKey.mBind:0);
-   if(cycle<18||age%30==0){
+   int cycle=(age-start)%120;point(n,violet->mSRT.t,false,cycle>=30&&cycle<48?KeyConfig::_instance->mThrowKey.mBind:0);
+   if(cycle<70||age%30==0){
     int captured=0,index=0;Iterator samples(pikiMgr);
     CI_LOOP(samples){Piki* p=static_cast<Piki*>(*samples);if(!p->isAlive())continue;
      if(p->getStickObject()==violet)++captured;
