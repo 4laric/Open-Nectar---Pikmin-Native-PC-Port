@@ -192,10 +192,10 @@ public:
         }
         if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
         if(saving)return result;
-        if(!pc_randomizer_enabled()||!pc_randomizer_ready()||!naviMgr||!naviMgr->getActiveNavi()||gameflow.mPauseAll||(gameflow.mIsUIOverlayActive && !(resumePhase&&withdrawQueued)))return result;
+        if(!pc_randomizer_enabled()||!pc_randomizer_ready()||!naviMgr||!naviMgr->getActiveNavi()||(gameflow.mPauseAll && !(resumePhase&&withdrawQueued))||(gameflow.mIsUIOverlayActive && !(resumePhase&&withdrawQueued)))return result;
         auto* a=naviMgr->getNavi(0);auto* b=naviMgr->getNavi(1);require(a&&b,"two campaign captains");
         if(tick<0){
-            if(a->getCurrState()->getID()!=NAVISTATE_Walk||b->getCurrState()->getID()!=NAVISTATE_Walk)return result;
+            if((a->getCurrState()->getID()!=NAVISTATE_Walk && !(resumePhase&&withdrawQueued&&a->getCurrState()->getID()==NAVISTATE_Container))||b->getCurrState()->getID()!=NAVISTATE_Walk)return result;
             require(pc_randomizer_resumed()==resumePhase,"actual production campaign load state");
             startDay=gameflow.mWorldClock.mCurrentDay;
             int live=0;Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p&&p->isAlive())++live;}
