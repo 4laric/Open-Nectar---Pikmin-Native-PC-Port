@@ -3895,6 +3895,29 @@ static void pelletBonusTestTick()
     if (!any) return;
     if (++readyFrames < 120) return;
     done = true;
+    if (modeEnv && !std::strcmp(modeEnv, "show")) {
+        // Visual check: every colour x size laid out on the ground around the first captain (pellet colour
+        // as drawn vs the data logged here), never delivered.
+        Navi* navi = naviMgr ? naviMgr->getNavi(0) : nullptr;
+        if (!navi) return;
+        for (int pcolor = 0; pcolor < 3; ++pcolor) {
+            for (int size = 0; size < 4; ++size) {
+                Pellet* pelt = pelletMgr->newNumberPellet(pcolor, size);
+                if (!pelt) continue;
+                const f32 x = navi->mSRT.t.x + 60.0f * f32(size - 1.5f);
+                const f32 z = navi->mSRT.t.z + 70.0f + 55.0f * f32(pcolor);
+                pelt->init(Vector3f(x, mapMgr->getMinY(x, z, true) + 5.0f, z));
+                pelt->startAI(0);
+                const f32 scale = pelt->mConfig->mPelletScale();
+                pelt->mSRT.s.set(scale, scale, scale);
+                pelt->mStateMachine->transit(pelt, 0);
+                std::printf("[pellet-test] show pcolor=%d size=%d model=%s cfg_type=%d cfg_pcolor=%d\n", pcolor, size,
+                    pelt->mConfig->mModelId.mStringID, int(pelt->mConfig->mPelletType()), int(pelt->mConfig->mPelletColor()));
+            }
+        }
+        std::fflush(stdout);
+        return;
+    }
     if (carryMode) {
         // One 1-pellet per (carrier colour, pellet colour); one Pikmin recoloured to the carrier colour
         // carries it to the Onion ActTransport::decideGoal picks (Onions that do not exist are skipped).
