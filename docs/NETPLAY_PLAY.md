@@ -383,9 +383,13 @@ differently.
 
 - **DESYNC** (exit code 5): the games disagreed about the game state.
   Both games then trade a short report over the connection (up to 4 s) and
-  each writes it into its own run folder. **Zip your whole netplay run folder
-  and send it, and ask the other player to send theirs.** The message names the
-  folder. It holds:
+  each writes it into its own run folder; the game window can linger for that
+  time and Windows may call it "Not responding", which is harmless: wait for
+  the banner. **If a desync happens, BOTH players send their whole run
+  folder** (zip it): the host's and the joiner's folder are needed together,
+  and a replay of a continued session needs the host's folder (it holds the
+  start checkpoint the replay begins from). The message names the folder. It
+  holds:
   - `session-inputs.pknl`: every frame's two inputs and this game's state hash
     (written all session, flushed every 2 s, about 3 MB per hour), so the
     session can be replayed offline on one machine from its start checkpoint
@@ -683,8 +687,10 @@ player too:
   the seeds and whether the colour matched.
 - **A geyser throws only the captain standing on it, when there are two
   captains.** A captain more than 80 units from the geyser is left where it
-  is (issue #1035; the same rule as Open Nectar 0.9). With one captain nothing
-  changes.
+  is (issue #1035; the same rule as Open Nectar 0.9). It applies whenever two
+  captains exist, so it also holds in a single-player game with
+  `PIKMIN_P2_SECOND_CAPTAIN` set, not only in a netplay session. With one
+  captain nothing changes.
 
 ## Current limits
 
@@ -729,12 +735,24 @@ the sim, give it to both peers.
   reaches `<tick>`, captain 1 (and captain 2 in co-op, 40 units further
   along z) is placed `dx`,`dz` (default 100, 0) from the first active boss of
   that id, so its appear trigger fires and both cameras see it without a
-  scripted walk. Ids: 0 Beady Long Legs, 1 Burrowing Snagret, 3 Emperor
-  Bulblax. Inert when unset. It prints `[netplay-test] navis pulled to boss`.
+  scripted walk. Ids: 0 Beady Long Legs, 1 Burrowing Snagret, 2 Goolix
+  (no profile loads one, so there is nothing to pull to), 3 Emperor Bulblax.
+  Inert when unset. It prints `[netplay-test] navis pulled to boss`.
 - `PIKMIN_TEST_ONLY_PELLET_BONUS=1` (or `carry`) (issue #1034): spawns a
   matching and a non-matching number pellet of every size around each Onion
   and logs the seeds credited (`tools/netplay/pellet_bonus_check.py` checks
-  the log). `carry` uses real carriers.
+  the log). `carry` uses real carriers. `show` lays every colour and size out
+  on the ground around the first captain for a visual check (the drawn pellet
+  colour against the logged data) and never delivers them.
+- `PIKMIN_NETPLAY_TEST_TELEPORT="<tick>:<navi>:<x>:<z>;..."` (issue #1037):
+  once the deterministic tick reaches `<tick>`, captain `<navi>` (0 = P1, 1 =
+  P2) and every Pikmin it owns are placed next to (x, z), so a scripted pair
+  reaches a boss without a long walk (the Final Trial Emperor Bulblax is about
+  x=17 z=2450). It changes the sim, so give it to both peers; it only works
+  in a hidden test run (`PIKMIN_RANDOMIZER_TEST_BACKGROUND=1`, which
+  `--netplay-test-hidden` sets) and is inert in normal play. Also
+  `PIKMIN_NETPLAY_TEST_DESYNC_NUDGE=<frame>[:<kind>[:<ord>]]`, which nudges
+  one object on one peer so the forensics can be shown to name it.
 - `PIKMIN_TEST_CLOCK_TOD=<hour>` (issue #1031): jumps the world clock to
   that hour once, on the first gameplay tick, so a short run sits in the
   end-of-day countdown window (18.5 to 19.5).
