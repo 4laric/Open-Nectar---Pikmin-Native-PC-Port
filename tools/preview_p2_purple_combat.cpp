@@ -19,6 +19,9 @@
 #include "PikiState.h"
 #include "PikiHeadItem.h"
 #include "Pellet.h"
+#include "PelletState.h"
+#include "PikiAI.h"
+#include "GoalItem.h"
 #include "Pom.h"
 #include "Boss.h"
 #include "ItemMgr.h"
@@ -170,6 +173,95 @@ class PurpleCombatApp : public PlugPikiApp {
         std::printf("P2_PURPLE_PERSIST_RESUME_PASS day=%d maturity=%d stock=1 field_before=%d field_after=%d checkpoint_resumed=1 identity_injected=0 maturity_injected=0 strength=10 selection=4\n",
             expectedDay,savedMaturity,field,int(GameStat::mapPikis));
         std::fflush(nullptr); std::_Exit(0);
+    }
+
+    Pellet* haul=nullptr;
+    GoalItem* haulGoal=nullptr;
+    Piki* haulRed=nullptr;
+    Vector3f haulStart, approachStart;
+    int haulPhase=0, haulTicks=0, haulStable=0, rewardBefore=0, expectedReward=0, haulMaturity=-1;
+    bool haulMoved=false, haulGoalSeen=false, haulGone=false;
+    void assignHaul(Piki* p) {
+        require(p && p->isAlive() && p->getState()==PIKISTATE_Normal && !p->isStickTo(),"carrier not ready for native approach");
+        p->mActiveAction->abandon(nullptr);
+        p->mActiveAction->mCurrActionIdx=PikiAction::Transport;
+        p->mActiveAction->mChildActions[PikiAction::Transport].initialise(haul);
+        p->mMode=PikiMode::TransportMode;
+        approachStart=p->mSRT.t;
+        std::printf("P2_PURPLE_HAUL_ASSIGN purple=%d native_approach=1 slot_teleport=0 forced_attachment=0 x=%.2f z=%.2f\n",
+            int(pc_p2_is_purple(p)),p->mSRT.t.x,p->mSRT.t.z);
+    }
+    void transportStep(Navi* n) {
+        require(++haulTicks<7200,"native transport/delivery timeout");
+        require(acquired && acquired->isAlive() && pc_p2_is_purple(acquired) && !acquired->mP2White,"Purple carrier identity lost");
+        if(!haulPhase) {
+            haulGoal=itemMgr->getContainer(Red);
+            require(haulGoal && haulGoal->mOnionColour==Red,"active Red Onion required");
+            Iterator squad(pikiMgr); CI_LOOP(squad) {
+                Piki* p=static_cast<Piki*>(*squad);
+                if(p && p->isAlive() && !pc_p2_is_purple(p) && !p->mP2White && p->mColor==Red
+                    && p->getState()==PIKISTATE_Normal && p->mMode==PikiMode::FormationMode) { haulRed=p; break; }
+            }
+            require(haulRed,"ordinary Red control missing");
+            haul=pelletMgr->newNumberPellet(Red,NUMPEL_TenPellet);
+            require(haul && haul->mConfig->mCarryMinPikis()==10,"standard weight10 pellet missing");
+            expectedReward=haul->mConfig->mMatchingOnyonSeeds();require(expectedReward>0,"positive matching Onion yield required");
+            Vector3f pos=haulGoal->mSRT.t+Vector3f(180,0,80);pos.y=mapMgr->getMinY(pos.x,pos.z,true)+5;
+            require(std::isfinite(pos.y),"cargo placement terrain invalid");
+            haul->init(pos);haul->startAI(TRUE);haulStart=pos;
+            rewardBefore=GameStat::bornPikis[Red];haulMaturity=acquired->mHappa;haulPhase=1;haulTicks=0;
+            std::printf("P2_PURPLE_HAUL_BEGIN injected_cargo=1 weight=10 expected_reward=%d maturity=%d source_identity_injected=0 cargo_position_staged_once=1\n",expectedReward,haulMaturity);
+            return;
+        }
+        require(acquired->mHappa==haulMaturity,"carrier maturity changed");
+        bool present=false;Iterator pellets(pelletMgr);CI_LOOP(pellets) if(static_cast<Pellet*>(*pellets)==haul){present=true;break;}
+        const bool alive=present && haul->isAlive();
+        const int reward=GameStat::bornPikis[Red]-rewardBefore;
+        require(reward>=0 && reward<=expectedReward,"unexpected/duplicate Red reward");
+        if(haulPhase==1) {
+            require(alive,"cargo disappeared before assignment");
+            const Vector3f d=haul->mSRT.t-haulStart;const float drift=d.x*d.x+d.z*d.z;
+            if(haulTicks<90 || drift>=0.25f){haulStart=haul->mSRT.t;haulStable=0;}else ++haulStable;
+            if(haulStable>=30 && haul->isVisible() && haul->getState()==PELSTATE_Normal){haulStart=haul->mSRT.t;assignHaul(haulRed);haulPhase=2;haulTicks=0;haulStable=0;}
+        } else if(haulPhase==2) {
+            require(alive && reward==0,"control consumed cargo or generated reward");
+            const Vector3f d=haul->mSRT.t-haulStart;require(d.x*d.x+d.z*d.z<4,"single Red moved weight10 cargo");
+            require(haul->mCarrierCounter<=1,"unexpected helper in control");
+            if(haulRed->getStickObject()==haul && haul->mCarrierCounter==1) ++haulStable;
+            if(haulStable>=90) {
+                haulRed->mActiveAction->abandon(nullptr);haulRed->changeMode(PikiMode::FormationMode,n);
+                require(haulRed->getStickObject()!=haul,"Red control did not detach");
+                std::puts("P2_PURPLE_HAUL_RED_CONTROL_PASS strength=1 attached_observations=90 displacement_under_2=1 reward=0");
+                haulStart=haul->mSRT.t;assignHaul(acquired);haulPhase=3;haulTicks=0;haulStable=0;
+            }
+        } else {
+            if(alive) {
+                int attached=0;Iterator bodies(pikiMgr);CI_LOOP(bodies) if(static_cast<Piki*>(*bodies)->getStickObject()==haul) ++attached;
+                require(attached<=1 && haul->mCarrierCounter<=10,"extra carrier invalidates single-Purple haul");
+                const Vector3f d=haul->mSRT.t-haulStart;
+                if(!haulMoved && attached==1 && haul->mCarrierCounter==10 && d.x*d.x+d.z*d.z>100) {
+                    const Vector3f approach=acquired->mSRT.t-approachStart;
+                    require(approach.x*approach.x+approach.z*approach.z>25,"native approach not observed");
+                    haulMoved=true;
+                    std::printf("P2_PURPLE_HAUL_MOVEMENT_PASS strength=10 attached=1 distance=%.2f native_approach=1 forced_attachment=0 cargo_teleport_after_spawn=0\n",std::sqrt(d.x*d.x+d.z*d.z));
+                }
+                if(haul->getState()==PELSTATE_Goal) {
+                    require(haulMoved && haul->mTargetGoal==static_cast<Suckable*>(haulGoal),"wrong destination or missing native transport");
+                    if(!haulGoalSeen) std::puts("P2_PURPLE_HAUL_ONION_UPTAKE target=red_onion native_goal_state=1");
+                    haulGoalSeen=true;
+                }
+            } else {
+                require(haulGoalSeen && haulMoved,"cargo vanished without observed Onion uptake");haulGone=true;
+            }
+            if(haulGone && reward==expectedReward && acquired->getStickObject()!=haul && acquired->getState()==PIKISTATE_Normal) {
+                if(++haulStable>=90) {
+                    std::printf("P2_PURPLE_HAUL_DELIVERY_PASS reward=%d expected_reward=%d purple_alive=1 maturity=%d released=1 stable_ticks=%d duplicate_reward=0 injected_cargo=1 scripted_action_assignment=1 controls_validated=0\n",reward,expectedReward,haulMaturity,haulStable);
+                    std::fflush(nullptr);std::_Exit(0);
+                }
+            } else haulStable=0;
+        }
+        if(haulTicks%120==0) std::printf("P2_PURPLE_HAUL_PROGRESS phase=%d ticks=%d cargo_alive=%d cargo_state=%d strength=%d purple_state=%d attached=%d reward=%d expected=%d\n",
+            haulPhase,haulTicks,int(alive),alive?haul->getState():-1,alive?int(haul->mCarrierCounter):0,acquired->getState(),int(acquired->getStickObject()==haul),reward,expectedReward);
     }
 
     Piki* naturalStep(Navi* n) {
@@ -445,7 +537,7 @@ public:
             }
             return result;
         }
-        if(mode("persistence_dayend")) beginPersistence(n); else combatStep(n);
+        if(mode("persistence_dayend")) beginPersistence(n); else if(mode("transport_delivery")) transportStep(n); else combatStep(n);
         return result;
     }
 };
@@ -453,8 +545,8 @@ int main(int argc,char** argv) {
     if(std::getenv("P2_FIXTURE_FORCE_CAPTAIN_DOWN")) p2_fixture_require_captain(false,false,0,0);
     setvbuf(stdout,nullptr,_IONBF,0);
     const char* mode=std::getenv("P2_PURPLE_COMBAT_MODE");
-    if(mode && std::strcmp(mode,"adult_direct") && std::strcmp(mode,"persistence_dayend") && std::strcmp(mode,"persistence_resume")) {
-        std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=adult_direct,persistence_dayend,persistence_resume\n",mode); return 2;
+    if(mode && std::strcmp(mode,"adult_direct") && std::strcmp(mode,"persistence_dayend") && std::strcmp(mode,"persistence_resume") && std::strcmp(mode,"transport_delivery")) {
+        std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=adult_direct,persistence_dayend,persistence_resume,transport_delivery\n",mode); return 2;
     }
     SDL_SetMainReady(); pc_gpu_preference_apply(); pc_bbft_init(argc,argv);
     require(pc_randomizer_purple_campaign() && pc_randomizer_p2_bridge(),"ordinary Purple seed campaign required");
