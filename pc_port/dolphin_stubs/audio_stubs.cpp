@@ -69,9 +69,9 @@ bool sMenuActive = false;
 bool sPauseActive = false;
 bool sDVDPauseActive = false;
 u8 sEventResumeFrames = 0;
-// Shared by every caller: the Pikmin throw sounds are not owned by a captain (the ready sound comes from the Pikmin,
-// the fly sound from the captain's throw), so the latch moves with every call, audible on this PC or not.
-bool sPikiFlyReady = false;
+// One latch per source (indexed like kAudioSources below): the ready sound is raised for the captain holding the
+// Pikmin and the fly sound inside that captain's throw. The latch moves with every call, audible on this PC or not.
+bool sPikiFlyReady[3] = {};
 u16 sPulledVoiceHistory[3] = { 4, 5, 6 };
 u32 sVoiceRandom = 0x6D2B79F5u;
 u32 sPikiGayaTimer = 0;
@@ -663,15 +663,16 @@ void Jac_PlayOrimaSe(u32 id) {
         Jac_PlaySystemSe(JACSYS_Unk40);
     }
     if (id & JACORIMA_PIKISOUND) {
-        // The ready sound plays once until the throw's fly sound resets it. The ready sound is raised by the
-        // Pikmin, the fly sound inside a captain's scope, so on the PC that does not play that captain the fly call
-        // never reaches the mixer; the latch has to move with every call or it stays set and silences the next
-        // ready sound there.
+        // The ready sound plays once until the throw's fly sound resets it. On the PC that does not play that
+        // captain the fly call never reaches the mixer, so the latch moves with every call or it stays set and
+        // silences the next ready sound there. Each captain has its own latch, so one captain holding a Pikmin
+        // does not silence the other's ready sound; a throw also clears the unowned slot.
+        const int flySlot = audio_source_slot();
         if (audio_demo_active()
-            || (sPikiFlyReady && id == JACORIMA_PikiFlyReady))
+            || (sPikiFlyReady[flySlot] && id == JACORIMA_PikiFlyReady))
             return;
-        if (id == JACORIMA_PikiFly) sPikiFlyReady = false;
-        else if (id == JACORIMA_PikiFlyReady) sPikiFlyReady = true;
+        if (id == JACORIMA_PikiFly) sPikiFlyReady[flySlot] = sPikiFlyReady[2] = false;
+        else if (id == JACORIMA_PikiFlyReady) sPikiFlyReady[flySlot] = true;
         if (audible) pc_audio_send_orima_se(static_cast<u16>(id & 0x7FFF), false, true);
         return;
     }
