@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <vector>
+#include <queue>
 #include "system.h"
 #include "App.h"
 #include "Node.h"
@@ -15,6 +17,7 @@
 #include "NaviMgr.h"
 #include "NaviState.h"
 #include "Camera.h"
+#include "Route.h"
 #include "KeyConfig.h"
 #include "Kontroller.h"
 #include "Piki.h"
@@ -62,8 +65,22 @@ void point(Navi* n,const Vector3f& goal,bool walk,unsigned keys=0){
  }
  input(keys,x,y);
 }
+std::vector<Vector3f> approachRoute(const Vector3f& from,const Vector3f& goal){
+ require(routeMgr,"native route graph missing");const unsigned handle='test';int count=routeMgr->getNumWayPoints(handle);require(count>0 && count<=4096,"native route graph size");
+ int start=-1,end=-1;float nearStart=1e30f,nearEnd=1e30f;
+ for(int i=0;i<count;++i){WayPoint* w=routeMgr->getWayPoint(handle,i);if(!w || !w->mIsOpen || w->inWater())continue;
+  float dx=w->mPosition.x-from.x,dz=w->mPosition.z-from.z,dy=w->mPosition.y-from.y;float a=dx*dx+dz*dz+9*dy*dy;
+  dx=w->mPosition.x-goal.x;dz=w->mPosition.z-goal.z;dy=w->mPosition.y-goal.y;float b=dx*dx+dz*dz+9*dy*dy;
+  if(a<nearStart){nearStart=a;start=i;}if(b<nearEnd){nearEnd=b;end=i;}}
+ require(start>=0 && end>=0,"open land route endpoints missing");std::vector<int> parent(count,-1);std::queue<int> pending;parent[start]=start;pending.push(start);
+ while(!pending.empty() && parent[end]<0){int here=pending.front();pending.pop();WayPoint* w=routeMgr->getWayPoint(handle,here);
+  for(int i=0;i<int(w->mLinkCount) && i<8;++i){int next=w->mLinkIndices[i];if(next<0 || next>=count || parent[next]>=0)continue;WayPoint* candidate=routeMgr->getWayPoint(handle,next);if(!candidate || !candidate->mIsOpen || candidate->inWater())continue;parent[next]=here;pending.push(next);}}
+ require(parent[end]>=0,"original slot needs closed gate or unreachable land route");std::vector<int> reversed;for(int i=end;;i=parent[i]){reversed.push_back(i);if(i==start)break;require(reversed.size()<=size_t(count),"route cycle");}
+ std::vector<Vector3f> route;for(auto i=reversed.rbegin();i!=reversed.rend();++i){WayPoint* w=routeMgr->getWayPoint(handle,*i);route.push_back(w->mPosition);std::printf("P2_GENERATED_ROUTE_LEG index=%d waypoint=%d xyz=%.3f,%.3f,%.3f open_land=1 world_writes=0\n",int(route.size()-1),*i,w->mPosition.x,w->mPosition.y,w->mPosition.z);}
+ std::fflush(nullptr);return route;
+}
 class DeliveryApp:public PlugPikiApp {
- int frames=0,observed=0,phase=0,phaseStart=0;bool captainSeen=false;Teki* enemy=nullptr;
+ int frames=0,observed=0,phase=0,phaseStart=0;bool captainSeen=false;Teki* enemy=nullptr;std::vector<Vector3f> route;size_t routeLeg=0;
  public:
  int idle()override{
   int result=PlugPikiApp::idle();Navi* n=naviMgr?naviMgr->getNavi():nullptr;
@@ -94,9 +111,11 @@ class DeliveryApp:public PlugPikiApp {
   }
   if(observed%60==0){int assigned=-1;int kind=pc_window_input_get_assignment(0,&assigned);const Vector3f& axis=n->controlCamera()->mViewXAxis;std::printf("P2_GENERATED_INPUT_OBS request=%d,%d SDL=%d,%d native=%d,%d frozen=%d port=%d assigned_kind=%d assigned_id=%d camera_axis=%.3f,%.3f,%.3f\n",requestedX,requestedY,int(SDL_JoystickGetAxis(pad,SDL_CONTROLLER_AXIS_LEFTX)),int(SDL_JoystickGetAxis(pad,SDL_CONTROLLER_AXIS_LEFTY)),int(n->mKontroller->mMainStickX),int(n->mKontroller->mMainStickY),int(n->mKontroller->mIsControllerFrozen),n->mKontroller->mPlayerNum,kind,assigned,axis.x,axis.y,axis.z);std::printf("P2_GENERATED_PROGRESS frame=%d phase=%d alive=%d enemy_alive=%d hp=%.3f navi=%.3f,%.3f enemy=%.3f,%.3f\n",frames,phase,alive,int(enemy->isAlive()),n->mHealth,n->mSRT.t.x,n->mSRT.t.z,enemy->mSRT.t.x,enemy->mSRT.t.z);std::fflush(nullptr);}
   if(pc_randomizer_checked(Check)){std::puts("PASS P2_GENERATED_DELIVERY actual_native_check=1 direct_event_writes=0 scripted_virtual_P1=1");std::fflush(nullptr);std::_Exit(0);}
-  if(phase==1){input(KeyConfig::_instance->mSetCursorKey.mBind);if(observed-phaseStart>100){phase=2;phaseStart=observed;}return result;}
+  if(phase==1){input(KeyConfig::_instance->mSetCursorKey.mBind);if(observed-phaseStart>100){phase=2;phaseStart=observed;route=approachRoute(n->mSRT.t,enemy->mSRT.t);}return result;}
   float dx=enemy->mSRT.t.x-n->mSRT.t.x,dz=enemy->mSRT.t.z-n->mSRT.t.z;
-  if(phase==2){point(n,enemy->mSRT.t,true);if(dx*dx+dz*dz<120*120){phase=3;phaseStart=observed;input();}return result;}
+  if(phase==2){
+   while(routeLeg<route.size()){float rx=route[routeLeg].x-n->mSRT.t.x,rz=route[routeLeg].z-n->mSRT.t.z;if(rx*rx+rz*rz>25*25)break;std::printf("P2_GENERATED_ROUTE_REACHED leg=%d navi=%.3f,%.3f\n",int(routeLeg),n->mSRT.t.x,n->mSRT.t.z);++routeLeg;}
+   point(n,routeLeg<route.size()?route[routeLeg]:enemy->mSRT.t,true);if(dx*dx+dz*dz<120*120){phase=3;phaseStart=observed;input();}return result;}
   if(phase==3){
    unsigned keys=(observed-phaseStart)%60<15?KeyConfig::_instance->mThrowKey.mBind:0;
    point(n,enemy->mSRT.t,false,keys);
