@@ -56,9 +56,25 @@ int triggerAxisOf(int stored)
 	return (axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT || axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT) ? axis : -1;
 }
 
+/// Whether any action other than `self` is explicitly bound to the physical
+/// axis direction (axis, positive?). A trigger axis is claimed in either
+/// direction, since only its positive travel is a press.
+bool axisClaimedByOther(const int* stored, int self, int axis, int positive, bool trigger)
+{
+	for (int a = 0; a < PC_KEY_ACT_COUNT; a++) {
+		const int s = stored[a];
+		if (a == self || s < PC_GP_AXIS_BIND)
+			continue;
+		const int sAxis = (s - PC_GP_AXIS_BIND) / 2;
+		if (sAxis == axis && (trigger || ((s - PC_GP_AXIS_BIND) & 1) == positive))
+			return true;
+	}
+	return false;
+}
+
 } // namespace
 
-void pc_pad_route_build(const int* stored, PcPadRoute* route)
+void pc_pad_route_build(const int* stored, PcPadRoute* route, int stickInvert, int cstickInvert)
 {
 	for (int a = 0; a < PC_KEY_ACT_COUNT; a++) {
 		const int s = stored[a];
@@ -75,7 +91,10 @@ void pc_pad_route_build(const int* stored, PcPadRoute* route)
 		const int s = stored[kAction[side]];
 		route->triggerAxis[side] = -1;
 		if (s == PC_GP_DEFAULT) {
-			route->triggerAxis[side] = kStockAxis[side];
+			// The stock trigger feeds a default L / R unless another action has
+			// been bound to that same trigger: explicit means explicit.
+			if (!axisClaimedByOther(stored, kAction[side], kStockAxis[side], 1, true))
+				route->triggerAxis[side] = kStockAxis[side];
 		} else if (triggerAxisOf(s) >= 0) {
 			route->triggerAxis[side]   = triggerAxisOf(s);
 			route->bind[kAction[side]] = -1;
@@ -86,9 +105,24 @@ void pc_pad_route_build(const int* stored, PcPadRoute* route)
 		                                           PC_KEY_ACT_STICK_UP, PC_KEY_ACT_STICK_DOWN };
 	static const int kCStick[PC_PAD_DIR_COUNT] = { PC_KEY_ACT_CSTICK_LEFT, PC_KEY_ACT_CSTICK_RIGHT,
 		                                           PC_KEY_ACT_CSTICK_UP, PC_KEY_ACT_CSTICK_DOWN };
+	// A stick direction at its default is driven by the physical stick; another
+	// action explicitly bound to that same stick direction takes it over. The
+	// physical direction is the pad's, before the invert option flips it.
+	static const int kAxisX[2]    = { SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_RIGHTX };
+	static const int kAxisY[2]    = { SDL_CONTROLLER_AXIS_LEFTY, SDL_CONTROLLER_AXIS_RIGHTY };
+	static const int kPositive[PC_PAD_DIR_COUNT] = { 0, 1, 0, 1 }; // left, right, up, down
 	for (int d = 0; d < PC_PAD_DIR_COUNT; d++) {
-		route->stick[d]  = stored[kStick[d]] != PC_GP_UNBOUND;
-		route->cstick[d] = stored[kCStick[d]] != PC_GP_UNBOUND;
+		for (int which = 0; which < 2; which++) {
+			const int action = which ? kCStick[d] : kStick[d];
+			const int inv    = which ? cstickInvert : stickInvert;
+			const bool vert  = d == PC_PAD_DIR_UP || d == PC_PAD_DIR_DOWN;
+			bool live        = stored[action] != PC_GP_UNBOUND;
+			if (live && stored[action] == PC_GP_DEFAULT) {
+				const int positive = kPositive[d] ^ ((inv >> (vert ? 1 : 0)) & 1);
+				live = !axisClaimedByOther(stored, action, vert ? kAxisY[which] : kAxisX[which], positive, false);
+			}
+			(which ? route->cstick : route->stick)[d] = live;
+		}
 	}
 	route->freeCamSwarmDpad = stored[PC_KEY_ACT_SWARM] == PC_GP_DEFAULT;
 }

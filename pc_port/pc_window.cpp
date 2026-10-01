@@ -421,7 +421,9 @@ void pc_window_message_control_label(char tag, char* buf, unsigned bufSize)
 		bool allSingle = true;
 		for (int i = 0; i < 4; i++) {
 			const char* name = pc_bind_is_mouse(keys[i]) ? nullptr : SDL_GetScancodeName(keys[i]);
-			if (!name || name[1] != '\0') {
+			// A cleared C-stick key is scancode 0, whose name is "": check the
+			// terminator before reading name[1].
+			if (!name || !name[0] || name[1] != '\0') {
 				allSingle = false;
 				break;
 			}
@@ -749,12 +751,11 @@ bool pc_window_init(const char* title, int width, int height) {
 static bool pc_window_read_gamepad(SDL_GameController* ctl, u16& button, s8& stickX, s8& stickY,
                                    s8& substickX, s8& substickY, u8& triggerL, u8& triggerR, bool& swarmHeld, int player = 0)
 {
-    // La ruta resuelve qué
-    // entradas físicas alimentan cada acción; el analógico de los gatillos y
+    // La ruta resuelve qué entradas físicas alimentan cada acción; el analógico de los gatillos y
     // de los sticks solo llega al juego mientras siga ligado a ella.
     initGamepadBindings();
     PcPadRoute route;
-    pc_pad_route_build(sGamepadBindings, &route);
+    pc_pad_route_build(sGamepadBindings, &route, sStickInvert, sCStickInvert);
     PcPadRaw raw;
     for (int b = 0; b < SDL_CONTROLLER_BUTTON_MAX; b++)
         raw.button[b] = SDL_GameControllerGetButton(ctl, static_cast<SDL_GameControllerButton>(b)) != 0;

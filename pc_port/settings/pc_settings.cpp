@@ -2355,8 +2355,10 @@ void pollKeyCapture(SDL_GameController* ctl) {
         break;
     }
     // Mouse buttons are bindable too (issue #42). Capture starts from
-    // Enter/Space/pad A, never from a click, so every button is fair
-    // game; buttons already held when capture opened are ignored.
+    // Enter/Space/pad A or a tap on the selected row; the press mask is
+    // dropped and sCapturePrevMouse latched when it starts, so the click that
+    // started it is never bound, and any other button is fair game. Buttons
+    // already held when capture opened are ignored.
     // Use the event edge mask so a click shorter than a frame counts.
     if (sWaitingForKey) {
         const Uint32 mouseWent = pc_window_take_mouse_pressed() & ~sCapturePrevMouse;
@@ -3147,8 +3149,13 @@ void drawSubmenuRow(DGXGraphics* gfx, int x, int y, int w,
 // leave the selected action unbound (see bindListTap).
 void drawBindClearButton(DGXGraphics* gfx, bool enabled) {
     const BindListGeom g = bindListGeom();
-    fillRoundRectGrad(gfx, g.clearX, g.clearY, g.clearW, g.clearH, 8,
-                      Colour(58, 51, 31, 235), Colour(7, 7, 8, 245));
+    // fillRoundRectGrad draws nothing under the native (P2D) layer, so give the
+    // button its glass plate there or it would read as a bare label.
+    if (pc_settings_p2d_active())
+        pc_settings_p2d_plate(g.clearX, g.clearY, g.clearW, g.clearH, 1);
+    else
+        fillRoundRectGrad(gfx, g.clearX, g.clearY, g.clearW, g.clearH, 8,
+                          Colour(58, 51, 31, 235), Colour(7, 7, 8, 245));
     const char* label = "Clear binding";
     drawTextOutline(g.clearX + g.clearW / 2 - menuTextWidth(label) / 2, g.clearY + 2, "%s",
                     enabled ? Colour(255, 190, 28, 255) : Colour(170, 140, 90, 255),
