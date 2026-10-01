@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include "pc_p2_captain.h"
 #include <cassert>
 #include <cstdio>
