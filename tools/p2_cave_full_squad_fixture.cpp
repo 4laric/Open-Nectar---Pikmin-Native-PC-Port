@@ -100,7 +100,7 @@ class CaveFullSquadApp final : public PlugPikiApp {
     int frames = 0, observed = 0;
     bool entrySeen = false, captainSeen = false, carryPicked = false;
     bool positioned = false;
-    int routePhase=0, routePoint=0, phaseTick=0, settled=0, regroupPoint=0;
+    int routePhase=0, routePoint=0, phaseTick=0, settled=0, regroupPoint=0, recoveryPoint=0;
     struct Trace {Piki* actor;bool wet=false,east=false;};
     std::vector<Trace> squad;
     int crossed=0;
@@ -199,11 +199,17 @@ class CaveFullSquadApp final : public PlugPikiApp {
             return;
         }
         if(routePhase==4) {
-            if(observed-phaseTick<90 || following()!=20) {
-                require(observed-phaseTick<450,"ordinary whistle did not recover full squad");
-                gatherAtCursor(n);return;
+            require(observed-phaseTick<1200,"ordinary whistle did not recover full squad");
+            // Recall the disbanded treasure-side group first, then walk back
+            // to the pod: the returned carrier is beyond whistle range here.
+            if(observed-phaseTick<90) {gatherAtCursor(n);return;}
+            static const float recovery[][2]={{0,-300},{0,-200},{0,-100},{100,-100},{100,0}};
+            if(recoveryPoint<5) {
+                if(walkTo(n,recovery[recoveryPoint][0],recovery[recoveryPoint][1]))++recoveryPoint;
+                return;
             }
-            pc_p2_input_script_set(1,0);routePhase=5;routePoint=0;
+            if(following()!=20) {gatherAtCursor(n);return;}
+            pc_p2_input_script_set(1,0);routePhase=5;routePoint=6;
             std::puts("P2_CAVE_FULL_SQUAD_RECALLED following=20");std::fflush(nullptr);
             return;
         }
