@@ -296,8 +296,17 @@ class PurpleCombatApp : public PlugPikiApp {
                 }
             } else haulStable=0;
         }
-        if(haulTicks%120==0) std::printf("P2_PURPLE_HAUL_PROGRESS phase=%d ticks=%d cargo_alive=%d cargo_state=%d strength=%d purple_state=%d attached=%d reward=%d expected=%d\n",
-            haulPhase,haulTicks,int(alive),alive?haul->getState():-1,alive?int(haul->mCarrierCounter):0,acquired->getState(),int(acquired->getStickObject()==haul),reward,expectedReward);
+        if(haulTicks%120==0) {
+            std::printf("P2_PURPLE_HAUL_PROGRESS phase=%d ticks=%d cargo_alive=%d cargo_state=%d strength=%d purple_state=%d attached=%d reward=%d expected=%d recalls=%d\n",
+                haulPhase,haulTicks,int(alive),alive?haul->getState():-1,alive?int(haul->mCarrierCounter):0,acquired->getState(),int(acquired->getStickObject()==haul),reward,expectedReward,haulRecalls);
+            if(alive) {
+                const Vector3f goal=haulGoal->getGoalPos();
+                std::printf("P2_PURPLE_HAUL_ROUTE cargo=%.2f,%.2f,%.2f velocity=%.2f,%.2f,%.2f goal=%.2f,%.2f,%.2f target_red=%d target_present=%d goal_waypoint=%d computed_speed=%.3f\n",
+                    haul->mSRT.t.x,haul->mSRT.t.y,haul->mSRT.t.z,haul->mVelocity.x,haul->mVelocity.y,haul->mVelocity.z,
+                    goal.x,goal.y,goal.z,int(haul->mTargetGoal==static_cast<Suckable*>(haulGoal)),
+                    int(haul->mTargetGoal!=nullptr),haulGoal->getRouteIndex(),pc_p2_transport_speed(haul,0));
+            }
+        }
     }
 
     Piki* naturalStep(Navi* n) {
