@@ -72,6 +72,7 @@ void pc_randomizer_p2_delivery_reset();
 // it exactly once through the durable ordinary receipt host (p1Proxy=false).
 // Returns true when a bound P2 delivery was handled; callers use the return value
 // so a bound P2 corpse is never ALSO credited to the P1-proxy bestiary check.
+bool pc_randomizer_resolved_checks();
 bool pc_randomizer_p2_corpse_delivered(const void* tekiview, int type, int stage, bool gameplay);
 // Read-only receipt query for the TEST-ONLY autoplay bot (bot-v2 gap 1):
 // true once this process granted (or saw a durable duplicate of) the Onion

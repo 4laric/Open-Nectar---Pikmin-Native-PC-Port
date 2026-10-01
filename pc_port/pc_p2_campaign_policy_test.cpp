@@ -12,8 +12,15 @@ int main() {
             assert(p2campaign::hostType(sources[i],original,true)==original);
         }
     }
-    for (unsigned source: {0u,1u,31u,45u,99u,999u})
+    for (unsigned source: {0u,1u,45u,99u,999u})
         assert(p2campaign::hostType(source,17,false)==17);
+    // #1042: admitted Bulborb Larva uses the Swallow vehicle; protected
+    // source slots keep their original host instead of being replaced.
+    for (int original=0;original<34;++original) {
+        assert(p2campaign::hostType(31u,original,false)==4);
+        assert(p2campaign::hostType(31u,original,true)==original);
+    }
+    assert(p2campaign::hasStaticHost(31u));
     // #898: Breadbug (PanModoki 38) rides TEKI_Collec (8); protected spawns keep theirs.
     for (int original=0;original<34;++original) {
         assert(p2campaign::hostType(38u,original,false)==8);
