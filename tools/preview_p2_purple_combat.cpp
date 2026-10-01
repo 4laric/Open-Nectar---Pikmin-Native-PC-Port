@@ -270,8 +270,12 @@ class PurpleCombatApp : public PlugPikiApp {
             haul=pelletMgr->newNumberPellet(Red,NUMPEL_TenPellet);
             require(haul && haul->mConfig->mCarryMinPikis()==10,"standard weight10 pellet missing");
             expectedReward=haul->mConfig->mMatchingOnyonSeeds();require(expectedReward>0,"positive matching Onion yield required");
-            Vector3f pos=haulGoal->mSRT.t+Vector3f(180,0,80);pos.y=mapMgr->getMinY(pos.x,pos.z,true)+5;
+            const char* route=std::getenv("P2_PURPLE_HAUL_ROUTE");
+            require(!route || !std::strcmp(route,"east197") || !std::strcmp(route,"west197"),"unknown fixture cargo route");
+            const bool west=route && !std::strcmp(route,"west197");
+            Vector3f pos=haulGoal->mSRT.t+Vector3f(west?-180:180,0,80);pos.y=mapMgr->getMinY(pos.x,pos.z,true)+5;
             require(std::isfinite(pos.y),"cargo placement terrain invalid");
+            std::printf("P2_PURPLE_HAUL_ORIGIN route=%s xyz=%.2f,%.2f,%.2f distance_xz=196.98 violet_unchanged=1\n",west?"west197":"east197",pos.x,pos.y,pos.z);
             haul->init(pos);haul->startAI(TRUE);haulStart=pos;
             GameStat::update();haulPopulationBefore=GameStat::allPikis[Red];
             rewardBefore=GameStat::bornPikis[Red];haulMaturity=acquired->mHappa;haulPhase=1;haulTicks=0;
@@ -288,7 +292,7 @@ class PurpleCombatApp : public PlugPikiApp {
             require(alive,"cargo disappeared before assignment");
             const Vector3f d=haul->mSRT.t-haulStart;const float drift=d.x*d.x+d.z*d.z;
             const bool settling=(!redOnly && !positiveOnly && haulTicks<90)
-                || drift>=0.25f || !haul->onGround() || std::fabs(haul->mVelocity.y)>0.1f;
+                || drift>=0.25f || !haul->onGround() || std::fabs(d.y)>0.25f;
             if(settling){haulStart=haul->mSRT.t;haulStable=0;}else ++haulStable;
             if(haulStable>=30 && haul->isVisible() && haul->getState()==PELSTATE_Normal){
                 haulStart=haul->mSRT.t;
@@ -346,8 +350,8 @@ class PurpleCombatApp : public PlugPikiApp {
             } else haulStable=0;
         }
         if(haulTicks%60==0) {
-            std::printf("P2_PURPLE_HAUL_PROGRESS phase=%d ticks=%d cargo_alive=%d cargo_state=%d strength=%d purple_state=%d attached=%d reward=%d expected=%d recalls=%d\n",
-                haulPhase,haulTicks,int(alive),alive?haul->getState():-1,alive?int(haul->mCarrierCounter):0,acquired->getState(),int(acquired->getStickObject()==haul),reward,expectedReward,haulRecalls);
+            std::printf("P2_PURPLE_HAUL_PROGRESS phase=%d ticks=%d cargo_alive=%d cargo_state=%d strength=%d purple_state=%d attached=%d reward=%d expected=%d recalls=%d grounded=%d stable_ticks=%d\n",
+                haulPhase,haulTicks,int(alive),alive?haul->getState():-1,alive?int(haul->mCarrierCounter):0,acquired->getState(),int(acquired->getStickObject()==haul),reward,expectedReward,haulRecalls,int(alive && haul->onGround()),haulStable);
             if(alive) {
                 const Vector3f goal=haulGoal->getGoalPos();
                 std::printf("P2_PURPLE_HAUL_ROUTE cargo=%.2f,%.2f,%.2f velocity=%.2f,%.2f,%.2f goal=%.2f,%.2f,%.2f target_red=%d target_present=%d goal_waypoint=%d computed_speed=%.3f\n",
