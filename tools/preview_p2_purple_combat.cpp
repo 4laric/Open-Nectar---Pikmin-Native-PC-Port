@@ -94,6 +94,7 @@ class PurpleCombatApp : public PlugPikiApp {
     bool captainSeen=false, thrown=false, descentStaged=false, isolated=false;
     Piki* input=nullptr;
     Piki* acquired=nullptr;
+    bool manualWithdrawRequested=false;
     BTeki* target=nullptr;
     unsigned targetUid=0;
     float initialHealth=0, maxQueued=0, regeneration=0;
@@ -632,6 +633,16 @@ public:
         if (!acquired) {
             const int state=n->getCurrState()->getID();
             if(state==NAVISTATE_Walk||state==NAVISTATE_Idle) {
+                // Ordinary visible play leaves the starting squad in its Onion.
+                // This ready-scene companion explicitly uses native withdrawal.
+                if(mode("transport_manual") && !manualWithdrawRequested) {
+                    GameStat::update();
+                    GoalItem* onion=itemMgr->getContainer(Red);
+                    if(int(GameStat::mapPikis)==0 && onion && onion->getTotalStorePikis()>=20) {
+                        onion->exitPikis(20);manualWithdrawRequested=true;
+                        std::puts("P2_PURPLE_MANUAL_WITHDRAW count=20 native_onion_exit=1 scripted_setup=1");
+                    }
+                }
                 if(mode("transport_red_control") || mode("transport_staged") || mode("transport_manual")) {
                     const bool stagedStart=mode("transport_staged") || mode("transport_manual");
                     int aliveCount=0,normalCount=0,redCount=0,formationCount=0;
