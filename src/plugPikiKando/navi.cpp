@@ -230,7 +230,20 @@ void Navi::decPlatePiki()
  */
 int Navi::getPlatePikis()
 {
+#if defined(PIKI_PC_PORT)
+	// Netplay co-op #1033: the squad size the plate refreshes to is the number of
+	// slots it holds. With one captain mPlatePikiCount is always equal to
+	// mUsedSlotCount (ActCrowd is the only getSlot/releaseSlot caller and moves
+	// them together), so this returns the same number. With two captains a count
+	// that drifted from the slots (a Pikmin whose mNavi changed under a live
+	// ActCrowd) made CPlate::refresh() shrink mUsedSlotCount below the real
+	// occupancy and the next ActCrowd::exec panicked with "invalid slotId!".
+	// Reading the slots makes that impossible whatever moved mNavi; drift is
+	// logged once (pc_crowd_slot_diag::countDrift) so the cause can still be found.
+	return mPlateMgr->mUsedSlotCount;
+#else
 	return mPlateMgr->mPlatePikiCount;
+#endif
 }
 
 /**
@@ -2869,7 +2882,7 @@ void Navi::makeCStick(bool isSunset)
 			strength = 0.6f * (strength / 0.9f);
 		}
 
-		pc_crowd_slot_diag::refreshShrink(unsigned(gsys->mTotalFrames), mNaviID, getPlatePikis(), mPlateMgr->mTotalSlotCount, mPlateMgr->mUsedSlotCount);
+		pc_crowd_slot_diag::countDrift(unsigned(gsys->mTotalFrames), mNaviID, int(mPlateMgr->mPlatePikiCount), mPlateMgr->mUsedSlotCount, mPlateMgr->mTotalSlotCount);
 		mPlateMgr->refresh(getPlatePikis(), strength);
 
 		mPlateMgr->setPos(mSRT.t, targetYaw, mVelocity);
@@ -2888,7 +2901,7 @@ void Navi::makeCStick(bool isSunset)
 			mPlateDirLocked = true;
 		}
 
-		pc_crowd_slot_diag::refreshShrink(unsigned(gsys->mTotalFrames), mNaviID, getPlatePikis(), mPlateMgr->mTotalSlotCount, mPlateMgr->mUsedSlotCount);
+		pc_crowd_slot_diag::countDrift(unsigned(gsys->mTotalFrames), mNaviID, int(mPlateMgr->mPlatePikiCount), mPlateMgr->mUsedSlotCount, mPlateMgr->mTotalSlotCount);
 		mPlateMgr->refresh(getPlatePikis(), 0.0f);
 		Iterator iter(mPlateMgr);
 		f32 nearestPikiDist = 12800.0f;

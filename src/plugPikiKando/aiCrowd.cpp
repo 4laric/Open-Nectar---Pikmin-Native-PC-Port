@@ -59,6 +59,24 @@ do { \
 #define PC_CROWD_SLOT_CHECK(WHERE) do { } while (0)
 #endif
 
+#if defined(PIKI_PC_PORT)
+// Netplay co-op #1033: true when mPlateMgr still lists mPiki at mCPlateSlotID although
+// its used-slot counter no longer covers it; the counter is raised back over the
+// slot (every Pikmin the counter cut off then finds its own slot valid again).
+// False when the slot is gone (idx out of range or listed to somebody else).
+#define PC_CROWD_RESTORE_SLOT() \
+	([&]() -> bool { \
+		if (mCPlateSlotID < 0 || mCPlateSlotID >= mPlateMgr->mSlotListSize \
+		    || mPlateMgr->mSlotList[mCPlateSlotID].mOccupant.getPtr() != mPiki) { \
+			return false; \
+		} \
+		if (mPlateMgr->mUsedSlotCount <= mCPlateSlotID) { \
+			mPlateMgr->mUsedSlotCount = mCPlateSlotID + 1; \
+		} \
+		return true; \
+	}())
+#endif
+
 /**
  * @todo: Documentation
  * @note UNUSED Size: 00009C
@@ -315,6 +333,13 @@ int ActCrowd::exec()
 	// changeMode abandons this action (releasing the old slot and count on the plate it
 	// holds) and starts a fresh one on mNavi's plate. Logged once above.
 	if (mPlateMgr && mPiki->mNavi && mPiki->mNavi->mPlateMgr != mPlateMgr) {
+		if (!mPlateMgr->validSlot(mCPlateSlotID) && !PC_CROWD_RESTORE_SLOT()) {
+			// The old plate lost this slot: nothing to release.
+			if (mCPlateSlotID != -1) {
+				mPlateMgr->mPlatePikiCount--;
+			}
+			mCPlateSlotID = -1;
+		}
 		mPiki->changeMode(PikiMode::FormationMode, mPiki->mNavi);
 		return ACTOUT_Continue;
 	}
@@ -373,7 +398,28 @@ int ActCrowd::exec()
 	}
 
 	if (!mPlateMgr->validSlot(mCPlateSlotID)) {
+#if defined(PIKI_PC_PORT)
+		// Netplay co-op #1033: this used to end both games of a session. Logged
+		// once, then recovered the same way on both peers (nothing here reads
+		// anything but sim state):
+		//  - the plate still lists this Pikmin at its slot, so only the plate's
+		//    used-slot counter fell behind: raise it back over the slot. Every
+		//    other Pikmin the counter cut off finds its own slot valid again;
+		//  - otherwise the slot is gone: drop the count init() added, forget the
+		//    slot (cleanup() then skips the release) and rejoin mNavi's plate.
+		pc_crowd_slot_diag::invalidSlot(unsigned(gsys->mTotalFrames), mPiki, mPiki->mNavi->mNaviID, mCPlateSlotID, mPlateMgr->mUsedSlotCount,
+		                                mPlateMgr->mTotalSlotCount, unsigned(mPlateMgr->mPlatePikiCount));
+		if (!PC_CROWD_RESTORE_SLOT()) {
+			if (mCPlateSlotID != -1) {
+				mPlateMgr->mPlatePikiCount--;
+			}
+			mCPlateSlotID = -1;
+			mPiki->changeMode(PikiMode::FormationMode, mPiki->mNavi);
+			return ACTOUT_Continue;
+		}
+#else
 		ERROR("invalid slotId!\n");
+#endif
 	}
 
 	Vector3f platePos = mPlateMgr->mSlotList[mCPlateSlotID].mOffsetFromCenter + mPlateMgr->mPlateCenter;

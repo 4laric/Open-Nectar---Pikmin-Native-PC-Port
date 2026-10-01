@@ -52,15 +52,33 @@ inline void ownerMismatch(const Info& i)
 	std::fflush(stdout);
 }
 
-// Navi::refresh is about to hand its plate a pikmin count below the slots it
-// has: the bookkeeping is already miswired (a legitimate leave lowers the
-// count and mTotalSlotCount together).
-inline void refreshShrink(unsigned frame, int naviId, int count, int total, int used)
+// Navi::makeCStick is about to refresh the plate. Outside an ActCrowd call the
+// plate's pikmin count and its used slots are always equal (init and cleanup move
+// them together), so a difference means some write left them miswired. The
+// refresh itself reads the slots (Navi::getPlatePikis), so a drift is harmless
+// now; the line says which captain's plate drifted and when. Once per captain.
+inline void countDrift(unsigned frame, int naviId, int count, int used, int total)
 {
-	if (count >= total) return;
+	static bool sSeen[8] = {};
+	if (count == used) return;
+	if (naviId >= 0 && naviId < 8) {
+		if (sSeen[naviId]) return;
+		sSeen[naviId] = true;
+	}
 	if (lineCount() >= kMaxLines) return;
 	++lineCount();
-	std::printf("[crowd-slot] REFRESH_SHRINK frame=%u navi=%d count=%d total=%d used=%d\n", frame, naviId, count, total, used);
+	std::printf("[crowd-slot] COUNT_DRIFT frame=%u navi=%d count=%d used=%d total=%d\n", frame, naviId, count, used, total);
+	std::fflush(stdout);
+}
+
+// ActCrowd::exec found its slot id outside the plate's used slots (the state
+// that used to end the session with "invalid slotId!").
+inline void invalidSlot(unsigned frame, const void* piki, int naviId, int slot, int used, int total, unsigned count)
+{
+	if (lineCount() >= kMaxLines) return;
+	++lineCount();
+	std::printf("[crowd-slot] INVALID_SLOT frame=%u piki=%p navi=%d slot=%d used=%d total=%d count=%u\n", frame, piki, naviId, slot, used,
+	            total, count);
 	std::fflush(stdout);
 }
 
