@@ -51,7 +51,7 @@ static int population() {
     return count;
 }
 
-static int phase=0,ticks=0,inputFrame=0,whiteBodies=0,targetBodies=5;static bool refundMode=false,refundThrown=false,refundObserved=false;static int aimDestination=3;static bool manualSmoke=false,manualReady=false;static Vector3f goal;static SDL_Joystick* virtualPad=nullptr;
+static int phase=0,ticks=0,inputFrame=0,whiteBodies=0,targetBodies=5;static bool refundMode=false,refundThrown=false,refundObserved=false;static int aimDestination=3;static int heldWhite=0,heldRed=0;static bool manualSmoke=false,manualReady=false;static Vector3f goal;static SDL_Joystick* virtualPad=nullptr;
 class AcquisitionController:public Kontroller {
 public:
  AcquisitionController():Kontroller(1){}
@@ -71,11 +71,13 @@ public:
   }
   if((phase==3 && (whiteBodies<targetBodies || (refundMode&&refundThrown&&!refundObserved)) && ticks%(refundMode?60:20)<15)||(phase==5 && ticks%60<50))keys=KeyConfig::_instance->mThrowKey.mBind;
   if(phase==9 && n && n->getCurrState() && n->getCurrState()->getID()==NAVISTATE_Walk && ticks%30<15)keys=KeyConfig::_instance->mDisbandKey.mBind;
+  if(phase==11){keys=KeyConfig::_instance->mThrowKey.mBind;if(heldRed && ticks%30<5)keys|=KBBTN_DPAD_RIGHT;}
   if(gameflow.mIsUIOverlayActive)keys=(inputFrame%30<15)?KBBTN_A:0;
   SDL_JoystickSetVirtualButton(virtualPad,SDL_CONTROLLER_BUTTON_A,int((keys&KBBTN_A)!=0));
   SDL_JoystickSetVirtualButton(virtualPad,SDL_CONTROLLER_BUTTON_B,int((keys&KBBTN_B)!=0));
   SDL_JoystickSetVirtualButton(virtualPad,SDL_CONTROLLER_BUTTON_X,int((keys&KBBTN_X)!=0));
   SDL_JoystickSetVirtualButton(virtualPad,SDL_CONTROLLER_BUTTON_Y,int((keys&KBBTN_Y)!=0));
+  SDL_JoystickSetVirtualButton(virtualPad,SDL_CONTROLLER_BUTTON_DPAD_RIGHT,int((keys&KBBTN_DPAD_RIGHT)!=0));
   SDL_JoystickSetVirtualAxis(virtualPad,SDL_CONTROLLER_AXIS_LEFTX,Sint16(int(mMainStickX)*32767/74));
   SDL_JoystickSetVirtualAxis(virtualPad,SDL_CONTROLLER_AXIS_LEFTY,Sint16(-int(mMainStickY)*32767/74));
   SDL_JoystickUpdate();
@@ -158,12 +160,21 @@ public:
   if(refundMode && phase==5 && white==1 && heads==0 && n->getCurrState()->getID()==NAVISTATE_Walk){
    require(red==19 && spent==1 && captured==0,"player pluck changed counts/budget");
    if(refundObserved){std::puts("P2_WHITE_REFUND_PASS red=19 white=1 sprouts=0 bodies=20 spent=1 ordinary_throw=1 ordinary_pluck=1");std::fflush(nullptr);std::_Exit(0);}
-   int follows=0;Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(p->isAlive()&&p->mMode==PikiMode::FormationMode){++follows;require(pc_p2_is_white(p),"non-White follower before refund throw");}}
-   require(follows==1,"must select exactly one naturally plucked White");
-   refundThrown=true;goal=flower->mSRT.t;phase=2;ticks=0;
-   std::puts("P2_WHITE_REFUND_INPUT sole_follower=White spent=1");
+   refundThrown=true;aimDestination=11;goal=flower->mSRT.t;phase=2;ticks=0;
+   std::puts("P2_WHITE_REFUND_SELECTION_BEGIN actual_dpad=1 spent=1");
   }
-  if(refundMode && refundThrown && phase==3 && white==0 && heads==1 && captured==0){
+  heldWhite=0;heldRed=0;
+  if(n->getCurrState()->getID()==NAVISTATE_ThrowWait){
+   NaviThrowWaitState* state=static_cast<NaviThrowWaitState*>(n->getCurrState());
+   Piki* held=state->mHeldThrowPiki;
+   if(held && state->mIsHoldingThrowPiki && held->isAlive() && held->getState()==PIKISTATE_Hanged){if(pc_p2_is_white(held))heldWhite=1;else heldRed=1;}
+  }
+  if(phase==11){
+   require(ticks<240,"actual D-pad White selection timeout");
+   if(ticks%30==0){std::printf("P2_WHITE_SELECTION_WAIT ticks=%d held_white=%d held_red=%d preferred=%d nstate=%d\n",ticks,heldWhite,heldRed,pc_preferred_throw_color_for(n),n->getCurrState()->getID());std::fflush(nullptr);}
+   if(heldWhite){phase=12;ticks=0;std::puts("P2_WHITE_REFUND_SELECTED actual_held_white=1 release_next_input=1");}
+  }
+  if(refundMode && refundThrown && phase==12 && white==0 && heads==1 && captured==0){
    require(red==19 && spent==1,"same White spent slot or altered Red population");refundObserved=true;phase=4;ticks=0;
    std::puts("P2_WHITE_REFUND_REBIRTH live_white=0 sprouts=1 spent=1 same_actor_preserved=0");
   }
@@ -185,7 +196,7 @@ int main(int argc,char**argv){
     std::puts("Experimental preview window set to 960x540 windowed and centered");
     int device=SDL_JoystickAttachVirtual(SDL_JOYSTICK_TYPE_GAMECONTROLLER,SDL_CONTROLLER_AXIS_MAX,SDL_CONTROLLER_BUTTON_MAX,0);require(device>=0,"virtual gamepad attach failed");
     char guid[64];SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(device),guid,sizeof(guid));std::string mapping=std::string(guid)+",White acceptance virtual pad,a:b0,b:b1,x:b2,y:b3,back:b4,guide:b5,start:b6,leftstick:b7,rightstick:b8,leftshoulder:b9,rightshoulder:b10,dpup:b11,dpdown:b12,dpleft:b13,dpright:b14,leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:a4,righttrigger:a5,";require(SDL_GameControllerAddMapping(mapping.c_str())>=0,"virtual gamepad mapping failed");
-    virtualPad=SDL_JoystickOpen(device);require(virtualPad!=nullptr,"virtual gamepad open failed");pc_window_input_assign(0,PC_INPUT_DEV_GAMEPAD,SDL_JoystickInstanceID(virtualPad));pc_window_input_assign(1,PC_INPUT_DEV_NONE,-1);pc_window_set_stick_invert(0);pc_window_set_cstick_invert(0);pc_window_set_gamepad_binding(PC_KEY_ACT_A,SDL_CONTROLLER_BUTTON_A);pc_window_set_gamepad_binding(PC_KEY_ACT_B,SDL_CONTROLLER_BUTTON_B);pc_window_set_gamepad_binding(PC_KEY_ACT_X,SDL_CONTROLLER_BUTTON_X);pc_window_set_gamepad_binding(PC_KEY_ACT_Y,SDL_CONTROLLER_BUTTON_Y);scriptedInput=new AcquisitionController();
+    virtualPad=SDL_JoystickOpen(device);require(virtualPad!=nullptr,"virtual gamepad open failed");pc_window_input_assign(0,PC_INPUT_DEV_GAMEPAD,SDL_JoystickInstanceID(virtualPad));pc_window_input_assign(1,PC_INPUT_DEV_NONE,-1);pc_window_set_stick_invert(0);pc_window_set_cstick_invert(0);pc_window_set_gamepad_binding(PC_KEY_ACT_A,SDL_CONTROLLER_BUTTON_A);pc_window_set_gamepad_binding(PC_KEY_ACT_B,SDL_CONTROLLER_BUTTON_B);pc_window_set_gamepad_binding(PC_KEY_ACT_X,SDL_CONTROLLER_BUTTON_X);pc_window_set_gamepad_binding(PC_KEY_ACT_Y,SDL_CONTROLLER_BUTTON_Y);pc_window_set_gamepad_binding(PC_KEY_ACT_DPAD_RIGHT,SDL_CONTROLLER_BUTTON_DPAD_RIGHT);scriptedInput=new AcquisitionController();
     std::puts("P2_WHITE_INPUT_METHOD SDL_virtual_gamepad native_controller_and_UI_polling=1");
     gsys->Initialise();pc_settings_p2d_init();nodeMgr=new NodeMgr();gsys->run(new AcquisitionApp());return 0;
 }
