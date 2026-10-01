@@ -194,6 +194,7 @@ public:
         if(saving)return result;
         if(!pc_randomizer_enabled()||!pc_randomizer_ready()||!naviMgr||!naviMgr->getActiveNavi()||(gameflow.mPauseAll && !(resumePhase&&withdrawQueued))||(gameflow.mIsUIOverlayActive && !(resumePhase&&withdrawQueued)))return result;
         auto* a=naviMgr->getNavi(0);auto* b=naviMgr->getNavi(1);require(a&&b,"two campaign captains");
+        if(!a->getCurrState()||!b->getCurrState())return result; // Initial startup readiness; initialized guards above fail closed.
         if(tick<0){
             if((a->getCurrState()->getID()!=NAVISTATE_Walk && !(resumePhase&&withdrawQueued&&a->getCurrState()->getID()==NAVISTATE_Container))||b->getCurrState()->getID()!=NAVISTATE_Walk)return result;
             require(pc_randomizer_resumed()==resumePhase,"actual production campaign load state");
@@ -259,7 +260,7 @@ public:
 } // namespace
 int main(int argc,char** argv){
     for(int i=1;i<argc;++i){resumePhase|=std::string(argv[i])=="--resume-phase";sForceCaptainDown|=std::string(argv[i])=="--force-captain-down";sForceInactiveDown|=std::string(argv[i])=="--force-inactive-down";forceNullState|=std::string(argv[i])=="--force-null-state";forceMissingManager|=std::string(argv[i])=="--force-missing-manager";}
-    _putenv_s("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1");SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetMainReady();pc_gpu_preference_apply();pc_bbft_init(argc,argv);
+    SDL_setenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1",1);SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetMainReady();pc_gpu_preference_apply();pc_bbft_init(argc,argv);
     require(pc_randomizer_second_captain(),"generated bootstrap captain option required");
     require(pc_randomizer_enabled()&&!pc_pikipelago_room_preview(),"ordinary randomizer campaign required");
     if(!pc_window_init("Captain native campaign save/resume",960,540))return 3;
@@ -270,6 +271,9 @@ int main(int argc,char** argv){
     pc_coop_set_pending(false);
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");
     const int device=SDL_JoystickAttachVirtual(SDL_JOYSTICK_TYPE_GAMECONTROLLER,SDL_CONTROLLER_AXIS_MAX,SDL_CONTROLLER_BUTTON_MAX,0);require(device>=0,"attach virtual");
+    char guid[64];SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(device),guid,sizeof(guid));
+    const std::string mapping=std::string(guid)+",Combined captain SDL pad,a:b0,b:b1,x:b2,y:b3,back:b4,guide:b5,start:b6,leftstick:b7,rightstick:b8,leftshoulder:b9,rightshoulder:b10,dpup:b11,dpdown:b12,dpleft:b13,dpright:b14,leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:a4,righttrigger:a5,";
+    require(SDL_GameControllerAddMapping(mapping.c_str())>=0 && SDL_IsGameController(device),"mapped SDL virtual controller");
     virtualPad=SDL_JoystickOpen(device);require(virtualPad&&SDL_JoystickIsVirtual(device),"actual virtual P1");
     pc_window_input_assign(0,PC_INPUT_DEV_GAMEPAD,SDL_JoystickInstanceID(virtualPad));pc_window_input_assign(1,PC_INPUT_DEV_NONE,-1);
     std::printf("P2_SAVE_SDL_ROUTING instance=%d virtual=1 player=1 input_script=0 background_test_seam=1\n",int(SDL_JoystickInstanceID(virtualPad)));
