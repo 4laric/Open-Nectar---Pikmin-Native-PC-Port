@@ -59,8 +59,8 @@ public:
   Navi* n=naviMgr?naviMgr->getNavi():nullptr;
   if(phase==1)keys=KeyConfig::_instance->mSetCursorKey.mBind;
   if(phase==2 || phase==4){
-   if(n && n->mNaviCamera){float dx=goal.x-n->mSRT.t.x,dz=goal.z-n->mSRT.t.z,d=std::sqrt(dx*dx+dz*dz);
-    if(d>15){const Vector3f& axis=n->mNaviCamera->mViewXAxis;keys=KBBTN_MSTICK_RIGHT;mMainStickX=s8(65*(dx*axis.x+dz*axis.z)/d);mMainStickY=s8(65*(dx*axis.z-dz*axis.x)/d);}
+   if(n && n->mNaviCamera){float dx=goal.x-(phase==2?n->mCursorWorldPos.x:n->mSRT.t.x),dz=goal.z-(phase==2?n->mCursorWorldPos.z:n->mSRT.t.z),d=std::sqrt(dx*dx+dz*dz);
+    if(d>(phase==2?3.f:15.f)){const Vector3f& axis=n->mNaviCamera->mViewXAxis;float strength=phase==2?std::fmin(65.f,std::fmax(22.f,d*1.5f)):65.f;keys=KBBTN_MSTICK_RIGHT;mMainStickX=s8(strength*(dx*axis.x+dz*axis.z)/d);mMainStickY=s8(strength*(dx*axis.z-dz*axis.x)/d);}
    }
   }
   if((phase==3 && ticks%60<15)||(phase==5 && ticks%60<50))keys=KeyConfig::_instance->mThrowKey.mBind;
@@ -108,7 +108,8 @@ public:
    phase=1;ticks=0;
   }
   if(phase==1&&ticks>=100){goal=flower->mSRT.t;phase=2;ticks=0;}
-  if(phase==2){float dx=flower->mSRT.t.x-n->mCursorWorldPos.x,dz=flower->mSRT.t.z-n->mCursorWorldPos.z;float bx=flower->mSRT.t.x-n->mSRT.t.x,bz=flower->mSRT.t.z-n->mSRT.t.z;if(dx*dx+dz*dz<900 && bx*bx+bz*bz>2500){phase=3;ticks=0;}}
+  if(phase==2){float dx=flower->mSRT.t.x-n->mCursorWorldPos.x,dz=flower->mSRT.t.z-n->mCursorWorldPos.z;float bx=flower->mSRT.t.x-n->mSRT.t.x,bz=flower->mSRT.t.z-n->mSRT.t.z;if(dx*dx+dz*dz<25 && bx*bx+bz*bz>625){phase=6;ticks=0;}}
+  if(phase==6&&ticks>=20){float dx=flower->mSRT.t.x-n->mCursorWorldPos.x,dz=flower->mSRT.t.z-n->mCursorWorldPos.z;phase=(dx*dx+dz*dz<25)?3:2;ticks=0;}
   int red=0,white=0,heads=0,captured=0,flying=0;PikiHeadItem* head=nullptr;
   Iterator actors(pikiMgr);CI_LOOP(actors){Piki* p=static_cast<Piki*>(*actors);if(!p->isAlive())continue;if(pc_p2_is_white(p))++white;else ++red;if(p->getStickObject()==flower)++captured;if(p->getState()==PIKISTATE_Flying)++flying;}
   Iterator sprouts(itemMgr->getPikiHeadMgr());CI_LOOP(sprouts){PikiHeadItem* p=static_cast<PikiHeadItem*>(*sprouts);if(p->isAlive()){++heads;require(pc_p2_species(p)==P2SpeciesWhite,"non-White sprout");if(!head&&p->canPullout())head=p;}}
