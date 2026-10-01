@@ -32,6 +32,10 @@
 #include "Camera.h"
 #include "Controller.h"
 #include "Kontroller.h"
+#include "MapCode.h"
+#include <vector>
+#include <algorithm>
+#include <limits>
 #include "nlib/System.h"
 #include "gameflow.h"
 #include "pc_randomizer.h"
@@ -138,6 +142,81 @@ struct PurpleTransportTrace : ActTransport {
     }
 };
 class PurpleCombatApp : public PlugPikiApp {
+    struct PluckObstacle { Vector3f centre; float radius; };
+    std::vector<PluckObstacle> pluckObstacles;
+    std::vector<Vector3f> pluckRoute;
+    size_t pluckRouteIndex=0;
+    PikiHeadItem* routedHead=nullptr;
+    Vector3f routedHeadPosition;
+    static float planarDistance(const Vector3f& a,const Vector3f& b) {
+        const float x=a.x-b.x,z=a.z-b.z;return std::sqrt(x*x+z*z);
+    }
+    bool pluckSegmentClear(const Vector3f& a,const Vector3f& b) const {
+        const float dx=b.x-a.x,dz=b.z-a.z,length2=dx*dx+dz*dz;
+        for(const auto& obstacle:pluckObstacles) {
+            const float t=length2>0?std::max(0.f,std::min(1.f,((obstacle.centre.x-a.x)*dx+(obstacle.centre.z-a.z)*dz)/length2)):0.f;
+            const float x=a.x+t*dx-obstacle.centre.x,z=a.z+t*dz-obstacle.centre.z;
+            if(x*x+z*z<obstacle.radius*obstacle.radius) return false;
+        }
+        return true;
+    }
+    void collectPluckObstacles(CollPart* part,float captainRadius,int depth=0) {
+        if(!part) return;
+        require(depth<32,"pluck collision tree depth");
+        if(part->isCollisionType()) pluckObstacles.push_back({part->mCentre,part->mRadius+captainRadius+1.f});
+        for(int i=0;i<part->getChildCount();++i) collectPluckObstacles(part->getChildAt(i),captainRadius,depth+1);
+    }
+    void planPluckRoute(Navi* n,PikiHeadItem* head,Pom* violet,float pluckRange) {
+        require(violet && violet->mCollInfo && violet->mCollInfo->hasInfo(),"Violet collision data required for ordinary approach");
+        pluckObstacles.clear();pluckRoute.clear();pluckRouteIndex=0;
+        collectPluckObstacles(violet->mCollInfo->getBoundingSphere(),n->mCollisionRadius);
+        std::vector<Vector3f> nodes{n->mSRT.t};std::vector<bool> goal{false};
+        auto addNode=[&](Vector3f p,bool isGoal) {
+            if(pluckSegmentClear(p,p)) {nodes.push_back(p);goal.push_back(isGoal);}
+        };
+        // Choose a reachable position inside the engine's actual pluck range,
+        // using the real sprout and current Violet parts. This plans controller
+        // inputs only; it never moves actors or edits the game's route graph.
+        for(int i=0;i<32;++i) {
+            const float a=i*6.283185307f/32.f;
+            addNode(head->mSRT.t+Vector3f(pluckRange*.95f*std::cos(a),0,pluckRange*.95f*std::sin(a)),true);
+        }
+        for(const auto& obstacle:pluckObstacles) for(int i=0;i<16;++i) {
+            const float a=i*6.283185307f/16.f;
+            const float r=obstacle.radius/std::cos(3.141592654f/16.f)+4.f;
+            addNode(obstacle.centre+Vector3f(r*std::cos(a),0,r*std::sin(a)),false);
+        }
+        const size_t count=nodes.size();std::vector<float> cost(count,std::numeric_limits<float>::infinity());
+        std::vector<int> parent(count,-1);std::vector<bool> visited(count,false);cost[0]=0;int end=-1;
+        for(size_t iteration=0;iteration<count;++iteration) {
+            int here=-1;for(size_t i=0;i<count;++i) if(!visited[i] && (here<0 || cost[i]<cost[here])) here=int(i);
+            if(here<0 || !std::isfinite(cost[here])) break;
+            visited[here]=true;if(goal[here]) {end=here;break;}
+            for(size_t next=0;next<count;++next) if(!visited[next] && pluckSegmentClear(nodes[here],nodes[next])) {
+                const float candidate=cost[here]+planarDistance(nodes[here],nodes[next]);
+                if(candidate<cost[next]) {cost[next]=candidate;parent[next]=here;}
+            }
+        }
+        require(end>=0,"no collision-clear controller approach to native pluck range");
+        for(int i=end;i>0;i=parent[i]) {require(parent[i]>=0,"invalid pluck route");pluckRoute.push_back(nodes[i]);}
+        std::reverse(pluckRoute.begin(),pluckRoute.end());
+        Vector3f previous=n->mSRT.t;
+        for(size_t i=0;i<pluckRoute.size();++i) {
+            Vector3f& next=pluckRoute[i];const int samples=int(std::ceil(planarDistance(previous,next)/5.f))+1;
+            for(int j=0;j<=samples;++j) {
+                const float t=float(j)/samples,x=previous.x+(next.x-previous.x)*t,z=previous.z+(next.z-previous.z)*t;
+                CollTriInfo* tri=mapMgr->getCurrTri(x,z,true);const float y=mapMgr->getMinY(x,z,true);
+                require(tri && MapCode::getAttribute(tri)!=ATTR_Water && MapCode::getAttribute(tri)!=ATTR_Hole
+                    && std::isfinite(y) && std::fabs(y-head->mSRT.t.y)<5.f,"pluck approach terrain requires separate route");
+            }
+            next.y=mapMgr->getMinY(next.x,next.z,true);
+            std::printf("P2_PURPLE_PLUCK_WAYPOINT index=%u xyz=%.3f,%.3f,%.3f actor_position_injected=0\n",unsigned(i),next.x,next.y,next.z);
+            previous=next;
+        }
+        routedHead=head;routedHeadPosition=head->mSRT.t;
+        std::printf("P2_PURPLE_PLUCK_ROUTE length=%.3f waypoints=%u collision_parts=%u loaded_range=%.3f captain_radius=%.3f scripted_controller_only=1\n",
+            cost[end],unsigned(pluckRoute.size()),unsigned(pluckObstacles.size()),pluckRange,n->mCollisionRadius);
+    }
     int ticks=0, phase=0, phaseTicks=0, startingField=0, pluckAttempts=0;
     int combatTicks=0, observedTicks=0, throwAttempts=0, throwTick=0;
     bool captainSeen=false, thrown=false, descentStaged=false, isolated=false;
@@ -448,24 +527,34 @@ class PurpleCombatApp : public PlugPikiApp {
         }
     }
 
-    bool approachAndPluck(Navi* n,PikiHeadItem* head) {
+    bool approachAndPluck(Navi* n,PikiHeadItem* head,Pom* violet) {
         // Ordinary controller movement/pluck. Never relocate the captain or
         // sprout, or force a plucking state to satisfy natural acceptance.
         const float dx=head->mSRT.t.x-n->mSRT.t.x,dz=head->mSRT.t.z-n->mSRT.t.z;
         const float distance=std::sqrt(dx*dx+dz*dz);
+        const float pluckRange=C_NAVI_PARM(n,mPluckDistanceOutsideOnyon);
+        require(std::isfinite(pluckRange) && pluckRange>1.f,"invalid native pluck range");
         if(ticks%60==0) std::printf("P2_PURPLE_PLUCK_APPROACH distance=%.3f captain=%.3f,%.3f,%.3f sprout=%.3f,%.3f,%.3f state=%d port=%u observed_stick=%d,%d frozen=%d\n",
             distance,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,head->mSRT.t.x,head->mSRT.t.y,head->mSRT.t.z,
             n->getCurrState()->getID(),n->mKontroller?n->mKontroller->mPlayerNum:0,
             n->mKontroller?int(n->mKontroller->mMainStickX):0,n->mKontroller?int(n->mKontroller->mMainStickY):0,
             int(n->mKontroller && n->mKontroller->mIsControllerFrozen));
-        if(distance>20.f) {
+        if(distance>=pluckRange-.25f) {
+            if(routedHead!=head || pluckRoute.empty() || planarDistance(routedHeadPosition,head->mSRT.t)>2.f)
+                planPluckRoute(n,head,violet,pluckRange);
+            while(pluckRouteIndex+1<pluckRoute.size() && planarDistance(n->mSRT.t,pluckRoute[pluckRouteIndex])<4.f
+                && pluckSegmentClear(n->mSRT.t,pluckRoute[pluckRouteIndex+1])) ++pluckRouteIndex;
+            const Vector3f& target=pluckRoute[pluckRouteIndex];
+            const float tx=target.x-n->mSRT.t.x,tz=target.z-n->mSRT.t.z,d=std::sqrt(tx*tx+tz*tz);
+            require(d>.05f,"controller reached approach point outside native pluck range");
             require(n->controlCamera()!=nullptr,"natural approach camera missing");
             const Vector3f& axis=n->controlCamera()->mViewXAxis;
-            const float power=distance>45.f?65.f:35.f;
-            pc_p2_input_script_set(1,0,int(std::lround(power*(dx*axis.x+dz*axis.z)/distance)),
-                int(std::lround(power*(dx*axis.z-dz*axis.x)/distance)));
+            const float power=std::max(18.f,std::min(65.f,d*2.f));
+            pc_p2_input_script_set(1,0,int(std::lround(power*(tx*axis.x+tz*axis.z)/d)),
+                int(std::lround(power*(tx*axis.z-tz*axis.x)/d)));
             return false;
         }
+        if(!head->canPullout()) {pc_p2_input_script_set(1,0);return false;}
         pc_p2_input_script_set(1,KBBTN_A);
         ++pluckAttempts;
         milestone("native_sprout_pluck_requested",ticks);
@@ -516,8 +605,9 @@ class PurpleCombatApp : public PlugPikiApp {
             Iterator heads(itemMgr->getPikiHeadMgr());
             CI_LOOP(heads) {
                 PikiHeadItem* h = static_cast<PikiHeadItem*>(*heads);
-                if (h && h->isAlive() && h->mP2Purple && h->canPullout()) {
-                    if(!approachAndPluck(n,h)) break;
+                if (h && h->isAlive() && h->mP2Purple && h->mGroundTriangle
+                    && std::fabs(h->mSRT.t.y-mapMgr->getMinY(h->mSRT.t.x,h->mSRT.t.z,true))<1.f) {
+                    if(!approachAndPluck(n,h,violet)) break;
                     phase=2; phaseTicks=0; input=nullptr;
                     std::puts("P2_VIOLET_REAL_SPROUT captain_pluck_requested=1 actor_position_injected=0"); break;
                 }
@@ -543,7 +633,7 @@ class PurpleCombatApp : public PlugPikiApp {
                 if (!h || !h->isAlive() || !h->mP2Purple || !h->canPullout()) continue;
                 require(pluckAttempts < 3, "native pluck failed after three staged attempts");
                 phase=1;phaseTicks=0;
-                approachAndPluck(n,h);
+                approachAndPluck(n,h,violet);
                 break;
             }
         }
