@@ -25,6 +25,9 @@
 #if defined(PIKI_PC_PORT)
 #include "pc_bbft.h"
 #include "pc_p2_surface_topology.h"
+#if defined(PIKI_PC_PORT)
+#include "pc_p2_surface_water.h"
+#endif
 #include "pc_p2_cargo_ground.h"
 #endif
 
@@ -1104,6 +1107,7 @@ MapMgr::MapMgr(Controller* controller)
 {
 #if defined(PIKI_PC_PORT)
 	pc_p2_surface_topology_reset();
+	pc_p2_surface_water_reset();
 #endif
 	mController = controller;
 
@@ -1225,6 +1229,7 @@ void MapMgr::initShape()
 	mMapModel->createCollisions(MAP_GRID_SIZE);
 #if defined(PIKI_PC_PORT)
 	pc_p2_surface_topology_init(mMapModel);
+	pc_p2_surface_water_init(mMapModel);
 #endif
 	mMapBounds.expandBound(mMapModel->mCourseExtents);
 
