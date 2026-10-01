@@ -422,8 +422,8 @@ bool pc_randomizer_init(int argc, char** argv) {
         input >> end;
     }
     if (end == "CAPTAINS") {
-        unsigned count;
-        if (!p2EnemyBridge || !(input >> count) || count != 2)
+        std::string count;
+        if (!p2EnemyBridge || !(input >> count) || count != "2")
             fail("two captains require P2 campaign bridge and count 2");
         secondCaptain = true;
         input >> end;
