@@ -42,6 +42,7 @@
 #include "settings/pc_settings_p2d.h"
 #include "system.h"
 #include "teki.h"
+#include "zen/DrawContainer.h"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -109,6 +110,7 @@ class CaptainSaveApp final:public PlugPikiApp {
     bool dayAdvanced=false,resumeMenuLogged=false,withdrawQueued=false;
     int withdrawnFromTotal=-1;
     int diaryFrames=0, menuFrames=0, withdrawFrames=0;
+    bool withdrawConfirmQueued=false;
     void elapsed(const char* phase){std::printf("P2_SAVE_TIME phase=%s elapsed_ms=%lld\n",phase,(long long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-started).count());}
     bool saving=false,shot=false,sawWhistle=false,initialized[2]={false,false},retired=false;
     int teardownGapFrames=0;
@@ -145,7 +147,7 @@ class CaptainSaveApp final:public PlugPikiApp {
     void selected(int slot){auto* n=naviMgr->getNavi(slot);require(naviMgr->getActiveNavi()==n,"selected captain");require(cameraMgr->mController==n->mKontroller && cameraMgr->mCamera->mTargetCreature==n,"camera binding");std::printf("P2_SAVE_SELECTED phase=%s slot=%d camera=1\n",resumePhase?"resume":"save",slot);}
 public:
     CaptainSaveApp(){initialCards=cards();require(resumePhase?initialCards==1:initialCards==0,"expected committed generation before phase");}
-    void draw(Graphics& gfx)override{PlugPikiApp::draw(gfx);if(tick>30&&!shot)shot=capture("captain-campaign.ppm");if(saving&&menuFrames==120)require(capture("pause-menu.ppm"),"ordinary pause menu capture");}
+    void draw(Graphics& gfx)override{PlugPikiApp::draw(gfx);if(tick>30&&!shot)shot=capture("captain-campaign.ppm");if(saving&&menuFrames==120)require(capture("pause-menu.ppm"),"ordinary pause menu capture");if(resumePhase&&withdrawFrames==120)require(capture("onion-menu.ppm"),"ordinary Onion menu capture");}
     int idle()override{
         if(pendingNegative){
             // Queue mutation until the next ordinary pre-engine guard. This
@@ -160,7 +162,7 @@ public:
         const int result=PlugPikiApp::idle();require(++frames<7200,"frame bound");
         guardLiveState(); // never bypass initialized actors for movie/readiness/pause
 
-        if(resumePhase&&tick<0){
+        if(resumePhase&&tick<0&&!withdrawQueued){
             const bool menu=!naviMgr||gameflow.mIsUIOverlayActive;
             if(menu&&!resumeMenuLogged){resumeMenuLogged=true;std::puts("P2_SAVE_RESUME_MENU ordinary_A_input=1 area_day_injected=0");}
             pad(menu&&frames%20<4?KBBTN_A:0);
@@ -221,7 +223,12 @@ public:
                     GoalItem* onion=itemMgr->getContainer(pc_randomizer_start_color());require(onion,"Onion unavailable");
                     if(a->getCurrState()->getID()==NAVISTATE_Container){
                         ++withdrawFrames;
-                        pad(withdrawFrames>=180&&withdrawFrames%20<2?KBBTN_A:0,0,withdrawFrames<170?-65:0);
+                        require(containerWindow,"ordinary Onion window unavailable");
+                        const int uiState=containerWindow->getStatus(), squad=containerWindow->getMyPikiDisp(), stock=containerWindow->getContainerPikiDisp();
+                        if(withdrawFrames==1||withdrawFrames%30==0){std::printf("P2_SAVE_ONION_OBSERVER frame=%d state=%d squad=%d stock=%d live=%d stored=%d active_state=%d inactive_state=%d\n",withdrawFrames,uiState,squad,stock,live,storedCount(),a->getCurrState()->getID(),b->getCurrState()->getID());std::fflush(stdout);}
+                        require(squad<=20,"ordinary Onion UI selection exceeds20");
+                        if(uiState==zen::DrawContainer::STATE_Operation && squad==20){pad(withdrawConfirmQueued?KBBTN_A:0);withdrawConfirmQueued=true;}
+                        else pad(0,0,uiState==zen::DrawContainer::STATE_Operation?-65:0);
                         if(withdrawFrames==1)std::puts("P2_SAVE_ONION_UI opened=1 direction=withdraw input=SDL_virtual");
                     }else if(withdrawFrames==0){
                         const Vector3f goal=onion->getPosition();float dx=goal.x-a->getPosition().x,dz=goal.z-a->getPosition().z,d=std::sqrt(dx*dx+dz*dz);
