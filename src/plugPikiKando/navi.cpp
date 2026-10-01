@@ -11,6 +11,8 @@
 #include "pc_p2_bulbmin.h"
 #include "Navi.h"
 #include "pc_randomizer.h"
+#include "pc_crowd_handover.h"
+#include "pc_crowd_slot_diag.h"
 #include <cstdlib>
 #if defined(PIKI_PC_PORT)
 #include "GameStat.h"
@@ -228,7 +230,20 @@ void Navi::decPlatePiki()
  */
 int Navi::getPlatePikis()
 {
+#if defined(PIKI_PC_PORT)
+	// Netplay co-op #1033: the squad size the plate refreshes to is the number of
+	// slots it holds. With one captain mPlatePikiCount is always equal to
+	// mUsedSlotCount (ActCrowd is the only getSlot/releaseSlot caller and moves
+	// them together), so this returns the same number. With two captains a count
+	// that drifted from the slots (a Pikmin whose mNavi changed under a live
+	// ActCrowd) made CPlate::refresh() shrink mUsedSlotCount below the real
+	// occupancy and the next ActCrowd::exec panicked with "invalid slotId!".
+	// Reading the slots makes that impossible whatever moved mNavi; drift is
+	// logged once (pc_crowd_slot_diag::countDrift) so the cause can still be found.
+	return mPlateMgr->mUsedSlotCount;
+#else
 	return mPlateMgr->mPlatePikiCount;
+#endif
 }
 
 /**
@@ -1619,6 +1634,7 @@ void Navi::callPikis(f32 radius, bool recallWorkers)
 					piki->endFire();
 				}
 
+				pc_crowd_handover::abandonSquadBeforeHandover(piki, this);
 				piki->mNavi = this;
 				if (state == PIKISTATE_Emotion) {
 					static_cast<PikiEmotionState*>(piki->getCurrState())->mCheerCount = 0;
@@ -1651,6 +1667,7 @@ void Navi::callPikis(f32 radius, bool recallWorkers)
 #endif
 				piki->mFSM->transit(piki, PIKISTATE_LookAt);
 			} else {
+				pc_crowd_handover::abandonSquadBeforeHandover(piki, this);
 				piki->mNavi             = this;
 				piki->mIsWhistlePending = true;
 			}
@@ -1661,6 +1678,7 @@ void Navi::callPikis(f32 radius, bool recallWorkers)
 
 		if (AICONST.mDoPluckWithCursor() && (mNaviID == piki->mPlayerId || piki->mPlayerId == -1) && piki->isBuried()
 		    && piki->getState() == PIKISTATE_Bury && dist < radius) {
+			pc_crowd_handover::abandonSquadBeforeHandover(piki, this);
 			piki->mNavi = this;
 			piki->mFSM->transit(piki, PIKISTATE_AutoNuki);
 			// Why would you put an `ERROR` here?  Just don't enable it??
@@ -2864,6 +2882,7 @@ void Navi::makeCStick(bool isSunset)
 			strength = 0.6f * (strength / 0.9f);
 		}
 
+		pc_crowd_slot_diag::countDrift(unsigned(gsys->mTotalFrames), mNaviID, int(mPlateMgr->mPlatePikiCount), mPlateMgr->mUsedSlotCount, mPlateMgr->mTotalSlotCount);
 		mPlateMgr->refresh(getPlatePikis(), strength);
 
 		mPlateMgr->setPos(mSRT.t, targetYaw, mVelocity);
@@ -2882,6 +2901,7 @@ void Navi::makeCStick(bool isSunset)
 			mPlateDirLocked = true;
 		}
 
+		pc_crowd_slot_diag::countDrift(unsigned(gsys->mTotalFrames), mNaviID, int(mPlateMgr->mPlatePikiCount), mPlateMgr->mUsedSlotCount, mPlateMgr->mTotalSlotCount);
 		mPlateMgr->refresh(getPlatePikis(), 0.0f);
 		Iterator iter(mPlateMgr);
 		f32 nearestPikiDist = 12800.0f;

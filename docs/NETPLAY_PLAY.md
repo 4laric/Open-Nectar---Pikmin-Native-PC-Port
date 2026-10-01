@@ -605,6 +605,17 @@ folder), not append the second evening to the first evening's run.
   record is damaged`: that run cannot tell which saves both games agreed on.
   Name the folder you want with `--continue <run folder>`; the game warns
   (`UNCONFIRMED`) that its newest save may not have been agreed.
+- `[crowd-slot] MISMATCH ...`, `REINIT ...`, `COUNT_DRIFT ...` or
+  `INVALID_SLOT ...` (issue #1033): a Pikmin's squad slot is booked on a
+  different captain's formation plate than the captain it follows, or a
+  plate's count and slots disagree. The game sizes each plate from the slots
+  it holds, keeps each plate's count, and re-homes such a Pikmin to its
+  captain's plate (or re-joins it when its slot is gone) instead of ending
+  the session, so these lines are diagnostics, not errors (at most 24 per
+  game). Please send them: the write that first moved the Pikmin was never
+  found in normal play. `at=` says where it was seen, `navi=` is the captain
+  the Pikmin follows, `plate_owner=` the captain whose plate it joined,
+  `piki_mode=` and `state=` what it was doing.
 - Logs: the console output (or your `> file` redirect; `native.log` in the
   local test), plus the run folder `netplay\run-...\` next to the exe.
 
