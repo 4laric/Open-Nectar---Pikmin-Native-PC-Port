@@ -28,6 +28,11 @@
 #include "gameflow.h"
 #include "pc_randomizer.h"
 #include "pc_p2_purple.h"
+#include "pc_p2_ship.h"
+#include "pc_p2_ship_store.h"
+#include "pc_p2_input_script.h"
+#include "FlowController.h"
+#include "WorldClock.h"
 #include "pc_p2_purple_direct.h"
 #include "pc_p2_purple_flight.h"
 #include "pc_p2_campaign_actor.h"
@@ -66,6 +71,101 @@ class PurpleCombatApp : public PlugPikiApp {
     float initialHealth=0, maxQueued=0, regeneration=0;
     int regenerationFrames=0;
     Vector3f parkPosition;
+    bool sunsetRequested=false, sunsetSeen=false;
+    int sunsetTicks=0, sunsetDay=-1, expectedDay=-1, savedMaturity=-1, resumeReady=0;
+    unsigned saveIndexBefore=0;
+    bool mode(const char* name) const {
+        const char* value=std::getenv("P2_PURPLE_COMBAT_MODE");
+        return value && std::strcmp(value,name)==0;
+    }
+    bool stockOne() const {
+        return savedMaturity>=0 && savedMaturity<3 && p2ship::stock.total()==1
+            && p2ship::stock.counts[0][savedMaturity]==1;
+    }
+    void boundAdult() {
+        require(pc_p2_purple_direct_enabled(),"combat profile missing after save/restart");
+        bool found=false;
+        Iterator it(tekiMgr);
+        CI_LOOP(it) {
+            BTeki* actor=static_cast<BTeki*>(*it);
+            if (actor && actor->isAlive() && pc_p2_campaign_source(actor)==2
+                && pc_p2_purple_direct_adult_registered(actor)) {
+                std::printf("P2_PURPLE_PERSIST_BINDING uid=%u source=2 registered=1\n",pc_p2_campaign_token(actor));
+                found=true; break;
+            }
+        }
+        require(found,"no exact live adult combat binding in persistence fixture");
+    }
+    void sunsetStep() {
+        require(++sunsetTicks<9000,"ordinary day-save timeout");
+        require(gameflow.mCurrGameSectionID==SECTION_OnePlayer && flowCont.mGameEndFlag==GAMEEND_None,
+            "sunset left ordinary healthy campaign");
+        if(gameflow.mIsDayEndActive) sunsetSeen=true;
+        require(gameflow.mWorldClock.mCurrentDay<=expectedDay,"unexpected extra day advance");
+        if(sunsetSeen && gameflow.mGamePrefs.mHasSaveGame
+            && gameflow.mGamePrefs.mMostRecentSaveIndex!=saveIndexBefore) {
+            require(gameflow.mWorldClock.mCurrentDay==expectedDay && stockOne(),"day-save identity/maturity/day mismatch");
+            pc_p2_input_script_clear(1);
+            std::printf("P2_PURPLE_PERSIST_SAVED day_before=%d day=%d maturity=%d stock=1 native_save_index_before=%u native_save_index_after=%u external_CAMPAIGN_SAVED_required=1 identity_injected=0 maturity_injected=0\n",
+                sunsetDay,expectedDay,savedMaturity,saveIndexBefore,unsigned(gameflow.mGamePrefs.mMostRecentSaveIndex));
+            std::fflush(nullptr); std::_Exit(0);
+        }
+        const bool confirming=sunsetSeen && gameflow.mWorldClock.mCurrentDay==expectedDay;
+        pc_p2_input_script_set(1,confirming && sunsetTicks%20<4?KBBTN_A:0,0,0);
+        if(sunsetTicks%120==0) std::printf("P2_PURPLE_PERSIST_PROGRESS ticks=%d day=%d active=%d stock=%d\n",
+            sunsetTicks,gameflow.mWorldClock.mCurrentDay,int(gameflow.mIsDayEndActive),p2ship::stock.total());
+    }
+    void beginPersistence(Navi* n) {
+        require(acquired && acquired->isAlive() && pc_p2_is_purple(acquired),"persistence requires naturally acquired Purple");
+        require(!pc_randomizer_resumed() && p2ship::stock.total()==0,"day-save requires fresh empty baseline");
+        boundAdult(); savedMaturity=acquired->mHappa;
+        require(savedMaturity>=0 && savedMaturity<3,"invalid acquired maturity");
+        GameStat::update(); const int field=GameStat::mapPikis;
+        require(field==20,"fresh conversion must conserve starting20");
+        require(pc_p2_ship_deposit(acquired) && stockOne() && int(GameStat::mapPikis)==field-1,"deposit identity/population");
+        Piki* restored=pc_p2_ship_withdraw(n,3);
+        require(restored && pc_p2_is_purple(restored) && !restored->mP2White
+            && restored->mHappa==savedMaturity && pc_piki_carry_strength(restored)==10
+            && pc_throw_selection_class(restored)==4 && p2ship::stock.total()==0
+            && int(GameStat::mapPikis)==field && restored->mMode==PikiMode::FormationMode,"withdraw identity/population");
+        sunsetDay=gameflow.mWorldClock.mCurrentDay; expectedDay=pc_randomizer_next_day(sunsetDay);
+        require(expectedDay==sunsetDay+1 && flowCont.mGameEndFlag==GAMEEND_None,"ordinary next day required");
+        saveIndexBefore=gameflow.mGamePrefs.mMostRecentSaveIndex;
+        sunsetRequested=true; acquired=nullptr; input=nullptr;
+        pc_p2_input_script_set(1,0,0,0);
+        std::printf("P2_PURPLE_PERSIST_BEGIN day=%d expected_day=%d maturity=%d field=%d stock=0 identity_injected=0 maturity_injected=0 clock_advanced=1 menu_input_scripted=1\n",
+            sunsetDay,expectedDay,savedMaturity,field);
+        gameflow.mWorldClock.setTime(gameflow.mParameters->mEndHour());
+    }
+    static int expectedNumber(const char* name,int minimum,int maximum) {
+        const char* text=std::getenv(name); require(text && *text,"missing restart expectation");
+        char* end=nullptr; errno=0; const long n=std::strtol(text,&end,10);
+        require(!errno && end && !*end && n>=minimum && n<=maximum,"invalid restart expectation"); return int(n);
+    }
+    void resumePersistence(Navi* n) {
+        savedMaturity=expectedNumber("P2_PURPLE_EXPECT_MATURITY",0,2);
+        expectedDay=expectedNumber("P2_PURPLE_EXPECT_DAY",1,99999);
+        require(pc_randomizer_resumed() && gameflow.mWorldClock.mCurrentDay==expectedDay && stockOne(),
+            "native restart checkpoint/day/stock/maturity mismatch");
+        if(++resumeReady<60) return;
+        boundAdult(); GameStat::update(); const int field=GameStat::mapPikis;
+        Iterator bodies(pikiMgr); CI_LOOP(bodies) {
+            Piki* p=static_cast<Piki*>(*bodies);
+            require(!p || !p->isAlive() || !pc_p2_is_purple(p),"duplicate field Purple before withdrawal");
+        }
+        Piki* restored=pc_p2_ship_withdraw(n,3);
+        require(restored && pc_p2_is_purple(restored) && !restored->mP2White
+            && restored->mHappa==savedMaturity && pc_piki_carry_strength(restored)==10
+            && pc_throw_selection_class(restored)==4 && p2ship::stock.total()==0
+            && int(GameStat::mapPikis)==field+1,"restart withdrawal identity/population");
+        require(!pc_p2_ship_withdraw(n,3),"restart duplicated stock");
+        require(pc_p2_ship_deposit(restored) && stockOne() && int(GameStat::mapPikis)==field,"restart redeposit conservation");
+        pc_p2_input_script_clear(1);
+        std::printf("P2_PURPLE_PERSIST_RESUME_PASS day=%d maturity=%d stock=1 field_before=%d field_after=%d checkpoint_resumed=1 identity_injected=0 maturity_injected=0 strength=10 selection=4\n",
+            expectedDay,savedMaturity,field,int(GameStat::mapPikis));
+        std::fflush(nullptr); std::_Exit(0);
+    }
+
     Piki* naturalStep(Navi* n) {
         ++phaseTicks;
         Pom* violet = nullptr; int count = 0;
@@ -307,12 +407,24 @@ public:
         if(n) {
             captainSeen=true;
             p2_fixture_require_captain(GameStat::orimaDead,n->getCurrState()&&n->getCurrState()->getID()==NAVISTATE_Dead,n->mHealth,ticks);
-        } else require(!captainSeen,"captain disappeared");
+        } else {
+            const bool expectedTeardown=sunsetRequested && sunsetSeen
+                && gameflow.mCurrGameSectionID==SECTION_OnePlayer && flowCont.mGameEndFlag==GAMEEND_None
+                && gameflow.mWorldClock.mCurrentDay==expectedDay && stockOne();
+            require(!captainSeen || expectedTeardown,"captain disappeared outside expected sunset teardown");
+        }
         if (++ticks%120==0) diagnostics(n);
-        require(ticks<6000,"global startup/acquisition/combat timeout");
+        require(ticks<(sunsetRequested?15000:6000),"global fixture timeout");
+        if(mode("persistence_resume")) pc_p2_input_script_set(1,(!n || gameflow.mIsUIOverlayActive) && ticks%20<4?KBBTN_A:0,0,0);
+        if(sunsetRequested) {
+            sunsetStep();
+            if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive) gameflow.mMoviePlayer->requestSkip();
+            return result;
+        }
         if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive) { gameflow.mMoviePlayer->requestSkip(); return result; }
         if(!n||!pikiMgr||!itemMgr||!bossMgr||!tekiMgr||!mapMgr||!n->getCurrState()
             ||gameflow.mPauseAll||gameflow.mIsUIOverlayActive) return result;
+        if(mode("persistence_resume")) { resumePersistence(n); return result; }
         if (!acquired) {
             const int state=n->getCurrState()->getID();
             if(state==NAVISTATE_Walk||state==NAVISTATE_Idle) {
@@ -320,15 +432,16 @@ public:
             }
             return result;
         }
-        combatStep(n); return result;
+        if(mode("persistence_dayend")) beginPersistence(n); else combatStep(n);
+        return result;
     }
 };
 int main(int argc,char** argv) {
     if(std::getenv("P2_FIXTURE_FORCE_CAPTAIN_DOWN")) p2_fixture_require_captain(false,false,0,0);
     setvbuf(stdout,nullptr,_IONBF,0);
     const char* mode=std::getenv("P2_PURPLE_COMBAT_MODE");
-    if(mode && std::strcmp(mode,"adult_direct")) {
-        std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=adult_direct\n",mode); return 2;
+    if(mode && std::strcmp(mode,"adult_direct") && std::strcmp(mode,"persistence_dayend") && std::strcmp(mode,"persistence_resume")) {
+        std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=adult_direct,persistence_dayend,persistence_resume\n",mode); return 2;
     }
     SDL_SetMainReady(); pc_gpu_preference_apply(); pc_bbft_init(argc,argv);
     require(pc_randomizer_purple_campaign() && pc_randomizer_p2_bridge(),"ordinary Purple seed campaign required");
