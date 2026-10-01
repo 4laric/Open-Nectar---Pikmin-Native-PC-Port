@@ -417,7 +417,8 @@ void pc_state_hash_flush(void)
 // deterministic tick reaches <tick> (applied at the end of that tick, so the same on both
 // peers when both get the same value). Lets a scripted pair reach a boss (the Final Trial
 // Emperor Bulblax is about x=17 z=2450) without a long walk. Inert unless set; it changes sim
-// state, so give it to both peers (run_pair scrubs it from the inherited environment).
+// state, so give it to both peers (run_pair scrubs it from the inherited environment). Gated behind
+// PIKMIN_RANDOMIZER_TEST_BACKGROUND=1 (hidden test runs), so it is inert in normal play.
 static void pcTestTeleport(uint64_t tick)
 {
 	static bool init = false;
@@ -426,7 +427,10 @@ static void pcTestTeleport(uint64_t tick)
 	static int ntp = 0;
 	if (!init) {
 		init = true;
-		const char* e = std::getenv("PIKMIN_NETPLAY_TEST_TELEPORT");
+		// Hidden test runs only (PIKMIN_RANDOMIZER_TEST_BACKGROUND=1), like the desync nudge knob:
+		// inert in normal play even if the variable is set in the environment.
+		const char* bg = std::getenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND");
+		const char* e  = (bg != nullptr && std::strcmp(bg, "1") == 0) ? std::getenv("PIKMIN_NETPLAY_TEST_TELEPORT") : nullptr;
 		while (e && *e && ntp < 16) {
 			unsigned long long t = 0;
 			int n = 0, used = 0;
