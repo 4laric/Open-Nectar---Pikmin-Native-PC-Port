@@ -18,6 +18,8 @@ int pc_p2_cave_bud_body_species(const Pom*);
 int pc_p2_cave_bud_body_remaining(const Pom*);
 // Call only after an output was allocated and its input consumed.
 void pc_p2_cave_bud_body_output(const Pom*, bool sameSpecies);
+// Native Pom death only: retire an exhausted, empty body before manager reuse.
+void pc_p2_cave_bud_body_retire(Pom*);
 
 // True when at least one seeded bud actor was instantiated this run.
 bool pc_p2_cave_bud_active();

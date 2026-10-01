@@ -658,7 +658,10 @@ void PomAi::dieState()
 {
 	if (mPom->getMotionFinish()) {
 		if (mPom->getAttackTimer() > 1.0f) {
+            const bool bodyProfile = pc_p2_cave_bud_body_profile();
+            if (bodyProfile) pc_p2_cave_bud_body_retire(mPom);
 			mPom->doKill();
+            if (bodyProfile) return; // The manager has returned this body to its free pool.
 		}
 		mPom->addAttackTimer(gsys->getFrameTime());
 	}

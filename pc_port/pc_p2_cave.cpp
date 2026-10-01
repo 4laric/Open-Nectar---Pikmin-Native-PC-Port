@@ -69,6 +69,7 @@ unsigned navDrawCalls=0;
 bool navMarkerLogged=false;
 P2CaveSurfaceRoute surfaceRoute;
 bool surfaceRouteLoaded=false;
+bool surfaceWfgDestination=false;
 unsigned long surfaceContextScene=0;
 unsigned routeSpeciesMask=0;
 std::set<std::string> activatedSurfaceTokens;
@@ -115,7 +116,7 @@ void loadSurfaceRoute(){
     const auto scene=pc_p2_scene_generation();
     if(surfaceContextScene!=scene){
         const bool oldSurface=surfaceRouteLoaded;
-        resetRouteSpecies();surfaceRoute=P2CaveSurfaceRoute{};surfaceRouteLoaded=false;
+        resetRouteSpecies();surfaceRoute=P2CaveSurfaceRoute{};surfaceRouteLoaded=false;surfaceWfgDestination=false;
         if(oldSurface){completed=false;requested=false;anchor=P2CaveAnchor{};}
         surfaceContextScene=scene;
     }
@@ -130,6 +131,18 @@ void loadSurfaceRoute(){
     std::string routeBytes;if(!routeFile("p2-cave-route-surface.txt",routeBytes))invalid("surface route unreadable");
     std::istringstream in(routeBytes);
     P2CaveSurfaceRoute route;if(!p2_cave_surface_route_read(in,route))invalid("surface route");
+    std::error_code destinationError;
+    const bool destinationPresent=std::filesystem::exists("p2-cave-route-destination.txt",destinationError);
+    if(destinationError)invalid("surface destination unreadable");
+    bool wfgDestination=false;
+    if(destinationPresent){
+        std::ifstream destination("p2-cave-route-destination.txt");
+        std::string magic,boundary,cave,extra;
+        if(!(destination>>magic>>boundary>>cave) || magic!="P2_CAVE_ROUTE_DESTINATION_1"
+            || boundary!=route.party.token || cave!="forest_2/f_02"
+            || (destination>>extra) || !destination.eof())invalid("surface destination");
+        wfgDestination=true;
+    }
     // A scene reload may not treat the old staged boundary as fresh stock.
     // Ordinary return/reentry starts a new bounded process with a new token.
     if(activatedSurfaceTokens.count(route.party.token))invalid("surface token reused across scenes");
@@ -155,7 +168,7 @@ void loadSurfaceRoute(){
         if(saved.species==4)pc_p2_make_white(p);
     }
     n->mHealth=C_NAVI_PARM(n,mHealth)*route.party.health;
-    surfaceRoute=route;surfaceRouteLoaded=true;anchor=route.entrance;
+    surfaceRoute=route;surfaceRouteLoaded=true;surfaceWfgDestination=wfgDestination;anchor=route.entrance;
     std::printf("P2_CAVE_SURFACE_READY token=%s survivors=%zu health=%.9g x=%.3f y=%.3f z=%.3f radius=%.3f\n",
         route.party.token.c_str(),actors.size(),route.party.health,anchor.x,anchor.y,anchor.z,anchor.radius);std::fflush(stdout);
 }
@@ -174,9 +187,10 @@ bool enterSurfaceCave(){
     Navi* n=naviMgr->getNavi();party.health=n->mHealth/C_NAVI_PARM(n,mHealth);
     const std::string text=p2_cave_surface_route_transfer(party,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,surfaceRoute.wireVersion);
     if(text.empty())return false;
-    const std::string message="Enter Emergence Cave with all "+std::to_string(party.squad.size())+" surviving Pikmin?";
+    const char* destination=surfaceWfgDestination?"White Flower Garden":"Emergence Cave";
+    const std::string message=std::string("Enter ")+destination+" with all "+std::to_string(party.squad.size())+" surviving Pikmin?";
     const SDL_MessageBoxButtonData buttons[]={{SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT,0,"Stay"},{SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT,1,"Enter cave"}};
-    SDL_MessageBoxData data={SDL_MESSAGEBOX_INFORMATION,SDL_GL_GetCurrentWindow(),"Emergence Cave",message.c_str(),2,buttons,nullptr};int choice=0;
+    SDL_MessageBoxData data={SDL_MESSAGEBOX_INFORMATION,SDL_GL_GetCurrentWindow(),destination,message.c_str(),2,buttons,nullptr};int choice=0;
     if(SDL_ShowMessageBox(&data,&choice)!=0 || choice!=1)return false;
     if(!surfaceSafe())return false;
     FILE* f=std::fopen("p2-cave-surface-transfer.tmp","wb");if(!f)return false;
@@ -224,7 +238,7 @@ void navigationDiagnostic(){
     std::fflush(stdout);
 }
 
-const char* caveName(){return beasts?"Beasts Cave":"Emergence Cave";}
+const char* caveName(){return beasts?"Beasts Cave":bodyContextReady?"White Flower Garden":"Emergence Cave";}
 void notice(const char* text){SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION,caveName(),text,SDL_GL_GetCurrentWindow());}
 bool writeTransfer(const std::string& text){
     FILE* file=std::fopen("p2-cave-transfer.tmp","wb");
@@ -285,7 +299,7 @@ bool pc_p2_tutorial2_entry_check(const char* path, int* floorOut){
 void pc_p2_cave_setup(){
     bodyContextReady=false;bodyContextScene=0;
     resetRouteSpecies();surfaceContextScene=pc_p2_scene_generation();
-    surfaceRoute=P2CaveSurfaceRoute{};surfaceRouteLoaded=false;
+    surfaceRoute=P2CaveSurfaceRoute{};surfaceRouteLoaded=false;surfaceWfgDestination=false;
     const char* opt=std::getenv("PIKMIN_CAVE_NAV_DIAGNOSTICS");
     navRate.reset(opt && opt[0]==49 && opt[1]==0);navDrawCalls=0;navMarkerLogged=false;
     pc_p2_cave_rooms_shutdown();

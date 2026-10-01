@@ -55,6 +55,7 @@ struct BudActor {
     bool done = false;
     unsigned generator = 0;
     Pom* body = nullptr;
+    bool retired = false;
 };
 
 std::vector<BudActor> actors;
@@ -77,8 +78,18 @@ BudActor* boundBody(const Pom* pom)
     const auto* layout = pc_p2_cave_rooms_layout();
     if (!layout || !pc_p2_cave_body_profile_context(layout->seed, layout->cave.c_str(),
             layout->floor, bodyToken.c_str())) return nullptr;
+    // A saved address may already belong to the free pool. Prove current
+    // manager membership before reading any field through that address.
+    if (!bossMgr) return nullptr;
+    bool present = false;
+    Iterator active(bossMgr);
+    CI_LOOP(active) {
+        Creature* current = *active;
+        if (current == pom) { present = current->mObjType == OBJTYPE_Pom; break; }
+    }
+    if (!present) return nullptr;
     for (auto& actor : actors)
-        if (actor.body == pom && pom->mGenerator && pom->mGenerator->_70 == actor.generator)
+        if (!actor.retired && actor.body == pom && pom->mGenerator && pom->mGenerator->_70 == actor.generator)
             return &actor;
     return nullptr;
 }
@@ -219,6 +230,25 @@ void pc_p2_cave_bud_body_output(const Pom* pom, bool sameSpecies)
     actor->done = actor->used == actor->count;
     std::printf("P2_CAVE_POM_OUTPUT slot=%s species=%d refund=%d used=%d budget=5 ordinary_pluck_pending=1\n",
         actor->slot_id.c_str(),actor->colour_index,int(sameSpecies),actor->used);
+}
+
+void pc_p2_cave_bud_body_retire(Pom* pom)
+{
+    auto* actor = boundBody(pom);
+    if (!actor || actor->count != 5 || actor->used != 5 || !actor->done || actor->pending)
+        invalidBody("retirement before exhausted budget");
+    if (pom->isHolding()) invalidBody("retirement with held input");
+    Stickers stickers(pom); Iterator it(&stickers);
+    CI_LOOP(it) {
+        Creature* c = *it;
+        if (c && c->isAlive() && c->isPiki()) invalidBody("retirement with attached input");
+    }
+    // Do not keep a free-pool address. Sprouts remain independently pending
+    // until the player plucks them through the ordinary engine interaction.
+    actor->body = nullptr;
+    actor->retired = true;
+    std::printf("P2_CAVE_POM_RETIRED slot=%s used=5 budget=5 scene=%lu\n",
+        actor->slot_id.c_str(),bodyScene);
 }
 
 int pc_p2_cave_bud_count() { return static_cast<int>(actors.size()); }
@@ -385,9 +415,25 @@ bool pc_p2_cave_bud_pending()
 {
     if (pc_p2_cave_bud_body_profile()) {
         if (!bodyReady || bodyScene != pc_p2_scene_generation()) return true;
+        const auto* layout = pc_p2_cave_rooms_layout();
+        if (!layout || !pc_p2_cave_body_profile_context(layout->seed,layout->cave,
+                layout->floor,bodyToken) || !bossMgr) return true;
         for (const auto& actor : actors) {
+            if (actor.retired) {
+                if (actor.body || actor.count != 5 || actor.used != 5 || !actor.done || actor.pending) return true;
+                continue;
+            }
             if (!boundBody(actor.body)) return true;
-            Stickers stickers(actor.body); Iterator it(&stickers);
+        }
+        // Inspect live manager members, not retained addresses; unexpected
+        // recycled/new Pom bodies cannot inherit a retired budget's authority.
+        Iterator active(bossMgr);
+        CI_LOOP(active) {
+            Creature* current = *active;
+            if (!current || current->mObjType != OBJTYPE_Pom) continue;
+            auto* pom = static_cast<Pom*>(current);
+            if (!boundBody(pom) || pom->isHolding()) return true;
+            Stickers stickers(pom); Iterator it(&stickers);
             CI_LOOP(it) { Creature* c = *it; if (c && c->isAlive() && c->isPiki()) return true; }
         }
         if (!itemMgr) return true;
