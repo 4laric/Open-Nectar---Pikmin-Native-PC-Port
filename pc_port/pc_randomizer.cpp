@@ -752,13 +752,13 @@ void pc_randomizer_observe_population(int activePikmin, bool gameplay) {
         if (activePikmin >= 20 + 10 * i) pc_randomizer_check(randomizerCheckNames[30 + i]);
 }
 void pc_randomizer_enemy_defeated(int type, int stage, bool healthDepleted, bool gameplay) {
-    if (schema >= 9 && type == 16 && healthDepleted && gameplay && ready && accessibleStage(stage))
+    if (!thelynk && schema >= 9 && type == 16 && healthDepleted && gameplay && ready && accessibleStage(stage))
         pc_randomizer_check("Bestiary: Defeat Puffy Blowhog");
     if (schema >= 7 || !pc_randomizer_expanded() || !healthDepleted || !gameplay || !ready || !accessibleStage(stage)) return;
     for (int i = 0; i < 8; ++i)
         if (type == randomizerEnemyTypes[i]) pc_randomizer_check(randomizerCheckNames[39 + i]);
 }
-bool pc_randomizer_collection_checks() { return enabled && schema >= 7; }
+bool pc_randomizer_collection_checks() { return enabled && !thelynk && schema >= 7; }
 void pc_randomizer_observe_color_population(int color, int totalPikmin, bool gameplay) {
     if (!enabled || !colorPopulation || !gameplay || !ready || color < 0 || color > 2 || totalPikmin < 0) return;
     const char* colors[] = {"Blue", "Red", "Yellow"};
