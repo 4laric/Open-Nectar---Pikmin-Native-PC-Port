@@ -2421,7 +2421,9 @@ function(pikmin_add_ci_fixture name source)
         message(FATAL_ERROR "Invalid explicit CI fixture: ${name} ${source}")
     endif()
     set(target "pikmin_ci_fixture_${name}")
-    set(sources ${PC_PORT_SOURCES})
+    # Clone final production sources, preserving late platform sources and
+    # any existing object bindings instead of duplicating them.
+    get_target_property(sources ${NECTAR_GAME} SOURCES)
     list(REMOVE_ITEM sources pc_port/pc_main.cpp)
     list(APPEND sources "${source}")
     add_executable(${target} EXCLUDE_FROM_ALL ${sources})
