@@ -2555,6 +2555,25 @@ public:
 					const bool pcClockHeld = pc_settings_get_infinite_day() != 0;
 					if (!pcClockHeld && !gameflow.mMoviePlayer->mIsActive && (mUpdateFlags & UPDATE_WORLD_CLOCK)
 					    && !playerState->isTutorial()) {
+#if defined(PIKI_PC_PORT)
+						// Test-only (issue #1031): PIKMIN_TEST_CLOCK_TOD=<hour> jumps the clock once,
+						// on the first gameplay tick of the process, so a short harness run can sit
+						// in the end-of-day countdown window (18.5..19.5). Unset in every shipped
+						// launch.
+						{
+							static int sTestTodState = 0; // 0 unread, 1 armed, 2 done or absent
+							static float sTestTod = 0.0f;
+							if (sTestTodState == 0) {
+								const char* e = std::getenv("PIKMIN_TEST_CLOCK_TOD");
+								sTestTodState = (e && *e) ? 1 : 2;
+								if (sTestTodState == 1) sTestTod = (float)std::atof(e);
+							}
+							if (sTestTodState == 1) {
+								gameflow.mWorldClock.setTime(sTestTod);
+								sTestTodState = 2;
+							}
+						}
+#endif
 						f32 tod = gameflow.mWorldClock.mTimeOfDay;
 						gameflow.mWorldClock.update(1.0f);
 						f32 tod2 = gameflow.mWorldClock.mTimeOfDay;

@@ -12,6 +12,9 @@ extern "C" {
 // Initialization
 void pc_gfx_init(void);
 void pc_gfx_begin_frame(void);
+// Netplay two-pass frame (issue #1031): reset the per-frame 2D mapping flags
+// between the authoritative and presentation passes.
+void pc_gfx_reset_ui_state(void);
 void pc_gfx_present(void);
 // Probe screenshot hook (#871, probe-only): called once per proxy key on its
 // first live draw. Env-gated inside pc_gfx.cpp (PIKMIN_P2_PROXY_SHOT); without

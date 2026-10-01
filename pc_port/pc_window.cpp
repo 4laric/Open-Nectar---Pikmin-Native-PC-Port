@@ -402,6 +402,15 @@ void pc_window_set_prompt_player(int player) { sPromptPlayer = player; }
 // jugador al que va el texto, o el último usado si no hay asignación.
 static bool promptUsesGamepad()
 {
+	{
+		// Test-only (#1029): PIKMIN_TEST_PROMPT_GAMEPAD=1 makes this peer's
+		// text-window labels read as a gamepad player's.
+		static const bool forced = [] {
+			const char* e = std::getenv("PIKMIN_TEST_PROMPT_GAMEPAD");
+			return e != nullptr && e[0] == '1';
+		}();
+		if (forced) return true;
+	}
 	if (sPromptPlayer >= 0 && sPromptPlayer < 2 && sPlayerDeviceExplicit) {
 		if (sPlayerDevice[sPromptPlayer].kind == PC_INPUT_DEV_GAMEPAD) return true;
 		if (sPlayerDevice[sPromptPlayer].kind == PC_INPUT_DEV_KEYBOARD) return false;
@@ -448,6 +457,32 @@ void pc_window_message_control_label(char tag, char* buf, unsigned bufSize)
 		snprintf(buf, bufSize, "?");
 		return;
 	}
+
+#if PIKI_NETPLAY_BUILD
+	// Netplay (#1029): this text is substituted into the message window
+	// strings the SIM reveals character by character, so its length decides
+	// when a page is fully revealed (and when a tutorial window releases the
+	// game). A keyboard peer ("Space"), a gamepad peer ("A") or a different
+	// binding / keyboard layout would reveal at different ticks and desync the
+	// pair. In a session every peer prints the same fixed GameCube names. The
+	// escape hatch PIKMIN_NETPLAY_LOCAL_PROMPT_LABELS=1 restores per-device
+	// labels (it can desync; for testing the fix only).
+	if (pc_netplay_session_active != nullptr && pc_netplay_session_active()) {
+		static const bool local = [] {
+			const char* e = std::getenv("PIKMIN_NETPLAY_LOCAL_PROMPT_LABELS");
+			return e != nullptr && e[0] == '1';
+		}();
+		if (!local) {
+			static const char* const kNames[] = { "A", "B", "C-Stick", "X", "Y", "Z", "L", "R" };
+			static const char kTags[]         = "abcxyzlr";
+			const char* hit                   = std::strchr(kTags, tag);
+			snprintf(buf, bufSize, "%s", hit ? kNames[hit - kTags] : "?");
+			printf("[netplay-det] prompt label tag=%c -> %s (session labels)\n", tag, buf);
+			return;
+		}
+		// Still in a session: this peer prints its own device's label.
+	}
+#endif
 
 	if (promptUsesGamepad()) {
 		if (tag == 'c') {

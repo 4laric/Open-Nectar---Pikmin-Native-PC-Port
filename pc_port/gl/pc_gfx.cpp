@@ -3313,6 +3313,53 @@ static void perf_gpu_scene_begin() {
 #endif
 }
 
+// Netplay two-pass frame (issue #1031): the per-frame 2D mapping flags
+// (4:3 menu, wide HUD, 4:3 menu clip) are reset by pc_gfx_begin_frame once per
+// tick, before the authoritative pass. The authoritative pass then draws every
+// 2D screen with the null GX, which leaves sHudWide / sMenuClip43 set by the
+// last of them (pc_gfx_set_hud_wide and the clip setter are CPU-side and not
+// null-gated; the end-of-day countdown's zen::DrawScreen::draw is one). Without
+// this the presentation pass started its 3D scene with the wide-HUD mapping,
+// which stretches the 640x480 viewport and scissor through the virtual HUD
+// width and leaves a black bar on the right. This puts the presentation pass
+// where a single pass starts: with the flags as pc_gfx_begin_frame leaves them.
+// Called by the two-pass driver between the passes; never from a single pass.
+void pc_gfx_reset_ui_state(void) {
+    // Test/diagnostic only: PIKMIN_NETPLAY_GFX_TRACE=1 prints the mapping the
+    // presentation pass is about to start with, and PIKMIN_NETPLAY_TEST_NO_UI_RESET=1
+    // restores the pre-fix leak so the same exe shows both behaviours.
+    static int traceMode = -1;
+    static bool noReset = false;
+    if (traceMode < 0) {
+        const char* t = std::getenv("PIKMIN_NETPLAY_GFX_TRACE");
+        traceMode = (t && *t && *t != '0') ? 1 : 0;
+        const char* n = std::getenv("PIKMIN_NETPLAY_TEST_NO_UI_RESET");
+        noReset = n && *n && *n != '0';
+    }
+    if (traceMode) {
+        static unsigned traced = 0;
+        const bool leaked = sUi43 || sHudWide || sMenuClip43;
+        if (leaked || (++traced % 600) == 0) {
+            GLint vx = 0, vy = 0;
+            GLsizei vw = 0, vh = 0;
+            map_gx_rect(0.0f, 0.0f, 640.0f, 480.0f, vx, vy, vw, vh);
+            printf("[gfx-trace] present-begin ui43=%d hudWide=%d menuClip43=%d "
+                   "viewport640=(%d,%d,%d,%d) target=%dx%d reset=%d\n",
+                   sUi43 ? 1 : 0, sHudWide ? 1 : 0, sMenuClip43 ? 1 : 0, vx, vy, int(vw), int(vh),
+                   sNativeFramebufferReady ? sRenderWidth : sDrawableWidth,
+                   sNativeFramebufferReady ? sRenderHeight : sDrawableHeight, (leaked && !noReset) ? 1 : 0);
+            fflush(stdout);
+        }
+    }
+    if (noReset) return;
+    if (sUi43 || sHudWide || sMenuClip43) {
+        sUi43 = false;
+        sHudWide = false;
+        sMenuClip43 = false;
+        invalidate_gl_pipeline_guards();
+    }
+}
+
 void pc_gfx_begin_frame(void) {
     // M2b fix2 (issue #879 B1): no GL in the authoritative pass. This runs
     // per renderall (both passes) via GXInvalidateVtxCache and issues a VBO

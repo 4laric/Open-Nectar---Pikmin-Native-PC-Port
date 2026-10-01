@@ -4467,7 +4467,11 @@ void GameCoreSection::updateAI()
 	// builds mLookAtMtx, and that matrix is what the renderer actually uses --
 	// setting mPosition after update() changes the reported position without
 	// moving the view at all.
-	if (!gameflow.mMoviePlayer->mIsActive && pc_photo_mode_poll_toggle()) {
+	// Netplay (#1029): entering photo mode sets mPauseAll / mIsUIOverlayActive,
+	// which stop the sim on THIS peer only, so a local F3 (or touch button)
+	// desyncs the pair. In deterministic mode the request is drained and
+	// ignored; outside it the line is unchanged.
+	if (!gameflow.mMoviePlayer->mIsActive && pc_photo_mode_poll_toggle() && !pc_netplay_deterministic()) {
 		PcamCamera* pcam = cameraMgr->mCamera;
 		if (pc_photo_mode_active()) {
 			pc_photo_mode_exit();

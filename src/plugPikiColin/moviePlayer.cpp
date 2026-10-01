@@ -1,5 +1,6 @@
 #include "MoviePlayer.h"
 #include "pc_bbft.h"
+#include "netplay/pc_netplay_det.h"
 #include <cstdio>
 #include "DebugLog.h"
 #include "EffectMgr.h"
@@ -468,6 +469,10 @@ void MoviePlayer::startMovie(int movieIdx, int, Creature* target, immut Vector3f
 		return;
 	}
 	mIsActive = true;
+	if (pc_netplay_deterministic()) {
+		std::printf("[netplay-det] movie start idx=%d tick=%u\n", translatedIdx, pc_netplay_tick());
+		std::fflush(stdout);
+	}
 	info->del();
 	info->initCore(movie->mCinFileName);
 	info->mMovieIndex   = translatedIdx;
@@ -757,7 +762,15 @@ void MoviePlayer::requestSkip()
          info = static_cast<MovieInfo*>(info->mNext)) {
         if (info->mPlayer) { info->mPlayer->requestSkip(); requested = true; }
     }
-    if (requested) Jac_NoteDemoSkipped();
+    if (requested) {
+        Jac_NoteDemoSkipped();
+        // Evidence for the netplay pair harness (#1029): both peers must log
+        // this on the same logical tick.
+        if (pc_netplay_deterministic()) {
+            std::printf("[netplay-det] cutscene skip requested tick=%u\n", pc_netplay_tick());
+            std::fflush(stdout);
+        }
+    }
 }
 
 void MoviePlayer::skipScene(int sceneSkipFlag)
