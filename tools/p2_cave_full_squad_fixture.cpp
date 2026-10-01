@@ -100,24 +100,31 @@ class CaveFullSquadApp final : public PlugPikiApp {
     int frames = 0, observed = 0;
     bool entrySeen = false, captainSeen = false, carryPicked = false;
     bool positioned = false;
-    int routePhase=0, routePoint=0, phaseTick=0, settled=0;
+    int routePhase=0, routePoint=0, phaseTick=0, settled=0, regroupPoint=0;
     struct Trace {Piki* actor;bool wet=false,east=false;};
     std::vector<Trace> squad;
     int crossed=0;
     float farthest(Navi* n) {
         float maximum=0;
-        for(const auto& t:squad) {float dx=t.actor->mSRT.t.x-n->mSRT.t.x,dz=t.actor->mSRT.t.z-n->mSRT.t.z;maximum=std::fmax(maximum,std::sqrt(dx*dx+dz*dz));}
+        require(std::isfinite(n->mSRT.t.x)&&std::isfinite(n->mSRT.t.y)&&std::isfinite(n->mSRT.t.z),"nonfinite captain position");
+        for(const auto& t:squad) {float dx=t.actor->mSRT.t.x-n->mSRT.t.x,dy=t.actor->mSRT.t.y-n->mSRT.t.y,dz=t.actor->mSRT.t.z-n->mSRT.t.z;maximum=std::fmax(maximum,std::sqrt(dx*dx+dy*dy+dz*dz));}
         return maximum;
+    }
+    bool exitHeights(Navi* n) {
+        if(std::fabs(n->mSRT.t.y)>30)return false;
+        for(const auto& t:squad)if(std::fabs(t.actor->mSRT.t.y)>30)return false;
+        return true;
     }
     void observeSquad() {
         require(alivePikis()==20,"squad population changed");
         for(size_t i=0;i<squad.size();++i) {
             auto& t=squad[i];require(t.actor->isAlive(),"original actor lost");
-            float x=t.actor->mSRT.t.x,z=t.actor->mSRT.t.z;
-            if(x>=350 && x<=450 && std::fabs(z)<=60)t.wet=true;
-            if(t.wet && !t.east && x>460 && std::fabs(z)<=60) {
+            float x=t.actor->mSRT.t.x,y=t.actor->mSRT.t.y,z=t.actor->mSRT.t.z;
+            require(std::isfinite(x)&&std::isfinite(y)&&std::isfinite(z),"nonfinite original actor position");
+            if(x>=350 && x<=450 && std::fabs(z)<=60 && std::fabs(y)<=30)t.wet=true;
+            if(t.wet && !t.east && x>460 && std::fabs(z)<=60 && std::fabs(y)<=30) {
                 t.east=true;++crossed;
-                std::printf("P2_CAVE_FULL_SQUAD_CROSSED actor=%zu x=%.3f z=%.3f total=%d\n",i,x,z,crossed);std::fflush(nullptr);
+                std::printf("P2_CAVE_FULL_SQUAD_CROSSED actor=%zu x=%.3f y=%.3f z=%.3f total=%d\n",i,x,y,z,crossed);std::fflush(nullptr);
             }
         }
     }
@@ -207,7 +214,7 @@ class CaveFullSquadApp final : public PlugPikiApp {
             if(walkTo(n,path[routePoint][0],path[routePoint][1])) {
                 // Wait for the real followers at every return waypoint. A global
                 // live-actor count is not evidence of a physically arriving squad.
-                if(routePhase==5 && (following()!=20 || farthest(n)>120))return;
+                if(routePhase==5 && (following()!=20 || farthest(n)>170))return;
                 std::printf("P2_CAVE_ROUTE_WAYPOINT phase=%d point=%d x=%.2f z=%.2f\n",routePhase,routePoint,n->mSRT.t.x,n->mSRT.t.z);std::fflush(nullptr);
                 if(++routePoint==count) {++routePhase;phaseTick=observed;}
             }
@@ -246,14 +253,18 @@ class CaveFullSquadApp final : public PlugPikiApp {
             return;
         }
         if(routePhase==6) {
-            pc_p2_input_script_set(1,0);
+            // Keep the group moving through a small diamond inside the exit.
+            // Neutral formation adds a trailing offset; ordinary walking avoids
+            // falsely treating that prescribed offset as a stuck squad.
+            static const float regroup[][2]={{800,80},{820,100},{800,120},{780,100}};
+            if(walkTo(n,regroup[regroupPoint][0],regroup[regroupPoint][1]))regroupPoint=(regroupPoint+1)%4;
             require(pc_p2_cave_items_delivered()==1,"delivery count changed");
             require(crossed==20,"not every original actor crossed the water passage");
-            if(following()!=20 || farthest(n)>120) {settled=0;return;}
+            if(following()!=20 || farthest(n)>120 || !exitHeights(n)) {settled=0;return;}
             if(++settled<30)return;
             if(settled==30) {
-                std::printf("P2_CAVE_FULL_SQUAD_ARRIVED alive=%d following=%d crossed=%d farthest=%.3f captain_x=%.3f captain_z=%.3f\n",alivePikis(),following(),crossed,farthest(n),n->mSRT.t.x,n->mSRT.t.z);
-                for(size_t i=0;i<squad.size();++i)std::printf("P2_CAVE_FULL_SQUAD_AT_EXIT actor=%zu species=%d x=%.3f z=%.3f mode=%d\n",i,pc_p2_species(squad[i].actor),squad[i].actor->mSRT.t.x,squad[i].actor->mSRT.t.z,int(squad[i].actor->mMode));
+                std::printf("P2_CAVE_FULL_SQUAD_ARRIVED alive=%d following=%d crossed=%d farthest=%.3f captain_x=%.3f captain_y=%.3f captain_z=%.3f\n",alivePikis(),following(),crossed,farthest(n),n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z);
+                for(size_t i=0;i<squad.size();++i)std::printf("P2_CAVE_FULL_SQUAD_AT_EXIT actor=%zu species=%d x=%.3f y=%.3f z=%.3f mode=%d\n",i,pc_p2_species(squad[i].actor),squad[i].actor->mSRT.t.x,squad[i].actor->mSRT.t.y,squad[i].actor->mSRT.t.z,int(squad[i].actor->mMode));
                 std::fflush(nullptr);
             }
             if(pc_p2_cave_checkpoint(false)) {
