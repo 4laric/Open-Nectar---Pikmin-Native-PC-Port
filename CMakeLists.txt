@@ -2481,3 +2481,6 @@ add_test(NAME p2_purple_combat_bindings_test COMMAND p2_purple_combat_bindings_t
 
 # Issue1074 bounded local scene reentry; CI builds only.
 pikmin_add_ci_fixture(captain_reentry tools/p2_captain_reentry_runtime.cpp)
+
+# #1079 local native card save/resume acceptance, built only on CI.
+pikmin_add_ci_fixture(captain_campaign_resume tools/p2_captain_campaign_resume_runtime.cpp)
