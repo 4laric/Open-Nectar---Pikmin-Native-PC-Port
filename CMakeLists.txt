@@ -2965,6 +2965,10 @@ function(pikmin_add_ci_fixture name source)
     list(REMOVE_ITEM sources pc_port/pc_main.cpp)
     list(APPEND sources "${source}")
     add_executable(${target} EXCLUDE_FROM_ALL ${sources})
+    # Deterministic libm is attached separately to production, not in PC_PORT_SOURCES.
+    if(TARGET pc_netplay_libm_obj)
+        target_sources(${target} PRIVATE $<TARGET_OBJECTS:pc_netplay_libm_obj>)
+    endif()
     # Copy final production settings, including platform libraries and IPO.
     # Inherited directory includes/definitions and source properties also apply.
     foreach(prop COMPILE_OPTIONS COMPILE_DEFINITIONS INCLUDE_DIRECTORIES LINK_LIBRARIES LINK_OPTIONS INTERPROCEDURAL_OPTIMIZATION)
