@@ -6,6 +6,13 @@ int pc_randomizer_carry_strength(int color);
 // Standalone file-IPC adapter. No game state is touched before validation.
 bool pc_randomizer_init(int argc, char** argv);
 bool pc_randomizer_enabled();
+// Separate, versioned TheLynk AP contract. Physical checks and rewards differ.
+bool pc_randomizer_thelynk();
+bool pc_randomizer_thelynk_part(unsigned model, bool received);
+void pc_randomizer_thelynk_collect(unsigned model);
+void pc_randomizer_thelynk_squad(int color, int followers, bool gameplay);
+int pc_randomizer_thelynk_bonus(int kind);
+void pc_randomizer_thelynk_consume(int kind);
 void pc_randomizer_update();
 bool pc_randomizer_ready();
 bool pc_randomizer_has(const char* name);
