@@ -87,7 +87,9 @@ void pc_pad_route_triggers(const PcPadRoute& route, const PcPadRaw& raw, int dea
 /// may drive its direction. Zero never drives anything.
 bool pc_pad_route_stick_live(const bool dir[PC_PAD_DIR_COUNT], int value, bool vertical);
 
-/// Settings file: the three binding tables as key_N / gp_N / gp2_N lines.
+/// Settings file: the binding tables as key_N / gp_N / gp2_N lines. padP2 may
+/// be null (the fork has one pad binding set): gp2_N lines are then not written
+/// and are ignored on load.
 void pc_pad_bindings_write(std::ostream& out, const int* keyboard, const int* pad, const int* padP2);
 /// Consumes one "key = value" settings line when the key is a binding. Returns
 /// true if it was a binding key, even if the value was rejected (the table then

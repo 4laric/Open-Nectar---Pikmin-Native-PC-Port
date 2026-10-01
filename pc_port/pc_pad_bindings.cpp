@@ -167,8 +167,9 @@ bool pc_pad_bindings_parse(const std::string& key, const std::string& val, int* 
 		const int idx = atoi(key.substr(p2 ? 4 : 3).c_str());
 		if (idx >= 0 && idx < PC_KEY_ACT_COUNT) {
 			const int button = atoi(val.c_str());
-			if (pc_pad_bind_value_valid(button))
-				(p2 ? padP2 : pad)[idx] = button;
+			int* table = p2 ? padP2 : pad;
+			if (table && pc_pad_bind_value_valid(button))
+				table[idx] = button;
 		}
 		return true;
 	}
