@@ -37,6 +37,25 @@ int main(int argc, char**) {
     pc_bbft_start_button(true); assert(pc_bbft_take_skip());
     pc_bbft_start_button(true); assert(!pc_bbft_take_skip());
     pc_bbft_start_button(false);
+    // #1029: netplay derives the cutscene skip from the synced inputs. Local
+    // Start is ignored; a rising edge on EITHER captain's pad requests one
+    // skip for that frame only; a held Start does not repeat.
+    pc_bbft_synced_start(true, false); assert(!pc_bbft_take_skip()); // inert until switched on
+    pc_bbft_start_source_synced(true);
+    pc_bbft_start_button(false); pc_bbft_start_button(true); assert(!pc_bbft_take_skip());
+    pc_bbft_synced_start(false, false); assert(!pc_bbft_take_skip());
+    pc_bbft_synced_start(true, false); assert(pc_bbft_take_skip());
+    pc_bbft_synced_start(true, false); assert(!pc_bbft_take_skip());   // held: no new edge
+    pc_bbft_synced_start(false, false);
+    pc_bbft_synced_start(false, true); assert(pc_bbft_take_skip());    // the joiner's pad
+    pc_bbft_synced_start(true, true); assert(pc_bbft_take_skip());     // host presses while joiner holds
+    pc_bbft_synced_start(true, true); assert(!pc_bbft_take_skip());
+    pc_bbft_synced_start(false, false);
+    pc_bbft_synced_start(true, false);                                 // an unconsumed edge...
+    pc_bbft_synced_start(true, false); assert(!pc_bbft_take_skip());   // ...does not outlive its frame
+    pc_bbft_start_source_synced(false);
+    pc_bbft_start_button(false); pc_bbft_start_button(true); assert(pc_bbft_take_skip()); // local path back
+    pc_bbft_start_button(false);
     pc_bbft_update(); pc_bbft_warp(); pc_bbft_check("test");
     assert(!updates && !warps && !checks);
     char exe[] = "nectar", arg[] = "--bbft-port", port[] = "39000";

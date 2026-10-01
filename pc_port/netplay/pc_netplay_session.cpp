@@ -92,6 +92,7 @@
 #include "netplay/pc_netplay_launch.h"
 #include "netplay/pc_netplay_loadguard.h"
 #include "netplay/pc_netplay_pad.h"
+#include "pc_bbft.h"
 #include "netplay/pc_netplay_present.h"
 #include "netplay/pc_netplay_randstate.h"
 #include "netplay/pc_netplay_transfer.h"
@@ -4665,6 +4666,9 @@ void start_gekko_session()
 	sNextTurnMs = sSessionStartMs + 1000.0 / 30.0;
 	// M5c lane C: the campaign record's `start` line (launcher mode).
 	rec_session_start();
+	// #1029: from here on the cutscene skip is derived from the synced inputs
+	// (per Advance, below), never from the local physical pad.
+	pc_bbft_start_source_synced(true);
 	sPhase          = kSession;
 }
 
@@ -4814,6 +4818,14 @@ int handle_game_events(System* sys, BaseApp* app)
 			}
 			inject_neutral_pad(2);
 			inject_neutral_pad(3);
+			{
+				// #1029: the cutscene skip is a Start rising edge in EITHER
+				// captain's synced input for this frame (pads 0/1 as just
+				// injected; both peers hold the identical values here).
+				const PADStatus* sp = pc_netplay_pad_status();
+				pc_bbft_synced_start((sp[0].button & PAD_BUTTON_START) != 0,
+				                     (sp[1].button & PAD_BUTTON_START) != 0);
+			}
 			// Exactly one tick: the same per-tick sequence the normal
 			// path runs (M4). Jac_Gsync drives the per-frame audio event
 			// timers + gameplay-audio unpause; OSCheckActiveThreads is the

@@ -118,7 +118,10 @@ ignored), `--netplay-input gamepad` or `gamepad:N` (the first or the N-th
 gamepad only, every key ignored; the pad keeps working while another window
 has focus, and a pad plugged in later is picked up), or
 `--netplay-input auto` (the default behaviour). In a session the debug
-hotkeys (F5, F6, F9) do nothing: they would change one player's game only.
+hotkeys (F5, F6, F9) and photo mode (F3, or its touch button) do nothing: they
+would change one player's game only. Start skips a cutscene for both players,
+whichever of you presses it, and the button names in text windows read the
+same on both screens (A, B, X, Y, Z, L, R, C-Stick) whatever each of you plays on.
 
 Keep the console open: it shows the codes and the session log. To keep a
 log file, start the game with `> host.log 2>&1` added (the code is still
