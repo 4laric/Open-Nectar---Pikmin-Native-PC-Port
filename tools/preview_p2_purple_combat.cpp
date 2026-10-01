@@ -10,6 +10,7 @@
 #include <GL/gl.h>
 #include "Graphics.h"
 #include "pc_gfx.h"
+#include "pc_diary_observer.h"
 #include "system.h"
 #include "App.h"
 #include "Node.h"
@@ -317,6 +318,8 @@ class PurpleCombatApp : public PlugPikiApp {
     bool sunsetRequested=false, sunsetSeen=false;
     int sunsetTicks=0, sunsetDay=-1, expectedDay=-1, savedMaturity=-1, resumeReady=0;
     int ordinaryMenuFrames=0,ordinaryDiaryFrames=0;
+    bool releaseDiaryInput=false,diaryRevealObserved=false,diaryAdvanceObserved=false;
+    int diaryActions=0;
     unsigned saveIndexBefore=0;
     bool mode(const char* name) const {
         const char* value=std::getenv("P2_PURPLE_COMBAT_MODE");
@@ -444,16 +447,24 @@ class PurpleCombatApp : public PlugPikiApp {
         } else {
             ++ordinaryDiaryFrames;
             if(ordinaryDiaryFrames==1) milestone("ordinary_day_advanced",ticks);
-            if(ordinaryDiaryFrames==60) ordinaryInput(KBBTN_B);
-            // Ordinary held A accelerates diary text; release periodically for
-            // results/card edges. Do not waste the initial two seconds neutral.
-            // Keep the single B reveal; repeated B could cancel a card prompt.
-            else if(ordinaryDiaryFrames==61) ordinaryInput();
-            else ordinaryInput(ordinaryDiaryFrames%6<5?KBBTN_A:0);
+            const PcDiaryAction diary=pc_diary_observe();
+            // Reuse #1166's reviewed const observer. Ordinary B only reveals an
+            // active unrevealed diary page; A advances a revealed page. Never
+            // send B into results/card prompts, and release each diary edge.
+            if(releaseDiaryInput) {ordinaryInput();releaseDiaryInput=false;}
+            else if(diary==PcDiaryAction::RevealPage || diary==PcDiaryAction::AdvancePage) {
+                require(++diaryActions<240,"bounded ordinary diary actions");
+                const bool reveal=diary==PcDiaryAction::RevealPage;
+                diaryRevealObserved|=reveal;diaryAdvanceObserved|=!reveal;
+                ordinaryInput(reveal?KBBTN_B:KBBTN_A);releaseDiaryInput=true;
+                std::printf("P2_PURPLE_ORDINARY_DIARY action=%d input=%s observer=%d SDL_input=1\n",diaryActions,reveal?"B":"A",int(diary));
+            } else ordinaryInput(ordinaryDiaryFrames%6<5?KBBTN_A:0);
+            if(ordinaryDiaryFrames%30==0) std::printf("P2_PURPLE_ORDINARY_UI observer=%d diary_frames=%d observer_read_only=1 SDL_input=1\n",int(diary),ordinaryDiaryFrames);
         }
         const int cards=ordinaryCards();require(cards<=1,"ordinary save extra checkpoint generation");
         if(cards==1) {
             require(confirming && sunsetSeen && stockOne(),"ordinary card/day/Purple stock mismatch");
+            require(diaryRevealObserved && diaryAdvanceObserved,"actual ordinary diary reveal/advance missing");
             ordinaryInput();milestone("ordinary_checkpoint_committed",ticks);
             std::printf("P2_PURPLE_ORDINARY_SAVE_PASS day_before=%d day=%d maturity=%d stock=1 generations=1 direct_stock_helpers=0 clock_advanced=0 external_checkpoint_validation_required=1\n",
                 sunsetDay,expectedDay,savedMaturity);
