@@ -167,12 +167,15 @@ class CaptainSaveApp final:public PlugPikiApp {
     }
     void selected(int slot){auto* n=naviMgr->getNavi(slot);require(naviMgr->getActiveNavi()==n,"selected captain");require(cameraMgr->mController==n->mKontroller && cameraMgr->mCamera->mTargetCreature==n,"camera binding");std::printf("P2_SAVE_SELECTED phase=%s slot=%d camera=1\n",resumePhase?"resume":"save",slot);}
     int liveCount(){int n=0;Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p&&p->isAlive())++n;}return n;}
+    // validSlot observes the used-slot boundary without accessing protected layout.
+    // More occupied slots than live Pikmin fails the observation immediately.
+    int plateCount(Navi* n){require(n&&n->mPlateMgr,"captain plate exists");int limit=liveCount();for(int i=0;i<=limit;++i)if(!n->mPlateMgr->validSlot(i))return i;require(false,"plate exceeds live population");return -1;}
     int formation(Navi* n){int count=0;Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p&&p->isAlive()&&p->mMode==PikiMode::FormationMode&&p->mNavi==n)++count;}return count;}
     void owned(const char* stage){
         auto* a=naviMgr->getNavi(0);auto* b=naviMgr->getNavi(1);
         require(liveCount()==20&&storedCount()==0,"owned field20 stock0");
         require(formation(a)==0&&formation(b)==20,"all20 actual formation owner captain1");
-        require(a->mPlateMgr&&b->mPlateMgr&&a->mPlateMgr->mUsedSlotCount==0&&b->mPlateMgr->mUsedSlotCount==20,"CPlate agrees with observed ownership");
+        require(a->mPlateMgr&&b->mPlateMgr&&plateCount(a)==0&&plateCount(b)==20,"CPlate agrees with observed ownership");
         if(stage)std::printf("P2_ONION_OWNER stage=%s owner0=0 owner1=20 plate0=0 plate1=20 live=20 stored=0 input_player=1 switched_captain=1\n",stage);
     }
     void onionMenu(Navi* n,int target){
@@ -270,7 +273,7 @@ public:
                 if(!resumePhase && live<20)return result;
                 require(resumePhase?live==0:live==20,"actual initial field count");
                 require(a->mPlateMgr && b->mPlateMgr,"initialized captain formation plates");
-                if(!resumePhase && (formation(a)!=20 || a->mPlateMgr->mUsedSlotCount!=20))return result;
+                if(!resumePhase && (formation(a)!=20 || plateCount(a)!=20))return result;
                 startDay=gameflow.mWorldClock.mCurrentDay;
                 withdrawnFromTotal=live+storedCount();require(withdrawnFromTotal==20,"actual total20 baseline");
                 selected(0);withdrawQueued=true;elapsed("ownership_boot");
