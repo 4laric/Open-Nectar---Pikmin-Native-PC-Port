@@ -156,7 +156,7 @@ class CaptainSaveApp final:public PlugPikiApp {
     void selected(int slot){auto* n=naviMgr->getNavi(slot);require(naviMgr->getActiveNavi()==n,"selected captain");require(cameraMgr->mController==n->mKontroller && cameraMgr->mCamera->mTargetCreature==n,"camera binding");std::printf("P2_SAVE_SELECTED phase=%s slot=%d camera=1\n",resumePhase?"resume":"save",slot);}
 public:
     CaptainSaveApp(){initialCards=cards();require(resumePhase?initialCards==1:initialCards==0,"expected committed generation before phase");}
-    void draw(Graphics& gfx)override{PlugPikiApp::draw(gfx);if(tick>30&&!shot)shot=capture("captain-campaign.ppm");if(saving&&menuFrames==120)require(capture("pause-menu.ppm"),"ordinary pause menu capture");if(resumePhase&&withdrawFrames==120)require(capture("onion-menu.ppm"),"ordinary Onion menu capture");}
+    void draw(Graphics& gfx)override{PlugPikiApp::draw(gfx);if(tick>30&&!shot)shot=capture("captain-campaign.ppm");if(saving&&menuFrames==120)require(capture("pause-menu.ppm"),"ordinary pause menu capture");if(resumePhase&&withdrawQueued&&frames%240==0){const std::string path="onion-menu-"+std::to_string(frames)+".ppm";require(capture(path.c_str()),"ordinary Onion menu capture");}}
     int idle()override{
         if(pendingNegative){
             // Queue mutation until the next ordinary pre-engine guard. This
@@ -170,6 +170,11 @@ public:
         guardLiveState(); // also protects the engine from negative null-state setup
         const int result=PlugPikiApp::idle();require(++frames<7200,"frame bound");
         guardLiveState(); // never bypass initialized actors for movie/readiness/pause
+
+        if(resumePhase&&withdrawQueued&&tick<0&&frames%120==0){
+            auto* a=naviMgr?naviMgr->getNavi(0):nullptr;auto* b=naviMgr?naviMgr->getNavi(1):nullptr;
+            std::printf("P2_SAVE_RESUME_GATE frame=%d ready=%d pause=%d overlay=%d movie=%d active_state=%d inactive_state=%d ui_state=%d squad=%d stock=%d\n",frames,int(pc_randomizer_ready()),int(gameflow.mPauseAll),int(gameflow.mIsUIOverlayActive),int(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive),a&&a->getCurrState()?a->getCurrState()->getID():-1,b&&b->getCurrState()?b->getCurrState()->getID():-1,containerWindow?int(containerWindow->getStatus()):-1,containerWindow?containerWindow->getMyPikiDisp():-1,containerWindow?containerWindow->getContainerPikiDisp():-1);std::fflush(stdout);
+        }
 
         if(resumePhase&&tick<0&&!withdrawQueued){
             const bool menu=!naviMgr||gameflow.mIsUIOverlayActive;
