@@ -20,6 +20,7 @@
 #include <string>
 #include <set>
 #include <tuple>
+#include <vector>
 #ifdef _WIN32
 #include <io.h>
 #else
@@ -41,6 +42,10 @@ bool slotEnemies = false, campaignEnemies = false;
 bool p2EnemyBridge = false;
 bool p2ProxyTier = false;
 std::unordered_map<std::string, unsigned> p2Bindings;
+// Versioned manifest-owned native journal order. Empty for all historical seeds.
+std::vector<std::string> resolvedCheckNames, legacyCheckNames;
+std::unordered_map<unsigned, unsigned> p2CheckIndices;
+std::unordered_map<unsigned, std::set<std::pair<unsigned, int>>> p2CheckSources;
 unsigned campaignAssignments[72] = {};
 bool groupEnemies = false;
 unsigned groupAssignments[12] = {};
@@ -145,7 +150,7 @@ void expect(std::istream& in, const char* expected) {
     if (!(in >> word) || word != expected) fail("unsupported or malformed bootstrap");
 }
 const char* baseCheckName(unsigned i) { return compactPopulation ? (permanentChecks ? randomizerCompactPermanentNames[i] : randomizerCompactCollectionNames[i]) : colorPopulation ? (permanentChecks ? randomizerColorPermanentNames[i] : randomizerColorCollectionNames[i]) : noExploration ? (permanentChecks ? randomizerNoExplorePermanentNames[i] : randomizerNoExploreCollectionNames[i]) : schema >= 9 ? (permanentChecks ? randomizerModernPermanentNames[i] : randomizerModernCollectionNames[i]) : schema >= 8 ? randomizerPermanentNames[i] : schema >= 7 ? randomizerCollectionNames[i] : randomizerCheckNames[i]; }
-const char* checkName(unsigned i) {
+const char* legacyCheckName(unsigned i) {
     if (!noSticks) return baseCheckName(i);
     unsigned source = 0;
     for (;;) {
@@ -153,6 +158,9 @@ const char* checkName(unsigned i) {
         if (std::strstr(name, "Climbing Stick")) continue;
         if (i-- == 0) return name;
     }
+}
+const char* checkName(unsigned i) {
+    return resolvedCheckNames.empty() ? legacyCheckName(i) : resolvedCheckNames.at(i).c_str();
 }
 int index(const char* name) {
     if (name) for (unsigned i = 0; i < checkCount; ++i) if (!std::strcmp(name, checkName(i))) return (int)i;
@@ -311,6 +319,42 @@ bool pc_randomizer_init(int argc, char** argv) {
             p2ProxyTier = true;
             input >> end;
         }
+        if (end == "ENEMY_CHECKS") {
+            unsigned version, count;
+            if (!(input >> version >> count) || version != 1 || count == 0 || count > checkCount + 102)
+                fail("invalid resolved enemy check catalog");
+            for (unsigned i = 0; i < checkCount; ++i) legacyCheckNames.emplace_back(legacyCheckName(i));
+            std::set<unsigned> retained;
+            for (unsigned i = 0; i < count; ++i) {
+                std::string kind; unsigned value;
+                if (!(input >> kind >> value)) fail("truncated resolved enemy check catalog");
+                if (kind == "L") {
+                    if (value >= legacyCheckNames.size() || !retained.insert(value).second)
+                        fail("invalid resolved legacy check index");
+                    resolvedCheckNames.push_back(legacyCheckNames[value]);
+                } else if (kind == "P") {
+                    unsigned sources;
+                    if (!pc_randomizer_p2_bound(value) || value == 9 || value == 10 || value == 11 || value == 16
+                        || !p2CheckIndices.emplace(value, i).second || !(input >> sources)
+                        || sources == 0 || sources > kP2MaxBindings)
+                        fail("invalid resolved P2 check identity");
+                    for (unsigned j = 0; j < sources; ++j) {
+                        unsigned uid; int stage;
+                        if (!(input >> uid >> stage) || !uid || stage < 0 || stage > 4
+                            || !p2CheckSources[value].insert({uid, stage}).second)
+                            fail("invalid resolved P2 check source");
+                    }
+                    resolvedCheckNames.push_back("P2:" + std::to_string(value));
+                } else fail("unknown resolved enemy check kind");
+            }
+            // Only bestiary locations may be removed from the legacy catalog.
+            // Parts, population and permanent checks keep their original identity.
+            for (unsigned i = 0; i < legacyCheckNames.size(); ++i)
+                if (legacyCheckNames[i].find("Bestiary:") != 0 && !retained.count(i))
+                    fail("resolved catalog omits non-enemy check");
+            checkCount = count;
+            input >> end;
+        }
         if (end != "END" && end != "PURPLE") fail("P2 enemy bridge cannot mix other enemy layouts");
     }
     if (end == "ENEMY_CAMPAIGN") {
@@ -422,6 +466,7 @@ bool pc_randomizer_init(int argc, char** argv) {
     if (deathLinkUnit) hello << " death-link-v1";
     if (p2EnemyBridge) hello << " p2-enemy-bridge-v1";
     if (p2ProxyTier) hello << " p2-proxy-tier-v1";
+    if (!resolvedCheckNames.empty()) hello << " resolved-enemy-checks-v1";
     hello << " END\n";
     hello.close();
     if (!hello) fail("cannot write native handshake");
@@ -644,6 +689,7 @@ bool pc_randomizer_p2_receipt_seen(unsigned generatorUid)
 {
     return generatorUid != 0 && p2ReceiptGenerators.count(generatorUid) != 0;
 }
+bool pc_randomizer_resolved_checks() { return !resolvedCheckNames.empty(); }
 bool pc_randomizer_p2_corpse_delivered(const void* tekiview, int type, int stage, bool gameplay) {
     if (!enabled || !ready || !gameplay || !tekiview) return false;
     const unsigned sourceId = pc_randomizer_p2_source_for(tekiview);
@@ -653,6 +699,13 @@ bool pc_randomizer_p2_corpse_delivered(const void* tekiview, int type, int stage
         std::printf("[Pikmin Randomizer] P2_ORDINARY_DELIVERY SKIP source=%u no_generator_uid\n", sourceId);
         pc_randomizer_p2_forget_source(tekiview);
         return false;
+    }
+    if (!resolvedCheckNames.empty() && p2CheckIndices.count(sourceId)) {
+        if (!p2CheckSources[sourceId].count({generatorUid, stage}))
+            fail("P2 delivery differs from resolved source catalog");
+        // Persist the AP event before the secondary receipt ledger. A runner or
+        // game crash between the two writes cannot lose an earned AP check.
+        pc_randomizer_check(resolvedCheckNames[p2CheckIndices[sourceId]].c_str());
     }
     // Open the durable ordinary receipt ledger once per process, at a path stable
     // across a save + process restart (the session campaign directory).
@@ -890,6 +943,10 @@ void pc_randomizer_check(const char* name) {
     if (slot < 0) {
         // Main Engine is the synthetic tutorial completion, not a standalone check.
         if (name && !std::strcmp(name, "Pikmin: Main Engine")) return;
+        if (!resolvedCheckNames.empty() && name && std::strstr(name, "Bestiary:") == name) {
+            for (const auto& original : legacyCheckNames)
+                if (original == name) return; // a removed P1 species has no AP location
+        }
         fail("unknown native collection identity");
     }
     if (checks.count(unsigned(slot))) return;
@@ -995,7 +1052,7 @@ void pc_randomizer_observe_total_population(int totalPikmin, bool gameplay) {
         return;
     }
     for (int i = 0; i < 9; ++i)
-        if (totalPikmin >= randomizerTotalPopulation[i]) pc_randomizer_check(checkName(30 + i));
+        if (totalPikmin >= randomizerTotalPopulation[i]) pc_randomizer_check(legacyCheckName(30 + i));
 }
 void pc_randomizer_corpse_delivered(int type, int stage, bool gameplay) {
     if (!pc_randomizer_collection_checks() || !gameplay || !ready || !accessibleStage(stage)) return;
