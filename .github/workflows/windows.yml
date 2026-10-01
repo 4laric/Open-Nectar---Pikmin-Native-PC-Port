@@ -101,9 +101,15 @@ jobs:
             | awk '$1 ~ /p2_/ { n = $2; sub(/.*\//, "", n); sub(/\.exe$/, "", n); print n }' \
             | sort -u)
           echo "Building pikmin_pc + pc_bbft_test + ${#p2_targets[@]} p2 test targets"
+          mapfile -t fixture_targets < <(tr -d '\r' < build/ci-fixtures.txt)
+          for target in "${fixture_targets[@]}"; do
+            [[ "$target" =~ ^pikmin_ci_fixture_[a-z0-9_]+$ ]] || exit 1
+          done
           ccache -z
-          cmake --build build --target pikmin_pc pc_bbft_test "${p2_targets[@]}" -j 4
+          cmake --build build --target pikmin_pc pc_bbft_test "${p2_targets[@]}" "${fixture_targets[@]}" -j 4
           ccache -s
+          cmake --build build --target pikmin_pc pc_bbft_test "${p2_targets[@]}" "${fixture_targets[@]}" -- -n | tee build/build-dry-run.txt
+          grep -Fx "ninja: no work to do." build/build-dry-run.txt
 
       - name: Build all targets
         if: ${{ inputs.all_targets }}
@@ -150,5 +156,35 @@ jobs:
         with:
           name: nectar-windows-${{ env.HEAD_SHA }}
           path: nectar-windows-${{ env.HEAD_SHA }}/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Package opt-in fixtures (compile only; no game assets)
+        if: ${{ !inputs.all_targets }}
+        run: |
+          out="pikmin-fixtures-windows-${HEAD_SHA}"
+          mkdir -p "${out}"
+          cp build/ci-fixtures.txt build/build-dry-run.txt "${out}/"
+          while read -r target; do
+            [[ "$target" =~ ^pikmin_ci_fixture_[a-z0-9_]+$ ]] || {
+              printf 'Rejected fixture target: %q\n' "$target"; exit 1;
+            }
+            cp "build/fixtures/${target}.exe" "${out}/"
+            ldd "build/fixtures/${target}.exe" | awk '{ print $3 }' | grep -i '^/mingw64/' | sort -u | while read -r dll; do
+              cp "${dll}" "${out}/"
+            done
+            if ldd "${out}/${target}.exe" | grep -qi 'not found'; then
+              echo 'Unresolved fixture DLLs'; exit 1
+            fi
+          done < <(tr -d '\r' < build/ci-fixtures.txt)
+          printf '%s\n%s\n%s\n' "commit ${HEAD_SHA}" "run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" "TEST FIXTURES ONLY: scripted acceptance, not production" > "${out}/BUILD_INFO.txt"
+          (cd "${out}" && find . -maxdepth 1 -type f \( -name '*.exe' -o -name '*.dll' \) -print0 | sort -z | xargs -0 -r sha256sum > sha256.txt)
+
+      - name: Upload opt-in fixtures
+        if: ${{ !inputs.all_targets }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pikmin-fixtures-windows-${{ env.HEAD_SHA }}
+          path: pikmin-fixtures-windows-${{ env.HEAD_SHA }}/
           if-no-files-found: error
           retention-days: 14
