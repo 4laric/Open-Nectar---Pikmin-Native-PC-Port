@@ -117,6 +117,7 @@
 #include "Pcam/Camera.h"
 #include "Pcam/CameraManager.h"
 #include "Pellet.h"
+#include "PelletState.h"
 #include "PikiHeadItem.h"
 #include "PikiInfo.h"
 #include "PikiMgr.h"
@@ -3880,8 +3881,130 @@ static void coopPolicyFixture(Navi* p1, Navi* p2, MapMgr* map, int initialColor)
 }
 #endif
 
+// TEST_ONLY (issue #1034): PIKMIN_TEST_ONLY_PELLET_BONUS=1 spawns, around every Onion that
+// exists, a matching-colour and a non-matching-colour number pellet of each size (1/5/10/20)
+// and sends them through the normal absorb path (Pellet::startGoal -> PelletGoalState ->
+// GoalItem::suckMe), which logs "[pellet] onion=... seeds=... matching=...". Inert unless set.
+static void pelletBonusTestTick()
+{
+    static const char* const modeEnv = std::getenv("PIKMIN_TEST_ONLY_PELLET_BONUS");
+    static const bool enabled = modeEnv != nullptr;
+    // "carry": use real carriers (the full carry path incl. ActTransport::decideGoal) instead of startGoal.
+    static const bool carryMode = modeEnv && !std::strcmp(modeEnv, "carry");
+    static int readyFrames = 0;
+    static bool done = false;
+    if (!enabled || done || !itemMgr || !pelletMgr || !mapMgr || gameflow.mMoviePlayer->mIsActive || gameflow.mPauseAll) return;
+    bool any = false;
+    for (int c = 0; c < 3; ++c) any = any || itemMgr->getContainer(c);
+    if (!any) return;
+    if (++readyFrames < 120) return;
+    done = true;
+    if (modeEnv && !std::strcmp(modeEnv, "show")) {
+        // Visual check: every colour x size laid out on the ground around the first captain (pellet colour
+        // as drawn vs the data logged here), never delivered.
+        Navi* navi = naviMgr ? naviMgr->getNavi(0) : nullptr;
+        if (!navi) return;
+        for (int pcolor = 0; pcolor < 3; ++pcolor) {
+            for (int size = 0; size < 4; ++size) {
+                Pellet* pelt = pelletMgr->newNumberPellet(pcolor, size);
+                if (!pelt) continue;
+                const f32 x = navi->mSRT.t.x + 60.0f * f32(size - 1.5f);
+                const f32 z = navi->mSRT.t.z + 70.0f + 55.0f * f32(pcolor);
+                pelt->init(Vector3f(x, mapMgr->getMinY(x, z, true) + 5.0f, z));
+                pelt->startAI(0);
+                const f32 scale = pelt->mConfig->mPelletScale();
+                pelt->mSRT.s.set(scale, scale, scale);
+                pelt->mStateMachine->transit(pelt, 0);
+                std::printf("[pellet-test] show pcolor=%d size=%d model=%s cfg_type=%d cfg_pcolor=%d\n", pcolor, size,
+                    pelt->mConfig->mModelId.mStringID, int(pelt->mConfig->mPelletType()), int(pelt->mConfig->mPelletColor()));
+            }
+        }
+        std::fflush(stdout);
+        return;
+    }
+    if (carryMode) {
+        // One 1-pellet per (carrier colour, pellet colour); one Pikmin recoloured to the carrier colour
+        // carries it to the Onion ActTransport::decideGoal picks (Onions that do not exist are skipped).
+        Piki* crew[16];
+        int available = 0;
+        Iterator pikis(pikiMgr);
+        CI_LOOP(pikis) {
+            Piki* piki = static_cast<Piki*>(*pikis);
+            if (piki && piki->isAlive() && available < 16) crew[available++] = piki;
+        }
+        int next = 0;
+        for (int carrier = 0; carrier < 3; ++carrier) {
+            GoalItem* home = itemMgr->getContainer(carrier);
+            if (!home) {
+                std::printf("[pellet-test] carry carrier=%d no-onion-skipped\n", carrier);
+                continue;
+            }
+            for (int pcolor = 0; pcolor < 3; ++pcolor) {
+                if (next >= available) {
+                    std::printf("[pellet-test] carry carrier=%d pcolor=%d no-free-piki\n", carrier, pcolor);
+                    continue;
+                }
+                Pellet* pelt = pelletMgr->newNumberPellet(pcolor, 0);
+                if (!pelt) continue;
+                const f32 ang = f32(next) * 1.0471976f;
+                const f32 x = home->mSRT.t.x + 260.0f * cosf(ang);
+                const f32 z = home->mSRT.t.z + 260.0f * sinf(ang);
+                pelt->init(Vector3f(x, mapMgr->getMinY(x, z, true) + 5.0f, z));
+                pelt->startAI(0);
+                const f32 scale = pelt->mConfig->mPelletScale();
+                pelt->mSRT.s.set(scale, scale, scale);
+                pelt->mStateMachine->transit(pelt, 0);
+                Piki* piki = crew[next++];
+                piki->initColor(carrier);
+                piki->mActiveAction->abandon(nullptr);
+                piki->mActiveAction->mCurrActionIdx = PikiAction::Transport;
+                piki->mActiveAction->mChildActions[PikiAction::Transport].initialise(pelt);
+                piki->mMode = PikiMode::TransportMode;
+                // The Pikmin starts beside the pellet and runs the ordinary go/wait/lift/move/goal states.
+                piki->mSRT.t = Vector3f(x + 18.0f, mapMgr->getMinY(x + 18.0f, z, true) + 2.0f, z);
+                std::printf("[pellet-test] carry carrier=%d pcolor=%d model=%s home_onion=%d\n", carrier, pcolor,
+                    pelt->mConfig->mModelId.mStringID, carrier);
+            }
+        }
+        std::fflush(stdout);
+        return;
+    }
+    for (int c = 0; c < 3; ++c) {
+        GoalItem* goal = itemMgr->getContainer(c);
+        if (!goal) {
+            std::printf("[pellet-test] onion=%d absent\n", c);
+            continue;
+        }
+        int slot = 0;
+        for (int match = 1; match >= 0; --match) {
+            const int pcolor = match ? c : (c + 1) % 3;
+            for (int size = 0; size < 4; ++size, ++slot) {
+                Pellet* pelt = pelletMgr->newNumberPellet(pcolor, size);
+                if (!pelt) {
+                    std::printf("[pellet-test] onion=%d pcolor=%d size=%d spawn-failed\n", c, pcolor, size);
+                    continue;
+                }
+                const f32 ang = f32(slot) * 0.7853982f;
+                const f32 x = goal->mSRT.t.x + 70.0f * cosf(ang);
+                const f32 z = goal->mSRT.t.z + 70.0f * sinf(ang);
+                pelt->init(Vector3f(x, mapMgr->getMinY(x, z, true) + 5.0f, z));
+                pelt->startAI(0);
+                const f32 scale = pelt->mConfig->mPelletScale();
+                pelt->mSRT.s.set(scale, scale, scale);
+                pelt->mStateMachine->transit(pelt, 0);
+                pelt->mTargetGoal = goal;
+                pelt->startGoal();
+                std::printf("[pellet-test] onion=%d spawn pcolor=%d size=%d match_expected=%d model=%s cfg_type=%d cfg_pcolor=%d\n", c, pcolor,
+                    size, match, pelt->mConfig->mModelId.mStringID, int(pelt->mConfig->mPelletType()), int(pelt->mConfig->mPelletColor()));
+            }
+        }
+    }
+    std::fflush(stdout);
+}
+
 void GameCoreSection::updateAI()
 {
+    pelletBonusTestTick();
     pc_p2_cave_tick();
     pc_p2_giant_breadbug_actor_tick();
     pc_p2_breadbug_actor_tick();
