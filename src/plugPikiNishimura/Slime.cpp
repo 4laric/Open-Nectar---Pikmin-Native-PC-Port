@@ -6,6 +6,7 @@
 #include "Shape.h"
 #include "sysNew.h"
 #include "system.h"
+#include "timing/pc_render_phase.h"
 
 /**
  * @todo: Documentation
@@ -168,6 +169,12 @@ void Slime::refresh(Graphics& gfx)
  */
 void Slime::drawShape(Graphics& gfx)
 {
+#if defined(PIKI_PC_PORT)
+	// Netplay (#1037): doAnimation() steps the slime body spring and rewrites mSRT.t, which is hashed sim state.
+	// It must run once per tick (authoritative pass only); a peer that also draws the slime in its
+	// presentation pass (it is inside that peer's local frustum) would step it a second time.
+	if (pc_render_is_authoritative())
+#endif
 	doAnimation();
 	gfx.useMatrix(Matrix4f::ident, 0);
 	if (mAppearanceScale > 0.0f) {
