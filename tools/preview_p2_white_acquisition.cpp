@@ -74,6 +74,7 @@ public:
   if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
   if(!pc_p2_preview_ready()||!n||!n->getCurrState()||gameflow.mPauseAll||gameflow.mIsUIOverlayActive||frames<90)return result;
   ++ticks;
+  if(phase==0 && n->getCurrState()->getID()==NAVISTATE_Starting)return result;
   if(phase==0){
    for(int f=0;f<DEMOFLAG_COUNT;++f)playerState->mDemoFlags.setFlagOnly(f);
    int count=0;Iterator actors(pikiMgr);CI_LOOP(actors){Piki* p=static_cast<Piki*>(*actors);if(p->isAlive()){++count;require(pc_p2_species(p)==P2SpeciesRed,"starting squad not Red");}}
@@ -89,6 +90,7 @@ public:
   Iterator actors(pikiMgr);CI_LOOP(actors){Piki* p=static_cast<Piki*>(*actors);if(!p->isAlive())continue;if(pc_p2_is_white(p))++white;else ++red;if(p->getStickObject()==flower)++captured;if(p->getState()==PIKISTATE_Flying)++flying;}
   Iterator sprouts(itemMgr->getPikiHeadMgr());CI_LOOP(sprouts){PikiHeadItem* p=static_cast<PikiHeadItem*>(*sprouts);if(p->isAlive()){++heads;require(pc_p2_species(p)==P2SpeciesWhite,"non-White sprout");if(!head&&p->canPullout())head=p;}}
   if(ticks%60==0){std::printf("P2_WHITE_ACQUISITION_FRAME frame=%d phase=%d ticks=%d red=%d white=%d heads=%d captured=%d flying=%d bodies=%d nstate=%d navi=%.2f,%.2f cursor=%.2f,%.2f budstate=%d budalive=%d\n",frames,phase,ticks,red,white,heads,captured,flying,population(),n->getCurrState()->getID(),n->mSRT.t.x,n->mSRT.t.z,n->mCursorWorldPos.x,n->mCursorWorldPos.z,flower->getCurrentState(),int(flower->isAlive()));std::fflush(stdout);}
+  if(population()!=20){std::printf("P2_WHITE_POPULATION_FAILURE frame=%d red=%d white=%d heads=%d captured=%d flying=%d bodies=%d phase=%d nstate=%d\n",frames,red,white,heads,captured,flying,population(),phase,n->getCurrState()->getID());Iterator diag(pikiMgr);CI_LOOP(diag){Piki* p=static_cast<Piki*>(*diag);std::printf("P2_WHITE_PIKI_DIAG alive=%d state=%d mode=%d x=%.2f y=%.2f z=%.2f\n",int(p->isAlive()),p->getState(),int(p->mMode),p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z);}}
   require(population()==20,"ordinary acquisition lost/duplicated bodies");
   if(phase==3&&head){std::printf("P2_WHITE_ORDINARY_DISCHARGE sprouts=%d red=%d bodies=20\n",heads,red);goal=head->mSRT.t;phase=4;ticks=0;}
   if(phase==4&&head){goal=head->mSRT.t;float dx=goal.x-n->mSRT.t.x,dz=goal.z-n->mSRT.t.z;if(dx*dx+dz*dz<400){phase=5;ticks=0;}}
@@ -101,7 +103,7 @@ int main(int argc,char**argv){
     _putenv_s("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1");pc_bbft_init(argc,argv);
     require(pc_pikipelago_room_preview(),"requires experimental room");
     if(!pc_window_init("White acquisition acceptance",960,540))return 3;
-    pc_settings_init();pc_window_set_display_mode(PC_WINDOW_FULLSCREEN_WINDOWED);pc_window_set_window_size(960,540);pc_window_center();
+    pc_settings_init();pc_window_set_control_mode(PC_CONTROL_CLASSIC);pc_window_set_display_mode(PC_WINDOW_FULLSCREEN_WINDOWED);pc_window_set_window_size(960,540);pc_window_center();
     std::puts("Experimental preview window set to 960x540 windowed and centered");
     gsys->Initialise();pc_settings_p2d_init();nodeMgr=new NodeMgr();gsys->run(new AcquisitionApp());return 0;
 }
