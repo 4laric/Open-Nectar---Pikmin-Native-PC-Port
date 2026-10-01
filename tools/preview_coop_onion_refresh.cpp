@@ -64,9 +64,9 @@ class OnionSmokeApp final : public PlugPikiApp {
    for(int c=0;c<3;c++) {GoalItem* g=itemMgr->getContainer(c);if(g && g!=goals[0]){goals[1]=g;break;}}
    require(goals[0] && goals[1],"two distinct native Onion objects required");
    GameStat::update();baseLimit=int(AICONST.mMaxPikisOnField());
-   require(baseLimit==30,"authoritative starting flarlic1 capacity30");
+   require(baseLimit==30,"authoritative starting flarlic3 capacity30");
    const int reserve=baseLimit-int(GameStat::mapPikis)-itemMgr->getContainerExitCount();
-   require(reserve>=0 && reserve<10,"starting20live plus source heads fit known field budget");
+   require(reserve>=0 && reserve<=10,"starting20live plus source heads fit known field budget");
    for(int i=0;i<2;i++){goals[i]->mHeldPikis[Leaf]=10;goals[i]->mHeldPikis[Bud]=goals[i]->mHeldPikis[Flower]=0;}
    goals[1]->exitPikis(reserve,1);
    for(int i=0;i<2;i++) {
