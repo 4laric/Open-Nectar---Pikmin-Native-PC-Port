@@ -7,6 +7,8 @@
 #include "pc_p2_purple_motion.h"
 #include "pc_p2_white.h"
 #include "pc_p2_preview.h"
+#include "pc_p2_cave.h"
+#include "pc_p2_species.h"
 #include "pc_bbft.h"
 #include "pc_randomizer.h"
 #include "Piki.h"
@@ -56,7 +58,7 @@ Shape* shape(const std::string& name) {
     return result;
 }
 }
-bool pc_p2_purples_enabled(){return (pc_pikipelago_room_preview() || pc_randomizer_purple_campaign()) && enabled;}
+bool pc_p2_purples_enabled(){return (pc_pikipelago_room_preview() || pc_randomizer_purple_campaign() || pc_p2_cave_route_species_requested(P2SpeciesPurple)) && enabled;}
 bool pc_p2_is_purple(const Piki* p){return pc_p2_purples_enabled() && p && p->mP2Purple;}
 void pc_p2_make_purple(Piki* p) {
     if(!pc_p2_purples_enabled())std::abort();
@@ -78,10 +80,11 @@ float pc_p2_transport_speed(Pellet* pellet,float fallback) {
 }
 void pc_p2_purple_setup() {
     enabled=false;clips.clear();pc_p2_purple_impact_reset();pc_p2_purple_direct_reset();
-    if(!pc_pikipelago_room_preview() && !pc_randomizer_purple_campaign())return;
+    const bool route=pc_p2_cave_route_species_requested(P2SpeciesPurple);
+    if(!pc_pikipelago_room_preview() && !pc_randomizer_purple_campaign() && !route)return;
     if(pc_randomizer_purple_campaign())(void)campaignConfig();
-    std::ifstream in("p2-purple.txt");if(!in){if(pc_randomizer_purple_campaign())std::abort();return;}
-    std::string word;in>>word;if(word!="P2_PURPLE_1" || (!pc_randomizer_purple_campaign() && !pc_p2_preview_goal()))std::abort();
+    std::ifstream in("p2-purple.txt");if(!in){if(pc_randomizer_purple_campaign() || route)std::abort();return;}
+    std::string word;in>>word;if(word!="P2_PURPLE_1" || (!route && !pc_randomizer_purple_campaign() && !pc_p2_preview_goal()))std::abort();
     if(!(in>>word) || word!="stats")std::abort();
     for(float& value:stats)if(!(in>>value) || !std::isfinite(value) || value<0 || value>1000)std::abort();
     for(const char* expected:{"wait","walk","attack1"}) {
@@ -168,6 +171,9 @@ int pc_p2_convert_violet(Pom* pom, int remaining) {
 void pc_p2_purple_status() {
     if(!pc_p2_purples_enabled())return;
     int purple=0,other=0;Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(p && p->isAlive()){if(pc_p2_is_purple(p))++purple;else ++other;}}
+    if(pc_p2_cave_route_species_requested(P2SpeciesPurple)){
+        std::printf("P2_ROUTE_PURPLE_FIELD purple=%d other=%d\n",purple,other);return;
+    }
     if(SDL_Window* window=SDL_GL_GetCurrentWindow()) {
         std::string title=(pc_randomizer_purple_campaign()?"Pikipelago - Purple campaign: ":"Pikipelago - Purple preview: ")+std::to_string(purple)+" Purple, "+std::to_string(other)+" other field Pikmin | "+std::to_string(pc_p2_preview_pokos())+" Pokos";
         SDL_SetWindowTitle(window,title.c_str());

@@ -15,6 +15,7 @@
 #include "pc_p2_species_schema.h"
 #include "pc_p2_cave_transfer.h"
 #include "pc_p2_cave_route_policy.h"
+#include "pc_p2_teki_lifetime.h"
 #include "pc_p2_bulbmin.h"
 #include "pc_p2_cave_generator.h"  // lane 41 (#480) runtime generator hook
 #include "pc_p2_cave_rooms_engine.h"  // lane 44 (#482) proxy room/unit instantiation
@@ -35,6 +36,8 @@
 #include "MoviePlayer.h"
 #include "PlayerState.h"
 #include "gameflow.h"
+#include "FlowController.h"
+#include "OnePlayerSection.h"
 #include "system.h"
 #include <SDL2/SDL.h>
 #include <cstdio>
@@ -64,9 +67,39 @@ unsigned navDrawCalls=0;
 bool navMarkerLogged=false;
 P2CaveSurfaceRoute surfaceRoute;
 bool surfaceRouteLoaded=false;
+unsigned long surfaceContextScene=0;
+unsigned routeSpeciesMask=0;
+std::set<std::string> activatedSurfaceTokens;
+void resetRouteSpecies(){routeSpeciesMask=0;}
 bool online(){return pc_netplay_session_active && pc_netplay_session_active();}
+bool tutorialSurfaceStage(){
+    const char* surface=pc_pikipelago_surface_course();
+    return surface && std::string(surface)=="tutorial" && flowCont.mCurrentStage
+        && flowCont.mCurrentStage->mFileName
+        && std::string(flowCont.mCurrentStage->mFileName)=="stages/p2_tutorial.ini";
+}
 using Survivor = P2CaveSurvivor;
-void invalid(const char* reason){std::fprintf(stderr,"Invalid P2 cave entry: %s\n",reason);std::abort();}
+void invalid(const char* reason){resetRouteSpecies();std::fprintf(stderr,"Invalid P2 cave entry: %s\n",reason);std::abort();}
+bool routeFile(const std::string& path,std::string& bytes){
+    std::ifstream in(path,std::ios::binary|std::ios::ate);if(!in)return false;
+    const auto size=in.tellg();if(size<=0 || size>64*1024*1024)return false;
+    bytes.resize(static_cast<size_t>(size));in.seekg(0);
+    return bool(in.read(&bytes[0],static_cast<std::streamsize>(bytes.size())));
+}
+unsigned authorizeRouteSpecies(const P2CaveSurfaceRoute& route,const std::string& routeBytes){
+    unsigned mask=0;for(const auto& p:route.party.squad)
+        if(p.species==P2SpeciesPurple || p.species==P2SpeciesWhite)mask|=1u<<p.species;
+    if(!mask)return 0; // Retained wire2 alone never activates a species.
+    std::ifstream in("p2-cave-route-species.txt");P2CaveRouteActivation request;
+    if(!in || !p2_cave_route_activation_read(in,request))invalid("species authorization");
+    std::map<std::string,std::string> bytes;size_t total=0;
+    for(const auto& file:request.files){std::string content;
+        if(!routeFile(file.first,content))invalid("species bank missing or oversized");
+        total+=content.size();if(total>256u*1024u*1024u)invalid("species bank aggregate size");
+        bytes.emplace(file.first,std::move(content));}
+    if(!p2_cave_route_activation_valid(request,route,routeBytes,bytes))invalid("species bank or route identity");
+    return mask;
+}
 bool surfaceSafe(){
     Navi* n=naviMgr?naviMgr->getNavi():nullptr;
     return surfaceRouteLoaded && !completed && n && n->getCurrState() && playerState
@@ -75,18 +108,40 @@ bool surfaceSafe(){
             gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive,playerState->mInDayEnd,online(),n->mHealth);
 }
 void loadSurfaceRoute(){
-    if(surfaceRouteLoaded || !pc_pikipelago_surface_course() || online() || !naviMgr || !pikiMgr)return;
+    const auto scene=pc_p2_scene_generation();
+    if(surfaceContextScene!=scene){
+        const bool oldSurface=surfaceRouteLoaded;
+        resetRouteSpecies();surfaceRoute=P2CaveSurfaceRoute{};surfaceRouteLoaded=false;
+        if(oldSurface){completed=false;requested=false;anchor=P2CaveAnchor{};}
+        surfaceContextScene=scene;
+    }
+    if(!tutorialSurfaceStage() || online()){resetRouteSpecies();return;}
+    if(surfaceRouteLoaded || !naviMgr || !pikiMgr)return;
     Navi* n=naviMgr->getNavi();if(!n || !n->getCurrState())return;
     // Restoring a staged checkpoint must never revive an already dead captain.
     if(n->getCurrState()->getID()!=NAVISTATE_Walk || !std::isfinite(n->mHealth)
         || n->mHealth<=1 || naviMgr->isNaviDead(n) || gameflow.mPauseAll
         || gameflow.mIsUIOverlayActive || (gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive))return;
-    std::ifstream in("p2-cave-route-surface.txt");if(!in)return;
+    std::ifstream present("p2-cave-route-surface.txt");if(!present)return;
+    std::string routeBytes;if(!routeFile("p2-cave-route-surface.txt",routeBytes))invalid("surface route unreadable");
+    std::istringstream in(routeBytes);
     P2CaveSurfaceRoute route;if(!p2_cave_surface_route_read(in,route))invalid("surface route");
+    // A scene reload may not treat the old staged boundary as fresh stock.
+    // Ordinary return/reentry starts a new bounded process with a new token.
+    if(activatedSurfaceTokens.count(route.party.token))invalid("surface token reused across scenes");
     std::vector<Piki*> actors;Iterator it(pikiMgr);
     CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(p->isAlive())actors.push_back(p);}
     if(actors.size()!=route.party.squad.size())invalid("surface roster differs from staged actors");
     if(C_NAVI_PARM(n,mHealth)<=0)invalid("surface captain unavailable");
+    // No typed species, maturity or captain-health write occurs before this
+    // complete authorization/hash/model-set gate and actual native shape setup.
+    resetRouteSpecies();routeSpeciesMask=authorizeRouteSpecies(route,routeBytes);
+    if(routeSpeciesMask&(1u<<P2SpeciesPurple))pc_p2_purple_setup();
+    if(routeSpeciesMask&(1u<<P2SpeciesWhite))pc_p2_white_setup();
+    for(const auto& saved:route.party.squad)
+        if((saved.species==P2SpeciesPurple && !pc_p2_purples_enabled())
+            || (saved.species==P2SpeciesWhite && !pc_p2_whites_enabled()))invalid("surface species assets unavailable");
+    activatedSurfaceTokens.insert(route.party.token);
     for(size_t i=0;i<actors.size();++i){
         const auto& saved=route.party.squad[i];Piki* p=actors[i];
         if((saved.species==3 && !pc_p2_purples_enabled()) || (saved.species==4 && !pc_p2_whites_enabled()))invalid("surface species assets unavailable");
@@ -124,7 +179,7 @@ bool enterSurfaceCave(){
     bool ok=std::fwrite(text.data(),1,text.size(),f)==text.size() && std::fflush(f)==0;
     if(std::fclose(f)!=0)ok=false;
     if(!ok || std::rename("p2-cave-surface-transfer.tmp","p2-cave-surface-transfer.txt")!=0)return false;
-    completed=true;std::printf("P2_CAVE_SURFACE_TRANSFER token=%s survivors=%zu health=%.9g\n",party.token.c_str(),party.squad.size(),party.health);
+    completed=true;resetRouteSpecies();std::printf("P2_CAVE_SURFACE_TRANSFER token=%s survivors=%zu health=%.9g\n",party.token.c_str(),party.squad.size(),party.health);
     std::fflush(nullptr);std::_Exit(42);
 }
 // Tutorial later-floors entry admission (lanes tutorial2-descend-policy-native
@@ -176,7 +231,12 @@ bool writeTransfer(const std::string& text){
 }
 }
 int pc_p2_cave_floor(){return floorId;}
-bool pc_p2_cave_surface_route_active(){return surfaceRouteLoaded;}
+bool pc_p2_cave_surface_route_active(){return surfaceRouteLoaded && tutorialSurfaceStage() && pc_p2_scene_generation()==surfaceContextScene;}
+bool pc_p2_cave_route_species_requested(int species){
+    if(completed || online() || !tutorialSurfaceStage()
+        || pc_p2_scene_generation()!=surfaceContextScene){resetRouteSpecies();return false;}
+    return (species==P2SpeciesPurple || species==P2SpeciesWhite) && (routeSpeciesMask&(1u<<species));
+}
 bool pc_p2_cave_is_beasts(){return beasts;}
 std::string pc_p2_cave_boundary_token(){return token;}
 std::string pc_p2_cave_receipt_prefix(){return floorId?"floor"+std::to_string(floorId)+":":"";}
@@ -207,6 +267,7 @@ bool pc_p2_tutorial2_entry_check(const char* path, int* floorOut){
     return ok!=0;
 }
 void pc_p2_cave_setup(){
+    resetRouteSpecies();surfaceContextScene=pc_p2_scene_generation();
     surfaceRoute=P2CaveSurfaceRoute{};surfaceRouteLoaded=false;
     const char* opt=std::getenv("PIKMIN_CAVE_NAV_DIAGNOSTICS");
     navRate.reset(opt && opt[0]==49 && opt[1]==0);navDrawCalls=0;navMarkerLogged=false;

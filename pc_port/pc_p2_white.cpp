@@ -3,6 +3,7 @@
 #include "pc_p2_ivory_budget.h"
 #include "pc_p2_species.h"
 #include "pc_p2_preview.h"
+#include "pc_p2_cave.h"
 #include "pc_bbft.h"
 #include "Piki.h"
 #include "PikiHeadItem.h"
@@ -44,7 +45,7 @@ Shape* loadShape(const std::string& name) {
 }
 }
 
-bool pc_p2_whites_enabled(){return pc_pikipelago_room_preview() && enabled;}
+bool pc_p2_whites_enabled(){return (pc_pikipelago_room_preview() || pc_p2_cave_route_species_requested(P2SpeciesWhite)) && enabled;}
 bool pc_p2_is_white(const Piki* piki){return pc_p2_whites_enabled() && pc_p2_species(piki)==P2SpeciesWhite;}
 void pc_p2_make_white(Piki* piki){
     if(!pc_p2_whites_enabled() || !pc_p2_set_species(piki,P2SpeciesWhite))std::abort();
@@ -59,9 +60,10 @@ float pc_p2_white_carry_max_factor(){return stats.baseRunSpeed*stats.carryMaxFac
 
 void pc_p2_white_setup(){
     enabled=false;clips.clear();ivoryGenerators.clear();
-    if(!pc_pikipelago_room_preview())return;
-    std::ifstream in("p2-white.txt");if(!in)return;
-    std::string word;if(!(in>>word) || word!="P2_WHITE_1" || !pc_p2_preview_goal())std::abort();
+    const bool route=pc_p2_cave_route_species_requested(P2SpeciesWhite);
+    if(!pc_pikipelago_room_preview() && !route)return;
+    std::ifstream in("p2-white.txt");if(!in){if(route)std::abort();return;}
+    std::string word;if(!(in>>word) || word!="P2_WHITE_1" || (!route && !pc_p2_preview_goal()))std::abort();
     if(!(in>>word>>stats.movement>>stats.attack>>stats.scale>>stats.carryPower>>stats.budBonus>>stats.flowerBonus>>stats.carryMaxFactor>>stats.carryMinFactor>>stats.baseRunSpeed) || word!="stats" || !p2_white_stats_valid(stats))std::abort();
     int generatorCount=0;if(!(in>>word>>generatorCount)||word!="ivory_generators"||generatorCount<1||generatorCount>32)std::abort();
     for(int i=0;i<generatorCount;++i){unsigned id;if(!(in>>id)||!ivoryGenerators.insert(id).second)std::abort();}
