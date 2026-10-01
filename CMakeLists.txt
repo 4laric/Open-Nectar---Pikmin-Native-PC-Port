@@ -2433,7 +2433,11 @@ function(pikmin_add_ci_fixture name source)
         message(FATAL_ERROR "Invalid explicit CI fixture: ${name} ${source}")
     endif()
     set(target "pikmin_ci_fixture_${name}")
-    set(sources ${PC_PORT_SOURCES})
+    # Clone the final production source set, including late-added NETPLAY
+    # ICE/launcher/session/HUD TUs, platform resources and libm object binding.
+    # PC_PORT_SOURCES predates those additions. Cloning it omitted real symbols;
+    # attaching libm separately here would duplicate its existing object source.
+    get_target_property(sources ${NECTAR_GAME} SOURCES)
     list(REMOVE_ITEM sources pc_port/pc_main.cpp)
     list(APPEND sources "${source}")
     add_executable(${target} EXCLUDE_FROM_ALL ${sources})
