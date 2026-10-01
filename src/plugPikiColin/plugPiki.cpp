@@ -343,6 +343,9 @@ int PlugPikiApp::idle()
 		pc_render_begin_presentation(1.0);
 		gsys->mDGXGfx->resetPresentBuffer();
 		pc_netplay_present_begin_presentation(*gsys->mDGXGfx);
+		// Issue #1031: the authoritative pass's 2D screens (end-of-day countdown)
+		// leave the wide-HUD mapping set; start the presentation pass clean.
+		pc_gfx_reset_ui_state();
 		// M2b fix (review M1): initRender runs once per idle before the auth
 		// pass. Without a reset here the auth pass's lights, cached
 		// (translucent) shapes and lens flares leak into presentation:
