@@ -62,6 +62,8 @@ int main(int argc, char** argv) {
         actor.mHealth = 0.0f;
         require(!actor.isAlive() && actor.isHostAlive(), "combat ends while animation host lives", source);
         require(!late.startStick(&actor, nullptr), "reject late latch", source);
+        late.startStickMouth(&actor, nullptr);
+        require(!late.getStickObject() && !late.isStickToMouth(), "reject late mouth capture without fatal error", source);
         InteractAttack hit(&late, nullptr, 5.0f, false);
         require(!hit.actTeki(&actor), "reject attack wrapper", source);
         require(!actor.interact(TekiInteractionKey(TekiInteractType::Attack, &hit)), "reject direct attack", source);
