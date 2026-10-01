@@ -170,4 +170,32 @@ inline bool punchReachesHead(const Vec3& navi, float naviFace, const Vec3& head,
     return std::fabs(a) < 2.3561945f;  // the port punch's own 135 degree facing cone (naviState.cpp)
 }
 
+// ---- Idle homing and burrowing (#1063) ---------------------------------------------------------------
+// Source ArmorState.cpp:
+//   StateMove::exec :220-274  no Pikmin/Navi in view -> GoHome (:249-252); a target that is not attackable and a
+//                             position beyond the territory radius (fp09) -> GoHome (:236-239); a Pikmin/Navi
+//                             inside attack range/angle -> Attack2 (:240-245). The change happens at the move
+//                             clip's KEYEVENT_END (:267-269).
+//   StateGoHome::exec :461-500 walk to mHomePosition; Pikmin/Navi in attack range -> Attack2 (:470-473); within the
+//                             home radius (fp10) -> Dive (:476-483), taken at clip end.
+//   StateDive :168-198        dive clip, then Stay; StateStay :75-106 stays hidden (hard constrained) until a
+//                             Pikmin/Navi is in view (fp12 sight, fp13 view angle), then Appear -> Move.
+enum Next { KeepMoving = 0, ToAttack2, ToGoHome, ToDive };
+
+inline Next moveNext(bool hasTarget, bool attackable, bool nearAttackTarget, float distHome, float territory)
+{
+    if (!hasTarget) return ToGoHome;
+    if (attackable) return ToAttack2;
+    if (distHome > territory) return ToGoHome;
+    if (nearAttackTarget) return ToAttack2;
+    return KeepMoving;
+}
+
+inline Next goHomeNext(bool nearAttackTarget, float distHome, float homeRadius)
+{
+    if (nearAttackTarget) return ToAttack2;
+    if (distHome < homeRadius) return ToDive;
+    return KeepMoving;
+}
+
 }  // namespace p2armor

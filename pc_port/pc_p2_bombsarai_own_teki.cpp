@@ -62,6 +62,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <map>
 #include <string>
@@ -117,6 +118,44 @@ bool sBillboardLogged = false;
 constexpr int kBombGaugeSlots = 16;
 P2BombGauge sBombGauge[kBombGaugeSlots];
 bool sBombGaugeLogged = false;
+// #1066: a burning bomb looks lit, with the same cues as the Volatile Dweevil's
+// bomb (pc_p2_bomb_telegraph.h / pc_p2_bomb_visual.h): the flash/tick ramp
+// (faster as the fuse empties), a red-hot tint and swell on each flash, a fuse
+// spark and tick per flash, and below 4.0 fuse life P2's TBombrockLight
+// (bomb.cpp:203-207) as a core glow on every flash. Every generator is
+// tracked and force-killed at the blast (bombState.cpp:130 forceKill).
+constexpr int kBombSparkEffect = 44;  // EFF_Piki_FireSparkles (pkf2.pcr), as the Volatile bomb
+constexpr int kBombGlowEffect = 32;   // EFF_Bomb_Glow (bi_gro1.pcr), the P1 bomb-rock glow
+struct BombFx {
+    p2bombtelegraph::Pulse pulse;
+    P2BombSparks sparks, glow;
+    bool lit = false, light = false;
+    std::uint64_t token = 0;
+    unsigned baseline = 0;     // engine live generators when the fuse lit
+    float sinceBlast = -1.0f;  // >= 0: seconds since this slot's blast (one late check)
+};
+BombFx sBombFx[kBombGaugeSlots];
+bool bombBurning(const P2BombSaraiBomb* b) {
+    return b && (b->phase() == P2BombSaraiBombPhase::ArmedLoop || b->phase() == P2BombSaraiBombPhase::Burning)
+        && b->fuseMax() > 0.0f;
+}
+float bombRatio(const P2BombSaraiBomb* b) {
+    const float r = b->fuseRemaining() / b->fuseMax();
+    return r < 0.0f ? 0.0f : (r > 1.0f ? 1.0f : r);
+}
+void endBombFx(int s, const char* why) {
+    BombFx& fx = sBombFx[s];
+    if (!fx.lit) return;
+    const int tracked = fx.sparks.count + fx.glow.count;
+    fx.sparks.killAll();
+    fx.glow.killAll();
+    if (std::strcmp(why, "blast") == 0) fx.sinceBlast = 0.0f;
+    std::printf("P2_BOMBSARAI_BOMB_FX_KILLED token=%llu slot=%d reason=%s pulses=%d light=%d killed=%d live_generators=%u baseline=%u\n",
+                (unsigned long long)fx.token, s, why, fx.pulse.pulses, fx.light ? 1 : 0,
+                tracked, pc_p2_bomb_live_generators(), fx.baseline);
+    fx.pulse.reset();
+    fx.lit = fx.light = false;
+}
 // A clip is bank-loadable when its staged files are numbered 0..N-1 (the
 // extractor names poses by sample index; an old dead1 tree skipped some).
 bool contiguousFiles(const std::vector<int>& files) {
@@ -859,6 +898,7 @@ void pc_p2_bombsarai_own_reset() {
     sPoseBank.reset();
     sBombPoseBank.reset();
     for (auto& gauge : sBombGauge) gauge = P2BombGauge();
+    for (int s = 0; s < kBombGaugeSlots; ++s) endBombFx(s, "reset");
     sPool = P2BombSaraiBombPool(16);
     for (auto& v : sPoses) v.clear();
     for (auto& v : sBombPoses) v.clear();
@@ -887,12 +927,53 @@ void pc_p2_bombsarai_teki_update_bombs() {
     if (!sAdapter || sPool.activeCount() == 0) {
         sBombClock.reset();
         for (int s = 0; s < sPool.slotCount(); ++s) sBombVis.forget(sPool.bombAt(s));
+        for (int s = 0; s < kBombGaugeSlots; ++s) endBombFx(s, "no_bombs");
         return;
     }
     const float dt = gsys ? gsys->getFrameTime() : 0.0f;
     for (int s = 0; s < sPool.slotCount(); ++s) {
         if (sPool.slotLive(s)) sBombVis.advance(sPool.bombAt(s), p2fbsmooth::fadeStep(dt));
         else sBombVis.forget(sPool.bombAt(s));
+    }
+    // #1066 lit-bomb cues, one presentation frame at a time.
+    for (int s = 0; s < sPool.slotCount() && s < kBombGaugeSlots; ++s) {
+        const P2BombSaraiBomb* b = sPool.slotLive(s) ? sPool.bombAt(s) : nullptr;
+        BombFx& fx = sBombFx[s];
+        if (fx.sinceBlast >= 0.0f && (fx.sinceBlast += p2fbsmooth::fadeStep(dt)) >= 1.0f) {
+            // One second on: only the engine's own blast effect may still be fading.
+            std::printf("P2_BOMBSARAI_BOMB_FX_AFTER token=%llu slot=%d tracked=%d live_generators=%u baseline=%u\n",
+                        (unsigned long long)fx.token, s, fx.sparks.count + fx.glow.count,
+                        pc_p2_bomb_live_generators(), fx.baseline);
+            fx.sinceBlast = -1.0f;
+        }
+        if (!bombBurning(b)) {
+            endBombFx(s, "not_burning");
+            continue;
+        }
+        const P2BombSaraiVec3& p = b->position();
+        if (!fx.lit) {
+            fx.lit = true;
+            fx.token = b->carrierToken();
+            fx.baseline = pc_p2_bomb_live_generators();
+            std::printf("P2_BOMBSARAI_BOMB_LIT token=%llu slot=%d fuse=%.2f/%.2f\n", (unsigned long long)fx.token, s,
+                        b->fuseRemaining(), b->fuseMax());
+        }
+        const float ratio = bombRatio(b);
+        fx.sparks.update(p2fbsmooth::fadeStep(dt), 0.35f);
+        fx.glow.update(p2fbsmooth::fadeStep(dt), 0.35f);
+        if (!fx.light && b->fuseRemaining() < p2bombtelegraph::kLightBelowHealth) {
+            fx.light = true;
+            std::printf("P2_BOMBSARAI_BOMB_LIGHT token=%llu slot=%d fuse=%.2f threshold=%.1f source=bomb.cpp:203\n",
+                        (unsigned long long)fx.token, s, b->fuseRemaining(), p2bombtelegraph::kLightBelowHealth);
+        }
+        if (fx.pulse.step(p2fbsmooth::fadeStep(dt), ratio)) {
+            fx.sparks.spawn(kBombSparkEffect, p.x, p.y + 8.0f, p.z);
+            if (fx.light) fx.glow.spawn(kBombGlowEffect, p.x, p.y + 4.0f, p.z);
+            pc_p2_sfx(58, unsigned(fx.token), p2sfx::Event::Fuse, Vector3f(p.x, p.y, p.z));
+            std::printf("P2_BOMBSARAI_BOMB_TICK token=%llu slot=%d n=%d ratio=%.3f period=%.3f light=%d\n",
+                        (unsigned long long)fx.token, s, fx.pulse.pulses, ratio, p2bombtelegraph::flashPeriod(ratio),
+                        fx.light ? 1 : 0);
+        }
     }
     const int ticks = sBombClock.step(double(dt), true);
     for (int k = 0; k < ticks; ++k) {
@@ -908,6 +989,7 @@ void pc_p2_bombsarai_teki_update_bombs() {
             if (b->hasBlast()) {
                 const P2BombSaraiBlastEvent e = b->lastBlast();
                 b->clearBlast();
+                if (s < kBombGaugeSlots) endBombFx(s, "blast");  // nothing outlives the blast
                 applyBlast(e);
             }
         }
@@ -916,12 +998,13 @@ void pc_p2_bombsarai_teki_update_bombs() {
 }
 
 namespace {
-void drawShapeAt(Graphics& gfx, Shape* shape, const Vector3f& pos, float yaw) {
+void drawShapeAt(Graphics& gfx, Shape* shape, const Vector3f& pos, float yaw, float scale = 1.0f, bool lit = false,
+                 bool flashOn = false, float ratio = 1.0f) {
     Matrix4f world, view;
-    world.makeSRT(Vector3f(1.0f, 1.0f, 1.0f), Vector3f(0.0f, yaw, 0.0f), pos);
+    world.makeSRT(Vector3f(scale, scale, scale), Vector3f(0.0f, yaw, 0.0f), pos);
     gfx.mCamera->mLookAtMtx.multiplyTo(world, view);
-    shape->updateAnim(gfx, view, nullptr, nullptr);
-    shape->drawshape(gfx, *gfx.mCamera, nullptr);
+    // #1066: the shared lit-fuse tint (pc_p2_bomb_visual.h), restored after the draw.
+    pc_p2_bomb_draw_tinted(gfx, *shape, view, lit, flashOn, ratio);
 }
 bool sBombDrawLogged = false;
 }
@@ -961,7 +1044,10 @@ void pc_p2_bombsarai_teki_draw_bombs(Graphics& gfx) {
             }
         }
         const P2BombSaraiVec3& p = b->position();
-        drawShapeAt(gfx, shape, Vector3f(p.x, p.y, p.z), 0.0f);
+        const bool lit = s < kBombGaugeSlots && sBombFx[s].lit && bombBurning(b);
+        const bool flashOn = lit && sBombFx[s].pulse.on();
+        drawShapeAt(gfx, shape, Vector3f(p.x, p.y, p.z), 0.0f, flashOn ? p2bombtelegraph::kFlashSwell : 1.0f, lit,
+                    flashOn, lit ? bombRatio(b) : 1.0f);
         ++drawn;
     }
     pc_gfx_specular_family_scope(0);

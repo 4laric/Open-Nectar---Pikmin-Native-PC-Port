@@ -24,6 +24,12 @@ bool pc_p2_bomb_draw_shape(Graphics& gfx, const Matrix4f& view, bool flashing, b
     if (!gfx.mCamera || !itemMgr || !itemMgr->mItemShapes || !itemMgr->mItemShapes[2]) return false;
     Shape* shape = itemMgr->mItemShapes[2]->mShape;
     if (!shape) return false;
+    return pc_p2_bomb_draw_tinted(gfx, *shape, view, flashing, flashOn, ratio);
+}
+
+bool pc_p2_bomb_draw_tinted(Graphics& gfx, Shape& drawn, const Matrix4f& view, bool flashing, bool flashOn, float ratio) {
+    if (!gfx.mCamera) return false;
+    Shape* shape = &drawn;
     const p2bombtelegraph::Tint tint = p2bombtelegraph::flashTint(flashOn, ratio);
     struct Saved {
         Material* material;

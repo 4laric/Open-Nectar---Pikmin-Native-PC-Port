@@ -152,6 +152,7 @@ enum class Cmd {
     Tp,       // tp <x> <z> | tp <arena_id>
     Pos,      // print captain position
     Rebind,   // rerun the stage P2 family setups
+    Bomb,     // bomb [n] : n lit P1 bomb rocks (BOMB_Set) in front of the captain, for comparisons
     Unknown,
 };
 
@@ -233,6 +234,13 @@ inline Command parse(const char* line)
     if (ieq(w, "help") || ieq(w, "?")) { c.kind = Cmd::Help; return c; }
     if (ieq(w, "list") || ieq(w, "ls")) { c.kind = Cmd::List; return c; }
     if (ieq(w, "pos") || ieq(w, "where")) { c.kind = Cmd::Pos; return c; }
+    if (ieq(w, "bomb")) {
+        c.kind = Cmd::Bomb;
+        c.count = 1;
+        if (n >= 2 && (!parseInt(words[1], c.count) || c.count < 1 || c.count > 5))
+            std::snprintf(c.error, sizeof(c.error), "usage: bomb [1..5]");
+        return c;
+    }
     if (ieq(w, "rebind")) { c.kind = Cmd::Rebind; return c; }
     if (ieq(w, "hurt")) {
         c.kind = Cmd::Hurt;
@@ -307,7 +315,7 @@ inline Command parse(const char* line)
 inline const char* helpText()
 {
     return "spawn <id|Enum|Common_Name|p1 teki name> [count] [norebind] | kill [all] | killall | hurt [fraction [stored]] | "
-           "pikmin <red|yellow|blue> [n] | day <n> | time <hours|0..1> | tp <x> <z> | tp <arena> | pos | list | rebind | help";
+           "pikmin <red|yellow|blue> [n] | day <n> | time <hours|0..1> | tp <x> <z> | tp <arena> | pos | bomb [n] | list | rebind | help";
 }
 
 } // namespace devconsole

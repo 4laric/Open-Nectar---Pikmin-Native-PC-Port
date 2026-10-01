@@ -695,22 +695,24 @@ bool pc_p2_kurage_teki_draw(BTeki* t, Graphics& gfx, const Matrix4f& matrix, boo
         auto shapeOf = [greater](const char* name) {
             return greater ? pc_p2_kurage_visual_shape_greater(name) : pc_p2_kurage_visual_shape(name);
         };
-        // #972: the corpse holds the last visible pose of the death clip it
-        // died in (the live body played it to the end), instead of snapping
-        // back to the clip's first frame.
+        // #1065: the carcass rests in the settled pose of the death clip it
+        // died in (the bell squashed flat on the ground), lifted onto the
+        // ground. #972 held the last visible frame instead, which is the swollen
+        // pre-burst thrash (source frame 91 of 95): the source clip ends in the
+        // burst and a Jellyfloat leaves no carcass at all (Kurage.cpp:36).
         const char* deathClip = corpsesGround.count(t) ? "dead2" : "dead1";
-        const float lastFrame = pc_p2_kurage_visual_last_frame(greater, deathClip);
-        if (lastFrame >= 0.0f) {
-            if (Shape* banked = pc_p2_kurage_visual_pose(t, greater, deathClip, lastFrame, corpses[t])) {
-                banked->updateAnim(gfx, matrix, nullptr, t);
-                banked->drawshape(gfx, *gfx.mCamera, nullptr);
-                if (!sCorpseDrawLogged) {
-                    sCorpseDrawLogged = true;
-                    std::printf("P2_KURAGE_CORPSE_DRAW corpse=1 pose=%s banked=1\n", deathClip);
-                    std::fflush(stdout);
-                }
-                return true;
+        float lift = 0.0f;
+        if (Shape* banked = pc_p2_kurage_visual_corpse(t, greater, deathClip, corpses[t], lift)) {
+            Matrix4f rested = matrix;
+            for (int row = 0; row < 3; ++row) rested.mMtx[row][3] += rested.mMtx[row][1] * lift;
+            banked->updateAnim(gfx, rested, nullptr, t);
+            banked->drawshape(gfx, *gfx.mCamera, nullptr);
+            if (!sCorpseDrawLogged) {
+                sCorpseDrawLogged = true;
+                std::printf("P2_KURAGE_CORPSE_DRAW corpse=1 pose=%s banked=1 settled=1 lift=%.1f\n", deathClip, lift);
+                std::fflush(stdout);
             }
+            return true;
         }
         Shape* dead = shapeOf("dead1");
         const char* pose = "dead1";

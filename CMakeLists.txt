@@ -474,6 +474,7 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_window.cpp
     pc_port/pc_gyro.cpp
     pc_port/pc_pad_axis.cpp
+    pc_port/pc_pad_bindings.cpp
     pc_port/pc_menu_repeat.cpp
     pc_port/pc_photo_mode.cpp
     pc_port/pc_permadeath.cpp
@@ -1805,6 +1806,12 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_pad_axis_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_pad_axis_test COMMAND pc_pad_axis_test)
 
+    # Gamepad binding routing and its settings lines (no controller needed)
+    add_executable(pc_pad_bindings_test pc_port/pc_pad_bindings_test.cpp pc_port/pc_pad_bindings.cpp)
+    target_include_directories(pc_pad_bindings_test PRIVATE ${SDL2_INCLUDE_DIRS} pc_port)
+    target_compile_options(pc_pad_bindings_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_pad_bindings_test COMMAND pc_pad_bindings_test)
+
     # Permadeath save block (no game needed)
     add_executable(pc_permadeath_test pc_port/pc_permadeath_test.cpp pc_port/pc_permadeath.cpp src/sysCommon/stream.cpp src/sysCommon/string.cpp)
     target_include_directories(pc_permadeath_test PRIVATE pc_port include)
@@ -2398,6 +2405,10 @@ add_library(p2_campaign_goal_lifecycle_runtime_compile OBJECT tools/p2_campaign_
 target_include_directories(p2_campaign_goal_lifecycle_runtime_compile PRIVATE pc_port ${SDL2_INCLUDE_DIRS})
 target_compile_options(p2_campaign_goal_lifecycle_runtime_compile PRIVATE ${NATIVE_COMPILE_OPTIONS} -Wno-unused-parameter)
 
+add_executable(p2_bomb_pulse_test tools/p2_bomb_pulse_test.cpp)
+target_include_directories(p2_bomb_pulse_test PRIVATE pc_port)
+target_compile_options(p2_bomb_pulse_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_bomb_pulse_test COMMAND p2_bomb_pulse_test)
 # Explicit replacement-main diagnostics: CI compiles/packages but never runs
 # them or receives local game assets. Default production builds stay unchanged.
 file(WRITE "${CMAKE_BINARY_DIR}/ci-fixtures.txt" "")
@@ -2466,3 +2477,6 @@ add_executable(p2_purple_combat_bindings_test tools/test_p2_purple_combat_bindin
 target_include_directories(p2_purple_combat_bindings_test PRIVATE pc_port)
 target_compile_options(p2_purple_combat_bindings_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_purple_combat_bindings_test COMMAND p2_purple_combat_bindings_test)
+
+# Issue1074 bounded local scene reentry; CI builds only.
+pikmin_add_ci_fixture(captain_reentry tools/p2_captain_reentry_runtime.cpp)
