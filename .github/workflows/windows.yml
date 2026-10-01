@@ -79,6 +79,7 @@ jobs:
           msystem: MINGW64
           update: false
           install: >-
+            git
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
@@ -123,12 +124,18 @@ jobs:
         run: |
           guard_dir="$(cygpath -m "${GITHUB_WORKSPACE}")/.ci-root/scripts"
           test "$(grep '^P2_CHALLENGE_GUARD_INCLUDE_DIR:PATH=' build/CMakeCache.txt | cut -d= -f2- | tr -d '\r')" = "$guard_dir"
+          command -v git >/dev/null || { echo 'MSYS2 git is unavailable'; exit 1; }
+          compiled_commit=$(git rev-parse --verify HEAD) || exit 1
+          compiled_tree=$(git rev-parse --verify 'HEAD^{tree}') || exit 1
+          [[ "$compiled_commit" =~ ^[0-9a-f]{40}$ && "$compiled_tree" =~ ^[0-9a-f]{40}$ ]] || {
+            echo 'Invalid compiled Git commit/tree identity'; exit 1;
+          }
           {
             # Legacy commit names requested source; compiled_* fields are authoritative.
             printf 'commit %s\n' "$HEAD_SHA"
             printf 'requested_commit %s\n' "$HEAD_SHA"
-            printf 'compiled_commit %s\n' "$(git rev-parse HEAD)"
-            printf 'compiled_tree %s\n' "$(git rev-parse HEAD^{tree})"
+            printf 'compiled_commit %s\n' "$compiled_commit"
+            printf 'compiled_tree %s\n' "$compiled_tree"
             printf 'profile netplay=%s\n' "$NETPLAY_BUILD"
             printf 'guard_root %s\n' '36ac5ddd2877b9308276f96b28a81e137ae58c5a'
             printf 'guard_sha256 %s\n' "$(sha256sum .ci-root/scripts/p2_fixture_captain_guard.h | cut -d' ' -f1)"
@@ -223,8 +230,19 @@ jobs:
           for required in nectar.exe SDL2.dll; do
             test -f "${out}/${required}" || { echo "missing ${required}"; exit 1; }
           done
-          test "$(git rev-parse HEAD)" = "$(sed -n 's/^compiled_commit //p' build/configured-source-identity.txt)"
-          test "$(git rev-parse HEAD^{tree})" = "$(sed -n 's/^compiled_tree //p' build/configured-source-identity.txt)"
+          command -v git >/dev/null || { echo 'MSYS2 git is unavailable'; exit 1; }
+          compiled_commit=$(git rev-parse --verify HEAD) || exit 1
+          compiled_tree=$(git rev-parse --verify 'HEAD^{tree}') || exit 1
+          [[ "$compiled_commit" =~ ^[0-9a-f]{40}$ && "$compiled_tree" =~ ^[0-9a-f]{40}$ ]] || {
+            echo 'Invalid compiled Git commit/tree identity'; exit 1;
+          }
+          recorded_commit=$(sed -n 's/^compiled_commit //p' build/configured-source-identity.txt)
+          recorded_tree=$(sed -n 's/^compiled_tree //p' build/configured-source-identity.txt)
+          [[ "$recorded_commit" =~ ^[0-9a-f]{40}$ && "$recorded_tree" =~ ^[0-9a-f]{40}$ ]] || {
+            echo 'Invalid configured Git identity'; exit 1;
+          }
+          test "$compiled_commit" = "$recorded_commit"
+          test "$compiled_tree" = "$recorded_tree"
           cp build/configured-source-identity.txt "${out}/BUILD_INFO.txt"
           printf 'run %s\n' "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >> "${out}/BUILD_INFO.txt"
           (cd "${out}" && sha256sum *.exe *.dll > sha256.txt)
@@ -263,8 +281,19 @@ jobs:
               echo 'Unresolved fixture DLLs'; exit 1
             fi
           done < <(tr -d '\r' < "$list")
-          test "$(git rev-parse HEAD)" = "$(sed -n 's/^compiled_commit //p' build/configured-source-identity.txt)"
-          test "$(git rev-parse HEAD^{tree})" = "$(sed -n 's/^compiled_tree //p' build/configured-source-identity.txt)"
+          command -v git >/dev/null || { echo 'MSYS2 git is unavailable'; exit 1; }
+          compiled_commit=$(git rev-parse --verify HEAD) || exit 1
+          compiled_tree=$(git rev-parse --verify 'HEAD^{tree}') || exit 1
+          [[ "$compiled_commit" =~ ^[0-9a-f]{40}$ && "$compiled_tree" =~ ^[0-9a-f]{40}$ ]] || {
+            echo 'Invalid compiled Git commit/tree identity'; exit 1;
+          }
+          recorded_commit=$(sed -n 's/^compiled_commit //p' build/configured-source-identity.txt)
+          recorded_tree=$(sed -n 's/^compiled_tree //p' build/configured-source-identity.txt)
+          [[ "$recorded_commit" =~ ^[0-9a-f]{40}$ && "$recorded_tree" =~ ^[0-9a-f]{40}$ ]] || {
+            echo 'Invalid configured Git identity'; exit 1;
+          }
+          test "$compiled_commit" = "$recorded_commit"
+          test "$compiled_tree" = "$recorded_tree"
           cp build/configured-source-identity.txt "${out}/BUILD_INFO.txt"
           printf 'run %s\n' "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >> "${out}/BUILD_INFO.txt"
           printf '%s\n' 'TEST FIXTURES ONLY: scripted acceptance, not production' >> "${out}/BUILD_INFO.txt"
