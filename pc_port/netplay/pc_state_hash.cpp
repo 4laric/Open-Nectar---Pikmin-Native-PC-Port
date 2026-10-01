@@ -8,6 +8,9 @@
 #include "Boss.h"
 #include "GoalItem.h"
 #include "ItemMgr.h"
+#include "MapMgr.h"
+#include "Navi.h"
+#include "Piki.h"
 #include "NaviMgr.h"
 #include "ObjType.h"
 #include "Pellet.h"
@@ -18,6 +21,7 @@
 
 #include <SDL2/SDL.h>
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -408,6 +412,59 @@ void pc_state_hash_flush(void)
 	if (sLogFile != nullptr) std::fflush(sLogFile);
 }
 
+// TEST_ONLY (issue #1037): PIKMIN_NETPLAY_TEST_TELEPORT="tick:navi:x:z;tick:navi:x:z..."
+// moves captain <navi> (0 = P1, 1 = P2) and every Pikmin it owns next to (x, z) once the
+// deterministic tick reaches <tick> (applied at the end of that tick, so the same on both
+// peers when both get the same value). Lets a scripted pair reach a boss (the Final Trial
+// Emperor Bulblax is about x=17 z=2450) without a long walk. Inert unless set; it changes sim
+// state, so give it to both peers (run_pair scrubs it from the inherited environment).
+static void pcTestTeleport(uint64_t tick)
+{
+	static bool init = false;
+	struct Tp { unsigned long long tick; int navi; float x, z; bool done; };
+	static Tp tps[16];
+	static int ntp = 0;
+	if (!init) {
+		init = true;
+		const char* e = std::getenv("PIKMIN_NETPLAY_TEST_TELEPORT");
+		while (e && *e && ntp < 16) {
+			unsigned long long t = 0;
+			int n = 0, used = 0;
+			float x = 0, z = 0;
+			if (std::sscanf(e, "%llu:%d:%f:%f%n", &t, &n, &x, &z, &used) < 4) break;
+			tps[ntp++] = { t, n, x, z, false };
+			e += used;
+			while (*e == ';' || *e == ' ') ++e;
+		}
+	}
+	if (ntp == 0 || naviMgr == nullptr || mapMgr == nullptr) return;
+	for (int i = 0; i < ntp; ++i) {
+		if (tps[i].done || tick != tps[i].tick) continue;
+		tps[i].done = true;
+		Navi* nv = naviMgr->getNavi(tps[i].navi);
+		if (!nv) continue;
+		const float y = mapMgr->getMinY(tps[i].x, tps[i].z, true);
+		nv->mSRT.t.set(tps[i].x, y + 2.0f, tps[i].z);
+		nv->mVelocity.set(0.0f, 0.0f, 0.0f);
+		int k = 0;
+		if (pikiMgr != nullptr) {
+			Iterator it(pikiMgr);
+			CI_LOOP(it)
+			{
+				Piki* pk = static_cast<Piki*>(*it);
+				if (!pk || pk->mNavi != nv) continue;
+				const float ang = (float)(k++) * 0.61803f * 6.2831853f;
+				const float px = tps[i].x + 30.0f * std::cos(ang), pz = tps[i].z + 30.0f * std::sin(ang);
+				pk->mSRT.t.set(px, mapMgr->getMinY(px, pz, true) + 2.0f, pz);
+				pk->mVelocity.set(0.0f, 0.0f, 0.0f);
+			}
+		}
+		std::printf("[netplay-test] teleport tick=%llu navi=%d to (%.1f %.1f %.1f), %d pikmin\n", tick, tps[i].navi,
+		            tps[i].x, y, tps[i].z, k);
+		std::fflush(stdout);
+	}
+}
+
 void pc_state_hash_tick_end(void)
 {
 	if (!sInitialised) initOnce();
@@ -467,6 +524,7 @@ void pc_state_hash_tick_end(void)
 		sLastSubs[6]  = rand;
 		sLastTick     = sTick;
 		sNetplayHaveHash = true;
+		pcTestTeleport(sTick);
 
 		if (sLogActive) {
 			std::fprintf(sLogFile, "%llu %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx\n",
