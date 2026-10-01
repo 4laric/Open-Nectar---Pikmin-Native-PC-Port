@@ -62,7 +62,7 @@ public:
  void update()override{
   u32 keys=0;mMainStickX=0;mMainStickY=0;mSubStickX=0;mSubStickY=0;
   Navi* n=naviMgr?naviMgr->getNavi():nullptr;
-  if(phase==13)keys=KeyConfig::_instance->mDisbandKey.mBind;
+  if(phase==13 && n && n->getCurrState() && n->getCurrState()->getID()==NAVISTATE_Walk && ticks%30<15)keys=KeyConfig::_instance->mDisbandKey.mBind;
   if(phase==8)keys=KeyConfig::_instance->mThrowKey.mBind;
   if(phase==1)keys=KeyConfig::_instance->mSetCursorKey.mBind;
   if((phase==2 || phase==4 || phase==9 || phase==9) && n && n->mNaviCamera){
@@ -137,7 +137,7 @@ public:
   require(whiteBodies<=1,"unexpected additional White output");
   if(phase<7)require(pellets==baselinePellets,"Ivory created legacy reward pellet");
   if(phase==3 && head && captured==0){require(red==19&&heads==1,"ordinary acquisition output");goal=head->mSRT.t;phase=13;ticks=0;std::puts("P2_WHITE_INGESTION_SPROUT ordinary_birth=1 spent=1");}
-  if(phase==13 && ticks>=30){int follows=0;Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(p->isAlive()&&p->mMode==PikiMode::FormationMode)++follows;}if(follows==0&&n->getCurrState()->getID()==NAVISTATE_Walk){phase=4;ticks=0;std::puts("P2_WHITE_INGESTION_REDS_DISMISSED");}}
+  if(phase==13 && ticks>=30){int follows=0;Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(p->isAlive()&&p->mMode==PikiMode::FormationMode)++follows;}if(ticks%30==0){std::printf("P2_WHITE_INGESTION_DISBAND ticks=%d follows=%d state=%d bind=%u down=%u\n",ticks,follows,n->getCurrState()->getID(),unsigned(KeyConfig::_instance->mDisbandKey.mBind),unsigned(n->mKontroller->keyDown(KeyConfig::_instance->mDisbandKey.mBind)));std::fflush(nullptr);}require(ticks<240,"ordinary Red disband timeout");if(follows==0&&n->getCurrState()->getID()==NAVISTATE_Walk){phase=4;ticks=0;std::puts("P2_WHITE_INGESTION_REDS_DISMISSED");}}
   if(phase==4 && head){goal=head->mSRT.t;float dx=goal.x-n->mSRT.t.x,dz=goal.z-n->mSRT.t.z;if(dx*dx+dz*dz<400){phase=5;ticks=0;}}
   if(phase==5 && head){float dx=head->mSRT.t.x-n->mSRT.t.x,dz=head->mSRT.t.z-n->mSRT.t.z;if(dx*dx+dz*dz>400 && n->getCurrState()->getID()==NAVISTATE_Walk){goal=head->mSRT.t;phase=4;ticks=0;}}
   if(phase==5 && white==1 && heads==0 && n->getCurrState()->getID()==NAVISTATE_Walk){
