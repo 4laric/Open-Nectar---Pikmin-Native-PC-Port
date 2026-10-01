@@ -2095,6 +2095,12 @@ add_executable(p2_captor_mouth_test tools/p2_captor_mouth_test.cpp)
 target_include_directories(p2_captor_mouth_test PRIVATE pc_port)
 target_compile_options(p2_captor_mouth_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_captor_mouth_test COMMAND p2_captor_mouth_test)
+# Cloaking Burrow-nit (Armor 15, #1014): retail collision tree (only dmg1 stickable), attack cone,
+# kamujnt bite sweep, captain hit and damage predicates. Engine-free.
+add_executable(p2_armor_policy_test tools/p2_armor_policy_test.cpp)
+target_include_directories(p2_armor_policy_test PRIVATE pc_port)
+target_compile_options(p2_armor_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_armor_policy_test COMMAND p2_armor_policy_test)
 
 # #995: Bloyster source policy (tail bulb is the only stickable part, damageCallBack, tongue tables).
 add_executable(p2_umimushi_policy_test tools/p2_umimushi_policy_test.cpp)
