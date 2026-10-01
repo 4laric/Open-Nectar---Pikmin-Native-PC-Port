@@ -81,6 +81,12 @@ void pc_randomizer_p2_delivery_reset();
 // so a bound P2 corpse is never ALSO credited to the P1-proxy bestiary check.
 bool pc_randomizer_resolved_checks();
 bool pc_randomizer_p2_corpse_delivered(const void* tekiview, int type, int stage, bool gameplay);
+// Kill-based receipt for a bound P2 source that leaves no carcass (#1088: the
+// source species never leaves a corpse, so its check is earned at the kill).
+// Same resolved check, same `onion:p2:<source>:<stage>` identity and the same
+// single-use binding as the corpse delivery (whichever runs first consumes it),
+// so one actor earns its check exactly once. Ledger encounter "kill".
+bool pc_randomizer_p2_killed(const void* tekiview, int type, int stage, bool gameplay);
 // Read-only receipt query for the TEST-ONLY autoplay bot (bot-v2 gap 1):
 // true once this process granted (or saw a durable duplicate of) the Onion
 // corpse receipt for `generatorUid`. Never mutates the ledger.
