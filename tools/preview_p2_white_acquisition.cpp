@@ -84,6 +84,16 @@ public:
    std::printf("P2_WHITE_BASELINE_COUNTS frame=%d red=%d bodies=%d bound_ivory=%d nstate=%d\n",frames,count,population(),int(flower!=nullptr),n->getCurrState()->getID());require(count==20&&population()==20&&flower,"fresh baseline requires twenty Reds and one Ivory");
    int w,h,x,y;SDL_Window* window=SDL_GL_GetCurrentWindow();SDL_GetWindowSize(window,&w,&h);SDL_GetWindowPosition(window,&x,&y);require(w==960&&h==540,"window dimensions");
    std::printf("P2_WHITE_ACQUISITION_BASELINE squad=20 window=%dx%d position=%d,%d hp=%.3f navi=%.2f,%.2f face=%.2f bud=%.2f,%.2f kill_same=%d capacity=%d cycles=%d..%d\n",w,h,x,y,n->mHealth,n->mSRT.t.x,n->mSRT.t.z,n->mFaceDirection,flower->mSRT.t.x,flower->mSRT.t.z,int(C_POM_PARM(flower,mDoKillSameColorPiki)),int(C_POM_PARM(flower,mMaxPikiPerCycle)),int(C_POM_PARM(flower,mMinCycles)),int(C_POM_PARM(flower,mMaxCycles)));
+   // Temporarily supply query inputs, restore them before the next engine idle.
+   // This policy probe is separate from the subsequent ordinary controller path.
+   PomAi* ai=flower->mPomAi;int prev=ai->mPrevStickPikiCount,used=ai->mReleasedSeedCount;float timer=flower->getWalkTimer();
+   ai->mPrevStickPikiCount=4;flower->setWalkTimer(.99f);require(!ai->petalCloseTransit(),"Ivory closed before five/one second");
+   flower->setWalkTimer(1.01f);require(ai->petalCloseTransit(),"Ivory did not close after one second");
+   flower->setWalkTimer(0.f);ai->mPrevStickPikiCount=5;require(ai->petalCloseTransit(),"Ivory five-input capacity not applied");
+   Generator* binding=flower->mGenerator;flower->mGenerator=nullptr;require(!ai->petalCloseTransit(),"ordinary Pom changed by Ivory capacity");flower->mGenerator=binding;
+   ai->mReleasedSeedCount=4;require(!ai->deadTransit(),"Ivory died before five spent slots");ai->mReleasedSeedCount=5;require(ai->deadTransit(),"Ivory survived five spent slots");
+   ai->mPrevStickPikiCount=prev;ai->mReleasedSeedCount=used;flower->setWalkTimer(timer);
+   std::puts("P2_IVORY_STATE_POLICY_PASS bound_runtime_queries=1 restored_before_idle=1 capacity=5 close_seconds=1 lifetime_slots=5 ordinary_capacity_preserved=1");
    n->mKontroller=new AcquisitionController();phase=1;ticks=0;
   }
   if(phase==1&&ticks>=100){goal=flower->mSRT.t;phase=2;ticks=0;}
