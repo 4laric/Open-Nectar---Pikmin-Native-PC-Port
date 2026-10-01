@@ -474,6 +474,7 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/pc_window.cpp
     pc_port/pc_gyro.cpp
     pc_port/pc_pad_axis.cpp
+    pc_port/pc_pad_bindings.cpp
     pc_port/pc_menu_repeat.cpp
     pc_port/pc_photo_mode.cpp
     pc_port/pc_permadeath.cpp
@@ -1804,6 +1805,12 @@ if(PIKMIN_BUILD_TESTS)
     target_include_directories(pc_pad_axis_test PRIVATE ${SDL2_INCLUDE_DIRS} pc_port)
     target_compile_options(pc_pad_axis_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_pad_axis_test COMMAND pc_pad_axis_test)
+
+    # Gamepad binding routing and its settings lines (no controller needed)
+    add_executable(pc_pad_bindings_test pc_port/pc_pad_bindings_test.cpp pc_port/pc_pad_bindings.cpp)
+    target_include_directories(pc_pad_bindings_test PRIVATE ${SDL2_INCLUDE_DIRS} pc_port)
+    target_compile_options(pc_pad_bindings_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_pad_bindings_test COMMAND pc_pad_bindings_test)
 
     # Permadeath save block (no game needed)
     add_executable(pc_permadeath_test pc_port/pc_permadeath_test.cpp pc_port/pc_permadeath.cpp src/sysCommon/stream.cpp src/sysCommon/string.cpp)
