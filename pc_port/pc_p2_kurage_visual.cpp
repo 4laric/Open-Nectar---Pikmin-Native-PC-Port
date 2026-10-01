@@ -12,6 +12,8 @@
 #include <fstream>
 #include <map>
 #include <set>
+#include <algorithm>
+#include <vector>
 #include <string>
 namespace {
 Shape* sWait = nullptr;
@@ -33,8 +35,14 @@ struct Family {
     p2posefamily::Actors actors;
     p2kuragebank::Profile profile;
     std::set<const void*> measured; // actors whose private-Shape heap cost was logged
+    // #1065 settled carcass pose per death clip: source frame + ground lift.
+    struct Settled { bool ok = false; float frame = 0.f, lift = 0.f; };
+    std::map<std::string, Settled> settled;
     bool attempted = false;
-    void reset() { bank.reset(); actors.clear(); profile = p2kuragebank::Profile(); attempted = false; measured.clear(); }
+    void reset() {
+        bank.reset(); actors.clear(); profile = p2kuragebank::Profile(); attempted = false; measured.clear();
+        settled.clear();
+    }
 };
 Family& family(bool greater)
 {
@@ -250,4 +258,54 @@ void pc_p2_kurage_visual_forget(BTeki* actor)
     family(true).actors.forget(actor);
     family(false).measured.erase(actor);
     family(true).measured.erase(actor);
+}
+
+// #1065: settled carcass pose. Source Jellyfloats leave no carcass (the death
+// clip ends in the burst, every joint scaled to nothing); the port's carried
+// carcass rests in the flattest visible pose of the clip it died in, lifted onto
+// the ground (p2kuragebank::settledIndex / groundLift).
+Shape* pc_p2_kurage_visual_corpse(BTeki* actor, bool greater, const char* deathClip, unsigned token, float& lift)
+{
+    lift = 0.0f;
+    if (!actor || !deathClip) return nullptr;
+    Family& f = family(greater);
+    const p2posefamily::Clip* clip = f.bank.ready() ? f.bank.clip(deathClip) : nullptr;
+    if (!clip || clip->poses.size() != clip->frames.size()) return nullptr;
+    auto it = f.settled.find(deathClip);
+    if (it == f.settled.end()) {
+        std::vector<p2kuragebank::Extent> extents;
+        for (const p2pose::Pose& pose : clip->poses) {
+            p2kuragebank::Extent e;
+            if (!pose.positions.empty()) {
+                float lo[3] = {pose.positions[0].x, pose.positions[0].y, pose.positions[0].z};
+                float hi[3] = {lo[0], lo[1], lo[2]};
+                for (const p2pose::Vec& q : pose.positions) {
+                    const float c[3] = {q.x, q.y, q.z};
+                    for (int k = 0; k < 3; ++k) { lo[k] = std::min(lo[k], c[k]); hi[k] = std::max(hi[k], c[k]); }
+                }
+                e.minY = lo[1];
+                e.maxY = hi[1];
+                e.width = std::max(hi[0] - lo[0], hi[2] - lo[2]);
+            }
+            extents.push_back(e);
+        }
+        Family::Settled st;
+        const int index = p2kuragebank::settledIndex(extents);
+        if (index >= 0) {
+            st.ok = true;
+            st.frame = float(clip->frames[std::size_t(index)]);
+            st.lift = p2kuragebank::groundLift(extents[std::size_t(index)]);
+        }
+        std::printf("P2_%s_CORPSE_POSE clip=%s settled=%d index=%d frame=%.0f lift=%.1f height=%.1f width=%.1f "
+                    "source_carcass=0\n",
+                    greater ? "ONIKURAGE" : "KURAGE", deathClip, int(st.ok), index, st.frame, st.lift,
+                    index >= 0 ? extents[std::size_t(index)].maxY - extents[std::size_t(index)].minY : 0.0f,
+                    index >= 0 ? extents[std::size_t(index)].width : 0.0f);
+        std::fflush(stdout);
+        it = f.settled.emplace(deathClip, st).first;
+    }
+    if (!it->second.ok) return nullptr;
+    Shape* shape = pc_p2_kurage_visual_pose(actor, greater, deathClip, it->second.frame, token);
+    if (shape) lift = it->second.lift;
+    return shape;
 }

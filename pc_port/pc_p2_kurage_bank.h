@@ -88,4 +88,31 @@ inline std::array<float, 3> proomAt(const Clip& clip, float frame) {
     return out;
 }
 
+// Corpse pose (#1065). Source Kurage/OniKurage leave no carcass
+// (Kurage.cpp:36 / OniKurage.cpp:46 disable EB_LeaveCarcass): the death clip
+// (dead1 airborne, dead2 grounded; OniKurageState.cpp:46-50) drops the bell,
+// squashes it flat on the ground (source frames ~37-45), then swells and
+// thrashes until the burst at key 93 (deathProcedure + body bomb effect,
+// OniKurageState.cpp:80-88; enemyanimmgr "93 3") and the kill at the clip end
+// (:90-91). By frame 95 every joint is scaled to nothing. The port keeps a
+// P1-style carried carcass, so it needs a resting pose: the settled pose is the
+// flattest visible pose of the death clip (smallest vertical extent, ignoring
+// poses collapsed to a point), lifted so its lowest vertex rests on the ground.
+struct Extent { float minY = 0.f, maxY = 0.f, width = 0.f; };
+
+// Index of the settled pose, or -1 when no pose is visible. A pose is visible
+// when its width and height exceed `collapsed` model units.
+inline int settledIndex(const std::vector<Extent>& poses, float collapsed = 1.0f) {
+    int best = -1;
+    for (std::size_t i = 0; i < poses.size(); ++i) {
+        const float height = poses[i].maxY - poses[i].minY;
+        if (!(height > collapsed) || !(poses[i].width > collapsed)) continue;
+        if (best < 0 || height < poses[std::size_t(best)].maxY - poses[std::size_t(best)].minY) best = int(i);
+    }
+    return best;
+}
+
+// Model-space vertical offset that puts a pose's lowest vertex at y = 0.
+inline float groundLift(const Extent& pose) { return std::isfinite(pose.minY) ? -pose.minY : 0.f; }
+
 }  // namespace p2kuragebank
