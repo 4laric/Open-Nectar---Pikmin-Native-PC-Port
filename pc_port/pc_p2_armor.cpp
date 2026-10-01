@@ -743,7 +743,7 @@ void probeHeal(BTeki* a, Armor& s) {
 }
 // TEST-ONLY idle probe (PIKMIN_P2_ARMOR_PROBE_IDLE=1, #1063), independent of the bite probe: at 2 s a Pikmin is put 120
 // units ahead so the Armor surfaces and chases it; at 12 s every Pikmin and the captain are moved 900 units away, so the
-// Armor is truly idle and the source Move -> GoHome -> Dive -> Stay sequence shows in the P2_ARMOR_STATE log; at 50 s a
+// Armor is truly idle and the source Move -> GoHome -> Dive -> Stay sequence shows in the P2_ARMOR_STATE log; at 25 s a
 // Pikmin is put back 150 units ahead to show it resurfaces.
 void runIdleProbe(BTeki* actor, Armor& s, unsigned generator, float dt) {
     static const bool on = [] {
@@ -772,7 +772,7 @@ void runIdleProbe(BTeki* actor, Armor& s, unsigned generator, float dt) {
         for (Navi* n : pc_p2_navis()) n->mSRT.t = far;
         std::printf("P2_ARMOR_PROBE kind=idle generator=%u t=%.1f state=%s\n", generator, double(s.idleT), stateName(s.state));
         std::fflush(stdout);
-    } else if (s.idleStage == 2 && s.idleT >= 50.0f) {
+    } else if (s.idleStage == 2 && s.idleT >= 25.0f) {
         s.idleStage = 3;
         std::printf("P2_ARMOR_PROBE kind=resurface_bait generator=%u t=%.1f state=%s\n", generator, double(s.idleT),
                     stateName(s.state));
