@@ -125,7 +125,21 @@ public:
         pc_window_set_display_mode(PC_WINDOW_FULLSCREEN_WINDOWED);
         pc_window_set_window_size(960, 540);
         pc_window_center();
-        std::printf("COOP_PROTOCOL_FIXTURE_WINDOW 960x540 windowed centered\n");
+        SDL_Window* window = SDL_GL_GetCurrentWindow();
+        fixture_require(window != nullptr, "actual SDL GL window");
+        int width = 0, height = 0, x = 0, y = 0;
+        SDL_GetWindowSize(window, &width, &height);
+        SDL_GetWindowPosition(window, &x, &y);
+        SDL_Rect bounds;
+        const int display = SDL_GetWindowDisplayIndex(window);
+        fixture_require(display >= 0 && SDL_GetDisplayBounds(display, &bounds) == 0, "actual display bounds");
+        const bool centered = std::abs(x - (bounds.x + (bounds.w - width) / 2)) <= 2
+                           && std::abs(y - (bounds.y + (bounds.h - height) / 2)) <= 2;
+        const bool windowed = !(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN);
+        fixture_require(width == 960 && height == 540 && centered && windowed, "actual SDL window geometry");
+        std::printf("COOP_PROTOCOL_FIXTURE_WINDOW measured=1 width=%d height=%d centered=%d windowed=%d x=%d y=%d display=%d bounds=%d,%d,%d,%d hidden=%d\n",
+                    width, height, int(centered), int(windowed), x, y, display,
+                    bounds.x, bounds.y, bounds.w, bounds.h, int(bool(SDL_GetWindowFlags(window) & SDL_WINDOW_HIDDEN)));
         mLocalRole = launch.isHost ? 0 : 1;
         if (const char* path = std::getenv("PIKMIN_COOP_FIXTURE_INPUT")) mInputPath = path;
         // Production post-settings/ICE setup has already completed. This device
