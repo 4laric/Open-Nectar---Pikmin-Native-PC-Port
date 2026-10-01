@@ -563,6 +563,9 @@ void updateColl(BTeki* actor, Armor& s) {
         p2armor::nodeCentre(clip, frame, 0, rootC);
         const p2armor::Vec3 rw = p2armor::toWorld(apos, actor->getDirection(), s.scale, rootC);
         const float nose[3] = {mw.x - rw.x, mw.y - rw.y, mw.z - rw.z};
+        float seated[3] = {mw.x, mw.y, mw.z};
+        p2skewer::seat(seated, nose, s.scale);
+        s.coll.kam->mCentre.set(seated[0], seated[1], seated[2]);
         p2skewer::jointMatrix(s.coll.kam->mJointMatrix, camRot, nose, actor->getDirection());
     }
 }

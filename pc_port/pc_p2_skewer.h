@@ -10,6 +10,7 @@
 // Engine-free: world-space basis only. The caller multiplies it by its camera rotation exactly as it
 // already does for the yaw (see pc_p2_umimushi.cpp updateColl).
 #include <cmath>
+#include <cstdlib>
 
 namespace p2skewer {
 
@@ -71,6 +72,28 @@ inline void jointMatrix(Mtx& out, const Mtx& camRot, const float dir[3], float f
         world.mMtx[r][2] = b.z[r];
     }
     camRot.multiplyTo(world, out);
+}
+
+// How far back along the spear the held Pikmin is seated, in model units at scale 1. The Pikmin model's origin is
+// at its feet and its body extends along its up axis (= the spear direction, see along()), so seating the origin
+// ON the joint leaves the whole body beyond the tip (floating in front of it, #1020 evidence). Seating it this
+// far back brings the tip through the middle of the body. PIKMIN_P2_SKEWER_DEPTH overrides it for tuning.
+inline float depth()
+{
+    static const float d = [] {
+        const char* e = std::getenv("PIKMIN_P2_SKEWER_DEPTH");
+        return e && *e ? float(std::atof(e)) : 18.0f;
+    }();
+    return d;
+}
+
+// Moves `p` back along `dir` (unit or not) by depth() * scale: toward the captor, onto the spear.
+inline void seat(float p[3], const float dir[3], float scale)
+{
+    const float len = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+    if (!(len > 1.0e-3f)) return;
+    const float k = depth() * scale / len;
+    for (int i = 0; i < 3; ++i) p[i] -= dir[i] * k;
 }
 
 } // namespace p2skewer

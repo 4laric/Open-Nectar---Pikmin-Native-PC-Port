@@ -779,10 +779,12 @@ void updateColl(BTeki* actor, Umi& s) {
     for (int i = 0; i < T::kKamuCount; ++i) {
         CollPart* part = s.coll.kam[i];
         if (!part) continue;
-        part->mCentre.set(slotW[i][0], slotW[i][1], slotW[i][2]);
-        part->mRadius = s.blind ? p2umi::SlotRadiusBlind : p2umi::SlotRadius;
         float dir[3];
         p2skewer::tangent(slotW, T::kKamuCount, i, dir);
+        float seated[3] = {slotW[i][0], slotW[i][1], slotW[i][2]};
+        p2skewer::seat(seated, dir, s.scale);
+        part->mCentre.set(seated[0], seated[1], seated[2]);
+        part->mRadius = s.blind ? p2umi::SlotRadiusBlind : p2umi::SlotRadius;
         p2skewer::jointMatrix(part->mJointMatrix, camRot, dir, actor->getDirection());
     }
 }
