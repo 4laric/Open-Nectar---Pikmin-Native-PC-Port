@@ -49,6 +49,11 @@
 #include "p2_fixture_captain_guard.h"
 namespace {
 constexpr unsigned Target=0x50323101;
+// Read-only inherited member pointer applied to the genuine Boss instance.
+struct BossObserver:Boss {
+ static float frame(Boss& b){return (b.*(&BossObserver::mAnimator)).getCounter();}
+ static int motion(Boss& b){return (b.*(&BossObserver::mAnimator)).getCurrentMotionIndex();}
+};
 SDL_Joystick* pad=nullptr;
 bool human(){return std::getenv("P2_PURPLE_KOCHAPPY_HUMAN")!=nullptr;}
 void require(bool yes,const char* message){if(!yes){std::printf("FAIL P2_PURPLE_KOCHAPPY %s\n",message);std::fflush(nullptr);std::_Exit(1);}}
@@ -115,6 +120,20 @@ public:
    if(head){input();phase=3;start=age;return result;}
    // Hold/release the ordinary A throw. Never call throwPiki or transit actors.
    int cycle=(age-start)%120;point(n,violet->mSRT.t,false,cycle<18?KeyConfig::_instance->mThrowKey.mBind:0);
+   if(cycle<18||age%30==0){
+    int captured=0,index=0;Iterator samples(pikiMgr);
+    CI_LOOP(samples){Piki* p=static_cast<Piki*>(*samples);if(!p->isAlive())continue;
+     if(p->getStickObject()==violet)++captured;
+     if(p->getState()==PIKISTATE_Flying||p->mMode!=PikiMode::FormationMode){
+      std::printf("P2_PURPLE_KOCHAPPY_THROW_OBSERVE age=%d index=%d state=%d mode=%d violet_sticker=%d xyz=%.4f,%.4f,%.4f velocity=%.4f,%.4f,%.4f\n",
+       age,index,p->getState(),int(p->mMode),int(p->getStickObject()==violet),p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z,p->mVelocity.x,p->mVelocity.y,p->mVelocity.z);
+     }++index;
+    }
+    std::printf("P2_PURPLE_KOCHAPPY_AIM_OBSERVE age=%d cycle=%d actual_pad_a=%d captain=%.4f,%.4f,%.4f cursor=%.4f,%.4f,%.4f violet=%.4f,%.4f,%.4f registered=%d state=%d motion=%d anim_frame=%.4f captured=%d enemy_health=%.2f\n",
+     age,cycle,int(SDL_JoystickGetButton(pad,SDL_CONTROLLER_BUTTON_A)),n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,n->mCursorWorldPos.x,n->mCursorWorldPos.y,n->mCursorWorldPos.z,
+     violet->mSRT.t.x,violet->mSRT.t.y,violet->mSRT.t.z,int(pc_p2_violet(violet)),violet->getCurrentState(),BossObserver::motion(*violet),BossObserver::frame(*violet),captured,enemy->mHealth);
+    std::fflush(nullptr);
+   }
    require(age-start<600,"ordinaryViolet conversion did not complete");return result;
   }
   if(phase==3){
