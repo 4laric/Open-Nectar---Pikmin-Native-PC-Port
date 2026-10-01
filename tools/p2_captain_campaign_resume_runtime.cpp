@@ -199,7 +199,8 @@ public:
 } // namespace
 int main(int argc,char** argv){
     for(int i=1;i<argc;++i){resumePhase|=std::string(argv[i])=="--resume-phase";sForceCaptainDown|=std::string(argv[i])=="--force-captain-down";sForceInactiveDown|=std::string(argv[i])=="--force-inactive-down";forceNullState|=std::string(argv[i])=="--force-null-state";forceMissingManager|=std::string(argv[i])=="--force-missing-manager";}
-    _putenv_s("PIKMIN_P2_SECOND_CAPTAIN","1");_putenv_s("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1");SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetMainReady();pc_gpu_preference_apply();pc_bbft_init(argc,argv);
+    _putenv_s("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1");SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetMainReady();pc_gpu_preference_apply();pc_bbft_init(argc,argv);
+    require(pc_randomizer_second_captain(),"generated bootstrap captain option required");
     require(pc_randomizer_enabled()&&!pc_pikipelago_room_preview(),"ordinary randomizer campaign required");
     if(!pc_window_init("Captain native campaign save/resume",960,540))return 3;
     pc_settings_init();pc_window_set_display_mode(0);pc_window_set_window_size(960,540);pc_window_center();
