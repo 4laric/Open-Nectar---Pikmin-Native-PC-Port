@@ -115,7 +115,7 @@ int main(int argc,char** argv) {
     if(!pc_window_init("P2 enemy gameplay smoke - F7 restarts",960,540))return 3;
     pc_settings_init();pc_window_set_control_mode(PC_CONTROL_CLASSIC);pc_window_set_display_mode(0);
     pc_window_set_window_size(960,540);pc_window_center();
-    int device=-1;for(int i=0;i<SDL_NumJoysticks();++i)if(SDL_IsGameController(i)){device=i;break;}
+    int device=-1;for(int i=0;i<SDL_NumJoysticks();++i)if(!SDL_JoystickIsVirtual(i)&&SDL_IsGameController(i)){device=i;break;}
     pc_window_input_assign(0,device>=0?PC_INPUT_DEV_GAMEPAD:PC_INPUT_DEV_KEYBOARD,
         device>=0?SDL_JoystickGetDeviceInstanceID(device):-1);
     pc_window_input_assign(1,PC_INPUT_DEV_NONE,-1);
