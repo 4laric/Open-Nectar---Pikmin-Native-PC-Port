@@ -58,9 +58,9 @@ int main(int argc, char** argv) {
         return failures == 0 ? 0 : 1;
     }
 
-    // A long video frame must not discard JAM time. At the default 120 BPM /
-    // 48 timebase, 350 ms represents about 33 ticks; the historical 250 ms
-    // clamp could never report more than 24 here.
+    // #1030 caps a long frame at 250 ms so music does not fast-forward in
+    // a burst. At the initial 120 BPM / 48 timebase that advances 24 ticks.
+    // This real mixer check complements the engine-free elapsed-clock test.
     if (!pc_audio_play_sequence(18)) {
         ++failures;
     } else {
@@ -68,8 +68,15 @@ int main(int argc, char** argv) {
         pc_audio_tick();
         PCAudioMetrics clockMetrics {};
         pc_audio_get_metrics(&clockMetrics);
-        if (clockMetrics.bgmTicks < 28 || clockMetrics.seTicks < 28
-            || clockMetrics.eventTicks < 28) ++failures;
+        if (clockMetrics.bgmTicks < 23 || clockMetrics.bgmTicks > 25
+            || clockMetrics.seTicks < 23 || clockMetrics.seTicks > 25
+            || clockMetrics.eventTicks < 23 || clockMetrics.eventTicks > 25) {
+            std::printf("FAIL: capped 350ms clock bgm=%llu se=%llu event=%llu (expected 23..25 each)\n",
+                static_cast<unsigned long long>(clockMetrics.bgmTicks),
+                static_cast<unsigned long long>(clockMetrics.seTicks),
+                static_cast<unsigned long long>(clockMetrics.eventTicks));
+            ++failures;
+        }
         pc_audio_stop_sequence();
     }
     pc_audio_reset_metrics();
