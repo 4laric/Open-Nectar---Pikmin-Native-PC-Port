@@ -24,6 +24,10 @@ on:
         description: Build every target and require `ninja -n` to report no work
         type: boolean
         default: false
+      netplay:
+        description: Deterministic netplay profile; build all targets and run netplay gates
+        type: boolean
+        default: false
 
 concurrency:
   group: windows-${{ github.event_name }}-${{ github.ref }}
@@ -42,6 +46,8 @@ jobs:
       # For pull_request events github.sha is the synthetic merge commit; name
       # the artifact after the commit that was actually pushed.
       HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      NETPLAY_BUILD: ${{ inputs.netplay && 'ON' || 'OFF' }}
+      NETPLAY_SUFFIX: ${{ inputs.netplay && '-netplay' || '' }}
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_MAXSIZE: 3G
@@ -89,10 +95,11 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DPIKMIN_NATIVE_JAUDIO=ON \
             -DPIKMIN_NATIVE_OPTIMIZE=OFF \
+            -DPIKMIN_NETPLAY_BUILD="${NETPLAY_BUILD}" \
             -DPIKMIN_ENABLE_IPO=ON
 
       - name: Build pikmin_pc and p2/bbft test targets
-        if: ${{ !inputs.all_targets }}
+        if: ${{ !inputs.all_targets && !inputs.netplay }}
         run: |
           # Every p2_ test runs an executable of the same name in the build
           # root, so the test list is the target list.
@@ -115,7 +122,7 @@ jobs:
           grep -Fx "ninja: no work to do." build/build-dry-run.txt
 
       - name: Build all targets
-        if: ${{ inputs.all_targets }}
+        if: ${{ inputs.all_targets || inputs.netplay }}
         run: |
           ccache -z
           cmake --build build -j 4
@@ -134,9 +141,20 @@ jobs:
       - name: Run p2 and bbft tests
         run: ctest --test-dir build -R 'p2_|pc_bbft_' --output-on-failure -j 4 --timeout 300
 
+      - name: Run deterministic netplay consumer and FP gates
+        if: ${{ inputs.netplay }}
+        run: |
+          grep -Fx 'PIKMIN_NETPLAY_BUILD:BOOL=ON' build/CMakeCache.txt
+          grep -Fx 'PIKMIN_NATIVE_OPTIMIZE:BOOL=OFF' build/CMakeCache.txt
+          ctest --test-dir build -N -R 'netplay_|pc_netplay_|pc_input_log|pc_randomizer_(state_stream|outbox|campaign_net)|p2_(receipt|delivery)_host' | tr -d '\r' | tee build/netplay-test-list.txt
+          for required in netplay_launch_settings_selftest netplay_launch_input_selftest netplay_launch_input_session_selftest netplay_fp_gate netplay_fp_gate_kurage pc_netplay_randstate_test; do
+            grep -Eq ": ${required}$" build/netplay-test-list.txt || { echo "Missing required netplay gate: ${required}"; exit 1; }
+          done
+          ctest --test-dir build -R 'netplay_|pc_netplay_|pc_input_log|pc_randomizer_(state_stream|outbox|campaign_net)|p2_(receipt|delivery)_host' --no-tests=error --output-on-failure -j 4 --timeout 300
+
       - name: Package nectar.exe with runtime DLLs
         run: |
-          out="nectar-windows-${HEAD_SHA}"
+          out="nectar-windows-${HEAD_SHA}${NETPLAY_SUFFIX}"
           mkdir -p "${out}"
           cp build/bin/nectar.exe "${out}/"
           # Copy every non-system DLL the exe resolves from the MINGW64 prefix.
@@ -149,7 +167,7 @@ jobs:
           for required in nectar.exe SDL2.dll; do
             test -f "${out}/${required}" || { echo "missing ${required}"; exit 1; }
           done
-          printf '%s\n%s\n' "commit ${HEAD_SHA}" "run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > "${out}/BUILD_INFO.txt"
+          printf '%s\n%s\n%s\n' "commit ${HEAD_SHA}" "run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" "profile netplay=${NETPLAY_BUILD}" > "${out}/BUILD_INFO.txt"
           (cd "${out}" && sha256sum *.exe *.dll > sha256.txt)
           cat "${out}/sha256.txt"
           ls -l "${out}"
@@ -157,13 +175,13 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nectar-windows-${{ env.HEAD_SHA }}
-          path: nectar-windows-${{ env.HEAD_SHA }}/
+          name: nectar-windows-${{ env.HEAD_SHA }}${{ env.NETPLAY_SUFFIX }}
+          path: nectar-windows-${{ env.HEAD_SHA }}${{ env.NETPLAY_SUFFIX }}/
           if-no-files-found: error
           retention-days: 14
 
       - name: Package opt-in fixtures (compile only; no game assets)
-        if: ${{ !inputs.all_targets }}
+        if: ${{ !inputs.all_targets && !inputs.netplay }}
         run: |
           out="pikmin-fixtures-windows-${HEAD_SHA}"
           mkdir -p "${out}"
@@ -184,7 +202,7 @@ jobs:
           (cd "${out}" && find . -maxdepth 1 -type f \( -name '*.exe' -o -name '*.dll' \) -print0 | sort -z | xargs -0 -r sha256sum > sha256.txt)
 
       - name: Upload opt-in fixtures
-        if: ${{ !inputs.all_targets }}
+        if: ${{ !inputs.all_targets && !inputs.netplay }}
         uses: actions/upload-artifact@v4
         with:
           name: pikmin-fixtures-windows-${{ env.HEAD_SHA }}
