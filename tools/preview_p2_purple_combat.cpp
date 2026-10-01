@@ -28,6 +28,8 @@
 #include "ItemMgr.h"
 #include "GameStat.h"
 #include "MapMgr.h"
+#include "Collision.h"
+#include "Camera.h"
 #include "nlib/System.h"
 #include "gameflow.h"
 #include "pc_randomizer.h"
@@ -71,6 +73,35 @@ static void p2_fixture_require_captain(bool present,bool dead,bool managerDead,b
 static void require(bool ok, const char* why) {
     if (!ok) { std::printf("P2_PURPLE_COMBAT_FAIL reason=%s\n",why); std::fflush(nullptr); std::_Exit(1); }
 }
+static void auditTerrain(const char* owner,const Vector3f& centre,float radius) {
+    if(!mapMgr || !std::isfinite(radius) || radius<0) return;
+    // Observations only: ring samples cannot certify all intervening terrain.
+    for(int i=-1;i<16;++i) {
+        const float angle=i*6.283185307f/16.f;
+        const float x=centre.x+(i<0?0:radius*std::cos(angle));
+        const float z=centre.z+(i<0?0:radius*std::sin(angle));
+        CollTriInfo* tri=mapMgr->getCurrTri(x,z,true);
+        std::printf("P2_PURPLE_TERRAIN owner=%s sample=%d x=%.3f z=%.3f y=%.3f triangle=%d map_code=%u radius=%.3f\n",
+            owner,i,x,z,mapMgr->getMinY(x,z,true),int(tri!=nullptr),tri?unsigned(tri->mMapCode):0,radius);
+    }
+}
+static void auditPart(const char* owner,CollPart* part,int depth=0) {
+    if(!part) return;
+    require(depth<32,"collision audit tree depth");
+    std::printf("P2_PURPLE_COLLISION_PART owner=%s depth=%d id=%u type=%u active=%d xyz=%.3f,%.3f,%.3f radius=%.3f\n",
+        owner,depth,unsigned(part->getID().mId),unsigned(part->mPartType),int(part->mIsUpdateActive),
+        part->mCentre.x,part->mCentre.y,part->mCentre.z,part->mRadius);
+    for(int i=0;i<part->getChildCount();++i) auditPart(owner,part->getChildAt(i),depth+1);
+}
+static void auditBody(const char* owner,Creature* creature) {
+    if(!creature || !creature->isAlive()) return;
+    const Vector3f centre=creature->getBoundingSphereCentre();
+    const float radius=creature->getBoundingSphereRadius();
+    std::printf("P2_PURPLE_BODY owner=%s xyz=%.3f,%.3f,%.3f bound=%.3f,%.3f,%.3f radius=%.3f collision_radius=%.3f\n",
+        owner,creature->mSRT.t.x,creature->mSRT.t.y,creature->mSRT.t.z,centre.x,centre.y,centre.z,radius,creature->mCollisionRadius);
+    if(creature->mCollInfo) auditPart(owner,creature->mCollInfo->getBoundingSphere());
+    auditTerrain(owner,centre,radius);
+}
 // Read-only fixture telemetry. Form inherited member pointers in a derived
 // scope, then apply them to the actual ActTransport; no layout casts/mutations.
 struct PurpleTransportTrace : ActTransport {
@@ -82,6 +113,16 @@ struct PurpleTransportTrace : ActTransport {
         const int count=action->*(&PurpleTransportTrace::mNumRoutePoints);
         const int index=action->*(&PurpleTransportTrace::mPathIndex);
         const int next=action->*(&PurpleTransportTrace::mNextPathIndex);
+        static bool routeAudited=false;
+        if(!routeAudited && routeMgr && count>0) {
+            routeAudited=true;
+            for(int i=0;i<count;++i) {
+                const int id=piki->mPathBuffers[i].mWayPointIdx;
+                WayPoint* wp=routeMgr->getWayPoint('test',id);
+                if(wp) std::printf("P2_PURPLE_FULL_ROUTE index=%d id=%d xyz=%.3f,%.3f,%.3f open=%d water=%d\n",
+                    i,id,wp->mPosition.x,wp->mPosition.y,wp->mPosition.z,int(wp->mIsOpen),int(wp->inWater()));
+            }
+        }
         std::printf("P2_PURPLE_HAUL_ACTION state=%d route_count=%d path_index=%d next_index=%d path_type=%d slot=%d can_carry=%d stall_timer=%.3f better_pathfinding=%d\n",
             state,count,index,next,
             int(action->*(&PurpleTransportTrace::mPathType)),action->*(&PurpleTransportTrace::mSlotIndex),
@@ -120,8 +161,14 @@ class PurpleCombatApp : public PlugPikiApp {
         if(!test || guardInjected || !n || !n->getCurrState() || !mapMgr || !pikiMgr) return;
         const int state=n->getCurrState()->getID();
         if(state!=NAVISTATE_Walk && state!=NAVISTATE_Idle) return;
-        guardInjected=true;captainSeen=true;
+        // Startup briefly exposes a Walk captain before the landing movie and
+        // squad exist. Inject only after the required live fixture baseline;
+        // the unconditional real guard below still protects every earlier frame.
+        if(gameflow.mPauseAll || gameflow.mIsUIOverlayActive
+            || (gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive)) return;
         GameStat::update();
+        if(int(GameStat::mapPikis)!=20) return;
+        guardInjected=true;captainSeen=true;
         std::printf("P2_PURPLE_GUARD_ARMED case=%s initialized=1 tick=%d health_before=%.3f field=%d state=%d\n",test,ticks,n->mHealth,int(GameStat::mapPikis),state);
         milestone("initialized_guard_injection",ticks);
         if(!std::strcmp(test,"health_pause")) gameflow.mPauseAll=true;
@@ -399,8 +446,28 @@ class PurpleCombatApp : public PlugPikiApp {
         }
     }
 
+    bool approachAndPluck(Navi* n,PikiHeadItem* head) {
+        // Ordinary controller movement/pluck. Never relocate the captain or
+        // sprout, or force a plucking state to satisfy natural acceptance.
+        const float dx=head->mSRT.t.x-n->mSRT.t.x,dz=head->mSRT.t.z-n->mSRT.t.z;
+        const float distance=std::sqrt(dx*dx+dz*dz);
+        if(distance>20.f) {
+            require(n->controlCamera()!=nullptr,"natural approach camera missing");
+            const Vector3f& axis=n->controlCamera()->mViewXAxis;
+            const float power=distance>45.f?65.f:35.f;
+            pc_p2_input_script_set(1,0,int(std::lround(power*(dx*axis.x+dz*axis.z)/distance)),
+                int(std::lround(power*(dx*axis.z-dz*axis.x)/distance)));
+            return false;
+        }
+        pc_p2_input_script_set(1,KBBTN_A);
+        ++pluckAttempts;
+        milestone("native_sprout_pluck_requested",ticks);
+        std::printf("P2_PURPLE_PLUCK_ATTEMPT attempt=%d captain_position_staged=0 native_input=1 forced_pluck_state=0 distance=%.3f player_controls_validated=0\n",pluckAttempts,distance);
+        return true;
+    }
     Piki* naturalStep(Navi* n) {
         ++phaseTicks;
+        if(phase==2) pc_p2_input_script_set(1,0);
         Pom* violet = nullptr; int count = 0;
         Iterator flowers(bossMgr);
         CI_LOOP(flowers) {
@@ -443,16 +510,9 @@ class PurpleCombatApp : public PlugPikiApp {
             CI_LOOP(heads) {
                 PikiHeadItem* h = static_cast<PikiHeadItem*>(*heads);
                 if (h && h->isAlive() && h->mP2Purple && h->canPullout()) {
-                    // Fixture staging bypasses captain approach/pathfinding only.
-                    // The sprout stays where native Violet conversion placed it.
-                    n->resetPosition(h->mSRT.t + Vector3f(-12,0,0));
-                    ++pluckAttempts;
-                    std::printf("P2_PURPLE_PLUCK_ATTEMPT attempt=%d captain_position_staged=1 native_pluck=1 pathfinding_validated=0 player_controls_validated=0\n", pluckAttempts);
-                    n->mSproutToPluck=h; n->mPikiToPluck=nullptr;
-                    n->mStateMachine->transit(n,NAVISTATE_NukuAdjust);
-                    milestone("native_sprout_pluck_started",ticks);
+                    if(!approachAndPluck(n,h)) break;
                     phase=2; phaseTicks=0; input=nullptr;
-                    std::puts("P2_VIOLET_REAL_SPROUT captain_pluck_started=1"); break;
+                    std::puts("P2_VIOLET_REAL_SPROUT captain_pluck_requested=1 actor_position_injected=0"); break;
                 }
             }
         }
@@ -475,12 +535,8 @@ class PurpleCombatApp : public PlugPikiApp {
                 PikiHeadItem* h = static_cast<PikiHeadItem*>(*retryHeads);
                 if (!h || !h->isAlive() || !h->mP2Purple || !h->canPullout()) continue;
                 require(pluckAttempts < 3, "native pluck failed after three staged attempts");
-                n->resetPosition(h->mSRT.t + Vector3f(-12,0,0));
-                ++pluckAttempts;
-                std::printf("P2_PURPLE_PLUCK_ATTEMPT attempt=%d captain_position_staged=1 retry=1 phase_ticks=%d native_pluck=1 pathfinding_validated=0 player_controls_validated=0\n",
-                    pluckAttempts, phaseTicks);
-                n->mSproutToPluck = h; n->mPikiToPluck = nullptr;
-                n->mStateMachine->transit(n, NAVISTATE_NukuAdjust);
+                phase=1;phaseTicks=0;
+                approachAndPluck(n,h);
                 break;
             }
         }
@@ -499,6 +555,13 @@ class PurpleCombatApp : public PlugPikiApp {
         return false;
     }
     void diagnostics(Navi* n) {
+        if(bossMgr) { Iterator flowers(bossMgr); CI_LOOP(flowers) {
+            Boss* b=static_cast<Boss*>(*flowers);
+            if(b && b->isAlive() && b->mObjType==OBJTYPE_Pom && pc_p2_violet(static_cast<Pom*>(b))) auditBody("violet",b);
+        } }
+        if(haul && pelletMgr) { Iterator bodies(pelletMgr); CI_LOOP(bodies) {
+            if(static_cast<Pellet*>(*bodies)==haul) {auditBody("cargo",haul);break;}
+        } }
         const char* state="unavailable"; const char* clip="unavailable"; float clipPhase=0;
         const bool present=target && targetPresent();
         if (present) pc_p2_chappy_probe(target,&state,&clip,&clipPhase);
