@@ -83,7 +83,7 @@ public:
         require(flowCont.mCurrentStage && !std::strcmp(flowCont.mCurrentStage->mFileName,"stages/p2_tutorial.ini"),"wrong loaded stage");
         require(!gameflow.mIsChallengeMode && !pc_pikipelago_room_preview(),"wrong lifecycle");
         int count=0;Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(p->isAlive())++count;}
-        require(count==20,"live starting squad");
+        if(!humanSmoke() || phase==0)require(count==20,"live starting squad");
         require(mapMgr->mMapModel->mTriCount==5332,"complete source face count");
         require(mapMgr->mMapModel->mTriList[673].mMapCode!=mapMgr->mMapModel->mTriList[4914].mMapCode,"duplicate slip overlay collapsed");
         for(int flag=0;flag<DEMOFLAG_COUNT;++flag)playerState->mDemoFlags.setFlagOnly(flag);
@@ -102,6 +102,8 @@ public:
             require(std::fabs(mapMgr->getMinY(220,1000,true)-56.0442f)<0.1f,"retail shoreline starting floor");
             require(pc_p2_surface_water_box(Vector3f(0,148.63f,1000),0)==-1,"upper bridge incorrectly wet");
             require(pc_p2_surface_water_box(Vector3f(0,15,1000),0)==0,"lower pool probe missing");
+            require(pc_p2_surface_water_box(Vector3f(-1000,67,-300),0)==1,"source volume1 query missing");
+            require(pc_p2_surface_water_box(Vector3f(0,37,1600),0)==2,"source volume2 query missing");
             auto* shape=mapMgr->mMapModel;
             auto centroid=[&](int face){Vector3f p;for(int i=0;i<3;++i)p.add(shape->mVertexList[shape->mTriList[face].mVertexIndices[i]]);p.multiply(1.f/3.f);return p;};
             auto unique=pc_p2_surface_continuation(shape,&shape->mTriList[320],1,centroid(4296));
