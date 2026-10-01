@@ -22,6 +22,9 @@ public:
     FixturePiki() : Piki(nullptr) { initializeLinks(*this); }
     void refresh(Graphics&) override {}
     bool isKinoko() override { return false; }
+    // This headless contract fixture has no scene state machine running.
+    // Attachment links use production code; scene messages are outside scope.
+    void stickToCallback(Creature*) override {}
 };
 class FixtureAttachment : public Creature {
 public:
