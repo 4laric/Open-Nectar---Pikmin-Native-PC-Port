@@ -2984,6 +2984,11 @@ endfunction()
 
 # #928 opt-in captain switching acceptance (requires local assets to run).
 pikmin_add_ci_fixture(captain_switch tools/p2_captain_switch_runtime.cpp)
+# #1157 matched captain combined SDL fixture; opt-in compile/package only.
+pikmin_add_ci_fixture(captain_combined_sdl tools/p2_captain_combined_sdl_fixture.cpp)
+if(TARGET pikmin_ci_fixture_captain_combined_sdl)
+    target_include_directories(pikmin_ci_fixture_captain_combined_sdl PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
+endif()
 add_executable(p2_bomb_telegraph_test tools/p2_bomb_telegraph_test.cpp)
 target_include_directories(p2_bomb_telegraph_test PRIVATE pc_port)
 target_compile_options(p2_bomb_telegraph_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
@@ -3039,3 +3044,8 @@ foreach(mode p1 thelynk)
         add_test(NAME pc_randomizer_state_stream_${mode}_${fault} COMMAND pc_randomizer_state_stream_test ${mode} ${fault})
     endforeach()
 endforeach()
+# #1150 compile-only original tutorial encounter/carry diagnostic.
+pikmin_add_ci_fixture(tutorial_encounter tools/p2_tutorial_encounter_runtime.cpp)
+if(TARGET pikmin_ci_fixture_tutorial_encounter)
+    target_include_directories(pikmin_ci_fixture_tutorial_encounter PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
+endif()
