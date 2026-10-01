@@ -39,6 +39,9 @@ const char* Check="Bestiary: Deliver P2 Dwarf Orange Bulborb";
 SDL_Joystick* pad=nullptr;
 void require(bool yes,const char* reason){if(!yes){std::printf("FAIL P2_GENERATED_DELIVERY %s\n",reason);std::fflush(nullptr);std::_Exit(1);}}
 void input(unsigned keys=0,int x=0,int y=0,int cx=0,int cy=0){
+ // Campaign card selection resets device routing; keep the disclosed virtual P1.
+ int id=-1;int kind=pc_window_input_get_assignment(0,&id);
+ if(kind!=PC_INPUT_DEV_GAMEPAD || id!=SDL_JoystickInstanceID(pad)){std::printf("P2_GENERATED_ROUTE_RESTORE previous_kind=%d previous_id=%d virtual_id=%d\n",kind,id,int(SDL_JoystickInstanceID(pad)));std::fflush(nullptr);pc_window_input_assign(0,PC_INPUT_DEV_GAMEPAD,SDL_JoystickInstanceID(pad));pc_window_input_assign(1,PC_INPUT_DEV_NONE,-1);}
  SDL_JoystickSetVirtualButton(pad,SDL_CONTROLLER_BUTTON_A,(keys&KBBTN_A)!=0);
  SDL_JoystickSetVirtualButton(pad,SDL_CONTROLLER_BUTTON_B,(keys&KBBTN_B)!=0);
  SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTX,Sint16(x*32767/74));
