@@ -220,7 +220,9 @@ public:
         case 165:active(1);pad();break;
         case 170: {
             // Clear the stock ship collision volume for this input observation.
-            Vector3f open(-85,0,0);open.y=mapMgr->getMinY(open.x,open.z,true)+1;
+            // Use observed live landing terrain rather than assuming every
+            // staged room has collision beneath the prototype's origin.
+            Vector3f open=a->getPosition();open.y=mapMgr->getMinY(open.x,open.z,true)+1;
             b->resetPosition(open);a->resetPosition(open+Vector3f(25,0,20));break;
         }
         case 175: {
