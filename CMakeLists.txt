@@ -1896,6 +1896,12 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_coop_policy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_coop_policy_test COMMAND pc_coop_policy_test)
 
+    # Co-op geyser launch gate (#1035; header-only, no game needed)
+    add_executable(pc_geyser_gate_test pc_port/pc_geyser_gate_test.cpp)
+    target_include_directories(pc_geyser_gate_test PRIVATE pc_port)
+    target_compile_options(pc_geyser_gate_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_geyser_gate_test COMMAND pc_geyser_gate_test)
+
     # Netplay input-ownership selection (launch lane; header-only, no SDL/game)
     add_executable(pc_netplay_input_sel_test pc_port/netplay/pc_netplay_input_sel_test.cpp)
     target_include_directories(pc_netplay_input_sel_test PRIVATE pc_port)
