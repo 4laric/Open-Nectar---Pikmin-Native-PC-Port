@@ -94,7 +94,12 @@ public:
         if(!initialized||!pikiMgr||!mapMgr||!playerState)return result;
         if(gameflow.mPauseAll||gameflow.mIsUIOverlayActive||(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive))return result;
         require(!pc_settings_get_debug_keys(),"debug keys must remain disabled");
-        if(n->getCurrState()->getID()!=NAVISTATE_Walk)return result;
+        // A held whistle enters a non-Walk captain state. Keep advancing that
+        // input phase so its release happens through SDL instead of deadlocking.
+        if(n->getCurrState()->getID()!=NAVISTATE_Walk && phase!=2){
+            if(ticks%60==0){std::printf("P2_CAVE_ROUTE_WAIT tick=%d phase=%d captain_state=%d\n",ticks,phase,n->getCurrState()->getID());std::fflush(nullptr);}
+            return result;
+        }
         require(std::isfinite(n->mSRT.t.x)&&std::isfinite(n->mSRT.t.y)&&std::isfinite(n->mSRT.t.z),"nonfinite captain position");
         if(phase==0){
             if(!pc_p2_cave_surface_route_active()||++ready<30)return result;
