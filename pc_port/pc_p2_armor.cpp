@@ -1326,13 +1326,19 @@ void pc_p2_armor_update(BTeki* actor) {
         } else {
             walkTo(actor, s, s.home, dt);
         }
-        if (distXZ(pos, s.home) > TERRITORY && s.state != ARMOR_GOHOME) {
-            std::printf("P2_ARMOR_STATE generator=%u state=gohome\n", generator);
-            enter(s, ARMOR_GOHOME, "move");
-            break;
-        }
-        if (s.state == ARMOR_GOHOME && distXZ(pos, s.home) < HOME_RADIUS) {
-            std::printf("P2_ARMOR_STATE generator=%u state=dive\n", generator);
+        // #1063: source Move/GoHome decisions (ArmorState.cpp:220-274, 461-500). An idle Move (nothing in view)
+        // goes GoHome at the move clip's end; GoHome dives once inside the home radius.
+        if (s.state == ARMOR_MOVE) {
+            const bool clipEnd = s.stateTime >= clipDuration("move");
+            const p2armor::Next next = p2armor::moveNext(target != nullptr, false, false, distXZ(pos, s.home), TERRITORY);
+            if (next == p2armor::ToGoHome && (target != nullptr || clipEnd)) {
+                std::printf("P2_ARMOR_STATE generator=%u state=gohome reason=%s dist_home=%.1f t=%.2f\n", generator,
+                            target ? "territory" : "idle", double(distXZ(pos, s.home)), double(s.stateTime));
+                enter(s, ARMOR_GOHOME, "move");
+                break;
+            }
+        } else if (p2armor::goHomeNext(false, distXZ(pos, s.home), HOME_RADIUS) == p2armor::ToDive) {
+            std::printf("P2_ARMOR_STATE generator=%u state=dive dist_home=%.1f\n", generator, double(distXZ(pos, s.home)));
             enter(s, ARMOR_DIVE, "dive");
             break;
         }
