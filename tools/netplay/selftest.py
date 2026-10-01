@@ -543,6 +543,42 @@ def main():
         check(any("does not say `on`" in x for x in probe_case("off", summary_edit=lambda t: t.replace("summary: on", "summary: off"))),
               "probe: a lead run whose summary says off fails")
 
+    # #1037: the PKNL session input log reader and the desync dump differ.
+    import pknl  # noqa: E402
+    import diff_desync  # noqa: E402
+    meta = b"role host\ncheckpoint_gen 13\n"
+    blob = b"PKNL" + struct.pack("<HHI", 1, 0, len(meta)) + meta
+    blob += bytes([0x08]) + struct.pack("<I", 0) + struct.pack("<Q", 7)  # frame 0: neutral inputs, total only
+    f1 = bytes(range(16))
+    blob += bytes([0x09]) + struct.pack("<I", 1) + f1 + struct.pack("<Q", 8)               # frame 1: p0 changed
+    blob += bytes([0x08]) + struct.pack("<I", 2) + struct.pack("<Q", 9)                    # frame 2: unchanged
+    blob += bytes([0x40]) + struct.pack("<IBH", 2, 1, 3) + b"abc"                          # event
+    lg = pknl.parse(blob)
+    check(lg.get("role") == "host" and lg.get("checkpoint_gen") == "13", "pknl: meta read back")
+    check(len(lg.frames) == 3 and lg.frames[2]["in0"] == f1 and lg.frames[2]["total"] == 9 and lg.frames[0]["in0"] == bytes(16),
+          "pknl: frames decode with delta inputs")
+    check(len(lg.events) == 1 and lg.events[0]["data"] == b"abc", "pknl: event decodes")
+    cut = pknl.parse(blob[:-2])
+    check(len(cut.frames) == 3 and cut.truncated > 0 and not cut.events, "pknl: a cut record is reported, earlier ones kept")
+    try:
+        pknl.parse(b"XXXX" + blob[4:])
+        check(False, "pknl: bad magic refused")
+    except ValueError:
+        check(True, "pknl: bad magic refused")
+    with tempfile.TemporaryDirectory() as dd:
+        da, db = Path(dd) / "a.txt", Path(dd) / "b.txt"
+        base = ("# tick 5: 2 records\n"
+                "piki ord=0 type=1 state=2 hp=1 pos=(1,2,3) rot=(0,0,0) vel=(0,0,0) drv=(0,0,0) face=0 aux=[0,0,0,0] hash=aa xhash=bb\n"
+                "teki ord=0 type=3 state=2 hp=9 pos=(5,5,5) rot=(0,0,0) vel=(0,0,0) drv=(0,0,0) face=0 aux=[0,0,0,0] hash=cc xhash=dd\n")
+        da.write_text(base)
+        db.write_text(base.replace("pos=(1,2,3)", "pos=(2,2,3)").replace("hash=aa", "hash=ab"))
+        lines = []
+        n, first, differing = diff_desync.diff(da, db, out=lines.append)
+        check(n == 1 and first == 5 and differing == [(5, ("piki", 0))], "diff_desync: names the one differing object")
+        check(any("pos: (1,2,3)  vs  (2,2,3)" in x for x in lines), "diff_desync: names the differing field")
+        db.write_text(base)
+        check(diff_desync.diff(da, db, out=lambda s: None)[0] == 0, "diff_desync: identical dumps -> 0")
+
     if failures:
         print(f"selftest: {failures} failure(s)")
         return 1

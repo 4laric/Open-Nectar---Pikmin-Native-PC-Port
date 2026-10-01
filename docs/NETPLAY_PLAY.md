@@ -382,6 +382,26 @@ Command Prompt: ".\nectar (2).exe" ...`, because each console quotes it
 differently.
 
 - **DESYNC** (exit code 5): the games disagreed about the game state.
+  Both games then trade a short report over the connection (up to 4 s) and
+  each writes it into its own run folder. **Zip your whole netplay run folder
+  and send it, and ask the other player to send theirs.** The message names the
+  folder. It holds:
+  - `session-inputs.pknl`: every frame's two inputs and this game's state hash
+    (written all session, flushed every 2 s, about 3 MB per hour), so the
+    session can be replayed offline on one machine from its start checkpoint
+    (`tools/netplay/replay_session.py`; the replay compares its hashes with
+    the recorded ones and names the first frame that differs);
+  - `desync-report.txt`: both games' sub-hashes at the desynced tick (navi,
+    piki, teki, item, world, rng, rand and an extra `xtra` hash over state the
+    other columns do not cover), which of them differ, the first tick where
+    the two games differ, and the objects that differ there;
+  - `desync-subs.txt` (the last ~68 s of per-tick sub-hashes, both games),
+    `desync-objects.txt` (one line per object at the first differing tick: ids,
+    positions, states, health, per-object hashes) and `desync-peer-objects.txt`.
+  `tools/netplay/diff_desync.py <your run>/desync-objects.txt <their
+  run>/desync-objects.txt` shows the objects that differ. Test knobs:
+  `PIKMIN_NETPLAY_INPUT_LOG=<file>` (or `0`) moves or disables the input log,
+  `PIKMIN_NETPLAY_FORENSICS=0` turns the per-tick object capture off.
 - **DESYNC AT THE DAY-END SAVE** (exit code 5) / **SAVE NOT AGREED** (exit
   code 6): the day-end save did not finish the same way on both games, so
   that day does not count; the campaign continues from the day before.

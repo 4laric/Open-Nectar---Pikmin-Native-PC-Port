@@ -188,6 +188,19 @@ int main()
 		e.extraArgs = "--netplay-input keyboard";
 		std::vector<std::string> l = recovery_lines(e);
 		CHECK(contains(l, "DESYNC") && contains(l, "at frame 30012"), "what happened");
+		CHECK(!contains(l, "netplay run folder"), "no run folder request without a forensics folder");
+		{
+			// #1037: a desync with a run folder asks the players to send it.
+			EndInfo f = e;
+			f.forensicsDir = "C:\game\netplay\run-1";
+			const std::vector<std::string> fl = recovery_lines(f);
+			CHECK(contains(fl, "send your whole netplay run folder") && contains(fl, "The run folder: C:\game\netplay\run-1"),
+			      "desync names the run folder to send");
+			CHECK(contains(fl, "desync-report.txt") && contains(fl, "session-inputs.pknl"), "and what it holds");
+			CHECK(fl.back() == "The run folder: C:\game\netplay\run-1", "the folder path is the last line");
+			f.kind = EndKind::Disconnect;
+			CHECK(!contains(recovery_lines(f), "netplay run folder"), "only a desync asks for it");
+		}
 		CHECK(contains(l, "Last save: the end of day 2; the campaign continues from the start of day 3 (checkpoint 1)."),
 		      "the last save names the day that ended and the day that follows (day known: the day before ended)");
 		e.dayEnded = 2;
