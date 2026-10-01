@@ -1323,6 +1323,11 @@ static bool restart_event_jam() {
     return sEventJamPlayer.result() == PCJamResult::Ok;
 }
 
+namespace {
+struct QueuedPortWrite { u8 track; u8 port; u16 value; };
+std::vector<QueuedPortWrite> sSEPortQueue;
+}
+
 static bool restart_se_jam() {
     for (auto& track : sSEJamVoices) {
         for (int& handle : track) {
@@ -1338,6 +1343,7 @@ static bool restart_se_jam() {
         if (sSETrackPaused[child]) sSEJamPlayer.setChildPaused(child, true);
     sSEJamTickAccumulator = 0.0;
     sSEJamLastCounter = SDL_GetPerformanceCounter();
+    sSEPortQueue.clear();
     return sSEJamPlayer.result() == PCJamResult::Ok;
 }
 
@@ -1355,6 +1361,36 @@ bool pc_audio_send_orima_se(u16 id, bool stop, bool pikiSound) {
 bool pc_audio_write_se_port(u8 track, u8 port, u16 value) {
     if (sSEJamPlayer.result() != PCJamResult::Ok && !restart_se_jam()) return false;
     return sSEJamPlayer.writeChildPort(track, port, value);
+}
+
+// Jal_AddCmdQueue / Jal_SendCmdQueue_Noblock / Jal_FrameWork (cmdqueue.c): a bounded FIFO per (child, port) whose
+// head is written once the script has read the previous value. Game thread only, like pc_audio_tick.
+namespace {
+constexpr size_t kSEPortQueueDepth = 16;
+
+// Hand over every queued value whose port is free; later values for a port that just took one wait.
+void flush_se_port_queue() {
+    if (sSEPortQueue.empty()) return;
+    for (size_t i = 0; i < sSEPortQueue.size();) {
+        const QueuedPortWrite& w = sSEPortQueue[i];
+        bool earlierForPort = false;
+        for (size_t j = 0; j < i; ++j)
+            earlierForPort = earlierForPort || (sSEPortQueue[j].track == w.track && sSEPortQueue[j].port == w.port);
+        if (earlierForPort || sSEJamPlayer.childPortPending(w.track, w.port)) { ++i; continue; }
+        sSEJamPlayer.writeChildPort(w.track, w.port, w.value);
+        sSEPortQueue.erase(sSEPortQueue.begin() + static_cast<std::ptrdiff_t>(i));
+    }
+}
+}
+
+bool pc_audio_queue_se_port(u8 track, u8 port, u16 value) {
+    if (sSEJamPlayer.result() != PCJamResult::Ok && !restart_se_jam()) return false;
+    size_t waiting = 0;
+    for (const QueuedPortWrite& w : sSEPortQueue) waiting += (w.track == track && w.port == port);
+    if (waiting >= kSEPortQueueDepth) return false;
+    sSEPortQueue.push_back({ track, port, value });
+    flush_se_port_queue();
+    return true;
 }
 
 void pc_audio_set_se_track_volume(u8 track, float volume) {
@@ -1757,6 +1793,40 @@ void pc_audio_trace_event(const char* fmt, ...) {
     std::fflush(stdout);
 }
 
+// Per movie index, per trace second: how many frame requests arrived and the first / last frame they carried.
+// Each concurrent movie (the day-end results screen plays four, the take-off two) asks for its own sound frame
+// once per tick, so N movies means N requests per tick; what must hold is that every movie's frames advance by one
+// per tick on its own timeline, and that only the demo's owner drives the cue cursor.
+namespace {
+struct TraceMovie {
+    int index = -1;
+    int calls = 0;
+    int forwarded = 0;
+    int firstFrame = 0;
+    int lastFrame = 0;
+    int backward = 0;
+};
+TraceMovie sTraceMovies[8];
+}
+
+void pc_audio_trace_movie_frame(int movieIndex, int frame, int forwarded) {
+    if (!pc_audio_trace_enabled()) return;
+    pc_audio_trace_count(PCAT_MOVIE_FRAME);
+    if (forwarded) pc_audio_trace_count(PCAT_MOVIE_FRAME_FWD);
+    TraceMovie* slot = nullptr;
+    for (TraceMovie& m : sTraceMovies) {
+        if (m.index == movieIndex) { slot = &m; break; }
+        if (!slot && m.index < 0) slot = &m;
+    }
+    if (!slot) return;
+    if (slot->index != movieIndex) { *slot = TraceMovie(); slot->index = movieIndex; }
+    if (slot->calls == 0) slot->firstFrame = frame;
+    else if (frame < slot->lastFrame) ++slot->backward;
+    slot->lastFrame = frame;
+    ++slot->calls;
+    if (forwarded) ++slot->forwarded;
+}
+
 void pc_audio_trace_listener(int authoritativePass, int localPlayer, float lx, float ly, float lz,
                              float cx, float cy, float cz) {
     if (!pc_audio_trace_enabled()) return;
@@ -1799,8 +1869,29 @@ static void pc_audio_trace_second(void) {
     // Expected JAM ticks per wall second = tempo * timeBase / 60; ratio 1.00 is real time.
     const double ratio = bgmTempo > 0.0 ? bgmTicks / (dt / 1000.0 * bgmTempo * bgmTb / 60.0) : 0.0;
     const double mixHz = double(m.mixedFrames - lastM.mixedFrames) / (dt / 1000.0);
+    // The demo-sequence player (BGM_DemoBgm for sequence-config cutscenes) and the persistent SE sequencer, same
+    // measure as the BGM ratio: ticks advanced / ticks expected from tempo * timebase / 60 over the wall second.
+    const bool bossOn = sBossJamPlayer.result() == PCJamResult::Ok && sBossJamPlayer.tempo() > 0;
+    const double bossTempo = bossOn ? double(sBossJamPlayer.tempo()) : 0.0;
+    const double bossTb = bossOn ? double(sBossJamPlayer.timeBase()) : 0.0;
+    const double bossTicks = double(m.bossTicks - lastM.bossTicks);
+    const double bossRatio = bossTempo > 0.0 ? bossTicks / (dt / 1000.0 * bossTempo * bossTb / 60.0) : 0.0;
+    const bool seOn = sSEJamPlayer.result() == PCJamResult::Ok && sSEJamPlayer.tempo() > 0;
+    const double seTicks = double(m.seTicks - lastM.seTicks);
+    const double seRatio = seOn ? seTicks / (dt / 1000.0 * double(sSEJamPlayer.tempo()) * double(sSEJamPlayer.timeBase()) / 60.0) : 0.0;
+    char movies[160] = "";
+    {
+        size_t used = 0;
+        for (TraceMovie& tm : sTraceMovies) {
+            if (tm.index < 0 || tm.calls == 0 || used + 40 >= sizeof movies) continue;
+            used += std::snprintf(movies + used, sizeof movies - used, "%s%d:%d/%d@%d-%d%s", used ? "," : "", tm.index,
+                                  tm.calls, tm.forwarded, tm.firstFrame, tm.lastFrame, tm.backward ? "!back" : "");
+        }
+        for (TraceMovie& tm : sTraceMovies) tm = TraceMovie();
+    }
     std::printf("[audio-trace] sec t=%.3f dt=%.0fms poll=%llu gsync=%llu movie=%llu seupd=%llu(auth %llu) "
-                "bgm_seq=%u bgm_ticks=%.0f(tempo %.0f tb %.0f ratio %.3f) se_ticks=%llu ev_ticks=%llu "
+                "bgm_seq=%u bgm_ticks=%.0f(tempo %.0f tb %.0f ratio %.3f) boss_ticks=%.0f(tempo %.0f tb %.0f ratio %.3f) "
+                "se_ticks=%llu(ratio %.3f) ev_ticks=%llu movies[idx:calls/fwd@frames]=%s fwd=%llu cue=%llu "
                 "mix=%.0fHz(dev %uHz) stream_active=%d stream_samples=%lld(%.0f/s) "
                 "formation call=%llu start=%llu stop=%llu orima_se=%llu dropped=%llu "
                 "evplay=%llu evfail=%llu sysse=%llu seclosed=%llu sejam_notes=%llu(novoice %llu) state(demo=%d flags=0x%x scene=%d) "
@@ -1809,7 +1900,9 @@ static void pc_audio_trace_second(void) {
                 now / 1000.0, dt, (unsigned long long)d[PCAT_POLL], (unsigned long long)d[PCAT_GSYNC],
                 (unsigned long long)d[PCAT_MOVIE_FRAME], (unsigned long long)d[PCAT_SE_UPDATE],
                 (unsigned long long)d[PCAT_SE_UPDATE_AUTH], sJamSequence, bgmTicks, bgmTempo, bgmTb, ratio,
-                (unsigned long long)(m.seTicks - lastM.seTicks), (unsigned long long)(m.eventTicks - lastM.eventTicks),
+                bossTicks, bossTempo, bossTb, bossRatio,
+                (unsigned long long)(m.seTicks - lastM.seTicks), seRatio, (unsigned long long)(m.eventTicks - lastM.eventTicks),
+                movies, (unsigned long long)d[PCAT_MOVIE_FRAME_FWD], (unsigned long long)d[PCAT_DEMO_CUE],
                 mixHz, m.sampleRate, sStreamVoice.active ? 1 : 0, streamDelta,
                 double(streamDelta) / (dt / 1000.0), (unsigned long long)d[PCAT_FORMATION_CALL],
                 (unsigned long long)d[PCAT_FORMATION_START], (unsigned long long)d[PCAT_FORMATION_STOP],
@@ -1962,6 +2055,7 @@ void pc_audio_tick(void) {
             sSEJamTickAccumulator -= 1.0;
             sSETicks.fetch_add(1, std::memory_order_relaxed);
             reap_finished_voices(sSEJamPlayer, sSEJamVoices);
+            flush_se_port_queue();
             const PCJamResult result = sSEJamPlayer.tick(sSEJamEvents, 4096);
             for (const PCJamEvent& event : sSEJamEvents) {
                 int& handle = sSEJamVoices[event.track % kPCJamTrackCount][event.voice & 7];
@@ -1973,10 +2067,15 @@ void pc_audio_tick(void) {
                         event.pitch, event.cutoff, event.fxMix, event.dolby,
                         event.envelope);
                     pc_audio_trace_count(handle >= 0 ? PCAT_SEJAM_NOTE : PCAT_SEJAM_NOVOICE);
-                    if (event.track == 15)
-                        pc_audio_trace_event("se jam track 15 note bank=%u program=%u key=%u vel=%u vol=%.2f -> %s",
-                                             event.bank, event.program, event.key, event.velocity, event.volume,
-                                             handle >= 0 ? "voice" : "NO VOICE");
+                    // Notes the effect sequencer raises while a cinematic runs (the demo track's cues): where they came from
+                    // (track slot) and whether the mixer found them a voice. Capped, trace only.
+                    if (pc_audio_trace_enabled() && sTraceDemo.load(std::memory_order_relaxed) >= 0) {
+                        static int traced = 0;
+                        if (traced++ < 400)
+                            pc_audio_trace_event("se jam note in demo %d: slot=%u bank=%u program=%u key=%u vel=%u vol=%.2f -> %s",
+                                                 sTraceDemo.load(std::memory_order_relaxed), event.track, event.bank, event.program,
+                                                 event.key, event.velocity, event.volume, handle >= 0 ? "voice" : "NO VOICE");
+                    }
                     if (handle >= 0) tag_jam_voice(handle, 1, event.source);
                 } else if (event.type == PCJamEventType::NoteOff && handle >= 0) {
                     const u32 releaseFrames = event.release == 0 ? 0

@@ -416,6 +416,9 @@ bool Navi::isRopable()
  */
 bool Navi::startDamage()
 {
+#if defined(PIKI_PC_PORT)
+	PcAudioSource audioSource(mNaviID); // issue #1030: whose sounds these are (the hurt state starts here)
+#endif
 	int stateID      = mStateMachine->getCurrID(this);
 	NaviState* state = mStateMachine->getNaviState(this);
 	if (state->invincible(this)) {
@@ -3427,9 +3430,6 @@ void Navi::sendMsg(Msg* msg)
  */
 void Navi::procDamage(f32)
 {
-#if defined(PIKI_PC_PORT)
-	PcAudioSource audioSource(mNaviID); // issue #1030: whose sounds these are
-#endif
 }
 
 /**
@@ -3437,6 +3437,11 @@ void Navi::procDamage(f32)
  */
 bool Navi::stimulate(immut Interaction& interaction)
 {
+#if defined(PIKI_PC_PORT)
+	// Issue #1030: the hurt and fired sounds of Interact*::actNavi (SE_DAMAGED, SE_FIRED) belong to the navi that is
+	// hit, not to the enemy code that raised them: only the PC that plays that captain should hear them.
+	PcAudioSource audioSource(mNaviID);
+#endif
 	if (interaction.actCommon(this)) {
 		return interaction.actNavi(this);
 	}

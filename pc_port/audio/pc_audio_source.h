@@ -23,12 +23,20 @@
 // audible. Outside a deterministic netplay session (single player, local
 // split-screen co-op) every sound is audible, exactly as before.
 // PIKMIN_NETPLAY_AUDIO_LEGACY=1 restores the old behaviour for A/B traces.
+//
+// "In a session" means a host or join switch is set: a deterministic replay of a recorded input log
+// (run_replay, an M1 .pkni) runs the same two-pass frame with one human watching both captains and no partner PC,
+// so nothing is muted there.
 
 #if defined(PIKI_PC_PORT) && defined(__cplusplus)
 
 #include <cstdlib>
 
 #include "netplay/pc_netplay_present.h"
+
+// Declared in netplay/pc_netplay_session.h with C++ linkage and defined only in netplay builds (the session TU),
+// so it is referenced weakly: the default build and the host tests link without it.
+__attribute__((weak)) bool pc_netplay_session_active(void);
 
 inline int& pc_audio_source_captain_slot()
 {
@@ -52,6 +60,11 @@ private:
 	int mPrevious;
 };
 
+inline bool pc_audio_in_netplay_session()
+{
+	return pc_netplay_session_active != nullptr && pc_netplay_session_active();
+}
+
 inline bool pc_audio_legacy_ownership()
 {
 	static const bool legacy = [] {
@@ -66,7 +79,8 @@ inline bool pc_audio_legacy_ownership()
 inline bool pc_audio_source_audible()
 {
 	const int source = pc_audio_source_captain_slot();
-	if (source < 0 || !pc_netplay_present_two_pass_active() || pc_audio_legacy_ownership()) {
+	if (source < 0 || !pc_netplay_present_two_pass_active() || !pc_audio_in_netplay_session()
+	    || pc_audio_legacy_ownership()) {
 		return true;
 	}
 	return source == pc_netplay_present_local_player();

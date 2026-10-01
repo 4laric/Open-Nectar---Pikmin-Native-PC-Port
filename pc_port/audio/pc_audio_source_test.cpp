@@ -26,7 +26,11 @@ static void check(bool condition, const char* message)
 namespace {
 int sTwoPass = 0;
 int sLocal   = 0;
+bool sSession = true;
 } // namespace
+
+// Netplay builds define this in the session TU; the gate reads it weakly.
+bool pc_netplay_session_active(void) { return sSession; }
 
 // The real definitions live in the engine (pc_netplay_present.cpp); the gate
 // only needs these two answers.
@@ -42,6 +46,16 @@ int main()
 		PcAudioSource captain(1);
 		check(pc_audio_source_audible(), "no session (single player / split screen): captain 1 audible");
 	}
+
+	// A deterministic replay (two-pass frame, no host/join switch): one human, both captains, nothing muted.
+	sTwoPass = 1;
+	sLocal   = 0;
+	sSession = false;
+	{
+		PcAudioSource louie(1);
+		check(pc_audio_source_audible(), "replay (no session): captain 1 audible with local player 0");
+	}
+	sSession = true;
 
 	// In a session, host (local 0): captain 0 audible, captain 1 muted.
 	sTwoPass = 1;
