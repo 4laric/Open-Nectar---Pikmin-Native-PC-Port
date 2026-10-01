@@ -1813,7 +1813,80 @@ void pc_p2_autoplay_tick(void)
     std::fflush(stdout);
 
     // --- Pad synthesis through the live camera basis ---
-    const p2autoplay::Command cmd = sBrain.command();
+    p2autoplay::Command cmd = sBrain.command();
+    // TEST-ONLY coarse water map (PIKMIN_RANDOMIZER_AUTOPLAY_WATER_MAP=1): one dump of
+    // ground (.), water (W) and no-ground (x) on a 50 u grid so a lure path can be planned.
+    {
+        static bool waterMapped = false;
+        const char* wm = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_WATER_MAP");
+        if (!waterMapped && wm && *wm == '1' && mapMgr) {
+            waterMapped = true;
+            for (int j = 0; j <= 90; ++j) {
+                const float pz = 50.0f * float(j);
+                std::string row;
+                for (int i = -50; i <= 40; ++i) {
+                    const float px = 50.0f * float(i);
+                    CollTriInfo* tri = mapMgr->getCurrTri(px, pz, true);
+                    row += !tri ? 'x' : (MapCode::getAttribute(tri) == ATTR_Water ? 'W' : '.');
+                }
+                std::printf("AUTOPLAY_WATERMAP z=%.0f x0=-2500 step=50 row=%s TEST-ONLY bot-driven\n", double(pz), row.c_str());
+            }
+            std::fflush(stdout);
+        }
+    }
+    // TEST-ONLY lure path (PIKMIN_RANDOMIZER_AUTOPLAY_LURE): replace the Brain
+    // command with a walk along the waypoint list, then hold still.
+    {
+        static const std::vector<std::pair<float, float>> lure = p2autoplay::lurePath();
+        static size_t lureIdx = 0;
+        static int lureWarm = 0;
+        if (!lure.empty()) {
+            cmd = p2autoplay::Command{};
+            if (lureWarm == 300) {
+                const char* lt = std::getenv("PIKMIN_RANDOMIZER_AUTOPLAY_LURE_TELEPORT");
+                if (lt && *lt == '1' && mapMgr) {
+                    // Start the lure at its first waypoint (the walk from the Onion is not what is under test).
+                    const float ty = mapMgr->getMinY(lure[0].first, lure[0].second, true);
+                    Vector3f at(lure[0].first, ty, lure[0].second);
+                    navi->resetPosition(at);
+                    std::printf("AUTOPLAY_LURE_TELEPORT x=%.0f z=%.0f TEST-ONLY bot-driven\n", double(at.x), double(at.z));
+                    std::fflush(stdout);
+                    lureIdx = 1;
+                }
+            }
+            if (lureWarm % 120 == 0) {
+                std::printf("AUTOPLAY_LURE_POS idx=%zu navi=(%.0f,%.0f) attr=%d TEST-ONLY bot-driven\n", lureIdx, double(naviX), double(naviZ),
+                            navi->mGroundTriangle ? MapCode::getAttribute(navi->mGroundTriangle) : -1);
+                // Every campaign teki within 1200 u: where it is and whether the engine is still updating it.
+                Iterator lit(tekiMgr);
+                CI_LOOP(lit)
+                {
+                    Teki* lt = static_cast<Teki*>(*lit);
+                    if (!lt || !lt->mGenerator) continue;
+                    BTeki* lb = static_cast<BTeki*>(lt);
+                    const float d = distXZ(naviX, naviZ, lb->getPosition().x, lb->getPosition().z);
+                    if (d > 1200.0f) continue;
+                    std::printf("AUTOPLAY_LURE_TEKI type=%d pos=(%.0f,%.0f) dist=%.0f vel=(%.1f,%.1f) aiCulling=%d aiCullable=%d alwaysActive=%d attr=%d TEST-ONLY bot-driven\n",
+                                int(lb->mTekiType), double(lb->getPosition().x), double(lb->getPosition().z), double(d), double(lb->mVelocity.x),
+                                double(lb->mVelocity.z), int(lb->mGrid.aiCulling()), int(lb->aiCullable()), int(lb->insideView()),
+                                lb->getPositionMapCode());
+                }
+                std::fflush(stdout);
+            }
+            if (++lureWarm > 300 && lureIdx < lure.size()) {
+                const float dx = lure[lureIdx].first - naviX, dz = lure[lureIdx].second - naviZ;
+                const float len = std::sqrt(dx * dx + dz * dz);
+                if (len < 30.0f) {
+                    std::printf("AUTOPLAY_LURE reached=%zu navi=(%.0f,%.0f) TEST-ONLY bot-driven\n", lureIdx, double(naviX), double(naviZ));
+                    std::fflush(stdout);
+                    ++lureIdx;
+                } else {
+                    cmd.moveX = dx / len;
+                    cmd.moveZ = dz / len;
+                }
+            }
+        }
+    }
     unsigned buttons = cmd.buttons;
     int stickX = 0, stickY = 0;
     float yawDbg = 0.0f;
