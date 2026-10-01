@@ -24,7 +24,7 @@
 #include "ItemMgr.h"
 #include "Boss.h"
 #include "Pellet.h"
-// Fixture-only access for restored state-query checks; no production headers change.
+// Fixture-only read access to the naturally spent counter; no state mutation.
 #define private public
 #include "Pom.h"
 #undef private
@@ -51,7 +51,7 @@ static int population() {
     return count;
 }
 
-static int phase=0,ticks=0,inputFrame=0,whiteBodies=0;static Vector3f goal;static SDL_Joystick* virtualPad=nullptr;
+static int phase=0,ticks=0,inputFrame=0,whiteBodies=0;static bool manualSmoke=false,manualReady=false;static Vector3f goal;static SDL_Joystick* virtualPad=nullptr;
 class AcquisitionController:public Kontroller {
 public:
  AcquisitionController():Kontroller(1){}
@@ -85,7 +85,7 @@ public:
  int idle()override{
   inputFrame=frames;if(scriptedInput)scriptedInput->update();
   int result=PlugPikiApp::idle();Navi* n=naviMgr?naviMgr->getNavi():nullptr;
-  if(n){initialized=true;p2_fixture_require_captain(GameStat::orimaDead,n->getCurrState()&&n->getCurrState()->getID()==NAVISTATE_Dead,std::getenv("P2_WHITE_EXHAUSTION_FORCE_CAPTAIN_DOWN")?0.f:n->mHealth,frames);}
+  if(n){if(n->getCurrState())initialized=true;p2_fixture_require_captain(GameStat::orimaDead,n->getCurrState()&&n->getCurrState()->getID()==NAVISTATE_Dead,std::getenv("P2_WHITE_EXHAUSTION_FORCE_CAPTAIN_DOWN")?0.f:n->mHealth,frames);}
   else if(initialized){std::puts("P2_FIXTURE_CAPTAIN_DOWN missing_captain outcome=BLOCKED");std::fflush(nullptr);std::_Exit(86);}
   require(++frames<5000,"frame timeout");
   if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
@@ -112,12 +112,26 @@ public:
   int red=0,white=0,heads=0,captured=0,flying=0;PikiHeadItem* head=nullptr;
   Iterator actors(pikiMgr);CI_LOOP(actors){Piki* p=static_cast<Piki*>(*actors);if(!p->isAlive())continue;if(pc_p2_is_white(p))++white;else ++red;if(p->getStickObject()==flower)++captured;if(p->getState()==PIKISTATE_Flying)++flying;}
   Iterator sprouts(itemMgr->getPikiHeadMgr());CI_LOOP(sprouts){PikiHeadItem* p=static_cast<PikiHeadItem*>(*sprouts);if(p->isAlive()){++heads;require(pc_p2_species(p)==P2SpeciesWhite,"non-White sprout");if(!head&&p->canPullout())head=p;}}
+  int activeIvory=0,totalBosses=0;Iterator bossList(bossMgr);CI_LOOP(bossList){Boss* boss=static_cast<Boss*>(*bossList);++totalBosses;if(boss==flower)++activeIvory;}
+  // The sole Pom stays allocated in its free pool after kill. This arena has
+  // no other boss generators; reject active pool reuse before observing it.
+  require(totalBosses==activeIvory && activeIvory<=1,"unexpected boss birth/pool reuse");
+  if(activeIvory)require(flower->mObjType==OBJTYPE_Pom && pc_p2_ivory(flower),"bound Pom identity changed");
   if(ticks%60==0){std::printf("P2_WHITE_ACQUISITION_FRAME frame=%d phase=%d ticks=%d red=%d white=%d heads=%d captured=%d flying=%d bodies=%d nstate=%d navi=%.2f,%.2f cursor=%.2f,%.2f budstate=%d budalive=%d\n",frames,phase,ticks,red,white,heads,captured,flying,population(),n->getCurrState()->getID(),n->mSRT.t.x,n->mSRT.t.z,n->mCursorWorldPos.x,n->mCursorWorldPos.z,flower->getCurrentState(),int(flower->isAlive()));std::fflush(stdout);}
   if(population()!=20){std::printf("P2_WHITE_POPULATION_FAILURE frame=%d red=%d white=%d heads=%d captured=%d flying=%d bodies=%d phase=%d nstate=%d\n",frames,red,white,heads,captured,flying,population(),phase,n->getCurrState()->getID());Iterator diag(pikiMgr);CI_LOOP(diag){Piki* p=static_cast<Piki*>(*diag);std::printf("P2_WHITE_PIKI_DIAG alive=%d state=%d mode=%d x=%.2f y=%.2f z=%.2f\n",int(p->isAlive()),p->getState(),int(p->mMode),p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z);}}
   require(population()==20,"ordinary acquisition lost/duplicated bodies");
   whiteBodies=white+heads;
-  int pellets=0,activeIvory=0;Iterator pelletList(pelletMgr);CI_LOOP(pelletList){if(static_cast<Pellet*>(*pelletList)->isAlive())++pellets;}
-  Iterator bossList(bossMgr);CI_LOOP(bossList){Boss* boss=static_cast<Boss*>(*bossList);if(boss==flower)++activeIvory;}
+  int pellets=0;Iterator pelletList(pelletMgr);CI_LOOP(pelletList){if(static_cast<Pellet*>(*pelletList)->isAlive())++pellets;}
+  if(manualSmoke && phase==3 && !manualReady){
+   require(red==20 && white==0 && heads==0 && captured==0 && flower->mPomAi->mReleasedSeedCount==0,"manual handover changed initial squad");
+   SDL_JoystickSetVirtualButton(virtualPad,SDL_CONTROLLER_BUTTON_A,0);SDL_JoystickSetVirtualButton(virtualPad,SDL_CONTROLLER_BUTTON_B,0);
+   SDL_JoystickSetVirtualAxis(virtualPad,SDL_CONTROLLER_AXIS_LEFTX,0);SDL_JoystickSetVirtualAxis(virtualPad,SDL_CONTROLLER_AXIS_LEFTY,0);SDL_JoystickUpdate();
+   scriptedInput=nullptr;pc_window_input_assign(0,PC_INPUT_DEV_KEYBOARD,-1);pc_window_input_assign(1,PC_INPUT_DEV_NONE,-1);pc_window_reset_key_bindings();pc_window_set_control_mode(PC_CONTROL_MOUSE_CURSOR);
+   manualReady=true;phase=8;ticks=0;SDL_SetWindowTitle(SDL_GL_GetCurrentWindow(),"Ivory smoke: WASD + mouse, hold/release Space to throw, F5 reset");
+   std::puts("P2_WHITE_MANUAL_SMOKE_READY red=20 white=0 sprouts=0 bodies=20 startup=scripted_whistle_move_aim movies=skipped tutorials=suppressed input=keyboard_mouse F5=fresh_reset");std::fflush(stdout);
+   if(std::getenv("P2_WHITE_MANUAL_STARTUP_CHECK"))std::_Exit(0);
+  }
+  if(manualReady){if(SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F5]){std::puts("P2_WHITE_MANUAL_RESET requested=1");std::fflush(nullptr);std::_Exit(77);}return result;}
   require(whiteBodies<=5,"Ivory exceeded five White births");
   require(pellets==baselinePellets,"Ivory created legacy P1 reward pellet");
   if(ticks%60==0){std::printf("P2_WHITE_EXHAUSTION_COUNTERS frame=%d red=%d white=%d sprouts=%d spent=%d captured=%d alive=%d active=%d generator=%d pellets=%d baseline_pellets=%d\n",frames,red,white,heads,flower->mPomAi->mReleasedSeedCount,captured,int(flower->isAlive()),activeIvory,int(flower->mGenerator!=nullptr),pellets,baselinePellets);std::fflush(stdout);}
@@ -134,6 +148,7 @@ public:
  }
 };
 int main(int argc,char**argv){
+    manualSmoke=std::getenv("P2_WHITE_MANUAL_SMOKE")!=nullptr;
     SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");SDL_SetMainReady();pc_gpu_preference_apply();
     _putenv_s("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1");pc_bbft_init(argc,argv);
     require(pc_pikipelago_room_preview(),"requires experimental room");
