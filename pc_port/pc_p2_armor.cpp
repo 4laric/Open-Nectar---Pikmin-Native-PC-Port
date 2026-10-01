@@ -49,6 +49,8 @@
 #include "pc_p2_armor_events.h"
 #include "pc_p2_armor_receiver_policy.h"
 #include "pc_p2_armor_policy.h"
+#include "pc_p2_skewer.h"
+#include "pc_p2_skewer_cam.h"
 #include "CreatureCollPart.h"
 #include "PikiState.h"
 #include "gl/pc_gfx.h"
@@ -364,7 +366,8 @@ int attackPikmin(BTeki* a, Armor& s, unsigned generator, int frame) {
     int refused = 0;
     const int caught = p2captor::eat(g, apos, s.heading, scene.prey.data(), (int)scene.prey.size(), occupied,
                                      p2captor::defaultEligible, [&](int n, int slot) {
-        if (!p2captorhost::swallowInto(a, scene, n, slot, s.held, 0, &refused)) return false;
+        // motion 1 = Fall (limp): the source stab plays SUWARERU, not the eaten ESA (interactPiki.cpp:675-678)
+        if (!p2captorhost::swallowInto(a, scene, n, slot, s.held, 1, &refused)) return false;
         const p2captor::Vec3 l = p2captor::toLocal(apos, s.heading, scene.prey[n].pos);
         const p2armor::Polar pl = p2armor::polar(apos, a->getDirection(), scene.prey[n].pos);
         const float df = drawFrame(s);
@@ -555,7 +558,21 @@ void updateColl(BTeki* actor, Armor& s) {
     if (s.coll.kam) {
         s.coll.kam->mCentre.set(mw.x, mw.y, mw.z);
         s.coll.kam->mRadius = p2armor::MouthRadius;
-        s.coll.kam->mJointMatrix = camYaw;
+        // #1020: a stabbed Pikmin is skewered on the jaw tip, laid along the nose (root -> kamujnt).
+        float rootC[3] = {0.0f, 0.0f, 0.0f};
+        p2armor::nodeCentre(clip, frame, 0, rootC);
+        const p2armor::Vec3 rw = p2armor::toWorld(apos, actor->getDirection(), s.scale, rootC);
+        const float nose[3] = {mw.x - rw.x, mw.y - rw.y, mw.z - rw.z};
+        float seated[3] = {mw.x, mw.y, mw.z};
+        p2skewer::seat(seated, nose, s.scale);
+        s.coll.kam->mCentre.set(seated[0], seated[1], seated[2]);
+        // P2 poses the held Pikmin with the kamujnt matrix itself (Creature::updateStick); use the real joint
+        // rotation, falling back to the nose direction for an untabled clip.
+        float rot[9];
+        if (p2skewer::armorRotation(s.clip.c_str(), frame, rot))
+            p2skewer::jointMatrixBasis(s.coll.kam->mJointMatrix, camRot, p2skewer::fromRotation(rot, actor->getDirection()));
+        else
+            p2skewer::jointMatrix(s.coll.kam->mJointMatrix, camRot, nose, actor->getDirection());
     }
 }
 // Gives the actor its host CollInfo back (the own tree is never freed: stuck Pikmin may still hold its
@@ -1433,6 +1450,7 @@ void pc_p2_armor_update(BTeki* actor) {
     }
     setPhase(s);
     updateColl(actor, s);
+    pc_p2_skewer_cam_follow(actor, actor->getDirection(), "armor");
     logHold(actor, s, generator);
     logLatch(actor, s, generator);
     s.logTimer += dt;

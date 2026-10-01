@@ -23,6 +23,10 @@
 #include "pc_p2_long_legs_fsm.h"
 #include "pc_p2_houdai_fsm.h"
 #include "pc_p2_long_legs_ik.h"
+#include "pc_p2_houdai_rig.h"
+#include "pc_p2_attack_fx_host.h"
+#include "pc_p2_groink_fx.h"
+#include "pc_p2_groink_map_trace.h"
 #include "pc_p2_long_legs_pose.h"
 #include "pc_p2_pose_family.h"
 #include "pc_p2_bigfoot_fsm.h"
@@ -30,6 +34,7 @@
 #include "pc_p2_bigfoot_skin.h"
 #include "pc_p2_bigfoot_tables.h"
 #include "Collision.h"
+#include "ID32.h"
 #include "MapMgr.h"
 #include "EffectMgr.h"
 #include "UtEffect.h"
@@ -74,6 +79,8 @@
 #include <vector>
 
 extern Matrix4f invCamMat; // collInfo.cpp: camera inverse used by CollPart::getMatrix
+// pc_port/gl/pc_gfx.cpp: never re-cache resident meshes whose vertex storage the CPU rewrites.
+extern "C" void pc_gfx_mark_dynamic_vertex_range(const void* addr, size_t bytes);
 
 namespace {
 struct SpeciesDef {
@@ -130,13 +137,26 @@ struct ActorState {
     int flicks = 0;
     int receiverAccepted = 0, receiverRejected = 0;
     bool scaleLogged = false;       // per-actor P2_HOUDAI_SCALE line
-    bool stayIntangible = false;    // Stay: host collision/shadow/gauge off
+    bool stayIntangible = false;    // Stay: dormant presentation active
+    int clearedOpts = 0;            // TEKIOPT bits currently withheld for the dormant body
     // #173 walk animation: source IKSystemMgr legs over the rigid skin
     // sidecar, drawn through a private copy of the bind mesh. Draw-only: it
     // reads the brain's strides and the map floor, draws no RNG and never
     // moves the host body, so gameplay and lockstep state are unchanged.
     Shape* ikShape = nullptr;
     bool ikStarted = false;
+    bool ikBlend = false;           // Flick/Shot: IKSystemMgr::startBlendMotion (animation orientation hints)
+    // #1012 sampled-joint rig: the clip pose drives the body, gun and collision tree.
+    bool dormantShadowOff = true;   // Stay: no shadow (shadowMgr->delShadow) until Land
+    p2attackfx::Emitter sightFx;    // red laser-sight glow generators (force-finished on end)
+    bool sightOn = false;           // aiming and the gun ray reaches the ground
+    Vector3f sightFrom, sightTo;    // muzzle and lock-on point of the last tick
+    int sightTicks = 0, sightStarts = 0, sightHits = 0, sightMisses = 0;
+    CollInfo* collOwn = nullptr;    // retail houdai/enemycoll.txt tree swapped in for the host's
+    CollInfo* collHost = nullptr;
+    std::vector<CollPart*> collParts;
+    int collLogged = 0;
+    unsigned poseDiag = 0;
     bool ikDrawLogged = false;
     p2ik::Mgr ik;
     int ikStrides = 0, ikLifts = 0, ikPlants = 0;
@@ -179,6 +199,9 @@ p2ik::Skin houdaiSkin;
 bool houdaiSkinReady = false;
 int houdaiLegJoint[p2ik::kLegCount][3];
 float houdaiSkinBindError = 0.0f;
+p2houdairig::Rig houdaiRig;              // sampled joint clips + retail collision tree (#1012)
+bool houdaiRigReady = false;
+int houdaiHeadJoint = -1, houdaiGunJoint = -1;
 
 std::map<BTeki*, ActorState> actors;      // actor -> species + policy state
 // Naturally dead Long Legs proxy corpses, keyed on the corpse Pellet* the engine
@@ -506,8 +529,10 @@ struct HoudaiStraightShell {
     Vector3f pos;
     Vector3f vel;
     float flight = 0.0f;
+    int age = 0;  // source ticks alive (effect cadence)
 };
 std::vector<HoudaiStraightShell> houdaiShells;
+P2GroinkMapTrace houdaiTrace;  // shell map trace (Groink shell trace; reset with the stage)
 constexpr int kHoudaiShellPool = 10;
 
 // Shell visuals: the source THdamaShell/THdamaHit particle sets do not exist in
@@ -635,13 +660,30 @@ void houdaiStepShells(BTeki* owner, ActorState& state, float dt) {
         Vector3f next(start.x + s.vel.x * dt, start.y + s.vel.y * dt, start.z + s.vel.z * dt);
         bool expire = false;
         const char* reason = "";
-        const float ground = mapMgr ? mapMgr->getMinY(next.x, next.z, true) : -1.0e9f;
-        if (next.y - 10.0f <= ground) {
-            // Map sphere (radius 10) touched the floor, or a wall face whose
-            // floor height rises above the shell (the port has no shell trace).
-            if (next.y - ground < 20.0f) next.y = ground + 10.0f;
+        // HoudaiShotGunNode::update: mapMgr->traceMove of a radius-10 sphere (the Groink shell trace,
+        // pc_p2_groink_map_trace: same source call, same radius and tick); a floor or wall contact raises the
+        // shell to ground+10 when it is below ground+20, plays the hit effect at position-10 and ends it.
+        // If the trace refuses (no map), fall back to the floor-height test.
+        P2GroinkTraceResult traced;
+        bool contact = false;
+        if (P2GroinkMapTrace::trace(&houdaiTrace, P2GroinkVec3{start.x, start.y, start.z},
+                                    P2GroinkVec3{s.vel.x, s.vel.y, s.vel.z}, dt, P2GroinkPolicy::kShellRadius, traced)) {
+            next = Vector3f(traced.position.x, traced.position.y, traced.position.z);
+            if (traced.floor || traced.wall) {
+                contact = true;
+                if (traced.hasGroundY && next.y - traced.groundY < 20.0f) next.y = traced.groundY + 10.0f;
+                reason = traced.wall && !traced.floor ? "wall" : "floor";
+            }
+        } else {
+            const float ground = mapMgr ? mapMgr->getMinY(next.x, next.z, true) : -1.0e9f;
+            if (next.y - 10.0f <= ground) {
+                if (next.y - ground < 20.0f) next.y = ground + 10.0f;
+                contact = true;
+                reason = "map";
+            }
+        }
+        if (contact) {
             expire = true;
-            reason = "map";
         } else if (std::fabs(home.x - next.x) > 1500.0f || std::fabs(home.y - next.y) > 1000.0f
                    || std::fabs(home.z - next.z) > 1500.0f) {
             expire = true;
@@ -649,7 +691,23 @@ void houdaiStepShells(BTeki* owner, ActorState& state, float dt) {
         }
         s.pos = next;
         s.flight += dt;
-        houdaiFx(26, next, nullptr); // EFF_BombLight_FireGlow trail puff
+        if (!expire) {
+            // THdamaShell follows the shell: the Groink shell visuals (#892) - a trail puff every second tick,
+            // the bomb glow and the floor marker every tick, all short-lived one-shots.
+            if (s.age % 2 == 0) {
+                P2GroinkFxCommand c;
+                c.kind = P2GroinkFxKind::Trail;
+                c.pos = P2GroinkVec3{next.x, next.y, next.z};
+                pc_p2_groink_fx_spawn(c);
+            }
+            for (const P2GroinkFxKind kind : {P2GroinkFxKind::Glow, P2GroinkFxKind::Marker}) {
+                P2GroinkFxCommand c;
+                c.kind = kind;
+                c.pos = P2GroinkVec3{next.x, next.y, next.z};
+                pc_p2_groink_fx_spawn(c);
+            }
+        }
+        ++s.age;
         const Vector3f a(start.x, start.y - 10.0f, start.z);
         const Vector3f b(next.x, next.y - 10.0f, next.z);
         auto report = [&](Creature* c, const char* kind, float dmg, bool accepted, const Vector3f& blast) {
@@ -693,7 +751,14 @@ void houdaiStepShells(BTeki* owner, ActorState& state, float dt) {
                 report(t, "teki", 500.0f, ok, Vector3f(0.0f, 0.0f, 0.0f));
             }
         }
-        if (expire && reason[0] == 'm') houdaiImpactFx(next);
+        if (expire && (reason[0] == 'f' || reason[0] == 'w' || reason[0] == 'm')) {
+            // Map contact: the source hit effect at position-10 (THdamaHit1/2/2W; water THdamaHit3 is not
+            // told apart here), as the P1 light bomb blast the Groink hit uses.
+            P2GroinkFxCommand c;
+            c.kind = P2GroinkFxKind::Hit;
+            c.pos = P2GroinkVec3{next.x, next.y - 10.0f, next.z};
+            pc_p2_groink_fx_spawn(c);
+        }
         if (expire) {
             std::printf("P2_HOUDAI_SHELL_END generator=%u shell=%d reason=%s flight=%.2f at=%.1f,%.1f,%.1f\n",
                         s.generator, s.id, reason, s.flight, next.x, next.y, next.z);
@@ -772,7 +837,9 @@ bool houdaiWake(BTeki* actor, const Vector3f& pos, float radius) {
     for (Navi* n : pc_p2_navis()) {
         if (!n || !n->isAlive()) continue;
         const Vector3f q = n->getPosition();
-        if ((q.x - pos.x) * (q.x - pos.x) + (q.z - pos.z) * (q.z - pos.z) < radius * radius) return true;
+        // EnemyFunc::isThereOlimar (enemyAction.cpp:1525): 3D squared distance below the radius.
+        if ((q.x - pos.x) * (q.x - pos.x) + (q.y - pos.y) * (q.y - pos.y) + (q.z - pos.z) * (q.z - pos.z) < radius * radius)
+            return true;
     }
     return houdaiNearest(actor, pos, 0.0f, 180.0f, radius, false) != nullptr;
 }
@@ -794,20 +861,24 @@ void houdaiLogState(const ActorState& st, P2LongLegsState from, P2LongLegsState 
                 actor->mHealth, st.houdai.flickTimer(), st.houdai.burstTimer(), houdaiWallMs());
 }
 
-// Source Stay keeps the boss up in the dormant drop-in pose, out of reach, so
-// nothing can stick to it. The port hides the bind mesh in Stay; without this
-// the host Swallow collision stayed live at ground level and Pikmin could
-// latch onto an invisible body. Clear Atari (creatureCollision.cpp:34 skips
-// non-Atari pairs), shadow and life gauge while dormant; restore on Land.
+// Dormant (Stay) presentation. With the sampled rig the dormant body is the landing clip's frame 0 (a low
+// crouched mass, legs tucked underground): visible and, like the source Stay (the collision tree updates
+// every frame and Houdai::damageCallBack has no state test), still tangible. Only the joint shadow is
+// withheld until StateLand::init adds it (shadowMgr->delShadow in onInit). Without the rig the legacy draw
+// hides the bind mesh in Stay, so its host collision (creatureCollision.cpp:34 skips non-Atari pairs),
+// shadow and life gauge go too, and come back on Land.
 void houdaiSetIntangible(BTeki* actor, ActorState& state, bool on) {
-    if (on == state.stayIntangible) return;
-    state.stayIntangible = on;
-    constexpr int kOpts = TEKIOPT_Atari | TEKIOPT_ShadowVisible | TEKIOPT_LifeGaugeVisible;
+    const int want = !on ? 0
+        : houdaiRigReady ? int(TEKIOPT_ShadowVisible)
+                         : int(TEKIOPT_Atari | TEKIOPT_ShadowVisible | TEKIOPT_LifeGaugeVisible);
+    if (on == state.stayIntangible && want == state.clearedOpts) return;
     Teki* teki = static_cast<Teki*>(actor);
-    if (on) teki->clearTekiOption(kOpts);
-    else teki->setTekiOption(kOpts);
-    std::printf("P2_HOUDAI_INTANGIBLE generator=%u on=%d atari=%d\n", state.generator, int(on),
-                int(teki->isAtari()));
+    if (state.clearedOpts & ~want) teki->setTekiOption(state.clearedOpts & ~want);
+    if (want & ~state.clearedOpts) teki->clearTekiOption(want & ~state.clearedOpts);
+    state.clearedOpts = want;
+    state.stayIntangible = on;
+    std::printf("P2_HOUDAI_INTANGIBLE generator=%u on=%d atari=%d rig=%d\n", state.generator, int(on),
+                int(teki->isAtari()), int(houdaiRigReady));
 }
 
 // ---- #173 IK legs ---------------------------------------------------------
@@ -843,34 +914,78 @@ p2ik::M34 houdaiBodyMatrix(BTeki* actor) {
     return m;
 }
 
-void houdaiLegJoints(const p2ik::M34& world, p2ik::M34 out[p2ik::kLegCount][3]) {
+void houdaiLegJoints(const p2ik::M34& world, const std::vector<p2ik::M34>& pose,
+                     p2ik::M34 out[p2ik::kLegCount][3]) {
     for (int l = 0; l < p2ik::kLegCount; ++l)
-        for (int j = 0; j < 3; ++j) out[l][j] = p2ik::mul(world, houdaiSkin.bind[size_t(houdaiLegJoint[l][j])]);
+        for (int j = 0; j < 3; ++j) out[l][j] = p2ik::mul(world, pose[size_t(houdaiLegJoint[l][j])]);
+}
+
+// World -> model direction for a body matrix built like houdaiBodyMatrix (yaw about +Y).
+p2ik::V3 houdaiToModelDir(float face, const P2HoudaiVec& d) {
+    const float c = std::cos(face), n = std::sin(face);
+    return p2ik::V3(c * d.x - n * d.z, d.y, n * d.x + c * d.z);
+}
+
+// Model-space joints the body shows for the brain's current pose (#1012): the sampled clip (frame
+// + `alpha` of the next source frame for draw smoothing), the gun turned toward its aim while the
+// source rotation is active (HoudaiShotGunMgr::rotateLevel/rotateVertical), and - with `withIk` and
+// once the legs are captured - the twelve leg joints rewritten by the ported IKSystemMgr. Without a
+// rig this is the bind skeleton (the legacy draw).
+void houdaiPose(BTeki* actor, ActorState& state, const p2ik::M34& world, float alpha, bool withIk,
+                std::vector<p2ik::M34>& joints) {
+    const P2HoudaiFsm& brain = state.houdai;
+    if (houdaiRigReady) {
+        houdaiRig.sample(brain.poseClip(), float(brain.poseFrame()) + alpha, joints);
+        if (brain.gunRotating()) {
+            const float face = static_cast<Teki*>(actor)->getDirection();
+            houdaiRig.aimGun(joints, houdaiHeadJoint, houdaiGunJoint, houdaiToModelDir(face, brain.gunDirection()));
+        }
+    } else {
+        joints = houdaiSkin.bind;
+    }
+    if (withIk && state.ikStarted) {
+        p2ik::M34 inv;
+        if (!p2ik::inverse(world, inv)) return;
+        p2ik::M34 legs[p2ik::kLegCount][3];
+        houdaiLegJoints(world, joints, legs);
+        state.ik.makeMatrix(legs, houdaiIkParms());
+        for (int l = 0; l < p2ik::kLegCount; ++l)
+            for (int j = 0; j < 3; ++j) joints[size_t(houdaiLegJoint[l][j])] = p2ik::mul(inv, legs[l][j]);
+    }
 }
 
 // Houdai::updateIKSystem, driven by the brain's stride choice: capture the
-// planted bind feet once the boss has landed, start one leg cycle per brain
+// planted feet once the boss has landed, start one leg cycle per brain
 // stride, and advance the legs one source frame.
 void houdaiIkStep(BTeki* actor, ActorState& state, const P2HoudaiOutput& out) {
     if (!state.ikShape) return;
     const P2LongLegsState now = state.houdai.state();
+    const p2ik::M34 world = houdaiBodyMatrix(actor);
+    std::vector<p2ik::M34> pose;
+    houdaiPose(actor, state, world, 0.0f, false, pose);
     if (!state.ikStarted) {
-        if (out.drawHidden || out.landDrop > 0.0f || now == P2LongLegsState::Stay
-                || now == P2LongLegsState::Land)
-            return;
+        // StateLand::cleanup startProgramedIK: the legs are captured at the end of the landing clip.
+        const bool grounded = houdaiRigReady ? (now != P2LongLegsState::Stay && now != P2LongLegsState::Land)
+                                             : !(out.drawHidden || out.landDrop > 0.0f || now == P2LongLegsState::Stay
+                                                 || now == P2LongLegsState::Land);
+        if (!grounded) return;
         p2ik::M34 legs[p2ik::kLegCount][3];
-        houdaiLegJoints(houdaiBodyMatrix(actor), legs);
+        houdaiLegJoints(world, pose, legs);
         const Vector3f p = actor->getPosition();
         const float face = static_cast<Teki*>(actor)->getDirection();
         state.ik.init(p2ik::V3(p.x, p.y, p.z), face);
         state.ik.startProgramedIK(legs, p2ik::V3(p.x, p.y, p.z), face);
         state.ikStarted = true;
         std::printf("P2_HOUDAI_IK_START generator=%u state=%s foot_radius=%.1f leg_angles=%.2f,%.2f,%.2f,%.2f "
-                    "thigh=%.1f shin=%.1f\n",
+                    "thigh=%.1f shin=%.1f pose=%s\n",
                     state.generator, P2LongLegsFsm::stateName(now), state.ik.distanceOffset(),
                     state.ik.legAngle(0), state.ik.legAngle(1), state.ik.legAngle(2), state.ik.legAngle(3),
-                    state.ik.leg(0).topToMiddle, state.ik.leg(0).middleToBottom);
+                    state.ik.leg(0).topToMiddle, state.ik.leg(0).middleToBottom, houdaiRigReady ? "clip" : "bind");
     }
+    // Flick/Shot run with blend motion on (Flick::init/Shot::init startBlendMotion, cleanup finish).
+    const bool blend = now == P2LongLegsState::Flick || now == P2LongLegsState::Shot;
+    if (blend != state.ikBlend) state.ikBlend = blend;
+    state.ik.setBlend(state.ikBlend);
     if (out.strideStart) {
         state.ik.startCycleTo(p2ik::V3(out.strideTo.x, 0.0f, out.strideTo.z), out.strideFace, houdaiIkParms(),
                               houdaiGround, nullptr);
@@ -881,7 +996,7 @@ void houdaiIkStep(BTeki* actor, ActorState& state, const P2HoudaiOutput& out) {
                     state.ikLifts, state.ikPlants);
     }
     p2ik::M34 legs[p2ik::kLegCount][3];
-    houdaiLegJoints(houdaiBodyMatrix(actor), legs);
+    houdaiLegJoints(world, pose, legs);
     state.ik.update(houdaiIkParms(), P2HoudaiFsm::kDelta, houdaiGround, nullptr, legs);
     for (int l = 0; l < p2ik::kLegCount; ++l) {
         if (state.ik.liftedMask() & (1 << l)) ++state.ikLifts;
@@ -889,34 +1004,51 @@ void houdaiIkStep(BTeki* actor, ActorState& state, const P2HoudaiOutput& out) {
     }
 }
 
-// Pose the private mesh: every non-leg joint keeps its bind matrix, the twelve
-// leg joints take the IK result (IKSystemMgr::makeMatrix on the world joints
-// under the drawn body) mapped back to model space.
-bool houdaiIkPose(BTeki* actor, ActorState& state) {
-    if (!state.ikShape || !state.ikStarted || !houdaiSkinReady) return false;
+// Pose the private mesh: the rig's clip pose (or the bind skeleton without a rig) with the gun turned
+// and the twelve leg joints taking the IK result (IKSystemMgr::makeMatrix on the world joints under
+// the drawn body) mapped back to model space, then the rigid skin evaluated on it.
+bool houdaiIkPose(BTeki* actor, ActorState& state, bool corpse) {
+    if (!state.ikShape || !houdaiSkinReady) return false;
+    if (!houdaiRigReady && !state.ikStarted) return false;  // legacy draw keeps the static bind mesh until IK runs
     const p2ik::M34 world = houdaiM34(actor->mWorldMtx);
     p2ik::M34 inv;
     if (!p2ik::inverse(world, inv)) return false;
     static std::vector<p2ik::M34> joints;
     static std::vector<p2ik::V3> pos, nrm;
-    joints = houdaiSkin.bind;
-    p2ik::M34 legs[p2ik::kLegCount][3];
-    houdaiLegJoints(world, legs);
-    state.ik.makeMatrix(legs, houdaiIkParms());
-    for (int l = 0; l < p2ik::kLegCount; ++l)
-        for (int j = 0; j < 3; ++j) joints[size_t(houdaiLegJoint[l][j])] = p2ik::mul(inv, legs[l][j]);
+    // Between two 30 Hz source ticks blend toward the next clip frame (presentation only).
+    float alpha = 0.0f;
+    if (houdaiRigReady && state.houdai.poseAdvancing())
+        alpha = std::fmin(0.999f, std::fmax(0.0f, state.srcAccum / P2HoudaiFsm::kDelta));
+    // A carried corpse moves away from the spot its legs were planted on: no IK for it (the dead clip's own legs).
+    houdaiPose(actor, state, world, alpha, !corpse, joints);
+    if ((++state.poseDiag % 90) == 1) {
+        const p2ik::V3 k = joints[0].col(3), g = joints[size_t(houdaiGunJoint)].col(3);
+        std::printf("P2_HOUDAI_POSE_DIAG generator=%u state=%s clip=%s frame=%d alpha=%.2f ik=%d kosi_model_y=%.1f gun_model_y=%.1f "
+                    "world_y=%.1f actor_y=%.1f world_scale_y=%.2f corpse=%d tama_y=%.1f damage_count=%.0f flick_timer=%.0f stuck=%d\n",
+                    state.generator, P2LongLegsFsm::stateName(state.houdai.state()),
+                    p2houdairig::Rig::clipName(state.houdai.poseClip()), state.houdai.poseFrame(), alpha,
+                    int(state.ikStarted), k.y, g.y, world.m[1][3], actor->getPosition().y, world.m[1][1], int(corpse),
+                    (state.collParts.size() > 1 && state.collParts[1]) ? state.collParts[1]->mCentre.y : -9999.0f,
+                    actor->mDamageCount, state.houdai.flickTimer(), houdaiStuckCount(actor));
+        std::fflush(stdout);
+    }
     houdaiSkin.evaluate(joints, pos, nrm);
     Shape* shape = state.ikShape;
     for (size_t i = 0; i < pos.size(); ++i) shape->mVertexList[i].set(pos[i].x, pos[i].y, pos[i].z);
     for (size_t i = 0; i < nrm.size(); ++i) shape->mNormalList[i].set(nrm[i].x, nrm[i].y, nrm[i].z);
     BoundBox bounds(shape->mVertexList[0], shape->mVertexList[0]);
     for (int i = 1; i < shape->mVertexCount; ++i) bounds.expandBound(shape->mVertexList[i]);
+    // The resident-mesh cache keys on the display list: without this the first pose drawn (Stay, landing frame
+    // 0, the crouch) stays on screen for the life of the level, whatever the vertices say (owner playtest
+    // 2026-09-30: the boss never stood up). Same rule as p2pose::write (#897).
+    pc_gfx_mark_dynamic_vertex_range(shape->mVertexList, size_t(shape->mVertexCount) * sizeof(shape->mVertexList[0]));
+    pc_gfx_mark_dynamic_vertex_range(shape->mNormalList, size_t(shape->mNormalCount) * sizeof(shape->mNormalList[0]));
     shape->mCourseExtents = bounds;
     shape->mJointList[0].mBounds = bounds;
     if (!state.ikDrawLogged) {
         state.ikDrawLogged = true;
-        std::printf("P2_HOUDAI_IK_DRAW generator=%u positions=%zu normals=%zu private_geometry=1\n",
-                    state.generator, pos.size(), nrm.size());
+        std::printf("P2_HOUDAI_IK_DRAW generator=%u positions=%zu normals=%zu private_geometry=1 pose=%s\n",
+                    state.generator, pos.size(), nrm.size(), houdaiRigReady ? "rig" : "bind");
     }
     return true;
 }
@@ -945,6 +1077,51 @@ Shape* houdaiPrivateShape(const char* rel, Shape& shared) {
     model->mTexAttrList = shared.mTexAttrList;
     model->mTevInfoList = shared.mTevInfoList;
     return model;
+}
+
+// Load the sampled clip rig (longlegs_Houdai_rig_00.txt, experimental/pikmin2_houdai_rig.py). It must agree
+// with the skin sidecar (same joint names, order and hierarchy). Anything missing or inconsistent leaves the
+// legacy bind-pose draw and is reported; it never aborts the session.
+void houdaiRigLoad() {
+    houdaiRigReady = false;
+    houdaiHeadJoint = houdaiGunJoint = -1;
+    std::ifstream file("assets/dataDir/courses/pikmin2room/longlegs_Houdai_rig_00.txt", std::ios::binary);
+    if (!file) {
+        std::printf("P2_HOUDAI_RIG status=absent pose=bind\n");
+        return;
+    }
+    const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    std::string error;
+    if (!houdaiRig.parse(text, &error)) {
+        std::printf("P2_HOUDAI_RIG status=invalid error=%s pose=bind\n", error.c_str());
+        return;
+    }
+    if (houdaiRig.jointCount() != int(houdaiSkin.names.size())) {
+        std::printf("P2_HOUDAI_RIG status=joint_count_mismatch rig=%d skin=%zu pose=bind\n", houdaiRig.jointCount(),
+                    houdaiSkin.names.size());
+        return;
+    }
+    for (int j = 0; j < houdaiRig.jointCount(); ++j)
+        if (houdaiRig.jointName(j) != houdaiSkin.names[size_t(j)]) {
+            std::printf("P2_HOUDAI_RIG status=joint_name_mismatch joint=%d rig=%s skin=%s pose=bind\n", j,
+                        houdaiRig.jointName(j).c_str(), houdaiSkin.names[size_t(j)].c_str());
+            return;
+        }
+    houdaiHeadJoint = houdaiRig.joint("tamajnt");
+    houdaiGunJoint = houdaiRig.joint("gun");
+    if (houdaiHeadJoint < 0 || houdaiGunJoint < 0) {
+        std::printf("P2_HOUDAI_RIG status=missing_gun_joint pose=bind\n");
+        return;
+    }
+    // The rig's bind-time standing pose must be consistent with the skin bind (same skeleton): the wait
+    // clip's kosi joint sits at the animated standing height.
+    houdaiRigReady = true;
+    std::printf("P2_HOUDAI_RIG status=ready joints=%d clips=5 poses=%d min_poses_per_clip=%d coll_nodes=%zu "
+                "landing=%d wait=%d flick=%d attack=%d dead=%d interpolation=slerp pose=clip\n",
+                houdaiRig.jointCount(), houdaiRig.totalPoses(), houdaiRig.minPoses(), houdaiRig.coll().size(),
+                houdaiRig.poseCount(p2houdairig::Rig::Landing), houdaiRig.poseCount(p2houdairig::Rig::Wait),
+                houdaiRig.poseCount(p2houdairig::Rig::Flick), houdaiRig.poseCount(p2houdairig::Rig::Attack),
+                houdaiRig.poseCount(p2houdairig::Rig::Dead));
 }
 
 // Load the skin sidecar and give every Houdai its private posable mesh. Any
@@ -992,6 +1169,7 @@ void houdaiIkSetup(const SpeciesDef& def, Shape* shared) {
         return;
     }
     houdaiSkinReady = true;
+    houdaiRigLoad();
     const std::string rel = std::string("courses/pikmin2room/") + def.mod;
     for (auto& entry : actors) {
         ActorState& state = entry.second;
@@ -1001,7 +1179,217 @@ void houdaiIkSetup(const SpeciesDef& def, Shape* shared) {
                     "private_geometry=%d rng=0 body=brain\n",
                     state.generator, houdaiSkin.bind.size(), houdaiSkin.posLocal.size(),
                     houdaiSkin.nrmLocal.size(), worst, int(state.ikShape != nullptr));
+        if (!state.ikShape && houdaiRigReady) {
+            // The rig draws through the private shape; without it fall back to the legacy bind draw for all.
+            houdaiRigReady = false;
+            std::printf("P2_HOUDAI_RIG status=no_private_shape generator=%u pose=bind\n", state.generator);
+        }
     }
+    // The dormant presentation was chosen at bind time, before the rig was known: reconcile it.
+    for (auto& entry : actors)
+        if (entry.second.isHoudai) houdaiSetIntangible(entry.first, entry.second, entry.second.stayIntangible);
+}
+
+// ---- #1012 retail collision tree -------------------------------------------
+// houdai/enemycoll.txt (US GPVE01 rev 0): root `none` r50 (code `____`, joint kosi) with one child `tama`
+// r30 (code `st__`, offset 5,0,0 in the kosi frame). `tama` is the only stickable part (CollPart::isStickable
+// matches the code against `s***`, collinfo.cpp:806-809): Pikmin latch onto it and Houdai::damageCallBack only
+// accepts a stuck Pikmin. (Houdai::setupCollision asks for a tube tree on `rht1`, which this file does not
+// contain, so the call is a no-op.) The tree replaces the P1 Swallow host's (host-swap pattern of the Groink,
+// Emperor Bulblax and Titan Dweevil) and is posed through the clip every source tick like
+// mCollTree->update() in doAnimationCullingOff.
+unsigned houdaiFourcc(const std::string& id) {
+    unsigned v = 0;
+    for (int i = 0; i < 4; ++i) v = (v << 8) | unsigned(static_cast<unsigned char>(i < int(id.size()) && id[size_t(i)] ? id[size_t(i)] : '_'));
+    return v;
+}
+
+void houdaiBuildColl(BTeki* t, ActorState& s) {
+    if (s.collOwn || !houdaiRigReady || !t->mCollInfo || houdaiRig.coll().empty()) return;
+    const std::vector<p2houdairig::CollNode>& tree = houdaiRig.coll();
+    std::vector<ObjCollInfo*> nodes;
+    for (const p2houdairig::CollNode& node : tree) {
+        auto* n = new ObjCollInfo();
+        n->mId.setID(houdaiFourcc(node.id));
+        n->mCode.setID(houdaiFourcc(node.code));
+        n->mRadius = node.radius;
+        n->mCentrePosition.set(0.0f, 0.0f, 0.0f);
+        n->mJointIndex = 0;
+        nodes.push_back(n);
+    }
+    for (size_t i = 1; i < tree.size(); ++i) {
+        if (tree[i].parent < 0) continue;
+        nodes[size_t(tree[i].parent)]->add(nodes[i]);
+    }
+    s.collOwn = new CollInfo(int(nodes.size()) + 14);
+    s.collOwn->initInfoTree(nodes[0]);
+    int found = 0, stick = 0;
+    s.collParts.assign(tree.size(), nullptr);
+    for (size_t i = 0; i < tree.size(); ++i) {
+        s.collParts[i] = s.collOwn->getSphere(houdaiFourcc(tree[i].id));
+        if (s.collParts[i]) {
+            ++found;
+            s.collParts[i]->mIsUpdateActive = false;  // no parent shape: houdaiUpdateColl owns centre/radius
+            s.collParts[i]->mJointMatrix = Matrix4f::ident;
+        }
+        stick += tree[i].stickable() ? 1 : 0;
+    }
+    s.collHost = t->mCollInfo;
+    t->mCollInfo = s.collOwn;
+    // The host's platforms would report contacts whose part this tree cannot resolve.
+    t->mPlatMgr.release();
+    std::printf("P2_HOUDAI_COLL_BIND generator=%u nodes=%zu parts_found=%d stickable=%d source=houdai/enemycoll.txt "
+                "host_parts_replaced=1\n",
+                s.generator, tree.size(), found, stick);
+    std::fflush(stdout);
+}
+
+// Pose every node through the joints of this tick (model space) under the body matrix `world`.
+void houdaiUpdateColl(BTeki* t, ActorState& s, const p2ik::M34& world, const std::vector<p2ik::M34>& joints) {
+    if (!s.collOwn || t->mCollInfo != s.collOwn) return;
+    const float face = static_cast<Teki*>(t)->getDirection();
+    Matrix4f yaw, camRot, camYaw;
+    yaw.makeSRT(Vector3f(1.0f, 1.0f, 1.0f), Vector3f(0.0f, face, 0.0f), Vector3f(0.0f, 0.0f, 0.0f));
+    camRot.makeIdentity();
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 3; ++c) camRot.mMtx[r][c] = invCamMat.mMtx[c][r];
+    camRot.multiplyTo(yaw, camYaw);
+    const float scale = std::sqrt(world.m[0][0] * world.m[0][0] + world.m[1][0] * world.m[1][0] + world.m[2][0] * world.m[2][0]);
+    const std::vector<p2houdairig::CollNode>& tree = houdaiRig.coll();
+    for (size_t i = 0; i < s.collParts.size(); ++i) {
+        CollPart* part = s.collParts[i];
+        if (!part) continue;
+        const p2ik::V3 w = p2ik::apply(world, houdaiRig.collCentre(joints, int(i)));
+        part->mCentre.set(w.x, w.y, w.z);
+        part->mRadius = tree[i].radius * (scale > 0.05f ? scale : 1.0f);
+        part->mJointMatrix = camYaw;
+        if (s.collLogged < 3 && i == 1) {
+            ++s.collLogged;
+            std::printf("P2_HOUDAI_COLL_POSE generator=%u state=%s clip=%s frame=%d part=%s centre=%.1f,%.1f,%.1f "
+                        "radius=%.1f stickable=%d\n",
+                        s.generator, P2LongLegsFsm::stateName(s.houdai.state()),
+                        p2houdairig::Rig::clipName(s.houdai.poseClip()), s.houdai.poseFrame(), tree[i].id.c_str(),
+                        w.x, w.y, w.z, part->mRadius, int(tree[i].stickable()));
+        }
+    }
+}
+
+// Hand the host its own tree back (death funnel / forget / reset). The own tree is never freed: a stuck
+// Pikmin may still hold CollPart pointers into it.
+void houdaiRestoreColl(BTeki* t, ActorState& s) {
+    if (!s.collOwn) return;
+    if (s.collHost && t && t->mCollInfo == s.collOwn) t->mCollInfo = s.collHost;
+    s.collOwn = nullptr;
+    s.collHost = nullptr;
+    s.collParts.clear();
+}
+
+// ---- #1012 laser sight -------------------------------------------------------
+// HoudaiShotGunMgr::setShotGunLockOnPosition (HoudaiShotGun.cpp, run from doUpdate while the source
+// rotation is searching): from the gun joint march the gun X axis 50 units, then up to 60 steps of 10
+// units; at the first step below the floor (mapMgr->getMinY above the point) clamp to the floor and
+// place efx::THdamaSight there with the reversed axis as normal; if the ray never reaches the floor the
+// sight fades. PSSE_EN_HOUDAI_BEAM plays at the lock position. P1 has no THdamaSight resource, so the
+// red sight is drawn as P1 effects (a red-tinted Navi light glow at the lock point and along the ray)
+// and, in the actor draw, a red line from the muzzle to the lock point (houdaiDrawSight).
+constexpr int kEffNaviLightGlow = 22;
+static_assert(int(EffectMgr::EFF_Navi_LightGlow) == kEffNaviLightGlow, "EFF_Navi_LightGlow id");
+constexpr unsigned kSightRgb = 0xFF2020;
+
+void houdaiSightEnd(ActorState& state, const char* why) {
+    if (!state.sightOn && state.sightTicks == 0) return;
+    const unsigned gens = state.sightFx.stopAll();
+    std::printf("P2_HOUDAI_SIGHT generator=%u event=end reason=%s ticks=%d hit=%d miss=%d generators=%u\n",
+                state.generator, why, state.sightTicks, state.sightHits, state.sightMisses, gens);
+    std::fflush(stdout);
+    state.sightOn = false;
+    state.sightTicks = 0;
+}
+
+void houdaiSightTick(BTeki* actor, ActorState& state, const p2ik::M34& world, const std::vector<p2ik::M34>& joints) {
+    (void)actor;
+    if (!houdaiRigReady) return;
+    if (!state.houdai.gunAiming()) {
+        houdaiSightEnd(state, "aim_end");
+        return;
+    }
+    const p2ik::M34 gun = p2ik::mul(world, joints[size_t(houdaiGunJoint)]);
+    const p2ik::V3 origin = gun.col(3);
+    p2ik::V3 axis = gun.col(0);
+    const float len = std::sqrt(axis.x * axis.x + axis.y * axis.y + axis.z * axis.z);
+    if (!(len > 1.0e-6f)) return;
+    axis = p2ik::V3(axis.x / len, axis.y / len, axis.z / len);
+    if (state.sightTicks == 0) {
+        ++state.sightStarts;
+        std::printf("P2_HOUDAI_SIGHT generator=%u event=start n=%d\n", state.generator, state.sightStarts);
+    }
+    ++state.sightTicks;
+    p2ik::V3 lock(origin.x + axis.x * 50.0f, origin.y + axis.y * 50.0f, origin.z + axis.z * 50.0f);
+    bool hit = false;
+    for (int i = 0; i < 60; ++i) {
+        lock = p2ik::V3(lock.x + axis.x * 10.0f, lock.y + axis.y * 10.0f, lock.z + axis.z * 10.0f);
+        const float minY = mapMgr ? mapMgr->getMinY(lock.x, lock.z, true) : -1.0e9f;
+        if (minY > lock.y) {
+            lock.y = minY;
+            hit = true;
+            break;
+        }
+    }
+    state.sightFrom = Vector3f(origin.x, origin.y, origin.z);
+    state.sightTo = Vector3f(lock.x, lock.y, lock.z);
+    state.sightOn = hit;
+    if (hit) ++state.sightHits;
+    else ++state.sightMisses;
+    if (state.sightTicks <= 6 || state.sightTicks % 15 == 0)
+        std::printf("P2_HOUDAI_SIGHT_TRACE generator=%u tick=%d hit=%d from=%.1f,%.1f,%.1f lock=%.1f,%.1f,%.1f "
+                    "axis=%.2f,%.2f,%.2f yaw=%.2f tilt=%.2f\n",
+                    state.generator, state.sightTicks, int(hit), origin.x, origin.y, origin.z, lock.x, lock.y,
+                    lock.z, axis.x, axis.y, axis.z, state.houdai.gunYaw(), state.houdai.gunTilt());
+    if (!hit) return;
+    // Red glow at the lock point plus a beam of small glows along the ray (P1 effects, owned by the
+    // actor's Emitter so every generator is force-finished when the sight ends).
+    const float dx = axis.x, dz = axis.z;
+    const float hl = std::sqrt(dx * dx + dz * dz);
+    const float ux = hl > 1.0e-4f ? dx / hl : 0.0f, uz = hl > 1.0e-4f ? dz / hl : 0.0f;
+    p2attackfx::Point pts[8];
+    int n = 0;
+    const float total = std::sqrt((lock.x - origin.x) * (lock.x - origin.x) + (lock.y - origin.y) * (lock.y - origin.y)
+                                  + (lock.z - origin.z) * (lock.z - origin.z));
+    for (int i = 1; i <= 6; ++i) {
+        const float t = float(i) / 7.0f;
+        pts[n++] = {p2attackfx::Kind::Body, origin.x + (lock.x - origin.x) * t, origin.y + (lock.y - origin.y) * t,
+                    origin.z + (lock.z - origin.z) * t, 0.35f, ux, uz};
+    }
+    pts[n++] = {p2attackfx::Kind::Tip, lock.x, lock.y + 1.0f, lock.z, 1.6f, ux, uz};
+    (void)total;
+    p2attackfx::Look look{kEffNaviLightGlow, 6, true, kSightRgb};
+    state.sightFx.emitLook(look, pts, n);
+}
+
+// Red line from the muzzle to the lock-on point, drawn in the actor's draw pass (Graphics::drawLine
+// renders 1 px lines on the GL backend whatever setLineWidth says, so the beam is a small bundle).
+void houdaiDrawSight(Graphics& gfx, const ActorState& state) {
+    if (!state.sightOn || !gfx.mCamera) return;
+    const Colour oldColour = gfx.mPrimaryColour;
+    const Colour oldAux = gfx.mAuxiliaryColour;
+    const int oldBlend = gfx.setCBlending(BLEND_Alpha);
+    Texture* oldTexture = gfx.mActiveTexture[0];
+    const bool oldLight = gfx.setLighting(false, nullptr);
+    const float oldWidth = gfx.setLineWidth(3.0f);
+    gfx.useMaterial(nullptr);
+    gfx.useTexture(nullptr, 0);
+    gfx.useMatrix(gfx.mCamera->mLookAtMtx, 0);
+    const Vector3f a = state.sightFrom, b = state.sightTo;
+    gfx.setColour(Colour(255, 30, 30, 235), true);
+    static const float offs[5][2] = {{0.0f, 0.0f}, {0.7f, 0.0f}, {-0.7f, 0.0f}, {0.0f, 0.7f}, {0.0f, -0.7f}};
+    for (const auto& o : offs)
+        gfx.drawLine(Vector3f(a.x + o[0], a.y + o[1], a.z), Vector3f(b.x + o[0], b.y + o[1], b.z));
+    gfx.setLineWidth(oldWidth);
+    gfx.setColour(oldColour, true);
+    gfx.mAuxiliaryColour = oldAux;
+    gfx.setCBlending(oldBlend);
+    gfx.useTexture(oldTexture, 0);
+    gfx.setLighting(oldLight, nullptr);
 }
 
 // One host frame for a registered Houdai. Returns after the escape.
@@ -1052,6 +1440,17 @@ void houdaiTick(BTeki* actor, ActorState& state, float dt) {
             in.gunTarget = hv(g->getPosition());
         }
         for (float& r : in.roll) r = gsys ? gsys->getRand(1.0f) : 0.5f;
+        if (houdaiRigReady) {
+            // The gun pivot of the pose the body shows this tick (it does not move when the head turns or the
+            // gun pitches): aim and muzzle both start from it, so the shells leave the drawn barrel.
+            houdaiBuildColl(actor, state);
+            std::vector<p2ik::M34> posed;
+            const p2ik::M34 body = houdaiBodyMatrix(actor);
+            houdaiPose(actor, state, body, 0.0f, false, posed);
+            const p2ik::V3 g = p2ik::apply(body, posed[size_t(houdaiGunJoint)].col(3));
+            in.gunPosValid = true;
+            in.gunPos = P2HoudaiVec{g.x, g.y, g.z};
+        }
         {
             // The bind mesh is drawn through the host mWorldMtx (host scale),
             // so the gun joint height follows the drawn scale.
@@ -1120,8 +1519,14 @@ void houdaiTick(BTeki* actor, ActorState& state, float dt) {
                 s.vel = Vector3f(out.shellVel.x, out.shellVel.y, out.shellVel.z);
                 houdaiShells.push_back(s);
                 const Vector3f dir(s.vel.x / 600.0f, s.vel.y / 600.0f, s.vel.z / 600.0f);
-                houdaiFx(137, s.pos, &dir); // EFF_Beatle_ShootRockHalo
-                houdaiFx(138, s.pos, &dir); // EFF_Beatle_ShootRockSpecks
+                {
+                    // THdamaShoot at the gun joint: the Groink muzzle burst (#892) along the barrel.
+                    P2GroinkFxCommand c;
+                    c.kind = P2GroinkFxKind::Shoot;
+                    c.pos = P2GroinkVec3{s.pos.x, s.pos.y, s.pos.z};
+                    c.dir = P2GroinkVec3{dir.x, dir.y, dir.z};
+                    pc_p2_groink_fx_spawn(c);
+                }
                 std::printf("P2_HOUDAI_SHELL_FIRE generator=%u shell=%d pos=%.1f,%.1f,%.1f vel=%.1f,%.1f,%.1f "
                             "target_found=%d\n",
                             state.generator, s.id, s.pos.x, s.pos.y, s.pos.z, s.vel.x, s.vel.y, s.vel.z,
@@ -1149,6 +1554,15 @@ void houdaiTick(BTeki* actor, ActorState& state, float dt) {
         houdaiSetIntangible(actor, state, out.drawHidden);
         state.landDrop = out.landDrop;
         houdaiIkStep(actor, state, out);
+        if (houdaiRigReady) {
+            // Collision tree and laser sight follow the pose of the tick just computed (mCollTree->update()
+            // after the animation, HoudaiShotGunMgr::doUpdate in the same frame).
+            std::vector<p2ik::M34> posed;
+            const p2ik::M34 body = houdaiBodyMatrix(actor);
+            houdaiPose(actor, state, body, 0.0f, false, posed);
+            houdaiUpdateColl(actor, state, body, posed);
+            houdaiSightTick(actor, state, body, posed);
+        }
         state.damageable = out.damageRate > 0.0f;
         state.bitterImmune = after == P2LongLegsState::Stay || after == P2LongLegsState::Land;
         if (out.deadEnd && !state.deadEscapeDone) {
@@ -1157,6 +1571,19 @@ void houdaiTick(BTeki* actor, ActorState& state, float dt) {
             // carriable corpse (owner decision pending, #173).
             state.deadEscapeDone = true;
             houdaiDropShells(actor, "owner_dead");
+            houdaiSightEnd(state, "dead");
+            houdaiRestoreColl(actor, state);
+            {
+                // StateDead END createDeadBombEffect (efx::TDamaDeadBomb per joint, THdamaDeadbomb on the body)
+                // and the camera vibration: the P1 large-enemy death burst (wave, glow, smoke) at the body and
+                // the belly, as the stand-in for the P2 particle sets.
+                const Vector3f at = actor->getPosition();
+                for (int effect : {int(EffectMgr::EFF_Teki_DeathWaveL), int(EffectMgr::EFF_Teki_DeathGlowL),
+                                   int(EffectMgr::EFF_Teki_DeathSmokeL)}) {
+                    houdaiFx(effect, Vector3f(at.x, at.y + 100.0f, at.z), nullptr);
+                    houdaiFx(effect, Vector3f(at.x, at.y + 40.0f, at.z), nullptr);
+                }
+            }
             std::printf("P2_LONG_LEGS_ESCAPE species=Houdai generator=%u native=host_escape_now "
                         "dead_clip_frames=%d\n",
                         state.generator, P2HoudaiFsm::kDeadFrames);
@@ -1779,6 +2206,8 @@ void pc_p2_long_legs_reset() {
     bytesTotal = 0;
     logged[0] = logged[1] = false;
     houdaiSkinReady = false;
+    houdaiRigReady = false;
+    houdaiTrace.reset(mapMgr);
 }
 
 void pc_p2_long_legs_forget(BTeki* actor) {
@@ -1789,6 +2218,13 @@ void pc_p2_long_legs_forget(BTeki* actor) {
     }
     killShellsOf(actor);
     houdaiDropShells(actor, "forget");
+    {
+        auto known = actors.find(actor);
+        if (known != actors.end() && known->second.isHoudai) {
+            houdaiSightEnd(known->second, "forget");
+            houdaiRestoreColl(actor, known->second);
+        }
+    }
     // Lane 06 single-use binding: drop the ordinary-delivery source so a
     // recycled actor address can never inherit it (mirrors Sokkuri/ElecBug).
     pc_randomizer_p2_forget_source(static_cast<PelletView*>(actor));
@@ -2222,10 +2658,21 @@ bool pc_p2_long_legs_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, b
                     int(corpse), state.species.c_str(), state.generator);
         logged[corpse ? 1 : 0] = true;
     }
-    if (state.isHoudai && !corpse) {
-        // Source Stay keeps the dormant boss out of view until Land drops it
-        // in; the port has no landing clip playback, so Land lowers the bind
-        // mesh from kHoudaiDropHeight to the ground by landing key 4 (frame 100).
+    if (state.isHoudai && houdaiRigReady && state.ikShape) {
+        // Sampled rig (#1012): the landing clip raises the dormant crouch into the standing body, wait/flick/
+        // attack/dead play from the bank, the gun turns to its aim, the legs take the IK. A carried corpse
+        // shows the dead clip's last visible pose.
+        if (houdaiIkPose(actor, state, corpse)) {
+            state.ikShape->updateAnim(gfx, matrix, nullptr, actor);
+            state.ikShape->drawshape(gfx, *gfx.mCamera, nullptr);
+            if (!corpse) houdaiDrawSight(gfx, state);
+            return true;
+        }
+    }
+    if (state.isHoudai && !corpse && !houdaiRigReady) {
+        // Legacy bind-pose draw (no rig sidecar staged). Source Stay keeps the dormant boss out of view
+        // until Land drops it in; without clip playback Land lowers the bind mesh from kHoudaiDropHeight to
+        // the ground by landing key 4 (frame 100).
         if (state.drawHidden) return true;
         if (state.landDrop > 0.0f) {
             constexpr float kHoudaiDropHeight = 300.0f;
@@ -2236,7 +2683,7 @@ bool pc_p2_long_legs_draw(BTeki* actor, Graphics& gfx, const Matrix4f& matrix, b
             shape->drawshape(gfx, *gfx.mCamera, nullptr);
             return true;
         }
-        if (houdaiIkPose(actor, state)) {
+        if (houdaiIkPose(actor, state, false)) {
             state.ikShape->updateAnim(gfx, matrix, nullptr, actor);
             state.ikShape->drawshape(gfx, *gfx.mCamera, nullptr);
             return true;
@@ -2358,8 +2805,9 @@ bool pc_p2_long_legs_receiver_rejects(Teki* teki, const InteractAttack* /*attack
 
 float pc_p2_long_legs_damage_rate(Teki* teki, Creature* attacker) {
     // Source Houdai::damageCallBack (Houdai.cpp:223-236, US build): only a
-    // Pikmin stuck to the boss damages it (captains, bombs and loose Pikmin do
-    // nothing); Land takes 0.25x. A stuck hit while dormant wakes Stay into
+    // Pikmin stuck to the boss damages it through this path (captain punches
+    // and loose Pikmin do nothing); Land takes 0.25x. Bombs do not come here:
+    // they use EnemyBase::bombCallBack (full damage, any state, #1012). A stuck hit while dormant wakes Stay into
     // Land (StateStay::exec EB_TakingDamage) but is refused here.
     auto it = actors.find(teki);
     if (it != actors.end() && it->second.isBigFoot) {
@@ -2389,8 +2837,17 @@ float pc_p2_long_legs_damage_rate(Teki* teki, Creature* attacker) {
     ActorState& st = it->second;
     const bool stuckPiki = attacker && attacker->isPiki() && attacker->getStickObject() == teki;
     const P2LongLegsState s = st.houdai.state();
+    // The part the Pikmin is stuck to (retail tree swapped in): only `tama` (st__) is stickable, so a
+    // latch anywhere else cannot damage (defence in depth; the engine already refuses the latch).
+    int node = -1;
+    if (stuckPiki && st.collOwn) {
+        CollPart* stuckPart = attacker->getStickPart();
+        for (size_t i = 0; i < st.collParts.size(); ++i)
+            if (st.collParts[i] == stuckPart) node = int(i);
+    }
+    const bool partOk = !st.collOwn || node < 0 || houdaiRig.coll()[size_t(node)].stickable();
     float rate = 0.0f;
-    if (stuckPiki) {
+    if (stuckPiki && partOk) {
         // US damageCallBack applies the hit in Stay too; StateStay::exec then
         // sees EB_TakingDamage and transits to Land.
         rate = P2HoudaiFsm::damageRateFor(s);
@@ -2400,9 +2857,10 @@ float pc_p2_long_legs_damage_rate(Teki* teki, Creature* attacker) {
     else ++st.receiverRejected;
     const int total = st.receiverAccepted + st.receiverRejected;
     if (total == 1 || total % 200 == 0) {
-        std::printf("P2_HOUDAI_RECEIVER generator=%u accepted=%d rejected=%d last_rate=%.2f stuck_piki=%d state=%s\n",
+        std::printf("P2_HOUDAI_RECEIVER generator=%u accepted=%d rejected=%d last_rate=%.2f stuck_piki=%d state=%s "
+                    "part=%s\n",
                     st.generator, st.receiverAccepted, st.receiverRejected, rate, int(stuckPiki),
-                    P2LongLegsFsm::stateName(s));
+                    P2LongLegsFsm::stateName(s), node >= 0 ? houdaiRig.coll()[size_t(node)].id.c_str() : "none");
         std::fflush(stdout);
     }
     return rate;
@@ -2413,6 +2871,9 @@ float pc_p2_long_legs_bomb_rate(Teki* teki) {
     // (full damage, BigFoot.h has no override). -1 leaves every other actor on
     // its existing bomb rule.
     auto it = actors.find(teki);
+    // #1012: Man-at-Legs also takes the base bombCallBack (Houdai.h overrides only damageCallBack): full
+    // damage in every state, so no refusal rule applies to it.
+    if (it != actors.end() && it->second.isHoudai) return 1.0f;
     if (it == actors.end() || !it->second.isBigFoot) return -1.0f;
     ActorState& st = it->second;
     ++st.bfBombs;
