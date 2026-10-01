@@ -12,8 +12,8 @@
 #include "Navi.h"
 #include "NaviMgr.h"
 #include "NaviState.h"
-#include "Controller.h"
-#include "NaviCamera.h"
+#include "Kontroller.h"
+#include "Camera.h"
 #include "KeyConfig.h"
 #include <cmath>
 #include "Piki.h"
