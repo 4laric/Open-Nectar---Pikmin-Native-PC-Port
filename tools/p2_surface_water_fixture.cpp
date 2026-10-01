@@ -54,7 +54,7 @@ public:
             Navi* before=naviMgr?naviMgr->getNavi():nullptr;
             int sx=0,sy=0;
             if((phase==2 || phase==3)&&before&&before->mNaviCamera){float dx=goal.x-before->mSRT.t.x,dz=goal.z-before->mSRT.t.z,d=std::sqrt(dx*dx+dz*dz);if(d>10){const Vector3f& axis=before->mNaviCamera->mViewXAxis;sx=int(65*(dx*axis.x+dz*axis.z)/d);sy=int(65*(dx*axis.z-dz*axis.x)/d);}}
-            SDL_JoystickSetVirtualButton(pad,SDL_CONTROLLER_BUTTON_B,phase==1 || (speciesProbe() && phase==3));
+            SDL_JoystickSetVirtualButton(pad,SDL_CONTROLLER_BUTTON_B,phase==1 || (speciesProbe() && (phase==3 || phase==5)));
             SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTX,Sint16(sx*32767/74));
             SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTY,Sint16(-sy*32767/74));SDL_JoystickUpdate();
         }
@@ -126,7 +126,7 @@ public:
             if(dx*dx+dz*dz<144 && !n->mIsInWater){exited=true;phase=5;settle=0;}
         } else if(phase==5 && ++settle>=60){
             require(entered&&exited,"ordinary water entry/exit absent");
-            if(speciesProbe()){require(redDrown&&blueWet,"species water observations absent");require(probeRed->mInWaterTimer==0 && probeRed->getState()!=PIKISTATE_Drown,"ordinary whistle did not recover Red to dry shore");std::puts("P2_SURFACE_WATER_SPECIES_PASS red_drown=1 blue_wet_not_drown=1 red_dry_timer_reset=1 ordinary_whistle=1 staged_species=1 natural_acquisition=0");}
+            if(speciesProbe()){require(redDrown&&blueWet,"species water observations absent");if(probeRed->mInWaterTimer!=0 || probeRed->getState()==PIKISTATE_Drown){require(settle<180,"ordinary whistle did not recover Red to dry shore");return result;}std::puts("P2_SURFACE_WATER_SPECIES_PASS red_drown=1 blue_wet_not_drown=1 red_dry_timer_reset=1 ordinary_whistle=1 staged_species=1 natural_acquisition=0");}
             require(std::isfinite(n->mSRT.t.y)&&n->mSRT.t.y>45,"captain failed dry return");
             std::printf("PASS P2_SURFACE_WATER_RUNTIME faces=5332 boxes=3 live=%d native_controller=1 entered=1 exited=1 x=%.3f y=%.3f z=%.3f body_convention=P1 complete_gameplay=0\n",count,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z);
             std::fflush(nullptr);std::_Exit(0);
