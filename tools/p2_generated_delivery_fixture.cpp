@@ -65,6 +65,8 @@ class DeliveryApp:public PlugPikiApp {
   if(n){captainSeen=true;p2_fixture_require_captain(GameStat::orimaDead,!n->getCurrState() || naviMgr->isNaviDead(n) || n->getCurrState()->getID()==NAVISTATE_Dead,std::getenv("P2_GENERATED_FORCE_CAPTAIN_DOWN")?0:n->mHealth,frames);}
   else if(captainSeen)p2_fixture_require_captain(true,true,0,frames);
   require(++frames<5000,"frame ceiling");
+  if(frames%60==0){std::printf("P2_GENERATED_GATE frame=%d ready=%d pause=%d overlay=%d movie=%d nstate=%d managers=%d hp=%.3f\n",frames,int(pc_randomizer_ready()),int(gameflow.mPauseAll),int(gameflow.mIsUIOverlayActive),int(gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive),n && n->getCurrState()?n->getCurrState()->getID():-1,int(tekiMgr && pikiMgr),n?n->mHealth:-1.f);std::fflush(nullptr);}
+  if(playerState)for(int f=0;f<DEMOFLAG_COUNT;++f)playerState->mDemoFlags.setFlagOnly(f); // Disclosed tutorial instrumentation before starting-state wait.
   if(gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
   if(gameflow.mIsUIOverlayActive){input(frames%30<15?KBBTN_A:0);return result;}
   if(gameflow.mPauseAll || !pc_randomizer_ready() || !n || !n->getCurrState() || !tekiMgr || !pikiMgr || !n->controlCamera())return result;
@@ -74,6 +76,8 @@ class DeliveryApp:public PlugPikiApp {
   if(!enemy){Iterator it(tekiMgr);CI_LOOP(it){Teki* t=static_cast<Teki*>(*it);if(pc_randomizer_p2_source_for(static_cast<PelletView*>(t))==44 && pc_randomizer_p2_generator_for(static_cast<PelletView*>(t))==Target){require(!enemy,"duplicate singleton source");enemy=t;}}}
   if(phase==0){
    if(observed<60)return result;
+   int w,h,x,y;SDL_Window* window=SDL_GL_GetCurrentWindow();require(window,"current SDL window");SDL_GetWindowSize(window,&w,&h);SDL_GetWindowPosition(window,&x,&y);SDL_Rect bounds;require(SDL_GetDisplayBounds(SDL_GetWindowDisplayIndex(window),&bounds)==0,"display bounds");
+   std::printf("P2_GENERATED_WINDOW width=%d height=%d x=%d y=%d display=%d,%d,%d,%d\n",w,h,x,y,bounds.x,bounds.y,bounds.w,bounds.h);require(w==960 && h==540,"window dimensions");require(std::abs((x+w/2)-(bounds.x+bounds.w/2))<=2 && std::abs((y+h/2)-(bounds.y+bounds.h/2))<=2,"window centering");
    require(enemy,"generated source44 singleton not born");require(alive==20,"starting field squad differs from disclosed20");
    require(gameflow.mWorldClock.mCurrentDay==2,"unexpected initial day");
    std::printf("P2_GENERATED_BASELINE source=44 uid=%u day=2 alive=%d enemy=%.3f,%.3f,%.3f navi=%.3f,%.3f,%.3f hp=%.3f\n",Target,alive,enemy->mSRT.t.x,enemy->mSRT.t.y,enemy->mSRT.t.z,n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,n->mHealth);
