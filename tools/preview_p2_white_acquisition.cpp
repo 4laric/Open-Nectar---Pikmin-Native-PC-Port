@@ -60,7 +60,7 @@ public:
   if(phase==1)keys=KeyConfig::_instance->mSetCursorKey.mBind;
   if(phase==2 || phase==4){
    if(n && n->mNaviCamera){float dx=goal.x-(phase==2?n->mCursorWorldPos.x:n->mSRT.t.x),dz=goal.z-(phase==2?n->mCursorWorldPos.z:n->mSRT.t.z),d=std::sqrt(dx*dx+dz*dz);
-    if(d>(phase==2?3.f:15.f)){const Vector3f& axis=n->mNaviCamera->mViewXAxis;float strength=phase==2?std::fmin(65.f,std::fmax(22.f,d*1.5f)):65.f;keys=KBBTN_MSTICK_RIGHT;mMainStickX=s8(strength*(dx*axis.x+dz*axis.z)/d);mMainStickY=s8(strength*(dx*axis.z-dz*axis.x)/d);}
+    if(d>(phase==2?3.f:15.f)){const Vector3f& axis=n->mNaviCamera->mViewXAxis;float strength=phase==2?22.f:65.f;float bx=goal.x-n->mSRT.t.x,bz=goal.z-n->mSRT.t.z;if(phase==2 && bx*bx+bz*bz>10000.f){dx=bx;dz=bz;d=std::sqrt(dx*dx+dz*dz);strength=65.f;}keys=KBBTN_MSTICK_RIGHT;mMainStickX=s8(strength*(dx*axis.x+dz*axis.z)/d);mMainStickY=s8(strength*(dx*axis.z-dz*axis.x)/d);}
    }
   }
   if((phase==3 && ticks%60<15)||(phase==5 && ticks%60<50))keys=KeyConfig::_instance->mThrowKey.mBind;
