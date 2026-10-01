@@ -34,7 +34,7 @@
 #include "teki.h"
 #include "Generator.h"
 #include "Shape.h"
-#include "System.h"
+#include "system.h"
 #include "Joint.h"
 #include "Texture.h"
 #include "Material.h"

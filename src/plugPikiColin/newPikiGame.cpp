@@ -58,6 +58,7 @@
 #include "Kontroller.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_coop.h"
+#include "pc_coop_menu_layout.h"
 #include "timing/pc_render_phase.h"
 #if defined(PIKI_PC_PORT)
 #include "pc_permadeath.h"
@@ -2694,20 +2695,30 @@ public:
 	void preRender(Graphics& gfx) { gamecore->mMapMgr->preRender(gfx); }
 
 #if defined(PIKI_PC_PORT)
-	/// Menú de mapa/controles de cada jugador dentro de su mitad (4:3
-	/// uniforme, centrado), sin tapar la mitad del otro.
+	/// Compact corner menus leave both players' view centers unobscured.
 	void drawSplitMenuWindows(Graphics& gfx)
 	{
+		const bool fullscreen = pc_netplay_present_two_pass_active() || gamecore->mSplitBlend <= .001f;
+		const pc_coop_menu::Mode mode = fullscreen ? pc_coop_menu::Mode::Fullscreen
+		    : (pc_settings_get_coop_split() == 1 ? pc_coop_menu::Mode::Horizontal : pc_coop_menu::Mode::Vertical);
+		const int savedUi43 = pc_gfx_get_ui_43();
+		const int savedRadarIndex = zen::gRaderNaviIndex;
+		float savedProjX, savedProjY;
+		pc_gfx_get_proj_offset(&savedProjX, &savedProjY);
+		pc_gfx_set_proj_offset(0, 0);
 		zen::ogScrMenuMgr* wins[2] = { menuWindow, menuWindow2 };
 		for (int view = 0; view < 2; view++) {
 			if (!wins[view]) continue;
-			gamecore->setViewSubrect(view);
+			const int side = pc_netplay_present_two_pass_active() ? view : gamecore->viewSide(view);
+			const auto panel = pc_coop_menu::panel(pc_gfx_get_window_aspect_ratio(), mode, side);
+			pc_gfx_set_view_subrect(panel.x0, panel.y0, panel.x1, panel.y1);
 			pc_gfx_set_ui_43_no_bars(1);
 			zen::gRaderNaviIndex = view;
 			wins[view]->draw(gfx);
-			zen::gRaderNaviIndex = 0;
-			pc_gfx_set_ui_43_no_bars(0);
 		}
+		zen::gRaderNaviIndex = savedRadarIndex;
+		pc_gfx_set_ui_43_no_bars(savedUi43);
+		pc_gfx_set_proj_offset(savedProjX, savedProjY);
 		pc_gfx_clear_view_subrect();
 		gfx.setViewport(AREA_FULL_SCREEN(gfx));
 		gfx.setScissor(AREA_FULL_SCREEN(gfx));
