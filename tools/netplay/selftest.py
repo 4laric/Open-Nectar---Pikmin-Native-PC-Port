@@ -488,6 +488,20 @@ def main():
         except SystemExit as e:
             check("needs at least" in str(e), "check_script_length refuses a file one record short")
 
+        # Every scripted scenario in coop_whistle_pair must pass run_pair's own length check
+        # at the tick count its generator returns (the Onion scenario shipped 1700 records for 1700 ticks).
+        import coop_whistle_pair  # noqa: E402
+        for name, fn in (("whistle", coop_whistle_pair.whistle_inputs), ("onion", coop_whistle_pair.onion_inputs)):
+            sd = Path(tmp3) / name
+            sd.mkdir()
+            ticks = fn(sd)
+            for who in ("host", "join"):
+                try:
+                    run_pair.check_script_length(sd / f"{who}.pkni", who, ticks)
+                    check(True, f"coop_whistle_pair {name} {who}.pkni satisfies check_script_length at {ticks} ticks")
+                except SystemExit as e:
+                    check(False, f"coop_whistle_pair {name} {who}.pkni satisfies check_script_length ({e})")
+
 
     # #965 lane H: camera_lead_probe judges latency on the submit frame (moving delay),
     # requires keys_checked > 0 in lead mode and fails a missing or non-zero counter.

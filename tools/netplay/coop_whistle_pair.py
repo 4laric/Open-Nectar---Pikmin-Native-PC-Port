@@ -47,20 +47,28 @@ def tap_series(stick, n):
     return segs
 
 
+# run_pair refuses a scripted input file shorter than --ticks + 50 records (#1028), so each
+# generator below writes at least ticks + SCRIPT_MARGIN records. The last segment repeats
+# (hands-off), so the extra tail does not change what the scenario does.
+SCRIPT_MARGIN = 50
+WHISTLE_TICKS = 800
+ONION_TICKS = 1700
+
+
 def whistle_inputs(out):
     gen(out / "host.pkni", 1200, ["420:-:0:0", "3:X:0:0", "777:-:0:0"])
     gen(out / "join.pkni", 1200, ["480:-:0:0", "17:-:-59:-80", "8:-:0:0", "40:B:0:0", "400:-:0:0"])
-    return 800
+    return WHISTLE_TICKS
 
 
 def onion_inputs(out):
-    gen(out / "host.pkni", 1700,
+    gen(out / "host.pkni", ONION_TICKS + SCRIPT_MARGIN,
         ["400:-:0:0", "37:-:40:-92", "20:-:0:0", "3:A:0:0", "140:-:0:0"] + tap_series("0:100", 6)
         + ["10:-:0:0", "3:A:0:0", "1000:-:0:0"])
-    gen(out / "join.pkni", 1700,
+    gen(out / "join.pkni", ONION_TICKS + SCRIPT_MARGIN,
         ["900:-:0:0", "36:-:33:-94", "40:-:0:0", "3:A:0:0", "140:-:0:0"] + tap_series("0:-100", 3)
         + ["10:-:0:0", "3:A:0:0", "700:-:0:0"])
-    return 1700
+    return ONION_TICKS
 
 
 def run(name, exe, out, port, ticks):
