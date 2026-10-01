@@ -248,6 +248,10 @@ struct Otakara {
     p2bombtelegraph::Burn burn;
     const char* burnTrigger = "fuse";
     float heldHealth = 0.0f; // carrier takes no damage while its bomb burns
+    P2BombSparks sparks;     // lit-fuse sparks, all killed at the blast
+    unsigned liveBaseline = 0;
+    float sinceBlast = -1.0f;
+    bool cleanLogged = false;
     P2BombGauge gauge;       // the bomb's own countdown wheel (pc_p2_bomb_visual.h)
     int gaugeLogTick = 0;
     // P2_OTAKARA_PRESS once-per-press gate (pc_p2_otakara_press_policy.h).
@@ -971,11 +975,12 @@ void igniteBomb(BTeki* a, Otakara& s, const char* trigger, float carrierHealth) 
     s.burn.ignite();
     s.burnTrigger = trigger;
     s.heldHealth = carrierHealth;
+    s.liveBaseline = pc_p2_bomb_live_generators();
     std::printf("P2_BOMBOTAKARA_FUSE_START generator=%u payload=93 trigger=%s life=%.2f blast_in=%.3f "
                 "source=bombState.cpp:97-122\n",
                 genOf(a), trigger, p2bombtelegraph::kBombLife, p2bombtelegraph::kTotalSeconds);
     std::fflush(stdout);
-    shotRequest(s, "bomb_fuse", 330); // test-only frame burst (PIKMIN_P2_DWEEVIL_SHOT + PIKMIN_FRAME_DUMP)
+    shotRequest(s, "bomb_fuse", 540); // test-only frame burst (PIKMIN_P2_DWEEVIL_SHOT + PIKMIN_FRAME_DUMP)
 }
 
 // One burn frame: drain (addDamage(dt,1)), flash pulse -> spark + tick, the
@@ -984,9 +989,10 @@ void bombBurnTick(BTeki* a, Otakara& s, float dt) {
     if (s.species != p2dweevil::BombId || !s.burn.burning) return;
     const unsigned generator = genOf(a);
     const p2bombtelegraph::Step step = s.burn.step(dt);
+    s.sparks.update(dt, 0.35f);
     const Vector3f wp = bombWorldPos(a);
     if (step.pulse) {
-        pc_p2_otakara_fx_engine_spawn(44, wp.x, wp.y + 4.0f, wp.z); // EFF_Piki_FireSparkles (pkf2.pcr)
+        s.sparks.spawn(44, wp.x, wp.y + 4.0f, wp.z); // EFF_Piki_FireSparkles (pkf2.pcr), force-killed after 0.35 s
         pc_p2_sfx(93, generator, p2sfx::Event::Fuse, a);
         std::printf("P2_BOMBOTAKARA_FUSE_TICK generator=%u payload=93 n=%d t=%.2f ratio=%.3f period=%.3f\n",
                     generator, s.burn.pulses, s.burn.elapsed(), s.burn.ratio(),
@@ -1008,6 +1014,10 @@ void bombBurnTick(BTeki* a, Otakara& s, float dt) {
         std::printf("P2_BOMBOTAKARA_FUSE_END generator=%u payload=93 trigger=%s ratio=0.000 t=%.2f pulses=%d\n",
                     generator, s.burnTrigger, s.burn.elapsed(), s.burn.pulses);
         std::fflush(stdout);
+        s.sparks.killAll();
+        s.sinceBlast = 0.0f;
+        std::printf("P2_BOMBOTAKARA_FX_KILLED generator=%u live_generators=%u baseline=%u\n", generator,
+                    pc_p2_bomb_live_generators(), s.liveBaseline);
         applyBombBlast(a, s, s.burnTrigger);
     }
 }
@@ -1986,6 +1996,15 @@ void pc_p2_otakara_update(BTeki* actor) {
         actor->mHealth = s.heldHealth;
     }
     bombBurnTick(actor, s, dt);
+    if (s.sinceBlast >= 0.0f && !s.cleanLogged) {
+        s.sinceBlast += dt;
+        if (s.sinceBlast >= 1.0f) {
+            s.cleanLogged = true;
+            std::printf("P2_BOMBOTAKARA_FX_CLEAN generator=%u since_blast=%.2f live_generators=%u baseline=%u\n",
+                        genOf(actor), s.sinceBlast, pc_p2_bomb_live_generators(), s.liveBaseline);
+            std::fflush(stdout);
+        }
+    }
     // Source Otakara::doUpdateCommon (OtakaraBase.cpp:93-108) for BombOtakara:
     // once the carried Bomb is no longer alive (mTargetCreature dead, or null)
     // the Dweevil sets mTargetCreature = nullptr and mHealth = 0, i.e. it dies
@@ -2015,6 +2034,7 @@ void pc_p2_otakara_update(BTeki* actor) {
             s.bombDetonated = true;
             s.burn.burning = false;
             s.burn.detonated = true;
+            s.sparks.killAll();
             applyBombBlast(actor, s, "death");
         }
         // OtakaraBase::onKill (OtakaraBase.cpp:65-69): fallTreasure(true) + finishChargeEffect. The
