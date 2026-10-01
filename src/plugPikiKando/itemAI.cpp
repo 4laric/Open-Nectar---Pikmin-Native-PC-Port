@@ -1,4 +1,5 @@
 #include "ItemAI.h"
+#include <cstdio>
 #if defined(PIKI_PC_PORT)
 #include "pc_coop.h"
 #include "netplay/pc_sim_rng.h"
@@ -1015,6 +1016,9 @@ void GemAI::Die::act(AICreature* item)
 	} else {
 		seeds = obj->mNonMatchingSeeds;
 	}
+	// Permanent diagnostic (issue #1034): GemItem credit (the unused "gem" path).
+	std::printf("[pellet] onion=%d kind=gem colour=%d size=%d seeds=%d matching=%d\n", int(goal->mOnionColour), obj->mColor, obj->mGemType,
+	    seeds, int(goal->mOnionColour == obj->mColor));
 	MsgUser msg(0);
 	PRINT("gem item : ### add %d pikis\n", seeds);
 	goal->mSAICtx.mCurrAnimId += seeds;

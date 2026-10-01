@@ -400,6 +400,10 @@ void GoalItem::suckMe(Pellet* item)
 	} else {
 		pikiNum = config->mNonMatchingOnyonSeeds();
 	}
+	// Permanent diagnostic (issue #1034): which Onion paid how many seeds for which pellet.
+	std::printf("[pellet] onion=%d kind=pellet type=%d size=%s seeds=%d matching=%d pcolor=%d match_seeds=%d nonmatch_seeds=%d\n",
+	    int(mOnionColour), int(config->mPelletType()), config->mModelId.mStringID, pikiNum, int(mOnionColour == config->mPelletType()),
+	    int(config->mPelletColor()), int(config->mMatchingOnyonSeeds()), int(config->mNonMatchingOnyonSeeds()));
 
 	if (pikiNum < 0) {
 		mSAICtx.mCounter += 2;
