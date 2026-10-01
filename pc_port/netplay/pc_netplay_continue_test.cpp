@@ -380,7 +380,8 @@ int main()
         CHECK(!pending || contains(lines, "unconfirmed"), "pending save is explicitly unconfirmed");
         CHECK(saved || pending || contains(lines, "new campaign"), "unsaved restart explained");
         if (launcher) CHECK(contains(lines, "new offer code") && contains(lines, "answer code"), "fresh exchange required");
-        else CHECK(!contains(lines, "host.bat") && contains(lines, "same launch options"), "low-level path accurate");
+        else CHECK(!contains(lines, "host.bat") && contains(lines, "same launch options") &&
+            contains(lines, "sets up the campaign") && !contains(lines, "sends the saved day"), "low-level path accurate");
     }
 
 	std::printf("pc_netplay_continue_test: %s (%d checks, %d failures)\n", sFailures == 0 ? "PASS" : "FAIL",

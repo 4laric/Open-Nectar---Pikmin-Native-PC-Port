@@ -666,7 +666,7 @@ inline std::vector<std::string> recovery_banner_lines(const EndInfo& e)
                                   : "Progress since the last saved day will be lost.");
     if (!e.launcher) {
         out.push_back("Both players: restart with the same launch options.");
-        out.push_back("The host sends the saved day to the other player.");
+        out.push_back("The host sets up the campaign for both players.");
     } else {
         const bool resume = e.gen != 0 || e.pendingGen != 0;
         out.push_back(e.host ? (resume ? "Host: open host.bat and choose Continue." : "Host: open host.bat to start again.")
