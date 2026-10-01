@@ -102,8 +102,9 @@ static void ordinaryCapture(const char* path) {
     std::fclose(file);
     std::printf("P2_PURPLE_ORDINARY_CAPTURE path=%s width=%d height=%d read_only=1\n",path,width,height);
 }
-static void ordinaryInput(unsigned buttons=0,int y=0) {
+static void ordinaryInput(unsigned buttons=0,int y=0,int x=0) {
     require(ordinaryPad!=nullptr,"ordinary SDL controller missing");
+    require(std::abs(x)<=74 && std::abs(y)<=74,"ordinary SDL axes out of range");
     const int instance=SDL_JoystickInstanceID(ordinaryPad);int assigned=-1;
     if(pc_window_input_get_assignment(0,&assigned)!=PC_INPUT_DEV_GAMEPAD || assigned!=instance) {
         pc_window_input_assign(0,PC_INPUT_DEV_GAMEPAD,instance);pc_window_input_assign(1,PC_INPUT_DEV_NONE,-1);
@@ -111,7 +112,7 @@ static void ordinaryInput(unsigned buttons=0,int y=0) {
     SDL_JoystickSetVirtualButton(ordinaryPad,SDL_CONTROLLER_BUTTON_A,(buttons&KBBTN_A)!=0);
     SDL_JoystickSetVirtualButton(ordinaryPad,SDL_CONTROLLER_BUTTON_B,(buttons&KBBTN_B)!=0);
     SDL_JoystickSetVirtualButton(ordinaryPad,SDL_CONTROLLER_BUTTON_START,(buttons&KBBTN_START)!=0);
-    SDL_JoystickSetVirtualAxis(ordinaryPad,SDL_CONTROLLER_AXIS_LEFTX,0);
+    SDL_JoystickSetVirtualAxis(ordinaryPad,SDL_CONTROLLER_AXIS_LEFTX,Sint16(x*32767/74));
     SDL_JoystickSetVirtualAxis(ordinaryPad,SDL_CONTROLLER_AXIS_LEFTY,Sint16(-y*32767/74));
     SDL_JoystickUpdate();
 }
@@ -319,6 +320,8 @@ class PurpleCombatApp : public PlugPikiApp {
     int sunsetTicks=0, sunsetDay=-1, expectedDay=-1, savedMaturity=-1, resumeReady=0;
     int ordinaryMenuFrames=0,ordinaryDiaryFrames=0;
     bool releaseDiaryInput=false,diaryRevealObserved=false,diaryAdvanceObserved=false;
+    int sdlPhase=0,sdlStableAim=0,sdlThrowTicks=0;
+    bool sdlStarted=false,sdlThrowObserved=false;
     int diaryActions=0;
     unsigned saveIndexBefore=0;
     bool mode(const char* name) const {
@@ -675,6 +678,10 @@ class PurpleCombatApp : public PlugPikiApp {
         }
     }
 
+    void acquisitionInput(unsigned buttons=0,int x=0,int y=0) {
+        if(mode("sdl_acquire")) ordinaryInput(buttons,y,x);
+        else pc_p2_input_script_set(1,buttons,x,y);
+    }
     bool approachAndPluck(Navi* n,PikiHeadItem* head,Pom* violet) {
         // Ordinary controller movement/pluck. Never relocate the captain or
         // sprout, or force a plucking state to satisfy natural acceptance.
@@ -710,12 +717,12 @@ class PurpleCombatApp : public PlugPikiApp {
             // input above that loaded band; do not change movement parameters.
             const float minimum=std::ceil(74.f*(cursorBand+.05f));
             const float power=std::max(minimum,std::min(65.f,d*2.f));
-            pc_p2_input_script_set(1,0,int(std::lround(power*(tx*axis.x+tz*axis.z)/d)),
+            acquisitionInput(0,int(std::lround(power*(tx*axis.x+tz*axis.z)/d)),
                 int(std::lround(power*(tx*axis.z-tz*axis.x)/d)));
             return false;
         }
-        if(!head->canPullout()) {pc_p2_input_script_set(1,0);return false;}
-        pc_p2_input_script_set(1,KBBTN_A);
+        if(!head->canPullout()) {acquisitionInput();return false;}
+        acquisitionInput(KBBTN_A);
         ++pluckAttempts;
         milestone("native_sprout_pluck_requested",ticks);
         std::printf("P2_PURPLE_PLUCK_ATTEMPT attempt=%d captain_position_staged=0 native_input=1 forced_pluck_state=0 distance=%.3f player_controls_validated=0\n",pluckAttempts,distance);
@@ -737,6 +744,95 @@ class PurpleCombatApp : public PlugPikiApp {
         std::printf("P2_PURPLE_ORDINARY_RESUME_PASS day=%d maturity=%d stock=1 field=%d native_population=20 generations=1 checkpoint_resumed=1 direct_stock_helpers=0 withdrawal_ui_validated=0 saved_bytes_injected=0\n",
             expectedDay,savedMaturity,int(GameStat::mapPikis));
         std::fflush(nullptr);std::_Exit(0);
+    }
+    void sdlDirection(Navi* n,float dx,float dz,int power) {
+        require(n->controlCamera()!=nullptr,"SDL acquisition camera missing");
+        const float distance=std::sqrt(dx*dx+dz*dz);
+        require(distance>.01f,"SDL direction missing");
+        const Vector3f& axis=n->controlCamera()->mViewXAxis;
+        ordinaryInput(0,int(std::lround(power*(dx*axis.z-dz*axis.x)/distance)),
+            int(std::lround(power*(dx*axis.x+dz*axis.z)/distance)));
+    }
+    Piki* sdlStep(Navi* n) {
+        require(pc_window_get_control_mode()==PC_CONTROL_CLASSIC,"SDL classic cursor controls required");
+        require(std::fabs(pc_settings_get_navi_speed_scale()-1.f)<.001f,"SDL default captain speed");
+        Pom* violet=nullptr;int flowersFound=0,alive=0,red=0,purple=0,ready=0;
+        Piki* follower=nullptr;
+        Iterator flowers(bossMgr);CI_LOOP(flowers) {
+            Boss* b=static_cast<Boss*>(*flowers);
+            if(b && b->isAlive() && b->mObjType==OBJTYPE_Pom && pc_p2_violet(static_cast<Pom*>(b))) {
+                violet=static_cast<Pom*>(b);++flowersFound;
+            }
+        }
+        require(flowersFound==1,"SDL original Violet missing or ambiguous");
+        Iterator bodies(pikiMgr);CI_LOOP(bodies) {
+            Piki* p=static_cast<Piki*>(*bodies);if(!p || !p->isAlive())continue;
+            ++alive;
+            if(pc_p2_is_purple(p)) {
+                ++purple;
+                if(p->getState()==PIKISTATE_Normal && p->mMode==PikiMode::FormationMode && p->mNavi==n)follower=p;
+            } else if(p->mColor==Red && !p->mP2White) {
+                ++red;
+                if(p->getState()==PIKISTATE_Normal && p->mMode==PikiMode::FormationMode && !p->isStickTo())++ready;
+            }
+            if(ticks%30==0 && p->getState()==PIKISTATE_Flying)
+                std::printf("P2_PURPLE_SDL_FLIGHT xyz=%.3f,%.3f,%.3f velocity=%.3f,%.3f,%.3f\n",
+                    p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z,p->mVelocity.x,p->mVelocity.y,p->mVelocity.z);
+        }
+        if(!sdlStarted) {
+            ordinaryInput();if(alive<20)return nullptr;
+            require(alive==20 && red==20 && purple==0,"SDL starting twenty Reds");
+            Iterator initialHeads(itemMgr->getPikiHeadMgr());CI_LOOP(initialHeads) {
+                PikiHeadItem* h=static_cast<PikiHeadItem*>(*initialHeads);
+                require(!h || !h->isAlive() || !h->mP2Purple,"SDL pre-existing Purple sprout");
+            }
+            sdlStarted=true;
+            std::puts("P2_PURPLE_SDL_START field=20 red=20 scripted_throw=0 direct_throw_api=0 actor_state_writes=0 starting_withdrawal_fixture=1");
+        }
+        if(sdlPhase==2 && n->getCurrState()->getID()==NAVISTATE_Throw)sdlThrowObserved=true;
+        if(ticks%30==0)std::printf("P2_PURPLE_SDL_PROGRESS phase=%d state=%d captain=%.3f,%.3f,%.3f cursor=%.3f,%.3f,%.3f red=%d purple=%d ready=%d violet_state=%d throw_observed=%d\n",
+            sdlPhase,n->getCurrState()->getID(),n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,
+            n->mCursorWorldPos.x,n->mCursorWorldPos.y,n->mCursorWorldPos.z,red,purple,ready,violet->getCurrentState(),int(sdlThrowObserved));
+        if(sdlPhase==3) {
+            ordinaryInput();if(!follower)return nullptr;
+            GameStat::update();require(alive==20 && red==19 && purple==1 && int(GameStat::mapPikis)==20,"SDL conversion population");
+            require(sdlThrowObserved && pc_throw_selection_class(follower)==4 && pc_piki_carry_strength(follower)==10,"SDL native throw and Purple capabilities");
+            milestone("SDL_acquisition_verified",ticks);
+            std::puts("P2_PURPLE_SDL_ACQUISITION_PASS scripted_throw=0 direct_throw_api=0 actor_state_writes=0 native_throw_state_observed=1 SDL_pluck=1 field=20 red=19 purple=1 selection=4 strength=10");
+            return follower;
+        }
+        Iterator heads(itemMgr->getPikiHeadMgr());CI_LOOP(heads) {
+            PikiHeadItem* h=static_cast<PikiHeadItem*>(*heads);
+            if(!h || !h->isAlive() || !h->mP2Purple)continue;
+            ordinaryInput();
+            if(h->mGroundTriangle && std::fabs(h->mSRT.t.y-mapMgr->getMinY(h->mSRT.t.x,h->mSRT.t.z,true))<1.f
+                && approachAndPluck(n,h,violet))sdlPhase=3;
+            return nullptr;
+        }
+        const float dx=violet->mSRT.t.x-n->mSRT.t.x,dz=violet->mSRT.t.z-n->mSRT.t.z;
+        const float distance=std::sqrt(dx*dx+dz*dz),radius=C_NAVI_PARM(n,mCursorMaxRadius);
+        require(std::isfinite(radius) && radius>105.f,"SDL loaded cursor radius");
+        if(sdlPhase==0) {
+            const float stand=std::min(100.f,radius/1.4f);
+            if(distance>stand+5.f) {
+                Vector3f target=n->mSRT.t;target.x+=dx*(distance-stand)/distance;target.z+=dz*(distance-stand)/distance;
+                refreshPluckObstacles(n,violet);
+                require(pluckSegmentClear(n->mSRT.t,target),"SDL approach requires clear native route");
+                sdlDirection(n,dx,dz,65);return nullptr;
+            }
+            sdlPhase=1;
+        }
+        if(sdlPhase==1) {
+            require(distance*1.2f<radius,"SDL desired reticle outside native range");
+            const float ex=n->mSRT.t.x+dx*1.2f-n->mCursorWorldPos.x;
+            const float ez=n->mSRT.t.z+dz*1.2f-n->mCursorWorldPos.z;
+            const float tolerance=std::max(5.f,C_NAVI_PARM(n,mCursorMoveSpeed)*gsys->getFrameTime()*.75f);
+            if(std::sqrt(ex*ex+ez*ez)>tolerance) {sdlStableAim=0;sdlDirection(n,ex,ez,20);return nullptr;}
+            ordinaryInput();if(!ready || ++sdlStableAim<3)return nullptr;
+            sdlPhase=2;sdlThrowTicks=0;milestone("SDL_A_throw_requested",ticks);
+        }
+        if(sdlPhase==2)ordinaryInput(sdlThrowTicks++<18?KBBTN_A:0);
+        return nullptr;
     }
     Piki* naturalStep(Navi* n) {
         ++phaseTicks;
@@ -1044,6 +1140,10 @@ public:
             return result;
         }
         if (!acquired) {
+            if(mode("sdl_acquire")) {
+                if(!activeSeen) {ordinaryInput();return result;}
+                acquired=sdlStep(n);return result;
+            }
             const int state=n->getCurrState()->getID();
             if(state==NAVISTATE_Walk||state==NAVISTATE_Idle) {
                 // Ordinary visible play leaves the starting squad in its Onion.
@@ -1099,6 +1199,7 @@ public:
             }
             return result;
         }
+        if(mode("sdl_acquire")) {ordinaryInput();std::fflush(nullptr);std::_Exit(0);}
         if(mode("natural_dayend")) beginOrdinarySave(n);
         else if(mode("persistence_dayend")) beginPersistence(n);
         else if(mode("transport_delivery") || mode("transport_positive") || mode("transport_red_control") || mode("transport_staged") || mode("transport_manual")) transportStep(n);
@@ -1113,14 +1214,14 @@ int main(int argc,char** argv) {
         || !std::strcmp(guardCase,"global") || !std::strcmp(guardCase,"dead_state") || !std::strcmp(guardCase,"missing")
         || !std::strcmp(guardCase,"health_pause") || !std::strcmp(guardCase,"missing_movie"),"unknown initialized guard case");
     const char* mode=std::getenv("P2_PURPLE_COMBAT_MODE");
-    if(mode && std::strcmp(mode,"natural_dayend") && std::strcmp(mode,"natural_resume") && std::strcmp(mode,"adult_direct") && std::strcmp(mode,"persistence_dayend") && std::strcmp(mode,"persistence_resume") && std::strcmp(mode,"transport_delivery") && std::strcmp(mode,"transport_positive") && std::strcmp(mode,"transport_red_control") && std::strcmp(mode,"transport_staged") && std::strcmp(mode,"transport_manual")) {
-        std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=adult_direct,persistence_dayend,persistence_resume,natural_dayend,natural_resume,transport_delivery,transport_positive,transport_red_control,transport_staged,transport_manual\n",mode); return 2;
+    if(mode && std::strcmp(mode,"sdl_acquire") && std::strcmp(mode,"natural_dayend") && std::strcmp(mode,"natural_resume") && std::strcmp(mode,"adult_direct") && std::strcmp(mode,"persistence_dayend") && std::strcmp(mode,"persistence_resume") && std::strcmp(mode,"transport_delivery") && std::strcmp(mode,"transport_positive") && std::strcmp(mode,"transport_red_control") && std::strcmp(mode,"transport_staged") && std::strcmp(mode,"transport_manual")) {
+        std::printf("P2_PURPLE_COMBAT_UNIMPLEMENTED mode=%s implemented=sdl_acquire,adult_direct,persistence_dayend,persistence_resume,natural_dayend,natural_resume,transport_delivery,transport_positive,transport_red_control,transport_staged,transport_manual\n",mode); return 2;
     }
     SDL_SetMainReady(); pc_gpu_preference_apply(); pc_bbft_init(argc,argv);
     require(pc_randomizer_purple_campaign() && pc_randomizer_p2_bridge(),"ordinary Purple seed campaign required");
     if(!pc_window_init(mode && !std::strcmp(mode,"transport_manual")?"Purple carry smoke - staged Purple - F7 resets":"Purple campaign combat fixture",960,540)) return 3;
     pc_settings_init(); pc_window_set_display_mode(PC_WINDOW_FULLSCREEN_WINDOWED);
-    if(mode && (!std::strcmp(mode,"natural_dayend") || !std::strcmp(mode,"natural_resume"))) ordinaryController();
+    if(mode && (!std::strcmp(mode,"sdl_acquire") || !std::strcmp(mode,"natural_dayend") || !std::strcmp(mode,"natural_resume"))) ordinaryController();
     pc_window_set_window_size(960,540); pc_window_center();
     std::puts("Experimental preview window set to 960x540 windowed and centered");
     int w=0,h=0,x=0,y=0; SDL_Window* window=SDL_GL_GetCurrentWindow();
