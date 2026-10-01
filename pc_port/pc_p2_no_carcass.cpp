@@ -15,9 +15,9 @@ int pc_p2_no_carcass_corpse_type(BTeki* actor, int value)
     if (!source) source = pc_p2_campaign_source(actor);
     const int type = p2nocarcass::corpseType(source, value);
     if (p2nocarcass::leavesNoCarcass(source)) {
-        static int logged = 0;
-        if (logged < 16) {
-            ++logged;
+        static bool logged[102] = {};
+        if (source < 102 && !logged[source]) {
+            logged[source] = true;
             std::printf("P2_NO_CARCASS source_id=%u corpse=none source_carcass=0\n", source);
             std::fflush(stdout);
         }

@@ -16,8 +16,10 @@ int main() {
     for (unsigned s : {0u, 2u, 30u, 32u, 56u, 73u}) { assert(corpseType(s, 1) == 1); assert(corpseType(s, 0) == 0); }
     // Only a killed actor earns the receipt; a teardown that is not a death does not,
     // and an unbound actor (source 0) or a corpse-leaving source never does here.
-    assert(killEarnsReceipt(57, false));
-    assert(!killEarnsReceipt(57, true));
+    for (unsigned s : {31u, 57u, 66u, 69u, 72u}) {
+        assert(killEarnsReceipt(s, false));
+        assert(!killEarnsReceipt(s, true));
+    }
     assert(!killEarnsReceipt(0, false));
     assert(!killEarnsReceipt(30, false));
     std::puts("p2_no_carcass_policy_test ok");
