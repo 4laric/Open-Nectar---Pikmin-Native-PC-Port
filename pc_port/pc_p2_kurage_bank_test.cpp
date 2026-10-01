@@ -34,6 +34,28 @@ int main() {
     const p2kuragebank::Clip* attack = p.find("attack");
     assert(near(p2kuragebank::proomAt(*attack, 59.5f)[1], 50.f));
 
+    // #1065 corpse pose: the flattest visible pose of the death clip, rested on
+    // the ground. Rows are the converted OniKurage dead1 bounds (minY, maxY,
+    // width): drop, squash flat at f41, swell/thrash, collapse to a point at f95.
+    {
+        using p2kuragebank::Extent;
+        const std::vector<Extent> dead1 = {
+            {-3, 93, 91}, {-21, 60, 114}, {33, 125, 63}, {62, 198, 79}, {-5, 95, 112}, {-20, 59, 124},
+            {-21, 39, 132}, {-23, 24, 135}, {-29, 20, 115}, {100, 209, 95}, {-75, 7, 103}, {-35, 81, 83},
+            {88, 88, 0}};
+        assert(p2kuragebank::settledIndex(dead1) == 7);              // f41: 47 units tall, 135 wide
+        assert(near(p2kuragebank::groundLift(dead1[7]), 23.f));       // lowest vertex to the ground
+        // The point the burst leaves (zero extent) is never chosen, even though it is "flattest".
+        assert(p2kuragebank::settledIndex({{88, 88, 0}, {0, 50, 10}}) == 1);
+        // Nothing visible: no settled pose (caller keeps its fallback).
+        assert(p2kuragebank::settledIndex({{5, 5, 0}, {1, 1.5f, 0.5f}}) == -1);
+        assert(p2kuragebank::settledIndex({}) == -1);
+        // A pose resting above the origin is lowered, never left floating.
+        assert(near(p2kuragebank::groundLift({47, 78, 89}), -47.f));
+        // Ties keep the earlier pose (the first moment the bell lies flat).
+        assert(p2kuragebank::settledIndex({{0, 20, 10}, {0, 20, 10}}) == 0);
+    }
+
     // Every malformed profile is rejected whole.
     const char* bad[] = {
         "",                                                        // empty

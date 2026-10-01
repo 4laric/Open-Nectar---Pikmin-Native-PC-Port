@@ -30,3 +30,7 @@ bool pc_p2_kurage_visual_proom(bool greater, const char* clip, float sourceFrame
 // Last source frame of a banked clip, or -1 when the clip has no bank.
 float pc_p2_kurage_visual_last_frame(bool greater, const char* clip);
 void pc_p2_kurage_visual_forget(BTeki* actor);
+// #1065 carried-carcass pose: the private Shape in the settled (flattest
+// visible) pose of `deathClip`; `lift` is the model-space Y offset that rests it
+// on the ground. nullptr without a bank (callers keep the static dead mesh).
+Shape* pc_p2_kurage_visual_corpse(BTeki* actor, bool greater, const char* deathClip, unsigned token, float& lift);
