@@ -2,7 +2,9 @@
 #include "DayMgr.h"
 #include "DebugLog.h"
 #include "Graphics.h"
+#if defined(PIKI_PC_PORT)
 #include "timing/pc_render_phase.h"
+#endif
 
 /**
  * @todo: Documentation

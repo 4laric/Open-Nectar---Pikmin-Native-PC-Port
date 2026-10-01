@@ -6,7 +6,9 @@
 #include "Shape.h"
 #include "sysNew.h"
 #include "system.h"
+#if defined(PIKI_PC_PORT)
 #include "timing/pc_render_phase.h"
+#endif
 
 /**
  * @todo: Documentation
