@@ -320,6 +320,9 @@ void PlayerState::reconcileBbftParts()
                 part->mPartVisType = received ? (part->mPelletShape ? PARTVIS_Visible : PARTVIS_Invisible) : PARTVIS_Uncollected;
         }
         mShipUpgradeLevel = mCurrParts >= 30 ? 5 : mCurrParts >= 29 ? 4 : mCurrParts >= 12 ? 3 : mCurrParts >= 5 ? 2 : mCurrParts ? 1 : 0;
+        const int thresholds[5] = {0, 1, 5, 12, 29};
+        for (int stage = 0; stage < 5; ++stage)
+            if (mCurrParts >= thresholds[stage]) gameflow.mPlayState.openStage(stage);
         return;
     }
     if (!pc_bbft_progression()) return;

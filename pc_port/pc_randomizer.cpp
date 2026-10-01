@@ -202,6 +202,10 @@ void updateTheLynk(std::istream& input) {
     expect(input, "BONUSES"); unsigned bonus[18];
     for (int i = 0; i < 18; ++i) if (!(input >> bonus[i]) || bonus[i] > thelynkEnabled.size()
         || bonus[i] < thelynkBonuses[i] || bonus[i] < thelynkUsed[i]) fail("invalid/retracted TheLynk bonus");
+    unsigned receipts = 0;
+    for (unsigned i = 0; i < 30; ++i) if (parts & (1u << i)) ++receipts;
+    for (unsigned n : bonus) receipts += n;
+    if (receipts > thelynkEnabled.size()) fail("too many TheLynk receipts");
     expect(input, "END"); std::string extra;
     if (input >> extra) fail("trailing TheLynk state");
     thelynkParts = parts;
