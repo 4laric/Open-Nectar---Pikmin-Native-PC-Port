@@ -1721,7 +1721,7 @@ void Navi::callPikis(f32 radius, bool recallWorkers)
                     workerEvent.action=top?top->mCurrActionIdx:-1;
                     if(top && top->mChildActions && top->mCurrActionIdx==PikiAction::Transport && top->mCurrActionIdx<top->mChildCount){
                         const Action* action=top->mChildActions[top->mCurrActionIdx].mAction;
-                        if(action && action->mPiki==piki)if(auto* transport=dynamic_cast<const ActTransport*>(action))workerEvent.target=transport->pcTransportObservation();
+                        if(action && action->mPiki==piki)if(auto* transport=dynamic_cast<const ActTransport*>(action)){workerEvent.target=transport->pcTransportObservation();workerEvent.episode=pc_worker_task_ensure(reinterpret_cast<uintptr_t>(transport),workerEvent.target);}
                     }
                     workerEvent.held=mKontroller && mKontroller->keyDown(KBBTN_B);workerEvent.heldSeconds=mWhistleTimer;
                     workerEvent.recall=recallWorkers;workerEvent.radius=radius;workerEvent.distance=dist;

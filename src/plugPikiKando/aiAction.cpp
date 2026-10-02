@@ -435,12 +435,35 @@ int TopAction::exec()
 	}
 
 	Child* child = &mChildActions[mCurrActionIdx];
+
+#if defined(PIKI_PC_PORT)
+    PcWorkerTerminal workerTerminal;
+    if(pc_worker_observer_enabled && mCurrActionIdx==PikiAction::Transport && child->mAction && child->mAction->mPiki==mPiki){
+        if(auto* transport=dynamic_cast<const ActTransport*>(child->mAction)){
+            workerTerminal.before=transport->pcTransportObservation();workerTerminal.actor=reinterpret_cast<uintptr_t>(mPiki);
+            workerTerminal.action=reinterpret_cast<uintptr_t>(transport);
+            workerTerminal.episode=pc_worker_task_ensure(workerTerminal.action,workerTerminal.before);
+        }
+    }
+#endif
 	int res      = child->mAction->exec();
+#if defined(PIKI_PC_PORT)
+    if(workerTerminal.episode && (res==ACTOUT_Fail || res==ACTOUT_Success)){
+        workerTerminal.result=res;
+        if(auto* e=pc_worker_current(workerTerminal.actor))workerTerminal.reason=e->reason;
+        if(auto* transport=dynamic_cast<const ActTransport*>(child->mAction))workerTerminal.after=transport->pcTransportObservation();
+    }
+#endif
+
 	switch (res) {
 	case ACTOUT_Fail:
 	case ACTOUT_Success:
 	{
 		if (mCurrActionIdx == PikiAction::NOACTION) {
+#if defined(PIKI_PC_PORT)
+            pc_worker_terminal_record(workerTerminal);
+#endif
+
 			return ACTOUT_Fail;
 		}
 
@@ -519,6 +542,11 @@ int TopAction::exec()
 				}
 				int emote = mPiki->mEmotion;
 				mPiki->changeMode(PikiMode::FormationMode, nullptr);
+#if defined(PIKI_PC_PORT)
+                workerTerminal.joined=true;workerTerminal.mode=mPiki->mMode;workerTerminal.state=mPiki->getState();
+                workerTerminal.captain=mPiki->mNavi?mPiki->mNavi->mNaviID:-1;pc_worker_terminal_record(workerTerminal);
+#endif
+
 				if (mPiki->isKinoko()) {
 					PRINT("キノコピキ：もとにもどる！\n"); // 'kinokopiki: back to normal!'
 					mPiki->mFSM->transit(mPiki, PIKISTATE_KinokoChange);
@@ -571,6 +599,10 @@ int TopAction::exec()
 				mPiki->mFSM->transit(mPiki, PIKISTATE_Emotion);
 			}
 		}
+
+#if defined(PIKI_PC_PORT)
+        pc_worker_terminal_record(workerTerminal);
+#endif
 		break;
 	}
 	}

@@ -130,7 +130,8 @@ class CaptainSaveApp final:public PlugPikiApp {
     OwnerStage ownerStage=Boot;
     int ownerFrames=0, switchFrames=0, startupFrames=0;
     std::vector<Piki*> startupBodies, ownedBodies, startupFreeBodies, startupWorkers, recalledWorkers;
-    unsigned workerEventsRead=0;
+    unsigned workerEventsRead=0, workerEpisodesRead=0, workerTerminalsRead=0;
+    std::vector<unsigned> completedWorkerEpisodes;
     bool acquisitionNeeded=false, setupBSubmitted=false, setupBObserved=false, setupGatherObserved=false, setupRecruitmentObserved=false;
     bool menuSeen=false, menuConfirm=false;
     int menuFrames=0, diaryActions=0;
@@ -195,16 +196,39 @@ class CaptainSaveApp final:public PlugPikiApp {
         const auto target=transport->pcTransportObservation();
         require(target.valid() && target.actor==reinterpret_cast<uintptr_t>(p),"actual live member pellet target");return target;
     }
+    size_t workerBody(uintptr_t actor){
+        auto it=std::find_if(startupBodies.begin(),startupBodies.end(),[&](Piki* p){return reinterpret_cast<uintptr_t>(p)==actor;});
+        require(it!=startupBodies.end(),"worker episode belongs to original body");return size_t(it-startupBodies.begin());
+    }
+    const PcWorkerEpisode& workerEpisode(unsigned id,uintptr_t actor,uintptr_t target){
+        require(id>0 && id<=workerEpisodesRead,"worker episode has observed begin");
+        const auto& e=pc_worker_episodes[id-1];
+        require(e.id==id && e.actor==actor && e.target.target==target,"exact worker task/body/target continuity");
+        require(std::find(completedWorkerEpisodes.begin(),completedWorkerEpisodes.end(),id)==completedWorkerEpisodes.end(),"one resolution per task episode");
+        return e;
+    }
     void consumeWorkerEvents(){
         require(!pc_worker_observer_overflow,"worker event ring not overflowed");
+        while(workerEpisodesRead<pc_worker_episode_count){
+            const auto& e=pc_worker_episodes[workerEpisodesRead++];
+            require(e.id==workerEpisodesRead && e.action && e.target.valid() && e.target.visible && !e.target.atGoal,"safe observed native task begin");
+            std::printf("P2_ONION_WORKER_EPISODE episode=%u body_token=%zu target_token=%llu\n",e.id,workerBody(e.actor),(unsigned long long)e.target.target);
+        }
         while(workerEventsRead<pc_worker_observer_count){
             const auto event=pc_worker_observer_events[workerEventsRead++];
             require(event.eligible() && event.nativeResult(),"actual call-time worker eligibility/result");
-            auto found=std::find_if(startupWorkers.begin(),startupWorkers.end(),[&](Piki* p){return reinterpret_cast<uintptr_t>(p)==event.actor;});
-            require(found!=startupWorkers.end(),"worker event belongs to observed original body");
-            require(std::find(recalledWorkers.begin(),recalledWorkers.end(),*found)==recalledWorkers.end(),"one native recall event per worker");
-            recalledWorkers.push_back(*found);
-            std::printf("P2_ONION_WORKER_RECALL body_token=%zu target_token=%llu held_seconds=%.6f distance=%.6f radius=%.6f instant=%d after_mode=%d after_state=%d accepted=1\n",size_t(std::find(startupBodies.begin(),startupBodies.end(),*found)-startupBodies.begin()),(unsigned long long)event.target.target,event.heldSeconds,event.distance,event.radius,int(event.instant),event.afterMode,event.afterState);
+            workerEpisode(event.episode,event.actor,event.target.target);
+            completedWorkerEpisodes.push_back(event.episode);
+            const size_t token=workerBody(event.actor);recalledWorkers.push_back(startupBodies[token]);
+            std::printf("P2_ONION_WORKER_RECALL episode=%u body_token=%zu target_token=%llu held_seconds=%.6f distance=%.6f radius=%.6f instant=%d after_mode=%d after_state=%d accepted=1\n",event.episode,token,(unsigned long long)event.target.target,event.heldSeconds,event.distance,event.radius,int(event.instant),event.afterMode,event.afterState);
+        }
+        while(workerTerminalsRead<pc_worker_terminal_count){
+            const auto& event=pc_worker_terminals[workerTerminalsRead++];
+            require(event.eligible(),"only exact live-visible nongGoal slot-failure natural Formation allowed");
+            const auto& e=workerEpisode(event.episode,event.actor,event.after.target);
+            require(e.action==event.action,"actual terminal action matches episode");
+            completedWorkerEpisodes.push_back(event.episode);
+            std::printf("P2_ONION_WORKER_NATURAL episode=%u body_token=%zu target_token=%llu reason=%d result=%d before_visible=1 after_visible=1 before_goal=0 after_goal=0 captain=%d mode=%d joined=1 accepted=1\n",event.episode,workerBody(event.actor),(unsigned long long)event.after.target,event.reason,event.result,event.captain,event.mode);
         }
     }
     // Explicit fresh-save setup, never evidence of automatic startup ownership.
@@ -241,8 +265,8 @@ class CaptainSaveApp final:public PlugPikiApp {
             require(!acquisitionNeeded || (setupBObserved && setupGatherObserved && setupRecruitmentObserved),"needed acquisition requires observed B/Gather and actual recruitment");
             require(acquisitionNeeded || (!setupBSubmitted && !setupBObserved && !setupGatherObserved && !setupRecruitmentObserved),"already assembled makes no SDL recruitment claim");
             std::printf("P2_ONION_STARTUP_ACQUIRED frames=%d unique=20 live=20 stored=0 owner0=20 owner1=0 plate0=20 plate1=0 acquisition_needed=%d observed_B=%d observed_Gather=%d observed_recruitment=%d via_ordinary_SDL=%d\n",startupFrames,int(acquisitionNeeded),int(setupBObserved),int(setupGatherObserved),int(setupRecruitmentObserved),int(acquisitionNeeded && setupBObserved && setupGatherObserved && setupRecruitmentObserved));
-            require(recalledWorkers.size()==startupWorkers.size(),"all initial workers have actual native recall events");
-            std::printf("P2_ONION_WORKER_SETUP needed=%zu observed=%zu original_unique=20\n",startupWorkers.size(),recalledWorkers.size());
+            require(completedWorkerEpisodes.size()==pc_worker_episode_count,"every observed Transport task episode has exact native resolution");
+            std::printf("P2_ONION_WORKER_SETUP needed=%u observed=%zu recalls=%u natural=%u original_unique=20\n",pc_worker_episode_count,completedWorkerEpisodes.size(),workerEventsRead,workerTerminalsRead);
             pc_worker_observer_end();
             return true;
         }
