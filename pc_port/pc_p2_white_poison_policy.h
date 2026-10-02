@@ -1,6 +1,7 @@
 #pragma once
 #include <set>
 #include <utility>
+#include <cstddef>
 
 // A prepare/commit pair spans the existing kill call. Committing consumes the
 // token, so replay cannot damage twice and a recycled actor address can be
@@ -20,6 +21,9 @@ public:
         }
     }
     void reset() { mPending.clear(); }
+    std::size_t pendingCount() const { return mPending.size(); }
+    // Copies pending logical tokens under the agreed save fence; does not consume them.
+    std::set<std::pair<const void*, const void*>> capturePending() const { return mPending; }
 private:
     std::set<std::pair<const void*, const void*>> mPending;
 };

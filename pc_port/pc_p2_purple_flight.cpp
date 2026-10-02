@@ -175,3 +175,19 @@ PcP2PurpleFlightSample pc_p2_purple_flight_sample(const Piki* piki)
     return found == states.end() ? PcP2PurpleFlightSample{}
                                  : PcP2PurpleFlightSample{ found->second.phase, found->second.elapsed, found->second.motionElapsed };
 }
+
+bool pc_p2_purple_flight_capture(PcP2PurpleFlightCheckpoint& out, std::string& error)
+{
+    PcP2PurpleFlightCheckpoint snapshot;snapshot.enabled=enabled;
+    if(states.size()>65536||(!enabled&&!states.empty())){error="invalid Purple flight profile/inventory";return false;}
+    snapshot.entries.reserve(states.size());
+    for(const auto& entry:states){
+        const auto& state=entry.second;
+        if(!entry.first||state.phase<PcP2PurpleFlightPhase::Ascent||state.phase>PcP2PurpleFlightPhase::Recovery||
+           !std::isfinite(state.elapsed)||!std::isfinite(state.motionElapsed)||state.elapsed<0||state.motionElapsed<0){
+            error="invalid Purple flight component state";return false;
+        }
+        snapshot.entries.push_back({entry.first,state.phase,state.elapsed,state.motionElapsed,state.hadIgnoreGravity,state.hadPriorityFaceDirection});
+    }
+    out=std::move(snapshot);error.clear();return true;
+}

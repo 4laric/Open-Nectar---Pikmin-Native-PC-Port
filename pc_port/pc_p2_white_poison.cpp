@@ -88,3 +88,18 @@ bool pc_p2_white_poison_finish(BTeki* predator, const Creature* victim, bool con
                 static_cast<void*>(predator), static_cast<const void*>(victim), poisonDamage, predator->mHealth);
     return true;
 }
+
+bool pc_p2_white_poison_capture(PcP2WhitePoisonCheckpoint& out, std::string& error)
+{
+    if(!std::isfinite(poisonDamage)||poisonDamage<0||predatorGenerators.size()>32||predators.size()>65536||events.pendingCount()>65536){
+        error="invalid White poison component inventory";return false;
+    }
+    const auto pending=events.capturePending();
+    PcP2WhitePoisonCheckpoint snapshot;snapshot.enabled=enabled;snapshot.damage=poisonDamage;
+    snapshot.predatorGenerators.assign(predatorGenerators.begin(),predatorGenerators.end());
+    snapshot.predators.assign(predators.begin(),predators.end());
+    snapshot.pendingTokens.assign(pending.begin(),pending.end());
+    for(const auto* predator:snapshot.predators)if(!predator){error="null admitted White predator";return false;}
+    for(const auto& token:snapshot.pendingTokens)if(!token.first||!token.second){error="null White poison pending token";return false;}
+    out=std::move(snapshot);error.clear();return true;
+}
