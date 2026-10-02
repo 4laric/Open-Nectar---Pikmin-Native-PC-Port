@@ -9,7 +9,7 @@ bool capturePlayerCore(const PlayerState& p,const PlayerCoreTopology& topology,c
  if(!fence.sceneInitialized||!fence.agreedReadOnlyFence||fence.tickBefore!=fence.tickAfter){e="player capture requires initialized stopped scene fence";return false;}
  static_assert(MAX_DAYS==30&&STAGE_COUNT==5&&PikiColorCount==3,"PlayerState topology changed");
  // Check every known allocated course before any dynamic data read. Never touch
- // zero-count pointers: initGame leaves those pointer slots uninitialized.
+ // zero-count pointers: construction leaves those slots uninitialized.
  if(!graphMatches(p.mPerHourGraph,topology.hourStart,topology.hourEnd)||!graphMatches(p.mPerDayGraph,topology.dayStart,topology.dayEnd)){e="PlayerState graph factory mismatch";return false;}
  for(size_t i=0;i<5;++i){const auto n=topology.courseEntries[i];if(n>4096){e="course factory count exceeds bound";return false;}if(n&&(!p.mCourseFlags||!p.mCourseFlags[i]||p.mCourseFlags[i]->mEntryCount!=n||p.mCourseFlags[i]->mSize!=n/8+1||!p.mCourseFlags[i]->mFlags)){e="course flags factory mismatch";return false;}}
  PlayerCoreFields v;
