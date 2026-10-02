@@ -30,6 +30,9 @@ public:
   return visitor.visit(key,slot,error);
  }
 };
+// Diagnostic snapshot only: no schema checks, clamping, or engine updates.
+struct PlateCounts {int capacity;int used;int total;u32 platePikis;int happa[3];};
+bool navi_plate_counts(Navi&,PlateCounts&,std::string&);
 bool visit_navi_strong_storage(Navi&,const ActorFields&,StrongStorageVisitor&,std::string&);
 bool visit_creature_strong_storage(Creature&,const ActorFields&,StrongStorageVisitor&,std::string&);
 bool visit_formpoint_strong_storage(FormPoint&,StrongStorageVisitor&,std::string&);

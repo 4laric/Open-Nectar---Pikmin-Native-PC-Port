@@ -102,6 +102,10 @@ void runStorage(){
  require(!captains.empty()&&pikis.size()==20,"actual captain and20 Piki inventory");
  auto check=[&](const std::vector<FieldSchema>& schema,const StorageCensus& census){size_t expected=0;for(auto& d:schema)if(d.strength==ReferenceStrength::StrongCreature){++expected;require(census.keys.count(d.key)==1,"exact strong schema key present");}require(expected==census.keys.size(),"no extra storage keys");for(auto slot:census.slots)require(allSlots.insert(slot).second,"globally unique native wrapper address");};
  for(size_t i=0;i<captains.size();++i){auto& n=*captains[i];Resolver resolver;resolver.owner=&n;resolver.typedOwner=&n;ActorBytes before,after;ActorFields fields;std::vector<FieldSchema> schema;StorageCensus census;
+  PlateCounts raw{};
+  if(navi_plate_counts(n,raw,error))std::printf("MIDDAY_STRONG_PLATE index=%zu capacity=%d used=%d total=%d plate_pikis=%u happa0=%d happa1=%d happa2=%d\n",i,raw.capacity,raw.used,raw.total,static_cast<unsigned>(raw.platePikis),raw.happa[0],raw.happa[1],raw.happa[2]);
+  else std::printf("MIDDAY_STRONG_PLATE index=%zu observation_unavailable=1 reason=%s\n",i,error.c_str());
+  std::fflush(nullptr);
   storageStage("Navi",i,"capture",error,[&]{return capture_navi(n,resolver,now,before,error);});
   storageStage("Navi",i,"decode",error,[&]{return decode_actor_fields(before,fields,error);});
   storageStage("Navi",i,"schema",error,[&]{return navi_schema(fields,schema,error);});
