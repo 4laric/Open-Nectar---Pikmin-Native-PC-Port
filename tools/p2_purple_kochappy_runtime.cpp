@@ -444,6 +444,7 @@ class PurpleKochappyApp:public PlugPikiApp {
  int receiverWaypoint=0;
  bool seenCaptain=false,wasActive=false,sawFit=false,sawPause=false,recovered=false,deathDuringStun=false;
  Teki* enemy=nullptr;Pom* violet=nullptr;Piki* purple=nullptr;
+ PcKochappyFsmSnapshot pausedFsm;
  Generator* enemyGenerator=nullptr;Generator* violetGenerator=nullptr;
  unsigned violetGeneratorId=0;
  void requireCurrentActors() {
@@ -621,9 +622,13 @@ public:
    phase=5;start=age;input();
   }
   const bool active=pc_p2_kochappy_stun_active(enemy);
+  const auto fsm=pc_p2_kochappy_fsm_observe(enemy);
+  require(fsm.available&&std::isfinite(fsm.stateTime),"current ownFSM snapshot unavailable");
+  require(enemy->mTekiAnimator,"current enemy animator absent");
   const float counter=enemy->mTekiAnimator->getCounter();
   if(active){
-   if(!wasActive){pausedCounter=counter;activeSeconds=0;std::printf("P2_PURPLE_KOCHAPPY_ACTIVE counter=%.6f health=%.2f\n",counter,enemy->mHealth);}
+   if(!wasActive){pausedFsm=fsm;pausedCounter=counter;activeSeconds=0;std::printf("P2_PURPLE_KOCHAPPY_ACTIVE counter=%.6f health=%.2f state=%d stateTime=%.6f attack=%d swallow=%d flick=%d\n",counter,enemy->mHealth,fsm.state,fsm.stateTime,int(fsm.attackFired),int(fsm.swallowFired),int(fsm.flickFired));}
+   require(pc_kochappy_overlay_preserved(pausedFsm,fsm),"ownFSM clock/state/one-shot changed during active overlay");
    require(enemy->getTekiOption(TEKIOPT_ManualAnimation)&&enemy->mMotionSpeed==0,"actual ownmotion overlay notpaused");
    require(std::fabs(counter-pausedCounter)<.001f,"actual animator advanced during receiveroverlay");
    sawPause=true;activeSeconds+=gsys->getFrameTime();if(activeSeconds>1.5f)sawFit=true;
@@ -632,10 +637,11 @@ public:
    if(phase==5)input(KeyConfig::_instance->mSetCursorKey.mBind);
   }
   if(wasActive&&!active&&phase==5){
+   require(!fsm.stunPaused&&!fsm.terminal&&enemy->mHealth>0,"natural recovery entered terminal state or retained pause");
    std::printf("P2_PURPLE_KOCHAPPY_RECOVERY elapsed=%.3f counter=%.6f fit=%d\n",activeSeconds,counter,int(sawFit));
    if(sawFit){require(activeSeconds>=10,"RedFit recovered before source10s");phase=6;start=age;lastCounter=counter;input();}
   }
-  if(phase==7&&wasActive&&!active&&enemy->mHealth<=0)deathDuringStun=true;
+  if(phase==7&&wasActive&&!active&&enemy->mHealth<=0){require(fsm.terminal&&!fsm.stunPaused,"terminal interruption missing ownFSM terminal/unpause");deathDuringStun=true;}
   wasActive=active;
   if(phase==5&&!active){
    const int cycle=(age-start)%150;
@@ -645,11 +651,10 @@ public:
    if(cycle==18)++throwCount;
    require(throwCount<8,"natural Purple receiver/Fit not observed after bounded throws");
   }
-  if(phase==6){input();if(age-start>60){require(std::fabs(counter-lastCounter)>.001f,"animator failed toresume");recovered=true;phase=7;start=age;}}
+  if(phase==6){input();if(age-start>60){require(std::fabs(counter-lastCounter)>.001f,"animator failed toresume");require(pc_kochappy_clock_resumed(pausedFsm,fsm),"ownFSM clock failed toresume naturally");recovered=true;phase=7;start=age;}}
   if(phase==7){
    // Further ordinary throws allow natural damage/death to interrupt another
    // overlay. Success requires the observed active->terminal boundary.
-   if(active&&enemy->mHealth<=0)deathDuringStun=true;
    if(!enemy->isAlive()||enemy->mHealth<=0){
     require(sawPause&&sawFit&&recovered,"receiver recovery prerequisite missing");
     std::printf("P2_PURPLE_KOCHAPPY_MECHANIC_RECOVERY_PASS natural_impact=1 motion_pause_resume=1 RedFit10=1 actor_writes=0 death_during_stun=%d tutorial_AP_gate=OPEN\n",int(deathDuringStun));
