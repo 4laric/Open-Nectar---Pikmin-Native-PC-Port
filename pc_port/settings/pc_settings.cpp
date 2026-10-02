@@ -1,3 +1,4 @@
+#include "pc_midday_save_quit_native.h"
 #include "pc_randomizer.h"
 /**
  * @file pc_settings.cpp
@@ -3550,6 +3551,11 @@ void pc_texpack_install_finished(bool ok, const char* message) {
     texturePackNotice(!ok, message ? message : (ok ? "Pack instalado." : "No se pudo instalar el pack."));
 }
 
+// Main-thread Save & Quit uses the same visible notice renderer.
+void pc_settings_midday_notice(const char* message, bool error) {
+    texturePackNotice(error, message);
+}
+
 // Llega desde el hilo Java que exportó/importó la partida (submenú F1 → Android,
 // SaveTransfer.java). Cierra la transferencia en curso y deja el mensaje pintado
 // unos segundos por drawTimedNotice.
@@ -6055,13 +6061,13 @@ const char* pc_settings_group_summary(int group) {
     case PC_SET_GROUP_CAMERA: return "Free camera, first person, lock-on";
     case PC_SET_GROUP_GAMEPLAY: return "Pikmin behaviour, co-op";
     case PC_SET_GROUP_CHEATS: return "Day, health, Pikmin limit, whistle";
-    case PC_SET_GROUP_DATA: return "Save transfer, reset settings";
+    case PC_SET_GROUP_DATA: return "Save transfer, mid-day save, reset settings";
     default: return "";
     }
 }
 
 namespace {
-constexpr int kSaveDataRows = 3; // export, import, reset defaults
+constexpr int kSaveDataRows = 4; // export, import, reset defaults, experimental mid-day save
 const char* kHdModelLabels[6] = { "Olimar HD", "Louie (Pikmin 2 zip)", "Louie HD (Pikmin 3 zip)", "Pikmin HD (red/yellow/blue)", "Bulborb HD", "Dwarf Bulborb HD" };
 
 void graphicsRowValue(int i, char* value, size_t n) {
@@ -6342,6 +6348,7 @@ const GroupRow kDataRows[] = {
     { SRC_DATA, 1, "Import save from ZIP", "Desktop saves are plain files in the 'save' folder. Replace it to restore." },
 #endif
     { SRC_DATA, 2, "Reset all settings to defaults", "Puts every setting back to its default. Saves are not touched." },
+    { SRC_DATA, 3, "Save & Quit (experimental)", "Saves the current day before quitting. Unavailable until this world supports complete restore." },
 };
 
 template <size_t N> constexpr int countOf(const GroupRow (&)[N]) { return (int)N; }
@@ -6611,7 +6618,7 @@ void pc_settings_row_value(int group, int row, char* out, unsigned long n) {
 #else
             if (r->idx < 2) snprintf(out, n, "save / card0, card1");
 #endif
-            else snprintf(out, n, "A: reset");
+            else snprintf(out, n, r->idx == 3 ? "A: save and quit" : "A: reset");
             break;
         case SRC_KEYS:
         case SRC_PADS: snprintf(out, n, "Open  >"); break;
@@ -6680,6 +6687,7 @@ void pc_settings_row_change(int group, int row, int dir, bool ok) {
         case SRC_DATA:
             if (!ok) return;
             if (r->idx < 2) saveDataRowAction(r->idx);
+            else if (r->idx == 3) pc_midday_request_save_quit();
             else resetToDefaults();
             break;
         default: break; // selectores

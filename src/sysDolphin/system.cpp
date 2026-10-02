@@ -16,6 +16,7 @@
 #include "mods/pc_vs_arena.h"
 #include "netplay/pc_input_log.h"
 #include "netplay/pc_state_hash.h"
+#include "pc_midday_save_quit_native.h"
 #endif
 
 #include "bigFont.h"
@@ -452,6 +453,7 @@ void System::run(BaseApp* app)
 			if (pc_netplay_deterministic()) pc_netplay_det_profile_note_tick();
 			pc_input_log_tick_end(); // netplay harness: file the yaw the sim used (M2c).
 			pc_state_hash_tick_end(); // netplay harness: hash sim state after this tick.
+			if (pc_midday_save_quit_tick(pc_netplay_tick())) break; // saved: exit before another tick
 #endif
 
 			// Identity-replay experiment: re-execute the tick's captured display

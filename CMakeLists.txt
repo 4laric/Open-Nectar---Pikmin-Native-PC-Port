@@ -354,6 +354,12 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_white.cpp
     pc_port/pc_p2_white_poison.cpp
     pc_port/pc_midday_scene_bootstrap.cpp
+    pc_port/pc_midday_codec.cpp
+    pc_port/pc_midday_store.cpp
+    pc_port/pc_midday_save_quit.cpp
+    pc_port/pc_midday_save_quit_engine.cpp
+    pc_port/pc_midday_economy.cpp
+    pc_port/pc_midday_economy_engine.cpp
     pc_port/pc_p2_cave.cpp
     pc_port/pc_p2_cave_dialog_window.cpp
     pc_port/pc_p2_cave_generate.cpp
@@ -3162,3 +3168,21 @@ pikmin_add_ci_fixture(white_campaign tools/p2_white_campaign_runtime.cpp)
 if(TARGET pikmin_ci_fixture_white_campaign)
     target_include_directories(pikmin_ci_fixture_white_campaign PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
 endif()
+
+# Issue68 ordinary host controls; no engine launch or legal assets required.
+add_executable(pc_midday_economy_test tools/pc_midday_economy_test.cpp pc_port/pc_midday_economy.cpp)
+target_include_directories(pc_midday_economy_test PRIVATE pc_port)
+target_compile_options(pc_midday_economy_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME pc_midday_economy COMMAND pc_midday_economy_test)
+add_executable(pc_midday_save_quit_test tools/pc_midday_save_quit_test.cpp
+    pc_port/pc_midday_save_quit.cpp pc_port/pc_midday_codec.cpp pc_port/pc_midday_store.cpp)
+target_include_directories(pc_midday_save_quit_test PRIVATE pc_port)
+target_compile_options(pc_midday_save_quit_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME pc_midday_save_quit COMMAND pc_midday_save_quit_test "${CMAKE_CURRENT_BINARY_DIR}/midday-save-quit-controls")
+add_executable(pc_midday_save_quit_engine_test tools/pc_midday_save_quit_engine_test.cpp
+    pc_port/pc_midday_save_quit.cpp pc_port/pc_midday_save_quit_engine.cpp
+    pc_port/pc_midday_codec.cpp pc_port/pc_midday_store.cpp)
+target_include_directories(pc_midday_save_quit_engine_test PRIVATE pc_port ${SDL2_INCLUDE_DIRS})
+target_compile_options(pc_midday_save_quit_engine_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+target_link_libraries(pc_midday_save_quit_engine_test PRIVATE ${SDL2_LIBRARIES})
+add_test(NAME pc_midday_save_quit_engine COMMAND pc_midday_save_quit_engine_test "${CMAKE_CURRENT_BINARY_DIR}/midday-save-quit-engine-controls")

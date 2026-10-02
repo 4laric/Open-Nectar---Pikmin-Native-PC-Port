@@ -267,6 +267,8 @@ void pc_texpack_install_progress(int files);
    importación Android (SaveTransfer.java), entregado desde un hilo Java para
    que el submenú F1 Save Data lo pinte unos segundos. */
 void pc_save_transfer_finished(bool ok, const char* message);
+// Main-thread Save & Quit status, also drawn by the native F1 menu.
+void pc_settings_midday_notice(const char* message, bool error);
 
 #ifdef __cplusplus
 }
