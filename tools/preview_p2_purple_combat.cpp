@@ -324,6 +324,7 @@ class PurpleCombatApp : public PlugPikiApp {
     bool releaseDiaryInput=false,diaryRevealObserved=false,diaryAdvanceObserved=false;
     int sdlPhase=0,sdlStableAim=0,sdlThrowTicks=0;
     bool sdlStarted=false,sdlThrowObserved=false,sdlGeometryLogged=false;
+    bool sdlAimReleasePending=false;
     Piki* sdlTracePiki=nullptr;
     int sdlTracePikiState=-1;
     int diaryActions=0;
@@ -897,8 +898,15 @@ class PurpleCombatApp : public PlugPikiApp {
             const float ez=n->mSRT.t.z+dz*1.2f-n->mCursorWorldPos.z;
             const float tolerance=std::max(5.f,C_NAVI_PARM(n,mCursorMoveSpeed)*gsys->getFrameTime()*.75f);
             const int stableBefore=sdlStableAim;
+            // The observed reticle trails the live cursor by one tick. End
+            // each correction pulse before using the next reticle observation,
+            // otherwise a second pulse repeats the already completed movement.
+            if(sdlAimReleasePending) {
+                ordinaryInput();sdlAimReleasePending=false;sdlStableAim=0;
+                sdlAimTrace(n,violet,"release_correction",ex,ez,tolerance,ready,stableBefore);return nullptr;
+            }
             if(std::sqrt(ex*ex+ez*ez)>tolerance) {
-                sdlStableAim=0;sdlDirection(n,ex,ez,20);
+                sdlStableAim=0;sdlDirection(n,ex,ez,20);sdlAimReleasePending=true;
                 sdlAimTrace(n,violet,"correct",ex,ez,tolerance,ready,stableBefore);return nullptr;
             }
             ordinaryInput();if(!ready || ++sdlStableAim<3) {
