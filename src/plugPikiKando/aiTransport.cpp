@@ -1700,3 +1700,21 @@ int ActTransport::moveToWayPoint()
 
 	STACK_PAD_VAR(1);
 }
+
+#if defined(PIKI_PC_PORT)
+PcTransportObservation ActTransport::pcTransportObservation() const
+{
+    PcTransportObservation result;result.actor=reinterpret_cast<uintptr_t>(mPiki);
+    const Pellet* target=mPellet.mPtr;result.target=reinterpret_cast<uintptr_t>(target);result.state=mState;
+    if(!target || !pelletMgr)return result;
+    Iterator it(pelletMgr);CI_LOOP(it){
+        Pellet* current=static_cast<Pellet*>(*it);
+        if(current!=target)continue; // Compare only before dereference; reject stale non-member pointers.
+        result.member=true;result.alive=current->isAlive();result.pellet=current->mObjType==OBJTYPE_Pellet;
+        result.generator=current->getGeneratorID();
+        const Vector3f pos=current->getPosition();result.x=pos.x;result.y=pos.y;result.z=pos.z;
+        return result;
+    }
+    return result;
+}
+#endif

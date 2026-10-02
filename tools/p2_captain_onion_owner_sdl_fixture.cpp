@@ -32,6 +32,7 @@
 #include "KeyConfig.h"
 #include "pc_coop.h"
 #include "pc_diary_observer.h"
+#include "pc_whistle_observer.h"
 #include "Node.h"
 #include "Piki.h"
 #include "PikiMgr.h"
@@ -128,7 +129,8 @@ class CaptainSaveApp final:public PlugPikiApp {
     enum OwnerStage { Boot, Deposit, SwitchOne, Withdraw, Settle, Owned };
     OwnerStage ownerStage=Boot;
     int ownerFrames=0, switchFrames=0, startupFrames=0;
-    std::vector<Piki*> startupBodies, ownedBodies, startupFreeBodies;
+    std::vector<Piki*> startupBodies, ownedBodies, startupFreeBodies, startupWorkers, recalledWorkers;
+    unsigned workerEventsRead=0;
     bool acquisitionNeeded=false, setupBSubmitted=false, setupBObserved=false, setupGatherObserved=false, setupRecruitmentObserved=false;
     bool menuSeen=false, menuConfirm=false;
     int menuFrames=0, diaryActions=0;
@@ -183,6 +185,28 @@ class CaptainSaveApp final:public PlugPikiApp {
         const auto current=liveBodies();require(current.size()==expected.size(),"same actual live body count");
         for(auto* p:current)require(std::find(expected.begin(),expected.end(),p)!=expected.end(),"same actual live body identities");
     }
+    PcTransportObservation transportTarget(Piki* p){
+        auto* top=p->mActiveAction;
+        require(top && top->mChildActions && top->mCurrActionIdx==PikiAction::Transport && top->mCurrActionIdx>=0 && top->mCurrActionIdx<top->mChildCount,"valid transport table index");
+        const Action* action=top->mChildActions[top->mCurrActionIdx].mAction;
+        require(action && action->mPiki==p,"transport action belongs to this body");
+        const auto* transport=dynamic_cast<const ActTransport*>(action);
+        require(transport!=nullptr,"actual transport action type");
+        const auto target=transport->pcTransportObservation();
+        require(target.valid() && target.actor==reinterpret_cast<uintptr_t>(p),"actual live member pellet target");return target;
+    }
+    void consumeWorkerEvents(){
+        require(!pc_worker_observer_overflow,"worker event ring not overflowed");
+        while(workerEventsRead<pc_worker_observer_count){
+            const auto event=pc_worker_observer_events[workerEventsRead++];
+            require(event.eligible() && event.nativeResult(),"actual call-time worker eligibility/result");
+            auto found=std::find_if(startupWorkers.begin(),startupWorkers.end(),[&](Piki* p){return reinterpret_cast<uintptr_t>(p)==event.actor;});
+            require(found!=startupWorkers.end(),"worker event belongs to observed original body");
+            require(std::find(recalledWorkers.begin(),recalledWorkers.end(),*found)==recalledWorkers.end(),"one native recall event per worker");
+            recalledWorkers.push_back(*found);
+            std::printf("P2_ONION_WORKER_RECALL body_token=%zu target_token=%llu held_seconds=%.6f distance=%.6f radius=%.6f instant=%d after_mode=%d after_state=%d accepted=1\n",size_t(std::find(startupBodies.begin(),startupBodies.end(),*found)-startupBodies.begin()),(unsigned long long)event.target.target,event.heldSeconds,event.distance,event.radius,int(event.instant),event.afterMode,event.afterState);
+        }
+    }
     // Explicit fresh-save setup, never evidence of automatic startup ownership.
     // Only SDL input recruits; no direct callPikis, actor, cursor or stock writes.
     bool acquireStartup(Navi* a,Navi* b){
@@ -191,10 +215,15 @@ class CaptainSaveApp final:public PlugPikiApp {
         if(startupBodies.empty()){
             startupBodies=liveBodies();require(startupBodies.size()==20,"startup twenty unique bodies");
             acquisitionNeeded=!(formation(a)==20 && formation(b)==0 && plateCount(a)==20 && plateCount(b)==0);
+            // Read all actual starting bodies before applying the narrower work refusal policy.
+            for(size_t i=0;i<startupBodies.size();++i){auto* body=startupBodies[i];const Vector3f pos=body->getPosition();
+                std::printf("P2_ONION_STARTUP_INITIAL body_token=%zu address=%p mode=%d state=%d action=%d owner=%d position=%.3f,%.3f,%.3f\n",i,static_cast<void*>(body),int(body->mMode),body->getState(),body->mActiveAction?body->mActiveAction->mCurrActionIdx:-1,body->mNavi?body->mNavi->mNaviID:-1,pos.x,pos.y,pos.z);
+            }
+            pc_worker_observer_begin();
             elapsed("startup_acquisition_begin");
             std::puts("P2_ONION_STARTUP_ACQUIRE disclosed_setup=1 automatic_ownership_claim=0 input_player=1 captain=0");
         }
-        sameBodies(startupBodies);require(++startupFrames<=180,"bounded180-frame ordinary startup acquisition");
+        sameBodies(startupBodies);consumeWorkerEvents();require(++startupFrames<=180,"bounded180-frame ordinary startup acquisition");
         // Observe engine-consumed input and a subsequent real Free -> Formation change.
         // Submitted SDL state alone never qualifies as an observed recruitment.
         if(setupBSubmitted && a->mKontroller && a->mKontroller->keyClick(KBBTN_B))setupBObserved=true;
@@ -202,6 +231,7 @@ class CaptainSaveApp final:public PlugPikiApp {
         for(auto* p:startupBodies){
             if(setupBObserved && setupGatherObserved && p->mMode==PikiMode::FormationMode && p->mNavi==a
                 && std::find(startupFreeBodies.begin(),startupFreeBodies.end(),p)!=startupFreeBodies.end())setupRecruitmentObserved=true;
+            if(p->mMode==PikiMode::FormationMode && p->mNavi==a && std::find(recalledWorkers.begin(),recalledWorkers.end(),p)!=recalledWorkers.end())setupRecruitmentObserved=true;
             if(p->mMode==PikiMode::FreeMode && std::find(startupFreeBodies.begin(),startupFreeBodies.end(),p)==startupFreeBodies.end())startupFreeBodies.push_back(p);
         }
         const bool complete=formation(a)==20 && formation(b)==0 && plateCount(a)==20 && plateCount(b)==0;
@@ -211,6 +241,9 @@ class CaptainSaveApp final:public PlugPikiApp {
             require(!acquisitionNeeded || (setupBObserved && setupGatherObserved && setupRecruitmentObserved),"needed acquisition requires observed B/Gather and actual recruitment");
             require(acquisitionNeeded || (!setupBSubmitted && !setupBObserved && !setupGatherObserved && !setupRecruitmentObserved),"already assembled makes no SDL recruitment claim");
             std::printf("P2_ONION_STARTUP_ACQUIRED frames=%d unique=20 live=20 stored=0 owner0=20 owner1=0 plate0=20 plate1=0 acquisition_needed=%d observed_B=%d observed_Gather=%d observed_recruitment=%d via_ordinary_SDL=%d\n",startupFrames,int(acquisitionNeeded),int(setupBObserved),int(setupGatherObserved),int(setupRecruitmentObserved),int(acquisitionNeeded && setupBObserved && setupGatherObserved && setupRecruitmentObserved));
+            require(recalledWorkers.size()==startupWorkers.size(),"all initial workers have actual native recall events");
+            std::printf("P2_ONION_WORKER_SETUP needed=%zu observed=%zu original_unique=20\n",startupWorkers.size(),recalledWorkers.size());
+            pc_worker_observer_end();
             return true;
         }
         Piki* target=nullptr;float nearest=1.0e30f;
@@ -220,11 +253,20 @@ class CaptainSaveApp final:public PlugPikiApp {
             if(startupFrames==1 || startupFrames%30==0)std::printf("P2_ONION_STARTUP_BODY frame=%d body_token=%zu address=%p generator_id=%u mode=%d state=%d action=%d owner=%d callable=%d rope=%d navi_distance=%.3f cursor_distance=%.3f\n",
                 startupFrames,i,static_cast<void*>(p),unsigned(p->getGeneratorID()),int(p->mMode),p->getState(),p->mActiveAction?p->mActiveAction->mCurrActionIdx:-1,p->mNavi?p->mNavi->mNaviID:-1,int(p->mIsCallable),int(p->mRope!=nullptr),std::sqrt(d2),std::sqrt(cursor.x*cursor.x+cursor.z*cursor.z));
             // Wait for genuine exit/LookAt transitions; do not substitute a new body.
-            require(p->mMode==PikiMode::FreeMode || p->mMode==PikiMode::FormationMode || p->mMode==PikiMode::ExitMode,"startup mode must be observed free/formation/exit, not repaired work");
+            require(p->mMode==PikiMode::FreeMode || p->mMode==PikiMode::FormationMode || p->mMode==PikiMode::ExitMode || p->mMode==PikiMode::TransportMode,"startup mode outside reviewed native recall contract");
+            if(p->mMode==PikiMode::TransportMode && p->getState()!=PIKISTATE_LookAt){
+                require(!pc_vs_active() && p->isAlive() && p->mIsCallable && !p->isBuried() && !p->isKinoko() && !p->isFired() && !p->isDamaged() && !p->mRope && p->getState()==PIKISTATE_Normal,"safe ordinary transport recall body");
+                const auto targetFacts=transportTarget(p);
+                if(std::find(startupWorkers.begin(),startupWorkers.end(),p)==startupWorkers.end()){
+                    startupWorkers.push_back(p);
+                    const Vector3f pos=p->getPosition();const Vector3f captainPos=a->getPosition();
+                    std::printf("P2_ONION_WORKER_SETUP_BEGIN body_token=%zu body_pos=%.3f,%.3f,%.3f captain_pos=%.3f,%.3f,%.3f target_token=%llu target_generator=%u target_pos=%.3f,%.3f,%.3f transport_state=%d disclosed_worker_recall=1\n",i,pos.x,pos.y,pos.z,captainPos.x,captainPos.y,captainPos.z,(unsigned long long)targetFacts.target,targetFacts.generator,targetFacts.x,targetFacts.y,targetFacts.z,targetFacts.state);
+                }
+            }
             // LookAt has already received the native whistle. It remains FreeMode
             // until its reaction animation finishes; callPikis excludes it too.
             // Approach an uncalled body instead, or release input and await cleanup.
-            if(p->mMode==PikiMode::FreeMode && p->getState()!=PIKISTATE_LookAt && p->mIsCallable && !p->mRope && d2<nearest){nearest=d2;target=p;}
+            if((p->mMode==PikiMode::FreeMode || p->mMode==PikiMode::TransportMode) && p->getState()!=PIKISTATE_LookAt && p->mIsCallable && !p->mRope && d2<nearest){nearest=d2;target=p;}
         }
         if(!target){pad();return false;}
         // The same camera-relative left-stick transform used by onionMenu.
