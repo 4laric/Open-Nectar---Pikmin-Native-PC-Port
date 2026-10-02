@@ -158,7 +158,7 @@ bool run(Prepare prepare,Inspect inspect,Observe observe,pc_midday::ConstructorF
   unchanged=observe(e);
   if(!unchanged&&detail.empty())detail.assign(e.data(),std::min(e.size(),size_t(511)));
   graph.reset();
-  retired=graph.empty()&&!graph.stagedNavi()&&!graph.stagedPiki();
+  retired=graph.empty()&&!graph.stagedNavi()&&!graph.stagedPiki()&&!graph.heldBy(fence);
   unchanged=observe(e)&&unchanged;
   if(!unchanged&&detail.empty())detail.assign(e.data(),std::min(e.size(),size_t(511)));
   }
@@ -175,7 +175,7 @@ bool run(Prepare prepare,Inspect inspect,Observe observe,pc_midday::ConstructorF
   good=!accepted&&!rejected.empty()&&graph.empty()&&!graph.stagedNavi()&&!graph.stagedPiki()&&graph.allocationAttempts()==at+1;
   unchanged=observe(e);
   graph.reset();
-  retired=graph.empty()&&!graph.stagedNavi()&&!graph.stagedPiki();
+  retired=graph.empty()&&!graph.stagedNavi()&&!graph.stagedPiki()&&!graph.heldBy(fence);
   unchanged=observe(e)&&unchanged;
   }
   const bool heap=heapEqual(before,piki_pc_allocation_stats(),e);
@@ -198,7 +198,7 @@ bool run(Prepare prepare,Inspect inspect,Observe observe,pc_midday::ConstructorF
   unchanged=observe(e);
   if(!unchanged&&detail.empty())detail.assign(e.data(),std::min(e.size(),size_t(511)));
   graph.reset();
-  retired=graph.empty()&&!graph.stagedNavi()&&!graph.stagedPiki();
+  retired=graph.empty()&&!graph.stagedNavi()&&!graph.stagedPiki()&&!graph.heldBy(fence);
   unchanged=observe(e)&&unchanged;
   if(!unchanged&&detail.empty())detail.assign(e.data(),std::min(e.size(),size_t(511)));
   }
@@ -225,10 +225,14 @@ template<class Observe> bool pc_midday_check_owned_piki_graph(ViewPiki& live,con
 template<class Observe> bool pc_midday_check_free_graphs(Navi& liveNavi,ViewPiki& livePiki,
  NaviProp& naviProps,PikiProp& pikiProps,pc_midday::ConstructorFence& fence,Observe observe,std::string& e){
  using namespace pc_midday;using namespace pc_midday_graph_checks;
+ ConstructorFence differentFence;
+ {ActorAllocationGraph empty;
+  if(empty.heldBy(fence)||empty.heldBy(differentFence))return fail(e,"empty graph claims fence ownership");}
  const NaviAncillaryConfig nc{5,100,1,30,150,12};
  auto nprepare=[&](ActorAllocationGraph& g,size_t at,std::string& error){return g.prepareFreeNavi(naviProps,0,nc,fence,error,at);};
  auto ninspect=[&](ActorAllocationGraph& g,std::string& error){
   auto* n=g.stagedNavi();
+  if(!g.heldBy(fence)||g.heldBy(differentFence))return fail(error,"free Navi fence identity mismatch");
   if(!navi(liveNavi,n,error))return false;
   if(n->mSize!=20.0f||n->mHealth!=naviProps.mNaviProps.mHealth()||n->mLowerMotionCooldown!=4||n->mNeutralTime!=0.0f||n->mThrowHoldTime!=0.0f||n->mSeedCollectionCount!=0||n->mShadowCaster.mLightCamera.mFov!=20.0f||
      n->mProps!=&naviProps||n->mNaviID!=0||n->mNaviShapeObject||n->mNaviCamera||n->mControlCamera||n->mAttackTarget.mPtr||n->mPellet||
@@ -244,6 +248,7 @@ template<class Observe> bool pc_midday_check_free_graphs(Navi& liveNavi,ViewPiki
   auto prepare=[&](ActorAllocationGraph& g,size_t at,std::string& error){return g.prepareFreeViewPiki(pikiProps,pc,fence,error,at);};
   auto inspect=[&](ActorAllocationGraph& g,std::string& error){
    auto* p=g.stagedPiki();if(!piki(livePiki,p,error))return false;
+   if(!g.heldBy(fence)||g.heldBy(differentFence))return fail(error,"free ViewPiki fence identity mismatch");
    if(p->mCollisionRadius!=8.0f||p->_68!=1||p->mDeathTimer!=0.0f||p->mIsPanicked||p->mMode!=PikiMode::FormationMode||
       p->mProps!=&pikiProps||p->mPikiShape||p->mHappaModel||p->mRouteHandle||p->mNavi||p->mPellet||
       bool(p->mPathBuffers)!=(pathCapacity!=0)||p->mHappa!=0||p->mPikiAnimMgr.mUpperAnimator.mMgr||p->mPikiAnimMgr.mUpperAnimator.mContext||
@@ -259,7 +264,7 @@ template<class Observe> bool pc_midday_check_free_graphs(Navi& liveNavi,ViewPiki
  auto reject=[&](auto prepare){
   std::string refusal;refusal.reserve(512);const auto before=piki_pc_allocation_stats();bool good=false,unchanged=false;
   {ActorAllocationGraph graph;good=!prepare(graph,refusal)&&!refusal.empty()&&graph.empty()&&!graph.stagedNavi()&&!graph.stagedPiki();
-   unchanged=observe(e);graph.reset();unchanged=observe(e)&&unchanged;}
+   unchanged=observe(e);graph.reset();good=good&&!graph.heldBy(fence)&&!graph.heldBy(differentFence);unchanged=observe(e)&&unchanged;}
   if(!heapEqual(before,piki_pc_allocation_stats(),e))return false;
   return good&&unchanged?true:fail(e,"free graph negative configuration accepted or leaked");
  };
