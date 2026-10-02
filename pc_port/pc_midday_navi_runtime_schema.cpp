@@ -2,7 +2,7 @@
 namespace pc_midday {
 namespace {
 void scalar(std::vector<FieldSchema>& out,const std::string& key,ScalarKind kind){out.push_back(FieldSchema::value(key.c_str(),kind));}
-void ref(std::vector<FieldSchema>& out,const std::string& key,RefKind kind,bool nullable=true){out.push_back(FieldSchema::ref(key.c_str(),kind,nullable));}
+void ref(std::vector<FieldSchema>& out,const std::string& key,RefKind kind,bool nullable,const char* type,ReferenceOwnership owner=ReferenceOwnership::AnyLive){out.push_back(FieldSchema::ref(key.c_str(),kind,nullable,type,owner));}
 void vector(std::vector<FieldSchema>& out,const std::string& key){for(const char* c:{".x",".y",".z"})scalar(out,key+c,ScalarKind::F32);}
 
 }
@@ -80,31 +80,31 @@ bool navi_runtime_schema(const ActorFields& fields,std::vector<FieldSchema>& out
     vector(out,p+"mNaviLightPosition");
     vector(out,p+"mDayEndPosition");
     vector(out,p+"mWalkAnimPrevPos");
-    ref(out,p+"mDamageEfxA",RefKind::ParticleGenerator,true);
-    ref(out,p+"mDamageEfxB",RefKind::ParticleGenerator,true);
-    ref(out,p+"mDamageEfxC",RefKind::ParticleGenerator,true);
-    ref(out,p+"mKontroller",RefKind::Controller,false);
-    ref(out,p+"mNaviCamera",RefKind::Camera,false);
-    ref(out,p+"mControlCamera",RefKind::Camera,true);
-    ref(out,p+"mLookAtPosPtr",RefKind::Vector3,true);
-    ref(out,p+"mCollidedWorkObj",RefKind::Creature,true);
-    ref(out,p+"mSelectedShipPart",RefKind::Creature,true);
-    ref(out,p+"mPcLockTarget",RefKind::Creature,true);
-    ref(out,p+"mGoalItem",RefKind::Creature,true);
-    ref(out,p+"mPikiToPluck",RefKind::Creature,true);
-    ref(out,p+"mSproutToPluck",RefKind::Creature,true);
-    ref(out,p+"mNextThrowPiki",RefKind::Creature,true);
-    ref(out,p+"mPellet",RefKind::Creature,true);
-    ref(out,p+"mBurnEffect",RefKind::Effect,true);
-    ref(out,p+"mRippleEffect",RefKind::Effect,true);
-    ref(out,p+"mSlimeEffect",RefKind::Effect,true);
-    ref(out,p+"mNaviLightEfx",RefKind::Effect,true);
-    ref(out,p+"mNaviLightGlowEfx",RefKind::Effect,true);
-    ref(out,p+"mCursorTrailEfx",RefKind::Effect,true);
-    ref(out,p+"mWallPlane",RefKind::Plane,true);
-    ref(out,p+"mWallCollObj",RefKind::DynCollObject,true);
-    ref(out,p+"mNaviShapeObject",RefKind::Shape,false);
-    ref(out,p+"attackTarget",RefKind::Creature);
+    ref(out,p+"mDamageEfxA",RefKind::ParticleGenerator,true,"zen::particleGenerator",ReferenceOwnership::ActorSubobject);
+    ref(out,p+"mDamageEfxB",RefKind::ParticleGenerator,true,"zen::particleGenerator",ReferenceOwnership::ActorSubobject);
+    ref(out,p+"mDamageEfxC",RefKind::ParticleGenerator,true,"zen::particleGenerator",ReferenceOwnership::ActorSubobject);
+    ref(out,p+"mKontroller",RefKind::Controller,false,"Kontroller");
+    ref(out,p+"mNaviCamera",RefKind::Camera,false,"Camera");
+    ref(out,p+"mControlCamera",RefKind::Camera,true,"Camera");
+    ref(out,p+"mLookAtPosPtr",RefKind::Vector3,true,"Vector3f");
+    ref(out,p+"mCollidedWorkObj",RefKind::Creature,true,"Creature");
+    ref(out,p+"mSelectedShipPart",RefKind::Creature,true,"Pellet");
+    ref(out,p+"mPcLockTarget",RefKind::Creature,true,"Creature");
+    ref(out,p+"mGoalItem",RefKind::Creature,true,"GoalItem");
+    ref(out,p+"mPikiToPluck",RefKind::Creature,true,"Piki");
+    ref(out,p+"mSproutToPluck",RefKind::Creature,true,"PikiHeadItem");
+    ref(out,p+"mNextThrowPiki",RefKind::Creature,true,"Piki");
+    ref(out,p+"mPellet",RefKind::Creature,true,"Pellet");
+    ref(out,p+"mBurnEffect",RefKind::Effect,true,"BurnEffect",ReferenceOwnership::ActorSubobject);
+    ref(out,p+"mRippleEffect",RefKind::Effect,true,"RippleEffect",ReferenceOwnership::ActorSubobject);
+    ref(out,p+"mSlimeEffect",RefKind::Effect,true,"SlimeEffect",ReferenceOwnership::ActorSubobject);
+    ref(out,p+"mNaviLightEfx",RefKind::Effect,true,"PermanentEffect",ReferenceOwnership::ActorSubobject);
+    ref(out,p+"mNaviLightGlowEfx",RefKind::Effect,true,"PermanentEffect",ReferenceOwnership::ActorSubobject);
+    ref(out,p+"mCursorTrailEfx",RefKind::Effect,true,"PermanentEffect",ReferenceOwnership::ActorSubobject);
+    ref(out,p+"mWallPlane",RefKind::Plane,true,"Plane");
+    ref(out,p+"mWallCollObj",RefKind::DynCollObject,true,"DynCollObject");
+    ref(out,p+"mNaviShapeObject",RefKind::Shape,false,"PikiShapeObject",ReferenceOwnership::Content);
+    ref(out,p+"attackTarget",RefKind::Creature,true,"Creature");
     for(const char* key:{"distance","remaining","minimum","reset"})scalar(out,p+"odometer."+key,ScalarKind::F32);
     for(int i=0;i<32;++i)vector(out,p+"whistleFx."+std::to_string(i));
     scalar(out,p+"animationSpeed",ScalarKind::F32);animation_schema(p+"upperAnimation.",out);animation_schema(p+"lowerAnimation.",out);
@@ -128,7 +128,7 @@ bool navi_runtime_schema(const ActorFields& fields,std::vector<FieldSchema>& out
     for(int i=0;i<3;++i)scalar(out,p+"plate.happa."+std::to_string(i),ScalarKind::S32);
     for(int i=0;i<capacity;++i) {
         auto slot=p+"plate.slot."+std::to_string(i)+".";
-        vector(out,slot+"position");vector(out,slot+"offset");ref(out,slot+"occupant",RefKind::Creature,i>=used);ref(out,slot+"listener",RefKind::SlotListener,i>=used);
+        vector(out,slot+"position");vector(out,slot+"offset");ref(out,slot+"occupant",RefKind::Creature,i>=used,"Creature");ref(out,slot+"listener",RefKind::SlotListener,i>=used,"SlotChangeListner",ReferenceOwnership::ActorSubobject);
     }
     return true;
 }

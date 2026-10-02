@@ -14,7 +14,10 @@ enum class RefKind { Creature, CollPart, WayPoint, Path, Animation, Action,
     Traversable, CPlate, FormationMgr, Grass, GrassGen, RockGen, Pebble, Plane,
     DynCollObject, AnimKey, AnimListener, ParticleGenerator, Vector3,
     Camera, Controller, SlotListener, Locus, Generator, FormPoint, UpdateMgr,
-    CollInfo, CreatureProp, CollTriInfo, Shape, SeContext, Effect };
+    CollInfo, CreatureProp, CollTriInfo, Shape, SeContext, Effect,
+    ProjectileToken, SAIStateMachine, ItemShape, PelletConfig, PelletView,
+    UfoShape, DynParticle, DynBuildShape, Joint, StaticText,
+    ObjCollInfo, CollPartUpdater, Count };
 class ActorArchive {
 public:
     virtual ~ActorArchive() = default;
@@ -27,6 +30,10 @@ public:
     virtual bool fail(const char* reason) = 0;
     // Runtime pool handles require the same stable-identity remapping as pointers.
     virtual bool handle(const char* key, RefKind kind, u32& staging) = 0;
+    // Opaque 64-bit runtime identities are remapped, never saved as scalars.
+    virtual bool token64(const char*, RefKind, u64&) {
+        return fail("64-bit logical token adapter unavailable");
+    }
     template<class T> bool value(const char* key, ScalarKind kind, T& live) {
         T staging = mode() == Mode::Capture ? live : T{};
         if (!scalar(key, kind, &staging)) return false;
@@ -58,6 +65,7 @@ public:
     bool scalar(const char* key, ScalarKind kind, void* p) override { return parent.scalar((prefix+key).c_str(),kind,p); }
     bool reference(const char* key, RefKind kind, void*& p) override { return parent.reference((prefix+key).c_str(),kind,p); }
     bool handle(const char* key, RefKind kind, u32& v) override { return parent.handle((prefix+key).c_str(),kind,v); }
+    bool token64(const char* key, RefKind kind, u64& v) override { return parent.token64((prefix+key).c_str(),kind,v); }
     bool fail(const char* reason) override { return parent.fail(reason); }
 };
 inline bool ActorArchive::field(const char* key, Vector3f& v) {

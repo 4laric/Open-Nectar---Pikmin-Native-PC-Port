@@ -35,7 +35,7 @@ bool action(const ActorFields& f,std::vector<FieldSchema>& out,const std::string
  scalar(out,p+"type",ScalarKind::S32);scalar(out,p+"count",ScalarKind::S16);scalar(out,p+"child",ScalarKind::S16);
  std::vector<FieldSchema> payload;if(!piki_action_schema(type,payload))return bad(e,"unknown Piki action schema");append(out,payload,p);
  if(type==44||type==17||type==4){int sub=0;int maximum=type==44?7:type==17?2:1;if(!number(f,p+"mState",ScalarKind::U16,sub,e)||sub<0||sub>maximum)return bad(e,"Piki action substate invalid");}
- if(type==3||type==16||type==30||type==31||type==32||type==41)out.push_back(FieldSchema::ref((p+"andTarget").c_str(),RefKind::Creature,true));
+ if(type==3||type==16||type==30||type==31||type==32||type==41)out.push_back(FieldSchema::ref((p+"andTarget").c_str(),RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
  if(type==1){
   int used=0,next=0;if(!number(f,p+"boredom.count",ScalarKind::S32,used,e)||!number(f,p+"boredom.next",ScalarKind::S32,next,e)||used<0||used>30||next<0||next>=30)return bad(e,"Piki boredom bounds invalid");
   scalar(out,p+"boredom.count",ScalarKind::S32);scalar(out,p+"boredom.next",ScalarKind::S32);
@@ -78,7 +78,7 @@ bool extras(const ActorFields& f,std::vector<FieldSchema>& schema,std::string& e
   if(ref==f.end()||runtime==f.end()||ref->second.category!=FieldCategory::Reference||runtime->second.category!=FieldCategory::Reference||ref->second.reference!=RefKind::AnimListener||runtime->second.reference!=RefKind::AnimListener)return bad(e,"missing listener reference");
   const auto& x=ref->second.target;const auto& y=runtime->second.target;
   if(x.owner!=y.owner||x.resource!=y.resource||x.slot!=y.slot)return bad(e,"listener supplemental reference mismatch");
-  schema.push_back(FieldSchema::ref((p+"listener").c_str(),RefKind::AnimListener,false));
+  schema.push_back(FieldSchema::ref((p+"listener").c_str(),RefKind::AnimListener,false,"PaniAnimKeyListener",ReferenceOwnership::ActorSubobject));
   if(!action(f,schema,p+"payload.",type,0,e))return false;
   activePaths(f,p+"payload.",type,path,seen);
  }

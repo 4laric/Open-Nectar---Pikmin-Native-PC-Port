@@ -9,15 +9,35 @@ int checks=0;
 void check(bool b,const char* msg) {++checks;if(!b)throw std::runtime_error(msg);}
 struct Resolver : LogicalResolver {
     int object=1;
+    bool validateTyped(const FieldSchema& d,const LogicalRef& r,std::string& e) const override {return !d.targetType.empty()&&validate(d.key.c_str(),d.reference,r,e);}
     bool identify(const char* key,RefKind,const void* p,LogicalRef& r,std::string&) override {if(p!=&object)return false;r={7,0,2};return true;}
     bool validate(const char* key,RefKind,const LogicalRef& r,std::string&) const override {return (r.owner==7 || (r.owner==8 && std::string(key)!="target")) && r.resource==0 && r.slot==2;}
     bool resolve(const char* key,RefKind k,const LogicalRef& r,void*& p,std::string& e) override {if(!validate(key,k,r,e))return false;p=&object;return true;}
     bool identifyHandle(const char* key,RefKind,u32 v,LogicalRef& r,std::string&) override {if(v!=19)return false;r={7,0,2};return true;}
     bool resolveHandle(const char* key,RefKind k,const LogicalRef& r,u32& v,std::string& e) override {if(!validate(key,k,r,e))return false;v=81;return true;}
+    bool identifyToken(const char*,RefKind,u64 v,LogicalRef& r,std::string&) override {if(v!=0x100000019ULL)return false;r={7,0,2};return true;}
+    bool resolveToken(const char* key,RefKind k,const LogicalRef& r,u64& v,std::string& e) override {if(!validate(key,k,r,e))return false;v=0x200000051ULL;return true;}
 };
 void integer(ActorFields& f,const char* key,ScalarKind kind,u64 bits){ActorField a;a.scalar=kind;a.bits=bits;f[key]=a;}
 void run() {
     Resolver resolver;std::string error;ActorFields fields;
+    {
+        ActorFields tokens;u64 source=0x100000019ULL;
+        FieldArchive captureToken(Mode::Capture,tokens,resolver,error,0);
+        check(captureToken.token64("projectile.owner",RefKind::ProjectileToken,source)&&captureToken.finish(),"64-bit token capture");
+        ActorBytes wire;check(encode_actor_fields(tokens,wire,error),"logical token encoding");
+        ActorFields restored;check(decode_actor_fields(wire,restored,error),"logical token decoding");
+        const auto schema=std::vector<FieldSchema>{FieldSchema::token64("projectile.owner",RefKind::ProjectileToken,false,"P2CannonStone",ReferenceOwnership::ActorSubobject)};
+        check(validate_actor_fields(restored,schema,resolver,error),"token closure validation");
+        u64 rebound=0;FieldArchive applyToken(Mode::Apply,restored,resolver,error,0);
+        check(applyToken.token64("projectile.owner",RefKind::ProjectileToken,rebound)&&applyToken.finish()&&rebound==0x200000051ULL,"64-bit token remaps without truncation");
+        auto invalid=restored;invalid["projectile.owner"].target={};std::string failure;
+        check(!validate_actor_fields(invalid,schema,resolver,failure),"required token absent refused");
+        invalid=restored;invalid["projectile.owner"].category=FieldCategory::Handle;failure.clear();
+        check(!validate_actor_fields(invalid,schema,resolver,failure),"32-bit handle cannot replace token");
+        invalid=restored;invalid["projectile.owner"].reference=static_cast<RefKind>(-1);failure.clear();
+        check(!encode_actor_fields(invalid,wire,failure),"negative reference kind refused");
+    }
     s32 signedValue=-53;u64 wide=0xfedcba9876543210ULL;float fraction=0.125f;bool flag=true;int* pointer=&resolver.object;u32 handle=19;
     FieldArchive capture(Mode::Capture,fields,resolver,error,100);
     check(capture.field("signed",signedValue)&&capture.field("wide",wide)&&capture.field("fraction",fraction)&&capture.field("flag",flag),"typed capture");
@@ -31,8 +51,22 @@ void run() {
     auto extra=bytes;extra.push_back(0);std::string e;check(!decode_actor_fields(extra,decoded,e),"trailing refusal");
     auto invalid=fields;invalid["flag"].bits=2;ActorBytes unchanged=bytes;e.clear();check(!encode_actor_fields(invalid,unchanged,e)&&unchanged==bytes,"invalid bool atomic refusal");
     invalid=fields;invalid["fraction"].bits=0x7fc00000;e.clear();check(!encode_actor_fields(invalid,unchanged,e),"NaN refusal");
-    std::vector<FieldSchema> schema={FieldSchema::value("signed",ScalarKind::S32),FieldSchema::value("wide",ScalarKind::U64),FieldSchema::value("fraction",ScalarKind::F32),FieldSchema::value("flag",ScalarKind::Bool),FieldSchema::ref("target",RefKind::Creature),FieldSchema::handle("path",RefKind::Path)};
+    std::vector<FieldSchema> schema={FieldSchema::value("signed",ScalarKind::S32),FieldSchema::value("wide",ScalarKind::U64),FieldSchema::value("fraction",ScalarKind::F32),FieldSchema::value("flag",ScalarKind::Bool),FieldSchema::ref("target",RefKind::Creature,false,"Piki"),FieldSchema::handle("path",RefKind::Path,false,"RouteHandle",ReferenceOwnership::Content)};
     e.clear();check(validate_actor_fields(fields,schema,resolver,e),"pure graph validation");
+    struct TypedResolver final : Resolver {
+        bool validateTyped(const FieldSchema& d,const LogicalRef& r,std::string& error) const override {
+            if(d.key=="target")return d.targetType=="Piki" && d.ownership==ReferenceOwnership::AnyLive && validate(d.key.c_str(),d.reference,r,error);
+            return Resolver::validateTyped(d,r,error);
+        }
+    } typedResolver;
+    e.clear();check(validate_actor_fields(fields,schema,typedResolver,e),"concrete reference contract delivered to resolver");
+    auto wrongType=schema;wrongType[4].targetType="Navi";e.clear();
+    check(!validate_actor_fields(fields,wrongType,typedResolver,e),"same broad kind cannot bypass concrete target type");
+    wrongType=schema;wrongType[4].ownership=ReferenceOwnership::Self;e.clear();
+    check(!validate_actor_fields(fields,wrongType,typedResolver,e),"ownership contract delivered to resolver");
+    wrongType=schema;wrongType[4].targetType.clear();wrongType[4].nullable=true;
+    invalid=fields;invalid["target"].target={};e.clear();
+    check(!validate_actor_fields(invalid,wrongType,typedResolver,e),"null optional reference still requires compiled target contract");
     invalid=fields;invalid["target"].target={};e.clear();check(!validate_actor_fields(invalid,schema,resolver,e),"required null refusal");
     invalid=fields;invalid["target"].target.owner=8;e.clear();check(!validate_actor_fields(invalid,schema,resolver,e),"existing incompatible actor role refusal");
     invalid=fields;invalid["target"].reference=RefKind::Animation;e.clear();check(!validate_actor_fields(invalid,schema,resolver,e),"reference role refusal");

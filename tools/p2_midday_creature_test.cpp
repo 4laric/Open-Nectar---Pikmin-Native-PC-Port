@@ -3,6 +3,7 @@
 #include <cstdlib>
 using namespace pc_midday;
 struct Resolver:LogicalResolver{
+ bool validateTyped(const FieldSchema& s,const LogicalRef& r,std::string&)const override{return !s.targetType.empty()&&r.owner==1;}
  bool identify(const char*,RefKind,const void*,LogicalRef&,std::string&)override{return false;}
  bool validate(const char*,RefKind,const LogicalRef& r,std::string&)const override{return r.owner==1;}
  bool resolve(const char*,RefKind,const LogicalRef&,void*&,std::string&)override{return false;}

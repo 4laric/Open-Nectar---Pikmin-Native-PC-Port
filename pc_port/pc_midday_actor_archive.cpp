@@ -59,8 +59,8 @@ bool encode_actor_fields(const ActorFields& fields,ActorBytes& output,std::strin
         if(f.category==FieldCategory::Scalar) {
             if(!valid_scalar(f.scalar,f.bits))return reject(error,"invalid actor scalar");
             put(b,static_cast<u8>(f.scalar),1);put(b,f.bits,width(f.scalar));
-        } else if(f.category==FieldCategory::Reference || f.category==FieldCategory::Handle) {
-            if(f.reference>RefKind::Effect)return reject(error,"invalid reference kind");
+        } else if(f.category==FieldCategory::Reference || f.category==FieldCategory::Handle || f.category==FieldCategory::Token64) {
+            if(static_cast<unsigned>(f.reference)>=static_cast<unsigned>(RefKind::Count))return reject(error,"invalid reference kind");
             put(b,static_cast<u8>(f.reference),1);put(b,f.target.owner,8);put(b,f.target.resource,8);put(b,f.target.slot,4);
         } else return reject(error,"invalid field category");
         if(b.size()>Limit)return reject(error,"actor payload exceeds bound");
@@ -81,8 +81,8 @@ bool decode_actor_fields(const ActorBytes& bytes,ActorFields& output,std::string
             if(kind>static_cast<u8>(ScalarKind::Bool))return reject(error,"unknown scalar kind");
             f.scalar=static_cast<ScalarKind>(kind);
             if(!r.get(f.bits,width(f.scalar))||!valid_scalar(f.scalar,f.bits))return reject(error,"invalid scalar payload");
-        } else if(f.category==FieldCategory::Reference||f.category==FieldCategory::Handle) {
-            if(kind>static_cast<u8>(RefKind::Effect))return reject(error,"unknown reference kind");
+        } else if(f.category==FieldCategory::Reference||f.category==FieldCategory::Handle||f.category==FieldCategory::Token64) {
+            if(kind>=static_cast<u8>(RefKind::Count))return reject(error,"unknown reference kind");
             f.reference=static_cast<RefKind>(kind);u64 slot=0;
             if(!r.get(f.target.owner,8)||!r.get(f.target.resource,8)||!r.get(slot,4))return reject(error,"truncated logical reference");
             f.target.slot=static_cast<u32>(slot);
@@ -103,9 +103,10 @@ bool validate_actor_fields(const ActorFields& fields,const std::vector<FieldSche
         if(f.category==FieldCategory::Scalar) {
             if(f.scalar!=s.scalar||!valid_scalar(f.scalar,f.bits))return reject(error,"actor scalar schema mismatch");
         } else {
+            if(s.targetType.empty())return reject(error,"missing concrete reference contract");
             if(f.reference!=s.reference)return reject(error,"actor reference role mismatch");
             if(absent(f.target)) {if(!s.nullable)return reject(error,"required actor reference absent");}
-            else if(!resolver.validate(s.key.c_str(),f.reference,f.target,error))return false;
+            else if(!resolver.validateTyped(s,f.target,error))return false;
         }
     }
     return true;
@@ -157,4 +158,11 @@ bool FieldArchive::handle(const char* key,RefKind k,u32& value) {
     value=0;return true;
 }
 bool FieldArchive::finish() {return visited.size()==fields.size() || fail("unvisited actor fields");}
+bool FieldArchive::token64(const char* key,RefKind k,u64& value) {
+    ActorField* f;if(!entry(key,FieldCategory::Token64,ScalarKind::U64,k,f))return false;
+    if(operation==Mode::Capture)return resolver.identifyToken(key,k,value,f->target,error);
+    if(!absent(f->target)&&!resolver.validate(key,k,f->target,error))return false;
+    if(operation==Mode::Apply)return resolver.resolveToken(key,k,f->target,value,error);
+    value=0;return true;
+}
 }
