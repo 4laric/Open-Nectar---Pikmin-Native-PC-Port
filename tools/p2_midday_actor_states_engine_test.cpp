@@ -7,6 +7,9 @@
 #include "PikiMgr.h"
 #include "PikiState.h"
 #include "GameStat.h"
+#include "FormationMgr.h"
+#include <cstring>
+#include <vector>
 #include "Node.h"
 #include "MoviePlayer.h"
 #include "pc_midday_actor_archive.h"
@@ -25,6 +28,7 @@
 #include <map>
 using namespace pc_midday;
 namespace {
+bool strongStorageOnly=false;
 void require(bool b,const std::string& message){if(!b){std::printf("FAIL MIDDAY_ACTOR_ENGINE %s\n",message.c_str());std::fflush(nullptr);std::_Exit(1);}}
 struct Resolver : LogicalResolver {
     std::map<std::pair<RefKind,const void*>,u64> ids;
@@ -77,6 +81,28 @@ struct Resolver : LogicalResolver {
     bool resolveHandle(const char* key,RefKind,const LogicalRef& ref,u32& value,std::string&) override{if(!ref.owner&&!ref.resource&&!ref.slot){value=0;return true;}return false;}
 };
 void value(ActorFields& fields,const char* key,ScalarKind kind,u64 bits){ActorField f;f.scalar=kind;f.bits=bits;fields[key]=f;}
+struct StorageCensus:StrongStorageVisitor {
+ std::map<std::string,const void*> keys;std::set<const void*> slots;
+ bool visit(const char* key,const StrongStorageSlot& slot,std::string& error)override{
+  if(!slot.storage||!slot.owner||!slot.ownerType||!*slot.ownerType||!slot.member||!*slot.member||!keys.emplace(key,slot.storage).second||!slots.insert(slot.storage).second){error="duplicate or missing storage metadata";return false;}return true;
+ }
+};
+void runStorage(){
+ std::string error;const double now=std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+ std::vector<Navi*> captains;std::vector<Piki*> pikis;std::map<Creature*,int> counts;std::set<const void*> allSlots;
+ for(int i=0;i<naviMgr->getNaviCount();++i){auto* n=naviMgr->getNavi(i);require(n&&n->getCurrState()&&n->mHealth>1,"initialized healthy captain");captains.push_back(n);counts[n]=n->mCount;}
+ Iterator it(pikiMgr);for(it.first();!it.isDone();it.next()){auto* p=static_cast<Piki*>(*it);require(p&&p->mHealth>0&&counts.emplace(p,p->mCount).second,"unique live Piki");pikis.push_back(p);}
+ require(!captains.empty()&&pikis.size()==20,"actual captain and20 Piki inventory");
+ auto check=[&](const std::vector<FieldSchema>& schema,const StorageCensus& census){size_t expected=0;for(auto& d:schema)if(d.strength==ReferenceStrength::StrongCreature){++expected;require(census.keys.count(d.key)==1,"exact strong schema key present");}require(expected==census.keys.size(),"no extra storage keys");for(auto slot:census.slots)require(allSlots.insert(slot).second,"globally unique native wrapper address");};
+ for(size_t i=0;i<captains.size();++i){auto& n=*captains[i];Resolver resolver;resolver.owner=&n;resolver.typedOwner=&n;ActorBytes before,after;ActorFields fields;std::vector<FieldSchema> schema;StorageCensus census;
+  require(capture_navi(n,resolver,now,before,error)&&decode_actor_fields(before,fields,error)&&navi_schema(fields,schema,error)&&visit_navi_strong_storage(n,fields,census,error),"Navi storage: "+error);check(schema,census);require(capture_navi(n,resolver,now,after,error)&&before==after,"Navi observation unchanged");std::printf("MIDDAY_STRONG_ACTOR family=Navi index=%zu slots=%zu keys_exact=1 unchanged=1\n",i,census.slots.size());}
+ for(size_t i=0;i<pikis.size();++i){auto& p=*pikis[i];Resolver resolver;resolver.owner=p.mNavi;resolver.typedOwner=&p;ActorBytes bytes;ActorFields fields;std::vector<FieldSchema> schema;StorageCensus census;
+  require(pc_midday_test_piki(p,resolver,now,error,true),"Piki storage/selection: "+error);require(capture_piki(p,resolver,now,bytes,error)&&decode_actor_fields(bytes,fields,error)&&piki_schema(fields,schema,error)&&visit_piki_strong_storage(p,fields,census,error),"Piki census: "+error);check(schema,census);std::printf("MIDDAY_STRONG_ACTOR family=Piki index=%zu slots=%zu keys_exact=1 selector_independent=1 unchanged=1\n",i,census.slots.size());}
+ // Standalone real default constructor only; no owner insertion or reference callbacks.
+ FormPoint point;StorageCensus form;require(visit_formpoint_strong_storage(point,form,error)&&form.keys.size()==1&&form.keys.at("formpoint.mOwner")==&point.mOwner&&point.mOwner.mPtr==nullptr,"actual empty FormPoint wrapper");require(allSlots.insert(&point.mOwner).second,"FormPoint storage unique");
+ for(auto& entry:counts)require(entry.first->mCount==entry.second,"live actor reference count unchanged");
+ std::printf("PASS MIDDAY_STRONG_STORAGE captains=%zu pikis=20 slots=%zu formpoint_exercised=1 formpoint_empty=1 counts_unchanged=1 synthetic_bind=0 fresh_process_resume=0\n",captains.size(),allSlots.size());std::fflush(nullptr);std::_Exit(0);
+}
 void run(Navi& n) {
     Resolver resolver;resolver.owner=&n;std::string error;double now=std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
     ActorBytes original;require(capture_navi(n,resolver,now,original,error),"actual Navi capture: "+error);
@@ -139,6 +165,7 @@ public:
         auto* n=naviMgr->getActiveNavi();if(!n||!n->getCurrState()||n->getCurrState()->getID()!=NAVISTATE_Walk)return result;
         int count=0;Iterator it(pikiMgr);for(it.first();!it.isDone();it.next())++count;
         if(count!=20)return result;
+        if(strongStorageOnly)runStorage();
         if(!walkRestored) {
             Resolver resolver;resolver.owner=n;std::string error;ActorBytes original;
             const double now=std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -153,6 +180,7 @@ public:
 };
 }
 int main(int argc,char** argv) {
+    for(int i=1;i<argc;++i)if(std::strcmp(argv[i],"--strong-storage-only")==0){strongStorageOnly=true;for(int j=i;j+1<argc;++j)argv[j]=argv[j+1];--argc;argv[argc]=nullptr;--i;}
     SDL_setenv("PIKMIN_RANDOMIZER_TEST_BACKGROUND","1",1);SDL_setenv("SDL_AUDIODRIVER","dummy",1);SDL_SetMainReady();pc_gpu_preference_apply();pc_bbft_init(argc,argv);
     require(pc_randomizer_enabled(),"ordinary randomizer assets required");
     if(!pc_window_init("Midday actor component fixture",960,540))return 3;

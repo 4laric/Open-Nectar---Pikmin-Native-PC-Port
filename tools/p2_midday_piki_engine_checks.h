@@ -7,7 +7,7 @@
 #include <cmath>
 // Component roundtrip on an already initialized real engine Piki. The caller
 // prevents engine ticks throughout. This is not a campaign resume qualification.
-inline bool pc_midday_test_piki(Piki& piki,pc_midday::LogicalResolver& resolver,double now,std::string& error){
+inline bool pc_midday_test_piki(Piki& piki,pc_midday::LogicalResolver& resolver,double now,std::string& error,bool storageOnly=false){
  using namespace pc_midday;
  ActorBytes original;
  if(!capture_piki(piki,resolver,now,original,error))return false;
@@ -18,6 +18,7 @@ inline bool pc_midday_test_piki(Piki& piki,pc_midday::LogicalResolver& resolver,
  auto savedChild=piki.mActiveAction->mCurrActionIdx;piki.mActiveAction->mCurrActionIdx=savedChild==-1?0:-1;
  bool freshMapping=visit_piki_strong_storage(piki,fields,changedSelection,error);piki.mActiveAction->mCurrActionIdx=savedChild;
  if(!freshMapping||census.keys!=changedSelection.keys){error="strong storage mapping used live action selection";return false;}
+ if(storageOnly){ActorBytes unchanged;if(!capture_piki(piki,resolver,now,unchanged,error)||unchanged!=original){error="storage observation changed Piki payload";return false;}return true;}
  auto* state=piki.mCurrentState;auto* top=piki.mActiveAction;
  auto change=[&](const char* key,float delta){
   auto it=fields.find(key);if(it==fields.end()||it->second.category!=FieldCategory::Scalar||it->second.scalar!=ScalarKind::F32){error="missing real Piki float field";return false;}
