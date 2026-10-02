@@ -20,3 +20,7 @@ void pc_p2_kochappy_fsm_update(BTeki*);
 bool pc_p2_kochappy_fsm_suppress_ai(const BTeki*);
 bool pc_p2_kochappy_fsm_enabled();
 void pc_p2_kochappy_fsm_press(BTeki*);
+// Earthquake is a source lifecycle overlay: pause/resume this FSM, never
+// transit its actor through an unconsumed P1 strategy state.
+bool pc_p2_kochappy_fsm_stun_eligible(const BTeki*);
+void pc_p2_kochappy_fsm_begin_stun(BTeki*);
