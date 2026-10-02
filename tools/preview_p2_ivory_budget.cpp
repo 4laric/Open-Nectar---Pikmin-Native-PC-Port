@@ -32,7 +32,7 @@
 #include "pc_gpu_preference.h"
 #include "settings/pc_settings.h"
 #include "settings/pc_settings_p2d.h"
-#include "C:/Users/alari/pikmin-randomizer/scripts/p2_fixture_captain_guard.h"
+#include "p2_fixture_captain_guard.h"
 
 static void require(bool ok,const char* reason) {
     if(!ok){std::printf("P2_IVORY_BUDGET_FAIL %s\n",reason);std::fflush(nullptr);std::_Exit(1);}
