@@ -11,6 +11,8 @@
 
 #if defined(PIKI_PC_PORT)
 #include "PlayerState.h"
+#include "pc_onion_start_observer.h"
+static_assert(PikiAction::Exit==18 && PikiAction::Crowd==14, "observed startup action ids");
 #include "settings/pc_settings.h"
 #endif
 
@@ -140,6 +142,16 @@ void Action::procMsg(Msg* msg)
  */
 void Action::Child::initialise(Creature* creature)
 {
+#if defined(PIKI_PC_PORT)
+    if(pc_onion_start_enabled && mAction && mAction->mPiki){
+        const auto* top=mAction->mPiki->mActiveAction;
+        if(top && top->mChildActions){
+            for(int i=0;i<top->mChildCount;++i)if(this==&top->mChildActions[i]){
+                pc_onion_start_note(reinterpret_cast<uintptr_t>(mAction->mPiki),i,true);break;
+            }
+        }
+    }
+#endif
 	if (mAction) {
 		mAction->mPiki->mEmotion     = PikiEmotion::None;
 		mAction->mPiki->mActionState = 2;
@@ -404,6 +416,9 @@ void TopAction::init(Creature* creature)
  */
 int TopAction::exec()
 {
+#if defined(PIKI_PC_PORT)
+    if(pc_onion_start_enabled && mPiki)pc_onion_start_note(reinterpret_cast<uintptr_t>(mPiki),mCurrActionIdx,false);
+#endif
 	if (mIsSuspended) {
 		return ACTOUT_Continue;
 	}

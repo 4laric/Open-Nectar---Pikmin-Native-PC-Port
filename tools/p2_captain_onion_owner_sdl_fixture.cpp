@@ -33,6 +33,7 @@
 #include "pc_coop.h"
 #include "pc_diary_observer.h"
 #include "pc_whistle_observer.h"
+#include "pc_onion_start_observer.h"
 #include "Node.h"
 #include "Piki.h"
 #include "PikiMgr.h"
@@ -126,10 +127,10 @@ class CaptainSaveApp final:public PlugPikiApp {
     const std::chrono::steady_clock::time_point started=std::chrono::steady_clock::now();
     bool dayAdvanced=false,resumeMenuLogged=false,withdrawQueued=false;
     int withdrawnFromTotal=-1;
-    enum OwnerStage { Boot, Deposit, SwitchOne, Withdraw, Settle, Owned };
+    enum OwnerStage { Boot, InitialWithdraw, InitialSettle, Deposit, SwitchOne, Withdraw, Settle, Owned };
     OwnerStage ownerStage=Boot;
     int ownerFrames=0, switchFrames=0, startupFrames=0;
-    std::vector<Piki*> startupBodies, ownedBodies, startupFreeBodies, startupWorkers, recalledWorkers;
+    std::vector<Piki*> startupBodies, ownedBodies, startupFreeBodies, startupWorkers, recalledWorkers, manualBornBodies;
     unsigned workerEventsRead=0, workerEpisodesRead=0, workerTerminalsRead=0;
     std::vector<unsigned> completedWorkerEpisodes;
     bool acquisitionNeeded=false, setupBSubmitted=false, setupBObserved=false, setupGatherObserved=false, setupRecruitmentObserved=false;
@@ -438,15 +439,47 @@ public:
                 const bool resting0=state0==NAVISTATE_Walk || state0==NAVISTATE_Idle;
                 const bool resting1=state1==NAVISTATE_Walk || state1==NAVISTATE_Idle;
                 if(!resting1 || (!resting0 && !(startupFrames>0 && state0==NAVISTATE_Gather)))return result;
-                if(!resumePhase && live<20)return result;
-                require(resumePhase?live==0:live==20,"actual initial field count");
+                require(live==0 && storedCount()==20,"actual manual-start/resume stock20 field0");
                 require(a->mPlateMgr && b->mPlateMgr,"initialized captain formation plates");
-                if(!resumePhase && !acquireStartup(a,b))return result;
+                require(formation(a)==0 && formation(b)==0 && plateCount(a)==0 && plateCount(b)==0,"initial stock has no field owners");
                 startDay=gameflow.mWorldClock.mCurrentDay;
                 withdrawnFromTotal=live+storedCount();require(withdrawnFromTotal==20,"actual total20 baseline");
                 selected(0);withdrawQueued=true;elapsed("ownership_boot");
-                if(!resumePhase){require(formation(a)==20 && formation(b)==0,"fresh actual captain0 formation20");ownerStage=Deposit;}
-                else ownerStage=SwitchOne;
+                if(!resumePhase){
+                    const char* manual=std::getenv("PIKMIN_RANDOMIZER_MANUAL_START");
+                    require(manual && std::string(manual)=="1","explicit production manual-start binding");
+                    std::puts("P2_ONION_MANUAL_START live=0 stored=20 owner0=0 owner1=0 plate0=0 plate1=0 ordinary_UI_next=1");
+                    pc_worker_observer_begin();pc_onion_start_begin(); // Before first ordinary input and first native birth.
+                    ownerStage=InitialWithdraw;menuSeen=false;menuConfirm=false;
+                }else ownerStage=SwitchOne;
+            }
+            if(ownerStage==InitialWithdraw || ownerStage==InitialSettle){
+                require(!resumePhase,"initial captain0 withdrawal is fresh-only");
+                require(++startupFrames<=180,"bounded180-frame ordinary initial Onion withdrawal");
+                require(live<=20 && live+storedCount()==20,"initial UI withdrawal conserves total20");
+                std::printf("P2_ONION_START_HISTORY frames=%d bodies=%u events=%u failed=%d bad_actor=%llu bad_action=%d\n",startupFrames,pc_onion_start_count,pc_onion_start_events,int(pc_onion_start_failed),(unsigned long long)pc_onion_start_bad_actor,pc_onion_start_bad_action);
+                require(pc_onion_start_enabled && !pc_onion_start_failed,"continuous native initial Exit-to-Crowd history");
+                require(pc_worker_observer_enabled && !pc_worker_observer_overflow && pc_worker_episode_count==0 && pc_worker_observer_count==0 && pc_worker_terminal_count==0,"no initial Transport episode or recall");
+                const auto born=liveBodies();
+                for(auto* p:born)require(p->getState()==PIKISTATE_Normal && (p->mMode==PikiMode::ExitMode || (p->mMode==PikiMode::FormationMode && p->mNavi==a)),"initial bodies only native Exit or captain0 Formation");
+                for(auto* p:born)if(std::find(manualBornBodies.begin(),manualBornBodies.end(),p)==manualBornBodies.end())manualBornBodies.push_back(p);
+                require(manualBornBodies.size()<=20 && manualBornBodies.size()==born.size(),"no original withdrawal body lost or replaced");
+                if(ownerStage==InitialWithdraw){
+                    if(live==20 && a->getCurrState()->getID()!=NAVISTATE_Container){pad();ownerStage=InitialSettle;elapsed("initial_withdraw20_spawned");}
+                    else{onionMenu(a,20);return result;}
+                }
+                pad();
+                if(formation(a)!=20 || formation(b)!=0 || plateCount(a)!=20 || plateCount(b)!=0)return result;
+                require(manualBornBodies.size()==20,"twenty original ordinary UI withdrawal bodies");
+                sameBodies(manualBornBodies);
+                require(pc_onion_start_complete(),"all20 continuous actual Exit-to-Crowd histories complete");
+                for(auto* p:manualBornBodies){bool found=false;for(const auto& body:pc_onion_start_bodies)if(body.actor==reinterpret_cast<uintptr_t>(p))found=true;require(found,"every original body matches native history");}
+                std::printf("P2_ONION_INITIAL_HISTORY bodies=20 exit_entries=20 formed=20 unexpected=0 events=%u continuous=1\n",pc_onion_start_events);
+                pc_onion_start_end();pc_worker_observer_end();
+                std::printf("P2_ONION_STARTUP_ACQUIRED frames=%d unique=20 live=20 stored=0 owner0=20 owner1=0 plate0=20 plate1=0 acquisition_needed=0 observed_B=0 observed_Gather=0 observed_recruitment=0 via_ordinary_SDL=0\n",startupFrames);
+                std::puts("P2_ONION_WORKER_SETUP needed=0 observed=0 recalls=0 natural=0 original_unique=20");
+                std::printf("P2_ONION_INITIAL_UI_WITHDRAW frames=%d unique=20 live=20 stored=0 owner0=20 owner1=0 plate0=20 plate1=0 input_player=1 whistle=0\n",startupFrames);
+                ownerStage=Deposit;menuSeen=false;menuConfirm=false;elapsed("initial_captain0_formation20");
             }
             require(++ownerFrames<1800,"bounded ordinary ownership preparation");
             if(ownerStage==Deposit){
