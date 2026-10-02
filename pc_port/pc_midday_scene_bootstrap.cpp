@@ -32,6 +32,7 @@ bool decodeSceneBootstrap(const Bytes& b,SceneBootstrap& out,std::string& e){
 }
 bool applySceneBootstrap(SceneBootstrap& staged,const Bytes& b,const RestoreGate& g,std::string& e){
     if(!g.freshProcess||!g.paused||!g.zeroInput||!g.birthEffectsSuppressed||!g.rewardsSuppressed||!g.rngDrawsSuppressed||!g.audioVoicesSuppressed){e="bootstrap apply requires complete paused fresh-stage fence";return false;}
+    if(&staged==&runtime){e="bootstrap staging cannot alias live runtime";return false;}
     SceneBootstrap saved;if(!decodeSceneBootstrap(b,saved,e))return false;
     staged=saved;e.clear();return true;
 }

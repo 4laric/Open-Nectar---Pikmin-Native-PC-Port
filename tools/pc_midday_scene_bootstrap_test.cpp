@@ -15,6 +15,7 @@ int main(){try{
         check(!applySceneBootstrap(staged,wire,bad,e)&&encodeSceneBootstrap(staged,after,e)&&after==original,"fence refusal preserves whole runtime singleton");}
     for(unsigned f=0;f<6;++f){auto bad=wire;if(f==0)bad.pop_back();if(f==1)bad[8]=2;if(f==2)bad[12]=2;if(f==3)bad[21]=2;if(f==4)bad[16]=0;if(f==5)bad[15]=0;
         check(!applySceneBootstrap(staged,bad,gate,e)&&encodeSceneBootstrap(staged,after,e)&&after==original,"malformed/inconsistent bootstrap refuses atomically");}
+    check(!applySceneBootstrap(sceneBootstrap(),wire,gate,e)&&encodeSceneBootstrap(sceneBootstrap(),after,e)&&after==original,"direct live-runtime destination refuses under otherwise full fence");
     check(applySceneBootstrap(staged,wire,gate,e)&&encodeSceneBootstrap(staged,after,e)&&after==wire,"staged bootstrap apply exact");
     // Pending automatic withdrawal is valid: retain queued target, do not finish it.
     saved.redsReady=false;check(encodeSceneBootstrap(saved,wire,e)&&applySceneBootstrap(staged,wire,gate,e)&&!staged.redsReady&&staged.redsQueued&&staged.initialField==17,"pending queued withdrawal retained");
