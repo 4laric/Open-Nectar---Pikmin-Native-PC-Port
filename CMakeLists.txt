@@ -596,6 +596,7 @@ pc_port/pc_p2_projectile_host.cpp
     pc_port/timing/pc_render_packet.cpp
     pc_port/timing/pc_tick_profiler.cpp
     pc_port/audio/pc_audio.cpp
+    pc_port/pc_midday_audio_fence.cpp
     pc_port/audio/pc_envelope.cpp
     pc_port/audio/pc_jam.cpp
     pc_port/audio/pc_instrument_bank.cpp
@@ -2361,6 +2362,7 @@ if(PIKMIN_BUILD_TESTS)
     add_executable(pc_audio_mixer_test
         pc_port/audio/pc_audio_mixer_test.cpp
         pc_port/audio/pc_audio.cpp
+        pc_port/pc_midday_audio_fence.cpp
         pc_port/audio/pc_envelope.cpp
         pc_port/audio/pc_jam.cpp
         pc_port/audio/pc_instrument_bank.cpp
@@ -3331,3 +3333,8 @@ add_executable(pc_midday_inventory_test tools/pc_midday_inventory_test.cpp pc_po
 target_include_directories(pc_midday_inventory_test PRIVATE pc_port)
 target_compile_options(pc_midday_inventory_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME pc_midday_inventory COMMAND pc_midday_inventory_test)
+
+add_executable(pc_midday_audio_fence_test tools/pc_midday_audio_fence_test.cpp pc_port/pc_midday_audio_fence.cpp)
+target_include_directories(pc_midday_audio_fence_test PRIVATE pc_port)
+target_link_libraries(pc_midday_audio_fence_test PRIVATE ${SDL2_LIBRARIES})
+add_test(NAME pc_midday_audio_fence COMMAND pc_midday_audio_fence_test)
