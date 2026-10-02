@@ -178,6 +178,25 @@ class CaptainSaveApp final:public PlugPikiApp {
         require(a->mPlateMgr&&b->mPlateMgr&&plateCount(a)==0&&plateCount(b)==20,"CPlate agrees with observed ownership");
         if(stage)std::printf("P2_ONION_OWNER stage=%s owner0=0 owner1=20 plate0=0 plate1=20 live=20 stored=0 input_player=1 switched_captain=1\n",stage);
     }
+    // Read-only startup observation, capped at twenty records per process.
+    // Missing objects are reported, never created or repaired by telemetry.
+    void bootTelemetry(){
+        if(tick>=0 || (frames!=1 && frames%60!=0) || frames>1140)return;
+        auto* a=naviMgr?naviMgr->getNavi(0):nullptr;
+        auto* b=naviMgr?naviMgr->getNavi(1):nullptr;
+        const int live=pikiMgr?liveCount():-1;
+        auto plate=[live](Navi* n){
+            if(!n || !n->mPlateMgr || live<0)return -1;
+            for(int i=0;i<=live;++i)if(!n->mPlateMgr->validSlot(i))return i;
+            return live+1; // Observed overflow sentinel; no ownership assertion here.
+        };
+        std::printf("P2_ONION_BOOT frame=%d ready=%d paused=%d overlay=%d movie=%d initialized0=%d initialized1=%d state0=%d state1=%d live=%d stored=%d formation0=%d formation1=%d plate0=%d plate1=%d owner_stage=%d\n",
+            frames,int(pc_randomizer_ready()),int(gameflow.mPauseAll),int(gameflow.mIsUIOverlayActive),
+            int(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive),int(initialized[0]),int(initialized[1]),
+            a&&a->getCurrState()?a->getCurrState()->getID():-1,b&&b->getCurrState()?b->getCurrState()->getID():-1,
+            live,storedCount(),pikiMgr&&a?formation(a):-1,pikiMgr&&b?formation(b):-1,plate(a),plate(b),int(ownerStage));
+        std::fflush(stdout);
+    }
     void onionMenu(Navi* n,int target){
         require(naviMgr->getActiveNavi()==n,"Onion input owner is selected captain");
         auto* onion=itemMgr?itemMgr->getContainer(pc_randomizer_start_color()):nullptr;require(onion,"real starting Onion");
@@ -212,6 +231,15 @@ public:
         guardLiveState(); // also protects the engine from negative null-state setup
         const int result=PlugPikiApp::idle();require(++frames<7200,"frame bound");
         guardLiveState(); // never bypass initialized actors for movie/readiness/pause
+        bootTelemetry(); // Before every positive readiness early-return path.
+        if(!saving && tick<0 && initialized[0] && initialized[1]
+            && (sForceCaptainDown||sForceInactiveDown||forceNullState||forceMissingManager)){
+            // Both actual initialized actors just passed the ordinary guards.
+            // Queue only the explicit negative; mutate at the next pre-engine guard.
+            std::puts("P2_ONION_NEGATIVE_QUEUED initialized0=1 initialized1=1 before_positive_boot=1");
+            std::fflush(stdout);
+            pendingNegative=true;gameflow.mPauseAll=TRUE;return result;
+        }
 
         if(resumePhase&&tick<0&&!withdrawQueued){
             const bool menu=!naviMgr||gameflow.mIsUIOverlayActive;
@@ -277,7 +305,6 @@ public:
                 startDay=gameflow.mWorldClock.mCurrentDay;
                 withdrawnFromTotal=live+storedCount();require(withdrawnFromTotal==20,"actual total20 baseline");
                 selected(0);withdrawQueued=true;elapsed("ownership_boot");
-                if(sForceCaptainDown||sForceInactiveDown||forceNullState||forceMissingManager){pendingNegative=true;gameflow.mPauseAll=TRUE;return result;}
                 if(!resumePhase){require(formation(a)==20 && formation(b)==0,"fresh actual captain0 formation20");ownerStage=Deposit;}
                 else ownerStage=SwitchOne;
             }
@@ -309,9 +336,6 @@ public:
             require(pc_p2_captain::adapter()&&pc_p2_captain::captive_count()==0,"fresh live binding");
             selected(1);tick=0;elapsed("scene_ready");
             std::printf("P2_SAVE_SCENE phase=%s resumed=%d day=%d live=%d stored=%d health0=%.3f health1=%.3f active_selected=1 ownership_observed_after_UI=1 ownership_restoration_not_assumed=1\n",resumePhase?"resume":"save",int(pc_randomizer_resumed()),startDay,live,storedCount(),a->mHealth,b->mHealth);
-            if(sForceCaptainDown||sForceInactiveDown||forceNullState||forceMissingManager){
-                pendingNegative=true;gameflow.mPauseAll=TRUE;return result;
-            }
         }
         owned(nullptr);
         if(b->getCurrState()->getID()==NAVISTATE_Gather)sawWhistle=true;
