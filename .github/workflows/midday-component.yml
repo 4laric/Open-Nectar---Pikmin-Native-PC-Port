@@ -2,6 +2,12 @@ name: Midday engine component build
 
 on:
   workflow_dispatch:
+    inputs:
+      native_jaudio:
+        description: 'ON for shipped audio; OFF for isolated constructor/owned-graph fixture only'
+        type: choice
+        options: ['ON', 'OFF']
+        default: 'ON'
   push:
     branches: [codex/midday-actor-states-68]
     paths:
@@ -29,14 +35,17 @@ jobs:
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y ninja-build libsdl2-dev libgl1-mesa-dev
       - name: Configure isolated component build
-        run: cmake -S . -B build-midday-component -G Ninja -DCMAKE_BUILD_TYPE=Release -DPIKMIN_NATIVE_OPTIMIZE=OFF -DPIKMIN_ENABLE_IPO=OFF -DPIKMIN_NETPLAY_BUILD=OFF -DPIKMIN_NATIVE_JAUDIO=ON
+        run: cmake -S . -B build-midday-component -G Ninja -DCMAKE_BUILD_TYPE=Release -DPIKMIN_NATIVE_OPTIMIZE=OFF -DPIKMIN_ENABLE_IPO=OFF -DPIKMIN_NETPLAY_BUILD=OFF -DPIKMIN_NATIVE_JAUDIO=${{ inputs.native_jaudio || 'ON' }}
       - name: Compile real engine fixture without game data
-        run: cmake --build build-midday-component --target pikmin_ci_fixture_midday_actor_states -j2
+        run: cmake --build build-midday-component --target pikmin_ci_fixture_midday_actor_states p2_midday_allocation_owner_test p2_midday_view_piki_test p2_midday_view_piki_fields_test -j2
+      - name: Run ownership and subtype controls
+        run: ctest --test-dir build-midday-component --output-on-failure -R 'p2_midday_(allocation_owner|view_piki|view_piki_fields)_test'
       - name: Record binary provenance
         run: |
           git rev-parse HEAD > build-midday-component/fixtures/commit.txt
           sha256sum build-midday-component/fixtures/pikmin_ci_fixture_midday_actor_states > build-midday-component/fixtures/sha256.txt
           ldd build-midday-component/fixtures/pikmin_ci_fixture_midday_actor_states > build-midday-component/fixtures/dependencies.txt
+          cmake --build build-midday-component --target pikmin_ci_fixture_midday_actor_states -- -n > build-midday-component/fixtures/dry-run.txt
       - uses: actions/upload-artifact@v4
         with:
           name: midday-engine-component-linux

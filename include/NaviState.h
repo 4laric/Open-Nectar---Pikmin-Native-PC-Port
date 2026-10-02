@@ -237,6 +237,12 @@ struct NaviDemoInfState : public NaviState {
  * @note Size: 0x40.
  */
 class NaviDemoSunsetState : public NaviState {
+#if defined(PIKI_PC_PORT)
+private:
+	friend struct PcMiddayStateFactoryAccess;
+	struct MiddayRestoreTag {};
+	NaviDemoSunsetState(MiddayRestoreTag);
+#endif
 public:
 	NaviDemoSunsetState();
 

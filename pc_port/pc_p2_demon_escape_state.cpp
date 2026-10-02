@@ -1,4 +1,6 @@
 #include "pc_p2_demon_escape_state.h"
+#include "pc_midday_allocation_owner.h"
+#include "pc_midday_state_factory.h"
 #include "pc_p2_demon_admission.h"
 #include "Navi.h"
 #include "NaviState.h"
@@ -30,6 +32,7 @@ EscapeState* state(Navi* n) {
 }
 }
 NaviState* pc_demon_escape_state_create() { return new EscapeState(); }
+NaviState* pc_midday::allocate_demon_escape_state(AllocationOwner& owner) { return owner.make<EscapeState>(); }
 bool pc_demon_escape_begin(Navi* n) {
     auto* s=state(n);
     if(!s||s->captain||!n->isAlive()||n->isStickTo()||n->mRope||!pc_demon_captain_admission_eligible(n)) return false;

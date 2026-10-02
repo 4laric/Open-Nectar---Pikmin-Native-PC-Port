@@ -16,6 +16,11 @@ class SlotChangeListner;
  * @brief TODO
  */
 class CPlate : public Traversable, public Node {
+#if defined(PIKI_PC_PORT)
+    friend struct PcMiddayAncillaryAccess;
+    struct MiddayRestoreTag {};
+    CPlate(MiddayRestoreTag, int capacity, float offset, float length, float size);
+#endif
 public:
 	// These all all pretty unsurprising.
 	friend class Navi;
