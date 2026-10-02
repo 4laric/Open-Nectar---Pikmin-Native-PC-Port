@@ -454,9 +454,14 @@ PcWorldMapSnapshot pc_world_map_observe()
 	if (gameflow.mCurrGameSectionID!=SECTION_OnePlayer || !gameflow.mGameSection || !gsys) return value;
 	const auto owner=pc_world_map_live_owner(static_cast<CoreNode*>(gameflow.mGameSection));
 	if (!owner.map || !owner.setup) return value;
-	value=static_cast<MapSelectSetupSection*>(owner.setup)->pcInputSnapshot();
+	// Names and current tree membership establish liveness, not C++ type.
+	// Check both concrete owners before inspecting their UI state.
+	MapSelectSection* mapOwner=nullptr;
+	MapSelectSetupSection* setupOwner=nullptr;
+	if (!pc_world_map_typed_owner(owner,mapOwner,setupOwner)) return value;
+	value=setupOwner->pcInputSnapshot();
 	if (value.available) {
-		value.sectionIdentity=reinterpret_cast<std::uintptr_t>(owner.map);
+		value.sectionIdentity=reinterpret_cast<std::uintptr_t>(mapOwner);
 		value.observedFrame=gsys->mTotalFrames;
 	}
 	return value;

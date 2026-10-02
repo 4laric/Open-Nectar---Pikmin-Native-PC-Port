@@ -27,6 +27,17 @@ template<class Node> PcWorldMapLiveOwner<Node> pc_world_map_live_owner(Node* roo
     if (!owner.setup || count>=16 || owner.setup->Parent()!=owner.map || owner.map->Parent()!=root) return {};
     return owner;
 }
+// Call only after current live tree membership/parent checks. Exact names do
+// not imply a concrete dynamic type; both owners must pass RTTI together.
+template<class Map,class Setup,class Node> bool pc_world_map_typed_owner(
+    const PcWorldMapLiveOwner<Node>& owner,Map*& map,Setup*& setup) {
+    map=nullptr;setup=nullptr;
+    if (!owner.map || !owner.setup) return false;
+    auto* liveMap=dynamic_cast<Map*>(owner.map);
+    auto* liveSetup=dynamic_cast<Setup*>(owner.setup);
+    if (!liveMap || !liveSetup) return false;
+    map=liveMap;setup=liveSetup;return true;
+}
 
 // Values only, queried on the engine thread from the current live section tree.
 // No UI pointer or cached snapshot escapes; no scene/selection/card mutation.
