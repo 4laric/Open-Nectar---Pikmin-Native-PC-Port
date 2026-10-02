@@ -224,6 +224,9 @@ public:
 			selectWindow                     = new zen::DrawCMcourseSelect;
 			selectWindow->start();
 		}
+#if defined(PIKI_PC_PORT)
+		mPcOwnedMap=mapWindow;
+#endif
 		gsys->setFade(1.0f);
 		// default target is to exit back to title unless we positively confirm otherwise
 		mNextSectionsFlag = PACK_NEXT_ONEPLAYER(ONEPLAYER_GameExit);
@@ -410,6 +413,20 @@ public:
 		}
 	}
 
+#if defined(PIKI_PC_PORT)
+	PcWorldMapSnapshot pcInputSnapshot() const {
+		PcWorldMapSnapshot value;
+		if (mSectionState!=Active || !mPcOwnedMap || mapWindow!=mPcOwnedMap) return value;
+		value.available=true;
+		if (gameflow.mIsChallengeMode || selectWindow || mActiveOverlayMenu) return value;
+		value=mapWindow->pcInputSnapshot();
+		value.available=true;
+		value.contextReady=true;
+		value.menuIdentity=reinterpret_cast<std::uintptr_t>(mapWindow);
+		value.setupIdentity=reinterpret_cast<std::uintptr_t>(this);
+		return value;
+	}
+#endif
 	// _00     = VTBL
 	// _00-_20 = Node
 	u32 mSectionState;        ///< _20, whether screen is inactive, active, or exiting - see `State` enum.
@@ -420,7 +437,28 @@ public:
 	Font* mConsFont;          ///< _34, console font (for debug menu).
 	Font* mBigFont;           ///< _38, big font (for regular text).
 	Camera mCamera;           ///< _3C, dedicated camera - seemingly unused.
+#if defined(PIKI_PC_PORT)
+	const zen::DrawWorldMap* mPcOwnedMap=nullptr; // Appended identity only; live-tree membership precedes access.
+#endif
 };
+
+#if defined(PIKI_PC_PORT)
+PcWorldMapSnapshot pc_world_map_observe()
+{
+	PcWorldMapSnapshot value;
+	// The file-static mapWindow survives heap transitions. Never touch it until
+	// its actual owner is found in the current live OnePlayer section tree.
+	if (gameflow.mCurrGameSectionID!=SECTION_OnePlayer || !gameflow.mGameSection || !gsys) return value;
+	const auto owner=pc_world_map_live_owner(static_cast<CoreNode*>(gameflow.mGameSection));
+	if (!owner.map || !owner.setup) return value;
+	value=static_cast<MapSelectSetupSection*>(owner.setup)->pcInputSnapshot();
+	if (value.available) {
+		value.sectionIdentity=reinterpret_cast<std::uintptr_t>(owner.map);
+		value.observedFrame=gsys->mTotalFrames;
+	}
+	return value;
+}
+#endif
 
 /**
  * @brief Constructs map select subsection - either challenge mode map select, or story mode world map.
