@@ -34,6 +34,7 @@ int main(){
 #include "Navi.h"
 #include "NaviMgr.h"
 #include "NaviState.h"
+#include "CPlate.h"
 #include "Kontroller.h"
 #include "Camera.h"
 #include "KeyConfig.h"
@@ -94,7 +95,8 @@ public:
   u32 keys=0;mMainStickX=0;mMainStickY=0;mSubStickX=0;mSubStickY=0;
   Navi* n=naviMgr?naviMgr->getNavi():nullptr;
   if(phase==13 && n && n->getCurrState() && n->getCurrState()->getID()==NAVISTATE_Walk && ticks%30<15)keys=KeyConfig::_instance->mDisbandKey.mBind;
-  if(phase==8 && ticks<15)keys=KeyConfig::_instance->mThrowKey.mBind;
+  if(phase==14 && n && n->getCurrState() && n->getCurrState()->getID()==NAVISTATE_Walk && ticks%30<15)keys=KBBTN_DPAD_RIGHT;
+  if(phase==8)keys=KeyConfig::_instance->mThrowKey.mBind;
   if(phase==1)keys=KeyConfig::_instance->mSetCursorKey.mBind;
   if((phase==2 || phase==4 || phase==7 || phase==9) && n && n->mNaviCamera){
    float bx=goal.x-n->mSRT.t.x,bz=goal.z-n->mSRT.t.z;
@@ -177,6 +179,9 @@ public:
    require(generatedUid(cargo)==cargoUid,"cargo active-slot identity changed");
    if(ticks%60==0||cr||other)std::printf("P2_WHITE_CARGO_OBSERVATION frame=%d phase=%d cargo_uid=%u white=%d red=%d other=%d native_strength=%d x=%.4f y=%.4f z=%.4f\n",frames,phase,cargoUid,cw,cr,other,cargo->mCarrierCounter,cargo->mSRT.t.x,cargo->mSRT.t.y,cargo->mSRT.t.z);
   }else{std::printf("P2_WHITE_CARGO_REMOVED frame=%d phase=%d haul_proven=%d\n",frames,phase,int(haulProven));require(phase==10&&haulProven,"cargo disappeared before actual transport proof");}
+  if(phase>=7&&phase!=13&&ticks%30==0){
+   Iterator squadActors(pikiMgr);CI_LOOP(squadActors){Piki* p=static_cast<Piki*>(*squadActors);if(p->isAlive())std::printf("P2_WHITE_SQUAD_OBSERVATION frame=%d phase=%d uid=%u species=%d mode=%u state=%d owned_navi=%d acquired=%d selected=%d x=%.3f z=%.3f\n",frames,phase,p->mGenerator?generatedUid(p):0,unsigned(pc_p2_species(p)),unsigned(p->mMode),p->getState(),int(p->mNavi==n),int(p==acquired),int(p==n->mNextThrowPiki),p->mSRT.t.x,p->mSRT.t.z);}
+  }
   require(cr==0&&other==0&&cw<=1,"unexpected cargo carriers");
   if(cw)require(acquiredActive&&cw==1&&acquired&&acquired->getStickObject()==cargo,"cargo White must be the naturally acquired body");
   if(!haulProven)require(!std::ifstream("p2-economy.txt").good()&&!std::ifstream("treasure-receipt.txt").good(),"cargo receipt before sole White physical hauling proof");
@@ -202,8 +207,30 @@ public:
    // Never dereference retained cargo after active-manager removal.
    if(cargoActive){
     require(generatedUid(cargo)==cargoUid,"cargo active-slot identity changed");
-    if(phase==7){goal=cargo->mSRT.t;float dx=goal.x-n->mCursorWorldPos.x,dz=goal.z-n->mCursorWorldPos.z;float bx=goal.x-n->mSRT.t.x,bz=goal.z-n->mSRT.t.z;if(dx*dx+dz*dz<64&&bx*bx+bz*bz>625&&bx*bx+bz*bz<10000){phase=8;ticks=0;}}
-    if(phase==8&&ticks>=20){phase=9;ticks=0;goal=cargo->mSRT.t;}
+    if(phase==7){goal=cargo->mSRT.t;float dx=goal.x-n->mCursorWorldPos.x,dz=goal.z-n->mCursorWorldPos.z;float bx=goal.x-n->mSRT.t.x,bz=goal.z-n->mSRT.t.z;if(dx*dx+dz*dz<64&&bx*bx+bz*bz>625&&bx*bx+bz*bz<10000){phase=14;ticks=0;}}
+    if(phase==14){
+     int redFormation=0;Iterator squad(n->mPlateMgr);CI_LOOP(squad){Piki* p=static_cast<Piki*>(*squad);if(p->isAlive()&&pc_p2_species(p)==P2SpeciesRed)++redFormation;}
+     Piki* selected=n->mNextThrowPiki;const int preferred=pc_preferred_throw_color_for(n);
+     if(ticks%15==0)std::printf("P2_WHITE_THROW_SELECTION frame=%d ticks=%d red_formation=%d preferred=%d selected_acquired=%d acquired_mode=%u acquired_state=%d\n",frames,ticks,redFormation,preferred,int(selected==acquired),unsigned(acquired->mMode),acquired->getState());
+     require(ticks<180,"ordinary White throw selection timeout");
+     if(n->getCurrState()->getID()==NAVISTATE_Walk&&selected==acquired&&(!redFormation||preferred==pc_throw_selection_class(acquired))&&acquired->mNavi==n&&acquired->mMode==PikiMode::FormationMode&&acquired->getState()==PIKISTATE_Normal&&acquired->isThrowable()){
+      phase=8;ticks=0;std::puts("P2_WHITE_THROW_SELECTED actual_acquired=1 ordinary_DPAD=1");
+     }
+    }
+    if(phase==8){
+     require(ticks<180,"ordinary White grab timeout");
+     if(n->getCurrState()->getID()==NAVISTATE_ThrowWait){
+      auto* grab=static_cast<NaviThrowWaitState*>(n->getCurrState());
+      require((!grab->mHeldThrowPiki||grab->mHeldThrowPiki==acquired)&&(!grab->mPendingThrowPiki||grab->mPendingThrowPiki==acquired),"native grab selected another body");
+      if(grab->mHeldThrowPiki==acquired&&grab->mIsHoldingThrowPiki&&acquired->getState()==PIKISTATE_Hanged){
+       phase=15;ticks=0;std::puts("P2_WHITE_THROW_HELD actual_acquired=1 ordinary_A_release_next=1");
+      }
+     }
+    }
+    if(phase==15){
+     require(ticks<180,"ordinary White release timeout");
+     if(acquired->getState()==PIKISTATE_Flying||acquired->getStickObject()==cargo){phase=9;ticks=0;goal=cargo->mSRT.t;std::puts("P2_WHITE_THROW_RELEASED actual_acquired=1");}
+    }
     if(phase==9 && acquired->getStickObject()==cargo){phase=10;ticks=0;}
     if(phase==10 && cw==1&&acquired->mMode==PikiMode::TransportMode&&cargo->mCarrierCounter==1){
      require(!transportEnded&&pc_piki_carry_strength(acquired)==1,"sole actual White transport sequence/strength");
