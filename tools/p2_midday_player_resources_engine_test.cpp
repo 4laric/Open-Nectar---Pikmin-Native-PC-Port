@@ -69,7 +69,12 @@ void run(){
  unsigned failures=0;
  for(size_t fail=1;fail<=7;++fail){auto heap=piki_pc_allocation_stats();
   {std::string e;IsolatedPlayerResources stage;require(!stage.allocate(bytes,core,resolver,gate,fence,e,fail),"injected native allocation boundary refuses");require(stage.allocationAttempts()==fail&&!stage.parts()&&!stage.light(false)&&!stage.light(true),"failed stage exposes no partial native allocation");++failures;}
-  require(sameHeap(heap,piki_pc_allocation_stats()),"failed native allocation returns heap to exact baseline");
+  // Capture before require's std::string conversion: argument evaluation order
+  // may otherwise count the assertion message itself as a live allocation.
+  const auto afterHeap=piki_pc_allocation_stats();
+  const bool exactHeap=sameHeap(heap,afterHeap);
+  std::printf("MIDDAY_PLAYER_HEAP failure_site=%zu before_blocks=%zu after_blocks=%zu before_bytes=%zu after_bytes=%zu before_unknown=%zu after_unknown=%zu\n",fail,heap.liveBlocks,afterHeap.liveBlocks,heap.liveBytes,afterHeap.liveBytes,heap.unknownFrees,afterHeap.unknownFrees);
+  require(exactHeap,"failed native allocation returns heap to exact baseline");
  }
  for(int round=0;round<2;++round){auto heap=piki_pc_allocation_stats();
   {std::string e;IsolatedPlayerResources stage;requireError(stage.allocate(bytes,core,resolver,gate,fence,e),"actual UFO material light construction",e);require(stage.allocationAttempts()==7&&stage.heldBy(fence),"seven owned native allocation sites");auto*staged=static_cast<PlayerState::UfoParts*>(stage.parts());require(staged&&staged!=parts,"private UFO array");const int counts[]={1,2,256};
@@ -81,7 +86,10 @@ void run(){
    Bytes observedCore,observedResult;requireError(capturePlayerCore(*root,topology,stopped,observedCore,e),"actual staged core readback",e);require(observedCore==coreBytes,"native named core graph and course backing roundtrip");requireError(captureResult(root->mResultFlags,stopped,observedResult,e),"actual staged Result readback",e);require(observedResult==resultBytes,"native inline Result named-field roundtrip");
 
   }
-  require(sameHeap(heap,piki_pc_allocation_stats()),"successful native disposal returns heap to exact baseline");
+  const auto afterHeap=piki_pc_allocation_stats();
+  const bool exactHeap=sameHeap(heap,afterHeap);
+  std::printf("MIDDAY_PLAYER_HEAP disposal_round=%d before_blocks=%zu after_blocks=%zu before_bytes=%zu after_bytes=%zu before_unknown=%zu after_unknown=%zu\n",round,heap.liveBlocks,afterHeap.liveBlocks,heap.liveBytes,afterHeap.liveBytes,heap.unknownFrees,afterHeap.unknownFrees);
+  require(exactHeap,"successful native disposal returns heap to exact baseline");
  }
  std::array<bool,30> current{};PcMiddayPlayerReplayAccess::read(current);require(current==replay&&preloadUFO==preload,"live replay and preload unchanged");require(playerState==source&&source->mUfoParts==parts&&source->mTotalRegisteredParts==registered&&source->mNaviLightEfx==light&&source->mNaviLightGlowEfx==glow,"live player resource roots unchanged");require(naviMgr==captains&&pikiMgr==pikis&&itemMgr==items&&generatorRoots()==generators,"live manager generator roots unchanged");requireError(fence.finish(false,error),"fence abort",error);requireError(pc_sim_rng_capture(after,error),"actual RNG after",error);require(before.profile==after.profile&&before.simState==after.simState&&before.cosmeticState==after.cosmeticState&&before.simDraws==after.simDraws&&before.cosmeticDraws==after.cosmeticDraws,"exact RNG after native constructors and aborts");
  std::printf("PASS MIDDAY_PLAYER_RESOURCES checks=%u injected_failures=%u abort_rounds=2 native_constructors=1 disposal=1 heap_exact=1 player_root=1 core_result_readback=1 source_unchanged=1 synthetic_descriptors=1 typed_bind=0 fresh_process_resume=0\n",checks,failures);std::fflush(nullptr);std::_Exit(0);
