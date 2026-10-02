@@ -289,7 +289,7 @@ bool piki_action_schema(int type,std::vector<FieldSchema>& out) { switch(type){
  out.push_back(FieldSchema::value("mPcRouteGoal.y",ScalarKind::F32));
  out.push_back(FieldSchema::value("mPcRouteGoal.z",ScalarKind::F32));
  out.push_back(FieldSchema::value("mPcOwnsRoute",ScalarKind::Bool));
- out.push_back(FieldSchema::ref("mPlateMgr",RefKind::CPlate,false,"CPlate",ReferenceOwnership::ActorSubobject));
+ out.push_back(FieldSchema::ref("mPlateMgr",RefKind::CPlate,false,"CPlate",ReferenceOwnership::ActorSubobject,"piki.runtime.mNavi"));
  out.push_back(FieldSchema::value("mOdometer.distance",ScalarKind::F32));
  out.push_back(FieldSchema::value("mOdometer.remaining",ScalarKind::F32));
  out.push_back(FieldSchema::value("mOdometer.minimum",ScalarKind::F32));
@@ -341,7 +341,7 @@ bool piki_action_schema(int type,std::vector<FieldSchema>& out) { switch(type){
  out.push_back(FieldSchema::value("mIsOnFloorTripped",ScalarKind::Bool));
  out.push_back(FieldSchema::value("mHasStartedRunAnim",ScalarKind::Bool));
  out.push_back(FieldSchema::value("mIsTripping",ScalarKind::S32));
- out.push_back(FieldSchema::ref("mFormMgr",RefKind::FormationMgr,false,"FormationMgr",ReferenceOwnership::ActorSubobject));
+ out.push_back(FieldSchema::ref("mFormMgr",RefKind::FormationMgr,false,"FormationMgr",ReferenceOwnership::ActorSubobject,"piki.runtime.mNavi"));
  return true;
  case 22: // ActFreeSelect
  out.push_back(FieldSchema::value("mActionTimer",ScalarKind::F32));

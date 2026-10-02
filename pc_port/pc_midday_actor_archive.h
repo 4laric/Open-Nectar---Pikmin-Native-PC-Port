@@ -17,8 +17,11 @@ struct FieldSchema {
     // contract is invalid for every reference, including nullable references.
     std::string targetType;
     ReferenceOwnership ownership=ReferenceOwnership::AnyLive;
+    // Absolute payload key of the owning actor reference. Empty means the
+    // subject actor for ActorSubobject; populated links are checked prebegin.
+    std::string ownerLink;
     static FieldSchema value(const char* k, ScalarKind s) { return {k,FieldCategory::Scalar,s,RefKind::Creature,false,"",ReferenceOwnership::AnyLive}; }
-    static FieldSchema ref(const char* k, RefKind r, bool n=false, const char* t="", ReferenceOwnership o=ReferenceOwnership::AnyLive) { return {k,FieldCategory::Reference,ScalarKind::U8,r,n,t,o}; }
+    static FieldSchema ref(const char* k, RefKind r, bool n=false, const char* t="", ReferenceOwnership o=ReferenceOwnership::AnyLive, const char* owner="") { return {k,FieldCategory::Reference,ScalarKind::U8,r,n,t,o,owner}; }
     static FieldSchema handle(const char* k, RefKind r, bool n=false, const char* t="", ReferenceOwnership o=ReferenceOwnership::AnyLive) { return {k,FieldCategory::Handle,ScalarKind::U32,r,n,t,o}; }
     static FieldSchema token64(const char* k, RefKind r, bool n=false, const char* t="", ReferenceOwnership o=ReferenceOwnership::AnyLive) { return {k,FieldCategory::Token64,ScalarKind::U64,r,n,t,o}; }
 };
