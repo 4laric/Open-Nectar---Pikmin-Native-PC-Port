@@ -6,6 +6,11 @@
 #include "SlotChangeListner.h"
 namespace pc_midday { bool animation_fields(PaniPikiAnimator&,ActorArchive&); }
 struct PcMiddayNaviRuntimeAccess {
+ static void counts(const CPlate& s,pc_midday::PlateCounts& out){
+    out.capacity=s.mSlotListSize;out.used=s.mUsedSlotCount;out.total=s.mTotalSlotCount;out.platePikis=s.mPlatePikiCount;
+    for(int i=0;i<3;++i)out.happa[i]=s.mHappaCounts[i];
+ }
+
  static bool strongPlate(CPlate& s,const pc_midday::ActorFields& fields,pc_midday::ActorArchive& a,std::string& error) {
     using namespace pc_midday;int capacity=0;
     if(!actor_i32(fields,"navi.runtime.plate.capacity",capacity,error)||capacity<1||capacity>4096||capacity!=s.mSlotListSize||!s.mSlotList)return a.fail("CPlate strong storage allocation mismatch");
@@ -47,6 +52,10 @@ struct PcMiddayNaviRuntimeAccess {
  }
 };
 namespace pc_midday {
+bool navi_plate_counts(Navi& s,PlateCounts& out,std::string& error){
+    if(!s.mPlateMgr){error="Navi count observer missing CPlate";return false;}
+    PcMiddayNaviRuntimeAccess::counts(*s.mPlateMgr,out);error.clear();return true;
+}
 bool visit_navi_strong_storage(Navi& s,const ActorFields& fields,StrongStorageVisitor& visitor,std::string& error) {
     if(!s.mPlateMgr){error="Navi strong storage missing CPlate";return false;}
     if(!visit_creature_strong_storage(s,fields,visitor,error))return false;

@@ -151,6 +151,17 @@ void run() {
             bad=f;bad["navi.runtime.plate.happa.0"].bits=0xffffffff;e.clear();check(encode_actor_fields(bad,wire,e)&&!validate_navi(wire,resolver,e),"negative CPlate happa refused");
             bad=f;bad["navi.runtime.plate.happa.0"].bits=1;bad["navi.runtime.plate.happa.1"].bits=1;e.clear();check(encode_actor_fields(bad,wire,e)&&!validate_navi(wire,resolver,e),"CPlate combined happa overflow refused");
             bad=f;bad["navi.runtime.plate.happa.0"].bits=1;e.clear();check(encode_actor_fields(bad,wire,e)&&validate_navi(wire,resolver,e),"bounded transitional CPlate counter differences retained");
+            // Native constructor total=used=0; acquire increments only used,
+            // release decrements both. A second balanced pair before refresh
+            // gives total=-2 even with capacity1 and no occupied slots.
+            for(u32 stale:{0xffffffffu,0xfffffffeu}){bad=f;bad["navi.runtime.plate.mTotalSlotCount"].bits=stale;e.clear();check(encode_actor_fields(bad,wire,e)&&validate_navi(wire,resolver,e),"native pre-refresh acquire/release negative total retained");}
+            bad=f;bad["navi.runtime.plate.mTotalSlotCount"].bits=2;e.clear();check(encode_actor_fields(bad,wire,e)&&!validate_navi(wire,resolver,e),"positive CPlate total cannot exceed allocation");
+            bad=f;bad["navi.runtime.plate.mUsedSlotCount"].bits=0xffffffffu;e.clear();check(encode_actor_fields(bad,wire,e)&&!validate_navi(wire,resolver,e),"negative used count still refused");
+            bad=f;bad["navi.runtime.plate.mUsedSlotCount"].bits=2;e.clear();check(encode_actor_fields(bad,wire,e)&&!validate_navi(wire,resolver,e),"used overflow still refused");
+            bad=f;bad["navi.runtime.plate.mTotalSlotCount"].bits=0x80000000u;e.clear();check(encode_actor_fields(bad,wire,e)&&!validate_navi(wire,resolver,e),"INT_MIN total immediate release overflow refused");
+            bad=f;bad["navi.runtime.plate.mTotalSlotCount"].bits=0x80000001u;e.clear();check(encode_actor_fields(bad,wire,e)&&validate_navi(wire,resolver,e),"INT_MIN plus1 passes finite component guard only");
+
+
             bad=f;bad["current"].bits=38;e.clear();check(encode_actor_fields(bad,wire,e)&&!validate_navi(wire,resolver,e),"unknown state refusal before begin");
         }
         if(id==3) {

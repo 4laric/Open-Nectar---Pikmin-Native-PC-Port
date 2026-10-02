@@ -1,0 +1,44 @@
+name: Midday engine component build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/midday-actor-states-68]
+    paths:
+      - '.github/workflows/midday-component.yml'
+      - 'tools/p2_midday_actor_states_engine_test.cpp'
+      - 'tools/p2_midday_piki_engine_checks.h'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    env:
+      P2_CHALLENGE_GUARD_INCLUDE_DIR: ${{ github.workspace }}/.ci-root/scripts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: 4laric/pikmin-randomizer
+          ref: fdd558123223f94d706b9a00973037553e864756
+          path: .ci-root
+          sparse-checkout: scripts
+          persist-credentials: false
+      - name: Verify canonical fixture guard
+        run: echo 'ee2bfeaba96020f4f0ae310f9cf98dfabbd824353d20de6fb78fec17001f3ff9  .ci-root/scripts/p2_fixture_captain_guard.h' | sha256sum --check --strict
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libsdl2-dev libgl1-mesa-dev
+      - name: Configure isolated component build
+        run: cmake -S . -B build-midday-component -G Ninja -DCMAKE_BUILD_TYPE=Release -DPIKMIN_NATIVE_OPTIMIZE=OFF -DPIKMIN_ENABLE_IPO=OFF -DPIKMIN_NETPLAY_BUILD=OFF -DPIKMIN_NATIVE_JAUDIO=ON
+      - name: Compile real engine fixture without game data
+        run: cmake --build build-midday-component --target pikmin_ci_fixture_midday_actor_states -j2
+      - name: Record binary provenance
+        run: |
+          git rev-parse HEAD > build-midday-component/fixtures/commit.txt
+          sha256sum build-midday-component/fixtures/pikmin_ci_fixture_midday_actor_states > build-midday-component/fixtures/sha256.txt
+          ldd build-midday-component/fixtures/pikmin_ci_fixture_midday_actor_states > build-midday-component/fixtures/dependencies.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: midday-engine-component-linux
+          path: build-midday-component/fixtures/
+          if-no-files-found: error

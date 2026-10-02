@@ -22,6 +22,11 @@ OdoMeter::OdoMeter()
 {
 	mTotalDistance = 0.0f;
 	mRemainingTime = 0.0f;
+#if defined(PIKI_PC_PORT)
+	// A dormant odometer can be captured before its first start().
+	mMinAllowedDistance = 0.0f;
+	mResetTimeValue = 0.0f;
+#endif
 }
 
 /**

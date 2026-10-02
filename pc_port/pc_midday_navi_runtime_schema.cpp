@@ -1,4 +1,5 @@
 #include "pc_midday_actor_archive.h"
+#include <limits>
 namespace pc_midday {
 namespace {
 void scalar(std::vector<FieldSchema>& out,const std::string& key,ScalarKind kind){out.push_back(FieldSchema::value(key.c_str(),kind));}
@@ -11,7 +12,15 @@ bool navi_runtime_schema(const ActorFields& fields,std::vector<FieldSchema>& out
     if(!actor_i32(fields,(p+"plate.capacity").c_str(),capacity,error)||capacity<1||capacity>4096||!actor_i32(fields,(p+"mPcPikiAnimColor").c_str(),color,error)||color< -1||color>2){error="invalid Navi runtime topology";return false;}
     int used=0,total=0;
     if(fields.count(p+"plate.mUsedSlotCount")&&(!actor_i32(fields,(p+"plate.mUsedSlotCount").c_str(),used,error)||used<0||used>capacity)){error="invalid CPlate used count";return false;}
-    if(fields.count(p+"plate.mTotalSlotCount")&&(!actor_i32(fields,(p+"plate.mTotalSlotCount").c_str(),total,error)||total<0||total>capacity)){error="invalid CPlate total count";return false;}
+    // getSlot increments used only; releaseSlot decrements used AND total.
+    // Before refresh(used), balanced acquire/release sequences can leave total
+    // negative (even below -capacity). Negative totals enumerate no positions;
+    // they are a stale layout counter, not an allocated/live-slot count.
+    // Refuse INT_MIN because one ordinary release would overflow immediately.
+    // This is only a finite immediate guard: the complete scene provider MUST
+    // prove its release budget/headroom until the next refresh before publish,
+    // or refuse publication. INT_MIN+1 is not a full scheduling safety proof.
+    if(fields.count(p+"plate.mTotalSlotCount")&&(!actor_i32(fields,(p+"plate.mTotalSlotCount").c_str(),total,error)||total==std::numeric_limits<int>::min()||total>capacity)){error="invalid CPlate total count: total="+std::to_string(total)+" used="+std::to_string(used)+" capacity="+std::to_string(capacity);return false;}
     u32 plateCount=0;
     if(fields.count(p+"plate.mPlatePikiCount")&&(!actor_u32(fields,(p+"plate.mPlatePikiCount").c_str(),plateCount,error)||plateCount>static_cast<u32>(capacity))){error="invalid CPlate Piki count";return false;}
     // refresh can reduce used slots before other counters settle. Bound the
