@@ -7,6 +7,10 @@
 #include "SimpleAI.h"
 #include "types.h"
 
+#if defined(PIKI_PC_PORT)
+namespace pc_midday { struct ItemManagerStageTag; }
+class PcMiddayIsolatedItemMgr;
+#endif
 struct BuildingItemProp;
 struct GoalAI;
 class GoalItem;
@@ -100,6 +104,12 @@ public:
 	};
 
 	ItemMgr();
+#if defined(PIKI_PC_PORT)
+private:
+ friend class PcMiddayIsolatedItemMgr;
+ explicit ItemMgr(const pc_midday::ItemManagerStageTag&);
+public:
+#endif
 
 	virtual ~ItemMgr() { }             // _48 (weak)
 	virtual void update();             // _4C (weak)

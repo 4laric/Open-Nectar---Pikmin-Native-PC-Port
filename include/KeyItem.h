@@ -38,6 +38,7 @@ enum {
 struct KeyItem : public Creature {
 #if defined(PIKI_PC_PORT)
  friend struct PcMiddayWorldAccess;
+ friend struct PcMiddayItemFactoryAccess;
 #endif
 	KeyItem(CreatureProp*, Shape*);
 

@@ -28,6 +28,7 @@ struct SeedProp : public CreatureProp {
 struct SeedItem : public Creature {
 #if defined(PIKI_PC_PORT)
  friend struct PcMiddayWorldAccess;
+ friend struct PcMiddayItemFactoryAccess;
 #endif
 public:
 	SeedItem(CreatureProp*, Shape**);

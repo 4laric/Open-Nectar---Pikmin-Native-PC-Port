@@ -385,6 +385,9 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_inventory.cpp
     pc_port/pc_midday_poly_pool.cpp
     pc_port/pc_midday_poly_pool_engine.cpp
+    pc_port/pc_midday_item_factory_plan.cpp
+    pc_port/pc_midday_item_factory_engine.cpp
+    pc_port/pc_midday_item_manager_engine.cpp
     pc_port/pc_midday_player_core.cpp
     pc_port/pc_midday_player_core_engine.cpp
     pc_port/pc_midday_economy.cpp
@@ -3170,6 +3173,9 @@ target_compile_definitions(p2_midday_effect_test PRIVATE PIKI_PC_PORT)
 target_compile_options(p2_midday_effect_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME p2_midday_effect_test COMMAND p2_midday_effect_test)
 pikmin_add_ci_fixture(midday_actor_states tools/p2_midday_actor_states_engine_test.cpp)
+if(NOT PIKMIN_NATIVE_JAUDIO)
+    pikmin_add_ci_fixture(midday_item_factory tools/p2_midday_item_factory_engine_test.cpp)
+endif()
 
 # #1154/#1161 ordinary natural WFG acquisition and cave party route; build only.
 pikmin_add_ci_fixture(cave_route tools/p2_cave_route_runtime.cpp)
@@ -3355,3 +3361,9 @@ target_include_directories(pc_midday_constructor_test PRIVATE pc_port)
 target_compile_options(pc_midday_constructor_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 target_link_libraries(pc_midday_constructor_test PRIVATE ${SDL2_LIBRARIES})
 add_test(NAME pc_midday_constructor COMMAND pc_midday_constructor_test "${CMAKE_CURRENT_BINARY_DIR}/midday-fixtures")
+
+add_executable(pc_midday_item_factory_plan_test tools/pc_midday_item_factory_plan_test.cpp
+    pc_port/pc_midday_item_factory_plan.cpp pc_port/pc_midday_poly_pool.cpp
+    pc_port/pc_midday_inventory.cpp pc_port/pc_midday_capture.cpp pc_port/pc_midday_codec.cpp)
+target_include_directories(pc_midday_item_factory_plan_test PRIVATE pc_port)
+add_test(NAME pc_midday_item_factory_plan COMMAND pc_midday_item_factory_plan_test)
