@@ -58,6 +58,7 @@
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -126,7 +127,9 @@ class CaptainSaveApp final:public PlugPikiApp {
     int withdrawnFromTotal=-1;
     enum OwnerStage { Boot, Deposit, SwitchOne, Withdraw, Settle, Owned };
     OwnerStage ownerStage=Boot;
-    int ownerFrames=0, switchFrames=0;
+    int ownerFrames=0, switchFrames=0, startupFrames=0;
+    std::vector<Piki*> startupBodies, ownedBodies, startupFreeBodies;
+    bool acquisitionNeeded=false, setupBSubmitted=false, setupBObserved=false, setupGatherObserved=false, setupRecruitmentObserved=false;
     bool menuSeen=false, menuConfirm=false;
     int menuFrames=0, diaryActions=0;
     bool releaseDiaryInput=false;
@@ -170,10 +173,75 @@ class CaptainSaveApp final:public PlugPikiApp {
     // validSlot observes the used-slot boundary without accessing protected layout.
     // More occupied slots than live Pikmin fails the observation immediately.
     int plateCount(Navi* n){require(n&&n->mPlateMgr,"captain plate exists");int limit=liveCount();for(int i=0;i<=limit;++i)if(!n->mPlateMgr->validSlot(i))return i;require(false,"plate exceeds live population");return -1;}
+    std::vector<Piki*> liveBodies(){
+        std::vector<Piki*> bodies;Iterator it(pikiMgr);CI_LOOP(it){
+            auto* p=static_cast<Piki*>(*it);if(!p||!p->isAlive())continue;
+            require(std::find(bodies.begin(),bodies.end(),p)==bodies.end(),"unique live body enumeration");bodies.push_back(p);
+        }return bodies;
+    }
+    void sameBodies(const std::vector<Piki*>& expected){
+        const auto current=liveBodies();require(current.size()==expected.size(),"same actual live body count");
+        for(auto* p:current)require(std::find(expected.begin(),expected.end(),p)!=expected.end(),"same actual live body identities");
+    }
+    // Explicit fresh-save setup, never evidence of automatic startup ownership.
+    // Only SDL input recruits; no direct callPikis, actor, cursor or stock writes.
+    bool acquireStartup(Navi* a,Navi* b){
+        require(!resumePhase && naviMgr->getActiveNavi()==a,"fresh captain0 acquisition only");
+        require(liveCount()==20 && storedCount()==0,"startup actual live20 stock0");
+        if(startupBodies.empty()){
+            startupBodies=liveBodies();require(startupBodies.size()==20,"startup twenty unique bodies");
+            acquisitionNeeded=!(formation(a)==20 && formation(b)==0 && plateCount(a)==20 && plateCount(b)==0);
+            elapsed("startup_acquisition_begin");
+            std::puts("P2_ONION_STARTUP_ACQUIRE disclosed_setup=1 automatic_ownership_claim=0 input_player=1 captain=0");
+        }
+        sameBodies(startupBodies);require(++startupFrames<=180,"bounded180-frame ordinary startup acquisition");
+        // Observe engine-consumed input and a subsequent real Free -> Formation change.
+        // Submitted SDL state alone never qualifies as an observed recruitment.
+        if(setupBSubmitted && a->mKontroller && a->mKontroller->keyClick(KBBTN_B))setupBObserved=true;
+        if(setupBObserved && a->getCurrState()->getID()==NAVISTATE_Gather)setupGatherObserved=true;
+        for(auto* p:startupBodies){
+            if(setupBObserved && setupGatherObserved && p->mMode==PikiMode::FormationMode && p->mNavi==a
+                && std::find(startupFreeBodies.begin(),startupFreeBodies.end(),p)!=startupFreeBodies.end())setupRecruitmentObserved=true;
+            if(p->mMode==PikiMode::FreeMode && std::find(startupFreeBodies.begin(),startupFreeBodies.end(),p)==startupFreeBodies.end())startupFreeBodies.push_back(p);
+        }
+        const bool complete=formation(a)==20 && formation(b)==0 && plateCount(a)==20 && plateCount(b)==0;
+        if(complete){
+            pad(); // Release whistle before actual deposit; observe ordinary state recovery.
+            if(a->getCurrState()->getID()!=NAVISTATE_Walk && a->getCurrState()->getID()!=NAVISTATE_Idle)return false;
+            require(!acquisitionNeeded || (setupBObserved && setupGatherObserved && setupRecruitmentObserved),"needed acquisition requires observed B/Gather and actual recruitment");
+            require(acquisitionNeeded || (!setupBSubmitted && !setupBObserved && !setupGatherObserved && !setupRecruitmentObserved),"already assembled makes no SDL recruitment claim");
+            std::printf("P2_ONION_STARTUP_ACQUIRED frames=%d unique=20 live=20 stored=0 owner0=20 owner1=0 plate0=20 plate1=0 acquisition_needed=%d observed_B=%d observed_Gather=%d observed_recruitment=%d via_ordinary_SDL=%d\n",startupFrames,int(acquisitionNeeded),int(setupBObserved),int(setupGatherObserved),int(setupRecruitmentObserved),int(acquisitionNeeded && setupBObserved && setupGatherObserved && setupRecruitmentObserved));
+            return true;
+        }
+        Piki* target=nullptr;float nearest=1.0e30f;
+        for(size_t i=0;i<startupBodies.size();++i){auto* p=startupBodies[i];
+            const Vector3f delta=p->getPosition()-a->getPosition();const float d2=delta.x*delta.x+delta.z*delta.z;
+            const Vector3f cursor=p->getPosition()-a->mCursorWorldPos;
+            if(startupFrames==1 || startupFrames%30==0)std::printf("P2_ONION_STARTUP_BODY frame=%d body_token=%zu address=%p generator_id=%u mode=%d state=%d action=%d owner=%d callable=%d rope=%d navi_distance=%.3f cursor_distance=%.3f\n",
+                startupFrames,i,static_cast<void*>(p),unsigned(p->getGeneratorID()),int(p->mMode),p->getState(),p->mActiveAction?p->mActiveAction->mCurrActionIdx:-1,p->mNavi?p->mNavi->mNaviID:-1,int(p->mIsCallable),int(p->mRope!=nullptr),std::sqrt(d2),std::sqrt(cursor.x*cursor.x+cursor.z*cursor.z));
+            // Wait for genuine exit/LookAt transitions; do not substitute a new body.
+            require(p->mMode==PikiMode::FreeMode || p->mMode==PikiMode::FormationMode || p->mMode==PikiMode::ExitMode,"startup mode must be observed free/formation/exit, not repaired work");
+            if(p->mMode==PikiMode::FreeMode && p->mIsCallable && !p->mRope && d2<nearest){nearest=d2;target=p;}
+        }
+        if(!target){pad();return false;}
+        // The same camera-relative left-stick transform used by onionMenu.
+        // Aim by walking toward the observed body, never writing cursor/world position.
+        const Vector3f delta=target->getPosition()-a->getPosition();const float d=std::sqrt(nearest);
+        require(a->controlCamera()!=nullptr,"startup camera basis exists");
+        const Vector3f axis=a->controlCamera()->mViewXAxis;
+        const int x=d>30?int(55*(delta.x*axis.x+delta.z*axis.z)/d):0;
+        const int y=d>30?int(55*(delta.x*axis.z-delta.z*axis.x)/d):0;
+        // Walk enters Gather on keyClick; release two frames per cycle so an
+        // Idle wake cannot consume the only B edge. Hold grows the real radius.
+        if(startupFrames%30<28)setupBSubmitted=true;
+        pad(startupFrames%30<28?KBBTN_B:0,x,y);
+        return false;
+    }
     int formation(Navi* n){int count=0;Iterator it(pikiMgr);CI_LOOP(it){auto* p=static_cast<Piki*>(*it);if(p&&p->isAlive()&&p->mMode==PikiMode::FormationMode&&p->mNavi==n)++count;}return count;}
     void owned(const char* stage){
         auto* a=naviMgr->getNavi(0);auto* b=naviMgr->getNavi(1);
         require(liveCount()==20&&storedCount()==0,"owned field20 stock0");
+        require(ownedBodies.size()==20,"withdrawal twenty unique bodies recorded");sameBodies(ownedBodies);
         require(formation(a)==0&&formation(b)==20,"all20 actual formation owner captain1");
         require(a->mPlateMgr&&b->mPlateMgr&&plateCount(a)==0&&plateCount(b)==20,"CPlate agrees with observed ownership");
         if(stage)std::printf("P2_ONION_OWNER stage=%s owner0=0 owner1=20 plate0=0 plate1=20 live=20 stored=0 input_player=1 switched_captain=1\n",stage);
@@ -297,11 +365,14 @@ public:
             require(pc_randomizer_resumed()==resumePhase,"actual production campaign load state");
             int live=liveCount();
             if(ownerStage==Boot){
-                if(a->getCurrState()->getID()!=NAVISTATE_Walk || b->getCurrState()->getID()!=NAVISTATE_Walk)return result;
+                const int state0=a->getCurrState()->getID(),state1=b->getCurrState()->getID();
+                const bool resting0=state0==NAVISTATE_Walk || state0==NAVISTATE_Idle;
+                const bool resting1=state1==NAVISTATE_Walk || state1==NAVISTATE_Idle;
+                if(!resting1 || (!resting0 && !(startupFrames>0 && state0==NAVISTATE_Gather)))return result;
                 if(!resumePhase && live<20)return result;
                 require(resumePhase?live==0:live==20,"actual initial field count");
                 require(a->mPlateMgr && b->mPlateMgr,"initialized captain formation plates");
-                if(!resumePhase && (formation(a)!=20 || plateCount(a)!=20))return result;
+                if(!resumePhase && !acquireStartup(a,b))return result;
                 startDay=gameflow.mWorldClock.mCurrentDay;
                 withdrawnFromTotal=live+storedCount();require(withdrawnFromTotal==20,"actual total20 baseline");
                 selected(0);withdrawQueued=true;elapsed("ownership_boot");
@@ -311,6 +382,8 @@ public:
             require(++ownerFrames<1800,"bounded ordinary ownership preparation");
             if(ownerStage==Deposit){
                 if(live==0 && storedCount()==20 && a->getCurrState()->getID()!=NAVISTATE_Container){
+                    require(formation(a)==0&&formation(b)==0&&plateCount(a)==0&&plateCount(b)==0,"deposit clears both owner formations and plates");
+                    std::puts("P2_ONION_DEPOSIT_BOUNDARY live=0 stored=20 owner0=0 owner1=0 plate0=0 plate1=0 startup_whistle_ended=1");
                     pad();menuSeen=false;menuConfirm=false;ownerStage=SwitchOne;elapsed("deposit20_complete");
                 }else{onionMenu(a,0);return result;}
             }
@@ -328,6 +401,7 @@ public:
             if(ownerStage==Settle){
                 pad();require(live+storedCount()==withdrawnFromTotal,"withdrawal conserves actual total");
                 if(formation(b)!=20)return result;
+                ownedBodies=liveBodies();require(ownedBodies.size()==20,"twenty unique actual withdrawn bodies");
                 owned("withdraw_complete");ownerStage=Owned;elapsed("captain1_formation20");
             }
             require(live<=20,"campaign field exceeds20live");
