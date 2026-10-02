@@ -4,6 +4,7 @@ class Teki;
 class BTeki;
 class Boss;
 struct PaniAnimator;
+namespace p2sampled { struct Clip; }
 namespace pc_midday {
 // Sub-visitors compose into complete family records; these are not standalone
 // save adapters. The caller must also serialize the concrete family host graph.
@@ -16,6 +17,10 @@ struct EnemyRegistration { int id; const char* name; const char* strategy; };
 const EnemyRegistration* enemy_registration(int id);
 int boss_object_type(int bossId);
 bool enemy_catfish_fields(BTeki&,ActorArchive&);
+// The scene content resolver MUST call this during validateTyped for
+// enemy.p2.catfish.clock.content, using the actual content-bound clip. This
+// closes clip-dependent clock bounds before scene allocation, not during bind.
+bool enemy_catfish_clock_valid(const ActorFields&,const p2sampled::Clip&,std::string&);
 bool enemy_catfish_schema(const ActorFields&,std::vector<FieldSchema>&,std::string&);
 bool enemy_stun_fields(BTeki&,ActorArchive&);
 bool enemy_stun_schema(const ActorFields&,std::vector<FieldSchema>&,std::string&);

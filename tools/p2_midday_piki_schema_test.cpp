@@ -12,7 +12,7 @@ void require(bool ok,const char* why){++checks;if(!ok){std::fprintf(stderr,"FAIL
 struct Resolver final:LogicalResolver {
  bool identify(const char*,RefKind,const void*,LogicalRef&,std::string&)override{return false;}
  bool validate(const char*,RefKind,const LogicalRef& r,std::string& e)const override{if(r.owner==17&&r.resource==0&&r.slot<100)return true;e="wrong stable incarnation or subobject";return false;}
- bool validateTyped(const FieldSchema& field,const LogicalRef& r,std::string& e)const override {return !field.targetType.empty()&&validate(field.key.c_str(),field.reference,r,e);}
+ bool validateTyped(const FieldSchema& field,const LogicalRef& r,std::string& e)const override {return !field.targetType.empty()&&(!r.owner&&!r.resource&&!r.slot?field.nullable:validate(field.key.c_str(),field.reference,r,e));}
  bool resolve(const char*,RefKind,const LogicalRef&,void*&,std::string&)override{return false;}
  bool identifyHandle(const char*,RefKind,u32,LogicalRef&,std::string&)override{return false;}
  bool resolveHandle(const char*,RefKind,const LogicalRef&,u32&,std::string&)override{return false;}

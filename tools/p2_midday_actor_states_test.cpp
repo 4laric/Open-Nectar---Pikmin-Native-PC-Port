@@ -9,7 +9,7 @@ int checks=0;
 void check(bool b,const char* msg) {++checks;if(!b)throw std::runtime_error(msg);}
 struct Resolver : LogicalResolver {
     int object=1;
-    bool validateTyped(const FieldSchema& d,const LogicalRef& r,std::string& e) const override {return !d.targetType.empty()&&validate(d.key.c_str(),d.reference,r,e);}
+    bool validateTyped(const FieldSchema& d,const LogicalRef& r,std::string& e) const override {return !d.targetType.empty()&&(!r.owner&&!r.resource&&!r.slot?d.nullable:validate(d.key.c_str(),d.reference,r,e));}
     bool identify(const char* key,RefKind,const void* p,LogicalRef& r,std::string&) override {if(p!=&object)return false;r={7,0,2};return true;}
     bool validate(const char* key,RefKind,const LogicalRef& r,std::string&) const override {return (r.owner==7 || (r.owner==8 && std::string(key)!="target")) && r.resource==0 && r.slot==2;}
     bool resolve(const char* key,RefKind k,const LogicalRef& r,void*& p,std::string& e) override {if(!validate(key,k,r,e))return false;p=&object;return true;}
@@ -37,6 +37,18 @@ void run() {
         check(!validate_actor_fields(invalid,schema,resolver,failure),"32-bit handle cannot replace token");
         invalid=restored;invalid["projectile.owner"].reference=static_cast<RefKind>(-1);failure.clear();
         check(!encode_actor_fields(invalid,wire,failure),"negative reference kind refused");
+    }
+    {
+        ActorFields seed;integer(seed,"navi.runtime.plate.capacity",ScalarKind::S32,1);integer(seed,"navi.runtime.mPcPikiAnimColor",ScalarKind::S32,0xffffffffu);
+        std::vector<FieldSchema> descriptors;check(navi_runtime_schema(seed,descriptors,error),"CPlate role schema");
+        FieldSchema occupant;for(const auto& d:descriptors)if(d.key=="navi.runtime.plate.slot.0.occupant")occupant=d;
+        check(occupant.targetType=="Piki","all nonnull CPlate occupants require Piki");
+        struct PlateResolver:Resolver {bool validateTyped(const FieldSchema& d,const LogicalRef& r,std::string& e)const override {return d.targetType=="Piki"&&(r.owner==7||(!r.owner&&!r.resource&&!r.slot&&d.nullable));}} plateResolver;
+        ActorField value;value.category=FieldCategory::Reference;value.reference=RefKind::Creature;value.target={7,0,2};ActorFields one={{occupant.key,value}};
+        check(validate_actor_fields(one,{occupant},plateResolver,error),"registered Piki slot occupant accepted");
+        one[occupant.key].target.owner=8;check(resolver.validate(occupant.key.c_str(),RefKind::Creature,one[occupant.key].target,error),"foreign Navi exists in catalog");
+        check(!validate_actor_fields(one,{occupant},plateResolver,error),"valid foreign Navi cannot occupy CPlate");
+        one[occupant.key].target={};check(validate_actor_fields(one,{occupant},plateResolver,error),"empty inactive CPlate slot retained");
     }
     s32 signedValue=-53;u64 wide=0xfedcba9876543210ULL;float fraction=0.125f;bool flag=true;int* pointer=&resolver.object;u32 handle=19;
     FieldArchive capture(Mode::Capture,fields,resolver,error,100);
@@ -79,8 +91,10 @@ void run() {
     }
     {
         struct ResourceResolver final:Resolver {
+            bool resourceContext=true;
             bool validateTyped(const FieldSchema& d,const LogicalRef& r,std::string&) const override {
-                return d.targetType=="zen::particleMdl" && d.ownership==ReferenceOwnership::ResourceSubobject && r.resource==91 && r.slot==4;
+                if(!resourceContext||d.targetType!="zen::particleMdl"||d.ownership!=ReferenceOwnership::ResourceSubobject)return false;
+                return !r.owner&&!r.resource&&!r.slot?d.nullable:r.resource==91&&r.slot==4;
             }
         } resourceResolver;
         ActorField node;node.category=FieldCategory::Reference;node.reference=RefKind::ParticleNode;node.target={0,91,4};
@@ -90,6 +104,9 @@ void run() {
         nodes["model"].target.owner=7;e.clear();check(!validate_actor_fields(nodes,nodeSchema,resourceResolver,e),"resource child cannot carry actor owner");
         nodes["model"].target={0,92,4};e.clear();check(!validate_actor_fields(nodes,nodeSchema,resourceResolver,e),"different resource subject child refused");
         nodes["model"].target={0,91,5};e.clear();check(!validate_actor_fields(nodes,nodeSchema,resourceResolver,e),"unregistered resource child slot refused");
+        nodes["model"].target={};nodeSchema[0].nullable=true;e.clear();check(validate_actor_fields(nodes,nodeSchema,resourceResolver,e),"nullable resource child with correct context validates");
+        resourceResolver.resourceContext=false;e.clear();check(!validate_actor_fields(nodes,nodeSchema,resourceResolver,e),"nullable resource child cannot bypass subject context");
+        resourceResolver.resourceContext=true;nodeSchema[0].ownership=static_cast<ReferenceOwnership>(99);e.clear();check(!validate_actor_fields(nodes,nodeSchema,resolver,e),"nullable reference cannot bypass unknown ownership check");
     }
     invalid=fields;invalid["target"].target={};e.clear();check(!validate_actor_fields(invalid,schema,resolver,e),"required null refusal");
     invalid=fields;invalid["target"].target.owner=8;e.clear();check(!validate_actor_fields(invalid,schema,resolver,e),"existing incompatible actor role refusal");

@@ -5,7 +5,7 @@ using namespace pc_midday;
 struct Resolver:LogicalResolver{
  bool identify(const char*,RefKind,const void*,LogicalRef&,std::string&)override{return false;}
  bool validate(const char*,RefKind,const LogicalRef&r,std::string&)const override{return r.owner==1;}
- bool validateTyped(const FieldSchema&s,const LogicalRef&r,std::string&)const override{return !s.targetType.empty()&&r.owner==1;}
+ bool validateTyped(const FieldSchema&s,const LogicalRef&r,std::string&)const override{return !s.targetType.empty()&&((!r.owner&&!r.resource&&!r.slot)?s.nullable:(r.owner==1));}
  bool resolve(const char*,RefKind,const LogicalRef&,void*&,std::string&)override{return false;}
  bool identifyHandle(const char*,RefKind,u32,LogicalRef&,std::string&)override{return false;}
  bool resolveHandle(const char*,RefKind,const LogicalRef&,u32&,std::string&)override{return false;}

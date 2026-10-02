@@ -9,7 +9,7 @@ using Schema=bool(*)(const ActorFields&,const std::string&,std::vector<FieldSche
 struct Resolver:LogicalResolver {
  bool identify(const char*,RefKind,const void*,LogicalRef&,std::string&)override{return false;}
  bool validate(const char*,RefKind,const LogicalRef&,std::string&)const override{return false;}
- bool validateTyped(const FieldSchema& s,const LogicalRef&r,std::string&)const override{return !s.targetType.empty()&&((s.ownership==ReferenceOwnership::Content&&r.owner==0&&r.resource==1)||(s.ownership!=ReferenceOwnership::Content&&r.owner==1&&r.resource==0))&&r.slot==static_cast<u32>(s.reference)+1;}
+ bool validateTyped(const FieldSchema& s,const LogicalRef&r,std::string&)const override{if(!r.owner&&!r.resource&&!r.slot)return s.nullable&&!s.targetType.empty();return !s.targetType.empty()&&((s.ownership==ReferenceOwnership::Content&&r.owner==0&&r.resource==1)||(s.ownership!=ReferenceOwnership::Content&&r.owner==1&&r.resource==0))&&r.slot==static_cast<u32>(s.reference)+1;}
  bool resolve(const char*,RefKind,const LogicalRef&,void*&,std::string&)override{return false;}
  bool identifyHandle(const char*,RefKind,u32,LogicalRef&,std::string&)override{return false;}
  bool resolveHandle(const char*,RefKind,const LogicalRef&,u32&,std::string&)override{return false;}

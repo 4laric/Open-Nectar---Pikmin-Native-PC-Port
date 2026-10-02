@@ -1,5 +1,6 @@
 #include "pc_midday_enemy.h"
 #include "pc_p2_chappy_mouth.h"
+#include "pc_p2_sampled_clock.h"
 #include <cmath>
 #include <cstring>
 namespace pc_midday {
@@ -139,6 +140,20 @@ bool enemy_stun_schema(const ActorFields& f,std::vector<FieldSchema>& out,std::s
  scalar(out,p+"phase",ScalarKind::S32);scalar(out,p+"fitDuration",ScalarKind::F32);scalar(out,p+"fitElapsed",ScalarKind::F32);scalar(out,p+"bounceUpdates",ScalarKind::U32);return true;
 }
 
+bool enemy_catfish_clock_valid(const ActorFields& f,const p2sampled::Clip& clip,std::string& error) {
+ const std::string p="enemy.p2.catfish.clock.";p2sampled::Clock::SavedState s{};bool receiver=false;
+ auto bits=[&](const char* key,ScalarKind kind,u64& value){auto it=f.find(p+key);if(it==f.end()||it->second.category!=FieldCategory::Scalar||it->second.scalar!=kind||(kind==ScalarKind::Bool&&it->second.bits>1)){error="invalid Catfish clock field";return false;}value=it->second.bits;return true;};
+ u64 value=0;if(!bits("clock.frame",ScalarKind::F64,value))return false;std::memcpy(&s.frame,&value,8);
+ if(!bits("clock.generation",ScalarKind::U64,value))return false;s.generation=value;
+ if(!bits("clock.cycle",ScalarKind::U64,value))return false;s.cycle=value;
+ if(!bits("clock.active",ScalarKind::Bool,value))return false;s.active=value;
+ if(!bits("clock.entry",ScalarKind::Bool,value))return false;s.entry=value;
+ if(!bits("clock.paused",ScalarKind::Bool,value))return false;s.paused=value;
+ if(!bits("active",ScalarKind::Bool,value))return false;receiver=value;
+ if((receiver&&!s.active)||!p2sampled::Clock::validState(clip,s)){error="Catfish clock does not match resolved content";return false;}
+ return true;
+}
+
 bool enemy_catfish_schema(const ActorFields& f,std::vector<FieldSchema>& out,std::string& error) {
  const std::string p="enemy.p2.catfish.";auto present=f.find(p+"present");
  if(present==f.end()||present->second.category!=FieldCategory::Scalar||present->second.scalar!=ScalarKind::Bool||present->second.bits>1){error="invalid Catfish presence";return false;}scalar(out,p+"present",ScalarKind::Bool);if(!present->second.bits)return true;
@@ -154,10 +169,12 @@ bool enemy_catfish_schema(const ActorFields& f,std::vector<FieldSchema>& out,std
  auto frameIt=f.find(p+"clock.clock.frame");double frame=0;
  if(frameIt==f.end()||frameIt->second.scalar!=ScalarKind::F64){error="missing Catfish clock frame";return false;}
  auto frameBits=frameIt->second.bits;std::memcpy(&frame,&frameBits,8);
- if(!std::isfinite(frame)||frame<0||frame>10000){error="invalid Catfish source frame";return false;}
+ if(!std::isfinite(frame)||frame<0){error="invalid Catfish source frame";return false;}
  for(const char* key:{"stateTime","phase"}){float v=0;if(!number(f,(p+key).c_str(),v,error)||v<0){error="invalid Catfish state clock";return false;}}
  scalar(out,p+"clock.clock.frame",ScalarKind::F64);scalar(out,p+"clock.clock.generation",ScalarKind::U64);scalar(out,p+"clock.clock.cycle",ScalarKind::U64);
  auto active=f.find(p+"clock.clock.active");bool running=active!=f.end()&&active->second.bits!=0;
+ auto receiver=f.find(p+"clock.active");
+ if(receiver!=f.end()&&receiver->second.bits&&!running){error="active Catfish receiver lacks active clock";return false;}
  if(running){auto generation=f.find(p+"clock.clock.generation");if(generation==f.end()||generation->second.scalar!=ScalarKind::U64||!generation->second.bits){error="active Catfish clock has no generation";return false;}}
  ref(out,p+"clock.content",RefKind::Animation,!running,"p2sampled::Clip",ReferenceOwnership::Content);
  return true;

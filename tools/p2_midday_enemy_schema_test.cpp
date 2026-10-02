@@ -4,6 +4,7 @@
 #include "pc_midday_creature.h"
 #include "pc_midday_collision.h"
 #include <cstdio>
+#include <cstring>
 #include <stdexcept>
 using namespace pc_midday;
 namespace {
@@ -11,7 +12,7 @@ int checks=0;void check(bool ok,const char* what){++checks;if(!ok)throw std::run
 struct Resolver:LogicalResolver {
  bool identify(const char*,RefKind,const void*,LogicalRef&,std::string&)override{return false;}
  bool validate(const char*,RefKind,const LogicalRef& r,std::string&)const override{return r.owner==7;}
- bool validateTyped(const FieldSchema& d,const LogicalRef& r,std::string& e)const override{return !d.targetType.empty()&&validate(d.key.c_str(),d.reference,r,e);}
+ bool validateTyped(const FieldSchema& d,const LogicalRef& r,std::string& e)const override{return !d.targetType.empty()&&((!r.owner&&!r.resource&&!r.slot)?d.nullable:validate(d.key.c_str(),d.reference,r,e));}
  bool resolve(const char*,RefKind,const LogicalRef&,void*&,std::string&)override{return false;}
  bool identifyHandle(const char*,RefKind,u32,LogicalRef&,std::string&)override{return false;}
  bool resolveHandle(const char*,RefKind,const LogicalRef&,u32&,std::string&)override{return false;}
@@ -24,7 +25,9 @@ void composed(){
  struct Catalog:Resolver {
   bool validate(const char*,RefKind,const LogicalRef& r,std::string&)const override{return r.owner==7||(r.owner==0&&r.resource==900);}
   bool validateTyped(const FieldSchema& d,const LogicalRef& r,std::string& e)const override{
-   if(d.targetType.empty()||!validate(d.key.c_str(),d.reference,r,e))return false;
+   if(d.targetType.empty())return false;
+   if(!r.owner&&!r.resource&&!r.slot)return d.nullable;
+   if(!validate(d.key.c_str(),d.reference,r,e))return false;
    if(d.ownership==ReferenceOwnership::Content)return r.owner==0&&r.resource==900;
    if(d.ownership==ReferenceOwnership::Self||d.ownership==ReferenceOwnership::ActorSubobject)return r.owner==7&&r.resource==0;
    return true;
@@ -71,6 +74,20 @@ void run(){
  check(!enemy_schema(f,EnemyHost::Frog,schema,e),"absent selected host refuses");
  }
 
+ {
+  ActorFields f;std::string e;const std::string p="enemy.p2.catfish.clock.";
+  for(const char* k:{"active","clock.active","clock.entry","clock.paused"})set(f,p+k,ScalarKind::Bool,0);
+  set(f,p+"clock.generation",ScalarKind::U64,1);set(f,p+"clock.cycle",ScalarKind::U64,0);
+  auto frame=[&](double n){u64 b=0;std::memcpy(&b,&n,8);set(f,p+"clock.frame",ScalarKind::F64,b);};
+  auto clip=p2catfishevents::makeClip(p2catfishevents::catfishRows().front());
+  frame(clip.poses.duration);set(f,p+"active",ScalarKind::Bool,1);set(f,p+"clock.active",ScalarKind::Bool,1);
+  check(enemy_catfish_clock_valid(f,clip,e),"nonloop exact end validates before allocation");
+  frame(clip.poses.duration+0.25);check(!enemy_catfish_clock_valid(f,clip,e),"resolved clip duration overflow refused prebegin");
+  clip.loopEnd=clip.poses.duration;frame(clip.loopEnd);check(!enemy_catfish_clock_valid(f,clip,e),"loop end exclusive bound refused prebegin");
+  frame(clip.loopEnd-0.25);check(enemy_catfish_clock_valid(f,clip,e),"loop interior validates");
+  set(f,p+"clock.active",ScalarKind::Bool,0);check(!enemy_catfish_clock_valid(f,clip,e),"active receiver inactive clock refused prebegin");
+  set(f,p+"active",ScalarKind::Bool,0);frame(10001);check(enemy_catfish_clock_valid(f,clip,e),"inactive finite historical frame preserved");
+ }
  auto row=p2catfishevents::catfishRows().front();auto clip=p2catfishevents::makeClip(row);
  p2catfishevents::Receiver a,b;check(a.start(clip,"attack"),"actual Catfish event clock start");
  auto bite=a.advance(18.0/30.0);check(bite.size()==1&&bite[0].action==p2catfishevents::Action::Bite,"bite occurs before snapshot");

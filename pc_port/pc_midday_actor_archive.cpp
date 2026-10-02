@@ -104,6 +104,12 @@ bool validate_actor_fields(const ActorFields& fields,const std::vector<FieldSche
             if(f.scalar!=s.scalar||!valid_scalar(f.scalar,f.bits))return reject(error,"actor scalar schema mismatch");
         } else {
             if(s.targetType.empty())return reject(error,"missing concrete reference contract");
+            switch(s.ownership) {
+            case ReferenceOwnership::AnyLive: case ReferenceOwnership::Self:
+            case ReferenceOwnership::ActorSubobject: case ReferenceOwnership::Content:
+            case ReferenceOwnership::ResourceSubobject: case ReferenceOwnership::ResourceSelf:break;
+            default:return reject(error,"unknown reference ownership contract");
+            }
             if(f.reference!=s.reference)return reject(error,"actor reference role mismatch");
             if(absent(f.target)) {if(!s.nullable)return reject(error,"required actor reference absent");}
             else {
@@ -117,8 +123,10 @@ bool validate_actor_fields(const ActorFields& fields,const std::vector<FieldSche
                        f.target.owner!=owner->second.target.owner || f.target.resource)
                         return reject(error,"actor subobject owner link mismatch");
                 }
-                if(!resolver.validateTyped(s,f.target,error))return false;
             }
+            // Nullability does not waive the compiled type, ownership, subject
+            // context or declared owner-link contract supplied to the resolver.
+            if(!resolver.validateTyped(s,f.target,error))return false;
         }
     }
     return true;
