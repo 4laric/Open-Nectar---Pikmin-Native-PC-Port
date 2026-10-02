@@ -42,6 +42,17 @@
 #include "pc_randomizer.h"
 #include "pc_p2_preview.h"
 #include "p2_fixture_captain_guard.h"
+// Windows engine declarations above retain the production -UWIN32 layout.
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+// Windows SDK headers redefine the legacy WIN32 macro; keep production layout.
+#ifdef WIN32
+#undef WIN32
+#endif
+#endif
 extern std::uint32_t pc_netplay_current_frame(void);
 
 namespace {
@@ -65,6 +76,31 @@ void fixture_require(bool ok, const char* why) {
     std::_Exit(1);
 }
 
+
+// Read one immutable whole-command snapshot. The writer uses ReplaceFileW for
+// an existing Windows path; a retained reader sees the complete previous file.
+bool command_snapshot(const std::string& path, std::string& text) {
+#if defined(_WIN32)
+    HANDLE file = CreateFileA(path.c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return false;
+    char bytes[256];
+    DWORD count = 0;
+    const BOOL read = ReadFile(file, bytes, sizeof(bytes), &count, nullptr);
+    const BOOL closed = CloseHandle(file);
+    fixture_require(read && closed, "SDL input snapshot I/O");
+    fixture_require(count < sizeof(bytes), "SDL input command length");
+    text.assign(bytes, count);
+    return true;
+#else
+    std::ifstream file(path);
+    if (!file) return false;
+    text.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+    return true;
+#endif
+}
+
 class CoopProtocolFixtureApp : public PlugPikiApp {
     SDL_Joystick* mPad = nullptr;
     bool mCaptainInitialized[2] = {false, false};
@@ -80,9 +116,8 @@ class CoopProtocolFixtureApp : public PlugPikiApp {
 
     void input() {
         if (!mInputPath.empty()) {
-            std::ifstream file(mInputPath);
-            if (file) {
-                std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            std::string text;
+            if (command_snapshot(mInputPath, text)) {
                 fixture_require(text.size() < 256, "SDL input command length");
                 std::istringstream stream(text);
                 std::string tag, end, extra;
