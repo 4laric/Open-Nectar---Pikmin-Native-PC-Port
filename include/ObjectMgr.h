@@ -100,6 +100,9 @@ protected:
  * @note Size: 0x4C.
  */
 struct PolyObjectMgr : public ObjectMgr {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPolyAccess;
+#endif
 	PolyObjectMgr(int);
 
 	// completely guessing on this name
