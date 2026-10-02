@@ -107,6 +107,8 @@ bool validate_actor_fields(const ActorFields& fields,const std::vector<FieldSche
             if(f.reference!=s.reference)return reject(error,"actor reference role mismatch");
             if(absent(f.target)) {if(!s.nullable)return reject(error,"required actor reference absent");}
             else {
+                if((s.ownership==ReferenceOwnership::ResourceSelf || s.ownership==ReferenceOwnership::ResourceSubobject) &&
+                   (f.target.owner || !f.target.resource))return reject(error,"resource subject reference encoding mismatch");
                 if(!s.ownerLink.empty()) {
                     auto owner=fields.find(s.ownerLink);
                     if(s.ownership!=ReferenceOwnership::ActorSubobject || owner==fields.end() ||

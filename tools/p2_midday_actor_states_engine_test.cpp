@@ -29,13 +29,31 @@ void require(bool b,const std::string& message){if(!b){std::printf("FAIL MIDDAY_
 struct Resolver : LogicalResolver {
     std::map<std::pair<RefKind,const void*>,u64> ids;
     std::map<std::pair<RefKind,u64>,void*> objects;
+    std::map<std::string,LogicalRef> identifiedRoles;
     u64 next=1;
     Navi* owner=nullptr;
     Creature* typedOwner=nullptr;
     bool identify(const char* key,RefKind k,const void* p,LogicalRef& ref,std::string&) override {
         if(!p){ref={};return true;}auto identity=std::make_pair(k,p);
+        if(k==RefKind::SlotListener) {
+            std::string occupant=key;auto suffix=occupant.rfind(".listener");
+            if(suffix==std::string::npos)return false;
+            occupant.replace(suffix,9,".occupant");
+            auto found=identifiedRoles.find(occupant);if(found==identifiedRoles.end()||!found->second.owner)return false;
+            ref=found->second;ids[identity]=ref.owner;objects[{k,ref.owner}]=const_cast<void*>(p);return true;
+        }
+        // Formation resources use the owning captain's incarnation, matching
+        // the compiled Piki action ownerLink contract.
+        if(k==RefKind::CPlate || k==RefKind::FormationMgr) {
+            auto* piki=dynamic_cast<Piki*>(typedOwner);
+            Navi* captain=piki?piki->mNavi:owner;
+            if(!captain || (k==RefKind::CPlate ? p!=captain->mPlateMgr : p!=captain->mFormMgr))return false;
+            LogicalRef captainRef;std::string error;
+            if(!identify("fixture.captain",RefKind::Creature,captain,captainRef,error))return false;
+            ids[identity]=captainRef.owner;objects[{k,captainRef.owner}]=const_cast<void*>(p);ref=captainRef;return true;
+        }
         if(!ids.count(identity)){ids[identity]=next;objects[{k,next}]=const_cast<void*>(p);++next;}
-        ref={ids[identity],0,0};return true;
+        ref={ids[identity],0,0};identifiedRoles[key]=ref;return true;
     }
     bool validate(const char* key,RefKind k,const LogicalRef& r,std::string&) const override{if(r.resource||r.slot||!objects.count({k,r.owner}))return false;
         void* p=objects.at({k,r.owner});std::string role=key;
