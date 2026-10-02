@@ -33,6 +33,12 @@ int PlayerState::totalUfoParts = MAX_UFO_PARTS;
 bool preloadUFO = false;
 PlayerState* playerState;
 static bool bbftReplayedParts[30] = {};
+#if defined(PIKI_PC_PORT)
+#include "pc_midday_player_resources.h"
+void PcMiddayPlayerReplayAccess::read(std::array<bool,30>& out) {
+    for (size_t i=0;i<out.size();++i) out[i]=bbftReplayedParts[i];
+}
+#endif
 
 /**
  * @todo: Documentation

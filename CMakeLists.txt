@@ -398,6 +398,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_item_manager_engine.cpp
     pc_port/pc_midday_demo.cpp
     pc_port/pc_midday_demo_engine.cpp
+    pc_port/pc_midday_player_resources.cpp
+    pc_port/pc_midday_player_resources_engine.cpp
     pc_port/pc_midday_result.cpp
     pc_port/pc_midday_result_engine.cpp
     pc_port/pc_midday_player_core.cpp
@@ -3406,3 +3408,12 @@ add_test(NAME pc_midday_demo COMMAND pc_midday_demo_test)
 add_executable(pc_midday_result_test tools/pc_midday_result_test.cpp pc_port/pc_midday_result.cpp)
 target_include_directories(pc_midday_result_test PRIVATE pc_port)
 add_test(NAME pc_midday_result COMMAND pc_midday_result_test)
+
+add_executable(pc_midday_player_resources_test tools/pc_midday_player_resources_test.cpp
+    pc_port/pc_midday_player_resources.cpp pc_port/pc_midday_actor_archive.cpp
+    pc_port/pc_midday_world_schema.cpp pc_port/pc_midday_world_resources_schema.cpp
+    pc_port/pc_midday_particle_schema.cpp pc_port/pc_midday_creature_schema.cpp pc_port/pc_midday_collision_schema.cpp)
+target_include_directories(pc_midday_player_resources_test PRIVATE pc_port)
+target_compile_definitions(pc_midday_player_resources_test PRIVATE PIKI_PC_PORT)
+target_compile_options(pc_midday_player_resources_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME pc_midday_player_resources COMMAND pc_midday_player_resources_test)
