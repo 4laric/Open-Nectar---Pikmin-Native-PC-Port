@@ -23,6 +23,7 @@
 #include "Piki.h"
 #include "PikiState.h"
 #include "PikiMgr.h"
+#include "Generator.h"
 #include "MapMgr.h"
 #include "Collision.h"
 #include "Shape.h"
@@ -51,8 +52,10 @@ void input(Navi* n,float gx,bool whistle=false) {
  pc_window_input_assign(0,PC_INPUT_DEV_GAMEPAD,SDL_JoystickInstanceID(pad));
  pc_window_input_assign(1,PC_INPUT_DEV_NONE,-1);
  SDL_JoystickSetVirtualButton(pad,SDL_CONTROLLER_BUTTON_B,whistle);
- SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTX,Sint16(x*32767/74));
- SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTY,Sint16(-y*32767/74));SDL_JoystickUpdate();
+ // Production SDL->PAD divides by256, then Controller normalizes GC axes by74.
+ require(x>=-74&&x<=74&&y>=-74&&y<=74,"ordinary GC axis domain");
+ SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTX,Sint16(x*256));
+ SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTY,Sint16(-y*256));SDL_JoystickUpdate();
 }
 struct Track {Creature* actor=nullptr;int outbound=0,back=0;};
 class UpperApp:public PlugPikiApp {
@@ -119,7 +122,7 @@ public:
   require(pc_p2_surface_water_active()&&pc_p2_surface_water_count()==3,"source water owner missing");
   std::array<Piki*,20> current{};int count=0;
   Iterator it(pikiMgr);CI_LOOP(it){auto* q=static_cast<Piki*>(*it);if(!q->isAlive())continue;
-   unsigned uid=q->getGeneratorID();require(uid>=1&&uid<=20&&!current[uid-1],"original roster UID missing/duplicate/new actor");
+   unsigned uid=q->mGenerator?static_cast<unsigned>(q->mGenerator->_70):0;require(uid>=1&&uid<=20&&!current[uid-1],"original roster UID missing/duplicate/new actor");
    current[uid-1]=q;++count;}
   require(count==20,"original twenty live Reds lost");
   if(!bankReady){if(n->getCurrState()->getID()!=NAVISTATE_Walk){ready=0;return result;}
