@@ -99,6 +99,9 @@ bool validate_actor_fields(const ActorFields& fields,const std::vector<FieldSche
         if(!seen.insert(s.key).second)return reject(error,"duplicate schema field");
         auto it=fields.find(s.key);if(it==fields.end())return reject(error,"missing actor field");
         const auto& f=it->second;
+        if(s.strength!=ReferenceStrength::Weak &&
+           (s.strength!=ReferenceStrength::StrongCreature || s.category!=FieldCategory::Reference || s.reference!=RefKind::Creature))
+            return reject(error,"invalid reference strength contract");
         if(f.category!=s.category)return reject(error,"actor field category mismatch");
         if(f.category==FieldCategory::Scalar) {
             if(f.scalar!=s.scalar||!valid_scalar(f.scalar,f.bits))return reject(error,"actor scalar schema mismatch");

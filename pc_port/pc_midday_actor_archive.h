@@ -10,6 +10,9 @@ enum class FieldCategory : u8 { Scalar, Reference, Handle, Token64 };
 // payloads are still required. It does not assert immutable state.
 enum class ReferenceOwnership { AnyLive, Self, ActorSubobject, Content,
     ResourceSubobject, ResourceSelf };
+// Compiled native storage semantics, never inferred from the pointer target or
+// serialized into the wire payload. Raw Creature pointers remain Weak.
+enum class ReferenceStrength { Weak, StrongCreature };
 struct FieldSchema {
     std::string key;
     FieldCategory category;
@@ -23,8 +26,9 @@ struct FieldSchema {
     // Absolute payload key of the owning actor reference. Empty means the
     // subject actor for ActorSubobject; populated links are checked prebegin.
     std::string ownerLink;
+    ReferenceStrength strength=ReferenceStrength::Weak;
     static FieldSchema value(const char* k, ScalarKind s) { return {k,FieldCategory::Scalar,s,RefKind::Creature,false,"",ReferenceOwnership::AnyLive}; }
-    static FieldSchema ref(const char* k, RefKind r, bool n=false, const char* t="", ReferenceOwnership o=ReferenceOwnership::AnyLive, const char* owner="") { return {k,FieldCategory::Reference,ScalarKind::U8,r,n,t,o,owner}; }
+    static FieldSchema ref(const char* k, RefKind r, bool n=false, const char* t="", ReferenceOwnership o=ReferenceOwnership::AnyLive, const char* owner="", ReferenceStrength strength=ReferenceStrength::Weak) { return {k,FieldCategory::Reference,ScalarKind::U8,r,n,t,o,owner,strength}; }
     static FieldSchema handle(const char* k, RefKind r, bool n=false, const char* t="", ReferenceOwnership o=ReferenceOwnership::AnyLive) { return {k,FieldCategory::Handle,ScalarKind::U32,r,n,t,o}; }
     static FieldSchema token64(const char* k, RefKind r, bool n=false, const char* t="", ReferenceOwnership o=ReferenceOwnership::AnyLive) { return {k,FieldCategory::Token64,ScalarKind::U64,r,n,t,o}; }
 };

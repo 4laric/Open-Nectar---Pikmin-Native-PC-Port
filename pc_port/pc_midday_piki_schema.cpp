@@ -184,7 +184,7 @@ bool piki_action_schema(int type,std::vector<FieldSchema>& out) { switch(type){
  out.push_back(FieldSchema::value("mIsCriticalHit",ScalarKind::Bool));
  out.push_back(FieldSchema::value("mTargetIsPlayer",ScalarKind::Bool));
  out.push_back(FieldSchema::ref("mTargetObjectPool",RefKind::Traversable,true,"Traversable",ReferenceOwnership::AnyLive));
- out.push_back(FieldSchema::ref("mOther",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
+ out.push_back(FieldSchema::ref("mOther",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
  out.push_back(FieldSchema::ref("mPlayerObject",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
  return true;
  case 4: // ActBoMake
@@ -260,7 +260,7 @@ bool piki_action_schema(int type,std::vector<FieldSchema>& out) { switch(type){
  return true;
  case 13: // ActChase
  out.push_back(FieldSchema::value("mChaseTimer",ScalarKind::F32));
- out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
+ out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
  return true;
  case 14: // ActCrowd
  out.push_back(FieldSchema::value("mState",ScalarKind::U16));
@@ -301,7 +301,7 @@ bool piki_action_schema(int type,std::vector<FieldSchema>& out) { switch(type){
  out.push_back(FieldSchema::value("mDecoyTimer",ScalarKind::F32));
  return true;
  case 16: // ActDeliver
- out.push_back(FieldSchema::ref("mObject",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
+ out.push_back(FieldSchema::ref("mObject",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
  return true;
  case 17: // ActEnter
  out.push_back(FieldSchema::value("mState",ScalarKind::U16));
@@ -318,7 +318,7 @@ bool piki_action_schema(int type,std::vector<FieldSchema>& out) { switch(type){
  out.push_back(FieldSchema::value("mAvoidDirection.x",ScalarKind::F32));
  out.push_back(FieldSchema::value("mAvoidDirection.y",ScalarKind::F32));
  out.push_back(FieldSchema::value("mAvoidDirection.z",ScalarKind::F32));
- out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
+ out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
  return true;
  case 19: // ActExit
  out.push_back(FieldSchema::value("mPrevPosition.x",ScalarKind::F32));
@@ -368,7 +368,7 @@ bool piki_action_schema(int type,std::vector<FieldSchema>& out) { switch(type){
  out.push_back(FieldSchema::value("mMaxDistance",ScalarKind::F32));
  out.push_back(FieldSchema::value("mMinDistance",ScalarKind::F32));
  out.push_back(FieldSchema::value("mTimeoutDuration",ScalarKind::F32));
- out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
+ out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
  return true;
  case 25: // ActGuard
  out.push_back(FieldSchema::value("mGoalPosition.x",ScalarKind::F32));
@@ -382,9 +382,9 @@ bool piki_action_schema(int type,std::vector<FieldSchema>& out) { switch(type){
  out.push_back(FieldSchema::value("mTimer",ScalarKind::F32));
  out.push_back(FieldSchema::value("mIsWaiting",ScalarKind::Bool));
  out.push_back(FieldSchema::value("mIsGuardable",ScalarKind::Bool));
- out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
- out.push_back(FieldSchema::ref("mLeftGuard",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
- out.push_back(FieldSchema::ref("mRightGuard",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
+ out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
+ out.push_back(FieldSchema::ref("mLeftGuard",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
+ out.push_back(FieldSchema::ref("mRightGuard",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
  out.push_back(FieldSchema::value("mFormationSide",ScalarKind::S32));
  return true;
  case 26: // ActJumpAttack
@@ -392,7 +392,7 @@ bool piki_action_schema(int type,std::vector<FieldSchema>& out) { switch(type){
  out.push_back(FieldSchema::value("mAttackState",ScalarKind::S32));
  out.push_back(FieldSchema::value("_2C",ScalarKind::Bool));
  out.push_back(FieldSchema::value("mIsCriticalHit",ScalarKind::Bool));
- out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
+ out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
  out.push_back(FieldSchema::ref("mTargetCollider",RefKind::CollPart,true,"CollPart",ReferenceOwnership::AnyLive));
  return true;
  case 27: // ActKinoko
@@ -401,7 +401,7 @@ bool piki_action_schema(int type,std::vector<FieldSchema>& out) { switch(type){
  out.push_back(FieldSchema::value("mTargetDirection.x",ScalarKind::F32));
  out.push_back(FieldSchema::value("mTargetDirection.y",ScalarKind::F32));
  out.push_back(FieldSchema::value("mTargetDirection.z",ScalarKind::F32));
- out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
+ out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
  return true;
  case 28: // ActMine
  out.push_back(FieldSchema::value("mState",ScalarKind::U16));
@@ -410,22 +410,22 @@ bool piki_action_schema(int type,std::vector<FieldSchema>& out) { switch(type){
  return true;
  case 29: // ActPick
  out.push_back(FieldSchema::value("mIsAnimationFinished",ScalarKind::Bool));
- out.push_back(FieldSchema::ref("mObject",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
+ out.push_back(FieldSchema::ref("mObject",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
  return true;
  case 30: // ActPickCreature
- out.push_back(FieldSchema::ref("_18",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
+ out.push_back(FieldSchema::ref("_18",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
  return true;
  case 31: // ActPickItem
- out.push_back(FieldSchema::ref("mTargetItem",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
+ out.push_back(FieldSchema::ref("mTargetItem",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
  return true;
  case 32: // ActPullout
- out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
+ out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
  return true;
  case 33: // ActPulloutCreature
  out.push_back(FieldSchema::value("mState",ScalarKind::S32));
  out.push_back(FieldSchema::value("mPulloutTimer",ScalarKind::F32));
  out.push_back(FieldSchema::value("mPulloutSuccess",ScalarKind::Bool));
- out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
+ out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
  return true;
  case 34: // ActPush
  out.push_back(FieldSchema::value("mPushAnimationState",ScalarKind::U8));
@@ -454,7 +454,7 @@ bool piki_action_schema(int type,std::vector<FieldSchema>& out) { switch(type){
  out.push_back(FieldSchema::value("mItemPosition.x",ScalarKind::F32));
  out.push_back(FieldSchema::value("mItemPosition.y",ScalarKind::F32));
  out.push_back(FieldSchema::value("mItemPosition.z",ScalarKind::F32));
- out.push_back(FieldSchema::ref("mItem",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
+ out.push_back(FieldSchema::ref("mItem",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
  return true;
  case 38: // ActRandomBoid
  out.push_back(FieldSchema::value("mState",ScalarKind::S32));
@@ -482,13 +482,13 @@ bool piki_action_schema(int type,std::vector<FieldSchema>& out) { switch(type){
  case 41: // ActShoot
  out.push_back(FieldSchema::value("mTargetIsPlayer",ScalarKind::Bool));
  out.push_back(FieldSchema::ref("mTargetObjectPool",RefKind::Traversable,true,"Traversable",ReferenceOwnership::AnyLive));
- out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
+ out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
  out.push_back(FieldSchema::ref("mNavi",RefKind::Creature,false,"Navi",ReferenceOwnership::AnyLive));
  return true;
  case 42: // ActShootCreature
  out.push_back(FieldSchema::value("mState",ScalarKind::S32));
  out.push_back(FieldSchema::value("mChaseTimer",ScalarKind::F32));
- out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
+ out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
  return true;
  case 43: // ActStone
  out.push_back(FieldSchema::value("mState",ScalarKind::U16));
@@ -526,7 +526,7 @@ bool piki_action_schema(int type,std::vector<FieldSchema>& out) { switch(type){
  out.push_back(FieldSchema::value("mPcStallCheckPos.z",ScalarKind::F32));
  out.push_back(FieldSchema::value("mPcStallTimer",ScalarKind::F32));
  out.push_back(FieldSchema::value("mPcStallArmed",ScalarKind::Bool));
- out.push_back(FieldSchema::ref("mPellet",RefKind::Creature,true,"Pellet",ReferenceOwnership::AnyLive));
+ out.push_back(FieldSchema::ref("mPellet",RefKind::Creature,true,"Pellet",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
  out.push_back(FieldSchema::ref("mGoal",RefKind::Creature,true,"Suckable",ReferenceOwnership::AnyLive));
  out.push_back(FieldSchema::value("mSplineControlPts.0.x",ScalarKind::F32));
  out.push_back(FieldSchema::value("mSplineControlPts.0.y",ScalarKind::F32));
@@ -550,7 +550,7 @@ bool piki_action_schema(int type,std::vector<FieldSchema>& out) { switch(type){
  out.push_back(FieldSchema::value("mTargetPosition.x",ScalarKind::F32));
  out.push_back(FieldSchema::value("mTargetPosition.y",ScalarKind::F32));
  out.push_back(FieldSchema::value("mTargetPosition.z",ScalarKind::F32));
- out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
+ out.push_back(FieldSchema::ref("mTarget",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
  out.push_back(FieldSchema::ref("mListener",RefKind::AnimListener,true,"AnimListener",ReferenceOwnership::ActorSubobject));
  return true;
  case 46: // ActWeed
@@ -680,8 +680,8 @@ void piki_runtime_schema(std::vector<FieldSchema>& out) {
  out.push_back(FieldSchema::ref("mRippleEffect",RefKind::Effect,true,"RippleEffect",ReferenceOwnership::ActorSubobject));
  out.push_back(FieldSchema::ref("mFreeLightEffect",RefKind::Effect,true,"FreeLightEffect",ReferenceOwnership::ActorSubobject));
  out.push_back(FieldSchema::ref("mSlimeEffect",RefKind::Effect,true,"SlimeEffect",ReferenceOwnership::ActorSubobject));
- out.push_back(FieldSchema::ref("mLookAtCreature",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
- out.push_back(FieldSchema::ref("_500",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive));
+ out.push_back(FieldSchema::ref("mLookAtCreature",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
+ out.push_back(FieldSchema::ref("_500",RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
  out.push_back(FieldSchema::value("path.capacity",ScalarKind::S32));
  out.push_back(FieldSchema::ref("update.manager",RefKind::UpdateMgr,true,"UpdateMgr",ReferenceOwnership::Content));
  out.push_back(FieldSchema::value("update.slot",ScalarKind::S32));

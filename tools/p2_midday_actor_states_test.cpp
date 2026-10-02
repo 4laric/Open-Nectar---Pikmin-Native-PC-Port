@@ -65,6 +65,20 @@ void run() {
     invalid=fields;invalid["fraction"].bits=0x7fc00000;e.clear();check(!encode_actor_fields(invalid,unchanged,e),"NaN refusal");
     std::vector<FieldSchema> schema={FieldSchema::value("signed",ScalarKind::S32),FieldSchema::value("wide",ScalarKind::U64),FieldSchema::value("fraction",ScalarKind::F32),FieldSchema::value("flag",ScalarKind::Bool),FieldSchema::ref("target",RefKind::Creature,false,"Piki"),FieldSchema::handle("path",RefKind::Path,false,"RouteHandle",ReferenceOwnership::Content)};
     e.clear();check(validate_actor_fields(fields,schema,resolver,e),"pure graph validation");
+    {
+        struct StrongResolver final:Resolver {
+            bool validateTyped(const FieldSchema& d,const LogicalRef& r,std::string& e)const override {
+                return (d.key!="target"||d.strength==ReferenceStrength::StrongCreature)&&Resolver::validateTyped(d,r,e);
+            }
+        } strongResolver;
+        auto strongSchema=schema;strongSchema[4].strength=ReferenceStrength::StrongCreature;
+        e.clear();check(validate_actor_fields(fields,strongSchema,strongResolver,e),"compiled strong storage metadata reaches resolver");
+        e.clear();check(!validate_actor_fields(fields,schema,strongResolver,e),"weak metadata cannot substitute for required smart storage");
+        strongSchema[5].strength=ReferenceStrength::StrongCreature;e.clear();
+        check(!validate_actor_fields(fields,strongSchema,resolver,e),"non-creature handle cannot be strong creature storage");
+        strongSchema=schema;strongSchema[4].strength=static_cast<ReferenceStrength>(99);e.clear();
+        check(!validate_actor_fields(fields,strongSchema,resolver,e),"unknown reference strength refused");
+    }
     struct TypedResolver final : Resolver {
         bool validateTyped(const FieldSchema& d,const LogicalRef& r,std::string& error) const override {
             if(d.key=="target")return d.targetType=="Piki" && d.ownership==ReferenceOwnership::AnyLive && validate(d.key.c_str(),d.reference,r,error);

@@ -25,6 +25,14 @@ inline bool pc_midday_test_piki(Piki& piki,pc_midday::LogicalResolver& resolver,
  if(!bind_piki(piki,original,resolver,now,restoreError)){error="restoring original real Piki payload: "+restoreError;return false;}
  ActorBytes restored;if(!capture_piki(piki,resolver,now,restored,restoreError)||restored!=original){error="original real Piki bytes differ after restore: "+restoreError;return false;}
  if(!exact){error="real Piki typed timer/frame roundtrip mismatch or identity changed";return false;}
+ // Family binding must not install the observed historical count. The complete
+ // scene backend separately rejects a forged census before publication.
+ fields.clear();if(!decode_actor_fields(original,fields,error))return false;
+ const int nativeCount=piki.mCount;
+ fields["creature.referenceCount"].bits=nativeCount?0:1;
+ ActorBytes observedCount;
+ if(!encode_actor_fields(fields,observedCount,error)||!bind_piki(piki,observedCount,resolver,now,error)||piki.mCount!=nativeCount){error="family binding wrote observed reference count";return false;}
+ restored.clear();if(!capture_piki(piki,resolver,now,restored,error)||restored!=original){error="count observation changed actual actor state";return false;}
  // Reject a forged live child before any binding writes, then prove no change.
  fields.clear();if(!decode_actor_fields(original,fields,error))return false;
  fields["piki.action.child"].bits=31;ActorBytes corrupt;

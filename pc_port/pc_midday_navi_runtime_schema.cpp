@@ -104,7 +104,7 @@ bool navi_runtime_schema(const ActorFields& fields,std::vector<FieldSchema>& out
     ref(out,p+"mWallPlane",RefKind::Plane,true,"Plane");
     ref(out,p+"mWallCollObj",RefKind::DynCollObject,true,"DynCollObject");
     ref(out,p+"mNaviShapeObject",RefKind::Shape,false,"PikiShapeObject",ReferenceOwnership::Content);
-    ref(out,p+"attackTarget",RefKind::Creature,true,"Creature");
+    out.push_back(FieldSchema::ref((p+"attackTarget").c_str(),RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));
     for(const char* key:{"distance","remaining","minimum","reset"})scalar(out,p+"odometer."+key,ScalarKind::F32);
     for(int i=0;i<32;++i)vector(out,p+"whistleFx."+std::to_string(i));
     scalar(out,p+"animationSpeed",ScalarKind::F32);animation_schema(p+"upperAnimation.",out);animation_schema(p+"lowerAnimation.",out);
@@ -128,7 +128,7 @@ bool navi_runtime_schema(const ActorFields& fields,std::vector<FieldSchema>& out
     for(int i=0;i<3;++i)scalar(out,p+"plate.happa."+std::to_string(i),ScalarKind::S32);
     for(int i=0;i<capacity;++i) {
         auto slot=p+"plate.slot."+std::to_string(i)+".";
-        vector(out,slot+"position");vector(out,slot+"offset");ref(out,slot+"occupant",RefKind::Creature,i>=used,"Piki");out.push_back(FieldSchema::ref((slot+"listener").c_str(),RefKind::SlotListener,i>=used,"SlotChangeListner",ReferenceOwnership::ActorSubobject,(slot+"occupant").c_str()));
+        vector(out,slot+"position");vector(out,slot+"offset");out.push_back(FieldSchema::ref((slot+"occupant").c_str(),RefKind::Creature,i>=used,"Piki",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));out.push_back(FieldSchema::ref((slot+"listener").c_str(),RefKind::SlotListener,i>=used,"SlotChangeListner",ReferenceOwnership::ActorSubobject,(slot+"occupant").c_str()));
     }
     return true;
 }
