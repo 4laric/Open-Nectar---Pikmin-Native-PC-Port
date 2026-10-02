@@ -3102,3 +3102,12 @@ pikmin_add_ci_fixture(elecbug_contact tools/p2_elecbug_contact_runtime.cpp)
 if(TARGET pikmin_ci_fixture_elecbug_contact)
     target_include_directories(pikmin_ci_fixture_elecbug_contact PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
 endif()
+
+# #1166 separately bounded ordinary blank-card initialization; opt-in only.
+pikmin_add_ci_fixture(blank_card_sdl tools/p2_blank_card_sdl_fixture.cpp)
+
+# #1191 ordinary natural White acquisition, retail haul and native save/resume.
+pikmin_add_ci_fixture(white_campaign tools/p2_white_campaign_runtime.cpp)
+if(TARGET pikmin_ci_fixture_white_campaign)
+    target_include_directories(pikmin_ci_fixture_white_campaign PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
+endif()
