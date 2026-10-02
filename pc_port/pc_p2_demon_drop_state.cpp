@@ -171,3 +171,63 @@ void pc_demon_drop_scene_exit() {
     }
     std::printf("DEMON_SCENE_REVOKE states=%u before_heap_disposal=1\n",count);
 }
+// Typed checkpoint access lives beside the private state and issuance tokens.
+#include "pc_midday_actor_states.h"
+namespace pc_midday {
+bool navi_state_subobjects(Navi& n, ActorArchive& a) {
+    auto* s=registered(&n);
+    if (!s) return a.fail("DemonDrop state missing");
+    u32 count=a.mode()==Mode::Capture ? static_cast<u32>(s->listeners.size()) : 0;
+    if (!a.scalar("demon.listeners.count",ScalarKind::U32,&count)) return false;
+    if (count>4096) return a.fail("Demon listener count exceeds bound");
+    if (a.mode()==Mode::Apply) {
+        if (!s->listeners.empty()) return a.fail("listener allocation requires fresh actor stage");
+        for (u32 i=0;i<count;++i) s->listeners.emplace_back(s,nullptr,0,0);
+    }
+    return true;
+}
+bool navi_listener_index(Navi& n, const PaniAnimKeyListener* listener, u32& index) {
+    auto* s=registered(&n); if (!s || !listener) return false;
+    for (u32 i=0;i<s->listeners.size();++i)
+        if (&s->listeners[i]==listener) { index=i; return true; }
+    return false;
+}
+PaniAnimKeyListener* navi_listener_at(Navi& n, u32 index) {
+    auto* s=registered(&n);
+    return s && index<s->listeners.size() ? &s->listeners[index] : nullptr;
+}
+bool demon_drop_state(Navi& n, ActorArchive& a) {
+    auto* s=registered(&n); if (!s) return a.fail("DemonDrop state missing");
+    // These members are initialized at construction and retained across states.
+    auto policy=s->policy.captureState();
+    int phase=a.mode()==Mode::Capture ? static_cast<int>(policy.phase) : 0;
+    if (!a.scalar("policy.phase",ScalarKind::S32,&phase) || phase<0 || phase>4)
+        return a.fail("invalid DemonDrop phase");
+    if (!a.scalar("policy.generation",ScalarKind::U64,&policy.generation) ||
+        !a.scalar("policy.pendingDamage",ScalarKind::F32,&policy.pendingDamage) ||
+        !a.scalar("policy.recovery",ScalarKind::F32,&policy.recovery)) return false;
+    policy.phase=static_cast<P2DemonDropPhase>(phase);
+    P2DemonDropPolicy checked;
+    if (!checked.restoreState(policy)) return a.fail("invalid DemonDrop policy");
+    if (!a.ref("captain",RefKind::Creature,s->captain) ||
+        !a.field("generation",s->generation) || !a.field("serial",s->serial) ||
+        !a.field("retired",s->retired) || !a.field("frame",s->frame) ||
+        !a.field("expected",s->expected)) return false;
+    // Reentrant callbacks cannot be checkpointed at a completed engine tick.
+    if (a.mode()==Mode::Capture && (s->delivering || s->dispatch || gSilentDamage))
+        return a.fail("Demon callback in progress");
+    u32 count=a.mode()==Mode::Capture ? static_cast<u32>(s->listeners.size()) : 0;
+    if (!a.scalar("listeners.count",ScalarKind::U32,&count) || count>4096)
+        return a.fail("invalid Demon token count");
+    if (a.mode()!=Mode::Capture && s->listeners.size()!=count)
+        return a.fail("Demon listener allocation does not match checkpoint");
+    for (u32 i=0;i<count;++i) {
+        PrefixArchive token(a,(std::string("listeners.")+std::to_string(i)).c_str());
+        auto& t=s->listeners[i];
+        if (!token.ref("captain",RefKind::Creature,t.captain) ||
+            !token.field("generation",t.generation) || !token.field("serial",t.serial)) return false;
+    }
+    if (a.mode()==Mode::Apply) { s->policy=checked; s->dispatch=0; s->delivering=false; }
+    return true;
+}
+}

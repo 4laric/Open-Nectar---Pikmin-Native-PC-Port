@@ -250,6 +250,18 @@ if (NOT WIN32 AND NOT ANDROID)
 endif()
 
 set(PC_PORT_SOURCES
+    pc_port/pc_midday_actor_states.cpp
+    pc_port/pc_midday_actor_archive.cpp
+    pc_port/pc_midday_navi_schema.cpp
+    pc_port/pc_midday_navi_runtime.cpp
+    pc_port/pc_midday_navi_runtime_schema.cpp
+    pc_port/pc_midday_creature.cpp
+    pc_port/pc_midday_creature_schema.cpp
+    pc_port/pc_midday_piki_schema.cpp
+    pc_port/pc_midday_piki_validate.cpp
+    pc_port/pc_midday_piki_states.cpp
+    pc_port/pc_midday_piki_actions.cpp
+    pc_port/pc_midday_piki_runtime.cpp
     pc_port/pc_p2_material_scope.cpp
     pc_port/pc_p2_material_binding.cpp
     pc_port/pc_p2_color_binding.cpp
@@ -3000,6 +3012,35 @@ endfunction()
 
 # #928 opt-in captain switching acceptance (requires local assets to run).
 pikmin_add_ci_fixture(captain_switch tools/p2_captain_switch_runtime.cpp)
+
+# #68 typed actor archive validation and real state-machine restore fixture.
+add_executable(p2_midday_actor_states_test
+    tools/p2_midday_actor_states_test.cpp
+    pc_port/pc_midday_actor_archive.cpp
+    pc_port/pc_midday_navi_schema.cpp
+    pc_port/pc_midday_navi_runtime_schema.cpp
+    pc_port/pc_midday_creature_schema.cpp
+    pc_port/pc_midday_piki_schema.cpp)
+target_include_directories(p2_midday_actor_states_test PRIVATE pc_port)
+target_compile_options(p2_midday_actor_states_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_midday_actor_states_test COMMAND p2_midday_actor_states_test)
+add_executable(p2_midday_piki_schema_test
+    tools/p2_midday_piki_schema_test.cpp
+    pc_port/pc_midday_actor_archive.cpp
+    pc_port/pc_midday_creature_schema.cpp
+    pc_port/pc_midday_piki_schema.cpp
+    pc_port/pc_midday_piki_validate.cpp)
+target_include_directories(p2_midday_piki_schema_test PRIVATE pc_port)
+target_compile_options(p2_midday_piki_schema_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_midday_piki_schema_test COMMAND p2_midday_piki_schema_test)
+add_executable(p2_midday_creature_test
+    tools/p2_midday_creature_test.cpp
+    pc_port/pc_midday_actor_archive.cpp
+    pc_port/pc_midday_creature_schema.cpp)
+target_include_directories(p2_midday_creature_test PRIVATE pc_port)
+target_compile_options(p2_midday_creature_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
+add_test(NAME p2_midday_creature_test COMMAND p2_midday_creature_test)
+pikmin_add_ci_fixture(midday_actor_states tools/p2_midday_actor_states_engine_test.cpp)
 
 # #1154/#1161 ordinary natural WFG acquisition and cave party route; build only.
 pikmin_add_ci_fixture(cave_route tools/p2_cave_route_runtime.cpp)

@@ -19,6 +19,9 @@ class CPlate : public Traversable, public Node {
 public:
 	// These all all pretty unsurprising.
 	friend class Navi;
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayNaviRuntimeAccess;
+#endif
 	friend struct NaviThrowWaitState;
 	friend class NaviDemoSunsetState;
 	friend struct ActCrowd;
@@ -99,7 +102,11 @@ protected:
 	Vector3f mPlateOffset;            // _5C, denoted by a markerShape in debug mode
 	f32 mPlateLength;                 // _68
 	f32 mPlateSize;                   // _6C
-	f32 mInnerRadius;                 // _70
+	f32 mInnerRadius
+#if defined(PIKI_PC_PORT)
+        = 0
+#endif
+        ;                 // _70
 	int mTotalSlotCount;              // _74
 	u32 mPlatePikiCount;              // _78
 	int mUsedSlotCount;               // _7C
