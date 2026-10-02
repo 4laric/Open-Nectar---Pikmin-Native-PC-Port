@@ -14,23 +14,32 @@ bool world_animation_fields(PaniAnimator& s,ActorArchive& ar){
  if(ar.mode()!=Mode::Validate&&(!s.mMgr||!s.mContext||!s.mMotionTable||!s.mAnimInfo))return ar.fail("active world animation has missing resources");
  return ar.field("mPlayState",s.mPlayState)&&ar.field("mCurrentAnimID",s.mCurrentAnimID)&&ar.field("mStartKeyIndex",s.mStartKeyIndex)&&ar.field("mEndKeyIndex",s.mEndKeyIndex)&&ar.field("mAnimationCounter",s.mAnimationCounter)&&ar.field("mCurrentKeyIndex",s.mCurrentKeyIndex)&&ar.field("mPreviousKeyIndex",s.mPreviousKeyIndex)&&ar.field("mMotionIdx",s.mMotionIdx)&&ar.field("mIsFinished",s.mIsFinished)&&ar.ref("mListener",RefKind::AnimListener,s.mListener);
 }
+bool world_sai_machine_fields(StateMachine<AICreature>& machine,WorldSAIKind expected,ActorArchive& ar){
+ int kind=int(expected),version=1,last=ar.mode()==Mode::Capture?machine.mLastStateID:-1;
+ if(!ar.scalar("kind",ScalarKind::S32,&kind)||kind!=int(expected)||!ar.scalar("version",ScalarKind::S32,&version)||version!=1||!ar.scalar("last",ScalarKind::S32,&last)||!world_sai_registered(expected,last))return ar.fail("canonical SAI factory/history mismatch");
+ auto* identity=&machine;if(!ar.ref("identity",RefKind::SAIStateMachine,identity)||identity!=&machine)return ar.fail("canonical SAI identity mismatch");
+ if(machine.mStateCount<1||machine.mStateCount>64||!machine.mStates)return ar.fail("canonical SAI table storage");
+ bool seen[64]={};int expectedCount=0;for(int id=0;id<64;++id)expectedCount+=world_sai_registered(expected,id);
+ if(machine.mStateCount!=expectedCount)return ar.fail("canonical SAI registered state count");
+ for(int i=0;i<machine.mStateCount;++i){auto* state=machine.mStates[i];if(!state)return ar.fail("canonical SAI null state");int id=state->getID();if(id<0||id>=64||seen[id]||!world_sai_registered(expected,id))return ar.fail("canonical SAI registered state identity");seen[id]=true;}
+ if(ar.mode()==Mode::Apply)machine.mLastStateID=last;return true;
+}
 bool world_ai_fields(AICreature& s,ActorArchive& outer){
  PrefixArchive ar(outer,"world.ai");auto& c=s.mSAICtx;
  auto* machine=c.mStateMachine;
  if(!ar.ref("machine",RefKind::SAIStateMachine,machine))return false;
  int current=ar.mode()==Mode::Capture&&c.mCurrentState?c.mCurrentState->getID():-1;
- int last=ar.mode()==Mode::Capture&&machine?machine->mLastStateID:-1;
- if(!ar.scalar("current",ScalarKind::S32,&current)||!ar.scalar("last",ScalarKind::S32,&last))return false;
+ if(!ar.scalar("current",ScalarKind::S32,&current))return false;
  // During Validate resource resolution is deliberately staged, not assigned.
  // The prepared object already carries its factory's immutable table.
  auto* table=ar.mode()==Mode::Apply?machine:c.mStateMachine;
- AState<AICreature>* selected=nullptr;bool lastFound=last==-1;
- if(table){if(table->mStateCount<0||table->mStateCount>64||!table->mStates)return ar.fail("invalid SAI table allocation");for(int i=0;i<table->mStateCount;++i){auto* state=table->mStates[i];if(!state)return ar.fail("null SAI table entry");if(state->getID()==current)selected=state;if(state->getID()==last)lastFound=true;}}
- if((current!=-1&&!selected)||!lastFound||(current==-1&&last!=-1))return ar.fail("unregistered world SAI state");
+ AState<AICreature>* selected=nullptr;
+ if(table){if(table->mStateCount<0||table->mStateCount>64||!table->mStates)return ar.fail("invalid SAI table allocation");for(int i=0;i<table->mStateCount;++i){auto* state=table->mStates[i];if(!state)return ar.fail("null SAI table entry");if(state->getID()==current)selected=state;}}
+ if(current!=-1&&!selected)return ar.fail("unregistered world SAI state");
  if(!ar.ref("collision",RefKind::Creature,c.mCollidingCreature)||!ar.field("vector",c._08)||!ar.field("animation",c.mCurrAnimId)||!ar.field("counter",c.mCounter)||!ar.field("health",c.mCurrentItemHealth)||!ar.field("events",c.mCurrentEventCount))return false;
  for(int i=0;i<16;++i)if(!ar.field(("event."+std::to_string(i)).c_str(),c.mEventFlags[i]))return false;
  if(s.mObjType==OBJTYPE_Bomb&&!ar.field("maxHealth",c.mMaxItemHealth))return false;
- if(ar.mode()==Mode::Apply){c.mStateMachine=machine;c.mCurrentState=selected;if(machine)machine->mLastStateID=last;}
+ if(ar.mode()==Mode::Apply){c.mStateMachine=machine;c.mCurrentState=selected;}
  return true;
 }
 bool world_item_fields(ItemCreature& s,ActorArchive& outer){

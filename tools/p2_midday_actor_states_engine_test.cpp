@@ -63,7 +63,9 @@ struct Resolver : LogicalResolver {
     // Structural fixture only: pointers were identified from real typed fields
     // in this process. Production restore must validate the persisted catalog.
     bool validateTyped(const FieldSchema& d,const LogicalRef& r,std::string& e) const override {
-        if(d.targetType.empty()||!validate(d.key.c_str(),d.reference,r,e))return false;
+        if(d.targetType.empty())return false;
+        if(!r.owner&&!r.resource&&!r.slot)return d.nullable;
+        if(!validate(d.key.c_str(),d.reference,r,e))return false;
         auto p=objects.at({d.reference,r.owner});
         if(d.ownership==ReferenceOwnership::Self)return p==(typedOwner?typedOwner:owner);
         if(d.reference==RefKind::Creature&&d.targetType=="Piki")return dynamic_cast<Piki*>(static_cast<Creature*>(p))!=nullptr;

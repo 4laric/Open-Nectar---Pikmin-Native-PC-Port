@@ -20,7 +20,8 @@ bool particles(Pellet& s,ActorArchive& outer){
  std::set<DynParticle*> seen;auto* p=s.mParticleList;
  for(int i=0;i<count;++i){if(!p||!seen.insert(p).second)return ar.fail("pellet particle list missing/cyclic");PrefixArchive part(ar,("particle."+std::to_string(i)).c_str());
  if(!part.field("mass",p->mMass)||!part.field("initial",p->mInitialPosition)||!part.field("local",p->mLocalPosition)||!part.field("preCollision",p->mPreCollisionVelocity)||!part.field("free",p->mIsFree)||!part.field("radius",p->mCollisionRadius)||!part.field("position",p->mWorldPosition)||!part.field("velocity",p->mWorldVelocity))return false;
- PrefixArchive inv(part,"inverse");if(!matrix(inv,p->mInvCrossMatrix)||!part.ref("next",RefKind::DynParticle,p->mNextParticle))return false;p=p->mNextParticle;
+ // mInvCrossMatrix is never consumed and its upstream temporary is partially initialized.
+ if(!part.ref("next",RefKind::DynParticle,p->mNextParticle))return false;p=p->mNextParticle;
  }return !p||ar.fail("pellet particle list exceeds count");
 }
 }

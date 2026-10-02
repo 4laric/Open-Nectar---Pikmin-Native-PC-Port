@@ -19,6 +19,9 @@ bool particle_schema(const ActorFields&f,ParticleRecordKind kind,const std::stri
  auto ref=[&](const std::string&k,RefKind r,bool n,const char*t,ReferenceOwnership own=ReferenceOwnership::AnyLive){s.push_back(FieldSchema::ref((p+k).c_str(),r,n,t,own));};
  if(kind==ParticleRecordKind::Generator){
  int draw=0,rotation=0;if(!actor_i32(f,(p+"drawCallback").c_str(),draw,e)||!actor_i32(f,(p+"rotationCallback").c_str(),rotation,e)||draw<0||draw>2||rotation<0||rotation>7){e="particle callback selector";return false;}
+ u32 control=0,flags=0;if(!actor_u32(f,(p+"mControlFlags").c_str(),control,e)||!actor_u32(f,(p+"mParticleFlags").c_str(),flags,e))return false;
+ // Native draw invokes the selected member callback whenever Visible is set.
+ if((control&0x10u)&&draw==0){e="visible particle requires draw callback";return false;}
 
  for(auto group:{"links.","mainList.","childList."})for(auto k:{"identity","prev","next"})ref(std::string(group)+k,RefKind::ParticleNode,false,"zen::zenList");
  vec("mEmitPos");
@@ -101,7 +104,7 @@ bool particle_schema(const ActorFields&f,ParticleRecordKind kind,const std::stri
  ref("mEmitPosPtr",RefKind::Vector3,true,"Vector3f",ReferenceOwnership::AnyLive);
  ref("mTexture",RefKind::Texture,true,"Texture",ReferenceOwnership::Content);
  ref("mChildTexture",RefKind::Texture,true,"Texture",ReferenceOwnership::Content);
- ref("mSolidTexFieldData",RefKind::ParticleData,true,"u16[]",ReferenceOwnership::Content);
+ ref("mSolidTexFieldData",RefKind::ParticleData,(flags&(1u<<21))==0,"u16[]",ReferenceOwnership::Content);
  ref("mEmissionRateKeyframes",RefKind::ParticleData,true,"f32[]",ReferenceOwnership::Content);
  ref("mEmissionRateValues",RefKind::ParticleData,true,"f32[]",ReferenceOwnership::Content);
  ref("mEmissionRadiusKeyframes",RefKind::ParticleData,true,"f32[]",ReferenceOwnership::Content);
@@ -122,8 +125,10 @@ bool particle_schema(const ActorFields&f,ParticleRecordKind kind,const std::stri
  }
  if(kind==ParticleRecordKind::Manager){u32 models=0,children=0;if(!actor_u32(f,(p+"models").c_str(),models,e)||!actor_u32(f,(p+"children").c_str(),children,e)||models>16384||children>16384){e="particle pool descriptor bounds";return false;}val("models",ScalarKind::U32);val("children",ScalarKind::U32);
  for(auto group:{"sleeping.","childSleeping."})for(auto k:{"identity","prev","next"})ref(std::string(group)+k,RefKind::ParticleNode,false,"zen::zenList");
- for(u32 i=0;i<models;++i)ref("model."+std::to_string(i),RefKind::ParticleNode,false,"zen::particleMdl",ReferenceOwnership::ResourceSubobject);
- for(u32 i=0;i<children;++i)ref("child."+std::to_string(i),RefKind::ParticleNode,false,"zen::particleChildMdl",ReferenceOwnership::ResourceSubobject);return true;}
+ // Arrays are separate canonical allocations. Scene closure must check each
+ // model.N/child.N maps to the declared array element and concrete adjusted type.
+ for(u32 i=0;i<models;++i)ref("model."+std::to_string(i),RefKind::ParticleNode,false,"zen::particleMdl",ReferenceOwnership::AnyLive);
+ for(u32 i=0;i<children;++i)ref("child."+std::to_string(i),RefKind::ParticleNode,false,"zen::particleChildMdl",ReferenceOwnership::AnyLive);return true;}
  if(kind==ParticleRecordKind::Permanent){vec("position");ref("generator",RefKind::ParticleGenerator,true,"zen::particleGenerator");return true;}
  if(kind==ParticleRecordKind::List){for(auto k:{"identity","prev","next"})ref(k,RefKind::ParticleNode,false,"zen::zenList");return true;}
  if(kind!=ParticleRecordKind::Model&&kind!=ParticleRecordKind::Child){e="particle record subtype not implemented";return false;}

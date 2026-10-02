@@ -51,7 +51,9 @@ public:
     virtual ~LogicalResolver()=default;
     virtual bool identify(const char*,RefKind,const void*,LogicalRef&,std::string&)=0;
     virtual bool validate(const char*,RefKind,const LogicalRef&,std::string&) const=0;
-    // Validate the exact compiled type/owner contract before scene allocation.
+    // Validate the exact compiled type/owner contract before scene allocation,
+    // including for nullable all-zero references. Null cannot bypass subject
+    // context or owner-link metadata validation.
     // resolve(key,...) must use this same record's descriptors to produce the
     // correctly adjusted destination pointer, including multiple inheritance.
     virtual bool validateTyped(const FieldSchema&,const LogicalRef&,std::string& error) const {

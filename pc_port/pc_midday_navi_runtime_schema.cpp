@@ -128,7 +128,7 @@ bool navi_runtime_schema(const ActorFields& fields,std::vector<FieldSchema>& out
     for(int i=0;i<3;++i)scalar(out,p+"plate.happa."+std::to_string(i),ScalarKind::S32);
     for(int i=0;i<capacity;++i) {
         auto slot=p+"plate.slot."+std::to_string(i)+".";
-        vector(out,slot+"position");vector(out,slot+"offset");ref(out,slot+"occupant",RefKind::Creature,i>=used,"Creature");out.push_back(FieldSchema::ref((slot+"listener").c_str(),RefKind::SlotListener,i>=used,"SlotChangeListner",ReferenceOwnership::ActorSubobject,(slot+"occupant").c_str()));
+        vector(out,slot+"position");vector(out,slot+"offset");ref(out,slot+"occupant",RefKind::Creature,i>=used,"Piki");out.push_back(FieldSchema::ref((slot+"listener").c_str(),RefKind::SlotListener,i>=used,"SlotChangeListner",ReferenceOwnership::ActorSubobject,(slot+"occupant").c_str()));
     }
     return true;
 }

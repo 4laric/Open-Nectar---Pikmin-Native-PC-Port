@@ -650,7 +650,9 @@ void pc_p2_kabuto_fsm_draw_stones(Graphics& gfx){
 namespace pc_midday {
 bool kabuto_projectile_fields(ActorArchive& outer){
  PrefixArchive a(outer,"kabutoProjectiles"),pool(a,"fleet");
- if(!projectile_fields(fleet,pool)||!a.field("sourceDebt",stoneDebt)||!a.field("traceCalls",stoneMap.calls)||!a.field("traceWalls",stoneMap.walls))return false;
+ // These counters are unsigned long long, while uint64_t is unsigned long on
+ // LP64 platforms. Preserve their explicit wire width without a typedef match.
+ if(!projectile_fields(fleet,pool)||!a.field("sourceDebt",stoneDebt)||!a.value("traceCalls",ScalarKind::U64,stoneMap.calls)||!a.value("traceWalls",ScalarKind::U64,stoneMap.walls))return false;
  for(int i=0;i<p2kabutostone::kFleetCapacity;++i){PrefixArchive p(a,("slot."+std::to_string(i)).c_str());if(!p.field("generator",slotGen[i])||!p.field("positionTicks",slotPosTicks[i]))return false;}
  u32 count=a.mode()==Mode::Capture?u32(shooters.size()):0;if(!a.scalar("shooterCount",ScalarKind::U32,&count)||count>4096)return a.fail("Kabuto shooter count");
  auto it=shooters.begin();std::map<std::uint64_t,BTeki*> staged;
