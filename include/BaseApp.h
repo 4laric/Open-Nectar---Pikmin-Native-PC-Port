@@ -40,7 +40,7 @@ public:
 	{
 #if defined(PIKI_PC_PORT)
 		// M1 deterministic netplay: sim stream (rand() passthrough when off).
-		return pc_sim_rand() / f32(RAND_MAX);
+		return pc_sim_randf(1.0f);
 #else
 		return rand() / f32(RAND_MAX);
 #endif

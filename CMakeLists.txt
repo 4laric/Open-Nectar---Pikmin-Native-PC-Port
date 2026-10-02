@@ -2350,6 +2350,15 @@ if(PIKMIN_BUILD_TESTS)
     target_compile_options(pc_sim_rng_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_sim_rng_test COMMAND pc_sim_rng_test)
 
+    # Offline checkpoint RNG profile: bootstrap-before-draw, constructor fence,
+    # typed stream state/counters and platform-independent portable float range.
+    add_executable(pc_midday_rng_test tools/pc_midday_rng_test.cpp
+        pc_port/netplay/pc_sim_rng.cpp pc_port/netplay/pc_netplay_det.cpp)
+    target_compile_options(pc_midday_rng_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+    add_test(NAME pc_midday_rng_legacy COMMAND pc_midday_rng_test legacy)
+    add_test(NAME pc_midday_rng_portable COMMAND pc_midday_rng_test)
+    add_test(NAME pc_midday_rng_netplay COMMAND pc_midday_rng_test netplay)
+
     # Netplay sim-visibility policy, M2a (issue #879). Host-run; covers the
     # pass-through contract with the switch off and the pinned sim values
     # (visible / 16:9 / near LOD) with the switch on.

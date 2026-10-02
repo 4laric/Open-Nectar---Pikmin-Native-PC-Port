@@ -1,3 +1,4 @@
+#include "netplay/pc_sim_rng.h"
 // Family-owned ground-invertebrate source behavior for the batch-2 Chappy
 // placement vehicle: Anode Beetle (ElecBug, EnemyID 28). Implements the source
 // ElecBugState.cpp cycle (Wait/Turn/Move wander -> Charge -> Discharge -> Return)
@@ -289,7 +290,7 @@ void sweepArc(BTeki* actor, ElecBug& s, unsigned generator) {
     std::fflush(stdout);
 }
 // Source randWeightFloat(10.0f): the inactivity timer restarts in [0,10).
-float inactiveReset() { return 10.0f * float(std::rand() % 1000) / 1000.0f; }
+float inactiveReset() { return 10.0f * float(pc_sim_rand() % 1000) / 1000.0f; }
 int recoverFrames() {
     auto it = clips.find("recover");
     return it == clips.end() ? 30 : it->second.frames;
