@@ -99,6 +99,8 @@ class CoopProtocolFixtureApp : public PlugPikiApp {
     unsigned mButtons = 0;
     int mAxes[4] = {0, 0, 0, 0};
     std::string mInputPath;
+    std::string mInputDirectory;
+    PcCoopGenerationState mGenerationState = {};
 
     // #1148 read-only post-idle facts, before parsing the next SDL command.
     // These snapshots are not the pre-callPikis state or an eligibility oracle.
@@ -197,6 +199,45 @@ class CoopProtocolFixtureApp : public PlugPikiApp {
     }
 
     void input() {
+        const bool generations = !mInputDirectory.empty();
+        if (generations) {
+            char bytes[256];
+            unsigned count = 0;
+            PcCoopGenerationInfo info = {0, 0, 0};
+            const PcCoopSnapshotResult snapshot = pc_coop_fixture_generation_snapshot(
+                mInputDirectory.c_str(), bytes, sizeof(bytes), &count, &info);
+            unsigned long long now = 0;
+            fixture_require(pc_coop_fixture_input_clock(&now), "generation clock unsupported");
+            if (snapshot != PC_COOP_SNAPSHOT_MISSING && snapshot != PC_COOP_SNAPSHOT_OK) {
+                std::printf("COOP_PROTOCOL_GENERATION_READ_ERROR role=%d result=%d os_error=%u close_error=%u sequence=%llu\n",
+                    mLocalRole, int(snapshot), info.os_error, info.close_error, info.sequence);
+                fixture_require(false, "generation snapshot refusal");
+            }
+            if (snapshot == PC_COOP_SNAPSHOT_MISSING && info.os_error) {
+                std::printf("COOP_PROTOCOL_GENERATION_MISSING role=%d os_error=%u sequence=%llu\n",
+                    mLocalRole, info.os_error, info.sequence);
+            }
+            PcCoopGenerationDecision decision = PC_COOP_GENERATION_OLDER;
+            if (snapshot == PC_COOP_SNAPSHOT_OK) {
+                // SDK-isolated parser/freshness logic is standalone-testable.
+                decision = pc_coop_fixture_generation_accept(&mGenerationState, bytes, count,
+                    info.sequence, now, 1u << SDL_CONTROLLER_BUTTON_MAX);
+                fixture_require(decision != PC_COOP_GENERATION_INVALID, "generation canonical/order/clock refusal");
+            }
+            int axes[4] = {};
+            fixture_require(pc_coop_fixture_generation_effective(&mGenerationState, now, &mButtons, axes),
+                "generation reader clock regressed");
+            for (unsigned i = 0; i < 4; ++i) mAxes[i] = axes[i];
+            mInputSequence = mGenerationState.sequence;
+            const bool fresh = mGenerationState.sequence && now >= mGenerationState.published_ms
+                && now - mGenerationState.published_ms <= 500;
+            if (decision == PC_COOP_GENERATION_NEW_FRESH || decision == PC_COOP_GENERATION_NEW_EXPIRED || mFrames % 15 == 0) {
+                std::printf("COOP_PROTOCOL_GENERATION_READ role=%d observed_sequence=%llu consumed_sequence=%llu decision=%d published_tick=%llu reader_tick=%llu expired=%d effective_buttons=%u attempted_input_only=1 applied_PAD_proven=0\n",
+                    mLocalRole, info.sequence, static_cast<unsigned long long>(mInputSequence), int(decision),
+                    mGenerationState.published_ms, now, int(!fresh), mButtons);
+                std::fflush(nullptr);
+            }
+        }
         if (!mInputPath.empty()) {
             std::string text;
             if (command_snapshot(mInputPath, text)) {
@@ -225,7 +266,7 @@ class CoopProtocolFixtureApp : public PlugPikiApp {
             }
         }
         // A stopped orchestrator cannot leave a held movement/throw command.
-        if (!mLastInput || SDL_GetTicks64() - mLastInput > 500) {
+        if (!generations && (!mLastInput || SDL_GetTicks64() - mLastInput > 500)) {
             mButtons = 0;
             for (int& axis : mAxes) axis = 0;
         }
@@ -263,6 +304,12 @@ public:
                     bounds.x, bounds.y, bounds.w, bounds.h, int(bool(SDL_GetWindowFlags(window) & SDL_WINDOW_HIDDEN)));
         mLocalRole = launch.isHost ? 0 : 1;
         if (const char* path = std::getenv("PIKMIN_COOP_FIXTURE_INPUT")) mInputPath = path;
+        if (const char* path = std::getenv("PIKMIN_COOP_FIXTURE_INPUT_DIR")) mInputDirectory = path;
+        fixture_require(mInputPath.empty() || mInputDirectory.empty(), "fixture input transports mutually exclusive");
+        if (!mInputDirectory.empty()) {
+            unsigned long long tick = 0;
+            fixture_require(pc_coop_fixture_input_clock(&tick), "Windows generation input clock required");
+        }
         // Production post-settings/ICE setup has already completed. This device
         // feeds the local SDL polling path; no source-input script is used.
         const int device = SDL_JoystickAttachVirtual(SDL_JOYSTICK_TYPE_GAMECONTROLLER,
@@ -280,8 +327,8 @@ public:
         fixture_require(mPad != nullptr, "SDL virtual controller open");
         pc_window_input_assign(mLocalRole, PC_INPUT_DEV_GAMEPAD, SDL_JoystickInstanceID(mPad));
         pc_window_input_assign(1 - mLocalRole, PC_INPUT_DEV_NONE, -1);
-        std::printf("COOP_PROTOCOL_FIXTURE_INPUT role=%d actual_SDL=1 source_script=0 command_file=%s\n",
-                    mLocalRole, mInputPath.c_str());
+        std::printf("COOP_PROTOCOL_FIXTURE_INPUT role=%d actual_SDL=1 source_script=0 command_file=%s command_dir=%s input_protocol=%d\n",
+                    mLocalRole, mInputPath.c_str(), mInputDirectory.c_str(), mInputDirectory.empty() ? 1 : 2);
     }
 
     int idle() override {
