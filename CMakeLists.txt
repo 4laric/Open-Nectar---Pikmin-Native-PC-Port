@@ -382,6 +382,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_store.cpp
     pc_port/pc_midday_save_quit.cpp
     pc_port/pc_midday_save_quit_engine.cpp
+    pc_port/pc_midday_inventory.cpp
     pc_port/pc_midday_player_core.cpp
     pc_port/pc_midday_player_core_engine.cpp
     pc_port/pc_midday_economy.cpp
@@ -3321,3 +3322,8 @@ add_executable(pc_midday_player_core_test tools/pc_midday_player_core_test.cpp p
 target_include_directories(pc_midday_player_core_test PRIVATE pc_port)
 target_compile_options(pc_midday_player_core_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME pc_midday_player_core COMMAND pc_midday_player_core_test)
+
+add_executable(pc_midday_inventory_test tools/pc_midday_inventory_test.cpp pc_port/pc_midday_inventory.cpp pc_port/pc_midday_capture.cpp pc_port/pc_midday_codec.cpp)
+target_include_directories(pc_midday_inventory_test PRIVATE pc_port)
+target_compile_options(pc_midday_inventory_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME pc_midday_inventory COMMAND pc_midday_inventory_test)

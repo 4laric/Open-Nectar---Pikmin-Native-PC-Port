@@ -31,6 +31,11 @@ struct PcMiddayManagerAccess {
     }
 };
 namespace pc_midday {
+bool readMonoPoolView(const MonoObjectMgr& m,MonoPoolView& out,std::string& e){
+ MonoPoolView before,after;if(!PcMiddayManagerAccess::view(m,before,e)||!PcMiddayManagerAccess::view(m,after,e))return false;
+ if(before.capacity!=after.capacity||before.count!=after.count||before.statuses!=after.statuses||before.objects!=after.objects){e="native pool changed during root inventory";return false;}
+ out=std::move(before);e.clear();return true;
+}
 bool captureMonoPool(const MonoObjectMgr& m,const BirthLedger& ledger,MonoPoolPlan& out,std::string& e){
     MonoPoolView before,after;if(!PcMiddayManagerAccess::view(m,before,e))return false;
     MonoPoolPlan p;if(!planMonoPool(before,ledger,p,e)||!PcMiddayManagerAccess::view(m,after,e))return false;

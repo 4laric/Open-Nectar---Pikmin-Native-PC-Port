@@ -15,6 +15,7 @@ bool planMonoPool(const MonoPoolView&,const BirthLedger&,MonoPoolPlan&,std::stri
 bool validateMonoPool(const MonoPoolPlan&,const std::set<uint64_t>& expectedActors,std::string&);
 bool encodeMonoPool(const MonoPoolPlan&,Bytes&,std::string&);
 bool decodeMonoPool(const Bytes&,MonoPoolPlan&,std::string&);
+bool readMonoPoolView(const MonoObjectMgr&,MonoPoolView&,std::string&);
 bool captureMonoPool(const MonoObjectMgr&,const BirthLedger&,MonoPoolPlan&,std::string&);
 // This operates only on a newly constructed zero-active pool under the complete
 // restore fence. All saved slots validate before mutation. No birth/kill calls.
