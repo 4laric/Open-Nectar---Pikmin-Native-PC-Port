@@ -16,6 +16,15 @@ PcWorldMapSnapshot ready(std::uint64_t frame=1) {
 }
 int main() {
     using I=PcWorldMapInput;
+    for(int mode=0;mode<=1;++mode) {
+        PcWorldMapResumeInput initial;auto fresh=ready();fresh.mode=mode;fresh.selectedCourse=-1;fresh.courseOpen=false;fresh.returnStatus=-1;
+        CHECK(initial.observe(fresh,1)==I::Neutral && initial.keyEdges()==0);
+        fresh=ready(2);CHECK(initial.observe(fresh,2)==I::Confirm && initial.keyEdges()==1);
+        PcWorldMapResumeInput operational;fresh=ready();fresh.selectedCourse=-1;fresh.courseOpen=false;fresh.returnStatus=-1;
+        CHECK(operational.observe(fresh,1)==I::Refuse && operational.keyEdges()==0);
+        PcWorldMapResumeInput blocked;fresh.mode=mode;fresh.contextReady=false;
+        CHECK(blocked.observe(fresh,1)==I::Refuse);
+    }
     TestMap typedMap;TestSetup typedSetup;TestNode impostor;
     TestMap* checkedMap=nullptr;TestSetup* checkedSetup=nullptr;
     PcWorldMapLiveOwner<TestNode> typed{&typedMap,&typedSetup};
