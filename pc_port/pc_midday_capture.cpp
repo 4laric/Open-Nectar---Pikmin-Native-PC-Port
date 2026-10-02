@@ -11,6 +11,34 @@ AdapterOutput captureBirthLedger(const BirthLedger& ledger){
     put(ledger.nextId(),8);put(ledger.tombstones().size(),4);for(auto id:ledger.tombstones())put(id,8);
     out.status=Completeness::Complete;return out;
 }
+bool restoreBirthLedger(const Snapshot& saved,const std::map<uint64_t,const void*>& addresses,
+                        BirthLedger& out,std::string& e){
+    try{
+        if(out.liveCount()||out.nextId()!=1||!out.tombstones().empty()){e="ledger restore destination is not fresh staging";return false;}
+        const Section* section=nullptr;
+        for(const auto& candidate:saved.sections)if(candidate.adapter.family==uint32_t(Global::BirthLedger)){
+            if(section||candidate.adapter.version!=1){e="duplicate/versioned identity section";return false;}section=&candidate;
+        }
+        if(!section){e="missing saved identity section";return false;}
+        const auto& b=section->state;
+        if(b.size()<12){e="truncated identity state";return false;}
+        auto get=[&](size_t at,unsigned width){uint64_t value=0;for(unsigned i=0;i<width;++i)value|=uint64_t(b[at+i])<<(i*8);return value;};
+        const uint64_t next=get(0,8),count=get(8,4);
+        if(!next||count>MaxActors||b.size()!=12+size_t(count)*8){e="invalid identity counter/tombstone bounds";return false;}
+        std::set<uint64_t> dead;uint64_t previous=0;
+        for(size_t i=0;i<size_t(count);++i){uint64_t id=get(12+i*8,8);if(!id||id<=previous||id>=next){e="noncanonical identity tombstones";return false;}dead.insert(id);previous=id;}
+        if(saved.actors.size()>MaxActors||addresses.size()!=saved.actors.size()){e="incomplete allocated identity census";return false;}
+        std::set<uint64_t> live;std::set<const void*> unique;
+        for(const auto& actor:saved.actors){
+            Family family=Family(actor.adapter.family);auto local=addresses.find(actor.id);
+            if(!known(family)||actor.adapter.version!=1||!actor.id||actor.id>=next||dead.count(actor.id)||!live.insert(actor.id).second||
+               local==addresses.end()||!local->second||!unique.insert(local->second).second){e="invalid or incomplete restored actor identity";return false;}
+        }
+        BirthLedger staged;if(!staged.restoreCounter(next,dead,e))return false;
+        for(const auto& actor:saved.actors)if(!staged.rebind(addresses.at(actor.id),{actor.id,Family(actor.adapter.family)},e))return false;
+        out=std::move(staged);e.clear();return true;
+    }catch(const std::exception& failure){e=std::string("identity staging failed: ")+failure.what();return false;}
+}
 bool BirthLedger::birth(const void* p,Family f,uint64_t& id,std::string& e){
     if(!p||!known(f)||live_.count(p)||next_==std::numeric_limits<uint64_t>::max()){e="duplicate/null/unknown birth or identity counter exhausted";return false;}
     id=next_++;live_.emplace(p,Lifetime{id,f});e.clear();return true;

@@ -54,6 +54,11 @@ struct AdapterOutput {
 using ActorAdapter=std::function<AdapterOutput(const Observation&)>;
 struct Globals { Global family; AdapterOutput output; };
 AdapterOutput captureBirthLedger(const BirthLedger&);
+// Backend identity stage after all actors are allocated; uses new local addresses.
+// Requires a fresh destination; validates all saved IDs/tombstones/map coverage
+// before replacing it. This never changes an already-live ledger.
+bool restoreBirthLedger(const Snapshot&,const std::map<uint64_t,const void*>&,
+                        BirthLedger&,std::string&);
 // Fails before replacing output on incomplete census, untracked lifetimes,
 // unsupported typed adapters/global sections or invalid typed reference roles.
 bool capture(const Census&, const BirthLedger&, const std::map<Family,ActorAdapter>&,
