@@ -3,7 +3,9 @@
 #include <string>
 #include <sstream>
 #if defined(_WIN32)
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #else
 #include <cstdio>

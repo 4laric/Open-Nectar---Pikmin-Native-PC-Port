@@ -49,9 +49,29 @@
 #include "pc_p2_preview.h"
 #include "p2_fixture_captain_guard.h"
 #include "p2_coop_fixture_input_snapshot.h"
+#include "p2_coop_fixture_step.h"
+#include "MoviePlayer.h"
+#include "netplay/pc_netplay_pad.h"
+#include "netplay/pc_netplay_session.h"
+#include "netplay/pc_netplay_loadguard.h"
 extern std::uint32_t pc_netplay_current_frame(void);
 
+// These definitions satisfy only the private fixture's optional session observers.
+// State is fixed capacity; no production pointer is retained or input changed.
+static PcCoopQueueObserver gFixtureQueue;
+void pc_coop_fixture_note_submit(std::uint64_t land, int role, const std::uint8_t* wire) {
+    gFixtureQueue.submit(land, role, wire);
+}
+void pc_coop_fixture_note_advance(std::uint64_t frame, int role, std::uint64_t next,
+    unsigned delay, unsigned maximum, bool adaptive, bool hold, bool speculative,
+    bool rand_neutral, const std::uint8_t* wire) {
+    gFixtureQueue.advance(frame, role, next, delay, maximum, adaptive, hold, speculative, rand_neutral, wire);
+}
+
 namespace {
+void fixture_wire_hex(const unsigned char* wire, unsigned bytes) {
+    for (unsigned i = 0; i < bytes; ++i) std::printf("%02x", unsigned(wire[i]));
+}
 // Read-only protected-member access via a correctly typed base member pointer.
 // No layout casts, fake derived object, callback, or menu/world write is used.
 struct PlateObserver : CPlate {
@@ -101,6 +121,74 @@ class CoopProtocolFixtureApp : public PlugPikiApp {
     std::string mInputPath;
     std::string mInputDirectory;
     PcCoopGenerationState mGenerationState = {};
+    std::string mStepDirectory, mStepEpoch;
+    PcCoopStepState mStepState;
+    bool mSawStartupMovie = false, mStepArmed = false;
+    unsigned mGenerationDiagnosticFrame = 0;
+
+    bool stepReady() const {
+        if (!mSawStartupMovie || !gameflow.mMoviePlayer || gameflow.mMoviePlayer->mIsActive
+            || gameflow.mPauseAll || gameflow.mIsUIOverlayActive || !naviMgr || !pikiMgr || !itemMgr) return false;
+        for (int i = 0; i < 2; ++i) {
+            Navi* n = naviMgr->getNavi(i);
+            if (!n || !n->getCurrState() || n->getCurrState()->getID() != NAVISTATE_Walk
+                || !std::isfinite(n->mHealth) || n->mHealth <= 0.f) return false;
+        }
+        GoalItem* red = itemMgr->pcGetContainer(Red, 0);
+        if (!red || red->getTotalStorePikis() != 20 || red->mPikisToExit || itemMgr->getContainerExitCount()) return false;
+        unsigned alive = 0; Iterator it(pikiMgr);
+        CI_LOOP(it) {
+            Piki* p = static_cast<Piki*>(*it);
+            if (p && p->getCurrState() && p->isAlive()) {
+                if (p->mColor != Red || p->isBuried()) return false;
+                ++alive;
+            }
+        }
+        return alive == 20;
+    }
+
+    void waitStep() {
+        if (!mStepArmed) return;
+        unsigned long long beganBoot = 0;
+        fixture_require(pc_coop_fixture_input_clock(&beganBoot), "step boot wait clock");
+        const Uint64 began = SDL_GetTicks64();
+        const unsigned frame = pc_netplay_current_frame();
+        std::printf("COOP_PROTOCOL_STEP_WAIT epoch=%s role=%d sim_frame=%u next_frame=%u next_permit=%llu input_sequence=%llu bounded_ms=500 wait_started_boot_ms=%llu\n",
+            mStepEpoch.c_str(), mLocalRole, frame, frame + 1, mStepState.sequence + 1, mInputSequence, beganBoot);
+        std::fflush(nullptr);
+        for (;;) {
+            const Uint64 tick = SDL_GetTicks64();
+            fixture_require(pc_coop_step_elapsed_ok(tick, began, mStarted, mFrames), "step permit elapsed/overall deadline");
+            // Refresh only the real virtual SDL device. No PADRead, engine idle,
+            // ControllerMgr update or Gekko game-event consumption inside wait.
+            input();
+            char bytes[256]; unsigned count = 0; PcCoopGenerationInfo info = {};
+            const PcCoopSnapshotResult result = pc_coop_fixture_generation_snapshot(
+                mStepDirectory.c_str(), bytes, sizeof(bytes), &count, &info);
+            fixture_require(result == PC_COOP_SNAPSHOT_MISSING || result == PC_COOP_SNAPSHOT_OK, "step immutable snapshot refusal");
+            unsigned long long now = 0;
+            fixture_require(pc_coop_fixture_input_clock(&now), "step clock unsupported");
+            // now is Windows boot time, exclusively for packet freshness below.
+            // Re-read SDL elapsed time after IO against its own SDL starts.
+            fixture_require(pc_coop_step_elapsed_ok(SDL_GetTicks64(), began, mStarted, mFrames),
+                "step post-read deadline");
+            if (result == PC_COOP_SNAPSHOT_OK) {
+                const PcCoopStepDecision decision = pc_coop_step_accept(mStepState, bytes, count, info.sequence,
+                    now, mStepEpoch, mLocalRole, frame, mInputSequence);
+                fixture_require(decision != PC_COOP_STEP_INVALID, "step canonical epoch role frame sequence command freshness refusal");
+                if (decision == PC_COOP_STEP_RELEASE) {
+                    fixture_require(pc_coop_step_elapsed_ok(SDL_GetTicks64(), began, mStarted, mFrames),
+                        "step post-parser deadline");
+                    std::printf("COOP_PROTOCOL_STEP_RELEASE epoch=%s role=%d sim_frame=%u next_frame=%llu permit=%llu input_sequence=%llu applied_generation_proven=0\n",
+                        mStepEpoch.c_str(), mLocalRole, frame, mStepState.frame, mStepState.sequence, mInputSequence);
+                    std::fflush(nullptr);
+                    return;
+                }
+            }
+            pc_netplay_load_keepalive(pc_netplay_loadguard::kSiteStall); // Network-only, existing enabled guard.
+            SDL_Delay(1);
+        }
+    }
 
     // #1148 read-only post-idle facts, before parsing the next SDL command.
     // These snapshots are not the pre-callPikis state or an eligibility oracle.
@@ -114,7 +202,7 @@ class CoopProtocolFixtureApp : public PlugPikiApp {
             Navi* n = naviMgr ? naviMgr->getNavi(captain) : nullptr;
             gather = gather || (n && n->getCurrState() && n->getCurrState()->getID() == NAVISTATE_Gather);
         }
-        const bool emit = gather || mPreviousGatherObservation || mFrames % 15 == 0;
+        const bool emit = mStepArmed || gather || mPreviousGatherObservation || mFrames % 15 == 0;
         mPreviousGatherObservation = gather;
         if (!emit) return;
         if (!mRecruitSchemaEmitted) {
@@ -231,7 +319,9 @@ class CoopProtocolFixtureApp : public PlugPikiApp {
             mInputSequence = mGenerationState.sequence;
             const bool fresh = mGenerationState.sequence && now >= mGenerationState.published_ms
                 && now - mGenerationState.published_ms <= 500;
-            if (decision == PC_COOP_GENERATION_NEW_FRESH || decision == PC_COOP_GENERATION_NEW_EXPIRED || mFrames % 15 == 0) {
+            if (decision == PC_COOP_GENERATION_NEW_FRESH || decision == PC_COOP_GENERATION_NEW_EXPIRED
+                || (mFrames % 15 == 0 && (!mStepArmed || mGenerationDiagnosticFrame != mFrames))) {
+                mGenerationDiagnosticFrame = mFrames;
                 std::printf("COOP_PROTOCOL_GENERATION_READ role=%d observed_sequence=%llu consumed_sequence=%llu decision=%d published_tick=%llu reader_tick=%llu expired=%d effective_buttons=%u attempted_input_only=1 applied_PAD_proven=0\n",
                     mLocalRole, info.sequence, static_cast<unsigned long long>(mInputSequence), int(decision),
                     mGenerationState.published_ms, now, int(!fresh), mButtons);
@@ -305,6 +395,13 @@ public:
         mLocalRole = launch.isHost ? 0 : 1;
         if (const char* path = std::getenv("PIKMIN_COOP_FIXTURE_INPUT")) mInputPath = path;
         if (const char* path = std::getenv("PIKMIN_COOP_FIXTURE_INPUT_DIR")) mInputDirectory = path;
+        if (const char* path = std::getenv("PIKMIN_COOP_FIXTURE_STEP_DIR")) mStepDirectory = path;
+        if (const char* epoch = std::getenv("PIKMIN_COOP_FIXTURE_STEP_EPOCH")) mStepEpoch = epoch;
+        fixture_require(mStepDirectory.empty() == mStepEpoch.empty(), "step directory and epoch paired");
+        fixture_require(mStepDirectory.empty() || (!mInputDirectory.empty() && mInputPath.empty()
+            && mStepDirectory != mInputDirectory && pc_coop_step_epoch(mStepEpoch)), "step generation transport and epoch required");
+        gFixtureQueue.enabled = !mStepDirectory.empty();
+        gFixtureQueue.role = mLocalRole;
         fixture_require(mInputPath.empty() || mInputDirectory.empty(), "fixture input transports mutually exclusive");
         if (!mInputDirectory.empty()) {
             unsigned long long tick = 0;
@@ -334,6 +431,12 @@ public:
     int idle() override {
         // Native simulation always runs first. Guard precedes readiness,
         // pause/movie and manager early returns. Check both initialized captains.
+        if (!mStepDirectory.empty() && gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive) mSawStartupMovie = true;
+        PADStatus applied[2] = {pc_netplay_pad_status()[0], pc_netplay_pad_status()[1]};
+        const unsigned appliedFrame = pc_netplay_current_frame();
+        const unsigned yaw[2] = {pc_input_log_yaw_raw(0), pc_input_log_yaw_raw(1)};
+        const unsigned flags[2] = {pc_input_log_yaw_flags(0), pc_input_log_yaw_flags(1)};
+        const int yawValid[2] = {int(pc_input_log_yaw_valid(0)), int(pc_input_log_yaw_valid(1))};
         const int result = PlugPikiApp::idle();
         ++mFrames;
         for (int i = 0; i < 2; ++i) {
@@ -357,6 +460,38 @@ public:
         }
         fixture_require(SDL_GetTicks64() - mStarted < 60000, "60 second local ceiling");
         fixture_require(mFrames < 5000, "frame ceiling");
+        if (!mStepDirectory.empty() && !mStepArmed && stepReady()) {
+            mStepArmed = true;
+            gFixtureQueue.armed = true;
+            std::printf("COOP_PROTOCOL_STEP_ARM epoch=%s role=%d sim_frame=%u saw_startup_movie=1 post_movie=1 healthy_walk=1 live_red=20 stored=20\n",
+                mStepEpoch.c_str(), mLocalRole, appliedFrame);
+        }
+        if (mStepArmed) {
+            fixture_require(pc_netplay_current_frame() == appliedFrame, "one authoritative step inside idle");
+            fixture_require(gFixtureQueue.complete(appliedFrame), "actual submit/applied/future queue coverage refusal");
+            std::printf("COOP_PROTOCOL_STEP_QUEUE epoch=%s role=%d sim_frame=%u next_land=%llu submit_serial=%llu last_submit=%llu delay=%u maximum=%u adaptive=%d hold=%d speculative=%d rand_neutral=%d future_neutral=%d applied=",
+                mStepEpoch.c_str(), mLocalRole, appliedFrame, gFixtureQueue.next_land, gFixtureQueue.submit_serial, gFixtureQueue.last_submit,
+                gFixtureQueue.delay, gFixtureQueue.maximum, int(gFixtureQueue.adaptive), int(gFixtureQueue.hold),
+                int(gFixtureQueue.speculative), int(gFixtureQueue.rand_neutral), int(gFixtureQueue.future_neutral()));
+            fixture_wire_hex(gFixtureQueue.applied, 32);
+            std::printf(" current_submission=");
+            fixture_wire_hex(gFixtureQueue.slot(appliedFrame)->wire, 16);
+            std::printf(" pending=");
+            if (gFixtureQueue.next_land == appliedFrame + 1) std::printf("none");
+            for (unsigned long long f = appliedFrame + 1; f < gFixtureQueue.next_land; ++f) {
+                if (f != appliedFrame + 1) std::printf(",");
+                std::printf("%llu:", f); fixture_wire_hex(gFixtureQueue.slot(f)->wire, 16);
+            }
+            std::printf(" applied_generation_proven=0\n");
+            std::printf("COOP_PROTOCOL_STEP_APPLIED epoch=%s role=%d sim_frame=%u phase=synced_pre_idle "
+                "p0=%u,%d,%d,%d,%d,%u,%u,%u,%u,%d p1=%u,%d,%d,%d,%d,%u,%u,%u,%u,%d yaw=%u,%u yaw_flags=%u,%u yaw_valid=%d,%d applied_generation_proven=0\n",
+                mStepEpoch.c_str(), mLocalRole, appliedFrame,
+                unsigned(applied[0].button), int(applied[0].stickX), int(applied[0].stickY), int(applied[0].substickX), int(applied[0].substickY),
+                unsigned(applied[0].triggerLeft), unsigned(applied[0].triggerRight), unsigned(applied[0].analogA), unsigned(applied[0].analogB), int(applied[0].err),
+                unsigned(applied[1].button), int(applied[1].stickX), int(applied[1].stickY), int(applied[1].substickX), int(applied[1].substickY),
+                unsigned(applied[1].triggerLeft), unsigned(applied[1].triggerRight), unsigned(applied[1].analogA), unsigned(applied[1].analogB), int(applied[1].err),
+                yaw[0], yaw[1], flags[0], flags[1], yawValid[0], yawValid[1]);
+        }
         observeRecruitment();
         input();
         // UI and world counts are sampled on every authoritative engine frame,
@@ -384,7 +519,7 @@ public:
                 onion ? onion->mSRT.t.x : 0.f, onion ? onion->mSRT.t.y : 0.f, onion ? onion->mSRT.t.z : 0.f);
             std::fflush(nullptr);
         }
-        if (mFrames % 15 == 0) {
+        if (mStepArmed || mFrames % 15 == 0) {
             // Read-only approach facts from the actual owner-filtered GoalItem,
             // including its real 'cont' sphere. No lookup assigns mGoalItem,
             // updates GameStat, enters UI, or changes collision/stock/world.
@@ -449,6 +584,7 @@ public:
             }
             std::fflush(nullptr);
         }
+        waitStep();
         return result;
     }
 };

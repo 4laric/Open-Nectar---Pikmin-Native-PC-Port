@@ -220,6 +220,10 @@ bool pc_settings_menu_open(void);
 // pc_netplay_det.cpp; re-reads the unthrottled env gate.
 void pc_netplay_det_force_on(void);
 
+// Optional private-fixture const-wire observers; absent in production links.
+extern void pc_coop_fixture_note_submit(uint64_t, int, const uint8_t*) __attribute__((weak));
+extern void pc_coop_fixture_note_advance(uint64_t, int, uint64_t, unsigned, unsigned, bool, bool, bool, bool, const uint8_t*) __attribute__((weak));
+
 namespace {
 
 // ---- tiny SHA-256 (public-domain style, written fresh for M3) ----
@@ -2463,6 +2467,7 @@ void submit_local_inputs(unsigned n)
 		// Advance checks each noted frame against the applied input
 		// (`key_mismatch`), which exposes any wrong key.
 		pc_netplay_camlead_note_local_input(land, local);
+		if (pc_coop_fixture_note_submit) pc_coop_fixture_note_submit(land, sLocalRole, wire);
 		++sSubmitted;
 		++sNextLand;
 		if (sHolding && land == (uint64_t)sHoldFrame + kHoldLeadFrames - 1) {
@@ -5546,6 +5551,9 @@ bool run_advance(System* sys, BaseApp* app, int frame, const uint8_t* inputs, bo
 	pc_netplay_camlead_begin_frame((uint64_t)frame); // M5c lane A
 	loadguard_tick_begin((uint32_t)frame, // lane S: keep-alive may pump inside
 	                     speculative);
+	if (pc_coop_fixture_note_advance)
+		pc_coop_fixture_note_advance((uint64_t)frame, sLocalRole, sNextLand, sCfg.localDelay, kMaxLocalDelay,
+		    sAdaptive, sHolding || sHoldRequested || sResumeHave, speculative, randstate_gate_neutral(), inputs);
 	app->idle();
 	loadguard_tick_end();
 	adaptive_note_tick(now_ms() - sLgTickStartMs); // M5c lane B: slow-tick trace
