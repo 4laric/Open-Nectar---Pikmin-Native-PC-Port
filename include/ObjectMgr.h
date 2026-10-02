@@ -52,6 +52,9 @@ public:
  * @note Size: 0x3C.
  */
 struct MonoObjectMgr : public ObjectMgr {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayManagerAccess;
+#endif
 	friend struct SearchSystem;
 
 public:
