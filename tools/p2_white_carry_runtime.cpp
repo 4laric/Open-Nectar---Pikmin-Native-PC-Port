@@ -167,12 +167,25 @@ public:
   require(totalBosses==1 && activeIvory==1,"bound Ivory disappeared or unexpected boss birth/pool reuse");
   if(activeIvory)require(flower->mObjType==OBJTYPE_Pom && pc_p2_ivory(flower),"bound Pom identity changed");
   if(ticks%60==0){std::printf("P2_WHITE_ACQUISITION_FRAME frame=%d phase=%d ticks=%d red=%d white=%d heads=%d captured=%d flying=%d bodies=%d nstate=%d navi=%.2f,%.2f cursor=%.2f,%.2f budstate=%d budalive=%d\n",frames,phase,ticks,red,white,heads,captured,flying,population(),n->getCurrState()->getID(),n->mSRT.t.x,n->mSRT.t.z,n->mCursorWorldPos.x,n->mCursorWorldPos.z,flower->getCurrentState(),int(flower->isAlive()));std::fflush(stdout);}
+  // All phases observe original cargo before dereferencing its retained pointer.
+  bool cargoActive=false;Iterator cargoList(pelletMgr);CI_LOOP(cargoList){if(*cargoList==cargo)cargoActive=true;}
+  int cw=0,cr=0,other=0;Iterator cargoCarriers(pikiMgr);CI_LOOP(cargoCarriers){Piki* p=static_cast<Piki*>(*cargoCarriers);if(p->isAlive()&&p->getStickObject()==cargo){
+   if(pc_p2_is_white(p))++cw;else if(pc_p2_species(p)==P2SpeciesRed)++cr;else ++other;
+   std::printf("P2_WHITE_CARGO_CARRIER frame=%d phase=%d generated=%d uid=%u species=%d mode=%u acquired=%d\n",frames,phase,int(p->mGenerator!=nullptr),p->mGenerator?generatedUid(p):0,unsigned(pc_p2_species(p)),unsigned(p->mMode),int(p==acquired));
+  }}
+  if(cargoActive){
+   require(generatedUid(cargo)==cargoUid,"cargo active-slot identity changed");
+   if(ticks%60==0||cr||other)std::printf("P2_WHITE_CARGO_OBSERVATION frame=%d phase=%d cargo_uid=%u white=%d red=%d other=%d native_strength=%d x=%.4f y=%.4f z=%.4f\n",frames,phase,cargoUid,cw,cr,other,cargo->mCarrierCounter,cargo->mSRT.t.x,cargo->mSRT.t.y,cargo->mSRT.t.z);
+  }else{std::printf("P2_WHITE_CARGO_REMOVED frame=%d phase=%d haul_proven=%d\n",frames,phase,int(haulProven));require(phase==10&&haulProven,"cargo disappeared before actual transport proof");}
+  require(cr==0&&other==0&&cw<=1,"unexpected cargo carriers");
+  if(cw)require(acquiredActive&&cw==1&&acquired&&acquired->getStickObject()==cargo,"cargo White must be the naturally acquired body");
+  if(!haulProven)require(!std::ifstream("p2-economy.txt").good()&&!std::ifstream("treasure-receipt.txt").good(),"cargo receipt before sole White physical hauling proof");
   if(phase<7 && population()!=20){std::printf("P2_WHITE_POPULATION_FAILURE frame=%d red=%d white=%d heads=%d captured=%d flying=%d bodies=%d phase=%d nstate=%d\n",frames,red,white,heads,captured,flying,population(),phase,n->getCurrState()->getID());Iterator diag(pikiMgr);CI_LOOP(diag){Piki* p=static_cast<Piki*>(*diag);std::printf("P2_WHITE_PIKI_DIAG alive=%d state=%d mode=%d x=%.2f y=%.2f z=%.2f\n",int(p->isAlive()),p->getState(),int(p->mMode),p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z);}}
   require(population()==20,"ordinary acquisition lost/duplicated bodies");
   whiteBodies=white+heads;
   int pellets=0;Iterator pelletList(pelletMgr);CI_LOOP(pelletList){if(static_cast<Pellet*>(*pelletList)->isAlive())++pellets;}
   require(whiteBodies<=1,"unexpected additional White output");
-  if(phase<7 || phase==13)require(pellets==baselinePellets,"Ivory created legacy reward pellet");
+  if(phase<7 || phase==13)require(pellets==baselinePellets,"live pellet count changed before sole White cargo phase");
   if(phase==3 && heads==1 && captured==0){require(red==19&&heads==1,"ordinary acquisition output");goal=flower->mSRT.t;phase=13;ticks=0;std::puts("P2_WHITE_CARRY_SPROUT ordinary_birth=1 spent=1");}
   if(phase==13 && ticks>=30){int follows=0;Iterator it(pikiMgr);CI_LOOP(it){Piki* p=static_cast<Piki*>(*it);if(p->isAlive()&&p->mMode==PikiMode::FormationMode)++follows;}if(ticks%30==0){std::printf("P2_WHITE_CARRY_DISBAND ticks=%d follows=%d state=%d bind=%u down=%u\n",ticks,follows,n->getCurrState()->getID(),unsigned(KeyConfig::_instance->mDisbandKey.mBind),unsigned(n->mKontroller->keyDown(KeyConfig::_instance->mDisbandKey.mBind)));std::fflush(nullptr);}require(ticks<240,"ordinary Red disband timeout");if(follows==0&&n->getCurrState()->getID()==NAVISTATE_Walk){phase=4;ticks=0;std::puts("P2_WHITE_CARRY_REDS_DISMISSED");}}
   if(phase==4 && head){goal=head->mSRT.t;float dx=goal.x-n->mSRT.t.x,dz=goal.z-n->mSRT.t.z;if(dx*dx+dz*dz<225){phase=5;ticks=0;}}
@@ -187,14 +200,11 @@ public:
   if(phase>=7&&phase!=13){
    require(red==19&&white==1&&heads==0&&acquiredActive&&pc_p2_is_white(acquired)&&acquired->getGeneratorID()==whiteUid,"acquired White conserved");
    // Never dereference retained cargo after active-manager removal.
-   bool active=false;Iterator list(pelletMgr);CI_LOOP(list){if(*list==cargo)active=true;}
-   if(active){
+   if(cargoActive){
     require(generatedUid(cargo)==cargoUid,"cargo active-slot identity changed");
     if(phase==7){goal=cargo->mSRT.t;float dx=goal.x-n->mCursorWorldPos.x,dz=goal.z-n->mCursorWorldPos.z;float bx=goal.x-n->mSRT.t.x,bz=goal.z-n->mSRT.t.z;if(dx*dx+dz*dz<64&&bx*bx+bz*bz>625&&bx*bx+bz*bz<10000){phase=8;ticks=0;}}
     if(phase==8&&ticks>=20){phase=9;ticks=0;goal=cargo->mSRT.t;}
     if(phase==9 && acquired->getStickObject()==cargo){phase=10;ticks=0;}
-    int cw=0,cr=0,other=0;Iterator carriers(pikiMgr);CI_LOOP(carriers){Piki* p=static_cast<Piki*>(*carriers);if(p->isAlive()&&p->getStickObject()==cargo){if(pc_p2_is_white(p))++cw;else if(pc_p2_species(p)==P2SpeciesRed)++cr;else ++other;}}
-    require(cr==0&&other==0&&cw<=1,"unexpected cargo carriers");
     if(phase==10 && cw==1&&acquired->mMode==PikiMode::TransportMode&&cargo->mCarrierCounter==1){
      require(!transportEnded&&pc_piki_carry_strength(acquired)==1,"sole actual White transport sequence/strength");
      float dx=cargo->mSRT.t.x-destination.x,dz=cargo->mSRT.t.z-destination.z,d=std::sqrt(dx*dx+dz*dz);
