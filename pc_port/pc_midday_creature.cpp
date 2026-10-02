@@ -27,6 +27,10 @@ bool creature_fields(Creature& c,ActorArchive& outer){
  PrefixArchive a(outer,"creature");
  int type=a.mode()==Mode::Capture?int(c.mObjType):0;
  if(!a.scalar("objectType",ScalarKind::S32,&type)||type!=int(c.mObjType))return a.fail("Creature concrete type mismatch");
+ // Preserve the observation without assigning a historical native count. Only
+ // the backend's complete strong-root reconciliation installs fresh counts.
+ int referenceCount=a.mode()==Mode::Capture?c.mCount:0;
+ if(!a.scalar("referenceCount",ScalarKind::S32,&referenceCount)||referenceCount<0)return a.fail("invalid native reference count");
  if(!a.field("mRebirthDay",c.mRebirthDay))return false;
  if(!a.field("mHealth",c.mHealth))return false;
  if(!a.field("mMaxHealth",c.mMaxHealth))return false;

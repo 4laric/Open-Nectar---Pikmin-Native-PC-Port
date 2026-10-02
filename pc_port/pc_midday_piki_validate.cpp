@@ -58,8 +58,14 @@ void activePaths(const ActorFields& f,const std::string& p,int type,Path path,st
  int waiting=0;if(type==14)number(f,p+"mIsWaiting",ScalarKind::Bool,waiting,ignored);
  if(type==23||(type==14&&waiting)){path.push_back(31);activePaths(f,p+"selector.",type==23?22:8,path,seen);}
 }
-bool extras(const ActorFields& f,std::vector<FieldSchema>& schema,std::string& e){
- std::set<Path> seen;activePaths(f,"piki.action.",1,{},seen);
+bool inactiveStrongSchema(int type,Path path,const std::set<Path>& seen,std::vector<FieldSchema>& schema,unsigned depth,std::string& e){
+ if(depth>16)return bad(e,"inactive strong topology depth");
+ if(!seen.count(path)){std::vector<FieldSchema> payload;if(!piki_action_schema(type,payload))return bad(e,"inactive strong unknown action");std::string prefix="piki.inactiveStrong";for(int edge:path)prefix+="."+std::to_string(edge);for(auto d:payload)if(d.strength==ReferenceStrength::StrongCreature){d.key=prefix+"."+d.key;d.nullable=true;schema.push_back(d);}}
+ auto graph=children(type);for(size_t i=0;i<graph.size();++i){auto p=path;p.push_back(int(i));if(!inactiveStrongSchema(graph[i],p,seen,schema,depth+1,e))return false;}
+ if(type==14||type==23){path.push_back(31);if(!inactiveStrongSchema(type==14?8:22,path,seen,schema,depth+1,e))return false;}return true;
+}
+bool extras(const ActorFields& f,std::vector<FieldSchema>& schema,std::set<Path>& seen,std::string& e){
+ activePaths(f,"piki.action.",1,{},seen);
  for(const char* layer:{"upper","lower"}){
   std::string p=std::string("piki.listenerExtras.")+layer+".";int present=0;
   if(!number(f,p+"present",ScalarKind::Bool,present,e))return false;scalar(schema,p+"present",ScalarKind::Bool);
@@ -97,7 +103,7 @@ bool piki_schema(const ActorFields& f,std::vector<FieldSchema>& out,std::string&
  if(maximum>=0){int sub=0;if(!number(f,"piki.fsm.mState",subKind,sub,e)||sub<0||sub>maximum)return bad(e,"Piki FSM substate invalid");}
  scalar(schema,"piki.fsm.current",ScalarKind::S32);scalar(schema,"piki.fsm.last",ScalarKind::S32);append(schema,state,"piki.fsm.");
  if(!action(f,schema,"piki.action.",1,0,e))return false;
- if(!extras(f,schema,e))return false;
+ std::set<Path> represented;if(!extras(f,schema,represented,e)||!inactiveStrongSchema(1,{},represented,schema,0,e))return false;
  std::vector<FieldSchema> runtime;piki_runtime_schema(runtime);append(schema,runtime,"piki.runtime.");
  int capacity=0;if(!number(f,"piki.runtime.path.capacity",ScalarKind::S32,capacity,e)||capacity<0||capacity>32767)return bad(e,"Piki path capacity invalid");
  if(capacity)for(auto& field:schema)if(field.key=="piki.runtime.mPathBuffers")field.nullable=false;

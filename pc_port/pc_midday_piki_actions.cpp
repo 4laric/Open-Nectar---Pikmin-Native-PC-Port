@@ -23,6 +23,92 @@ bool odometer(ActorArchive& ar,const char* key,OdoMeter& o) {
 struct PcMiddayPikiActionAccess {
  static bool visit(Action&,ActorArchive&,unsigned);
  static thread_local std::set<Action*> visited;
+ static int typeOf(Action& action){
+ int type=0;
+ if(dynamic_cast<TopAction*>(&action))type=1;
+ else if(dynamic_cast<ActAdjust*>(&action))type=2;
+ else if(dynamic_cast<ActAttack*>(&action))type=3;
+ else if(dynamic_cast<ActBoMake*>(&action))type=4;
+ else if(dynamic_cast<ActBoreListen*>(&action))type=5;
+ else if(dynamic_cast<ActBoreOneshot*>(&action))type=6;
+ else if(dynamic_cast<ActBoreRest*>(&action))type=7;
+ else if(dynamic_cast<ActBoreSelect*>(&action))type=8;
+ else if(dynamic_cast<ActBoreTalk*>(&action))type=9;
+ else if(dynamic_cast<ActBou*>(&action))type=10;
+ else if(dynamic_cast<ActBreakWall*>(&action))type=11;
+ else if(dynamic_cast<ActBridge*>(&action))type=12;
+ else if(dynamic_cast<ActChase*>(&action))type=13;
+ else if(dynamic_cast<ActCrowd*>(&action))type=14;
+ else if(dynamic_cast<ActDecoy*>(&action))type=15;
+ else if(dynamic_cast<ActDeliver*>(&action))type=16;
+ else if(dynamic_cast<ActEnter*>(&action))type=17;
+ else if(dynamic_cast<ActEscape*>(&action))type=18;
+ else if(dynamic_cast<ActExit*>(&action))type=19;
+ else if(dynamic_cast<ActFlower*>(&action))type=20;
+ else if(dynamic_cast<ActFormation*>(&action))type=21;
+ else if(dynamic_cast<ActFreeSelect*>(&action))type=22;
+ else if(dynamic_cast<ActFree*>(&action))type=23;
+ else if(dynamic_cast<ActGoto*>(&action))type=24;
+ else if(dynamic_cast<ActGuard*>(&action))type=25;
+ else if(dynamic_cast<ActJumpAttack*>(&action))type=26;
+ else if(dynamic_cast<ActKinoko*>(&action))type=27;
+ else if(dynamic_cast<ActMine*>(&action))type=28;
+ else if(dynamic_cast<ActPick*>(&action))type=29;
+ else if(dynamic_cast<ActPickCreature*>(&action))type=30;
+ else if(dynamic_cast<ActPickItem*>(&action))type=31;
+ else if(dynamic_cast<ActPullout*>(&action))type=32;
+ else if(dynamic_cast<ActPulloutCreature*>(&action))type=33;
+ else if(dynamic_cast<ActPush*>(&action))type=34;
+ else if(dynamic_cast<ActPut*>(&action))type=35;
+ else if(dynamic_cast<ActPutBomb*>(&action))type=36;
+ else if(dynamic_cast<ActPutItem*>(&action))type=37;
+ else if(dynamic_cast<ActRandomBoid*>(&action))type=38;
+ else if(dynamic_cast<ActRescue*>(&action))type=39;
+ else if(dynamic_cast<ActRope*>(&action))type=40;
+ else if(dynamic_cast<ActShoot*>(&action))type=41;
+ else if(dynamic_cast<ActShootCreature*>(&action))type=42;
+ else if(dynamic_cast<ActStone*>(&action))type=43;
+ else if(dynamic_cast<ActTransport*>(&action))type=44;
+ else if(dynamic_cast<ActWatch*>(&action))type=45;
+ else if(dynamic_cast<ActWeed*>(&action))type=46;
+ return type;
+ }
+ static std::vector<int> allocatedChildren(int type){
+ switch(type){
+ case 1:return {38,45,18,13,24,30,37,21,3,41,25,32,31,15,14,23,40,17,19,11,28,44,27,12,34,36,39,46,43,4,10};
+ case 3:return {26};case 8:case 22:return {45,9,6,7};case 16:return {30,24,35};
+ case 30:case 31:return {24,29};case 32:return {24,2,33};case 41:return {24,42};default:return {};
+ }
+}
+ static bool inactiveStrong(Action& action,ActorArchive& outer,const std::string& path,int expected,Piki* owner,std::set<Action*>& all,unsigned depth){
+  if(depth>16||action.mPiki!=owner||!all.insert(&action).second||typeOf(action)!=expected)return outer.fail("inactive strong action allocation mismatch");
+  auto graph=allocatedChildren(expected);if(action.mChildCount!=int(graph.size())||(!graph.empty()&&!action.mChildActions))return outer.fail("inactive strong child topology mismatch");
+  if(!visited.count(&action)){PrefixArchive ar(outer,path.c_str());switch(expected){
+ case 3:{auto& s=static_cast<ActAttack&>(action);if(!ar.ref("mOther",RefKind::Creature,s.mOther.mPtr))return false;break;}
+ case 13:{auto& s=static_cast<ActChase&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;break;}
+ case 16:{auto& s=static_cast<ActDeliver&>(action);if(!ar.ref("mObject",RefKind::Creature,s.mObject.mPtr))return false;break;}
+ case 18:{auto& s=static_cast<ActEscape&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;break;}
+ case 24:{auto& s=static_cast<ActGoto&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;break;}
+ case 25:{auto& s=static_cast<ActGuard&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;if(!ar.ref("mLeftGuard",RefKind::Creature,s.mLeftGuard.mPtr))return false;if(!ar.ref("mRightGuard",RefKind::Creature,s.mRightGuard.mPtr))return false;break;}
+ case 26:{auto& s=static_cast<ActJumpAttack&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;break;}
+ case 27:{auto& s=static_cast<ActKinoko&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;break;}
+ case 29:{auto& s=static_cast<ActPick&>(action);if(!ar.ref("mObject",RefKind::Creature,s.mObject.mPtr))return false;break;}
+ case 30:{auto& s=static_cast<ActPickCreature&>(action);if(!ar.ref("_18",RefKind::Creature,s._18.mPtr))return false;break;}
+ case 31:{auto& s=static_cast<ActPickItem&>(action);if(!ar.ref("mTargetItem",RefKind::Creature,s.mTargetItem.mPtr))return false;break;}
+ case 32:{auto& s=static_cast<ActPullout&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;break;}
+ case 33:{auto& s=static_cast<ActPulloutCreature&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;break;}
+ case 37:{auto& s=static_cast<ActPutItem&>(action);if(!ar.ref("mItem",RefKind::Creature,s.mItem.mPtr))return false;break;}
+ case 41:{auto& s=static_cast<ActShoot&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;break;}
+ case 42:{auto& s=static_cast<ActShootCreature&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;break;}
+ case 44:{auto& s=static_cast<ActTransport&>(action);if(!ar.ref("mPellet",RefKind::Creature,s.mPellet.mPtr))return false;break;}
+ case 45:{auto& s=static_cast<ActWatch&>(action);if(!ar.ref("mTarget",RefKind::Creature,s.mTarget.mPtr))return false;break;}
+ default:break;}}
+  for(size_t i=0;i<graph.size();++i){auto* child=action.mChildActions[i].mAction;if(!child||!inactiveStrong(*child,outer,path+"."+std::to_string(i),graph[i],owner,all,depth+1))return false;}
+  Action* selector=nullptr;if(expected==14)selector=static_cast<ActCrowd&>(action).mSelectAction;if(expected==23)selector=static_cast<ActFree&>(action).mSelectAction;
+  if(expected==14||expected==23){if(!selector||!inactiveStrong(*selector,outer,path+".31",expected==14?8:22,owner,all,depth+1))return outer.fail("inactive strong selector allocation missing");}
+  return true;
+ }
+ static bool inactiveStrong(Piki& piki,ActorArchive& ar){std::set<Action*> all;return inactiveStrong(*piki.mActiveAction,ar,"piki.inactiveStrong",1,&piki,all,0);}
  static bool extras(Piki&,ActorArchive&);
  static bool payload(TopAction& s,ActorArchive& ar,unsigned depth) {
   if(!ar.ref("mListener",RefKind::AnimListener,s.mListener))return false;
@@ -520,53 +606,7 @@ bool PcMiddayPikiActionAccess::visit(Action& action,ActorArchive& ar,unsigned de
  if(!ar.scalar("child",ScalarKind::S16,&child)||!ar.scalar("count",ScalarKind::S16,&count))return false;
  if(count!=action.mChildCount||child < -1||(count>0&&child>=count)||(count==0&&child>0))return ar.fail("action child discriminator corrupt");
  if(count && !action.mChildActions)return ar.fail("missing action child allocation");
- int type=0;
- if(dynamic_cast<TopAction*>(&action))type=1;
- else if(dynamic_cast<ActAdjust*>(&action))type=2;
- else if(dynamic_cast<ActAttack*>(&action))type=3;
- else if(dynamic_cast<ActBoMake*>(&action))type=4;
- else if(dynamic_cast<ActBoreListen*>(&action))type=5;
- else if(dynamic_cast<ActBoreOneshot*>(&action))type=6;
- else if(dynamic_cast<ActBoreRest*>(&action))type=7;
- else if(dynamic_cast<ActBoreSelect*>(&action))type=8;
- else if(dynamic_cast<ActBoreTalk*>(&action))type=9;
- else if(dynamic_cast<ActBou*>(&action))type=10;
- else if(dynamic_cast<ActBreakWall*>(&action))type=11;
- else if(dynamic_cast<ActBridge*>(&action))type=12;
- else if(dynamic_cast<ActChase*>(&action))type=13;
- else if(dynamic_cast<ActCrowd*>(&action))type=14;
- else if(dynamic_cast<ActDecoy*>(&action))type=15;
- else if(dynamic_cast<ActDeliver*>(&action))type=16;
- else if(dynamic_cast<ActEnter*>(&action))type=17;
- else if(dynamic_cast<ActEscape*>(&action))type=18;
- else if(dynamic_cast<ActExit*>(&action))type=19;
- else if(dynamic_cast<ActFlower*>(&action))type=20;
- else if(dynamic_cast<ActFormation*>(&action))type=21;
- else if(dynamic_cast<ActFreeSelect*>(&action))type=22;
- else if(dynamic_cast<ActFree*>(&action))type=23;
- else if(dynamic_cast<ActGoto*>(&action))type=24;
- else if(dynamic_cast<ActGuard*>(&action))type=25;
- else if(dynamic_cast<ActJumpAttack*>(&action))type=26;
- else if(dynamic_cast<ActKinoko*>(&action))type=27;
- else if(dynamic_cast<ActMine*>(&action))type=28;
- else if(dynamic_cast<ActPick*>(&action))type=29;
- else if(dynamic_cast<ActPickCreature*>(&action))type=30;
- else if(dynamic_cast<ActPickItem*>(&action))type=31;
- else if(dynamic_cast<ActPullout*>(&action))type=32;
- else if(dynamic_cast<ActPulloutCreature*>(&action))type=33;
- else if(dynamic_cast<ActPush*>(&action))type=34;
- else if(dynamic_cast<ActPut*>(&action))type=35;
- else if(dynamic_cast<ActPutBomb*>(&action))type=36;
- else if(dynamic_cast<ActPutItem*>(&action))type=37;
- else if(dynamic_cast<ActRandomBoid*>(&action))type=38;
- else if(dynamic_cast<ActRescue*>(&action))type=39;
- else if(dynamic_cast<ActRope*>(&action))type=40;
- else if(dynamic_cast<ActShoot*>(&action))type=41;
- else if(dynamic_cast<ActShootCreature*>(&action))type=42;
- else if(dynamic_cast<ActStone*>(&action))type=43;
- else if(dynamic_cast<ActTransport*>(&action))type=44;
- else if(dynamic_cast<ActWatch*>(&action))type=45;
- else if(dynamic_cast<ActWeed*>(&action))type=46;
+ int type=typeOf(action);
  int saved=ar.mode()==Mode::Capture?type:0;
  if(!ar.scalar("type",ScalarKind::S32,&saved)||!type||saved!=type)return ar.fail("action type mismatch");
  if(auto* andAction=dynamic_cast<AndAction*>(&action)){if(!ar.ref("andTarget",RefKind::Creature,andAction->mOtherCreature))return false;}
@@ -633,7 +673,7 @@ bool piki_runtime_fields(Piki&,ActorArchive&);
 bool piki_actions(Piki& piki,ActorArchive& ar){
  if(!piki.mActiveAction||piki.mActiveAction->mPiki!=&piki)return ar.fail("missing/foreign TopAction");
  PcMiddayPikiActionAccess::visited.clear();
- PrefixArchive top(ar,"piki.action");return PcMiddayPikiActionAccess::visit(*piki.mActiveAction,top,0) && PcMiddayPikiActionAccess::extras(piki,ar) && piki_runtime_fields(piki,ar);
+ PrefixArchive top(ar,"piki.action");return PcMiddayPikiActionAccess::visit(*piki.mActiveAction,top,0) && PcMiddayPikiActionAccess::extras(piki,ar) && PcMiddayPikiActionAccess::inactiveStrong(piki,ar) && piki_runtime_fields(piki,ar);
 }
 bool capture_piki(Piki& piki,LogicalResolver& resolver,double now,ActorBytes& output,std::string& error){
  ActorFields fields;FieldArchive capture(Mode::Capture,fields,resolver,error,now);

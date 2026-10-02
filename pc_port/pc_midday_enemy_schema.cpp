@@ -67,7 +67,7 @@ bool enemy_base_schema(const ActorFields& f,std::vector<FieldSchema>& out,std::s
  for(int i=0;i<count;++i)ref(out,p+"route."+std::to_string(i),RefKind::WayPoint,false,"WayPoint",ReferenceOwnership::Content);
  scalar(out,p+"routeGraph",ScalarKind::U32);
  for(int i=0;i<5;++i)scalar(out,p+"timer."+std::to_string(i),ScalarKind::F32);
- for(int i=0;i<4;++i){ref(out,p+"target."+std::to_string(i),RefKind::Creature,true,"Creature");ref(out,p+"particle."+std::to_string(i),RefKind::ParticleGenerator,true,"zen::particleGenerator",ReferenceOwnership::ActorSubobject);}
+ for(int i=0;i<4;++i){out.push_back(FieldSchema::ref((p+"target."+std::to_string(i)).c_str(),RefKind::Creature,true,"Creature",ReferenceOwnership::AnyLive,"",ReferenceStrength::StrongCreature));ref(out,p+"particle."+std::to_string(i),RefKind::ParticleGenerator,true,"zen::particleGenerator",ReferenceOwnership::ActorSubobject);}
  for(int i=0;i<8;++i)scalar(out,p+"corpseJoint."+std::to_string(i),ScalarKind::S32);
  ref(out,p+"pellet",RefKind::Creature,true,"Pellet");enemy_animation_schema(p+"animation.",out);
  for(const char* k:{"phase","frequency","amplitude"})scalar(out,p+"vibration."+k,ScalarKind::F32);

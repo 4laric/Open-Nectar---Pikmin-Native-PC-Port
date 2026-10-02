@@ -13,14 +13,23 @@ struct Resolver:LogicalResolver{
 static void check(bool value,const char* m){if(!value){std::cerr<<m<<'\n';std::exit(1);}}
 static ActorField num(ScalarKind k,u64 bits){ActorField f;f.scalar=k;f.bits=bits;return f;}
 int main(){
- Resolver r;ActorFields f;std::string e;std::vector<FieldSchema>s;
+ Resolver r;
+ // The serialized observation is decoded locally; native counts remain untouched.
+ ActorFields counts;std::string countError;int nativeCount=17;
+ FieldArchive countCapture(Mode::Capture,counts,r,countError,0);check(countCapture.field("creature.referenceCount",nativeCount)&&countCapture.finish(),"native count capture");
+ int restoredCount=0,observation=0;FieldArchive countValidate(Mode::Validate,counts,r,countError,0);check(countValidate.scalar("creature.referenceCount",ScalarKind::S32,&observation)&&countValidate.finish()&&observation==17&&restoredCount==0,"count Validate wrote native count");
+ observation=0;FieldArchive countApply(Mode::Apply,counts,r,countError,0);check(countApply.scalar("creature.referenceCount",ScalarKind::S32,&observation)&&countApply.finish()&&observation==17&&restoredCount==0,"count Apply wrote native count");
+ ActorFields f;std::string e;std::vector<FieldSchema>s;
  f["creature.objectType"]=num(ScalarKind::S32,1);f["creature.search.capacity"]=num(ScalarKind::S16,2);f["creature.search.count"]=num(ScalarKind::S16,1);f["creature.search.last"]=num(ScalarKind::S32,0);
  check(creature_schema(f,s,e),"schema seed");
  for(auto& x:s){if(f.count(x.key))continue;ActorField v;v.category=x.category;v.scalar=x.scalar;v.reference=x.reference;if(x.category!=FieldCategory::Scalar&&!x.nullable)v.target.owner=1;f[x.key]=v;}
  ActorBytes bytes;check(encode_actor_fields(f,bytes,e)&&validate_creature(bytes,r,1,e),"valid typed payload");
- int cases=2;std::string wrongType;check(!validate_creature(bytes,r,2,wrongType),"factory mismatch accepted");
+ int strong=0;for(const auto& field:s){if(field.strength==ReferenceStrength::StrongCreature){++strong;check(field.key=="creature.mHoldingCreature.mPtr"||field.key=="creature.mGrabbedCreature.mPtr"||field.key=="creature.search.0.target"||field.key=="creature.search.1.target","raw reference marked strong");}}check(strong==4,"allocated inactive search strong reference omitted");
+ int cases=6;std::string wrongType;check(!validate_creature(bytes,r,2,wrongType),"factory mismatch accepted");
  auto reject=[&](ActorFields bad){ActorBytes b;std::string why;check(!encode_actor_fields(bad,b,why)||!validate_creature(b,r,1,why),"malformed payload accepted");++cases;};
- auto g=f;g.erase("creature.world.3.3");reject(g);
+ auto g=f;g["creature.referenceCount"].bits=0xffffffffu;reject(g);
+ g=f;g["creature.referenceCount"].scalar=ScalarKind::U32;reject(g);
+ g=f;g.erase("creature.world.3.3");reject(g);
  g=f;g["creature.extra"]=num(ScalarKind::U8,0);reject(g);
  g=f;g["creature.mProps"].target={};reject(g);
  g=f;g["creature.search.0.target"].target={};reject(g);
