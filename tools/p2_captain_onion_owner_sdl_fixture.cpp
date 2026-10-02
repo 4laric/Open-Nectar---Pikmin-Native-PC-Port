@@ -9,6 +9,7 @@
 #endif
 #include "App.h"
 #include "CPlate.h"
+#include "Collision.h"
 #include "GameCoreSection.h"
 #include "GameStat.h"
 #include "GoalItem.h"
@@ -335,24 +336,45 @@ class CaptainSaveApp final:public PlugPikiApp {
             live,storedCount(),pikiMgr&&a?formation(a):-1,pikiMgr&&b?formation(b):-1,plate(a),plate(b),int(ownerStage));
         std::fflush(stdout);
     }
+    bool onionInputHeld=false;
+    unsigned onionInputObservations=0;
     void onionMenu(Navi* n,int target){
         require(naviMgr->getActiveNavi()==n,"Onion input owner is selected captain");
+        require(!pc_vs_active(),"offline ordinary Onion fixture");
         auto* onion=itemMgr?itemMgr->getContainer(pc_randomizer_start_color()):nullptr;require(onion,"real starting Onion");
+        require(!pc_p2_preview_is_pod(onion),"actual Onion not Research Pod");
         if(n->getCurrState()->getID()==NAVISTATE_Container){
-            require(containerWindow,"ordinary offline Onion UI");
+            require(containerWindow && n->mGoalItem==onion,"ordinary offline selected Onion UI");
             const int state=containerWindow->getStatus(), squad=containerWindow->getMyPikiDisp();
-            if(!menuSeen){menuSeen=true;elapsed(target?"withdraw_menu_open":"deposit_menu_open");}
-            if(ownerFrames%30==0)std::printf("P2_ONION_MENU captain=%d target=%d displayed=%d stock=%d live=%d state=%d\n",n->mNaviID,target,squad,storedCount(),liveCount(),state);
+            if(!menuSeen){menuSeen=true;onionInputHeld=false;elapsed(target?"withdraw_menu_open":"deposit_menu_open");}
+            if(onionInputObservations++<240)std::printf("P2_ONION_MENU_INPUT captain=%d target=%d displayed=%d stock=%d live=%d state=%d held=%08x pressed=%08x axis_y=%.3f release_next=%d\n",n->mNaviID,target,squad,storedCount(),liveCount(),state,unsigned(n->mKontroller->mCurrentInput),unsigned(n->mKontroller->mInputPressed),n->mKontroller->mMainStickY,int(onionInputHeld));
             require(squad>=0&&squad<=20,"ordinary menu selection bounded20");
-            if(state==zen::DrawContainer::STATE_Operation&&squad==target){pad(menuConfirm?KBBTN_A:0);menuConfirm=true;}
-            else pad(0,0,state==zen::DrawContainer::STATE_Operation?(target? -65:65):0);
+            if(state!=zen::DrawContainer::STATE_Operation){pad();onionInputHeld=false;menuConfirm=false;return;}
+            if(onionInputHeld){pad();onionInputHeld=false;return;} // One engine tick of release between every stick/A edge.
+            if(squad==target){pad(menuConfirm?KBBTN_A:0);onionInputHeld=menuConfirm;menuConfirm=true;}
+            else{menuConfirm=false;pad(0,0,squad<target?-65:65);onionInputHeld=true;}
         }else if(!menuSeen){
-            const Vector3f goal=onion->getPosition();const float dx=goal.x-n->getPosition().x,dz=goal.z-n->getPosition().z,d=std::sqrt(dx*dx+dz*dz);
+            require(onion->mCollInfo && n->controlCamera(),"actual Onion collision and camera available");
+            const auto* coll=onion->mCollInfo->getSphere('cont');require(coll,"actual Onion cont sphere");
+            const Vector3f centre=n->getCentre(), goal=coll->mCentre, diff=goal-centre;
+            const float radius=n->getSize()+coll->mRadius, distance=diff.length();
+            require(std::isfinite(radius)&&radius>0&&std::isfinite(distance),"finite actual interaction geometry");
+            const bool culled=n->roughCulling(onion,radius*1.5f);
+            bool busy=false;
+            for(int i=0;i<naviMgr->getNaviCount();++i){auto* other=naviMgr->getNavi(i);if(other&&other!=n&&other->getCurrState()&&other->getCurrState()->getID()==NAVISTATE_Container&&other->mGoalItem==onion)busy=true;}
+            const bool blocked=n->mStickListHead || playerState->inDayEnd() || gameflow.mPauseAll || (gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive) || busy;
+            const bool inRange=!culled && distance<=radius;
+            if(onionInputObservations++<240)std::printf("P2_ONION_APPROACH captain=%d state=%d centre=%.3f,%.3f,%.3f target=%.3f,%.3f,%.3f distance=%.3f radius=%.3f culled=%d busy=%d blocked=%d in_range=%d held=%08x pressed=%08x\n",n->mNaviID,n->getCurrState()->getID(),centre.x,centre.y,centre.z,goal.x,goal.y,goal.z,distance,radius,int(culled),int(busy),int(blocked),int(inRange),unsigned(n->mKontroller->mCurrentInput),unsigned(n->mKontroller->mInputPressed));
+            if(blocked){pad();onionInputHeld=false;return;}
+            if(inRange){pad(onionInputHeld?0:KBBTN_A);onionInputHeld=!onionInputHeld;return;}
+            onionInputHeld=false;
+            const float dx=goal.x-centre.x,dz=goal.z-centre.z,d=std::sqrt(dx*dx+dz*dz);
+            if(d<=0.001f){pad();return;} // No invented vertical movement; bounded diagnostics identify an unreachable height.
             const Vector3f axis=n->controlCamera()->mViewXAxis;
-            if(d>12)pad(0,int(65*(dx*axis.x+dz*axis.z)/d),int(65*(dx*axis.z-dz*axis.x)/d));
-            else pad(frames%20<2?KBBTN_A:0);
-        }else pad();
+            pad(0,int(65*(dx*axis.x+dz*axis.z)/d),int(65*(dx*axis.z-dz*axis.x)/d));
+        }else{pad();onionInputHeld=false;}
     }
+
 public:
     CaptainSaveApp(){initialCards=cards();require(resumePhase?initialCards==1:initialCards==0,"expected committed generation before phase");}
     void draw(Graphics& gfx)override{PlugPikiApp::draw(gfx);if(tick>=0&&!shot)shot=capture("captain-campaign.ppm");if(saving&&menuFrames==120)require(capture("pause-menu.ppm"),"ordinary pause menu capture");if(resumePhase&&withdrawQueued&&frames%240==0){const std::string path="onion-menu-"+std::to_string(frames)+".ppm";require(capture(path.c_str()),"ordinary Onion menu capture");}}
