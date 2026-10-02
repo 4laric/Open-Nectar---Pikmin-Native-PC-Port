@@ -5,7 +5,7 @@
 #include <set>
 namespace pc_midday {
 using ActorBytes = std::vector<u8>;
-enum class FieldCategory : u8 { Scalar, Reference, Handle };
+enum class FieldCategory : u8 { Scalar, Reference, Handle, Token64 };
 struct FieldSchema {
     std::string key;
     FieldCategory category;
@@ -15,6 +15,7 @@ struct FieldSchema {
     static FieldSchema value(const char* k, ScalarKind s) { return {k,FieldCategory::Scalar,s,RefKind::Creature,false}; }
     static FieldSchema ref(const char* k, RefKind r, bool n=false) { return {k,FieldCategory::Reference,ScalarKind::U8,r,n}; }
     static FieldSchema handle(const char* k, RefKind r, bool n=false) { return {k,FieldCategory::Handle,ScalarKind::U32,r,n}; }
+    static FieldSchema token64(const char* k, RefKind r, bool n=false) { return {k,FieldCategory::Token64,ScalarKind::U64,r,n}; }
 };
 // owner is a checkpoint actor incarnation, resource is a content-bound resource
 // identity, slot identifies a named/indexed subobject of that owner/resource.
@@ -39,6 +40,12 @@ public:
     virtual bool resolve(const char*,RefKind,const LogicalRef&,void*&,std::string&)=0;
     virtual bool identifyHandle(const char*,RefKind,u32,LogicalRef&,std::string&)=0;
     virtual bool resolveHandle(const char*,RefKind,const LogicalRef&,u32&,std::string&)=0;
+    virtual bool identifyToken(const char*,RefKind,u64,LogicalRef&,std::string& error) {
+        error="64-bit logical token capture unavailable"; return false;
+    }
+    virtual bool resolveToken(const char*,RefKind,const LogicalRef&,u64&,std::string& error) {
+        error="64-bit logical token restore unavailable"; return false;
+    }
 };
 bool encode_actor_fields(const ActorFields&,ActorBytes&,std::string&);
 bool decode_actor_fields(const ActorBytes&,ActorFields&,std::string&);
@@ -60,6 +67,7 @@ public:
     bool scalar(const char*,ScalarKind,void*) override;
     bool reference(const char*,RefKind,void*&) override;
     bool handle(const char*,RefKind,u32&) override;
+    bool token64(const char*,RefKind,u64&) override;
     bool fail(const char* reason) override { if(error.empty()) error=reason; return false; }
     bool finish();
 };

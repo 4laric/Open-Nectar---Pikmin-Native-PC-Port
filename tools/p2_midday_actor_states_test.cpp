@@ -14,10 +14,29 @@ struct Resolver : LogicalResolver {
     bool resolve(const char* key,RefKind k,const LogicalRef& r,void*& p,std::string& e) override {if(!validate(key,k,r,e))return false;p=&object;return true;}
     bool identifyHandle(const char* key,RefKind,u32 v,LogicalRef& r,std::string&) override {if(v!=19)return false;r={7,0,2};return true;}
     bool resolveHandle(const char* key,RefKind k,const LogicalRef& r,u32& v,std::string& e) override {if(!validate(key,k,r,e))return false;v=81;return true;}
+    bool identifyToken(const char*,RefKind,u64 v,LogicalRef& r,std::string&) override {if(v!=0x100000019ULL)return false;r={7,0,2};return true;}
+    bool resolveToken(const char* key,RefKind k,const LogicalRef& r,u64& v,std::string& e) override {if(!validate(key,k,r,e))return false;v=0x200000051ULL;return true;}
 };
 void integer(ActorFields& f,const char* key,ScalarKind kind,u64 bits){ActorField a;a.scalar=kind;a.bits=bits;f[key]=a;}
 void run() {
     Resolver resolver;std::string error;ActorFields fields;
+    {
+        ActorFields tokens;u64 source=0x100000019ULL;
+        FieldArchive captureToken(Mode::Capture,tokens,resolver,error,0);
+        check(captureToken.token64("projectile.owner",RefKind::ProjectileToken,source)&&captureToken.finish(),"64-bit token capture");
+        ActorBytes wire;check(encode_actor_fields(tokens,wire,error),"logical token encoding");
+        ActorFields restored;check(decode_actor_fields(wire,restored,error),"logical token decoding");
+        const auto schema=std::vector<FieldSchema>{FieldSchema::token64("projectile.owner",RefKind::ProjectileToken)};
+        check(validate_actor_fields(restored,schema,resolver,error),"token closure validation");
+        u64 rebound=0;FieldArchive applyToken(Mode::Apply,restored,resolver,error,0);
+        check(applyToken.token64("projectile.owner",RefKind::ProjectileToken,rebound)&&applyToken.finish()&&rebound==0x200000051ULL,"64-bit token remaps without truncation");
+        auto invalid=restored;invalid["projectile.owner"].target={};std::string failure;
+        check(!validate_actor_fields(invalid,schema,resolver,failure),"required token absent refused");
+        invalid=restored;invalid["projectile.owner"].category=FieldCategory::Handle;failure.clear();
+        check(!validate_actor_fields(invalid,schema,resolver,failure),"32-bit handle cannot replace token");
+        invalid=restored;invalid["projectile.owner"].reference=static_cast<RefKind>(-1);failure.clear();
+        check(!encode_actor_fields(invalid,wire,failure),"negative reference kind refused");
+    }
     s32 signedValue=-53;u64 wide=0xfedcba9876543210ULL;float fraction=0.125f;bool flag=true;int* pointer=&resolver.object;u32 handle=19;
     FieldArchive capture(Mode::Capture,fields,resolver,error,100);
     check(capture.field("signed",signedValue)&&capture.field("wide",wide)&&capture.field("fraction",fraction)&&capture.field("flag",flag),"typed capture");
