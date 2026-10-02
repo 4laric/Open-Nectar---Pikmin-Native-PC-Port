@@ -403,6 +403,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_demo.cpp
     pc_port/pc_midday_demo_engine.cpp
     pc_port/pc_midday_mono_manager_engine.cpp
+    pc_port/pc_midday_player_resource_stage.cpp
+    pc_port/pc_midday_player_resource_stage_engine.cpp
     pc_port/pc_midday_player_root.cpp
     pc_port/pc_midday_player_root_engine.cpp
     pc_port/pc_midday_player_resources.cpp
@@ -3419,7 +3421,7 @@ add_executable(pc_midday_result_test tools/pc_midday_result_test.cpp pc_port/pc_
 target_include_directories(pc_midday_result_test PRIVATE pc_port)
 add_test(NAME pc_midday_result COMMAND pc_midday_result_test)
 
-add_executable(pc_midday_player_resources_test tools/pc_midday_player_resources_test.cpp
+add_executable(pc_midday_player_resources_test pc_port/pc_midday_player_resource_stage.cpp tools/pc_midday_player_resources_test.cpp
     pc_port/pc_midday_player_resources.cpp pc_port/pc_midday_actor_archive.cpp
     pc_port/pc_midday_world_schema.cpp pc_port/pc_midday_world_resources_schema.cpp
     pc_port/pc_midday_particle_schema.cpp pc_port/pc_midday_creature_schema.cpp pc_port/pc_midday_collision_schema.cpp)

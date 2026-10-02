@@ -1,4 +1,5 @@
 #include "pc_midday_player_resources.h"
+#include "pc_midday_player_resource_stage.h"
 #include <cstdio>
 using namespace pc_midday;
 namespace {
@@ -41,5 +42,14 @@ int main(){Resolver r;auto f=fixture();std::string e;check(valid(f,r),"unshaped 
  }
  {std::vector<FieldSchema> out{FieldSchema::value("sentinel",ScalarKind::U8)};auto bad=f;bad["player.resources.total"].bits=29;check(!player_resources_schema(bad,out,e)&&out.size()==1&&out[0].key=="sentinel","schema output atomic on failure");}
  {auto bad=b;bad.pop_back();check(!validatePlayerResources(bad,r,e),"truncation rejected");bad=b;bad.push_back(0);check(!validatePlayerResources(bad,r,e),"trailing bytes rejected");}
+ {PlayerCoreFields core;core.totalParts=30;core.totalRegisteredParts=1;PlayerResourcePlan plan;plan.registered=17;
+  check(planPlayerResources(b,core,r,plan,e)&&plan.registered==1&&plan.repair==-1&&plan.materials[0]==0&&plan.visibility[29]==2,"native allocation plan preserves complete registration topology");
+  core.totalRegisteredParts=0;plan.registered=17;check(!planPlayerResources(b,core,r,plan,e)&&plan.registered==17,"core/resource disagreement refuses before allocation and leaves plan unchanged");
+  core.totalRegisteredParts=1;core.totalParts=29;check(!planPlayerResources(b,core,r,plan,e),"core total mismatch refuses before allocation");core.totalParts=30;
+  auto material=f;material["player.resources.part.0.materials.count"].bits=256;material["player.resources.part.0.materials.model"].target.resource=8;for(int i=0;i<256;++i)ref(material,"player.resources.part.0.materials.material."+std::to_string(i),RefKind::Material,100+i);
+  ActorBytes payload;check(encode_actor_fields(material,payload,e)&&planPlayerResources(payload,core,r,plan,e)&&plan.materials[0]==256&&plan.materials[29]==0,"bounded native material array planned without unregistered storage reads");
+  material["player.resources.part.0.materials.count"].bits=257;check(encode_actor_fields(material,payload,e)&&!planPlayerResources(payload,core,r,plan,e),"oversized native material allocation refused");
+  Resolver denied;denied.deny=true;check(!planPlayerResources(b,core,denied,plan,e),"unresolved typed resource contract prevents allocation");
+ }
  std::printf("%d checks, %d failures\n",checks,failures);return failures?1:0;
 }
