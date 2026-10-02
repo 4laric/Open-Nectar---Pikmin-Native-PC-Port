@@ -444,6 +444,28 @@ class PurpleKochappyApp:public PlugPikiApp {
  int receiverWaypoint=0;
  bool seenCaptain=false,wasActive=false,sawFit=false,sawPause=false,recovered=false,deathDuringStun=false;
  Teki* enemy=nullptr;Pom* violet=nullptr;Piki* purple=nullptr;
+ Generator* enemyGenerator=nullptr;Generator* violetGenerator=nullptr;
+ unsigned violetGeneratorId=0;
+ void requireCurrentActors() {
+  // Cached addresses are comparison tokens only until their current manager
+  // owns them. Never call a receiver/profile hook on an absent cached actor.
+  Teki* currentEnemy=nullptr;Pom* currentViolet=nullptr;
+  Iterator ts(tekiMgr);CI_LOOP(ts){Teki* t=static_cast<Teki*>(*ts);
+   if(t!=enemy)continue;
+   require(!currentEnemy,"duplicate current enemy address");
+   require(t->mGenerator==enemyGenerator&&t->mGenerator&&t->mGenerator->_70==Target,"enemy generator identity changed");
+   currentEnemy=t;
+  }
+  Iterator bs(bossMgr);CI_LOOP(bs){Boss* b=static_cast<Boss*>(*bs);
+   if(b!=violet)continue;
+   require(!currentViolet,"duplicate current Violet address");
+   require(b->mObjType==OBJTYPE_Pom&&b->mGenerator==violetGenerator&&b->mGenerator&&unsigned(b->mGenerator->_70)==violetGeneratorId,"Violet generator identity changed");
+   currentViolet=static_cast<Pom*>(b);
+  }
+  require(currentEnemy&&currentViolet,"observed actor no longer owned by current manager");
+  require(pc_p2_kochappy_registered(currentEnemy)&&pc_p2_kochappy_fsm_suppress_ai(currentEnemy),"current enemy receiver/FSM lifetime lost");
+  require(currentViolet->isAlive()&&pc_p2_violet(currentViolet),"current Violet lifetime/profile lost");
+ }
  // Fixture-local observation ledger; pointer/slot is process-local, not a durable Pikmin UID.
  Piki* initialBodies[20]={};unsigned initialGeneratorIds[20]={};int initialBodyCount=0,lastObservedLive=-1;
  void observePopulation(int live) {
@@ -486,9 +508,10 @@ public:
   if(!initialized||!pikiMgr||!tekiMgr||!itemMgr||!bossMgr)return result;
   if(gameflow.mPauseAll||gameflow.mIsUIOverlayActive)return result;
   if(phase==0&&(n->getCurrState()->getID()!=NAVISTATE_Walk||++settled<45))return result;
-  ++age;int live=0,red=0,purples=0;
+  ++age;int live=0,red=0,purples=0;purple=nullptr;
   Iterator bodies(pikiMgr);CI_LOOP(bodies){Piki* p=static_cast<Piki*>(*bodies);if(!p->isAlive())continue;++live;
    if(pc_p2_is_purple(p)){++purples;purple=p;}else if(p->mColor==Red)++red;}
+  require(purples<=1,"duplicate natural Purple body");
   if(phase==0){
    require(live==20&&red==20&&purples==0,"current20nativeRed baseline, no injectedPurple");
    Iterator baseline(pikiMgr);CI_LOOP(baseline){Piki* p=static_cast<Piki*>(*baseline);if(p&&p->isAlive()&&initialBodyCount<20){initialBodies[initialBodyCount]=p;initialGeneratorIds[initialBodyCount]=p->mGenerator?unsigned(p->mGenerator->_70):0;++initialBodyCount;}}
@@ -496,11 +519,14 @@ public:
    Iterator ts(tekiMgr);CI_LOOP(ts){Teki* t=static_cast<Teki*>(*ts);if(t->mGenerator&&t->mGenerator->_70==Target){require(!enemy,"duplicateRed");enemy=t;}}
    Iterator bs(bossMgr);CI_LOOP(bs){Boss* b=static_cast<Boss*>(*bs);if(b->isAlive()&&b->mObjType==OBJTYPE_Pom&&pc_p2_violet(static_cast<Pom*>(b))){require(!violet,"duplicateViolet");violet=static_cast<Pom*>(b);}}
    require(enemy&&violet&&pc_p2_kochappy_registered(enemy)&&pc_p2_kochappy_fsm_suppress_ai(enemy),"actualRedownFSM and nativeViolet");
+   require(enemy->mGenerator&&violet->mGenerator,"source actor generator identities missing");
+   enemyGenerator=enemy->mGenerator;violetGenerator=violet->mGenerator;violetGeneratorId=unsigned(violetGenerator->_70);
    require(std::fabs(enemy->mHealth-200)<.01f,"sourceRedhealth200");
    std::puts("P2_PURPLE_KOCHAPPY_READY engineering_preview=1 startingRed=20 startingPurple=0 actor_writes=0 tutorial_AP_gate=OPEN");std::fflush(nullptr);
    if(std::getenv("P2_PURPLE_KOCHAPPY_READY_ONLY"))std::_Exit(0);
    phase=1;start=age;
   }
+  requireCurrentActors();
   if(human())return result;
   if(age%60==0){std::printf("P2_PURPLE_KOCHAPPY_PROGRESS phase=%d age=%d hp=%.2f live=%d red=%d purple=%d followers=%d\n",phase,age,n->mHealth,live,red,purples,n->getPlatePikis());std::fflush(nullptr);}
   if(phase==1){
