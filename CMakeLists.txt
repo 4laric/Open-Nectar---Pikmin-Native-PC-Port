@@ -330,6 +330,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_white.cpp
     pc_port/pc_p2_white_poison.cpp
     pc_port/pc_p2_cave.cpp
+    pc_port/pc_p2_cave_dialog_window.cpp
     pc_port/pc_p2_cave_generate.cpp
     pc_port/pc_p2_cave_generator.cpp
     pc_port/pc_p2_cave_rooms.cpp

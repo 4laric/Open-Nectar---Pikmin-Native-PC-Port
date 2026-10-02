@@ -42,6 +42,12 @@
 #include "OnePlayerSection.h"
 #include "system.h"
 #include <SDL2/SDL.h>
+#include "pc_p2_cave_dialog_window.h"
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -173,6 +179,72 @@ void loadSurfaceRoute(){
     std::printf("P2_CAVE_SURFACE_READY token=%s survivors=%zu health=%.9g x=%.3f y=%.3f z=%.3f radius=%.3f\n",
         route.party.token.c_str(),actors.size(),route.party.health,anchor.x,anchor.y,anchor.z,anchor.radius);std::fflush(stdout);
 }
+
+// Output-only #1154 dialog-evidence candidate. These observations never select
+// a button. The external OS consumer must corroborate mapped dialog/title,
+// WM_TRANSIENT_FOR(parent_x11_window), modality, and the parent's _NET_WM_PID.
+unsigned long dialogEvidenceSequence=0;
+long dialogEvidencePid(){
+#if defined(_WIN32)
+    return static_cast<long>(_getpid());
+#else
+    return static_cast<long>(getpid());
+#endif
+}
+std::string dialogEvidenceString(const char* text){
+    std::string out="\"";
+    if(text)for(const unsigned char* p=reinterpret_cast<const unsigned char*>(text);*p;++p){
+        if(*p=='"' || *p=='\\'){out+='\\';out+=static_cast<char>(*p);}
+        else if(*p<32){char escaped[7];std::snprintf(escaped,sizeof(escaped),"\\u%04x",unsigned(*p));out+=escaped;}
+        else out+=static_cast<char>(*p);
+    }
+    return out+'"';
+}
+unsigned long dialogEvidenceBefore(const SDL_MessageBoxData& data,const char* phase,const char* action,
+        const std::string& boundary,const char* cave,int floor){
+    const unsigned long sequence=++dialogEvidenceSequence;
+    int x=0,y=0,width=0,height=0;
+    if(data.window){SDL_GetWindowPosition(data.window,&x,&y);SDL_GetWindowSize(data.window,&width,&height);}
+    const PcP2CaveDialogWindow wm = pc_p2_cave_dialog_window(data.window);
+    std::ostringstream out;
+    out<<"{\"event\":\"begin\",\"sequence\":"<<sequence<<",\"pid\":"<<dialogEvidencePid()
+       <<",\"phase\":"<<dialogEvidenceString(phase)<<",\"action\":"<<dialogEvidenceString(action)<<",\"token\":"<<dialogEvidenceString(boundary.c_str())
+       <<",\"cave\":"<<dialogEvidenceString(cave)<<",\"floor\":"<<floor
+       <<",\"title\":"<<dialogEvidenceString(data.title)<<",\"message\":"<<dialogEvidenceString(data.message)
+       <<",\"flags\":"<<data.flags<<",\"video_driver\":"<<dialogEvidenceString(SDL_GetCurrentVideoDriver())
+       <<",\"parent_sdl_window\":"<<(data.window?SDL_GetWindowID(data.window):0)
+       <<",\"parent_title\":"<<dialogEvidenceString(data.window?SDL_GetWindowTitle(data.window):nullptr)
+       <<",\"parent_flags\":"<<(data.window?SDL_GetWindowFlags(data.window):0)
+       <<",\"parent_x\":"<<x<<",\"parent_y\":"<<y<<",\"parent_w\":"<<width<<",\"parent_h\":"<<height
+       <<",\"syswm_available\":"<<(wm.available?"true":"false")
+       <<",\"syswm_subsystem\":"<<wm.subsystem
+       <<",\"parent_x11_window\":"<<wm.x11Window
+       <<",\"parent_net_wm_pid_verification\":\"external_OS_required\""
+       <<",\"button_disabled_state_supported\":false,\"buttons\":[";
+    for(int i=0;i<data.numbuttons;++i){const auto& b=data.buttons[i];if(i)out<<',';
+        out<<"{\"id\":"<<b.buttonid<<",\"text\":"<<dialogEvidenceString(b.text)<<",\"flags\":"<<b.flags
+           <<",\"return_default\":"<<((b.flags&SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT)?"true":"false")
+           <<",\"escape_default\":"<<((b.flags&SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT)?"true":"false")<<'}';}
+    out<<"]}";
+    std::printf("P2_CAVE_NATIVE_DIALOG %s\n",out.str().c_str());std::fflush(stdout);
+    return sequence;
+}
+void dialogEvidenceAfter(unsigned long sequence,const SDL_MessageBoxData& data,
+        const char* phase,const char* action,const std::string& boundary,const char* cave,int floor,int result,int choice){
+    const std::string error=result?SDL_GetError():"";
+    const char* selected=nullptr;
+    if(result==0)for(int i=0;i<data.numbuttons;++i)
+        if(data.buttons[i].buttonid==choice)selected=data.buttons[i].text;
+    std::ostringstream out;
+    out<<"{\"event\":\"end\",\"sequence\":"<<sequence<<",\"pid\":"<<dialogEvidencePid()
+       <<",\"phase\":"<<dialogEvidenceString(phase)<<",\"action\":"<<dialogEvidenceString(action)<<",\"token\":"<<dialogEvidenceString(boundary.c_str())
+       <<",\"cave\":"<<dialogEvidenceString(cave)<<",\"floor\":"<<floor
+       <<",\"title\":"<<dialogEvidenceString(data.title)<<",\"rc\":"<<result<<",\"choice\":"<<choice
+       <<",\"known_button_selected\":"<<(selected?"true":"false")
+       <<",\"selected_label\":"<<dialogEvidenceString(selected)<<",\"sdl_error\":"<<dialogEvidenceString(error.c_str())<<'}';
+    std::printf("P2_CAVE_NATIVE_DIALOG %s\n",out.str().c_str());std::fflush(stdout);
+}
+
 bool enterSurfaceCave(){
     if(!surfaceSafe() || pc_p2_cave_bud_pending())return false;
     P2CaveEntry party=surfaceRoute.party;party.squad.clear();
@@ -192,7 +264,12 @@ bool enterSurfaceCave(){
     const std::string message=std::string("Enter ")+destination+" with all "+std::to_string(party.squad.size())+" surviving Pikmin?";
     const SDL_MessageBoxButtonData buttons[]={{SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT,0,"Stay"},{SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT,1,"Enter cave"}};
     SDL_MessageBoxData data={SDL_MESSAGEBOX_INFORMATION,SDL_GL_GetCurrentWindow(),destination,message.c_str(),2,buttons,nullptr};int choice=0;
-    if(SDL_ShowMessageBox(&data,&choice)!=0 || choice!=1)return false;
+    const unsigned long dialogSequence=dialogEvidenceBefore(data,"surface","enter",party.token,
+        surfaceWfgDestination?"forest_2/f_02":"forest_1",0);
+    const int dialogResult=SDL_ShowMessageBox(&data,&choice);
+    dialogEvidenceAfter(dialogSequence,data,"surface","enter",party.token,
+        surfaceWfgDestination?"forest_2/f_02":"forest_1",0,dialogResult,choice);
+    if(dialogResult!=0 || choice!=1)return false;
     if(!surfaceSafe())return false;
     FILE* f=std::fopen("p2-cave-surface-transfer.tmp","wb");if(!f)return false;
     bool ok=std::fwrite(text.data(),1,text.size(),f)==text.size() && std::fflush(f)==0;
@@ -500,12 +577,19 @@ bool pc_p2_cave_checkpoint(bool confirm){
         if(confirm)notice(anchor.enabled?"Stand at the hole/geyser to descend or leave the cave.":"Return to the Research Pod to descend or leave the cave.");return false;
     }
     if(confirm && !failed){
-        const char* action=(beasts || (!tutorialEntry && floorId==1) || (tutorialEntry && p2_tutorial_descends(floorId)))?"Descend":"Leave cave";
+        const char* action=(beasts || (!bodyContextReady && !tutorialEntry && floorId==1) || (tutorialEntry && p2_tutorial_descends(floorId)))?"Descend":"Leave cave";
         std::string message=std::string(action)+" with all "+std::to_string(alive.size())+" surviving Pikmin?\n"
             "Uncollected treasure stays behind. Your squad and delivered treasure will be saved together.";
         const SDL_MessageBoxButtonData buttons[]={{SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT,0,"Stay"},{SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT,1,action}};
         SDL_MessageBoxData data={SDL_MESSAGEBOX_INFORMATION,SDL_GL_GetCurrentWindow(),caveName(),message.c_str(),2,buttons,nullptr};int choice=0;
-        if(SDL_ShowMessageBox(&data,&choice)!=0 || choice!=1)return false;
+        const char* dialogAction=std::string(action)=="Descend"?"descend":"leave";
+        const auto* dialogLayout=pc_p2_cave_rooms_layout();
+        const unsigned long dialogSequence=dialogEvidenceBefore(data,"floor",dialogAction,token,
+            dialogLayout?dialogLayout->cave.c_str():caveName(),floorId);
+        const int dialogResult=SDL_ShowMessageBox(&data,&choice);
+        dialogEvidenceAfter(dialogSequence,data,"floor",dialogAction,token,
+            dialogLayout?dialogLayout->cave.c_str():caveName(),floorId,dialogResult,choice);
+        if(dialogResult!=0 || choice!=1)return false;
     }
     // Apply the source cave save filter (pikiMgr::caveSaveAllPikmins, pikiMgr.cpp
     // :723) and build the persisted squad. Wild Bulbmin dependents are dropped on
@@ -570,7 +654,7 @@ void pc_p2_cave_tick(){
         titleTimer=0;
         int count=0,purples=0,whites=0;Iterator squad(pikiMgr);CI_LOOP(squad){Piki* p=static_cast<Piki*>(*squad);if(p->isAlive()){++count;if(pc_p2_is_purple(p))++purples;if(pc_p2_is_white(p))++whites;}}
         const std::string transition=beasts && floorId>=3?" | Floor "+std::to_string(floorId+1)+" descent unavailable":
-            " | F6 at "+(anchor.enabled?anchor.kind:std::string("Pod"))+": "+((beasts || (!tutorialEntry && floorId==1) || (tutorialEntry && p2_tutorial_descends(floorId)))?"descend":"leave cave")+" | Saves at floor boundaries";
+            " | F6 at "+(anchor.enabled?anchor.kind:std::string("Pod"))+": "+((beasts || (!bodyContextReady && !tutorialEntry && floorId==1) || (tutorialEntry && p2_tutorial_descends(floorId)))?"descend":"leave cave")+" | Saves at floor boundaries";
         std::string title=std::string("Pikipelago - ")+caveName()+" | Floor "+std::to_string(floorId)+" | "+std::to_string(count)+" Pikmin ("+std::to_string(purples)+" Purple, "+std::to_string(whites)+" White) | "+std::to_string(pc_p2_preview_pokos())+" Pokos"+transition;
         if(SDL_Window* w=SDL_GL_GetCurrentWindow())SDL_SetWindowTitle(w,title.c_str());
     }
