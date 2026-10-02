@@ -379,6 +379,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_p2_white_poison.cpp
     pc_port/pc_midday_scene_bootstrap.cpp
     pc_port/pc_midday_codec.cpp
+    pc_port/pc_midday_capture.cpp
     pc_port/pc_midday_store.cpp
     pc_port/pc_midday_save_quit.cpp
     pc_port/pc_midday_save_quit_engine.cpp
