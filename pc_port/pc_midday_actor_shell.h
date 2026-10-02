@@ -2,6 +2,8 @@
 #include "pc_midday_actor_archive.h"
 #include <memory>
 class ViewPiki;
+struct NaviProp;
+struct PikiProp;
 namespace pc_midday {
 class ConstructorFence;
 class AllocationOwner;
@@ -9,6 +11,10 @@ class AllocationOwner;
 // nested objects. Returned pointers are borrows, never manager-ready actors.
 bool allocate_owned_navi_shell(const ActorBytes&,LogicalResolver&,ConstructorFence&,AllocationOwner&,Navi*&,std::string&);
 bool allocate_owned_view_piki_shell(const ActorBytes&,const ActorBytes&,LogicalResolver&,ConstructorFence&,AllocationOwner&,ViewPiki*&,std::string&);
+// Internal free-slot roots: exact typed borrowed props, inert source defaults,
+// no saved payload and no manager/resource lookup. Not birth-ready.
+bool allocate_owned_free_navi_shell(NaviProp&,int slot,ConstructorFence&,AllocationOwner&,Navi*&,std::string&);
+bool allocate_owned_free_view_piki_shell(PikiProp&,ConstructorFence&,AllocationOwner&,ViewPiki*&,std::string&);
 // Factory prerequisite ONLY: exact native root objects with no nested owned
 // allocations, no manager lookup/swap and no gameplay initialization. The
 // schema/catalog must describe the complete saved actor before construction.

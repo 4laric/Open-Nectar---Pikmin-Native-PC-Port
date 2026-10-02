@@ -1,8 +1,11 @@
 #pragma once
 #include "pc_midday_actor_archive.h"
+#include "pc_midday_actor_ancillary.h"
 #include <limits>
 #include <memory>
 class ViewPiki;
+struct NaviProp;
+struct PikiProp;
 namespace pc_midday {
 class ConstructorFence;
 // Owns one physical actor root AND its constructor-owned nested graph. Borrowed
@@ -22,6 +25,15 @@ public:
                   std::size_t failAt=std::numeric_limits<std::size_t>::max());
  bool prepareViewPiki(const ActorBytes&,const ActorBytes&,LogicalResolver&,ConstructorFence&,std::string&,
                       std::size_t failAt=std::numeric_limits<std::size_t>::max());
+ // Explicit free-slot allocation: no ActorBytes, resolver, saved selectors or
+ // live actor snapshots. Properties are exact compiled scene-owned types.
+ // The source-defined defaults are INERT; caller must bind scene resources and
+ // validate birth readiness before exposing a free slot to MonoObjectMgr.
+ // In particular MonoObjectMgr::birth does not initialize a returned slot.
+ bool prepareFreeNavi(NaviProp&,int slot,const NaviAncillaryConfig&,ConstructorFence&,std::string&,
+                      std::size_t failAt=std::numeric_limits<std::size_t>::max());
+ bool prepareFreeViewPiki(PikiProp&,const PikiAncillaryConfig&,ConstructorFence&,std::string&,
+                          std::size_t failAt=std::numeric_limits<std::size_t>::max());
  Navi* stagedNavi()const;
  ViewPiki* stagedPiki()const;
  bool empty()const;

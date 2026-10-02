@@ -3,6 +3,8 @@
 #include "pc_midday_constructor.h"
 #include "pc_midday_piki_action_factory.h"
 #include "Navi.h"
+#include "NaviMgr.h"
+#include "PikiMgr.h"
 #include "NaviState.h"
 #include "ViewPiki.h"
 #include "PikiState.h"
@@ -216,4 +218,62 @@ template<class Observe> bool pc_midday_check_owned_piki_graph(ViewPiki& live,con
  pc_midday::LogicalResolver& resolver,pc_midday::ConstructorFence& fence,Observe observe,std::string& e){
  return pc_midday_graph_checks::run([&](pc_midday::ActorAllocationGraph& g,size_t at,std::string& error){return g.prepareViewPiki(base,subtype,resolver,fence,error,at);},
   [&](pc_midday::ActorAllocationGraph& g,std::string& error){return pc_midday_graph_checks::piki(live,g.stagedPiki(),error);},observe,fence,e);
+}
+
+// Free-slot allocation consumes only explicit manager properties/configuration.
+// Live actor arguments are invariance/alias witnesses, never allocation input.
+template<class Observe> bool pc_midday_check_free_graphs(Navi& liveNavi,ViewPiki& livePiki,
+ NaviProp& naviProps,PikiProp& pikiProps,pc_midday::ConstructorFence& fence,Observe observe,std::string& e){
+ using namespace pc_midday;using namespace pc_midday_graph_checks;
+ const NaviAncillaryConfig nc{5,100,1,30,150,12};
+ auto nprepare=[&](ActorAllocationGraph& g,size_t at,std::string& error){return g.prepareFreeNavi(naviProps,0,nc,fence,error,at);};
+ auto ninspect=[&](ActorAllocationGraph& g,std::string& error){
+  auto* n=g.stagedNavi();
+  if(!navi(liveNavi,n,error))return false;
+  if(n->mSize!=20.0f||n->mHealth!=naviProps.mNaviProps.mHealth()||n->mLowerMotionCooldown!=4||n->mNeutralTime!=0.0f||n->mThrowHoldTime!=0.0f||n->mSeedCollectionCount!=0||n->mShadowCaster.mLightCamera.mFov!=20.0f||
+     n->mProps!=&naviProps||n->mNaviID!=0||n->mNaviShapeObject||n->mNaviCamera||n->mControlCamera||n->mAttackTarget.mPtr||n->mPellet||
+     n->mNaviAnimMgr.mUpperAnimator.mMgr||n->mNaviAnimMgr.mUpperAnimator.mContext||n->mNaviAnimMgr.mLowerAnimator.mMgr||n->mNaviAnimMgr.mLowerAnimator.mContext)
+   return fail(error,"free Navi inert defaults mismatch");
+  std::string refusal;refusal.reserve(512);
+  if(g.prepareFreeNavi(naviProps,0,nc,fence,refusal)||refusal.empty()||g.stagedNavi()!=n)return fail(error,"occupied Navi graph accepted/replaced");
+  return true;
+ };
+ if(!run(nprepare,ninspect,observe,fence,e))return false;
+ for(int pathCapacity:{0,8}){
+  const PikiAncillaryConfig pc{4,pathCapacity};
+  auto prepare=[&](ActorAllocationGraph& g,size_t at,std::string& error){return g.prepareFreeViewPiki(pikiProps,pc,fence,error,at);};
+  auto inspect=[&](ActorAllocationGraph& g,std::string& error){
+   auto* p=g.stagedPiki();if(!piki(livePiki,p,error))return false;
+   if(p->mCollisionRadius!=8.0f||p->_68!=1||p->mDeathTimer!=0.0f||p->mIsPanicked||p->mMode!=PikiMode::FormationMode||
+      p->mProps!=&pikiProps||p->mPikiShape||p->mHappaModel||p->mRouteHandle||p->mNavi||p->mPellet||
+      bool(p->mPathBuffers)!=(pathCapacity!=0)||p->mHappa!=0||p->mPikiAnimMgr.mUpperAnimator.mMgr||p->mPikiAnimMgr.mUpperAnimator.mContext||
+      p->mPikiAnimMgr.mLowerAnimator.mMgr||p->mPikiAnimMgr.mLowerAnimator.mContext||p->mLastEffectPosition.x||p->mLastEffectPosition.y||p->mLastEffectPosition.z)
+    return fail(error,"free ViewPiki inert defaults mismatch");
+   std::string refusal;refusal.reserve(512);
+   if(g.prepareFreeViewPiki(pikiProps,pc,fence,refusal)||refusal.empty()||g.stagedPiki()!=p)return fail(error,"occupied ViewPiki graph accepted/replaced");
+   return true;
+  };
+  if(!run(prepare,inspect,observe,fence,e))return false;
+ }
+ // Malformed configuration and absent-fence refusals also retire all storage.
+ auto reject=[&](auto prepare){
+  std::string refusal;refusal.reserve(512);const auto before=piki_pc_allocation_stats();bool good=false,unchanged=false;
+  {ActorAllocationGraph graph;good=!prepare(graph,refusal)&&!refusal.empty()&&graph.empty()&&!graph.stagedNavi()&&!graph.stagedPiki();
+   unchanged=observe(e);graph.reset();unchanged=observe(e)&&unchanged;}
+  if(!heapEqual(before,piki_pc_allocation_stats(),e))return false;
+  return good&&unchanged?true:fail(e,"free graph negative configuration accepted or leaked");
+ };
+ for(int slot:{-1,2})if(!reject([&](ActorAllocationGraph& g,std::string& error){return g.prepareFreeNavi(naviProps,slot,nc,fence,error);}))return false;
+ for(int test=0;test<10;++test){auto bad=nc;
+  switch(test){case 0:bad.collisionCapacity=4;break;case 1:bad.plateCapacity=0;break;case 2:bad.plateCapacity=4097;break;
+   case 3:bad.controllerPort=0;break;case 4:bad.controllerPort=5;break;case 5:bad.plateStartOffset=-1;break;case 6:bad.plateLengthLimit=1001;break;
+   case 7:bad.plateMaxPosSize=0;break;case 8:bad.plateMaxPosSize=51;break;case 9:bad.plateStartOffset=std::numeric_limits<float>::quiet_NaN();break;}
+  if(!reject([&](ActorAllocationGraph& g,std::string& error){return g.prepareFreeNavi(naviProps,0,bad,fence,error);}))return false;
+ }
+ for(const auto config:{PikiAncillaryConfig{5,0},PikiAncillaryConfig{4,-1},PikiAncillaryConfig{4,32768}})
+  if(!reject([&](ActorAllocationGraph& g,std::string& error){return g.prepareFreeViewPiki(pikiProps,config,fence,error);}))return false;
+ ConstructorFence absent;
+ if(!reject([&](ActorAllocationGraph& g,std::string& error){return g.prepareFreeNavi(naviProps,0,nc,absent,error);})||
+    !reject([&](ActorAllocationGraph& g,std::string& error){return g.prepareFreeViewPiki(pikiProps,{4,0},absent,error);}))return false;
+ return true;
 }

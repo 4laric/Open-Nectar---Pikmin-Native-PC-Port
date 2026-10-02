@@ -15,6 +15,13 @@ struct ActorAllocationGraph::Impl {
  AllocationOwner owner;
  Navi* navi=nullptr;ViewPiki* piki=nullptr;
  Impl(ConstructorFence& f,std::size_t failure):fence(f),owner(failure){}
+ bool completeNavi(const NaviAncillaryConfig& config,std::string& error){
+  return allocate_navi_state_graph(*navi,owner,error)&&allocate_navi_ancillary(*navi,config,owner,error);
+ }
+ bool completePiki(const PikiAncillaryConfig& config,std::string& error){
+  if(!allocate_piki_state_graph(*piki,owner,error)||!allocate_piki_ancillary(*piki,config,owner,error))return false;
+  piki->mActiveAction=allocate_piki_action_graph(*piki,owner);return true;
+ }
  ~Impl(){
   if(owner.ownedEntries()){
    std::string error;
@@ -50,8 +57,7 @@ bool ActorAllocationGraph::prepareNavi(const ActorBytes& base,LogicalResolver& r
      !number(fields,"navi.runtime.plate.params.startOffset",config.plateStartOffset,error)||
      !number(fields,"navi.runtime.plate.params.lengthLimit",config.plateLengthLimit,error)||
      !number(fields,"navi.runtime.plate.params.maxPosSize",config.plateMaxPosSize,error))return false;
-  const bool ok=allocate_navi_state_graph(*pending->navi,pending->owner,error)&&
-                allocate_navi_ancillary(*pending->navi,config,pending->owner,error);
+  const bool ok=pending->completeNavi(config,error);
   attempts_=pending->owner.allocationAttempts();if(!ok)return false;
   impl_=std::move(pending);error.clear();return true;
  } catch(const std::exception& exception){if(pending)attempts_=pending->owner.allocationAttempts();error=exception.what();return false;}
@@ -67,12 +73,39 @@ bool ActorAllocationGraph::prepareViewPiki(const ActorBytes& base,const ActorByt
   ActorFields fields;if(!decode_actor_fields(base,fields,error))return false;
   PikiAncillaryConfig config{4,0};
   if(!actor_i32(fields,"piki.runtime.path.capacity",config.pathCapacity,error))return false;
-  if(!allocate_piki_state_graph(*pending->piki,pending->owner,error)||
-     !allocate_piki_ancillary(*pending->piki,config,pending->owner,error)){
+  if(!pending->completePiki(config,error)){
    attempts_=pending->owner.allocationAttempts();return false;
   }
-  pending->piki->mActiveAction=allocate_piki_action_graph(*pending->piki,pending->owner);
   attempts_=pending->owner.allocationAttempts();impl_=std::move(pending);error.clear();return true;
  } catch(const std::exception& exception){if(pending)attempts_=pending->owner.allocationAttempts();error=exception.what();return false;}
 }
+bool ActorAllocationGraph::prepareFreeNavi(NaviProp& props,int slot,const NaviAncillaryConfig& config,
+ ConstructorFence& fence,std::string& error,std::size_t failAt){
+ if(impl_){error="actor graph already prepared";return false;}
+ attempts_=0;
+ if(config.collisionCapacity!=5){error="free Navi requires compiled collider capacity five";return false;}
+ std::unique_ptr<Impl> pending;
+ struct Receipt {std::size_t& result;std::unique_ptr<Impl>& stage;~Receipt(){if(stage)result=stage->owner.allocationAttempts();}} receipt{attempts_,pending};
+ try {
+  pending.reset(new Impl(fence,failAt));
+  if(!allocate_owned_free_navi_shell(props,slot,fence,pending->owner,pending->navi,error)||
+     !pending->completeNavi(config,error))return false;
+  attempts_=pending->owner.allocationAttempts();impl_=std::move(pending);error.clear();return true;
+ }catch(const std::exception& exception){error=exception.what();return false;}
+}
+bool ActorAllocationGraph::prepareFreeViewPiki(PikiProp& props,const PikiAncillaryConfig& config,
+ ConstructorFence& fence,std::string& error,std::size_t failAt){
+ if(impl_){error="actor graph already prepared";return false;}
+ attempts_=0;
+ if(config.collisionCapacity!=4){error="free ViewPiki requires compiled collider capacity four";return false;}
+ std::unique_ptr<Impl> pending;
+ struct Receipt {std::size_t& result;std::unique_ptr<Impl>& stage;~Receipt(){if(stage)result=stage->owner.allocationAttempts();}} receipt{attempts_,pending};
+ try {
+  pending.reset(new Impl(fence,failAt));
+  if(!allocate_owned_free_view_piki_shell(props,fence,pending->owner,pending->piki,error)||
+     !pending->completePiki(config,error))return false;
+  attempts_=pending->owner.allocationAttempts();impl_=std::move(pending);error.clear();return true;
+ }catch(const std::exception& exception){error=exception.what();return false;}
+}
+
 }

@@ -70,5 +70,30 @@ bool allocate_owned_view_piki_shell(const ActorBytes& bytes,const ActorBytes& su
  auto* props=properties<PikiProp>(fields,resolver,e);if(!props)return false;
  output=PcMiddayActorShellAccess::piki(allocation,props);return true;
 }
+bool allocate_owned_free_navi_shell(NaviProp& props,int slot,ConstructorFence& fence,
+ AllocationOwner& allocation,Navi*& output,std::string& e){
+ if(output){e="free Navi shell output occupied";return false;}
+ if(!owner(fence,e))return false;
+ if(typeid(props)!=typeid(NaviProp)||slot<0||slot>1){e="free Navi properties or slot invalid";return false;}
+ output=PcMiddayActorShellAccess::navi(allocation,&props,slot);
+ // Local, source-defined ordinary constructor defaults only. Animation, shape,
+ // controller resources, state entry and manager registration remain deferred.
+ output->mSize=20.0f;output->mHealth=props.mNaviProps.mHealth();
+ output->mLowerMotionCooldown=4;output->mNeutralTime=0.0f;
+ output->mThrowHoldTime=0.0f;output->mSeedCollectionCount=0;
+ output->mShadowCaster.mLightCamera.mFov=20.0f;
+ return true;
+}
+bool allocate_owned_free_view_piki_shell(PikiProp& props,ConstructorFence& fence,
+ AllocationOwner& allocation,ViewPiki*& output,std::string& e){
+ if(output){e="free ViewPiki shell output occupied";return false;}
+ if(!owner(fence,e))return false;
+ if(typeid(props)!=typeid(PikiProp)){e="free Piki properties concrete type mismatch";return false;}
+ output=PcMiddayActorShellAccess::piki(allocation,&props);
+ // Piki constructor defaults, not Piki::init's RNG-selected actor state.
+ output->mCollisionRadius=8.0f;output->_68=1;
+ return true;
+}
+
 }
 #endif
