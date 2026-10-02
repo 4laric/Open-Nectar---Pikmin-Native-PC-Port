@@ -1124,6 +1124,32 @@ unsigned char pc_settings_startup_language(void) {
     return language;
 }
 
+// Issue #1190: explicit private test probe only. The priority guarantees this
+// calls the real production PAL helper before C++ settings globals construct.
+// Normal launches (no test-language environment) perform no file operations.
+static int sPersistenceLanguageBeforeMain = -1;
+#if defined(__GNUC__)
+__attribute__((constructor(101)))
+static void persistenceLanguageBeforeMain() {
+    const char* expected = getenv("PIKMIN_SETTINGS_TEST_LANGUAGE");
+    if (!expected) return;
+    if (!expected[0] || expected[1] || expected[0] < '0' || expected[0] > '5') {
+        printf("PIKMIN_SETTINGS_PREMAIN invalid expected language\n");
+        fflush(stdout);
+        _Exit(2);
+    }
+    sPersistenceLanguageBeforeMain = pc_settings_startup_language();
+    const bool matches = sPersistenceLanguageBeforeMain == expected[0] - '0';
+    printf("PIKMIN_SETTINGS_PREMAIN actual=%d expected=%c %s\n",
+           sPersistenceLanguageBeforeMain, expected[0], matches ? "PASS" : "FAIL");
+    fflush(stdout);
+    // Ordinary and netplay binaries can run this no-assets integration check
+    // without entering SDL/gameplay or any later global constructors.
+    const char* stop = getenv("PIKMIN_SETTINGS_TEST_EARLY_EXIT");
+    if (stop && strcmp(stop, "1") == 0) _Exit(matches ? 0 : 1);
+}
+#endif
+
 unsigned char pc_settings_get_language(void) {
     if (sLanguage == 0xFF) pc_settings_startup_language();
     return sLanguage;
@@ -5820,6 +5846,42 @@ int pc_settings_netplay_selftest(const char* (*configTextFn)(void)) {
     // No window here: applyVideo/applyGraphics are GL work, the probing
     // flag already skips them (the F1 option probe uses it the same way).
     sProbing = true;
+    if (const char* expected = getenv("PIKMIN_SETTINGS_TEST_LANGUAGE")) {
+        check(expected[0] && !expected[1] && sPersistenceLanguageBeforeMain == expected[0] - '0',
+              "actual production language read happened before main");
+    }
+    // This selftest deliberately owns its existing private cwd-relative file;
+    // an inherited player override must never redirect its writes elsewhere.
+#ifdef _WIN32
+    const bool overrideCleared = SetEnvironmentVariableW(L"PIKMIN_SETTINGS_PATH", nullptr) != 0;
+#else
+    const bool overrideCleared = unsetenv("PIKMIN_SETTINGS_PATH") == 0;
+#endif
+    check(overrideCleared, "selftest clears inherited settings override in its own process");
+    if (!overrideCleared) {
+        sProbing = false;
+        printf("netplay settings selftest: isolation refused before any file write\n");
+        return 1;
+    }
+    // Do not merely count an isolation failure and continue with player data.
+    // B2 must not remain pinned to another directory, and the actual resolver
+    // must select precisely this already-created private selftest cwd file.
+    PcSettingsFilePath isolatedPath;
+    std::error_code pathError;
+    const std::filesystem::path privateCwd = std::filesystem::current_path(pathError);
+    bool isolated = !pathError && sConfigPathPin.empty() &&
+                    pc_settings_file_resolve(configFallback(), &isolatedPath) != 0;
+    if (isolated) {
+        const std::filesystem::path resolved = std::filesystem::absolute(
+            std::filesystem::path(isolatedPath.value), pathError).lexically_normal();
+        isolated = !pathError && resolved == (privateCwd / kConfigFilename).lexically_normal();
+    }
+    check(isolated, "actual settings path is the private cwd target with no B2 pin");
+    if (!isolated) {
+        sProbing = false;
+        printf("netplay settings selftest: path isolation refused before any file write\n");
+        return 1;
+    }
     const char* path = kConfigFilename;
     for (const SelftestCase& tc : kSelftestCases) {
         const std::string name = tc.name;
@@ -5890,6 +5952,43 @@ int pc_settings_netplay_selftest(const char* (*configTextFn)(void)) {
             check(w != now.end() && w->second == "1024", name + ": window size change is saved");
         }
         fileKeepsJoinerValues("window size");
+#ifdef _WIN32
+        // Exercise the actual compiled saveConfig -> sessionGuardedSave ->
+        // atomic writer chain. Deny replacement while allowing disk readback.
+        const std::string beforeFailureBytes = readWholeFile(path);
+        const std::string beforeFailureRender = sDiskRender;
+        const std::string beforeFailureConfig = renderConfig(sDiskConfig);
+        PcSettingsFilePath lockedPath;
+        const bool pathReady = pc_settings_file_resolve(kConfigFilename, &lockedPath) != 0;
+        check(pathReady, name + ": resolve private failure target");
+        HANDLE locked = pathReady ? CreateFileW(lockedPath.value, GENERIC_READ, FILE_SHARE_READ,
+                                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)
+                                  : INVALID_HANDLE_VALUE;
+        check(locked != INVALID_HANDLE_VALUE, name + ": lock actual settings target");
+        if (locked != INVALID_HANDLE_VALUE) {
+            sConfig.windowWidth = 1152;
+            saveConfig();
+            check(sDiskRender == beforeFailureRender,
+                  name + ": failed save retains disk render baseline");
+            check(renderConfig(sDiskConfig) == beforeFailureConfig,
+                  name + ": failed save retains disk config baseline");
+            check(readWholeFile(path) == beforeFailureBytes,
+                  name + ": failed atomic replacement preserves disk bytes");
+            check(configText() == hostText,
+                  name + ": failed local save keeps actual host session keys locked");
+            check(CloseHandle(locked) != 0, name + ": release owned file lock");
+            // Retry the identical unsaved local value; advancing the baseline
+            // on failure would incorrectly suppress this real second write.
+            saveConfig();
+            const auto retried = parseSettingsFile(path);
+            auto width = retried.find("windowWidth");
+            check(width != retried.end() && width->second == "1152",
+                  name + ": identical local edit commits on retry");
+            check(sDiskRender != beforeFailureRender,
+                  name + ": successful retry advances render baseline");
+            fileKeepsJoinerValues("failed commit and identical retry");
+        }
+#endif
         // Player-count prompt accept path (pcPlayerCountPromptInput).
         sConfig.coopPlayers = sConfig.coopPlayers == 2 ? 1 : 2;
         saveConfig();
