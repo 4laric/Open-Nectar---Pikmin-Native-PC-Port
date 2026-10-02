@@ -221,6 +221,7 @@ bool pc_settings_menu_open(void);
 void pc_netplay_det_force_on(void);
 
 // Optional private-fixture const-wire observers; absent in production links.
+extern bool pc_coop_fixture_trace_each_sample(void) noexcept __attribute__((weak));
 extern void pc_coop_fixture_note_submit(uint64_t, int, const uint8_t*) __attribute__((weak));
 extern void pc_coop_fixture_note_advance(uint64_t, int, uint64_t, unsigned, unsigned, bool, bool, bool, bool, const uint8_t*) __attribute__((weak));
 
@@ -2127,7 +2128,9 @@ void accum_add_current()
 		if (sTrace == 1) {
 			const bool changed = s.button != sTraceLast.button || s.stickX != sTraceLast.stickX
 			                     || s.stickY != sTraceLast.stickY;
-			if (changed || (sTraceCalls % 30) == 0) {
+			// Only an armed private fixture opts into fresh sampling diagnostics.
+			const bool fixtureEachSample = pc_coop_fixture_trace_each_sample && pc_coop_fixture_trace_each_sample();
+			if (changed || fixtureEachSample || (sTraceCalls % 30) == 0) {
 				char dev[512];
 				pc_window_netplay_input_trace(dev, (int)sizeof(dev));
 				printf("[netplay] input-trace call=%u adv=%llu role=%d kind=%d slot=%d "

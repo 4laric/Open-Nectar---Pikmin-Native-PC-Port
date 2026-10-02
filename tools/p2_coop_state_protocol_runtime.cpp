@@ -59,6 +59,9 @@ extern std::uint32_t pc_netplay_current_frame(void);
 // These definitions satisfy only the private fixture's optional session observers.
 // State is fixed capacity; no production pointer is retained or input changed.
 static PcCoopQueueObserver gFixtureQueue;
+bool pc_coop_fixture_trace_each_sample(void) noexcept {
+    return gFixtureQueue.armed; // Diagnostic opt-in only; no sampling/input/state mutation.
+}
 void pc_coop_fixture_note_submit(std::uint64_t land, int role, const std::uint8_t* wire) {
     gFixtureQueue.submit(land, role, wire);
 }
