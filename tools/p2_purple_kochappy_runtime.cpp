@@ -354,11 +354,27 @@ constexpr RouteFloor ReceiverRouteFloor[]={
 struct RouteWall {RouteVec a,b,c;};
 std::vector<RouteWall> receiverRouteWalls;
 const Shape* receiverRouteShape=nullptr;
+// ROUTE_LAYOUT_POLICY_BEGIN
+// Governed full.mod keeps14161 converted render vertices, then3027 original
+// collision vertices; all5332 source triangles reference that appended suffix.
+constexpr int ReceiverRenderVertexPrefix=14161;
+constexpr int ReceiverSourceVertexCount=3027;
+constexpr int ReceiverTotalVertexCount=ReceiverRenderVertexPrefix+ReceiverSourceVertexCount;
+constexpr bool receiverMapLayout(int faces,int vertices,bool triangles,bool positions){
+ return faces==5332 && vertices==ReceiverTotalVertexCount && triangles && positions;
+}
+constexpr bool receiverSourceVertex(unsigned index){
+ return index>=unsigned(ReceiverRenderVertexPrefix) && index<unsigned(ReceiverTotalVertexCount);
+}
+// ROUTE_LAYOUT_POLICY_END
 void receiverWallCache(){
  require(mapMgr&&mapMgr->mMapModel,"route actual map missing");auto* shape=mapMgr->mMapModel;
- require(shape->mTriCount==5332&&shape->mVertexCount==3027&&shape->mTriList&&shape->mVertexList,"route governed map layout changed");
+ if(!receiverRouteShape)std::printf("P2_PURPLE_KOCHAPPY_ROUTE_LAYOUT faces=%d vertices=%d render_prefix=%d source_vertices=%d expected_total=%d actor_writes=0\n",shape->mTriCount,shape->mVertexCount,ReceiverRenderVertexPrefix,ReceiverSourceVertexCount,ReceiverTotalVertexCount);
+ require(receiverMapLayout(shape->mTriCount,shape->mVertexCount,shape->mTriList!=nullptr,shape->mVertexList!=nullptr),"route governed map layout changed");
  if(receiverRouteShape){require(receiverRouteShape==shape,"route map replaced");return;}
- for(int i=0;i<shape->mTriCount;++i){const auto& t=shape->mTriList[i];float ny=t.mTriangle.mNormal.y;require(std::isfinite(ny),"route nonfinite plane");if(!(ny>-.5f&&ny<.5f))continue;
+ for(int i=0;i<shape->mTriCount;++i){const auto& t=shape->mTriList[i];
+  for(int k=0;k<3;++k)require(receiverSourceVertex(t.mVertexIndices[k]),"route original collision vertex suffix changed");
+  float ny=t.mTriangle.mNormal.y;require(std::isfinite(ny),"route nonfinite plane");if(!(ny>-.5f&&ny<.5f))continue;
   RouteVec v[3];for(int k=0;k<3;++k){require(t.mVertexIndices[k]<unsigned(shape->mVertexCount),"route bad wall vertex");const auto& p=shape->mVertexList[t.mVertexIndices[k]];v[k]={p.x,p.y,p.z};require(rvfinite(v[k]),"route nonfinite vertex");}
   receiverRouteWalls.push_back({v[0],v[1],v[2]});
  }
