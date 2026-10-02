@@ -403,6 +403,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_demo.cpp
     pc_port/pc_midday_demo_engine.cpp
     pc_port/pc_midday_mono_manager_engine.cpp
+    pc_port/pc_midday_manager_pool.cpp
+    pc_port/pc_midday_manager_pool_engine.cpp
     pc_port/pc_midday_resolved_fields.cpp
     pc_port/pc_midday_player_resource_bind_engine.cpp
     pc_port/pc_midday_player_resource_stage.cpp
@@ -421,6 +423,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_reference_catalog_engine.cpp
     pc_port/pc_midday_animation_stage.cpp
     pc_port/pc_midday_animation_stage_engine.cpp
+    pc_port/pc_midday_render_graph.cpp
+    pc_port/pc_midday_render_graph_engine.cpp
     pc_port/pc_midday_animation_context.cpp
     pc_port/pc_midday_animation_context_engine.cpp
     pc_port/pc_midday_refcounts.cpp
@@ -3450,3 +3454,9 @@ target_include_directories(pc_midday_animation_stage_test PRIVATE pc_port includ
 target_compile_definitions(pc_midday_animation_stage_test PRIVATE PIKI_PC_PORT)
 target_compile_options(pc_midday_animation_stage_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
 add_test(NAME pc_midday_animation_stage COMMAND pc_midday_animation_stage_test)
+
+add_executable(pc_midday_render_graph_test tools/pc_midday_render_graph_test.cpp pc_port/pc_midday_render_graph.cpp)
+target_include_directories(pc_midday_render_graph_test PRIVATE pc_port include)
+target_compile_definitions(pc_midday_render_graph_test PRIVATE PIKI_PC_PORT)
+target_compile_options(pc_midday_render_graph_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME pc_midday_render_graph COMMAND pc_midday_render_graph_test)
