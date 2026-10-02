@@ -66,10 +66,12 @@ void input(unsigned keys=0,int x=0,int y=0,int cx=0,int cy=0){
  SDL_JoystickSetVirtualButton(pad,SDL_CONTROLLER_BUTTON_A,(keys&KBBTN_A)!=0);
  SDL_JoystickSetVirtualButton(pad,SDL_CONTROLLER_BUTTON_B,(keys&KBBTN_B)!=0);
  SDL_JoystickSetVirtualButton(pad,SDL_CONTROLLER_BUTTON_DPAD_RIGHT,(keys&KBBTN_DPAD_RIGHT)!=0);
- SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTX,Sint16(x*32767/74));
- SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTY,Sint16(-y*32767/74));
- SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_RIGHTX,Sint16(cx*32767/74));
- SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_RIGHTY,Sint16(-cy*32767/74));SDL_JoystickUpdate();
+ // SDL->PAD divides by256; Controller normalizes the resulting GC axis by74.
+ require(x>=-74&&x<=74&&y>=-74&&y<=74&&cx>=-74&&cx<=74&&cy>=-74&&cy<=74,"ordinary GC axis domain");
+ SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTX,Sint16(x*256));
+ SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTY,Sint16(-y*256));
+ SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_RIGHTX,Sint16(cx*256));
+ SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_RIGHTY,Sint16(-cy*256));SDL_JoystickUpdate();
 }
 void point(Navi* n,const Vector3f& goal,bool walk,unsigned keys=0){
  const Vector3f& from=walk?n->mSRT.t:n->mCursorWorldPos;
@@ -162,6 +164,14 @@ public:
       age,n->getPlatePikis(),gather->mGenerator?unsigned(gather->mGenerator->_70):0,int(gather->mIsCallable),gather->getState(),gather->mSRT.t.x,gather->mSRT.t.y,gather->mSRT.t.z,n->mCursorWorldPos.x,n->mCursorWorldPos.y,n->mCursorWorldPos.z,C_NAVI_PARM(n,mWhistleMinRadius),C_NAVI_PARM(n,mWhistleMaxRadius),n->mWhistleTimer);
      point(n,gather->mSRT.t,false,KeyConfig::_instance->mSetCursorKey.mBind);return result;
     }
+   }
+   if(age%30==0){
+    const Vector3f ground=n->mGroundTriangle?n->mGroundTriangle->mTriangle.mNormal:Vector3f(0,0,0);
+    const Vector3f wall=n->mWallPlane?n->mWallPlane->mNormal:Vector3f(0,0,0);
+    const Vector3f axis=n->controlCamera()->mViewXAxis;
+    std::printf("P2_PURPLE_KOCHAPPY_MOVE_CONTACT age=%d ground=%d ground_normal=%.4f,%.4f,%.4f wall=%d wall_normal=%.4f,%.4f,%.4f collision_radius=%.4f target_velocity=%.4f,%.4f,%.4f camera_xaxis=%.4f,%.4f,%.4f own_floor=%.4f SDL_left_axes=%d,%d axis_contract=GC74_to_SDL256 actor_writes=0\n",
+     age,int(n->mGroundTriangle!=nullptr),ground.x,ground.y,ground.z,int(n->mWallPlane!=nullptr),wall.x,wall.y,wall.z,n->mCollisionRadius,n->mTargetVelocity.x,n->mTargetVelocity.y,n->mTargetVelocity.z,axis.x,axis.y,axis.z,mapMgr->getMinY(n->mSRT.t.x,n->mSRT.t.z,true),int(SDL_JoystickGetAxis(pad,SDL_CONTROLLER_AXIS_LEFTX)),int(SDL_JoystickGetAxis(pad,SDL_CONTROLLER_AXIS_LEFTY)));
+    std::fflush(nullptr);
    }
    if(n->getPlatePikis()==20&&age-start>30){
     if(distance(n->mSRT.t,violet->mSRT.t)>approach){point(n,violet->mSRT.t,true,KeyConfig::_instance->mSetCursorKey.mBind);return result;}
