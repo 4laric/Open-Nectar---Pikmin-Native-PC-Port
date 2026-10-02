@@ -49,13 +49,23 @@ void run(){
    require(m->mPikiHeadMgr==nullptr&&m->mMeltingPotMgr==nullptr,"forwarded managers not reused");require(m->mItemShapes!=original->mItemShapes,"independent shape-pointer array");
    for(unsigned i=0;i<11;++i)require(m->mItemShapes[i]==original->mItemShapes[i],"exact borrowed source content");
    require(generatorRoots()==generators&&itemMgr==original&&naviMgr==captains&&pikiMgr==pikis&&PikiHeadMgr::buryMode==bury,"live roots unchanged while stage exists");
+   auto* ownedShapes=m->mItemShapes;m->mItemShapes=original->mItemShapes;
+   require(!stage.installStagedChannel(error),"foreign native backing descriptor refused");
+   PolyPoolView refused;require(readPolyPoolView(*m,refused,error)&&equal(fresh,refused),"foreign backing refusal leaves native status/count unchanged");m->mItemShapes=ownedShapes;
+   requireError(stage.installStagedChannel(error),"actual staged channel installation",error);
+   PolyPoolView installed;require(readPolyPoolView(*m,installed,error)&&installed.count==12,"private occupied count includes retained actors");
+   for(unsigned i=0;i<plan.capacity;++i){const auto& saved=plan.slots[i];require(installed.statuses[i]==(saved.life==SlotLife::Free?-1:(saved.life==SlotLife::Retained?-2:saved.classId)),"actual native saved lifecycle status");}
+   unsigned visible=0;Iterator active(m);for(active.first();!active.isDone();active.next())++visible;require(visible==6&&m->getSize()==12,"ordinary iterator excludes retained but count preserves them");
+   require(!stage.installStagedChannel(error),"double private channel installation refused");
+   PolyPoolView unchanged;require(readPolyPoolView(*m,unchanged,error)&&equal(installed,unchanged),"failed second install leaves staged channel unchanged");
+
   } // Exact typed destructors execute under the still-held physical fence.
   PolyPoolView observed;require(readPolyPoolView(*original,observed,error)&&equal(source,observed),"source pool unchanged after actual abort");
   require(generatorRoots()==generators&&itemMgr==original&&PikiHeadMgr::buryMode==bury,"source roots unchanged after actual abort");
  }
  requireError(fence.finish(false,error),"actual fence abort",error);requireError(pc_sim_rng_capture(after,error),"actual RNG after",error);
  require(before.profile==after.profile&&before.simState==after.simState&&before.cosmeticState==after.cosmeticState&&before.simDraws==after.simDraws&&before.cosmeticDraws==after.cosmeticDraws,"RNG exact after two aborts");
- std::printf("PASS MIDDAY_ITEM_FACTORY checks=%u classes=12 abort_rounds=2 native_constructors=1 disposal=1 source_unchanged=1 synthetic_bind=0 fresh_process_resume=0\n",checks);std::fflush(nullptr);std::_Exit(0);
+ std::printf("PASS MIDDAY_ITEM_FACTORY checks=%u classes=12 abort_rounds=2 native_constructors=1 disposal=1 source_unchanged=1 channel_installed=1 active_iterator=6 retained=6 synthetic_bind=0 fresh_process_resume=0\n",checks);std::fflush(nullptr);std::_Exit(0);
 }
 class TestApp:public PlugPikiApp {
  std::chrono::steady_clock::time_point started=std::chrono::steady_clock::now();

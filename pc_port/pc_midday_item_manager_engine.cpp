@@ -19,6 +19,14 @@ public:
   delete[] mEntries;mEntries=nullptr;mEntryCount=0;mMaxClassLength=0;
   mMaxSize=0;mPoolCapacity=0;mActiveObjects=0;mObjectPool=nullptr;mObjectIndices=nullptr;
  }
+ bool owns(uint32_t capacity,uint32_t stride,const std::vector<PolyData>& templates,
+           const std::vector<int>&statuses,const std::unique_ptr<u8[]>&storage,
+           const std::vector<ItemShapeObject*>&shapes)const{
+  return mPoolCapacity==int(capacity)&&mMaxSize==int(stride)&&mEntries==templates.data()&&mEntryCount==templates.size()&&mMaxClassLength==int(templates.size())&&mObjectIndices==statuses.data()&&mObjectPool==storage.get()&&mItemShapes==shapes.data();
+ }
+ void install(const std::vector<int>& statuses,uint32_t count)noexcept{
+  std::copy(statuses.begin(),statuses.end(),mObjectIndices);mActiveObjects=int(count);
+ }
  void attach(uint32_t capacity,uint32_t stride,std::vector<PolyData>& templates,
              std::vector<int>&statuses,std::unique_ptr<u8[]>&storage,
              std::vector<ItemShapeObject*>&shapes){
@@ -53,6 +61,7 @@ bool content(const ItemMgr&s,ContentInputs&out,std::string&e){
 }
 struct IsolatedItemManager::Impl {
  // Reverse destruction: roots BEFORE manager BEFORE its independent backing.
+ ConstructorFence*fence=nullptr;PolyPoolPlan plan;uint32_t stride=0;bool installed=false;
  std::vector<ItemMgr::PolyData>templates;std::vector<int>statuses;
  std::unique_ptr<u8[]>storage;std::vector<ItemShapeObject*>shapes;
  std::vector<std::unique_ptr<ItemMgr::UseNode>>uses;
@@ -62,6 +71,29 @@ struct IsolatedItemManager::Impl {
 IsolatedItemManager::IsolatedItemManager()=default;IsolatedItemManager::~IsolatedItemManager()=default;
 ItemMgr*IsolatedItemManager::manager()const{return impl_?impl_->manager.get():nullptr;}
 const std::map<uint64_t,Creature*>&IsolatedItemManager::roots()const{static const std::map<uint64_t,Creature*>empty;return impl_?impl_->actors.roots():empty;}
+bool IsolatedItemManager::installStagedChannel(std::string&e){
+ if(!impl_||impl_->installed||!impl_->manager||!impl_->fence||!impl_->fence->held()||!pc_sim_rng_constructor_suppression(true,e)){if(e.empty())e="private ItemMgr channel requires uninstalled constructor-owned stage";return false;}
+ auto&m=*impl_->manager;
+ if(&m==itemMgr){e="private channel cannot target live ItemMgr singleton";return false;}
+ if(!m.owns(impl_->plan.capacity,impl_->stride,impl_->templates,impl_->statuses,impl_->storage,impl_->shapes)){e="private ItemMgr native buffers are no longer stage-owned";return false;}
+ PolyPoolView view;if(!readPolyPoolView(m,view,e))return false;
+ const auto&p=impl_->plan;const auto&roots=impl_->actors.roots();
+ if(view.capacity!=p.capacity||view.stride!=impl_->stride||view.count||roots.size()!=p.count||view.objects.size()!=p.capacity||view.statuses.size()!=p.capacity){e="private ItemMgr channel/root geometry changed";return false;}
+ ItemPolyConcreteTypes types;if(!types.bind(m,e))return false;
+ std::set<uint64_t>ids;for(const auto&root:roots)ids.insert(root.first);
+ if(!validatePolyPool(p,ids,types.allocatedClasses(),e))return false;
+ std::vector<int>statuses;statuses.reserve(p.capacity);
+ for(size_t i=0;i<p.capacity;++i){
+  const auto&slot=p.slots[i];if(view.objects[i]!=impl_->storage.get()+size_t(i)*impl_->stride){e="private ItemMgr backing identity changed";return false;}if(view.statuses[i]!=-1){e="private ItemMgr channel is no longer free";return false;}
+  if(slot.life==SlotLife::Free){statuses.push_back(-1);continue;}
+  auto found=roots.find(slot.actor);bool match=false;
+  if(found==roots.end()||found->second!=view.objects[i]||!types.matches(slot.classId,found->second,match,e)||!match){e="private ItemMgr channel root/type/backing mismatch";return false;}
+  statuses.push_back(slot.life==SlotLife::Retained?-2:slot.classId);
+ }
+ // Private destination only. Complete validations/allocation above; named int
+ // writes below cannot allocate, call engine birth/init/kill or mutate globals.
+ m.install(statuses,p.count);impl_->installed=true;e.clear();return true;
+}
 bool IsolatedItemManager::prepare(const ItemMgr&s,const PolyPoolPlan&p,ConstructorFence&f,std::string&e){
  if(impl_||!f.held()||!pc_sim_rng_constructor_suppression(true,e)){if(e.empty())e="isolated ItemMgr requires fresh allocation and physical constructor owner";return false;}
  ItemPolyConcreteTypes types;if(!types.bind(s,e))return false;
@@ -74,7 +106,7 @@ bool IsolatedItemManager::prepare(const ItemMgr&s,const PolyPoolPlan&p,Construct
  for(const auto&t:source.templates)if(!types.validateTemplate(t,e))return false;
  // Whole source/prototype/content validation precedes any native manager ctor.
  try {
-  auto stage=std::make_unique<Impl>();stage->templates.reserve(source.templates.size());
+  auto stage=std::make_unique<Impl>();stage->fence=&f;stage->plan=p;stage->stride=source.stride;stage->templates.reserve(source.templates.size());
   for(const auto&t:source.templates)stage->templates.push_back({const_cast<Creature*>(static_cast<const Creature*>(t.prototype)),int(t.bytes),t.classId});
   stage->statuses.assign(p.capacity,-1);stage->storage=std::make_unique<u8[]>(size_t(p.capacity)*source.stride);stage->shapes=a.shapes;
   stage->uses.reserve(a.uses.size());for(int id:a.uses){auto node=std::make_unique<ItemMgr::UseNode>();node->mType=id;stage->uses.push_back(std::move(node));}

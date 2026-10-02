@@ -10,6 +10,9 @@ public:
  IsolatedItemManager(const IsolatedItemManager&)=delete;
  IsolatedItemManager&operator=(const IsolatedItemManager&)=delete;
  bool prepare(const ItemMgr& contentSource,const PolyPoolPlan&,ConstructorFence&,std::string&);
+ // Installs only the private manager channel after root/subobject/typed bind
+ // staging. No live-world publication; retained -2 stays separately enumerable.
+ bool installStagedChannel(std::string&);
  ItemMgr* manager()const;
  const std::map<uint64_t,Creature*>& roots()const;
  // Source manager/resource lifetime, complete stopped world, all typed binding,
