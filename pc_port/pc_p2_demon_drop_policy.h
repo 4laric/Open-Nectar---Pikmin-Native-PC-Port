@@ -16,6 +16,20 @@ class P2DemonDropPolicy {
     float pendingDamage=0, recovery=0;
     bool current(std::uint64_t id) const { return id && id==generation && state!=P2DemonDropPhase::Idle; }
 public:
+    struct SavedState {
+        std::uint64_t generation;
+        P2DemonDropPhase phase;
+        float pendingDamage, recovery;
+    };
+    SavedState captureState() const { return {generation,state,pendingDamage,recovery}; }
+    bool restoreState(const SavedState& saved) {
+        if (saved.phase<P2DemonDropPhase::Idle || saved.phase>P2DemonDropPhase::GetUp ||
+            !std::isfinite(saved.pendingDamage) || !std::isfinite(saved.recovery) ||
+            (saved.phase!=P2DemonDropPhase::Idle && !saved.generation)) return false;
+        generation=saved.generation; state=saved.phase;
+        pendingDamage=saved.pendingDamage; recovery=saved.recovery;
+        return true;
+    }
     P2DemonDropPhase phase() const { return state; }
     void cancel() { state=P2DemonDropPhase::Idle; pendingDamage=0; recovery=0; }
     P2DemonDropCommand begin(std::uint64_t id,float damage,float retailSpeed) {

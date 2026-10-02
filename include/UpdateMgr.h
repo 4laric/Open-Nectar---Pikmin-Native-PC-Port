@@ -23,7 +23,11 @@ public:
 
 	UpdateMgr* mMgr;   // _00
 	int mMgrSlotIndex; // _04, what slot is client in in mMgr?
-	bool mIsPiki;      // _08
+	bool mIsPiki
+#if defined(PIKI_PC_PORT)
+        = false
+#endif
+        ; // _08
 };
 
 /**

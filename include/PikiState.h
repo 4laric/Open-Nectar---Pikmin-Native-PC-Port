@@ -1,6 +1,12 @@
 #ifndef _PIKISTATE_H
 #define _PIKISTATE_H
 
+#if defined(PIKI_PC_PORT)
+#define PC_MIDDAY_PIKI_STATE_DEFAULT {}
+#else
+#define PC_MIDDAY_PIKI_STATE_DEFAULT
+#endif
+
 #include "Piki.h"
 #include "StateMachine.h"
 #include "Vector.h"
@@ -94,6 +100,9 @@ public:
  * @note Size: 0x1C.
  */
 struct PikiAbsorbState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiAbsorbState();
 
@@ -116,6 +125,9 @@ protected:
  * @note Size: 0x14.
  */
 struct PikiAutoNukiState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiAutoNukiState();
 
@@ -137,6 +149,9 @@ protected:
  * @note Size: 0x20.
  */
 struct PikiBubbleState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiBubbleState();
 
@@ -159,6 +174,9 @@ protected:
  * @note Size: 0x14.
  */
 struct PikiBulletState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiBulletState();
 
@@ -179,6 +197,9 @@ protected:
  * @note Size: 0x10.
  */
 struct PikiBuryState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiBuryState();
 
@@ -197,6 +218,9 @@ protected:
  * @note Size: 0x2C.
  */
 struct PikiCliffState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiCliffState();
 
@@ -213,8 +237,8 @@ protected:
 	// _00     = VTBL
 	// _00-_10 = PikiState
 	u32 mState;                // _10, unknown
-	int mLoopCounter;          // _14
-	int mCliffHangType;        // _18, 0 = fall, 1 = hang
+	int mLoopCounter PC_MIDDAY_PIKI_STATE_DEFAULT;          // _14
+	int mCliffHangType PC_MIDDAY_PIKI_STATE_DEFAULT;        // _18, 0 = fall, 1 = hang
 	Vector3f mInitialVelocity; // _1C
 	f32 mInitialFaceDir;       // _28
 };
@@ -225,6 +249,9 @@ protected:
  * @note Size: 0x10.
  */
 struct PikiDeadState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiDeadState();
 
@@ -250,6 +277,9 @@ protected:
  * @note Size: 0x14.
  */
 struct PikiDenkiDyingState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiDenkiDyingState();
 
@@ -278,6 +308,9 @@ protected:
  * @note Size: 0x20.
  */
 struct PikiPanicState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiPanicState();
 
@@ -296,7 +329,7 @@ protected:
 	// whose owner died (aiTeki.cpp ActTeki::exec): KIZUKU, then panic-run,
 	// then back to the ordinary walking state when the timer ends. Non-lethal.
 	bool mAstonish;            // PC
-	int mAstonishSubState;     // PC: 0 drama wait, 1 kizuku, 2 run
+	int mAstonishSubState PC_MIDDAY_PIKI_STATE_DEFAULT;     // PC: 0 drama wait, 1 kizuku, 2 run
 };
 
 /**
@@ -305,6 +338,9 @@ protected:
  * @note Size: 0x2C.
  */
 struct PikiDrownState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 	friend class Navi;
 
 public:
@@ -318,7 +354,7 @@ public:
 protected:
 	// _00     = VTBL
 	// _00-_10 = PikiState
-	u16 mState;               // _10
+	u16 mState PC_MIDDAY_PIKI_STATE_DEFAULT;               // _10
 	u16 mStruggleDuration;    // _12
 	u16 _UNUSED14;            // _14
 	u16 mOutOfWaterFrames;    // _16
@@ -333,6 +369,9 @@ protected:
  * @note Size: 0x10.
  */
 struct PikiDyingState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiDyingState();
 
@@ -353,6 +392,9 @@ protected:
  * @note Size: 0x14.
  */
 struct PikiEmitState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiEmitState();
 
@@ -374,6 +416,9 @@ protected:
  * @note Size: 0x24.
  */
 struct PikiEmotionState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 	friend class Navi;
 
 public:
@@ -390,8 +435,8 @@ protected:
 	// _00-_10 = PikiState
 	Vector3f mGazePosition; // _10
 	u8 mGazeFlag;           // _1C
-	u8 mCheerCount;         // _1D
-	f32 mTimer;             // _20
+	u8 mCheerCount PC_MIDDAY_PIKI_STATE_DEFAULT;         // _1D
+	f32 mTimer PC_MIDDAY_PIKI_STATE_DEFAULT;             // _20
 };
 
 /**
@@ -400,6 +445,9 @@ protected:
  * @note Size: 0x10.
  */
 struct PikiFallMeckState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiFallMeckState();
 
@@ -419,6 +467,9 @@ protected:
  * @note Size: 0x14.
  */
 struct PikiFallState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiFallState();
 
@@ -440,6 +491,9 @@ protected:
  * @note Size: 0x20.
  */
 struct PikiFiredState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiFiredState();
 
@@ -462,6 +516,9 @@ protected:
  * @note Size: 0x24.
  */
 struct PikiFlickState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 	friend class Navi;
 
 public:
@@ -476,7 +533,7 @@ protected:
 	// _00     = VTBL
 	// _00-_10 = PikiState
 	u16 mState;         // _10
-	f32 mGetUpTimer;    // _14
+	f32 mGetUpTimer PC_MIDDAY_PIKI_STATE_DEFAULT;    // _14
 	f32 mInitialAngle;  // _18
 	f32 mRotationDelta; // _1C
 	f32 mStrength;      // _20
@@ -488,6 +545,9 @@ protected:
  * @note Size: 0x24.
  */
 struct PikiFlownState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 	friend class Navi;
 
 public:
@@ -502,7 +562,7 @@ public:
 protected:
 	// _00     = VTBL
 	// _00-_10 = PikiState
-	f32 mKnockdownTimer; // _10
+	f32 mKnockdownTimer PC_MIDDAY_PIKI_STATE_DEFAULT; // _10
 	f32 mInitialAngle;   // _14
 	f32 mRotationDelta;  // _18
 	f32 mFlickIntensity; // _1C
@@ -515,6 +575,9 @@ protected:
  * @note Size: 0x44.
  */
 struct PikiFlyingState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiFlyingState();
 
@@ -531,13 +594,13 @@ protected:
 	// _00     = VTBL
 	// _00-_10 = PikiState
 	PermanentEffect mSparkleEffect; // _10
-	f32 mGlideTimer;                // _20
+	f32 mGlideTimer PC_MIDDAY_PIKI_STATE_DEFAULT;                // _20
 	bool mIsFlowerGliding;          // _24
 	bool mHasBounced;               // _25
 	u8 _UNUSED26[0x2C - 0x26];      // _26
 	Vector3f mHorizontalDirection;  // _2C
-	f32 mInitialHorizontalSpeed;    // _38
-	f32 mTargetHorizontalSpeed;     // _3C
+	f32 mInitialHorizontalSpeed PC_MIDDAY_PIKI_STATE_DEFAULT;    // _38
+	f32 mTargetHorizontalSpeed PC_MIDDAY_PIKI_STATE_DEFAULT;     // _3C
 	int mGroundTouchFrames;         // _40
 };
 
@@ -547,6 +610,9 @@ protected:
  * @note Size: 0x10.
  */
 struct PikiGoHangState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiGoHangState();
 
@@ -565,6 +631,9 @@ protected:
  * @note Size: 0x10.
  */
 struct PikiGrowState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiGrowState();
 
@@ -585,6 +654,9 @@ protected:
  * @note Size: 0x10.
  */
 struct PikiGrowupState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiGrowupState();
 
@@ -605,6 +677,9 @@ protected:
  * @note Size: 0x10.
  */
 struct PikiHangedState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiHangedState();
 
@@ -624,6 +699,9 @@ protected:
  * @note Size: 0x14.
  */
 struct PikiKinokoChangeState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiKinokoChangeState();
 
@@ -637,7 +715,7 @@ public:
 protected:
 	// _00     = VTBL
 	// _00-_10 = PikiState
-	bool mDoBecomeKinoko; // _10, if false, change back to normal piki
+	bool mDoBecomeKinoko PC_MIDDAY_PIKI_STATE_DEFAULT; // _10, if false, change back to normal piki
 };
 
 /**
@@ -646,6 +724,9 @@ protected:
  * @note Size: 0x28.
  */
 struct PikiKinokoState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiKinokoState();
 
@@ -661,7 +742,7 @@ protected:
 	// _00     = VTBL
 	// _00-_10 = PikiState
 	Creature* mTarget;   // _10, nearest target?
-	f32 mWalkTimer;      // _14
+	f32 mWalkTimer PC_MIDDAY_PIKI_STATE_DEFAULT;      // _14
 	Vector3f mTargetDir; // _18
 	int mState;          // _24
 };
@@ -672,6 +753,9 @@ protected:
  * @note Size: 0x1C.
  */
 struct PikiLookAtState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiLookAtState();
 
@@ -685,7 +769,7 @@ protected:
 	// _00-_10 = PikiState
 	f32 mTimer;        // _10
 	int mState;        // _14
-	f32 mRotationStep; // _18
+	f32 mRotationStep PC_MIDDAY_PIKI_STATE_DEFAULT; // _18
 };
 
 /**
@@ -694,6 +778,9 @@ protected:
  * @note Size: 0x20.
  */
 struct PikiNormalState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiNormalState();
 
@@ -722,6 +809,9 @@ protected:
  * @note Size: 0x10.
  */
 struct PikiNukareState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiNukareState();
 
@@ -742,6 +832,9 @@ protected:
  * @note Size: 0x10.
  */
 struct PikiNukareWaitState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiNukareWaitState();
 
@@ -761,6 +854,9 @@ protected:
  * @note Size: 0x18.
  */
 struct PikiPressedState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiPressedState();
 
@@ -783,6 +879,9 @@ protected:
  * @note Size: 0x18.
  */
 struct PikiPushPikiState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiPushPikiState();
 
@@ -808,6 +907,9 @@ protected:
  * @note Size: 0x14.
  */
 struct PikiPushState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 	friend class Piki;
 
 public:
@@ -833,6 +935,9 @@ protected:
  * @note Size: 0x14.
  */
 struct PikiSwallowedState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiSwallowedState();
 
@@ -852,6 +957,9 @@ protected:
  * @note Size: 0x10.
  */
 struct PikiWaterHangedState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiWaterHangedState();
 
@@ -871,6 +979,9 @@ protected:
  * @note Size: 0x10.
  */
 struct PikiWaveState : public PikiState {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiStateAccess;
+#endif
 public:
 	PikiWaveState();
 
@@ -888,4 +999,5 @@ protected:
 	// _00-_10 = PikiState
 };
 
+#undef PC_MIDDAY_PIKI_STATE_DEFAULT
 #endif

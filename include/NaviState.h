@@ -10,6 +10,13 @@
 #include "pc_whistle.h"
 #endif
 
+// Checkpoint capture can observe an inner phase before its scalar is first
+// assigned. Define those otherwise indeterminate values only in the PC port.
+#if defined(PIKI_PC_PORT)
+#define PC_NAVI_CHECKPOINT_DEFAULT(value) = value
+#else
+#define PC_NAVI_CHECKPOINT_DEFAULT(value)
+#endif
 class NaviState;
 
 /**
@@ -109,10 +116,10 @@ struct NaviAttackState : public NaviState {
 
 	// _00     = VTBL
 	// _00-_10 = NaviState
-	u16 mAttackPhase;      // _10
-	bool mGatherRequested; // _12
-	f32 _14;  // _14
-	f32 _18;  // _18
+	u16 mAttackPhase PC_NAVI_CHECKPOINT_DEFAULT(0);      // _10
+	bool mGatherRequested PC_NAVI_CHECKPOINT_DEFAULT(false); // _12
+	f32 _14 PC_NAVI_CHECKPOINT_DEFAULT(0);  // _14
+	f32 _18 PC_NAVI_CHECKPOINT_DEFAULT(0);  // _18
 };
 
 /**
@@ -132,10 +139,10 @@ struct NaviBuryState : public NaviState {
 	// _00     = VTBL
 	// _00-_10 = NaviState
 	Vector3f mPreviousStickInput; // _10
-	u8 mBuryState;                // _1C
-	u8 mEscapeAttemptCounter;     // _1D
-	u8 mValidEscapeAttempts;      // _1E
-	u8 mEscapeTimer;              // _1F
+	u8 mBuryState PC_NAVI_CHECKPOINT_DEFAULT(0);                // _1C
+	u8 mEscapeAttemptCounter PC_NAVI_CHECKPOINT_DEFAULT(0);     // _1D
+	u8 mValidEscapeAttempts PC_NAVI_CHECKPOINT_DEFAULT(0);      // _1E
+	u8 mEscapeTimer PC_NAVI_CHECKPOINT_DEFAULT(0);              // _1F
 };
 
 /**
@@ -177,8 +184,8 @@ struct NaviContainerState : public NaviState, virtual public ContainerWin::Liste
 	// _00-_10 = NaviState
 	// _10     = ContainerWin::Listener ptr
 	// _14     = GmWin::CloseListener ptr
-	int mContainerWinEvent; // _18
-	int mContainerWinCount; // _1C
+	int mContainerWinEvent PC_NAVI_CHECKPOINT_DEFAULT(0); // _18
+	int mContainerWinCount PC_NAVI_CHECKPOINT_DEFAULT(0); // _1C
 	                        // ContainerWin::Listener
 	                        // GmWin::CloseListener
 };
@@ -285,8 +292,8 @@ public:
 
 		// _00     = VTBL
 		// _00-_0C = AState
-		int mStumbleLoopCount; // _10
-		bool mIsStumbling;     // _14
+		int mStumbleLoopCount PC_NAVI_CHECKPOINT_DEFAULT(0); // _10
+		bool mIsStumbling PC_NAVI_CHECKPOINT_DEFAULT(false);     // _14
 	};
 
 	/**
@@ -362,7 +369,7 @@ public:
 
 		// _00     = VTBL
 		// _00-_0C = AState
-		int mWhistleLoopCount; // _10
+		int mWhistleLoopCount PC_NAVI_CHECKPOINT_DEFAULT(0); // _10
 	};
 
 	virtual void procAnimMsg(Navi*, MsgAnim*); // _20
@@ -378,12 +385,12 @@ public:
 
 	// _00     = VTBL
 	// _00-_10 = NaviState
-	Navi* mNavi;                                // _10
+	Navi* mNavi PC_NAVI_CHECKPOINT_DEFAULT(nullptr);                                // _10
 	Vector3f mStartPos;                         // _14
 	Vector3f mGoalPos;                          // _20
-	f32 mGoalDistance;                          // _2C
-	f32 mSunsetTimer;                           // _30
-	bool mOpenedAccount;                        // _34
+	f32 mGoalDistance PC_NAVI_CHECKPOINT_DEFAULT(0);                          // _2C
+	f32 mSunsetTimer PC_NAVI_CHECKPOINT_DEFAULT(0);                           // _30
+	bool mOpenedAccount PC_NAVI_CHECKPOINT_DEFAULT(false);                        // _34
 	DemoStateMachine* mStateMachine;            // _38
 	AState<NaviDemoSunsetState>* mCurrentState; // _3C, unknown
 };
@@ -422,11 +429,11 @@ struct NaviFlickState : public NaviState {
 
 	// _00     = VTBL
 	// _00-_10 = NaviState
-	u16 mFlickState;          // _10
-	f32 mGetupAnimationTimer; // _14
-	f32 mDirection;           // _18
-	f32 mRandVariation;       // _1C
-	f32 mIntensity;           // _20
+	u16 mFlickState PC_NAVI_CHECKPOINT_DEFAULT(0);          // _10
+	f32 mGetupAnimationTimer PC_NAVI_CHECKPOINT_DEFAULT(0); // _14
+	f32 mDirection PC_NAVI_CHECKPOINT_DEFAULT(0);           // _18
+	f32 mRandVariation PC_NAVI_CHECKPOINT_DEFAULT(0);       // _1C
+	f32 mIntensity PC_NAVI_CHECKPOINT_DEFAULT(0);           // _20
 };
 
 /**
@@ -467,9 +474,9 @@ struct NaviGatherState : public NaviState {
 
 	// _00     = VTBL
 	// _00-_10 = NaviState
-	u16 mWhistleAnimPhase;       // _10
-	f32 mWhistleCallRadius;      // _14
-	bool mWhistleEffectsStopped; // _18
+	u16 mWhistleAnimPhase PC_NAVI_CHECKPOINT_DEFAULT(0);       // _10
+	f32 mWhistleCallRadius PC_NAVI_CHECKPOINT_DEFAULT(0);      // _14
+	bool mWhistleEffectsStopped PC_NAVI_CHECKPOINT_DEFAULT(false); // _18
 };
 
 /**
@@ -489,13 +496,13 @@ struct NaviGeyzerState : public NaviState {
 
 	// _00     = VTBL
 	// _00-_10 = NaviState
-	u16 mGeyserState;     // _10
-	f32 mGetupDelayTimer; // _14
-	f32 mPlayerDirection; // _18
-	f32 mSpinDelta;       // _1C
+	u16 mGeyserState PC_NAVI_CHECKPOINT_DEFAULT(0);     // _10
+	f32 mGetupDelayTimer PC_NAVI_CHECKPOINT_DEFAULT(0); // _14
+	f32 mPlayerDirection PC_NAVI_CHECKPOINT_DEFAULT(0); // _18
+	f32 mSpinDelta PC_NAVI_CHECKPOINT_DEFAULT(0);       // _1C
 	Vector3f mLaunchTargetPos;      // _20
-	f32 mRiseTargetHeight;          // _2C
-	bool mHasAppliedLaunchVelocity; // _30
+	f32 mRiseTargetHeight PC_NAVI_CHECKPOINT_DEFAULT(0);          // _2C
+	bool mHasAppliedLaunchVelocity PC_NAVI_CHECKPOINT_DEFAULT(false); // _30
 };
 
 /**
@@ -514,7 +521,7 @@ struct NaviIdleState : public NaviState {
 	// _00     = VTBL
 	// _00-_10 = NaviState
 	u8 _10[0x4];         // _10, unknown
-	bool mStopBeingIdle; // _14
+	bool mStopBeingIdle PC_NAVI_CHECKPOINT_DEFAULT(false); // _14
 };
 
 /**
@@ -565,9 +572,9 @@ struct NaviNukuAdjustState : public NaviState {
 
 	// _00     = VTBL
 	// _00-_10 = NaviState
-	f32 mTargetFaceDirection;   // _10
+	f32 mTargetFaceDirection PC_NAVI_CHECKPOINT_DEFAULT(0);   // _10
 	Vector3f mApproachPosition; // _14
-	bool _20;     // _20
+	bool _20 PC_NAVI_CHECKPOINT_DEFAULT(false);     // _20
 	Vector3f mLastPosition; // _24
 };
 
@@ -587,11 +594,11 @@ struct NaviNukuState : public NaviState {
 
 	// _00     = VTBL
 	// _00-_10 = NaviState
-	u16 mPullCountRemaining; // _10
-	bool _12; // _12
-	bool mExtractKeyReleased; // _13
-	bool mWantsNextPluck;     // _14
-	bool _15; // _15
+	u16 mPullCountRemaining PC_NAVI_CHECKPOINT_DEFAULT(0); // _10
+	bool _12 PC_NAVI_CHECKPOINT_DEFAULT(false); // _12
+	bool mExtractKeyReleased PC_NAVI_CHECKPOINT_DEFAULT(false); // _13
+	bool mWantsNextPluck PC_NAVI_CHECKPOINT_DEFAULT(false);     // _14
+	bool _15 PC_NAVI_CHECKPOINT_DEFAULT(false); // _15
 };
 
 /**
@@ -610,7 +617,7 @@ struct NaviPartsAccessState : public NaviState {
 
 	// _00     = VTBL
 	// _00-_10 = NaviState
-	bool mHasShownPartText; // _10
+	bool mHasShownPartText PC_NAVI_CHECKPOINT_DEFAULT(false); // _10
 };
 
 /**
@@ -629,7 +636,7 @@ struct NaviPelletState : public NaviState {
 
 	// _00     = VTBL
 	// _00-_10 = NaviState
-	bool mIsFinished; // _10
+	bool mIsFinished PC_NAVI_CHECKPOINT_DEFAULT(false); // _10
 };
 
 /**
@@ -667,7 +674,7 @@ struct NaviPikiZeroState : public NaviState {
 	// _00-_10 = NaviState
 	bool _10; // _10
 	bool _11; // _11
-	u16 mGameOverCountdown; // _12
+	u16 mGameOverCountdown PC_NAVI_CHECKPOINT_DEFAULT(0); // _12
 	u32 _14;  // _14
 };
 
@@ -704,7 +711,7 @@ struct NaviPushPikiState : public NaviState {
 
 	// _00     = VTBL
 	// _00-_10 = NaviState
-	int mHasPushContact; // _10
+	int mHasPushContact PC_NAVI_CHECKPOINT_DEFAULT(0); // _10
 };
 
 /**
@@ -723,7 +730,7 @@ struct NaviPushState : public NaviState {
 
 	// _00     = VTBL
 	// _00-_10 = NaviState
-	bool mIsFinishing; // _10
+	bool mIsFinishing PC_NAVI_CHECKPOINT_DEFAULT(false); // _10
 };
 
 /**
@@ -741,7 +748,7 @@ struct NaviReleaseState : public NaviState {
 
 	// _00     = VTBL
 	// _00-_10 = NaviState
-	bool mCanInterruptToGather; // _10
+	bool mCanInterruptToGather PC_NAVI_CHECKPOINT_DEFAULT(false); // _10
 };
 
 /**
@@ -815,12 +822,12 @@ struct NaviStartingState : public NaviState {
 
 	// _00     = VTBL
 	// _00-_10 = NaviState
-	f32 mStartDelayTimer;      // _10
+	f32 mStartDelayTimer PC_NAVI_CHECKPOINT_DEFAULT(0);      // _10
 	Vector3f mWalkTargetPos;   // _14
 	Vector3f mLookAtTargetPos; // _20
 	u32 _2C;      // _2C
-	u16 mStartPhase;           // _30
-	bool mIsStartAnimComplete; // _32
+	u16 mStartPhase PC_NAVI_CHECKPOINT_DEFAULT(0);           // _30
+	bool mIsStartAnimComplete PC_NAVI_CHECKPOINT_DEFAULT(false); // _32
 	Vector3f mLastPosition;    // _34
 };
 
@@ -839,8 +846,8 @@ struct NaviStuckState : public NaviState {
 	// _00     = VTBL
 	// _00-_10 = NaviState
 	Vector3f mPrevStickDir; // _10, last recorded main joystick direction
-	f32 mIdleTimer;         // _1C, resets recorded action attempts when this hits 0
-	int mActionCount;       // _20
+	f32 mIdleTimer PC_NAVI_CHECKPOINT_DEFAULT(0);         // _1C, resets recorded action attempts when this hits 0
+	int mActionCount PC_NAVI_CHECKPOINT_DEFAULT(0);       // _20
 };
 
 /**
@@ -859,15 +866,15 @@ struct NaviThrowState : public NaviState {
 
 	// _00     = VTBL
 	// _00-_10 = NaviState
-	bool mHasThrownPiki; // _10
-	bool _11;  // _11
+	bool mHasThrownPiki PC_NAVI_CHECKPOINT_DEFAULT(false); // _10
+	bool _11 PC_NAVI_CHECKPOINT_DEFAULT(false);  // _11
 #if defined(PIKI_PC_PORT)
 	// Throw press seen during the wind-up, before KEY_Action0 released the
 	// Pikmin. Kept so a rapid mash starts the next grab as soon as the throw
 	// lands instead of being dropped (issues #37 / #40).
-	bool mQueuedThrowPress;
+	bool mQueuedThrowPress PC_NAVI_CHECKPOINT_DEFAULT(false);
 #endif
-	Piki* mTargetPiki; // _14
+	Piki* mTargetPiki PC_NAVI_CHECKPOINT_DEFAULT(nullptr); // _14
 };
 
 /**
@@ -892,13 +899,13 @@ struct NaviThrowWaitState : public NaviState {
 
 	// _00     = VTBL
 	// _00-_10 = NaviState
-	Piki* mHeldThrowPiki;     // _10
-	Piki* mPendingThrowPiki;  // _14
-	int mThrowChargeLevel;    // _18
-	bool mIsHoldingThrowPiki; // _1C
-	u32 _20;   // _20
-	f32 mPendingThrowPikiTimeout; // _24
-	f32 mSortDelayTimer;          // _28
+	Piki* mHeldThrowPiki PC_NAVI_CHECKPOINT_DEFAULT(nullptr);     // _10
+	Piki* mPendingThrowPiki PC_NAVI_CHECKPOINT_DEFAULT(nullptr);  // _14
+	int mThrowChargeLevel PC_NAVI_CHECKPOINT_DEFAULT(0);    // _18
+	bool mIsHoldingThrowPiki PC_NAVI_CHECKPOINT_DEFAULT(false); // _1C
+	u32 _20 PC_NAVI_CHECKPOINT_DEFAULT(0);   // _20
+	f32 mPendingThrowPikiTimeout PC_NAVI_CHECKPOINT_DEFAULT(0); // _24
+	f32 mSortDelayTimer PC_NAVI_CHECKPOINT_DEFAULT(0);          // _28
 };
 
 /**
@@ -917,7 +924,7 @@ struct NaviUfoAccessState : public NaviState {
 
 	// _00     = VTBL
 	// _00-_10 = NaviState
-	bool mHasShownUfoText; // _10
+	bool mHasShownUfoText PC_NAVI_CHECKPOINT_DEFAULT(false); // _10
 };
 
 /**
@@ -937,11 +944,11 @@ struct NaviUfoState : public NaviState {
 
 	// _00     = VTBL
 	// _00-_10 = NaviState
-	u16 mState;             // _10
-	u16 mRecoveryTimer;     // _12
+	u16 mState PC_NAVI_CHECKPOINT_DEFAULT(0);             // _10
+	u16 mRecoveryTimer PC_NAVI_CHECKPOINT_DEFAULT(0);     // _12
 	Vector3f mLastPosition; // _14
-	s8 mPunchCooldownTimer; // _20
-	bool mHasReachedUfo;    // _21
+	s8 mPunchCooldownTimer PC_NAVI_CHECKPOINT_DEFAULT(0); // _20
+	bool mHasReachedUfo PC_NAVI_CHECKPOINT_DEFAULT(false);    // _21
 };
 
 /**
@@ -962,10 +969,10 @@ struct NaviWalkState : public NaviState {
 
 	// _00     = VTBL
 	// _00-_10 = NaviState
-	Creature* _10; // _10, unknown
-	f32 _14;       // _14
-	int mIsTouchingWall; // _18
-	f32 _1C;       // _1C
+	Creature* _10 PC_NAVI_CHECKPOINT_DEFAULT(nullptr); // _10, unknown
+	f32 _14 PC_NAVI_CHECKPOINT_DEFAULT(0);       // _14
+	int mIsTouchingWall PC_NAVI_CHECKPOINT_DEFAULT(0); // _18
+	f32 _1C PC_NAVI_CHECKPOINT_DEFAULT(0);       // _1C
 };
 
 /**
@@ -984,4 +991,5 @@ struct NaviWaterState : public NaviState {
 	// _00-_10 = NaviState
 };
 
+#undef PC_NAVI_CHECKPOINT_DEFAULT
 #endif

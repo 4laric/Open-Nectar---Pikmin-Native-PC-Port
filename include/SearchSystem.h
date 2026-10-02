@@ -27,6 +27,9 @@ public:
  * @note Size: 0x28.
  */
 class SearchBuffer : public Traversable {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayCreatureAccess;
+#endif
 public:
 	SearchBuffer();
 

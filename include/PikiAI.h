@@ -1,5 +1,11 @@
 #ifndef _PIKIAI_H
 #define _PIKIAI_H
+
+#if defined(PIKI_PC_PORT)
+#define PC_MIDDAY_PIKI_ACTION_DEFAULT {}
+#else
+#define PC_MIDDAY_PIKI_ACTION_DEFAULT
+#endif
 #if defined(PIKI_PC_PORT)
 #include "pc_whistle_observer.h"
 #endif
@@ -86,6 +92,9 @@ enum {
  * @note Size: 0x14.
  */
 class Action : public Receiver<Piki> {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -158,6 +167,9 @@ public:
  * @brief TODO
  */
 struct AndAction : public Action {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	AndAction(Piki* piki)
 	    : Action(piki, true)
@@ -179,6 +191,9 @@ protected:
  * @brief TODO
  */
 struct OrAction : public Action {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	inline OrAction(); // TODO: probably
 
@@ -196,6 +211,9 @@ protected:
  * @brief TODO
  */
 class TopAction : public Action {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 	// Another encapsulation fail...  Write a getter for `mIsSuspended`, Kando!
 	friend class Piki;
 	friend struct PikiSwallowedState;
@@ -310,6 +328,9 @@ protected:
  * @brief TODO
  */
 struct ActAdjust : public Action {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -341,10 +362,10 @@ protected:
 	f32 mAdjustDistance;      // _14
 	int mAdjustTimeLimit;     // _18
 	Vector3f mTargetPosition; // _1C
-	f32 mAdjustTimer;         // _28
-	f32 mTurnSpeed;           // _2C
+	f32 mAdjustTimer PC_MIDDAY_PIKI_ACTION_DEFAULT;         // _28
+	f32 mTurnSpeed PC_MIDDAY_PIKI_ACTION_DEFAULT;           // _2C
 	Vector3f mVelocity;       // _30
-	bool mForceFail;          // _3C
+	bool mForceFail PC_MIDDAY_PIKI_ACTION_DEFAULT;          // _3C
 };
 
 /**
@@ -353,6 +374,9 @@ protected:
  * @note Size: 0x2C.
  */
 struct ActAttack : public AndAction, public PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -387,11 +411,11 @@ protected:
 	// _18     = PaniAnimKeyListener
 	bool mHasLost;             // _1C
 	bool mIsAttackFinished;    // _1D
-	bool mIsCriticalHit;       // _1E
+	bool mIsCriticalHit PC_MIDDAY_PIKI_ACTION_DEFAULT;       // _1E
 	bool mTargetIsPlayer;      // _1F
-	Traversable* mTargetObjectPool; // _20, idk what this is but it's something inheriting from this
+	Traversable* mTargetObjectPool PC_MIDDAY_PIKI_ACTION_DEFAULT; // _20, idk what this is but it's something inheriting from this
 	SmartPtr<Creature> mOther;      // _24
-	Creature* mPlayerObject;   // _28
+	Creature* mPlayerObject PC_MIDDAY_PIKI_ACTION_DEFAULT;   // _28
 };
 
 /**
@@ -400,6 +424,9 @@ protected:
  * @note Size: 0x24.
  */
 struct ActBoMake : public Action, private PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
     friend void pc_randomizer_test_work_damage();
 public:
 	/**
@@ -427,7 +454,7 @@ protected:
 	// _00     = VTBL
 	// _00-_14 = Action
 	// _14     = PaniAnimKeyListener
-	u16 mState;             // _18, see StateID enum
+	u16 mState PC_MIDDAY_PIKI_ACTION_DEFAULT;             // _18, see StateID enum
 	Creature* mBuildObject; // _1C
 	u8 _20[0x24 - 0x20];    // _20, unknown
 };
@@ -436,6 +463,9 @@ protected:
  * @brief TODO
  */
 struct ActBoreListen : public Action {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	ActBoreListen(Piki*);
 
@@ -456,6 +486,9 @@ protected:
  * @note Size: 0x24.
  */
 struct ActBoreOneshot : public Action, virtual PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	ActBoreOneshot(Piki*);
 
@@ -481,6 +514,9 @@ protected:
  * @note Size: 0x30.
  */
 struct ActBoreRest : public Action, virtual PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	ActBoreRest(Piki*);
 
@@ -513,6 +549,9 @@ protected:
  * @brief TODO
  */
 struct ActBoreSelect : public Action {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -555,6 +594,9 @@ protected:
  * @note Size: 0x30.
  */
 struct ActBoreTalk : public Action, virtual PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 	// `mIsLookHandledElsewhere` and `mTarget` are altered by these two.
 	friend struct ActFreeSelect;
 	friend struct ActBoreSelect;
@@ -576,7 +618,7 @@ protected:
 	// _14     = PaniAnimKeyListener ptr
 	BOOL mIsLookHandledElsewhere; // _18
 	Creature* mTarget;            // _1C
-	f32 mTalkTimer;               // _20
+	f32 mTalkTimer PC_MIDDAY_PIKI_ACTION_DEFAULT;               // _20
 	bool mIsAnimFinished;         // _24
 	                              // _28-_30 = PaniAnimKeyListener
 };
@@ -587,6 +629,9 @@ protected:
  * @note Size: 0x34.
  */
 struct ActBou : public Action {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -613,7 +658,7 @@ protected:
 	u16 mState;               // _14
 	s16 mTimeoutCounter;      // _16
 	Vector3f mClimbDirection; // _18
-	Creature* mTargetStick;   // _24
+	Creature* mTargetStick PC_MIDDAY_PIKI_ACTION_DEFAULT;   // _24
 	Vector3f mLastPosition;   // _28
 };
 
@@ -623,6 +668,9 @@ protected:
  * @note Size: 0x34.
  */
 struct ActBreakWall : public Action, public PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
     friend void pc_randomizer_test_work_damage();
 public:
 	/**
@@ -653,10 +701,10 @@ protected:
 	// _00     = VTBL
 	// _00-_14 = Action
 	// _14     = PaniAnimKeyListener
-	BuildingItem* mWall;         // _18
+	BuildingItem* mWall PC_MIDDAY_PIKI_ACTION_DEFAULT;         // _18
 	u16 mState;                  // _1C
 	Vector3f mHitPikminPosition; // _20
-	int mStartAttackTime;        // _2C
+	int mStartAttackTime PC_MIDDAY_PIKI_ACTION_DEFAULT;        // _2C
 	u8 mWorkTimer;               // _30
 	u8 mFailAttackCounter;       // _31
 	bool mIsAttackReady;         // _32
@@ -668,6 +716,9 @@ protected:
  * @note Size: 0x58.
  */
 struct ActBridge : public Action, virtual PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
     friend void pc_randomizer_test_work_damage();
 public:
 	/**
@@ -723,18 +774,18 @@ protected:
 	// _14     = PaniAnimKeyListener ptr
 	Bridge* mBridge;            // _18, unknown
 	u16 mState;                 // _1C
-	int mStartWorkTime;         // _20, unknown - same as _300 in gameflow
-	BOOL mIsAttackReady;        // _24
-	u16 mCollisionCount;        // _28
-	u16 _2A;                    // _2A
-	f32 mRandomBridgeWidth;     // _2C
-	s16 mStageID;               // _30
+	int mStartWorkTime PC_MIDDAY_PIKI_ACTION_DEFAULT;         // _20, unknown - same as _300 in gameflow
+	BOOL mIsAttackReady PC_MIDDAY_PIKI_ACTION_DEFAULT;        // _24
+	u16 mCollisionCount PC_MIDDAY_PIKI_ACTION_DEFAULT;        // _28
+	u16 _2A PC_MIDDAY_PIKI_ACTION_DEFAULT;                    // _2A
+	f32 mRandomBridgeWidth PC_MIDDAY_PIKI_ACTION_DEFAULT;     // _2C
+	s16 mStageID PC_MIDDAY_PIKI_ACTION_DEFAULT;               // _30
 	bool mClimbingBridge;       // _32
 	u8 _33;                     // _33
 	Vector3f mBridgeWallNormal; // _34
 	Vector3f mClimbingVelocity; // _40
 	u8 mActionCounter;          // _4C
-	bool mAnimationFinished;    // _4D
+	bool mAnimationFinished PC_MIDDAY_PIKI_ACTION_DEFAULT;    // _4D
 	                            // _50-_58 = PaniAnimKeyListener
 };
 
@@ -744,6 +795,9 @@ protected:
  * @note Size: 0x1C.
  */
 struct ActChase : public Action {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -776,6 +830,9 @@ protected:
  * @note Size: 0x88.
  */
 struct ActCrowd : public Action, virtual SlotChangeListner {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 	// I want to believe in encapsulation so bad... it's probably to a fault.
 	friend class Navi;
 	friend class NaviDemoSunsetState;
@@ -838,7 +895,7 @@ protected:
 	int mTripLoopCounter;         // _5C
 	f32 mTravelDistance;          // _60
 	bool mIsTripping;             // _64
-	f32 mLostChildTimer;          // _68
+	f32 mLostChildTimer PC_MIDDAY_PIKI_ACTION_DEFAULT;          // _68
 	CPlate* mPlateMgr;            // _6C
 	Vector3f mWallNormal;         // _70
 	u8 mBoredomMotion;            // _7C, is never initialized to anything
@@ -871,6 +928,9 @@ protected:
  * @note Size: 0x20.
  */
 struct ActDecoy : public Action, public PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	ActDecoy(Piki*);
 
@@ -887,14 +947,17 @@ protected:
 	// _00     = VTBL
 	// _00-_14 = Action
 	// _14     = PaniAnimKeyListener
-	int mState;      // _18
-	f32 mDecoyTimer; // _1C
+	int mState PC_MIDDAY_PIKI_ACTION_DEFAULT;      // _18
+	f32 mDecoyTimer PC_MIDDAY_PIKI_ACTION_DEFAULT; // _1C
 };
 
 /**
  * @brief TODO
  */
 struct ActDeliver : public AndAction {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -937,6 +1000,9 @@ protected:
  * @note Size: 0x30.
  */
 struct ActEnter : public Action {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -965,9 +1031,9 @@ public:
 protected:
 	// _00     = VTBL
 	// _00-_14 = Action
-	u16 mState;             // _14
-	GoalItem* mOnyon;       // _18
-	CollPart* mLeg;         // _1C
+	u16 mState PC_MIDDAY_PIKI_ACTION_DEFAULT;             // _14
+	GoalItem* mOnyon PC_MIDDAY_PIKI_ACTION_DEFAULT;       // _18
+	CollPart* mLeg PC_MIDDAY_PIKI_ACTION_DEFAULT;         // _1C
 	Vector3f mLastPosition; // _20
 	bool mHasCollided;      // _2C, unknown
 };
@@ -978,6 +1044,9 @@ protected:
  * @note Size: 0x30.
  */
 struct ActEscape : public Action {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -1022,6 +1091,9 @@ protected:
  * @note Size: 0x24.
  */
 struct ActExit : public Action {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	ActExit(Piki*);
 
@@ -1042,6 +1114,9 @@ protected:
  * @brief TODO
  */
 struct ActFlower : public Action, virtual PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	ActFlower(Piki*);
 
@@ -1067,6 +1142,9 @@ protected:
  * @note Size: 0x34.
  */
 struct ActFormation : public Action, public PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 	friend class TopAction; // Brazenly accesses `mInFormation`.
 
 public:
@@ -1088,12 +1166,12 @@ protected:
 	bool mInFormation;              // _18
 	f32 mIdleTimer;                 // _1C
 	FormationMgr* mFormMgr;         // _20
-	f32 mDistanceToTarget;          // _24
+	f32 mDistanceToTarget PC_MIDDAY_PIKI_ACTION_DEFAULT;          // _24
 	bool mUseLastFormationPosition; // _28
 	bool mIsIdling;                 // _29
 	bool mHasStartedIdleAnim;       // _2A
 	bool mIsOnFloorTripped;         // _2B
-	bool mHasStartedRunAnim;        // _2C
+	bool mHasStartedRunAnim PC_MIDDAY_PIKI_ACTION_DEFAULT;        // _2C
 	BOOL mIsTripping;               // _30
 };
 
@@ -1101,6 +1179,9 @@ protected:
  * @brief TODO
  */
 struct ActFreeSelect : public Action {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -1142,6 +1223,9 @@ protected:
  * @note Size: 0x50.
  */
 struct ActFree : public Action, virtual PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	ActFree(Piki*);
 
@@ -1167,7 +1251,7 @@ protected:
 	f32 mBoidTimer;               // _28
 	f32 mFixedPositionTimer;      // _2C
 	Vector3f mTargetPosition;     // _30
-	f32 mArrivalRadius;           // _3C
+	f32 mArrivalRadius PC_MIDDAY_PIKI_ACTION_DEFAULT;           // _3C
 	f32 mCollisionCooldownTimer;  // _40
 	bool _44;                     // _44
 	bool mTouchedPlayer;          // _45
@@ -1181,6 +1265,9 @@ protected:
  * @note Size: 0x24.
  */
 struct ActGoto : public Action {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -1217,8 +1304,8 @@ public:
 protected:
 	// _00     = VTBL
 	// _00-_14 = Action
-	f32 mMaxDistance;           // _14
-	f32 mMinDistance;           // _18
+	f32 mMaxDistance PC_MIDDAY_PIKI_ACTION_DEFAULT;           // _14
+	f32 mMinDistance PC_MIDDAY_PIKI_ACTION_DEFAULT;           // _18
 	SmartPtr<Creature> mTarget; // _1C
 	f32 mTimeoutDuration;       // _20
 };
@@ -1229,6 +1316,9 @@ protected:
  * @note Size: 0x4C.
  */
 struct ActGuard : public Action {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	enum FormationSide {
 		Left,  // 0
@@ -1259,11 +1349,11 @@ protected:
 	SmartPtr<Creature> mLeftGuard;  // _18
 	SmartPtr<Creature> mRightGuard; // _1C
 	Vector3f mGoalPosition;         // _20
-	f32 mFormationAngle;            // _2C
+	f32 mFormationAngle PC_MIDDAY_PIKI_ACTION_DEFAULT;            // _2C
 	Vector3f mLandPosition;         // _30
 	f32 mFormationSpacing;          // _3C
 	f32 mTimer;                     // _40
-	FormationSide mFormationSide;   // _44
+	FormationSide mFormationSide PC_MIDDAY_PIKI_ACTION_DEFAULT;   // _44
 	bool mIsWaiting;                // _48
 	bool mIsGuardable;              // _49
 };
@@ -1274,6 +1364,9 @@ protected:
  * @note Size: 0x30.
  */
 struct ActJumpAttack : public Action, public PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	ActJumpAttack(Piki*);
 
@@ -1299,11 +1392,11 @@ protected:
 	// _14     = PaniAnimKeyListener
 	int mState;                 // _18
 	u8 _1C[0x20 - 0x1C];        // _1C, unknown
-	int mAttackState;           // _20
+	int mAttackState PC_MIDDAY_PIKI_ACTION_DEFAULT;           // _20
 	SmartPtr<Creature> mTarget; // _24
 	CollPart* mTargetCollider;  // _28
 	bool _2C;                   // _2C
-	bool mIsCriticalHit;        // _2D
+	bool mIsCriticalHit PC_MIDDAY_PIKI_ACTION_DEFAULT;        // _2D
 };
 
 /**
@@ -1312,6 +1405,9 @@ protected:
  * @note Size: 0x38.
  */
 struct ActKinoko : public Action, virtual PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -1347,7 +1443,7 @@ protected:
 	// _14     = PaniAnimKeyListener ptr
 	SmartPtr<Creature> mTarget; // _18
 	int mState;                 // _1C, unknown
-	f32 mStateTimer;            // _20, unknown
+	f32 mStateTimer PC_MIDDAY_PIKI_ACTION_DEFAULT;            // _20, unknown
 	Vector3f mTargetDirection;  // _24
 	                            // _30-_38 = PaniAnimKeyListener
 };
@@ -1358,6 +1454,9 @@ protected:
  * @note Size: 0x30.
  */
 struct ActMine : public Action, virtual PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -1392,7 +1491,7 @@ protected:
 	BombGenItem* mBombGen;   // _18
 	u16 mState;              // _1C
 	u32 _20;                 // _20, unknown
-	bool mIsMineActionReady; // _24
+	bool mIsMineActionReady PC_MIDDAY_PIKI_ACTION_DEFAULT; // _24
 	                         // _28-_30 = PaniAnimKeyListener
 };
 
@@ -1402,6 +1501,9 @@ protected:
  * @note Size: 0x20.
  */
 struct ActPick : public Action, public PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -1437,6 +1539,9 @@ protected:
  * @note Size: 0x1C.
  */
 struct ActPickCreature : public AndAction {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -1474,6 +1579,9 @@ protected:
  * @note Size: 0x1C.
  */
 struct ActPickItem : public AndAction {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -1506,6 +1614,9 @@ protected:
  * @note Size: 0x1C.
  */
 struct ActPullout : public AndAction {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -1537,6 +1648,9 @@ protected:
  * @note Size: 0x28.
  */
 struct ActPulloutCreature : public Action, private PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -1560,7 +1674,7 @@ protected:
 	// _00-_14 = Action
 	// _14     = PaniAnimKeyListener
 	int mState;                 // _18
-	f32 mPulloutTimer;          // _1C
+	f32 mPulloutTimer PC_MIDDAY_PIKI_ACTION_DEFAULT;          // _1C
 	SmartPtr<Creature> mTarget; // _20
 	bool mPulloutSuccess;       // _24
 };
@@ -1571,6 +1685,9 @@ protected:
  * @note Size: 0x50.
  */
 struct ActPush : public Action, virtual PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -1604,15 +1721,15 @@ protected:
 	u8 mPushAnimationState;  // _1C
 	u16 mState;              // _1E
 	u8 _20[0x4];             // _20, unknown
-	int _24;                 // _24
+	int _24 PC_MIDDAY_PIKI_ACTION_DEFAULT;                 // _24
 	u8 _28[0x4];             // _28, unknown
 	Vector3f _2C;            // _2C
-	f32 _38;                 // _38
+	f32 _38 PC_MIDDAY_PIKI_ACTION_DEFAULT;                 // _38
 	bool mPushObjectStopped; // _3C
-	f32 _40;                 // _40
+	f32 _40 PC_MIDDAY_PIKI_ACTION_DEFAULT;                 // _40
 	u8 _44;                  // _44
-	s8 mPushCount;           // _45
-	bool mIsPushReady;       // _46
+	s8 mPushCount PC_MIDDAY_PIKI_ACTION_DEFAULT;           // _45
+	bool mIsPushReady PC_MIDDAY_PIKI_ACTION_DEFAULT;       // _46
 	                         // _48-_50 = PaniAnimKeyListener
 };
 
@@ -1620,6 +1737,9 @@ protected:
  * @brief TODO
  */
 struct ActPut : public Action {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -1651,6 +1771,9 @@ protected:
  * @note Size: 0x30.
  */
 struct ActPutBomb : public Action, virtual PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -1693,11 +1816,11 @@ protected:
 	// _00-_14 = Action
 	// _14     = PaniAnimKeyListener
 	u16 mState;              // _18
-	bool mAnimationFinished; // _1A
+	bool mAnimationFinished PC_MIDDAY_PIKI_ACTION_DEFAULT; // _1A
 	bool mTouchedPlayer;     // _1B
-	f32 mAimTimer;           // _1C
-	f32 mPlaceTimer;         // _20
-	Creature* mTarget;       // _24
+	f32 mAimTimer PC_MIDDAY_PIKI_ACTION_DEFAULT;           // _1C
+	f32 mPlaceTimer PC_MIDDAY_PIKI_ACTION_DEFAULT;         // _20
+	Creature* mTarget PC_MIDDAY_PIKI_ACTION_DEFAULT;       // _24
 	                         // _28-_30 = PaniAnimKeyListener
 };
 
@@ -1707,6 +1830,9 @@ protected:
  * @note Size: 0x24.
  */
 struct ActPutItem : public Action {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	ActPutItem(Piki*);
 
@@ -1731,6 +1857,9 @@ protected:
  * @note Size: 0x28.
  */
 class ActRandomBoid : public Action {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -1796,6 +1925,9 @@ protected:
  * @note Size: 0x3C.
  */
 struct ActRescue : public Action, virtual PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -1829,13 +1961,13 @@ protected:
 	// _00     = VTBL
 	// _00-_14 = Action
 	// _14     = PaniAnimKeyListener ptr
-	u16 mState;                     // _18
-	Piki* mDrowningPiki;            // _1C
-	u16 mTargetSurviveTimer;        // _20
+	u16 mState PC_MIDDAY_PIKI_ACTION_DEFAULT;                     // _18
+	Piki* mDrowningPiki PC_MIDDAY_PIKI_ACTION_DEFAULT;            // _1C
+	u16 mTargetSurviveTimer PC_MIDDAY_PIKI_ACTION_DEFAULT;        // _20
 	Vector3f mRescueTargetPosition; // _24
-	bool mGotAnimationAction;       // _30
-	bool mAnimationFinished;        // _31
-	bool mThrowReady;               // _32
+	bool mGotAnimationAction PC_MIDDAY_PIKI_ACTION_DEFAULT;       // _30
+	bool mAnimationFinished PC_MIDDAY_PIKI_ACTION_DEFAULT;        // _31
+	bool mThrowReady PC_MIDDAY_PIKI_ACTION_DEFAULT;               // _32
 	                                // _34-_3C = PaniAnimKeyListener
 };
 
@@ -1845,6 +1977,9 @@ protected:
  * @note Size: 0x24.
  */
 struct ActRope : public Action {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	ActRope(Piki*);
 
@@ -1866,6 +2001,9 @@ protected:
  * @note Size: 0x28.
  */
 struct ActShoot : public AndAction {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -1891,9 +2029,9 @@ protected:
 	// _00     = VTBL
 	// _00-_18 = AndAction
 	bool mTargetIsPlayer;           // _18
-	Traversable* mTargetObjectPool; // _1C, idk *what* but it inherits from Traversable
+	Traversable* mTargetObjectPool PC_MIDDAY_PIKI_ACTION_DEFAULT; // _1C, idk *what* but it inherits from Traversable
 	SmartPtr<Creature> mTarget;     // _20
-	Navi* mNavi;                    // _24
+	Navi* mNavi PC_MIDDAY_PIKI_ACTION_DEFAULT;                    // _24
 };
 
 /**
@@ -1902,6 +2040,9 @@ protected:
  * @note Size: 0x24.
  */
 struct ActShootCreature : public Action, public PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief The state of the action.
@@ -1928,7 +2069,7 @@ protected:
 	// _00-_14 = Action
 	// _14     = PaniAnimKeyListener
 	int mState;                 // _18
-	f32 mChaseTimer;            // _1C
+	f32 mChaseTimer PC_MIDDAY_PIKI_ACTION_DEFAULT;            // _1C
 	SmartPtr<Creature> mTarget; // _20
 };
 
@@ -1938,6 +2079,9 @@ protected:
  * @note Size: 0x2C.
  */
 struct ActStone : public Action, private PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 
 #define STONE_NECTAR_CHANCE (0.08f)
 
@@ -1970,11 +2114,11 @@ protected:
 	// _00     = VTBL
 	// _00-_14 = Action
 	// _14     = PaniAnimKeyListener
-	u16 mState;          // _18
+	u16 mState PC_MIDDAY_PIKI_ACTION_DEFAULT;          // _18
 	u8 _1A[0x20 - 0x1A]; // _1A, unknown
 	Pebble* mCurrPebble; // _20, unknown
-	RockGen* mRockGen;   // _24
-	bool mIsAttackReady; // _28
+	RockGen* mRockGen PC_MIDDAY_PIKI_ACTION_DEFAULT;   // _24
+	bool mIsAttackReady PC_MIDDAY_PIKI_ACTION_DEFAULT; // _28
 };
 
 /**
@@ -1983,6 +2127,9 @@ protected:
  * @note Size: 0xC0.
  */
 struct ActTransport : public Action, virtual PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
     friend void pc_randomizer_test_color_stats();
 public:
 	/**
@@ -2049,22 +2196,22 @@ protected:
 	u16 mState;                    // _1C
 	OdoMeter mOdometer;            // _20
 	Vector3f mMoveDir;             // _30, calc'd from CRSplineTangent
-	u16 mNumRoutePoints;           // _3C
-	u8 mJumpRetryTimer;            // _3E
+	u16 mNumRoutePoints PC_MIDDAY_PIKI_ACTION_DEFAULT;           // _3C
+	u8 mJumpRetryTimer PC_MIDDAY_PIKI_ACTION_DEFAULT;            // _3E
 	u16 mStateProgress;            // _40
-	int mNextPathIndex;            // _44
-	u32 _48;                       // _48, unknown
+	int mNextPathIndex PC_MIDDAY_PIKI_ACTION_DEFAULT;            // _44
+	u32 _48 PC_MIDDAY_PIKI_ACTION_DEFAULT;                       // _48, unknown
 	Vector3f mSplineControlPts[4]; // _4C
 	Vector3f mRouteStartPos;       // _7C
-	u8 mPathType;                  // _88
-	int mSlotIndex;                // _8C
+	u8 mPathType PC_MIDDAY_PIKI_ACTION_DEFAULT;                  // _88
+	int mSlotIndex PC_MIDDAY_PIKI_ACTION_DEFAULT;                // _8C
 	Vector3f mSpinStartPosition;   // _90
 	bool mFinishPutting;           // _9C
 	bool mIsLiftActionDone;        // _9D
-	int mLiftRetryCount;           // _A0
+	int mLiftRetryCount PC_MIDDAY_PIKI_ACTION_DEFAULT;           // _A0
 	f32 mWaitTimer;                // _A4
 	int mPathIndex;                // _A8
-	int mGoalWPIndex;              // _AC
+	int mGoalWPIndex PC_MIDDAY_PIKI_ACTION_DEFAULT;              // _AC
 	Suckable* mGoal;               // _B0, either GoalItem* or UfoItem*
 	bool mCanCarry;                // _B4
 	                               // _B8-_C0 = PaniAnimKeyListener
@@ -2082,6 +2229,9 @@ protected:
  * @note Size: 0x2C.
  */
 class ActWatch : public Action {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -2124,7 +2274,7 @@ protected:
 	// _00     = VTBL
 	// _00-_14 = Action
 	SmartPtr<Creature> mTarget; // _14
-	int mWatchRetryTimer;       // _18
+	int mWatchRetryTimer PC_MIDDAY_PIKI_ACTION_DEFAULT;       // _18
 	AnimListener* mListener;    // _1C
 	Vector3f mTargetPosition;   // _20
 };
@@ -2135,6 +2285,9 @@ protected:
  * @note Size: 0x2C.
  */
 struct ActWeed : public Action, private PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+	friend struct PcMiddayPikiActionAccess;
+#endif
 
 #define GRASS_NECTAR_CHANCE (0.08f)
 
@@ -2167,12 +2320,12 @@ protected:
 	// _00     = VTBL
 	// _00-_14 = Action
 	// _14     = PaniAnimKeyListener
-	u16 mState;              // _18
+	u16 mState PC_MIDDAY_PIKI_ACTION_DEFAULT;              // _18
 	u8 _1A[0x6];             // _1A, unknown
 	Grass* mCurrGrass;       // _20
-	GrassGen* mGrassGen;     // _24
-	u16 _28;                 // _28
-	bool mAnimationFinished; // _2A
+	GrassGen* mGrassGen PC_MIDDAY_PIKI_ACTION_DEFAULT;     // _24
+	u16 _28 PC_MIDDAY_PIKI_ACTION_DEFAULT;                 // _28
+	bool mAnimationFinished PC_MIDDAY_PIKI_ACTION_DEFAULT; // _2A
 };
 
 /**
@@ -2227,4 +2380,5 @@ protected:
 	// TODO: members
 };
 
+#undef PC_MIDDAY_PIKI_ACTION_DEFAULT
 #endif

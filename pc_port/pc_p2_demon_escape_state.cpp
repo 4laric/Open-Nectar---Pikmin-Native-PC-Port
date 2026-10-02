@@ -52,3 +52,11 @@ void pc_demon_escape_scene_exit() {
     Iterator it(naviMgr);
     for(it.first();!it.isDone();it.next()) pc_demon_escape_reset(static_cast<Navi*>(*it));
 }
+
+#include "pc_midday_actor_states.h"
+namespace pc_midday {
+bool demon_escape_state(Navi& n, ActorArchive& a) {
+    auto* s=state(&n);
+    return s ? a.ref("captain",RefKind::Creature,s->captain) : a.fail("DemonEscape state missing");
+}
+}
