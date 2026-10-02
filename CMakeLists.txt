@@ -3065,3 +3065,9 @@ pikmin_add_ci_fixture(tutorial_encounter tools/p2_tutorial_encounter_runtime.cpp
 if(TARGET pikmin_ci_fixture_tutorial_encounter)
     target_include_directories(pikmin_ci_fixture_tutorial_encounter PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
 endif()
+
+# #1177 compile-only ordinary all-roster upper-terrain traversal.
+pikmin_add_ci_fixture(tutorial_upper_traversal tools/p2_tutorial_upper_traversal_runtime.cpp)
+if(TARGET pikmin_ci_fixture_tutorial_upper_traversal)
+    target_include_directories(pikmin_ci_fixture_tutorial_upper_traversal PRIVATE ${P2_CHALLENGE_GUARD_INCLUDE_DIR})
+endif()
