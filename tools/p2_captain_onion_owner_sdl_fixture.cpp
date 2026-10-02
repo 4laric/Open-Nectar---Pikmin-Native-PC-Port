@@ -128,9 +128,10 @@ class CaptainSaveApp final:public PlugPikiApp {
     const std::chrono::steady_clock::time_point started=std::chrono::steady_clock::now();
     bool dayAdvanced=false,resumeMenuLogged=false,withdrawQueued=false;
     int withdrawnFromTotal=-1;
-    enum OwnerStage { Boot, InitialWithdraw, InitialSettle, Deposit, SwitchOne, Withdraw, Settle, Owned };
+    enum OwnerStage { Boot, InitialApproach, InitialWithdraw, InitialSettle, Deposit, SwitchOne, Withdraw, Settle, Owned };
     OwnerStage ownerStage=Boot;
-    int ownerFrames=0, switchFrames=0, startupFrames=0;
+    int ownerFrames=0, switchFrames=0, startupFrames=0, initialApproachFrames=0;
+    bool initialApproachNeutral=false;
     std::vector<Piki*> startupBodies, ownedBodies, startupFreeBodies, startupWorkers, recalledWorkers, manualBornBodies;
     unsigned workerEventsRead=0, workerEpisodesRead=0, workerTerminalsRead=0;
     std::vector<unsigned> completedWorkerEpisodes;
@@ -336,6 +337,17 @@ class CaptainSaveApp final:public PlugPikiApp {
             live,storedCount(),pikiMgr&&a?formation(a):-1,pikiMgr&&b?formation(b):-1,plate(a),plate(b),int(ownerStage));
         std::fflush(stdout);
     }
+    bool initialOnionEligible(Navi* n){
+        auto* onion=itemMgr?itemMgr->getContainer(pc_randomizer_start_color()):nullptr;
+        require(onion && onion->mCollInfo && !pc_p2_preview_is_pod(onion),"actual initial Onion collision");
+        const auto* coll=onion->mCollInfo->getSphere('cont');require(coll,"initial cont sphere");
+        const float radius=n->getSize()+coll->mRadius;const Vector3f diff=coll->mCentre-n->getCentre();
+        require(std::isfinite(radius)&&radius>0&&std::isfinite(diff.length()),"finite initial eligibility geometry");
+        bool busy=false;
+        for(int i=0;i<naviMgr->getNaviCount();++i){auto* other=naviMgr->getNavi(i);if(other&&other!=n&&other->getCurrState()&&other->getCurrState()->getID()==NAVISTATE_Container&&other->mGoalItem==onion)busy=true;}
+        return n->getCurrState()->getID()==NAVISTATE_Walk && !n->mStickListHead && !playerState->inDayEnd() && !gameflow.mPauseAll
+            && !(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive) && !busy && !n->roughCulling(onion,radius*1.5f) && diff.length()<=radius;
+    }
     bool onionInputHeld=false;
     unsigned onionInputObservations=0;
     void onionMenu(Navi* n,int target){
@@ -347,7 +359,7 @@ class CaptainSaveApp final:public PlugPikiApp {
             require(containerWindow && n->mGoalItem==onion,"ordinary offline selected Onion UI");
             const int state=containerWindow->getStatus(), squad=containerWindow->getMyPikiDisp();
             if(!menuSeen){menuSeen=true;onionInputHeld=false;elapsed(target?"withdraw_menu_open":"deposit_menu_open");}
-            if(onionInputObservations++<240)std::printf("P2_ONION_MENU_INPUT captain=%d target=%d displayed=%d stock=%d live=%d state=%d held=%08x pressed=%08x axis_y=%.3f release_next=%d\n",n->mNaviID,target,squad,storedCount(),liveCount(),state,unsigned(n->mKontroller->mCurrentInput),unsigned(n->mKontroller->mInputPressed),n->mKontroller->mMainStickY,int(onionInputHeld));
+            if(onionInputObservations++<240)std::printf("P2_ONION_MENU_INPUT captain=%d target=%d displayed=%d stock=%d live=%d state=%d held=%08x pressed=%08x axis_y=%.3f release_next=%d\n",n->mNaviID,target,squad,storedCount(),liveCount(),state,unsigned(n->mKontroller->mCurrentInput),unsigned(n->mKontroller->mInputPressed),double(n->mKontroller->mMainStickY),int(onionInputHeld));
             require(squad>=0&&squad<=20,"ordinary menu selection bounded20");
             if(state!=zen::DrawContainer::STATE_Operation){pad();onionInputHeld=false;menuConfirm=false;return;}
             if(onionInputHeld){pad();onionInputHeld=false;return;} // One engine tick of release between every stick/A edge.
@@ -415,7 +427,7 @@ public:
                 ++menuFrames;
                 if(menuFrames<=3||menuFrames==45||menuFrames==50||menuFrames==65||menuFrames==66||menuFrames==125||menuFrames==126||menuFrames%120==0){
                     auto* core=findCore(gameflow.mGameSection);auto* ui=core?core->mController:nullptr;
-                    std::printf("P2_SAVE_UI_OBSERVER frame=%d allowed=%d overlay=%d paused=%d movie=%d player_day=%d ui_present=%d held=%08x pressed=%08x frozen=%d axis_y=%.3f\n",menuFrames,int(gameflow.mIsPauseAllowed),int(gameflow.mIsUIOverlayActive),int(gameflow.mPauseAll),int(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive),playerState->getCurrDay(),int(ui!=nullptr),ui?unsigned(ui->mCurrentInput):0,ui?unsigned(ui->mInputPressed):0,ui?int(ui->mIsControllerFrozen):-1,ui?ui->mMainStickY:0.0f);
+                    std::printf("P2_SAVE_UI_OBSERVER frame=%d allowed=%d overlay=%d paused=%d movie=%d player_day=%d ui_present=%d held=%08x pressed=%08x frozen=%d axis_y=%.3f\n",menuFrames,int(gameflow.mIsPauseAllowed),int(gameflow.mIsUIOverlayActive),int(gameflow.mPauseAll),int(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive),playerState->getCurrDay(),int(ui!=nullptr),ui?unsigned(ui->mCurrentInput):0,ui?unsigned(ui->mInputPressed):0,ui?int(ui->mIsControllerFrozen):-1,ui?double(ui->mMainStickY):0.0);
                     std::fflush(stdout);
                 }
                 if(menuFrames==2)pad(); // Release START after its ordinary input edge.
@@ -472,8 +484,25 @@ public:
                     require(manual && std::string(manual)=="1","explicit production manual-start binding");
                     std::puts("P2_ONION_MANUAL_START live=0 stored=20 owner0=0 owner1=0 plate0=0 plate1=0 ordinary_UI_next=1");
                     pc_worker_observer_begin();pc_onion_start_begin(); // Before first ordinary input and first native birth.
-                    ownerStage=InitialWithdraw;menuSeen=false;menuConfirm=false;
+                    ownerStage=InitialApproach;menuSeen=false;menuConfirm=false;
                 }else ownerStage=SwitchOne;
+            }
+            if(ownerStage==InitialApproach){
+                require(!resumePhase && ++initialApproachFrames<=180,"bounded180-frame ordinary initial Onion approach");
+                require(live==0 && storedCount()==20 && formation(a)==0 && formation(b)==0 && plateCount(a)==0 && plateCount(b)==0,"approach preserves actual stock20 field0");
+                require(pc_onion_start_enabled && !pc_onion_start_failed && pc_onion_start_count==0 && pc_onion_start_events==0,"no native births or action entries before withdrawal");
+                require(pc_worker_observer_enabled && !pc_worker_observer_overflow && pc_worker_episode_count==0 && pc_worker_observer_count==0 && pc_worker_terminal_count==0,"no work before withdrawal");
+                require(naviMgr->getActiveNavi()==a && a->mKontroller,"selected initialized captain0 approaches");
+                require(a->getCurrState()->getID()!=NAVISTATE_Container,"no initial menu before explicit approach boundary");
+                if(initialOnionEligible(a)){
+                    const bool neutral=a->mKontroller->mCurrentInput==0 && a->mKontroller->mMainStickX==0 && a->mKontroller->mMainStickY==0;
+                    pad();onionInputHeld=false;
+                    if(!initialApproachNeutral || !neutral){initialApproachNeutral=true;return result;}
+                    auto* onion=itemMgr->getContainer(pc_randomizer_start_color());const auto* coll=onion->mCollInfo->getSphere('cont');const Vector3f centre=a->getCentre();
+                    std::printf("P2_ONION_APPROACH_BOUNDARY frames=%d limit=180 selected=0 live=0 stored=20 history_bodies=0 history_events=0 neutral=1 eligible=1 distance=%.3f radius=%.3f centre=%.3f,%.3f,%.3f\n",initialApproachFrames,(coll->mCentre-centre).length(),a->getSize()+coll->mRadius,centre.x,centre.y,centre.z);
+                    elapsed("initial_approach_boundary");ownerStage=InitialWithdraw;return result;
+                }
+                initialApproachNeutral=false;onionMenu(a,20);return result;
             }
             if(ownerStage==InitialWithdraw || ownerStage==InitialSettle){
                 require(!resumePhase,"initial captain0 withdrawal is fresh-only");
