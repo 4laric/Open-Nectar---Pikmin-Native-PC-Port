@@ -9,6 +9,8 @@
 #include <chrono>
 #include <thread>
 #include <functional>
+#include <cerrno>
+#include <exception>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -38,18 +40,37 @@ int child(const fs::path& exe,const fs::path& dir,const std::string& point,std::
 #else
     pid_t pid=fork();if(pid<0)throw std::runtime_error("fork failed");
     if(!pid){execl(exe.c_str(),exe.c_str(),dir.c_str(),point.c_str(),nullptr);_Exit(99);}
-    try{if(observe)observe();}catch(...){kill(pid,SIGKILL);throw;}
-    int status=0;auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
-    pid_t waited=0;
-    while((waited=waitpid(pid,&status,WNOHANG))==0){
-        if(std::chrono::steady_clock::now()>=deadline){
-            kill(pid,SIGKILL);auto reapDeadline=std::chrono::steady_clock::now()+std::chrono::seconds(1);
-            while(waitpid(pid,&status,WNOHANG)==0&&std::chrono::steady_clock::now()<reapDeadline)std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            return 99;
+    int status=0;
+    auto waitBounded=[&](std::chrono::seconds limit){
+        const auto deadline=std::chrono::steady_clock::now()+limit;
+        for(;;){
+            const pid_t waited=waitpid(pid,&status,WNOHANG);
+            if(waited==pid)return true;
+            if(waited<0&&errno!=EINTR)throw std::runtime_error("child status unknown: waitpid failed (errno="+std::to_string(errno)+")");
+            if(std::chrono::steady_clock::now()>=deadline)return false;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    };
+    auto stopAndReap=[&](){
+        if(kill(pid,SIGKILL)!=0&&errno!=ESRCH)throw std::runtime_error("child termination unknown: kill failed (errno="+std::to_string(errno)+")");
+        if(!waitBounded(std::chrono::seconds(1)))throw std::runtime_error("child remains unreaped after bounded SIGKILL wait");
+    };
+    try{if(observe)observe();}catch(...){
+        const auto original=std::current_exception();
+        try{stopAndReap();}catch(const std::exception& failure){
+            std::throw_with_nested(std::runtime_error(std::string("observer failed; child cleanup unknown: ")+failure.what()));
+        }
+        std::rethrow_exception(original);
     }
-    if(waited!=pid)throw std::runtime_error("child wait failed");
+    bool completed=false;
+    try{completed=waitBounded(std::chrono::seconds(10));}catch(...){
+        const auto original=std::current_exception();
+        try{stopAndReap();}catch(const std::exception& failure){
+            std::throw_with_nested(std::runtime_error(std::string("child wait failed; cleanup unknown: ")+failure.what()));
+        }
+        std::rethrow_exception(original);
+    }
+    if(!completed){stopAndReap();return 99;}
     return WIFEXITED(status)?WEXITSTATUS(status):99;
 #endif
 }
@@ -69,6 +90,10 @@ int main(int argc,char** argv){try{
         publish(fs::absolute(argv[1]),s,c,e,[&](const char* at){if(std::string(at)==argv[2])std::_Exit(86);return true;});return 98;}
     if(argc!=2)throw std::runtime_error("new private output directory required");
     fs::path root=fs::absolute(argv[1]);if(fs::exists(root))throw std::runtime_error("refuse existing test output");fs::create_directories(root);
+    bool observerRethrown=false;
+    try{child(fs::absolute(argv[0]),root/"observer-failure","live-writer",[]{throw std::runtime_error("intentional observer failure");});}
+    catch(const std::runtime_error& failure){observerRethrown=std::string(failure.what())=="intentional observer failure";}
+    check(observerRethrown,"observer exception rethrown after child cleanup");
     auto s=fixture();Coverage c{{{1,1},{10,1}},{{10,1}},{1,2}};std::string e;Bytes b;Snapshot out;out.generation=777;
     check(encode(s,c,b,e),"encode");check(decode(b,s.binding,c,out,e)&&out.frame==12345&&out.actors[0].id==1,"roundtrip sorted IDs");
     auto reordered=s;std::reverse(reordered.actors.begin(),reordered.actors.end());Bytes other;check(encode(reordered,c,other,e)&&other==b,"canonical actor order");
