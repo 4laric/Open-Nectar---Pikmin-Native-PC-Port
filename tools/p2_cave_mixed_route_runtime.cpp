@@ -320,9 +320,12 @@ int main(int argc, char** argv) {
     pc_window_set_display_mode(PC_WINDOW_FULLSCREEN_WINDOWED);
     pc_window_set_window_size(960,540);
     pc_window_center();
-    { SDL_Window* window=SDL_GL_GetCurrentWindow();int w=0,h=0;SDL_GetWindowSize(window,&w,&h);
-      std::printf("P2_CAVE_FINAL_WINDOW width=%d height=%d mode=%d\n",w,h,pc_window_get_display_mode());std::fflush(nullptr);
-      if(w!=960 || h!=540 || pc_window_get_display_mode()!=PC_WINDOW_FULLSCREEN_WINDOWED)return 3; }
+    { SDL_Window* window=SDL_GL_GetCurrentWindow();int w=0,h=0,x=0,y=0;SDL_GetWindowSize(window,&w,&h);SDL_GetWindowPosition(window,&x,&y);
+      SDL_Rect bounds{};if(SDL_GetDisplayBounds(SDL_GetWindowDisplayIndex(window),&bounds)!=0)return 3;
+      const bool centered=std::abs(x-(bounds.x+(bounds.w-w)/2))<=2&&std::abs(y-(bounds.y+(bounds.h-h)/2))<=2;
+      const bool windowed=(SDL_GetWindowFlags(window)&(SDL_WINDOW_FULLSCREEN|SDL_WINDOW_FULLSCREEN_DESKTOP))==0;
+      std::printf("P2_CAVE_FINAL_WINDOW width=%d height=%d mode=%d centered=%d windowed=%d x=%d y=%d\n",w,h,pc_window_get_display_mode(),int(centered),int(windowed),x,y);std::fflush(nullptr);
+      if(w!=960 || h!=540 || !centered || !windowed || pc_window_get_display_mode()!=PC_WINDOW_FULLSCREEN_WINDOWED)return 3; }
     setupVirtualPad();
     nodeMgr = new NodeMgr();
     gsys->run(new CaveMixedRouteApp());
