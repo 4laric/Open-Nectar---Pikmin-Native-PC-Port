@@ -175,7 +175,7 @@ public:int idle()override{
   if(phase<10){require(cargoSlot&&uid(cargo)==26&&cargo->isAlive()&&pelletCount==baselinePellets&&!p2whitetreasure::ledger.delivered,"cargo/receipt changed before physical hauling phase");}
   if(phase<7)require(carriers==0,"premature ordinary cargo attachment");
  }else{p1Require();require(red==0&&white+whiteStock()==15&&heads==0,"fresh resumed original20 lineage lost/duplicated or unexpected Red bodies");}
- 
+
  if(phase==1&&phaseTick>=30&&followers==20){goal=flowers[budIndex]->mSRT.t;next(2);}
  if(phase==2){float x=goal.x-n->mCursorWorldPos.x,z=goal.z-n->mCursorWorldPos.z;float bx=goal.x-n->mSRT.t.x,bz=goal.z-n->mSRT.t.z;if(x*x+z*z<64&&bx*bx+bz*bz>625){next(6);}}
  if(phase==6&&phaseTick>=20){float x=goal.x-n->mCursorWorldPos.x,z=goal.z-n->mCursorWorldPos.z;next(x*x+z*z<64?3:2);}
