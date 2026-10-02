@@ -2,6 +2,12 @@ name: Midday engine component build
 
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/midday-actor-states-68]
+    paths:
+      - '.github/workflows/midday-component.yml'
+      - 'tools/p2_midday_actor_states_engine_test.cpp'
+      - 'tools/p2_midday_piki_engine_checks.h'
 
 jobs:
   build:
