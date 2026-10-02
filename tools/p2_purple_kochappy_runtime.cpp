@@ -29,6 +29,7 @@
 #include "Generator.h"
 #include "MapMgr.h"
 #include "Shape.h"
+#include "Collision.h"
 #include "Route.h"
 #include "GameStat.h"
 #include "PlayerState.h"
@@ -81,6 +82,30 @@ class PurpleKochappyApp:public PlugPikiApp {
  int frame=0,age=0,phase=0,start=0,settled=0,throwCount=0;
  bool seenCaptain=false,wasActive=false,sawFit=false,sawPause=false,recovered=false,deathDuringStun=false;
  Teki* enemy=nullptr;Pom* violet=nullptr;Piki* purple=nullptr;
+ // Fixture-local observation ledger; pointer/slot is process-local, not a durable Pikmin UID.
+ Piki* initialBodies[20]={};unsigned initialGeneratorIds[20]={};int initialBodyCount=0,lastObservedLive=-1;
+ void observePopulation(int live) {
+  if(age%10!=0&&live==lastObservedLive)return;
+  lastObservedLive=live;bool present[20]={};int purpleHeads=0,otherHeads=0,captured=0;
+  Iterator observed(pikiMgr);CI_LOOP(observed){Piki* p=static_cast<Piki*>(*observed);if(!p)continue;
+   int slot=-1;for(int i=0;i<initialBodyCount;++i)if(initialBodies[i]==p){slot=i;present[i]=true;break;}
+   unsigned generator=p->mGenerator?unsigned(p->mGenerator->_70):0;
+   if(p->getStickObject()==violet)++captured;
+   const Vector3f normal=p->mGroundTriangle?p->mGroundTriangle->mTriangle.mNormal:Vector3f(0,0,0);
+   std::printf("P2_PURPLE_KOCHAPPY_BODY age=%d slot=%d ptr=%p generator_present=%d generator=%u baseline_generator=%u alive=%d health=%.3f state=%d mode=%d purple=%d mouth=%d sticker=%p violet_sticker=%d water_timer=%u xyz=%.4f,%.4f,%.4f velocity=%.4f,%.4f,%.4f terrain=%.4f ground=%d normal=%.4f,%.4f,%.4f\n",
+    age,slot,static_cast<void*>(p),int(p->mGenerator!=nullptr),generator,slot>=0?initialGeneratorIds[slot]:0,int(p->isAlive()),p->mHealth,p->getCurrState()?p->getState():-1,int(p->mMode),int(pc_p2_is_purple(p)),int(p->isStickToMouth()),static_cast<void*>(p->getStickObject()),int(p->getStickObject()==violet),unsigned(p->mInWaterTimer),p->mSRT.t.x,p->mSRT.t.y,p->mSRT.t.z,p->mVelocity.x,p->mVelocity.y,p->mVelocity.z,mapMgr->getMinY(p->mSRT.t.x,p->mSRT.t.z,true),int(p->mGroundTriangle!=nullptr),normal.x,normal.y,normal.z);
+  }
+  // Compare pointer tokens only; never dereference a body absent from the current manager.
+  for(int i=0;i<initialBodyCount;++i)if(!present[i])std::printf("P2_PURPLE_KOCHAPPY_BODY_MISSING age=%d slot=%d ptr=%p baseline_generator=%u durable_identity=0\n",age,i,static_cast<void*>(initialBodies[i]),initialGeneratorIds[i]);
+  Iterator sprouts(itemMgr->getPikiHeadMgr());CI_LOOP(sprouts){PikiHeadItem* h=static_cast<PikiHeadItem*>(*sprouts);if(!h)continue;
+   if(h->isAlive()){if(h->mP2Purple)++purpleHeads;else ++otherHeads;}
+   std::printf("P2_PURPLE_KOCHAPPY_HEAD age=%d ptr=%p alive=%d purple=%d white=%d bulbmin=%d seed_color=%d state=%d generator_present=%d generator=%u owner=%d parent_onion=%p pullable=%d xyz=%.4f,%.4f,%.4f velocity=%.4f,%.4f,%.4f terrain=%.4f input_UID_mapping=unavailable\n",
+    age,static_cast<void*>(h),int(h->isAlive()),int(h->mP2Purple),int(h->mP2White),int(h->mP2Bulbmin),h->mSeedColor,h->getCurrState()?h->getCurrState()->getID():-1,int(h->mGenerator!=nullptr),h->mGenerator?unsigned(h->mGenerator->_70):0,h->mPcOwner,static_cast<void*>(h->mParentOnion),int(h->canPullout()),h->mSRT.t.x,h->mSRT.t.y,h->mSRT.t.z,h->mVelocity.x,h->mVelocity.y,h->mVelocity.z,mapMgr->getMinY(h->mSRT.t.x,h->mSRT.t.z,true));
+  }
+  std::printf("P2_PURPLE_KOCHAPPY_POPULATION age=%d field=%d purple_heads=%d other_heads=%d field_plus_heads=%d captured=%d dead=%d fall=%d victim=%d born=%d map=%d all=%d violet_generator=%u violet_state=%d violet_motion=%d violet_frame=%.4f loaded_cycle_capacity=%d loaded_min_cycles=%d loaded_max_cycles=%d source_violet_lifetime_capacity=5 remaining_budget=private_unobserved enemy_health=%.3f enemy_xyz=%.4f,%.4f,%.4f\n",
+   age,live,purpleHeads,otherHeads,live+purpleHeads+otherHeads,captured,int(GameStat::deadPikis),int(GameStat::fallPikis),int(GameStat::victimPikis),int(GameStat::bornPikis),int(GameStat::mapPikis),int(GameStat::allPikis),violet->mGenerator?unsigned(violet->mGenerator->_70):0,violet->getCurrentState(),BossObserver::motion(*violet),BossObserver::frame(*violet),C_POM_PARM(violet,mMaxPikiPerCycle),C_POM_PARM(violet,mMinCycles),C_POM_PARM(violet,mMaxCycles),enemy->mHealth,enemy->mSRT.t.x,enemy->mSRT.t.y,enemy->mSRT.t.z);
+  std::fflush(nullptr);
+ }
  float pausedCounter=0,lastCounter=0,activeSeconds=0;
 public:
  int idle() override {
@@ -104,6 +129,7 @@ public:
    if(pc_p2_is_purple(p)){++purples;purple=p;}else if(p->mColor==Red)++red;}
   if(phase==0){
    require(live==20&&red==20&&purples==0,"current20nativeRed baseline, no injectedPurple");
+   Iterator baseline(pikiMgr);CI_LOOP(baseline){Piki* p=static_cast<Piki*>(*baseline);if(p&&p->isAlive()&&initialBodyCount<20){initialBodies[initialBodyCount]=p;initialGeneratorIds[initialBodyCount]=p->mGenerator?unsigned(p->mGenerator->_70):0;++initialBodyCount;}}
    require(pc_p2_purples_enabled()&&pc_p2_purple_flight_enabled(),"actual Purplebank/flight profiles");
    Iterator ts(tekiMgr);CI_LOOP(ts){Teki* t=static_cast<Teki*>(*ts);if(t->mGenerator&&t->mGenerator->_70==Target){require(!enemy,"duplicateRed");enemy=t;}}
    Iterator bs(bossMgr);CI_LOOP(bs){Boss* b=static_cast<Boss*>(*bs);if(b->isAlive()&&b->mObjType==OBJTYPE_Pom&&pc_p2_violet(static_cast<Pom*>(b))){require(!violet,"duplicateViolet");violet=static_cast<Pom*>(b);}}
@@ -116,6 +142,7 @@ public:
   if(human())return result;
   if(age%60==0){std::printf("P2_PURPLE_KOCHAPPY_PROGRESS phase=%d age=%d hp=%.2f live=%d red=%d purple=%d followers=%d\n",phase,age,n->mHealth,live,red,purples,n->getPlatePikis());std::fflush(nullptr);}
   if(phase==1){
+   observePopulation(live);
    const float radius=C_NAVI_PARM(n,mCursorMaxRadius);
    require(std::isfinite(radius)&&radius>20,"loaded cursor radius permits ordinary approach");
    const float approach=std::min(65.f,radius*.5f);
