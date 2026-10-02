@@ -1,5 +1,6 @@
 #include "pc_randomizer.h"
 #include "MapSelect.h"
+#include "MoviePlayer.h"
 #include <cstdint>
 
 #include "Camera.h"
@@ -418,7 +419,9 @@ public:
 		PcWorldMapSnapshot value;
 		if (mSectionState!=Active || !mPcOwnedMap || mapWindow!=mPcOwnedMap) return value;
 		value.available=true;
-		if (gameflow.mIsChallengeMode || selectWindow || mActiveOverlayMenu) return value;
+		if (gameflow.mIsChallengeMode || selectWindow || mActiveOverlayMenu || gameflow.mPauseAll
+		    || gameflow.mIsUIOverlayActive || gameflow.mIsTutorialTextActive
+		    || (gameflow.mMoviePlayer && gameflow.mMoviePlayer->mIsActive)) return value;
 		value=mapWindow->pcInputSnapshot();
 		value.available=true;
 		value.contextReady=true;
