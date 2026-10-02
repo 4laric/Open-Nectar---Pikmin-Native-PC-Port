@@ -49,6 +49,9 @@ public:
  * @note Size: 0x3C0.
  */
 class Mizu : public Boss {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayEnemyAccess;
+#endif
 	friend struct MizuAi;
 
 	friend struct MizuGenSpringPuffCallBack; // Not actually required, but other bosses do similar.
@@ -82,6 +85,9 @@ private:
  * @brief TODO
  */
 struct MizuGenSpringPuffCallBack : public zen::CallBack1<zen::particleGenerator*> {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayEnemyAccess;
+#endif
 public:
 	virtual bool invoke(zen::particleGenerator* ptclGen) // _08
 	{
@@ -116,7 +122,11 @@ public:
 private:
 	// _00     = VTBL
 	// _00-_04 = zen::CallBack1
-	zen::particleGenerator* mPtcl; // _04
+	zen::particleGenerator* mPtcl
+#if defined(PIKI_PC_PORT)
+ = nullptr
+#endif
+; // _04
 };
 
 /**
@@ -125,6 +135,9 @@ private:
  * @note Size: 0x14.
  */
 struct MizuAi : public PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayEnemyAccess;
+#endif
 public:
 	MizuAi(Mizu*);
 

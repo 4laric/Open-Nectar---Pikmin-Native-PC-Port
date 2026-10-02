@@ -36,6 +36,9 @@ enum {
  * @note Size: 0x2E4.
  */
 struct KeyItem : public Creature {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayWorldAccess;
+#endif
 	KeyItem(CreatureProp*, Shape*);
 
 	virtual void init(immut Vector3f&);               // _28
@@ -53,9 +56,17 @@ protected:
 
 	// _00      = VTBL
 	// _00-_2B8 = Creature
-	KeyState::Type mState; // _2B8
+	KeyState::Type mState
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ; // _2B8
 	SearchData mSearch[3]; // _2BC
-	Shape* mModel;         // _2E0
+	Shape* mModel
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;         // _2E0
 };
 
 #endif

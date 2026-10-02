@@ -63,6 +63,9 @@ public:
  * @note Size: 0x3E4.
  */
 struct GrassGen : public ItemCreature {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayWorldAccess;
+#endif
 public:
 	GrassGen(Shape*, CreatureProp*);
 
@@ -88,12 +91,32 @@ protected:
 
 	// _00      = VTBL
 	// _00-_3C8 = ItemCreature
-	int mWorkingPikis;    // _3C8
-	Grass* mGrass;        // _3CC
-	u16 mActiveGrass;     // _3D0
-	u16 mTotalGrassCount; // _3D2
+	int mWorkingPikis
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;    // _3C8
+	Grass* mGrass
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;        // _3CC
+	u16 mActiveGrass
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;     // _3D0
+	u16 mTotalGrassCount
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ; // _3D2
 	Vector3f _3D4;        // _3D4
-	f32 mSize;            // _3E0
+	f32 mSize
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;            // _3E0
 };
 
 /**
@@ -102,6 +125,9 @@ protected:
  * @note Size: 0x3E8
  */
 struct RockGen : public ItemCreature {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayWorldAccess;
+#endif
 public:
 	RockGen(Shape*, CreatureProp*);
 
@@ -128,13 +154,37 @@ protected:
 
 	// _00      = VTBL
 	// _00-_3C8 = ItemCreature
-	int mWorkingPikis;  // _3C8
-	u8 _3CC;            // _3CC
-	Pebble* mPebbles;   // _3D0
-	u16 mActivePebbles; // _3D4
-	u16 mMaxPebbles;    // _3D6
+	int mWorkingPikis
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;  // _3C8
+	u8 _3CC
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;            // _3CC
+	Pebble* mPebbles
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;   // _3D0
+	u16 mActivePebbles
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ; // _3D4
+	u16 mMaxPebbles
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;    // _3D6
 	Vector3f _3D8;      // _3D8
-	f32 mSize;          // _3E4
+	f32 mSize
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;          // _3E4
 };
 
 /*
@@ -149,9 +199,21 @@ struct WeedsGen : public ItemCreature {
 
 	// _00      = VTBL
 	// _00-_3C8 = ItemCreature
-	int mWeedsCount;              // _3C8
-	Shape* mWeedShape;            // _3CC
-	CreatureProp* mWeedsGenProps; // _3D0
+	int mWeedsCount
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;              // _3C8
+	Shape* mWeedShape
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;            // _3CC
+	CreatureProp* mWeedsGenProps
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ; // _3D0
 };
 
 /*
@@ -172,9 +234,21 @@ struct Weed : public ItemCreature {
 
 	// _00      = VTBL
 	// _00-_3C8 = ItemCreature
-	u16 mIsPulled;     // _3C8
-	u16 mPulloutTimer; // _3CA
-	WeedsGen* mGen;    // _3CC
+	u16 mIsPulled
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;     // _3C8
+	u16 mPulloutTimer
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ; // _3CA
+	WeedsGen* mGen
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;    // _3CC
 };
 
 #endif

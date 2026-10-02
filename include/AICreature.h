@@ -24,6 +24,11 @@ struct SAIContext {
 	SAIContext()
 	{
 		mCollidingCreature = nullptr;
+#if defined(PIKI_PC_PORT)
+		mTargetCreature = nullptr;
+		mMaxItemHealth = 0.0f;
+		mStateMachine = nullptr;
+#endif
 		_08.set(0.0f, 0.0f, 0.0f);
 		mCounter           = 0;
 		mCurrAnimId        = 0;

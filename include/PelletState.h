@@ -95,12 +95,28 @@ struct PelletGoalState : public PelletState {
 	f32 _10; // _10
 	f32 mDistanceToTarget;
 	f32 mWaitTimer;
-	f32 mStartScaleX;
-	f32 mSuckProgress;
+	f32 mStartScaleX
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;
+	f32 mSuckProgress
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;
 	Vector3f mStartPosition; // _24
-	u8 mIsFirstMove;         // _30
+	u8 mIsFirstMove
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;         // _30
 	u8 mTargetIsShip;        // _31
-	f32 mSuckSpeed;          // _34
+	f32 mSuckSpeed
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;          // _34
 };
 
 /**

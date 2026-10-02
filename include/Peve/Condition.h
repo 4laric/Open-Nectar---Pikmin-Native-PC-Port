@@ -116,8 +116,16 @@ struct PeveTimeCondition : public PeveCondition {
 
 	// _00     = VTBL
 	// _00-_04 = PeveCondition
-	f32 mCurrTime; // _04, in seconds
-	f32 mLimit;    // _08, in seconds, a.k.a. period
+	f32 mCurrTime
+#if defined(PIKI_PC_PORT)
+ = 0
+#endif
+; // _04, in seconds
+	f32 mLimit
+#if defined(PIKI_PC_PORT)
+ = 0
+#endif
+;    // _08, in seconds, a.k.a. period
 };
 
 #endif

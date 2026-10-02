@@ -27,7 +27,12 @@ struct PcMiddayNaviRuntimeAccess {
     for(int i=0;i<capacity;++i) {
         PrefixArchive slot(a,("slot."+std::to_string(i)).c_str());auto& v=s.mSlotList[i];
         if(!slot.field("position",v.mPosition)||!slot.field("offset",v.mOffsetFromCenter)||
-           !slot.ref("occupant",RefKind::Creature,v.mOccupant.mPtr)||!slot.ref("listener",RefKind::SlotListener,v.mListener))return false;
+           !slot.ref("occupant",RefKind::Creature,v.mOccupant.mPtr))return false;
+        // Releasing the last slot clears its occupant but leaves the listener
+        // stale. getSlot overwrites it before reuse; do not root that dead link.
+        auto* listener=a.mode()==Mode::Capture && !v.mOccupant.mPtr ? nullptr : v.mListener;
+        if(!slot.ref("listener",RefKind::SlotListener,listener))return false;
+        if(a.mode()==Mode::Apply)v.mListener=listener;
     }
     return true;
  }

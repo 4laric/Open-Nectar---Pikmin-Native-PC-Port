@@ -236,7 +236,11 @@ public:
 	AnimMgr* mAnimMgr;      // _04
 	AnimContext mAnimatorA; // _08
 	AnimContext mAnimatorB; // _18
-	u8 mMotionFlag;         // _28
+	u8 mMotionFlag
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;         // _28
 };
 
 /**
@@ -386,22 +390,58 @@ public:
 	Vector3f mSpawnPosition;              // _444
 	bool mUseSpawnPosition;               // _450
 	bool mIsPlayTrySound;                 // _451
-	u8 mMotionFlag;                       // _452
+	u8 mMotionFlag
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                       // _452
 	RippleEffect* mRippleEffect;          // _454
-	Suckable* mTargetGoal;                // _458
-	CollPart* mStuckMouthPart;            // _45C
-	f32 mStuckAngle;                      // _460
+	Suckable* mTargetGoal
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                // _458
+	CollPart* mStuckMouthPart
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;            // _45C
+	f32 mStuckAngle
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                      // _460
 	Vector3f mLastPosition;               // _464
 	PelletStateMachine* mStateMachine;    // _470
 	AState<Pellet>* mCurrentState;        // _474
 	Creature* mPikiCarrier;               // _478
 	Vector3f mCarryDirection;             // _47C
-	u16 mCarrierCount;                    // _488
-	f32 mTransitionTimer;                 // _48C
-	u16 mCarryState;                      // _490
+	u16 mCarrierCount
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                    // _488
+	f32 mTransitionTimer
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                 // _48C
+	u16 mCarryState
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                      // _490
 	Vector3f mCurrentPelletPosition;      // _494
-	u16 _4A0;                             // _4A0
-	f32 mCurrentPelletHeight;             // _4A4
+	u16 _4A0
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                             // _4A0
+	f32 mCurrentPelletHeight
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;             // _4A4
 	PelletView* mPelletView;              // _4A8
 	PelletAnimator mAnimator;             // _4AC
 	PelletShapeObject* mShapeObject;      // _554
@@ -409,12 +449,24 @@ public:
 	PelletConfig* mConfig;                // _55C
 	f32 mMotionSpeed;                     // _560
 	int mSlotFlags[4];                    // 128 physical slots; P2 Atlas declares 101.
-	u16 mCarrierCounter;                  // _570, carrying strength; attachment slots still count bodies
+	u16 mCarrierCounter
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                  // _570, carrying strength; attachment slots still count bodies
 	CollInfo* mPelletCollInfo;            // _574
 	SearchData mSearchData[4];            // _578
 	ShapeDynMaterials mAnimatedMaterials; // _5A8
-	bool mIsAlive;                        // _5B8
-	bool mIsAIActive;                     // _5B9, name is a guess
+	bool mIsAlive
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                        // _5B8
+	bool mIsAIActive
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                     // _5B9, name is a guess
 };
 
 /**

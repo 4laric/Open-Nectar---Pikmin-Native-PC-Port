@@ -1,4 +1,10 @@
 #include "pc_p2_frog.h"
+#if defined(PIKI_PC_PORT)
+#define PC_MIDDAY_ENEMY_DEFAULT = {}
+#else
+#define PC_MIDDAY_ENEMY_DEFAULT
+#endif
+
 #include "pc_p2_tank.h"
 #include "pc_p2_kabuto_fsm.h"
 #include "pc_p2_king_teki.h"
@@ -615,42 +621,42 @@ public:
 	PaniTekiAnimator* mTekiAnimator;              // _2CC
 	TekiShapeObject* mTekiShape;                  // _2D0
 	CreaturePlatMgr mPlatMgr;                     // _2D4
-	int mDeadState;                               // _31C
+	int mDeadState PC_MIDDAY_ENEMY_DEFAULT;                               // _31C
 	TekiTypes mTekiType;                          // _320
 	volatile int mStateID;                        // _324
-	bool mIsStateReady;                           // _328
+	bool mIsStateReady PC_MIDDAY_ENEMY_DEFAULT;                           // _328
 	u8 _329[0x330 - 0x329];                       // _329, TODO: work out members
-	int mReturnStateID;                           // _330
-	int mCurrentQueueId;                          // _334
-	int mActionStateId;                           // _338
-	f32 mStoredDamage;                            // _33C, damage waiting to be applied on next makeDamaged call
-	f32 mDamageCount;                             // _340
-	int _344;                                     // _344
-	int mRouteWayPointMax;                        // _348, size of mRouteWayPoints array
-	int mRouteWayPointCount;                      // _34C
+	int mReturnStateID PC_MIDDAY_ENEMY_DEFAULT;                           // _330
+	int mCurrentQueueId PC_MIDDAY_ENEMY_DEFAULT;                          // _334
+	int mActionStateId PC_MIDDAY_ENEMY_DEFAULT;                           // _338
+	f32 mStoredDamage PC_MIDDAY_ENEMY_DEFAULT;                            // _33C, damage waiting to be applied on next makeDamaged call
+	f32 mDamageCount PC_MIDDAY_ENEMY_DEFAULT;                             // _340
+	int _344 PC_MIDDAY_ENEMY_DEFAULT;                                     // _344
+	int mRouteWayPointMax PC_MIDDAY_ENEMY_DEFAULT;                        // _348, size of mRouteWayPoints array
+	int mRouteWayPointCount PC_MIDDAY_ENEMY_DEFAULT;                      // _34C
 	u32 mPathHandle;                              // _350
-	int mCurrRouteWayPointID;                     // _354
+	int mCurrRouteWayPointID PC_MIDDAY_ENEMY_DEFAULT;                     // _354
 	NVector3fIOClass mPositionIO;                 // _358
 	NVector3fIOClass mVelocityIO;                 // _368
 	NVector3fIOClass mAccelerationIO;             // _378
 	NVector3f mTargetPosition;                    // _388, possibly position
-	f32 mTargetAngle;                             // _394
+	f32 mTargetAngle PC_MIDDAY_ENEMY_DEFAULT;                             // _394
 	NVector3f mActionVelocity;                    // _398
-	f32 _3A4;                                     // _3A4
-	int mCurrentAnimEvent;                        // _3A8
-	f32 mAnimationSpeed;                          // _3AC
-	int mMotionLoopCount;                         // _3B0
-	f32 mMotionSpeed;                             // _3B4
-	f32 mPreStopAnimationSpeed;                   // _3B8
-	int _3BC;                                     // _3BC, possibly mPelletPosyColor?
-	f32 _3C0;                                     // _3C0
+	f32 _3A4 PC_MIDDAY_ENEMY_DEFAULT;                                     // _3A4
+	int mCurrentAnimEvent PC_MIDDAY_ENEMY_DEFAULT;                        // _3A8
+	f32 mAnimationSpeed PC_MIDDAY_ENEMY_DEFAULT;                          // _3AC
+	int mMotionLoopCount PC_MIDDAY_ENEMY_DEFAULT;                         // _3B0
+	f32 mMotionSpeed PC_MIDDAY_ENEMY_DEFAULT;                             // _3B4
+	f32 mPreStopAnimationSpeed PC_MIDDAY_ENEMY_DEFAULT;                   // _3B8
+	int _3BC PC_MIDDAY_ENEMY_DEFAULT;                                     // _3BC, possibly mPelletPosyColor?
+	f32 _3C0 PC_MIDDAY_ENEMY_DEFAULT;                                     // _3C0
 	f32 mTimers[5];                               // _3C4
 	zen::particleGenerator** mParticleGenerators; // _3D8
 	zen::PtclGenPack* mParticleGenPack;           // _3DC
 	ShapeDynMaterials mAnimatedMaterials;         // _3E0, unknown
 	int mCorpsePartJoints[8];                     // _3F0
-	int mTekiOptions;                             // _410
-	int mAnimKeyOptions;                          // _414
+	int mTekiOptions PC_MIDDAY_ENEMY_DEFAULT;                             // _410
+	int mAnimKeyOptions PC_MIDDAY_ENEMY_DEFAULT;                          // _414
 	SmartPtr<Creature> mTargetCreatures[4];       // _418
 	NVibrationFunction* mVibrationController;     // _428
 	SearchData mTekiSearchData[3];                // _42C
@@ -687,6 +693,9 @@ public:
  * @brief TODO
  */
 struct YTeki : public NTeki {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayTekiAccess;
+#endif
 public:
 	/**
 	 * @brief TODO
@@ -857,19 +866,19 @@ public:
 protected:
 	// _00       = VTBL
 	// _000-_46C = NTeki
-	int mStatus;                             // _46C
-	int mTableIndex;                         // _470, this is to do with route waypoint graphs
-	int mMapCode;                            // _474
-	f32 mFrameCounter;                       // _478
-	f32 mFrameCounterMax;                    // _47C
-	f32 mFootPosY[4];                        // _480, indexed by effFootIndexFlag
-	f32 mSpeed;                              // _490, might just be flying speed?
-	f32 mTurnAngle;                          // _494
+	int mStatus PC_MIDDAY_ENEMY_DEFAULT;                             // _46C
+	int mTableIndex PC_MIDDAY_ENEMY_DEFAULT;                         // _470, this is to do with route waypoint graphs
+	int mMapCode PC_MIDDAY_ENEMY_DEFAULT;                            // _474
+	f32 mFrameCounter PC_MIDDAY_ENEMY_DEFAULT;                       // _478
+	f32 mFrameCounterMax PC_MIDDAY_ENEMY_DEFAULT;                    // _47C
+	f32 mFootPosY[4] PC_MIDDAY_ENEMY_DEFAULT;                        // _480, indexed by effFootIndexFlag
+	f32 mSpeed PC_MIDDAY_ENEMY_DEFAULT;                              // _490, might just be flying speed?
+	f32 mTurnAngle PC_MIDDAY_ENEMY_DEFAULT;                          // _494
 	zen::particleGenerator* mPtclGenPtrs[8]; // _498, indexed by ptclIndexFlag
 	u8 _4B8[0x4];                            // _4B8, unknown
-	WorkObject* mWorkObject;                 // _4BC
-	f32 mDororoGravity;                      // _4C0
-	f32 mDororoBarkDesire;                   // _4C4
+	WorkObject* mWorkObject PC_MIDDAY_ENEMY_DEFAULT;                 // _4BC
+	f32 mDororoGravity PC_MIDDAY_ENEMY_DEFAULT;                      // _4C0
+	f32 mDororoBarkDesire PC_MIDDAY_ENEMY_DEFAULT;                   // _4C4
 	struct {
 		u32 mBite : 1;
 		u32 mRunAway : 1;
@@ -879,7 +888,7 @@ protected:
 		u32 mTimer : 1;
 		u32 mChoke : 1;
 		u32 mFootEffect : 4;
-	} mTekiSwitches;                         // _4C8
+	} mTekiSwitches PC_MIDDAY_ENEMY_DEFAULT;                         // _4C8
 	TAIeffectAttackParam mEffectAttackParam; // _4CC
 	ConeTypeCallBack mConeCallBack;          // _51C
 	CylinderTypeCallBack mCylinderCallBack;  // _528
@@ -965,3 +974,5 @@ public:
 extern TekiMgr* tekiMgr;
 
 #endif
+
+#undef PC_MIDDAY_ENEMY_DEFAULT

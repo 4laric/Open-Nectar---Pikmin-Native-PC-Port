@@ -40,9 +40,21 @@ public:
 
 	// _00      = VTBL
 	// _00-_2B8 = Creature
-	Creature* mParentRope;      // _2B8, probably
-	RopeCreature* mAttachedObj; // _2BC, probably
-	f32 mRopeLength;            // _2C0
+	Creature* mParentRope
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;      // _2B8, probably
+	RopeCreature* mAttachedObj
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ; // _2BC, probably
+	f32 mRopeLength
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;            // _2C0
 	Vector3f mRopeDirection;    // _2C4
 };
 
@@ -72,10 +84,22 @@ protected:
 public:
 	// _00      = VTBL
 	// _00-_2D0 = RopeCreature
-	int _2D0;              // _2D0
+	int _2D0
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;              // _2D0
 	SearchData mSearch[3]; // _2D4
-	Shape* mModel;         // _2F8
-	Creature* mOwner;      // _2FC
+	Shape* mModel
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;         // _2F8
+	Creature* mOwner
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;      // _2FC
 };
 
 #endif

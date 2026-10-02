@@ -94,8 +94,16 @@ struct BombGenItem : public ItemObject {
 
 	// _00      = VTBL
 	// _00-_3C8 = ItemObject
-	s16 mCapacity;  // _3C8, a capacity of -1 gives infinite bombs.
-	s16 mRemaining; // _3CA
+	s16 mCapacity
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;  // _3C8, a capacity of -1 gives infinite bombs.
+	s16 mRemaining
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ; // _3CA
 };
 
 /**

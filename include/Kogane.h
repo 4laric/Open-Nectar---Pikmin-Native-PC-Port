@@ -99,6 +99,9 @@ public:
  * @note Size: 0x3C0.
  */
 class Kogane : public Boss {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayEnemyAccess;
+#endif
 	friend struct KoganeAi;
 
 	friend struct KoganeGenRippleCallBack;
@@ -131,6 +134,9 @@ private:
  * @note Size: 0x20.
  */
 struct KoganeAi : public PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayEnemyAccess;
+#endif
 public:
 	KoganeAi(Kogane*);
 
@@ -188,13 +194,20 @@ public:
 	int mDropCount;                           // _10
 	EffectMgr::effTypeTable mEffectType;      // _14
 	f32 mAppearTimer;                         // _18
-	f32 mIdleDuration;                        // _1C
+	f32 mIdleDuration
+#if defined(PIKI_PC_PORT)
+ = 0
+#endif
+;                        // _1C
 };
 
 /**
  * @brief TODO
  */
 struct KoganeGenRippleCallBack : public zen::CallBack1<zen::particleGenerator*> {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayEnemyAccess;
+#endif
 public:
 	KoganeGenRippleCallBack() { }
 
@@ -212,7 +225,11 @@ public:
 private:
 	// _00     = VTBL
 	// _00-_04 = zen::CallBack1
-	Kogane* mKogane; // _04
+	Kogane* mKogane
+#if defined(PIKI_PC_PORT)
+ = nullptr
+#endif
+; // _04
 };
 
 #endif

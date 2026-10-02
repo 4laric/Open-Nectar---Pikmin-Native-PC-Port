@@ -62,8 +62,16 @@ public:
 	Matrix4f mInertiaTensor;         // _378
 	Matrix4f mInvInertiaTensor;      // _3B8
 	Matrix4f _3F8;                   // _3F8
-	u8 mDynFlag;                     // _438
-	u8 mGroundFlag;                  // _439
+	u8 mDynFlag
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                     // _438
+	u8 mGroundFlag
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                  // _439
 };
 
 #endif

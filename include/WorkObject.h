@@ -140,22 +140,66 @@ protected:
 public:
 	// _00      = VTBL
 	// _00-_3C8 = WorkObject
-	bool mDoUseJointSegments;             // _3C8
-	s16 _3CA;                             // _3CA
-	u8 _3CC;                              // _3CC
+	bool mDoUseJointSegments
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;             // _3C8
+	s16 _3CA
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                             // _3CA
+	u8 _3CC
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                              // _3CC
 	f32* mStageProgressList;              // _3D0, stage items?
 	Joint** mStageJoints;                 // _3D4, unknown
 	PermanentEffect _3D8;                 // _3D8
 	PermanentEffect _3E8;                 // _3E8
-	WayPoint* mStartWaypoint;             // _3F8
-	WayPoint* mEndWaypoint;               // _3FC
-	u8 _400;                              // _400
-	int mStageCount;                      // _404
-	DynBuildShape* mBuildShape;           // _408
-	Shape* mBridgeShape;                  // _40C
-	CollPart* _410;                       // _410
+	WayPoint* mStartWaypoint
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;             // _3F8
+	WayPoint* mEndWaypoint
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;               // _3FC
+	u8 _400
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                              // _400
+	int mStageCount
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                      // _404
+	DynBuildShape* mBuildShape
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;           // _408
+	Shape* mBridgeShape
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                  // _40C
+	CollPart* _410
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                       // _410
 	ShapeDynMaterials mAnimatedMaterials; // _414
-	u8 _424;                              // _424, flags (3 = final setup)
+	u8 _424
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                              // _424, flags (3 = final setup)
 };
 
 /**
@@ -199,26 +243,90 @@ protected:
 public:
 	// _00      = VTBL
 	// _00-_3C8 = WorkObject
-	u16 mPushingPikmin;            // _3C8
+	u16 mPushingPikmin
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;            // _3C8
 	Plane mPlanes[4];              // _3CC
 	Vector3f mDestinationPosition; // _40C
-	int mTotalPushStrength;        // _418
-	int mAmountPushersToStart;     // _41C
-	f32 mPushSpeed;                // _420
-	WayPoint* mWayPoint;           // _424
+	int mTotalPushStrength
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;        // _418
+	int mAmountPushersToStart
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;     // _41C
+	f32 mPushSpeed
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                // _420
+	WayPoint* mWayPoint
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;           // _424
 	u8 _428;                       // _428
 	f32 _42C;                      // _42C
-	f32 mCentreSize;               // _430
-	DynBuildShape* mBuildShape;    // _434
-	Shape* mBoxShape;              // _438
-	u8 mState;                     // _43C
-	u8 mFxCooldownTimer;           // _43D
-	f32 mPushMoveTimer;            // _440
-	bool mIsMoving;                // _444
-	bool mIsSoundPlaying;          // _445
-	zen::particleGenerator* mEfxA; // _448
-	zen::particleGenerator* mEfxB; // _44C
-	zen::particleGenerator* mEfxC; // _450
+	f32 mCentreSize
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;               // _430
+	DynBuildShape* mBuildShape
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;    // _434
+	Shape* mBoxShape
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;              // _438
+	u8 mState
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                     // _43C
+	u8 mFxCooldownTimer
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;           // _43D
+	f32 mPushMoveTimer
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;            // _440
+	bool mIsMoving
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                // _444
+	bool mIsSoundPlaying
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;          // _445
+	zen::particleGenerator* mEfxA
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ; // _448
+	zen::particleGenerator* mEfxB
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ; // _44C
+	zen::particleGenerator* mEfxC
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ; // _450
 	Vector3f mMoveFrontEfxPos;     // _454
 	Vector3f mMoveSideEfxPos[2];   // _460
 };

@@ -50,6 +50,8 @@ struct SimplePtclLoadInfo {
 	GXColor _08;          // _08
 };
 
+struct PcMiddayParticleAccess;
+
 namespace zen {
 
 class particleMdl;
@@ -155,6 +157,10 @@ class particleMdl : public particleMdlBase {
 public:
 	particleMdl()
 	{
+#if defined(PIKI_PC_PORT)
+        mAcceleration.set(0.0f,0.0f,0.0f);
+        mPtclCallBack = nullptr;
+#endif
 		mBBoardColourAnim.mProgress     = 0.0f;
 		mBBoardColourAnim.mCurrentFrame = 0;
 		mBBoardColourAnim.mDuration     = 1;
@@ -242,6 +248,9 @@ public:
  * @brief TODO
  */
 class particleMdlManager {
+#if defined(PIKI_PC_PORT)
+ friend struct ::PcMiddayParticleAccess;
+#endif
 public:
 	particleMdlManager()
 	{
@@ -267,6 +276,10 @@ public:
 protected:
 	zenListManager mSleepPtclList;      // _00
 	zenListManager mSleepPtclChildList; // _10
+#if defined(PIKI_PC_PORT)
+    u32 mMiddayParticleCapacity = 0;
+    u32 mMiddayChildCapacity = 0;
+#endif
 	particleMdl* mPtclList;             // _20
 	particleChildMdl* mChildPtclList;   // _24
 };
@@ -277,9 +290,109 @@ protected:
  * @note Size: 0x200.
  */
 class particleGenerator : public zenList {
+#if defined(PIKI_PC_PORT)
+ friend struct ::PcMiddayParticleAccess;
+#endif
 public:
 	particleGenerator()
 	{
+#if defined(PIKI_PC_PORT)
+        mEmitPos.set(0.0f,0.0f,0.0f);
+        mEmitVelocity.set(0.0f,0.0f,0.0f);
+        mLengthScale = 0;
+        mPivotOffsetY = 0;
+        mScaleRate1 = 0;
+        mScaleRate2 = 0;
+        mAlphaRate1 = 0;
+        mAlphaRate2 = 0;
+        mControlFlags = 0;
+        mParticleFlags = 0;
+        mPartialParticleCount = 0;
+        mPassTimer = 0;
+        mCurrentFrame = 0;
+        mCurrentPass = 0;
+        mEmitPosOffset.set(0.0f,0.0f,0.0f);
+        mEmitDir.set(0.0f,0.0f,0.0f);
+        mEmissionBoxSize.set(0.0f,0.0f,0.0f);
+        mEmissionRate = 0;
+        mEmissionRateJitter = 0;
+        mEmissionSpread = 0;
+        mEmissionRadiusScale = 0;
+        mEmissionRadius = 0;
+        mInitVel = 0;
+        mInitialVelocityJitter = 0;
+        mDrag = 0;
+        mDragJitter = 0;
+        mMaxVel = 0;
+        mScaleThreshold1 = 0;
+        mScaleThreshold2 = 0;
+        mMinScaleFactor1 = 0;
+        mMinScaleFactor2 = 0;
+        mScaleSize = 0;
+        mSizeJitter = 0;
+        mAlphaThreshold1 = 0;
+        mAlphaThreshold2 = 0;
+        mAlphaJitter = 0;
+        mRotSpeedMin = 0;
+        mRotSpeedJitter = 0;
+        mRotAngle = 0;
+        mLifetimeJitter = 0;
+        mBaseLifetime = 0;
+        mChildScaleFactor = 0;
+        mChildAlphaMultiplier = 0;
+        mChildPosJitter = 0;
+        mChildColor.set(0,0,0,0);
+        mTint.set(0,0,0,0);
+        mHasTint = 0;
+        _124 = 0;
+        mChildSpawnInterval = 0;
+        mGravFieldAccel.set(0.0f,0.0f,0.0f);
+        mAirFieldVelocity.set(0.0f,0.0f,0.0f);
+        mVortexCenter.set(0.0f,0.0f,0.0f);
+        mVortexRotationSpeed = 0;
+        mVortexStrength = 0;
+        mVortexFalloffFactor = 0;
+        mVortexFalloffDivisor = 0;
+        mDampedNewtonFieldDir.set(0.0f,0.0f,0.0f);
+        mDampedNewtonFieldStrength = 0;
+        mNewtonFieldDir.set(0.0f,0.0f,0.0f);
+        mNewtonFieldStrength = 0;
+        mSolidFieldForceMultiplier.set(0.0f,0.0f,0.0f);
+        mSolidFieldGridScale = 0;
+        mSolidFieldSampleOffset = 0;
+        mSolidFieldType = 0;
+        mJitterStrength = 0;
+        mLineFieldAxis.set(0.0f,0.0f,0.0f);
+        mLineFieldAxialForce = 0;
+        mLineFieldRadialForce = 0;
+        mFreePtclMotionTime = 0;
+        mEmissionRateKeyCount = 0;
+        mEmissionRadiusKeyCount = 0;
+        mInitialVelocityKeyCount = 0;
+        mMaxFrame = 0;
+        mMaxPasses = 0;
+        mBlendFactor = 0;
+        mZMode = 0;
+        mOrientedNormal.set(0.0f,0.0f,0.0f);
+        mEmitPosPtr = nullptr;
+        mTexture = nullptr;
+        mChildTexture = nullptr;
+        mSolidTexFieldData = nullptr;
+        mEmissionRateKeyframes = nullptr;
+        mEmissionRateValues = nullptr;
+        mEmissionRadiusKeyframes = nullptr;
+        mEmissionRadiusValues = nullptr;
+        mInitVelIntpThresholds = nullptr;
+        mInitVelIntpValues = nullptr;
+        mMdlMgr = nullptr;
+        mCallBack1 = nullptr;
+        mCallBack2 = nullptr;
+        mDrawCallBack = nullptr;
+        mRotAxisCallBack = nullptr;
+        mOrientedDrawConfig.mOrientationSource = 0;
+        mOrientedDrawConfig.mIsDoubleSided = 0;
+        mOrientedDrawConfig.mFlipNormal = 0;
+#endif
 		ClearPtclsStatus(nullptr, nullptr);
 		mCallBack1     = nullptr;
 		mCallBack2     = nullptr;

@@ -65,12 +65,20 @@ protected:
 public:
 	// _00      = VTBL
 	// _00-_304 = AICreature
-	f32 mMotionSpeed;                  // _304
+	f32 mMotionSpeed
+#if defined(PIKI_PC_PORT)
+        = 0.0f
+#endif
+        ;                  // _304
 	Shape* mItemShape;                 // _308
 	SearchData mItemSearchData[8];     // _30C
 	PaniItemAnimator mItemAnimator;    // _36C
 	ItemShapeObject* mItemShapeObject; // _3C0
-	bool _3C4;                         // _3C4
+	bool _3C4
+#if defined(PIKI_PC_PORT)
+        = false
+#endif
+        ;                         // _3C4
 };
 
 /**

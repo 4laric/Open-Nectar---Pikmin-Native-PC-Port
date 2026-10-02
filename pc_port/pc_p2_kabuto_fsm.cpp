@@ -644,3 +644,22 @@ void pc_p2_kabuto_fsm_draw_stones(Graphics& gfx){
     so->mAnimContext.mData=sharedAnim;
     so->mAnimContext.mCurrentFrame=savedFrame;
 }
+
+#if defined(PIKI_PC_PORT)
+#include "pc_midday_projectile_hosts.h"
+namespace pc_midday {
+bool kabuto_projectile_fields(ActorArchive& outer){
+ PrefixArchive a(outer,"kabutoProjectiles"),pool(a,"fleet");
+ if(!projectile_fields(fleet,pool)||!a.field("sourceDebt",stoneDebt)||!a.field("traceCalls",stoneMap.calls)||!a.field("traceWalls",stoneMap.walls))return false;
+ for(int i=0;i<p2kabutostone::kFleetCapacity;++i){PrefixArchive p(a,("slot."+std::to_string(i)).c_str());if(!p.field("generator",slotGen[i])||!p.field("positionTicks",slotPosTicks[i]))return false;}
+ u32 count=a.mode()==Mode::Capture?u32(shooters.size()):0;if(!a.scalar("shooterCount",ScalarKind::U32,&count)||count>4096)return a.fail("Kabuto shooter count");
+ auto it=shooters.begin();std::map<std::uint64_t,BTeki*> staged;
+ for(u32 i=0;i<count;++i){u64 token=0;BTeki* actor=nullptr;if(a.mode()==Mode::Capture){token=it->first;actor=it->second;++it;}PrefixArchive p(a,("shooter."+std::to_string(i)).c_str());
+ if(!p.token64("token",RefKind::ProjectileToken,token)||!p.ref("actor",RefKind::Creature,actor))return false;
+ if(a.mode()==Mode::Apply&&!staged.emplace(token,actor).second)return a.fail("Kabuto duplicate shooter token");}
+ if(a.mode()==Mode::Apply)shooters.swap(staged);
+ // TraceProxy is cleared before every trace; roll/dust/drawn caches are visual.
+ return true;
+}
+}
+#endif

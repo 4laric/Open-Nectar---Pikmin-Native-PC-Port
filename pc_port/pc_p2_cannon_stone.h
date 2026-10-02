@@ -182,6 +182,9 @@ public:
     static P2CannonStoneVec3 initialVelocity(float faceDir, float moveSpeed);
 
 private:
+#if defined(PIKI_PC_PORT)
+    friend struct PcMiddayProjectileAccess;
+#endif
     void enterDead();
     void steerTo(const P2CannonStoneVec3& targetPos);
 
@@ -217,6 +220,9 @@ public:
     int activeCount() const;
 
 private:
+#if defined(PIKI_PC_PORT)
+    friend struct PcMiddayProjectileAccess;
+#endif
     static constexpr int kMaxStones = 16;
     int mCapacity;
     P2CannonStone mStones[kMaxStones];

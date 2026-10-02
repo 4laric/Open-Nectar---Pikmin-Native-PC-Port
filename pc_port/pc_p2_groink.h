@@ -1,4 +1,7 @@
 #pragma once
+#if defined(PIKI_PC_PORT)
+struct PcMiddayProjectileAccess;
+#endif
 
 #include <cmath>
 
@@ -101,6 +104,9 @@ public:
     void recycle() { mShell = P2GroinkShell{}; }
 
 private:
+#if defined(PIKI_PC_PORT)
+    friend struct ::PcMiddayProjectileAccess;
+#endif
     P2GroinkShell mShell;
     P2GroinkTerminalStep mLastTerminalStep;
 };

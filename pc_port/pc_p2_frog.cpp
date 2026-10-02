@@ -526,3 +526,31 @@ bool pc_p2_frog_draw(BTeki* actor,Graphics& gfx,const Matrix4f& matrix,bool corp
     pc_gfx_specular_family_scope(0);
     return true;
 }
+
+// Mid-day save visitor: reads a private copy and publishes only for an already
+// allocated staged actor. No transition, spawn, sound or damage callback runs.
+#include "pc_midday_enemy.h"
+namespace pc_midday {
+bool enemy_frog_fields(BTeki& actor,ActorArchive& outer) {
+ PrefixArchive ar(outer,"enemy.p2.frog");auto* key=static_cast<PelletView*>(&actor);
+ const auto found=fsms.find(key);bool present=ar.mode()==Mode::Capture&&found!=fsms.end();
+ if(!ar.scalar("present",ScalarKind::Bool,&present))return false;
+ if(!present){if(ar.mode()==Mode::Apply){fsms.erase(key);actors.erase(key);bitteredFrogs.erase(key);pressing.erase(key);}return true;}
+ FrogFsm value=ar.mode()==Mode::Capture?found->second:FrogFsm{};
+ int state=static_cast<int>(value.state);if(!ar.scalar("state",ScalarKind::S32,&state)||state<0||state>9)return ar.fail("invalid frog state");value.state=static_cast<FState>(state);
+ static const char* names[]={"wait1","dead","type1","waitact1","damage","wait2","type2","attack","move1"};
+ int clip=-1;if(ar.mode()==Mode::Capture)for(int i=0;i<9;++i)if(value.clip==names[i])clip=i;
+ if(!ar.scalar("clip",ScalarKind::S32,&clip)||clip<0||clip>=9)return ar.fail("unknown frog animation");value.clip=names[clip];
+#define FIELD(k,x) if(!ar.field(#x,value.x))return false;
+#define VECTOR(x) if(!ar.field(#x,value.x))return false;
+#include "pc_midday_enemy_frog_fields.inc"
+#undef FIELD
+#undef VECTOR
+ if(!ar.handle("generator",RefKind::Generator,value.token))return false;
+ bool bitter=ar.mode()==Mode::Capture&&bitteredFrogs.count(key),press=ar.mode()==Mode::Capture&&pressing.count(key);
+ if(!ar.scalar("bitter",ScalarKind::Bool,&bitter)||!ar.scalar("pressing",ScalarKind::Bool,&press))return false;
+ if(value.kind<0||value.kind>1||value.stateTime<0||value.phase<0||value.flight.elapsed<0)return ar.fail("invalid frog runtime bounds");
+ if(ar.mode()==Mode::Apply){fsms[key]=value;actors[key]=value.kind;if(bitter)bitteredFrogs.insert(key);else bitteredFrogs.erase(key);if(press)pressing.insert(key);else pressing.erase(key);}
+ return true;
+}
+}

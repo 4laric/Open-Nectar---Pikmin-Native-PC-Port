@@ -1,6 +1,12 @@
 #ifndef _BOSS_H
 #define _BOSS_H
 
+#if defined(PIKI_PC_PORT)
+#define PC_MIDDAY_ENEMY_DEFAULT = {}
+#else
+#define PC_MIDDAY_ENEMY_DEFAULT
+#endif
+
 #include "Creature.h"
 #include "CreatureProp.h"
 #include "ID32.h"
@@ -182,6 +188,9 @@ struct BossPresentJoints {
  * @note Size: 0x3B8.
  */
 class Boss : public Creature {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayEnemyAccess;
+#endif
 	friend class BossMgr;
 
 public:
@@ -308,30 +317,30 @@ private:
 protected:
 	// _00      = VTBL
 	// _00-_2B8 = Creature
-	bool mIsAlive;                  // _2B8
-	bool mIsAtari;                  // _2B9
-	bool mIsVisible;                // _2BA
-	bool mIsOrganic;                // _2BB
-	bool mIsInvincible;             // _2BC
-	bool mIsMotionFinished;         // _2BD
-	bool mNeedShadow;               // _2BE
-	bool mIsOnWall;                 // _2BF
-	f32 mDamage;                    // _2C0
-	f32 mCurrentLife;               // _2C4, current health (but there's a creature variable for that too)
-	f32 mMaxLife;                   // _2C8, max health (but there's a creature variable for that too)
-	f32 mLifeRecoveryTimer;         // _2CC
-	f32 mWalkTimer;                 // _2D0
-	f32 mAttackTimer;               // _2D4
-	f32 mAnimTimer;                 // _2D8
-	f32 mSearchAngle;               // _2DC
-	f32 mShadowSize;                // _2E0
-	int mCurrentStateID;            // _2E4
-	int mNextStateID;               // _2E8
-	int mAnimLoopCounter;           // _2EC
-	int mFlickDamageCount;          // _2F0
-	int mItemIndex;                 // _2F4
-	int mItemColour;                // _2F8
-	int mItemCount;                 // _2FC
+	bool mIsAlive PC_MIDDAY_ENEMY_DEFAULT;                  // _2B8
+	bool mIsAtari PC_MIDDAY_ENEMY_DEFAULT;                  // _2B9
+	bool mIsVisible PC_MIDDAY_ENEMY_DEFAULT;                // _2BA
+	bool mIsOrganic PC_MIDDAY_ENEMY_DEFAULT;                // _2BB
+	bool mIsInvincible PC_MIDDAY_ENEMY_DEFAULT;             // _2BC
+	bool mIsMotionFinished PC_MIDDAY_ENEMY_DEFAULT;         // _2BD
+	bool mNeedShadow PC_MIDDAY_ENEMY_DEFAULT;               // _2BE
+	bool mIsOnWall PC_MIDDAY_ENEMY_DEFAULT;                 // _2BF
+	f32 mDamage PC_MIDDAY_ENEMY_DEFAULT;                    // _2C0
+	f32 mCurrentLife PC_MIDDAY_ENEMY_DEFAULT;               // _2C4, current health (but there's a creature variable for that too)
+	f32 mMaxLife PC_MIDDAY_ENEMY_DEFAULT;                   // _2C8, max health (but there's a creature variable for that too)
+	f32 mLifeRecoveryTimer PC_MIDDAY_ENEMY_DEFAULT;         // _2CC
+	f32 mWalkTimer PC_MIDDAY_ENEMY_DEFAULT;                 // _2D0
+	f32 mAttackTimer PC_MIDDAY_ENEMY_DEFAULT;               // _2D4
+	f32 mAnimTimer PC_MIDDAY_ENEMY_DEFAULT;                 // _2D8
+	f32 mSearchAngle PC_MIDDAY_ENEMY_DEFAULT;               // _2DC
+	f32 mShadowSize PC_MIDDAY_ENEMY_DEFAULT;                // _2E0
+	int mCurrentStateID PC_MIDDAY_ENEMY_DEFAULT;            // _2E4
+	int mNextStateID PC_MIDDAY_ENEMY_DEFAULT;               // _2E8
+	int mAnimLoopCounter PC_MIDDAY_ENEMY_DEFAULT;           // _2EC
+	int mFlickDamageCount PC_MIDDAY_ENEMY_DEFAULT;          // _2F0
+	int mItemIndex PC_MIDDAY_ENEMY_DEFAULT;                 // _2F4
+	int mItemColour PC_MIDDAY_ENEMY_DEFAULT;                // _2F8
+	int mItemCount PC_MIDDAY_ENEMY_DEFAULT;                 // _2FC
 	Vector3f mInitPosition;         // _300
 	Vector3f mTargetPosition;       // _30C
 	Creature* mTargetCreature;      // _318
@@ -445,3 +454,5 @@ protected:
 extern BossMgr* bossMgr;
 
 #endif
+
+#undef PC_MIDDAY_ENEMY_DEFAULT

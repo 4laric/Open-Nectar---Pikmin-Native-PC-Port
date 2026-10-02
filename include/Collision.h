@@ -239,6 +239,9 @@ struct CndBombable : public CndCollPart {
  * @note Size: 0x14.
  */
 class CollInfo {
+#if defined(PIKI_PC_PORT)
+    friend struct PcMiddayCollisionAccess;
+#endif
 	friend class CollPart; // Accesses `mCollParts` in `CollPart::getChild`/`getChildAt`/`getNext`.
 
 public:

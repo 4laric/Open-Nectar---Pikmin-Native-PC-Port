@@ -207,6 +207,9 @@ public:
     bool shouldIgnoreAtari(std::uint64_t targetToken) const;
 
 private:
+#if defined(PIKI_PC_PORT)
+    friend struct PcMiddayProjectileAccess;
+#endif
     void enterAppear();
     void enterFallFromAppear();
     void enterFallFromDropWait();
@@ -259,6 +262,9 @@ public:
     int activeCount() const;
 
 private:
+#if defined(PIKI_PC_PORT)
+    friend struct PcMiddayProjectileAccess;
+#endif
     static constexpr int kMaxRocks = 16;
     int mCapacity;
     P2RockHazard mRocks[kMaxRocks];

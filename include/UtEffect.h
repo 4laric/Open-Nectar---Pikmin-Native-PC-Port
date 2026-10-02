@@ -84,7 +84,11 @@ struct BurnEffect : public KEffect {
  * @note Size: 0x18.
  */
 struct FreeLightEffect : public KEffect {
-	FreeLightEffect() { mEfx = nullptr; }
+	FreeLightEffect() { mEfx = nullptr;
+#if defined(PIKI_PC_PORT)
+        mColor=0;mScale=1.0f;
+#endif
+    }
 
 	virtual void emit(immut EffectParm&); // _2C
 	virtual void kill();                  // _30
@@ -248,7 +252,11 @@ struct SmokeTreeEffect : public KEffect {
  * @brief TODO
  */
 struct UfoSuikomiEffect : public KEffect {
-	UfoSuikomiEffect() { mEfx = 0; }
+	UfoSuikomiEffect() { mEfx = 0;
+#if defined(PIKI_PC_PORT)
+        _0C.set(0.0f,0.0f,0.0f);_18.set(0.0f,0.0f,0.0f);
+#endif
+    }
 
 	virtual void emit(immut EffectParm& parm) // _2C
 	{
@@ -339,6 +347,9 @@ struct BombEffectLight : public KEffect {
 struct WhistleTemplate : public KEffect {
 	WhistleTemplate(EffectMgr::effTypeTable id1, EffectMgr::effTypeTable id2)
 	{
+#if defined(PIKI_PC_PORT)
+        _0C.set(0.0f,0.0f,0.0f);_18.set(0.0f,0.0f,0.0f);
+#endif
 		mEfxA = mEfxB = nullptr;
 		mEffIDA       = id1;
 		mEffIDB       = id2;

@@ -46,6 +46,9 @@ struct PlantShapeObject {
  * @note Size: 0x398.
  */
 struct Plant : public AICreature {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayWorldAccess;
+#endif
 public:
 	Plant();
 
@@ -67,15 +70,31 @@ protected:
 public:
 	// _00      = VTBL
 	// _00-_304 = AICreature
-	u16 mPlantType; // _304, see PlantTypes enum
+	u16 mPlantType
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ; // _304, see PlantTypes enum
 
 protected:
-	f32 mMotionSpeed;                 // _308
-	bool mIsCulled;                   // _30C
+	f32 mMotionSpeed
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                 // _308
+	bool mIsCulled
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                   // _30C
 	PaniPlantAnimator mPlantAnimator; // _310
 	SearchData mPlantSearchData[3];   // _364
 	Vector3f _388;                    // _388
-	bool _394;                        // _394
+	bool _394
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                        // _394
 	                                  // TODO: work out members
 };
 
@@ -152,7 +171,11 @@ public:
 
 		// _00     = VTBL
 		// _00-_14 = CoreNode
-		int mPlantType; // _14
+		int mPlantType
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ; // _14
 	};
 
 	PlantMgr(MapMgr*);

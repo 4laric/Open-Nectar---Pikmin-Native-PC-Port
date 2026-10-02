@@ -44,6 +44,9 @@ struct UfoItemProp : public CreatureProp {
  * @brief TODO
  */
 struct UfoAnimator {
+#if defined(PIKI_PC_PORT)
+ friend struct PcMiddayWorldAccess;
+#endif
 public:
 	UfoAnimator();
 
@@ -99,9 +102,21 @@ public:
 		Spot() { }
 
 		Vector3f mPosition; // _00
-		f32 mRadius;        // _0C
-		f32 mAngleOffset;   // _10
-		f32 mRotationTime;  // _14
+		f32 mRadius
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;        // _0C
+		f32 mAngleOffset
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;   // _10
+		f32 mRotationTime
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;  // _14
 		f32 _18;            // _18
 	};
 
@@ -152,15 +167,47 @@ protected:
 public:
 	// _00      = VTBL
 	// _00-_3C8 = Suckable
-	bool mIsMenuOpen;                                     // _3C8
-	bool mIsLightActive;                                  // _3C9
-	bool mShouldLightActivate;                            // _3CA
-	zen::particleGenerator* mRingFx;                      // _3CC
-	zen::particleGenerator* mSparkleFx;                   // _3D0
+	bool mIsMenuOpen
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                                     // _3C8
+	bool mIsLightActive
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                                  // _3C9
+	bool mShouldLightActivate
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                            // _3CA
+	zen::particleGenerator* mRingFx
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                      // _3CC
+	zen::particleGenerator* mSparkleFx
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                   // _3D0
 	Spot mSpots[3];                                       // _3D4
-	bool mIsTroubleFxEnabled;                             // _428
-	f32 mTroubleFxTimer;                                  // _42C
-	u32 mTroubleFxState;                                  // _430
+	bool mIsTroubleFxEnabled
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                             // _428
+	f32 mTroubleFxTimer
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                                  // _42C
+	u32 mTroubleFxState
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                                  // _430
 	Vector3f _434;                                        // _434
 	Vector3f _440;                                        // _440
 	Vector3f _44C;                                        // _44C
@@ -169,25 +216,57 @@ public:
 	Vector3f _470;                                        // _470
 	Vector3f mTroubleFxPositionList[6];                   // _47C
 	zen::particleGenerator* mTroubleFxGenList[6];         // _4C4
-	s16 mJetLevel;                                        // _4DC
+	s16 mJetLevel
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                                        // _4DC
 	zen::particleGenerator* mEngineParticleGenList[4][4]; // _4E0
-	u8 mShipUpgradeLevel;                                 // _520
+	u8 mShipUpgradeLevel
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                                 // _520
 	UfoAnimator mAnimator;                                // _524
-	int mConeEffectId;                                    // _52C
+	int mConeEffectId
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                                    // _52C
 	Vector3f mPca1FxPosition;                             // _530
 	Vector3f mPca2FxPosition;                             // _53C
-	bool mIsPca1FxActive;                                 // _548
-	bool mIsPca2FxActive;                                 // _549
+	bool mIsPca1FxActive
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                                 // _548
+	bool mIsPca2FxActive
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                                 // _549
 	Vector3f mSpotlightPosition;                          // _54C
-	int mWaypointID;                                      // _558
+	int mWaypointID
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                                      // _558
 #if defined(PIKI_PC_PORT)
 	int mPcOwner = -1; ///< VS: jugador dueño de este cohete (-1 fuera de VS)
 #endif
-	UfoShapeObject* mShipModel;                           // _55C
+	UfoShapeObject* mShipModel
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                           // _55C
 	SeContext mShipSe;                                    // _560
 	ShapeDynMaterials* mAnimatedMaterialsList;            // _588
 	LightAnimator mLightAnims[4];                         // _58C
-	bool mNeedPathfindRefresh;                            // _5CC
+	bool mNeedPathfindRefresh
+#if defined(PIKI_PC_PORT)
+ {}
+#endif
+ ;                            // _5CC
 };
 
 #endif
