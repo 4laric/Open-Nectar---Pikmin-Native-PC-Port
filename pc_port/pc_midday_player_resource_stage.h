@@ -13,10 +13,12 @@ struct PlayerResourcePlan {
 // the independently decoded PlayerCore record. Outputs are transactional.
 bool planPlayerResources(const ActorBytes&,const PlayerCoreFields&,const LogicalResolver&,PlayerResourcePlan&,std::string&);
 class IsolatedPlayerResources {
- struct Impl;std::unique_ptr<Impl> impl_;
+ struct Impl;std::unique_ptr<Impl> impl_;size_t attempts_=0;
 public:
  IsolatedPlayerResources();~IsolatedPlayerResources();
- bool allocate(const ActorBytes&,const PlayerCoreFields&,const LogicalResolver&,const RestoreGate&,ConstructorFence&,std::string&);
+ bool allocate(const ActorBytes&,const PlayerCoreFields&,const LogicalResolver&,const RestoreGate&,ConstructorFence&,std::string&,size_t failAt=0);
+ // Counts owned allocation sites only, not codec/bookkeeping allocations.
+ size_t allocationAttempts()const{return attempts_;}
  bool heldBy(const ConstructorFence&)const;
  // Borrowed canonical allocation roots for catalog registration. Parts is a
  // native PlayerState::UfoParts[30], not an actor and not a process wire address.

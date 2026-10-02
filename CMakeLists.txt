@@ -3221,6 +3221,7 @@ add_test(NAME p2_midday_effect_test COMMAND p2_midday_effect_test)
 pikmin_add_ci_fixture(midday_actor_states tools/p2_midday_actor_states_engine_test.cpp)
 if(NOT PIKMIN_NATIVE_JAUDIO)
     pikmin_add_ci_fixture(midday_item_factory tools/p2_midday_item_factory_engine_test.cpp)
+    pikmin_add_ci_fixture(midday_player_resources tools/p2_midday_player_resources_engine_test.cpp)
 endif()
 
 # #1154/#1161 ordinary natural WFG acquisition and cave party route; build only.
