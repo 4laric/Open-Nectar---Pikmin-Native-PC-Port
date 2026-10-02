@@ -106,7 +106,17 @@ bool validate_actor_fields(const ActorFields& fields,const std::vector<FieldSche
             if(s.targetType.empty())return reject(error,"missing concrete reference contract");
             if(f.reference!=s.reference)return reject(error,"actor reference role mismatch");
             if(absent(f.target)) {if(!s.nullable)return reject(error,"required actor reference absent");}
-            else if(!resolver.validateTyped(s,f.target,error))return false;
+            else {
+                if(!s.ownerLink.empty()) {
+                    auto owner=fields.find(s.ownerLink);
+                    if(s.ownership!=ReferenceOwnership::ActorSubobject || owner==fields.end() ||
+                       owner->second.category!=FieldCategory::Reference || owner->second.reference!=RefKind::Creature ||
+                       !owner->second.target.owner || owner->second.target.resource ||
+                       f.target.owner!=owner->second.target.owner || f.target.resource)
+                        return reject(error,"actor subobject owner link mismatch");
+                }
+                if(!resolver.validateTyped(s,f.target,error))return false;
+            }
         }
     }
     return true;

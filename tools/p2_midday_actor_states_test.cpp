@@ -67,6 +67,16 @@ void run() {
     wrongType=schema;wrongType[4].targetType.clear();wrongType[4].nullable=true;
     invalid=fields;invalid["target"].target={};e.clear();
     check(!validate_actor_fields(invalid,wrongType,typedResolver,e),"null optional reference still requires compiled target contract");
+    {
+        ActorFields linked;
+        ActorField captain;captain.category=FieldCategory::Reference;captain.reference=RefKind::Creature;captain.target={8,0,2};linked["captain"]=captain;
+        ActorField plate=captain;plate.reference=RefKind::CPlate;linked["plate"]=plate;
+        std::vector<FieldSchema> linkSchema={FieldSchema::ref("captain",RefKind::Creature,false,"Navi"),FieldSchema::ref("plate",RefKind::CPlate,false,"CPlate",ReferenceOwnership::ActorSubobject,"captain")};
+        e.clear();check(validate_actor_fields(linked,linkSchema,resolver,e),"captain-owned subobject cross-actor link validates");
+        linked["plate"].target.owner=7;e.clear();check(!validate_actor_fields(linked,linkSchema,resolver,e),"valid subobject belonging to wrong captain refused");
+        linked["plate"].target.owner=8;linked["captain"].target={};linkSchema[0].nullable=true;e.clear();
+        check(!validate_actor_fields(linked,linkSchema,resolver,e),"present subobject cannot refer through absent owner");
+    }
     invalid=fields;invalid["target"].target={};e.clear();check(!validate_actor_fields(invalid,schema,resolver,e),"required null refusal");
     invalid=fields;invalid["target"].target.owner=8;e.clear();check(!validate_actor_fields(invalid,schema,resolver,e),"existing incompatible actor role refusal");
     invalid=fields;invalid["target"].reference=RefKind::Animation;e.clear();check(!validate_actor_fields(invalid,schema,resolver,e),"reference role refusal");
