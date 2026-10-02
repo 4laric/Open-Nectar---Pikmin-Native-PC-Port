@@ -403,6 +403,8 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_demo.cpp
     pc_port/pc_midday_demo_engine.cpp
     pc_port/pc_midday_mono_manager_engine.cpp
+    pc_port/pc_midday_player_root.cpp
+    pc_port/pc_midday_player_root_engine.cpp
     pc_port/pc_midday_player_resources.cpp
     pc_port/pc_midday_player_resources_engine.cpp
     pc_port/pc_midday_result.cpp
@@ -3425,3 +3427,7 @@ target_include_directories(pc_midday_player_resources_test PRIVATE pc_port)
 target_compile_definitions(pc_midday_player_resources_test PRIVATE PIKI_PC_PORT)
 target_compile_options(pc_midday_player_resources_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME pc_midday_player_resources COMMAND pc_midday_player_resources_test)
+
+add_executable(pc_midday_player_root_test tools/pc_midday_player_root_test.cpp pc_port/pc_midday_player_root.cpp pc_port/pc_midday_player_core.cpp)
+target_include_directories(pc_midday_player_root_test PRIVATE pc_port)
+add_test(NAME pc_midday_player_root COMMAND pc_midday_player_root_test)

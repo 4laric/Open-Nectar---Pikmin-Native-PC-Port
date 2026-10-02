@@ -87,6 +87,9 @@ struct TimeGraph {
 /**
  * @brief TODO
  */
+#if defined(PIKI_PC_PORT)
+namespace pc_midday { struct PlayerRootStageTag; }
+#endif
 class PlayerState {
 public:
 	/**
@@ -123,6 +126,9 @@ public:
 	};
 
 	PlayerState();
+#if defined(PIKI_PC_PORT)
+	explicit PlayerState(const pc_midday::PlayerRootStageTag&);
+#endif
 
 	bool isEnding();
 	bool existUfoParts(u32);

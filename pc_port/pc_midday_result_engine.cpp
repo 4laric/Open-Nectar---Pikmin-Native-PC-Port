@@ -1,7 +1,6 @@
 #include "pc_midday_result.h"
 #include "ResultFlags.h"
 #include <algorithm>
-namespace pc_midday {struct ResultStageTag{};}
 ResultFlags::ResultFlags(const pc_midday::ResultStageTag&){mLength=38;mActiveCount=0;mTableSize=152;mStates=nullptr;mScreenToTableList=nullptr;for(auto&day:mDaysSeen)day=-1;}
 bool PcMiddayResultAccess::read(const ResultFlags&s,pc_midday::ResultFields&out,std::string&e){
  using namespace pc_midday;ResultFields v;if(!compiled(v.descriptors,e))return false;

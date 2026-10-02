@@ -8,7 +8,7 @@
 struct DemoFlags;
 class Creature;
 namespace pc_midday {
-struct DemoStageTag;
+struct DemoStageTag {};
 struct DemoDescriptor {uint16_t index=0;int16_t movie=0;uint16_t part=0;bool text=false;};
 struct DemoFields {
  std::array<uint8_t,32> stored{};

@@ -15,6 +15,7 @@ namespace pc_midday { struct ResultStageTag; }
 struct ResultFlags {
 #if defined(PIKI_PC_PORT)
 	friend struct PcMiddayResultAccess;
+	friend struct PcMiddayPlayerRootAccess;
 #endif
 public:
 	/**

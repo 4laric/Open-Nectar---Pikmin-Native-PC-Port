@@ -4,7 +4,7 @@
 #include <memory>
 struct ResultFlags;
 namespace pc_midday {
-struct ResultStageTag;
+struct ResultStageTag {};
 struct ResultDescriptor{int32_t screen=0,priority=0;uint32_t store=0;bool autoSet=false;};
 struct ResultFields{std::array<uint8_t,38>states{};std::array<int16_t,30>days{};std::vector<ResultDescriptor>descriptors;};
 bool encodeResult(const ResultFields&,Bytes&,std::string&);

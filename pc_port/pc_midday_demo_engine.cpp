@@ -2,7 +2,6 @@
 #include "Demo.h"
 #include "Creature.h"
 #include <set>
-namespace pc_midday {struct DemoStageTag{};}
 DemoFlags::DemoFlags(const pc_midday::DemoStageTag&){
  mFlagCount=32;mFlagDataNum=256;mCurrentDataIndex=0;mStoredFlags=nullptr;
  mFlagDataList=nullptr;mTargetCreature=nullptr;mWaitTimer=0;mCurrentDemoIndex=-1;
