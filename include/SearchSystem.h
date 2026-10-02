@@ -28,6 +28,15 @@ public:
  */
 class SearchBuffer : public Traversable {
 #if defined(PIKI_PC_PORT)
+private:
+    struct MiddayRestoreTag {};
+    explicit SearchBuffer(MiddayRestoreTag);
+    void bindMiddayRestoreStorage(SearchData*, int);
+    friend class Creature;
+    friend class Piki;
+    friend class Navi;
+#endif
+#if defined(PIKI_PC_PORT)
 	friend struct PcMiddayCreatureAccess;
 #endif
 public:

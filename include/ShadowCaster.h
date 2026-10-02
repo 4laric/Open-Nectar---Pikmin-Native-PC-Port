@@ -15,6 +15,13 @@
  * @note Size: 0x398.
  */
 struct ShadowCaster : public CoreNode {
+#if defined(PIKI_PC_PORT)
+private:
+	friend class Navi;
+	struct MiddayRestoreTag {};
+	ShadowCaster(MiddayRestoreTag);
+public:
+#endif
 	ShadowCaster();
 
 	void initShadow();

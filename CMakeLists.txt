@@ -262,6 +262,13 @@ set(PC_PORT_SOURCES
     pc_port/pc_midday_piki_states.cpp
     pc_port/pc_midday_piki_actions.cpp
     pc_port/pc_midday_piki_runtime.cpp
+    pc_port/pc_midday_view_piki.cpp
+    pc_port/pc_midday_view_piki_schema.cpp
+    pc_port/pc_midday_view_piki_prepare.cpp
+    pc_port/pc_midday_actor_shell.cpp
+    pc_port/pc_midday_creature_shell.cpp
+    pc_port/pc_midday_navi_shell.cpp
+    pc_port/pc_midday_piki_shell.cpp
     pc_port/pc_midday_enemy.cpp
     pc_port/pc_midday_enemy_subobjects.cpp
     pc_port/pc_midday_enemy_schema.cpp
@@ -3083,6 +3090,24 @@ add_executable(p2_midday_actor_states_test
 target_include_directories(p2_midday_actor_states_test PRIVATE pc_port)
 target_compile_options(p2_midday_actor_states_test PRIVATE ${NATIVE_COMPILE_OPTIONS} -UNDEBUG)
 add_test(NAME p2_midday_actor_states_test COMMAND p2_midday_actor_states_test)
+
+add_executable(p2_midday_view_piki_test
+    tools/p2_midday_view_piki_test.cpp
+    pc_port/pc_midday_view_piki_schema.cpp
+    pc_port/pc_midday_actor_archive.cpp)
+target_include_directories(p2_midday_view_piki_test PRIVATE pc_port)
+target_compile_definitions(p2_midday_view_piki_test PRIVATE PIKI_PC_PORT)
+target_compile_options(p2_midday_view_piki_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_midday_view_piki_test COMMAND p2_midday_view_piki_test)
+
+add_executable(p2_midday_view_piki_fields_test
+    tools/p2_midday_view_piki_fields_test.cpp
+    pc_port/pc_midday_view_piki_schema.cpp
+    pc_port/pc_midday_actor_archive.cpp)
+target_include_directories(p2_midday_view_piki_fields_test PRIVATE pc_port include include/Dolphin)
+target_compile_definitions(p2_midday_view_piki_fields_test PRIVATE PIKI_PC_PORT)
+target_compile_options(p2_midday_view_piki_fields_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
+add_test(NAME p2_midday_view_piki_fields_test COMMAND p2_midday_view_piki_fields_test)
 add_executable(p2_midday_piki_schema_test
     tools/p2_midday_piki_schema_test.cpp
     pc_port/pc_midday_actor_archive.cpp

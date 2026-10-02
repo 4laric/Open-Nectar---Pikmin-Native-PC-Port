@@ -99,6 +99,13 @@ enum {
  * @brief TODO
  */
 class Piki : public Creature, public PaniAnimKeyListener {
+#if defined(PIKI_PC_PORT)
+private:
+    struct MiddayRestoreTag {};
+    Piki(MiddayRestoreTag, CreatureProp*);
+    friend class ViewPiki;
+    friend struct PcMiddayActorShellAccess;
+#endif
 public:
 	Piki(CreatureProp*);
 

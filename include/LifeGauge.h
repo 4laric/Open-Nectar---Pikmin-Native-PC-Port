@@ -97,6 +97,13 @@ public:
  * @note Size: 0x3C.
  */
 struct LifeGauge {
+#if defined(PIKI_PC_PORT)
+private:
+    struct MiddayRestoreTag {};
+    explicit LifeGauge(MiddayRestoreTag);
+    friend class Creature;
+public:
+#endif
 
 	/**
 	 * @brief Style to render the health gauge in.
