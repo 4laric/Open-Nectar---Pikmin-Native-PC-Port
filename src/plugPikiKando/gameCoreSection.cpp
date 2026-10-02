@@ -1,3 +1,6 @@
+#if defined(PIKI_PC_PORT)
+#include "pc_midday_scene_bootstrap.h"
+#endif
 #include "pc_p2_ship.h"
 #include "pc_dev_console.h"
 #include "pc_p2_ship_store.h"
@@ -4196,8 +4199,8 @@ void GameCoreSection::updateAI()
         }
     }
     // Grants are once per campaign unlock; restored boot flags prevent replay.
-    static bool bbftColorGranted[3] = {};
-    static bool initialColorRegistered = false;
+    auto& bbftColorGranted = pc_midday::sceneBootstrap().colorGranted;
+    auto& initialColorRegistered = pc_midday::sceneBootstrap().initialColorRegistered;
     const int initialColor = pc_randomizer_enabled() ? pc_randomizer_start_color() : Red;
     if (!initialColorRegistered) {
         if (pc_randomizer_resumed()) {
@@ -4228,8 +4231,9 @@ void GameCoreSection::updateAI()
             pc_bbft_milestone(color == Blue ? "PIKMIN_BLUE_ONION_GRANTED starter=5" : color == Red ? "PIKMIN_RED_ONION_GRANTED starter=5" : "PIKMIN_YELLOW_ONION_GRANTED starter=5");
         }
     }
-    static bool bbftRedsQueued = false, bbftRedsReady = false;
-    static int bbftInitialField = 20;
+    auto& bbftRedsQueued = pc_midday::sceneBootstrap().redsQueued;
+    auto& bbftRedsReady = pc_midday::sceneBootstrap().redsReady;
+    auto& bbftInitialField = pc_midday::sceneBootstrap().initialField;
     if (pc_bbft_skip_tutorial() && !pc_randomizer_resumed() && !gameflow.mMoviePlayer->mIsActive
         && !gameflow.mPauseAll && !gameflow.mIsUIOverlayActive && itemMgr) {
         GoalItem* redOnion = itemMgr->getContainer(initialColor);
@@ -4703,7 +4707,7 @@ void GameCoreSection::updateAI()
         }
     }
 #endif
-    static bool bbftReady = false;
+    auto& bbftReady = pc_midday::sceneBootstrap().gameplayReady;
     if (!bbftReady && pc_bbft_enabled() && !gameflow.mMoviePlayer->mIsActive
         && !gameflow.mPauseAll && !gameflow.mIsUIOverlayActive && mNavi && mMapMgr) {
         pc_bbft_milestone("PIKMIN_GAMEPLAY_READY");
