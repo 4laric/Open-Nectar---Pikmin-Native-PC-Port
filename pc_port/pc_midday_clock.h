@@ -1,6 +1,7 @@
 #pragma once
 #include "pc_midday_codec.h"
 struct WorldClock;
+namespace pc_midday { struct RestoreGate; }
 namespace pc_midday {
 // Component only: scene/fence/first-update state is a separate required envelope.
 struct ClockFields {
@@ -12,4 +13,7 @@ bool encodeClock(const ClockFields&,Bytes&,std::string&);
 bool decodeClock(const Bytes&,ClockFields&,std::string&);
 // Reads all named logical fields, without advancing or recomputing the clock.
 bool captureClockComponent(const WorldClock&,Bytes&,std::string&);
+// Staged-world component apply only: all named fields validate before any write.
+// Scene/day-end/tick/first-update envelopes remain separate mandatory state.
+bool applyClockComponent(WorldClock&,const Bytes&,const RestoreGate&,std::string&);
 }
