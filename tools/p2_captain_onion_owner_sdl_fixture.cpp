@@ -348,6 +348,25 @@ class CaptainSaveApp final:public PlugPikiApp {
         return n->getCurrState()->getID()==NAVISTATE_Walk && !n->mStickListHead && !playerState->inDayEnd() && !gameflow.mPauseAll
             && !(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive) && !busy && !n->roughCulling(onion,radius*1.5f) && diff.length()<=radius;
     }
+    bool initialIterableNeutral=false;
+    int initialIterableCount(Navi* n){
+        require(n && n->mPlateMgr,"initial iterable plate exists");
+        std::vector<Piki*> seen;
+        int index=n->mPlateMgr->getFirst();
+        for(int steps=0;steps<=20;++steps){
+            require(index>=0 && index<=20,"bounded native plate iterator index");
+            if(n->mPlateMgr->isDone(index))return int(seen.size());
+            require(steps<20 && n->mPlateMgr->validSlot(index),"native iterable fits actual used slots and original20");
+            auto* p=static_cast<Piki*>(n->mPlateMgr->getCreature(index));
+            require(p && std::find(manualBornBodies.begin(),manualBornBodies.end(),p)!=manualBornBodies.end(),"iterable pointer belongs to original living withdrawal bodies");
+            require(std::find(seen.begin(),seen.end(),p)==seen.end(),"native iterable has no duplicate body");
+            require(p->isAlive() && p->mHealth>0.0f && p->mColor==pc_randomizer_start_color()
+                && p->getState()==PIKISTATE_Normal && p->mMode==PikiMode::FormationMode && p->mNavi==n,"native iterable healthy original color and owner");
+            seen.push_back(p);
+            const int next=n->mPlateMgr->getNext(index);require(next>index,"native iterator advances");index=next;
+        }
+        require(false,"bounded native iterator termination");return -1;
+    }
     bool onionInputHeld=false;
     unsigned onionInputObservations=0;
     void onionMenu(Navi* n,int target){
@@ -358,7 +377,14 @@ class CaptainSaveApp final:public PlugPikiApp {
         if(n->getCurrState()->getID()==NAVISTATE_Container){
             require(containerWindow && n->mGoalItem==onion,"ordinary offline selected Onion UI");
             const int state=containerWindow->getStatus(), squad=containerWindow->getMyPikiDisp();
-            if(!menuSeen){menuSeen=true;onionInputHeld=false;elapsed(target?"withdraw_menu_open":"deposit_menu_open");}
+            if(!menuSeen){
+                if(ownerStage==Deposit){
+                    const int iterable=initialIterableCount(n);
+                    std::printf("P2_ONION_DEPOSIT_INITIAL displayed=%d iterable=%d used=%d formation=%d live=%d stored=%d\n",squad,iterable,plateCount(n),formation(n),liveCount(),storedCount());
+                    require(squad==20 && iterable==20 && plateCount(n)==20 && formation(n)==20 && liveCount()==20 && storedCount()==0,"initial deposit menu exposes all original20 before any selection");
+                }
+                menuSeen=true;onionInputHeld=false;elapsed(target?"withdraw_menu_open":"deposit_menu_open");
+            }
             if(onionInputObservations++<240)std::printf("P2_ONION_MENU_INPUT captain=%d target=%d displayed=%d stock=%d live=%d state=%d held=%08x pressed=%08x axis_y=%.3f release_next=%d\n",n->mNaviID,target,squad,storedCount(),liveCount(),state,unsigned(n->mKontroller->mCurrentInput),unsigned(n->mKontroller->mInputPressed),double(n->mKontroller->mMainStickY),int(onionInputHeld));
             require(squad>=0&&squad<=20,"ordinary menu selection bounded20");
             if(state!=zen::DrawContainer::STATE_Operation){pad();onionInputHeld=false;menuConfirm=false;return;}
@@ -523,6 +549,11 @@ public:
                 if(formation(a)!=20 || formation(b)!=0 || plateCount(a)!=20 || plateCount(b)!=0)return result;
                 require(manualBornBodies.size()==20,"twenty original ordinary UI withdrawal bodies");
                 sameBodies(manualBornBodies);
+                const int iterable=initialIterableCount(a);
+                const bool neutral=a->mKontroller->mCurrentInput==0 && a->mKontroller->mMainStickX==0 && a->mKontroller->mMainStickY==0;
+                std::printf("P2_ONION_ITERABLE_READY frames=%d iterable=%d used=%d formation=%d neutral=%d prior_ready=%d\n",startupFrames,iterable,plateCount(a),formation(a),int(neutral),int(initialIterableNeutral));
+                if(iterable!=20 || !neutral){initialIterableNeutral=false;return result;}
+                if(!initialIterableNeutral){initialIterableNeutral=true;return result;}
                 require(pc_onion_start_complete(),"all20 continuous actual Exit-to-Crowd histories complete");
                 for(auto* p:manualBornBodies){bool found=false;for(const auto& body:pc_onion_start_bodies)if(body.actor==reinterpret_cast<uintptr_t>(p))found=true;require(found,"every original body matches native history");}
                 std::printf("P2_ONION_INITIAL_HISTORY bodies=20 exit_entries=20 formed=20 unexpected=0 events=%u continuous=1\n",pc_onion_start_events);
