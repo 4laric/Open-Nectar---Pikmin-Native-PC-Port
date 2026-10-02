@@ -82,7 +82,7 @@ class ContactApp:public PlugPikiApp {
     int frame=0,age=0,ready=0,throwTicks=0;
     bool captainSeen=false,started=false,offContactSeen=false,reverseSeen=false;
     bool slotSeen[2]={false,false};
-    int acquisition=0,acquisitionTicks=0,whiteGather=0;
+    int acquisition=0,acquisitionTicks=0,whiteGather=0,ivoryThrowTicks=0;
     bool sawWhiteSprout=false,ivoryCaptured=false;
     Piki* acquiredWhite=nullptr;
     std::map<Piki*,int> observedSpecies;
@@ -152,8 +152,11 @@ class ContactApp:public PlugPikiApp {
         if(distance(n->mSRT.t,flower->mSRT.t)>100.f){point(n,flower->mSRT.t,true);return false;}
         acquisition=1;
         if(sawWhiteSprout||ivoryCaptured){input();return false;}
-        const int cycle=acquisitionTicks%60;
-        if(cycle<22)point(n,flower->mSRT.t,false,KBBTN_A);else input();
+        // One ordinary attempt: do not send another Pikmin while the first
+        // throw is still flying or awaiting the flower's capture/conversion.
+        ++ivoryThrowTicks;
+        require(ivoryThrowTicks<=240,"single Ivory throw missed or capture not observed");
+        if(ivoryThrowTicks<=22)point(n,flower->mSRT.t,false,KBBTN_A);else input();
         return false;
     }
     int contactSamples=0,offContactSamples=0;
