@@ -26,6 +26,7 @@
 #include "Pom.h"
 #include "pc_p2_white.h"
 #include "pc_p2_species.h"
+#include "pc_p2_second_captain.h"
 #include "Generator.h"
 #include "teki.h"
 #include "Collision.h"
@@ -79,7 +80,7 @@ Teki* find(unsigned token){
     return nullptr;
 }
 class ContactApp:public PlugPikiApp {
-    int frame=0,age=0,ready=0,throwTicks=0;
+    int frame=0,age=0,ready=0,throwTicks=0,inactiveWaitFrames=0;
     bool captainSeen=false,started=false,offContactSeen=false,reverseSeen=false;
     bool slotSeen[2]={false,false};
     int acquisition=0,acquisitionTicks=0,whiteGather=0,ivoryThrowTicks=0;
@@ -198,7 +199,12 @@ public:
             }
         }
         const char* mask=std::getenv("P2_ELECBUG_GUARD_MASK");
-        if(mask&&!std::strcmp(mask,"inactive"))require(false,"inactive guard mask unavailable: no initialized inactive captain");
+        if(mask&&!std::strcmp(mask,"inactive")){
+            // Supported scene startup owns captain construction and init. Keep
+            // guarding every initialized slot while waiting for the second one.
+            require(++inactiveWaitFrames<=180,"requested second captain failed to initialize");
+            input();return result;
+        }
         if(!acquireWhite(n))return result;
         ++age;
         const char* state=pc_p2_elecbug_state_name(enemy);
@@ -315,6 +321,11 @@ int main(int argc,char** argv){
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");
     SDL_SetMainReady();pc_gpu_preference_apply();pc_bbft_init(argc,argv);
     require(pc_pikipelago_room_preview(),"requires experimental room argument");
+    const char* guardMask=std::getenv("P2_ELECBUG_GUARD_MASK");
+    const bool inactiveGuard=guardMask&&!std::strcmp(guardMask,"inactive");
+    require(pc_p2_captain::second_captain_requested()==inactiveGuard,"second captain is requested only for isolated inactive guard");
+    require(pc_p2_captain::navi_capacity()==(inactiveGuard?2:1),"supported startup captain capacity");
+    std::printf("P2_ELECBUG_STARTUP second_captain=%d capacity=%d guard=%s\n",int(inactiveGuard),pc_p2_captain::navi_capacity(),guardMask?guardMask:"none");
     if(!pc_window_init("P2 Anode landing-contact acceptance",960,540))return 3;
     pc_settings_init();pc_window_set_control_mode(PC_CONTROL_CLASSIC);
     pc_window_set_display_mode(0);pc_window_set_window_size(960,540);pc_window_center();
