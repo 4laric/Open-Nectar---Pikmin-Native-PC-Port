@@ -57,6 +57,12 @@ void input(Navi* n,float gx,bool whistle=false) {
  SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTX,Sint16(x*256));
  SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTY,Sint16(-y*256));SDL_JoystickUpdate();
 }
+// Release previously published alignment input without dereferencing actors/camera.
+void neutral_input() {
+ SDL_JoystickSetVirtualButton(pad,SDL_CONTROLLER_BUTTON_B,0);
+ SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTX,0);
+ SDL_JoystickSetVirtualAxis(pad,SDL_CONTROLLER_AXIS_LEFTY,0);SDL_JoystickUpdate();
+}
 struct Track {Creature* actor=nullptr;int outbound=0,back=0;};
 class UpperApp:public PlugPikiApp {
  std::array<Track,21> roster{};
@@ -112,9 +118,9 @@ public:
     p2_fixture_require_captain(GameStat::orimaDead||forced||paused,
      naviMgr->isNaviDead(n)||n->getCurrState()->getID()==NAVISTATE_Dead,n->mHealth,tick);}}
   ++tick;require(tick<3600,"frame bound; outer supervisor must cap60 seconds");
-  if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){gameflow.mMoviePlayer->requestSkip();return result;}
+  if(gameflow.mMoviePlayer&&gameflow.mMoviePlayer->mIsActive){if(!bankReady){ready=0;neutral_input();}gameflow.mMoviePlayer->requestSkip();return result;}
   Navi* n=naviMgr?naviMgr->getNavi():nullptr;
-  if(!n||!n->getCurrState()||!pikiMgr||!mapMgr||gameflow.mPauseAll||gameflow.mIsUIOverlayActive)return result;
+  if(!n||!n->getCurrState()||!pikiMgr||!mapMgr||gameflow.mPauseAll||gameflow.mIsUIOverlayActive){if(!bankReady){ready=0;neutral_input();}return result;}
   require(flowCont.mCurrentStage&&!std::strcmp(flowCont.mCurrentStage->mFileName,"stages/p2_tutorial.ini"),"wrong tutorial stage");
   require(!gameflow.mIsChallengeMode&&!pc_pikipelago_room_preview(),"wrong course lifecycle");
   require(mapMgr->mMapModel&&mapMgr->mMapModel->mTriCount==5332,"complete source faces missing");
@@ -125,7 +131,17 @@ public:
    unsigned uid=q->mGenerator?static_cast<unsigned>(q->mGenerator->_70):0;require(uid>=1&&uid<=20&&!current[uid-1],"original roster UID missing/duplicate/new actor");
    current[uid-1]=q;++count;}
   require(count==20,"original twenty live Reds lost");
-  if(!bankReady){if(n->getCurrState()->getID()!=NAVISTATE_Walk){ready=0;return result;}
+  if(!bankReady){if(n->getCurrState()->getID()!=NAVISTATE_Walk){ready=0;neutral_input();return result;}
+   // Engineering spawn clearance settles through ordinary gravity/collisions.
+   // Reacquire the disclosed bank anchor using the existing calibrated SDL path;
+   // preserve the exact pose gate rather than assuming the birth pose is stationary.
+   input(n,-250.f,false); // No whistle transition during Walk-only alignment.
+   if(tick%15==0){
+    std::printf("P2_UPPER_BANK_ALIGNMENT tick=%d state=%d xyz=%.3f,%.3f,%.3f velocity=%.3f,%.3f,%.3f target_velocity=%.3f,%.3f,%.3f ground=%d wall=%d ordinary_SDL=1 actor_writes=0 ready_frames=%d\n",
+     tick,n->getCurrState()->getID(),n->mSRT.t.x,n->mSRT.t.y,n->mSRT.t.z,n->mVelocity.x,n->mVelocity.y,n->mVelocity.z,n->mTargetVelocity.x,n->mTargetVelocity.y,n->mTargetVelocity.z,int(n->mGroundTriangle!=nullptr),int(n->mWallPlane!=nullptr),ready);
+    std::fflush(nullptr);
+   }
+   if(!(n->mSRT.t.x<-230.f&&std::fabs(n->mSRT.t.z-1000.f)<20.f)){ready=0;return result;}
    if(++ready<45)return result;
    require(!pc_settings_get_piki_invincible()&&!pc_settings_get_blues_only_water(),"hazard settings changed ordinary baseline");
    require(std::fabs(pc_settings_get_navi_speed_scale()-1.f)<.0001f,"captain speed changed ordinary baseline");
