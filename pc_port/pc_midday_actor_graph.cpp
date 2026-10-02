@@ -35,6 +35,7 @@ ActorAllocationGraph::~ActorAllocationGraph()=default;
 Navi* ActorAllocationGraph::stagedNavi()const{return impl_?impl_->navi:nullptr;}
 ViewPiki* ActorAllocationGraph::stagedPiki()const{return impl_?impl_->piki:nullptr;}
 bool ActorAllocationGraph::empty()const{return !impl_;}
+bool ActorAllocationGraph::heldBy(const ConstructorFence& fence)const{return impl_ && &impl_->fence==&fence && fence.held();}
 void ActorAllocationGraph::reset(){impl_.reset();}
 namespace {
 bool number(const ActorFields& fields,const char* key,float& output,std::string& error){

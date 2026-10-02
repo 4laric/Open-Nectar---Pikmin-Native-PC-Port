@@ -37,6 +37,8 @@ public:
  Navi* stagedNavi()const;
  ViewPiki* stagedPiki()const;
  bool empty()const;
+ // Identity/held-state observation only; the fence must still outlive this graph.
+ bool heldBy(const ConstructorFence&)const;
  std::size_t allocationAttempts()const{return attempts_;}
  // Construction owner fence must remain held through cleanup. This owner has
  // no live-world transfer protocol; publication support is intentionally absent.
