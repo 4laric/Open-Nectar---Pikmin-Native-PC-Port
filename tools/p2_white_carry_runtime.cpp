@@ -76,6 +76,10 @@ int main(){
 static void require(bool ok,const char* reason) {
     if(!ok){std::printf("P2_WHITE_CARRY_FAIL %s\n",reason);std::fflush(nullptr);std::_Exit(1);}
 }
+static unsigned generatedUid(const Creature* actor) {
+    require(actor&&actor->mGenerator,"original generated actor missing generator");
+    return actor->mGenerator->_70; // Staged unique ID; getGeneratorID() is the shared name tag.
+}
 static int population() {
     int count=0;Iterator actors(pikiMgr);CI_LOOP(actors){if(static_cast<Piki*>(*actors)->isAlive())++count;}
     Iterator heads(itemMgr->getPikiHeadMgr());CI_LOOP(heads){if(static_cast<PikiHeadItem*>(*heads)->isAlive())++count;}
@@ -135,14 +139,14 @@ public:
    int w,h,x,y;SDL_Window* window=SDL_GL_GetCurrentWindow();SDL_GetWindowSize(window,&w,&h);SDL_GetWindowPosition(window,&x,&y);SDL_Rect bounds{};SDL_GetDisplayBounds(SDL_GetWindowDisplayIndex(window),&bounds);bool centered=std::abs(x-(bounds.x+(bounds.w-w)/2))<=2&&std::abs(y-(bounds.y+(bounds.h-h)/2))<=2;require(w==960&&h==540&&centered,"window dimensions/centering");std::printf("P2_WHITE_CARRY_WINDOW width=%d height=%d centered=%d\n",w,h,int(centered));
    int count=0,white=0,red=0;Iterator actors(pikiMgr);CI_LOOP(actors){Piki* p=static_cast<Piki*>(*actors);if(p->isAlive()){++count;if(pc_p2_is_white(p))++white;else if(pc_p2_species(p)==P2SpeciesRed)++red;require(p->mHappa==Leaf,"unexpected restored maturity");}}
    require(count==20&&red==20&&white==0,"starting squad not20Red");
-   std::set<unsigned> ids;Iterator roster(pikiMgr);CI_LOOP(roster){Piki* p=static_cast<Piki*>(*roster);require(p->isAlive()&&p->getGeneratorID()>=1&&p->getGeneratorID()<=20&&ids.insert(p->getGeneratorID()).second,"original20 unique generated Reds");}
+   std::set<unsigned> ids;Iterator roster(pikiMgr);CI_LOOP(roster){Piki* p=static_cast<Piki*>(*roster);require(p->isAlive()&&generatedUid(p)>=1&&generatedUid(p)<=20&&ids.insert(generatedUid(p)).second,"original20 unique generated Reds");}
    Iterator bosses(bossMgr);CI_LOOP(bosses){Boss* b=static_cast<Boss*>(*bosses);if(b->isAlive()&&b->mObjType==OBJTYPE_Pom&&pc_p2_ivory(static_cast<Pom*>(b))){require(!flower,"multiple Ivory buds");flower=static_cast<Pom*>(b);}}
    std::printf("P2_WHITE_BASELINE_COUNTS frame=%d red=%d bodies=%d bound_ivory=%d nstate=%d\n",frames,count,population(),int(flower!=nullptr),n->getCurrState()->getID());require(count==20&&population()==20&&flower,"fresh baseline requires twenty Reds and one Ivory");
    std::printf("P2_WHITE_ACQUISITION_BASELINE squad=20 window=%dx%d position=%d,%d hp=%.3f navi=%.2f,%.2f face=%.2f bud=%.2f,%.2f kill_same=%d capacity=%d cycles=%d..%d\n",w,h,x,y,n->mHealth,n->mSRT.t.x,n->mSRT.t.z,n->mFaceDirection,flower->mSRT.t.x,flower->mSRT.t.z,int(C_POM_PARM(flower,mDoKillSameColorPiki)),int(C_POM_PARM(flower,mMaxPikiPerCycle)),int(C_POM_PARM(flower,mMinCycles)),int(C_POM_PARM(flower,mMaxCycles)));
    Iterator pellets(pelletMgr);CI_LOOP(pellets){if(static_cast<Pellet*>(*pellets)->isAlive())++baselinePellets;}
    require(flower->mPomAi->mReleasedSeedCount==0,"Ivory starts with nonzero spent budget");
    cargo=pc_p2_preview_treasure();require(cargo&&cargo->isAlive()&&cargo->mConfig,"generated treasure missing");
-   cargoUid=cargo->getGeneratorID();require(cargoUid==26,"cargo generator identity");
+   cargoUid=generatedUid(cargo);require(cargoUid==26,"cargo generator identity");
    require(cargo->mConfig->mCarryMinPikis()==1&&cargo->mConfig->mCarryMaxPikis()==1,"engineering cargo profile");
    auto* pod=itemMgr->getContainer(Red);require(pod&&pc_p2_preview_is_pod(pod),"real Pod missing");destination=pod->mSRT.t;
    require(!std::ifstream("p2-economy.txt").good()&&!std::ifstream("treasure-receipt.txt").good(),"fresh economy required");
@@ -155,7 +159,7 @@ public:
   if(phase==6&&ticks>=20){float dx=flower->mSRT.t.x-n->mCursorWorldPos.x,dz=flower->mSRT.t.z-n->mCursorWorldPos.z;phase=(dx*dx+dz*dz<64)?3:2;ticks=0;}
   int red=0,white=0,heads=0,captured=0,flying=0;PikiHeadItem* head=nullptr;
   bool acquiredActive=false;std::set<unsigned> redIds;
-  Iterator actors(pikiMgr);CI_LOOP(actors){Piki* p=static_cast<Piki*>(*actors);if(!p->isAlive())continue;if(p==acquired)acquiredActive=true;if(pc_p2_is_white(p))++white;else{require(pc_p2_species(p)==P2SpeciesRed&&p->getGeneratorID()>=1&&p->getGeneratorID()<=20&&redIds.insert(p->getGeneratorID()).second,"original Red identity/roster changed");++red;}if(p->getStickObject()==flower)++captured;if(p->getState()==PIKISTATE_Flying)++flying;}
+  Iterator actors(pikiMgr);CI_LOOP(actors){Piki* p=static_cast<Piki*>(*actors);if(!p->isAlive())continue;if(p==acquired)acquiredActive=true;if(pc_p2_is_white(p))++white;else{require(pc_p2_species(p)==P2SpeciesRed&&generatedUid(p)>=1&&generatedUid(p)<=20&&redIds.insert(generatedUid(p)).second,"original Red identity/roster changed");++red;}if(p->getStickObject()==flower)++captured;if(p->getState()==PIKISTATE_Flying)++flying;}
   Iterator sprouts(itemMgr->getPikiHeadMgr());CI_LOOP(sprouts){PikiHeadItem* p=static_cast<PikiHeadItem*>(*sprouts);if(p->isAlive()){++heads;require(pc_p2_species(p)==P2SpeciesWhite,"non-White sprout");if(!head&&p->canPullout())head=p;}}
   int activeIvory=0,totalBosses=0;Iterator bossList(bossMgr);CI_LOOP(bossList){Boss* boss=static_cast<Boss*>(*bossList);++totalBosses;if(boss==flower)++activeIvory;}
   // The sole Pom stays allocated in its free pool after kill. This arena has
@@ -176,7 +180,7 @@ public:
   if(phase==5 && white==1 && heads==0 && n->getCurrState()->getID()==NAVISTATE_Walk){
    require(red==19&&captured==0&&flower->mPomAi->mReleasedSeedCount==1,"ordinary White pluck counts/budget");
    Iterator whites(pikiMgr);CI_LOOP(whites){Piki* p=static_cast<Piki*>(*whites);if(p->isAlive()&&pc_p2_is_white(p)){require(!acquired,"multiple Whites");acquired=p;}}
-   require(acquired&&!pc_p2_has_red_immunity(acquired)&&acquired->mHappa==Leaf,"natural White leaf identity/immunity");whiteUid=acquired->getGeneratorID();
+   require(acquired&&!pc_p2_has_red_immunity(acquired)&&acquired->mHappa==Leaf,"natural White leaf identity/immunity");whiteUid=acquired->getGeneratorID(); // Ordinary name tag (possibly null); active pointer membership conserves this naturally born body.
    goal=cargo->mSRT.t;phase=7;ticks=0;
    std::puts("P2_WHITE_CARRY_PLUCKED red=19 white=1 heads=0 bodies=20 spent=1 ordinary_birth_pluck=1");std::fflush(nullptr);return result; // Observe active membership afresh after the next real engine idle.
   }
@@ -185,7 +189,7 @@ public:
    // Never dereference retained cargo after active-manager removal.
    bool active=false;Iterator list(pelletMgr);CI_LOOP(list){if(*list==cargo)active=true;}
    if(active){
-    require(cargo->getGeneratorID()==cargoUid,"cargo active-slot identity changed");
+    require(generatedUid(cargo)==cargoUid,"cargo active-slot identity changed");
     if(phase==7){goal=cargo->mSRT.t;float dx=goal.x-n->mCursorWorldPos.x,dz=goal.z-n->mCursorWorldPos.z;float bx=goal.x-n->mSRT.t.x,bz=goal.z-n->mSRT.t.z;if(dx*dx+dz*dz<64&&bx*bx+bz*bz>625&&bx*bx+bz*bz<10000){phase=8;ticks=0;}}
     if(phase==8&&ticks>=20){phase=9;ticks=0;goal=cargo->mSRT.t;}
     if(phase==9 && acquired->getStickObject()==cargo){phase=10;ticks=0;}
