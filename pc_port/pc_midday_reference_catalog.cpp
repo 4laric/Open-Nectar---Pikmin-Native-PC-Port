@@ -5,7 +5,7 @@ namespace {
 bool absent(const LogicalRef& r){return !r.owner&&!r.resource&&!r.slot;}
 bool same(const LogicalRef& a,const LogicalRef& b){return a.owner==b.owner&&a.resource==b.resource&&a.slot==b.slot;}
 bool referenceCategory(FieldCategory c){return c==FieldCategory::Reference||c==FieldCategory::Handle||c==FieldCategory::Token64;}
-bool ownership(ReferenceOwnership o){return o==ReferenceOwnership::AnyLive||o==ReferenceOwnership::Self||o==ReferenceOwnership::ActorSubobject||o==ReferenceOwnership::Content;}
+bool ownership(ReferenceOwnership o){return o==ReferenceOwnership::AnyLive||o==ReferenceOwnership::Self||o==ReferenceOwnership::ActorSubobject||o==ReferenceOwnership::Content||o==ReferenceOwnership::ResourceSelf||o==ReferenceOwnership::ResourceSubobject;}
 bool fail(std::string& e,const char* m){e=m;return false;}
 }
 const CatalogAlias* SceneReferenceCatalog::lookup(const LogicalRef& id,RefKind k,FieldCategory c,const std::string& t)const{
@@ -17,8 +17,10 @@ bool SceneReferenceCatalog::declare(const CatalogAlias& a,std::string& e){
  bool identity=false;
  switch(a.origin){
  case CatalogOrigin::ActorRoot:identity=live(a.id.owner)&&!a.id.resource&&!a.id.slot;break;
- case CatalogOrigin::ActorSubobject:identity=live(a.id.owner)&&a.id.slot;break;
- case CatalogOrigin::Content:identity=!a.id.owner&&a.id.resource;break;
+ case CatalogOrigin::ActorSubobject:identity=live(a.id.owner)&&!a.id.resource&&a.id.slot;break;
+ case CatalogOrigin::Content:identity=!a.id.owner&&resource(a.id.resource);break;
+ case CatalogOrigin::ResourceSelf:identity=!a.id.owner&&resource(a.id.resource);break;
+ case CatalogOrigin::ResourceSubobject:identity=!a.id.owner&&resource(a.id.resource)&&a.id.slot;break;
  default:break;
  }
  if(!identity||lookup(a.id,a.kind,a.category,a.type))return fail(e,"invalid or duplicate catalog identity/type");
@@ -40,17 +42,21 @@ bool SceneReferenceCatalog::bind(const LogicalRef& id,RefKind k,FieldCategory c,
  }
  return fail(e,"fresh reference has no declared concrete alias");
 }
-bool SceneReferenceCatalog::identify(RefKind k,FieldCategory c,const void* pointer,u64 n,LogicalRef& out,std::string& e,u64 numericOwner)const{
+bool SceneReferenceCatalog::identify(RefKind k,FieldCategory c,const void* pointer,u64 n,LogicalRef& out,std::string& e,SceneSubject numericSubject)const{
+ if(!referenceCategory(c)||static_cast<unsigned>(k)>=static_cast<unsigned>(RefKind::Count))return fail(e,"invalid reference capture category/kind");
+ if((numericSubject.actor&&numericSubject.resource)||(numericSubject.actor&&!live(numericSubject.actor))||(numericSubject.resource&&!resource(numericSubject.resource))||
+    (c!=FieldCategory::Reference&&!numericSubject.actor&&!numericSubject.resource))return fail(e,"numeric capture requires one registered subject");
  bool found=false;LogicalRef selected;
- for(const auto& a:aliases_)if(a.bound&&a.kind==k&&a.category==c&&(!numericOwner||a.id.owner==numericOwner)&&(c==FieldCategory::Reference?a.address==pointer:a.number==n)){
+ for(const auto& a:aliases_)if(a.bound&&a.kind==k&&a.category==c&&(!numericSubject.actor||a.id.owner==numericSubject.actor)&&(!numericSubject.resource||(!a.id.owner&&a.id.resource==numericSubject.resource))&&(c==FieldCategory::Reference?a.address==pointer:a.number==n)){
   if(found&&!same(selected,a.id))return fail(e,"ambiguous native reference identity");
   selected=a.id;found=true;
  }
  if(!found){if(c!=FieldCategory::Reference&&!n){out={};e.clear();return true;}return fail(e,"native reference missing from complete catalog");}
  out=selected;e.clear();return true;
 }
-SceneReferenceResolver::SceneReferenceResolver(u64 subject,const SceneReferenceCatalog& c,const std::vector<FieldSchema>& schema,SceneRoleCheck role,std::map<std::string,LogicalRef> owners):subject_(subject),catalog_(c),role_(std::move(role)),ownerRoots_(std::move(owners)){
- if(!catalog_.live(subject_))valid_=false;
+SceneReferenceResolver::SceneReferenceResolver(u64 subject,const SceneReferenceCatalog& c,const std::vector<FieldSchema>& schema,SceneRoleCheck role,std::map<std::string,LogicalRef> owners):SceneReferenceResolver(SceneSubject{subject,0},c,schema,std::move(role),std::move(owners)){}
+SceneReferenceResolver::SceneReferenceResolver(SceneSubject subject,const SceneReferenceCatalog& c,const std::vector<FieldSchema>& schema,SceneRoleCheck role,std::map<std::string,LogicalRef> owners):subject_(subject),catalog_(c),role_(std::move(role)),ownerRoots_(std::move(owners)){
+ if((bool(subject.actor)==bool(subject.resource))||(subject.actor&&!catalog_.live(subject.actor))||(subject.resource&&!catalog_.resource(subject.resource)))valid_=false;
  for(const auto& owner:ownerRoots_)if(owner.first.empty()||!catalog_.live(owner.second.owner)||owner.second.resource||owner.second.slot)valid_=false;
  for(const auto& s:schema)if(s.key.empty()||!schema_.emplace(s.key,s).second)valid_=false;
 }
@@ -61,19 +67,24 @@ const FieldSchema* SceneReferenceResolver::field(const char* key,RefKind k,Field
 }
 bool SceneReferenceResolver::typed(const FieldSchema& s,const LogicalRef& id,std::string& e)const{
  if(!valid_||!referenceCategory(s.category)||s.targetType.empty()||!ownership(s.ownership)||static_cast<unsigned>(s.reference)>=static_cast<unsigned>(RefKind::Count))return fail(e,"missing or invalid compiled reference contract");
+ if(((s.ownership==ReferenceOwnership::Self||s.ownership==ReferenceOwnership::ActorSubobject)&&!subject_.actor)||
+    ((s.ownership==ReferenceOwnership::ResourceSelf||s.ownership==ReferenceOwnership::ResourceSubobject)&&!subject_.resource))return fail(e,"compiled reference requires different subject context");
+ if(!s.ownerLink.empty()&&(s.ownership!=ReferenceOwnership::ActorSubobject||!ownerRoots_.count(s.ownerLink)))return fail(e,"compiled owner link unavailable or invalid");
  if(absent(id))return s.nullable?(e.clear(),true):fail(e,"required typed reference absent");
  const auto* a=catalog_.lookup(id,s.reference,s.category,s.targetType);
  if(!a)return fail(e,"wrong concrete reference type or unknown identity");
- u64 expectedOwner=subject_;
+ u64 expectedOwner=subject_.actor;
  if(!s.ownerLink.empty()){
   auto owner=ownerRoots_.find(s.ownerLink);
   if(s.ownership!=ReferenceOwnership::ActorSubobject||owner==ownerRoots_.end())return fail(e,"compiled owner link unavailable or invalid");
   expectedOwner=owner->second.owner;
  }
  if((id.owner&&!catalog_.live(id.owner))||
-    (s.ownership==ReferenceOwnership::Self&&(a->origin!=CatalogOrigin::ActorRoot||id.owner!=subject_))||
+    (s.ownership==ReferenceOwnership::Self&&(a->origin!=CatalogOrigin::ActorRoot||id.owner!=subject_.actor))||
     (s.ownership==ReferenceOwnership::ActorSubobject&&(a->origin!=CatalogOrigin::ActorSubobject||id.owner!=expectedOwner))||
-    (s.ownership==ReferenceOwnership::Content&&a->origin!=CatalogOrigin::Content))return fail(e,"typed reference ownership mismatch");
+    (s.ownership==ReferenceOwnership::Content&&a->origin!=CatalogOrigin::Content)||
+    (s.ownership==ReferenceOwnership::ResourceSelf&&(a->origin!=CatalogOrigin::ResourceSelf||id.owner||id.resource!=subject_.resource))||
+    (s.ownership==ReferenceOwnership::ResourceSubobject&&(a->origin!=CatalogOrigin::ResourceSubobject||id.owner||id.resource!=subject_.resource)))return fail(e,"typed reference ownership mismatch");
  if(!role_)return fail(e,"complete scene relationship check unavailable");
  if(!role_(subject_,s,id,e)){if(e.empty())e="scene relationship check refused";return false;}
  e.clear();return true;

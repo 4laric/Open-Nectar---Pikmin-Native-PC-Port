@@ -5,7 +5,7 @@ using namespace pc_midday;
 int checks=0;void check(bool b){++checks;if(!b){std::cerr<<"catalog check failed "<<checks<<"\n";std::exit(1);}}
 struct Left {virtual ~Left()=default;int value=1;};struct Right {virtual ~Right()=default;int value=2;};struct Multi:Left,Right{};
 int main(){
- std::string e;SceneReferenceCatalog catalog({1,2});Multi actor;Right* adjusted=static_cast<Right*>(&actor);
+ std::string e;SceneReferenceCatalog catalog({1,2},{55,56});Multi actor;Right* adjusted=static_cast<Right*>(&actor);
  const LogicalRef root{1,0,0},other{2,0,0},part{1,0,4},foreignPart{2,0,4},resource{0,55,0};
  check(catalog.declare({root,RefKind::Creature,FieldCategory::Reference,"Multi",CatalogOrigin::ActorRoot,&actor,0,true},e));
  check(catalog.declare({root,RefKind::Creature,FieldCategory::Reference,"Right",CatalogOrigin::ActorRoot,adjusted,0,true},e));
@@ -13,7 +13,7 @@ int main(){
  check(catalog.declare({part,RefKind::AnimListener,FieldCategory::Reference,"Listener",CatalogOrigin::ActorSubobject,nullptr,0,false},e));
  check(catalog.declare({foreignPart,RefKind::AnimListener,FieldCategory::Reference,"Listener",CatalogOrigin::ActorSubobject,nullptr,0,false},e));
  check(catalog.declare({resource,RefKind::Animation,FieldCategory::Reference,"Clip",CatalogOrigin::Content,nullptr,0,false},e));
- auto role=[](u64,const FieldSchema&,const LogicalRef&,std::string& err){err.clear();return true;};
+ auto role=[](SceneSubject,const FieldSchema&,const LogicalRef&,std::string& err){err.clear();return true;};
  std::vector<FieldSchema> schema={FieldSchema::ref("self",RefKind::Creature,false,"Right",ReferenceOwnership::Self),
   FieldSchema::ref("optional",RefKind::Creature,true,"Multi"),FieldSchema::ref("part",RefKind::AnimListener,false,"Listener",ReferenceOwnership::ActorSubobject),
   FieldSchema::ref("content",RefKind::Animation,false,"Clip",ReferenceOwnership::Content),
@@ -57,5 +57,59 @@ int main(){
  check(!transactional.declareAll({a,a},e)&&!transactional.lookup(root,RefKind::Creature,FieldCategory::Reference,"Multi"));
  auto invalid=schema[1];invalid.ownership=ReferenceOwnership(999);SceneReferenceResolver capture(1,catalog,{},role);
  check(!capture.validateTyped(invalid,{},e));
+ // Resources are canonical allocations with explicit membership; interfaces
+ // retain adjusted addresses and owned array members retain exact slots.
+ Multi material;Right* materialInterface=static_cast<Right*>(&material);int member=3;
+ const LogicalRef resourceSelf{0,55,1},resourcePart{0,55,2},foreignResource{0,56,1};
+ check(catalog.declare({resourceSelf,RefKind::Creature,FieldCategory::Reference,"Right",CatalogOrigin::ResourceSelf,materialInterface,0,true},e));
+ check(catalog.declare({resourcePart,RefKind::AnimListener,FieldCategory::Reference,"Listener",CatalogOrigin::ResourceSubobject,&member,0,true},e));
+ check(catalog.declare({foreignResource,RefKind::Creature,FieldCategory::Reference,"Right",CatalogOrigin::ResourceSelf,nullptr,0,false},e));
+ check(!catalog.declare({{0,999,1},RefKind::Creature,FieldCategory::Reference,"Right",CatalogOrigin::ResourceSelf,nullptr,0,false},e));
+ check(!catalog.declare({{1,55,3},RefKind::Creature,FieldCategory::Reference,"Right",CatalogOrigin::ResourceSubobject,nullptr,0,false},e));
+ check(!catalog.declare({{0,55,0},RefKind::Creature,FieldCategory::Reference,"Member",CatalogOrigin::ResourceSubobject,nullptr,0,false},e));
+ check(!catalog.declare({{1,55,3},RefKind::Creature,FieldCategory::Reference,"Right",CatalogOrigin::ActorSubobject,nullptr,0,false},e));
+ auto selfResource=FieldSchema::ref("rself",RefKind::Creature,true,"Right",ReferenceOwnership::ResourceSelf);
+ auto partResource=FieldSchema::ref("rpart",RefKind::AnimListener,false,"Listener",ReferenceOwnership::ResourceSubobject);
+ auto nextResource=FieldSchema::ref("next",RefKind::Creature,true,"Right",ReferenceOwnership::AnyLive);
+ SceneSubject observed{};auto resourceRole=[&](SceneSubject subject,const FieldSchema&,const LogicalRef&,std::string& err){observed=subject;err.clear();return true;};
+ SceneReferenceResolver resources(SceneSubject{0,55},catalog,{selfResource,partResource,nextResource},resourceRole);
+ check(resources.resolve("rself",RefKind::Creature,resourceSelf,output,e)&&output==materialInterface&&output!=static_cast<void*>(&material));
+ check(!observed.actor&&observed.resource==55);
+ check(resources.validateTyped(selfResource,{},e));
+ check(!resources.validateTyped(selfResource,foreignResource,e));
+ check(resources.resolve("rpart",RefKind::AnimListener,resourcePart,output,e)&&output==&member);
+ check(!resources.validateTyped(partResource,resourceSelf,e));
+ check(!resources.validateTyped(partResource,{0,55,999},e));
+ check(resources.validateTyped(nextResource,foreignResource,e));
+ check(!resources.resolve("next",RefKind::Creature,foreignResource,output,e));
+ check(!resources.validateTyped(FieldSchema::ref("rself",RefKind::Creature,true,"Multi",ReferenceOwnership::ResourceSelf),resourceSelf,e));
+ SceneReferenceResolver actorResourceRole(1,catalog,{selfResource},role);
+ check(!actorResourceRole.validateTyped(selfResource,resourceSelf,e));
+ check(!actorResourceRole.validateTyped(selfResource,{},e));
+ SceneReferenceResolver resourceActorRole(SceneSubject{0,55},catalog,{schema[0]},role);
+ check(!resourceActorRole.validateTyped(schema[0],root,e));
+ SceneReferenceResolver bothSubjects(SceneSubject{1,55},catalog,{selfResource},role);
+ check(!bothSubjects.validateTyped(selfResource,{},e));
+ SceneReferenceResolver noSubject(SceneSubject{},catalog,{selfResource},role);
+ check(!noSubject.validateTyped(selfResource,{},e));
+ SceneReferenceResolver unknownResource(SceneSubject{0,999},catalog,{selfResource},role);
+ check(!unknownResource.validateTyped(selfResource,{},e));
+ SceneReferenceResolver unavailableResource(SceneSubject{0,55},catalog,{selfResource},{});
+ check(!unavailableResource.validateTyped(selfResource,resourceSelf,e));
+ const LogicalRef resourceToken{0,55,8},foreignToken{0,56,8};
+ check(catalog.declare({resourceToken,RefKind::SlotListener,FieldCategory::Token64,"Serial",CatalogOrigin::ResourceSubobject,nullptr,42,true},e));
+ check(catalog.declare({foreignToken,RefKind::SlotListener,FieldCategory::Token64,"Serial",CatalogOrigin::ResourceSubobject,nullptr,42,true},e));
+ auto rt=FieldSchema::token64("rt",RefKind::SlotListener,false,"Serial",ReferenceOwnership::ResourceSubobject);
+ SceneReferenceResolver resourceNumbers(SceneSubject{0,55},catalog,{rt},role);
+ check(resourceNumbers.identifyToken("rt",RefKind::SlotListener,42,found,e)&&!found.owner&&found.resource==55);
+ check(resourceNumbers.resolveToken("rt",RefKind::SlotListener,resourceToken,t,e)&&t==42);
+ check(!resourceNumbers.validateTyped(rt,foreignToken,e));
+ auto invalidOwnerLink=selfResource;invalidOwnerLink.ownerLink="captain";
+ SceneReferenceResolver invalidResourceLink(SceneSubject{0,55},catalog,{invalidOwnerLink},role,{{"captain",other}});
+ check(!invalidResourceLink.validateTyped(invalidOwnerLink,{},e));
+ check(!catalog.identify(RefKind::SlotListener,FieldCategory::Token64,nullptr,0,found,e));
+ check(!catalog.identify(RefKind::SlotListener,FieldCategory::Token64,nullptr,0,found,e,SceneSubject{1,55}));
+ check(!catalog.identify(RefKind::SlotListener,FieldCategory::Token64,nullptr,0,found,e,SceneSubject{0,999}));
+ check(!catalog.identify(RefKind::SlotListener,FieldCategory::Scalar,nullptr,0,found,e,SceneSubject{0,55}));
  std::cout<<checks<<" scene catalog controls PASS\n";
 }
